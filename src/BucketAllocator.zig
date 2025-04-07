@@ -1,0 +1,953 @@
+const build = @import("builtin");
+const std = @import("std");
+const assert = std.debug.assert;
+const mem = std.mem;
+const math = std.math;
+const Allocator = std.mem.Allocator;
+const PageAllocator = std.heap.PageAllocator;
+const List = std.ArrayList;
+const BranchHint = std.builtin.BranchHint;
+const Type = std.builtin.Type;
+
+const Root = @import("./root.zig");
+
+const Log2Usize = math.Log2Int(usize);
+
+pub const Options = struct {
+    /// A list of all allocation size buckets desired for this allocator. Any requested allocation will be
+    /// sent to the smallest bucket that can hold it, and take exactly one single block from that bucket.
+    ///
+    /// This list MUST follow the following rules:
+    /// - all buckets in sorted order from smallest block_size to largest block_size
+    /// - all block sizes different
+    /// - smallest block size is >= @sizeOf(usize)
+    /// - all slab sizes >= their respective block sizes
+    /// - all slab sizes >= std.heap.page_size_min
+    buckets: []const BucketDef,
+    /// The unsigned integer type to use for indexing.
+    ///
+    /// This type places a maximum limit on how many total blocks any single bucket can have. A smaller integer type will save
+    /// a small amount of memory footprint. Choosing `usize` is effectively the same as `unlimited` blocks, as
+    /// the system will run out of address space long before it runs out of block indexes to use
+    ///
+    /// For most use cases, `u16` (65536 maximum blocks per bucket) or `u32` (4294967296 maximum blocks per bucket) are good choices
+    index_uint_type: type = u32,
+    /// The unsigned integer type to use for block/slab sizes.
+    ///
+    /// This type places a maximum limit on the largest block/slab size. A smaller integer type will save
+    /// a small amount of memory footprint. Choosing `usize` is effectively the same as `unlimited` block/slab size, as
+    /// any block or slab size of the maximum value of `usize` would completely exhaust the system address space anyway
+    ///
+    /// For most use cases, `u16` (max block/slab size of 32 kilobytes) or `u32` (max block/slab size of 2 gigabytes) are good choices
+    size_uint_type: type = u32,
+    /// If a requested allocation exceeds the maximum block size, how should this allocator respond
+    ///
+    /// the `.UNREACHABLE` option will slightly reduce the processing overhead of checking whether a
+    /// requested allocation does or does not fall into the 'large' category and prevent branching
+    large_allocation_behavior: LargeAllocBehavior = LargeAllocBehavior.USE_PAGE_ALLOCATOR,
+    /// Enable additional tracking for allocation usage.
+    ///
+    /// This option allows logging functions to report additional statistics,
+    /// (or for the user to inspect the stats themselves). This adds a moderate amount of processing overhead to all
+    /// allocation functions and increases the memory footprint of the allocator by around 3x.
+    ///
+    /// It provides no additional behavioral functionality or performance.
+    track_allocation_statistics: bool = false,
+    // /// If enabled, allows the allocator to recycle slabs of the same size between different buckets with the same slab size,
+    // /// as long as the slab is entirely unused.
+    // ///
+    // /// `MANUAL_ONLY` and `AUTOMATIC_RATIO` add a small memory footprint to the allocator, and very small processing overhead to allocation requests,
+    // /// but allows the user to call a function to look for entire free slabs that can be recycled between buckets of the same slab size
+    // ///
+    // /// `AUTOMATIC_RATIO` allows the allocator to attempt to find and recycle entire free slabs when a `free` operation
+    // /// puts the ratio of free_blocks to block_per_slab over the specified limit, but adds additional processing overhead to all
+    // /// free requests
+    // slab_recycling: SlabRecycling = .DISABLED,
+    /// How likely it is for this allocator to get an allocation request greater than the largest block size
+    hint_large_allocation: Hint = Hint.UNKNOWN,
+    /// How likely is it that a free block will exist for any given bucket
+    /// that was once used but returned (freed) back to the allocator for re-use
+    hint_buckets_have_free_blocks_that_were_used_in_the_past: Hint = Hint.UNKNOWN,
+    /// How likely is it that a free block will exist for any given bucket that has never been used before
+    hint_buckets_have_free_blocks_that_have_never_been_used: Hint = Hint.UNKNOWN,
+    /// How often you plan on using the provided usage statistic logging function
+    hint_log_usage_statistics: Hint = Hint.ALMOST_NEVER,
+};
+
+// pub const SlabRecycling = union(enum) {
+//     /// Do not allow recycling entire free slabs
+//     ///
+//     /// (blocks are still recycled within their own bucket)
+//     DISABLED,
+//     /// Enable manual slab recycling.
+//     ///
+//     /// Free block list is only checked for entire free slabs when the function to do so is called by the user
+//     MANUAL_ONLY,
+//     /// Enable manual and automatic slab recycling.
+//     ///
+//     /// Free slabs are checked and pooled when `bucket_free_blocks / blocks_per_slab >= pool_ratio`
+//     ///
+//     /// Free slabs are checked and freed when `bucket_free_blocks / blocks_per_slab >= free_ratio`
+//     ///
+//     /// Both ratios must be >= 1.0 and `free_ratio` must be >= `pool_ratio`
+//     AUTOMATIC: struct {
+//         /// When `bucket_free_blocks / blocks_per_slab >= pool_ratio` the allocator will be checked for
+//         /// any entirely free slabs and they will be returned to the slab pool
+//         pool_ratio: f32,
+//         /// When `bucket_free_blocks / blocks_per_slab >= free_ratio` the allocator will be checked for
+//         /// any entirely free slabs and they will freed
+//         free_ratio: f32,
+//     },
+// };
+
+/// How often you, the user, predict a specific case will occur given your application use case
+///
+/// These hints are translated directly into `std.builting.BranchHint` for their respective branches:
+/// - .UNKNOWN == .none
+/// - .VERY_LIKELY = .likely
+/// - .VERY_UNLIKELY = .unlikely
+/// - .ALMOST_NEVER = .cold
+/// - .CANNOT_PREDICT = .unpredictable
+pub const Hint = enum {
+    /// You do not know how likely this case is
+    UNKNOWN,
+    /// You consider this case much more likely to occur
+    VERY_LIKELY,
+    /// You consider this case much less likely to occur
+    VERY_UNLIKELY,
+    /// You consider this case to be extremely rare,
+    ALMOST_NEVER,
+    /// The frequency of this case occuring cannot be predicted
+    CANNOT_PREDICT,
+
+    inline fn to_hint(comptime self: Hint) BranchHint {
+        return switch (self) {
+            Hint.UNKNOWN => BranchHint.none,
+            Hint.VERY_LIKELY => BranchHint.likely,
+            Hint.VERY_UNLIKELY => BranchHint.unlikely,
+            Hint.ALMOST_NEVER => BranchHint.cold,
+            Hint.CANNOT_PREDICT => BranchHint.unpredictable,
+        };
+    }
+};
+
+pub const BucketDef = struct {
+    /// The size of the memory region requested from the backing allocator when this bucket does not have
+    /// any more blocks left. This size will then be divided into individual blocks and appended to this bucket
+    /// free list.
+    ///
+    /// This value must follow the following rules:
+    /// - slab_size >= bucket size
+    /// - slab_size >= std.heap.page_size_min
+    slab_size: AllocSize,
+    /// The size of individiual memory blocks for this bucket. The slab_size is divided into individual blocks
+    /// for this bucket to use, but it WILL NOT use multiple blocks for a single allocation.
+    ///
+    /// Instead an allocation larger than this will be sent to the next largest bucket that can hold the requested bytes.
+    ///
+    /// This value must follow the following rules:
+    /// - block size is >= @sizeOf(usize)
+    /// - block_size is <= slab_size
+    block_size: AllocSize,
+};
+
+pub const AllocSize = enum(Log2Usize) {
+    _1_B = 0,
+    _2_B = 1,
+    _4_B = 2,
+    _8_B = 3,
+    _16_B = 4,
+    _32_B = 5,
+    _64_B = 6,
+    _128_B = 7,
+    _256_B = 8,
+    _512_B = 9,
+    _1_KB = 10,
+    _2_KB = 11,
+    _4_KB = 12,
+    _8_KB = 13,
+    _16_KB = 14,
+    _32_KB = 15,
+    _64_KB = 16,
+    _128_KB = 17,
+    _256_KB = 18,
+    _512_KB = 19,
+    _1_MB = 20,
+    _2_MB = 21,
+    _4_MB = 22,
+    _8_MB = 23,
+    _16_MB = 24,
+    _32_MB = 25,
+    _64_MB = 26,
+    _128_MB = 27,
+    _256_MB = 28,
+    _512_MB = 29,
+    _1_GB = 30,
+    _2_GB = 31,
+
+    pub const MIN_SLAB_SIZE: AllocSize = @enumFromInt(get_bytes_log2(std.heap.page_size_min));
+    pub const SLAB_SIZE_MAX_PAGE_SIZE: AllocSize = @enumFromInt(get_bytes_log2(std.heap.page_size_max));
+
+    pub inline fn bytes_log2(self: AllocSize, comptime UINT_LOG2: type) UINT_LOG2 {
+        return @intCast(@intFromEnum(self));
+    }
+
+    pub inline fn increase_n_sizes(self: AllocSize, n: Log2Usize) AllocSize {
+        const val = @intFromEnum(self);
+        return @enumFromInt(val + n);
+    }
+
+    pub inline fn bytes(self: AllocSize, comptime UINT: type) UINT {
+        return @as(UINT, 1) << @as(math.Log2Int(UINT), @intCast(@intFromEnum(self)));
+    }
+
+    pub inline fn to_alignment(self: AllocSize) mem.Alignment {
+        return @enumFromInt(@intFromEnum(self));
+    }
+
+    pub inline fn get_name(self: AllocSize) []const u8 {
+        return get_name_from_bytes_log2(@intFromEnum(self));
+    }
+
+    pub fn get_name_from_bytes_log2(val: anytype) []const u8 {
+        return switch (val) {
+            0 => "1 byte",
+            1 => "2 bytes",
+            2 => "4 bytes",
+            3 => "8 bytes",
+            4 => "16 bytes",
+            5 => "32 bytes",
+            6 => "64 bytes",
+            7 => "128 bytes",
+            8 => "256 bytes",
+            9 => "512 bytes",
+            10 => "1 kilobyte",
+            11 => "2 kilobytes",
+            12 => "4 kilobytes",
+            13 => "8 kilobytes",
+            14 => "16 kilobytes",
+            15 => "32 kilobytes",
+            16 => "64 kilobytes",
+            17 => "128 kilobytes",
+            18 => "256 kilobytes",
+            19 => "512 kilobytes",
+            20 => "1 megabyte",
+            21 => "2 megabytes",
+            22 => "4 megabytes",
+            23 => "8 megabytes",
+            24 => "16 megabytes",
+            25 => "32 megabytes",
+            26 => "64 megabytes",
+            27 => "128 megabytes",
+            28 => "256 megabytes",
+            29 => "512 megabytes",
+            30 => "1 gigabyte",
+            31 => "2 gigabytes",
+            32 => "4 gigabytes",
+            33 => "8 gigabytes",
+            34 => "16 gigabytes",
+            35 => "32 gigabytes",
+            36 => "64 gigabytes",
+            37 => "128 gigabytes",
+            38 => "256 gigabytes",
+            39 => "512 gigabytes",
+            40 => "1 terabyte",
+            41 => "2 terabytes",
+            42 => "4 terabytes",
+            43 => "8 terabytes",
+            44 => "16 terabytes",
+            45 => "32 terabytes",
+            46 => "64 terabytes",
+            47 => "128 terabytes",
+            48 => "256 terabytes",
+            49 => "512 terabytes",
+            50 => "1 petabyte",
+            51 => "2 petabytes",
+            52 => "4 petabytes",
+            53 => "8 petabytes",
+            54 => "16 petabytes",
+            55 => "32 petabytes",
+            56 => "64 petabytes",
+            57 => "128 petabytes",
+            58 => "256 petabytes",
+            59 => "512 petabytes",
+            60 => "1 exabyte",
+            61 => "2 exabytes",
+            62 => "4 exabytes",
+            63 => "8 exabytes",
+        };
+    }
+};
+
+// pub const ErrorBehavior = enum {
+//     RETURN_FAIL_VALUE,
+//     LOG_AND_RETURN_FAIL_VALUE,
+//     PANIC,
+//     UNREACHABLE,
+// };
+
+pub const LargeAllocBehavior = enum {
+    USE_PAGE_ALLOCATOR,
+    PANIC,
+    UNREACHABLE,
+};
+
+pub fn define_allocator(comptime options: Options) type {
+    if (options.buckets.len == 0) @panic("must provide at least one allocation bucket");
+    const buckets = options.buckets;
+    const Idx = options.index_uint_type;
+    if (@typeInfo(Idx) != Type.Int or @typeInfo(Idx).int.signedness != .unsigned) @panic("index_uint_type must be an unsigned integer type");
+    const Size = options.size_uint_type;
+    if (@typeInfo(Size) != Type.Int or @typeInfo(Idx).int.signedness != .unsigned) @panic("size_uint_type must be an unsigned integer type");
+    const SizeLog2: type = math.Log2Int(Size);
+    const Address = usize;
+    const ConstIdx = u8;
+
+    // Sort slabs by size, check their validity
+    var idx: ConstIdx = 0;
+    var temp_slab_size_log2_buf: [buckets.len]SizeLog2 = undefined;
+    var temp_slab_size_log2_len: Idx = 0;
+    outer: while (idx < buckets.len) : (idx += 1) {
+        const slab_size_log2: SizeLog2 = buckets[idx].slab_size.bytes_log2(SizeLog2);
+        const slab_size: Size = buckets[idx].slab_size.bytes(Size);
+        if (slab_size < std.heap.page_size_min) @panic("all slab sizes must be >= std.heap.page_size_min");
+        var sidx: Idx = 0;
+        while (sidx < temp_slab_size_log2_len) : (sidx += 1) {
+            if (slab_size_log2 < temp_slab_size_log2_buf[sidx]) {
+                mem.copyBackwards(SizeLog2, temp_slab_size_log2_buf[sidx + 1 .. temp_slab_size_log2_len + 1], temp_slab_size_log2_buf[sidx..temp_slab_size_log2_len]);
+                temp_slab_size_log2_buf[sidx].* = slab_size_log2;
+                temp_slab_size_log2_len += 1;
+                continue :outer;
+            }
+            if (slab_size_log2 == temp_slab_size_log2_buf[sidx]) continue :outer;
+        }
+        temp_slab_size_log2_buf[temp_slab_size_log2_len] = slab_size_log2;
+        temp_slab_size_log2_len += 1;
+    }
+    const largest_block_size_log2 = buckets[buckets.len - 1].block_size.bytes_log2(SizeLog2);
+    const smallest_block_size_log2 = buckets[0].block_size.bytes_log2(SizeLog2);
+    const size_count: Idx = @intCast(buckets[buckets.len - 1].block_size.bytes_log2(SizeLog2) + 1);
+    const slab_count: Idx = temp_slab_size_log2_len;
+    const const_slab_log2_sizes: [slab_count]SizeLog2 = comptime make: {
+        var arr: [slab_count]SizeLog2 = undefined;
+        @memcpy(&arr, &temp_slab_size_log2_buf[0..temp_slab_size_log2_len]);
+        break :make arr;
+    };
+    // check buckets and build bucket idx tables
+    var block_log2_sizes: [buckets.len]SizeLog2 = undefined;
+    var block_byte_sizes: [buckets.len]Size = undefined;
+    var slab_log2_sizes: [buckets.len]SizeLog2 = undefined;
+    var slab_byte_sizes: [buckets.len]Size = undefined;
+    var slab_modulo: [buckets.len]Size = undefined;
+    var blocks_per_slab: [buckets.len]Idx = undefined;
+    var leftover_blocks_per_slab: [buckets.len]Idx = undefined;
+    var bucket_to_slab_mapping: [buckets.len]ConstIdx = undefined;
+    var alloc_size_to_bucket_mapping: [size_count]ConstIdx = undefined;
+    idx = 0;
+    var this_block_size_log2 = buckets[idx].block_size.bytes_log2(SizeLog2);
+    while (idx < buckets.len) : (idx += 1) {
+        const this_block_bytes = buckets[idx].block_size.bytes(Size);
+        const this_slab_size = buckets[idx].slab_size.bytes_log2(SizeLog2);
+        const this_slab_bytes = buckets[idx].slab_size.bytes(Size);
+        if (this_block_size_log2 > this_slab_size) @panic("Cannot have a block_size larger than slab_size");
+        if (this_block_bytes < @sizeOf(usize)) @panic("Cannot have a block_size smaller than @sizeOf(usize)");
+        const slab_idx = calc: {
+            var s: ConstIdx = 0;
+            while (s < slab_count) : (s += 1) {
+                if (this_slab_size == const_slab_log2_sizes[s]) break :calc s;
+            }
+            unreachable;
+        };
+        block_log2_sizes[idx] = this_block_size_log2;
+        block_byte_sizes[idx] = this_block_bytes;
+        slab_log2_sizes[idx] = this_slab_size;
+        slab_byte_sizes[idx] = this_slab_bytes;
+        slab_modulo[idx] = this_block_bytes - 1;
+        blocks_per_slab[idx] = this_slab_bytes / this_block_bytes;
+        leftover_blocks_per_slab[idx] = blocks_per_slab[idx] - 1;
+        bucket_to_slab_mapping[idx] = slab_idx;
+        if (idx < buckets.len - 1) {
+            const next_size_log2: SizeLog2 = @intCast(@intFromEnum(buckets[idx + 1].block_size));
+            if (this_block_size_log2 >= next_size_log2) @panic("bucket sizes MUST be in sorted order from smallest to largest, and there cannot be 2 buckets of the same size");
+            this_block_size_log2 = next_size_log2;
+        }
+    }
+    // build alloc_size to bucket_idx mapping
+    idx = 0;
+    var this_bucket_idx: ConstIdx = 0;
+    while (idx < size_count) : (idx += 1) {
+        if (idx > block_log2_sizes[this_bucket_idx]) this_bucket_idx += 1;
+        alloc_size_to_bucket_mapping[idx] = this_bucket_idx;
+    }
+    // make arrays constant
+    const const_block_byte_sizes: [buckets.len]Size = comptime make: {
+        var arr: [buckets.len]Size = undefined;
+        @memcpy(&arr, &block_byte_sizes);
+        break :make arr;
+    };
+    const const_block_log2_sizes: [buckets.len]SizeLog2 = comptime make: {
+        var arr: [buckets.len]SizeLog2 = undefined;
+        @memcpy(&arr, &block_log2_sizes);
+        break :make arr;
+    };
+    const const_slab_byte_sizes: [buckets.len]Size = comptime make: {
+        var arr: [buckets.len]Size = undefined;
+        @memcpy(&arr, &slab_byte_sizes);
+        break :make arr;
+    };
+    const const_slab_modulo: [buckets.len]Size = comptime make: {
+        var arr: [buckets.len]Size = undefined;
+        @memcpy(&arr, &slab_modulo);
+        break :make arr;
+    };
+    const const_blocks_per_slab: [buckets.len]Idx = comptime make: {
+        var arr: [buckets.len]Idx = undefined;
+        @memcpy(&arr, &blocks_per_slab);
+        break :make arr;
+    };
+    const const_leftover_blocks_per_slab: [buckets.len]Idx = comptime make: {
+        var arr: [buckets.len]Idx = undefined;
+        @memcpy(&arr, &leftover_blocks_per_slab);
+        break :make arr;
+    };
+    const const_alloc_size_to_bucket_mapping: [size_count]ConstIdx = comptime make: {
+        var arr: [size_count]ConstIdx = undefined;
+        @memcpy(&arr, &alloc_size_to_bucket_mapping);
+        break :make arr;
+    };
+    const const_bucket_to_slab_mapping: [buckets.len]ConstIdx = comptime make: {
+        var arr: [buckets.len]ConstIdx = undefined;
+        @memcpy(&arr, &bucket_to_slab_mapping);
+        break :make arr;
+    };
+    return struct {
+        first_recycled_block_by_bucket: [BUCKET_COUNT]Address = @splat(0),
+        recycled_block_count_by_bucket: [BUCKET_COUNT]Idx = @splat(0),
+        first_brand_new_block_by_bucket: [BUCKET_COUNT]Address = @splat(0),
+        brand_new_block_count_by_bucket: [BUCKET_COUNT]Idx = @splat(0),
+        stats: AllocStats = AllocStats{},
+        // slabs: SlabList = SlabList{},
+
+        const QuickAlloc = @This();
+        const BUCKET_COUNT = buckets.len;
+        const ALLOC_ERROR_BEHAVIOR = options.slab_allocation_fail_behavior;
+        const BLOCK_BYTES = const_block_byte_sizes;
+        const BLOCK_BYTES_LOG2 = const_block_log2_sizes;
+        const SLAB_COUNT = slab_count;
+        const SLAB_BYTES = const_slab_byte_sizes;
+        const SLAB_BYTES_LOG2 = const_slab_log2_sizes;
+        const SLAB_MODULO = const_slab_modulo;
+        const BLOCKS_PER_SLAB = const_blocks_per_slab;
+        const LEFTOVER_BLOCKS_PER_SLAB = const_leftover_blocks_per_slab;
+        const ALLOC_SIZE_LOG2_TO_BUCKET_IDX = const_alloc_size_to_bucket_mapping;
+        const LARGEST_BLOCK_SIZE_LOG2 = largest_block_size_log2;
+        const SMALLEST_BLOCK_SIZE_LOG2 = smallest_block_size_log2;
+        const LARGE_ALLOC_BEHAVIOR = options.large_allocation_behavior;
+        const PAGE_ALLOC: bool = LARGE_ALLOC_BEHAVIOR == .USE_PAGE_ALLOCATOR;
+        const LARGE_ALLOC_HINT = options.hint_large_allocation.to_hint();
+        const RECYCLE_HINT = options.hint_buckets_have_free_blocks_that_were_used_in_the_past.to_hint();
+        const BRAND_NEW_HINT = options.hint_buckets_have_free_blocks_that_have_never_been_used.to_hint();
+        const STAT_LOG_HINT = options.hint_log_usage_statistics.to_hint();
+        const TRACK_STATS = options.track_allocation_statistics;
+        const BUCKET_IDX_TO_SLAB_IDX = const_bucket_to_slab_mapping;
+        // const SLAB_RECYCLE = options.slab_recycling == .MANUAL_ONLY or options.slab_recycling == .AUTOMATIC;
+        // const SLAB_RECYCLE_AUTO = options.slab_recycling == .AUTOMATIC;
+        // const SLAB_RECYCLE_POOL_RATIO = if (SLAB_RECYCLE_AUTO) options.slab_recycling.AUTOMATIC.pool_ratio else 1.0;
+        // const SLAB_RECYCLE_FREE_RATIO = if (SLAB_RECYCLE_AUTO) options.slab_recycling.AUTOMATIC.free_ratio else 1.0;
+        const MSG_LARGE_ALLOCATION = "Large allocation: largest bucket size is " ++ @tagName(@as(AllocSize, @enumFromInt(LARGEST_BLOCK_SIZE_LOG2))) ++ ", but the requested allocation would require a bucket size of {s}";
+        const MSG_LARGE_RESIZE = "Large resize/remap: largest bucket size is " ++ @tagName(@as(AllocSize, @enumFromInt(LARGEST_BLOCK_SIZE_LOG2))) ++ ", but either the old memory allocation ({s}) or the new memory allocation ({s}) would exceed this limit";
+        const MSG_LARGE_FREE = "Large free: largest bucket size is " ++ @tagName(@as(AllocSize, @enumFromInt(LARGEST_BLOCK_SIZE_LOG2))) ++ ", but the memory provided to free exceeds this limit: {s}";
+
+        pub const AllocStats = if (!TRACK_STATS) void else struct {
+            current_total_memory_allocated: Address = 0,
+            largest_total_memory_allocated: Address = 0,
+            smallest_allocation_request_ever: Address = math.maxInt(Address),
+            largest_allocation_request_ever: Address = 0,
+            largest_allocation_request_by_bucket: [BUCKET_COUNT]Address = @splat(0),
+            smallest_allocation_request_by_bucket: [BUCKET_COUNT]Address = @splat(math.maxInt(usize)),
+            most_blocks_ever_used_by_bucket: [BUCKET_COUNT]Idx = @splat(0),
+            current_blocks_used_by_bucket: [BUCKET_COUNT]Idx = @splat(0),
+            most_slabs_ever_used_by_bucket: [BUCKET_COUNT]Idx = @splat(0),
+            current_slabs_used_by_bucket: [BUCKET_COUNT]Idx = @splat(0),
+            number_of_attempted_resizes_to_larger_buckets_by_bucket: [BUCKET_COUNT]u64 = @splat(0),
+            largest_page_allocator_fallback_request_ever: if (PAGE_ALLOC) Address else void = if (PAGE_ALLOC) 0 else void{},
+            smallest_page_allocator_fallback_request_ever: if (PAGE_ALLOC) Address else void = if (PAGE_ALLOC) math.maxInt(usize) else void{},
+            largest_total_bytes_allocated_from_page_allocator_fallback: if (PAGE_ALLOC) Address else void = if (PAGE_ALLOC) 0 else void{},
+            current_total_bytes_allocated_from_page_allocator_fallback: if (PAGE_ALLOC) Address else void = if (PAGE_ALLOC) 0 else void{},
+            largest_number_of_page_allocator_fallback_allocations: if (PAGE_ALLOC) Address else void = if (PAGE_ALLOC) 0 else void{},
+            current_number_of_page_allocator_fallback_allocations: if (PAGE_ALLOC) Address else void = if (PAGE_ALLOC) 0 else void{},
+            largest_attempted_page_allocator_fallback_resize_delta_grow: if (PAGE_ALLOC) Address else void = if (PAGE_ALLOC) 0 else void{},
+            largest_attempted_page_allocator_fallback_resize_delta_shrink: if (PAGE_ALLOC) Address else void = if (PAGE_ALLOC) 0 else void{},
+        };
+
+        // const SlabList = if (!SLAB_RECYCLE) void else struct {
+        //     ptr: [*]SlabData = mem.alignBackward(Address, math.maxInt(Address), @alignOf(SlabData)),
+        //     len: Idx = 0,
+        //     cap: Idx = 0,
+        //     current_brand_new_slab_address_by_size: [SLAB_COUNT]Address = @splat(0),
+        //     free_slab_count_by_slab_size: [SLAB_COUNT]Idx = @splat(0),
+        //     first_free_slab_address_by_size: [SLAB_COUNT]Address = @splat(0),
+        // };
+
+        // const SlabData = if (!SLAB_RECYCLE) void else struct {
+        //     address: Address,
+        //     blocks_free: Idx,
+        //     bucket_idx: ConstIdx,
+
+        //     pub fn order(self: *const SlabData) Address {
+        //         return self.address;
+        //     }
+        // };
+
+        pub const VTABLE: Allocator.VTable = .{
+            .alloc = alloc,
+            .resize = resize,
+            .remap = remap,
+            .free = free,
+        };
+
+        pub inline fn allocator(self: *QuickAlloc) Allocator {
+            return Allocator{ .ptr = @ptrCast(@alignCast(self)), .vtable = &VTABLE };
+        }
+
+        fn alloc(self_opaque: *anyopaque, len: usize, alignment: mem.Alignment, ret_addr: usize) ?[*]u8 {
+            _ = ret_addr;
+            const self: *QuickAlloc = @ptrCast(@alignCast(self_opaque));
+            const alloc_size_log2 = get_bytes_log2_with_align(len, alignment);
+            if (TRACK_STATS) {
+                if (len < self.stats.smallest_allocation_request_ever) self.stats.smallest_allocation_request_ever = len;
+                if (len > self.stats.largest_allocation_request_ever) self.stats.largest_allocation_request_ever = len;
+            }
+            switch (LARGE_ALLOC_BEHAVIOR) {
+                LargeAllocBehavior.USE_PAGE_ALLOCATOR => if (alloc_size_log2 > LARGEST_BLOCK_SIZE_LOG2) {
+                    @branchHint(LARGE_ALLOC_HINT);
+                    if (TRACK_STATS) {
+                        if (len > self.stats.largest_page_allocator_fallback_request_ever) self.stats.largest_page_allocator_fallback_request_ever = len;
+                        if (len < self.stats.smallest_page_allocator_fallback_request_ever) self.stats.smallest_page_allocator_fallback_request_ever = len;
+                        self.stats.current_number_of_page_allocator_fallback_allocations += 1;
+                        if (self.stats.current_number_of_page_allocator_fallback_allocations > self.stats.largest_number_of_page_allocator_fallback_allocations) self.stats.largest_number_of_page_allocator_fallback_allocations = self.stats.current_number_of_page_allocator_fallback_allocations;
+                        self.stats.current_total_bytes_allocated_from_page_allocator_fallback += len;
+                        if (self.stats.current_total_bytes_allocated_from_page_allocator_fallback > self.stats.largest_total_bytes_allocated_from_page_allocator_fallback) self.stats.largest_total_bytes_allocated_from_page_allocator_fallback = self.stats.current_total_bytes_allocated_from_page_allocator_fallback;
+                        self.stats.current_total_memory_allocated += len;
+                        if (self.stats.current_total_memory_allocated > self.stats.largest_total_memory_allocated) self.stats.largest_total_memory_allocated = self.stats.current_total_memory_allocated;
+                    }
+                    return PageAllocator.map(len, alignment);
+                },
+                LargeAllocBehavior.PANIC => if (alloc_size_log2 > LARGEST_BLOCK_SIZE_LOG2) {
+                    @branchHint(.cold);
+                    std.debug.panic(MSG_LARGE_ALLOCATION, .{AllocSize.get_name_from_bytes_log2(alloc_size_log2)});
+                },
+                LargeAllocBehavior.UNREACHABLE => if (alloc_size_log2 > LARGEST_BLOCK_SIZE_LOG2) unreachable,
+            }
+            const bucket_idx = ALLOC_SIZE_LOG2_TO_BUCKET_IDX[alloc_size_log2];
+            if (self.recycled_block_count_by_bucket[bucket_idx] != 0) {
+                @branchHint(RECYCLE_HINT);
+                const first_free_address = self.first_recycled_block_by_bucket[bucket_idx];
+                const next_free_address: *usize = @ptrFromInt(first_free_address);
+                self.first_recycled_block_by_bucket[bucket_idx] = next_free_address.*;
+                self.recycled_block_count_by_bucket[bucket_idx] -= 1;
+                if (TRACK_STATS) {
+                    if (len > self.stats.largest_allocation_request_by_bucket[bucket_idx]) self.stats.largest_allocation_request_by_bucket[bucket_idx] = len;
+                    if (len < self.stats.smallest_allocation_request_by_bucket[bucket_idx]) self.stats.smallest_allocation_request_by_bucket[bucket_idx] = len;
+                    self.stats.current_blocks_used_by_bucket[bucket_idx] += 1;
+                    if (self.stats.current_blocks_used_by_bucket[bucket_idx] > self.stats.most_blocks_ever_used_by_bucket[bucket_idx]) self.stats.most_blocks_ever_used_by_bucket[bucket_idx] = self.stats.current_blocks_used_by_bucket[bucket_idx];
+                }
+                return @ptrFromInt(first_free_address);
+            }
+            if (self.brand_new_block_count_by_bucket[bucket_idx] != 0) {
+                @branchHint(BRAND_NEW_HINT);
+                const first_free_address = self.first_brand_new_block_by_bucket[bucket_idx];
+                const next_unused_addr = first_free_address + BLOCK_BYTES[bucket_idx];
+                self.first_brand_new_block_by_bucket[bucket_idx] = next_unused_addr;
+                self.brand_new_block_count_by_bucket[bucket_idx] -= 1;
+                if (TRACK_STATS) {
+                    if (len > self.stats.largest_allocation_request_by_bucket[bucket_idx]) self.stats.largest_allocation_request_by_bucket[bucket_idx] = len;
+                    if (len < self.stats.smallest_allocation_request_by_bucket[bucket_idx]) self.stats.smallest_allocation_request_by_bucket[bucket_idx] = len;
+                    self.stats.current_blocks_used_by_bucket[bucket_idx] += 1;
+                    if (self.stats.current_blocks_used_by_bucket[bucket_idx] > self.stats.most_blocks_ever_used_by_bucket[bucket_idx]) self.stats.most_blocks_ever_used_by_bucket[bucket_idx] = self.stats.current_blocks_used_by_bucket[bucket_idx];
+                }
+                return @ptrFromInt(first_free_address);
+            }
+            const did_recycle_slab = false;
+            const block_size = BLOCK_BYTES[bucket_idx];
+            const new_slab_ptr = get_slab: {
+                // if (SLAB_RECYCLE) {
+                //     const slab_idx = BUCKET_IDX_TO_SLAB_IDX[bucket_idx];
+                //     if (self.slabs.free_slab_count_by_slab_size[slab_idx] > 0) {
+                //         self.slabs.free_slab_count_by_slab_size[slab_idx] -= 1;
+                //         const first_free_slab_addr = self.slabs.first_free_slab_by_size[slab_idx];
+                //         const first_free_slab_ptr: *usize = @ptrFromInt(first_free_slab_addr);
+                //         self.slabs.first_free_slab_by_size[slab_idx] = first_free_slab_ptr.*;
+                //         const slab_data = self.find_slab_data_idx_by_address(first_free_slab_addr);
+                //         assert(slab_data.blocks_free == BLOCKS_PER_SLAB[slab_data.bucket_idx]);
+                //         slab_data.blocks_free = 0;
+                //         slab_data.bucket_idx = bucket_idx;
+                //         did_recycle_slab = true;
+                //         var i: usize = 0;
+                //         while (i < self.slabs.len) : (i += 1) {
+                //             if (self.slabs.ptr[i].addr == first_free_slab_addr) {
+                //                 self.slabs.ptr[i].block_size = block_size;
+                //             }
+                //         }
+                //         break :get_slab @as([*]u8, @ptrFromInt(first_free_slab_addr));
+                //     }
+                // }
+                const new_free_slab_ptr = PageAllocator.map(SLAB_BYTES[bucket_idx], bytes_log2_to_alignment(BLOCK_BYTES_LOG2[bucket_idx])) orelse return null;
+                break :get_slab new_free_slab_ptr;
+            };
+            self.first_brand_new_block_by_bucket[bucket_idx] = @intFromPtr(new_slab_ptr) + block_size;
+            self.brand_new_block_count_by_bucket[bucket_idx] = LEFTOVER_BLOCKS_PER_SLAB[bucket_idx];
+            if (TRACK_STATS) {
+                if (len > self.stats.largest_allocation_request_by_bucket[bucket_idx]) self.stats.largest_allocation_request_by_bucket[bucket_idx] = len;
+                if (len < self.stats.smallest_allocation_request_by_bucket[bucket_idx]) self.stats.smallest_allocation_request_by_bucket[bucket_idx] = len;
+                self.stats.current_blocks_used_by_bucket[bucket_idx] += 1;
+                if (self.stats.current_blocks_used_by_bucket[bucket_idx] > self.stats.most_blocks_ever_used_by_bucket[bucket_idx]) self.stats.most_blocks_ever_used_by_bucket[bucket_idx] = self.stats.current_blocks_used_by_bucket[bucket_idx];
+                self.stats.current_slabs_used_by_bucket[bucket_idx] += 1;
+                if (self.stats.current_slabs_used_by_bucket[bucket_idx] > self.stats.most_slabs_ever_used_by_bucket[bucket_idx]) self.stats.most_slabs_ever_used_by_bucket[bucket_idx] = self.stats.current_slabs_used_by_bucket[bucket_idx];
+                if (!did_recycle_slab) self.stats.current_total_memory_allocated += SLAB_BYTES[bucket_idx];
+                if (self.stats.current_total_memory_allocated > self.stats.largest_total_memory_allocated) self.stats.largest_total_memory_allocated = self.stats.current_total_memory_allocated;
+            }
+            return new_slab_ptr;
+        }
+
+        fn resize(self_opaque: *anyopaque, memory: []u8, alignment: mem.Alignment, new_len: usize, ret_addr: usize) bool {
+            _ = ret_addr;
+            const self: *QuickAlloc = @ptrCast(@alignCast(self_opaque));
+            const old_alloc_size_log2 = get_bytes_log2_with_align(memory.len, alignment);
+            const new_alloc_size_log2 = get_bytes_log2_with_align(new_len, alignment);
+            switch (LARGE_ALLOC_BEHAVIOR) {
+                LargeAllocBehavior.USE_PAGE_ALLOCATOR => if (old_alloc_size_log2 > LARGEST_BLOCK_SIZE_LOG2 or new_alloc_size_log2 > LARGEST_BLOCK_SIZE_LOG2) {
+                    @branchHint(LARGE_ALLOC_HINT);
+                    if (TRACK_STATS) {
+                        if (old_alloc_size_log2 <= LARGEST_BLOCK_SIZE_LOG2 and new_alloc_size_log2 > LARGEST_BLOCK_SIZE_LOG2) {
+                            const old_bucket = ALLOC_SIZE_LOG2_TO_BUCKET_IDX[old_alloc_size_log2];
+                            self.stats.number_of_attempted_resizes_to_larger_buckets_by_bucket[old_bucket] += 1;
+                        } else if (old_alloc_size_log2 > LARGEST_BLOCK_SIZE_LOG2 and new_alloc_size_log2 > LARGEST_BLOCK_SIZE_LOG2) {
+                            if (new_len > memory.len) {
+                                const delta = new_len - memory.len;
+                                if (delta > self.stats.largest_attempted_page_allocator_fallback_resize_delta_grow) self.stats.largest_attempted_page_allocator_fallback_resize_delta_grow = delta;
+                            }
+                            if (new_len < memory.len) {
+                                const delta = memory.len - new_len;
+                                if (delta > self.stats.largest_attempted_page_allocator_fallback_resize_delta_shrink) self.stats.largest_attempted_page_allocator_fallback_resize_delta_shrink = delta;
+                            }
+                            if (new_len < self.stats.smallest_page_allocator_fallback_request_ever) self.stats.smallest_page_allocator_fallback_request_ever = new_len;
+                            if (new_len > self.stats.largest_page_allocator_fallback_request_ever) self.stats.largest_page_allocator_fallback_request_ever = new_len;
+                            const resize_result = PageAllocator.realloc(memory, new_len, false);
+                            if (resize_result != null) {
+                                if (new_len > memory.len) self.stats.current_total_memory_allocated += (new_len - memory.len);
+                                if (new_len < memory.len) self.stats.current_total_memory_allocated -= (memory.len - new_len);
+                            }
+                            return resize_result != null;
+                        }
+                        return false;
+                    }
+                    if (old_alloc_size_log2 > LARGEST_BLOCK_SIZE_LOG2 and new_alloc_size_log2 > LARGEST_BLOCK_SIZE_LOG2) return PageAllocator.realloc(memory, new_len, false) != null;
+                    return false;
+                },
+                LargeAllocBehavior.PANIC => if (old_alloc_size_log2 > LARGEST_BLOCK_SIZE_LOG2 or new_alloc_size_log2 > LARGEST_BLOCK_SIZE_LOG2) {
+                    @branchHint(.cold);
+                    std.debug.panic(MSG_LARGE_RESIZE, .{ AllocSize.get_name_from_bytes_log2(old_alloc_size_log2), AllocSize.get_name_from_bytes_log2(new_alloc_size_log2) });
+                },
+                LargeAllocBehavior.UNREACHABLE => if (old_alloc_size_log2 > LARGEST_BLOCK_SIZE_LOG2 or new_alloc_size_log2 > LARGEST_BLOCK_SIZE_LOG2) unreachable,
+            }
+            const old_bucket = ALLOC_SIZE_LOG2_TO_BUCKET_IDX[old_alloc_size_log2];
+            const new_bucket = ALLOC_SIZE_LOG2_TO_BUCKET_IDX[new_alloc_size_log2];
+            if (TRACK_STATS) {
+                if (old_bucket < new_bucket) self.stats.number_of_attempted_resizes_to_larger_buckets_by_bucket[old_bucket] += 1;
+                if (old_bucket == new_bucket and new_len > self.stats.largest_allocation_request_by_bucket[old_bucket]) self.stats.largest_allocation_request_by_bucket[old_bucket] = new_len;
+                if (old_bucket >= new_bucket and new_len < self.stats.smallest_allocation_request_by_bucket[old_bucket]) self.stats.smallest_allocation_request_by_bucket[old_bucket] = new_len;
+            }
+            return old_bucket >= new_bucket;
+        }
+
+        fn remap(self_opaque: *anyopaque, memory: []u8, alignment: mem.Alignment, new_len: usize, ret_addr: usize) ?[*]u8 {
+            _ = ret_addr;
+            const self: *QuickAlloc = @ptrCast(@alignCast(self_opaque));
+            const old_alloc_size_log2 = get_bytes_log2_with_align(memory.len, alignment);
+            const new_alloc_size_log2 = get_bytes_log2_with_align(new_len, alignment);
+            switch (LARGE_ALLOC_BEHAVIOR) {
+                LargeAllocBehavior.USE_PAGE_ALLOCATOR => if (old_alloc_size_log2 > LARGEST_BLOCK_SIZE_LOG2 or new_alloc_size_log2 > LARGEST_BLOCK_SIZE_LOG2) {
+                    @branchHint(LARGE_ALLOC_HINT);
+                    if (TRACK_STATS) {
+                        if (old_alloc_size_log2 <= LARGEST_BLOCK_SIZE_LOG2 and new_alloc_size_log2 > LARGEST_BLOCK_SIZE_LOG2) {
+                            const old_bucket = ALLOC_SIZE_LOG2_TO_BUCKET_IDX[old_alloc_size_log2];
+                            self.stats.number_of_attempted_resizes_to_larger_buckets_by_bucket[old_bucket] += 1;
+                        } else if (old_alloc_size_log2 > LARGEST_BLOCK_SIZE_LOG2 and new_alloc_size_log2 > LARGEST_BLOCK_SIZE_LOG2) {
+                            if (new_len > memory.len) {
+                                const delta = new_len - memory.len;
+                                if (delta > self.stats.largest_attempted_page_allocator_fallback_resize_delta_grow) self.stats.largest_attempted_page_allocator_fallback_resize_delta_grow = delta;
+                            }
+                            if (new_len < memory.len) {
+                                const delta = memory.len - new_len;
+                                if (delta > self.stats.largest_attempted_page_allocator_fallback_resize_delta_shrink) self.stats.largest_attempted_page_allocator_fallback_resize_delta_shrink = delta;
+                            }
+                            if (new_len < self.stats.smallest_page_allocator_fallback_request_ever) self.stats.smallest_page_allocator_fallback_request_ever = new_len;
+                            if (new_len > self.stats.largest_page_allocator_fallback_request_ever) self.stats.largest_page_allocator_fallback_request_ever = new_len;
+                            const resize_result = PageAllocator.realloc(memory, new_len, true);
+                            if (resize_result != null) {
+                                if (new_len > memory.len) self.stats.current_total_memory_allocated += (new_len - memory.len);
+                                if (new_len < memory.len) self.stats.current_total_memory_allocated -= (memory.len - new_len);
+                            }
+                            return resize_result;
+                        }
+                        return null;
+                    }
+                    if (old_alloc_size_log2 > LARGEST_BLOCK_SIZE_LOG2 and new_alloc_size_log2 > LARGEST_BLOCK_SIZE_LOG2) return PageAllocator.realloc(memory, new_len, true);
+                    return null;
+                },
+                LargeAllocBehavior.PANIC => if (old_alloc_size_log2 > LARGEST_BLOCK_SIZE_LOG2 or new_alloc_size_log2 > LARGEST_BLOCK_SIZE_LOG2) {
+                    @branchHint(.cold);
+                    std.debug.panic(MSG_LARGE_RESIZE, .{ AllocSize.get_name_from_bytes_log2(old_alloc_size_log2), AllocSize.get_name_from_bytes_log2(new_alloc_size_log2) });
+                },
+                LargeAllocBehavior.UNREACHABLE => if (old_alloc_size_log2 > LARGEST_BLOCK_SIZE_LOG2 or new_alloc_size_log2 > LARGEST_BLOCK_SIZE_LOG2) unreachable,
+            }
+            const old_bucket = ALLOC_SIZE_LOG2_TO_BUCKET_IDX[old_alloc_size_log2];
+            const new_bucket = ALLOC_SIZE_LOG2_TO_BUCKET_IDX[new_alloc_size_log2];
+            if (TRACK_STATS) {
+                if (old_bucket < new_bucket) self.stats.number_of_attempted_resizes_to_larger_buckets_by_bucket[old_bucket] += 1;
+                if (old_bucket == new_bucket and new_len > self.stats.largest_allocation_request_by_bucket[old_bucket]) self.stats.largest_allocation_request_by_bucket[old_bucket] = new_len;
+                if (old_bucket >= new_bucket and new_len < self.stats.smallest_allocation_request_by_bucket[old_bucket]) self.stats.smallest_allocation_request_by_bucket[old_bucket] = new_len;
+            }
+            if (old_bucket >= new_bucket) return memory.ptr;
+            return null;
+        }
+
+        fn free(self_opaque: *anyopaque, memory: []u8, alignment: mem.Alignment, ret_addr: usize) void {
+            _ = ret_addr;
+            const self: *QuickAlloc = @ptrCast(@alignCast(self_opaque));
+            const alloc_size_log2 = get_bytes_log2_with_align(memory.len, alignment);
+            switch (LARGE_ALLOC_BEHAVIOR) {
+                LargeAllocBehavior.USE_PAGE_ALLOCATOR => if (alloc_size_log2 > LARGEST_BLOCK_SIZE_LOG2) {
+                    @branchHint(LARGE_ALLOC_HINT);
+                    if (TRACK_STATS) {
+                        self.stats.current_number_of_page_allocator_fallback_allocations -= 1;
+                        self.stats.current_total_bytes_allocated_from_page_allocator_fallback -= memory.len;
+                        self.stats.current_total_memory_allocated -= memory.len;
+                    }
+                    return PageAllocator.unmap(@alignCast(memory));
+                },
+                LargeAllocBehavior.PANIC => if (alloc_size_log2 > LARGEST_BLOCK_SIZE_LOG2) {
+                    @branchHint(.cold);
+                    std.debug.panic(MSG_LARGE_FREE, .{AllocSize.get_name_from_bytes_log2(alloc_size_log2)});
+                },
+                LargeAllocBehavior.UNREACHABLE => if (alloc_size_log2 > LARGEST_BLOCK_SIZE_LOG2) unreachable,
+            }
+            const bucket_idx = ALLOC_SIZE_LOG2_TO_BUCKET_IDX[alloc_size_log2];
+            const prev_first_free_address = self.first_recycled_block_by_bucket[bucket_idx];
+            const curr_first_free_addr: usize = @intFromPtr(memory.ptr);
+            const curr_first_free_ptr: *usize = @ptrFromInt(curr_first_free_addr);
+            curr_first_free_ptr.* = prev_first_free_address;
+            self.first_recycled_block_by_bucket[bucket_idx] = curr_first_free_addr;
+            self.recycled_block_count_by_bucket[bucket_idx] += 1;
+            if (TRACK_STATS) {
+                self.stats.current_blocks_used_by_bucket[bucket_idx] -= 1;
+            }
+            // if (SLAB_RECYCLE) {
+            //     const slab_addr = mem.alignBackward(Address, @intFromPtr(memory.ptr), SLAB_BYTES[bucket_idx]);
+            //     const slab_data_idx = self.find_slab_data_idx_by_address(slab_addr);
+            //     const slab_data = &self.slabs.ptr[slab_data_idx];
+            //     assert(slab_data.bucket_idx == bucket_idx);
+            //     slab_data.blocks_free += 1;
+            //     if (SLAB_RECYCLE_AUTO) {
+            //         const ratio: f32 = @as(f32, @floatFromInt(self.recycled_block_count_by_bucket[bucket_idx])) / @as(f32, @floatFromInt(BLOCKS_PER_SLAB[bucket_idx]));
+            //         if (ratio > SLAB_RECYCLE_POOL_RATIO) {
+            //             const slab_size_idx = BUCKET_IDX_TO_SLAB_IDX[bucket_idx];
+            //             if (slab_data.blocks_free == BLOCKS_PER_SLAB[bucket_idx]) {
+            //                 if (ratio > SLAB_RECYCLE_POOL_RATIO) {
+            //                     self.free_and_remove_slab(slab_data_idx);
+            //                 } else {
+            //                     self.slabs.free_slab_count_by_slab_size[slab_const_idx] += 1;
+            //                     var next_free_slab_ptr
+            //                     self.slabs.first_free_slab_address_by_size[slab_size_idx]
+            //                 }
+            //             } else if (self.try_find_entire_free_slab(bucket_idx)) |free_slab_idx| {
+
+            //                 var i: Idx = 0;
+            //                 while (i < self.slabs.free_slab_count_by_slab_size[slab_const_idx]) : (i += 1) {
+
+            //                 }
+            //                 self.slabs.free_slab_count_by_slab_size[BUCKET_IDX_TO_SLAB_IDX[bucket_idx]] -= 1;
+
+            //                 self.free_and_remove_slab(free_slab_idx);
+            //             }
+            //     }
+            // }
+        }
+
+        // fn insert_brand_new_slab_data(self: *QuickAlloc, slab_data: SlabData) bool {
+        //     if (!SLAB_RECYCLE) return true;
+        //     var slabs = &self.slabs;
+        //     if (slabs.len == slabs.cap) {
+        //         const old_len: Address = @as(Address, @intCast(slabs.cap)) * @sizeOf(SlabData);
+        //         const new_len = mem.alignForward(Address, old_len, std.heap.pageSize()) + std.heap.pageSize();
+        //         const old_raw_ptr: [*]u8 = @ptrCast(@alignCast(slabs.ptr));
+        //         if (PageAllocator.realloc(old_raw_ptr[old_len], new_len, true)) |new_raw_ptr| {
+        //             slabs.ptr = @ptrCast(@alignCast(new_raw_ptr));
+        //             slabs.cap = new_len / @sizeOf(SlabList);
+        //         } else {
+        //             const new_raw_ptr = PageAllocator.map(new_len, std.heap.page_size_min) orelse return false;
+        //             @memcpy(new_raw_ptr[0..old_len], old_raw_ptr[0..old_len]);
+        //             PageAllocator.unmap(@alignCast(old_raw_ptr[0..old_len]));
+        //             slabs.ptr = @ptrCast(@alignCast(new_raw_ptr));
+        //             slabs.cap = new_len / @sizeOf(SlabList);
+        //         }
+        //     }
+        //     assert(slabs.len < slabs.cap);
+        //     const insert_idx = Root.Algorithms.BinarySearch.binary_search_insert_index(SlabData, Address, SlabData.order, false, slabs.ptr[0..slabs.len], slab_data.address);
+        //     const new_len = slabs.len + 1;
+        //     mem.copyBackwards(SlabData, slabs.ptr[insert_idx + 1 .. new_len], slabs.ptr[insert_idx..slabs.len]);
+        //     slabs.ptr[insert_idx] = slab_data;
+        //     slabs.len = new_len;
+        //     return true;
+        // }
+
+        // fn find_slab_data_idx_by_address(self: *QuickAlloc, address: Address) Idx {
+        //     if (!SLAB_RECYCLE) return @intFromPtr(math.maxInt(usize));
+        //     const slabs = &self.slabs;
+        //     if (Root.Algorithms.BinarySearch.binary_search(SlabData, Address, SlabData.order, slabs.ptr[0..slabs.len], address)) |found_idx| {
+        //         return found_idx;
+        //     }
+        //     unreachable;
+        // }
+
+        // fn free_and_remove_slab(self: *QuickAlloc, slab_idx: Idx) void {
+        //     if (!SLAB_RECYCLE) return;
+        //     var slabs = &self.slabs;
+        //     assert(slab_idx < slabs.len);
+        //     const slab_data = slabs.ptr[slab_idx];
+        //     assert(slab_data.blocks_free == BLOCKS_PER_SLAB[slab_data.bucket_idx]);
+        //     const new_len = slabs.len - 1;
+        //     const raw_ptr: [*]align(std.heap.page_size_min) u8 = @ptrFromInt(slab_data.address);
+        //     const raw_len: Address = @as(Address, @intCast(SLAB_BYTES[slab_data.bucket_idx]));
+        //     PageAllocator.unmap(raw_ptr[0..raw_len]);
+        //     mem.copyForwards(SlabData, slabs.ptr[slab_idx..new_len], slabs.ptr[slab_idx + 1 .. slabs.len]);
+        //     slabs.len -= 1;
+        // }
+
+        // fn free_all_memory(self: *QuickAlloc, comptime panic_if_memory_was_in_use: bool) void {
+        //     if (!SLAB_RECYCLE) return;
+        //     var i: usize = 0;
+        //     var slab_data: SlabData = undefined;
+        //     while (i < self.slabs.len) : (i += 1) {
+        //         slab_data = self.slabs.ptr[i];
+        //         if (panic_if_memory_was_in_use and slab_data.blocks_free != BLOCKS_PER_SLAB[slab_data.bucket_idx]) @panic("attempted to free memory still in use");
+        //         const raw_ptr: [*]align(std.heap.page_size_min) u8 = @ptrFromInt(slab_data.address);
+        //         const raw_len: Address = @as(Address, @intCast(SLAB_BYTES[slab_data.bucket_idx]));
+        //         PageAllocator.unmap(raw_ptr[0..raw_len]);
+        //     }
+        //     self.* = QuickAlloc{};
+        // }
+
+        // fn try_find_entire_free_slab(self: *QuickAlloc, bucket_idx: ConstIdx) ?Idx {
+        //     if (!SLAB_RECYCLE) return null;
+        //     var i: Idx = 0;
+        //     while (i < self.slabs.len) : (i += 1) {
+        //         const slab_data: *SlabData = &self.slabs.ptr[i];
+        //         if (slab_data.bucket_idx == bucket_idx and slab_data.blocks_free == BLOCKS_PER_SLAB[bucket_idx]) return i;
+        //     }
+        //     return null;
+        // }
+
+        pub fn log_usage_statistics(self: *const QuickAlloc, log_buffer: *std.ArrayList(u8), comptime log_name: []const u8) void {
+            @branchHint(STAT_LOG_HINT);
+            log_buffer.clearRetainingCapacity();
+            var log_writer = log_buffer.writer();
+            var i: usize = 0;
+            log_writer.print("\n[QuickAlloc] Usage Statistics ({s})\n======== FREE MEMORY STATS =========\n   SIZE GROUP | FREE SLABS | FREE BLOCKS | FREE BYTES\n--------------+------------+-------------+--------------------------\n", .{log_name}) catch @panic(FAILED_TO_LOG ++ log_name);
+            while (i < BUCKET_COUNT) : (i += 1) {
+                const block_bytes_log_2: Log2Usize = BLOCK_BYTES_LOG2[i];
+                const block_bytes: usize = BLOCK_BYTES[i];
+                const block_count: usize = self.recycled_block_count_by_bucket[i] + self.brand_new_block_count_by_bucket[i];
+                const bucket_slab_count = block_count / BLOCKS_PER_SLAB[i];
+                log_writer.print("{s: >13} | {d: >10} | {d: >11} | {d: >19} bytes\n", .{ AllocSize.get_name_from_bytes_log2(block_bytes_log_2), bucket_slab_count, block_count, block_count * block_bytes }) catch @panic(FAILED_TO_LOG ++ log_name);
+            }
+            if (TRACK_STATS) {
+                log_writer.print("======== USED MEMORY STATS =========\n", .{}) catch @panic("failed to allocate memory for logging: " ++ log_name);
+                log_writer.print("Current total memory allocated: {d} bytes\nLargest total memory allocated: {d} bytes\n", .{ self.stats.current_total_memory_allocated, self.stats.largest_total_memory_allocated }) catch @panic(FAILED_TO_LOG ++ log_name);
+                log_writer.print("Smallest allocation ever requested: {d} bytes\nLargest allocation ever requested: {d} bytes\n", .{ if (self.stats.smallest_allocation_request_ever == math.maxInt(usize)) 0 else self.stats.smallest_allocation_request_ever, self.stats.largest_allocation_request_ever }) catch @panic(FAILED_TO_LOG ++ log_name);
+                log_writer.print("---- BUCKET STATS ----\n", .{}) catch @panic(FAILED_TO_LOG ++ log_name);
+                i = 0;
+                while (i < BUCKET_COUNT) : (i += 1) {
+                    const local_i = i;
+                    const block_bytes_log_2: Log2Usize = BLOCK_BYTES_LOG2[local_i];
+                    log_writer.print("  [{s}]\n", .{AllocSize.get_name_from_bytes_log2(block_bytes_log_2)}) catch @panic(FAILED_TO_LOG ++ log_name);
+                    log_writer.print("     Smallest single allocation: {d} bytes\n     Largest single allocation: {d} bytes\n", .{ if (self.stats.smallest_allocation_request_by_bucket[i] == math.maxInt(usize)) 0 else self.stats.smallest_allocation_request_by_bucket[i], self.stats.largest_allocation_request_by_bucket[i] }) catch @panic(FAILED_TO_LOG ++ log_name);
+                    log_writer.print("     Current blocks used by bucket: {d}\n     Most blocks ever used by bucket: {d}\n", .{ self.stats.current_blocks_used_by_bucket[i], self.stats.most_blocks_ever_used_by_bucket[i] }) catch @panic(FAILED_TO_LOG ++ log_name);
+                    log_writer.print("     Current slabs used by bucket: {d}\n     Most slabs ever used by bucket: {d}\n", .{ self.stats.current_slabs_used_by_bucket[i], self.stats.most_slabs_ever_used_by_bucket[i] }) catch @panic(FAILED_TO_LOG ++ log_name);
+                    log_writer.print("     Number of attempted resizes to larger buckets: {d}\n", .{self.stats.number_of_attempted_resizes_to_larger_buckets_by_bucket[i]}) catch @panic(FAILED_TO_LOG ++ log_name);
+                }
+                if (PAGE_ALLOC) {
+                    log_writer.print("  [Page Allocator]\n", .{}) catch @panic(FAILED_TO_LOG ++ log_name);
+                    log_writer.print("     Smallest single allocation: {d} bytes\n     Largest single allocation: {d} bytes\n", .{ if (self.stats.smallest_page_allocator_fallback_request_ever == math.maxInt(usize)) 0 else self.stats.smallest_page_allocator_fallback_request_ever, self.stats.largest_page_allocator_fallback_request_ever }) catch @panic(FAILED_TO_LOG ++ log_name);
+                    log_writer.print("     Current total bytes allocated: {d} bytes\n     Largest total bytes allocated: {d} bytes\n", .{ self.stats.current_total_bytes_allocated_from_page_allocator_fallback, self.stats.largest_total_bytes_allocated_from_page_allocator_fallback }) catch @panic(FAILED_TO_LOG ++ log_name);
+                    log_writer.print("     Current number of distinct allocations: {d}\n     Largest number of distinct allocations: {d}\n", .{ self.stats.current_number_of_page_allocator_fallback_allocations, self.stats.largest_number_of_page_allocator_fallback_allocations }) catch @panic(FAILED_TO_LOG ++ log_name);
+                    log_writer.print("     Largest attempted resize delta (grow): {d} bytes\n     Largest attempted resize delta (shrink): {d} bytes\n", .{ self.stats.largest_attempted_page_allocator_fallback_resize_delta_grow, self.stats.largest_attempted_page_allocator_fallback_resize_delta_shrink }) catch @panic(FAILED_TO_LOG ++ log_name);
+                }
+            }
+            std.log.info("{s}", .{log_buffer.items[0..log_buffer.items.len]});
+        }
+    };
+}
+
+const FAILED_TO_LOG = "failed to allocate memory for logging: ";
+
+inline fn get_bytes_log2_with_align(len: usize, alignment: mem.Alignment) Log2Usize {
+    const size_log2 = @max(@bitSizeOf(usize) - @clz(len - 1), @intFromEnum(alignment));
+    return @intCast(size_log2);
+}
+
+inline fn get_bytes_log2(len: usize) Log2Usize {
+    const size_log2 = @bitSizeOf(usize) - @clz(len - 1);
+    return @intCast(size_log2);
+}
+
+inline fn bytes_log2_to_alignment(val: Log2Usize) mem.Alignment {
+    return @enumFromInt(val);
+}
+
+test "Does it basically work?" {
+    const t = std.testing;
+    t.log_level = .err;
+    const ListU8 = std.ArrayList(u8);
+    var log_buffer = ListU8.init(std.heap.page_allocator);
+    const ALLOC_OPTIONS = Options{
+        .buckets = &[_]BucketDef{
+            BucketDef{
+                .block_size = ._128_B,
+                .slab_size = ._4_KB,
+            },
+            BucketDef{
+                .block_size = ._1_KB,
+                .slab_size = ._16_KB,
+            },
+        },
+        .track_allocation_statistics = true,
+        .hint_log_usage_statistics = .VERY_LIKELY,
+        .large_allocation_behavior = .USE_PAGE_ALLOCATOR,
+        .hint_large_allocation = .VERY_LIKELY,
+    };
+    const ALLOC = define_allocator(ALLOC_OPTIONS);
+    var quick_alloc = ALLOC{};
+    const allocator = quick_alloc.allocator();
+    var text_list = ListU8.init(allocator);
+    try text_list.append('H');
+    try text_list.append('e');
+    try text_list.append('l');
+    try text_list.append('l');
+    try text_list.append('o');
+    try text_list.append(' ');
+    quick_alloc.log_usage_statistics(&log_buffer, "After append 'Hello ' = 6 total bytes of ListU8");
+    try text_list.appendSlice("World!");
+    quick_alloc.log_usage_statistics(&log_buffer, "After append 'World!' = 12 total bytes of ListU8");
+    try t.expectEqualStrings("Hello World!", text_list.items[0..text_list.items.len]);
+    try text_list.ensureTotalCapacity(129);
+    try t.expectEqualStrings("Hello World!", text_list.items[0..text_list.items.len]);
+    quick_alloc.log_usage_statistics(&log_buffer, "After ensureTotalCapacity(129)");
+    text_list.clearAndFree();
+    quick_alloc.log_usage_statistics(&log_buffer, "After first clear and free");
+    try text_list.ensureTotalCapacity(1025);
+    quick_alloc.log_usage_statistics(&log_buffer, "After ensureTotalCapacity(1025)");
+    text_list.clearAndFree();
+    quick_alloc.log_usage_statistics(&log_buffer, "After second clear and free");
+}
