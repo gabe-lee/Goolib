@@ -9,7 +9,7 @@ const List = std.ArrayList;
 const BranchHint = std.builtin.BranchHint;
 const Type = std.builtin.Type;
 
-const Root = @import("./root.zig");
+const Root = @import("./_root.zig");
 
 const Log2Usize = math.Log2Int(usize);
 
@@ -296,9 +296,9 @@ pub fn define_allocator(comptime options: Options) type {
     if (options.buckets.len == 0) @panic("must provide at least one allocation bucket");
     const buckets = options.buckets;
     const Idx = options.index_uint_type;
-    if (@typeInfo(Idx) != Type.Int or @typeInfo(Idx).int.signedness != .unsigned) @panic("index_uint_type must be an unsigned integer type");
+    if (@typeInfo(Idx) != Type.int or @typeInfo(Idx).int.signedness != .unsigned) @panic("index_uint_type must be an unsigned integer type");
     const Size = options.size_uint_type;
-    if (@typeInfo(Size) != Type.Int or @typeInfo(Idx).int.signedness != .unsigned) @panic("size_uint_type must be an unsigned integer type");
+    if (@typeInfo(Size) != Type.int or @typeInfo(Idx).int.signedness != .unsigned) @panic("size_uint_type must be an unsigned integer type");
     const SizeLog2: type = math.Log2Int(Size);
     const Address = usize;
     const ConstIdx = u8;
@@ -330,7 +330,7 @@ pub fn define_allocator(comptime options: Options) type {
     const slab_count: Idx = temp_slab_size_log2_len;
     const const_slab_log2_sizes: [slab_count]SizeLog2 = comptime make: {
         var arr: [slab_count]SizeLog2 = undefined;
-        @memcpy(&arr, &temp_slab_size_log2_buf[0..temp_slab_size_log2_len]);
+        @memcpy(&arr, temp_slab_size_log2_buf[0..temp_slab_size_log2_len]);
         break :make arr;
     };
     // check buckets and build bucket idx tables

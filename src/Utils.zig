@@ -7,11 +7,11 @@ pub inline fn inline_swap(comptime T: type, a: *T, b: *T, temp: *T) void {
     b.* = temp.*;
 }
 
-pub inline fn inline_simple_rand_int(comptime T: type, min: T, max: T) T {
-    return inline_simple_n_rand_ints(T, 1, 0, min, max)[0];
+pub inline fn simple_rand_int(comptime T: type, min: T, max: T) T {
+    return simple_n_rand_ints(T, 1, min, max)[0];
 }
 
-pub inline fn inline_simple_n_rand_ints(comptime T: type, comptime count: comptime_int, comptime add: comptime_int, min: T, max: T) [count]T {
+pub fn simple_n_rand_ints(comptime T: type, comptime count: comptime_int, min: T, max: T) [count]T {
     if (count <= 0) @compileError("count must greater than zero");
     assert(max >= min);
     const range = max - min;
@@ -22,7 +22,7 @@ pub inline fn inline_simple_n_rand_ints(comptime T: type, comptime count: compti
     var idx: usize = 1;
     while (idx < count) : (idx += 1) {
         r_idx = (r_idx + 1) % RANDOM_U64_TABLE.len;
-        time += add;
+        time += 13;
         arr[idx] = @as(T, @truncate(((time ^ RANDOM_U64_TABLE[r_idx]) % range) + min));
     }
     return arr;

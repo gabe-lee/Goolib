@@ -2,7 +2,7 @@ const std = @import("std");
 const assert = std.debug.assert;
 const build = @import("builtin");
 
-const Root = @import("./root.zig");
+const Root = @import("./_root.zig");
 
 pub const Pivot = enum {
     FIRST,
@@ -29,7 +29,7 @@ pub fn define_quicksort_package(comptime ELEMENT_TYPE: type, comptime ORDER_NUME
 fn recurse(comptime ELEMENT_TYPE: type, comptime ORDER_NUMERIC_TYPE: type, comptime ORDER_FUNC: fn (element: *const ELEMENT_TYPE) ORDER_NUMERIC_TYPE, comptime PIVOT: Pivot, buffer: []ELEMENT_TYPE, lo: usize, hi: usize) void {
     if (lo >= hi) return;
     const pivot_idx = partition(ELEMENT_TYPE, ORDER_NUMERIC_TYPE, ORDER_FUNC, PIVOT, buffer, lo, hi);
-    recurse(ELEMENT_TYPE, ORDER_NUMERIC_TYPE, ORDER_FUNC, PIVOT, buffer, lo, pivot_idx -% 1);
+    recurse(ELEMENT_TYPE, ORDER_NUMERIC_TYPE, ORDER_FUNC, PIVOT, buffer, lo, pivot_idx -| 1);
     recurse(ELEMENT_TYPE, ORDER_NUMERIC_TYPE, ORDER_FUNC, PIVOT, buffer, pivot_idx + 1, hi);
 }
 
@@ -39,12 +39,12 @@ fn partition(comptime ELEMENT_TYPE: type, comptime ORDER_NUMERIC_TYPE: type, com
         Pivot.FIRST => lo,
         Pivot.MIDDLE => ((hi - lo) >> 1) + lo,
         Pivot.LAST => hi,
-        Pivot.RANDOM => Root.Utils.inline_simple_rand_int(usize, lo, hi),
+        Pivot.RANDOM => Root.Utils.simple_rand_int(usize, lo, hi),
         Pivot.MEDIAN_OF_3 => calc: {
             const mid = ((hi - lo) >> 1) + lo;
             if (ORDER_FUNC(&buffer[mid]) < ORDER_FUNC(&buffer[lo])) Root.Utils.inline_swap(ELEMENT_TYPE, &buffer[mid], &buffer[lo], &temp);
-            if (ORDER_FUNC(&buffer[hi] < ORDER_FUNC(&buffer[lo]))) Root.Utils.inline_swap(ELEMENT_TYPE, &buffer[hi], &buffer[lo], &temp);
-            if (ORDER_FUNC(&buffer[mid] < ORDER_FUNC(&buffer[hi]))) Root.Utils.inline_swap(ELEMENT_TYPE, &buffer[mid], &buffer[hi], &temp);
+            if (ORDER_FUNC(&buffer[hi]) < ORDER_FUNC(&buffer[lo])) Root.Utils.inline_swap(ELEMENT_TYPE, &buffer[hi], &buffer[lo], &temp);
+            if (ORDER_FUNC(&buffer[mid]) < ORDER_FUNC(&buffer[hi])) Root.Utils.inline_swap(ELEMENT_TYPE, &buffer[mid], &buffer[hi], &temp);
             if (build.mode == .Debug) {
                 assert(ORDER_FUNC(&buffer[hi]) <= ORDER_FUNC(&buffer[mid]));
                 assert(ORDER_FUNC(&buffer[lo]) <= ORDER_FUNC(&buffer[hi]));
@@ -52,7 +52,7 @@ fn partition(comptime ELEMENT_TYPE: type, comptime ORDER_NUMERIC_TYPE: type, com
             break :calc hi;
         },
         Pivot.MEDIAN_OF_3_RANDOM => calc: {
-            const idx_arr = Root.Utils.inline_simple_n_rand_ints(usize, 3, 13, lo, hi);
+            const idx_arr = Root.Utils.simple_n_rand_ints(usize, 3, lo, hi);
             if (ORDER_FUNC(&buffer[idx_arr[1]]) < ORDER_FUNC(&buffer[idx_arr[0]])) Root.Utils.inline_swap(ELEMENT_TYPE, &buffer[idx_arr[1]], &buffer[idx_arr[0]], &temp);
             if (ORDER_FUNC(&buffer[idx_arr[2]]) < ORDER_FUNC(&buffer[idx_arr[0]])) Root.Utils.inline_swap(ELEMENT_TYPE, &buffer[idx_arr[2]], &buffer[idx_arr[0]], &temp);
             if (ORDER_FUNC(&buffer[idx_arr[1]]) < ORDER_FUNC(&buffer[idx_arr[2]])) Root.Utils.inline_swap(ELEMENT_TYPE, &buffer[idx_arr[1]], &buffer[idx_arr[2]], &temp);
@@ -68,8 +68,60 @@ fn partition(comptime ELEMENT_TYPE: type, comptime ORDER_NUMERIC_TYPE: type, com
     var right: usize = hi;
     while (true) {
         while (ORDER_FUNC(&buffer[left]) < pivot_val) left += 1;
-        while (ORDER_FUNC(&buffer[right] > pivot_val)) right -= 1;
+        while (ORDER_FUNC(&buffer[right]) > pivot_val) right -= 1;
         if (left >= right) return right;
         Root.Utils.inline_swap(ELEMENT_TYPE, &buffer[left], &buffer[right], &temp);
+    }
+}
+
+test "quicksort" {
+    const t = std.testing;
+    const TestCase = struct {
+        input: [10]usize,
+        expected_output: [10]usize,
+        len: usize,
+    };
+    const cases = [_]TestCase{
+        TestCase{
+            .input = .{ 42, 1, 33, 99, 5, 10, 11, 0, 0, 0 },
+            .expected_output = .{ 1, 5, 10, 11, 33, 42, 99, 0, 0, 0 },
+            .len = 7,
+        },
+        TestCase{
+            .input = .{ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 },
+            .expected_output = .{ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 },
+            .len = 0,
+        },
+        TestCase{
+            .input = .{ 1, 0, 0, 0, 0, 0, 0, 0, 0, 0 },
+            .expected_output = .{ 1, 0, 0, 0, 0, 0, 0, 0, 0, 0 },
+            .len = 1,
+        },
+    };
+    const order = struct {
+        fn func(element: *const usize) usize {
+            return element.*;
+        }
+    };
+
+    for (cases) |case| {
+        var output: [10]usize = case.input;
+        quicksort(usize, usize, order.func, Pivot.FIRST, output[0..case.len]);
+        try t.expectEqualSlices(usize, case.expected_output[0..case.len], output[0..case.len]);
+        output = case.input;
+        quicksort(usize, usize, order.func, Pivot.MIDDLE, output[0..case.len]);
+        try t.expectEqualSlices(usize, case.expected_output[0..case.len], output[0..case.len]);
+        output = case.input;
+        quicksort(usize, usize, order.func, Pivot.LAST, output[0..case.len]);
+        try t.expectEqualSlices(usize, case.expected_output[0..case.len], output[0..case.len]);
+        output = case.input;
+        quicksort(usize, usize, order.func, Pivot.RANDOM, output[0..case.len]);
+        try t.expectEqualSlices(usize, case.expected_output[0..case.len], output[0..case.len]);
+        output = case.input;
+        quicksort(usize, usize, order.func, Pivot.MEDIAN_OF_3, output[0..case.len]);
+        try t.expectEqualSlices(usize, case.expected_output[0..case.len], output[0..case.len]);
+        output = case.input;
+        quicksort(usize, usize, order.func, Pivot.MEDIAN_OF_3_RANDOM, output[0..case.len]);
+        try t.expectEqualSlices(usize, case.expected_output[0..case.len], output[0..case.len]);
     }
 }

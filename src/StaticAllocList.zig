@@ -8,6 +8,8 @@ const Allocator = std.mem.Allocator;
 const ArrayListUnmanaged = std.ArrayListUnmanaged;
 const ArrayList = std.ArrayListUnmanaged;
 
+const Root = @import("./_root.zig");
+
 pub const AllocErrorBehavior = enum {
     ALLOCATION_ERRORS_RETURN_ERROR,
     ALLOCATION_ERRORS_PANIC,
@@ -25,79 +27,27 @@ pub const GrowthModel = enum {
     GROW_BY_25_PERCENT_WITH_ATOMIC_PADDING,
 };
 
-pub const SortPivot = enum {
-    FIRST,
-    LAST,
-    MIDDLE,
-    MEDIAN_OF_3_RANDOM,
-    RANDOM,
+pub const SortAlgorithm = enum {
+    // BUBBlE_SORT,
+    // HEAP_SORT,
+    QUICK_SORT_PIVOT_FIRST,
+    QUICK_SORT_PIVOT_MIDDLE,
+    QUICK_SORT_PIVOT_LAST,
+    QUICK_SORT_PIVOT_RANDOM,
+    QUICK_SORT_PIVOT_MEDIAN_OF_3,
+    QUICK_SORT_PIVOT_MEDIAN_OF_3_RANDOM,
 };
-
-const ORDER = struct {
-    const A_GREATER_THAN_B: u3 = 0b001;
-    const A_EQUALS_B: u3 = 0b010;
-    const A_LESS_THAN_B: u3 = 0b100;
-    const A_GREATER_THAN_OR_EQUAL_TO_B: u3 = 0b011;
-    const A_LESS_THAN_OR_EQUAL_TO_B: u3 = 0b110;
-};
-
-// /// A function that, when given two values of the same type,
-// /// returns `true` if `a > b`, for the purposes of sorting order
-// pub const AnyGreaterThanFunc = fn (a: anytype, b: anytype) bool;
-
-// pub const COMPARE_RESULT = enum {
-//     A_LESS_THAN_B,
-//     A_EQUALS_B,
-//     A_GREATER_THAN_B,
-// };
-
-fn make_default_compare_funcs(comptime T: type) type {
-    return struct {
-        fn greater_than(a: T, b: T) bool {
-            return a > b;
-        }
-        fn less_than(a: T, b: T) bool {
-            return a < b;
-        }
-        fn greater_than_or_equal_to(a: T, b: T) bool {
-            return a >= b;
-        }
-        fn less_than_or_equal_to(a: T, b: T) bool {
-            return a <= b;
-        }
-        fn equal_to(a: T, b: T) bool {
-            return a == b;
-        }
-    };
-}
 
 pub const ListOptions = struct {
     element_type: type,
+    order_value_type: ?type = null,
+    order_value_func_struct: ?type = null,
     allocator: *const Allocator,
     alignment: ?u29 = null,
     alloc_error_behavior: AllocErrorBehavior = .ALLOCATION_ERRORS_PANIC,
     growth_model: GrowthModel = .GROW_BY_50_PERCENT_WITH_ATOMIC_PADDING,
     index_type: type = usize,
     secure_wipe_bytes: bool = false,
-    /// This MUST be a struct type with the following methods:
-    /// ```
-    /// fn greater_than(a: T, b: T) bool {
-    ///     // Your implementation, for example "return a > b;"
-    /// }
-    /// fn less_than(a: T, b: T) bool {
-    ///     // Your implementation, for example "return a < b;"
-    /// }
-    /// fn greater_than_or_equal_to(a: T, b: T) bool {
-    ///     // Your implementation, for example "return a >= b;"
-    /// }
-    /// fn less_than_or_equal_to(a: T, b: T) bool {
-    ///     // Your implementation, for example "return a <= b;"
-    /// }
-    /// fn equal_to(a: T, b: T) bool {
-    ///     // Your implementation, for example "return a == b;"
-    /// }
-    /// ```
-    comparison_functions: ?type = null,
     default_sorting_algorithm: SortAlgorithm = SortAlgorithm.QUICK_SORT_PIVOT_MEDIAN_OF_3,
 };
 
@@ -120,6 +70,9 @@ pub fn define_list_type(comptime options: ListOptions) type {
         cap: Idx = 0,
 
         pub const T: type = opt.element_type;
+        const CAN_SORT = opt.order_value_type != null and opt.order_value_func_struct != null and @hasDecl(opt.order_value_func_struct, "func");
+        const ORDER_TYPE = opt.order_value_type;
+        const ORDER_FUNC: if (CAN_SORT) fn (element: *const T) ORDER_TYPE else void = if (CAN_SORT) opt.order_value_func_struct.func else void{};
         pub const Idx: type = opt.index_type;
         pub const Ptr: type = if (ALIGN) |a| [*]align(a) T else [*]T;
         pub const Error = Allocator.Error;
@@ -669,129 +622,24 @@ pub fn define_list_type(comptime options: ListOptions) type {
             }
         }
 
-        /// A function that takes two values and returns a `u3` result with one of the following values:
-        /// - `1` (`0b001`) if `a > b`
-        /// - `2` (`0b010`) if `a == b`
-        /// - `4` (`0b100`) if `a < b`
-        pub const OrderValueFunc = fn (a: T, b: T) u3;
-
-        pub fn sort(self: *List, comptime optional_compare_funcs: ?type) void {
-            if (optional_compare_funcs) |compare_funcs| {
-                self.custom_sort(compare_funcs, DEFAULT_SORT);
-            } else {
-                const default_compare = make_default_compare_funcs(T);
-                self.custom_sort(default_compare, DEFAULT_SORT);
-            }
+        pub inline fn sort(self: *List) void {
+            self.custom_sort(DEFAULT_SORT);
         }
 
-        pub fn custom_sort(self: *List, comptime compare_funcs: type, comptime algorithm: SortAlgorithm) void {
+        pub fn custom_sort(self: *List, comptime algorithm: SortAlgorithm) void {
+            if (!CAN_SORT) unreachable;
             if (self.len == 0) return;
             switch (algorithm) {
                 // SortAlgorithm.BUBBlE_SORT => {},
                 // SortAlgorithm.HEAP_SORT => {},
-                SortAlgorithm.QUICK_SORT_PIVOT_FIRST,
-                SortAlgorithm.QUICK_SORT_PIVOT_LAST,
-                SortAlgorithm.QUICK_SORT_PIVOT_MIDDLE,
-                SortAlgorithm.QUICK_SORT_PIVOT_RANDOM,
-                SortAlgorithm.QUICK_SORT_PIVOT_MEDIAN_OF_3,
-                SortAlgorithm.QUICK_SORT_PIVOT_MEDIAN_OF_3_RANDOM,
-                => {
-                    self.quicksort_recurse(compare_funcs, algorithm, 0, self.len - 1);
-                },
+                SortAlgorithm.QUICK_SORT_PIVOT_FIRST => Root.Algorithms.Quicksort.quicksort(T, ORDER_TYPE, ORDER_FUNC, Root.Algorithms.Quicksort.Pivot.FIRST, self.ptr[0..self.len]),
+                SortAlgorithm.QUICK_SORT_PIVOT_LAST => Root.Algorithms.Quicksort.quicksort(T, ORDER_TYPE, ORDER_FUNC, Root.Algorithms.Quicksort.Pivot.LAST, self.ptr[0..self.len]),
+                SortAlgorithm.QUICK_SORT_PIVOT_MIDDLE => Root.Algorithms.Quicksort.quicksort(T, ORDER_TYPE, ORDER_FUNC, Root.Algorithms.Quicksort.Pivot.MIDDLE, self.ptr[0..self.len]),
+                SortAlgorithm.QUICK_SORT_PIVOT_RANDOM => Root.Algorithms.Quicksort.quicksort(T, ORDER_TYPE, ORDER_FUNC, Root.Algorithms.Quicksort.Pivot.RANDOM, self.ptr[0..self.len]),
+                SortAlgorithm.QUICK_SORT_PIVOT_MEDIAN_OF_3 => Root.Algorithms.Quicksort.quicksort(T, ORDER_TYPE, ORDER_FUNC, Root.Algorithms.Quicksort.Pivot.MEDIAN_OF_3, self.ptr[0..self.len]),
+                SortAlgorithm.QUICK_SORT_PIVOT_MEDIAN_OF_3_RANDOM => Root.Algorithms.Quicksort.quicksort(T, ORDER_TYPE, ORDER_FUNC, Root.Algorithms.Quicksort.Pivot.MEDIAN_OF_3_RANDOM, self.ptr[0..self.len]),
             }
         }
-
-        // inline fn inline_swap(a: *T, b: *T, temp: *T) void {
-        //     temp.* = a.*;
-        //     a.* = b.*;
-        //     b.* = temp.*;
-        // }
-
-        // inline fn simple_rand_idx(min: Idx, max: Idx) Idx {
-        //     const range = max - min;
-        //     return (@as(Idx, @truncate(@as(u64, @bitCast(std.time.microTimestamp())))) % range) + min;
-        // }
-
-        // inline fn simple_3_rand_idx(min: Idx, max: Idx) [3]Idx {
-        //     const range = max - min;
-        //     const time = @as(u64, @bitCast(std.time.microTimestamp()));
-        //     return [3]Idx{
-        //         @as(Idx, @truncate((time % range) + min)),
-        //         @as(Idx, @truncate(((time + 1) % range) + min)),
-        //         @as(Idx, @truncate(((time + 2) % range) + min)),
-        //     };
-        // }
-
-        // fn quicksort_recurse(self: *List, comptime compare: type, comptime algorithm: SortAlgorithm, lo: Idx, hi: Idx) void {
-        //     if (lo >= hi) return;
-        //     const pivot_idx = self.quicksort_partition(compare, algorithm, lo, hi);
-        //     if (pivot_idx > 0) self.quicksort_recurse(compare, algorithm, lo, pivot_idx - 1);
-        //     self.quicksort_recurse(compare, algorithm, pivot_idx + 1, hi);
-        //     // if (lo >= 0 and hi >= 0 and lo < hi) {
-        //     //     const pivot_idx = self.quicksort_partition(compare, algorithm, lo, hi);
-        //     //     self.quicksort_recurse(compare, algorithm, lo, pivot_idx);
-        //     //     self.quicksort_recurse(compare, algorithm, pivot_idx + 1, hi);
-        //     // }
-        // }
-
-        // fn quicksort_partition(self: *List, comptime compare: type, comptime algorithm: SortAlgorithm, lo: Idx, hi: Idx) Idx {
-        //     var temp: T = undefined;
-        //     const pivot_idx = switch (algorithm) {
-        //         SortAlgorithm.QUICK_SORT_PIVOT_FIRST => lo,
-        //         SortAlgorithm.QUICK_SORT_PIVOT_LAST => hi,
-        //         SortAlgorithm.QUICK_SORT_PIVOT_MIDDLE => ((hi - lo) >> 1) + lo,
-        //         SortAlgorithm.QUICK_SORT_PIVOT_RANDOM => simple_rand_idx(lo, hi),
-        //         SortAlgorithm.QUICK_SORT_PIVOT_MEDIAN_OF_3 => calc: {
-        //             const mid = ((hi - lo) >> 1) + lo;
-        //             if (compare.less_than(self.ptr[mid], self.ptr[lo])) inline_swap(&self.ptr[mid], &self.ptr[lo], &temp);
-        //             if (compare.less_than(self.ptr[hi], self.ptr[lo])) inline_swap(&self.ptr[hi], &self.ptr[lo], &temp);
-        //             if (compare.less_than(self.ptr[mid], self.ptr[hi])) inline_swap(&self.ptr[mid], &self.ptr[hi], &temp);
-        //             if (builtin.mode == .Debug) switch (@typeInfo(T)) {
-        //                 .int, .float, .comptime_int, .comptime_float => {
-        //                     assert(self.ptr[hi] < self.ptr[mid]);
-        //                     assert(self.ptr[lo] < self.ptr[hi]);
-        //                 },
-        //                 else => {},
-        //             };
-
-        //             break :calc hi;
-        //         },
-        //         SortAlgorithm.QUICK_SORT_PIVOT_MEDIAN_OF_3_RANDOM => calc: {
-        //             const idx_arr = simple_3_rand_idx(lo, hi);
-        //             if (compare.less_than(self.ptr[idx_arr[1]], self.ptr[idx_arr[0]])) inline_swap(&self.ptr[idx_arr[1]], &self.ptr[idx_arr[0]], &temp);
-        //             if (compare.less_than(self.ptr[idx_arr[2]], self.ptr[idx_arr[0]])) inline_swap(&self.ptr[idx_arr[2]], &self.ptr[idx_arr[0]], &temp);
-        //             if (compare.less_than(self.ptr[idx_arr[1]], self.ptr[idx_arr[2]])) inline_swap(&self.ptr[idx_arr[1]], &self.ptr[idx_arr[2]], &temp);
-        //             if (builtin.mode == .Debug) switch (@typeInfo(T)) {
-        //                 .int, .float, .comptime_int, .comptime_float => {
-        //                     assert(self.ptr[idx_arr[2]] <= self.ptr[idx_arr[1]]);
-        //                     assert(self.ptr[idx_arr[0]] <= self.ptr[idx_arr[2]]);
-        //                 },
-        //                 else => {},
-        //             };
-        //             break :calc idx_arr[2];
-        //         },
-        //     };
-        //     const pivot_val = self.ptr[pivot_idx];
-        //     // var greater_than_pivot: Idx = lo;
-        //     // var lesser_than_pivot: Idx = lo;
-        //     // while (lesser_than_pivot < hi) : (lesser_than_pivot += 1) {
-        //     //     if (compare.less_than_or_equal_to(self.ptr[lesser_than_pivot], pivot_val)) {
-        //     //         inline_swap(&self.ptr[lesser_than_pivot], &self.ptr[greater_than_pivot], &temp);
-        //     //         greater_than_pivot += 1;
-        //     //     }
-        //     // }
-        //     // inline_swap(&self.ptr[greater_than_pivot], &self.ptr[pivot_idx], &temp);
-        //     // return greater_than_pivot;
-        //     var left: Idx = lo;
-        //     var right: Idx = hi;
-        //     while (true) {
-        //         // std.debug.print("min: 0, left: {d}, right: {d}, max: {d}\n", .{ left, right, self.len - 1 });
-        //         while (compare.less_than(self.ptr[left], pivot_val)) left += 1;
-        //         while (compare.greater_than(self.ptr[right], pivot_val)) right -= 1;
-        //         if (left >= right) return right;
-        //         inline_swap(&self.ptr[left], &self.ptr[right], &temp);
-        //     }
-        // }
 
         fn handle_alloc_error(err: Allocator.Error) if (RETURN_ERRORS) Error else noreturn {
             switch (ALLOC_ERROR_BEHAVIOR) {
@@ -803,23 +651,19 @@ pub fn define_list_type(comptime options: ListOptions) type {
     };
 }
 
-pub const SortAlgorithm = enum {
-    // BUBBlE_SORT,
-    // HEAP_SORT,
-    QUICK_SORT_PIVOT_FIRST,
-    QUICK_SORT_PIVOT_MIDDLE,
-    QUICK_SORT_PIVOT_LAST,
-    QUICK_SORT_PIVOT_RANDOM,
-    QUICK_SORT_PIVOT_MEDIAN_OF_3,
-    QUICK_SORT_PIVOT_MEDIAN_OF_3_RANDOM,
-};
-
 test "Does it basically work?" {
     const t = std.testing;
     const alloc = std.heap.page_allocator;
+    const order = struct {
+        fn func(element: *const u8) u8 {
+            return element.*;
+        }
+    };
     const Options = ListOptions{
         .alloc_error_behavior = .ALLOCATION_ERRORS_PANIC,
         .element_type = u8,
+        .order_value_type = u8,
+        .order_value_func_struct = order,
         .index_type = u32,
         .allocator = &alloc,
     };
@@ -833,22 +677,4 @@ test "Does it basically work?" {
     list.append(' ');
     list.append_slice("World!");
     try t.expectEqualStrings("Hello World!", list.slice());
-}
-
-test "sort" {
-    const t = std.testing;
-    const alloc = std.heap.page_allocator;
-    const Options = ListOptions{
-        .alloc_error_behavior = .ALLOCATION_ERRORS_PANIC,
-        .element_type = u32,
-        .index_type = u32,
-        .allocator = &alloc,
-        .default_sorting_algorithm = SortAlgorithm.QUICK_SORT_PIVOT_MEDIAN_OF_3_RANDOM,
-    };
-    const List = define_list_type(Options);
-    const compare_funcs = make_default_compare_funcs(u32);
-    var list = List.new_empty();
-    list.append_slice(&.{ 42, 1, 33, 99, 5, 10, 11 });
-    list.custom_sort(compare_funcs, SortAlgorithm.QUICK_SORT_PIVOT_MEDIAN_OF_3_RANDOM);
-    try t.expectEqualSlices(u32, &.{ 1, 5, 10, 11, 33, 42, 99 }, list.slice());
 }
