@@ -7,36 +7,13 @@ const crypto = std.crypto;
 const Allocator = std.mem.Allocator;
 const ArrayListUnmanaged = std.ArrayListUnmanaged;
 const ArrayList = std.ArrayListUnmanaged;
+const Type = std.builtin.Type;
 
 const Root = @import("./_root.zig");
 
-pub const AllocErrorBehavior = enum {
-    ALLOCATION_ERRORS_RETURN_ERROR,
-    ALLOCATION_ERRORS_PANIC,
-    ALLOCATION_ERRORS_ARE_UNREACHABLE,
-};
-
-pub const GrowthModel = enum {
-    GROW_EXACT_NEEDED,
-    GROW_EXACT_NEEDED_WITH_ATOMIC_PADDING,
-    GROW_BY_100_PERCENT,
-    GROW_BY_100_PERCENT_WITH_ATOMIC_PADDING,
-    GROW_BY_50_PERCENT,
-    GROW_BY_50_PERCENT_WITH_ATOMIC_PADDING,
-    GROW_BY_25_PERCENT,
-    GROW_BY_25_PERCENT_WITH_ATOMIC_PADDING,
-};
-
-pub const SortAlgorithm = enum {
-    // BUBBlE_SORT,
-    // HEAP_SORT,
-    QUICK_SORT_PIVOT_FIRST,
-    QUICK_SORT_PIVOT_MIDDLE,
-    QUICK_SORT_PIVOT_LAST,
-    QUICK_SORT_PIVOT_RANDOM,
-    QUICK_SORT_PIVOT_MEDIAN_OF_3,
-    QUICK_SORT_PIVOT_MEDIAN_OF_3_RANDOM,
-};
+const AllocErrorBehavior = Root.CommonTypes.AllocErrorBehavior;
+const GrowthModel = Root.CommonTypes.GrowthModel;
+const SortAlgorithm = Root.CommonTypes.SortAlgorithm;
 
 pub const ListOptions = struct {
     element_type: type,
@@ -64,6 +41,7 @@ pub fn define_list_type(comptime options: ListOptions) type {
     if (opt.alignment) |a| {
         if (!math.isPowerOfTwo(a)) @panic("alignment must be a power of 2");
     }
+    if (@typeInfo(opt.index_type) != Type.int or @typeInfo(opt.index_type).int.signedness != .unsigned) @panic("index_type must be an unsigned integer type");
     return struct {
         ptr: Ptr = UNINIT_PTR,
         len: Idx = 0,
