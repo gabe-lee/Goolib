@@ -1,5 +1,9 @@
 const std = @import("std");
+const mem = std.mem;
 const assert = std.debug.assert;
+
+const Root = @import("root");
+const BinarySearch = Root.Algorithms.BinarySearch;
 
 pub inline fn inline_swap(comptime T: type, a: *T, b: *T, temp: *T) void {
     temp.* = a.*;
@@ -46,3 +50,28 @@ pub const RANDOM_U64_TABLE = [_]u64{
     0xf1f4dce921a05b8d,
     0x13a3a109aca5ae7d,
 };
+
+pub fn is_valid_value_for_enum(comptime ENUM_TYPE: type, int_value: anytype) bool {
+    const enum_info = @typeInfo(ENUM_TYPE).@"enum";
+    if (!enum_info.is_exhaustive) {
+        if (std.math.cast(enum_info.tag_type, int_value) == null) return false;
+        return true;
+    }
+
+    const ordered_values = comptime make: {
+        var arr: [enum_info.fields.len]enum_info.tag_type = undefined;
+        var len: usize = 0;
+        while (len < enum_info.fields.len) : (len += 1) {
+            const ins_idx = BinarySearch.simple_binary_search_insert_index(enum_info.tag_type, false, arr[0..len], enum_info.fields[len].value);
+            mem.copyBackwards(enum_info.tag_type, arr[ins_idx + 1 .. len + 1], arr[ins_idx..len]);
+            arr[ins_idx] = enum_info.fields[len].value;
+        }
+        break :make arr;
+    };
+
+    if (BinarySearch.simple_binary_search(enum_info.tag_type, ordered_values[0..], int_value) == null) return false;
+    return true;
+}
+
+
+

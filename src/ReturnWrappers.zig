@@ -1,20 +1,5 @@
 const Root = @import("root");
 
-// pub const Result = enum(u8) {
-//     failure = 0,
-//     success = 1,
-
-//     pub inline fn is_success(self: Result) bool {
-//         return self == .success;
-//     }
-//     pub inline fn is_failure(self: Result) bool {
-//         return self == .failure;
-//     }
-//     pub inline fn from_bool(val: bool) Result {
-//         return @enumFromInt(@as(u8, @intCast(@intFromBool(val))));
-//     }
-// };
-
 pub const OptionalTag = enum(u8) {
     none = 0,
     val = 1,
@@ -26,6 +11,7 @@ pub fn Optional(comptime TYPE: type) type {
         val: TYPE,
 
         const Self = @This();
+        pub const T_VAL = TYPE;
 
         pub inline fn new_none() Self {
             return Self{ .none = void{} };
@@ -56,6 +42,8 @@ pub fn Result(comptime VAL_TYPE: type, comptime ERR_TYPE: type) type {
         val: VAL_TYPE,
 
         const Self = @This();
+        pub const T_ERR = ERR_TYPE;
+        pub const T_VAL = VAL_TYPE;
 
         pub inline fn new_err(err: ERR_TYPE) Self {
             return Self{ .err = err };
@@ -86,6 +74,7 @@ pub fn Success(comptime ERR_TYPE: type) type {
         ok: void,
 
         const Self = @This();
+        pub const T_ERR = ERR_TYPE;
 
         pub inline fn new_err(err: ERR_TYPE) Self {
             return Self{ .failure = err };

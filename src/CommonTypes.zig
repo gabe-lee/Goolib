@@ -1,3 +1,6 @@
+const std = @import("std");
+const build = @import("builtin");
+
 pub const PointOrientation = enum {
     COLINEAR,
     WINDING_CCW,
@@ -31,3 +34,5 @@ pub const SortAlgorithm = enum {
     QUICK_SORT_PIVOT_MEDIAN_OF_3,
     QUICK_SORT_PIVOT_MEDIAN_OF_3_RANDOM,
 };
+
+

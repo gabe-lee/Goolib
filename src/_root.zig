@@ -21,6 +21,7 @@ pub const IO = struct {
 pub const Generic = struct {
     pub const ReturnWrappers = @import("./ReturnWrappers.zig");
 };
+pub const Bytes = @import("./Bytes.zig");
 pub const Utils = @import("./Utils.zig");
 pub const Math = @import("./Math.zig");
 pub const CommonTypes = @import("./CommonTypes.zig");
