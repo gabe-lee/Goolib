@@ -6,170 +6,142 @@ const math = std.math;
 const meta = std.meta;
 const mem = std.mem;
 
-const Root = @import("./_root.zig");
-const NumBase = Root.IO.Format.IntBase;
+const Root = @import("root");
+const Bytes = Root.Bytes;
+const WriteError = Root.CommonTypes.WriteError;
+const CopyAdapter = Bytes.CopyAdapter;
+const CopyRange = Bytes.CopyRange;
+const BufferProperties = Bytes.BufferProperties;
+const BufferPropertiesPair = Bytes.BufferPropertiesPair;
 
-const Writer = @This();
+/// A type-erased pointer to the object that implements this interface
+_opaque: *anyopaque,
+/// A function pointer table that matches the minimum required interface functions to their implementations
+_vtable: VTable,
 
-implementation: struct {
-    opaque_ptr: *anyopaque,
-    get_buffer: *const fn (*anyopaque) []u8,
-    get_byte_index: *const fn (*anyopaque) usize,
-    set_byte_index: *const fn (*anyopaque, pos: usize) bool,
-    write_bytes: *const fn (*anyopaque, bytes: []const u8) bool,
-},
-
-pub inline fn get_byte_index(self: *const Writer) usize {
-    return self.implementation.get_byte_index(self.implementation.opaque_ptr);
-}
-
-pub inline fn set_byte_index(self: *const Writer, pos: usize) bool {
-    return self.implementation.set_byte_index(self.implementation.opaque_ptr, pos);
-}
-
-pub inline fn get_buffer(self: *const Writer) []u8 {
-    return self.implementation.get_buffer(self.implementation.opaque_ptr);
-}
-
-pub inline fn get_remaining_buffer(self: *const Writer) []u8 {
-    return self.get_buffer()[self.get_byte_index()..];
-}
-
-pub fn write(self: *Writer, val: anytype, comptime endian: EndianMode) WriteResult {
-    const T = @TypeOf(val);
-    switch (@typeInfo(T)) {
-        .void => return 0,
-        .int, .float, .bool, .@"enum" => {
-            const write_success = self.implementation.write_bytes(self.implementation.opaque_ptr, &to_bytes(T, @sizeOf(T), endian, val));
-            if (write_success) return WriteResult.new_ok();
-            return WriteResult.new_err(WriteErrorKind.buffer_too_short);
-        },
-        .pointer => |ptr_info| {
-            switch (ptr_info.size) {
-                .one => {
-                    return self.write(val.*, endian);
-                },
-                .slice => {
-                    const len = val.len;
-                    var i: usize = 0;
-                    const len_result = self.write(len, endian);
-                    if (len_result.is_err()) return len_result;
-                    while (i < len) : (i += 1) {
-                        const val_result = self.write(val[i], endian);
-                        if (val_result.is_err()) return val_result;
-                    }
-                    return WriteResult.new_ok();
-                },
-                .many, .c => @compileError("Cannot implicitly write `[*]T` or `[*c]T` pointers with an unknown length. Instead manually slice these with a length when writing."),
-            }
-        },
-        .optional => {
-            const tag: u8 = if (val != null) TAG_GOOD else TAG_BAD;
-            const tag_success = self.implementation.write_bytes(self.implementation.opaque_ptr, &[1]u8{tag});
-            if (!tag_success) return WriteResult.new_err(WriteErrorKind.buffer_too_short);
-            if (tag == 0) return WriteResult.new_ok();
-            return self.write(val.?, endian);
-        },
-        .array => |arr| {
-            var i: usize = 0;
-            while (i < arr.len) : (i += 1) {
-                const write_result = self.write(val[i], endian);
-                if (write_result.is_err()) return write_result;
-            }
-            return WriteResult.new_ok();
-        },
-        .vector => |vec| {
-            var i: usize = 0;
-            while (i < vec.len) : (i += 1) {
-                const write_result = self.write(val[i], endian);
-                if (write_result.is_err()) return write_result;
-            }
-            return WriteResult.new_ok();
-        },
-        .error_set => {
-            if (stable_error_write) {
-                const name = @errorName(val);
-                return self.implementation.write_bytes(self.implementation.opaque_ptr, name);
-            } else {
-                const tag = @intFromError(val);
-                const TT = @TypeOf(tag);
-                return self.implementation.write_bytes(self.implementation.opaque_ptr, &to_bytes(TT, @sizeOf(TT), endian, tag));
-            }
-        },
-        .error_union => |err_uni| {
-            if (val) |ok_val| {
-                const tag = 1;
-                var total_bytes = self.implementation.write_bytes(self.implementation.opaque_ptr, &[1]u8{tag});
-                total_bytes += self.write_complete(endian, follow_pointer_depth, stable_error_write, err_uni.payload, ok_val);
-                return total_bytes;
-            } else |err_val| {
-                const tag = 0;
-                var total_bytes = self.implementation.write_bytes(self.implementation.opaque_ptr, &[1]u8{tag});
-                const e_tag = @intFromError(err_val);
-                const TT = @TypeOf(e_tag);
-                total_bytes += self.implementation.write_bytes(self.implementation.opaque_ptr, &to_bytes(TT, @sizeOf(TT), endian, e_tag));
-                return total_bytes;
-            }
-        },
-        .@"union" => {
-            switch (val) {
-                inline else => |inner_val, tag| {
-                    const TT = @TypeOf(tag);
-                    var total_bytes = self.implementation.write_bytes(self.implementation.opaque_ptr, &to_bytes(TT, @sizeOf(TT), endian, tag));
-                    total_bytes += self.write_complete(endian, follow_pointer_depth, stable_error_write, @TypeOf(inner_val), inner_val);
-                    return total_bytes;
-                },
-            }
-        },
-        .@"struct" => |struct_info| {
-            var total_bytes: usize = 0;
-            inline for (struct_info.fields) |field| {
-                total_bytes += self.write_complete(endian, follow_pointer_depth, stable_error_write, field.type, @field(val, field.type));
-            }
-        },
-        .comptime_int, .comptime_float => @compileError("Types comptime_int and comptime_float must be explicitly cast to a concrete type to write"),
-        else => @compileError("Type " ++ @typeName(T) ++ " has no write procedure."),
-    }
-}
-
-fn to_bytes(comptime T: type, comptime N: comptime_int, comptime E: EndianMode, val: T) [N]u8 {
-    var raw: [N]u8 = @bitCast(val);
-    if (N == 1 or E.is_native()) return raw;
-    var left: usize = 0;
-    var right: usize = N - 1;
-    var temp: u8 = 0;
-    while (left < right) {
-        temp = raw[left];
-        raw[left] = raw[right];
-        raw[right] = temp;
-        left += 1;
-        right -= 1;
-    }
-    return raw;
-}
-
-// pub const WriteResult = Root.Generic.ReturnWrappers.Result(usize, WriteErrorKind);
-pub const WriteResult = Root.Generic.ReturnWrappers.Success(WriteErrorKind);
-pub const WriteErrorKind = enum(u8) {
-    buffer_too_short = 0,
+/// A function pointer table that matches the minimum required interface functions to their implementations
+pub const VTable = struct {
+    /// Attempt to obtain a slice that can hold at least `count` bytes to write into
+    ///
+    /// If the full slice size cannot be returned by the implementation, it should return
+    /// a zero-length slice instead and NOT advance the write position
+    try_get_write_slice: *const fn (_opaque: *anyopaque, byte_count: usize) []u8,
 };
-// pub const WriteError = union(WriteErrorKind) {
-//     buffer_too_short: WriteErrorTooShort,
 
-//     pub inline fn new_too_short_err(pos: usize, needed: usize, available: usize) WriteError {
-//         return WriteError{ .buffer_too_short = WriteErrorTooShort{
-//             .pos = pos,
-//             .needed_bytes = needed,
-//             .available_bytes = available,
-//         } };
-//     }
-// };
-// pub const WriteErrorTooShort = struct {
-//     pos: usize,
-//     needed_bytes: usize,
-//     available_bytes: usize,
-// };
-pub const NATIVE_ENDIAN = Root.CommonTypes.NATIVE_ENDIAN;
-pub const EndianMode = Root.CommonTypes.EndianMode;
-const TAG_GOOD = 1;
-const TAG_BAD = 0;
+const ByteWriter = @This();
+
+/// Create a `CopyAdapter`, used for writing a _specific_ type to a buffer with the specified `write_buffer_properties`
+///
+/// All write operations *require* one of these adapters as a parameter
+pub fn make_type_adapter(comptime T: type, comptime write_buffer_properties: BufferProperties) CopyAdapter {
+    return CopyAdapter.from_type_and_buffer_properties(T, BufferProperties{}, write_buffer_properties);
+}
+
+/// Create a `CopyRange` with a runtime-known `element_count` and comptime `CopyAdapter`
+///
+/// All write operations *require* one of these ranges as a parameter
+pub fn make_range(element_count: usize, comptime type_adapter: CopyAdapter) CopyRange {
+    return CopyRange.from_count_and_adapter(element_count, type_adapter);
+}
+/// Create a `CopyRange` with a comptime-known `element_count` and comptime `CopyAdapter`
+///
+/// All write operations *require* one of these ranges as a parameter
+pub fn make_comptime_range(comptime element_count: usize, comptime type_adapter: CopyAdapter) CopyRange {
+    return comptime CopyRange.from_count_and_adapter(element_count, type_adapter);
+}
+
+pub fn write_range(self: *ByteWriter, comptime type_adapter: CopyAdapter, range: CopyRange, source: anytype) WriteError!void {
+    const src_type = @TypeOf(source);
+    const src_raw: []u8 = undefined;
+    switch (src_type) {
+        *const type_adapter.element_type, *type_adapter.element_type => {
+            const src_raw_len: usize = @sizeOf(type_adapter.element_type);
+            const src_raw_ptr: [*]u8 = @ptrCast(@alignCast(source));
+            src_raw = src_raw_ptr[0..src_raw_len];
+        },
+        []const type_adapter.element_type, []type_adapter.element_type => {
+            const src_raw_len: usize = source.len * @sizeOf(type_adapter.element_type);
+            const src_raw_ptr: [*]u8 = @ptrCast(@alignCast(source));
+            src_raw = src_raw_ptr[0..src_raw_len];
+        },
+        type_adapter.element_type => {
+            const src_raw_len: usize = @sizeOf(type_adapter.element_type);
+            const src_raw_ptr: [*]u8 = @ptrCast(@alignCast(&source));
+            src_raw = src_raw_ptr[0..src_raw_len];
+        },
+        else => @compileError("`source` must be one of the following types:\n\t[]T, []const T, *T, *const T, T\nwhere T == `type_adapter.element_type`"),
+    }
+    if (src_raw.len < range.total_read_len) return WriteError.source_too_short_for_given_range;
+    const write_slice = self._vtable.try_get_write_slice(self._opaque, range.total_write_len);
+    if (write_slice.len < range.total_write_len) return WriteError.write_buffer_too_short;
+    Bytes.copy_elements_with_range(write_slice, src_raw, range, type_adapter);
+    return;
+}
+
+pub fn write_comptime_range(self: *ByteWriter, comptime type_adapter: CopyAdapter, comptime range: CopyRange, source: anytype) WriteError!void {
+    const src_type = @TypeOf(source);
+    const src_raw: []u8 = undefined;
+    switch (src_type) {
+        *const type_adapter.element_type, *type_adapter.element_type => {
+            const src_raw_len: usize = @sizeOf(type_adapter.element_type);
+            const src_raw_ptr: [*]u8 = @ptrCast(@alignCast(source));
+            src_raw = src_raw_ptr[0..src_raw_len];
+        },
+        []const type_adapter.element_type, []type_adapter.element_type => {
+            const src_raw_len: usize = source.len * @sizeOf(type_adapter.element_type);
+            const src_raw_ptr: [*]u8 = @ptrCast(@alignCast(source));
+            src_raw = src_raw_ptr[0..src_raw_len];
+        },
+        type_adapter.element_type => {
+            const src_raw_len: usize = @sizeOf(type_adapter.element_type);
+            const src_raw_ptr: [*]u8 = @ptrCast(@alignCast(&source));
+            src_raw = src_raw_ptr[0..src_raw_len];
+        },
+        else => @compileError("`source` must be one of the following types:\n\t[]T, []const T, *T, *const T, T\nwhere T == `type_adapter.element_type`"),
+    }
+    if (src_raw.len < range.total_read_len) return WriteError.source_too_short_for_given_range;
+    const write_slice = self._vtable.try_get_write_slice(self._opaque, range.total_write_len);
+    if (write_slice.len < range.total_write_len) return WriteError.write_buffer_too_short;
+    Bytes.copy_elements_with_comptime_range(write_slice, src_raw, range, type_adapter);
+    return;
+}
+
+/// A simple implementation of the ByteWriter interface
+///
+/// This implementation has no special features, cannot expand its size,
+/// and may be invalidated if another function causes the original memory to relocate or shrink
+pub const SimpleByteWriter = struct {
+    buffer: []u8,
+    write_pos: usize,
+
+    /// Instantiate a new SimpleByteWriter using the provided buffer.
+    pub fn new(initial_buffer: []const u8) SimpleByteWriter {
+        return SimpleByteWriter{
+            .buffer = initial_buffer,
+            .write_pos = 0,
+        };
+    }
+
+    pub fn reset(self: *SimpleByteWriter) void {
+        self.write_pos = 0;
+    }
+
+    /// Get the actual ByteWriter interface object
+    pub fn byte_reader(self: *SimpleByteWriter) ByteWriter {
+        return ByteWriter{
+            ._opaque = @ptrCast(self),
+            ._vtable = VTable{
+                .try_get_write_slice = try_get_write_slice,
+            },
+        };
+    }
+
+    fn try_get_write_slice(self_opaque: *anyopaque, byte_count: usize) []u8 {
+        const self: *SimpleByteWriter = @ptrCast(@alignCast(self_opaque));
+        if (self.buffer.len - self.write_pos < byte_count) return &.{};
+        const new_write_pos = self.write_pos + byte_count;
+        const slice = self.buffer[self.write_pos..new_write_pos];
+        self.write_pos = new_write_pos;
+        return slice;
+    }
+};

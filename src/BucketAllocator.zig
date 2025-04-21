@@ -53,16 +53,6 @@ pub const Options = struct {
     ///
     /// It provides no additional behavioral functionality or performance.
     track_allocation_statistics: bool = false,
-    // /// If enabled, allows the allocator to recycle slabs of the same size between different buckets with the same slab size,
-    // /// as long as the slab is entirely unused.
-    // ///
-    // /// `MANUAL_ONLY` and `AUTOMATIC_RATIO` add a small memory footprint to the allocator, and very small processing overhead to allocation requests,
-    // /// but allows the user to call a function to look for entire free slabs that can be recycled between buckets of the same slab size
-    // ///
-    // /// `AUTOMATIC_RATIO` allows the allocator to attempt to find and recycle entire free slabs when a `free` operation
-    // /// puts the ratio of free_blocks to block_per_slab over the specified limit, but adds additional processing overhead to all
-    // /// free requests
-    // slab_recycling: SlabRecycling = .DISABLED,
     /// How likely it is for this allocator to get an allocation request greater than the largest block size
     hint_large_allocation: Hint = Hint.UNKNOWN,
     /// How likely is it that a free block will exist for any given bucket
@@ -73,32 +63,6 @@ pub const Options = struct {
     /// How often you plan on using the provided usage statistic logging function
     hint_log_usage_statistics: Hint = Hint.ALMOST_NEVER,
 };
-
-// pub const SlabRecycling = union(enum) {
-//     /// Do not allow recycling entire free slabs
-//     ///
-//     /// (blocks are still recycled within their own bucket)
-//     DISABLED,
-//     /// Enable manual slab recycling.
-//     ///
-//     /// Free block list is only checked for entire free slabs when the function to do so is called by the user
-//     MANUAL_ONLY,
-//     /// Enable manual and automatic slab recycling.
-//     ///
-//     /// Free slabs are checked and pooled when `bucket_free_blocks / blocks_per_slab >= pool_ratio`
-//     ///
-//     /// Free slabs are checked and freed when `bucket_free_blocks / blocks_per_slab >= free_ratio`
-//     ///
-//     /// Both ratios must be >= 1.0 and `free_ratio` must be >= `pool_ratio`
-//     AUTOMATIC: struct {
-//         /// When `bucket_free_blocks / blocks_per_slab >= pool_ratio` the allocator will be checked for
-//         /// any entirely free slabs and they will be returned to the slab pool
-//         pool_ratio: f32,
-//         /// When `bucket_free_blocks / blocks_per_slab >= free_ratio` the allocator will be checked for
-//         /// any entirely free slabs and they will freed
-//         free_ratio: f32,
-//     },
-// };
 
 /// How often you, the user, predict a specific case will occur given your application use case
 ///
@@ -279,13 +243,6 @@ pub const AllocSize = enum(Log2Usize) {
     }
 };
 
-// pub const ErrorBehavior = enum {
-//     RETURN_FAIL_VALUE,
-//     LOG_AND_RETURN_FAIL_VALUE,
-//     PANIC,
-//     UNREACHABLE,
-// };
-
 pub const LargeAllocBehavior = enum {
     USE_PAGE_ALLOCATOR,
     PANIC,
@@ -426,7 +383,6 @@ pub fn define_allocator(comptime options: Options) type {
         first_brand_new_block_by_bucket: [BUCKET_COUNT]Address = @splat(0),
         brand_new_block_count_by_bucket: [BUCKET_COUNT]Idx = @splat(0),
         stats: AllocStats = AllocStats{},
-        // slabs: SlabList = SlabList{},
 
         const QuickAlloc = @This();
         const BUCKET_COUNT = buckets.len;
@@ -450,10 +406,6 @@ pub fn define_allocator(comptime options: Options) type {
         const STAT_LOG_HINT = options.hint_log_usage_statistics.to_hint();
         const TRACK_STATS = options.track_allocation_statistics;
         const BUCKET_IDX_TO_SLAB_IDX = const_bucket_to_slab_mapping;
-        // const SLAB_RECYCLE = options.slab_recycling == .MANUAL_ONLY or options.slab_recycling == .AUTOMATIC;
-        // const SLAB_RECYCLE_AUTO = options.slab_recycling == .AUTOMATIC;
-        // const SLAB_RECYCLE_POOL_RATIO = if (SLAB_RECYCLE_AUTO) options.slab_recycling.AUTOMATIC.pool_ratio else 1.0;
-        // const SLAB_RECYCLE_FREE_RATIO = if (SLAB_RECYCLE_AUTO) options.slab_recycling.AUTOMATIC.free_ratio else 1.0;
         const MSG_LARGE_ALLOCATION = "Large allocation: largest bucket size is " ++ @tagName(@as(AllocSize, @enumFromInt(LARGEST_BLOCK_SIZE_LOG2))) ++ ", but the requested allocation would require a bucket size of {s}";
         const MSG_LARGE_RESIZE = "Large resize/remap: largest bucket size is " ++ @tagName(@as(AllocSize, @enumFromInt(LARGEST_BLOCK_SIZE_LOG2))) ++ ", but either the old memory allocation ({s}) or the new memory allocation ({s}) would exceed this limit";
         const MSG_LARGE_FREE = "Large free: largest bucket size is " ++ @tagName(@as(AllocSize, @enumFromInt(LARGEST_BLOCK_SIZE_LOG2))) ++ ", but the memory provided to free exceeds this limit: {s}";
@@ -479,25 +431,6 @@ pub fn define_allocator(comptime options: Options) type {
             largest_attempted_page_allocator_fallback_resize_delta_grow: if (PAGE_ALLOC) Address else void = if (PAGE_ALLOC) 0 else void{},
             largest_attempted_page_allocator_fallback_resize_delta_shrink: if (PAGE_ALLOC) Address else void = if (PAGE_ALLOC) 0 else void{},
         };
-
-        // const SlabList = if (!SLAB_RECYCLE) void else struct {
-        //     ptr: [*]SlabData = mem.alignBackward(Address, math.maxInt(Address), @alignOf(SlabData)),
-        //     len: Idx = 0,
-        //     cap: Idx = 0,
-        //     current_brand_new_slab_address_by_size: [SLAB_COUNT]Address = @splat(0),
-        //     free_slab_count_by_slab_size: [SLAB_COUNT]Idx = @splat(0),
-        //     first_free_slab_address_by_size: [SLAB_COUNT]Address = @splat(0),
-        // };
-
-        // const SlabData = if (!SLAB_RECYCLE) void else struct {
-        //     address: Address,
-        //     blocks_free: Idx,
-        //     bucket_idx: ConstIdx,
-
-        //     pub fn order(self: *const SlabData) Address {
-        //         return self.address;
-        //     }
-        // };
 
         pub const VTABLE: Allocator.VTable = .{
             .alloc = alloc,
@@ -570,31 +503,7 @@ pub fn define_allocator(comptime options: Options) type {
             }
             const did_recycle_slab = false;
             const block_size = BLOCK_BYTES[bucket_idx];
-            const new_slab_ptr = get_slab: {
-                // if (SLAB_RECYCLE) {
-                //     const slab_idx = BUCKET_IDX_TO_SLAB_IDX[bucket_idx];
-                //     if (self.slabs.free_slab_count_by_slab_size[slab_idx] > 0) {
-                //         self.slabs.free_slab_count_by_slab_size[slab_idx] -= 1;
-                //         const first_free_slab_addr = self.slabs.first_free_slab_by_size[slab_idx];
-                //         const first_free_slab_ptr: *usize = @ptrFromInt(first_free_slab_addr);
-                //         self.slabs.first_free_slab_by_size[slab_idx] = first_free_slab_ptr.*;
-                //         const slab_data = self.find_slab_data_idx_by_address(first_free_slab_addr);
-                //         assert(slab_data.blocks_free == BLOCKS_PER_SLAB[slab_data.bucket_idx]);
-                //         slab_data.blocks_free = 0;
-                //         slab_data.bucket_idx = bucket_idx;
-                //         did_recycle_slab = true;
-                //         var i: usize = 0;
-                //         while (i < self.slabs.len) : (i += 1) {
-                //             if (self.slabs.ptr[i].addr == first_free_slab_addr) {
-                //                 self.slabs.ptr[i].block_size = block_size;
-                //             }
-                //         }
-                //         break :get_slab @as([*]u8, @ptrFromInt(first_free_slab_addr));
-                //     }
-                // }
-                const new_free_slab_ptr = PageAllocator.map(SLAB_BYTES[bucket_idx], bytes_log2_to_alignment(BLOCK_BYTES_LOG2[bucket_idx])) orelse return null;
-                break :get_slab new_free_slab_ptr;
-            };
+            const new_slab_ptr = PageAllocator.map(SLAB_BYTES[bucket_idx], bytes_log2_to_alignment(BLOCK_BYTES_LOG2[bucket_idx])) orelse return null;
             self.first_brand_new_block_by_bucket[bucket_idx] = @intFromPtr(new_slab_ptr) + block_size;
             self.brand_new_block_count_by_bucket[bucket_idx] = LEFTOVER_BLOCKS_PER_SLAB[bucket_idx];
             if (TRACK_STATS) {
@@ -743,111 +652,7 @@ pub fn define_allocator(comptime options: Options) type {
             if (TRACK_STATS) {
                 self.stats.current_blocks_used_by_bucket[bucket_idx] -= 1;
             }
-            // if (SLAB_RECYCLE) {
-            //     const slab_addr = mem.alignBackward(Address, @intFromPtr(memory.ptr), SLAB_BYTES[bucket_idx]);
-            //     const slab_data_idx = self.find_slab_data_idx_by_address(slab_addr);
-            //     const slab_data = &self.slabs.ptr[slab_data_idx];
-            //     assert(slab_data.bucket_idx == bucket_idx);
-            //     slab_data.blocks_free += 1;
-            //     if (SLAB_RECYCLE_AUTO) {
-            //         const ratio: f32 = @as(f32, @floatFromInt(self.recycled_block_count_by_bucket[bucket_idx])) / @as(f32, @floatFromInt(BLOCKS_PER_SLAB[bucket_idx]));
-            //         if (ratio > SLAB_RECYCLE_POOL_RATIO) {
-            //             const slab_size_idx = BUCKET_IDX_TO_SLAB_IDX[bucket_idx];
-            //             if (slab_data.blocks_free == BLOCKS_PER_SLAB[bucket_idx]) {
-            //                 if (ratio > SLAB_RECYCLE_POOL_RATIO) {
-            //                     self.free_and_remove_slab(slab_data_idx);
-            //                 } else {
-            //                     self.slabs.free_slab_count_by_slab_size[slab_const_idx] += 1;
-            //                     var next_free_slab_ptr
-            //                     self.slabs.first_free_slab_address_by_size[slab_size_idx]
-            //                 }
-            //             } else if (self.try_find_entire_free_slab(bucket_idx)) |free_slab_idx| {
-
-            //                 var i: Idx = 0;
-            //                 while (i < self.slabs.free_slab_count_by_slab_size[slab_const_idx]) : (i += 1) {
-
-            //                 }
-            //                 self.slabs.free_slab_count_by_slab_size[BUCKET_IDX_TO_SLAB_IDX[bucket_idx]] -= 1;
-
-            //                 self.free_and_remove_slab(free_slab_idx);
-            //             }
-            //     }
-            // }
         }
-
-        // fn insert_brand_new_slab_data(self: *QuickAlloc, slab_data: SlabData) bool {
-        //     if (!SLAB_RECYCLE) return true;
-        //     var slabs = &self.slabs;
-        //     if (slabs.len == slabs.cap) {
-        //         const old_len: Address = @as(Address, @intCast(slabs.cap)) * @sizeOf(SlabData);
-        //         const new_len = mem.alignForward(Address, old_len, std.heap.pageSize()) + std.heap.pageSize();
-        //         const old_raw_ptr: [*]u8 = @ptrCast(@alignCast(slabs.ptr));
-        //         if (PageAllocator.realloc(old_raw_ptr[old_len], new_len, true)) |new_raw_ptr| {
-        //             slabs.ptr = @ptrCast(@alignCast(new_raw_ptr));
-        //             slabs.cap = new_len / @sizeOf(SlabList);
-        //         } else {
-        //             const new_raw_ptr = PageAllocator.map(new_len, std.heap.page_size_min) orelse return false;
-        //             @memcpy(new_raw_ptr[0..old_len], old_raw_ptr[0..old_len]);
-        //             PageAllocator.unmap(@alignCast(old_raw_ptr[0..old_len]));
-        //             slabs.ptr = @ptrCast(@alignCast(new_raw_ptr));
-        //             slabs.cap = new_len / @sizeOf(SlabList);
-        //         }
-        //     }
-        //     assert(slabs.len < slabs.cap);
-        //     const insert_idx = Root.Algorithms.BinarySearch.binary_search_insert_index(SlabData, Address, SlabData.order, false, slabs.ptr[0..slabs.len], slab_data.address);
-        //     const new_len = slabs.len + 1;
-        //     mem.copyBackwards(SlabData, slabs.ptr[insert_idx + 1 .. new_len], slabs.ptr[insert_idx..slabs.len]);
-        //     slabs.ptr[insert_idx] = slab_data;
-        //     slabs.len = new_len;
-        //     return true;
-        // }
-
-        // fn find_slab_data_idx_by_address(self: *QuickAlloc, address: Address) Idx {
-        //     if (!SLAB_RECYCLE) return @intFromPtr(math.maxInt(usize));
-        //     const slabs = &self.slabs;
-        //     if (Root.Algorithms.BinarySearch.binary_search(SlabData, Address, SlabData.order, slabs.ptr[0..slabs.len], address)) |found_idx| {
-        //         return found_idx;
-        //     }
-        //     unreachable;
-        // }
-
-        // fn free_and_remove_slab(self: *QuickAlloc, slab_idx: Idx) void {
-        //     if (!SLAB_RECYCLE) return;
-        //     var slabs = &self.slabs;
-        //     assert(slab_idx < slabs.len);
-        //     const slab_data = slabs.ptr[slab_idx];
-        //     assert(slab_data.blocks_free == BLOCKS_PER_SLAB[slab_data.bucket_idx]);
-        //     const new_len = slabs.len - 1;
-        //     const raw_ptr: [*]align(std.heap.page_size_min) u8 = @ptrFromInt(slab_data.address);
-        //     const raw_len: Address = @as(Address, @intCast(SLAB_BYTES[slab_data.bucket_idx]));
-        //     PageAllocator.unmap(raw_ptr[0..raw_len]);
-        //     mem.copyForwards(SlabData, slabs.ptr[slab_idx..new_len], slabs.ptr[slab_idx + 1 .. slabs.len]);
-        //     slabs.len -= 1;
-        // }
-
-        // fn free_all_memory(self: *QuickAlloc, comptime panic_if_memory_was_in_use: bool) void {
-        //     if (!SLAB_RECYCLE) return;
-        //     var i: usize = 0;
-        //     var slab_data: SlabData = undefined;
-        //     while (i < self.slabs.len) : (i += 1) {
-        //         slab_data = self.slabs.ptr[i];
-        //         if (panic_if_memory_was_in_use and slab_data.blocks_free != BLOCKS_PER_SLAB[slab_data.bucket_idx]) @panic("attempted to free memory still in use");
-        //         const raw_ptr: [*]align(std.heap.page_size_min) u8 = @ptrFromInt(slab_data.address);
-        //         const raw_len: Address = @as(Address, @intCast(SLAB_BYTES[slab_data.bucket_idx]));
-        //         PageAllocator.unmap(raw_ptr[0..raw_len]);
-        //     }
-        //     self.* = QuickAlloc{};
-        // }
-
-        // fn try_find_entire_free_slab(self: *QuickAlloc, bucket_idx: ConstIdx) ?Idx {
-        //     if (!SLAB_RECYCLE) return null;
-        //     var i: Idx = 0;
-        //     while (i < self.slabs.len) : (i += 1) {
-        //         const slab_data: *SlabData = &self.slabs.ptr[i];
-        //         if (slab_data.bucket_idx == bucket_idx and slab_data.blocks_free == BLOCKS_PER_SLAB[bucket_idx]) return i;
-        //     }
-        //     return null;
-        // }
 
         pub fn log_usage_statistics(self: *const QuickAlloc, log_buffer: *std.ArrayList(u8), comptime log_name: []const u8) void {
             @branchHint(STAT_LOG_HINT);
@@ -908,7 +713,8 @@ inline fn bytes_log2_to_alignment(val: Log2Usize) mem.Alignment {
 
 test "Does it basically work?" {
     const t = std.testing;
-    t.log_level = .err;
+    const LOG = false; // set to `true` to log allocation data about this test
+    t.log_level = if (LOG) .info else .warn; // set to .info to log allocation data about this test
     const ListU8 = std.ArrayList(u8);
     var log_buffer = ListU8.init(std.heap.page_allocator);
     const ALLOC_OPTIONS = Options{
@@ -922,8 +728,8 @@ test "Does it basically work?" {
                 .slab_size = ._16_KB,
             },
         },
-        .track_allocation_statistics = true,
-        .hint_log_usage_statistics = .VERY_LIKELY,
+        .track_allocation_statistics = LOG,
+        .hint_log_usage_statistics = if (LOG) .VERY_LIKELY else .ALMOST_NEVER,
         .large_allocation_behavior = .USE_PAGE_ALLOCATOR,
         .hint_large_allocation = .VERY_LIKELY,
     };
@@ -937,17 +743,19 @@ test "Does it basically work?" {
     try text_list.append('l');
     try text_list.append('o');
     try text_list.append(' ');
-    quick_alloc.log_usage_statistics(&log_buffer, "After append 'Hello ' = 6 total bytes of ListU8");
+    if (t.log_level == .info) quick_alloc.log_usage_statistics(&log_buffer, "After append 'Hello ' = 6 total bytes of ListU8");
     try text_list.appendSlice("World!");
-    quick_alloc.log_usage_statistics(&log_buffer, "After append 'World!' = 12 total bytes of ListU8");
+    if (t.log_level == .info) quick_alloc.log_usage_statistics(&log_buffer, "After append 'World!' = 12 total bytes of ListU8");
     try t.expectEqualStrings("Hello World!", text_list.items[0..text_list.items.len]);
     try text_list.ensureTotalCapacity(129);
+    try t.expect(text_list.capacity >= 129);
     try t.expectEqualStrings("Hello World!", text_list.items[0..text_list.items.len]);
-    quick_alloc.log_usage_statistics(&log_buffer, "After ensureTotalCapacity(129)");
+    if (t.log_level == .info) quick_alloc.log_usage_statistics(&log_buffer, "After ensureTotalCapacity(129)");
     text_list.clearAndFree();
-    quick_alloc.log_usage_statistics(&log_buffer, "After first clear and free");
+    if (t.log_level == .info) quick_alloc.log_usage_statistics(&log_buffer, "After first clear and free");
     try text_list.ensureTotalCapacity(1025);
-    quick_alloc.log_usage_statistics(&log_buffer, "After ensureTotalCapacity(1025)");
+    try t.expect(text_list.capacity >= 1025);
+    if (t.log_level == .info) quick_alloc.log_usage_statistics(&log_buffer, "After ensureTotalCapacity(1025)");
     text_list.clearAndFree();
-    quick_alloc.log_usage_statistics(&log_buffer, "After second clear and free");
+    if (t.log_level == .info) quick_alloc.log_usage_statistics(&log_buffer, "After second clear and free");
 }

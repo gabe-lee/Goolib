@@ -8,10 +8,12 @@ pub const Endian = enum(@typeInfo(std.builtin.Endian).@"enum".tag_type) {
     little_endian = @intFromEnum(std.builtin.Endian.little),
     big_endian = @intFromEnum(std.builtin.Endian.big),
 
-    pub const native_endian: Endian = switch (build.cpu.arch.endian()) {
-        .big => Endian.big,
-        .little => Endian.little,
-    };
+    pub inline fn native_endian() Endian {
+        switch (build.cpu.arch.endian()) {
+            .big => return Endian.big_endian,
+            .little => return Endian.little_endian,
+        }
+    }
 
     pub inline fn to_std_endian(self: Endian) std.builtin.Endian {
         return @enumFromInt(@intFromEnum(self));
@@ -22,13 +24,19 @@ pub const Endian = enum(@typeInfo(std.builtin.Endian).@"enum".tag_type) {
     }
 };
 
-/// TODO
+/// TODO documentation
 pub const BufferProperties = struct {
-    endianness: Endian = .native_endian,
+    endianness: Endian = .native_endian(),
     packed_elements: bool = false,
 };
 
-/// TODO
+/// TODO documentation
+pub const BufferPropertiesPair = struct {
+    read_properties: BufferProperties = BufferProperties{},
+    write_properties: BufferProperties = BufferProperties{},
+};
+
+/// TODO documentation
 pub const CopyRange = struct {
     element_count: usize,
     read_stride: usize,
@@ -36,6 +44,7 @@ pub const CopyRange = struct {
     total_read_len: usize,
     total_write_len: usize,
 
+    ///TODO documentation
     pub fn from_count_and_adapter(count: usize, adapter: CopyAdapter) CopyRange {
         const read_stride = adapter.read_padding_before + adapter.packed_size + adapter.read_padding_after;
         const write_stride = adapter.write_padding_before + adapter.packed_size + adapter.write_padding_after;
@@ -49,6 +58,7 @@ pub const CopyRange = struct {
         };
     }
 
+    ///TODO documentation
     pub fn flip_direction(self: CopyRange) CopyRange {
         return CopyRange{
             .element_count = self.element_count,
@@ -59,6 +69,7 @@ pub const CopyRange = struct {
         };
     }
 
+    ///TODO documentation
     pub fn with_new_count(self: CopyRange, new_count: usize) CopyRange {
         return CopyRange{
             .element_count = new_count,
@@ -70,7 +81,7 @@ pub const CopyRange = struct {
     }
 };
 
-/// TODO
+/// TODO documentation
 pub const CopyAdapter = struct {
     element_type: type,
     base_type: type,
@@ -83,6 +94,12 @@ pub const CopyAdapter = struct {
     write_padding_after: usize,
     write_endianness: Endian,
 
+    ///TODO documentation
+    pub fn from_type_and_buffer_properties_pair(comptime element_type: type, comptime buf_properties_pair: BufferPropertiesPair) CopyAdapter {
+        return CopyAdapter.from_type_and_buffer_properties(element_type, buf_properties_pair.read_buf, buf_properties_pair.write_buf);
+    }
+
+    ///TODO documentation
     pub fn from_type_and_buffer_properties(comptime element_type: type, comptime read_buf_properties: BufferProperties, comptime write_buf_properties: BufferProperties) CopyAdapter {
         comptime var base_multiple: usize = 1;
         comptime var base_type = element_type;
@@ -135,6 +152,7 @@ pub const CopyAdapter = struct {
         };
     }
 
+    ///TODO documentation
     pub fn flip_direction(self: CopyAdapter) CopyAdapter {
         return CopyAdapter{
             .base_type = self.base_type,
@@ -157,7 +175,7 @@ pub const CopyAdapter = struct {
 /// This version takes a runtime-known `CopyRange` and comptime-known `CopyAdapter`
 pub fn copy_elements_with_count(dst: []u8, src: []const u8, count: usize, comptime adapter: CopyAdapter) void {
     const copy_range = CopyRange.from_count_and_adapter(count, adapter);
-    return copy_elements_with_copy_range(dst, src, copy_range, adapter);
+    return copy_elements_with_range(dst, src, copy_range, adapter);
 }
 
 /// Copy bytes from the src buffer to the dst buffer,
@@ -165,7 +183,7 @@ pub fn copy_elements_with_count(dst: []u8, src: []const u8, count: usize, compti
 /// with arbirary endianness, and arbitrary padding between elements
 ///
 /// This version takes a runtime-known `CopyRange` and comptime-known `CopyAdapter`
-pub fn copy_elements_with_copy_range(dst: []u8, src: []const u8, copy_range: CopyRange, comptime adapter: CopyAdapter) void {
+pub fn copy_elements_with_range(dst: []u8, src: []const u8, copy_range: CopyRange, comptime adapter: CopyAdapter) void {
     assert(copy_range.total_read_len <= src.len);
     assert(copy_range.total_write_len <= dst.len);
     if ((adapter.read_endianness == adapter.write_endianness or adapter.exact_byte_size == 1) and copy_range.total_read_len == copy_range.total_write_len) {
@@ -202,7 +220,7 @@ pub fn copy_elements_with_copy_range(dst: []u8, src: []const u8, copy_range: Cop
 /// This version takes a comptime-known `count` and `CopyAdapter`
 pub fn copy_elements_with_comptime_count(dst: []u8, src: []const u8, comptime count: usize, comptime adapter: CopyAdapter) void {
     const copy_range = comptime CopyRange.from_count_and_adapter(count, adapter);
-    return copy_elements_with_comptime_copy_range(dst, src, copy_range, adapter);
+    return copy_elements_with_comptime_range(dst, src, copy_range, adapter);
 }
 
 /// Copy bytes from the src buffer to the dst buffer,
@@ -210,7 +228,7 @@ pub fn copy_elements_with_comptime_count(dst: []u8, src: []const u8, comptime co
 /// with arbirary endianness, and arbitrary padding between elements
 ///
 /// This version takes a comptime-known `CopyRange` and `CopyAdapter`
-pub fn copy_elements_with_comptime_copy_range(dst: []u8, src: []const u8, comptime copy_range: CopyRange, comptime adapter: CopyAdapter) void {
+pub fn copy_elements_with_comptime_range(dst: []u8, src: []const u8, comptime copy_range: CopyRange, comptime adapter: CopyAdapter) void {
     assert(copy_range.total_read_len <= src.len);
     assert(copy_range.total_write_len <= dst.len);
     if ((adapter.read_endianness == adapter.write_endianness or adapter.packed_size == 1) and copy_range.total_read_len == copy_range.total_write_len) {

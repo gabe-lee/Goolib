@@ -12,12 +12,6 @@ const GrowthModel = Root.CommonTypes.GrowthModel;
 const SortAlgorithm = Root.CommonTypes.SortAlgorithm;
 const List = Root.CollectionTypes.StaticAllocList;
 
-pub fn define_struct(comptime T: type) type {
-    return struct {
-        pub const c = @pop
-    };
-}
-
 pub const Options = struct {
     /// This MUST be an `enum` type, where each enum key is a field name
     /// and each enum value must be in numeric order starting from 0, with no gaps.
