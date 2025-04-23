@@ -18,6 +18,7 @@ pub const StaticAllocList = @import("./StaticAllocList.zig");
 pub const Utils = @import("./Utils.zig");
 pub const Vec2 = @import("./Vec2.zig");
 pub const Writer = @import("./Writer.zig");
+pub const Graphics = @import("./Graphics.zig");
 
 comptime {
     _ = @import("./AABB2.zig");
@@ -28,6 +29,7 @@ comptime {
     _ = @import("./CommonTypes.zig");
     // _ = @import("./Filegen.zig");
     // _ = @import("./Format.zig");
+    _ = @import("./Graphics.zig");
     _ = @import("./Math.zig");
     _ = @import("./Quicksort.zig");
     _ = @import("./Reader.zig");

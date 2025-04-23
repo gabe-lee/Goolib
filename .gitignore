@@ -4,3 +4,5 @@ zig-out
 .zig-out
 scrap
 .scrap
+.references
+references
