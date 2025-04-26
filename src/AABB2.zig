@@ -5,11 +5,20 @@ const Type = std.builtin.Type;
 const Root = @import("./_root.zig");
 
 pub fn define_aabb2_type(comptime T: type) type {
-    return struct {
+    return extern struct {
         const T_AABB2 = @This();
-        const T_Vec2 = Root.Geometry.Vec2.define_vec2_type(T);
+        const T_Vec2 = Root.Vec2.define_vec2_type(T);
+        const T_Rect2 = Root.Rect2.define_rect2_type(T);
         const INF = if (@typeInfo(T).int) math.maxInt(T) else math.inf(T);
         const NEG_INF = if (@typeInfo(T).int) math.minInt(T) else -math.inf(T);
+        const IS_FLOAT = switch (T) {
+            f16, f32, f64, f80, f128, c_longdouble => true,
+            else => false,
+        };
+        const IS_INT = switch (T) {
+            i8, i16, i32, i64, i128, isize, u8, u16, u32, u64, u128, usize, c_short, c_int, c_long, c_longlong, c_char, c_ushort, c_uint, c_ulong, c_ulonglong => true,
+            else => false,
+        };
 
         x_min: T = INF,
         x_max: T = NEG_INF,
@@ -129,6 +138,51 @@ pub fn define_aabb2_type(comptime T: type) type {
 
         pub fn point_approx_within(self: T_AABB2, point: T_Vec2) bool {
             return Root.Math.approx_greater_than_or_equal_to(T, self.x_max, point.x) and Root.Math.approx_greater_than_or_equal_to(T, point.x, self.x_min) and Root.Math.approx_greater_than_or_equal_to(T, self.y_max, point.y) and Root.Math.approx_greater_than_or_equal_to(T, point.y, self.y_min);
+        }
+
+        pub fn to_rect2(self: T_AABB2) T_Rect2 {
+            return T_Rect2{
+                .x = self.x_min,
+                .y = self.y_min,
+                .w = self.x_max - self.x_min,
+                .h = self.y_max - self.y_min,
+            };
+        }
+
+        pub fn to_new_type(self: T_AABB2, comptime NEW_T: type) define_aabb2_type(NEW_T) {
+            const A = define_aabb2_type(NEW_T);
+            const mode = @as(u8, @bitCast(IS_FLOAT)) | (@as(u8, @bitCast(A.IS_FLOAT)) << 1);
+            const FLOAT_TO_FLOAT: u8 = 0b11;
+            const FLOAT_TO_INT: u8 = 0b01;
+            const INT_TO_INT: u8 = 0b00;
+            const INT_TO_FLOAT: u8 = 0b10;
+            switch (mode) {
+                FLOAT_TO_FLOAT => return A{
+                    .x_max = @floatCast(self.x_max),
+                    .x_min = @floatCast(self.x_min),
+                    .y_max = @floatCast(self.y_max),
+                    .y_min = @floatCast(self.y_min),
+                },
+                FLOAT_TO_INT => return A{
+                    .x_max = @intFromFloat(self.x_max),
+                    .x_min = @intFromFloat(self.x_min),
+                    .y_max = @intFromFloat(self.y_max),
+                    .y_min = @intFromFloat(self.y_min),
+                },
+                INT_TO_INT => return A{
+                    .x_max = @intCast(self.x_max),
+                    .x_min = @intCast(self.x_min),
+                    .y_max = @intCast(self.y_max),
+                    .y_min = @intCast(self.y_min),
+                },
+                INT_TO_FLOAT => return A{
+                    .x_max = @floatFromInt(self.x_max),
+                    .x_min = @floatFromInt(self.x_min),
+                    .y_max = @floatFromInt(self.y_max),
+                    .y_min = @floatFromInt(self.y_min),
+                },
+                else => unreachable,
+            }
         }
     };
 }

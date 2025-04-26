@@ -4,17 +4,29 @@ const assert = std.debug.assert;
 
 const Root = @import("./_root.zig");
 const PointOrientation = Root.CommonTypes.PointOrientation;
+const SDL3 = Root.SDL3;
+
+// pub const Vec2ExtraOptions = struct {
+//     convert_SDL3: bool = false,
+// };
 
 pub fn define_vec2_type(comptime T: type) type {
-    return struct {
+    return extern struct {
         const T_Vec2 = @This();
-        const T_AABB2 = Root.Geometry.AABB2.define_aabb2_type(T);
+        const T_Rect2 = Root.Rect2.define_rect2_type(T);
+        const IS_FLOAT = switch (T) {
+            f16, f32, f64, f80, f128, c_longdouble => true,
+            else => false,
+        };
+        const IS_INT = switch (T) {
+            i8, i16, i32, i64, i128, isize, u8, u16, u32, u64, u128, usize, c_short, c_int, c_long, c_longlong, c_char, c_ushort, c_uint, c_ulong, c_ulonglong => true,
+            else => false,
+        };
 
         x: T = 0,
         y: T = 0,
 
-        pub const ZERO = T_Vec2{ .x = 0, .y = 0 };
-        pub const HALF_HALF = T_Vec2{ .x = 0.5, .y = 0.5 };
+        pub const ZERO_ZERO = T_Vec2{ .x = 0, .y = 0 };
         pub const ZERO_ONE = T_Vec2{ .x = 0, .y = 1 };
         pub const ONE_ZERO = T_Vec2{ .x = 1, .y = 0 };
         pub const ONE_ONE = T_Vec2{ .x = 1, .y = 1 };
@@ -209,13 +221,13 @@ pub fn define_vec2_type(comptime T: type) type {
 
         pub fn approx_on_segment(self: T_Vec2, line_a: T_Vec2, line_b: T_Vec2) bool {
             if (self.approx_orientation(line_a, line_b) != PointOrientation.COLINEAR) return false;
-            const line_aabb = T_AABB2.from_static_line(line_a, line_b);
+            const line_aabb = T_Rect2.from_static_line(line_a, line_b);
             return line_aabb.point_approx_within(self);
         }
 
         pub fn on_segment(self: T_Vec2, line_a: T_Vec2, line_b: T_Vec2) bool {
             if (self.orientation(line_a, line_b) != PointOrientation.COLINEAR) return false;
-            const line_aabb = T_AABB2.from_static_line(line_a, line_b);
+            const line_aabb = T_Rect2.from_static_line(line_a, line_b);
             return line_aabb.point_within(self);
         }
 
@@ -225,6 +237,34 @@ pub fn define_vec2_type(comptime T: type) type {
 
         pub fn velocity_required_to_reach_point_inverse_time(self: T_Vec2, point: T_Vec2, inverse_time: T) T_Vec2 {
             return point.subtract(self).scale(inverse_time);
+        }
+
+        pub fn to_new_type(self: T_Rect2, comptime NEW_T: type) define_vec2_type(NEW_T) {
+            const V = (NEW_T);
+            const mode = @as(u8, @bitCast(IS_FLOAT)) | (@as(u8, @bitCast(V.IS_FLOAT)) << 1);
+            const FLOAT_TO_FLOAT: u8 = 0b11;
+            const FLOAT_TO_INT: u8 = 0b01;
+            const INT_TO_INT: u8 = 0b00;
+            const INT_TO_FLOAT: u8 = 0b10;
+            switch (mode) {
+                FLOAT_TO_FLOAT => return V{
+                    .x = @floatCast(self.x),
+                    .y = @floatCast(self.y),
+                },
+                FLOAT_TO_INT => return V{
+                    .x = @intFromFloat(self.x),
+                    .y = @intFromFloat(self.y),
+                },
+                INT_TO_INT => return V{
+                    .x = @intCast(self.x),
+                    .y = @intCast(self.y),
+                },
+                INT_TO_FLOAT => return V{
+                    .x = @floatFromInt(self.x),
+                    .y = @floatFromInt(self.y),
+                },
+                else => unreachable,
+            }
         }
     };
 }

@@ -15,13 +15,14 @@ pub fn build(b: *std.Build) void {
         //.install_build_config_h = false,
     });
     const sdl_lib = sdl_dep.artifact("SDL3");
-
     const lib = b.addModule("ZigGulag", .{
         .root_source_file = b.path("src/_root.zig"),
         .target = target,
         .optimize = optimize,
     });
     lib.linkLibrary(sdl_lib);
+
+    b.addConfigHeader();
 
     const lib_tests = b.addTest(.{
         .root_source_file = b.path("src/_root.zig"),

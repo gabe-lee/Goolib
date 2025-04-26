@@ -72,6 +72,3 @@ pub fn is_valid_value_for_enum(comptime ENUM_TYPE: type, int_value: anytype) boo
     if (BinarySearch.simple_binary_search(enum_info.tag_type, ordered_values[0..], int_value) == null) return false;
     return true;
 }
-
-
-

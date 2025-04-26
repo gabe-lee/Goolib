@@ -1,5 +1,6 @@
 const std = @import("std");
 const build = @import("builtin");
+const init_zero = std.mem.zeroes;
 
 const Root = @import("root");
 const C = @cImport({
@@ -10,7 +11,16 @@ const C = @cImport({
     @cInclude("SDL3/SDL_main.h");
 });
 
-pub const PropertiesID = struct {
+fn sdl_free(mem: ?*anyopaque) void {
+    C.SDL_free(mem);
+}
+
+pub const Rect = Root.Rect2.define_rect2_type(c_int);
+pub const SDL_FRect = Root.Rect2.define_rect2_type(f32);
+pub const Point = Root.Vec2.define_vec2_type(c_int);
+pub const SDL_FPoint = Root.Vec2.define_vec2_type(f32);
+
+pub const Properties = struct {
     id: u32,
 
     // pub extern fn SDL_GetGlobalProperties() SDL_PropertiesID;
@@ -305,4 +315,319 @@ pub const ColorPrimaries = enum(c_uint) {
     inline fn raw(self: ColorPrimaries) c_uint {
         return @intFromEnum(self);
     }
+};
+
+pub const ColorU8 = struct {
+    raw: C.struct_SDL_Color,
+};
+
+pub const ColorF32 = struct {
+    raw: C.struct_SDL_FColor,
+};
+
+pub const PointI32 = struct {
+    raw: C.struct_SDL_Point,
+
+    pub fn to_vec2(self: PointI32, comptime T: type) Root.Vec2.define_vec2_type(T) {
+        const VEC = Root.Vec2.define_vec2_type(T);
+        return VEC{
+            .x = if (VEC.IS_FLOAT) @floatFromInt(self.raw.x) else @intCast(self.raw.x),
+            .y = if (VEC.IS_FLOAT) @floatFromInt(self.raw.y) else @intCast(self.raw.y),
+        };
+    }
+};
+
+pub const PointF32 = struct {
+    raw: C.struct_SDL_FPoint,
+
+    pub fn to_vec2(self: PointF32, comptime T: type) Root.Vec2.define_vec2_type(T) {
+        const VEC = Root.Vec2.define_vec2_type(T);
+        return VEC{
+            .x = if (!VEC.IS_FLOAT) @intFromFloat(self.raw.x) else @floatCast(self.raw.x),
+            .y = if (!VEC.IS_FLOAT) @intFromFloat(self.raw.y) else @floatCast(self.raw.y),
+        };
+    }
+};
+
+pub const SurfaceFlags = struct {
+    raw: C.SDL_SurfaceFlags,
+};
+
+pub const Surface = struct {
+    // flags: SDL_SurfaceFlags = @import("std").mem.zeroes(SDL_SurfaceFlags),
+    // format: SDL_PixelFormat = @import("std").mem.zeroes(SDL_PixelFormat),
+    // w: c_int = @import("std").mem.zeroes(c_int),
+    // h: c_int = @import("std").mem.zeroes(c_int),
+    // pitch: c_int = @import("std").mem.zeroes(c_int),
+    // pixels: ?*anyopaque = @import("std").mem.zeroes(?*anyopaque),
+    // refcount: c_int = @import("std").mem.zeroes(c_int),
+    // reserved: ?*anyopaque = @import("std").mem.zeroes(?*anyopaque),
+    raw: C.struct_SDL_Surface,
+
+    pub fn get_flags(self: Surface) SurfaceFlags {
+        return SurfaceFlags{ .raw = self.raw.flags };
+    }
+    pub fn get_pixel_format(self: Surface) PixelFormat {
+        return @enumFromInt(self.raw.format);
+    }
+
+    // pub extern fn SDL_CreateSurface(width: c_int, height: c_int, format: SDL_PixelFormat) [*c]SDL_Surface;
+    // pub extern fn SDL_CreateSurfaceFrom(width: c_int, height: c_int, format: SDL_PixelFormat, pixels: ?*anyopaque, pitch: c_int) [*c]SDL_Surface;
+    // pub extern fn SDL_DestroySurface(surface: [*c]SDL_Surface) void;
+    // pub extern fn SDL_GetSurfaceProperties(surface: [*c]SDL_Surface) SDL_PropertiesID;
+    // pub extern fn SDL_SetSurfaceColorspace(surface: [*c]SDL_Surface, colorspace: SDL_Colorspace) bool;
+    // pub extern fn SDL_GetSurfaceColorspace(surface: [*c]SDL_Surface) SDL_Colorspace;
+    // pub extern fn SDL_CreateSurfacePalette(surface: [*c]SDL_Surface) [*c]SDL_Palette;
+    // pub extern fn SDL_SetSurfacePalette(surface: [*c]SDL_Surface, palette: [*c]SDL_Palette) bool;
+    // pub extern fn SDL_GetSurfacePalette(surface: [*c]SDL_Surface) [*c]SDL_Palette;
+    // pub extern fn SDL_AddSurfaceAlternateImage(surface: [*c]SDL_Surface, image: [*c]SDL_Surface) bool;
+    // pub extern fn SDL_SurfaceHasAlternateImages(surface: [*c]SDL_Surface) bool;
+    // pub extern fn SDL_GetSurfaceImages(surface: [*c]SDL_Surface, count: [*c]c_int) [*c][*c]SDL_Surface;
+    // pub extern fn SDL_RemoveSurfaceAlternateImages(surface: [*c]SDL_Surface) void;
+    // pub extern fn SDL_LockSurface(surface: [*c]SDL_Surface) bool;
+    // pub extern fn SDL_UnlockSurface(surface: [*c]SDL_Surface) void;
+    // pub extern fn SDL_LoadBMP_IO(src: ?*SDL_IOStream, closeio: bool) [*c]SDL_Surface;
+    // pub extern fn SDL_LoadBMP(file: [*c]const u8) [*c]SDL_Surface;
+    // pub extern fn SDL_SaveBMP_IO(surface: [*c]SDL_Surface, dst: ?*SDL_IOStream, closeio: bool) bool;
+    // pub extern fn SDL_SaveBMP(surface: [*c]SDL_Surface, file: [*c]const u8) bool;
+    // pub extern fn SDL_SetSurfaceRLE(surface: [*c]SDL_Surface, enabled: bool) bool;
+    // pub extern fn SDL_SurfaceHasRLE(surface: [*c]SDL_Surface) bool;
+    // pub extern fn SDL_SetSurfaceColorKey(surface: [*c]SDL_Surface, enabled: bool, key: Uint32) bool;
+    // pub extern fn SDL_SurfaceHasColorKey(surface: [*c]SDL_Surface) bool;
+    // pub extern fn SDL_GetSurfaceColorKey(surface: [*c]SDL_Surface, key: [*c]Uint32) bool;
+    // pub extern fn SDL_SetSurfaceColorMod(surface: [*c]SDL_Surface, r: Uint8, g: Uint8, b: Uint8) bool;
+    // pub extern fn SDL_GetSurfaceColorMod(surface: [*c]SDL_Surface, r: [*c]Uint8, g: [*c]Uint8, b: [*c]Uint8) bool;
+    // pub extern fn SDL_SetSurfaceAlphaMod(surface: [*c]SDL_Surface, alpha: Uint8) bool;
+    // pub extern fn SDL_GetSurfaceAlphaMod(surface: [*c]SDL_Surface, alpha: [*c]Uint8) bool;
+    // pub extern fn SDL_SetSurfaceBlendMode(surface: [*c]SDL_Surface, blendMode: SDL_BlendMode) bool;
+    // pub extern fn SDL_GetSurfaceBlendMode(surface: [*c]SDL_Surface, blendMode: [*c]SDL_BlendMode) bool;
+    // pub extern fn SDL_SetSurfaceClipRect(surface: [*c]SDL_Surface, rect: [*c]const SDL_Rect) bool;
+    // pub extern fn SDL_GetSurfaceClipRect(surface: [*c]SDL_Surface, rect: [*c]SDL_Rect) bool;
+    // pub extern fn SDL_FlipSurface(surface: [*c]SDL_Surface, flip: SDL_FlipMode) bool;
+    // pub extern fn SDL_DuplicateSurface(surface: [*c]SDL_Surface) [*c]SDL_Surface;
+    // pub extern fn SDL_ScaleSurface(surface: [*c]SDL_Surface, width: c_int, height: c_int, scaleMode: SDL_ScaleMode) [*c]SDL_Surface;
+    // pub extern fn SDL_ConvertSurface(surface: [*c]SDL_Surface, format: SDL_PixelFormat) [*c]SDL_Surface;
+    // pub extern fn SDL_ConvertSurfaceAndColorspace(surface: [*c]SDL_Surface, format: SDL_PixelFormat, palette: [*c]SDL_Palette, colorspace: SDL_Colorspace, props: SDL_PropertiesID) [*c]SDL_Surface;
+    // pub extern fn SDL_ConvertPixels(width: c_int, height: c_int, src_format: SDL_PixelFormat, src: ?*const anyopaque, src_pitch: c_int, dst_format: SDL_PixelFormat, dst: ?*anyopaque, dst_pitch: c_int) bool;
+    // pub extern fn SDL_ConvertPixelsAndColorspace(width: c_int, height: c_int, src_format: SDL_PixelFormat, src_colorspace: SDL_Colorspace, src_properties: SDL_PropertiesID, src: ?*const anyopaque, src_pitch: c_int, dst_format: SDL_PixelFormat, dst_colorspace: SDL_Colorspace, dst_properties: SDL_PropertiesID, dst: ?*anyopaque, dst_pitch: c_int) bool;
+    // pub extern fn SDL_PremultiplyAlpha(width: c_int, height: c_int, src_format: SDL_PixelFormat, src: ?*const anyopaque, src_pitch: c_int, dst_format: SDL_PixelFormat, dst: ?*anyopaque, dst_pitch: c_int, linear: bool) bool;
+    // pub extern fn SDL_PremultiplySurfaceAlpha(surface: [*c]SDL_Surface, linear: bool) bool;
+    // pub extern fn SDL_ClearSurface(surface: [*c]SDL_Surface, r: f32, g: f32, b: f32, a: f32) bool;
+    // pub extern fn SDL_FillSurfaceRect(dst: [*c]SDL_Surface, rect: [*c]const SDL_Rect, color: Uint32) bool;
+    // pub extern fn SDL_FillSurfaceRects(dst: [*c]SDL_Surface, rects: [*c]const SDL_Rect, count: c_int, color: Uint32) bool;
+    // pub extern fn SDL_BlitSurface(src: [*c]SDL_Surface, srcrect: [*c]const SDL_Rect, dst: [*c]SDL_Surface, dstrect: [*c]const SDL_Rect) bool;
+    // pub extern fn SDL_BlitSurfaceUnchecked(src: [*c]SDL_Surface, srcrect: [*c]const SDL_Rect, dst: [*c]SDL_Surface, dstrect: [*c]const SDL_Rect) bool;
+    // pub extern fn SDL_BlitSurfaceScaled(src: [*c]SDL_Surface, srcrect: [*c]const SDL_Rect, dst: [*c]SDL_Surface, dstrect: [*c]const SDL_Rect, scaleMode: SDL_ScaleMode) bool;
+    // pub extern fn SDL_BlitSurfaceUncheckedScaled(src: [*c]SDL_Surface, srcrect: [*c]const SDL_Rect, dst: [*c]SDL_Surface, dstrect: [*c]const SDL_Rect, scaleMode: SDL_ScaleMode) bool;
+    // pub extern fn SDL_StretchSurface(src: [*c]SDL_Surface, srcrect: [*c]const SDL_Rect, dst: [*c]SDL_Surface, dstrect: [*c]const SDL_Rect, scaleMode: SDL_ScaleMode) bool;
+    // pub extern fn SDL_BlitSurfaceTiled(src: [*c]SDL_Surface, srcrect: [*c]const SDL_Rect, dst: [*c]SDL_Surface, dstrect: [*c]const SDL_Rect) bool;
+    // pub extern fn SDL_BlitSurfaceTiledWithScale(src: [*c]SDL_Surface, srcrect: [*c]const SDL_Rect, scale: f32, scaleMode: SDL_ScaleMode, dst: [*c]SDL_Surface, dstrect: [*c]const SDL_Rect) bool;
+    // pub extern fn SDL_BlitSurface9Grid(src: [*c]SDL_Surface, srcrect: [*c]const SDL_Rect, left_width: c_int, right_width: c_int, top_height: c_int, bottom_height: c_int, scale: f32, scaleMode: SDL_ScaleMode, dst: [*c]SDL_Surface, dstrect: [*c]const SDL_Rect) bool;
+    // pub extern fn SDL_MapSurfaceRGB(surface: [*c]SDL_Surface, r: Uint8, g: Uint8, b: Uint8) Uint32;
+    // pub extern fn SDL_MapSurfaceRGBA(surface: [*c]SDL_Surface, r: Uint8, g: Uint8, b: Uint8, a: Uint8) Uint32;
+    // pub extern fn SDL_ReadSurfacePixel(surface: [*c]SDL_Surface, x: c_int, y: c_int, r: [*c]Uint8, g: [*c]Uint8, b: [*c]Uint8, a: [*c]Uint8) bool;
+    // pub extern fn SDL_ReadSurfacePixelFloat(surface: [*c]SDL_Surface, x: c_int, y: c_int, r: [*c]f32, g: [*c]f32, b: [*c]f32, a: [*c]f32) bool;
+    // pub extern fn SDL_WriteSurfacePixel(surface: [*c]SDL_Surface, x: c_int, y: c_int, r: Uint8, g: Uint8, b: Uint8, a: Uint8) bool;
+    // pub extern fn SDL_WriteSurfacePixelFloat(surface: [*c]SDL_Surface, x: c_int, y: c_int, r: f32, g: f32, b: f32, a: f32) bool;
+};
+
+pub const ScaleMode = enum(c_int) {
+    INVALID = C.SDL_SCALEMODE_INVALID,
+    NEAREST = C.SDL_SCALEMODE_NEAREST,
+    LINEAR = C.SDL_SCALEMODE_LINEAR,
+
+    pub fn raw(self: ScaleMode) c_int {
+        return @intFromEnum(self);
+    }
+};
+
+pub const FlipMode = enum(c_uint) {
+    NONE = C.SDL_FLIP_NONE,
+    HORIZONTAL = C.SDL_FLIP_HORIZONTAL,
+    VERTICAL = C.SDL_FLIP_VERTICAL,
+    HORIZ_VERT = C.SDL_FLIP_HORIZONTAL | C.SDL_FLIP_VERTICAL,
+
+    pub fn raw(self: FlipMode) c_uint {
+        return @intFromEnum(self);
+    }
+};
+
+pub const Clipboard = struct {
+    pub fn get_text() [:0]const u8 {
+        const clip: [*c]u8 = C.SDL_GetClipboardText();
+        var i: usize = 0;
+        while (clip[i] != 0) : (i += 1) {}
+        return clip[0..i];
+    }
+    pub fn set_text(text: [:0]const u8) bool {
+        return C.SDL_SetClipboardText(text);
+    }
+    pub fn has_text() bool {
+        return C.SDL_HasClipboardText();
+    }
+
+    // pub extern fn SDL_SetPrimarySelectionText(text: [*c]const u8) bool;
+    // pub extern fn SDL_GetPrimarySelectionText() [*c]u8;
+    // pub extern fn SDL_HasPrimarySelectionText() bool;
+    // pub const SDL_ClipboardDataCallback = ?*const fn (?*anyopaque, [*c]const u8, [*c]usize) callconv(.c) ?*const anyopaque;
+    // pub const SDL_ClipboardCleanupCallback = ?*const fn (?*anyopaque) callconv(.c) void;
+    // pub extern fn SDL_SetClipboardData(callback: SDL_ClipboardDataCallback, cleanup: SDL_ClipboardCleanupCallback, userdata: ?*anyopaque, mime_types: [*c][*c]const u8, num_mime_types: usize) bool;
+    // pub extern fn SDL_ClearClipboardData() bool;
+    // pub extern fn SDL_GetClipboardData(mime_type: [*c]const u8, size: [*c]usize) ?*anyopaque;
+    // pub extern fn SDL_HasClipboardData(mime_type: [*c]const u8) bool;
+    // pub extern fn SDL_GetClipboardMimeTypes(num_mime_types: [*c]usize) [*c][*c]u8;
+};
+
+pub const DisplayOrientation = enum(c_int) {
+    UNKNOWN = C.SDL_ORIENTATION_UNKNOWN,
+    LANDSCAPE = C.SDL_ORIENTATION_LANDSCAPE,
+    LANDSCAPE_FLIPPED = C.SDL_ORIENTATION_LANDSCAPE_FLIPPED,
+    PORTRAIT = C.SDL_ORIENTATION_PORTRAIT,
+    PORTRAIT_FLIPPED = C.SDL_ORIENTATION_PORTRAIT_FLIPPED,
+
+    pub fn to_int(self: DisplayOrientation) c_int {
+        return @intFromEnum(self);
+    }
+    pub fn from_int(val: c_int) DisplayOrientation {
+        return @enumFromInt(val);
+    }
+};
+
+pub const DisplayID = extern struct {
+    id: u32 = 0,
+
+    pub fn try_get_all_displays() ?DisplayList {
+        const len: c_int = 0;
+        const c_ptr: ?[*]u32 = C.SDL_GetDisplays(&len);
+        if (c_ptr) |c_ptr_good| {
+            const ptr: [*]DisplayID = @ptrCast(@alignCast(c_ptr_good));
+            return DisplayList{ .ids = ptr[0..len] };
+        }
+        return null;
+    }
+    pub fn try_get_primary_display() ?DisplayID {
+        const id_result = C.SDL_GetPrimaryDisplay();
+        if (id_result == 0) return null;
+        return DisplayID{ .id = id_result };
+    }
+    pub fn try_get_properties(self: DisplayID) ?Properties {
+        const id_result = C.SDL_GetDisplayProperties(self.id);
+        if (id_result == 0) return null;
+        return Properties{ .id = id_result };
+    }
+    pub fn try_get_name(self: DisplayID) ?[*:0]const u8 {
+        return C.SDL_GetDisplayName(self.id);
+    }
+    pub fn try_get_bounds(self: DisplayID) ?Rect {
+        const rect: Rect = .{};
+        if (C.SDL_GetDisplayBounds(self.id, &rect)) return rect;
+        return null;
+    }
+    pub fn try_get_usable_bounds(self: DisplayID) ?Rect {
+        const rect: Rect = .{};
+        if (C.SDL_GetDisplayUsableBounds(self.id, &rect)) return rect;
+        return null;
+    }
+    pub fn get_natural_orientation(self: DisplayID) DisplayOrientation {
+        return DisplayOrientation.from_int(C.SDL_GetNaturalDisplayOrientation(self.id));
+    }
+    pub fn get_current_orientation(self: DisplayID) DisplayOrientation {
+        return DisplayOrientation.from_int(C.SDL_GetCurrentDisplayOrientation(self.id));
+    }
+    pub fn get_content_scale(self: DisplayID) f32 {
+        return C.SDL_GetDisplayContentScale(self.id);
+    }
+    pub fn try_get_all_fullscreen_modes(self: DisplayID) ?DisplayModeList {
+        const len: c_int = 0;
+        const ptr_result: ?[*]*DisplayMode = C.SDL_GetFullscreenDisplayModes(self.id, &len);
+        if (ptr_result) |ptr| return DisplayModeList{
+            .modes = ptr[0..len],
+        };
+        return null;
+    }
+    pub fn try_get_closest_fullscreen_mode(self: DisplayID, options: ClosestDisplayModeOptions) ?DisplayMode {
+        const mode = DisplayMode{};
+        if (C.SDL_GetClosestFullscreenDisplayMode(self.id, options.width, options.height, options.refresh_rate, options.include_high_density_modes, &mode)) return mode;
+        return null;
+    }
+    pub fn try_get_desktop_mode(self: DisplayID) ?*const DisplayMode {
+        return C.SDL_GetDesktopDisplayMode(self.id);
+    }
+    pub fn try_get_current_mode(self: DisplayID) ?*const DisplayMode {
+        return C.SDL_GetCurrentDisplayMode(self.id);
+    }
+    pub fn try_get_display_for_point(point: Point) ?DisplayID {
+        const id_result = C.SDL_GetDisplayForPoint(&point);
+        if (id_result == 0) return null;
+        return DisplayID{ .id = id_result };
+    }
+    pub fn try_get_display_for_rect(rect: Rect) ?DisplayID {
+        const id_result = C.SDL_GetDisplayForRect(&rect);
+        if (id_result == 0) return null;
+        return DisplayID{ .id = id_result };
+    }
+    pub fn try_get_display_for_window(window: Window) ?DisplayID {
+        const id_result = C.SDL_GetDisplayForWindow(window.extern_ptr);
+        if (id_result == 0) return null;
+        return DisplayID{ .id = id_result };
+    }
+};
+
+pub const ClosestDisplayModeOptions = struct {
+    width: f32 = 800,
+    height: f32 = 600,
+    refresh_rate: f32 = 60.0,
+    include_high_density_modes: bool = true,
+};
+
+pub const WindowID = extern struct {
+    id: u32 = 0,
+};
+
+pub const DisplayModeData = extern struct {
+    extern_ptr: *opaque {},
+};
+
+pub const DisplayMode = extern struct {
+    display: DisplayID = DisplayID{},
+    pixel_format: PixelFormat = .UNKNOWN,
+    width: c_int = 0,
+    height: c_int = 0,
+    pixel_density: f32 = 0.0,
+    refresh_rate: f32 = 0.0,
+    refresh_rate_numerator: c_int = 0,
+    refresh_rate_denominator: c_int = 0,
+    data: ?DisplayModeData = init_zero(?DisplayModeData),
+
+    // pub inline fn to_c(self: DisplayMode) C.SDL_DisplayMode {
+    //     return @bitCast(self);
+    // }
+};
+
+pub const Window = extern struct {
+    extern_ptr: *opaque {},
+
+    pub fn try_get_display(self: Window) ?DisplayID {
+        return DisplayID.try_get_display_for_window(self);
+    }
+};
+
+pub const DisplayModeList = struct {
+    modes: []*DisplayMode,
+
+    pub fn free(self: DisplayModeList) void {
+        sdl_free(self.modes.ptr);
+    }
+};
+
+pub const DisplayList = struct {
+    ids: []DisplayID,
+
+    pub fn free(self: DisplayList) void {
+        sdl_free(self.ids.ptr);
+    }
+};
+
+pub const WindowFlags = struct {
+    flags: u64,
 };

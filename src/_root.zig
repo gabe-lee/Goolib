@@ -11,14 +11,16 @@ pub const CommonTypes = @import("./CommonTypes.zig");
 pub const Math = @import("./Math.zig");
 pub const Quicksort = @import("./Quicksort.zig");
 pub const Reader = @import("./Reader.zig");
+pub const Rect2 = @import("./Rect2.zig");
 // pub const ReturnWrappers = @import("./ReturnWrappers.zig");
+pub const SDL3 = @import("./SDL3.zig");
 pub const StaticAllocList = @import("./StaticAllocList.zig");
 // pub const StaticAllocVectorizedStructOfArrays = @import("./StaticAllocVectorizedStructOfArrays.zig");
 // pub const Template = @import("./Template.zig");
 pub const Utils = @import("./Utils.zig");
 pub const Vec2 = @import("./Vec2.zig");
 pub const Writer = @import("./Writer.zig");
-pub const Graphics = @import("./Graphics.zig");
+// pub const Graphics = @import("./Graphics.zig");
 
 comptime {
     _ = @import("./AABB2.zig");
