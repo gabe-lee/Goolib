@@ -15,13 +15,18 @@ fn sdl_free(mem: ?*anyopaque) void {
     C.SDL_free(mem);
 }
 
-pub const Rect = Root.Rect2.define_rect2_type(c_int);
-pub const SDL_FRect = Root.Rect2.define_rect2_type(f32);
-pub const Point = Root.Vec2.define_vec2_type(c_int);
-pub const SDL_FPoint = Root.Vec2.define_vec2_type(f32);
+pub fn get_error_details() [:0]const u8 {
+    const details_ptr: [*:0]const u8 = C.SDL_GetError();
+    return Root.Utils.make_const_slice_from_sentinel_ptr(u8, 0, details_ptr);
+}
 
-pub const Properties = struct {
-    id: u32,
+pub const IRect2 = Root.Rect2.define_rect2_type(c_int);
+pub const FRect2 = Root.Rect2.define_rect2_type(f32);
+pub const IVec2 = Root.Vec2.define_vec2_type(c_int);
+pub const FVec2 = Root.Vec2.define_vec2_type(f32);
+
+pub const PropertiesID = struct {
+    id: C.SDL_PropertiesID,
 
     // pub extern fn SDL_GetGlobalProperties() SDL_PropertiesID;
     // pub extern fn SDL_CreateProperties() SDL_PropertiesID;
@@ -325,51 +330,577 @@ pub const ColorF32 = struct {
     raw: C.struct_SDL_FColor,
 };
 
-pub const PointI32 = struct {
-    raw: C.struct_SDL_Point,
+pub const ScaleMode = enum(c_int) {
+    INVALID = C.SDL_SCALEMODE_INVALID,
+    NEAREST = C.SDL_SCALEMODE_NEAREST,
+    LINEAR = C.SDL_SCALEMODE_LINEAR,
 
-    pub fn to_vec2(self: PointI32, comptime T: type) Root.Vec2.define_vec2_type(T) {
-        const VEC = Root.Vec2.define_vec2_type(T);
-        return VEC{
-            .x = if (VEC.IS_FLOAT) @floatFromInt(self.raw.x) else @intCast(self.raw.x),
-            .y = if (VEC.IS_FLOAT) @floatFromInt(self.raw.y) else @intCast(self.raw.y),
+    pub fn raw(self: ScaleMode) c_int {
+        return @intFromEnum(self);
+    }
+};
+
+pub const FlipMode = enum(c_uint) {
+    NONE = C.SDL_FLIP_NONE,
+    HORIZONTAL = C.SDL_FLIP_HORIZONTAL,
+    VERTICAL = C.SDL_FLIP_VERTICAL,
+    HORIZ_VERT = C.SDL_FLIP_HORIZONTAL | C.SDL_FLIP_VERTICAL,
+
+    pub fn raw(self: FlipMode) c_uint {
+        return @intFromEnum(self);
+    }
+};
+
+pub const Clipboard = struct {
+    pub fn get_text() [:0]const u8 {
+        const clip: [*:0]u8 = C.SDL_GetClipboardText();
+        return Root.Utils.make_slice_from_sentinel_ptr(u8, 0, clip);
+    }
+    pub fn set_text(text: [:0]const u8) bool {
+        return C.SDL_SetClipboardText(text.ptr);
+    }
+    pub fn has_text() bool {
+        return C.SDL_HasClipboardText();
+    }
+
+    // pub extern fn SDL_SetPrimarySelectionText(text: [*c]const u8) bool;
+    // pub extern fn SDL_GetPrimarySelectionText() [*c]u8;
+    // pub extern fn SDL_HasPrimarySelectionText() bool;
+    // pub const SDL_ClipboardDataCallback = ?*const fn (?*anyopaque, [*c]const u8, [*c]usize) callconv(.c) ?*const anyopaque;
+    // pub const SDL_ClipboardCleanupCallback = ?*const fn (?*anyopaque) callconv(.c) void;
+    // pub extern fn SDL_SetClipboardData(callback: SDL_ClipboardDataCallback, cleanup: SDL_ClipboardCleanupCallback, userdata: ?*anyopaque, mime_types: [*c][*c]const u8, num_mime_types: usize) bool;
+    // pub extern fn SDL_ClearClipboardData() bool;
+    // pub extern fn SDL_GetClipboardData(mime_type: [*c]const u8, size: [*c]usize) ?*anyopaque;
+    // pub extern fn SDL_HasClipboardData(mime_type: [*c]const u8) bool;
+    // pub extern fn SDL_GetClipboardMimeTypes(num_mime_types: [*c]usize) [*c][*c]u8;
+};
+
+pub const DisplayOrientation = enum(c_int) {
+    UNKNOWN = C.SDL_ORIENTATION_UNKNOWN,
+    LANDSCAPE = C.SDL_ORIENTATION_LANDSCAPE,
+    LANDSCAPE_FLIPPED = C.SDL_ORIENTATION_LANDSCAPE_FLIPPED,
+    PORTRAIT = C.SDL_ORIENTATION_PORTRAIT,
+    PORTRAIT_FLIPPED = C.SDL_ORIENTATION_PORTRAIT_FLIPPED,
+
+    pub fn to_int(self: DisplayOrientation) c_int {
+        return @intFromEnum(self);
+    }
+    pub fn from_int(val: c_int) DisplayOrientation {
+        return @enumFromInt(val);
+    }
+};
+
+pub const DisplayID = extern struct {
+    id: u32 = 0,
+
+    pub fn try_get_all_displays() ?DisplayList {
+        const len: c_int = 0;
+        const c_ptr: ?[*]u32 = C.SDL_GetDisplays(&len);
+        if (c_ptr) |c_ptr_good| {
+            const ptr: [*]DisplayID = @ptrCast(@alignCast(c_ptr_good));
+            return DisplayList{ .ids = ptr[0..len] };
+        }
+        return null;
+    }
+    pub fn try_get_primary_display() ?DisplayID {
+        const id_result = C.SDL_GetPrimaryDisplay();
+        if (id_result == 0) return null;
+        return DisplayID{ .id = id_result };
+    }
+    pub fn try_get_properties(self: DisplayID) ?PropertiesID {
+        const id_result = C.SDL_GetDisplayProperties(self.id);
+        if (id_result == 0) return null;
+        return PropertiesID{ .id = id_result };
+    }
+    pub fn try_get_name(self: DisplayID) ?[*:0]const u8 {
+        return C.SDL_GetDisplayName(self.id);
+    }
+    pub fn try_get_bounds(self: DisplayID) ?IRect2 {
+        const rect: IRect2 = .{};
+        if (C.SDL_GetDisplayBounds(self.id, &rect)) return rect;
+        return null;
+    }
+    pub fn try_get_usable_bounds(self: DisplayID) ?IRect2 {
+        const rect: IRect2 = .{};
+        if (C.SDL_GetDisplayUsableBounds(self.id, &rect)) return rect;
+        return null;
+    }
+    pub fn get_natural_orientation(self: DisplayID) DisplayOrientation {
+        return DisplayOrientation.from_int(C.SDL_GetNaturalDisplayOrientation(self.id));
+    }
+    pub fn get_current_orientation(self: DisplayID) DisplayOrientation {
+        return DisplayOrientation.from_int(C.SDL_GetCurrentDisplayOrientation(self.id));
+    }
+    pub fn get_content_scale(self: DisplayID) f32 {
+        return C.SDL_GetDisplayContentScale(self.id);
+    }
+    pub fn try_get_all_fullscreen_modes(self: DisplayID) ?DisplayModeList {
+        const len: c_int = 0;
+        const ptr_result: ?[*]*DisplayMode = C.SDL_GetFullscreenDisplayModes(self.id, &len);
+        if (ptr_result) |ptr| return DisplayModeList{
+            .modes = ptr[0..len],
         };
+        return null;
+    }
+    pub fn try_get_closest_fullscreen_mode(self: DisplayID, options: ClosestDisplayModeOptions) ?DisplayMode {
+        const mode = DisplayMode{};
+        if (C.SDL_GetClosestFullscreenDisplayMode(self.id, options.width, options.height, options.refresh_rate, options.include_high_density_modes, &mode)) return mode;
+        return null;
+    }
+    pub fn try_get_desktop_mode(self: DisplayID) ?*const DisplayMode {
+        return C.SDL_GetDesktopDisplayMode(self.id);
+    }
+    pub fn try_get_current_mode(self: DisplayID) ?*const DisplayMode {
+        return C.SDL_GetCurrentDisplayMode(self.id);
+    }
+    pub fn try_get_display_for_point(point: IVec2) ?DisplayID {
+        const id_result = C.SDL_GetDisplayForPoint(&point);
+        if (id_result == 0) return null;
+        return DisplayID{ .id = id_result };
+    }
+    pub fn try_get_display_for_rect(rect: IRect2) ?DisplayID {
+        const id_result = C.SDL_GetDisplayForRect(&rect);
+        if (id_result == 0) return null;
+        return DisplayID{ .id = id_result };
     }
 };
 
-pub const PointF32 = struct {
-    raw: C.struct_SDL_FPoint,
+pub const ClosestDisplayModeOptions = struct {
+    width: f32 = 800,
+    height: f32 = 600,
+    refresh_rate: f32 = 60.0,
+    include_high_density_modes: bool = true,
+};
 
-    pub fn to_vec2(self: PointF32, comptime T: type) Root.Vec2.define_vec2_type(T) {
-        const VEC = Root.Vec2.define_vec2_type(T);
-        return VEC{
-            .x = if (!VEC.IS_FLOAT) @intFromFloat(self.raw.x) else @floatCast(self.raw.x),
-            .y = if (!VEC.IS_FLOAT) @intFromFloat(self.raw.y) else @floatCast(self.raw.y),
-        };
+pub const WindowID = extern struct {
+    id: u32 = 0,
+
+    pub fn try_get_window(self: WindowID) ?*Window {
+        return C.SDL_GetWindowFromID(self.id);
     }
 };
 
-pub const SurfaceFlags = struct {
-    raw: C.SDL_SurfaceFlags,
+pub const DisplayModeData = extern struct {
+    extern_ptr: *anyopaque,
 };
 
-pub const Surface = struct {
-    // flags: SDL_SurfaceFlags = @import("std").mem.zeroes(SDL_SurfaceFlags),
-    // format: SDL_PixelFormat = @import("std").mem.zeroes(SDL_PixelFormat),
-    // w: c_int = @import("std").mem.zeroes(c_int),
-    // h: c_int = @import("std").mem.zeroes(c_int),
-    // pitch: c_int = @import("std").mem.zeroes(c_int),
-    // pixels: ?*anyopaque = @import("std").mem.zeroes(?*anyopaque),
-    // refcount: c_int = @import("std").mem.zeroes(c_int),
-    // reserved: ?*anyopaque = @import("std").mem.zeroes(?*anyopaque),
-    raw: C.struct_SDL_Surface,
+pub const DisplayMode = extern struct {
+    display: DisplayID = DisplayID{},
+    pixel_format: PixelFormat = .UNKNOWN,
+    width: c_int = 0,
+    height: c_int = 0,
+    pixel_density: f32 = 0.0,
+    refresh_rate: f32 = 0.0,
+    refresh_rate_numerator: c_int = 0,
+    refresh_rate_denominator: c_int = 0,
+    data: ?DisplayModeData = init_zero(?DisplayModeData),
 
-    pub fn get_flags(self: Surface) SurfaceFlags {
-        return SurfaceFlags{ .raw = self.raw.flags };
+    // pub inline fn to_c(self: DisplayMode) C.SDL_DisplayMode {
+    //     return @bitCast(self);
+    // }
+};
+
+pub const Window = extern struct {
+    extern_ptr: *External,
+
+    pub const External = opaque {};
+
+    pub fn try_get_display(self: Window) ?DisplayID {
+        return DisplayID.try_get_display_for_window(self);
     }
-    pub fn get_pixel_format(self: Surface) PixelFormat {
-        return @enumFromInt(self.raw.format);
+    pub fn get_pixel_density(self: Window) f32 {
+        return C.SDL_GetWindowPixelDensity(self.extern_ptr);
     }
+    pub fn get_display_scale(self: Window) f32 {
+        return C.SDL_GetWindowDisplayScale(self.extern_ptr);
+    }
+    pub fn get_fullscreen_display_mode(self: Window) FullscreenMode {
+        const result: ?*const DisplayMode = C.SDL_GetWindowFullscreenMode(self.extern_ptr);
+        if (result) |mode| return FullscreenMode.new_exclusive(mode);
+        return FullscreenMode.new_borderless();
+    }
+    pub fn try_set_fullscreen_display_mode(self: Window, mode: FullscreenMode) bool {
+        switch (mode) {
+            .borderless => return C.SDL_SetWindowFullscreenMode(self.extern_ptr, null),
+            .exclusive => |excl_mode| return C.SDL_SetWindowFullscreenMode(self.extern_ptr, excl_mode),
+        }
+    }
+    pub fn try_get_icc_profile(self: Window, size: usize) ?WindowICCProfile {
+        const result: ?*WindowICCProfile.Extern = C.SDL_GetWindowICCProfile(self.extern_ptr, &size);
+        if (result) |ptr| return WindowICCProfile{ .extern_ptr = ptr };
+        return null;
+    }
+    pub fn get_pixel_format(self: Window) PixelFormat {
+        return @enumFromInt(C.SDL_GetWindowPixelFormat(self.extern_ptr));
+    }
+    pub fn try_get_all_windows() ?WindowsList {
+        var len: c_int = 0;
+        const result: ?[*]*Window.External = C.SDL_GetWindows(&len);
+        if (result) |ptr| return WindowsList{ .list = @as([*]Window, @ptrCast(@alignCast(ptr)))[0..len] };
+        return null;
+    }
+    pub fn try_create_window(options: CreateWindowOptions) ?Window {
+        const result: ?*Window.External = C.SDL_CreateWindow(options.title.ptr, options.width, options.height, options.flags);
+        if (result) |ptr| return Window{ .extern_ptr = ptr };
+        return null;
+    }
+    pub fn try_create_popup_window(parent: Window, options: CreatePopupWindowOptions) ?Window {
+        const result: ?*Window.External = C.SDL_CreatePopupWindow(parent.extern_ptr, options.x_offset, options.y_offset, options.width, options.height, options.flags);
+        if (result) |ptr| return Window{ .extern_ptr = ptr };
+        return null;
+    }
+    pub fn try_create_window_with_properties(properties: PropertiesID) ?Window {
+        const result: ?*Window.External = C.SDL_CreateWindowWithProperties(properties.id);
+        if (result) |ptr| return Window{ .extern_ptr = ptr };
+        return null;
+    }
+    pub fn get_id(self: Window) WindowID {
+        return WindowID{ .id = C.SDL_GetWindowID(self.extern_ptr) };
+    }
+    pub fn try_get_parent_window(self: Window) ?Window {
+        const result: ?*Window.External = C.SDL_GetWindowFromID(self.extern_ptr);
+        if (result) |ptr| return Window{ .extern_ptr = ptr };
+        return null;
+    }
+    pub fn get_properties(self: Window) PropertiesID {
+        return PropertiesID{ .id = C.SDL_GetWindowProperties(self.extern_ptr) };
+    }
+    pub fn get_flags(self: Window) WindowFlags {
+        return WindowFlags{ .flags = C.SDL_GetWindowFlags(self.extern_ptr) };
+    }
+    pub fn try_set_title(self: Window, title: [:0]const u8) bool {
+        return C.SDL_SetWindowTitle(self.extern_ptr, title.ptr);
+    }
+    pub fn get_title_ptr(self: Window) [*:0]const u8 {
+        return C.SDL_GetWindowTitle(self.extern_ptr);
+    }
+    pub fn get_title_slice(self: Window) [:0]const u8 {
+        const ptr = self.get_title_ptr();
+        return Root.Utils.make_slice_from_sentinel_ptr(u8, 0, ptr);
+    }
+    pub fn try_set_window_icon(self: Window, icon: *Surface) bool {
+        return C.SDL_SetWindowIcon(self.extern_ptr, @ptrCast(@alignCast(icon)));
+    }
+    pub fn try_set_window_position(self: Window, pos: IVec2) bool {
+        return C.SDL_SetWindowPosition(self.extern_ptr, pos.x, pos.y);
+    }
+    pub fn try_get_window_position(self: Window) ?IVec2 {
+        var point: IVec2 = IVec2.ZERO;
+        const success = C.SDL_GetWindowPosition(self.extern_ptr, &point.x, &point.y);
+        if (success) return point;
+        return null;
+    }
+    pub fn try_set_size(self: Window, size: IVec2) bool {
+        return C.SDL_SetWindowSize(self.extern_ptr, size.x, size.y);
+    }
+    pub fn try_get_size(self: Window) ?IVec2 {
+        var size = IVec2.ZERO;
+        const success = C.SDL_GetWindowSize(self.extern_ptr, &size.x, &size.y);
+        if (success) return size;
+        return null;
+    }
+    pub fn try_get_safe_area(self: Window) ?IRect2 {
+        var rect = IRect2{};
+        const success = C.SDL_GetWindowSafeArea(self.extern_ptr, @ptrCast(@alignCast(&rect)));
+        if (success) return rect;
+        return null;
+    }
+    pub fn try_set_aspect_ratio(self: Window, aspect_ratio: AspectRatio) bool {
+        return C.SDL_SetWindowAspectRatio(self.extern_ptr, aspect_ratio.min, aspect_ratio.max);
+    }
+    pub fn try_get_aspect_ratio(self: Window) ?AspectRatio {
+        var ratio = AspectRatio{};
+        const success = C.SDL_SetWindowAspectRatio(self.extern_ptr, &ratio.min, &ratio.max);
+        if (success) return ratio;
+        return null;
+    }
+    pub fn try_get_border_sizes(self: Window) ?BorderSizes {
+        var sizes = BorderSizes{};
+        const success = C.SDL_GetWindowBordersSize(self.extern_ptr, &sizes.top, &sizes.left, &sizes.bottom, &sizes.right);
+        if (success) return sizes;
+        return null;
+    }
+    pub fn try_get_size_in_pixels(self: Window) ?IVec2 {
+        var size = IVec2{};
+        const success = C.SDL_GetWindowSizeInPixels(self.extern_ptr, &size.x, &size.y);
+        if (success) return size;
+        return null;
+    }
+    pub fn try_set_minimum_size(self: Window, size: IVec2) bool {
+        return C.SDL_SetWindowMinimumSize(self.extern_ptr, size.x, size.y);
+    }
+    pub fn try_get_minimum_size(self: Window) ?IVec2 {
+        var size = IVec2{};
+        const success = C.SDL_GetWindowMinimumSize(self.extern_ptr, &size.x, &size.y);
+        if (success) return size;
+        return null;
+    }
+    pub fn try_set_maximum_size(self: Window, size: IVec2) bool {
+        return C.SDL_SetWindowMaximumSize(self.extern_ptr, size.x, size.y);
+    }
+    pub fn try_get_maximum_size(self: Window) ?IVec2 {
+        var size = IVec2{};
+        const success = C.SDL_GetWindowMaximumSize(self.extern_ptr, &size.x, &size.y);
+        if (success) return size;
+        return null;
+    }
+    pub fn try_set_bordered(self: Window, state: bool) bool {
+        return C.SDL_SetWindowBordered(self.extern_ptr, state);
+    }
+    pub fn try_set_resizable(self: Window, state: bool) bool {
+        return C.SDL_SetWindowResizable(self.extern_ptr, state);
+    }
+    pub fn try_set_always_on_top(self: Window, state: bool) bool {
+        return C.SDL_SetWindowAlwaysOnTop(self.extern_ptr, state);
+    }
+    pub fn try_show(self: Window) bool {
+        return C.SDL_ShowWindow(self.extern_ptr);
+    }
+    pub fn try_hide(self: Window) bool {
+        return C.SDL_HideWindow(self.extern_ptr);
+    }
+    pub fn try_raise(self: Window) bool {
+        return C.SDL_RaiseWindow(self.extern_ptr);
+    }
+    pub fn try_maximize(self: Window) bool {
+        return C.SDL_MaximizeWindow(self.extern_ptr);
+    }
+    pub fn try_minimize(self: Window) bool {
+        return C.SDL_MinimizeWindow(self.extern_ptr);
+    }
+    pub fn try_restore(self: Window) bool {
+        return C.SDL_RestoreWindow(self.extern_ptr);
+    }
+    pub fn try_set_fullscreen(self: Window, state: bool) bool {
+        return C.SDL_SetWindowFullscreen(self.extern_ptr, state);
+    }
+    pub fn try_sync(self: Window) bool {
+        return C.SDL_SyncWindow(self.extern_ptr);
+    }
+    pub fn has_surface(self: Window) bool {
+        return C.SDL_WindowHasSurface(self.extern_ptr);
+    }
+    pub fn try_get_surface(self: Window) ?*Surface {
+        return @ptrCast(@alignCast(C.SDL_GetWindowSurface(self.extern_ptr)));
+    }
+    pub fn try_set_surface_vsync(self: Window, vsync: VSync) bool {
+        return C.SDL_SetWindowSurfaceVSync(self.extern_ptr, vsync.to_int());
+    }
+    pub fn try_get_surface_vsync(self: Window) ?VSync {
+        var int: c_int = 0;
+        const success = C.SDL_GetWindowSurfaceVSync(self.extern_ptr, &int);
+        if (success) return VSync.from_int(int);
+        return null;
+    }
+    pub fn try_update_surface(self: Window) bool {
+        return C.SDL_UpdateWindowSurface(self.extern_ptr);
+    }
+    pub fn try_update_surface_rects(self: Window, rects: []const IRect2) bool {
+        return C.SDL_UpdateWindowSurfaceRects(self.extern_ptr, @ptrCast(@alignCast(rects.ptr)), @intCast(rects.len));
+    }
+    pub fn try_destroy_surface(self: Window) bool {
+        return C.SDL_DestroyWindowSurface(self.extern_ptr);
+    }
+    pub fn try_set_keyboard_grab(self: Window, state: bool) bool {
+        return C.SDL_SetWindowKeyboardGrab(self.extern_ptr, state);
+    }
+    pub fn try_set_mouse_grab(self: Window, state: bool) bool {
+        return C.SDL_SetWindowMouseGrab(self.extern_ptr, state);
+    }
+    pub fn try_get_keyboard_grab(self: Window) bool {
+        return C.SDL_GetWindowKeyboardGrab(self.extern_ptr);
+    }
+    pub fn try_get_mouse_grab(self: Window) bool {
+        return C.SDL_GetWindowMouseGrab(self.extern_ptr);
+    }
+    pub fn try_get_grabbed_window() ?Window {
+        const ptr: ?*Window.External = C.SDL_GetGrabbedWindow();
+        if (ptr) |good_ptr| return Window{ .extern_ptr = good_ptr };
+        return null;
+    }
+    pub fn try_set_mouse_rect(self: Window, rect: IRect2) bool {
+        return C.SDL_SetWindowMouseRect(self.extern_ptr, @ptrCast(@alignCast(&rect)));
+    }
+    pub fn try_get_mouse_rect(self: Window) ?IRect2 {
+        const ptr: ?*IRect2 = @ptrCast(@alignCast(C.SDL_GetWindowMouseRect(self.extern_ptr)));
+        if (ptr) |good_ptr| return good_ptr.*;
+        return null;
+    }
+    pub fn try_set_opacity(self: Window, opacity: f32) bool {
+        return C.SDL_SetWindowOpacity(self.extern_ptr, opacity);
+    }
+    pub fn get_opacity(self: Window) f32 {
+        return C.SDL_GetWindowOpacity(self.extern_ptr);
+    }
+    pub fn try_set_parent(self: Window, parent: Window) bool {
+        return C.SDL_SetWindowParent(self.extern_ptr, parent.extern_ptr);
+    }
+    pub fn try_clear_parent(self: Window) bool {
+        return C.SDL_SetWindowParent(self.extern_ptr, null);
+    }
+    pub fn try_set_modal(self: Window, state: bool) bool {
+        return C.SDL_SetWindowModal(self.extern_ptr, state);
+    }
+    pub fn try_set_focusable(self: Window, state: bool) bool {
+        return C.SDL_SetWindowFocusable(self.extern_ptr, state);
+    }
+    pub fn try_show_system_menu(self: Window, pos: IVec2) bool {
+        return C.SDL_ShowWindowSystemMenu(self.extern_ptr, pos.x, pos.y);
+    }
+};
+
+pub const VSync = enum(c_int) {
+    adaptive = C.SDL_WINDOW_SURFACE_VSYNC_ADAPTIVE,
+    disabled = C.SDL_WINDOW_SURFACE_VSYNC_DISABLED,
+    _,
+
+    pub fn to_int(self: VSync) c_int {
+        return @intFromEnum(self);
+    }
+    pub fn from_int(val: c_int) VSync {
+        return @enumFromInt(val);
+    }
+};
+
+pub const BorderSizes = extern struct {
+    top: c_uint = 0,
+    left: c_uint = 0,
+    bottom: c_uint = 0,
+    right: c_uint = 0,
+};
+
+pub const AspectRatio = extern struct {
+    min: f32 = 0.1,
+    max: f32 = 10.0,
+};
+
+pub const CreateWindowOptions = extern struct {
+    title: [:0]const u8 = "New Window",
+    flags: WindowFlags = WindowFlags{},
+    size: IVec2 = IVec2.new(800, 600),
+};
+
+pub const CreatePopupWindowOptions = extern struct {
+    flags: WindowFlags = WindowFlags{},
+    offset: IVec2 = IVec2.ZERO,
+    size: IVec2 = IVec2.new(400, 300),
+};
+
+pub const WindowsList = extern struct {
+    list: []Window,
+
+    pub fn free(self: WindowsList) void {
+        sdl_free(self.list.ptr);
+    }
+};
+
+pub const FullscreenMode = union(enum) {
+    borderless: void,
+    exclusive: *const DisplayMode,
+
+    pub fn new_borderless() FullscreenMode {
+        return FullscreenMode{ .borderless = void{} };
+    }
+    pub fn new_exclusive(mode: *const DisplayMode) FullscreenMode {
+        return FullscreenMode{ .exclusive = mode };
+    }
+};
+
+pub const WindowICCProfile = extern struct {
+    extern_ptr: *Extern,
+
+    pub const Extern = opaque {};
+};
+
+pub const DisplayModeList = extern struct {
+    modes: []*DisplayMode,
+
+    pub fn free(self: DisplayModeList) void {
+        sdl_free(self.modes.ptr);
+    }
+};
+
+pub const DisplayList = extern struct {
+    ids: []DisplayID,
+
+    pub fn free(self: DisplayList) void {
+        sdl_free(self.ids.ptr);
+    }
+};
+
+pub const WindowFlags = extern struct {
+    flags: FLAG_UINT = 0,
+
+    const FLAG_UINT: type = @TypeOf(C.SDL_WINDOW_FULLSCREEN);
+    pub fn new(flags: []const FLAG) WindowFlags {
+        var val: FLAG_UINT = 0;
+        for (flags) |flag| {
+            val |= @intFromEnum(flag);
+        }
+        return WindowFlags{ .flags = val };
+    }
+    pub fn set(self: *WindowFlags, flag: FLAG) void {
+        self.flags |= @intFromEnum(flag);
+    }
+    pub fn set_raw(self: *WindowFlags, raw_flags: FLAG_UINT) void {
+        self.flags |= raw_flags;
+    }
+    pub fn clear(self: *WindowFlags, flag: FLAG) void {
+        self.flags &= ~@intFromEnum(flag);
+    }
+    pub fn clear_raw(self: *WindowFlags, raw_flags: FLAG_UINT) void {
+        self.flags &= ~raw_flags;
+    }
+    pub fn clear_all(self: *WindowFlags) void {
+        self.flags = 0;
+    }
+    pub fn is_set(self: *const WindowFlags, flag: FLAG) bool {
+        return self.flags & @intFromEnum(flag) > 0;
+    }
+    pub fn set_many(self: *WindowFlags, other: WindowFlags) void {
+        self.flags |= other.flags;
+    }
+    pub fn clear_many(self: *WindowFlags, other: WindowFlags) void {
+        self.flags &= ~other.flags;
+    }
+    pub const FLAG = enum(FLAG_UINT) {
+        FULLSCREEN = C.SDL_WINDOW_FULLSCREEN,
+        OPENGL = C.SDL_WINDOW_OPENGL,
+        OCCLUDED = C.SDL_WINDOW_OCCLUDED,
+        HIDDEN = C.SDL_WINDOW_HIDDEN,
+        BORDERLESS = C.SDL_WINDOW_BORDERLESS,
+        RESIZABLE = C.SDL_WINDOW_RESIZABLE,
+        MINIMIZED = C.SDL_WINDOW_MINIMIZED,
+        MAXIMIZED = C.SDL_WINDOW_MAXIMIZED,
+        MOUSE_GRABBED = C.SDL_WINDOW_MOUSE_GRABBED,
+        INPUT_FOCUS = C.SDL_WINDOW_INPUT_FOCUS,
+        MOUSE_FOCUS = C.SDL_WINDOW_MOUSE_FOCUS,
+        EXTERNAL = C.SDL_WINDOW_EXTERNAL,
+        MODAL = C.SDL_WINDOW_MODAL,
+        HIGH_PIXEL_DENSITY = C.SDL_WINDOW_HIGH_PIXEL_DENSITY,
+        MOUSE_CAPTURE = C.SDL_WINDOW_MOUSE_CAPTURE,
+        MOUSE_RELATIVE_MODE = C.SDL_WINDOW_MOUSE_RELATIVE_MODE,
+        ALWAYS_ON_TOP = C.SDL_WINDOW_ALWAYS_ON_TOP,
+        UTILITY = C.SDL_WINDOW_UTILITY,
+        TOOLTIP = C.SDL_WINDOW_TOOLTIP,
+        POPUP_MENU = C.SDL_WINDOW_POPUP_MENU,
+        KEYBOARD_GRABBED = C.SDL_WINDOW_KEYBOARD_GRABBED,
+        VULKAN = C.SDL_WINDOW_VULKAN,
+        METAL = C.SDL_WINDOW_METAL,
+        TRANSPARENT = C.SDL_WINDOW_TRANSPARENT,
+        NOT_FOCUSABLE = C.SDL_WINDOW_NOT_FOCUSABLE,
+    };
+};
+
+pub const Surface = extern struct {
+    flags: SurfaceFlags = SurfaceFlags{},
+    format: PixelFormat = .UNKNOWN,
+    width: c_int = 0,
+    height: c_int = 0,
+    pitch: c_int = 0,
+    pixels: ?*anyopaque = null,
+    refcount: c_int = 0,
+    reserved: ?*anyopaque = null,
 
     // pub extern fn SDL_CreateSurface(width: c_int, height: c_int, format: SDL_PixelFormat) [*c]SDL_Surface;
     // pub extern fn SDL_CreateSurfaceFrom(width: c_int, height: c_int, format: SDL_PixelFormat, pixels: ?*anyopaque, pitch: c_int) [*c]SDL_Surface;
@@ -431,203 +962,8 @@ pub const Surface = struct {
     // pub extern fn SDL_WriteSurfacePixelFloat(surface: [*c]SDL_Surface, x: c_int, y: c_int, r: f32, g: f32, b: f32, a: f32) bool;
 };
 
-pub const ScaleMode = enum(c_int) {
-    INVALID = C.SDL_SCALEMODE_INVALID,
-    NEAREST = C.SDL_SCALEMODE_NEAREST,
-    LINEAR = C.SDL_SCALEMODE_LINEAR,
+pub const SurfaceFlags = extern struct {
+    flags: FLAG_UINT = 0,
 
-    pub fn raw(self: ScaleMode) c_int {
-        return @intFromEnum(self);
-    }
-};
-
-pub const FlipMode = enum(c_uint) {
-    NONE = C.SDL_FLIP_NONE,
-    HORIZONTAL = C.SDL_FLIP_HORIZONTAL,
-    VERTICAL = C.SDL_FLIP_VERTICAL,
-    HORIZ_VERT = C.SDL_FLIP_HORIZONTAL | C.SDL_FLIP_VERTICAL,
-
-    pub fn raw(self: FlipMode) c_uint {
-        return @intFromEnum(self);
-    }
-};
-
-pub const Clipboard = struct {
-    pub fn get_text() [:0]const u8 {
-        const clip: [*c]u8 = C.SDL_GetClipboardText();
-        var i: usize = 0;
-        while (clip[i] != 0) : (i += 1) {}
-        return clip[0..i];
-    }
-    pub fn set_text(text: [:0]const u8) bool {
-        return C.SDL_SetClipboardText(text);
-    }
-    pub fn has_text() bool {
-        return C.SDL_HasClipboardText();
-    }
-
-    // pub extern fn SDL_SetPrimarySelectionText(text: [*c]const u8) bool;
-    // pub extern fn SDL_GetPrimarySelectionText() [*c]u8;
-    // pub extern fn SDL_HasPrimarySelectionText() bool;
-    // pub const SDL_ClipboardDataCallback = ?*const fn (?*anyopaque, [*c]const u8, [*c]usize) callconv(.c) ?*const anyopaque;
-    // pub const SDL_ClipboardCleanupCallback = ?*const fn (?*anyopaque) callconv(.c) void;
-    // pub extern fn SDL_SetClipboardData(callback: SDL_ClipboardDataCallback, cleanup: SDL_ClipboardCleanupCallback, userdata: ?*anyopaque, mime_types: [*c][*c]const u8, num_mime_types: usize) bool;
-    // pub extern fn SDL_ClearClipboardData() bool;
-    // pub extern fn SDL_GetClipboardData(mime_type: [*c]const u8, size: [*c]usize) ?*anyopaque;
-    // pub extern fn SDL_HasClipboardData(mime_type: [*c]const u8) bool;
-    // pub extern fn SDL_GetClipboardMimeTypes(num_mime_types: [*c]usize) [*c][*c]u8;
-};
-
-pub const DisplayOrientation = enum(c_int) {
-    UNKNOWN = C.SDL_ORIENTATION_UNKNOWN,
-    LANDSCAPE = C.SDL_ORIENTATION_LANDSCAPE,
-    LANDSCAPE_FLIPPED = C.SDL_ORIENTATION_LANDSCAPE_FLIPPED,
-    PORTRAIT = C.SDL_ORIENTATION_PORTRAIT,
-    PORTRAIT_FLIPPED = C.SDL_ORIENTATION_PORTRAIT_FLIPPED,
-
-    pub fn to_int(self: DisplayOrientation) c_int {
-        return @intFromEnum(self);
-    }
-    pub fn from_int(val: c_int) DisplayOrientation {
-        return @enumFromInt(val);
-    }
-};
-
-pub const DisplayID = extern struct {
-    id: u32 = 0,
-
-    pub fn try_get_all_displays() ?DisplayList {
-        const len: c_int = 0;
-        const c_ptr: ?[*]u32 = C.SDL_GetDisplays(&len);
-        if (c_ptr) |c_ptr_good| {
-            const ptr: [*]DisplayID = @ptrCast(@alignCast(c_ptr_good));
-            return DisplayList{ .ids = ptr[0..len] };
-        }
-        return null;
-    }
-    pub fn try_get_primary_display() ?DisplayID {
-        const id_result = C.SDL_GetPrimaryDisplay();
-        if (id_result == 0) return null;
-        return DisplayID{ .id = id_result };
-    }
-    pub fn try_get_properties(self: DisplayID) ?Properties {
-        const id_result = C.SDL_GetDisplayProperties(self.id);
-        if (id_result == 0) return null;
-        return Properties{ .id = id_result };
-    }
-    pub fn try_get_name(self: DisplayID) ?[*:0]const u8 {
-        return C.SDL_GetDisplayName(self.id);
-    }
-    pub fn try_get_bounds(self: DisplayID) ?Rect {
-        const rect: Rect = .{};
-        if (C.SDL_GetDisplayBounds(self.id, &rect)) return rect;
-        return null;
-    }
-    pub fn try_get_usable_bounds(self: DisplayID) ?Rect {
-        const rect: Rect = .{};
-        if (C.SDL_GetDisplayUsableBounds(self.id, &rect)) return rect;
-        return null;
-    }
-    pub fn get_natural_orientation(self: DisplayID) DisplayOrientation {
-        return DisplayOrientation.from_int(C.SDL_GetNaturalDisplayOrientation(self.id));
-    }
-    pub fn get_current_orientation(self: DisplayID) DisplayOrientation {
-        return DisplayOrientation.from_int(C.SDL_GetCurrentDisplayOrientation(self.id));
-    }
-    pub fn get_content_scale(self: DisplayID) f32 {
-        return C.SDL_GetDisplayContentScale(self.id);
-    }
-    pub fn try_get_all_fullscreen_modes(self: DisplayID) ?DisplayModeList {
-        const len: c_int = 0;
-        const ptr_result: ?[*]*DisplayMode = C.SDL_GetFullscreenDisplayModes(self.id, &len);
-        if (ptr_result) |ptr| return DisplayModeList{
-            .modes = ptr[0..len],
-        };
-        return null;
-    }
-    pub fn try_get_closest_fullscreen_mode(self: DisplayID, options: ClosestDisplayModeOptions) ?DisplayMode {
-        const mode = DisplayMode{};
-        if (C.SDL_GetClosestFullscreenDisplayMode(self.id, options.width, options.height, options.refresh_rate, options.include_high_density_modes, &mode)) return mode;
-        return null;
-    }
-    pub fn try_get_desktop_mode(self: DisplayID) ?*const DisplayMode {
-        return C.SDL_GetDesktopDisplayMode(self.id);
-    }
-    pub fn try_get_current_mode(self: DisplayID) ?*const DisplayMode {
-        return C.SDL_GetCurrentDisplayMode(self.id);
-    }
-    pub fn try_get_display_for_point(point: Point) ?DisplayID {
-        const id_result = C.SDL_GetDisplayForPoint(&point);
-        if (id_result == 0) return null;
-        return DisplayID{ .id = id_result };
-    }
-    pub fn try_get_display_for_rect(rect: Rect) ?DisplayID {
-        const id_result = C.SDL_GetDisplayForRect(&rect);
-        if (id_result == 0) return null;
-        return DisplayID{ .id = id_result };
-    }
-    pub fn try_get_display_for_window(window: Window) ?DisplayID {
-        const id_result = C.SDL_GetDisplayForWindow(window.extern_ptr);
-        if (id_result == 0) return null;
-        return DisplayID{ .id = id_result };
-    }
-};
-
-pub const ClosestDisplayModeOptions = struct {
-    width: f32 = 800,
-    height: f32 = 600,
-    refresh_rate: f32 = 60.0,
-    include_high_density_modes: bool = true,
-};
-
-pub const WindowID = extern struct {
-    id: u32 = 0,
-};
-
-pub const DisplayModeData = extern struct {
-    extern_ptr: *opaque {},
-};
-
-pub const DisplayMode = extern struct {
-    display: DisplayID = DisplayID{},
-    pixel_format: PixelFormat = .UNKNOWN,
-    width: c_int = 0,
-    height: c_int = 0,
-    pixel_density: f32 = 0.0,
-    refresh_rate: f32 = 0.0,
-    refresh_rate_numerator: c_int = 0,
-    refresh_rate_denominator: c_int = 0,
-    data: ?DisplayModeData = init_zero(?DisplayModeData),
-
-    // pub inline fn to_c(self: DisplayMode) C.SDL_DisplayMode {
-    //     return @bitCast(self);
-    // }
-};
-
-pub const Window = extern struct {
-    extern_ptr: *opaque {},
-
-    pub fn try_get_display(self: Window) ?DisplayID {
-        return DisplayID.try_get_display_for_window(self);
-    }
-};
-
-pub const DisplayModeList = struct {
-    modes: []*DisplayMode,
-
-    pub fn free(self: DisplayModeList) void {
-        sdl_free(self.modes.ptr);
-    }
-};
-
-pub const DisplayList = struct {
-    ids: []DisplayID,
-
-    pub fn free(self: DisplayList) void {
-        sdl_free(self.ids.ptr);
-    }
-};
-
-pub const WindowFlags = struct {
-    flags: u64,
+    const FLAG_UINT: type = C.SDL_SurfaceFlags;
 };

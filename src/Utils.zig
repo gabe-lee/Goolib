@@ -72,3 +72,15 @@ pub fn is_valid_value_for_enum(comptime ENUM_TYPE: type, int_value: anytype) boo
     if (BinarySearch.simple_binary_search(enum_info.tag_type, ordered_values[0..], int_value) == null) return false;
     return true;
 }
+
+pub fn make_slice_from_sentinel_ptr(comptime T: type, comptime S: T, ptr: [*:S]T) [:S]T {
+    var i: usize = 0;
+    while (ptr[i] != S) : (i += 1) {}
+    return ptr[0..i :S];
+}
+
+pub fn make_const_slice_from_sentinel_ptr(comptime T: type, comptime S: T, ptr: [*:S]const T) [:S]T {
+    var i: usize = 0;
+    while (ptr[i] != S) : (i += 1) {}
+    return ptr[0..i :S];
+}
