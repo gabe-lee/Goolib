@@ -11,6 +11,54 @@ const C = @cImport({
     @cInclude("SDL3/SDL_main.h");
 });
 
+pub const SDL3Error = error{
+    SDL3_ERROR__null_value,
+    SDL3_ERROR__operation_failure,
+};
+
+inline fn ptr_cast_or_null_error(result_ptr: anytype, comptime CAST_TO: type) SDL3Error!CAST_TO {
+    if (result_ptr) |good_ptr| return @ptrCast(@alignCast(good_ptr));
+    return SDL3Error.SDL3_ERROR__null_value;
+}
+inline fn slice_cast_or_null_error(result_ptr: anytype, len_ptr: anytype, comptime CAST_TO: type) SDL3Error!CAST_TO {
+    if (result_ptr) |good_ptr| return @as(CAST_TO, @ptrCast(@alignCast(good_ptr)))[0..len_ptr.*];
+    return SDL3Error.SDL3_ERROR__null_value;
+}
+inline fn id_or_null_error(result_id: anytype) SDL3Error!@TypeOf(result_id) {
+    if (result_id == 0) return SDL3Error.SDL3_ERROR__null_value;
+    return result_id;
+}
+inline fn ok_or_fail_error(result: bool) SDL3Error!void {
+    if (result) return void{};
+    return SDL3Error.SDL3_ERROR__operation_failure;
+}
+
+pub inline fn MightError(comptime T: type) type {
+    return switch (@typeInfo(T)) {
+        .bool => void,
+        .pointer => |info| ret: {
+            var new_info = info;
+            new_info.is_allowzero = false;
+            break :ret SDL3Error!@Type(new_info);
+        },
+        .optional => |info| SDL3Error!info.child,
+        .int => SDL3Error!T,
+        else => @compileError("no defined error conversion for type " ++ @typeName(T)),
+    };
+}
+
+inline fn make_err(comptime E: SDL3Error, value: anytype) MightError(@TypeOf(value)) {
+    return switch (@typeInfo(@TypeOf(value))) {
+        .bool => if (!value) E else void{},
+        .pointer, .optional => value orelse E,
+        .int => |info| switch (info.signedness) {
+            .signed => if (value >= 0) value else E,
+            .unsigned => if (value != 0) value else E,
+        },
+        else => comptime unreachable,
+    };
+}
+
 fn sdl_free(mem: ?*anyopaque) void {
     C.SDL_free(mem);
 }
@@ -393,37 +441,28 @@ pub const DisplayOrientation = enum(c_int) {
 pub const DisplayID = extern struct {
     id: u32 = 0,
 
-    pub fn try_get_all_displays() ?DisplayList {
-        const len: c_int = 0;
-        const c_ptr: ?[*]u32 = C.SDL_GetDisplays(&len);
-        if (c_ptr) |c_ptr_good| {
-            const ptr: [*]DisplayID = @ptrCast(@alignCast(c_ptr_good));
-            return DisplayList{ .ids = ptr[0..len] };
-        }
-        return null;
+    pub fn get_all_displays() SDL3Error!DisplayList {
+        var len: c_int = 0;
+        return DisplayList{ .ids = try slice_cast_or_null_error(C.SDL_GetDisplays(&len), &len, [*]u32) };
     }
-    pub fn try_get_primary_display() ?DisplayID {
-        const id_result = C.SDL_GetPrimaryDisplay();
-        if (id_result == 0) return null;
-        return DisplayID{ .id = id_result };
+    pub fn get_primary_display() SDL3Error!DisplayID {
+        return DisplayID{ .id = try id_or_null_error(C.SDL_GetPrimaryDisplay()) };
     }
-    pub fn try_get_properties(self: DisplayID) ?PropertiesID {
-        const id_result = C.SDL_GetDisplayProperties(self.id);
-        if (id_result == 0) return null;
-        return PropertiesID{ .id = id_result };
+    pub fn get_properties(self: DisplayID) SDL3Error!PropertiesID {
+        return PropertiesID{ .id = try id_or_null_error(C.SDL_GetDisplayProperties(self.id)) };
     }
-    pub fn try_get_name(self: DisplayID) ?[*:0]const u8 {
-        return C.SDL_GetDisplayName(self.id);
+    pub fn get_name(self: DisplayID) SDL3Error![*:0]const u8 {
+        return ptr_cast_or_null_error(C.SDL_GetDisplayName(self.id), [*:0]const u8);
     }
-    pub fn try_get_bounds(self: DisplayID) ?IRect2 {
-        const rect: IRect2 = .{};
-        if (C.SDL_GetDisplayBounds(self.id, &rect)) return rect;
-        return null;
+    pub fn get_bounds(self: DisplayID) SDL3Error!IRect2 {
+        var rect = IRect2{};
+        try ok_or_fail_error(C.SDL_GetDisplayBounds(self.id, @ptrCast(@alignCast(&rect))));
+        return rect;
     }
-    pub fn try_get_usable_bounds(self: DisplayID) ?IRect2 {
-        const rect: IRect2 = .{};
-        if (C.SDL_GetDisplayUsableBounds(self.id, &rect)) return rect;
-        return null;
+    pub fn get_usable_bounds(self: DisplayID) SDL3Error!IRect2 {
+        var rect = IRect2{};
+        try ok_or_fail_error(C.SDL_GetDisplayUsableBounds(self.id, @ptrCast(@alignCast(&rect))));
+        return rect;
     }
     pub fn get_natural_orientation(self: DisplayID) DisplayOrientation {
         return DisplayOrientation.from_int(C.SDL_GetNaturalDisplayOrientation(self.id));
@@ -434,34 +473,28 @@ pub const DisplayID = extern struct {
     pub fn get_content_scale(self: DisplayID) f32 {
         return C.SDL_GetDisplayContentScale(self.id);
     }
-    pub fn try_get_all_fullscreen_modes(self: DisplayID) ?DisplayModeList {
+    pub fn get_all_fullscreen_modes(self: DisplayID) SDL3Error!DisplayModeList {
         const len: c_int = 0;
-        const ptr_result: ?[*]*DisplayMode = C.SDL_GetFullscreenDisplayModes(self.id, &len);
-        if (ptr_result) |ptr| return DisplayModeList{
-            .modes = ptr[0..len],
+        return DisplayModeList{
+            .modes = try slice_cast_or_null_error(C.SDL_GetFullscreenDisplayModes(self.id, &len), &len, [*]*DisplayMode),
         };
-        return null;
     }
-    pub fn try_get_closest_fullscreen_mode(self: DisplayID, options: ClosestDisplayModeOptions) ?DisplayMode {
+    pub fn get_closest_fullscreen_mode(self: DisplayID, options: ClosestDisplayModeOptions) SDL3Error!DisplayMode {
         const mode = DisplayMode{};
-        if (C.SDL_GetClosestFullscreenDisplayMode(self.id, options.width, options.height, options.refresh_rate, options.include_high_density_modes, &mode)) return mode;
-        return null;
+        try ok_or_fail_error(C.SDL_GetClosestFullscreenDisplayMode(self.id, options.width, options.height, options.refresh_rate, options.include_high_density_modes, @ptrCast(@alignCast(&mode))));
+        return mode;
     }
-    pub fn try_get_desktop_mode(self: DisplayID) ?*const DisplayMode {
-        return C.SDL_GetDesktopDisplayMode(self.id);
+    pub fn get_desktop_mode(self: DisplayID) SDL3Error!*const DisplayMode {
+        return ptr_cast_or_null_error(C.SDL_GetDesktopDisplayMode(self.id), *const DisplayMode);
     }
-    pub fn try_get_current_mode(self: DisplayID) ?*const DisplayMode {
-        return C.SDL_GetCurrentDisplayMode(self.id);
+    pub fn get_current_mode(self: DisplayID) SDL3Error!*const DisplayMode {
+        return ptr_cast_or_null_error(C.SDL_GetCurrentDisplayMode(self.id), *const DisplayMode);
     }
-    pub fn try_get_display_for_point(point: IVec2) ?DisplayID {
-        const id_result = C.SDL_GetDisplayForPoint(&point);
-        if (id_result == 0) return null;
-        return DisplayID{ .id = id_result };
+    pub fn get_display_for_point(point: IVec2) SDL3Error!DisplayID {
+        return DisplayID{ .id = try id_or_null_error(C.SDL_GetDisplayForPoint(@ptrCast(@alignCast(&point)))) };
     }
-    pub fn try_get_display_for_rect(rect: IRect2) ?DisplayID {
-        const id_result = C.SDL_GetDisplayForRect(&rect);
-        if (id_result == 0) return null;
-        return DisplayID{ .id = id_result };
+    pub fn get_display_for_rect(rect: IRect2) SDL3Error!DisplayID {
+        return DisplayID{ .id = try id_or_null_error(C.SDL_GetDisplayForRect(@ptrCast(@alignCast(&rect)))) };
     }
 };
 
@@ -475,13 +508,15 @@ pub const ClosestDisplayModeOptions = struct {
 pub const WindowID = extern struct {
     id: u32 = 0,
 
-    pub fn try_get_window(self: WindowID) ?*Window {
-        return C.SDL_GetWindowFromID(self.id);
+    pub fn get_window(self: WindowID) SDL3Error!Window {
+        return Window{ .extern_ptr = try ptr_cast_or_null_error(C.SDL_GetWindowFromID(self.id), Window.External) };
     }
 };
 
 pub const DisplayModeData = extern struct {
-    extern_ptr: *anyopaque,
+    extern_ptr: *External,
+
+    pub const External: type = C.SDL_DisplayModeData;
 };
 
 pub const DisplayMode = extern struct {
@@ -493,7 +528,7 @@ pub const DisplayMode = extern struct {
     refresh_rate: f32 = 0.0,
     refresh_rate_numerator: c_int = 0,
     refresh_rate_denominator: c_int = 0,
-    data: ?DisplayModeData = init_zero(?DisplayModeData),
+    data: ?DisplayModeData = null,
 
     // pub inline fn to_c(self: DisplayMode) C.SDL_DisplayMode {
     //     return @bitCast(self);
@@ -503,10 +538,10 @@ pub const DisplayMode = extern struct {
 pub const Window = extern struct {
     extern_ptr: *External,
 
-    pub const External = opaque {};
+    pub const External: type = C.SDL_Window;
 
-    pub fn try_get_display(self: Window) ?DisplayID {
-        return DisplayID.try_get_display_for_window(self);
+    pub fn try_get_display_id(self: Window) SDL3Error!DisplayID {
+        return DisplayID{ .id = try id_or_null_error(C.SDL_GetDisplayForWindow(self.extern_ptr)) };
     }
     pub fn get_pixel_density(self: Window) f32 {
         return C.SDL_GetWindowPixelDensity(self.extern_ptr);
@@ -519,48 +554,36 @@ pub const Window = extern struct {
         if (result) |mode| return FullscreenMode.new_exclusive(mode);
         return FullscreenMode.new_borderless();
     }
-    pub fn try_set_fullscreen_display_mode(self: Window, mode: FullscreenMode) bool {
+    pub fn set_fullscreen_display_mode(self: Window, mode: FullscreenMode) SDL3Error!void {
         switch (mode) {
-            .borderless => return C.SDL_SetWindowFullscreenMode(self.extern_ptr, null),
-            .exclusive => |excl_mode| return C.SDL_SetWindowFullscreenMode(self.extern_ptr, excl_mode),
+            .borderless => try ok_or_fail_error(C.SDL_SetWindowFullscreenMode(self.extern_ptr, null)),
+            .exclusive => |excl_mode| try ok_or_fail_error(C.SDL_SetWindowFullscreenMode(self.extern_ptr, @ptrCast(@alignCast(excl_mode)))),
         }
     }
-    pub fn try_get_icc_profile(self: Window, size: usize) ?WindowICCProfile {
-        const result: ?*WindowICCProfile.Extern = C.SDL_GetWindowICCProfile(self.extern_ptr, &size);
-        if (result) |ptr| return WindowICCProfile{ .extern_ptr = ptr };
-        return null;
+    pub fn get_icc_profile(self: Window, size: usize) SDL3Error!WindowICCProfile {
+        return WindowICCProfile{ .extern_ptr = try ptr_cast_or_null_error(C.SDL_GetWindowICCProfile(self.extern_ptr, &size), *WindowICCProfile.Extern) };
     }
     pub fn get_pixel_format(self: Window) PixelFormat {
         return @enumFromInt(C.SDL_GetWindowPixelFormat(self.extern_ptr));
     }
-    pub fn try_get_all_windows() ?WindowsList {
+    pub fn get_all_windows() SDL3Error!WindowsList {
         var len: c_int = 0;
-        const result: ?[*]*Window.External = C.SDL_GetWindows(&len);
-        if (result) |ptr| return WindowsList{ .list = @as([*]Window, @ptrCast(@alignCast(ptr)))[0..len] };
-        return null;
+        return WindowsList{ .list = try slice_cast_or_null_error(C.SDL_GetWindows(&len), &len, [*]*Window.External) };
     }
-    pub fn try_create_window(options: CreateWindowOptions) ?Window {
-        const result: ?*Window.External = C.SDL_CreateWindow(options.title.ptr, options.width, options.height, options.flags);
-        if (result) |ptr| return Window{ .extern_ptr = ptr };
-        return null;
+    pub fn create(options: CreateWindowOptions) SDL3Error!Window {
+        return Window{ .extern_ptr = try ptr_cast_or_null_error(C.SDL_CreateWindow(options.title.ptr, options.width, options.height, options.flags), *Window.External) };
     }
-    pub fn try_create_popup_window(parent: Window, options: CreatePopupWindowOptions) ?Window {
-        const result: ?*Window.External = C.SDL_CreatePopupWindow(parent.extern_ptr, options.x_offset, options.y_offset, options.width, options.height, options.flags);
-        if (result) |ptr| return Window{ .extern_ptr = ptr };
-        return null;
+    pub fn create_popup_window(parent: Window, options: CreatePopupWindowOptions) SDL3Error!Window {
+        return Window{ .extern_ptr = try ptr_cast_or_null_error(C.SDL_CreatePopupWindow(parent.extern_ptr, options.x_offset, options.y_offset, options.width, options.height, options.flags), *Window.External) };
     }
-    pub fn try_create_window_with_properties(properties: PropertiesID) ?Window {
-        const result: ?*Window.External = C.SDL_CreateWindowWithProperties(properties.id);
-        if (result) |ptr| return Window{ .extern_ptr = ptr };
-        return null;
+    pub fn create_window_with_properties(properties: PropertiesID) SDL3Error!Window {
+        return Window{ .extern_ptr = try ptr_cast_or_null_error(C.SDL_CreateWindowWithProperties(properties.id), *Window.External) };
     }
     pub fn get_id(self: Window) WindowID {
         return WindowID{ .id = C.SDL_GetWindowID(self.extern_ptr) };
     }
-    pub fn try_get_parent_window(self: Window) ?Window {
-        const result: ?*Window.External = C.SDL_GetWindowFromID(self.extern_ptr);
-        if (result) |ptr| return Window{ .extern_ptr = ptr };
-        return null;
+    pub fn get_parent_window(self: Window) SDL3Error!Window {
+        return Window{ .extern_ptr = try ptr_cast_or_null_error(C.SDL_GetWindowParent(self.extern_ptr), *Window.External) };
     }
     pub fn get_properties(self: Window) PropertiesID {
         return PropertiesID{ .id = C.SDL_GetWindowProperties(self.extern_ptr) };
@@ -568,186 +591,224 @@ pub const Window = extern struct {
     pub fn get_flags(self: Window) WindowFlags {
         return WindowFlags{ .flags = C.SDL_GetWindowFlags(self.extern_ptr) };
     }
-    pub fn try_set_title(self: Window, title: [:0]const u8) bool {
-        return C.SDL_SetWindowTitle(self.extern_ptr, title.ptr);
+    pub fn set_title(self: Window, title: [:0]const u8) SDL3Error!void {
+        try ok_or_fail_error(C.SDL_SetWindowTitle(self.extern_ptr, title.ptr));
     }
     pub fn get_title_ptr(self: Window) [*:0]const u8 {
-        return C.SDL_GetWindowTitle(self.extern_ptr);
+        return @ptrCast(@alignCast(C.SDL_GetWindowTitle(self.extern_ptr)));
     }
     pub fn get_title_slice(self: Window) [:0]const u8 {
         const ptr = self.get_title_ptr();
         return Root.Utils.make_slice_from_sentinel_ptr(u8, 0, ptr);
     }
-    pub fn try_set_window_icon(self: Window, icon: *Surface) bool {
-        return C.SDL_SetWindowIcon(self.extern_ptr, @ptrCast(@alignCast(icon)));
+    pub fn set_window_icon(self: Window, icon: *Surface) SDL3Error!void {
+        try ok_or_fail_error(C.SDL_SetWindowIcon(self.extern_ptr, @ptrCast(@alignCast(icon))));
     }
-    pub fn try_set_window_position(self: Window, pos: IVec2) bool {
-        return C.SDL_SetWindowPosition(self.extern_ptr, pos.x, pos.y);
+    pub fn set_window_position(self: Window, pos: IVec2) SDL3Error!void {
+        try ok_or_fail_error(C.SDL_SetWindowPosition(self.extern_ptr, pos.x, pos.y));
     }
-    pub fn try_get_window_position(self: Window) ?IVec2 {
-        var point: IVec2 = IVec2.ZERO;
-        const success = C.SDL_GetWindowPosition(self.extern_ptr, &point.x, &point.y);
-        if (success) return point;
-        return null;
+    pub fn get_window_position(self: Window) SDL3Error!IVec2 {
+        var point = IVec2{};
+        try ok_or_fail_error(C.SDL_GetWindowPosition(self.extern_ptr, &point.x, &point.y));
+        return point;
     }
-    pub fn try_set_size(self: Window, size: IVec2) bool {
-        return C.SDL_SetWindowSize(self.extern_ptr, size.x, size.y);
+    pub fn set_size(self: Window, size: IVec2) SDL3Error!void {
+        try ok_or_fail_error(C.SDL_SetWindowSize(self.extern_ptr, size.x, size.y));
     }
-    pub fn try_get_size(self: Window) ?IVec2 {
+    pub fn get_size(self: Window) SDL3Error!IVec2 {
         var size = IVec2.ZERO;
-        const success = C.SDL_GetWindowSize(self.extern_ptr, &size.x, &size.y);
-        if (success) return size;
-        return null;
+        try ok_or_fail_error(C.SDL_GetWindowSize(self.extern_ptr, &size.x, &size.y));
+        return size;
     }
-    pub fn try_get_safe_area(self: Window) ?IRect2 {
+    pub fn get_safe_area(self: Window) SDL3Error!IRect2 {
         var rect = IRect2{};
-        const success = C.SDL_GetWindowSafeArea(self.extern_ptr, @ptrCast(@alignCast(&rect)));
-        if (success) return rect;
-        return null;
+        try ok_or_fail_error(C.SDL_GetWindowSafeArea(self.extern_ptr, @ptrCast(@alignCast(&rect))));
+        return rect;
     }
-    pub fn try_set_aspect_ratio(self: Window, aspect_ratio: AspectRatio) bool {
-        return C.SDL_SetWindowAspectRatio(self.extern_ptr, aspect_ratio.min, aspect_ratio.max);
+    pub fn set_aspect_ratio(self: Window, aspect_range: AspectRange) SDL3Error!void {
+        try ok_or_fail_error(C.SDL_SetWindowAspectRatio(self.extern_ptr, aspect_range.min, aspect_range.max));
     }
-    pub fn try_get_aspect_ratio(self: Window) ?AspectRatio {
-        var ratio = AspectRatio{};
-        const success = C.SDL_SetWindowAspectRatio(self.extern_ptr, &ratio.min, &ratio.max);
-        if (success) return ratio;
-        return null;
+    pub fn get_aspect_ratio(self: Window) SDL3Error!AspectRange {
+        var ratio = AspectRange{};
+        try ok_or_fail_error(C.SDL_SetWindowAspectRatio(self.extern_ptr, &ratio.min, &ratio.max));
+        return ratio;
     }
-    pub fn try_get_border_sizes(self: Window) ?BorderSizes {
+    pub fn get_border_sizes(self: Window) SDL3Error!BorderSizes {
         var sizes = BorderSizes{};
-        const success = C.SDL_GetWindowBordersSize(self.extern_ptr, &sizes.top, &sizes.left, &sizes.bottom, &sizes.right);
-        if (success) return sizes;
-        return null;
+        try ok_or_fail_error(C.SDL_GetWindowBordersSize(self.extern_ptr, &sizes.top, &sizes.left, &sizes.bottom, &sizes.right));
+        return sizes;
     }
-    pub fn try_get_size_in_pixels(self: Window) ?IVec2 {
+    pub fn get_size_in_pixels(self: Window) SDL3Error!IVec2 {
         var size = IVec2{};
-        const success = C.SDL_GetWindowSizeInPixels(self.extern_ptr, &size.x, &size.y);
-        if (success) return size;
-        return null;
+        try ok_or_fail_error(C.SDL_GetWindowSizeInPixels(self.extern_ptr, &size.x, &size.y));
+        return size;
     }
-    pub fn try_set_minimum_size(self: Window, size: IVec2) bool {
-        return C.SDL_SetWindowMinimumSize(self.extern_ptr, size.x, size.y);
+    pub fn set_minimum_size(self: Window, size: IVec2) SDL3Error!void {
+        try ok_or_fail_error(C.SDL_SetWindowMinimumSize(self.extern_ptr, size.x, size.y));
     }
-    pub fn try_get_minimum_size(self: Window) ?IVec2 {
+    pub fn get_minimum_size(self: Window) SDL3Error!IVec2 {
         var size = IVec2{};
-        const success = C.SDL_GetWindowMinimumSize(self.extern_ptr, &size.x, &size.y);
-        if (success) return size;
-        return null;
+        try ok_or_fail_error(C.SDL_GetWindowMinimumSize(self.extern_ptr, &size.x, &size.y));
+        return size;
     }
-    pub fn try_set_maximum_size(self: Window, size: IVec2) bool {
-        return C.SDL_SetWindowMaximumSize(self.extern_ptr, size.x, size.y);
+    pub fn set_maximum_size(self: Window, size: IVec2) SDL3Error!void {
+        try ok_or_fail_error(C.SDL_SetWindowMaximumSize(self.extern_ptr, size.x, size.y));
     }
-    pub fn try_get_maximum_size(self: Window) ?IVec2 {
+    pub fn get_maximum_size(self: Window) SDL3Error!IVec2 {
         var size = IVec2{};
-        const success = C.SDL_GetWindowMaximumSize(self.extern_ptr, &size.x, &size.y);
-        if (success) return size;
-        return null;
+        try ok_or_fail_error(C.SDL_GetWindowMaximumSize(self.extern_ptr, &size.x, &size.y));
+        return size;
     }
-    pub fn try_set_bordered(self: Window, state: bool) bool {
-        return C.SDL_SetWindowBordered(self.extern_ptr, state);
+    pub fn set_bordered(self: Window, state: bool) SDL3Error!void {
+        try ok_or_fail_error(C.SDL_SetWindowBordered(self.extern_ptr, state));
     }
-    pub fn try_set_resizable(self: Window, state: bool) bool {
-        return C.SDL_SetWindowResizable(self.extern_ptr, state);
+    pub fn set_resizable(self: Window, state: bool) SDL3Error!void {
+        try ok_or_fail_error(C.SDL_SetWindowResizable(self.extern_ptr, state));
     }
-    pub fn try_set_always_on_top(self: Window, state: bool) bool {
-        return C.SDL_SetWindowAlwaysOnTop(self.extern_ptr, state);
+    pub fn set_always_on_top(self: Window, state: bool) SDL3Error!void {
+        try ok_or_fail_error(C.SDL_SetWindowAlwaysOnTop(self.extern_ptr, state));
     }
-    pub fn try_show(self: Window) bool {
-        return C.SDL_ShowWindow(self.extern_ptr);
+    pub fn show(self: Window) SDL3Error!void {
+        try ok_or_fail_error(C.SDL_ShowWindow(self.extern_ptr));
     }
-    pub fn try_hide(self: Window) bool {
-        return C.SDL_HideWindow(self.extern_ptr);
+    pub fn hide(self: Window) SDL3Error!void {
+        try ok_or_fail_error(C.SDL_HideWindow(self.extern_ptr));
     }
-    pub fn try_raise(self: Window) bool {
-        return C.SDL_RaiseWindow(self.extern_ptr);
+    pub fn raise(self: Window) SDL3Error!void {
+        try ok_or_fail_error(C.SDL_RaiseWindow(self.extern_ptr));
     }
-    pub fn try_maximize(self: Window) bool {
-        return C.SDL_MaximizeWindow(self.extern_ptr);
+    pub fn maximize(self: Window) SDL3Error!void {
+        try ok_or_fail_error(C.SDL_MaximizeWindow(self.extern_ptr));
     }
-    pub fn try_minimize(self: Window) bool {
-        return C.SDL_MinimizeWindow(self.extern_ptr);
+    pub fn minimize(self: Window) SDL3Error!void {
+        try ok_or_fail_error(C.SDL_MinimizeWindow(self.extern_ptr));
     }
-    pub fn try_restore(self: Window) bool {
-        return C.SDL_RestoreWindow(self.extern_ptr);
+    pub fn restore(self: Window) SDL3Error!void {
+        try ok_or_fail_error(C.SDL_RestoreWindow(self.extern_ptr));
     }
-    pub fn try_set_fullscreen(self: Window, state: bool) bool {
-        return C.SDL_SetWindowFullscreen(self.extern_ptr, state);
+    pub fn set_fullscreen(self: Window, state: bool) SDL3Error!void {
+        try ok_or_fail_error(C.SDL_SetWindowFullscreen(self.extern_ptr, state));
     }
-    pub fn try_sync(self: Window) bool {
-        return C.SDL_SyncWindow(self.extern_ptr);
+    pub fn sync(self: Window) SDL3Error!void {
+        try ok_or_fail_error(C.SDL_SyncWindow(self.extern_ptr));
     }
     pub fn has_surface(self: Window) bool {
         return C.SDL_WindowHasSurface(self.extern_ptr);
     }
-    pub fn try_get_surface(self: Window) ?*Surface {
-        return @ptrCast(@alignCast(C.SDL_GetWindowSurface(self.extern_ptr)));
+    pub fn get_surface(self: Window) SDL3Error!*Surface {
+        return ptr_cast_or_null_error(C.SDL_GetWindowSurface(self.extern_ptr), *Surface);
     }
-    pub fn try_set_surface_vsync(self: Window, vsync: VSync) bool {
-        return C.SDL_SetWindowSurfaceVSync(self.extern_ptr, vsync.to_int());
+    pub fn set_surface_vsync(self: Window, vsync: VSync) SDL3Error!void {
+        try ok_or_fail_error(C.SDL_SetWindowSurfaceVSync(self.extern_ptr, vsync.to_int()));
     }
-    pub fn try_get_surface_vsync(self: Window) ?VSync {
+    pub fn get_surface_vsync(self: Window) SDL3Error!VSync {
         var int: c_int = 0;
-        const success = C.SDL_GetWindowSurfaceVSync(self.extern_ptr, &int);
-        if (success) return VSync.from_int(int);
-        return null;
+        try ok_or_fail_error(C.SDL_GetWindowSurfaceVSync(self.extern_ptr, &int));
+        return VSync.from_int(int);
     }
-    pub fn try_update_surface(self: Window) bool {
-        return C.SDL_UpdateWindowSurface(self.extern_ptr);
+    pub fn update_surface(self: Window) SDL3Error!void {
+        try ok_or_fail_error(C.SDL_UpdateWindowSurface(self.extern_ptr));
     }
-    pub fn try_update_surface_rects(self: Window, rects: []const IRect2) bool {
-        return C.SDL_UpdateWindowSurfaceRects(self.extern_ptr, @ptrCast(@alignCast(rects.ptr)), @intCast(rects.len));
+    pub fn update_surface_rects(self: Window, rects: []const IRect2) SDL3Error!void {
+        try ok_or_fail_error(C.SDL_UpdateWindowSurfaceRects(self.extern_ptr, @ptrCast(@alignCast(rects.ptr)), @intCast(rects.len)));
     }
-    pub fn try_destroy_surface(self: Window) bool {
-        return C.SDL_DestroyWindowSurface(self.extern_ptr);
+    pub fn destroy_surface(self: Window) SDL3Error!void {
+        try ok_or_fail_error(C.SDL_DestroyWindowSurface(self.extern_ptr));
     }
-    pub fn try_set_keyboard_grab(self: Window, state: bool) bool {
-        return C.SDL_SetWindowKeyboardGrab(self.extern_ptr, state);
+    pub fn set_keyboard_grab(self: Window, state: bool) SDL3Error!void {
+        try ok_or_fail_error(C.SDL_SetWindowKeyboardGrab(self.extern_ptr, state));
     }
-    pub fn try_set_mouse_grab(self: Window, state: bool) bool {
-        return C.SDL_SetWindowMouseGrab(self.extern_ptr, state);
+    pub fn set_mouse_grab(self: Window, state: bool) SDL3Error!void {
+        try ok_or_fail_error(C.SDL_SetWindowMouseGrab(self.extern_ptr, state));
     }
-    pub fn try_get_keyboard_grab(self: Window) bool {
-        return C.SDL_GetWindowKeyboardGrab(self.extern_ptr);
+    pub fn get_keyboard_grab(self: Window) SDL3Error!void {
+        try ok_or_fail_error(C.SDL_GetWindowKeyboardGrab(self.extern_ptr));
     }
-    pub fn try_get_mouse_grab(self: Window) bool {
-        return C.SDL_GetWindowMouseGrab(self.extern_ptr);
+    pub fn get_mouse_grab(self: Window) SDL3Error!void {
+        try ok_or_fail_error(C.SDL_GetWindowMouseGrab(self.extern_ptr));
     }
-    pub fn try_get_grabbed_window() ?Window {
-        const ptr: ?*Window.External = C.SDL_GetGrabbedWindow();
-        if (ptr) |good_ptr| return Window{ .extern_ptr = good_ptr };
-        return null;
+    pub fn get_grabbed_window() SDL3Error!Window {
+        return Window{ .extern_ptr = try ptr_cast_or_null_error(C.SDL_GetGrabbedWindow(), *Window.External) };
     }
-    pub fn try_set_mouse_rect(self: Window, rect: IRect2) bool {
-        return C.SDL_SetWindowMouseRect(self.extern_ptr, @ptrCast(@alignCast(&rect)));
+    pub fn set_mouse_rect(self: Window, rect: IRect2) SDL3Error!void {
+        try ok_or_fail_error(C.SDL_SetWindowMouseRect(self.extern_ptr, @ptrCast(@alignCast(&rect))));
     }
-    pub fn try_get_mouse_rect(self: Window) ?IRect2 {
-        const ptr: ?*IRect2 = @ptrCast(@alignCast(C.SDL_GetWindowMouseRect(self.extern_ptr)));
-        if (ptr) |good_ptr| return good_ptr.*;
-        return null;
+    pub fn get_mouse_rect(self: Window) SDL3Error!IRect2 {
+        const rect_ptr = try ptr_cast_or_null_error(C.SDL_GetWindowMouseRect(self.extern_ptr), *IRect2);
+        return rect_ptr.*;
     }
-    pub fn try_set_opacity(self: Window, opacity: f32) bool {
-        return C.SDL_SetWindowOpacity(self.extern_ptr, opacity);
+    pub fn set_opacity(self: Window, opacity: f32) SDL3Error!void {
+        try ok_or_fail_error(C.SDL_SetWindowOpacity(self.extern_ptr, opacity));
     }
     pub fn get_opacity(self: Window) f32 {
         return C.SDL_GetWindowOpacity(self.extern_ptr);
     }
-    pub fn try_set_parent(self: Window, parent: Window) bool {
-        return C.SDL_SetWindowParent(self.extern_ptr, parent.extern_ptr);
+    pub fn set_parent(self: Window, parent: Window) SDL3Error!void {
+        try ok_or_fail_error(C.SDL_SetWindowParent(self.extern_ptr, parent.extern_ptr));
     }
-    pub fn try_clear_parent(self: Window) bool {
-        return C.SDL_SetWindowParent(self.extern_ptr, null);
+    pub fn clear_parent(self: Window) SDL3Error!void {
+        try ok_or_fail_error(C.SDL_SetWindowParent(self.extern_ptr, null));
     }
-    pub fn try_set_modal(self: Window, state: bool) bool {
-        return C.SDL_SetWindowModal(self.extern_ptr, state);
+    pub fn set_modal(self: Window, state: bool) SDL3Error!void {
+        try ok_or_fail_error(C.SDL_SetWindowModal(self.extern_ptr, state));
     }
-    pub fn try_set_focusable(self: Window, state: bool) bool {
-        return C.SDL_SetWindowFocusable(self.extern_ptr, state);
+    pub fn set_focusable(self: Window, state: bool) SDL3Error!void {
+        try ok_or_fail_error(C.SDL_SetWindowFocusable(self.extern_ptr, state));
     }
-    pub fn try_show_system_menu(self: Window, pos: IVec2) bool {
-        return C.SDL_ShowWindowSystemMenu(self.extern_ptr, pos.x, pos.y);
+    pub fn show_system_menu(self: Window, pos: IVec2) SDL3Error!void {
+        try ok_or_fail_error(C.SDL_ShowWindowSystemMenu(self.extern_ptr, pos.x, pos.y));
+    }
+    pub fn set_custom_hittest(self: Window, hittest: CustomWindowHittest, data: ?*anyopaque) SDL3Error!void {
+        try ok_or_fail_error(C.SDL_SetWindowHitTest(self.extern_ptr, hittest, data));
+    }
+    pub fn set_window_shape(self: Window, shape: *Surface) SDL3Error!void {
+        try ok_or_fail_error(C.SDL_SetWindowShape(self.extern_ptr, @ptrCast(@alignCast(shape))));
+    }
+    pub fn clear_window_shape(self: Window) SDL3Error!void {
+        try ok_or_fail_error(C.SDL_SetWindowShape(self.extern_ptr, null));
+    }
+    pub fn flash_window(self: Window, mode: FlashMode) SDL3Error!void {
+        try ok_or_fail_error(C.SDL_FlashWindow(self.extern_ptr, mode.to_int()));
+    }
+    pub fn destroy(self: Window) void {
+        C.SDL_DestroyWindow(self.extern_ptr);
     }
 };
+
+pub const FlashMode = enum(c_uint) {
+    CANCEL = C.SDL_FLASH_CANCEL,
+    BRIEFLY = C.SDL_FLASH_BRIEFLY,
+    UNTIL_FOCUSED = C.SDL_FLASH_UNTIL_FOCUSED,
+
+    pub fn to_int(self: FlashMode) c_uint {
+        return @intFromEnum(self);
+    }
+    pub fn from_int(val: c_uint) FlashMode {
+        return @enumFromInt(val);
+    }
+};
+
+pub const WindowHitTestResult = enum(c_uint) {
+    NORMAL = C.SDL_HITTEST_NORMAL,
+    DRAGGABLE = C.SDL_HITTEST_DRAGGABLE,
+    RESIZE_TOPLEFT = C.SDL_HITTEST_RESIZE_TOPLEFT,
+    RESIZE_TOP = C.SDL_HITTEST_RESIZE_TOP,
+    RESIZE_TOPRIGHT = C.SDL_HITTEST_RESIZE_TOPRIGHT,
+    RESIZE_RIGHT = C.SDL_HITTEST_RESIZE_RIGHT,
+    RESIZE_BOTTOMRIGHT = C.SDL_HITTEST_RESIZE_BOTTOMRIGHT,
+    RESIZE_BOTTOM = C.SDL_HITTEST_RESIZE_BOTTOM,
+    RESIZE_BOTTOMLEFT = C.SDL_HITTEST_RESIZE_BOTTOMLEFT,
+    RESIZE_LEFT = C.SDL_HITTEST_RESIZE_LEFT,
+
+    pub fn to_int(self: WindowHitTestResult) c_uint {
+        return @intFromEnum(self);
+    }
+    pub fn from_int(val: c_uint) WindowHitTestResult {
+        return @enumFromInt(val);
+    }
+};
+
+pub const CustomWindowHittest = ?*const fn (?*Window.External, [*c]const C.SDL_Point, ?*anyopaque) callconv(.c) c_uint;
 
 pub const VSync = enum(c_int) {
     adaptive = C.SDL_WINDOW_SURFACE_VSYNC_ADAPTIVE,
@@ -769,7 +830,7 @@ pub const BorderSizes = extern struct {
     right: c_uint = 0,
 };
 
-pub const AspectRatio = extern struct {
+pub const AspectRange = extern struct {
     min: f32 = 0.1,
     max: f32 = 10.0,
 };
