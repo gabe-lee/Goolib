@@ -25,6 +25,10 @@ pub fn define_aabb2_type(comptime T: type) type {
         y_min: T = INF,
         y_max: T = NEG_INF,
 
+        pub fn new(x_min: T, x_max: T, y_min: T, y_max: T) T_AABB2 {
+            return T_AABB2{ .x_min = x_min, .x_max = x_max, .y_min = y_min, .y_max = y_max };
+        }
+
         pub fn combine_with(self: T_AABB2, other: T_AABB2) T_AABB2 {
             return T_AABB2{
                 .x_min = @min(self.x_min, other.x_min),

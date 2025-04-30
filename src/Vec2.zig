@@ -32,10 +32,7 @@ pub fn define_vec2_type(comptime T: type) type {
         pub const ONE_ONE = T_Vec2{ .x = 1, .y = 1 };
 
         pub fn new(x: T, y: T) T_Vec2 {
-            return T_Vec2{
-                .x = x,
-                .y = y,
-            };
+            return T_Vec2{ .x = x, .y = y };
         }
 
         pub fn dot(self: T_Vec2, other: T_Vec2) T {

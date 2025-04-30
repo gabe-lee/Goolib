@@ -26,32 +26,9 @@ pub fn define_rect2_type(comptime T: type) type {
         w: T = 0,
         h: T = 0,
 
-        // pub fn combine_with(self: T_Rect2, other: T_Rect2) T_Rect2 {
-        //     return T_Rect2{
-        //         .x_min = @min(self.x_min, other.x_min),
-        //         .y_min = @min(self.y_min, other.y_min),
-        //         .x_max = @max(self.x_max, other.x_max),
-        //         .y_max = @min(self.y_max, other.y_max),
-        //     };
-        // }
-
-        // pub fn combine_with_point(self: T_Rect2, point: T_Vec2) T_Rect2 {
-        //     return T_Rect2{
-        //         .x_min = @min(self.x_min, point.x),
-        //         .y_min = @min(self.y_min, point.y),
-        //         .x_max = @max(self.x_max, point.x),
-        //         .y_max = @min(self.y_max, point.y),
-        //     };
-        // }
-
-        // pub fn expand_by(self: T_Rect2, amount: T) T_Rect2 {
-        //     return T_Rect2{
-        //         .x_min = self.x_min - amount,
-        //         .y_min = self.y_min - amount,
-        //         .x_max = self.x_max + amount,
-        //         .y_max = self.y_max + amount,
-        //     };
-        // }
+        pub fn new(x: T, y: T, w: T, h: T) T_Rect2 {
+            return T_Rect2{ .x = x, .y = y, .w = w, .h = h };
+        }
 
         pub fn overlaps(self: T_Rect2, other: T_Rect2) bool {
             return self.to_aabb2().overlaps(other.to_aabb2());

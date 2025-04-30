@@ -1,6 +1,7 @@
 const std = @import("std");
 const build = @import("builtin");
 const init_zero = std.mem.zeroes;
+const assert = std.debug.assert;
 
 const Root = @import("root");
 const C = @cImport({
@@ -33,34 +34,18 @@ inline fn ok_or_fail_error(result: bool) SDL3Error!void {
     return SDL3Error.SDL3_ERROR__operation_failure;
 }
 
-pub inline fn MightError(comptime T: type) type {
-    return switch (@typeInfo(T)) {
-        .bool => void,
-        .pointer => |info| ret: {
-            var new_info = info;
-            new_info.is_allowzero = false;
-            break :ret SDL3Error!@Type(new_info);
-        },
-        .optional => |info| SDL3Error!info.child,
-        .int => SDL3Error!T,
-        else => @compileError("no defined error conversion for type " ++ @typeName(T)),
-    };
-}
-
-inline fn make_err(comptime E: SDL3Error, value: anytype) MightError(@TypeOf(value)) {
-    return switch (@typeInfo(@TypeOf(value))) {
-        .bool => if (!value) E else void{},
-        .pointer, .optional => value orelse E,
-        .int => |info| switch (info.signedness) {
-            .signed => if (value >= 0) value else E,
-            .unsigned => if (value != 0) value else E,
-        },
-        else => comptime unreachable,
-    };
-}
-
-fn sdl_free(mem: ?*anyopaque) void {
+pub fn sdl_free(mem: ?*anyopaque) void {
     C.SDL_free(mem);
+}
+
+pub fn wait_milliseconds(ms: u32) void {
+    C.SDL_Delay(ms);
+}
+pub fn wait_nanoseconds(ns: u64) void {
+    C.SDL_DelayNS(ns);
+}
+pub fn wait_milliseconds_precise(ms: u32) void {
+    C.SDL_DelayPrecise(ms);
 }
 
 pub fn get_error_details() [:0]const u8 {
@@ -72,9 +57,13 @@ pub const IRect2 = Root.Rect2.define_rect2_type(c_int);
 pub const FRect2 = Root.Rect2.define_rect2_type(f32);
 pub const IVec2 = Root.Vec2.define_vec2_type(c_int);
 pub const FVec2 = Root.Vec2.define_vec2_type(f32);
+pub const IColor_RGBA = Root.Color.define_color_rgba_type(u8);
+pub const FColor_RGBA = Root.Color.define_color_rgba_type(f32);
+pub const IColor_RGB = Root.Color.define_color_rgb_type(u8);
+pub const FColor_RGB = Root.Color.define_color_rgb_type(f32);
 
 pub const PropertiesID = struct {
-    id: C.SDL_PropertiesID,
+    id: C.SDL_PropertiesID = 0,
 
     // pub extern fn SDL_GetGlobalProperties() SDL_PropertiesID;
     // pub extern fn SDL_CreateProperties() SDL_PropertiesID;
@@ -109,8 +98,11 @@ pub const PropertyType = enum(c_uint) {
     FLOAT = C.SDL_PROPERTY_TYPE_FLOAT,
     BOOLEAN = C.SDL_PROPERTY_TYPE_BOOLEAN,
 
-    inline fn raw(self: PropertyType) c_uint {
+    pub fn to_c(self: PropertyType) c_uint {
         return @intFromEnum(self);
+    }
+    pub fn from_c(val: c_uint) PropertyType {
+        return @enumFromInt(val);
     }
 };
 
@@ -120,8 +112,11 @@ pub const InitStatus = enum(c_uint) {
     INIT = C.SDL_INIT_STATUS_INITIALIZED,
     UNINIT_IN_PROGRESS = C.SDL_INIT_STATUS_UNINITIALIZING,
 
-    inline fn raw(self: InitStatus) c_uint {
+    pub fn to_c(self: InitStatus) c_uint {
         return @intFromEnum(self);
+    }
+    pub fn from_c(val: c_uint) InitStatus {
+        return @enumFromInt(val);
     }
 };
 
@@ -139,8 +134,11 @@ pub const AudioFormat = enum(c_uint) {
     S32 = C.SDL_AUDIO_S32,
     F32 = C.SDL_AUDIO_F32,
 
-    inline fn raw(self: AudioFormat) c_uint {
+    pub fn to_c(self: AudioFormat) c_uint {
         return @intFromEnum(self);
+    }
+    pub fn from_c(val: c_uint) AudioFormat {
+        return @enumFromInt(val);
     }
 };
 
@@ -151,8 +149,11 @@ pub const BlendOperation = enum(c_uint) {
     MINIMUM = C.SDL_BLENDOPERATION_MINIMUM,
     MAXIMUM = C.SDL_BLENDOPERATION_MAXIMUM,
 
-    inline fn raw(self: BlendOperation) c_uint {
+    pub fn to_c(self: BlendOperation) c_uint {
         return @intFromEnum(self);
+    }
+    pub fn from_c(val: c_uint) BlendOperation {
+        return @enumFromInt(val);
     }
 };
 
@@ -168,8 +169,11 @@ pub const BlendFactor = enum(c_uint) {
     DST_ALPHA = C.SDL_BLENDFACTOR_DST_ALPHA,
     ONE_MINUS_DST_ALPHA = C.SDL_BLENDFACTOR_ONE_MINUS_DST_ALPHA,
 
-    inline fn raw(self: BlendFactor) c_uint {
+    pub fn to_c(self: BlendFactor) c_uint {
         return @intFromEnum(self);
+    }
+    pub fn from_c(val: c_uint) BlendFactor {
+        return @enumFromInt(val);
     }
 };
 
@@ -188,8 +192,11 @@ pub const PixelType = enum(c_uint) {
     ARRAY_F16 = C.SDL_PIXELTYPE_ARRAYF16,
     ARRAY_F32 = C.SDL_PIXELTYPE_ARRAYF32,
 
-    inline fn raw(self: PixelType) c_uint {
+    pub fn to_c(self: PixelType) c_uint {
         return @intFromEnum(self);
+    }
+    pub fn from_c(val: c_uint) PixelType {
+        return @enumFromInt(val);
     }
 };
 
@@ -198,8 +205,11 @@ pub const BitmapOrder = enum(c_uint) {
     _4321 = C.SDL_BITMAPORDER_4321,
     _1234 = C.SDL_BITMAPORDER_1234,
 
-    inline fn raw(self: BitmapOrder) c_uint {
+    pub fn to_c(self: BitmapOrder) c_uint {
         return @intFromEnum(self);
+    }
+    pub fn from_c(val: c_uint) BitmapOrder {
+        return @enumFromInt(val);
     }
 };
 
@@ -214,8 +224,11 @@ pub const PackedOrder = enum(c_uint) {
     ABGR = C.SDL_PACKEDORDER_ABGR,
     BGRA = C.SDL_PACKEDORDER_BGRA,
 
-    inline fn raw(self: PackedOrder) c_uint {
+    pub fn to_c(self: PackedOrder) c_uint {
         return @intFromEnum(self);
+    }
+    pub fn from_c(val: c_uint) PackedOrder {
+        return @enumFromInt(val);
     }
 };
 
@@ -228,8 +241,11 @@ pub const ArrayOrder = enum(c_uint) {
     BGRA = C.SDL_ARRAYORDER_BGRA,
     ABGR = C.SDL_ARRAYORDER_ABGR,
 
-    inline fn raw(self: ArrayOrder) c_uint {
+    pub fn to_c(self: ArrayOrder) c_uint {
         return @intFromEnum(self);
+    }
+    pub fn from_c(val: c_uint) ArrayOrder {
+        return @enumFromInt(val);
     }
 };
 
@@ -244,8 +260,11 @@ pub const PackedLayout = enum(c_uint) {
     _2101010 = C.SDL_PACKEDLAYOUT_2101010,
     _1010102 = C.SDL_PACKEDLAYOUT_1010102,
 
-    inline fn raw(self: PackedLayout) c_uint {
+    pub fn to_c(self: PackedLayout) c_uint {
         return @intFromEnum(self);
+    }
+    pub fn from_c(val: c_uint) PackedLayout {
+        return @enumFromInt(val);
     }
 };
 
@@ -324,8 +343,11 @@ pub const PixelFormat = enum(c_uint) {
     BGRX_32 = C.SDL_PIXELFORMAT_BGRX32,
     XBGR_32 = C.SDL_PIXELFORMAT_XBGR32,
 
-    inline fn raw(self: PixelFormat) c_uint {
+    pub fn to_c(self: PixelFormat) c_uint {
         return @intFromEnum(self);
+    }
+    pub fn from_c(val: c_uint) PixelFormat {
+        return @enumFromInt(val);
     }
 };
 
@@ -334,8 +356,11 @@ pub const ColorType = enum(c_uint) {
     RGB = C.SDL_COLOR_TYPE_RGB,
     YCBCR = C.SDL_COLOR_TYPE_YCBCR,
 
-    inline fn raw(self: ColorType) c_uint {
+    pub fn to_c(self: ColorType) c_uint {
         return @intFromEnum(self);
+    }
+    pub fn from_c(val: c_uint) ColorType {
+        return @enumFromInt(val);
     }
 };
 
@@ -344,8 +369,11 @@ pub const ColorRange = enum(c_uint) {
     LIMITED = C.SDL_COLOR_RANGE_LIMITED,
     FULL = C.SDL_COLOR_RANGE_FULL,
 
-    inline fn raw(self: ColorRange) c_uint {
+    pub fn to_c(self: ColorRange) c_uint {
         return @intFromEnum(self);
+    }
+    pub fn from_c(val: c_uint) ColorRange {
+        return @enumFromInt(val);
     }
 };
 
@@ -365,26 +393,11 @@ pub const ColorPrimaries = enum(c_uint) {
     EBU3213 = C.SDL_COLOR_PRIMARIES_EBU3213,
     CUSTOM = C.SDL_COLOR_PRIMARIES_CUSTOM,
 
-    inline fn raw(self: ColorPrimaries) c_uint {
+    pub fn to_c(self: ColorPrimaries) c_uint {
         return @intFromEnum(self);
     }
-};
-
-pub const ColorU8 = struct {
-    raw: C.struct_SDL_Color,
-};
-
-pub const ColorF32 = struct {
-    raw: C.struct_SDL_FColor,
-};
-
-pub const ScaleMode = enum(c_int) {
-    INVALID = C.SDL_SCALEMODE_INVALID,
-    NEAREST = C.SDL_SCALEMODE_NEAREST,
-    LINEAR = C.SDL_SCALEMODE_LINEAR,
-
-    pub fn raw(self: ScaleMode) c_int {
-        return @intFromEnum(self);
+    pub fn from_c(val: c_uint) ColorPrimaries {
+        return @enumFromInt(val);
     }
 };
 
@@ -394,8 +407,11 @@ pub const FlipMode = enum(c_uint) {
     VERTICAL = C.SDL_FLIP_VERTICAL,
     HORIZ_VERT = C.SDL_FLIP_HORIZONTAL | C.SDL_FLIP_VERTICAL,
 
-    pub fn raw(self: FlipMode) c_uint {
+    pub fn to_c(self: FlipMode) c_uint {
         return @intFromEnum(self);
+    }
+    pub fn from_c(val: c_uint) FlipMode {
+        return @enumFromInt(val);
     }
 };
 
@@ -430,10 +446,10 @@ pub const DisplayOrientation = enum(c_int) {
     PORTRAIT = C.SDL_ORIENTATION_PORTRAIT,
     PORTRAIT_FLIPPED = C.SDL_ORIENTATION_PORTRAIT_FLIPPED,
 
-    pub fn to_int(self: DisplayOrientation) c_int {
+    pub fn to_c(self: DisplayOrientation) c_int {
         return @intFromEnum(self);
     }
-    pub fn from_int(val: c_int) DisplayOrientation {
+    pub fn from_c(val: c_int) DisplayOrientation {
         return @enumFromInt(val);
     }
 };
@@ -465,10 +481,10 @@ pub const DisplayID = extern struct {
         return rect;
     }
     pub fn get_natural_orientation(self: DisplayID) DisplayOrientation {
-        return DisplayOrientation.from_int(C.SDL_GetNaturalDisplayOrientation(self.id));
+        return DisplayOrientation.from_c(C.SDL_GetNaturalDisplayOrientation(self.id));
     }
     pub fn get_current_orientation(self: DisplayID) DisplayOrientation {
-        return DisplayOrientation.from_int(C.SDL_GetCurrentDisplayOrientation(self.id));
+        return DisplayOrientation.from_c(C.SDL_GetCurrentDisplayOrientation(self.id));
     }
     pub fn get_content_scale(self: DisplayID) f32 {
         return C.SDL_GetDisplayContentScale(self.id);
@@ -535,243 +551,244 @@ pub const DisplayMode = extern struct {
     // }
 };
 
-pub const Window = extern struct {
-    extern_ptr: *External,
-
-    pub const External: type = C.SDL_Window;
-
-    pub fn try_get_display_id(self: Window) SDL3Error!DisplayID {
-        return DisplayID{ .id = try id_or_null_error(C.SDL_GetDisplayForWindow(self.extern_ptr)) };
+pub const Window = opaque {
+    fn to_c(self: *Window) *C.SDL_Window {
+        return @ptrCast(@alignCast(self));
     }
-    pub fn get_pixel_density(self: Window) f32 {
-        return C.SDL_GetWindowPixelDensity(self.extern_ptr);
+    pub fn try_get_display_id(self: *Window) SDL3Error!DisplayID {
+        return DisplayID{ .id = try id_or_null_error(C.SDL_GetDisplayForWindow(self.to_c())) };
     }
-    pub fn get_display_scale(self: Window) f32 {
-        return C.SDL_GetWindowDisplayScale(self.extern_ptr);
+    pub fn get_pixel_density(self: *Window) f32 {
+        return C.SDL_GetWindowPixelDensity(self.to_c());
     }
-    pub fn get_fullscreen_display_mode(self: Window) FullscreenMode {
-        const result: ?*const DisplayMode = C.SDL_GetWindowFullscreenMode(self.extern_ptr);
+    pub fn get_display_scale(self: *Window) f32 {
+        return C.SDL_GetWindowDisplayScale(self.to_c());
+    }
+    pub fn get_fullscreen_display_mode(self: *Window) FullscreenMode {
+        const result: ?*const DisplayMode = C.SDL_GetWindowFullscreenMode(self);
         if (result) |mode| return FullscreenMode.new_exclusive(mode);
         return FullscreenMode.new_borderless();
     }
-    pub fn set_fullscreen_display_mode(self: Window, mode: FullscreenMode) SDL3Error!void {
+    pub fn set_fullscreen_display_mode(self: *Window, mode: FullscreenMode) SDL3Error!void {
         switch (mode) {
-            .borderless => try ok_or_fail_error(C.SDL_SetWindowFullscreenMode(self.extern_ptr, null)),
-            .exclusive => |excl_mode| try ok_or_fail_error(C.SDL_SetWindowFullscreenMode(self.extern_ptr, @ptrCast(@alignCast(excl_mode)))),
+            .borderless => try ok_or_fail_error(C.SDL_SetWindowFullscreenMode(self.to_c(), null)),
+            .exclusive => |excl_mode| try ok_or_fail_error(C.SDL_SetWindowFullscreenMode(self.to_c(), @ptrCast(@alignCast(excl_mode)))),
         }
     }
-    pub fn get_icc_profile(self: Window, size: usize) SDL3Error!WindowICCProfile {
-        return WindowICCProfile{ .extern_ptr = try ptr_cast_or_null_error(C.SDL_GetWindowICCProfile(self.extern_ptr, &size), *WindowICCProfile.Extern) };
+    pub fn get_icc_profile(self: *Window, size: usize) SDL3Error!WindowICCProfile {
+        return WindowICCProfile{ .extern_ptr = try ptr_cast_or_null_error(C.SDL_GetWindowICCProfile(self.to_c(), &size), *WindowICCProfile.Extern) };
     }
-    pub fn get_pixel_format(self: Window) PixelFormat {
-        return @enumFromInt(C.SDL_GetWindowPixelFormat(self.extern_ptr));
+    pub fn get_pixel_format(self: *Window) PixelFormat {
+        return @enumFromInt(C.SDL_GetWindowPixelFormat(self.to_c()));
     }
     pub fn get_all_windows() SDL3Error!WindowsList {
         var len: c_int = 0;
-        return WindowsList{ .list = try slice_cast_or_null_error(C.SDL_GetWindows(&len), &len, [*]*Window.External) };
+        return WindowsList{ .list = try slice_cast_or_null_error(C.SDL_GetWindows(&len), &len, [*]*Window) };
     }
-    pub fn create(options: CreateWindowOptions) SDL3Error!Window {
-        return Window{ .extern_ptr = try ptr_cast_or_null_error(C.SDL_CreateWindow(options.title.ptr, options.width, options.height, options.flags), *Window.External) };
+    pub fn create(options: CreateWindowOptions) SDL3Error!*Window {
+        return ptr_cast_or_null_error(C.SDL_CreateWindow(options.title.ptr, options.width, options.height, options.flags), *Window);
     }
-    pub fn create_popup_window(parent: Window, options: CreatePopupWindowOptions) SDL3Error!Window {
-        return Window{ .extern_ptr = try ptr_cast_or_null_error(C.SDL_CreatePopupWindow(parent.extern_ptr, options.x_offset, options.y_offset, options.width, options.height, options.flags), *Window.External) };
+    pub fn create_popup_window(parent: *Window, options: CreatePopupWindowOptions) SDL3Error!*Window {
+        return ptr_cast_or_null_error(C.SDL_CreatePopupWindow(parent.to_c(), options.x_offset, options.y_offset, options.width, options.height, options.flags), *Window);
     }
-    pub fn create_window_with_properties(properties: PropertiesID) SDL3Error!Window {
-        return Window{ .extern_ptr = try ptr_cast_or_null_error(C.SDL_CreateWindowWithProperties(properties.id), *Window.External) };
+    pub fn create_window_with_properties(properties: PropertiesID) SDL3Error!*Window {
+        return ptr_cast_or_null_error(C.SDL_CreateWindowWithProperties(properties.id), *Window);
     }
-    pub fn get_id(self: Window) WindowID {
-        return WindowID{ .id = C.SDL_GetWindowID(self.extern_ptr) };
+    pub fn get_id(self: *Window) WindowID {
+        return WindowID{ .id = C.SDL_GetWindowID(self.to_c()) };
     }
-    pub fn get_parent_window(self: Window) SDL3Error!Window {
-        return Window{ .extern_ptr = try ptr_cast_or_null_error(C.SDL_GetWindowParent(self.extern_ptr), *Window.External) };
+    pub fn get_parent_window(self: *Window) SDL3Error!*Window {
+        return ptr_cast_or_null_error(C.SDL_GetWindowParent(self.to_c()), *Window);
     }
-    pub fn get_properties(self: Window) PropertiesID {
-        return PropertiesID{ .id = C.SDL_GetWindowProperties(self.extern_ptr) };
+    pub fn get_properties(self: *Window) PropertiesID {
+        return PropertiesID{ .id = C.SDL_GetWindowProperties(self.to_c()) };
     }
-    pub fn get_flags(self: Window) WindowFlags {
-        return WindowFlags{ .flags = C.SDL_GetWindowFlags(self.extern_ptr) };
+    pub fn get_flags(self: *Window) WindowFlags {
+        return WindowFlags{ .flags = C.SDL_GetWindowFlags(self.to_c()) };
     }
-    pub fn set_title(self: Window, title: [:0]const u8) SDL3Error!void {
-        try ok_or_fail_error(C.SDL_SetWindowTitle(self.extern_ptr, title.ptr));
+    pub fn set_title(self: *Window, title: [:0]const u8) SDL3Error!void {
+        try ok_or_fail_error(C.SDL_SetWindowTitle(self.to_c(), title.ptr));
     }
-    pub fn get_title_ptr(self: Window) [*:0]const u8 {
-        return @ptrCast(@alignCast(C.SDL_GetWindowTitle(self.extern_ptr)));
+    pub fn get_title(self: *Window) [*:0]const u8 {
+        return @ptrCast(@alignCast(C.SDL_GetWindowTitle(self.to_c())));
     }
-    pub fn get_title_slice(self: Window) [:0]const u8 {
-        const ptr = self.get_title_ptr();
-        return Root.Utils.make_slice_from_sentinel_ptr(u8, 0, ptr);
+    pub fn set_window_icon(self: *Window, icon: *Surface) SDL3Error!void {
+        try ok_or_fail_error(C.SDL_SetWindowIcon(self.to_c(), @ptrCast(@alignCast(icon))));
     }
-    pub fn set_window_icon(self: Window, icon: *Surface) SDL3Error!void {
-        try ok_or_fail_error(C.SDL_SetWindowIcon(self.extern_ptr, @ptrCast(@alignCast(icon))));
+    pub fn set_window_position(self: *Window, pos: IVec2) SDL3Error!void {
+        try ok_or_fail_error(C.SDL_SetWindowPosition(self.to_c(), pos.x, pos.y));
     }
-    pub fn set_window_position(self: Window, pos: IVec2) SDL3Error!void {
-        try ok_or_fail_error(C.SDL_SetWindowPosition(self.extern_ptr, pos.x, pos.y));
-    }
-    pub fn get_window_position(self: Window) SDL3Error!IVec2 {
+    pub fn get_window_position(self: *Window) SDL3Error!IVec2 {
         var point = IVec2{};
-        try ok_or_fail_error(C.SDL_GetWindowPosition(self.extern_ptr, &point.x, &point.y));
+        try ok_or_fail_error(C.SDL_GetWindowPosition(self.to_c(), &point.x, &point.y));
         return point;
     }
-    pub fn set_size(self: Window, size: IVec2) SDL3Error!void {
-        try ok_or_fail_error(C.SDL_SetWindowSize(self.extern_ptr, size.x, size.y));
+    pub fn set_size(self: *Window, size: IVec2) SDL3Error!void {
+        try ok_or_fail_error(C.SDL_SetWindowSize(self.to_c(), size.x, size.y));
     }
-    pub fn get_size(self: Window) SDL3Error!IVec2 {
+    pub fn get_size(self: *Window) SDL3Error!IVec2 {
         var size = IVec2.ZERO;
-        try ok_or_fail_error(C.SDL_GetWindowSize(self.extern_ptr, &size.x, &size.y));
+        try ok_or_fail_error(C.SDL_GetWindowSize(self.to_c(), &size.x, &size.y));
         return size;
     }
-    pub fn get_safe_area(self: Window) SDL3Error!IRect2 {
+    pub fn get_safe_area(self: *Window) SDL3Error!IRect2 {
         var rect = IRect2{};
-        try ok_or_fail_error(C.SDL_GetWindowSafeArea(self.extern_ptr, @ptrCast(@alignCast(&rect))));
+        try ok_or_fail_error(C.SDL_GetWindowSafeArea(self.to_c(), @ptrCast(@alignCast(&rect))));
         return rect;
     }
-    pub fn set_aspect_ratio(self: Window, aspect_range: AspectRange) SDL3Error!void {
-        try ok_or_fail_error(C.SDL_SetWindowAspectRatio(self.extern_ptr, aspect_range.min, aspect_range.max));
+    pub fn set_aspect_ratio(self: *Window, aspect_range: AspectRange) SDL3Error!void {
+        try ok_or_fail_error(C.SDL_SetWindowAspectRatio(self.to_c(), aspect_range.min, aspect_range.max));
     }
-    pub fn get_aspect_ratio(self: Window) SDL3Error!AspectRange {
+    pub fn get_aspect_ratio(self: *Window) SDL3Error!AspectRange {
         var ratio = AspectRange{};
-        try ok_or_fail_error(C.SDL_SetWindowAspectRatio(self.extern_ptr, &ratio.min, &ratio.max));
+        try ok_or_fail_error(C.SDL_SetWindowAspectRatio(self.to_c(), &ratio.min, &ratio.max));
         return ratio;
     }
-    pub fn get_border_sizes(self: Window) SDL3Error!BorderSizes {
+    pub fn get_border_sizes(self: *Window) SDL3Error!BorderSizes {
         var sizes = BorderSizes{};
-        try ok_or_fail_error(C.SDL_GetWindowBordersSize(self.extern_ptr, &sizes.top, &sizes.left, &sizes.bottom, &sizes.right));
+        try ok_or_fail_error(C.SDL_GetWindowBordersSize(self.to_c(), &sizes.top, &sizes.left, &sizes.bottom, &sizes.right));
         return sizes;
     }
-    pub fn get_size_in_pixels(self: Window) SDL3Error!IVec2 {
+    pub fn get_size_in_pixels(self: *Window) SDL3Error!IVec2 {
         var size = IVec2{};
-        try ok_or_fail_error(C.SDL_GetWindowSizeInPixels(self.extern_ptr, &size.x, &size.y));
+        try ok_or_fail_error(C.SDL_GetWindowSizeInPixels(self.to_c(), &size.x, &size.y));
         return size;
     }
-    pub fn set_minimum_size(self: Window, size: IVec2) SDL3Error!void {
-        try ok_or_fail_error(C.SDL_SetWindowMinimumSize(self.extern_ptr, size.x, size.y));
+    pub fn set_minimum_size(self: *Window, size: IVec2) SDL3Error!void {
+        try ok_or_fail_error(C.SDL_SetWindowMinimumSize(self.to_c(), size.x, size.y));
     }
-    pub fn get_minimum_size(self: Window) SDL3Error!IVec2 {
+    pub fn get_minimum_size(self: *Window) SDL3Error!IVec2 {
         var size = IVec2{};
-        try ok_or_fail_error(C.SDL_GetWindowMinimumSize(self.extern_ptr, &size.x, &size.y));
+        try ok_or_fail_error(C.SDL_GetWindowMinimumSize(self.to_c(), &size.x, &size.y));
         return size;
     }
-    pub fn set_maximum_size(self: Window, size: IVec2) SDL3Error!void {
-        try ok_or_fail_error(C.SDL_SetWindowMaximumSize(self.extern_ptr, size.x, size.y));
+    pub fn set_maximum_size(self: *Window, size: IVec2) SDL3Error!void {
+        try ok_or_fail_error(C.SDL_SetWindowMaximumSize(self.to_c(), size.x, size.y));
     }
-    pub fn get_maximum_size(self: Window) SDL3Error!IVec2 {
+    pub fn get_maximum_size(self: *Window) SDL3Error!IVec2 {
         var size = IVec2{};
-        try ok_or_fail_error(C.SDL_GetWindowMaximumSize(self.extern_ptr, &size.x, &size.y));
+        try ok_or_fail_error(C.SDL_GetWindowMaximumSize(self.to_c(), &size.x, &size.y));
         return size;
     }
-    pub fn set_bordered(self: Window, state: bool) SDL3Error!void {
-        try ok_or_fail_error(C.SDL_SetWindowBordered(self.extern_ptr, state));
+    pub fn set_bordered(self: *Window, state: bool) SDL3Error!void {
+        try ok_or_fail_error(C.SDL_SetWindowBordered(self.to_c(), state));
     }
-    pub fn set_resizable(self: Window, state: bool) SDL3Error!void {
-        try ok_or_fail_error(C.SDL_SetWindowResizable(self.extern_ptr, state));
+    pub fn set_resizable(self: *Window, state: bool) SDL3Error!void {
+        try ok_or_fail_error(C.SDL_SetWindowResizable(self.to_c(), state));
     }
-    pub fn set_always_on_top(self: Window, state: bool) SDL3Error!void {
-        try ok_or_fail_error(C.SDL_SetWindowAlwaysOnTop(self.extern_ptr, state));
+    pub fn set_always_on_top(self: *Window, state: bool) SDL3Error!void {
+        try ok_or_fail_error(C.SDL_SetWindowAlwaysOnTop(self.to_c(), state));
     }
-    pub fn show(self: Window) SDL3Error!void {
-        try ok_or_fail_error(C.SDL_ShowWindow(self.extern_ptr));
+    pub fn show(self: *Window) SDL3Error!void {
+        try ok_or_fail_error(C.SDL_ShowWindow(self.to_c()));
     }
-    pub fn hide(self: Window) SDL3Error!void {
-        try ok_or_fail_error(C.SDL_HideWindow(self.extern_ptr));
+    pub fn hide(self: *Window) SDL3Error!void {
+        try ok_or_fail_error(C.SDL_HideWindow(self.to_c()));
     }
-    pub fn raise(self: Window) SDL3Error!void {
-        try ok_or_fail_error(C.SDL_RaiseWindow(self.extern_ptr));
+    pub fn raise(self: *Window) SDL3Error!void {
+        try ok_or_fail_error(C.SDL_RaiseWindow(self.to_c()));
     }
-    pub fn maximize(self: Window) SDL3Error!void {
-        try ok_or_fail_error(C.SDL_MaximizeWindow(self.extern_ptr));
+    pub fn maximize(self: *Window) SDL3Error!void {
+        try ok_or_fail_error(C.SDL_MaximizeWindow(self.to_c()));
     }
-    pub fn minimize(self: Window) SDL3Error!void {
-        try ok_or_fail_error(C.SDL_MinimizeWindow(self.extern_ptr));
+    pub fn minimize(self: *Window) SDL3Error!void {
+        try ok_or_fail_error(C.SDL_MinimizeWindow(self.to_c()));
     }
-    pub fn restore(self: Window) SDL3Error!void {
-        try ok_or_fail_error(C.SDL_RestoreWindow(self.extern_ptr));
+    pub fn restore(self: *Window) SDL3Error!void {
+        try ok_or_fail_error(C.SDL_RestoreWindow(self.to_c()));
     }
-    pub fn set_fullscreen(self: Window, state: bool) SDL3Error!void {
-        try ok_or_fail_error(C.SDL_SetWindowFullscreen(self.extern_ptr, state));
+    pub fn set_fullscreen(self: *Window, state: bool) SDL3Error!void {
+        try ok_or_fail_error(C.SDL_SetWindowFullscreen(self.to_c(), state));
     }
-    pub fn sync(self: Window) SDL3Error!void {
-        try ok_or_fail_error(C.SDL_SyncWindow(self.extern_ptr));
+    pub fn sync(self: *Window) SDL3Error!void {
+        try ok_or_fail_error(C.SDL_SyncWindow(self.to_c()));
     }
-    pub fn has_surface(self: Window) bool {
-        return C.SDL_WindowHasSurface(self.extern_ptr);
+    pub fn has_surface(self: *Window) bool {
+        return C.SDL_WindowHasSurface(self.to_c());
     }
-    pub fn get_surface(self: Window) SDL3Error!*Surface {
-        return ptr_cast_or_null_error(C.SDL_GetWindowSurface(self.extern_ptr), *Surface);
+    pub fn get_surface(self: *Window) SDL3Error!*Surface {
+        return ptr_cast_or_null_error(C.SDL_GetWindowSurface(self.to_c()), *Surface);
     }
-    pub fn set_surface_vsync(self: Window, vsync: VSync) SDL3Error!void {
-        try ok_or_fail_error(C.SDL_SetWindowSurfaceVSync(self.extern_ptr, vsync.to_int()));
+    pub fn set_surface_vsync(self: *Window, vsync: VSync) SDL3Error!void {
+        try ok_or_fail_error(C.SDL_SetWindowSurfaceVSync(self.to_c(), vsync.to_c()));
     }
-    pub fn get_surface_vsync(self: Window) SDL3Error!VSync {
+    pub fn get_surface_vsync(self: *Window) SDL3Error!VSync {
         var int: c_int = 0;
-        try ok_or_fail_error(C.SDL_GetWindowSurfaceVSync(self.extern_ptr, &int));
-        return VSync.from_int(int);
+        try ok_or_fail_error(C.SDL_GetWindowSurfaceVSync(self.to_c(), &int));
+        return VSync.from_c(int);
     }
-    pub fn update_surface(self: Window) SDL3Error!void {
-        try ok_or_fail_error(C.SDL_UpdateWindowSurface(self.extern_ptr));
+    pub fn update_surface(self: *Window) SDL3Error!void {
+        try ok_or_fail_error(C.SDL_UpdateWindowSurface(self.to_c()));
     }
-    pub fn update_surface_rects(self: Window, rects: []const IRect2) SDL3Error!void {
-        try ok_or_fail_error(C.SDL_UpdateWindowSurfaceRects(self.extern_ptr, @ptrCast(@alignCast(rects.ptr)), @intCast(rects.len)));
+    pub fn update_surface_rects(self: *Window, rects: []const IRect2) SDL3Error!void {
+        try ok_or_fail_error(C.SDL_UpdateWindowSurfaceRects(self.to_c(), @ptrCast(@alignCast(rects.ptr)), @intCast(rects.len)));
     }
-    pub fn destroy_surface(self: Window) SDL3Error!void {
-        try ok_or_fail_error(C.SDL_DestroyWindowSurface(self.extern_ptr));
+    pub fn destroy_surface(self: *Window) SDL3Error!void {
+        try ok_or_fail_error(C.SDL_DestroyWindowSurface(self.to_c()));
     }
-    pub fn set_keyboard_grab(self: Window, state: bool) SDL3Error!void {
-        try ok_or_fail_error(C.SDL_SetWindowKeyboardGrab(self.extern_ptr, state));
+    pub fn set_keyboard_grab(self: *Window, state: bool) SDL3Error!void {
+        try ok_or_fail_error(C.SDL_SetWindowKeyboardGrab(self.to_c(), state));
     }
-    pub fn set_mouse_grab(self: Window, state: bool) SDL3Error!void {
-        try ok_or_fail_error(C.SDL_SetWindowMouseGrab(self.extern_ptr, state));
+    pub fn set_mouse_grab(self: *Window, state: bool) SDL3Error!void {
+        try ok_or_fail_error(C.SDL_SetWindowMouseGrab(self.to_c(), state));
     }
-    pub fn get_keyboard_grab(self: Window) SDL3Error!void {
-        try ok_or_fail_error(C.SDL_GetWindowKeyboardGrab(self.extern_ptr));
+    pub fn get_keyboard_grab(self: *Window) SDL3Error!void {
+        try ok_or_fail_error(C.SDL_GetWindowKeyboardGrab(self.to_c()));
     }
-    pub fn get_mouse_grab(self: Window) SDL3Error!void {
-        try ok_or_fail_error(C.SDL_GetWindowMouseGrab(self.extern_ptr));
+    pub fn get_mouse_grab(self: *Window) SDL3Error!void {
+        try ok_or_fail_error(C.SDL_GetWindowMouseGrab(self.to_c()));
     }
-    pub fn get_grabbed_window() SDL3Error!Window {
-        return Window{ .extern_ptr = try ptr_cast_or_null_error(C.SDL_GetGrabbedWindow(), *Window.External) };
+    pub fn get_grabbed_window() SDL3Error!*Window {
+        return ptr_cast_or_null_error(C.SDL_GetGrabbedWindow(), *Window);
     }
-    pub fn set_mouse_rect(self: Window, rect: IRect2) SDL3Error!void {
-        try ok_or_fail_error(C.SDL_SetWindowMouseRect(self.extern_ptr, @ptrCast(@alignCast(&rect))));
+    pub fn set_mouse_rect(self: *Window, rect: IRect2) SDL3Error!void {
+        try ok_or_fail_error(C.SDL_SetWindowMouseRect(self.to_c(), @ptrCast(@alignCast(&rect))));
     }
-    pub fn get_mouse_rect(self: Window) SDL3Error!IRect2 {
-        const rect_ptr = try ptr_cast_or_null_error(C.SDL_GetWindowMouseRect(self.extern_ptr), *IRect2);
+    pub fn get_mouse_rect(self: *Window) SDL3Error!IRect2 {
+        const rect_ptr = try ptr_cast_or_null_error(C.SDL_GetWindowMouseRect(self.to_c()), *IRect2);
         return rect_ptr.*;
     }
-    pub fn set_opacity(self: Window, opacity: f32) SDL3Error!void {
-        try ok_or_fail_error(C.SDL_SetWindowOpacity(self.extern_ptr, opacity));
+    pub fn set_opacity(self: *Window, opacity: f32) SDL3Error!void {
+        try ok_or_fail_error(C.SDL_SetWindowOpacity(self.to_c(), opacity));
     }
-    pub fn get_opacity(self: Window) f32 {
-        return C.SDL_GetWindowOpacity(self.extern_ptr);
+    pub fn get_opacity(self: *Window) f32 {
+        return C.SDL_GetWindowOpacity(self.to_c());
     }
-    pub fn set_parent(self: Window, parent: Window) SDL3Error!void {
-        try ok_or_fail_error(C.SDL_SetWindowParent(self.extern_ptr, parent.extern_ptr));
+    pub fn set_parent(self: *Window, parent: *Window) SDL3Error!void {
+        try ok_or_fail_error(C.SDL_SetWindowParent(self.to_c(), parent.to_c()));
     }
-    pub fn clear_parent(self: Window) SDL3Error!void {
-        try ok_or_fail_error(C.SDL_SetWindowParent(self.extern_ptr, null));
+    pub fn clear_parent(self: *Window) SDL3Error!void {
+        try ok_or_fail_error(C.SDL_SetWindowParent(self.to_c(), null));
     }
-    pub fn set_modal(self: Window, state: bool) SDL3Error!void {
-        try ok_or_fail_error(C.SDL_SetWindowModal(self.extern_ptr, state));
+    pub fn set_modal(self: *Window, state: bool) SDL3Error!void {
+        try ok_or_fail_error(C.SDL_SetWindowModal(self.to_c(), state));
     }
-    pub fn set_focusable(self: Window, state: bool) SDL3Error!void {
-        try ok_or_fail_error(C.SDL_SetWindowFocusable(self.extern_ptr, state));
+    pub fn set_focusable(self: *Window, state: bool) SDL3Error!void {
+        try ok_or_fail_error(C.SDL_SetWindowFocusable(self.to_c(), state));
     }
-    pub fn show_system_menu(self: Window, pos: IVec2) SDL3Error!void {
-        try ok_or_fail_error(C.SDL_ShowWindowSystemMenu(self.extern_ptr, pos.x, pos.y));
+    pub fn show_system_menu(self: *Window, pos: IVec2) SDL3Error!void {
+        try ok_or_fail_error(C.SDL_ShowWindowSystemMenu(self.to_c(), pos.x, pos.y));
     }
-    pub fn set_custom_hittest(self: Window, hittest: CustomWindowHittest, data: ?*anyopaque) SDL3Error!void {
-        try ok_or_fail_error(C.SDL_SetWindowHitTest(self.extern_ptr, hittest, data));
+    pub fn set_custom_hittest(self: *Window, hittest: CustomWindowHittest, data: ?*anyopaque) SDL3Error!void {
+        try ok_or_fail_error(C.SDL_SetWindowHitTest(self.to_c(), hittest, data));
     }
-    pub fn set_window_shape(self: Window, shape: *Surface) SDL3Error!void {
-        try ok_or_fail_error(C.SDL_SetWindowShape(self.extern_ptr, @ptrCast(@alignCast(shape))));
+    pub fn set_window_shape(self: *Window, shape: *Surface) SDL3Error!void {
+        try ok_or_fail_error(C.SDL_SetWindowShape(self.to_c(), @ptrCast(@alignCast(shape))));
     }
-    pub fn clear_window_shape(self: Window) SDL3Error!void {
-        try ok_or_fail_error(C.SDL_SetWindowShape(self.extern_ptr, null));
+    pub fn clear_window_shape(self: *Window) SDL3Error!void {
+        try ok_or_fail_error(C.SDL_SetWindowShape(self.to_c(), null));
     }
-    pub fn flash_window(self: Window, mode: FlashMode) SDL3Error!void {
-        try ok_or_fail_error(C.SDL_FlashWindow(self.extern_ptr, mode.to_int()));
+    pub fn flash_window(self: *Window, mode: FlashMode) SDL3Error!void {
+        try ok_or_fail_error(C.SDL_FlashWindow(self.to_c(), mode.to_c()));
     }
-    pub fn destroy(self: Window) void {
-        C.SDL_DestroyWindow(self.extern_ptr);
+    pub fn destroy(self: *Window) void {
+        C.SDL_DestroyWindow(self.to_c());
+    }
+    pub fn create_renderer(self: *Window, name: [:0]const u8) SDL3Error!*Renderer {
+        return ptr_cast_or_null_error(C.SDL_CreateRenderer(self.extern_ptr, name.ptr), *Renderer);
+    }
+    pub fn get_renderer(self: *Window) SDL3Error!*Renderer {
+        return ptr_cast_or_null_error(C.SDL_GetRenderer(self.extern_ptr), *Renderer);
     }
 };
 
@@ -780,10 +797,10 @@ pub const FlashMode = enum(c_uint) {
     BRIEFLY = C.SDL_FLASH_BRIEFLY,
     UNTIL_FOCUSED = C.SDL_FLASH_UNTIL_FOCUSED,
 
-    pub fn to_int(self: FlashMode) c_uint {
+    pub fn to_c(self: FlashMode) c_uint {
         return @intFromEnum(self);
     }
-    pub fn from_int(val: c_uint) FlashMode {
+    pub fn from_c(val: c_uint) FlashMode {
         return @enumFromInt(val);
     }
 };
@@ -800,10 +817,10 @@ pub const WindowHitTestResult = enum(c_uint) {
     RESIZE_BOTTOMLEFT = C.SDL_HITTEST_RESIZE_BOTTOMLEFT,
     RESIZE_LEFT = C.SDL_HITTEST_RESIZE_LEFT,
 
-    pub fn to_int(self: WindowHitTestResult) c_uint {
+    pub fn to_c(self: WindowHitTestResult) c_uint {
         return @intFromEnum(self);
     }
-    pub fn from_int(val: c_uint) WindowHitTestResult {
+    pub fn from_c(val: c_uint) WindowHitTestResult {
         return @enumFromInt(val);
     }
 };
@@ -815,10 +832,10 @@ pub const VSync = enum(c_int) {
     disabled = C.SDL_WINDOW_SURFACE_VSYNC_DISABLED,
     _,
 
-    pub fn to_int(self: VSync) c_int {
+    pub fn to_c(self: VSync) c_int {
         return @intFromEnum(self);
     }
-    pub fn from_int(val: c_int) VSync {
+    pub fn from_c(val: c_int) VSync {
         return @enumFromInt(val);
     }
 };
@@ -867,11 +884,7 @@ pub const FullscreenMode = union(enum) {
     }
 };
 
-pub const WindowICCProfile = extern struct {
-    extern_ptr: *Extern,
-
-    pub const Extern = opaque {};
-};
+pub const WindowICCProfile = opaque {};
 
 pub const DisplayModeList = extern struct {
     modes: []*DisplayMode,
@@ -950,6 +963,13 @@ pub const WindowFlags = extern struct {
         METAL = C.SDL_WINDOW_METAL,
         TRANSPARENT = C.SDL_WINDOW_TRANSPARENT,
         NOT_FOCUSABLE = C.SDL_WINDOW_NOT_FOCUSABLE,
+
+        pub fn to_c(self: FLAG_UINT) c_uint {
+            return @intFromEnum(self);
+        }
+        pub fn from_c(val: c_uint) FLAG_UINT {
+            return @enumFromInt(val);
+        }
     };
 };
 
@@ -958,8 +978,8 @@ pub const Surface = extern struct {
     format: PixelFormat = .UNKNOWN,
     width: c_int = 0,
     height: c_int = 0,
-    pitch: c_int = 0,
-    pixels: ?*anyopaque = null,
+    bytes_per_row: c_int = 0,
+    pixel_data: ?[*]u8 = null,
     refcount: c_int = 0,
     reserved: ?*anyopaque = null,
 
@@ -1027,4 +1047,620 @@ pub const SurfaceFlags = extern struct {
     flags: FLAG_UINT = 0,
 
     const FLAG_UINT: type = C.SDL_SurfaceFlags;
+};
+
+pub const Renderer = opaque {
+    fn to_sdl(self: *Renderer) *C.SDL_Renderer {
+        return @ptrCast(@alignCast(self));
+    }
+    pub fn get_driver_count() c_int {
+        return C.SDL_GetNumRenderDrivers();
+    }
+    pub fn get_driver_name(index: c_int) SDL3Error![*:0]const u8 {
+        return ptr_cast_or_null_error(C.SDL_GetRenderDriver(index), [*:0]const u8);
+    }
+    pub fn create_renderer_with_properties(props_id: PropertiesID) SDL3Error!*Renderer {
+        return ptr_cast_or_null_error(C.SDL_CreateRendererWithProperties(props_id), *Renderer);
+    }
+    pub fn create_software_renderer(surface: *Surface) SDL3Error!*Renderer {
+        return ptr_cast_or_null_error(C.SDL_CreateSoftwareRenderer(@ptrCast(@alignCast(surface))), *Renderer);
+    }
+    pub fn get_window(self: *Renderer) SDL3Error!*Window {
+        return ptr_cast_or_null_error(C.SDL_GetRenderWindow(self.to_c()), *Window);
+    }
+    pub fn get_name(self: *Renderer) SDL3Error![*:0]const u8 {
+        return ptr_cast_or_null_error(C.SDL_GetRenderWindow(self.to_c()), [*:0]const u8);
+    }
+    pub fn get_properties_id(self: *Renderer) SDL3Error!PropertiesID {
+        return PropertiesID{ .id = C.SDL_GetRendererProperties(self.to_c()) };
+    }
+    pub fn get_true_output_size(self: *Renderer) SDL3Error!IVec2 {
+        var size = IVec2{};
+        try ok_or_fail_error(C.SDL_GetRenderOutputSize(self.to_c(), &size.x, &size.y));
+        return size;
+    }
+    pub fn get_adjusted_output_size(self: *Renderer) SDL3Error!IVec2 {
+        var size = IVec2{};
+        try ok_or_fail_error(C.SDL_GetCurrentRenderOutputSize(self.to_c(), &size.x, &size.y));
+        return size;
+    }
+    pub fn create_texture(self: *Renderer, format: PixelFormat, access_mode: TextureAccessMode, size: IVec2) SDL3Error!*const Texture {
+        return ptr_cast_or_null_error(C.SDL_CreateTexture(self.to_c(), format.to_c(), access_mode.to_c(), size.x, size.y), *const Texture);
+    }
+    pub fn create_texture_from_surface(self: *Renderer, surface: *Surface) SDL3Error!*const Texture {
+        return ptr_cast_or_null_error(C.SDL_CreateTextureFromSurface(self.to_c(), @ptrCast(@alignCast(surface))), *const Texture);
+    }
+    pub fn create_texture_with_properties(self: *Renderer, props_id: PropertiesID) SDL3Error!*const Texture {
+        return ptr_cast_or_null_error(C.SDL_CreateTextureWithProperties(self.to_c(), props_id.id), *const Texture);
+    }
+    //CHECKPOINT
+    // pub extern fn SDL_SetRenderTarget(renderer: ?*SDL_Renderer, texture: [*c]SDL_Texture) bool;
+    // pub extern fn SDL_GetRenderTarget(renderer: ?*SDL_Renderer) [*c]SDL_Texture;
+    // pub extern fn SDL_SetRenderLogicalPresentation(renderer: ?*SDL_Renderer, w: c_int, h: c_int, mode: SDL_RendererLogicalPresentation) bool;
+    // pub extern fn SDL_GetRenderLogicalPresentation(renderer: ?*SDL_Renderer, w: [*c]c_int, h: [*c]c_int, mode: [*c]SDL_RendererLogicalPresentation) bool;
+    // pub extern fn SDL_GetRenderLogicalPresentationRect(renderer: ?*SDL_Renderer, rect: [*c]SDL_FRect) bool;
+    // pub extern fn SDL_RenderCoordinatesFromWindow(renderer: ?*SDL_Renderer, window_x: f32, window_y: f32, x: [*c]f32, y: [*c]f32) bool;
+    // pub extern fn SDL_RenderCoordinatesToWindow(renderer: ?*SDL_Renderer, x: f32, y: f32, window_x: [*c]f32, window_y: [*c]f32) bool;
+    // pub extern fn SDL_ConvertEventToRenderCoordinates(renderer: ?*SDL_Renderer, event: [*c]SDL_Event) bool;
+    // pub extern fn SDL_SetRenderViewport(renderer: ?*SDL_Renderer, rect: [*c]const SDL_Rect) bool;
+    // pub extern fn SDL_GetRenderViewport(renderer: ?*SDL_Renderer, rect: [*c]SDL_Rect) bool;
+    // pub extern fn SDL_RenderViewportSet(renderer: ?*SDL_Renderer) bool;
+    // pub extern fn SDL_GetRenderSafeArea(renderer: ?*SDL_Renderer, rect: [*c]SDL_Rect) bool;
+    // pub extern fn SDL_SetRenderClipRect(renderer: ?*SDL_Renderer, rect: [*c]const SDL_Rect) bool;
+    // pub extern fn SDL_GetRenderClipRect(renderer: ?*SDL_Renderer, rect: [*c]SDL_Rect) bool;
+    // pub extern fn SDL_RenderClipEnabled(renderer: ?*SDL_Renderer) bool;
+    // pub extern fn SDL_SetRenderScale(renderer: ?*SDL_Renderer, scaleX: f32, scaleY: f32) bool;
+    // pub extern fn SDL_GetRenderScale(renderer: ?*SDL_Renderer, scaleX: [*c]f32, scaleY: [*c]f32) bool;
+    // pub extern fn SDL_SetRenderDrawColor(renderer: ?*SDL_Renderer, r: Uint8, g: Uint8, b: Uint8, a: Uint8) bool;
+    // pub extern fn SDL_SetRenderDrawColorFloat(renderer: ?*SDL_Renderer, r: f32, g: f32, b: f32, a: f32) bool;
+    // pub extern fn SDL_GetRenderDrawColor(renderer: ?*SDL_Renderer, r: [*c]Uint8, g: [*c]Uint8, b: [*c]Uint8, a: [*c]Uint8) bool;
+    // pub extern fn SDL_GetRenderDrawColorFloat(renderer: ?*SDL_Renderer, r: [*c]f32, g: [*c]f32, b: [*c]f32, a: [*c]f32) bool;
+    // pub extern fn SDL_SetRenderColorScale(renderer: ?*SDL_Renderer, scale: f32) bool;
+    // pub extern fn SDL_GetRenderColorScale(renderer: ?*SDL_Renderer, scale: [*c]f32) bool;
+    // pub extern fn SDL_SetRenderDrawBlendMode(renderer: ?*SDL_Renderer, blendMode: SDL_BlendMode) bool;
+    // pub extern fn SDL_GetRenderDrawBlendMode(renderer: ?*SDL_Renderer, blendMode: [*c]SDL_BlendMode) bool;
+    // pub extern fn SDL_RenderClear(renderer: ?*SDL_Renderer) bool;
+    // pub extern fn SDL_RenderPoint(renderer: ?*SDL_Renderer, x: f32, y: f32) bool;
+    // pub extern fn SDL_RenderPoints(renderer: ?*SDL_Renderer, points: [*c]const SDL_FPoint, count: c_int) bool;
+    // pub extern fn SDL_RenderLine(renderer: ?*SDL_Renderer, x1: f32, y1: f32, x2: f32, y2: f32) bool;
+    // pub extern fn SDL_RenderLines(renderer: ?*SDL_Renderer, points: [*c]const SDL_FPoint, count: c_int) bool;
+    // pub extern fn SDL_RenderRect(renderer: ?*SDL_Renderer, rect: [*c]const SDL_FRect) bool;
+    // pub extern fn SDL_RenderRects(renderer: ?*SDL_Renderer, rects: [*c]const SDL_FRect, count: c_int) bool;
+    // pub extern fn SDL_RenderFillRect(renderer: ?*SDL_Renderer, rect: [*c]const SDL_FRect) bool;
+    // pub extern fn SDL_RenderFillRects(renderer: ?*SDL_Renderer, rects: [*c]const SDL_FRect, count: c_int) bool;
+    // pub extern fn SDL_RenderTexture(renderer: ?*SDL_Renderer, texture: [*c]SDL_Texture, srcrect: [*c]const SDL_FRect, dstrect: [*c]const SDL_FRect) bool;
+    // pub extern fn SDL_RenderTextureRotated(renderer: ?*SDL_Renderer, texture: [*c]SDL_Texture, srcrect: [*c]const SDL_FRect, dstrect: [*c]const SDL_FRect, angle: f64, center: [*c]const SDL_FPoint, flip: SDL_FlipMode) bool;
+    // pub extern fn SDL_RenderTextureAffine(renderer: ?*SDL_Renderer, texture: [*c]SDL_Texture, srcrect: [*c]const SDL_FRect, origin: [*c]const SDL_FPoint, right: [*c]const SDL_FPoint, down: [*c]const SDL_FPoint) bool;
+    // pub extern fn SDL_RenderTextureTiled(renderer: ?*SDL_Renderer, texture: [*c]SDL_Texture, srcrect: [*c]const SDL_FRect, scale: f32, dstrect: [*c]const SDL_FRect) bool;
+    // pub extern fn SDL_RenderTexture9Grid(renderer: ?*SDL_Renderer, texture: [*c]SDL_Texture, srcrect: [*c]const SDL_FRect, left_width: f32, right_width: f32, top_height: f32, bottom_height: f32, scale: f32, dstrect: [*c]const SDL_FRect) bool;
+    // pub extern fn SDL_RenderGeometry(renderer: ?*SDL_Renderer, texture: [*c]SDL_Texture, vertices: [*c]const SDL_Vertex, num_vertices: c_int, indices: [*c]const c_int, num_indices: c_int) bool;
+    // pub extern fn SDL_RenderGeometryRaw(renderer: ?*SDL_Renderer, texture: [*c]SDL_Texture, xy: [*c]const f32, xy_stride: c_int, color: [*c]const SDL_FColor, color_stride: c_int, uv: [*c]const f32, uv_stride: c_int, num_vertices: c_int, indices: ?*const anyopaque, num_indices: c_int, size_indices: c_int) bool;
+    // pub extern fn SDL_RenderReadPixels(renderer: ?*SDL_Renderer, rect: [*c]const SDL_Rect) [*c]SDL_Surface;
+    // pub extern fn SDL_RenderPresent(renderer: ?*SDL_Renderer) bool;
+    // pub extern fn SDL_DestroyTexture(texture: [*c]SDL_Texture) void;
+    // pub extern fn SDL_DestroyRenderer(renderer: ?*SDL_Renderer) void;
+    // pub extern fn SDL_FlushRenderer(renderer: ?*SDL_Renderer) bool;
+    // pub extern fn SDL_GetRenderMetalLayer(renderer: ?*SDL_Renderer) ?*anyopaque;
+    // pub extern fn SDL_GetRenderMetalCommandEncoder(renderer: ?*SDL_Renderer) ?*anyopaque;
+    // pub extern fn SDL_AddVulkanRenderSemaphores(renderer: ?*SDL_Renderer, wait_stage_mask: Uint32, wait_semaphore: Sint64, signal_semaphore: Sint64) bool;
+    // pub extern fn SDL_SetRenderVSync(renderer: ?*SDL_Renderer, vsync: c_int) bool;
+    // pub extern fn SDL_GetRenderVSync(renderer: ?*SDL_Renderer, vsync: [*c]c_int) bool;
+    // pub extern fn SDL_RenderDebugText(renderer: ?*SDL_Renderer, x: f32, y: f32, str: [*c]const u8) bool;
+    // pub extern fn SDL_RenderDebugTextFormat(renderer: ?*SDL_Renderer, x: f32, y: f32, fmt: [*c]const u8, ...) bool;
+};
+
+pub const Texture = extern struct {
+    format: PixelFormat = .UNKNOWN,
+    width: c_int = 0,
+    height: c_int = 0,
+    refcount: c_int = 0,
+
+    fn to_c(self: *const Texture) *const C.SDL_Texture {
+        return @ptrCast(@alignCast(self));
+    }
+
+    pub fn get_properties(self: *const Texture) PropertiesID {
+        return C.SDL_GetTextureProperties(self.to_c());
+    }
+    pub fn get_renderer(self: *const Texture) SDL3Error!*Renderer {
+        return ptr_cast_or_null_error(C.SDL_GetTextureProperties(self.to_c()), *Renderer);
+    }
+    pub fn get_size(self: *const Texture) SDL3Error!IVec2 {
+        var size = IVec2{};
+        try ok_or_fail_error(C.SDL_GetTextureSize(self.to_c(), &size.x, &size.y));
+        return size;
+    }
+    pub fn set_color_mod(self: *const Texture, color: IColor_RGB) SDL3Error!void {
+        return ok_or_fail_error(C.SDL_SetTextureColorMod(self.to_c(), color.r, color.g, color.b));
+    }
+    pub fn set_color_mod_float(self: *const Texture, color: FColor_RGB) SDL3Error!void {
+        return ok_or_fail_error(C.SDL_SetTextureColorModFloat(self.to_c(), color.r, color.g, color.b));
+    }
+    pub fn get_color_mod(self: *const Texture) SDL3Error!IColor_RGB {
+        var color = IColor_RGB{};
+        try ok_or_fail_error(C.SDL_GetTextureColorMod(self.to_c(), &color.r, &color.g, &color.b));
+        return color;
+    }
+    pub fn get_color_mod_float(self: *const Texture) SDL3Error!FColor_RGB {
+        var color = FColor_RGB{};
+        try ok_or_fail_error(C.SDL_GetTextureColorModFloat(self.to_c(), &color.r, &color.g, &color.b));
+        return color;
+    }
+    pub fn set_alpha_mod(self: *const Texture, alpha: u8) SDL3Error!void {
+        return ok_or_fail_error(C.SDL_SetTextureAlphaMod(self.to_c(), alpha));
+    }
+    pub fn set_alpha_mod_float(self: *const Texture, alpha: f32) SDL3Error!void {
+        return ok_or_fail_error(C.SDL_SetTextureAlphaModFloat(self.to_c(), alpha));
+    }
+    pub fn get_alpha_mod(self: *const Texture) SDL3Error!u8 {
+        var alpha: u8 = 0;
+        try ok_or_fail_error(C.SDL_GetTextureAlphaMod(self.to_c(), &alpha));
+        return alpha;
+    }
+    pub fn get_alpha_mod_float(self: *const Texture) SDL3Error!f32 {
+        var alpha: f32 = 0.0;
+        try ok_or_fail_error(C.SDL_GetTextureAlphaModFloat(self.to_c(), &alpha));
+        return alpha;
+    }
+    pub fn set_blend_mode(self: *const Texture, blend_mode: BlendMode) SDL3Error!void {
+        return ok_or_fail_error(C.SDL_SetTextureBlendMode(self.to_c(), blend_mode.mode));
+    }
+    pub fn get_blend_mode(self: *const Texture) SDL3Error!BlendMode {
+        var mode: u32 = 0;
+        try ok_or_fail_error(C.SDL_GetTextureBlendMode(self.to_c(), &mode));
+        return BlendMode{ .mode = mode };
+    }
+    pub fn set_scale_mode(self: *const Texture, scale_mode: ScaleMode) SDL3Error!void {
+        return ok_or_fail_error(C.SDL_SetTextureScaleMode(self.to_c(), scale_mode.to_c()));
+    }
+    pub fn get_scale_mode(self: *const Texture) SDL3Error!ScaleMode {
+        var mode: c_int = 0;
+        try ok_or_fail_error(C.SDL_GetTextureScaleMode(self.to_c(), &mode));
+        return ScaleMode.from_c(mode);
+    }
+    pub fn update_texture(self: *const Texture, raw_pixel_data: []const u8, bytes_per_row: c_int) SDL3Error!void {
+        return ok_or_fail_error(C.SDL_UpdateTexture(self.to_c(), null, raw_pixel_data.ptr, bytes_per_row));
+    }
+    pub fn update_texture_rect(self: *const Texture, rect: IRect2, raw_pixel_data: []const u8, bytes_per_row: c_int) SDL3Error!void {
+        return ok_or_fail_error(C.SDL_UpdateTexture(self.to_c(), @ptrCast(@alignCast(&rect)), raw_pixel_data.ptr, bytes_per_row));
+    }
+    pub fn update_YUV_texture(self: *const Texture, y_plane_data: []const u8, bytes_per_y_row: c_int, u_plane_data: []const u8, bytes_per_u_row: c_int, v_plane_data: []const u8, bytes_per_v_row: c_int) SDL3Error!void {
+        return ok_or_fail_error(C.SDL_UpdateYUVTexture(self.to_c(), null, y_plane_data.ptr, bytes_per_y_row, u_plane_data.ptr, bytes_per_u_row, v_plane_data.ptr, bytes_per_v_row));
+    }
+    pub fn update_YUV_texture_rect(self: *const Texture, rect: IRect2, y_plane_data: []const u8, bytes_per_y_row: c_int, u_plane_data: []const u8, bytes_per_u_row: c_int, v_plane_data: []const u8, bytes_per_v_row: c_int) SDL3Error!void {
+        return ok_or_fail_error(C.SDL_UpdateYUVTexture(self.to_c(), @ptrCast(@alignCast(&rect)), y_plane_data.ptr, bytes_per_y_row, u_plane_data.ptr, bytes_per_u_row, v_plane_data.ptr, bytes_per_v_row));
+    }
+    pub fn update_NV_texture_rect(self: *const Texture, rect: IRect2, y_plane_data: []const u8, bytes_per_y_row: c_int, uv_plane_data: []const u8, bytes_per_uv_row: c_int) SDL3Error!void {
+        return ok_or_fail_error(C.SDL_UpdateNVTexture(self.to_c(), @ptrCast(@alignCast(&rect)), y_plane_data.ptr, bytes_per_y_row, uv_plane_data.ptr, bytes_per_uv_row));
+    }
+    pub fn lock_for_byte_write(self: *const Texture) SDL3Error!TextureWriteBytes {
+        var bytes_ptr: [*]u8 = undefined;
+        var bytes_per_row: c_int = 0;
+        try ok_or_fail_error(C.SDL_LockTexture(self.to_c(), null, &bytes_ptr, &bytes_per_row));
+        const total_len = self.height * bytes_per_row;
+        return TextureWriteBytes{
+            .bytes = bytes_ptr[0..total_len],
+            .bytes_per_row = bytes_per_row,
+            .texture = self,
+        };
+    }
+    pub fn lock_rect_for_byte_write(self: *const Texture, rect: IRect2) SDL3Error!TextureWriteBytes {
+        var bytes_ptr: [*]u8 = undefined;
+        var bytes_per_row: c_int = 0;
+        try ok_or_fail_error(C.SDL_LockTexture(self.to_c(), @ptrCast(@alignCast(&rect)), &bytes_ptr, &bytes_per_row));
+        const total_len = rect.y * bytes_per_row;
+        return TextureWriteBytes{
+            .bytes = bytes_ptr[0..total_len],
+            .bytes_per_row = bytes_per_row,
+            .texture = self,
+        };
+    }
+    pub fn lock_for_surface_write(self: *const Texture) SDL3Error!TextureWriteSurface {
+        var surface: *Surface = undefined;
+        try ok_or_fail_error(C.SDL_LockTextureToSurface(self.to_c(), null, @ptrCast(@alignCast(&surface))));
+        return TextureWriteSurface{
+            .surface = surface,
+            .texture = self,
+        };
+    }
+    pub fn lock_rect_for_surface_write(self: *const Texture, rect: IRect2) SDL3Error!TextureWriteSurface {
+        var surface: *Surface = undefined;
+        try ok_or_fail_error(C.SDL_LockTextureToSurface(self.to_c(), @ptrCast(@alignCast(&rect)), @ptrCast(@alignCast(&surface))));
+        return TextureWriteSurface{
+            .surface = surface,
+            .texture = self,
+        };
+    }
+};
+
+pub const TextureWriteBytes = extern struct {
+    bytes: []u8,
+    bytes_per_row: c_int,
+    texture: ?*const Texture,
+
+    pub fn unlock(self: *TextureWriteBytes) void {
+        assert(self.texture != null);
+        C.SDL_UnlockTexture(self.texture.?);
+        self.bytes = &.{};
+        self.bytes_per_row = 0;
+        self.texture = null;
+    }
+};
+
+pub const TextureWriteSurface = extern struct {
+    surface: *Surface,
+    texture: ?*const Texture,
+
+    pub fn unlock(self: *TextureWriteSurface) void {
+        assert(self.texture != null);
+        C.SDL_UnlockTexture(self.texture.?);
+        self.surface = &Surface{};
+        self.texture = null;
+    }
+};
+
+pub const BlendMode = struct {
+    mode: u32 = 0,
+
+    pub fn create(src_color_factor: BlendFactor, dst_color_factor: BlendFactor, color_operation: BlendOperation, src_alpha_factor: BlendFactor, dst_alpha_factor: BlendFactor, alpha_operation: BlendOperation) BlendMode {
+        return BlendMode{ .mode = C.SDL_ComposeCustomBlendMode(src_color_factor.to_c(), dst_color_factor.to_c(), color_operation.to_c(), src_alpha_factor.to_c(), dst_alpha_factor.to_c(), alpha_operation.to_c()) };
+    }
+};
+
+pub const ScaleMode = enum(c_int) {
+    INVALID = C.SDL_SCALEMODE_INVALID,
+    NEAREST = C.SDL_SCALEMODE_NEAREST,
+    LINEAR = C.SDL_SCALEMODE_LINEAR,
+
+    pub fn to_c(self: ScaleMode) c_uint {
+        return @intFromEnum(self);
+    }
+    pub fn from_c(val: c_uint) ScaleMode {
+        return @enumFromInt(val);
+    }
+};
+
+pub const TextureAccessMode = enum(c_uint) {
+    STATIC = C.SDL_TEXTUREACCESS_STATIC,
+    STREAMING = C.SDL_TEXTUREACCESS_STREAMING,
+    TARGET = C.SDL_TEXTUREACCESS_TARGET,
+
+    pub fn to_c(self: TextureAccessMode) c_uint {
+        return @intFromEnum(self);
+    }
+    pub fn from_c(val: c_uint) TextureAccessMode {
+        return @enumFromInt(val);
+    }
+};
+
+pub const AudioSpec = extern struct {
+    format: AudioFormat = .UNKNOWN,
+    channels: c_int = 0,
+    freq: c_int = 0,
+};
+
+pub const AudioDeviceID = extern struct {
+    id: u32 = 0,
+
+    // pub extern fn SDL_GetAudioPlaybackDevices(count: [*c]c_int) [*c]SDL_AudioDeviceID;
+    // pub extern fn SDL_GetAudioRecordingDevices(count: [*c]c_int) [*c]SDL_AudioDeviceID;
+    // pub extern fn SDL_GetAudioDeviceName(devid: SDL_AudioDeviceID) [*c]const u8;
+    // pub extern fn SDL_GetAudioDeviceFormat(devid: SDL_AudioDeviceID, spec: [*c]SDL_AudioSpec, sample_frames: [*c]c_int) bool;
+    // pub extern fn SDL_GetAudioDeviceChannelMap(devid: SDL_AudioDeviceID, count: [*c]c_int) [*c]c_int;
+    // pub extern fn SDL_OpenAudioDevice(devid: SDL_AudioDeviceID, spec: [*c]const SDL_AudioSpec) SDL_AudioDeviceID;
+    // pub extern fn SDL_IsAudioDevicePhysical(devid: SDL_AudioDeviceID) bool;
+    // pub extern fn SDL_IsAudioDevicePlayback(devid: SDL_AudioDeviceID) bool;
+    // pub extern fn SDL_PauseAudioDevice(devid: SDL_AudioDeviceID) bool;
+    // pub extern fn SDL_ResumeAudioDevice(devid: SDL_AudioDeviceID) bool;
+    // pub extern fn SDL_AudioDevicePaused(devid: SDL_AudioDeviceID) bool;
+    // pub extern fn SDL_GetAudioDeviceGain(devid: SDL_AudioDeviceID) f32;
+    // pub extern fn SDL_SetAudioDeviceGain(devid: SDL_AudioDeviceID, gain: f32) bool;
+    // pub extern fn SDL_CloseAudioDevice(devid: SDL_AudioDeviceID) void;
+    // pub extern fn SDL_BindAudioStreams(devid: SDL_AudioDeviceID, streams: [*c]const ?*SDL_AudioStream, num_streams: c_int) bool;
+    // pub extern fn SDL_BindAudioStream(devid: SDL_AudioDeviceID, stream: ?*SDL_AudioStream) bool;
+};
+
+pub const AudioStream = extern struct {
+    extern_ptr: *External,
+
+    const External = C.SDL_AudioStream;
+
+    // pub extern fn SDL_UnbindAudioStreams(streams: [*c]const ?*SDL_AudioStream, num_streams: c_int) void;
+    // pub extern fn SDL_UnbindAudioStream(stream: ?*SDL_AudioStream) void;
+    // pub extern fn SDL_GetAudioStreamDevice(stream: ?*SDL_AudioStream) SDL_AudioDeviceID;
+    // pub extern fn SDL_CreateAudioStream(src_spec: [*c]const SDL_AudioSpec, dst_spec: [*c]const SDL_AudioSpec) ?*SDL_AudioStream;
+    // pub extern fn SDL_GetAudioStreamProperties(stream: ?*SDL_AudioStream) SDL_PropertiesID;
+    // pub extern fn SDL_GetAudioStreamFormat(stream: ?*SDL_AudioStream, src_spec: [*c]SDL_AudioSpec, dst_spec: [*c]SDL_AudioSpec) bool;
+    // pub extern fn SDL_SetAudioStreamFormat(stream: ?*SDL_AudioStream, src_spec: [*c]const SDL_AudioSpec, dst_spec: [*c]const SDL_AudioSpec) bool;
+    // pub extern fn SDL_GetAudioStreamFrequencyRatio(stream: ?*SDL_AudioStream) f32;
+    // pub extern fn SDL_SetAudioStreamFrequencyRatio(stream: ?*SDL_AudioStream, ratio: f32) bool;
+    // pub extern fn SDL_GetAudioStreamGain(stream: ?*SDL_AudioStream) f32;
+    // pub extern fn SDL_SetAudioStreamGain(stream: ?*SDL_AudioStream, gain: f32) bool;
+    // pub extern fn SDL_GetAudioStreamInputChannelMap(stream: ?*SDL_AudioStream, count: [*c]c_int) [*c]c_int;
+    // pub extern fn SDL_GetAudioStreamOutputChannelMap(stream: ?*SDL_AudioStream, count: [*c]c_int) [*c]c_int;
+    // pub extern fn SDL_SetAudioStreamInputChannelMap(stream: ?*SDL_AudioStream, chmap: [*c]const c_int, count: c_int) bool;
+    // pub extern fn SDL_SetAudioStreamOutputChannelMap(stream: ?*SDL_AudioStream, chmap: [*c]const c_int, count: c_int) bool;
+    // pub extern fn SDL_PutAudioStreamData(stream: ?*SDL_AudioStream, buf: ?*const anyopaque, len: c_int) bool;
+    // pub extern fn SDL_GetAudioStreamData(stream: ?*SDL_AudioStream, buf: ?*anyopaque, len: c_int) c_int;
+    // pub extern fn SDL_GetAudioStreamAvailable(stream: ?*SDL_AudioStream) c_int;
+    // pub extern fn SDL_GetAudioStreamQueued(stream: ?*SDL_AudioStream) c_int;
+    // pub extern fn SDL_FlushAudioStream(stream: ?*SDL_AudioStream) bool;
+    // pub extern fn SDL_ClearAudioStream(stream: ?*SDL_AudioStream) bool;
+    // pub extern fn SDL_PauseAudioStreamDevice(stream: ?*SDL_AudioStream) bool;
+    // pub extern fn SDL_ResumeAudioStreamDevice(stream: ?*SDL_AudioStream) bool;
+    // pub extern fn SDL_AudioStreamDevicePaused(stream: ?*SDL_AudioStream) bool;
+    // pub extern fn SDL_LockAudioStream(stream: ?*SDL_AudioStream) bool;
+    // pub extern fn SDL_UnlockAudioStream(stream: ?*SDL_AudioStream) bool;
+    // pub const SDL_AudioStreamCallback = ?*const fn (?*anyopaque, ?*SDL_AudioStream, c_int, c_int) callconv(.c) void;
+    // pub extern fn SDL_SetAudioStreamGetCallback(stream: ?*SDL_AudioStream, callback: SDL_AudioStreamCallback, userdata: ?*anyopaque) bool;
+    // pub extern fn SDL_SetAudioStreamPutCallback(stream: ?*SDL_AudioStream, callback: SDL_AudioStreamCallback, userdata: ?*anyopaque) bool;
+    // pub extern fn SDL_DestroyAudioStream(stream: ?*SDL_AudioStream) void;
+    // pub extern fn SDL_OpenAudioDeviceStream(devid: SDL_AudioDeviceID, spec: [*c]const SDL_AudioSpec, callback: SDL_AudioStreamCallback, userdata: ?*anyopaque) ?*SDL_AudioStream;
+};
+
+pub const Gamepad = extern struct {
+    extern_ptr: *External,
+
+    pub const External = C.SDL_Gamepad;
+};
+
+pub const GamepadType = enum(c_uint) {
+    UNKNOWN = C.SDL_GAMEPAD_TYPE_UNKNOWN,
+    STANDARD = C.SDL_GAMEPAD_TYPE_STANDARD,
+    XBOX360 = C.SDL_GAMEPAD_TYPE_XBOX360,
+    XBOXONE = C.SDL_GAMEPAD_TYPE_XBOXONE,
+    PS3 = C.SDL_GAMEPAD_TYPE_PS3,
+    PS4 = C.SDL_GAMEPAD_TYPE_PS4,
+    PS5 = C.SDL_GAMEPAD_TYPE_PS5,
+    NINTENDO_SWITCH_PRO = C.SDL_GAMEPAD_TYPE_NINTENDO_SWITCH_PRO,
+    NINTENDO_SWITCH_JOYCON_LEFT = C.SDL_GAMEPAD_TYPE_NINTENDO_SWITCH_JOYCON_LEFT,
+    NINTENDO_SWITCH_JOYCON_RIGHT = C.SDL_GAMEPAD_TYPE_NINTENDO_SWITCH_JOYCON_RIGHT,
+    NINTENDO_SWITCH_JOYCON_PAIR = C.SDL_GAMEPAD_TYPE_NINTENDO_SWITCH_JOYCON_PAIR,
+
+    pub const COUNT: c_uint = C.SDL_GAMEPAD_TYPE_COUNT;
+
+    pub fn to_c(self: GamepadType) c_uint {
+        return @intFromEnum(self);
+    }
+    pub fn from_c(val: c_uint) GamepadType {
+        return @enumFromInt(val);
+    }
+};
+
+pub const GamepadButton = enum(c_int) {
+    INVALID = C.SDL_GAMEPAD_BUTTON_INVALID,
+    SOUTH = C.SDL_GAMEPAD_BUTTON_SOUTH,
+    EAST = C.SDL_GAMEPAD_BUTTON_EAST,
+    WEST = C.SDL_GAMEPAD_BUTTON_WEST,
+    NORTH = C.SDL_GAMEPAD_BUTTON_NORTH,
+    BACK = C.SDL_GAMEPAD_BUTTON_BACK,
+    GUIDE = C.SDL_GAMEPAD_BUTTON_GUIDE,
+    START = C.SDL_GAMEPAD_BUTTON_START,
+    LEFT_STICK = C.SDL_GAMEPAD_BUTTON_LEFT_STICK,
+    RIGHT_STICK = C.SDL_GAMEPAD_BUTTON_RIGHT_STICK,
+    LEFT_SHOULDER = C.SDL_GAMEPAD_BUTTON_LEFT_SHOULDER,
+    RIGHT_SHOULDER = C.SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER,
+    DPAD_UP = C.SDL_GAMEPAD_BUTTON_DPAD_UP,
+    DPAD_DOWN = C.SDL_GAMEPAD_BUTTON_DPAD_DOWN,
+    DPAD_LEFT = C.SDL_GAMEPAD_BUTTON_DPAD_LEFT,
+    DPAD_RIGHT = C.SDL_GAMEPAD_BUTTON_DPAD_RIGHT,
+    MISC1 = C.SDL_GAMEPAD_BUTTON_MISC1,
+    RIGHT_PADDLE1 = C.SDL_GAMEPAD_BUTTON_RIGHT_PADDLE1,
+    LEFT_PADDLE1 = C.SDL_GAMEPAD_BUTTON_LEFT_PADDLE1,
+    RIGHT_PADDLE2 = C.SDL_GAMEPAD_BUTTON_RIGHT_PADDLE2,
+    LEFT_PADDLE2 = C.SDL_GAMEPAD_BUTTON_LEFT_PADDLE2,
+    TOUCHPAD = C.SDL_GAMEPAD_BUTTON_TOUCHPAD,
+    MISC2 = C.SDL_GAMEPAD_BUTTON_MISC2,
+    MISC3 = C.SDL_GAMEPAD_BUTTON_MISC3,
+    MISC4 = C.SDL_GAMEPAD_BUTTON_MISC4,
+    MISC5 = C.SDL_GAMEPAD_BUTTON_MISC5,
+    MISC6 = C.SDL_GAMEPAD_BUTTON_MISC6,
+
+    pub const COUNT: c_int = C.SDL_GAMEPAD_BUTTON_COUNT;
+
+    pub fn to_c(self: GamepadButton) c_uint {
+        return @intFromEnum(self);
+    }
+    pub fn from_c(val: c_uint) GamepadButton {
+        return @enumFromInt(val);
+    }
+};
+
+pub const GamepadButtonLabel = enum(c_uint) {
+    UNKNOWN = C.SDL_GAMEPAD_BUTTON_LABEL_UNKNOWN,
+    A = C.SDL_GAMEPAD_BUTTON_LABEL_A,
+    B = C.SDL_GAMEPAD_BUTTON_LABEL_B,
+    X = C.SDL_GAMEPAD_BUTTON_LABEL_X,
+    Y = C.SDL_GAMEPAD_BUTTON_LABEL_Y,
+    CROSS = C.SDL_GAMEPAD_BUTTON_LABEL_CROSS,
+    CIRCLE = C.SDL_GAMEPAD_BUTTON_LABEL_CIRCLE,
+    SQUARE = C.SDL_GAMEPAD_BUTTON_LABEL_SQUARE,
+    TRIANGLE = C.SDL_GAMEPAD_BUTTON_LABEL_TRIANGLE,
+
+    pub fn to_c(self: GamepadButtonLabel) c_uint {
+        return @intFromEnum(self);
+    }
+    pub fn from_c(val: c_uint) GamepadButtonLabel {
+        return @enumFromInt(val);
+    }
+};
+
+pub const GamepadAxis = enum(c_int) {
+    INVALID = C.SDL_GAMEPAD_AXIS_INVALID,
+    LEFTX = C.SDL_GAMEPAD_AXIS_LEFTX,
+    LEFTY = C.SDL_GAMEPAD_AXIS_LEFTY,
+    RIGHTX = C.SDL_GAMEPAD_AXIS_RIGHTX,
+    RIGHTY = C.SDL_GAMEPAD_AXIS_RIGHTY,
+    LEFT_TRIGGER = C.SDL_GAMEPAD_AXIS_LEFT_TRIGGER,
+    RIGHT_TRIGGER = C.SDL_GAMEPAD_AXIS_RIGHT_TRIGGER,
+
+    pub const COUNT: c_int = C.SDL_GAMEPAD_AXIS_COUNT;
+
+    pub fn to_c(self: GamepadAxis) c_uint {
+        return @intFromEnum(self);
+    }
+    pub fn from_c(val: c_uint) GamepadAxis {
+        return @enumFromInt(val);
+    }
+};
+
+pub const GamepadBindingType = enum(c_uint) {
+    NONE = C.SDL_GAMEPAD_BINDTYPE_NONE,
+    BUTTON = C.SDL_GAMEPAD_BINDTYPE_BUTTON,
+    AXIS = C.SDL_GAMEPAD_BINDTYPE_AXIS,
+    HAT = C.SDL_GAMEPAD_BINDTYPE_HAT,
+
+    pub fn to_c(self: GamepadBindingType) c_uint {
+        return @intFromEnum(self);
+    }
+    pub fn from_c(val: c_uint) GamepadBindingType {
+        return @enumFromInt(val);
+    }
+};
+
+pub const StorageInterface = extern struct {
+    version: C.Uint32 = @sizeOf(*StorageInterface),
+    close: ?*const fn (?*anyopaque) callconv(.c) bool = @import("std").mem.zeroes(?*const fn (?*anyopaque) callconv(.c) bool),
+    ready: ?*const fn (?*anyopaque) callconv(.c) bool = @import("std").mem.zeroes(?*const fn (?*anyopaque) callconv(.c) bool),
+    enumerate: ?*const fn (?*anyopaque, [*c]const u8, C.SDL_EnumerateDirectoryCallback, ?*anyopaque) callconv(.c) bool = @import("std").mem.zeroes(?*const fn (?*anyopaque, [*c]const u8, C.SDL_EnumerateDirectoryCallback, ?*anyopaque) callconv(.c) bool),
+    info: ?*const fn (?*anyopaque, [*c]const u8, [*c]C.SDL_PathInfo) callconv(.c) bool = @import("std").mem.zeroes(?*const fn (?*anyopaque, [*c]const u8, [*c]C.SDL_PathInfo) callconv(.c) bool),
+    read_file: ?*const fn (?*anyopaque, [*c]const u8, ?*anyopaque, C.Uint64) callconv(.c) bool = @import("std").mem.zeroes(?*const fn (?*anyopaque, [*c]const u8, ?*anyopaque, C.Uint64) callconv(.c) bool),
+    write_file: ?*const fn (?*anyopaque, [*c]const u8, ?*const anyopaque, C.Uint64) callconv(.c) bool = @import("std").mem.zeroes(?*const fn (?*anyopaque, [*c]const u8, ?*const anyopaque, C.Uint64) callconv(.c) bool),
+    mkdir: ?*const fn (?*anyopaque, [*c]const u8) callconv(.c) bool = @import("std").mem.zeroes(?*const fn (?*anyopaque, [*c]const u8) callconv(.c) bool),
+    remove: ?*const fn (?*anyopaque, [*c]const u8) callconv(.c) bool = @import("std").mem.zeroes(?*const fn (?*anyopaque, [*c]const u8) callconv(.c) bool),
+    rename: ?*const fn (?*anyopaque, [*c]const u8, [*c]const u8) callconv(.c) bool = @import("std").mem.zeroes(?*const fn (?*anyopaque, [*c]const u8, [*c]const u8) callconv(.c) bool),
+    copy: ?*const fn (?*anyopaque, [*c]const u8, [*c]const u8) callconv(.c) bool = @import("std").mem.zeroes(?*const fn (?*anyopaque, [*c]const u8, [*c]const u8) callconv(.c) bool),
+    space_remaining: ?*const fn (?*anyopaque) callconv(.c) C.Uint64 = @import("std").mem.zeroes(?*const fn (?*anyopaque) callconv(.c) C.Uint64),
+};
+
+pub const Storage = extern struct {
+    extern_ptr: *External,
+    is_open: bool = false,
+
+    pub const External = C.SDL_Storage;
+    pub fn open_app_readonly_storage_folder(override: [:0]const u8, properties: PropertiesID) SDL3Error!Storage {
+        return Storage{ .is_open = true, .extern_ptr = try ptr_cast_or_null_error(C.SDL_OpenTitleStorage(override.ptr, properties), *Storage.External) };
+    }
+    pub fn open_user_storage_folder(org_name: [:0]const u8, app_name: [:0]const u8, properties: PropertiesID) SDL3Error!Storage {
+        return Storage{ .is_open = true, .extern_ptr = try ptr_cast_or_null_error(C.SDL_OpenUserStorage(org_name.ptr, app_name.ptr, properties), *Storage.External) };
+    }
+    pub fn open_filesystem(path: [:0]const u8) SDL3Error!Storage {
+        return Storage{ .is_open = true, .extern_ptr = try ptr_cast_or_null_error(C.SDL_OpenFileStorage(path.ptr), *Storage.External) };
+    }
+    pub fn open_storage_with_custom_interface(iface: StorageInterface, user_data: ?*anyopaque) SDL3Error!Storage {
+        return Storage{ .is_open = true, .extern_ptr = try ptr_cast_or_null_error(C.SDL_OpenStorage(@ptrCast(@alignCast(&iface)), user_data), *Storage.External) };
+    }
+    pub fn close(self: Storage) SDL3Error!void {
+        assert(self.is_open);
+        try ok_or_fail_error(C.SDL_CloseStorage(self.extern_ptr));
+        self.is_open = false;
+    }
+    pub fn is_ready(self: Storage) SDL3Error!void {
+        assert(self.is_open);
+        try ok_or_fail_error(C.SDL_StorageReady(self.extern_ptr));
+    }
+    pub fn get_file_size(self: Storage, sub_path: [:0]const u8) SDL3Error!u64 {
+        assert(self.is_open);
+        var size: u64 = 0;
+        try ok_or_fail_error(C.SDL_GetStorageFileSize(self.extern_ptr, sub_path.ptr, &size));
+        return size;
+    }
+    pub fn read_file_into_buffer(self: Storage, sub_path: [:0]const u8, buffer: []u8) SDL3Error!void {
+        assert(self.is_open);
+        try ok_or_fail_error(C.SDL_ReadStorageFile(self.extern_ptr, sub_path.ptr, buffer.ptr, @intCast(buffer.len)));
+    }
+    pub fn write_file_from_buffer(self: Storage, sub_path: [:0]const u8, buffer: []const u8) SDL3Error!void {
+        assert(self.is_open);
+        try ok_or_fail_error(C.SDL_WriteStorageFile(self.extern_ptr, sub_path.ptr, buffer.ptr, @intCast(buffer.len)));
+    }
+    pub fn create_directory(self: Storage, sub_path: [:0]const u8) SDL3Error!void {
+        assert(self.is_open);
+        try ok_or_fail_error(C.SDL_CreateStorageDirectory(self.extern_ptr, sub_path.ptr));
+    }
+    pub fn do_callback_for_each_directory_entry(self: Storage, sub_path: [:0]const u8, callback: FolderEntryCallback, callback_data: ?*anyopaque) SDL3Error!void {
+        assert(self.is_open);
+        try ok_or_fail_error(C.SDL_EnumerateStorageDirectory(self.extern_ptr, sub_path.ptr, @ptrCast(@alignCast(callback)), callback_data));
+    }
+    pub fn delete_file_or_empty_directory(self: Storage, sub_path: [:0]const u8) SDL3Error!void {
+        assert(self.is_open);
+        try ok_or_fail_error(C.SDL_RemoveStoragePath(self.extern_ptr, sub_path.ptr));
+    }
+    pub fn rename_file_or_directory(self: Storage, old_sub_path: [:0]const u8, new_sub_path: [:0]const u8) SDL3Error!void {
+        assert(self.is_open);
+        try ok_or_fail_error(C.SDL_RenameStoragePath(self.extern_ptr, old_sub_path.ptr, new_sub_path.ptr));
+    }
+    pub fn copy_file(self: Storage, old_sub_path: [:0]const u8, new_sub_path: [:0]const u8) SDL3Error!void {
+        assert(self.is_open);
+        try ok_or_fail_error(C.SDL_CopyStorageFile(self.extern_ptr, old_sub_path.ptr, new_sub_path.ptr));
+    }
+    pub fn get_path_info(self: Storage, sub_path: [:0]const u8) SDL3Error!PathInfo {
+        var info = PathInfo{};
+        try ok_or_fail_error(C.SDL_GetStoragePathInfo(self.extern_ptr, sub_path.ptr, @ptrCast(@alignCast(&info))));
+        return info;
+    }
+    pub fn get_remaining_storage_space(self: Storage) SDL3Error!u64 {
+        return @intCast(C.SDL_GetStorageSpaceRemaining(self.extern_ptr));
+    }
+    pub fn get_directory_glob(self: Storage, sub_path: [:0]const u8, pattern: [:0]const u8, case_insensitive: bool) SDL3Error!DirectoryGlob {
+        var len: c_int = 0;
+        const ptr = try ptr_cast_or_null_error(C.SDL_GlobStorageDirectory(self.extern_ptr, sub_path.ptr, pattern.ptr, @intCast(@intFromBool(case_insensitive)), &len), [*]const [*:0]const u8);
+        return DirectoryGlob{
+            .strings = ptr[0..len],
+        };
+    }
+};
+
+pub const FolderEntryCallback = ?*const fn (callback_data: ?*anyopaque, folder_name: [*:0]const u8, entry_name: [*:0]const u8) callconv(.c) EnumerationResult;
+
+pub const EnumerationResult = enum(c_uint) {
+    CONTINUE = C.SDL_ENUM_CONTINUE,
+    SUCCESS = C.SDL_ENUM_SUCCESS,
+    FAILURE = C.SDL_ENUM_FAILURE,
+
+    pub fn to_c(self: EnumerationResult) c_uint {
+        return @intFromEnum(self);
+    }
+    pub fn from_c(val: c_uint) EnumerationResult {
+        return @enumFromInt(val);
+    }
+};
+
+pub const PathInfo = extern struct {
+    type: PathType = .NONE,
+    size: u64 = 0,
+    create_time: Time = Time{},
+    modify_time: Time = Time{},
+    access_time: Time = Time{},
+};
+
+pub const PathType = enum(c_uint) {
+    NONE = C.SDL_PATHTYPE_NONE,
+    FILE = C.SDL_PATHTYPE_FILE,
+    DIRECTORY = C.SDL_PATHTYPE_DIRECTORY,
+    OTHER = C.SDL_PATHTYPE_OTHER,
+
+    pub fn to_c(self: PathType) c_uint {
+        return @intFromEnum(self);
+    }
+    pub fn from_c(val: c_uint) PathType {
+        return @enumFromInt(val);
+    }
+};
+
+pub const Time = extern struct {
+    ns: i64 = 0,
+};
+
+pub const DirectoryGlob = extern struct {
+    strings: []const [*:0]const u8,
+
+    pub fn get_string(self: DirectoryGlob, index: usize) []const u8 {
+        assert(index < self.strings.len);
+        return Root.Utils.make_const_slice_from_sentinel_ptr(u8, 0, self.strings[index]);
+    }
+
+    pub fn free(self: DirectoryGlob) void {
+        sdl_free(self.strings.ptr);
+        self.strings = &.{};
+    }
 };
