@@ -26,35 +26,19 @@ pub const GrowthModel = enum {
     /// TODO documentation
     GROW_EXACT_NEEDED,
     /// TODO documentation
-    GROW_EXACT_NEEDED_SENTINEL,
-    /// TODO documentation
     GROW_EXACT_NEEDED_ATOMIC_PADDING,
-    /// TODO documentation
-    GROW_EXACT_NEEDED_ATOMIC_PADDING_SENTINEL,
     /// TODO documentation
     GROW_BY_100_PERCENT,
     /// TODO documentation
-    GROW_BY_100_PERCENT_SENTINEL,
-    /// TODO documentation
     GROW_BY_100_PERCENT_ATOMIC_PADDING,
-    /// TODO documentation
-    GROW_BY_100_PERCENT_ATOMIC_PADDING_SENTINEL,
     /// TODO documentation
     GROW_BY_50_PERCENT,
     /// TODO documentation
-    GROW_BY_50_PERCENT_SENTINEL,
-    /// TODO documentation
     GROW_BY_50_PERCENT_ATOMIC_PADDING,
-    /// TODO documentation
-    GROW_BY_50_PERCENT_ATOMIC_PADDING_SENTINEL,
     /// TODO documentation
     GROW_BY_25_PERCENT,
     /// TODO documentation
-    GROW_BY_25_PERCENT_SENTINEL,
-    /// TODO documentation
     GROW_BY_25_PERCENT_ATOMIC_PADDING,
-    /// TODO documentation
-    GROW_BY_25_PERCENT_ATOMIC_PADDING_SENTINEL,
 };
 
 /// TODO documentation

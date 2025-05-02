@@ -10,7 +10,8 @@ const ArrayList = std.ArrayListUnmanaged;
 const Type = std.builtin.Type;
 
 const Root = @import("./_root.zig");
-
+const Quicksort = Root.Quicksort;
+const Pivot = Quicksort.Pivot;
 const AllocErrorBehavior = Root.CommonTypes.AllocErrorBehavior;
 const GrowthModel = Root.CommonTypes.GrowthModel;
 const SortAlgorithm = Root.CommonTypes.SortAlgorithm;
@@ -23,7 +24,6 @@ pub const ListOptionsBase = struct {
     growth_model: GrowthModel = .GROW_BY_50_PERCENT_WITH_ATOMIC_PADDING,
     index_type: type = usize,
     secure_wipe_bytes: bool = false,
-    reserve_sentinel_space: bool = false,
 };
 
 pub fn ListOptionsExtended(comptime base_options: ListOptionsBase) type {
@@ -75,24 +75,23 @@ pub const Internal = struct {
         self.len = new_len;
     }
 
-    pub fn new_empty(comptime List: type) if (List.RESERVE_SENTINEL and List.RETURN_ERRORS) List.Error!List else List {
-        if (List.RESERVE_SENTINEL) return List.new_with_capacity(1);
+    pub fn new_empty(comptime List: type) List {
         return List.EMPTY;
     }
 
-    pub fn new_with_capacity(comptime List: type, capacity: List.Idx) if (List.RETURN_ERRORS) List.Error!List else List {
+    pub fn new_with_capacity(comptime List: type, capacity: List.Idx, alloc: Allocator) if (List.RETURN_ERRORS) List.Error!List else List {
         var self = List.EMPTY;
         if (List.RETURN_ERRORS) {
-            try self.ensure_total_capacity_exact(capacity);
+            try ensure_total_capacity_exact(List, &self, capacity, alloc);
         } else {
-            self.ensure_total_capacity_exact(capacity);
+            ensure_total_capacity_exact(List, &self, capacity, alloc);
         }
         return self;
     }
 
-    pub fn clone(comptime List: type, self: List) if (List.RETURN_ERRORS) List.Error!List else List {
-        var new_list = if (List.RETURN_ERRORS) try List.new_with_capacity(self.cap) else List.new_with_capacity(self.cap);
-        new_list.append_slice_assume_capacity(self.ptr[0..self.len]);
+    pub fn clone(comptime List: type, self: List, alloc: Allocator) if (List.RETURN_ERRORS) List.Error!List else List {
+        var new_list = if (List.RETURN_ERRORS) try new_with_capacity(List, self.cap, alloc) else new_with_capacity(List, self.cap, alloc);
+        append_slice_assume_capacity(List, &new_list, self.ptr[0..self.len]);
         return new_list;
     }
 
@@ -102,14 +101,450 @@ pub const Internal = struct {
             self.* = List.EMPTY;
             return new_items;
         }
-        const new_memory = alloc.alignedAlloc(List.Elem, List.ALIGN, self.len) catch |err| return List.handle_alloc_error(err);
+        const new_memory = alloc.alignedAlloc(List.Elem, List.ALIGN, self.len) catch |err| return handle_alloc_error(List, err);
         @memcpy(new_memory, self.ptr[0..self.len]);
-        self.clear_and_free();
+        clear_and_free(List, self);
         return new_memory;
     }
 
-    pub fn to_owned_slice_sentinel(comptime List: type, self: *List, comptime sentinel: List.Elem) if (List.RETURN_ERRORS) List.Error!List.SentinelSlice(sentinel) else List.SentinelSlice(sentinel) {
-        //CHECKPOINT
+    pub fn to_owned_slice_sentinel(comptime List: type, self: *List, alloc: Allocator, comptime sentinel: List.Elem) if (List.RETURN_ERRORS) List.Error!List.SentinelSlice(sentinel) else List.SentinelSlice(sentinel) {
+        if (List.RETURN_ERRORS) {
+            try ensure_total_capacity_exact(List, self, self.len + 1);
+        } else {
+            ensure_total_capacity_exact(List, self, self.len + 1);
+        }
+        self.ptr[self.len] = sentinel;
+        self.len += 1;
+        const result: List.Slice = if (List.RETURN_ERRORS) try to_owned_slice(List, self, alloc) else to_owned_slice(List, self, alloc);
+        return result[0 .. result.len - 1 :sentinel];
+    }
+
+    pub fn from_owned_slice(comptime List: type, from_slice: List.Slice) List {
+        return List{
+            .ptr = from_slice.ptr,
+            .len = from_slice.len,
+            .cap = from_slice.len,
+        };
+    }
+
+    pub fn from_owned_slice_sentinel(comptime List: type, comptime sentinel: List.Elem, from_slice: [:sentinel]List.Elem) List {
+        return List{
+            .ptr = from_slice.ptr,
+            .len = from_slice.len,
+            .cap = from_slice.len,
+        };
+    }
+
+    pub fn insert_slot(comptime List: type, self: *List, idx: List.Idx, alloc: Allocator) if (List.RETURN_ERRORS) List.Error!*List.Elem else *List.Elem {
+        if (List.RETURN_ERRORS) {
+            try ensure_unused_capacity(List, self, 1, alloc);
+        } else {
+            ensure_unused_capacity(List, self, 1, alloc);
+        }
+        return insert_slot_assume_capacity(List, self, idx);
+    }
+
+    pub fn insert_slot_assume_capacity(comptime List: type, self: *List, idx: List.Idx) *List.Elem {
+        assert(idx <= self.len);
+        mem.copyBackwards(List.Elem, self.ptr[idx + 1 .. self.len + 1], self.ptr[idx..self.len]);
+        return &self.ptr[idx];
+    }
+
+    pub fn insert(comptime List: type, self: *List, idx: List.Idx, item: List.Elem, alloc: Allocator) if (List.RETURN_ERRORS) List.Error!void else void {
+        const ptr = if (List.RETURN_ERRORS) try insert_slot(List, self, idx, alloc) else insert_slot(List, self, idx, alloc);
+        ptr.* = item;
+    }
+
+    pub fn insert_assume_capacity(comptime List: type, self: *List, idx: List.Idx, item: List.Elem) void {
+        const ptr = insert_slot_assume_capacity(List, self, idx);
+        ptr.* = item;
+    }
+
+    pub fn insert_many_slots(comptime List: type, self: *List, idx: List.Idx, count: List.Idx, alloc: Allocator) if (List.RETURN_ERRORS) List.Error![]List.Elem else []List.Elem {
+        if (List.RETURN_ERRORS) {
+            try ensure_unused_capacity(List, self, count, alloc);
+        } else {
+            ensure_unused_capacity(List, self, count, alloc);
+        }
+        return insert_many_slots_assume_capacity(List, self, idx, count);
+    }
+
+    pub fn insert_many_slots_assume_capacity(comptime List: type, self: *List, idx: List.Idx, count: List.Idx) []List.Elem {
+        assert(idx <= self.len);
+        mem.copyBackwards(List.Elem, self.ptr[idx + count .. self.len + count], self.ptr[idx..self.len]);
+        return self.ptr[idx .. idx + count];
+    }
+
+    pub fn insert_slice(comptime List: type, self: *List, idx: List.Idx, items: []const List.Elem, alloc: Allocator) if (List.RETURN_ERRORS) List.Error!void else void {
+        const slots = if (List.RETURN_ERRORS) try insert_many_slots(List, self, idx, @intCast(items.len), alloc) else insert_slot(List, self, idx, @intCast(items.len), alloc);
+        @memcpy(slots, items);
+    }
+
+    pub fn insert_slice_assume_capacity(comptime List: type, self: *List, idx: List.Idx, items: []const List.Elem) void {
+        const slots = insert_many_slots_assume_capacity(List, self, idx, @intCast(items.len));
+        @memcpy(slots, items);
+    }
+
+    pub fn replace_range(comptime List: type, self: *List, start: List.Idx, length: List.Idx, new_items: []const List.Elem, alloc: Allocator) if (List.RETURN_ERRORS) List.Error!void else void {
+        if (new_items.len > length) {
+            const additional_needed = new_items.len - length;
+            if (List.RETURN_ERRORS) {
+                try ensure_unused_capacity(List, self, additional_needed, alloc);
+            } else {
+                ensure_unused_capacity(List, self, additional_needed, alloc);
+            }
+        }
+        replace_range_assume_capacity(List, self, start, length, new_items);
+    }
+
+    pub fn replace_range_assume_capacity(comptime List: type, self: *List, start: List.Idx, length: List.Idx, new_items: []const List.Elem) void {
+        const end_of_range = start + length;
+        assert(end_of_range <= self.len);
+        const range = self.ptr[start..end_of_range];
+        if (range.len == new_items.len)
+            @memcpy(range[0..new_items.len], new_items)
+        else if (range.len < new_items.len) {
+            const within_range = new_items[0..range.len];
+            const leftover = new_items[range.len..];
+            @memcpy(range[0..within_range.len], within_range);
+            const new_slots = insert_many_slots_assume_capacity(List, self, end_of_range, leftover.len);
+            @memcpy(new_slots, leftover);
+        } else {
+            const unused_slots = range.len - new_items.len;
+            @memcpy(range[0..new_items.len], new_items);
+            std.mem.copyForwards(List.Elem, self.ptr[end_of_range - unused_slots .. self.len], self.ptr[end_of_range..self.len]);
+            if (List.SECURE_WIPE) {
+                crypto.secureZero(List.Elem, self.ptr[self.len - unused_slots .. self.len]);
+            }
+            self.len -= unused_slots;
+        }
+    }
+
+    pub fn append(comptime List: type, self: *List, item: List.Elem, alloc: Allocator) if (List.RETURN_ERRORS) List.Error!void else void {
+        const slot = if (List.RETURN_ERRORS) try append_slot(List, self, alloc) else append_slot(List, self, alloc);
+        slot.* = item;
+    }
+
+    pub fn append_assume_capacity(comptime List: type, self: *List, item: List.Elem) void {
+        const slot = append_slot_assume_capacity(List, self);
+        slot.* = item;
+    }
+
+    pub fn remove(comptime List: type, self: *List, idx: List.Idx) List.Elem {
+        const val: List.Elem = self.ptr[idx];
+        delete(List, self, idx);
+        return val;
+    }
+
+    pub fn swap_remove(comptime List: type, self: *List, idx: List.Idx) List.Elem {
+        const val: List.Elem = self.ptr[idx];
+        swap_delete(List, self, idx);
+        return val;
+    }
+
+    pub fn delete(comptime List: type, self: *List, idx: List.Idx) void {
+        assert(idx < self.len);
+        std.mem.copyForwards(List.Elem, self.ptr[idx..self.len], self.ptr[idx + 1 .. self.len]);
+        if (List.SECURE_WIPE) {
+            crypto.secureZero(List.Elem, self.ptr[self.len - 1 .. self.len]);
+        }
+        self.len -= 1;
+    }
+
+    pub fn delete_range(comptime List: type, self: *List, start: List.Idx, length: List.Idx) void {
+        const end_of_range = start + length;
+        assert(end_of_range <= self.len);
+        std.mem.copyForwards(List.Elem, self.ptr[start..self.len], self.ptr[end_of_range..self.len]);
+        if (List.SECURE_WIPE) {
+            crypto.secureZero(List.Elem, self.ptr[self.len - length .. self.len]);
+        }
+        self.len -= length;
+    }
+
+    pub fn swap_delete(comptime List: type, self: *List, idx: List.Idx) void {
+        assert(idx < self.len);
+        self.ptr[idx] = self.ptr[self.list.items.len - 1];
+        if (List.SECURE_WIPE) {
+            crypto.secureZero(List.Elem, self.ptr[self.len - 1 .. self.len]);
+        }
+        self.len -= 1;
+    }
+
+    pub fn append_slice(comptime List: type, self: *List, items: []const List.Elem, alloc: Allocator) if (List.RETURN_ERRORS) List.Error!void else void {
+        const slots = if (List.RETURN_ERRORS) try append_many_slots(List, self, @intCast(items.len), alloc) else append_many_slots(List, self, @intCast(items.len), alloc);
+        @memcpy(slots, items);
+    }
+
+    pub fn append_slice_assume_capacity(comptime List: type, self: *List, items: []const List.Elem) void {
+        const slots = append_many_slots_assume_capacity(List, self, @intCast(items.len));
+        @memcpy(slots, items);
+    }
+
+    pub fn append_slice_unaligned(comptime List: type, self: *List, items: []align(1) const List.Elem, alloc: Allocator) if (List.RETURN_ERRORS) List.Error!void else void {
+        const slots = if (List.RETURN_ERRORS) try append_many_slots(List, self, @intCast(items.len), alloc) else append_many_slots(List, self, @intCast(items.len), alloc);
+        @memcpy(slots, items);
+    }
+
+    pub fn append_slice_unaligned_assume_capacity(comptime List: type, self: *List, items: []align(1) const List.Elem) void {
+        const slots = append_many_slots_assume_capacity(List, self, @intCast(items.len));
+        @memcpy(slots, items);
+    }
+
+    pub fn append_n_times(comptime List: type, self: *List, value: List.Elem, count: List.Idx, alloc: Allocator) if (List.RETURN_ERRORS) List.Error!void else void {
+        const slots = if (List.RETURN_ERRORS) try append_many_slots(List, self, count, alloc) else append_many_slots(List, self, count, alloc);
+        @memset(slots, value);
+    }
+
+    pub fn append_n_times_assume_capacity(comptime List: type, self: *List, value: List.Elem, count: List.Idx) void {
+        const slots = append_many_slots_assume_capacity(List, self, count);
+        @memset(slots, value);
+    }
+
+    pub fn resize(comptime List: type, self: *List, new_len: List.Idx, alloc: Allocator) if (List.RETURN_ERRORS) List.Error!void else void {
+        if (List.RETURN_ERRORS) {
+            try ensure_total_capacity(List, self, new_len, alloc);
+        } else {
+            ensure_total_capacity(List, self, new_len, alloc);
+        }
+        if (List.SECURE_WIPE and new_len < self.len) {
+            crypto.secureZero(List.Elem, self.ptr[new_len..self.len]);
+        }
+        self.len = new_len;
+    }
+
+    pub fn shrink_and_free(comptime List: type, self: *List, new_len: List.Idx, alloc: Allocator) void {
+        assert(new_len <= self.len);
+
+        if (@sizeOf(List.Elem) == 0) {
+            self.items.len = new_len;
+            return;
+        }
+
+        if (List.SECURE_WIPE) {
+            crypto.secureZero(List.Elem, self.ptr[new_len..self.len]);
+        }
+
+        const old_memory = self.ptr[0..self.cap];
+        if (alloc.remap(old_memory, new_len)) |new_items| {
+            self.ptr = new_items.ptr;
+            self.len = new_items.len;
+            self.cap = new_items.len;
+            return;
+        }
+
+        const new_memory = alloc.alignedAlloc(List.Elem, List.ALIGN, new_len) catch |err| return handle_alloc_error(List, err);
+
+        @memcpy(new_memory, self.ptr[0..new_len]);
+        alloc.free(old_memory);
+        self.ptr = new_memory.ptr;
+        self.len = new_memory.len;
+        self.cap = new_memory.len;
+    }
+
+    pub fn shrink_retaining_capacity(comptime List: type, self: *List, new_len: List.Idx) void {
+        assert(new_len <= self.len);
+        if (List.SECURE_WIPE) {
+            crypto.secureZero(List.Elem, self.ptr[new_len..self.len]);
+        }
+        self.len = new_len;
+    }
+
+    pub fn clear_retaining_capacity(comptime List: type, self: *List) void {
+        if (List.SECURE_WIPE) {
+            std.crypto.secureZero(List.Elem, self.ptr[0..self.len]);
+        }
+        self.len = 0;
+    }
+
+    pub fn clear_and_free(comptime List: type, self: *List, alloc: Allocator) void {
+        if (List.SECURE_WIPE) {
+            std.crypto.secureZero(List.Elem, self.ptr[0..self.len]);
+        }
+        alloc.free(self.ptr[0..self.cap]);
+        self.* = List.EMPTY;
+    }
+
+    pub fn ensure_total_capacity(comptime List: type, self: *List, new_capacity: List.Idx, alloc: Allocator) if (List.RETURN_ERRORS) List.Error!void else void {
+        if (self.cap >= new_capacity) return;
+        return ensure_total_capacity_exact(List, self, true_capacity_for_grow(List, self.cap, new_capacity), alloc);
+    }
+
+    pub fn ensure_total_capacity_exact(comptime List: type, self: *List, new_capacity: List.Idx, alloc: Allocator) if (List.RETURN_ERRORS) List.Error!void else void {
+        if (@sizeOf(List.Elem) == 0) {
+            self.cap = math.maxInt(List.Idx);
+            return;
+        }
+
+        if (self.cap >= new_capacity) return;
+
+        if (new_capacity < self.len) {
+            if (List.SECURE_WIPE) crypto.secureZero(List.Elem, self.ptr[new_capacity..self.len]);
+            self.len = new_capacity;
+        }
+
+        const old_memory = self.ptr[0..self.cap];
+        if (alloc.remap(old_memory, new_capacity)) |new_memory| {
+            self.ptr = new_memory.ptr;
+            self.cap = @intCast(new_memory.len);
+        } else {
+            const new_memory = alloc.alignedAlloc(List.Elem, List.ALIGN, new_capacity) catch |err| return handle_alloc_error(List, err);
+            @memcpy(new_memory[0..self.len], self.ptr[0..self.len]);
+            if (List.SECURE_WIPE) crypto.secureZero(List.Elem, self.ptr[0..self.len]);
+            alloc.free(old_memory);
+            self.ptr = new_memory.ptr;
+            self.cap = @as(List.Idx, @intCast(new_memory.len));
+        }
+    }
+
+    pub fn ensure_unused_capacity(comptime List: type, self: *List, additional_count: List.Idx, alloc: Allocator) if (List.RETURN_ERRORS) List.Error!void else void {
+        const new_total_cap = if (List.RETURN_ERRORS) try add_or_error(self.len, additional_count) else add_or_error(self.len, additional_count);
+        return ensure_total_capacity(List, self, new_total_cap, alloc);
+    }
+
+    pub fn expand_to_capacity(comptime List: type, self: *List) void {
+        self.len = self.cap;
+    }
+
+    pub fn append_slot(comptime List: type, self: *List, alloc: Allocator) if (List.RETURN_ERRORS) List.Error!*List.Elem else *List.Elem {
+        const new_len = self.len + 1;
+        if (List.RETURN_ERRORS) try ensure_total_capacity(List, self, new_len, alloc) else ensure_total_capacity(List, self, new_len, alloc);
+        return append_slot_assume_capacity(List, self);
+    }
+
+    pub fn append_slot_assume_capacity(comptime List: type, self: *List) *List.Elem {
+        assert(self.len < self.cap);
+        const idx = self.len;
+        self.len += 1;
+        return &self.ptr[idx];
+    }
+
+    pub fn append_many_slots(comptime List: type, self: *List, count: List.Idx) if (List.RETURN_ERRORS) List.Error![]List.Elem else []List.Elem {
+        const new_len = self.len + count;
+        if (List.RETURN_ERRORS) try ensure_total_capacity(List, self, new_len) else ensure_total_capacity(List, self, new_len);
+        return append_many_slots_assume_capacity(List, self, count);
+    }
+
+    pub fn append_many_slots_assume_capacity(comptime List: type, self: *List, count: List.Idx) []List.Elem {
+        const new_len = self.len + count;
+        assert(new_len <= self.cap);
+        const prev_len = self.len;
+        self.len = new_len;
+        return self.ptr[prev_len..][0..count];
+    }
+
+    pub fn append_many_slots_as_array(comptime List: type, self: *List, comptime count: List.Idx) if (List.RETURN_ERRORS) List.Error!*[count]List.Elem else *[count]List.Elem {
+        const new_len = self.len + count;
+        if (List.RETURN_ERRORS) try ensure_total_capacity(List, self, new_len) else ensure_total_capacity(List, self, new_len);
+        return append_many_slots_as_array_assume_capacity(List, self, count);
+    }
+
+    pub fn append_many_slots_as_array_assume_capacity(comptime List: type, self: *List, comptime count: List.Idx) *[count]List.Elem {
+        const new_len = self.len + count;
+        assert(new_len <= self.cap);
+        const prev_len = self.len;
+        self.len = new_len;
+        return self.ptr[prev_len..][0..count];
+    }
+
+    pub fn pop(comptime List: type, self: *List) List.Elem {
+        assert(self.len > 0);
+        const new_len = self.len - 1;
+        self.len = new_len;
+        return self.ptr[new_len];
+    }
+
+    pub fn pop_or_null(comptime List: type, self: *List) ?List.Elem {
+        if (self.len == 0) return null;
+        return pop(List, self);
+    }
+
+    pub fn get_last(comptime List: type, self: List) List.Elem {
+        assert(self.len > 0);
+        return self.ptr[self.len - 1];
+    }
+
+    pub fn get_last_or_null(comptime List: type, self: List) ?List.Elem {
+        if (self.len == 0) return null;
+        return get_last(List, self);
+    }
+
+    fn add_or_error(comptime List: type, a: List.Idx, b: List.Idx) if (List.RETURN_ERRORS) error{OutOfMemory}!List.Idx else List.Idx {
+        if (!List.RETURN_ERRORS) return a + b;
+        const result, const overflow = @addWithOverflow(a, b);
+        if (overflow != 0) return error.OutOfMemory;
+        return result;
+    }
+
+    fn true_capacity_for_grow(comptime List: type, current: List.Idx, minimum: List.Idx) List.Idx {
+        switch (List.GROWTH) {
+            GrowthModel.GROW_EXACT_NEEDED => {
+                return minimum;
+            },
+            GrowthModel.GROW_EXACT_NEEDED_ATOMIC_PADDING => {
+                return minimum + List.ATOMIC_PADDING;
+            },
+            else => {
+                var new = current;
+                while (true) {
+                    switch (List.GROWTH) {
+                        GrowthModel.GROW_BY_100_PERCENT => {
+                            new +|= new;
+                            if (new >= minimum) return new;
+                        },
+                        GrowthModel.GROW_BY_100_PERCENT_ATOMIC_PADDING => {
+                            new +|= new;
+                            const new_with_padding = new + List.ATOMIC_PADDING;
+                            if (new_with_padding >= minimum) return new_with_padding;
+                        },
+                        GrowthModel.GROW_BY_50_PERCENT => {
+                            new +|= new / 2;
+                            if (new >= minimum) return new;
+                        },
+                        GrowthModel.GROW_BY_50_PERCENT_ATOMIC_PADDING => {
+                            new +|= new / 2;
+                            const new_with_padding = new + List.ATOMIC_PADDING;
+                            if (new_with_padding >= minimum) return new_with_padding;
+                        },
+                        GrowthModel.GROW_BY_25_PERCENT => {
+                            new +|= new / 4;
+                            if (new >= minimum) return new;
+                        },
+                        GrowthModel.GROW_BY_25_PERCENT_ATOMIC_PADDING => {
+                            new +|= new / 4;
+                            const new_with_padding = new + List.ATOMIC_PADDING;
+                            if (new_with_padding >= minimum) return new_with_padding;
+                        },
+                        else => unreachable,
+                    }
+                }
+            },
+        }
+    }
+
+    pub inline fn sort(comptime List: type, self: *List) void {
+        custom_sort(List, self, List.DEFAULT_SORT_ALGO, List.DEFAULT_ORDER_FUNC);
+    }
+
+    pub fn custom_sort(comptime List: type, self: *List, algorithm: SortAlgorithm, order_func: *const fn (a: *const List.Elem, b: *const List.Elem) Compare.Order) void {
+        if (self.len == 0) return;
+        switch (algorithm) {
+            // SortAlgorithm.BUBBlE_SORT => {},
+            // SortAlgorithm.HEAP_SORT => {},
+            SortAlgorithm.QUICK_SORT_PIVOT_FIRST => Quicksort.quicksort(List.Elem, order_func, Pivot.FIRST, self.ptr[0..self.len]),
+            SortAlgorithm.QUICK_SORT_PIVOT_LAST => Quicksort.quicksort(List.Elem, order_func, Pivot.LAST, self.ptr[0..self.len]),
+            SortAlgorithm.QUICK_SORT_PIVOT_MIDDLE => Quicksort.quicksort(List.Elem, order_func, Pivot.MIDDLE, self.ptr[0..self.len]),
+            SortAlgorithm.QUICK_SORT_PIVOT_RANDOM => Quicksort.quicksort(List.Elem, order_func, Pivot.RANDOM, self.ptr[0..self.len]),
+            SortAlgorithm.QUICK_SORT_PIVOT_MEDIAN_OF_3 => Quicksort.quicksort(List.Elem, order_func, Pivot.MEDIAN_OF_3, self.ptr[0..self.len]),
+            SortAlgorithm.QUICK_SORT_PIVOT_MEDIAN_OF_3_RANDOM => Quicksort.quicksort(List.Elem, order_func, Pivot.MEDIAN_OF_3_RANDOM, self.ptr[0..self.len]),
+        }
+    }
+
+    fn handle_alloc_error(comptime List: type, err: Allocator.Error) if (List.RETURN_ERRORS) List.Error else noreturn {
+        switch (List.ALLOC_ERROR_BEHAVIOR) {
+            AllocErrorBehavior.ALLOCATION_ERRORS_RETURN_ERROR => return err,
+            AllocErrorBehavior.ALLOCATION_ERRORS_PANIC => std.debug.panic("List's backing allocator failed to allocate memory: Allocator.Error.{s}", .{@errorName(err)}),
+            AllocErrorBehavior.ALLOCATION_ERRORS_ARE_UNREACHABLE => unreachable,
+        }
     }
 };
 
@@ -132,16 +567,15 @@ pub fn define_manually_managed_list_type(comptime base_options: ListOptionsBase,
         len: Idx = 0,
         cap: Idx = 0,
 
-        pub const COMPARE_PACKAGE = Compare.type_package(Elem, ex_options.default_sorting_compare_func);
         pub const ALIGN = base_options.alignment;
-        pub const DEFAULT_SORT = ex_options.default_sorting_algorithm;
-        pub const PIVOT = Root.Quicksort.Pivot.from_sort_algorithm(ex_options.default_sorting_algorithm);
+        pub const DEFAULT_SORT_ALGO = ex_options.default_sorting_algorithm;
+        pub const DEFAULT_ORDER_FUNC = ex_options.default_sorting_compare_func;
         pub const ALLOC_ERROR_BEHAVIOR = base_options.alloc_error_behavior;
         pub const GROWTH = base_options.growth_model;
         pub const RETURN_ERRORS = base_options.alloc_error_behavior == .ALLOCATION_ERRORS_RETURN_ERROR;
         pub const SECURE_WIPE = base_options.secure_wipe_bytes;
-        pub const RESERVE_SENTINEL = base_options.reserve_sentinel_space;
         pub const UNINIT_PTR: Ptr = @ptrFromInt(if (ALIGN) |a| mem.alignBackward(usize, math.maxInt(usize), @intCast(a)) else mem.alignBackward(usize, math.maxInt(usize), @alignOf(Elem)));
+        pub const ATOMIC_PADDING = @as(comptime_int, @max(1, std.atomic.cache_line / @sizeOf(Elem)));
         pub const EMPTY = List{
             .ptr = UNINIT_PTR,
             .len = 0,
@@ -149,6 +583,7 @@ pub fn define_manually_managed_list_type(comptime base_options: ListOptionsBase,
         };
 
         const List = @This();
+        pub const Error = Allocator.Error;
         pub const Elem = base_options.element_type;
         pub const Idx = base_options.index_type;
         pub const Ptr = if (ALIGN) |a| [*]align(a) Elem else [*]Elem;
@@ -156,7 +591,6 @@ pub fn define_manually_managed_list_type(comptime base_options: ListOptionsBase,
         pub fn SentinelSlice(comptime sentinel: Elem) type {
             return if (ALIGN) |a| ([:sentinel]align(a) Elem) else [:sentinel]Elem;
         }
-        pub const Error = Allocator.Error;
 
         pub inline fn slice(self: List) Slice {
             return Internal.slice(List, self);
@@ -179,238 +613,251 @@ pub fn define_manually_managed_list_type(comptime base_options: ListOptionsBase,
         }
 
         pub inline fn slice_unused_capacity(self: List) []Elem {
-            Internal.slice_unused_capacity(List, self);
+            return Internal.slice_unused_capacity(List, self);
         }
 
-        pub inline fn set_len(self: *List, new_len: usize) void {
+        pub inline fn set_len(self: *List, new_len: Idx) void {
             return Internal.set_len(List, self, new_len);
         }
 
-        pub inline fn new_empty() if (RESERVE_SENTINEL and RETURN_ERRORS) Error!List else List {
+        pub inline fn new_empty() List {
             return Internal.new_empty(List);
         }
 
-        pub inline fn new_with_capacity(capacity: Idx) if (RETURN_ERRORS) Error!List else List {
-            return Internal.new_with_capacity(List, capacity);
+        pub inline fn new_with_capacity(capacity: Idx, alloc: Allocator) if (RETURN_ERRORS) Error!List else List {
+            return Internal.new_with_capacity(List, capacity, alloc);
         }
 
-        pub inline fn clone(self: List) if (RETURN_ERRORS) Error!List else List {
-            return Internal.clone(List, self);
+        pub inline fn clone(self: List, alloc: Allocator) if (RETURN_ERRORS) Error!List else List {
+            return Internal.clone(List, self, alloc);
         }
 
         pub inline fn to_owned_slice(self: *List, alloc: Allocator) if (RETURN_ERRORS) Error!Slice else Slice {
             return Internal.to_owned_slice(List, self, alloc);
         }
 
-        pub fn to_owned_slice_sentinel(self: *List, comptime sentinel: Elem) if (RETURN_ERRORS) Error!SentinelSlice(sentinel) else SentinelSlice(sentinel) {
-            if (RETURN_ERRORS) {
-                try self.ensure_total_capacity_exact(self.len + 1);
-            } else {
-                self.ensure_total_capacity_exact(self.len + 1);
-            }
-            self.append_assume_capacity(sentinel);
-            const result: Slice = if (RETURN_ERRORS) try self.to_owned_slice() else self.to_owned_slice();
-            return result[0 .. result.len - 1 :sentinel];
+        pub inline fn to_owned_slice_sentinel(self: *List, alloc: Allocator, comptime sentinel: Elem) if (RETURN_ERRORS) Error!SentinelSlice(sentinel) else SentinelSlice(sentinel) {
+            return Internal.to_owned_slice_sentinel(List, self, alloc, sentinel);
         }
 
-        pub fn from_owned_slice(from_slice: Slice) List {
-            return List{
-                .ptr = from_slice.ptr,
-                .len = from_slice.len,
-                .cap = from_slice.len,
-            };
+        pub inline fn from_owned_slice(from_slice: Slice) List {
+            return Internal.from_owned_slice(List, from_slice);
         }
 
-        pub fn from_owned_slice_sentinel(comptime sentinel: Elem, from_slice: [:sentinel]Elem) List {
-            return List{
-                .ptr = from_slice.ptr,
-                .len = from_slice.len,
-                .cap = from_slice.len + 1,
-            };
+        pub inline fn from_owned_slice_sentinel(comptime sentinel: Elem, from_slice: [:sentinel]Elem) List {
+            return Internal.from_owned_slice_sentinel(List, sentinel, from_slice);
         }
 
-        pub fn insert_slot(self: *List, idx: Idx) if (RETURN_ERRORS) Error!*Elem else *Elem {
-            if (RETURN_ERRORS) {
-                try self.ensure_unused_capacity(1);
-            } else {
-                self.ensure_unused_capacity(1);
-            }
-            return self.insert_slot_assume_capacity(idx);
+        pub inline fn insert_slot(self: *List, idx: Idx, alloc: Allocator) if (RETURN_ERRORS) Error!*Elem else *Elem {
+            return Internal.insert_slot(List, self, idx, alloc);
         }
 
-        pub fn insert_slot_assume_capacity(self: *List, idx: Idx) *Elem {
-            assert(idx <= self.len);
-            mem.copyBackwards(Elem, self.ptr[idx + 1 .. self.len + 1], self.ptr[idx..self.len]);
-            return self.ptr + idx;
+        pub inline fn insert_slot_assume_capacity(self: *List, idx: Idx) *Elem {
+            return Internal.insert_slot_assume_capacity(List, self, idx);
         }
 
-        pub fn insert(self: *List, idx: Idx, item: Elem) if (RETURN_ERRORS) Error!void else void {
-            const ptr = if (RETURN_ERRORS) try self.insert_slot(idx) else self.insert_slot(idx);
-            ptr.* = item;
+        pub inline fn insert(self: *List, idx: Idx, item: Elem, alloc: Allocator) if (RETURN_ERRORS) Error!void else void {
+            return Internal.insert(List, self, idx, item, alloc);
         }
 
-        pub fn insert_assume_capacity(self: *List, idx: Idx, item: Elem) void {
-            const ptr = self.insert_slot_assume_capacity(idx);
-            ptr.* = item;
+        pub inline fn insert_assume_capacity(self: *List, idx: Idx, item: Elem) void {
+            return Internal.insert_assume_capacity(List, self, idx, item);
         }
 
-        pub fn insert_many_slots(self: *List, idx: Idx, count: Idx) if (RETURN_ERRORS) Error![]Elem else []Elem {
-            if (RETURN_ERRORS) {
-                try self.ensure_unused_capacity(count);
-            } else {
-                self.ensure_unused_capacity(count);
-            }
-            return self.insert_many_slots_assume_capacity(idx, count);
+        pub inline fn insert_many_slots(self: *List, idx: Idx, count: Idx, alloc: Allocator) if (RETURN_ERRORS) Error![]Elem else []Elem {
+            return Internal.insert_many_slots(List, self, idx, count, alloc);
         }
 
-        pub fn insert_many_slots_assume_capacity(self: *List, idx: Idx, count: Idx) []Elem {
-            assert(idx <= self.len);
-            mem.copyBackwards(Elem, self.ptr[idx + count .. self.len + count], self.ptr[idx..self.len]);
-            return self.ptr[idx .. idx + count];
+        pub inline fn insert_many_slots_assume_capacity(self: *List, idx: Idx, count: Idx) []Elem {
+            return Internal.insert_many_slots_assume_capacity(List, self, idx, count);
         }
 
-        pub fn insert_slice(self: *List, idx: Idx, items: []const Elem) if (RETURN_ERRORS) Error!void else void {
-            const slots = if (RETURN_ERRORS) try self.insert_many_slots(idx, @intCast(items.len)) else self.insert_slot(idx, @intCast(items.len));
-            @memcpy(slots, items);
+        pub inline fn insert_slice(self: *List, idx: Idx, items: []const Elem, alloc: Allocator) if (RETURN_ERRORS) Error!void else void {
+            return Internal.insert_slice(List, self, idx, items, alloc);
         }
 
-        pub fn insert_slice_assume_capacity(self: *List, idx: usize, items: []const Elem) void {
-            const slots = self.insert_many_slots_assume_capacity(idx, @intCast(items.len));
-            @memcpy(slots, items);
+        pub inline fn insert_slice_assume_capacity(self: *List, idx: Idx, items: []const Elem) void {
+            return Internal.insert_slice_assume_capacity(List, self, idx, items);
         }
 
-        pub fn replace_range(self: *List, start: Idx, length: Idx, new_items: []const Elem) if (RETURN_ERRORS) Error!void else void {
-            if (new_items.len > length) {
-                const additional_needed = new_items.len - length;
-                if (RETURN_ERRORS) {
-                    try self.ensure_unused_capacity(additional_needed);
-                } else {
-                    self.ensure_unused_capacity(additional_needed);
-                }
-            }
-            self.replace_range_assume_capacity(start, length, new_items);
+        pub inline fn replace_range(self: *List, start: Idx, length: Idx, new_items: []const Elem, alloc: Allocator) if (RETURN_ERRORS) Error!void else void {
+            return Internal.replace_range(List, self, start, length, new_items, alloc);
         }
 
-        pub fn replace_range_assume_capacity(self: *List, start: Idx, length: Idx, new_items: []const Elem) void {
-            const end_of_range = start + length;
-            assert(end_of_range <= self.len);
-            const range = self.ptr[start..end_of_range];
-            if (range.len == new_items.len)
-                @memcpy(range[0..new_items.len], new_items)
-            else if (range.len < new_items.len) {
-                const within_range = new_items[0..range.len];
-                const leftover = new_items[range.len..];
-                @memcpy(range[0..within_range.len], within_range);
-                const new_slots = self.insert_many_slots_assume_capacity(end_of_range, leftover.len);
-                @memcpy(new_slots, leftover);
-            } else {
-                const unused_slots = range.len - new_items.len;
-                @memcpy(range[0..new_items.len], new_items);
-                std.mem.copyForwards(Elem, self.ptr[end_of_range - unused_slots .. self.len], self.ptr[end_of_range..self.len]);
-                if (SECURE_WIPE) {
-                    crypto.secureZero(Elem, self.ptr[self.len - unused_slots .. self.len]);
-                }
-                self.len -= unused_slots;
-            }
+        pub inline fn replace_range_assume_capacity(self: *List, start: Idx, length: Idx, new_items: []const Elem) void {
+            return Internal.replace_range_assume_capacity(List, self, start, length, new_items);
         }
 
-        pub fn append(self: *List, item: Elem) if (RETURN_ERRORS) Error!void else void {
-            const slot = if (RETURN_ERRORS) try self.append_slot() else self.append_slot();
-            slot.* = item;
+        pub inline fn append(self: *List, item: Elem, alloc: Allocator) if (RETURN_ERRORS) Error!void else void {
+            return Internal.append(List, self, item, alloc);
         }
 
-        pub fn append_assume_capacity(self: *List, item: Elem) void {
-            const slot = self.append_slot_assume_capacity();
-            slot.* = item;
+        pub inline fn append_assume_capacity(self: *List, item: Elem) void {
+            return Internal.append_assume_capacity(List, self, item);
         }
 
-        pub fn remove(self: *List, idx: Idx) Elem {
-            const val: Elem = self.ptr[idx];
-            self.delete(idx);
-            return val;
+        pub inline fn remove(self: *List, idx: Idx) Elem {
+            return Internal.remove(List, self, idx);
         }
 
-        pub fn swap_remove(self: *List, idx: Idx) Elem {
-            const val: Elem = self.ptr[idx];
-            self.swap_delete(idx);
-            return val;
+        pub inline fn swap_remove(self: *List, idx: Idx) Elem {
+            return Internal.swap_remove(List, self, idx);
         }
 
-        pub fn delete(self: *List, idx: Idx) void {
-            assert(idx < self.len);
-            std.mem.copyForwards(Elem, self.ptr[idx..self.len], self.ptr[idx + 1 .. self.len]);
-            if (SECURE_WIPE) {
-                crypto.secureZero(Elem, self.ptr[self.len - 1 .. self.len]);
-            }
-            self.len -= 1;
+        pub inline fn delete(self: *List, idx: Idx) void {
+            return Internal.delete(List, self, idx);
         }
 
-        pub fn delete_range(self: *List, start: Idx, length: Idx) void {
-            const end_of_range = start + length;
-            assert(end_of_range <= self.len);
-            std.mem.copyForwards(Elem, self.ptr[start..self.len], self.ptr[end_of_range..self.len]);
-            if (SECURE_WIPE) {
-                crypto.secureZero(Elem, self.ptr[self.len - length .. self.len]);
-            }
-            self.len -= length;
+        pub inline fn delete_range(self: *List, start: Idx, length: Idx) void {
+            return Internal.delete_range(List, self, start, length);
         }
 
-        pub fn swap_delete(self: *List, idx: Idx) void {
-            assert(idx < self.len);
-            self.ptr[idx] = self.ptr[self.list.items.len - 1];
-            if (SECURE_WIPE) {
-                crypto.secureZero(Elem, self.ptr[self.len - 1 .. self.len]);
-            }
-            self.len -= 1;
+        pub inline fn swap_delete(self: *List, idx: Idx) void {
+            return Internal.swap_delete(List, self, idx);
         }
 
-        pub fn append_slice(self: *List, items: []const Elem) if (RETURN_ERRORS) Error!void else void {
-            const slots = if (RETURN_ERRORS) try self.append_many_slots(@intCast(items.len)) else self.append_many_slots(@intCast(items.len));
-            @memcpy(slots, items);
+        pub inline fn append_slice(self: *List, items: []const Elem, alloc: Allocator) if (RETURN_ERRORS) Error!void else void {
+            return Internal.append_slice(List, self, items, alloc);
         }
 
-        pub fn append_slice_assume_capacity(self: *List, items: []const Elem) void {
-            const slots = self.append_many_slots_assume_capacity(@intCast(items.len));
-            @memcpy(slots, items);
+        pub inline fn append_slice_assume_capacity(self: *List, items: []const Elem) void {
+            return Internal.append_slice_assume_capacity(List, self, items);
         }
 
-        pub fn append_slice_unaligned(self: *List, items: []align(1) const Elem) if (RETURN_ERRORS) Error!void else void {
-            const slots = if (RETURN_ERRORS) try self.append_many_slots(@intCast(items.len)) else self.append_many_slots(@intCast(items.len));
-            @memcpy(slots, items);
+        pub inline fn append_slice_unaligned(self: *List, items: []align(1) const Elem, alloc: Allocator) if (RETURN_ERRORS) Error!void else void {
+            return Internal.append_slice_unaligned(List, self, items, alloc);
         }
 
-        pub fn append_slice_unaligned_assume_capacity(self: *List, items: []align(1) const Elem) void {
-            const slots = self.append_many_slots_assume_capacity(@intCast(items.len));
-            @memcpy(slots, items);
+        pub inline fn append_slice_unaligned_assume_capacity(self: *List, items: []align(1) const Elem) void {
+            return Internal.append_slice_unaligned_assume_capacity(List, self, items);
         }
 
-        pub const WriterHandle = struct {
+        pub inline fn append_n_times(self: *List, value: Elem, count: Idx, alloc: Allocator) if (RETURN_ERRORS) Error!void else void {
+            return Internal.append_n_times(List, self, value, count, alloc);
+        }
+
+        pub inline fn append_n_times_assume_capacity(self: *List, value: Elem, count: Idx) void {
+            return Internal.append_n_times_assume_capacity(List, self, value, count);
+        }
+
+        pub inline fn resize(self: *List, new_len: Idx, alloc: Allocator) if (RETURN_ERRORS) Error!void else void {
+            return Internal.resize(List, self, new_len, alloc);
+        }
+
+        pub inline fn shrink_and_free(self: *List, new_len: Idx, alloc: Allocator) void {
+            return Internal.shrink_and_free(List, self, new_len, alloc);
+        }
+
+        pub inline fn shrink_retaining_capacity(self: *List, new_len: Idx) void {
+            return Internal.shrink_retaining_capacity(List, self, new_len);
+        }
+
+        pub inline fn clear_retaining_capacity(self: *List) void {
+            return Internal.clear_retaining_capacity(List, self);
+        }
+
+        pub inline fn clear_and_free(self: *List, alloc: Allocator) void {
+            return Internal.clear_and_free(List, self, alloc);
+        }
+
+        pub inline fn ensure_total_capacity(self: *List, new_capacity: Idx, alloc: Allocator) if (RETURN_ERRORS) Error!void else void {
+            return Internal.ensure_total_capacity(List, self, new_capacity, alloc);
+        }
+
+        pub inline fn ensure_total_capacity_exact(self: *List, new_capacity: Idx, alloc: Allocator) if (RETURN_ERRORS) Error!void else void {
+            return Internal.ensure_total_capacity_exact(List, self, new_capacity, alloc);
+        }
+
+        pub inline fn ensure_unused_capacity(self: *List, additional_count: Idx, alloc: Allocator) if (RETURN_ERRORS) Error!void else void {
+            return Internal.ensure_unused_capacity(List, self, additional_count, alloc);
+        }
+
+        pub inline fn expand_to_capacity(self: *List) void {
+            return Internal.expand_to_capacity(List, self);
+        }
+
+        pub inline fn append_slot(self: *List, alloc: Allocator) if (RETURN_ERRORS) Error!*Elem else *Elem {
+            return Internal.append_slot(List, self, alloc);
+        }
+
+        pub inline fn append_slot_assume_capacity(self: *List) *Elem {
+            return Internal.append_slot_assume_capacity(List, self);
+        }
+
+        pub inline fn append_many_slots(self: *List, count: Idx, alloc: Allocator) if (RETURN_ERRORS) Error![]Elem else []Elem {
+            return Internal.append_many_slots(List, self, count, alloc);
+        }
+
+        pub inline fn append_many_slots_assume_capacity(self: *List, count: Idx) []Elem {
+            return Internal.append_many_slots_assume_capacity(List, self, count);
+        }
+
+        pub inline fn append_many_slots_as_array(self: *List, comptime count: Idx, alloc: Allocator) if (RETURN_ERRORS) Error!*[count]Elem else *[count]Elem {
+            return Internal.append_many_slots_as_array(List, self, count, alloc);
+        }
+
+        pub inline fn append_many_slots_as_array_assume_capacity(self: *List, comptime count: Idx) *[count]Elem {
+            return Internal.append_many_slots_as_array_assume_capacity(List, self, count);
+        }
+
+        pub inline fn pop_or_null(self: *List) ?Elem {
+            return Internal.pop_or_null(List, self);
+        }
+
+        pub inline fn pop(self: *List) Elem {
+            return Internal.pop(List, self);
+        }
+
+        pub inline fn get_last(self: List) Elem {
+            return Internal.get_last(List, self);
+        }
+
+        pub inline fn get_last_or_null(self: List) ?Elem {
+            return Internal.get_last_or_null(List, self);
+        }
+
+        pub inline fn sort(self: *List) void {
+            return Internal.sort(List, self);
+        }
+
+        pub inline fn custom_sort(self: *List, algorithm: SortAlgorithm, order_func: *const fn (a: *const List.Elem, b: *const List.Elem) Compare.Order) void {
+            return Internal.custom_sort(List, self, algorithm, order_func);
+        }
+
+        //**************************
+        // std.io.Writer interface *
+        //**************************
+        const WriterHandle = struct {
+            list: *List,
+            alloc: Allocator,
+        };
+        const WriterHandleNoGrow = struct {
             list: *List,
         };
 
-        pub const Writer = if (Elem != u8)
+        pub const StdWriter = if (Elem != u8)
             @compileError("The Writer interface is only defined for child type `u8` " ++
                 "but the given type is " ++ @typeName(Elem))
         else
             std.io.Writer(WriterHandle, Allocator.Error, write);
 
-        pub fn get_writer(self: *List) Writer {
-            return Writer{ .context = .{ .list = self } };
+        pub fn get_std_writer(self: *List, alloc: Allocator) StdWriter {
+            return StdWriter{ .context = .{ .list = self, .alloc = alloc } };
         }
 
         fn write(handle: WriterHandle, bytes: []const u8) Allocator.Error!usize {
-            try handle.list.append_slice(bytes);
+            try handle.list.append_slice(bytes, handle.alloc);
             return bytes.len;
         }
 
-        pub const WriterNoGrow = if (Elem != u8)
+        pub const StdWriterNoGrow = if (Elem != u8)
             @compileError("The Writer interface is only defined for child type `u8` " ++
                 "but the given type is " ++ @typeName(Elem))
         else
-            std.io.Writer(WriterHandle, Allocator.Error, write_no_grow);
+            std.io.Writer(WriterHandleNoGrow, Allocator.Error, write_no_grow);
 
-        pub fn get_writer_no_grow(self: *List) WriterNoGrow {
-            return WriterNoGrow{ .context = .{ .list = self } };
+        pub fn get_std_writer_no_grow(self: *List) StdWriterNoGrow {
+            return StdWriterNoGrow{ .context = .{ .list = self } };
         }
 
         fn write_no_grow(handle: WriterHandle, bytes: []const u8) error{OutOfMemory}!usize {
@@ -419,300 +866,29 @@ pub fn define_manually_managed_list_type(comptime base_options: ListOptionsBase,
             handle.list.append_slice_assume_capacity(bytes);
             return bytes.len;
         }
-
-        pub fn append_n_times(self: *List, value: Elem, count: Idx) if (RETURN_ERRORS) Error!void else void {
-            const slots = if (RETURN_ERRORS) try self.append_many_slots(count) else self.append_many_slots(count);
-            @memset(slots, value);
-        }
-
-        pub fn append_n_times_assume_capacity(self: *List, value: Elem, count: Idx) void {
-            const slots = self.append_many_slots_assume_capacity(count);
-            @memset(slots, value);
-        }
-
-        pub fn resize(self: *List, new_len: Idx) if (RETURN_ERRORS) Error!void else void {
-            if (RETURN_ERRORS) {
-                try self.ensure_total_capacity(new_len);
-            } else {
-                self.ensure_total_capacity(new_len);
-            }
-            if (SECURE_WIPE and new_len < self.len) {
-                crypto.secureZero(Elem, self.ptr[new_len..self.len]);
-            }
-            self.len = new_len;
-        }
-
-        pub fn shrink_and_free(self: *List, new_len: Idx, alloc: Allocator) void {
-            assert(new_len <= self.len);
-
-            if (@sizeOf(Elem) == 0) {
-                self.items.len = new_len;
-                return;
-            }
-
-            if (SECURE_WIPE) {
-                crypto.secureZero(Elem, self.ptr[new_len..self.len]);
-            }
-
-            const old_memory = self.ptr[0..self.cap];
-            if (alloc.remap(old_memory, new_len)) |new_items| {
-                self.ptr = new_items.ptr;
-                self.len = new_items.len;
-                self.cap = new_items.len;
-                return;
-            }
-
-            const new_memory = alloc.alignedAlloc(Elem, ALIGN, new_len) catch |err| switch (err) {
-                error.OutOfMemory => {
-                    self.len = new_len;
-                    return;
-                },
-            };
-
-            @memcpy(new_memory, self.ptr[0..new_len]);
-            alloc.free(old_memory);
-            self.ptr = new_memory.ptr;
-            self.len = new_memory.len;
-            self.cap = new_memory.len;
-        }
-
-        pub fn shrink_retaining_capacity(self: *List, new_len: Idx) void {
-            assert(new_len <= self.len);
-            if (SECURE_WIPE) {
-                crypto.secureZero(Elem, self.ptr[new_len..self.len]);
-            }
-            self.len = new_len;
-        }
-
-        pub fn clear_retaining_capacity(self: *List) void {
-            if (SECURE_WIPE) {
-                std.crypto.secureZero(Elem, self.ptr[0..self.len]);
-            }
-            self.len = 0;
-        }
-
-        pub fn clear_and_free(self: *List, alloc: Allocator) void {
-            if (SECURE_WIPE) {
-                std.crypto.secureZero(Elem, self.ptr[0..self.len]);
-            }
-            alloc.free(self.ptr[0..self.cap]);
-            self.ptr = UNINIT_PTR;
-            self.len = 0;
-            self.cap = 0;
-        }
-
-        pub fn ensure_total_capacity(self: *List, new_capacity: Idx, alloc: Allocator) if (RETURN_ERRORS) Error!void else void {
-            if (self.cap >= new_capacity) return;
-            return self.ensure_total_capacity_exact(true_capacity_for_grow(self.cap, new_capacity), alloc);
-        }
-
-        pub fn ensure_total_capacity_exact(self: *List, new_capacity: Idx, alloc: Allocator) if (RETURN_ERRORS) Error!void else void {
-            if (@sizeOf(Elem) == 0) {
-                self.cap = math.maxInt(Idx);
-                return;
-            }
-
-            if (self.cap >= new_capacity) return;
-
-            if (new_capacity < self.len) {
-                if (SECURE_WIPE) crypto.secureZero(Elem, self.ptr[new_capacity..self.len]);
-                self.len = new_capacity;
-            }
-
-            const old_memory = self.ptr[0..self.cap];
-            if (alloc.remap(old_memory, new_capacity)) |new_memory| {
-                self.ptr = new_memory.ptr;
-                self.cap = @intCast(new_memory.len);
-            } else {
-                const new_memory = alloc.alignedAlloc(Elem, ALIGN, new_capacity) catch |err| return handle_alloc_error(err);
-                @memcpy(new_memory[0..self.len], self.ptr[0..self.len]);
-                if (SECURE_WIPE) crypto.secureZero(Elem, self.ptr[0..self.len]);
-                alloc.free(old_memory);
-                self.ptr = new_memory.ptr;
-                self.cap = @intCast(new_memory.len);
-            }
-        }
-
-        pub fn ensure_unused_capacity(self: *List, additional_count: Idx) if (RETURN_ERRORS) Error!void else void {
-            const new_total_cap = if (RETURN_ERRORS) try add_or_error(self.len, additional_count) else add_or_error(self.len, additional_count);
-            return self.ensure_total_capacity(new_total_cap);
-        }
-
-        pub fn expand_to_capacity(self: *List) void {
-            self.len = self.cap;
-        }
-
-        pub fn append_slot(self: *List) if (RETURN_ERRORS) Error!*Elem else *Elem {
-            const new_len = self.len + 1;
-            if (RETURN_ERRORS) try self.ensure_total_capacity(new_len) else self.ensure_total_capacity(new_len);
-            return self.append_slot_assume_capacity();
-        }
-
-        pub fn append_slot_assume_capacity(self: *List) *Elem {
-            assert(self.len < self.cap);
-            const idx = self.len;
-            self.len += 1;
-            return &self.ptr[idx];
-        }
-
-        pub fn append_many_slots(self: *List, count: Idx) if (RETURN_ERRORS) Error![]Elem else []Elem {
-            const new_len = self.len + count;
-            if (RETURN_ERRORS) try self.ensure_total_capacity(new_len) else self.ensure_total_capacity(new_len);
-            return self.append_many_slots_assume_capacity(count);
-        }
-
-        pub fn append_many_slots_assume_capacity(self: *List, count: Idx) []Elem {
-            const new_len = self.len + count;
-            assert(new_len <= self.cap);
-            const prev_len = self.len;
-            self.len = new_len;
-            return self.ptr[prev_len..][0..count];
-        }
-
-        pub fn append_many_slots_as_array(self: *List, comptime count: Idx) if (RETURN_ERRORS) Error!*[count]Elem else *[count]Elem {
-            const new_len = self.len + count;
-            if (RETURN_ERRORS) try self.ensure_total_capacity(new_len) else self.ensure_total_capacity(new_len);
-            return self.append_many_slots_as_array_assume_capacity(count);
-        }
-
-        pub fn append_many_slots_as_array_assume_capacity(self: *List, comptime count: Idx) *[count]Elem {
-            const new_len = self.len + count;
-            assert(new_len <= self.cap);
-            const prev_len = self.len;
-            self.len = new_len;
-            return self.ptr[prev_len..][0..count];
-        }
-
-        pub fn pop_or_null(self: *List) ?Elem {
-            if (self.len == 0) return null;
-            return self.pop();
-        }
-
-        pub fn pop(self: *List) Elem {
-            assert(self.len > 0);
-            const new_len = self.len - 1;
-            self.len = new_len;
-            return self.ptr[new_len];
-        }
-
-        pub fn get_last(self: List) Elem {
-            assert(self.len > 0);
-            return self.ptr[self.len - 1];
-        }
-
-        pub fn get_last_or_null(self: List) ?Elem {
-            if (self.len == 0) return null;
-            return self.get_last();
-        }
-
-        fn add_or_error(a: Idx, b: Idx) if (RETURN_ERRORS) error{OutOfMemory}!Idx else Idx {
-            if (!RETURN_ERRORS) return a + b;
-            const result, const overflow = @addWithOverflow(a, b);
-            if (overflow != 0) return error.OutOfMemory;
-            return result;
-        }
-
-        const ATOMIC_PADDING = @as(comptime_int, @max(1, std.atomic.cache_line / @sizeOf(Elem)));
-
-        fn true_capacity_for_grow(current: Idx, minimum: Idx) Idx {
-            switch (GROWTH) {
-                GrowthModel.GROW_EXACT_NEEDED => {
-                    return minimum;
-                },
-                GrowthModel.GROW_EXACT_NEEDED_ATOMIC_PADDING => {
-                    return minimum + ATOMIC_PADDING;
-                },
-                else => {
-                    var new = current;
-                    while (true) {
-                        switch (GROWTH) {
-                            GrowthModel.GROW_BY_100_PERCENT => {
-                                new +|= new;
-                                if (new >= minimum) return new;
-                            },
-                            GrowthModel.GROW_BY_100_PERCENT_WITH_ATOMIC_PADDING => {
-                                new +|= new;
-                                const new_with_padding = new + ATOMIC_PADDING;
-                                if (new_with_padding >= minimum) return new_with_padding;
-                            },
-                            GrowthModel.GROW_BY_50_PERCENT => {
-                                new +|= new / 2;
-                                if (new >= minimum) return new;
-                            },
-                            GrowthModel.GROW_BY_50_PERCENT_WITH_ATOMIC_PADDING => {
-                                new +|= new / 2;
-                                const new_with_padding = new + ATOMIC_PADDING;
-                                if (new_with_padding >= minimum) return new_with_padding;
-                            },
-                            GrowthModel.GROW_BY_25_PERCENT => {
-                                new +|= new / 4;
-                                if (new >= minimum) return new;
-                            },
-                            GrowthModel.GROW_BY_25_PERCENT_WITH_ATOMIC_PADDING => {
-                                new +|= new / 4;
-                                const new_with_padding = new + ATOMIC_PADDING;
-                                if (new_with_padding >= minimum) return new_with_padding;
-                            },
-                            else => unreachable,
-                        }
-                    }
-                },
-            }
-        }
-
-        pub inline fn sort(self: *List) void {
-            self.custom_sort(DEFAULT_SORT);
-        }
-
-        pub fn custom_sort(self: *List, comptime algorithm: SortAlgorithm) void {
-            if (!CAN_SORT) unreachable;
-            if (self.len == 0) return;
-            switch (algorithm) {
-                // SortAlgorithm.BUBBlE_SORT => {},
-                // SortAlgorithm.HEAP_SORT => {},
-                SortAlgorithm.QUICK_SORT_PIVOT_FIRST => Root.Algorithms.Quicksort.quicksort(Elem, ORDER_TYPE, ORDER_FUNC, Root.Algorithms.Quicksort.Pivot.FIRST, self.ptr[0..self.len]),
-                SortAlgorithm.QUICK_SORT_PIVOT_LAST => Root.Algorithms.Quicksort.quicksort(Elem, ORDER_TYPE, ORDER_FUNC, Root.Algorithms.Quicksort.Pivot.LAST, self.ptr[0..self.len]),
-                SortAlgorithm.QUICK_SORT_PIVOT_MIDDLE => Root.Algorithms.Quicksort.quicksort(Elem, ORDER_TYPE, ORDER_FUNC, Root.Algorithms.Quicksort.Pivot.MIDDLE, self.ptr[0..self.len]),
-                SortAlgorithm.QUICK_SORT_PIVOT_RANDOM => Root.Algorithms.Quicksort.quicksort(Elem, ORDER_TYPE, ORDER_FUNC, Root.Algorithms.Quicksort.Pivot.RANDOM, self.ptr[0..self.len]),
-                SortAlgorithm.QUICK_SORT_PIVOT_MEDIAN_OF_3 => Root.Algorithms.Quicksort.quicksort(Elem, ORDER_TYPE, ORDER_FUNC, Root.Algorithms.Quicksort.Pivot.MEDIAN_OF_3, self.ptr[0..self.len]),
-                SortAlgorithm.QUICK_SORT_PIVOT_MEDIAN_OF_3_RANDOM => Root.Algorithms.Quicksort.quicksort(Elem, ORDER_TYPE, ORDER_FUNC, Root.Algorithms.Quicksort.Pivot.MEDIAN_OF_3_RANDOM, self.ptr[0..self.len]),
-            }
-        }
-
-        fn handle_alloc_error(err: Allocator.Error) if (RETURN_ERRORS) Error else noreturn {
-            switch (ALLOC_ERROR_BEHAVIOR) {
-                AllocErrorBehavior.ALLOCATION_ERRORS_RETURN_ERROR => return err,
-                AllocErrorBehavior.ALLOCATION_ERRORS_PANIC => std.debug.panic("[ErgoList] List's backing allocator failed to allocate memory: Allocator.Error.{s}", .{@errorName(err)}),
-                AllocErrorBehavior.ALLOCATION_ERRORS_ARE_UNREACHABLE => unreachable,
-            }
-        }
     };
 }
 
 test "Does it basically work?" {
     const t = std.testing;
     const alloc = std.heap.page_allocator;
-    const order = struct {
-        fn func(element: *const u8) u8 {
-            return element.*;
-        }
-    };
-    const Options = ListOptions{
+    const base_opts = ListOptionsBase{
         .alloc_error_behavior = .ALLOCATION_ERRORS_PANIC,
         .element_type = u8,
-        .order_value_type = u8,
-        .order_value_func_struct = order,
         .index_type = u32,
-        .allocator = &alloc,
     };
-    const List = define_list_type(Options);
+    const ex_opts = ListOptionsExtended(base_opts){
+        .default_sorting_algorithm = .QUICK_SORT_PIVOT_MEDIAN_OF_3_RANDOM,
+        .default_sorting_compare_func = Compare.numeric_order_else_always_equal(u8),
+    };
+    const List = define_manually_managed_list_type(base_opts, ex_opts);
     var list = List.new_empty();
-    list.append('H');
-    list.append('e');
-    list.append('l');
-    list.append('l');
-    list.append('o');
-    list.append(' ');
-    list.append_slice("World!");
+    list.append('H', alloc);
+    list.append('e', alloc);
+    list.append('l', alloc);
+    list.append('l', alloc);
+    list.append('o', alloc);
+    list.append(' ', alloc);
+    list.append_slice("World!", alloc);
     try t.expectEqualStrings("Hello World!", list.slice());
 }

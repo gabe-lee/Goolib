@@ -17,67 +17,23 @@ pub fn a_greater_than_or_equal_to_b(comptime T: type, a: *const T, b: *const T, 
     return @intFromEnum(order_func(a, b)) >= @intFromEnum(Order.A_EQUALS_B);
 }
 
-pub fn type_package(comptime T: type, comptime default_order_func: *const fn (a: *const T, b: *const T) Order) type {
+pub fn type_package(comptime T: type, order_func: *const fn (a: *const T, b: *const T) Order) type {
     return struct {
-        pub const Default = struct {
-            pub fn a_equals_b(a: *const T, b: *const T) bool {
-                return @intFromEnum(default_order_func(a, b)) == @intFromEnum(Order.A_EQUALS_B);
-            }
-            pub fn a_less_than_b(a: *const T, b: *const T) bool {
-                return @intFromEnum(default_order_func(a, b)) == @intFromEnum(Order.A_LESS_THAN_B);
-            }
-            pub fn a_less_than_or_equal_to_b(a: *const T, b: *const T) bool {
-                return @intFromEnum(default_order_func(a, b)) <= @intFromEnum(Order.A_EQUALS_B);
-            }
-            pub fn a_greater_than_b(a: *const T, b: *const T) bool {
-                return @intFromEnum(default_order_func(a, b)) == @intFromEnum(Order.A_GREATER_THAN_B);
-            }
-            pub fn a_greater_than_or_equal_to_b(a: *const T, b: *const T) bool {
-                return @intFromEnum(default_order_func(a, b)) >= @intFromEnum(Order.A_EQUALS_B);
-            }
-        };
-        pub const Custom = struct {
-            pub fn a_equals_b(a: *const T, b: *const T, order_func: *const fn (a: *const T, b: *const T) Order) bool {
-                return @intFromEnum(order_func(a, b)) == @intFromEnum(Order.A_EQUALS_B);
-            }
-            pub fn a_less_than_b(a: *const T, b: *const T, order_func: *const fn (a: *const T, b: *const T) Order) bool {
-                return @intFromEnum(order_func(a, b)) == @intFromEnum(Order.A_LESS_THAN_B);
-            }
-            pub fn a_less_than_or_equal_to_b(a: *const T, b: *const T, order_func: *const fn (a: *const T, b: *const T) Order) bool {
-                return @intFromEnum(order_func(a, b)) <= @intFromEnum(Order.A_EQUALS_B);
-            }
-            pub fn a_greater_than_b(a: *const T, b: *const T, order_func: *const fn (a: *const T, b: *const T) Order) bool {
-                return @intFromEnum(order_func(a, b)) == @intFromEnum(Order.A_GREATER_THAN_B);
-            }
-            pub fn a_greater_than_or_equal_to_b(a: *const T, b: *const T, order_func: *const fn (a: *const T, b: *const T) Order) bool {
-                return @intFromEnum(order_func(a, b)) >= @intFromEnum(Order.A_EQUALS_B);
-            }
-        };
-        pub const CustomCached = struct {
-            order_func: *const fn (a: *const T, b: *const T) Order,
-
-            pub fn new(func: *const fn (a: *const T, b: *const T) Order) CustomCached {
-                return CustomCached{
-                    .order_func = func,
-                };
-            }
-
-            pub fn a_equals_b(self: CustomCached, a: *const T, b: *const T) bool {
-                return @intFromEnum(self.order_func(a, b)) == @intFromEnum(Order.A_EQUALS_B);
-            }
-            pub fn a_less_than_b(self: CustomCached, a: *const T, b: *const T) bool {
-                return @intFromEnum(self.order_func(a, b)) == @intFromEnum(Order.A_LESS_THAN_B);
-            }
-            pub fn a_less_than_or_equal_to_b(self: CustomCached, a: *const T, b: *const T) bool {
-                return @intFromEnum(self.order_func(a, b)) <= @intFromEnum(Order.A_EQUALS_B);
-            }
-            pub fn a_greater_than_b(self: CustomCached, a: *const T, b: *const T) bool {
-                return @intFromEnum(self.order_func(a, b)) == @intFromEnum(Order.A_GREATER_THAN_B);
-            }
-            pub fn a_greater_than_or_equal_to_b(self: CustomCached, a: *const T, b: *const T) bool {
-                return @intFromEnum(self.order_func(a, b)) >= @intFromEnum(Order.A_EQUALS_B);
-            }
-        };
+        pub fn a_equals_b(a: *const T, b: *const T) bool {
+            return @intFromEnum(order_func(a, b)) == @intFromEnum(Order.A_EQUALS_B);
+        }
+        pub fn a_less_than_b(a: *const T, b: *const T) bool {
+            return @intFromEnum(order_func(a, b)) == @intFromEnum(Order.A_LESS_THAN_B);
+        }
+        pub fn a_less_than_or_equal_to_b(a: *const T, b: *const T) bool {
+            return @intFromEnum(order_func(a, b)) <= @intFromEnum(Order.A_EQUALS_B);
+        }
+        pub fn a_greater_than_b(a: *const T, b: *const T) bool {
+            return @intFromEnum(order_func(a, b)) == @intFromEnum(Order.A_GREATER_THAN_B);
+        }
+        pub fn a_greater_than_or_equal_to_b(a: *const T, b: *const T) bool {
+            return @intFromEnum(order_func(a, b)) >= @intFromEnum(Order.A_EQUALS_B);
+        }
     };
 }
 
@@ -101,29 +57,29 @@ pub fn numeric_order_else_always_equal(comptime T: type) *const fn (a: *const T,
     return container.func;
 }
 
-pub fn order_always_equal(comptime T: type) type {
-    return struct {
-        fn func(a: *const T, b: *const T) Order {
-            _ = a;
-            _ = b;
-            return Order.A_EQUALS_B;
-        }
-    };
-}
+// pub fn order_always_equal(comptime T: type) type {
+//     return struct {
+//         fn func(a: *const T, b: *const T) Order {
+//             _ = a;
+//             _ = b;
+//             return Order.A_EQUALS_B;
+//         }
+//     };
+// }
 
-pub fn order_intrinsic(comptime T: type) type {
-    switch (@typeInfo(T)) {
-        .int, .float, .comptime_int, .comptime_float => {},
-        else => @compileError("can only use intrinsic ordering for integer and float types"),
-    }
-    return struct {
-        fn func(a: *const T, b: *const T) Order {
-            var val: i8 = @intCast(@intFromBool(a > b));
-            val -= @intCast(@intFromBool(a < b));
-            return @enumFromInt(val);
-        }
-    };
-}
+// pub fn order_intrinsic(comptime T: type) type {
+//     switch (@typeInfo(T)) {
+//         .int, .float, .comptime_int, .comptime_float => {},
+//         else => @compileError("can only use intrinsic ordering for integer and float types"),
+//     }
+//     return struct {
+//         fn func(a: *const T, b: *const T) Order {
+//             var val: i8 = @intCast(@intFromBool(a > b));
+//             val -= @intCast(@intFromBool(a < b));
+//             return @enumFromInt(val);
+//         }
+//     };
+// }
 
 // pub fn order_intrinsic_vector(comptime LEN: comptime_int, comptime T: type) type {
 //     switch (@typeInfo(T)) {
