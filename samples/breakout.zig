@@ -235,7 +235,7 @@ const Brick = struct {
     src_rect: *const SDL.FRect2,
 };
 
-fn render_object(renderer_: SDL.Renderer, texture: *SDL.Texture, src: *const SDL.FRect2, dst: Box) !void {
+fn render_object(renderer_: *SDL.Renderer, texture: *SDL.Texture, src: *const SDL.FRect2, dst: Box) !void {
     try c.SDL_RenderTexture(renderer_, texture, src, &.{
         .x = dst.x,
         .y = dst.y,

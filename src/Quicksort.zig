@@ -3,14 +3,27 @@ const assert = std.debug.assert;
 const build = @import("builtin");
 
 const Root = @import("./_root.zig");
+const SortAlgorithm = Root.CommonTypes.SortAlgorithm;
 
-pub const Pivot = enum {
+pub const Pivot = enum(u8) {
     FIRST,
     MIDDLE,
     LAST,
     RANDOM,
     MEDIAN_OF_3,
     MEDIAN_OF_3_RANDOM,
+
+    pub fn from_sort_algorithm(algorithm: SortAlgorithm) Pivot {
+        switch (algorithm) {
+            SortAlgorithm.QUICK_SORT_PIVOT_FIRST => Pivot.FIRST,
+            SortAlgorithm.QUICK_SORT_PIVOT_LAST => Pivot.LAST,
+            SortAlgorithm.QUICK_SORT_PIVOT_MIDDLE => Pivot.MIDDLE,
+            SortAlgorithm.QUICK_SORT_PIVOT_RANDOM => Pivot.RANDOM,
+            SortAlgorithm.QUICK_SORT_PIVOT_MEDIAN_OF_3 => Pivot.MEDIAN_OF_3,
+            SortAlgorithm.QUICK_SORT_PIVOT_MEDIAN_OF_3_RANDOM => Pivot.MEDIAN_OF_3_RANDOM,
+            else => Pivot.FIRST,
+        }
+    }
 };
 
 pub inline fn quicksort(comptime ELEMENT_TYPE: type, comptime ORDER_NUMERIC_TYPE: type, comptime ORDER_FUNC: fn (element: *const ELEMENT_TYPE) ORDER_NUMERIC_TYPE, comptime PIVOT: Pivot, buffer: []ELEMENT_TYPE) void {

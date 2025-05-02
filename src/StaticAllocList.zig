@@ -14,23 +14,108 @@ const Root = @import("./_root.zig");
 const AllocErrorBehavior = Root.CommonTypes.AllocErrorBehavior;
 const GrowthModel = Root.CommonTypes.GrowthModel;
 const SortAlgorithm = Root.CommonTypes.SortAlgorithm;
+const Compare = Root.Compare;
 
-pub const ListOptions = struct {
+pub const ListOptionsBase = struct {
     element_type: type,
-    order_value_type: ?type = null,
-    order_value_func_struct: ?type = null,
-    allocator: *const Allocator,
     alignment: ?u29 = null,
     alloc_error_behavior: AllocErrorBehavior = .ALLOCATION_ERRORS_PANIC,
     growth_model: GrowthModel = .GROW_BY_50_PERCENT_WITH_ATOMIC_PADDING,
     index_type: type = usize,
     secure_wipe_bytes: bool = false,
-    default_sorting_algorithm: SortAlgorithm = SortAlgorithm.QUICK_SORT_PIVOT_MEDIAN_OF_3,
+    reserve_sentinel_space: bool = false,
 };
 
-pub fn define_list_type(comptime options: ListOptions) type {
+pub fn ListOptionsExtended(comptime base_options: ListOptionsBase) type {
+    return struct {
+        default_sorting_algorithm: SortAlgorithm = .QUICK_SORT_PIVOT_MEDIAN_OF_3,
+        default_sorting_compare_func: *const fn (a: *const base_options.element_type, b: *const base_options.element_type) Compare.Order = Compare.numeric_order_else_always_equal(base_options.element_type),
+    };
+}
+
+/// A struct containing all common operations used internally for the various List
+/// paradigms (Manual, Cached, Static)
+///
+/// These are not intended for normal use, but are provided in this public namespace
+/// regardless
+pub const Internal = struct {
+    pub fn slice(comptime List: type, self: List) List.Slice {
+        return self.ptr[0..self.len];
+    }
+
+    pub fn array_ptr(comptime List: type, self: List, start: List.Idx, comptime length: List.Idx) *[length]List.Elem {
+        assert(start + length <= self.len);
+        return self.ptr[start..self.len][0..length];
+    }
+
+    pub fn vector_ptr(comptime List: type, self: List, start: List.Idx, comptime length: List.Idx) *@Vector(length, List.Elem) {
+        assert(start + length <= self.len);
+        return self.ptr[start..self.len][0..length];
+    }
+
+    pub fn slice_with_sentinel(comptime List: type, self: List, comptime sentinel: List.Elem) List.SentinelSlice(List.Elem) {
+        assert(self.len < self.cap);
+        self.ptr[self.len] = sentinel;
+        return self.ptr[0..self.len :sentinel];
+    }
+
+    pub fn slice_full_capacity(comptime List: type, self: List) List.Slice {
+        return self.ptr[0..self.cap];
+    }
+
+    pub fn slice_unused_capacity(comptime List: type, self: List) []List.Elem {
+        return self.ptr[self.len..self.cap];
+    }
+
+    pub fn set_len(comptime List: type, self: *List, new_len: List.Idx) void {
+        assert(new_len <= self.cap);
+        if (List.SECURE_WIPE and new_len < self.len) {
+            crypto.secureZero(List.Elem, self.ptr[new_len..self.len]);
+        }
+        self.len = new_len;
+    }
+
+    pub fn new_empty(comptime List: type) if (List.RESERVE_SENTINEL and List.RETURN_ERRORS) List.Error!List else List {
+        if (List.RESERVE_SENTINEL) return List.new_with_capacity(1);
+        return List.EMPTY;
+    }
+
+    pub fn new_with_capacity(comptime List: type, capacity: List.Idx) if (List.RETURN_ERRORS) List.Error!List else List {
+        var self = List.EMPTY;
+        if (List.RETURN_ERRORS) {
+            try self.ensure_total_capacity_exact(capacity);
+        } else {
+            self.ensure_total_capacity_exact(capacity);
+        }
+        return self;
+    }
+
+    pub fn clone(comptime List: type, self: List) if (List.RETURN_ERRORS) List.Error!List else List {
+        var new_list = if (List.RETURN_ERRORS) try List.new_with_capacity(self.cap) else List.new_with_capacity(self.cap);
+        new_list.append_slice_assume_capacity(self.ptr[0..self.len]);
+        return new_list;
+    }
+
+    pub fn to_owned_slice(comptime List: type, self: *List, alloc: Allocator) if (List.RETURN_ERRORS) List.Error!List.Slice else List.Slice {
+        const old_memory = self.ptr[0..self.cap];
+        if (alloc.remap(old_memory, self.len)) |new_items| {
+            self.* = List.EMPTY;
+            return new_items;
+        }
+        const new_memory = alloc.alignedAlloc(List.Elem, List.ALIGN, self.len) catch |err| return List.handle_alloc_error(err);
+        @memcpy(new_memory, self.ptr[0..self.len]);
+        self.clear_and_free();
+        return new_memory;
+    }
+
+    pub fn to_owned_slice_sentinel(comptime List: type, self: *List, comptime sentinel: List.Elem) if (List.RETURN_ERRORS) List.Error!List.SentinelSlice(sentinel) else List.SentinelSlice(sentinel) {
+        //CHECKPOINT
+    }
+};
+
+pub fn define_manually_managed_list_type(comptime base_options: ListOptionsBase, comptime ex_options: ListOptionsExtended(base_options)) type {
     const opt = comptime check: {
-        var opts = options;
+        var opts = base_options;
         if (opts.alignment) |a| {
             if (a == @alignOf(opts.T)) {
                 opts.alignment = null;
@@ -42,107 +127,82 @@ pub fn define_list_type(comptime options: ListOptions) type {
         if (!math.isPowerOfTwo(a)) @panic("alignment must be a power of 2");
     }
     if (@typeInfo(opt.index_type) != Type.int or @typeInfo(opt.index_type).int.signedness != .unsigned) @panic("index_type must be an unsigned integer type");
-    return struct {
+    return extern struct {
         ptr: Ptr = UNINIT_PTR,
         len: Idx = 0,
         cap: Idx = 0,
 
-        pub const T: type = opt.element_type;
-        const CAN_SORT = opt.order_value_type != null and opt.order_value_func_struct != null and @hasDecl(opt.order_value_func_struct, "func");
-        const ORDER_TYPE = opt.order_value_type;
-        const ORDER_FUNC: if (CAN_SORT) fn (element: *const T) ORDER_TYPE else void = if (CAN_SORT) opt.order_value_func_struct.func else void{};
-        pub const Idx: type = opt.index_type;
-        pub const Ptr: type = if (ALIGN) |a| [*]align(a) T else [*]T;
-        pub const Error = Allocator.Error;
-        pub const Slice = if (ALIGN) |a| ([]align(a) T) else []T;
-        pub fn SentinelSlice(comptime sentinel: T) type {
-            return if (ALIGN) |a| ([:sentinel]align(a) T) else [:sentinel]T;
-        }
-        pub const ALLOC: *const Allocator = opt.allocator;
+        pub const COMPARE_PACKAGE = Compare.type_package(Elem, ex_options.default_sorting_compare_func);
+        pub const ALIGN = base_options.alignment;
+        pub const DEFAULT_SORT = ex_options.default_sorting_algorithm;
+        pub const PIVOT = Root.Quicksort.Pivot.from_sort_algorithm(ex_options.default_sorting_algorithm);
+        pub const ALLOC_ERROR_BEHAVIOR = base_options.alloc_error_behavior;
+        pub const GROWTH = base_options.growth_model;
+        pub const RETURN_ERRORS = base_options.alloc_error_behavior == .ALLOCATION_ERRORS_RETURN_ERROR;
+        pub const SECURE_WIPE = base_options.secure_wipe_bytes;
+        pub const RESERVE_SENTINEL = base_options.reserve_sentinel_space;
+        pub const UNINIT_PTR: Ptr = @ptrFromInt(if (ALIGN) |a| mem.alignBackward(usize, math.maxInt(usize), @intCast(a)) else mem.alignBackward(usize, math.maxInt(usize), @alignOf(Elem)));
         pub const EMPTY = List{
             .ptr = UNINIT_PTR,
             .len = 0,
             .cap = 0,
         };
+
         const List = @This();
-        const PIVOT = opt.sorting_pivot;
-        const ALLOC_ERROR_BEHAVIOR = opt.alloc_error_behavior;
-        const ALIGN = opt.alignment;
-        const GROWTH = opt.growth_model;
-        const RETURN_ERRORS = opt.alloc_error_behavior == .ALLOCATION_ERRORS_RETURN_ERROR;
-        const SECURE_WIPE = opt.secure_wipe_bytes;
-        const DEFAULT_SORT = opt.default_sorting_algorithm;
-        const UNINIT_PTR: Ptr = @ptrFromInt(if (ALIGN) |a| mem.alignBackward(usize, math.maxInt(usize), @intCast(a)) else mem.alignBackward(usize, math.maxInt(usize), @alignOf(T)));
+        pub const Elem = base_options.element_type;
+        pub const Idx = base_options.index_type;
+        pub const Ptr = if (ALIGN) |a| [*]align(a) Elem else [*]Elem;
+        pub const Slice = if (ALIGN) |a| ([]align(a) Elem) else []Elem;
+        pub fn SentinelSlice(comptime sentinel: Elem) type {
+            return if (ALIGN) |a| ([:sentinel]align(a) Elem) else [:sentinel]Elem;
+        }
+        pub const Error = Allocator.Error;
 
-        pub fn slice(self: List) Slice {
-            return self.ptr[0..self.len];
+        pub inline fn slice(self: List) Slice {
+            return Internal.slice(List, self);
         }
 
-        pub fn array_ptr(self: List, start: Idx, comptime length: Idx) *[length]T {
-            assert(start + length <= self.len);
-            return self.ptr[start..self.len][0..length];
+        pub inline fn array_ptr(self: List, start: Idx, comptime length: Idx) *[length]Elem {
+            return Internal.array_ptr(List, self, start, length);
         }
 
-        pub fn vector_ptr(self: List, start: Idx, comptime length: Idx) *@Vector(length, T) {
-            assert(start + length <= self.len);
-            return self.ptr[start..self.len][0..length];
+        pub inline fn vector_ptr(self: List, start: Idx, comptime length: Idx) *@Vector(length, Elem) {
+            return Internal.vector_ptr(List, self, start, length);
         }
 
-        pub fn slice_with_sentinel(self: List, comptime sentinel: T) SentinelSlice(T) {
-            assert(self.len < self.cap);
-            self.ptr[self.len] = sentinel;
-            return self.ptr[0..self.len :sentinel];
+        pub inline fn slice_with_sentinel(self: List, comptime sentinel: Elem) SentinelSlice(Elem) {
+            return Internal.slice_with_sentinel(List, self, sentinel);
         }
 
-        pub fn slice_full_capacity(self: List) Slice {
-            return self.ptr[0..self.cap];
+        pub inline fn slice_full_capacity(self: List) Slice {
+            return Internal.slice_full_capacity(List, self);
         }
 
-        pub fn slice_unused_capacity(self: List) []T {
-            return self.ptr[self.len..self.cap];
+        pub inline fn slice_unused_capacity(self: List) []Elem {
+            Internal.slice_unused_capacity(List, self);
         }
 
-        pub fn set_len(self: *List, new_len: usize) void {
-            assert(new_len <= self.cap);
-            if (SECURE_WIPE and new_len < self.len) {
-                crypto.secureZero(T, self.ptr[new_len..self.len]);
-            }
-            self.len = new_len;
+        pub inline fn set_len(self: *List, new_len: usize) void {
+            return Internal.set_len(List, self, new_len);
         }
 
-        pub fn new_empty() List {
-            return List{};
+        pub inline fn new_empty() if (RESERVE_SENTINEL and RETURN_ERRORS) Error!List else List {
+            return Internal.new_empty(List);
         }
 
-        pub fn new_with_capacity(capacity: Idx) if (RETURN_ERRORS) Error!List else List {
-            var self = List{};
-            if (RETURN_ERRORS) {
-                try self.ensure_total_capacity_exact(capacity);
-            } else {
-                self.ensure_total_capacity_exact(capacity);
-            }
-            return self;
+        pub inline fn new_with_capacity(capacity: Idx) if (RETURN_ERRORS) Error!List else List {
+            return Internal.new_with_capacity(List, capacity);
         }
 
-        pub fn clone(self: List) if (RETURN_ERRORS) Error!List else List {
-            var new_list = if (RETURN_ERRORS) try List.new_with_capacity(self.cap) else List.new_with_capacity(self.cap);
-            new_list.append_slice_assume_capacity(self.ptr[0..self.len]);
-            return new_list;
+        pub inline fn clone(self: List) if (RETURN_ERRORS) Error!List else List {
+            return Internal.clone(List, self);
         }
 
-        pub fn to_owned_slice(self: *List) if (RETURN_ERRORS) Error!Slice else Slice {
-            const old_memory = self.ptr[0..self.cap];
-            if (ALLOC.remap(old_memory, self.len)) |new_items| {
-                self.* = EMPTY;
-                return new_items;
-            }
-            const new_memory = ALLOC.alignedAlloc(T, ALIGN, self.len) catch |err| return handle_alloc_error(err);
-            @memcpy(new_memory, self.ptr[0..self.len]);
-            self.clear_and_free();
-            return new_memory;
+        pub inline fn to_owned_slice(self: *List, alloc: Allocator) if (RETURN_ERRORS) Error!Slice else Slice {
+            return Internal.to_owned_slice(List, self, alloc);
         }
 
-        pub fn to_owned_slice_sentinel(self: *List, comptime sentinel: T) if (RETURN_ERRORS) Error!SentinelSlice(sentinel) else SentinelSlice(sentinel) {
+        pub fn to_owned_slice_sentinel(self: *List, comptime sentinel: Elem) if (RETURN_ERRORS) Error!SentinelSlice(sentinel) else SentinelSlice(sentinel) {
             if (RETURN_ERRORS) {
                 try self.ensure_total_capacity_exact(self.len + 1);
             } else {
@@ -161,7 +221,7 @@ pub fn define_list_type(comptime options: ListOptions) type {
             };
         }
 
-        pub fn from_owned_slice_sentinel(comptime sentinel: T, from_slice: [:sentinel]T) List {
+        pub fn from_owned_slice_sentinel(comptime sentinel: Elem, from_slice: [:sentinel]Elem) List {
             return List{
                 .ptr = from_slice.ptr,
                 .len = from_slice.len,
@@ -169,7 +229,7 @@ pub fn define_list_type(comptime options: ListOptions) type {
             };
         }
 
-        pub fn insert_slot(self: *List, idx: Idx) if (RETURN_ERRORS) Error!*T else *T {
+        pub fn insert_slot(self: *List, idx: Idx) if (RETURN_ERRORS) Error!*Elem else *Elem {
             if (RETURN_ERRORS) {
                 try self.ensure_unused_capacity(1);
             } else {
@@ -178,23 +238,23 @@ pub fn define_list_type(comptime options: ListOptions) type {
             return self.insert_slot_assume_capacity(idx);
         }
 
-        pub fn insert_slot_assume_capacity(self: *List, idx: Idx) *T {
+        pub fn insert_slot_assume_capacity(self: *List, idx: Idx) *Elem {
             assert(idx <= self.len);
-            mem.copyBackwards(T, self.ptr[idx + 1 .. self.len + 1], self.ptr[idx..self.len]);
+            mem.copyBackwards(Elem, self.ptr[idx + 1 .. self.len + 1], self.ptr[idx..self.len]);
             return self.ptr + idx;
         }
 
-        pub fn insert(self: *List, idx: Idx, item: T) if (RETURN_ERRORS) Error!void else void {
+        pub fn insert(self: *List, idx: Idx, item: Elem) if (RETURN_ERRORS) Error!void else void {
             const ptr = if (RETURN_ERRORS) try self.insert_slot(idx) else self.insert_slot(idx);
             ptr.* = item;
         }
 
-        pub fn insert_assume_capacity(self: *List, idx: Idx, item: T) void {
+        pub fn insert_assume_capacity(self: *List, idx: Idx, item: Elem) void {
             const ptr = self.insert_slot_assume_capacity(idx);
             ptr.* = item;
         }
 
-        pub fn insert_many_slots(self: *List, idx: Idx, count: Idx) if (RETURN_ERRORS) Error![]T else []T {
+        pub fn insert_many_slots(self: *List, idx: Idx, count: Idx) if (RETURN_ERRORS) Error![]Elem else []Elem {
             if (RETURN_ERRORS) {
                 try self.ensure_unused_capacity(count);
             } else {
@@ -203,23 +263,23 @@ pub fn define_list_type(comptime options: ListOptions) type {
             return self.insert_many_slots_assume_capacity(idx, count);
         }
 
-        pub fn insert_many_slots_assume_capacity(self: *List, idx: Idx, count: Idx) []T {
+        pub fn insert_many_slots_assume_capacity(self: *List, idx: Idx, count: Idx) []Elem {
             assert(idx <= self.len);
-            mem.copyBackwards(T, self.ptr[idx + count .. self.len + count], self.ptr[idx..self.len]);
+            mem.copyBackwards(Elem, self.ptr[idx + count .. self.len + count], self.ptr[idx..self.len]);
             return self.ptr[idx .. idx + count];
         }
 
-        pub fn insert_slice(self: *List, idx: Idx, items: []const T) if (RETURN_ERRORS) Error!void else void {
+        pub fn insert_slice(self: *List, idx: Idx, items: []const Elem) if (RETURN_ERRORS) Error!void else void {
             const slots = if (RETURN_ERRORS) try self.insert_many_slots(idx, @intCast(items.len)) else self.insert_slot(idx, @intCast(items.len));
             @memcpy(slots, items);
         }
 
-        pub fn insert_slice_assume_capacity(self: *List, idx: usize, items: []const T) void {
+        pub fn insert_slice_assume_capacity(self: *List, idx: usize, items: []const Elem) void {
             const slots = self.insert_many_slots_assume_capacity(idx, @intCast(items.len));
             @memcpy(slots, items);
         }
 
-        pub fn replace_range(self: *List, start: Idx, length: Idx, new_items: []const T) if (RETURN_ERRORS) Error!void else void {
+        pub fn replace_range(self: *List, start: Idx, length: Idx, new_items: []const Elem) if (RETURN_ERRORS) Error!void else void {
             if (new_items.len > length) {
                 const additional_needed = new_items.len - length;
                 if (RETURN_ERRORS) {
@@ -231,7 +291,7 @@ pub fn define_list_type(comptime options: ListOptions) type {
             self.replace_range_assume_capacity(start, length, new_items);
         }
 
-        pub fn replace_range_assume_capacity(self: *List, start: Idx, length: Idx, new_items: []const T) void {
+        pub fn replace_range_assume_capacity(self: *List, start: Idx, length: Idx, new_items: []const Elem) void {
             const end_of_range = start + length;
             assert(end_of_range <= self.len);
             const range = self.ptr[start..end_of_range];
@@ -246,41 +306,41 @@ pub fn define_list_type(comptime options: ListOptions) type {
             } else {
                 const unused_slots = range.len - new_items.len;
                 @memcpy(range[0..new_items.len], new_items);
-                std.mem.copyForwards(T, self.ptr[end_of_range - unused_slots .. self.len], self.ptr[end_of_range..self.len]);
+                std.mem.copyForwards(Elem, self.ptr[end_of_range - unused_slots .. self.len], self.ptr[end_of_range..self.len]);
                 if (SECURE_WIPE) {
-                    crypto.secureZero(T, self.ptr[self.len - unused_slots .. self.len]);
+                    crypto.secureZero(Elem, self.ptr[self.len - unused_slots .. self.len]);
                 }
                 self.len -= unused_slots;
             }
         }
 
-        pub fn append(self: *List, item: T) if (RETURN_ERRORS) Error!void else void {
+        pub fn append(self: *List, item: Elem) if (RETURN_ERRORS) Error!void else void {
             const slot = if (RETURN_ERRORS) try self.append_slot() else self.append_slot();
             slot.* = item;
         }
 
-        pub fn append_assume_capacity(self: *List, item: T) void {
+        pub fn append_assume_capacity(self: *List, item: Elem) void {
             const slot = self.append_slot_assume_capacity();
             slot.* = item;
         }
 
-        pub fn remove(self: *List, idx: Idx) T {
-            const val: T = self.ptr[idx];
+        pub fn remove(self: *List, idx: Idx) Elem {
+            const val: Elem = self.ptr[idx];
             self.delete(idx);
             return val;
         }
 
-        pub fn swap_remove(self: *List, idx: Idx) T {
-            const val: T = self.ptr[idx];
+        pub fn swap_remove(self: *List, idx: Idx) Elem {
+            const val: Elem = self.ptr[idx];
             self.swap_delete(idx);
             return val;
         }
 
         pub fn delete(self: *List, idx: Idx) void {
             assert(idx < self.len);
-            std.mem.copyForwards(T, self.ptr[idx..self.len], self.ptr[idx + 1 .. self.len]);
+            std.mem.copyForwards(Elem, self.ptr[idx..self.len], self.ptr[idx + 1 .. self.len]);
             if (SECURE_WIPE) {
-                crypto.secureZero(T, self.ptr[self.len - 1 .. self.len]);
+                crypto.secureZero(Elem, self.ptr[self.len - 1 .. self.len]);
             }
             self.len -= 1;
         }
@@ -288,9 +348,9 @@ pub fn define_list_type(comptime options: ListOptions) type {
         pub fn delete_range(self: *List, start: Idx, length: Idx) void {
             const end_of_range = start + length;
             assert(end_of_range <= self.len);
-            std.mem.copyForwards(T, self.ptr[start..self.len], self.ptr[end_of_range..self.len]);
+            std.mem.copyForwards(Elem, self.ptr[start..self.len], self.ptr[end_of_range..self.len]);
             if (SECURE_WIPE) {
-                crypto.secureZero(T, self.ptr[self.len - length .. self.len]);
+                crypto.secureZero(Elem, self.ptr[self.len - length .. self.len]);
             }
             self.len -= length;
         }
@@ -299,27 +359,27 @@ pub fn define_list_type(comptime options: ListOptions) type {
             assert(idx < self.len);
             self.ptr[idx] = self.ptr[self.list.items.len - 1];
             if (SECURE_WIPE) {
-                crypto.secureZero(T, self.ptr[self.len - 1 .. self.len]);
+                crypto.secureZero(Elem, self.ptr[self.len - 1 .. self.len]);
             }
             self.len -= 1;
         }
 
-        pub fn append_slice(self: *List, items: []const T) if (RETURN_ERRORS) Error!void else void {
+        pub fn append_slice(self: *List, items: []const Elem) if (RETURN_ERRORS) Error!void else void {
             const slots = if (RETURN_ERRORS) try self.append_many_slots(@intCast(items.len)) else self.append_many_slots(@intCast(items.len));
             @memcpy(slots, items);
         }
 
-        pub fn append_slice_assume_capacity(self: *List, items: []const T) void {
+        pub fn append_slice_assume_capacity(self: *List, items: []const Elem) void {
             const slots = self.append_many_slots_assume_capacity(@intCast(items.len));
             @memcpy(slots, items);
         }
 
-        pub fn append_slice_unaligned(self: *List, items: []align(1) const T) if (RETURN_ERRORS) Error!void else void {
+        pub fn append_slice_unaligned(self: *List, items: []align(1) const Elem) if (RETURN_ERRORS) Error!void else void {
             const slots = if (RETURN_ERRORS) try self.append_many_slots(@intCast(items.len)) else self.append_many_slots(@intCast(items.len));
             @memcpy(slots, items);
         }
 
-        pub fn append_slice_unaligned_assume_capacity(self: *List, items: []align(1) const T) void {
+        pub fn append_slice_unaligned_assume_capacity(self: *List, items: []align(1) const Elem) void {
             const slots = self.append_many_slots_assume_capacity(@intCast(items.len));
             @memcpy(slots, items);
         }
@@ -328,9 +388,9 @@ pub fn define_list_type(comptime options: ListOptions) type {
             list: *List,
         };
 
-        pub const Writer = if (T != u8)
+        pub const Writer = if (Elem != u8)
             @compileError("The Writer interface is only defined for child type `u8` " ++
-                "but the given type is " ++ @typeName(T))
+                "but the given type is " ++ @typeName(Elem))
         else
             std.io.Writer(WriterHandle, Allocator.Error, write);
 
@@ -343,9 +403,9 @@ pub fn define_list_type(comptime options: ListOptions) type {
             return bytes.len;
         }
 
-        pub const WriterNoGrow = if (T != u8)
+        pub const WriterNoGrow = if (Elem != u8)
             @compileError("The Writer interface is only defined for child type `u8` " ++
-                "but the given type is " ++ @typeName(T))
+                "but the given type is " ++ @typeName(Elem))
         else
             std.io.Writer(WriterHandle, Allocator.Error, write_no_grow);
 
@@ -360,12 +420,12 @@ pub fn define_list_type(comptime options: ListOptions) type {
             return bytes.len;
         }
 
-        pub fn append_n_times(self: *List, value: T, count: Idx) if (RETURN_ERRORS) Error!void else void {
+        pub fn append_n_times(self: *List, value: Elem, count: Idx) if (RETURN_ERRORS) Error!void else void {
             const slots = if (RETURN_ERRORS) try self.append_many_slots(count) else self.append_many_slots(count);
             @memset(slots, value);
         }
 
-        pub fn append_n_times_assume_capacity(self: *List, value: T, count: Idx) void {
+        pub fn append_n_times_assume_capacity(self: *List, value: Elem, count: Idx) void {
             const slots = self.append_many_slots_assume_capacity(count);
             @memset(slots, value);
         }
@@ -377,32 +437,32 @@ pub fn define_list_type(comptime options: ListOptions) type {
                 self.ensure_total_capacity(new_len);
             }
             if (SECURE_WIPE and new_len < self.len) {
-                crypto.secureZero(T, self.ptr[new_len..self.len]);
+                crypto.secureZero(Elem, self.ptr[new_len..self.len]);
             }
             self.len = new_len;
         }
 
-        pub fn shrink_and_free(self: *List, new_len: Idx) void {
+        pub fn shrink_and_free(self: *List, new_len: Idx, alloc: Allocator) void {
             assert(new_len <= self.len);
 
-            if (@sizeOf(T) == 0) {
+            if (@sizeOf(Elem) == 0) {
                 self.items.len = new_len;
                 return;
             }
 
             if (SECURE_WIPE) {
-                crypto.secureZero(T, self.ptr[new_len..self.len]);
+                crypto.secureZero(Elem, self.ptr[new_len..self.len]);
             }
 
             const old_memory = self.ptr[0..self.cap];
-            if (ALLOC.remap(old_memory, new_len)) |new_items| {
+            if (alloc.remap(old_memory, new_len)) |new_items| {
                 self.ptr = new_items.ptr;
                 self.len = new_items.len;
                 self.cap = new_items.len;
                 return;
             }
 
-            const new_memory = ALLOC.alignedAlloc(T, ALIGN, new_len) catch |err| switch (err) {
+            const new_memory = alloc.alignedAlloc(Elem, ALIGN, new_len) catch |err| switch (err) {
                 error.OutOfMemory => {
                     self.len = new_len;
                     return;
@@ -410,7 +470,7 @@ pub fn define_list_type(comptime options: ListOptions) type {
             };
 
             @memcpy(new_memory, self.ptr[0..new_len]);
-            ALLOC.free(old_memory);
+            alloc.free(old_memory);
             self.ptr = new_memory.ptr;
             self.len = new_memory.len;
             self.cap = new_memory.len;
@@ -419,35 +479,35 @@ pub fn define_list_type(comptime options: ListOptions) type {
         pub fn shrink_retaining_capacity(self: *List, new_len: Idx) void {
             assert(new_len <= self.len);
             if (SECURE_WIPE) {
-                crypto.secureZero(T, self.ptr[new_len..self.len]);
+                crypto.secureZero(Elem, self.ptr[new_len..self.len]);
             }
             self.len = new_len;
         }
 
         pub fn clear_retaining_capacity(self: *List) void {
             if (SECURE_WIPE) {
-                std.crypto.secureZero(T, self.ptr[0..self.len]);
+                std.crypto.secureZero(Elem, self.ptr[0..self.len]);
             }
             self.len = 0;
         }
 
-        pub fn clear_and_free(self: *List) void {
+        pub fn clear_and_free(self: *List, alloc: Allocator) void {
             if (SECURE_WIPE) {
-                std.crypto.secureZero(T, self.ptr[0..self.len]);
+                std.crypto.secureZero(Elem, self.ptr[0..self.len]);
             }
-            ALLOC.free(self.ptr[0..self.cap]);
+            alloc.free(self.ptr[0..self.cap]);
             self.ptr = UNINIT_PTR;
             self.len = 0;
             self.cap = 0;
         }
 
-        pub fn ensure_total_capacity(self: *List, new_capacity: Idx) if (RETURN_ERRORS) Error!void else void {
+        pub fn ensure_total_capacity(self: *List, new_capacity: Idx, alloc: Allocator) if (RETURN_ERRORS) Error!void else void {
             if (self.cap >= new_capacity) return;
-            return self.ensure_total_capacity_exact(true_capacity_for_grow(self.cap, new_capacity));
+            return self.ensure_total_capacity_exact(true_capacity_for_grow(self.cap, new_capacity), alloc);
         }
 
-        pub fn ensure_total_capacity_exact(self: *List, new_capacity: Idx) if (RETURN_ERRORS) Error!void else void {
-            if (@sizeOf(T) == 0) {
+        pub fn ensure_total_capacity_exact(self: *List, new_capacity: Idx, alloc: Allocator) if (RETURN_ERRORS) Error!void else void {
+            if (@sizeOf(Elem) == 0) {
                 self.cap = math.maxInt(Idx);
                 return;
             }
@@ -455,19 +515,19 @@ pub fn define_list_type(comptime options: ListOptions) type {
             if (self.cap >= new_capacity) return;
 
             if (new_capacity < self.len) {
-                if (SECURE_WIPE) crypto.secureZero(T, self.ptr[new_capacity..self.len]);
+                if (SECURE_WIPE) crypto.secureZero(Elem, self.ptr[new_capacity..self.len]);
                 self.len = new_capacity;
             }
 
             const old_memory = self.ptr[0..self.cap];
-            if (ALLOC.remap(old_memory, new_capacity)) |new_memory| {
+            if (alloc.remap(old_memory, new_capacity)) |new_memory| {
                 self.ptr = new_memory.ptr;
                 self.cap = @intCast(new_memory.len);
             } else {
-                const new_memory = ALLOC.alignedAlloc(T, ALIGN, new_capacity) catch |err| return handle_alloc_error(err);
+                const new_memory = alloc.alignedAlloc(Elem, ALIGN, new_capacity) catch |err| return handle_alloc_error(err);
                 @memcpy(new_memory[0..self.len], self.ptr[0..self.len]);
-                if (SECURE_WIPE) crypto.secureZero(T, self.ptr[0..self.len]);
-                ALLOC.free(old_memory);
+                if (SECURE_WIPE) crypto.secureZero(Elem, self.ptr[0..self.len]);
+                alloc.free(old_memory);
                 self.ptr = new_memory.ptr;
                 self.cap = @intCast(new_memory.len);
             }
@@ -482,26 +542,26 @@ pub fn define_list_type(comptime options: ListOptions) type {
             self.len = self.cap;
         }
 
-        pub fn append_slot(self: *List) if (RETURN_ERRORS) Error!*T else *T {
+        pub fn append_slot(self: *List) if (RETURN_ERRORS) Error!*Elem else *Elem {
             const new_len = self.len + 1;
             if (RETURN_ERRORS) try self.ensure_total_capacity(new_len) else self.ensure_total_capacity(new_len);
             return self.append_slot_assume_capacity();
         }
 
-        pub fn append_slot_assume_capacity(self: *List) *T {
+        pub fn append_slot_assume_capacity(self: *List) *Elem {
             assert(self.len < self.cap);
             const idx = self.len;
             self.len += 1;
             return &self.ptr[idx];
         }
 
-        pub fn append_many_slots(self: *List, count: Idx) if (RETURN_ERRORS) Error![]T else []T {
+        pub fn append_many_slots(self: *List, count: Idx) if (RETURN_ERRORS) Error![]Elem else []Elem {
             const new_len = self.len + count;
             if (RETURN_ERRORS) try self.ensure_total_capacity(new_len) else self.ensure_total_capacity(new_len);
             return self.append_many_slots_assume_capacity(count);
         }
 
-        pub fn append_many_slots_assume_capacity(self: *List, count: Idx) []T {
+        pub fn append_many_slots_assume_capacity(self: *List, count: Idx) []Elem {
             const new_len = self.len + count;
             assert(new_len <= self.cap);
             const prev_len = self.len;
@@ -509,13 +569,13 @@ pub fn define_list_type(comptime options: ListOptions) type {
             return self.ptr[prev_len..][0..count];
         }
 
-        pub fn append_many_slots_as_array(self: *List, comptime count: Idx) if (RETURN_ERRORS) Error!*[count]T else *[count]T {
+        pub fn append_many_slots_as_array(self: *List, comptime count: Idx) if (RETURN_ERRORS) Error!*[count]Elem else *[count]Elem {
             const new_len = self.len + count;
             if (RETURN_ERRORS) try self.ensure_total_capacity(new_len) else self.ensure_total_capacity(new_len);
             return self.append_many_slots_as_array_assume_capacity(count);
         }
 
-        pub fn append_many_slots_as_array_assume_capacity(self: *List, comptime count: Idx) *[count]T {
+        pub fn append_many_slots_as_array_assume_capacity(self: *List, comptime count: Idx) *[count]Elem {
             const new_len = self.len + count;
             assert(new_len <= self.cap);
             const prev_len = self.len;
@@ -523,24 +583,24 @@ pub fn define_list_type(comptime options: ListOptions) type {
             return self.ptr[prev_len..][0..count];
         }
 
-        pub fn pop_or_null(self: *List) ?T {
+        pub fn pop_or_null(self: *List) ?Elem {
             if (self.len == 0) return null;
             return self.pop();
         }
 
-        pub fn pop(self: *List) T {
+        pub fn pop(self: *List) Elem {
             assert(self.len > 0);
             const new_len = self.len - 1;
             self.len = new_len;
             return self.ptr[new_len];
         }
 
-        pub fn get_last(self: List) T {
+        pub fn get_last(self: List) Elem {
             assert(self.len > 0);
             return self.ptr[self.len - 1];
         }
 
-        pub fn get_last_or_null(self: List) ?T {
+        pub fn get_last_or_null(self: List) ?Elem {
             if (self.len == 0) return null;
             return self.get_last();
         }
@@ -552,14 +612,14 @@ pub fn define_list_type(comptime options: ListOptions) type {
             return result;
         }
 
-        const ATOMIC_PADDING = @as(comptime_int, @max(1, std.atomic.cache_line / @sizeOf(T)));
+        const ATOMIC_PADDING = @as(comptime_int, @max(1, std.atomic.cache_line / @sizeOf(Elem)));
 
         fn true_capacity_for_grow(current: Idx, minimum: Idx) Idx {
             switch (GROWTH) {
                 GrowthModel.GROW_EXACT_NEEDED => {
                     return minimum;
                 },
-                GrowthModel.GROW_EXACT_NEEDED_WITH_ATOMIC_PADDING => {
+                GrowthModel.GROW_EXACT_NEEDED_ATOMIC_PADDING => {
                     return minimum + ATOMIC_PADDING;
                 },
                 else => {
@@ -610,12 +670,12 @@ pub fn define_list_type(comptime options: ListOptions) type {
             switch (algorithm) {
                 // SortAlgorithm.BUBBlE_SORT => {},
                 // SortAlgorithm.HEAP_SORT => {},
-                SortAlgorithm.QUICK_SORT_PIVOT_FIRST => Root.Algorithms.Quicksort.quicksort(T, ORDER_TYPE, ORDER_FUNC, Root.Algorithms.Quicksort.Pivot.FIRST, self.ptr[0..self.len]),
-                SortAlgorithm.QUICK_SORT_PIVOT_LAST => Root.Algorithms.Quicksort.quicksort(T, ORDER_TYPE, ORDER_FUNC, Root.Algorithms.Quicksort.Pivot.LAST, self.ptr[0..self.len]),
-                SortAlgorithm.QUICK_SORT_PIVOT_MIDDLE => Root.Algorithms.Quicksort.quicksort(T, ORDER_TYPE, ORDER_FUNC, Root.Algorithms.Quicksort.Pivot.MIDDLE, self.ptr[0..self.len]),
-                SortAlgorithm.QUICK_SORT_PIVOT_RANDOM => Root.Algorithms.Quicksort.quicksort(T, ORDER_TYPE, ORDER_FUNC, Root.Algorithms.Quicksort.Pivot.RANDOM, self.ptr[0..self.len]),
-                SortAlgorithm.QUICK_SORT_PIVOT_MEDIAN_OF_3 => Root.Algorithms.Quicksort.quicksort(T, ORDER_TYPE, ORDER_FUNC, Root.Algorithms.Quicksort.Pivot.MEDIAN_OF_3, self.ptr[0..self.len]),
-                SortAlgorithm.QUICK_SORT_PIVOT_MEDIAN_OF_3_RANDOM => Root.Algorithms.Quicksort.quicksort(T, ORDER_TYPE, ORDER_FUNC, Root.Algorithms.Quicksort.Pivot.MEDIAN_OF_3_RANDOM, self.ptr[0..self.len]),
+                SortAlgorithm.QUICK_SORT_PIVOT_FIRST => Root.Algorithms.Quicksort.quicksort(Elem, ORDER_TYPE, ORDER_FUNC, Root.Algorithms.Quicksort.Pivot.FIRST, self.ptr[0..self.len]),
+                SortAlgorithm.QUICK_SORT_PIVOT_LAST => Root.Algorithms.Quicksort.quicksort(Elem, ORDER_TYPE, ORDER_FUNC, Root.Algorithms.Quicksort.Pivot.LAST, self.ptr[0..self.len]),
+                SortAlgorithm.QUICK_SORT_PIVOT_MIDDLE => Root.Algorithms.Quicksort.quicksort(Elem, ORDER_TYPE, ORDER_FUNC, Root.Algorithms.Quicksort.Pivot.MIDDLE, self.ptr[0..self.len]),
+                SortAlgorithm.QUICK_SORT_PIVOT_RANDOM => Root.Algorithms.Quicksort.quicksort(Elem, ORDER_TYPE, ORDER_FUNC, Root.Algorithms.Quicksort.Pivot.RANDOM, self.ptr[0..self.len]),
+                SortAlgorithm.QUICK_SORT_PIVOT_MEDIAN_OF_3 => Root.Algorithms.Quicksort.quicksort(Elem, ORDER_TYPE, ORDER_FUNC, Root.Algorithms.Quicksort.Pivot.MEDIAN_OF_3, self.ptr[0..self.len]),
+                SortAlgorithm.QUICK_SORT_PIVOT_MEDIAN_OF_3_RANDOM => Root.Algorithms.Quicksort.quicksort(Elem, ORDER_TYPE, ORDER_FUNC, Root.Algorithms.Quicksort.Pivot.MEDIAN_OF_3_RANDOM, self.ptr[0..self.len]),
             }
         }
 

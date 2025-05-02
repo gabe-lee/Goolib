@@ -1,6 +1,7 @@
 const std = @import("std");
 const math = std.math;
 const Type = std.builtin.Type;
+const Allocator = std.mem.Allocator;
 
 const Root = @import("./_root.zig");
 
@@ -190,3 +191,13 @@ pub fn define_aabb2_type(comptime T: type) type {
         }
     };
 }
+
+pub const SweepAndPruneListOptions = struct {
+    aabb_point_type: type = f32,
+    aabb_id_type: type = u16,
+    allocator: *const Allocator,
+    alloc_error_behavior: Root.StaticAllocList.AllocErrorBehavior = .ALLOCATION_ERRORS_PANIC,
+    growth_model: Root.StaticAllocList.GrowthModel = .GROW_BY_50_PERCENT_WITH_ATOMIC_PADDING,
+};
+
+pub fn define_sweep_and_prune_list(comptime options: SweepAndPruneListOptions) type {}

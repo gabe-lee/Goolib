@@ -7,6 +7,7 @@ pub const Bytes = @import("./Bytes.zig");
 // pub const Codegen = @import("./Codegen.zig");
 pub const Color = @import("./Color.zig");
 pub const CommonTypes = @import("./CommonTypes.zig");
+pub const Compare = @import("./Compare.zig");
 // pub const Filegen = @import("./Filegen.zig");
 // pub const Format = @import("./Format.zig");
 pub const Math = @import("./Math.zig");
@@ -31,6 +32,7 @@ comptime {
     // _ = @import("./Codegen.zig");
     _ = @import("./Color.zig");
     _ = @import("./CommonTypes.zig");
+    _ = @import("./Compare.zig");
     // _ = @import("./Filegen.zig");
     // _ = @import("./Format.zig");
     // _ = @import("./Graphics.zig");
