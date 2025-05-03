@@ -8,15 +8,17 @@ pub const Bytes = @import("./Bytes.zig");
 pub const Color = @import("./Color.zig");
 pub const CommonTypes = @import("./CommonTypes.zig");
 pub const Compare = @import("./Compare.zig");
+pub const DummyAllocator = @import("./DummyAllocator.zig");
 // pub const Filegen = @import("./Filegen.zig");
 // pub const Format = @import("./Format.zig");
+pub const List = @import("./List.zig");
 pub const Math = @import("./Math.zig");
 pub const Quicksort = @import("./Quicksort.zig");
 pub const Reader = @import("./Reader.zig");
 pub const Rect2 = @import("./Rect2.zig");
 // pub const ReturnWrappers = @import("./ReturnWrappers.zig");
 pub const SDL3 = @import("./SDL3.zig");
-pub const StaticAllocList = @import("./StaticAllocList.zig");
+
 // pub const StaticAllocVectorizedStructOfArrays = @import("./StaticAllocVectorizedStructOfArrays.zig");
 // pub const Template = @import("./Template.zig");
 pub const Utils = @import("./Utils.zig");
@@ -33,14 +35,15 @@ comptime {
     _ = @import("./Color.zig");
     _ = @import("./CommonTypes.zig");
     _ = @import("./Compare.zig");
+    _ = @import("./DummyAllocator.zig");
     // _ = @import("./Filegen.zig");
     // _ = @import("./Format.zig");
-    // _ = @import("./Graphics.zig");
+    _ = @import("./List.zig");
     _ = @import("./Math.zig");
     _ = @import("./Quicksort.zig");
     _ = @import("./Reader.zig");
     // _ = @import("./ReturnWrappers.zig");
-    _ = @import("./StaticAllocList.zig");
+
     // _ = @import("./StaticAllocVectorizedStructOfArrays.zig");
     // _ = @import("./Template.zig");
     _ = @import("./Utils.zig");

@@ -4,6 +4,8 @@ const Type = std.builtin.Type;
 const Allocator = std.mem.Allocator;
 
 const Root = @import("./_root.zig");
+const List = Root.List;
+const Compare = Root.Compare;
 
 pub fn define_aabb2_type(comptime T: type) type {
     return extern struct {
@@ -200,4 +202,35 @@ pub const SweepAndPruneListOptions = struct {
     growth_model: Root.StaticAllocList.GrowthModel = .GROW_BY_50_PERCENT_WITH_ATOMIC_PADDING,
 };
 
-pub fn define_sweep_and_prune_list(comptime options: SweepAndPruneListOptions) type {}
+pub fn define_aabb2_sweep_and_prune_list(comptime options: SweepAndPruneListOptions) type {
+    return struct {
+        const Self = @This();
+        const T_AABB2 = define_aabb2_type(options.aabb_point_type);
+        const T_ID = options.aabb_id_type;
+        fn compare(a: *const T_AABB2_WITH_ID, b: *const T_AABB2_WITH_ID) Compare.Order {
+            const a_less_than_b: i8 = @intCast(@intFromBool(a.aabb.x_min < b.aabb.x_min));
+            const a_greater_than_b: i8 = @intCast(@intFromBool(a.aabb.x_min > b.aabb.x_min));
+            const result: Compare.Order = @enumFromInt(a_greater_than_b - a_less_than_b);
+            return result;
+        }
+        const T_AABB2_WITH_ID = extern struct {
+            aabb: T_AABB2,
+            id: T_ID,
+        };
+        const list_base_opts = List.ListOptionsBase{
+            .alignment = null,
+            .alloc_error_behavior = options.alloc_error_behavior,
+            .element_type = T_AABB2_WITH_ID,
+            .growth_model = options.growth_model,
+            .index_type = T_ID,
+            .secure_wipe_bytes = false,
+        };
+        const list_ex_opts = List.ListOptionsExtended(list_base_opts){
+            .default_sorting_algorithm = .QUICK_SORT_PIVOT_MEDIAN_OF_3,
+            .default_sorting_compare_func = compare,
+        };
+        const AABB_ID_List = List.define_statically_managed_list_type(list_base_opts, list_ex_opts, options.allocator);
+
+        list: AABB_ID_List = AABB_ID_List.EMPTY,
+    };
+}
