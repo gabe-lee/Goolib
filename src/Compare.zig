@@ -102,7 +102,7 @@ pub fn numeric_order_else_always_equal(comptime T: type) CompareFn(T) {
     return container.func;
 }
 
-pub fn shallow_exactly_equal_else_never_equal(comptime T: type) MatchFn(T) {
+pub fn shallow_equals_else_never_equal(comptime T: type) MatchFn(T) {
     const container = comptime switch (@typeInfo(T)) {
         .int, .float, .comptime_int, .comptime_float, .@"enum", .@"struct", .error_union, .@"union", .array, .vector, .pointer, .optional => struct {
             fn func(a: *const T, b: *const T) bool {

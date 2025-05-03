@@ -34,7 +34,7 @@ pub fn ListOptionsExtended(comptime base_options: ListOptionsBase) type {
     return struct {
         default_sorting_algorithm: SortAlgorithm = .QUICK_SORT_PIVOT_MEDIAN_OF_3,
         default_sorting_compare_func: CompareFn(base_options.element_type) = Compare.numeric_order_else_always_equal(base_options.element_type),
-        default_exactly_equal_func: MatchFn(base_options.element_type) = Compare.shallow_exactly_equal_else_never_equal(base_options.element_type),
+        default_match_func: MatchFn(base_options.element_type) = Compare.shallow_equals_else_never_equal(base_options.element_type),
     };
 }
 
@@ -640,7 +640,7 @@ pub fn define_manually_managed_list_type(comptime base_options: ListOptionsBase,
         pub const ALIGN = base_options.alignment;
         pub const DEFAULT_SORT_ALGO = ex_options.default_sorting_algorithm;
         pub const DEFAULT_COMPARE_FN = ex_options.default_sorting_compare_func;
-        pub const DEFAULT_EXACT_EQUAL_FN = ex_options.default_exactly_equal_func;
+        pub const DEFAULT_EXACT_EQUAL_FN = ex_options.default_match_func;
         pub const ALLOC_ERROR_BEHAVIOR = base_options.alloc_error_behavior;
         pub const GROWTH = base_options.growth_model;
         pub const RETURN_ERRORS = base_options.alloc_error_behavior == .ALLOCATION_ERRORS_RETURN_ERROR;
@@ -1005,7 +1005,7 @@ pub fn define_statically_managed_list_type(comptime base_options: ListOptionsBas
         pub const ALIGN = base_options.alignment;
         pub const DEFAULT_SORT_ALGO = ex_options.default_sorting_algorithm;
         pub const DEFAULT_COMPARE_FN = ex_options.default_sorting_compare_func;
-        pub const DEFAULT_EXACT_EQUAL_FN = ex_options.default_exactly_equal_func;
+        pub const DEFAULT_EXACT_EQUAL_FN = ex_options.default_match_func;
         pub const ALLOC_ERROR_BEHAVIOR = base_options.alloc_error_behavior;
         pub const GROWTH = base_options.growth_model;
         pub const RETURN_ERRORS = base_options.alloc_error_behavior == .ALLOCATION_ERRORS_RETURN_ERROR;
@@ -1365,7 +1365,7 @@ pub fn define_cached_allocator_list_type(comptime base_options: ListOptionsBase,
         pub const ALIGN = base_options.alignment;
         pub const DEFAULT_SORT_ALGO = ex_options.default_sorting_algorithm;
         pub const DEFAULT_COMPARE_FN = ex_options.default_sorting_compare_func;
-        pub const DEFAULT_EXACT_EQUAL_FN = ex_options.default_exactly_equal_func;
+        pub const DEFAULT_EXACT_EQUAL_FN = ex_options.default_match_func;
         pub const ALLOC_ERROR_BEHAVIOR = base_options.alloc_error_behavior;
         pub const GROWTH = base_options.growth_model;
         pub const RETURN_ERRORS = base_options.alloc_error_behavior == .ALLOCATION_ERRORS_RETURN_ERROR;
@@ -1730,7 +1730,7 @@ test "Does it basically work?" {
     const ex_opts = comptime ListOptionsExtended(base_opts){
         .default_sorting_algorithm = .QUICK_SORT_PIVOT_MEDIAN_OF_3_RANDOM,
         .default_sorting_compare_func = Compare.numeric_order_else_always_equal(u8),
-        .default_exactly_equal_func = Compare.shallow_exactly_equal_else_never_equal(u8),
+        .default_match_func = Compare.shallow_exactly_equal_else_never_equal(u8),
     };
     const List = define_manually_managed_list_type(base_opts, ex_opts);
     var list = List.new_empty();
