@@ -20,7 +20,7 @@ pub fn build(b: *std.Build) void {
 
     //MAIN LIBRARY
 
-    const lib = b.addModule("ZigGulag", .{
+    const lib = b.addModule("Goolib", .{
         .root_source_file = b.path("src/_root.zig"),
         .target = target,
         .optimize = optimize,
@@ -46,7 +46,7 @@ pub fn build(b: *std.Build) void {
         .root_source_file = b.path("samples/breakout.zig"),
     });
     breakout.want_lto = optimize != .Debug;
-    breakout.root_module.addImport("ZigGulag", lib);
+    breakout.root_module.addImport("Goolib", lib);
     b.installArtifact(breakout);
 
     const run_breakout = b.addRunArtifact(breakout);

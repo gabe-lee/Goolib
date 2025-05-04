@@ -3,17 +3,20 @@ const std = @import("std");
 const sdl_log = std.log.scoped(.sdl);
 const app_log = std.log.scoped(.app);
 
-const Gulag = @import("ZigGulag");
-const SDL = Gulag.SDL3;
+const Goolib = @import("Goolib");
+const SDL = Goolib.SDL3;
+const AABB = Goolib.AABB2.define_aabb2_type(f32);
+const Rect = Goolib.Rect2.define_rect2_type(f32);
+const FVec: type = SDL.FVec;
+const IVec: type = SDL.IVec;
 
-const best_score_storage_org_name = "zig_gulag_samples";
+const best_score_storage_org_name = "goolib_samples";
 const best_score_storage_app_name = "breakout";
 const best_score_storage_file_name = "best_score";
 var fully_initialized = false;
-const window_w = 640;
-const window_h = 480;
-var window: SDL.Window = undefined;
-var renderer: SDL.Renderer = undefined;
+const window_size: IVec = IVec.new(640, 480);
+var window: *SDL.Window = undefined;
+var renderer: *SDL.Renderer = undefined;
 var sprite_texture: *SDL.Texture = undefined;
 var sounds_spec: SDL.AudioSpec = undefined;
 var sounds_data: []u8 = undefined;
@@ -28,9 +31,9 @@ var prev_vcon: VirtualControllerState = undefined;
 var best_score: u32 = undefined;
 var timekeeper: Timekeeper = undefined;
 
-// var paddle: Paddle = undefined;
-// var ball: Ball = undefined;
-// var bricks: std.BoundedArray(Brick, 100) = undefined;
+var paddle: Paddle = undefined;
+var ball: Ball = undefined;
+var bricks: std.BoundedArray(Brick, 100) = undefined;
 
 var score: u32 = undefined;
 var score_color: [3]u8 = undefined;
@@ -39,25 +42,134 @@ pub fn main() !void {
     std.debug.print("test\n", .{});
 }
 
+pub fn app_init(app_state: ?*?*anyopaque, argv: [][*:0]u8) !SDL.AppResult {
+    _ = app_state;
+    _ = argv;
+
+    sdl_log.debug("SDL build time version: {d}.{d}.{d}", .{
+        SDL.Meta.BUILD_MAJOR_VERSION,
+        SDL.Meta.BUILD_MINOR_VERSION,
+        SDL.Meta.BUILD_MICRO_VERSION,
+    });
+    sdl_log.debug("SDL build time revision: {s}", .{SDL.Meta.BUILD_REVISION});
+    {
+        const version = SDL.Meta.get_version();
+        sdl_log.debug("SDL runtime version: {d}.{d}.{d}", .{
+            SDL.Meta.RUNTIME_MAJOR_VERSION(version),
+            SDL.Meta.RUNTIME_MINOR_VERSION(version),
+            SDL.Meta.RUNTIME_MICRO_VERSION(version),
+        });
+        const revision: [*:0]const u8 = SDL.Meta.runtime_revision();
+        sdl_log.debug("SDL runtime revision: {s}", .{revision});
+    }
+
+    try SDL.App.set_metadata("Breakout Sample", "0.0.0", "sample.goolib.breakout");
+    try SDL.App.init(SDL.InitFlags.new(.{ .VIDEO, .AUDIO, .GAMEPAD }));
+
+    sdl_log.debug("SDL video drivers: {}", .{fmt_sdl_drivers(
+        SDL.get_current_video_driver().?,
+        SDL.get_num_video_drivers(),
+        SDL.get_video_driver,
+    )});
+    sdl_log.debug("SDL audio drivers: {}", .{fmt_sdl_drivers(
+        SDL.get_current_audio_driver().?,
+        SDL.get_num_audio_drivers(),
+        SDL.get_audio_driver,
+    )});
+
+    SDL.set_hint(SDL.HINT.RENDER_VSYNC, "1") catch {};
+
+    window = try SDL.Window.create(.{ .title = "Breakout Sample", .size = window_size });
+    errdefer window.destroy();
+    renderer = try window.create_renderer("main_window_renderer");
+    errdefer renderer.destroy();
+
+    sdl_log.debug("SDL render drivers: {}", .{fmt_sdl_drivers(
+        try renderer.get_name(),
+        SDL.Renderer.get_driver_count(),
+        SDL.Renderer.get_driver_name,
+    )});
+
+    {
+        const stream: *c.SDL_IOStream = try errify(c.SDL_IOFromConstMem(sprites.bmp, sprites.bmp.len));
+        const surface: *c.SDL_Surface = try errify(c.SDL_LoadBMP_IO(stream, true));
+        defer c.SDL_DestroySurface(surface);
+
+        sprites_texture = try errify(c.SDL_CreateTextureFromSurface(renderer, surface));
+        errdefer comptime unreachable;
+    }
+    errdefer c.SDL_DestroyTexture(sprites_texture);
+
+    {
+        const stream: *c.SDL_IOStream = try errify(c.SDL_IOFromConstMem(sounds.wav, sounds.wav.len));
+        var data_ptr: ?[*]u8 = undefined;
+        var data_len: u32 = undefined;
+        try errify(c.SDL_LoadWAV_IO(stream, true, &sounds_spec, &data_ptr, &data_len));
+        errdefer comptime unreachable;
+
+        sounds_data = data_ptr.?[0..data_len];
+    }
+    errdefer c.SDL_free(sounds_data.ptr);
+
+    audio_device = try errify(c.SDL_OpenAudioDevice(c.SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, &sounds_spec));
+    errdefer c.SDL_CloseAudioDevice(audio_device);
+
+    errdefer while (audio_streams.len != 0) {
+        c.SDL_DestroyAudioStream(audio_streams[audio_streams.len - 1]);
+        audio_streams.len -= 1;
+    };
+    while (audio_streams.len < audio_streams_buf.len) {
+        audio_streams.len += 1;
+        audio_streams[audio_streams.len - 1] = try errify(c.SDL_CreateAudioStream(&sounds_spec, null));
+    }
+
+    try errify(c.SDL_BindAudioStreams(audio_device, @ptrCast(audio_streams.ptr), @intCast(audio_streams.len)));
+
+    {
+        var count: c_int = 0;
+        const gamepads: [*]c.SDL_JoystickID = try errify(c.SDL_GetGamepads(&count));
+        defer c.SDL_free(gamepads);
+
+        gamepad = if (count > 0) try errify(c.SDL_OpenGamepad(gamepads[0])) else null;
+    }
+    errdefer c.SDL_CloseGamepad(gamepad);
+
+    phcon = .{};
+    prev_phcon = phcon;
+    vcon = .{};
+    prev_vcon = vcon;
+
+    try loadBestScore();
+
+    timekeeper = .{ .tocks_per_s = c.SDL_GetPerformanceFrequency() };
+
+    try resetGame();
+
+    fully_initialized = true;
+    errdefer comptime unreachable;
+
+    return c.SDL_APP_CONTINUE;
+}
+
 const Sprites = struct {
     const bmp = @embedFile("sprites.bmp");
 
     // zig fmt: off
-    const brick_2x1_purple = SDL.FRect2{ .x =   1, .y =  1, .w = 64, .h = 32 };
-    const brick_1x1_purple = SDL.FRect2{ .x =  67, .y =  1, .w = 32, .h = 32 };
-    const brick_2x1_red    = SDL.FRect2{ .x = 101, .y =  1, .w = 64, .h = 32 };
-    const brick_1x1_red    = SDL.FRect2{ .x = 167, .y =  1, .w = 32, .h = 32 };
-    const brick_2x1_yellow = SDL.FRect2{ .x =   1, .y = 35, .w = 64, .h = 32 };
-    const brick_1x1_yellow = SDL.FRect2{ .x =  67, .y = 35, .w = 32, .h = 32 };
-    const brick_2x1_green  = SDL.FRect2{ .x = 101, .y = 35, .w = 64, .h = 32 };
-    const brick_1x1_green  = SDL.FRect2{ .x = 167, .y = 35, .w = 32, .h = 32 };
-    const brick_2x1_blue   = SDL.FRect2{ .x =   1, .y = 69, .w = 64, .h = 32 };
-    const brick_1x1_blue   = SDL.FRect2{ .x =  67, .y = 69, .w = 32, .h = 32 };
-    const brick_2x1_gray   = SDL.FRect2{ .x = 101, .y = 69, .w = 64, .h = 32 };
-    const brick_1x1_gray   = SDL.FRect2{ .x = 167, .y = 69, .w = 32, .h = 32 };
+    const brick_2x1_purple = SDL.FRect{ .x =   1, .y =  1, .w = 64, .h = 32 };
+    const brick_1x1_purple = SDL.FRect{ .x =  67, .y =  1, .w = 32, .h = 32 };
+    const brick_2x1_red    = SDL.FRect{ .x = 101, .y =  1, .w = 64, .h = 32 };
+    const brick_1x1_red    = SDL.FRect{ .x = 167, .y =  1, .w = 32, .h = 32 };
+    const brick_2x1_yellow = SDL.FRect{ .x =   1, .y = 35, .w = 64, .h = 32 };
+    const brick_1x1_yellow = SDL.FRect{ .x =  67, .y = 35, .w = 32, .h = 32 };
+    const brick_2x1_green  = SDL.FRect{ .x = 101, .y = 35, .w = 64, .h = 32 };
+    const brick_1x1_green  = SDL.FRect{ .x = 167, .y = 35, .w = 32, .h = 32 };
+    const brick_2x1_blue   = SDL.FRect{ .x =   1, .y = 69, .w = 64, .h = 32 };
+    const brick_1x1_blue   = SDL.FRect{ .x =  67, .y = 69, .w = 32, .h = 32 };
+    const brick_2x1_gray   = SDL.FRect{ .x = 101, .y = 69, .w = 64, .h = 32 };
+    const brick_1x1_gray   = SDL.FRect{ .x = 167, .y = 69, .w = 32, .h = 32 };
  
-    const ball             = SDL.FRect2{ .x =  2, .y = 104, .w =  22, .h = 22 };
-    const paddle           = SDL.FRect2{ .x = 27, .y = 103, .w = 104, .h = 24 };
+    const ball             = SDL.FRect{ .x =  2, .y = 104, .w =  22, .h = 22 };
+    const paddle           = SDL.FRect{ .x = 27, .y = 103, .w = 104, .h = 24 };
     // zig fmt: on
 };
 
@@ -153,32 +265,18 @@ const Timekeeper = struct {
 };
 
 const Paddle = struct {
-    box: Box,
-    src_rect: *const SDL.FRect2,
+    box: Rect,
+    src_rect: *const Rect,
 };
 
-const Box = struct {
-    x: f32,
-    y: f32,
-    w: f32,
-    h: f32,
+const Collision = struct {
+    t: f32,
+    sign_x: f32,
+    sign_y: f32,
 
-    fn intersects(a: Box, b: Box) bool {
-        const min_x = b.x - a.w;
-        const max_x = b.x + b.w;
-        if (a.x > min_x and a.x < max_x) {
-            const min_y = b.y - a.h;
-            const max_y = b.y + b.h;
-            if (a.y > min_y and a.y < max_y) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    fn sweep_test(a: Box, a_vel_x: f32, a_vel_y: f32, b: Box, b_vel_x: f32, b_vel_y: f32) ?Collision {
-        const vel_x_inv = 1 / (a_vel_x - b_vel_x);
-        const vel_y_inv = 1 / (a_vel_y - b_vel_y);
+    fn sweep_test(a: Rect, a_vel: FVec, b: Rect, b_vel: FVec) ?Collision {
+        const vel_x_inv = 1 / (a_vel.x - b_vel.x);
+        const vel_y_inv = 1 / (a_vel.y - b_vel.y);
         const min_x = b.x - a.w;
         const min_y = b.y - a.h;
         const max_x = b.x + b.w;
@@ -205,20 +303,13 @@ const Box = struct {
         }
         return null;
     }
-
-    const Collision = struct {
-        t: f32,
-        sign_x: f32,
-        sign_y: f32,
-    };
 };
 
 const Ball = struct {
-    box: Box,
-    vel_x: f32,
-    vel_y: f32,
+    box: Rect,
+    vel: FVec,
     launched: bool,
-    src_rect: *const SDL.FRect2,
+    src_rect: *const SDL.FRect,
 
     fn get_paddle_bounce_angle(ball_: Ball, paddle_: Paddle) f32 {
         const min_x = paddle_.box.x - ball_.box.w;
@@ -231,17 +322,20 @@ const Ball = struct {
 };
 
 const Brick = struct {
-    box: Box,
-    src_rect: *const SDL.FRect2,
+    box: Rect,
+    src_rect: *const SDL.FRect,
 };
 
-fn render_object(renderer_: *SDL.Renderer, texture: *SDL.Texture, src: *const SDL.FRect2, dst: Box) !void {
-    try c.SDL_RenderTexture(renderer_, texture, src, &.{
-        .x = dst.x,
-        .y = dst.y,
-        .w = dst.w,
-        .h = dst.h,
-    }));
+fn fmt_sdl_drivers(
+    current_driver: [*:0]const u8,
+    num_drivers: c_int,
+    getDriver: *const fn (c_int) callconv(.C) ?[*:0]const u8,
+) std.fmt.Formatter(fmt_sdl_drivers) {
+    return .{ .data = .{
+        .current_driver = current_driver,
+        .num_drivers = num_drivers,
+        .getDriver = getDriver,
+    } };
 }
 
 fn load_best_score() !void {

@@ -1730,7 +1730,7 @@ test "Does it basically work?" {
     const ex_opts = comptime ListOptionsExtended(base_opts){
         .default_sorting_algorithm = .QUICK_SORT_PIVOT_MEDIAN_OF_3_RANDOM,
         .default_sorting_compare_func = Compare.numeric_order_else_always_equal(u8),
-        .default_match_func = Compare.shallow_exactly_equal_else_never_equal(u8),
+        .default_match_func = Compare.shallow_equals_else_never_equal(u8),
     };
     const List = define_manually_managed_list_type(base_opts, ex_opts);
     var list = List.new_empty();
