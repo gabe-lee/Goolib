@@ -585,8 +585,11 @@ pub const IOStream = opaque {
     pub fn write_i64_be(self: *IOStream, val: i64) SDL3Error!void {
         return ok_or_failure(C.SDL_WriteS64BE(self.to_c(), val));
     }
-    pub fn copy_bmp_to_new_surface(self: *IOStream, close_stream: bool) SDL3Error!*Surface {
+    pub fn save_bmp_to_new_surface(self: *IOStream, close_stream: bool) SDL3Error!*Surface {
         return ptr_cast_or_failure(*Surface, C.SDL_LoadBMP_IO(self.to_c(), close_stream));
+    }
+    pub fn load_bmp_from_surface(self: *IOStream, surface: *Surface, close_stream: bool) SDL3Error!void {
+        return ok_or_failure(C.SDL_SaveBMP_IO(surface.to_c(), self.to_c(), close_stream));
     }
 };
 
@@ -1594,25 +1597,71 @@ pub const Surface = extern struct {
     refcount: c_int = 0,
     reserved: ?*anyopaque = null,
 
+    fn to_c(self: *Surface) *C.SDL_Surface {
+        return @ptrCast(@alignCast(self));
+    }
+
+    pub fn create_surface(size: IVec, format: PixelFormat) SDL3Error!*Surface {
+        return ptr_cast_or_failure(*Surface, C.SDL_CreateSurface(size.x, size.y, format));
+    }
+    pub fn create_surface_from(size: IVec, format: PixelFormat, pixel_data: [*]u8, bytes_per_row: c_int) SDL3Error!*Surface {
+        return ptr_cast_or_failure(*Surface, C.SDL_CreateSurface(size.x, size.y, format, @ptrCast(@alignCast(pixel_data)), bytes_per_row));
+    }
+    pub fn destroy(self: *Surface) void {
+        C.SDL_DestroySurface(self.to_c());
+    }
+    pub fn get_properties(self: *Surface) SDL3Error!PropertiesID {
+        return PropertiesID{ .id = try nonzero_or_null(C.SDL_GetSurfaceProperties(self.to_c())) };
+    }
+    pub fn set_colorspace(self: *Surface, colorspace: Colorspace) SDL3Error!void {
+        try ok_or_failure(C.SDL_SetSurfaceColorspace(self.to_c(), colorspace.to_c()));
+    }
+    pub fn get_colorspace(self: *Surface) Colorspace {
+        C.SDL_GetSurfaceColorspace(self.to_c());
+    }
+    pub fn create_color_palette(self: *Surface) SDL3Error!*ColorPalette {
+        return ptr_cast_or_failure(*ColorPalette, C.SDL_CreateSurfacePalette(self.to_c()));
+    }
+    pub fn set_color_palette(self: *Surface, palette: ColorPalette) SDL3Error!void {
+        try ok_or_failure(C.SDL_SetSurfacePalette(self.to_c(), palette.to_c()));
+    }
+    pub fn get_color_palette(self: *Surface) SDL3Error!*ColorPalette {
+        return ptr_cast_or_null(*ColorPalette, C.SDL_GetSurfacePalette(self.to_c()));
+    }
+    pub fn add_alternate_surface(self: *Surface, alternate: *Surface) SDL3Error!void {
+        try ok_or_failure(C.SDL_AddSurfaceAlternateImage(self.to_c(), alternate.to_c()));
+    }
+    pub fn has_alternate_surfaces(self: *Surface) bool {
+        return C.SDL_SurfaceHasAlternateImages(self.to_c());
+    }
+    pub fn get_all_alternate_surfaces(self: *Surface) SDL3Error!SurfaceList {
+        var len: c_int = 0;
+        const ptr = try ptr_cast_or_null([*]*Surface, C.SDL_GetSurfaceImages(self.to_c(), &len));
+        return SurfaceList{ .list = ptr[0..len] };
+    }
+    pub fn remove_all_alternate_surfaces(self: *Surface) SDL3Error!void {
+        return ok_or_failure(C.SDL_RemoveSurfaceAlternateImages(self.to_c()));
+    }
+    pub fn lock(self: *Surface) SDL3Error!void {
+        return ok_or_failure(C.SDL_LockSurface(self.to_c()));
+    }
+    pub fn unlock(self: *Surface) SDL3Error!void {
+        return ok_or_failure(C.SDL_UnlockSurface(self.to_c()));
+    }
+    pub fn load_from_bmp_file(bmp_path: [*:0]const u8) SDL3Error!*Surface {
+        return ptr_cast_or_failure(*Surface, C.SDL_LoadBMP(bmp_path));
+    }
+    pub fn save_to_bmp_file(self: *Surface, bmp_path: [*:0]const u8) SDL3Error!void {
+        return ok_or_failure(C.SDL_SaveBMP(self.to_c(), bmp_path));
+    }
+    pub fn load_from_bmp_iostream(stream: *IOStream, close_stream: bool) SDL3Error!*Surface {
+        return ptr_cast_or_failure(*Surface, C.SDL_LoadBMP_IO(stream.to_c(), close_stream));
+    }
+    pub fn save_to_bmp_iostream(self: *Surface, stream: *IOStream, close_stream: bool) SDL3Error!void {
+        return ok_or_failure(C.SDL_SaveBMP_IO(self.to_c(), stream.to_c(), close_stream));
+    }
     //CHECKPOINT finish these funcs
-    // pub extern fn SDL_CreateSurface(width: c_int, height: c_int, format: SDL_PixelFormat) [*c]SDL_Surface;
-    // pub extern fn SDL_CreateSurfaceFrom(width: c_int, height: c_int, format: SDL_PixelFormat, pixels: ?*anyopaque, pitch: c_int) [*c]SDL_Surface;
-    // pub extern fn SDL_DestroySurface(surface: [*c]SDL_Surface) void;
-    // pub extern fn SDL_GetSurfaceProperties(surface: [*c]SDL_Surface) SDL_PropertiesID;
-    // pub extern fn SDL_SetSurfaceColorspace(surface: [*c]SDL_Surface, colorspace: SDL_Colorspace) bool;
-    // pub extern fn SDL_GetSurfaceColorspace(surface: [*c]SDL_Surface) SDL_Colorspace;
-    // pub extern fn SDL_CreateSurfacePalette(surface: [*c]SDL_Surface) [*c]SDL_Palette;
-    // pub extern fn SDL_SetSurfacePalette(surface: [*c]SDL_Surface, palette: [*c]SDL_Palette) bool;
-    // pub extern fn SDL_GetSurfacePalette(surface: [*c]SDL_Surface) [*c]SDL_Palette;
-    // pub extern fn SDL_AddSurfaceAlternateImage(surface: [*c]SDL_Surface, image: [*c]SDL_Surface) bool;
-    // pub extern fn SDL_SurfaceHasAlternateImages(surface: [*c]SDL_Surface) bool;
-    // pub extern fn SDL_GetSurfaceImages(surface: [*c]SDL_Surface, count: [*c]c_int) [*c][*c]SDL_Surface;
-    // pub extern fn SDL_RemoveSurfaceAlternateImages(surface: [*c]SDL_Surface) void;
-    // pub extern fn SDL_LockSurface(surface: [*c]SDL_Surface) bool;
-    // pub extern fn SDL_UnlockSurface(surface: [*c]SDL_Surface) void;
-    // pub extern fn SDL_LoadBMP(file: [*c]const u8) [*c]SDL_Surface;
-    // pub extern fn SDL_SaveBMP_IO(surface: [*c]SDL_Surface, dst: ?*SDL_IOStream, closeio: bool) bool;
-    // pub extern fn SDL_SaveBMP(surface: [*c]SDL_Surface, file: [*c]const u8) bool;
+
     // pub extern fn SDL_SetSurfaceRLE(surface: [*c]SDL_Surface, enabled: bool) bool;
     // pub extern fn SDL_SurfaceHasRLE(surface: [*c]SDL_Surface) bool;
     // pub extern fn SDL_SetSurfaceColorKey(surface: [*c]SDL_Surface, enabled: bool, key: Uint32) bool;
@@ -1652,6 +1701,58 @@ pub const Surface = extern struct {
     // pub extern fn SDL_ReadSurfacePixelFloat(surface: [*c]SDL_Surface, x: c_int, y: c_int, r: [*c]f32, g: [*c]f32, b: [*c]f32, a: [*c]f32) bool;
     // pub extern fn SDL_WriteSurfacePixel(surface: [*c]SDL_Surface, x: c_int, y: c_int, r: Uint8, g: Uint8, b: Uint8, a: Uint8) bool;
     // pub extern fn SDL_WriteSurfacePixelFloat(surface: [*c]SDL_Surface, x: c_int, y: c_int, r: f32, g: f32, b: f32, a: f32) bool;
+};
+
+pub const SurfaceList = extern struct {
+    list: []*Surface,
+
+    pub fn free(self: SurfaceList) void {
+        sdl_free(self.list.ptr);
+    }
+};
+
+pub const ColorPalette = opaque {
+    fn to_c(self: *ColorPalette) *C.SDL_Palette {
+        return @ptrCast(@alignCast(self));
+    }
+
+    pub fn colors(self: *ColorPalette) []const IColor_RGBA {
+        const c = self.to_c();
+        const ptr: ?[*]C.SDL_Color = c.colors;
+        if (ptr) |good_ptr| {
+            return @as([*]const IColor_RGBA, @ptrCast(@alignCast(good_ptr)))[0..c.ncolors];
+        }
+        return &.{};
+    }
+    pub fn version(self: *ColorPalette) u32 {
+        return self.to_c().version;
+    }
+    pub fn refcount(self: *ColorPalette) c_int {
+        return self.to_c().refcount;
+    }
+};
+
+pub const Colorspace = enum(c_uint) {
+    UNKNOWN = C.SDL_COLORSPACE_UNKNOWN,
+    SRGB = C.SDL_COLORSPACE_SRGB,
+    SRGB_LINEAR = C.SDL_COLORSPACE_SRGB_LINEAR,
+    HDR10 = C.SDL_COLORSPACE_HDR10,
+    JPEG = C.SDL_COLORSPACE_JPEG,
+    BT601_LIMITED = C.SDL_COLORSPACE_BT601_LIMITED,
+    BT601_FULL = C.SDL_COLORSPACE_BT601_FULL,
+    BT709_LIMITED = C.SDL_COLORSPACE_BT709_LIMITED,
+    BT709_FULL = C.SDL_COLORSPACE_BT709_FULL,
+    BT2020_LIMITED = C.SDL_COLORSPACE_BT2020_LIMITED,
+    BT2020_FULL = C.SDL_COLORSPACE_BT2020_FULL,
+    RGB_DEFAULT = C.SDL_COLORSPACE_RGB_DEFAULT,
+    YUV_DEFAULT = C.SDL_COLORSPACE_YUV_DEFAULT,
+
+    fn to_c(self: Colorspace) c_uint {
+        return @intFromEnum(self);
+    }
+    fn from_c(val: c_uint) Colorspace {
+        return @enumFromInt(val);
+    }
 };
 
 pub const SurfaceFlags = extern struct {
@@ -1933,7 +2034,7 @@ pub const AppResult = enum(c_uint) {
     fn to_c(self: AppResult) c_uint {
         return @intFromEnum(self);
     }
-    fn from_c(val: AppResult) IndexType {
+    fn from_c(val: c_uint) AppResult {
         return @enumFromInt(val);
     }
 };
