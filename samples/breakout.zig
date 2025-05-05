@@ -9,6 +9,8 @@ const AABB = Goolib.AABB2.define_aabb2_type(f32);
 const Rect = Goolib.Rect2.define_rect2_type(f32);
 const FVec: type = SDL.FVec;
 const IVec: type = SDL.IVec;
+const c_strings_equal = Goolib.Utils.c_strings_equal;
+const ansi = Goolib.ANSI.ansi;
 
 const best_score_storage_org_name = "goolib_samples";
 const best_score_storage_app_name = "breakout";
@@ -46,6 +48,8 @@ pub fn app_init(app_state: ?*?*anyopaque, argv: [][*:0]u8) !SDL.AppResult {
     _ = app_state;
     _ = argv;
 
+    var write_buf = std.BoundedArray(u8, 200).init(0);
+
     sdl_log.debug("SDL build time version: {d}.{d}.{d}", .{
         SDL.Meta.BUILD_MAJOR_VERSION,
         SDL.Meta.BUILD_MINOR_VERSION,
@@ -65,13 +69,16 @@ pub fn app_init(app_state: ?*?*anyopaque, argv: [][*:0]u8) !SDL.AppResult {
 
     try SDL.App.set_metadata("Breakout Sample", "0.0.0", "sample.goolib.breakout");
     try SDL.App.init(SDL.InitFlags.new(.{ .VIDEO, .AUDIO, .GAMEPAD }));
-
-    sdl_log.debug("SDL video drivers: {}", .{fmt_sdl_drivers(
+    write_buf.clear();
+    sdl_log.debug("SDL video drivers: {s}", .{fmt_sdl_drivers(
+        &write_buf,
         SDL.get_current_video_driver().?,
         SDL.get_num_video_drivers(),
         SDL.get_video_driver,
     )});
-    sdl_log.debug("SDL audio drivers: {}", .{fmt_sdl_drivers(
+    write_buf.clear();
+    sdl_log.debug("SDL audio drivers: {s}", .{fmt_sdl_drivers(
+        &write_buf,
         SDL.get_current_audio_driver().?,
         SDL.get_num_audio_drivers(),
         SDL.get_audio_driver,
@@ -84,16 +91,17 @@ pub fn app_init(app_state: ?*?*anyopaque, argv: [][*:0]u8) !SDL.AppResult {
     renderer = try window.create_renderer("main_window_renderer");
     errdefer renderer.destroy();
 
-    sdl_log.debug("SDL render drivers: {}", .{fmt_sdl_drivers(
+    write_buf.clear();
+    sdl_log.debug("SDL render drivers: {s}", .{fmt_sdl_drivers(
         try renderer.get_name(),
         SDL.Renderer.get_driver_count(),
         SDL.Renderer.get_driver_name,
     )});
 
     {
-        const stream: *c.SDL_IOStream = try errify(c.SDL_IOFromConstMem(sprites.bmp, sprites.bmp.len));
-        const surface: *c.SDL_Surface = try errify(c.SDL_LoadBMP_IO(stream, true));
-        defer c.SDL_DestroySurface(surface);
+        const stream = try SDL.IOStream.from_const_mem(Sprites.bmp[0..Sprites.bmp.len]);
+        const surface = try stream.copy_bmp_to_new_surface(true);
+        defer (surface);
 
         sprites_texture = try errify(c.SDL_CreateTextureFromSurface(renderer, surface));
         errdefer comptime unreachable;
@@ -326,16 +334,17 @@ const Brick = struct {
     src_rect: *const SDL.FRect,
 };
 
-fn fmt_sdl_drivers(
-    current_driver: [*:0]const u8,
-    num_drivers: c_int,
-    getDriver: *const fn (c_int) callconv(.C) ?[*:0]const u8,
-) std.fmt.Formatter(fmt_sdl_drivers) {
-    return .{ .data = .{
-        .current_driver = current_driver,
-        .num_drivers = num_drivers,
-        .getDriver = getDriver,
-    } };
+fn fmt_sdl_drivers(write_buf: *std.BoundedArray(u8, 250), current_driver: [*:0]const u8, num_drivers: c_int, get_driver: *const fn (c_int) SDL.SDL3Error![*:0]const u8) SDL.SDL3Error![]const u8 {
+    var writer = write_buf.writer();
+    var i: c_int = 0;
+    while (i < num_drivers) : (i += 1) {
+        const driver_name = try get_driver(i);
+        const is_current = c_strings_equal(driver_name, current_driver);
+        if (is_current) writer.write(ansi(.{.FG_GREEN}));
+        writer.print("\n\t({d}) {s}", .{ i, driver_name });
+        if (is_current) writer.write(ansi(.{.RESET}));
+    }
+    return write_buf.slice();
 }
 
 fn load_best_score() !void {

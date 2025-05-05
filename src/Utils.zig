@@ -84,3 +84,11 @@ pub fn make_const_slice_from_sentinel_ptr(comptime T: type, comptime S: T, ptr: 
     while (ptr[i] != S) : (i += 1) {}
     return ptr[0..i :S];
 }
+
+pub fn c_strings_equal(a: [*:0]const u8, b: [*:0]const u8) bool {
+    var i: usize = 0;
+    while (true) : (i += 1) {
+        if (a[i] != b[i]) return false;
+        if (a[i] == '0') return true;
+    }
+}
