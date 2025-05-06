@@ -627,16 +627,70 @@ pub const IOMode = enum(u8) {
     };
 };
 
-pub const NinePatch = extern struct {
-    rect: ?*const FRect = null,
+pub const FNinePatch = extern struct {
+    rect_ptr: ?*const FRect = null,
     left: f32 = 0,
     right: f32 = 0,
     top: f32 = 0,
     bottom: f32 = 0,
+
+    pub fn rect(r: *const FRect, left: f32, right: f32, top: f32, bottom: f32) FNinePatch {
+        return FNinePatch{
+            .rect_ptr = r,
+            .left = left,
+            .right = right,
+            .top = top,
+            .bottom = bottom,
+        };
+    }
+    pub fn entire_area(left: f32, right: f32, top: f32, bottom: f32) FNinePatch {
+        return FNinePatch{
+            .rect_ptr = null,
+            .left = left,
+            .right = right,
+            .top = top,
+            .bottom = bottom,
+        };
+    }
+    pub inline fn rect_to_c(self: FNinePatch) ?*C.SDL_FRect {
+        return @ptrCast(@alignCast(self.rect_ptr));
+    }
+};
+
+pub const INinePatch = extern struct {
+    rect_ptr: ?*const IRect = null,
+    left: c_int = 0,
+    right: c_int = 0,
+    top: c_int = 0,
+    bottom: c_int = 0,
+
+    pub fn rect(r: *const IRect, left: c_int, right: c_int, top: c_int, bottom: c_int) INinePatch {
+        return INinePatch{
+            .rect_ptr = r,
+            .left = left,
+            .right = right,
+            .top = top,
+            .bottom = bottom,
+        };
+    }
+    pub fn entire_area(left: c_int, right: c_int, top: c_int, bottom: c_int) INinePatch {
+        return INinePatch{
+            .rect_ptr = null,
+            .left = left,
+            .right = right,
+            .top = top,
+            .bottom = bottom,
+        };
+    }
+    pub inline fn rect_to_c(self: INinePatch) ?*C.SDL_Rect {
+        return @ptrCast(@alignCast(self.rect_ptr));
+    }
 };
 
 pub const PropertiesID = struct {
     id: C.SDL_PropertiesID = 0,
+
+    pub const NULL = PropertiesID{ .id = 0 };
 
     // pub extern fn SDL_GetGlobalProperties() SDL_PropertiesID;
     // pub extern fn SDL_CreateProperties() SDL_PropertiesID;
@@ -1008,7 +1062,7 @@ pub const FlipMode = enum(c_uint) {
     NONE = C.SDL_FLIP_NONE,
     HORIZONTAL = C.SDL_FLIP_HORIZONTAL,
     VERTICAL = C.SDL_FLIP_VERTICAL,
-    HORIZ_VERT = C.SDL_FLIP_HORIZONTAL | C.SDL_FLIP_VERTICAL,
+    // HORIZ_VERT = C.SDL_FLIP_HORIZONTAL | C.SDL_FLIP_VERTICAL,
 
     fn to_c(self: FlipMode) c_uint {
         return @intFromEnum(self);
@@ -1660,41 +1714,107 @@ pub const Surface = extern struct {
     pub fn save_to_bmp_iostream(self: *Surface, stream: *IOStream, close_stream: bool) SDL3Error!void {
         return ok_or_failure(C.SDL_SaveBMP_IO(self.to_c(), stream.to_c(), close_stream));
     }
+    pub fn set_RLE(self: *Surface, state: bool) SDL3Error!void {
+        return ok_or_failure(C.SDL_SetSurfaceRLE(self.to_c(), state));
+    }
+    pub fn is_RLE_set(self: *Surface) bool {
+        return ok_or_failure(C.SDL_SurfaceHasRLE(self.to_c()));
+    }
+    pub fn set_color_key(self: *Surface, state: bool, key: u32) SDL3Error!void {
+        return ok_or_failure(C.SDL_SetSurfaceColorKey(self.to_c(), state, key));
+    }
+    pub fn has_color_key(self: *Surface) bool {
+        return ok_or_failure(C.SDL_SurfaceHasColorKey(self.to_c()));
+    }
+    pub fn get_color_key(self: *Surface) SDL3Error!u32 {
+        var key: u32 = 0;
+        try ok_or_failure(C.SDL_GetSurfaceColorKey(self.to_c(), &key));
+        return key;
+    }
+    pub fn set_color_mod(self: *Surface, color: IColor_RGB) SDL3Error!void {
+        return ok_or_failure(C.SDL_SetSurfaceColorMod(self.to_c(), color.r, color.g, color.b));
+    }
+    pub fn get_color_mod(self: *Surface) SDL3Error!IColor_RGB {
+        var color: IColor_RGB = IColor_RGB{};
+        try ok_or_failure(C.SDL_GetSurfaceColorMod(self.to_c(), &color.r, &color.g, &color.b));
+        return color;
+    }
+    pub fn set_alpha_mod(self: *Surface, alpha: u8) SDL3Error!void {
+        return ok_or_failure(C.SDL_SetSurfaceAlphaMod(self.to_c(), alpha));
+    }
+    pub fn get_alpha_mod(self: *Surface) SDL3Error!u8 {
+        var alpha: u8 = 0;
+        try ok_or_failure(C.SDL_GetSurfaceColorMod(self.to_c(), &alpha));
+        return alpha;
+    }
+    pub fn set_blend_mode(self: *Surface, mode: BlendMode) SDL3Error!void {
+        return ok_or_failure(C.SDL_SetSurfaceBlendMode(self.to_c(), mode.mode));
+    }
+    pub fn get_blend_mode(self: *Surface) SDL3Error!BlendMode {
+        var mode: u32 = 0;
+        try ok_or_failure(C.SDL_GetSurfaceBlendMode(self.to_c(), &mode));
+        return BlendMode{ .mode = mode };
+    }
+    pub fn set_clip_rect(self: *Surface, rect: IRect) SDL3Error!void {
+        return ok_or_failure(C.SDL_SetSurfaceClipRect(self.to_c(), &rect));
+    }
+    pub fn get_clip_rect(self: *Surface) SDL3Error!IRect {
+        var rect = IRect{};
+        try ok_or_failure(C.SDL_GetSurfaceClipRect(self.to_c(), &rect));
+        return rect;
+    }
+    pub fn flip(self: *Surface, flip_mode: FlipMode) SDL3Error!void {
+        return ok_or_failure(C.SDL_FlipSurface(self.to_c(), flip_mode.to_c()));
+    }
+    pub fn duplicate(self: *Surface) SDL3Error!*Surface {
+        return ptr_cast_or_failure(*Surface, C.SDL_DuplicateSurface(self.to_c()));
+    }
+    pub fn scale_copy(self: *Surface, scale: Scale) SDL3Error!*Surface {
+        return ptr_cast_or_failure(*Surface, C.SDL_ScaleSurface(self.to_c(), scale.ratio.x, scale.ratio.y, scale.mode.to_c()));
+    }
+    pub fn convert_to_format(self: *Surface, format: PixelFormat) SDL3Error!*Surface {
+        return ptr_cast_or_failure(*Surface, C.SDL_ConvertSurface(self.to_c(), format.to_c()));
+    }
+    pub fn convert_to_format_and_colorspace(self: *Surface, format: PixelFormat, optional_palette: ?*ColorPalette, color_space: Colorspace, extra_color_props: PropertiesID) SDL3Error!*Surface {
+        return ptr_cast_or_failure(*Surface, C.SDL_ConvertSurface(self.to_c(), format.to_c(), @ptrCast(@alignCast(optional_palette)), color_space.to_c(), extra_color_props.id));
+    }
+    pub fn premultiply_alpha(self: *Surface, linear: bool) SDL3Error!void {
+        return ok_or_failure(C.SDL_PremultiplySurfaceAlpha(self.to_c(), linear));
+    }
+    pub fn clear(self: *Surface, color: FColor_RGBA) SDL3Error!void {
+        return ok_or_failure(C.SDL_ClearSurface(self.to_c(), color.r, color.g, color.b, color.a));
+    }
+    pub fn fill_rect(self: *Surface, rect: IRect, color: IColor_RGBA) SDL3Error!void {
+        return ok_or_failure(C.SDL_FillSurfaceRect(self.to_c(), @ptrCast(@alignCast(&rect)), color.to_raw_int()));
+    }
+    pub fn fill_many_rects(self: *Surface, rects: []const IRect, color: IColor_RGBA) SDL3Error!void {
+        return ok_or_failure(C.SDL_FillSurfaceRects(self.to_c(), @ptrCast(@alignCast(rects.ptr)), @intCast(rects.len), color.to_raw_int()));
+    }
+    pub fn blit_to(self: *Surface, area: IArea, dst: *Surface, dst_area: IArea) SDL3Error!void {
+        return ok_or_failure(C.SDL_BlitSurface(self.to_c(), area.to_c(), dst.to_c(), dst_area.to_c()));
+    }
+    pub fn blit_unchecked_to(self: *Surface, area: IArea, dst: *Surface, dst_area: IArea) SDL3Error!void {
+        return ok_or_failure(C.SDL_BlitSurfaceUnchecked(self.to_c(), area.to_c(), dst.to_c(), dst_area.to_c()));
+    }
+    pub fn blit_scaled_to(self: *Surface, area: IArea, dst: *Surface, dst_area: IArea, mode: ScaleMode) SDL3Error!void {
+        return ok_or_failure(C.SDL_BlitSurface(self.to_c(), area.to_c(), dst.to_c(), dst_area.to_c(), mode.to_c()));
+    }
+    pub fn blit_scaled_unchecked_to(self: *Surface, area: IArea, dst: *Surface, dst_area: IArea, mode: ScaleMode) SDL3Error!void {
+        return ok_or_failure(C.SDL_BlitSurfaceUnchecked(self.to_c(), area.to_c(), dst.to_c(), dst_area.to_c(), mode.to_c()));
+    }
+    pub fn copy_stretched_to(self: *Surface, area: IArea, dst: *Surface, dst_area: IArea, mode: ScaleMode) SDL3Error!void {
+        return ok_or_failure(C.SDL_StretchSurface(self.to_c(), area.to_c(), dst.to_c(), dst_area.to_c(), mode.to_c()));
+    }
+    pub fn blit_tiled_to(self: *Surface, area: IArea, dst: *Surface, dst_area: IArea) SDL3Error!void {
+        return ok_or_failure(C.SDL_BlitSurfaceTiled(self.to_c(), area.to_c(), dst.to_c(), dst_area.to_c()));
+    }
+    pub fn blit_tiled_scaled_to(self: *Surface, area: IArea, dst: *Surface, dst_area: IArea, scale_val: f32, mode: ScaleMode) SDL3Error!void {
+        return ok_or_failure(C.SDL_BlitSurfaceTiledWithScale(self.to_c(), area.to_c(), scale_val, mode.to_c(), dst.to_c(), dst_area.to_c()));
+    }
+    pub fn blit_nine_patch_to(self: *Surface, nine_patch: INinePatch, dst: *Surface, dst_area: IArea, scale: Scale) SDL3Error!void {
+        return ok_or_failure(C.SDL_BlitSurface9Grid(self.to_c(), nine_patch.rect_to_c(), nine_patch.left, nine_patch.right, nine_patch.top, nine_patch.bottom, scale.ratio, scale.mode.to_c(), dst.to_c(), dst_area.to_c()));
+    }
     //CHECKPOINT finish these funcs
-
-    // pub extern fn SDL_SetSurfaceRLE(surface: [*c]SDL_Surface, enabled: bool) bool;
-    // pub extern fn SDL_SurfaceHasRLE(surface: [*c]SDL_Surface) bool;
-    // pub extern fn SDL_SetSurfaceColorKey(surface: [*c]SDL_Surface, enabled: bool, key: Uint32) bool;
-    // pub extern fn SDL_SurfaceHasColorKey(surface: [*c]SDL_Surface) bool;
-    // pub extern fn SDL_GetSurfaceColorKey(surface: [*c]SDL_Surface, key: [*c]Uint32) bool;
-    // pub extern fn SDL_SetSurfaceColorMod(surface: [*c]SDL_Surface, r: Uint8, g: Uint8, b: Uint8) bool;
-    // pub extern fn SDL_GetSurfaceColorMod(surface: [*c]SDL_Surface, r: [*c]Uint8, g: [*c]Uint8, b: [*c]Uint8) bool;
-    // pub extern fn SDL_SetSurfaceAlphaMod(surface: [*c]SDL_Surface, alpha: Uint8) bool;
-    // pub extern fn SDL_GetSurfaceAlphaMod(surface: [*c]SDL_Surface, alpha: [*c]Uint8) bool;
-    // pub extern fn SDL_SetSurfaceBlendMode(surface: [*c]SDL_Surface, blendMode: SDL_BlendMode) bool;
-    // pub extern fn SDL_GetSurfaceBlendMode(surface: [*c]SDL_Surface, blendMode: [*c]SDL_BlendMode) bool;
-    // pub extern fn SDL_SetSurfaceClipRect(surface: [*c]SDL_Surface, rect: [*c]const SDL_Rect) bool;
-    // pub extern fn SDL_GetSurfaceClipRect(surface: [*c]SDL_Surface, rect: [*c]SDL_Rect) bool;
-    // pub extern fn SDL_FlipSurface(surface: [*c]SDL_Surface, flip: SDL_FlipMode) bool;
-    // pub extern fn SDL_DuplicateSurface(surface: [*c]SDL_Surface) [*c]SDL_Surface;
-    // pub extern fn SDL_ScaleSurface(surface: [*c]SDL_Surface, width: c_int, height: c_int, scaleMode: SDL_ScaleMode) [*c]SDL_Surface;
-    // pub extern fn SDL_ConvertSurface(surface: [*c]SDL_Surface, format: SDL_PixelFormat) [*c]SDL_Surface;
-    // pub extern fn SDL_ConvertSurfaceAndColorspace(surface: [*c]SDL_Surface, format: SDL_PixelFormat, palette: [*c]SDL_Palette, colorspace: SDL_Colorspace, props: SDL_PropertiesID) [*c]SDL_Surface;
-    // pub extern fn SDL_ConvertPixels(width: c_int, height: c_int, src_format: SDL_PixelFormat, src: ?*const anyopaque, src_pitch: c_int, dst_format: SDL_PixelFormat, dst: ?*anyopaque, dst_pitch: c_int) bool;
-    // pub extern fn SDL_ConvertPixelsAndColorspace(width: c_int, height: c_int, src_format: SDL_PixelFormat, src_colorspace: SDL_Colorspace, src_properties: SDL_PropertiesID, src: ?*const anyopaque, src_pitch: c_int, dst_format: SDL_PixelFormat, dst_colorspace: SDL_Colorspace, dst_properties: SDL_PropertiesID, dst: ?*anyopaque, dst_pitch: c_int) bool;
-    // pub extern fn SDL_PremultiplyAlpha(width: c_int, height: c_int, src_format: SDL_PixelFormat, src: ?*const anyopaque, src_pitch: c_int, dst_format: SDL_PixelFormat, dst: ?*anyopaque, dst_pitch: c_int, linear: bool) bool;
-    // pub extern fn SDL_PremultiplySurfaceAlpha(surface: [*c]SDL_Surface, linear: bool) bool;
-    // pub extern fn SDL_ClearSurface(surface: [*c]SDL_Surface, r: f32, g: f32, b: f32, a: f32) bool;
-    // pub extern fn SDL_FillSurfaceRect(dst: [*c]SDL_Surface, rect: [*c]const SDL_Rect, color: Uint32) bool;
-    // pub extern fn SDL_FillSurfaceRects(dst: [*c]SDL_Surface, rects: [*c]const SDL_Rect, count: c_int, color: Uint32) bool;
-    // pub extern fn SDL_BlitSurface(src: [*c]SDL_Surface, srcrect: [*c]const SDL_Rect, dst: [*c]SDL_Surface, dstrect: [*c]const SDL_Rect) bool;
-    // pub extern fn SDL_BlitSurfaceUnchecked(src: [*c]SDL_Surface, srcrect: [*c]const SDL_Rect, dst: [*c]SDL_Surface, dstrect: [*c]const SDL_Rect) bool;
-    // pub extern fn SDL_BlitSurfaceScaled(src: [*c]SDL_Surface, srcrect: [*c]const SDL_Rect, dst: [*c]SDL_Surface, dstrect: [*c]const SDL_Rect, scaleMode: SDL_ScaleMode) bool;
-    // pub extern fn SDL_BlitSurfaceUncheckedScaled(src: [*c]SDL_Surface, srcrect: [*c]const SDL_Rect, dst: [*c]SDL_Surface, dstrect: [*c]const SDL_Rect, scaleMode: SDL_ScaleMode) bool;
-    // pub extern fn SDL_StretchSurface(src: [*c]SDL_Surface, srcrect: [*c]const SDL_Rect, dst: [*c]SDL_Surface, dstrect: [*c]const SDL_Rect, scaleMode: SDL_ScaleMode) bool;
-    // pub extern fn SDL_BlitSurfaceTiled(src: [*c]SDL_Surface, srcrect: [*c]const SDL_Rect, dst: [*c]SDL_Surface, dstrect: [*c]const SDL_Rect) bool;
-    // pub extern fn SDL_BlitSurfaceTiledWithScale(src: [*c]SDL_Surface, srcrect: [*c]const SDL_Rect, scale: f32, scaleMode: SDL_ScaleMode, dst: [*c]SDL_Surface, dstrect: [*c]const SDL_Rect) bool;
-    // pub extern fn SDL_BlitSurface9Grid(src: [*c]SDL_Surface, srcrect: [*c]const SDL_Rect, left_width: c_int, right_width: c_int, top_height: c_int, bottom_height: c_int, scale: f32, scaleMode: SDL_ScaleMode, dst: [*c]SDL_Surface, dstrect: [*c]const SDL_Rect) bool;
     // pub extern fn SDL_MapSurfaceRGB(surface: [*c]SDL_Surface, r: Uint8, g: Uint8, b: Uint8) Uint32;
     // pub extern fn SDL_MapSurfaceRGBA(surface: [*c]SDL_Surface, r: Uint8, g: Uint8, b: Uint8, a: Uint8) Uint32;
     // pub extern fn SDL_ReadSurfacePixel(surface: [*c]SDL_Surface, x: c_int, y: c_int, r: [*c]Uint8, g: [*c]Uint8, b: [*c]Uint8, a: [*c]Uint8) bool;
@@ -1702,6 +1822,79 @@ pub const Surface = extern struct {
     // pub extern fn SDL_WriteSurfacePixel(surface: [*c]SDL_Surface, x: c_int, y: c_int, r: Uint8, g: Uint8, b: Uint8, a: Uint8) bool;
     // pub extern fn SDL_WriteSurfacePixelFloat(surface: [*c]SDL_Surface, x: c_int, y: c_int, r: f32, g: f32, b: f32, a: f32) bool;
 };
+
+/// Helper struct for SDL functions that expect a `?*IRect` where:
+/// - `null` == use entire area
+/// - `*IRect` == use this rect area
+pub const IArea = extern struct {
+    rect_ptr: ?*IRect = null,
+
+    pub inline fn rect(r: *IRect) IArea {
+        return IArea{ .rect_ptr = r };
+    }
+    pub inline fn entire_area() IArea {
+        return ENTIRE_AREA;
+    }
+    pub const ENTIRE_AREA = IArea{ .rect_ptr = null };
+
+    inline fn to_c(self: *IArea) ?*C.SDL_Rect {
+        return @ptrCast(@alignCast(self.rect_ptr));
+    }
+};
+/// Helper struct for SDL functions that expect a `?*FRect` where:
+/// - `null` == use entire area
+/// - `*FRect` == use this rect area
+pub const FArea = extern struct {
+    rect_ptr: ?*FRect = null,
+
+    pub inline fn rect(r: *FRect) FArea {
+        return FArea{ .rect_ptr = r };
+    }
+    pub inline fn entire_area() FArea {
+        return ENTIRE_AREA;
+    }
+    pub const ENTIRE_AREA = FArea{ .rect_ptr = null };
+    inline fn to_c(self: *FArea) ?*C.SDL_FRect {
+        return @ptrCast(@alignCast(self.rect_ptr));
+    }
+};
+
+pub const Scale = extern struct {
+    ratio: f32 = 1.0,
+    mode: ScaleMode = .NEAREST,
+
+    pub inline fn none() Scale {
+        return Scale{ .ratio = 1.0, .mode = .NEAREST };
+    }
+    pub inline fn linear(ratio: f32) Scale {
+        return Scale{ .ratio = ratio, .mode = .LINEAR };
+    }
+    pub inline fn nearest(ratio: f32) Scale {
+        return Scale{ .ratio = ratio, .mode = .NEAREST };
+    }
+};
+
+pub const PixelRect = extern struct {
+    size: IVec,
+    ptr: [*]u8,
+    bytes_per_row: c_int,
+    pixel_format: PixelFormat,
+    color_space: Colorspace,
+    optional_color_properties: PropertiesID = PropertiesID.NULL,
+};
+
+pub fn convert_pixels(src: PixelRect, dst: PixelRect) SDL3Error!void {
+    assert(src.size.x == dst.size.x and src.size.y == dst.size.y);
+    return ok_or_failure(C.SDL_ConvertPixels(src.size.x, src.size.y, src.pixel_format.to_c(), src.ptr, src.bytes_per_row, dst.pixel_format.to_c(), dst.ptr, dst.bytes_per_row));
+}
+pub fn convert_pixels_and_colorspace(src: PixelRect, dst: PixelRect) SDL3Error!void {
+    assert(src.size.x == dst.size.x and src.size.y == dst.size.y);
+    return ok_or_failure(C.SDL_ConvertPixelsAndColorspace(src.size.x, src.size.y, src.pixel_format.to_c(), src.color_space.to_c(), src.optional_color_properties.id, src.ptr, src.bytes_per_row, dst.pixel_format.to_c(), dst.color_space.to_c(), dst.optional_color_properties.id, dst.ptr, dst.bytes_per_row));
+}
+pub fn premultiply_alpha(src: PixelRect, dst: PixelRect, linear: bool) SDL3Error!void {
+    assert(src.size.x == dst.size.x and src.size.y == dst.size.y);
+    return ok_or_failure(C.SDL_PremultiplyAlpha(src.size.x, src.size.y, src.pixel_format.to_c(), src.ptr, src.bytes_per_row, dst.pixel_format.to_c(), dst.ptr, dst.bytes_per_row, linear));
+}
 
 pub const SurfaceList = extern struct {
     list: []*Surface,
@@ -1949,7 +2142,7 @@ pub const Renderer = opaque {
     pub fn draw_texture_rect_tiled(self: *Renderer, texture: *Texture, tex_rect: ?*const FRect, tex_scale: f32, target_rect: ?*const FRect) SDL3Error!void {
         return ok_or_failure(C.SDL_RenderTextureTiled(self.to_c(), texture.to_c(), @ptrCast(@alignCast(tex_rect)), tex_scale, @ptrCast(@alignCast(target_rect))));
     }
-    pub fn draw_texture_rect_nine_patch(self: *Renderer, texture: *Texture, tex_nine_patch: NinePatch, edge_scale: f32, target_rect: ?*const FRect) SDL3Error!void {
+    pub fn draw_texture_rect_nine_patch(self: *Renderer, texture: *Texture, tex_nine_patch: FNinePatch, edge_scale: f32, target_rect: ?*const FRect) SDL3Error!void {
         return ok_or_failure(C.SDL_RenderTexture9Grid(self.to_c(), texture.to_c(), @ptrCast(@alignCast(tex_nine_patch.rect)), tex_nine_patch.left, tex_nine_patch.right, tex_nine_patch.top, tex_nine_patch.bottom, edge_scale, @ptrCast(@alignCast(target_rect))));
     }
     pub fn draw_vertices_as_triangles(self: *Renderer, texture: ?*Texture, vertices: []const Vertex) SDL3Error!void {
