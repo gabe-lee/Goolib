@@ -20,11 +20,10 @@ const window_size: IVec = IVec.new(640, 480);
 var window: *SDL.Window = undefined;
 var renderer: *SDL.Renderer = undefined;
 var sprite_texture: *SDL.Texture = undefined;
-var sounds_spec: SDL.AudioSpec = undefined;
-var sounds_data: []u8 = undefined;
+var sounds: SDL.WaveAudio = undefined;
 var audio_device: SDL.AudioDeviceID = undefined;
 var audio_streams_buf: [8]SDL.AudioStream = undefined;
-var audio_stream: []SDL.AudioStream = audio_streams_buf[0..0];
+var audio_streams: []SDL.AudioStream = audio_streams_buf[0..0];
 var gamepad: ?SDL.Gamepad = undefined;
 var phcon: PhysicalControllerState = undefined;
 var prev_phcon: PhysicalControllerState = undefined;
@@ -100,29 +99,26 @@ pub fn app_init(app_state: ?*?*anyopaque, argv: [][*:0]u8) !SDL.AppResult {
 
     {
         const stream = try SDL.IOStream.from_const_mem(Sprites.bmp[0..Sprites.bmp.len]);
-        const surface = try stream.copy_bmp_to_new_surface(true);
-        defer (surface);
+        const surface = try stream.save_bmp_to_new_surface(true);
+        defer surface.destroy();
 
-        sprites_texture = try errify(c.SDL_CreateTextureFromSurface(renderer, surface));
+        sprite_texture = try renderer.create_texture_from_surface(surface);
         errdefer comptime unreachable;
     }
-    errdefer c.SDL_DestroyTexture(sprites_texture);
+    errdefer sprite_texture.destroy();
 
     {
-        const stream: *c.SDL_IOStream = try errify(c.SDL_IOFromConstMem(sounds.wav, sounds.wav.len));
-        var data_ptr: ?[*]u8 = undefined;
-        var data_len: u32 = undefined;
-        try errify(c.SDL_LoadWAV_IO(stream, true, &sounds_spec, &data_ptr, &data_len));
+        const stream = SDL.IOStream.from_const_mem(Sounds.wav[0..Sounds.wav.len]);
+        sounds = try stream.load_wav(true);
         errdefer comptime unreachable;
-
-        sounds_data = data_ptr.?[0..data_len];
     }
-    errdefer c.SDL_free(sounds_data.ptr);
+    errdefer sounds.free();
 
-    audio_device = try errify(c.SDL_OpenAudioDevice(c.SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, &sounds_spec));
-    errdefer c.SDL_CloseAudioDevice(audio_device);
+    audio_device = try SDL.AudioDeviceID.DEFAULT_PLAYBACK_DEVICE.open_device(.spec(&sounds.spec));
+    errdefer audio_device.close_device();
 
     errdefer while (audio_streams.len != 0) {
+        audio_streams[audio_streams.len - 1].
         c.SDL_DestroyAudioStream(audio_streams[audio_streams.len - 1]);
         audio_streams.len -= 1;
     };

@@ -45,6 +45,30 @@ inline fn ok_or_failure(result: bool) SDL3Error!void {
     if (result) return;
     return SDL3Error.SDL_operation_failure;
 }
+inline fn nonempty_str_or_null(result: ?[*:0]u8) SDL3Error![*:0]u8 {
+    if (result) |ptr| {
+        if (ptr[0] != 0) return ptr;
+    }
+    return SDL3Error.SDL_null_value;
+}
+inline fn nonempty_str_or_failure(result: ?[*:0]u8) SDL3Error![*:0]u8 {
+    if (result) |ptr| {
+        if (ptr[0] != 0) return ptr;
+    }
+    return SDL3Error.SDL_operation_failure;
+}
+inline fn nonempty_const_str_or_null(result: ?[*:0]const u8) SDL3Error![*:0]const u8 {
+    if (result) |ptr| {
+        if (ptr[0] != 0) return ptr;
+    }
+    return SDL3Error.SDL_null_value;
+}
+inline fn nonempty_const_str_or_failure(result: ?[*:0]const u8) SDL3Error![*:0]const u8 {
+    if (result) |ptr| {
+        if (ptr[0] != 0) return ptr;
+    }
+    return SDL3Error.SDL_operation_failure;
+}
 
 pub const IRect = Root.Rect2.define_rect2_type(c_int);
 pub const FRect = Root.Rect2.define_rect2_type(f32);
@@ -55,6 +79,9 @@ pub const IColor_RGBA = Root.Color.define_color_rgba_type(u8);
 pub const FColor_RGBA = Root.Color.define_color_rgba_type(f32);
 pub const IColor_RGB = Root.Color.define_color_rgb_type(u8);
 pub const FColor_RGB = Root.Color.define_color_rgb_type(f32);
+pub const IColor_U32 = extern struct {
+    raw: u32,
+};
 
 pub fn sdl_free(mem: ?*anyopaque) void {
     C.SDL_free(mem);
@@ -350,7 +377,7 @@ pub const SeekRelativeTo = enum(c_uint) {
     RELATIVE_TO_CURRENT = C.SDL_IO_SEEK_CUR,
     RELATIVE_TO_END = C.SDL_IO_SEEK_END,
 
-    fn to_c(self: SeekRelativeTo) c_uint {
+    inline fn to_c(self: SeekRelativeTo) c_uint {
         return @intFromEnum(self);
     }
 };
@@ -363,7 +390,7 @@ pub const IOStatus = enum(c_uint) {
     READONLY = C.SDL_IO_STATUS_READONLY,
     WRITEONLY = C.SDL_IO_STATUS_WRITEONLY,
 
-    fn to_c(self: IOStatus) c_uint {
+    inline fn to_c(self: IOStatus) c_uint {
         return @intFromEnum(self);
     }
 };
@@ -415,7 +442,7 @@ pub const IOFile = extern struct {
 };
 
 pub const IOStream = opaque {
-    fn to_c(self: *IOStream) *C.SDL_IOStream {
+    inline fn to_c(self: *IOStream) *C.SDL_IOStream {
         return @ptrCast(@alignCast(self));
     }
 
@@ -591,6 +618,17 @@ pub const IOStream = opaque {
     pub fn load_bmp_from_surface(self: *IOStream, surface: *Surface, close_stream: bool) SDL3Error!void {
         return ok_or_failure(C.SDL_SaveBMP_IO(surface.to_c(), self.to_c(), close_stream));
     }
+    pub fn load_wav(self: *IOStream, close_stream: bool) SDL3Error!WaveAudio {
+        var ptr: [*]u8 = undefined;
+        var len: u32 = 0;
+        var spec: AudioSpec = undefined;
+        try ok_or_failure(C.SDL_LoadWAV_IO(self.to_c(), close_stream, @ptrCast(@alignCast(&spec)), &ptr, &len));
+        return WaveAudio{
+            .data = ptr[0..len],
+            .spec = spec,
+        };
+    }
+    // pub fn SDL_LoadWAV_IO(src: ?*SDL_IOStream, closeio: bool, spec: [*c]SDL_AudioSpec, audio_buf: [*c][*c]Uint8, audio_len: [*c]Uint32) bool;
 };
 
 pub const IOMode = enum(u8) {
@@ -607,7 +645,7 @@ pub const IOMode = enum(u8) {
     BinaryTruncateReadWrite = 10,
     BinaryAppendReadWrite = 11,
 
-    fn to_c(self: IOMode) [*:0]const u8 {
+    inline fn to_c(self: IOMode) [*:0]const u8 {
         return STR[@intFromEnum(self)];
     }
 
@@ -627,6 +665,20 @@ pub const IOMode = enum(u8) {
     };
 };
 
+pub const WaveAudio = extern struct {
+    data: []u8 = undefined,
+    spec: AudioSpec = undefined,
+
+    pub fn free(self: *WaveAudio) void {
+        sdl_free(self.data.ptr);
+    }
+};
+
+/// Helper struct for SDL functioons that require a `?*FRect` where:
+/// - `null` == use entire area
+/// - `*FRect` == use specific rect
+///
+/// As well as four values for edge widths
 pub const FNinePatch = extern struct {
     rect_ptr: ?*const FRect = null,
     left: f32 = 0,
@@ -657,6 +709,11 @@ pub const FNinePatch = extern struct {
     }
 };
 
+/// Helper struct for SDL functioons that require a `?*IRect` where:
+/// - `null` == use entire area
+/// - `*IRect` == use specific rect
+///
+/// As well as four values for edge widths
 pub const INinePatch = extern struct {
     rect_ptr: ?*const IRect = null,
     left: c_int = 0,
@@ -725,10 +782,10 @@ pub const PropertyType = enum(c_uint) {
     FLOAT = C.SDL_PROPERTY_TYPE_FLOAT,
     BOOLEAN = C.SDL_PROPERTY_TYPE_BOOLEAN,
 
-    fn to_c(self: PropertyType) c_uint {
+    inline fn to_c(self: PropertyType) c_uint {
         return @intFromEnum(self);
     }
-    fn from_c(val: c_uint) PropertyType {
+    inline fn from_c(val: c_uint) PropertyType {
         return @enumFromInt(val);
     }
 };
@@ -739,10 +796,10 @@ pub const InitStatus = enum(c_uint) {
     INIT = C.SDL_INIT_STATUS_INITIALIZED,
     UNINIT_IN_PROGRESS = C.SDL_INIT_STATUS_UNINITIALIZING,
 
-    fn to_c(self: InitStatus) c_uint {
+    inline fn to_c(self: InitStatus) c_uint {
         return @intFromEnum(self);
     }
-    fn from_c(val: c_uint) InitStatus {
+    inline fn from_c(val: c_uint) InitStatus {
         return @enumFromInt(val);
     }
 };
@@ -791,11 +848,38 @@ pub const AudioFormat = enum(c_uint) {
     S32 = C.SDL_AUDIO_S32,
     F32 = C.SDL_AUDIO_F32,
 
-    fn to_c(self: AudioFormat) c_uint {
+    inline fn to_c(self: AudioFormat) c_uint {
         return @intFromEnum(self);
     }
-    fn from_c(val: c_uint) AudioFormat {
+    inline fn from_c(val: c_uint) AudioFormat {
         return @enumFromInt(val);
+    }
+
+    pub fn bit_size(self: AudioFormat) c_uint {
+        return @intCast(C.SDL_AUDIO_BITSIZE(self.to_c()));
+    }
+
+    pub fn byte_size(self: AudioFormat) c_uint {
+        return @intCast(C.SDL_AUDIO_BYTESIZE(self.to_c()));
+    }
+
+    pub fn is_float(self: AudioFormat) bool {
+        return C.SDL_AUDIO_ISFLOAT(self.to_c()) > 0;
+    }
+    pub fn is_integer(self: AudioFormat) bool {
+        return C.SDL_AUDIO_ISFLOAT(self.to_c()) == 0;
+    }
+    pub fn is_big_endian(self: AudioFormat) bool {
+        return C.SDL_AUDIO_ISBIGENDIAN(self.to_c()) > 0;
+    }
+    pub fn is_little_endian(self: AudioFormat) bool {
+        return C.SDL_AUDIO_ISBIGENDIAN(self.to_c()) == 0;
+    }
+    pub fn is_signed(self: AudioFormat) bool {
+        return C.SDL_AUDIO_ISSIGNED(self.to_c()) > 0;
+    }
+    pub fn is_unsigned(self: AudioFormat) bool {
+        return C.SDL_AUDIO_ISSIGNED(self.to_c()) == 0;
     }
 };
 
@@ -806,10 +890,10 @@ pub const BlendOperation = enum(c_uint) {
     MINIMUM = C.SDL_BLENDOPERATION_MINIMUM,
     MAXIMUM = C.SDL_BLENDOPERATION_MAXIMUM,
 
-    fn to_c(self: BlendOperation) c_uint {
+    inline fn to_c(self: BlendOperation) c_uint {
         return @intFromEnum(self);
     }
-    fn from_c(val: c_uint) BlendOperation {
+    inline fn from_c(val: c_uint) BlendOperation {
         return @enumFromInt(val);
     }
 };
@@ -826,10 +910,10 @@ pub const BlendFactor = enum(c_uint) {
     DST_ALPHA = C.SDL_BLENDFACTOR_DST_ALPHA,
     ONE_MINUS_DST_ALPHA = C.SDL_BLENDFACTOR_ONE_MINUS_DST_ALPHA,
 
-    fn to_c(self: BlendFactor) c_uint {
+    inline fn to_c(self: BlendFactor) c_uint {
         return @intFromEnum(self);
     }
-    fn from_c(val: c_uint) BlendFactor {
+    inline fn from_c(val: c_uint) BlendFactor {
         return @enumFromInt(val);
     }
 };
@@ -849,10 +933,10 @@ pub const PixelType = enum(c_uint) {
     ARRAY_F16 = C.SDL_PIXELTYPE_ARRAYF16,
     ARRAY_F32 = C.SDL_PIXELTYPE_ARRAYF32,
 
-    fn to_c(self: PixelType) c_uint {
+    inline fn to_c(self: PixelType) c_uint {
         return @intFromEnum(self);
     }
-    fn from_c(val: c_uint) PixelType {
+    inline fn from_c(val: c_uint) PixelType {
         return @enumFromInt(val);
     }
 };
@@ -862,10 +946,10 @@ pub const BitmapOrder = enum(c_uint) {
     _4321 = C.SDL_BITMAPORDER_4321,
     _1234 = C.SDL_BITMAPORDER_1234,
 
-    fn to_c(self: BitmapOrder) c_uint {
+    inline fn to_c(self: BitmapOrder) c_uint {
         return @intFromEnum(self);
     }
-    fn from_c(val: c_uint) BitmapOrder {
+    inline fn from_c(val: c_uint) BitmapOrder {
         return @enumFromInt(val);
     }
 };
@@ -881,10 +965,10 @@ pub const PackedOrder = enum(c_uint) {
     ABGR = C.SDL_PACKEDORDER_ABGR,
     BGRA = C.SDL_PACKEDORDER_BGRA,
 
-    fn to_c(self: PackedOrder) c_uint {
+    inline fn to_c(self: PackedOrder) c_uint {
         return @intFromEnum(self);
     }
-    fn from_c(val: c_uint) PackedOrder {
+    inline fn from_c(val: c_uint) PackedOrder {
         return @enumFromInt(val);
     }
 };
@@ -898,10 +982,10 @@ pub const ArrayOrder = enum(c_uint) {
     BGRA = C.SDL_ARRAYORDER_BGRA,
     ABGR = C.SDL_ARRAYORDER_ABGR,
 
-    fn to_c(self: ArrayOrder) c_uint {
+    inline fn to_c(self: ArrayOrder) c_uint {
         return @intFromEnum(self);
     }
-    fn from_c(val: c_uint) ArrayOrder {
+    inline fn from_c(val: c_uint) ArrayOrder {
         return @enumFromInt(val);
     }
 };
@@ -917,10 +1001,10 @@ pub const PackedLayout = enum(c_uint) {
     _2101010 = C.SDL_PACKEDLAYOUT_2101010,
     _1010102 = C.SDL_PACKEDLAYOUT_1010102,
 
-    fn to_c(self: PackedLayout) c_uint {
+    inline fn to_c(self: PackedLayout) c_uint {
         return @intFromEnum(self);
     }
-    fn from_c(val: c_uint) PackedLayout {
+    inline fn from_c(val: c_uint) PackedLayout {
         return @enumFromInt(val);
     }
 };
@@ -1000,10 +1084,10 @@ pub const PixelFormat = enum(c_uint) {
     BGRX_32 = C.SDL_PIXELFORMAT_BGRX32,
     XBGR_32 = C.SDL_PIXELFORMAT_XBGR32,
 
-    fn to_c(self: PixelFormat) c_uint {
+    inline fn to_c(self: PixelFormat) c_uint {
         return @intFromEnum(self);
     }
-    fn from_c(val: c_uint) PixelFormat {
+    inline fn from_c(val: c_uint) PixelFormat {
         return @enumFromInt(val);
     }
 };
@@ -1013,10 +1097,10 @@ pub const ColorType = enum(c_uint) {
     RGB = C.SDL_COLOR_TYPE_RGB,
     YCBCR = C.SDL_COLOR_TYPE_YCBCR,
 
-    fn to_c(self: ColorType) c_uint {
+    inline fn to_c(self: ColorType) c_uint {
         return @intFromEnum(self);
     }
-    fn from_c(val: c_uint) ColorType {
+    inline fn from_c(val: c_uint) ColorType {
         return @enumFromInt(val);
     }
 };
@@ -1026,10 +1110,10 @@ pub const ColorRange = enum(c_uint) {
     LIMITED = C.SDL_COLOR_RANGE_LIMITED,
     FULL = C.SDL_COLOR_RANGE_FULL,
 
-    fn to_c(self: ColorRange) c_uint {
+    inline fn to_c(self: ColorRange) c_uint {
         return @intFromEnum(self);
     }
-    fn from_c(val: c_uint) ColorRange {
+    inline fn from_c(val: c_uint) ColorRange {
         return @enumFromInt(val);
     }
 };
@@ -1050,10 +1134,10 @@ pub const ColorPrimaries = enum(c_uint) {
     EBU3213 = C.SDL_COLOR_PRIMARIES_EBU3213,
     CUSTOM = C.SDL_COLOR_PRIMARIES_CUSTOM,
 
-    fn to_c(self: ColorPrimaries) c_uint {
+    inline fn to_c(self: ColorPrimaries) c_uint {
         return @intFromEnum(self);
     }
-    fn from_c(val: c_uint) ColorPrimaries {
+    inline fn from_c(val: c_uint) ColorPrimaries {
         return @enumFromInt(val);
     }
 };
@@ -1064,21 +1148,20 @@ pub const FlipMode = enum(c_uint) {
     VERTICAL = C.SDL_FLIP_VERTICAL,
     // HORIZ_VERT = C.SDL_FLIP_HORIZONTAL | C.SDL_FLIP_VERTICAL,
 
-    fn to_c(self: FlipMode) c_uint {
+    inline fn to_c(self: FlipMode) c_uint {
         return @intFromEnum(self);
     }
-    fn from_c(val: c_uint) FlipMode {
+    inline fn from_c(val: c_uint) FlipMode {
         return @enumFromInt(val);
     }
 };
 
 pub const Clipboard = struct {
-    pub fn get_text() [:0]const u8 {
-        const clip: [*:0]u8 = C.SDL_GetClipboardText();
-        return Root.Utils.make_slice_from_sentinel_ptr(u8, 0, clip);
+    pub fn get_text() SDL3Error!Text {
+        return Text{ .ptr = try nonempty_str_or_null(C.SDL_GetClipboardText()) };
     }
-    pub fn set_text(text: [:0]const u8) bool {
-        return C.SDL_SetClipboardText(text.ptr);
+    pub fn set_text(text: [*:0]const u8) SDL3Error!void {
+        return ok_or_failure(C.SDL_SetClipboardText(text));
     }
     pub fn has_text() bool {
         return C.SDL_HasClipboardText();
@@ -1096,6 +1179,18 @@ pub const Clipboard = struct {
     // pub extern fn SDL_GetClipboardMimeTypes(num_mime_types: [*c]usize) [*c][*c]u8;
 };
 
+pub const Text = extern struct {
+    ptr: [*:0]u8,
+
+    pub fn slice(self: Text) [:0]u8 {
+        return Root.Utils.make_slice_from_sentinel_ptr(u8, 0, self.ptr);
+    }
+
+    pub fn free(self: Text) void {
+        return sdl_free(self.ptr);
+    }
+};
+
 pub const DisplayOrientation = enum(c_int) {
     UNKNOWN = C.SDL_ORIENTATION_UNKNOWN,
     LANDSCAPE = C.SDL_ORIENTATION_LANDSCAPE,
@@ -1103,10 +1198,10 @@ pub const DisplayOrientation = enum(c_int) {
     PORTRAIT = C.SDL_ORIENTATION_PORTRAIT,
     PORTRAIT_FLIPPED = C.SDL_ORIENTATION_PORTRAIT_FLIPPED,
 
-    fn to_c(self: DisplayOrientation) c_int {
+    inline fn to_c(self: DisplayOrientation) c_int {
         return @intFromEnum(self);
     }
-    fn from_c(val: c_int) DisplayOrientation {
+    inline fn from_c(val: c_int) DisplayOrientation {
         return @enumFromInt(val);
     }
 };
@@ -1209,7 +1304,7 @@ pub const DisplayMode = extern struct {
 };
 
 pub const Window = opaque {
-    fn to_c(self: *Window) *C.SDL_Window {
+    inline fn to_c(self: *Window) *C.SDL_Window {
         return @ptrCast(@alignCast(self));
     }
     pub fn try_get_display_id(self: *Window) SDL3Error!DisplayID {
@@ -1222,15 +1317,10 @@ pub const Window = opaque {
         return C.SDL_GetWindowDisplayScale(self.to_c());
     }
     pub fn get_fullscreen_display_mode(self: *Window) FullscreenMode {
-        const result: ?*const DisplayMode = C.SDL_GetWindowFullscreenMode(self);
-        if (result) |mode| return FullscreenMode.new_exclusive(mode);
-        return FullscreenMode.new_borderless();
+        return FullscreenMode{ .mode = C.SDL_GetWindowFullscreenMode(self) };
     }
     pub fn set_fullscreen_display_mode(self: *Window, mode: FullscreenMode) SDL3Error!void {
-        switch (mode) {
-            .borderless => try ok_or_failure(C.SDL_SetWindowFullscreenMode(self.to_c(), null)),
-            .exclusive => |excl_mode| try ok_or_failure(C.SDL_SetWindowFullscreenMode(self.to_c(), @ptrCast(@alignCast(excl_mode)))),
-        }
+        return ok_or_failure(C.SDL_SetWindowFullscreenMode(self.to_c(), mode.mode));
     }
     pub fn get_icc_profile(self: *Window, size: usize) SDL3Error!*WindowICCProfile {
         return ptr_cast_or_null(*WindowICCProfile, C.SDL_GetWindowICCProfile(self.to_c(), &size));
@@ -1460,10 +1550,10 @@ pub const FlashMode = enum(c_uint) {
     BRIEFLY = C.SDL_FLASH_BRIEFLY,
     UNTIL_FOCUSED = C.SDL_FLASH_UNTIL_FOCUSED,
 
-    fn to_c(self: FlashMode) c_uint {
+    inline fn to_c(self: FlashMode) c_uint {
         return @intFromEnum(self);
     }
-    fn from_c(val: c_uint) FlashMode {
+    inline fn from_c(val: c_uint) FlashMode {
         return @enumFromInt(val);
     }
 };
@@ -1480,11 +1570,11 @@ pub const WindowHitTestResult = enum(c_uint) {
     RESIZE_BOTTOMLEFT = C.SDL_HITTEST_RESIZE_BOTTOMLEFT,
     RESIZE_LEFT = C.SDL_HITTEST_RESIZE_LEFT,
 
-    fn to_c(self: WindowHitTestResult) c_uint {
+    inline fn to_c(self: WindowHitTestResult) c_uint {
         return @intFromEnum(self);
     }
 
-    fn from_c(val: c_uint) WindowHitTestResult {
+    inline fn from_c(val: c_uint) WindowHitTestResult {
         return @enumFromInt(val);
     }
 };
@@ -1500,10 +1590,10 @@ pub const VSync = enum(c_int) {
         return @enumFromInt(n);
     }
 
-    fn to_c(self: VSync) c_int {
+    inline fn to_c(self: VSync) c_int {
         return @intFromEnum(self);
     }
-    fn from_c(val: c_int) VSync {
+    inline fn from_c(val: c_int) VSync {
         return @enumFromInt(val);
     }
 };
@@ -1540,15 +1630,24 @@ pub const WindowsList = extern struct {
     }
 };
 
-pub const FullscreenMode = union(enum) {
-    borderless: void,
-    exclusive: *const DisplayMode,
+/// Helper struct for SDL functions that take a `?*DisplayMode` where:
+/// - `null` == borderless fullscreen
+/// - `*DisplayMode` == exclusive fullscreen using the specified mode
+pub const FullscreenMode = extern struct {
+    mode: ?*const DisplayMode,
 
-    pub fn new_borderless() FullscreenMode {
-        return FullscreenMode{ .borderless = void{} };
+    pub fn borderless() FullscreenMode {
+        return FullscreenMode{ .mode = null };
     }
-    pub fn new_exclusive(mode: *const DisplayMode) FullscreenMode {
-        return FullscreenMode{ .exclusive = mode };
+    pub fn exclusive(mode: *DisplayMode) FullscreenMode {
+        return FullscreenMode{ .mode = mode };
+    }
+
+    pub fn is_borderless(self: FullscreenMode) bool {
+        return self.mode == null;
+    }
+    pub fn is_exclusive(self: FullscreenMode) bool {
+        return self.mode != null;
     }
 };
 
@@ -1632,29 +1731,44 @@ pub const WindowFlags = extern struct {
         TRANSPARENT = C.SDL_WINDOW_TRANSPARENT,
         NOT_FOCUSABLE = C.SDL_WINDOW_NOT_FOCUSABLE,
 
-        fn to_c(self: FLAG_UINT) c_uint {
+        inline fn to_c(self: FLAG_UINT) c_uint {
             return @intFromEnum(self);
         }
-        fn from_c(val: c_uint) FLAG_UINT {
+        inline fn from_c(val: c_uint) FLAG_UINT {
             return @enumFromInt(val);
         }
     };
 };
 
-pub const Surface = extern struct {
-    flags: SurfaceFlags = SurfaceFlags{},
-    format: PixelFormat = .UNKNOWN,
-    width: c_int = 0,
-    height: c_int = 0,
-    bytes_per_row: c_int = 0,
-    pixel_data: ?[*]u8 = null,
-    refcount: c_int = 0,
-    reserved: ?*anyopaque = null,
-
-    fn to_c(self: *Surface) *C.SDL_Surface {
+pub const Surface = opaque {
+    inline fn to_c(self: *Surface) *C.SDL_Surface {
         return @ptrCast(@alignCast(self));
     }
-
+    pub inline fn get_flags(self: *Surface) SurfaceFlags {
+        return SurfaceFlags{ .flags = self.to_c().flags };
+    }
+    pub inline fn get_format(self: *Surface) PixelFormat {
+        return @enumFromInt(self.to_c().format);
+    }
+    pub inline fn get_size(self: *Surface) IVec {
+        const c = self.to_c();
+        return IVec{
+            .x = c.w,
+            .y = c.h,
+        };
+    }
+    pub inline fn get_bytes_per_row(self: *Surface) c_int {
+        return self.to_c().pitch;
+    }
+    pub inline fn get_pixel_data_ptr(self: *Surface) ?[*]u8 {
+        return @ptrCast(@alignCast(self.to_c().pixels));
+    }
+    pub inline fn get_ref_count(self: *Surface) c_int {
+        return self.to_c().refcount;
+    }
+    pub inline fn get_reserved_ptr(self: *Surface) ?*anyopaque {
+        return self.to_c().reserved;
+    }
     pub fn create_surface(size: IVec, format: PixelFormat) SDL3Error!*Surface {
         return ptr_cast_or_failure(*Surface, C.SDL_CreateSurface(size.x, size.y, format));
     }
@@ -1808,19 +1922,34 @@ pub const Surface = extern struct {
     pub fn blit_tiled_to(self: *Surface, area: IArea, dst: *Surface, dst_area: IArea) SDL3Error!void {
         return ok_or_failure(C.SDL_BlitSurfaceTiled(self.to_c(), area.to_c(), dst.to_c(), dst_area.to_c()));
     }
-    pub fn blit_tiled_scaled_to(self: *Surface, area: IArea, dst: *Surface, dst_area: IArea, scale_val: f32, mode: ScaleMode) SDL3Error!void {
-        return ok_or_failure(C.SDL_BlitSurfaceTiledWithScale(self.to_c(), area.to_c(), scale_val, mode.to_c(), dst.to_c(), dst_area.to_c()));
+    pub fn blit_tiled_scaled_to(self: *Surface, area: IArea, dst: *Surface, dst_area: IArea, scale: Scale) SDL3Error!void {
+        return ok_or_failure(C.SDL_BlitSurfaceTiledWithScale(self.to_c(), area.to_c(), scale.ratio, scale.mode.to_c(), dst.to_c(), dst_area.to_c()));
     }
     pub fn blit_nine_patch_to(self: *Surface, nine_patch: INinePatch, dst: *Surface, dst_area: IArea, scale: Scale) SDL3Error!void {
         return ok_or_failure(C.SDL_BlitSurface9Grid(self.to_c(), nine_patch.rect_to_c(), nine_patch.left, nine_patch.right, nine_patch.top, nine_patch.bottom, scale.ratio, scale.mode.to_c(), dst.to_c(), dst_area.to_c()));
     }
-    //CHECKPOINT finish these funcs
-    // pub extern fn SDL_MapSurfaceRGB(surface: [*c]SDL_Surface, r: Uint8, g: Uint8, b: Uint8) Uint32;
-    // pub extern fn SDL_MapSurfaceRGBA(surface: [*c]SDL_Surface, r: Uint8, g: Uint8, b: Uint8, a: Uint8) Uint32;
-    // pub extern fn SDL_ReadSurfacePixel(surface: [*c]SDL_Surface, x: c_int, y: c_int, r: [*c]Uint8, g: [*c]Uint8, b: [*c]Uint8, a: [*c]Uint8) bool;
-    // pub extern fn SDL_ReadSurfacePixelFloat(surface: [*c]SDL_Surface, x: c_int, y: c_int, r: [*c]f32, g: [*c]f32, b: [*c]f32, a: [*c]f32) bool;
-    // pub extern fn SDL_WriteSurfacePixel(surface: [*c]SDL_Surface, x: c_int, y: c_int, r: Uint8, g: Uint8, b: Uint8, a: Uint8) bool;
-    // pub extern fn SDL_WriteSurfacePixelFloat(surface: [*c]SDL_Surface, x: c_int, y: c_int, r: f32, g: f32, b: f32, a: f32) bool;
+    pub fn closest_valid_color_rgb(self: *Surface, color: IColor_RGB) IColor_U32 {
+        return IColor_U32{ .raw = C.SDL_MapSurfaceRGB(self.to_c(), color.r, color.g, color.b) };
+    }
+    pub fn closest_valid_color_rgba(self: *Surface, color: IColor_RGBA) IColor_U32 {
+        return IColor_U32{ .raw = C.SDL_MapSurfaceRGBA(self.to_c(), color.r, color.g, color.b, color.a) };
+    }
+    pub fn read_pixel(self: *Surface, pos: IVec) SDL3Error!IColor_RGBA {
+        var color = IColor_RGBA{};
+        try ok_or_failure(C.SDL_ReadSurfacePixel(self.to_c(), pos.x, pos.y, &color.r, &color.g, &color.b, &color.a));
+        return color;
+    }
+    pub fn read_pixel_float(self: *Surface, pos: IVec) SDL3Error!FColor_RGBA {
+        var color = FColor_RGBA{};
+        try ok_or_failure(C.SDL_ReadSurfacePixelFloat(self.to_c(), pos.x, pos.y, &color.r, &color.g, &color.b, &color.a));
+        return color;
+    }
+    pub fn write_pixel(self: *Surface, pos: IVec, color: IColor_RGBA) SDL3Error!void {
+        return ok_or_failure(C.SDL_ReadSurfacePixel(self.to_c(), pos.x, pos.y, color.r, color.g, color.b, color.a));
+    }
+    pub fn write_pixel_float(self: *Surface, pos: IVec, color: FColor_RGBA) SDL3Error!void {
+        return ok_or_failure(C.SDL_WriteSurfacePixelFloat(self.to_c(), pos.x, pos.y, color.r, color.g, color.b, color.a));
+    }
 };
 
 /// Helper struct for SDL functions that expect a `?*IRect` where:
@@ -1841,6 +1970,7 @@ pub const IArea = extern struct {
         return @ptrCast(@alignCast(self.rect_ptr));
     }
 };
+
 /// Helper struct for SDL functions that expect a `?*FRect` where:
 /// - `null` == use entire area
 /// - `*FRect` == use this rect area
@@ -1859,6 +1989,8 @@ pub const FArea = extern struct {
     }
 };
 
+/// Helper struct for SDL functions that expect both a
+/// `f32` ratio and `ScaleMode(u32)` mode
 pub const Scale = extern struct {
     ratio: f32 = 1.0,
     mode: ScaleMode = .NEAREST,
@@ -1874,13 +2006,43 @@ pub const Scale = extern struct {
     }
 };
 
+/// Helper Struct for SDL functions that expect a number of various
+/// properties pertaining to a rectangle of pixels
 pub const PixelRect = extern struct {
     size: IVec,
     ptr: [*]u8,
     bytes_per_row: c_int,
     pixel_format: PixelFormat,
-    color_space: Colorspace,
+    colorspace: Colorspace = .UNKNOWN,
     optional_color_properties: PropertiesID = PropertiesID.NULL,
+
+    pub fn rect(size: IVec, ptr: [*]u8, bytes_per_row: c_uint, format: PixelFormat) PixelRect {
+        return PixelRect{
+            .size = size,
+            .ptr = ptr,
+            .bytes_per_row = bytes_per_row,
+            .pixel_format = format,
+        };
+    }
+    pub fn rect_with_colorspace(size: IVec, ptr: [*]u8, bytes_per_row: c_uint, format: PixelFormat, colorspace: Colorspace) PixelRect {
+        return PixelRect{
+            .size = size,
+            .ptr = ptr,
+            .bytes_per_row = bytes_per_row,
+            .pixel_format = format,
+            .colorspace = colorspace,
+        };
+    }
+    pub fn rect_with_colorspace_and_props(size: IVec, ptr: [*]u8, bytes_per_row: c_uint, format: PixelFormat, colorspace: Colorspace, properties: PropertiesID) PixelRect {
+        return PixelRect{
+            .size = size,
+            .ptr = ptr,
+            .bytes_per_row = bytes_per_row,
+            .pixel_format = format,
+            .colorspace = colorspace,
+            .optional_color_properties = properties,
+        };
+    }
 };
 
 pub fn convert_pixels(src: PixelRect, dst: PixelRect) SDL3Error!void {
@@ -1889,7 +2051,7 @@ pub fn convert_pixels(src: PixelRect, dst: PixelRect) SDL3Error!void {
 }
 pub fn convert_pixels_and_colorspace(src: PixelRect, dst: PixelRect) SDL3Error!void {
     assert(src.size.x == dst.size.x and src.size.y == dst.size.y);
-    return ok_or_failure(C.SDL_ConvertPixelsAndColorspace(src.size.x, src.size.y, src.pixel_format.to_c(), src.color_space.to_c(), src.optional_color_properties.id, src.ptr, src.bytes_per_row, dst.pixel_format.to_c(), dst.color_space.to_c(), dst.optional_color_properties.id, dst.ptr, dst.bytes_per_row));
+    return ok_or_failure(C.SDL_ConvertPixelsAndColorspace(src.size.x, src.size.y, src.pixel_format.to_c(), src.colorspace.to_c(), src.optional_color_properties.id, src.ptr, src.bytes_per_row, dst.pixel_format.to_c(), dst.colorspace.to_c(), dst.optional_color_properties.id, dst.ptr, dst.bytes_per_row));
 }
 pub fn premultiply_alpha(src: PixelRect, dst: PixelRect, linear: bool) SDL3Error!void {
     assert(src.size.x == dst.size.x and src.size.y == dst.size.y);
@@ -1905,7 +2067,7 @@ pub const SurfaceList = extern struct {
 };
 
 pub const ColorPalette = opaque {
-    fn to_c(self: *ColorPalette) *C.SDL_Palette {
+    inline fn to_c(self: *ColorPalette) *C.SDL_Palette {
         return @ptrCast(@alignCast(self));
     }
 
@@ -1940,10 +2102,10 @@ pub const Colorspace = enum(c_uint) {
     RGB_DEFAULT = C.SDL_COLORSPACE_RGB_DEFAULT,
     YUV_DEFAULT = C.SDL_COLORSPACE_YUV_DEFAULT,
 
-    fn to_c(self: Colorspace) c_uint {
+    inline fn to_c(self: Colorspace) c_uint {
         return @intFromEnum(self);
     }
-    fn from_c(val: c_uint) Colorspace {
+    inline fn from_c(val: c_uint) Colorspace {
         return @enumFromInt(val);
     }
 };
@@ -1955,7 +2117,7 @@ pub const SurfaceFlags = extern struct {
 };
 
 pub const Renderer = opaque {
-    fn to_c(self: *Renderer) *C.SDL_Renderer {
+    inline fn to_c(self: *Renderer) *C.SDL_Renderer {
         return @ptrCast(@alignCast(self));
     }
     pub fn get_driver_count() c_int {
@@ -2211,10 +2373,10 @@ pub const IndexType = enum(c_int) {
     U16 = 2,
     U32 = 4,
 
-    fn to_c(self: IndexType) c_uint {
+    inline fn to_c(self: IndexType) c_uint {
         return @intFromEnum(self);
     }
-    fn from_c(val: c_uint) IndexType {
+    inline fn from_c(val: c_uint) IndexType {
         return @enumFromInt(val);
     }
 };
@@ -2224,10 +2386,10 @@ pub const AppResult = enum(c_uint) {
     SUCCESS = C.SDL_APP_SUCCESS,
     FAILURE = C.SDL_APP_FAILURE,
 
-    fn to_c(self: AppResult) c_uint {
+    inline fn to_c(self: AppResult) c_uint {
         return @intFromEnum(self);
     }
-    fn from_c(val: c_uint) AppResult {
+    inline fn from_c(val: c_uint) AppResult {
         return @enumFromInt(val);
     }
 };
@@ -2246,7 +2408,7 @@ pub const Texture = opaque {
         return self.to_c().refcount;
     }
 
-    fn to_c(self: *Texture) *C.SDL_Texture {
+    inline fn to_c(self: *Texture) *C.SDL_Texture {
         return @ptrCast(@alignCast(self));
     }
 
@@ -2401,10 +2563,10 @@ pub const LogicalPresentationMode = enum(c_uint) {
     OVERSCAN = C.SDL_LOGICAL_PRESENTATION_OVERSCAN,
     INTEGER_SCALE = C.SDL_LOGICAL_PRESENTATION_INTEGER_SCALE,
 
-    fn to_c(self: LogicalPresentationMode) c_uint {
+    inline fn to_c(self: LogicalPresentationMode) c_uint {
         return @intFromEnum(self);
     }
-    fn from_c(val: c_uint) LogicalPresentationMode {
+    inline fn from_c(val: c_uint) LogicalPresentationMode {
         return @enumFromInt(val);
     }
 };
@@ -2440,10 +2602,10 @@ pub const ScaleMode = enum(c_int) {
     NEAREST = C.SDL_SCALEMODE_NEAREST,
     LINEAR = C.SDL_SCALEMODE_LINEAR,
 
-    fn to_c(self: ScaleMode) c_uint {
+    inline fn to_c(self: ScaleMode) c_uint {
         return @intFromEnum(self);
     }
-    fn from_c(val: c_uint) ScaleMode {
+    inline fn from_c(val: c_uint) ScaleMode {
         return @enumFromInt(val);
     }
 };
@@ -2453,10 +2615,10 @@ pub const TextureAccessMode = enum(c_uint) {
     STREAMING = C.SDL_TEXTUREACCESS_STREAMING,
     TARGET = C.SDL_TEXTUREACCESS_TARGET,
 
-    fn to_c(self: TextureAccessMode) c_uint {
+    inline fn to_c(self: TextureAccessMode) c_uint {
         return @intFromEnum(self);
     }
-    fn from_c(val: c_uint) TextureAccessMode {
+    inline fn from_c(val: c_uint) TextureAccessMode {
         return @enumFromInt(val);
     }
 };
@@ -2465,34 +2627,134 @@ pub const AudioSpec = extern struct {
     format: AudioFormat = .UNKNOWN,
     channels: c_int = 0,
     freq: c_int = 0,
+
+    fn to_c(self: *AudioSpec) *C.SDL_AudioSpec {
+        return @ptrCast(@alignCast(self));
+    }
+
+    pub fn frame_size(self: *AudioSpec) c_int {
+        return @as(c_int, @intCast(self.format.byte_size())) * self.channels;
+    }
 };
 
 pub const AudioDeviceID = extern struct {
     id: u32 = 0,
 
-    // pub extern fn SDL_GetAudioPlaybackDevices(count: [*c]c_int) [*c]SDL_AudioDeviceID;
-    // pub extern fn SDL_GetAudioRecordingDevices(count: [*c]c_int) [*c]SDL_AudioDeviceID;
-    // pub extern fn SDL_GetAudioDeviceName(devid: SDL_AudioDeviceID) [*c]const u8;
-    // pub extern fn SDL_GetAudioDeviceFormat(devid: SDL_AudioDeviceID, spec: [*c]SDL_AudioSpec, sample_frames: [*c]c_int) bool;
-    // pub extern fn SDL_GetAudioDeviceChannelMap(devid: SDL_AudioDeviceID, count: [*c]c_int) [*c]c_int;
-    // pub extern fn SDL_OpenAudioDevice(devid: SDL_AudioDeviceID, spec: [*c]const SDL_AudioSpec) SDL_AudioDeviceID;
-    // pub extern fn SDL_IsAudioDevicePhysical(devid: SDL_AudioDeviceID) bool;
-    // pub extern fn SDL_IsAudioDevicePlayback(devid: SDL_AudioDeviceID) bool;
-    // pub extern fn SDL_PauseAudioDevice(devid: SDL_AudioDeviceID) bool;
-    // pub extern fn SDL_ResumeAudioDevice(devid: SDL_AudioDeviceID) bool;
-    // pub extern fn SDL_AudioDevicePaused(devid: SDL_AudioDeviceID) bool;
-    // pub extern fn SDL_GetAudioDeviceGain(devid: SDL_AudioDeviceID) f32;
-    // pub extern fn SDL_SetAudioDeviceGain(devid: SDL_AudioDeviceID, gain: f32) bool;
-    // pub extern fn SDL_CloseAudioDevice(devid: SDL_AudioDeviceID) void;
-    // pub extern fn SDL_BindAudioStreams(devid: SDL_AudioDeviceID, streams: [*c]const ?*SDL_AudioStream, num_streams: c_int) bool;
-    // pub extern fn SDL_BindAudioStream(devid: SDL_AudioDeviceID, stream: ?*SDL_AudioStream) bool;
+    pub const DEFAULT_PLAYBACK_DEVICE = AudioDeviceID{ .id = C.SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK };
+    pub const DEFAULT_RECORDING_DEVICE = AudioDeviceID{ .id = C.SDL_AUDIO_DEVICE_DEFAULT_RECORDING };
+    pub inline fn default_playback_device() AudioDeviceID {
+        return DEFAULT_PLAYBACK_DEVICE;
+    }
+    pub inline fn default_recording_device() AudioDeviceID {
+        return DEFAULT_RECORDING_DEVICE;
+    }
+
+    pub fn is_null(self: AudioDeviceID) bool {
+        return self.id == 0;
+    }
+    pub fn get_all_playback_devices() SDL3Error!AudioDeviceIDList {
+        var len: c_int = 0;
+        const ptr = try ptr_cast_or_null([*]AudioDeviceID, C.SDL_GetAudioPlaybackDevices(&len));
+        return AudioDeviceIDList{ .list = ptr[0..len] };
+    }
+    pub fn get_all_recording_devices() SDL3Error!AudioDeviceIDList {
+        var len: c_int = 0;
+        const ptr = try ptr_cast_or_null([*]AudioDeviceID, C.SDL_GetAudioRecordingDevices(&len));
+        return AudioDeviceIDList{ .list = ptr[0..len] };
+    }
+    pub fn get_name(self: AudioDeviceID) SDL3Error![*:0]const u8 {
+        return ptr_cast_or_null([*:0]const u8, C.SDL_GetAudioDeviceName(self.id));
+    }
+    pub fn get_format(self: AudioDeviceID) SDL3Error!AudioDeviceFormat {
+        var fmt: AudioDeviceFormat = undefined;
+        try ok_or_failure(C.SDL_GetAudioDeviceFormat(self.id, @ptrCast(@alignCast(&fmt.spec)), &fmt.sample_frames_len));
+        return fmt;
+    }
+    pub fn get_channel_map(self: AudioDeviceID) SDL3Error!AudioDeviceFormat {
+        var len: c_int = 0;
+        const ptr = ptr_cast_or_null([*]c_int, C.SDL_GetAudioDeviceChannelMap(self.id, &len));
+        return AudioDeviceChannelMap{
+            .map = ptr[0..len],
+        };
+    }
+    pub fn open_device(self: AudioDeviceID, spec_request: AudioSpecRequest) SDL3Error!AudioDeviceID {
+        return AudioDeviceID{ .id = try nonzero_or_null(C.SDL_OpenAudioDevice(self.id, @ptrCast(@alignCast(spec_request.spec_ptr)))) };
+    }
+    pub fn is_physical(self: AudioDeviceID) bool {
+        return C.SDL_IsAudioDevicePhysical(self.id);
+    }
+    pub fn is_playback_device(self: AudioDeviceID) bool {
+        return C.SDL_IsAudioDevicePlayback(self.id);
+    }
+    pub fn is_recording_device(self: AudioDeviceID) bool {
+        return !C.SDL_IsAudioDevicePlayback(self.id);
+    }
+    pub fn pause_operation(self: AudioDeviceID) SDL3Error!void {
+        return ok_or_failure(C.SDL_PauseAudioDevice(self.id));
+    }
+    pub fn resume_operation(self: AudioDeviceID) SDL3Error!void {
+        return ok_or_failure(C.SDL_ResumeAudioDevice(self.id));
+    }
+    pub fn is_paused(self: AudioDeviceID) bool {
+        return C.SDL_AudioDevicePaused(self.id);
+    }
+    pub fn get_gain(self: AudioDeviceID) f32 {
+        return C.SDL_GetAudioDeviceGain(self.id);
+    }
+    pub fn set_gain(self: AudioDeviceID, gain: f32) SDL3Error!void {
+        return ok_or_failure(C.SDL_SetAudioDeviceGain(self.id, gain));
+    }
+    pub fn close_device(self: AudioDeviceID) void {
+        C.SDL_CloseAudioDevice(self.id);
+    }
+    pub fn bind_audio_stream(self: AudioDeviceID, audio_stream: *AudioStream) SDL3Error!void {
+        return ok_or_failure(C.SDL_BindAudioStream(self.id, audio_stream.to_c()));
+    }
+    pub fn bind_many_audio_streams(self: AudioDeviceID, audio_streams: []AudioStream) SDL3Error!void {
+        return ok_or_failure(C.SDL_BindAudioStreams(self.id, @ptrCast(@alignCast(audio_streams.ptr)), @intCast(audio_streams.len)));
+    }
 };
 
-pub const AudioStream = extern struct {
-    extern_ptr: *External,
+/// Helper struct for SDL functions that require a `?*AudioSpec` where:
+/// - `null` == use default for device
+/// - `*AudioSpec` == use specific spec
+pub const AudioSpecRequest = extern struct {
+    spec_ptr: ?*AudioSpec,
 
-    const External = C.SDL_AudioStream;
+    pub fn use_default() AudioSpecRequest {
+        return AudioSpecRequest{ .spec = null };
+    }
+    pub fn spec(spec_: *AudioSpec) AudioSpecRequest {
+        return AudioSpecRequest{ .spec = spec_ };
+    }
+};
 
+pub const AudioDeviceFormat = extern struct {
+    spec: AudioSpec,
+    sample_frames_len: c_int,
+};
+
+pub const AudioDeviceChannelMap = extern struct {
+    map: []c_int,
+
+    pub fn free(self: *AudioDeviceChannelMap) void {
+        sdl_free(self.map.ptr);
+    }
+};
+
+pub const AudioDeviceIDList = extern struct {
+    list: []AudioDeviceID,
+
+    pub fn free(self: AudioDeviceIDList) void {
+        sdl_free(self.list.ptr);
+    }
+};
+
+pub const AudioStream = opaque {
+    fn to_c(self: *AudioStream) *C.SDL_AudioStream {
+        return @ptrCast(@alignCast(self));
+    }
+    //CHECKPOINT
     // pub extern fn SDL_UnbindAudioStreams(streams: [*c]const ?*SDL_AudioStream, num_streams: c_int) void;
     // pub extern fn SDL_UnbindAudioStream(stream: ?*SDL_AudioStream) void;
     // pub extern fn SDL_GetAudioStreamDevice(stream: ?*SDL_AudioStream) SDL_AudioDeviceID;
@@ -2547,10 +2809,10 @@ pub const GamepadType = enum(c_uint) {
 
     pub const COUNT: c_uint = C.SDL_GAMEPAD_TYPE_COUNT;
 
-    fn to_c(self: GamepadType) c_uint {
+    inline fn to_c(self: GamepadType) c_uint {
         return @intFromEnum(self);
     }
-    fn from_c(val: c_uint) GamepadType {
+    inline fn from_c(val: c_uint) GamepadType {
         return @enumFromInt(val);
     }
 };
@@ -2586,10 +2848,10 @@ pub const GamepadButton = enum(c_int) {
 
     pub const COUNT: c_int = C.SDL_GAMEPAD_BUTTON_COUNT;
 
-    fn to_c(self: GamepadButton) c_uint {
+    inline fn to_c(self: GamepadButton) c_uint {
         return @intFromEnum(self);
     }
-    fn from_c(val: c_uint) GamepadButton {
+    inline fn from_c(val: c_uint) GamepadButton {
         return @enumFromInt(val);
     }
 };
@@ -2605,10 +2867,10 @@ pub const GamepadButtonLabel = enum(c_uint) {
     SQUARE = C.SDL_GAMEPAD_BUTTON_LABEL_SQUARE,
     TRIANGLE = C.SDL_GAMEPAD_BUTTON_LABEL_TRIANGLE,
 
-    fn to_c(self: GamepadButtonLabel) c_uint {
+    inline fn to_c(self: GamepadButtonLabel) c_uint {
         return @intFromEnum(self);
     }
-    fn from_c(val: c_uint) GamepadButtonLabel {
+    inline fn from_c(val: c_uint) GamepadButtonLabel {
         return @enumFromInt(val);
     }
 };
@@ -2624,10 +2886,10 @@ pub const GamepadAxis = enum(c_int) {
 
     pub const COUNT: c_int = C.SDL_GAMEPAD_AXIS_COUNT;
 
-    fn to_c(self: GamepadAxis) c_uint {
+    inline fn to_c(self: GamepadAxis) c_uint {
         return @intFromEnum(self);
     }
-    fn from_c(val: c_uint) GamepadAxis {
+    inline fn from_c(val: c_uint) GamepadAxis {
         return @enumFromInt(val);
     }
 };
@@ -2638,10 +2900,10 @@ pub const GamepadBindingType = enum(c_uint) {
     AXIS = C.SDL_GAMEPAD_BINDTYPE_AXIS,
     HAT = C.SDL_GAMEPAD_BINDTYPE_HAT,
 
-    fn to_c(self: GamepadBindingType) c_uint {
+    inline fn to_c(self: GamepadBindingType) c_uint {
         return @intFromEnum(self);
     }
-    fn from_c(val: c_uint) GamepadBindingType {
+    inline fn from_c(val: c_uint) GamepadBindingType {
         return @enumFromInt(val);
     }
 };
@@ -2662,7 +2924,7 @@ pub const StorageInterface = extern struct {
 };
 
 pub const Storage = opaque {
-    fn to_c(self: *Storage) *C.SDL_Storage {
+    inline fn to_c(self: *Storage) *C.SDL_Storage {
         return @ptrCast(@alignCast(self));
     }
     pub fn open_app_readonly_storage_folder(override: [:0]const u8, properties: PropertiesID) SDL3Error!*Storage {
@@ -2733,10 +2995,10 @@ pub const EnumerationResult = enum(c_uint) {
     SUCCESS = C.SDL_ENUM_SUCCESS,
     FAILURE = C.SDL_ENUM_FAILURE,
 
-    fn to_c(self: EnumerationResult) c_uint {
+    inline fn to_c(self: EnumerationResult) c_uint {
         return @intFromEnum(self);
     }
-    fn from_c(val: c_uint) EnumerationResult {
+    inline fn from_c(val: c_uint) EnumerationResult {
         return @enumFromInt(val);
     }
 };
@@ -2755,10 +3017,10 @@ pub const PathType = enum(c_uint) {
     DIRECTORY = C.SDL_PATHTYPE_DIRECTORY,
     OTHER = C.SDL_PATHTYPE_OTHER,
 
-    fn to_c(self: PathType) c_uint {
+    inline fn to_c(self: PathType) c_uint {
         return @intFromEnum(self);
     }
-    fn from_c(val: c_uint) PathType {
+    inline fn from_c(val: c_uint) PathType {
         return @enumFromInt(val);
     }
 };
@@ -2826,7 +3088,7 @@ pub const Event = extern union {
     clipboard: ClipboardEvent,
     _FORCE_SIZE: [128]u8,
 
-    fn to_c(self: *Event) *C.SDL_Event {
+    inline fn to_c(self: *Event) *C.SDL_Event {
         return @ptrCast(@alignCast(self));
     }
 
@@ -2840,7 +3102,7 @@ pub const CommonEvent = extern struct {
     reserved: u32 = 0,
     timestamp: u64 = 0,
 
-    fn to_c(self: *CommonEvent) *C.SDL_CommonEvent {
+    inline fn to_c(self: *CommonEvent) *C.SDL_CommonEvent {
         return @ptrCast(@alignCast(self));
     }
 };
@@ -2853,7 +3115,7 @@ pub const DisplayEvent = extern struct {
     data_1: i32 = 0,
     data_2: i32 = 0,
 
-    fn to_c(self: *DisplayEvent) *C.SDL_DisplayEvent {
+    inline fn to_c(self: *DisplayEvent) *C.SDL_DisplayEvent {
         return @ptrCast(@alignCast(self));
     }
 };
@@ -2866,7 +3128,7 @@ pub const WindowEvent = extern struct {
     data_1: i32 = 0,
     data_2: i32 = 0,
 
-    fn to_c(self: *WindowEvent) *C.SDL_WindowEvent {
+    inline fn to_c(self: *WindowEvent) *C.SDL_WindowEvent {
         return @ptrCast(@alignCast(self));
     }
 };
@@ -2877,7 +3139,7 @@ pub const KeyboardDeviceEvent = extern struct {
     timestamp: u64 = 0,
     keyboard_id: KeyboardID = .{},
 
-    fn to_c(self: *KeyboardDeviceEvent) *C.SDL_KeyboardDeviceEvent {
+    inline fn to_c(self: *KeyboardDeviceEvent) *C.SDL_KeyboardDeviceEvent {
         return @ptrCast(@alignCast(self));
     }
 };
@@ -2895,7 +3157,7 @@ pub const KeyboardEvent = extern struct {
     down: bool = false,
     repeat: bool = false,
 
-    fn to_c(self: *KeyboardEvent) *C.SDL_KeyboardEvent {
+    inline fn to_c(self: *KeyboardEvent) *C.SDL_KeyboardEvent {
         return @ptrCast(@alignCast(self));
     }
 };
@@ -2909,7 +3171,7 @@ pub const TextEditEvent = extern struct {
     start: i32 = 0,
     length: i32 = 0,
 
-    fn to_c(self: *TextEditEvent) *C.SDL_TextEditingEvent {
+    inline fn to_c(self: *TextEditEvent) *C.SDL_TextEditingEvent {
         return @ptrCast(@alignCast(self));
     }
 };
@@ -2927,7 +3189,7 @@ pub const TextEditCandidateEvent = extern struct {
     _padding_2: u8 = 0,
     _padding_3: u8 = 0,
 
-    fn to_c(self: *TextEditCandidateEvent) *C.SDL_TextEditingCandidatesEvent {
+    inline fn to_c(self: *TextEditCandidateEvent) *C.SDL_TextEditingCandidatesEvent {
         return @ptrCast(@alignCast(self));
     }
 };
@@ -2939,7 +3201,7 @@ pub const TextInputEvent = extern struct {
     window_id: WindowID = .{},
     text: ?[*:0]const u8 = null,
 
-    fn to_c(self: *TextInputEvent) *C.SDL_TextInputEvent {
+    inline fn to_c(self: *TextInputEvent) *C.SDL_TextInputEvent {
         return @ptrCast(@alignCast(self));
     }
 };
@@ -2950,7 +3212,7 @@ pub const MouseDeviceEvent = extern struct {
     timestamp: u64 = 0,
     mouse_id: MouseID = .{},
 
-    fn to_c(self: *MouseDeviceEvent) *C.SDL_MouseDeviceEvent {
+    inline fn to_c(self: *MouseDeviceEvent) *C.SDL_MouseDeviceEvent {
         return @ptrCast(@alignCast(self));
     }
 };
@@ -2965,7 +3227,7 @@ pub const MouseMotionEvent = extern struct {
     pos: FVec = FVec{},
     delta: FVec = FVec{},
 
-    fn to_c(self: *MouseMotionEvent) *C.SDL_MouseMotionEvent {
+    inline fn to_c(self: *MouseMotionEvent) *C.SDL_MouseMotionEvent {
         return @ptrCast(@alignCast(self));
     }
 
@@ -2990,7 +3252,7 @@ pub const MouseButtonEvent = extern struct {
     _padding: u8 = 0,
     pos: FVec = FVec{},
 
-    fn to_c(self: *MouseButtonEvent) *C.SDL_MouseButtonEvent {
+    inline fn to_c(self: *MouseButtonEvent) *C.SDL_MouseButtonEvent {
         return @ptrCast(@alignCast(self));
     }
 
@@ -3013,7 +3275,7 @@ pub const MouseWheelEvent = extern struct {
     direction: MouseWheelDirection = .NORMAL,
     pos: FVec = FVec{},
 
-    fn to_c(self: *MouseWheelEvent) *C.SDL_MouseWheelEvent {
+    inline fn to_c(self: *MouseWheelEvent) *C.SDL_MouseWheelEvent {
         return @ptrCast(@alignCast(self));
     }
 
@@ -3038,7 +3300,7 @@ pub const JoyAxisEvent = extern struct {
     value: i16 = 0,
     _padding_4: u16 = 0,
 
-    fn to_c(self: *JoyAxisEvent) *C.SDL_JoyAxisEvent {
+    inline fn to_c(self: *JoyAxisEvent) *C.SDL_JoyAxisEvent {
         return @ptrCast(@alignCast(self));
     }
 };
@@ -3054,7 +3316,7 @@ pub const JoyBallEvent = extern struct {
     _padding_3: u8 = 0,
     delta: IVec_16 = IVec_16{},
 
-    fn to_c(self: *JoyBallEvent) *C.SDL_JoyBallEvent {
+    inline fn to_c(self: *JoyBallEvent) *C.SDL_JoyBallEvent {
         return @ptrCast(@alignCast(self));
     }
 
@@ -3077,7 +3339,7 @@ pub const JoyHatEvent = extern struct {
     _padding_1: u8 = 0,
     _padding_2: u8 = 0,
 
-    fn to_c(self: *JoyHatEvent) *C.SDL_JoyHatEvent {
+    inline fn to_c(self: *JoyHatEvent) *C.SDL_JoyHatEvent {
         return @ptrCast(@alignCast(self));
     }
 };
@@ -3092,7 +3354,7 @@ pub const JoyButtonEvent = extern struct {
     _padding_1: u8 = 0,
     _padding_2: u8 = 0,
 
-    fn to_c(self: *JoyButtonEvent) *C.SDL_JoyButtonEvent {
+    inline fn to_c(self: *JoyButtonEvent) *C.SDL_JoyButtonEvent {
         return @ptrCast(@alignCast(self));
     }
 };
@@ -3103,7 +3365,7 @@ pub const JoyDeviceEvent = extern struct {
     timestamp: u64 = 0,
     joystick_id: JoystickID = .{},
 
-    fn to_c(self: *JoyDeviceEvent) *C.SDL_JoyDeviceEvent {
+    inline fn to_c(self: *JoyDeviceEvent) *C.SDL_JoyDeviceEvent {
         return @ptrCast(@alignCast(self));
     }
 };
@@ -3116,7 +3378,7 @@ pub const JoyBatteryEvent = extern struct {
     state: PowerState = .UNKNOWN,
     percent: c_int = 0,
 
-    fn to_c(self: *JoyBatteryEvent) *C.SDL_JoyBatteryEvent {
+    inline fn to_c(self: *JoyBatteryEvent) *C.SDL_JoyBatteryEvent {
         return @ptrCast(@alignCast(self));
     }
 };
@@ -3133,7 +3395,7 @@ pub const GamepadAxisEvent = extern struct {
     value: i16 = 0,
     _padding_4: u16 = 0,
 
-    fn to_c(self: *GamepadAxisEvent) *C.SDL_GamepadAxisEvent {
+    inline fn to_c(self: *GamepadAxisEvent) *C.SDL_GamepadAxisEvent {
         return @ptrCast(@alignCast(self));
     }
 };
@@ -3148,7 +3410,7 @@ pub const GamepadButtonEvent = extern struct {
     _padding_1: u8 = 0,
     _padding_2: u8 = 0,
 
-    fn to_c(self: *GamepadButtonEvent) *C.SDL_GamepadButtonEvent {
+    inline fn to_c(self: *GamepadButtonEvent) *C.SDL_GamepadButtonEvent {
         return @ptrCast(@alignCast(self));
     }
 };
@@ -3159,7 +3421,7 @@ pub const GamepadDeviceEvent = extern struct {
     timestamp: u64 = 0,
     joystick_id: JoystickID = .{},
 
-    fn to_c(self: *GamepadDeviceEvent) *C.SDL_GamepadDeviceEvent {
+    inline fn to_c(self: *GamepadDeviceEvent) *C.SDL_GamepadDeviceEvent {
         return @ptrCast(@alignCast(self));
     }
 };
@@ -3174,7 +3436,7 @@ pub const GamepadTouchpadEvent = extern struct {
     pos: FVec = FVec{},
     pressure: f32 = 0,
 
-    fn to_c(self: *GamepadTouchpadEvent) *C.SDL_GamepadTouchpadEvent {
+    inline fn to_c(self: *GamepadTouchpadEvent) *C.SDL_GamepadTouchpadEvent {
         return @ptrCast(@alignCast(self));
     }
 
@@ -3196,7 +3458,7 @@ pub const GamepadSensorEvent = extern struct {
     data: [3]f32 = @splat(0.0),
     sensor_timestamp: u64 = 0,
 
-    fn to_c(self: *GamepadSensorEvent) *C.SDL_GamepadSensorEvent {
+    inline fn to_c(self: *GamepadSensorEvent) *C.SDL_GamepadSensorEvent {
         return @ptrCast(@alignCast(self));
     }
 };
@@ -3211,7 +3473,7 @@ pub const AudioDeviceEvent = extern struct {
     _padding_2: u8 = 0,
     _padding_3: u8 = 0,
 
-    fn to_c(self: *AudioDeviceEvent) *C.SDL_AudioDeviceEvent {
+    inline fn to_c(self: *AudioDeviceEvent) *C.SDL_AudioDeviceEvent {
         return @ptrCast(@alignCast(self));
     }
 };
@@ -3222,7 +3484,7 @@ pub const CameraDeviceEvent = extern struct {
     timestamp: u64 = 0,
     device_id: CameraID = .{},
 
-    fn to_c(self: *CameraDeviceEvent) *C.SDL_CameraDeviceEvent {
+    inline fn to_c(self: *CameraDeviceEvent) *C.SDL_CameraDeviceEvent {
         return @ptrCast(@alignCast(self));
     }
 };
@@ -3233,7 +3495,7 @@ pub const RenderEvent = extern struct {
     timestamp: u64 = 0,
     window_id: WindowID = .{},
 
-    fn to_c(self: *RenderEvent) *C.SDL_RenderEvent {
+    inline fn to_c(self: *RenderEvent) *C.SDL_RenderEvent {
         return @ptrCast(@alignCast(self));
     }
 };
@@ -3249,7 +3511,7 @@ pub const TouchFingerEvent = extern struct {
     pressure: f32 = 0,
     window_id: WindowID = .{},
 
-    fn to_c(self: *TouchFingerEvent) *C.SDL_TouchFingerEvent {
+    inline fn to_c(self: *TouchFingerEvent) *C.SDL_TouchFingerEvent {
         return @ptrCast(@alignCast(self));
     }
 
@@ -3269,7 +3531,7 @@ pub const PenProximityEvent = extern struct {
     window_id: WindowID = .{},
     pen_id: PenID = .{},
 
-    fn to_c(self: *PenProximityEvent) *C.SDL_PenProximityEvent {
+    inline fn to_c(self: *PenProximityEvent) *C.SDL_PenProximityEvent {
         return @ptrCast(@alignCast(self));
     }
 };
@@ -3283,7 +3545,7 @@ pub const PenMotionEvent = extern struct {
     pen_state: PenInputFlags = .{},
     pos: FVec = FVec{},
 
-    fn to_c(self: *PenMotionEvent) *C.SDL_PenMotionEvent {
+    inline fn to_c(self: *PenMotionEvent) *C.SDL_PenMotionEvent {
         return @ptrCast(@alignCast(self));
     }
 
@@ -3307,7 +3569,7 @@ pub const PenTouchEvent = extern struct {
     eraser: bool = false,
     down: bool = false,
 
-    fn to_c(self: *PenTouchEvent) *C.SDL_PenTouchEvent {
+    inline fn to_c(self: *PenTouchEvent) *C.SDL_PenTouchEvent {
         return @ptrCast(@alignCast(self));
     }
 
@@ -3331,7 +3593,7 @@ pub const PenButtonEvent = extern struct {
     button: u8 = 0,
     down: bool = false,
 
-    fn to_c(self: *PenButtonEvent) *C.SDL_PenButtonEvent {
+    inline fn to_c(self: *PenButtonEvent) *C.SDL_PenButtonEvent {
         return @ptrCast(@alignCast(self));
     }
 
@@ -3355,7 +3617,7 @@ pub const PenAxisEvent = extern struct {
     axis: PenAxis = .PRESSURE,
     value: f32 = 0.0,
 
-    fn to_c(self: *PenAxisEvent) *C.SDL_PenAxisEvent {
+    inline fn to_c(self: *PenAxisEvent) *C.SDL_PenAxisEvent {
         return @ptrCast(@alignCast(self));
     }
 
@@ -3377,7 +3639,7 @@ pub const DropEvent = extern struct {
     source: ?[*]const u8 = null,
     data: ?[*]const u8 = null,
 
-    fn to_c(self: *DropEvent) *C.SDL_DropEvent {
+    inline fn to_c(self: *DropEvent) *C.SDL_DropEvent {
         return @ptrCast(@alignCast(self));
     }
 
@@ -3398,7 +3660,7 @@ pub const ClipboardEvent = extern struct {
     num_mime_types: i32 = 0,
     mime_types: ?[*]const [*:0]const u8 = null,
 
-    fn to_c(self: *ClipboardEvent) *C.SDL_ClipboardEvent {
+    inline fn to_c(self: *ClipboardEvent) *C.SDL_ClipboardEvent {
         return @ptrCast(@alignCast(self));
     }
 };
@@ -3411,7 +3673,7 @@ pub const SensorEvent = extern struct {
     data: [6]f32 = @splat(0),
     sensor_timestamp: u64 = 0,
 
-    fn to_c(self: *SensorEvent) *C.SDL_SensorEvent {
+    inline fn to_c(self: *SensorEvent) *C.SDL_SensorEvent {
         return @ptrCast(@alignCast(self));
     }
 };
@@ -3421,7 +3683,7 @@ pub const QuitEvent = extern struct {
     reserved: u32 = 0,
     timestamp: u64 = 0,
 
-    fn to_c(self: *QuitEvent) *C.SDL_QuitEvent {
+    inline fn to_c(self: *QuitEvent) *C.SDL_QuitEvent {
         return @ptrCast(@alignCast(self));
     }
 };
@@ -3435,7 +3697,7 @@ pub const UserEvent = extern struct {
     user_data_1: ?*anyopaque = null,
     user_data_2: ?*anyopaque = null,
 
-    fn to_c(self: *UserEvent) *C.SDL_UserEvent {
+    inline fn to_c(self: *UserEvent) *C.SDL_UserEvent {
         return @ptrCast(@alignCast(self));
     }
 };
@@ -3487,10 +3749,10 @@ pub const PenAxis = enum(c_uint) {
 
     pub const AXIS_COUNT: c_uint = C.SDL_PEN_AXIS_COUNT;
 
-    fn to_c(self: PenAxis) c_uint {
+    inline fn to_c(self: PenAxis) c_uint {
         return @intFromEnum(self);
     }
-    fn from_c(val: c_uint) PenAxis {
+    inline fn from_c(val: c_uint) PenAxis {
         return @enumFromInt(val);
     }
 };
@@ -3499,10 +3761,10 @@ pub const MouseWheelDirection = enum(c_uint) {
     NORMAL = C.SDL_MOUSEWHEEL_NORMAL,
     FLIPPED = C.SDL_MOUSEWHEEL_FLIPPED,
 
-    fn to_c(self: MouseWheelDirection) c_uint {
+    inline fn to_c(self: MouseWheelDirection) c_uint {
         return @intFromEnum(self);
     }
-    fn from_c(val: c_uint) MouseWheelDirection {
+    inline fn from_c(val: c_uint) MouseWheelDirection {
         return @enumFromInt(val);
     }
 };
@@ -3515,10 +3777,10 @@ pub const PowerState = enum(c_int) {
     CHARGING = C.SDL_POWERSTATE_CHARGING,
     CHARGED = C.SDL_POWERSTATE_CHARGED,
 
-    fn to_c(self: PowerState) c_uint {
+    inline fn to_c(self: PowerState) c_uint {
         return @intFromEnum(self);
     }
-    fn from_c(val: c_uint) PowerState {
+    inline fn from_c(val: c_uint) PowerState {
         return @enumFromInt(val);
     }
 };
@@ -3644,10 +3906,10 @@ pub const EventType = enum(u32) {
 
     const ENUM_PADDING = C.SDL_EVENT_ENUM_PADDING;
 
-    fn to_c(self: EventType) c_uint {
+    inline fn to_c(self: EventType) c_uint {
         return @intFromEnum(self);
     }
-    fn from_c(val: c_uint) EventType {
+    inline fn from_c(val: c_uint) EventType {
         return @enumFromInt(val);
     }
 };
@@ -3904,10 +4166,10 @@ pub const Scancode = enum(c_uint) {
     // pub const SDL_SCANCODE_RESERVED: c_int = 400;
     // pub const SDL_SCANCODE_COUNT: c_int = 512;
 
-    fn to_c(self: Scancode) c_uint {
+    inline fn to_c(self: Scancode) c_uint {
         return @intFromEnum(self);
     }
-    fn from_c(val: c_uint) Scancode {
+    inline fn from_c(val: c_uint) Scancode {
         return @enumFromInt(val);
     }
 };
