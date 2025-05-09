@@ -22,9 +22,9 @@ var renderer: *SDL.Renderer = undefined;
 var sprite_texture: *SDL.Texture = undefined;
 var sounds: SDL.WaveAudio = undefined;
 var audio_device: SDL.AudioDeviceID = undefined;
-var audio_streams_buf: [8]SDL.AudioStream = undefined;
-var audio_streams: []SDL.AudioStream = audio_streams_buf[0..0];
-var gamepad: ?SDL.Gamepad = undefined;
+var audio_streams_buf: [8]*SDL.AudioStream = undefined;
+var audio_streams: []*SDL.AudioStream = audio_streams_buf[0..0];
+var gamepad: ?*SDL.Gamepad = undefined;
 var phcon: PhysicalControllerState = undefined;
 var prev_phcon: PhysicalControllerState = undefined;
 var vcon: VirtualControllerState = undefined;
@@ -118,23 +118,21 @@ pub fn app_init(app_state: ?*?*anyopaque, argv: [][*:0]u8) !SDL.AppResult {
     errdefer audio_device.close_device();
 
     errdefer while (audio_streams.len != 0) {
-        audio_streams[audio_streams.len - 1].
-        c.SDL_DestroyAudioStream(audio_streams[audio_streams.len - 1]);
-        audio_streams.len -= 1;
+        audio_streams[audio_streams.len - 1].destroy();
+        if (audio_streams.len != 0) audio_streams.len -= 1;
     };
     while (audio_streams.len < audio_streams_buf.len) {
         audio_streams.len += 1;
-        audio_streams[audio_streams.len - 1] = try errify(c.SDL_CreateAudioStream(&sounds_spec, null));
+        audio_streams[audio_streams.len - 1] = try SDL.AudioStream.create(.same_input_and_output(&sounds.spec));
     }
 
-    try errify(c.SDL_BindAudioStreams(audio_device, @ptrCast(audio_streams.ptr), @intCast(audio_streams.len)));
+    try audio_device.bind_many_audio_streams(audio_streams);
 
     {
-        var count: c_int = 0;
-        const gamepads: [*]c.SDL_JoystickID = try errify(c.SDL_GetGamepads(&count));
-        defer c.SDL_free(gamepads);
+        const gamepads_list = try SDL.JoystickOrGamepad.get_all_gamepads();
+        defer gamepads_list.free();
 
-        gamepad = if (count > 0) try errify(c.SDL_OpenGamepad(gamepads[0])) else null;
+        gamepad = if (gamepads_list.list.len > 0) try gamepads_list.list[0].open_gamepad() else null;
     }
     errdefer c.SDL_CloseGamepad(gamepad);
 
@@ -344,7 +342,7 @@ fn fmt_sdl_drivers(write_buf: *std.BoundedArray(u8, 250), current_driver: [*:0]c
 }
 
 fn load_best_score() !void {
-    const storage = try SDL.Storage.open_user_storage_folder(best_score_storage_org_name, best_score_storage_app_name, SDL.PropertiesID{});
+    const storage = try SDL.Storage.open_user_storage_folder(best_score_storage_org_name, best_score_storage_app_name, SDL.Properties{});
     defer storage.close() catch {};
 
     while (!storage.is_ready()) {
@@ -369,7 +367,7 @@ fn load_best_score() !void {
 }
 
 fn save_best_score() !void {
-    const storage = try SDL.Storage.open_user_storage_folder(best_score_storage_org_name, best_score_storage_app_name, SDL.PropertiesID{});
+    const storage = try SDL.Storage.open_user_storage_folder(best_score_storage_org_name, best_score_storage_app_name, SDL.Properties{});
     defer storage.close() catch {};
 
     while (!storage.is_ready()) {

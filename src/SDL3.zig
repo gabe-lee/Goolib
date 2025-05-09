@@ -37,6 +37,10 @@ inline fn positive_or_failure(result_int: anytype) SDL3Error!@TypeOf(result_int)
     if (result_int < 0) return SDL3Error.SDL_operation_failure;
     return result_int;
 }
+inline fn positive_or_null(result_int: anytype) SDL3Error!@TypeOf(result_int) {
+    if (result_int < 0) return SDL3Error.SDL_null_value;
+    return result_int;
+}
 inline fn ok_or_null(result: bool) SDL3Error!void {
     if (result) return;
     return SDL3Error.SDL_null_value;
@@ -50,6 +54,12 @@ inline fn nonempty_str_or_null(result: ?[*:0]u8) SDL3Error![*:0]u8 {
         if (ptr[0] != 0) return ptr;
     }
     return SDL3Error.SDL_null_value;
+}
+inline fn valid_guid_or_null(result: C.SDL_GUID) SDL3Error!GUID {
+    const as_u64s: [2]u64 = @bitCast(result.data);
+    const final = as_u64s[0] | as_u64s[1];
+    if (final == 0) return SDL3Error.SDL_null_value;
+    return GUID{ .data = result.data };
 }
 inline fn nonempty_str_or_failure(result: ?[*:0]u8) SDL3Error![*:0]u8 {
     if (result) |ptr| {
@@ -464,8 +474,8 @@ pub const IOStream = opaque {
     pub fn close(self: *IOStream) SDL3Error!void {
         return ok_or_failure(C.SDL_CloseIO(self.to_c()));
     }
-    pub fn get_properties(self: *IOStream) SDL3Error!PropertiesID {
-        return PropertiesID{ .id = try nonzero_or_null(C.SDL_GetIOProperties(self.to_c())) };
+    pub fn get_properties(self: *IOStream) SDL3Error!Properties {
+        return Properties{ .id = try nonzero_or_null(C.SDL_GetIOProperties(self.to_c())) };
     }
     pub fn get_status(self: *IOStream) IOStatus {
         return @enumFromInt(C.SDL_GetIOStatus(self.to_c()));
@@ -744,41 +754,92 @@ pub const INinePatch = extern struct {
     }
 };
 
-pub const PropertiesID = struct {
-    id: C.SDL_PropertiesID = 0,
+pub const Properties = struct {
+    id: u32 = 0,
 
-    pub const NULL = PropertiesID{ .id = 0 };
+    pub const NULL = Properties{ .id = 0 };
 
-    // pub extern fn SDL_GetGlobalProperties() SDL_PropertiesID;
-    // pub extern fn SDL_CreateProperties() SDL_PropertiesID;
-    // pub extern fn SDL_CopyProperties(src: SDL_PropertiesID, dst: SDL_PropertiesID) bool;
-    // pub extern fn SDL_LockProperties(props: SDL_PropertiesID) bool;
-    // pub extern fn SDL_UnlockProperties(props: SDL_PropertiesID) void;
-    // pub const SDL_CleanupPropertyCallback = ?*const fn (?*anyopaque, ?*anyopaque) callconv(.c) void;
-    // pub extern fn SDL_SetPointerPropertyWithCleanup(props: SDL_PropertiesID, name: [*c]const u8, value: ?*anyopaque, cleanup: SDL_CleanupPropertyCallback, userdata: ?*anyopaque) bool;
-    // pub extern fn SDL_SetPointerProperty(props: SDL_PropertiesID, name: [*c]const u8, value: ?*anyopaque) bool;
-    // pub extern fn SDL_SetStringProperty(props: SDL_PropertiesID, name: [*c]const u8, value: [*c]const u8) bool;
-    // pub extern fn SDL_SetNumberProperty(props: SDL_PropertiesID, name: [*c]const u8, value: Sint64) bool;
-    // pub extern fn SDL_SetFloatProperty(props: SDL_PropertiesID, name: [*c]const u8, value: f32) bool;
-    // pub extern fn SDL_SetBooleanProperty(props: SDL_PropertiesID, name: [*c]const u8, value: bool) bool;
-    // pub extern fn SDL_HasProperty(props: SDL_PropertiesID, name: [*c]const u8) bool;
-    // pub extern fn SDL_GetPropertyType(props: SDL_PropertiesID, name: [*c]const u8) SDL_PropertyType;
-    // pub extern fn SDL_GetPointerProperty(props: SDL_PropertiesID, name: [*c]const u8, default_value: ?*anyopaque) ?*anyopaque;
-    // pub extern fn SDL_GetStringProperty(props: SDL_PropertiesID, name: [*c]const u8, default_value: [*c]const u8) [*c]const u8;
-    // pub extern fn SDL_GetNumberProperty(props: SDL_PropertiesID, name: [*c]const u8, default_value: Sint64) Sint64;
-    // pub extern fn SDL_GetFloatProperty(props: SDL_PropertiesID, name: [*c]const u8, default_value: f32) f32;
-    // pub extern fn SDL_GetBooleanProperty(props: SDL_PropertiesID, name: [*c]const u8, default_value: bool) bool;
-    // pub extern fn SDL_ClearProperty(props: SDL_PropertiesID, name: [*c]const u8) bool;
-    // pub const SDL_EnumeratePropertiesCallback = ?*const fn (?*anyopaque, SDL_PropertiesID, [*c]const u8) callconv(.c) void;
-    // pub extern fn SDL_EnumerateProperties(props: SDL_PropertiesID, callback: SDL_EnumeratePropertiesCallback, userdata: ?*anyopaque) bool;
-    // pub extern fn SDL_DestroyProperties(props: SDL_PropertiesID) void;
+    pub inline fn is_null(self: Properties) bool {
+        return self.id == 0;
+    }
+
+    inline fn new(id: u32) SDL3Error!Properties {
+        return Properties{ .id = try nonzero_or_null(id) };
+    }
+
+    pub fn global_properties() SDL3Error!Properties {
+        return new(C.SDL_GetGlobalProperties());
+    }
+    pub fn create_new() SDL3Error!Properties {
+        return new(C.SDL_CreateProperties());
+    }
+    pub fn copy_to(self: Properties, dst_props: Properties) SDL3Error!void {
+        return ok_or_failure(C.SDL_CopyProperties(self.id, dst_props.id));
+    }
+    pub fn lock(self: Properties) SDL3Error!void {
+        return ok_or_failure(C.SDL_LockProperties(self.id));
+    }
+    pub fn unlock(self: Properties) void {
+        C.SDL_UnlockProperties(self.id);
+    }
+    pub fn set_pointer_property_with_cleanup(self: Properties, name: [*:0]const u8, value: ?*anyopaque, cleanup: *PropertyCleanupCallback, user_data: ?*anyopaque) SDL3Error!void {
+        return ok_or_failure(C.SDL_SetPointerPropertyWithCleanup(self.id, name, value, @ptrCast(@alignCast(cleanup)), user_data));
+    }
+    pub fn set_pointer_property(self: Properties, name: [*:0]const u8, value: ?*anyopaque) SDL3Error!void {
+        return ok_or_failure(C.SDL_SetPointerProperty(self.id, name, value));
+    }
+    pub fn set_string_property(self: Properties, name: [*:0]const u8, value: [*:0]const u8) SDL3Error!void {
+        return ok_or_failure(C.SDL_SetStringProperty(self.id, name, value));
+    }
+    pub fn set_integer_property(self: Properties, name: [*:0]const u8, value: i64) SDL3Error!void {
+        return ok_or_failure(C.SDL_SetNumberProperty(self.id, name, value));
+    }
+    pub fn set_float_property(self: Properties, name: [*:0]const u8, value: f32) SDL3Error!void {
+        return ok_or_failure(C.SDL_SetFloatProperty(self.id, name, value));
+    }
+    pub fn set_bool_property(self: Properties, name: [*:0]const u8, value: bool) SDL3Error!void {
+        return ok_or_failure(C.SDL_SetBooleanProperty(self.id, name, value));
+    }
+    pub fn has_property(self: Properties, name: [*:0]const u8) bool {
+        return C.SDL_HasProperty(self.id, name);
+    }
+    pub fn get_property_type(self: Properties, name: [*:0]const u8) PropertyType {
+        return PropertyType.from_c(C.SDL_GetPropertyType(self.id, name));
+    }
+    pub fn get_pointer_property_or_default(self: Properties, name: [*:0]const u8, default: ?*anyopaque) ?*anyopaque {
+        return C.SDL_GetPointerProperty(self.id, name, default);
+    }
+    pub fn get_string_property_or_default(self: Properties, name: [*:0]const u8, default: [*:0]const u8) [*:0]const u8 {
+        return C.SDL_GetStringProperty(self.id, name, default);
+    }
+    pub fn get_integer_property_or_default(self: Properties, name: [*:0]const u8, default: i64) i64 {
+        return C.SDL_GetNumberProperty(self.id, name, default);
+    }
+    pub fn get_float_property_or_default(self: Properties, name: [*:0]const u8, default: f32) f32 {
+        return C.SDL_GetFloatProperty(self.id, name, default);
+    }
+    pub fn get_bool_property_or_default(self: Properties, name: [*:0]const u8, default: bool) bool {
+        return C.SDL_GetBooleanProperty(self.id, name, default);
+    }
+    pub fn clear_property(self: Properties, name: [*:0]const u8) SDL3Error!void {
+        return ok_or_failure(C.SDL_ClearProperty(self.id, name));
+    }
+    pub fn do_callback_on_each_property(self: Properties, callback: *EnumeratePropertiesCallback, user_data: ?*anyopaque) SDL3Error!void {
+        return ok_or_failure(C.SDL_EnumerateProperties(self.id, @ptrCast(@alignCast(callback)), user_data));
+    }
+    pub fn destroy(self: Properties) void {
+        C.SDL_DestroyProperties(self.id);
+    }
 };
+
+pub const PropertyCleanupCallback = fn (user_data: ?*anyopaque, value_ptr: ?*anyopaque) callconv(.c) void;
+pub const EnumeratePropertiesCallback = fn (user_data: ?*anyopaque, props_id: u32, prop_name: [*:0]const u8) callconv(.c) void;
 
 pub const PropertyType = enum(c_uint) {
     INVALID = C.SDL_PROPERTY_TYPE_INVALID,
     POINTER = C.SDL_PROPERTY_TYPE_POINTER,
     STRING = C.SDL_PROPERTY_TYPE_STRING,
-    NUMBER = C.SDL_PROPERTY_TYPE_NUMBER,
+    INTEGER = C.SDL_PROPERTY_TYPE_NUMBER,
     FLOAT = C.SDL_PROPERTY_TYPE_FLOAT,
     BOOLEAN = C.SDL_PROPERTY_TYPE_BOOLEAN,
 
@@ -1157,8 +1218,8 @@ pub const FlipMode = enum(c_uint) {
 };
 
 pub const Clipboard = struct {
-    pub fn get_text() SDL3Error!Text {
-        return Text{ .ptr = try nonempty_str_or_null(C.SDL_GetClipboardText()) };
+    pub fn get_text() SDL3Error!String {
+        return String{ .ptr = try nonempty_str_or_null(C.SDL_GetClipboardText()) };
     }
     pub fn set_text(text: [*:0]const u8) SDL3Error!void {
         return ok_or_failure(C.SDL_SetClipboardText(text));
@@ -1179,14 +1240,14 @@ pub const Clipboard = struct {
     // pub extern fn SDL_GetClipboardMimeTypes(num_mime_types: [*c]usize) [*c][*c]u8;
 };
 
-pub const Text = extern struct {
+pub const String = extern struct {
     ptr: [*:0]u8,
 
-    pub fn slice(self: Text) [:0]u8 {
+    pub fn slice(self: String) [:0]u8 {
         return Root.Utils.make_slice_from_sentinel_ptr(u8, 0, self.ptr);
     }
 
-    pub fn free(self: Text) void {
+    pub fn free(self: String) void {
         return sdl_free(self.ptr);
     }
 };
@@ -1216,8 +1277,8 @@ pub const DisplayID = extern struct {
     pub fn get_primary_display() SDL3Error!DisplayID {
         return DisplayID{ .id = try nonzero_or_null(C.SDL_GetPrimaryDisplay()) };
     }
-    pub fn get_properties(self: DisplayID) SDL3Error!PropertiesID {
-        return PropertiesID{ .id = try nonzero_or_null(C.SDL_GetDisplayProperties(self.id)) };
+    pub fn get_properties(self: DisplayID) SDL3Error!Properties {
+        return Properties{ .id = try nonzero_or_null(C.SDL_GetDisplayProperties(self.id)) };
     }
     pub fn get_name(self: DisplayID) SDL3Error![*:0]const u8 {
         return ptr_cast_or_null([*:0]const u8, C.SDL_GetDisplayName(self.id));
@@ -1338,7 +1399,7 @@ pub const Window = opaque {
     pub fn create_popup_window(parent: *Window, options: CreatePopupWindowOptions) SDL3Error!*Window {
         return ptr_cast_or_failure(*Window, C.SDL_CreatePopupWindow(parent.to_c(), options.x_offset, options.y_offset, options.width, options.height, options.flags));
     }
-    pub fn create_window_with_properties(properties: PropertiesID) SDL3Error!*Window {
+    pub fn create_window_with_properties(properties: Properties) SDL3Error!*Window {
         return ptr_cast_or_failure(*Window, C.SDL_CreateWindowWithProperties(properties.id));
     }
     pub fn get_id(self: *Window) SDL3Error!WindowID {
@@ -1347,8 +1408,8 @@ pub const Window = opaque {
     pub fn get_parent_window(self: *Window) SDL3Error!*Window {
         return ptr_cast_or_null(*Window, C.SDL_GetWindowParent(self.to_c()));
     }
-    pub fn get_properties(self: *Window) SDL3Error!PropertiesID {
-        return PropertiesID{ .id = try nonzero_or_null(C.SDL_GetWindowProperties(self.to_c())) };
+    pub fn get_properties(self: *Window) SDL3Error!Properties {
+        return Properties{ .id = try nonzero_or_null(C.SDL_GetWindowProperties(self.to_c())) };
     }
     pub fn get_flags(self: *Window) WindowFlags {
         return WindowFlags{ .flags = C.SDL_GetWindowFlags(self.to_c()) };
@@ -1778,8 +1839,8 @@ pub const Surface = opaque {
     pub fn destroy(self: *Surface) void {
         C.SDL_DestroySurface(self.to_c());
     }
-    pub fn get_properties(self: *Surface) SDL3Error!PropertiesID {
-        return PropertiesID{ .id = try nonzero_or_null(C.SDL_GetSurfaceProperties(self.to_c())) };
+    pub fn get_properties(self: *Surface) SDL3Error!Properties {
+        return Properties{ .id = try nonzero_or_null(C.SDL_GetSurfaceProperties(self.to_c())) };
     }
     pub fn set_colorspace(self: *Surface, colorspace: Colorspace) SDL3Error!void {
         try ok_or_failure(C.SDL_SetSurfaceColorspace(self.to_c(), colorspace.to_c()));
@@ -1889,7 +1950,7 @@ pub const Surface = opaque {
     pub fn convert_to_format(self: *Surface, format: PixelFormat) SDL3Error!*Surface {
         return ptr_cast_or_failure(*Surface, C.SDL_ConvertSurface(self.to_c(), format.to_c()));
     }
-    pub fn convert_to_format_and_colorspace(self: *Surface, format: PixelFormat, optional_palette: ?*ColorPalette, color_space: Colorspace, extra_color_props: PropertiesID) SDL3Error!*Surface {
+    pub fn convert_to_format_and_colorspace(self: *Surface, format: PixelFormat, optional_palette: ?*ColorPalette, color_space: Colorspace, extra_color_props: Properties) SDL3Error!*Surface {
         return ptr_cast_or_failure(*Surface, C.SDL_ConvertSurface(self.to_c(), format.to_c(), @ptrCast(@alignCast(optional_palette)), color_space.to_c(), extra_color_props.id));
     }
     pub fn premultiply_alpha(self: *Surface, linear: bool) SDL3Error!void {
@@ -2014,7 +2075,7 @@ pub const PixelRect = extern struct {
     bytes_per_row: c_int,
     pixel_format: PixelFormat,
     colorspace: Colorspace = .UNKNOWN,
-    optional_color_properties: PropertiesID = PropertiesID.NULL,
+    optional_color_properties: Properties = Properties.NULL,
 
     pub fn rect(size: IVec, ptr: [*]u8, bytes_per_row: c_uint, format: PixelFormat) PixelRect {
         return PixelRect{
@@ -2033,7 +2094,7 @@ pub const PixelRect = extern struct {
             .colorspace = colorspace,
         };
     }
-    pub fn rect_with_colorspace_and_props(size: IVec, ptr: [*]u8, bytes_per_row: c_uint, format: PixelFormat, colorspace: Colorspace, properties: PropertiesID) PixelRect {
+    pub fn rect_with_colorspace_and_props(size: IVec, ptr: [*]u8, bytes_per_row: c_uint, format: PixelFormat, colorspace: Colorspace, properties: Properties) PixelRect {
         return PixelRect{
             .size = size,
             .ptr = ptr,
@@ -2126,7 +2187,7 @@ pub const Renderer = opaque {
     pub fn get_driver_name(index: c_int) SDL3Error![*:0]const u8 {
         return ptr_cast_or_null([*:0]const u8, C.SDL_GetRenderDriver(index));
     }
-    pub fn create_renderer_with_properties(props_id: PropertiesID) SDL3Error!*Renderer {
+    pub fn create_renderer_with_properties(props_id: Properties) SDL3Error!*Renderer {
         return ptr_cast_or_failure(*Renderer, C.SDL_CreateRendererWithProperties(props_id));
     }
     pub fn create_software_renderer(surface: *Surface) SDL3Error!*Renderer {
@@ -2138,8 +2199,8 @@ pub const Renderer = opaque {
     pub fn get_name(self: *Renderer) SDL3Error![*:0]const u8 {
         return ptr_cast_or_null([*:0]const u8, C.SDL_GetRenderWindow(self.to_c()));
     }
-    pub fn get_properties_id(self: *Renderer) SDL3Error!PropertiesID {
-        return PropertiesID{ .id = try nonzero_or_null(C.SDL_GetRendererProperties(self.to_c())) };
+    pub fn get_properties_id(self: *Renderer) SDL3Error!Properties {
+        return Properties{ .id = try nonzero_or_null(C.SDL_GetRendererProperties(self.to_c())) };
     }
     pub fn get_true_output_size(self: *Renderer) SDL3Error!IVec {
         var size = IVec{};
@@ -2157,7 +2218,7 @@ pub const Renderer = opaque {
     pub fn create_texture_from_surface(self: *Renderer, surface: *Surface) SDL3Error!*Texture {
         return ptr_cast_or_failure(C.SDL_CreateTextureFromSurface(self.to_c(), @ptrCast(@alignCast(surface))), *Texture);
     }
-    pub fn create_texture_with_properties(self: *Renderer, props_id: PropertiesID) SDL3Error!*Texture {
+    pub fn create_texture_with_properties(self: *Renderer, props_id: Properties) SDL3Error!*Texture {
         return ptr_cast_or_failure(*Texture, C.SDL_CreateTextureWithProperties(self.to_c(), props_id.id));
     }
     pub fn set_texture_target(self: *Renderer, texture: *Texture) SDL3Error!void {
@@ -2416,7 +2477,7 @@ pub const Texture = opaque {
         C.SDL_DestroyTexture(self.to_c());
     }
 
-    pub fn get_properties(self: *Texture) PropertiesID {
+    pub fn get_properties(self: *Texture) Properties {
         return C.SDL_GetTextureProperties(self.to_c());
     }
     pub fn get_renderer(self: *Texture) SDL3Error!*Renderer {
@@ -2673,7 +2734,7 @@ pub const AudioDeviceID = extern struct {
     pub fn get_channel_map(self: AudioDeviceID) SDL3Error!AudioDeviceFormat {
         var len: c_int = 0;
         const ptr = ptr_cast_or_null([*]c_int, C.SDL_GetAudioDeviceChannelMap(self.id, &len));
-        return AudioDeviceChannelMap{
+        return AudioChannelMap{
             .map = ptr[0..len],
         };
     }
@@ -2713,6 +2774,9 @@ pub const AudioDeviceID = extern struct {
     pub fn bind_many_audio_streams(self: AudioDeviceID, audio_streams: []AudioStream) SDL3Error!void {
         return ok_or_failure(C.SDL_BindAudioStreams(self.id, @ptrCast(@alignCast(audio_streams.ptr)), @intCast(audio_streams.len)));
     }
+    pub fn open_new_audio_stream(self: AudioDeviceID, spec: AudioSpec, callback: ?*AudioStreamCallback, user_data: ?*anyopaque) SDL3Error!*AudioStream {
+        return ptr_cast_or_failure(*AudioStream, C.SDL_OpenAudioDeviceStream(self.id, spec.to_c(), @ptrCast(@alignCast(callback)), user_data));
+    }
 };
 
 /// Helper struct for SDL functions that require a `?*AudioSpec` where:
@@ -2734,10 +2798,10 @@ pub const AudioDeviceFormat = extern struct {
     sample_frames_len: c_int,
 };
 
-pub const AudioDeviceChannelMap = extern struct {
+pub const AudioChannelMap = extern struct {
     map: []c_int,
 
-    pub fn free(self: *AudioDeviceChannelMap) void {
+    pub fn free(self: *AudioChannelMap) void {
         sdl_free(self.map.ptr);
     }
 };
@@ -2754,38 +2818,130 @@ pub const AudioStream = opaque {
     fn to_c(self: *AudioStream) *C.SDL_AudioStream {
         return @ptrCast(@alignCast(self));
     }
-    //CHECKPOINT
-    // pub extern fn SDL_UnbindAudioStreams(streams: [*c]const ?*SDL_AudioStream, num_streams: c_int) void;
-    // pub extern fn SDL_UnbindAudioStream(stream: ?*SDL_AudioStream) void;
-    // pub extern fn SDL_GetAudioStreamDevice(stream: ?*SDL_AudioStream) SDL_AudioDeviceID;
-    // pub extern fn SDL_CreateAudioStream(src_spec: [*c]const SDL_AudioSpec, dst_spec: [*c]const SDL_AudioSpec) ?*SDL_AudioStream;
-    // pub extern fn SDL_GetAudioStreamProperties(stream: ?*SDL_AudioStream) SDL_PropertiesID;
-    // pub extern fn SDL_GetAudioStreamFormat(stream: ?*SDL_AudioStream, src_spec: [*c]SDL_AudioSpec, dst_spec: [*c]SDL_AudioSpec) bool;
-    // pub extern fn SDL_SetAudioStreamFormat(stream: ?*SDL_AudioStream, src_spec: [*c]const SDL_AudioSpec, dst_spec: [*c]const SDL_AudioSpec) bool;
-    // pub extern fn SDL_GetAudioStreamFrequencyRatio(stream: ?*SDL_AudioStream) f32;
-    // pub extern fn SDL_SetAudioStreamFrequencyRatio(stream: ?*SDL_AudioStream, ratio: f32) bool;
-    // pub extern fn SDL_GetAudioStreamGain(stream: ?*SDL_AudioStream) f32;
-    // pub extern fn SDL_SetAudioStreamGain(stream: ?*SDL_AudioStream, gain: f32) bool;
-    // pub extern fn SDL_GetAudioStreamInputChannelMap(stream: ?*SDL_AudioStream, count: [*c]c_int) [*c]c_int;
-    // pub extern fn SDL_GetAudioStreamOutputChannelMap(stream: ?*SDL_AudioStream, count: [*c]c_int) [*c]c_int;
-    // pub extern fn SDL_SetAudioStreamInputChannelMap(stream: ?*SDL_AudioStream, chmap: [*c]const c_int, count: c_int) bool;
-    // pub extern fn SDL_SetAudioStreamOutputChannelMap(stream: ?*SDL_AudioStream, chmap: [*c]const c_int, count: c_int) bool;
-    // pub extern fn SDL_PutAudioStreamData(stream: ?*SDL_AudioStream, buf: ?*const anyopaque, len: c_int) bool;
-    // pub extern fn SDL_GetAudioStreamData(stream: ?*SDL_AudioStream, buf: ?*anyopaque, len: c_int) c_int;
-    // pub extern fn SDL_GetAudioStreamAvailable(stream: ?*SDL_AudioStream) c_int;
-    // pub extern fn SDL_GetAudioStreamQueued(stream: ?*SDL_AudioStream) c_int;
-    // pub extern fn SDL_FlushAudioStream(stream: ?*SDL_AudioStream) bool;
-    // pub extern fn SDL_ClearAudioStream(stream: ?*SDL_AudioStream) bool;
-    // pub extern fn SDL_PauseAudioStreamDevice(stream: ?*SDL_AudioStream) bool;
-    // pub extern fn SDL_ResumeAudioStreamDevice(stream: ?*SDL_AudioStream) bool;
-    // pub extern fn SDL_AudioStreamDevicePaused(stream: ?*SDL_AudioStream) bool;
-    // pub extern fn SDL_LockAudioStream(stream: ?*SDL_AudioStream) bool;
-    // pub extern fn SDL_UnlockAudioStream(stream: ?*SDL_AudioStream) bool;
-    // pub const SDL_AudioStreamCallback = ?*const fn (?*anyopaque, ?*SDL_AudioStream, c_int, c_int) callconv(.c) void;
-    // pub extern fn SDL_SetAudioStreamGetCallback(stream: ?*SDL_AudioStream, callback: SDL_AudioStreamCallback, userdata: ?*anyopaque) bool;
-    // pub extern fn SDL_SetAudioStreamPutCallback(stream: ?*SDL_AudioStream, callback: SDL_AudioStreamCallback, userdata: ?*anyopaque) bool;
-    // pub extern fn SDL_DestroyAudioStream(stream: ?*SDL_AudioStream) void;
-    // pub extern fn SDL_OpenAudioDeviceStream(devid: SDL_AudioDeviceID, spec: [*c]const SDL_AudioSpec, callback: SDL_AudioStreamCallback, userdata: ?*anyopaque) ?*SDL_AudioStream;
+    pub fn unbind_streams(streams: []*AudioStream) void {
+        C.SDL_UnbindAudioStreams(@ptrCast(@alignCast(streams.ptr)), @intCast(streams.len));
+    }
+    pub fn unbind(self: *AudioStream) void {
+        C.SDL_UnbindAudioStream(self.to_c());
+    }
+    pub fn get_device(self: *AudioStream) SDL3Error!AudioDeviceID {
+        return AudioDeviceID{ .id = try nonzero_or_null(C.SDL_GetAudioStreamDevice(self.to_c())) };
+    }
+    pub fn create(format: AudioStreamFormat) SDL3Error!*AudioStream {
+        return ptr_cast_or_failure(*AudioStream, C.SDL_CreateAudioStream(@ptrCast(@alignCast(format.input_spec)), @ptrCast(@alignCast(format.output_spec))));
+    }
+    pub fn get_properties(self: *AudioStream) SDL3Error!Properties {
+        return Properties{ .id = try nonzero_or_null(C.SDL_GetAudioStreamProperties(self.to_c())) };
+    }
+    pub fn get_format(self: *AudioStream) SDL3Error!AudioStreamFormat {
+        var fmt: AudioStreamFormat = undefined;
+        try ok_or_failure(C.SDL_GetAudioStreamFormat(self.to_c(), @ptrCast(@alignCast(&fmt.input_spec)), @ptrCast(@alignCast(&fmt.output_spec))));
+        return fmt;
+    }
+    pub fn set_format(self: *AudioStream, format: AudioStreamFormat) SDL3Error!void {
+        return ok_or_failure(C.SDL_SetAudioStreamFormat(self.to_c(), @ptrCast(@alignCast(format.input_spec)), @ptrCast(@alignCast(format.output_spec))));
+    }
+    pub fn get_frequency_ratio(self: *AudioStream) f32 {
+        return C.SDL_GetAudioStreamFrequencyRatio(self.to_c());
+    }
+    pub fn set_frequency_ratio(self: *AudioStream, freq_ratio: f32) SDL3Error!void {
+        return ok_or_failure(C.SDL_SetAudioStreamFrequencyRatio(self.to_c(), freq_ratio));
+    }
+    pub fn get_gain(self: *AudioStream) f32 {
+        return C.SDL_GetAudioStreamGain(self.to_c());
+    }
+    pub fn set_gain(self: *AudioStream, gain: f32) SDL3Error!void {
+        return ok_or_failure(C.SDL_SetAudioStreamGain(self.to_c(), gain));
+    }
+    pub fn get_input_channel_map(self: *AudioStream) SDL3Error!AudioChannelMap {
+        var len: c_int = 0;
+        const ptr = try ptr_cast_or_null([*]c_int, C.SDL_GetAudioStreamInputChannelMap(self.to_c(), &len));
+        return AudioChannelMap{ .map = ptr[0..len] };
+    }
+    pub fn get_output_channel_map(self: *AudioStream) SDL3Error!AudioChannelMap {
+        var len: c_int = 0;
+        const ptr = try ptr_cast_or_null([*]c_int, C.SDL_GetAudioStreamOutputChannelMap(self.to_c(), &len));
+        return AudioChannelMap{ .map = ptr[0..len] };
+    }
+    pub fn set_input_channel_map(self: *AudioStream, channel_map: AudioChannelMap) SDL3Error!void {
+        return ok_or_failure(C.SDL_SetAudioStreamInputChannelMap(self.to_c(), channel_map.map.ptr, @intCast(channel_map.map.len)));
+    }
+    pub fn set_output_channel_map(self: *AudioStream, channel_map: AudioChannelMap) SDL3Error!void {
+        return ok_or_failure(C.SDL_SetAudioStreamOutputChannelMap(self.to_c(), channel_map.map.ptr, @intCast(channel_map.map.len)));
+    }
+    pub fn put_in_audio_data(self: *AudioStream, data: []const u8) SDL3Error!void {
+        return ok_or_failure(C.SDL_PutAudioStreamData(self.to_c(), data.map.ptr, @intCast(data.len)));
+    }
+    pub fn take_out_audio_data(self: *AudioStream, dst_buffer: []u8) SDL3Error!void {
+        return positive_or_failure(C.SDL_PutAudioStreamData(self.to_c(), dst_buffer.ptr, @intCast(dst_buffer.len)));
+    }
+    pub fn get_bytes_available_to_take_out(self: *AudioStream) SDL3Error!c_int {
+        return positive_or_failure(C.SDL_GetAudioStreamAvailable(self.to_c()));
+    }
+    pub fn get_bytes_queued_for_take_out(self: *AudioStream) SDL3Error!c_int {
+        return positive_or_failure(C.SDL_GetAudioStreamQueued(self.to_c()));
+    }
+    pub fn flush(self: *AudioStream) SDL3Error!void {
+        return ok_or_failure(C.SDL_FlushAudioStream(self.to_c()));
+    }
+    pub fn clear(self: *AudioStream) SDL3Error!void {
+        return ok_or_failure(C.SDL_ClearAudioStream(self.to_c()));
+    }
+    pub fn pause_device(self: *AudioStream) SDL3Error!void {
+        return ok_or_failure(C.SDL_PauseAudioStreamDevice(self.to_c()));
+    }
+    pub fn resume_device(self: *AudioStream) SDL3Error!void {
+        return ok_or_failure(C.SDL_ResumeAudioStreamDevice(self.to_c()));
+    }
+    pub fn is_device_paused(self: *AudioStream) bool {
+        return C.SDL_AudioStreamDevicePaused(self.to_c());
+    }
+    pub fn lock(self: *AudioStream) SDL3Error!void {
+        return ok_or_failure(C.SDL_LockAudioStream(self.to_c()));
+    }
+    pub fn unlock(self: *AudioStream) SDL3Error!void {
+        return ok_or_failure(C.SDL_UnlockAudioStream(self.to_c()));
+    }
+    pub fn set_take_out_callback(self: *AudioStream, callback: *AudioStreamCallback, user_data: ?*anyopaque) SDL3Error!void {
+        return ok_or_failure(C.SDL_SetAudioStreamGetCallback(self.to_c(), @ptrCast(@alignCast(callback)), user_data));
+    }
+    pub fn clear_take_out_callback(self: *AudioStream) SDL3Error!void {
+        return ok_or_failure(C.SDL_SetAudioStreamGetCallback(self.to_c(), null, null));
+    }
+    pub fn set_put_in_callback(self: *AudioStream, callback: *AudioStreamCallback, user_data: ?*anyopaque) SDL3Error!void {
+        return ok_or_failure(C.SDL_SetAudioStreamPutCallback(self.to_c(), @ptrCast(@alignCast(callback)), user_data));
+    }
+    pub fn clear_put_in_callback(self: *AudioStream) SDL3Error!void {
+        return ok_or_failure(C.SDL_SetAudioStreamPutCallback(self.to_c(), null, null));
+    }
+    pub fn destroy(self: *AudioStream) void {
+        C.SDL_DestroyAudioStream(self.to_c());
+    }
+};
+
+pub const AudioStreamCallback = fn (user_data: ?*anyopaque, stream: *AudioStream, additional_needed: c_int, total_available: c_int) callconv(.c) void;
+
+/// Helper struct for SDL functions that expect an input `*AudioSpec` and
+/// _optional_ output `?*AudioSpec` where for the output spec:
+/// - `null` == same as input
+/// - `*AudioSpec` == convert from the input spec to the output spec
+pub const AudioStreamFormat = extern struct {
+    input_spec: *AudioSpec,
+    output_spec: ?*AudioSpec,
+
+    pub inline fn same_input_and_output(spec: *AudioSpec) AudioStreamFormat {
+        return AudioStreamFormat{
+            .input_spec = spec,
+            .output_spec = null,
+        };
+    }
+
+    pub inline fn convert_input_to_output(input: *AudioSpec, output: *AudioSpec) AudioStreamFormat {
+        return AudioStreamFormat{
+            .input_spec = input,
+            .output_spec = output,
+        };
+    }
 };
 
 pub const Gamepad = extern struct {
@@ -2927,10 +3083,10 @@ pub const Storage = opaque {
     inline fn to_c(self: *Storage) *C.SDL_Storage {
         return @ptrCast(@alignCast(self));
     }
-    pub fn open_app_readonly_storage_folder(override: [:0]const u8, properties: PropertiesID) SDL3Error!*Storage {
+    pub fn open_app_readonly_storage_folder(override: [:0]const u8, properties: Properties) SDL3Error!*Storage {
         return ptr_cast_or_failure(*Storage, C.SDL_OpenTitleStorage(override.ptr, properties));
     }
-    pub fn open_user_storage_folder(org_name: [:0]const u8, app_name: [:0]const u8, properties: PropertiesID) SDL3Error!*Storage {
+    pub fn open_user_storage_folder(org_name: [:0]const u8, app_name: [:0]const u8, properties: Properties) SDL3Error!*Storage {
         return ptr_cast_or_failure(*Storage, C.SDL_OpenUserStorage(org_name.ptr, app_name.ptr, properties));
     }
     pub fn open_filesystem(path: [:0]const u8) SDL3Error!*Storage {
@@ -3210,7 +3366,7 @@ pub const MouseDeviceEvent = extern struct {
     type: EventType = .FIRST,
     reserved: u32 = 0,
     timestamp: u64 = 0,
-    mouse_id: MouseID = .{},
+    mouse_id: Mouse = .{},
 
     inline fn to_c(self: *MouseDeviceEvent) *C.SDL_MouseDeviceEvent {
         return @ptrCast(@alignCast(self));
@@ -3222,7 +3378,7 @@ pub const MouseMotionEvent = extern struct {
     reserved: u32 = 0,
     timestamp: u64 = 0,
     window_id: WindowID = .{},
-    mouse_id: MouseID = .{},
+    mouse_id: Mouse = .{},
     state: MouseButtonFlags = .{},
     pos: FVec = FVec{},
     delta: FVec = FVec{},
@@ -3245,7 +3401,7 @@ pub const MouseButtonEvent = extern struct {
     reserved: u32 = 0,
     timestamp: u64 = 0,
     window_id: WindowID = .{},
-    mouse_id: MouseID = .{},
+    mouse_id: Mouse = .{},
     button: u8 = 0,
     down: bool = false,
     clicks: u8 = 0,
@@ -3270,7 +3426,7 @@ pub const MouseWheelEvent = extern struct {
     reserved: u32 = 0,
     timestamp: u64 = 0,
     window_id: WindowID = .{},
-    mouse_id: MouseID = .{},
+    mouse_id: Mouse = .{},
     delta: FVec = FVec{},
     direction: MouseWheelDirection = .NORMAL,
     pos: FVec = FVec{},
@@ -3292,7 +3448,7 @@ pub const JoyAxisEvent = extern struct {
     type: EventType = .FIRST,
     reserved: u32 = 0,
     timestamp: u64 = 0,
-    joystick_id: JoystickID = .{},
+    joystick_id: JoystickOrGamepad = .{},
     axis: u8 = 0,
     _padding_1: u8 = 0,
     _padding_2: u8 = 0,
@@ -3309,7 +3465,7 @@ pub const JoyBallEvent = extern struct {
     type: EventType = .FIRST,
     reserved: u32 = 0,
     timestamp: u64 = 0,
-    joystick_id: JoystickID = .{},
+    joystick_id: JoystickOrGamepad = .{},
     ball: u8 = 0,
     _padding_1: u8 = 0,
     _padding_2: u8 = 0,
@@ -3333,7 +3489,7 @@ pub const JoyHatEvent = extern struct {
     type: EventType = .FIRST,
     reserved: u32 = 0,
     timestamp: u64 = 0,
-    joystick_id: JoystickID = .{},
+    joystick_id: JoystickOrGamepad = .{},
     hat: u8 = 0,
     value: u8 = 0,
     _padding_1: u8 = 0,
@@ -3348,7 +3504,7 @@ pub const JoyButtonEvent = extern struct {
     type: EventType = .FIRST,
     reserved: u32 = 0,
     timestamp: u64 = 0,
-    joystick_id: JoystickID = .{},
+    joystick_id: JoystickOrGamepad = .{},
     button: u8 = 0,
     down: bool = false,
     _padding_1: u8 = 0,
@@ -3363,7 +3519,7 @@ pub const JoyDeviceEvent = extern struct {
     type: EventType = .FIRST,
     reserved: u32 = 0,
     timestamp: u64 = 0,
-    joystick_id: JoystickID = .{},
+    joystick_id: JoystickOrGamepad = .{},
 
     inline fn to_c(self: *JoyDeviceEvent) *C.SDL_JoyDeviceEvent {
         return @ptrCast(@alignCast(self));
@@ -3374,7 +3530,7 @@ pub const JoyBatteryEvent = extern struct {
     type: EventType = .FIRST,
     reserved: u32 = 0,
     timestamp: u64 = 0,
-    joystick_id: JoystickID = .{},
+    joystick_id: JoystickOrGamepad = .{},
     state: PowerState = .UNKNOWN,
     percent: c_int = 0,
 
@@ -3387,7 +3543,7 @@ pub const GamepadAxisEvent = extern struct {
     type: EventType = .FIRST,
     reserved: u32 = 0,
     timestamp: u64 = 0,
-    joystick_id: JoystickID = .{},
+    joystick_id: JoystickOrGamepad = .{},
     axis: u8 = 0,
     _padding_1: u8 = 0,
     _padding_2: u8 = 0,
@@ -3404,7 +3560,7 @@ pub const GamepadButtonEvent = extern struct {
     type: EventType = .FIRST,
     reserved: u32 = 0,
     timestamp: u64 = 0,
-    joystick_id: JoystickID = .{},
+    joystick_id: JoystickOrGamepad = .{},
     button: u8 = 0,
     down: bool = false,
     _padding_1: u8 = 0,
@@ -3419,7 +3575,7 @@ pub const GamepadDeviceEvent = extern struct {
     type: EventType = .FIRST,
     reserved: u32 = 0,
     timestamp: u64 = 0,
-    joystick_id: JoystickID = .{},
+    joystick_id: JoystickOrGamepad = .{},
 
     inline fn to_c(self: *GamepadDeviceEvent) *C.SDL_GamepadDeviceEvent {
         return @ptrCast(@alignCast(self));
@@ -3430,7 +3586,7 @@ pub const GamepadTouchpadEvent = extern struct {
     type: EventType = .FIRST,
     reserved: u32 = 0,
     timestamp: u64 = 0,
-    joystick_id: JoystickID = .{},
+    joystick_id: JoystickOrGamepad = .{},
     touchpad: i32 = 0,
     finger: i32 = 0,
     pos: FVec = FVec{},
@@ -3453,7 +3609,7 @@ pub const GamepadSensorEvent = extern struct {
     type: EventType = .FIRST,
     reserved: u32 = 0,
     timestamp: u64 = 0,
-    joystick_id: JoystickID = .{},
+    joystick_id: JoystickOrGamepad = .{},
     sensor: i32 = 0,
     data: [3]f32 = @splat(0.0),
     sensor_timestamp: u64 = 0,
@@ -3482,7 +3638,7 @@ pub const CameraDeviceEvent = extern struct {
     type: EventType = .FIRST,
     reserved: u32 = 0,
     timestamp: u64 = 0,
-    device_id: CameraID = .{},
+    device_id: Camera = .{},
 
     inline fn to_c(self: *CameraDeviceEvent) *C.SDL_CameraDeviceEvent {
         return @ptrCast(@alignCast(self));
@@ -3504,8 +3660,8 @@ pub const TouchFingerEvent = extern struct {
     type: EventType = .FIRST,
     reserved: u32 = 0,
     timestamp: u64 = 0,
-    touch_id: TouchID = .{},
-    finger_id: FingerID = .{},
+    touch_id: Touch = .{},
+    finger_id: Finger = .{},
     pos: FVec = FVec{},
     delta: FVec = FVec{},
     pressure: f32 = 0,
@@ -3529,7 +3685,7 @@ pub const PenProximityEvent = extern struct {
     reserved: u32 = 0,
     timestamp: u64 = 0,
     window_id: WindowID = .{},
-    pen_id: PenID = .{},
+    pen_id: Pen = .{},
 
     inline fn to_c(self: *PenProximityEvent) *C.SDL_PenProximityEvent {
         return @ptrCast(@alignCast(self));
@@ -3541,7 +3697,7 @@ pub const PenMotionEvent = extern struct {
     reserved: u32 = 0,
     timestamp: u64 = 0,
     window_id: WindowID = .{},
-    pen_id: PenID = .{},
+    pen_id: Pen = .{},
     pen_state: PenInputFlags = .{},
     pos: FVec = FVec{},
 
@@ -3563,7 +3719,7 @@ pub const PenTouchEvent = extern struct {
     reserved: u32 = 0,
     timestamp: u64 = 0,
     window_id: WindowID = .{},
-    pen_id: PenID = .{},
+    pen_id: Pen = .{},
     pen_state: PenInputFlags = .{},
     pos: FVec = FVec{},
     eraser: bool = false,
@@ -3587,7 +3743,7 @@ pub const PenButtonEvent = extern struct {
     reserved: u32 = 0,
     timestamp: u64 = 0,
     window_id: WindowID = .{},
-    pen_id: PenID = .{},
+    pen_id: Pen = .{},
     pen_state: PenInputFlags = .{},
     pos: FVec = FVec{},
     button: u8 = 0,
@@ -3611,7 +3767,7 @@ pub const PenAxisEvent = extern struct {
     reserved: u32 = 0,
     timestamp: u64 = 0,
     window_id: WindowID = .{},
-    pen_id: PenID = .{},
+    pen_id: Pen = .{},
     pen_state: PenInputFlags = .{},
     pos: FVec = FVec{},
     axis: PenAxis = .PRESSURE,
@@ -3702,31 +3858,211 @@ pub const UserEvent = extern struct {
     }
 };
 
-pub const MouseID = extern struct {
+pub const Mouse = extern struct {
     id: u32 = 0,
 };
 
-pub const PenID = extern struct {
+pub const Pen = extern struct {
     id: u32 = 0,
 };
 
-pub const SensorID = extern struct {
+pub const Sensor = extern struct {
     id: u32 = 0,
 };
 
-pub const JoystickID = extern struct {
+pub const JoystickOrGamepad = extern struct {
     id: u32 = 0,
+
+    pub fn get_all_gamepads() SDL3Error!GamepadsList {
+        var len: c_int = 0;
+        const ptr = try ptr_cast_or_failure([*]JoystickOrGamepad, C.SDL_GetGamepads(&len));
+        return GamepadsList{ .list = ptr[0..len] };
+    }
+    pub fn is_gamepad(self: JoystickOrGamepad) bool {
+        return C.SDL_IsGamepad(self.id);
+    }
+    pub fn get_name(self: JoystickOrGamepad) SDL3Error![*:0]const u8 {
+        return ptr_cast_or_null([*:0]const u8, C.SDL_GetGamepadNameForID(self.id));
+    }
+    pub fn get_path(self: JoystickOrGamepad) SDL3Error![*:0]const u8 {
+        return ptr_cast_or_null([*:0]const u8, C.SDL_GetGamepadPathForID(self.id));
+    }
+    pub fn get_player_index(self: JoystickOrGamepad) SDL3Error!PlayerIndex {
+        return PlayerIndex{ .index = try positive_or_null(C.SDL_GetGamepadPlayerIndexForID(self.id)) };
+    }
+    pub fn get_guid(self: JoystickOrGamepad) SDL3Error!GUID {
+        return valid_guid_or_null(C.SDL_GetGamepadGUIDForID(self.id));
+    }
+    pub fn get_vendor_code(self: JoystickOrGamepad) SDL3Error!HWVendorCode {
+        return HWVendorCode{ .code = try nonzero_or_null(C.SDL_GetGamepadVendorForID(self.id)) };
+    }
+    pub fn get_product_code(self: JoystickOrGamepad) SDL3Error!HWProductCode {
+        return HWProductCode{ .code = try nonzero_or_null(C.SDL_GetGamepadProductForID(self.id)) };
+    }
+    pub fn get_product_version(self: JoystickOrGamepad) SDL3Error!HWProductVersion {
+        return HWProductVersion{ .code = try nonzero_or_null(C.SDL_GetGamepadProductVersionForID(self.id)) };
+    }
+    pub fn get_gamepad_type(self: JoystickOrGamepad) SDL3Error!GamepadType {
+        return GamepadType.from_c(C.SDL_GetGamepadTypeForID(self.id));
+    }
+    pub fn get_real_gamepad_type(self: JoystickOrGamepad) SDL3Error!GamepadType {
+        return GamepadType.from_c(C.SDL_GetRealGamepadTypeForID(self.id));
+    }
+    pub fn get_gamepad_mapping_string(self: JoystickOrGamepad) SDL3Error!String {
+        return String{ .ptr = try ptr_cast_or_null([*:0]u8, C.SDL_GetGamepadMappingForID(self.id)) };
+    }
+    pub fn open_gamepad(self: JoystickOrGamepad) SDL3Error!*Gamepad {
+        return ptr_cast_or_null(*Gamepad, C.SDL_OpenGamepad(self.id));
+    }
+    pub fn get_open_gamepad(self: JoystickOrGamepad) SDL3Error!*Gamepad {
+        return ptr_cast_or_null(*Gamepad, C.SDL_GetGamepadFromID(self.id));
+    }
+    // pub extern fn SDL_AddGamepadMapping(mapping: [*c]const u8) c_int;
+    // pub extern fn SDL_AddGamepadMappingsFromIO(src: ?*SDL_IOStream, closeio: bool) c_int;
+    // pub extern fn SDL_AddGamepadMappingsFromFile(file: [*c]const u8) c_int;
+    // pub extern fn SDL_ReloadGamepadMappings() bool;
+    // pub extern fn SDL_GetGamepadMappings(count: [*c]c_int) [*c][*c]u8;
+    // pub extern fn SDL_GetGamepadMappingForGUID(guid: SDL_GUID) [*c]u8;
+    // pub extern fn SDL_GetGamepadMapping(gamepad: ?*SDL_Gamepad) [*c]u8;
+    // pub extern fn SDL_SetGamepadMapping(instance_id: SDL_JoystickID, mapping: [*c]const u8) bool;
+    // pub extern fn SDL_HasGamepad() bool;
 };
 
-pub const CameraID = extern struct {
+pub const Gamepad = opaque {
+    //CHECKPOINT
+    // pub extern fn SDL_GetGamepadFromPlayerIndex(player_index: c_int) ?*SDL_Gamepad;
+    // pub extern fn SDL_GetGamepadProperties(gamepad: ?*SDL_Gamepad) SDL_PropertiesID;
+    // pub extern fn SDL_GetGamepadID(gamepad: ?*SDL_Gamepad) SDL_JoystickID;
+    // pub extern fn SDL_GetGamepadName(gamepad: ?*SDL_Gamepad) [*c]const u8;
+    // pub extern fn SDL_GetGamepadPath(gamepad: ?*SDL_Gamepad) [*c]const u8;
+    // pub extern fn SDL_GetGamepadType(gamepad: ?*SDL_Gamepad) SDL_GamepadType;
+    // pub extern fn SDL_GetRealGamepadType(gamepad: ?*SDL_Gamepad) SDL_GamepadType;
+    // pub extern fn SDL_GetGamepadPlayerIndex(gamepad: ?*SDL_Gamepad) c_int;
+    // pub extern fn SDL_SetGamepadPlayerIndex(gamepad: ?*SDL_Gamepad, player_index: c_int) bool;
+    // pub extern fn SDL_GetGamepadVendor(gamepad: ?*SDL_Gamepad) Uint16;
+    // pub extern fn SDL_GetGamepadProduct(gamepad: ?*SDL_Gamepad) Uint16;
+    // pub extern fn SDL_GetGamepadProductVersion(gamepad: ?*SDL_Gamepad) Uint16;
+    // pub extern fn SDL_GetGamepadFirmwareVersion(gamepad: ?*SDL_Gamepad) Uint16;
+    // pub extern fn SDL_GetGamepadSerial(gamepad: ?*SDL_Gamepad) [*c]const u8;
+    // pub extern fn SDL_GetGamepadSteamHandle(gamepad: ?*SDL_Gamepad) Uint64;
+    // pub extern fn SDL_GetGamepadConnectionState(gamepad: ?*SDL_Gamepad) SDL_JoystickConnectionState;
+    // pub extern fn SDL_GetGamepadPowerInfo(gamepad: ?*SDL_Gamepad, percent: [*c]c_int) SDL_PowerState;
+    // pub extern fn SDL_GamepadConnected(gamepad: ?*SDL_Gamepad) bool;
+    // pub extern fn SDL_GetGamepadJoystick(gamepad: ?*SDL_Gamepad) ?*SDL_Joystick;
+    // pub extern fn SDL_SetGamepadEventsEnabled(enabled: bool) void;
+    // pub extern fn SDL_GamepadEventsEnabled() bool;
+    // pub extern fn SDL_GetGamepadBindings(gamepad: ?*SDL_Gamepad, count: [*c]c_int) [*c][*c]SDL_GamepadBinding;
+    // pub extern fn SDL_UpdateGamepads() void;
+    // pub extern fn SDL_GetGamepadTypeFromString(str: [*c]const u8) SDL_GamepadType;
+    // pub extern fn SDL_GetGamepadStringForType(@"type": SDL_GamepadType) [*c]const u8;
+    // pub extern fn SDL_GetGamepadAxisFromString(str: [*c]const u8) SDL_GamepadAxis;
+    // pub extern fn SDL_GetGamepadStringForAxis(axis: SDL_GamepadAxis) [*c]const u8;
+    // pub extern fn SDL_GamepadHasAxis(gamepad: ?*SDL_Gamepad, axis: SDL_GamepadAxis) bool;
+    // pub extern fn SDL_GetGamepadAxis(gamepad: ?*SDL_Gamepad, axis: SDL_GamepadAxis) Sint16;
+    // pub extern fn SDL_GetGamepadButtonFromString(str: [*c]const u8) SDL_GamepadButton;
+    // pub extern fn SDL_GetGamepadStringForButton(button: SDL_GamepadButton) [*c]const u8;
+    // pub extern fn SDL_GamepadHasButton(gamepad: ?*SDL_Gamepad, button: SDL_GamepadButton) bool;
+    // pub extern fn SDL_GetGamepadButton(gamepad: ?*SDL_Gamepad, button: SDL_GamepadButton) bool;
+    // pub extern fn SDL_GetGamepadButtonLabelForType(@"type": SDL_GamepadType, button: SDL_GamepadButton) SDL_GamepadButtonLabel;
+    // pub extern fn SDL_GetGamepadButtonLabel(gamepad: ?*SDL_Gamepad, button: SDL_GamepadButton) SDL_GamepadButtonLabel;
+    // pub extern fn SDL_GetNumGamepadTouchpads(gamepad: ?*SDL_Gamepad) c_int;
+    // pub extern fn SDL_GetNumGamepadTouchpadFingers(gamepad: ?*SDL_Gamepad, touchpad: c_int) c_int;
+    // pub extern fn SDL_GetGamepadTouchpadFinger(gamepad: ?*SDL_Gamepad, touchpad: c_int, finger: c_int, down: [*c]bool, x: [*c]f32, y: [*c]f32, pressure: [*c]f32) bool;
+    // pub extern fn SDL_GamepadHasSensor(gamepad: ?*SDL_Gamepad, @"type": SDL_SensorType) bool;
+    // pub extern fn SDL_SetGamepadSensorEnabled(gamepad: ?*SDL_Gamepad, @"type": SDL_SensorType, enabled: bool) bool;
+    // pub extern fn SDL_GamepadSensorEnabled(gamepad: ?*SDL_Gamepad, @"type": SDL_SensorType) bool;
+    // pub extern fn SDL_GetGamepadSensorDataRate(gamepad: ?*SDL_Gamepad, @"type": SDL_SensorType) f32;
+    // pub extern fn SDL_GetGamepadSensorData(gamepad: ?*SDL_Gamepad, @"type": SDL_SensorType, data: [*c]f32, num_values: c_int) bool;
+    // pub extern fn SDL_RumbleGamepad(gamepad: ?*SDL_Gamepad, low_frequency_rumble: Uint16, high_frequency_rumble: Uint16, duration_ms: Uint32) bool;
+    // pub extern fn SDL_RumbleGamepadTriggers(gamepad: ?*SDL_Gamepad, left_rumble: Uint16, right_rumble: Uint16, duration_ms: Uint32) bool;
+    // pub extern fn SDL_SetGamepadLED(gamepad: ?*SDL_Gamepad, red: Uint8, green: Uint8, blue: Uint8) bool;
+    // pub extern fn SDL_SendGamepadEffect(gamepad: ?*SDL_Gamepad, data: ?*const anyopaque, size: c_int) bool;
+    // pub extern fn SDL_CloseGamepad(gamepad: ?*SDL_Gamepad) void;
+    // pub extern fn SDL_GetGamepadAppleSFSymbolsNameForButton(gamepad: ?*SDL_Gamepad, button: SDL_GamepadButton) [*c]const u8;
+    // pub extern fn SDL_GetGamepadAppleSFSymbolsNameForAxis(gamepad: ?*SDL_Gamepad, axis: SDL_GamepadAxis) [*c]const u8;
+};
+
+pub const Joystick = opaque {
+    // pub extern fn SDL_AttachVirtualJoystick(desc: [*c]const SDL_VirtualJoystickDesc) SDL_JoystickID;
+    // pub extern fn SDL_DetachVirtualJoystick(instance_id: SDL_JoystickID) bool;
+    // pub extern fn SDL_IsJoystickVirtual(instance_id: SDL_JoystickID) bool;
+    // pub extern fn SDL_SetJoystickVirtualAxis(joystick: ?*SDL_Joystick, axis: c_int, value: Sint16) bool;
+    // pub extern fn SDL_SetJoystickVirtualBall(joystick: ?*SDL_Joystick, ball: c_int, xrel: Sint16, yrel: Sint16) bool;
+    // pub extern fn SDL_SetJoystickVirtualButton(joystick: ?*SDL_Joystick, button: c_int, down: bool) bool;
+    // pub extern fn SDL_SetJoystickVirtualHat(joystick: ?*SDL_Joystick, hat: c_int, value: Uint8) bool;
+    // pub extern fn SDL_SetJoystickVirtualTouchpad(joystick: ?*SDL_Joystick, touchpad: c_int, finger: c_int, down: bool, x: f32, y: f32, pressure: f32) bool;
+    // pub extern fn SDL_SendJoystickVirtualSensorData(joystick: ?*SDL_Joystick, @"type": SDL_SensorType, sensor_timestamp: Uint64, data: [*c]const f32, num_values: c_int) bool;
+    // pub extern fn SDL_GetJoystickProperties(joystick: ?*SDL_Joystick) SDL_PropertiesID;
+    // pub extern fn SDL_GetJoystickName(joystick: ?*SDL_Joystick) [*c]const u8;
+    // pub extern fn SDL_GetJoystickPath(joystick: ?*SDL_Joystick) [*c]const u8;
+    // pub extern fn SDL_GetJoystickPlayerIndex(joystick: ?*SDL_Joystick) c_int;
+    // pub extern fn SDL_SetJoystickPlayerIndex(joystick: ?*SDL_Joystick, player_index: c_int) bool;
+    // pub extern fn SDL_GetJoystickGUID(joystick: ?*SDL_Joystick) SDL_GUID;
+    // pub extern fn SDL_GetJoystickVendor(joystick: ?*SDL_Joystick) Uint16;
+    // pub extern fn SDL_GetJoystickProduct(joystick: ?*SDL_Joystick) Uint16;
+    // pub extern fn SDL_GetJoystickProductVersion(joystick: ?*SDL_Joystick) Uint16;
+    // pub extern fn SDL_GetJoystickFirmwareVersion(joystick: ?*SDL_Joystick) Uint16;
+    // pub extern fn SDL_GetJoystickSerial(joystick: ?*SDL_Joystick) [*c]const u8;
+    // pub extern fn SDL_GetJoystickType(joystick: ?*SDL_Joystick) SDL_JoystickType;
+    // pub extern fn SDL_GetJoystickGUIDInfo(guid: SDL_GUID, vendor: [*c]Uint16, product: [*c]Uint16, version: [*c]Uint16, crc16: [*c]Uint16) void;
+    // pub extern fn SDL_JoystickConnected(joystick: ?*SDL_Joystick) bool;
+    // pub extern fn SDL_GetJoystickID(joystick: ?*SDL_Joystick) SDL_JoystickID;
+    // pub extern fn SDL_GetNumJoystickAxes(joystick: ?*SDL_Joystick) c_int;
+    // pub extern fn SDL_GetNumJoystickBalls(joystick: ?*SDL_Joystick) c_int;
+    // pub extern fn SDL_GetNumJoystickHats(joystick: ?*SDL_Joystick) c_int;
+    // pub extern fn SDL_GetNumJoystickButtons(joystick: ?*SDL_Joystick) c_int;
+    // pub extern fn SDL_SetJoystickEventsEnabled(enabled: bool) void;
+    // pub extern fn SDL_JoystickEventsEnabled() bool;
+    // pub extern fn SDL_UpdateJoysticks() void;
+    // pub extern fn SDL_GetJoystickAxis(joystick: ?*SDL_Joystick, axis: c_int) Sint16;
+    // pub extern fn SDL_GetJoystickAxisInitialState(joystick: ?*SDL_Joystick, axis: c_int, state: [*c]Sint16) bool;
+    // pub extern fn SDL_GetJoystickBall(joystick: ?*SDL_Joystick, ball: c_int, dx: [*c]c_int, dy: [*c]c_int) bool;
+    // pub extern fn SDL_GetJoystickHat(joystick: ?*SDL_Joystick, hat: c_int) Uint8;
+    // pub extern fn SDL_GetJoystickButton(joystick: ?*SDL_Joystick, button: c_int) bool;
+    // pub extern fn SDL_RumbleJoystick(joystick: ?*SDL_Joystick, low_frequency_rumble: Uint16, high_frequency_rumble: Uint16, duration_ms: Uint32) bool;
+    // pub extern fn SDL_RumbleJoystickTriggers(joystick: ?*SDL_Joystick, left_rumble: Uint16, right_rumble: Uint16, duration_ms: Uint32) bool;
+    // pub extern fn SDL_SetJoystickLED(joystick: ?*SDL_Joystick, red: Uint8, green: Uint8, blue: Uint8) bool;
+    // pub extern fn SDL_SendJoystickEffect(joystick: ?*SDL_Joystick, data: ?*const anyopaque, size: c_int) bool;
+    // pub extern fn SDL_CloseJoystick(joystick: ?*SDL_Joystick) void;
+    // pub extern fn SDL_GetJoystickConnectionState(joystick: ?*SDL_Joystick) SDL_JoystickConnectionState;
+    // pub extern fn SDL_GetJoystickPowerInfo(joystick: ?*SDL_Joystick, percent: [*c]c_int) SDL_PowerState;
+};
+
+pub const HWVendorCode = extern struct {
+    code: u16,
+};
+pub const HWProductCode = extern struct {
+    code: u16,
+};
+pub const HWProductVersion = extern struct {
+    ver: u16,
+};
+
+pub const PlayerIndex = extern struct {
+    index: c_int = 0,
+};
+
+pub const GamepadsList = extern struct {
+    list: []JoystickOrGamepad,
+
+    pub fn free(self: GamepadsList) void {
+        sdl_free(self.list.ptr);
+    }
+};
+
+pub const GUID = extern struct {
+    data: [16]u8,
+};
+
+pub const Camera = extern struct {
     id: u32,
 };
 
-pub const TouchID = extern struct {
+pub const Touch = extern struct {
     id: u64 = 0,
 };
 
-pub const FingerID = extern struct {
+pub const Finger = extern struct {
     id: u64 = 0,
 };
 
