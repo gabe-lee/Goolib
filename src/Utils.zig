@@ -92,3 +92,36 @@ pub fn c_strings_equal(a: [*:0]const u8, b: [*:0]const u8) bool {
         if (a[i] == '0') return true;
     }
 }
+
+pub fn c_args_to_zig_args(c_args: CArgsList) [][*:0]u8 {
+    if (c_args.len == 0 or c_args.ptr == null) {
+        const NULL = [0][*:0]u8;
+        return NULL[0..0];
+    }
+    const good_args_list = c_args.ptr.?;
+    assert(check_no_early_null: {
+        var i: c_int = 0;
+        while (i < c_args.len) : (i += 1) {
+            if (good_args_list[i] == null) break :check_no_early_null false;
+        }
+        break :check_no_early_null true;
+    });
+    const cast_ptr: [*][*:0]u8 = @ptrCast(good_args_list);
+    return cast_ptr[0..@intCast(c_args.len)];
+}
+pub fn zig_args_to_c_args(zig_args: [][*:0]u8) CArgsList {
+    const cast_ptr: [*]?[*:0]u8 = @ptrCast(zig_args.ptr);
+    assert(cast_ptr[zig_args.len] == null);
+    return CArgsList{
+        .ptr = @ptrCast(cast_ptr),
+        .len = @intCast(zig_args.len),
+    };
+}
+pub const CArgsList = struct {
+    ptr: ?[*:null]?[*:0]u8,
+    len: c_int,
+
+    pub fn c_args_list(len: c_int, ptr: ?[*:null]?[*:0]u8) CArgsList {
+        return CArgsList{ .ptr = ptr, .len = len };
+    }
+};

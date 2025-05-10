@@ -12,72 +12,72 @@ const C = @cImport({
     @cInclude("SDL3/SDL_main.h");
 });
 
-pub const SDL3Error = error{
+pub const Error = error{
     SDL_null_value,
     SDL_operation_failure,
 };
 
-inline fn ptr_cast_or_null(comptime T: type, result_ptr: anytype) SDL3Error!T {
+inline fn ptr_cast_or_null_err(comptime T: type, result_ptr: anytype) Error!T {
     if (result_ptr) |good_ptr| return @ptrCast(@alignCast(good_ptr));
-    return SDL3Error.SDL_null_value;
+    return Error.SDL_null_value;
 }
-inline fn ptr_cast_or_failure(comptime T: type, result_ptr: anytype) SDL3Error!T {
+inline fn ptr_cast_or_fail_err(comptime T: type, result_ptr: anytype) Error!T {
     if (result_ptr) |good_ptr| return @ptrCast(@alignCast(good_ptr));
-    return SDL3Error.SDL_operation_failure;
+    return Error.SDL_operation_failure;
 }
-inline fn nonzero_or_null(result_id: anytype) SDL3Error!@TypeOf(result_id) {
-    if (result_id <= 0) return SDL3Error.SDL_null_value;
+inline fn nonzero_or_null_err(result_id: anytype) Error!@TypeOf(result_id) {
+    if (result_id <= 0) return Error.SDL_null_value;
     return result_id;
 }
-inline fn nonzero_or_failure(result_id: anytype) SDL3Error!@TypeOf(result_id) {
-    if (result_id <= 0) return SDL3Error.SDL_operation_failure;
+inline fn nonzero_or_fail_err(result_id: anytype) Error!@TypeOf(result_id) {
+    if (result_id <= 0) return Error.SDL_operation_failure;
     return result_id;
 }
-inline fn positive_or_failure(result_int: anytype) SDL3Error!@TypeOf(result_int) {
-    if (result_int < 0) return SDL3Error.SDL_operation_failure;
+inline fn positive_or_fail_err(result_int: anytype) Error!@TypeOf(result_int) {
+    if (result_int < 0) return Error.SDL_operation_failure;
     return result_int;
 }
-inline fn positive_or_null(result_int: anytype) SDL3Error!@TypeOf(result_int) {
-    if (result_int < 0) return SDL3Error.SDL_null_value;
+inline fn positive_or_null_err(result_int: anytype) Error!@TypeOf(result_int) {
+    if (result_int < 0) return Error.SDL_null_value;
     return result_int;
 }
-inline fn ok_or_null(result: bool) SDL3Error!void {
+inline fn ok_or_null_err(result: bool) Error!void {
     if (result) return;
-    return SDL3Error.SDL_null_value;
+    return Error.SDL_null_value;
 }
-inline fn ok_or_failure(result: bool) SDL3Error!void {
+inline fn ok_or_fail_err(result: bool) Error!void {
     if (result) return;
-    return SDL3Error.SDL_operation_failure;
+    return Error.SDL_operation_failure;
 }
-inline fn nonempty_str_or_null(result: ?[*:0]u8) SDL3Error![*:0]u8 {
+inline fn nonempty_str_or_null_err(result: ?[*:0]u8) Error![*:0]u8 {
     if (result) |ptr| {
         if (ptr[0] != 0) return ptr;
     }
-    return SDL3Error.SDL_null_value;
+    return Error.SDL_null_value;
 }
-inline fn valid_guid_or_null(result: C.SDL_GUID) SDL3Error!GUID {
+inline fn nonempty_str_or_fail_err(result: ?[*:0]u8) Error![*:0]u8 {
+    if (result) |ptr| {
+        if (ptr[0] != 0) return ptr;
+    }
+    return Error.SDL_operation_failure;
+}
+inline fn valid_guid_or_null_err(result: C.SDL_GUID) Error!GUID {
     const as_u64s: [2]u64 = @bitCast(result.data);
     const final = as_u64s[0] | as_u64s[1];
-    if (final == 0) return SDL3Error.SDL_null_value;
+    if (final == 0) return Error.SDL_null_value;
     return GUID{ .data = result.data };
 }
-inline fn nonempty_str_or_failure(result: ?[*:0]u8) SDL3Error![*:0]u8 {
+inline fn nonempty_const_str_or_null_err(result: ?[*:0]const u8) Error![*:0]const u8 {
     if (result) |ptr| {
         if (ptr[0] != 0) return ptr;
     }
-    return SDL3Error.SDL_operation_failure;
+    return Error.SDL_null_value;
 }
-inline fn nonempty_const_str_or_null(result: ?[*:0]const u8) SDL3Error![*:0]const u8 {
+inline fn nonempty_const_str_or_fail_err(result: ?[*:0]const u8) Error![*:0]const u8 {
     if (result) |ptr| {
         if (ptr[0] != 0) return ptr;
     }
-    return SDL3Error.SDL_null_value;
-}
-inline fn nonempty_const_str_or_failure(result: ?[*:0]const u8) SDL3Error![*:0]const u8 {
-    if (result) |ptr| {
-        if (ptr[0] != 0) return ptr;
-    }
-    return SDL3Error.SDL_operation_failure;
+    return Error.SDL_operation_failure;
 }
 
 pub const IRect = Root.Rect2.define_rect2_type(c_int);
@@ -92,6 +92,19 @@ pub const FColor_RGB = Root.Color.define_color_rgb_type(f32);
 pub const IColor_U32 = extern struct {
     raw: u32,
 };
+
+pub const AppMainFunc = fn (arg_count: c_int, arg_list: ?[*:null]?[*:0]u8) callconv(.c) c_int;
+pub const AppInitFunc = fn (app_state: ?*?*anyopaque, arg_count: c_int, arg_list: ?[*:null]?[*:0]u8) callconv(.c) AppProcess;
+pub const AppUpdateFunc = fn (app_state: ?*?*anyopaque) callconv(.c) AppProcess;
+pub const AppEventFunc = fn (app_state: ?*?*anyopaque, event: ?*Event) callconv(.c) AppProcess;
+pub const AppQuitFunc = fn (app_state: ?*?*anyopaque, quit_process_state: AppProcess) callconv(.c) void;
+
+pub fn run_app(arg_count: c_int, arg_list: ?[*:null][*:0]u8, main_func: *AppMainFunc) c_int {
+    return C.SDL_RunApp(arg_count, @ptrCast(@alignCast(arg_list)), main_func, null);
+}
+pub fn run_app_with_callbacks(arg_count: c_int, arg_list: ?[*:null]?[*:0]u8, init_func: *AppInitFunc, update_func: *AppUpdateFunc, event_func: *AppEventFunc, quit_func: *AppQuitFunc) c_int {
+    return C.SDL_EnterAppMainCallbacks(arg_count, @ptrCast(@alignCast(arg_list)), init_func, update_func, event_func, quit_func);
+}
 
 pub fn sdl_free(mem: ?*anyopaque) void {
     C.SDL_free(mem);
@@ -108,38 +121,50 @@ pub fn wait_nanoseconds(ns: u64) void {
 pub fn wait_milliseconds_precise(ms: u32) void {
     C.SDL_DelayPrecise(ms);
 }
-pub fn get_current_video_driver() SDL3Error![*:0]const u8 {
-    return ptr_cast_or_null([*:0]const u8, C.SDL_GetCurrentVideoDriver());
+pub fn get_ticks_ms() u64 {
+    return C.SDL_GetTicks();
+}
+pub fn get_ticks_ns() u64 {
+    return C.SDL_GetTicksNS();
+}
+pub fn get_performance_counter() u64 {
+    return C.SDL_GetPerformanceCounter();
+}
+pub fn get_performance_frequency() u64 {
+    return C.SDL_GetPerformanceFrequency();
+}
+pub fn get_current_video_driver() Error![*:0]const u8 {
+    return ptr_cast_or_null_err([*:0]const u8, C.SDL_GetCurrentVideoDriver());
 }
 pub fn get_num_video_drivers() c_int {
     return C.SDL_GetNumVideoDrivers();
 }
-pub fn get_video_driver(index: c_int) SDL3Error![*:0]const u8 {
-    return ptr_cast_or_null([*:0]const u8, C.SDL_GetVideoDriver(index));
+pub fn get_video_driver(index: c_int) Error![*:0]const u8 {
+    return ptr_cast_or_null_err([*:0]const u8, C.SDL_GetVideoDriver(index));
 }
-pub fn get_current_audio_driver() SDL3Error![*:0]const u8 {
-    return ptr_cast_or_null([*:0]const u8, C.SDL_GetCurrentAudioDriver());
+pub fn get_current_audio_driver() Error![*:0]const u8 {
+    return ptr_cast_or_null_err([*:0]const u8, C.SDL_GetCurrentAudioDriver());
 }
 pub fn get_num_audio_drivers() c_int {
     return C.SDL_GetNumAudioDrivers();
 }
-pub fn get_audio_driver(index: c_int) SDL3Error![*:0]const u8 {
-    return ptr_cast_or_null([*:0]const u8, C.SDL_GetAudioDriver(index));
+pub fn get_audio_driver(index: c_int) Error![*:0]const u8 {
+    return ptr_cast_or_null_err([*:0]const u8, C.SDL_GetAudioDriver(index));
 }
-pub fn set_metadata(app_name: [:0]const u8, app_version: [:0]const u8, app_identifier: [:0]const u8) SDL3Error!void {
-    return ok_or_failure(C.SDL_SetAppMetadata(app_name.ptr, app_version.ptr, app_identifier.ptr));
+pub fn set_metadata(app_name: [:0]const u8, app_version: [:0]const u8, app_identifier: [:0]const u8) Error!void {
+    return ok_or_fail_err(C.SDL_SetAppMetadata(app_name.ptr, app_version.ptr, app_identifier.ptr));
 }
-pub fn set_metadata_property(prop_name: [:0]const u8, prop_val: [:0]const u8) SDL3Error!void {
-    return ok_or_failure(C.SDL_SetAppMetadataProperty(prop_name.ptr, prop_val.ptr));
+pub fn set_metadata_property(prop_name: [:0]const u8, prop_val: [:0]const u8) Error!void {
+    return ok_or_fail_err(C.SDL_SetAppMetadataProperty(prop_name.ptr, prop_val.ptr));
 }
-pub fn get_metadata_property(prop_name: [:0]const u8) SDL3Error![*:0]const u8 {
-    return ptr_cast_or_null([*:0]const u8, C.SDL_GetAppMetadataProperty(prop_name.ptr));
+pub fn get_metadata_property(prop_name: [:0]const u8) Error![*:0]const u8 {
+    return ptr_cast_or_null_err([*:0]const u8, C.SDL_GetAppMetadataProperty(prop_name.ptr));
 }
-pub fn init(init_flags: InitFlags) SDL3Error!void {
-    return ok_or_failure(C.SDL_Init(init_flags.flags));
+pub fn init(init_flags: InitFlags) Error!void {
+    return ok_or_fail_err(C.SDL_Init(init_flags.flags));
 }
-pub fn set_hint(hint_name: [:0]const u8, hint_value: [:0]const u8) SDL3Error!void {
-    return ok_or_failure(C.SDL_SetHint(hint_name.ptr, hint_value.ptr));
+pub fn set_hint(hint_name: [:0]const u8, hint_value: [:0]const u8) Error!void {
+    return ok_or_fail_err(C.SDL_SetHint(hint_name.ptr, hint_value.ptr));
 }
 pub const HINT = struct {
     pub const ALLOW_ALT_TAB_WHILE_GRABBED = "SDL_ALLOW_ALT_TAB_WHILE_GRABBED";
@@ -425,18 +450,18 @@ pub const IOVarArgsList = extern struct {
 pub const IOFile = extern struct {
     data: [:0]u8 = "",
 
-    pub fn load(path: [*:0]const u8) SDL3Error!IOFile {
+    pub fn load(path: [*:0]const u8) Error!IOFile {
         var len: usize = 0;
-        const ptr = try ptr_cast_or_null([*:0]u8, C.SDL_LoadFile(path, &len));
+        const ptr = try ptr_cast_or_null_err([*:0]u8, C.SDL_LoadFile(path, &len));
         return IOFile{ .data = ptr[0..len :0] };
     }
 
-    pub fn save(self: IOFile, path: [*:0]const u8) SDL3Error!void {
-        return ok_or_failure(C.SDL_SaveFile(path, self.data.ptr, self.data.len));
+    pub fn save(self: IOFile, path: [*:0]const u8) Error!void {
+        return ok_or_fail_err(C.SDL_SaveFile(path, self.data.ptr, self.data.len));
     }
 
-    pub fn save_and_free(self: IOFile, path: [*:0]const u8) SDL3Error!void {
-        try ok_or_failure(C.SDL_SaveFile(path, self.data.ptr, self.data.len));
+    pub fn save_and_free(self: IOFile, path: [*:0]const u8) Error!void {
+        try ok_or_fail_err(C.SDL_SaveFile(path, self.data.ptr, self.data.len));
         sdl_free(self.data.ptr);
         self.data = "";
     }
@@ -456,26 +481,26 @@ pub const IOStream = opaque {
         return @ptrCast(@alignCast(self));
     }
 
-    pub fn from_file(file_path: [:0]const u8, mode: IOMode) SDL3Error!*IOStream {
-        return ptr_cast_or_null(*IOStream, C.SDL_IOFromFile(file_path.ptr, mode.to_c()));
+    pub fn from_file(file_path: [:0]const u8, mode: IOMode) Error!*IOStream {
+        return ptr_cast_or_null_err(*IOStream, C.SDL_IOFromFile(file_path.ptr, mode.to_c()));
     }
-    pub fn from_mem(mem: [:0]u8) SDL3Error!*IOStream {
-        return ptr_cast_or_null(*IOStream, C.SDL_IOFromMem(mem.ptr, @intCast(mem.len)));
+    pub fn from_mem(mem: [:0]u8) Error!*IOStream {
+        return ptr_cast_or_null_err(*IOStream, C.SDL_IOFromMem(mem.ptr, @intCast(mem.len)));
     }
-    pub fn from_const_mem(mem: [:0]const u8) SDL3Error!*IOStream {
-        return ptr_cast_or_null(*IOStream, C.SDL_IOFromConstMem(mem.ptr, @intCast(mem.len)));
+    pub fn from_const_mem(mem: [:0]const u8) Error!*IOStream {
+        return ptr_cast_or_null_err(*IOStream, C.SDL_IOFromConstMem(mem.ptr, @intCast(mem.len)));
     }
-    pub fn from_heap_allocation() SDL3Error!*IOStream {
-        return ptr_cast_or_null(*IOStream, C.SDL_IOFromDynamicMem());
+    pub fn from_heap_allocation() Error!*IOStream {
+        return ptr_cast_or_null_err(*IOStream, C.SDL_IOFromDynamicMem());
     }
-    pub fn from_custom_interface(iface: *IOStreamInterface, user_data: ?*anyopaque) SDL3Error!*IOStream {
-        return ptr_cast_or_failure(*IOStream, C.SDL_OpenIO(@ptrCast(@alignCast(iface)), user_data));
+    pub fn from_custom_interface(iface: *IOStreamInterface, user_data: ?*anyopaque) Error!*IOStream {
+        return ptr_cast_or_fail_err(*IOStream, C.SDL_OpenIO(@ptrCast(@alignCast(iface)), user_data));
     }
-    pub fn close(self: *IOStream) SDL3Error!void {
-        return ok_or_failure(C.SDL_CloseIO(self.to_c()));
+    pub fn close(self: *IOStream) Error!void {
+        return ok_or_fail_err(C.SDL_CloseIO(self.to_c()));
     }
-    pub fn get_properties(self: *IOStream) SDL3Error!Properties {
-        return Properties{ .id = try nonzero_or_null(C.SDL_GetIOProperties(self.to_c())) };
+    pub fn get_properties(self: *IOStream) Error!PropertiesID {
+        return PropertiesID{ .id = try nonzero_or_null_err(C.SDL_GetIOProperties(self.to_c())) };
     }
     pub fn get_status(self: *IOStream) IOStatus {
         return @enumFromInt(C.SDL_GetIOStatus(self.to_c()));
@@ -483,156 +508,156 @@ pub const IOStream = opaque {
     pub fn get_size(self: *IOStream) i64 {
         return C.SDL_GetIOSize(self.to_c());
     }
-    pub fn seek(self: *IOStream, offset: i64, relative_to: SeekRelativeTo) SDL3Error!i64 {
-        return positive_or_failure(C.SDL_SeekIO(self.to_c(), offset, relative_to.to_c()));
+    pub fn seek(self: *IOStream, offset: i64, relative_to: SeekRelativeTo) Error!i64 {
+        return positive_or_fail_err(C.SDL_SeekIO(self.to_c(), offset, relative_to.to_c()));
     }
-    pub fn current_offest(self: *IOStream) SDL3Error!i64 {
-        return positive_or_failure(C.SDL_TellIO(self.to_c()));
+    pub fn current_offest(self: *IOStream) Error!i64 {
+        return positive_or_fail_err(C.SDL_TellIO(self.to_c()));
     }
-    pub fn read_from_stream_into_ptr(self: *IOStream, dst_ptr: [*]u8, read_len: usize) SDL3Error!usize {
-        return nonzero_or_failure(C.SDL_ReadIO(self.to_c(), dst_ptr, read_len));
+    pub fn read_from_stream_into_ptr(self: *IOStream, dst_ptr: [*]u8, read_len: usize) Error!usize {
+        return nonzero_or_fail_err(C.SDL_ReadIO(self.to_c(), dst_ptr, read_len));
     }
-    pub fn write_from_ptr_into_stream(self: *IOStream, src_ptr: [*]const u8, write_len: usize) SDL3Error!usize {
-        return nonzero_or_failure(C.SDL_WriteIO(self.to_c(), src_ptr, write_len));
+    pub fn write_from_ptr_into_stream(self: *IOStream, src_ptr: [*]const u8, write_len: usize) Error!usize {
+        return nonzero_or_fail_err(C.SDL_WriteIO(self.to_c(), src_ptr, write_len));
     }
-    pub fn c_printf(self: *IOStream, fmt: [*:0]const u8, args: anytype) SDL3Error!usize {
-        return nonzero_or_failure(@call(.auto, C.SDL_IOprintf, .{ self.to_c(), fmt } ++ args));
+    pub fn c_printf(self: *IOStream, fmt: [*:0]const u8, args: anytype) Error!usize {
+        return nonzero_or_fail_err(@call(.auto, C.SDL_IOprintf, .{ self.to_c(), fmt } ++ args));
     }
     // pub extern fn SDL_IOvprintf(context: ?*SDL_IOStream, fmt: [*c]const u8, ap: [*c]struct___va_list_tag_1) usize;
-    pub fn flush(self: *IOStream) SDL3Error!void {
-        return ok_or_failure(C.SDL_FlushIO(self.to_c()));
+    pub fn flush(self: *IOStream) Error!void {
+        return ok_or_fail_err(C.SDL_FlushIO(self.to_c()));
     }
-    pub fn load_file_from_stream(self: *IOStream, close_stream: bool) SDL3Error!IOFile {
+    pub fn load_file_from_stream(self: *IOStream, close_stream: bool) Error!IOFile {
         var len: usize = 0;
-        const ptr = try ptr_cast_or_null([*:0]u8, C.SDL_LoadFile_IO(self.to_c(), &len, close_stream));
+        const ptr = try ptr_cast_or_null_err([*:0]u8, C.SDL_LoadFile_IO(self.to_c(), &len, close_stream));
         return IOFile{ .data = ptr[0..len :0] };
     }
-    pub fn save_file_into_stream(self: *IOStream, file: IOFile, close_stream: bool) SDL3Error!void {
-        return ok_or_failure(C.SDL_SaveFile_IO(self.to_c(), file.data.ptr, file.data.len, close_stream));
+    pub fn save_file_into_stream(self: *IOStream, file: IOFile, close_stream: bool) Error!void {
+        return ok_or_fail_err(C.SDL_SaveFile_IO(self.to_c(), file.data.ptr, file.data.len, close_stream));
     }
-    pub fn read_u8(self: *IOStream) SDL3Error!u8 {
+    pub fn read_u8(self: *IOStream) Error!u8 {
         var val: u8 = 0;
-        try ok_or_failure(C.SDL_ReadU8(self.to_c(), &val));
+        try ok_or_fail_err(C.SDL_ReadU8(self.to_c(), &val));
         return val;
     }
-    pub fn read_i8(self: *IOStream) SDL3Error!i8 {
+    pub fn read_i8(self: *IOStream) Error!i8 {
         var val: i8 = 0;
-        try ok_or_failure(C.SDL_ReadS8(self.to_c(), &val));
+        try ok_or_fail_err(C.SDL_ReadS8(self.to_c(), &val));
         return val;
     }
-    pub fn read_u16_le(self: *IOStream) SDL3Error!u16 {
+    pub fn read_u16_le(self: *IOStream) Error!u16 {
         var val: u16 = 0;
-        try ok_or_failure(C.SDL_ReadU16LE(self.to_c(), &val));
+        try ok_or_fail_err(C.SDL_ReadU16LE(self.to_c(), &val));
         return val;
     }
-    pub fn read_i16_le(self: *IOStream) SDL3Error!i16 {
+    pub fn read_i16_le(self: *IOStream) Error!i16 {
         var val: i16 = 0;
-        try ok_or_failure(C.SDL_ReadS16LE(self.to_c(), &val));
+        try ok_or_fail_err(C.SDL_ReadS16LE(self.to_c(), &val));
         return val;
     }
-    pub fn read_u16_be(self: *IOStream) SDL3Error!u16 {
+    pub fn read_u16_be(self: *IOStream) Error!u16 {
         var val: u16 = 0;
-        try ok_or_failure(C.SDL_ReadU16BE(self.to_c(), &val));
+        try ok_or_fail_err(C.SDL_ReadU16BE(self.to_c(), &val));
         return val;
     }
-    pub fn read_i16_be(self: *IOStream) SDL3Error!i16 {
+    pub fn read_i16_be(self: *IOStream) Error!i16 {
         var val: i16 = 0;
-        try ok_or_failure(C.SDL_ReadS16BE(self.to_c(), &val));
+        try ok_or_fail_err(C.SDL_ReadS16BE(self.to_c(), &val));
         return val;
     }
-    pub fn read_u32_le(self: *IOStream) SDL3Error!u16 {
+    pub fn read_u32_le(self: *IOStream) Error!u16 {
         var val: u32 = 0;
-        try ok_or_failure(C.SDL_ReadU32LE(self.to_c(), &val));
+        try ok_or_fail_err(C.SDL_ReadU32LE(self.to_c(), &val));
         return val;
     }
-    pub fn read_i32_le(self: *IOStream) SDL3Error!i16 {
+    pub fn read_i32_le(self: *IOStream) Error!i16 {
         var val: i32 = 0;
-        try ok_or_failure(C.SDL_ReadS32LE(self.to_c(), &val));
+        try ok_or_fail_err(C.SDL_ReadS32LE(self.to_c(), &val));
         return val;
     }
-    pub fn read_u32_be(self: *IOStream) SDL3Error!u16 {
+    pub fn read_u32_be(self: *IOStream) Error!u16 {
         var val: u32 = 0;
-        try ok_or_failure(C.SDL_ReadU32BE(self.to_c(), &val));
+        try ok_or_fail_err(C.SDL_ReadU32BE(self.to_c(), &val));
         return val;
     }
-    pub fn read_i32_be(self: *IOStream) SDL3Error!i16 {
+    pub fn read_i32_be(self: *IOStream) Error!i16 {
         var val: i32 = 0;
-        try ok_or_failure(C.SDL_ReadS32BE(self.to_c(), &val));
+        try ok_or_fail_err(C.SDL_ReadS32BE(self.to_c(), &val));
         return val;
     }
-    pub fn read_u64_le(self: *IOStream) SDL3Error!u64 {
+    pub fn read_u64_le(self: *IOStream) Error!u64 {
         var val: u64 = 0;
-        try ok_or_failure(C.SDL_ReadU64LE(self.to_c(), &val));
+        try ok_or_fail_err(C.SDL_ReadU64LE(self.to_c(), &val));
         return val;
     }
-    pub fn read_i64_le(self: *IOStream) SDL3Error!i64 {
+    pub fn read_i64_le(self: *IOStream) Error!i64 {
         var val: i64 = 0;
-        try ok_or_failure(C.SDL_ReadS64LE(self.to_c(), &val));
+        try ok_or_fail_err(C.SDL_ReadS64LE(self.to_c(), &val));
         return val;
     }
-    pub fn read_u64_be(self: *IOStream) SDL3Error!u64 {
+    pub fn read_u64_be(self: *IOStream) Error!u64 {
         var val: u64 = 0;
-        try ok_or_failure(C.SDL_ReadU64BE(self.to_c(), &val));
+        try ok_or_fail_err(C.SDL_ReadU64BE(self.to_c(), &val));
         return val;
     }
-    pub fn read_i64_be(self: *IOStream) SDL3Error!i64 {
+    pub fn read_i64_be(self: *IOStream) Error!i64 {
         var val: i64 = 0;
-        try ok_or_failure(C.SDL_ReadS64BE(self.to_c(), &val));
+        try ok_or_fail_err(C.SDL_ReadS64BE(self.to_c(), &val));
         return val;
     }
-    pub fn write_u8(self: *IOStream, val: u8) SDL3Error!void {
-        return ok_or_failure(C.SDL_WriteU8(self.to_c(), val));
+    pub fn write_u8(self: *IOStream, val: u8) Error!void {
+        return ok_or_fail_err(C.SDL_WriteU8(self.to_c(), val));
     }
-    pub fn write_i8(self: *IOStream, val: i8) SDL3Error!void {
-        return ok_or_failure(C.SDL_WriteS8(self.to_c(), val));
+    pub fn write_i8(self: *IOStream, val: i8) Error!void {
+        return ok_or_fail_err(C.SDL_WriteS8(self.to_c(), val));
     }
-    pub fn write_u16_le(self: *IOStream, val: u16) SDL3Error!void {
-        return ok_or_failure(C.SDL_WriteU16LE(self.to_c(), val));
+    pub fn write_u16_le(self: *IOStream, val: u16) Error!void {
+        return ok_or_fail_err(C.SDL_WriteU16LE(self.to_c(), val));
     }
-    pub fn write_i16_le(self: *IOStream, val: i16) SDL3Error!void {
-        return ok_or_failure(C.SDL_WriteS16LE(self.to_c(), val));
+    pub fn write_i16_le(self: *IOStream, val: i16) Error!void {
+        return ok_or_fail_err(C.SDL_WriteS16LE(self.to_c(), val));
     }
-    pub fn write_u16_be(self: *IOStream, val: u16) SDL3Error!void {
-        return ok_or_failure(C.SDL_WriteU16BE(self.to_c(), val));
+    pub fn write_u16_be(self: *IOStream, val: u16) Error!void {
+        return ok_or_fail_err(C.SDL_WriteU16BE(self.to_c(), val));
     }
-    pub fn write_i16_be(self: *IOStream, val: i16) SDL3Error!void {
-        return ok_or_failure(C.SDL_WriteS16BE(self.to_c(), val));
+    pub fn write_i16_be(self: *IOStream, val: i16) Error!void {
+        return ok_or_fail_err(C.SDL_WriteS16BE(self.to_c(), val));
     }
-    pub fn write_u32_le(self: *IOStream, val: u32) SDL3Error!void {
-        return ok_or_failure(C.SDL_WriteU32LE(self.to_c(), val));
+    pub fn write_u32_le(self: *IOStream, val: u32) Error!void {
+        return ok_or_fail_err(C.SDL_WriteU32LE(self.to_c(), val));
     }
-    pub fn write_i32_le(self: *IOStream, val: i32) SDL3Error!void {
-        return ok_or_failure(C.SDL_WriteS32LE(self.to_c(), val));
+    pub fn write_i32_le(self: *IOStream, val: i32) Error!void {
+        return ok_or_fail_err(C.SDL_WriteS32LE(self.to_c(), val));
     }
-    pub fn write_u32_be(self: *IOStream, val: u32) SDL3Error!void {
-        return ok_or_failure(C.SDL_WriteU32BE(self.to_c(), val));
+    pub fn write_u32_be(self: *IOStream, val: u32) Error!void {
+        return ok_or_fail_err(C.SDL_WriteU32BE(self.to_c(), val));
     }
-    pub fn write_i32_be(self: *IOStream, val: i32) SDL3Error!void {
-        return ok_or_failure(C.SDL_WriteS32BE(self.to_c(), val));
+    pub fn write_i32_be(self: *IOStream, val: i32) Error!void {
+        return ok_or_fail_err(C.SDL_WriteS32BE(self.to_c(), val));
     }
-    pub fn write_u64_le(self: *IOStream, val: u64) SDL3Error!void {
-        return ok_or_failure(C.SDL_WriteU64LE(self.to_c(), val));
+    pub fn write_u64_le(self: *IOStream, val: u64) Error!void {
+        return ok_or_fail_err(C.SDL_WriteU64LE(self.to_c(), val));
     }
-    pub fn write_i64_le(self: *IOStream, val: i64) SDL3Error!void {
-        return ok_or_failure(C.SDL_WriteS64LE(self.to_c(), val));
+    pub fn write_i64_le(self: *IOStream, val: i64) Error!void {
+        return ok_or_fail_err(C.SDL_WriteS64LE(self.to_c(), val));
     }
-    pub fn write_u64_be(self: *IOStream, val: u64) SDL3Error!void {
-        return ok_or_failure(C.SDL_WriteU64BE(self.to_c(), val));
+    pub fn write_u64_be(self: *IOStream, val: u64) Error!void {
+        return ok_or_fail_err(C.SDL_WriteU64BE(self.to_c(), val));
     }
-    pub fn write_i64_be(self: *IOStream, val: i64) SDL3Error!void {
-        return ok_or_failure(C.SDL_WriteS64BE(self.to_c(), val));
+    pub fn write_i64_be(self: *IOStream, val: i64) Error!void {
+        return ok_or_fail_err(C.SDL_WriteS64BE(self.to_c(), val));
     }
-    pub fn save_bmp_to_new_surface(self: *IOStream, close_stream: bool) SDL3Error!*Surface {
-        return ptr_cast_or_failure(*Surface, C.SDL_LoadBMP_IO(self.to_c(), close_stream));
+    pub fn save_bmp_to_new_surface(self: *IOStream, close_stream: bool) Error!*Surface {
+        return ptr_cast_or_fail_err(*Surface, C.SDL_LoadBMP_IO(self.to_c(), close_stream));
     }
-    pub fn load_bmp_from_surface(self: *IOStream, surface: *Surface, close_stream: bool) SDL3Error!void {
-        return ok_or_failure(C.SDL_SaveBMP_IO(surface.to_c(), self.to_c(), close_stream));
+    pub fn load_bmp_from_surface(self: *IOStream, surface: *Surface, close_stream: bool) Error!void {
+        return ok_or_fail_err(C.SDL_SaveBMP_IO(surface.to_c(), self.to_c(), close_stream));
     }
-    pub fn load_wav(self: *IOStream, close_stream: bool) SDL3Error!WaveAudio {
+    pub fn load_wav(self: *IOStream, close_stream: bool) Error!WaveAudio {
         var ptr: [*]u8 = undefined;
         var len: u32 = 0;
         var spec: AudioSpec = undefined;
-        try ok_or_failure(C.SDL_LoadWAV_IO(self.to_c(), close_stream, @ptrCast(@alignCast(&spec)), &ptr, &len));
+        try ok_or_fail_err(C.SDL_LoadWAV_IO(self.to_c(), close_stream, @ptrCast(@alignCast(&spec)), &ptr, &len));
         return WaveAudio{
             .data = ptr[0..len],
             .spec = spec,
@@ -679,7 +704,7 @@ pub const WaveAudio = extern struct {
     data: []u8 = undefined,
     spec: AudioSpec = undefined,
 
-    pub fn free(self: *WaveAudio) void {
+    pub fn destroy(self: *WaveAudio) void {
         sdl_free(self.data.ptr);
     }
 };
@@ -754,80 +779,80 @@ pub const INinePatch = extern struct {
     }
 };
 
-pub const Properties = struct {
+pub const PropertiesID = struct {
     id: u32 = 0,
 
-    pub const NULL = Properties{ .id = 0 };
+    pub const NULL = PropertiesID{ .id = 0 };
 
-    pub inline fn is_null(self: Properties) bool {
+    pub inline fn is_null(self: PropertiesID) bool {
         return self.id == 0;
     }
 
-    inline fn new(id: u32) SDL3Error!Properties {
-        return Properties{ .id = try nonzero_or_null(id) };
+    inline fn new(id: u32) Error!PropertiesID {
+        return PropertiesID{ .id = try nonzero_or_null_err(id) };
     }
 
-    pub fn global_properties() SDL3Error!Properties {
+    pub fn global_properties() Error!PropertiesID {
         return new(C.SDL_GetGlobalProperties());
     }
-    pub fn create_new() SDL3Error!Properties {
+    pub fn create_new() Error!PropertiesID {
         return new(C.SDL_CreateProperties());
     }
-    pub fn copy_to(self: Properties, dst_props: Properties) SDL3Error!void {
-        return ok_or_failure(C.SDL_CopyProperties(self.id, dst_props.id));
+    pub fn copy_to(self: PropertiesID, dst_props: PropertiesID) Error!void {
+        return ok_or_fail_err(C.SDL_CopyProperties(self.id, dst_props.id));
     }
-    pub fn lock(self: Properties) SDL3Error!void {
-        return ok_or_failure(C.SDL_LockProperties(self.id));
+    pub fn lock(self: PropertiesID) Error!void {
+        return ok_or_fail_err(C.SDL_LockProperties(self.id));
     }
-    pub fn unlock(self: Properties) void {
+    pub fn unlock(self: PropertiesID) void {
         C.SDL_UnlockProperties(self.id);
     }
-    pub fn set_pointer_property_with_cleanup(self: Properties, name: [*:0]const u8, value: ?*anyopaque, cleanup: *PropertyCleanupCallback, user_data: ?*anyopaque) SDL3Error!void {
-        return ok_or_failure(C.SDL_SetPointerPropertyWithCleanup(self.id, name, value, @ptrCast(@alignCast(cleanup)), user_data));
+    pub fn set_pointer_property_with_cleanup(self: PropertiesID, name: [*:0]const u8, value: ?*anyopaque, cleanup: *PropertyCleanupCallback, user_data: ?*anyopaque) Error!void {
+        return ok_or_fail_err(C.SDL_SetPointerPropertyWithCleanup(self.id, name, value, @ptrCast(@alignCast(cleanup)), user_data));
     }
-    pub fn set_pointer_property(self: Properties, name: [*:0]const u8, value: ?*anyopaque) SDL3Error!void {
-        return ok_or_failure(C.SDL_SetPointerProperty(self.id, name, value));
+    pub fn set_pointer_property(self: PropertiesID, name: [*:0]const u8, value: ?*anyopaque) Error!void {
+        return ok_or_fail_err(C.SDL_SetPointerProperty(self.id, name, value));
     }
-    pub fn set_string_property(self: Properties, name: [*:0]const u8, value: [*:0]const u8) SDL3Error!void {
-        return ok_or_failure(C.SDL_SetStringProperty(self.id, name, value));
+    pub fn set_string_property(self: PropertiesID, name: [*:0]const u8, value: [*:0]const u8) Error!void {
+        return ok_or_fail_err(C.SDL_SetStringProperty(self.id, name, value));
     }
-    pub fn set_integer_property(self: Properties, name: [*:0]const u8, value: i64) SDL3Error!void {
-        return ok_or_failure(C.SDL_SetNumberProperty(self.id, name, value));
+    pub fn set_integer_property(self: PropertiesID, name: [*:0]const u8, value: i64) Error!void {
+        return ok_or_fail_err(C.SDL_SetNumberProperty(self.id, name, value));
     }
-    pub fn set_float_property(self: Properties, name: [*:0]const u8, value: f32) SDL3Error!void {
-        return ok_or_failure(C.SDL_SetFloatProperty(self.id, name, value));
+    pub fn set_float_property(self: PropertiesID, name: [*:0]const u8, value: f32) Error!void {
+        return ok_or_fail_err(C.SDL_SetFloatProperty(self.id, name, value));
     }
-    pub fn set_bool_property(self: Properties, name: [*:0]const u8, value: bool) SDL3Error!void {
-        return ok_or_failure(C.SDL_SetBooleanProperty(self.id, name, value));
+    pub fn set_bool_property(self: PropertiesID, name: [*:0]const u8, value: bool) Error!void {
+        return ok_or_fail_err(C.SDL_SetBooleanProperty(self.id, name, value));
     }
-    pub fn has_property(self: Properties, name: [*:0]const u8) bool {
+    pub fn has_property(self: PropertiesID, name: [*:0]const u8) bool {
         return C.SDL_HasProperty(self.id, name);
     }
-    pub fn get_property_type(self: Properties, name: [*:0]const u8) PropertyType {
+    pub fn get_property_type(self: PropertiesID, name: [*:0]const u8) PropertyType {
         return PropertyType.from_c(C.SDL_GetPropertyType(self.id, name));
     }
-    pub fn get_pointer_property_or_default(self: Properties, name: [*:0]const u8, default: ?*anyopaque) ?*anyopaque {
+    pub fn get_pointer_property_or_default(self: PropertiesID, name: [*:0]const u8, default: ?*anyopaque) ?*anyopaque {
         return C.SDL_GetPointerProperty(self.id, name, default);
     }
-    pub fn get_string_property_or_default(self: Properties, name: [*:0]const u8, default: [*:0]const u8) [*:0]const u8 {
+    pub fn get_string_property_or_default(self: PropertiesID, name: [*:0]const u8, default: [*:0]const u8) [*:0]const u8 {
         return C.SDL_GetStringProperty(self.id, name, default);
     }
-    pub fn get_integer_property_or_default(self: Properties, name: [*:0]const u8, default: i64) i64 {
+    pub fn get_integer_property_or_default(self: PropertiesID, name: [*:0]const u8, default: i64) i64 {
         return C.SDL_GetNumberProperty(self.id, name, default);
     }
-    pub fn get_float_property_or_default(self: Properties, name: [*:0]const u8, default: f32) f32 {
+    pub fn get_float_property_or_default(self: PropertiesID, name: [*:0]const u8, default: f32) f32 {
         return C.SDL_GetFloatProperty(self.id, name, default);
     }
-    pub fn get_bool_property_or_default(self: Properties, name: [*:0]const u8, default: bool) bool {
+    pub fn get_bool_property_or_default(self: PropertiesID, name: [*:0]const u8, default: bool) bool {
         return C.SDL_GetBooleanProperty(self.id, name, default);
     }
-    pub fn clear_property(self: Properties, name: [*:0]const u8) SDL3Error!void {
-        return ok_or_failure(C.SDL_ClearProperty(self.id, name));
+    pub fn clear_property(self: PropertiesID, name: [*:0]const u8) Error!void {
+        return ok_or_fail_err(C.SDL_ClearProperty(self.id, name));
     }
-    pub fn do_callback_on_each_property(self: Properties, callback: *EnumeratePropertiesCallback, user_data: ?*anyopaque) SDL3Error!void {
-        return ok_or_failure(C.SDL_EnumerateProperties(self.id, @ptrCast(@alignCast(callback)), user_data));
+    pub fn do_callback_on_each_property(self: PropertiesID, callback: *EnumeratePropertiesCallback, user_data: ?*anyopaque) Error!void {
+        return ok_or_fail_err(C.SDL_EnumerateProperties(self.id, @ptrCast(@alignCast(callback)), user_data));
     }
-    pub fn destroy(self: Properties) void {
+    pub fn destroy(self: PropertiesID) void {
         C.SDL_DestroyProperties(self.id);
     }
 };
@@ -1218,11 +1243,11 @@ pub const FlipMode = enum(c_uint) {
 };
 
 pub const Clipboard = struct {
-    pub fn get_text() SDL3Error!String {
-        return String{ .ptr = try nonempty_str_or_null(C.SDL_GetClipboardText()) };
+    pub fn get_text() Error!String {
+        return String{ .ptr = try nonempty_str_or_null_err(C.SDL_GetClipboardText()) };
     }
-    pub fn set_text(text: [*:0]const u8) SDL3Error!void {
-        return ok_or_failure(C.SDL_SetClipboardText(text));
+    pub fn set_text(text: [*:0]const u8) Error!void {
+        return ok_or_fail_err(C.SDL_SetClipboardText(text));
     }
     pub fn has_text() bool {
         return C.SDL_HasClipboardText();
@@ -1270,27 +1295,27 @@ pub const DisplayOrientation = enum(c_int) {
 pub const DisplayID = extern struct {
     id: u32 = 0,
 
-    pub fn get_all_displays() SDL3Error!DisplayList {
+    pub fn get_all_displays() Error!DisplayList {
         var len: c_int = 0;
-        return DisplayList{ .ids = (try ptr_cast_or_null([*]u32, C.SDL_GetDisplays(&len)))[0..len] };
+        return DisplayList{ .ids = (try ptr_cast_or_null_err([*]u32, C.SDL_GetDisplays(&len)))[0..len] };
     }
-    pub fn get_primary_display() SDL3Error!DisplayID {
-        return DisplayID{ .id = try nonzero_or_null(C.SDL_GetPrimaryDisplay()) };
+    pub fn get_primary_display() Error!DisplayID {
+        return DisplayID{ .id = try nonzero_or_null_err(C.SDL_GetPrimaryDisplay()) };
     }
-    pub fn get_properties(self: DisplayID) SDL3Error!Properties {
-        return Properties{ .id = try nonzero_or_null(C.SDL_GetDisplayProperties(self.id)) };
+    pub fn get_properties(self: DisplayID) Error!PropertiesID {
+        return PropertiesID{ .id = try nonzero_or_null_err(C.SDL_GetDisplayProperties(self.id)) };
     }
-    pub fn get_name(self: DisplayID) SDL3Error![*:0]const u8 {
-        return ptr_cast_or_null([*:0]const u8, C.SDL_GetDisplayName(self.id));
+    pub fn get_name(self: DisplayID) Error![*:0]const u8 {
+        return ptr_cast_or_null_err([*:0]const u8, C.SDL_GetDisplayName(self.id));
     }
-    pub fn get_bounds(self: DisplayID) SDL3Error!IRect {
+    pub fn get_bounds(self: DisplayID) Error!IRect {
         var rect = IRect{};
-        try ok_or_null(C.SDL_GetDisplayBounds(self.id, @ptrCast(@alignCast(&rect))));
+        try ok_or_null_err(C.SDL_GetDisplayBounds(self.id, @ptrCast(@alignCast(&rect))));
         return rect;
     }
-    pub fn get_usable_bounds(self: DisplayID) SDL3Error!IRect {
+    pub fn get_usable_bounds(self: DisplayID) Error!IRect {
         var rect = IRect{};
-        try ok_or_null(C.SDL_GetDisplayUsableBounds(self.id, @ptrCast(@alignCast(&rect))));
+        try ok_or_null_err(C.SDL_GetDisplayUsableBounds(self.id, @ptrCast(@alignCast(&rect))));
         return rect;
     }
     pub fn get_natural_orientation(self: DisplayID) DisplayOrientation {
@@ -1302,28 +1327,28 @@ pub const DisplayID = extern struct {
     pub fn get_content_scale(self: DisplayID) f32 {
         return C.SDL_GetDisplayContentScale(self.id);
     }
-    pub fn get_all_fullscreen_modes(self: DisplayID) SDL3Error!DisplayModeList {
+    pub fn get_all_fullscreen_modes(self: DisplayID) Error!DisplayModeList {
         const len: c_int = 0;
         return DisplayModeList{
-            .modes = (try ptr_cast_or_null([*]*DisplayMode, C.SDL_GetFullscreenDisplayModes(self.id, &len)))[0..len],
+            .modes = (try ptr_cast_or_null_err([*]*DisplayMode, C.SDL_GetFullscreenDisplayModes(self.id, &len)))[0..len],
         };
     }
-    pub fn get_closest_fullscreen_mode(self: DisplayID, options: ClosestDisplayModeOptions) SDL3Error!DisplayMode {
+    pub fn get_closest_fullscreen_mode(self: DisplayID, options: ClosestDisplayModeOptions) Error!DisplayMode {
         const mode = DisplayMode{};
-        try ok_or_null(C.SDL_GetClosestFullscreenDisplayMode(self.id, options.width, options.height, options.refresh_rate, options.include_high_density_modes, @ptrCast(@alignCast(&mode))));
+        try ok_or_null_err(C.SDL_GetClosestFullscreenDisplayMode(self.id, options.width, options.height, options.refresh_rate, options.include_high_density_modes, @ptrCast(@alignCast(&mode))));
         return mode;
     }
-    pub fn get_desktop_mode(self: DisplayID) SDL3Error!*const DisplayMode {
-        return ptr_cast_or_null(*const DisplayMode, C.SDL_GetDesktopDisplayMode(self.id));
+    pub fn get_desktop_mode(self: DisplayID) Error!*const DisplayMode {
+        return ptr_cast_or_null_err(*const DisplayMode, C.SDL_GetDesktopDisplayMode(self.id));
     }
-    pub fn get_current_mode(self: DisplayID) SDL3Error!*const DisplayMode {
-        return ptr_cast_or_null(*const DisplayMode, C.SDL_GetCurrentDisplayMode(self.id));
+    pub fn get_current_mode(self: DisplayID) Error!*const DisplayMode {
+        return ptr_cast_or_null_err(*const DisplayMode, C.SDL_GetCurrentDisplayMode(self.id));
     }
-    pub fn get_display_for_point(point: IVec) SDL3Error!DisplayID {
-        return DisplayID{ .id = try nonzero_or_null(C.SDL_GetDisplayForPoint(@ptrCast(@alignCast(&point)))) };
+    pub fn get_display_for_point(point: IVec) Error!DisplayID {
+        return DisplayID{ .id = try nonzero_or_null_err(C.SDL_GetDisplayForPoint(@ptrCast(@alignCast(&point)))) };
     }
-    pub fn get_display_for_rect(rect: IRect) SDL3Error!DisplayID {
-        return DisplayID{ .id = try nonzero_or_null(C.SDL_GetDisplayForRect(@ptrCast(@alignCast(&rect)))) };
+    pub fn get_display_for_rect(rect: IRect) Error!DisplayID {
+        return DisplayID{ .id = try nonzero_or_null_err(C.SDL_GetDisplayForRect(@ptrCast(@alignCast(&rect)))) };
     }
 };
 
@@ -1337,8 +1362,8 @@ pub const ClosestDisplayModeOptions = struct {
 pub const WindowID = extern struct {
     id: u32 = 0,
 
-    pub fn get_window(self: WindowID) SDL3Error!*Window {
-        return try ptr_cast_or_null(*Window, C.SDL_GetWindowFromID(self.id));
+    pub fn get_window(self: WindowID) Error!*Window {
+        return try ptr_cast_or_null_err(*Window, C.SDL_GetWindowFromID(self.id));
     }
 };
 
@@ -1368,8 +1393,8 @@ pub const Window = opaque {
     inline fn to_c(self: *Window) *C.SDL_Window {
         return @ptrCast(@alignCast(self));
     }
-    pub fn try_get_display_id(self: *Window) SDL3Error!DisplayID {
-        return DisplayID{ .id = try nonzero_or_null(C.SDL_GetDisplayForWindow(self.to_c())) };
+    pub fn try_get_display_id(self: *Window) Error!DisplayID {
+        return DisplayID{ .id = try nonzero_or_null_err(C.SDL_GetDisplayForWindow(self.to_c())) };
     }
     pub fn get_pixel_density(self: *Window) f32 {
         return C.SDL_GetWindowPixelDensity(self.to_c());
@@ -1380,165 +1405,165 @@ pub const Window = opaque {
     pub fn get_fullscreen_display_mode(self: *Window) FullscreenMode {
         return FullscreenMode{ .mode = C.SDL_GetWindowFullscreenMode(self) };
     }
-    pub fn set_fullscreen_display_mode(self: *Window, mode: FullscreenMode) SDL3Error!void {
-        return ok_or_failure(C.SDL_SetWindowFullscreenMode(self.to_c(), mode.mode));
+    pub fn set_fullscreen_display_mode(self: *Window, mode: FullscreenMode) Error!void {
+        return ok_or_fail_err(C.SDL_SetWindowFullscreenMode(self.to_c(), mode.mode));
     }
-    pub fn get_icc_profile(self: *Window, size: usize) SDL3Error!*WindowICCProfile {
-        return ptr_cast_or_null(*WindowICCProfile, C.SDL_GetWindowICCProfile(self.to_c(), &size));
+    pub fn get_icc_profile(self: *Window, size: usize) Error!*WindowICCProfile {
+        return ptr_cast_or_null_err(*WindowICCProfile, C.SDL_GetWindowICCProfile(self.to_c(), &size));
     }
     pub fn get_pixel_format(self: *Window) PixelFormat {
         return @enumFromInt(C.SDL_GetWindowPixelFormat(self.to_c()));
     }
-    pub fn get_all_windows() SDL3Error!WindowsList {
+    pub fn get_all_windows() Error!WindowsList {
         var len: c_int = 0;
-        return WindowsList{ .list = (try ptr_cast_or_null([*]*Window, C.SDL_GetWindows(&len)))[0..len] };
+        return WindowsList{ .list = (try ptr_cast_or_null_err([*]*Window, C.SDL_GetWindows(&len)))[0..len] };
     }
-    pub fn create(options: CreateWindowOptions) SDL3Error!*Window {
-        return ptr_cast_or_failure(*Window, C.SDL_CreateWindow(options.title.ptr, options.width, options.height, options.flags));
+    pub fn create(options: CreateWindowOptions) Error!*Window {
+        return ptr_cast_or_fail_err(*Window, C.SDL_CreateWindow(options.title.ptr, options.width, options.height, options.flags));
     }
-    pub fn create_popup_window(parent: *Window, options: CreatePopupWindowOptions) SDL3Error!*Window {
-        return ptr_cast_or_failure(*Window, C.SDL_CreatePopupWindow(parent.to_c(), options.x_offset, options.y_offset, options.width, options.height, options.flags));
+    pub fn create_popup_window(parent: *Window, options: CreatePopupWindowOptions) Error!*Window {
+        return ptr_cast_or_fail_err(*Window, C.SDL_CreatePopupWindow(parent.to_c(), options.x_offset, options.y_offset, options.width, options.height, options.flags));
     }
-    pub fn create_window_with_properties(properties: Properties) SDL3Error!*Window {
-        return ptr_cast_or_failure(*Window, C.SDL_CreateWindowWithProperties(properties.id));
+    pub fn create_window_with_properties(properties: PropertiesID) Error!*Window {
+        return ptr_cast_or_fail_err(*Window, C.SDL_CreateWindowWithProperties(properties.id));
     }
-    pub fn get_id(self: *Window) SDL3Error!WindowID {
-        return WindowID{ .id = try nonzero_or_null(C.SDL_GetWindowID(self.to_c())) };
+    pub fn get_id(self: *Window) Error!WindowID {
+        return WindowID{ .id = try nonzero_or_null_err(C.SDL_GetWindowID(self.to_c())) };
     }
-    pub fn get_parent_window(self: *Window) SDL3Error!*Window {
-        return ptr_cast_or_null(*Window, C.SDL_GetWindowParent(self.to_c()));
+    pub fn get_parent_window(self: *Window) Error!*Window {
+        return ptr_cast_or_null_err(*Window, C.SDL_GetWindowParent(self.to_c()));
     }
-    pub fn get_properties(self: *Window) SDL3Error!Properties {
-        return Properties{ .id = try nonzero_or_null(C.SDL_GetWindowProperties(self.to_c())) };
+    pub fn get_properties(self: *Window) Error!PropertiesID {
+        return PropertiesID{ .id = try nonzero_or_null_err(C.SDL_GetWindowProperties(self.to_c())) };
     }
     pub fn get_flags(self: *Window) WindowFlags {
         return WindowFlags{ .flags = C.SDL_GetWindowFlags(self.to_c()) };
     }
-    pub fn set_title(self: *Window, title: [:0]const u8) SDL3Error!void {
-        try ok_or_failure(C.SDL_SetWindowTitle(self.to_c(), title.ptr));
+    pub fn set_title(self: *Window, title: [:0]const u8) Error!void {
+        try ok_or_fail_err(C.SDL_SetWindowTitle(self.to_c(), title.ptr));
     }
     pub fn get_title(self: *Window) [*:0]const u8 {
         return @ptrCast(@alignCast(C.SDL_GetWindowTitle(self.to_c())));
     }
-    pub fn set_window_icon(self: *Window, icon: *Surface) SDL3Error!void {
-        try ok_or_failure(C.SDL_SetWindowIcon(self.to_c(), @ptrCast(@alignCast(icon))));
+    pub fn set_window_icon(self: *Window, icon: *Surface) Error!void {
+        try ok_or_fail_err(C.SDL_SetWindowIcon(self.to_c(), @ptrCast(@alignCast(icon))));
     }
-    pub fn set_window_position(self: *Window, pos: IVec) SDL3Error!void {
-        try ok_or_failure(C.SDL_SetWindowPosition(self.to_c(), pos.x, pos.y));
+    pub fn set_window_position(self: *Window, pos: IVec) Error!void {
+        try ok_or_fail_err(C.SDL_SetWindowPosition(self.to_c(), pos.x, pos.y));
     }
-    pub fn get_window_position(self: *Window) SDL3Error!IVec {
+    pub fn get_window_position(self: *Window) Error!IVec {
         var point = IVec{};
-        try ok_or_null(C.SDL_GetWindowPosition(self.to_c(), &point.x, &point.y));
+        try ok_or_null_err(C.SDL_GetWindowPosition(self.to_c(), &point.x, &point.y));
         return point;
     }
-    pub fn set_size(self: *Window, size: IVec) SDL3Error!void {
-        try ok_or_failure(C.SDL_SetWindowSize(self.to_c(), size.x, size.y));
+    pub fn set_size(self: *Window, size: IVec) Error!void {
+        try ok_or_fail_err(C.SDL_SetWindowSize(self.to_c(), size.x, size.y));
     }
-    pub fn get_size(self: *Window) SDL3Error!IVec {
+    pub fn get_size(self: *Window) Error!IVec {
         var size = IVec.ZERO;
-        try ok_or_null(C.SDL_GetWindowSize(self.to_c(), &size.x, &size.y));
+        try ok_or_null_err(C.SDL_GetWindowSize(self.to_c(), &size.x, &size.y));
         return size;
     }
-    pub fn get_safe_area(self: *Window) SDL3Error!IRect {
+    pub fn get_safe_area(self: *Window) Error!IRect {
         var rect = IRect{};
-        try ok_or_null(C.SDL_GetWindowSafeArea(self.to_c(), @ptrCast(@alignCast(&rect))));
+        try ok_or_null_err(C.SDL_GetWindowSafeArea(self.to_c(), @ptrCast(@alignCast(&rect))));
         return rect;
     }
-    pub fn set_aspect_ratio(self: *Window, aspect_range: AspectRange) SDL3Error!void {
-        try ok_or_failure(C.SDL_SetWindowAspectRatio(self.to_c(), aspect_range.min, aspect_range.max));
+    pub fn set_aspect_ratio(self: *Window, aspect_range: AspectRange) Error!void {
+        try ok_or_fail_err(C.SDL_SetWindowAspectRatio(self.to_c(), aspect_range.min, aspect_range.max));
     }
-    pub fn get_aspect_ratio(self: *Window) SDL3Error!AspectRange {
+    pub fn get_aspect_ratio(self: *Window) Error!AspectRange {
         var ratio = AspectRange{};
-        try ok_or_null(C.SDL_SetWindowAspectRatio(self.to_c(), &ratio.min, &ratio.max));
+        try ok_or_null_err(C.SDL_SetWindowAspectRatio(self.to_c(), &ratio.min, &ratio.max));
         return ratio;
     }
-    pub fn get_border_sizes(self: *Window) SDL3Error!BorderSizes {
+    pub fn get_border_sizes(self: *Window) Error!BorderSizes {
         var sizes = BorderSizes{};
-        try ok_or_null(C.SDL_GetWindowBordersSize(self.to_c(), &sizes.top, &sizes.left, &sizes.bottom, &sizes.right));
+        try ok_or_null_err(C.SDL_GetWindowBordersSize(self.to_c(), &sizes.top, &sizes.left, &sizes.bottom, &sizes.right));
         return sizes;
     }
-    pub fn get_size_in_pixels(self: *Window) SDL3Error!IVec {
+    pub fn get_size_in_pixels(self: *Window) Error!IVec {
         var size = IVec{};
-        try ok_or_null(C.SDL_GetWindowSizeInPixels(self.to_c(), &size.x, &size.y));
+        try ok_or_null_err(C.SDL_GetWindowSizeInPixels(self.to_c(), &size.x, &size.y));
         return size;
     }
-    pub fn set_minimum_size(self: *Window, size: IVec) SDL3Error!void {
-        try ok_or_failure(C.SDL_SetWindowMinimumSize(self.to_c(), size.x, size.y));
+    pub fn set_minimum_size(self: *Window, size: IVec) Error!void {
+        try ok_or_fail_err(C.SDL_SetWindowMinimumSize(self.to_c(), size.x, size.y));
     }
-    pub fn get_minimum_size(self: *Window) SDL3Error!IVec {
+    pub fn get_minimum_size(self: *Window) Error!IVec {
         var size = IVec{};
-        try ok_or_null(C.SDL_GetWindowMinimumSize(self.to_c(), &size.x, &size.y));
+        try ok_or_null_err(C.SDL_GetWindowMinimumSize(self.to_c(), &size.x, &size.y));
         return size;
     }
-    pub fn set_maximum_size(self: *Window, size: IVec) SDL3Error!void {
-        try ok_or_failure(C.SDL_SetWindowMaximumSize(self.to_c(), size.x, size.y));
+    pub fn set_maximum_size(self: *Window, size: IVec) Error!void {
+        try ok_or_fail_err(C.SDL_SetWindowMaximumSize(self.to_c(), size.x, size.y));
     }
-    pub fn get_maximum_size(self: *Window) SDL3Error!IVec {
+    pub fn get_maximum_size(self: *Window) Error!IVec {
         var size = IVec{};
-        try ok_or_null(C.SDL_GetWindowMaximumSize(self.to_c(), &size.x, &size.y));
+        try ok_or_null_err(C.SDL_GetWindowMaximumSize(self.to_c(), &size.x, &size.y));
         return size;
     }
-    pub fn set_bordered(self: *Window, state: bool) SDL3Error!void {
-        try ok_or_failure(C.SDL_SetWindowBordered(self.to_c(), state));
+    pub fn set_bordered(self: *Window, state: bool) Error!void {
+        try ok_or_fail_err(C.SDL_SetWindowBordered(self.to_c(), state));
     }
-    pub fn set_resizable(self: *Window, state: bool) SDL3Error!void {
-        try ok_or_failure(C.SDL_SetWindowResizable(self.to_c(), state));
+    pub fn set_resizable(self: *Window, state: bool) Error!void {
+        try ok_or_fail_err(C.SDL_SetWindowResizable(self.to_c(), state));
     }
-    pub fn set_always_on_top(self: *Window, state: bool) SDL3Error!void {
-        try ok_or_failure(C.SDL_SetWindowAlwaysOnTop(self.to_c(), state));
+    pub fn set_always_on_top(self: *Window, state: bool) Error!void {
+        try ok_or_fail_err(C.SDL_SetWindowAlwaysOnTop(self.to_c(), state));
     }
-    pub fn show(self: *Window) SDL3Error!void {
-        try ok_or_failure(C.SDL_ShowWindow(self.to_c()));
+    pub fn show(self: *Window) Error!void {
+        try ok_or_fail_err(C.SDL_ShowWindow(self.to_c()));
     }
-    pub fn hide(self: *Window) SDL3Error!void {
-        try ok_or_failure(C.SDL_HideWindow(self.to_c()));
+    pub fn hide(self: *Window) Error!void {
+        try ok_or_fail_err(C.SDL_HideWindow(self.to_c()));
     }
-    pub fn raise(self: *Window) SDL3Error!void {
-        try ok_or_failure(C.SDL_RaiseWindow(self.to_c()));
+    pub fn raise(self: *Window) Error!void {
+        try ok_or_fail_err(C.SDL_RaiseWindow(self.to_c()));
     }
-    pub fn maximize(self: *Window) SDL3Error!void {
-        try ok_or_failure(C.SDL_MaximizeWindow(self.to_c()));
+    pub fn maximize(self: *Window) Error!void {
+        try ok_or_fail_err(C.SDL_MaximizeWindow(self.to_c()));
     }
-    pub fn minimize(self: *Window) SDL3Error!void {
-        try ok_or_failure(C.SDL_MinimizeWindow(self.to_c()));
+    pub fn minimize(self: *Window) Error!void {
+        try ok_or_fail_err(C.SDL_MinimizeWindow(self.to_c()));
     }
-    pub fn restore(self: *Window) SDL3Error!void {
-        try ok_or_failure(C.SDL_RestoreWindow(self.to_c()));
+    pub fn restore(self: *Window) Error!void {
+        try ok_or_fail_err(C.SDL_RestoreWindow(self.to_c()));
     }
-    pub fn set_fullscreen(self: *Window, state: bool) SDL3Error!void {
-        try ok_or_failure(C.SDL_SetWindowFullscreen(self.to_c(), state));
+    pub fn set_fullscreen(self: *Window, state: bool) Error!void {
+        try ok_or_fail_err(C.SDL_SetWindowFullscreen(self.to_c(), state));
     }
-    pub fn sync(self: *Window) SDL3Error!void {
-        try ok_or_failure(C.SDL_SyncWindow(self.to_c()));
+    pub fn sync(self: *Window) Error!void {
+        try ok_or_fail_err(C.SDL_SyncWindow(self.to_c()));
     }
     pub fn has_surface(self: *Window) bool {
         return C.SDL_WindowHasSurface(self.to_c());
     }
-    pub fn get_surface(self: *Window) SDL3Error!*Surface {
-        return ptr_cast_or_null(*Surface, C.SDL_GetWindowSurface(self.to_c()));
+    pub fn get_surface(self: *Window) Error!*Surface {
+        return ptr_cast_or_null_err(*Surface, C.SDL_GetWindowSurface(self.to_c()));
     }
-    pub fn set_surface_vsync(self: *Window, vsync: VSync) SDL3Error!void {
-        try ok_or_failure(C.SDL_SetWindowSurfaceVSync(self.to_c(), vsync.to_c()));
+    pub fn set_surface_vsync(self: *Window, vsync: VSync) Error!void {
+        try ok_or_fail_err(C.SDL_SetWindowSurfaceVSync(self.to_c(), vsync.to_c()));
     }
-    pub fn get_surface_vsync(self: *Window) SDL3Error!VSync {
+    pub fn get_surface_vsync(self: *Window) Error!VSync {
         var int: c_int = 0;
-        try ok_or_failure(C.SDL_GetWindowSurfaceVSync(self.to_c(), &int));
+        try ok_or_fail_err(C.SDL_GetWindowSurfaceVSync(self.to_c(), &int));
         return VSync.from_c(int);
     }
-    pub fn update_surface(self: *Window) SDL3Error!void {
-        try ok_or_failure(C.SDL_UpdateWindowSurface(self.to_c()));
+    pub fn update_surface(self: *Window) Error!void {
+        try ok_or_fail_err(C.SDL_UpdateWindowSurface(self.to_c()));
     }
-    pub fn update_surface_rects(self: *Window, rects: []const IRect) SDL3Error!void {
-        try ok_or_failure(C.SDL_UpdateWindowSurfaceRects(self.to_c(), @ptrCast(@alignCast(rects.ptr)), @intCast(rects.len)));
+    pub fn update_surface_rects(self: *Window, rects: []const IRect) Error!void {
+        try ok_or_fail_err(C.SDL_UpdateWindowSurfaceRects(self.to_c(), @ptrCast(@alignCast(rects.ptr)), @intCast(rects.len)));
     }
-    pub fn destroy_surface(self: *Window) SDL3Error!void {
-        try ok_or_failure(C.SDL_DestroyWindowSurface(self.to_c()));
+    pub fn destroy_surface(self: *Window) Error!void {
+        try ok_or_fail_err(C.SDL_DestroyWindowSurface(self.to_c()));
     }
-    pub fn set_keyboard_grab(self: *Window, state: bool) SDL3Error!void {
-        try ok_or_failure(C.SDL_SetWindowKeyboardGrab(self.to_c(), state));
+    pub fn set_keyboard_grab(self: *Window, state: bool) Error!void {
+        try ok_or_fail_err(C.SDL_SetWindowKeyboardGrab(self.to_c(), state));
     }
-    pub fn set_mouse_grab(self: *Window, state: bool) SDL3Error!void {
-        try ok_or_failure(C.SDL_SetWindowMouseGrab(self.to_c(), state));
+    pub fn set_mouse_grab(self: *Window, state: bool) Error!void {
+        try ok_or_fail_err(C.SDL_SetWindowMouseGrab(self.to_c(), state));
     }
     pub fn is_keyboard_grabbed(self: *Window) bool {
         return C.SDL_GetWindowKeyboardGrab(self.to_c());
@@ -1546,63 +1571,63 @@ pub const Window = opaque {
     pub fn is_mouse_grabbed(self: *Window) bool {
         return C.SDL_GetWindowMouseGrab(self.to_c());
     }
-    pub fn get_window_that_has_grab() SDL3Error!*Window {
-        return ptr_cast_or_null(*Window, C.SDL_GetGrabbedWindow());
+    pub fn get_window_that_has_grab() Error!*Window {
+        return ptr_cast_or_null_err(*Window, C.SDL_GetGrabbedWindow());
     }
-    pub fn set_mouse_confine_rect(self: *Window, rect: IRect) SDL3Error!void {
-        try ok_or_failure(C.SDL_SetWindowMouseRect(self.to_c(), @ptrCast(@alignCast(&rect))));
+    pub fn set_mouse_confine_rect(self: *Window, rect: IRect) Error!void {
+        try ok_or_fail_err(C.SDL_SetWindowMouseRect(self.to_c(), @ptrCast(@alignCast(&rect))));
     }
-    pub fn clear_mouse_confine_rect(self: *Window) SDL3Error!void {
-        try ok_or_failure(C.SDL_SetWindowMouseRect(self.to_c(), null));
+    pub fn clear_mouse_confine_rect(self: *Window) Error!void {
+        try ok_or_fail_err(C.SDL_SetWindowMouseRect(self.to_c(), null));
     }
-    pub fn get_mouse_confine_rect(self: *Window) SDL3Error!IRect {
-        const rect_ptr = try ptr_cast_or_null(*IRect, C.SDL_GetWindowMouseRect(self.to_c()));
+    pub fn get_mouse_confine_rect(self: *Window) Error!IRect {
+        const rect_ptr = try ptr_cast_or_null_err(*IRect, C.SDL_GetWindowMouseRect(self.to_c()));
         return rect_ptr.*;
     }
-    pub fn set_opacity(self: *Window, opacity: f32) SDL3Error!void {
-        try ok_or_failure(C.SDL_SetWindowOpacity(self.to_c(), opacity));
+    pub fn set_opacity(self: *Window, opacity: f32) Error!void {
+        try ok_or_fail_err(C.SDL_SetWindowOpacity(self.to_c(), opacity));
     }
     pub fn get_opacity(self: *Window) f32 {
         return C.SDL_GetWindowOpacity(self.to_c());
     }
-    pub fn set_parent(self: *Window, parent: *Window) SDL3Error!void {
-        try ok_or_failure(C.SDL_SetWindowParent(self.to_c(), parent.to_c()));
+    pub fn set_parent(self: *Window, parent: *Window) Error!void {
+        try ok_or_fail_err(C.SDL_SetWindowParent(self.to_c(), parent.to_c()));
     }
-    pub fn clear_parent(self: *Window) SDL3Error!void {
-        try ok_or_failure(C.SDL_SetWindowParent(self.to_c(), null));
+    pub fn clear_parent(self: *Window) Error!void {
+        try ok_or_fail_err(C.SDL_SetWindowParent(self.to_c(), null));
     }
-    pub fn set_modal(self: *Window, state: bool) SDL3Error!void {
-        try ok_or_failure(C.SDL_SetWindowModal(self.to_c(), state));
+    pub fn set_modal(self: *Window, state: bool) Error!void {
+        try ok_or_fail_err(C.SDL_SetWindowModal(self.to_c(), state));
     }
-    pub fn set_focusable(self: *Window, state: bool) SDL3Error!void {
-        try ok_or_failure(C.SDL_SetWindowFocusable(self.to_c(), state));
+    pub fn set_focusable(self: *Window, state: bool) Error!void {
+        try ok_or_fail_err(C.SDL_SetWindowFocusable(self.to_c(), state));
     }
-    pub fn show_system_menu(self: *Window, pos: IVec) SDL3Error!void {
-        try ok_or_failure(C.SDL_ShowWindowSystemMenu(self.to_c(), pos.x, pos.y));
+    pub fn show_system_menu(self: *Window, pos: IVec) Error!void {
+        try ok_or_fail_err(C.SDL_ShowWindowSystemMenu(self.to_c(), pos.x, pos.y));
     }
-    pub fn set_custom_hittest(self: *Window, hittest_fn: *const WindowHittestFn, data: ?*anyopaque) SDL3Error!void {
-        try ok_or_failure(C.SDL_SetWindowHitTest(self.to_c(), @ptrCast(@alignCast(hittest_fn)), data));
+    pub fn set_custom_hittest(self: *Window, hittest_fn: *const WindowHittestFn, data: ?*anyopaque) Error!void {
+        try ok_or_fail_err(C.SDL_SetWindowHitTest(self.to_c(), @ptrCast(@alignCast(hittest_fn)), data));
     }
-    pub fn clear_custom_hittest(self: *Window) SDL3Error!void {
-        try ok_or_failure(C.SDL_SetWindowHitTest(self.to_c(), null, null));
+    pub fn clear_custom_hittest(self: *Window) Error!void {
+        try ok_or_fail_err(C.SDL_SetWindowHitTest(self.to_c(), null, null));
     }
-    pub fn set_window_shape(self: *Window, shape: *Surface) SDL3Error!void {
-        try ok_or_failure(C.SDL_SetWindowShape(self.to_c(), @ptrCast(@alignCast(shape))));
+    pub fn set_window_shape(self: *Window, shape: *Surface) Error!void {
+        try ok_or_fail_err(C.SDL_SetWindowShape(self.to_c(), @ptrCast(@alignCast(shape))));
     }
-    pub fn clear_window_shape(self: *Window) SDL3Error!void {
-        try ok_or_failure(C.SDL_SetWindowShape(self.to_c(), null));
+    pub fn clear_window_shape(self: *Window) Error!void {
+        try ok_or_fail_err(C.SDL_SetWindowShape(self.to_c(), null));
     }
-    pub fn flash_window(self: *Window, mode: FlashMode) SDL3Error!void {
-        try ok_or_failure(C.SDL_FlashWindow(self.to_c(), mode.to_c()));
+    pub fn flash_window(self: *Window, mode: FlashMode) Error!void {
+        try ok_or_fail_err(C.SDL_FlashWindow(self.to_c(), mode.to_c()));
     }
     pub fn destroy(self: *Window) void {
         C.SDL_DestroyWindow(self.to_c());
     }
-    pub fn create_renderer(self: *Window, name: ?[:0]const u8) SDL3Error!*Renderer {
-        return ptr_cast_or_failure(*Renderer, C.SDL_CreateRenderer(self.extern_ptr, name.ptr));
+    pub fn create_renderer(self: *Window, name: ?[:0]const u8) Error!*Renderer {
+        return ptr_cast_or_fail_err(*Renderer, C.SDL_CreateRenderer(self.extern_ptr, name.ptr));
     }
-    pub fn get_renderer(self: *Window) SDL3Error!*Renderer {
-        return ptr_cast_or_null(*Renderer, C.SDL_GetRenderer(self.extern_ptr));
+    pub fn get_renderer(self: *Window) Error!*Renderer {
+        return ptr_cast_or_null_err(*Renderer, C.SDL_GetRenderer(self.extern_ptr));
     }
 };
 
@@ -1830,164 +1855,164 @@ pub const Surface = opaque {
     pub inline fn get_reserved_ptr(self: *Surface) ?*anyopaque {
         return self.to_c().reserved;
     }
-    pub fn create_surface(size: IVec, format: PixelFormat) SDL3Error!*Surface {
-        return ptr_cast_or_failure(*Surface, C.SDL_CreateSurface(size.x, size.y, format));
+    pub fn create_surface(size: IVec, format: PixelFormat) Error!*Surface {
+        return ptr_cast_or_fail_err(*Surface, C.SDL_CreateSurface(size.x, size.y, format));
     }
-    pub fn create_surface_from(size: IVec, format: PixelFormat, pixel_data: [*]u8, bytes_per_row: c_int) SDL3Error!*Surface {
-        return ptr_cast_or_failure(*Surface, C.SDL_CreateSurface(size.x, size.y, format, @ptrCast(@alignCast(pixel_data)), bytes_per_row));
+    pub fn create_surface_from(size: IVec, format: PixelFormat, pixel_data: [*]u8, bytes_per_row: c_int) Error!*Surface {
+        return ptr_cast_or_fail_err(*Surface, C.SDL_CreateSurface(size.x, size.y, format, @ptrCast(@alignCast(pixel_data)), bytes_per_row));
     }
     pub fn destroy(self: *Surface) void {
         C.SDL_DestroySurface(self.to_c());
     }
-    pub fn get_properties(self: *Surface) SDL3Error!Properties {
-        return Properties{ .id = try nonzero_or_null(C.SDL_GetSurfaceProperties(self.to_c())) };
+    pub fn get_properties(self: *Surface) Error!PropertiesID {
+        return PropertiesID{ .id = try nonzero_or_null_err(C.SDL_GetSurfaceProperties(self.to_c())) };
     }
-    pub fn set_colorspace(self: *Surface, colorspace: Colorspace) SDL3Error!void {
-        try ok_or_failure(C.SDL_SetSurfaceColorspace(self.to_c(), colorspace.to_c()));
+    pub fn set_colorspace(self: *Surface, colorspace: Colorspace) Error!void {
+        try ok_or_fail_err(C.SDL_SetSurfaceColorspace(self.to_c(), colorspace.to_c()));
     }
     pub fn get_colorspace(self: *Surface) Colorspace {
         C.SDL_GetSurfaceColorspace(self.to_c());
     }
-    pub fn create_color_palette(self: *Surface) SDL3Error!*ColorPalette {
-        return ptr_cast_or_failure(*ColorPalette, C.SDL_CreateSurfacePalette(self.to_c()));
+    pub fn create_color_palette(self: *Surface) Error!*ColorPalette {
+        return ptr_cast_or_fail_err(*ColorPalette, C.SDL_CreateSurfacePalette(self.to_c()));
     }
-    pub fn set_color_palette(self: *Surface, palette: ColorPalette) SDL3Error!void {
-        try ok_or_failure(C.SDL_SetSurfacePalette(self.to_c(), palette.to_c()));
+    pub fn set_color_palette(self: *Surface, palette: ColorPalette) Error!void {
+        try ok_or_fail_err(C.SDL_SetSurfacePalette(self.to_c(), palette.to_c()));
     }
-    pub fn get_color_palette(self: *Surface) SDL3Error!*ColorPalette {
-        return ptr_cast_or_null(*ColorPalette, C.SDL_GetSurfacePalette(self.to_c()));
+    pub fn get_color_palette(self: *Surface) Error!*ColorPalette {
+        return ptr_cast_or_null_err(*ColorPalette, C.SDL_GetSurfacePalette(self.to_c()));
     }
-    pub fn add_alternate_surface(self: *Surface, alternate: *Surface) SDL3Error!void {
-        try ok_or_failure(C.SDL_AddSurfaceAlternateImage(self.to_c(), alternate.to_c()));
+    pub fn add_alternate_surface(self: *Surface, alternate: *Surface) Error!void {
+        try ok_or_fail_err(C.SDL_AddSurfaceAlternateImage(self.to_c(), alternate.to_c()));
     }
     pub fn has_alternate_surfaces(self: *Surface) bool {
         return C.SDL_SurfaceHasAlternateImages(self.to_c());
     }
-    pub fn get_all_alternate_surfaces(self: *Surface) SDL3Error!SurfaceList {
+    pub fn get_all_alternate_surfaces(self: *Surface) Error!SurfaceList {
         var len: c_int = 0;
-        const ptr = try ptr_cast_or_null([*]*Surface, C.SDL_GetSurfaceImages(self.to_c(), &len));
+        const ptr = try ptr_cast_or_null_err([*]*Surface, C.SDL_GetSurfaceImages(self.to_c(), &len));
         return SurfaceList{ .list = ptr[0..len] };
     }
-    pub fn remove_all_alternate_surfaces(self: *Surface) SDL3Error!void {
-        return ok_or_failure(C.SDL_RemoveSurfaceAlternateImages(self.to_c()));
+    pub fn remove_all_alternate_surfaces(self: *Surface) Error!void {
+        return ok_or_fail_err(C.SDL_RemoveSurfaceAlternateImages(self.to_c()));
     }
-    pub fn lock(self: *Surface) SDL3Error!void {
-        return ok_or_failure(C.SDL_LockSurface(self.to_c()));
+    pub fn lock(self: *Surface) Error!void {
+        return ok_or_fail_err(C.SDL_LockSurface(self.to_c()));
     }
-    pub fn unlock(self: *Surface) SDL3Error!void {
-        return ok_or_failure(C.SDL_UnlockSurface(self.to_c()));
+    pub fn unlock(self: *Surface) Error!void {
+        return ok_or_fail_err(C.SDL_UnlockSurface(self.to_c()));
     }
-    pub fn load_from_bmp_file(bmp_path: [*:0]const u8) SDL3Error!*Surface {
-        return ptr_cast_or_failure(*Surface, C.SDL_LoadBMP(bmp_path));
+    pub fn load_from_bmp_file(bmp_path: [*:0]const u8) Error!*Surface {
+        return ptr_cast_or_fail_err(*Surface, C.SDL_LoadBMP(bmp_path));
     }
-    pub fn save_to_bmp_file(self: *Surface, bmp_path: [*:0]const u8) SDL3Error!void {
-        return ok_or_failure(C.SDL_SaveBMP(self.to_c(), bmp_path));
+    pub fn save_to_bmp_file(self: *Surface, bmp_path: [*:0]const u8) Error!void {
+        return ok_or_fail_err(C.SDL_SaveBMP(self.to_c(), bmp_path));
     }
-    pub fn load_from_bmp_iostream(stream: *IOStream, close_stream: bool) SDL3Error!*Surface {
-        return ptr_cast_or_failure(*Surface, C.SDL_LoadBMP_IO(stream.to_c(), close_stream));
+    pub fn load_from_bmp_iostream(stream: *IOStream, close_stream: bool) Error!*Surface {
+        return ptr_cast_or_fail_err(*Surface, C.SDL_LoadBMP_IO(stream.to_c(), close_stream));
     }
-    pub fn save_to_bmp_iostream(self: *Surface, stream: *IOStream, close_stream: bool) SDL3Error!void {
-        return ok_or_failure(C.SDL_SaveBMP_IO(self.to_c(), stream.to_c(), close_stream));
+    pub fn save_to_bmp_iostream(self: *Surface, stream: *IOStream, close_stream: bool) Error!void {
+        return ok_or_fail_err(C.SDL_SaveBMP_IO(self.to_c(), stream.to_c(), close_stream));
     }
-    pub fn set_RLE(self: *Surface, state: bool) SDL3Error!void {
-        return ok_or_failure(C.SDL_SetSurfaceRLE(self.to_c(), state));
+    pub fn set_RLE(self: *Surface, state: bool) Error!void {
+        return ok_or_fail_err(C.SDL_SetSurfaceRLE(self.to_c(), state));
     }
     pub fn is_RLE_set(self: *Surface) bool {
-        return ok_or_failure(C.SDL_SurfaceHasRLE(self.to_c()));
+        return ok_or_fail_err(C.SDL_SurfaceHasRLE(self.to_c()));
     }
-    pub fn set_color_key(self: *Surface, state: bool, key: u32) SDL3Error!void {
-        return ok_or_failure(C.SDL_SetSurfaceColorKey(self.to_c(), state, key));
+    pub fn set_color_key(self: *Surface, state: bool, key: u32) Error!void {
+        return ok_or_fail_err(C.SDL_SetSurfaceColorKey(self.to_c(), state, key));
     }
     pub fn has_color_key(self: *Surface) bool {
-        return ok_or_failure(C.SDL_SurfaceHasColorKey(self.to_c()));
+        return ok_or_fail_err(C.SDL_SurfaceHasColorKey(self.to_c()));
     }
-    pub fn get_color_key(self: *Surface) SDL3Error!u32 {
+    pub fn get_color_key(self: *Surface) Error!u32 {
         var key: u32 = 0;
-        try ok_or_failure(C.SDL_GetSurfaceColorKey(self.to_c(), &key));
+        try ok_or_fail_err(C.SDL_GetSurfaceColorKey(self.to_c(), &key));
         return key;
     }
-    pub fn set_color_mod(self: *Surface, color: IColor_RGB) SDL3Error!void {
-        return ok_or_failure(C.SDL_SetSurfaceColorMod(self.to_c(), color.r, color.g, color.b));
+    pub fn set_color_mod(self: *Surface, color: IColor_RGB) Error!void {
+        return ok_or_fail_err(C.SDL_SetSurfaceColorMod(self.to_c(), color.r, color.g, color.b));
     }
-    pub fn get_color_mod(self: *Surface) SDL3Error!IColor_RGB {
+    pub fn get_color_mod(self: *Surface) Error!IColor_RGB {
         var color: IColor_RGB = IColor_RGB{};
-        try ok_or_failure(C.SDL_GetSurfaceColorMod(self.to_c(), &color.r, &color.g, &color.b));
+        try ok_or_fail_err(C.SDL_GetSurfaceColorMod(self.to_c(), &color.r, &color.g, &color.b));
         return color;
     }
-    pub fn set_alpha_mod(self: *Surface, alpha: u8) SDL3Error!void {
-        return ok_or_failure(C.SDL_SetSurfaceAlphaMod(self.to_c(), alpha));
+    pub fn set_alpha_mod(self: *Surface, alpha: u8) Error!void {
+        return ok_or_fail_err(C.SDL_SetSurfaceAlphaMod(self.to_c(), alpha));
     }
-    pub fn get_alpha_mod(self: *Surface) SDL3Error!u8 {
+    pub fn get_alpha_mod(self: *Surface) Error!u8 {
         var alpha: u8 = 0;
-        try ok_or_failure(C.SDL_GetSurfaceColorMod(self.to_c(), &alpha));
+        try ok_or_fail_err(C.SDL_GetSurfaceColorMod(self.to_c(), &alpha));
         return alpha;
     }
-    pub fn set_blend_mode(self: *Surface, mode: BlendMode) SDL3Error!void {
-        return ok_or_failure(C.SDL_SetSurfaceBlendMode(self.to_c(), mode.mode));
+    pub fn set_blend_mode(self: *Surface, mode: BlendMode) Error!void {
+        return ok_or_fail_err(C.SDL_SetSurfaceBlendMode(self.to_c(), mode.mode));
     }
-    pub fn get_blend_mode(self: *Surface) SDL3Error!BlendMode {
+    pub fn get_blend_mode(self: *Surface) Error!BlendMode {
         var mode: u32 = 0;
-        try ok_or_failure(C.SDL_GetSurfaceBlendMode(self.to_c(), &mode));
+        try ok_or_fail_err(C.SDL_GetSurfaceBlendMode(self.to_c(), &mode));
         return BlendMode{ .mode = mode };
     }
-    pub fn set_clip_rect(self: *Surface, rect: IRect) SDL3Error!void {
-        return ok_or_failure(C.SDL_SetSurfaceClipRect(self.to_c(), &rect));
+    pub fn set_clip_rect(self: *Surface, rect: IRect) Error!void {
+        return ok_or_fail_err(C.SDL_SetSurfaceClipRect(self.to_c(), &rect));
     }
-    pub fn get_clip_rect(self: *Surface) SDL3Error!IRect {
+    pub fn get_clip_rect(self: *Surface) Error!IRect {
         var rect = IRect{};
-        try ok_or_failure(C.SDL_GetSurfaceClipRect(self.to_c(), &rect));
+        try ok_or_fail_err(C.SDL_GetSurfaceClipRect(self.to_c(), &rect));
         return rect;
     }
-    pub fn flip(self: *Surface, flip_mode: FlipMode) SDL3Error!void {
-        return ok_or_failure(C.SDL_FlipSurface(self.to_c(), flip_mode.to_c()));
+    pub fn flip(self: *Surface, flip_mode: FlipMode) Error!void {
+        return ok_or_fail_err(C.SDL_FlipSurface(self.to_c(), flip_mode.to_c()));
     }
-    pub fn duplicate(self: *Surface) SDL3Error!*Surface {
-        return ptr_cast_or_failure(*Surface, C.SDL_DuplicateSurface(self.to_c()));
+    pub fn duplicate(self: *Surface) Error!*Surface {
+        return ptr_cast_or_fail_err(*Surface, C.SDL_DuplicateSurface(self.to_c()));
     }
-    pub fn scale_copy(self: *Surface, scale: Scale) SDL3Error!*Surface {
-        return ptr_cast_or_failure(*Surface, C.SDL_ScaleSurface(self.to_c(), scale.ratio.x, scale.ratio.y, scale.mode.to_c()));
+    pub fn scale_copy(self: *Surface, scale: Scale) Error!*Surface {
+        return ptr_cast_or_fail_err(*Surface, C.SDL_ScaleSurface(self.to_c(), scale.ratio.x, scale.ratio.y, scale.mode.to_c()));
     }
-    pub fn convert_to_format(self: *Surface, format: PixelFormat) SDL3Error!*Surface {
-        return ptr_cast_or_failure(*Surface, C.SDL_ConvertSurface(self.to_c(), format.to_c()));
+    pub fn convert_to_format(self: *Surface, format: PixelFormat) Error!*Surface {
+        return ptr_cast_or_fail_err(*Surface, C.SDL_ConvertSurface(self.to_c(), format.to_c()));
     }
-    pub fn convert_to_format_and_colorspace(self: *Surface, format: PixelFormat, optional_palette: ?*ColorPalette, color_space: Colorspace, extra_color_props: Properties) SDL3Error!*Surface {
-        return ptr_cast_or_failure(*Surface, C.SDL_ConvertSurface(self.to_c(), format.to_c(), @ptrCast(@alignCast(optional_palette)), color_space.to_c(), extra_color_props.id));
+    pub fn convert_to_format_and_colorspace(self: *Surface, format: PixelFormat, optional_palette: ?*ColorPalette, color_space: Colorspace, extra_color_props: PropertiesID) Error!*Surface {
+        return ptr_cast_or_fail_err(*Surface, C.SDL_ConvertSurface(self.to_c(), format.to_c(), @ptrCast(@alignCast(optional_palette)), color_space.to_c(), extra_color_props.id));
     }
-    pub fn premultiply_alpha(self: *Surface, linear: bool) SDL3Error!void {
-        return ok_or_failure(C.SDL_PremultiplySurfaceAlpha(self.to_c(), linear));
+    pub fn premultiply_alpha(self: *Surface, linear: bool) Error!void {
+        return ok_or_fail_err(C.SDL_PremultiplySurfaceAlpha(self.to_c(), linear));
     }
-    pub fn clear(self: *Surface, color: FColor_RGBA) SDL3Error!void {
-        return ok_or_failure(C.SDL_ClearSurface(self.to_c(), color.r, color.g, color.b, color.a));
+    pub fn clear(self: *Surface, color: FColor_RGBA) Error!void {
+        return ok_or_fail_err(C.SDL_ClearSurface(self.to_c(), color.r, color.g, color.b, color.a));
     }
-    pub fn fill_rect(self: *Surface, rect: IRect, color: IColor_RGBA) SDL3Error!void {
-        return ok_or_failure(C.SDL_FillSurfaceRect(self.to_c(), @ptrCast(@alignCast(&rect)), color.to_raw_int()));
+    pub fn fill_rect(self: *Surface, rect: IRect, color: IColor_RGBA) Error!void {
+        return ok_or_fail_err(C.SDL_FillSurfaceRect(self.to_c(), @ptrCast(@alignCast(&rect)), color.to_raw_int()));
     }
-    pub fn fill_many_rects(self: *Surface, rects: []const IRect, color: IColor_RGBA) SDL3Error!void {
-        return ok_or_failure(C.SDL_FillSurfaceRects(self.to_c(), @ptrCast(@alignCast(rects.ptr)), @intCast(rects.len), color.to_raw_int()));
+    pub fn fill_many_rects(self: *Surface, rects: []const IRect, color: IColor_RGBA) Error!void {
+        return ok_or_fail_err(C.SDL_FillSurfaceRects(self.to_c(), @ptrCast(@alignCast(rects.ptr)), @intCast(rects.len), color.to_raw_int()));
     }
-    pub fn blit_to(self: *Surface, area: IArea, dst: *Surface, dst_area: IArea) SDL3Error!void {
-        return ok_or_failure(C.SDL_BlitSurface(self.to_c(), area.to_c(), dst.to_c(), dst_area.to_c()));
+    pub fn blit_to(self: *Surface, area: IArea, dst: *Surface, dst_area: IArea) Error!void {
+        return ok_or_fail_err(C.SDL_BlitSurface(self.to_c(), area.to_c(), dst.to_c(), dst_area.to_c()));
     }
-    pub fn blit_unchecked_to(self: *Surface, area: IArea, dst: *Surface, dst_area: IArea) SDL3Error!void {
-        return ok_or_failure(C.SDL_BlitSurfaceUnchecked(self.to_c(), area.to_c(), dst.to_c(), dst_area.to_c()));
+    pub fn blit_unchecked_to(self: *Surface, area: IArea, dst: *Surface, dst_area: IArea) Error!void {
+        return ok_or_fail_err(C.SDL_BlitSurfaceUnchecked(self.to_c(), area.to_c(), dst.to_c(), dst_area.to_c()));
     }
-    pub fn blit_scaled_to(self: *Surface, area: IArea, dst: *Surface, dst_area: IArea, mode: ScaleMode) SDL3Error!void {
-        return ok_or_failure(C.SDL_BlitSurface(self.to_c(), area.to_c(), dst.to_c(), dst_area.to_c(), mode.to_c()));
+    pub fn blit_scaled_to(self: *Surface, area: IArea, dst: *Surface, dst_area: IArea, mode: ScaleMode) Error!void {
+        return ok_or_fail_err(C.SDL_BlitSurface(self.to_c(), area.to_c(), dst.to_c(), dst_area.to_c(), mode.to_c()));
     }
-    pub fn blit_scaled_unchecked_to(self: *Surface, area: IArea, dst: *Surface, dst_area: IArea, mode: ScaleMode) SDL3Error!void {
-        return ok_or_failure(C.SDL_BlitSurfaceUnchecked(self.to_c(), area.to_c(), dst.to_c(), dst_area.to_c(), mode.to_c()));
+    pub fn blit_scaled_unchecked_to(self: *Surface, area: IArea, dst: *Surface, dst_area: IArea, mode: ScaleMode) Error!void {
+        return ok_or_fail_err(C.SDL_BlitSurfaceUnchecked(self.to_c(), area.to_c(), dst.to_c(), dst_area.to_c(), mode.to_c()));
     }
-    pub fn copy_stretched_to(self: *Surface, area: IArea, dst: *Surface, dst_area: IArea, mode: ScaleMode) SDL3Error!void {
-        return ok_or_failure(C.SDL_StretchSurface(self.to_c(), area.to_c(), dst.to_c(), dst_area.to_c(), mode.to_c()));
+    pub fn copy_stretched_to(self: *Surface, area: IArea, dst: *Surface, dst_area: IArea, mode: ScaleMode) Error!void {
+        return ok_or_fail_err(C.SDL_StretchSurface(self.to_c(), area.to_c(), dst.to_c(), dst_area.to_c(), mode.to_c()));
     }
-    pub fn blit_tiled_to(self: *Surface, area: IArea, dst: *Surface, dst_area: IArea) SDL3Error!void {
-        return ok_or_failure(C.SDL_BlitSurfaceTiled(self.to_c(), area.to_c(), dst.to_c(), dst_area.to_c()));
+    pub fn blit_tiled_to(self: *Surface, area: IArea, dst: *Surface, dst_area: IArea) Error!void {
+        return ok_or_fail_err(C.SDL_BlitSurfaceTiled(self.to_c(), area.to_c(), dst.to_c(), dst_area.to_c()));
     }
-    pub fn blit_tiled_scaled_to(self: *Surface, area: IArea, dst: *Surface, dst_area: IArea, scale: Scale) SDL3Error!void {
-        return ok_or_failure(C.SDL_BlitSurfaceTiledWithScale(self.to_c(), area.to_c(), scale.ratio, scale.mode.to_c(), dst.to_c(), dst_area.to_c()));
+    pub fn blit_tiled_scaled_to(self: *Surface, area: IArea, dst: *Surface, dst_area: IArea, scale: Scale) Error!void {
+        return ok_or_fail_err(C.SDL_BlitSurfaceTiledWithScale(self.to_c(), area.to_c(), scale.ratio, scale.mode.to_c(), dst.to_c(), dst_area.to_c()));
     }
-    pub fn blit_nine_patch_to(self: *Surface, nine_patch: INinePatch, dst: *Surface, dst_area: IArea, scale: Scale) SDL3Error!void {
-        return ok_or_failure(C.SDL_BlitSurface9Grid(self.to_c(), nine_patch.rect_to_c(), nine_patch.left, nine_patch.right, nine_patch.top, nine_patch.bottom, scale.ratio, scale.mode.to_c(), dst.to_c(), dst_area.to_c()));
+    pub fn blit_nine_patch_to(self: *Surface, nine_patch: INinePatch, dst: *Surface, dst_area: IArea, scale: Scale) Error!void {
+        return ok_or_fail_err(C.SDL_BlitSurface9Grid(self.to_c(), nine_patch.rect_to_c(), nine_patch.left, nine_patch.right, nine_patch.top, nine_patch.bottom, scale.ratio, scale.mode.to_c(), dst.to_c(), dst_area.to_c()));
     }
     pub fn closest_valid_color_rgb(self: *Surface, color: IColor_RGB) IColor_U32 {
         return IColor_U32{ .raw = C.SDL_MapSurfaceRGB(self.to_c(), color.r, color.g, color.b) };
@@ -1995,21 +2020,21 @@ pub const Surface = opaque {
     pub fn closest_valid_color_rgba(self: *Surface, color: IColor_RGBA) IColor_U32 {
         return IColor_U32{ .raw = C.SDL_MapSurfaceRGBA(self.to_c(), color.r, color.g, color.b, color.a) };
     }
-    pub fn read_pixel(self: *Surface, pos: IVec) SDL3Error!IColor_RGBA {
+    pub fn read_pixel(self: *Surface, pos: IVec) Error!IColor_RGBA {
         var color = IColor_RGBA{};
-        try ok_or_failure(C.SDL_ReadSurfacePixel(self.to_c(), pos.x, pos.y, &color.r, &color.g, &color.b, &color.a));
+        try ok_or_fail_err(C.SDL_ReadSurfacePixel(self.to_c(), pos.x, pos.y, &color.r, &color.g, &color.b, &color.a));
         return color;
     }
-    pub fn read_pixel_float(self: *Surface, pos: IVec) SDL3Error!FColor_RGBA {
+    pub fn read_pixel_float(self: *Surface, pos: IVec) Error!FColor_RGBA {
         var color = FColor_RGBA{};
-        try ok_or_failure(C.SDL_ReadSurfacePixelFloat(self.to_c(), pos.x, pos.y, &color.r, &color.g, &color.b, &color.a));
+        try ok_or_fail_err(C.SDL_ReadSurfacePixelFloat(self.to_c(), pos.x, pos.y, &color.r, &color.g, &color.b, &color.a));
         return color;
     }
-    pub fn write_pixel(self: *Surface, pos: IVec, color: IColor_RGBA) SDL3Error!void {
-        return ok_or_failure(C.SDL_ReadSurfacePixel(self.to_c(), pos.x, pos.y, color.r, color.g, color.b, color.a));
+    pub fn write_pixel(self: *Surface, pos: IVec, color: IColor_RGBA) Error!void {
+        return ok_or_fail_err(C.SDL_ReadSurfacePixel(self.to_c(), pos.x, pos.y, color.r, color.g, color.b, color.a));
     }
-    pub fn write_pixel_float(self: *Surface, pos: IVec, color: FColor_RGBA) SDL3Error!void {
-        return ok_or_failure(C.SDL_WriteSurfacePixelFloat(self.to_c(), pos.x, pos.y, color.r, color.g, color.b, color.a));
+    pub fn write_pixel_float(self: *Surface, pos: IVec, color: FColor_RGBA) Error!void {
+        return ok_or_fail_err(C.SDL_WriteSurfacePixelFloat(self.to_c(), pos.x, pos.y, color.r, color.g, color.b, color.a));
     }
 };
 
@@ -2075,7 +2100,7 @@ pub const PixelRect = extern struct {
     bytes_per_row: c_int,
     pixel_format: PixelFormat,
     colorspace: Colorspace = .UNKNOWN,
-    optional_color_properties: Properties = Properties.NULL,
+    optional_color_properties: PropertiesID = PropertiesID.NULL,
 
     pub fn rect(size: IVec, ptr: [*]u8, bytes_per_row: c_uint, format: PixelFormat) PixelRect {
         return PixelRect{
@@ -2094,7 +2119,7 @@ pub const PixelRect = extern struct {
             .colorspace = colorspace,
         };
     }
-    pub fn rect_with_colorspace_and_props(size: IVec, ptr: [*]u8, bytes_per_row: c_uint, format: PixelFormat, colorspace: Colorspace, properties: Properties) PixelRect {
+    pub fn rect_with_colorspace_and_props(size: IVec, ptr: [*]u8, bytes_per_row: c_uint, format: PixelFormat, colorspace: Colorspace, properties: PropertiesID) PixelRect {
         return PixelRect{
             .size = size,
             .ptr = ptr,
@@ -2106,17 +2131,17 @@ pub const PixelRect = extern struct {
     }
 };
 
-pub fn convert_pixels(src: PixelRect, dst: PixelRect) SDL3Error!void {
+pub fn convert_pixels(src: PixelRect, dst: PixelRect) Error!void {
     assert(src.size.x == dst.size.x and src.size.y == dst.size.y);
-    return ok_or_failure(C.SDL_ConvertPixels(src.size.x, src.size.y, src.pixel_format.to_c(), src.ptr, src.bytes_per_row, dst.pixel_format.to_c(), dst.ptr, dst.bytes_per_row));
+    return ok_or_fail_err(C.SDL_ConvertPixels(src.size.x, src.size.y, src.pixel_format.to_c(), src.ptr, src.bytes_per_row, dst.pixel_format.to_c(), dst.ptr, dst.bytes_per_row));
 }
-pub fn convert_pixels_and_colorspace(src: PixelRect, dst: PixelRect) SDL3Error!void {
+pub fn convert_pixels_and_colorspace(src: PixelRect, dst: PixelRect) Error!void {
     assert(src.size.x == dst.size.x and src.size.y == dst.size.y);
-    return ok_or_failure(C.SDL_ConvertPixelsAndColorspace(src.size.x, src.size.y, src.pixel_format.to_c(), src.colorspace.to_c(), src.optional_color_properties.id, src.ptr, src.bytes_per_row, dst.pixel_format.to_c(), dst.colorspace.to_c(), dst.optional_color_properties.id, dst.ptr, dst.bytes_per_row));
+    return ok_or_fail_err(C.SDL_ConvertPixelsAndColorspace(src.size.x, src.size.y, src.pixel_format.to_c(), src.colorspace.to_c(), src.optional_color_properties.id, src.ptr, src.bytes_per_row, dst.pixel_format.to_c(), dst.colorspace.to_c(), dst.optional_color_properties.id, dst.ptr, dst.bytes_per_row));
 }
-pub fn premultiply_alpha(src: PixelRect, dst: PixelRect, linear: bool) SDL3Error!void {
+pub fn premultiply_alpha(src: PixelRect, dst: PixelRect, linear: bool) Error!void {
     assert(src.size.x == dst.size.x and src.size.y == dst.size.y);
-    return ok_or_failure(C.SDL_PremultiplyAlpha(src.size.x, src.size.y, src.pixel_format.to_c(), src.ptr, src.bytes_per_row, dst.pixel_format.to_c(), dst.ptr, dst.bytes_per_row, linear));
+    return ok_or_fail_err(C.SDL_PremultiplyAlpha(src.size.x, src.size.y, src.pixel_format.to_c(), src.ptr, src.bytes_per_row, dst.pixel_format.to_c(), dst.ptr, dst.bytes_per_row, linear));
 }
 
 pub const SurfaceList = extern struct {
@@ -2184,238 +2209,238 @@ pub const Renderer = opaque {
     pub fn get_driver_count() c_int {
         return C.SDL_GetNumRenderDrivers();
     }
-    pub fn get_driver_name(index: c_int) SDL3Error![*:0]const u8 {
-        return ptr_cast_or_null([*:0]const u8, C.SDL_GetRenderDriver(index));
+    pub fn get_driver_name(index: c_int) Error![*:0]const u8 {
+        return ptr_cast_or_null_err([*:0]const u8, C.SDL_GetRenderDriver(index));
     }
-    pub fn create_renderer_with_properties(props_id: Properties) SDL3Error!*Renderer {
-        return ptr_cast_or_failure(*Renderer, C.SDL_CreateRendererWithProperties(props_id));
+    pub fn create_renderer_with_properties(props_id: PropertiesID) Error!*Renderer {
+        return ptr_cast_or_fail_err(*Renderer, C.SDL_CreateRendererWithProperties(props_id));
     }
-    pub fn create_software_renderer(surface: *Surface) SDL3Error!*Renderer {
-        return ptr_cast_or_failure(*Renderer, C.SDL_CreateSoftwareRenderer(@ptrCast(@alignCast(surface))));
+    pub fn create_software_renderer(surface: *Surface) Error!*Renderer {
+        return ptr_cast_or_fail_err(*Renderer, C.SDL_CreateSoftwareRenderer(@ptrCast(@alignCast(surface))));
     }
-    pub fn get_window(self: *Renderer) SDL3Error!*Window {
-        return ptr_cast_or_null(*Window, C.SDL_GetRenderWindow(self.to_c()));
+    pub fn get_window(self: *Renderer) Error!*Window {
+        return ptr_cast_or_null_err(*Window, C.SDL_GetRenderWindow(self.to_c()));
     }
-    pub fn get_name(self: *Renderer) SDL3Error![*:0]const u8 {
-        return ptr_cast_or_null([*:0]const u8, C.SDL_GetRenderWindow(self.to_c()));
+    pub fn get_name(self: *Renderer) Error![*:0]const u8 {
+        return ptr_cast_or_null_err([*:0]const u8, C.SDL_GetRenderWindow(self.to_c()));
     }
-    pub fn get_properties_id(self: *Renderer) SDL3Error!Properties {
-        return Properties{ .id = try nonzero_or_null(C.SDL_GetRendererProperties(self.to_c())) };
+    pub fn get_properties_id(self: *Renderer) Error!PropertiesID {
+        return PropertiesID{ .id = try nonzero_or_null_err(C.SDL_GetRendererProperties(self.to_c())) };
     }
-    pub fn get_true_output_size(self: *Renderer) SDL3Error!IVec {
+    pub fn get_true_output_size(self: *Renderer) Error!IVec {
         var size = IVec{};
-        try ok_or_null(C.SDL_GetRenderOutputSize(self.to_c(), &size.x, &size.y));
+        try ok_or_null_err(C.SDL_GetRenderOutputSize(self.to_c(), &size.x, &size.y));
         return size;
     }
-    pub fn get_adjusted_output_size(self: *Renderer) SDL3Error!IVec {
+    pub fn get_adjusted_output_size(self: *Renderer) Error!IVec {
         var size = IVec{};
-        try ok_or_null(C.SDL_GetCurrentRenderOutputSize(self.to_c(), &size.x, &size.y));
+        try ok_or_null_err(C.SDL_GetCurrentRenderOutputSize(self.to_c(), &size.x, &size.y));
         return size;
     }
-    pub fn create_texture(self: *Renderer, format: PixelFormat, access_mode: TextureAccessMode, size: IVec) SDL3Error!*Texture {
-        return ptr_cast_or_failure(*Texture, C.SDL_CreateTexture(self.to_c(), format.to_c(), access_mode.to_c(), size.x, size.y));
+    pub fn create_texture(self: *Renderer, format: PixelFormat, access_mode: TextureAccessMode, size: IVec) Error!*Texture {
+        return ptr_cast_or_fail_err(*Texture, C.SDL_CreateTexture(self.to_c(), format.to_c(), access_mode.to_c(), size.x, size.y));
     }
-    pub fn create_texture_from_surface(self: *Renderer, surface: *Surface) SDL3Error!*Texture {
-        return ptr_cast_or_failure(C.SDL_CreateTextureFromSurface(self.to_c(), @ptrCast(@alignCast(surface))), *Texture);
+    pub fn create_texture_from_surface(self: *Renderer, surface: *Surface) Error!*Texture {
+        return ptr_cast_or_fail_err(C.SDL_CreateTextureFromSurface(self.to_c(), @ptrCast(@alignCast(surface))), *Texture);
     }
-    pub fn create_texture_with_properties(self: *Renderer, props_id: Properties) SDL3Error!*Texture {
-        return ptr_cast_or_failure(*Texture, C.SDL_CreateTextureWithProperties(self.to_c(), props_id.id));
+    pub fn create_texture_with_properties(self: *Renderer, props_id: PropertiesID) Error!*Texture {
+        return ptr_cast_or_fail_err(*Texture, C.SDL_CreateTextureWithProperties(self.to_c(), props_id.id));
     }
-    pub fn set_texture_target(self: *Renderer, texture: *Texture) SDL3Error!void {
-        return ok_or_failure(C.SDL_SetRenderTarget(self.to_c(), texture.to_c()));
+    pub fn set_texture_target(self: *Renderer, texture: *Texture) Error!void {
+        return ok_or_fail_err(C.SDL_SetRenderTarget(self.to_c(), texture.to_c()));
     }
-    pub fn clear_texture_target(self: *Renderer) SDL3Error!void {
-        return ok_or_failure(C.SDL_SetRenderTarget(self.to_c(), null));
+    pub fn clear_texture_target(self: *Renderer) Error!void {
+        return ok_or_fail_err(C.SDL_SetRenderTarget(self.to_c(), null));
     }
-    pub fn get_texture_target(self: *Renderer) SDL3Error!*Texture {
-        return ptr_cast_or_null(*Texture, C.SDL_GetRenderTarget(self.to_c()));
+    pub fn get_texture_target(self: *Renderer) Error!*Texture {
+        return ptr_cast_or_null_err(*Texture, C.SDL_GetRenderTarget(self.to_c()));
     }
-    pub fn set_logical_presentation(self: *Renderer, presentation: LogicalPresentation) SDL3Error!void {
-        return ok_or_failure(C.SDL_SetRenderLogicalPresentation(self.to_c(), &presentation.size.x, &presentation.size.y, presentation.mode.to_c()));
+    pub fn set_logical_presentation(self: *Renderer, presentation: LogicalPresentation) Error!void {
+        return ok_or_fail_err(C.SDL_SetRenderLogicalPresentation(self.to_c(), &presentation.size.x, &presentation.size.y, presentation.mode.to_c()));
     }
-    pub fn get_logical_presentation(self: *Renderer) SDL3Error!LogicalPresentation {
+    pub fn get_logical_presentation(self: *Renderer) Error!LogicalPresentation {
         var pres = LogicalPresentation{};
-        try ok_or_null(C.SDL_GetRenderLogicalPresentation(self.to_c(), &pres.size.x, &pres.size.y, @ptrCast(@alignCast(&pres.mode))));
+        try ok_or_null_err(C.SDL_GetRenderLogicalPresentation(self.to_c(), &pres.size.x, &pres.size.y, @ptrCast(@alignCast(&pres.mode))));
         return pres;
     }
-    pub fn get_logical_presentation_rect(self: *Renderer) SDL3Error!FRect {
+    pub fn get_logical_presentation_rect(self: *Renderer) Error!FRect {
         var rect = FRect{};
-        try ok_or_null(C.SDL_GetRenderLogicalPresentationRect(self.to_c(), @ptrCast(@alignCast(&rect))));
+        try ok_or_null_err(C.SDL_GetRenderLogicalPresentationRect(self.to_c(), @ptrCast(@alignCast(&rect))));
         return rect;
     }
-    pub fn render_coords_from_window(self: *Renderer, window_pos: FVec) SDL3Error!FVec {
+    pub fn render_coords_from_window(self: *Renderer, window_pos: FVec) Error!FVec {
         var vec = FVec{};
-        try ok_or_failure(C.SDL_RenderCoordinatesFromWindow(self.to_c(), window_pos.x, window_pos.y, &vec.x, &vec.y));
+        try ok_or_fail_err(C.SDL_RenderCoordinatesFromWindow(self.to_c(), window_pos.x, window_pos.y, &vec.x, &vec.y));
         return vec;
     }
-    pub fn render_coords_to_window(self: *Renderer, render_pos: FVec) SDL3Error!FVec {
+    pub fn render_coords_to_window(self: *Renderer, render_pos: FVec) Error!FVec {
         var vec = FVec{};
-        try ok_or_failure(C.SDL_RenderCoordinatesToWindow(self.to_c(), render_pos.x, render_pos.y, &vec.x, &vec.y));
+        try ok_or_fail_err(C.SDL_RenderCoordinatesToWindow(self.to_c(), render_pos.x, render_pos.y, &vec.x, &vec.y));
         return vec;
     }
-    pub fn set_viewport(self: *Renderer, rect: IRect) SDL3Error!void {
-        return ok_or_failure(C.SDL_SetRenderViewport(self.to_c(), @ptrCast(@alignCast(&rect))));
+    pub fn set_viewport(self: *Renderer, rect: IRect) Error!void {
+        return ok_or_fail_err(C.SDL_SetRenderViewport(self.to_c(), @ptrCast(@alignCast(&rect))));
     }
-    pub fn clear_viewport(self: *Renderer) SDL3Error!void {
-        return ok_or_failure(C.SDL_SetRenderViewport(self.to_c(), null));
+    pub fn clear_viewport(self: *Renderer) Error!void {
+        return ok_or_fail_err(C.SDL_SetRenderViewport(self.to_c(), null));
     }
-    pub fn get_viewport(self: *Renderer) SDL3Error!IRect {
+    pub fn get_viewport(self: *Renderer) Error!IRect {
         var rect = IRect{};
-        try ok_or_null(C.SDL_GetRenderViewport(self.to_c(), @ptrCast(@alignCast(&rect))));
+        try ok_or_null_err(C.SDL_GetRenderViewport(self.to_c(), @ptrCast(@alignCast(&rect))));
         return rect;
     }
     pub fn viewport_is_set(self: *Renderer) bool {
         return C.SDL_RenderViewportSet(self.to_c());
     }
-    pub fn get_safe_area(self: *Renderer) SDL3Error!IRect {
+    pub fn get_safe_area(self: *Renderer) Error!IRect {
         var rect = IRect{};
-        try ok_or_null(C.SDL_GetRenderSafeArea(self.to_c(), @ptrCast(@alignCast(&rect))));
+        try ok_or_null_err(C.SDL_GetRenderSafeArea(self.to_c(), @ptrCast(@alignCast(&rect))));
         return rect;
     }
-    pub fn set_clip_rect(self: *Renderer, rect: IRect) SDL3Error!void {
-        return ok_or_failure(C.SDL_SetRenderClipRect(self.to_c(), @ptrCast(@alignCast(&rect))));
+    pub fn set_clip_rect(self: *Renderer, rect: IRect) Error!void {
+        return ok_or_fail_err(C.SDL_SetRenderClipRect(self.to_c(), @ptrCast(@alignCast(&rect))));
     }
-    pub fn clear_clip_rect(self: *Renderer) SDL3Error!void {
-        return ok_or_failure(C.SDL_SetRenderClipRect(self.to_c(), null));
+    pub fn clear_clip_rect(self: *Renderer) Error!void {
+        return ok_or_fail_err(C.SDL_SetRenderClipRect(self.to_c(), null));
     }
-    pub fn get_clip_rect(self: *Renderer) SDL3Error!IRect {
+    pub fn get_clip_rect(self: *Renderer) Error!IRect {
         var rect = IRect{};
-        try ok_or_null(C.SDL_GetRenderClipRect(self.to_c(), @ptrCast(@alignCast(&rect))));
+        try ok_or_null_err(C.SDL_GetRenderClipRect(self.to_c(), @ptrCast(@alignCast(&rect))));
         return rect;
     }
     pub fn clip_rect_is_set(self: *Renderer) bool {
         return C.SDL_RenderClipEnabled(self.to_c());
     }
-    pub fn set_render_scale(self: *Renderer, scale: FVec) SDL3Error!void {
-        return ok_or_failure(C.SDL_SetRenderScale(self.to_c(), scale.x, scale.Y));
+    pub fn set_render_scale(self: *Renderer, scale: FVec) Error!void {
+        return ok_or_fail_err(C.SDL_SetRenderScale(self.to_c(), scale.x, scale.Y));
     }
-    pub fn get_render_scale(self: *Renderer) SDL3Error!FVec {
+    pub fn get_render_scale(self: *Renderer) Error!FVec {
         var vec = FVec{};
-        try ok_or_null(C.SDL_GetRenderScale(self.to_c(), &vec.x, &vec.y));
+        try ok_or_null_err(C.SDL_GetRenderScale(self.to_c(), &vec.x, &vec.y));
         return vec;
     }
-    pub fn set_draw_color(self: *Renderer, color: IColor_RGBA) SDL3Error!void {
-        return ok_or_failure(C.SDL_SetRenderDrawColor(self.to_c(), color.r, color.g, color.b, color.a));
+    pub fn set_draw_color(self: *Renderer, color: IColor_RGBA) Error!void {
+        return ok_or_fail_err(C.SDL_SetRenderDrawColor(self.to_c(), color.r, color.g, color.b, color.a));
     }
-    pub fn set_draw_color_float(self: *Renderer, color: FColor_RGBA) SDL3Error!void {
-        return ok_or_failure(C.SDL_SetRenderDrawColorFloat(self.to_c(), color.r, color.g, color.b, color.a));
+    pub fn set_draw_color_float(self: *Renderer, color: FColor_RGBA) Error!void {
+        return ok_or_fail_err(C.SDL_SetRenderDrawColorFloat(self.to_c(), color.r, color.g, color.b, color.a));
     }
-    pub fn get_draw_color(self: *Renderer) SDL3Error!IColor_RGBA {
+    pub fn get_draw_color(self: *Renderer) Error!IColor_RGBA {
         var color = IColor_RGBA{};
-        try ok_or_null(C.SDL_GetRenderDrawColor(self.to_c(), &color.r, &color.g, &color.b, &color.a));
+        try ok_or_null_err(C.SDL_GetRenderDrawColor(self.to_c(), &color.r, &color.g, &color.b, &color.a));
         return color;
     }
-    pub fn get_draw_color_float(self: *Renderer) SDL3Error!FColor_RGBA {
+    pub fn get_draw_color_float(self: *Renderer) Error!FColor_RGBA {
         var color = FColor_RGBA{};
-        try ok_or_null(C.SDL_GetRenderDrawColorFloat(self.to_c(), &color.r, &color.g, &color.b, &color.a));
+        try ok_or_null_err(C.SDL_GetRenderDrawColorFloat(self.to_c(), &color.r, &color.g, &color.b, &color.a));
         return color;
     }
-    pub fn set_draw_color_scale(self: *Renderer, scale: f32) SDL3Error!void {
-        return ok_or_failure(C.SDL_SetRenderColorScale(self.to_c(), scale));
+    pub fn set_draw_color_scale(self: *Renderer, scale: f32) Error!void {
+        return ok_or_fail_err(C.SDL_SetRenderColorScale(self.to_c(), scale));
     }
-    pub fn get_draw_color_scale(self: *Renderer) SDL3Error!f32 {
+    pub fn get_draw_color_scale(self: *Renderer) Error!f32 {
         var scale: f32 = 0.0;
-        try ok_or_null(C.SDL_GetRenderColorScale(self.to_c(), &scale));
+        try ok_or_null_err(C.SDL_GetRenderColorScale(self.to_c(), &scale));
         return scale;
     }
-    pub fn set_draw_blend_mode(self: *Renderer, mode: BlendMode) SDL3Error!void {
-        return ok_or_failure(C.SDL_SetRenderDrawBlendMode(self.to_c(), mode.mode));
+    pub fn set_draw_blend_mode(self: *Renderer, mode: BlendMode) Error!void {
+        return ok_or_fail_err(C.SDL_SetRenderDrawBlendMode(self.to_c(), mode.mode));
     }
-    pub fn get_draw_blend_mode(self: *Renderer) SDL3Error!BlendMode {
+    pub fn get_draw_blend_mode(self: *Renderer) Error!BlendMode {
         var mode: u32 = 0;
-        try ok_or_null(C.SDL_GetRenderDrawBlendMode(self.to_c(), &mode));
+        try ok_or_null_err(C.SDL_GetRenderDrawBlendMode(self.to_c(), &mode));
         return BlendMode{ .mode = mode };
     }
-    pub fn draw_fill(self: *Renderer) SDL3Error!void {
-        return ok_or_failure(C.SDL_RenderClear(self.to_c()));
+    pub fn draw_fill(self: *Renderer) Error!void {
+        return ok_or_fail_err(C.SDL_RenderClear(self.to_c()));
     }
-    pub fn draw_point(self: *Renderer, point: *const FVec) SDL3Error!void {
-        return ok_or_failure(C.SDL_RenderPoint(self.to_c(), point.x, point.y));
+    pub fn draw_point(self: *Renderer, point: *const FVec) Error!void {
+        return ok_or_fail_err(C.SDL_RenderPoint(self.to_c(), point.x, point.y));
     }
-    pub fn draw_many_points(self: *Renderer, points: []const FVec) SDL3Error!void {
-        return ok_or_failure(C.SDL_RenderPoints(self.to_c(), @ptrCast(@alignCast(points.ptr)), @intCast(points.len)));
+    pub fn draw_many_points(self: *Renderer, points: []const FVec) Error!void {
+        return ok_or_fail_err(C.SDL_RenderPoints(self.to_c(), @ptrCast(@alignCast(points.ptr)), @intCast(points.len)));
     }
-    pub fn draw_line(self: *Renderer, point_a: *const FVec, point_b: *const FVec) SDL3Error!void {
-        return ok_or_failure(C.SDL_RenderLine(self.to_c(), point_a.x, point_a.y, point_b.x, point_b.y));
+    pub fn draw_line(self: *Renderer, point_a: *const FVec, point_b: *const FVec) Error!void {
+        return ok_or_fail_err(C.SDL_RenderLine(self.to_c(), point_a.x, point_a.y, point_b.x, point_b.y));
     }
-    pub fn draw_many_lines(self: *Renderer, points: []const FVec) SDL3Error!void {
-        return ok_or_failure(C.SDL_RenderLines(self.to_c(), @ptrCast(@alignCast(points.ptr)), @intCast(points.len)));
+    pub fn draw_many_lines(self: *Renderer, points: []const FVec) Error!void {
+        return ok_or_fail_err(C.SDL_RenderLines(self.to_c(), @ptrCast(@alignCast(points.ptr)), @intCast(points.len)));
     }
-    pub fn draw_rect_outline(self: *Renderer, rect: *const FRect) SDL3Error!void {
-        return ok_or_failure(C.SDL_RenderRect(self.to_c(), @ptrCast(@alignCast(rect))));
+    pub fn draw_rect_outline(self: *Renderer, rect: *const FRect) Error!void {
+        return ok_or_fail_err(C.SDL_RenderRect(self.to_c(), @ptrCast(@alignCast(rect))));
     }
-    pub fn draw_many_rect_outlines(self: *Renderer, rects: []const FRect) SDL3Error!void {
-        return ok_or_failure(C.SDL_RenderLines(self.to_c(), @ptrCast(@alignCast(rects.ptr)), @intCast(rects.len)));
+    pub fn draw_many_rect_outlines(self: *Renderer, rects: []const FRect) Error!void {
+        return ok_or_fail_err(C.SDL_RenderLines(self.to_c(), @ptrCast(@alignCast(rects.ptr)), @intCast(rects.len)));
     }
-    pub fn draw_rect_filled(self: *Renderer, rect: *const FRect) SDL3Error!void {
-        return ok_or_failure(C.SDL_RenderRect(self.to_c(), @ptrCast(@alignCast(rect))));
+    pub fn draw_rect_filled(self: *Renderer, rect: *const FRect) Error!void {
+        return ok_or_fail_err(C.SDL_RenderRect(self.to_c(), @ptrCast(@alignCast(rect))));
     }
-    pub fn draw_many_rects_filled(self: *Renderer, rects: []const FRect) SDL3Error!void {
-        return ok_or_failure(C.SDL_RenderLines(self.to_c(), @ptrCast(@alignCast(rects.ptr)), @intCast(rects.len)));
+    pub fn draw_many_rects_filled(self: *Renderer, rects: []const FRect) Error!void {
+        return ok_or_fail_err(C.SDL_RenderLines(self.to_c(), @ptrCast(@alignCast(rects.ptr)), @intCast(rects.len)));
     }
-    pub fn draw_texture_rect(self: *Renderer, texture: *Texture, tex_rect: ?*const FRect, target_rect: ?*const FRect) SDL3Error!void {
-        return ok_or_failure(C.SDL_RenderTexture(self.to_c(), texture.to_c(), @ptrCast(@alignCast(tex_rect)), @ptrCast(@alignCast(target_rect))));
+    pub fn draw_texture_rect(self: *Renderer, texture: *Texture, tex_rect: ?*const FRect, target_rect: ?*const FRect) Error!void {
+        return ok_or_fail_err(C.SDL_RenderTexture(self.to_c(), texture.to_c(), @ptrCast(@alignCast(tex_rect)), @ptrCast(@alignCast(target_rect))));
     }
-    pub fn draw_texture_rect_rotated(self: *Renderer, texture: *Texture, tex_rect: ?*const FRect, target_rect: ?*const FRect, angle_deg: f32, pivot: ?*const FVec, flip: FlipMode) SDL3Error!void {
-        return ok_or_failure(C.SDL_RenderTextureRotated(self.to_c(), texture.to_c(), @ptrCast(@alignCast(tex_rect)), @ptrCast(@alignCast(target_rect)), angle_deg, pivot, flip));
+    pub fn draw_texture_rect_rotated(self: *Renderer, texture: *Texture, tex_rect: ?*const FRect, target_rect: ?*const FRect, angle_deg: f32, pivot: ?*const FVec, flip: FlipMode) Error!void {
+        return ok_or_fail_err(C.SDL_RenderTextureRotated(self.to_c(), texture.to_c(), @ptrCast(@alignCast(tex_rect)), @ptrCast(@alignCast(target_rect)), angle_deg, pivot, flip));
     }
-    pub fn draw_texture_rect_affine(self: *Renderer, texture: *Texture, tex_rect: ?*const FRect, target_top_left: ?*const FVec, target_top_right: ?*const FVec, target_bot_left: ?*const FVec) SDL3Error!void {
-        return ok_or_failure(C.SDL_RenderTextureAffine(self.to_c(), texture.to_c(), @ptrCast(@alignCast(tex_rect)), @ptrCast(@alignCast(target_top_left)), @ptrCast(@alignCast(target_top_right)), @ptrCast(@alignCast(target_bot_left))));
+    pub fn draw_texture_rect_affine(self: *Renderer, texture: *Texture, tex_rect: ?*const FRect, target_top_left: ?*const FVec, target_top_right: ?*const FVec, target_bot_left: ?*const FVec) Error!void {
+        return ok_or_fail_err(C.SDL_RenderTextureAffine(self.to_c(), texture.to_c(), @ptrCast(@alignCast(tex_rect)), @ptrCast(@alignCast(target_top_left)), @ptrCast(@alignCast(target_top_right)), @ptrCast(@alignCast(target_bot_left))));
     }
-    pub fn draw_texture_rect_tiled(self: *Renderer, texture: *Texture, tex_rect: ?*const FRect, tex_scale: f32, target_rect: ?*const FRect) SDL3Error!void {
-        return ok_or_failure(C.SDL_RenderTextureTiled(self.to_c(), texture.to_c(), @ptrCast(@alignCast(tex_rect)), tex_scale, @ptrCast(@alignCast(target_rect))));
+    pub fn draw_texture_rect_tiled(self: *Renderer, texture: *Texture, tex_rect: ?*const FRect, tex_scale: f32, target_rect: ?*const FRect) Error!void {
+        return ok_or_fail_err(C.SDL_RenderTextureTiled(self.to_c(), texture.to_c(), @ptrCast(@alignCast(tex_rect)), tex_scale, @ptrCast(@alignCast(target_rect))));
     }
-    pub fn draw_texture_rect_nine_patch(self: *Renderer, texture: *Texture, tex_nine_patch: FNinePatch, edge_scale: f32, target_rect: ?*const FRect) SDL3Error!void {
-        return ok_or_failure(C.SDL_RenderTexture9Grid(self.to_c(), texture.to_c(), @ptrCast(@alignCast(tex_nine_patch.rect)), tex_nine_patch.left, tex_nine_patch.right, tex_nine_patch.top, tex_nine_patch.bottom, edge_scale, @ptrCast(@alignCast(target_rect))));
+    pub fn draw_texture_rect_nine_patch(self: *Renderer, texture: *Texture, tex_nine_patch: FNinePatch, edge_scale: f32, target_rect: ?*const FRect) Error!void {
+        return ok_or_fail_err(C.SDL_RenderTexture9Grid(self.to_c(), texture.to_c(), @ptrCast(@alignCast(tex_nine_patch.rect)), tex_nine_patch.left, tex_nine_patch.right, tex_nine_patch.top, tex_nine_patch.bottom, edge_scale, @ptrCast(@alignCast(target_rect))));
     }
-    pub fn draw_vertices_as_triangles(self: *Renderer, texture: ?*Texture, vertices: []const Vertex) SDL3Error!void {
-        return ok_or_failure(C.SDL_RenderGeometry(self.to_c(), @ptrCast(@alignCast(texture)), @ptrCast(@alignCast(vertices.ptr)), @intCast(vertices.len), null, 0));
+    pub fn draw_vertices_as_triangles(self: *Renderer, texture: ?*Texture, vertices: []const Vertex) Error!void {
+        return ok_or_fail_err(C.SDL_RenderGeometry(self.to_c(), @ptrCast(@alignCast(texture)), @ptrCast(@alignCast(vertices.ptr)), @intCast(vertices.len), null, 0));
     }
-    pub fn draw_indexed_vertices_as_triangles(self: *Renderer, texture: ?*Texture, vertices: []const Vertex, indices: []const c_int) SDL3Error!void {
-        return ok_or_failure(C.SDL_RenderGeometry(self.to_c(), @ptrCast(@alignCast(texture)), @ptrCast(@alignCast(vertices.ptr)), @intCast(vertices.len), @ptrCast(@alignCast(indices.ptr)), @intCast(indices.len)));
+    pub fn draw_indexed_vertices_as_triangles(self: *Renderer, texture: ?*Texture, vertices: []const Vertex, indices: []const c_int) Error!void {
+        return ok_or_fail_err(C.SDL_RenderGeometry(self.to_c(), @ptrCast(@alignCast(texture)), @ptrCast(@alignCast(vertices.ptr)), @intCast(vertices.len), @ptrCast(@alignCast(indices.ptr)), @intCast(indices.len)));
     }
-    pub fn draw_vertices_as_triangles_raw(self: *Renderer, texture: ?*Texture, pos_start: [*]const FVec, pos_stride: c_int, color_start: [*]const FColor_RGBA, color_stride: c_int, tex_coord_start: [*]const FVec, tex_coord_stride: c_int, vertex_count: c_int) SDL3Error!void {
-        return ok_or_failure(C.SDL_RenderGeometryRaw(self.to_c(), @ptrCast(@alignCast(texture)), @ptrCast(@alignCast(pos_start.ptr)), pos_stride, @ptrCast(@alignCast(color_start.ptr)), color_stride, @ptrCast(@alignCast(tex_coord_start.ptr)), tex_coord_stride, vertex_count, null, 0, IndexType.U8.to_c()));
+    pub fn draw_vertices_as_triangles_raw(self: *Renderer, texture: ?*Texture, pos_start: [*]const FVec, pos_stride: c_int, color_start: [*]const FColor_RGBA, color_stride: c_int, tex_coord_start: [*]const FVec, tex_coord_stride: c_int, vertex_count: c_int) Error!void {
+        return ok_or_fail_err(C.SDL_RenderGeometryRaw(self.to_c(), @ptrCast(@alignCast(texture)), @ptrCast(@alignCast(pos_start.ptr)), pos_stride, @ptrCast(@alignCast(color_start.ptr)), color_stride, @ptrCast(@alignCast(tex_coord_start.ptr)), tex_coord_stride, vertex_count, null, 0, IndexType.U8.to_c()));
     }
-    pub fn draw_indexed_vertices_as_triangles_raw(self: *Renderer, texture: ?*Texture, pos_start: [*]const FVec, pos_stride: c_int, color_start: [*]const FColor_RGBA, color_stride: c_int, tex_coord_start: [*]const FVec, tex_coord_stride: c_int, vertex_count: c_int, index_start: *anyopaque, index_count: c_int, index_type: IndexType) SDL3Error!void {
-        return ok_or_failure(C.SDL_RenderGeometryRaw(self.to_c(), @ptrCast(@alignCast(texture)), @ptrCast(@alignCast(pos_start.ptr)), pos_stride, @ptrCast(@alignCast(color_start.ptr)), color_stride, @ptrCast(@alignCast(tex_coord_start.ptr)), tex_coord_stride, vertex_count, @ptrCast(@alignCast(index_start)), index_count, index_type.to_c()));
+    pub fn draw_indexed_vertices_as_triangles_raw(self: *Renderer, texture: ?*Texture, pos_start: [*]const FVec, pos_stride: c_int, color_start: [*]const FColor_RGBA, color_stride: c_int, tex_coord_start: [*]const FVec, tex_coord_stride: c_int, vertex_count: c_int, index_start: *anyopaque, index_count: c_int, index_type: IndexType) Error!void {
+        return ok_or_fail_err(C.SDL_RenderGeometryRaw(self.to_c(), @ptrCast(@alignCast(texture)), @ptrCast(@alignCast(pos_start.ptr)), pos_stride, @ptrCast(@alignCast(color_start.ptr)), color_stride, @ptrCast(@alignCast(tex_coord_start.ptr)), tex_coord_stride, vertex_count, @ptrCast(@alignCast(index_start)), index_count, index_type.to_c()));
     }
-    pub fn draw_debug_text(self: *Renderer, pos: FVec, text: [:0]const u8) SDL3Error!void {
-        return ok_or_failure(C.SDL_RenderDebugText(self.to_c(), pos.x, pos.y, @ptrCast(@alignCast(text.ptr))));
+    pub fn draw_debug_text(self: *Renderer, pos: FVec, text: [:0]const u8) Error!void {
+        return ok_or_fail_err(C.SDL_RenderDebugText(self.to_c(), pos.x, pos.y, @ptrCast(@alignCast(text.ptr))));
     }
-    pub fn draw_debug_text_formatted(self: *Renderer, pos: FVec, format: [:0]const u8, args: anytype) SDL3Error!void {
-        return ok_or_failure(@call(.auto, C.SDL_RenderDebugText, .{ self.to_c(), pos.x, pos.y, @as([*c]const u8, @ptrCast(@alignCast(format.ptr))) } ++ args));
+    pub fn draw_debug_text_formatted(self: *Renderer, pos: FVec, format: [:0]const u8, args: anytype) Error!void {
+        return ok_or_fail_err(@call(.auto, C.SDL_RenderDebugText, .{ self.to_c(), pos.x, pos.y, @as([*c]const u8, @ptrCast(@alignCast(format.ptr))) } ++ args));
     }
-    pub fn read_pixels_rect(self: *Renderer, rect: IRect) SDL3Error!*Surface {
-        return ptr_cast_or_failure(*Surface, C.SDL_RenderReadPixels(self.to_c(), @ptrCast(@alignCast(&rect))));
+    pub fn read_pixels_rect(self: *Renderer, rect: IRect) Error!*Surface {
+        return ptr_cast_or_fail_err(*Surface, C.SDL_RenderReadPixels(self.to_c(), @ptrCast(@alignCast(&rect))));
     }
-    pub fn read_pixels_all(self: *Renderer) SDL3Error!*Surface {
-        return ptr_cast_or_failure(*Surface, C.SDL_RenderReadPixels(self.to_c(), null));
+    pub fn read_pixels_all(self: *Renderer) Error!*Surface {
+        return ptr_cast_or_fail_err(*Surface, C.SDL_RenderReadPixels(self.to_c(), null));
     }
-    pub fn present(self: *Renderer) SDL3Error!void {
-        return ok_or_failure(C.SDL_RenderPresent(self.to_c()));
+    pub fn present(self: *Renderer) Error!void {
+        return ok_or_fail_err(C.SDL_RenderPresent(self.to_c()));
     }
     pub fn destroy(self: *Renderer) void {
         C.SDL_DestroyRenderer(self.to_c());
     }
-    pub fn flush(self: *Renderer) SDL3Error!void {
-        return ok_or_failure(C.SDL_FlushRenderer(self.to_c()));
+    pub fn flush(self: *Renderer) Error!void {
+        return ok_or_fail_err(C.SDL_FlushRenderer(self.to_c()));
     }
-    pub fn get_metal_layer(self: *Renderer) SDL3Error!*MetalLayer {
-        return ptr_cast_or_null(*MetalLayer, C.SDL_GetRenderMetalLayer(self.to_c()));
+    pub fn get_metal_layer(self: *Renderer) Error!*MetalLayer {
+        return ptr_cast_or_null_err(*MetalLayer, C.SDL_GetRenderMetalLayer(self.to_c()));
     }
-    pub fn get_metal_command_encoder(self: *Renderer) SDL3Error!*MetalCommandEncoder {
-        return ptr_cast_or_null(*MetalCommandEncoder, C.SDL_GetRenderMetalCommandEncoder(self.to_c()));
+    pub fn get_metal_command_encoder(self: *Renderer) Error!*MetalCommandEncoder {
+        return ptr_cast_or_null_err(*MetalCommandEncoder, C.SDL_GetRenderMetalCommandEncoder(self.to_c()));
     }
-    pub fn add_vulkan_semaphores(self: *Renderer, wait_stage_mask: u32, wait_semaphore: i64, signal_semaphore: i64) SDL3Error!void {
-        return ok_or_failure(C.SDL_AddVulkanRenderSemaphores(self.to_c(), wait_stage_mask, wait_semaphore, signal_semaphore));
+    pub fn add_vulkan_semaphores(self: *Renderer, wait_stage_mask: u32, wait_semaphore: i64, signal_semaphore: i64) Error!void {
+        return ok_or_fail_err(C.SDL_AddVulkanRenderSemaphores(self.to_c(), wait_stage_mask, wait_semaphore, signal_semaphore));
     }
-    pub fn set_vsync(self: *Renderer, v_sync: VSync) SDL3Error!void {
-        return ok_or_failure(C.SDL_SetRenderVSync(self.to_c(), v_sync.to_c()));
+    pub fn set_vsync(self: *Renderer, v_sync: VSync) Error!void {
+        return ok_or_fail_err(C.SDL_SetRenderVSync(self.to_c(), v_sync.to_c()));
     }
-    pub fn get_vsync(self: *Renderer) SDL3Error!VSync {
+    pub fn get_vsync(self: *Renderer) Error!VSync {
         var val: c_int = 0;
-        try ok_or_null(C.SDL_GetRenderVSync(self.to_c(), &val));
+        try ok_or_null_err(C.SDL_GetRenderVSync(self.to_c(), &val));
         return VSync.from_c(val);
     }
 };
@@ -2442,15 +2467,15 @@ pub const IndexType = enum(c_int) {
     }
 };
 
-pub const AppResult = enum(c_uint) {
+pub const AppProcess = enum(c_uint) {
     CONTINUE = C.SDL_APP_CONTINUE,
-    SUCCESS = C.SDL_APP_SUCCESS,
-    FAILURE = C.SDL_APP_FAILURE,
+    CLOSE_NORMAL = C.SDL_APP_SUCCESS,
+    CLOSE_ERROR = C.SDL_APP_FAILURE,
 
-    inline fn to_c(self: AppResult) c_uint {
+    inline fn to_c(self: AppProcess) c_uint {
         return @intFromEnum(self);
     }
-    inline fn from_c(val: c_uint) AppResult {
+    inline fn from_c(val: c_uint) AppProcess {
         return @enumFromInt(val);
     }
 };
@@ -2477,84 +2502,84 @@ pub const Texture = opaque {
         C.SDL_DestroyTexture(self.to_c());
     }
 
-    pub fn get_properties(self: *Texture) Properties {
+    pub fn get_properties(self: *Texture) PropertiesID {
         return C.SDL_GetTextureProperties(self.to_c());
     }
-    pub fn get_renderer(self: *Texture) SDL3Error!*Renderer {
-        return ptr_cast_or_null(*Renderer, C.SDL_GetTextureProperties(self.to_c()));
+    pub fn get_renderer(self: *Texture) Error!*Renderer {
+        return ptr_cast_or_null_err(*Renderer, C.SDL_GetTextureProperties(self.to_c()));
     }
-    pub fn get_size(self: *Texture) SDL3Error!IVec {
+    pub fn get_size(self: *Texture) Error!IVec {
         var size = IVec{};
-        try ok_or_null(C.SDL_GetTextureSize(self.to_c(), &size.x, &size.y));
+        try ok_or_null_err(C.SDL_GetTextureSize(self.to_c(), &size.x, &size.y));
         return size;
     }
-    pub fn set_color_mod(self: *Texture, color: IColor_RGB) SDL3Error!void {
-        return ok_or_failure(C.SDL_SetTextureColorMod(self.to_c(), color.r, color.g, color.b));
+    pub fn set_color_mod(self: *Texture, color: IColor_RGB) Error!void {
+        return ok_or_fail_err(C.SDL_SetTextureColorMod(self.to_c(), color.r, color.g, color.b));
     }
-    pub fn set_color_mod_float(self: *Texture, color: FColor_RGB) SDL3Error!void {
-        return ok_or_failure(C.SDL_SetTextureColorModFloat(self.to_c(), color.r, color.g, color.b));
+    pub fn set_color_mod_float(self: *Texture, color: FColor_RGB) Error!void {
+        return ok_or_fail_err(C.SDL_SetTextureColorModFloat(self.to_c(), color.r, color.g, color.b));
     }
-    pub fn get_color_mod(self: *Texture) SDL3Error!IColor_RGB {
+    pub fn get_color_mod(self: *Texture) Error!IColor_RGB {
         var color = IColor_RGB{};
-        try ok_or_null(C.SDL_GetTextureColorMod(self.to_c(), &color.r, &color.g, &color.b));
+        try ok_or_null_err(C.SDL_GetTextureColorMod(self.to_c(), &color.r, &color.g, &color.b));
         return color;
     }
-    pub fn get_color_mod_float(self: *Texture) SDL3Error!FColor_RGB {
+    pub fn get_color_mod_float(self: *Texture) Error!FColor_RGB {
         var color = FColor_RGB{};
-        try ok_or_null(C.SDL_GetTextureColorModFloat(self.to_c(), &color.r, &color.g, &color.b));
+        try ok_or_null_err(C.SDL_GetTextureColorModFloat(self.to_c(), &color.r, &color.g, &color.b));
         return color;
     }
-    pub fn set_alpha_mod(self: *Texture, alpha: u8) SDL3Error!void {
-        return ok_or_failure(C.SDL_SetTextureAlphaMod(self.to_c(), alpha));
+    pub fn set_alpha_mod(self: *Texture, alpha: u8) Error!void {
+        return ok_or_fail_err(C.SDL_SetTextureAlphaMod(self.to_c(), alpha));
     }
-    pub fn set_alpha_mod_float(self: *Texture, alpha: f32) SDL3Error!void {
-        return ok_or_failure(C.SDL_SetTextureAlphaModFloat(self.to_c(), alpha));
+    pub fn set_alpha_mod_float(self: *Texture, alpha: f32) Error!void {
+        return ok_or_fail_err(C.SDL_SetTextureAlphaModFloat(self.to_c(), alpha));
     }
-    pub fn get_alpha_mod(self: *Texture) SDL3Error!u8 {
+    pub fn get_alpha_mod(self: *Texture) Error!u8 {
         var alpha: u8 = 0;
-        try ok_or_null(C.SDL_GetTextureAlphaMod(self.to_c(), &alpha));
+        try ok_or_null_err(C.SDL_GetTextureAlphaMod(self.to_c(), &alpha));
         return alpha;
     }
-    pub fn get_alpha_mod_float(self: *Texture) SDL3Error!f32 {
+    pub fn get_alpha_mod_float(self: *Texture) Error!f32 {
         var alpha: f32 = 0.0;
-        try ok_or_null(C.SDL_GetTextureAlphaModFloat(self.to_c(), &alpha));
+        try ok_or_null_err(C.SDL_GetTextureAlphaModFloat(self.to_c(), &alpha));
         return alpha;
     }
-    pub fn set_blend_mode(self: *Texture, blend_mode: BlendMode) SDL3Error!void {
-        return ok_or_failure(C.SDL_SetTextureBlendMode(self.to_c(), blend_mode.mode));
+    pub fn set_blend_mode(self: *Texture, blend_mode: BlendMode) Error!void {
+        return ok_or_fail_err(C.SDL_SetTextureBlendMode(self.to_c(), blend_mode.mode));
     }
-    pub fn get_blend_mode(self: *Texture) SDL3Error!BlendMode {
+    pub fn get_blend_mode(self: *Texture) Error!BlendMode {
         var mode: u32 = 0;
-        try ok_or_null(C.SDL_GetTextureBlendMode(self.to_c(), &mode));
+        try ok_or_null_err(C.SDL_GetTextureBlendMode(self.to_c(), &mode));
         return BlendMode{ .mode = mode };
     }
-    pub fn set_scale_mode(self: *Texture, scale_mode: ScaleMode) SDL3Error!void {
-        return ok_or_failure(C.SDL_SetTextureScaleMode(self.to_c(), scale_mode.to_c()));
+    pub fn set_scale_mode(self: *Texture, scale_mode: ScaleMode) Error!void {
+        return ok_or_fail_err(C.SDL_SetTextureScaleMode(self.to_c(), scale_mode.to_c()));
     }
-    pub fn get_scale_mode(self: *Texture) SDL3Error!ScaleMode {
+    pub fn get_scale_mode(self: *Texture) Error!ScaleMode {
         var mode: c_int = 0;
-        try ok_or_null(C.SDL_GetTextureScaleMode(self.to_c(), &mode));
+        try ok_or_null_err(C.SDL_GetTextureScaleMode(self.to_c(), &mode));
         return ScaleMode.from_c(mode);
     }
-    pub fn update_texture(self: *Texture, raw_pixel_data: []const u8, bytes_per_row: c_int) SDL3Error!void {
-        return ok_or_failure(C.SDL_UpdateTexture(self.to_c(), null, raw_pixel_data.ptr, bytes_per_row));
+    pub fn update_texture(self: *Texture, raw_pixel_data: []const u8, bytes_per_row: c_int) Error!void {
+        return ok_or_fail_err(C.SDL_UpdateTexture(self.to_c(), null, raw_pixel_data.ptr, bytes_per_row));
     }
-    pub fn update_texture_rect(self: *Texture, rect: IRect, raw_pixel_data: []const u8, bytes_per_row: c_int) SDL3Error!void {
-        return ok_or_failure(C.SDL_UpdateTexture(self.to_c(), @ptrCast(@alignCast(&rect)), raw_pixel_data.ptr, bytes_per_row));
+    pub fn update_texture_rect(self: *Texture, rect: IRect, raw_pixel_data: []const u8, bytes_per_row: c_int) Error!void {
+        return ok_or_fail_err(C.SDL_UpdateTexture(self.to_c(), @ptrCast(@alignCast(&rect)), raw_pixel_data.ptr, bytes_per_row));
     }
-    pub fn update_YUV_texture(self: *Texture, y_plane_data: []const u8, bytes_per_y_row: c_int, u_plane_data: []const u8, bytes_per_u_row: c_int, v_plane_data: []const u8, bytes_per_v_row: c_int) SDL3Error!void {
-        return ok_or_failure(C.SDL_UpdateYUVTexture(self.to_c(), null, y_plane_data.ptr, bytes_per_y_row, u_plane_data.ptr, bytes_per_u_row, v_plane_data.ptr, bytes_per_v_row));
+    pub fn update_YUV_texture(self: *Texture, y_plane_data: []const u8, bytes_per_y_row: c_int, u_plane_data: []const u8, bytes_per_u_row: c_int, v_plane_data: []const u8, bytes_per_v_row: c_int) Error!void {
+        return ok_or_fail_err(C.SDL_UpdateYUVTexture(self.to_c(), null, y_plane_data.ptr, bytes_per_y_row, u_plane_data.ptr, bytes_per_u_row, v_plane_data.ptr, bytes_per_v_row));
     }
-    pub fn update_YUV_texture_rect(self: *Texture, rect: IRect, y_plane_data: []const u8, bytes_per_y_row: c_int, u_plane_data: []const u8, bytes_per_u_row: c_int, v_plane_data: []const u8, bytes_per_v_row: c_int) SDL3Error!void {
-        return ok_or_failure(C.SDL_UpdateYUVTexture(self.to_c(), @ptrCast(@alignCast(&rect)), y_plane_data.ptr, bytes_per_y_row, u_plane_data.ptr, bytes_per_u_row, v_plane_data.ptr, bytes_per_v_row));
+    pub fn update_YUV_texture_rect(self: *Texture, rect: IRect, y_plane_data: []const u8, bytes_per_y_row: c_int, u_plane_data: []const u8, bytes_per_u_row: c_int, v_plane_data: []const u8, bytes_per_v_row: c_int) Error!void {
+        return ok_or_fail_err(C.SDL_UpdateYUVTexture(self.to_c(), @ptrCast(@alignCast(&rect)), y_plane_data.ptr, bytes_per_y_row, u_plane_data.ptr, bytes_per_u_row, v_plane_data.ptr, bytes_per_v_row));
     }
-    pub fn update_NV_texture_rect(self: *Texture, rect: IRect, y_plane_data: []const u8, bytes_per_y_row: c_int, uv_plane_data: []const u8, bytes_per_uv_row: c_int) SDL3Error!void {
-        return ok_or_failure(C.SDL_UpdateNVTexture(self.to_c(), @ptrCast(@alignCast(&rect)), y_plane_data.ptr, bytes_per_y_row, uv_plane_data.ptr, bytes_per_uv_row));
+    pub fn update_NV_texture_rect(self: *Texture, rect: IRect, y_plane_data: []const u8, bytes_per_y_row: c_int, uv_plane_data: []const u8, bytes_per_uv_row: c_int) Error!void {
+        return ok_or_fail_err(C.SDL_UpdateNVTexture(self.to_c(), @ptrCast(@alignCast(&rect)), y_plane_data.ptr, bytes_per_y_row, uv_plane_data.ptr, bytes_per_uv_row));
     }
-    pub fn lock_for_byte_write(self: *Texture) SDL3Error!TextureWriteBytes {
+    pub fn lock_for_byte_write(self: *Texture) Error!TextureWriteBytes {
         var bytes_ptr: [*]u8 = undefined;
         var bytes_per_row: c_int = 0;
-        try ok_or_failure(C.SDL_LockTexture(self.to_c(), null, &bytes_ptr, &bytes_per_row));
+        try ok_or_fail_err(C.SDL_LockTexture(self.to_c(), null, &bytes_ptr, &bytes_per_row));
         const total_len = self.height * bytes_per_row;
         return TextureWriteBytes{
             .bytes = bytes_ptr[0..total_len],
@@ -2562,10 +2587,10 @@ pub const Texture = opaque {
             .texture = self,
         };
     }
-    pub fn lock_rect_for_byte_write(self: *Texture, rect: IRect) SDL3Error!TextureWriteBytes {
+    pub fn lock_rect_for_byte_write(self: *Texture, rect: IRect) Error!TextureWriteBytes {
         var bytes_ptr: [*]u8 = undefined;
         var bytes_per_row: c_int = 0;
-        try ok_or_failure(C.SDL_LockTexture(self.to_c(), @ptrCast(@alignCast(&rect)), &bytes_ptr, &bytes_per_row));
+        try ok_or_fail_err(C.SDL_LockTexture(self.to_c(), @ptrCast(@alignCast(&rect)), &bytes_ptr, &bytes_per_row));
         const total_len = rect.y * bytes_per_row;
         return TextureWriteBytes{
             .bytes = bytes_ptr[0..total_len],
@@ -2573,17 +2598,17 @@ pub const Texture = opaque {
             .texture = self,
         };
     }
-    pub fn lock_for_surface_write(self: *Texture) SDL3Error!TextureWriteSurface {
+    pub fn lock_for_surface_write(self: *Texture) Error!TextureWriteSurface {
         var surface: *Surface = undefined;
-        try ok_or_failure(C.SDL_LockTextureToSurface(self.to_c(), null, @ptrCast(@alignCast(&surface))));
+        try ok_or_fail_err(C.SDL_LockTextureToSurface(self.to_c(), null, @ptrCast(@alignCast(&surface))));
         return TextureWriteSurface{
             .surface = surface,
             .texture = self,
         };
     }
-    pub fn lock_rect_for_surface_write(self: *Texture, rect: IRect) SDL3Error!TextureWriteSurface {
+    pub fn lock_rect_for_surface_write(self: *Texture, rect: IRect) Error!TextureWriteSurface {
         var surface: *Surface = undefined;
-        try ok_or_failure(C.SDL_LockTextureToSurface(self.to_c(), @ptrCast(@alignCast(&rect)), @ptrCast(@alignCast(&surface))));
+        try ok_or_fail_err(C.SDL_LockTextureToSurface(self.to_c(), @ptrCast(@alignCast(&rect)), @ptrCast(@alignCast(&surface))));
         return TextureWriteSurface{
             .surface = surface,
             .texture = self,
@@ -2713,33 +2738,33 @@ pub const AudioDeviceID = extern struct {
     pub fn is_null(self: AudioDeviceID) bool {
         return self.id == 0;
     }
-    pub fn get_all_playback_devices() SDL3Error!AudioDeviceIDList {
+    pub fn get_all_playback_devices() Error!AudioDeviceIDList {
         var len: c_int = 0;
-        const ptr = try ptr_cast_or_null([*]AudioDeviceID, C.SDL_GetAudioPlaybackDevices(&len));
+        const ptr = try ptr_cast_or_null_err([*]AudioDeviceID, C.SDL_GetAudioPlaybackDevices(&len));
         return AudioDeviceIDList{ .list = ptr[0..len] };
     }
-    pub fn get_all_recording_devices() SDL3Error!AudioDeviceIDList {
+    pub fn get_all_recording_devices() Error!AudioDeviceIDList {
         var len: c_int = 0;
-        const ptr = try ptr_cast_or_null([*]AudioDeviceID, C.SDL_GetAudioRecordingDevices(&len));
+        const ptr = try ptr_cast_or_null_err([*]AudioDeviceID, C.SDL_GetAudioRecordingDevices(&len));
         return AudioDeviceIDList{ .list = ptr[0..len] };
     }
-    pub fn get_name(self: AudioDeviceID) SDL3Error![*:0]const u8 {
-        return ptr_cast_or_null([*:0]const u8, C.SDL_GetAudioDeviceName(self.id));
+    pub fn get_name(self: AudioDeviceID) Error![*:0]const u8 {
+        return ptr_cast_or_null_err([*:0]const u8, C.SDL_GetAudioDeviceName(self.id));
     }
-    pub fn get_format(self: AudioDeviceID) SDL3Error!AudioDeviceFormat {
+    pub fn get_format(self: AudioDeviceID) Error!AudioDeviceFormat {
         var fmt: AudioDeviceFormat = undefined;
-        try ok_or_failure(C.SDL_GetAudioDeviceFormat(self.id, @ptrCast(@alignCast(&fmt.spec)), &fmt.sample_frames_len));
+        try ok_or_fail_err(C.SDL_GetAudioDeviceFormat(self.id, @ptrCast(@alignCast(&fmt.spec)), &fmt.sample_frames_len));
         return fmt;
     }
-    pub fn get_channel_map(self: AudioDeviceID) SDL3Error!AudioDeviceFormat {
+    pub fn get_channel_map(self: AudioDeviceID) Error!AudioDeviceFormat {
         var len: c_int = 0;
-        const ptr = ptr_cast_or_null([*]c_int, C.SDL_GetAudioDeviceChannelMap(self.id, &len));
+        const ptr = ptr_cast_or_null_err([*]c_int, C.SDL_GetAudioDeviceChannelMap(self.id, &len));
         return AudioChannelMap{
             .map = ptr[0..len],
         };
     }
-    pub fn open_device(self: AudioDeviceID, spec_request: AudioSpecRequest) SDL3Error!AudioDeviceID {
-        return AudioDeviceID{ .id = try nonzero_or_null(C.SDL_OpenAudioDevice(self.id, @ptrCast(@alignCast(spec_request.spec_ptr)))) };
+    pub fn open_device(self: AudioDeviceID, spec_request: AudioSpecRequest) Error!AudioDeviceID {
+        return AudioDeviceID{ .id = try nonzero_or_null_err(C.SDL_OpenAudioDevice(self.id, @ptrCast(@alignCast(spec_request.spec_ptr)))) };
     }
     pub fn is_physical(self: AudioDeviceID) bool {
         return C.SDL_IsAudioDevicePhysical(self.id);
@@ -2750,11 +2775,11 @@ pub const AudioDeviceID = extern struct {
     pub fn is_recording_device(self: AudioDeviceID) bool {
         return !C.SDL_IsAudioDevicePlayback(self.id);
     }
-    pub fn pause_operation(self: AudioDeviceID) SDL3Error!void {
-        return ok_or_failure(C.SDL_PauseAudioDevice(self.id));
+    pub fn pause_operation(self: AudioDeviceID) Error!void {
+        return ok_or_fail_err(C.SDL_PauseAudioDevice(self.id));
     }
-    pub fn resume_operation(self: AudioDeviceID) SDL3Error!void {
-        return ok_or_failure(C.SDL_ResumeAudioDevice(self.id));
+    pub fn resume_operation(self: AudioDeviceID) Error!void {
+        return ok_or_fail_err(C.SDL_ResumeAudioDevice(self.id));
     }
     pub fn is_paused(self: AudioDeviceID) bool {
         return C.SDL_AudioDevicePaused(self.id);
@@ -2762,20 +2787,20 @@ pub const AudioDeviceID = extern struct {
     pub fn get_gain(self: AudioDeviceID) f32 {
         return C.SDL_GetAudioDeviceGain(self.id);
     }
-    pub fn set_gain(self: AudioDeviceID, gain: f32) SDL3Error!void {
-        return ok_or_failure(C.SDL_SetAudioDeviceGain(self.id, gain));
+    pub fn set_gain(self: AudioDeviceID, gain: f32) Error!void {
+        return ok_or_fail_err(C.SDL_SetAudioDeviceGain(self.id, gain));
     }
-    pub fn close_device(self: AudioDeviceID) void {
+    pub fn close(self: AudioDeviceID) void {
         C.SDL_CloseAudioDevice(self.id);
     }
-    pub fn bind_audio_stream(self: AudioDeviceID, audio_stream: *AudioStream) SDL3Error!void {
-        return ok_or_failure(C.SDL_BindAudioStream(self.id, audio_stream.to_c()));
+    pub fn bind_audio_stream(self: AudioDeviceID, audio_stream: *AudioStream) Error!void {
+        return ok_or_fail_err(C.SDL_BindAudioStream(self.id, audio_stream.to_c()));
     }
-    pub fn bind_many_audio_streams(self: AudioDeviceID, audio_streams: []AudioStream) SDL3Error!void {
-        return ok_or_failure(C.SDL_BindAudioStreams(self.id, @ptrCast(@alignCast(audio_streams.ptr)), @intCast(audio_streams.len)));
+    pub fn bind_many_audio_streams(self: AudioDeviceID, audio_streams: []AudioStream) Error!void {
+        return ok_or_fail_err(C.SDL_BindAudioStreams(self.id, @ptrCast(@alignCast(audio_streams.ptr)), @intCast(audio_streams.len)));
     }
-    pub fn open_new_audio_stream(self: AudioDeviceID, spec: AudioSpec, callback: ?*AudioStreamCallback, user_data: ?*anyopaque) SDL3Error!*AudioStream {
-        return ptr_cast_or_failure(*AudioStream, C.SDL_OpenAudioDeviceStream(self.id, spec.to_c(), @ptrCast(@alignCast(callback)), user_data));
+    pub fn open_new_audio_stream(self: AudioDeviceID, spec: AudioSpec, callback: ?*AudioStreamCallback, user_data: ?*anyopaque) Error!*AudioStream {
+        return ptr_cast_or_fail_err(*AudioStream, C.SDL_OpenAudioDeviceStream(self.id, spec.to_c(), @ptrCast(@alignCast(callback)), user_data));
     }
 };
 
@@ -2824,95 +2849,95 @@ pub const AudioStream = opaque {
     pub fn unbind(self: *AudioStream) void {
         C.SDL_UnbindAudioStream(self.to_c());
     }
-    pub fn get_device(self: *AudioStream) SDL3Error!AudioDeviceID {
-        return AudioDeviceID{ .id = try nonzero_or_null(C.SDL_GetAudioStreamDevice(self.to_c())) };
+    pub fn get_device(self: *AudioStream) Error!AudioDeviceID {
+        return AudioDeviceID{ .id = try nonzero_or_null_err(C.SDL_GetAudioStreamDevice(self.to_c())) };
     }
-    pub fn create(format: AudioStreamFormat) SDL3Error!*AudioStream {
-        return ptr_cast_or_failure(*AudioStream, C.SDL_CreateAudioStream(@ptrCast(@alignCast(format.input_spec)), @ptrCast(@alignCast(format.output_spec))));
+    pub fn create(format: AudioStreamFormat) Error!*AudioStream {
+        return ptr_cast_or_fail_err(*AudioStream, C.SDL_CreateAudioStream(@ptrCast(@alignCast(format.input_spec)), @ptrCast(@alignCast(format.output_spec))));
     }
-    pub fn get_properties(self: *AudioStream) SDL3Error!Properties {
-        return Properties{ .id = try nonzero_or_null(C.SDL_GetAudioStreamProperties(self.to_c())) };
+    pub fn get_properties(self: *AudioStream) Error!PropertiesID {
+        return PropertiesID{ .id = try nonzero_or_null_err(C.SDL_GetAudioStreamProperties(self.to_c())) };
     }
-    pub fn get_format(self: *AudioStream) SDL3Error!AudioStreamFormat {
+    pub fn get_format(self: *AudioStream) Error!AudioStreamFormat {
         var fmt: AudioStreamFormat = undefined;
-        try ok_or_failure(C.SDL_GetAudioStreamFormat(self.to_c(), @ptrCast(@alignCast(&fmt.input_spec)), @ptrCast(@alignCast(&fmt.output_spec))));
+        try ok_or_fail_err(C.SDL_GetAudioStreamFormat(self.to_c(), @ptrCast(@alignCast(&fmt.input_spec)), @ptrCast(@alignCast(&fmt.output_spec))));
         return fmt;
     }
-    pub fn set_format(self: *AudioStream, format: AudioStreamFormat) SDL3Error!void {
-        return ok_or_failure(C.SDL_SetAudioStreamFormat(self.to_c(), @ptrCast(@alignCast(format.input_spec)), @ptrCast(@alignCast(format.output_spec))));
+    pub fn set_format(self: *AudioStream, format: AudioStreamFormat) Error!void {
+        return ok_or_fail_err(C.SDL_SetAudioStreamFormat(self.to_c(), @ptrCast(@alignCast(format.input_spec)), @ptrCast(@alignCast(format.output_spec))));
     }
     pub fn get_frequency_ratio(self: *AudioStream) f32 {
         return C.SDL_GetAudioStreamFrequencyRatio(self.to_c());
     }
-    pub fn set_frequency_ratio(self: *AudioStream, freq_ratio: f32) SDL3Error!void {
-        return ok_or_failure(C.SDL_SetAudioStreamFrequencyRatio(self.to_c(), freq_ratio));
+    pub fn set_frequency_ratio(self: *AudioStream, freq_ratio: f32) Error!void {
+        return ok_or_fail_err(C.SDL_SetAudioStreamFrequencyRatio(self.to_c(), freq_ratio));
     }
     pub fn get_gain(self: *AudioStream) f32 {
         return C.SDL_GetAudioStreamGain(self.to_c());
     }
-    pub fn set_gain(self: *AudioStream, gain: f32) SDL3Error!void {
-        return ok_or_failure(C.SDL_SetAudioStreamGain(self.to_c(), gain));
+    pub fn set_gain(self: *AudioStream, gain: f32) Error!void {
+        return ok_or_fail_err(C.SDL_SetAudioStreamGain(self.to_c(), gain));
     }
-    pub fn get_input_channel_map(self: *AudioStream) SDL3Error!AudioChannelMap {
+    pub fn get_input_channel_map(self: *AudioStream) Error!AudioChannelMap {
         var len: c_int = 0;
-        const ptr = try ptr_cast_or_null([*]c_int, C.SDL_GetAudioStreamInputChannelMap(self.to_c(), &len));
+        const ptr = try ptr_cast_or_null_err([*]c_int, C.SDL_GetAudioStreamInputChannelMap(self.to_c(), &len));
         return AudioChannelMap{ .map = ptr[0..len] };
     }
-    pub fn get_output_channel_map(self: *AudioStream) SDL3Error!AudioChannelMap {
+    pub fn get_output_channel_map(self: *AudioStream) Error!AudioChannelMap {
         var len: c_int = 0;
-        const ptr = try ptr_cast_or_null([*]c_int, C.SDL_GetAudioStreamOutputChannelMap(self.to_c(), &len));
+        const ptr = try ptr_cast_or_null_err([*]c_int, C.SDL_GetAudioStreamOutputChannelMap(self.to_c(), &len));
         return AudioChannelMap{ .map = ptr[0..len] };
     }
-    pub fn set_input_channel_map(self: *AudioStream, channel_map: AudioChannelMap) SDL3Error!void {
-        return ok_or_failure(C.SDL_SetAudioStreamInputChannelMap(self.to_c(), channel_map.map.ptr, @intCast(channel_map.map.len)));
+    pub fn set_input_channel_map(self: *AudioStream, channel_map: AudioChannelMap) Error!void {
+        return ok_or_fail_err(C.SDL_SetAudioStreamInputChannelMap(self.to_c(), channel_map.map.ptr, @intCast(channel_map.map.len)));
     }
-    pub fn set_output_channel_map(self: *AudioStream, channel_map: AudioChannelMap) SDL3Error!void {
-        return ok_or_failure(C.SDL_SetAudioStreamOutputChannelMap(self.to_c(), channel_map.map.ptr, @intCast(channel_map.map.len)));
+    pub fn set_output_channel_map(self: *AudioStream, channel_map: AudioChannelMap) Error!void {
+        return ok_or_fail_err(C.SDL_SetAudioStreamOutputChannelMap(self.to_c(), channel_map.map.ptr, @intCast(channel_map.map.len)));
     }
-    pub fn put_in_audio_data(self: *AudioStream, data: []const u8) SDL3Error!void {
-        return ok_or_failure(C.SDL_PutAudioStreamData(self.to_c(), data.map.ptr, @intCast(data.len)));
+    pub fn put_in_audio_data(self: *AudioStream, data: []const u8) Error!void {
+        return ok_or_fail_err(C.SDL_PutAudioStreamData(self.to_c(), data.map.ptr, @intCast(data.len)));
     }
-    pub fn take_out_audio_data(self: *AudioStream, dst_buffer: []u8) SDL3Error!void {
-        return positive_or_failure(C.SDL_PutAudioStreamData(self.to_c(), dst_buffer.ptr, @intCast(dst_buffer.len)));
+    pub fn take_out_audio_data(self: *AudioStream, dst_buffer: []u8) Error!void {
+        return positive_or_fail_err(C.SDL_PutAudioStreamData(self.to_c(), dst_buffer.ptr, @intCast(dst_buffer.len)));
     }
-    pub fn get_bytes_available_to_take_out(self: *AudioStream) SDL3Error!c_int {
-        return positive_or_failure(C.SDL_GetAudioStreamAvailable(self.to_c()));
+    pub fn get_bytes_available_to_take_out(self: *AudioStream) Error!c_int {
+        return positive_or_fail_err(C.SDL_GetAudioStreamAvailable(self.to_c()));
     }
-    pub fn get_bytes_queued_for_take_out(self: *AudioStream) SDL3Error!c_int {
-        return positive_or_failure(C.SDL_GetAudioStreamQueued(self.to_c()));
+    pub fn get_bytes_queued_for_take_out(self: *AudioStream) Error!c_int {
+        return positive_or_fail_err(C.SDL_GetAudioStreamQueued(self.to_c()));
     }
-    pub fn flush(self: *AudioStream) SDL3Error!void {
-        return ok_or_failure(C.SDL_FlushAudioStream(self.to_c()));
+    pub fn flush(self: *AudioStream) Error!void {
+        return ok_or_fail_err(C.SDL_FlushAudioStream(self.to_c()));
     }
-    pub fn clear(self: *AudioStream) SDL3Error!void {
-        return ok_or_failure(C.SDL_ClearAudioStream(self.to_c()));
+    pub fn clear(self: *AudioStream) Error!void {
+        return ok_or_fail_err(C.SDL_ClearAudioStream(self.to_c()));
     }
-    pub fn pause_device(self: *AudioStream) SDL3Error!void {
-        return ok_or_failure(C.SDL_PauseAudioStreamDevice(self.to_c()));
+    pub fn pause_device(self: *AudioStream) Error!void {
+        return ok_or_fail_err(C.SDL_PauseAudioStreamDevice(self.to_c()));
     }
-    pub fn resume_device(self: *AudioStream) SDL3Error!void {
-        return ok_or_failure(C.SDL_ResumeAudioStreamDevice(self.to_c()));
+    pub fn resume_device(self: *AudioStream) Error!void {
+        return ok_or_fail_err(C.SDL_ResumeAudioStreamDevice(self.to_c()));
     }
     pub fn is_device_paused(self: *AudioStream) bool {
         return C.SDL_AudioStreamDevicePaused(self.to_c());
     }
-    pub fn lock(self: *AudioStream) SDL3Error!void {
-        return ok_or_failure(C.SDL_LockAudioStream(self.to_c()));
+    pub fn lock(self: *AudioStream) Error!void {
+        return ok_or_fail_err(C.SDL_LockAudioStream(self.to_c()));
     }
-    pub fn unlock(self: *AudioStream) SDL3Error!void {
-        return ok_or_failure(C.SDL_UnlockAudioStream(self.to_c()));
+    pub fn unlock(self: *AudioStream) Error!void {
+        return ok_or_fail_err(C.SDL_UnlockAudioStream(self.to_c()));
     }
-    pub fn set_take_out_callback(self: *AudioStream, callback: *AudioStreamCallback, user_data: ?*anyopaque) SDL3Error!void {
-        return ok_or_failure(C.SDL_SetAudioStreamGetCallback(self.to_c(), @ptrCast(@alignCast(callback)), user_data));
+    pub fn set_take_out_callback(self: *AudioStream, callback: *AudioStreamCallback, user_data: ?*anyopaque) Error!void {
+        return ok_or_fail_err(C.SDL_SetAudioStreamGetCallback(self.to_c(), @ptrCast(@alignCast(callback)), user_data));
     }
-    pub fn clear_take_out_callback(self: *AudioStream) SDL3Error!void {
-        return ok_or_failure(C.SDL_SetAudioStreamGetCallback(self.to_c(), null, null));
+    pub fn clear_take_out_callback(self: *AudioStream) Error!void {
+        return ok_or_fail_err(C.SDL_SetAudioStreamGetCallback(self.to_c(), null, null));
     }
-    pub fn set_put_in_callback(self: *AudioStream, callback: *AudioStreamCallback, user_data: ?*anyopaque) SDL3Error!void {
-        return ok_or_failure(C.SDL_SetAudioStreamPutCallback(self.to_c(), @ptrCast(@alignCast(callback)), user_data));
+    pub fn set_put_in_callback(self: *AudioStream, callback: *AudioStreamCallback, user_data: ?*anyopaque) Error!void {
+        return ok_or_fail_err(C.SDL_SetAudioStreamPutCallback(self.to_c(), @ptrCast(@alignCast(callback)), user_data));
     }
-    pub fn clear_put_in_callback(self: *AudioStream) SDL3Error!void {
-        return ok_or_failure(C.SDL_SetAudioStreamPutCallback(self.to_c(), null, null));
+    pub fn clear_put_in_callback(self: *AudioStream) Error!void {
+        return ok_or_fail_err(C.SDL_SetAudioStreamPutCallback(self.to_c(), null, null));
     }
     pub fn destroy(self: *AudioStream) void {
         C.SDL_DestroyAudioStream(self.to_c());
@@ -2944,12 +2969,6 @@ pub const AudioStreamFormat = extern struct {
     }
 };
 
-pub const Gamepad = extern struct {
-    extern_ptr: *External,
-
-    pub const External = C.SDL_Gamepad;
-};
-
 pub const GamepadType = enum(c_uint) {
     UNKNOWN = C.SDL_GAMEPAD_TYPE_UNKNOWN,
     STANDARD = C.SDL_GAMEPAD_TYPE_STANDARD,
@@ -2970,6 +2989,17 @@ pub const GamepadType = enum(c_uint) {
     }
     inline fn from_c(val: c_uint) GamepadType {
         return @enumFromInt(val);
+    }
+
+    pub fn from_string(str: [*:0]const u8) GamepadType {
+        return GamepadType.from_c(C.SDL_GetGamepadTypeFromString(str));
+    }
+    pub fn to_string(self: GamepadType) Error![*:0]const u8 {
+        return ptr_cast_or_null_err([*:0]const u8, C.SDL_GetGamepadStringForType(self.to_c()));
+    }
+
+    pub fn get_label_for_face_button(self: GamepadType, button: GamepadButton) GamepadFaceButtonLabel {
+        return GamepadFaceButtonLabel.from_c(C.SDL_GetGamepadButtonLabelForType(self.to_c(), button.to_c()));
     }
 };
 
@@ -3010,9 +3040,16 @@ pub const GamepadButton = enum(c_int) {
     inline fn from_c(val: c_uint) GamepadButton {
         return @enumFromInt(val);
     }
+
+    pub fn from_string(str: [*:0]const u8) GamepadButton {
+        return GamepadButton.from_c(C.SDL_GetGamepadButtonFromString(str));
+    }
+    pub fn to_string(self: GamepadButton) Error![*:0]const u8 {
+        return ptr_cast_or_null_err([*:0]const u8, C.SDL_GetGamepadStringForButton(self.to_c()));
+    }
 };
 
-pub const GamepadButtonLabel = enum(c_uint) {
+pub const GamepadFaceButtonLabel = enum(c_uint) {
     UNKNOWN = C.SDL_GAMEPAD_BUTTON_LABEL_UNKNOWN,
     A = C.SDL_GAMEPAD_BUTTON_LABEL_A,
     B = C.SDL_GAMEPAD_BUTTON_LABEL_B,
@@ -3023,10 +3060,10 @@ pub const GamepadButtonLabel = enum(c_uint) {
     SQUARE = C.SDL_GAMEPAD_BUTTON_LABEL_SQUARE,
     TRIANGLE = C.SDL_GAMEPAD_BUTTON_LABEL_TRIANGLE,
 
-    inline fn to_c(self: GamepadButtonLabel) c_uint {
+    inline fn to_c(self: GamepadFaceButtonLabel) c_uint {
         return @intFromEnum(self);
     }
-    inline fn from_c(val: c_uint) GamepadButtonLabel {
+    inline fn from_c(val: c_uint) GamepadFaceButtonLabel {
         return @enumFromInt(val);
     }
 };
@@ -3047,6 +3084,13 @@ pub const GamepadAxis = enum(c_int) {
     }
     inline fn from_c(val: c_uint) GamepadAxis {
         return @enumFromInt(val);
+    }
+
+    pub fn from_string(str: [*:0]const u8) GamepadAxis {
+        return GamepadAxis.from_c(C.SDL_GetGamepadAxisFromString(str));
+    }
+    pub fn to_string(self: GamepadAxis) Error![*:0]const u8 {
+        return ptr_cast_or_null_err([*:0]const u8, C.SDL_GetGamepadStringForAxis(self.to_c()));
     }
 };
 
@@ -3083,61 +3127,61 @@ pub const Storage = opaque {
     inline fn to_c(self: *Storage) *C.SDL_Storage {
         return @ptrCast(@alignCast(self));
     }
-    pub fn open_app_readonly_storage_folder(override: [:0]const u8, properties: Properties) SDL3Error!*Storage {
-        return ptr_cast_or_failure(*Storage, C.SDL_OpenTitleStorage(override.ptr, properties));
+    pub fn open_app_readonly_storage_folder(override: [:0]const u8, properties: PropertiesID) Error!*Storage {
+        return ptr_cast_or_fail_err(*Storage, C.SDL_OpenTitleStorage(override.ptr, properties));
     }
-    pub fn open_user_storage_folder(org_name: [:0]const u8, app_name: [:0]const u8, properties: Properties) SDL3Error!*Storage {
-        return ptr_cast_or_failure(*Storage, C.SDL_OpenUserStorage(org_name.ptr, app_name.ptr, properties));
+    pub fn open_user_storage_folder(org_name: [:0]const u8, app_name: [:0]const u8, properties: PropertiesID) Error!*Storage {
+        return ptr_cast_or_fail_err(*Storage, C.SDL_OpenUserStorage(org_name.ptr, app_name.ptr, properties));
     }
-    pub fn open_filesystem(path: [:0]const u8) SDL3Error!*Storage {
-        return ptr_cast_or_failure(*Storage, C.SDL_OpenFileStorage(path.ptr));
+    pub fn open_filesystem(path: [:0]const u8) Error!*Storage {
+        return ptr_cast_or_fail_err(*Storage, C.SDL_OpenFileStorage(path.ptr));
     }
-    pub fn open_storage_with_custom_interface(iface: StorageInterface, user_data: ?*anyopaque) SDL3Error!*Storage {
-        return ptr_cast_or_failure(*Storage, C.SDL_OpenStorage(@ptrCast(@alignCast(&iface)), user_data));
+    pub fn open_storage_with_custom_interface(iface: StorageInterface, user_data: ?*anyopaque) Error!*Storage {
+        return ptr_cast_or_fail_err(*Storage, C.SDL_OpenStorage(@ptrCast(@alignCast(&iface)), user_data));
     }
-    pub fn close(self: *Storage) SDL3Error!void {
-        return ok_or_failure(C.SDL_CloseStorage(self.to_c()));
+    pub fn close(self: *Storage) Error!void {
+        return ok_or_fail_err(C.SDL_CloseStorage(self.to_c()));
     }
     pub fn is_ready(self: *Storage) bool {
         C.SDL_StorageReady(self.to_c());
     }
-    pub fn get_file_size(self: *Storage, sub_path: [:0]const u8) SDL3Error!u64 {
+    pub fn get_file_size(self: *Storage, sub_path: [:0]const u8) Error!u64 {
         var size: u64 = 0;
-        try ok_or_null(C.SDL_GetStorageFileSize(self.to_c(), sub_path.ptr, &size));
+        try ok_or_null_err(C.SDL_GetStorageFileSize(self.to_c(), sub_path.ptr, &size));
         return size;
     }
-    pub fn read_file_into_buffer(self: *Storage, sub_path: [:0]const u8, buffer: []u8) SDL3Error!void {
-        try ok_or_failure(C.SDL_ReadStorageFile(self.to_c(), sub_path.ptr, buffer.ptr, @intCast(buffer.len)));
+    pub fn read_file_into_buffer(self: *Storage, sub_path: [:0]const u8, buffer: []u8) Error!void {
+        try ok_or_fail_err(C.SDL_ReadStorageFile(self.to_c(), sub_path.ptr, buffer.ptr, @intCast(buffer.len)));
     }
-    pub fn write_file_from_buffer(self: *Storage, sub_path: [:0]const u8, buffer: []const u8) SDL3Error!void {
-        try ok_or_failure(C.SDL_WriteStorageFile(self.to_c(), sub_path.ptr, buffer.ptr, @intCast(buffer.len)));
+    pub fn write_file_from_buffer(self: *Storage, sub_path: [:0]const u8, buffer: []const u8) Error!void {
+        try ok_or_fail_err(C.SDL_WriteStorageFile(self.to_c(), sub_path.ptr, buffer.ptr, @intCast(buffer.len)));
     }
-    pub fn create_directory(self: *Storage, sub_path: [:0]const u8) SDL3Error!void {
-        try ok_or_failure(C.SDL_CreateStorageDirectory(self.to_c(), sub_path.ptr));
+    pub fn create_directory(self: *Storage, sub_path: [:0]const u8) Error!void {
+        try ok_or_fail_err(C.SDL_CreateStorageDirectory(self.to_c(), sub_path.ptr));
     }
-    pub fn do_callback_for_each_directory_entry(self: *Storage, sub_path: [:0]const u8, callback: *const FolderEntryCallback, callback_data: ?*anyopaque) SDL3Error!void {
-        try ok_or_failure(C.SDL_EnumerateStorageDirectory(self.to_c(), sub_path.ptr, @ptrCast(@alignCast(callback)), callback_data));
+    pub fn do_callback_for_each_directory_entry(self: *Storage, sub_path: [:0]const u8, callback: *const FolderEntryCallback, callback_data: ?*anyopaque) Error!void {
+        try ok_or_fail_err(C.SDL_EnumerateStorageDirectory(self.to_c(), sub_path.ptr, @ptrCast(@alignCast(callback)), callback_data));
     }
-    pub fn delete_file_or_empty_directory(self: *Storage, sub_path: [:0]const u8) SDL3Error!void {
-        try ok_or_failure(C.SDL_RemoveStoragePath(self.to_c(), sub_path.ptr));
+    pub fn delete_file_or_empty_directory(self: *Storage, sub_path: [:0]const u8) Error!void {
+        try ok_or_fail_err(C.SDL_RemoveStoragePath(self.to_c(), sub_path.ptr));
     }
-    pub fn rename_file_or_directory(self: Storage, old_sub_path: [:0]const u8, new_sub_path: [:0]const u8) SDL3Error!void {
-        try ok_or_failure(C.SDL_RenameStoragePath(self.to_c(), old_sub_path.ptr, new_sub_path.ptr));
+    pub fn rename_file_or_directory(self: Storage, old_sub_path: [:0]const u8, new_sub_path: [:0]const u8) Error!void {
+        try ok_or_fail_err(C.SDL_RenameStoragePath(self.to_c(), old_sub_path.ptr, new_sub_path.ptr));
     }
-    pub fn copy_file(self: Storage, old_sub_path: [:0]const u8, new_sub_path: [:0]const u8) SDL3Error!void {
-        try ok_or_failure(C.SDL_CopyStorageFile(self.to_c(), old_sub_path.ptr, new_sub_path.ptr));
+    pub fn copy_file(self: Storage, old_sub_path: [:0]const u8, new_sub_path: [:0]const u8) Error!void {
+        try ok_or_fail_err(C.SDL_CopyStorageFile(self.to_c(), old_sub_path.ptr, new_sub_path.ptr));
     }
-    pub fn get_path_info(self: Storage, sub_path: [:0]const u8) SDL3Error!PathInfo {
+    pub fn get_path_info(self: Storage, sub_path: [:0]const u8) Error!PathInfo {
         var info = PathInfo{};
-        try ok_or_null(C.SDL_GetStoragePathInfo(self.to_c(), sub_path.ptr, @ptrCast(@alignCast(&info))));
+        try ok_or_null_err(C.SDL_GetStoragePathInfo(self.to_c(), sub_path.ptr, @ptrCast(@alignCast(&info))));
         return info;
     }
     pub fn get_remaining_storage_space(self: *Storage) u64 {
         return @intCast(C.SDL_GetStorageSpaceRemaining(self));
     }
-    pub fn get_directory_glob(self: Storage, sub_path: [:0]const u8, pattern: [:0]const u8, case_insensitive: bool) SDL3Error!DirectoryGlob {
+    pub fn get_directory_glob(self: Storage, sub_path: [:0]const u8, pattern: [:0]const u8, case_insensitive: bool) Error!DirectoryGlob {
         var len: c_int = 0;
-        const ptr = try ptr_cast_or_null([*]const [*:0]const u8, C.SDL_GlobStorageDirectory(self.to_c(), sub_path.ptr, pattern.ptr, @intCast(@intFromBool(case_insensitive)), &len));
+        const ptr = try ptr_cast_or_null_err([*]const [*:0]const u8, C.SDL_GlobStorageDirectory(self.to_c(), sub_path.ptr, pattern.ptr, @intCast(@intFromBool(case_insensitive)), &len));
         return DirectoryGlob{
             .strings = ptr[0..len],
         };
@@ -3248,8 +3292,8 @@ pub const Event = extern union {
         return @ptrCast(@alignCast(self));
     }
 
-    pub fn convert_coords_to_render_coords(self: *Event, renderer: *Renderer) SDL3Error!void {
-        return ok_or_failure(C.SDL_ConvertEventToRenderCoordinates(renderer.to_c(), self.to_c()));
+    pub fn convert_coords_to_render_coords(self: *Event, renderer: *Renderer) Error!void {
+        return ok_or_fail_err(C.SDL_ConvertEventToRenderCoordinates(renderer.to_c(), self.to_c()));
     }
 };
 
@@ -3391,8 +3435,8 @@ pub const MouseMotionEvent = extern struct {
         return @ptrCast(@alignCast(self));
     }
 
-    pub fn convert_coords_to_render_coords(self: *MouseMotionEvent, renderer: *Renderer) SDL3Error!void {
-        return ok_or_failure(C.SDL_ConvertEventToRenderCoordinates(renderer.to_c(), self.to_c_event()));
+    pub fn convert_coords_to_render_coords(self: *MouseMotionEvent, renderer: *Renderer) Error!void {
+        return ok_or_fail_err(C.SDL_ConvertEventToRenderCoordinates(renderer.to_c(), self.to_c_event()));
     }
 };
 
@@ -3416,8 +3460,8 @@ pub const MouseButtonEvent = extern struct {
         return @ptrCast(@alignCast(self));
     }
 
-    pub fn convert_coords_to_render_coords(self: *MouseButtonEvent, renderer: *Renderer) SDL3Error!void {
-        return ok_or_failure(C.SDL_ConvertEventToRenderCoordinates(renderer.to_c(), self.to_c_event()));
+    pub fn convert_coords_to_render_coords(self: *MouseButtonEvent, renderer: *Renderer) Error!void {
+        return ok_or_fail_err(C.SDL_ConvertEventToRenderCoordinates(renderer.to_c(), self.to_c_event()));
     }
 };
 
@@ -3439,8 +3483,8 @@ pub const MouseWheelEvent = extern struct {
         return @ptrCast(@alignCast(self));
     }
 
-    pub fn convert_coords_to_render_coords(self: *MouseWheelEvent, renderer: *Renderer) SDL3Error!void {
-        return ok_or_failure(C.SDL_ConvertEventToRenderCoordinates(renderer.to_c(), self.to_c_event()));
+    pub fn convert_coords_to_render_coords(self: *MouseWheelEvent, renderer: *Renderer) Error!void {
+        return ok_or_fail_err(C.SDL_ConvertEventToRenderCoordinates(renderer.to_c(), self.to_c_event()));
     }
 };
 
@@ -3448,7 +3492,7 @@ pub const JoyAxisEvent = extern struct {
     type: EventType = .FIRST,
     reserved: u32 = 0,
     timestamp: u64 = 0,
-    joystick_id: JoystickOrGamepad = .{},
+    joystick_id: GameControllerID = .{},
     axis: u8 = 0,
     _padding_1: u8 = 0,
     _padding_2: u8 = 0,
@@ -3465,7 +3509,7 @@ pub const JoyBallEvent = extern struct {
     type: EventType = .FIRST,
     reserved: u32 = 0,
     timestamp: u64 = 0,
-    joystick_id: JoystickOrGamepad = .{},
+    joystick_id: GameControllerID = .{},
     ball: u8 = 0,
     _padding_1: u8 = 0,
     _padding_2: u8 = 0,
@@ -3480,8 +3524,8 @@ pub const JoyBallEvent = extern struct {
         return @ptrCast(@alignCast(self));
     }
 
-    pub fn convert_coords_to_render_coords(self: *JoyBallEvent, renderer: *Renderer) SDL3Error!void {
-        return ok_or_failure(C.SDL_ConvertEventToRenderCoordinates(renderer.to_c(), self.to_c_event()));
+    pub fn convert_coords_to_render_coords(self: *JoyBallEvent, renderer: *Renderer) Error!void {
+        return ok_or_fail_err(C.SDL_ConvertEventToRenderCoordinates(renderer.to_c(), self.to_c_event()));
     }
 };
 
@@ -3489,7 +3533,7 @@ pub const JoyHatEvent = extern struct {
     type: EventType = .FIRST,
     reserved: u32 = 0,
     timestamp: u64 = 0,
-    joystick_id: JoystickOrGamepad = .{},
+    joystick_id: GameControllerID = .{},
     hat: u8 = 0,
     value: u8 = 0,
     _padding_1: u8 = 0,
@@ -3504,7 +3548,7 @@ pub const JoyButtonEvent = extern struct {
     type: EventType = .FIRST,
     reserved: u32 = 0,
     timestamp: u64 = 0,
-    joystick_id: JoystickOrGamepad = .{},
+    joystick_id: GameControllerID = .{},
     button: u8 = 0,
     down: bool = false,
     _padding_1: u8 = 0,
@@ -3519,7 +3563,7 @@ pub const JoyDeviceEvent = extern struct {
     type: EventType = .FIRST,
     reserved: u32 = 0,
     timestamp: u64 = 0,
-    joystick_id: JoystickOrGamepad = .{},
+    joystick_id: GameControllerID = .{},
 
     inline fn to_c(self: *JoyDeviceEvent) *C.SDL_JoyDeviceEvent {
         return @ptrCast(@alignCast(self));
@@ -3530,7 +3574,7 @@ pub const JoyBatteryEvent = extern struct {
     type: EventType = .FIRST,
     reserved: u32 = 0,
     timestamp: u64 = 0,
-    joystick_id: JoystickOrGamepad = .{},
+    joystick_id: GameControllerID = .{},
     state: PowerState = .UNKNOWN,
     percent: c_int = 0,
 
@@ -3543,7 +3587,7 @@ pub const GamepadAxisEvent = extern struct {
     type: EventType = .FIRST,
     reserved: u32 = 0,
     timestamp: u64 = 0,
-    joystick_id: JoystickOrGamepad = .{},
+    joystick_id: GameControllerID = .{},
     axis: u8 = 0,
     _padding_1: u8 = 0,
     _padding_2: u8 = 0,
@@ -3560,7 +3604,7 @@ pub const GamepadButtonEvent = extern struct {
     type: EventType = .FIRST,
     reserved: u32 = 0,
     timestamp: u64 = 0,
-    joystick_id: JoystickOrGamepad = .{},
+    joystick_id: GameControllerID = .{},
     button: u8 = 0,
     down: bool = false,
     _padding_1: u8 = 0,
@@ -3575,7 +3619,7 @@ pub const GamepadDeviceEvent = extern struct {
     type: EventType = .FIRST,
     reserved: u32 = 0,
     timestamp: u64 = 0,
-    joystick_id: JoystickOrGamepad = .{},
+    joystick_id: GameControllerID = .{},
 
     inline fn to_c(self: *GamepadDeviceEvent) *C.SDL_GamepadDeviceEvent {
         return @ptrCast(@alignCast(self));
@@ -3586,7 +3630,7 @@ pub const GamepadTouchpadEvent = extern struct {
     type: EventType = .FIRST,
     reserved: u32 = 0,
     timestamp: u64 = 0,
-    joystick_id: JoystickOrGamepad = .{},
+    joystick_id: GameControllerID = .{},
     touchpad: i32 = 0,
     finger: i32 = 0,
     pos: FVec = FVec{},
@@ -3600,8 +3644,8 @@ pub const GamepadTouchpadEvent = extern struct {
         return @ptrCast(@alignCast(self));
     }
 
-    pub fn convert_coords_to_render_coords(self: *GamepadTouchpadEvent, renderer: *Renderer) SDL3Error!void {
-        return ok_or_failure(C.SDL_ConvertEventToRenderCoordinates(renderer.to_c(), self.to_c_event()));
+    pub fn convert_coords_to_render_coords(self: *GamepadTouchpadEvent, renderer: *Renderer) Error!void {
+        return ok_or_fail_err(C.SDL_ConvertEventToRenderCoordinates(renderer.to_c(), self.to_c_event()));
     }
 };
 
@@ -3609,7 +3653,7 @@ pub const GamepadSensorEvent = extern struct {
     type: EventType = .FIRST,
     reserved: u32 = 0,
     timestamp: u64 = 0,
-    joystick_id: JoystickOrGamepad = .{},
+    joystick_id: GameControllerID = .{},
     sensor: i32 = 0,
     data: [3]f32 = @splat(0.0),
     sensor_timestamp: u64 = 0,
@@ -3675,8 +3719,8 @@ pub const TouchFingerEvent = extern struct {
         return @ptrCast(@alignCast(self));
     }
 
-    pub fn convert_coords_to_render_coords(self: *TouchFingerEvent, renderer: *Renderer) SDL3Error!void {
-        return ok_or_failure(C.SDL_ConvertEventToRenderCoordinates(renderer.to_c(), self.to_c_event()));
+    pub fn convert_coords_to_render_coords(self: *TouchFingerEvent, renderer: *Renderer) Error!void {
+        return ok_or_fail_err(C.SDL_ConvertEventToRenderCoordinates(renderer.to_c(), self.to_c_event()));
     }
 };
 
@@ -3709,8 +3753,8 @@ pub const PenMotionEvent = extern struct {
         return @ptrCast(@alignCast(self));
     }
 
-    pub fn convert_coords_to_render_coords(self: *PenMotionEvent, renderer: *Renderer) SDL3Error!void {
-        return ok_or_failure(C.SDL_ConvertEventToRenderCoordinates(renderer.to_c(), self.to_c_event()));
+    pub fn convert_coords_to_render_coords(self: *PenMotionEvent, renderer: *Renderer) Error!void {
+        return ok_or_fail_err(C.SDL_ConvertEventToRenderCoordinates(renderer.to_c(), self.to_c_event()));
     }
 };
 
@@ -3733,8 +3777,8 @@ pub const PenTouchEvent = extern struct {
         return @ptrCast(@alignCast(self));
     }
 
-    pub fn convert_coords_to_render_coords(self: *PenTouchEvent, renderer: *Renderer) SDL3Error!void {
-        return ok_or_failure(C.SDL_ConvertEventToRenderCoordinates(renderer.to_c(), self.to_c_event()));
+    pub fn convert_coords_to_render_coords(self: *PenTouchEvent, renderer: *Renderer) Error!void {
+        return ok_or_fail_err(C.SDL_ConvertEventToRenderCoordinates(renderer.to_c(), self.to_c_event()));
     }
 };
 
@@ -3757,8 +3801,8 @@ pub const PenButtonEvent = extern struct {
         return @ptrCast(@alignCast(self));
     }
 
-    pub fn convert_coords_to_render_coords(self: *PenButtonEvent, renderer: *Renderer) SDL3Error!void {
-        return ok_or_failure(C.SDL_ConvertEventToRenderCoordinates(renderer.to_c(), self.to_c_event()));
+    pub fn convert_coords_to_render_coords(self: *PenButtonEvent, renderer: *Renderer) Error!void {
+        return ok_or_fail_err(C.SDL_ConvertEventToRenderCoordinates(renderer.to_c(), self.to_c_event()));
     }
 };
 
@@ -3781,8 +3825,8 @@ pub const PenAxisEvent = extern struct {
         return @ptrCast(@alignCast(self));
     }
 
-    pub fn convert_coords_to_render_coords(self: *PenAxisEvent, renderer: *Renderer) SDL3Error!void {
-        return ok_or_failure(C.SDL_ConvertEventToRenderCoordinates(renderer.to_c(), self.to_c_event()));
+    pub fn convert_coords_to_render_coords(self: *PenAxisEvent, renderer: *Renderer) Error!void {
+        return ok_or_fail_err(C.SDL_ConvertEventToRenderCoordinates(renderer.to_c(), self.to_c_event()));
     }
 };
 
@@ -3803,8 +3847,8 @@ pub const DropEvent = extern struct {
         return @ptrCast(@alignCast(self));
     }
 
-    pub fn convert_coords_to_render_coords(self: *DropEvent, renderer: *Renderer) SDL3Error!void {
-        return ok_or_failure(C.SDL_ConvertEventToRenderCoordinates(renderer.to_c(), self.to_c_event()));
+    pub fn convert_coords_to_render_coords(self: *DropEvent, renderer: *Renderer) Error!void {
+        return ok_or_fail_err(C.SDL_ConvertEventToRenderCoordinates(renderer.to_c(), self.to_c_event()));
     }
 };
 
@@ -3870,52 +3914,64 @@ pub const Sensor = extern struct {
     id: u32 = 0,
 };
 
-pub const JoystickOrGamepad = extern struct {
+pub const GameControllerID = extern struct {
     id: u32 = 0,
 
-    pub fn get_all_gamepads() SDL3Error!GamepadsList {
+    fn new_err(id: u32) Error!GameControllerID {
+        return GameControllerID{ .id = try nonzero_or_null_err(id) };
+    }
+
+    pub fn game_controller_id(id: u32) GameControllerID {
+        return GameControllerID{ .id = id };
+    }
+    pub fn null_id() GameControllerID {
+        return NULL_ID;
+    }
+    pub const NULL_ID = GameControllerID{ .id = 0 };
+
+    pub fn get_all_gamepads() Error!GamepadsList {
         var len: c_int = 0;
-        const ptr = try ptr_cast_or_failure([*]JoystickOrGamepad, C.SDL_GetGamepads(&len));
+        const ptr = try ptr_cast_or_fail_err([*]GameControllerID, C.SDL_GetGamepads(&len));
         return GamepadsList{ .list = ptr[0..len] };
     }
-    pub fn is_gamepad(self: JoystickOrGamepad) bool {
+    pub fn is_gamepad(self: GameControllerID) bool {
         return C.SDL_IsGamepad(self.id);
     }
-    pub fn get_name(self: JoystickOrGamepad) SDL3Error![*:0]const u8 {
-        return ptr_cast_or_null([*:0]const u8, C.SDL_GetGamepadNameForID(self.id));
+    pub fn get_name(self: GameControllerID) Error![*:0]const u8 {
+        return ptr_cast_or_null_err([*:0]const u8, C.SDL_GetGamepadNameForID(self.id));
     }
-    pub fn get_path(self: JoystickOrGamepad) SDL3Error![*:0]const u8 {
-        return ptr_cast_or_null([*:0]const u8, C.SDL_GetGamepadPathForID(self.id));
+    pub fn get_path(self: GameControllerID) Error![*:0]const u8 {
+        return ptr_cast_or_null_err([*:0]const u8, C.SDL_GetGamepadPathForID(self.id));
     }
-    pub fn get_player_index(self: JoystickOrGamepad) SDL3Error!PlayerIndex {
-        return PlayerIndex{ .index = try positive_or_null(C.SDL_GetGamepadPlayerIndexForID(self.id)) };
+    pub fn get_player_index(self: GameControllerID) Error!PlayerIndex {
+        return PlayerIndex{ .index = try positive_or_null_err(C.SDL_GetGamepadPlayerIndexForID(self.id)) };
     }
-    pub fn get_guid(self: JoystickOrGamepad) SDL3Error!GUID {
-        return valid_guid_or_null(C.SDL_GetGamepadGUIDForID(self.id));
+    pub fn get_guid(self: GameControllerID) Error!GUID {
+        return valid_guid_or_null_err(C.SDL_GetGamepadGUIDForID(self.id));
     }
-    pub fn get_vendor_code(self: JoystickOrGamepad) SDL3Error!HWVendorCode {
-        return HWVendorCode{ .code = try nonzero_or_null(C.SDL_GetGamepadVendorForID(self.id)) };
+    pub fn get_vendor_code(self: GameControllerID) Error!HW_VendorCode {
+        return HW_VendorCode{ .code = try nonzero_or_null_err(C.SDL_GetGamepadVendorForID(self.id)) };
     }
-    pub fn get_product_code(self: JoystickOrGamepad) SDL3Error!HWProductCode {
-        return HWProductCode{ .code = try nonzero_or_null(C.SDL_GetGamepadProductForID(self.id)) };
+    pub fn get_product_code(self: GameControllerID) Error!HW_ProductCode {
+        return HW_ProductCode{ .code = try nonzero_or_null_err(C.SDL_GetGamepadProductForID(self.id)) };
     }
-    pub fn get_product_version(self: JoystickOrGamepad) SDL3Error!HWProductVersion {
-        return HWProductVersion{ .code = try nonzero_or_null(C.SDL_GetGamepadProductVersionForID(self.id)) };
+    pub fn get_product_version(self: GameControllerID) Error!HW_ProductVersion {
+        return HW_ProductVersion{ .code = try nonzero_or_null_err(C.SDL_GetGamepadProductVersionForID(self.id)) };
     }
-    pub fn get_gamepad_type(self: JoystickOrGamepad) SDL3Error!GamepadType {
+    pub fn get_gamepad_type(self: GameControllerID) Error!GamepadType {
         return GamepadType.from_c(C.SDL_GetGamepadTypeForID(self.id));
     }
-    pub fn get_real_gamepad_type(self: JoystickOrGamepad) SDL3Error!GamepadType {
+    pub fn get_real_gamepad_type(self: GameControllerID) Error!GamepadType {
         return GamepadType.from_c(C.SDL_GetRealGamepadTypeForID(self.id));
     }
-    pub fn get_gamepad_mapping_string(self: JoystickOrGamepad) SDL3Error!String {
-        return String{ .ptr = try ptr_cast_or_null([*:0]u8, C.SDL_GetGamepadMappingForID(self.id)) };
+    pub fn get_gamepad_mapping_string(self: GameControllerID) Error!String {
+        return String{ .ptr = try ptr_cast_or_null_err([*:0]u8, C.SDL_GetGamepadMappingForID(self.id)) };
     }
-    pub fn open_gamepad(self: JoystickOrGamepad) SDL3Error!*Gamepad {
-        return ptr_cast_or_null(*Gamepad, C.SDL_OpenGamepad(self.id));
+    pub fn open_gamepad(self: GameControllerID) Error!*Gamepad {
+        return ptr_cast_or_null_err(*Gamepad, C.SDL_OpenGamepad(self.id));
     }
-    pub fn get_open_gamepad(self: JoystickOrGamepad) SDL3Error!*Gamepad {
-        return ptr_cast_or_null(*Gamepad, C.SDL_GetGamepadFromID(self.id));
+    pub fn get_open_gamepad(self: GameControllerID) Error!*Gamepad {
+        return ptr_cast_or_null_err(*Gamepad, C.SDL_GetGamepadFromID(self.id));
     }
     // pub extern fn SDL_AddGamepadMapping(mapping: [*c]const u8) c_int;
     // pub extern fn SDL_AddGamepadMappingsFromIO(src: ?*SDL_IOStream, closeio: bool) c_int;
@@ -3929,57 +3985,133 @@ pub const JoystickOrGamepad = extern struct {
 };
 
 pub const Gamepad = opaque {
+    fn to_c(self: *Gamepad) *C.SDL_Gamepad {
+        return @ptrCast(@alignCast(self));
+    }
+
+    pub fn set_events_enabled(state: bool) void {
+        C.SDL_SetGamepadEventsEnabled(state);
+    }
+    pub fn update_all_gamepads() void {
+        C.SDL_UpdateGamepads();
+    }
+    pub fn events_are_enabled() bool {
+        return C.SDL_GamepadEventsEnabled();
+    }
+    pub fn from_player_index(index: PlayerIndex) Error!*Gamepad {
+        return ptr_cast_or_null_err(*Gamepad, C.SDL_GetGamepadFromPlayerIndex(index.index));
+    }
+    pub fn get_properties(self: *Gamepad) Error!PropertiesID {
+        return PropertiesID.new(try nonzero_or_null_err(C.SDL_GetGamepadProperties(self.to_c())));
+    }
+    pub fn get_id(self: *Gamepad) Error!GameControllerID {
+        return GameControllerID.new_err(C.SDL_GetGamepadProperties(self.to_c()));
+    }
+    pub fn get_name(self: *Gamepad) Error![*:0]const u8 {
+        return ptr_cast_or_null_err([*:0]const u8, C.SDL_GetGamepadName(self.to_c()));
+    }
+    pub fn get_path(self: *Gamepad) Error![*:0]const u8 {
+        return ptr_cast_or_null_err([*:0]const u8, C.SDL_GetGamepadPath(self.to_c()));
+    }
+    pub fn get_type(self: *Gamepad) Error!GamepadType {
+        return GamepadType.from_c(C.SDL_GetGamepadType(self.to_c()));
+    }
+    pub fn get_real_type(self: *Gamepad) Error!GamepadType {
+        return GamepadType.from_c(C.SDL_GetRealGamepadType(self.to_c()));
+    }
+    pub fn get_player_index(self: *Gamepad) Error!PlayerIndex {
+        return PlayerIndex.new_err(C.SDL_GetGamepadPlayerIndex(self.to_c()));
+    }
+    pub fn set_player_index(self: *Gamepad, player: PlayerIndex) Error!void {
+        return ok_or_fail_err(C.SDL_SetGamepadPlayerIndex(self.to_c(), player.index));
+    }
+    pub fn clear_player_index(self: *Gamepad) Error!void {
+        return ok_or_fail_err(C.SDL_SetGamepadPlayerIndex(self.to_c(), -1));
+    }
+    pub fn get_vendor_code(self: *Gamepad) HW_VendorCode {
+        return HW_VendorCode.new(C.SDL_GetGamepadVendor(self.to_c()));
+    }
+    pub fn get_product_code(self: *Gamepad) HW_ProductCode {
+        return HW_ProductCode.new(C.SDL_GetGamepadProduct(self.to_c()));
+    }
+    pub fn get_product_version(self: *Gamepad) HW_ProductVersion {
+        return HW_ProductVersion.new(C.SDL_GetGamepadProductVersion(self.to_c()));
+    }
+    pub fn get_firmware_version(self: *Gamepad) HW_FirmwareVersion {
+        return HW_FirmwareVersion.new(C.SDL_GetGamepadFirmwareVersion(self.to_c()));
+    }
+    pub fn get_serial_number(self: *Gamepad) Error!HW_SerialNumber {
+        return HW_SerialNumber.new_err(C.SDL_GetGamepadSerial(self.to_c()));
+    }
+    pub fn get_steam_handle(self: *Gamepad) Error!SteamHandle {
+        return SteamHandle.new_err(C.SDL_GetGamepadSteamHandle(self.to_c()));
+    }
+    pub fn get_connection_state(self: *Gamepad) ControllerConnectionState {
+        return ControllerConnectionState.from_c(C.SDL_GetGamepadConnectionState(self.to_c()));
+    }
+    pub fn get_power_info(self: *Gamepad) PowerInfo {
+        var percent: c_int = 0;
+        const state = PowerState.from_c(C.SDL_GetGamepadPowerInfo(self.to_c(), &percent));
+        return PowerInfo{ .state = state, .percent = percent };
+    }
+    pub fn is_connected(self: *Gamepad) bool {
+        return C.SDL_GamepadConnected(self.to_c());
+    }
+    pub fn get_joystick_api(self: *Gamepad) Error!*Joystick {
+        return ptr_cast_or_null_err(*Joystick, C.SDL_GetGamepadJoystick(self.to_c()));
+    }
+    pub fn get_bindings(self: *Gamepad) Error!GamepadBindingList {
+        var len: c_int = 0;
+        const ptr = try ptr_cast_or_null_err([*]*GamepadBinding, C.SDL_GetGamepadBindings(self.to_c(), &len));
+        GamepadBindingList{ .list = ptr[0..len] };
+    }
+    pub fn has_axis(self: *Gamepad, axis: GamepadAxis) bool {
+        return C.SDL_GamepadHasAxis(self.to_c(), axis.to_c());
+    }
+    pub fn get_axis_position(self: *Gamepad, axis: GamepadAxis) AxisPosition {
+        return AxisPosition{ .val = C.SDL_GetGamepadAxis(self.to_c(), axis.to_c()) };
+    }
+    pub fn has_button(self: *Gamepad, button: GamepadButton) bool {
+        return C.SDL_GamepadHasButton(self.to_c(), button.to_c());
+    }
+    pub fn get_button_state(self: *Gamepad, button: GamepadButton) KeyButtonState {
+        return KeyButtonState.from_bool(C.SDL_GetGamepadButton(self.to_c(), button.to_c()));
+    }
+    pub fn get_label_for_face_button(self: *Gamepad, button: GamepadButton) GamepadFaceButtonLabel {
+        return GamepadFaceButtonLabel.from_c(C.SDL_GetGamepadButtonLabel(self.to_c(), button.to_c()));
+    }
+    pub fn get_number_of_touchpads(self: *Gamepad) c_int {
+        return C.SDL_GetNumGamepadTouchpads(self.to_c());
+    }
+    pub fn get_touchpad_max_fingers(self: *Gamepad, touchpad: c_int) c_int {
+        return C.SDL_GetNumGamepadTouchpadFingers(self.to_c(), touchpad);
+    }
+    pub fn get_touchpad_finger_state(self: *Gamepad, touchpad: c_int, finger: c_int) FingerState {
+        var state: FingerState = undefined;
+        try ok_or_null_err(C.SDL_GetGamepadTouchpadFinger(self.to_c(), touchpad, finger, @ptrCast(@alignCast(&state.state)), &state.position.x, &state.position.y, &state.pressure));
+        return state;
+    }
+    pub fn has_sensor(self: *Gamepad, sensor: SensorType) bool {
+        return C.SDL_GamepadHasSensor(self.to_c(), sensor.to_c());
+    }
+    pub fn set_sensor_enabled(self: *Gamepad, sensor: SensorType, state: bool) Error!void {
+        return ok_or_fail_err(C.SDL_SetGamepadSensorEnabled(self.to_c(), sensor.to_c(), state));
+    }
+    pub fn is_sensor_enabled(self: *Gamepad, sensor: SensorType) bool {
+        return C.SDL_GamepadSensorEnabled(self.to_c(), sensor.to_c());
+    }
     //CHECKPOINT
-    // pub extern fn SDL_GetGamepadFromPlayerIndex(player_index: c_int) ?*SDL_Gamepad;
-    // pub extern fn SDL_GetGamepadProperties(gamepad: ?*SDL_Gamepad) SDL_PropertiesID;
-    // pub extern fn SDL_GetGamepadID(gamepad: ?*SDL_Gamepad) SDL_JoystickID;
-    // pub extern fn SDL_GetGamepadName(gamepad: ?*SDL_Gamepad) [*c]const u8;
-    // pub extern fn SDL_GetGamepadPath(gamepad: ?*SDL_Gamepad) [*c]const u8;
-    // pub extern fn SDL_GetGamepadType(gamepad: ?*SDL_Gamepad) SDL_GamepadType;
-    // pub extern fn SDL_GetRealGamepadType(gamepad: ?*SDL_Gamepad) SDL_GamepadType;
-    // pub extern fn SDL_GetGamepadPlayerIndex(gamepad: ?*SDL_Gamepad) c_int;
-    // pub extern fn SDL_SetGamepadPlayerIndex(gamepad: ?*SDL_Gamepad, player_index: c_int) bool;
-    // pub extern fn SDL_GetGamepadVendor(gamepad: ?*SDL_Gamepad) Uint16;
-    // pub extern fn SDL_GetGamepadProduct(gamepad: ?*SDL_Gamepad) Uint16;
-    // pub extern fn SDL_GetGamepadProductVersion(gamepad: ?*SDL_Gamepad) Uint16;
-    // pub extern fn SDL_GetGamepadFirmwareVersion(gamepad: ?*SDL_Gamepad) Uint16;
-    // pub extern fn SDL_GetGamepadSerial(gamepad: ?*SDL_Gamepad) [*c]const u8;
-    // pub extern fn SDL_GetGamepadSteamHandle(gamepad: ?*SDL_Gamepad) Uint64;
-    // pub extern fn SDL_GetGamepadConnectionState(gamepad: ?*SDL_Gamepad) SDL_JoystickConnectionState;
-    // pub extern fn SDL_GetGamepadPowerInfo(gamepad: ?*SDL_Gamepad, percent: [*c]c_int) SDL_PowerState;
-    // pub extern fn SDL_GamepadConnected(gamepad: ?*SDL_Gamepad) bool;
-    // pub extern fn SDL_GetGamepadJoystick(gamepad: ?*SDL_Gamepad) ?*SDL_Joystick;
-    // pub extern fn SDL_SetGamepadEventsEnabled(enabled: bool) void;
-    // pub extern fn SDL_GamepadEventsEnabled() bool;
-    // pub extern fn SDL_GetGamepadBindings(gamepad: ?*SDL_Gamepad, count: [*c]c_int) [*c][*c]SDL_GamepadBinding;
-    // pub extern fn SDL_UpdateGamepads() void;
-    // pub extern fn SDL_GetGamepadTypeFromString(str: [*c]const u8) SDL_GamepadType;
-    // pub extern fn SDL_GetGamepadStringForType(@"type": SDL_GamepadType) [*c]const u8;
-    // pub extern fn SDL_GetGamepadAxisFromString(str: [*c]const u8) SDL_GamepadAxis;
-    // pub extern fn SDL_GetGamepadStringForAxis(axis: SDL_GamepadAxis) [*c]const u8;
-    // pub extern fn SDL_GamepadHasAxis(gamepad: ?*SDL_Gamepad, axis: SDL_GamepadAxis) bool;
-    // pub extern fn SDL_GetGamepadAxis(gamepad: ?*SDL_Gamepad, axis: SDL_GamepadAxis) Sint16;
-    // pub extern fn SDL_GetGamepadButtonFromString(str: [*c]const u8) SDL_GamepadButton;
-    // pub extern fn SDL_GetGamepadStringForButton(button: SDL_GamepadButton) [*c]const u8;
-    // pub extern fn SDL_GamepadHasButton(gamepad: ?*SDL_Gamepad, button: SDL_GamepadButton) bool;
-    // pub extern fn SDL_GetGamepadButton(gamepad: ?*SDL_Gamepad, button: SDL_GamepadButton) bool;
-    // pub extern fn SDL_GetGamepadButtonLabelForType(@"type": SDL_GamepadType, button: SDL_GamepadButton) SDL_GamepadButtonLabel;
-    // pub extern fn SDL_GetGamepadButtonLabel(gamepad: ?*SDL_Gamepad, button: SDL_GamepadButton) SDL_GamepadButtonLabel;
-    // pub extern fn SDL_GetNumGamepadTouchpads(gamepad: ?*SDL_Gamepad) c_int;
-    // pub extern fn SDL_GetNumGamepadTouchpadFingers(gamepad: ?*SDL_Gamepad, touchpad: c_int) c_int;
-    // pub extern fn SDL_GetGamepadTouchpadFinger(gamepad: ?*SDL_Gamepad, touchpad: c_int, finger: c_int, down: [*c]bool, x: [*c]f32, y: [*c]f32, pressure: [*c]f32) bool;
-    // pub extern fn SDL_GamepadHasSensor(gamepad: ?*SDL_Gamepad, @"type": SDL_SensorType) bool;
-    // pub extern fn SDL_SetGamepadSensorEnabled(gamepad: ?*SDL_Gamepad, @"type": SDL_SensorType, enabled: bool) bool;
-    // pub extern fn SDL_GamepadSensorEnabled(gamepad: ?*SDL_Gamepad, @"type": SDL_SensorType) bool;
     // pub extern fn SDL_GetGamepadSensorDataRate(gamepad: ?*SDL_Gamepad, @"type": SDL_SensorType) f32;
     // pub extern fn SDL_GetGamepadSensorData(gamepad: ?*SDL_Gamepad, @"type": SDL_SensorType, data: [*c]f32, num_values: c_int) bool;
     // pub extern fn SDL_RumbleGamepad(gamepad: ?*SDL_Gamepad, low_frequency_rumble: Uint16, high_frequency_rumble: Uint16, duration_ms: Uint32) bool;
     // pub extern fn SDL_RumbleGamepadTriggers(gamepad: ?*SDL_Gamepad, left_rumble: Uint16, right_rumble: Uint16, duration_ms: Uint32) bool;
     // pub extern fn SDL_SetGamepadLED(gamepad: ?*SDL_Gamepad, red: Uint8, green: Uint8, blue: Uint8) bool;
     // pub extern fn SDL_SendGamepadEffect(gamepad: ?*SDL_Gamepad, data: ?*const anyopaque, size: c_int) bool;
-    // pub extern fn SDL_CloseGamepad(gamepad: ?*SDL_Gamepad) void;
     // pub extern fn SDL_GetGamepadAppleSFSymbolsNameForButton(gamepad: ?*SDL_Gamepad, button: SDL_GamepadButton) [*c]const u8;
     // pub extern fn SDL_GetGamepadAppleSFSymbolsNameForAxis(gamepad: ?*SDL_Gamepad, axis: SDL_GamepadAxis) [*c]const u8;
+    pub fn close(self: *Gamepad) void {
+        C.SDL_CloseGamepad(self.to_c());
+    }
 };
 
 pub const Joystick = opaque {
@@ -4028,22 +4160,208 @@ pub const Joystick = opaque {
     // pub extern fn SDL_GetJoystickPowerInfo(joystick: ?*SDL_Joystick, percent: [*c]c_int) SDL_PowerState;
 };
 
-pub const HWVendorCode = extern struct {
-    code: u16,
+pub const FingerState = extern struct {
+    state: KeyButtonState,
+    position: FVec,
+    pressure: f32,
 };
-pub const HWProductCode = extern struct {
-    code: u16,
+
+pub const KeyButtonState = enum(u1) {
+    UP = 0,
+    DOWN = 1,
+
+    pub inline fn is_down(self: KeyButtonState) bool {
+        return self.to_bool();
+    }
+    pub inline fn is_up(self: KeyButtonState) bool {
+        return !self.to_bool();
+    }
+
+    pub inline fn from_bool(val: bool) KeyButtonState {
+        return @enumFromInt(@intFromBool(val));
+    }
+    pub inline fn to_bool(self: KeyButtonState) bool {
+        return @bitCast(@intFromEnum(self));
+    }
 };
-pub const HWProductVersion = extern struct {
+
+pub const SensorType = enum(c_int) {
+    INVALID = C.SDL_SENSOR_INVALID,
+    UNKNOWN = C.SDL_SENSOR_UNKNOWN,
+    ACCEL = C.SDL_SENSOR_ACCEL,
+    GYRO = C.SDL_SENSOR_GYRO,
+    ACCEL_L = C.SDL_SENSOR_ACCEL_L,
+    GYRO_L = C.SDL_SENSOR_GYRO_L,
+    ACCEL_R = C.SDL_SENSOR_ACCEL_R,
+    GYRO_R = C.SDL_SENSOR_GYRO_R,
+
+    inline fn to_c(self: SensorType) c_int {
+        return @intFromEnum(self);
+    }
+    inline fn from_c(val: c_int) SensorType {
+        return @enumFromInt(val);
+    }
+};
+
+pub const AxisPosition = extern struct {
+    val: i16,
+
+    pub fn to_percent(self: AxisPosition) f32 {
+        return @min(-1.0, @max(1.0, @as(f32, @floatFromInt(self.val)) / 32767.0));
+    }
+    pub fn from_percent(percent: f32) AxisPosition {
+        return @intFromFloat(@min(-32767.0, @max(32767.0, percent * 32767.0)));
+    }
+};
+
+pub const GamepadBindingList = extern struct {
+    list: []*GamepadBinding,
+
+    pub fn free(self: GamepadBindingList) void {
+        sdl_free(self.list.ptr);
+    }
+};
+
+pub const GamepadBinding = extern struct {
+    input_type: GamepadBindingType,
+    input_details: GamepadBindingInput,
+    output_type: GamepadBindingType,
+    output_details: GamepadBindingOutput,
+};
+pub const GamepadBindingInput = extern struct {
+    button: GamepadButtonInputBinding,
+    axis: GamepadAxisInputBinding,
+    hat: GamepadHatInputBinding,
+};
+pub const GamepadBindingOutput = extern struct {
+    button: GamepadButtonOutputBinding,
+    axis: GamepadAxisOutputBinding,
+};
+pub const GamepadButtonOutputBinding = extern struct {
+    id: GamepadButton,
+};
+pub const GamepadButtonInputBinding = extern struct {
+    id: c_int,
+};
+pub const GamepadHatInputBinding = extern struct {
+    id: c_int,
+    mask: c_int,
+};
+pub const GamepadAxisInputBinding = extern struct {
+    axis: c_int,
+    min: c_int,
+    max: c_int,
+};
+pub const GamepadAxisOutputBinding = extern struct {
+    axis: GamepadAxis,
+    min: c_int,
+    max: c_int,
+};
+
+pub const PowerInfo = extern struct {
+    state: PowerState,
+    percent: c_int,
+};
+
+pub const ControllerConnectionState = enum(c_int) {
+    INVALID = C.SDL_JOYSTICK_CONNECTION_INVALID,
+    UNKNOWN = C.SDL_JOYSTICK_CONNECTION_UNKNOWN,
+    WIRED = C.SDL_JOYSTICK_CONNECTION_WIRED,
+    WIRELESS = C.SDL_JOYSTICK_CONNECTION_WIRELESS,
+
+    inline fn to_c(self: ControllerConnectionState) c_int {
+        return @intFromEnum(self);
+    }
+    inline fn from_c(val: c_int) ControllerConnectionState {
+        return @enumFromInt(val);
+    }
+};
+
+/// https://partner.steamgames.com/doc/api/ISteamInput#InputHandle_t
+pub const SteamHandle = extern struct {
+    handle: u64,
+
+    inline fn new_err(handle: u64) Error!SteamHandle {
+        return SteamHandle{ .handle = try nonzero_or_null_err(handle) };
+    }
+    pub inline fn steam_handle(handle: u64) SteamHandle {
+        return SteamHandle{ .handle = handle };
+    }
+    pub inline fn null_steam_handle() SteamHandle {
+        return NULL_HANDLE;
+    }
+    pub const NULL_HANDLE = SteamHandle{ .handle = 0 };
+};
+
+pub const HW_VendorCode = extern struct {
+    code: u16,
+
+    inline fn new(code: u16) HW_VendorCode {
+        return HW_VendorCode{ .code = code };
+    }
+    pub inline fn vendor_code(code: u16) HW_VendorCode {
+        return HW_VendorCode{ .code = code };
+    }
+};
+pub const HW_ProductCode = extern struct {
+    code: u16,
+
+    inline fn new(code: u16) HW_ProductCode {
+        return HW_ProductCode{ .code = code };
+    }
+    pub inline fn product_code(code: u16) HW_ProductCode {
+        return HW_ProductCode{ .code = code };
+    }
+};
+pub const HW_ProductVersion = extern struct {
     ver: u16,
+
+    inline fn new(ver: u16) HW_ProductVersion {
+        return HW_ProductVersion{ .ver = ver };
+    }
+    pub inline fn product_version(ver: u16) HW_ProductVersion {
+        return HW_ProductVersion{ .ver = ver };
+    }
+};
+pub const HW_FirmwareVersion = extern struct {
+    ver: u16,
+
+    inline fn new(ver: u16) HW_FirmwareVersion {
+        return HW_FirmwareVersion{ .ver = ver };
+    }
+    pub inline fn firmware_version(ver: u16) HW_FirmwareVersion {
+        return HW_FirmwareVersion{ .ver = ver };
+    }
+};
+pub const HW_SerialNumber = extern struct {
+    serial: [*:0]const u8,
+
+    inline fn new_err(ser: [*c]const u8) Error!HW_SerialNumber {
+        return HW_SerialNumber{ .serial = try ptr_cast_or_null_err([*:0]const u8, ser) };
+    }
+    pub inline fn serial_number(serial: [*:0]const u8) HW_SerialNumber {
+        return HW_SerialNumber{ .serial = serial };
+    }
 };
 
 pub const PlayerIndex = extern struct {
     index: c_int = 0,
+
+    fn new_err(idx: c_int) Error!PlayerIndex {
+        return PlayerIndex{ .index = @intCast(try positive_or_null_err(idx)) };
+    }
+
+    pub fn player_index(idx: c_int) PlayerIndex {
+        return PlayerIndex{ .index = idx };
+    }
+    pub fn null_player_idx() PlayerIndex {
+        return NULL_IDX;
+    }
+    pub const NULL_IDX = PlayerIndex{ .index = -1 };
 };
 
 pub const GamepadsList = extern struct {
-    list: []JoystickOrGamepad,
+    list: []GameControllerID,
 
     pub fn free(self: GamepadsList) void {
         sdl_free(self.list.ptr);
@@ -4517,24 +4835,22 @@ pub const Keymod = extern struct {
     mod: u16,
 };
 
-pub const Meta = struct {
-    pub fn runtime_version() c_int {
-        return C.SDL_GetVersion();
-    }
-    pub fn runtime_revision() [*:0]const u8 {
-        return C.SDL_GetRevision();
-    }
-    pub const BUILD_MAJOR_VERSION = C.SDL_MAJOR_VERSION;
-    pub const BUILD_MINOR_VERSION = C.SDL_MINOR_VERSION;
-    pub const BUILD_MICRO_VERSION = C.SDL_MICRO_VERSION;
-    pub const BUILD_REVISION = C.SDL_REVISION;
-    pub fn RUNTIME_MAJOR_VERSION(version: anytype) @TypeOf(@import("std").zig.c_translation.MacroArithmetic.div(version, @import("std").zig.c_translation.promoteIntLiteral(c_int, 1000000, .decimal))) {
-        C.SDL_VERSIONNUM_MAJOR(version);
-    }
-    pub fn RUNTIME_MINOR_VERSION(version: anytype) @TypeOf(@import("std").zig.c_translation.MacroArithmetic.rem(@import("std").zig.c_translation.MacroArithmetic.div(version, @as(c_int, 1000)), @as(c_int, 1000))) {
-        C.SDL_VERSIONNUM_MINOR(version);
-    }
-    pub fn RUNTIME_MICRO_VERSION(version: anytype) @TypeOf(@import("std").zig.c_translation.MacroArithmetic.rem(version, @as(c_int, 1000))) {
-        C.SDL_VERSIONNUM_MICRO(version);
-    }
-};
+pub fn runtime_version() c_int {
+    return C.SDL_GetVersion();
+}
+pub fn runtime_revision() [*:0]const u8 {
+    return C.SDL_GetRevision();
+}
+pub const BUILD_MAJOR_VERSION = C.SDL_MAJOR_VERSION;
+pub const BUILD_MINOR_VERSION = C.SDL_MINOR_VERSION;
+pub const BUILD_MICRO_VERSION = C.SDL_MICRO_VERSION;
+pub const BUILD_REVISION = C.SDL_REVISION;
+pub fn RUNTIME_MAJOR_VERSION(version: anytype) @TypeOf(@import("std").zig.c_translation.MacroArithmetic.div(version, @import("std").zig.c_translation.promoteIntLiteral(c_int, 1000000, .decimal))) {
+    C.SDL_VERSIONNUM_MAJOR(version);
+}
+pub fn RUNTIME_MINOR_VERSION(version: anytype) @TypeOf(@import("std").zig.c_translation.MacroArithmetic.rem(@import("std").zig.c_translation.MacroArithmetic.div(version, @as(c_int, 1000)), @as(c_int, 1000))) {
+    C.SDL_VERSIONNUM_MINOR(version);
+}
+pub fn RUNTIME_MICRO_VERSION(version: anytype) @TypeOf(@import("std").zig.c_translation.MacroArithmetic.rem(version, @as(c_int, 1000))) {
+    C.SDL_VERSIONNUM_MICRO(version);
+}

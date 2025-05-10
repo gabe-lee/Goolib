@@ -32,6 +32,8 @@ var prev_vcon: VirtualControllerState = undefined;
 var best_score: u32 = undefined;
 var timekeeper: Timekeeper = undefined;
 
+var app_err: ErrorStore = .{};
+
 var paddle: Paddle = undefined;
 var ball: Ball = undefined;
 var bricks: std.BoundedArray(Brick, 100) = undefined;
@@ -39,13 +41,16 @@ var bricks: std.BoundedArray(Brick, 100) = undefined;
 var score: u32 = undefined;
 var score_color: [3]u8 = undefined;
 
-pub fn main() !void {
-    std.debug.print("test\n", .{});
+pub fn main() !u8 {
+    app_err.reset();
+    var empty_argv: [0:null]?[*:0]u8 = .{};
+    const status: u8 = @truncate(@as(c_uint, @bitCast(c.SDL_RunApp(empty_argv.len, @ptrCast(&empty_argv), sdlMainC, null))));
+    return app_err.load() orelse status;
 }
 
-pub fn app_init(app_state: ?*?*anyopaque, argv: [][*:0]u8) !SDL.AppResult {
+pub fn app_init(app_state: ?*?*anyopaque, args_list: [][*:0]u8) SDL.Error!SDL.AppProcess {
     _ = app_state;
-    _ = argv;
+    _ = args_list;
 
     var write_buf = std.BoundedArray(u8, 200).init(0);
 
@@ -129,28 +134,28 @@ pub fn app_init(app_state: ?*?*anyopaque, argv: [][*:0]u8) !SDL.AppResult {
     try audio_device.bind_many_audio_streams(audio_streams);
 
     {
-        const gamepads_list = try SDL.JoystickOrGamepad.get_all_gamepads();
+        const gamepads_list = try SDL.GameControllerID.get_all_gamepads();
         defer gamepads_list.free();
 
         gamepad = if (gamepads_list.list.len > 0) try gamepads_list.list[0].open_gamepad() else null;
     }
-    errdefer c.SDL_CloseGamepad(gamepad);
+    errdefer if (gamepad) |pad| pad.close();
 
     phcon = .{};
     prev_phcon = phcon;
     vcon = .{};
     prev_vcon = vcon;
 
-    try loadBestScore();
+    try load_best_score();
 
-    timekeeper = .{ .tocks_per_s = c.SDL_GetPerformanceFrequency() };
+    timekeeper = .{ .tocks_per_s = SDL.get_performance_frequency() };
 
-    try resetGame();
+    try reset_game();
 
     fully_initialized = true;
     errdefer comptime unreachable;
 
-    return c.SDL_APP_CONTINUE;
+    return SDL.AppProcess.CONTINUE;
 }
 
 const Sprites = struct {
@@ -173,6 +178,44 @@ const Sprites = struct {
     const ball             = SDL.FRect{ .x =  2, .y = 104, .w =  22, .h = 22 };
     const paddle           = SDL.FRect{ .x = 27, .y = 103, .w = 104, .h = 24 };
     // zig fmt: on
+};
+
+const ErrorStore = struct {
+    const status_not_stored = 0;
+    const status_storing = 1;
+    const status_stored = 2;
+
+    status: c.SDL_AtomicInt = .{},
+    err: anyerror = undefined,
+    trace_index: usize = undefined,
+    trace_addrs: [32]usize = undefined,
+
+    fn reset(es: *ErrorStore) void {
+        _ = c.SDL_SetAtomicInt(&es.status, status_not_stored);
+    }
+
+    fn store(es: *ErrorStore, err: anyerror) c.SDL_AppResult {
+        if (c.SDL_CompareAndSwapAtomicInt(&es.status, status_not_stored, status_storing)) {
+            es.err = err;
+            if (@errorReturnTrace()) |src_trace| {
+                es.trace_index = src_trace.index;
+                const len = @min(es.trace_addrs.len, src_trace.instruction_addresses.len);
+                @memcpy(es.trace_addrs[0..len], src_trace.instruction_addresses[0..len]);
+            }
+            _ = c.SDL_SetAtomicInt(&es.status, status_stored);
+        }
+        return c.SDL_APP_FAILURE;
+    }
+
+    fn load(es: *ErrorStore) ?anyerror {
+        if (c.SDL_GetAtomicInt(&es.status) != status_stored) return null;
+        if (@errorReturnTrace()) |dst_trace| {
+            dst_trace.index = es.trace_index;
+            const len = @min(dst_trace.instruction_addresses.len, es.trace_addrs.len);
+            @memcpy(dst_trace.instruction_addresses[0..len], es.trace_addrs[0..len]);
+        }
+        return es.err;
+    }
 };
 
 const Sounds = struct {
@@ -328,7 +371,7 @@ const Brick = struct {
     src_rect: *const SDL.FRect,
 };
 
-fn fmt_sdl_drivers(write_buf: *std.BoundedArray(u8, 250), current_driver: [*:0]const u8, num_drivers: c_int, get_driver: *const fn (c_int) SDL.SDL3Error![*:0]const u8) SDL.SDL3Error![]const u8 {
+fn fmt_sdl_drivers(write_buf: *std.BoundedArray(u8, 250), current_driver: [*:0]const u8, num_drivers: c_int, get_driver: *const fn (c_int) SDL.Error![*:0]const u8) SDL.Error![]const u8 {
     var writer = write_buf.writer();
     var i: c_int = 0;
     while (i < num_drivers) : (i += 1) {
@@ -342,7 +385,7 @@ fn fmt_sdl_drivers(write_buf: *std.BoundedArray(u8, 250), current_driver: [*:0]c
 }
 
 fn load_best_score() !void {
-    const storage = try SDL.Storage.open_user_storage_folder(best_score_storage_org_name, best_score_storage_app_name, SDL.Properties{});
+    const storage = try SDL.Storage.open_user_storage_folder(best_score_storage_org_name, best_score_storage_app_name, SDL.PropertiesID{});
     defer storage.close() catch {};
 
     while (!storage.is_ready()) {
@@ -367,7 +410,7 @@ fn load_best_score() !void {
 }
 
 fn save_best_score() !void {
-    const storage = try SDL.Storage.open_user_storage_folder(best_score_storage_org_name, best_score_storage_app_name, SDL.Properties{});
+    const storage = try SDL.Storage.open_user_storage_folder(best_score_storage_org_name, best_score_storage_app_name, SDL.PropertiesID{});
     defer storage.close() catch {};
 
     while (!storage.is_ready()) {
@@ -381,4 +424,514 @@ fn save_best_score() !void {
     try storage.write_file_from_buffer(best_score_storage_file_name, best_score_le[0..4]);
 
     app_log.debug("saved best score: {}", .{best_score});
+}
+
+fn reset_game() !void {
+    //CHECKPOINT
+    paddle = .{
+        .box = .{
+            .x = window_w * 0.5 - sprites.paddle.w * 0.5,
+            .y = window_h - sprites.paddle.h,
+            .w = sprites.paddle.w,
+            .h = sprites.paddle.h,
+        },
+        .src_rect = &sprites.paddle,
+    };
+
+    ball = .{
+        .box = .{
+            .x = paddle.box.x + paddle.box.w * 0.5,
+            .y = paddle.box.y - sprites.ball.h,
+            .w = sprites.ball.w,
+            .h = sprites.ball.h,
+        },
+        .vel_x = 0,
+        .vel_y = 0,
+        .launched = false,
+        .src_rect = &sprites.ball,
+    };
+
+    bricks = .{};
+    {
+        const x = window_w * 0.5;
+        const h = sprites.brick_1x1_gray.h;
+        const gap = 5;
+        for ([_][2]*const c.SDL_FRect{
+            .{ &sprites.brick_1x1_purple, &sprites.brick_2x1_purple },
+            .{ &sprites.brick_1x1_red, &sprites.brick_2x1_red },
+            .{ &sprites.brick_1x1_yellow, &sprites.brick_2x1_yellow },
+            .{ &sprites.brick_1x1_green, &sprites.brick_2x1_green },
+            .{ &sprites.brick_1x1_blue, &sprites.brick_2x1_blue },
+            .{ &sprites.brick_1x1_gray, &sprites.brick_2x1_gray },
+        }, 0..) |src_rects, row| {
+            const y = gap + (h + gap) * (@as(f32, @floatFromInt(row)) + 1);
+            var large = row % 2 == 0;
+            var src_rect = src_rects[@intFromBool(large)];
+            try bricks.append(.{
+                .box = .{
+                    .x = x - src_rect.w * 0.5,
+                    .y = y,
+                    .w = src_rect.w,
+                    .h = src_rect.h,
+                },
+                .src_rect = src_rect,
+            });
+            var rel_x: f32 = 0;
+            var count: usize = 0;
+            while (count < 4) : (count += 1) {
+                rel_x += src_rect.w * 0.5 + gap;
+                large = !large;
+                src_rect = src_rects[@intFromBool(large)];
+                rel_x += src_rect.w * 0.5;
+                for ([_]f32{ -1, 1 }) |sign| {
+                    try bricks.append(.{
+                        .box = .{
+                            .x = x - src_rect.w * 0.5 + rel_x * sign,
+                            .y = y,
+                            .w = src_rect.w,
+                            .h = src_rect.h,
+                        },
+                        .src_rect = src_rect,
+                    });
+                }
+            }
+        }
+    }
+
+    score = 0;
+    score_color = .{ 0xff, 0xff, 0xff };
+}
+
+fn app_update(appstate: ?*anyopaque) !SDL.AppProcess {
+    _ = appstate;
+
+    var sounds_to_play: std.EnumSet(enum {
+        hit_wall,
+        hit_paddle,
+        hit_brick,
+        win,
+        lose,
+    }) = .initEmpty();
+
+    var won = false;
+
+    // Update the game state.
+    while (timekeeper.consume()) {
+        // Map the physical controller state to the virtual controller state.
+
+        prev_vcon = vcon;
+        vcon.move_paddle_exact = 0;
+
+        vcon.move_paddle_left =
+            phcon.k_left or
+            phcon.g_left or
+            phcon.g_leftx <= -0x4000;
+        vcon.move_paddle_right =
+            phcon.k_right or
+            phcon.g_right or
+            phcon.g_leftx >= 0x4000;
+        vcon.slow_paddle_movement =
+            phcon.k_lshift or
+            phcon.g_left_shoulder or
+            phcon.g_right_shoulder or
+            phcon.g_left_trigger >= 0x2000 or
+            phcon.g_right_trigger >= 0x2000;
+        vcon.launch_ball =
+            phcon.k_space or
+            phcon.g_south or
+            phcon.g_east;
+        vcon.reset_game =
+            phcon.k_r or
+            phcon.g_back or
+            phcon.g_start;
+
+        if (!vcon.lock_mouse) {
+            if (phcon.m_left and !prev_phcon.m_left) {
+                vcon.lock_mouse = true;
+                try errify(c.SDL_SetWindowRelativeMouseMode(window, true));
+            }
+        } else {
+            if (phcon.k_escape and !prev_phcon.k_escape) {
+                vcon.lock_mouse = false;
+                try errify(c.SDL_SetWindowRelativeMouseMode(window, false));
+            } else {
+                vcon.launch_ball = vcon.launch_ball or phcon.m_left;
+                vcon.move_paddle_exact = phcon.m_xrel;
+            }
+        }
+
+        prev_phcon = phcon;
+        phcon.m_xrel = 0;
+
+        if (vcon.reset_game and !prev_vcon.reset_game) {
+            try resetGame();
+            return c.SDL_APP_CONTINUE;
+        }
+
+        // Move the paddle.
+        {
+            var paddle_vel_x: f32 = 0;
+            var keyboard_gamepad_vel_x: f32 = 0;
+            if (vcon.move_paddle_left) keyboard_gamepad_vel_x -= 10;
+            if (vcon.move_paddle_right) keyboard_gamepad_vel_x += 10;
+            if (vcon.slow_paddle_movement) keyboard_gamepad_vel_x *= 0.5;
+            paddle_vel_x += keyboard_gamepad_vel_x;
+            var mouse_vel_x = vcon.move_paddle_exact;
+            if (vcon.slow_paddle_movement) mouse_vel_x *= 0.25;
+            paddle_vel_x += mouse_vel_x;
+            paddle.box.x = std.math.clamp(paddle.box.x + paddle_vel_x, 0, window_w - paddle.box.w);
+        }
+
+        const previous_ball_y = ball.box.y;
+
+        if (!ball.launched) {
+            // Stick the ball to the paddle.
+            ball.box.x = paddle.box.x + paddle.box.w * 0.5;
+
+            if (vcon.launch_ball and !prev_vcon.launch_ball) {
+                // Launch the ball.
+                const angle = ball.getPaddleBounceAngle(paddle);
+                ball.vel_x = @cos(angle) * 4;
+                ball.vel_y = @sin(angle) * 4;
+                ball.launched = true;
+            }
+        }
+
+        if (ball.launched) {
+            // Check for and handle collisions using swept AABB collision detection.
+            var remaining_vel_x: f32 = ball.vel_x;
+            var remaining_vel_y: f32 = ball.vel_y;
+            while (remaining_vel_x != 0 or remaining_vel_y != 0) {
+                var t: f32 = 1;
+                var sign_x: f32 = 0;
+                var sign_y: f32 = 0;
+                var collidee: union(enum) {
+                    none: void,
+                    wall: void,
+                    paddle: void,
+                    brick: usize,
+                } = .none;
+
+                const remaining_vel_x_inv = 1 / remaining_vel_x;
+                const remaining_vel_y_inv = 1 / remaining_vel_y;
+
+                if (remaining_vel_x < 0) {
+                    // Left wall
+                    const wall_t = -ball.box.x * remaining_vel_x_inv;
+                    if (t - wall_t >= 0.001) {
+                        t = wall_t;
+                        sign_x = 1;
+                        collidee = .wall;
+                    }
+                } else if (remaining_vel_x > 0) {
+                    // Right wall
+                    const wall_t = (window_w - ball.box.w - ball.box.x) * remaining_vel_x_inv;
+                    if (t - wall_t >= 0.001) {
+                        t = wall_t;
+                        sign_x = -1;
+                        collidee = .wall;
+                    }
+                }
+                if (remaining_vel_y < 0) {
+                    // Top wall
+                    const wall_t = -ball.box.y * remaining_vel_y_inv;
+                    if (t - wall_t >= 0.001) {
+                        t = wall_t;
+                        sign_y = 1;
+                        collidee = .wall;
+                    }
+                } else if (remaining_vel_y > 0) {
+                    // Paddle
+                    const paddle_top: Box = .{
+                        .x = paddle.box.x,
+                        .y = paddle.box.y,
+                        .w = paddle.box.w,
+                        .h = 0,
+                    };
+                    if (ball.box.sweepTest(remaining_vel_x, remaining_vel_y, paddle_top, 0, 0)) |collision| {
+                        if (t - collision.t >= 0.001) {
+                            t = @min(0, collision.t);
+                            sign_y = -1;
+                            collidee = .paddle;
+                        }
+                    }
+                }
+
+                // Bricks
+                const broad: Box = .{
+                    .x = @min(ball.box.x, ball.box.x + remaining_vel_x),
+                    .y = @min(ball.box.y, ball.box.y + remaining_vel_y),
+                    .w = @max(ball.box.w, ball.box.w + remaining_vel_x),
+                    .h = @max(ball.box.h, ball.box.h + remaining_vel_y),
+                };
+                for (bricks.slice(), 0..) |brick, i| {
+                    if (broad.intersects(brick.box)) {
+                        if (ball.box.sweepTest(remaining_vel_x, remaining_vel_y, brick.box, 0, 0)) |collision| {
+                            if (t - collision.t >= 0.001) {
+                                t = collision.t;
+                                sign_x = collision.sign_x;
+                                sign_y = collision.sign_y;
+                                collidee = .{ .brick = i };
+                            }
+                        }
+                    }
+                }
+
+                // Bounce the ball off the object it collided with (if any).
+                if (collidee == .paddle) {
+                    const angle = ball.getPaddleBounceAngle(paddle);
+                    const vel_factor = 1.05;
+                    ball.box.x += remaining_vel_x * t;
+                    ball.box.y += remaining_vel_y * t;
+                    const vel = @sqrt(ball.vel_x * ball.vel_x + ball.vel_y * ball.vel_y) * vel_factor;
+                    ball.vel_x = @cos(angle) * vel;
+                    ball.vel_y = @sin(angle) * vel;
+                    remaining_vel_x *= (1 - t);
+                    remaining_vel_y *= (1 - t);
+                    const remaining_vel = @sqrt(remaining_vel_x * remaining_vel_x + remaining_vel_y * remaining_vel_y) * vel_factor;
+                    remaining_vel_x = @cos(angle) * remaining_vel;
+                    remaining_vel_y = @sin(angle) * remaining_vel;
+                } else {
+                    ball.box.x += remaining_vel_x * t;
+                    ball.box.y += remaining_vel_y * t;
+                    ball.vel_x = std.math.copysign(ball.vel_x, if (sign_x != 0) sign_x else remaining_vel_x);
+                    ball.vel_y = std.math.copysign(ball.vel_y, if (sign_y != 0) sign_y else remaining_vel_y);
+                    remaining_vel_x = std.math.copysign(remaining_vel_x * (1 - t), ball.vel_x);
+                    remaining_vel_y = std.math.copysign(remaining_vel_y * (1 - t), ball.vel_y);
+                    if (collidee == .brick) {
+                        _ = bricks.swapRemove(collidee.brick);
+                    }
+                }
+
+                // Enqueue an appropriate sound effect.
+                switch (collidee) {
+                    .wall => {
+                        if (ball.box.y < window_h) {
+                            sounds_to_play.insert(.hit_wall);
+                        }
+                    },
+                    .paddle => {
+                        sounds_to_play.insert(.hit_paddle);
+                    },
+                    .brick => {
+                        if (bricks.len == 0) {
+                            won = true;
+                            sounds_to_play.insert(.win);
+                        } else {
+                            sounds_to_play.insert(.hit_brick);
+                        }
+                    },
+                    .none => {},
+                }
+            }
+        }
+
+        if (previous_ball_y < window_h and ball.box.y >= window_h) {
+            // The ball fell below the paddle.
+            if (bricks.len != 0) {
+                sounds_to_play.insert(.lose);
+            }
+        }
+
+        // Update score.
+        if (ball.launched) {
+            if (ball.box.y < window_h) {
+                if (bricks.len != 0) {
+                    score +|= 1;
+                } else {
+                    best_score = @min(score, best_score);
+                }
+            }
+            if (score <= best_score and bricks.len == 0) {
+                score_color = .{ 0x52, 0xcc, 0x73 };
+            } else if (ball.box.y >= window_h or score > best_score) {
+                score_color = .{ 0xcc, 0x5c, 0x52 };
+            }
+        }
+    }
+
+    // Save score.
+    if (won and score < best_score) {
+        try saveBestScore();
+    }
+
+    // Play audio.
+    {
+        // We have created eight SDL audio streams. When we want to play a sound effect,
+        // we loop through the streams for the first one that isn't playing any audio
+        // and write the audio to that stream.
+        // This is a kind of stupid and naive way of handling audio, but it's very easy to
+        // set up and use. A proper program would probably use an audio mixing callback.
+        var stream_index: usize = 0;
+        var it = sounds_to_play.iterator();
+        iterate_sounds: while (it.next()) |sound| {
+            const stream = find_available_stream: while (stream_index < audio_streams.len) {
+                defer stream_index += 1;
+                const stream = audio_streams[stream_index];
+                if (try errify(c.SDL_GetAudioStreamAvailable(stream)) == 0) {
+                    break :find_available_stream stream;
+                }
+            } else {
+                break :iterate_sounds;
+            };
+            const frame_size: usize = c.SDL_AUDIO_BYTESIZE(sounds_spec.format) * @as(c_uint, @intCast(sounds_spec.channels));
+            const start: usize, const end: usize = switch (sound) {
+                .hit_wall => sounds.hit_wall,
+                .hit_paddle => sounds.hit_paddle,
+                .hit_brick => sounds.hit_brick,
+                .win => sounds.win,
+                .lose => sounds.lose,
+            };
+            const data = sounds_data[(frame_size * start)..(frame_size * end)];
+            try errify(c.SDL_PutAudioStreamData(stream, data.ptr, @intCast(data.len)));
+        }
+    }
+
+    // Draw.
+    {
+        try errify(c.SDL_SetRenderDrawColor(renderer, 0x47, 0x5b, 0x8d, 0xff));
+
+        try errify(c.SDL_RenderClear(renderer));
+
+        for (bricks.slice()) |brick| try renderObject(renderer, sprites_texture, brick.src_rect, brick.box);
+        try renderObject(renderer, sprites_texture, ball.src_rect, ball.box);
+        try renderObject(renderer, sprites_texture, paddle.src_rect, paddle.box);
+
+        try errify(c.SDL_SetRenderScale(renderer, 2, 2));
+        {
+            var buf: [12]u8 = undefined;
+            var time: f32 = @min(@as(f32, @floatFromInt(score)) / Timekeeper.updates_per_s, 99.999);
+            var text = try std.fmt.bufPrintZ(&buf, "TIME {d:0>6.3}", .{time});
+            try errify(c.SDL_SetRenderDrawColor(renderer, score_color[0], score_color[1], score_color[2], 0xff));
+            try errify(c.SDL_RenderDebugText(renderer, 8, 8, text.ptr));
+            time = @min(@as(f32, @floatFromInt(best_score)) / Timekeeper.updates_per_s, 99.999);
+            text = try std.fmt.bufPrintZ(&buf, "BEST {d:0>6.3}", .{time});
+            try errify(c.SDL_SetRenderDrawColor(renderer, 0xff, 0xff, 0xff, 0xff));
+            try errify(c.SDL_RenderDebugText(renderer, window_w / 2 - 8 * 12, 8, text.ptr));
+        }
+        try errify(c.SDL_SetRenderScale(renderer, 1, 1));
+
+        try errify(c.SDL_RenderPresent(renderer));
+    }
+
+    timekeeper.produce(c.SDL_GetPerformanceCounter());
+
+    return c.SDL_APP_CONTINUE;
+}
+
+fn handle_event(appstate: ?*anyopaque, event: *SDL.Event) !SDL.AppProcess {
+    _ = appstate;
+
+    switch (event.type) {
+        .QUIT => {
+            return SDL.AppProcess.CLOSE_NORMAL;
+        },
+        .KEY_DOWN, .KEY_UP => {
+            const is_down = event.type == .KEY_DOWN;
+            switch (event.key.scancode) {
+                //CHECKPOINT
+                c.SDL_SCANCODE_LEFT => phcon.k_left = is_down,
+                c.SDL_SCANCODE_RIGHT => phcon.k_right = is_down,
+                c.SDL_SCANCODE_LSHIFT => phcon.k_lshift = is_down,
+                c.SDL_SCANCODE_SPACE => phcon.k_space = is_down,
+                c.SDL_SCANCODE_R => phcon.k_r = is_down,
+                c.SDL_SCANCODE_ESCAPE => phcon.k_escape = is_down,
+                else => {},
+            }
+        },
+        c.SDL_EVENT_MOUSE_BUTTON_DOWN, c.SDL_EVENT_MOUSE_BUTTON_UP => {
+            const down = event.type == c.SDL_EVENT_MOUSE_BUTTON_DOWN;
+            switch (event.button.button) {
+                c.SDL_BUTTON_LEFT => phcon.m_left = down,
+                else => {},
+            }
+        },
+        c.SDL_EVENT_MOUSE_MOTION => {
+            phcon.m_xrel += event.motion.xrel;
+        },
+        c.SDL_EVENT_GAMEPAD_ADDED => {
+            if (gamepad == null) {
+                gamepad = try errify(c.SDL_OpenGamepad(event.gdevice.which));
+            }
+        },
+        c.SDL_EVENT_GAMEPAD_REMOVED => {
+            if (gamepad != null) {
+                c.SDL_CloseGamepad(gamepad);
+                gamepad = null;
+            }
+        },
+        c.SDL_EVENT_GAMEPAD_BUTTON_DOWN, c.SDL_EVENT_GAMEPAD_BUTTON_UP => {
+            const down = event.type == c.SDL_EVENT_GAMEPAD_BUTTON_DOWN;
+            switch (event.gbutton.button) {
+                c.SDL_GAMEPAD_BUTTON_DPAD_LEFT => phcon.g_left = down,
+                c.SDL_GAMEPAD_BUTTON_DPAD_RIGHT => phcon.g_right = down,
+                c.SDL_GAMEPAD_BUTTON_LEFT_SHOULDER => phcon.g_left_shoulder = down,
+                c.SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER => phcon.g_right_shoulder = down,
+                c.SDL_GAMEPAD_BUTTON_SOUTH => phcon.g_south = down,
+                c.SDL_GAMEPAD_BUTTON_EAST => phcon.g_east = down,
+                c.SDL_GAMEPAD_BUTTON_BACK => phcon.g_back = down,
+                c.SDL_GAMEPAD_BUTTON_START => phcon.g_start = down,
+                else => {},
+            }
+        },
+        c.SDL_EVENT_GAMEPAD_AXIS_MOTION => {
+            switch (event.gaxis.axis) {
+                c.SDL_GAMEPAD_AXIS_LEFTX => phcon.g_leftx = event.gaxis.value,
+                c.SDL_GAMEPAD_AXIS_LEFT_TRIGGER => phcon.g_left_trigger = event.gaxis.value,
+                c.SDL_GAMEPAD_AXIS_RIGHT_TRIGGER => phcon.g_right_trigger = event.gaxis.value,
+                else => {},
+            }
+        },
+        else => {},
+    }
+
+    return c.SDL_APP_CONTINUE;
+}
+
+fn app_quit(appstate: ?*anyopaque, result: anyerror!SDL.AppProcess) void {
+    _ = appstate;
+
+    _ = result catch |err| switch (err) {
+        SDL.Error.SDL_null_value, SDL.Error.SDL_operation_failure => {
+            sdl_log.err("{s}: {s}", .{ @errorName(err), SDL.get_error_details() });
+        },
+        else => {
+            app_log.err("{s}", .{@errorName(err)});
+        },
+    };
+
+    if (fully_initialized) {
+        if (gamepad) |pad| pad.close();
+        while (audio_streams.len != 0) {
+            audio_streams[audio_streams.len - 1].destroy();
+            audio_streams.len -= 1;
+        }
+        audio_device.close();
+        sounds.destroy();
+        sprite_texture.destroy();
+        renderer.destroy();
+        window.destroy();
+        fully_initialized = false;
+    }
+}
+
+fn sdl_main_func(arg_count: c_int, arg_list: ?[*:null]?[*:0]u8) callconv(.c) c_int {
+    return SDL.run_app_with_callbacks(arg_count, arg_list, sdl_init_func, sdl_update_func, sdl_event_func, sdl_quit_func);
+}
+
+fn sdl_init_func(appstate: ?*?*anyopaque, argc: c_int, argv: ?[*:null]?[*:0]u8) callconv(.c) SDL.AppProcess {
+    const zig_args = Goolib.Utils.c_args_to_zig_args(.c_args_list(argc, argv));
+    return app_init(appstate, zig_args) catch |err| app_err.store(err);
+}
+
+fn sdl_update_func(appstate: ?*anyopaque) callconv(.c) SDL.AppProcess {
+    return app_update(appstate) catch |err| app_err.store(err);
+}
+
+fn sdl_event_func(appstate: ?*anyopaque, event: ?*SDL.Event) callconv(.c) SDL.AppProcess {
+    return handle_event(appstate, event.?) catch |err| app_err.store(err);
+}
+
+fn sdl_quit_func(appstate: ?*anyopaque, close_state: SDL.AppProcess) callconv(.c) void {
+    app_quit(appstate, app_err.load() orelse close_state);
 }
