@@ -11,7 +11,7 @@ const FVec: type = SDL.FVec;
 const IVec: type = SDL.IVec;
 const Cast = Goolib.Cast;
 const c_strings_equal = Goolib.Utils.c_strings_equal;
-const ansi = Goolib.ANSI.ansi;
+const ANSI = Goolib.ANSI;
 
 const best_score_storage_org_name = "goolib_samples";
 const best_score_storage_app_name = "breakout";
@@ -396,10 +396,11 @@ fn fmt_sdl_drivers(write_buf: *std.BoundedArray(u8, 250), current_driver: [*:0]c
     var i: c_int = 0;
     while (i < num_drivers) : (i += 1) {
         const driver_name = try get_driver(i);
+        // _ = c_strings_equal(driver_name, current_driver);
         const is_current = c_strings_equal(driver_name, current_driver);
-        if (is_current) _ = try writer.write(ansi(&.{.FG_GREEN}));
+        if (is_current) _ = try writer.write(ANSI.BEGIN ++ ANSI.FG_GREEN ++ ANSI.END);
         try writer.print("\n\t({d}) {s}", .{ i, driver_name });
-        if (is_current) _ = try writer.write(ansi(&.{.RESET}));
+        if (is_current) _ = try writer.write(ANSI.BEGIN ++ ANSI.RESET ++ ANSI.END);
     }
     return write_buf.slice();
 }
