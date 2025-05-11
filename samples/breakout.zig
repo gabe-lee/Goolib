@@ -9,12 +9,14 @@ const AABB = Goolib.AABB2.define_aabb2_type(f32);
 const Rect = Goolib.Rect2.define_rect2_type(f32);
 const FVec: type = SDL.FVec;
 const IVec: type = SDL.IVec;
+const Cast = Goolib.Cast;
 const c_strings_equal = Goolib.Utils.c_strings_equal;
 const ansi = Goolib.ANSI.ansi;
 
 const best_score_storage_org_name = "goolib_samples";
 const best_score_storage_app_name = "breakout";
-const best_score_storage_file_name = "best_score";
+const records_storage_file_name = "records";
+const attempts_storage_file_name = "attempts";
 var fully_initialized = false;
 const window_size: IVec = IVec.new(640, 480);
 var window: *SDL.Window = undefined;
@@ -29,7 +31,7 @@ var phcon: PhysicalControllerState = undefined;
 var prev_phcon: PhysicalControllerState = undefined;
 var vcon: VirtualControllerState = undefined;
 var prev_vcon: VirtualControllerState = undefined;
-var best_score: u32 = undefined;
+var best_win: u32 = undefined;
 var timekeeper: Timekeeper = undefined;
 
 var app_err: ErrorStore = .{};
@@ -38,52 +40,56 @@ var paddle: Paddle = undefined;
 var ball: Ball = undefined;
 var bricks: std.BoundedArray(Brick, 100) = undefined;
 
+var won = false;
+var records_need_save = false;
+
 var score: u32 = undefined;
-var score_color: [3]u8 = undefined;
+var score_color: SDL.IColor_RGBA = undefined;
+
+var attempts: u32 = 0;
 
 pub fn main() !u8 {
     app_err.reset();
     var empty_argv: [0:null]?[*:0]u8 = .{};
-    const status: u8 = @truncate(@as(c_uint, @bitCast(c.SDL_RunApp(empty_argv.len, @ptrCast(&empty_argv), sdlMainC, null))));
+    const status: u8 = @truncate(@as(c_uint, @bitCast(SDL.run_app(empty_argv.len, @ptrCast(&empty_argv), sdl_main_func))));
     return app_err.load() orelse status;
 }
 
-pub fn app_init(app_state: ?*?*anyopaque, args_list: [][*:0]u8) SDL.Error!SDL.AppProcess {
-    _ = app_state;
+pub fn app_init(args_list: [][*:0]u8) anyerror!SDL.AppProcess {
     _ = args_list;
 
-    var write_buf = std.BoundedArray(u8, 200).init(0);
+    var write_buf = std.BoundedArray(u8, 250).init(0) catch unreachable;
 
     sdl_log.debug("SDL build time version: {d}.{d}.{d}", .{
-        SDL.Meta.BUILD_MAJOR_VERSION,
-        SDL.Meta.BUILD_MINOR_VERSION,
-        SDL.Meta.BUILD_MICRO_VERSION,
+        SDL.BUILD_MAJOR_VERSION,
+        SDL.BUILD_MINOR_VERSION,
+        SDL.BUILD_MICRO_VERSION,
     });
-    sdl_log.debug("SDL build time revision: {s}", .{SDL.Meta.BUILD_REVISION});
+    sdl_log.debug("SDL build time revision: {s}", .{SDL.BUILD_REVISION});
     {
-        const version = SDL.Meta.get_version();
+        const version = SDL.runtime_version();
         sdl_log.debug("SDL runtime version: {d}.{d}.{d}", .{
-            SDL.Meta.RUNTIME_MAJOR_VERSION(version),
-            SDL.Meta.RUNTIME_MINOR_VERSION(version),
-            SDL.Meta.RUNTIME_MICRO_VERSION(version),
+            SDL.RUNTIME_MAJOR_VERSION(version),
+            SDL.RUNTIME_MINOR_VERSION(version),
+            SDL.RUNTIME_MICRO_VERSION(version),
         });
-        const revision: [*:0]const u8 = SDL.Meta.runtime_revision();
+        const revision: [*:0]const u8 = SDL.runtime_revision();
         sdl_log.debug("SDL runtime revision: {s}", .{revision});
     }
 
-    try SDL.App.set_metadata("Breakout Sample", "0.0.0", "sample.goolib.breakout");
-    try SDL.App.init(SDL.InitFlags.new(.{ .VIDEO, .AUDIO, .GAMEPAD }));
+    try SDL.set_metadata("Breakout Sample", "0.0.0", "sample.goolib.breakout");
+    try SDL.init(SDL.InitFlags.new(&.{ .VIDEO, .AUDIO, .GAMEPAD }));
     write_buf.clear();
-    sdl_log.debug("SDL video drivers: {s}", .{fmt_sdl_drivers(
+    sdl_log.debug("SDL video drivers: {s}", .{try fmt_sdl_drivers(
         &write_buf,
-        SDL.get_current_video_driver().?,
+        try SDL.get_current_video_driver(),
         SDL.get_num_video_drivers(),
         SDL.get_video_driver,
     )});
     write_buf.clear();
-    sdl_log.debug("SDL audio drivers: {s}", .{fmt_sdl_drivers(
+    sdl_log.debug("SDL audio drivers: {s}", .{try fmt_sdl_drivers(
         &write_buf,
-        SDL.get_current_audio_driver().?,
+        try SDL.get_current_audio_driver(),
         SDL.get_num_audio_drivers(),
         SDL.get_audio_driver,
     )});
@@ -92,11 +98,12 @@ pub fn app_init(app_state: ?*?*anyopaque, args_list: [][*:0]u8) SDL.Error!SDL.Ap
 
     window = try SDL.Window.create(.{ .title = "Breakout Sample", .size = window_size });
     errdefer window.destroy();
-    renderer = try window.create_renderer("main_window_renderer");
+    renderer = try window.create_renderer();
     errdefer renderer.destroy();
 
     write_buf.clear();
-    sdl_log.debug("SDL render drivers: {s}", .{fmt_sdl_drivers(
+    sdl_log.debug("SDL render drivers: {s}", .{try fmt_sdl_drivers(
+        &write_buf,
         try renderer.get_name(),
         SDL.Renderer.get_driver_count(),
         SDL.Renderer.get_driver_name,
@@ -113,14 +120,14 @@ pub fn app_init(app_state: ?*?*anyopaque, args_list: [][*:0]u8) SDL.Error!SDL.Ap
     errdefer sprite_texture.destroy();
 
     {
-        const stream = SDL.IOStream.from_const_mem(Sounds.wav[0..Sounds.wav.len]);
+        const stream = try SDL.IOStream.from_const_mem(Sounds.wav[0..Sounds.wav.len]);
         sounds = try stream.load_wav(true);
         errdefer comptime unreachable;
     }
-    errdefer sounds.free();
+    errdefer sounds.destroy();
 
     audio_device = try SDL.AudioDeviceID.DEFAULT_PLAYBACK_DEVICE.open_device(.spec(&sounds.spec));
-    errdefer audio_device.close_device();
+    errdefer audio_device.close();
 
     errdefer while (audio_streams.len != 0) {
         audio_streams[audio_streams.len - 1].destroy();
@@ -146,7 +153,7 @@ pub fn app_init(app_state: ?*?*anyopaque, args_list: [][*:0]u8) SDL.Error!SDL.Ap
     vcon = .{};
     prev_vcon = vcon;
 
-    try load_best_score();
+    try load_records();
 
     timekeeper = .{ .tocks_per_s = SDL.get_performance_frequency() };
 
@@ -181,34 +188,34 @@ const Sprites = struct {
 };
 
 const ErrorStore = struct {
-    const status_not_stored = 0;
-    const status_storing = 1;
-    const status_stored = 2;
+    const STATUS_NOT_STORED = 0;
+    const STATUS_STORING = 1;
+    const STATUS_STORED = 2;
 
-    status: c.SDL_AtomicInt = .{},
+    status: SDL.AtomicInt = .{},
     err: anyerror = undefined,
     trace_index: usize = undefined,
     trace_addrs: [32]usize = undefined,
 
     fn reset(es: *ErrorStore) void {
-        _ = c.SDL_SetAtomicInt(&es.status, status_not_stored);
+        _ = es.status.set(STATUS_NOT_STORED);
     }
 
-    fn store(es: *ErrorStore, err: anyerror) c.SDL_AppResult {
-        if (c.SDL_CompareAndSwapAtomicInt(&es.status, status_not_stored, status_storing)) {
+    fn store(es: *ErrorStore, err: anyerror) SDL.AppProcess {
+        if (es.status.compare_and_swap(STATUS_NOT_STORED, STATUS_STORING)) {
             es.err = err;
             if (@errorReturnTrace()) |src_trace| {
                 es.trace_index = src_trace.index;
                 const len = @min(es.trace_addrs.len, src_trace.instruction_addresses.len);
                 @memcpy(es.trace_addrs[0..len], src_trace.instruction_addresses[0..len]);
             }
-            _ = c.SDL_SetAtomicInt(&es.status, status_stored);
+            _ = es.status.set(STATUS_STORED);
         }
-        return c.SDL_APP_FAILURE;
+        return SDL.AppProcess.CLOSE_ERROR;
     }
 
     fn load(es: *ErrorStore) ?anyerror {
-        if (c.SDL_GetAtomicInt(&es.status) != status_stored) return null;
+        if (es.status.get() != STATUS_STORED) return null;
         if (@errorReturnTrace()) |dst_trace| {
             dst_trace.index = es.trace_index;
             const len = @min(dst_trace.instruction_addresses.len, es.trace_addrs.len);
@@ -319,6 +326,19 @@ const Collision = struct {
     sign_x: f32,
     sign_y: f32,
 
+    fn intersects(a: Rect, b: Rect) bool {
+        const min_x = b.x - a.w;
+        const max_x = b.x + b.w;
+        if (a.x > min_x and a.x < max_x) {
+            const min_y = b.y - a.h;
+            const max_y = b.y + b.h;
+            if (a.y > min_y and a.y < max_y) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     fn sweep_test(a: Rect, a_vel: FVec, b: Rect, b_vel: FVec) ?Collision {
         const vel_x_inv = 1 / (a_vel.x - b_vel.x);
         const vel_y_inv = 1 / (a_vel.y - b_vel.y);
@@ -371,98 +391,104 @@ const Brick = struct {
     src_rect: *const SDL.FRect,
 };
 
-fn fmt_sdl_drivers(write_buf: *std.BoundedArray(u8, 250), current_driver: [*:0]const u8, num_drivers: c_int, get_driver: *const fn (c_int) SDL.Error![*:0]const u8) SDL.Error![]const u8 {
+fn fmt_sdl_drivers(write_buf: *std.BoundedArray(u8, 250), current_driver: [*:0]const u8, num_drivers: c_int, get_driver: *const fn (c_int) SDL.Error![*:0]const u8) anyerror![]const u8 {
     var writer = write_buf.writer();
     var i: c_int = 0;
     while (i < num_drivers) : (i += 1) {
         const driver_name = try get_driver(i);
         const is_current = c_strings_equal(driver_name, current_driver);
-        if (is_current) writer.write(ansi(.{.FG_GREEN}));
-        writer.print("\n\t({d}) {s}", .{ i, driver_name });
-        if (is_current) writer.write(ansi(.{.RESET}));
+        if (is_current) _ = try writer.write(ansi(&.{.FG_GREEN}));
+        try writer.print("\n\t({d}) {s}", .{ i, driver_name });
+        if (is_current) _ = try writer.write(ansi(&.{.RESET}));
     }
     return write_buf.slice();
 }
 
-fn load_best_score() !void {
+fn load_records() !void {
     const storage = try SDL.Storage.open_user_storage_folder(best_score_storage_org_name, best_score_storage_app_name, SDL.PropertiesID{});
     defer storage.close() catch {};
 
     while (!storage.is_ready()) {
-        var total_time = 0;
+        var total_time: u32 = 0;
         SDL.wait_milliseconds(10);
         total_time += 10;
         if (total_time > 10000) return error.load_best_score_ready_timeout;
     }
+    const default_best: u32 = 1000 * Timekeeper.updates_per_s;
+    const default_best_score_le: [4]u8 = @bitCast(std.mem.nativeToLittle(u32, default_best));
 
-    const default_score = 100 * Timekeeper.updates_per_s;
-
-    var best_score_le: [4]u8 = undefined;
-
-    storage.read_file_into_buffer(best_score_storage_file_name, best_score_le[0..4]) catch |err| {
-        app_log.debug("failed to load best score: {s}: {s}", .{ @errorName(err), SDL.get_error_details() });
-        best_score = default_score;
-        return err;
+    var buf: [8:0]u8 = @splat(0);
+    storage.read_file_into_buffer(records_storage_file_name, buf[0..8]) catch {
+        @memcpy(buf[4..8], default_best_score_le[0..4]);
     };
-    best_score = @min(std.mem.littleToNative(u32, best_score_le), default_score);
+    var stream = try SDL.IOStream.from_mem(buf[0..8]);
+    defer stream.close() catch {};
+    attempts = try stream.read_u32_le();
+    best_win = try stream.read_u32_le();
 
-    app_log.debug("loaded best score: {}", .{best_score});
+    app_log.debug("loaded records:\n\tattempts = {d}\n\tbest win: {d}", .{ attempts, best_win });
 }
 
-fn save_best_score() !void {
+fn save_records() !void {
     const storage = try SDL.Storage.open_user_storage_folder(best_score_storage_org_name, best_score_storage_app_name, SDL.PropertiesID{});
     defer storage.close() catch {};
 
     while (!storage.is_ready()) {
-        var total_time = 0;
+        var total_time: u32 = 0;
         SDL.wait_milliseconds(10);
         total_time += 10;
         if (total_time > 10000) return error.save_best_score_ready_timeout;
     }
+    records_need_save = false;
 
-    const best_score_le: [4]u8 = @bitCast(std.mem.nativeToLittle(u32, best_score));
-    try storage.write_file_from_buffer(best_score_storage_file_name, best_score_le[0..4]);
-
-    app_log.debug("saved best score: {}", .{best_score});
+    const new_best_win = if (won and score < best_win) score else best_win;
+    var buf: [8:0]u8 = undefined;
+    const stream = try SDL.IOStream.from_mem(buf[0..8]);
+    defer stream.close() catch {};
+    try stream.write_u32_le(attempts);
+    try stream.write_u32_le(new_best_win);
+    try storage.write_file_from_buffer(records_storage_file_name, buf[0..8]);
+    app_log.debug("saved records:\n\tattempts = {d}\n\tbest win: {d}", .{ attempts, new_best_win });
 }
 
 fn reset_game() !void {
-    //CHECKPOINT
+    won = false;
+    records_need_save = false;
+    attempts += 1;
     paddle = .{
         .box = .{
-            .x = window_w * 0.5 - sprites.paddle.w * 0.5,
-            .y = window_h - sprites.paddle.h,
-            .w = sprites.paddle.w,
-            .h = sprites.paddle.h,
+            .x = Cast.to(f32, window_size.x) * 0.5 - Sprites.paddle.w * 0.5,
+            .y = Cast.to(f32, window_size.y) - Sprites.paddle.h,
+            .w = Sprites.paddle.w,
+            .h = Sprites.paddle.h,
         },
-        .src_rect = &sprites.paddle,
+        .src_rect = &Sprites.paddle,
     };
 
     ball = .{
         .box = .{
             .x = paddle.box.x + paddle.box.w * 0.5,
-            .y = paddle.box.y - sprites.ball.h,
-            .w = sprites.ball.w,
-            .h = sprites.ball.h,
+            .y = paddle.box.y - Sprites.ball.h,
+            .w = Sprites.ball.w,
+            .h = Sprites.ball.h,
         },
-        .vel_x = 0,
-        .vel_y = 0,
+        .vel = FVec.new(0, 0),
         .launched = false,
-        .src_rect = &sprites.ball,
+        .src_rect = &Sprites.ball,
     };
 
     bricks = .{};
     {
-        const x = window_w * 0.5;
-        const h = sprites.brick_1x1_gray.h;
+        const x = Cast.to(f32, window_size.x) * 0.5;
+        const h = Sprites.brick_1x1_gray.h;
         const gap = 5;
-        for ([_][2]*const c.SDL_FRect{
-            .{ &sprites.brick_1x1_purple, &sprites.brick_2x1_purple },
-            .{ &sprites.brick_1x1_red, &sprites.brick_2x1_red },
-            .{ &sprites.brick_1x1_yellow, &sprites.brick_2x1_yellow },
-            .{ &sprites.brick_1x1_green, &sprites.brick_2x1_green },
-            .{ &sprites.brick_1x1_blue, &sprites.brick_2x1_blue },
-            .{ &sprites.brick_1x1_gray, &sprites.brick_2x1_gray },
+        for ([_][2]*const SDL.FRect{
+            .{ &Sprites.brick_1x1_purple, &Sprites.brick_2x1_purple },
+            .{ &Sprites.brick_1x1_red, &Sprites.brick_2x1_red },
+            .{ &Sprites.brick_1x1_yellow, &Sprites.brick_2x1_yellow },
+            .{ &Sprites.brick_1x1_green, &Sprites.brick_2x1_green },
+            .{ &Sprites.brick_1x1_blue, &Sprites.brick_2x1_blue },
+            .{ &Sprites.brick_1x1_gray, &Sprites.brick_2x1_gray },
         }, 0..) |src_rects, row| {
             const y = gap + (h + gap) * (@as(f32, @floatFromInt(row)) + 1);
             var large = row % 2 == 0;
@@ -499,12 +525,10 @@ fn reset_game() !void {
     }
 
     score = 0;
-    score_color = .{ 0xff, 0xff, 0xff };
+    score_color = SDL.IColor_RGBA.new_opaque(0xff, 0xff, 0xff);
 }
 
-fn app_update(appstate: ?*anyopaque) !SDL.AppProcess {
-    _ = appstate;
-
+fn app_update() !SDL.AppProcess {
     var sounds_to_play: std.EnumSet(enum {
         hit_wall,
         hit_paddle,
@@ -512,8 +536,6 @@ fn app_update(appstate: ?*anyopaque) !SDL.AppProcess {
         win,
         lose,
     }) = .initEmpty();
-
-    var won = false;
 
     // Update the game state.
     while (timekeeper.consume()) {
@@ -548,12 +570,12 @@ fn app_update(appstate: ?*anyopaque) !SDL.AppProcess {
         if (!vcon.lock_mouse) {
             if (phcon.m_left and !prev_phcon.m_left) {
                 vcon.lock_mouse = true;
-                try errify(c.SDL_SetWindowRelativeMouseMode(window, true));
+                try window.set_mouse_mode_relative(true);
             }
         } else {
             if (phcon.k_escape and !prev_phcon.k_escape) {
                 vcon.lock_mouse = false;
-                try errify(c.SDL_SetWindowRelativeMouseMode(window, false));
+                try window.set_mouse_mode_relative(false);
             } else {
                 vcon.launch_ball = vcon.launch_ball or phcon.m_left;
                 vcon.move_paddle_exact = phcon.m_xrel;
@@ -564,8 +586,8 @@ fn app_update(appstate: ?*anyopaque) !SDL.AppProcess {
         phcon.m_xrel = 0;
 
         if (vcon.reset_game and !prev_vcon.reset_game) {
-            try resetGame();
-            return c.SDL_APP_CONTINUE;
+            try reset_game();
+            return SDL.AppProcess.CONTINUE;
         }
 
         // Move the paddle.
@@ -579,7 +601,7 @@ fn app_update(appstate: ?*anyopaque) !SDL.AppProcess {
             var mouse_vel_x = vcon.move_paddle_exact;
             if (vcon.slow_paddle_movement) mouse_vel_x *= 0.25;
             paddle_vel_x += mouse_vel_x;
-            paddle.box.x = std.math.clamp(paddle.box.x + paddle_vel_x, 0, window_w - paddle.box.w);
+            paddle.box.x = std.math.clamp(paddle.box.x + paddle_vel_x, 0, window_size.x - paddle.box.w);
         }
 
         const previous_ball_y = ball.box.y;
@@ -590,18 +612,17 @@ fn app_update(appstate: ?*anyopaque) !SDL.AppProcess {
 
             if (vcon.launch_ball and !prev_vcon.launch_ball) {
                 // Launch the ball.
-                const angle = ball.getPaddleBounceAngle(paddle);
-                ball.vel_x = @cos(angle) * 4;
-                ball.vel_y = @sin(angle) * 4;
+                const angle = ball.get_paddle_bounce_angle(paddle);
+                ball.vel.x = @cos(angle) * 4;
+                ball.vel.y = @sin(angle) * 4;
                 ball.launched = true;
             }
         }
 
         if (ball.launched) {
             // Check for and handle collisions using swept AABB collision detection.
-            var remaining_vel_x: f32 = ball.vel_x;
-            var remaining_vel_y: f32 = ball.vel_y;
-            while (remaining_vel_x != 0 or remaining_vel_y != 0) {
+            var rem_vel: FVec = ball.vel;
+            while (rem_vel.x != 0 or rem_vel.y != 0) {
                 var t: f32 = 1;
                 var sign_x: f32 = 0;
                 var sign_y: f32 = 0;
@@ -612,43 +633,42 @@ fn app_update(appstate: ?*anyopaque) !SDL.AppProcess {
                     brick: usize,
                 } = .none;
 
-                const remaining_vel_x_inv = 1 / remaining_vel_x;
-                const remaining_vel_y_inv = 1 / remaining_vel_y;
+                const inv_rem_vel = rem_vel.inverse();
 
-                if (remaining_vel_x < 0) {
+                if (rem_vel.x < 0) {
                     // Left wall
-                    const wall_t = -ball.box.x * remaining_vel_x_inv;
+                    const wall_t = -ball.box.x * inv_rem_vel.x;
                     if (t - wall_t >= 0.001) {
                         t = wall_t;
                         sign_x = 1;
                         collidee = .wall;
                     }
-                } else if (remaining_vel_x > 0) {
+                } else if (rem_vel.x > 0) {
                     // Right wall
-                    const wall_t = (window_w - ball.box.w - ball.box.x) * remaining_vel_x_inv;
+                    const wall_t = (window_size.x - ball.box.w - ball.box.x) * inv_rem_vel.x;
                     if (t - wall_t >= 0.001) {
                         t = wall_t;
                         sign_x = -1;
                         collidee = .wall;
                     }
                 }
-                if (remaining_vel_y < 0) {
+                if (rem_vel.y < 0) {
                     // Top wall
-                    const wall_t = -ball.box.y * remaining_vel_y_inv;
+                    const wall_t = -ball.box.y * inv_rem_vel.y;
                     if (t - wall_t >= 0.001) {
                         t = wall_t;
                         sign_y = 1;
                         collidee = .wall;
                     }
-                } else if (remaining_vel_y > 0) {
+                } else if (rem_vel.y > 0) {
                     // Paddle
-                    const paddle_top: Box = .{
+                    const paddle_top: Rect = .{
                         .x = paddle.box.x,
                         .y = paddle.box.y,
                         .w = paddle.box.w,
                         .h = 0,
                     };
-                    if (ball.box.sweepTest(remaining_vel_x, remaining_vel_y, paddle_top, 0, 0)) |collision| {
+                    if (Collision.sweep_test(ball.box, rem_vel, paddle_top, FVec.ZERO_ZERO)) |collision| {
                         if (t - collision.t >= 0.001) {
                             t = @min(0, collision.t);
                             sign_y = -1;
@@ -658,15 +678,15 @@ fn app_update(appstate: ?*anyopaque) !SDL.AppProcess {
                 }
 
                 // Bricks
-                const broad: Box = .{
-                    .x = @min(ball.box.x, ball.box.x + remaining_vel_x),
-                    .y = @min(ball.box.y, ball.box.y + remaining_vel_y),
-                    .w = @max(ball.box.w, ball.box.w + remaining_vel_x),
-                    .h = @max(ball.box.h, ball.box.h + remaining_vel_y),
+                const broad: Rect = .{
+                    .x = @min(ball.box.x, ball.box.x + rem_vel.x),
+                    .y = @min(ball.box.y, ball.box.y + rem_vel.y),
+                    .w = @max(ball.box.w, ball.box.w + rem_vel.x),
+                    .h = @max(ball.box.h, ball.box.h + rem_vel.y),
                 };
                 for (bricks.slice(), 0..) |brick, i| {
-                    if (broad.intersects(brick.box)) {
-                        if (ball.box.sweepTest(remaining_vel_x, remaining_vel_y, brick.box, 0, 0)) |collision| {
+                    if (Collision.intersects(broad, brick.box)) {
+                        if (Collision.sweep_test(ball.box, rem_vel, brick.box, FVec.ZERO_ZERO)) |collision| {
                             if (t - collision.t >= 0.001) {
                                 t = collision.t;
                                 sign_x = collision.sign_x;
@@ -679,25 +699,25 @@ fn app_update(appstate: ?*anyopaque) !SDL.AppProcess {
 
                 // Bounce the ball off the object it collided with (if any).
                 if (collidee == .paddle) {
-                    const angle = ball.getPaddleBounceAngle(paddle);
+                    const angle = ball.get_paddle_bounce_angle(paddle);
                     const vel_factor = 1.05;
-                    ball.box.x += remaining_vel_x * t;
-                    ball.box.y += remaining_vel_y * t;
-                    const vel = @sqrt(ball.vel_x * ball.vel_x + ball.vel_y * ball.vel_y) * vel_factor;
-                    ball.vel_x = @cos(angle) * vel;
-                    ball.vel_y = @sin(angle) * vel;
-                    remaining_vel_x *= (1 - t);
-                    remaining_vel_y *= (1 - t);
-                    const remaining_vel = @sqrt(remaining_vel_x * remaining_vel_x + remaining_vel_y * remaining_vel_y) * vel_factor;
-                    remaining_vel_x = @cos(angle) * remaining_vel;
-                    remaining_vel_y = @sin(angle) * remaining_vel;
+                    ball.box.x += rem_vel.x * t;
+                    ball.box.y += rem_vel.y * t;
+                    const vel = @sqrt(ball.vel.x * ball.vel.x + ball.vel.y * ball.vel.y) * vel_factor;
+                    ball.vel.x = @cos(angle) * vel;
+                    ball.vel.y = @sin(angle) * vel;
+                    rem_vel.x *= (1 - t);
+                    rem_vel.y *= (1 - t);
+                    const remaining_vel = @sqrt(rem_vel.x * rem_vel.x + rem_vel.y * rem_vel.y) * vel_factor;
+                    rem_vel.x = @cos(angle) * remaining_vel;
+                    rem_vel.y = @sin(angle) * remaining_vel;
                 } else {
-                    ball.box.x += remaining_vel_x * t;
-                    ball.box.y += remaining_vel_y * t;
-                    ball.vel_x = std.math.copysign(ball.vel_x, if (sign_x != 0) sign_x else remaining_vel_x);
-                    ball.vel_y = std.math.copysign(ball.vel_y, if (sign_y != 0) sign_y else remaining_vel_y);
-                    remaining_vel_x = std.math.copysign(remaining_vel_x * (1 - t), ball.vel_x);
-                    remaining_vel_y = std.math.copysign(remaining_vel_y * (1 - t), ball.vel_y);
+                    ball.box.x += rem_vel.x * t;
+                    ball.box.y += rem_vel.y * t;
+                    ball.vel.x = std.math.copysign(ball.vel.x, if (sign_x != 0) sign_x else rem_vel.x);
+                    ball.vel.y = std.math.copysign(ball.vel.y, if (sign_y != 0) sign_y else rem_vel.y);
+                    rem_vel.x = std.math.copysign(rem_vel.x * (1 - t), ball.vel.x);
+                    rem_vel.y = std.math.copysign(rem_vel.y * (1 - t), ball.vel.y);
                     if (collidee == .brick) {
                         _ = bricks.swapRemove(collidee.brick);
                     }
@@ -706,7 +726,7 @@ fn app_update(appstate: ?*anyopaque) !SDL.AppProcess {
                 // Enqueue an appropriate sound effect.
                 switch (collidee) {
                     .wall => {
-                        if (ball.box.y < window_h) {
+                        if (ball.box.y < window_size.y) {
                             sounds_to_play.insert(.hit_wall);
                         }
                     },
@@ -716,6 +736,7 @@ fn app_update(appstate: ?*anyopaque) !SDL.AppProcess {
                     .brick => {
                         if (bricks.len == 0) {
                             won = true;
+                            records_need_save = true;
                             sounds_to_play.insert(.win);
                         } else {
                             sounds_to_play.insert(.hit_brick);
@@ -726,33 +747,34 @@ fn app_update(appstate: ?*anyopaque) !SDL.AppProcess {
             }
         }
 
-        if (previous_ball_y < window_h and ball.box.y >= window_h) {
+        if (previous_ball_y < window_size.y and ball.box.y >= window_size.y) {
             // The ball fell below the paddle.
             if (bricks.len != 0) {
                 sounds_to_play.insert(.lose);
+                records_need_save = true;
             }
         }
 
         // Update score.
         if (ball.launched) {
-            if (ball.box.y < window_h) {
+            if (ball.box.y < window_size.y) {
                 if (bricks.len != 0) {
                     score +|= 1;
                 } else {
-                    best_score = @min(score, best_score);
+                    best_win = @min(score, best_win);
                 }
             }
-            if (score <= best_score and bricks.len == 0) {
-                score_color = .{ 0x52, 0xcc, 0x73 };
-            } else if (ball.box.y >= window_h or score > best_score) {
-                score_color = .{ 0xcc, 0x5c, 0x52 };
+            if (score <= best_win and bricks.len == 0) {
+                score_color = SDL.IColor_RGBA.new_opaque(0x52, 0xcc, 0x73);
+            } else if (ball.box.y >= window_size.y or score > best_win) {
+                score_color = SDL.IColor_RGBA.new_opaque(0xcc, 0x5c, 0x52);
             }
         }
     }
 
     // Save score.
-    if (won and score < best_score) {
-        try saveBestScore();
+    if (records_need_save) {
+        try save_records();
     }
 
     // Play audio.
@@ -768,131 +790,128 @@ fn app_update(appstate: ?*anyopaque) !SDL.AppProcess {
             const stream = find_available_stream: while (stream_index < audio_streams.len) {
                 defer stream_index += 1;
                 const stream = audio_streams[stream_index];
-                if (try errify(c.SDL_GetAudioStreamAvailable(stream)) == 0) {
+                if (try stream.get_bytes_available_to_take_out() == 0) {
                     break :find_available_stream stream;
                 }
             } else {
                 break :iterate_sounds;
             };
-            const frame_size: usize = c.SDL_AUDIO_BYTESIZE(sounds_spec.format) * @as(c_uint, @intCast(sounds_spec.channels));
+            const frame_size: usize = @intCast(sounds.spec.frame_size());
             const start: usize, const end: usize = switch (sound) {
-                .hit_wall => sounds.hit_wall,
-                .hit_paddle => sounds.hit_paddle,
-                .hit_brick => sounds.hit_brick,
-                .win => sounds.win,
-                .lose => sounds.lose,
+                .hit_wall => Sounds.hit_wall,
+                .hit_paddle => Sounds.hit_paddle,
+                .hit_brick => Sounds.hit_brick,
+                .win => Sounds.win,
+                .lose => Sounds.lose,
             };
-            const data = sounds_data[(frame_size * start)..(frame_size * end)];
-            try errify(c.SDL_PutAudioStreamData(stream, data.ptr, @intCast(data.len)));
+            const data = sounds.data[(frame_size * start)..(frame_size * end)];
+            try stream.put_in_audio_data(data);
         }
     }
 
     // Draw.
     {
-        try errify(c.SDL_SetRenderDrawColor(renderer, 0x47, 0x5b, 0x8d, 0xff));
+        const CLEAR_COLOR = SDL.IColor_RGBA.new(0x47, 0x5b, 0x8d, 0xff);
+        try renderer.set_draw_color(CLEAR_COLOR);
+        try renderer.draw_clear_fill();
 
-        try errify(c.SDL_RenderClear(renderer));
+        for (bricks.slice()) |brick| try renderer.draw_texture_rect(sprite_texture, .rect(brick.src_rect), .rect(&brick.box));
+        try renderer.draw_texture_rect(sprite_texture, .rect(ball.src_rect), .rect(&ball.box));
+        try renderer.draw_texture_rect(sprite_texture, .rect(paddle.src_rect), .rect(&paddle.box));
 
-        for (bricks.slice()) |brick| try renderObject(renderer, sprites_texture, brick.src_rect, brick.box);
-        try renderObject(renderer, sprites_texture, ball.src_rect, ball.box);
-        try renderObject(renderer, sprites_texture, paddle.src_rect, paddle.box);
-
-        try errify(c.SDL_SetRenderScale(renderer, 2, 2));
+        try renderer.set_render_scale(FVec.new(2, 2));
         {
-            var buf: [12]u8 = undefined;
-            var time: f32 = @min(@as(f32, @floatFromInt(score)) / Timekeeper.updates_per_s, 99.999);
-            var text = try std.fmt.bufPrintZ(&buf, "TIME {d:0>6.3}", .{time});
-            try errify(c.SDL_SetRenderDrawColor(renderer, score_color[0], score_color[1], score_color[2], 0xff));
-            try errify(c.SDL_RenderDebugText(renderer, 8, 8, text.ptr));
-            time = @min(@as(f32, @floatFromInt(best_score)) / Timekeeper.updates_per_s, 99.999);
-            text = try std.fmt.bufPrintZ(&buf, "BEST {d:0>6.3}", .{time});
-            try errify(c.SDL_SetRenderDrawColor(renderer, 0xff, 0xff, 0xff, 0xff));
-            try errify(c.SDL_RenderDebugText(renderer, window_w / 2 - 8 * 12, 8, text.ptr));
+            var buf: [13]u8 = undefined;
+            var time: f32 = @min(@as(f32, @floatFromInt(score)) / Timekeeper.updates_per_s, 999.999);
+            var text = try std.fmt.bufPrintZ(&buf, "TIME {d: >7.3}", .{time});
+            try renderer.set_draw_color(score_color);
+            try renderer.draw_debug_text(FVec.new(8, 8), text.ptr);
+            time = @min(@as(f32, @floatFromInt(best_win)) / Timekeeper.updates_per_s, 999.999);
+            text = try std.fmt.bufPrintZ(&buf, "BEST {d: >7.3}", .{time});
+            try renderer.set_draw_color(SDL.IColor_RGBA.WHITE);
+            try renderer.draw_debug_text(FVec.new(window_size.x / 2 - 8 * 12, 8), text.ptr);
         }
-        try errify(c.SDL_SetRenderScale(renderer, 1, 1));
-
-        try errify(c.SDL_RenderPresent(renderer));
+        try renderer.set_render_scale(FVec.new(1, 1));
+        try renderer.present();
     }
 
-    timekeeper.produce(c.SDL_GetPerformanceCounter());
+    timekeeper.produce(SDL.get_performance_counter());
 
-    return c.SDL_APP_CONTINUE;
+    return SDL.AppProcess.CONTINUE;
 }
 
-fn handle_event(appstate: ?*anyopaque, event: *SDL.Event) !SDL.AppProcess {
-    _ = appstate;
-
+fn handle_event(event: *SDL.Event) !SDL.AppProcess {
     switch (event.type) {
         .QUIT => {
             return SDL.AppProcess.CLOSE_NORMAL;
         },
         .KEY_DOWN, .KEY_UP => {
             const is_down = event.type == .KEY_DOWN;
-            switch (event.key.scancode) {
-                //CHECKPOINT
-                c.SDL_SCANCODE_LEFT => phcon.k_left = is_down,
-                c.SDL_SCANCODE_RIGHT => phcon.k_right = is_down,
-                c.SDL_SCANCODE_LSHIFT => phcon.k_lshift = is_down,
-                c.SDL_SCANCODE_SPACE => phcon.k_space = is_down,
-                c.SDL_SCANCODE_R => phcon.k_r = is_down,
-                c.SDL_SCANCODE_ESCAPE => phcon.k_escape = is_down,
+            switch (event.keyboard.scancode) {
+                .LEFT => phcon.k_left = is_down,
+                .RIGHT => phcon.k_right = is_down,
+                .LSHIFT => phcon.k_lshift = is_down,
+                .SPACE => phcon.k_space = is_down,
+                .R => phcon.k_r = is_down,
+                .ESCAPE => phcon.k_escape = is_down,
                 else => {},
             }
         },
-        c.SDL_EVENT_MOUSE_BUTTON_DOWN, c.SDL_EVENT_MOUSE_BUTTON_UP => {
-            const down = event.type == c.SDL_EVENT_MOUSE_BUTTON_DOWN;
-            switch (event.button.button) {
-                c.SDL_BUTTON_LEFT => phcon.m_left = down,
+        .MOUSE_BUTTON_DOWN, .MOUSE_BUTTON_UP => {
+            const is_down = event.type == .MOUSE_BUTTON_DOWN;
+            switch (event.mouse_button.button) {
+                .LEFT => phcon.m_left = is_down,
                 else => {},
             }
         },
-        c.SDL_EVENT_MOUSE_MOTION => {
-            phcon.m_xrel += event.motion.xrel;
+        .MOUSE_MOTION => {
+            phcon.m_xrel += event.mouse_motion.delta.x;
         },
-        c.SDL_EVENT_GAMEPAD_ADDED => {
+        .GAMEPAD_ADDED => {
             if (gamepad == null) {
-                gamepad = try errify(c.SDL_OpenGamepad(event.gdevice.which));
+                gamepad = try event.gamepad_device.controller_id.open_gamepad();
             }
         },
-        c.SDL_EVENT_GAMEPAD_REMOVED => {
-            if (gamepad != null) {
-                c.SDL_CloseGamepad(gamepad);
+        .GAMEPAD_REMOVED => {
+            if (gamepad) |pad| {
+                pad.close();
                 gamepad = null;
             }
         },
-        c.SDL_EVENT_GAMEPAD_BUTTON_DOWN, c.SDL_EVENT_GAMEPAD_BUTTON_UP => {
-            const down = event.type == c.SDL_EVENT_GAMEPAD_BUTTON_DOWN;
-            switch (event.gbutton.button) {
-                c.SDL_GAMEPAD_BUTTON_DPAD_LEFT => phcon.g_left = down,
-                c.SDL_GAMEPAD_BUTTON_DPAD_RIGHT => phcon.g_right = down,
-                c.SDL_GAMEPAD_BUTTON_LEFT_SHOULDER => phcon.g_left_shoulder = down,
-                c.SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER => phcon.g_right_shoulder = down,
-                c.SDL_GAMEPAD_BUTTON_SOUTH => phcon.g_south = down,
-                c.SDL_GAMEPAD_BUTTON_EAST => phcon.g_east = down,
-                c.SDL_GAMEPAD_BUTTON_BACK => phcon.g_back = down,
-                c.SDL_GAMEPAD_BUTTON_START => phcon.g_start = down,
+        .GAMEPAD_BUTTON_DOWN, .GAMEPAD_BUTTON_UP => {
+            const is_down = event.type == .GAMEPAD_BUTTON_DOWN;
+            switch (event.gamepad_button.button) {
+                .DPAD_LEFT => phcon.g_left = is_down,
+                .DPAD_RIGHT => phcon.g_right = is_down,
+                .LEFT_SHOULDER => phcon.g_left_shoulder = is_down,
+                .RIGHT_SHOULDER => phcon.g_right_shoulder = is_down,
+                .SOUTH => phcon.g_south = is_down,
+                .EAST => phcon.g_east = is_down,
+                .BACK => phcon.g_back = is_down,
+                .START => phcon.g_start = is_down,
                 else => {},
             }
         },
-        c.SDL_EVENT_GAMEPAD_AXIS_MOTION => {
-            switch (event.gaxis.axis) {
-                c.SDL_GAMEPAD_AXIS_LEFTX => phcon.g_leftx = event.gaxis.value,
-                c.SDL_GAMEPAD_AXIS_LEFT_TRIGGER => phcon.g_left_trigger = event.gaxis.value,
-                c.SDL_GAMEPAD_AXIS_RIGHT_TRIGGER => phcon.g_right_trigger = event.gaxis.value,
+        .GAMEPAD_AXIS_MOTION => {
+            switch (event.gamepad_axis.axis) {
+                .LEFTX => phcon.g_leftx = event.gamepad_axis.value,
+                .LEFT_TRIGGER => phcon.g_left_trigger = event.gamepad_axis.value,
+                .RIGHT_TRIGGER => phcon.g_right_trigger = event.gamepad_axis.value,
                 else => {},
             }
         },
         else => {},
     }
 
-    return c.SDL_APP_CONTINUE;
+    return SDL.AppProcess.CONTINUE;
 }
 
-fn app_quit(appstate: ?*anyopaque, result: anyerror!SDL.AppProcess) void {
-    _ = appstate;
-
+fn app_quit(result: anyerror!SDL.AppProcess) void {
     _ = result catch |err| switch (err) {
-        SDL.Error.SDL_null_value, SDL.Error.SDL_operation_failure => {
+        SDL.Error.SDL_null_value,
+        SDL.Error.SDL_operation_failure,
+        SDL.Error.SDL_invalid_value,
+        => {
             sdl_log.err("{s}: {s}", .{ @errorName(err), SDL.get_error_details() });
         },
         else => {
@@ -919,19 +938,26 @@ fn sdl_main_func(arg_count: c_int, arg_list: ?[*:null]?[*:0]u8) callconv(.c) c_i
     return SDL.run_app_with_callbacks(arg_count, arg_list, sdl_init_func, sdl_update_func, sdl_event_func, sdl_quit_func);
 }
 
-fn sdl_init_func(appstate: ?*?*anyopaque, argc: c_int, argv: ?[*:null]?[*:0]u8) callconv(.c) SDL.AppProcess {
-    const zig_args = Goolib.Utils.c_args_to_zig_args(.c_args_list(argc, argv));
-    return app_init(appstate, zig_args) catch |err| app_err.store(err);
+fn sdl_init_func(appstate: ?*?*anyopaque, arg_count: c_int, arg_list: ?[*:null]?[*:0]u8) callconv(.c) c_uint {
+    _ = appstate;
+    const zig_args = Goolib.Utils.c_args_to_zig_args(.c_args_list(arg_count, arg_list));
+    const process = app_init(zig_args) catch |err| app_err.store(err);
+    return @intFromEnum(process);
 }
 
-fn sdl_update_func(appstate: ?*anyopaque) callconv(.c) SDL.AppProcess {
-    return app_update(appstate) catch |err| app_err.store(err);
+fn sdl_update_func(appstate: ?*anyopaque) callconv(.c) c_uint {
+    _ = appstate;
+    const process = app_update() catch |err| app_err.store(err);
+    return @intFromEnum(process);
 }
 
-fn sdl_event_func(appstate: ?*anyopaque, event: ?*SDL.Event) callconv(.c) SDL.AppProcess {
-    return handle_event(appstate, event.?) catch |err| app_err.store(err);
+fn sdl_event_func(appstate: ?*anyopaque, event: ?*SDL.C_Event) callconv(.c) c_uint {
+    _ = appstate;
+    const process = handle_event(SDL.Event.from_c(event.?)) catch |err| app_err.store(err);
+    return @intFromEnum(process);
 }
 
-fn sdl_quit_func(appstate: ?*anyopaque, close_state: SDL.AppProcess) callconv(.c) void {
-    app_quit(appstate, app_err.load() orelse close_state);
+fn sdl_quit_func(appstate: ?*anyopaque, close_state: c_uint) callconv(.c) void {
+    _ = appstate;
+    app_quit(app_err.load() orelse @enumFromInt(close_state));
 }

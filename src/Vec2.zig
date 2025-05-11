@@ -35,6 +35,10 @@ pub fn define_vec2_type(comptime T: type) type {
             return T_Vec2{ .x = x, .y = y };
         }
 
+        pub fn inverse(self: T_Vec2) T_Vec2 {
+            return T_Vec2{ .x = 1 / self.x, .y = 1 / self.y };
+        }
+
         pub fn dot(self: T_Vec2, other: T_Vec2) T {
             return (self.x * other.x) + (self.y * other.y);
         }

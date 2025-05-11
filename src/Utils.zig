@@ -95,14 +95,14 @@ pub fn c_strings_equal(a: [*:0]const u8, b: [*:0]const u8) bool {
 
 pub fn c_args_to_zig_args(c_args: CArgsList) [][*:0]u8 {
     if (c_args.len == 0 or c_args.ptr == null) {
-        const NULL = [0][*:0]u8;
+        const NULL: [0][*:0]u8 = @splat(@ptrFromInt(std.math.maxInt(usize)));
         return NULL[0..0];
     }
     const good_args_list = c_args.ptr.?;
     assert(check_no_early_null: {
         var i: c_int = 0;
         while (i < c_args.len) : (i += 1) {
-            if (good_args_list[i] == null) break :check_no_early_null false;
+            if (good_args_list[@intCast(i)] == null) break :check_no_early_null false;
         }
         break :check_no_early_null true;
     });

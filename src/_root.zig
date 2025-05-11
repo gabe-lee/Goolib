@@ -5,6 +5,7 @@ pub const ANSI = @import("./ANSI.zig");
 pub const BinarySearch = @import("./BinarySearch.zig");
 pub const BucketAllocator = @import("./BucketAllocator.zig");
 pub const Bytes = @import("./Bytes.zig");
+pub const Cast = @import("./Cast.zig");
 // pub const Codegen = @import("./Codegen.zig");
 pub const Color = @import("./Color.zig");
 pub const CommonTypes = @import("./CommonTypes.zig");
@@ -33,6 +34,7 @@ comptime {
     _ = @import("./BinarySearch.zig");
     _ = @import("./BucketAllocator.zig");
     _ = @import("./Bytes.zig");
+    _ = @import("./Cast.zig");
     // _ = @import("./Codegen.zig");
     _ = @import("./Color.zig");
     _ = @import("./CommonTypes.zig");

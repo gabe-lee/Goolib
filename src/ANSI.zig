@@ -1,15 +1,25 @@
 pub const BEGIN = "\x1b[";
 pub const END = 'm';
+const BEG_END_LEN = BEGIN.len + 1;
 
-pub fn ansi(comptime params: []PARAM) []const u8 {
-    comptime var str = BEGIN;
-    comptime var len = 0;
+pub fn ansi(comptime params: []const PARAM) []const u8 {
+    const len = comptime calc: {
+        var total_len: usize = BEG_END_LEN;
+        for (params) |param| {
+            total_len += TABLE[@intFromEnum(param)].len;
+        }
+        break :calc total_len;
+    };
+    var str: [len]u8 = undefined;
+    @memcpy(str[0..BEGIN.len], BEGIN);
+    var i: usize = BEGIN.len;
     inline for (params) |param| {
-        str = str ++ TABLE[@intFromEnum(param)];
-        len += TABLE[@intFromEnum(param)].len;
+        const this_str = TABLE[@intFromEnum(param)];
+        @memcpy(str[i..][0..this_str.len], this_str);
+        i += this_str.len;
     }
-    str[len - 1] = END;
-    return str;
+    str[i] = END;
+    return str[0..len];
 }
 pub const PARAM = enum(u8) {
     RESET = 0,

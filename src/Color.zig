@@ -177,6 +177,19 @@ pub fn define_color_rgba_type(comptime T: type) type {
         const T_RGBA = @This();
         const T_RGB = define_color_rgb_type(T);
         const T_RAW = std.meta.Int(.unsigned, @bitSizeOf(T_RGBA));
+        const MAX = switch (T) {
+            f16, f32, f64, f80, f128, comptime_float => 1.0,
+            else => std.math.maxInt(T),
+        };
+
+        pub fn new(r: T, g: T, b: T, a: T) T_RGBA {
+            return T_RGBA{ .r = r, .g = g, .b = b, .a = a };
+        }
+        pub fn new_opaque(r: T, g: T, b: T) T_RGBA {
+            return T_RGBA{ .r = r, .g = g, .b = b, .a = MAX };
+        }
+
+        pub const WHITE = T_RGBA{ .r = MAX, .g = MAX, .b = MAX, .a = MAX };
 
         pub fn to_rgb(self: T_RGBA) T_RGB {
             return T_RGB{
@@ -201,6 +214,10 @@ pub fn define_color_rgb_type(comptime T: type) type {
         const T_RGB = @This();
         const T_RGBA = define_color_rgba_type(T);
         const T_RAW = std.meta.Int(.unsigned, @bitSizeOf(T_RGBA));
+
+        pub fn new(r: T, g: T, b: T) T_RGB {
+            return T_RGB{ .r = r, .g = g, .b = b };
+        }
 
         pub fn to_rgba(self: T_RGB, a: T) T_RGBA {
             return T_RGBA{

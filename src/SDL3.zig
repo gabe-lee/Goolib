@@ -15,6 +15,7 @@ const C = @cImport({
 pub const Error = error{
     SDL_null_value,
     SDL_operation_failure,
+    SDL_invalid_value,
 };
 
 inline fn ptr_cast_or_null_err(comptime T: type, result_ptr: anytype) Error!T {
@@ -36,6 +37,20 @@ inline fn nonzero_or_fail_err(result_id: anytype) Error!@TypeOf(result_id) {
 inline fn positive_or_fail_err(result_int: anytype) Error!@TypeOf(result_int) {
     if (result_int < 0) return Error.SDL_operation_failure;
     return result_int;
+}
+inline fn positive_or_invalid_err(result_int: anytype) Error!@TypeOf(result_int) {
+    if (result_int < 0) return Error.SDL_invalid_value;
+    return result_int;
+}
+inline fn to_enum_or_invalid_err(comptime E: type, result_int: anytype) Error!E {
+    const E_INFO = @typeInfo(E).@"enum";
+    const E_INT = E_INFO.tag_type;
+    if (build.mode == .Debug or build.mode == .ReleaseSafe) {
+        const enum_val: E = std.meta.intToEnum(E, result_int) catch return Error.SDL_invalid_value;
+        return enum_val;
+    } else {
+        return @as(E, @enumFromInt(@as(E_INT, @intCast(result_int))));
+    }
 }
 inline fn positive_or_null_err(result_int: anytype) Error!@TypeOf(result_int) {
     if (result_int < 0) return Error.SDL_null_value;
@@ -94,15 +109,15 @@ pub const IColor_U32 = extern struct {
 };
 
 pub const AppMainFunc = fn (arg_count: c_int, arg_list: ?[*:null]?[*:0]u8) callconv(.c) c_int;
-pub const AppInitFunc = fn (app_state: ?*?*anyopaque, arg_count: c_int, arg_list: ?[*:null]?[*:0]u8) callconv(.c) AppProcess;
-pub const AppUpdateFunc = fn (app_state: ?*?*anyopaque) callconv(.c) AppProcess;
-pub const AppEventFunc = fn (app_state: ?*?*anyopaque, event: ?*Event) callconv(.c) AppProcess;
-pub const AppQuitFunc = fn (app_state: ?*?*anyopaque, quit_process_state: AppProcess) callconv(.c) void;
+pub const AppInitFunc = fn (app_state: ?*?*anyopaque, arg_count: c_int, arg_list: ?[*:null]?[*:0]u8) callconv(.c) c_uint;
+pub const AppUpdateFunc = fn (app_state: ?*anyopaque) callconv(.c) c_uint;
+pub const AppEventFunc = fn (app_state: ?*anyopaque, event: ?*C_Event) callconv(.c) c_uint;
+pub const AppQuitFunc = fn (app_state: ?*anyopaque, quit_process_state: c_uint) callconv(.c) void;
 
-pub fn run_app(arg_count: c_int, arg_list: ?[*:null][*:0]u8, main_func: *AppMainFunc) c_int {
+pub fn run_app(arg_count: c_int, arg_list: ?[*:null]?[*:0]u8, main_func: *const AppMainFunc) c_int {
     return C.SDL_RunApp(arg_count, @ptrCast(@alignCast(arg_list)), main_func, null);
 }
-pub fn run_app_with_callbacks(arg_count: c_int, arg_list: ?[*:null]?[*:0]u8, init_func: *AppInitFunc, update_func: *AppUpdateFunc, event_func: *AppEventFunc, quit_func: *AppQuitFunc) c_int {
+pub fn run_app_with_callbacks(arg_count: c_int, arg_list: ?[*:null]?[*:0]u8, init_func: *const AppInitFunc, update_func: *const AppUpdateFunc, event_func: *const AppEventFunc, quit_func: *const AppQuitFunc) c_int {
     return C.SDL_EnterAppMainCallbacks(arg_count, @ptrCast(@alignCast(arg_list)), init_func, update_func, event_func, quit_func);
 }
 
@@ -565,22 +580,22 @@ pub const IOStream = opaque {
         try ok_or_fail_err(C.SDL_ReadS16BE(self.to_c(), &val));
         return val;
     }
-    pub fn read_u32_le(self: *IOStream) Error!u16 {
+    pub fn read_u32_le(self: *IOStream) Error!u32 {
         var val: u32 = 0;
         try ok_or_fail_err(C.SDL_ReadU32LE(self.to_c(), &val));
         return val;
     }
-    pub fn read_i32_le(self: *IOStream) Error!i16 {
+    pub fn read_i32_le(self: *IOStream) Error!i32 {
         var val: i32 = 0;
         try ok_or_fail_err(C.SDL_ReadS32LE(self.to_c(), &val));
         return val;
     }
-    pub fn read_u32_be(self: *IOStream) Error!u16 {
+    pub fn read_u32_be(self: *IOStream) Error!u32 {
         var val: u32 = 0;
         try ok_or_fail_err(C.SDL_ReadU32BE(self.to_c(), &val));
         return val;
     }
-    pub fn read_i32_be(self: *IOStream) Error!i16 {
+    pub fn read_i32_be(self: *IOStream) Error!i32 {
         var val: i32 = 0;
         try ok_or_fail_err(C.SDL_ReadS32BE(self.to_c(), &val));
         return val;
@@ -654,12 +669,13 @@ pub const IOStream = opaque {
         return ok_or_fail_err(C.SDL_SaveBMP_IO(surface.to_c(), self.to_c(), close_stream));
     }
     pub fn load_wav(self: *IOStream, close_stream: bool) Error!WaveAudio {
-        var ptr: [*]u8 = undefined;
+        var ptr: [*c]u8 = undefined;
         var len: u32 = 0;
         var spec: AudioSpec = undefined;
         try ok_or_fail_err(C.SDL_LoadWAV_IO(self.to_c(), close_stream, @ptrCast(@alignCast(&spec)), &ptr, &len));
+        const good_ptr = try ptr_cast_or_null_err([*]u8, ptr);
         return WaveAudio{
-            .data = ptr[0..len],
+            .data = good_ptr[0..len],
             .spec = spec,
         };
     }
@@ -700,7 +716,7 @@ pub const IOMode = enum(u8) {
     };
 };
 
-pub const WaveAudio = extern struct {
+pub const WaveAudio = struct {
     data: []u8 = undefined,
     spec: AudioSpec = undefined,
 
@@ -930,9 +946,6 @@ pub const AudioFormat = enum(c_uint) {
     S32BE = C.SDL_AUDIO_S32BE,
     F32BE = C.SDL_AUDIO_F32LE,
     F32LE = C.SDL_AUDIO_F32BE,
-    S16 = C.SDL_AUDIO_S16,
-    S32 = C.SDL_AUDIO_S32,
-    F32 = C.SDL_AUDIO_F32,
 
     inline fn to_c(self: AudioFormat) c_uint {
         return @intFromEnum(self);
@@ -1419,7 +1432,7 @@ pub const Window = opaque {
         return WindowsList{ .list = (try ptr_cast_or_null_err([*]*Window, C.SDL_GetWindows(&len)))[0..len] };
     }
     pub fn create(options: CreateWindowOptions) Error!*Window {
-        return ptr_cast_or_fail_err(*Window, C.SDL_CreateWindow(options.title.ptr, options.width, options.height, options.flags));
+        return ptr_cast_or_fail_err(*Window, C.SDL_CreateWindow(options.title.ptr, options.size.x, options.size.y, options.flags.flags));
     }
     pub fn create_popup_window(parent: *Window, options: CreatePopupWindowOptions) Error!*Window {
         return ptr_cast_or_fail_err(*Window, C.SDL_CreatePopupWindow(parent.to_c(), options.x_offset, options.y_offset, options.width, options.height, options.flags));
@@ -1623,11 +1636,23 @@ pub const Window = opaque {
     pub fn destroy(self: *Window) void {
         C.SDL_DestroyWindow(self.to_c());
     }
-    pub fn create_renderer(self: *Window, name: ?[:0]const u8) Error!*Renderer {
-        return ptr_cast_or_fail_err(*Renderer, C.SDL_CreateRenderer(self.extern_ptr, name.ptr));
+    pub fn create_renderer(self: *Window) Error!*Renderer {
+        return ptr_cast_or_fail_err(*Renderer, C.SDL_CreateRenderer(self.to_c(), null));
+    }
+    pub fn create_renderer_with_name(self: *Window, name: [*:0]const u8) Error!*Renderer {
+        return ptr_cast_or_fail_err(*Renderer, C.SDL_CreateRenderer(self.to_c(), name));
     }
     pub fn get_renderer(self: *Window) Error!*Renderer {
-        return ptr_cast_or_null_err(*Renderer, C.SDL_GetRenderer(self.extern_ptr));
+        return ptr_cast_or_null_err(*Renderer, C.SDL_GetRenderer(self.to_c()));
+    }
+    pub fn set_mouse_mode_relative(self: *Window, state: bool) Error!void {
+        return ok_or_fail_err(C.SDL_SetWindowRelativeMouseMode(self.to_c(), state));
+    }
+    pub fn is_mouse_mode_relative(self: *Window) bool {
+        return C.SDL_GetWindowRelativeMouseMode(self.to_c());
+    }
+    pub fn warp_mouse_position(self: *Window, pos: FVec) void {
+        C.SDL_WarpMouseInWindow(self.to_c(), pos.x, pos.y);
     }
 };
 
@@ -1696,7 +1721,7 @@ pub const AspectRange = extern struct {
     max: f32 = 10.0,
 };
 
-pub const CreateWindowOptions = extern struct {
+pub const CreateWindowOptions = struct {
     title: [:0]const u8 = "New Window",
     flags: WindowFlags = WindowFlags{},
     size: IVec = IVec.new(800, 600),
@@ -1756,11 +1781,10 @@ pub const DisplayList = extern struct {
 };
 
 pub const WindowFlags = extern struct {
-    flags: FLAG_UINT = 0,
+    flags: u64 = 0,
 
-    const FLAG_UINT: type = @TypeOf(C.SDL_WINDOW_FULLSCREEN);
     pub fn new(flags: []const FLAG) WindowFlags {
-        var val: FLAG_UINT = 0;
+        var val: u64 = 0;
         for (flags) |flag| {
             val |= @intFromEnum(flag);
         }
@@ -1769,13 +1793,13 @@ pub const WindowFlags = extern struct {
     pub fn set(self: *WindowFlags, flag: FLAG) void {
         self.flags |= @intFromEnum(flag);
     }
-    pub fn set_raw(self: *WindowFlags, raw_flags: FLAG_UINT) void {
+    pub fn set_raw(self: *WindowFlags, raw_flags: u64) void {
         self.flags |= raw_flags;
     }
     pub fn clear(self: *WindowFlags, flag: FLAG) void {
         self.flags &= ~@intFromEnum(flag);
     }
-    pub fn clear_raw(self: *WindowFlags, raw_flags: FLAG_UINT) void {
+    pub fn clear_raw(self: *WindowFlags, raw_flags: u64) void {
         self.flags &= ~raw_flags;
     }
     pub fn clear_all(self: *WindowFlags) void {
@@ -1790,7 +1814,7 @@ pub const WindowFlags = extern struct {
     pub fn clear_many(self: *WindowFlags, other: WindowFlags) void {
         self.flags &= ~other.flags;
     }
-    pub const FLAG = enum(FLAG_UINT) {
+    pub const FLAG = enum(u64) {
         FULLSCREEN = C.SDL_WINDOW_FULLSCREEN,
         OPENGL = C.SDL_WINDOW_OPENGL,
         OCCLUDED = C.SDL_WINDOW_OCCLUDED,
@@ -1817,10 +1841,10 @@ pub const WindowFlags = extern struct {
         TRANSPARENT = C.SDL_WINDOW_TRANSPARENT,
         NOT_FOCUSABLE = C.SDL_WINDOW_NOT_FOCUSABLE,
 
-        inline fn to_c(self: FLAG_UINT) c_uint {
+        inline fn to_c(self: FLAG) u64 {
             return @intFromEnum(self);
         }
-        inline fn from_c(val: c_uint) FLAG_UINT {
+        inline fn from_c(val: u64) FLAG {
             return @enumFromInt(val);
         }
     };
@@ -2061,18 +2085,15 @@ pub const IArea = extern struct {
 /// - `null` == use entire area
 /// - `*FRect` == use this rect area
 pub const FArea = extern struct {
-    rect_ptr: ?*FRect = null,
+    rect_ptr: ?*const FRect = null,
 
-    pub inline fn rect(r: *FRect) FArea {
+    pub inline fn rect(r: *const FRect) FArea {
         return FArea{ .rect_ptr = r };
     }
     pub inline fn entire_area() FArea {
         return ENTIRE_AREA;
     }
     pub const ENTIRE_AREA = FArea{ .rect_ptr = null };
-    inline fn to_c(self: *FArea) ?*C.SDL_FRect {
-        return @ptrCast(@alignCast(self.rect_ptr));
-    }
 };
 
 /// Helper struct for SDL functions that expect both a
@@ -2241,7 +2262,7 @@ pub const Renderer = opaque {
         return ptr_cast_or_fail_err(*Texture, C.SDL_CreateTexture(self.to_c(), format.to_c(), access_mode.to_c(), size.x, size.y));
     }
     pub fn create_texture_from_surface(self: *Renderer, surface: *Surface) Error!*Texture {
-        return ptr_cast_or_fail_err(C.SDL_CreateTextureFromSurface(self.to_c(), @ptrCast(@alignCast(surface))), *Texture);
+        return ptr_cast_or_fail_err(*Texture, C.SDL_CreateTextureFromSurface(self.to_c(), @ptrCast(@alignCast(surface))));
     }
     pub fn create_texture_with_properties(self: *Renderer, props_id: PropertiesID) Error!*Texture {
         return ptr_cast_or_fail_err(*Texture, C.SDL_CreateTextureWithProperties(self.to_c(), props_id.id));
@@ -2312,7 +2333,7 @@ pub const Renderer = opaque {
         return C.SDL_RenderClipEnabled(self.to_c());
     }
     pub fn set_render_scale(self: *Renderer, scale: FVec) Error!void {
-        return ok_or_fail_err(C.SDL_SetRenderScale(self.to_c(), scale.x, scale.Y));
+        return ok_or_fail_err(C.SDL_SetRenderScale(self.to_c(), scale.x, scale.y));
     }
     pub fn get_render_scale(self: *Renderer) Error!FVec {
         var vec = FVec{};
@@ -2351,7 +2372,7 @@ pub const Renderer = opaque {
         try ok_or_null_err(C.SDL_GetRenderDrawBlendMode(self.to_c(), &mode));
         return BlendMode{ .mode = mode };
     }
-    pub fn draw_fill(self: *Renderer) Error!void {
+    pub fn draw_clear_fill(self: *Renderer) Error!void {
         return ok_or_fail_err(C.SDL_RenderClear(self.to_c()));
     }
     pub fn draw_point(self: *Renderer, point: *const FVec) Error!void {
@@ -2378,13 +2399,13 @@ pub const Renderer = opaque {
     pub fn draw_many_rects_filled(self: *Renderer, rects: []const FRect) Error!void {
         return ok_or_fail_err(C.SDL_RenderLines(self.to_c(), @ptrCast(@alignCast(rects.ptr)), @intCast(rects.len)));
     }
-    pub fn draw_texture_rect(self: *Renderer, texture: *Texture, tex_rect: ?*const FRect, target_rect: ?*const FRect) Error!void {
-        return ok_or_fail_err(C.SDL_RenderTexture(self.to_c(), texture.to_c(), @ptrCast(@alignCast(tex_rect)), @ptrCast(@alignCast(target_rect))));
+    pub fn draw_texture_rect(self: *Renderer, texture: *Texture, tex_rect: FArea, target_rect: FArea) Error!void {
+        return ok_or_fail_err(C.SDL_RenderTexture(self.to_c(), texture.to_c(), @ptrCast(@alignCast(tex_rect.rect_ptr)), @ptrCast(@alignCast(target_rect.rect_ptr))));
     }
-    pub fn draw_texture_rect_rotated(self: *Renderer, texture: *Texture, tex_rect: ?*const FRect, target_rect: ?*const FRect, angle_deg: f32, pivot: ?*const FVec, flip: FlipMode) Error!void {
+    pub fn draw_texture_rect_rotated(self: *Renderer, texture: *Texture, tex_rect: FArea, target_rect: FArea, angle_deg: f32, pivot: ?*const FVec, flip: FlipMode) Error!void {
         return ok_or_fail_err(C.SDL_RenderTextureRotated(self.to_c(), texture.to_c(), @ptrCast(@alignCast(tex_rect)), @ptrCast(@alignCast(target_rect)), angle_deg, pivot, flip));
     }
-    pub fn draw_texture_rect_affine(self: *Renderer, texture: *Texture, tex_rect: ?*const FRect, target_top_left: ?*const FVec, target_top_right: ?*const FVec, target_bot_left: ?*const FVec) Error!void {
+    pub fn draw_texture_rect_affine(self: *Renderer, texture: *Texture, tex_rect: FArea, target_top_left: ?*const FVec, target_top_right: ?*const FVec, target_bot_left: ?*const FVec) Error!void {
         return ok_or_fail_err(C.SDL_RenderTextureAffine(self.to_c(), texture.to_c(), @ptrCast(@alignCast(tex_rect)), @ptrCast(@alignCast(target_top_left)), @ptrCast(@alignCast(target_top_right)), @ptrCast(@alignCast(target_bot_left))));
     }
     pub fn draw_texture_rect_tiled(self: *Renderer, texture: *Texture, tex_rect: ?*const FRect, tex_scale: f32, target_rect: ?*const FRect) Error!void {
@@ -2405,11 +2426,11 @@ pub const Renderer = opaque {
     pub fn draw_indexed_vertices_as_triangles_raw(self: *Renderer, texture: ?*Texture, pos_start: [*]const FVec, pos_stride: c_int, color_start: [*]const FColor_RGBA, color_stride: c_int, tex_coord_start: [*]const FVec, tex_coord_stride: c_int, vertex_count: c_int, index_start: *anyopaque, index_count: c_int, index_type: IndexType) Error!void {
         return ok_or_fail_err(C.SDL_RenderGeometryRaw(self.to_c(), @ptrCast(@alignCast(texture)), @ptrCast(@alignCast(pos_start.ptr)), pos_stride, @ptrCast(@alignCast(color_start.ptr)), color_stride, @ptrCast(@alignCast(tex_coord_start.ptr)), tex_coord_stride, vertex_count, @ptrCast(@alignCast(index_start)), index_count, index_type.to_c()));
     }
-    pub fn draw_debug_text(self: *Renderer, pos: FVec, text: [:0]const u8) Error!void {
-        return ok_or_fail_err(C.SDL_RenderDebugText(self.to_c(), pos.x, pos.y, @ptrCast(@alignCast(text.ptr))));
+    pub fn draw_debug_text(self: *Renderer, pos: FVec, text: [*:0]const u8) Error!void {
+        return ok_or_fail_err(C.SDL_RenderDebugText(self.to_c(), pos.x, pos.y, @ptrCast(@alignCast(text))));
     }
-    pub fn draw_debug_text_formatted(self: *Renderer, pos: FVec, format: [:0]const u8, args: anytype) Error!void {
-        return ok_or_fail_err(@call(.auto, C.SDL_RenderDebugText, .{ self.to_c(), pos.x, pos.y, @as([*c]const u8, @ptrCast(@alignCast(format.ptr))) } ++ args));
+    pub fn draw_debug_text_formatted(self: *Renderer, pos: FVec, format: [*:0]const u8, args: anytype) Error!void {
+        return ok_or_fail_err(@call(.auto, C.SDL_RenderDebugText, .{ self.to_c(), pos.x, pos.y, @as([*c]const u8, @ptrCast(@alignCast(format))) } ++ args));
     }
     pub fn read_pixels_rect(self: *Renderer, rect: IRect) Error!*Surface {
         return ptr_cast_or_fail_err(*Surface, C.SDL_RenderReadPixels(self.to_c(), @ptrCast(@alignCast(&rect))));
@@ -2445,6 +2466,27 @@ pub const Renderer = opaque {
     }
 };
 
+pub const AtomicInt = extern struct {
+    val: c_int = 0,
+
+    fn to_c(self: *AtomicInt) *C.SDL_AtomicInt {
+        return @ptrCast(@alignCast(self));
+    }
+
+    pub fn compare_and_swap(self: *AtomicInt, old_val_matches: c_int, new_val: c_int) bool {
+        return C.SDL_CompareAndSwapAtomicInt(self.to_c(), old_val_matches, new_val);
+    }
+    pub fn set(self: *AtomicInt, val: c_int) c_int {
+        return C.SDL_SetAtomicInt(self.to_c(), val);
+    }
+    pub fn add(self: *AtomicInt, val: c_int) c_int {
+        return C.SDL_AddAtomicInt(self.to_c(), val);
+    }
+    pub fn get(self: *AtomicInt) c_int {
+        return C.SDL_GetAtomicInt(self.to_c());
+    }
+};
+
 pub const MetalLayer = opaque {};
 pub const MetalCommandEncoder = opaque {};
 
@@ -2471,6 +2513,7 @@ pub const AppProcess = enum(c_uint) {
     CONTINUE = C.SDL_APP_CONTINUE,
     CLOSE_NORMAL = C.SDL_APP_SUCCESS,
     CLOSE_ERROR = C.SDL_APP_FAILURE,
+    _,
 
     inline fn to_c(self: AppProcess) c_uint {
         return @intFromEnum(self);
@@ -2796,7 +2839,7 @@ pub const AudioDeviceID = extern struct {
     pub fn bind_audio_stream(self: AudioDeviceID, audio_stream: *AudioStream) Error!void {
         return ok_or_fail_err(C.SDL_BindAudioStream(self.id, audio_stream.to_c()));
     }
-    pub fn bind_many_audio_streams(self: AudioDeviceID, audio_streams: []AudioStream) Error!void {
+    pub fn bind_many_audio_streams(self: AudioDeviceID, audio_streams: []*AudioStream) Error!void {
         return ok_or_fail_err(C.SDL_BindAudioStreams(self.id, @ptrCast(@alignCast(audio_streams.ptr)), @intCast(audio_streams.len)));
     }
     pub fn open_new_audio_stream(self: AudioDeviceID, spec: AudioSpec, callback: ?*AudioStreamCallback, user_data: ?*anyopaque) Error!*AudioStream {
@@ -2811,10 +2854,10 @@ pub const AudioSpecRequest = extern struct {
     spec_ptr: ?*AudioSpec,
 
     pub fn use_default() AudioSpecRequest {
-        return AudioSpecRequest{ .spec = null };
+        return AudioSpecRequest{ .spec_ptr = null };
     }
     pub fn spec(spec_: *AudioSpec) AudioSpecRequest {
-        return AudioSpecRequest{ .spec = spec_ };
+        return AudioSpecRequest{ .spec_ptr = spec_ };
     }
 };
 
@@ -2895,7 +2938,7 @@ pub const AudioStream = opaque {
         return ok_or_fail_err(C.SDL_SetAudioStreamOutputChannelMap(self.to_c(), channel_map.map.ptr, @intCast(channel_map.map.len)));
     }
     pub fn put_in_audio_data(self: *AudioStream, data: []const u8) Error!void {
-        return ok_or_fail_err(C.SDL_PutAudioStreamData(self.to_c(), data.map.ptr, @intCast(data.len)));
+        return ok_or_fail_err(C.SDL_PutAudioStreamData(self.to_c(), data.ptr, @intCast(data.len)));
     }
     pub fn take_out_audio_data(self: *AudioStream, dst_buffer: []u8) Error!void {
         return positive_or_fail_err(C.SDL_PutAudioStreamData(self.to_c(), dst_buffer.ptr, @intCast(dst_buffer.len)));
@@ -3003,8 +3046,7 @@ pub const GamepadType = enum(c_uint) {
     }
 };
 
-pub const GamepadButton = enum(c_int) {
-    INVALID = C.SDL_GAMEPAD_BUTTON_INVALID,
+pub const GamepadButton = enum(u8) {
     SOUTH = C.SDL_GAMEPAD_BUTTON_SOUTH,
     EAST = C.SDL_GAMEPAD_BUTTON_EAST,
     WEST = C.SDL_GAMEPAD_BUTTON_WEST,
@@ -3031,14 +3073,19 @@ pub const GamepadButton = enum(c_int) {
     MISC4 = C.SDL_GAMEPAD_BUTTON_MISC4,
     MISC5 = C.SDL_GAMEPAD_BUTTON_MISC5,
     MISC6 = C.SDL_GAMEPAD_BUTTON_MISC6,
+    _,
 
-    pub const COUNT: c_int = C.SDL_GAMEPAD_BUTTON_COUNT;
+    pub const COUNT: u8 = C.SDL_GAMEPAD_BUTTON_COUNT;
+
+    pub inline fn from_int(val: anytype) GamepadButton {
+        return @enumFromInt(@as(u8, @intCast(val)));
+    }
 
     inline fn to_c(self: GamepadButton) c_uint {
-        return @intFromEnum(self);
+        return @intCast(@intFromEnum(self));
     }
     inline fn from_c(val: c_uint) GamepadButton {
-        return @enumFromInt(val);
+        return @enumFromInt(@as(u8, @intCast(val)));
     }
 
     pub fn from_string(str: [*:0]const u8) GamepadButton {
@@ -3068,8 +3115,7 @@ pub const GamepadFaceButtonLabel = enum(c_uint) {
     }
 };
 
-pub const GamepadAxis = enum(c_int) {
-    INVALID = C.SDL_GAMEPAD_AXIS_INVALID,
+pub const GamepadAxis = enum(u8) {
     LEFTX = C.SDL_GAMEPAD_AXIS_LEFTX,
     LEFTY = C.SDL_GAMEPAD_AXIS_LEFTY,
     RIGHTX = C.SDL_GAMEPAD_AXIS_RIGHTX,
@@ -3077,13 +3123,13 @@ pub const GamepadAxis = enum(c_int) {
     LEFT_TRIGGER = C.SDL_GAMEPAD_AXIS_LEFT_TRIGGER,
     RIGHT_TRIGGER = C.SDL_GAMEPAD_AXIS_RIGHT_TRIGGER,
 
-    pub const COUNT: c_int = C.SDL_GAMEPAD_AXIS_COUNT;
+    pub const COUNT: u8 = C.SDL_GAMEPAD_AXIS_COUNT;
 
-    inline fn to_c(self: GamepadAxis) c_uint {
-        return @intFromEnum(self);
+    inline fn to_c(self: GamepadAxis) c_int {
+        return @intCast(@intFromEnum(self));
     }
-    inline fn from_c(val: c_uint) GamepadAxis {
-        return @enumFromInt(val);
+    inline fn from_c(val: c_int) Error!GamepadAxis {
+        return to_enum_or_invalid_err(GamepadAxis, val);
     }
 
     pub fn from_string(str: [*:0]const u8) GamepadAxis {
@@ -3131,7 +3177,7 @@ pub const Storage = opaque {
         return ptr_cast_or_fail_err(*Storage, C.SDL_OpenTitleStorage(override.ptr, properties));
     }
     pub fn open_user_storage_folder(org_name: [:0]const u8, app_name: [:0]const u8, properties: PropertiesID) Error!*Storage {
-        return ptr_cast_or_fail_err(*Storage, C.SDL_OpenUserStorage(org_name.ptr, app_name.ptr, properties));
+        return ptr_cast_or_fail_err(*Storage, C.SDL_OpenUserStorage(org_name.ptr, app_name.ptr, properties.id));
     }
     pub fn open_filesystem(path: [:0]const u8) Error!*Storage {
         return ptr_cast_or_fail_err(*Storage, C.SDL_OpenFileStorage(path.ptr));
@@ -3143,7 +3189,7 @@ pub const Storage = opaque {
         return ok_or_fail_err(C.SDL_CloseStorage(self.to_c()));
     }
     pub fn is_ready(self: *Storage) bool {
-        C.SDL_StorageReady(self.to_c());
+        return C.SDL_StorageReady(self.to_c());
     }
     pub fn get_file_size(self: *Storage, sub_path: [:0]const u8) Error!u64 {
         var size: u64 = 0;
@@ -3244,9 +3290,10 @@ pub const DirectoryGlob = extern struct {
 };
 
 pub const KeyboardID = extern struct {
-    id: u32,
+    id: u32 = 0,
 };
 
+pub const C_Event = C.SDL_Event;
 pub const Event = extern union {
     type: EventType,
     common: CommonEvent,
@@ -3288,8 +3335,11 @@ pub const Event = extern union {
     clipboard: ClipboardEvent,
     _FORCE_SIZE: [128]u8,
 
-    inline fn to_c(self: *Event) *C.SDL_Event {
+    pub inline fn to_c(self: *Event) *C_Event {
         return @ptrCast(@alignCast(self));
+    }
+    pub inline fn from_c(c: *C_Event) *Event {
+        return @ptrCast(@alignCast(c));
     }
 
     pub fn convert_coords_to_render_coords(self: *Event, renderer: *Renderer) Error!void {
@@ -3298,7 +3348,7 @@ pub const Event = extern union {
 };
 
 pub const CommonEvent = extern struct {
-    type: EventType = .FIRST,
+    type: EventType = .NONE,
     reserved: u32 = 0,
     timestamp: u64 = 0,
 
@@ -3308,7 +3358,7 @@ pub const CommonEvent = extern struct {
 };
 
 pub const DisplayEvent = extern struct {
-    type: EventType = .FIRST,
+    type: EventType = .NONE,
     reserved: u32 = 0,
     timestamp: u64 = 0,
     display_id: DisplayID = .{},
@@ -3321,7 +3371,7 @@ pub const DisplayEvent = extern struct {
 };
 
 pub const WindowEvent = extern struct {
-    type: EventType = .FIRST,
+    type: EventType = .NONE,
     reserved: u32 = 0,
     timestamp: u64 = 0,
     window_id: WindowID = .{},
@@ -3334,7 +3384,7 @@ pub const WindowEvent = extern struct {
 };
 
 pub const KeyboardDeviceEvent = extern struct {
-    type: EventType = .FIRST,
+    type: EventType = .NONE,
     reserved: u32 = 0,
     timestamp: u64 = 0,
     keyboard_id: KeyboardID = .{},
@@ -3345,7 +3395,7 @@ pub const KeyboardDeviceEvent = extern struct {
 };
 
 pub const KeyboardEvent = extern struct {
-    type: EventType = .FIRST,
+    type: EventType = .NONE,
     reserved: u32 = 0,
     timestamp: u64 = 0,
     window_id: WindowID = .{},
@@ -3363,7 +3413,7 @@ pub const KeyboardEvent = extern struct {
 };
 
 pub const TextEditEvent = extern struct {
-    type: EventType = .FIRST,
+    type: EventType = .NONE,
     reserved: u32 = 0,
     timestamp: u64 = 0,
     window_id: WindowID = .{},
@@ -3377,7 +3427,7 @@ pub const TextEditEvent = extern struct {
 };
 
 pub const TextEditCandidateEvent = extern struct {
-    type: EventType = .FIRST,
+    type: EventType = .NONE,
     reserved: u32 = 0,
     timestamp: u64 = 0,
     window_id: WindowID = .{},
@@ -3395,7 +3445,7 @@ pub const TextEditCandidateEvent = extern struct {
 };
 
 pub const TextInputEvent = extern struct {
-    type: EventType = .FIRST,
+    type: EventType = .NONE,
     reserved: u32 = 0,
     timestamp: u64 = 0,
     window_id: WindowID = .{},
@@ -3407,10 +3457,10 @@ pub const TextInputEvent = extern struct {
 };
 
 pub const MouseDeviceEvent = extern struct {
-    type: EventType = .FIRST,
+    type: EventType = .NONE,
     reserved: u32 = 0,
     timestamp: u64 = 0,
-    mouse_id: Mouse = .{},
+    mouse_id: MouseID = .{},
 
     inline fn to_c(self: *MouseDeviceEvent) *C.SDL_MouseDeviceEvent {
         return @ptrCast(@alignCast(self));
@@ -3418,11 +3468,11 @@ pub const MouseDeviceEvent = extern struct {
 };
 
 pub const MouseMotionEvent = extern struct {
-    type: EventType = .FIRST,
+    type: EventType = .NONE,
     reserved: u32 = 0,
     timestamp: u64 = 0,
     window_id: WindowID = .{},
-    mouse_id: Mouse = .{},
+    mouse_id: MouseID = .{},
     state: MouseButtonFlags = .{},
     pos: FVec = FVec{},
     delta: FVec = FVec{},
@@ -3441,12 +3491,12 @@ pub const MouseMotionEvent = extern struct {
 };
 
 pub const MouseButtonEvent = extern struct {
-    type: EventType = .FIRST,
+    type: EventType = .NONE,
     reserved: u32 = 0,
     timestamp: u64 = 0,
     window_id: WindowID = .{},
-    mouse_id: Mouse = .{},
-    button: u8 = 0,
+    mouse_id: MouseID = .{},
+    button: MouseButton = .LEFT,
     down: bool = false,
     clicks: u8 = 0,
     _padding: u8 = 0,
@@ -3465,12 +3515,48 @@ pub const MouseButtonEvent = extern struct {
     }
 };
 
+pub const MouseButton = enum(u8) {
+    LEFT = C.SDL_BUTTON_LEFT,
+    MIDDLE = C.SDL_BUTTON_MIDDLE,
+    RIGHT = C.SDL_BUTTON_RIGHT,
+    MOUSE_4 = C.SDL_BUTTON_X1,
+    MOUSE_5 = C.SDL_BUTTON_X2,
+    _,
+
+    inline fn to_c(self: MouseButton) u8 {
+        return @intFromEnum(self);
+    }
+    inline fn from_c(val: u8) MouseButton {
+        return @enumFromInt(val);
+    }
+
+    pub inline fn to_mask(self: MouseButton) Mask {
+        return @enumFromInt(@as(u32, 1) << @intCast(@intFromEnum(self) - @as(u8, 1)));
+    }
+
+    pub const Mask = enum(u32) {
+        LEFT = to_mask(MouseButton.LEFT),
+        MIDDLE = to_mask(MouseButton.MIDDLE),
+        RIGHT = to_mask(MouseButton.RIGHT),
+        MOUSE_4 = to_mask(MouseButton.MOUSE_4),
+        MOUSE_5 = to_mask(MouseButton.MOUSE_5),
+        _,
+
+        inline fn to_c(self: Mask) u32 {
+            return @intFromEnum(self);
+        }
+        inline fn from_c(val: u32) Mask {
+            return @enumFromInt(val);
+        }
+    };
+};
+
 pub const MouseWheelEvent = extern struct {
-    type: EventType = .FIRST,
+    type: EventType = .NONE,
     reserved: u32 = 0,
     timestamp: u64 = 0,
     window_id: WindowID = .{},
-    mouse_id: Mouse = .{},
+    mouse_id: MouseID = .{},
     delta: FVec = FVec{},
     direction: MouseWheelDirection = .NORMAL,
     pos: FVec = FVec{},
@@ -3489,10 +3575,10 @@ pub const MouseWheelEvent = extern struct {
 };
 
 pub const JoyAxisEvent = extern struct {
-    type: EventType = .FIRST,
+    type: EventType = .NONE,
     reserved: u32 = 0,
     timestamp: u64 = 0,
-    joystick_id: GameControllerID = .{},
+    controller_id: GameControllerID = .{},
     axis: u8 = 0,
     _padding_1: u8 = 0,
     _padding_2: u8 = 0,
@@ -3506,10 +3592,10 @@ pub const JoyAxisEvent = extern struct {
 };
 
 pub const JoyBallEvent = extern struct {
-    type: EventType = .FIRST,
+    type: EventType = .NONE,
     reserved: u32 = 0,
     timestamp: u64 = 0,
-    joystick_id: GameControllerID = .{},
+    controller_id: GameControllerID = .{},
     ball: u8 = 0,
     _padding_1: u8 = 0,
     _padding_2: u8 = 0,
@@ -3530,10 +3616,10 @@ pub const JoyBallEvent = extern struct {
 };
 
 pub const JoyHatEvent = extern struct {
-    type: EventType = .FIRST,
+    type: EventType = .NONE,
     reserved: u32 = 0,
     timestamp: u64 = 0,
-    joystick_id: GameControllerID = .{},
+    controller_id: GameControllerID = .{},
     hat: u8 = 0,
     value: u8 = 0,
     _padding_1: u8 = 0,
@@ -3545,10 +3631,10 @@ pub const JoyHatEvent = extern struct {
 };
 
 pub const JoyButtonEvent = extern struct {
-    type: EventType = .FIRST,
+    type: EventType = .NONE,
     reserved: u32 = 0,
     timestamp: u64 = 0,
-    joystick_id: GameControllerID = .{},
+    controller_id: GameControllerID = .{},
     button: u8 = 0,
     down: bool = false,
     _padding_1: u8 = 0,
@@ -3560,10 +3646,10 @@ pub const JoyButtonEvent = extern struct {
 };
 
 pub const JoyDeviceEvent = extern struct {
-    type: EventType = .FIRST,
+    type: EventType = .NONE,
     reserved: u32 = 0,
     timestamp: u64 = 0,
-    joystick_id: GameControllerID = .{},
+    controller_id: GameControllerID = .{},
 
     inline fn to_c(self: *JoyDeviceEvent) *C.SDL_JoyDeviceEvent {
         return @ptrCast(@alignCast(self));
@@ -3571,10 +3657,10 @@ pub const JoyDeviceEvent = extern struct {
 };
 
 pub const JoyBatteryEvent = extern struct {
-    type: EventType = .FIRST,
+    type: EventType = .NONE,
     reserved: u32 = 0,
     timestamp: u64 = 0,
-    joystick_id: GameControllerID = .{},
+    controller_id: GameControllerID = .{},
     state: PowerState = .UNKNOWN,
     percent: c_int = 0,
 
@@ -3584,11 +3670,11 @@ pub const JoyBatteryEvent = extern struct {
 };
 
 pub const GamepadAxisEvent = extern struct {
-    type: EventType = .FIRST,
+    type: EventType = .NONE,
     reserved: u32 = 0,
     timestamp: u64 = 0,
-    joystick_id: GameControllerID = .{},
-    axis: u8 = 0,
+    controller_id: GameControllerID = .{},
+    axis: GamepadAxis = .LEFTX,
     _padding_1: u8 = 0,
     _padding_2: u8 = 0,
     _padding_3: u8 = 0,
@@ -3601,11 +3687,11 @@ pub const GamepadAxisEvent = extern struct {
 };
 
 pub const GamepadButtonEvent = extern struct {
-    type: EventType = .FIRST,
+    type: EventType = .NONE,
     reserved: u32 = 0,
     timestamp: u64 = 0,
-    joystick_id: GameControllerID = .{},
-    button: u8 = 0,
+    controller_id: GameControllerID = .{},
+    button: GamepadButton = .START,
     down: bool = false,
     _padding_1: u8 = 0,
     _padding_2: u8 = 0,
@@ -3616,10 +3702,10 @@ pub const GamepadButtonEvent = extern struct {
 };
 
 pub const GamepadDeviceEvent = extern struct {
-    type: EventType = .FIRST,
+    type: EventType = .NONE,
     reserved: u32 = 0,
     timestamp: u64 = 0,
-    joystick_id: GameControllerID = .{},
+    controller_id: GameControllerID = .{},
 
     inline fn to_c(self: *GamepadDeviceEvent) *C.SDL_GamepadDeviceEvent {
         return @ptrCast(@alignCast(self));
@@ -3627,10 +3713,10 @@ pub const GamepadDeviceEvent = extern struct {
 };
 
 pub const GamepadTouchpadEvent = extern struct {
-    type: EventType = .FIRST,
+    type: EventType = .NONE,
     reserved: u32 = 0,
     timestamp: u64 = 0,
-    joystick_id: GameControllerID = .{},
+    controller_id: GameControllerID = .{},
     touchpad: i32 = 0,
     finger: i32 = 0,
     pos: FVec = FVec{},
@@ -3650,10 +3736,10 @@ pub const GamepadTouchpadEvent = extern struct {
 };
 
 pub const GamepadSensorEvent = extern struct {
-    type: EventType = .FIRST,
+    type: EventType = .NONE,
     reserved: u32 = 0,
     timestamp: u64 = 0,
-    joystick_id: GameControllerID = .{},
+    controller_id: GameControllerID = .{},
     sensor: i32 = 0,
     data: [3]f32 = @splat(0.0),
     sensor_timestamp: u64 = 0,
@@ -3664,7 +3750,7 @@ pub const GamepadSensorEvent = extern struct {
 };
 
 pub const AudioDeviceEvent = extern struct {
-    type: EventType = .FIRST,
+    type: EventType = .NONE,
     reserved: u32 = 0,
     timestamp: u64 = 0,
     device_id: AudioDeviceID = .{},
@@ -3679,10 +3765,10 @@ pub const AudioDeviceEvent = extern struct {
 };
 
 pub const CameraDeviceEvent = extern struct {
-    type: EventType = .FIRST,
+    type: EventType = .NONE,
     reserved: u32 = 0,
     timestamp: u64 = 0,
-    device_id: Camera = .{},
+    device_id: CameraID = .{},
 
     inline fn to_c(self: *CameraDeviceEvent) *C.SDL_CameraDeviceEvent {
         return @ptrCast(@alignCast(self));
@@ -3690,7 +3776,7 @@ pub const CameraDeviceEvent = extern struct {
 };
 
 pub const RenderEvent = extern struct {
-    type: EventType = .FIRST,
+    type: EventType = .NONE,
     reserved: u32 = 0,
     timestamp: u64 = 0,
     window_id: WindowID = .{},
@@ -3701,11 +3787,11 @@ pub const RenderEvent = extern struct {
 };
 
 pub const TouchFingerEvent = extern struct {
-    type: EventType = .FIRST,
+    type: EventType = .NONE,
     reserved: u32 = 0,
     timestamp: u64 = 0,
-    touch_id: Touch = .{},
-    finger_id: Finger = .{},
+    touch_id: TouchID = .{},
+    finger_id: FingerID = .{},
     pos: FVec = FVec{},
     delta: FVec = FVec{},
     pressure: f32 = 0,
@@ -3725,11 +3811,11 @@ pub const TouchFingerEvent = extern struct {
 };
 
 pub const PenProximityEvent = extern struct {
-    type: EventType = .FIRST,
+    type: EventType = .NONE,
     reserved: u32 = 0,
     timestamp: u64 = 0,
     window_id: WindowID = .{},
-    pen_id: Pen = .{},
+    pen_id: PenID = .{},
 
     inline fn to_c(self: *PenProximityEvent) *C.SDL_PenProximityEvent {
         return @ptrCast(@alignCast(self));
@@ -3737,11 +3823,11 @@ pub const PenProximityEvent = extern struct {
 };
 
 pub const PenMotionEvent = extern struct {
-    type: EventType = .FIRST,
+    type: EventType = .NONE,
     reserved: u32 = 0,
     timestamp: u64 = 0,
     window_id: WindowID = .{},
-    pen_id: Pen = .{},
+    pen_id: PenID = .{},
     pen_state: PenInputFlags = .{},
     pos: FVec = FVec{},
 
@@ -3759,11 +3845,11 @@ pub const PenMotionEvent = extern struct {
 };
 
 pub const PenTouchEvent = extern struct {
-    type: EventType = .FIRST,
+    type: EventType = .NONE,
     reserved: u32 = 0,
     timestamp: u64 = 0,
     window_id: WindowID = .{},
-    pen_id: Pen = .{},
+    pen_id: PenID = .{},
     pen_state: PenInputFlags = .{},
     pos: FVec = FVec{},
     eraser: bool = false,
@@ -3783,11 +3869,11 @@ pub const PenTouchEvent = extern struct {
 };
 
 pub const PenButtonEvent = extern struct {
-    type: EventType = .FIRST,
+    type: EventType = .NONE,
     reserved: u32 = 0,
     timestamp: u64 = 0,
     window_id: WindowID = .{},
-    pen_id: Pen = .{},
+    pen_id: PenID = .{},
     pen_state: PenInputFlags = .{},
     pos: FVec = FVec{},
     button: u8 = 0,
@@ -3807,11 +3893,11 @@ pub const PenButtonEvent = extern struct {
 };
 
 pub const PenAxisEvent = extern struct {
-    type: EventType = .FIRST,
+    type: EventType = .NONE,
     reserved: u32 = 0,
     timestamp: u64 = 0,
     window_id: WindowID = .{},
-    pen_id: Pen = .{},
+    pen_id: PenID = .{},
     pen_state: PenInputFlags = .{},
     pos: FVec = FVec{},
     axis: PenAxis = .PRESSURE,
@@ -3831,7 +3917,7 @@ pub const PenAxisEvent = extern struct {
 };
 
 pub const DropEvent = extern struct {
-    type: EventType = .FIRST,
+    type: EventType = .NONE,
     reserved: u32 = 0,
     timestamp: u64 = 0,
     window_id: WindowID = .{},
@@ -3853,7 +3939,7 @@ pub const DropEvent = extern struct {
 };
 
 pub const ClipboardEvent = extern struct {
-    type: EventType = .FIRST,
+    type: EventType = .NONE,
     reserved: u32 = 0,
     timestamp: u64 = 0,
     owner: bool = false,
@@ -3866,7 +3952,7 @@ pub const ClipboardEvent = extern struct {
 };
 
 pub const SensorEvent = extern struct {
-    type: EventType = .FIRST,
+    type: EventType = .NONE,
     reserved: u32 = 0,
     timestamp: u64 = 0,
     sensor_id: bool = false,
@@ -3879,7 +3965,7 @@ pub const SensorEvent = extern struct {
 };
 
 pub const QuitEvent = extern struct {
-    type: EventType = .FIRST,
+    type: EventType = .NONE,
     reserved: u32 = 0,
     timestamp: u64 = 0,
 
@@ -3889,7 +3975,7 @@ pub const QuitEvent = extern struct {
 };
 
 pub const UserEvent = extern struct {
-    type: EventType = .FIRST,
+    type: EventType = .NONE,
     reserved: u32 = 0,
     timestamp: u64 = 0,
     window_id: WindowID = .{},
@@ -3902,15 +3988,15 @@ pub const UserEvent = extern struct {
     }
 };
 
-pub const Mouse = extern struct {
+pub const MouseID = extern struct {
     id: u32 = 0,
 };
 
-pub const Pen = extern struct {
+pub const PenID = extern struct {
     id: u32 = 0,
 };
 
-pub const Sensor = extern struct {
+pub const SensorID = extern struct {
     id: u32 = 0,
 };
 
@@ -3932,7 +4018,7 @@ pub const GameControllerID = extern struct {
     pub fn get_all_gamepads() Error!GamepadsList {
         var len: c_int = 0;
         const ptr = try ptr_cast_or_fail_err([*]GameControllerID, C.SDL_GetGamepads(&len));
-        return GamepadsList{ .list = ptr[0..len] };
+        return GamepadsList{ .list = ptr[0..@intCast(len)] };
     }
     pub fn is_gamepad(self: GameControllerID) bool {
         return C.SDL_IsGamepad(self.id);
@@ -4360,7 +4446,7 @@ pub const PlayerIndex = extern struct {
     pub const NULL_IDX = PlayerIndex{ .index = -1 };
 };
 
-pub const GamepadsList = extern struct {
+pub const GamepadsList = struct {
     list: []GameControllerID,
 
     pub fn free(self: GamepadsList) void {
@@ -4369,18 +4455,18 @@ pub const GamepadsList = extern struct {
 };
 
 pub const GUID = extern struct {
-    data: [16]u8,
+    data: [16]u8 = @splat(0),
 };
 
-pub const Camera = extern struct {
-    id: u32,
+pub const CameraID = extern struct {
+    id: u32 = 0,
 };
 
-pub const Touch = extern struct {
+pub const TouchID = extern struct {
     id: u64 = 0,
 };
 
-pub const Finger = extern struct {
+pub const FingerID = extern struct {
     id: u64 = 0,
 };
 
@@ -4440,7 +4526,7 @@ pub const PowerState = enum(c_int) {
 };
 
 pub const EventType = enum(u32) {
-    FIRST = C.SDL_EVENT_FIRST,
+    NONE = 0,
     QUIT = C.SDL_EVENT_QUIT,
     TERMINATING = C.SDL_EVENT_TERMINATING,
     LOW_MEMORY = C.SDL_EVENT_LOW_MEMORY,
@@ -4457,8 +4543,6 @@ pub const EventType = enum(u32) {
     DISPLAY_DESKTOP_MODE_CHANGED = C.SDL_EVENT_DISPLAY_DESKTOP_MODE_CHANGED,
     DISPLAY_CURRENT_MODE_CHANGED = C.SDL_EVENT_DISPLAY_CURRENT_MODE_CHANGED,
     DISPLAY_CONTENT_SCALE_CHANGED = C.SDL_EVENT_DISPLAY_CONTENT_SCALE_CHANGED,
-    DISPLAY_FIRST = C.SDL_EVENT_DISPLAY_FIRST,
-    DISPLAY_LAST = C.SDL_EVENT_DISPLAY_LAST,
     WINDOW_SHOWN = C.SDL_EVENT_WINDOW_SHOWN,
     WINDOW_HIDDEN = C.SDL_EVENT_WINDOW_HIDDEN,
     WINDOW_EXPOSED = C.SDL_EVENT_WINDOW_EXPOSED,
@@ -4484,8 +4568,6 @@ pub const EventType = enum(u32) {
     WINDOW_LEAVE_FULLSCREEN = C.SDL_EVENT_WINDOW_LEAVE_FULLSCREEN,
     WINDOW_DESTROYED = C.SDL_EVENT_WINDOW_DESTROYED,
     WINDOW_HDR_STATE_CHANGED = C.SDL_EVENT_WINDOW_HDR_STATE_CHANGED,
-    WINDOW_FIRST = C.SDL_EVENT_WINDOW_FIRST,
-    WINDOW_LAST = C.SDL_EVENT_WINDOW_LAST,
     KEY_DOWN = C.SDL_EVENT_KEY_DOWN,
     KEY_UP = C.SDL_EVENT_KEY_UP,
     TEXT_EDITING = C.SDL_EVENT_TEXT_EDITING,
@@ -4555,10 +4637,26 @@ pub const EventType = enum(u32) {
     PRIVATE2 = C.SDL_EVENT_PRIVATE2,
     PRIVATE3 = C.SDL_EVENT_PRIVATE3,
     POLL_SENTINEL = C.SDL_EVENT_POLL_SENTINEL,
-    USER = C.SDL_EVENT_USER,
-    LAST = C.SDL_EVENT_LAST,
+    _,
 
-    const ENUM_PADDING = C.SDL_EVENT_ENUM_PADDING;
+    pub const SDL_BEGIN = C.SDL_EVENT_FIRST;
+    pub const DISPLAY_FIRST = C.SDL_EVENT_DISPLAY_ORIENTATION;
+    pub const DISPLAY_LAST = C.SDL_EVENT_DISPLAY_CONTENT_SCALE_CHANGED;
+    pub const WINDOW_FIRST = C.SDL_EVENT_WINDOW_FIRST;
+    pub const WINDOW_LAST = C.SDL_EVENT_WINDOW_LAST;
+    pub const SDL_END = USER_BEGIN - 1;
+    pub const USER_BEGIN = C.SDL_EVENT_USER;
+    pub const USER_END = C.SDL_EVENT_LAST;
+
+    pub fn user_event_int(int: u32) EventType {
+        assert(int >= USER_BEGIN and int <= USER_END);
+        return @enumFromInt(int);
+    }
+    pub fn user_event(comptime E: type, val: E) EventType {
+        const int = @intFromEnum(val);
+        assert(int >= USER_BEGIN and int <= USER_END);
+        return @enumFromInt(@as(u32, @intCast(int)));
+    }
 
     inline fn to_c(self: EventType) c_uint {
         return @intFromEnum(self);
@@ -4570,255 +4668,254 @@ pub const EventType = enum(u32) {
 
 pub const Scancode = enum(c_uint) {
     UNKNOWN = C.SDL_SCANCODE_UNKNOWN,
-    //FIXME
-    // pub const SDL_SCANCODE_A: c_int = 4;
-    // pub const SDL_SCANCODE_B: c_int = 5;
-    // pub const SDL_SCANCODE_C: c_int = 6;
-    // pub const SDL_SCANCODE_D: c_int = 7;
-    // pub const SDL_SCANCODE_E: c_int = 8;
-    // pub const SDL_SCANCODE_F: c_int = 9;
-    // pub const SDL_SCANCODE_G: c_int = 10;
-    // pub const SDL_SCANCODE_H: c_int = 11;
-    // pub const SDL_SCANCODE_I: c_int = 12;
-    // pub const SDL_SCANCODE_J: c_int = 13;
-    // pub const SDL_SCANCODE_K: c_int = 14;
-    // pub const SDL_SCANCODE_L: c_int = 15;
-    // pub const SDL_SCANCODE_M: c_int = 16;
-    // pub const SDL_SCANCODE_N: c_int = 17;
-    // pub const SDL_SCANCODE_O: c_int = 18;
-    // pub const SDL_SCANCODE_P: c_int = 19;
-    // pub const SDL_SCANCODE_Q: c_int = 20;
-    // pub const SDL_SCANCODE_R: c_int = 21;
-    // pub const SDL_SCANCODE_S: c_int = 22;
-    // pub const SDL_SCANCODE_T: c_int = 23;
-    // pub const SDL_SCANCODE_U: c_int = 24;
-    // pub const SDL_SCANCODE_V: c_int = 25;
-    // pub const SDL_SCANCODE_W: c_int = 26;
-    // pub const SDL_SCANCODE_X: c_int = 27;
-    // pub const SDL_SCANCODE_Y: c_int = 28;
-    // pub const SDL_SCANCODE_Z: c_int = 29;
-    // pub const SDL_SCANCODE_1: c_int = 30;
-    // pub const SDL_SCANCODE_2: c_int = 31;
-    // pub const SDL_SCANCODE_3: c_int = 32;
-    // pub const SDL_SCANCODE_4: c_int = 33;
-    // pub const SDL_SCANCODE_5: c_int = 34;
-    // pub const SDL_SCANCODE_6: c_int = 35;
-    // pub const SDL_SCANCODE_7: c_int = 36;
-    // pub const SDL_SCANCODE_8: c_int = 37;
-    // pub const SDL_SCANCODE_9: c_int = 38;
-    // pub const SDL_SCANCODE_0: c_int = 39;
-    // pub const SDL_SCANCODE_RETURN: c_int = 40;
-    // pub const SDL_SCANCODE_ESCAPE: c_int = 41;
-    // pub const SDL_SCANCODE_BACKSPACE: c_int = 42;
-    // pub const SDL_SCANCODE_TAB: c_int = 43;
-    // pub const SDL_SCANCODE_SPACE: c_int = 44;
-    // pub const SDL_SCANCODE_MINUS: c_int = 45;
-    // pub const SDL_SCANCODE_EQUALS: c_int = 46;
-    // pub const SDL_SCANCODE_LEFTBRACKET: c_int = 47;
-    // pub const SDL_SCANCODE_RIGHTBRACKET: c_int = 48;
-    // pub const SDL_SCANCODE_BACKSLASH: c_int = 49;
-    // pub const SDL_SCANCODE_NONUSHASH: c_int = 50;
-    // pub const SDL_SCANCODE_SEMICOLON: c_int = 51;
-    // pub const SDL_SCANCODE_APOSTROPHE: c_int = 52;
-    // pub const SDL_SCANCODE_GRAVE: c_int = 53;
-    // pub const SDL_SCANCODE_COMMA: c_int = 54;
-    // pub const SDL_SCANCODE_PERIOD: c_int = 55;
-    // pub const SDL_SCANCODE_SLASH: c_int = 56;
-    // pub const SDL_SCANCODE_CAPSLOCK: c_int = 57;
-    // pub const SDL_SCANCODE_F1: c_int = 58;
-    // pub const SDL_SCANCODE_F2: c_int = 59;
-    // pub const SDL_SCANCODE_F3: c_int = 60;
-    // pub const SDL_SCANCODE_F4: c_int = 61;
-    // pub const SDL_SCANCODE_F5: c_int = 62;
-    // pub const SDL_SCANCODE_F6: c_int = 63;
-    // pub const SDL_SCANCODE_F7: c_int = 64;
-    // pub const SDL_SCANCODE_F8: c_int = 65;
-    // pub const SDL_SCANCODE_F9: c_int = 66;
-    // pub const SDL_SCANCODE_F10: c_int = 67;
-    // pub const SDL_SCANCODE_F11: c_int = 68;
-    // pub const SDL_SCANCODE_F12: c_int = 69;
-    // pub const SDL_SCANCODE_PRINTSCREEN: c_int = 70;
-    // pub const SDL_SCANCODE_SCROLLLOCK: c_int = 71;
-    // pub const SDL_SCANCODE_PAUSE: c_int = 72;
-    // pub const SDL_SCANCODE_INSERT: c_int = 73;
-    // pub const SDL_SCANCODE_HOME: c_int = 74;
-    // pub const SDL_SCANCODE_PAGEUP: c_int = 75;
-    // pub const SDL_SCANCODE_DELETE: c_int = 76;
-    // pub const SDL_SCANCODE_END: c_int = 77;
-    // pub const SDL_SCANCODE_PAGEDOWN: c_int = 78;
-    // pub const SDL_SCANCODE_RIGHT: c_int = 79;
-    // pub const SDL_SCANCODE_LEFT: c_int = 80;
-    // pub const SDL_SCANCODE_DOWN: c_int = 81;
-    // pub const SDL_SCANCODE_UP: c_int = 82;
-    // pub const SDL_SCANCODE_NUMLOCKCLEAR: c_int = 83;
-    // pub const SDL_SCANCODE_KP_DIVIDE: c_int = 84;
-    // pub const SDL_SCANCODE_KP_MULTIPLY: c_int = 85;
-    // pub const SDL_SCANCODE_KP_MINUS: c_int = 86;
-    // pub const SDL_SCANCODE_KP_PLUS: c_int = 87;
-    // pub const SDL_SCANCODE_KP_ENTER: c_int = 88;
-    // pub const SDL_SCANCODE_KP_1: c_int = 89;
-    // pub const SDL_SCANCODE_KP_2: c_int = 90;
-    // pub const SDL_SCANCODE_KP_3: c_int = 91;
-    // pub const SDL_SCANCODE_KP_4: c_int = 92;
-    // pub const SDL_SCANCODE_KP_5: c_int = 93;
-    // pub const SDL_SCANCODE_KP_6: c_int = 94;
-    // pub const SDL_SCANCODE_KP_7: c_int = 95;
-    // pub const SDL_SCANCODE_KP_8: c_int = 96;
-    // pub const SDL_SCANCODE_KP_9: c_int = 97;
-    // pub const SDL_SCANCODE_KP_0: c_int = 98;
-    // pub const SDL_SCANCODE_KP_PERIOD: c_int = 99;
-    // pub const SDL_SCANCODE_NONUSBACKSLASH: c_int = 100;
-    // pub const SDL_SCANCODE_APPLICATION: c_int = 101;
-    // pub const SDL_SCANCODE_POWER: c_int = 102;
-    // pub const SDL_SCANCODE_KP_EQUALS: c_int = 103;
-    // pub const SDL_SCANCODE_F13: c_int = 104;
-    // pub const SDL_SCANCODE_F14: c_int = 105;
-    // pub const SDL_SCANCODE_F15: c_int = 106;
-    // pub const SDL_SCANCODE_F16: c_int = 107;
-    // pub const SDL_SCANCODE_F17: c_int = 108;
-    // pub const SDL_SCANCODE_F18: c_int = 109;
-    // pub const SDL_SCANCODE_F19: c_int = 110;
-    // pub const SDL_SCANCODE_F20: c_int = 111;
-    // pub const SDL_SCANCODE_F21: c_int = 112;
-    // pub const SDL_SCANCODE_F22: c_int = 113;
-    // pub const SDL_SCANCODE_F23: c_int = 114;
-    // pub const SDL_SCANCODE_F24: c_int = 115;
-    // pub const SDL_SCANCODE_EXECUTE: c_int = 116;
-    // pub const SDL_SCANCODE_HELP: c_int = 117;
-    // pub const SDL_SCANCODE_MENU: c_int = 118;
-    // pub const SDL_SCANCODE_SELECT: c_int = 119;
-    // pub const SDL_SCANCODE_STOP: c_int = 120;
-    // pub const SDL_SCANCODE_AGAIN: c_int = 121;
-    // pub const SDL_SCANCODE_UNDO: c_int = 122;
-    // pub const SDL_SCANCODE_CUT: c_int = 123;
-    // pub const SDL_SCANCODE_COPY: c_int = 124;
-    // pub const SDL_SCANCODE_PASTE: c_int = 125;
-    // pub const SDL_SCANCODE_FIND: c_int = 126;
-    // pub const SDL_SCANCODE_MUTE: c_int = 127;
-    // pub const SDL_SCANCODE_VOLUMEUP: c_int = 128;
-    // pub const SDL_SCANCODE_VOLUMEDOWN: c_int = 129;
-    // pub const SDL_SCANCODE_KP_COMMA: c_int = 133;
-    // pub const SDL_SCANCODE_KP_EQUALSAS400: c_int = 134;
-    // pub const SDL_SCANCODE_INTERNATIONAL1: c_int = 135;
-    // pub const SDL_SCANCODE_INTERNATIONAL2: c_int = 136;
-    // pub const SDL_SCANCODE_INTERNATIONAL3: c_int = 137;
-    // pub const SDL_SCANCODE_INTERNATIONAL4: c_int = 138;
-    // pub const SDL_SCANCODE_INTERNATIONAL5: c_int = 139;
-    // pub const SDL_SCANCODE_INTERNATIONAL6: c_int = 140;
-    // pub const SDL_SCANCODE_INTERNATIONAL7: c_int = 141;
-    // pub const SDL_SCANCODE_INTERNATIONAL8: c_int = 142;
-    // pub const SDL_SCANCODE_INTERNATIONAL9: c_int = 143;
-    // pub const SDL_SCANCODE_LANG1: c_int = 144;
-    // pub const SDL_SCANCODE_LANG2: c_int = 145;
-    // pub const SDL_SCANCODE_LANG3: c_int = 146;
-    // pub const SDL_SCANCODE_LANG4: c_int = 147;
-    // pub const SDL_SCANCODE_LANG5: c_int = 148;
-    // pub const SDL_SCANCODE_LANG6: c_int = 149;
-    // pub const SDL_SCANCODE_LANG7: c_int = 150;
-    // pub const SDL_SCANCODE_LANG8: c_int = 151;
-    // pub const SDL_SCANCODE_LANG9: c_int = 152;
-    // pub const SDL_SCANCODE_ALTERASE: c_int = 153;
-    // pub const SDL_SCANCODE_SYSREQ: c_int = 154;
-    // pub const SDL_SCANCODE_CANCEL: c_int = 155;
-    // pub const SDL_SCANCODE_CLEAR: c_int = 156;
-    // pub const SDL_SCANCODE_PRIOR: c_int = 157;
-    // pub const SDL_SCANCODE_RETURN2: c_int = 158;
-    // pub const SDL_SCANCODE_SEPARATOR: c_int = 159;
-    // pub const SDL_SCANCODE_OUT: c_int = 160;
-    // pub const SDL_SCANCODE_OPER: c_int = 161;
-    // pub const SDL_SCANCODE_CLEARAGAIN: c_int = 162;
-    // pub const SDL_SCANCODE_CRSEL: c_int = 163;
-    // pub const SDL_SCANCODE_EXSEL: c_int = 164;
-    // pub const SDL_SCANCODE_KP_00: c_int = 176;
-    // pub const SDL_SCANCODE_KP_000: c_int = 177;
-    // pub const SDL_SCANCODE_THOUSANDSSEPARATOR: c_int = 178;
-    // pub const SDL_SCANCODE_DECIMALSEPARATOR: c_int = 179;
-    // pub const SDL_SCANCODE_CURRENCYUNIT: c_int = 180;
-    // pub const SDL_SCANCODE_CURRENCYSUBUNIT: c_int = 181;
-    // pub const SDL_SCANCODE_KP_LEFTPAREN: c_int = 182;
-    // pub const SDL_SCANCODE_KP_RIGHTPAREN: c_int = 183;
-    // pub const SDL_SCANCODE_KP_LEFTBRACE: c_int = 184;
-    // pub const SDL_SCANCODE_KP_RIGHTBRACE: c_int = 185;
-    // pub const SDL_SCANCODE_KP_TAB: c_int = 186;
-    // pub const SDL_SCANCODE_KP_BACKSPACE: c_int = 187;
-    // pub const SDL_SCANCODE_KP_A: c_int = 188;
-    // pub const SDL_SCANCODE_KP_B: c_int = 189;
-    // pub const SDL_SCANCODE_KP_C: c_int = 190;
-    // pub const SDL_SCANCODE_KP_D: c_int = 191;
-    // pub const SDL_SCANCODE_KP_E: c_int = 192;
-    // pub const SDL_SCANCODE_KP_F: c_int = 193;
-    // pub const SDL_SCANCODE_KP_XOR: c_int = 194;
-    // pub const SDL_SCANCODE_KP_POWER: c_int = 195;
-    // pub const SDL_SCANCODE_KP_PERCENT: c_int = 196;
-    // pub const SDL_SCANCODE_KP_LESS: c_int = 197;
-    // pub const SDL_SCANCODE_KP_GREATER: c_int = 198;
-    // pub const SDL_SCANCODE_KP_AMPERSAND: c_int = 199;
-    // pub const SDL_SCANCODE_KP_DBLAMPERSAND: c_int = 200;
-    // pub const SDL_SCANCODE_KP_VERTICALBAR: c_int = 201;
-    // pub const SDL_SCANCODE_KP_DBLVERTICALBAR: c_int = 202;
-    // pub const SDL_SCANCODE_KP_COLON: c_int = 203;
-    // pub const SDL_SCANCODE_KP_HASH: c_int = 204;
-    // pub const SDL_SCANCODE_KP_SPACE: c_int = 205;
-    // pub const SDL_SCANCODE_KP_AT: c_int = 206;
-    // pub const SDL_SCANCODE_KP_EXCLAM: c_int = 207;
-    // pub const SDL_SCANCODE_KP_MEMSTORE: c_int = 208;
-    // pub const SDL_SCANCODE_KP_MEMRECALL: c_int = 209;
-    // pub const SDL_SCANCODE_KP_MEMCLEAR: c_int = 210;
-    // pub const SDL_SCANCODE_KP_MEMADD: c_int = 211;
-    // pub const SDL_SCANCODE_KP_MEMSUBTRACT: c_int = 212;
-    // pub const SDL_SCANCODE_KP_MEMMULTIPLY: c_int = 213;
-    // pub const SDL_SCANCODE_KP_MEMDIVIDE: c_int = 214;
-    // pub const SDL_SCANCODE_KP_PLUSMINUS: c_int = 215;
-    // pub const SDL_SCANCODE_KP_CLEAR: c_int = 216;
-    // pub const SDL_SCANCODE_KP_CLEARENTRY: c_int = 217;
-    // pub const SDL_SCANCODE_KP_BINARY: c_int = 218;
-    // pub const SDL_SCANCODE_KP_OCTAL: c_int = 219;
-    // pub const SDL_SCANCODE_KP_DECIMAL: c_int = 220;
-    // pub const SDL_SCANCODE_KP_HEXADECIMAL: c_int = 221;
-    // pub const SDL_SCANCODE_LCTRL: c_int = 224;
-    // pub const SDL_SCANCODE_LSHIFT: c_int = 225;
-    // pub const SDL_SCANCODE_LALT: c_int = 226;
-    // pub const SDL_SCANCODE_LGUI: c_int = 227;
-    // pub const SDL_SCANCODE_RCTRL: c_int = 228;
-    // pub const SDL_SCANCODE_RSHIFT: c_int = 229;
-    // pub const SDL_SCANCODE_RALT: c_int = 230;
-    // pub const SDL_SCANCODE_RGUI: c_int = 231;
-    // pub const SDL_SCANCODE_MODE: c_int = 257;
-    // pub const SDL_SCANCODE_SLEEP: c_int = 258;
-    // pub const SDL_SCANCODE_WAKE: c_int = 259;
-    // pub const SDL_SCANCODE_CHANNEL_INCREMENT: c_int = 260;
-    // pub const SDL_SCANCODE_CHANNEL_DECREMENT: c_int = 261;
-    // pub const SDL_SCANCODE_MEDIA_PLAY: c_int = 262;
-    // pub const SDL_SCANCODE_MEDIA_PAUSE: c_int = 263;
-    // pub const SDL_SCANCODE_MEDIA_RECORD: c_int = 264;
-    // pub const SDL_SCANCODE_MEDIA_FAST_FORWARD: c_int = 265;
-    // pub const SDL_SCANCODE_MEDIA_REWIND: c_int = 266;
-    // pub const SDL_SCANCODE_MEDIA_NEXT_TRACK: c_int = 267;
-    // pub const SDL_SCANCODE_MEDIA_PREVIOUS_TRACK: c_int = 268;
-    // pub const SDL_SCANCODE_MEDIA_STOP: c_int = 269;
-    // pub const SDL_SCANCODE_MEDIA_EJECT: c_int = 270;
-    // pub const SDL_SCANCODE_MEDIA_PLAY_PAUSE: c_int = 271;
-    // pub const SDL_SCANCODE_MEDIA_SELECT: c_int = 272;
-    // pub const SDL_SCANCODE_AC_NEW: c_int = 273;
-    // pub const SDL_SCANCODE_AC_OPEN: c_int = 274;
-    // pub const SDL_SCANCODE_AC_CLOSE: c_int = 275;
-    // pub const SDL_SCANCODE_AC_EXIT: c_int = 276;
-    // pub const SDL_SCANCODE_AC_SAVE: c_int = 277;
-    // pub const SDL_SCANCODE_AC_PRINT: c_int = 278;
-    // pub const SDL_SCANCODE_AC_PROPERTIES: c_int = 279;
-    // pub const SDL_SCANCODE_AC_SEARCH: c_int = 280;
-    // pub const SDL_SCANCODE_AC_HOME: c_int = 281;
-    // pub const SDL_SCANCODE_AC_BACK: c_int = 282;
-    // pub const SDL_SCANCODE_AC_FORWARD: c_int = 283;
-    // pub const SDL_SCANCODE_AC_STOP: c_int = 284;
-    // pub const SDL_SCANCODE_AC_REFRESH: c_int = 285;
-    // pub const SDL_SCANCODE_AC_BOOKMARKS: c_int = 286;
-    // pub const SDL_SCANCODE_SOFTLEFT: c_int = 287;
-    // pub const SDL_SCANCODE_SOFTRIGHT: c_int = 288;
-    // pub const SDL_SCANCODE_CALL: c_int = 289;
-    // pub const SDL_SCANCODE_ENDCALL: c_int = 290;
-    // pub const SDL_SCANCODE_RESERVED: c_int = 400;
-    // pub const SDL_SCANCODE_COUNT: c_int = 512;
+    A = C.SDL_SCANCODE_A,
+    B = C.SDL_SCANCODE_B,
+    C = C.SDL_SCANCODE_C,
+    D = C.SDL_SCANCODE_D,
+    E = C.SDL_SCANCODE_E,
+    F = C.SDL_SCANCODE_F,
+    G = C.SDL_SCANCODE_G,
+    H = C.SDL_SCANCODE_H,
+    I = C.SDL_SCANCODE_I,
+    K = C.SDL_SCANCODE_K,
+    L = C.SDL_SCANCODE_L,
+    M = C.SDL_SCANCODE_M,
+    N = C.SDL_SCANCODE_N,
+    O = C.SDL_SCANCODE_O,
+    P = C.SDL_SCANCODE_P,
+    Q = C.SDL_SCANCODE_Q,
+    R = C.SDL_SCANCODE_R,
+    S = C.SDL_SCANCODE_S,
+    T = C.SDL_SCANCODE_T,
+    U = C.SDL_SCANCODE_U,
+    V = C.SDL_SCANCODE_V,
+    W = C.SDL_SCANCODE_W,
+    X = C.SDL_SCANCODE_X,
+    Y = C.SDL_SCANCODE_Y,
+    Z = C.SDL_SCANCODE_Z,
+    _1 = C.SDL_SCANCODE_1,
+    _2 = C.SDL_SCANCODE_2,
+    _3 = C.SDL_SCANCODE_3,
+    _4 = C.SDL_SCANCODE_4,
+    _5 = C.SDL_SCANCODE_5,
+    _6 = C.SDL_SCANCODE_6,
+    _7 = C.SDL_SCANCODE_7,
+    _8 = C.SDL_SCANCODE_8,
+    _9 = C.SDL_SCANCODE_9,
+    _0 = C.SDL_SCANCODE_0,
+    RETURN = C.SDL_SCANCODE_RETURN,
+    ESCAPE = C.SDL_SCANCODE_ESCAPE,
+    BACKSPACE = C.SDL_SCANCODE_BACKSPACE,
+    TAB = C.SDL_SCANCODE_TAB,
+    SPACE = C.SDL_SCANCODE_SPACE,
+    MINUS = C.SDL_SCANCODE_MINUS,
+    EQUALS = C.SDL_SCANCODE_EQUALS,
+    LEFTBRACKET = C.SDL_SCANCODE_LEFTBRACKET,
+    RIGHTBRACKET = C.SDL_SCANCODE_RIGHTBRACKET,
+    BACKSLASH = C.SDL_SCANCODE_BACKSLASH,
+    NONUSHASH = C.SDL_SCANCODE_NONUSHASH,
+    SEMICOLON = C.SDL_SCANCODE_SEMICOLON,
+    APOSTROPHE = C.SDL_SCANCODE_APOSTROPHE,
+    GRAVE = C.SDL_SCANCODE_GRAVE,
+    COMMA = C.SDL_SCANCODE_COMMA,
+    PERIOD = C.SDL_SCANCODE_PERIOD,
+    SLASH = C.SDL_SCANCODE_SLASH,
+    CAPSLOCK = C.SDL_SCANCODE_CAPSLOCK,
+    F1 = C.SDL_SCANCODE_F1,
+    F2 = C.SDL_SCANCODE_F2,
+    F3 = C.SDL_SCANCODE_F3,
+    F4 = C.SDL_SCANCODE_F4,
+    F5 = C.SDL_SCANCODE_F5,
+    F6 = C.SDL_SCANCODE_F6,
+    F7 = C.SDL_SCANCODE_F7,
+    F8 = C.SDL_SCANCODE_F8,
+    F9 = C.SDL_SCANCODE_F9,
+    F10 = C.SDL_SCANCODE_F10,
+    F11 = C.SDL_SCANCODE_F11,
+    F12 = C.SDL_SCANCODE_F12,
+    PRINTSCREEN = C.SDL_SCANCODE_PRINTSCREEN,
+    SCROLLLOCK = C.SDL_SCANCODE_SCROLLLOCK,
+    PAUSE = C.SDL_SCANCODE_PAUSE,
+    INSERT = C.SDL_SCANCODE_INSERT,
+    HOME = C.SDL_SCANCODE_HOME,
+    PAGEUP = C.SDL_SCANCODE_PAGEUP,
+    DELETE = C.SDL_SCANCODE_DELETE,
+    END = C.SDL_SCANCODE_END,
+    PAGEDOWN = C.SDL_SCANCODE_PAGEDOWN,
+    RIGHT = C.SDL_SCANCODE_RIGHT,
+    LEFT = C.SDL_SCANCODE_LEFT,
+    DOWN = C.SDL_SCANCODE_DOWN,
+    UP = C.SDL_SCANCODE_UP,
+    NUMLOCKCLEAR = C.SDL_SCANCODE_NUMLOCKCLEAR,
+    KP_DIVIDE = C.SDL_SCANCODE_KP_DIVIDE,
+    KP_MULTIPLY = C.SDL_SCANCODE_KP_MULTIPLY,
+    KP_MINUS = C.SDL_SCANCODE_KP_MINUS,
+    KP_PLUS = C.SDL_SCANCODE_KP_PLUS,
+    KP_ENTER = C.SDL_SCANCODE_KP_ENTER,
+    KP_1 = C.SDL_SCANCODE_KP_1,
+    KP_2 = C.SDL_SCANCODE_KP_2,
+    KP_3 = C.SDL_SCANCODE_KP_3,
+    KP_4 = C.SDL_SCANCODE_KP_4,
+    KP_5 = C.SDL_SCANCODE_KP_5,
+    KP_6 = C.SDL_SCANCODE_KP_6,
+    KP_7 = C.SDL_SCANCODE_KP_7,
+    KP_8 = C.SDL_SCANCODE_KP_8,
+    KP_9 = C.SDL_SCANCODE_KP_9,
+    KP_0 = C.SDL_SCANCODE_KP_0,
+    KP_PERIOD = C.SDL_SCANCODE_KP_PERIOD,
+    NONUSBACKSLASH = C.SDL_SCANCODE_NONUSBACKSLASH,
+    APPLICATION = C.SDL_SCANCODE_APPLICATION,
+    POWER = C.SDL_SCANCODE_POWER,
+    KP_EQUALS = C.SDL_SCANCODE_KP_EQUALS,
+    F13 = C.SDL_SCANCODE_F13,
+    F14 = C.SDL_SCANCODE_F14,
+    F15 = C.SDL_SCANCODE_F15,
+    F16 = C.SDL_SCANCODE_F16,
+    F17 = C.SDL_SCANCODE_F17,
+    F18 = C.SDL_SCANCODE_F18,
+    F19 = C.SDL_SCANCODE_F19,
+    F20 = C.SDL_SCANCODE_F20,
+    F21 = C.SDL_SCANCODE_F21,
+    F22 = C.SDL_SCANCODE_F22,
+    F23 = C.SDL_SCANCODE_F23,
+    F24 = C.SDL_SCANCODE_F24,
+    EXECUTE = C.SDL_SCANCODE_EXECUTE,
+    HELP = C.SDL_SCANCODE_HELP,
+    MENU = C.SDL_SCANCODE_MENU,
+    SELECT = C.SDL_SCANCODE_SELECT,
+    STOP = C.SDL_SCANCODE_STOP,
+    AGAIN = C.SDL_SCANCODE_AGAIN,
+    UNDO = C.SDL_SCANCODE_UNDO,
+    CUT = C.SDL_SCANCODE_CUT,
+    COPY = C.SDL_SCANCODE_COPY,
+    PASTE = C.SDL_SCANCODE_PASTE,
+    FIND = C.SDL_SCANCODE_FIND,
+    MUTE = C.SDL_SCANCODE_MUTE,
+    VOLUMEUP = C.SDL_SCANCODE_VOLUMEUP,
+    VOLUMEDOWN = C.SDL_SCANCODE_VOLUMEDOWN,
+    KP_COMMA = C.SDL_SCANCODE_KP_COMMA,
+    KP_EQUALSAS400 = C.SDL_SCANCODE_KP_EQUALSAS400,
+    INTERNATIONAL1 = C.SDL_SCANCODE_INTERNATIONAL1,
+    INTERNATIONAL2 = C.SDL_SCANCODE_INTERNATIONAL2,
+    INTERNATIONAL3 = C.SDL_SCANCODE_INTERNATIONAL3,
+    INTERNATIONAL4 = C.SDL_SCANCODE_INTERNATIONAL4,
+    INTERNATIONAL5 = C.SDL_SCANCODE_INTERNATIONAL5,
+    INTERNATIONAL6 = C.SDL_SCANCODE_INTERNATIONAL6,
+    INTERNATIONAL7 = C.SDL_SCANCODE_INTERNATIONAL7,
+    INTERNATIONAL8 = C.SDL_SCANCODE_INTERNATIONAL8,
+    INTERNATIONAL9 = C.SDL_SCANCODE_INTERNATIONAL9,
+    LANG1 = C.SDL_SCANCODE_LANG1,
+    LANG2 = C.SDL_SCANCODE_LANG2,
+    LANG3 = C.SDL_SCANCODE_LANG3,
+    LANG4 = C.SDL_SCANCODE_LANG4,
+    LANG5 = C.SDL_SCANCODE_LANG5,
+    LANG6 = C.SDL_SCANCODE_LANG6,
+    LANG7 = C.SDL_SCANCODE_LANG7,
+    LANG8 = C.SDL_SCANCODE_LANG8,
+    LANG9 = C.SDL_SCANCODE_LANG9,
+    ALTERASE = C.SDL_SCANCODE_ALTERASE,
+    SYSREQ = C.SDL_SCANCODE_SYSREQ,
+    CANCEL = C.SDL_SCANCODE_CANCEL,
+    CLEAR = C.SDL_SCANCODE_CLEAR,
+    PRIOR = C.SDL_SCANCODE_PRIOR,
+    RETURN2 = C.SDL_SCANCODE_RETURN2,
+    SEPARATOR = C.SDL_SCANCODE_SEPARATOR,
+    OUT = C.SDL_SCANCODE_OUT,
+    OPER = C.SDL_SCANCODE_OPER,
+    CLEARAGAIN = C.SDL_SCANCODE_CLEARAGAIN,
+    CRSEL = C.SDL_SCANCODE_CRSEL,
+    EXSEL = C.SDL_SCANCODE_EXSEL,
+    KP_00 = C.SDL_SCANCODE_KP_00,
+    KP_000 = C.SDL_SCANCODE_KP_000,
+    THOUSANDSSEPARATOR = C.SDL_SCANCODE_THOUSANDSSEPARATOR,
+    DECIMALSEPARATOR = C.SDL_SCANCODE_DECIMALSEPARATOR,
+    CURRENCYUNIT = C.SDL_SCANCODE_CURRENCYUNIT,
+    CURRENCYSUBUNIT = C.SDL_SCANCODE_CURRENCYSUBUNIT,
+    KP_LEFTPAREN = C.SDL_SCANCODE_KP_LEFTPAREN,
+    KP_RIGHTPAREN = C.SDL_SCANCODE_KP_RIGHTPAREN,
+    KP_LEFTBRACE = C.SDL_SCANCODE_KP_LEFTBRACE,
+    KP_RIGHTBRACE = C.SDL_SCANCODE_KP_RIGHTBRACE,
+    KP_TAB = C.SDL_SCANCODE_KP_TAB,
+    KP_BACKSPACE = C.SDL_SCANCODE_KP_BACKSPACE,
+    KP_A = C.SDL_SCANCODE_KP_A,
+    KP_B = C.SDL_SCANCODE_KP_B,
+    KP_C = C.SDL_SCANCODE_KP_C,
+    KP_D = C.SDL_SCANCODE_KP_D,
+    KP_E = C.SDL_SCANCODE_KP_E,
+    KP_F = C.SDL_SCANCODE_KP_F,
+    KP_XOR = C.SDL_SCANCODE_KP_XOR,
+    KP_POWER = C.SDL_SCANCODE_KP_POWER,
+    KP_PERCENT = C.SDL_SCANCODE_KP_PERCENT,
+    KP_LESS = C.SDL_SCANCODE_KP_LESS,
+    KP_GREATER = C.SDL_SCANCODE_KP_GREATER,
+    KP_AMPERSAND = C.SDL_SCANCODE_KP_AMPERSAND,
+    KP_DBLAMPERSAND = C.SDL_SCANCODE_KP_DBLAMPERSAND,
+    KP_VERTICALBAR = C.SDL_SCANCODE_KP_VERTICALBAR,
+    KP_DBLVERTICALBAR = C.SDL_SCANCODE_KP_DBLVERTICALBAR,
+    KP_COLON = C.SDL_SCANCODE_KP_COLON,
+    KP_HASH = C.SDL_SCANCODE_KP_HASH,
+    KP_SPACE = C.SDL_SCANCODE_KP_SPACE,
+    KP_AT = C.SDL_SCANCODE_KP_AT,
+    KP_EXCLAM = C.SDL_SCANCODE_KP_EXCLAM,
+    KP_MEMSTORE = C.SDL_SCANCODE_KP_MEMSTORE,
+    KP_MEMRECALL = C.SDL_SCANCODE_KP_MEMRECALL,
+    KP_MEMCLEAR = C.SDL_SCANCODE_KP_MEMCLEAR,
+    KP_MEMADD = C.SDL_SCANCODE_KP_MEMADD,
+    KP_MEMSUBTRACT = C.SDL_SCANCODE_KP_MEMSUBTRACT,
+    KP_MEMMULTIPLY = C.SDL_SCANCODE_KP_MEMMULTIPLY,
+    KP_MEMDIVIDE = C.SDL_SCANCODE_KP_MEMDIVIDE,
+    KP_PLUSMINUS = C.SDL_SCANCODE_KP_PLUSMINUS,
+    KP_CLEAR = C.SDL_SCANCODE_KP_CLEAR,
+    KP_CLEARENTRY = C.SDL_SCANCODE_KP_CLEARENTRY,
+    KP_BINARY = C.SDL_SCANCODE_KP_BINARY,
+    KP_OCTAL = C.SDL_SCANCODE_KP_OCTAL,
+    KP_DECIMAL = C.SDL_SCANCODE_KP_DECIMAL,
+    KP_HEXADECIMAL = C.SDL_SCANCODE_KP_HEXADECIMAL,
+    LCTRL = C.SDL_SCANCODE_LCTRL,
+    LSHIFT = C.SDL_SCANCODE_LSHIFT,
+    LALT = C.SDL_SCANCODE_LALT,
+    LGUI = C.SDL_SCANCODE_LGUI,
+    RCTRL = C.SDL_SCANCODE_RCTRL,
+    RSHIFT = C.SDL_SCANCODE_RSHIFT,
+    RALT = C.SDL_SCANCODE_RALT,
+    RGUI = C.SDL_SCANCODE_RGUI,
+    MODE = C.SDL_SCANCODE_MODE,
+    SLEEP = C.SDL_SCANCODE_SLEEP,
+    WAKE = C.SDL_SCANCODE_WAKE,
+    CHANNEL_INCREMENT = C.SDL_SCANCODE_CHANNEL_INCREMENT,
+    CHANNEL_DECREMENT = C.SDL_SCANCODE_CHANNEL_DECREMENT,
+    MEDIA_PLAY = C.SDL_SCANCODE_MEDIA_PLAY,
+    MEDIA_PAUSE = C.SDL_SCANCODE_MEDIA_PAUSE,
+    MEDIA_RECORD = C.SDL_SCANCODE_MEDIA_RECORD,
+    MEDIA_FAST_FORWARD = C.SDL_SCANCODE_MEDIA_FAST_FORWARD,
+    MEDIA_REWIND = C.SDL_SCANCODE_MEDIA_REWIND,
+    MEDIA_NEXT_TRACK = C.SDL_SCANCODE_MEDIA_NEXT_TRACK,
+    MEDIA_PREVIOUS_TRACK = C.SDL_SCANCODE_MEDIA_PREVIOUS_TRACK,
+    MEDIA_STOP = C.SDL_SCANCODE_MEDIA_STOP,
+    MEDIA_EJECT = C.SDL_SCANCODE_MEDIA_EJECT,
+    MEDIA_PLAY_PAUSE = C.SDL_SCANCODE_MEDIA_PLAY_PAUSE,
+    MEDIA_SELECT = C.SDL_SCANCODE_MEDIA_SELECT,
+    AC_NEW = C.SDL_SCANCODE_AC_NEW,
+    AC_OPEN = C.SDL_SCANCODE_AC_OPEN,
+    AC_CLOSE = C.SDL_SCANCODE_AC_CLOSE,
+    AC_EXIT = C.SDL_SCANCODE_AC_EXIT,
+    AC_SAVE = C.SDL_SCANCODE_AC_SAVE,
+    AC_PRINT = C.SDL_SCANCODE_AC_PRINT,
+    AC_PROPERTIES = C.SDL_SCANCODE_AC_PROPERTIES,
+    AC_SEARCH = C.SDL_SCANCODE_AC_SEARCH,
+    AC_HOME = C.SDL_SCANCODE_AC_HOME,
+    AC_BACK = C.SDL_SCANCODE_AC_BACK,
+    AC_FORWARD = C.SDL_SCANCODE_AC_FORWARD,
+    AC_STOP = C.SDL_SCANCODE_AC_STOP,
+    AC_REFRESH = C.SDL_SCANCODE_AC_REFRESH,
+    AC_BOOKMARKS = C.SDL_SCANCODE_AC_BOOKMARKS,
+    SOFTLEFT = C.SDL_SCANCODE_SOFTLEFT,
+    SOFTRIGHT = C.SDL_SCANCODE_SOFTRIGHT,
+    CALL = C.SDL_SCANCODE_CALL,
+    ENDCALL = C.SDL_SCANCODE_ENDCALL,
+
+    pub const RESERVED = C.SDL_SCANCODE_RESERVED;
+    pub const COUNT = C.SDL_SCANCODE_COUNT;
 
     inline fn to_c(self: Scancode) c_uint {
         return @intFromEnum(self);
@@ -4829,10 +4926,10 @@ pub const Scancode = enum(c_uint) {
 };
 
 pub const Keycode = extern struct {
-    code: u32,
+    code: u32 = 0,
 };
 pub const Keymod = extern struct {
-    mod: u16,
+    mod: u16 = 0,
 };
 
 pub fn runtime_version() c_int {
@@ -4846,11 +4943,11 @@ pub const BUILD_MINOR_VERSION = C.SDL_MINOR_VERSION;
 pub const BUILD_MICRO_VERSION = C.SDL_MICRO_VERSION;
 pub const BUILD_REVISION = C.SDL_REVISION;
 pub fn RUNTIME_MAJOR_VERSION(version: anytype) @TypeOf(@import("std").zig.c_translation.MacroArithmetic.div(version, @import("std").zig.c_translation.promoteIntLiteral(c_int, 1000000, .decimal))) {
-    C.SDL_VERSIONNUM_MAJOR(version);
+    return C.SDL_VERSIONNUM_MAJOR(version);
 }
 pub fn RUNTIME_MINOR_VERSION(version: anytype) @TypeOf(@import("std").zig.c_translation.MacroArithmetic.rem(@import("std").zig.c_translation.MacroArithmetic.div(version, @as(c_int, 1000)), @as(c_int, 1000))) {
-    C.SDL_VERSIONNUM_MINOR(version);
+    return C.SDL_VERSIONNUM_MINOR(version);
 }
 pub fn RUNTIME_MICRO_VERSION(version: anytype) @TypeOf(@import("std").zig.c_translation.MacroArithmetic.rem(version, @as(c_int, 1000))) {
-    C.SDL_VERSIONNUM_MICRO(version);
+    return C.SDL_VERSIONNUM_MICRO(version);
 }
