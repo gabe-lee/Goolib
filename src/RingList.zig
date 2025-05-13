@@ -47,7 +47,7 @@ pub const Impl = struct {
         return self;
     }
 
-    pub fn logical_slices(comptime List: type, self: List) [2][]List.Elem {
+    pub fn slices_in_order(comptime List: type, self: List) [2][]List.Elem {
         const start_to_cap = self.cap - self.start;
         const len_1 = @min(self.len, start_to_cap);
         const len_2 = self.len - len_1;
@@ -55,14 +55,21 @@ pub const Impl = struct {
         return logical;
     }
 
-    pub fn ensure_total_capacity(comptime List: type, self: *List, new_capacity: List.Idx, alloc: Allocator) if (List.RETURN_ERRORS) List.Error!void else void {
-        if (self.cap >= new_capacity) return;
-        return ensure_total_capacity_exact(List, self, true_capacity_for_grow(List, self.cap, new_capacity), alloc);
+    pub fn slices_in_order_from_range(comptime List: type, self: List, start: List.IDX, count: List.Idx) [2][]List.Elem {
+        assert(start + count <= self.len);
+        const literal_start_1 = self.start + start;
+        const logical_start_1 = literal_start_1 % self.cap;
+        const possible_logical_end_1 = logical_start_1 + count;
+        const real_logical_end_1 = @min(possible_logical_end_1, self.cap);
+        const len_1 = real_logical_end_1 - logical_start_1;
+        const len_2 = count - len_1;
+        const logical = [2][]List.Elem{ self.ptr[logical_start_1..real_logical_end_1], self.ptr[0..len_2] };
+        return logical;
     }
 
     pub fn realign_to_start(comptime List: type, self: *List) void {
         if (self.start == 0) return;
-        const slices = logical_slices(List, self);
+        const slices = slices_in_order(List, self);
         if (slices[1].len == 0) {
             if (self.start >= self.len) {
                 @memcpy(self.ptr[0..self.len], slices[0]);
@@ -79,7 +86,11 @@ pub const Impl = struct {
             return;
         }
         if (self.start >= self.len) {
-            @memcpy(self.ptr[slices[0].len..self.cap], slices[1]);
+            if (slices[0].len >= slices[1].len) {
+                @memcpy(self.ptr[slices[0].len..self.cap], slices[1]);
+            } else {
+                std.mem.copyBackwards(List.Elem, self.ptr[slices[0].len..self.cap], slices[1]);
+            }
             @memcpy(self.ptr[0..self.cap], slices[0]);
             if (List.SECURE_WIPE) {
                 std.crypto.secureZero(List.Elem, slices[0]);
@@ -124,6 +135,11 @@ pub const Impl = struct {
         return;
     }
 
+    pub fn ensure_total_capacity(comptime List: type, self: *List, new_capacity: List.Idx, alloc: Allocator) if (List.RETURN_ERRORS) List.Error!void else void {
+        if (self.cap >= new_capacity) return;
+        return ensure_total_capacity_exact(List, self, true_capacity_for_grow(List, self.cap, new_capacity), alloc);
+    }
+
     pub fn ensure_total_capacity_exact(comptime List: type, self: *List, new_capacity: List.Idx, alloc: Allocator) if (List.RETURN_ERRORS) List.Error!void else void {
         if (@sizeOf(List.Elem) == 0) {
             self.cap = math.maxInt(List.Idx);
@@ -144,11 +160,28 @@ pub const Impl = struct {
         const old_memory = self.ptr[0..self.cap];
         if (alloc.remap(old_memory, new_capacity)) |new_memory| {
             self.ptr = new_memory.ptr;
+            var slices = slices_in_order(List, self);
+            if (slices[1].len > 0 and new_capacity > self.cap) {
+                const extra = new_capacity - self.cap;
+                const s1_copy_count = @min(extra, slices[1].len);
+                slices[0].len += extra;
+                @memcpy(slices[0][slices[0].len .. slices[0].len + extra], slices[1][0..s1_copy_count]);
+                std.mem.copyForwards(List.Elem, slices[1][0..], slices[1][s1_copy_count..]);
+                if (List.SECURE_WIPE) {
+                    const s1_leftover = extra - s1_copy_count;
+                    std.crypto.secureZero(List.Elem, slices[1][s1_leftover..]);
+                }
+            }
             self.cap = @intCast(new_memory.len);
         } else {
             const new_memory = alloc.alignedAlloc(List.Elem, List.ALIGN, new_capacity) catch |err| return handle_alloc_error(List, err);
-            @memcpy(new_memory[0..self.len], self.ptr[0..self.len]);
-            if (List.SECURE_WIPE) crypto.secureZero(List.Elem, self.ptr[0..self.len]);
+            const slices = slices_in_order(List, self);
+            @memcpy(new_memory[0..slices[0].len], slices[0]);
+            @memcpy(new_memory[slices[0].len..], slices[1]);
+            if (List.SECURE_WIPE) {
+                crypto.secureZero(List.Elem, slices[0]);
+                crypto.secureZero(List.Elem, slices[1]);
+            }
             alloc.free(old_memory);
             self.ptr = new_memory.ptr;
             self.cap = @as(List.Idx, @intCast(new_memory.len));
@@ -158,6 +191,119 @@ pub const Impl = struct {
     pub fn ensure_unused_capacity(comptime List: type, self: *List, additional_count: List.Idx, alloc: Allocator) if (List.RETURN_ERRORS) List.Error!void else void {
         const new_total_cap = if (List.RETURN_ERRORS) try add_or_error(List, self.len, additional_count) else add_or_error(List, self.len, additional_count);
         return ensure_total_capacity(List, self, new_total_cap, alloc);
+    }
+
+    pub fn append_slot(comptime List: type, self: *List, alloc: Allocator) if (List.RETURN_ERRORS) List.Error!*List.Elem else *List.Elem {
+        const new_len = self.len + 1;
+        if (List.RETURN_ERRORS) try ensure_total_capacity(List, self, new_len, alloc) else ensure_total_capacity(List, self, new_len, alloc);
+        return append_slot_assume_capacity(List, self);
+    }
+    // CHECKPOINT implement insert and PREPEND funcs
+    // pub fn insert_slot(comptime List: type, self: *List, idx: List.Idx, alloc: Allocator) if (List.RETURN_ERRORS) List.Error!*List.Elem else *List.Elem {
+    //     if (List.RETURN_ERRORS) {
+    //         try ensure_unused_capacity(List, self, 1, alloc);
+    //     } else {
+    //         ensure_unused_capacity(List, self, 1, alloc);
+    //     }
+    //     return insert_slot_assume_capacity(List, self, idx);
+    // }
+
+    // pub fn insert_slot_assume_capacity(comptime List: type, self: *List, idx: List.Idx) *List.Elem {
+    //     assert(idx <= self.len);
+    //     mem.copyBackwards(List.Elem, self.ptr[idx + 1 .. self.len + 1], self.ptr[idx..self.len]);
+    //     self.len += 1;
+    //     return &self.ptr[idx];
+    // }
+
+    // pub fn insert(comptime List: type, self: *List, idx: List.Idx, item: List.Elem, alloc: Allocator) if (List.RETURN_ERRORS) List.Error!void else void {
+    //     const ptr = if (List.RETURN_ERRORS) try insert_slot(List, self, idx, alloc) else insert_slot(List, self, idx, alloc);
+    //     ptr.* = item;
+    // }
+
+    // pub fn insert_assume_capacity(comptime List: type, self: *List, idx: List.Idx, item: List.Elem) void {
+    //     const ptr = insert_slot_assume_capacity(List, self, idx);
+    //     ptr.* = item;
+    // }
+
+    // pub fn insert_many_slots(comptime List: type, self: *List, idx: List.Idx, count: List.Idx, alloc: Allocator) if (List.RETURN_ERRORS) List.Error![]List.Elem else []List.Elem {
+    //     if (List.RETURN_ERRORS) {
+    //         try ensure_unused_capacity(List, self, count, alloc);
+    //     } else {
+    //         ensure_unused_capacity(List, self, count, alloc);
+    //     }
+    //     return insert_many_slots_assume_capacity(List, self, idx, count);
+    // }
+
+    // pub fn insert_many_slots_assume_capacity(comptime List: type, self: *List, idx: List.Idx, count: List.Idx) []List.Elem {
+    //     assert(idx + count <= self.len);
+    //     mem.copyBackwards(List.Elem, self.ptr[idx + count .. self.len + count], self.ptr[idx..self.len]);
+    //     self.len += count;
+    //     return self.ptr[idx .. idx + count];
+    // }
+
+    // pub fn insert_slice(comptime List: type, self: *List, idx: List.Idx, items: []const List.Elem, alloc: Allocator) if (List.RETURN_ERRORS) List.Error!void else void {
+    //     const slots = if (List.RETURN_ERRORS) try insert_many_slots(List, self, idx, @intCast(items.len), alloc) else insert_slot(List, self, idx, @intCast(items.len), alloc);
+    //     @memcpy(slots, items);
+    // }
+
+    // pub fn insert_slice_assume_capacity(comptime List: type, self: *List, idx: List.Idx, items: []const List.Elem) void {
+    //     const slots = insert_many_slots_assume_capacity(List, self, idx, @intCast(items.len));
+    //     @memcpy(slots, items);
+    // }
+
+    pub fn append_slot_assume_capacity(comptime List: type, self: *List) *List.Elem {
+        assert(self.len < self.cap);
+        const idx = (self.start + self.len) % self.cap;
+        self.len += 1;
+        return &self.ptr[idx];
+    }
+
+    pub fn append(comptime List: type, self: *List, item: List.Elem, alloc: Allocator) if (List.RETURN_ERRORS) List.Error!void else void {
+        const slot = if (List.RETURN_ERRORS) try append_slot(List, self, alloc) else append_slot(List, self, alloc);
+        slot.* = item;
+    }
+
+    pub fn append_assume_capacity(comptime List: type, self: *List, item: List.Elem) void {
+        const slot = append_slot_assume_capacity(List, self);
+        slot.* = item;
+    }
+
+    pub fn append_many_slots(comptime List: type, self: *List, count: List.Idx, alloc: Allocator) if (List.RETURN_ERRORS) List.Error![2][]List.Elem else [2][]List.Elem {
+        const new_len = self.len + count;
+        if (List.RETURN_ERRORS) try ensure_total_capacity(List, self, new_len, alloc) else ensure_total_capacity(List, self, new_len, alloc);
+        return append_many_slots_assume_capacity(List, self, count);
+    }
+
+    pub fn append_many_slots_assume_capacity(comptime List: type, self: *List, count: List.Idx) [2][]List.Elem {
+        const new_len = self.len + count;
+        assert(new_len <= self.cap);
+        const appended_start = self.len;
+        self.len = new_len;
+        return slices_in_order_from_range(List, self, appended_start, count);
+    }
+
+    pub fn append_slice(comptime List: type, self: *List, items: []const List.Elem, alloc: Allocator) if (List.RETURN_ERRORS) List.Error!void else void {
+        const slots = if (List.RETURN_ERRORS) try append_many_slots(List, self, @intCast(items.len), alloc) else append_many_slots(List, self, @intCast(items.len), alloc);
+        @memcpy(slots[0], items[0..slots[0..slots[0].len]]);
+        @memcpy(slots[1], items[slots[slots[0].len..]]);
+    }
+
+    pub fn append_slice_assume_capacity(comptime List: type, self: *List, items: []const List.Elem) void {
+        const slots = append_many_slots_assume_capacity(List, self, @intCast(items.len));
+        @memcpy(slots[0], items[0..slots[0..slots[0].len]]);
+        @memcpy(slots[1], items[slots[slots[0].len..]]);
+    }
+
+    pub fn append_n_times(comptime List: type, self: *List, value: List.Elem, count: List.Idx, alloc: Allocator) if (List.RETURN_ERRORS) List.Error!void else void {
+        const slots = if (List.RETURN_ERRORS) try append_many_slots(List, self, count, alloc) else append_many_slots(List, self, count, alloc);
+        @memset(slots[0], value);
+        @memset(slots[1], value);
+    }
+
+    pub fn append_n_times_assume_capacity(comptime List: type, self: *List, value: List.Elem, count: List.Idx) void {
+        const slots = append_many_slots_assume_capacity(List, self, count);
+        @memset(slots[0], value);
+        @memset(slots[1], value);
     }
 
     pub fn add_or_error(comptime List: type, a: List.Idx, b: List.Idx) if (List.RETURN_ERRORS) error{OutOfMemory}!List.Idx else List.Idx {
@@ -210,6 +356,14 @@ pub const Impl = struct {
                     }
                 }
             },
+        }
+    }
+
+    pub fn handle_alloc_error(comptime List: type, err: Allocator.Error) if (List.RETURN_ERRORS) List.Error else noreturn {
+        switch (List.ALLOC_ERROR_BEHAVIOR) {
+            AllocErrorBehavior.ALLOCATION_ERRORS_RETURN_ERROR => return err,
+            AllocErrorBehavior.ALLOCATION_ERRORS_PANIC => std.debug.panic("List's backing allocator failed to allocate memory: Allocator.Error.{s}", .{@errorName(err)}),
+            AllocErrorBehavior.ALLOCATION_ERRORS_ARE_UNREACHABLE => unreachable,
         }
     }
 };
