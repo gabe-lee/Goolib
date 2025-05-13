@@ -12,6 +12,7 @@ const Type = std.builtin.Type;
 const Root = @import("./_root.zig");
 const Quicksort = Root.Quicksort;
 const Pivot = Quicksort.Pivot;
+const InsertionSort = Root.InsertionSort;
 const AllocErrorBehavior = Root.CommonTypes.AllocErrorBehavior;
 const GrowthModel = Root.CommonTypes.GrowthModel;
 const SortAlgorithm = Root.CommonTypes.SortAlgorithm;
@@ -19,9 +20,9 @@ const Compare = Root.Compare;
 const DummyAllocator = Root.DummyAllocator;
 const BinarySearch = Root.BinarySearch;
 const CompareFn = Compare.CompareFn;
-const MatchFn = Compare.MatchFn;
+const ComparePackage = Compare.ComparePackage;
 
-pub const ListOptionsBase = struct {
+pub const ListOptions = struct {
     element_type: type,
     alignment: ?u29 = null,
     alloc_error_behavior: AllocErrorBehavior = .ALLOCATION_ERRORS_PANIC,
@@ -30,29 +31,52 @@ pub const ListOptionsBase = struct {
     secure_wipe_bytes: bool = false,
 };
 
-pub fn ListOptionsExtended(comptime base_options: ListOptionsBase) type {
-    return struct {
-        default_sorting_algorithm: SortAlgorithm = .QUICK_SORT_PIVOT_MEDIAN_OF_3,
-        default_sorting_compare_func: CompareFn(base_options.element_type) = Compare.numeric_order_else_always_equal(base_options.element_type),
-        default_match_func: MatchFn(base_options.element_type) = Compare.shallow_equals_else_never_equal(base_options.element_type),
-    };
-}
+// pub fn PtrType(comptime T: type, comptime ALIGN: ?u29, comptime SENT: ?T) type {
+//     if (ALIGN) |a| {
+//         if (SENT) |s| {
+//             return [*:s]align(a) T;
+//         } else {
+//             return [*]align(a) T;
+//         }
+//     } else {
+//         if (SENT) |s| {
+//             return [*:s]T;
+//         } else {
+//             return [*]T;
+//         }
+//     }
+// }
+
+// pub fn SliceType(comptime T: type, comptime ALIGN: ?u29, comptime SENT: ?T) type {
+//     if (ALIGN) |a| {
+//         if (SENT) |s| {
+//             return [:s]align(a) T;
+//         } else {
+//             return []align(a) T;
+//         }
+//     } else {
+//         if (SENT) |s| {
+//             return [:s]T;
+//         } else {
+//             return []T;
+//         }
+//     }
+// }
 
 /// A struct containing all common operations used internally for the various List
-/// paradigms (Manual, Cached, Static)
+/// paradigms
 ///
-/// These are not intended for normal use, but are provided in this public namespace
-/// regardless
-pub const Internal = struct {
-    pub fn slice(comptime List: type, self: List) List.Slice {
-        return self.ptr[0..self.len];
+/// These are not intended for normal use, but are provided here for ease of use
+/// when implementing a custom list/collection type
+pub const Impl = struct {
+    pub inline fn slice(comptime List: type, self: List) List.Slice(List.Elem) {
+        return self.ptr[0..@intCast(self.len)];
     }
 
     pub fn array_ptr(comptime List: type, self: List, start: List.Idx, comptime length: List.Idx) *[length]List.Elem {
         assert(start + length <= self.len);
-        return self.ptr[start..self.len][0..length];
+        return &(self.ptr[start..self.len][0..length]);
     }
-
     pub fn vector_ptr(comptime List: type, self: List, start: List.Idx, comptime length: List.Idx) *@Vector(length, List.Elem) {
         assert(start + length <= self.len);
         return self.ptr[start..self.len][0..length];
@@ -528,86 +552,86 @@ pub const Internal = struct {
         }
     }
 
-    pub inline fn sort(comptime List: type, self: *List) void {
-        custom_sort(List, self, List.DEFAULT_SORT_ALGO, List.DEFAULT_COMPARE_FN);
-    }
+    // pub inline fn sort(comptime List: type, self: *List) void {
+    //     custom_sort(List, self, List.DEFAULT_SORT_ALGO, List.DEFAULT_COMPARE_PKG);
+    // }
 
-    pub fn custom_sort(comptime List: type, self: *List, algorithm: SortAlgorithm, compare_fn: CompareFn(List.Elem)) void {
-        if (self.len == 0) return;
-        switch (algorithm) {
-            // SortAlgorithm.BUBBlE_SORT => {},
-            // SortAlgorithm.HEAP_SORT => {},
-            SortAlgorithm.QUICK_SORT_PIVOT_FIRST => Quicksort.quicksort(List.Elem, compare_fn, Pivot.FIRST, self.ptr[0..self.len]),
-            SortAlgorithm.QUICK_SORT_PIVOT_LAST => Quicksort.quicksort(List.Elem, compare_fn, Pivot.LAST, self.ptr[0..self.len]),
-            SortAlgorithm.QUICK_SORT_PIVOT_MIDDLE => Quicksort.quicksort(List.Elem, compare_fn, Pivot.MIDDLE, self.ptr[0..self.len]),
-            SortAlgorithm.QUICK_SORT_PIVOT_RANDOM => Quicksort.quicksort(List.Elem, compare_fn, Pivot.RANDOM, self.ptr[0..self.len]),
-            SortAlgorithm.QUICK_SORT_PIVOT_MEDIAN_OF_3 => Quicksort.quicksort(List.Elem, compare_fn, Pivot.MEDIAN_OF_3, self.ptr[0..self.len]),
-            SortAlgorithm.QUICK_SORT_PIVOT_MEDIAN_OF_3_RANDOM => Quicksort.quicksort(List.Elem, compare_fn, Pivot.MEDIAN_OF_3_RANDOM, self.ptr[0..self.len]),
-        }
-    }
+    // pub fn custom_sort(comptime List: type, self: *List, algorithm: SortAlgorithm, compare_pkg: ComparePackage(List.Elem)) void {
+    //     if (self.len < 2) return;
+    //     switch (algorithm) {
+    //         // SortAlgorithm.HEAP_SORT => {},
+    //         .INSERTION_SORT => InsertionSort.insertion_sort(List.Elem, compare_pkg.greater_than, self.ptr[0..self.len]),
+    //         .QUICK_SORT_PIVOT_FIRST => Quicksort.quicksort(List.Elem, compare_pkg.greater_than, compare_pkg.less_than, Pivot.FIRST, self.ptr[0..self.len]),
+    //         .QUICK_SORT_PIVOT_LAST => Quicksort.quicksort(List.Elem, compare_pkg.greater_than, compare_pkg.less_than, Pivot.LAST, self.ptr[0..self.len]),
+    //         .QUICK_SORT_PIVOT_MIDDLE => Quicksort.quicksort(List.Elem, compare_pkg.greater_than, compare_pkg.less_than, Pivot.MIDDLE, self.ptr[0..self.len]),
+    //         .QUICK_SORT_PIVOT_RANDOM => Quicksort.quicksort(List.Elem, compare_pkg.greater_than, compare_pkg.less_than, Pivot.RANDOM, self.ptr[0..self.len]),
+    //         .QUICK_SORT_PIVOT_MEDIAN_OF_3 => Quicksort.quicksort(List.Elem, compare_pkg.greater_than, compare_pkg.less_than, Pivot.MEDIAN_OF_3, self.ptr[0..self.len]),
+    //         .QUICK_SORT_PIVOT_MEDIAN_OF_3_RANDOM => Quicksort.quicksort(List.Elem, compare_pkg.greater_than, compare_pkg.less_than, Pivot.MEDIAN_OF_3_RANDOM, self.ptr[0..self.len]),
+    //     }
+    // }
 
-    pub inline fn is_sorted(comptime List: type, self: *List) bool {
-        return is_sorted_custom(List, self, List.DEFAULT_COMPARE_FN);
-    }
+    // pub inline fn is_sorted(comptime List: type, self: *List) bool {
+    //     return is_sorted_custom(List, self, List.DEFAULT_COMPARE_PKG.greater_than);
+    // }
 
-    pub fn is_sorted_custom(comptime List: type, self: *List, compare_fn: CompareFn(List.Elem)) bool {
-        if (self.len < 2) return true;
-        var idx: List.Idx = 0;
-        const limit = self.len - 1;
-        while (idx < limit) : (idx += 1) {
-            const next_idx = idx + 1;
-            if (Compare.a_greater_than_b(List.Elem, &self.ptr[idx], &self.ptr[next_idx], compare_fn)) return false;
-        }
-        return true;
-    }
+    // pub fn is_sorted_custom(comptime List: type, self: *List, greater_than_fn: *const CompareFn(List.Elem)) bool {
+    //     if (self.len < 2) return true;
+    //     var idx: List.Idx = 0;
+    //     const limit = self.len - 1;
+    //     while (idx < limit) : (idx += 1) {
+    //         const next_idx = idx + 1;
+    //         if (greater_than_fn(&self.ptr[idx], &self.ptr[next_idx])) return false;
+    //     }
+    //     return true;
+    // }
 
-    pub inline fn insert_one_sorted(comptime List: type, self: *List, item: List.Elem, alloc: Allocator) if (List.RETURN_ERRORS) List.Error!List.Idx else List.Idx {
-        return insert_one_sorted_custom(List, self, item, List.DEFAULT_COMPARE_FN, true, alloc);
-    }
+    // pub inline fn insert_one_sorted(comptime List: type, self: *List, item: List.Elem, alloc: Allocator) if (List.RETURN_ERRORS) List.Error!List.Idx else List.Idx {
+    //     return insert_one_sorted_custom(List, self, item, List.DEFAULT_COMPARE_PKG.greater_than, List.DEFAULT_MATCH_FN, alloc);
+    // }
 
-    pub fn insert_one_sorted_custom(comptime List: type, self: *List, item: List.Elem, compare_fn: CompareFn(List.Elem), comptime shortcut_equal_order: bool, alloc: Allocator) if (List.RETURN_ERRORS) List.Error!List.Idx else List.Idx {
-        const insert_idx: List.Idx = @intCast(BinarySearch.binary_search_insert_index(List.Elem, &item, self.ptr[0..self.len], compare_fn, shortcut_equal_order));
-        if (List.RETURN_ERRORS) try insert(List, self, insert_idx, item, alloc) else insert(List, self, insert_idx, item, alloc);
-        return insert_idx;
-    }
+    // pub fn insert_one_sorted_custom(comptime List: type, self: *List, item: List.Elem, greater_than_fn: *const CompareFn(List.Elem), equal_order_fn: *const CompareFn(List.Elem), alloc: Allocator) if (List.RETURN_ERRORS) List.Error!List.Idx else List.Idx {
+    //     const insert_idx: List.Idx = @intCast(BinarySearch.binary_search_insert_index(List.Elem, &item, self.ptr[0..self.len], greater_than_fn, equal_order_fn));
+    //     if (List.RETURN_ERRORS) try insert(List, self, insert_idx, item, alloc) else insert(List, self, insert_idx, item, alloc);
+    //     return insert_idx;
+    // }
 
-    pub inline fn find_equal_order_idx_sorted(comptime List: type, self: *List, item_to_compare: *const List.Elem) ?List.Idx {
-        return find_equal_order_idx_sorted_custom(List, self, item_to_compare, List.DEFAULT_COMPARE_FN);
-    }
+    // pub inline fn find_equal_order_idx_sorted(comptime List: type, self: *List, item_to_compare: *const List.Elem) ?List.Idx {
+    //     return find_equal_order_idx_sorted_custom(List, self, item_to_compare, List.DEFAULT_COMPARE_PKG.greater_than, List.DEFAULT_MATCH_FN);
+    // }
 
-    pub fn find_equal_order_idx_sorted_custom(comptime List: type, self: *List, item_to_compare: *const List.Elem, compare_fn: CompareFn(List.Elem)) ?List.Idx {
-        const insert_idx = BinarySearch.binary_search_by_order(List.Elem, item_to_compare, self.ptr[0..self.len], compare_fn);
-        if (insert_idx) |idx| return @intCast(idx);
-        return null;
-    }
+    // pub fn find_equal_order_idx_sorted_custom(comptime List: type, self: *List, item_to_compare: *const List.Elem, greater_than_fn: *const CompareFn(List.Elem), equal_order_fn: *const CompareFn(List.Elem)) ?List.Idx {
+    //     const insert_idx = BinarySearch.binary_search_by_order(List.Elem, item_to_compare, self.ptr[0..self.len], greater_than_fn, equal_order_fn);
+    //     if (insert_idx) |idx| return @intCast(idx);
+    //     return null;
+    // }
 
-    pub inline fn find_matching_item_idx_sorted(comptime List: type, self: *List, item_to_find: *const List.Elem) ?List.Idx {
-        return find_matching_item_idx_sorted_custom(List, self, item_to_find, List.DEFAULT_COMPARE_FN, List.DEFAULT_EXACT_EQUAL_FN);
-    }
+    // pub inline fn find_matching_item_idx_sorted(comptime List: type, self: *List, item_to_find: *const List.Elem) ?List.Idx {
+    //     return find_matching_item_idx_sorted_custom(List, self, item_to_find, List.DEFAULT_COMPARE_PKG.greater_than, List.DEFAULT_COMPARE_PKG.equals, List.DEFAULT_MATCH_FN);
+    // }
 
-    pub fn find_matching_item_idx_sorted_custom(comptime List: type, self: *List, item_to_find: *const List.Elem, compare_fn: CompareFn(List.Elem), match_fn: MatchFn(List.Elem)) ?List.Idx {
-        const insert_idx = BinarySearch.binary_search_exatly_equal(List.Elem, item_to_find, self.ptr[0..self.len], compare_fn, match_fn);
-        if (insert_idx) |idx| return @intCast(idx);
-        return null;
-    }
+    // pub fn find_matching_item_idx_sorted_custom(comptime List: type, self: *List, item_to_find: *const List.Elem, greater_than_fn: *const CompareFn(List.Elem), equal_order_fn: *const CompareFn(List.Elem), exact_match_fn: *const CompareFn(List.Elem)) ?List.Idx {
+    //     const insert_idx = BinarySearch.binary_search_exact_match(List.Elem, item_to_find, self.ptr[0..self.len], greater_than_fn, equal_order_fn, exact_match_fn);
+    //     if (insert_idx) |idx| return @intCast(idx);
+    //     return null;
+    // }
 
-    pub inline fn find_matching_item_idx(comptime List: type, self: *List, item_to_find: *const List.Elem) ?List.Idx {
-        return find_matching_item_idx_custom(List, self, item_to_find, List.DEFAULT_EXACT_EQUAL_FN);
-    }
+    // pub inline fn find_matching_item_idx(comptime List: type, self: *List, item_to_find: *const List.Elem) ?List.Idx {
+    //     return find_matching_item_idx_custom(List, self, item_to_find, List.DEFAULT_MATCH_FN);
+    // }
 
-    pub fn find_matching_item_idx_custom(comptime List: type, self: *List, item_to_find: *const List.Elem, match_fn: MatchFn(List.Elem)) ?List.Idx {
-        if (self.len == 0) return null;
-        const buf = self.ptr[0..self.len];
-        var idx: List.Idx = 0;
-        var found_exact = match_fn(item_to_find, &buf[idx]);
-        const limit = self.len - 1;
-        while (!found_exact and idx < limit) {
-            idx += 1;
-            found_exact = match_fn(item_to_find, &buf[idx]);
-        }
-        if (found_exact) return idx;
-        return null;
-    }
+    // pub fn find_matching_item_idx_custom(comptime List: type, self: *List, item_to_find: *const List.Elem, exact_match_fn: *const CompareFn(List.Elem)) ?List.Idx {
+    //     if (self.len == 0) return null;
+    //     const buf = self.ptr[0..self.len];
+    //     var idx: List.Idx = 0;
+    //     var found_exact = exact_match_fn(item_to_find, &buf[idx]);
+    //     const limit = self.len - 1;
+    //     while (!found_exact and idx < limit) {
+    //         idx += 1;
+    //         found_exact = exact_match_fn(item_to_find, &buf[idx]);
+    //     }
+    //     if (found_exact) return idx;
+    //     return null;
+    // }
 
     pub fn handle_alloc_error(comptime List: type, err: Allocator.Error) if (List.RETURN_ERRORS) List.Error else noreturn {
         switch (List.ALLOC_ERROR_BEHAVIOR) {
@@ -618,7 +642,7 @@ pub const Internal = struct {
     }
 };
 
-pub fn define_manually_managed_list_type(comptime base_options: ListOptionsBase, comptime ex_options: ListOptionsExtended(base_options)) type {
+pub fn define_manually_managed_list_type(comptime base_options: ListOptions) type {
     const opt = comptime check: {
         var opts = base_options;
         if (opts.alignment) |a| {
@@ -636,11 +660,7 @@ pub fn define_manually_managed_list_type(comptime base_options: ListOptionsBase,
         ptr: Ptr = UNINIT_PTR,
         len: Idx = 0,
         cap: Idx = 0,
-
         pub const ALIGN = base_options.alignment;
-        pub const DEFAULT_SORT_ALGO = ex_options.default_sorting_algorithm;
-        pub const DEFAULT_COMPARE_FN = ex_options.default_sorting_compare_func;
-        pub const DEFAULT_EXACT_EQUAL_FN = ex_options.default_match_func;
         pub const ALLOC_ERROR_BEHAVIOR = base_options.alloc_error_behavior;
         pub const GROWTH = base_options.growth_model;
         pub const RETURN_ERRORS = base_options.alloc_error_behavior == .ALLOCATION_ERRORS_RETURN_ERROR;
@@ -664,276 +684,276 @@ pub fn define_manually_managed_list_type(comptime base_options: ListOptionsBase,
         }
 
         pub inline fn slice(self: List) Slice {
-            return Internal.slice(List, self);
+            return Impl.slice(List, self);
         }
 
         pub inline fn array_ptr(self: List, start: Idx, comptime length: Idx) *[length]Elem {
-            return Internal.array_ptr(List, self, start, length);
+            return Impl.array_ptr(List, self, start, length);
         }
 
         pub inline fn vector_ptr(self: List, start: Idx, comptime length: Idx) *@Vector(length, Elem) {
-            return Internal.vector_ptr(List, self, start, length);
+            return Impl.vector_ptr(List, self, start, length);
         }
 
         pub inline fn slice_with_sentinel(self: List, comptime sentinel: Elem) SentinelSlice(Elem) {
-            return Internal.slice_with_sentinel(List, self, sentinel);
+            return Impl.slice_with_sentinel(List, self, sentinel);
         }
 
         pub inline fn slice_full_capacity(self: List) Slice {
-            return Internal.slice_full_capacity(List, self);
+            return Impl.slice_full_capacity(List, self);
         }
 
         pub inline fn slice_unused_capacity(self: List) []Elem {
-            return Internal.slice_unused_capacity(List, self);
+            return Impl.slice_unused_capacity(List, self);
         }
 
         pub inline fn set_len(self: *List, new_len: Idx) void {
-            return Internal.set_len(List, self, new_len);
+            return Impl.set_len(List, self, new_len);
         }
 
         pub inline fn new_empty() List {
-            return Internal.new_empty(List);
+            return Impl.new_empty(List);
         }
 
         pub inline fn new_with_capacity(capacity: Idx, alloc: Allocator) if (RETURN_ERRORS) Error!List else List {
-            return Internal.new_with_capacity(List, capacity, alloc);
+            return Impl.new_with_capacity(List, capacity, alloc);
         }
 
         pub inline fn clone(self: List, alloc: Allocator) if (RETURN_ERRORS) Error!List else List {
-            return Internal.clone(List, self, alloc);
+            return Impl.clone(List, self, alloc);
         }
 
         pub inline fn to_owned_slice(self: *List, alloc: Allocator) if (RETURN_ERRORS) Error!Slice else Slice {
-            return Internal.to_owned_slice(List, self, alloc);
+            return Impl.to_owned_slice(List, self, alloc);
         }
 
         pub inline fn to_owned_slice_sentinel(self: *List, alloc: Allocator, comptime sentinel: Elem) if (RETURN_ERRORS) Error!SentinelSlice(sentinel) else SentinelSlice(sentinel) {
-            return Internal.to_owned_slice_sentinel(List, self, alloc, sentinel);
+            return Impl.to_owned_slice_sentinel(List, self, alloc, sentinel);
         }
 
         pub inline fn from_owned_slice(from_slice: Slice) List {
-            return Internal.from_owned_slice(List, from_slice);
+            return Impl.from_owned_slice(List, from_slice);
         }
 
         pub inline fn from_owned_slice_sentinel(comptime sentinel: Elem, from_slice: [:sentinel]Elem) List {
-            return Internal.from_owned_slice_sentinel(List, sentinel, from_slice);
+            return Impl.from_owned_slice_sentinel(List, sentinel, from_slice);
         }
 
         pub inline fn insert_slot(self: *List, idx: Idx, alloc: Allocator) if (RETURN_ERRORS) Error!*Elem else *Elem {
-            return Internal.insert_slot(List, self, idx, alloc);
+            return Impl.insert_slot(List, self, idx, alloc);
         }
 
         pub inline fn insert_slot_assume_capacity(self: *List, idx: Idx) *Elem {
-            return Internal.insert_slot_assume_capacity(List, self, idx);
+            return Impl.insert_slot_assume_capacity(List, self, idx);
         }
 
         pub inline fn insert(self: *List, idx: Idx, item: Elem, alloc: Allocator) if (RETURN_ERRORS) Error!void else void {
-            return Internal.insert(List, self, idx, item, alloc);
+            return Impl.insert(List, self, idx, item, alloc);
         }
 
         pub inline fn insert_assume_capacity(self: *List, idx: Idx, item: Elem) void {
-            return Internal.insert_assume_capacity(List, self, idx, item);
+            return Impl.insert_assume_capacity(List, self, idx, item);
         }
 
         pub inline fn insert_many_slots(self: *List, idx: Idx, count: Idx, alloc: Allocator) if (RETURN_ERRORS) Error![]Elem else []Elem {
-            return Internal.insert_many_slots(List, self, idx, count, alloc);
+            return Impl.insert_many_slots(List, self, idx, count, alloc);
         }
 
         pub inline fn insert_many_slots_assume_capacity(self: *List, idx: Idx, count: Idx) []Elem {
-            return Internal.insert_many_slots_assume_capacity(List, self, idx, count);
+            return Impl.insert_many_slots_assume_capacity(List, self, idx, count);
         }
 
         pub inline fn insert_slice(self: *List, idx: Idx, items: []const Elem, alloc: Allocator) if (RETURN_ERRORS) Error!void else void {
-            return Internal.insert_slice(List, self, idx, items, alloc);
+            return Impl.insert_slice(List, self, idx, items, alloc);
         }
 
         pub inline fn insert_slice_assume_capacity(self: *List, idx: Idx, items: []const Elem) void {
-            return Internal.insert_slice_assume_capacity(List, self, idx, items);
+            return Impl.insert_slice_assume_capacity(List, self, idx, items);
         }
 
         pub inline fn replace_range(self: *List, start: Idx, length: Idx, new_items: []const Elem, alloc: Allocator) if (RETURN_ERRORS) Error!void else void {
-            return Internal.replace_range(List, self, start, length, new_items, alloc);
+            return Impl.replace_range(List, self, start, length, new_items, alloc);
         }
 
         pub inline fn replace_range_assume_capacity(self: *List, start: Idx, length: Idx, new_items: []const Elem) void {
-            return Internal.replace_range_assume_capacity(List, self, start, length, new_items);
+            return Impl.replace_range_assume_capacity(List, self, start, length, new_items);
         }
 
         pub inline fn append(self: *List, item: Elem, alloc: Allocator) if (RETURN_ERRORS) Error!void else void {
-            return Internal.append(List, self, item, alloc);
+            return Impl.append(List, self, item, alloc);
         }
 
         pub inline fn append_assume_capacity(self: *List, item: Elem) void {
-            return Internal.append_assume_capacity(List, self, item);
+            return Impl.append_assume_capacity(List, self, item);
         }
 
         pub inline fn remove(self: *List, idx: Idx) Elem {
-            return Internal.remove(List, self, idx);
+            return Impl.remove(List, self, idx);
         }
 
         pub inline fn swap_remove(self: *List, idx: Idx) Elem {
-            return Internal.swap_remove(List, self, idx);
+            return Impl.swap_remove(List, self, idx);
         }
 
         pub inline fn delete(self: *List, idx: Idx) void {
-            return Internal.delete(List, self, idx);
+            return Impl.delete(List, self, idx);
         }
 
         pub inline fn delete_range(self: *List, start: Idx, length: Idx) void {
-            return Internal.delete_range(List, self, start, length);
+            return Impl.delete_range(List, self, start, length);
         }
 
         pub inline fn swap_delete(self: *List, idx: Idx) void {
-            return Internal.swap_delete(List, self, idx);
+            return Impl.swap_delete(List, self, idx);
         }
 
         pub inline fn append_slice(self: *List, items: []const Elem, alloc: Allocator) if (RETURN_ERRORS) Error!void else void {
-            return Internal.append_slice(List, self, items, alloc);
+            return Impl.append_slice(List, self, items, alloc);
         }
 
         pub inline fn append_slice_assume_capacity(self: *List, items: []const Elem) void {
-            return Internal.append_slice_assume_capacity(List, self, items);
+            return Impl.append_slice_assume_capacity(List, self, items);
         }
 
         pub inline fn append_slice_unaligned(self: *List, items: []align(1) const Elem, alloc: Allocator) if (RETURN_ERRORS) Error!void else void {
-            return Internal.append_slice_unaligned(List, self, items, alloc);
+            return Impl.append_slice_unaligned(List, self, items, alloc);
         }
 
         pub inline fn append_slice_unaligned_assume_capacity(self: *List, items: []align(1) const Elem) void {
-            return Internal.append_slice_unaligned_assume_capacity(List, self, items);
+            return Impl.append_slice_unaligned_assume_capacity(List, self, items);
         }
 
         pub inline fn append_n_times(self: *List, value: Elem, count: Idx, alloc: Allocator) if (RETURN_ERRORS) Error!void else void {
-            return Internal.append_n_times(List, self, value, count, alloc);
+            return Impl.append_n_times(List, self, value, count, alloc);
         }
 
         pub inline fn append_n_times_assume_capacity(self: *List, value: Elem, count: Idx) void {
-            return Internal.append_n_times_assume_capacity(List, self, value, count);
+            return Impl.append_n_times_assume_capacity(List, self, value, count);
         }
 
         pub inline fn resize(self: *List, new_len: Idx, alloc: Allocator) if (RETURN_ERRORS) Error!void else void {
-            return Internal.resize(List, self, new_len, alloc);
+            return Impl.resize(List, self, new_len, alloc);
         }
 
         pub inline fn shrink_and_free(self: *List, new_len: Idx, alloc: Allocator) void {
-            return Internal.shrink_and_free(List, self, new_len, alloc);
+            return Impl.shrink_and_free(List, self, new_len, alloc);
         }
 
         pub inline fn shrink_retaining_capacity(self: *List, new_len: Idx) void {
-            return Internal.shrink_retaining_capacity(List, self, new_len);
+            return Impl.shrink_retaining_capacity(List, self, new_len);
         }
 
         pub inline fn clear_retaining_capacity(self: *List) void {
-            return Internal.clear_retaining_capacity(List, self);
+            return Impl.clear_retaining_capacity(List, self);
         }
 
         pub inline fn clear_and_free(self: *List, alloc: Allocator) void {
-            return Internal.clear_and_free(List, self, alloc);
+            return Impl.clear_and_free(List, self, alloc);
         }
 
         pub inline fn ensure_total_capacity(self: *List, new_capacity: Idx, alloc: Allocator) if (RETURN_ERRORS) Error!void else void {
-            return Internal.ensure_total_capacity(List, self, new_capacity, alloc);
+            return Impl.ensure_total_capacity(List, self, new_capacity, alloc);
         }
 
         pub inline fn ensure_total_capacity_exact(self: *List, new_capacity: Idx, alloc: Allocator) if (RETURN_ERRORS) Error!void else void {
-            return Internal.ensure_total_capacity_exact(List, self, new_capacity, alloc);
+            return Impl.ensure_total_capacity_exact(List, self, new_capacity, alloc);
         }
 
         pub inline fn ensure_unused_capacity(self: *List, additional_count: Idx, alloc: Allocator) if (RETURN_ERRORS) Error!void else void {
-            return Internal.ensure_unused_capacity(List, self, additional_count, alloc);
+            return Impl.ensure_unused_capacity(List, self, additional_count, alloc);
         }
 
         pub inline fn expand_to_capacity(self: *List) void {
-            return Internal.expand_to_capacity(List, self);
+            return Impl.expand_to_capacity(List, self);
         }
 
         pub inline fn append_slot(self: *List, alloc: Allocator) if (RETURN_ERRORS) Error!*Elem else *Elem {
-            return Internal.append_slot(List, self, alloc);
+            return Impl.append_slot(List, self, alloc);
         }
 
         pub inline fn append_slot_assume_capacity(self: *List) *Elem {
-            return Internal.append_slot_assume_capacity(List, self);
+            return Impl.append_slot_assume_capacity(List, self);
         }
 
         pub inline fn append_many_slots(self: *List, count: Idx, alloc: Allocator) if (RETURN_ERRORS) Error![]Elem else []Elem {
-            return Internal.append_many_slots(List, self, count, alloc);
+            return Impl.append_many_slots(List, self, count, alloc);
         }
 
         pub inline fn append_many_slots_assume_capacity(self: *List, count: Idx) []Elem {
-            return Internal.append_many_slots_assume_capacity(List, self, count);
+            return Impl.append_many_slots_assume_capacity(List, self, count);
         }
 
         pub inline fn append_many_slots_as_array(self: *List, comptime count: Idx, alloc: Allocator) if (RETURN_ERRORS) Error!*[count]Elem else *[count]Elem {
-            return Internal.append_many_slots_as_array(List, self, count, alloc);
+            return Impl.append_many_slots_as_array(List, self, count, alloc);
         }
 
         pub inline fn append_many_slots_as_array_assume_capacity(self: *List, comptime count: Idx) *[count]Elem {
-            return Internal.append_many_slots_as_array_assume_capacity(List, self, count);
+            return Impl.append_many_slots_as_array_assume_capacity(List, self, count);
         }
 
         pub inline fn pop_or_null(self: *List) ?Elem {
-            return Internal.pop_or_null(List, self);
+            return Impl.pop_or_null(List, self);
         }
 
         pub inline fn pop(self: *List) Elem {
-            return Internal.pop(List, self);
+            return Impl.pop(List, self);
         }
 
         pub inline fn get_last(self: List) Elem {
-            return Internal.get_last(List, self);
+            return Impl.get_last(List, self);
         }
 
         pub inline fn get_last_or_null(self: List) ?Elem {
-            return Internal.get_last_or_null(List, self);
+            return Impl.get_last_or_null(List, self);
         }
 
-        pub inline fn sort(self: *List) void {
-            return Internal.sort(List, self);
-        }
+        // pub inline fn sort(self: *List) void {
+        //     return Internal.sort(List, self);
+        // }
 
-        pub inline fn custom_sort(self: *List, algorithm: SortAlgorithm, order_func: CompareFn(Elem)) void {
-            return Internal.custom_sort(List, self, algorithm, order_func);
-        }
+        // pub inline fn custom_sort(self: *List, algorithm: SortAlgorithm, order_func: *const CompareFn(Elem)) void {
+        //     return Internal.custom_sort(List, self, algorithm, order_func);
+        // }
 
-        pub inline fn is_sorted(self: *List) bool {
-            return Internal.is_sorted(List, self);
-        }
+        // pub inline fn is_sorted(self: *List) bool {
+        //     return Internal.is_sorted(List, self);
+        // }
 
-        pub inline fn is_sorted_custom(self: *List, compare_fn: CompareFn(Elem)) bool {
-            return Internal.is_sorted_custom(List, self, compare_fn);
-        }
+        // pub inline fn is_sorted_custom(self: *List, compare_fn: *const CompareFn(Elem)) bool {
+        //     return Internal.is_sorted_custom(List, self, compare_fn);
+        // }
 
-        pub inline fn insert_one_sorted(self: *List, item: Elem, alloc: Allocator) if (RETURN_ERRORS) Error!Idx else Idx {
-            return Internal.insert_one_sorted(List, self, item, alloc);
-        }
+        // pub inline fn insert_one_sorted(self: *List, item: Elem, alloc: Allocator) if (RETURN_ERRORS) Error!Idx else Idx {
+        //     return Internal.insert_one_sorted(List, self, item, alloc);
+        // }
 
-        pub inline fn insert_one_sorted_custom(self: *List, item: Elem, compare_fn: CompareFn(Elem), comptime shortcut_equal_order: bool, alloc: Allocator) if (RETURN_ERRORS) Error!Idx else Idx {
-            return Internal.insert_one_sorted_custom(List, self, item, compare_fn, shortcut_equal_order, alloc);
-        }
+        // pub inline fn insert_one_sorted_custom(self: *List, item: Elem, compare_fn: *const CompareFn(Elem), comptime shortcut_equal_order: bool, alloc: Allocator) if (RETURN_ERRORS) Error!Idx else Idx {
+        //     return Internal.insert_one_sorted_custom(List, self, item, compare_fn, shortcut_equal_order, alloc);
+        // }
 
-        pub inline fn find_equal_order_idx_sorted(self: *const List, item_to_compare: *const Elem) ?Idx {
-            return Internal.find_equal_order_idx_sorted(List, self, item_to_compare);
-        }
+        // pub inline fn find_equal_order_idx_sorted(self: *const List, item_to_compare: *const Elem) ?Idx {
+        //     return Internal.find_equal_order_idx_sorted(List, self, item_to_compare);
+        // }
 
-        pub fn find_equal_order_idx_sorted_custom(self: *const List, item_to_compare: *const Elem, compare_fn: CompareFn(Elem)) ?Idx {
-            return Internal.find_equal_order_idx_sorted_custom(List, self, item_to_compare, compare_fn);
-        }
+        // pub fn find_equal_order_idx_sorted_custom(self: *const List, item_to_compare: *const Elem, compare_fn: *const CompareFn(Elem)) ?Idx {
+        //     return Internal.find_equal_order_idx_sorted_custom(List, self, item_to_compare, compare_fn);
+        // }
 
-        pub inline fn find_matching_item_idx_sorted(self: *const List, item_to_find: *const Elem) ?Idx {
-            return Internal.find_matching_item_idx_sorted(List, self, item_to_find);
-        }
+        // pub inline fn find_matching_item_idx_sorted(self: *const List, item_to_find: *const Elem) ?Idx {
+        //     return Internal.find_matching_item_idx_sorted(List, self, item_to_find);
+        // }
 
-        pub fn find_matching_item_idx_sorted_custom(self: *const List, item_to_find: *const Elem, compare_fn: CompareFn(Elem), match_fn: MatchFn(Elem)) ?Idx {
-            return Internal.find_matching_item_idx_sorted_custom(List, self, item_to_find, compare_fn, match_fn);
-        }
+        // pub fn find_matching_item_idx_sorted_custom(self: *const List, item_to_find: *const Elem, compare_fn: *const CompareFn(Elem), match_fn: *const CompareFn(Elem)) ?Idx {
+        //     return Internal.find_matching_item_idx_sorted_custom(List, self, item_to_find, compare_fn, match_fn);
+        // }
 
-        pub inline fn find_matching_item_idx(self: *const List, item_to_find: *const Elem) ?Idx {
-            return Internal.find_matching_item_idx(List, self, item_to_find);
-        }
+        // pub inline fn find_matching_item_idx(self: *const List, item_to_find: *const Elem) ?Idx {
+        //     return Internal.find_matching_item_idx(List, self, item_to_find);
+        // }
 
-        pub fn find_matching_item_idx_custom(self: *const List, item_to_find: *const Elem, match_fn: MatchFn(Elem)) ?Idx {
-            return Internal.find_matching_item_idx_custom(List, self, item_to_find, match_fn);
-        }
+        // pub fn find_matching_item_idx_custom(self: *const List, item_to_find: *const Elem, match_fn: *const CompareFn(Elem)) ?Idx {
+        //     return Internal.find_matching_item_idx_custom(List, self, item_to_find, match_fn);
+        // }
 
         //**************************
         // std.io.Writer interface *
@@ -980,7 +1000,7 @@ pub fn define_manually_managed_list_type(comptime base_options: ListOptionsBase,
     };
 }
 
-pub fn define_statically_managed_list_type(comptime base_options: ListOptionsBase, comptime ex_options: ListOptionsExtended(base_options), comptime alloc_ptr: *const Allocator) type {
+pub fn define_statically_managed_list_type(comptime base_options: ListOptions, comptime alloc_ptr: *const Allocator) type {
     const opt = comptime check: {
         var opts = base_options;
         if (opts.alignment) |a| {
@@ -999,13 +1019,8 @@ pub fn define_statically_managed_list_type(comptime base_options: ListOptionsBas
         len: Idx = 0,
         cap: Idx = 0,
 
-        const base_ops = base_options;
-        const ex_opts = ex_options;
         pub const ALLOC = alloc_ptr;
         pub const ALIGN = base_options.alignment;
-        pub const DEFAULT_SORT_ALGO = ex_options.default_sorting_algorithm;
-        pub const DEFAULT_COMPARE_FN = ex_options.default_sorting_compare_func;
-        pub const DEFAULT_EXACT_EQUAL_FN = ex_options.default_match_func;
         pub const ALLOC_ERROR_BEHAVIOR = base_options.alloc_error_behavior;
         pub const GROWTH = base_options.growth_model;
         pub const RETURN_ERRORS = base_options.alloc_error_behavior == .ALLOCATION_ERRORS_RETURN_ERROR;
@@ -1029,276 +1044,276 @@ pub fn define_statically_managed_list_type(comptime base_options: ListOptionsBas
         }
 
         pub inline fn slice(self: List) Slice {
-            return Internal.slice(List, self);
+            return Impl.slice(List, self);
         }
 
         pub inline fn array_ptr(self: List, start: Idx, comptime length: Idx) *[length]Elem {
-            return Internal.array_ptr(List, self, start, length);
+            return Impl.array_ptr(List, self, start, length);
         }
 
         pub inline fn vector_ptr(self: List, start: Idx, comptime length: Idx) *@Vector(length, Elem) {
-            return Internal.vector_ptr(List, self, start, length);
+            return Impl.vector_ptr(List, self, start, length);
         }
 
         pub inline fn slice_with_sentinel(self: List, comptime sentinel: Elem) SentinelSlice(Elem) {
-            return Internal.slice_with_sentinel(List, self, sentinel);
+            return Impl.slice_with_sentinel(List, self, sentinel);
         }
 
         pub inline fn slice_full_capacity(self: List) Slice {
-            return Internal.slice_full_capacity(List, self);
+            return Impl.slice_full_capacity(List, self);
         }
 
         pub inline fn slice_unused_capacity(self: List) []Elem {
-            return Internal.slice_unused_capacity(List, self);
+            return Impl.slice_unused_capacity(List, self);
         }
 
         pub inline fn set_len(self: *List, new_len: Idx) void {
-            return Internal.set_len(List, self, new_len);
+            return Impl.set_len(List, self, new_len);
         }
 
         pub inline fn new_empty() List {
-            return Internal.new_empty(List);
+            return Impl.new_empty(List);
         }
 
         pub inline fn new_with_capacity(capacity: Idx) if (RETURN_ERRORS) Error!List else List {
-            return Internal.new_with_capacity(List, capacity, ALLOC.*);
+            return Impl.new_with_capacity(List, capacity, ALLOC.*);
         }
 
         pub inline fn clone(self: List) if (RETURN_ERRORS) Error!List else List {
-            return Internal.clone(List, self, ALLOC.*);
+            return Impl.clone(List, self, ALLOC.*);
         }
 
         pub inline fn to_owned_slice(self: *List) if (RETURN_ERRORS) Error!Slice else Slice {
-            return Internal.to_owned_slice(List, self, ALLOC.*);
+            return Impl.to_owned_slice(List, self, ALLOC.*);
         }
 
         pub inline fn to_owned_slice_sentinel(self: *List, comptime sentinel: Elem) if (RETURN_ERRORS) Error!SentinelSlice(sentinel) else SentinelSlice(sentinel) {
-            return Internal.to_owned_slice_sentinel(List, self, sentinel, ALLOC.*);
+            return Impl.to_owned_slice_sentinel(List, self, sentinel, ALLOC.*);
         }
 
         pub inline fn from_owned_slice(from_slice: Slice) List {
-            return Internal.from_owned_slice(List, from_slice);
+            return Impl.from_owned_slice(List, from_slice);
         }
 
         pub inline fn from_owned_slice_sentinel(comptime sentinel: Elem, from_slice: [:sentinel]Elem) List {
-            return Internal.from_owned_slice_sentinel(List, sentinel, from_slice);
+            return Impl.from_owned_slice_sentinel(List, sentinel, from_slice);
         }
 
         pub inline fn insert_slot(self: *List, idx: Idx) if (RETURN_ERRORS) Error!*Elem else *Elem {
-            return Internal.insert_slot(List, self, idx, ALLOC.*);
+            return Impl.insert_slot(List, self, idx, ALLOC.*);
         }
 
         pub inline fn insert_slot_assume_capacity(self: *List, idx: Idx) *Elem {
-            return Internal.insert_slot_assume_capacity(List, self, idx);
+            return Impl.insert_slot_assume_capacity(List, self, idx);
         }
 
         pub inline fn insert(self: *List, idx: Idx, item: Elem) if (RETURN_ERRORS) Error!void else void {
-            return Internal.insert(List, self, idx, item, ALLOC.*);
+            return Impl.insert(List, self, idx, item, ALLOC.*);
         }
 
         pub inline fn insert_assume_capacity(self: *List, idx: Idx, item: Elem) void {
-            return Internal.insert_assume_capacity(List, self, idx, item);
+            return Impl.insert_assume_capacity(List, self, idx, item);
         }
 
         pub inline fn insert_many_slots(self: *List, idx: Idx, count: Idx) if (RETURN_ERRORS) Error![]Elem else []Elem {
-            return Internal.insert_many_slots(List, self, idx, count, ALLOC.*);
+            return Impl.insert_many_slots(List, self, idx, count, ALLOC.*);
         }
 
         pub inline fn insert_many_slots_assume_capacity(self: *List, idx: Idx, count: Idx) []Elem {
-            return Internal.insert_many_slots_assume_capacity(List, self, idx, count);
+            return Impl.insert_many_slots_assume_capacity(List, self, idx, count);
         }
 
         pub inline fn insert_slice(self: *List, idx: Idx, items: []const Elem) if (RETURN_ERRORS) Error!void else void {
-            return Internal.insert_slice(List, self, idx, items, ALLOC.*);
+            return Impl.insert_slice(List, self, idx, items, ALLOC.*);
         }
 
         pub inline fn insert_slice_assume_capacity(self: *List, idx: Idx, items: []const Elem) void {
-            return Internal.insert_slice_assume_capacity(List, self, idx, items);
+            return Impl.insert_slice_assume_capacity(List, self, idx, items);
         }
 
         pub inline fn replace_range(self: *List, start: Idx, length: Idx, new_items: []const Elem) if (RETURN_ERRORS) Error!void else void {
-            return Internal.replace_range(List, self, start, length, new_items, ALLOC.*);
+            return Impl.replace_range(List, self, start, length, new_items, ALLOC.*);
         }
 
         pub inline fn replace_range_assume_capacity(self: *List, start: Idx, length: Idx, new_items: []const Elem) void {
-            return Internal.replace_range_assume_capacity(List, self, start, length, new_items);
+            return Impl.replace_range_assume_capacity(List, self, start, length, new_items);
         }
 
         pub inline fn append(self: *List, item: Elem) if (RETURN_ERRORS) Error!void else void {
-            return Internal.append(List, self, item, ALLOC.*);
+            return Impl.append(List, self, item, ALLOC.*);
         }
 
         pub inline fn append_assume_capacity(self: *List, item: Elem) void {
-            return Internal.append_assume_capacity(List, self, item);
+            return Impl.append_assume_capacity(List, self, item);
         }
 
         pub inline fn remove(self: *List, idx: Idx) Elem {
-            return Internal.remove(List, self, idx);
+            return Impl.remove(List, self, idx);
         }
 
         pub inline fn swap_remove(self: *List, idx: Idx) Elem {
-            return Internal.swap_remove(List, self, idx);
+            return Impl.swap_remove(List, self, idx);
         }
 
         pub inline fn delete(self: *List, idx: Idx) void {
-            return Internal.delete(List, self, idx);
+            return Impl.delete(List, self, idx);
         }
 
         pub inline fn delete_range(self: *List, start: Idx, length: Idx) void {
-            return Internal.delete_range(List, self, start, length);
+            return Impl.delete_range(List, self, start, length);
         }
 
         pub inline fn swap_delete(self: *List, idx: Idx) void {
-            return Internal.swap_delete(List, self, idx);
+            return Impl.swap_delete(List, self, idx);
         }
 
         pub inline fn append_slice(self: *List, items: []const Elem) if (RETURN_ERRORS) Error!void else void {
-            return Internal.append_slice(List, self, items, ALLOC.*);
+            return Impl.append_slice(List, self, items, ALLOC.*);
         }
 
         pub inline fn append_slice_assume_capacity(self: *List, items: []const Elem) void {
-            return Internal.append_slice_assume_capacity(List, self, items);
+            return Impl.append_slice_assume_capacity(List, self, items);
         }
 
         pub inline fn append_slice_unaligned(self: *List, items: []align(1) const Elem) if (RETURN_ERRORS) Error!void else void {
-            return Internal.append_slice_unaligned(List, self, items, ALLOC.*);
+            return Impl.append_slice_unaligned(List, self, items, ALLOC.*);
         }
 
         pub inline fn append_slice_unaligned_assume_capacity(self: *List, items: []align(1) const Elem) void {
-            return Internal.append_slice_unaligned_assume_capacity(List, self, items);
+            return Impl.append_slice_unaligned_assume_capacity(List, self, items);
         }
 
         pub inline fn append_n_times(self: *List, value: Elem, count: Idx) if (RETURN_ERRORS) Error!void else void {
-            return Internal.append_n_times(List, self, value, count, ALLOC.*);
+            return Impl.append_n_times(List, self, value, count, ALLOC.*);
         }
 
         pub inline fn append_n_times_assume_capacity(self: *List, value: Elem, count: Idx) void {
-            return Internal.append_n_times_assume_capacity(List, self, value, count);
+            return Impl.append_n_times_assume_capacity(List, self, value, count);
         }
 
         pub inline fn resize(self: *List, new_len: Idx) if (RETURN_ERRORS) Error!void else void {
-            return Internal.resize(List, self, new_len, ALLOC.*);
+            return Impl.resize(List, self, new_len, ALLOC.*);
         }
 
         pub inline fn shrink_and_free(self: *List, new_len: Idx) void {
-            return Internal.shrink_and_free(List, self, new_len, ALLOC.*);
+            return Impl.shrink_and_free(List, self, new_len, ALLOC.*);
         }
 
         pub inline fn shrink_retaining_capacity(self: *List, new_len: Idx) void {
-            return Internal.shrink_retaining_capacity(List, self, new_len);
+            return Impl.shrink_retaining_capacity(List, self, new_len);
         }
 
         pub inline fn clear_retaining_capacity(self: *List) void {
-            return Internal.clear_retaining_capacity(List, self);
+            return Impl.clear_retaining_capacity(List, self);
         }
 
         pub inline fn clear_and_free(self: *List) void {
-            return Internal.clear_and_free(List, self, ALLOC.*);
+            return Impl.clear_and_free(List, self, ALLOC.*);
         }
 
         pub inline fn ensure_total_capacity(self: *List, new_capacity: Idx) if (RETURN_ERRORS) Error!void else void {
-            return Internal.ensure_total_capacity(List, self, new_capacity, ALLOC.*);
+            return Impl.ensure_total_capacity(List, self, new_capacity, ALLOC.*);
         }
 
         pub inline fn ensure_total_capacity_exact(self: *List, new_capacity: Idx) if (RETURN_ERRORS) Error!void else void {
-            return Internal.ensure_total_capacity_exact(List, self, new_capacity, ALLOC.*);
+            return Impl.ensure_total_capacity_exact(List, self, new_capacity, ALLOC.*);
         }
 
         pub inline fn ensure_unused_capacity(self: *List, additional_count: Idx) if (RETURN_ERRORS) Error!void else void {
-            return Internal.ensure_unused_capacity(List, self, additional_count, ALLOC.*);
+            return Impl.ensure_unused_capacity(List, self, additional_count, ALLOC.*);
         }
 
         pub inline fn expand_to_capacity(self: *List) void {
-            return Internal.expand_to_capacity(List, self);
+            return Impl.expand_to_capacity(List, self);
         }
 
         pub inline fn append_slot(self: *List) if (RETURN_ERRORS) Error!*Elem else *Elem {
-            return Internal.append_slot(List, self, ALLOC.*);
+            return Impl.append_slot(List, self, ALLOC.*);
         }
 
         pub inline fn append_slot_assume_capacity(self: *List) *Elem {
-            return Internal.append_slot_assume_capacity(List, self);
+            return Impl.append_slot_assume_capacity(List, self);
         }
 
         pub inline fn append_many_slots(self: *List, count: Idx) if (RETURN_ERRORS) Error![]Elem else []Elem {
-            return Internal.append_many_slots(List, self, count, ALLOC.*);
+            return Impl.append_many_slots(List, self, count, ALLOC.*);
         }
 
         pub inline fn append_many_slots_assume_capacity(self: *List, count: Idx) []Elem {
-            return Internal.append_many_slots_assume_capacity(List, self, count);
+            return Impl.append_many_slots_assume_capacity(List, self, count);
         }
 
         pub inline fn append_many_slots_as_array(self: *List, comptime count: Idx) if (RETURN_ERRORS) Error!*[count]Elem else *[count]Elem {
-            return Internal.append_many_slots_as_array(List, self, count, ALLOC.*);
+            return Impl.append_many_slots_as_array(List, self, count, ALLOC.*);
         }
 
         pub inline fn append_many_slots_as_array_assume_capacity(self: *List, comptime count: Idx) *[count]Elem {
-            return Internal.append_many_slots_as_array_assume_capacity(List, self, count);
+            return Impl.append_many_slots_as_array_assume_capacity(List, self, count);
         }
 
         pub inline fn pop_or_null(self: *List) ?Elem {
-            return Internal.pop_or_null(List, self);
+            return Impl.pop_or_null(List, self);
         }
 
         pub inline fn pop(self: *List) Elem {
-            return Internal.pop(List, self);
+            return Impl.pop(List, self);
         }
 
         pub inline fn get_last(self: List) Elem {
-            return Internal.get_last(List, self);
+            return Impl.get_last(List, self);
         }
 
         pub inline fn get_last_or_null(self: List) ?Elem {
-            return Internal.get_last_or_null(List, self);
+            return Impl.get_last_or_null(List, self);
         }
 
-        pub inline fn sort(self: *List) void {
-            return Internal.sort(List, self);
-        }
+        // pub inline fn sort(self: *List) void {
+        //     return Internal.sort(List, self);
+        // }
 
-        pub inline fn custom_sort(self: *List, algorithm: SortAlgorithm, order_func: *const fn (a: *const List.Elem, b: *const List.Elem) Compare.Order) void {
-            return Internal.custom_sort(List, self, algorithm, order_func);
-        }
+        // pub inline fn custom_sort(self: *List, algorithm: SortAlgorithm, order_func: *const fn (a: *const List.Elem, b: *const List.Elem) Compare.Order) void {
+        //     return Internal.custom_sort(List, self, algorithm, order_func);
+        // }
 
-        pub inline fn is_sorted(self: *List) bool {
-            return Internal.is_sorted(List, self);
-        }
+        // pub inline fn is_sorted(self: *List) bool {
+        //     return Internal.is_sorted(List, self);
+        // }
 
-        pub inline fn is_sorted_custom(self: *List, compare_fn: CompareFn(Elem)) bool {
-            return Internal.is_sorted_custom(List, self, compare_fn);
-        }
+        // pub inline fn is_sorted_custom(self: *List, greater_than_fn: *const CompareFn(Elem)) bool {
+        //     return Internal.is_sorted_custom(List, self, greater_than_fn);
+        // }
 
-        pub inline fn insert_one_sorted(self: *List, item: Elem) if (RETURN_ERRORS) Error!Idx else Idx {
-            return Internal.insert_one_sorted(List, self, item, ALLOC.*);
-        }
+        // pub inline fn insert_one_sorted(self: *List, item: Elem) if (RETURN_ERRORS) Error!Idx else Idx {
+        //     return Internal.insert_one_sorted(List, self, item, ALLOC.*);
+        // }
 
-        pub inline fn insert_one_sorted_custom(self: *List, item: Elem, compare_fn: CompareFn(Elem), comptime shortcut_equal_order: bool) if (RETURN_ERRORS) Error!Idx else Idx {
-            return Internal.insert_one_sorted_custom(List, self, item, compare_fn, shortcut_equal_order, ALLOC.*);
-        }
+        // pub inline fn insert_one_sorted_custom(self: *List, item: Elem, compare_fn: *const CompareFn(Elem), comptime shortcut_equal_order: bool) if (RETURN_ERRORS) Error!Idx else Idx {
+        //     return Internal.insert_one_sorted_custom(List, self, item, compare_fn, shortcut_equal_order, ALLOC.*);
+        // }
 
-        pub inline fn find_equal_order_idx_sorted(self: *const List, item_to_compare: *const Elem) ?Idx {
-            return Internal.find_equal_order_idx_sorted(List, self, item_to_compare);
-        }
+        // pub inline fn find_equal_order_idx_sorted(self: *const List, item_to_compare: *const Elem) ?Idx {
+        //     return Internal.find_equal_order_idx_sorted(List, self, item_to_compare);
+        // }
 
-        pub fn find_equal_order_idx_sorted_custom(self: *const List, item_to_compare: *const Elem, compare_fn: CompareFn(Elem)) ?Idx {
-            return Internal.find_equal_order_idx_sorted_custom(List, self, item_to_compare, compare_fn);
-        }
+        // pub fn find_equal_order_idx_sorted_custom(self: *const List, item_to_compare: *const Elem, compare_fn: *const CompareFn(Elem)) ?Idx {
+        //     return Internal.find_equal_order_idx_sorted_custom(List, self, item_to_compare, compare_fn);
+        // }
 
-        pub inline fn find_matching_item_idx_sorted(self: *const List, item_to_find: *const Elem) ?Idx {
-            return Internal.find_matching_item_idx_sorted(List, self, item_to_find);
-        }
+        // pub inline fn find_matching_item_idx_sorted(self: *const List, item_to_find: *const Elem) ?Idx {
+        //     return Internal.find_matching_item_idx_sorted(List, self, item_to_find);
+        // }
 
-        pub fn find_matching_item_idx_sorted_custom(self: *const List, item_to_find: *const Elem, compare_fn: CompareFn(Elem), match_fn: MatchFn(Elem)) ?Idx {
-            return Internal.find_matching_item_idx_sorted_custom(List, self, item_to_find, compare_fn, match_fn);
-        }
+        // pub fn find_matching_item_idx_sorted_custom(self: *const List, item_to_find: *const Elem, compare_fn: *const CompareFn(Elem), match_fn: *const CompareFn(Elem)) ?Idx {
+        //     return Internal.find_matching_item_idx_sorted_custom(List, self, item_to_find, compare_fn, match_fn);
+        // }
 
-        pub inline fn find_matching_item_idx(self: *const List, item_to_find: *const Elem) ?Idx {
-            return Internal.find_matching_item_idx(List, self, item_to_find);
-        }
+        // pub inline fn find_matching_item_idx(self: *const List, item_to_find: *const Elem) ?Idx {
+        //     return Internal.find_matching_item_idx(List, self, item_to_find);
+        // }
 
-        pub fn find_matching_item_idx_custom(self: *const List, item_to_find: *const Elem, match_fn: MatchFn(Elem)) ?Idx {
-            return Internal.find_matching_item_idx_custom(List, self, item_to_find, match_fn);
-        }
+        // pub fn find_matching_item_idx_custom(self: *const List, item_to_find: *const Elem, match_fn: *const CompareFn(Elem)) ?Idx {
+        //     return Internal.find_matching_item_idx_custom(List, self, item_to_find, match_fn);
+        // }
 
         //**************************
         // std.io.Writer interface *
@@ -1341,7 +1356,7 @@ pub fn define_statically_managed_list_type(comptime base_options: ListOptionsBas
     };
 }
 
-pub fn define_cached_allocator_list_type(comptime base_options: ListOptionsBase, comptime ex_options: ListOptionsExtended(base_options)) type {
+pub fn define_cached_allocator_list_type(comptime base_options: ListOptions) type {
     const opt = comptime check: {
         var opts = base_options;
         if (opts.alignment) |a| {
@@ -1363,9 +1378,6 @@ pub fn define_cached_allocator_list_type(comptime base_options: ListOptionsBase,
         cap: Idx = 0,
 
         pub const ALIGN = base_options.alignment;
-        pub const DEFAULT_SORT_ALGO = ex_options.default_sorting_algorithm;
-        pub const DEFAULT_COMPARE_FN = ex_options.default_sorting_compare_func;
-        pub const DEFAULT_EXACT_EQUAL_FN = ex_options.default_match_func;
         pub const ALLOC_ERROR_BEHAVIOR = base_options.alloc_error_behavior;
         pub const GROWTH = base_options.growth_model;
         pub const RETURN_ERRORS = base_options.alloc_error_behavior == .ALLOCATION_ERRORS_RETURN_ERROR;
@@ -1403,280 +1415,280 @@ pub fn define_cached_allocator_list_type(comptime base_options: ListOptionsBase,
         }
 
         pub inline fn slice(self: List) Slice {
-            return Internal.slice(List, self);
+            return Impl.slice(List, self);
         }
 
         pub inline fn array_ptr(self: List, start: Idx, comptime length: Idx) *[length]Elem {
-            return Internal.array_ptr(List, self, start, length);
+            return Impl.array_ptr(List, self, start, length);
         }
 
         pub inline fn vector_ptr(self: List, start: Idx, comptime length: Idx) *@Vector(length, Elem) {
-            return Internal.vector_ptr(List, self, start, length);
+            return Impl.vector_ptr(List, self, start, length);
         }
 
         pub inline fn slice_with_sentinel(self: List, comptime sentinel: Elem) SentinelSlice(Elem) {
-            return Internal.slice_with_sentinel(List, self, sentinel);
+            return Impl.slice_with_sentinel(List, self, sentinel);
         }
 
         pub inline fn slice_full_capacity(self: List) Slice {
-            return Internal.slice_full_capacity(List, self);
+            return Impl.slice_full_capacity(List, self);
         }
 
         pub inline fn slice_unused_capacity(self: List) []Elem {
-            return Internal.slice_unused_capacity(List, self);
+            return Impl.slice_unused_capacity(List, self);
         }
 
         pub inline fn set_len(self: *List, new_len: Idx) void {
-            return Internal.set_len(List, self, new_len);
+            return Impl.set_len(List, self, new_len);
         }
 
         pub inline fn new_empty(alloc: Allocator) List {
-            const list: List = Internal.new_empty(List);
+            const list: List = Impl.new_empty(List);
             list.set_alloc(alloc);
             return list;
         }
 
         pub inline fn new_with_capacity(capacity: Idx, alloc: Allocator) if (RETURN_ERRORS) Error!List else List {
-            const list: List = try Internal.new_with_capacity(List, capacity, alloc);
+            const list: List = try Impl.new_with_capacity(List, capacity, alloc);
             list.set_alloc(alloc);
             return list;
         }
 
         pub inline fn clone(self: List) if (RETURN_ERRORS) Error!List else List {
-            return Internal.clone(List, self, self.get_alloc());
+            return Impl.clone(List, self, self.get_alloc());
         }
 
         pub inline fn to_owned_slice(self: *List) if (RETURN_ERRORS) Error!Slice else Slice {
-            return Internal.to_owned_slice(List, self, self.get_alloc());
+            return Impl.to_owned_slice(List, self, self.get_alloc());
         }
 
         pub inline fn to_owned_slice_sentinel(self: *List, comptime sentinel: Elem) if (RETURN_ERRORS) Error!SentinelSlice(sentinel) else SentinelSlice(sentinel) {
-            return Internal.to_owned_slice_sentinel(List, self, sentinel, self.get_alloc());
+            return Impl.to_owned_slice_sentinel(List, self, sentinel, self.get_alloc());
         }
 
         pub inline fn from_owned_slice(from_slice: Slice) List {
-            return Internal.from_owned_slice(List, from_slice);
+            return Impl.from_owned_slice(List, from_slice);
         }
 
         pub inline fn from_owned_slice_sentinel(comptime sentinel: Elem, from_slice: [:sentinel]Elem) List {
-            return Internal.from_owned_slice_sentinel(List, sentinel, from_slice);
+            return Impl.from_owned_slice_sentinel(List, sentinel, from_slice);
         }
 
         pub inline fn insert_slot(self: *List, idx: Idx) if (RETURN_ERRORS) Error!*Elem else *Elem {
-            return Internal.insert_slot(List, self, idx, self.get_alloc());
+            return Impl.insert_slot(List, self, idx, self.get_alloc());
         }
 
         pub inline fn insert_slot_assume_capacity(self: *List, idx: Idx) *Elem {
-            return Internal.insert_slot_assume_capacity(List, self, idx);
+            return Impl.insert_slot_assume_capacity(List, self, idx);
         }
 
         pub inline fn insert(self: *List, idx: Idx, item: Elem) if (RETURN_ERRORS) Error!void else void {
-            return Internal.insert(List, self, idx, item, self.get_alloc());
+            return Impl.insert(List, self, idx, item, self.get_alloc());
         }
 
         pub inline fn insert_assume_capacity(self: *List, idx: Idx, item: Elem) void {
-            return Internal.insert_assume_capacity(List, self, idx, item);
+            return Impl.insert_assume_capacity(List, self, idx, item);
         }
 
         pub inline fn insert_many_slots(self: *List, idx: Idx, count: Idx) if (RETURN_ERRORS) Error![]Elem else []Elem {
-            return Internal.insert_many_slots(List, self, idx, count, self.get_alloc());
+            return Impl.insert_many_slots(List, self, idx, count, self.get_alloc());
         }
 
         pub inline fn insert_many_slots_assume_capacity(self: *List, idx: Idx, count: Idx) []Elem {
-            return Internal.insert_many_slots_assume_capacity(List, self, idx, count);
+            return Impl.insert_many_slots_assume_capacity(List, self, idx, count);
         }
 
         pub inline fn insert_slice(self: *List, idx: Idx, items: []const Elem) if (RETURN_ERRORS) Error!void else void {
-            return Internal.insert_slice(List, self, idx, items, self.get_alloc());
+            return Impl.insert_slice(List, self, idx, items, self.get_alloc());
         }
 
         pub inline fn insert_slice_assume_capacity(self: *List, idx: Idx, items: []const Elem) void {
-            return Internal.insert_slice_assume_capacity(List, self, idx, items);
+            return Impl.insert_slice_assume_capacity(List, self, idx, items);
         }
 
         pub inline fn replace_range(self: *List, start: Idx, length: Idx, new_items: []const Elem) if (RETURN_ERRORS) Error!void else void {
-            return Internal.replace_range(List, self, start, length, new_items, self.get_alloc());
+            return Impl.replace_range(List, self, start, length, new_items, self.get_alloc());
         }
 
         pub inline fn replace_range_assume_capacity(self: *List, start: Idx, length: Idx, new_items: []const Elem) void {
-            return Internal.replace_range_assume_capacity(List, self, start, length, new_items);
+            return Impl.replace_range_assume_capacity(List, self, start, length, new_items);
         }
 
         pub inline fn append(self: *List, item: Elem) if (RETURN_ERRORS) Error!void else void {
-            return Internal.append(List, self, item, self.get_alloc());
+            return Impl.append(List, self, item, self.get_alloc());
         }
 
         pub inline fn append_assume_capacity(self: *List, item: Elem) void {
-            return Internal.append_assume_capacity(List, self, item);
+            return Impl.append_assume_capacity(List, self, item);
         }
 
         pub inline fn remove(self: *List, idx: Idx) Elem {
-            return Internal.remove(List, self, idx);
+            return Impl.remove(List, self, idx);
         }
 
         pub inline fn swap_remove(self: *List, idx: Idx) Elem {
-            return Internal.swap_remove(List, self, idx);
+            return Impl.swap_remove(List, self, idx);
         }
 
         pub inline fn delete(self: *List, idx: Idx) void {
-            return Internal.delete(List, self, idx);
+            return Impl.delete(List, self, idx);
         }
 
         pub inline fn delete_range(self: *List, start: Idx, length: Idx) void {
-            return Internal.delete_range(List, self, start, length);
+            return Impl.delete_range(List, self, start, length);
         }
 
         pub inline fn swap_delete(self: *List, idx: Idx) void {
-            return Internal.swap_delete(List, self, idx);
+            return Impl.swap_delete(List, self, idx);
         }
 
         pub inline fn append_slice(self: *List, items: []const Elem) if (RETURN_ERRORS) Error!void else void {
-            return Internal.append_slice(List, self, items, self.get_alloc());
+            return Impl.append_slice(List, self, items, self.get_alloc());
         }
 
         pub inline fn append_slice_assume_capacity(self: *List, items: []const Elem) void {
-            return Internal.append_slice_assume_capacity(List, self, items);
+            return Impl.append_slice_assume_capacity(List, self, items);
         }
 
         pub inline fn append_slice_unaligned(self: *List, items: []align(1) const Elem) if (RETURN_ERRORS) Error!void else void {
-            return Internal.append_slice_unaligned(List, self, items, self.get_alloc());
+            return Impl.append_slice_unaligned(List, self, items, self.get_alloc());
         }
 
         pub inline fn append_slice_unaligned_assume_capacity(self: *List, items: []align(1) const Elem) void {
-            return Internal.append_slice_unaligned_assume_capacity(List, self, items);
+            return Impl.append_slice_unaligned_assume_capacity(List, self, items);
         }
 
         pub inline fn append_n_times(self: *List, value: Elem, count: Idx) if (RETURN_ERRORS) Error!void else void {
-            return Internal.append_n_times(List, self, value, count, self.get_alloc());
+            return Impl.append_n_times(List, self, value, count, self.get_alloc());
         }
 
         pub inline fn append_n_times_assume_capacity(self: *List, value: Elem, count: Idx) void {
-            return Internal.append_n_times_assume_capacity(List, self, value, count);
+            return Impl.append_n_times_assume_capacity(List, self, value, count);
         }
 
         pub inline fn resize(self: *List, new_len: Idx) if (RETURN_ERRORS) Error!void else void {
-            return Internal.resize(List, self, new_len, self.get_alloc());
+            return Impl.resize(List, self, new_len, self.get_alloc());
         }
 
         pub inline fn shrink_and_free(self: *List, new_len: Idx) void {
-            return Internal.shrink_and_free(List, self, new_len, self.get_alloc());
+            return Impl.shrink_and_free(List, self, new_len, self.get_alloc());
         }
 
         pub inline fn shrink_retaining_capacity(self: *List, new_len: Idx) void {
-            return Internal.shrink_retaining_capacity(List, self, new_len);
+            return Impl.shrink_retaining_capacity(List, self, new_len);
         }
 
         pub inline fn clear_retaining_capacity(self: *List) void {
-            return Internal.clear_retaining_capacity(List, self);
+            return Impl.clear_retaining_capacity(List, self);
         }
 
         pub inline fn clear_and_free(self: *List) void {
-            return Internal.clear_and_free(List, self, self.get_alloc());
+            return Impl.clear_and_free(List, self, self.get_alloc());
         }
 
         pub inline fn ensure_total_capacity(self: *List, new_capacity: Idx) if (RETURN_ERRORS) Error!void else void {
-            return Internal.ensure_total_capacity(List, self, new_capacity, self.get_alloc());
+            return Impl.ensure_total_capacity(List, self, new_capacity, self.get_alloc());
         }
 
         pub inline fn ensure_total_capacity_exact(self: *List, new_capacity: Idx) if (RETURN_ERRORS) Error!void else void {
-            return Internal.ensure_total_capacity_exact(List, self, new_capacity, self.get_alloc());
+            return Impl.ensure_total_capacity_exact(List, self, new_capacity, self.get_alloc());
         }
 
         pub inline fn ensure_unused_capacity(self: *List, additional_count: Idx) if (RETURN_ERRORS) Error!void else void {
-            return Internal.ensure_unused_capacity(List, self, additional_count, self.get_alloc());
+            return Impl.ensure_unused_capacity(List, self, additional_count, self.get_alloc());
         }
 
         pub inline fn expand_to_capacity(self: *List) void {
-            return Internal.expand_to_capacity(List, self);
+            return Impl.expand_to_capacity(List, self);
         }
 
         pub inline fn append_slot(self: *List) if (RETURN_ERRORS) Error!*Elem else *Elem {
-            return Internal.append_slot(List, self, self.get_alloc());
+            return Impl.append_slot(List, self, self.get_alloc());
         }
 
         pub inline fn append_slot_assume_capacity(self: *List) *Elem {
-            return Internal.append_slot_assume_capacity(List, self);
+            return Impl.append_slot_assume_capacity(List, self);
         }
 
         pub inline fn append_many_slots(self: *List, count: Idx) if (RETURN_ERRORS) Error![]Elem else []Elem {
-            return Internal.append_many_slots(List, self, count, self.get_alloc());
+            return Impl.append_many_slots(List, self, count, self.get_alloc());
         }
 
         pub inline fn append_many_slots_assume_capacity(self: *List, count: Idx) []Elem {
-            return Internal.append_many_slots_assume_capacity(List, self, count);
+            return Impl.append_many_slots_assume_capacity(List, self, count);
         }
 
         pub inline fn append_many_slots_as_array(self: *List, comptime count: Idx) if (RETURN_ERRORS) Error!*[count]Elem else *[count]Elem {
-            return Internal.append_many_slots_as_array(List, self, count, self.get_alloc());
+            return Impl.append_many_slots_as_array(List, self, count, self.get_alloc());
         }
 
         pub inline fn append_many_slots_as_array_assume_capacity(self: *List, comptime count: Idx) *[count]Elem {
-            return Internal.append_many_slots_as_array_assume_capacity(List, self, count);
+            return Impl.append_many_slots_as_array_assume_capacity(List, self, count);
         }
 
         pub inline fn pop_or_null(self: *List) ?Elem {
-            return Internal.pop_or_null(List, self);
+            return Impl.pop_or_null(List, self);
         }
 
         pub inline fn pop(self: *List) Elem {
-            return Internal.pop(List, self);
+            return Impl.pop(List, self);
         }
 
         pub inline fn get_last(self: List) Elem {
-            return Internal.get_last(List, self);
+            return Impl.get_last(List, self);
         }
 
         pub inline fn get_last_or_null(self: List) ?Elem {
-            return Internal.get_last_or_null(List, self);
+            return Impl.get_last_or_null(List, self);
         }
 
-        pub inline fn sort(self: *List) void {
-            return Internal.sort(List, self);
-        }
+        // pub inline fn sort(self: *List) void {
+        //     return Internal.sort(List, self);
+        // }
 
-        pub inline fn custom_sort(self: *List, algorithm: SortAlgorithm, order_func: *const fn (a: *const List.Elem, b: *const List.Elem) Compare.Order) void {
-            return Internal.custom_sort(List, self, algorithm, order_func);
-        }
+        // pub inline fn custom_sort(self: *List, algorithm: SortAlgorithm, order_func: *const fn (a: *const List.Elem, b: *const List.Elem) Compare.Order) void {
+        //     return Internal.custom_sort(List, self, algorithm, order_func);
+        // }
 
-        pub inline fn is_sorted(self: *List) bool {
-            return Internal.is_sorted(List, self);
-        }
+        // pub inline fn is_sorted(self: *List) bool {
+        //     return Internal.is_sorted(List, self);
+        // }
 
-        pub inline fn is_sorted_custom(self: *List, compare_fn: CompareFn(Elem)) bool {
-            return Internal.is_sorted_custom(List, self, compare_fn);
-        }
+        // pub inline fn is_sorted_custom(self: *List, compare_fn: *const CompareFn(Elem)) bool {
+        //     return Internal.is_sorted_custom(List, self, compare_fn);
+        // }
 
-        pub inline fn insert_one_sorted(self: *List, item: Elem) if (RETURN_ERRORS) Error!Idx else Idx {
-            return Internal.insert_one_sorted(List, self, item, self.get_alloc());
-        }
+        // pub inline fn insert_one_sorted(self: *List, item: Elem) if (RETURN_ERRORS) Error!Idx else Idx {
+        //     return Internal.insert_one_sorted(List, self, item, self.get_alloc());
+        // }
 
-        pub inline fn insert_one_sorted_custom(self: *List, item: Elem, compare_fn: CompareFn(Elem), comptime shortcut_equal_order: bool) if (RETURN_ERRORS) Error!Idx else Idx {
-            return Internal.insert_one_sorted_custom(List, self, item, compare_fn, shortcut_equal_order, self.get_alloc());
-        }
+        // pub inline fn insert_one_sorted_custom(self: *List, item: Elem, compare_fn: *const CompareFn(Elem), comptime shortcut_equal_order: bool) if (RETURN_ERRORS) Error!Idx else Idx {
+        //     return Internal.insert_one_sorted_custom(List, self, item, compare_fn, shortcut_equal_order, self.get_alloc());
+        // }
 
-        pub inline fn find_equal_order_idx_sorted(self: *const List, item_to_compare: *const Elem) ?Idx {
-            return Internal.find_equal_order_idx_sorted(List, self, item_to_compare);
-        }
+        // pub inline fn find_equal_order_idx_sorted(self: *const List, item_to_compare: *const Elem) ?Idx {
+        //     return Internal.find_equal_order_idx_sorted(List, self, item_to_compare);
+        // }
 
-        pub fn find_equal_order_idx_sorted_custom(self: *const List, item_to_compare: *const Elem, compare_fn: CompareFn(Elem)) ?Idx {
-            return Internal.find_equal_order_idx_sorted_custom(List, self, item_to_compare, compare_fn);
-        }
+        // pub fn find_equal_order_idx_sorted_custom(self: *const List, item_to_compare: *const Elem, compare_fn: *const CompareFn(Elem)) ?Idx {
+        //     return Internal.find_equal_order_idx_sorted_custom(List, self, item_to_compare, compare_fn);
+        // }
 
-        pub inline fn find_matching_item_idx_sorted(self: *const List, item_to_find: *const Elem) ?Idx {
-            return Internal.find_matching_item_idx_sorted(List, self, item_to_find);
-        }
+        // pub inline fn find_matching_item_idx_sorted(self: *const List, item_to_find: *const Elem) ?Idx {
+        //     return Internal.find_matching_item_idx_sorted(List, self, item_to_find);
+        // }
 
-        pub fn find_matching_item_idx_sorted_custom(self: *const List, item_to_find: *const Elem, compare_fn: CompareFn(Elem), match_fn: MatchFn(Elem)) ?Idx {
-            return Internal.find_matching_item_idx_sorted_custom(List, self, item_to_find, compare_fn, match_fn);
-        }
+        // pub fn find_matching_item_idx_sorted_custom(self: *const List, item_to_find: *const Elem, compare_fn: *const CompareFn(Elem), match_fn: *const CompareFn(Elem)) ?Idx {
+        //     return Internal.find_matching_item_idx_sorted_custom(List, self, item_to_find, compare_fn, match_fn);
+        // }
 
-        pub inline fn find_matching_item_idx(self: *const List, item_to_find: *const Elem) ?Idx {
-            return Internal.find_matching_item_idx(List, self, item_to_find);
-        }
+        // pub inline fn find_matching_item_idx(self: *const List, item_to_find: *const Elem) ?Idx {
+        //     return Internal.find_matching_item_idx(List, self, item_to_find);
+        // }
 
-        pub fn find_matching_item_idx_custom(self: *const List, item_to_find: *const Elem, match_fn: MatchFn(Elem)) ?Idx {
-            return Internal.find_matching_item_idx_custom(List, self, item_to_find, match_fn);
-        }
+        // pub fn find_matching_item_idx_custom(self: *const List, item_to_find: *const Elem, match_fn: *const CompareFn(Elem)) ?Idx {
+        //     return Internal.find_matching_item_idx_custom(List, self, item_to_find, match_fn);
+        // }
 
         //**************************
         // std.io.Writer interface *
@@ -1719,20 +1731,15 @@ pub fn define_cached_allocator_list_type(comptime base_options: ListOptionsBase,
     };
 }
 
-test "Does it basically work?" {
+test "List.zig" {
     const t = std.testing;
     const alloc = std.heap.page_allocator;
-    const base_opts = ListOptionsBase{
+    const base_opts = ListOptions{
         .alloc_error_behavior = .ALLOCATION_ERRORS_PANIC,
         .element_type = u8,
         .index_type = u32,
     };
-    const ex_opts = comptime ListOptionsExtended(base_opts){
-        .default_sorting_algorithm = .QUICK_SORT_PIVOT_MEDIAN_OF_3_RANDOM,
-        .default_sorting_compare_func = Compare.numeric_order_else_always_equal(u8),
-        .default_match_func = Compare.shallow_equals_else_never_equal(u8),
-    };
-    const List = define_manually_managed_list_type(base_opts, ex_opts);
+    const List = define_manually_managed_list_type(base_opts);
     var list = List.new_empty();
     list.append('H', alloc);
     list.append('e', alloc);
@@ -1745,15 +1752,6 @@ test "Does it basically work?" {
     const letter_l = list.remove(2);
     try t.expectEqual('l', letter_l);
     try t.expectEqualStrings("Helo World", list.slice());
-    const sorted_1 = list.is_sorted();
-    try t.expectEqual(false, sorted_1);
-    list.sort();
-    const sorted_2 = list.is_sorted();
-    try t.expectEqual(true, sorted_2);
-    try t.expectEqualStrings(" HWdelloor", list.slice());
-    const idx_for_f = list.insert_one_sorted('f', alloc);
-    try t.expectEqual(5, idx_for_f);
-    try t.expectEqualStrings(" HWdeflloor", list.slice());
     list.replace_range(3, 3, &.{ 'a', 'b', 'c' }, alloc);
-    try t.expectEqualStrings(" HWabclloor", list.slice());
+    try t.expectEqualStrings("Helabcorld", list.slice());
 }

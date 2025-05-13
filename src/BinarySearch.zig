@@ -2,77 +2,64 @@ const std = @import("std");
 
 const Root = @import("./_root.zig");
 const Compare = Root.Compare;
-const Order = Compare.Order;
+// const Order = Compare.Order;
 const CompareFn = Compare.CompareFn;
-const ExactlyEqualFn = Compare.ExactlyEqualFn;
+// const ExactlyEqualFn = Compare.ExactlyEqualFn;
 
-pub fn binary_search_insert_index(comptime T: type, item_to_insert: *const T, sorted_buffer: []const T, compare_fn: CompareFn(T), comptime shortcut_equal_order: bool) usize {
+pub fn binary_search_insert_index(comptime T: type, item_to_insert: *const T, sorted_buffer: []const T, greater_than_fn: *const CompareFn(T), equal_order_fn: *const CompareFn(T)) usize {
     var range: [2]usize = [2]usize{ 0, sorted_buffer.len };
     var new_range: [2][2]usize = undefined;
     var mid_idx: usize = undefined;
     var mid_val: *const T = undefined;
-    var order: Order = Order.A_EQUALS_B;
+    var insert_greater = false;
     while (range[0] < range[1]) {
         mid_idx = ((range[1] - range[0]) >> 1) + range[0];
         mid_val = &sorted_buffer[mid_idx];
-        order = compare_fn(item_to_insert, mid_val);
-        if (shortcut_equal_order and order == .A_EQUALS_B) return mid_idx;
+        if (equal_order_fn(item_to_insert, mid_val)) return mid_idx;
+        insert_greater = greater_than_fn(item_to_insert, mid_val);
         new_range = [2][2]usize{ [2]usize{ range[0], mid_idx }, [2]usize{ mid_idx + 1, range[1] } };
-        range = new_range[@max(0, @intFromEnum(order))];
+        range = new_range[@intFromBool(insert_greater)];
     }
     return range[1];
 }
 
-pub fn binary_search_by_order(comptime T: type, item_to_find: *const T, sorted_buffer: []const T, compare_fn: CompareFn(T)) ?usize {
-    var range: [2]usize = [2]usize{ 0, sorted_buffer.len };
-    var new_range: [2][2]usize = undefined;
-    var mid_idx: usize = undefined;
-    var mid_val: *const T = undefined;
-    var order: Compare.Order = Order.A_EQUALS_B;
-    while (range[0] < range[1]) {
-        mid_idx = ((range[1] - range[0]) >> 1) + range[0];
-        mid_val = &sorted_buffer[mid_idx];
-        order = compare_fn(item_to_find, mid_val);
-        if (order == .A_EQUALS_B) return mid_idx;
-        new_range = [2][2]usize{ [2]usize{ range[0], mid_idx }, [2]usize{ mid_idx + 1, range[1] } };
-        range = new_range[@max(0, @intFromEnum(order))];
-    }
+pub fn binary_search_by_order(comptime T: type, item_to_find: *const T, sorted_buffer: []const T, greater_than_fn: *const CompareFn(T), equal_order_fn: *const CompareFn(T)) ?usize {
+    const ins_idx = binary_search_insert_index(T, item_to_find, sorted_buffer, greater_than_fn, equal_order_fn);
+    if (ins_idx < sorted_buffer.len) return ins_idx;
     return null;
 }
 
-pub fn binary_search_exatly_equal(comptime T: type, item_to_find: *const T, sorted_buffer: []const T, compare_fn: CompareFn(T), exactly_equal_fn: ExactlyEqualFn(T)) ?usize {
+pub fn binary_search_exact_match(comptime T: type, item_to_find: *const T, sorted_buffer: []const T, greater_than_fn: *const CompareFn(T), equal_order_fn: *const CompareFn(T), exactly_equal_fn: *const CompareFn(T)) ?usize {
     var range: [2]usize = [2]usize{ 0, sorted_buffer.len };
     var new_range: [2][2]usize = undefined;
     var mid_idx: usize = undefined;
     var mid_val: *const T = undefined;
-    var order: Compare.Order = Order.A_EQUALS_B;
+    var find_greater = false;
     while (range[0] < range[1]) {
         mid_idx = ((range[1] - range[0]) >> 1) + range[0];
         mid_val = &sorted_buffer[mid_idx];
-        order = compare_fn(item_to_find, mid_val);
-        if (order == .A_EQUALS_B) {
+        if (equal_order_fn(item_to_find, mid_val)) {
             const first_order_match_idx = mid_idx;
             var found_exact = exactly_equal_fn(item_to_find, mid_val);
             while (!found_exact) {
                 mid_idx -= 1;
                 mid_val = &sorted_buffer[mid_idx];
-                order = compare_fn(item_to_find, mid_val);
-                if (order != .A_EQUALS_B) break;
+                if (!equal_order_fn(item_to_find, mid_val)) break;
                 found_exact = exactly_equal_fn(item_to_find, mid_val);
             }
             mid_idx = first_order_match_idx;
             while (!found_exact) {
                 mid_idx += 1;
                 mid_val = &sorted_buffer[mid_idx];
-                order = compare_fn(item_to_find, mid_val);
-                if (order != .A_EQUALS_B) break;
+                if (!equal_order_fn(item_to_find, mid_val)) break;
                 found_exact = exactly_equal_fn(item_to_find, mid_val);
             }
             if (found_exact) return mid_idx;
             return null;
         }
+        find_greater = greater_than_fn(item_to_find, mid_val);
         new_range = [2][2]usize{ [2]usize{ range[0], mid_idx }, [2]usize{ mid_idx + 1, range[1] } };
-        range = new_range[@max(0, @intFromEnum(order))];
+        range = new_range[@intFromBool(find_greater)];
     }
     return null;
 }

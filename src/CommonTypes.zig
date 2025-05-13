@@ -45,6 +45,8 @@ pub const GrowthModel = enum {
 pub const SortAlgorithm = enum {
     // BUBBlE_SORT,
     // HEAP_SORT,
+    ///TODO documentation
+    INSERTION_SORT,
     /// TODO documentation
     QUICK_SORT_PIVOT_FIRST,
     /// TODO documentation

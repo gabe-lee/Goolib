@@ -13,6 +13,7 @@ pub const Compare = @import("./Compare.zig");
 pub const DummyAllocator = @import("./DummyAllocator.zig");
 // pub const Filegen = @import("./Filegen.zig");
 // pub const Format = @import("./Format.zig");
+pub const InsertionSort = @import("./InsertionSort.zig");
 pub const List = @import("./List.zig");
 pub const Math = @import("./Math.zig");
 pub const Quicksort = @import("./Quicksort.zig");
@@ -42,6 +43,7 @@ comptime {
     _ = @import("./DummyAllocator.zig");
     // _ = @import("./Filegen.zig");
     // _ = @import("./Format.zig");
+    _ = @import("./InsertionSort.zig");
     _ = @import("./List.zig");
     _ = @import("./Math.zig");
     _ = @import("./Quicksort.zig");

@@ -4,151 +4,462 @@ const meta = std.meta;
 const mem = std.mem;
 
 pub fn CompareFn(comptime T: type) type {
-    return *const fn (a: *const T, b: *const T) Order;
+    return fn (a: T, b: T) bool;
 }
 
-pub fn MatchFn(comptime T: type) type {
-    return *const fn (a: *const T, b: *const T) bool;
-}
-
-pub fn a_equals_b(comptime T: type, a: *const T, b: *const T, compare_fn: CompareFn(T)) bool {
-    return @intFromEnum(compare_fn(a, b)) == @intFromEnum(Order.A_EQUALS_B);
-}
-pub fn a_less_than_b(comptime T: type, a: *const T, b: *const T, compare_fn: CompareFn(T)) bool {
-    return @intFromEnum(compare_fn(a, b)) == @intFromEnum(Order.A_LESS_THAN_B);
-}
-pub fn a_less_than_or_equal_to_b(comptime T: type, a: *const T, b: *const T, compare_fn: CompareFn(T)) bool {
-    return @intFromEnum(compare_fn(a, b)) <= @intFromEnum(Order.A_EQUALS_B);
-}
-pub fn a_greater_than_b(comptime T: type, a: *const T, b: *const T, compare_fn: CompareFn(T)) bool {
-    return @intFromEnum(compare_fn(a, b)) == @intFromEnum(Order.A_GREATER_THAN_B);
-}
-pub fn a_greater_than_or_equal_to_b(comptime T: type, a: *const T, b: *const T, compare_fn: CompareFn(T)) bool {
-    return @intFromEnum(compare_fn(a, b)) >= @intFromEnum(Order.A_EQUALS_B);
-}
-pub fn a_deep_equals_b(comptime T: type, a: *const T, b: *const T, equal_fn: MatchFn(T)) bool {
-    if (@intFromPtr(a) == @intFromPtr(b)) return true;
-    return equal_fn(a, b);
-}
-
-pub fn type_compare_package(comptime T: type, comptime compare_fn: CompareFn(T)) type {
+pub fn ComparePackage(comptime T: type) type {
+    const INFO = @typeInfo(T);
     return struct {
-        pub fn a_equals_b(a: *const T, b: *const T) bool {
-            return @intFromEnum(compare_fn(a, b)) == @intFromEnum(Order.A_EQUALS_B);
-        }
-        pub fn a_less_than_b(a: *const T, b: *const T) bool {
-            return @intFromEnum(compare_fn(a, b)) == @intFromEnum(Order.A_LESS_THAN_B);
-        }
-        pub fn a_less_than_or_equal_to_b(a: *const T, b: *const T) bool {
-            return @intFromEnum(compare_fn(a, b)) <= @intFromEnum(Order.A_EQUALS_B);
-        }
-        pub fn a_greater_than_b(a: *const T, b: *const T) bool {
-            return @intFromEnum(compare_fn(a, b)) == @intFromEnum(Order.A_GREATER_THAN_B);
-        }
-        pub fn a_greater_than_or_equal_to_b(a: *const T, b: *const T) bool {
-            return @intFromEnum(compare_fn(a, b)) >= @intFromEnum(Order.A_EQUALS_B);
-        }
-    };
-}
+        order_less_than: *const fn (a: T, b: T) bool,
+        order_less_than_or_equal_to: *const fn (a: T, b: T) bool,
+        order_greater_than: *const fn (a: T, b: T) bool,
+        order_greater_than_or_equal_to: *const fn (a: T, b: T) bool,
+        order_equals: *const fn (a: T, b: T) bool,
+        value_equals: *const fn (a: T, b: T) bool,
 
-pub fn type_deep_equals_package(comptime T: type, comptime equal_fn: MatchFn(T)) type {
-    return struct {
-        pub fn a_deep_equals_b(a: *const T, b: *const T) bool {
-            if (@intFromPtr(a) == @intFromPtr(b)) return true;
-            return equal_fn(a, b);
-        }
-    };
-}
+        const Self = @This();
 
-pub fn numeric_order_else_always_equal(comptime T: type) CompareFn(T) {
-    const container = comptime switch (@typeInfo(T)) {
-        .int, .float, .comptime_int, .comptime_float => struct {
-            fn func(a: *const T, b: *const T) Order {
-                var val: i8 = @intCast(@intFromBool(a.* > b.*));
-                val -= @intCast(@intFromBool(a.* < b.*));
-                return @enumFromInt(val);
-            }
-        },
-        .pointer => |info| struct {
-            fn func(a: *const T, b: *const T) Order {
-                const addr_a = switch (info.size) {
-                    .c, .one, .many => @intFromPtr(a.*),
-                    .slice => @intFromPtr(a.ptr),
+        pub fn default() Self {
+            if (INFO == .int or INFO == .comptime_int or INFO == .float or INFO == .comptime_float) {
+                const PROTO = struct {
+                    fn order_less_than(a: T, b: T) bool {
+                        return a < b;
+                    }
+                    fn order_less_than_or_equal_to(a: T, b: T) bool {
+                        return a <= b;
+                    }
+                    fn order_greater_than(a: T, b: T) bool {
+                        return a > b;
+                    }
+                    fn order_greater_than_or_equal_to(a: T, b: T) bool {
+                        return a >= b;
+                    }
+                    fn order_equals(a: T, b: T) bool {
+                        return a == b;
+                    }
+                    fn value_equals(a: T, b: T) bool {
+                        return a == b;
+                    }
                 };
-                const addr_b = switch (info.size) {
-                    .c, .one, .many => @intFromPtr(b.*),
-                    .slice => @intFromPtr(b.ptr),
+                return Self{
+                    .order_less_than = PROTO.order_less_than,
+                    .order_less_than_or_equal_to = PROTO.order_less_than_or_equal_to,
+                    .order_greater_than = PROTO.order_greater_than,
+                    .order_greater_than_or_equal_to = PROTO.order_greater_than_or_equal_to,
+                    .order_equals = PROTO.order_equals,
+                    .value_equals = PROTO.value_equals,
                 };
-                var val: i8 = @intCast(@intFromBool(addr_a > addr_b));
-                val -= @intCast(@intFromBool(addr_a < addr_b));
-                return @enumFromInt(val);
             }
-        },
-        .@"enum" => struct {
-            fn func(a: *const T, b: *const T) Order {
-                var val: i8 = @intCast(@intFromBool(@intFromEnum(a.*) > @intFromEnum(b.*)));
-                val -= @intCast(@intFromBool(@intFromEnum(a.*) < @intFromEnum(b.*)));
-                return @enumFromInt(val);
+            if (INFO == .@"enum") {
+                const PROTO = struct {
+                    fn order_less_than(a: T, b: T) bool {
+                        return @intFromEnum(a) < @intFromEnum(b);
+                    }
+                    fn order_less_than_or_equal_to(a: T, b: T) bool {
+                        return @intFromEnum(a) <= @intFromEnum(b);
+                    }
+                    fn order_greater_than(a: T, b: T) bool {
+                        return @intFromEnum(a) > @intFromEnum(b);
+                    }
+                    fn order_greater_than_or_equal_to(a: T, b: T) bool {
+                        return @intFromEnum(a) >= @intFromEnum(b);
+                    }
+                    fn order_equals(a: T, b: T) bool {
+                        return @intFromEnum(a) == @intFromEnum(b);
+                    }
+                    fn value_equals(a: T, b: T) bool {
+                        return @intFromEnum(a) == @intFromEnum(b);
+                    }
+                };
+                return Self{
+                    .order_less_than = PROTO.order_less_than,
+                    .order_less_than_or_equal_to = PROTO.order_less_than_or_equal_to,
+                    .order_greater_than = PROTO.order_greater_than,
+                    .order_greater_than_or_equal_to = PROTO.order_greater_than_or_equal_to,
+                    .order_equals = PROTO.order_equals,
+                    .value_equals = PROTO.value_equals,
+                };
             }
-        },
-        else => struct {
-            fn func(a: *const T, b: *const T) Order {
-                _ = a;
-                _ = b;
-                return Order.A_EQUALS_B;
+            if (INFO == .bool) {
+                const PROTO = struct {
+                    fn order_less_than(a: T, b: T) bool {
+                        return @intFromBool(a) < @intFromBool(b);
+                    }
+                    fn order_less_than_or_equal_to(a: T, b: T) bool {
+                        return @intFromBool(a) <= @intFromBool(b);
+                    }
+                    fn order_greater_than(a: T, b: T) bool {
+                        return @intFromBool(a) > @intFromBool(b);
+                    }
+                    fn order_greater_than_or_equal_to(a: T, b: T) bool {
+                        return @intFromBool(a) >= @intFromBool(b);
+                    }
+                    fn order_equals(a: T, b: T) bool {
+                        return @intFromBool(a) == @intFromBool(b);
+                    }
+                    fn value_equals(a: T, b: T) bool {
+                        return @intFromBool(a) == @intFromBool(b);
+                    }
+                };
+                return Self{
+                    .order_less_than = PROTO.order_less_than,
+                    .order_less_than_or_equal_to = PROTO.order_less_than_or_equal_to,
+                    .order_greater_than = PROTO.order_greater_than,
+                    .order_greater_than_or_equal_to = PROTO.order_greater_than_or_equal_to,
+                    .order_equals = PROTO.order_equals,
+                    .value_equals = PROTO.value_equals,
+                };
             }
-        },
+            if (INFO == .pointer and (@typeInfo(INFO.pointer.child) == .int or @typeInfo(INFO.pointer.child) == .comptime_int or @typeInfo(INFO.pointer.child) == .float or @typeInfo(INFO.pointer.child) == .comptime_float)) {
+                const PROTO = struct {
+                    fn order_less_than(a: T, b: T) bool {
+                        return a.* < b.*;
+                    }
+                    fn order_less_than_or_equal_to(a: T, b: T) bool {
+                        return a.* <= b.*;
+                    }
+                    fn order_greater_than(a: T, b: T) bool {
+                        return a.* > b.*;
+                    }
+                    fn order_greater_than_or_equal_to(a: T, b: T) bool {
+                        return a.* >= b.*;
+                    }
+                    fn order_equals(a: T, b: T) bool {
+                        return a.* == b.*;
+                    }
+                    fn value_equals(a: T, b: T) bool {
+                        return a.* == b.*;
+                    }
+                };
+                return Self{
+                    .order_less_than = PROTO.order_less_than,
+                    .order_less_than_or_equal_to = PROTO.order_less_than_or_equal_to,
+                    .order_greater_than = PROTO.order_greater_than,
+                    .order_greater_than_or_equal_to = PROTO.order_greater_than_or_equal_to,
+                    .order_equals = PROTO.order_equals,
+                    .value_equals = PROTO.value_equals,
+                };
+            }
+            if (INFO == .pointer and @typeInfo(INFO.pointer.child) == .@"enum") {
+                const PROTO = struct {
+                    fn order_less_than(a: T, b: T) bool {
+                        return @intFromEnum(a.*) < @intFromEnum(b.*);
+                    }
+                    fn order_less_than_or_equal_to(a: T, b: T) bool {
+                        return @intFromEnum(a.*) <= @intFromEnum(b.*);
+                    }
+                    fn order_greater_than(a: T, b: T) bool {
+                        return @intFromEnum(a.*) > @intFromEnum(b.*);
+                    }
+                    fn order_greater_than_or_equal_to(a: T, b: T) bool {
+                        return @intFromEnum(a.*) >= @intFromEnum(b.*);
+                    }
+                    fn order_equals(a: T, b: T) bool {
+                        return @intFromEnum(a.*) == @intFromEnum(b.*);
+                    }
+                    fn value_equals(a: T, b: T) bool {
+                        return @intFromEnum(a.*) == @intFromEnum(b.*);
+                    }
+                };
+                return Self{
+                    .order_less_than = PROTO.order_less_than,
+                    .order_less_than_or_equal_to = PROTO.order_less_than_or_equal_to,
+                    .order_greater_than = PROTO.order_greater_than,
+                    .order_greater_than_or_equal_to = PROTO.order_greater_than_or_equal_to,
+                    .order_equals = PROTO.order_equals,
+                    .value_equals = PROTO.value_equals,
+                };
+            }
+            if (INFO == .pointer and @typeInfo(INFO.pointer.child) == .bool) {
+                const PROTO = struct {
+                    fn order_less_than(a: T, b: T) bool {
+                        return @intFromBool(a.*) < @intFromBool(b.*);
+                    }
+                    fn order_less_than_or_equal_to(a: T, b: T) bool {
+                        return @intFromBool(a.*) <= @intFromBool(b.*);
+                    }
+                    fn order_greater_than(a: T, b: T) bool {
+                        return @intFromBool(a.*) > @intFromBool(b.*);
+                    }
+                    fn order_greater_than_or_equal_to(a: T, b: T) bool {
+                        return @intFromBool(a.*) >= @intFromBool(b.*);
+                    }
+                    fn order_equals(a: T, b: T) bool {
+                        return @intFromBool(a.*) == @intFromBool(b.*);
+                    }
+                    fn value_equals(a: T, b: T) bool {
+                        return @intFromBool(a.*) == @intFromBool(b.*);
+                    }
+                };
+                return Self{
+                    .order_less_than = PROTO.order_less_than,
+                    .order_less_than_or_equal_to = PROTO.order_less_than_or_equal_to,
+                    .order_greater_than = PROTO.order_greater_than,
+                    .order_greater_than_or_equal_to = PROTO.order_greater_than_or_equal_to,
+                    .order_equals = PROTO.order_equals,
+                    .value_equals = PROTO.value_equals,
+                };
+            }
+            const PROTO = struct {
+                fn order_less_than(a: T, b: T) bool {
+                    _ = a;
+                    _ = b;
+                    return false;
+                }
+                fn order_less_than_or_equal_to(a: T, b: T) bool {
+                    _ = a;
+                    _ = b;
+                    return true;
+                }
+                fn order_greater_than(a: T, b: T) bool {
+                    _ = a;
+                    _ = b;
+                    return false;
+                }
+                fn order_greater_than_or_equal_to(a: T, b: T) bool {
+                    _ = a;
+                    _ = b;
+                    return true;
+                }
+                fn order_equals(a: T, b: T) bool {
+                    _ = a;
+                    _ = b;
+                    return true;
+                }
+                fn value_equals(a: T, b: T) bool {
+                    _ = a;
+                    _ = b;
+                    return true;
+                }
+            };
+            return Self{
+                .order_less_than = PROTO.order_less_than,
+                .order_less_than_or_equal_to = PROTO.order_less_than_or_equal_to,
+                .order_greater_than = PROTO.order_greater_than,
+                .order_greater_than_or_equal_to = PROTO.order_greater_than_or_equal_to,
+                .order_equals = PROTO.order_equals,
+                .value_equals = PROTO.value_equals,
+            };
+        }
     };
-    return container.func;
 }
 
-pub fn shallow_equals_else_never_equal(comptime T: type) MatchFn(T) {
-    const container = comptime switch (@typeInfo(T)) {
-        .int, .float, .comptime_int, .comptime_float, .@"enum", .@"struct", .error_union, .@"union", .array, .vector, .pointer, .optional => struct {
-            fn func(a: *const T, b: *const T) bool {
-                return meta.eql(a.*, b.*);
-            }
-        },
-        else => struct {
-            fn func(a: *const T, b: *const T) bool {
-                _ = a;
-                _ = b;
+pub fn less_than(a: anytype, b: @TypeOf(a)) bool {
+    const T = @TypeOf(a);
+    const INFO = @typeInfo(T);
+    switch (INFO) {
+        .int, .comptime_int, .float, .comptime_float => return a < b,
+        .@"enum" => return @intFromEnum(a) < @intFromEnum(b),
+        .bool => return @intFromBool(a) < @intFromBool(b),
+        .pointer => |PTR_INFO| if (PTR_INFO.is_allowzero) {
+            @compileError("cannot infer a 'less than' condition for nullable pointer type: " ++ @typeName(T));
+        } else switch (PTR_INFO.size) {
+            .one => return if (a == b) false else less_than(a.*, b.*),
+            .slice => {
+                if (a.ptr == b.ptr) return a.len < b.len;
+                var i: usize = 0;
+                while (i < a.len) : (i += 1) {
+                    if (i >= b.len) return false;
+                    if (less_than(a.ptr[i], b.ptr[i])) return true;
+                    if (greater_than(a.ptr[i], b.ptr[i])) return false;
+                }
                 return false;
-            }
+            },
+            .many, .c => if (PTR_INFO.sentinel_ptr) |sent_opq| {
+                if (a == b) return false;
+                const sent: *const PTR_INFO.child = @ptrCast(@alignCast(sent_opq));
+                var i: usize = 0;
+                while (a[i] != sent) : (i += 1) {
+                    if (b[i] == sent) return false;
+                    if (less_than(a[i], b[i])) return true;
+                    if (greater_than(a[i], b[i])) return false;
+                }
+                return false;
+            } else @compileError("cannot infer a 'less than' condition for [*]T and [*c]T pointers with no sentinel value: " ++ @typeName(T)),
         },
-    };
-    return container.func;
+        .array, .vector => {
+            var i: usize = 0;
+            while (i < a.len) : (i += 1) {
+                if (less_than(a[i], b[i])) return true;
+                if (greater_than(a[i], b[i])) return false;
+            }
+            return false;
+        },
+        else => @compileError("cannot infer a 'less than' condition for type: " ++ @typeName(T)),
+    }
 }
 
-pub const Order = enum(i8) {
-    A_LESS_THAN_B = -1,
-    A_EQUALS_B = 0,
-    A_GREATER_THAN_B = 1,
-};
+pub fn less_than_or_equal(a: anytype, b: @TypeOf(a)) bool {
+    const T = @TypeOf(a);
+    const INFO = @typeInfo(T);
+    switch (INFO) {
+        .int, .comptime_int, .float, .comptime_float => return a <= b,
+        .@"enum" => return @intFromEnum(a) <= @intFromEnum(b),
+        .bool => return @intFromBool(a) <= @intFromBool(b),
+        .pointer => |PTR_INFO| if (PTR_INFO.is_allowzero) {
+            @compileError("cannot infer a 'less than or equal' condition for nullable pointer type: " ++ @typeName(T));
+        } else switch (PTR_INFO.size) {
+            .one => return if (a == b) true else less_than_or_equal(a.*, b.*),
+            .slice => {
+                if (a.ptr == b.ptr) return a.len <= b.len;
+                var i: usize = 0;
+                while (i < a.len) : (i += 1) {
+                    if (i >= b.len) return false;
+                    if (less_than(a.ptr[i], b.ptr[i])) return true;
+                    if (greater_than(a.ptr[i], b.ptr[i])) return false;
+                }
+                return true;
+            },
+            .many, .c => if (PTR_INFO.sentinel_ptr) |sent_opq| {
+                if (a == b) return true;
+                const sent: *const PTR_INFO.child = @ptrCast(@alignCast(sent_opq));
+                var i: usize = 0;
+                while (a[i] != sent) : (i += 1) {
+                    if (b[i] == sent) return false;
+                    if (less_than(a[i], b[i])) return true;
+                    if (greater_than(a[i], b[i])) return false;
+                }
+                return true;
+            } else @compileError("cannot infer a 'less than' condition for [*]T and [*c]T pointers with no sentinel value: " ++ @typeName(T)),
+        },
+        .array, .vector => {
+            var i: usize = 0;
+            while (i < a.len) : (i += 1) {
+                if (less_than(a[i], b[i])) return true;
+                if (greater_than(a[i], b[i])) return false;
+            }
+            return true;
+        },
+        else => @compileError("cannot infer a 'less than' condition for type: " ++ @typeName(T)),
+    }
+}
 
-test "Compare" {
-    const t = std.testing;
-    const _1: u8 = 1;
-    const _2: u8 = 2;
-    const compare_fn = numeric_order_else_always_equal(u8);
-    try t.expect(a_less_than_b(u8, &_1, &_2, compare_fn));
-    try t.expect(!a_less_than_b(u8, &_1, &_1, compare_fn));
-    try t.expect(!a_less_than_b(u8, &_2, &_2, compare_fn));
-    try t.expect(!a_less_than_b(u8, &_2, &_1, compare_fn));
-    try t.expect(a_less_than_or_equal_to_b(u8, &_1, &_2, compare_fn));
-    try t.expect(a_less_than_or_equal_to_b(u8, &_1, &_1, compare_fn));
-    try t.expect(a_less_than_or_equal_to_b(u8, &_2, &_2, compare_fn));
-    try t.expect(!a_less_than_or_equal_to_b(u8, &_2, &_1, compare_fn));
-    try t.expect(!a_greater_than_b(u8, &_1, &_2, compare_fn));
-    try t.expect(!a_greater_than_b(u8, &_1, &_1, compare_fn));
-    try t.expect(!a_greater_than_b(u8, &_2, &_2, compare_fn));
-    try t.expect(a_greater_than_b(u8, &_2, &_1, compare_fn));
-    try t.expect(!a_greater_than_or_equal_to_b(u8, &_1, &_2, compare_fn));
-    try t.expect(a_greater_than_or_equal_to_b(u8, &_1, &_1, compare_fn));
-    try t.expect(a_greater_than_or_equal_to_b(u8, &_2, &_2, compare_fn));
-    try t.expect(a_greater_than_or_equal_to_b(u8, &_2, &_1, compare_fn));
-    try t.expect(!a_equals_b(u8, &_1, &_2, compare_fn));
-    try t.expect(a_equals_b(u8, &_1, &_1, compare_fn));
-    try t.expect(a_equals_b(u8, &_2, &_2, compare_fn));
-    try t.expect(!a_equals_b(u8, &_2, &_1, compare_fn));
+pub fn greater_than(a: anytype, b: @TypeOf(a)) bool {
+    const T = @TypeOf(a);
+    const INFO = @typeInfo(T);
+    switch (INFO) {
+        .int, .comptime_int, .float, .comptime_float => return a > b,
+        .@"enum" => return @intFromEnum(a) > @intFromEnum(b),
+        .bool => return @intFromBool(a) > @intFromBool(b),
+        .pointer => |PTR_INFO| if (PTR_INFO.is_allowzero) {
+            @compileError("cannot infer a 'greater than' condition for nullable pointer type: " ++ @typeName(T));
+        } else switch (PTR_INFO.size) {
+            .one => return if (a == b) false else greater_than(a.*, b.*),
+            .slice => {
+                if (a.ptr == b.ptr) return a.len > b.len;
+                var i: usize = 0;
+                while (i < a.len) : (i += 1) {
+                    if (i >= b.len) return true;
+                    if (greater_than(a.ptr[i], b.ptr[i])) return true;
+                    if (less_than(a.ptr[i], b.ptr[i])) return false;
+                }
+                return false;
+            },
+            .many, .c => if (PTR_INFO.sentinel_ptr) |sent_opq| {
+                if (a.ptr == b.ptr) return false;
+                const sent: *const PTR_INFO.child = @ptrCast(@alignCast(sent_opq));
+                var i: usize = 0;
+                while (a[i] != sent) : (i += 1) {
+                    if (b[i] == sent) return true;
+                    if (greater_than(a[i], b[i])) return true;
+                    if (less_than(a[i], b[i])) return false;
+                }
+                return false;
+            } else @compileError("cannot infer a 'greater than' condition for [*]T and [*c]T pointers with no sentinel value: " ++ @typeName(T)),
+        },
+        .array, .vector => {
+            var i: usize = 0;
+            while (i < a.len) : (i += 1) {
+                if (greater_than(a[i], b[i])) return true;
+                if (less_than(a[i], b[i])) return false;
+            }
+            return false;
+        },
+        else => @compileError("cannot infer a 'greater than' condition for type: " ++ @typeName(T)),
+    }
+}
+
+pub fn greater_than_or_equal(a: anytype, b: @TypeOf(a)) bool {
+    const T = @TypeOf(a);
+    const INFO = @typeInfo(T);
+    switch (INFO) {
+        .int, .comptime_int, .float, .comptime_float => return a >= b,
+        .@"enum" => return @intFromEnum(a) >= @intFromEnum(b),
+        .bool => return @intFromBool(a) >= @intFromBool(b),
+        .pointer => |PTR_INFO| if (PTR_INFO.is_allowzero) {
+            @compileError("cannot infer a 'greater than or equal' condition for nullable pointer type: " ++ @typeName(T));
+        } else switch (PTR_INFO.size) {
+            .one => return if (a == b) true else greater_than_or_equal(a.*, b.*),
+            .slice => {
+                if (a.ptr == b.ptr) return a.len >= b.len;
+                var i: usize = 0;
+                while (i < a.len) : (i += 1) {
+                    if (i >= b.len) return true;
+                    if (greater_than(a.ptr[i], b.ptr[i])) return true;
+                    if (less_than(a.ptr[i], b.ptr[i])) return false;
+                }
+                return true;
+            },
+            .many, .c => if (PTR_INFO.sentinel_ptr) |sent_opq| {
+                if (a.ptr == b.ptr) return true;
+                const sent: *const PTR_INFO.child = @ptrCast(@alignCast(sent_opq));
+                var i: usize = 0;
+                while (a[i] != sent) : (i += 1) {
+                    if (b[i] == sent) return true;
+                    if (greater_than(a[i], b[i])) return true;
+                    if (less_than(a[i], b[i])) return false;
+                }
+                return true;
+            } else @compileError("cannot infer a 'greater than or equal' condition for [*]T and [*c]T pointers with no sentinel value: " ++ @typeName(T)),
+        },
+        .array, .vector => {
+            var i: usize = 0;
+            while (i < a.len) : (i += 1) {
+                if (greater_than(a[i], b[i])) return true;
+                if (less_than(a[i], b[i])) return false;
+            }
+            return true;
+        },
+        else => @compileError("cannot infer a 'greater than or equal' condition for type: " ++ @typeName(T)),
+    }
+}
+
+pub fn equal(a: anytype, b: @TypeOf(a)) bool {
+    const T = @TypeOf(a);
+    const INFO = @typeInfo(T);
+    switch (INFO) {
+        .int, .comptime_int, .float, .comptime_float, .bool, .@"enum" => return a == b,
+        .pointer => |PTR_INFO| if (PTR_INFO.is_allowzero) {
+            @compileError("cannot infer an 'equal' condition for nullable pointer type: " ++ @typeName(T));
+        } else switch (PTR_INFO.size) {
+            .one => return if (a == b) true else equal(a.*, b.*),
+            .slice => {
+                if (a.len != b.len) return false;
+                if (a.ptr == b.ptr) return true;
+                var i: usize = 0;
+                while (i < a.len) : (i += 1) {
+                    if (!equal(a.ptr[i], b.ptr[i])) return false;
+                }
+                return true;
+            },
+            .many, .c => if (PTR_INFO.sentinel_ptr) |sent_opq| {
+                if (a.ptr == b.ptr) return true;
+                const sent: *const PTR_INFO.child = @ptrCast(@alignCast(sent_opq));
+                var i: usize = 0;
+                while (a[i] != sent) : (i += 1) {
+                    if (b[i] == sent) return false;
+                    if (!equal(a.ptr[i], b.ptr[i])) return false;
+                }
+                return true;
+            } else @compileError("cannot infer an 'equal' condition for [*]T and [*c]T pointers with no sentinel value: " ++ @typeName(T)),
+        },
+        .array, .vector => {
+            var i: usize = 0;
+            while (i < a.len) : (i += 1) {
+                if (!equal(a[i], b[i])) return false;
+            }
+            return true;
+        },
+        else => @compileError("cannot infer an 'equal' condition for type: " ++ @typeName(T)),
+    }
 }
