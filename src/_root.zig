@@ -21,6 +21,7 @@ pub const Reader = @import("./Reader.zig");
 pub const Rect2 = @import("./Rect2.zig");
 // pub const ReturnWrappers = @import("./ReturnWrappers.zig");
 pub const SDL3 = @import("./SDL3.zig");
+pub const SoftSlice = @import("./SoftSlice.zig");
 
 // pub const StaticAllocVectorizedStructOfArrays = @import("./StaticAllocVectorizedStructOfArrays.zig");
 // pub const Template = @import("./Template.zig");
@@ -48,6 +49,9 @@ comptime {
     _ = @import("./Math.zig");
     _ = @import("./Quicksort.zig");
     _ = @import("./Reader.zig");
+    _ = @import("./Rect2.zig");
+    _ = @import("./SDL3.zig");
+    _ = @import("./SoftSlice.zig");
     // _ = @import("./ReturnWrappers.zig");
 
     // _ = @import("./StaticAllocVectorizedStructOfArrays.zig");

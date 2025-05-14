@@ -22,6 +22,7 @@ const DummyAllocator = Root.DummyAllocator;
 const BinarySearch = Root.BinarySearch;
 const CompareFn = Compare.CompareFn;
 const ComparePackage = Compare.ComparePackage;
+const SoftSlice = Root.SoftSlice.SoftSlice;
 const inline_swap = Root.Utils.inline_swap;
 
 pub const RingListOptions = struct {
@@ -47,37 +48,55 @@ pub const Impl = struct {
         return self;
     }
 
-    pub fn slices_in_order(comptime List: type, self: List) [2][]List.Elem {
-        const start_to_cap = self.cap - self.start;
-        const len_1 = @min(self.len, start_to_cap);
-        const len_2 = self.len - len_1;
-        const logical = [2][]List.Elem{ self.ptr[self.start..(self.start + len_1)], self.ptr[0..len_2] };
-        return logical;
+    pub fn cap_slices_in_order(comptime List: type, self: List) SliceSegments(List.Idx, List.Elem) {
+        return SliceSegments(List.Idx, List.Elem){
+            .first = self.ptr[self.start..self.cap],
+            .first_extra_cap = 0,
+            .second = self.ptr[0..self.start],
+            .second_extra_cap = 0,
+        };
     }
 
-    pub fn slices_in_order_from_range(comptime List: type, self: List, start: List.IDX, count: List.Idx) [2][]List.Elem {
+    pub fn slices_in_order(comptime List: type, self: List) SliceSegments(List.Idx, List.Elem) {
+        const start_to_cap = self.cap - self.start;
+        const len_1 = @min(self.len, start_to_cap);
+        const len_1_room_before_end = start_to_cap - len_1;
+        const len_2 = self.len - len_1;
+        const len_2_room_before_end = self.start - len_2;
+        return SliceSegments(List.Idx, List.Elem){
+            .first = self.ptr[self.start..(self.start + len_1)],
+            .first_extra_cap = len_1_room_before_end,
+            .second = self.ptr[0..len_2],
+            .second_extra_cap = len_2_room_before_end,
+        };
+    }
+
+    pub fn slices_in_order_from_range(comptime List: type, self: List, start: List.IDX, count: List.Idx) SliceSegments(List.Idx, List.Elem) {
         assert(start + count <= self.len);
-        const literal_start_1 = self.start + start;
-        const logical_start_1 = literal_start_1 % self.cap;
-        const possible_logical_end_1 = logical_start_1 + count;
-        const real_logical_end_1 = @min(possible_logical_end_1, self.cap);
-        const len_1 = real_logical_end_1 - logical_start_1;
+        const start_1 = @min(self.start + start, self.cap);
+        const len_1 = @min(count, self.cap - start_1);
+        const extra_room_1 = self.cap - (start_1 + len_1);
         const len_2 = count - len_1;
-        const logical = [2][]List.Elem{ self.ptr[logical_start_1..real_logical_end_1], self.ptr[0..len_2] };
-        return logical;
+        const extra_room_2 = self.start - len_2;
+        return SliceSegments{
+            .first = self.ptr[start_1..(start_1 + len_1)],
+            .first_extra_cap = extra_room_1,
+            .second = self.ptr[0..len_2],
+            .second_extra_cap = extra_room_2,
+        };
     }
 
     pub fn realign_to_start(comptime List: type, self: *List) void {
         if (self.start == 0) return;
-        const slices = slices_in_order(List, self);
-        if (slices[1].len == 0) {
+        const slices: SliceSegments(List.Idx, List.Elem) = slices_in_order(List, self);
+        if (slices.second.len == 0) {
             if (self.start >= self.len) {
-                @memcpy(self.ptr[0..self.len], slices[0]);
+                @memcpy(self.ptr[0..self.len], slices.first);
                 if (List.SECURE_WIPE) {
-                    std.crypto.secureZero(List.Elem, slices[0]);
+                    std.crypto.secureZero(List.Elem, slices.first);
                 }
             } else {
-                std.mem.copyForwards(List.Elem, self.ptr[0..self.len], slices[0][0..self.len]);
+                std.mem.copyForwards(List.Elem, self.ptr[0..self.len], slices.first[0..self.len]);
                 if (List.SECURE_WIPE) {
                     std.crypto.secureZero(List.Elem, self.ptr[self.len..(self.start + self.len)]);
                 }
@@ -86,14 +105,14 @@ pub const Impl = struct {
             return;
         }
         if (self.start >= self.len) {
-            if (slices[0].len >= slices[1].len) {
-                @memcpy(self.ptr[slices[0].len..self.cap], slices[1]);
+            if (slices.first.len >= slices.second.len) {
+                @memcpy(self.ptr[slices.first.len..self.cap], slices.second);
             } else {
-                std.mem.copyBackwards(List.Elem, self.ptr[slices[0].len..self.cap], slices[1]);
+                std.mem.copyBackwards(List.Elem, self.ptr[slices.first.len..self.cap], slices.second);
             }
-            @memcpy(self.ptr[0..self.cap], slices[0]);
+            @memcpy(self.ptr[0..self.cap], slices.first);
             if (List.SECURE_WIPE) {
-                std.crypto.secureZero(List.Elem, slices[0]);
+                std.crypto.secureZero(List.Elem, slices.first);
             }
             self.start = 0;
             return;
@@ -161,26 +180,26 @@ pub const Impl = struct {
         if (alloc.remap(old_memory, new_capacity)) |new_memory| {
             self.ptr = new_memory.ptr;
             var slices = slices_in_order(List, self);
-            if (slices[1].len > 0 and new_capacity > self.cap) {
+            if (slices.second.len > 0 and new_capacity > self.cap) {
                 const extra = new_capacity - self.cap;
-                const s1_copy_count = @min(extra, slices[1].len);
-                slices[0].len += extra;
-                @memcpy(slices[0][slices[0].len .. slices[0].len + extra], slices[1][0..s1_copy_count]);
-                std.mem.copyForwards(List.Elem, slices[1][0..], slices[1][s1_copy_count..]);
+                const s1_copy_count = @min(extra, slices.second.len);
+                slices.first.len += extra;
+                @memcpy(slices.first[slices.first.len .. slices.first.len + extra], slices.second[0..s1_copy_count]);
+                std.mem.copyForwards(List.Elem, slices.second[0..], slices.second[s1_copy_count..]);
                 if (List.SECURE_WIPE) {
                     const s1_leftover = extra - s1_copy_count;
-                    std.crypto.secureZero(List.Elem, slices[1][s1_leftover..]);
+                    std.crypto.secureZero(List.Elem, slices.second[s1_leftover..]);
                 }
             }
             self.cap = @intCast(new_memory.len);
         } else {
             const new_memory = alloc.alignedAlloc(List.Elem, List.ALIGN, new_capacity) catch |err| return handle_alloc_error(List, err);
             const slices = slices_in_order(List, self);
-            @memcpy(new_memory[0..slices[0].len], slices[0]);
-            @memcpy(new_memory[slices[0].len..], slices[1]);
+            @memcpy(new_memory[0..slices.first.len], slices.first);
+            @memcpy(new_memory[slices.first.len..], slices.second);
             if (List.SECURE_WIPE) {
-                crypto.secureZero(List.Elem, slices[0]);
-                crypto.secureZero(List.Elem, slices[1]);
+                crypto.secureZero(List.Elem, slices.first);
+                crypto.secureZero(List.Elem, slices.second);
             }
             alloc.free(old_memory);
             self.ptr = new_memory.ptr;
@@ -198,32 +217,42 @@ pub const Impl = struct {
         if (List.RETURN_ERRORS) try ensure_total_capacity(List, self, new_len, alloc) else ensure_total_capacity(List, self, new_len, alloc);
         return append_slot_assume_capacity(List, self);
     }
-    // CHECKPOINT implement insert and PREPEND funcs
-    // pub fn insert_slot(comptime List: type, self: *List, idx: List.Idx, alloc: Allocator) if (List.RETURN_ERRORS) List.Error!*List.Elem else *List.Elem {
-    //     if (List.RETURN_ERRORS) {
-    //         try ensure_unused_capacity(List, self, 1, alloc);
-    //     } else {
-    //         ensure_unused_capacity(List, self, 1, alloc);
-    //     }
-    //     return insert_slot_assume_capacity(List, self, idx);
-    // }
 
-    // pub fn insert_slot_assume_capacity(comptime List: type, self: *List, idx: List.Idx) *List.Elem {
-    //     assert(idx <= self.len);
-    //     mem.copyBackwards(List.Elem, self.ptr[idx + 1 .. self.len + 1], self.ptr[idx..self.len]);
-    //     self.len += 1;
-    //     return &self.ptr[idx];
-    // }
+    pub fn insert_slot(comptime List: type, self: *List, idx: List.Idx, alloc: Allocator) if (List.RETURN_ERRORS) List.Error!*List.Elem else *List.Elem {
+        if (List.RETURN_ERRORS) {
+            try ensure_unused_capacity(List, self, 1, alloc);
+        } else {
+            ensure_unused_capacity(List, self, 1, alloc);
+        }
+        return insert_slot_assume_capacity(List, self, idx);
+    }
 
-    // pub fn insert(comptime List: type, self: *List, idx: List.Idx, item: List.Elem, alloc: Allocator) if (List.RETURN_ERRORS) List.Error!void else void {
-    //     const ptr = if (List.RETURN_ERRORS) try insert_slot(List, self, idx, alloc) else insert_slot(List, self, idx, alloc);
-    //     ptr.* = item;
-    // }
+    pub fn insert_slot_assume_capacity(comptime List: type, self: *List, idx: List.Idx) *List.Elem {
+        assert(idx < self.len);
+        const slices = slices_in_order_from_range(List, self, idx, self.len - idx);
+        if (slices.first_extra_cap >= 1) {
+            _ = slices.first.copy_rightward(1, false);
+            self.len += 1;
+            return slices.first.get_item_ptr(0);
+        }
+        if (slices.second.len > 0) {
+            _ = slices.second.copy_rightward(1, false);
+        }
+        slices.second.set_item(0, slices.first.get_item_from_end(0));
+        const slice_1_shrunk = slices.first.shrink_right(1);
+        slice_1_shrunk.copy_rightward(1, false);
+        return slices.first.get_item_ptr(0);
+    }
 
-    // pub fn insert_assume_capacity(comptime List: type, self: *List, idx: List.Idx, item: List.Elem) void {
-    //     const ptr = insert_slot_assume_capacity(List, self, idx);
-    //     ptr.* = item;
-    // }
+    pub fn insert(comptime List: type, self: *List, idx: List.Idx, item: List.Elem, alloc: Allocator) if (List.RETURN_ERRORS) List.Error!void else void {
+        const ptr = if (List.RETURN_ERRORS) try insert_slot(List, self, idx, alloc) else insert_slot(List, self, idx, alloc);
+        ptr.* = item;
+    }
+
+    pub fn insert_assume_capacity(comptime List: type, self: *List, idx: List.Idx, item: List.Elem) void {
+        const ptr = insert_slot_assume_capacity(List, self, idx);
+        ptr.* = item;
+    }
 
     // pub fn insert_many_slots(comptime List: type, self: *List, idx: List.Idx, count: List.Idx, alloc: Allocator) if (List.RETURN_ERRORS) List.Error![]List.Elem else []List.Elem {
     //     if (List.RETURN_ERRORS) {
@@ -234,12 +263,30 @@ pub const Impl = struct {
     //     return insert_many_slots_assume_capacity(List, self, idx, count);
     // }
 
-    // pub fn insert_many_slots_assume_capacity(comptime List: type, self: *List, idx: List.Idx, count: List.Idx) []List.Elem {
-    //     assert(idx + count <= self.len);
-    //     mem.copyBackwards(List.Elem, self.ptr[idx + count .. self.len + count], self.ptr[idx..self.len]);
-    //     self.len += count;
-    //     return self.ptr[idx .. idx + count];
-    // }
+    pub fn insert_many_slots_assume_capacity(comptime List: type, self: *List, idx: List.Idx, count: List.Idx) SliceSegments(List.Idx, List.Elem) {
+        assert(idx + count <= self.len);
+        const slices = slices_in_order_from_range(List, self, idx, self.len - idx);
+        if (slices.first_extra_cap >= count) {
+            _ = slices.first.copy_rightward(count, false);
+            self.len += count;
+            return SliceSegments(List.Idx, List.Elem){
+                .first = slices.first.sub_slice_from_start(count),
+                .first_extra_cap = slices.first_extra_cap - 1,
+                .second = SoftSlice(List.Elem, List.Idx).EMPTY,
+                .second_extra_cap = 0,
+            };
+        }
+        if (slices.second.len > 0) {
+            _ = slices.second.copy_rightward(count, false);
+        }
+        //FIXME count might be larger than slice_1 size
+        const end_of_1 = slices.first.sub_slice_from_end(count);
+        const begin_of_2 = slices.second.sub_slice_from_start(count);
+        end_of_1.memcopy_to(begin_of_2);
+        const slice_1_shrunk = slices.first.shrink_right(count);
+        slice_1_shrunk.copy_rightward(count, false);
+        return slices.first.sub_slice_from_start(count);
+    }
 
     // pub fn insert_slice(comptime List: type, self: *List, idx: List.Idx, items: []const List.Elem, alloc: Allocator) if (List.RETURN_ERRORS) List.Error!void else void {
     //     const slots = if (List.RETURN_ERRORS) try insert_many_slots(List, self, idx, @intCast(items.len), alloc) else insert_slot(List, self, idx, @intCast(items.len), alloc);
@@ -403,5 +450,14 @@ pub fn define_statically_managed_ring_buffer_type(comptime options: RingListOpti
         pub fn new_with_capacity(cap: Idx) List {
             Impl.new_with_capacity(List, cap, ALLOC);
         }
+    };
+}
+
+pub fn SliceSegments(comptime Idx: type, comptime Elem: type) type {
+    return struct {
+        first: SoftSlice(Elem, Idx),
+        first_extra_cap: Idx,
+        second: SoftSlice(Elem, Idx),
+        second_extra_cap: Idx,
     };
 }
