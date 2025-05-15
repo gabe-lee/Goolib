@@ -207,7 +207,7 @@ pub const Impl = struct {
     }
 
     pub fn insert_slice(comptime List: type, self: *List, idx: List.Idx, items: []const List.Elem, alloc: Allocator) if (List.RETURN_ERRORS) List.Error!void else void {
-        const slots = if (List.RETURN_ERRORS) try insert_many_slots(List, self, idx, @intCast(items.len), alloc) else insert_slot(List, self, idx, @intCast(items.len), alloc);
+        const slots = if (List.RETURN_ERRORS) try insert_many_slots(List, self, idx, @intCast(items.len), alloc) else insert_many_slots(List, self, idx, @intCast(items.len), alloc);
         @memcpy(slots, items);
     }
 
