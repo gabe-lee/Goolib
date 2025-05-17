@@ -3,8 +3,9 @@ const mem = std.mem;
 const assert = std.debug.assert;
 const build = @import("builtin");
 
-const Root = @import("root");
-const BinarySearch = Root.Algorithms.BinarySearch;
+const Root = @import("./_root.zig");
+const LOG_PREFIX = Root.LOG_PREFIX;
+const BinarySearch = Root.BinarySearch;
 
 pub inline fn inline_swap(comptime T: type, a: *T, b: *T, temp: *T) void {
     temp.* = a.*;
@@ -169,7 +170,7 @@ pub inline fn assert_with_reason(condition: bool, reason_fmt: []const u8, reason
         assert(condition);
     }
 }
-pub inline fn compile_assert_with_reason(condition: bool, reason: []const u8) void {
+pub inline fn comptime_assert_with_reason(condition: bool, reason: []const u8) void {
     if (build.mode == .Debug) {
         if (!condition) {
             @compileError(reason);
@@ -284,12 +285,119 @@ pub inline fn pointer_is_immutable(comptime T: type) bool {
     return @typeInfo(T).pointer.is_const == true;
 }
 
-pub fn type_is_optional(comptime T: type) bool {
+pub inline fn type_is_optional(comptime T: type) bool {
     return @typeInfo(T) == .optional;
 }
-pub fn optional_type_child(comptime T: type) type {
+pub inline fn optional_type_child(comptime T: type) type {
     return @typeInfo(T).optional.child;
 }
+
+pub inline fn type_is_float(comptime T: type) bool {
+    return @typeInfo(T) == .float or @typeInfo(T) == .comptime_float;
+}
+pub inline fn type_is_int(comptime T: type) bool {
+    return @typeInfo(T) == .int or @typeInfo(T) == .comptime_int;
+}
+pub inline fn type_is_bool(comptime T: type) bool {
+    return T == bool;
+}
+pub inline fn type_is_enum(comptime T: type) bool {
+    return @typeInfo(T) == .@"enum";
+}
+pub inline fn can_infer_type_order(comptime T: type) bool {
+    switch (@typeInfo(T)) {
+        .int, .comptime_int, .float, .comptime_float, .bool, .@"enum" => return true,
+        .pointer => |info| {
+            if (info.size != .one) return false;
+            switch (@typeInfo(info.child)) {
+                .int, .comptime_int, .float, .comptime_float, .bool, .@"enum" => return true,
+                else => return false,
+            }
+        },
+        else => return false,
+    }
+}
+
+pub inline fn infered_less_than(a: anytype, b: anytype) bool {
+    const A = @TypeOf(a);
+    const B = @TypeOf(b);
+    comptime_assert_with_reason(can_infer_type_order(A), LOG_PREFIX ++ "infered_less_than: type of `a` (" ++ @typeName(A) ++ ") cannot infer order");
+    comptime_assert_with_reason(can_infer_type_order(B), LOG_PREFIX ++ "infered_less_than: type of `b` (" ++ @typeName(B) ++ ") cannot infer order");
+    const aa = if (type_is_pointer_or_slice(A)) unwrap: {
+        const AA = pointer_child_type(A);
+        break :unwrap if (type_is_bool(AA)) @intFromBool(a.*) else if (type_is_enum(AA)) @intFromEnum(a.*) else a.*;
+    } else if (type_is_bool(A)) @intFromBool(a) else if (type_is_enum(A)) @intFromEnum(a) else a;
+    const bb = if (type_is_pointer_or_slice(A)) unwrap: {
+        const BB = pointer_child_type(B);
+        break :unwrap if (type_is_bool(BB)) @intFromBool(b.*) else if (type_is_enum(BB)) @intFromEnum(b.*) else b.*;
+    } else if (type_is_bool(B)) @intFromBool(b) else if (type_is_enum(B)) @intFromEnum(b) else b;
+    return aa < bb;
+}
+
+pub inline fn infered_greater_than(a: anytype, b: anytype) bool {
+    const A = @TypeOf(a);
+    const B = @TypeOf(b);
+    comptime_assert_with_reason(can_infer_type_order(A), LOG_PREFIX ++ "infered_less_than: type of `a` (" ++ @typeName(A) ++ ") cannot infer order");
+    comptime_assert_with_reason(can_infer_type_order(B), LOG_PREFIX ++ "infered_less_than: type of `b` (" ++ @typeName(B) ++ ") cannot infer order");
+    const aa = if (type_is_pointer_or_slice(A)) unwrap: {
+        const AA = pointer_child_type(A);
+        break :unwrap if (type_is_bool(AA)) @intFromBool(a.*) else if (type_is_enum(AA)) @intFromEnum(a.*) else a.*;
+    } else if (type_is_bool(A)) @intFromBool(a) else if (type_is_enum(A)) @intFromEnum(a) else a;
+    const bb = if (type_is_pointer_or_slice(A)) unwrap: {
+        const BB = pointer_child_type(B);
+        break :unwrap if (type_is_bool(BB)) @intFromBool(b.*) else if (type_is_enum(BB)) @intFromEnum(b.*) else b.*;
+    } else if (type_is_bool(B)) @intFromBool(b) else if (type_is_enum(B)) @intFromEnum(b) else b;
+    return aa > bb;
+}
+
+pub inline fn infered_less_than_or_equal(a: anytype, b: anytype) bool {
+    const A = @TypeOf(a);
+    const B = @TypeOf(b);
+    comptime_assert_with_reason(can_infer_type_order(A), LOG_PREFIX ++ "infered_less_than: type of `a` (" ++ @typeName(A) ++ ") cannot infer order");
+    comptime_assert_with_reason(can_infer_type_order(B), LOG_PREFIX ++ "infered_less_than: type of `b` (" ++ @typeName(B) ++ ") cannot infer order");
+    const aa = if (type_is_pointer_or_slice(A)) unwrap: {
+        const AA = pointer_child_type(A);
+        break :unwrap if (type_is_bool(AA)) @intFromBool(a.*) else if (type_is_enum(AA)) @intFromEnum(a.*) else a.*;
+    } else if (type_is_bool(A)) @intFromBool(a) else if (type_is_enum(A)) @intFromEnum(a) else a;
+    const bb = if (type_is_pointer_or_slice(A)) unwrap: {
+        const BB = pointer_child_type(B);
+        break :unwrap if (type_is_bool(BB)) @intFromBool(b.*) else if (type_is_enum(BB)) @intFromEnum(b.*) else b.*;
+    } else if (type_is_bool(B)) @intFromBool(b) else if (type_is_enum(B)) @intFromEnum(b) else b;
+    return aa <= bb;
+}
+
+pub inline fn infered_greater_than_or_equal(a: anytype, b: anytype) bool {
+    const A = @TypeOf(a);
+    const B = @TypeOf(b);
+    comptime_assert_with_reason(can_infer_type_order(A), LOG_PREFIX ++ "infered_less_than: type of `a` (" ++ @typeName(A) ++ ") cannot infer order");
+    comptime_assert_with_reason(can_infer_type_order(B), LOG_PREFIX ++ "infered_less_than: type of `b` (" ++ @typeName(B) ++ ") cannot infer order");
+    const aa = if (type_is_pointer_or_slice(A)) unwrap: {
+        const AA = pointer_child_type(A);
+        break :unwrap if (type_is_bool(AA)) @intFromBool(a.*) else if (type_is_enum(AA)) @intFromEnum(a.*) else a.*;
+    } else if (type_is_bool(A)) @intFromBool(a) else if (type_is_enum(A)) @intFromEnum(a) else a;
+    const bb = if (type_is_pointer_or_slice(A)) unwrap: {
+        const BB = pointer_child_type(B);
+        break :unwrap if (type_is_bool(BB)) @intFromBool(b.*) else if (type_is_enum(BB)) @intFromEnum(b.*) else b.*;
+    } else if (type_is_bool(B)) @intFromBool(b) else if (type_is_enum(B)) @intFromEnum(b) else b;
+    return aa >= bb;
+}
+
+pub inline fn infered_equal(a: anytype, b: anytype) bool {
+    const A = @TypeOf(a);
+    const B = @TypeOf(b);
+    comptime_assert_with_reason(can_infer_type_order(A), LOG_PREFIX ++ "infered_less_than: type of `a` (" ++ @typeName(A) ++ ") cannot infer order");
+    comptime_assert_with_reason(can_infer_type_order(B), LOG_PREFIX ++ "infered_less_than: type of `b` (" ++ @typeName(B) ++ ") cannot infer order");
+    const aa = if (type_is_pointer_or_slice(A)) unwrap: {
+        const AA = pointer_child_type(A);
+        break :unwrap if (type_is_bool(AA)) @intFromBool(a.*) else if (type_is_enum(AA)) @intFromEnum(a.*) else a.*;
+    } else if (type_is_bool(A)) @intFromBool(a) else if (type_is_enum(A)) @intFromEnum(a) else a;
+    const bb = if (type_is_pointer_or_slice(A)) unwrap: {
+        const BB = pointer_child_type(B);
+        break :unwrap if (type_is_bool(BB)) @intFromBool(b.*) else if (type_is_enum(BB)) @intFromEnum(b.*) else b.*;
+    } else if (type_is_bool(B)) @intFromBool(b) else if (type_is_enum(B)) @intFromEnum(b) else b;
+    return aa == bb;
+}
+
 pub fn memcopy(from_src: anytype, to_dst: anytype, count: usize) void {
     if (count == 0) return;
     if (type_is_optional(@TypeOf(from_src)) and from_src == null) std.debug.panic("memcopy `from_src` optional type {s} is `null`, but `count` != 0", .{@typeName(@TypeOf(from_src))});
@@ -341,16 +449,16 @@ pub fn memcopy(from_src: anytype, to_dst: anytype, count: usize) void {
         const child_type = pointer_child_type(ptr_type);
         if (pointer_is_slice(ptr_type)) {
             assert_with_reason(to_dst_not_null.len >= count, "memcopy `to_dst` ({s}) cannot recieve {d} items (has {d} capacity)", .{ @typeName(TO), count, to_dst_not_null.len });
-            compile_assert_with_reason(child_type == copy_type, "memcopy `to_dst` (" ++ @typeName(TO) ++ ") does not have a matching child type for `from_src` (" ++ @typeName(FROM) ++ ")");
+            comptime_assert_with_reason(child_type == copy_type, "memcopy `to_dst` (" ++ @typeName(TO) ++ ") does not have a matching child type for `from_src` (" ++ @typeName(FROM) ++ ")");
             raw_to = @ptrCast(@alignCast(to_dst_not_null.ptr));
         } else if (pointer_is_single(ptr_type)) {
             if (type_is_array_or_vector(child_type)) {
                 assert_with_reason(to_dst_not_null.len >= count, "memcopy `to_dst` ({s}) cannot recieve {d} items (has {d} capacity)", .{ @typeName(TO), count, to_dst_not_null.len });
-                compile_assert_with_reason(array_or_vector_child_type(child_type) == copy_type, "memcopy `to_dst` (" ++ @typeName(TO) ++ ") does not have a matching child type for `from_src` (" ++ @typeName(FROM) ++ ")");
+                comptime_assert_with_reason(array_or_vector_child_type(child_type) == copy_type, "memcopy `to_dst` (" ++ @typeName(TO) ++ ") does not have a matching child type for `from_src` (" ++ @typeName(FROM) ++ ")");
                 raw_to = @ptrCast(@alignCast(to_dst_not_null));
             } else {
                 assert_with_reason(count == 1, "memcopy `to_dst` ({s}) cannot recieve {d} items (has 1 item capacity, single item pointer to non-array/vector)", .{ @typeName(TO), count });
-                compile_assert_with_reason(child_type == copy_type, "memcopy `to_dst` (" ++ @typeName(TO) ++ ") does not have a matching child type for `from_src` (" ++ @typeName(FROM) ++ ")");
+                comptime_assert_with_reason(child_type == copy_type, "memcopy `to_dst` (" ++ @typeName(TO) ++ ") does not have a matching child type for `from_src` (" ++ @typeName(FROM) ++ ")");
                 raw_to = @ptrCast(@alignCast(to_dst_not_null));
             }
         } else if (pointer_is_many(ptr_type)) {
@@ -359,7 +467,7 @@ pub fn memcopy(from_src: anytype, to_dst: anytype, count: usize) void {
                 const len_check_slice = make_const_slice_from_sentinel_ptr_max_len(child_type, sentinel.*, to_dst_not_null, count);
                 assert_with_reason(len_check_slice.len >= count, "memcopy `to_dst` ({s}) cannot recieve {d} items (has {d} capacity)", .{ @typeName(TO), count, to_dst_not_null.len });
             }
-            compile_assert_with_reason(child_type == copy_type, "memcopy `to_dst` (" ++ @typeName(TO) ++ ") does not have a matching child type for `from_src` (" ++ @typeName(FROM) ++ ")");
+            comptime_assert_with_reason(child_type == copy_type, "memcopy `to_dst` (" ++ @typeName(TO) ++ ") does not have a matching child type for `from_src` (" ++ @typeName(FROM) ++ ")");
             raw_to = @ptrCast(@alignCast(to_dst_not_null));
         }
     } else @compileError("memcopy `to_dst` must be a mutable pointer type");

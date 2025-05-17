@@ -3,14 +3,20 @@ const assert = std.debug.assert;
 const build = @import("builtin");
 
 const Root = @import("./_root.zig");
+const LOG_PREFIX = Root.LOG_PREFIX;
+const Utils = Root.Utils;
+const assert_with_reason = Utils.assert_with_reason;
+const comptime_assert_with_reason = Utils.comptime_assert_with_reason;
+const infered_greater_than = Utils.infered_greater_than;
 const SortAlgorithm = Root.CommonTypes.SortAlgorithm;
 const Compare = Root.Compare;
 const CompareFn = Compare.CompareFn;
 const ComparePackage = Compare.ComparePackage;
 const inline_swap = Root.Utils.inline_swap;
-const greater_than = Compare.greater_than;
+// const greater_than = Compare.greater_than;
 
-pub inline fn insertion_sort(comptime T: type, buffer: []T) void {
+pub fn insertion_sort(comptime T: type, buffer: []T) void {
+    comptime_assert_with_reason(Utils.can_infer_type_order(T), "cannot inherently order type " ++ @typeName(T));
     var i: usize = 1;
     var j: usize = undefined;
     var jj: usize = undefined;
@@ -20,7 +26,7 @@ pub inline fn insertion_sort(comptime T: type, buffer: []T) void {
         j = i;
         inner: while (j > 0) {
             jj = j - 1;
-            if (greater_than(buffer[jj], x)) {
+            if (infered_greater_than(buffer[jj], x)) {
                 buffer[j] = buffer[jj];
                 j -= 1;
             } else {
@@ -32,7 +38,8 @@ pub inline fn insertion_sort(comptime T: type, buffer: []T) void {
     }
 }
 
-pub inline fn insertion_sort_with_transform(comptime T: type, buffer: []T, comptime TX: type, transform_fn: *const fn (in: T, data: ?*const anyopaque) TX, data: ?*const anyopaque) void {
+pub inline fn insertion_sort_with_transform_and_user_data(comptime T: type, buffer: []T, comptime TX: type, transform_fn: *const fn (in: T, user_data: ?*anyopaque) TX, user_data: ?*anyopaque) void {
+    comptime_assert_with_reason(Utils.can_infer_type_order(TX), "cannot inherently order type " ++ @typeName(TX));
     var i: usize = 1;
     var j: usize = undefined;
     var jj: usize = undefined;
@@ -41,12 +48,39 @@ pub inline fn insertion_sort_with_transform(comptime T: type, buffer: []T, compt
     var xx: TX = undefined;
     while (i < buffer.len) {
         x = buffer[i];
-        xx = transform_fn(x, data);
+        xx = transform_fn(x, user_data);
         j = i;
         inner: while (j > 0) {
             jj = j - 1;
-            jj_xx = transform_fn(buffer[jj], data);
-            if (greater_than(jj_xx, xx)) {
+            jj_xx = transform_fn(buffer[jj], user_data);
+            if (infered_greater_than(jj_xx, xx)) {
+                buffer[j] = buffer[jj];
+                j -= 1;
+            } else {
+                break :inner;
+            }
+        }
+        buffer[j] = x;
+        i += 1;
+    }
+}
+
+pub inline fn insertion_sort_with_transform(comptime T: type, buffer: []T, comptime TX: type, transform_fn: *const fn (in: T) TX) void {
+    comptime_assert_with_reason(Utils.can_infer_type_order(TX), "cannot inherently order type " ++ @typeName(TX));
+    var i: usize = 1;
+    var j: usize = undefined;
+    var jj: usize = undefined;
+    var jj_xx: TX = undefined;
+    var x: T = undefined;
+    var xx: TX = undefined;
+    while (i < buffer.len) {
+        x = buffer[i];
+        xx = transform_fn(x);
+        j = i;
+        inner: while (j > 0) {
+            jj = j - 1;
+            jj_xx = transform_fn(buffer[jj]);
+            if (infered_greater_than(jj_xx, xx)) {
                 buffer[j] = buffer[jj];
                 j -= 1;
             } else {
@@ -93,11 +127,15 @@ test "InsertionSort.zig" {
         },
     };
     const u8_u8 = [2]u8;
-    const secret: u8 = 42;
+    var secret: u8 = 42;
     const proto = struct {
-        fn xfrm(a: u8, data: ?*const anyopaque) u8_u8 {
+        fn xfrm_user(a: u8, data: ?*const anyopaque) u16 {
             const secret_ptr: *const u8 = @ptrCast(@alignCast(data));
-            return u8_u8{ a, secret_ptr.* };
+            return @bitCast(u8_u8{ a, secret_ptr.* });
+        }
+
+        fn xfrm(a: u8) u16 {
+            return @bitCast(u8_u8{ a, 42 });
         }
     };
 
@@ -106,7 +144,10 @@ test "InsertionSort.zig" {
         insertion_sort(u8, output[0..case.len]);
         try t.expectEqualSlices(u8, case.expected_output[0..case.len], output[0..case.len]);
         output = case.input;
-        insertion_sort_with_transform(u8, output[0..case.len], u8_u8, proto.xfrm, &secret);
+        insertion_sort_with_transform(u8, output[0..case.len], u16, proto.xfrm);
+        try t.expectEqualSlices(u8, case.expected_output[0..case.len], output[0..case.len]);
+        output = case.input;
+        insertion_sort_with_transform_and_user_data(u8, output[0..case.len], u16, proto.xfrm_user, &secret);
         try t.expectEqualSlices(u8, case.expected_output[0..case.len], output[0..case.len]);
     }
 }

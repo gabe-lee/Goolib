@@ -3,10 +3,10 @@ const assert = std.debug.assert;
 const build = @import("builtin");
 
 const Root = @import("./_root.zig");
+const Utils = Root.Utils;
+const infered_less_than = Utils.infered_less_than;
+const infered_greater_than = Utils.infered_greater_than;
 const SortAlgorithm = Root.CommonTypes.SortAlgorithm;
-const Compare = Root.Compare;
-const CompareFn = Compare.CompareFn;
-const ComparePackage = Compare.ComparePackage;
 const inline_swap = Root.Utils.inline_swap;
 
 pub const Pivot = enum(u8) {
@@ -30,19 +30,19 @@ pub const Pivot = enum(u8) {
     }
 };
 
-pub inline fn quicksort(comptime T: type, greater_than_fn: *const CompareFn(T), less_than_fn: *const CompareFn(T), pivot: Pivot, buffer: []T) void {
+pub inline fn quicksort(comptime T: type, pivot: Pivot, buffer: []T) void {
     if (buffer.len < 2) return;
-    recurse(T, greater_than_fn, less_than_fn, pivot, buffer, 0, buffer.len - 1);
+    recurse(T, pivot, buffer, 0, buffer.len - 1);
 }
 
-fn recurse(comptime T: type, greater_than_fn: *const CompareFn(T), less_than_fn: *const CompareFn(T), pivot: Pivot, buffer: []T, lo: usize, hi: usize) void {
+fn recurse(comptime T: type, pivot: Pivot, buffer: []T, lo: usize, hi: usize) void {
     if (hi <= lo) return;
-    const mid = partition(T, greater_than_fn, less_than_fn, pivot, buffer, lo, hi);
-    recurse(T, greater_than_fn, less_than_fn, pivot, buffer, lo, mid.lo -| 1);
-    recurse(T, greater_than_fn, less_than_fn, pivot, buffer, mid.hi + 1, hi);
+    const mid = partition(T, pivot, buffer, lo, hi);
+    recurse(T, pivot, buffer, lo, mid.lo -| 1);
+    recurse(T, pivot, buffer, mid.hi + 1, hi);
 }
 
-fn partition(comptime T: type, greater_than_fn: *const CompareFn(T), less_than_fn: *const CompareFn(T), pivot: Pivot, buffer: []T, lo: usize, hi: usize) Range {
+fn partition(comptime T: type, pivot: Pivot, buffer: []T, lo: usize, hi: usize) Range {
     const pivot_idx = switch (pivot) {
         Pivot.FIRST => lo,
         Pivot.MIDDLE => ((hi - lo) >> 1) + lo,
@@ -50,13 +50,13 @@ fn partition(comptime T: type, greater_than_fn: *const CompareFn(T), less_than_f
         Pivot.RANDOM => Root.Utils.simple_rand_int(usize, lo, hi),
         Pivot.MEDIAN_OF_3 => calc: {
             const mid = ((hi - lo) >> 1) + lo;
-            if (less_than_fn(buffer[lo], buffer[mid])) {
-                if (less_than_fn(buffer[mid], buffer[hi])) break :calc mid;
-                if (less_than_fn(buffer[lo], buffer[hi])) break :calc hi;
+            if (infered_less_than(buffer[lo], buffer[mid])) {
+                if (infered_less_than(buffer[mid], buffer[hi])) break :calc mid;
+                if (infered_less_than(buffer[lo], buffer[hi])) break :calc hi;
                 break :calc lo;
             }
-            if (less_than_fn(buffer[lo], buffer[hi])) break :calc lo;
-            if (less_than_fn(buffer[mid], buffer[hi])) break :calc hi;
+            if (infered_less_than(buffer[lo], buffer[hi])) break :calc lo;
+            if (infered_less_than(buffer[mid], buffer[hi])) break :calc hi;
             break :calc mid;
         },
         Pivot.MEDIAN_OF_3_RANDOM => calc: {
@@ -64,13 +64,13 @@ fn partition(comptime T: type, greater_than_fn: *const CompareFn(T), less_than_f
             const t_lo = idx_arr[0];
             const t_mid = idx_arr[1];
             const t_hi = idx_arr[2];
-            if (less_than_fn(buffer[t_lo], buffer[t_mid])) {
-                if (less_than_fn(buffer[t_mid], buffer[t_hi])) break :calc t_mid;
-                if (less_than_fn(buffer[t_lo], buffer[t_hi])) break :calc t_hi;
+            if (infered_less_than(buffer[t_lo], buffer[t_mid])) {
+                if (infered_less_than(buffer[t_mid], buffer[t_hi])) break :calc t_mid;
+                if (infered_less_than(buffer[t_lo], buffer[t_hi])) break :calc t_hi;
                 break :calc t_lo;
             }
-            if (less_than_fn(buffer[t_lo], buffer[t_hi])) break :calc t_lo;
-            if (less_than_fn(buffer[t_mid], buffer[t_hi])) break :calc t_hi;
+            if (infered_less_than(buffer[t_lo], buffer[t_hi])) break :calc t_lo;
+            if (infered_less_than(buffer[t_mid], buffer[t_hi])) break :calc t_hi;
             break :calc t_mid;
         },
     };
@@ -80,11 +80,139 @@ fn partition(comptime T: type, greater_than_fn: *const CompareFn(T), less_than_f
     var more_idx: usize = hi;
     var temp: T = undefined;
     while (equal_idx <= more_idx) {
-        if (less_than_fn(buffer[equal_idx], pivot_val)) {
+        if (infered_less_than(buffer[equal_idx], pivot_val)) {
             inline_swap(T, &buffer[equal_idx], &buffer[less_idx], &temp);
             less_idx += 1;
             equal_idx += 1;
-        } else if (greater_than_fn(buffer[equal_idx], pivot_val)) {
+        } else if (infered_greater_than(buffer[equal_idx], pivot_val)) {
+            inline_swap(T, &buffer[equal_idx], &buffer[more_idx], &temp);
+            more_idx -= 1;
+        } else {
+            equal_idx += 1;
+        }
+    }
+    return Range.new(less_idx, more_idx);
+}
+
+pub inline fn quicksort_with_transform(comptime T: type, pivot: Pivot, buffer: []T, comptime TX: type, transform_fn: *const fn (item: T) TX) void {
+    if (buffer.len < 2) return;
+    recurse_with_transform(T, pivot, buffer, 0, buffer.len - 1, TX, transform_fn);
+}
+
+fn recurse_with_transform(comptime T: type, pivot: Pivot, buffer: []T, lo: usize, hi: usize, comptime TX: type, transform_fn: *const fn (item: T) TX) void {
+    if (hi <= lo) return;
+    const mid = partition_with_transform(T, pivot, buffer, lo, hi, TX, transform_fn);
+    recurse_with_transform(T, pivot, buffer, lo, mid.lo -| 1, TX, transform_fn);
+    recurse_with_transform(T, pivot, buffer, mid.hi + 1, hi, TX, transform_fn);
+}
+
+fn partition_with_transform(comptime T: type, pivot: Pivot, buffer: []T, lo: usize, hi: usize, comptime TX: type, transform_fn: *const fn (item: T) TX) Range {
+    const pivot_idx = switch (pivot) {
+        Pivot.FIRST => lo,
+        Pivot.MIDDLE => ((hi - lo) >> 1) + lo,
+        Pivot.LAST => hi,
+        Pivot.RANDOM => Root.Utils.simple_rand_int(usize, lo, hi),
+        Pivot.MEDIAN_OF_3 => calc: {
+            const mid = ((hi - lo) >> 1) + lo;
+            if (infered_less_than(transform_fn(buffer[lo]), transform_fn(buffer[mid]))) {
+                if (infered_less_than(transform_fn(buffer[mid]), transform_fn(buffer[hi]))) break :calc mid;
+                if (infered_less_than(transform_fn(buffer[lo]), transform_fn(buffer[hi]))) break :calc hi;
+                break :calc lo;
+            }
+            if (infered_less_than(transform_fn(buffer[lo]), transform_fn(buffer[hi]))) break :calc lo;
+            if (infered_less_than(transform_fn(buffer[mid]), transform_fn(buffer[hi]))) break :calc hi;
+            break :calc mid;
+        },
+        Pivot.MEDIAN_OF_3_RANDOM => calc: {
+            const idx_arr = Root.Utils.simple_n_rand_ints(usize, 3, lo, hi);
+            const t_lo = idx_arr[0];
+            const t_mid = idx_arr[1];
+            const t_hi = idx_arr[2];
+            if (infered_less_than(transform_fn(buffer[t_lo]), transform_fn(buffer[t_mid]))) {
+                if (infered_less_than(transform_fn(buffer[t_mid]), transform_fn(buffer[t_hi]))) break :calc t_mid;
+                if (infered_less_than(transform_fn(buffer[t_lo]), transform_fn(buffer[t_hi]))) break :calc t_hi;
+                break :calc t_lo;
+            }
+            if (infered_less_than(transform_fn(buffer[t_lo]), transform_fn(buffer[t_hi]))) break :calc t_lo;
+            if (infered_less_than(transform_fn(buffer[t_mid]), transform_fn(buffer[t_hi]))) break :calc t_hi;
+            break :calc t_mid;
+        },
+    };
+    const pivot_val = buffer[pivot_idx];
+    var less_idx: usize = lo;
+    var equal_idx: usize = lo;
+    var more_idx: usize = hi;
+    var temp: T = undefined;
+    while (equal_idx <= more_idx) {
+        if (infered_less_than(transform_fn(buffer[equal_idx]), transform_fn(pivot_val))) {
+            inline_swap(T, &buffer[equal_idx], &buffer[less_idx], &temp);
+            less_idx += 1;
+            equal_idx += 1;
+        } else if (infered_greater_than(transform_fn(buffer[equal_idx]), transform_fn(pivot_val))) {
+            inline_swap(T, &buffer[equal_idx], &buffer[more_idx], &temp);
+            more_idx -= 1;
+        } else {
+            equal_idx += 1;
+        }
+    }
+    return Range.new(less_idx, more_idx);
+}
+
+pub inline fn quicksort_with_transform_and_user_data(comptime T: type, pivot: Pivot, buffer: []T, comptime TX: type, transform_fn: *const fn (item: T, user_data: ?*anyopaque) TX, user_data: ?*anyopaque) void {
+    if (buffer.len < 2) return;
+    recurse_with_transform_and_user_data(T, pivot, buffer, 0, buffer.len - 1, TX, transform_fn, user_data);
+}
+
+fn recurse_with_transform_and_user_data(comptime T: type, pivot: Pivot, buffer: []T, lo: usize, hi: usize, comptime TX: type, transform_fn: *const fn (item: T, user_data: ?*anyopaque) TX, user_data: ?*anyopaque) void {
+    if (hi <= lo) return;
+    const mid = partition_with_transform_and_user_data(T, pivot, buffer, lo, hi, TX, transform_fn, user_data);
+    recurse_with_transform_and_user_data(T, pivot, buffer, lo, mid.lo -| 1, TX, transform_fn, user_data);
+    recurse_with_transform_and_user_data(T, pivot, buffer, mid.hi + 1, hi, TX, transform_fn, user_data);
+}
+
+fn partition_with_transform_and_user_data(comptime T: type, pivot: Pivot, buffer: []T, lo: usize, hi: usize, comptime TX: type, transform_fn: *const fn (item: T, user_data: ?*anyopaque) TX, user_data: ?*anyopaque) Range {
+    const pivot_idx = switch (pivot) {
+        Pivot.FIRST => lo,
+        Pivot.MIDDLE => ((hi - lo) >> 1) + lo,
+        Pivot.LAST => hi,
+        Pivot.RANDOM => Root.Utils.simple_rand_int(usize, lo, hi),
+        Pivot.MEDIAN_OF_3 => calc: {
+            const mid = ((hi - lo) >> 1) + lo;
+            if (infered_less_than(transform_fn(buffer[lo], user_data), transform_fn(buffer[mid], user_data))) {
+                if (infered_less_than(transform_fn(buffer[mid], user_data), transform_fn(buffer[hi], user_data))) break :calc mid;
+                if (infered_less_than(transform_fn(buffer[lo], user_data), transform_fn(buffer[hi], user_data))) break :calc hi;
+                break :calc lo;
+            }
+            if (infered_less_than(transform_fn(buffer[lo], user_data), transform_fn(buffer[hi], user_data))) break :calc lo;
+            if (infered_less_than(transform_fn(buffer[mid], user_data), transform_fn(buffer[hi], user_data))) break :calc hi;
+            break :calc mid;
+        },
+        Pivot.MEDIAN_OF_3_RANDOM => calc: {
+            const idx_arr = Root.Utils.simple_n_rand_ints(usize, 3, lo, hi);
+            const t_lo = idx_arr[0];
+            const t_mid = idx_arr[1];
+            const t_hi = idx_arr[2];
+            if (infered_less_than(transform_fn(buffer[t_lo], user_data), transform_fn(buffer[t_mid], user_data))) {
+                if (infered_less_than(transform_fn(buffer[t_mid], user_data), transform_fn(buffer[t_hi], user_data))) break :calc t_mid;
+                if (infered_less_than(transform_fn(buffer[t_lo], user_data), transform_fn(buffer[t_hi], user_data))) break :calc t_hi;
+                break :calc t_lo;
+            }
+            if (infered_less_than(transform_fn(buffer[t_lo], user_data), transform_fn(buffer[t_hi], user_data))) break :calc t_lo;
+            if (infered_less_than(transform_fn(buffer[t_mid], user_data), transform_fn(buffer[t_hi], user_data))) break :calc t_hi;
+            break :calc t_mid;
+        },
+    };
+    const pivot_val = buffer[pivot_idx];
+    var less_idx: usize = lo;
+    var equal_idx: usize = lo;
+    var more_idx: usize = hi;
+    var temp: T = undefined;
+    while (equal_idx <= more_idx) {
+        if (infered_less_than(transform_fn(buffer[equal_idx], user_data), transform_fn(pivot_val, user_data))) {
+            inline_swap(T, &buffer[equal_idx], &buffer[less_idx], &temp);
+            less_idx += 1;
+            equal_idx += 1;
+        } else if (infered_greater_than(transform_fn(buffer[equal_idx], user_data), transform_fn(pivot_val, user_data))) {
             inline_swap(T, &buffer[equal_idx], &buffer[more_idx], &temp);
             more_idx -= 1;
         } else {
@@ -140,26 +268,25 @@ test "Quicksort.zig" {
             .len = 10,
         },
     };
-    const compare_pkg = ComparePackage(u8).default();
 
     for (cases) |case| {
         var output: [10]u8 = case.input;
-        quicksort(u8, compare_pkg.order_greater_than, compare_pkg.order_less_than, Pivot.FIRST, output[0..case.len]);
+        quicksort(u8, Pivot.FIRST, output[0..case.len]);
         try t.expectEqualSlices(u8, case.expected_output[0..case.len], output[0..case.len]);
         output = case.input;
-        quicksort(u8, compare_pkg.order_greater_than, compare_pkg.order_less_than, Pivot.MIDDLE, output[0..case.len]);
+        quicksort(u8, Pivot.MIDDLE, output[0..case.len]);
         try t.expectEqualSlices(u8, case.expected_output[0..case.len], output[0..case.len]);
         output = case.input;
-        quicksort(u8, compare_pkg.order_greater_than, compare_pkg.order_less_than, Pivot.LAST, output[0..case.len]);
+        quicksort(u8, Pivot.LAST, output[0..case.len]);
         try t.expectEqualSlices(u8, case.expected_output[0..case.len], output[0..case.len]);
         output = case.input;
-        quicksort(u8, compare_pkg.order_greater_than, compare_pkg.order_less_than, Pivot.RANDOM, output[0..case.len]);
+        quicksort(u8, Pivot.RANDOM, output[0..case.len]);
         try t.expectEqualSlices(u8, case.expected_output[0..case.len], output[0..case.len]);
         output = case.input;
-        quicksort(u8, compare_pkg.order_greater_than, compare_pkg.order_less_than, Pivot.MEDIAN_OF_3, output[0..case.len]);
+        quicksort(u8, Pivot.MEDIAN_OF_3, output[0..case.len]);
         try t.expectEqualSlices(u8, case.expected_output[0..case.len], output[0..case.len]);
         output = case.input;
-        quicksort(u8, compare_pkg.order_greater_than, compare_pkg.order_less_than, Pivot.MEDIAN_OF_3_RANDOM, output[0..case.len]);
+        quicksort(u8, Pivot.MEDIAN_OF_3_RANDOM, output[0..case.len]);
         try t.expectEqualSlices(u8, case.expected_output[0..case.len], output[0..case.len]);
     }
 }

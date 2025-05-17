@@ -1,5 +1,9 @@
 const std = @import("std");
 
+pub const VERSION = "0.2.0";
+pub const NAME = "Goolib";
+pub const LOG_PREFIX = "[" ++ NAME ++ " " ++ VERSION ++ "] ";
+
 pub const AABB2 = @import("./AABB2.zig");
 pub const ANSI = @import("./ANSI.zig");
 pub const BinarySearch = @import("./BinarySearch.zig");
@@ -9,7 +13,7 @@ pub const Cast = @import("./Cast.zig");
 // pub const Codegen = @import("./Codegen.zig");
 pub const Color = @import("./Color.zig");
 pub const CommonTypes = @import("./CommonTypes.zig");
-pub const Compare = @import("./Compare.zig");
+// pub const Compare = @import("./Compare.zig");
 pub const DummyAllocator = @import("./DummyAllocator.zig");
 // pub const Filegen = @import("./Filegen.zig");
 // pub const Format = @import("./Format.zig");
@@ -21,7 +25,7 @@ pub const Reader = @import("./Reader.zig");
 pub const Rect2 = @import("./Rect2.zig");
 // pub const ReturnWrappers = @import("./ReturnWrappers.zig");
 pub const SDL3 = @import("./SDL3.zig");
-pub const SoftSlice = @import("./SoftSlice.zig");
+pub const Slice = @import("./Slice.zig");
 
 // pub const StaticAllocVectorizedStructOfArrays = @import("./StaticAllocVectorizedStructOfArrays.zig");
 // pub const Template = @import("./Template.zig");
@@ -40,7 +44,7 @@ comptime {
     // _ = @import("./Codegen.zig");
     _ = @import("./Color.zig");
     _ = @import("./CommonTypes.zig");
-    _ = @import("./Compare.zig");
+    // _ = @import("./Compare.zig");
     _ = @import("./DummyAllocator.zig");
     // _ = @import("./Filegen.zig");
     // _ = @import("./Format.zig");
@@ -51,7 +55,7 @@ comptime {
     _ = @import("./Reader.zig");
     _ = @import("./Rect2.zig");
     _ = @import("./SDL3.zig");
-    _ = @import("./SoftSlice.zig");
+    _ = @import("./Slice.zig");
     // _ = @import("./ReturnWrappers.zig");
 
     // _ = @import("./StaticAllocVectorizedStructOfArrays.zig");

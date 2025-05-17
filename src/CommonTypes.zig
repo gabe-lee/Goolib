@@ -76,3 +76,22 @@ pub const WriteError = error{
     /// TODO documentation
     source_too_short_for_given_range,
 };
+
+pub const Mutability = enum {
+    immutable,
+    mutable,
+};
+
+pub const LenMutability = enum {
+    immutable,
+    shrink_only,
+    grow_only,
+    shrink_or_grow,
+};
+
+pub const PosMutability = enum {
+    immutable,
+    increase_only,
+    decrease_only,
+    increase_or_decrease,
+};

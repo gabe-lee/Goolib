@@ -10,9 +10,11 @@ const ArrayList = std.ArrayListUnmanaged;
 const Type = std.builtin.Type;
 
 const Root = @import("./_root.zig");
+const Slice = Root.Slice.Slice;
 const Quicksort = Root.Quicksort;
 const Pivot = Quicksort.Pivot;
 const InsertionSort = Root.InsertionSort;
+const insertion_sort = InsertionSort.insertion_sort;
 const AllocErrorBehavior = Root.CommonTypes.AllocErrorBehavior;
 const GrowthModel = Root.CommonTypes.GrowthModel;
 const SortAlgorithm = Root.CommonTypes.SortAlgorithm;
@@ -31,58 +33,34 @@ pub const ListOptions = struct {
     secure_wipe_bytes: bool = false,
 };
 
-// pub fn PtrType(comptime T: type, comptime ALIGN: ?u29, comptime SENT: ?T) type {
-//     if (ALIGN) |a| {
-//         if (SENT) |s| {
-//             return [*:s]align(a) T;
-//         } else {
-//             return [*]align(a) T;
-//         }
-//     } else {
-//         if (SENT) |s| {
-//             return [*:s]T;
-//         } else {
-//             return [*]T;
-//         }
-//     }
-// }
-
-// pub fn SliceType(comptime T: type, comptime ALIGN: ?u29, comptime SENT: ?T) type {
-//     if (ALIGN) |a| {
-//         if (SENT) |s| {
-//             return [:s]align(a) T;
-//         } else {
-//             return []align(a) T;
-//         }
-//     } else {
-//         if (SENT) |s| {
-//             return [:s]T;
-//         } else {
-//             return []T;
-//         }
-//     }
-// }
-
 /// A struct containing all common operations used internally for the various List
 /// paradigms
 ///
 /// These are not intended for normal use, but are provided here for ease of use
 /// when implementing a custom list/collection type
 pub const Impl = struct {
-    pub inline fn slice(comptime List: type, self: List) List.Slice(List.Elem) {
+    pub inline fn zig_slice(comptime List: type, self: List) List.Slice(List.Elem) {
         return self.ptr[0..@intCast(self.len)];
+    }
+
+    pub inline fn slice(comptime List: type, self: List) Slice(List.Elem, List.Idx, .mutable) {
+        return Slice(List.Elem, List.Idx, .mutable){
+            .ptr = self.ptr,
+            .len = self.len,
+        };
     }
 
     pub fn array_ptr(comptime List: type, self: List, start: List.Idx, comptime length: List.Idx) *[length]List.Elem {
         assert(start + length <= self.len);
         return &(self.ptr[start..self.len][0..length]);
     }
+
     pub fn vector_ptr(comptime List: type, self: List, start: List.Idx, comptime length: List.Idx) *@Vector(length, List.Elem) {
         assert(start + length <= self.len);
         return self.ptr[start..self.len][0..length];
     }
 
-    pub fn slice_with_sentinel(comptime List: type, self: List, comptime sentinel: List.Elem) List.SentinelSlice(List.Elem) {
+    pub fn slice_with_sentinel(comptime List: type, self: List, comptime sentinel: List.Elem) List.ZigSentinelSlice(List.Elem) {
         assert(self.len < self.cap);
         self.ptr[self.len] = sentinel;
         return self.ptr[0..self.len :sentinel];
@@ -136,7 +114,7 @@ pub const Impl = struct {
         return new_memory;
     }
 
-    pub fn to_owned_slice_sentinel(comptime List: type, self: *List, comptime sentinel: List.Elem, alloc: Allocator) if (List.RETURN_ERRORS) List.Error!List.SentinelSlice(sentinel) else List.SentinelSlice(sentinel) {
+    pub fn to_owned_slice_sentinel(comptime List: type, self: *List, comptime sentinel: List.Elem, alloc: Allocator) if (List.RETURN_ERRORS) List.Error!List.ZigSentinelSlice(sentinel) else List.ZigSentinelSlice(sentinel) {
         if (List.RETURN_ERRORS) {
             try ensure_total_capacity_exact(List, self, self.len + 1, alloc);
         } else {
@@ -552,6 +530,132 @@ pub const Impl = struct {
         }
     }
 
+    pub fn find_idx(comptime List: type, self: List, comptime P: type, param: P, match_fn: *const fn (param: P, item: *const List.Elem) bool) ?List.Idx {
+        for (zig_slice(List, self), 0..) |*item, idx| {
+            if (match_fn(param, item)) return @intCast(idx);
+        }
+        return null;
+    }
+
+    pub fn find_ptr(comptime List: type, self: List, comptime P: type, param: P, match_fn: *const fn (param: P, item: *const List.Elem) bool) ?*List.Elem {
+        if (find_idx(List, self, P, param, match_fn)) |idx| {
+            return &self.ptr[idx];
+        }
+        return null;
+    }
+
+    pub fn find_const_ptr(comptime List: type, self: List, comptime P: type, param: P, match_fn: *const fn (param: P, item: *const List.Elem) bool) ?*const List.Elem {
+        if (find_idx(List, self, P, param, match_fn)) |idx| {
+            return &self.ptr[idx];
+        }
+        return null;
+    }
+
+    pub fn find_and_copy(comptime List: type, self: *List, comptime P: type, param: P, match_fn: *const fn (param: P, item: *const List.Elem) bool) ?List.Elem {
+        if (find_idx(List, self, P, param, match_fn)) |idx| {
+            return self.ptr[idx];
+        }
+        return null;
+    }
+
+    pub fn find_and_remove(comptime List: type, self: *List, comptime P: type, param: P, match_fn: *const fn (param: P, item: *const List.Elem) bool) ?List.Elem {
+        if (find_idx(List, self, P, param, match_fn)) |idx| {
+            return remove(List, self, idx);
+        }
+        return null;
+    }
+
+    pub fn find_and_delete(comptime List: type, self: *List, comptime P: type, param: P, match_fn: *const fn (param: P, item: *const List.Elem) bool) bool {
+        if (find_idx(List, self, P, param, match_fn)) |idx| {
+            delete(List, self, idx);
+            return true;
+        }
+        return false;
+    }
+
+    pub fn find_exactly_n_ordered_indexes_from_n_ordered_params(comptime List: type, self: List, comptime P: type, params: []const P, match_fn: *const fn (param: P, item: *const List.Elem) bool, output_buf: []List.Idx) bool {
+        assert(output_buf.len >= params.len);
+        var i: usize = 0;
+        for (zig_slice(List, self), 0..) |*item, idx| {
+            if (match_fn(params[i], item)) {
+                output_buf[i] = idx;
+                i += 1;
+                if (i == params.len) return true;
+            }
+        }
+        return false;
+    }
+
+    pub fn find_exactly_n_ordered_pointers_from_n_ordered_params(comptime List: type, self: List, comptime P: type, params: []const P, match_fn: *const fn (param: P, item: *const List.Elem) bool, output_buf: []*List.Elem) bool {
+        assert(output_buf.len >= params.len);
+        var i: usize = 0;
+        for (zig_slice(List, self)) |*item| {
+            if (match_fn(params[i], item)) {
+                output_buf[i] = item;
+                i += 1;
+                if (i == params.len) return true;
+            }
+        }
+        return false;
+    }
+
+    pub fn find_exactly_n_ordered_const_pointers_from_n_ordered_params(comptime List: type, self: List, comptime P: type, params: []const P, match_fn: *const fn (param: P, item: *const List.Elem) bool, output_buf: []*const List.Elem) bool {
+        assert(output_buf.len >= params.len);
+        var i: usize = 0;
+        for (zig_slice(List, self)) |*item| {
+            if (match_fn(params[i], item)) {
+                output_buf[i] = item;
+                i += 1;
+                if (i == params.len) return true;
+            }
+        }
+        return false;
+    }
+
+    pub fn find_exactly_n_ordered_copies_from_n_ordered_params(comptime List: type, self: List, comptime P: type, params: []const P, match_fn: *const fn (param: P, item: *const List.Elem) bool, output_buf: []List.Elem) bool {
+        assert(output_buf.len >= params.len);
+        var i: usize = 0;
+        for (zig_slice(List, self)) |*item| {
+            if (match_fn(params[i], item)) {
+                output_buf[i] = item.*;
+                i += 1;
+                if (i == params.len) return true;
+            }
+        }
+        return false;
+    }
+
+    pub fn delete_ordered_indexes(comptime List: type, self: *List, indexes: []const List.Idx) void {
+        assert(indexes.len <= self.len);
+        assert(check: {
+            var i: usize = 1;
+            while (i < indexes.len) : (i += 1) {
+                if (indexes[i - 1] >= indexes[i]) break :check false;
+            }
+            break :check true;
+        });
+        var shift_down: usize = 1;
+        var i: usize = 1;
+        var src_start: List.Idx = undefined;
+        var src_end: List.Idx = undefined;
+        var dst_start: List.Idx = undefined;
+        var dst_end: List.Idx = undefined;
+        while (i < indexes.len) : (i += 1) {
+            src_start = indexes[i - 1] + 1;
+            src_end = indexes[i];
+            dst_start = src_start - shift_down;
+            dst_end = src_end - shift_down;
+            std.mem.copyForwards(List.Idx, self.ptr[dst_start..dst_end], self.ptr[src_start..src_end]);
+            shift_down += 1;
+        }
+        src_start = indexes[i] + 1;
+        src_end = @intCast(self.len);
+        dst_start = src_start - shift_down;
+        dst_end = src_end - shift_down;
+        std.mem.copyForwards(List.Idx, self.ptr[dst_start..dst_end], self.ptr[src_start..src_end]);
+        self.len -= indexes.len;
+    }
+
     // pub inline fn sort(comptime List: type, self: *List) void {
     //     custom_sort(List, self, List.DEFAULT_SORT_ALGO, List.DEFAULT_COMPARE_PKG);
     // }
@@ -678,13 +782,17 @@ pub fn define_manually_managed_list_type(comptime base_options: ListOptions) typ
         pub const Elem = base_options.element_type;
         pub const Idx = base_options.index_type;
         pub const Ptr = if (ALIGN) |a| [*]align(a) Elem else [*]Elem;
-        pub const Slice = if (ALIGN) |a| ([]align(a) Elem) else []Elem;
-        pub fn SentinelSlice(comptime sentinel: Elem) type {
+        pub const ZigSlice = if (ALIGN) |a| ([]align(a) Elem) else []Elem;
+        pub fn ZigSentinelSlice(comptime sentinel: Elem) type {
             return if (ALIGN) |a| ([:sentinel]align(a) Elem) else [:sentinel]Elem;
         }
 
-        pub inline fn slice(self: List) Slice {
+        pub inline fn slice(self: List) Slice(Elem, Idx, .mutable) {
             return Impl.slice(List, self);
+        }
+
+        pub inline fn zig_slice(self: List) ZigSlice {
+            return Impl.zig_slice(List, self);
         }
 
         pub inline fn array_ptr(self: List, start: Idx, comptime length: Idx) *[length]Elem {
@@ -695,7 +803,7 @@ pub fn define_manually_managed_list_type(comptime base_options: ListOptions) typ
             return Impl.vector_ptr(List, self, start, length);
         }
 
-        pub inline fn slice_with_sentinel(self: List, comptime sentinel: Elem) SentinelSlice(Elem) {
+        pub inline fn slice_with_sentinel(self: List, comptime sentinel: Elem) ZigSentinelSlice(Elem) {
             return Impl.slice_with_sentinel(List, self, sentinel);
         }
 
@@ -727,7 +835,7 @@ pub fn define_manually_managed_list_type(comptime base_options: ListOptions) typ
             return Impl.to_owned_slice(List, self, alloc);
         }
 
-        pub inline fn to_owned_slice_sentinel(self: *List, alloc: Allocator, comptime sentinel: Elem) if (RETURN_ERRORS) Error!SentinelSlice(sentinel) else SentinelSlice(sentinel) {
+        pub inline fn to_owned_slice_sentinel(self: *List, alloc: Allocator, comptime sentinel: Elem) if (RETURN_ERRORS) Error!ZigSentinelSlice(sentinel) else ZigSentinelSlice(sentinel) {
             return Impl.to_owned_slice_sentinel(List, self, alloc, sentinel);
         }
 
@@ -907,6 +1015,50 @@ pub fn define_manually_managed_list_type(comptime base_options: ListOptions) typ
             return Impl.get_last_or_null(List, self);
         }
 
+        pub inline fn find_idx(self: List, match_param: anytype, match_fn: *const fn (param: @TypeOf(match_param), item: *const Elem) bool) ?Idx {
+            return Impl.find_idx(List, self, @TypeOf(match_param), match_param, match_fn);
+        }
+
+        pub inline fn find_ptr(self: List, match_param: anytype, match_fn: *const fn (param: @TypeOf(match_param), item: *const Elem) bool) ?*Elem {
+            return Impl.find_ptr(List, self, @TypeOf(match_param), match_param, match_fn);
+        }
+
+        pub inline fn find_const_ptr(self: List, match_param: anytype, match_fn: *const fn (param: @TypeOf(match_param), item: *const Elem) bool) ?*const Elem {
+            return Impl.find_const_ptr(List, self, @TypeOf(match_param), match_param, match_fn);
+        }
+
+        pub inline fn find_and_copy(self: List, match_param: anytype, match_fn: *const fn (param: @TypeOf(match_param), item: *const Elem) bool) ?Elem {
+            return Impl.find_and_copy(List, self, @TypeOf(match_param), match_param, match_fn);
+        }
+
+        pub inline fn find_and_remove(self: List, match_param: anytype, match_fn: *const fn (param: @TypeOf(match_param), item: *const Elem) bool) ?Elem {
+            return Impl.find_and_remove(List, self, @TypeOf(match_param), match_param, match_fn);
+        }
+
+        pub inline fn find_and_delete(self: List, match_param: anytype, match_fn: *const fn (param: @TypeOf(match_param), item: *const Elem) bool) bool {
+            return Impl.find_and_delete(List, self, @TypeOf(match_param), match_param, match_fn);
+        }
+
+        pub inline fn find_exactly_n_ordered_indexes_from_n_ordered_params(self: List, comptime P: type, params: []const P, match_fn: *const fn (param: P, item: *const Elem) bool, output_buf: []Idx) bool {
+            return Impl.find_exactly_n_ordered_indexes_from_n_ordered_params(List, self, P, params, match_fn, output_buf);
+        }
+
+        pub inline fn find_exactly_n_ordered_pointers_from_n_ordered_params(self: List, comptime P: type, params: []const P, match_fn: *const fn (param: P, item: *const Elem) bool, output_buf: []*Elem) bool {
+            return Impl.find_exactly_n_ordered_pointers_from_n_ordered_params(List, self, P, params, match_fn, output_buf);
+        }
+
+        pub inline fn find_exactly_n_ordered_const_pointers_from_n_ordered_params(self: List, comptime P: type, params: []const P, match_fn: *const fn (param: P, item: *const Elem) bool, output_buf: []*const Elem) bool {
+            return Impl.find_exactly_n_ordered_const_pointers_from_n_ordered_params(List, self, P, params, match_fn, output_buf);
+        }
+
+        pub inline fn find_exactly_n_ordered_copies_from_n_ordered_params(self: List, comptime P: type, params: []const P, match_fn: *const fn (param: P, item: *const Elem) bool, output_buf: []Elem) bool {
+            return Impl.find_exactly_n_ordered_copies_from_n_ordered_params(List, self, P, params, match_fn, output_buf);
+        }
+
+        pub inline fn delete_ordered_indexes(self: *List, indexes: []const Idx) void {
+            return Impl.delete_ordered_indexes(List, self, indexes);
+        }
+
         // pub inline fn sort(self: *List) void {
         //     return Internal.sort(List, self);
         // }
@@ -1000,7 +1152,7 @@ pub fn define_manually_managed_list_type(comptime base_options: ListOptions) typ
     };
 }
 
-pub fn define_statically_managed_list_type(comptime base_options: ListOptions, comptime alloc_ptr: *const Allocator) type {
+pub fn define_static_allocator_list_type(comptime base_options: ListOptions, comptime alloc_ptr: *const Allocator) type {
     const opt = comptime check: {
         var opts = base_options;
         if (opts.alignment) |a| {
@@ -1038,13 +1190,17 @@ pub fn define_statically_managed_list_type(comptime base_options: ListOptions, c
         pub const Elem = base_options.element_type;
         pub const Idx = base_options.index_type;
         pub const Ptr = if (ALIGN) |a| [*]align(a) Elem else [*]Elem;
-        pub const Slice = if (ALIGN) |a| ([]align(a) Elem) else []Elem;
-        pub fn SentinelSlice(comptime sentinel: Elem) type {
+        pub const ZigSlice = if (ALIGN) |a| ([]align(a) Elem) else []Elem;
+        pub fn ZigZigSentinelSlice(comptime sentinel: Elem) type {
             return if (ALIGN) |a| ([:sentinel]align(a) Elem) else [:sentinel]Elem;
         }
 
-        pub inline fn slice(self: List) Slice {
+        pub inline fn slice(self: List) Slice(Elem, Idx, .mutable) {
             return Impl.slice(List, self);
+        }
+
+        pub inline fn zig_slice(self: List) ZigSlice {
+            return Impl.zig_slice(List, self);
         }
 
         pub inline fn array_ptr(self: List, start: Idx, comptime length: Idx) *[length]Elem {
@@ -1055,11 +1211,11 @@ pub fn define_statically_managed_list_type(comptime base_options: ListOptions, c
             return Impl.vector_ptr(List, self, start, length);
         }
 
-        pub inline fn slice_with_sentinel(self: List, comptime sentinel: Elem) SentinelSlice(Elem) {
+        pub inline fn slice_with_sentinel(self: List, comptime sentinel: Elem) ZigZigSentinelSlice(Elem) {
             return Impl.slice_with_sentinel(List, self, sentinel);
         }
 
-        pub inline fn slice_full_capacity(self: List) Slice {
+        pub inline fn slice_full_capacity(self: List) ZigSlice {
             return Impl.slice_full_capacity(List, self);
         }
 
@@ -1083,15 +1239,15 @@ pub fn define_statically_managed_list_type(comptime base_options: ListOptions, c
             return Impl.clone(List, self, ALLOC.*);
         }
 
-        pub inline fn to_owned_slice(self: *List) if (RETURN_ERRORS) Error!Slice else Slice {
+        pub inline fn to_owned_slice(self: *List) if (RETURN_ERRORS) Error!ZigSlice else ZigSlice {
             return Impl.to_owned_slice(List, self, ALLOC.*);
         }
 
-        pub inline fn to_owned_slice_sentinel(self: *List, comptime sentinel: Elem) if (RETURN_ERRORS) Error!SentinelSlice(sentinel) else SentinelSlice(sentinel) {
+        pub inline fn to_owned_slice_sentinel(self: *List, comptime sentinel: Elem) if (RETURN_ERRORS) Error!ZigZigSentinelSlice(sentinel) else ZigZigSentinelSlice(sentinel) {
             return Impl.to_owned_slice_sentinel(List, self, sentinel, ALLOC.*);
         }
 
-        pub inline fn from_owned_slice(from_slice: Slice) List {
+        pub inline fn from_owned_slice(from_slice: ZigSlice) List {
             return Impl.from_owned_slice(List, from_slice);
         }
 
@@ -1267,6 +1423,50 @@ pub fn define_statically_managed_list_type(comptime base_options: ListOptions, c
             return Impl.get_last_or_null(List, self);
         }
 
+        pub inline fn find_idx(self: List, match_param: anytype, match_fn: *const fn (param: @TypeOf(match_param), item: *const Elem) bool) ?Idx {
+            return Impl.find_idx(List, self, @TypeOf(match_param), match_param, match_fn);
+        }
+
+        pub inline fn find_ptr(self: List, match_param: anytype, match_fn: *const fn (param: @TypeOf(match_param), item: *const Elem) bool) ?*Elem {
+            return Impl.find_ptr(List, self, @TypeOf(match_param), match_param, match_fn);
+        }
+
+        pub inline fn find_const_ptr(self: List, match_param: anytype, match_fn: *const fn (param: @TypeOf(match_param), item: *const Elem) bool) ?*const Elem {
+            return Impl.find_const_ptr(List, self, @TypeOf(match_param), match_param, match_fn);
+        }
+
+        pub inline fn find_and_copy(self: List, match_param: anytype, match_fn: *const fn (param: @TypeOf(match_param), item: *const Elem) bool) ?Elem {
+            return Impl.find_and_copy(List, self, @TypeOf(match_param), match_param, match_fn);
+        }
+
+        pub inline fn find_and_remove(self: List, match_param: anytype, match_fn: *const fn (param: @TypeOf(match_param), item: *const Elem) bool) ?Elem {
+            return Impl.find_and_remove(List, self, @TypeOf(match_param), match_param, match_fn);
+        }
+
+        pub inline fn find_and_delete(self: List, match_param: anytype, match_fn: *const fn (param: @TypeOf(match_param), item: *const Elem) bool) bool {
+            return Impl.find_and_delete(List, self, @TypeOf(match_param), match_param, match_fn);
+        }
+
+        pub inline fn find_exactly_n_ordered_indexes_from_n_ordered_params(self: List, comptime P: type, params: []const P, match_fn: *const fn (param: P, item: *const Elem) bool, output_buf: []Idx) bool {
+            return Impl.find_exactly_n_ordered_indexes_from_n_ordered_params(List, self, P, params, match_fn, output_buf);
+        }
+
+        pub inline fn find_exactly_n_ordered_pointers_from_n_ordered_params(self: List, comptime P: type, params: []const P, match_fn: *const fn (param: P, item: *const Elem) bool, output_buf: []*Elem) bool {
+            return Impl.find_exactly_n_ordered_pointers_from_n_ordered_params(List, self, P, params, match_fn, output_buf);
+        }
+
+        pub inline fn find_exactly_n_ordered_const_pointers_from_n_ordered_params(self: List, comptime P: type, params: []const P, match_fn: *const fn (param: P, item: *const Elem) bool, output_buf: []*const Elem) bool {
+            return Impl.find_exactly_n_ordered_const_pointers_from_n_ordered_params(List, self, P, params, match_fn, output_buf);
+        }
+
+        pub inline fn find_exactly_n_ordered_copies_from_n_ordered_params(self: List, comptime P: type, params: []const P, match_fn: *const fn (param: P, item: *const Elem) bool, output_buf: []Elem) bool {
+            return Impl.find_exactly_n_ordered_copies_from_n_ordered_params(List, self, P, params, match_fn, output_buf);
+        }
+
+        pub inline fn delete_ordered_indexes(self: *List, indexes: []const Idx) void {
+            return Impl.delete_ordered_indexes(List, self, indexes);
+        }
+
         // pub inline fn sort(self: *List) void {
         //     return Internal.sort(List, self);
         // }
@@ -1397,8 +1597,8 @@ pub fn define_cached_allocator_list_type(comptime base_options: ListOptions) typ
         pub const Elem = base_options.element_type;
         pub const Idx = base_options.index_type;
         pub const Ptr = if (ALIGN) |a| [*]align(a) Elem else [*]Elem;
-        pub const Slice = if (ALIGN) |a| ([]align(a) Elem) else []Elem;
-        pub fn SentinelSlice(comptime sentinel: Elem) type {
+        pub const ZigSlice = if (ALIGN) |a| ([]align(a) Elem) else []Elem;
+        pub fn ZigSentinelSlice(comptime sentinel: Elem) type {
             return if (ALIGN) |a| ([:sentinel]align(a) Elem) else [:sentinel]Elem;
         }
 
@@ -1414,8 +1614,12 @@ pub fn define_cached_allocator_list_type(comptime base_options: ListOptions) typ
             self.alloc_vtable = alloc.vtable;
         }
 
-        pub inline fn slice(self: List) Slice {
+        pub inline fn slice(self: List) Slice(Elem, Idx, .mutable) {
             return Impl.slice(List, self);
+        }
+
+        pub inline fn zig_slice(self: List) ZigSlice {
+            return Impl.zig_slice(List, self);
         }
 
         pub inline fn array_ptr(self: List, start: Idx, comptime length: Idx) *[length]Elem {
@@ -1426,11 +1630,11 @@ pub fn define_cached_allocator_list_type(comptime base_options: ListOptions) typ
             return Impl.vector_ptr(List, self, start, length);
         }
 
-        pub inline fn slice_with_sentinel(self: List, comptime sentinel: Elem) SentinelSlice(Elem) {
+        pub inline fn slice_with_sentinel(self: List, comptime sentinel: Elem) ZigSentinelSlice(Elem) {
             return Impl.slice_with_sentinel(List, self, sentinel);
         }
 
-        pub inline fn slice_full_capacity(self: List) Slice {
+        pub inline fn slice_full_capacity(self: List) ZigSlice {
             return Impl.slice_full_capacity(List, self);
         }
 
@@ -1462,7 +1666,7 @@ pub fn define_cached_allocator_list_type(comptime base_options: ListOptions) typ
             return Impl.to_owned_slice(List, self, self.get_alloc());
         }
 
-        pub inline fn to_owned_slice_sentinel(self: *List, comptime sentinel: Elem) if (RETURN_ERRORS) Error!SentinelSlice(sentinel) else SentinelSlice(sentinel) {
+        pub inline fn to_owned_slice_sentinel(self: *List, comptime sentinel: Elem) if (RETURN_ERRORS) Error!ZigSentinelSlice(sentinel) else ZigSentinelSlice(sentinel) {
             return Impl.to_owned_slice_sentinel(List, self, sentinel, self.get_alloc());
         }
 
@@ -1642,6 +1846,50 @@ pub fn define_cached_allocator_list_type(comptime base_options: ListOptions) typ
             return Impl.get_last_or_null(List, self);
         }
 
+        pub inline fn find_idx(self: List, match_param: anytype, match_fn: *const fn (param: @TypeOf(match_param), item: *const Elem) bool) ?Idx {
+            return Impl.find_idx(List, self, @TypeOf(match_param), match_param, match_fn);
+        }
+
+        pub inline fn find_ptr(self: List, match_param: anytype, match_fn: *const fn (param: @TypeOf(match_param), item: *const Elem) bool) ?*Elem {
+            return Impl.find_ptr(List, self, @TypeOf(match_param), match_param, match_fn);
+        }
+
+        pub inline fn find_const_ptr(self: List, match_param: anytype, match_fn: *const fn (param: @TypeOf(match_param), item: *const Elem) bool) ?*const Elem {
+            return Impl.find_const_ptr(List, self, @TypeOf(match_param), match_param, match_fn);
+        }
+
+        pub inline fn find_and_copy(self: List, match_param: anytype, match_fn: *const fn (param: @TypeOf(match_param), item: *const Elem) bool) ?Elem {
+            return Impl.find_and_copy(List, self, @TypeOf(match_param), match_param, match_fn);
+        }
+
+        pub inline fn find_and_remove(self: List, match_param: anytype, match_fn: *const fn (param: @TypeOf(match_param), item: *const Elem) bool) ?Elem {
+            return Impl.find_and_remove(List, self, @TypeOf(match_param), match_param, match_fn);
+        }
+
+        pub inline fn find_and_delete(self: List, match_param: anytype, match_fn: *const fn (param: @TypeOf(match_param), item: *const Elem) bool) bool {
+            return Impl.find_and_delete(List, self, @TypeOf(match_param), match_param, match_fn);
+        }
+
+        pub inline fn find_exactly_n_ordered_indexes_from_n_ordered_params(self: List, comptime P: type, params: []const P, match_fn: *const fn (param: P, item: *const Elem) bool, output_buf: []Idx) bool {
+            return Impl.find_exactly_n_ordered_indexes_from_n_ordered_params(List, self, P, params, match_fn, output_buf);
+        }
+
+        pub inline fn find_exactly_n_ordered_pointers_from_n_ordered_params(self: List, comptime P: type, params: []const P, match_fn: *const fn (param: P, item: *const Elem) bool, output_buf: []*Elem) bool {
+            return Impl.find_exactly_n_ordered_pointers_from_n_ordered_params(List, self, P, params, match_fn, output_buf);
+        }
+
+        pub inline fn find_exactly_n_ordered_const_pointers_from_n_ordered_params(self: List, comptime P: type, params: []const P, match_fn: *const fn (param: P, item: *const Elem) bool, output_buf: []*const Elem) bool {
+            return Impl.find_exactly_n_ordered_const_pointers_from_n_ordered_params(List, self, P, params, match_fn, output_buf);
+        }
+
+        pub inline fn find_exactly_n_ordered_copies_from_n_ordered_params(self: List, comptime P: type, params: []const P, match_fn: *const fn (param: P, item: *const Elem) bool, output_buf: []Elem) bool {
+            return Impl.find_exactly_n_ordered_copies_from_n_ordered_params(List, self, P, params, match_fn, output_buf);
+        }
+
+        pub inline fn delete_ordered_indexes(self: *List, indexes: []const Idx) void {
+            return Impl.delete_ordered_indexes(List, self, indexes);
+        }
+
         // pub inline fn sort(self: *List) void {
         //     return Internal.sort(List, self);
         // }
@@ -1748,10 +1996,10 @@ test "List.zig" {
     list.append('o', alloc);
     list.append(' ', alloc);
     list.append_slice("World", alloc);
-    try t.expectEqualStrings("Hello World", list.slice());
+    try t.expectEqualStrings("Hello World", list.slice().to_zig_slice());
     const letter_l = list.remove(2);
     try t.expectEqual('l', letter_l);
-    try t.expectEqualStrings("Helo World", list.slice());
+    try t.expectEqualStrings("Helo World", list.slice().to_zig_slice());
     list.replace_range(3, 3, &.{ 'a', 'b', 'c' }, alloc);
-    try t.expectEqualStrings("Helabcorld", list.slice());
+    try t.expectEqualStrings("Helabcorld", list.slice().to_zig_slice());
 }
