@@ -190,6 +190,8 @@ pub fn define_color_rgba_type(comptime T: type) type {
         }
 
         pub const WHITE = T_RGBA{ .r = MAX, .g = MAX, .b = MAX, .a = MAX };
+        pub const BLACK = T_RGBA{ .r = 0, .g = 0, .b = 0, .a = MAX };
+        pub const CLEAR = T_RGBA{ .r = 0, .g = 0, .b = 0, .a = 0 };
 
         pub fn to_rgb(self: T_RGBA) T_RGB {
             return T_RGB{

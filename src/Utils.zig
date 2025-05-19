@@ -1,11 +1,26 @@
 const std = @import("std");
+const builtin = std.builtin;
+const SourceLocation = builtin.SourceLocation;
 const mem = std.mem;
 const assert = std.debug.assert;
 const build = @import("builtin");
 
 const Root = @import("./_root.zig");
-const LOG_PREFIX = Root.LOG_PREFIX;
+const ANSI = Root.ANSI;
+const LOG_PREFIX = Root.LOG_PREFIX ++ "[Utils] ";
 const BinarySearch = Root.BinarySearch;
+
+pub inline fn comptime_err(comptime src_loc: SourceLocation, comptime log: []const u8) []const u8 {
+    return ANSI.BEGIN ++ ANSI.FG_RED ++ ANSI.END ++ "[" ++ src_loc.module ++ "] [" ++ src_loc.file ++ "] " ++ src_loc.fn_name ++ "\n\t" ++ log ++ ANSI.BEGIN ++ ANSI.RESET ++ ANSI.END;
+}
+
+pub inline fn comptime_warn(comptime src_loc: SourceLocation, comptime log: []const u8) []const u8 {
+    return ANSI.BEGIN ++ ANSI.FG_YELLOW ++ ANSI.END ++ "[" ++ src_loc.module ++ "] [" ++ src_loc.file ++ "] " ++ src_loc.fn_name ++ "\n\t" ++ log ++ ANSI.BEGIN ++ ANSI.RESET ++ ANSI.END;
+}
+
+pub inline fn comptime_log(comptime src_loc: SourceLocation, comptime log: []const u8) []const u8 {
+    return "[" ++ src_loc.module ++ "] [" ++ src_loc.file ++ "] " ++ src_loc.fn_name ++ "\n\t" ++ log;
+}
 
 pub inline fn inline_swap(comptime T: type, a: *T, b: *T, temp: *T) void {
     temp.* = a.*;
@@ -472,4 +487,52 @@ pub fn memcopy(from_src: anytype, to_dst: anytype, count: usize) void {
         }
     } else @compileError("memcopy `to_dst` must be a mutable pointer type");
     @memcpy(raw_to[0..raw_count], raw_from[0..raw_count]);
+}
+
+pub fn raw_ptr_cast_const(ptr_or_slice: anytype) [*]const u8 {
+    const PTR = @TypeOf(ptr_or_slice);
+    const P_INFO = @typeInfo(PTR);
+    comptime_assert_with_reason(P_INFO == .pointer, comptime_err(@src(), "input `ptr` must be a pointer type"));
+    const PTR_INFO = P_INFO.pointer;
+    return if (PTR_INFO.size == .slice) @ptrCast(@alignCast(ptr_or_slice.ptr)) else @ptrCast(@alignCast(ptr_or_slice));
+}
+
+pub fn raw_ptr_cast(ptr_or_slice: anytype) [*]u8 {
+    const PTR = @TypeOf(ptr_or_slice);
+    const P_INFO = @typeInfo(PTR);
+    comptime_assert_with_reason(P_INFO == .pointer, comptime_err(@src(), "input `ptr` must be a pointer type"));
+    const PTR_INFO = P_INFO.pointer;
+    return if (PTR_INFO.size == .slice) @ptrCast(@alignCast(ptr_or_slice.ptr)) else @ptrCast(@alignCast(ptr_or_slice));
+}
+
+pub fn raw_slice_cast_const(slice_or_many_with_sentinel: anytype) []const u8 {
+    const SLICE = @TypeOf(slice_or_many_with_sentinel);
+    const S_INFO = @typeInfo(SLICE);
+    comptime_assert_with_reason(S_INFO == .pointer and (S_INFO.pointer.size == .slice or (S_INFO.pointer.size == .many and S_INFO.pointer.sentinel_ptr != null)), comptime_err(@src(), "input `slice` must be a slice or many-item-pointer with a sentinel"));
+    const SLICE_INFO = S_INFO.pointer;
+    const CHILD = SLICE_INFO.child;
+    const SIZE = @sizeOf(CHILD);
+    const slice_with_len: []const CHILD = if (SLICE_INFO.size == .many) build: {
+        const sent: *const CHILD = @ptrCast(@alignCast(SLICE_INFO.sentinel_ptr.?));
+        break :build make_const_slice_from_sentinel_ptr(CHILD, sent.*, slice_or_many_with_sentinel);
+    } else slice_or_many_with_sentinel;
+    const ptr: [*]const u8 = @ptrCast(@alignCast(slice_with_len.ptr));
+    const len: usize = slice_or_many_with_sentinel.len * SIZE;
+    return ptr[0..len];
+}
+
+pub fn raw_slice_cast(slice_or_many_with_sentinel: anytype) []u8 {
+    const SLICE = @TypeOf(slice_or_many_with_sentinel);
+    const S_INFO = @typeInfo(SLICE);
+    comptime_assert_with_reason(S_INFO == .pointer and (S_INFO.pointer.size == .slice or (S_INFO.pointer.size == .many and S_INFO.pointer.sentinel_ptr != null)), comptime_err(@src(), "input `slice` must be a slice or many-item-pointer with a sentinel"));
+    const SLICE_INFO = S_INFO.pointer;
+    const CHILD = SLICE_INFO.child;
+    const SIZE = @sizeOf(CHILD);
+    const slice_with_len: []CHILD = if (SLICE_INFO.size == .many) build: {
+        const sent: *const CHILD = @ptrCast(@alignCast(SLICE_INFO.sentinel_ptr.?));
+        break :build make_slice_from_sentinel_ptr(CHILD, sent.*, slice_or_many_with_sentinel);
+    } else slice_or_many_with_sentinel;
+    const ptr: [*]u8 = @ptrCast(@alignCast(slice_with_len.ptr));
+    const len: usize = slice_or_many_with_sentinel.len * SIZE;
+    return ptr[0..len];
 }
