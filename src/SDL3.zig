@@ -3,7 +3,28 @@ const build = @import("builtin");
 const init_zero = std.mem.zeroes;
 const assert = std.debug.assert;
 
-const C = @cImport({
+/// #### SDL LICENSE: https://github.com/libsdl-org/SDL/blob/main/LICENSE.txt
+///
+/// Copyright (C) 1997-2025 Sam Lantinga <slouken@libsdl.org>
+///
+/// This software is provided 'as-is', without any express or implied
+/// warranty.  In no event will the authors be held liable for any damages
+/// arising from the use of this software.
+///
+/// Permission is granted to anyone to use this software for any purpose,
+/// including commercial applications, and to alter it and redistribute it
+/// freely, subject to the following restrictions:
+///
+/// 1. The origin of this software must not be misrepresented; you must not
+///    claim that you wrote the original software. If you use this software
+///    in a product, an acknowledgment in the product documentation would be
+///    appreciated but is not required.
+/// 2. Altered source versions must be plainly marked as such, and must not be
+///    misrepresented as being the original software.
+/// 3. This notice may not be removed or altered from any source distribution.
+///
+/// #### SDL3 Zig Wrapper license: https://github.com/castholm/SDL/blob/main/LICENSE.txt
+pub const C = @cImport({
     @cDefine("SDL_DISABLE_OLD_NAMES", {});
     @cInclude("SDL3/SDL.h");
     @cInclude("SDL3/SDL_revision.h");
@@ -140,8 +161,10 @@ inline fn nonempty_const_str_or_fail_err(result: ?[*:0]const u8) Error![*:0]cons
 }
 
 pub const IRect = Root.Rect2.define_rect2_type(c_int);
+pub const URect = Root.Rect2.define_rect2_type(c_uint);
 pub const FRect = Root.Rect2.define_rect2_type(f32);
 pub const IVec = Root.Vec2.define_vec2_type(c_int);
+pub const UVec = Root.Vec2.define_vec2_type(c_uint);
 pub const IVec_16 = Root.Vec2.define_vec2_type(i16);
 pub const FVec = Root.Vec2.define_vec2_type(f32);
 pub const IColor_RGBA = Root.Color.define_color_rgba_type(u8);
@@ -563,6 +586,11 @@ pub fn init(init_flags: InitFlags) Error!void {
 pub fn set_hint(hint_name: [:0]const u8, hint_value: [:0]const u8) Error!void {
     return ok_or_fail_err(C.SDL_SetHint(hint_name.ptr, hint_value.ptr));
 }
+//TODO
+// pub extern fn SDL_SetError(fmt: [*c]const u8, ...) bool;
+// pub extern fn SDL_SetErrorV(fmt: [*c]const u8, ap: [*c]struct___va_list_tag_1) bool;
+// pub extern fn SDL_OutOfMemory() bool;
+// pub extern fn SDL_ClearError() bool;
 pub const HINT = struct {
     pub const ALLOW_ALT_TAB_WHILE_GRABBED = "SDL_ALLOW_ALT_TAB_WHILE_GRABBED";
     pub const ANDROID_ALLOW_RECREATE_ACTIVITY = "SDL_ANDROID_ALLOW_RECREATE_ACTIVITY";
@@ -1255,6 +1283,26 @@ pub const PropertiesID = extern struct {
     }
 };
 
+pub const Thread = opaque {
+    usingnamespace c_opaque_conversions(Thread, C.SDL_Thread);
+};
+
+pub const ThreadID = extern struct {
+    id: u64 = 0,
+};
+
+pub const InitState = extern struct {
+    status: AtomicInt = .{},
+    thread: ThreadID = .{},
+    _reserved: ?*anyopaque = null,
+
+    usingnamespace c_non_opaque_conversions(InitState, C.SDL_InitState);
+    //TODO
+    // pub extern fn SDL_ShouldInit(state: [*c]SDL_InitState) bool;
+    // pub extern fn SDL_ShouldQuit(state: [*c]SDL_InitState) bool;
+    // pub extern fn SDL_SetInitialized(state: [*c]SDL_InitState, initialized: bool) void;
+};
+
 pub const PropertyCleanupCallback = fn (user_data: ?*anyopaque, value_ptr: ?*anyopaque) callconv(.c) void;
 pub const EnumeratePropertiesCallback = fn (user_data: ?*anyopaque, props_id: u32, prop_name: [*:0]const u8) callconv(.c) void;
 
@@ -1266,12 +1314,7 @@ pub const PropertyType = enum(c_uint) {
     FLOAT = C.SDL_PROPERTY_TYPE_FLOAT,
     BOOLEAN = C.SDL_PROPERTY_TYPE_BOOLEAN,
 
-    inline fn to_c(self: PropertyType) c_uint {
-        return @intFromEnum(self);
-    }
-    inline fn from_c(val: c_uint) PropertyType {
-        return @enumFromInt(val);
-    }
+    usingnamespace c_enum_conversions(PropertyType, c_uint);
 };
 
 pub const InitStatus = enum(c_uint) {
@@ -1280,43 +1323,19 @@ pub const InitStatus = enum(c_uint) {
     INIT = C.SDL_INIT_STATUS_INITIALIZED,
     UNINIT_IN_PROGRESS = C.SDL_INIT_STATUS_UNINITIALIZING,
 
-    inline fn to_c(self: InitStatus) c_uint {
-        return @intFromEnum(self);
-    }
-    inline fn from_c(val: c_uint) InitStatus {
-        return @enumFromInt(val);
-    }
+    usingnamespace c_enum_conversions(InitStatus, c_uint);
 };
 
-pub const InitFlags = extern struct {
-    flags: u32 = 0,
-
-    pub fn new(flags: []const FLAG) InitFlags {
-        var all_flags: u32 = 0;
-        for (flags) |flag| {
-            all_flags |= @intFromEnum(flag);
-        }
-        return InitFlags{ .flags = all_flags };
-    }
-
-    pub fn set(self: *InitFlags, flag: FLAG) void {
-        self.flags |= @intFromEnum(flag);
-    }
-    pub fn clear(self: *InitFlags, flag: FLAG) void {
-        self.flags &= ~@intFromEnum(flag);
-    }
-
-    pub const FLAG = enum(u32) {
-        AUDIO = C.SDL_INIT_AUDIO,
-        VIDEO = C.SDL_INIT_VIDEO,
-        JOYSTICK = C.SDL_INIT_JOYSTICK,
-        HAPTIC = C.SDL_INIT_HAPTIC,
-        GAMEPAD = C.SDL_INIT_GAMEPAD,
-        EVENTS = C.SDL_INIT_EVENTS,
-        SENSOR = C.SDL_INIT_SENSOR,
-        CAMERA = C.SDL_INIT_CAMERA,
-    };
-};
+pub const InitFlags = Flags(enum(u32) {
+    AUDIO = C.SDL_INIT_AUDIO,
+    VIDEO = C.SDL_INIT_VIDEO,
+    JOYSTICK = C.SDL_INIT_JOYSTICK,
+    HAPTIC = C.SDL_INIT_HAPTIC,
+    GAMEPAD = C.SDL_INIT_GAMEPAD,
+    EVENTS = C.SDL_INIT_EVENTS,
+    SENSOR = C.SDL_INIT_SENSOR,
+    CAMERA = C.SDL_INIT_CAMERA,
+}, null);
 
 pub const AudioFormat = enum(c_uint) {
     UNKNOWN = C.SDL_AUDIO_UNKNOWN,
@@ -1329,12 +1348,7 @@ pub const AudioFormat = enum(c_uint) {
     F32BE = C.SDL_AUDIO_F32LE,
     F32LE = C.SDL_AUDIO_F32BE,
 
-    inline fn to_c(self: AudioFormat) c_uint {
-        return @intFromEnum(self);
-    }
-    inline fn from_c(val: c_uint) AudioFormat {
-        return @enumFromInt(val);
-    }
+    usingnamespace c_enum_conversions(AudioFormat, c_uint);
 
     pub fn bit_size(self: AudioFormat) c_uint {
         return @intCast(C.SDL_AUDIO_BITSIZE(self.to_c()));
@@ -1371,6 +1385,141 @@ pub const FlipMode = enum(c_uint) {
     // HORIZ_VERT = C.SDL_FLIP_HORIZONTAL | C.SDL_FLIP_VERTICAL,
 
     usingnamespace c_enum_conversions(FlipMode, C.SDL_FlipMode);
+};
+
+pub const Sensor = opaque {
+    usingnamespace c_opaque_conversions(Sensor, C.SDL_Sensor);
+
+    // pub extern fn SDL_GetSensorProperties(sensor: ?*SDL_Sensor) SDL_PropertiesID;
+    // pub extern fn SDL_GetSensorName(sensor: ?*SDL_Sensor) [*c]const u8;
+    // pub extern fn SDL_GetSensorType(sensor: ?*SDL_Sensor) SDL_SensorType;
+    // pub extern fn SDL_GetSensorNonPortableType(sensor: ?*SDL_Sensor) c_int;
+    // pub extern fn SDL_GetSensorID(sensor: ?*SDL_Sensor) SDL_SensorID;
+    // pub extern fn SDL_GetSensorData(sensor: ?*SDL_Sensor, data: [*c]f32, num_values: c_int) bool;
+    // pub extern fn SDL_CloseSensor(sensor: ?*SDL_Sensor) void;
+    // pub extern fn SDL_UpdateSensors() void;
+};
+
+pub const HapticID = extern struct {
+    id: u32,
+    //TODO
+    // pub extern fn SDL_GetHaptics(count: [*c]c_int) [*c]SDL_HapticID;
+    // pub extern fn SDL_GetHapticNameForID(instance_id: SDL_HapticID) [*c]const u8;
+    // pub extern fn SDL_OpenHaptic(instance_id: SDL_HapticID) ?*SDL_Haptic;
+    // pub extern fn SDL_GetHapticFromID(instance_id: SDL_HapticID) ?*SDL_Haptic;
+};
+
+pub const Haptic = opaque {
+    usingnamespace c_opaque_conversions(Haptic, C.SDL_Haptic);
+    //TODO
+    // pub extern fn SDL_GetHapticID(haptic: ?*SDL_Haptic) SDL_HapticID;
+    // pub extern fn SDL_GetHapticName(haptic: ?*SDL_Haptic) [*c]const u8;
+    // pub extern fn SDL_IsMouseHaptic() bool;
+    // pub extern fn SDL_OpenHapticFromMouse() ?*SDL_Haptic;
+    // pub extern fn SDL_CloseHaptic(haptic: ?*SDL_Haptic) void;
+    // pub extern fn SDL_GetMaxHapticEffects(haptic: ?*SDL_Haptic) c_int;
+    // pub extern fn SDL_GetMaxHapticEffectsPlaying(haptic: ?*SDL_Haptic) c_int;
+    // pub extern fn SDL_GetHapticFeatures(haptic: ?*SDL_Haptic) Uint32;
+    // pub extern fn SDL_GetNumHapticAxes(haptic: ?*SDL_Haptic) c_int;
+    // pub extern fn SDL_HapticEffectSupported(haptic: ?*SDL_Haptic, effect: [*c]const SDL_HapticEffect) bool;
+    // pub extern fn SDL_CreateHapticEffect(haptic: ?*SDL_Haptic, effect: [*c]const SDL_HapticEffect) c_int;
+    // pub extern fn SDL_UpdateHapticEffect(haptic: ?*SDL_Haptic, effect: c_int, data: [*c]const SDL_HapticEffect) bool;
+    // pub extern fn SDL_RunHapticEffect(haptic: ?*SDL_Haptic, effect: c_int, iterations: Uint32) bool;
+    // pub extern fn SDL_StopHapticEffect(haptic: ?*SDL_Haptic, effect: c_int) bool;
+    // pub extern fn SDL_DestroyHapticEffect(haptic: ?*SDL_Haptic, effect: c_int) void;
+    // pub extern fn SDL_GetHapticEffectStatus(haptic: ?*SDL_Haptic, effect: c_int) bool;
+    // pub extern fn SDL_SetHapticGain(haptic: ?*SDL_Haptic, gain: c_int) bool;
+    // pub extern fn SDL_SetHapticAutocenter(haptic: ?*SDL_Haptic, autocenter: c_int) bool;
+    // pub extern fn SDL_PauseHaptic(haptic: ?*SDL_Haptic) bool;
+    // pub extern fn SDL_ResumeHaptic(haptic: ?*SDL_Haptic) bool;
+    // pub extern fn SDL_StopHapticEffects(haptic: ?*SDL_Haptic) bool;
+    // pub extern fn SDL_HapticRumbleSupported(haptic: ?*SDL_Haptic) bool;
+    // pub extern fn SDL_InitHapticRumble(haptic: ?*SDL_Haptic) bool;
+    // pub extern fn SDL_PlayHapticRumble(haptic: ?*SDL_Haptic, strength: f32, length: Uint32) bool;
+    // pub extern fn SDL_StopHapticRumble(haptic: ?*SDL_Haptic) bool;
+};
+
+pub const OpenGL_API = struct {
+    pub const Context = opaque {
+        usingnamespace c_opaque_conversions(Context, C.struct_SDL_GLContextState);
+    };
+
+    pub const Attr = enum(c_uint) {
+        RED_SIZE = C.SDL_GL_RED_SIZE,
+        GREEN_SIZE = C.SDL_GL_GREEN_SIZE,
+        BLUE_SIZE = C.SDL_GL_BLUE_SIZE,
+        ALPHA_SIZE = C.SDL_GL_ALPHA_SIZE,
+        BUFFER_SIZE = C.SDL_GL_BUFFER_SIZE,
+        DOUBLEBUFFER = C.SDL_GL_DOUBLEBUFFER,
+        DEPTH_SIZE = C.SDL_GL_DEPTH_SIZE,
+        STENCIL_SIZE = C.SDL_GL_STENCIL_SIZE,
+        ACCUM_RED_SIZE = C.SDL_GL_ACCUM_RED_SIZE,
+        ACCUM_GREEN_SIZE = C.SDL_GL_ACCUM_GREEN_SIZE,
+        ACCUM_BLUE_SIZE = C.SDL_GL_ACCUM_BLUE_SIZE,
+        ACCUM_ALPHA_SIZE = C.SDL_GL_ACCUM_ALPHA_SIZE,
+        STEREO = C.SDL_GL_STEREO,
+        MULTISAMPLE_BUFFERS = C.SDL_GL_MULTISAMPLEBUFFERS,
+        MULTISAMPLE_SAMPLES = C.SDL_GL_MULTISAMPLESAMPLES,
+        ACCELERATED_VISUAL = C.SDL_GL_ACCELERATED_VISUAL,
+        RETAINED_BACKING = C.SDL_GL_RETAINED_BACKING,
+        CONTEXT_MAJOR_VERSION = C.SDL_GL_CONTEXT_MAJOR_VERSION,
+        CONTEXT_MINOR_VERSION = C.SDL_GL_CONTEXT_MINOR_VERSION,
+        CONTEXT_FLAGS = C.SDL_GL_CONTEXT_FLAGS,
+        CONTEXT_PROFILE_MASK = C.SDL_GL_CONTEXT_PROFILE_MASK,
+        SHARE_WITH_CURRENT_CONTEXT = C.SDL_GL_SHARE_WITH_CURRENT_CONTEXT,
+        FRAMEBUFFER_SRGB_CAPABLE = C.SDL_GL_FRAMEBUFFER_SRGB_CAPABLE,
+        CONTEXT_RELEASE_BEHAVIOR = C.SDL_GL_CONTEXT_RELEASE_BEHAVIOR,
+        CONTEXT_RESET_NOTIFICATION = C.SDL_GL_CONTEXT_RESET_NOTIFICATION,
+        CONTEXT_NO_ERROR = C.SDL_GL_CONTEXT_NO_ERROR,
+        FLOAT_BUFFERS = C.SDL_GL_FLOATBUFFERS,
+        EGL_PLATFORM = C.SDL_GL_EGL_PLATFORM,
+
+        usingnamespace c_enum_conversions(Attr, c_uint);
+    };
+
+    pub const Profile = struct {
+        raw: u32,
+    };
+
+    pub const ContextFlag = struct {
+        raw: u32,
+    };
+
+    pub const ContextReleaseFlag = struct {
+        raw: u32,
+    };
+
+    pub const ContextResetNotification = struct {
+        raw: u32,
+    };
+
+    pub const EGL_Display = opaque {};
+    pub const EGL_Config = opaque {};
+    pub const EGL_Surface = opaque {};
+    pub const EGL_Attr = struct {
+        raw: isize,
+    };
+    //TODO
+    // pub extern fn SDL_GL_LoadLibrary(path: [*c]const u8) bool;
+    // pub extern fn SDL_GL_GetProcAddress(proc: [*c]const u8) SDL_FunctionPointer;
+    // pub extern fn SDL_EGL_GetProcAddress(proc: [*c]const u8) SDL_FunctionPointer;
+    // pub extern fn SDL_GL_UnloadLibrary() void;
+    // pub extern fn SDL_GL_ExtensionSupported(extension: [*c]const u8) bool;
+    // pub extern fn SDL_GL_ResetAttributes() void;
+    // pub extern fn SDL_GL_SetAttribute(attr: SDL_GLAttr, value: c_int) bool;
+    // pub extern fn SDL_GL_GetAttribute(attr: SDL_GLAttr, value: [*c]c_int) bool;
+    // pub extern fn SDL_GL_CreateContext(window: ?*SDL_Window) SDL_GLContext;
+    // pub extern fn SDL_GL_MakeCurrent(window: ?*SDL_Window, context: SDL_GLContext) bool;
+    // pub extern fn SDL_GL_GetCurrentWindow() ?*SDL_Window;
+    // pub extern fn SDL_GL_GetCurrentContext() SDL_GLContext;
+    // pub extern fn SDL_EGL_GetCurrentDisplay() SDL_EGLDisplay;
+    // pub extern fn SDL_EGL_GetCurrentConfig() SDL_EGLConfig;
+    // pub extern fn SDL_EGL_GetWindowSurface(window: ?*SDL_Window) SDL_EGLSurface;
+    // pub extern fn SDL_EGL_SetAttributeCallbacks(platformAttribCallback: SDL_EGLAttribArrayCallback, surfaceAttribCallback: SDL_EGLIntArrayCallback, contextAttribCallback: SDL_EGLIntArrayCallback, userdata: ?*anyopaque) void;
+    // pub extern fn SDL_GL_SetSwapInterval(interval: c_int) bool;
+    // pub extern fn SDL_GL_GetSwapInterval(interval: [*c]c_int) bool;
+    // pub extern fn SDL_GL_SwapWindow(window: ?*SDL_Window) bool;
+    // pub extern fn SDL_GL_DestroyContext(context: SDL_GLContext) bool;
 };
 
 pub const RenderAPI = struct {
@@ -2236,30 +2385,6 @@ pub const ColorRange = enum(c_uint) {
     }
 };
 
-pub const ColorPrimaries = enum(c_uint) {
-    UNKNOWN = C.SDL_COLOR_PRIMARIES_UNKNOWN,
-    BT709 = C.SDL_COLOR_PRIMARIES_BT709,
-    UNSPECIFIED = C.SDL_COLOR_PRIMARIES_UNSPECIFIED,
-    BT470M = C.SDL_COLOR_PRIMARIES_BT470M,
-    BT470BG = C.SDL_COLOR_PRIMARIES_BT470BG,
-    BT601 = C.SDL_COLOR_PRIMARIES_BT601,
-    SMPTE240 = C.SDL_COLOR_PRIMARIES_SMPTE240,
-    GENERIC_FILM = C.SDL_COLOR_PRIMARIES_GENERIC_FILM,
-    BT2020 = C.SDL_COLOR_PRIMARIES_BT2020,
-    XYZ = C.SDL_COLOR_PRIMARIES_XYZ,
-    SMPTE431 = C.SDL_COLOR_PRIMARIES_SMPTE431,
-    SMPTE432 = C.SDL_COLOR_PRIMARIES_SMPTE432,
-    EBU3213 = C.SDL_COLOR_PRIMARIES_EBU3213,
-    CUSTOM = C.SDL_COLOR_PRIMARIES_CUSTOM,
-
-    inline fn to_c(self: ColorPrimaries) c_uint {
-        return @intFromEnum(self);
-    }
-    inline fn from_c(val: c_uint) ColorPrimaries {
-        return @enumFromInt(val);
-    }
-};
-
 pub const Clipboard = struct {
     pub fn get_text() Error!String {
         return String{ .ptr = try nonempty_str_or_null_err(C.SDL_GetClipboardText()) };
@@ -2466,12 +2591,12 @@ pub const PixelFormat = enum(c_uint) {
     BGRX_32 = C.SDL_PIXELFORMAT_BGRX32,
     XBGR_32 = C.SDL_PIXELFORMAT_XBGR32,
 
-    inline fn to_c(self: PixelFormat) c_uint {
-        return @intFromEnum(self);
-    }
-    inline fn from_c(val: c_uint) PixelFormat {
-        return @enumFromInt(val);
-    }
+    usingnamespace c_enum_conversions(PixelFormat, c_uint);
+    //TODO
+    // pub extern fn SDL_GetPixelFormatName(format: SDL_PixelFormat) [*c]const u8;
+    // pub extern fn SDL_GetMasksForPixelFormat(format: SDL_PixelFormat, bpp: [*c]c_int, Rmask: [*c]Uint32, Gmask: [*c]Uint32, Bmask: [*c]Uint32, Amask: [*c]Uint32) bool;
+    // pub extern fn SDL_GetPixelFormatForMasks(bpp: c_int, Rmask: Uint32, Gmask: Uint32, Bmask: Uint32, Amask: Uint32) SDL_PixelFormat;
+    // pub extern fn SDL_GetPixelFormatDetails(format: SDL_PixelFormat) [*c]const SDL_PixelFormatDetails;
 };
 
 pub const DisplayMode = extern struct {
@@ -2490,30 +2615,36 @@ pub const DisplayMode = extern struct {
     // }
 };
 
+pub const SystemTheme = enum(c_uint) {
+    UNKNOWN = C.SDL_SYSTEM_THEME_UNKNOWN,
+    LIGHT = C.SDL_SYSTEM_THEME_LIGHT,
+    DARK = C.SDL_SYSTEM_THEME_DARK,
+
+    usingnamespace c_enum_conversions(SystemTheme, C.SDL_SystemTheme);
+};
+
 pub const Window = opaque {
-    inline fn to_c(self: *Window) *C.SDL_Window {
-        return @ptrCast(@alignCast(self));
-    }
+    usingnamespace c_opaque_conversions(Window, C.SDL_Window);
     pub fn try_get_display_id(self: *Window) Error!DisplayID {
-        return DisplayID{ .id = try nonzero_or_null_err(C.SDL_GetDisplayForWindow(self.to_c())) };
+        return DisplayID{ .id = try nonzero_or_null_err(C.SDL_GetDisplayForWindow(self.to_c_ptr())) };
     }
     pub fn get_pixel_density(self: *Window) f32 {
-        return C.SDL_GetWindowPixelDensity(self.to_c());
+        return C.SDL_GetWindowPixelDensity(self.to_c_ptr());
     }
     pub fn get_display_scale(self: *Window) f32 {
-        return C.SDL_GetWindowDisplayScale(self.to_c());
+        return C.SDL_GetWindowDisplayScale(self.to_c_ptr());
     }
     pub fn get_fullscreen_display_mode(self: *Window) FullscreenMode {
         return FullscreenMode{ .mode = C.SDL_GetWindowFullscreenMode(self) };
     }
     pub fn set_fullscreen_display_mode(self: *Window, mode: FullscreenMode) Error!void {
-        return ok_or_fail_err(C.SDL_SetWindowFullscreenMode(self.to_c(), mode.mode));
+        return ok_or_fail_err(C.SDL_SetWindowFullscreenMode(self.to_c_ptr(), mode.mode));
     }
     pub fn get_icc_profile(self: *Window, size: usize) Error!*WindowICCProfile {
-        return ptr_cast_or_null_err(*WindowICCProfile, C.SDL_GetWindowICCProfile(self.to_c(), &size));
+        return ptr_cast_or_null_err(*WindowICCProfile, C.SDL_GetWindowICCProfile(self.to_c_ptr(), &size));
     }
     pub fn get_pixel_format(self: *Window) PixelFormat {
-        return @enumFromInt(C.SDL_GetWindowPixelFormat(self.to_c()));
+        return @enumFromInt(C.SDL_GetWindowPixelFormat(self.to_c_ptr()));
     }
     pub fn get_all_windows() Error!WindowsList {
         var len: c_int = 0;
@@ -2523,224 +2654,224 @@ pub const Window = opaque {
         return ptr_cast_or_fail_err(*Window, C.SDL_CreateWindow(options.title.ptr, options.size.x, options.size.y, options.flags.flags));
     }
     pub fn create_popup_window(parent: *Window, options: CreatePopupWindowOptions) Error!*Window {
-        return ptr_cast_or_fail_err(*Window, C.SDL_CreatePopupWindow(parent.to_c(), options.x_offset, options.y_offset, options.width, options.height, options.flags));
+        return ptr_cast_or_fail_err(*Window, C.SDL_CreatePopupWindow(parent.to_c_ptr(), options.x_offset, options.y_offset, options.width, options.height, options.flags));
     }
     pub fn create_window_with_properties(properties: PropertiesID) Error!*Window {
         return ptr_cast_or_fail_err(*Window, C.SDL_CreateWindowWithProperties(properties.id));
     }
     pub fn get_id(self: *Window) Error!WindowID {
-        return WindowID{ .id = try nonzero_or_null_err(C.SDL_GetWindowID(self.to_c())) };
+        return WindowID{ .id = try nonzero_or_null_err(C.SDL_GetWindowID(self.to_c_ptr())) };
     }
     pub fn get_parent_window(self: *Window) Error!*Window {
-        return ptr_cast_or_null_err(*Window, C.SDL_GetWindowParent(self.to_c()));
+        return ptr_cast_or_null_err(*Window, C.SDL_GetWindowParent(self.to_c_ptr()));
     }
     pub fn get_properties(self: *Window) Error!PropertiesID {
-        return PropertiesID{ .id = try nonzero_or_null_err(C.SDL_GetWindowProperties(self.to_c())) };
+        return PropertiesID{ .id = try nonzero_or_null_err(C.SDL_GetWindowProperties(self.to_c_ptr())) };
     }
     pub fn get_flags(self: *Window) WindowFlags {
-        return WindowFlags{ .flags = C.SDL_GetWindowFlags(self.to_c()) };
+        return WindowFlags{ .flags = C.SDL_GetWindowFlags(self.to_c_ptr()) };
     }
     pub fn set_title(self: *Window, title: [:0]const u8) Error!void {
-        try ok_or_fail_err(C.SDL_SetWindowTitle(self.to_c(), title.ptr));
+        try ok_or_fail_err(C.SDL_SetWindowTitle(self.to_c_ptr(), title.ptr));
     }
     pub fn get_title(self: *Window) [*:0]const u8 {
-        return @ptrCast(@alignCast(C.SDL_GetWindowTitle(self.to_c())));
+        return @ptrCast(@alignCast(C.SDL_GetWindowTitle(self.to_c_ptr())));
     }
     pub fn set_window_icon(self: *Window, icon: *RenderAPI.Surface) Error!void {
-        try ok_or_fail_err(C.SDL_SetWindowIcon(self.to_c(), @ptrCast(@alignCast(icon))));
+        try ok_or_fail_err(C.SDL_SetWindowIcon(self.to_c_ptr(), @ptrCast(@alignCast(icon))));
     }
     pub fn set_window_position(self: *Window, pos: IVec) Error!void {
-        try ok_or_fail_err(C.SDL_SetWindowPosition(self.to_c(), pos.x, pos.y));
+        try ok_or_fail_err(C.SDL_SetWindowPosition(self.to_c_ptr(), pos.x, pos.y));
     }
     pub fn get_window_position(self: *Window) Error!IVec {
         var point = IVec{};
-        try ok_or_null_err(C.SDL_GetWindowPosition(self.to_c(), &point.x, &point.y));
+        try ok_or_null_err(C.SDL_GetWindowPosition(self.to_c_ptr(), &point.x, &point.y));
         return point;
     }
     pub fn set_size(self: *Window, size: IVec) Error!void {
-        try ok_or_fail_err(C.SDL_SetWindowSize(self.to_c(), size.x, size.y));
+        try ok_or_fail_err(C.SDL_SetWindowSize(self.to_c_ptr(), size.x, size.y));
     }
     pub fn get_size(self: *Window) Error!IVec {
         var size = IVec.ZERO;
-        try ok_or_null_err(C.SDL_GetWindowSize(self.to_c(), &size.x, &size.y));
+        try ok_or_null_err(C.SDL_GetWindowSize(self.to_c_ptr(), &size.x, &size.y));
         return size;
     }
     pub fn get_safe_area(self: *Window) Error!IRect {
         var rect = IRect{};
-        try ok_or_null_err(C.SDL_GetWindowSafeArea(self.to_c(), @ptrCast(@alignCast(&rect))));
+        try ok_or_null_err(C.SDL_GetWindowSafeArea(self.to_c_ptr(), @ptrCast(@alignCast(&rect))));
         return rect;
     }
     pub fn set_aspect_ratio(self: *Window, aspect_range: AspectRange) Error!void {
-        try ok_or_fail_err(C.SDL_SetWindowAspectRatio(self.to_c(), aspect_range.min, aspect_range.max));
+        try ok_or_fail_err(C.SDL_SetWindowAspectRatio(self.to_c_ptr(), aspect_range.min, aspect_range.max));
     }
     pub fn get_aspect_ratio(self: *Window) Error!AspectRange {
         var ratio = AspectRange{};
-        try ok_or_null_err(C.SDL_SetWindowAspectRatio(self.to_c(), &ratio.min, &ratio.max));
+        try ok_or_null_err(C.SDL_SetWindowAspectRatio(self.to_c_ptr(), &ratio.min, &ratio.max));
         return ratio;
     }
     pub fn get_border_sizes(self: *Window) Error!BorderSizes {
         var sizes = BorderSizes{};
-        try ok_or_null_err(C.SDL_GetWindowBordersSize(self.to_c(), &sizes.top, &sizes.left, &sizes.bottom, &sizes.right));
+        try ok_or_null_err(C.SDL_GetWindowBordersSize(self.to_c_ptr(), &sizes.top, &sizes.left, &sizes.bottom, &sizes.right));
         return sizes;
     }
     pub fn get_size_in_pixels(self: *Window) Error!IVec {
         var size = IVec{};
-        try ok_or_null_err(C.SDL_GetWindowSizeInPixels(self.to_c(), &size.x, &size.y));
+        try ok_or_null_err(C.SDL_GetWindowSizeInPixels(self.to_c_ptr(), &size.x, &size.y));
         return size;
     }
     pub fn set_minimum_size(self: *Window, size: IVec) Error!void {
-        try ok_or_fail_err(C.SDL_SetWindowMinimumSize(self.to_c(), size.x, size.y));
+        try ok_or_fail_err(C.SDL_SetWindowMinimumSize(self.to_c_ptr(), size.x, size.y));
     }
     pub fn get_minimum_size(self: *Window) Error!IVec {
         var size = IVec{};
-        try ok_or_null_err(C.SDL_GetWindowMinimumSize(self.to_c(), &size.x, &size.y));
+        try ok_or_null_err(C.SDL_GetWindowMinimumSize(self.to_c_ptr(), &size.x, &size.y));
         return size;
     }
     pub fn set_maximum_size(self: *Window, size: IVec) Error!void {
-        try ok_or_fail_err(C.SDL_SetWindowMaximumSize(self.to_c(), size.x, size.y));
+        try ok_or_fail_err(C.SDL_SetWindowMaximumSize(self.to_c_ptr(), size.x, size.y));
     }
     pub fn get_maximum_size(self: *Window) Error!IVec {
         var size = IVec{};
-        try ok_or_null_err(C.SDL_GetWindowMaximumSize(self.to_c(), &size.x, &size.y));
+        try ok_or_null_err(C.SDL_GetWindowMaximumSize(self.to_c_ptr(), &size.x, &size.y));
         return size;
     }
     pub fn set_bordered(self: *Window, state: bool) Error!void {
-        try ok_or_fail_err(C.SDL_SetWindowBordered(self.to_c(), state));
+        try ok_or_fail_err(C.SDL_SetWindowBordered(self.to_c_ptr(), state));
     }
     pub fn set_resizable(self: *Window, state: bool) Error!void {
-        try ok_or_fail_err(C.SDL_SetWindowResizable(self.to_c(), state));
+        try ok_or_fail_err(C.SDL_SetWindowResizable(self.to_c_ptr(), state));
     }
     pub fn set_always_on_top(self: *Window, state: bool) Error!void {
-        try ok_or_fail_err(C.SDL_SetWindowAlwaysOnTop(self.to_c(), state));
+        try ok_or_fail_err(C.SDL_SetWindowAlwaysOnTop(self.to_c_ptr(), state));
     }
     pub fn show(self: *Window) Error!void {
-        try ok_or_fail_err(C.SDL_ShowWindow(self.to_c()));
+        try ok_or_fail_err(C.SDL_ShowWindow(self.to_c_ptr()));
     }
     pub fn hide(self: *Window) Error!void {
-        try ok_or_fail_err(C.SDL_HideWindow(self.to_c()));
+        try ok_or_fail_err(C.SDL_HideWindow(self.to_c_ptr()));
     }
     pub fn raise(self: *Window) Error!void {
-        try ok_or_fail_err(C.SDL_RaiseWindow(self.to_c()));
+        try ok_or_fail_err(C.SDL_RaiseWindow(self.to_c_ptr()));
     }
     pub fn maximize(self: *Window) Error!void {
-        try ok_or_fail_err(C.SDL_MaximizeWindow(self.to_c()));
+        try ok_or_fail_err(C.SDL_MaximizeWindow(self.to_c_ptr()));
     }
     pub fn minimize(self: *Window) Error!void {
-        try ok_or_fail_err(C.SDL_MinimizeWindow(self.to_c()));
+        try ok_or_fail_err(C.SDL_MinimizeWindow(self.to_c_ptr()));
     }
     pub fn restore(self: *Window) Error!void {
-        try ok_or_fail_err(C.SDL_RestoreWindow(self.to_c()));
+        try ok_or_fail_err(C.SDL_RestoreWindow(self.to_c_ptr()));
     }
     pub fn set_fullscreen(self: *Window, state: bool) Error!void {
-        try ok_or_fail_err(C.SDL_SetWindowFullscreen(self.to_c(), state));
+        try ok_or_fail_err(C.SDL_SetWindowFullscreen(self.to_c_ptr(), state));
     }
     pub fn sync(self: *Window) Error!void {
-        try ok_or_fail_err(C.SDL_SyncWindow(self.to_c()));
+        try ok_or_fail_err(C.SDL_SyncWindow(self.to_c_ptr()));
     }
     pub fn has_surface(self: *Window) bool {
-        return C.SDL_WindowHasSurface(self.to_c());
+        return C.SDL_WindowHasSurface(self.to_c_ptr());
     }
     pub fn get_surface(self: *Window) Error!*RenderAPI.Surface {
-        return ptr_cast_or_null_err(*RenderAPI.Surface, C.SDL_GetWindowSurface(self.to_c()));
+        return ptr_cast_or_null_err(*RenderAPI.Surface, C.SDL_GetWindowSurface(self.to_c_ptr()));
     }
     pub fn set_surface_vsync(self: *Window, vsync: VSync) Error!void {
-        try ok_or_fail_err(C.SDL_SetWindowSurfaceVSync(self.to_c(), vsync.to_c()));
+        try ok_or_fail_err(C.SDL_SetWindowSurfaceVSync(self.to_c_ptr(), vsync.to_c()));
     }
     pub fn get_surface_vsync(self: *Window) Error!VSync {
         var int: c_int = 0;
-        try ok_or_fail_err(C.SDL_GetWindowSurfaceVSync(self.to_c(), &int));
+        try ok_or_fail_err(C.SDL_GetWindowSurfaceVSync(self.to_c_ptr(), &int));
         return VSync.from_c(int);
     }
     pub fn update_surface(self: *Window) Error!void {
-        try ok_or_fail_err(C.SDL_UpdateWindowSurface(self.to_c()));
+        try ok_or_fail_err(C.SDL_UpdateWindowSurface(self.to_c_ptr()));
     }
     pub fn update_surface_rects(self: *Window, rects: []const IRect) Error!void {
-        try ok_or_fail_err(C.SDL_UpdateWindowSurfaceRects(self.to_c(), @ptrCast(@alignCast(rects.ptr)), @intCast(rects.len)));
+        try ok_or_fail_err(C.SDL_UpdateWindowSurfaceRects(self.to_c_ptr(), @ptrCast(@alignCast(rects.ptr)), @intCast(rects.len)));
     }
     pub fn destroy_surface(self: *Window) Error!void {
-        try ok_or_fail_err(C.SDL_DestroyWindowSurface(self.to_c()));
+        try ok_or_fail_err(C.SDL_DestroyWindowSurface(self.to_c_ptr()));
     }
     pub fn set_keyboard_grab(self: *Window, state: bool) Error!void {
-        try ok_or_fail_err(C.SDL_SetWindowKeyboardGrab(self.to_c(), state));
+        try ok_or_fail_err(C.SDL_SetWindowKeyboardGrab(self.to_c_ptr(), state));
     }
     pub fn set_mouse_grab(self: *Window, state: bool) Error!void {
-        try ok_or_fail_err(C.SDL_SetWindowMouseGrab(self.to_c(), state));
+        try ok_or_fail_err(C.SDL_SetWindowMouseGrab(self.to_c_ptr(), state));
     }
     pub fn is_keyboard_grabbed(self: *Window) bool {
-        return C.SDL_GetWindowKeyboardGrab(self.to_c());
+        return C.SDL_GetWindowKeyboardGrab(self.to_c_ptr());
     }
     pub fn is_mouse_grabbed(self: *Window) bool {
-        return C.SDL_GetWindowMouseGrab(self.to_c());
+        return C.SDL_GetWindowMouseGrab(self.to_c_ptr());
     }
     pub fn get_window_that_has_grab() Error!*Window {
         return ptr_cast_or_null_err(*Window, C.SDL_GetGrabbedWindow());
     }
     pub fn set_mouse_confine_rect(self: *Window, rect: IRect) Error!void {
-        try ok_or_fail_err(C.SDL_SetWindowMouseRect(self.to_c(), @ptrCast(@alignCast(&rect))));
+        try ok_or_fail_err(C.SDL_SetWindowMouseRect(self.to_c_ptr(), @ptrCast(@alignCast(&rect))));
     }
     pub fn clear_mouse_confine_rect(self: *Window) Error!void {
-        try ok_or_fail_err(C.SDL_SetWindowMouseRect(self.to_c(), null));
+        try ok_or_fail_err(C.SDL_SetWindowMouseRect(self.to_c_ptr(), null));
     }
     pub fn get_mouse_confine_rect(self: *Window) Error!IRect {
-        const rect_ptr = try ptr_cast_or_null_err(*IRect, C.SDL_GetWindowMouseRect(self.to_c()));
+        const rect_ptr = try ptr_cast_or_null_err(*IRect, C.SDL_GetWindowMouseRect(self.to_c_ptr()));
         return rect_ptr.*;
     }
     pub fn set_opacity(self: *Window, opacity: f32) Error!void {
-        try ok_or_fail_err(C.SDL_SetWindowOpacity(self.to_c(), opacity));
+        try ok_or_fail_err(C.SDL_SetWindowOpacity(self.to_c_ptr(), opacity));
     }
     pub fn get_opacity(self: *Window) f32 {
-        return C.SDL_GetWindowOpacity(self.to_c());
+        return C.SDL_GetWindowOpacity(self.to_c_ptr());
     }
     pub fn set_parent(self: *Window, parent: *Window) Error!void {
-        try ok_or_fail_err(C.SDL_SetWindowParent(self.to_c(), parent.to_c()));
+        try ok_or_fail_err(C.SDL_SetWindowParent(self.to_c_ptr(), parent.to_c_ptr()));
     }
     pub fn clear_parent(self: *Window) Error!void {
-        try ok_or_fail_err(C.SDL_SetWindowParent(self.to_c(), null));
+        try ok_or_fail_err(C.SDL_SetWindowParent(self.to_c_ptr(), null));
     }
     pub fn set_modal(self: *Window, state: bool) Error!void {
-        try ok_or_fail_err(C.SDL_SetWindowModal(self.to_c(), state));
+        try ok_or_fail_err(C.SDL_SetWindowModal(self.to_c_ptr(), state));
     }
     pub fn set_focusable(self: *Window, state: bool) Error!void {
-        try ok_or_fail_err(C.SDL_SetWindowFocusable(self.to_c(), state));
+        try ok_or_fail_err(C.SDL_SetWindowFocusable(self.to_c_ptr(), state));
     }
     pub fn show_system_menu(self: *Window, pos: IVec) Error!void {
-        try ok_or_fail_err(C.SDL_ShowWindowSystemMenu(self.to_c(), pos.x, pos.y));
+        try ok_or_fail_err(C.SDL_ShowWindowSystemMenu(self.to_c_ptr(), pos.x, pos.y));
     }
     pub fn set_custom_hittest(self: *Window, hittest_fn: *const WindowHittestFn, data: ?*anyopaque) Error!void {
-        try ok_or_fail_err(C.SDL_SetWindowHitTest(self.to_c(), @ptrCast(@alignCast(hittest_fn)), data));
+        try ok_or_fail_err(C.SDL_SetWindowHitTest(self.to_c_ptr(), @ptrCast(@alignCast(hittest_fn)), data));
     }
     pub fn clear_custom_hittest(self: *Window) Error!void {
-        try ok_or_fail_err(C.SDL_SetWindowHitTest(self.to_c(), null, null));
+        try ok_or_fail_err(C.SDL_SetWindowHitTest(self.to_c_ptr(), null, null));
     }
     pub fn set_window_shape(self: *Window, shape: *RenderAPI.Surface) Error!void {
-        try ok_or_fail_err(C.SDL_SetWindowShape(self.to_c(), @ptrCast(@alignCast(shape))));
+        try ok_or_fail_err(C.SDL_SetWindowShape(self.to_c_ptr(), @ptrCast(@alignCast(shape))));
     }
     pub fn clear_window_shape(self: *Window) Error!void {
-        try ok_or_fail_err(C.SDL_SetWindowShape(self.to_c(), null));
+        try ok_or_fail_err(C.SDL_SetWindowShape(self.to_c_ptr(), null));
     }
     pub fn flash_window(self: *Window, mode: FlashMode) Error!void {
-        try ok_or_fail_err(C.SDL_FlashWindow(self.to_c(), mode.to_c()));
+        try ok_or_fail_err(C.SDL_FlashWindow(self.to_c_ptr(), mode.to_c()));
     }
     pub fn destroy(self: *Window) void {
-        C.SDL_DestroyWindow(self.to_c());
+        C.SDL_DestroyWindow(self.to_c_ptr());
     }
     pub fn create_renderer(self: *Window) Error!*RenderAPI.Renderer {
-        return ptr_cast_or_fail_err(*RenderAPI.Renderer, C.SDL_CreateRenderer(self.to_c(), null));
+        return ptr_cast_or_fail_err(*RenderAPI.Renderer, C.SDL_CreateRenderer(self.to_c_ptr(), null));
     }
     pub fn create_renderer_with_name(self: *Window, name: [*:0]const u8) Error!*RenderAPI.Renderer {
-        return ptr_cast_or_fail_err(*RenderAPI.Renderer, C.SDL_CreateRenderer(self.to_c(), name));
+        return ptr_cast_or_fail_err(*RenderAPI.Renderer, C.SDL_CreateRenderer(self.to_c_ptr(), name));
     }
     pub fn get_renderer(self: *Window) Error!*RenderAPI.Renderer {
-        return ptr_cast_or_null_err(*RenderAPI.Renderer, C.SDL_GetRenderer(self.to_c()));
+        return ptr_cast_or_null_err(*RenderAPI.Renderer, C.SDL_GetRenderer(self.to_c_ptr()));
     }
     pub fn set_mouse_mode_relative(self: *Window, state: bool) Error!void {
-        return ok_or_fail_err(C.SDL_SetWindowRelativeMouseMode(self.to_c(), state));
+        return ok_or_fail_err(C.SDL_SetWindowRelativeMouseMode(self.to_c_ptr(), state));
     }
     pub fn is_mouse_mode_relative(self: *Window) bool {
-        return C.SDL_GetWindowRelativeMouseMode(self.to_c());
+        return C.SDL_GetWindowRelativeMouseMode(self.to_c_ptr());
     }
     pub fn warp_mouse_position(self: *Window, pos: FVec) void {
-        C.SDL_WarpMouseInWindow(self.to_c(), pos.x, pos.y);
+        C.SDL_WarpMouseInWindow(self.to_c_ptr(), pos.x, pos.y);
     }
 };
 
@@ -2948,12 +3079,10 @@ pub const Scale = extern struct {
 };
 
 pub const ColorPalette = opaque {
-    inline fn to_c(self: *ColorPalette) *C.SDL_Palette {
-        return @ptrCast(@alignCast(self));
-    }
+    usingnamespace c_opaque_conversions(ColorPalette, C.SDL_Palette);
 
     pub fn colors(self: *ColorPalette) []const IColor_RGBA {
-        const c = self.to_c();
+        const c = self.to_c_ptr();
         const ptr: ?[*]C.SDL_Color = c.colors;
         if (ptr) |good_ptr| {
             return @as([*]const IColor_RGBA, @ptrCast(@alignCast(good_ptr)))[0..c.ncolors];
@@ -2961,11 +3090,15 @@ pub const ColorPalette = opaque {
         return &.{};
     }
     pub fn version(self: *ColorPalette) u32 {
-        return self.to_c().version;
+        return self.to_c_ptr().version;
     }
     pub fn refcount(self: *ColorPalette) c_int {
-        return self.to_c().refcount;
+        return self.to_c_ptr().refcount;
     }
+    //TODO
+    // pub extern fn SDL_CreatePalette(ncolors: c_int) [*c]SDL_Palette;
+    // pub extern fn SDL_SetPaletteColors(palette: [*c]SDL_Palette, colors: [*c]const SDL_Color, firstcolor: c_int, ncolors: c_int) bool;
+    // pub extern fn SDL_DestroyPalette(palette: [*c]SDL_Palette) void;
 };
 
 pub const Colorspace = enum(c_uint) {
@@ -3088,19 +3221,127 @@ pub const ScaleMode = enum(c_int) {
     }
 };
 
+pub const Audio = struct {
+    //TODO
+    // pub extern fn SDL_LoadWAV(path: [*c]const u8, spec: [*c]SDL_AudioSpec, audio_buf: [*c][*c]Uint8, audio_len: [*c]Uint32) bool;
+    // pub extern fn SDL_MixAudio(dst: [*c]Uint8, src: [*c]const Uint8, format: SDL_AudioFormat, len: Uint32, volume: f32) bool;
+    // pub extern fn SDL_ConvertAudioSamples(src_spec: [*c]const SDL_AudioSpec, src_data: [*c]const Uint8, src_len: c_int, dst_spec: [*c]const SDL_AudioSpec, dst_data: [*c][*c]Uint8, dst_len: [*c]c_int) bool;
+    // pub extern fn SDL_GetAudioFormatName(format: SDL_AudioFormat) [*c]const u8;
+    // pub extern fn SDL_GetSilenceValueForFormat(format: SDL_AudioFormat) c_int;
+};
+
+pub const ColorPrimaries = enum(c_uint) {
+    UNKNOWN = C.SDL_COLOR_PRIMARIES_UNKNOWN,
+    BT709 = C.SDL_COLOR_PRIMARIES_BT709,
+    UNSPECIFIED = C.SDL_COLOR_PRIMARIES_UNSPECIFIED,
+    BT470M = C.SDL_COLOR_PRIMARIES_BT470M,
+    BT470BG = C.SDL_COLOR_PRIMARIES_BT470BG,
+    BT601 = C.SDL_COLOR_PRIMARIES_BT601,
+    SMPTE240 = C.SDL_COLOR_PRIMARIES_SMPTE240,
+    GENERIC_FILM = C.SDL_COLOR_PRIMARIES_GENERIC_FILM,
+    BT2020 = C.SDL_COLOR_PRIMARIES_BT2020,
+    XYZ = C.SDL_COLOR_PRIMARIES_XYZ,
+    SMPTE431 = C.SDL_COLOR_PRIMARIES_SMPTE431,
+    SMPTE432 = C.SDL_COLOR_PRIMARIES_SMPTE432,
+    EBU3213 = C.SDL_COLOR_PRIMARIES_EBU3213,
+    CUSTOM = C.SDL_COLOR_PRIMARIES_CUSTOM,
+
+    usingnamespace c_enum_conversions(ColorPrimaries, c_uint);
+};
+
+pub const TransferCharacteristics = enum(c_uint) {
+    UNKNOWN = C.SDL_TRANSFER_CHARACTERISTICS_UNKNOWN,
+    BT709 = C.SDL_TRANSFER_CHARACTERISTICS_BT709,
+    UNSPECIFIED = C.SDL_TRANSFER_CHARACTERISTICS_UNSPECIFIED,
+    GAMMA22 = C.SDL_TRANSFER_CHARACTERISTICS_GAMMA22,
+    GAMMA28 = C.SDL_TRANSFER_CHARACTERISTICS_GAMMA28,
+    BT601 = C.SDL_TRANSFER_CHARACTERISTICS_BT601,
+    SMPTE240 = C.SDL_TRANSFER_CHARACTERISTICS_SMPTE240,
+    LINEAR = C.SDL_TRANSFER_CHARACTERISTICS_LINEAR,
+    LOG100 = C.SDL_TRANSFER_CHARACTERISTICS_LOG100,
+    LOG100_SQRT10 = C.SDL_TRANSFER_CHARACTERISTICS_LOG100_SQRT10,
+    IEC61966 = C.SDL_TRANSFER_CHARACTERISTICS_IEC61966,
+    BT1361 = C.SDL_TRANSFER_CHARACTERISTICS_BT1361,
+    SRGB = C.SDL_TRANSFER_CHARACTERISTICS_SRGB,
+    BT2020_10BIT = C.SDL_TRANSFER_CHARACTERISTICS_BT2020_10BIT,
+    BT2020_12BIT = C.SDL_TRANSFER_CHARACTERISTICS_BT2020_12BIT,
+    PQ = C.SDL_TRANSFER_CHARACTERISTICS_PQ,
+    SMPTE428 = C.SDL_TRANSFER_CHARACTERISTICS_SMPTE428,
+    HLG = C.SDL_TRANSFER_CHARACTERISTICS_HLG,
+    CUSTOM = C.SDL_TRANSFER_CHARACTERISTICS_CUSTOM,
+
+    usingnamespace c_enum_conversions(TransferCharacteristics, c_uint);
+};
+
+pub const MatrixCoefficients = enum(c_uint) {
+    IDENTITY = C.SDL_MATRIX_COEFFICIENTS_IDENTITY,
+    BT709 = C.SDL_MATRIX_COEFFICIENTS_BT709,
+    UNSPECIFIED = C.SDL_MATRIX_COEFFICIENTS_UNSPECIFIED,
+    FCC = C.SDL_MATRIX_COEFFICIENTS_FCC,
+    BT470BG = C.SDL_MATRIX_COEFFICIENTS_BT470BG,
+    BT601 = C.SDL_MATRIX_COEFFICIENTS_BT601,
+    SMPTE240 = C.SDL_MATRIX_COEFFICIENTS_SMPTE240,
+    YCGCO = C.SDL_MATRIX_COEFFICIENTS_YCGCO,
+    BT2020_NCL = C.SDL_MATRIX_COEFFICIENTS_BT2020_NCL,
+    BT2020_CL = C.SDL_MATRIX_COEFFICIENTS_BT2020_CL,
+    SMPTE2085 = C.SDL_MATRIX_COEFFICIENTS_SMPTE2085,
+    CHROMA_DERIVED_NCL = C.SDL_MATRIX_COEFFICIENTS_CHROMA_DERIVED_NCL,
+    CHROMA_DERIVED_CL = C.SDL_MATRIX_COEFFICIENTS_CHROMA_DERIVED_CL,
+    ICTCP = C.SDL_MATRIX_COEFFICIENTS_ICTCP,
+    CUSTOM = C.SDL_MATRIX_COEFFICIENTS_CUSTOM,
+
+    usingnamespace c_enum_conversions(MatrixCoefficients, c_uint);
+};
+
+pub const ChromaLocation = enum(c_uint) {
+    NONE = C.SDL_CHROMA_LOCATION_NONE,
+    LEFT = C.SDL_CHROMA_LOCATION_LEFT,
+    CENTER = C.SDL_CHROMA_LOCATION_CENTER,
+    TOPLEFT = C.SDL_CHROMA_LOCATION_TOPLEFT,
+
+    usingnamespace c_enum_conversions(ChromaLocation, c_uint);
+};
+
+pub const PixelFormatDetails = extern struct {
+    format: PixelFormat = .UNKNOWN,
+    bits_per_pixel: u8 = 0,
+    bytes_per_pixel: u8 = 0,
+    padding: [2]u8 = 0,
+    Rmask: u32 = 0,
+    Gmask: u32 = 0,
+    Bmask: u32 = 0,
+    Amask: u32 = 0,
+    Rbits: u8 = 0,
+    Gbits: u8 = 0,
+    Bbits: u8 = 0,
+    Abits: u8 = 0,
+    Rshift: u8 = 0,
+    Gshift: u8 = 0,
+    Bshift: u8 = 0,
+    Ashift: u8 = 0,
+
+    usingnamespace c_non_opaque_conversions(PixelFormatDetails, C.SDL_PixelFormatDetails);
+
+    //TODO
+    // pub extern fn SDL_MapRGB(format: [*c]const SDL_PixelFormatDetails, palette: [*c]const SDL_Palette, r: Uint8, g: Uint8, b: Uint8) Uint32;
+    // pub extern fn SDL_MapRGBA(format: [*c]const SDL_PixelFormatDetails, palette: [*c]const SDL_Palette, r: Uint8, g: Uint8, b: Uint8, a: Uint8) Uint32;
+    // pub extern fn SDL_GetRGB(pixel: Uint32, format: [*c]const SDL_PixelFormatDetails, palette: [*c]const SDL_Palette, r: [*c]Uint8, g: [*c]Uint8, b: [*c]Uint8) void;
+    // pub extern fn SDL_GetRGBA(pixel: Uint32, format: [*c]const SDL_PixelFormatDetails, palette: [*c]const SDL_Palette, r: [*c]Uint8, g: [*c]Uint8, b: [*c]Uint8, a: [*c]Uint8) void;
+};
+
 pub const AudioSpec = extern struct {
     format: AudioFormat = .UNKNOWN,
     channels: c_int = 0,
     freq: c_int = 0,
 
-    fn to_c(self: *AudioSpec) *C.SDL_AudioSpec {
-        return @ptrCast(@alignCast(self));
-    }
+    usingnamespace c_non_opaque_conversions(AudioSpec, C.SDL_AudioSpec);
 
     pub fn frame_size(self: *AudioSpec) c_int {
         return @as(c_int, @intCast(self.format.byte_size())) * self.channels;
     }
 };
+
+pub const AudioPostmixCallback = fn (user_data: ?*anyopaque, aduio_spec: ?*C.SDL_AudioSpec, samples_ptr: ?[*]f32, samples_len: c_int) callconv(.c) void;
 
 pub const AudioDeviceID = extern struct {
     id: u32 = 0,
@@ -3180,6 +3421,9 @@ pub const AudioDeviceID = extern struct {
     }
     pub fn open_new_audio_stream(self: AudioDeviceID, spec: AudioSpec, callback: ?*AudioStreamCallback, user_data: ?*anyopaque) Error!*AudioStream {
         return ptr_cast_or_fail_err(*AudioStream, C.SDL_OpenAudioDeviceStream(self.id, spec.to_c(), @ptrCast(@alignCast(callback)), user_data));
+    }
+    pub fn set_postmix_callback(self: AudioDeviceID, postmix_callback: *const AudioPostmixCallback, user_data: ?*anyopaque) Error!void {
+        return ok_or_fail_err(C.SDL_SetAudioPostmixCallback(self.id, postmix_callback, user_data));
     }
 };
 
@@ -3604,6 +3848,37 @@ pub const KeyboardID = extern struct {
     id: u32 = 0,
 };
 
+pub const Camera = opaque {
+    usingnamespace c_opaque_conversions(Camera, C.SDL_Camera);
+    //TODO
+    // pub extern fn SDL_GetCameraPermissionState(camera: ?*SDL_Camera) c_int;
+    // pub extern fn SDL_GetCameraID(camera: ?*SDL_Camera) SDL_CameraID;
+    // pub extern fn SDL_GetCameraProperties(camera: ?*SDL_Camera) SDL_PropertiesID;
+    // pub extern fn SDL_GetCameraFormat(camera: ?*SDL_Camera, spec: [*c]SDL_CameraSpec) bool;
+    // pub extern fn SDL_AcquireCameraFrame(camera: ?*SDL_Camera, timestampNS: [*c]Uint64) [*c]SDL_Surface;
+    // pub extern fn SDL_ReleaseCameraFrame(camera: ?*SDL_Camera, frame: [*c]SDL_Surface) void;
+    // pub extern fn SDL_CloseCamera(camera: ?*SDL_Camera) void;
+};
+
+pub const CameraSpec = extern struct {
+    format: PixelFormat = .UNKNOWN,
+    colorspace: Colorspace = .UNKNOWN,
+    width: c_int = 0,
+    height: c_int = 0,
+    framerate_numerator: c_int = 0,
+    framerate_denominator: c_int = 0,
+
+    usingnamespace c_non_opaque_conversions(CameraSpec, C.SDL_CameraSpec);
+};
+
+pub const CameraPosition = enum(c_uint) {
+    UNKNOWN = C.SDL_CAMERA_POSITION_UNKNOWN,
+    FRONT_FACING = C.SDL_CAMERA_POSITION_FRONT_FACING,
+    BACK_FACING = C.SDL_CAMERA_POSITION_BACK_FACING,
+
+    usingnamespace c_enum_conversions(CameraPosition, C.SDL_CameraPosition);
+};
+
 pub const Event = extern union {
     type: EventType,
     common: CommonEvent,
@@ -3837,7 +4112,7 @@ pub const JoyAxisEvent = extern struct {
     type: EventType = .NONE,
     reserved: u32 = 0,
     timestamp: u64 = 0,
-    controller_id: GameControllerID = .{},
+    controller_id: JoystickID = .{},
     axis: u8 = 0,
     _padding_1: u8 = 0,
     _padding_2: u8 = 0,
@@ -3852,7 +4127,7 @@ pub const JoyBallEvent = extern struct {
     type: EventType = .NONE,
     reserved: u32 = 0,
     timestamp: u64 = 0,
-    controller_id: GameControllerID = .{},
+    controller_id: JoystickID = .{},
     ball: u8 = 0,
     _padding_1: u8 = 0,
     _padding_2: u8 = 0,
@@ -3870,7 +4145,7 @@ pub const JoyHatEvent = extern struct {
     type: EventType = .NONE,
     reserved: u32 = 0,
     timestamp: u64 = 0,
-    controller_id: GameControllerID = .{},
+    controller_id: JoystickID = .{},
     hat: u8 = 0,
     value: u8 = 0,
     _padding_1: u8 = 0,
@@ -3883,7 +4158,7 @@ pub const JoyButtonEvent = extern struct {
     type: EventType = .NONE,
     reserved: u32 = 0,
     timestamp: u64 = 0,
-    controller_id: GameControllerID = .{},
+    controller_id: JoystickID = .{},
     button: u8 = 0,
     down: bool = false,
     _padding_1: u8 = 0,
@@ -3896,7 +4171,7 @@ pub const JoyDeviceEvent = extern struct {
     type: EventType = .NONE,
     reserved: u32 = 0,
     timestamp: u64 = 0,
-    controller_id: GameControllerID = .{},
+    controller_id: JoystickID = .{},
 
     usingnamespace c_non_opaque_conversions(JoyDeviceEvent, C.SDL_JoyDeviceEvent);
 };
@@ -3905,7 +4180,7 @@ pub const JoyBatteryEvent = extern struct {
     type: EventType = .NONE,
     reserved: u32 = 0,
     timestamp: u64 = 0,
-    controller_id: GameControllerID = .{},
+    controller_id: JoystickID = .{},
     state: PowerState = .UNKNOWN,
     percent: c_int = 0,
 
@@ -3916,7 +4191,7 @@ pub const GamepadAxisEvent = extern struct {
     type: EventType = .NONE,
     reserved: u32 = 0,
     timestamp: u64 = 0,
-    controller_id: GameControllerID = .{},
+    controller_id: JoystickID = .{},
     axis: GamepadAxis = .LEFTX,
     _padding_1: u8 = 0,
     _padding_2: u8 = 0,
@@ -3931,7 +4206,7 @@ pub const GamepadButtonEvent = extern struct {
     type: EventType = .NONE,
     reserved: u32 = 0,
     timestamp: u64 = 0,
-    controller_id: GameControllerID = .{},
+    controller_id: JoystickID = .{},
     button: GamepadButton = .START,
     down: bool = false,
     _padding_1: u8 = 0,
@@ -3944,7 +4219,7 @@ pub const GamepadDeviceEvent = extern struct {
     type: EventType = .NONE,
     reserved: u32 = 0,
     timestamp: u64 = 0,
-    controller_id: GameControllerID = .{},
+    controller_id: JoystickID = .{},
 
     usingnamespace c_non_opaque_conversions(GamepadDeviceEvent, C.SDL_GamepadDeviceEvent);
 };
@@ -3953,7 +4228,7 @@ pub const GamepadTouchpadEvent = extern struct {
     type: EventType = .NONE,
     reserved: u32 = 0,
     timestamp: u64 = 0,
-    controller_id: GameControllerID = .{},
+    controller_id: JoystickID = .{},
     touchpad: i32 = 0,
     finger: i32 = 0,
     pos: FVec = FVec{},
@@ -3970,7 +4245,7 @@ pub const GamepadSensorEvent = extern struct {
     type: EventType = .NONE,
     reserved: u32 = 0,
     timestamp: u64 = 0,
-    controller_id: GameControllerID = .{},
+    controller_id: JoystickID = .{},
     sensor: i32 = 0,
     data: [3]f32 = @splat(0.0),
     sensor_timestamp: u64 = 0,
@@ -4175,65 +4450,90 @@ pub const PenID = extern struct {
 
 pub const SensorID = extern struct {
     id: u32 = 0,
+
+    // pub extern fn SDL_GetSensors(count: [*c]c_int) [*c]SDL_SensorID;
+    // pub extern fn SDL_GetSensorNameForID(instance_id: SDL_SensorID) [*c]const u8;
+    // pub extern fn SDL_GetSensorTypeForID(instance_id: SDL_SensorID) SDL_SensorType;
+    // pub extern fn SDL_GetSensorNonPortableTypeForID(instance_id: SDL_SensorID) c_int;
+    // pub extern fn SDL_OpenSensor(instance_id: SDL_SensorID) ?*SDL_Sensor;
+    // pub extern fn SDL_GetSensorFromID(instance_id: SDL_SensorID) ?*SDL_Sensor;
+    // pub extern fn SDL_UpdateSensors() void;
 };
 
-pub const GameControllerID = extern struct {
+pub const JoystickType = enum(c_uint) {
+    UNKNOWN = C.SDL_JOYSTICK_TYPE_UNKNOWN,
+    GAMEPAD = C.SDL_JOYSTICK_TYPE_GAMEPAD,
+    WHEEL = C.SDL_JOYSTICK_TYPE_WHEEL,
+    ARCADE_STICK = C.SDL_JOYSTICK_TYPE_ARCADE_STICK,
+    FLIGHT_STICK = C.SDL_JOYSTICK_TYPE_FLIGHT_STICK,
+    DANCE_PAD = C.SDL_JOYSTICK_TYPE_DANCE_PAD,
+    GUITAR = C.SDL_JOYSTICK_TYPE_GUITAR,
+    DRUM_KIT = C.SDL_JOYSTICK_TYPE_DRUM_KIT,
+    ARCADE_PAD = C.SDL_JOYSTICK_TYPE_ARCADE_PAD,
+    THROTTLE = C.SDL_JOYSTICK_TYPE_THROTTLE,
+
+    pub const COUNT = C.SDL_JOYSTICK_TYPE_COUNT;
+
+    usingnamespace c_enum_conversions(JoystickType, C.SDL_JoystickType);
+};
+
+pub const JoystickID = extern struct {
     id: u32 = 0,
 
-    fn new_err(id: u32) Error!GameControllerID {
-        return GameControllerID{ .id = try nonzero_or_null_err(id) };
+    fn new_err(id: u32) Error!JoystickID {
+        return JoystickID{ .id = try nonzero_or_null_err(id) };
     }
 
-    pub fn game_controller_id(id: u32) GameControllerID {
-        return GameControllerID{ .id = id };
+    pub fn new(id: u32) JoystickID {
+        return JoystickID{ .id = id };
     }
-    pub fn null_id() GameControllerID {
+    pub fn null_id() JoystickID {
         return NULL_ID;
     }
-    pub const NULL_ID = GameControllerID{ .id = 0 };
+    pub const NULL_ID = JoystickID{ .id = 0 };
 
     pub fn get_all_gamepads() Error!GamepadsList {
         var len: c_int = 0;
-        const ptr = try ptr_cast_or_fail_err([*]GameControllerID, C.SDL_GetGamepads(&len));
+        const ptr = try ptr_cast_or_fail_err([*]JoystickID, C.SDL_GetGamepads(&len));
         return GamepadsList{ .list = ptr[0..@intCast(len)] };
     }
-    pub fn is_gamepad(self: GameControllerID) bool {
+    pub fn is_gamepad(self: JoystickID) bool {
         return C.SDL_IsGamepad(self.id);
     }
-    pub fn get_name(self: GameControllerID) Error![*:0]const u8 {
+    pub fn get_name(self: JoystickID) Error![*:0]const u8 {
         return ptr_cast_or_null_err([*:0]const u8, C.SDL_GetGamepadNameForID(self.id));
     }
-    pub fn get_path(self: GameControllerID) Error![*:0]const u8 {
+    pub fn get_path(self: JoystickID) Error![*:0]const u8 {
         return ptr_cast_or_null_err([*:0]const u8, C.SDL_GetGamepadPathForID(self.id));
     }
-    pub fn get_player_index(self: GameControllerID) Error!PlayerIndex {
+    pub fn get_player_index(self: JoystickID) Error!PlayerIndex {
         return PlayerIndex{ .index = try positive_or_null_err(C.SDL_GetGamepadPlayerIndexForID(self.id)) };
     }
-    pub fn get_guid(self: GameControllerID) Error!GUID {
+    pub fn get_guid(self: JoystickID) Error!GUID {
         return valid_guid_or_null_err(C.SDL_GetGamepadGUIDForID(self.id));
     }
-    pub fn get_vendor_code(self: GameControllerID) Error!HW_VendorCode {
+    pub fn get_vendor_code(self: JoystickID) Error!HW_VendorCode {
         return HW_VendorCode{ .code = try nonzero_or_null_err(C.SDL_GetGamepadVendorForID(self.id)) };
     }
-    pub fn get_product_code(self: GameControllerID) Error!HW_ProductCode {
+    pub fn get_product_code(self: JoystickID) Error!HW_ProductCode {
         return HW_ProductCode{ .code = try nonzero_or_null_err(C.SDL_GetGamepadProductForID(self.id)) };
     }
-    pub fn get_product_version(self: GameControllerID) Error!HW_ProductVersion {
+    pub fn get_product_version(self: JoystickID) Error!HW_ProductVersion {
         return HW_ProductVersion{ .code = try nonzero_or_null_err(C.SDL_GetGamepadProductVersionForID(self.id)) };
     }
-    pub fn get_gamepad_type(self: GameControllerID) Error!GamepadType {
+    pub fn get_gamepad_type(self: JoystickID) Error!GamepadType {
         return GamepadType.from_c(C.SDL_GetGamepadTypeForID(self.id));
     }
-    pub fn get_real_gamepad_type(self: GameControllerID) Error!GamepadType {
+    pub fn get_real_gamepad_type(self: JoystickID) Error!GamepadType {
         return GamepadType.from_c(C.SDL_GetRealGamepadTypeForID(self.id));
     }
-    pub fn get_gamepad_mapping_string(self: GameControllerID) Error!String {
+    pub fn get_gamepad_mapping_string(self: JoystickID) Error!String {
         return String{ .ptr = try ptr_cast_or_null_err([*:0]u8, C.SDL_GetGamepadMappingForID(self.id)) };
     }
-    pub fn open_gamepad(self: GameControllerID) Error!*Gamepad {
+    pub fn open_gamepad(self: JoystickID) Error!*Gamepad {
         return ptr_cast_or_null_err(*Gamepad, C.SDL_OpenGamepad(self.id));
     }
-    pub fn get_open_gamepad(self: GameControllerID) Error!*Gamepad {
+    pub fn get_open_gamepad(self: JoystickID) Error!*Gamepad {
         return ptr_cast_or_null_err(*Gamepad, C.SDL_GetGamepadFromID(self.id));
     }
     //TODO
@@ -4246,6 +4546,20 @@ pub const GameControllerID = extern struct {
     // pub extern fn SDL_GetGamepadMapping(gamepad: ?*SDL_Gamepad) [*c]u8;
     // pub extern fn SDL_SetGamepadMapping(instance_id: SDL_JoystickID, mapping: [*c]const u8) bool;
     // pub extern fn SDL_HasGamepad() bool;
+    // pub extern fn SDL_LockJoysticks() void;
+    // pub extern fn SDL_UnlockJoysticks() void;
+    // pub extern fn SDL_HasJoystick() bool;
+    // pub extern fn SDL_GetJoysticks(count: [*c]c_int) [*c]SDL_JoystickID;
+    // pub extern fn SDL_GetJoystickNameForID(instance_id: SDL_JoystickID) [*c]const u8;
+    // pub extern fn SDL_GetJoystickPathForID(instance_id: SDL_JoystickID) [*c]const u8;
+    // pub extern fn SDL_GetJoystickPlayerIndexForID(instance_id: SDL_JoystickID) c_int;
+    // pub extern fn SDL_GetJoystickGUIDForID(instance_id: SDL_JoystickID) SDL_GUID;
+    // pub extern fn SDL_GetJoystickVendorForID(instance_id: SDL_JoystickID) Uint16;
+    // pub extern fn SDL_GetJoystickProductForID(instance_id: SDL_JoystickID) Uint16;
+    // pub extern fn SDL_GetJoystickProductVersionForID(instance_id: SDL_JoystickID) Uint16;
+    // pub extern fn SDL_GetJoystickTypeForID(instance_id: SDL_JoystickID) SDL_JoystickType;
+    // pub extern fn SDL_OpenJoystick(instance_id: SDL_JoystickID) ?*SDL_Joystick;
+    // pub extern fn SDL_GetJoystickFromID(instance_id: SDL_JoystickID) ?*SDL_Joystick;
 };
 
 pub const Gamepad = opaque {
@@ -4266,8 +4580,8 @@ pub const Gamepad = opaque {
     pub fn get_properties(self: *Gamepad) Error!PropertiesID {
         return PropertiesID.new(try nonzero_or_null_err(C.SDL_GetGamepadProperties(self.to_c_ptr())));
     }
-    pub fn get_id(self: *Gamepad) Error!GameControllerID {
-        return GameControllerID.new_err(C.SDL_GetGamepadProperties(self.to_c_ptr()));
+    pub fn get_id(self: *Gamepad) Error!JoystickID {
+        return JoystickID.new_err(C.SDL_GetGamepadProperties(self.to_c_ptr()));
     }
     pub fn get_name(self: *Gamepad) Error![*:0]const u8 {
         return ptr_cast_or_null_err([*:0]const u8, C.SDL_GetGamepadName(self.to_c_ptr()));
@@ -4422,6 +4736,42 @@ pub const Joystick = opaque {
     // pub extern fn SDL_CloseJoystick(joystick: ?*SDL_Joystick) void;
     // pub extern fn SDL_GetJoystickConnectionState(joystick: ?*SDL_Joystick) SDL_JoystickConnectionState;
     // pub extern fn SDL_GetJoystickPowerInfo(joystick: ?*SDL_Joystick, percent: [*c]c_int) SDL_PowerState;
+    // pub extern fn SDL_IsJoystickHaptic(joystick: ?*SDL_Joystick) bool;
+    // pub extern fn SDL_OpenHapticFromJoystick(joystick: ?*SDL_Joystick) ?*SDL_Haptic;
+};
+
+pub const HID_Device = opaque {
+    usingnamespace c_opaque_conversions(HID_Device, C.SDL_hid_device);
+};
+
+pub const HID_BusType = enum(c_uint) {
+    UNKNOWN = C.SDL_HID_API_BUS_UNKNOWN,
+    USB = C.SDL_HID_API_BUS_USB,
+    BLUETOOTH = C.SDL_HID_API_BUS_BLUETOOTH,
+    I2C = C.SDL_HID_API_BUS_I2C,
+    SPI = C.SDL_HID_API_BUS_SPI,
+
+    usingnamespace c_enum_conversions(HID_BusType, c_uint);
+};
+
+pub const HID_DeviceInfo = extern struct {
+    path: ?[*:0]u8 = null,
+    vendor_id: c_ushort = 0,
+    product_id: c_ushort = 0,
+    serial_number: ?[*:0]C.wchar_t = null,
+    release_number: c_ushort = 0,
+    manufacturer_string: ?[*:0]C.wchar_t = null,
+    product_string: ?[*:0]C.wchar_t = null,
+    usage_page: c_ushort = 0,
+    usage: c_ushort = 0,
+    interface_number: c_int = 0,
+    interface_class: c_int = 0,
+    interface_subclass: c_int = 0,
+    interface_protocol: c_int = 0,
+    bus_type: HID_BusType = .UNKNOWN,
+    next: ?*HID_DeviceInfo = null,
+
+    usingnamespace c_non_opaque_conversions(HID_DeviceInfo, C.SDL_hid_device_info);
 };
 
 pub const FingerState = extern struct {
@@ -4522,6 +4872,12 @@ pub const PowerInfo = extern struct {
     percent: c_int,
 };
 
+pub const PowerInfoWithTime = extern struct {
+    state: PowerState,
+    percent: c_int,
+    time_left: c_int,
+};
+
 pub const ControllerConnectionState = enum(c_int) {
     INVALID = C.SDL_JOYSTICK_CONNECTION_INVALID,
     UNKNOWN = C.SDL_JOYSTICK_CONNECTION_UNKNOWN,
@@ -4615,7 +4971,7 @@ pub const PlayerIndex = extern struct {
 };
 
 pub const GamepadsList = struct {
-    list: []GameControllerID,
+    list: []JoystickID,
 
     pub fn free(self: GamepadsList) void {
         sdl_free(self.list.ptr);
@@ -4628,6 +4984,15 @@ pub const GUID = extern struct {
 
 pub const CameraID = extern struct {
     id: u32 = 0,
+    //TODO
+    // pub extern fn SDL_GetNumCameraDrivers() c_int;
+    // pub extern fn SDL_GetCameraDriver(index: c_int) [*c]const u8;
+    // pub extern fn SDL_GetCurrentCameraDriver() [*c]const u8;
+    // pub extern fn SDL_GetCameras(count: [*c]c_int) [*c]SDL_CameraID;
+    // pub extern fn SDL_GetCameraSupportedFormats(instance_id: SDL_CameraID, count: [*c]c_int) [*c][*c]SDL_CameraSpec;
+    // pub extern fn SDL_GetCameraName(instance_id: SDL_CameraID) [*c]const u8;
+    // pub extern fn SDL_GetCameraPosition(instance_id: SDL_CameraID) SDL_CameraPosition;
+    // pub extern fn SDL_OpenCamera(instance_id: SDL_CameraID, spec: [*c]const SDL_CameraSpec) ?*SDL_Camera;
 };
 
 pub const TouchID = extern struct {
@@ -4676,6 +5041,11 @@ pub const PowerState = enum(c_int) {
     CHARGED = C.SDL_POWERSTATE_CHARGED,
 
     usingnamespace c_enum_conversions(PowerState, c_int);
+
+    // pub fn get_power_info() PowerInfoWithTime {
+    //     pub extern fn SDL_GetPowerInfo(seconds: [*c]c_int, percent: [*c]c_int) SDL_PowerState;
+    // }
+
 };
 
 pub const EventType = enum(u32) {
@@ -5118,77 +5488,110 @@ pub const GPU_API = struct {
             return ptr_cast_or_fail_err(*Device, C.SDL_CreateGPUDeviceWithProperties(props.id));
         }
         pub fn destroy(self: *Device) void {
-            C.SDL_DestroyGPUDevice(self.to_c());
+            C.SDL_DestroyGPUDevice(self.to_c_ptr());
         }
         pub fn get_driver_name(self: *Device) Error![*:0]const u8 {
-            return ptr_cast_or_null_err([*:0]const u8, C.SDL_GetGPUDeviceDriver(self.to_c()));
+            return ptr_cast_or_null_err([*:0]const u8, C.SDL_GetGPUDeviceDriver(self.to_c_ptr()));
         }
         pub fn get_shader_formats(self: *Device) ShaderFormatFlags {
-            return ShaderFormatFlags{ .raw = C.SDL_GetGPUShaderFormats(self.to_c()) };
+            return ShaderFormatFlags{ .raw = C.SDL_GetGPUShaderFormats(self.to_c_ptr()) };
         }
         pub fn create_compute_pipeline(self: *Device, pipeline_info: *ComputePipelineCreateInfo) Error!*ComputePipeline {
-            return ptr_cast_or_null_err(*ComputePipeline, C.SDL_CreateGPUComputePipeline(self.to_c(), pipeline_info.to_c()));
+            return ptr_cast_or_null_err(*ComputePipeline, C.SDL_CreateGPUComputePipeline(self.to_c_ptr(), pipeline_info.to_c_ptr()));
         }
         pub fn create_graphics_pipeline(self: *Device, pipeline_info: *GraphicsPipelineCreateInfo) Error!*GraphicsPipeline {
-            return ptr_cast_or_null_err(*GraphicsPipeline, C.SDL_CreateGPUGraphicsPipeline(self.to_c(), pipeline_info.to_c()));
+            return ptr_cast_or_null_err(*GraphicsPipeline, C.SDL_CreateGPUGraphicsPipeline(self.to_c_ptr(), pipeline_info.to_c_ptr()));
         }
         pub fn create_texture_sampler(self: *Device, sampler_info: *SamplerCreateInfo) Error!*TextureSampler {
-            return ptr_cast_or_null_err(*TextureSampler, C.SDL_CreateGPUSampler(self.to_c(), sampler_info.to_c()));
+            return ptr_cast_or_null_err(*TextureSampler, C.SDL_CreateGPUSampler(self.to_c_ptr(), sampler_info.to_c_ptr()));
         }
         pub fn create_shader(self: *Device, shader_info: *ShaderCreateInfo) Error!*Shader {
-            return ptr_cast_or_null_err(*Shader, C.SDL_CreateGPUShader(self.to_c(), shader_info.to_c()));
+            return ptr_cast_or_null_err(*Shader, C.SDL_CreateGPUShader(self.to_c_ptr(), shader_info.to_c_ptr()));
         }
         pub fn create_buffer(self: *Device, buffer_info: *BufferCreateInfo) Error!*Buffer {
-            return ptr_cast_or_null_err(*Buffer, C.SDL_CreateGPUBuffer(self.to_c(), buffer_info.to_c()));
+            return ptr_cast_or_null_err(*Buffer, C.SDL_CreateGPUBuffer(self.to_c_ptr(), buffer_info.to_c_ptr()));
         }
         pub fn create_transfer_buffer(self: *Device, buffer_info: *TransferBufferCreateInfo) Error!*TransferBuffer {
-            return ptr_cast_or_null_err(*TransferBuffer, C.SDL_CreateGPUTransferBuffer(self.to_c(), buffer_info.to_c()));
+            return ptr_cast_or_null_err(*TransferBuffer, C.SDL_CreateGPUTransferBuffer(self.to_c_ptr(), buffer_info.to_c_ptr()));
         }
         pub fn set_buffer_name(self: *Device, buffer: *Buffer, name: [*:0]const u8) void {
-            C.SDL_SetGPUBufferName(self.to_c(), buffer.to_c(), name);
+            C.SDL_SetGPUBufferName(self.to_c_ptr(), buffer.to_c_ptr(), name);
         }
         pub fn set_texture_name(self: *Device, texture: *Texture, name: [*:0]const u8) void {
-            C.SDL_SetGPUTextureName(self.to_c(), texture.to_c(), name);
+            C.SDL_SetGPUTextureName(self.to_c_ptr(), texture.to_c_ptr(), name);
         }
         pub fn release_texture(self: *Device, texture: *Texture) void {
-            C.SDL_ReleaseGPUTexture(self.to_c(), texture.to_c());
+            C.SDL_ReleaseGPUTexture(self.to_c_ptr(), texture.to_c_ptr());
         }
         pub fn release_texture_sampler(self: *Device, sampler: *TextureSampler) void {
-            C.SDL_ReleaseGPUSampler(self.to_c(), sampler.to_c());
+            C.SDL_ReleaseGPUSampler(self.to_c_ptr(), sampler.to_c_ptr());
         }
         pub fn release_buffer(self: *Device, buffer: *Buffer) void {
-            C.SDL_ReleaseGPUBuffer(self.to_c(), buffer.to_c());
+            C.SDL_ReleaseGPUBuffer(self.to_c_ptr(), buffer.to_c_ptr());
         }
         pub fn release_transfer_buffer(self: *Device, buffer: *TransferBuffer) void {
-            C.SDL_ReleaseGPUTransferBuffer(self.to_c(), buffer.to_c());
+            C.SDL_ReleaseGPUTransferBuffer(self.to_c_ptr(), buffer.to_c_ptr());
         }
         pub fn release_compute_pipeline(self: *Device, pipeline: *ComputePipeline) void {
-            C.SDL_ReleaseGPUComputePipeline(self.to_c(), pipeline.to_c());
+            C.SDL_ReleaseGPUComputePipeline(self.to_c_ptr(), pipeline.to_c_ptr());
         }
         pub fn release_shader(self: *Device, shader: *Shader) void {
-            C.SDL_ReleaseGPUShader(self.to_c(), shader.to_c());
+            C.SDL_ReleaseGPUShader(self.to_c_ptr(), shader.to_c_ptr());
         }
         pub fn release_graphics_pipeline(self: *Device, pipeline: *GraphicsPipeline) void {
-            C.SDL_ReleaseGPUGraphicsPipeline(self.to_c(), pipeline.to_c());
+            C.SDL_ReleaseGPUGraphicsPipeline(self.to_c_ptr(), pipeline.to_c_ptr());
         }
         pub fn aquire_command_buffer(self: *Device) Error!*CommandBuffer {
             return ptr_cast_or_fail_err(*CommandBuffer, C.SDL_AcquireGPUCommandBuffer(self.to_c()));
         }
-        //TODO
-        // pub extern fn SDL_MapGPUTransferBuffer(device: ?*SDL_GPUDevice, transfer_buffer: ?*SDL_GPUTransferBuffer, cycle: bool) ?*anyopaque;
-        // pub extern fn SDL_UnmapGPUTransferBuffer(device: ?*SDL_GPUDevice, transfer_buffer: ?*SDL_GPUTransferBuffer) void;
-        // pub extern fn SDL_WindowSupportsGPUSwapchainComposition(device: ?*SDL_GPUDevice, window: ?*SDL_Window, swapchain_composition: SDL_GPUSwapchainComposition) bool;
-        // pub extern fn SDL_WindowSupportsGPUPresentMode(device: ?*SDL_GPUDevice, window: ?*SDL_Window, present_mode: SDL_GPUPresentMode) bool;
-        // pub extern fn SDL_ClaimWindowForGPUDevice(device: ?*SDL_GPUDevice, window: ?*SDL_Window) bool;
-        // pub extern fn SDL_ReleaseWindowFromGPUDevice(device: ?*SDL_GPUDevice, window: ?*SDL_Window) void;
-        // pub extern fn SDL_SetGPUSwapchainParameters(device: ?*SDL_GPUDevice, window: ?*SDL_Window, swapchain_composition: SDL_GPUSwapchainComposition, present_mode: SDL_GPUPresentMode) bool;
-        // pub extern fn SDL_SetGPUAllowedFramesInFlight(device: ?*SDL_GPUDevice, allowed_frames_in_flight: Uint32) bool;
-        // pub extern fn SDL_GetGPUSwapchainTextureFormat(device: ?*SDL_GPUDevice, window: ?*SDL_Window) SDL_GPUTextureFormat;
-        // pub extern fn SDL_WaitForGPUSwapchain(device: ?*SDL_GPUDevice, window: ?*SDL_Window) bool;
-        // pub extern fn SDL_WaitForGPUIdle(device: ?*SDL_GPUDevice) bool;
-        // pub extern fn SDL_WaitForGPUFences(device: ?*SDL_GPUDevice, wait_all: bool, fences: [*c]const ?*SDL_GPUFence, num_fences: Uint32) bool;
-        // pub extern fn SDL_QueryGPUFence(device: ?*SDL_GPUDevice, fence: ?*SDL_GPUFence) bool;
-        // pub extern fn SDL_ReleaseGPUFence(device: ?*SDL_GPUDevice, fence: ?*SDL_GPUFence) void;
+        pub fn map_transfer_buffer(self: *Device, buffer: *TransferBuffer, cycle: bool) Error![*]u8 {
+            return ptr_cast_or_fail_err([*]u8, C.SDL_MapGPUTransferBuffer(self.to_c_ptr(), buffer, cycle));
+        }
+        pub fn unmap_transfer_buffer(self: *Device, buffer: *TransferBuffer) void {
+            C.SDL_UnmapGPUTransferBuffer(self.to_c_ptr(), buffer);
+        }
+        pub fn window_supports_swapchain_composition(self: *Device, window: *Window, composition: SwapchainComposition) bool {
+            return C.SDL_WindowSupportsGPUSwapchainComposition(self.to_c_ptr(), window.to_c_ptr(), composition.to_c());
+        }
+        pub fn window_supports_present_mode(self: *Device, window: *Window, mode: PresentMode) bool {
+            return C.SDL_WindowSupportsGPUSwapchainComposition(self.to_c_ptr(), window.to_c_ptr(), mode.to_c());
+        }
+        pub fn claim_window(self: *Device, window: *Window) Error!void {
+            return ok_or_fail_err(C.SDL_ClaimWindowForGPUDevice(self.to_c_ptr(), window.to_c_ptr()));
+        }
+        pub fn release_window(self: *Device, window: *Window) void {
+            C.SDL_ReleaseWindowFromGPUDevice(self.to_c_ptr(), window.to_c_ptr());
+        }
+        pub fn set_swapchain_parameters(self: *Device, window: *Window, composition: SwapchainComposition, present_mode: PresentMode) Error!void {
+            return ok_or_fail_err(C.SDL_SetGPUSwapchainParameters(self.to_c_ptr(), window.to_c_ptr(), composition.to_c(), present_mode.to_c()));
+        }
+        pub fn set_max_frames_in_flight(self: *Device, frames: u32) Error!void {
+            return ok_or_fail_err(C.SDL_SetGPUAllowedFramesInFlight(self.to_c_ptr(), frames));
+        }
+        pub fn get_swapchain_texture_format(self: *Device, window: *Window) TextureFormat {
+            return TextureFormat.from_c(C.SDL_GetGPUSwapchainTextureFormat(self.to_c_ptr(), window.to_c_ptr()));
+        }
+        pub fn wait_for_swapchain(self: *Device, window: *Window) Error!void {
+            return ok_or_fail_err(C.SDL_WaitForGPUSwapchain(self.to_c_ptr(), window.to_c_ptr()));
+        }
+        pub fn wait_for_gpu_idle(self: *Device) Error!void {
+            return ok_or_fail_err(C.SDL_WaitForGPUIdle(self.to_c_ptr()));
+        }
+        pub fn wait_for_gpu_fences(self: *Device, wait_for_all: bool, fences: []const Fence) Error!void {
+            return ok_or_fail_err(C.SDL_WaitForGPUFences(self.to_c_ptr(), wait_for_all, @ptrCast(@alignCast(fences.ptr)), @intCast(fences.len)));
+        }
+        pub fn is_fence_signaled(self: *Device, fence: *Fence) bool {
+            return C.SDL_QueryGPUFence(self.to_c_ptr(), fence.to_c_ptr());
+        }
+        pub fn release_fence(self: *Device, fence: *Fence) void {
+            return C.SDL_ReleaseGPUFence(self.to_c_ptr(), fence.to_c_ptr());
+        }
+        pub fn texture_supports_format(self: *Device, tex_format: TextureFormat, tex_type: TextureType, tex_usage: TextureUsageFlags) bool {
+            return C.SDL_GPUTextureSupportsFormat(self.to_c_ptr(), tex_format.to_c(), tex_type.to_c(), tex_usage.raw);
+        }
+        pub fn texture_supports_sample_count(self: *Device, tex_format: TextureFormat, sample_count: SampleCount) bool {
+            return C.SDL_GPUTextureSupportsFormat(self.to_c_ptr(), tex_format.to_c(), sample_count.to_c());
+        }
     };
 
     pub const TransferBufferCreateInfo = extern struct {
@@ -5812,37 +6215,66 @@ pub const GPU_API = struct {
         usingnamespace c_opaque_conversions(CommandBuffer, C.SDL_GPUCommandBuffer);
 
         pub fn insert_debug_label(self: *CommandBuffer, text: [*:0]const u8) void {
-            C.SDL_InsertGPUDebugLabel(self.to_c(), text);
+            C.SDL_InsertGPUDebugLabel(self.to_c_ptr(), text);
         }
         pub fn push_debug_group(self: *CommandBuffer, name: [*:0]const u8) void {
-            C.SDL_PushGPUDebugGroup(self.to_c(), name);
+            C.SDL_PushGPUDebugGroup(self.to_c_ptr(), name);
         }
         pub fn pop_debug_group(self: *CommandBuffer) void {
-            C.SDL_PopGPUDebugGroup(self.to_c());
+            C.SDL_PopGPUDebugGroup(self.to_c_ptr());
         }
         pub fn push_vertex_uniform_data(self: *CommandBuffer, slot_index: u32, data_ptr: anytype) void {
             const data_raw = Utils.raw_slice_cast_const(data_ptr);
-            C.SDL_PushGPUVertexUniformData(self.to_c(), slot_index, data_raw.ptr, @intCast(data_raw.len));
+            C.SDL_PushGPUVertexUniformData(self.to_c_ptr(), slot_index, data_raw.ptr, @intCast(data_raw.len));
         }
         pub fn push_fragment_uniform_data(self: *CommandBuffer, slot_index: u32, data_ptr: anytype) void {
             const data_raw = Utils.raw_slice_cast_const(data_ptr);
-            C.SDL_PushGPUFragmentUniformData(self.to_c(), slot_index, data_raw.ptr, @intCast(data_raw.len));
+            C.SDL_PushGPUFragmentUniformData(self.to_c_ptr(), slot_index, data_raw.ptr, @intCast(data_raw.len));
         }
         pub fn push_compute_uniform_data(self: *CommandBuffer, slot_index: u32, data_ptr: anytype) void {
             const data_raw = Utils.raw_slice_cast_const(data_ptr);
-            C.SDL_PushGPUComputeUniformData(self.to_c(), slot_index, data_raw.ptr, @intCast(data_raw.len));
+            C.SDL_PushGPUComputeUniformData(self.to_c_ptr(), slot_index, data_raw.ptr, @intCast(data_raw.len));
         }
         pub fn begin_render_pass(self: *CommandBuffer, color_targets: []const ColorTargetInfo, depth_stencil_target: *DepthStencilTargetInfo) Error!*RenderPass {
-            return ptr_cast_or_fail_err(*RenderPass, C.SDL_BeginGPURenderPass(self.to_c(), @ptrCast(@alignCast(color_targets.ptr)), @intCast(color_targets.len), depth_stencil_target.to_c()));
+            return ptr_cast_or_fail_err(*RenderPass, C.SDL_BeginGPURenderPass(self.to_c_ptr(), @ptrCast(@alignCast(color_targets.ptr)), @intCast(color_targets.len), depth_stencil_target.to_c()));
         }
         pub fn begin_compute_pass(self: *CommandBuffer, storage_texture_bindings: []const StorageTextureReadWriteBinding, storage_buffer_bindings: []const StorageBufferReadWriteBinding) Error!*ComputePass {
-            return ptr_cast_or_fail_err(*ComputePass, C.SDL_BeginGPUComputePass(self.to_c(), @ptrCast(@alignCast(storage_texture_bindings.ptr)), @intCast(storage_texture_bindings.len), @ptrCast(@alignCast(storage_buffer_bindings.ptr)), @intCast(storage_buffer_bindings.len)));
+            return ptr_cast_or_fail_err(*ComputePass, C.SDL_BeginGPUComputePass(self.to_c_ptr(), @ptrCast(@alignCast(storage_texture_bindings.ptr)), @intCast(storage_texture_bindings.len), @ptrCast(@alignCast(storage_buffer_bindings.ptr)), @intCast(storage_buffer_bindings.len)));
         }
-        //TODO
-        // pub extern fn SDL_BeginGPUCopyPass(command_buffer: ?*SDL_GPUCommandBuffer) ?*SDL_GPUCopyPass;
-        // pub extern fn SDL_GenerateMipmapsForGPUTexture(command_buffer: ?*SDL_GPUCommandBuffer, texture: ?*SDL_GPUTexture) void;
-        // pub extern fn SDL_BlitGPUTexture(command_buffer: ?*SDL_GPUCommandBuffer, info: [*c]const SDL_GPUBlitInfo) void;
-        // pub extern fn SDL_AcquireGPUSwapchainTexture(command_buffer: ?*SDL_GPUCommandBuffer, window: ?*SDL_Window, swapchain_texture: [*c]?*SDL_GPUTexture, swapchain_texture_width: [*c]Uint32, swapchain_texture_height: [*c]Uint32) bool;
+        pub fn begin_copy_pass(self: *CommandBuffer) Error!*CopyPass {
+            return ptr_cast_or_fail_err(*CopyPass, C.SDL_BeginGPUCopyPass(self.to_c_ptr()));
+        }
+        pub fn generate_mipmaps_for_texture(self: *CommandBuffer, texture: *Texture) void {
+            C.SDL_GenerateMipmapsForGPUTexture(self.to_c_ptr(), texture.to_c_ptr());
+        }
+        pub fn blit_texture(self: *CommandBuffer, blit_info: *BlitInfo) void {
+            C.SDL_GenerateMipmapsForGPUTexture(self.to_c_ptr(), blit_info.to_c_ptr());
+        }
+        pub fn aquire_swapchain_texture(self: *CommandBuffer, window: *Window) Error!SwapchainTexture {
+            var tex: SwapchainTexture = undefined;
+            try ok_or_null_err(C.SDL_AcquireGPUSwapchainTexture(self.to_c_ptr(), window.to_c_ptr(), tex.texture.to_c_ptr(), &tex.w, &tex.h));
+            return tex;
+        }
+        pub fn wait_and_aquire_swapchain_texture(self: *CommandBuffer, window: *Window) Error!SwapchainTexture {
+            var tex: SwapchainTexture = undefined;
+            try ok_or_null_err(C.SDL_AcquireGPUSwapchainTexture(self.to_c_ptr(), window.to_c_ptr(), tex.texture.to_c_ptr(), &tex.w, &tex.h));
+            return tex;
+        }
+        pub fn submit_commands(self: *CommandBuffer) Error!void {
+            return ok_or_fail_err(C.SDL_SubmitGPUCommandBuffer(self.to_c_ptr()));
+        }
+        pub fn submit_commands_and_aquire_fence(self: *CommandBuffer) Error!Fence {
+            return ptr_cast_or_fail_err(*Fence, C.SDL_SubmitGPUCommandBufferAndAcquireFence(self.to_c_ptr()));
+        }
+        pub fn cancel_commands(self: *CommandBuffer) Error!void {
+            return ok_or_fail_err(C.SDL_CancelGPUCommandBuffer(self.to_c_ptr()));
+        }
+    };
+
+    pub const SwapchainTexture = struct {
+        texture: *Texture,
+        w: u32,
+        h: u32,
     };
 
     pub const RenderPass = opaque {
@@ -6080,6 +6512,13 @@ pub const GPU_API = struct {
         ASTC_12x12_FLOAT = C.SDL_TEXTUREFORMAT_ASTC_12x12_FLOAT,
 
         usingnamespace c_enum_conversions(TextureFormat, c_uint);
+
+        pub fn texel_block_size(self: TextureFormat) u32 {
+            return C.SDL_GPUTextureFormatTexelBlockSize(self.to_c());
+        }
+        pub fn calculate_texture_size(self: TextureFormat, size: UVec, depth_or_layer_count: u32) u32 {
+            return C.SDL_CalculateGPUTextureFormatSize(self.to_c(), size.x, size.y, depth_or_layer_count);
+        }
     };
 
     pub const TextureUsageFlags = Flags(enum(u32) {

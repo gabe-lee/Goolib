@@ -141,7 +141,7 @@ pub fn app_init(args_list: [][*:0]u8) anyerror!SDL.AppProcess {
     try audio_device.bind_many_audio_streams(audio_streams);
 
     {
-        const gamepads_list = try SDL.GameControllerID.get_all_gamepads();
+        const gamepads_list = try SDL.JoystickID.get_all_gamepads();
         defer gamepads_list.free();
 
         gamepad = if (gamepads_list.list.len > 0) try gamepads_list.list[0].open_gamepad() else null;

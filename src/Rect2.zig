@@ -38,12 +38,30 @@ pub fn define_rect2_type(comptime T: type) type {
             return self.to_aabb2().approx_overlaps(other.to_aabb2());
         }
 
+        pub fn overlap_area(self: T_Rect2, other: T_Rect2) ?T_Rect2 {
+            const overlap_aabb = self.to_aabb2().overlap_area(other.to_aabb2());
+            if (overlap_aabb) |aabb| return aabb.to_rect2();
+            return null;
+        }
+
+        pub fn overlap_area_guaranteed(self: T_Rect2, other: T_Rect2) T_Rect2 {
+            return self.to_aabb2().overlap_area_graranteed(other.to_aabb2()).to_rect2();
+        }
+
         pub fn point_within(self: T_Rect2, point: T_Vec2) bool {
             return self.to_aabb2().point_within(point);
         }
 
         pub fn point_approx_within(self: T_Rect2, point: T_Vec2) bool {
             return self.to_aabb2().point_approx_within(point);
+        }
+
+        pub fn equals(self: T_Rect2, other: T_Rect2) bool {
+            var result: u8 = @as(u8, @intCast(@intFromBool(self.x == other.x)));
+            result |= @as(u8, @intCast(@intFromBool(self.y == other.y))) << 1;
+            result |= @as(u8, @intCast(@intFromBool(self.w == other.w))) << 2;
+            result |= @as(u8, @intCast(@intFromBool(self.h == other.h))) << 3;
+            return result == 0b1111;
         }
 
         pub fn to_aabb2(self: T_Rect2) T_AABB2 {

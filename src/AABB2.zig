@@ -139,6 +139,34 @@ pub fn define_aabb2_type(comptime T: type) type {
             return Root.Math.approx_greater_than_or_equal_to(T, self.x_max, other.x_min) and Root.Math.approx_greater_than_or_equal_to(T, other.x_max, self.x_min) and Root.Math.approx_greater_than_or_equal_to(T, self.y_max, other.y_min) and Root.Math.approx_greater_than_or_equal_to(T, other.y_max, self.y_min);
         }
 
+        pub fn overlap_area(self: T_AABB2, other: T_AABB2) ?T_AABB2 {
+            const overlap_x_min = @max(self.x_min, other.x_min);
+            const overlap_x_max = @min(self.x_max, other.x_max);
+            if (overlap_x_min >= overlap_x_max) return null;
+            const overlap_y_min = @max(self.y_min, other.y_min);
+            const overlap_y_max = @min(self.y_max, other.y_max);
+            if (overlap_y_min >= overlap_y_max) return null;
+            return T_AABB2{
+                .x_min = overlap_x_min,
+                .x_max = overlap_x_max,
+                .y_min = overlap_y_min,
+                .y_max = overlap_y_max,
+            };
+        }
+
+        pub fn overlap_area_graranteed(self: T_AABB2, other: T_AABB2) T_AABB2 {
+            const overlap_x_min = @max(self.x_min, other.x_min);
+            const overlap_x_max = @min(self.x_max, other.x_max);
+            const overlap_y_min = @max(self.y_min, other.y_min);
+            const overlap_y_max = @min(self.y_max, other.y_max);
+            return T_AABB2{
+                .x_min = overlap_x_min,
+                .x_max = overlap_x_max,
+                .y_min = overlap_y_min,
+                .y_max = overlap_y_max,
+            };
+        }
+
         pub fn point_within(self: T_AABB2, point: T_Vec2) bool {
             return self.x_max >= point.x and point.x >= self.x_min and self.y_max >= point.y and point.y >= self.y_min;
         }
@@ -193,5 +221,3 @@ pub fn define_aabb2_type(comptime T: type) type {
         }
     };
 }
-
-
