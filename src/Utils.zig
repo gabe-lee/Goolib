@@ -185,10 +185,14 @@ pub inline fn assert_with_reason(condition: bool, reason_fmt: []const u8, reason
         assert(condition);
     }
 }
-pub inline fn comptime_assert_with_reason(condition: bool, reason: []const u8) void {
+pub inline fn comptime_assert_with_reason(condition: bool, comptime src_loc: ?builtin.SourceLocation, reason: []const u8) void {
     if (build.mode == .Debug) {
         if (!condition) {
-            @compileError(reason);
+            if (src_loc) |loc| {
+                comptime_err(loc, reason);
+            } else {
+                @compileError(reason);
+            }
         }
     } else {
         assert(condition);
@@ -536,3 +540,87 @@ pub fn raw_slice_cast(slice_or_many_with_sentinel: anytype) []u8 {
     const len: usize = slice_or_many_with_sentinel.len * SIZE;
     return ptr[0..len];
 }
+
+pub fn all_enum_values_start_from_zero_with_no_gaps(comptime ENUM: type) bool {
+    const min = enum_min_value(ENUM);
+    if (min != 0) return false;
+    const max = enum_max_value(ENUM);
+    const EI = @typeInfo(ENUM);
+    comptime_assert_with_reason(EI == .@"enum", comptime_err(@src(), "input `ENUM` must be an enum type"));
+    const E_INFO = EI.@"enum";
+    const range = max - min;
+    return (range - E_INFO.fields.len) == 0;
+}
+
+pub fn count_enum_gaps_between_raw_min_and_enum_max_val(comptime ENUM: type) comptime_int {
+    const EI = @typeInfo(ENUM);
+    comptime_assert_with_reason(EI == .@"enum", comptime_err(@src(), "input `ENUM` must be an enum type"));
+    const E_INFO = EI.@"enum";
+    if (!E_INFO.is_exhaustive) return 0;
+    const raw_smallest = std.math.minInt(E_INFO.tag_type);
+    const largest = enum_max_value(ENUM);
+    const range = largest - raw_smallest;
+    return @intCast(range - E_INFO.fields.len);
+}
+
+pub fn count_enum_gaps_between_zero_and_enum_max_val(comptime ENUM: type) comptime_int {
+    const EI = @typeInfo(ENUM);
+    comptime_assert_with_reason(EI == .@"enum", comptime_err(@src(), "input `ENUM` must be an enum type"));
+    const E_INFO = EI.@"enum";
+    if (!E_INFO.is_exhaustive) return 0;
+    const largest = enum_max_value(ENUM);
+    return @intCast(largest - E_INFO.fields.len);
+}
+
+pub fn count_enum_gaps_between_enum_min_and_enum_max_val(comptime ENUM: type) comptime_int {
+    const EI = @typeInfo(ENUM);
+    comptime_assert_with_reason(EI == .@"enum", comptime_err(@src(), "input `ENUM` must be an enum type"));
+    const E_INFO = EI.@"enum";
+    if (!E_INFO.is_exhaustive) return 0;
+    const largest = enum_max_value(ENUM);
+    const smallest = enum_min_value(ENUM);
+    const range = largest - smallest;
+    return @intCast(range - E_INFO.fields.len);
+}
+
+pub fn enum_min_value(comptime ENUM: type) comptime_int {
+    const EI = @typeInfo(ENUM);
+    comptime_assert_with_reason(EI == .@"enum", comptime_err(@src(), "input `ENUM` must be an enum type"));
+    const E_INFO = EI.@"enum";
+    const raw_largest: comptime_int = std.math.maxInt(E_INFO.tag_type);
+    var smallest: comptime_int = raw_largest;
+    for (E_INFO.fields) |field| {
+        if (field.value < smallest) smallest = field.value;
+    }
+    return smallest;
+}
+pub fn enum_max_value(comptime ENUM: type) comptime_int {
+    const EI = @typeInfo(ENUM);
+    comptime_assert_with_reason(EI == .@"enum", comptime_err(@src(), "input `ENUM` must be an enum type"));
+    const E_INFO = EI.@"enum";
+    const raw_smallest: comptime_int = std.math.minInt(E_INFO.tag_type);
+    var largest: comptime_int = raw_smallest;
+    for (E_INFO.fields) |field| {
+        if (field.value > largest) largest = field.value;
+    }
+    return largest;
+}
+
+pub fn enum_max_field_count(comptime ENUM: type) comptime_int {
+    const EI = @typeInfo(ENUM);
+    comptime_assert_with_reason(EI == .@"enum", comptime_err(@src(), "input `ENUM` must be an enum type"));
+    const E_INFO = EI.@"enum";
+    if (!E_INFO.is_exhaustive) return @intCast(std.math.maxInt(E_INFO.tag_type));
+    return @intCast(E_INFO.fields.len);
+}
+
+pub fn enum_defined_field_count(comptime ENUM: type) comptime_int {
+    const EI = @typeInfo(ENUM);
+    comptime_assert_with_reason(EI == .@"enum", comptime_err(@src(), "input `ENUM` must be an enum type"));
+    const E_INFO = EI.@"enum";
+    return @intCast(E_INFO.fields.len);
+}
+
+// pub fn rev_domain_str(parts: []const u8) []const u8 {
+
+// }

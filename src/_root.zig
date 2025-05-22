@@ -2,19 +2,20 @@ const std = @import("std");
 
 pub const VERSION = "0.2.0";
 pub const NAME = "Goolib";
-pub const LOG_PREFIX = "[" ++ NAME ++ " " ++ VERSION ++ "] ";
 
 pub const AABB2 = @import("./AABB2.zig");
 pub const ANSI = @import("./ANSI.zig");
 pub const BinarySearch = @import("./BinarySearch.zig");
 pub const BucketAllocator = @import("./BucketAllocator.zig");
 pub const Bytes = @import("./Bytes.zig");
+pub const C_Allocator = @import("./C_Allocator.zig");
 pub const Cast = @import("./Cast.zig");
 // pub const Codegen = @import("./Codegen.zig");
 pub const Color = @import("./Color.zig");
 pub const CommonTypes = @import("./CommonTypes.zig");
 // pub const Compare = @import("./Compare.zig");
 pub const DummyAllocator = @import("./DummyAllocator.zig");
+pub const EnumMap = @import("./EnumMap.zig");
 // pub const Filegen = @import("./Filegen.zig");
 pub const Flags = @import("./Flags.zig");
 // pub const Format = @import("./Format.zig");
@@ -30,6 +31,7 @@ pub const Slice = @import("./Slice.zig");
 
 // pub const StaticAllocVectorizedStructOfArrays = @import("./StaticAllocVectorizedStructOfArrays.zig");
 // pub const Template = @import("./Template.zig");
+pub const Time = @import("./Time.zig");
 pub const Utils = @import("./Utils.zig");
 pub const Vec2 = @import("./Vec2.zig");
 pub const Writer = @import("./Writer.zig");
@@ -41,12 +43,14 @@ comptime {
     _ = @import("./BinarySearch.zig");
     _ = @import("./BucketAllocator.zig");
     _ = @import("./Bytes.zig");
+    _ = @import("./C_Allocator.zig");
     _ = @import("./Cast.zig");
     // _ = @import("./Codegen.zig");
     _ = @import("./Color.zig");
     _ = @import("./CommonTypes.zig");
     // _ = @import("./Compare.zig");
     _ = @import("./DummyAllocator.zig");
+    _ = @import("./EnumMap.zig");
     // _ = @import("./Filegen.zig");
     _ = @import("./Flags.zig");
     // _ = @import("./Format.zig");
@@ -62,6 +66,7 @@ comptime {
 
     // _ = @import("./StaticAllocVectorizedStructOfArrays.zig");
     // _ = @import("./Template.zig");
+    _ = @import("./Time.zig");
     _ = @import("./Utils.zig");
     _ = @import("./Vec2.zig");
     _ = @import("./Writer.zig");

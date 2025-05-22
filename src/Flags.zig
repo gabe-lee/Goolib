@@ -1,29 +1,19 @@
 const std = @import("std");
-
-const Root = @import("./_root.zig");
-const LOG_PREFIX = Root.LOG_PREFIX ++ "[Flags] ";
-const Utils = Root.Utils;
-const comptime_assert_with_reason = Utils.comptime_assert_with_reason;
+const meta = std.meta;
 const math = std.math;
 const Log2Int = math.Log2Int;
 const Log2IntCeil = math.Log2IntCeil;
 
-fn NoGroups(comptime T: type) type {
-    return enum(T) {
-        NONE = 0,
-        ALL = @bitCast(math.maxInt(std.meta.Int(.unsigned, @typeInfo(T).int.bits))),
-    };
-}
+const Root = @import("./_root.zig");
+const Utils = Root.Utils;
+const comptime_assert_with_reason = Utils.comptime_assert_with_reason;
 
-pub fn Flags(comptime FLAGS_ENUM: type, comptime GROUPS_ENUM_OR_NULL: ?type) type {
+pub fn Flags(comptime FLAGS_ENUM: type, comptime GROUPS_OR_NULL: ?Groups) type {
     const INFO_1 = @typeInfo(FLAGS_ENUM);
-    comptime_assert_with_reason(INFO_1 == .@"enum", LOG_PREFIX ++ "parameter `FLAGS_ENUM` must be an enum type");
+    comptime_assert_with_reason(INFO_1 == .@"enum", @src(), "parameter `FLAGS_ENUM` must be an enum type");
     const E_INFO = INFO_1.@"enum";
-    const GROUPS_ENUM = GROUPS_ENUM_OR_NULL orelse NoGroups(E_INFO.tag_type);
-    const INFO_2 = @typeInfo(GROUPS_ENUM);
-    comptime_assert_with_reason(INFO_2 == .@"enum", LOG_PREFIX ++ "parameter `GROUPS_ENUM_OR_NULL` must be an enum type or `null`");
-    const G_INFO = INFO_2.@"enum";
-    comptime_assert_with_reason(G_INFO.tag_type == E_INFO.tag_type, "GROUPS_ENUM must have the exact same tag type as FLAGS_ENUM");
+    comptime_assert_with_reason(@typeInfo(E_INFO.tag_type).int.signedness == .unsigned, @src(), "parameter `FLAGS_ENUM` tage type must be an unsigned integer type");
+    const GROUPS = if (GROUPS_OR_NULL) |groups_struct| BuildGroups(groups_struct) else BuildGroups(Groups.none(FLAGS_ENUM));
     return extern struct {
         raw: EnumInt = 0,
 
@@ -32,7 +22,8 @@ pub fn Flags(comptime FLAGS_ENUM: type, comptime GROUPS_ENUM_OR_NULL: ?type) typ
         pub const BitIndex: type = Log2Int(EnumInt);
         pub const BitCount: type = Log2IntCeil(EnumInt);
         pub const Flag = FLAGS_ENUM;
-        pub const Group = GROUPS_ENUM;
+        pub const GroupsInfo = GROUPS;
+        pub const Group = GroupsInfo.Name;
 
         pub inline fn blank() Self {
             return Self{ .raw = 0 };
@@ -68,18 +59,18 @@ pub fn Flags(comptime FLAGS_ENUM: type, comptime GROUPS_ENUM_OR_NULL: ?type) typ
         }
 
         pub inline fn clear_group_then_set(self: *Self, group: Group, flag: Flag) void {
-            self.raw &= ~@intFromEnum(group);
+            self.raw &= GroupsInfo.inverse_bits(group);
             self.raw |= @intFromEnum(flag);
         }
         pub inline fn clear_group_then_set_many(self: *Self, group: Group, flags: []const Flag) void {
-            self.raw &= ~@intFromEnum(group);
+            self.raw &= GroupsInfo.inverse_bits(group);
             for (flags) |flag| {
                 self.raw |= @intFromEnum(flag);
             }
         }
         pub inline fn clear_many_groups_then_set_many(self: *Self, groups: []const Group, flags: []const Flag) void {
             for (groups) |group| {
-                self.raw &= ~@intFromEnum(group);
+                self.raw &= GroupsInfo.inverse_bits(group);
             }
             for (flags) |flag| {
                 self.raw |= @intFromEnum(flag);
@@ -108,29 +99,227 @@ pub fn Flags(comptime FLAGS_ENUM: type, comptime GROUPS_ENUM_OR_NULL: ?type) typ
             return self.raw & composite == composite;
         }
         pub inline fn isolate_group(self: Self, group: Group) Self {
-            return Self{ .raw = self.raw & @intFromEnum(group) };
+            return Self{ .raw = self.raw & GroupsInfo.bits(group) };
         }
         pub inline fn isolate_group_as_int_aligned_to_bit_0(self: Self, group: Group) EnumInt {
-            return (self.raw & @intFromEnum(group)) >> @intCast(@ctz(@intFromEnum(group)));
+            return (self.raw & GroupsInfo.bits(group)) >> GroupsInfo.ctz(group);
         }
         pub inline fn clear_group(self: *Self, group: Group) void {
-            self.raw &= ~@intFromEnum(group);
+            self.raw &= GroupsInfo.inverse_bits(group);
         }
         pub inline fn set_entire_group(self: *Self, group: Group) void {
-            self.raw |= @intFromEnum(group);
+            self.raw |= GroupsInfo.bits(group);
         }
         pub inline fn has_entire_group_set(self: Self, group: Group) bool {
-            return self.raw & @intFromEnum(group) == @intFromEnum(group);
+            const group_bits = GroupsInfo.bits(group);
+            return self.raw & group_bits == group_bits;
+        }
+        pub inline fn has_any_flag_in_group_set(self: Self, group: Group) bool {
+            return self.raw & GroupsInfo.bits(group) > 0;
         }
         pub inline fn set_group_from_int_aligned_at_bit_0(self: *Self, group: Group, val: EnumInt) void {
-            self.raw |= ((val) << @intCast(@ctz(@intFromEnum(group))));
+            const masked_val = ((val) << GroupsInfo.ctz(group)) & GroupsInfo.bits(group);
+            self.raw |= masked_val;
         }
         pub inline fn clear_and_set_group_from_int_aligned_at_bit_0(self: *Self, group: Group, val: EnumInt) void {
-            self.raw &= ~@intFromEnum(group);
-            self.raw |= ((val) << @intCast(@ctz(@intFromEnum(group))));
+            self.raw &= GroupsInfo.inverse_bits(group);
+            const masked_val = ((val) << GroupsInfo.ctz(group)) & GroupsInfo.bits(group);
+            self.raw |= masked_val;
         }
-        pub inline fn clear_group_from_int_aligned_at_bit_0(self: *Self, group: Group, val: EnumInt) void {
-            self.raw &= ~((val) << @intCast(@ctz(@intFromEnum(group))));
+        pub inline fn partial_clear_group_from_inverse_of_int_aligned_at_bit_0(self: *Self, group: Group, val: EnumInt) void {
+            const masked_val = ((val) << GroupsInfo.ctz(group)) & GroupsInfo.bits(group);
+            self.raw &= ~masked_val;
+        }
+        pub inline fn set_group_from_int_aligned_at_bit_0_dont_mask(self: *Self, group: Group, val: EnumInt) void {
+            const unmasked_val = ((val) << GroupsInfo.ctz(group));
+            self.raw |= unmasked_val;
+        }
+        pub inline fn clear_and_set_group_from_int_aligned_at_bit_0_dont_mask(self: *Self, group: Group, val: EnumInt) void {
+            self.raw &= GroupsInfo.inverse_bits(group);
+            const unmasked_val = ((val) << GroupsInfo.ctz(group));
+            self.raw |= unmasked_val;
+        }
+        pub inline fn partial_clear_group_from_inverse_of_int_aligned_at_bit_0_dont_mask(self: *Self, group: Group, val: EnumInt) void {
+            const unmasked_val = ((val) << GroupsInfo.ctz(group));
+            self.raw &= ~unmasked_val;
+        }
+
+        pub inline fn flag_to_first_matching_group(flag: Flag) ?Group {
+            for (GroupsInfo.BITS[0..], 0..) |bits, idx| {
+                if (@intFromEnum(flag) & bits == @intFromEnum(flag)) return @enumFromInt(idx);
+            }
+            return null;
+        }
+        pub inline fn flag_to_first_matching_group_guaranteed(flag: Flag) Group {
+            for (GroupsInfo.BITS[0..], 0..) |bits, idx| {
+                if (@intFromEnum(flag) & bits == @intFromEnum(flag)) return @enumFromInt(idx);
+            }
+            unreachable;
+        }
+        pub inline fn flag_to_first_matching_group_subset(flag: Flag, group_subset: []const Group) ?Group {
+            for (group_subset, 0..) |group, idx| {
+                if (@intFromEnum(flag) & GroupsInfo.bits(group) == @intFromEnum(flag)) return @enumFromInt(idx);
+            }
+            return null;
+        }
+        pub inline fn flag_to_first_matching_group_subset_guaranteed(flag: Flag, group_subset: []const Group) Group {
+            for (group_subset, 0..) |group, idx| {
+                if (@intFromEnum(flag) & GroupsInfo.bits(group) == @intFromEnum(flag)) return @enumFromInt(idx);
+            }
+            unreachable;
+        }
+
+        pub inline fn all_flags_to_first_matching_group(self: Self) ?Group {
+            for (GroupsInfo.BITS[0..], 0..) |bits, idx| {
+                if (self.raw & bits == self.raw) return @enumFromInt(idx);
+            }
+            return null;
+        }
+        pub inline fn all_flags_to_first_matching_group_guaranteed(self: Self) Group {
+            for (GroupsInfo.BITS[0..], 0..) |bits, idx| {
+                if (self.raw & bits == self.raw) return @enumFromInt(idx);
+            }
+            unreachable;
+        }
+        pub inline fn all_flags_to_first_matching_group_subset(self: Self, group_subset: []const Group) ?Group {
+            for (group_subset, 0..) |group, idx| {
+                if (self.raw & GroupsInfo.bits(group) == self.raw) return @enumFromInt(idx);
+            }
+            return null;
+        }
+        pub inline fn all_flags_to_first_matching_group_subset_guaranteed(self: Self, group_subset: []const Group) Group {
+            for (group_subset, 0..) |group, idx| {
+                if (self.raw & GroupsInfo.bits(group) == self.raw) return @enumFromInt(idx);
+            }
+            unreachable;
+        }
+    };
+}
+
+pub const Groups = struct {
+    group_names_enum: type,
+    group_vals_enum: type,
+
+    fn none(comptime FLAGS_ENUM: type) Groups {
+        const F_INFO = @typeInfo(FLAGS_ENUM);
+        comptime_assert_with_reason(F_INFO == .@"enum", @src(), "parameter `FLAGS_ENUM` must be an enum type");
+        const FLAGS_INFO = F_INFO.@"enum";
+        comptime_assert_with_reason(@typeInfo(FLAGS_INFO.tag_type).int.signedness == .unsigned, @src(), "parameter `FLAGS_ENUM` tage type must be an unsigned integer type");
+        return Groups{
+            .group_names_enum = enum(u8) {
+                NONE = 0,
+            },
+            .group_vals_enum = enum(FLAGS_INFO.tag_type) {
+                NONE = 0,
+            },
+        };
+    }
+};
+
+pub fn BuildGroups(comptime groups: Groups) type {
+    const GROUP_NAMES_ENUM = groups.group_names_enum;
+    const GROUP_VALS_ENUM = groups.group_vals_enum;
+    const N_INFO = @typeInfo(GROUP_NAMES_ENUM);
+    comptime_assert_with_reason(N_INFO == .@"enum", @src(), "GROUP_NAMES_ENUM must be an enum type");
+    const NAME_INFO = N_INFO.@"enum";
+    comptime_assert_with_reason(@typeInfo(NAME_INFO.tag_type).int.signedness == .unsigned, @src(), "GROUP_NAMES_ENUM tag type must be an unsigned integer type");
+    comptime_assert_with_reason(Utils.all_enum_values_start_from_zero_with_no_gaps(GROUP_NAMES_ENUM), @src(), "GROUP_NAMES_ENUM must use every tag value starting from zero up to the largest tag value with no gaps");
+    const V_INFO = @typeInfo(GROUP_VALS_ENUM);
+    comptime_assert_with_reason(V_INFO == .@"enum", @src(), "GROUP_VALS_ENUM must be an enum type");
+    const VAL_INFO = V_INFO.@"enum";
+    comptime var counts: [NAME_INFO.fields.len]usize = @splat(0);
+    comptime var maps: [NAME_INFO.fields.len]VAL_INFO.tag_type = @splat(0);
+    for (NAME_INFO.fields) |name_field| {
+        inner: for (VAL_INFO.fields) |val_field| {
+            if (std.mem.eql(u8, name_field.name, val_field.name)) {
+                counts[name_field.value] += 1;
+                maps[name_field.value] = val_field.value;
+                break :inner;
+            }
+        }
+    }
+    for (counts[0..]) |cnt| {
+        comptime_assert_with_reason(cnt == 1, @src(), "all GROUP_NAMES_ENUM tags must have a matching tag with the same exact name in GROUP_VALS_ENUM");
+    }
+    const M = comptime make_const: {
+        break :make_const maps;
+    };
+    const IM = comptime make_const: {
+        var inv: [M.len]VAL_INFO.tag_type = @splat(0);
+        for (M[0..], 0..) |val, idx| {
+            inv[idx] = ~val;
+        }
+        break :make_const inv;
+    };
+    const CT = comptime make_const: {
+        var trail_count: [M.len]Log2IntCeil(VAL_INFO.tag_type) = @splat(0);
+        for (M[0..], 0..) |val, idx| {
+            trail_count[idx] = @ctz(val);
+        }
+        break :make_const trail_count;
+    };
+    const CL = comptime make_const: {
+        var lead_count: [M.len]Log2IntCeil(VAL_INFO.tag_type) = @splat(0);
+        for (M[0..], 0..) |val, idx| {
+            lead_count[idx] = @clz(val);
+        }
+        break :make_const lead_count;
+    };
+    const POP = comptime make_const: {
+        var pop_count: [M.len]Log2IntCeil(VAL_INFO.tag_type) = @splat(0);
+        for (M[0..], 0..) |val, idx| {
+            pop_count[idx] = @popCount(val);
+        }
+        break :make_const pop_count;
+    };
+    const RNG = comptime make_const: {
+        const BITS: Log2IntCeil(VAL_INFO.tag_type) = @intCast(@typeInfo(VAL_INFO.tag_type).int.bits);
+        var range: [M.len]Log2IntCeil(VAL_INFO.tag_type) = @splat(0);
+        for (CL[0..], CT[0..], 0..) |leading, trailing, idx| {
+            range[idx] = (BITS - leading) -| trailing;
+        }
+        break :make_const range;
+    };
+    const CONT = comptime make_const: {
+        var contig: [M.len]bool = @splat(false);
+        for (RNG[0..], POP[0..], 0..) |range, pop, idx| {
+            contig[idx] = range == pop;
+        }
+        break :make_const contig;
+    };
+    return struct {
+        pub const Name = GROUP_NAMES_ENUM;
+        pub const Val = GROUP_VALS_ENUM;
+        pub const ValRaw = VAL_INFO.tag_type;
+        pub const COUNT = M.len;
+        pub const BITS = M;
+        pub const INV_BITS = IM;
+        pub const CLZ = CL;
+        pub const CTZ = CT;
+        pub const BIT_COUNT = POP;
+        pub const BIT_RANGE = RNG;
+        pub const CONTIGUOUS = CONT;
+
+        pub inline fn bits(group_name: Name) ValRaw {
+            return BITS[@intFromEnum(group_name)];
+        }
+        pub inline fn inverse_bits(group_name: Name) ValRaw {
+            return INV_BITS[@intFromEnum(group_name)];
+        }
+        pub inline fn clz(group_name: Name) Log2IntCeil(ValRaw) {
+            return CLZ[@intFromEnum(group_name)];
+        }
+        pub inline fn ctz(group_name: Name) Log2IntCeil(ValRaw) {
+            return CTZ[@intFromEnum(group_name)];
+        }
+        pub inline fn bit_count(group_name: Name) Log2IntCeil(ValRaw) {
+            return BIT_COUNT[@intFromEnum(group_name)];
+        }
+        pub inline fn bit_range(group_name: Name) Log2IntCeil(ValRaw) {
+            return BIT_RANGE[@intFromEnum(group_name)];
+        }
+        pub inline fn contiguous(group_name: Name) bool {
+            return CONTIGUOUS[@intFromEnum(group_name)];
         }
     };
 }
