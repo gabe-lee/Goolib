@@ -7,56 +7,9 @@ const build = @import("builtin");
 
 const Root = @import("./_root.zig");
 const ANSI = Root.ANSI;
-const LOG_PREFIX = Root.LOG_PREFIX ++ "[Utils] ";
 const BinarySearch = Root.BinarySearch;
-
-pub inline fn comptime_err(comptime in_comptime: bool, comptime src_loc: ?SourceLocation, comptime this: ?type, comptime log: []const u8) []const u8 {
-    const timing = if (in_comptime) "COMPTIME " else "RUNTIME ";
-    const ident_pfx = if (src_loc != null or this != null) "[" else "";
-    const ident_sfx = if (src_loc != null or this != null) "]\n\t" else "\n\t";
-    const type_chain = if (this) |t| @typeName(t) ++ "." else "";
-    const loc_prefix = if (src_loc) |s| "Zig." ++ s.module ++ "." else "";
-    const loc_func = if (src_loc) |s| s.fn_name ++ "(...)" else "";
-    return ANSI.BEGIN ++ ANSI.FG_RED ++ ANSI.END ++ timing ++ "ERROR: " ++ ident_pfx ++ loc_prefix ++ type_chain ++ loc_func ++ ident_sfx ++ log ++ ANSI.BEGIN ++ ANSI.RESET ++ ANSI.END ++ "\n";
-}
-
-pub inline fn comptime_warn(comptime src_loc: ?SourceLocation, comptime this: ?type, comptime log: []const u8) []const u8 {
-    const ident_pfx = if (src_loc != null or this != null) "[" else "";
-    const ident_sfx = if (src_loc != null or this != null) "]\n\t" else "\n\t";
-    const type_chain = if (this) |t| @typeName(t) ++ "." else "";
-    const loc_prefix = if (src_loc) |s| "Zig." ++ s.module ++ "." else "";
-    const loc_func = if (src_loc) |s| s.fn_name ++ "(...)" else "";
-    return ANSI.BEGIN ++ ANSI.FG_YELLOW ++ ANSI.END ++ "WARN: " ++ ident_pfx ++ loc_prefix ++ type_chain ++ loc_func ++ ident_sfx ++ log ++ ANSI.BEGIN ++ ANSI.RESET ++ ANSI.END ++ "\n";
-}
-
-pub inline fn comptime_info(comptime src_loc: ?SourceLocation, comptime this: ?type, comptime log: []const u8) []const u8 {
-    const ident_pfx = if (src_loc != null or this != null) "[" else "";
-    const ident_sfx = if (src_loc != null or this != null) "]\n\t" else "\n\t";
-    const type_chain = if (this) |t| @typeName(t) ++ "." else "";
-    const loc_prefix = if (src_loc) |s| "Zig." ++ s.module ++ "." else "";
-    const loc_func = if (src_loc) |s| s.fn_name ++ "(...)" else "";
-    return "INFO: " ++ ident_pfx ++ loc_prefix ++ type_chain ++ loc_func ++ ident_sfx ++ log ++ "\n";
-}
-
-pub inline fn assert_with_reason(condition: bool, src_loc: ?SourceLocation, this: ?type, reason_fmt: []const u8, reason_args: anytype) void {
-    if (build.mode == .Debug) {
-        if (!condition) {
-            std.debug.panic(comptime_err(src_loc, this, reason_fmt), reason_args);
-            unreachable;
-        }
-    } else {
-        assert(condition);
-    }
-}
-pub inline fn comptime_assert_with_reason(condition: bool, comptime src_loc: ?builtin.SourceLocation, this: ?type, reason: []const u8) void {
-    if (build.mode == .Debug) {
-        if (!condition) {
-            @compileError(comptime_err(src_loc, this, reason));
-        }
-    } else {
-        assert(condition);
-    }
-}
+const Assert = Root.Assert;
+const assert_with_reason = Assert.assert_with_reason;
 
 pub inline fn inline_swap(comptime T: type, a: *T, b: *T, temp: *T) void {
     temp.* = a.*;
@@ -352,8 +305,8 @@ pub inline fn can_infer_type_order(comptime T: type) bool {
 pub inline fn infered_less_than(a: anytype, b: anytype) bool {
     const A = @TypeOf(a);
     const B = @TypeOf(b);
-    comptime_assert_with_reason(can_infer_type_order(A), LOG_PREFIX ++ "infered_less_than: type of `a` (" ++ @typeName(A) ++ ") cannot infer order");
-    comptime_assert_with_reason(can_infer_type_order(B), LOG_PREFIX ++ "infered_less_than: type of `b` (" ++ @typeName(B) ++ ") cannot infer order");
+    assert_with_reason(can_infer_type_order(A), @inComptime(), @src(), @This(), "type of `a` (" ++ @typeName(A) ++ ") cannot infer order");
+    assert_with_reason(can_infer_type_order(B), @inComptime(), @src(), @This(), "type of `b` (" ++ @typeName(B) ++ ") cannot infer order");
     const aa = if (type_is_pointer_or_slice(A)) unwrap: {
         const AA = pointer_child_type(A);
         break :unwrap if (type_is_bool(AA)) @intFromBool(a.*) else if (type_is_enum(AA)) @intFromEnum(a.*) else a.*;
@@ -368,8 +321,8 @@ pub inline fn infered_less_than(a: anytype, b: anytype) bool {
 pub inline fn infered_greater_than(a: anytype, b: anytype) bool {
     const A = @TypeOf(a);
     const B = @TypeOf(b);
-    comptime_assert_with_reason(can_infer_type_order(A), LOG_PREFIX ++ "infered_less_than: type of `a` (" ++ @typeName(A) ++ ") cannot infer order");
-    comptime_assert_with_reason(can_infer_type_order(B), LOG_PREFIX ++ "infered_less_than: type of `b` (" ++ @typeName(B) ++ ") cannot infer order");
+    assert_with_reason(can_infer_type_order(A), @inComptime(), @src(), @This(), "type of `a` (" ++ @typeName(A) ++ ") cannot infer order");
+    assert_with_reason(can_infer_type_order(B), @inComptime(), @src(), @This(), "type of `b` (" ++ @typeName(B) ++ ") cannot infer order");
     const aa = if (type_is_pointer_or_slice(A)) unwrap: {
         const AA = pointer_child_type(A);
         break :unwrap if (type_is_bool(AA)) @intFromBool(a.*) else if (type_is_enum(AA)) @intFromEnum(a.*) else a.*;
@@ -384,8 +337,8 @@ pub inline fn infered_greater_than(a: anytype, b: anytype) bool {
 pub inline fn infered_less_than_or_equal(a: anytype, b: anytype) bool {
     const A = @TypeOf(a);
     const B = @TypeOf(b);
-    comptime_assert_with_reason(can_infer_type_order(A), LOG_PREFIX ++ "infered_less_than: type of `a` (" ++ @typeName(A) ++ ") cannot infer order");
-    comptime_assert_with_reason(can_infer_type_order(B), LOG_PREFIX ++ "infered_less_than: type of `b` (" ++ @typeName(B) ++ ") cannot infer order");
+    assert_with_reason(can_infer_type_order(A), @inComptime(), @src(), @This(), "type of `a` (" ++ @typeName(A) ++ ") cannot infer order");
+    assert_with_reason(can_infer_type_order(B), @inComptime(), @src(), @This(), "type of `b` (" ++ @typeName(B) ++ ") cannot infer order");
     const aa = if (type_is_pointer_or_slice(A)) unwrap: {
         const AA = pointer_child_type(A);
         break :unwrap if (type_is_bool(AA)) @intFromBool(a.*) else if (type_is_enum(AA)) @intFromEnum(a.*) else a.*;
@@ -400,8 +353,8 @@ pub inline fn infered_less_than_or_equal(a: anytype, b: anytype) bool {
 pub inline fn infered_greater_than_or_equal(a: anytype, b: anytype) bool {
     const A = @TypeOf(a);
     const B = @TypeOf(b);
-    comptime_assert_with_reason(can_infer_type_order(A), LOG_PREFIX ++ "infered_less_than: type of `a` (" ++ @typeName(A) ++ ") cannot infer order");
-    comptime_assert_with_reason(can_infer_type_order(B), LOG_PREFIX ++ "infered_less_than: type of `b` (" ++ @typeName(B) ++ ") cannot infer order");
+    assert_with_reason(can_infer_type_order(A), @inComptime(), @src(), @This(), "type of `a` (" ++ @typeName(A) ++ ") cannot infer order");
+    assert_with_reason(can_infer_type_order(B), @inComptime(), @src(), @This(), "type of `b` (" ++ @typeName(B) ++ ") cannot infer order");
     const aa = if (type_is_pointer_or_slice(A)) unwrap: {
         const AA = pointer_child_type(A);
         break :unwrap if (type_is_bool(AA)) @intFromBool(a.*) else if (type_is_enum(AA)) @intFromEnum(a.*) else a.*;
@@ -416,8 +369,8 @@ pub inline fn infered_greater_than_or_equal(a: anytype, b: anytype) bool {
 pub inline fn infered_equal(a: anytype, b: anytype) bool {
     const A = @TypeOf(a);
     const B = @TypeOf(b);
-    comptime_assert_with_reason(can_infer_type_order(A), LOG_PREFIX ++ "infered_less_than: type of `a` (" ++ @typeName(A) ++ ") cannot infer order");
-    comptime_assert_with_reason(can_infer_type_order(B), LOG_PREFIX ++ "infered_less_than: type of `b` (" ++ @typeName(B) ++ ") cannot infer order");
+    assert_with_reason(can_infer_type_order(A), @inComptime(), @src(), @This(), "type of `a` (" ++ @typeName(A) ++ ") cannot infer order");
+    assert_with_reason(can_infer_type_order(B), @inComptime(), @src(), @This(), "type of `b` (" ++ @typeName(B) ++ ") cannot infer order");
     const aa = if (type_is_pointer_or_slice(A)) unwrap: {
         const AA = pointer_child_type(A);
         break :unwrap if (type_is_bool(AA)) @intFromBool(a.*) else if (type_is_enum(AA)) @intFromEnum(a.*) else a.*;
@@ -479,26 +432,26 @@ pub fn memcopy(from_src: anytype, to_dst: anytype, count: usize) void {
         const ptr_type = TO;
         const child_type = pointer_child_type(ptr_type);
         if (pointer_is_slice(ptr_type)) {
-            assert_with_reason(to_dst_not_null.len >= count, "memcopy `to_dst` ({s}) cannot recieve {d} items (has {d} capacity)", .{ @typeName(TO), count, to_dst_not_null.len });
-            comptime_assert_with_reason(child_type == copy_type, "memcopy `to_dst` (" ++ @typeName(TO) ++ ") does not have a matching child type for `from_src` (" ++ @typeName(FROM) ++ ")");
+            assert_with_reason(to_dst_not_null.len >= count, @inComptime(), @src(), @This(), "`to_dst` ({s}) cannot recieve {d} items (has {d} capacity)", .{ @typeName(TO), count, to_dst_not_null.len });
+            assert_with_reason(child_type == copy_type, @inComptime(), @src(), @This(), "`to_dst` (" ++ @typeName(TO) ++ ") does not have a matching child type for `from_src` (" ++ @typeName(FROM) ++ ")");
             raw_to = @ptrCast(@alignCast(to_dst_not_null.ptr));
         } else if (pointer_is_single(ptr_type)) {
             if (type_is_array_or_vector(child_type)) {
                 assert_with_reason(to_dst_not_null.len >= count, "memcopy `to_dst` ({s}) cannot recieve {d} items (has {d} capacity)", .{ @typeName(TO), count, to_dst_not_null.len });
-                comptime_assert_with_reason(array_or_vector_child_type(child_type) == copy_type, "memcopy `to_dst` (" ++ @typeName(TO) ++ ") does not have a matching child type for `from_src` (" ++ @typeName(FROM) ++ ")");
+                assert_with_reason(array_or_vector_child_type(child_type) == copy_type, @inComptime(), @src(), @This(), "`to_dst` (" ++ @typeName(TO) ++ ") does not have a matching child type for `from_src` (" ++ @typeName(FROM) ++ ")");
                 raw_to = @ptrCast(@alignCast(to_dst_not_null));
             } else {
-                assert_with_reason(count == 1, "memcopy `to_dst` ({s}) cannot recieve {d} items (has 1 item capacity, single item pointer to non-array/vector)", .{ @typeName(TO), count });
-                comptime_assert_with_reason(child_type == copy_type, "memcopy `to_dst` (" ++ @typeName(TO) ++ ") does not have a matching child type for `from_src` (" ++ @typeName(FROM) ++ ")");
+                assert_with_reason(count == 1, @inComptime(), @src(), @This(), "`to_dst` ({s}) cannot recieve {d} items (has 1 item capacity, single item pointer to non-array/vector)", .{ @typeName(TO), count });
+                assert_with_reason(child_type == copy_type, @inComptime(), @src(), @This(), "`to_dst` (" ++ @typeName(TO) ++ ") does not have a matching child type for `from_src` (" ++ @typeName(FROM) ++ ")");
                 raw_to = @ptrCast(@alignCast(to_dst_not_null));
             }
         } else if (pointer_is_many(ptr_type)) {
             if (pointer_type_has_sentinel(ptr_type) and (build.mode == .Debug or build.mode == .ReleaseSafe)) {
                 const sentinel = pointer_type_sentinel(ptr_type);
                 const len_check_slice = make_const_slice_from_sentinel_ptr_max_len(child_type, sentinel.*, to_dst_not_null, count);
-                assert_with_reason(len_check_slice.len >= count, "memcopy `to_dst` ({s}) cannot recieve {d} items (has {d} capacity)", .{ @typeName(TO), count, to_dst_not_null.len });
+                assert_with_reason(len_check_slice.len >= count, @inComptime(), @src(), @This(), "`to_dst` ({s}) cannot recieve {d} items (has {d} capacity)", .{ @typeName(TO), count, to_dst_not_null.len });
             }
-            comptime_assert_with_reason(child_type == copy_type, "memcopy `to_dst` (" ++ @typeName(TO) ++ ") does not have a matching child type for `from_src` (" ++ @typeName(FROM) ++ ")");
+            assert_with_reason(child_type == copy_type, @inComptime(), @src(), @This(), "`to_dst` (" ++ @typeName(TO) ++ ") does not have a matching child type for `from_src` (" ++ @typeName(FROM) ++ ")");
             raw_to = @ptrCast(@alignCast(to_dst_not_null));
         }
     } else @compileError("memcopy `to_dst` must be a mutable pointer type");
@@ -508,7 +461,7 @@ pub fn memcopy(from_src: anytype, to_dst: anytype, count: usize) void {
 pub fn raw_ptr_cast_const(ptr_or_slice: anytype) [*]const u8 {
     const PTR = @TypeOf(ptr_or_slice);
     const P_INFO = @typeInfo(PTR);
-    comptime_assert_with_reason(P_INFO == .pointer, comptime_err(@src(), "input `ptr` must be a pointer type"));
+    assert_with_reason(P_INFO == .pointer, @inComptime(), @src(), @This(), "input `ptr` must be a pointer type");
     const PTR_INFO = P_INFO.pointer;
     return if (PTR_INFO.size == .slice) @ptrCast(@alignCast(ptr_or_slice.ptr)) else @ptrCast(@alignCast(ptr_or_slice));
 }
@@ -516,7 +469,7 @@ pub fn raw_ptr_cast_const(ptr_or_slice: anytype) [*]const u8 {
 pub fn raw_ptr_cast(ptr_or_slice: anytype) [*]u8 {
     const PTR = @TypeOf(ptr_or_slice);
     const P_INFO = @typeInfo(PTR);
-    comptime_assert_with_reason(P_INFO == .pointer, comptime_err(@src(), "input `ptr` must be a pointer type"));
+    assert_with_reason(P_INFO == .pointer, @inComptime(), @src(), @This(), "input `ptr` must be a pointer type");
     const PTR_INFO = P_INFO.pointer;
     return if (PTR_INFO.size == .slice) @ptrCast(@alignCast(ptr_or_slice.ptr)) else @ptrCast(@alignCast(ptr_or_slice));
 }
@@ -524,7 +477,7 @@ pub fn raw_ptr_cast(ptr_or_slice: anytype) [*]u8 {
 pub fn raw_slice_cast_const(slice_or_many_with_sentinel: anytype) []const u8 {
     const SLICE = @TypeOf(slice_or_many_with_sentinel);
     const S_INFO = @typeInfo(SLICE);
-    comptime_assert_with_reason(S_INFO == .pointer and (S_INFO.pointer.size == .slice or (S_INFO.pointer.size == .many and S_INFO.pointer.sentinel_ptr != null)), comptime_err(@src(), "input `slice` must be a slice or many-item-pointer with a sentinel"));
+    assert_with_reason(S_INFO == .pointer and (S_INFO.pointer.size == .slice or (S_INFO.pointer.size == .many and S_INFO.pointer.sentinel_ptr != null)), @inComptime(), @src(), @This(), "input `slice` must be a slice or many-item-pointer with a sentinel");
     const SLICE_INFO = S_INFO.pointer;
     const CHILD = SLICE_INFO.child;
     const SIZE = @sizeOf(CHILD);
@@ -540,7 +493,7 @@ pub fn raw_slice_cast_const(slice_or_many_with_sentinel: anytype) []const u8 {
 pub fn raw_slice_cast(slice_or_many_with_sentinel: anytype) []u8 {
     const SLICE = @TypeOf(slice_or_many_with_sentinel);
     const S_INFO = @typeInfo(SLICE);
-    comptime_assert_with_reason(S_INFO == .pointer and (S_INFO.pointer.size == .slice or (S_INFO.pointer.size == .many and S_INFO.pointer.sentinel_ptr != null)), comptime_err(@src(), "input `slice` must be a slice or many-item-pointer with a sentinel"));
+    assert_with_reason(S_INFO == .pointer and (S_INFO.pointer.size == .slice or (S_INFO.pointer.size == .many and S_INFO.pointer.sentinel_ptr != null)), @inComptime(), @src(), @This(), "input `slice` must be a slice or many-item-pointer with a sentinel");
     const SLICE_INFO = S_INFO.pointer;
     const CHILD = SLICE_INFO.child;
     const SIZE = @sizeOf(CHILD);
@@ -558,7 +511,7 @@ pub fn all_enum_values_start_from_zero_with_no_gaps(comptime ENUM: type) bool {
     if (min != 0) return false;
     const max = enum_max_value(ENUM);
     const EI = @typeInfo(ENUM);
-    comptime_assert_with_reason(EI == .@"enum", comptime_err(@src(), "input `ENUM` must be an enum type"));
+    assert_with_reason(EI == .@"enum", @inComptime(), @src(), @This(), "input `ENUM` must be an enum type");
     const E_INFO = EI.@"enum";
     const range = max - min;
     return (range - E_INFO.fields.len) == 0;
@@ -566,7 +519,7 @@ pub fn all_enum_values_start_from_zero_with_no_gaps(comptime ENUM: type) bool {
 
 pub fn count_enum_gaps_between_raw_min_and_enum_max_val(comptime ENUM: type) comptime_int {
     const EI = @typeInfo(ENUM);
-    comptime_assert_with_reason(EI == .@"enum", comptime_err(@src(), "input `ENUM` must be an enum type"));
+    assert_with_reason(EI == .@"enum", @inComptime(), @src(), @This(), "input `ENUM` must be an enum type");
     const E_INFO = EI.@"enum";
     if (!E_INFO.is_exhaustive) return 0;
     const raw_smallest = std.math.minInt(E_INFO.tag_type);
@@ -577,7 +530,7 @@ pub fn count_enum_gaps_between_raw_min_and_enum_max_val(comptime ENUM: type) com
 
 pub fn count_enum_gaps_between_zero_and_enum_max_val(comptime ENUM: type) comptime_int {
     const EI = @typeInfo(ENUM);
-    comptime_assert_with_reason(EI == .@"enum", comptime_err(@src(), "input `ENUM` must be an enum type"));
+    assert_with_reason(EI == .@"enum", @inComptime(), @src(), @This(), "input `ENUM` must be an enum type");
     const E_INFO = EI.@"enum";
     if (!E_INFO.is_exhaustive) return 0;
     const largest = enum_max_value(ENUM);
@@ -586,7 +539,7 @@ pub fn count_enum_gaps_between_zero_and_enum_max_val(comptime ENUM: type) compti
 
 pub fn count_enum_gaps_between_enum_min_and_enum_max_val(comptime ENUM: type) comptime_int {
     const EI = @typeInfo(ENUM);
-    comptime_assert_with_reason(EI == .@"enum", comptime_err(@src(), "input `ENUM` must be an enum type"));
+    assert_with_reason(EI == .@"enum", @inComptime(), @src(), @This(), "input `ENUM` must be an enum type");
     const E_INFO = EI.@"enum";
     if (!E_INFO.is_exhaustive) return 0;
     const largest = enum_max_value(ENUM);
@@ -597,7 +550,7 @@ pub fn count_enum_gaps_between_enum_min_and_enum_max_val(comptime ENUM: type) co
 
 pub fn enum_min_value(comptime ENUM: type) comptime_int {
     const EI = @typeInfo(ENUM);
-    comptime_assert_with_reason(EI == .@"enum", comptime_err(@src(), "input `ENUM` must be an enum type"));
+    assert_with_reason(EI == .@"enum", @inComptime(), @src(), @This(), "input `ENUM` must be an enum type");
     const E_INFO = EI.@"enum";
     const raw_largest: comptime_int = std.math.maxInt(E_INFO.tag_type);
     var smallest: comptime_int = raw_largest;
@@ -608,7 +561,7 @@ pub fn enum_min_value(comptime ENUM: type) comptime_int {
 }
 pub fn enum_max_value(comptime ENUM: type) comptime_int {
     const EI = @typeInfo(ENUM);
-    comptime_assert_with_reason(EI == .@"enum", comptime_err(@src(), "input `ENUM` must be an enum type"));
+    assert_with_reason(EI == .@"enum", @inComptime(), @src(), @This(), "input `ENUM` must be an enum type");
     const E_INFO = EI.@"enum";
     const raw_smallest: comptime_int = std.math.minInt(E_INFO.tag_type);
     var largest: comptime_int = raw_smallest;
@@ -620,7 +573,7 @@ pub fn enum_max_value(comptime ENUM: type) comptime_int {
 
 pub fn enum_max_field_count(comptime ENUM: type) comptime_int {
     const EI = @typeInfo(ENUM);
-    comptime_assert_with_reason(EI == .@"enum", comptime_err(@src(), "input `ENUM` must be an enum type"));
+    assert_with_reason(EI == .@"enum", @inComptime(), @src(), @This(), "input `ENUM` must be an enum type");
     const E_INFO = EI.@"enum";
     if (!E_INFO.is_exhaustive) return @intCast(std.math.maxInt(E_INFO.tag_type));
     return @intCast(E_INFO.fields.len);
@@ -628,11 +581,7 @@ pub fn enum_max_field_count(comptime ENUM: type) comptime_int {
 
 pub fn enum_defined_field_count(comptime ENUM: type) comptime_int {
     const EI = @typeInfo(ENUM);
-    comptime_assert_with_reason(EI == .@"enum", comptime_err(@src(), "input `ENUM` must be an enum type"));
+    assert_with_reason(EI == .@"enum", @inComptime(), @src(), @This(), "input `ENUM` must be an enum type");
     const E_INFO = EI.@"enum";
     return @intCast(E_INFO.fields.len);
 }
-
-// pub fn rev_domain_str(parts: []const u8) []const u8 {
-
-// }

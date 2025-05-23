@@ -169,21 +169,21 @@ const Sprites = struct {
     const bmp = @embedFile("sprites.bmp");
 
     // zig fmt: off
-    const brick_2x1_purple = SDL.FRect{ .x =   1, .y =  1, .w = 64, .h = 32 };
-    const brick_1x1_purple = SDL.FRect{ .x =  67, .y =  1, .w = 32, .h = 32 };
-    const brick_2x1_red    = SDL.FRect{ .x = 101, .y =  1, .w = 64, .h = 32 };
-    const brick_1x1_red    = SDL.FRect{ .x = 167, .y =  1, .w = 32, .h = 32 };
-    const brick_2x1_yellow = SDL.FRect{ .x =   1, .y = 35, .w = 64, .h = 32 };
-    const brick_1x1_yellow = SDL.FRect{ .x =  67, .y = 35, .w = 32, .h = 32 };
-    const brick_2x1_green  = SDL.FRect{ .x = 101, .y = 35, .w = 64, .h = 32 };
-    const brick_1x1_green  = SDL.FRect{ .x = 167, .y = 35, .w = 32, .h = 32 };
-    const brick_2x1_blue   = SDL.FRect{ .x =   1, .y = 69, .w = 64, .h = 32 };
-    const brick_1x1_blue   = SDL.FRect{ .x =  67, .y = 69, .w = 32, .h = 32 };
-    const brick_2x1_gray   = SDL.FRect{ .x = 101, .y = 69, .w = 64, .h = 32 };
-    const brick_1x1_gray   = SDL.FRect{ .x = 167, .y = 69, .w = 32, .h = 32 };
+    const brick_2x1_purple = SDL.Rect_F32{ .x =   1, .y =  1, .w = 64, .h = 32 };
+    const brick_1x1_purple = SDL.Rect_F32{ .x =  67, .y =  1, .w = 32, .h = 32 };
+    const brick_2x1_red    = SDL.Rect_F32{ .x = 101, .y =  1, .w = 64, .h = 32 };
+    const brick_1x1_red    = SDL.Rect_F32{ .x = 167, .y =  1, .w = 32, .h = 32 };
+    const brick_2x1_yellow = SDL.Rect_F32{ .x =   1, .y = 35, .w = 64, .h = 32 };
+    const brick_1x1_yellow = SDL.Rect_F32{ .x =  67, .y = 35, .w = 32, .h = 32 };
+    const brick_2x1_green  = SDL.Rect_F32{ .x = 101, .y = 35, .w = 64, .h = 32 };
+    const brick_1x1_green  = SDL.Rect_F32{ .x = 167, .y = 35, .w = 32, .h = 32 };
+    const brick_2x1_blue   = SDL.Rect_F32{ .x =   1, .y = 69, .w = 64, .h = 32 };
+    const brick_1x1_blue   = SDL.Rect_F32{ .x =  67, .y = 69, .w = 32, .h = 32 };
+    const brick_2x1_gray   = SDL.Rect_F32{ .x = 101, .y = 69, .w = 64, .h = 32 };
+    const brick_1x1_gray   = SDL.Rect_F32{ .x = 167, .y = 69, .w = 32, .h = 32 };
  
-    const ball             = SDL.FRect{ .x =  2, .y = 104, .w =  22, .h = 22 };
-    const paddle           = SDL.FRect{ .x = 27, .y = 103, .w = 104, .h = 24 };
+    const ball             = SDL.Rect_F32{ .x =  2, .y = 104, .w =  22, .h = 22 };
+    const paddle           = SDL.Rect_F32{ .x = 27, .y = 103, .w = 104, .h = 24 };
     // zig fmt: on
 };
 
@@ -374,7 +374,7 @@ const Ball = struct {
     box: Rect,
     vel: FVec,
     launched: bool,
-    src_rect: *const SDL.FRect,
+    src_rect: *const SDL.Rect_F32,
 
     fn get_paddle_bounce_angle(ball_: Ball, paddle_: Paddle) f32 {
         const min_x = paddle_.box.x - ball_.box.w;
@@ -388,7 +388,7 @@ const Ball = struct {
 
 const Brick = struct {
     box: Rect,
-    src_rect: *const SDL.FRect,
+    src_rect: *const SDL.Rect_F32,
 };
 
 fn fmt_sdl_drivers(write_buf: *std.BoundedArray(u8, 250), current_driver: [*:0]const u8, num_drivers: c_int, get_driver: *const fn (c_int) SDL.Error![*:0]const u8) anyerror![]const u8 {
@@ -483,7 +483,7 @@ fn reset_game() !void {
         const x = Cast.to(f32, window_size.x) * 0.5;
         const h = Sprites.brick_1x1_gray.h;
         const gap = 5;
-        for ([_][2]*const SDL.FRect{
+        for ([_][2]*const SDL.Rect_F32{
             .{ &Sprites.brick_1x1_purple, &Sprites.brick_2x1_purple },
             .{ &Sprites.brick_1x1_red, &Sprites.brick_2x1_red },
             .{ &Sprites.brick_1x1_yellow, &Sprites.brick_2x1_yellow },

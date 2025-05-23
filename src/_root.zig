@@ -5,6 +5,7 @@ pub const NAME = "Goolib";
 
 pub const AABB2 = @import("./AABB2.zig");
 pub const ANSI = @import("./ANSI.zig");
+pub const Assert = @import("./Assert.zig");
 pub const BinarySearch = @import("./BinarySearch.zig");
 pub const BucketAllocator = @import("./BucketAllocator.zig");
 pub const Bytes = @import("./Bytes.zig");
@@ -40,6 +41,7 @@ pub const Writer = @import("./Writer.zig");
 comptime {
     _ = @import("./AABB2.zig");
     _ = @import("./ANSI.zig");
+    _ = @import("./Assert.zig");
     _ = @import("./BinarySearch.zig");
     _ = @import("./BucketAllocator.zig");
     _ = @import("./Bytes.zig");
