@@ -52,6 +52,10 @@ pub fn define_rect2_type(comptime T: type) type {
             return self.to_aabb2().point_within(point);
         }
 
+        pub fn all_points_within(self: T_Rect2, points: []const T_Vec2) bool {
+            return self.to_aabb2().all_points_within(points);
+        }
+
         pub fn point_approx_within(self: T_Rect2, point: T_Vec2) bool {
             return self.to_aabb2().point_approx_within(point);
         }

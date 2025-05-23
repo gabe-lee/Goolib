@@ -4,8 +4,7 @@ const Type = std.builtin.Type;
 const Allocator = std.mem.Allocator;
 
 const Root = @import("./_root.zig");
-const List = Root.List;
-const Compare = Root.Compare;
+const Utils = Root.Utils;
 
 pub fn define_aabb2_type(comptime T: type) type {
     return extern struct {
@@ -22,6 +21,7 @@ pub fn define_aabb2_type(comptime T: type) type {
             i8, i16, i32, i64, i128, isize, u8, u16, u32, u64, u128, usize, c_short, c_int, c_long, c_longlong, c_char, c_ushort, c_uint, c_ulong, c_ulonglong => true,
             else => false,
         };
+        const DEFAULT_EPSILON: T = if (IS_FLOAT) math.floatEps(T) else 0;
 
         x_min: T = INF,
         x_max: T = NEG_INF,
@@ -30,6 +30,31 @@ pub fn define_aabb2_type(comptime T: type) type {
 
         pub fn new(x_min: T, x_max: T, y_min: T, y_max: T) T_AABB2 {
             return T_AABB2{ .x_min = x_min, .x_max = x_max, .y_min = y_min, .y_max = y_max };
+        }
+
+        pub fn new_from_point(point: T_Vec2) T_AABB2 {
+            return T_AABB2{
+                .x_max = point.x,
+                .x_min = point.x,
+                .y_min = point.y,
+                .y_max = point.y,
+            };
+        }
+
+        pub fn new_from_points(points: []const T_Vec2) T_AABB2 {
+            var result = T_AABB2{
+                .x_max = points[0].x,
+                .x_min = points[0].x,
+                .y_min = points[0].y,
+                .y_max = points[0].y,
+            };
+            for (points[1..]) |point| {
+                result.x_min = @min(result.x_min, point.x);
+                result.y_min = @min(result.y_min, point.y);
+                result.x_max = @max(result.x_max, point.x);
+                result.y_max = @min(result.y_max, point.y);
+            }
+            return result;
         }
 
         pub fn combine_with(self: T_AABB2, other: T_AABB2) T_AABB2 {
@@ -48,6 +73,17 @@ pub fn define_aabb2_type(comptime T: type) type {
                 .x_max = @max(self.x_max, point.x),
                 .y_max = @min(self.y_max, point.y),
             };
+        }
+
+        pub fn combine_with_all_points(self: T_AABB2, points: []const T_Vec2) T_AABB2 {
+            var result = self;
+            for (points) |point| {
+                result.x_min = @min(result.x_min, point.x);
+                result.y_min = @min(result.y_min, point.y);
+                result.x_max = @max(result.x_max, point.x);
+                result.y_max = @min(result.y_max, point.y);
+            }
+            return result;
         }
 
         pub fn expand_by(self: T_AABB2, amount: T) T_AABB2 {
@@ -136,7 +172,11 @@ pub fn define_aabb2_type(comptime T: type) type {
         }
 
         pub fn approx_overlaps(self: T_AABB2, other: T_AABB2) bool {
-            return Root.Math.approx_greater_than_or_equal_to(T, self.x_max, other.x_min) and Root.Math.approx_greater_than_or_equal_to(T, other.x_max, self.x_min) and Root.Math.approx_greater_than_or_equal_to(T, self.y_max, other.y_min) and Root.Math.approx_greater_than_or_equal_to(T, other.y_max, self.y_min);
+            self.approx_overlaps_threshold(other, DEFAULT_EPSILON);
+        }
+
+        pub fn approx_overlaps_threshold(self: T_AABB2, other: T_AABB2, threshold: T) bool {
+            return self.x_max + threshold >= other.x_min - threshold and other.x_max + threshold >= self.x_min - threshold and self.y_max + threshold >= other.y_min - threshold and other.y_max + threshold >= self.y_min - threshold;
         }
 
         pub fn overlap_area(self: T_AABB2, other: T_AABB2) ?T_AABB2 {
@@ -154,11 +194,44 @@ pub fn define_aabb2_type(comptime T: type) type {
             };
         }
 
-        pub fn overlap_area_graranteed(self: T_AABB2, other: T_AABB2) T_AABB2 {
+        pub fn overlap_area_approx(self: T_AABB2, other: T_AABB2) ?T_AABB2 {
+            return self.overlap_area_approx_threshold(other, DEFAULT_EPSILON);
+        }
+
+        pub fn overlap_area_approx_threshold(self: T_AABB2, other: T_AABB2, threshold: T) ?T_AABB2 {
+            const overlap_x_min = @max(self.x_min - threshold, other.x_min - threshold);
+            const overlap_x_max = @min(self.x_max + threshold, other.x_max + threshold);
+            if (overlap_x_min >= overlap_x_max) return null;
+            const overlap_y_min = @max(self.y_min - threshold, other.y_min - threshold);
+            const overlap_y_max = @min(self.y_max + threshold, other.y_max + threshold);
+            if (overlap_y_min >= overlap_y_max) return null;
+            return T_AABB2{
+                .x_min = overlap_x_min,
+                .x_max = overlap_x_max,
+                .y_min = overlap_y_min,
+                .y_max = overlap_y_max,
+            };
+        }
+
+        pub fn overlap_area_guaranteed(self: T_AABB2, other: T_AABB2) T_AABB2 {
             const overlap_x_min = @max(self.x_min, other.x_min);
             const overlap_x_max = @min(self.x_max, other.x_max);
             const overlap_y_min = @max(self.y_min, other.y_min);
             const overlap_y_max = @min(self.y_max, other.y_max);
+            return T_AABB2{
+                .x_min = overlap_x_min,
+                .x_max = overlap_x_max,
+                .y_min = overlap_y_min,
+                .y_max = overlap_y_max,
+            };
+        }
+
+        pub fn overlap_area_approx_guaranteed_threshold(self: T_AABB2, other: T_AABB2, threshold: T) T_AABB2 {
+            const overlap_x_min = @max(self.x_min - threshold, other.x_min - threshold);
+            const overlap_x_max = @min(self.x_max + threshold, other.x_max + threshold);
+            const overlap_y_min = @max(self.y_min - threshold, other.y_min - threshold);
+            const overlap_y_max = @min(self.y_max + threshold, other.y_max + threshold);
+            Utils.assert_with_reason(condition: bool, reason_fmt: []const u8, reason_args: anytype)
             return T_AABB2{
                 .x_min = overlap_x_min,
                 .x_max = overlap_x_max,
@@ -172,7 +245,32 @@ pub fn define_aabb2_type(comptime T: type) type {
         }
 
         pub fn point_approx_within(self: T_AABB2, point: T_Vec2) bool {
-            return Root.Math.approx_greater_than_or_equal_to(T, self.x_max, point.x) and Root.Math.approx_greater_than_or_equal_to(T, point.x, self.x_min) and Root.Math.approx_greater_than_or_equal_to(T, self.y_max, point.y) and Root.Math.approx_greater_than_or_equal_to(T, point.y, self.y_min);
+            return self.point_approx_within_threshold(point, DEFAULT_EPSILON);
+        }
+
+        pub fn point_approx_within_threshold(self: T_AABB2, point: T_Vec2, threshold: T) bool {
+            return self.x_max + threshold >= point.x - threshold and point.x + threshold >= self.x_min - threshold and self.y_max + threshold >= point.y - threshold and point.y + threshold >= self.y_min - threshold;
+        }
+
+        pub fn all_points_within(self: T_AABB2, points: []const T_Vec2) bool {
+            for (points) |point| {
+                const is_within = self.x_max >= point.x and point.x >= self.x_min and self.y_max >= point.y and point.y >= self.y_min;
+                if (!is_within) return false;
+            }
+            return true;
+        }
+
+        pub fn all_points_approx_within(self: T_AABB2, points: []const T_Vec2) bool {
+            return self.all_points_approx_within_threshold(points, DEFAULT_EPSILON);
+        }
+
+        pub fn all_points_approx_within_threshold(self: T_AABB2, points: []const T_Vec2, threshold: T) bool {
+            const expanded = self.expand_by(threshold);
+            for (points) |point| {
+                const is_within = expanded.x_max >= point.x and point.x >= expanded.x_min and expanded.y_max >= point.y and point.y >= expanded.y_min;
+                if (!is_within) return false;
+            }
+            return true;
         }
 
         pub fn to_rect2(self: T_AABB2) T_Rect2 {

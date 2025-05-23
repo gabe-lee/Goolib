@@ -10,16 +10,52 @@ const ANSI = Root.ANSI;
 const LOG_PREFIX = Root.LOG_PREFIX ++ "[Utils] ";
 const BinarySearch = Root.BinarySearch;
 
-pub inline fn comptime_err(comptime src_loc: SourceLocation, comptime log: []const u8) []const u8 {
-    return ANSI.BEGIN ++ ANSI.FG_RED ++ ANSI.END ++ "[" ++ src_loc.module ++ "] [" ++ src_loc.file ++ "] " ++ src_loc.fn_name ++ "\n\t" ++ log ++ ANSI.BEGIN ++ ANSI.RESET ++ ANSI.END;
+pub inline fn comptime_err(comptime in_comptime: bool, comptime src_loc: ?SourceLocation, comptime this: ?type, comptime log: []const u8) []const u8 {
+    const timing = if (in_comptime) "COMPTIME " else "RUNTIME ";
+    const ident_pfx = if (src_loc != null or this != null) "[" else "";
+    const ident_sfx = if (src_loc != null or this != null) "]\n\t" else "\n\t";
+    const type_chain = if (this) |t| @typeName(t) ++ "." else "";
+    const loc_prefix = if (src_loc) |s| "Zig." ++ s.module ++ "." else "";
+    const loc_func = if (src_loc) |s| s.fn_name ++ "(...)" else "";
+    return ANSI.BEGIN ++ ANSI.FG_RED ++ ANSI.END ++ timing ++ "ERROR: " ++ ident_pfx ++ loc_prefix ++ type_chain ++ loc_func ++ ident_sfx ++ log ++ ANSI.BEGIN ++ ANSI.RESET ++ ANSI.END ++ "\n";
 }
 
-pub inline fn comptime_warn(comptime src_loc: SourceLocation, comptime log: []const u8) []const u8 {
-    return ANSI.BEGIN ++ ANSI.FG_YELLOW ++ ANSI.END ++ "[" ++ src_loc.module ++ "] [" ++ src_loc.file ++ "] " ++ src_loc.fn_name ++ "\n\t" ++ log ++ ANSI.BEGIN ++ ANSI.RESET ++ ANSI.END;
+pub inline fn comptime_warn(comptime src_loc: ?SourceLocation, comptime this: ?type, comptime log: []const u8) []const u8 {
+    const ident_pfx = if (src_loc != null or this != null) "[" else "";
+    const ident_sfx = if (src_loc != null or this != null) "]\n\t" else "\n\t";
+    const type_chain = if (this) |t| @typeName(t) ++ "." else "";
+    const loc_prefix = if (src_loc) |s| "Zig." ++ s.module ++ "." else "";
+    const loc_func = if (src_loc) |s| s.fn_name ++ "(...)" else "";
+    return ANSI.BEGIN ++ ANSI.FG_YELLOW ++ ANSI.END ++ "WARN: " ++ ident_pfx ++ loc_prefix ++ type_chain ++ loc_func ++ ident_sfx ++ log ++ ANSI.BEGIN ++ ANSI.RESET ++ ANSI.END ++ "\n";
 }
 
-pub inline fn comptime_log(comptime src_loc: SourceLocation, comptime log: []const u8) []const u8 {
-    return "[" ++ src_loc.module ++ "] [" ++ src_loc.file ++ "] " ++ src_loc.fn_name ++ "\n\t" ++ log;
+pub inline fn comptime_info(comptime src_loc: ?SourceLocation, comptime this: ?type, comptime log: []const u8) []const u8 {
+    const ident_pfx = if (src_loc != null or this != null) "[" else "";
+    const ident_sfx = if (src_loc != null or this != null) "]\n\t" else "\n\t";
+    const type_chain = if (this) |t| @typeName(t) ++ "." else "";
+    const loc_prefix = if (src_loc) |s| "Zig." ++ s.module ++ "." else "";
+    const loc_func = if (src_loc) |s| s.fn_name ++ "(...)" else "";
+    return "INFO: " ++ ident_pfx ++ loc_prefix ++ type_chain ++ loc_func ++ ident_sfx ++ log ++ "\n";
+}
+
+pub inline fn assert_with_reason(condition: bool, src_loc: ?SourceLocation, this: ?type, reason_fmt: []const u8, reason_args: anytype) void {
+    if (build.mode == .Debug) {
+        if (!condition) {
+            std.debug.panic(comptime_err(src_loc, this, reason_fmt), reason_args);
+            unreachable;
+        }
+    } else {
+        assert(condition);
+    }
+}
+pub inline fn comptime_assert_with_reason(condition: bool, comptime src_loc: ?builtin.SourceLocation, this: ?type, reason: []const u8) void {
+    if (build.mode == .Debug) {
+        if (!condition) {
+            @compileError(comptime_err(src_loc, this, reason));
+        }
+    } else {
+        assert(condition);
+    }
 }
 
 pub inline fn inline_swap(comptime T: type, a: *T, b: *T, temp: *T) void {
@@ -173,30 +209,6 @@ pub inline fn secure_memset_const(comptime T: type, slice: []volatile T, comptim
 }
 pub inline fn secure_memset(comptime T: type, slice: []volatile T, val: T) void {
     @memset(slice, val);
-}
-
-pub inline fn assert_with_reason(condition: bool, reason_fmt: []const u8, reason_args: anytype) void {
-    if (build.mode == .Debug) {
-        if (!condition) {
-            std.debug.panic(reason_fmt, reason_args);
-            unreachable;
-        }
-    } else {
-        assert(condition);
-    }
-}
-pub inline fn comptime_assert_with_reason(condition: bool, comptime src_loc: ?builtin.SourceLocation, reason: []const u8) void {
-    if (build.mode == .Debug) {
-        if (!condition) {
-            if (src_loc) |loc| {
-                comptime_err(loc, reason);
-            } else {
-                @compileError(reason);
-            }
-        }
-    } else {
-        assert(condition);
-    }
 }
 
 pub fn ptr_with_sentinel_has_min_len(comptime T: type, comptime S: T, ptr: [*:S]const T, len: usize) bool {

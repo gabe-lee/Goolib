@@ -1298,10 +1298,30 @@ pub const PropertiesID = extern struct {
 
 pub const Thread = opaque {
     pub usingnamespace c_opaque_conversions(Thread, C.SDL_Thread);
+    //TODO
+    // pub extern fn SDL_CreateThreadRuntime(@"fn": SDL_ThreadFunction, name: [*c]const u8, data: ?*anyopaque, pfnBeginThread: SDL_FunctionPointer, pfnEndThread: SDL_FunctionPointer) ?*SDL_Thread;
+    // pub extern fn SDL_CreateThreadWithPropertiesRuntime(props: SDL_PropertiesID, pfnBeginThread: SDL_FunctionPointer, pfnEndThread: SDL_FunctionPointer) ?*SDL_Thread;
+    // pub extern fn SDL_GetThreadName(thread: ?*SDL_Thread) [*c]const u8;
+    // pub extern fn SDL_GetCurrentThreadID() SDL_ThreadID;
+    // pub extern fn SDL_GetThreadID(thread: ?*SDL_Thread) SDL_ThreadID;
+    // pub extern fn SDL_SetCurrentThreadPriority(priority: SDL_ThreadPriority) bool;
+    // pub extern fn SDL_WaitThread(thread: ?*SDL_Thread, status: [*c]c_int) void;
+    // pub extern fn SDL_GetThreadState(thread: ?*SDL_Thread) SDL_ThreadState;
+    // pub extern fn SDL_DetachThread(thread: ?*SDL_Thread) void;
 };
 
 pub const ThreadID = extern struct {
     id: u64 = 0,
+};
+
+pub const Mutex = opaque {
+    pub usingnamespace c_opaque_conversions(Mutex, C.SDL_Mutex);
+    //TODO
+    // pub extern fn SDL_CreateMutex() ?*SDL_Mutex;
+    // pub extern fn SDL_LockMutex(mutex: ?*SDL_Mutex) void;
+    // pub extern fn SDL_TryLockMutex(mutex: ?*SDL_Mutex) bool;
+    // pub extern fn SDL_UnlockMutex(mutex: ?*SDL_Mutex) void;
+    // pub extern fn SDL_DestroyMutex(mutex: ?*SDL_Mutex) void;
 };
 
 pub const InitState = extern struct {
@@ -3505,22 +3525,88 @@ pub const Colorspace = enum(c_uint) {
 pub const AtomicInt = extern struct {
     val: c_int = 0,
 
-    fn to_c(self: *AtomicInt) *C.SDL_AtomicInt {
-        return @ptrCast(@alignCast(self));
-    }
+    pub usingnamespace c_non_opaque_conversions(AtomicInt, C.SDL_AtomicInt);
 
     pub fn compare_and_swap(self: *AtomicInt, old_val_matches: c_int, new_val: c_int) bool {
-        return C.SDL_CompareAndSwapAtomicInt(self.to_c(), old_val_matches, new_val);
+        return C.SDL_CompareAndSwapAtomicInt(self.to_c_ptr(), old_val_matches, new_val);
     }
     pub fn set(self: *AtomicInt, val: c_int) c_int {
-        return C.SDL_SetAtomicInt(self.to_c(), val);
+        return C.SDL_SetAtomicInt(self.to_c_ptr(), val);
     }
     pub fn add(self: *AtomicInt, val: c_int) c_int {
-        return C.SDL_AddAtomicInt(self.to_c(), val);
+        return C.SDL_AddAtomicInt(self.to_c_ptr(), val);
     }
     pub fn get(self: *AtomicInt) c_int {
-        return C.SDL_GetAtomicInt(self.to_c());
+        return C.SDL_GetAtomicInt(self.to_c_ptr());
     }
+};
+
+pub const TSL_ID = extern struct {
+    id: AtomicInt,
+
+    pub usingnamespace c_non_opaque_conversions(TSL_ID, C.SDL_TLSID);
+    //TODO
+    // pub extern fn SDL_GetTLS(id: [*c]SDL_TLSID) ?*anyopaque;
+    // pub const SDL_TLSDestructorCallback = ?*const fn (?*anyopaque) callconv(.c) void;
+    // pub extern fn SDL_SetTLS(id: [*c]SDL_TLSID, value: ?*const anyopaque, destructor: SDL_TLSDestructorCallback) bool;
+    // pub extern fn SDL_CleanupTLS() void;
+};
+
+pub const TLS = opaque {};
+
+pub const ThreadPriority = enum(C.SDL_ThreadPriority) {
+    LOW = C.SDL_THREAD_PRIORITY_LOW,
+    NORMAL = C.SDL_THREAD_PRIORITY_NORMAL,
+    HIGH = C.SDL_THREAD_PRIORITY_HIGH,
+    TIME_CRITICAL = C.SDL_THREAD_PRIORITY_TIME_CRITICAL,
+
+    pub usingnamespace c_enum_conversions(ThreadPriority, C.SDL_ThreadPriority);
+};
+
+pub const ThreadState = enum(C.SDL_ThreadState) {
+    UNKNOWN = C.SDL_THREAD_UNKNOWN,
+    ALIVE = C.SDL_THREAD_ALIVE,
+    DETACHED = C.SDL_THREAD_DETACHED,
+    COMPLETE = C.SDL_THREAD_COMPLETE,
+
+    pub usingnamespace c_enum_conversions(ThreadState, C.SDL_ThreadState);
+};
+
+pub const ThreadFunc = fn (user_data: ?*anyopaque) callconv(.c) c_int;
+
+pub const RWLock = opaque {
+    pub usingnamespace c_opaque_conversions(RWLock, C.SDL_RWLock);
+    //TODO
+    // pub extern fn SDL_CreateRWLock() ?*SDL_RWLock;
+    // pub extern fn SDL_LockRWLockForReading(rwlock: ?*SDL_RWLock) void;
+    // pub extern fn SDL_LockRWLockForWriting(rwlock: ?*SDL_RWLock) void;
+    // pub extern fn SDL_TryLockRWLockForReading(rwlock: ?*SDL_RWLock) bool;
+    // pub extern fn SDL_TryLockRWLockForWriting(rwlock: ?*SDL_RWLock) bool;
+    // pub extern fn SDL_UnlockRWLock(rwlock: ?*SDL_RWLock) void;
+    // pub extern fn SDL_DestroyRWLock(rwlock: ?*SDL_RWLock) void;
+};
+
+pub const Semaphore = opaque {
+    pub usingnamespace c_opaque_conversions(Semaphore, C.SDL_Semaphore);
+    //TODO
+    // pub extern fn SDL_CreateSemaphore(initial_value: Uint32) ?*SDL_Semaphore;
+    // pub extern fn SDL_DestroySemaphore(sem: ?*SDL_Semaphore) void;
+    // pub extern fn SDL_WaitSemaphore(sem: ?*SDL_Semaphore) void;
+    // pub extern fn SDL_TryWaitSemaphore(sem: ?*SDL_Semaphore) bool;
+    // pub extern fn SDL_WaitSemaphoreTimeout(sem: ?*SDL_Semaphore, timeoutMS: Sint32) bool;
+    // pub extern fn SDL_SignalSemaphore(sem: ?*SDL_Semaphore) void;
+    // pub extern fn SDL_GetSemaphoreValue(sem: ?*SDL_Semaphore) Uint32;
+};
+
+pub const Condition = opaque {
+    pub usingnamespace c_opaque_conversions(Condition, C.SDL_Condition);
+    //TODO
+    // pub extern fn SDL_CreateCondition() ?*SDL_Condition;
+    // pub extern fn SDL_DestroyCondition(cond: ?*SDL_Condition) void;
+    // pub extern fn SDL_SignalCondition(cond: ?*SDL_Condition) void;
+    // pub extern fn SDL_BroadcastCondition(cond: ?*SDL_Condition) void;
+    // pub extern fn SDL_WaitCondition(cond: ?*SDL_Condition, mutex: ?*SDL_Mutex) void;
+    // pub extern fn SDL_WaitConditionTimeout(cond: ?*SDL_Condition, mutex: ?*SDL_Mutex, timeoutMS: Sint32) bool;
 };
 
 pub const MetalLayer = opaque {};
@@ -3531,26 +3617,16 @@ pub const IndexType = enum(c_int) {
     U16 = 2,
     U32 = 4,
 
-    inline fn to_c(self: IndexType) c_uint {
-        return @intFromEnum(self);
-    }
-    inline fn from_c(val: c_uint) IndexType {
-        return @enumFromInt(val);
-    }
+    pub usingnamespace c_enum_conversions(IndexType, c_int);
 };
 
-pub const AppProcess = enum(c_uint) {
+pub const AppProcess = enum(C.SDL_AppResult) {
     CONTINUE = C.SDL_APP_CONTINUE,
     CLOSE_NORMAL = C.SDL_APP_SUCCESS,
     CLOSE_ERROR = C.SDL_APP_FAILURE,
     _,
 
-    inline fn to_c(self: AppProcess) c_uint {
-        return @intFromEnum(self);
-    }
-    inline fn from_c(val: c_uint) AppProcess {
-        return @enumFromInt(val);
-    }
+    pub usingnamespace c_enum_conversions(AppProcess, C.SDL_AppResult);
 };
 
 pub const LogicalPresentationMode = enum(c_uint) {

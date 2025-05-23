@@ -1,6 +1,6 @@
 .{
     .name = .Goolib,
-    .version = "0.2.0",
+    .version = "0.2.1",
     .minimum_zig_version = "0.14.0",
     .dependencies = .{
         .sdl = .{
@@ -13,6 +13,8 @@
         "build.zig",
         "build.zig.zon",
         "src",
+        "samples",
         "LICENSE",
+        "README.md",
     },
 }
