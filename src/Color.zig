@@ -181,6 +181,10 @@ pub fn define_color_rgba_type(comptime T: type) type {
             f16, f32, f64, f80, f128, comptime_float => 1.0,
             else => std.math.maxInt(T),
         };
+        const MIN = switch (T) {
+            f16, f32, f64, f80, f128, comptime_float => 0.0,
+            else => std.math.minInt(T),
+        };
 
         pub fn new(r: T, g: T, b: T, a: T) T_RGBA {
             return T_RGBA{ .r = r, .g = g, .b = b, .a = a };
@@ -190,8 +194,8 @@ pub fn define_color_rgba_type(comptime T: type) type {
         }
 
         pub const WHITE = T_RGBA{ .r = MAX, .g = MAX, .b = MAX, .a = MAX };
-        pub const BLACK = T_RGBA{ .r = 0, .g = 0, .b = 0, .a = MAX };
-        pub const CLEAR = T_RGBA{ .r = 0, .g = 0, .b = 0, .a = 0 };
+        pub const BLACK = T_RGBA{ .r = MIN, .g = MIN, .b = MIN, .a = MAX };
+        pub const CLEAR = T_RGBA{ .r = MIN, .g = MIN, .b = MIN, .a = MIN };
 
         pub fn to_rgb(self: T_RGBA) T_RGB {
             return T_RGB{
@@ -216,6 +220,14 @@ pub fn define_color_rgb_type(comptime T: type) type {
         const T_RGB = @This();
         const T_RGBA = define_color_rgba_type(T);
         const T_RAW = std.meta.Int(.unsigned, @bitSizeOf(T_RGBA));
+        const MAX = switch (T) {
+            f16, f32, f64, f80, f128, comptime_float => 1.0,
+            else => std.math.maxInt(T),
+        };
+        const MIN = switch (T) {
+            f16, f32, f64, f80, f128, comptime_float => 0.0,
+            else => std.math.minInt(T),
+        };
 
         pub fn new(r: T, g: T, b: T) T_RGB {
             return T_RGB{ .r = r, .g = g, .b = b };
@@ -233,5 +245,8 @@ pub fn define_color_rgb_type(comptime T: type) type {
         pub inline fn to_raw_int(self: T_RGB) T_RAW {
             return @bitCast(self.to_rgba(0));
         }
+
+        pub const WHITE = T_RGB{ .r = MAX, .g = MAX, .b = MAX };
+        pub const BLACK = T_RGB{ .r = MIN, .g = MIN, .b = MIN };
     };
 }

@@ -7,8 +7,8 @@ const Goolib = @import("Goolib");
 const SDL = Goolib.SDL3;
 const AABB = Goolib.AABB2.define_aabb2_type(f32);
 const Rect = Goolib.Rect2.define_rect2_type(f32);
-const FVec: type = SDL.FVec;
-const IVec: type = SDL.IVec;
+const FVec: type = SDL.Vec_f32;
+const IVec: type = SDL.Vec_c_int;
 const Cast = Goolib.Cast;
 const c_strings_equal = Goolib.Utils.c_strings_equal;
 const ANSI = Goolib.ANSI;
@@ -21,7 +21,7 @@ var fully_initialized = false;
 const window_size: IVec = IVec.new(640, 480);
 var window: *SDL.Window = undefined;
 var renderer: *SDL.Renderer = undefined;
-var sprite_texture: *SDL.Texture = undefined;
+var sprite_texture: *SDL.SimpleTexture = undefined;
 var sounds: SDL.WaveAudio = undefined;
 var audio_device: SDL.AudioDeviceID = undefined;
 var audio_streams_buf: [8]*SDL.AudioStream = undefined;
@@ -44,7 +44,7 @@ var won = false;
 var records_need_save = false;
 
 var score: u32 = undefined;
-var score_color: SDL.IColor_RGBA = undefined;
+var score_color: SDL.Color_RGBA_u8 = undefined;
 
 var attempts: u32 = 0;
 
@@ -169,21 +169,21 @@ const Sprites = struct {
     const bmp = @embedFile("sprites.bmp");
 
     // zig fmt: off
-    const brick_2x1_purple = SDL.Rect_F32{ .x =   1, .y =  1, .w = 64, .h = 32 };
-    const brick_1x1_purple = SDL.Rect_F32{ .x =  67, .y =  1, .w = 32, .h = 32 };
-    const brick_2x1_red    = SDL.Rect_F32{ .x = 101, .y =  1, .w = 64, .h = 32 };
-    const brick_1x1_red    = SDL.Rect_F32{ .x = 167, .y =  1, .w = 32, .h = 32 };
-    const brick_2x1_yellow = SDL.Rect_F32{ .x =   1, .y = 35, .w = 64, .h = 32 };
-    const brick_1x1_yellow = SDL.Rect_F32{ .x =  67, .y = 35, .w = 32, .h = 32 };
-    const brick_2x1_green  = SDL.Rect_F32{ .x = 101, .y = 35, .w = 64, .h = 32 };
-    const brick_1x1_green  = SDL.Rect_F32{ .x = 167, .y = 35, .w = 32, .h = 32 };
-    const brick_2x1_blue   = SDL.Rect_F32{ .x =   1, .y = 69, .w = 64, .h = 32 };
-    const brick_1x1_blue   = SDL.Rect_F32{ .x =  67, .y = 69, .w = 32, .h = 32 };
-    const brick_2x1_gray   = SDL.Rect_F32{ .x = 101, .y = 69, .w = 64, .h = 32 };
-    const brick_1x1_gray   = SDL.Rect_F32{ .x = 167, .y = 69, .w = 32, .h = 32 };
+    const brick_2x1_purple = SDL.Rect_f32{ .x =   1, .y =  1, .w = 64, .h = 32 };
+    const brick_1x1_purple = SDL.Rect_f32{ .x =  67, .y =  1, .w = 32, .h = 32 };
+    const brick_2x1_red    = SDL.Rect_f32{ .x = 101, .y =  1, .w = 64, .h = 32 };
+    const brick_1x1_red    = SDL.Rect_f32{ .x = 167, .y =  1, .w = 32, .h = 32 };
+    const brick_2x1_yellow = SDL.Rect_f32{ .x =   1, .y = 35, .w = 64, .h = 32 };
+    const brick_1x1_yellow = SDL.Rect_f32{ .x =  67, .y = 35, .w = 32, .h = 32 };
+    const brick_2x1_green  = SDL.Rect_f32{ .x = 101, .y = 35, .w = 64, .h = 32 };
+    const brick_1x1_green  = SDL.Rect_f32{ .x = 167, .y = 35, .w = 32, .h = 32 };
+    const brick_2x1_blue   = SDL.Rect_f32{ .x =   1, .y = 69, .w = 64, .h = 32 };
+    const brick_1x1_blue   = SDL.Rect_f32{ .x =  67, .y = 69, .w = 32, .h = 32 };
+    const brick_2x1_gray   = SDL.Rect_f32{ .x = 101, .y = 69, .w = 64, .h = 32 };
+    const brick_1x1_gray   = SDL.Rect_f32{ .x = 167, .y = 69, .w = 32, .h = 32 };
  
-    const ball             = SDL.Rect_F32{ .x =  2, .y = 104, .w =  22, .h = 22 };
-    const paddle           = SDL.Rect_F32{ .x = 27, .y = 103, .w = 104, .h = 24 };
+    const ball             = SDL.Rect_f32{ .x =  2, .y = 104, .w =  22, .h = 22 };
+    const paddle           = SDL.Rect_f32{ .x = 27, .y = 103, .w = 104, .h = 24 };
     // zig fmt: on
 };
 
@@ -374,7 +374,7 @@ const Ball = struct {
     box: Rect,
     vel: FVec,
     launched: bool,
-    src_rect: *const SDL.Rect_F32,
+    src_rect: *const SDL.Rect_f32,
 
     fn get_paddle_bounce_angle(ball_: Ball, paddle_: Paddle) f32 {
         const min_x = paddle_.box.x - ball_.box.w;
@@ -388,7 +388,7 @@ const Ball = struct {
 
 const Brick = struct {
     box: Rect,
-    src_rect: *const SDL.Rect_F32,
+    src_rect: *const SDL.Rect_f32,
 };
 
 fn fmt_sdl_drivers(write_buf: *std.BoundedArray(u8, 250), current_driver: [*:0]const u8, num_drivers: c_int, get_driver: *const fn (c_int) SDL.Error![*:0]const u8) anyerror![]const u8 {
@@ -483,7 +483,7 @@ fn reset_game() !void {
         const x = Cast.to(f32, window_size.x) * 0.5;
         const h = Sprites.brick_1x1_gray.h;
         const gap = 5;
-        for ([_][2]*const SDL.Rect_F32{
+        for ([_][2]*const SDL.Rect_f32{
             .{ &Sprites.brick_1x1_purple, &Sprites.brick_2x1_purple },
             .{ &Sprites.brick_1x1_red, &Sprites.brick_2x1_red },
             .{ &Sprites.brick_1x1_yellow, &Sprites.brick_2x1_yellow },
@@ -526,7 +526,7 @@ fn reset_game() !void {
     }
 
     score = 0;
-    score_color = SDL.IColor_RGBA.new_opaque(0xff, 0xff, 0xff);
+    score_color = SDL.Color_RGBA_u8.new_opaque(0xff, 0xff, 0xff);
 }
 
 fn app_update() !SDL.AppProcess {
@@ -766,9 +766,9 @@ fn app_update() !SDL.AppProcess {
                 }
             }
             if (score <= best_win and bricks.len == 0) {
-                score_color = SDL.IColor_RGBA.new_opaque(0x52, 0xcc, 0x73);
+                score_color = SDL.Color_RGBA_u8.new_opaque(0x52, 0xcc, 0x73);
             } else if (ball.box.y >= window_size.y or score > best_win) {
-                score_color = SDL.IColor_RGBA.new_opaque(0xcc, 0x5c, 0x52);
+                score_color = SDL.Color_RGBA_u8.new_opaque(0xcc, 0x5c, 0x52);
             }
         }
     }
@@ -812,7 +812,7 @@ fn app_update() !SDL.AppProcess {
 
     // Draw.
     {
-        const CLEAR_COLOR = SDL.IColor_RGBA.new(0x47, 0x5b, 0x8d, 0xff);
+        const CLEAR_COLOR = SDL.Color_RGBA_u8.new(0x47, 0x5b, 0x8d, 0xff);
         try renderer.set_draw_color(CLEAR_COLOR);
         try renderer.draw_clear_fill();
 
@@ -829,7 +829,7 @@ fn app_update() !SDL.AppProcess {
             try renderer.draw_debug_text(FVec.new(8, 8), text.ptr);
             time = @min(@as(f32, @floatFromInt(best_win)) / Timekeeper.updates_per_s, 999.999);
             text = try std.fmt.bufPrintZ(&buf, "BEST {d: >7.3}", .{time});
-            try renderer.set_draw_color(SDL.IColor_RGBA.WHITE);
+            try renderer.set_draw_color(SDL.Color_RGBA_u8.WHITE);
             try renderer.draw_debug_text(FVec.new(window_size.x / 2 - 8 * 12, 8), text.ptr);
         }
         try renderer.set_render_scale(FVec.new(1, 1));

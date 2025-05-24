@@ -1,3 +1,11 @@
+const std = @import("std");
+
+const Root = @import("./_root.zig");
+const Comp = Root.Composition;
+const CompChain = Comp.FieldAccessChain;
+const Assert = Root.Assert;
+const assert_with_reason = Assert.assert_with_reason;
+
 // zig fmt: off
 pub const NS_PER_US         =                  1_000;
 pub const NS_PER_MS         =              1_000_000;
@@ -95,6 +103,39 @@ pub const Years = extern struct {
     }
     pub inline fn to_nsecs(self: Years) NSecs {
         return NSecs{ .val = self.val * NS_PER_YEAR_EXACT };
+    }
+
+    pub fn CompProvider(comptime access_years_i64: CompChain) type {
+        const Self = access_years_i64.container;
+        return struct {
+            pub inline fn to_months(self: Self) Months {
+                return Months{ .val = access_years_i64.get_from(self) * MONTH_PER_YEAR };
+            }
+            pub inline fn to_weeks(self: Self) Weeks {
+                return Weeks{ .val = access_years_i64.get_from(self) * WEEK_PER_YEAR };
+            }
+            pub inline fn to_days(self: Self) Days {
+                return Days{ .val = access_years_i64.get_from(self) * DAY_PER_YEAR };
+            }
+            pub inline fn to_hours(self: Self) Hours {
+                return Hours{ .val = access_years_i64.get_from(self) * HOUR_PER_YEAR_EXACT };
+            }
+            pub inline fn to_mins(self: Self) Mins {
+                return Mins{ .val = access_years_i64.get_from(self) * MIN_PER_YEAR_EXACT };
+            }
+            pub inline fn to_secs(self: Self) Secs {
+                return Secs{ .val = access_years_i64.get_from(self) * SEC_PER_YEAR_EXACT };
+            }
+            pub inline fn to_msecs(self: Self) MSecs {
+                return MSecs{ .val = access_years_i64.get_from(self) * MS_PER_YEAR_EXACT };
+            }
+            pub inline fn to_usecs(self: Self) USecs {
+                return USecs{ .val = access_years_i64.get_from(self) * US_PER_YEAR_EXACT };
+            }
+            pub inline fn to_nsecs(self: Self) NSecs {
+                return NSecs{ .val = access_years_i64.get_from(self) * NS_PER_YEAR_EXACT };
+            }
+        };
     }
 };
 pub const Months = extern struct {

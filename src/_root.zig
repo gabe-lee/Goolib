@@ -14,6 +14,7 @@ pub const Cast = @import("./Cast.zig");
 // pub const Codegen = @import("./Codegen.zig");
 pub const Color = @import("./Color.zig");
 pub const CommonTypes = @import("./CommonTypes.zig");
+pub const Composition = @import("./Composition.zig");
 // pub const Compare = @import("./Compare.zig");
 pub const DummyAllocator = @import("./DummyAllocator.zig");
 pub const EnumMap = @import("./EnumMap.zig");
@@ -50,6 +51,7 @@ comptime {
     // _ = @import("./Codegen.zig");
     _ = @import("./Color.zig");
     _ = @import("./CommonTypes.zig");
+    _ = @import("./Composition.zig");
     // _ = @import("./Compare.zig");
     _ = @import("./DummyAllocator.zig");
     _ = @import("./EnumMap.zig");

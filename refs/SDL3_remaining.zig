@@ -1,324 +1,324 @@
-pub const __builtin_bswap16 = @import("std").zig.c_builtins.__builtin_bswap16;
-pub const __builtin_bswap32 = @import("std").zig.c_builtins.__builtin_bswap32;
-pub const __builtin_bswap64 = @import("std").zig.c_builtins.__builtin_bswap64;
-pub const __builtin_signbit = @import("std").zig.c_builtins.__builtin_signbit;
-pub const __builtin_signbitf = @import("std").zig.c_builtins.__builtin_signbitf;
-pub const __builtin_popcount = @import("std").zig.c_builtins.__builtin_popcount;
-pub const __builtin_ctz = @import("std").zig.c_builtins.__builtin_ctz;
-pub const __builtin_clz = @import("std").zig.c_builtins.__builtin_clz;
-pub const __builtin_sqrt = @import("std").zig.c_builtins.__builtin_sqrt;
-pub const __builtin_sqrtf = @import("std").zig.c_builtins.__builtin_sqrtf;
-pub const __builtin_sin = @import("std").zig.c_builtins.__builtin_sin;
-pub const __builtin_sinf = @import("std").zig.c_builtins.__builtin_sinf;
-pub const __builtin_cos = @import("std").zig.c_builtins.__builtin_cos;
-pub const __builtin_cosf = @import("std").zig.c_builtins.__builtin_cosf;
-pub const __builtin_exp = @import("std").zig.c_builtins.__builtin_exp;
-pub const __builtin_expf = @import("std").zig.c_builtins.__builtin_expf;
-pub const __builtin_exp2 = @import("std").zig.c_builtins.__builtin_exp2;
-pub const __builtin_exp2f = @import("std").zig.c_builtins.__builtin_exp2f;
-pub const __builtin_log = @import("std").zig.c_builtins.__builtin_log;
-pub const __builtin_logf = @import("std").zig.c_builtins.__builtin_logf;
-pub const __builtin_log2 = @import("std").zig.c_builtins.__builtin_log2;
-pub const __builtin_log2f = @import("std").zig.c_builtins.__builtin_log2f;
-pub const __builtin_log10 = @import("std").zig.c_builtins.__builtin_log10;
-pub const __builtin_log10f = @import("std").zig.c_builtins.__builtin_log10f;
-pub const __builtin_abs = @import("std").zig.c_builtins.__builtin_abs;
-pub const __builtin_labs = @import("std").zig.c_builtins.__builtin_labs;
-pub const __builtin_llabs = @import("std").zig.c_builtins.__builtin_llabs;
-pub const __builtin_fabs = @import("std").zig.c_builtins.__builtin_fabs;
-pub const __builtin_fabsf = @import("std").zig.c_builtins.__builtin_fabsf;
-pub const __builtin_floor = @import("std").zig.c_builtins.__builtin_floor;
-pub const __builtin_floorf = @import("std").zig.c_builtins.__builtin_floorf;
-pub const __builtin_ceil = @import("std").zig.c_builtins.__builtin_ceil;
-pub const __builtin_ceilf = @import("std").zig.c_builtins.__builtin_ceilf;
-pub const __builtin_trunc = @import("std").zig.c_builtins.__builtin_trunc;
-pub const __builtin_truncf = @import("std").zig.c_builtins.__builtin_truncf;
-pub const __builtin_round = @import("std").zig.c_builtins.__builtin_round;
-pub const __builtin_roundf = @import("std").zig.c_builtins.__builtin_roundf;
-pub const __builtin_strlen = @import("std").zig.c_builtins.__builtin_strlen;
-pub const __builtin_strcmp = @import("std").zig.c_builtins.__builtin_strcmp;
-pub const __builtin_object_size = @import("std").zig.c_builtins.__builtin_object_size;
-pub const __builtin___memset_chk = @import("std").zig.c_builtins.__builtin___memset_chk;
-pub const __builtin_memset = @import("std").zig.c_builtins.__builtin_memset;
-pub const __builtin___memcpy_chk = @import("std").zig.c_builtins.__builtin___memcpy_chk;
-pub const __builtin_memcpy = @import("std").zig.c_builtins.__builtin_memcpy;
-pub const __builtin_expect = @import("std").zig.c_builtins.__builtin_expect;
-pub const __builtin_nanf = @import("std").zig.c_builtins.__builtin_nanf;
-pub const __builtin_huge_valf = @import("std").zig.c_builtins.__builtin_huge_valf;
-pub const __builtin_inff = @import("std").zig.c_builtins.__builtin_inff;
-pub const __builtin_isnan = @import("std").zig.c_builtins.__builtin_isnan;
-pub const __builtin_isinf = @import("std").zig.c_builtins.__builtin_isinf;
-pub const __builtin_isinf_sign = @import("std").zig.c_builtins.__builtin_isinf_sign;
-pub const __has_builtin = @import("std").zig.c_builtins.__has_builtin;
-pub const __builtin_assume = @import("std").zig.c_builtins.__builtin_assume;
-pub const __builtin_unreachable = @import("std").zig.c_builtins.__builtin_unreachable;
-pub const __builtin_constant_p = @import("std").zig.c_builtins.__builtin_constant_p;
-pub const __builtin_mul_overflow = @import("std").zig.c_builtins.__builtin_mul_overflow;
-pub const struct___va_list_tag_1 = extern struct {
-    gp_offset: c_uint = @import("std").mem.zeroes(c_uint),
-    fp_offset: c_uint = @import("std").mem.zeroes(c_uint),
-    overflow_arg_area: ?*anyopaque = @import("std").mem.zeroes(?*anyopaque),
-    reg_save_area: ?*anyopaque = @import("std").mem.zeroes(?*anyopaque),
-};
-pub const __builtin_va_list = [1]struct___va_list_tag_1;
-pub const __gnuc_va_list = __builtin_va_list;
-pub const va_list = __builtin_va_list;
-pub const __u_char = u8;
-pub const __u_short = c_ushort;
-pub const __u_int = c_uint;
-pub const __u_long = c_ulong;
-pub const __int8_t = i8;
-pub const __uint8_t = u8;
-pub const __int16_t = c_short;
-pub const __uint16_t = c_ushort;
-pub const __int32_t = c_int;
-pub const __uint32_t = c_uint;
-pub const __int64_t = c_long;
-pub const __uint64_t = c_ulong;
-pub const __int_least8_t = __int8_t;
-pub const __uint_least8_t = __uint8_t;
-pub const __int_least16_t = __int16_t;
-pub const __uint_least16_t = __uint16_t;
-pub const __int_least32_t = __int32_t;
-pub const __uint_least32_t = __uint32_t;
-pub const __int_least64_t = __int64_t;
-pub const __uint_least64_t = __uint64_t;
-pub const __quad_t = c_long;
-pub const __u_quad_t = c_ulong;
-pub const __intmax_t = c_long;
-pub const __uintmax_t = c_ulong;
-pub const __dev_t = c_ulong;
-pub const __uid_t = c_uint;
-pub const __gid_t = c_uint;
-pub const __ino_t = c_ulong;
-pub const __ino64_t = c_ulong;
-pub const __mode_t = c_uint;
-pub const __nlink_t = c_ulong;
-pub const __off_t = c_long;
-pub const __off64_t = c_long;
-pub const __pid_t = c_int;
-pub const __fsid_t = extern struct {
-    __val: [2]c_int = @import("std").mem.zeroes([2]c_int),
-};
-pub const __clock_t = c_long;
-pub const __rlim_t = c_ulong;
-pub const __rlim64_t = c_ulong;
-pub const __id_t = c_uint;
-pub const __time_t = c_long;
-pub const __useconds_t = c_uint;
-pub const __suseconds_t = c_long;
-pub const __suseconds64_t = c_long;
-pub const __daddr_t = c_int;
-pub const __key_t = c_int;
-pub const __clockid_t = c_int;
-pub const __timer_t = ?*anyopaque;
-pub const __blksize_t = c_long;
-pub const __blkcnt_t = c_long;
-pub const __blkcnt64_t = c_long;
-pub const __fsblkcnt_t = c_ulong;
-pub const __fsblkcnt64_t = c_ulong;
-pub const __fsfilcnt_t = c_ulong;
-pub const __fsfilcnt64_t = c_ulong;
-pub const __fsword_t = c_long;
-pub const __ssize_t = c_long;
-pub const __syscall_slong_t = c_long;
-pub const __syscall_ulong_t = c_ulong;
-pub const __loff_t = __off64_t;
-pub const __caddr_t = [*c]u8;
-pub const __intptr_t = c_long;
-pub const __socklen_t = c_uint;
-pub const __sig_atomic_t = c_int;
-pub const int_least8_t = __int_least8_t;
-pub const int_least16_t = __int_least16_t;
-pub const int_least32_t = __int_least32_t;
-pub const int_least64_t = __int_least64_t;
-pub const uint_least8_t = __uint_least8_t;
-pub const uint_least16_t = __uint_least16_t;
-pub const uint_least32_t = __uint_least32_t;
-pub const uint_least64_t = __uint_least64_t;
-pub const int_fast8_t = i8;
-pub const int_fast16_t = c_long;
-pub const int_fast32_t = c_long;
-pub const int_fast64_t = c_long;
-pub const uint_fast8_t = u8;
-pub const uint_fast16_t = c_ulong;
-pub const uint_fast32_t = c_ulong;
-pub const uint_fast64_t = c_ulong;
-pub const intmax_t = __intmax_t;
-pub const uintmax_t = __uintmax_t;
-pub extern fn memcpy(__dest: ?*anyopaque, __src: ?*const anyopaque, __n: c_ulong) ?*anyopaque;
-pub extern fn memmove(__dest: ?*anyopaque, __src: ?*const anyopaque, __n: c_ulong) ?*anyopaque;
-pub extern fn memccpy(__dest: ?*anyopaque, __src: ?*const anyopaque, __c: c_int, __n: c_ulong) ?*anyopaque;
-pub extern fn memset(__s: ?*anyopaque, __c: c_int, __n: c_ulong) ?*anyopaque;
-pub extern fn memcmp(__s1: ?*const anyopaque, __s2: ?*const anyopaque, __n: c_ulong) c_int;
-pub extern fn __memcmpeq(__s1: ?*const anyopaque, __s2: ?*const anyopaque, __n: usize) c_int;
-pub extern fn memchr(__s: ?*const anyopaque, __c: c_int, __n: c_ulong) ?*anyopaque;
-pub extern fn strcpy(__dest: [*c]u8, __src: [*c]const u8) [*c]u8;
-pub extern fn strncpy(__dest: [*c]u8, __src: [*c]const u8, __n: c_ulong) [*c]u8;
-pub extern fn strcat(__dest: [*c]u8, __src: [*c]const u8) [*c]u8;
-pub extern fn strncat(__dest: [*c]u8, __src: [*c]const u8, __n: c_ulong) [*c]u8;
-pub extern fn strcmp(__s1: [*c]const u8, __s2: [*c]const u8) c_int;
-pub extern fn strncmp(__s1: [*c]const u8, __s2: [*c]const u8, __n: c_ulong) c_int;
-pub extern fn strcoll(__s1: [*c]const u8, __s2: [*c]const u8) c_int;
-pub extern fn strxfrm(__dest: [*c]u8, __src: [*c]const u8, __n: c_ulong) c_ulong;
-pub const struct___locale_data_2 = opaque {};
-pub const struct___locale_struct = extern struct {
-    __locales: [13]?*struct___locale_data_2 = @import("std").mem.zeroes([13]?*struct___locale_data_2),
-    __ctype_b: [*c]const c_ushort = @import("std").mem.zeroes([*c]const c_ushort),
-    __ctype_tolower: [*c]const c_int = @import("std").mem.zeroes([*c]const c_int),
-    __ctype_toupper: [*c]const c_int = @import("std").mem.zeroes([*c]const c_int),
-    __names: [13][*c]const u8 = @import("std").mem.zeroes([13][*c]const u8),
-};
-pub const __locale_t = [*c]struct___locale_struct;
-pub const locale_t = __locale_t;
-pub extern fn strcoll_l(__s1: [*c]const u8, __s2: [*c]const u8, __l: locale_t) c_int;
-pub extern fn strxfrm_l(__dest: [*c]u8, __src: [*c]const u8, __n: usize, __l: locale_t) usize;
-pub extern fn strdup(__s: [*c]const u8) [*c]u8;
-pub extern fn strndup(__string: [*c]const u8, __n: c_ulong) [*c]u8;
-pub extern fn strchr(__s: [*c]const u8, __c: c_int) [*c]u8;
-pub extern fn strrchr(__s: [*c]const u8, __c: c_int) [*c]u8;
-pub extern fn strcspn(__s: [*c]const u8, __reject: [*c]const u8) c_ulong;
-pub extern fn strspn(__s: [*c]const u8, __accept: [*c]const u8) c_ulong;
-pub extern fn strpbrk(__s: [*c]const u8, __accept: [*c]const u8) [*c]u8;
-pub extern fn strstr(__haystack: [*c]const u8, __needle: [*c]const u8) [*c]u8;
-pub extern fn strtok(__s: [*c]u8, __delim: [*c]const u8) [*c]u8;
-pub extern fn __strtok_r(noalias __s: [*c]u8, noalias __delim: [*c]const u8, noalias __save_ptr: [*c][*c]u8) [*c]u8;
-pub extern fn strtok_r(noalias __s: [*c]u8, noalias __delim: [*c]const u8, noalias __save_ptr: [*c][*c]u8) [*c]u8;
-pub extern fn strlen(__s: [*c]const u8) c_ulong;
-pub extern fn strnlen(__string: [*c]const u8, __maxlen: usize) usize;
-pub extern fn strerror(__errnum: c_int) [*c]u8;
-pub extern fn strerror_r(__errnum: c_int, __buf: [*c]u8, __buflen: usize) c_int;
-pub extern fn strerror_l(__errnum: c_int, __l: locale_t) [*c]u8;
-pub extern fn bcmp(__s1: ?*const anyopaque, __s2: ?*const anyopaque, __n: c_ulong) c_int;
-pub extern fn bcopy(__src: ?*const anyopaque, __dest: ?*anyopaque, __n: c_ulong) void;
-pub extern fn bzero(__s: ?*anyopaque, __n: c_ulong) void;
-pub extern fn index(__s: [*c]const u8, __c: c_int) [*c]u8;
-pub extern fn rindex(__s: [*c]const u8, __c: c_int) [*c]u8;
-pub extern fn ffs(__i: c_int) c_int;
-pub extern fn ffsl(__l: c_long) c_int;
-pub extern fn ffsll(__ll: c_longlong) c_int;
-pub extern fn strcasecmp(__s1: [*c]const u8, __s2: [*c]const u8) c_int;
-pub extern fn strncasecmp(__s1: [*c]const u8, __s2: [*c]const u8, __n: c_ulong) c_int;
-pub extern fn strcasecmp_l(__s1: [*c]const u8, __s2: [*c]const u8, __loc: locale_t) c_int;
-pub extern fn strncasecmp_l(__s1: [*c]const u8, __s2: [*c]const u8, __n: usize, __loc: locale_t) c_int;
-pub extern fn explicit_bzero(__s: ?*anyopaque, __n: usize) void;
-pub extern fn strsep(noalias __stringp: [*c][*c]u8, noalias __delim: [*c]const u8) [*c]u8;
-pub extern fn strsignal(__sig: c_int) [*c]u8;
-pub extern fn __stpcpy(noalias __dest: [*c]u8, noalias __src: [*c]const u8) [*c]u8;
-pub extern fn stpcpy(__dest: [*c]u8, __src: [*c]const u8) [*c]u8;
-pub extern fn __stpncpy(noalias __dest: [*c]u8, noalias __src: [*c]const u8, __n: usize) [*c]u8;
-pub extern fn stpncpy(__dest: [*c]u8, __src: [*c]const u8, __n: c_ulong) [*c]u8;
-pub const _Float32 = f32;
-pub const _Float64 = f64;
-pub const _Float32x = f64;
-pub const _Float64x = c_longdouble;
-pub const wchar_t = c_int;
-pub const wint_t = c_uint;
-const union_unnamed_3 = extern union {
-    __wch: c_uint,
-    __wchb: [4]u8,
-};
-pub const __mbstate_t = extern struct {
-    __count: c_int = @import("std").mem.zeroes(c_int),
-    __value: union_unnamed_3 = @import("std").mem.zeroes(union_unnamed_3),
-};
-pub const mbstate_t = __mbstate_t;
-pub const struct__IO_FILE = opaque {};
-pub const __FILE = struct__IO_FILE;
-pub const FILE = struct__IO_FILE;
-pub const struct_tm = opaque {};
-pub extern fn wcscpy(noalias __dest: [*c]wchar_t, noalias __src: [*c]const wchar_t) [*c]wchar_t;
-pub extern fn wcsncpy(noalias __dest: [*c]wchar_t, noalias __src: [*c]const wchar_t, __n: usize) [*c]wchar_t;
-pub extern fn wcscat(noalias __dest: [*c]wchar_t, noalias __src: [*c]const wchar_t) [*c]wchar_t;
-pub extern fn wcsncat(noalias __dest: [*c]wchar_t, noalias __src: [*c]const wchar_t, __n: usize) [*c]wchar_t;
-pub extern fn wcscmp(__s1: [*c]const c_int, __s2: [*c]const c_int) c_int;
-pub extern fn wcsncmp(__s1: [*c]const c_int, __s2: [*c]const c_int, __n: c_ulong) c_int;
-pub extern fn wcscasecmp(__s1: [*c]const wchar_t, __s2: [*c]const wchar_t) c_int;
-pub extern fn wcsncasecmp(__s1: [*c]const wchar_t, __s2: [*c]const wchar_t, __n: usize) c_int;
-pub extern fn wcscasecmp_l(__s1: [*c]const wchar_t, __s2: [*c]const wchar_t, __loc: locale_t) c_int;
-pub extern fn wcsncasecmp_l(__s1: [*c]const wchar_t, __s2: [*c]const wchar_t, __n: usize, __loc: locale_t) c_int;
-pub extern fn wcscoll(__s1: [*c]const wchar_t, __s2: [*c]const wchar_t) c_int;
-pub extern fn wcsxfrm(noalias __s1: [*c]wchar_t, noalias __s2: [*c]const wchar_t, __n: usize) usize;
-pub extern fn wcscoll_l(__s1: [*c]const wchar_t, __s2: [*c]const wchar_t, __loc: locale_t) c_int;
-pub extern fn wcsxfrm_l(__s1: [*c]wchar_t, __s2: [*c]const wchar_t, __n: usize, __loc: locale_t) usize;
-pub extern fn wcsdup(__s: [*c]const wchar_t) [*c]wchar_t;
-pub extern fn wcschr(__wcs: [*c]const c_int, __wc: c_int) [*c]c_int;
-pub extern fn wcsrchr(__wcs: [*c]const wchar_t, __wc: wchar_t) [*c]wchar_t;
-pub extern fn wcscspn(__wcs: [*c]const wchar_t, __reject: [*c]const wchar_t) usize;
-pub extern fn wcsspn(__wcs: [*c]const wchar_t, __accept: [*c]const wchar_t) usize;
-pub extern fn wcspbrk(__wcs: [*c]const wchar_t, __accept: [*c]const wchar_t) [*c]wchar_t;
-pub extern fn wcsstr(__haystack: [*c]const wchar_t, __needle: [*c]const wchar_t) [*c]wchar_t;
-pub extern fn wcstok(noalias __s: [*c]wchar_t, noalias __delim: [*c]const wchar_t, noalias __ptr: [*c][*c]wchar_t) [*c]wchar_t;
-pub extern fn wcslen(__s: [*c]const c_int) c_ulong;
-pub extern fn wcsnlen(__s: [*c]const wchar_t, __maxlen: usize) usize;
-pub extern fn wmemchr(__s: [*c]const c_int, __c: c_int, __n: c_ulong) [*c]c_int;
-pub extern fn wmemcmp(__s1: [*c]const c_int, __s2: [*c]const c_int, __n: c_ulong) c_int;
-pub extern fn wmemcpy(__s1: [*c]c_int, __s2: [*c]const c_int, __n: c_ulong) [*c]c_int;
-pub extern fn wmemmove(__s1: [*c]c_int, __s2: [*c]const c_int, __n: c_ulong) [*c]c_int;
-pub extern fn wmemset(__s: [*c]wchar_t, __c: wchar_t, __n: usize) [*c]wchar_t;
-pub extern fn btowc(__c: c_int) wint_t;
-pub extern fn wctob(__c: wint_t) c_int;
-pub extern fn mbsinit(__ps: [*c]const mbstate_t) c_int;
-pub extern fn mbrtowc(noalias __pwc: [*c]wchar_t, noalias __s: [*c]const u8, __n: usize, noalias __p: [*c]mbstate_t) usize;
-pub extern fn wcrtomb(noalias __s: [*c]u8, __wc: wchar_t, noalias __ps: [*c]mbstate_t) usize;
-pub extern fn __mbrlen(noalias __s: [*c]const u8, __n: usize, noalias __ps: [*c]mbstate_t) usize;
-pub extern fn mbrlen(noalias __s: [*c]const u8, __n: usize, noalias __ps: [*c]mbstate_t) usize;
-pub extern fn mbsrtowcs(noalias __dst: [*c]wchar_t, noalias __src: [*c][*c]const u8, __len: usize, noalias __ps: [*c]mbstate_t) usize;
-pub extern fn wcsrtombs(noalias __dst: [*c]u8, noalias __src: [*c][*c]const wchar_t, __len: usize, noalias __ps: [*c]mbstate_t) usize;
-pub extern fn mbsnrtowcs(noalias __dst: [*c]wchar_t, noalias __src: [*c][*c]const u8, __nmc: usize, __len: usize, noalias __ps: [*c]mbstate_t) usize;
-pub extern fn wcsnrtombs(noalias __dst: [*c]u8, noalias __src: [*c][*c]const wchar_t, __nwc: usize, __len: usize, noalias __ps: [*c]mbstate_t) usize;
-pub extern fn wcstod(noalias __nptr: [*c]const wchar_t, noalias __endptr: [*c][*c]wchar_t) f64;
-pub extern fn wcstof(noalias __nptr: [*c]const wchar_t, noalias __endptr: [*c][*c]wchar_t) f32;
-pub extern fn wcstold(noalias __nptr: [*c]const wchar_t, noalias __endptr: [*c][*c]wchar_t) c_longdouble;
-pub extern fn wcstol(noalias __nptr: [*c]const wchar_t, noalias __endptr: [*c][*c]wchar_t, __base: c_int) c_long;
-pub extern fn wcstoul(noalias __nptr: [*c]const wchar_t, noalias __endptr: [*c][*c]wchar_t, __base: c_int) c_ulong;
-pub extern fn wcstoll(noalias __nptr: [*c]const wchar_t, noalias __endptr: [*c][*c]wchar_t, __base: c_int) c_longlong;
-pub extern fn wcstoull(noalias __nptr: [*c]const wchar_t, noalias __endptr: [*c][*c]wchar_t, __base: c_int) c_ulonglong;
-pub extern fn wcpcpy(noalias __dest: [*c]wchar_t, noalias __src: [*c]const wchar_t) [*c]wchar_t;
-pub extern fn wcpncpy(noalias __dest: [*c]wchar_t, noalias __src: [*c]const wchar_t, __n: usize) [*c]wchar_t;
-pub extern fn open_wmemstream(__bufloc: [*c][*c]wchar_t, __sizeloc: [*c]usize) ?*__FILE;
-pub extern fn fwide(__fp: ?*__FILE, __mode: c_int) c_int;
-pub extern fn fwprintf(noalias __stream: ?*__FILE, noalias __format: [*c]const wchar_t, ...) c_int;
-pub extern fn wprintf(noalias __format: [*c]const wchar_t, ...) c_int;
-pub extern fn swprintf(noalias __s: [*c]wchar_t, __n: usize, noalias __format: [*c]const wchar_t, ...) c_int;
-pub extern fn vfwprintf(noalias __s: ?*__FILE, noalias __format: [*c]const wchar_t, __arg: [*c]struct___va_list_tag_1) c_int;
-pub extern fn vwprintf(noalias __format: [*c]const wchar_t, __arg: [*c]struct___va_list_tag_1) c_int;
-pub extern fn vswprintf(noalias __s: [*c]wchar_t, __n: usize, noalias __format: [*c]const wchar_t, __arg: [*c]struct___va_list_tag_1) c_int;
-pub extern fn fwscanf(noalias __stream: ?*__FILE, noalias __format: [*c]const wchar_t, ...) c_int;
-pub extern fn wscanf(noalias __format: [*c]const wchar_t, ...) c_int;
-pub extern fn swscanf(noalias __s: [*c]const wchar_t, noalias __format: [*c]const wchar_t, ...) c_int;
-pub extern fn vfwscanf(noalias __s: ?*__FILE, noalias __format: [*c]const wchar_t, __arg: [*c]struct___va_list_tag_1) c_int;
-pub extern fn vwscanf(noalias __format: [*c]const wchar_t, __arg: [*c]struct___va_list_tag_1) c_int;
-pub extern fn vswscanf(noalias __s: [*c]const wchar_t, noalias __format: [*c]const wchar_t, __arg: [*c]struct___va_list_tag_1) c_int;
-pub extern fn fgetwc(__stream: ?*__FILE) wint_t;
-pub extern fn getwc(__stream: ?*__FILE) wint_t;
-pub extern fn getwchar() wint_t;
-pub extern fn fputwc(__wc: wchar_t, __stream: ?*__FILE) wint_t;
-pub extern fn putwc(__wc: wchar_t, __stream: ?*__FILE) wint_t;
-pub extern fn putwchar(__wc: wchar_t) wint_t;
-pub extern fn fgetws(noalias __ws: [*c]wchar_t, __n: c_int, noalias __stream: ?*__FILE) [*c]wchar_t;
-pub extern fn fputws(noalias __ws: [*c]const wchar_t, noalias __stream: ?*__FILE) c_int;
-pub extern fn ungetwc(__wc: wint_t, __stream: ?*__FILE) wint_t;
-pub extern fn wcsftime(noalias __s: [*c]wchar_t, __maxsize: usize, noalias __format: [*c]const wchar_t, noalias __tp: ?*const struct_tm) usize;
-pub const __gwchar_t = c_int;
-pub const imaxdiv_t = extern struct {
-    quot: c_long = @import("std").mem.zeroes(c_long),
-    rem: c_long = @import("std").mem.zeroes(c_long),
-};
-pub extern fn imaxabs(__n: intmax_t) intmax_t;
-pub extern fn imaxdiv(__numer: intmax_t, __denom: intmax_t) imaxdiv_t;
-pub extern fn strtoimax(noalias __nptr: [*c]const u8, noalias __endptr: [*c][*c]u8, __base: c_int) intmax_t;
-pub extern fn strtoumax(noalias __nptr: [*c]const u8, noalias __endptr: [*c][*c]u8, __base: c_int) uintmax_t;
-pub extern fn wcstoimax(noalias __nptr: [*c]const __gwchar_t, noalias __endptr: [*c][*c]__gwchar_t, __base: c_int) intmax_t;
-pub extern fn wcstoumax(noalias __nptr: [*c]const __gwchar_t, noalias __endptr: [*c][*c]__gwchar_t, __base: c_int) uintmax_t;
-pub const Sint8 = i8;
-pub const Uint8 = u8;
-pub const Sint16 = i16;
-pub const Uint16 = u16;
-pub const Sint32 = i32;
-pub const Uint32 = u32;
-pub const Sint64 = i64;
-pub const Uint64 = u64;
+// pub const __builtin_bswap16 = @import("std").zig.c_builtins.__builtin_bswap16;
+// pub const __builtin_bswap32 = @import("std").zig.c_builtins.__builtin_bswap32;
+// pub const __builtin_bswap64 = @import("std").zig.c_builtins.__builtin_bswap64;
+// pub const __builtin_signbit = @import("std").zig.c_builtins.__builtin_signbit;
+// pub const __builtin_signbitf = @import("std").zig.c_builtins.__builtin_signbitf;
+// pub const __builtin_popcount = @import("std").zig.c_builtins.__builtin_popcount;
+// pub const __builtin_ctz = @import("std").zig.c_builtins.__builtin_ctz;
+// pub const __builtin_clz = @import("std").zig.c_builtins.__builtin_clz;
+// pub const __builtin_sqrt = @import("std").zig.c_builtins.__builtin_sqrt;
+// pub const __builtin_sqrtf = @import("std").zig.c_builtins.__builtin_sqrtf;
+// pub const __builtin_sin = @import("std").zig.c_builtins.__builtin_sin;
+// pub const __builtin_sinf = @import("std").zig.c_builtins.__builtin_sinf;
+// pub const __builtin_cos = @import("std").zig.c_builtins.__builtin_cos;
+// pub const __builtin_cosf = @import("std").zig.c_builtins.__builtin_cosf;
+// pub const __builtin_exp = @import("std").zig.c_builtins.__builtin_exp;
+// pub const __builtin_expf = @import("std").zig.c_builtins.__builtin_expf;
+// pub const __builtin_exp2 = @import("std").zig.c_builtins.__builtin_exp2;
+// pub const __builtin_exp2f = @import("std").zig.c_builtins.__builtin_exp2f;
+// pub const __builtin_log = @import("std").zig.c_builtins.__builtin_log;
+// pub const __builtin_logf = @import("std").zig.c_builtins.__builtin_logf;
+// pub const __builtin_log2 = @import("std").zig.c_builtins.__builtin_log2;
+// pub const __builtin_log2f = @import("std").zig.c_builtins.__builtin_log2f;
+// pub const __builtin_log10 = @import("std").zig.c_builtins.__builtin_log10;
+// pub const __builtin_log10f = @import("std").zig.c_builtins.__builtin_log10f;
+// pub const __builtin_abs = @import("std").zig.c_builtins.__builtin_abs;
+// pub const __builtin_labs = @import("std").zig.c_builtins.__builtin_labs;
+// pub const __builtin_llabs = @import("std").zig.c_builtins.__builtin_llabs;
+// pub const __builtin_fabs = @import("std").zig.c_builtins.__builtin_fabs;
+// pub const __builtin_fabsf = @import("std").zig.c_builtins.__builtin_fabsf;
+// pub const __builtin_floor = @import("std").zig.c_builtins.__builtin_floor;
+// pub const __builtin_floorf = @import("std").zig.c_builtins.__builtin_floorf;
+// pub const __builtin_ceil = @import("std").zig.c_builtins.__builtin_ceil;
+// pub const __builtin_ceilf = @import("std").zig.c_builtins.__builtin_ceilf;
+// pub const __builtin_trunc = @import("std").zig.c_builtins.__builtin_trunc;
+// pub const __builtin_truncf = @import("std").zig.c_builtins.__builtin_truncf;
+// pub const __builtin_round = @import("std").zig.c_builtins.__builtin_round;
+// pub const __builtin_roundf = @import("std").zig.c_builtins.__builtin_roundf;
+// pub const __builtin_strlen = @import("std").zig.c_builtins.__builtin_strlen;
+// pub const __builtin_strcmp = @import("std").zig.c_builtins.__builtin_strcmp;
+// pub const __builtin_object_size = @import("std").zig.c_builtins.__builtin_object_size;
+// pub const __builtin___memset_chk = @import("std").zig.c_builtins.__builtin___memset_chk;
+// pub const __builtin_memset = @import("std").zig.c_builtins.__builtin_memset;
+// pub const __builtin___memcpy_chk = @import("std").zig.c_builtins.__builtin___memcpy_chk;
+// pub const __builtin_memcpy = @import("std").zig.c_builtins.__builtin_memcpy;
+// pub const __builtin_expect = @import("std").zig.c_builtins.__builtin_expect;
+// pub const __builtin_nanf = @import("std").zig.c_builtins.__builtin_nanf;
+// pub const __builtin_huge_valf = @import("std").zig.c_builtins.__builtin_huge_valf;
+// pub const __builtin_inff = @import("std").zig.c_builtins.__builtin_inff;
+// pub const __builtin_isnan = @import("std").zig.c_builtins.__builtin_isnan;
+// pub const __builtin_isinf = @import("std").zig.c_builtins.__builtin_isinf;
+// pub const __builtin_isinf_sign = @import("std").zig.c_builtins.__builtin_isinf_sign;
+// pub const __has_builtin = @import("std").zig.c_builtins.__has_builtin;
+// pub const __builtin_assume = @import("std").zig.c_builtins.__builtin_assume;
+// pub const __builtin_unreachable = @import("std").zig.c_builtins.__builtin_unreachable;
+// pub const __builtin_constant_p = @import("std").zig.c_builtins.__builtin_constant_p;
+// pub const __builtin_mul_overflow = @import("std").zig.c_builtins.__builtin_mul_overflow;
+// pub const struct___va_list_tag_1 = extern struct {
+//     gp_offset: c_uint = @import("std").mem.zeroes(c_uint),
+//     fp_offset: c_uint = @import("std").mem.zeroes(c_uint),
+//     overflow_arg_area: ?*anyopaque = @import("std").mem.zeroes(?*anyopaque),
+//     reg_save_area: ?*anyopaque = @import("std").mem.zeroes(?*anyopaque),
+// };
+// pub const __builtin_va_list = [1]struct___va_list_tag_1;
+// pub const __gnuc_va_list = __builtin_va_list;
+// pub const va_list = __builtin_va_list;
+// pub const __u_char = u8;
+// pub const __u_short = c_ushort;
+// pub const __u_int = c_uint;
+// pub const __u_long = c_ulong;
+// pub const __int8_t = i8;
+// pub const __uint8_t = u8;
+// pub const __int16_t = c_short;
+// pub const __uint16_t = c_ushort;
+// pub const __int32_t = c_int;
+// pub const __uint32_t = c_uint;
+// pub const __int64_t = c_long;
+// pub const __uint64_t = c_ulong;
+// pub const __int_least8_t = __int8_t;
+// pub const __uint_least8_t = __uint8_t;
+// pub const __int_least16_t = __int16_t;
+// pub const __uint_least16_t = __uint16_t;
+// pub const __int_least32_t = __int32_t;
+// pub const __uint_least32_t = __uint32_t;
+// pub const __int_least64_t = __int64_t;
+// pub const __uint_least64_t = __uint64_t;
+// pub const __quad_t = c_long;
+// pub const __u_quad_t = c_ulong;
+// pub const __intmax_t = c_long;
+// pub const __uintmax_t = c_ulong;
+// pub const __dev_t = c_ulong;
+// pub const __uid_t = c_uint;
+// pub const __gid_t = c_uint;
+// pub const __ino_t = c_ulong;
+// pub const __ino64_t = c_ulong;
+// pub const __mode_t = c_uint;
+// pub const __nlink_t = c_ulong;
+// pub const __off_t = c_long;
+// pub const __off64_t = c_long;
+// pub const __pid_t = c_int;
+// pub const __fsid_t = extern struct {
+//     __val: [2]c_int = @import("std").mem.zeroes([2]c_int),
+// };
+// pub const __clock_t = c_long;
+// pub const __rlim_t = c_ulong;
+// pub const __rlim64_t = c_ulong;
+// pub const __id_t = c_uint;
+// pub const __time_t = c_long;
+// pub const __useconds_t = c_uint;
+// pub const __suseconds_t = c_long;
+// pub const __suseconds64_t = c_long;
+// pub const __daddr_t = c_int;
+// pub const __key_t = c_int;
+// pub const __clockid_t = c_int;
+// pub const __timer_t = ?*anyopaque;
+// pub const __blksize_t = c_long;
+// pub const __blkcnt_t = c_long;
+// pub const __blkcnt64_t = c_long;
+// pub const __fsblkcnt_t = c_ulong;
+// pub const __fsblkcnt64_t = c_ulong;
+// pub const __fsfilcnt_t = c_ulong;
+// pub const __fsfilcnt64_t = c_ulong;
+// pub const __fsword_t = c_long;
+// pub const __ssize_t = c_long;
+// pub const __syscall_slong_t = c_long;
+// pub const __syscall_ulong_t = c_ulong;
+// pub const __loff_t = __off64_t;
+// pub const __caddr_t = [*c]u8;
+// pub const __intptr_t = c_long;
+// pub const __socklen_t = c_uint;
+// pub const __sig_atomic_t = c_int;
+// pub const int_least8_t = __int_least8_t;
+// pub const int_least16_t = __int_least16_t;
+// pub const int_least32_t = __int_least32_t;
+// pub const int_least64_t = __int_least64_t;
+// pub const uint_least8_t = __uint_least8_t;
+// pub const uint_least16_t = __uint_least16_t;
+// pub const uint_least32_t = __uint_least32_t;
+// pub const uint_least64_t = __uint_least64_t;
+// pub const int_fast8_t = i8;
+// pub const int_fast16_t = c_long;
+// pub const int_fast32_t = c_long;
+// pub const int_fast64_t = c_long;
+// pub const uint_fast8_t = u8;
+// pub const uint_fast16_t = c_ulong;
+// pub const uint_fast32_t = c_ulong;
+// pub const uint_fast64_t = c_ulong;
+// pub const intmax_t = __intmax_t;
+// pub const uintmax_t = __uintmax_t;
+// pub extern fn memcpy(__dest: ?*anyopaque, __src: ?*const anyopaque, __n: c_ulong) ?*anyopaque;
+// pub extern fn memmove(__dest: ?*anyopaque, __src: ?*const anyopaque, __n: c_ulong) ?*anyopaque;
+// pub extern fn memccpy(__dest: ?*anyopaque, __src: ?*const anyopaque, __c: c_int, __n: c_ulong) ?*anyopaque;
+// pub extern fn memset(__s: ?*anyopaque, __c: c_int, __n: c_ulong) ?*anyopaque;
+// pub extern fn memcmp(__s1: ?*const anyopaque, __s2: ?*const anyopaque, __n: c_ulong) c_int;
+// pub extern fn __memcmpeq(__s1: ?*const anyopaque, __s2: ?*const anyopaque, __n: usize) c_int;
+// pub extern fn memchr(__s: ?*const anyopaque, __c: c_int, __n: c_ulong) ?*anyopaque;
+// pub extern fn strcpy(__dest: [*c]u8, __src: [*c]const u8) [*c]u8;
+// pub extern fn strncpy(__dest: [*c]u8, __src: [*c]const u8, __n: c_ulong) [*c]u8;
+// pub extern fn strcat(__dest: [*c]u8, __src: [*c]const u8) [*c]u8;
+// pub extern fn strncat(__dest: [*c]u8, __src: [*c]const u8, __n: c_ulong) [*c]u8;
+// pub extern fn strcmp(__s1: [*c]const u8, __s2: [*c]const u8) c_int;
+// pub extern fn strncmp(__s1: [*c]const u8, __s2: [*c]const u8, __n: c_ulong) c_int;
+// pub extern fn strcoll(__s1: [*c]const u8, __s2: [*c]const u8) c_int;
+// pub extern fn strxfrm(__dest: [*c]u8, __src: [*c]const u8, __n: c_ulong) c_ulong;
+// pub const struct___locale_data_2 = opaque {};
+// pub const struct___locale_struct = extern struct {
+//     __locales: [13]?*struct___locale_data_2 = @import("std").mem.zeroes([13]?*struct___locale_data_2),
+//     __ctype_b: [*c]const c_ushort = @import("std").mem.zeroes([*c]const c_ushort),
+//     __ctype_tolower: [*c]const c_int = @import("std").mem.zeroes([*c]const c_int),
+//     __ctype_toupper: [*c]const c_int = @import("std").mem.zeroes([*c]const c_int),
+//     __names: [13][*c]const u8 = @import("std").mem.zeroes([13][*c]const u8),
+// };
+// pub const __locale_t = [*c]struct___locale_struct;
+// pub const locale_t = __locale_t;
+// pub extern fn strcoll_l(__s1: [*c]const u8, __s2: [*c]const u8, __l: locale_t) c_int;
+// pub extern fn strxfrm_l(__dest: [*c]u8, __src: [*c]const u8, __n: usize, __l: locale_t) usize;
+// pub extern fn strdup(__s: [*c]const u8) [*c]u8;
+// pub extern fn strndup(__string: [*c]const u8, __n: c_ulong) [*c]u8;
+// pub extern fn strchr(__s: [*c]const u8, __c: c_int) [*c]u8;
+// pub extern fn strrchr(__s: [*c]const u8, __c: c_int) [*c]u8;
+// pub extern fn strcspn(__s: [*c]const u8, __reject: [*c]const u8) c_ulong;
+// pub extern fn strspn(__s: [*c]const u8, __accept: [*c]const u8) c_ulong;
+// pub extern fn strpbrk(__s: [*c]const u8, __accept: [*c]const u8) [*c]u8;
+// pub extern fn strstr(__haystack: [*c]const u8, __needle: [*c]const u8) [*c]u8;
+// pub extern fn strtok(__s: [*c]u8, __delim: [*c]const u8) [*c]u8;
+// pub extern fn __strtok_r(noalias __s: [*c]u8, noalias __delim: [*c]const u8, noalias __save_ptr: [*c][*c]u8) [*c]u8;
+// pub extern fn strtok_r(noalias __s: [*c]u8, noalias __delim: [*c]const u8, noalias __save_ptr: [*c][*c]u8) [*c]u8;
+// pub extern fn strlen(__s: [*c]const u8) c_ulong;
+// pub extern fn strnlen(__string: [*c]const u8, __maxlen: usize) usize;
+// pub extern fn strerror(__errnum: c_int) [*c]u8;
+// pub extern fn strerror_r(__errnum: c_int, __buf: [*c]u8, __buflen: usize) c_int;
+// pub extern fn strerror_l(__errnum: c_int, __l: locale_t) [*c]u8;
+// pub extern fn bcmp(__s1: ?*const anyopaque, __s2: ?*const anyopaque, __n: c_ulong) c_int;
+// pub extern fn bcopy(__src: ?*const anyopaque, __dest: ?*anyopaque, __n: c_ulong) void;
+// pub extern fn bzero(__s: ?*anyopaque, __n: c_ulong) void;
+// pub extern fn index(__s: [*c]const u8, __c: c_int) [*c]u8;
+// pub extern fn rindex(__s: [*c]const u8, __c: c_int) [*c]u8;
+// pub extern fn ffs(__i: c_int) c_int;
+// pub extern fn ffsl(__l: c_long) c_int;
+// pub extern fn ffsll(__ll: c_longlong) c_int;
+// pub extern fn strcasecmp(__s1: [*c]const u8, __s2: [*c]const u8) c_int;
+// pub extern fn strncasecmp(__s1: [*c]const u8, __s2: [*c]const u8, __n: c_ulong) c_int;
+// pub extern fn strcasecmp_l(__s1: [*c]const u8, __s2: [*c]const u8, __loc: locale_t) c_int;
+// pub extern fn strncasecmp_l(__s1: [*c]const u8, __s2: [*c]const u8, __n: usize, __loc: locale_t) c_int;
+// pub extern fn explicit_bzero(__s: ?*anyopaque, __n: usize) void;
+// pub extern fn strsep(noalias __stringp: [*c][*c]u8, noalias __delim: [*c]const u8) [*c]u8;
+// pub extern fn strsignal(__sig: c_int) [*c]u8;
+// pub extern fn __stpcpy(noalias __dest: [*c]u8, noalias __src: [*c]const u8) [*c]u8;
+// pub extern fn stpcpy(__dest: [*c]u8, __src: [*c]const u8) [*c]u8;
+// pub extern fn __stpncpy(noalias __dest: [*c]u8, noalias __src: [*c]const u8, __n: usize) [*c]u8;
+// pub extern fn stpncpy(__dest: [*c]u8, __src: [*c]const u8, __n: c_ulong) [*c]u8;
+// pub const _Float32 = f32;
+// pub const _Float64 = f64;
+// pub const _Float32x = f64;
+// pub const _Float64x = c_longdouble;
+// pub const wchar_t = c_int;
+// pub const wint_t = c_uint;
+// const union_unnamed_3 = extern union {
+//     __wch: c_uint,
+//     __wchb: [4]u8,
+// };
+// pub const __mbstate_t = extern struct {
+//     __count: c_int = @import("std").mem.zeroes(c_int),
+//     __value: union_unnamed_3 = @import("std").mem.zeroes(union_unnamed_3),
+// };
+// pub const mbstate_t = __mbstate_t;
+// pub const struct__IO_FILE = opaque {};
+// pub const __FILE = struct__IO_FILE;
+// pub const FILE = struct__IO_FILE;
+// pub const struct_tm = opaque {};
+// pub extern fn wcscpy(noalias __dest: [*c]wchar_t, noalias __src: [*c]const wchar_t) [*c]wchar_t;
+// pub extern fn wcsncpy(noalias __dest: [*c]wchar_t, noalias __src: [*c]const wchar_t, __n: usize) [*c]wchar_t;
+// pub extern fn wcscat(noalias __dest: [*c]wchar_t, noalias __src: [*c]const wchar_t) [*c]wchar_t;
+// pub extern fn wcsncat(noalias __dest: [*c]wchar_t, noalias __src: [*c]const wchar_t, __n: usize) [*c]wchar_t;
+// pub extern fn wcscmp(__s1: [*c]const c_int, __s2: [*c]const c_int) c_int;
+// pub extern fn wcsncmp(__s1: [*c]const c_int, __s2: [*c]const c_int, __n: c_ulong) c_int;
+// pub extern fn wcscasecmp(__s1: [*c]const wchar_t, __s2: [*c]const wchar_t) c_int;
+// pub extern fn wcsncasecmp(__s1: [*c]const wchar_t, __s2: [*c]const wchar_t, __n: usize) c_int;
+// pub extern fn wcscasecmp_l(__s1: [*c]const wchar_t, __s2: [*c]const wchar_t, __loc: locale_t) c_int;
+// pub extern fn wcsncasecmp_l(__s1: [*c]const wchar_t, __s2: [*c]const wchar_t, __n: usize, __loc: locale_t) c_int;
+// pub extern fn wcscoll(__s1: [*c]const wchar_t, __s2: [*c]const wchar_t) c_int;
+// pub extern fn wcsxfrm(noalias __s1: [*c]wchar_t, noalias __s2: [*c]const wchar_t, __n: usize) usize;
+// pub extern fn wcscoll_l(__s1: [*c]const wchar_t, __s2: [*c]const wchar_t, __loc: locale_t) c_int;
+// pub extern fn wcsxfrm_l(__s1: [*c]wchar_t, __s2: [*c]const wchar_t, __n: usize, __loc: locale_t) usize;
+// pub extern fn wcsdup(__s: [*c]const wchar_t) [*c]wchar_t;
+// pub extern fn wcschr(__wcs: [*c]const c_int, __wc: c_int) [*c]c_int;
+// pub extern fn wcsrchr(__wcs: [*c]const wchar_t, __wc: wchar_t) [*c]wchar_t;
+// pub extern fn wcscspn(__wcs: [*c]const wchar_t, __reject: [*c]const wchar_t) usize;
+// pub extern fn wcsspn(__wcs: [*c]const wchar_t, __accept: [*c]const wchar_t) usize;
+// pub extern fn wcspbrk(__wcs: [*c]const wchar_t, __accept: [*c]const wchar_t) [*c]wchar_t;
+// pub extern fn wcsstr(__haystack: [*c]const wchar_t, __needle: [*c]const wchar_t) [*c]wchar_t;
+// pub extern fn wcstok(noalias __s: [*c]wchar_t, noalias __delim: [*c]const wchar_t, noalias __ptr: [*c][*c]wchar_t) [*c]wchar_t;
+// pub extern fn wcslen(__s: [*c]const c_int) c_ulong;
+// pub extern fn wcsnlen(__s: [*c]const wchar_t, __maxlen: usize) usize;
+// pub extern fn wmemchr(__s: [*c]const c_int, __c: c_int, __n: c_ulong) [*c]c_int;
+// pub extern fn wmemcmp(__s1: [*c]const c_int, __s2: [*c]const c_int, __n: c_ulong) c_int;
+// pub extern fn wmemcpy(__s1: [*c]c_int, __s2: [*c]const c_int, __n: c_ulong) [*c]c_int;
+// pub extern fn wmemmove(__s1: [*c]c_int, __s2: [*c]const c_int, __n: c_ulong) [*c]c_int;
+// pub extern fn wmemset(__s: [*c]wchar_t, __c: wchar_t, __n: usize) [*c]wchar_t;
+// pub extern fn btowc(__c: c_int) wint_t;
+// pub extern fn wctob(__c: wint_t) c_int;
+// pub extern fn mbsinit(__ps: [*c]const mbstate_t) c_int;
+// pub extern fn mbrtowc(noalias __pwc: [*c]wchar_t, noalias __s: [*c]const u8, __n: usize, noalias __p: [*c]mbstate_t) usize;
+// pub extern fn wcrtomb(noalias __s: [*c]u8, __wc: wchar_t, noalias __ps: [*c]mbstate_t) usize;
+// pub extern fn __mbrlen(noalias __s: [*c]const u8, __n: usize, noalias __ps: [*c]mbstate_t) usize;
+// pub extern fn mbrlen(noalias __s: [*c]const u8, __n: usize, noalias __ps: [*c]mbstate_t) usize;
+// pub extern fn mbsrtowcs(noalias __dst: [*c]wchar_t, noalias __src: [*c][*c]const u8, __len: usize, noalias __ps: [*c]mbstate_t) usize;
+// pub extern fn wcsrtombs(noalias __dst: [*c]u8, noalias __src: [*c][*c]const wchar_t, __len: usize, noalias __ps: [*c]mbstate_t) usize;
+// pub extern fn mbsnrtowcs(noalias __dst: [*c]wchar_t, noalias __src: [*c][*c]const u8, __nmc: usize, __len: usize, noalias __ps: [*c]mbstate_t) usize;
+// pub extern fn wcsnrtombs(noalias __dst: [*c]u8, noalias __src: [*c][*c]const wchar_t, __nwc: usize, __len: usize, noalias __ps: [*c]mbstate_t) usize;
+// pub extern fn wcstod(noalias __nptr: [*c]const wchar_t, noalias __endptr: [*c][*c]wchar_t) f64;
+// pub extern fn wcstof(noalias __nptr: [*c]const wchar_t, noalias __endptr: [*c][*c]wchar_t) f32;
+// pub extern fn wcstold(noalias __nptr: [*c]const wchar_t, noalias __endptr: [*c][*c]wchar_t) c_longdouble;
+// pub extern fn wcstol(noalias __nptr: [*c]const wchar_t, noalias __endptr: [*c][*c]wchar_t, __base: c_int) c_long;
+// pub extern fn wcstoul(noalias __nptr: [*c]const wchar_t, noalias __endptr: [*c][*c]wchar_t, __base: c_int) c_ulong;
+// pub extern fn wcstoll(noalias __nptr: [*c]const wchar_t, noalias __endptr: [*c][*c]wchar_t, __base: c_int) c_longlong;
+// pub extern fn wcstoull(noalias __nptr: [*c]const wchar_t, noalias __endptr: [*c][*c]wchar_t, __base: c_int) c_ulonglong;
+// pub extern fn wcpcpy(noalias __dest: [*c]wchar_t, noalias __src: [*c]const wchar_t) [*c]wchar_t;
+// pub extern fn wcpncpy(noalias __dest: [*c]wchar_t, noalias __src: [*c]const wchar_t, __n: usize) [*c]wchar_t;
+// pub extern fn open_wmemstream(__bufloc: [*c][*c]wchar_t, __sizeloc: [*c]usize) ?*__FILE;
+// pub extern fn fwide(__fp: ?*__FILE, __mode: c_int) c_int;
+// pub extern fn fwprintf(noalias __stream: ?*__FILE, noalias __format: [*c]const wchar_t, ...) c_int;
+// pub extern fn wprintf(noalias __format: [*c]const wchar_t, ...) c_int;
+// pub extern fn swprintf(noalias __s: [*c]wchar_t, __n: usize, noalias __format: [*c]const wchar_t, ...) c_int;
+// pub extern fn vfwprintf(noalias __s: ?*__FILE, noalias __format: [*c]const wchar_t, __arg: [*c]struct___va_list_tag_1) c_int;
+// pub extern fn vwprintf(noalias __format: [*c]const wchar_t, __arg: [*c]struct___va_list_tag_1) c_int;
+// pub extern fn vswprintf(noalias __s: [*c]wchar_t, __n: usize, noalias __format: [*c]const wchar_t, __arg: [*c]struct___va_list_tag_1) c_int;
+// pub extern fn fwscanf(noalias __stream: ?*__FILE, noalias __format: [*c]const wchar_t, ...) c_int;
+// pub extern fn wscanf(noalias __format: [*c]const wchar_t, ...) c_int;
+// pub extern fn swscanf(noalias __s: [*c]const wchar_t, noalias __format: [*c]const wchar_t, ...) c_int;
+// pub extern fn vfwscanf(noalias __s: ?*__FILE, noalias __format: [*c]const wchar_t, __arg: [*c]struct___va_list_tag_1) c_int;
+// pub extern fn vwscanf(noalias __format: [*c]const wchar_t, __arg: [*c]struct___va_list_tag_1) c_int;
+// pub extern fn vswscanf(noalias __s: [*c]const wchar_t, noalias __format: [*c]const wchar_t, __arg: [*c]struct___va_list_tag_1) c_int;
+// pub extern fn fgetwc(__stream: ?*__FILE) wint_t;
+// pub extern fn getwc(__stream: ?*__FILE) wint_t;
+// pub extern fn getwchar() wint_t;
+// pub extern fn fputwc(__wc: wchar_t, __stream: ?*__FILE) wint_t;
+// pub extern fn putwc(__wc: wchar_t, __stream: ?*__FILE) wint_t;
+// pub extern fn putwchar(__wc: wchar_t) wint_t;
+// pub extern fn fgetws(noalias __ws: [*c]wchar_t, __n: c_int, noalias __stream: ?*__FILE) [*c]wchar_t;
+// pub extern fn fputws(noalias __ws: [*c]const wchar_t, noalias __stream: ?*__FILE) c_int;
+// pub extern fn ungetwc(__wc: wint_t, __stream: ?*__FILE) wint_t;
+// pub extern fn wcsftime(noalias __s: [*c]wchar_t, __maxsize: usize, noalias __format: [*c]const wchar_t, noalias __tp: ?*const struct_tm) usize;
+// pub const __gwchar_t = c_int;
+// pub const imaxdiv_t = extern struct {
+//     quot: c_long = @import("std").mem.zeroes(c_long),
+//     rem: c_long = @import("std").mem.zeroes(c_long),
+// };
+// pub extern fn imaxabs(__n: intmax_t) intmax_t;
+// pub extern fn imaxdiv(__numer: intmax_t, __denom: intmax_t) imaxdiv_t;
+// pub extern fn strtoimax(noalias __nptr: [*c]const u8, noalias __endptr: [*c][*c]u8, __base: c_int) intmax_t;
+// pub extern fn strtoumax(noalias __nptr: [*c]const u8, noalias __endptr: [*c][*c]u8, __base: c_int) uintmax_t;
+// pub extern fn wcstoimax(noalias __nptr: [*c]const __gwchar_t, noalias __endptr: [*c][*c]__gwchar_t, __base: c_int) intmax_t;
+// pub extern fn wcstoumax(noalias __nptr: [*c]const __gwchar_t, noalias __endptr: [*c][*c]__gwchar_t, __base: c_int) uintmax_t;
+// pub const Sint8 = i8;
+// pub const Uint8 = u8;
+// pub const Sint16 = i16;
+// pub const Uint16 = u16;
+// pub const Sint32 = i32;
+// pub const Uint32 = u32;
+// pub const Sint64 = i64;
+// pub const Uint64 = u64;
 // pub const SDL_Time = Sint64;
 // /home/gabe/Code/github.com/gabe-lee/Goolib/.zig-cache/o/3a9a5418a30d0d5a8a8c91bad20d9c47/SDL3/SDL_stdinc.h:203:42: warning: ignoring StaticAssert declaration
 
@@ -1520,2795 +1520,2794 @@ pub const Uint64 = u64;
 // pub const SDL_FLASH_UNTIL_FOCUSED: c_int = 2;
 // pub const enum_SDL_FlashOperation = c_uint;
 // pub const SDL_FlashOperation = enum_SDL_FlashOperation;
-//CHECKPOINT
-pub const struct_SDL_GLContextState = opaque {};
-pub const SDL_GLContext = ?*struct_SDL_GLContextState;
-pub const SDL_EGLDisplay = ?*anyopaque;
-pub const SDL_EGLConfig = ?*anyopaque;
-pub const SDL_EGLSurface = ?*anyopaque;
-pub const SDL_EGLAttrib = isize;
-pub const SDL_EGLint = c_int;
-pub const SDL_EGLAttribArrayCallback = ?*const fn (?*anyopaque) callconv(.c) [*c]SDL_EGLAttrib;
-pub const SDL_EGLIntArrayCallback = ?*const fn (?*anyopaque, SDL_EGLDisplay, SDL_EGLConfig) callconv(.c) [*c]SDL_EGLint;
-pub const SDL_GL_RED_SIZE: c_int = 0;
-pub const SDL_GL_GREEN_SIZE: c_int = 1;
-pub const SDL_GL_BLUE_SIZE: c_int = 2;
-pub const SDL_GL_ALPHA_SIZE: c_int = 3;
-pub const SDL_GL_BUFFER_SIZE: c_int = 4;
-pub const SDL_GL_DOUBLEBUFFER: c_int = 5;
-pub const SDL_GL_DEPTH_SIZE: c_int = 6;
-pub const SDL_GL_STENCIL_SIZE: c_int = 7;
-pub const SDL_GL_ACCUM_RED_SIZE: c_int = 8;
-pub const SDL_GL_ACCUM_GREEN_SIZE: c_int = 9;
-pub const SDL_GL_ACCUM_BLUE_SIZE: c_int = 10;
-pub const SDL_GL_ACCUM_ALPHA_SIZE: c_int = 11;
-pub const SDL_GL_STEREO: c_int = 12;
-pub const SDL_GL_MULTISAMPLEBUFFERS: c_int = 13;
-pub const SDL_GL_MULTISAMPLESAMPLES: c_int = 14;
-pub const SDL_GL_ACCELERATED_VISUAL: c_int = 15;
-pub const SDL_GL_RETAINED_BACKING: c_int = 16;
-pub const SDL_GL_CONTEXT_MAJOR_VERSION: c_int = 17;
-pub const SDL_GL_CONTEXT_MINOR_VERSION: c_int = 18;
-pub const SDL_GL_CONTEXT_FLAGS: c_int = 19;
-pub const SDL_GL_CONTEXT_PROFILE_MASK: c_int = 20;
-pub const SDL_GL_SHARE_WITH_CURRENT_CONTEXT: c_int = 21;
-pub const SDL_GL_FRAMEBUFFER_SRGB_CAPABLE: c_int = 22;
-pub const SDL_GL_CONTEXT_RELEASE_BEHAVIOR: c_int = 23;
-pub const SDL_GL_CONTEXT_RESET_NOTIFICATION: c_int = 24;
-pub const SDL_GL_CONTEXT_NO_ERROR: c_int = 25;
-pub const SDL_GL_FLOATBUFFERS: c_int = 26;
-pub const SDL_GL_EGL_PLATFORM: c_int = 27;
-pub const enum_SDL_GLAttr = c_uint;
-pub const SDL_GLAttr = enum_SDL_GLAttr;
-pub const SDL_GLProfile = Uint32;
-pub const SDL_GLContextFlag = Uint32;
-pub const SDL_GLContextReleaseFlag = Uint32;
-pub const SDL_GLContextResetNotification = Uint32;
-pub extern fn SDL_GetNumVideoDrivers() c_int;
-pub extern fn SDL_GetVideoDriver(index: c_int) [*c]const u8;
-pub extern fn SDL_GetCurrentVideoDriver() [*c]const u8;
-pub extern fn SDL_GetSystemTheme() SDL_SystemTheme;
-pub extern fn SDL_GetDisplays(count: [*c]c_int) [*c]SDL_DisplayID;
-pub extern fn SDL_GetPrimaryDisplay() SDL_DisplayID;
-pub extern fn SDL_GetDisplayProperties(displayID: SDL_DisplayID) SDL_PropertiesID;
-pub extern fn SDL_GetDisplayName(displayID: SDL_DisplayID) [*c]const u8;
-pub extern fn SDL_GetDisplayBounds(displayID: SDL_DisplayID, rect: [*c]SDL_Rect) bool;
-pub extern fn SDL_GetDisplayUsableBounds(displayID: SDL_DisplayID, rect: [*c]SDL_Rect) bool;
-pub extern fn SDL_GetNaturalDisplayOrientation(displayID: SDL_DisplayID) SDL_DisplayOrientation;
-pub extern fn SDL_GetCurrentDisplayOrientation(displayID: SDL_DisplayID) SDL_DisplayOrientation;
-pub extern fn SDL_GetDisplayContentScale(displayID: SDL_DisplayID) f32;
-pub extern fn SDL_GetFullscreenDisplayModes(displayID: SDL_DisplayID, count: [*c]c_int) [*c][*c]SDL_DisplayMode;
-pub extern fn SDL_GetClosestFullscreenDisplayMode(displayID: SDL_DisplayID, w: c_int, h: c_int, refresh_rate: f32, include_high_density_modes: bool, closest: [*c]SDL_DisplayMode) bool;
-pub extern fn SDL_GetDesktopDisplayMode(displayID: SDL_DisplayID) [*c]const SDL_DisplayMode;
-pub extern fn SDL_GetCurrentDisplayMode(displayID: SDL_DisplayID) [*c]const SDL_DisplayMode;
-pub extern fn SDL_GetDisplayForPoint(point: [*c]const SDL_Point) SDL_DisplayID;
-pub extern fn SDL_GetDisplayForRect(rect: [*c]const SDL_Rect) SDL_DisplayID;
-pub extern fn SDL_GetDisplayForWindow(window: ?*SDL_Window) SDL_DisplayID;
-pub extern fn SDL_GetWindowPixelDensity(window: ?*SDL_Window) f32;
-pub extern fn SDL_GetWindowDisplayScale(window: ?*SDL_Window) f32;
-pub extern fn SDL_SetWindowFullscreenMode(window: ?*SDL_Window, mode: [*c]const SDL_DisplayMode) bool;
-pub extern fn SDL_GetWindowFullscreenMode(window: ?*SDL_Window) [*c]const SDL_DisplayMode;
-pub extern fn SDL_GetWindowICCProfile(window: ?*SDL_Window, size: [*c]usize) ?*anyopaque;
-pub extern fn SDL_GetWindowPixelFormat(window: ?*SDL_Window) SDL_PixelFormat;
-pub extern fn SDL_GetWindows(count: [*c]c_int) [*c]?*SDL_Window;
-pub extern fn SDL_CreateWindow(title: [*c]const u8, w: c_int, h: c_int, flags: SDL_WindowFlags) ?*SDL_Window;
-pub extern fn SDL_CreatePopupWindow(parent: ?*SDL_Window, offset_x: c_int, offset_y: c_int, w: c_int, h: c_int, flags: SDL_WindowFlags) ?*SDL_Window;
-pub extern fn SDL_CreateWindowWithProperties(props: SDL_PropertiesID) ?*SDL_Window;
-pub extern fn SDL_GetWindowID(window: ?*SDL_Window) SDL_WindowID;
-pub extern fn SDL_GetWindowFromID(id: SDL_WindowID) ?*SDL_Window;
-pub extern fn SDL_GetWindowParent(window: ?*SDL_Window) ?*SDL_Window;
-pub extern fn SDL_GetWindowProperties(window: ?*SDL_Window) SDL_PropertiesID;
-pub extern fn SDL_GetWindowFlags(window: ?*SDL_Window) SDL_WindowFlags;
-pub extern fn SDL_SetWindowTitle(window: ?*SDL_Window, title: [*c]const u8) bool;
-pub extern fn SDL_GetWindowTitle(window: ?*SDL_Window) [*c]const u8;
-pub extern fn SDL_SetWindowIcon(window: ?*SDL_Window, icon: [*c]SDL_Surface) bool;
-pub extern fn SDL_SetWindowPosition(window: ?*SDL_Window, x: c_int, y: c_int) bool;
-pub extern fn SDL_GetWindowPosition(window: ?*SDL_Window, x: [*c]c_int, y: [*c]c_int) bool;
-pub extern fn SDL_SetWindowSize(window: ?*SDL_Window, w: c_int, h: c_int) bool;
-pub extern fn SDL_GetWindowSize(window: ?*SDL_Window, w: [*c]c_int, h: [*c]c_int) bool;
-pub extern fn SDL_GetWindowSafeArea(window: ?*SDL_Window, rect: [*c]SDL_Rect) bool;
-pub extern fn SDL_SetWindowAspectRatio(window: ?*SDL_Window, min_aspect: f32, max_aspect: f32) bool;
-pub extern fn SDL_GetWindowAspectRatio(window: ?*SDL_Window, min_aspect: [*c]f32, max_aspect: [*c]f32) bool;
-pub extern fn SDL_GetWindowBordersSize(window: ?*SDL_Window, top: [*c]c_int, left: [*c]c_int, bottom: [*c]c_int, right: [*c]c_int) bool;
-pub extern fn SDL_GetWindowSizeInPixels(window: ?*SDL_Window, w: [*c]c_int, h: [*c]c_int) bool;
-pub extern fn SDL_SetWindowMinimumSize(window: ?*SDL_Window, min_w: c_int, min_h: c_int) bool;
-pub extern fn SDL_GetWindowMinimumSize(window: ?*SDL_Window, w: [*c]c_int, h: [*c]c_int) bool;
-pub extern fn SDL_SetWindowMaximumSize(window: ?*SDL_Window, max_w: c_int, max_h: c_int) bool;
-pub extern fn SDL_GetWindowMaximumSize(window: ?*SDL_Window, w: [*c]c_int, h: [*c]c_int) bool;
-pub extern fn SDL_SetWindowBordered(window: ?*SDL_Window, bordered: bool) bool;
-pub extern fn SDL_SetWindowResizable(window: ?*SDL_Window, resizable: bool) bool;
-pub extern fn SDL_SetWindowAlwaysOnTop(window: ?*SDL_Window, on_top: bool) bool;
-pub extern fn SDL_ShowWindow(window: ?*SDL_Window) bool;
-pub extern fn SDL_HideWindow(window: ?*SDL_Window) bool;
-pub extern fn SDL_RaiseWindow(window: ?*SDL_Window) bool;
-pub extern fn SDL_MaximizeWindow(window: ?*SDL_Window) bool;
-pub extern fn SDL_MinimizeWindow(window: ?*SDL_Window) bool;
-pub extern fn SDL_RestoreWindow(window: ?*SDL_Window) bool;
-pub extern fn SDL_SetWindowFullscreen(window: ?*SDL_Window, fullscreen: bool) bool;
-pub extern fn SDL_SyncWindow(window: ?*SDL_Window) bool;
-pub extern fn SDL_WindowHasSurface(window: ?*SDL_Window) bool;
-pub extern fn SDL_GetWindowSurface(window: ?*SDL_Window) [*c]SDL_Surface;
-pub extern fn SDL_SetWindowSurfaceVSync(window: ?*SDL_Window, vsync: c_int) bool;
-pub extern fn SDL_GetWindowSurfaceVSync(window: ?*SDL_Window, vsync: [*c]c_int) bool;
-pub extern fn SDL_UpdateWindowSurface(window: ?*SDL_Window) bool;
-pub extern fn SDL_UpdateWindowSurfaceRects(window: ?*SDL_Window, rects: [*c]const SDL_Rect, numrects: c_int) bool;
-pub extern fn SDL_DestroyWindowSurface(window: ?*SDL_Window) bool;
-pub extern fn SDL_SetWindowKeyboardGrab(window: ?*SDL_Window, grabbed: bool) bool;
-pub extern fn SDL_SetWindowMouseGrab(window: ?*SDL_Window, grabbed: bool) bool;
-pub extern fn SDL_GetWindowKeyboardGrab(window: ?*SDL_Window) bool;
-pub extern fn SDL_GetWindowMouseGrab(window: ?*SDL_Window) bool;
-pub extern fn SDL_GetGrabbedWindow() ?*SDL_Window;
-pub extern fn SDL_SetWindowMouseRect(window: ?*SDL_Window, rect: [*c]const SDL_Rect) bool;
-pub extern fn SDL_GetWindowMouseRect(window: ?*SDL_Window) [*c]const SDL_Rect;
-pub extern fn SDL_SetWindowOpacity(window: ?*SDL_Window, opacity: f32) bool;
-pub extern fn SDL_GetWindowOpacity(window: ?*SDL_Window) f32;
-pub extern fn SDL_SetWindowParent(window: ?*SDL_Window, parent: ?*SDL_Window) bool;
-pub extern fn SDL_SetWindowModal(window: ?*SDL_Window, modal: bool) bool;
-pub extern fn SDL_SetWindowFocusable(window: ?*SDL_Window, focusable: bool) bool;
-pub extern fn SDL_ShowWindowSystemMenu(window: ?*SDL_Window, x: c_int, y: c_int) bool;
-pub const SDL_HITTEST_NORMAL: c_int = 0;
-pub const SDL_HITTEST_DRAGGABLE: c_int = 1;
-pub const SDL_HITTEST_RESIZE_TOPLEFT: c_int = 2;
-pub const SDL_HITTEST_RESIZE_TOP: c_int = 3;
-pub const SDL_HITTEST_RESIZE_TOPRIGHT: c_int = 4;
-pub const SDL_HITTEST_RESIZE_RIGHT: c_int = 5;
-pub const SDL_HITTEST_RESIZE_BOTTOMRIGHT: c_int = 6;
-pub const SDL_HITTEST_RESIZE_BOTTOM: c_int = 7;
-pub const SDL_HITTEST_RESIZE_BOTTOMLEFT: c_int = 8;
-pub const SDL_HITTEST_RESIZE_LEFT: c_int = 9;
-pub const enum_SDL_HitTestResult = c_uint;
-pub const SDL_HitTestResult = enum_SDL_HitTestResult;
-pub const SDL_HitTest = ?*const fn (?*SDL_Window, [*c]const SDL_Point, ?*anyopaque) callconv(.c) SDL_HitTestResult;
-pub extern fn SDL_SetWindowHitTest(window: ?*SDL_Window, callback: SDL_HitTest, callback_data: ?*anyopaque) bool;
-pub extern fn SDL_SetWindowShape(window: ?*SDL_Window, shape: [*c]SDL_Surface) bool;
-pub extern fn SDL_FlashWindow(window: ?*SDL_Window, operation: SDL_FlashOperation) bool;
-pub extern fn SDL_DestroyWindow(window: ?*SDL_Window) void;
-pub extern fn SDL_ScreenSaverEnabled() bool;
-pub extern fn SDL_EnableScreenSaver() bool;
-pub extern fn SDL_DisableScreenSaver() bool;
-pub extern fn SDL_GL_LoadLibrary(path: [*c]const u8) bool;
-pub extern fn SDL_GL_GetProcAddress(proc: [*c]const u8) SDL_FunctionPointer;
-pub extern fn SDL_EGL_GetProcAddress(proc: [*c]const u8) SDL_FunctionPointer;
-pub extern fn SDL_GL_UnloadLibrary() void;
-pub extern fn SDL_GL_ExtensionSupported(extension: [*c]const u8) bool;
-pub extern fn SDL_GL_ResetAttributes() void;
-pub extern fn SDL_GL_SetAttribute(attr: SDL_GLAttr, value: c_int) bool;
-pub extern fn SDL_GL_GetAttribute(attr: SDL_GLAttr, value: [*c]c_int) bool;
-pub extern fn SDL_GL_CreateContext(window: ?*SDL_Window) SDL_GLContext;
-pub extern fn SDL_GL_MakeCurrent(window: ?*SDL_Window, context: SDL_GLContext) bool;
-pub extern fn SDL_GL_GetCurrentWindow() ?*SDL_Window;
-pub extern fn SDL_GL_GetCurrentContext() SDL_GLContext;
-pub extern fn SDL_EGL_GetCurrentDisplay() SDL_EGLDisplay;
-pub extern fn SDL_EGL_GetCurrentConfig() SDL_EGLConfig;
-pub extern fn SDL_EGL_GetWindowSurface(window: ?*SDL_Window) SDL_EGLSurface;
-pub extern fn SDL_EGL_SetAttributeCallbacks(platformAttribCallback: SDL_EGLAttribArrayCallback, surfaceAttribCallback: SDL_EGLIntArrayCallback, contextAttribCallback: SDL_EGLIntArrayCallback, userdata: ?*anyopaque) void;
-pub extern fn SDL_GL_SetSwapInterval(interval: c_int) bool;
-pub extern fn SDL_GL_GetSwapInterval(interval: [*c]c_int) bool;
-pub extern fn SDL_GL_SwapWindow(window: ?*SDL_Window) bool;
-pub extern fn SDL_GL_DestroyContext(context: SDL_GLContext) bool;
-pub const struct_SDL_DialogFileFilter = extern struct {
-    name: [*c]const u8 = @import("std").mem.zeroes([*c]const u8),
-    pattern: [*c]const u8 = @import("std").mem.zeroes([*c]const u8),
-};
-pub const SDL_DialogFileFilter = struct_SDL_DialogFileFilter;
-pub const SDL_DialogFileCallback = ?*const fn (?*anyopaque, [*c]const [*c]const u8, c_int) callconv(.c) void;
-pub extern fn SDL_ShowOpenFileDialog(callback: SDL_DialogFileCallback, userdata: ?*anyopaque, window: ?*SDL_Window, filters: [*c]const SDL_DialogFileFilter, nfilters: c_int, default_location: [*c]const u8, allow_many: bool) void;
-pub extern fn SDL_ShowSaveFileDialog(callback: SDL_DialogFileCallback, userdata: ?*anyopaque, window: ?*SDL_Window, filters: [*c]const SDL_DialogFileFilter, nfilters: c_int, default_location: [*c]const u8) void;
-pub extern fn SDL_ShowOpenFolderDialog(callback: SDL_DialogFileCallback, userdata: ?*anyopaque, window: ?*SDL_Window, default_location: [*c]const u8, allow_many: bool) void;
-pub const SDL_FILEDIALOG_OPENFILE: c_int = 0;
-pub const SDL_FILEDIALOG_SAVEFILE: c_int = 1;
-pub const SDL_FILEDIALOG_OPENFOLDER: c_int = 2;
-pub const enum_SDL_FileDialogType = c_uint;
-pub const SDL_FileDialogType = enum_SDL_FileDialogType;
-pub extern fn SDL_ShowFileDialogWithProperties(@"type": SDL_FileDialogType, callback: SDL_DialogFileCallback, userdata: ?*anyopaque, props: SDL_PropertiesID) void;
-pub const struct_SDL_GUID = extern struct {
-    data: [16]Uint8 = @import("std").mem.zeroes([16]Uint8),
-};
-pub const SDL_GUID = struct_SDL_GUID;
-pub extern fn SDL_GUIDToString(guid: SDL_GUID, pszGUID: [*c]u8, cbGUID: c_int) void;
-pub extern fn SDL_StringToGUID(pchGUID: [*c]const u8) SDL_GUID;
-pub const SDL_POWERSTATE_ERROR: c_int = -1;
-pub const SDL_POWERSTATE_UNKNOWN: c_int = 0;
-pub const SDL_POWERSTATE_ON_BATTERY: c_int = 1;
-pub const SDL_POWERSTATE_NO_BATTERY: c_int = 2;
-pub const SDL_POWERSTATE_CHARGING: c_int = 3;
-pub const SDL_POWERSTATE_CHARGED: c_int = 4;
-pub const enum_SDL_PowerState = c_int;
-pub const SDL_PowerState = enum_SDL_PowerState;
-pub extern fn SDL_GetPowerInfo(seconds: [*c]c_int, percent: [*c]c_int) SDL_PowerState;
-pub const struct_SDL_Sensor = opaque {};
-pub const SDL_Sensor = struct_SDL_Sensor;
-pub const SDL_SensorID = Uint32;
-pub const SDL_SENSOR_INVALID: c_int = -1;
-pub const SDL_SENSOR_UNKNOWN: c_int = 0;
-pub const SDL_SENSOR_ACCEL: c_int = 1;
-pub const SDL_SENSOR_GYRO: c_int = 2;
-pub const SDL_SENSOR_ACCEL_L: c_int = 3;
-pub const SDL_SENSOR_GYRO_L: c_int = 4;
-pub const SDL_SENSOR_ACCEL_R: c_int = 5;
-pub const SDL_SENSOR_GYRO_R: c_int = 6;
-pub const enum_SDL_SensorType = c_int;
-pub const SDL_SensorType = enum_SDL_SensorType;
-pub extern fn SDL_GetSensors(count: [*c]c_int) [*c]SDL_SensorID;
-pub extern fn SDL_GetSensorNameForID(instance_id: SDL_SensorID) [*c]const u8;
-pub extern fn SDL_GetSensorTypeForID(instance_id: SDL_SensorID) SDL_SensorType;
-pub extern fn SDL_GetSensorNonPortableTypeForID(instance_id: SDL_SensorID) c_int;
-pub extern fn SDL_OpenSensor(instance_id: SDL_SensorID) ?*SDL_Sensor;
-pub extern fn SDL_GetSensorFromID(instance_id: SDL_SensorID) ?*SDL_Sensor;
-pub extern fn SDL_GetSensorProperties(sensor: ?*SDL_Sensor) SDL_PropertiesID;
-pub extern fn SDL_GetSensorName(sensor: ?*SDL_Sensor) [*c]const u8;
-pub extern fn SDL_GetSensorType(sensor: ?*SDL_Sensor) SDL_SensorType;
-pub extern fn SDL_GetSensorNonPortableType(sensor: ?*SDL_Sensor) c_int;
-pub extern fn SDL_GetSensorID(sensor: ?*SDL_Sensor) SDL_SensorID;
-pub extern fn SDL_GetSensorData(sensor: ?*SDL_Sensor, data: [*c]f32, num_values: c_int) bool;
-pub extern fn SDL_CloseSensor(sensor: ?*SDL_Sensor) void;
-pub extern fn SDL_UpdateSensors() void;
-pub const struct_SDL_Joystick = opaque {};
-pub const SDL_Joystick = struct_SDL_Joystick;
-pub const SDL_JoystickID = Uint32;
-pub const SDL_JOYSTICK_TYPE_UNKNOWN: c_int = 0;
-pub const SDL_JOYSTICK_TYPE_GAMEPAD: c_int = 1;
-pub const SDL_JOYSTICK_TYPE_WHEEL: c_int = 2;
-pub const SDL_JOYSTICK_TYPE_ARCADE_STICK: c_int = 3;
-pub const SDL_JOYSTICK_TYPE_FLIGHT_STICK: c_int = 4;
-pub const SDL_JOYSTICK_TYPE_DANCE_PAD: c_int = 5;
-pub const SDL_JOYSTICK_TYPE_GUITAR: c_int = 6;
-pub const SDL_JOYSTICK_TYPE_DRUM_KIT: c_int = 7;
-pub const SDL_JOYSTICK_TYPE_ARCADE_PAD: c_int = 8;
-pub const SDL_JOYSTICK_TYPE_THROTTLE: c_int = 9;
-pub const SDL_JOYSTICK_TYPE_COUNT: c_int = 10;
-pub const enum_SDL_JoystickType = c_uint;
-pub const SDL_JoystickType = enum_SDL_JoystickType;
-pub const SDL_JOYSTICK_CONNECTION_INVALID: c_int = -1;
-pub const SDL_JOYSTICK_CONNECTION_UNKNOWN: c_int = 0;
-pub const SDL_JOYSTICK_CONNECTION_WIRED: c_int = 1;
-pub const SDL_JOYSTICK_CONNECTION_WIRELESS: c_int = 2;
-pub const enum_SDL_JoystickConnectionState = c_int;
-pub const SDL_JoystickConnectionState = enum_SDL_JoystickConnectionState;
-pub extern fn SDL_LockJoysticks() void;
-pub extern fn SDL_UnlockJoysticks() void;
-pub extern fn SDL_HasJoystick() bool;
-pub extern fn SDL_GetJoysticks(count: [*c]c_int) [*c]SDL_JoystickID;
-pub extern fn SDL_GetJoystickNameForID(instance_id: SDL_JoystickID) [*c]const u8;
-pub extern fn SDL_GetJoystickPathForID(instance_id: SDL_JoystickID) [*c]const u8;
-pub extern fn SDL_GetJoystickPlayerIndexForID(instance_id: SDL_JoystickID) c_int;
-pub extern fn SDL_GetJoystickGUIDForID(instance_id: SDL_JoystickID) SDL_GUID;
-pub extern fn SDL_GetJoystickVendorForID(instance_id: SDL_JoystickID) Uint16;
-pub extern fn SDL_GetJoystickProductForID(instance_id: SDL_JoystickID) Uint16;
-pub extern fn SDL_GetJoystickProductVersionForID(instance_id: SDL_JoystickID) Uint16;
-pub extern fn SDL_GetJoystickTypeForID(instance_id: SDL_JoystickID) SDL_JoystickType;
-pub extern fn SDL_OpenJoystick(instance_id: SDL_JoystickID) ?*SDL_Joystick;
-pub extern fn SDL_GetJoystickFromID(instance_id: SDL_JoystickID) ?*SDL_Joystick;
-pub extern fn SDL_GetJoystickFromPlayerIndex(player_index: c_int) ?*SDL_Joystick;
-pub const struct_SDL_VirtualJoystickTouchpadDesc = extern struct {
-    nfingers: Uint16 = @import("std").mem.zeroes(Uint16),
-    padding: [3]Uint16 = @import("std").mem.zeroes([3]Uint16),
-};
-pub const SDL_VirtualJoystickTouchpadDesc = struct_SDL_VirtualJoystickTouchpadDesc;
-pub const struct_SDL_VirtualJoystickSensorDesc = extern struct {
-    type: SDL_SensorType = @import("std").mem.zeroes(SDL_SensorType),
-    rate: f32 = @import("std").mem.zeroes(f32),
-};
-pub const SDL_VirtualJoystickSensorDesc = struct_SDL_VirtualJoystickSensorDesc;
-pub const struct_SDL_VirtualJoystickDesc = extern struct {
-    version: Uint32 = @import("std").mem.zeroes(Uint32),
-    type: Uint16 = @import("std").mem.zeroes(Uint16),
-    padding: Uint16 = @import("std").mem.zeroes(Uint16),
-    vendor_id: Uint16 = @import("std").mem.zeroes(Uint16),
-    product_id: Uint16 = @import("std").mem.zeroes(Uint16),
-    naxes: Uint16 = @import("std").mem.zeroes(Uint16),
-    nbuttons: Uint16 = @import("std").mem.zeroes(Uint16),
-    nballs: Uint16 = @import("std").mem.zeroes(Uint16),
-    nhats: Uint16 = @import("std").mem.zeroes(Uint16),
-    ntouchpads: Uint16 = @import("std").mem.zeroes(Uint16),
-    nsensors: Uint16 = @import("std").mem.zeroes(Uint16),
-    padding2: [2]Uint16 = @import("std").mem.zeroes([2]Uint16),
-    button_mask: Uint32 = @import("std").mem.zeroes(Uint32),
-    axis_mask: Uint32 = @import("std").mem.zeroes(Uint32),
-    name: [*c]const u8 = @import("std").mem.zeroes([*c]const u8),
-    touchpads: [*c]const SDL_VirtualJoystickTouchpadDesc = @import("std").mem.zeroes([*c]const SDL_VirtualJoystickTouchpadDesc),
-    sensors: [*c]const SDL_VirtualJoystickSensorDesc = @import("std").mem.zeroes([*c]const SDL_VirtualJoystickSensorDesc),
-    userdata: ?*anyopaque = @import("std").mem.zeroes(?*anyopaque),
-    Update: ?*const fn (?*anyopaque) callconv(.c) void = @import("std").mem.zeroes(?*const fn (?*anyopaque) callconv(.c) void),
-    SetPlayerIndex: ?*const fn (?*anyopaque, c_int) callconv(.c) void = @import("std").mem.zeroes(?*const fn (?*anyopaque, c_int) callconv(.c) void),
-    Rumble: ?*const fn (?*anyopaque, Uint16, Uint16) callconv(.c) bool = @import("std").mem.zeroes(?*const fn (?*anyopaque, Uint16, Uint16) callconv(.c) bool),
-    RumbleTriggers: ?*const fn (?*anyopaque, Uint16, Uint16) callconv(.c) bool = @import("std").mem.zeroes(?*const fn (?*anyopaque, Uint16, Uint16) callconv(.c) bool),
-    SetLED: ?*const fn (?*anyopaque, Uint8, Uint8, Uint8) callconv(.c) bool = @import("std").mem.zeroes(?*const fn (?*anyopaque, Uint8, Uint8, Uint8) callconv(.c) bool),
-    SendEffect: ?*const fn (?*anyopaque, ?*const anyopaque, c_int) callconv(.c) bool = @import("std").mem.zeroes(?*const fn (?*anyopaque, ?*const anyopaque, c_int) callconv(.c) bool),
-    SetSensorsEnabled: ?*const fn (?*anyopaque, bool) callconv(.c) bool = @import("std").mem.zeroes(?*const fn (?*anyopaque, bool) callconv(.c) bool),
-    Cleanup: ?*const fn (?*anyopaque) callconv(.c) void = @import("std").mem.zeroes(?*const fn (?*anyopaque) callconv(.c) void),
-};
-pub const SDL_VirtualJoystickDesc = struct_SDL_VirtualJoystickDesc;
+// pub const struct_SDL_GLContextState = opaque {};
+// pub const SDL_GLContext = ?*struct_SDL_GLContextState;
+// pub const SDL_EGLDisplay = ?*anyopaque;
+// pub const SDL_EGLConfig = ?*anyopaque;
+// pub const SDL_EGLSurface = ?*anyopaque;
+// pub const SDL_EGLAttrib = isize;
+// pub const SDL_EGLint = c_int;
+// pub const SDL_EGLAttribArrayCallback = ?*const fn (?*anyopaque) callconv(.c) [*c]SDL_EGLAttrib;
+// pub const SDL_EGLIntArrayCallback = ?*const fn (?*anyopaque, SDL_EGLDisplay, SDL_EGLConfig) callconv(.c) [*c]SDL_EGLint;
+// pub const SDL_GL_RED_SIZE: c_int = 0;
+// pub const SDL_GL_GREEN_SIZE: c_int = 1;
+// pub const SDL_GL_BLUE_SIZE: c_int = 2;
+// pub const SDL_GL_ALPHA_SIZE: c_int = 3;
+// pub const SDL_GL_BUFFER_SIZE: c_int = 4;
+// pub const SDL_GL_DOUBLEBUFFER: c_int = 5;
+// pub const SDL_GL_DEPTH_SIZE: c_int = 6;
+// pub const SDL_GL_STENCIL_SIZE: c_int = 7;
+// pub const SDL_GL_ACCUM_RED_SIZE: c_int = 8;
+// pub const SDL_GL_ACCUM_GREEN_SIZE: c_int = 9;
+// pub const SDL_GL_ACCUM_BLUE_SIZE: c_int = 10;
+// pub const SDL_GL_ACCUM_ALPHA_SIZE: c_int = 11;
+// pub const SDL_GL_STEREO: c_int = 12;
+// pub const SDL_GL_MULTISAMPLEBUFFERS: c_int = 13;
+// pub const SDL_GL_MULTISAMPLESAMPLES: c_int = 14;
+// pub const SDL_GL_ACCELERATED_VISUAL: c_int = 15;
+// pub const SDL_GL_RETAINED_BACKING: c_int = 16;
+// pub const SDL_GL_CONTEXT_MAJOR_VERSION: c_int = 17;
+// pub const SDL_GL_CONTEXT_MINOR_VERSION: c_int = 18;
+// pub const SDL_GL_CONTEXT_FLAGS: c_int = 19;
+// pub const SDL_GL_CONTEXT_PROFILE_MASK: c_int = 20;
+// pub const SDL_GL_SHARE_WITH_CURRENT_CONTEXT: c_int = 21;
+// pub const SDL_GL_FRAMEBUFFER_SRGB_CAPABLE: c_int = 22;
+// pub const SDL_GL_CONTEXT_RELEASE_BEHAVIOR: c_int = 23;
+// pub const SDL_GL_CONTEXT_RESET_NOTIFICATION: c_int = 24;
+// pub const SDL_GL_CONTEXT_NO_ERROR: c_int = 25;
+// pub const SDL_GL_FLOATBUFFERS: c_int = 26;
+// pub const SDL_GL_EGL_PLATFORM: c_int = 27;
+// pub const enum_SDL_GLAttr = c_uint;
+// pub const SDL_GLAttr = enum_SDL_GLAttr;
+// pub const SDL_GLProfile = Uint32;
+// pub const SDL_GLContextFlag = Uint32;
+// pub const SDL_GLContextReleaseFlag = Uint32;
+// pub const SDL_GLContextResetNotification = Uint32;
+// pub extern fn SDL_GetNumVideoDrivers() c_int;
+// pub extern fn SDL_GetVideoDriver(index: c_int) [*c]const u8;
+// pub extern fn SDL_GetCurrentVideoDriver() [*c]const u8;
+// pub extern fn SDL_GetSystemTheme() SDL_SystemTheme;
+// pub extern fn SDL_GetDisplays(count: [*c]c_int) [*c]SDL_DisplayID;
+// pub extern fn SDL_GetPrimaryDisplay() SDL_DisplayID;
+// pub extern fn SDL_GetDisplayProperties(displayID: SDL_DisplayID) SDL_PropertiesID;
+// pub extern fn SDL_GetDisplayName(displayID: SDL_DisplayID) [*c]const u8;
+// pub extern fn SDL_GetDisplayBounds(displayID: SDL_DisplayID, rect: [*c]SDL_Rect) bool;
+// pub extern fn SDL_GetDisplayUsableBounds(displayID: SDL_DisplayID, rect: [*c]SDL_Rect) bool;
+// pub extern fn SDL_GetNaturalDisplayOrientation(displayID: SDL_DisplayID) SDL_DisplayOrientation;
+// pub extern fn SDL_GetCurrentDisplayOrientation(displayID: SDL_DisplayID) SDL_DisplayOrientation;
+// pub extern fn SDL_GetDisplayContentScale(displayID: SDL_DisplayID) f32;
+// pub extern fn SDL_GetFullscreenDisplayModes(displayID: SDL_DisplayID, count: [*c]c_int) [*c][*c]SDL_DisplayMode;
+// pub extern fn SDL_GetClosestFullscreenDisplayMode(displayID: SDL_DisplayID, w: c_int, h: c_int, refresh_rate: f32, include_high_density_modes: bool, closest: [*c]SDL_DisplayMode) bool;
+// pub extern fn SDL_GetDesktopDisplayMode(displayID: SDL_DisplayID) [*c]const SDL_DisplayMode;
+// pub extern fn SDL_GetCurrentDisplayMode(displayID: SDL_DisplayID) [*c]const SDL_DisplayMode;
+// pub extern fn SDL_GetDisplayForPoint(point: [*c]const SDL_Point) SDL_DisplayID;
+// pub extern fn SDL_GetDisplayForRect(rect: [*c]const SDL_Rect) SDL_DisplayID;
+// pub extern fn SDL_GetDisplayForWindow(window: ?*SDL_Window) SDL_DisplayID;
+// pub extern fn SDL_GetWindowPixelDensity(window: ?*SDL_Window) f32;
+// pub extern fn SDL_GetWindowDisplayScale(window: ?*SDL_Window) f32;
+// pub extern fn SDL_SetWindowFullscreenMode(window: ?*SDL_Window, mode: [*c]const SDL_DisplayMode) bool;
+// pub extern fn SDL_GetWindowFullscreenMode(window: ?*SDL_Window) [*c]const SDL_DisplayMode;
+// pub extern fn SDL_GetWindowICCProfile(window: ?*SDL_Window, size: [*c]usize) ?*anyopaque;
+// pub extern fn SDL_GetWindowPixelFormat(window: ?*SDL_Window) SDL_PixelFormat;
+// pub extern fn SDL_GetWindows(count: [*c]c_int) [*c]?*SDL_Window;
+// pub extern fn SDL_CreateWindow(title: [*c]const u8, w: c_int, h: c_int, flags: SDL_WindowFlags) ?*SDL_Window;
+// pub extern fn SDL_CreatePopupWindow(parent: ?*SDL_Window, offset_x: c_int, offset_y: c_int, w: c_int, h: c_int, flags: SDL_WindowFlags) ?*SDL_Window;
+// pub extern fn SDL_CreateWindowWithProperties(props: SDL_PropertiesID) ?*SDL_Window;
+// pub extern fn SDL_GetWindowID(window: ?*SDL_Window) SDL_WindowID;
+// pub extern fn SDL_GetWindowFromID(id: SDL_WindowID) ?*SDL_Window;
+// pub extern fn SDL_GetWindowParent(window: ?*SDL_Window) ?*SDL_Window;
+// pub extern fn SDL_GetWindowProperties(window: ?*SDL_Window) SDL_PropertiesID;
+// pub extern fn SDL_GetWindowFlags(window: ?*SDL_Window) SDL_WindowFlags;
+// pub extern fn SDL_SetWindowTitle(window: ?*SDL_Window, title: [*c]const u8) bool;
+// pub extern fn SDL_GetWindowTitle(window: ?*SDL_Window) [*c]const u8;
+// pub extern fn SDL_SetWindowIcon(window: ?*SDL_Window, icon: [*c]SDL_Surface) bool;
+// pub extern fn SDL_SetWindowPosition(window: ?*SDL_Window, x: c_int, y: c_int) bool;
+// pub extern fn SDL_GetWindowPosition(window: ?*SDL_Window, x: [*c]c_int, y: [*c]c_int) bool;
+// pub extern fn SDL_SetWindowSize(window: ?*SDL_Window, w: c_int, h: c_int) bool;
+// pub extern fn SDL_GetWindowSize(window: ?*SDL_Window, w: [*c]c_int, h: [*c]c_int) bool;
+// pub extern fn SDL_GetWindowSafeArea(window: ?*SDL_Window, rect: [*c]SDL_Rect) bool;
+// pub extern fn SDL_SetWindowAspectRatio(window: ?*SDL_Window, min_aspect: f32, max_aspect: f32) bool;
+// pub extern fn SDL_GetWindowAspectRatio(window: ?*SDL_Window, min_aspect: [*c]f32, max_aspect: [*c]f32) bool;
+// pub extern fn SDL_GetWindowBordersSize(window: ?*SDL_Window, top: [*c]c_int, left: [*c]c_int, bottom: [*c]c_int, right: [*c]c_int) bool;
+// pub extern fn SDL_GetWindowSizeInPixels(window: ?*SDL_Window, w: [*c]c_int, h: [*c]c_int) bool;
+// pub extern fn SDL_SetWindowMinimumSize(window: ?*SDL_Window, min_w: c_int, min_h: c_int) bool;
+// pub extern fn SDL_GetWindowMinimumSize(window: ?*SDL_Window, w: [*c]c_int, h: [*c]c_int) bool;
+// pub extern fn SDL_SetWindowMaximumSize(window: ?*SDL_Window, max_w: c_int, max_h: c_int) bool;
+// pub extern fn SDL_GetWindowMaximumSize(window: ?*SDL_Window, w: [*c]c_int, h: [*c]c_int) bool;
+// pub extern fn SDL_SetWindowBordered(window: ?*SDL_Window, bordered: bool) bool;
+// pub extern fn SDL_SetWindowResizable(window: ?*SDL_Window, resizable: bool) bool;
+// pub extern fn SDL_SetWindowAlwaysOnTop(window: ?*SDL_Window, on_top: bool) bool;
+// pub extern fn SDL_ShowWindow(window: ?*SDL_Window) bool;
+// pub extern fn SDL_HideWindow(window: ?*SDL_Window) bool;
+// pub extern fn SDL_RaiseWindow(window: ?*SDL_Window) bool;
+// pub extern fn SDL_MaximizeWindow(window: ?*SDL_Window) bool;
+// pub extern fn SDL_MinimizeWindow(window: ?*SDL_Window) bool;
+// pub extern fn SDL_RestoreWindow(window: ?*SDL_Window) bool;
+// pub extern fn SDL_SetWindowFullscreen(window: ?*SDL_Window, fullscreen: bool) bool;
+// pub extern fn SDL_SyncWindow(window: ?*SDL_Window) bool;
+// pub extern fn SDL_WindowHasSurface(window: ?*SDL_Window) bool;
+// pub extern fn SDL_GetWindowSurface(window: ?*SDL_Window) [*c]SDL_Surface;
+// pub extern fn SDL_SetWindowSurfaceVSync(window: ?*SDL_Window, vsync: c_int) bool;
+// pub extern fn SDL_GetWindowSurfaceVSync(window: ?*SDL_Window, vsync: [*c]c_int) bool;
+// pub extern fn SDL_UpdateWindowSurface(window: ?*SDL_Window) bool;
+// pub extern fn SDL_UpdateWindowSurfaceRects(window: ?*SDL_Window, rects: [*c]const SDL_Rect, numrects: c_int) bool;
+// pub extern fn SDL_DestroyWindowSurface(window: ?*SDL_Window) bool;
+// pub extern fn SDL_SetWindowKeyboardGrab(window: ?*SDL_Window, grabbed: bool) bool;
+// pub extern fn SDL_SetWindowMouseGrab(window: ?*SDL_Window, grabbed: bool) bool;
+// pub extern fn SDL_GetWindowKeyboardGrab(window: ?*SDL_Window) bool;
+// pub extern fn SDL_GetWindowMouseGrab(window: ?*SDL_Window) bool;
+// pub extern fn SDL_GetGrabbedWindow() ?*SDL_Window;
+// pub extern fn SDL_SetWindowMouseRect(window: ?*SDL_Window, rect: [*c]const SDL_Rect) bool;
+// pub extern fn SDL_GetWindowMouseRect(window: ?*SDL_Window) [*c]const SDL_Rect;
+// pub extern fn SDL_SetWindowOpacity(window: ?*SDL_Window, opacity: f32) bool;
+// pub extern fn SDL_GetWindowOpacity(window: ?*SDL_Window) f32;
+// pub extern fn SDL_SetWindowParent(window: ?*SDL_Window, parent: ?*SDL_Window) bool;
+// pub extern fn SDL_SetWindowModal(window: ?*SDL_Window, modal: bool) bool;
+// pub extern fn SDL_SetWindowFocusable(window: ?*SDL_Window, focusable: bool) bool;
+// pub extern fn SDL_ShowWindowSystemMenu(window: ?*SDL_Window, x: c_int, y: c_int) bool;
+// pub const SDL_HITTEST_NORMAL: c_int = 0;
+// pub const SDL_HITTEST_DRAGGABLE: c_int = 1;
+// pub const SDL_HITTEST_RESIZE_TOPLEFT: c_int = 2;
+// pub const SDL_HITTEST_RESIZE_TOP: c_int = 3;
+// pub const SDL_HITTEST_RESIZE_TOPRIGHT: c_int = 4;
+// pub const SDL_HITTEST_RESIZE_RIGHT: c_int = 5;
+// pub const SDL_HITTEST_RESIZE_BOTTOMRIGHT: c_int = 6;
+// pub const SDL_HITTEST_RESIZE_BOTTOM: c_int = 7;
+// pub const SDL_HITTEST_RESIZE_BOTTOMLEFT: c_int = 8;
+// pub const SDL_HITTEST_RESIZE_LEFT: c_int = 9;
+// pub const enum_SDL_HitTestResult = c_uint;
+// pub const SDL_HitTestResult = enum_SDL_HitTestResult;
+// pub const SDL_HitTest = ?*const fn (?*SDL_Window, [*c]const SDL_Point, ?*anyopaque) callconv(.c) SDL_HitTestResult;
+// pub extern fn SDL_SetWindowHitTest(window: ?*SDL_Window, callback: SDL_HitTest, callback_data: ?*anyopaque) bool;
+// pub extern fn SDL_SetWindowShape(window: ?*SDL_Window, shape: [*c]SDL_Surface) bool;
+// pub extern fn SDL_FlashWindow(window: ?*SDL_Window, operation: SDL_FlashOperation) bool;
+// pub extern fn SDL_DestroyWindow(window: ?*SDL_Window) void;
+// pub extern fn SDL_ScreenSaverEnabled() bool;
+// pub extern fn SDL_EnableScreenSaver() bool;
+// pub extern fn SDL_DisableScreenSaver() bool;
+// pub extern fn SDL_GL_LoadLibrary(path: [*c]const u8) bool;
+// pub extern fn SDL_GL_GetProcAddress(proc: [*c]const u8) SDL_FunctionPointer;
+// pub extern fn SDL_EGL_GetProcAddress(proc: [*c]const u8) SDL_FunctionPointer;
+// pub extern fn SDL_GL_UnloadLibrary() void;
+// pub extern fn SDL_GL_ExtensionSupported(extension: [*c]const u8) bool;
+// pub extern fn SDL_GL_ResetAttributes() void;
+// pub extern fn SDL_GL_SetAttribute(attr: SDL_GLAttr, value: c_int) bool;
+// pub extern fn SDL_GL_GetAttribute(attr: SDL_GLAttr, value: [*c]c_int) bool;
+// pub extern fn SDL_GL_CreateContext(window: ?*SDL_Window) SDL_GLContext;
+// pub extern fn SDL_GL_MakeCurrent(window: ?*SDL_Window, context: SDL_GLContext) bool;
+// pub extern fn SDL_GL_GetCurrentWindow() ?*SDL_Window;
+// pub extern fn SDL_GL_GetCurrentContext() SDL_GLContext;
+// pub extern fn SDL_EGL_GetCurrentDisplay() SDL_EGLDisplay;
+// pub extern fn SDL_EGL_GetCurrentConfig() SDL_EGLConfig;
+// pub extern fn SDL_EGL_GetWindowSurface(window: ?*SDL_Window) SDL_EGLSurface;
+// pub extern fn SDL_EGL_SetAttributeCallbacks(platformAttribCallback: SDL_EGLAttribArrayCallback, surfaceAttribCallback: SDL_EGLIntArrayCallback, contextAttribCallback: SDL_EGLIntArrayCallback, userdata: ?*anyopaque) void;
+// pub extern fn SDL_GL_SetSwapInterval(interval: c_int) bool;
+// pub extern fn SDL_GL_GetSwapInterval(interval: [*c]c_int) bool;
+// pub extern fn SDL_GL_SwapWindow(window: ?*SDL_Window) bool;
+// pub extern fn SDL_GL_DestroyContext(context: SDL_GLContext) bool;
+// pub const struct_SDL_DialogFileFilter = extern struct {
+//     name: [*c]const u8 = @import("std").mem.zeroes([*c]const u8),
+//     pattern: [*c]const u8 = @import("std").mem.zeroes([*c]const u8),
+// };
+// pub const SDL_DialogFileFilter = struct_SDL_DialogFileFilter;
+// pub const SDL_DialogFileCallback = ?*const fn (?*anyopaque, [*c]const [*c]const u8, c_int) callconv(.c) void;
+// pub extern fn SDL_ShowOpenFileDialog(callback: SDL_DialogFileCallback, userdata: ?*anyopaque, window: ?*SDL_Window, filters: [*c]const SDL_DialogFileFilter, nfilters: c_int, default_location: [*c]const u8, allow_many: bool) void;
+// pub extern fn SDL_ShowSaveFileDialog(callback: SDL_DialogFileCallback, userdata: ?*anyopaque, window: ?*SDL_Window, filters: [*c]const SDL_DialogFileFilter, nfilters: c_int, default_location: [*c]const u8) void;
+// pub extern fn SDL_ShowOpenFolderDialog(callback: SDL_DialogFileCallback, userdata: ?*anyopaque, window: ?*SDL_Window, default_location: [*c]const u8, allow_many: bool) void;
+// pub const SDL_FILEDIALOG_OPENFILE: c_int = 0;
+// pub const SDL_FILEDIALOG_SAVEFILE: c_int = 1;
+// pub const SDL_FILEDIALOG_OPENFOLDER: c_int = 2;
+// pub const enum_SDL_FileDialogType = c_uint;
+// pub const SDL_FileDialogType = enum_SDL_FileDialogType;
+// pub extern fn SDL_ShowFileDialogWithProperties(@"type": SDL_FileDialogType, callback: SDL_DialogFileCallback, userdata: ?*anyopaque, props: SDL_PropertiesID) void;
+// pub const struct_SDL_GUID = extern struct {
+//     data: [16]Uint8 = @import("std").mem.zeroes([16]Uint8),
+// };
+// pub const SDL_GUID = struct_SDL_GUID;
+// pub extern fn SDL_GUIDToString(guid: SDL_GUID, pszGUID: [*c]u8, cbGUID: c_int) void;
+// pub extern fn SDL_StringToGUID(pchGUID: [*c]const u8) SDL_GUID;
+// pub const SDL_POWERSTATE_ERROR: c_int = -1;
+// pub const SDL_POWERSTATE_UNKNOWN: c_int = 0;
+// pub const SDL_POWERSTATE_ON_BATTERY: c_int = 1;
+// pub const SDL_POWERSTATE_NO_BATTERY: c_int = 2;
+// pub const SDL_POWERSTATE_CHARGING: c_int = 3;
+// pub const SDL_POWERSTATE_CHARGED: c_int = 4;
+// pub const enum_SDL_PowerState = c_int;
+// pub const SDL_PowerState = enum_SDL_PowerState;
+// pub extern fn SDL_GetPowerInfo(seconds: [*c]c_int, percent: [*c]c_int) SDL_PowerState;
+// pub const struct_SDL_Sensor = opaque {};
+// pub const SDL_Sensor = struct_SDL_Sensor;
+// pub const SDL_SensorID = Uint32;
+// pub const SDL_SENSOR_INVALID: c_int = -1;
+// pub const SDL_SENSOR_UNKNOWN: c_int = 0;
+// pub const SDL_SENSOR_ACCEL: c_int = 1;
+// pub const SDL_SENSOR_GYRO: c_int = 2;
+// pub const SDL_SENSOR_ACCEL_L: c_int = 3;
+// pub const SDL_SENSOR_GYRO_L: c_int = 4;
+// pub const SDL_SENSOR_ACCEL_R: c_int = 5;
+// pub const SDL_SENSOR_GYRO_R: c_int = 6;
+// pub const enum_SDL_SensorType = c_int;
+// pub const SDL_SensorType = enum_SDL_SensorType;
+// pub extern fn SDL_GetSensors(count: [*c]c_int) [*c]SDL_SensorID;
+// pub extern fn SDL_GetSensorNameForID(instance_id: SDL_SensorID) [*c]const u8;
+// pub extern fn SDL_GetSensorTypeForID(instance_id: SDL_SensorID) SDL_SensorType;
+// pub extern fn SDL_GetSensorNonPortableTypeForID(instance_id: SDL_SensorID) c_int;
+// pub extern fn SDL_OpenSensor(instance_id: SDL_SensorID) ?*SDL_Sensor;
+// pub extern fn SDL_GetSensorFromID(instance_id: SDL_SensorID) ?*SDL_Sensor;
+// pub extern fn SDL_GetSensorProperties(sensor: ?*SDL_Sensor) SDL_PropertiesID;
+// pub extern fn SDL_GetSensorName(sensor: ?*SDL_Sensor) [*c]const u8;
+// pub extern fn SDL_GetSensorType(sensor: ?*SDL_Sensor) SDL_SensorType;
+// pub extern fn SDL_GetSensorNonPortableType(sensor: ?*SDL_Sensor) c_int;
+// pub extern fn SDL_GetSensorID(sensor: ?*SDL_Sensor) SDL_SensorID;
+// pub extern fn SDL_GetSensorData(sensor: ?*SDL_Sensor, data: [*c]f32, num_values: c_int) bool;
+// pub extern fn SDL_CloseSensor(sensor: ?*SDL_Sensor) void;
+// pub extern fn SDL_UpdateSensors() void;
+// pub const struct_SDL_Joystick = opaque {};
+// pub const SDL_Joystick = struct_SDL_Joystick;
+// pub const SDL_JoystickID = Uint32;
+// pub const SDL_JOYSTICK_TYPE_UNKNOWN: c_int = 0;
+// pub const SDL_JOYSTICK_TYPE_GAMEPAD: c_int = 1;
+// pub const SDL_JOYSTICK_TYPE_WHEEL: c_int = 2;
+// pub const SDL_JOYSTICK_TYPE_ARCADE_STICK: c_int = 3;
+// pub const SDL_JOYSTICK_TYPE_FLIGHT_STICK: c_int = 4;
+// pub const SDL_JOYSTICK_TYPE_DANCE_PAD: c_int = 5;
+// pub const SDL_JOYSTICK_TYPE_GUITAR: c_int = 6;
+// pub const SDL_JOYSTICK_TYPE_DRUM_KIT: c_int = 7;
+// pub const SDL_JOYSTICK_TYPE_ARCADE_PAD: c_int = 8;
+// pub const SDL_JOYSTICK_TYPE_THROTTLE: c_int = 9;
+// pub const SDL_JOYSTICK_TYPE_COUNT: c_int = 10;
+// pub const enum_SDL_JoystickType = c_uint;
+// pub const SDL_JoystickType = enum_SDL_JoystickType;
+// pub const SDL_JOYSTICK_CONNECTION_INVALID: c_int = -1;
+// pub const SDL_JOYSTICK_CONNECTION_UNKNOWN: c_int = 0;
+// pub const SDL_JOYSTICK_CONNECTION_WIRED: c_int = 1;
+// pub const SDL_JOYSTICK_CONNECTION_WIRELESS: c_int = 2;
+// pub const enum_SDL_JoystickConnectionState = c_int;
+// pub const SDL_JoystickConnectionState = enum_SDL_JoystickConnectionState;
+// pub extern fn SDL_LockJoysticks() void;
+// pub extern fn SDL_UnlockJoysticks() void;
+// pub extern fn SDL_HasJoystick() bool;
+// pub extern fn SDL_GetJoysticks(count: [*c]c_int) [*c]SDL_JoystickID;
+// pub extern fn SDL_GetJoystickNameForID(instance_id: SDL_JoystickID) [*c]const u8;
+// pub extern fn SDL_GetJoystickPathForID(instance_id: SDL_JoystickID) [*c]const u8;
+// pub extern fn SDL_GetJoystickPlayerIndexForID(instance_id: SDL_JoystickID) c_int;
+// pub extern fn SDL_GetJoystickGUIDForID(instance_id: SDL_JoystickID) SDL_GUID;
+// pub extern fn SDL_GetJoystickVendorForID(instance_id: SDL_JoystickID) Uint16;
+// pub extern fn SDL_GetJoystickProductForID(instance_id: SDL_JoystickID) Uint16;
+// pub extern fn SDL_GetJoystickProductVersionForID(instance_id: SDL_JoystickID) Uint16;
+// pub extern fn SDL_GetJoystickTypeForID(instance_id: SDL_JoystickID) SDL_JoystickType;
+// pub extern fn SDL_OpenJoystick(instance_id: SDL_JoystickID) ?*SDL_Joystick;
+// pub extern fn SDL_GetJoystickFromID(instance_id: SDL_JoystickID) ?*SDL_Joystick;
+// pub extern fn SDL_GetJoystickFromPlayerIndex(player_index: c_int) ?*SDL_Joystick;
+// pub const struct_SDL_VirtualJoystickTouchpadDesc = extern struct {
+//     nfingers: Uint16 = @import("std").mem.zeroes(Uint16),
+//     padding: [3]Uint16 = @import("std").mem.zeroes([3]Uint16),
+// };
+// pub const SDL_VirtualJoystickTouchpadDesc = struct_SDL_VirtualJoystickTouchpadDesc;
+// pub const struct_SDL_VirtualJoystickSensorDesc = extern struct {
+//     type: SDL_SensorType = @import("std").mem.zeroes(SDL_SensorType),
+//     rate: f32 = @import("std").mem.zeroes(f32),
+// };
+// pub const SDL_VirtualJoystickSensorDesc = struct_SDL_VirtualJoystickSensorDesc;
+// pub const struct_SDL_VirtualJoystickDesc = extern struct {
+//     version: Uint32 = @import("std").mem.zeroes(Uint32),
+//     type: Uint16 = @import("std").mem.zeroes(Uint16),
+//     padding: Uint16 = @import("std").mem.zeroes(Uint16),
+//     vendor_id: Uint16 = @import("std").mem.zeroes(Uint16),
+//     product_id: Uint16 = @import("std").mem.zeroes(Uint16),
+//     naxes: Uint16 = @import("std").mem.zeroes(Uint16),
+//     nbuttons: Uint16 = @import("std").mem.zeroes(Uint16),
+//     nballs: Uint16 = @import("std").mem.zeroes(Uint16),
+//     nhats: Uint16 = @import("std").mem.zeroes(Uint16),
+//     ntouchpads: Uint16 = @import("std").mem.zeroes(Uint16),
+//     nsensors: Uint16 = @import("std").mem.zeroes(Uint16),
+//     padding2: [2]Uint16 = @import("std").mem.zeroes([2]Uint16),
+//     button_mask: Uint32 = @import("std").mem.zeroes(Uint32),
+//     axis_mask: Uint32 = @import("std").mem.zeroes(Uint32),
+//     name: [*c]const u8 = @import("std").mem.zeroes([*c]const u8),
+//     touchpads: [*c]const SDL_VirtualJoystickTouchpadDesc = @import("std").mem.zeroes([*c]const SDL_VirtualJoystickTouchpadDesc),
+//     sensors: [*c]const SDL_VirtualJoystickSensorDesc = @import("std").mem.zeroes([*c]const SDL_VirtualJoystickSensorDesc),
+//     userdata: ?*anyopaque = @import("std").mem.zeroes(?*anyopaque),
+//     Update: ?*const fn (?*anyopaque) callconv(.c) void = @import("std").mem.zeroes(?*const fn (?*anyopaque) callconv(.c) void),
+//     SetPlayerIndex: ?*const fn (?*anyopaque, c_int) callconv(.c) void = @import("std").mem.zeroes(?*const fn (?*anyopaque, c_int) callconv(.c) void),
+//     Rumble: ?*const fn (?*anyopaque, Uint16, Uint16) callconv(.c) bool = @import("std").mem.zeroes(?*const fn (?*anyopaque, Uint16, Uint16) callconv(.c) bool),
+//     RumbleTriggers: ?*const fn (?*anyopaque, Uint16, Uint16) callconv(.c) bool = @import("std").mem.zeroes(?*const fn (?*anyopaque, Uint16, Uint16) callconv(.c) bool),
+//     SetLED: ?*const fn (?*anyopaque, Uint8, Uint8, Uint8) callconv(.c) bool = @import("std").mem.zeroes(?*const fn (?*anyopaque, Uint8, Uint8, Uint8) callconv(.c) bool),
+//     SendEffect: ?*const fn (?*anyopaque, ?*const anyopaque, c_int) callconv(.c) bool = @import("std").mem.zeroes(?*const fn (?*anyopaque, ?*const anyopaque, c_int) callconv(.c) bool),
+//     SetSensorsEnabled: ?*const fn (?*anyopaque, bool) callconv(.c) bool = @import("std").mem.zeroes(?*const fn (?*anyopaque, bool) callconv(.c) bool),
+//     Cleanup: ?*const fn (?*anyopaque) callconv(.c) void = @import("std").mem.zeroes(?*const fn (?*anyopaque) callconv(.c) void),
+// };
+// pub const SDL_VirtualJoystickDesc = struct_SDL_VirtualJoystickDesc;
 // /home/gabe/Code/github.com/gabe-lee/Goolib/.zig-cache/o/3a9a5418a30d0d5a8a8c91bad20d9c47/SDL3/SDL_stdinc.h:203:42: warning: ignoring StaticAssert declaration
-pub extern fn SDL_AttachVirtualJoystick(desc: [*c]const SDL_VirtualJoystickDesc) SDL_JoystickID;
-pub extern fn SDL_DetachVirtualJoystick(instance_id: SDL_JoystickID) bool;
-pub extern fn SDL_IsJoystickVirtual(instance_id: SDL_JoystickID) bool;
-pub extern fn SDL_SetJoystickVirtualAxis(joystick: ?*SDL_Joystick, axis: c_int, value: Sint16) bool;
-pub extern fn SDL_SetJoystickVirtualBall(joystick: ?*SDL_Joystick, ball: c_int, xrel: Sint16, yrel: Sint16) bool;
-pub extern fn SDL_SetJoystickVirtualButton(joystick: ?*SDL_Joystick, button: c_int, down: bool) bool;
-pub extern fn SDL_SetJoystickVirtualHat(joystick: ?*SDL_Joystick, hat: c_int, value: Uint8) bool;
-pub extern fn SDL_SetJoystickVirtualTouchpad(joystick: ?*SDL_Joystick, touchpad: c_int, finger: c_int, down: bool, x: f32, y: f32, pressure: f32) bool;
-pub extern fn SDL_SendJoystickVirtualSensorData(joystick: ?*SDL_Joystick, @"type": SDL_SensorType, sensor_timestamp: Uint64, data: [*c]const f32, num_values: c_int) bool;
-pub extern fn SDL_GetJoystickProperties(joystick: ?*SDL_Joystick) SDL_PropertiesID;
-pub extern fn SDL_GetJoystickName(joystick: ?*SDL_Joystick) [*c]const u8;
-pub extern fn SDL_GetJoystickPath(joystick: ?*SDL_Joystick) [*c]const u8;
-pub extern fn SDL_GetJoystickPlayerIndex(joystick: ?*SDL_Joystick) c_int;
-pub extern fn SDL_SetJoystickPlayerIndex(joystick: ?*SDL_Joystick, player_index: c_int) bool;
-pub extern fn SDL_GetJoystickGUID(joystick: ?*SDL_Joystick) SDL_GUID;
-pub extern fn SDL_GetJoystickVendor(joystick: ?*SDL_Joystick) Uint16;
-pub extern fn SDL_GetJoystickProduct(joystick: ?*SDL_Joystick) Uint16;
-pub extern fn SDL_GetJoystickProductVersion(joystick: ?*SDL_Joystick) Uint16;
-pub extern fn SDL_GetJoystickFirmwareVersion(joystick: ?*SDL_Joystick) Uint16;
-pub extern fn SDL_GetJoystickSerial(joystick: ?*SDL_Joystick) [*c]const u8;
-pub extern fn SDL_GetJoystickType(joystick: ?*SDL_Joystick) SDL_JoystickType;
-pub extern fn SDL_GetJoystickGUIDInfo(guid: SDL_GUID, vendor: [*c]Uint16, product: [*c]Uint16, version: [*c]Uint16, crc16: [*c]Uint16) void;
-pub extern fn SDL_JoystickConnected(joystick: ?*SDL_Joystick) bool;
-pub extern fn SDL_GetJoystickID(joystick: ?*SDL_Joystick) SDL_JoystickID;
-pub extern fn SDL_GetNumJoystickAxes(joystick: ?*SDL_Joystick) c_int;
-pub extern fn SDL_GetNumJoystickBalls(joystick: ?*SDL_Joystick) c_int;
-pub extern fn SDL_GetNumJoystickHats(joystick: ?*SDL_Joystick) c_int;
-pub extern fn SDL_GetNumJoystickButtons(joystick: ?*SDL_Joystick) c_int;
-pub extern fn SDL_SetJoystickEventsEnabled(enabled: bool) void;
-pub extern fn SDL_JoystickEventsEnabled() bool;
-pub extern fn SDL_UpdateJoysticks() void;
-pub extern fn SDL_GetJoystickAxis(joystick: ?*SDL_Joystick, axis: c_int) Sint16;
-pub extern fn SDL_GetJoystickAxisInitialState(joystick: ?*SDL_Joystick, axis: c_int, state: [*c]Sint16) bool;
-pub extern fn SDL_GetJoystickBall(joystick: ?*SDL_Joystick, ball: c_int, dx: [*c]c_int, dy: [*c]c_int) bool;
-pub extern fn SDL_GetJoystickHat(joystick: ?*SDL_Joystick, hat: c_int) Uint8;
-pub extern fn SDL_GetJoystickButton(joystick: ?*SDL_Joystick, button: c_int) bool;
-pub extern fn SDL_RumbleJoystick(joystick: ?*SDL_Joystick, low_frequency_rumble: Uint16, high_frequency_rumble: Uint16, duration_ms: Uint32) bool;
-pub extern fn SDL_RumbleJoystickTriggers(joystick: ?*SDL_Joystick, left_rumble: Uint16, right_rumble: Uint16, duration_ms: Uint32) bool;
-pub extern fn SDL_SetJoystickLED(joystick: ?*SDL_Joystick, red: Uint8, green: Uint8, blue: Uint8) bool;
-pub extern fn SDL_SendJoystickEffect(joystick: ?*SDL_Joystick, data: ?*const anyopaque, size: c_int) bool;
-pub extern fn SDL_CloseJoystick(joystick: ?*SDL_Joystick) void;
-pub extern fn SDL_GetJoystickConnectionState(joystick: ?*SDL_Joystick) SDL_JoystickConnectionState;
-pub extern fn SDL_GetJoystickPowerInfo(joystick: ?*SDL_Joystick, percent: [*c]c_int) SDL_PowerState;
-pub const struct_SDL_Gamepad = opaque {};
-pub const SDL_Gamepad = struct_SDL_Gamepad;
-pub const SDL_GAMEPAD_TYPE_UNKNOWN: c_int = 0;
-pub const SDL_GAMEPAD_TYPE_STANDARD: c_int = 1;
-pub const SDL_GAMEPAD_TYPE_XBOX360: c_int = 2;
-pub const SDL_GAMEPAD_TYPE_XBOXONE: c_int = 3;
-pub const SDL_GAMEPAD_TYPE_PS3: c_int = 4;
-pub const SDL_GAMEPAD_TYPE_PS4: c_int = 5;
-pub const SDL_GAMEPAD_TYPE_PS5: c_int = 6;
-pub const SDL_GAMEPAD_TYPE_NINTENDO_SWITCH_PRO: c_int = 7;
-pub const SDL_GAMEPAD_TYPE_NINTENDO_SWITCH_JOYCON_LEFT: c_int = 8;
-pub const SDL_GAMEPAD_TYPE_NINTENDO_SWITCH_JOYCON_RIGHT: c_int = 9;
-pub const SDL_GAMEPAD_TYPE_NINTENDO_SWITCH_JOYCON_PAIR: c_int = 10;
-pub const SDL_GAMEPAD_TYPE_COUNT: c_int = 11;
-pub const enum_SDL_GamepadType = c_uint;
-pub const SDL_GamepadType = enum_SDL_GamepadType;
-pub const SDL_GAMEPAD_BUTTON_INVALID: c_int = -1;
-pub const SDL_GAMEPAD_BUTTON_SOUTH: c_int = 0;
-pub const SDL_GAMEPAD_BUTTON_EAST: c_int = 1;
-pub const SDL_GAMEPAD_BUTTON_WEST: c_int = 2;
-pub const SDL_GAMEPAD_BUTTON_NORTH: c_int = 3;
-pub const SDL_GAMEPAD_BUTTON_BACK: c_int = 4;
-pub const SDL_GAMEPAD_BUTTON_GUIDE: c_int = 5;
-pub const SDL_GAMEPAD_BUTTON_START: c_int = 6;
-pub const SDL_GAMEPAD_BUTTON_LEFT_STICK: c_int = 7;
-pub const SDL_GAMEPAD_BUTTON_RIGHT_STICK: c_int = 8;
-pub const SDL_GAMEPAD_BUTTON_LEFT_SHOULDER: c_int = 9;
-pub const SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER: c_int = 10;
-pub const SDL_GAMEPAD_BUTTON_DPAD_UP: c_int = 11;
-pub const SDL_GAMEPAD_BUTTON_DPAD_DOWN: c_int = 12;
-pub const SDL_GAMEPAD_BUTTON_DPAD_LEFT: c_int = 13;
-pub const SDL_GAMEPAD_BUTTON_DPAD_RIGHT: c_int = 14;
-pub const SDL_GAMEPAD_BUTTON_MISC1: c_int = 15;
-pub const SDL_GAMEPAD_BUTTON_RIGHT_PADDLE1: c_int = 16;
-pub const SDL_GAMEPAD_BUTTON_LEFT_PADDLE1: c_int = 17;
-pub const SDL_GAMEPAD_BUTTON_RIGHT_PADDLE2: c_int = 18;
-pub const SDL_GAMEPAD_BUTTON_LEFT_PADDLE2: c_int = 19;
-pub const SDL_GAMEPAD_BUTTON_TOUCHPAD: c_int = 20;
-pub const SDL_GAMEPAD_BUTTON_MISC2: c_int = 21;
-pub const SDL_GAMEPAD_BUTTON_MISC3: c_int = 22;
-pub const SDL_GAMEPAD_BUTTON_MISC4: c_int = 23;
-pub const SDL_GAMEPAD_BUTTON_MISC5: c_int = 24;
-pub const SDL_GAMEPAD_BUTTON_MISC6: c_int = 25;
-pub const SDL_GAMEPAD_BUTTON_COUNT: c_int = 26;
-pub const enum_SDL_GamepadButton = c_int;
-pub const SDL_GamepadButton = enum_SDL_GamepadButton;
-pub const SDL_GAMEPAD_BUTTON_LABEL_UNKNOWN: c_int = 0;
-pub const SDL_GAMEPAD_BUTTON_LABEL_A: c_int = 1;
-pub const SDL_GAMEPAD_BUTTON_LABEL_B: c_int = 2;
-pub const SDL_GAMEPAD_BUTTON_LABEL_X: c_int = 3;
-pub const SDL_GAMEPAD_BUTTON_LABEL_Y: c_int = 4;
-pub const SDL_GAMEPAD_BUTTON_LABEL_CROSS: c_int = 5;
-pub const SDL_GAMEPAD_BUTTON_LABEL_CIRCLE: c_int = 6;
-pub const SDL_GAMEPAD_BUTTON_LABEL_SQUARE: c_int = 7;
-pub const SDL_GAMEPAD_BUTTON_LABEL_TRIANGLE: c_int = 8;
-pub const enum_SDL_GamepadButtonLabel = c_uint;
-pub const SDL_GamepadButtonLabel = enum_SDL_GamepadButtonLabel;
-pub const SDL_GAMEPAD_AXIS_INVALID: c_int = -1;
-pub const SDL_GAMEPAD_AXIS_LEFTX: c_int = 0;
-pub const SDL_GAMEPAD_AXIS_LEFTY: c_int = 1;
-pub const SDL_GAMEPAD_AXIS_RIGHTX: c_int = 2;
-pub const SDL_GAMEPAD_AXIS_RIGHTY: c_int = 3;
-pub const SDL_GAMEPAD_AXIS_LEFT_TRIGGER: c_int = 4;
-pub const SDL_GAMEPAD_AXIS_RIGHT_TRIGGER: c_int = 5;
-pub const SDL_GAMEPAD_AXIS_COUNT: c_int = 6;
-pub const enum_SDL_GamepadAxis = c_int;
-pub const SDL_GamepadAxis = enum_SDL_GamepadAxis;
-pub const SDL_GAMEPAD_BINDTYPE_NONE: c_int = 0;
-pub const SDL_GAMEPAD_BINDTYPE_BUTTON: c_int = 1;
-pub const SDL_GAMEPAD_BINDTYPE_AXIS: c_int = 2;
-pub const SDL_GAMEPAD_BINDTYPE_HAT: c_int = 3;
-pub const enum_SDL_GamepadBindingType = c_uint;
-pub const SDL_GamepadBindingType = enum_SDL_GamepadBindingType;
-const struct_unnamed_6 = extern struct {
-    axis: c_int = @import("std").mem.zeroes(c_int),
-    axis_min: c_int = @import("std").mem.zeroes(c_int),
-    axis_max: c_int = @import("std").mem.zeroes(c_int),
-};
-const struct_unnamed_7 = extern struct {
-    hat: c_int = @import("std").mem.zeroes(c_int),
-    hat_mask: c_int = @import("std").mem.zeroes(c_int),
-};
-const union_unnamed_5 = extern union {
-    button: c_int,
-    axis: struct_unnamed_6,
-    hat: struct_unnamed_7,
-};
-const struct_unnamed_9 = extern struct {
-    axis: SDL_GamepadAxis = @import("std").mem.zeroes(SDL_GamepadAxis),
-    axis_min: c_int = @import("std").mem.zeroes(c_int),
-    axis_max: c_int = @import("std").mem.zeroes(c_int),
-};
-const union_unnamed_8 = extern union {
-    button: SDL_GamepadButton,
-    axis: struct_unnamed_9,
-};
-pub const struct_SDL_GamepadBinding = extern struct {
-    input_type: SDL_GamepadBindingType = @import("std").mem.zeroes(SDL_GamepadBindingType),
-    input: union_unnamed_5 = @import("std").mem.zeroes(union_unnamed_5),
-    output_type: SDL_GamepadBindingType = @import("std").mem.zeroes(SDL_GamepadBindingType),
-    output: union_unnamed_8 = @import("std").mem.zeroes(union_unnamed_8),
-};
-pub const SDL_GamepadBinding = struct_SDL_GamepadBinding;
-pub extern fn SDL_AddGamepadMapping(mapping: [*c]const u8) c_int;
-pub extern fn SDL_AddGamepadMappingsFromIO(src: ?*SDL_IOStream, closeio: bool) c_int;
-pub extern fn SDL_AddGamepadMappingsFromFile(file: [*c]const u8) c_int;
-pub extern fn SDL_ReloadGamepadMappings() bool;
-pub extern fn SDL_GetGamepadMappings(count: [*c]c_int) [*c][*c]u8;
-pub extern fn SDL_GetGamepadMappingForGUID(guid: SDL_GUID) [*c]u8;
-pub extern fn SDL_GetGamepadMapping(gamepad: ?*SDL_Gamepad) [*c]u8;
-pub extern fn SDL_SetGamepadMapping(instance_id: SDL_JoystickID, mapping: [*c]const u8) bool;
-pub extern fn SDL_HasGamepad() bool;
-pub extern fn SDL_GetGamepads(count: [*c]c_int) [*c]SDL_JoystickID;
-pub extern fn SDL_IsGamepad(instance_id: SDL_JoystickID) bool;
-pub extern fn SDL_GetGamepadNameForID(instance_id: SDL_JoystickID) [*c]const u8;
-pub extern fn SDL_GetGamepadPathForID(instance_id: SDL_JoystickID) [*c]const u8;
-pub extern fn SDL_GetGamepadPlayerIndexForID(instance_id: SDL_JoystickID) c_int;
-pub extern fn SDL_GetGamepadGUIDForID(instance_id: SDL_JoystickID) SDL_GUID;
-pub extern fn SDL_GetGamepadVendorForID(instance_id: SDL_JoystickID) Uint16;
-pub extern fn SDL_GetGamepadProductForID(instance_id: SDL_JoystickID) Uint16;
-pub extern fn SDL_GetGamepadProductVersionForID(instance_id: SDL_JoystickID) Uint16;
-pub extern fn SDL_GetGamepadTypeForID(instance_id: SDL_JoystickID) SDL_GamepadType;
-pub extern fn SDL_GetRealGamepadTypeForID(instance_id: SDL_JoystickID) SDL_GamepadType;
-pub extern fn SDL_GetGamepadMappingForID(instance_id: SDL_JoystickID) [*c]u8;
-pub extern fn SDL_OpenGamepad(instance_id: SDL_JoystickID) ?*SDL_Gamepad;
-pub extern fn SDL_GetGamepadFromID(instance_id: SDL_JoystickID) ?*SDL_Gamepad;
-pub extern fn SDL_GetGamepadFromPlayerIndex(player_index: c_int) ?*SDL_Gamepad;
-pub extern fn SDL_GetGamepadProperties(gamepad: ?*SDL_Gamepad) SDL_PropertiesID;
-pub extern fn SDL_GetGamepadID(gamepad: ?*SDL_Gamepad) SDL_JoystickID;
-pub extern fn SDL_GetGamepadName(gamepad: ?*SDL_Gamepad) [*c]const u8;
-pub extern fn SDL_GetGamepadPath(gamepad: ?*SDL_Gamepad) [*c]const u8;
-pub extern fn SDL_GetGamepadType(gamepad: ?*SDL_Gamepad) SDL_GamepadType;
-pub extern fn SDL_GetRealGamepadType(gamepad: ?*SDL_Gamepad) SDL_GamepadType;
-pub extern fn SDL_GetGamepadPlayerIndex(gamepad: ?*SDL_Gamepad) c_int;
-pub extern fn SDL_SetGamepadPlayerIndex(gamepad: ?*SDL_Gamepad, player_index: c_int) bool;
-pub extern fn SDL_GetGamepadVendor(gamepad: ?*SDL_Gamepad) Uint16;
-pub extern fn SDL_GetGamepadProduct(gamepad: ?*SDL_Gamepad) Uint16;
-pub extern fn SDL_GetGamepadProductVersion(gamepad: ?*SDL_Gamepad) Uint16;
-pub extern fn SDL_GetGamepadFirmwareVersion(gamepad: ?*SDL_Gamepad) Uint16;
-pub extern fn SDL_GetGamepadSerial(gamepad: ?*SDL_Gamepad) [*c]const u8;
-pub extern fn SDL_GetGamepadSteamHandle(gamepad: ?*SDL_Gamepad) Uint64;
-pub extern fn SDL_GetGamepadConnectionState(gamepad: ?*SDL_Gamepad) SDL_JoystickConnectionState;
-pub extern fn SDL_GetGamepadPowerInfo(gamepad: ?*SDL_Gamepad, percent: [*c]c_int) SDL_PowerState;
-pub extern fn SDL_GamepadConnected(gamepad: ?*SDL_Gamepad) bool;
-pub extern fn SDL_GetGamepadJoystick(gamepad: ?*SDL_Gamepad) ?*SDL_Joystick;
-pub extern fn SDL_SetGamepadEventsEnabled(enabled: bool) void;
-pub extern fn SDL_GamepadEventsEnabled() bool;
-pub extern fn SDL_GetGamepadBindings(gamepad: ?*SDL_Gamepad, count: [*c]c_int) [*c][*c]SDL_GamepadBinding;
-pub extern fn SDL_UpdateGamepads() void;
-pub extern fn SDL_GetGamepadTypeFromString(str: [*c]const u8) SDL_GamepadType;
-pub extern fn SDL_GetGamepadStringForType(@"type": SDL_GamepadType) [*c]const u8;
-pub extern fn SDL_GetGamepadAxisFromString(str: [*c]const u8) SDL_GamepadAxis;
-pub extern fn SDL_GetGamepadStringForAxis(axis: SDL_GamepadAxis) [*c]const u8;
-pub extern fn SDL_GamepadHasAxis(gamepad: ?*SDL_Gamepad, axis: SDL_GamepadAxis) bool;
-pub extern fn SDL_GetGamepadAxis(gamepad: ?*SDL_Gamepad, axis: SDL_GamepadAxis) Sint16;
-pub extern fn SDL_GetGamepadButtonFromString(str: [*c]const u8) SDL_GamepadButton;
-pub extern fn SDL_GetGamepadStringForButton(button: SDL_GamepadButton) [*c]const u8;
-pub extern fn SDL_GamepadHasButton(gamepad: ?*SDL_Gamepad, button: SDL_GamepadButton) bool;
-pub extern fn SDL_GetGamepadButton(gamepad: ?*SDL_Gamepad, button: SDL_GamepadButton) bool;
-pub extern fn SDL_GetGamepadButtonLabelForType(@"type": SDL_GamepadType, button: SDL_GamepadButton) SDL_GamepadButtonLabel;
-pub extern fn SDL_GetGamepadButtonLabel(gamepad: ?*SDL_Gamepad, button: SDL_GamepadButton) SDL_GamepadButtonLabel;
-pub extern fn SDL_GetNumGamepadTouchpads(gamepad: ?*SDL_Gamepad) c_int;
-pub extern fn SDL_GetNumGamepadTouchpadFingers(gamepad: ?*SDL_Gamepad, touchpad: c_int) c_int;
-pub extern fn SDL_GetGamepadTouchpadFinger(gamepad: ?*SDL_Gamepad, touchpad: c_int, finger: c_int, down: [*c]bool, x: [*c]f32, y: [*c]f32, pressure: [*c]f32) bool;
-pub extern fn SDL_GamepadHasSensor(gamepad: ?*SDL_Gamepad, @"type": SDL_SensorType) bool;
-pub extern fn SDL_SetGamepadSensorEnabled(gamepad: ?*SDL_Gamepad, @"type": SDL_SensorType, enabled: bool) bool;
-pub extern fn SDL_GamepadSensorEnabled(gamepad: ?*SDL_Gamepad, @"type": SDL_SensorType) bool;
-pub extern fn SDL_GetGamepadSensorDataRate(gamepad: ?*SDL_Gamepad, @"type": SDL_SensorType) f32;
-pub extern fn SDL_GetGamepadSensorData(gamepad: ?*SDL_Gamepad, @"type": SDL_SensorType, data: [*c]f32, num_values: c_int) bool;
-pub extern fn SDL_RumbleGamepad(gamepad: ?*SDL_Gamepad, low_frequency_rumble: Uint16, high_frequency_rumble: Uint16, duration_ms: Uint32) bool;
-pub extern fn SDL_RumbleGamepadTriggers(gamepad: ?*SDL_Gamepad, left_rumble: Uint16, right_rumble: Uint16, duration_ms: Uint32) bool;
-pub extern fn SDL_SetGamepadLED(gamepad: ?*SDL_Gamepad, red: Uint8, green: Uint8, blue: Uint8) bool;
-pub extern fn SDL_SendGamepadEffect(gamepad: ?*SDL_Gamepad, data: ?*const anyopaque, size: c_int) bool;
-pub extern fn SDL_CloseGamepad(gamepad: ?*SDL_Gamepad) void;
-pub extern fn SDL_GetGamepadAppleSFSymbolsNameForButton(gamepad: ?*SDL_Gamepad, button: SDL_GamepadButton) [*c]const u8;
-pub extern fn SDL_GetGamepadAppleSFSymbolsNameForAxis(gamepad: ?*SDL_Gamepad, axis: SDL_GamepadAxis) [*c]const u8;
-pub const SDL_SCANCODE_UNKNOWN: c_int = 0;
-pub const SDL_SCANCODE_A: c_int = 4;
-pub const SDL_SCANCODE_B: c_int = 5;
-pub const SDL_SCANCODE_C: c_int = 6;
-pub const SDL_SCANCODE_D: c_int = 7;
-pub const SDL_SCANCODE_E: c_int = 8;
-pub const SDL_SCANCODE_F: c_int = 9;
-pub const SDL_SCANCODE_G: c_int = 10;
-pub const SDL_SCANCODE_H: c_int = 11;
-pub const SDL_SCANCODE_I: c_int = 12;
-pub const SDL_SCANCODE_J: c_int = 13;
-pub const SDL_SCANCODE_K: c_int = 14;
-pub const SDL_SCANCODE_L: c_int = 15;
-pub const SDL_SCANCODE_M: c_int = 16;
-pub const SDL_SCANCODE_N: c_int = 17;
-pub const SDL_SCANCODE_O: c_int = 18;
-pub const SDL_SCANCODE_P: c_int = 19;
-pub const SDL_SCANCODE_Q: c_int = 20;
-pub const SDL_SCANCODE_R: c_int = 21;
-pub const SDL_SCANCODE_S: c_int = 22;
-pub const SDL_SCANCODE_T: c_int = 23;
-pub const SDL_SCANCODE_U: c_int = 24;
-pub const SDL_SCANCODE_V: c_int = 25;
-pub const SDL_SCANCODE_W: c_int = 26;
-pub const SDL_SCANCODE_X: c_int = 27;
-pub const SDL_SCANCODE_Y: c_int = 28;
-pub const SDL_SCANCODE_Z: c_int = 29;
-pub const SDL_SCANCODE_1: c_int = 30;
-pub const SDL_SCANCODE_2: c_int = 31;
-pub const SDL_SCANCODE_3: c_int = 32;
-pub const SDL_SCANCODE_4: c_int = 33;
-pub const SDL_SCANCODE_5: c_int = 34;
-pub const SDL_SCANCODE_6: c_int = 35;
-pub const SDL_SCANCODE_7: c_int = 36;
-pub const SDL_SCANCODE_8: c_int = 37;
-pub const SDL_SCANCODE_9: c_int = 38;
-pub const SDL_SCANCODE_0: c_int = 39;
-pub const SDL_SCANCODE_RETURN: c_int = 40;
-pub const SDL_SCANCODE_ESCAPE: c_int = 41;
-pub const SDL_SCANCODE_BACKSPACE: c_int = 42;
-pub const SDL_SCANCODE_TAB: c_int = 43;
-pub const SDL_SCANCODE_SPACE: c_int = 44;
-pub const SDL_SCANCODE_MINUS: c_int = 45;
-pub const SDL_SCANCODE_EQUALS: c_int = 46;
-pub const SDL_SCANCODE_LEFTBRACKET: c_int = 47;
-pub const SDL_SCANCODE_RIGHTBRACKET: c_int = 48;
-pub const SDL_SCANCODE_BACKSLASH: c_int = 49;
-pub const SDL_SCANCODE_NONUSHASH: c_int = 50;
-pub const SDL_SCANCODE_SEMICOLON: c_int = 51;
-pub const SDL_SCANCODE_APOSTROPHE: c_int = 52;
-pub const SDL_SCANCODE_GRAVE: c_int = 53;
-pub const SDL_SCANCODE_COMMA: c_int = 54;
-pub const SDL_SCANCODE_PERIOD: c_int = 55;
-pub const SDL_SCANCODE_SLASH: c_int = 56;
-pub const SDL_SCANCODE_CAPSLOCK: c_int = 57;
-pub const SDL_SCANCODE_F1: c_int = 58;
-pub const SDL_SCANCODE_F2: c_int = 59;
-pub const SDL_SCANCODE_F3: c_int = 60;
-pub const SDL_SCANCODE_F4: c_int = 61;
-pub const SDL_SCANCODE_F5: c_int = 62;
-pub const SDL_SCANCODE_F6: c_int = 63;
-pub const SDL_SCANCODE_F7: c_int = 64;
-pub const SDL_SCANCODE_F8: c_int = 65;
-pub const SDL_SCANCODE_F9: c_int = 66;
-pub const SDL_SCANCODE_F10: c_int = 67;
-pub const SDL_SCANCODE_F11: c_int = 68;
-pub const SDL_SCANCODE_F12: c_int = 69;
-pub const SDL_SCANCODE_PRINTSCREEN: c_int = 70;
-pub const SDL_SCANCODE_SCROLLLOCK: c_int = 71;
-pub const SDL_SCANCODE_PAUSE: c_int = 72;
-pub const SDL_SCANCODE_INSERT: c_int = 73;
-pub const SDL_SCANCODE_HOME: c_int = 74;
-pub const SDL_SCANCODE_PAGEUP: c_int = 75;
-pub const SDL_SCANCODE_DELETE: c_int = 76;
-pub const SDL_SCANCODE_END: c_int = 77;
-pub const SDL_SCANCODE_PAGEDOWN: c_int = 78;
-pub const SDL_SCANCODE_RIGHT: c_int = 79;
-pub const SDL_SCANCODE_LEFT: c_int = 80;
-pub const SDL_SCANCODE_DOWN: c_int = 81;
-pub const SDL_SCANCODE_UP: c_int = 82;
-pub const SDL_SCANCODE_NUMLOCKCLEAR: c_int = 83;
-pub const SDL_SCANCODE_KP_DIVIDE: c_int = 84;
-pub const SDL_SCANCODE_KP_MULTIPLY: c_int = 85;
-pub const SDL_SCANCODE_KP_MINUS: c_int = 86;
-pub const SDL_SCANCODE_KP_PLUS: c_int = 87;
-pub const SDL_SCANCODE_KP_ENTER: c_int = 88;
-pub const SDL_SCANCODE_KP_1: c_int = 89;
-pub const SDL_SCANCODE_KP_2: c_int = 90;
-pub const SDL_SCANCODE_KP_3: c_int = 91;
-pub const SDL_SCANCODE_KP_4: c_int = 92;
-pub const SDL_SCANCODE_KP_5: c_int = 93;
-pub const SDL_SCANCODE_KP_6: c_int = 94;
-pub const SDL_SCANCODE_KP_7: c_int = 95;
-pub const SDL_SCANCODE_KP_8: c_int = 96;
-pub const SDL_SCANCODE_KP_9: c_int = 97;
-pub const SDL_SCANCODE_KP_0: c_int = 98;
-pub const SDL_SCANCODE_KP_PERIOD: c_int = 99;
-pub const SDL_SCANCODE_NONUSBACKSLASH: c_int = 100;
-pub const SDL_SCANCODE_APPLICATION: c_int = 101;
-pub const SDL_SCANCODE_POWER: c_int = 102;
-pub const SDL_SCANCODE_KP_EQUALS: c_int = 103;
-pub const SDL_SCANCODE_F13: c_int = 104;
-pub const SDL_SCANCODE_F14: c_int = 105;
-pub const SDL_SCANCODE_F15: c_int = 106;
-pub const SDL_SCANCODE_F16: c_int = 107;
-pub const SDL_SCANCODE_F17: c_int = 108;
-pub const SDL_SCANCODE_F18: c_int = 109;
-pub const SDL_SCANCODE_F19: c_int = 110;
-pub const SDL_SCANCODE_F20: c_int = 111;
-pub const SDL_SCANCODE_F21: c_int = 112;
-pub const SDL_SCANCODE_F22: c_int = 113;
-pub const SDL_SCANCODE_F23: c_int = 114;
-pub const SDL_SCANCODE_F24: c_int = 115;
-pub const SDL_SCANCODE_EXECUTE: c_int = 116;
-pub const SDL_SCANCODE_HELP: c_int = 117;
-pub const SDL_SCANCODE_MENU: c_int = 118;
-pub const SDL_SCANCODE_SELECT: c_int = 119;
-pub const SDL_SCANCODE_STOP: c_int = 120;
-pub const SDL_SCANCODE_AGAIN: c_int = 121;
-pub const SDL_SCANCODE_UNDO: c_int = 122;
-pub const SDL_SCANCODE_CUT: c_int = 123;
-pub const SDL_SCANCODE_COPY: c_int = 124;
-pub const SDL_SCANCODE_PASTE: c_int = 125;
-pub const SDL_SCANCODE_FIND: c_int = 126;
-pub const SDL_SCANCODE_MUTE: c_int = 127;
-pub const SDL_SCANCODE_VOLUMEUP: c_int = 128;
-pub const SDL_SCANCODE_VOLUMEDOWN: c_int = 129;
-pub const SDL_SCANCODE_KP_COMMA: c_int = 133;
-pub const SDL_SCANCODE_KP_EQUALSAS400: c_int = 134;
-pub const SDL_SCANCODE_INTERNATIONAL1: c_int = 135;
-pub const SDL_SCANCODE_INTERNATIONAL2: c_int = 136;
-pub const SDL_SCANCODE_INTERNATIONAL3: c_int = 137;
-pub const SDL_SCANCODE_INTERNATIONAL4: c_int = 138;
-pub const SDL_SCANCODE_INTERNATIONAL5: c_int = 139;
-pub const SDL_SCANCODE_INTERNATIONAL6: c_int = 140;
-pub const SDL_SCANCODE_INTERNATIONAL7: c_int = 141;
-pub const SDL_SCANCODE_INTERNATIONAL8: c_int = 142;
-pub const SDL_SCANCODE_INTERNATIONAL9: c_int = 143;
-pub const SDL_SCANCODE_LANG1: c_int = 144;
-pub const SDL_SCANCODE_LANG2: c_int = 145;
-pub const SDL_SCANCODE_LANG3: c_int = 146;
-pub const SDL_SCANCODE_LANG4: c_int = 147;
-pub const SDL_SCANCODE_LANG5: c_int = 148;
-pub const SDL_SCANCODE_LANG6: c_int = 149;
-pub const SDL_SCANCODE_LANG7: c_int = 150;
-pub const SDL_SCANCODE_LANG8: c_int = 151;
-pub const SDL_SCANCODE_LANG9: c_int = 152;
-pub const SDL_SCANCODE_ALTERASE: c_int = 153;
-pub const SDL_SCANCODE_SYSREQ: c_int = 154;
-pub const SDL_SCANCODE_CANCEL: c_int = 155;
-pub const SDL_SCANCODE_CLEAR: c_int = 156;
-pub const SDL_SCANCODE_PRIOR: c_int = 157;
-pub const SDL_SCANCODE_RETURN2: c_int = 158;
-pub const SDL_SCANCODE_SEPARATOR: c_int = 159;
-pub const SDL_SCANCODE_OUT: c_int = 160;
-pub const SDL_SCANCODE_OPER: c_int = 161;
-pub const SDL_SCANCODE_CLEARAGAIN: c_int = 162;
-pub const SDL_SCANCODE_CRSEL: c_int = 163;
-pub const SDL_SCANCODE_EXSEL: c_int = 164;
-pub const SDL_SCANCODE_KP_00: c_int = 176;
-pub const SDL_SCANCODE_KP_000: c_int = 177;
-pub const SDL_SCANCODE_THOUSANDSSEPARATOR: c_int = 178;
-pub const SDL_SCANCODE_DECIMALSEPARATOR: c_int = 179;
-pub const SDL_SCANCODE_CURRENCYUNIT: c_int = 180;
-pub const SDL_SCANCODE_CURRENCYSUBUNIT: c_int = 181;
-pub const SDL_SCANCODE_KP_LEFTPAREN: c_int = 182;
-pub const SDL_SCANCODE_KP_RIGHTPAREN: c_int = 183;
-pub const SDL_SCANCODE_KP_LEFTBRACE: c_int = 184;
-pub const SDL_SCANCODE_KP_RIGHTBRACE: c_int = 185;
-pub const SDL_SCANCODE_KP_TAB: c_int = 186;
-pub const SDL_SCANCODE_KP_BACKSPACE: c_int = 187;
-pub const SDL_SCANCODE_KP_A: c_int = 188;
-pub const SDL_SCANCODE_KP_B: c_int = 189;
-pub const SDL_SCANCODE_KP_C: c_int = 190;
-pub const SDL_SCANCODE_KP_D: c_int = 191;
-pub const SDL_SCANCODE_KP_E: c_int = 192;
-pub const SDL_SCANCODE_KP_F: c_int = 193;
-pub const SDL_SCANCODE_KP_XOR: c_int = 194;
-pub const SDL_SCANCODE_KP_POWER: c_int = 195;
-pub const SDL_SCANCODE_KP_PERCENT: c_int = 196;
-pub const SDL_SCANCODE_KP_LESS: c_int = 197;
-pub const SDL_SCANCODE_KP_GREATER: c_int = 198;
-pub const SDL_SCANCODE_KP_AMPERSAND: c_int = 199;
-pub const SDL_SCANCODE_KP_DBLAMPERSAND: c_int = 200;
-pub const SDL_SCANCODE_KP_VERTICALBAR: c_int = 201;
-pub const SDL_SCANCODE_KP_DBLVERTICALBAR: c_int = 202;
-pub const SDL_SCANCODE_KP_COLON: c_int = 203;
-pub const SDL_SCANCODE_KP_HASH: c_int = 204;
-pub const SDL_SCANCODE_KP_SPACE: c_int = 205;
-pub const SDL_SCANCODE_KP_AT: c_int = 206;
-pub const SDL_SCANCODE_KP_EXCLAM: c_int = 207;
-pub const SDL_SCANCODE_KP_MEMSTORE: c_int = 208;
-pub const SDL_SCANCODE_KP_MEMRECALL: c_int = 209;
-pub const SDL_SCANCODE_KP_MEMCLEAR: c_int = 210;
-pub const SDL_SCANCODE_KP_MEMADD: c_int = 211;
-pub const SDL_SCANCODE_KP_MEMSUBTRACT: c_int = 212;
-pub const SDL_SCANCODE_KP_MEMMULTIPLY: c_int = 213;
-pub const SDL_SCANCODE_KP_MEMDIVIDE: c_int = 214;
-pub const SDL_SCANCODE_KP_PLUSMINUS: c_int = 215;
-pub const SDL_SCANCODE_KP_CLEAR: c_int = 216;
-pub const SDL_SCANCODE_KP_CLEARENTRY: c_int = 217;
-pub const SDL_SCANCODE_KP_BINARY: c_int = 218;
-pub const SDL_SCANCODE_KP_OCTAL: c_int = 219;
-pub const SDL_SCANCODE_KP_DECIMAL: c_int = 220;
-pub const SDL_SCANCODE_KP_HEXADECIMAL: c_int = 221;
-pub const SDL_SCANCODE_LCTRL: c_int = 224;
-pub const SDL_SCANCODE_LSHIFT: c_int = 225;
-pub const SDL_SCANCODE_LALT: c_int = 226;
-pub const SDL_SCANCODE_LGUI: c_int = 227;
-pub const SDL_SCANCODE_RCTRL: c_int = 228;
-pub const SDL_SCANCODE_RSHIFT: c_int = 229;
-pub const SDL_SCANCODE_RALT: c_int = 230;
-pub const SDL_SCANCODE_RGUI: c_int = 231;
-pub const SDL_SCANCODE_MODE: c_int = 257;
-pub const SDL_SCANCODE_SLEEP: c_int = 258;
-pub const SDL_SCANCODE_WAKE: c_int = 259;
-pub const SDL_SCANCODE_CHANNEL_INCREMENT: c_int = 260;
-pub const SDL_SCANCODE_CHANNEL_DECREMENT: c_int = 261;
-pub const SDL_SCANCODE_MEDIA_PLAY: c_int = 262;
-pub const SDL_SCANCODE_MEDIA_PAUSE: c_int = 263;
-pub const SDL_SCANCODE_MEDIA_RECORD: c_int = 264;
-pub const SDL_SCANCODE_MEDIA_FAST_FORWARD: c_int = 265;
-pub const SDL_SCANCODE_MEDIA_REWIND: c_int = 266;
-pub const SDL_SCANCODE_MEDIA_NEXT_TRACK: c_int = 267;
-pub const SDL_SCANCODE_MEDIA_PREVIOUS_TRACK: c_int = 268;
-pub const SDL_SCANCODE_MEDIA_STOP: c_int = 269;
-pub const SDL_SCANCODE_MEDIA_EJECT: c_int = 270;
-pub const SDL_SCANCODE_MEDIA_PLAY_PAUSE: c_int = 271;
-pub const SDL_SCANCODE_MEDIA_SELECT: c_int = 272;
-pub const SDL_SCANCODE_AC_NEW: c_int = 273;
-pub const SDL_SCANCODE_AC_OPEN: c_int = 274;
-pub const SDL_SCANCODE_AC_CLOSE: c_int = 275;
-pub const SDL_SCANCODE_AC_EXIT: c_int = 276;
-pub const SDL_SCANCODE_AC_SAVE: c_int = 277;
-pub const SDL_SCANCODE_AC_PRINT: c_int = 278;
-pub const SDL_SCANCODE_AC_PROPERTIES: c_int = 279;
-pub const SDL_SCANCODE_AC_SEARCH: c_int = 280;
-pub const SDL_SCANCODE_AC_HOME: c_int = 281;
-pub const SDL_SCANCODE_AC_BACK: c_int = 282;
-pub const SDL_SCANCODE_AC_FORWARD: c_int = 283;
-pub const SDL_SCANCODE_AC_STOP: c_int = 284;
-pub const SDL_SCANCODE_AC_REFRESH: c_int = 285;
-pub const SDL_SCANCODE_AC_BOOKMARKS: c_int = 286;
-pub const SDL_SCANCODE_SOFTLEFT: c_int = 287;
-pub const SDL_SCANCODE_SOFTRIGHT: c_int = 288;
-pub const SDL_SCANCODE_CALL: c_int = 289;
-pub const SDL_SCANCODE_ENDCALL: c_int = 290;
-pub const SDL_SCANCODE_RESERVED: c_int = 400;
-pub const SDL_SCANCODE_COUNT: c_int = 512;
-pub const enum_SDL_Scancode = c_uint;
-pub const SDL_Scancode = enum_SDL_Scancode;
-pub const SDL_Keycode = Uint32;
-pub const SDL_Keymod = Uint16;
-pub const SDL_KeyboardID = Uint32;
-pub extern fn SDL_HasKeyboard() bool;
-pub extern fn SDL_GetKeyboards(count: [*c]c_int) [*c]SDL_KeyboardID;
-pub extern fn SDL_GetKeyboardNameForID(instance_id: SDL_KeyboardID) [*c]const u8;
-pub extern fn SDL_GetKeyboardFocus() ?*SDL_Window;
-pub extern fn SDL_GetKeyboardState(numkeys: [*c]c_int) [*c]const bool;
-pub extern fn SDL_ResetKeyboard() void;
-pub extern fn SDL_GetModState() SDL_Keymod;
-pub extern fn SDL_SetModState(modstate: SDL_Keymod) void;
-pub extern fn SDL_GetKeyFromScancode(scancode: SDL_Scancode, modstate: SDL_Keymod, key_event: bool) SDL_Keycode;
-pub extern fn SDL_GetScancodeFromKey(key: SDL_Keycode, modstate: [*c]SDL_Keymod) SDL_Scancode;
-pub extern fn SDL_SetScancodeName(scancode: SDL_Scancode, name: [*c]const u8) bool;
-pub extern fn SDL_GetScancodeName(scancode: SDL_Scancode) [*c]const u8;
-pub extern fn SDL_GetScancodeFromName(name: [*c]const u8) SDL_Scancode;
-pub extern fn SDL_GetKeyName(key: SDL_Keycode) [*c]const u8;
-pub extern fn SDL_GetKeyFromName(name: [*c]const u8) SDL_Keycode;
-pub extern fn SDL_StartTextInput(window: ?*SDL_Window) bool;
-pub const SDL_TEXTINPUT_TYPE_TEXT: c_int = 0;
-pub const SDL_TEXTINPUT_TYPE_TEXT_NAME: c_int = 1;
-pub const SDL_TEXTINPUT_TYPE_TEXT_EMAIL: c_int = 2;
-pub const SDL_TEXTINPUT_TYPE_TEXT_USERNAME: c_int = 3;
-pub const SDL_TEXTINPUT_TYPE_TEXT_PASSWORD_HIDDEN: c_int = 4;
-pub const SDL_TEXTINPUT_TYPE_TEXT_PASSWORD_VISIBLE: c_int = 5;
-pub const SDL_TEXTINPUT_TYPE_NUMBER: c_int = 6;
-pub const SDL_TEXTINPUT_TYPE_NUMBER_PASSWORD_HIDDEN: c_int = 7;
-pub const SDL_TEXTINPUT_TYPE_NUMBER_PASSWORD_VISIBLE: c_int = 8;
-pub const enum_SDL_TextInputType = c_uint;
-pub const SDL_TextInputType = enum_SDL_TextInputType;
-pub const SDL_CAPITALIZE_NONE: c_int = 0;
-pub const SDL_CAPITALIZE_SENTENCES: c_int = 1;
-pub const SDL_CAPITALIZE_WORDS: c_int = 2;
-pub const SDL_CAPITALIZE_LETTERS: c_int = 3;
-pub const enum_SDL_Capitalization = c_uint;
-pub const SDL_Capitalization = enum_SDL_Capitalization;
-pub extern fn SDL_StartTextInputWithProperties(window: ?*SDL_Window, props: SDL_PropertiesID) bool;
-pub extern fn SDL_TextInputActive(window: ?*SDL_Window) bool;
-pub extern fn SDL_StopTextInput(window: ?*SDL_Window) bool;
-pub extern fn SDL_ClearComposition(window: ?*SDL_Window) bool;
-pub extern fn SDL_SetTextInputArea(window: ?*SDL_Window, rect: [*c]const SDL_Rect, cursor: c_int) bool;
-pub extern fn SDL_GetTextInputArea(window: ?*SDL_Window, rect: [*c]SDL_Rect, cursor: [*c]c_int) bool;
-pub extern fn SDL_HasScreenKeyboardSupport() bool;
-pub extern fn SDL_ScreenKeyboardShown(window: ?*SDL_Window) bool;
-pub const SDL_MouseID = Uint32;
-pub const struct_SDL_Cursor = opaque {};
-pub const SDL_Cursor = struct_SDL_Cursor;
-pub const SDL_SYSTEM_CURSOR_DEFAULT: c_int = 0;
-pub const SDL_SYSTEM_CURSOR_TEXT: c_int = 1;
-pub const SDL_SYSTEM_CURSOR_WAIT: c_int = 2;
-pub const SDL_SYSTEM_CURSOR_CROSSHAIR: c_int = 3;
-pub const SDL_SYSTEM_CURSOR_PROGRESS: c_int = 4;
-pub const SDL_SYSTEM_CURSOR_NWSE_RESIZE: c_int = 5;
-pub const SDL_SYSTEM_CURSOR_NESW_RESIZE: c_int = 6;
-pub const SDL_SYSTEM_CURSOR_EW_RESIZE: c_int = 7;
-pub const SDL_SYSTEM_CURSOR_NS_RESIZE: c_int = 8;
-pub const SDL_SYSTEM_CURSOR_MOVE: c_int = 9;
-pub const SDL_SYSTEM_CURSOR_NOT_ALLOWED: c_int = 10;
-pub const SDL_SYSTEM_CURSOR_POINTER: c_int = 11;
-pub const SDL_SYSTEM_CURSOR_NW_RESIZE: c_int = 12;
-pub const SDL_SYSTEM_CURSOR_N_RESIZE: c_int = 13;
-pub const SDL_SYSTEM_CURSOR_NE_RESIZE: c_int = 14;
-pub const SDL_SYSTEM_CURSOR_E_RESIZE: c_int = 15;
-pub const SDL_SYSTEM_CURSOR_SE_RESIZE: c_int = 16;
-pub const SDL_SYSTEM_CURSOR_S_RESIZE: c_int = 17;
-pub const SDL_SYSTEM_CURSOR_SW_RESIZE: c_int = 18;
-pub const SDL_SYSTEM_CURSOR_W_RESIZE: c_int = 19;
-pub const SDL_SYSTEM_CURSOR_COUNT: c_int = 20;
-pub const enum_SDL_SystemCursor = c_uint;
-pub const SDL_SystemCursor = enum_SDL_SystemCursor;
-pub const SDL_MOUSEWHEEL_NORMAL: c_int = 0;
-pub const SDL_MOUSEWHEEL_FLIPPED: c_int = 1;
-pub const enum_SDL_MouseWheelDirection = c_uint;
-pub const SDL_MouseWheelDirection = enum_SDL_MouseWheelDirection;
-pub const SDL_MouseButtonFlags = Uint32;
-pub extern fn SDL_HasMouse() bool;
-pub extern fn SDL_GetMice(count: [*c]c_int) [*c]SDL_MouseID;
-pub extern fn SDL_GetMouseNameForID(instance_id: SDL_MouseID) [*c]const u8;
-pub extern fn SDL_GetMouseFocus() ?*SDL_Window;
-pub extern fn SDL_GetMouseState(x: [*c]f32, y: [*c]f32) SDL_MouseButtonFlags;
-pub extern fn SDL_GetGlobalMouseState(x: [*c]f32, y: [*c]f32) SDL_MouseButtonFlags;
-pub extern fn SDL_GetRelativeMouseState(x: [*c]f32, y: [*c]f32) SDL_MouseButtonFlags;
-pub extern fn SDL_WarpMouseInWindow(window: ?*SDL_Window, x: f32, y: f32) void;
-pub extern fn SDL_WarpMouseGlobal(x: f32, y: f32) bool;
-pub extern fn SDL_SetWindowRelativeMouseMode(window: ?*SDL_Window, enabled: bool) bool;
-pub extern fn SDL_GetWindowRelativeMouseMode(window: ?*SDL_Window) bool;
-pub extern fn SDL_CaptureMouse(enabled: bool) bool;
-pub extern fn SDL_CreateCursor(data: [*c]const Uint8, mask: [*c]const Uint8, w: c_int, h: c_int, hot_x: c_int, hot_y: c_int) ?*SDL_Cursor;
-pub extern fn SDL_CreateColorCursor(surface: [*c]SDL_Surface, hot_x: c_int, hot_y: c_int) ?*SDL_Cursor;
-pub extern fn SDL_CreateSystemCursor(id: SDL_SystemCursor) ?*SDL_Cursor;
-pub extern fn SDL_SetCursor(cursor: ?*SDL_Cursor) bool;
-pub extern fn SDL_GetCursor() ?*SDL_Cursor;
-pub extern fn SDL_GetDefaultCursor() ?*SDL_Cursor;
-pub extern fn SDL_DestroyCursor(cursor: ?*SDL_Cursor) void;
-pub extern fn SDL_ShowCursor() bool;
-pub extern fn SDL_HideCursor() bool;
-pub extern fn SDL_CursorVisible() bool;
-pub const SDL_TouchID = Uint64;
-pub const SDL_FingerID = Uint64;
-pub const SDL_TOUCH_DEVICE_INVALID: c_int = -1;
-pub const SDL_TOUCH_DEVICE_DIRECT: c_int = 0;
-pub const SDL_TOUCH_DEVICE_INDIRECT_ABSOLUTE: c_int = 1;
-pub const SDL_TOUCH_DEVICE_INDIRECT_RELATIVE: c_int = 2;
-pub const enum_SDL_TouchDeviceType = c_int;
-pub const SDL_TouchDeviceType = enum_SDL_TouchDeviceType;
-pub const struct_SDL_Finger = extern struct {
-    id: SDL_FingerID = @import("std").mem.zeroes(SDL_FingerID),
-    x: f32 = @import("std").mem.zeroes(f32),
-    y: f32 = @import("std").mem.zeroes(f32),
-    pressure: f32 = @import("std").mem.zeroes(f32),
-};
-pub const SDL_Finger = struct_SDL_Finger;
-pub extern fn SDL_GetTouchDevices(count: [*c]c_int) [*c]SDL_TouchID;
-pub extern fn SDL_GetTouchDeviceName(touchID: SDL_TouchID) [*c]const u8;
-pub extern fn SDL_GetTouchDeviceType(touchID: SDL_TouchID) SDL_TouchDeviceType;
-pub extern fn SDL_GetTouchFingers(touchID: SDL_TouchID, count: [*c]c_int) [*c][*c]SDL_Finger;
-pub const SDL_PenID = Uint32;
-pub const SDL_PenInputFlags = Uint32;
-pub const SDL_PEN_AXIS_PRESSURE: c_int = 0;
-pub const SDL_PEN_AXIS_XTILT: c_int = 1;
-pub const SDL_PEN_AXIS_YTILT: c_int = 2;
-pub const SDL_PEN_AXIS_DISTANCE: c_int = 3;
-pub const SDL_PEN_AXIS_ROTATION: c_int = 4;
-pub const SDL_PEN_AXIS_SLIDER: c_int = 5;
-pub const SDL_PEN_AXIS_TANGENTIAL_PRESSURE: c_int = 6;
-pub const SDL_PEN_AXIS_COUNT: c_int = 7;
-pub const enum_SDL_PenAxis = c_uint;
-pub const SDL_PenAxis = enum_SDL_PenAxis;
-pub const SDL_EVENT_FIRST: c_int = 0;
-pub const SDL_EVENT_QUIT: c_int = 256;
-pub const SDL_EVENT_TERMINATING: c_int = 257;
-pub const SDL_EVENT_LOW_MEMORY: c_int = 258;
-pub const SDL_EVENT_WILL_ENTER_BACKGROUND: c_int = 259;
-pub const SDL_EVENT_DID_ENTER_BACKGROUND: c_int = 260;
-pub const SDL_EVENT_WILL_ENTER_FOREGROUND: c_int = 261;
-pub const SDL_EVENT_DID_ENTER_FOREGROUND: c_int = 262;
-pub const SDL_EVENT_LOCALE_CHANGED: c_int = 263;
-pub const SDL_EVENT_SYSTEM_THEME_CHANGED: c_int = 264;
-pub const SDL_EVENT_DISPLAY_ORIENTATION: c_int = 337;
-pub const SDL_EVENT_DISPLAY_ADDED: c_int = 338;
-pub const SDL_EVENT_DISPLAY_REMOVED: c_int = 339;
-pub const SDL_EVENT_DISPLAY_MOVED: c_int = 340;
-pub const SDL_EVENT_DISPLAY_DESKTOP_MODE_CHANGED: c_int = 341;
-pub const SDL_EVENT_DISPLAY_CURRENT_MODE_CHANGED: c_int = 342;
-pub const SDL_EVENT_DISPLAY_CONTENT_SCALE_CHANGED: c_int = 343;
-pub const SDL_EVENT_DISPLAY_FIRST: c_int = 337;
-pub const SDL_EVENT_DISPLAY_LAST: c_int = 343;
-pub const SDL_EVENT_WINDOW_SHOWN: c_int = 514;
-pub const SDL_EVENT_WINDOW_HIDDEN: c_int = 515;
-pub const SDL_EVENT_WINDOW_EXPOSED: c_int = 516;
-pub const SDL_EVENT_WINDOW_MOVED: c_int = 517;
-pub const SDL_EVENT_WINDOW_RESIZED: c_int = 518;
-pub const SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED: c_int = 519;
-pub const SDL_EVENT_WINDOW_METAL_VIEW_RESIZED: c_int = 520;
-pub const SDL_EVENT_WINDOW_MINIMIZED: c_int = 521;
-pub const SDL_EVENT_WINDOW_MAXIMIZED: c_int = 522;
-pub const SDL_EVENT_WINDOW_RESTORED: c_int = 523;
-pub const SDL_EVENT_WINDOW_MOUSE_ENTER: c_int = 524;
-pub const SDL_EVENT_WINDOW_MOUSE_LEAVE: c_int = 525;
-pub const SDL_EVENT_WINDOW_FOCUS_GAINED: c_int = 526;
-pub const SDL_EVENT_WINDOW_FOCUS_LOST: c_int = 527;
-pub const SDL_EVENT_WINDOW_CLOSE_REQUESTED: c_int = 528;
-pub const SDL_EVENT_WINDOW_HIT_TEST: c_int = 529;
-pub const SDL_EVENT_WINDOW_ICCPROF_CHANGED: c_int = 530;
-pub const SDL_EVENT_WINDOW_DISPLAY_CHANGED: c_int = 531;
-pub const SDL_EVENT_WINDOW_DISPLAY_SCALE_CHANGED: c_int = 532;
-pub const SDL_EVENT_WINDOW_SAFE_AREA_CHANGED: c_int = 533;
-pub const SDL_EVENT_WINDOW_OCCLUDED: c_int = 534;
-pub const SDL_EVENT_WINDOW_ENTER_FULLSCREEN: c_int = 535;
-pub const SDL_EVENT_WINDOW_LEAVE_FULLSCREEN: c_int = 536;
-pub const SDL_EVENT_WINDOW_DESTROYED: c_int = 537;
-pub const SDL_EVENT_WINDOW_HDR_STATE_CHANGED: c_int = 538;
-pub const SDL_EVENT_WINDOW_FIRST: c_int = 514;
-pub const SDL_EVENT_WINDOW_LAST: c_int = 538;
-pub const SDL_EVENT_KEY_DOWN: c_int = 768;
-pub const SDL_EVENT_KEY_UP: c_int = 769;
-pub const SDL_EVENT_TEXT_EDITING: c_int = 770;
-pub const SDL_EVENT_TEXT_INPUT: c_int = 771;
-pub const SDL_EVENT_KEYMAP_CHANGED: c_int = 772;
-pub const SDL_EVENT_KEYBOARD_ADDED: c_int = 773;
-pub const SDL_EVENT_KEYBOARD_REMOVED: c_int = 774;
-pub const SDL_EVENT_TEXT_EDITING_CANDIDATES: c_int = 775;
-pub const SDL_EVENT_MOUSE_MOTION: c_int = 1024;
-pub const SDL_EVENT_MOUSE_BUTTON_DOWN: c_int = 1025;
-pub const SDL_EVENT_MOUSE_BUTTON_UP: c_int = 1026;
-pub const SDL_EVENT_MOUSE_WHEEL: c_int = 1027;
-pub const SDL_EVENT_MOUSE_ADDED: c_int = 1028;
-pub const SDL_EVENT_MOUSE_REMOVED: c_int = 1029;
-pub const SDL_EVENT_JOYSTICK_AXIS_MOTION: c_int = 1536;
-pub const SDL_EVENT_JOYSTICK_BALL_MOTION: c_int = 1537;
-pub const SDL_EVENT_JOYSTICK_HAT_MOTION: c_int = 1538;
-pub const SDL_EVENT_JOYSTICK_BUTTON_DOWN: c_int = 1539;
-pub const SDL_EVENT_JOYSTICK_BUTTON_UP: c_int = 1540;
-pub const SDL_EVENT_JOYSTICK_ADDED: c_int = 1541;
-pub const SDL_EVENT_JOYSTICK_REMOVED: c_int = 1542;
-pub const SDL_EVENT_JOYSTICK_BATTERY_UPDATED: c_int = 1543;
-pub const SDL_EVENT_JOYSTICK_UPDATE_COMPLETE: c_int = 1544;
-pub const SDL_EVENT_GAMEPAD_AXIS_MOTION: c_int = 1616;
-pub const SDL_EVENT_GAMEPAD_BUTTON_DOWN: c_int = 1617;
-pub const SDL_EVENT_GAMEPAD_BUTTON_UP: c_int = 1618;
-pub const SDL_EVENT_GAMEPAD_ADDED: c_int = 1619;
-pub const SDL_EVENT_GAMEPAD_REMOVED: c_int = 1620;
-pub const SDL_EVENT_GAMEPAD_REMAPPED: c_int = 1621;
-pub const SDL_EVENT_GAMEPAD_TOUCHPAD_DOWN: c_int = 1622;
-pub const SDL_EVENT_GAMEPAD_TOUCHPAD_MOTION: c_int = 1623;
-pub const SDL_EVENT_GAMEPAD_TOUCHPAD_UP: c_int = 1624;
-pub const SDL_EVENT_GAMEPAD_SENSOR_UPDATE: c_int = 1625;
-pub const SDL_EVENT_GAMEPAD_UPDATE_COMPLETE: c_int = 1626;
-pub const SDL_EVENT_GAMEPAD_STEAM_HANDLE_UPDATED: c_int = 1627;
-pub const SDL_EVENT_FINGER_DOWN: c_int = 1792;
-pub const SDL_EVENT_FINGER_UP: c_int = 1793;
-pub const SDL_EVENT_FINGER_MOTION: c_int = 1794;
-pub const SDL_EVENT_FINGER_CANCELED: c_int = 1795;
-pub const SDL_EVENT_CLIPBOARD_UPDATE: c_int = 2304;
-pub const SDL_EVENT_DROP_FILE: c_int = 4096;
-pub const SDL_EVENT_DROP_TEXT: c_int = 4097;
-pub const SDL_EVENT_DROP_BEGIN: c_int = 4098;
-pub const SDL_EVENT_DROP_COMPLETE: c_int = 4099;
-pub const SDL_EVENT_DROP_POSITION: c_int = 4100;
-pub const SDL_EVENT_AUDIO_DEVICE_ADDED: c_int = 4352;
-pub const SDL_EVENT_AUDIO_DEVICE_REMOVED: c_int = 4353;
-pub const SDL_EVENT_AUDIO_DEVICE_FORMAT_CHANGED: c_int = 4354;
-pub const SDL_EVENT_SENSOR_UPDATE: c_int = 4608;
-pub const SDL_EVENT_PEN_PROXIMITY_IN: c_int = 4864;
-pub const SDL_EVENT_PEN_PROXIMITY_OUT: c_int = 4865;
-pub const SDL_EVENT_PEN_DOWN: c_int = 4866;
-pub const SDL_EVENT_PEN_UP: c_int = 4867;
-pub const SDL_EVENT_PEN_BUTTON_DOWN: c_int = 4868;
-pub const SDL_EVENT_PEN_BUTTON_UP: c_int = 4869;
-pub const SDL_EVENT_PEN_MOTION: c_int = 4870;
-pub const SDL_EVENT_PEN_AXIS: c_int = 4871;
-pub const SDL_EVENT_CAMERA_DEVICE_ADDED: c_int = 5120;
-pub const SDL_EVENT_CAMERA_DEVICE_REMOVED: c_int = 5121;
-pub const SDL_EVENT_CAMERA_DEVICE_APPROVED: c_int = 5122;
-pub const SDL_EVENT_CAMERA_DEVICE_DENIED: c_int = 5123;
-pub const SDL_EVENT_RENDER_TARGETS_RESET: c_int = 8192;
-pub const SDL_EVENT_RENDER_DEVICE_RESET: c_int = 8193;
-pub const SDL_EVENT_RENDER_DEVICE_LOST: c_int = 8194;
-pub const SDL_EVENT_PRIVATE0: c_int = 16384;
-pub const SDL_EVENT_PRIVATE1: c_int = 16385;
-pub const SDL_EVENT_PRIVATE2: c_int = 16386;
-pub const SDL_EVENT_PRIVATE3: c_int = 16387;
-pub const SDL_EVENT_POLL_SENTINEL: c_int = 32512;
-pub const SDL_EVENT_USER: c_int = 32768;
-pub const SDL_EVENT_LAST: c_int = 65535;
-pub const SDL_EVENT_ENUM_PADDING: c_int = 2147483647;
-pub const enum_SDL_EventType = c_uint;
-pub const SDL_EventType = enum_SDL_EventType;
-pub const struct_SDL_CommonEvent = extern struct {
-    type: Uint32 = @import("std").mem.zeroes(Uint32),
-    reserved: Uint32 = @import("std").mem.zeroes(Uint32),
-    timestamp: Uint64 = @import("std").mem.zeroes(Uint64),
-};
-pub const SDL_CommonEvent = struct_SDL_CommonEvent;
-pub const struct_SDL_DisplayEvent = extern struct {
-    type: SDL_EventType = @import("std").mem.zeroes(SDL_EventType),
-    reserved: Uint32 = @import("std").mem.zeroes(Uint32),
-    timestamp: Uint64 = @import("std").mem.zeroes(Uint64),
-    displayID: SDL_DisplayID = @import("std").mem.zeroes(SDL_DisplayID),
-    data1: Sint32 = @import("std").mem.zeroes(Sint32),
-    data2: Sint32 = @import("std").mem.zeroes(Sint32),
-};
-pub const SDL_DisplayEvent = struct_SDL_DisplayEvent;
-pub const struct_SDL_WindowEvent = extern struct {
-    type: SDL_EventType = @import("std").mem.zeroes(SDL_EventType),
-    reserved: Uint32 = @import("std").mem.zeroes(Uint32),
-    timestamp: Uint64 = @import("std").mem.zeroes(Uint64),
-    windowID: SDL_WindowID = @import("std").mem.zeroes(SDL_WindowID),
-    data1: Sint32 = @import("std").mem.zeroes(Sint32),
-    data2: Sint32 = @import("std").mem.zeroes(Sint32),
-};
-pub const SDL_WindowEvent = struct_SDL_WindowEvent;
-pub const struct_SDL_KeyboardDeviceEvent = extern struct {
-    type: SDL_EventType = @import("std").mem.zeroes(SDL_EventType),
-    reserved: Uint32 = @import("std").mem.zeroes(Uint32),
-    timestamp: Uint64 = @import("std").mem.zeroes(Uint64),
-    which: SDL_KeyboardID = @import("std").mem.zeroes(SDL_KeyboardID),
-};
-pub const SDL_KeyboardDeviceEvent = struct_SDL_KeyboardDeviceEvent;
-pub const struct_SDL_KeyboardEvent = extern struct {
-    type: SDL_EventType = @import("std").mem.zeroes(SDL_EventType),
-    reserved: Uint32 = @import("std").mem.zeroes(Uint32),
-    timestamp: Uint64 = @import("std").mem.zeroes(Uint64),
-    windowID: SDL_WindowID = @import("std").mem.zeroes(SDL_WindowID),
-    which: SDL_KeyboardID = @import("std").mem.zeroes(SDL_KeyboardID),
-    scancode: SDL_Scancode = @import("std").mem.zeroes(SDL_Scancode),
-    key: SDL_Keycode = @import("std").mem.zeroes(SDL_Keycode),
-    mod: SDL_Keymod = @import("std").mem.zeroes(SDL_Keymod),
-    raw: Uint16 = @import("std").mem.zeroes(Uint16),
-    down: bool = @import("std").mem.zeroes(bool),
-    repeat: bool = @import("std").mem.zeroes(bool),
-};
-pub const SDL_KeyboardEvent = struct_SDL_KeyboardEvent;
-pub const struct_SDL_TextEditingEvent = extern struct {
-    type: SDL_EventType = @import("std").mem.zeroes(SDL_EventType),
-    reserved: Uint32 = @import("std").mem.zeroes(Uint32),
-    timestamp: Uint64 = @import("std").mem.zeroes(Uint64),
-    windowID: SDL_WindowID = @import("std").mem.zeroes(SDL_WindowID),
-    text: [*c]const u8 = @import("std").mem.zeroes([*c]const u8),
-    start: Sint32 = @import("std").mem.zeroes(Sint32),
-    length: Sint32 = @import("std").mem.zeroes(Sint32),
-};
-pub const SDL_TextEditingEvent = struct_SDL_TextEditingEvent;
-pub const struct_SDL_TextEditingCandidatesEvent = extern struct {
-    type: SDL_EventType = @import("std").mem.zeroes(SDL_EventType),
-    reserved: Uint32 = @import("std").mem.zeroes(Uint32),
-    timestamp: Uint64 = @import("std").mem.zeroes(Uint64),
-    windowID: SDL_WindowID = @import("std").mem.zeroes(SDL_WindowID),
-    candidates: [*c]const [*c]const u8 = @import("std").mem.zeroes([*c]const [*c]const u8),
-    num_candidates: Sint32 = @import("std").mem.zeroes(Sint32),
-    selected_candidate: Sint32 = @import("std").mem.zeroes(Sint32),
-    horizontal: bool = @import("std").mem.zeroes(bool),
-    padding1: Uint8 = @import("std").mem.zeroes(Uint8),
-    padding2: Uint8 = @import("std").mem.zeroes(Uint8),
-    padding3: Uint8 = @import("std").mem.zeroes(Uint8),
-};
-pub const SDL_TextEditingCandidatesEvent = struct_SDL_TextEditingCandidatesEvent;
-pub const struct_SDL_TextInputEvent = extern struct {
-    type: SDL_EventType = @import("std").mem.zeroes(SDL_EventType),
-    reserved: Uint32 = @import("std").mem.zeroes(Uint32),
-    timestamp: Uint64 = @import("std").mem.zeroes(Uint64),
-    windowID: SDL_WindowID = @import("std").mem.zeroes(SDL_WindowID),
-    text: [*c]const u8 = @import("std").mem.zeroes([*c]const u8),
-};
-pub const SDL_TextInputEvent = struct_SDL_TextInputEvent;
-pub const struct_SDL_MouseDeviceEvent = extern struct {
-    type: SDL_EventType = @import("std").mem.zeroes(SDL_EventType),
-    reserved: Uint32 = @import("std").mem.zeroes(Uint32),
-    timestamp: Uint64 = @import("std").mem.zeroes(Uint64),
-    which: SDL_MouseID = @import("std").mem.zeroes(SDL_MouseID),
-};
-pub const SDL_MouseDeviceEvent = struct_SDL_MouseDeviceEvent;
-pub const struct_SDL_MouseMotionEvent = extern struct {
-    type: SDL_EventType = @import("std").mem.zeroes(SDL_EventType),
-    reserved: Uint32 = @import("std").mem.zeroes(Uint32),
-    timestamp: Uint64 = @import("std").mem.zeroes(Uint64),
-    windowID: SDL_WindowID = @import("std").mem.zeroes(SDL_WindowID),
-    which: SDL_MouseID = @import("std").mem.zeroes(SDL_MouseID),
-    state: SDL_MouseButtonFlags = @import("std").mem.zeroes(SDL_MouseButtonFlags),
-    x: f32 = @import("std").mem.zeroes(f32),
-    y: f32 = @import("std").mem.zeroes(f32),
-    xrel: f32 = @import("std").mem.zeroes(f32),
-    yrel: f32 = @import("std").mem.zeroes(f32),
-};
-pub const SDL_MouseMotionEvent = struct_SDL_MouseMotionEvent;
-pub const struct_SDL_MouseButtonEvent = extern struct {
-    type: SDL_EventType = @import("std").mem.zeroes(SDL_EventType),
-    reserved: Uint32 = @import("std").mem.zeroes(Uint32),
-    timestamp: Uint64 = @import("std").mem.zeroes(Uint64),
-    windowID: SDL_WindowID = @import("std").mem.zeroes(SDL_WindowID),
-    which: SDL_MouseID = @import("std").mem.zeroes(SDL_MouseID),
-    button: Uint8 = @import("std").mem.zeroes(Uint8),
-    down: bool = @import("std").mem.zeroes(bool),
-    clicks: Uint8 = @import("std").mem.zeroes(Uint8),
-    padding: Uint8 = @import("std").mem.zeroes(Uint8),
-    x: f32 = @import("std").mem.zeroes(f32),
-    y: f32 = @import("std").mem.zeroes(f32),
-};
-pub const SDL_MouseButtonEvent = struct_SDL_MouseButtonEvent;
-pub const struct_SDL_MouseWheelEvent = extern struct {
-    type: SDL_EventType = @import("std").mem.zeroes(SDL_EventType),
-    reserved: Uint32 = @import("std").mem.zeroes(Uint32),
-    timestamp: Uint64 = @import("std").mem.zeroes(Uint64),
-    windowID: SDL_WindowID = @import("std").mem.zeroes(SDL_WindowID),
-    which: SDL_MouseID = @import("std").mem.zeroes(SDL_MouseID),
-    x: f32 = @import("std").mem.zeroes(f32),
-    y: f32 = @import("std").mem.zeroes(f32),
-    direction: SDL_MouseWheelDirection = @import("std").mem.zeroes(SDL_MouseWheelDirection),
-    mouse_x: f32 = @import("std").mem.zeroes(f32),
-    mouse_y: f32 = @import("std").mem.zeroes(f32),
-    integer_x: Sint32 = @import("std").mem.zeroes(Sint32),
-    integer_y: Sint32 = @import("std").mem.zeroes(Sint32),
-};
-pub const SDL_MouseWheelEvent = struct_SDL_MouseWheelEvent;
-pub const struct_SDL_JoyAxisEvent = extern struct {
-    type: SDL_EventType = @import("std").mem.zeroes(SDL_EventType),
-    reserved: Uint32 = @import("std").mem.zeroes(Uint32),
-    timestamp: Uint64 = @import("std").mem.zeroes(Uint64),
-    which: SDL_JoystickID = @import("std").mem.zeroes(SDL_JoystickID),
-    axis: Uint8 = @import("std").mem.zeroes(Uint8),
-    padding1: Uint8 = @import("std").mem.zeroes(Uint8),
-    padding2: Uint8 = @import("std").mem.zeroes(Uint8),
-    padding3: Uint8 = @import("std").mem.zeroes(Uint8),
-    value: Sint16 = @import("std").mem.zeroes(Sint16),
-    padding4: Uint16 = @import("std").mem.zeroes(Uint16),
-};
-pub const SDL_JoyAxisEvent = struct_SDL_JoyAxisEvent;
-pub const struct_SDL_JoyBallEvent = extern struct {
-    type: SDL_EventType = @import("std").mem.zeroes(SDL_EventType),
-    reserved: Uint32 = @import("std").mem.zeroes(Uint32),
-    timestamp: Uint64 = @import("std").mem.zeroes(Uint64),
-    which: SDL_JoystickID = @import("std").mem.zeroes(SDL_JoystickID),
-    ball: Uint8 = @import("std").mem.zeroes(Uint8),
-    padding1: Uint8 = @import("std").mem.zeroes(Uint8),
-    padding2: Uint8 = @import("std").mem.zeroes(Uint8),
-    padding3: Uint8 = @import("std").mem.zeroes(Uint8),
-    xrel: Sint16 = @import("std").mem.zeroes(Sint16),
-    yrel: Sint16 = @import("std").mem.zeroes(Sint16),
-};
-pub const SDL_JoyBallEvent = struct_SDL_JoyBallEvent;
-pub const struct_SDL_JoyHatEvent = extern struct {
-    type: SDL_EventType = @import("std").mem.zeroes(SDL_EventType),
-    reserved: Uint32 = @import("std").mem.zeroes(Uint32),
-    timestamp: Uint64 = @import("std").mem.zeroes(Uint64),
-    which: SDL_JoystickID = @import("std").mem.zeroes(SDL_JoystickID),
-    hat: Uint8 = @import("std").mem.zeroes(Uint8),
-    value: Uint8 = @import("std").mem.zeroes(Uint8),
-    padding1: Uint8 = @import("std").mem.zeroes(Uint8),
-    padding2: Uint8 = @import("std").mem.zeroes(Uint8),
-};
-pub const SDL_JoyHatEvent = struct_SDL_JoyHatEvent;
-pub const struct_SDL_JoyButtonEvent = extern struct {
-    type: SDL_EventType = @import("std").mem.zeroes(SDL_EventType),
-    reserved: Uint32 = @import("std").mem.zeroes(Uint32),
-    timestamp: Uint64 = @import("std").mem.zeroes(Uint64),
-    which: SDL_JoystickID = @import("std").mem.zeroes(SDL_JoystickID),
-    button: Uint8 = @import("std").mem.zeroes(Uint8),
-    down: bool = @import("std").mem.zeroes(bool),
-    padding1: Uint8 = @import("std").mem.zeroes(Uint8),
-    padding2: Uint8 = @import("std").mem.zeroes(Uint8),
-};
-pub const SDL_JoyButtonEvent = struct_SDL_JoyButtonEvent;
-pub const struct_SDL_JoyDeviceEvent = extern struct {
-    type: SDL_EventType = @import("std").mem.zeroes(SDL_EventType),
-    reserved: Uint32 = @import("std").mem.zeroes(Uint32),
-    timestamp: Uint64 = @import("std").mem.zeroes(Uint64),
-    which: SDL_JoystickID = @import("std").mem.zeroes(SDL_JoystickID),
-};
-pub const SDL_JoyDeviceEvent = struct_SDL_JoyDeviceEvent;
-pub const struct_SDL_JoyBatteryEvent = extern struct {
-    type: SDL_EventType = @import("std").mem.zeroes(SDL_EventType),
-    reserved: Uint32 = @import("std").mem.zeroes(Uint32),
-    timestamp: Uint64 = @import("std").mem.zeroes(Uint64),
-    which: SDL_JoystickID = @import("std").mem.zeroes(SDL_JoystickID),
-    state: SDL_PowerState = @import("std").mem.zeroes(SDL_PowerState),
-    percent: c_int = @import("std").mem.zeroes(c_int),
-};
-pub const SDL_JoyBatteryEvent = struct_SDL_JoyBatteryEvent;
-pub const struct_SDL_GamepadAxisEvent = extern struct {
-    type: SDL_EventType = @import("std").mem.zeroes(SDL_EventType),
-    reserved: Uint32 = @import("std").mem.zeroes(Uint32),
-    timestamp: Uint64 = @import("std").mem.zeroes(Uint64),
-    which: SDL_JoystickID = @import("std").mem.zeroes(SDL_JoystickID),
-    axis: Uint8 = @import("std").mem.zeroes(Uint8),
-    padding1: Uint8 = @import("std").mem.zeroes(Uint8),
-    padding2: Uint8 = @import("std").mem.zeroes(Uint8),
-    padding3: Uint8 = @import("std").mem.zeroes(Uint8),
-    value: Sint16 = @import("std").mem.zeroes(Sint16),
-    padding4: Uint16 = @import("std").mem.zeroes(Uint16),
-};
-pub const SDL_GamepadAxisEvent = struct_SDL_GamepadAxisEvent;
-pub const struct_SDL_GamepadButtonEvent = extern struct {
-    type: SDL_EventType = @import("std").mem.zeroes(SDL_EventType),
-    reserved: Uint32 = @import("std").mem.zeroes(Uint32),
-    timestamp: Uint64 = @import("std").mem.zeroes(Uint64),
-    which: SDL_JoystickID = @import("std").mem.zeroes(SDL_JoystickID),
-    button: Uint8 = @import("std").mem.zeroes(Uint8),
-    down: bool = @import("std").mem.zeroes(bool),
-    padding1: Uint8 = @import("std").mem.zeroes(Uint8),
-    padding2: Uint8 = @import("std").mem.zeroes(Uint8),
-};
-pub const SDL_GamepadButtonEvent = struct_SDL_GamepadButtonEvent;
-pub const struct_SDL_GamepadDeviceEvent = extern struct {
-    type: SDL_EventType = @import("std").mem.zeroes(SDL_EventType),
-    reserved: Uint32 = @import("std").mem.zeroes(Uint32),
-    timestamp: Uint64 = @import("std").mem.zeroes(Uint64),
-    which: SDL_JoystickID = @import("std").mem.zeroes(SDL_JoystickID),
-};
-pub const SDL_GamepadDeviceEvent = struct_SDL_GamepadDeviceEvent;
-pub const struct_SDL_GamepadTouchpadEvent = extern struct {
-    type: SDL_EventType = @import("std").mem.zeroes(SDL_EventType),
-    reserved: Uint32 = @import("std").mem.zeroes(Uint32),
-    timestamp: Uint64 = @import("std").mem.zeroes(Uint64),
-    which: SDL_JoystickID = @import("std").mem.zeroes(SDL_JoystickID),
-    touchpad: Sint32 = @import("std").mem.zeroes(Sint32),
-    finger: Sint32 = @import("std").mem.zeroes(Sint32),
-    x: f32 = @import("std").mem.zeroes(f32),
-    y: f32 = @import("std").mem.zeroes(f32),
-    pressure: f32 = @import("std").mem.zeroes(f32),
-};
-pub const SDL_GamepadTouchpadEvent = struct_SDL_GamepadTouchpadEvent;
-pub const struct_SDL_GamepadSensorEvent = extern struct {
-    type: SDL_EventType = @import("std").mem.zeroes(SDL_EventType),
-    reserved: Uint32 = @import("std").mem.zeroes(Uint32),
-    timestamp: Uint64 = @import("std").mem.zeroes(Uint64),
-    which: SDL_JoystickID = @import("std").mem.zeroes(SDL_JoystickID),
-    sensor: Sint32 = @import("std").mem.zeroes(Sint32),
-    data: [3]f32 = @import("std").mem.zeroes([3]f32),
-    sensor_timestamp: Uint64 = @import("std").mem.zeroes(Uint64),
-};
-pub const SDL_GamepadSensorEvent = struct_SDL_GamepadSensorEvent;
-pub const struct_SDL_AudioDeviceEvent = extern struct {
-    type: SDL_EventType = @import("std").mem.zeroes(SDL_EventType),
-    reserved: Uint32 = @import("std").mem.zeroes(Uint32),
-    timestamp: Uint64 = @import("std").mem.zeroes(Uint64),
-    which: SDL_AudioDeviceID = @import("std").mem.zeroes(SDL_AudioDeviceID),
-    recording: bool = @import("std").mem.zeroes(bool),
-    padding1: Uint8 = @import("std").mem.zeroes(Uint8),
-    padding2: Uint8 = @import("std").mem.zeroes(Uint8),
-    padding3: Uint8 = @import("std").mem.zeroes(Uint8),
-};
-pub const SDL_AudioDeviceEvent = struct_SDL_AudioDeviceEvent;
-pub const struct_SDL_CameraDeviceEvent = extern struct {
-    type: SDL_EventType = @import("std").mem.zeroes(SDL_EventType),
-    reserved: Uint32 = @import("std").mem.zeroes(Uint32),
-    timestamp: Uint64 = @import("std").mem.zeroes(Uint64),
-    which: SDL_CameraID = @import("std").mem.zeroes(SDL_CameraID),
-};
-pub const SDL_CameraDeviceEvent = struct_SDL_CameraDeviceEvent;
-pub const struct_SDL_RenderEvent = extern struct {
-    type: SDL_EventType = @import("std").mem.zeroes(SDL_EventType),
-    reserved: Uint32 = @import("std").mem.zeroes(Uint32),
-    timestamp: Uint64 = @import("std").mem.zeroes(Uint64),
-    windowID: SDL_WindowID = @import("std").mem.zeroes(SDL_WindowID),
-};
-pub const SDL_RenderEvent = struct_SDL_RenderEvent;
-pub const struct_SDL_TouchFingerEvent = extern struct {
-    type: SDL_EventType = @import("std").mem.zeroes(SDL_EventType),
-    reserved: Uint32 = @import("std").mem.zeroes(Uint32),
-    timestamp: Uint64 = @import("std").mem.zeroes(Uint64),
-    touchID: SDL_TouchID = @import("std").mem.zeroes(SDL_TouchID),
-    fingerID: SDL_FingerID = @import("std").mem.zeroes(SDL_FingerID),
-    x: f32 = @import("std").mem.zeroes(f32),
-    y: f32 = @import("std").mem.zeroes(f32),
-    dx: f32 = @import("std").mem.zeroes(f32),
-    dy: f32 = @import("std").mem.zeroes(f32),
-    pressure: f32 = @import("std").mem.zeroes(f32),
-    windowID: SDL_WindowID = @import("std").mem.zeroes(SDL_WindowID),
-};
-pub const SDL_TouchFingerEvent = struct_SDL_TouchFingerEvent;
-pub const struct_SDL_PenProximityEvent = extern struct {
-    type: SDL_EventType = @import("std").mem.zeroes(SDL_EventType),
-    reserved: Uint32 = @import("std").mem.zeroes(Uint32),
-    timestamp: Uint64 = @import("std").mem.zeroes(Uint64),
-    windowID: SDL_WindowID = @import("std").mem.zeroes(SDL_WindowID),
-    which: SDL_PenID = @import("std").mem.zeroes(SDL_PenID),
-};
-pub const SDL_PenProximityEvent = struct_SDL_PenProximityEvent;
-pub const struct_SDL_PenMotionEvent = extern struct {
-    type: SDL_EventType = @import("std").mem.zeroes(SDL_EventType),
-    reserved: Uint32 = @import("std").mem.zeroes(Uint32),
-    timestamp: Uint64 = @import("std").mem.zeroes(Uint64),
-    windowID: SDL_WindowID = @import("std").mem.zeroes(SDL_WindowID),
-    which: SDL_PenID = @import("std").mem.zeroes(SDL_PenID),
-    pen_state: SDL_PenInputFlags = @import("std").mem.zeroes(SDL_PenInputFlags),
-    x: f32 = @import("std").mem.zeroes(f32),
-    y: f32 = @import("std").mem.zeroes(f32),
-};
-pub const SDL_PenMotionEvent = struct_SDL_PenMotionEvent;
-pub const struct_SDL_PenTouchEvent = extern struct {
-    type: SDL_EventType = @import("std").mem.zeroes(SDL_EventType),
-    reserved: Uint32 = @import("std").mem.zeroes(Uint32),
-    timestamp: Uint64 = @import("std").mem.zeroes(Uint64),
-    windowID: SDL_WindowID = @import("std").mem.zeroes(SDL_WindowID),
-    which: SDL_PenID = @import("std").mem.zeroes(SDL_PenID),
-    pen_state: SDL_PenInputFlags = @import("std").mem.zeroes(SDL_PenInputFlags),
-    x: f32 = @import("std").mem.zeroes(f32),
-    y: f32 = @import("std").mem.zeroes(f32),
-    eraser: bool = @import("std").mem.zeroes(bool),
-    down: bool = @import("std").mem.zeroes(bool),
-};
-pub const SDL_PenTouchEvent = struct_SDL_PenTouchEvent;
-pub const struct_SDL_PenButtonEvent = extern struct {
-    type: SDL_EventType = @import("std").mem.zeroes(SDL_EventType),
-    reserved: Uint32 = @import("std").mem.zeroes(Uint32),
-    timestamp: Uint64 = @import("std").mem.zeroes(Uint64),
-    windowID: SDL_WindowID = @import("std").mem.zeroes(SDL_WindowID),
-    which: SDL_PenID = @import("std").mem.zeroes(SDL_PenID),
-    pen_state: SDL_PenInputFlags = @import("std").mem.zeroes(SDL_PenInputFlags),
-    x: f32 = @import("std").mem.zeroes(f32),
-    y: f32 = @import("std").mem.zeroes(f32),
-    button: Uint8 = @import("std").mem.zeroes(Uint8),
-    down: bool = @import("std").mem.zeroes(bool),
-};
-pub const SDL_PenButtonEvent = struct_SDL_PenButtonEvent;
-pub const struct_SDL_PenAxisEvent = extern struct {
-    type: SDL_EventType = @import("std").mem.zeroes(SDL_EventType),
-    reserved: Uint32 = @import("std").mem.zeroes(Uint32),
-    timestamp: Uint64 = @import("std").mem.zeroes(Uint64),
-    windowID: SDL_WindowID = @import("std").mem.zeroes(SDL_WindowID),
-    which: SDL_PenID = @import("std").mem.zeroes(SDL_PenID),
-    pen_state: SDL_PenInputFlags = @import("std").mem.zeroes(SDL_PenInputFlags),
-    x: f32 = @import("std").mem.zeroes(f32),
-    y: f32 = @import("std").mem.zeroes(f32),
-    axis: SDL_PenAxis = @import("std").mem.zeroes(SDL_PenAxis),
-    value: f32 = @import("std").mem.zeroes(f32),
-};
-pub const SDL_PenAxisEvent = struct_SDL_PenAxisEvent;
-pub const struct_SDL_DropEvent = extern struct {
-    type: SDL_EventType = @import("std").mem.zeroes(SDL_EventType),
-    reserved: Uint32 = @import("std").mem.zeroes(Uint32),
-    timestamp: Uint64 = @import("std").mem.zeroes(Uint64),
-    windowID: SDL_WindowID = @import("std").mem.zeroes(SDL_WindowID),
-    x: f32 = @import("std").mem.zeroes(f32),
-    y: f32 = @import("std").mem.zeroes(f32),
-    source: [*c]const u8 = @import("std").mem.zeroes([*c]const u8),
-    data: [*c]const u8 = @import("std").mem.zeroes([*c]const u8),
-};
-pub const SDL_DropEvent = struct_SDL_DropEvent;
-pub const struct_SDL_ClipboardEvent = extern struct {
-    type: SDL_EventType = @import("std").mem.zeroes(SDL_EventType),
-    reserved: Uint32 = @import("std").mem.zeroes(Uint32),
-    timestamp: Uint64 = @import("std").mem.zeroes(Uint64),
-    owner: bool = @import("std").mem.zeroes(bool),
-    num_mime_types: Sint32 = @import("std").mem.zeroes(Sint32),
-    mime_types: [*c][*c]const u8 = @import("std").mem.zeroes([*c][*c]const u8),
-};
-pub const SDL_ClipboardEvent = struct_SDL_ClipboardEvent;
-pub const struct_SDL_SensorEvent = extern struct {
-    type: SDL_EventType = @import("std").mem.zeroes(SDL_EventType),
-    reserved: Uint32 = @import("std").mem.zeroes(Uint32),
-    timestamp: Uint64 = @import("std").mem.zeroes(Uint64),
-    which: SDL_SensorID = @import("std").mem.zeroes(SDL_SensorID),
-    data: [6]f32 = @import("std").mem.zeroes([6]f32),
-    sensor_timestamp: Uint64 = @import("std").mem.zeroes(Uint64),
-};
-pub const SDL_SensorEvent = struct_SDL_SensorEvent;
-pub const struct_SDL_QuitEvent = extern struct {
-    type: SDL_EventType = @import("std").mem.zeroes(SDL_EventType),
-    reserved: Uint32 = @import("std").mem.zeroes(Uint32),
-    timestamp: Uint64 = @import("std").mem.zeroes(Uint64),
-};
-pub const SDL_QuitEvent = struct_SDL_QuitEvent;
-pub const struct_SDL_UserEvent = extern struct {
-    type: Uint32 = @import("std").mem.zeroes(Uint32),
-    reserved: Uint32 = @import("std").mem.zeroes(Uint32),
-    timestamp: Uint64 = @import("std").mem.zeroes(Uint64),
-    windowID: SDL_WindowID = @import("std").mem.zeroes(SDL_WindowID),
-    code: Sint32 = @import("std").mem.zeroes(Sint32),
-    data1: ?*anyopaque = @import("std").mem.zeroes(?*anyopaque),
-    data2: ?*anyopaque = @import("std").mem.zeroes(?*anyopaque),
-};
-pub const SDL_UserEvent = struct_SDL_UserEvent;
-pub const union_SDL_Event = extern union {
-    type: Uint32,
-    common: SDL_CommonEvent,
-    display: SDL_DisplayEvent,
-    window: SDL_WindowEvent,
-    kdevice: SDL_KeyboardDeviceEvent,
-    key: SDL_KeyboardEvent,
-    edit: SDL_TextEditingEvent,
-    edit_candidates: SDL_TextEditingCandidatesEvent,
-    text: SDL_TextInputEvent,
-    mdevice: SDL_MouseDeviceEvent,
-    motion: SDL_MouseMotionEvent,
-    button: SDL_MouseButtonEvent,
-    wheel: SDL_MouseWheelEvent,
-    jdevice: SDL_JoyDeviceEvent,
-    jaxis: SDL_JoyAxisEvent,
-    jball: SDL_JoyBallEvent,
-    jhat: SDL_JoyHatEvent,
-    jbutton: SDL_JoyButtonEvent,
-    jbattery: SDL_JoyBatteryEvent,
-    gdevice: SDL_GamepadDeviceEvent,
-    gaxis: SDL_GamepadAxisEvent,
-    gbutton: SDL_GamepadButtonEvent,
-    gtouchpad: SDL_GamepadTouchpadEvent,
-    gsensor: SDL_GamepadSensorEvent,
-    adevice: SDL_AudioDeviceEvent,
-    cdevice: SDL_CameraDeviceEvent,
-    sensor: SDL_SensorEvent,
-    quit: SDL_QuitEvent,
-    user: SDL_UserEvent,
-    tfinger: SDL_TouchFingerEvent,
-    pproximity: SDL_PenProximityEvent,
-    ptouch: SDL_PenTouchEvent,
-    pmotion: SDL_PenMotionEvent,
-    pbutton: SDL_PenButtonEvent,
-    paxis: SDL_PenAxisEvent,
-    render: SDL_RenderEvent,
-    drop: SDL_DropEvent,
-    clipboard: SDL_ClipboardEvent,
-    padding: [128]Uint8,
-};
-pub const SDL_Event = union_SDL_Event;
+// pub extern fn SDL_AttachVirtualJoystick(desc: [*c]const SDL_VirtualJoystickDesc) SDL_JoystickID;
+// pub extern fn SDL_DetachVirtualJoystick(instance_id: SDL_JoystickID) bool;
+// pub extern fn SDL_IsJoystickVirtual(instance_id: SDL_JoystickID) bool;
+// pub extern fn SDL_SetJoystickVirtualAxis(joystick: ?*SDL_Joystick, axis: c_int, value: Sint16) bool;
+// pub extern fn SDL_SetJoystickVirtualBall(joystick: ?*SDL_Joystick, ball: c_int, xrel: Sint16, yrel: Sint16) bool;
+// pub extern fn SDL_SetJoystickVirtualButton(joystick: ?*SDL_Joystick, button: c_int, down: bool) bool;
+// pub extern fn SDL_SetJoystickVirtualHat(joystick: ?*SDL_Joystick, hat: c_int, value: Uint8) bool;
+// pub extern fn SDL_SetJoystickVirtualTouchpad(joystick: ?*SDL_Joystick, touchpad: c_int, finger: c_int, down: bool, x: f32, y: f32, pressure: f32) bool;
+// pub extern fn SDL_SendJoystickVirtualSensorData(joystick: ?*SDL_Joystick, @"type": SDL_SensorType, sensor_timestamp: Uint64, data: [*c]const f32, num_values: c_int) bool;
+// pub extern fn SDL_GetJoystickProperties(joystick: ?*SDL_Joystick) SDL_PropertiesID;
+// pub extern fn SDL_GetJoystickName(joystick: ?*SDL_Joystick) [*c]const u8;
+// pub extern fn SDL_GetJoystickPath(joystick: ?*SDL_Joystick) [*c]const u8;
+// pub extern fn SDL_GetJoystickPlayerIndex(joystick: ?*SDL_Joystick) c_int;
+// pub extern fn SDL_SetJoystickPlayerIndex(joystick: ?*SDL_Joystick, player_index: c_int) bool;
+// pub extern fn SDL_GetJoystickGUID(joystick: ?*SDL_Joystick) SDL_GUID;
+// pub extern fn SDL_GetJoystickVendor(joystick: ?*SDL_Joystick) Uint16;
+// pub extern fn SDL_GetJoystickProduct(joystick: ?*SDL_Joystick) Uint16;
+// pub extern fn SDL_GetJoystickProductVersion(joystick: ?*SDL_Joystick) Uint16;
+// pub extern fn SDL_GetJoystickFirmwareVersion(joystick: ?*SDL_Joystick) Uint16;
+// pub extern fn SDL_GetJoystickSerial(joystick: ?*SDL_Joystick) [*c]const u8;
+// pub extern fn SDL_GetJoystickType(joystick: ?*SDL_Joystick) SDL_JoystickType;
+// pub extern fn SDL_GetJoystickGUIDInfo(guid: SDL_GUID, vendor: [*c]Uint16, product: [*c]Uint16, version: [*c]Uint16, crc16: [*c]Uint16) void;
+// pub extern fn SDL_JoystickConnected(joystick: ?*SDL_Joystick) bool;
+// pub extern fn SDL_GetJoystickID(joystick: ?*SDL_Joystick) SDL_JoystickID;
+// pub extern fn SDL_GetNumJoystickAxes(joystick: ?*SDL_Joystick) c_int;
+// pub extern fn SDL_GetNumJoystickBalls(joystick: ?*SDL_Joystick) c_int;
+// pub extern fn SDL_GetNumJoystickHats(joystick: ?*SDL_Joystick) c_int;
+// pub extern fn SDL_GetNumJoystickButtons(joystick: ?*SDL_Joystick) c_int;
+// pub extern fn SDL_SetJoystickEventsEnabled(enabled: bool) void;
+// pub extern fn SDL_JoystickEventsEnabled() bool;
+// pub extern fn SDL_UpdateJoysticks() void;
+// pub extern fn SDL_GetJoystickAxis(joystick: ?*SDL_Joystick, axis: c_int) Sint16;
+// pub extern fn SDL_GetJoystickAxisInitialState(joystick: ?*SDL_Joystick, axis: c_int, state: [*c]Sint16) bool;
+// pub extern fn SDL_GetJoystickBall(joystick: ?*SDL_Joystick, ball: c_int, dx: [*c]c_int, dy: [*c]c_int) bool;
+// pub extern fn SDL_GetJoystickHat(joystick: ?*SDL_Joystick, hat: c_int) Uint8;
+// pub extern fn SDL_GetJoystickButton(joystick: ?*SDL_Joystick, button: c_int) bool;
+// pub extern fn SDL_RumbleJoystick(joystick: ?*SDL_Joystick, low_frequency_rumble: Uint16, high_frequency_rumble: Uint16, duration_ms: Uint32) bool;
+// pub extern fn SDL_RumbleJoystickTriggers(joystick: ?*SDL_Joystick, left_rumble: Uint16, right_rumble: Uint16, duration_ms: Uint32) bool;
+// pub extern fn SDL_SetJoystickLED(joystick: ?*SDL_Joystick, red: Uint8, green: Uint8, blue: Uint8) bool;
+// pub extern fn SDL_SendJoystickEffect(joystick: ?*SDL_Joystick, data: ?*const anyopaque, size: c_int) bool;
+// pub extern fn SDL_CloseJoystick(joystick: ?*SDL_Joystick) void;
+// pub extern fn SDL_GetJoystickConnectionState(joystick: ?*SDL_Joystick) SDL_JoystickConnectionState;
+// pub extern fn SDL_GetJoystickPowerInfo(joystick: ?*SDL_Joystick, percent: [*c]c_int) SDL_PowerState;
+// pub const struct_SDL_Gamepad = opaque {};
+// pub const SDL_Gamepad = struct_SDL_Gamepad;
+// pub const SDL_GAMEPAD_TYPE_UNKNOWN: c_int = 0;
+// pub const SDL_GAMEPAD_TYPE_STANDARD: c_int = 1;
+// pub const SDL_GAMEPAD_TYPE_XBOX360: c_int = 2;
+// pub const SDL_GAMEPAD_TYPE_XBOXONE: c_int = 3;
+// pub const SDL_GAMEPAD_TYPE_PS3: c_int = 4;
+// pub const SDL_GAMEPAD_TYPE_PS4: c_int = 5;
+// pub const SDL_GAMEPAD_TYPE_PS5: c_int = 6;
+// pub const SDL_GAMEPAD_TYPE_NINTENDO_SWITCH_PRO: c_int = 7;
+// pub const SDL_GAMEPAD_TYPE_NINTENDO_SWITCH_JOYCON_LEFT: c_int = 8;
+// pub const SDL_GAMEPAD_TYPE_NINTENDO_SWITCH_JOYCON_RIGHT: c_int = 9;
+// pub const SDL_GAMEPAD_TYPE_NINTENDO_SWITCH_JOYCON_PAIR: c_int = 10;
+// pub const SDL_GAMEPAD_TYPE_COUNT: c_int = 11;
+// pub const enum_SDL_GamepadType = c_uint;
+// pub const SDL_GamepadType = enum_SDL_GamepadType;
+// pub const SDL_GAMEPAD_BUTTON_INVALID: c_int = -1;
+// pub const SDL_GAMEPAD_BUTTON_SOUTH: c_int = 0;
+// pub const SDL_GAMEPAD_BUTTON_EAST: c_int = 1;
+// pub const SDL_GAMEPAD_BUTTON_WEST: c_int = 2;
+// pub const SDL_GAMEPAD_BUTTON_NORTH: c_int = 3;
+// pub const SDL_GAMEPAD_BUTTON_BACK: c_int = 4;
+// pub const SDL_GAMEPAD_BUTTON_GUIDE: c_int = 5;
+// pub const SDL_GAMEPAD_BUTTON_START: c_int = 6;
+// pub const SDL_GAMEPAD_BUTTON_LEFT_STICK: c_int = 7;
+// pub const SDL_GAMEPAD_BUTTON_RIGHT_STICK: c_int = 8;
+// pub const SDL_GAMEPAD_BUTTON_LEFT_SHOULDER: c_int = 9;
+// pub const SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER: c_int = 10;
+// pub const SDL_GAMEPAD_BUTTON_DPAD_UP: c_int = 11;
+// pub const SDL_GAMEPAD_BUTTON_DPAD_DOWN: c_int = 12;
+// pub const SDL_GAMEPAD_BUTTON_DPAD_LEFT: c_int = 13;
+// pub const SDL_GAMEPAD_BUTTON_DPAD_RIGHT: c_int = 14;
+// pub const SDL_GAMEPAD_BUTTON_MISC1: c_int = 15;
+// pub const SDL_GAMEPAD_BUTTON_RIGHT_PADDLE1: c_int = 16;
+// pub const SDL_GAMEPAD_BUTTON_LEFT_PADDLE1: c_int = 17;
+// pub const SDL_GAMEPAD_BUTTON_RIGHT_PADDLE2: c_int = 18;
+// pub const SDL_GAMEPAD_BUTTON_LEFT_PADDLE2: c_int = 19;
+// pub const SDL_GAMEPAD_BUTTON_TOUCHPAD: c_int = 20;
+// pub const SDL_GAMEPAD_BUTTON_MISC2: c_int = 21;
+// pub const SDL_GAMEPAD_BUTTON_MISC3: c_int = 22;
+// pub const SDL_GAMEPAD_BUTTON_MISC4: c_int = 23;
+// pub const SDL_GAMEPAD_BUTTON_MISC5: c_int = 24;
+// pub const SDL_GAMEPAD_BUTTON_MISC6: c_int = 25;
+// pub const SDL_GAMEPAD_BUTTON_COUNT: c_int = 26;
+// pub const enum_SDL_GamepadButton = c_int;
+// pub const SDL_GamepadButton = enum_SDL_GamepadButton;
+// pub const SDL_GAMEPAD_BUTTON_LABEL_UNKNOWN: c_int = 0;
+// pub const SDL_GAMEPAD_BUTTON_LABEL_A: c_int = 1;
+// pub const SDL_GAMEPAD_BUTTON_LABEL_B: c_int = 2;
+// pub const SDL_GAMEPAD_BUTTON_LABEL_X: c_int = 3;
+// pub const SDL_GAMEPAD_BUTTON_LABEL_Y: c_int = 4;
+// pub const SDL_GAMEPAD_BUTTON_LABEL_CROSS: c_int = 5;
+// pub const SDL_GAMEPAD_BUTTON_LABEL_CIRCLE: c_int = 6;
+// pub const SDL_GAMEPAD_BUTTON_LABEL_SQUARE: c_int = 7;
+// pub const SDL_GAMEPAD_BUTTON_LABEL_TRIANGLE: c_int = 8;
+// pub const enum_SDL_GamepadButtonLabel = c_uint;
+// pub const SDL_GamepadButtonLabel = enum_SDL_GamepadButtonLabel;
+// pub const SDL_GAMEPAD_AXIS_INVALID: c_int = -1;
+// pub const SDL_GAMEPAD_AXIS_LEFTX: c_int = 0;
+// pub const SDL_GAMEPAD_AXIS_LEFTY: c_int = 1;
+// pub const SDL_GAMEPAD_AXIS_RIGHTX: c_int = 2;
+// pub const SDL_GAMEPAD_AXIS_RIGHTY: c_int = 3;
+// pub const SDL_GAMEPAD_AXIS_LEFT_TRIGGER: c_int = 4;
+// pub const SDL_GAMEPAD_AXIS_RIGHT_TRIGGER: c_int = 5;
+// pub const SDL_GAMEPAD_AXIS_COUNT: c_int = 6;
+// pub const enum_SDL_GamepadAxis = c_int;
+// pub const SDL_GamepadAxis = enum_SDL_GamepadAxis;
+// pub const SDL_GAMEPAD_BINDTYPE_NONE: c_int = 0;
+// pub const SDL_GAMEPAD_BINDTYPE_BUTTON: c_int = 1;
+// pub const SDL_GAMEPAD_BINDTYPE_AXIS: c_int = 2;
+// pub const SDL_GAMEPAD_BINDTYPE_HAT: c_int = 3;
+// pub const enum_SDL_GamepadBindingType = c_uint;
+// pub const SDL_GamepadBindingType = enum_SDL_GamepadBindingType;
+// const struct_unnamed_6 = extern struct {
+//     axis: c_int = @import("std").mem.zeroes(c_int),
+//     axis_min: c_int = @import("std").mem.zeroes(c_int),
+//     axis_max: c_int = @import("std").mem.zeroes(c_int),
+// };
+// const struct_unnamed_7 = extern struct {
+//     hat: c_int = @import("std").mem.zeroes(c_int),
+//     hat_mask: c_int = @import("std").mem.zeroes(c_int),
+// };
+// const union_unnamed_5 = extern union {
+//     button: c_int,
+//     axis: struct_unnamed_6,
+//     hat: struct_unnamed_7,
+// };
+// const struct_unnamed_9 = extern struct {
+//     axis: SDL_GamepadAxis = @import("std").mem.zeroes(SDL_GamepadAxis),
+//     axis_min: c_int = @import("std").mem.zeroes(c_int),
+//     axis_max: c_int = @import("std").mem.zeroes(c_int),
+// };
+// const union_unnamed_8 = extern union {
+//     button: SDL_GamepadButton,
+//     axis: struct_unnamed_9,
+// };
+// pub const struct_SDL_GamepadBinding = extern struct {
+//     input_type: SDL_GamepadBindingType = @import("std").mem.zeroes(SDL_GamepadBindingType),
+//     input: union_unnamed_5 = @import("std").mem.zeroes(union_unnamed_5),
+//     output_type: SDL_GamepadBindingType = @import("std").mem.zeroes(SDL_GamepadBindingType),
+//     output: union_unnamed_8 = @import("std").mem.zeroes(union_unnamed_8),
+// };
+// pub const SDL_GamepadBinding = struct_SDL_GamepadBinding;
+// pub extern fn SDL_AddGamepadMapping(mapping: [*c]const u8) c_int;
+// pub extern fn SDL_AddGamepadMappingsFromIO(src: ?*SDL_IOStream, closeio: bool) c_int;
+// pub extern fn SDL_AddGamepadMappingsFromFile(file: [*c]const u8) c_int;
+// pub extern fn SDL_ReloadGamepadMappings() bool;
+// pub extern fn SDL_GetGamepadMappings(count: [*c]c_int) [*c][*c]u8;
+// pub extern fn SDL_GetGamepadMappingForGUID(guid: SDL_GUID) [*c]u8;
+// pub extern fn SDL_GetGamepadMapping(gamepad: ?*SDL_Gamepad) [*c]u8;
+// pub extern fn SDL_SetGamepadMapping(instance_id: SDL_JoystickID, mapping: [*c]const u8) bool;
+// pub extern fn SDL_HasGamepad() bool;
+// pub extern fn SDL_GetGamepads(count: [*c]c_int) [*c]SDL_JoystickID;
+// pub extern fn SDL_IsGamepad(instance_id: SDL_JoystickID) bool;
+// pub extern fn SDL_GetGamepadNameForID(instance_id: SDL_JoystickID) [*c]const u8;
+// pub extern fn SDL_GetGamepadPathForID(instance_id: SDL_JoystickID) [*c]const u8;
+// pub extern fn SDL_GetGamepadPlayerIndexForID(instance_id: SDL_JoystickID) c_int;
+// pub extern fn SDL_GetGamepadGUIDForID(instance_id: SDL_JoystickID) SDL_GUID;
+// pub extern fn SDL_GetGamepadVendorForID(instance_id: SDL_JoystickID) Uint16;
+// pub extern fn SDL_GetGamepadProductForID(instance_id: SDL_JoystickID) Uint16;
+// pub extern fn SDL_GetGamepadProductVersionForID(instance_id: SDL_JoystickID) Uint16;
+// pub extern fn SDL_GetGamepadTypeForID(instance_id: SDL_JoystickID) SDL_GamepadType;
+// pub extern fn SDL_GetRealGamepadTypeForID(instance_id: SDL_JoystickID) SDL_GamepadType;
+// pub extern fn SDL_GetGamepadMappingForID(instance_id: SDL_JoystickID) [*c]u8;
+// pub extern fn SDL_OpenGamepad(instance_id: SDL_JoystickID) ?*SDL_Gamepad;
+// pub extern fn SDL_GetGamepadFromID(instance_id: SDL_JoystickID) ?*SDL_Gamepad;
+// pub extern fn SDL_GetGamepadFromPlayerIndex(player_index: c_int) ?*SDL_Gamepad;
+// pub extern fn SDL_GetGamepadProperties(gamepad: ?*SDL_Gamepad) SDL_PropertiesID;
+// pub extern fn SDL_GetGamepadID(gamepad: ?*SDL_Gamepad) SDL_JoystickID;
+// pub extern fn SDL_GetGamepadName(gamepad: ?*SDL_Gamepad) [*c]const u8;
+// pub extern fn SDL_GetGamepadPath(gamepad: ?*SDL_Gamepad) [*c]const u8;
+// pub extern fn SDL_GetGamepadType(gamepad: ?*SDL_Gamepad) SDL_GamepadType;
+// pub extern fn SDL_GetRealGamepadType(gamepad: ?*SDL_Gamepad) SDL_GamepadType;
+// pub extern fn SDL_GetGamepadPlayerIndex(gamepad: ?*SDL_Gamepad) c_int;
+// pub extern fn SDL_SetGamepadPlayerIndex(gamepad: ?*SDL_Gamepad, player_index: c_int) bool;
+// pub extern fn SDL_GetGamepadVendor(gamepad: ?*SDL_Gamepad) Uint16;
+// pub extern fn SDL_GetGamepadProduct(gamepad: ?*SDL_Gamepad) Uint16;
+// pub extern fn SDL_GetGamepadProductVersion(gamepad: ?*SDL_Gamepad) Uint16;
+// pub extern fn SDL_GetGamepadFirmwareVersion(gamepad: ?*SDL_Gamepad) Uint16;
+// pub extern fn SDL_GetGamepadSerial(gamepad: ?*SDL_Gamepad) [*c]const u8;
+// pub extern fn SDL_GetGamepadSteamHandle(gamepad: ?*SDL_Gamepad) Uint64;
+// pub extern fn SDL_GetGamepadConnectionState(gamepad: ?*SDL_Gamepad) SDL_JoystickConnectionState;
+// pub extern fn SDL_GetGamepadPowerInfo(gamepad: ?*SDL_Gamepad, percent: [*c]c_int) SDL_PowerState;
+// pub extern fn SDL_GamepadConnected(gamepad: ?*SDL_Gamepad) bool;
+// pub extern fn SDL_GetGamepadJoystick(gamepad: ?*SDL_Gamepad) ?*SDL_Joystick;
+// pub extern fn SDL_SetGamepadEventsEnabled(enabled: bool) void;
+// pub extern fn SDL_GamepadEventsEnabled() bool;
+// pub extern fn SDL_GetGamepadBindings(gamepad: ?*SDL_Gamepad, count: [*c]c_int) [*c][*c]SDL_GamepadBinding;
+// pub extern fn SDL_UpdateGamepads() void;
+// pub extern fn SDL_GetGamepadTypeFromString(str: [*c]const u8) SDL_GamepadType;
+// pub extern fn SDL_GetGamepadStringForType(@"type": SDL_GamepadType) [*c]const u8;
+// pub extern fn SDL_GetGamepadAxisFromString(str: [*c]const u8) SDL_GamepadAxis;
+// pub extern fn SDL_GetGamepadStringForAxis(axis: SDL_GamepadAxis) [*c]const u8;
+// pub extern fn SDL_GamepadHasAxis(gamepad: ?*SDL_Gamepad, axis: SDL_GamepadAxis) bool;
+// pub extern fn SDL_GetGamepadAxis(gamepad: ?*SDL_Gamepad, axis: SDL_GamepadAxis) Sint16;
+// pub extern fn SDL_GetGamepadButtonFromString(str: [*c]const u8) SDL_GamepadButton;
+// pub extern fn SDL_GetGamepadStringForButton(button: SDL_GamepadButton) [*c]const u8;
+// pub extern fn SDL_GamepadHasButton(gamepad: ?*SDL_Gamepad, button: SDL_GamepadButton) bool;
+// pub extern fn SDL_GetGamepadButton(gamepad: ?*SDL_Gamepad, button: SDL_GamepadButton) bool;
+// pub extern fn SDL_GetGamepadButtonLabelForType(@"type": SDL_GamepadType, button: SDL_GamepadButton) SDL_GamepadButtonLabel;
+// pub extern fn SDL_GetGamepadButtonLabel(gamepad: ?*SDL_Gamepad, button: SDL_GamepadButton) SDL_GamepadButtonLabel;
+// pub extern fn SDL_GetNumGamepadTouchpads(gamepad: ?*SDL_Gamepad) c_int;
+// pub extern fn SDL_GetNumGamepadTouchpadFingers(gamepad: ?*SDL_Gamepad, touchpad: c_int) c_int;
+// pub extern fn SDL_GetGamepadTouchpadFinger(gamepad: ?*SDL_Gamepad, touchpad: c_int, finger: c_int, down: [*c]bool, x: [*c]f32, y: [*c]f32, pressure: [*c]f32) bool;
+// pub extern fn SDL_GamepadHasSensor(gamepad: ?*SDL_Gamepad, @"type": SDL_SensorType) bool;
+// pub extern fn SDL_SetGamepadSensorEnabled(gamepad: ?*SDL_Gamepad, @"type": SDL_SensorType, enabled: bool) bool;
+// pub extern fn SDL_GamepadSensorEnabled(gamepad: ?*SDL_Gamepad, @"type": SDL_SensorType) bool;
+// pub extern fn SDL_GetGamepadSensorDataRate(gamepad: ?*SDL_Gamepad, @"type": SDL_SensorType) f32;
+// pub extern fn SDL_GetGamepadSensorData(gamepad: ?*SDL_Gamepad, @"type": SDL_SensorType, data: [*c]f32, num_values: c_int) bool;
+// pub extern fn SDL_RumbleGamepad(gamepad: ?*SDL_Gamepad, low_frequency_rumble: Uint16, high_frequency_rumble: Uint16, duration_ms: Uint32) bool;
+// pub extern fn SDL_RumbleGamepadTriggers(gamepad: ?*SDL_Gamepad, left_rumble: Uint16, right_rumble: Uint16, duration_ms: Uint32) bool;
+// pub extern fn SDL_SetGamepadLED(gamepad: ?*SDL_Gamepad, red: Uint8, green: Uint8, blue: Uint8) bool;
+// pub extern fn SDL_SendGamepadEffect(gamepad: ?*SDL_Gamepad, data: ?*const anyopaque, size: c_int) bool;
+// pub extern fn SDL_CloseGamepad(gamepad: ?*SDL_Gamepad) void;
+// pub extern fn SDL_GetGamepadAppleSFSymbolsNameForButton(gamepad: ?*SDL_Gamepad, button: SDL_GamepadButton) [*c]const u8;
+// pub extern fn SDL_GetGamepadAppleSFSymbolsNameForAxis(gamepad: ?*SDL_Gamepad, axis: SDL_GamepadAxis) [*c]const u8;
+// pub const SDL_SCANCODE_UNKNOWN: c_int = 0;
+// pub const SDL_SCANCODE_A: c_int = 4;
+// pub const SDL_SCANCODE_B: c_int = 5;
+// pub const SDL_SCANCODE_C: c_int = 6;
+// pub const SDL_SCANCODE_D: c_int = 7;
+// pub const SDL_SCANCODE_E: c_int = 8;
+// pub const SDL_SCANCODE_F: c_int = 9;
+// pub const SDL_SCANCODE_G: c_int = 10;
+// pub const SDL_SCANCODE_H: c_int = 11;
+// pub const SDL_SCANCODE_I: c_int = 12;
+// pub const SDL_SCANCODE_J: c_int = 13;
+// pub const SDL_SCANCODE_K: c_int = 14;
+// pub const SDL_SCANCODE_L: c_int = 15;
+// pub const SDL_SCANCODE_M: c_int = 16;
+// pub const SDL_SCANCODE_N: c_int = 17;
+// pub const SDL_SCANCODE_O: c_int = 18;
+// pub const SDL_SCANCODE_P: c_int = 19;
+// pub const SDL_SCANCODE_Q: c_int = 20;
+// pub const SDL_SCANCODE_R: c_int = 21;
+// pub const SDL_SCANCODE_S: c_int = 22;
+// pub const SDL_SCANCODE_T: c_int = 23;
+// pub const SDL_SCANCODE_U: c_int = 24;
+// pub const SDL_SCANCODE_V: c_int = 25;
+// pub const SDL_SCANCODE_W: c_int = 26;
+// pub const SDL_SCANCODE_X: c_int = 27;
+// pub const SDL_SCANCODE_Y: c_int = 28;
+// pub const SDL_SCANCODE_Z: c_int = 29;
+// pub const SDL_SCANCODE_1: c_int = 30;
+// pub const SDL_SCANCODE_2: c_int = 31;
+// pub const SDL_SCANCODE_3: c_int = 32;
+// pub const SDL_SCANCODE_4: c_int = 33;
+// pub const SDL_SCANCODE_5: c_int = 34;
+// pub const SDL_SCANCODE_6: c_int = 35;
+// pub const SDL_SCANCODE_7: c_int = 36;
+// pub const SDL_SCANCODE_8: c_int = 37;
+// pub const SDL_SCANCODE_9: c_int = 38;
+// pub const SDL_SCANCODE_0: c_int = 39;
+// pub const SDL_SCANCODE_RETURN: c_int = 40;
+// pub const SDL_SCANCODE_ESCAPE: c_int = 41;
+// pub const SDL_SCANCODE_BACKSPACE: c_int = 42;
+// pub const SDL_SCANCODE_TAB: c_int = 43;
+// pub const SDL_SCANCODE_SPACE: c_int = 44;
+// pub const SDL_SCANCODE_MINUS: c_int = 45;
+// pub const SDL_SCANCODE_EQUALS: c_int = 46;
+// pub const SDL_SCANCODE_LEFTBRACKET: c_int = 47;
+// pub const SDL_SCANCODE_RIGHTBRACKET: c_int = 48;
+// pub const SDL_SCANCODE_BACKSLASH: c_int = 49;
+// pub const SDL_SCANCODE_NONUSHASH: c_int = 50;
+// pub const SDL_SCANCODE_SEMICOLON: c_int = 51;
+// pub const SDL_SCANCODE_APOSTROPHE: c_int = 52;
+// pub const SDL_SCANCODE_GRAVE: c_int = 53;
+// pub const SDL_SCANCODE_COMMA: c_int = 54;
+// pub const SDL_SCANCODE_PERIOD: c_int = 55;
+// pub const SDL_SCANCODE_SLASH: c_int = 56;
+// pub const SDL_SCANCODE_CAPSLOCK: c_int = 57;
+// pub const SDL_SCANCODE_F1: c_int = 58;
+// pub const SDL_SCANCODE_F2: c_int = 59;
+// pub const SDL_SCANCODE_F3: c_int = 60;
+// pub const SDL_SCANCODE_F4: c_int = 61;
+// pub const SDL_SCANCODE_F5: c_int = 62;
+// pub const SDL_SCANCODE_F6: c_int = 63;
+// pub const SDL_SCANCODE_F7: c_int = 64;
+// pub const SDL_SCANCODE_F8: c_int = 65;
+// pub const SDL_SCANCODE_F9: c_int = 66;
+// pub const SDL_SCANCODE_F10: c_int = 67;
+// pub const SDL_SCANCODE_F11: c_int = 68;
+// pub const SDL_SCANCODE_F12: c_int = 69;
+// pub const SDL_SCANCODE_PRINTSCREEN: c_int = 70;
+// pub const SDL_SCANCODE_SCROLLLOCK: c_int = 71;
+// pub const SDL_SCANCODE_PAUSE: c_int = 72;
+// pub const SDL_SCANCODE_INSERT: c_int = 73;
+// pub const SDL_SCANCODE_HOME: c_int = 74;
+// pub const SDL_SCANCODE_PAGEUP: c_int = 75;
+// pub const SDL_SCANCODE_DELETE: c_int = 76;
+// pub const SDL_SCANCODE_END: c_int = 77;
+// pub const SDL_SCANCODE_PAGEDOWN: c_int = 78;
+// pub const SDL_SCANCODE_RIGHT: c_int = 79;
+// pub const SDL_SCANCODE_LEFT: c_int = 80;
+// pub const SDL_SCANCODE_DOWN: c_int = 81;
+// pub const SDL_SCANCODE_UP: c_int = 82;
+// pub const SDL_SCANCODE_NUMLOCKCLEAR: c_int = 83;
+// pub const SDL_SCANCODE_KP_DIVIDE: c_int = 84;
+// pub const SDL_SCANCODE_KP_MULTIPLY: c_int = 85;
+// pub const SDL_SCANCODE_KP_MINUS: c_int = 86;
+// pub const SDL_SCANCODE_KP_PLUS: c_int = 87;
+// pub const SDL_SCANCODE_KP_ENTER: c_int = 88;
+// pub const SDL_SCANCODE_KP_1: c_int = 89;
+// pub const SDL_SCANCODE_KP_2: c_int = 90;
+// pub const SDL_SCANCODE_KP_3: c_int = 91;
+// pub const SDL_SCANCODE_KP_4: c_int = 92;
+// pub const SDL_SCANCODE_KP_5: c_int = 93;
+// pub const SDL_SCANCODE_KP_6: c_int = 94;
+// pub const SDL_SCANCODE_KP_7: c_int = 95;
+// pub const SDL_SCANCODE_KP_8: c_int = 96;
+// pub const SDL_SCANCODE_KP_9: c_int = 97;
+// pub const SDL_SCANCODE_KP_0: c_int = 98;
+// pub const SDL_SCANCODE_KP_PERIOD: c_int = 99;
+// pub const SDL_SCANCODE_NONUSBACKSLASH: c_int = 100;
+// pub const SDL_SCANCODE_APPLICATION: c_int = 101;
+// pub const SDL_SCANCODE_POWER: c_int = 102;
+// pub const SDL_SCANCODE_KP_EQUALS: c_int = 103;
+// pub const SDL_SCANCODE_F13: c_int = 104;
+// pub const SDL_SCANCODE_F14: c_int = 105;
+// pub const SDL_SCANCODE_F15: c_int = 106;
+// pub const SDL_SCANCODE_F16: c_int = 107;
+// pub const SDL_SCANCODE_F17: c_int = 108;
+// pub const SDL_SCANCODE_F18: c_int = 109;
+// pub const SDL_SCANCODE_F19: c_int = 110;
+// pub const SDL_SCANCODE_F20: c_int = 111;
+// pub const SDL_SCANCODE_F21: c_int = 112;
+// pub const SDL_SCANCODE_F22: c_int = 113;
+// pub const SDL_SCANCODE_F23: c_int = 114;
+// pub const SDL_SCANCODE_F24: c_int = 115;
+// pub const SDL_SCANCODE_EXECUTE: c_int = 116;
+// pub const SDL_SCANCODE_HELP: c_int = 117;
+// pub const SDL_SCANCODE_MENU: c_int = 118;
+// pub const SDL_SCANCODE_SELECT: c_int = 119;
+// pub const SDL_SCANCODE_STOP: c_int = 120;
+// pub const SDL_SCANCODE_AGAIN: c_int = 121;
+// pub const SDL_SCANCODE_UNDO: c_int = 122;
+// pub const SDL_SCANCODE_CUT: c_int = 123;
+// pub const SDL_SCANCODE_COPY: c_int = 124;
+// pub const SDL_SCANCODE_PASTE: c_int = 125;
+// pub const SDL_SCANCODE_FIND: c_int = 126;
+// pub const SDL_SCANCODE_MUTE: c_int = 127;
+// pub const SDL_SCANCODE_VOLUMEUP: c_int = 128;
+// pub const SDL_SCANCODE_VOLUMEDOWN: c_int = 129;
+// pub const SDL_SCANCODE_KP_COMMA: c_int = 133;
+// pub const SDL_SCANCODE_KP_EQUALSAS400: c_int = 134;
+// pub const SDL_SCANCODE_INTERNATIONAL1: c_int = 135;
+// pub const SDL_SCANCODE_INTERNATIONAL2: c_int = 136;
+// pub const SDL_SCANCODE_INTERNATIONAL3: c_int = 137;
+// pub const SDL_SCANCODE_INTERNATIONAL4: c_int = 138;
+// pub const SDL_SCANCODE_INTERNATIONAL5: c_int = 139;
+// pub const SDL_SCANCODE_INTERNATIONAL6: c_int = 140;
+// pub const SDL_SCANCODE_INTERNATIONAL7: c_int = 141;
+// pub const SDL_SCANCODE_INTERNATIONAL8: c_int = 142;
+// pub const SDL_SCANCODE_INTERNATIONAL9: c_int = 143;
+// pub const SDL_SCANCODE_LANG1: c_int = 144;
+// pub const SDL_SCANCODE_LANG2: c_int = 145;
+// pub const SDL_SCANCODE_LANG3: c_int = 146;
+// pub const SDL_SCANCODE_LANG4: c_int = 147;
+// pub const SDL_SCANCODE_LANG5: c_int = 148;
+// pub const SDL_SCANCODE_LANG6: c_int = 149;
+// pub const SDL_SCANCODE_LANG7: c_int = 150;
+// pub const SDL_SCANCODE_LANG8: c_int = 151;
+// pub const SDL_SCANCODE_LANG9: c_int = 152;
+// pub const SDL_SCANCODE_ALTERASE: c_int = 153;
+// pub const SDL_SCANCODE_SYSREQ: c_int = 154;
+// pub const SDL_SCANCODE_CANCEL: c_int = 155;
+// pub const SDL_SCANCODE_CLEAR: c_int = 156;
+// pub const SDL_SCANCODE_PRIOR: c_int = 157;
+// pub const SDL_SCANCODE_RETURN2: c_int = 158;
+// pub const SDL_SCANCODE_SEPARATOR: c_int = 159;
+// pub const SDL_SCANCODE_OUT: c_int = 160;
+// pub const SDL_SCANCODE_OPER: c_int = 161;
+// pub const SDL_SCANCODE_CLEARAGAIN: c_int = 162;
+// pub const SDL_SCANCODE_CRSEL: c_int = 163;
+// pub const SDL_SCANCODE_EXSEL: c_int = 164;
+// pub const SDL_SCANCODE_KP_00: c_int = 176;
+// pub const SDL_SCANCODE_KP_000: c_int = 177;
+// pub const SDL_SCANCODE_THOUSANDSSEPARATOR: c_int = 178;
+// pub const SDL_SCANCODE_DECIMALSEPARATOR: c_int = 179;
+// pub const SDL_SCANCODE_CURRENCYUNIT: c_int = 180;
+// pub const SDL_SCANCODE_CURRENCYSUBUNIT: c_int = 181;
+// pub const SDL_SCANCODE_KP_LEFTPAREN: c_int = 182;
+// pub const SDL_SCANCODE_KP_RIGHTPAREN: c_int = 183;
+// pub const SDL_SCANCODE_KP_LEFTBRACE: c_int = 184;
+// pub const SDL_SCANCODE_KP_RIGHTBRACE: c_int = 185;
+// pub const SDL_SCANCODE_KP_TAB: c_int = 186;
+// pub const SDL_SCANCODE_KP_BACKSPACE: c_int = 187;
+// pub const SDL_SCANCODE_KP_A: c_int = 188;
+// pub const SDL_SCANCODE_KP_B: c_int = 189;
+// pub const SDL_SCANCODE_KP_C: c_int = 190;
+// pub const SDL_SCANCODE_KP_D: c_int = 191;
+// pub const SDL_SCANCODE_KP_E: c_int = 192;
+// pub const SDL_SCANCODE_KP_F: c_int = 193;
+// pub const SDL_SCANCODE_KP_XOR: c_int = 194;
+// pub const SDL_SCANCODE_KP_POWER: c_int = 195;
+// pub const SDL_SCANCODE_KP_PERCENT: c_int = 196;
+// pub const SDL_SCANCODE_KP_LESS: c_int = 197;
+// pub const SDL_SCANCODE_KP_GREATER: c_int = 198;
+// pub const SDL_SCANCODE_KP_AMPERSAND: c_int = 199;
+// pub const SDL_SCANCODE_KP_DBLAMPERSAND: c_int = 200;
+// pub const SDL_SCANCODE_KP_VERTICALBAR: c_int = 201;
+// pub const SDL_SCANCODE_KP_DBLVERTICALBAR: c_int = 202;
+// pub const SDL_SCANCODE_KP_COLON: c_int = 203;
+// pub const SDL_SCANCODE_KP_HASH: c_int = 204;
+// pub const SDL_SCANCODE_KP_SPACE: c_int = 205;
+// pub const SDL_SCANCODE_KP_AT: c_int = 206;
+// pub const SDL_SCANCODE_KP_EXCLAM: c_int = 207;
+// pub const SDL_SCANCODE_KP_MEMSTORE: c_int = 208;
+// pub const SDL_SCANCODE_KP_MEMRECALL: c_int = 209;
+// pub const SDL_SCANCODE_KP_MEMCLEAR: c_int = 210;
+// pub const SDL_SCANCODE_KP_MEMADD: c_int = 211;
+// pub const SDL_SCANCODE_KP_MEMSUBTRACT: c_int = 212;
+// pub const SDL_SCANCODE_KP_MEMMULTIPLY: c_int = 213;
+// pub const SDL_SCANCODE_KP_MEMDIVIDE: c_int = 214;
+// pub const SDL_SCANCODE_KP_PLUSMINUS: c_int = 215;
+// pub const SDL_SCANCODE_KP_CLEAR: c_int = 216;
+// pub const SDL_SCANCODE_KP_CLEARENTRY: c_int = 217;
+// pub const SDL_SCANCODE_KP_BINARY: c_int = 218;
+// pub const SDL_SCANCODE_KP_OCTAL: c_int = 219;
+// pub const SDL_SCANCODE_KP_DECIMAL: c_int = 220;
+// pub const SDL_SCANCODE_KP_HEXADECIMAL: c_int = 221;
+// pub const SDL_SCANCODE_LCTRL: c_int = 224;
+// pub const SDL_SCANCODE_LSHIFT: c_int = 225;
+// pub const SDL_SCANCODE_LALT: c_int = 226;
+// pub const SDL_SCANCODE_LGUI: c_int = 227;
+// pub const SDL_SCANCODE_RCTRL: c_int = 228;
+// pub const SDL_SCANCODE_RSHIFT: c_int = 229;
+// pub const SDL_SCANCODE_RALT: c_int = 230;
+// pub const SDL_SCANCODE_RGUI: c_int = 231;
+// pub const SDL_SCANCODE_MODE: c_int = 257;
+// pub const SDL_SCANCODE_SLEEP: c_int = 258;
+// pub const SDL_SCANCODE_WAKE: c_int = 259;
+// pub const SDL_SCANCODE_CHANNEL_INCREMENT: c_int = 260;
+// pub const SDL_SCANCODE_CHANNEL_DECREMENT: c_int = 261;
+// pub const SDL_SCANCODE_MEDIA_PLAY: c_int = 262;
+// pub const SDL_SCANCODE_MEDIA_PAUSE: c_int = 263;
+// pub const SDL_SCANCODE_MEDIA_RECORD: c_int = 264;
+// pub const SDL_SCANCODE_MEDIA_FAST_FORWARD: c_int = 265;
+// pub const SDL_SCANCODE_MEDIA_REWIND: c_int = 266;
+// pub const SDL_SCANCODE_MEDIA_NEXT_TRACK: c_int = 267;
+// pub const SDL_SCANCODE_MEDIA_PREVIOUS_TRACK: c_int = 268;
+// pub const SDL_SCANCODE_MEDIA_STOP: c_int = 269;
+// pub const SDL_SCANCODE_MEDIA_EJECT: c_int = 270;
+// pub const SDL_SCANCODE_MEDIA_PLAY_PAUSE: c_int = 271;
+// pub const SDL_SCANCODE_MEDIA_SELECT: c_int = 272;
+// pub const SDL_SCANCODE_AC_NEW: c_int = 273;
+// pub const SDL_SCANCODE_AC_OPEN: c_int = 274;
+// pub const SDL_SCANCODE_AC_CLOSE: c_int = 275;
+// pub const SDL_SCANCODE_AC_EXIT: c_int = 276;
+// pub const SDL_SCANCODE_AC_SAVE: c_int = 277;
+// pub const SDL_SCANCODE_AC_PRINT: c_int = 278;
+// pub const SDL_SCANCODE_AC_PROPERTIES: c_int = 279;
+// pub const SDL_SCANCODE_AC_SEARCH: c_int = 280;
+// pub const SDL_SCANCODE_AC_HOME: c_int = 281;
+// pub const SDL_SCANCODE_AC_BACK: c_int = 282;
+// pub const SDL_SCANCODE_AC_FORWARD: c_int = 283;
+// pub const SDL_SCANCODE_AC_STOP: c_int = 284;
+// pub const SDL_SCANCODE_AC_REFRESH: c_int = 285;
+// pub const SDL_SCANCODE_AC_BOOKMARKS: c_int = 286;
+// pub const SDL_SCANCODE_SOFTLEFT: c_int = 287;
+// pub const SDL_SCANCODE_SOFTRIGHT: c_int = 288;
+// pub const SDL_SCANCODE_CALL: c_int = 289;
+// pub const SDL_SCANCODE_ENDCALL: c_int = 290;
+// pub const SDL_SCANCODE_RESERVED: c_int = 400;
+// pub const SDL_SCANCODE_COUNT: c_int = 512;
+// pub const enum_SDL_Scancode = c_uint;
+// pub const SDL_Scancode = enum_SDL_Scancode;
+// pub const SDL_Keycode = Uint32;
+// pub const SDL_Keymod = Uint16;
+// pub const SDL_KeyboardID = Uint32;
+// pub extern fn SDL_HasKeyboard() bool;
+// pub extern fn SDL_GetKeyboards(count: [*c]c_int) [*c]SDL_KeyboardID;
+// pub extern fn SDL_GetKeyboardNameForID(instance_id: SDL_KeyboardID) [*c]const u8;
+// pub extern fn SDL_GetKeyboardFocus() ?*SDL_Window;
+// pub extern fn SDL_GetKeyboardState(numkeys: [*c]c_int) [*c]const bool;
+// pub extern fn SDL_ResetKeyboard() void;
+// pub extern fn SDL_GetModState() SDL_Keymod;
+// pub extern fn SDL_SetModState(modstate: SDL_Keymod) void;
+// pub extern fn SDL_GetKeyFromScancode(scancode: SDL_Scancode, modstate: SDL_Keymod, key_event: bool) SDL_Keycode;
+// pub extern fn SDL_GetScancodeFromKey(key: SDL_Keycode, modstate: [*c]SDL_Keymod) SDL_Scancode;
+// pub extern fn SDL_SetScancodeName(scancode: SDL_Scancode, name: [*c]const u8) bool;
+// pub extern fn SDL_GetScancodeName(scancode: SDL_Scancode) [*c]const u8;
+// pub extern fn SDL_GetScancodeFromName(name: [*c]const u8) SDL_Scancode;
+// pub extern fn SDL_GetKeyName(key: SDL_Keycode) [*c]const u8;
+// pub extern fn SDL_GetKeyFromName(name: [*c]const u8) SDL_Keycode;
+// pub extern fn SDL_StartTextInput(window: ?*SDL_Window) bool;
+// pub const SDL_TEXTINPUT_TYPE_TEXT: c_int = 0;
+// pub const SDL_TEXTINPUT_TYPE_TEXT_NAME: c_int = 1;
+// pub const SDL_TEXTINPUT_TYPE_TEXT_EMAIL: c_int = 2;
+// pub const SDL_TEXTINPUT_TYPE_TEXT_USERNAME: c_int = 3;
+// pub const SDL_TEXTINPUT_TYPE_TEXT_PASSWORD_HIDDEN: c_int = 4;
+// pub const SDL_TEXTINPUT_TYPE_TEXT_PASSWORD_VISIBLE: c_int = 5;
+// pub const SDL_TEXTINPUT_TYPE_NUMBER: c_int = 6;
+// pub const SDL_TEXTINPUT_TYPE_NUMBER_PASSWORD_HIDDEN: c_int = 7;
+// pub const SDL_TEXTINPUT_TYPE_NUMBER_PASSWORD_VISIBLE: c_int = 8;
+// pub const enum_SDL_TextInputType = c_uint;
+// pub const SDL_TextInputType = enum_SDL_TextInputType;
+// pub const SDL_CAPITALIZE_NONE: c_int = 0;
+// pub const SDL_CAPITALIZE_SENTENCES: c_int = 1;
+// pub const SDL_CAPITALIZE_WORDS: c_int = 2;
+// pub const SDL_CAPITALIZE_LETTERS: c_int = 3;
+// pub const enum_SDL_Capitalization = c_uint;
+// pub const SDL_Capitalization = enum_SDL_Capitalization;
+// pub extern fn SDL_StartTextInputWithProperties(window: ?*SDL_Window, props: SDL_PropertiesID) bool;
+// pub extern fn SDL_TextInputActive(window: ?*SDL_Window) bool;
+// pub extern fn SDL_StopTextInput(window: ?*SDL_Window) bool;
+// pub extern fn SDL_ClearComposition(window: ?*SDL_Window) bool;
+// pub extern fn SDL_SetTextInputArea(window: ?*SDL_Window, rect: [*c]const SDL_Rect, cursor: c_int) bool;
+// pub extern fn SDL_GetTextInputArea(window: ?*SDL_Window, rect: [*c]SDL_Rect, cursor: [*c]c_int) bool;
+// pub extern fn SDL_HasScreenKeyboardSupport() bool;
+// pub extern fn SDL_ScreenKeyboardShown(window: ?*SDL_Window) bool;
+// pub const SDL_MouseID = Uint32;
+// pub const struct_SDL_Cursor = opaque {};
+// pub const SDL_Cursor = struct_SDL_Cursor;
+// pub const SDL_SYSTEM_CURSOR_DEFAULT: c_int = 0;
+// pub const SDL_SYSTEM_CURSOR_TEXT: c_int = 1;
+// pub const SDL_SYSTEM_CURSOR_WAIT: c_int = 2;
+// pub const SDL_SYSTEM_CURSOR_CROSSHAIR: c_int = 3;
+// pub const SDL_SYSTEM_CURSOR_PROGRESS: c_int = 4;
+// pub const SDL_SYSTEM_CURSOR_NWSE_RESIZE: c_int = 5;
+// pub const SDL_SYSTEM_CURSOR_NESW_RESIZE: c_int = 6;
+// pub const SDL_SYSTEM_CURSOR_EW_RESIZE: c_int = 7;
+// pub const SDL_SYSTEM_CURSOR_NS_RESIZE: c_int = 8;
+// pub const SDL_SYSTEM_CURSOR_MOVE: c_int = 9;
+// pub const SDL_SYSTEM_CURSOR_NOT_ALLOWED: c_int = 10;
+// pub const SDL_SYSTEM_CURSOR_POINTER: c_int = 11;
+// pub const SDL_SYSTEM_CURSOR_NW_RESIZE: c_int = 12;
+// pub const SDL_SYSTEM_CURSOR_N_RESIZE: c_int = 13;
+// pub const SDL_SYSTEM_CURSOR_NE_RESIZE: c_int = 14;
+// pub const SDL_SYSTEM_CURSOR_E_RESIZE: c_int = 15;
+// pub const SDL_SYSTEM_CURSOR_SE_RESIZE: c_int = 16;
+// pub const SDL_SYSTEM_CURSOR_S_RESIZE: c_int = 17;
+// pub const SDL_SYSTEM_CURSOR_SW_RESIZE: c_int = 18;
+// pub const SDL_SYSTEM_CURSOR_W_RESIZE: c_int = 19;
+// pub const SDL_SYSTEM_CURSOR_COUNT: c_int = 20;
+// pub const enum_SDL_SystemCursor = c_uint;
+// pub const SDL_SystemCursor = enum_SDL_SystemCursor;
+// pub const SDL_MOUSEWHEEL_NORMAL: c_int = 0;
+// pub const SDL_MOUSEWHEEL_FLIPPED: c_int = 1;
+// pub const enum_SDL_MouseWheelDirection = c_uint;
+// pub const SDL_MouseWheelDirection = enum_SDL_MouseWheelDirection;
+// pub const SDL_MouseButtonFlags = Uint32;
+// pub extern fn SDL_HasMouse() bool;
+// pub extern fn SDL_GetMice(count: [*c]c_int) [*c]SDL_MouseID;
+// pub extern fn SDL_GetMouseNameForID(instance_id: SDL_MouseID) [*c]const u8;
+// pub extern fn SDL_GetMouseFocus() ?*SDL_Window;
+// pub extern fn SDL_GetMouseState(x: [*c]f32, y: [*c]f32) SDL_MouseButtonFlags;
+// pub extern fn SDL_GetGlobalMouseState(x: [*c]f32, y: [*c]f32) SDL_MouseButtonFlags;
+// pub extern fn SDL_GetRelativeMouseState(x: [*c]f32, y: [*c]f32) SDL_MouseButtonFlags;
+// pub extern fn SDL_WarpMouseInWindow(window: ?*SDL_Window, x: f32, y: f32) void;
+// pub extern fn SDL_WarpMouseGlobal(x: f32, y: f32) bool;
+// pub extern fn SDL_SetWindowRelativeMouseMode(window: ?*SDL_Window, enabled: bool) bool;
+// pub extern fn SDL_GetWindowRelativeMouseMode(window: ?*SDL_Window) bool;
+// pub extern fn SDL_CaptureMouse(enabled: bool) bool;
+// pub extern fn SDL_CreateCursor(data: [*c]const Uint8, mask: [*c]const Uint8, w: c_int, h: c_int, hot_x: c_int, hot_y: c_int) ?*SDL_Cursor;
+// pub extern fn SDL_CreateColorCursor(surface: [*c]SDL_Surface, hot_x: c_int, hot_y: c_int) ?*SDL_Cursor;
+// pub extern fn SDL_CreateSystemCursor(id: SDL_SystemCursor) ?*SDL_Cursor;
+// pub extern fn SDL_SetCursor(cursor: ?*SDL_Cursor) bool;
+// pub extern fn SDL_GetCursor() ?*SDL_Cursor;
+// pub extern fn SDL_GetDefaultCursor() ?*SDL_Cursor;
+// pub extern fn SDL_DestroyCursor(cursor: ?*SDL_Cursor) void;
+// pub extern fn SDL_ShowCursor() bool;
+// pub extern fn SDL_HideCursor() bool;
+// pub extern fn SDL_CursorVisible() bool;
+// pub const SDL_TouchID = Uint64;
+// pub const SDL_FingerID = Uint64;
+// pub const SDL_TOUCH_DEVICE_INVALID: c_int = -1;
+// pub const SDL_TOUCH_DEVICE_DIRECT: c_int = 0;
+// pub const SDL_TOUCH_DEVICE_INDIRECT_ABSOLUTE: c_int = 1;
+// pub const SDL_TOUCH_DEVICE_INDIRECT_RELATIVE: c_int = 2;
+// pub const enum_SDL_TouchDeviceType = c_int;
+// pub const SDL_TouchDeviceType = enum_SDL_TouchDeviceType;
+// pub const struct_SDL_Finger = extern struct {
+//     id: SDL_FingerID = @import("std").mem.zeroes(SDL_FingerID),
+//     x: f32 = @import("std").mem.zeroes(f32),
+//     y: f32 = @import("std").mem.zeroes(f32),
+//     pressure: f32 = @import("std").mem.zeroes(f32),
+// };
+// pub const SDL_Finger = struct_SDL_Finger;
+// pub extern fn SDL_GetTouchDevices(count: [*c]c_int) [*c]SDL_TouchID;
+// pub extern fn SDL_GetTouchDeviceName(touchID: SDL_TouchID) [*c]const u8;
+// pub extern fn SDL_GetTouchDeviceType(touchID: SDL_TouchID) SDL_TouchDeviceType;
+// pub extern fn SDL_GetTouchFingers(touchID: SDL_TouchID, count: [*c]c_int) [*c][*c]SDL_Finger;
+// pub const SDL_PenID = Uint32;
+// pub const SDL_PenInputFlags = Uint32;
+// pub const SDL_PEN_AXIS_PRESSURE: c_int = 0;
+// pub const SDL_PEN_AXIS_XTILT: c_int = 1;
+// pub const SDL_PEN_AXIS_YTILT: c_int = 2;
+// pub const SDL_PEN_AXIS_DISTANCE: c_int = 3;
+// pub const SDL_PEN_AXIS_ROTATION: c_int = 4;
+// pub const SDL_PEN_AXIS_SLIDER: c_int = 5;
+// pub const SDL_PEN_AXIS_TANGENTIAL_PRESSURE: c_int = 6;
+// pub const SDL_PEN_AXIS_COUNT: c_int = 7;
+// pub const enum_SDL_PenAxis = c_uint;
+// pub const SDL_PenAxis = enum_SDL_PenAxis;
+// pub const SDL_EVENT_FIRST: c_int = 0;
+// pub const SDL_EVENT_QUIT: c_int = 256;
+// pub const SDL_EVENT_TERMINATING: c_int = 257;
+// pub const SDL_EVENT_LOW_MEMORY: c_int = 258;
+// pub const SDL_EVENT_WILL_ENTER_BACKGROUND: c_int = 259;
+// pub const SDL_EVENT_DID_ENTER_BACKGROUND: c_int = 260;
+// pub const SDL_EVENT_WILL_ENTER_FOREGROUND: c_int = 261;
+// pub const SDL_EVENT_DID_ENTER_FOREGROUND: c_int = 262;
+// pub const SDL_EVENT_LOCALE_CHANGED: c_int = 263;
+// pub const SDL_EVENT_SYSTEM_THEME_CHANGED: c_int = 264;
+// pub const SDL_EVENT_DISPLAY_ORIENTATION: c_int = 337;
+// pub const SDL_EVENT_DISPLAY_ADDED: c_int = 338;
+// pub const SDL_EVENT_DISPLAY_REMOVED: c_int = 339;
+// pub const SDL_EVENT_DISPLAY_MOVED: c_int = 340;
+// pub const SDL_EVENT_DISPLAY_DESKTOP_MODE_CHANGED: c_int = 341;
+// pub const SDL_EVENT_DISPLAY_CURRENT_MODE_CHANGED: c_int = 342;
+// pub const SDL_EVENT_DISPLAY_CONTENT_SCALE_CHANGED: c_int = 343;
+// pub const SDL_EVENT_DISPLAY_FIRST: c_int = 337;
+// pub const SDL_EVENT_DISPLAY_LAST: c_int = 343;
+// pub const SDL_EVENT_WINDOW_SHOWN: c_int = 514;
+// pub const SDL_EVENT_WINDOW_HIDDEN: c_int = 515;
+// pub const SDL_EVENT_WINDOW_EXPOSED: c_int = 516;
+// pub const SDL_EVENT_WINDOW_MOVED: c_int = 517;
+// pub const SDL_EVENT_WINDOW_RESIZED: c_int = 518;
+// pub const SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED: c_int = 519;
+// pub const SDL_EVENT_WINDOW_METAL_VIEW_RESIZED: c_int = 520;
+// pub const SDL_EVENT_WINDOW_MINIMIZED: c_int = 521;
+// pub const SDL_EVENT_WINDOW_MAXIMIZED: c_int = 522;
+// pub const SDL_EVENT_WINDOW_RESTORED: c_int = 523;
+// pub const SDL_EVENT_WINDOW_MOUSE_ENTER: c_int = 524;
+// pub const SDL_EVENT_WINDOW_MOUSE_LEAVE: c_int = 525;
+// pub const SDL_EVENT_WINDOW_FOCUS_GAINED: c_int = 526;
+// pub const SDL_EVENT_WINDOW_FOCUS_LOST: c_int = 527;
+// pub const SDL_EVENT_WINDOW_CLOSE_REQUESTED: c_int = 528;
+// pub const SDL_EVENT_WINDOW_HIT_TEST: c_int = 529;
+// pub const SDL_EVENT_WINDOW_ICCPROF_CHANGED: c_int = 530;
+// pub const SDL_EVENT_WINDOW_DISPLAY_CHANGED: c_int = 531;
+// pub const SDL_EVENT_WINDOW_DISPLAY_SCALE_CHANGED: c_int = 532;
+// pub const SDL_EVENT_WINDOW_SAFE_AREA_CHANGED: c_int = 533;
+// pub const SDL_EVENT_WINDOW_OCCLUDED: c_int = 534;
+// pub const SDL_EVENT_WINDOW_ENTER_FULLSCREEN: c_int = 535;
+// pub const SDL_EVENT_WINDOW_LEAVE_FULLSCREEN: c_int = 536;
+// pub const SDL_EVENT_WINDOW_DESTROYED: c_int = 537;
+// pub const SDL_EVENT_WINDOW_HDR_STATE_CHANGED: c_int = 538;
+// pub const SDL_EVENT_WINDOW_FIRST: c_int = 514;
+// pub const SDL_EVENT_WINDOW_LAST: c_int = 538;
+// pub const SDL_EVENT_KEY_DOWN: c_int = 768;
+// pub const SDL_EVENT_KEY_UP: c_int = 769;
+// pub const SDL_EVENT_TEXT_EDITING: c_int = 770;
+// pub const SDL_EVENT_TEXT_INPUT: c_int = 771;
+// pub const SDL_EVENT_KEYMAP_CHANGED: c_int = 772;
+// pub const SDL_EVENT_KEYBOARD_ADDED: c_int = 773;
+// pub const SDL_EVENT_KEYBOARD_REMOVED: c_int = 774;
+// pub const SDL_EVENT_TEXT_EDITING_CANDIDATES: c_int = 775;
+// pub const SDL_EVENT_MOUSE_MOTION: c_int = 1024;
+// pub const SDL_EVENT_MOUSE_BUTTON_DOWN: c_int = 1025;
+// pub const SDL_EVENT_MOUSE_BUTTON_UP: c_int = 1026;
+// pub const SDL_EVENT_MOUSE_WHEEL: c_int = 1027;
+// pub const SDL_EVENT_MOUSE_ADDED: c_int = 1028;
+// pub const SDL_EVENT_MOUSE_REMOVED: c_int = 1029;
+// pub const SDL_EVENT_JOYSTICK_AXIS_MOTION: c_int = 1536;
+// pub const SDL_EVENT_JOYSTICK_BALL_MOTION: c_int = 1537;
+// pub const SDL_EVENT_JOYSTICK_HAT_MOTION: c_int = 1538;
+// pub const SDL_EVENT_JOYSTICK_BUTTON_DOWN: c_int = 1539;
+// pub const SDL_EVENT_JOYSTICK_BUTTON_UP: c_int = 1540;
+// pub const SDL_EVENT_JOYSTICK_ADDED: c_int = 1541;
+// pub const SDL_EVENT_JOYSTICK_REMOVED: c_int = 1542;
+// pub const SDL_EVENT_JOYSTICK_BATTERY_UPDATED: c_int = 1543;
+// pub const SDL_EVENT_JOYSTICK_UPDATE_COMPLETE: c_int = 1544;
+// pub const SDL_EVENT_GAMEPAD_AXIS_MOTION: c_int = 1616;
+// pub const SDL_EVENT_GAMEPAD_BUTTON_DOWN: c_int = 1617;
+// pub const SDL_EVENT_GAMEPAD_BUTTON_UP: c_int = 1618;
+// pub const SDL_EVENT_GAMEPAD_ADDED: c_int = 1619;
+// pub const SDL_EVENT_GAMEPAD_REMOVED: c_int = 1620;
+// pub const SDL_EVENT_GAMEPAD_REMAPPED: c_int = 1621;
+// pub const SDL_EVENT_GAMEPAD_TOUCHPAD_DOWN: c_int = 1622;
+// pub const SDL_EVENT_GAMEPAD_TOUCHPAD_MOTION: c_int = 1623;
+// pub const SDL_EVENT_GAMEPAD_TOUCHPAD_UP: c_int = 1624;
+// pub const SDL_EVENT_GAMEPAD_SENSOR_UPDATE: c_int = 1625;
+// pub const SDL_EVENT_GAMEPAD_UPDATE_COMPLETE: c_int = 1626;
+// pub const SDL_EVENT_GAMEPAD_STEAM_HANDLE_UPDATED: c_int = 1627;
+// pub const SDL_EVENT_FINGER_DOWN: c_int = 1792;
+// pub const SDL_EVENT_FINGER_UP: c_int = 1793;
+// pub const SDL_EVENT_FINGER_MOTION: c_int = 1794;
+// pub const SDL_EVENT_FINGER_CANCELED: c_int = 1795;
+// pub const SDL_EVENT_CLIPBOARD_UPDATE: c_int = 2304;
+// pub const SDL_EVENT_DROP_FILE: c_int = 4096;
+// pub const SDL_EVENT_DROP_TEXT: c_int = 4097;
+// pub const SDL_EVENT_DROP_BEGIN: c_int = 4098;
+// pub const SDL_EVENT_DROP_COMPLETE: c_int = 4099;
+// pub const SDL_EVENT_DROP_POSITION: c_int = 4100;
+// pub const SDL_EVENT_AUDIO_DEVICE_ADDED: c_int = 4352;
+// pub const SDL_EVENT_AUDIO_DEVICE_REMOVED: c_int = 4353;
+// pub const SDL_EVENT_AUDIO_DEVICE_FORMAT_CHANGED: c_int = 4354;
+// pub const SDL_EVENT_SENSOR_UPDATE: c_int = 4608;
+// pub const SDL_EVENT_PEN_PROXIMITY_IN: c_int = 4864;
+// pub const SDL_EVENT_PEN_PROXIMITY_OUT: c_int = 4865;
+// pub const SDL_EVENT_PEN_DOWN: c_int = 4866;
+// pub const SDL_EVENT_PEN_UP: c_int = 4867;
+// pub const SDL_EVENT_PEN_BUTTON_DOWN: c_int = 4868;
+// pub const SDL_EVENT_PEN_BUTTON_UP: c_int = 4869;
+// pub const SDL_EVENT_PEN_MOTION: c_int = 4870;
+// pub const SDL_EVENT_PEN_AXIS: c_int = 4871;
+// pub const SDL_EVENT_CAMERA_DEVICE_ADDED: c_int = 5120;
+// pub const SDL_EVENT_CAMERA_DEVICE_REMOVED: c_int = 5121;
+// pub const SDL_EVENT_CAMERA_DEVICE_APPROVED: c_int = 5122;
+// pub const SDL_EVENT_CAMERA_DEVICE_DENIED: c_int = 5123;
+// pub const SDL_EVENT_RENDER_TARGETS_RESET: c_int = 8192;
+// pub const SDL_EVENT_RENDER_DEVICE_RESET: c_int = 8193;
+// pub const SDL_EVENT_RENDER_DEVICE_LOST: c_int = 8194;
+// pub const SDL_EVENT_PRIVATE0: c_int = 16384;
+// pub const SDL_EVENT_PRIVATE1: c_int = 16385;
+// pub const SDL_EVENT_PRIVATE2: c_int = 16386;
+// pub const SDL_EVENT_PRIVATE3: c_int = 16387;
+// pub const SDL_EVENT_POLL_SENTINEL: c_int = 32512;
+// pub const SDL_EVENT_USER: c_int = 32768;
+// pub const SDL_EVENT_LAST: c_int = 65535;
+// pub const SDL_EVENT_ENUM_PADDING: c_int = 2147483647;
+// pub const enum_SDL_EventType = c_uint;
+// pub const SDL_EventType = enum_SDL_EventType;
+// pub const struct_SDL_CommonEvent = extern struct {
+//     type: Uint32 = @import("std").mem.zeroes(Uint32),
+//     reserved: Uint32 = @import("std").mem.zeroes(Uint32),
+//     timestamp: Uint64 = @import("std").mem.zeroes(Uint64),
+// };
+// pub const SDL_CommonEvent = struct_SDL_CommonEvent;
+// pub const struct_SDL_DisplayEvent = extern struct {
+//     type: SDL_EventType = @import("std").mem.zeroes(SDL_EventType),
+//     reserved: Uint32 = @import("std").mem.zeroes(Uint32),
+//     timestamp: Uint64 = @import("std").mem.zeroes(Uint64),
+//     displayID: SDL_DisplayID = @import("std").mem.zeroes(SDL_DisplayID),
+//     data1: Sint32 = @import("std").mem.zeroes(Sint32),
+//     data2: Sint32 = @import("std").mem.zeroes(Sint32),
+// };
+// pub const SDL_DisplayEvent = struct_SDL_DisplayEvent;
+// pub const struct_SDL_WindowEvent = extern struct {
+//     type: SDL_EventType = @import("std").mem.zeroes(SDL_EventType),
+//     reserved: Uint32 = @import("std").mem.zeroes(Uint32),
+//     timestamp: Uint64 = @import("std").mem.zeroes(Uint64),
+//     windowID: SDL_WindowID = @import("std").mem.zeroes(SDL_WindowID),
+//     data1: Sint32 = @import("std").mem.zeroes(Sint32),
+//     data2: Sint32 = @import("std").mem.zeroes(Sint32),
+// };
+// pub const SDL_WindowEvent = struct_SDL_WindowEvent;
+// pub const struct_SDL_KeyboardDeviceEvent = extern struct {
+//     type: SDL_EventType = @import("std").mem.zeroes(SDL_EventType),
+//     reserved: Uint32 = @import("std").mem.zeroes(Uint32),
+//     timestamp: Uint64 = @import("std").mem.zeroes(Uint64),
+//     which: SDL_KeyboardID = @import("std").mem.zeroes(SDL_KeyboardID),
+// };
+// pub const SDL_KeyboardDeviceEvent = struct_SDL_KeyboardDeviceEvent;
+// pub const struct_SDL_KeyboardEvent = extern struct {
+//     type: SDL_EventType = @import("std").mem.zeroes(SDL_EventType),
+//     reserved: Uint32 = @import("std").mem.zeroes(Uint32),
+//     timestamp: Uint64 = @import("std").mem.zeroes(Uint64),
+//     windowID: SDL_WindowID = @import("std").mem.zeroes(SDL_WindowID),
+//     which: SDL_KeyboardID = @import("std").mem.zeroes(SDL_KeyboardID),
+//     scancode: SDL_Scancode = @import("std").mem.zeroes(SDL_Scancode),
+//     key: SDL_Keycode = @import("std").mem.zeroes(SDL_Keycode),
+//     mod: SDL_Keymod = @import("std").mem.zeroes(SDL_Keymod),
+//     raw: Uint16 = @import("std").mem.zeroes(Uint16),
+//     down: bool = @import("std").mem.zeroes(bool),
+//     repeat: bool = @import("std").mem.zeroes(bool),
+// };
+// pub const SDL_KeyboardEvent = struct_SDL_KeyboardEvent;
+// pub const struct_SDL_TextEditingEvent = extern struct {
+//     type: SDL_EventType = @import("std").mem.zeroes(SDL_EventType),
+//     reserved: Uint32 = @import("std").mem.zeroes(Uint32),
+//     timestamp: Uint64 = @import("std").mem.zeroes(Uint64),
+//     windowID: SDL_WindowID = @import("std").mem.zeroes(SDL_WindowID),
+//     text: [*c]const u8 = @import("std").mem.zeroes([*c]const u8),
+//     start: Sint32 = @import("std").mem.zeroes(Sint32),
+//     length: Sint32 = @import("std").mem.zeroes(Sint32),
+// };
+// pub const SDL_TextEditingEvent = struct_SDL_TextEditingEvent;
+// pub const struct_SDL_TextEditingCandidatesEvent = extern struct {
+//     type: SDL_EventType = @import("std").mem.zeroes(SDL_EventType),
+//     reserved: Uint32 = @import("std").mem.zeroes(Uint32),
+//     timestamp: Uint64 = @import("std").mem.zeroes(Uint64),
+//     windowID: SDL_WindowID = @import("std").mem.zeroes(SDL_WindowID),
+//     candidates: [*c]const [*c]const u8 = @import("std").mem.zeroes([*c]const [*c]const u8),
+//     num_candidates: Sint32 = @import("std").mem.zeroes(Sint32),
+//     selected_candidate: Sint32 = @import("std").mem.zeroes(Sint32),
+//     horizontal: bool = @import("std").mem.zeroes(bool),
+//     padding1: Uint8 = @import("std").mem.zeroes(Uint8),
+//     padding2: Uint8 = @import("std").mem.zeroes(Uint8),
+//     padding3: Uint8 = @import("std").mem.zeroes(Uint8),
+// };
+// pub const SDL_TextEditingCandidatesEvent = struct_SDL_TextEditingCandidatesEvent;
+// pub const struct_SDL_TextInputEvent = extern struct {
+//     type: SDL_EventType = @import("std").mem.zeroes(SDL_EventType),
+//     reserved: Uint32 = @import("std").mem.zeroes(Uint32),
+//     timestamp: Uint64 = @import("std").mem.zeroes(Uint64),
+//     windowID: SDL_WindowID = @import("std").mem.zeroes(SDL_WindowID),
+//     text: [*c]const u8 = @import("std").mem.zeroes([*c]const u8),
+// };
+// pub const SDL_TextInputEvent = struct_SDL_TextInputEvent;
+// pub const struct_SDL_MouseDeviceEvent = extern struct {
+//     type: SDL_EventType = @import("std").mem.zeroes(SDL_EventType),
+//     reserved: Uint32 = @import("std").mem.zeroes(Uint32),
+//     timestamp: Uint64 = @import("std").mem.zeroes(Uint64),
+//     which: SDL_MouseID = @import("std").mem.zeroes(SDL_MouseID),
+// };
+// pub const SDL_MouseDeviceEvent = struct_SDL_MouseDeviceEvent;
+// pub const struct_SDL_MouseMotionEvent = extern struct {
+//     type: SDL_EventType = @import("std").mem.zeroes(SDL_EventType),
+//     reserved: Uint32 = @import("std").mem.zeroes(Uint32),
+//     timestamp: Uint64 = @import("std").mem.zeroes(Uint64),
+//     windowID: SDL_WindowID = @import("std").mem.zeroes(SDL_WindowID),
+//     which: SDL_MouseID = @import("std").mem.zeroes(SDL_MouseID),
+//     state: SDL_MouseButtonFlags = @import("std").mem.zeroes(SDL_MouseButtonFlags),
+//     x: f32 = @import("std").mem.zeroes(f32),
+//     y: f32 = @import("std").mem.zeroes(f32),
+//     xrel: f32 = @import("std").mem.zeroes(f32),
+//     yrel: f32 = @import("std").mem.zeroes(f32),
+// };
+// pub const SDL_MouseMotionEvent = struct_SDL_MouseMotionEvent;
+// pub const struct_SDL_MouseButtonEvent = extern struct {
+//     type: SDL_EventType = @import("std").mem.zeroes(SDL_EventType),
+//     reserved: Uint32 = @import("std").mem.zeroes(Uint32),
+//     timestamp: Uint64 = @import("std").mem.zeroes(Uint64),
+//     windowID: SDL_WindowID = @import("std").mem.zeroes(SDL_WindowID),
+//     which: SDL_MouseID = @import("std").mem.zeroes(SDL_MouseID),
+//     button: Uint8 = @import("std").mem.zeroes(Uint8),
+//     down: bool = @import("std").mem.zeroes(bool),
+//     clicks: Uint8 = @import("std").mem.zeroes(Uint8),
+//     padding: Uint8 = @import("std").mem.zeroes(Uint8),
+//     x: f32 = @import("std").mem.zeroes(f32),
+//     y: f32 = @import("std").mem.zeroes(f32),
+// };
+// pub const SDL_MouseButtonEvent = struct_SDL_MouseButtonEvent;
+// pub const struct_SDL_MouseWheelEvent = extern struct {
+//     type: SDL_EventType = @import("std").mem.zeroes(SDL_EventType),
+//     reserved: Uint32 = @import("std").mem.zeroes(Uint32),
+//     timestamp: Uint64 = @import("std").mem.zeroes(Uint64),
+//     windowID: SDL_WindowID = @import("std").mem.zeroes(SDL_WindowID),
+//     which: SDL_MouseID = @import("std").mem.zeroes(SDL_MouseID),
+//     x: f32 = @import("std").mem.zeroes(f32),
+//     y: f32 = @import("std").mem.zeroes(f32),
+//     direction: SDL_MouseWheelDirection = @import("std").mem.zeroes(SDL_MouseWheelDirection),
+//     mouse_x: f32 = @import("std").mem.zeroes(f32),
+//     mouse_y: f32 = @import("std").mem.zeroes(f32),
+//     integer_x: Sint32 = @import("std").mem.zeroes(Sint32),
+//     integer_y: Sint32 = @import("std").mem.zeroes(Sint32),
+// };
+// pub const SDL_MouseWheelEvent = struct_SDL_MouseWheelEvent;
+// pub const struct_SDL_JoyAxisEvent = extern struct {
+//     type: SDL_EventType = @import("std").mem.zeroes(SDL_EventType),
+//     reserved: Uint32 = @import("std").mem.zeroes(Uint32),
+//     timestamp: Uint64 = @import("std").mem.zeroes(Uint64),
+//     which: SDL_JoystickID = @import("std").mem.zeroes(SDL_JoystickID),
+//     axis: Uint8 = @import("std").mem.zeroes(Uint8),
+//     padding1: Uint8 = @import("std").mem.zeroes(Uint8),
+//     padding2: Uint8 = @import("std").mem.zeroes(Uint8),
+//     padding3: Uint8 = @import("std").mem.zeroes(Uint8),
+//     value: Sint16 = @import("std").mem.zeroes(Sint16),
+//     padding4: Uint16 = @import("std").mem.zeroes(Uint16),
+// };
+// pub const SDL_JoyAxisEvent = struct_SDL_JoyAxisEvent;
+// pub const struct_SDL_JoyBallEvent = extern struct {
+//     type: SDL_EventType = @import("std").mem.zeroes(SDL_EventType),
+//     reserved: Uint32 = @import("std").mem.zeroes(Uint32),
+//     timestamp: Uint64 = @import("std").mem.zeroes(Uint64),
+//     which: SDL_JoystickID = @import("std").mem.zeroes(SDL_JoystickID),
+//     ball: Uint8 = @import("std").mem.zeroes(Uint8),
+//     padding1: Uint8 = @import("std").mem.zeroes(Uint8),
+//     padding2: Uint8 = @import("std").mem.zeroes(Uint8),
+//     padding3: Uint8 = @import("std").mem.zeroes(Uint8),
+//     xrel: Sint16 = @import("std").mem.zeroes(Sint16),
+//     yrel: Sint16 = @import("std").mem.zeroes(Sint16),
+// };
+// pub const SDL_JoyBallEvent = struct_SDL_JoyBallEvent;
+// pub const struct_SDL_JoyHatEvent = extern struct {
+//     type: SDL_EventType = @import("std").mem.zeroes(SDL_EventType),
+//     reserved: Uint32 = @import("std").mem.zeroes(Uint32),
+//     timestamp: Uint64 = @import("std").mem.zeroes(Uint64),
+//     which: SDL_JoystickID = @import("std").mem.zeroes(SDL_JoystickID),
+//     hat: Uint8 = @import("std").mem.zeroes(Uint8),
+//     value: Uint8 = @import("std").mem.zeroes(Uint8),
+//     padding1: Uint8 = @import("std").mem.zeroes(Uint8),
+//     padding2: Uint8 = @import("std").mem.zeroes(Uint8),
+// };
+// pub const SDL_JoyHatEvent = struct_SDL_JoyHatEvent;
+// pub const struct_SDL_JoyButtonEvent = extern struct {
+//     type: SDL_EventType = @import("std").mem.zeroes(SDL_EventType),
+//     reserved: Uint32 = @import("std").mem.zeroes(Uint32),
+//     timestamp: Uint64 = @import("std").mem.zeroes(Uint64),
+//     which: SDL_JoystickID = @import("std").mem.zeroes(SDL_JoystickID),
+//     button: Uint8 = @import("std").mem.zeroes(Uint8),
+//     down: bool = @import("std").mem.zeroes(bool),
+//     padding1: Uint8 = @import("std").mem.zeroes(Uint8),
+//     padding2: Uint8 = @import("std").mem.zeroes(Uint8),
+// };
+// pub const SDL_JoyButtonEvent = struct_SDL_JoyButtonEvent;
+// pub const struct_SDL_JoyDeviceEvent = extern struct {
+//     type: SDL_EventType = @import("std").mem.zeroes(SDL_EventType),
+//     reserved: Uint32 = @import("std").mem.zeroes(Uint32),
+//     timestamp: Uint64 = @import("std").mem.zeroes(Uint64),
+//     which: SDL_JoystickID = @import("std").mem.zeroes(SDL_JoystickID),
+// };
+// pub const SDL_JoyDeviceEvent = struct_SDL_JoyDeviceEvent;
+// pub const struct_SDL_JoyBatteryEvent = extern struct {
+//     type: SDL_EventType = @import("std").mem.zeroes(SDL_EventType),
+//     reserved: Uint32 = @import("std").mem.zeroes(Uint32),
+//     timestamp: Uint64 = @import("std").mem.zeroes(Uint64),
+//     which: SDL_JoystickID = @import("std").mem.zeroes(SDL_JoystickID),
+//     state: SDL_PowerState = @import("std").mem.zeroes(SDL_PowerState),
+//     percent: c_int = @import("std").mem.zeroes(c_int),
+// };
+// pub const SDL_JoyBatteryEvent = struct_SDL_JoyBatteryEvent;
+// pub const struct_SDL_GamepadAxisEvent = extern struct {
+//     type: SDL_EventType = @import("std").mem.zeroes(SDL_EventType),
+//     reserved: Uint32 = @import("std").mem.zeroes(Uint32),
+//     timestamp: Uint64 = @import("std").mem.zeroes(Uint64),
+//     which: SDL_JoystickID = @import("std").mem.zeroes(SDL_JoystickID),
+//     axis: Uint8 = @import("std").mem.zeroes(Uint8),
+//     padding1: Uint8 = @import("std").mem.zeroes(Uint8),
+//     padding2: Uint8 = @import("std").mem.zeroes(Uint8),
+//     padding3: Uint8 = @import("std").mem.zeroes(Uint8),
+//     value: Sint16 = @import("std").mem.zeroes(Sint16),
+//     padding4: Uint16 = @import("std").mem.zeroes(Uint16),
+// };
+// pub const SDL_GamepadAxisEvent = struct_SDL_GamepadAxisEvent;
+// pub const struct_SDL_GamepadButtonEvent = extern struct {
+//     type: SDL_EventType = @import("std").mem.zeroes(SDL_EventType),
+//     reserved: Uint32 = @import("std").mem.zeroes(Uint32),
+//     timestamp: Uint64 = @import("std").mem.zeroes(Uint64),
+//     which: SDL_JoystickID = @import("std").mem.zeroes(SDL_JoystickID),
+//     button: Uint8 = @import("std").mem.zeroes(Uint8),
+//     down: bool = @import("std").mem.zeroes(bool),
+//     padding1: Uint8 = @import("std").mem.zeroes(Uint8),
+//     padding2: Uint8 = @import("std").mem.zeroes(Uint8),
+// };
+// pub const SDL_GamepadButtonEvent = struct_SDL_GamepadButtonEvent;
+// pub const struct_SDL_GamepadDeviceEvent = extern struct {
+//     type: SDL_EventType = @import("std").mem.zeroes(SDL_EventType),
+//     reserved: Uint32 = @import("std").mem.zeroes(Uint32),
+//     timestamp: Uint64 = @import("std").mem.zeroes(Uint64),
+//     which: SDL_JoystickID = @import("std").mem.zeroes(SDL_JoystickID),
+// };
+// pub const SDL_GamepadDeviceEvent = struct_SDL_GamepadDeviceEvent;
+// pub const struct_SDL_GamepadTouchpadEvent = extern struct {
+//     type: SDL_EventType = @import("std").mem.zeroes(SDL_EventType),
+//     reserved: Uint32 = @import("std").mem.zeroes(Uint32),
+//     timestamp: Uint64 = @import("std").mem.zeroes(Uint64),
+//     which: SDL_JoystickID = @import("std").mem.zeroes(SDL_JoystickID),
+//     touchpad: Sint32 = @import("std").mem.zeroes(Sint32),
+//     finger: Sint32 = @import("std").mem.zeroes(Sint32),
+//     x: f32 = @import("std").mem.zeroes(f32),
+//     y: f32 = @import("std").mem.zeroes(f32),
+//     pressure: f32 = @import("std").mem.zeroes(f32),
+// };
+// pub const SDL_GamepadTouchpadEvent = struct_SDL_GamepadTouchpadEvent;
+// pub const struct_SDL_GamepadSensorEvent = extern struct {
+//     type: SDL_EventType = @import("std").mem.zeroes(SDL_EventType),
+//     reserved: Uint32 = @import("std").mem.zeroes(Uint32),
+//     timestamp: Uint64 = @import("std").mem.zeroes(Uint64),
+//     which: SDL_JoystickID = @import("std").mem.zeroes(SDL_JoystickID),
+//     sensor: Sint32 = @import("std").mem.zeroes(Sint32),
+//     data: [3]f32 = @import("std").mem.zeroes([3]f32),
+//     sensor_timestamp: Uint64 = @import("std").mem.zeroes(Uint64),
+// };
+// pub const SDL_GamepadSensorEvent = struct_SDL_GamepadSensorEvent;
+// pub const struct_SDL_AudioDeviceEvent = extern struct {
+//     type: SDL_EventType = @import("std").mem.zeroes(SDL_EventType),
+//     reserved: Uint32 = @import("std").mem.zeroes(Uint32),
+//     timestamp: Uint64 = @import("std").mem.zeroes(Uint64),
+//     which: SDL_AudioDeviceID = @import("std").mem.zeroes(SDL_AudioDeviceID),
+//     recording: bool = @import("std").mem.zeroes(bool),
+//     padding1: Uint8 = @import("std").mem.zeroes(Uint8),
+//     padding2: Uint8 = @import("std").mem.zeroes(Uint8),
+//     padding3: Uint8 = @import("std").mem.zeroes(Uint8),
+// };
+// pub const SDL_AudioDeviceEvent = struct_SDL_AudioDeviceEvent;
+// pub const struct_SDL_CameraDeviceEvent = extern struct {
+//     type: SDL_EventType = @import("std").mem.zeroes(SDL_EventType),
+//     reserved: Uint32 = @import("std").mem.zeroes(Uint32),
+//     timestamp: Uint64 = @import("std").mem.zeroes(Uint64),
+//     which: SDL_CameraID = @import("std").mem.zeroes(SDL_CameraID),
+// };
+// pub const SDL_CameraDeviceEvent = struct_SDL_CameraDeviceEvent;
+// pub const struct_SDL_RenderEvent = extern struct {
+//     type: SDL_EventType = @import("std").mem.zeroes(SDL_EventType),
+//     reserved: Uint32 = @import("std").mem.zeroes(Uint32),
+//     timestamp: Uint64 = @import("std").mem.zeroes(Uint64),
+//     windowID: SDL_WindowID = @import("std").mem.zeroes(SDL_WindowID),
+// };
+// pub const SDL_RenderEvent = struct_SDL_RenderEvent;
+// pub const struct_SDL_TouchFingerEvent = extern struct {
+//     type: SDL_EventType = @import("std").mem.zeroes(SDL_EventType),
+//     reserved: Uint32 = @import("std").mem.zeroes(Uint32),
+//     timestamp: Uint64 = @import("std").mem.zeroes(Uint64),
+//     touchID: SDL_TouchID = @import("std").mem.zeroes(SDL_TouchID),
+//     fingerID: SDL_FingerID = @import("std").mem.zeroes(SDL_FingerID),
+//     x: f32 = @import("std").mem.zeroes(f32),
+//     y: f32 = @import("std").mem.zeroes(f32),
+//     dx: f32 = @import("std").mem.zeroes(f32),
+//     dy: f32 = @import("std").mem.zeroes(f32),
+//     pressure: f32 = @import("std").mem.zeroes(f32),
+//     windowID: SDL_WindowID = @import("std").mem.zeroes(SDL_WindowID),
+// };
+// pub const SDL_TouchFingerEvent = struct_SDL_TouchFingerEvent;
+// pub const struct_SDL_PenProximityEvent = extern struct {
+//     type: SDL_EventType = @import("std").mem.zeroes(SDL_EventType),
+//     reserved: Uint32 = @import("std").mem.zeroes(Uint32),
+//     timestamp: Uint64 = @import("std").mem.zeroes(Uint64),
+//     windowID: SDL_WindowID = @import("std").mem.zeroes(SDL_WindowID),
+//     which: SDL_PenID = @import("std").mem.zeroes(SDL_PenID),
+// };
+// pub const SDL_PenProximityEvent = struct_SDL_PenProximityEvent;
+// pub const struct_SDL_PenMotionEvent = extern struct {
+//     type: SDL_EventType = @import("std").mem.zeroes(SDL_EventType),
+//     reserved: Uint32 = @import("std").mem.zeroes(Uint32),
+//     timestamp: Uint64 = @import("std").mem.zeroes(Uint64),
+//     windowID: SDL_WindowID = @import("std").mem.zeroes(SDL_WindowID),
+//     which: SDL_PenID = @import("std").mem.zeroes(SDL_PenID),
+//     pen_state: SDL_PenInputFlags = @import("std").mem.zeroes(SDL_PenInputFlags),
+//     x: f32 = @import("std").mem.zeroes(f32),
+//     y: f32 = @import("std").mem.zeroes(f32),
+// };
+// pub const SDL_PenMotionEvent = struct_SDL_PenMotionEvent;
+// pub const struct_SDL_PenTouchEvent = extern struct {
+//     type: SDL_EventType = @import("std").mem.zeroes(SDL_EventType),
+//     reserved: Uint32 = @import("std").mem.zeroes(Uint32),
+//     timestamp: Uint64 = @import("std").mem.zeroes(Uint64),
+//     windowID: SDL_WindowID = @import("std").mem.zeroes(SDL_WindowID),
+//     which: SDL_PenID = @import("std").mem.zeroes(SDL_PenID),
+//     pen_state: SDL_PenInputFlags = @import("std").mem.zeroes(SDL_PenInputFlags),
+//     x: f32 = @import("std").mem.zeroes(f32),
+//     y: f32 = @import("std").mem.zeroes(f32),
+//     eraser: bool = @import("std").mem.zeroes(bool),
+//     down: bool = @import("std").mem.zeroes(bool),
+// };
+// pub const SDL_PenTouchEvent = struct_SDL_PenTouchEvent;
+// pub const struct_SDL_PenButtonEvent = extern struct {
+//     type: SDL_EventType = @import("std").mem.zeroes(SDL_EventType),
+//     reserved: Uint32 = @import("std").mem.zeroes(Uint32),
+//     timestamp: Uint64 = @import("std").mem.zeroes(Uint64),
+//     windowID: SDL_WindowID = @import("std").mem.zeroes(SDL_WindowID),
+//     which: SDL_PenID = @import("std").mem.zeroes(SDL_PenID),
+//     pen_state: SDL_PenInputFlags = @import("std").mem.zeroes(SDL_PenInputFlags),
+//     x: f32 = @import("std").mem.zeroes(f32),
+//     y: f32 = @import("std").mem.zeroes(f32),
+//     button: Uint8 = @import("std").mem.zeroes(Uint8),
+//     down: bool = @import("std").mem.zeroes(bool),
+// };
+// pub const SDL_PenButtonEvent = struct_SDL_PenButtonEvent;
+// pub const struct_SDL_PenAxisEvent = extern struct {
+//     type: SDL_EventType = @import("std").mem.zeroes(SDL_EventType),
+//     reserved: Uint32 = @import("std").mem.zeroes(Uint32),
+//     timestamp: Uint64 = @import("std").mem.zeroes(Uint64),
+//     windowID: SDL_WindowID = @import("std").mem.zeroes(SDL_WindowID),
+//     which: SDL_PenID = @import("std").mem.zeroes(SDL_PenID),
+//     pen_state: SDL_PenInputFlags = @import("std").mem.zeroes(SDL_PenInputFlags),
+//     x: f32 = @import("std").mem.zeroes(f32),
+//     y: f32 = @import("std").mem.zeroes(f32),
+//     axis: SDL_PenAxis = @import("std").mem.zeroes(SDL_PenAxis),
+//     value: f32 = @import("std").mem.zeroes(f32),
+// };
+// pub const SDL_PenAxisEvent = struct_SDL_PenAxisEvent;
+// pub const struct_SDL_DropEvent = extern struct {
+//     type: SDL_EventType = @import("std").mem.zeroes(SDL_EventType),
+//     reserved: Uint32 = @import("std").mem.zeroes(Uint32),
+//     timestamp: Uint64 = @import("std").mem.zeroes(Uint64),
+//     windowID: SDL_WindowID = @import("std").mem.zeroes(SDL_WindowID),
+//     x: f32 = @import("std").mem.zeroes(f32),
+//     y: f32 = @import("std").mem.zeroes(f32),
+//     source: [*c]const u8 = @import("std").mem.zeroes([*c]const u8),
+//     data: [*c]const u8 = @import("std").mem.zeroes([*c]const u8),
+// };
+// pub const SDL_DropEvent = struct_SDL_DropEvent;
+// pub const struct_SDL_ClipboardEvent = extern struct {
+//     type: SDL_EventType = @import("std").mem.zeroes(SDL_EventType),
+//     reserved: Uint32 = @import("std").mem.zeroes(Uint32),
+//     timestamp: Uint64 = @import("std").mem.zeroes(Uint64),
+//     owner: bool = @import("std").mem.zeroes(bool),
+//     num_mime_types: Sint32 = @import("std").mem.zeroes(Sint32),
+//     mime_types: [*c][*c]const u8 = @import("std").mem.zeroes([*c][*c]const u8),
+// };
+// pub const SDL_ClipboardEvent = struct_SDL_ClipboardEvent;
+// pub const struct_SDL_SensorEvent = extern struct {
+//     type: SDL_EventType = @import("std").mem.zeroes(SDL_EventType),
+//     reserved: Uint32 = @import("std").mem.zeroes(Uint32),
+//     timestamp: Uint64 = @import("std").mem.zeroes(Uint64),
+//     which: SDL_SensorID = @import("std").mem.zeroes(SDL_SensorID),
+//     data: [6]f32 = @import("std").mem.zeroes([6]f32),
+//     sensor_timestamp: Uint64 = @import("std").mem.zeroes(Uint64),
+// };
+// pub const SDL_SensorEvent = struct_SDL_SensorEvent;
+// pub const struct_SDL_QuitEvent = extern struct {
+//     type: SDL_EventType = @import("std").mem.zeroes(SDL_EventType),
+//     reserved: Uint32 = @import("std").mem.zeroes(Uint32),
+//     timestamp: Uint64 = @import("std").mem.zeroes(Uint64),
+// };
+// pub const SDL_QuitEvent = struct_SDL_QuitEvent;
+// pub const struct_SDL_UserEvent = extern struct {
+//     type: Uint32 = @import("std").mem.zeroes(Uint32),
+//     reserved: Uint32 = @import("std").mem.zeroes(Uint32),
+//     timestamp: Uint64 = @import("std").mem.zeroes(Uint64),
+//     windowID: SDL_WindowID = @import("std").mem.zeroes(SDL_WindowID),
+//     code: Sint32 = @import("std").mem.zeroes(Sint32),
+//     data1: ?*anyopaque = @import("std").mem.zeroes(?*anyopaque),
+//     data2: ?*anyopaque = @import("std").mem.zeroes(?*anyopaque),
+// };
+// pub const SDL_UserEvent = struct_SDL_UserEvent;
+// pub const union_SDL_Event = extern union {
+//     type: Uint32,
+//     common: SDL_CommonEvent,
+//     display: SDL_DisplayEvent,
+//     window: SDL_WindowEvent,
+//     kdevice: SDL_KeyboardDeviceEvent,
+//     key: SDL_KeyboardEvent,
+//     edit: SDL_TextEditingEvent,
+//     edit_candidates: SDL_TextEditingCandidatesEvent,
+//     text: SDL_TextInputEvent,
+//     mdevice: SDL_MouseDeviceEvent,
+//     motion: SDL_MouseMotionEvent,
+//     button: SDL_MouseButtonEvent,
+//     wheel: SDL_MouseWheelEvent,
+//     jdevice: SDL_JoyDeviceEvent,
+//     jaxis: SDL_JoyAxisEvent,
+//     jball: SDL_JoyBallEvent,
+//     jhat: SDL_JoyHatEvent,
+//     jbutton: SDL_JoyButtonEvent,
+//     jbattery: SDL_JoyBatteryEvent,
+//     gdevice: SDL_GamepadDeviceEvent,
+//     gaxis: SDL_GamepadAxisEvent,
+//     gbutton: SDL_GamepadButtonEvent,
+//     gtouchpad: SDL_GamepadTouchpadEvent,
+//     gsensor: SDL_GamepadSensorEvent,
+//     adevice: SDL_AudioDeviceEvent,
+//     cdevice: SDL_CameraDeviceEvent,
+//     sensor: SDL_SensorEvent,
+//     quit: SDL_QuitEvent,
+//     user: SDL_UserEvent,
+//     tfinger: SDL_TouchFingerEvent,
+//     pproximity: SDL_PenProximityEvent,
+//     ptouch: SDL_PenTouchEvent,
+//     pmotion: SDL_PenMotionEvent,
+//     pbutton: SDL_PenButtonEvent,
+//     paxis: SDL_PenAxisEvent,
+//     render: SDL_RenderEvent,
+//     drop: SDL_DropEvent,
+//     clipboard: SDL_ClipboardEvent,
+//     padding: [128]Uint8,
+// };
+// pub const SDL_Event = union_SDL_Event;
 // /home/gabe/Code/github.com/gabe-lee/Goolib/.zig-cache/o/3a9a5418a30d0d5a8a8c91bad20d9c47/SDL3/SDL_stdinc.h:203:42: warning: ignoring StaticAssert declaration
-pub extern fn SDL_PumpEvents() void;
-pub const SDL_ADDEVENT: c_int = 0;
-pub const SDL_PEEKEVENT: c_int = 1;
-pub const SDL_GETEVENT: c_int = 2;
-pub const enum_SDL_EventAction = c_uint;
-pub const SDL_EventAction = enum_SDL_EventAction;
-pub extern fn SDL_PeepEvents(events: [*c]SDL_Event, numevents: c_int, action: SDL_EventAction, minType: Uint32, maxType: Uint32) c_int;
-pub extern fn SDL_HasEvent(@"type": Uint32) bool;
-pub extern fn SDL_HasEvents(minType: Uint32, maxType: Uint32) bool;
-pub extern fn SDL_FlushEvent(@"type": Uint32) void;
-pub extern fn SDL_FlushEvents(minType: Uint32, maxType: Uint32) void;
-pub extern fn SDL_PollEvent(event: [*c]SDL_Event) bool;
-pub extern fn SDL_WaitEvent(event: [*c]SDL_Event) bool;
-pub extern fn SDL_WaitEventTimeout(event: [*c]SDL_Event, timeoutMS: Sint32) bool;
-pub extern fn SDL_PushEvent(event: [*c]SDL_Event) bool;
-pub const SDL_EventFilter = ?*const fn (?*anyopaque, [*c]SDL_Event) callconv(.c) bool;
-pub extern fn SDL_SetEventFilter(filter: SDL_EventFilter, userdata: ?*anyopaque) void;
-pub extern fn SDL_GetEventFilter(filter: [*c]SDL_EventFilter, userdata: [*c]?*anyopaque) bool;
-pub extern fn SDL_AddEventWatch(filter: SDL_EventFilter, userdata: ?*anyopaque) bool;
-pub extern fn SDL_RemoveEventWatch(filter: SDL_EventFilter, userdata: ?*anyopaque) void;
-pub extern fn SDL_FilterEvents(filter: SDL_EventFilter, userdata: ?*anyopaque) void;
-pub extern fn SDL_SetEventEnabled(@"type": Uint32, enabled: bool) void;
-pub extern fn SDL_EventEnabled(@"type": Uint32) bool;
-pub extern fn SDL_RegisterEvents(numevents: c_int) Uint32;
-pub extern fn SDL_GetWindowFromEvent(event: [*c]const SDL_Event) ?*SDL_Window;
-pub extern fn SDL_GetBasePath() [*c]const u8;
-pub extern fn SDL_GetPrefPath(org: [*c]const u8, app: [*c]const u8) [*c]u8;
-pub const SDL_FOLDER_HOME: c_int = 0;
-pub const SDL_FOLDER_DESKTOP: c_int = 1;
-pub const SDL_FOLDER_DOCUMENTS: c_int = 2;
-pub const SDL_FOLDER_DOWNLOADS: c_int = 3;
-pub const SDL_FOLDER_MUSIC: c_int = 4;
-pub const SDL_FOLDER_PICTURES: c_int = 5;
-pub const SDL_FOLDER_PUBLICSHARE: c_int = 6;
-pub const SDL_FOLDER_SAVEDGAMES: c_int = 7;
-pub const SDL_FOLDER_SCREENSHOTS: c_int = 8;
-pub const SDL_FOLDER_TEMPLATES: c_int = 9;
-pub const SDL_FOLDER_VIDEOS: c_int = 10;
-pub const SDL_FOLDER_COUNT: c_int = 11;
-pub const enum_SDL_Folder = c_uint;
-pub const SDL_Folder = enum_SDL_Folder;
-pub extern fn SDL_GetUserFolder(folder: SDL_Folder) [*c]const u8;
-pub const SDL_PATHTYPE_NONE: c_int = 0;
-pub const SDL_PATHTYPE_FILE: c_int = 1;
-pub const SDL_PATHTYPE_DIRECTORY: c_int = 2;
-pub const SDL_PATHTYPE_OTHER: c_int = 3;
-pub const enum_SDL_PathType = c_uint;
-pub const SDL_PathType = enum_SDL_PathType;
-pub const struct_SDL_PathInfo = extern struct {
-    type: SDL_PathType = @import("std").mem.zeroes(SDL_PathType),
-    size: Uint64 = @import("std").mem.zeroes(Uint64),
-    create_time: SDL_Time = @import("std").mem.zeroes(SDL_Time),
-    modify_time: SDL_Time = @import("std").mem.zeroes(SDL_Time),
-    access_time: SDL_Time = @import("std").mem.zeroes(SDL_Time),
-};
-pub const SDL_PathInfo = struct_SDL_PathInfo;
-pub const SDL_GlobFlags = Uint32;
-pub extern fn SDL_CreateDirectory(path: [*c]const u8) bool;
-pub const SDL_ENUM_CONTINUE: c_int = 0;
-pub const SDL_ENUM_SUCCESS: c_int = 1;
-pub const SDL_ENUM_FAILURE: c_int = 2;
-pub const enum_SDL_EnumerationResult = c_uint;
-pub const SDL_EnumerationResult = enum_SDL_EnumerationResult;
-pub const SDL_EnumerateDirectoryCallback = ?*const fn (?*anyopaque, [*c]const u8, [*c]const u8) callconv(.c) SDL_EnumerationResult;
-pub extern fn SDL_EnumerateDirectory(path: [*c]const u8, callback: SDL_EnumerateDirectoryCallback, userdata: ?*anyopaque) bool;
-pub extern fn SDL_RemovePath(path: [*c]const u8) bool;
-pub extern fn SDL_RenamePath(oldpath: [*c]const u8, newpath: [*c]const u8) bool;
-pub extern fn SDL_CopyFile(oldpath: [*c]const u8, newpath: [*c]const u8) bool;
-pub extern fn SDL_GetPathInfo(path: [*c]const u8, info: [*c]SDL_PathInfo) bool;
-pub extern fn SDL_GlobDirectory(path: [*c]const u8, pattern: [*c]const u8, flags: SDL_GlobFlags, count: [*c]c_int) [*c][*c]u8;
-pub extern fn SDL_GetCurrentDirectory() [*c]u8;
-pub const struct_SDL_GPUDevice = opaque {};
-pub const SDL_GPUDevice = struct_SDL_GPUDevice;
-pub const struct_SDL_GPUBuffer = opaque {};
-pub const SDL_GPUBuffer = struct_SDL_GPUBuffer;
-pub const struct_SDL_GPUTransferBuffer = opaque {};
-pub const SDL_GPUTransferBuffer = struct_SDL_GPUTransferBuffer;
-pub const struct_SDL_GPUTexture = opaque {};
-pub const SDL_GPUTexture = struct_SDL_GPUTexture;
-pub const struct_SDL_GPUSampler = opaque {};
-pub const SDL_GPUSampler = struct_SDL_GPUSampler;
-pub const struct_SDL_GPUShader = opaque {};
-pub const SDL_GPUShader = struct_SDL_GPUShader;
-pub const struct_SDL_GPUComputePipeline = opaque {};
-pub const SDL_GPUComputePipeline = struct_SDL_GPUComputePipeline;
-pub const struct_SDL_GPUGraphicsPipeline = opaque {};
-pub const SDL_GPUGraphicsPipeline = struct_SDL_GPUGraphicsPipeline;
-pub const struct_SDL_GPUCommandBuffer = opaque {};
-pub const SDL_GPUCommandBuffer = struct_SDL_GPUCommandBuffer;
-pub const struct_SDL_GPURenderPass = opaque {};
-pub const SDL_GPURenderPass = struct_SDL_GPURenderPass;
-pub const struct_SDL_GPUComputePass = opaque {};
-pub const SDL_GPUComputePass = struct_SDL_GPUComputePass;
-pub const struct_SDL_GPUCopyPass = opaque {};
-pub const SDL_GPUCopyPass = struct_SDL_GPUCopyPass;
-pub const struct_SDL_GPUFence = opaque {};
-pub const SDL_GPUFence = struct_SDL_GPUFence;
-pub const SDL_GPU_PRIMITIVETYPE_TRIANGLELIST: c_int = 0;
-pub const SDL_GPU_PRIMITIVETYPE_TRIANGLESTRIP: c_int = 1;
-pub const SDL_GPU_PRIMITIVETYPE_LINELIST: c_int = 2;
-pub const SDL_GPU_PRIMITIVETYPE_LINESTRIP: c_int = 3;
-pub const SDL_GPU_PRIMITIVETYPE_POINTLIST: c_int = 4;
-pub const enum_SDL_GPUPrimitiveType = c_uint;
-pub const SDL_GPUPrimitiveType = enum_SDL_GPUPrimitiveType;
-pub const SDL_GPU_LOADOP_LOAD: c_int = 0;
-pub const SDL_GPU_LOADOP_CLEAR: c_int = 1;
-pub const SDL_GPU_LOADOP_DONT_CARE: c_int = 2;
-pub const enum_SDL_GPULoadOp = c_uint;
-pub const SDL_GPULoadOp = enum_SDL_GPULoadOp;
-pub const SDL_GPU_STOREOP_STORE: c_int = 0;
-pub const SDL_GPU_STOREOP_DONT_CARE: c_int = 1;
-pub const SDL_GPU_STOREOP_RESOLVE: c_int = 2;
-pub const SDL_GPU_STOREOP_RESOLVE_AND_STORE: c_int = 3;
-pub const enum_SDL_GPUStoreOp = c_uint;
-pub const SDL_GPUStoreOp = enum_SDL_GPUStoreOp;
-pub const SDL_GPU_INDEXELEMENTSIZE_16BIT: c_int = 0;
-pub const SDL_GPU_INDEXELEMENTSIZE_32BIT: c_int = 1;
-pub const enum_SDL_GPUIndexElementSize = c_uint;
-pub const SDL_GPUIndexElementSize = enum_SDL_GPUIndexElementSize;
-pub const SDL_GPU_TEXTUREFORMAT_INVALID: c_int = 0;
-pub const SDL_GPU_TEXTUREFORMAT_A8_UNORM: c_int = 1;
-pub const SDL_GPU_TEXTUREFORMAT_R8_UNORM: c_int = 2;
-pub const SDL_GPU_TEXTUREFORMAT_R8G8_UNORM: c_int = 3;
-pub const SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM: c_int = 4;
-pub const SDL_GPU_TEXTUREFORMAT_R16_UNORM: c_int = 5;
-pub const SDL_GPU_TEXTUREFORMAT_R16G16_UNORM: c_int = 6;
-pub const SDL_GPU_TEXTUREFORMAT_R16G16B16A16_UNORM: c_int = 7;
-pub const SDL_GPU_TEXTUREFORMAT_R10G10B10A2_UNORM: c_int = 8;
-pub const SDL_GPU_TEXTUREFORMAT_B5G6R5_UNORM: c_int = 9;
-pub const SDL_GPU_TEXTUREFORMAT_B5G5R5A1_UNORM: c_int = 10;
-pub const SDL_GPU_TEXTUREFORMAT_B4G4R4A4_UNORM: c_int = 11;
-pub const SDL_GPU_TEXTUREFORMAT_B8G8R8A8_UNORM: c_int = 12;
-pub const SDL_GPU_TEXTUREFORMAT_BC1_RGBA_UNORM: c_int = 13;
-pub const SDL_GPU_TEXTUREFORMAT_BC2_RGBA_UNORM: c_int = 14;
-pub const SDL_GPU_TEXTUREFORMAT_BC3_RGBA_UNORM: c_int = 15;
-pub const SDL_GPU_TEXTUREFORMAT_BC4_R_UNORM: c_int = 16;
-pub const SDL_GPU_TEXTUREFORMAT_BC5_RG_UNORM: c_int = 17;
-pub const SDL_GPU_TEXTUREFORMAT_BC7_RGBA_UNORM: c_int = 18;
-pub const SDL_GPU_TEXTUREFORMAT_BC6H_RGB_FLOAT: c_int = 19;
-pub const SDL_GPU_TEXTUREFORMAT_BC6H_RGB_UFLOAT: c_int = 20;
-pub const SDL_GPU_TEXTUREFORMAT_R8_SNORM: c_int = 21;
-pub const SDL_GPU_TEXTUREFORMAT_R8G8_SNORM: c_int = 22;
-pub const SDL_GPU_TEXTUREFORMAT_R8G8B8A8_SNORM: c_int = 23;
-pub const SDL_GPU_TEXTUREFORMAT_R16_SNORM: c_int = 24;
-pub const SDL_GPU_TEXTUREFORMAT_R16G16_SNORM: c_int = 25;
-pub const SDL_GPU_TEXTUREFORMAT_R16G16B16A16_SNORM: c_int = 26;
-pub const SDL_GPU_TEXTUREFORMAT_R16_FLOAT: c_int = 27;
-pub const SDL_GPU_TEXTUREFORMAT_R16G16_FLOAT: c_int = 28;
-pub const SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT: c_int = 29;
-pub const SDL_GPU_TEXTUREFORMAT_R32_FLOAT: c_int = 30;
-pub const SDL_GPU_TEXTUREFORMAT_R32G32_FLOAT: c_int = 31;
-pub const SDL_GPU_TEXTUREFORMAT_R32G32B32A32_FLOAT: c_int = 32;
-pub const SDL_GPU_TEXTUREFORMAT_R11G11B10_UFLOAT: c_int = 33;
-pub const SDL_GPU_TEXTUREFORMAT_R8_UINT: c_int = 34;
-pub const SDL_GPU_TEXTUREFORMAT_R8G8_UINT: c_int = 35;
-pub const SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UINT: c_int = 36;
-pub const SDL_GPU_TEXTUREFORMAT_R16_UINT: c_int = 37;
-pub const SDL_GPU_TEXTUREFORMAT_R16G16_UINT: c_int = 38;
-pub const SDL_GPU_TEXTUREFORMAT_R16G16B16A16_UINT: c_int = 39;
-pub const SDL_GPU_TEXTUREFORMAT_R32_UINT: c_int = 40;
-pub const SDL_GPU_TEXTUREFORMAT_R32G32_UINT: c_int = 41;
-pub const SDL_GPU_TEXTUREFORMAT_R32G32B32A32_UINT: c_int = 42;
-pub const SDL_GPU_TEXTUREFORMAT_R8_INT: c_int = 43;
-pub const SDL_GPU_TEXTUREFORMAT_R8G8_INT: c_int = 44;
-pub const SDL_GPU_TEXTUREFORMAT_R8G8B8A8_INT: c_int = 45;
-pub const SDL_GPU_TEXTUREFORMAT_R16_INT: c_int = 46;
-pub const SDL_GPU_TEXTUREFORMAT_R16G16_INT: c_int = 47;
-pub const SDL_GPU_TEXTUREFORMAT_R16G16B16A16_INT: c_int = 48;
-pub const SDL_GPU_TEXTUREFORMAT_R32_INT: c_int = 49;
-pub const SDL_GPU_TEXTUREFORMAT_R32G32_INT: c_int = 50;
-pub const SDL_GPU_TEXTUREFORMAT_R32G32B32A32_INT: c_int = 51;
-pub const SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM_SRGB: c_int = 52;
-pub const SDL_GPU_TEXTUREFORMAT_B8G8R8A8_UNORM_SRGB: c_int = 53;
-pub const SDL_GPU_TEXTUREFORMAT_BC1_RGBA_UNORM_SRGB: c_int = 54;
-pub const SDL_GPU_TEXTUREFORMAT_BC2_RGBA_UNORM_SRGB: c_int = 55;
-pub const SDL_GPU_TEXTUREFORMAT_BC3_RGBA_UNORM_SRGB: c_int = 56;
-pub const SDL_GPU_TEXTUREFORMAT_BC7_RGBA_UNORM_SRGB: c_int = 57;
-pub const SDL_GPU_TEXTUREFORMAT_D16_UNORM: c_int = 58;
-pub const SDL_GPU_TEXTUREFORMAT_D24_UNORM: c_int = 59;
-pub const SDL_GPU_TEXTUREFORMAT_D32_FLOAT: c_int = 60;
-pub const SDL_GPU_TEXTUREFORMAT_D24_UNORM_S8_UINT: c_int = 61;
-pub const SDL_GPU_TEXTUREFORMAT_D32_FLOAT_S8_UINT: c_int = 62;
-pub const SDL_GPU_TEXTUREFORMAT_ASTC_4x4_UNORM: c_int = 63;
-pub const SDL_GPU_TEXTUREFORMAT_ASTC_5x4_UNORM: c_int = 64;
-pub const SDL_GPU_TEXTUREFORMAT_ASTC_5x5_UNORM: c_int = 65;
-pub const SDL_GPU_TEXTUREFORMAT_ASTC_6x5_UNORM: c_int = 66;
-pub const SDL_GPU_TEXTUREFORMAT_ASTC_6x6_UNORM: c_int = 67;
-pub const SDL_GPU_TEXTUREFORMAT_ASTC_8x5_UNORM: c_int = 68;
-pub const SDL_GPU_TEXTUREFORMAT_ASTC_8x6_UNORM: c_int = 69;
-pub const SDL_GPU_TEXTUREFORMAT_ASTC_8x8_UNORM: c_int = 70;
-pub const SDL_GPU_TEXTUREFORMAT_ASTC_10x5_UNORM: c_int = 71;
-pub const SDL_GPU_TEXTUREFORMAT_ASTC_10x6_UNORM: c_int = 72;
-pub const SDL_GPU_TEXTUREFORMAT_ASTC_10x8_UNORM: c_int = 73;
-pub const SDL_GPU_TEXTUREFORMAT_ASTC_10x10_UNORM: c_int = 74;
-pub const SDL_GPU_TEXTUREFORMAT_ASTC_12x10_UNORM: c_int = 75;
-pub const SDL_GPU_TEXTUREFORMAT_ASTC_12x12_UNORM: c_int = 76;
-pub const SDL_GPU_TEXTUREFORMAT_ASTC_4x4_UNORM_SRGB: c_int = 77;
-pub const SDL_GPU_TEXTUREFORMAT_ASTC_5x4_UNORM_SRGB: c_int = 78;
-pub const SDL_GPU_TEXTUREFORMAT_ASTC_5x5_UNORM_SRGB: c_int = 79;
-pub const SDL_GPU_TEXTUREFORMAT_ASTC_6x5_UNORM_SRGB: c_int = 80;
-pub const SDL_GPU_TEXTUREFORMAT_ASTC_6x6_UNORM_SRGB: c_int = 81;
-pub const SDL_GPU_TEXTUREFORMAT_ASTC_8x5_UNORM_SRGB: c_int = 82;
-pub const SDL_GPU_TEXTUREFORMAT_ASTC_8x6_UNORM_SRGB: c_int = 83;
-pub const SDL_GPU_TEXTUREFORMAT_ASTC_8x8_UNORM_SRGB: c_int = 84;
-pub const SDL_GPU_TEXTUREFORMAT_ASTC_10x5_UNORM_SRGB: c_int = 85;
-pub const SDL_GPU_TEXTUREFORMAT_ASTC_10x6_UNORM_SRGB: c_int = 86;
-pub const SDL_GPU_TEXTUREFORMAT_ASTC_10x8_UNORM_SRGB: c_int = 87;
-pub const SDL_GPU_TEXTUREFORMAT_ASTC_10x10_UNORM_SRGB: c_int = 88;
-pub const SDL_GPU_TEXTUREFORMAT_ASTC_12x10_UNORM_SRGB: c_int = 89;
-pub const SDL_GPU_TEXTUREFORMAT_ASTC_12x12_UNORM_SRGB: c_int = 90;
-pub const SDL_GPU_TEXTUREFORMAT_ASTC_4x4_FLOAT: c_int = 91;
-pub const SDL_GPU_TEXTUREFORMAT_ASTC_5x4_FLOAT: c_int = 92;
-pub const SDL_GPU_TEXTUREFORMAT_ASTC_5x5_FLOAT: c_int = 93;
-pub const SDL_GPU_TEXTUREFORMAT_ASTC_6x5_FLOAT: c_int = 94;
-pub const SDL_GPU_TEXTUREFORMAT_ASTC_6x6_FLOAT: c_int = 95;
-pub const SDL_GPU_TEXTUREFORMAT_ASTC_8x5_FLOAT: c_int = 96;
-pub const SDL_GPU_TEXTUREFORMAT_ASTC_8x6_FLOAT: c_int = 97;
-pub const SDL_GPU_TEXTUREFORMAT_ASTC_8x8_FLOAT: c_int = 98;
-pub const SDL_GPU_TEXTUREFORMAT_ASTC_10x5_FLOAT: c_int = 99;
-pub const SDL_GPU_TEXTUREFORMAT_ASTC_10x6_FLOAT: c_int = 100;
-pub const SDL_GPU_TEXTUREFORMAT_ASTC_10x8_FLOAT: c_int = 101;
-pub const SDL_GPU_TEXTUREFORMAT_ASTC_10x10_FLOAT: c_int = 102;
-pub const SDL_GPU_TEXTUREFORMAT_ASTC_12x10_FLOAT: c_int = 103;
-pub const SDL_GPU_TEXTUREFORMAT_ASTC_12x12_FLOAT: c_int = 104;
-pub const enum_SDL_GPUTextureFormat = c_uint;
-pub const SDL_GPUTextureFormat = enum_SDL_GPUTextureFormat;
-pub const SDL_GPUTextureUsageFlags = Uint32;
-pub const SDL_GPU_TEXTURETYPE_2D: c_int = 0;
-pub const SDL_GPU_TEXTURETYPE_2D_ARRAY: c_int = 1;
-pub const SDL_GPU_TEXTURETYPE_3D: c_int = 2;
-pub const SDL_GPU_TEXTURETYPE_CUBE: c_int = 3;
-pub const SDL_GPU_TEXTURETYPE_CUBE_ARRAY: c_int = 4;
-pub const enum_SDL_GPUTextureType = c_uint;
-pub const SDL_GPUTextureType = enum_SDL_GPUTextureType;
-pub const SDL_GPU_SAMPLECOUNT_1: c_int = 0;
-pub const SDL_GPU_SAMPLECOUNT_2: c_int = 1;
-pub const SDL_GPU_SAMPLECOUNT_4: c_int = 2;
-pub const SDL_GPU_SAMPLECOUNT_8: c_int = 3;
-pub const enum_SDL_GPUSampleCount = c_uint;
-pub const SDL_GPUSampleCount = enum_SDL_GPUSampleCount;
-pub const SDL_GPU_CUBEMAPFACE_POSITIVEX: c_int = 0;
-pub const SDL_GPU_CUBEMAPFACE_NEGATIVEX: c_int = 1;
-pub const SDL_GPU_CUBEMAPFACE_POSITIVEY: c_int = 2;
-pub const SDL_GPU_CUBEMAPFACE_NEGATIVEY: c_int = 3;
-pub const SDL_GPU_CUBEMAPFACE_POSITIVEZ: c_int = 4;
-pub const SDL_GPU_CUBEMAPFACE_NEGATIVEZ: c_int = 5;
-pub const enum_SDL_GPUCubeMapFace = c_uint;
-pub const SDL_GPUCubeMapFace = enum_SDL_GPUCubeMapFace;
-pub const SDL_GPUBufferUsageFlags = Uint32;
-pub const SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD: c_int = 0;
-pub const SDL_GPU_TRANSFERBUFFERUSAGE_DOWNLOAD: c_int = 1;
-pub const enum_SDL_GPUTransferBufferUsage = c_uint;
-pub const SDL_GPUTransferBufferUsage = enum_SDL_GPUTransferBufferUsage;
-pub const SDL_GPU_SHADERSTAGE_VERTEX: c_int = 0;
-pub const SDL_GPU_SHADERSTAGE_FRAGMENT: c_int = 1;
-pub const enum_SDL_GPUShaderStage = c_uint;
-pub const SDL_GPUShaderStage = enum_SDL_GPUShaderStage;
-pub const SDL_GPUShaderFormat = Uint32;
-pub const SDL_GPU_VERTEXELEMENTFORMAT_INVALID: c_int = 0;
-pub const SDL_GPU_VERTEXELEMENTFORMAT_INT: c_int = 1;
-pub const SDL_GPU_VERTEXELEMENTFORMAT_INT2: c_int = 2;
-pub const SDL_GPU_VERTEXELEMENTFORMAT_INT3: c_int = 3;
-pub const SDL_GPU_VERTEXELEMENTFORMAT_INT4: c_int = 4;
-pub const SDL_GPU_VERTEXELEMENTFORMAT_UINT: c_int = 5;
-pub const SDL_GPU_VERTEXELEMENTFORMAT_UINT2: c_int = 6;
-pub const SDL_GPU_VERTEXELEMENTFORMAT_UINT3: c_int = 7;
-pub const SDL_GPU_VERTEXELEMENTFORMAT_UINT4: c_int = 8;
-pub const SDL_GPU_VERTEXELEMENTFORMAT_FLOAT: c_int = 9;
-pub const SDL_GPU_VERTEXELEMENTFORMAT_FLOAT2: c_int = 10;
-pub const SDL_GPU_VERTEXELEMENTFORMAT_FLOAT3: c_int = 11;
-pub const SDL_GPU_VERTEXELEMENTFORMAT_FLOAT4: c_int = 12;
-pub const SDL_GPU_VERTEXELEMENTFORMAT_BYTE2: c_int = 13;
-pub const SDL_GPU_VERTEXELEMENTFORMAT_BYTE4: c_int = 14;
-pub const SDL_GPU_VERTEXELEMENTFORMAT_UBYTE2: c_int = 15;
-pub const SDL_GPU_VERTEXELEMENTFORMAT_UBYTE4: c_int = 16;
-pub const SDL_GPU_VERTEXELEMENTFORMAT_BYTE2_NORM: c_int = 17;
-pub const SDL_GPU_VERTEXELEMENTFORMAT_BYTE4_NORM: c_int = 18;
-pub const SDL_GPU_VERTEXELEMENTFORMAT_UBYTE2_NORM: c_int = 19;
-pub const SDL_GPU_VERTEXELEMENTFORMAT_UBYTE4_NORM: c_int = 20;
-pub const SDL_GPU_VERTEXELEMENTFORMAT_SHORT2: c_int = 21;
-pub const SDL_GPU_VERTEXELEMENTFORMAT_SHORT4: c_int = 22;
-pub const SDL_GPU_VERTEXELEMENTFORMAT_USHORT2: c_int = 23;
-pub const SDL_GPU_VERTEXELEMENTFORMAT_USHORT4: c_int = 24;
-pub const SDL_GPU_VERTEXELEMENTFORMAT_SHORT2_NORM: c_int = 25;
-pub const SDL_GPU_VERTEXELEMENTFORMAT_SHORT4_NORM: c_int = 26;
-pub const SDL_GPU_VERTEXELEMENTFORMAT_USHORT2_NORM: c_int = 27;
-pub const SDL_GPU_VERTEXELEMENTFORMAT_USHORT4_NORM: c_int = 28;
-pub const SDL_GPU_VERTEXELEMENTFORMAT_HALF2: c_int = 29;
-pub const SDL_GPU_VERTEXELEMENTFORMAT_HALF4: c_int = 30;
-pub const enum_SDL_GPUVertexElementFormat = c_uint;
-pub const SDL_GPUVertexElementFormat = enum_SDL_GPUVertexElementFormat;
-pub const SDL_GPU_VERTEXINPUTRATE_VERTEX: c_int = 0;
-pub const SDL_GPU_VERTEXINPUTRATE_INSTANCE: c_int = 1;
-pub const enum_SDL_GPUVertexInputRate = c_uint;
-pub const SDL_GPUVertexInputRate = enum_SDL_GPUVertexInputRate;
-pub const SDL_GPU_FILLMODE_FILL: c_int = 0;
-pub const SDL_GPU_FILLMODE_LINE: c_int = 1;
-pub const enum_SDL_GPUFillMode = c_uint;
-pub const SDL_GPUFillMode = enum_SDL_GPUFillMode;
-pub const SDL_GPU_CULLMODE_NONE: c_int = 0;
-pub const SDL_GPU_CULLMODE_FRONT: c_int = 1;
-pub const SDL_GPU_CULLMODE_BACK: c_int = 2;
-pub const enum_SDL_GPUCullMode = c_uint;
-pub const SDL_GPUCullMode = enum_SDL_GPUCullMode;
-pub const SDL_GPU_FRONTFACE_COUNTER_CLOCKWISE: c_int = 0;
-pub const SDL_GPU_FRONTFACE_CLOCKWISE: c_int = 1;
-pub const enum_SDL_GPUFrontFace = c_uint;
-pub const SDL_GPUFrontFace = enum_SDL_GPUFrontFace;
-pub const SDL_GPU_COMPAREOP_INVALID: c_int = 0;
-pub const SDL_GPU_COMPAREOP_NEVER: c_int = 1;
-pub const SDL_GPU_COMPAREOP_LESS: c_int = 2;
-pub const SDL_GPU_COMPAREOP_EQUAL: c_int = 3;
-pub const SDL_GPU_COMPAREOP_LESS_OR_EQUAL: c_int = 4;
-pub const SDL_GPU_COMPAREOP_GREATER: c_int = 5;
-pub const SDL_GPU_COMPAREOP_NOT_EQUAL: c_int = 6;
-pub const SDL_GPU_COMPAREOP_GREATER_OR_EQUAL: c_int = 7;
-pub const SDL_GPU_COMPAREOP_ALWAYS: c_int = 8;
-pub const enum_SDL_GPUCompareOp = c_uint;
-pub const SDL_GPUCompareOp = enum_SDL_GPUCompareOp;
-pub const SDL_GPU_STENCILOP_INVALID: c_int = 0;
-pub const SDL_GPU_STENCILOP_KEEP: c_int = 1;
-pub const SDL_GPU_STENCILOP_ZERO: c_int = 2;
-pub const SDL_GPU_STENCILOP_REPLACE: c_int = 3;
-pub const SDL_GPU_STENCILOP_INCREMENT_AND_CLAMP: c_int = 4;
-pub const SDL_GPU_STENCILOP_DECREMENT_AND_CLAMP: c_int = 5;
-pub const SDL_GPU_STENCILOP_INVERT: c_int = 6;
-pub const SDL_GPU_STENCILOP_INCREMENT_AND_WRAP: c_int = 7;
-pub const SDL_GPU_STENCILOP_DECREMENT_AND_WRAP: c_int = 8;
-pub const enum_SDL_GPUStencilOp = c_uint;
-pub const SDL_GPUStencilOp = enum_SDL_GPUStencilOp;
-pub const SDL_GPU_BLENDOP_INVALID: c_int = 0;
-pub const SDL_GPU_BLENDOP_ADD: c_int = 1;
-pub const SDL_GPU_BLENDOP_SUBTRACT: c_int = 2;
-pub const SDL_GPU_BLENDOP_REVERSE_SUBTRACT: c_int = 3;
-pub const SDL_GPU_BLENDOP_MIN: c_int = 4;
-pub const SDL_GPU_BLENDOP_MAX: c_int = 5;
-pub const enum_SDL_GPUBlendOp = c_uint;
-pub const SDL_GPUBlendOp = enum_SDL_GPUBlendOp;
-pub const SDL_GPU_BLENDFACTOR_INVALID: c_int = 0;
-pub const SDL_GPU_BLENDFACTOR_ZERO: c_int = 1;
-pub const SDL_GPU_BLENDFACTOR_ONE: c_int = 2;
-pub const SDL_GPU_BLENDFACTOR_SRC_COLOR: c_int = 3;
-pub const SDL_GPU_BLENDFACTOR_ONE_MINUS_SRC_COLOR: c_int = 4;
-pub const SDL_GPU_BLENDFACTOR_DST_COLOR: c_int = 5;
-pub const SDL_GPU_BLENDFACTOR_ONE_MINUS_DST_COLOR: c_int = 6;
-pub const SDL_GPU_BLENDFACTOR_SRC_ALPHA: c_int = 7;
-pub const SDL_GPU_BLENDFACTOR_ONE_MINUS_SRC_ALPHA: c_int = 8;
-pub const SDL_GPU_BLENDFACTOR_DST_ALPHA: c_int = 9;
-pub const SDL_GPU_BLENDFACTOR_ONE_MINUS_DST_ALPHA: c_int = 10;
-pub const SDL_GPU_BLENDFACTOR_CONSTANT_COLOR: c_int = 11;
-pub const SDL_GPU_BLENDFACTOR_ONE_MINUS_CONSTANT_COLOR: c_int = 12;
-pub const SDL_GPU_BLENDFACTOR_SRC_ALPHA_SATURATE: c_int = 13;
-pub const enum_SDL_GPUBlendFactor = c_uint;
-pub const SDL_GPUBlendFactor = enum_SDL_GPUBlendFactor;
-pub const SDL_GPUColorComponentFlags = Uint8;
-pub const SDL_GPU_FILTER_NEAREST: c_int = 0;
-pub const SDL_GPU_FILTER_LINEAR: c_int = 1;
-pub const enum_SDL_GPUFilter = c_uint;
-pub const SDL_GPUFilter = enum_SDL_GPUFilter;
-pub const SDL_GPU_SAMPLERMIPMAPMODE_NEAREST: c_int = 0;
-pub const SDL_GPU_SAMPLERMIPMAPMODE_LINEAR: c_int = 1;
-pub const enum_SDL_GPUSamplerMipmapMode = c_uint;
-pub const SDL_GPUSamplerMipmapMode = enum_SDL_GPUSamplerMipmapMode;
-pub const SDL_GPU_SAMPLERADDRESSMODE_REPEAT: c_int = 0;
-pub const SDL_GPU_SAMPLERADDRESSMODE_MIRRORED_REPEAT: c_int = 1;
-pub const SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE: c_int = 2;
-pub const enum_SDL_GPUSamplerAddressMode = c_uint;
-pub const SDL_GPUSamplerAddressMode = enum_SDL_GPUSamplerAddressMode;
-pub const SDL_GPU_PRESENTMODE_VSYNC: c_int = 0;
-pub const SDL_GPU_PRESENTMODE_IMMEDIATE: c_int = 1;
-pub const SDL_GPU_PRESENTMODE_MAILBOX: c_int = 2;
-pub const enum_SDL_GPUPresentMode = c_uint;
-pub const SDL_GPUPresentMode = enum_SDL_GPUPresentMode;
-pub const SDL_GPU_SWAPCHAINCOMPOSITION_SDR: c_int = 0;
-pub const SDL_GPU_SWAPCHAINCOMPOSITION_SDR_LINEAR: c_int = 1;
-pub const SDL_GPU_SWAPCHAINCOMPOSITION_HDR_EXTENDED_LINEAR: c_int = 2;
-pub const SDL_GPU_SWAPCHAINCOMPOSITION_HDR10_ST2084: c_int = 3;
-pub const enum_SDL_GPUSwapchainComposition = c_uint;
-pub const SDL_GPUSwapchainComposition = enum_SDL_GPUSwapchainComposition;
-pub const struct_SDL_GPUViewport = extern struct {
-    x: f32 = @import("std").mem.zeroes(f32),
-    y: f32 = @import("std").mem.zeroes(f32),
-    w: f32 = @import("std").mem.zeroes(f32),
-    h: f32 = @import("std").mem.zeroes(f32),
-    min_depth: f32 = @import("std").mem.zeroes(f32),
-    max_depth: f32 = @import("std").mem.zeroes(f32),
-};
-pub const SDL_GPUViewport = struct_SDL_GPUViewport;
-pub const struct_SDL_GPUTextureTransferInfo = extern struct {
-    transfer_buffer: ?*SDL_GPUTransferBuffer = @import("std").mem.zeroes(?*SDL_GPUTransferBuffer),
-    offset: Uint32 = @import("std").mem.zeroes(Uint32),
-    pixels_per_row: Uint32 = @import("std").mem.zeroes(Uint32),
-    rows_per_layer: Uint32 = @import("std").mem.zeroes(Uint32),
-};
-pub const SDL_GPUTextureTransferInfo = struct_SDL_GPUTextureTransferInfo;
-pub const struct_SDL_GPUTransferBufferLocation = extern struct {
-    transfer_buffer: ?*SDL_GPUTransferBuffer = @import("std").mem.zeroes(?*SDL_GPUTransferBuffer),
-    offset: Uint32 = @import("std").mem.zeroes(Uint32),
-};
-pub const SDL_GPUTransferBufferLocation = struct_SDL_GPUTransferBufferLocation;
-pub const struct_SDL_GPUTextureLocation = extern struct {
-    texture: ?*SDL_GPUTexture = @import("std").mem.zeroes(?*SDL_GPUTexture),
-    mip_level: Uint32 = @import("std").mem.zeroes(Uint32),
-    layer: Uint32 = @import("std").mem.zeroes(Uint32),
-    x: Uint32 = @import("std").mem.zeroes(Uint32),
-    y: Uint32 = @import("std").mem.zeroes(Uint32),
-    z: Uint32 = @import("std").mem.zeroes(Uint32),
-};
-pub const SDL_GPUTextureLocation = struct_SDL_GPUTextureLocation;
-pub const struct_SDL_GPUTextureRegion = extern struct {
-    texture: ?*SDL_GPUTexture = @import("std").mem.zeroes(?*SDL_GPUTexture),
-    mip_level: Uint32 = @import("std").mem.zeroes(Uint32),
-    layer: Uint32 = @import("std").mem.zeroes(Uint32),
-    x: Uint32 = @import("std").mem.zeroes(Uint32),
-    y: Uint32 = @import("std").mem.zeroes(Uint32),
-    z: Uint32 = @import("std").mem.zeroes(Uint32),
-    w: Uint32 = @import("std").mem.zeroes(Uint32),
-    h: Uint32 = @import("std").mem.zeroes(Uint32),
-    d: Uint32 = @import("std").mem.zeroes(Uint32),
-};
-pub const SDL_GPUTextureRegion = struct_SDL_GPUTextureRegion;
-pub const struct_SDL_GPUBlitRegion = extern struct {
-    texture: ?*SDL_GPUTexture = @import("std").mem.zeroes(?*SDL_GPUTexture),
-    mip_level: Uint32 = @import("std").mem.zeroes(Uint32),
-    layer_or_depth_plane: Uint32 = @import("std").mem.zeroes(Uint32),
-    x: Uint32 = @import("std").mem.zeroes(Uint32),
-    y: Uint32 = @import("std").mem.zeroes(Uint32),
-    w: Uint32 = @import("std").mem.zeroes(Uint32),
-    h: Uint32 = @import("std").mem.zeroes(Uint32),
-};
-pub const SDL_GPUBlitRegion = struct_SDL_GPUBlitRegion;
-pub const struct_SDL_GPUBufferLocation = extern struct {
-    buffer: ?*SDL_GPUBuffer = @import("std").mem.zeroes(?*SDL_GPUBuffer),
-    offset: Uint32 = @import("std").mem.zeroes(Uint32),
-};
-pub const SDL_GPUBufferLocation = struct_SDL_GPUBufferLocation;
-pub const struct_SDL_GPUBufferRegion = extern struct {
-    buffer: ?*SDL_GPUBuffer = @import("std").mem.zeroes(?*SDL_GPUBuffer),
-    offset: Uint32 = @import("std").mem.zeroes(Uint32),
-    size: Uint32 = @import("std").mem.zeroes(Uint32),
-};
-pub const SDL_GPUBufferRegion = struct_SDL_GPUBufferRegion;
-pub const struct_SDL_GPUIndirectDrawCommand = extern struct {
-    num_vertices: Uint32 = @import("std").mem.zeroes(Uint32),
-    num_instances: Uint32 = @import("std").mem.zeroes(Uint32),
-    first_vertex: Uint32 = @import("std").mem.zeroes(Uint32),
-    first_instance: Uint32 = @import("std").mem.zeroes(Uint32),
-};
-pub const SDL_GPUIndirectDrawCommand = struct_SDL_GPUIndirectDrawCommand;
-pub const struct_SDL_GPUIndexedIndirectDrawCommand = extern struct {
-    num_indices: Uint32 = @import("std").mem.zeroes(Uint32),
-    num_instances: Uint32 = @import("std").mem.zeroes(Uint32),
-    first_index: Uint32 = @import("std").mem.zeroes(Uint32),
-    vertex_offset: Sint32 = @import("std").mem.zeroes(Sint32),
-    first_instance: Uint32 = @import("std").mem.zeroes(Uint32),
-};
-pub const SDL_GPUIndexedIndirectDrawCommand = struct_SDL_GPUIndexedIndirectDrawCommand;
-pub const struct_SDL_GPUIndirectDispatchCommand = extern struct {
-    groupcount_x: Uint32 = @import("std").mem.zeroes(Uint32),
-    groupcount_y: Uint32 = @import("std").mem.zeroes(Uint32),
-    groupcount_z: Uint32 = @import("std").mem.zeroes(Uint32),
-};
-pub const SDL_GPUIndirectDispatchCommand = struct_SDL_GPUIndirectDispatchCommand;
-pub const struct_SDL_GPUSamplerCreateInfo = extern struct {
-    min_filter: SDL_GPUFilter = @import("std").mem.zeroes(SDL_GPUFilter),
-    mag_filter: SDL_GPUFilter = @import("std").mem.zeroes(SDL_GPUFilter),
-    mipmap_mode: SDL_GPUSamplerMipmapMode = @import("std").mem.zeroes(SDL_GPUSamplerMipmapMode),
-    address_mode_u: SDL_GPUSamplerAddressMode = @import("std").mem.zeroes(SDL_GPUSamplerAddressMode),
-    address_mode_v: SDL_GPUSamplerAddressMode = @import("std").mem.zeroes(SDL_GPUSamplerAddressMode),
-    address_mode_w: SDL_GPUSamplerAddressMode = @import("std").mem.zeroes(SDL_GPUSamplerAddressMode),
-    mip_lod_bias: f32 = @import("std").mem.zeroes(f32),
-    max_anisotropy: f32 = @import("std").mem.zeroes(f32),
-    compare_op: SDL_GPUCompareOp = @import("std").mem.zeroes(SDL_GPUCompareOp),
-    min_lod: f32 = @import("std").mem.zeroes(f32),
-    max_lod: f32 = @import("std").mem.zeroes(f32),
-    enable_anisotropy: bool = @import("std").mem.zeroes(bool),
-    enable_compare: bool = @import("std").mem.zeroes(bool),
-    padding1: Uint8 = @import("std").mem.zeroes(Uint8),
-    padding2: Uint8 = @import("std").mem.zeroes(Uint8),
-    props: SDL_PropertiesID = @import("std").mem.zeroes(SDL_PropertiesID),
-};
-pub const SDL_GPUSamplerCreateInfo = struct_SDL_GPUSamplerCreateInfo;
-pub const struct_SDL_GPUVertexBufferDescription = extern struct {
-    slot: Uint32 = @import("std").mem.zeroes(Uint32),
-    pitch: Uint32 = @import("std").mem.zeroes(Uint32),
-    input_rate: SDL_GPUVertexInputRate = @import("std").mem.zeroes(SDL_GPUVertexInputRate),
-    instance_step_rate: Uint32 = @import("std").mem.zeroes(Uint32),
-};
-pub const SDL_GPUVertexBufferDescription = struct_SDL_GPUVertexBufferDescription;
-pub const struct_SDL_GPUVertexAttribute = extern struct {
-    location: Uint32 = @import("std").mem.zeroes(Uint32),
-    buffer_slot: Uint32 = @import("std").mem.zeroes(Uint32),
-    format: SDL_GPUVertexElementFormat = @import("std").mem.zeroes(SDL_GPUVertexElementFormat),
-    offset: Uint32 = @import("std").mem.zeroes(Uint32),
-};
-pub const SDL_GPUVertexAttribute = struct_SDL_GPUVertexAttribute;
-pub const struct_SDL_GPUVertexInputState = extern struct {
-    vertex_buffer_descriptions: [*c]const SDL_GPUVertexBufferDescription = @import("std").mem.zeroes([*c]const SDL_GPUVertexBufferDescription),
-    num_vertex_buffers: Uint32 = @import("std").mem.zeroes(Uint32),
-    vertex_attributes: [*c]const SDL_GPUVertexAttribute = @import("std").mem.zeroes([*c]const SDL_GPUVertexAttribute),
-    num_vertex_attributes: Uint32 = @import("std").mem.zeroes(Uint32),
-};
-pub const SDL_GPUVertexInputState = struct_SDL_GPUVertexInputState;
-pub const struct_SDL_GPUStencilOpState = extern struct {
-    fail_op: SDL_GPUStencilOp = @import("std").mem.zeroes(SDL_GPUStencilOp),
-    pass_op: SDL_GPUStencilOp = @import("std").mem.zeroes(SDL_GPUStencilOp),
-    depth_fail_op: SDL_GPUStencilOp = @import("std").mem.zeroes(SDL_GPUStencilOp),
-    compare_op: SDL_GPUCompareOp = @import("std").mem.zeroes(SDL_GPUCompareOp),
-};
-pub const SDL_GPUStencilOpState = struct_SDL_GPUStencilOpState;
-pub const struct_SDL_GPUColorTargetBlendState = extern struct {
-    src_color_blendfactor: SDL_GPUBlendFactor = @import("std").mem.zeroes(SDL_GPUBlendFactor),
-    dst_color_blendfactor: SDL_GPUBlendFactor = @import("std").mem.zeroes(SDL_GPUBlendFactor),
-    color_blend_op: SDL_GPUBlendOp = @import("std").mem.zeroes(SDL_GPUBlendOp),
-    src_alpha_blendfactor: SDL_GPUBlendFactor = @import("std").mem.zeroes(SDL_GPUBlendFactor),
-    dst_alpha_blendfactor: SDL_GPUBlendFactor = @import("std").mem.zeroes(SDL_GPUBlendFactor),
-    alpha_blend_op: SDL_GPUBlendOp = @import("std").mem.zeroes(SDL_GPUBlendOp),
-    color_write_mask: SDL_GPUColorComponentFlags = @import("std").mem.zeroes(SDL_GPUColorComponentFlags),
-    enable_blend: bool = @import("std").mem.zeroes(bool),
-    enable_color_write_mask: bool = @import("std").mem.zeroes(bool),
-    padding1: Uint8 = @import("std").mem.zeroes(Uint8),
-    padding2: Uint8 = @import("std").mem.zeroes(Uint8),
-};
-pub const SDL_GPUColorTargetBlendState = struct_SDL_GPUColorTargetBlendState;
-pub const struct_SDL_GPUShaderCreateInfo = extern struct {
-    code_size: usize = @import("std").mem.zeroes(usize),
-    code: [*c]const Uint8 = @import("std").mem.zeroes([*c]const Uint8),
-    entrypoint: [*c]const u8 = @import("std").mem.zeroes([*c]const u8),
-    format: SDL_GPUShaderFormat = @import("std").mem.zeroes(SDL_GPUShaderFormat),
-    stage: SDL_GPUShaderStage = @import("std").mem.zeroes(SDL_GPUShaderStage),
-    num_samplers: Uint32 = @import("std").mem.zeroes(Uint32),
-    num_storage_textures: Uint32 = @import("std").mem.zeroes(Uint32),
-    num_storage_buffers: Uint32 = @import("std").mem.zeroes(Uint32),
-    num_uniform_buffers: Uint32 = @import("std").mem.zeroes(Uint32),
-    props: SDL_PropertiesID = @import("std").mem.zeroes(SDL_PropertiesID),
-};
-pub const SDL_GPUShaderCreateInfo = struct_SDL_GPUShaderCreateInfo;
-pub const struct_SDL_GPUTextureCreateInfo = extern struct {
-    type: SDL_GPUTextureType = @import("std").mem.zeroes(SDL_GPUTextureType),
-    format: SDL_GPUTextureFormat = @import("std").mem.zeroes(SDL_GPUTextureFormat),
-    usage: SDL_GPUTextureUsageFlags = @import("std").mem.zeroes(SDL_GPUTextureUsageFlags),
-    width: Uint32 = @import("std").mem.zeroes(Uint32),
-    height: Uint32 = @import("std").mem.zeroes(Uint32),
-    layer_count_or_depth: Uint32 = @import("std").mem.zeroes(Uint32),
-    num_levels: Uint32 = @import("std").mem.zeroes(Uint32),
-    sample_count: SDL_GPUSampleCount = @import("std").mem.zeroes(SDL_GPUSampleCount),
-    props: SDL_PropertiesID = @import("std").mem.zeroes(SDL_PropertiesID),
-};
-pub const SDL_GPUTextureCreateInfo = struct_SDL_GPUTextureCreateInfo;
-pub const struct_SDL_GPUBufferCreateInfo = extern struct {
-    usage: SDL_GPUBufferUsageFlags = @import("std").mem.zeroes(SDL_GPUBufferUsageFlags),
-    size: Uint32 = @import("std").mem.zeroes(Uint32),
-    props: SDL_PropertiesID = @import("std").mem.zeroes(SDL_PropertiesID),
-};
-pub const SDL_GPUBufferCreateInfo = struct_SDL_GPUBufferCreateInfo;
-pub const struct_SDL_GPUTransferBufferCreateInfo = extern struct {
-    usage: SDL_GPUTransferBufferUsage = @import("std").mem.zeroes(SDL_GPUTransferBufferUsage),
-    size: Uint32 = @import("std").mem.zeroes(Uint32),
-    props: SDL_PropertiesID = @import("std").mem.zeroes(SDL_PropertiesID),
-};
-pub const SDL_GPUTransferBufferCreateInfo = struct_SDL_GPUTransferBufferCreateInfo;
-pub const struct_SDL_GPURasterizerState = extern struct {
-    fill_mode: SDL_GPUFillMode = @import("std").mem.zeroes(SDL_GPUFillMode),
-    cull_mode: SDL_GPUCullMode = @import("std").mem.zeroes(SDL_GPUCullMode),
-    front_face: SDL_GPUFrontFace = @import("std").mem.zeroes(SDL_GPUFrontFace),
-    depth_bias_constant_factor: f32 = @import("std").mem.zeroes(f32),
-    depth_bias_clamp: f32 = @import("std").mem.zeroes(f32),
-    depth_bias_slope_factor: f32 = @import("std").mem.zeroes(f32),
-    enable_depth_bias: bool = @import("std").mem.zeroes(bool),
-    enable_depth_clip: bool = @import("std").mem.zeroes(bool),
-    padding1: Uint8 = @import("std").mem.zeroes(Uint8),
-    padding2: Uint8 = @import("std").mem.zeroes(Uint8),
-};
-pub const SDL_GPURasterizerState = struct_SDL_GPURasterizerState;
-pub const struct_SDL_GPUMultisampleState = extern struct {
-    sample_count: SDL_GPUSampleCount = @import("std").mem.zeroes(SDL_GPUSampleCount),
-    sample_mask: Uint32 = @import("std").mem.zeroes(Uint32),
-    enable_mask: bool = @import("std").mem.zeroes(bool),
-    padding1: Uint8 = @import("std").mem.zeroes(Uint8),
-    padding2: Uint8 = @import("std").mem.zeroes(Uint8),
-    padding3: Uint8 = @import("std").mem.zeroes(Uint8),
-};
-pub const SDL_GPUMultisampleState = struct_SDL_GPUMultisampleState;
-pub const struct_SDL_GPUDepthStencilState = extern struct {
-    compare_op: SDL_GPUCompareOp = @import("std").mem.zeroes(SDL_GPUCompareOp),
-    back_stencil_state: SDL_GPUStencilOpState = @import("std").mem.zeroes(SDL_GPUStencilOpState),
-    front_stencil_state: SDL_GPUStencilOpState = @import("std").mem.zeroes(SDL_GPUStencilOpState),
-    compare_mask: Uint8 = @import("std").mem.zeroes(Uint8),
-    write_mask: Uint8 = @import("std").mem.zeroes(Uint8),
-    enable_depth_test: bool = @import("std").mem.zeroes(bool),
-    enable_depth_write: bool = @import("std").mem.zeroes(bool),
-    enable_stencil_test: bool = @import("std").mem.zeroes(bool),
-    padding1: Uint8 = @import("std").mem.zeroes(Uint8),
-    padding2: Uint8 = @import("std").mem.zeroes(Uint8),
-    padding3: Uint8 = @import("std").mem.zeroes(Uint8),
-};
-pub const SDL_GPUDepthStencilState = struct_SDL_GPUDepthStencilState;
-pub const struct_SDL_GPUColorTargetDescription = extern struct {
-    format: SDL_GPUTextureFormat = @import("std").mem.zeroes(SDL_GPUTextureFormat),
-    blend_state: SDL_GPUColorTargetBlendState = @import("std").mem.zeroes(SDL_GPUColorTargetBlendState),
-};
-pub const SDL_GPUColorTargetDescription = struct_SDL_GPUColorTargetDescription;
-pub const struct_SDL_GPUGraphicsPipelineTargetInfo = extern struct {
-    color_target_descriptions: [*c]const SDL_GPUColorTargetDescription = @import("std").mem.zeroes([*c]const SDL_GPUColorTargetDescription),
-    num_color_targets: Uint32 = @import("std").mem.zeroes(Uint32),
-    depth_stencil_format: SDL_GPUTextureFormat = @import("std").mem.zeroes(SDL_GPUTextureFormat),
-    has_depth_stencil_target: bool = @import("std").mem.zeroes(bool),
-    padding1: Uint8 = @import("std").mem.zeroes(Uint8),
-    padding2: Uint8 = @import("std").mem.zeroes(Uint8),
-    padding3: Uint8 = @import("std").mem.zeroes(Uint8),
-};
-pub const SDL_GPUGraphicsPipelineTargetInfo = struct_SDL_GPUGraphicsPipelineTargetInfo;
-pub const struct_SDL_GPUGraphicsPipelineCreateInfo = extern struct {
-    vertex_shader: ?*SDL_GPUShader = @import("std").mem.zeroes(?*SDL_GPUShader),
-    fragment_shader: ?*SDL_GPUShader = @import("std").mem.zeroes(?*SDL_GPUShader),
-    vertex_input_state: SDL_GPUVertexInputState = @import("std").mem.zeroes(SDL_GPUVertexInputState),
-    primitive_type: SDL_GPUPrimitiveType = @import("std").mem.zeroes(SDL_GPUPrimitiveType),
-    rasterizer_state: SDL_GPURasterizerState = @import("std").mem.zeroes(SDL_GPURasterizerState),
-    multisample_state: SDL_GPUMultisampleState = @import("std").mem.zeroes(SDL_GPUMultisampleState),
-    depth_stencil_state: SDL_GPUDepthStencilState = @import("std").mem.zeroes(SDL_GPUDepthStencilState),
-    target_info: SDL_GPUGraphicsPipelineTargetInfo = @import("std").mem.zeroes(SDL_GPUGraphicsPipelineTargetInfo),
-    props: SDL_PropertiesID = @import("std").mem.zeroes(SDL_PropertiesID),
-};
-pub const SDL_GPUGraphicsPipelineCreateInfo = struct_SDL_GPUGraphicsPipelineCreateInfo;
-pub const struct_SDL_GPUComputePipelineCreateInfo = extern struct {
-    code_size: usize = @import("std").mem.zeroes(usize),
-    code: [*c]const Uint8 = @import("std").mem.zeroes([*c]const Uint8),
-    entrypoint: [*c]const u8 = @import("std").mem.zeroes([*c]const u8),
-    format: SDL_GPUShaderFormat = @import("std").mem.zeroes(SDL_GPUShaderFormat),
-    num_samplers: Uint32 = @import("std").mem.zeroes(Uint32),
-    num_readonly_storage_textures: Uint32 = @import("std").mem.zeroes(Uint32),
-    num_readonly_storage_buffers: Uint32 = @import("std").mem.zeroes(Uint32),
-    num_readwrite_storage_textures: Uint32 = @import("std").mem.zeroes(Uint32),
-    num_readwrite_storage_buffers: Uint32 = @import("std").mem.zeroes(Uint32),
-    num_uniform_buffers: Uint32 = @import("std").mem.zeroes(Uint32),
-    threadcount_x: Uint32 = @import("std").mem.zeroes(Uint32),
-    threadcount_y: Uint32 = @import("std").mem.zeroes(Uint32),
-    threadcount_z: Uint32 = @import("std").mem.zeroes(Uint32),
-    props: SDL_PropertiesID = @import("std").mem.zeroes(SDL_PropertiesID),
-};
-pub const SDL_GPUComputePipelineCreateInfo = struct_SDL_GPUComputePipelineCreateInfo;
-pub const struct_SDL_GPUColorTargetInfo = extern struct {
-    texture: ?*SDL_GPUTexture = @import("std").mem.zeroes(?*SDL_GPUTexture),
-    mip_level: Uint32 = @import("std").mem.zeroes(Uint32),
-    layer_or_depth_plane: Uint32 = @import("std").mem.zeroes(Uint32),
-    clear_color: SDL_FColor = @import("std").mem.zeroes(SDL_FColor),
-    load_op: SDL_GPULoadOp = @import("std").mem.zeroes(SDL_GPULoadOp),
-    store_op: SDL_GPUStoreOp = @import("std").mem.zeroes(SDL_GPUStoreOp),
-    resolve_texture: ?*SDL_GPUTexture = @import("std").mem.zeroes(?*SDL_GPUTexture),
-    resolve_mip_level: Uint32 = @import("std").mem.zeroes(Uint32),
-    resolve_layer: Uint32 = @import("std").mem.zeroes(Uint32),
-    cycle: bool = @import("std").mem.zeroes(bool),
-    cycle_resolve_texture: bool = @import("std").mem.zeroes(bool),
-    padding1: Uint8 = @import("std").mem.zeroes(Uint8),
-    padding2: Uint8 = @import("std").mem.zeroes(Uint8),
-};
-pub const SDL_GPUColorTargetInfo = struct_SDL_GPUColorTargetInfo;
-pub const struct_SDL_GPUDepthStencilTargetInfo = extern struct {
-    texture: ?*SDL_GPUTexture = @import("std").mem.zeroes(?*SDL_GPUTexture),
-    clear_depth: f32 = @import("std").mem.zeroes(f32),
-    load_op: SDL_GPULoadOp = @import("std").mem.zeroes(SDL_GPULoadOp),
-    store_op: SDL_GPUStoreOp = @import("std").mem.zeroes(SDL_GPUStoreOp),
-    stencil_load_op: SDL_GPULoadOp = @import("std").mem.zeroes(SDL_GPULoadOp),
-    stencil_store_op: SDL_GPUStoreOp = @import("std").mem.zeroes(SDL_GPUStoreOp),
-    cycle: bool = @import("std").mem.zeroes(bool),
-    clear_stencil: Uint8 = @import("std").mem.zeroes(Uint8),
-    padding1: Uint8 = @import("std").mem.zeroes(Uint8),
-    padding2: Uint8 = @import("std").mem.zeroes(Uint8),
-};
-pub const SDL_GPUDepthStencilTargetInfo = struct_SDL_GPUDepthStencilTargetInfo;
-pub const struct_SDL_GPUBlitInfo = extern struct {
-    source: SDL_GPUBlitRegion = @import("std").mem.zeroes(SDL_GPUBlitRegion),
-    destination: SDL_GPUBlitRegion = @import("std").mem.zeroes(SDL_GPUBlitRegion),
-    load_op: SDL_GPULoadOp = @import("std").mem.zeroes(SDL_GPULoadOp),
-    clear_color: SDL_FColor = @import("std").mem.zeroes(SDL_FColor),
-    flip_mode: SDL_FlipMode = @import("std").mem.zeroes(SDL_FlipMode),
-    filter: SDL_GPUFilter = @import("std").mem.zeroes(SDL_GPUFilter),
-    cycle: bool = @import("std").mem.zeroes(bool),
-    padding1: Uint8 = @import("std").mem.zeroes(Uint8),
-    padding2: Uint8 = @import("std").mem.zeroes(Uint8),
-    padding3: Uint8 = @import("std").mem.zeroes(Uint8),
-};
-pub const SDL_GPUBlitInfo = struct_SDL_GPUBlitInfo;
-pub const struct_SDL_GPUBufferBinding = extern struct {
-    buffer: ?*SDL_GPUBuffer = @import("std").mem.zeroes(?*SDL_GPUBuffer),
-    offset: Uint32 = @import("std").mem.zeroes(Uint32),
-};
-pub const SDL_GPUBufferBinding = struct_SDL_GPUBufferBinding;
-pub const struct_SDL_GPUTextureSamplerBinding = extern struct {
-    texture: ?*SDL_GPUTexture = @import("std").mem.zeroes(?*SDL_GPUTexture),
-    sampler: ?*SDL_GPUSampler = @import("std").mem.zeroes(?*SDL_GPUSampler),
-};
-pub const SDL_GPUTextureSamplerBinding = struct_SDL_GPUTextureSamplerBinding;
-pub const struct_SDL_GPUStorageBufferReadWriteBinding = extern struct {
-    buffer: ?*SDL_GPUBuffer = @import("std").mem.zeroes(?*SDL_GPUBuffer),
-    cycle: bool = @import("std").mem.zeroes(bool),
-    padding1: Uint8 = @import("std").mem.zeroes(Uint8),
-    padding2: Uint8 = @import("std").mem.zeroes(Uint8),
-    padding3: Uint8 = @import("std").mem.zeroes(Uint8),
-};
-pub const SDL_GPUStorageBufferReadWriteBinding = struct_SDL_GPUStorageBufferReadWriteBinding;
-pub const struct_SDL_GPUStorageTextureReadWriteBinding = extern struct {
-    texture: ?*SDL_GPUTexture = @import("std").mem.zeroes(?*SDL_GPUTexture),
-    mip_level: Uint32 = @import("std").mem.zeroes(Uint32),
-    layer: Uint32 = @import("std").mem.zeroes(Uint32),
-    cycle: bool = @import("std").mem.zeroes(bool),
-    padding1: Uint8 = @import("std").mem.zeroes(Uint8),
-    padding2: Uint8 = @import("std").mem.zeroes(Uint8),
-    padding3: Uint8 = @import("std").mem.zeroes(Uint8),
-};
-pub const SDL_GPUStorageTextureReadWriteBinding = struct_SDL_GPUStorageTextureReadWriteBinding;
-pub extern fn SDL_GPUSupportsShaderFormats(format_flags: SDL_GPUShaderFormat, name: [*c]const u8) bool;
-pub extern fn SDL_GPUSupportsProperties(props: SDL_PropertiesID) bool;
-pub extern fn SDL_CreateGPUDevice(format_flags: SDL_GPUShaderFormat, debug_mode: bool, name: [*c]const u8) ?*SDL_GPUDevice;
-pub extern fn SDL_CreateGPUDeviceWithProperties(props: SDL_PropertiesID) ?*SDL_GPUDevice;
-pub extern fn SDL_DestroyGPUDevice(device: ?*SDL_GPUDevice) void;
-pub extern fn SDL_GetNumGPUDrivers() c_int;
-pub extern fn SDL_GetGPUDriver(index: c_int) [*c]const u8;
-pub extern fn SDL_GetGPUDeviceDriver(device: ?*SDL_GPUDevice) [*c]const u8;
-pub extern fn SDL_GetGPUShaderFormats(device: ?*SDL_GPUDevice) SDL_GPUShaderFormat;
-pub extern fn SDL_CreateGPUComputePipeline(device: ?*SDL_GPUDevice, createinfo: [*c]const SDL_GPUComputePipelineCreateInfo) ?*SDL_GPUComputePipeline;
-pub extern fn SDL_CreateGPUGraphicsPipeline(device: ?*SDL_GPUDevice, createinfo: [*c]const SDL_GPUGraphicsPipelineCreateInfo) ?*SDL_GPUGraphicsPipeline;
-pub extern fn SDL_CreateGPUSampler(device: ?*SDL_GPUDevice, createinfo: [*c]const SDL_GPUSamplerCreateInfo) ?*SDL_GPUSampler;
-pub extern fn SDL_CreateGPUShader(device: ?*SDL_GPUDevice, createinfo: [*c]const SDL_GPUShaderCreateInfo) ?*SDL_GPUShader;
-pub extern fn SDL_CreateGPUTexture(device: ?*SDL_GPUDevice, createinfo: [*c]const SDL_GPUTextureCreateInfo) ?*SDL_GPUTexture;
-pub extern fn SDL_CreateGPUBuffer(device: ?*SDL_GPUDevice, createinfo: [*c]const SDL_GPUBufferCreateInfo) ?*SDL_GPUBuffer;
-pub extern fn SDL_CreateGPUTransferBuffer(device: ?*SDL_GPUDevice, createinfo: [*c]const SDL_GPUTransferBufferCreateInfo) ?*SDL_GPUTransferBuffer;
-pub extern fn SDL_SetGPUBufferName(device: ?*SDL_GPUDevice, buffer: ?*SDL_GPUBuffer, text: [*c]const u8) void;
-pub extern fn SDL_SetGPUTextureName(device: ?*SDL_GPUDevice, texture: ?*SDL_GPUTexture, text: [*c]const u8) void;
-pub extern fn SDL_InsertGPUDebugLabel(command_buffer: ?*SDL_GPUCommandBuffer, text: [*c]const u8) void;
-pub extern fn SDL_PushGPUDebugGroup(command_buffer: ?*SDL_GPUCommandBuffer, name: [*c]const u8) void;
-pub extern fn SDL_PopGPUDebugGroup(command_buffer: ?*SDL_GPUCommandBuffer) void;
-pub extern fn SDL_ReleaseGPUTexture(device: ?*SDL_GPUDevice, texture: ?*SDL_GPUTexture) void;
-pub extern fn SDL_ReleaseGPUSampler(device: ?*SDL_GPUDevice, sampler: ?*SDL_GPUSampler) void;
-pub extern fn SDL_ReleaseGPUBuffer(device: ?*SDL_GPUDevice, buffer: ?*SDL_GPUBuffer) void;
-pub extern fn SDL_ReleaseGPUTransferBuffer(device: ?*SDL_GPUDevice, transfer_buffer: ?*SDL_GPUTransferBuffer) void;
-pub extern fn SDL_ReleaseGPUComputePipeline(device: ?*SDL_GPUDevice, compute_pipeline: ?*SDL_GPUComputePipeline) void;
-pub extern fn SDL_ReleaseGPUShader(device: ?*SDL_GPUDevice, shader: ?*SDL_GPUShader) void;
-pub extern fn SDL_ReleaseGPUGraphicsPipeline(device: ?*SDL_GPUDevice, graphics_pipeline: ?*SDL_GPUGraphicsPipeline) void;
-pub extern fn SDL_AcquireGPUCommandBuffer(device: ?*SDL_GPUDevice) ?*SDL_GPUCommandBuffer;
-pub extern fn SDL_PushGPUVertexUniformData(command_buffer: ?*SDL_GPUCommandBuffer, slot_index: Uint32, data: ?*const anyopaque, length: Uint32) void;
-pub extern fn SDL_PushGPUFragmentUniformData(command_buffer: ?*SDL_GPUCommandBuffer, slot_index: Uint32, data: ?*const anyopaque, length: Uint32) void;
-pub extern fn SDL_PushGPUComputeUniformData(command_buffer: ?*SDL_GPUCommandBuffer, slot_index: Uint32, data: ?*const anyopaque, length: Uint32) void;
-pub extern fn SDL_BeginGPURenderPass(command_buffer: ?*SDL_GPUCommandBuffer, color_target_infos: [*c]const SDL_GPUColorTargetInfo, num_color_targets: Uint32, depth_stencil_target_info: [*c]const SDL_GPUDepthStencilTargetInfo) ?*SDL_GPURenderPass;
-pub extern fn SDL_BindGPUGraphicsPipeline(render_pass: ?*SDL_GPURenderPass, graphics_pipeline: ?*SDL_GPUGraphicsPipeline) void;
-pub extern fn SDL_SetGPUViewport(render_pass: ?*SDL_GPURenderPass, viewport: [*c]const SDL_GPUViewport) void;
-pub extern fn SDL_SetGPUScissor(render_pass: ?*SDL_GPURenderPass, scissor: [*c]const SDL_Rect) void;
-pub extern fn SDL_SetGPUBlendConstants(render_pass: ?*SDL_GPURenderPass, blend_constants: SDL_FColor) void;
-pub extern fn SDL_SetGPUStencilReference(render_pass: ?*SDL_GPURenderPass, reference: Uint8) void;
-pub extern fn SDL_BindGPUVertexBuffers(render_pass: ?*SDL_GPURenderPass, first_slot: Uint32, bindings: [*c]const SDL_GPUBufferBinding, num_bindings: Uint32) void;
-pub extern fn SDL_BindGPUIndexBuffer(render_pass: ?*SDL_GPURenderPass, binding: [*c]const SDL_GPUBufferBinding, index_element_size: SDL_GPUIndexElementSize) void;
-pub extern fn SDL_BindGPUVertexSamplers(render_pass: ?*SDL_GPURenderPass, first_slot: Uint32, texture_sampler_bindings: [*c]const SDL_GPUTextureSamplerBinding, num_bindings: Uint32) void;
-pub extern fn SDL_BindGPUVertexStorageTextures(render_pass: ?*SDL_GPURenderPass, first_slot: Uint32, storage_textures: [*c]const ?*SDL_GPUTexture, num_bindings: Uint32) void;
-pub extern fn SDL_BindGPUVertexStorageBuffers(render_pass: ?*SDL_GPURenderPass, first_slot: Uint32, storage_buffers: [*c]const ?*SDL_GPUBuffer, num_bindings: Uint32) void;
-pub extern fn SDL_BindGPUFragmentSamplers(render_pass: ?*SDL_GPURenderPass, first_slot: Uint32, texture_sampler_bindings: [*c]const SDL_GPUTextureSamplerBinding, num_bindings: Uint32) void;
-pub extern fn SDL_BindGPUFragmentStorageTextures(render_pass: ?*SDL_GPURenderPass, first_slot: Uint32, storage_textures: [*c]const ?*SDL_GPUTexture, num_bindings: Uint32) void;
-pub extern fn SDL_BindGPUFragmentStorageBuffers(render_pass: ?*SDL_GPURenderPass, first_slot: Uint32, storage_buffers: [*c]const ?*SDL_GPUBuffer, num_bindings: Uint32) void;
-pub extern fn SDL_DrawGPUIndexedPrimitives(render_pass: ?*SDL_GPURenderPass, num_indices: Uint32, num_instances: Uint32, first_index: Uint32, vertex_offset: Sint32, first_instance: Uint32) void;
-pub extern fn SDL_DrawGPUPrimitives(render_pass: ?*SDL_GPURenderPass, num_vertices: Uint32, num_instances: Uint32, first_vertex: Uint32, first_instance: Uint32) void;
-pub extern fn SDL_DrawGPUPrimitivesIndirect(render_pass: ?*SDL_GPURenderPass, buffer: ?*SDL_GPUBuffer, offset: Uint32, draw_count: Uint32) void;
-pub extern fn SDL_DrawGPUIndexedPrimitivesIndirect(render_pass: ?*SDL_GPURenderPass, buffer: ?*SDL_GPUBuffer, offset: Uint32, draw_count: Uint32) void;
-pub extern fn SDL_EndGPURenderPass(render_pass: ?*SDL_GPURenderPass) void;
-pub extern fn SDL_BeginGPUComputePass(command_buffer: ?*SDL_GPUCommandBuffer, storage_texture_bindings: [*c]const SDL_GPUStorageTextureReadWriteBinding, num_storage_texture_bindings: Uint32, storage_buffer_bindings: [*c]const SDL_GPUStorageBufferReadWriteBinding, num_storage_buffer_bindings: Uint32) ?*SDL_GPUComputePass;
-pub extern fn SDL_BindGPUComputePipeline(compute_pass: ?*SDL_GPUComputePass, compute_pipeline: ?*SDL_GPUComputePipeline) void;
-pub extern fn SDL_BindGPUComputeSamplers(compute_pass: ?*SDL_GPUComputePass, first_slot: Uint32, texture_sampler_bindings: [*c]const SDL_GPUTextureSamplerBinding, num_bindings: Uint32) void;
-pub extern fn SDL_BindGPUComputeStorageTextures(compute_pass: ?*SDL_GPUComputePass, first_slot: Uint32, storage_textures: [*c]const ?*SDL_GPUTexture, num_bindings: Uint32) void;
-pub extern fn SDL_BindGPUComputeStorageBuffers(compute_pass: ?*SDL_GPUComputePass, first_slot: Uint32, storage_buffers: [*c]const ?*SDL_GPUBuffer, num_bindings: Uint32) void;
-pub extern fn SDL_DispatchGPUCompute(compute_pass: ?*SDL_GPUComputePass, groupcount_x: Uint32, groupcount_y: Uint32, groupcount_z: Uint32) void;
-pub extern fn SDL_DispatchGPUComputeIndirect(compute_pass: ?*SDL_GPUComputePass, buffer: ?*SDL_GPUBuffer, offset: Uint32) void;
-pub extern fn SDL_EndGPUComputePass(compute_pass: ?*SDL_GPUComputePass) void;
-pub extern fn SDL_MapGPUTransferBuffer(device: ?*SDL_GPUDevice, transfer_buffer: ?*SDL_GPUTransferBuffer, cycle: bool) ?*anyopaque;
-pub extern fn SDL_UnmapGPUTransferBuffer(device: ?*SDL_GPUDevice, transfer_buffer: ?*SDL_GPUTransferBuffer) void;
-pub extern fn SDL_BeginGPUCopyPass(command_buffer: ?*SDL_GPUCommandBuffer) ?*SDL_GPUCopyPass;
-pub extern fn SDL_UploadToGPUTexture(copy_pass: ?*SDL_GPUCopyPass, source: [*c]const SDL_GPUTextureTransferInfo, destination: [*c]const SDL_GPUTextureRegion, cycle: bool) void;
-pub extern fn SDL_UploadToGPUBuffer(copy_pass: ?*SDL_GPUCopyPass, source: [*c]const SDL_GPUTransferBufferLocation, destination: [*c]const SDL_GPUBufferRegion, cycle: bool) void;
-pub extern fn SDL_CopyGPUTextureToTexture(copy_pass: ?*SDL_GPUCopyPass, source: [*c]const SDL_GPUTextureLocation, destination: [*c]const SDL_GPUTextureLocation, w: Uint32, h: Uint32, d: Uint32, cycle: bool) void;
-pub extern fn SDL_CopyGPUBufferToBuffer(copy_pass: ?*SDL_GPUCopyPass, source: [*c]const SDL_GPUBufferLocation, destination: [*c]const SDL_GPUBufferLocation, size: Uint32, cycle: bool) void;
-pub extern fn SDL_DownloadFromGPUTexture(copy_pass: ?*SDL_GPUCopyPass, source: [*c]const SDL_GPUTextureRegion, destination: [*c]const SDL_GPUTextureTransferInfo) void;
-pub extern fn SDL_DownloadFromGPUBuffer(copy_pass: ?*SDL_GPUCopyPass, source: [*c]const SDL_GPUBufferRegion, destination: [*c]const SDL_GPUTransferBufferLocation) void;
-pub extern fn SDL_EndGPUCopyPass(copy_pass: ?*SDL_GPUCopyPass) void;
-pub extern fn SDL_GenerateMipmapsForGPUTexture(command_buffer: ?*SDL_GPUCommandBuffer, texture: ?*SDL_GPUTexture) void;
-pub extern fn SDL_BlitGPUTexture(command_buffer: ?*SDL_GPUCommandBuffer, info: [*c]const SDL_GPUBlitInfo) void;
-pub extern fn SDL_WindowSupportsGPUSwapchainComposition(device: ?*SDL_GPUDevice, window: ?*SDL_Window, swapchain_composition: SDL_GPUSwapchainComposition) bool;
-pub extern fn SDL_WindowSupportsGPUPresentMode(device: ?*SDL_GPUDevice, window: ?*SDL_Window, present_mode: SDL_GPUPresentMode) bool;
-pub extern fn SDL_ClaimWindowForGPUDevice(device: ?*SDL_GPUDevice, window: ?*SDL_Window) bool;
-pub extern fn SDL_ReleaseWindowFromGPUDevice(device: ?*SDL_GPUDevice, window: ?*SDL_Window) void;
-pub extern fn SDL_SetGPUSwapchainParameters(device: ?*SDL_GPUDevice, window: ?*SDL_Window, swapchain_composition: SDL_GPUSwapchainComposition, present_mode: SDL_GPUPresentMode) bool;
-pub extern fn SDL_SetGPUAllowedFramesInFlight(device: ?*SDL_GPUDevice, allowed_frames_in_flight: Uint32) bool;
-pub extern fn SDL_GetGPUSwapchainTextureFormat(device: ?*SDL_GPUDevice, window: ?*SDL_Window) SDL_GPUTextureFormat;
-pub extern fn SDL_AcquireGPUSwapchainTexture(command_buffer: ?*SDL_GPUCommandBuffer, window: ?*SDL_Window, swapchain_texture: [*c]?*SDL_GPUTexture, swapchain_texture_width: [*c]Uint32, swapchain_texture_height: [*c]Uint32) bool;
-pub extern fn SDL_WaitForGPUSwapchain(device: ?*SDL_GPUDevice, window: ?*SDL_Window) bool;
-pub extern fn SDL_WaitAndAcquireGPUSwapchainTexture(command_buffer: ?*SDL_GPUCommandBuffer, window: ?*SDL_Window, swapchain_texture: [*c]?*SDL_GPUTexture, swapchain_texture_width: [*c]Uint32, swapchain_texture_height: [*c]Uint32) bool;
-pub extern fn SDL_SubmitGPUCommandBuffer(command_buffer: ?*SDL_GPUCommandBuffer) bool;
-pub extern fn SDL_SubmitGPUCommandBufferAndAcquireFence(command_buffer: ?*SDL_GPUCommandBuffer) ?*SDL_GPUFence;
-pub extern fn SDL_CancelGPUCommandBuffer(command_buffer: ?*SDL_GPUCommandBuffer) bool;
-pub extern fn SDL_WaitForGPUIdle(device: ?*SDL_GPUDevice) bool;
-pub extern fn SDL_WaitForGPUFences(device: ?*SDL_GPUDevice, wait_all: bool, fences: [*c]const ?*SDL_GPUFence, num_fences: Uint32) bool;
-pub extern fn SDL_QueryGPUFence(device: ?*SDL_GPUDevice, fence: ?*SDL_GPUFence) bool;
-pub extern fn SDL_ReleaseGPUFence(device: ?*SDL_GPUDevice, fence: ?*SDL_GPUFence) void;
-pub extern fn SDL_GPUTextureFormatTexelBlockSize(format: SDL_GPUTextureFormat) Uint32;
-pub extern fn SDL_GPUTextureSupportsFormat(device: ?*SDL_GPUDevice, format: SDL_GPUTextureFormat, @"type": SDL_GPUTextureType, usage: SDL_GPUTextureUsageFlags) bool;
-pub extern fn SDL_GPUTextureSupportsSampleCount(device: ?*SDL_GPUDevice, format: SDL_GPUTextureFormat, sample_count: SDL_GPUSampleCount) bool;
-pub extern fn SDL_CalculateGPUTextureFormatSize(format: SDL_GPUTextureFormat, width: Uint32, height: Uint32, depth_or_layer_count: Uint32) Uint32;
-pub const struct_SDL_Haptic = opaque {};
-pub const SDL_Haptic = struct_SDL_Haptic;
-pub const struct_SDL_HapticDirection = extern struct {
-    type: Uint8 = @import("std").mem.zeroes(Uint8),
-    dir: [3]Sint32 = @import("std").mem.zeroes([3]Sint32),
-};
-pub const SDL_HapticDirection = struct_SDL_HapticDirection;
-pub const struct_SDL_HapticConstant = extern struct {
-    type: Uint16 = @import("std").mem.zeroes(Uint16),
-    direction: SDL_HapticDirection = @import("std").mem.zeroes(SDL_HapticDirection),
-    length: Uint32 = @import("std").mem.zeroes(Uint32),
-    delay: Uint16 = @import("std").mem.zeroes(Uint16),
-    button: Uint16 = @import("std").mem.zeroes(Uint16),
-    interval: Uint16 = @import("std").mem.zeroes(Uint16),
-    level: Sint16 = @import("std").mem.zeroes(Sint16),
-    attack_length: Uint16 = @import("std").mem.zeroes(Uint16),
-    attack_level: Uint16 = @import("std").mem.zeroes(Uint16),
-    fade_length: Uint16 = @import("std").mem.zeroes(Uint16),
-    fade_level: Uint16 = @import("std").mem.zeroes(Uint16),
-};
-pub const SDL_HapticConstant = struct_SDL_HapticConstant;
-pub const struct_SDL_HapticPeriodic = extern struct {
-    type: Uint16 = @import("std").mem.zeroes(Uint16),
-    direction: SDL_HapticDirection = @import("std").mem.zeroes(SDL_HapticDirection),
-    length: Uint32 = @import("std").mem.zeroes(Uint32),
-    delay: Uint16 = @import("std").mem.zeroes(Uint16),
-    button: Uint16 = @import("std").mem.zeroes(Uint16),
-    interval: Uint16 = @import("std").mem.zeroes(Uint16),
-    period: Uint16 = @import("std").mem.zeroes(Uint16),
-    magnitude: Sint16 = @import("std").mem.zeroes(Sint16),
-    offset: Sint16 = @import("std").mem.zeroes(Sint16),
-    phase: Uint16 = @import("std").mem.zeroes(Uint16),
-    attack_length: Uint16 = @import("std").mem.zeroes(Uint16),
-    attack_level: Uint16 = @import("std").mem.zeroes(Uint16),
-    fade_length: Uint16 = @import("std").mem.zeroes(Uint16),
-    fade_level: Uint16 = @import("std").mem.zeroes(Uint16),
-};
-pub const SDL_HapticPeriodic = struct_SDL_HapticPeriodic;
-pub const struct_SDL_HapticCondition = extern struct {
-    type: Uint16 = @import("std").mem.zeroes(Uint16),
-    direction: SDL_HapticDirection = @import("std").mem.zeroes(SDL_HapticDirection),
-    length: Uint32 = @import("std").mem.zeroes(Uint32),
-    delay: Uint16 = @import("std").mem.zeroes(Uint16),
-    button: Uint16 = @import("std").mem.zeroes(Uint16),
-    interval: Uint16 = @import("std").mem.zeroes(Uint16),
-    right_sat: [3]Uint16 = @import("std").mem.zeroes([3]Uint16),
-    left_sat: [3]Uint16 = @import("std").mem.zeroes([3]Uint16),
-    right_coeff: [3]Sint16 = @import("std").mem.zeroes([3]Sint16),
-    left_coeff: [3]Sint16 = @import("std").mem.zeroes([3]Sint16),
-    deadband: [3]Uint16 = @import("std").mem.zeroes([3]Uint16),
-    center: [3]Sint16 = @import("std").mem.zeroes([3]Sint16),
-};
-pub const SDL_HapticCondition = struct_SDL_HapticCondition;
-pub const struct_SDL_HapticRamp = extern struct {
-    type: Uint16 = @import("std").mem.zeroes(Uint16),
-    direction: SDL_HapticDirection = @import("std").mem.zeroes(SDL_HapticDirection),
-    length: Uint32 = @import("std").mem.zeroes(Uint32),
-    delay: Uint16 = @import("std").mem.zeroes(Uint16),
-    button: Uint16 = @import("std").mem.zeroes(Uint16),
-    interval: Uint16 = @import("std").mem.zeroes(Uint16),
-    start: Sint16 = @import("std").mem.zeroes(Sint16),
-    end: Sint16 = @import("std").mem.zeroes(Sint16),
-    attack_length: Uint16 = @import("std").mem.zeroes(Uint16),
-    attack_level: Uint16 = @import("std").mem.zeroes(Uint16),
-    fade_length: Uint16 = @import("std").mem.zeroes(Uint16),
-    fade_level: Uint16 = @import("std").mem.zeroes(Uint16),
-};
-pub const SDL_HapticRamp = struct_SDL_HapticRamp;
-pub const struct_SDL_HapticLeftRight = extern struct {
-    type: Uint16 = @import("std").mem.zeroes(Uint16),
-    length: Uint32 = @import("std").mem.zeroes(Uint32),
-    large_magnitude: Uint16 = @import("std").mem.zeroes(Uint16),
-    small_magnitude: Uint16 = @import("std").mem.zeroes(Uint16),
-};
-pub const SDL_HapticLeftRight = struct_SDL_HapticLeftRight;
-pub const struct_SDL_HapticCustom = extern struct {
-    type: Uint16 = @import("std").mem.zeroes(Uint16),
-    direction: SDL_HapticDirection = @import("std").mem.zeroes(SDL_HapticDirection),
-    length: Uint32 = @import("std").mem.zeroes(Uint32),
-    delay: Uint16 = @import("std").mem.zeroes(Uint16),
-    button: Uint16 = @import("std").mem.zeroes(Uint16),
-    interval: Uint16 = @import("std").mem.zeroes(Uint16),
-    channels: Uint8 = @import("std").mem.zeroes(Uint8),
-    period: Uint16 = @import("std").mem.zeroes(Uint16),
-    samples: Uint16 = @import("std").mem.zeroes(Uint16),
-    data: [*c]Uint16 = @import("std").mem.zeroes([*c]Uint16),
-    attack_length: Uint16 = @import("std").mem.zeroes(Uint16),
-    attack_level: Uint16 = @import("std").mem.zeroes(Uint16),
-    fade_length: Uint16 = @import("std").mem.zeroes(Uint16),
-    fade_level: Uint16 = @import("std").mem.zeroes(Uint16),
-};
-pub const SDL_HapticCustom = struct_SDL_HapticCustom;
-pub const union_SDL_HapticEffect = extern union {
-    type: Uint16,
-    constant: SDL_HapticConstant,
-    periodic: SDL_HapticPeriodic,
-    condition: SDL_HapticCondition,
-    ramp: SDL_HapticRamp,
-    leftright: SDL_HapticLeftRight,
-    custom: SDL_HapticCustom,
-};
-pub const SDL_HapticEffect = union_SDL_HapticEffect;
-pub const SDL_HapticID = Uint32;
-pub extern fn SDL_GetHaptics(count: [*c]c_int) [*c]SDL_HapticID;
-pub extern fn SDL_GetHapticNameForID(instance_id: SDL_HapticID) [*c]const u8;
-pub extern fn SDL_OpenHaptic(instance_id: SDL_HapticID) ?*SDL_Haptic;
-pub extern fn SDL_GetHapticFromID(instance_id: SDL_HapticID) ?*SDL_Haptic;
-pub extern fn SDL_GetHapticID(haptic: ?*SDL_Haptic) SDL_HapticID;
-pub extern fn SDL_GetHapticName(haptic: ?*SDL_Haptic) [*c]const u8;
-pub extern fn SDL_IsMouseHaptic() bool;
-pub extern fn SDL_OpenHapticFromMouse() ?*SDL_Haptic;
-pub extern fn SDL_IsJoystickHaptic(joystick: ?*SDL_Joystick) bool;
-pub extern fn SDL_OpenHapticFromJoystick(joystick: ?*SDL_Joystick) ?*SDL_Haptic;
-pub extern fn SDL_CloseHaptic(haptic: ?*SDL_Haptic) void;
-pub extern fn SDL_GetMaxHapticEffects(haptic: ?*SDL_Haptic) c_int;
-pub extern fn SDL_GetMaxHapticEffectsPlaying(haptic: ?*SDL_Haptic) c_int;
-pub extern fn SDL_GetHapticFeatures(haptic: ?*SDL_Haptic) Uint32;
-pub extern fn SDL_GetNumHapticAxes(haptic: ?*SDL_Haptic) c_int;
-pub extern fn SDL_HapticEffectSupported(haptic: ?*SDL_Haptic, effect: [*c]const SDL_HapticEffect) bool;
-pub extern fn SDL_CreateHapticEffect(haptic: ?*SDL_Haptic, effect: [*c]const SDL_HapticEffect) c_int;
-pub extern fn SDL_UpdateHapticEffect(haptic: ?*SDL_Haptic, effect: c_int, data: [*c]const SDL_HapticEffect) bool;
-pub extern fn SDL_RunHapticEffect(haptic: ?*SDL_Haptic, effect: c_int, iterations: Uint32) bool;
-pub extern fn SDL_StopHapticEffect(haptic: ?*SDL_Haptic, effect: c_int) bool;
-pub extern fn SDL_DestroyHapticEffect(haptic: ?*SDL_Haptic, effect: c_int) void;
-pub extern fn SDL_GetHapticEffectStatus(haptic: ?*SDL_Haptic, effect: c_int) bool;
-pub extern fn SDL_SetHapticGain(haptic: ?*SDL_Haptic, gain: c_int) bool;
-pub extern fn SDL_SetHapticAutocenter(haptic: ?*SDL_Haptic, autocenter: c_int) bool;
-pub extern fn SDL_PauseHaptic(haptic: ?*SDL_Haptic) bool;
-pub extern fn SDL_ResumeHaptic(haptic: ?*SDL_Haptic) bool;
-pub extern fn SDL_StopHapticEffects(haptic: ?*SDL_Haptic) bool;
-pub extern fn SDL_HapticRumbleSupported(haptic: ?*SDL_Haptic) bool;
-pub extern fn SDL_InitHapticRumble(haptic: ?*SDL_Haptic) bool;
-pub extern fn SDL_PlayHapticRumble(haptic: ?*SDL_Haptic, strength: f32, length: Uint32) bool;
-pub extern fn SDL_StopHapticRumble(haptic: ?*SDL_Haptic) bool;
-pub const struct_SDL_hid_device = opaque {};
-pub const SDL_hid_device = struct_SDL_hid_device;
-pub const SDL_HID_API_BUS_UNKNOWN: c_int = 0;
-pub const SDL_HID_API_BUS_USB: c_int = 1;
-pub const SDL_HID_API_BUS_BLUETOOTH: c_int = 2;
-pub const SDL_HID_API_BUS_I2C: c_int = 3;
-pub const SDL_HID_API_BUS_SPI: c_int = 4;
-pub const enum_SDL_hid_bus_type = c_uint;
-pub const SDL_hid_bus_type = enum_SDL_hid_bus_type;
-pub const struct_SDL_hid_device_info = extern struct {
-    path: [*c]u8 = @import("std").mem.zeroes([*c]u8),
-    vendor_id: c_ushort = @import("std").mem.zeroes(c_ushort),
-    product_id: c_ushort = @import("std").mem.zeroes(c_ushort),
-    serial_number: [*c]wchar_t = @import("std").mem.zeroes([*c]wchar_t),
-    release_number: c_ushort = @import("std").mem.zeroes(c_ushort),
-    manufacturer_string: [*c]wchar_t = @import("std").mem.zeroes([*c]wchar_t),
-    product_string: [*c]wchar_t = @import("std").mem.zeroes([*c]wchar_t),
-    usage_page: c_ushort = @import("std").mem.zeroes(c_ushort),
-    usage: c_ushort = @import("std").mem.zeroes(c_ushort),
-    interface_number: c_int = @import("std").mem.zeroes(c_int),
-    interface_class: c_int = @import("std").mem.zeroes(c_int),
-    interface_subclass: c_int = @import("std").mem.zeroes(c_int),
-    interface_protocol: c_int = @import("std").mem.zeroes(c_int),
-    bus_type: SDL_hid_bus_type = @import("std").mem.zeroes(SDL_hid_bus_type),
-    next: [*c]struct_SDL_hid_device_info = @import("std").mem.zeroes([*c]struct_SDL_hid_device_info),
-};
-pub const SDL_hid_device_info = struct_SDL_hid_device_info;
-pub extern fn SDL_hid_init() c_int;
-pub extern fn SDL_hid_exit() c_int;
-pub extern fn SDL_hid_device_change_count() Uint32;
-pub extern fn SDL_hid_enumerate(vendor_id: c_ushort, product_id: c_ushort) [*c]SDL_hid_device_info;
-pub extern fn SDL_hid_free_enumeration(devs: [*c]SDL_hid_device_info) void;
-pub extern fn SDL_hid_open(vendor_id: c_ushort, product_id: c_ushort, serial_number: [*c]const wchar_t) ?*SDL_hid_device;
-pub extern fn SDL_hid_open_path(path: [*c]const u8) ?*SDL_hid_device;
-pub extern fn SDL_hid_write(dev: ?*SDL_hid_device, data: [*c]const u8, length: usize) c_int;
-pub extern fn SDL_hid_read_timeout(dev: ?*SDL_hid_device, data: [*c]u8, length: usize, milliseconds: c_int) c_int;
-pub extern fn SDL_hid_read(dev: ?*SDL_hid_device, data: [*c]u8, length: usize) c_int;
-pub extern fn SDL_hid_set_nonblocking(dev: ?*SDL_hid_device, nonblock: c_int) c_int;
-pub extern fn SDL_hid_send_feature_report(dev: ?*SDL_hid_device, data: [*c]const u8, length: usize) c_int;
-pub extern fn SDL_hid_get_feature_report(dev: ?*SDL_hid_device, data: [*c]u8, length: usize) c_int;
-pub extern fn SDL_hid_get_input_report(dev: ?*SDL_hid_device, data: [*c]u8, length: usize) c_int;
-pub extern fn SDL_hid_close(dev: ?*SDL_hid_device) c_int;
-pub extern fn SDL_hid_get_manufacturer_string(dev: ?*SDL_hid_device, string: [*c]wchar_t, maxlen: usize) c_int;
-pub extern fn SDL_hid_get_product_string(dev: ?*SDL_hid_device, string: [*c]wchar_t, maxlen: usize) c_int;
-pub extern fn SDL_hid_get_serial_number_string(dev: ?*SDL_hid_device, string: [*c]wchar_t, maxlen: usize) c_int;
-pub extern fn SDL_hid_get_indexed_string(dev: ?*SDL_hid_device, string_index: c_int, string: [*c]wchar_t, maxlen: usize) c_int;
-pub extern fn SDL_hid_get_device_info(dev: ?*SDL_hid_device) [*c]SDL_hid_device_info;
-pub extern fn SDL_hid_get_report_descriptor(dev: ?*SDL_hid_device, buf: [*c]u8, buf_size: usize) c_int;
-pub extern fn SDL_hid_ble_scan(active: bool) void;
-pub const SDL_HINT_DEFAULT: c_int = 0;
-pub const SDL_HINT_NORMAL: c_int = 1;
-pub const SDL_HINT_OVERRIDE: c_int = 2;
-pub const enum_SDL_HintPriority = c_uint;
-pub const SDL_HintPriority = enum_SDL_HintPriority;
-pub extern fn SDL_SetHintWithPriority(name: [*c]const u8, value: [*c]const u8, priority: SDL_HintPriority) bool;
-pub extern fn SDL_SetHint(name: [*c]const u8, value: [*c]const u8) bool;
-pub extern fn SDL_ResetHint(name: [*c]const u8) bool;
-pub extern fn SDL_ResetHints() void;
-pub extern fn SDL_GetHint(name: [*c]const u8) [*c]const u8;
-pub extern fn SDL_GetHintBoolean(name: [*c]const u8, default_value: bool) bool;
-pub const SDL_HintCallback = ?*const fn (?*anyopaque, [*c]const u8, [*c]const u8, [*c]const u8) callconv(.c) void;
-pub extern fn SDL_AddHintCallback(name: [*c]const u8, callback: SDL_HintCallback, userdata: ?*anyopaque) bool;
-pub extern fn SDL_RemoveHintCallback(name: [*c]const u8, callback: SDL_HintCallback, userdata: ?*anyopaque) void;
-pub const SDL_InitFlags = Uint32;
-pub const SDL_APP_CONTINUE: c_int = 0;
-pub const SDL_APP_SUCCESS: c_int = 1;
-pub const SDL_APP_FAILURE: c_int = 2;
-pub const enum_SDL_AppResult = c_uint;
-pub const SDL_AppResult = enum_SDL_AppResult;
-pub const SDL_AppInit_func = ?*const fn ([*c]?*anyopaque, c_int, [*c][*c]u8) callconv(.c) SDL_AppResult;
-pub const SDL_AppIterate_func = ?*const fn (?*anyopaque) callconv(.c) SDL_AppResult;
-pub const SDL_AppEvent_func = ?*const fn (?*anyopaque, [*c]SDL_Event) callconv(.c) SDL_AppResult;
-pub const SDL_AppQuit_func = ?*const fn (?*anyopaque, SDL_AppResult) callconv(.c) void;
-pub extern fn SDL_Init(flags: SDL_InitFlags) bool;
-pub extern fn SDL_InitSubSystem(flags: SDL_InitFlags) bool;
-pub extern fn SDL_QuitSubSystem(flags: SDL_InitFlags) void;
-pub extern fn SDL_WasInit(flags: SDL_InitFlags) SDL_InitFlags;
-pub extern fn SDL_Quit() void;
-pub extern fn SDL_IsMainThread() bool;
-pub const SDL_MainThreadCallback = ?*const fn (?*anyopaque) callconv(.c) void;
-pub extern fn SDL_RunOnMainThread(callback: SDL_MainThreadCallback, userdata: ?*anyopaque, wait_complete: bool) bool;
-pub extern fn SDL_SetAppMetadata(appname: [*c]const u8, appversion: [*c]const u8, appidentifier: [*c]const u8) bool;
-pub extern fn SDL_SetAppMetadataProperty(name: [*c]const u8, value: [*c]const u8) bool;
-pub extern fn SDL_GetAppMetadataProperty(name: [*c]const u8) [*c]const u8;
-pub const struct_SDL_SharedObject = opaque {};
-pub const SDL_SharedObject = struct_SDL_SharedObject;
-pub extern fn SDL_LoadObject(sofile: [*c]const u8) ?*SDL_SharedObject;
-pub extern fn SDL_LoadFunction(handle: ?*SDL_SharedObject, name: [*c]const u8) SDL_FunctionPointer;
-pub extern fn SDL_UnloadObject(handle: ?*SDL_SharedObject) void;
-pub const struct_SDL_Locale = extern struct {
-    language: [*c]const u8 = @import("std").mem.zeroes([*c]const u8),
-    country: [*c]const u8 = @import("std").mem.zeroes([*c]const u8),
-};
-pub const SDL_Locale = struct_SDL_Locale;
-pub extern fn SDL_GetPreferredLocales(count: [*c]c_int) [*c][*c]SDL_Locale;
-pub const SDL_LOG_CATEGORY_APPLICATION: c_int = 0;
-pub const SDL_LOG_CATEGORY_ERROR: c_int = 1;
-pub const SDL_LOG_CATEGORY_ASSERT: c_int = 2;
-pub const SDL_LOG_CATEGORY_SYSTEM: c_int = 3;
-pub const SDL_LOG_CATEGORY_AUDIO: c_int = 4;
-pub const SDL_LOG_CATEGORY_VIDEO: c_int = 5;
-pub const SDL_LOG_CATEGORY_RENDER: c_int = 6;
-pub const SDL_LOG_CATEGORY_INPUT: c_int = 7;
-pub const SDL_LOG_CATEGORY_TEST: c_int = 8;
-pub const SDL_LOG_CATEGORY_GPU: c_int = 9;
-pub const SDL_LOG_CATEGORY_RESERVED2: c_int = 10;
-pub const SDL_LOG_CATEGORY_RESERVED3: c_int = 11;
-pub const SDL_LOG_CATEGORY_RESERVED4: c_int = 12;
-pub const SDL_LOG_CATEGORY_RESERVED5: c_int = 13;
-pub const SDL_LOG_CATEGORY_RESERVED6: c_int = 14;
-pub const SDL_LOG_CATEGORY_RESERVED7: c_int = 15;
-pub const SDL_LOG_CATEGORY_RESERVED8: c_int = 16;
-pub const SDL_LOG_CATEGORY_RESERVED9: c_int = 17;
-pub const SDL_LOG_CATEGORY_RESERVED10: c_int = 18;
-pub const SDL_LOG_CATEGORY_CUSTOM: c_int = 19;
-pub const enum_SDL_LogCategory = c_uint;
-pub const SDL_LogCategory = enum_SDL_LogCategory;
-pub const SDL_LOG_PRIORITY_INVALID: c_int = 0;
-pub const SDL_LOG_PRIORITY_TRACE: c_int = 1;
-pub const SDL_LOG_PRIORITY_VERBOSE: c_int = 2;
-pub const SDL_LOG_PRIORITY_DEBUG: c_int = 3;
-pub const SDL_LOG_PRIORITY_INFO: c_int = 4;
-pub const SDL_LOG_PRIORITY_WARN: c_int = 5;
-pub const SDL_LOG_PRIORITY_ERROR: c_int = 6;
-pub const SDL_LOG_PRIORITY_CRITICAL: c_int = 7;
-pub const SDL_LOG_PRIORITY_COUNT: c_int = 8;
-pub const enum_SDL_LogPriority = c_uint;
-pub const SDL_LogPriority = enum_SDL_LogPriority;
-pub extern fn SDL_SetLogPriorities(priority: SDL_LogPriority) void;
-pub extern fn SDL_SetLogPriority(category: c_int, priority: SDL_LogPriority) void;
-pub extern fn SDL_GetLogPriority(category: c_int) SDL_LogPriority;
-pub extern fn SDL_ResetLogPriorities() void;
-pub extern fn SDL_SetLogPriorityPrefix(priority: SDL_LogPriority, prefix: [*c]const u8) bool;
-pub extern fn SDL_Log(fmt: [*c]const u8, ...) void;
-pub extern fn SDL_LogTrace(category: c_int, fmt: [*c]const u8, ...) void;
-pub extern fn SDL_LogVerbose(category: c_int, fmt: [*c]const u8, ...) void;
-pub extern fn SDL_LogDebug(category: c_int, fmt: [*c]const u8, ...) void;
-pub extern fn SDL_LogInfo(category: c_int, fmt: [*c]const u8, ...) void;
-pub extern fn SDL_LogWarn(category: c_int, fmt: [*c]const u8, ...) void;
-pub extern fn SDL_LogError(category: c_int, fmt: [*c]const u8, ...) void;
-pub extern fn SDL_LogCritical(category: c_int, fmt: [*c]const u8, ...) void;
-pub extern fn SDL_LogMessage(category: c_int, priority: SDL_LogPriority, fmt: [*c]const u8, ...) void;
-pub extern fn SDL_LogMessageV(category: c_int, priority: SDL_LogPriority, fmt: [*c]const u8, ap: [*c]struct___va_list_tag_1) void;
-pub const SDL_LogOutputFunction = ?*const fn (?*anyopaque, c_int, SDL_LogPriority, [*c]const u8) callconv(.c) void;
-pub extern fn SDL_GetDefaultLogOutputFunction() SDL_LogOutputFunction;
-pub extern fn SDL_GetLogOutputFunction(callback: [*c]SDL_LogOutputFunction, userdata: [*c]?*anyopaque) void;
-pub extern fn SDL_SetLogOutputFunction(callback: SDL_LogOutputFunction, userdata: ?*anyopaque) void;
-pub const SDL_MessageBoxFlags = Uint32;
-pub const SDL_MessageBoxButtonFlags = Uint32;
-pub const struct_SDL_MessageBoxButtonData = extern struct {
-    flags: SDL_MessageBoxButtonFlags = @import("std").mem.zeroes(SDL_MessageBoxButtonFlags),
-    buttonID: c_int = @import("std").mem.zeroes(c_int),
-    text: [*c]const u8 = @import("std").mem.zeroes([*c]const u8),
-};
-pub const SDL_MessageBoxButtonData = struct_SDL_MessageBoxButtonData;
-pub const struct_SDL_MessageBoxColor = extern struct {
-    r: Uint8 = @import("std").mem.zeroes(Uint8),
-    g: Uint8 = @import("std").mem.zeroes(Uint8),
-    b: Uint8 = @import("std").mem.zeroes(Uint8),
-};
-pub const SDL_MessageBoxColor = struct_SDL_MessageBoxColor;
-pub const SDL_MESSAGEBOX_COLOR_BACKGROUND: c_int = 0;
-pub const SDL_MESSAGEBOX_COLOR_TEXT: c_int = 1;
-pub const SDL_MESSAGEBOX_COLOR_BUTTON_BORDER: c_int = 2;
-pub const SDL_MESSAGEBOX_COLOR_BUTTON_BACKGROUND: c_int = 3;
-pub const SDL_MESSAGEBOX_COLOR_BUTTON_SELECTED: c_int = 4;
-pub const SDL_MESSAGEBOX_COLOR_COUNT: c_int = 5;
-pub const enum_SDL_MessageBoxColorType = c_uint;
-pub const SDL_MessageBoxColorType = enum_SDL_MessageBoxColorType;
-pub const struct_SDL_MessageBoxColorScheme = extern struct {
-    colors: [5]SDL_MessageBoxColor = @import("std").mem.zeroes([5]SDL_MessageBoxColor),
-};
-pub const SDL_MessageBoxColorScheme = struct_SDL_MessageBoxColorScheme;
-pub const struct_SDL_MessageBoxData = extern struct {
-    flags: SDL_MessageBoxFlags = @import("std").mem.zeroes(SDL_MessageBoxFlags),
-    window: ?*SDL_Window = @import("std").mem.zeroes(?*SDL_Window),
-    title: [*c]const u8 = @import("std").mem.zeroes([*c]const u8),
-    message: [*c]const u8 = @import("std").mem.zeroes([*c]const u8),
-    numbuttons: c_int = @import("std").mem.zeroes(c_int),
-    buttons: [*c]const SDL_MessageBoxButtonData = @import("std").mem.zeroes([*c]const SDL_MessageBoxButtonData),
-    colorScheme: [*c]const SDL_MessageBoxColorScheme = @import("std").mem.zeroes([*c]const SDL_MessageBoxColorScheme),
-};
-pub const SDL_MessageBoxData = struct_SDL_MessageBoxData;
-pub extern fn SDL_ShowMessageBox(messageboxdata: [*c]const SDL_MessageBoxData, buttonid: [*c]c_int) bool;
-pub extern fn SDL_ShowSimpleMessageBox(flags: SDL_MessageBoxFlags, title: [*c]const u8, message: [*c]const u8, window: ?*SDL_Window) bool;
-pub const SDL_MetalView = ?*anyopaque;
-pub extern fn SDL_Metal_CreateView(window: ?*SDL_Window) SDL_MetalView;
-pub extern fn SDL_Metal_DestroyView(view: SDL_MetalView) void;
-pub extern fn SDL_Metal_GetLayer(view: SDL_MetalView) ?*anyopaque;
-pub extern fn SDL_OpenURL(url: [*c]const u8) bool;
-pub extern fn SDL_GetPlatform() [*c]const u8;
-pub const struct_SDL_Process = opaque {};
-pub const SDL_Process = struct_SDL_Process;
-pub extern fn SDL_CreateProcess(args: [*c]const [*c]const u8, pipe_stdio: bool) ?*SDL_Process;
-pub const SDL_PROCESS_STDIO_INHERITED: c_int = 0;
-pub const SDL_PROCESS_STDIO_NULL: c_int = 1;
-pub const SDL_PROCESS_STDIO_APP: c_int = 2;
-pub const SDL_PROCESS_STDIO_REDIRECT: c_int = 3;
-pub const enum_SDL_ProcessIO = c_uint;
-pub const SDL_ProcessIO = enum_SDL_ProcessIO;
-pub extern fn SDL_CreateProcessWithProperties(props: SDL_PropertiesID) ?*SDL_Process;
-pub extern fn SDL_GetProcessProperties(process: ?*SDL_Process) SDL_PropertiesID;
-pub extern fn SDL_ReadProcess(process: ?*SDL_Process, datasize: [*c]usize, exitcode: [*c]c_int) ?*anyopaque;
-pub extern fn SDL_GetProcessInput(process: ?*SDL_Process) ?*SDL_IOStream;
-pub extern fn SDL_GetProcessOutput(process: ?*SDL_Process) ?*SDL_IOStream;
-pub extern fn SDL_KillProcess(process: ?*SDL_Process, force: bool) bool;
-pub extern fn SDL_WaitProcess(process: ?*SDL_Process, block: bool, exitcode: [*c]c_int) bool;
-pub extern fn SDL_DestroyProcess(process: ?*SDL_Process) void;
-pub const struct_SDL_Vertex = extern struct {
-    position: SDL_FPoint = @import("std").mem.zeroes(SDL_FPoint),
-    color: SDL_FColor = @import("std").mem.zeroes(SDL_FColor),
-    tex_coord: SDL_FPoint = @import("std").mem.zeroes(SDL_FPoint),
-};
-pub const SDL_Vertex = struct_SDL_Vertex;
-pub const SDL_TEXTUREACCESS_STATIC: c_int = 0;
-pub const SDL_TEXTUREACCESS_STREAMING: c_int = 1;
-pub const SDL_TEXTUREACCESS_TARGET: c_int = 2;
-pub const enum_SDL_TextureAccess = c_uint;
-pub const SDL_TextureAccess = enum_SDL_TextureAccess;
-pub const SDL_LOGICAL_PRESENTATION_DISABLED: c_int = 0;
-pub const SDL_LOGICAL_PRESENTATION_STRETCH: c_int = 1;
-pub const SDL_LOGICAL_PRESENTATION_LETTERBOX: c_int = 2;
-pub const SDL_LOGICAL_PRESENTATION_OVERSCAN: c_int = 3;
-pub const SDL_LOGICAL_PRESENTATION_INTEGER_SCALE: c_int = 4;
-pub const enum_SDL_RendererLogicalPresentation = c_uint;
-pub const SDL_RendererLogicalPresentation = enum_SDL_RendererLogicalPresentation;
-pub const struct_SDL_Renderer = opaque {};
-pub const SDL_Renderer = struct_SDL_Renderer;
-pub const struct_SDL_Texture = extern struct {
-    format: SDL_PixelFormat = @import("std").mem.zeroes(SDL_PixelFormat),
-    w: c_int = @import("std").mem.zeroes(c_int),
-    h: c_int = @import("std").mem.zeroes(c_int),
-    refcount: c_int = @import("std").mem.zeroes(c_int),
-};
-pub const SDL_Texture = struct_SDL_Texture;
-pub extern fn SDL_GetNumRenderDrivers() c_int;
-pub extern fn SDL_GetRenderDriver(index: c_int) [*c]const u8;
-pub extern fn SDL_CreateWindowAndRenderer(title: [*c]const u8, width: c_int, height: c_int, window_flags: SDL_WindowFlags, window: [*c]?*SDL_Window, renderer: [*c]?*SDL_Renderer) bool;
-pub extern fn SDL_CreateRenderer(window: ?*SDL_Window, name: [*c]const u8) ?*SDL_Renderer;
-pub extern fn SDL_CreateRendererWithProperties(props: SDL_PropertiesID) ?*SDL_Renderer;
-pub extern fn SDL_CreateSoftwareRenderer(surface: [*c]SDL_Surface) ?*SDL_Renderer;
-pub extern fn SDL_GetRenderer(window: ?*SDL_Window) ?*SDL_Renderer;
-pub extern fn SDL_GetRenderWindow(renderer: ?*SDL_Renderer) ?*SDL_Window;
-pub extern fn SDL_GetRendererName(renderer: ?*SDL_Renderer) [*c]const u8;
-pub extern fn SDL_GetRendererProperties(renderer: ?*SDL_Renderer) SDL_PropertiesID;
-pub extern fn SDL_GetRenderOutputSize(renderer: ?*SDL_Renderer, w: [*c]c_int, h: [*c]c_int) bool;
-pub extern fn SDL_GetCurrentRenderOutputSize(renderer: ?*SDL_Renderer, w: [*c]c_int, h: [*c]c_int) bool;
-pub extern fn SDL_CreateTexture(renderer: ?*SDL_Renderer, format: SDL_PixelFormat, access: SDL_TextureAccess, w: c_int, h: c_int) [*c]SDL_Texture;
-pub extern fn SDL_CreateTextureFromSurface(renderer: ?*SDL_Renderer, surface: [*c]SDL_Surface) [*c]SDL_Texture;
-pub extern fn SDL_CreateTextureWithProperties(renderer: ?*SDL_Renderer, props: SDL_PropertiesID) [*c]SDL_Texture;
-pub extern fn SDL_GetTextureProperties(texture: [*c]SDL_Texture) SDL_PropertiesID;
-pub extern fn SDL_GetRendererFromTexture(texture: [*c]SDL_Texture) ?*SDL_Renderer;
-pub extern fn SDL_GetTextureSize(texture: [*c]SDL_Texture, w: [*c]f32, h: [*c]f32) bool;
-pub extern fn SDL_SetTextureColorMod(texture: [*c]SDL_Texture, r: Uint8, g: Uint8, b: Uint8) bool;
-pub extern fn SDL_SetTextureColorModFloat(texture: [*c]SDL_Texture, r: f32, g: f32, b: f32) bool;
-pub extern fn SDL_GetTextureColorMod(texture: [*c]SDL_Texture, r: [*c]Uint8, g: [*c]Uint8, b: [*c]Uint8) bool;
-pub extern fn SDL_GetTextureColorModFloat(texture: [*c]SDL_Texture, r: [*c]f32, g: [*c]f32, b: [*c]f32) bool;
-pub extern fn SDL_SetTextureAlphaMod(texture: [*c]SDL_Texture, alpha: Uint8) bool;
-pub extern fn SDL_SetTextureAlphaModFloat(texture: [*c]SDL_Texture, alpha: f32) bool;
-pub extern fn SDL_GetTextureAlphaMod(texture: [*c]SDL_Texture, alpha: [*c]Uint8) bool;
-pub extern fn SDL_GetTextureAlphaModFloat(texture: [*c]SDL_Texture, alpha: [*c]f32) bool;
-pub extern fn SDL_SetTextureBlendMode(texture: [*c]SDL_Texture, blendMode: SDL_BlendMode) bool;
-pub extern fn SDL_GetTextureBlendMode(texture: [*c]SDL_Texture, blendMode: [*c]SDL_BlendMode) bool;
-pub extern fn SDL_SetTextureScaleMode(texture: [*c]SDL_Texture, scaleMode: SDL_ScaleMode) bool;
-pub extern fn SDL_GetTextureScaleMode(texture: [*c]SDL_Texture, scaleMode: [*c]SDL_ScaleMode) bool;
-pub extern fn SDL_UpdateTexture(texture: [*c]SDL_Texture, rect: [*c]const SDL_Rect, pixels: ?*const anyopaque, pitch: c_int) bool;
-pub extern fn SDL_UpdateYUVTexture(texture: [*c]SDL_Texture, rect: [*c]const SDL_Rect, Yplane: [*c]const Uint8, Ypitch: c_int, Uplane: [*c]const Uint8, Upitch: c_int, Vplane: [*c]const Uint8, Vpitch: c_int) bool;
-pub extern fn SDL_UpdateNVTexture(texture: [*c]SDL_Texture, rect: [*c]const SDL_Rect, Yplane: [*c]const Uint8, Ypitch: c_int, UVplane: [*c]const Uint8, UVpitch: c_int) bool;
-pub extern fn SDL_LockTexture(texture: [*c]SDL_Texture, rect: [*c]const SDL_Rect, pixels: [*c]?*anyopaque, pitch: [*c]c_int) bool;
-pub extern fn SDL_LockTextureToSurface(texture: [*c]SDL_Texture, rect: [*c]const SDL_Rect, surface: [*c][*c]SDL_Surface) bool;
-pub extern fn SDL_UnlockTexture(texture: [*c]SDL_Texture) void;
-pub extern fn SDL_SetRenderTarget(renderer: ?*SDL_Renderer, texture: [*c]SDL_Texture) bool;
-pub extern fn SDL_GetRenderTarget(renderer: ?*SDL_Renderer) [*c]SDL_Texture;
-pub extern fn SDL_SetRenderLogicalPresentation(renderer: ?*SDL_Renderer, w: c_int, h: c_int, mode: SDL_RendererLogicalPresentation) bool;
-pub extern fn SDL_GetRenderLogicalPresentation(renderer: ?*SDL_Renderer, w: [*c]c_int, h: [*c]c_int, mode: [*c]SDL_RendererLogicalPresentation) bool;
-pub extern fn SDL_GetRenderLogicalPresentationRect(renderer: ?*SDL_Renderer, rect: [*c]SDL_FRect) bool;
-pub extern fn SDL_RenderCoordinatesFromWindow(renderer: ?*SDL_Renderer, window_x: f32, window_y: f32, x: [*c]f32, y: [*c]f32) bool;
-pub extern fn SDL_RenderCoordinatesToWindow(renderer: ?*SDL_Renderer, x: f32, y: f32, window_x: [*c]f32, window_y: [*c]f32) bool;
-pub extern fn SDL_ConvertEventToRenderCoordinates(renderer: ?*SDL_Renderer, event: [*c]SDL_Event) bool;
-pub extern fn SDL_SetRenderViewport(renderer: ?*SDL_Renderer, rect: [*c]const SDL_Rect) bool;
-pub extern fn SDL_GetRenderViewport(renderer: ?*SDL_Renderer, rect: [*c]SDL_Rect) bool;
-pub extern fn SDL_RenderViewportSet(renderer: ?*SDL_Renderer) bool;
-pub extern fn SDL_GetRenderSafeArea(renderer: ?*SDL_Renderer, rect: [*c]SDL_Rect) bool;
-pub extern fn SDL_SetRenderClipRect(renderer: ?*SDL_Renderer, rect: [*c]const SDL_Rect) bool;
-pub extern fn SDL_GetRenderClipRect(renderer: ?*SDL_Renderer, rect: [*c]SDL_Rect) bool;
-pub extern fn SDL_RenderClipEnabled(renderer: ?*SDL_Renderer) bool;
-pub extern fn SDL_SetRenderScale(renderer: ?*SDL_Renderer, scaleX: f32, scaleY: f32) bool;
-pub extern fn SDL_GetRenderScale(renderer: ?*SDL_Renderer, scaleX: [*c]f32, scaleY: [*c]f32) bool;
-pub extern fn SDL_SetRenderDrawColor(renderer: ?*SDL_Renderer, r: Uint8, g: Uint8, b: Uint8, a: Uint8) bool;
-pub extern fn SDL_SetRenderDrawColorFloat(renderer: ?*SDL_Renderer, r: f32, g: f32, b: f32, a: f32) bool;
-pub extern fn SDL_GetRenderDrawColor(renderer: ?*SDL_Renderer, r: [*c]Uint8, g: [*c]Uint8, b: [*c]Uint8, a: [*c]Uint8) bool;
-pub extern fn SDL_GetRenderDrawColorFloat(renderer: ?*SDL_Renderer, r: [*c]f32, g: [*c]f32, b: [*c]f32, a: [*c]f32) bool;
-pub extern fn SDL_SetRenderColorScale(renderer: ?*SDL_Renderer, scale: f32) bool;
-pub extern fn SDL_GetRenderColorScale(renderer: ?*SDL_Renderer, scale: [*c]f32) bool;
-pub extern fn SDL_SetRenderDrawBlendMode(renderer: ?*SDL_Renderer, blendMode: SDL_BlendMode) bool;
-pub extern fn SDL_GetRenderDrawBlendMode(renderer: ?*SDL_Renderer, blendMode: [*c]SDL_BlendMode) bool;
-pub extern fn SDL_RenderClear(renderer: ?*SDL_Renderer) bool;
-pub extern fn SDL_RenderPoint(renderer: ?*SDL_Renderer, x: f32, y: f32) bool;
-pub extern fn SDL_RenderPoints(renderer: ?*SDL_Renderer, points: [*c]const SDL_FPoint, count: c_int) bool;
-pub extern fn SDL_RenderLine(renderer: ?*SDL_Renderer, x1: f32, y1: f32, x2: f32, y2: f32) bool;
-pub extern fn SDL_RenderLines(renderer: ?*SDL_Renderer, points: [*c]const SDL_FPoint, count: c_int) bool;
-pub extern fn SDL_RenderRect(renderer: ?*SDL_Renderer, rect: [*c]const SDL_FRect) bool;
-pub extern fn SDL_RenderRects(renderer: ?*SDL_Renderer, rects: [*c]const SDL_FRect, count: c_int) bool;
-pub extern fn SDL_RenderFillRect(renderer: ?*SDL_Renderer, rect: [*c]const SDL_FRect) bool;
-pub extern fn SDL_RenderFillRects(renderer: ?*SDL_Renderer, rects: [*c]const SDL_FRect, count: c_int) bool;
-pub extern fn SDL_RenderTexture(renderer: ?*SDL_Renderer, texture: [*c]SDL_Texture, srcrect: [*c]const SDL_FRect, dstrect: [*c]const SDL_FRect) bool;
-pub extern fn SDL_RenderTextureRotated(renderer: ?*SDL_Renderer, texture: [*c]SDL_Texture, srcrect: [*c]const SDL_FRect, dstrect: [*c]const SDL_FRect, angle: f64, center: [*c]const SDL_FPoint, flip: SDL_FlipMode) bool;
-pub extern fn SDL_RenderTextureAffine(renderer: ?*SDL_Renderer, texture: [*c]SDL_Texture, srcrect: [*c]const SDL_FRect, origin: [*c]const SDL_FPoint, right: [*c]const SDL_FPoint, down: [*c]const SDL_FPoint) bool;
-pub extern fn SDL_RenderTextureTiled(renderer: ?*SDL_Renderer, texture: [*c]SDL_Texture, srcrect: [*c]const SDL_FRect, scale: f32, dstrect: [*c]const SDL_FRect) bool;
-pub extern fn SDL_RenderTexture9Grid(renderer: ?*SDL_Renderer, texture: [*c]SDL_Texture, srcrect: [*c]const SDL_FRect, left_width: f32, right_width: f32, top_height: f32, bottom_height: f32, scale: f32, dstrect: [*c]const SDL_FRect) bool;
-pub extern fn SDL_RenderGeometry(renderer: ?*SDL_Renderer, texture: [*c]SDL_Texture, vertices: [*c]const SDL_Vertex, num_vertices: c_int, indices: [*c]const c_int, num_indices: c_int) bool;
-pub extern fn SDL_RenderGeometryRaw(renderer: ?*SDL_Renderer, texture: [*c]SDL_Texture, xy: [*c]const f32, xy_stride: c_int, color: [*c]const SDL_FColor, color_stride: c_int, uv: [*c]const f32, uv_stride: c_int, num_vertices: c_int, indices: ?*const anyopaque, num_indices: c_int, size_indices: c_int) bool;
-pub extern fn SDL_RenderReadPixels(renderer: ?*SDL_Renderer, rect: [*c]const SDL_Rect) [*c]SDL_Surface;
-pub extern fn SDL_RenderPresent(renderer: ?*SDL_Renderer) bool;
-pub extern fn SDL_DestroyTexture(texture: [*c]SDL_Texture) void;
-pub extern fn SDL_DestroyRenderer(renderer: ?*SDL_Renderer) void;
-pub extern fn SDL_FlushRenderer(renderer: ?*SDL_Renderer) bool;
-pub extern fn SDL_GetRenderMetalLayer(renderer: ?*SDL_Renderer) ?*anyopaque;
-pub extern fn SDL_GetRenderMetalCommandEncoder(renderer: ?*SDL_Renderer) ?*anyopaque;
-pub extern fn SDL_AddVulkanRenderSemaphores(renderer: ?*SDL_Renderer, wait_stage_mask: Uint32, wait_semaphore: Sint64, signal_semaphore: Sint64) bool;
-pub extern fn SDL_SetRenderVSync(renderer: ?*SDL_Renderer, vsync: c_int) bool;
-pub extern fn SDL_GetRenderVSync(renderer: ?*SDL_Renderer, vsync: [*c]c_int) bool;
-pub extern fn SDL_RenderDebugText(renderer: ?*SDL_Renderer, x: f32, y: f32, str: [*c]const u8) bool;
-pub extern fn SDL_RenderDebugTextFormat(renderer: ?*SDL_Renderer, x: f32, y: f32, fmt: [*c]const u8, ...) bool;
-pub const struct_SDL_StorageInterface = extern struct {
-    version: Uint32 = @import("std").mem.zeroes(Uint32),
-    close: ?*const fn (?*anyopaque) callconv(.c) bool = @import("std").mem.zeroes(?*const fn (?*anyopaque) callconv(.c) bool),
-    ready: ?*const fn (?*anyopaque) callconv(.c) bool = @import("std").mem.zeroes(?*const fn (?*anyopaque) callconv(.c) bool),
-    enumerate: ?*const fn (?*anyopaque, [*c]const u8, SDL_EnumerateDirectoryCallback, ?*anyopaque) callconv(.c) bool = @import("std").mem.zeroes(?*const fn (?*anyopaque, [*c]const u8, SDL_EnumerateDirectoryCallback, ?*anyopaque) callconv(.c) bool),
-    info: ?*const fn (?*anyopaque, [*c]const u8, [*c]SDL_PathInfo) callconv(.c) bool = @import("std").mem.zeroes(?*const fn (?*anyopaque, [*c]const u8, [*c]SDL_PathInfo) callconv(.c) bool),
-    read_file: ?*const fn (?*anyopaque, [*c]const u8, ?*anyopaque, Uint64) callconv(.c) bool = @import("std").mem.zeroes(?*const fn (?*anyopaque, [*c]const u8, ?*anyopaque, Uint64) callconv(.c) bool),
-    write_file: ?*const fn (?*anyopaque, [*c]const u8, ?*const anyopaque, Uint64) callconv(.c) bool = @import("std").mem.zeroes(?*const fn (?*anyopaque, [*c]const u8, ?*const anyopaque, Uint64) callconv(.c) bool),
-    mkdir: ?*const fn (?*anyopaque, [*c]const u8) callconv(.c) bool = @import("std").mem.zeroes(?*const fn (?*anyopaque, [*c]const u8) callconv(.c) bool),
-    remove: ?*const fn (?*anyopaque, [*c]const u8) callconv(.c) bool = @import("std").mem.zeroes(?*const fn (?*anyopaque, [*c]const u8) callconv(.c) bool),
-    rename: ?*const fn (?*anyopaque, [*c]const u8, [*c]const u8) callconv(.c) bool = @import("std").mem.zeroes(?*const fn (?*anyopaque, [*c]const u8, [*c]const u8) callconv(.c) bool),
-    copy: ?*const fn (?*anyopaque, [*c]const u8, [*c]const u8) callconv(.c) bool = @import("std").mem.zeroes(?*const fn (?*anyopaque, [*c]const u8, [*c]const u8) callconv(.c) bool),
-    space_remaining: ?*const fn (?*anyopaque) callconv(.c) Uint64 = @import("std").mem.zeroes(?*const fn (?*anyopaque) callconv(.c) Uint64),
-};
-pub const SDL_StorageInterface = struct_SDL_StorageInterface;
+// pub extern fn SDL_PumpEvents() void;
+// pub const SDL_ADDEVENT: c_int = 0;
+// pub const SDL_PEEKEVENT: c_int = 1;
+// pub const SDL_GETEVENT: c_int = 2;
+// pub const enum_SDL_EventAction = c_uint;
+// pub const SDL_EventAction = enum_SDL_EventAction;
+// pub extern fn SDL_PeepEvents(events: [*c]SDL_Event, numevents: c_int, action: SDL_EventAction, minType: Uint32, maxType: Uint32) c_int;
+// pub extern fn SDL_HasEvent(@"type": Uint32) bool;
+// pub extern fn SDL_HasEvents(minType: Uint32, maxType: Uint32) bool;
+// pub extern fn SDL_FlushEvent(@"type": Uint32) void;
+// pub extern fn SDL_FlushEvents(minType: Uint32, maxType: Uint32) void;
+// pub extern fn SDL_PollEvent(event: [*c]SDL_Event) bool;
+// pub extern fn SDL_WaitEvent(event: [*c]SDL_Event) bool;
+// pub extern fn SDL_WaitEventTimeout(event: [*c]SDL_Event, timeoutMS: Sint32) bool;
+// pub extern fn SDL_PushEvent(event: [*c]SDL_Event) bool;
+// pub const SDL_EventFilter = ?*const fn (?*anyopaque, [*c]SDL_Event) callconv(.c) bool;
+// pub extern fn SDL_SetEventFilter(filter: SDL_EventFilter, userdata: ?*anyopaque) void;
+// pub extern fn SDL_GetEventFilter(filter: [*c]SDL_EventFilter, userdata: [*c]?*anyopaque) bool;
+// pub extern fn SDL_AddEventWatch(filter: SDL_EventFilter, userdata: ?*anyopaque) bool;
+// pub extern fn SDL_RemoveEventWatch(filter: SDL_EventFilter, userdata: ?*anyopaque) void;
+// pub extern fn SDL_FilterEvents(filter: SDL_EventFilter, userdata: ?*anyopaque) void;
+// pub extern fn SDL_SetEventEnabled(@"type": Uint32, enabled: bool) void;
+// pub extern fn SDL_EventEnabled(@"type": Uint32) bool;
+// pub extern fn SDL_RegisterEvents(numevents: c_int) Uint32;
+// pub extern fn SDL_GetWindowFromEvent(event: [*c]const SDL_Event) ?*SDL_Window;
+// pub extern fn SDL_GetBasePath() [*c]const u8;
+// pub extern fn SDL_GetPrefPath(org: [*c]const u8, app: [*c]const u8) [*c]u8;
+// pub const SDL_FOLDER_HOME: c_int = 0;
+// pub const SDL_FOLDER_DESKTOP: c_int = 1;
+// pub const SDL_FOLDER_DOCUMENTS: c_int = 2;
+// pub const SDL_FOLDER_DOWNLOADS: c_int = 3;
+// pub const SDL_FOLDER_MUSIC: c_int = 4;
+// pub const SDL_FOLDER_PICTURES: c_int = 5;
+// pub const SDL_FOLDER_PUBLICSHARE: c_int = 6;
+// pub const SDL_FOLDER_SAVEDGAMES: c_int = 7;
+// pub const SDL_FOLDER_SCREENSHOTS: c_int = 8;
+// pub const SDL_FOLDER_TEMPLATES: c_int = 9;
+// pub const SDL_FOLDER_VIDEOS: c_int = 10;
+// pub const SDL_FOLDER_COUNT: c_int = 11;
+// pub const enum_SDL_Folder = c_uint;
+// pub const SDL_Folder = enum_SDL_Folder;
+// pub extern fn SDL_GetUserFolder(folder: SDL_Folder) [*c]const u8;
+// pub const SDL_PATHTYPE_NONE: c_int = 0;
+// pub const SDL_PATHTYPE_FILE: c_int = 1;
+// pub const SDL_PATHTYPE_DIRECTORY: c_int = 2;
+// pub const SDL_PATHTYPE_OTHER: c_int = 3;
+// pub const enum_SDL_PathType = c_uint;
+// pub const SDL_PathType = enum_SDL_PathType;
+// pub const struct_SDL_PathInfo = extern struct {
+//     type: SDL_PathType = @import("std").mem.zeroes(SDL_PathType),
+//     size: Uint64 = @import("std").mem.zeroes(Uint64),
+//     create_time: SDL_Time = @import("std").mem.zeroes(SDL_Time),
+//     modify_time: SDL_Time = @import("std").mem.zeroes(SDL_Time),
+//     access_time: SDL_Time = @import("std").mem.zeroes(SDL_Time),
+// };
+// pub const SDL_PathInfo = struct_SDL_PathInfo;
+// pub const SDL_GlobFlags = Uint32;
+// pub extern fn SDL_CreateDirectory(path: [*c]const u8) bool;
+// pub const SDL_ENUM_CONTINUE: c_int = 0;
+// pub const SDL_ENUM_SUCCESS: c_int = 1;
+// pub const SDL_ENUM_FAILURE: c_int = 2;
+// pub const enum_SDL_EnumerationResult = c_uint;
+// pub const SDL_EnumerationResult = enum_SDL_EnumerationResult;
+// pub const SDL_EnumerateDirectoryCallback = ?*const fn (?*anyopaque, [*c]const u8, [*c]const u8) callconv(.c) SDL_EnumerationResult;
+// pub extern fn SDL_EnumerateDirectory(path: [*c]const u8, callback: SDL_EnumerateDirectoryCallback, userdata: ?*anyopaque) bool;
+// pub extern fn SDL_RemovePath(path: [*c]const u8) bool;
+// pub extern fn SDL_RenamePath(oldpath: [*c]const u8, newpath: [*c]const u8) bool;
+// pub extern fn SDL_CopyFile(oldpath: [*c]const u8, newpath: [*c]const u8) bool;
+// pub extern fn SDL_GetPathInfo(path: [*c]const u8, info: [*c]SDL_PathInfo) bool;
+// pub extern fn SDL_GlobDirectory(path: [*c]const u8, pattern: [*c]const u8, flags: SDL_GlobFlags, count: [*c]c_int) [*c][*c]u8;
+// pub extern fn SDL_GetCurrentDirectory() [*c]u8;
+// pub const struct_SDL_GPUDevice = opaque {};
+// pub const SDL_GPUDevice = struct_SDL_GPUDevice;
+// pub const struct_SDL_GPUBuffer = opaque {};
+// pub const SDL_GPUBuffer = struct_SDL_GPUBuffer;
+// pub const struct_SDL_GPUTransferBuffer = opaque {};
+// pub const SDL_GPUTransferBuffer = struct_SDL_GPUTransferBuffer;
+// pub const struct_SDL_GPUTexture = opaque {};
+// pub const SDL_GPUTexture = struct_SDL_GPUTexture;
+// pub const struct_SDL_GPUSampler = opaque {};
+// pub const SDL_GPUSampler = struct_SDL_GPUSampler;
+// pub const struct_SDL_GPUShader = opaque {};
+// pub const SDL_GPUShader = struct_SDL_GPUShader;
+// pub const struct_SDL_GPUComputePipeline = opaque {};
+// pub const SDL_GPUComputePipeline = struct_SDL_GPUComputePipeline;
+// pub const struct_SDL_GPUGraphicsPipeline = opaque {};
+// pub const SDL_GPUGraphicsPipeline = struct_SDL_GPUGraphicsPipeline;
+// pub const struct_SDL_GPUCommandBuffer = opaque {};
+// pub const SDL_GPUCommandBuffer = struct_SDL_GPUCommandBuffer;
+// pub const struct_SDL_GPURenderPass = opaque {};
+// pub const SDL_GPURenderPass = struct_SDL_GPURenderPass;
+// pub const struct_SDL_GPUComputePass = opaque {};
+// pub const SDL_GPUComputePass = struct_SDL_GPUComputePass;
+// pub const struct_SDL_GPUCopyPass = opaque {};
+// pub const SDL_GPUCopyPass = struct_SDL_GPUCopyPass;
+// pub const struct_SDL_GPUFence = opaque {};
+// pub const SDL_GPUFence = struct_SDL_GPUFence;
+// pub const SDL_GPU_PRIMITIVETYPE_TRIANGLELIST: c_int = 0;
+// pub const SDL_GPU_PRIMITIVETYPE_TRIANGLESTRIP: c_int = 1;
+// pub const SDL_GPU_PRIMITIVETYPE_LINELIST: c_int = 2;
+// pub const SDL_GPU_PRIMITIVETYPE_LINESTRIP: c_int = 3;
+// pub const SDL_GPU_PRIMITIVETYPE_POINTLIST: c_int = 4;
+// pub const enum_SDL_GPUPrimitiveType = c_uint;
+// pub const SDL_GPUPrimitiveType = enum_SDL_GPUPrimitiveType;
+// pub const SDL_GPU_LOADOP_LOAD: c_int = 0;
+// pub const SDL_GPU_LOADOP_CLEAR: c_int = 1;
+// pub const SDL_GPU_LOADOP_DONT_CARE: c_int = 2;
+// pub const enum_SDL_GPULoadOp = c_uint;
+// pub const SDL_GPULoadOp = enum_SDL_GPULoadOp;
+// pub const SDL_GPU_STOREOP_STORE: c_int = 0;
+// pub const SDL_GPU_STOREOP_DONT_CARE: c_int = 1;
+// pub const SDL_GPU_STOREOP_RESOLVE: c_int = 2;
+// pub const SDL_GPU_STOREOP_RESOLVE_AND_STORE: c_int = 3;
+// pub const enum_SDL_GPUStoreOp = c_uint;
+// pub const SDL_GPUStoreOp = enum_SDL_GPUStoreOp;
+// pub const SDL_GPU_INDEXELEMENTSIZE_16BIT: c_int = 0;
+// pub const SDL_GPU_INDEXELEMENTSIZE_32BIT: c_int = 1;
+// pub const enum_SDL_GPUIndexElementSize = c_uint;
+// pub const SDL_GPUIndexElementSize = enum_SDL_GPUIndexElementSize;
+// pub const SDL_GPU_TEXTUREFORMAT_INVALID: c_int = 0;
+// pub const SDL_GPU_TEXTUREFORMAT_A8_UNORM: c_int = 1;
+// pub const SDL_GPU_TEXTUREFORMAT_R8_UNORM: c_int = 2;
+// pub const SDL_GPU_TEXTUREFORMAT_R8G8_UNORM: c_int = 3;
+// pub const SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM: c_int = 4;
+// pub const SDL_GPU_TEXTUREFORMAT_R16_UNORM: c_int = 5;
+// pub const SDL_GPU_TEXTUREFORMAT_R16G16_UNORM: c_int = 6;
+// pub const SDL_GPU_TEXTUREFORMAT_R16G16B16A16_UNORM: c_int = 7;
+// pub const SDL_GPU_TEXTUREFORMAT_R10G10B10A2_UNORM: c_int = 8;
+// pub const SDL_GPU_TEXTUREFORMAT_B5G6R5_UNORM: c_int = 9;
+// pub const SDL_GPU_TEXTUREFORMAT_B5G5R5A1_UNORM: c_int = 10;
+// pub const SDL_GPU_TEXTUREFORMAT_B4G4R4A4_UNORM: c_int = 11;
+// pub const SDL_GPU_TEXTUREFORMAT_B8G8R8A8_UNORM: c_int = 12;
+// pub const SDL_GPU_TEXTUREFORMAT_BC1_RGBA_UNORM: c_int = 13;
+// pub const SDL_GPU_TEXTUREFORMAT_BC2_RGBA_UNORM: c_int = 14;
+// pub const SDL_GPU_TEXTUREFORMAT_BC3_RGBA_UNORM: c_int = 15;
+// pub const SDL_GPU_TEXTUREFORMAT_BC4_R_UNORM: c_int = 16;
+// pub const SDL_GPU_TEXTUREFORMAT_BC5_RG_UNORM: c_int = 17;
+// pub const SDL_GPU_TEXTUREFORMAT_BC7_RGBA_UNORM: c_int = 18;
+// pub const SDL_GPU_TEXTUREFORMAT_BC6H_RGB_FLOAT: c_int = 19;
+// pub const SDL_GPU_TEXTUREFORMAT_BC6H_RGB_UFLOAT: c_int = 20;
+// pub const SDL_GPU_TEXTUREFORMAT_R8_SNORM: c_int = 21;
+// pub const SDL_GPU_TEXTUREFORMAT_R8G8_SNORM: c_int = 22;
+// pub const SDL_GPU_TEXTUREFORMAT_R8G8B8A8_SNORM: c_int = 23;
+// pub const SDL_GPU_TEXTUREFORMAT_R16_SNORM: c_int = 24;
+// pub const SDL_GPU_TEXTUREFORMAT_R16G16_SNORM: c_int = 25;
+// pub const SDL_GPU_TEXTUREFORMAT_R16G16B16A16_SNORM: c_int = 26;
+// pub const SDL_GPU_TEXTUREFORMAT_R16_FLOAT: c_int = 27;
+// pub const SDL_GPU_TEXTUREFORMAT_R16G16_FLOAT: c_int = 28;
+// pub const SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT: c_int = 29;
+// pub const SDL_GPU_TEXTUREFORMAT_R32_FLOAT: c_int = 30;
+// pub const SDL_GPU_TEXTUREFORMAT_R32G32_FLOAT: c_int = 31;
+// pub const SDL_GPU_TEXTUREFORMAT_R32G32B32A32_FLOAT: c_int = 32;
+// pub const SDL_GPU_TEXTUREFORMAT_R11G11B10_UFLOAT: c_int = 33;
+// pub const SDL_GPU_TEXTUREFORMAT_R8_UINT: c_int = 34;
+// pub const SDL_GPU_TEXTUREFORMAT_R8G8_UINT: c_int = 35;
+// pub const SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UINT: c_int = 36;
+// pub const SDL_GPU_TEXTUREFORMAT_R16_UINT: c_int = 37;
+// pub const SDL_GPU_TEXTUREFORMAT_R16G16_UINT: c_int = 38;
+// pub const SDL_GPU_TEXTUREFORMAT_R16G16B16A16_UINT: c_int = 39;
+// pub const SDL_GPU_TEXTUREFORMAT_R32_UINT: c_int = 40;
+// pub const SDL_GPU_TEXTUREFORMAT_R32G32_UINT: c_int = 41;
+// pub const SDL_GPU_TEXTUREFORMAT_R32G32B32A32_UINT: c_int = 42;
+// pub const SDL_GPU_TEXTUREFORMAT_R8_INT: c_int = 43;
+// pub const SDL_GPU_TEXTUREFORMAT_R8G8_INT: c_int = 44;
+// pub const SDL_GPU_TEXTUREFORMAT_R8G8B8A8_INT: c_int = 45;
+// pub const SDL_GPU_TEXTUREFORMAT_R16_INT: c_int = 46;
+// pub const SDL_GPU_TEXTUREFORMAT_R16G16_INT: c_int = 47;
+// pub const SDL_GPU_TEXTUREFORMAT_R16G16B16A16_INT: c_int = 48;
+// pub const SDL_GPU_TEXTUREFORMAT_R32_INT: c_int = 49;
+// pub const SDL_GPU_TEXTUREFORMAT_R32G32_INT: c_int = 50;
+// pub const SDL_GPU_TEXTUREFORMAT_R32G32B32A32_INT: c_int = 51;
+// pub const SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM_SRGB: c_int = 52;
+// pub const SDL_GPU_TEXTUREFORMAT_B8G8R8A8_UNORM_SRGB: c_int = 53;
+// pub const SDL_GPU_TEXTUREFORMAT_BC1_RGBA_UNORM_SRGB: c_int = 54;
+// pub const SDL_GPU_TEXTUREFORMAT_BC2_RGBA_UNORM_SRGB: c_int = 55;
+// pub const SDL_GPU_TEXTUREFORMAT_BC3_RGBA_UNORM_SRGB: c_int = 56;
+// pub const SDL_GPU_TEXTUREFORMAT_BC7_RGBA_UNORM_SRGB: c_int = 57;
+// pub const SDL_GPU_TEXTUREFORMAT_D16_UNORM: c_int = 58;
+// pub const SDL_GPU_TEXTUREFORMAT_D24_UNORM: c_int = 59;
+// pub const SDL_GPU_TEXTUREFORMAT_D32_FLOAT: c_int = 60;
+// pub const SDL_GPU_TEXTUREFORMAT_D24_UNORM_S8_UINT: c_int = 61;
+// pub const SDL_GPU_TEXTUREFORMAT_D32_FLOAT_S8_UINT: c_int = 62;
+// pub const SDL_GPU_TEXTUREFORMAT_ASTC_4x4_UNORM: c_int = 63;
+// pub const SDL_GPU_TEXTUREFORMAT_ASTC_5x4_UNORM: c_int = 64;
+// pub const SDL_GPU_TEXTUREFORMAT_ASTC_5x5_UNORM: c_int = 65;
+// pub const SDL_GPU_TEXTUREFORMAT_ASTC_6x5_UNORM: c_int = 66;
+// pub const SDL_GPU_TEXTUREFORMAT_ASTC_6x6_UNORM: c_int = 67;
+// pub const SDL_GPU_TEXTUREFORMAT_ASTC_8x5_UNORM: c_int = 68;
+// pub const SDL_GPU_TEXTUREFORMAT_ASTC_8x6_UNORM: c_int = 69;
+// pub const SDL_GPU_TEXTUREFORMAT_ASTC_8x8_UNORM: c_int = 70;
+// pub const SDL_GPU_TEXTUREFORMAT_ASTC_10x5_UNORM: c_int = 71;
+// pub const SDL_GPU_TEXTUREFORMAT_ASTC_10x6_UNORM: c_int = 72;
+// pub const SDL_GPU_TEXTUREFORMAT_ASTC_10x8_UNORM: c_int = 73;
+// pub const SDL_GPU_TEXTUREFORMAT_ASTC_10x10_UNORM: c_int = 74;
+// pub const SDL_GPU_TEXTUREFORMAT_ASTC_12x10_UNORM: c_int = 75;
+// pub const SDL_GPU_TEXTUREFORMAT_ASTC_12x12_UNORM: c_int = 76;
+// pub const SDL_GPU_TEXTUREFORMAT_ASTC_4x4_UNORM_SRGB: c_int = 77;
+// pub const SDL_GPU_TEXTUREFORMAT_ASTC_5x4_UNORM_SRGB: c_int = 78;
+// pub const SDL_GPU_TEXTUREFORMAT_ASTC_5x5_UNORM_SRGB: c_int = 79;
+// pub const SDL_GPU_TEXTUREFORMAT_ASTC_6x5_UNORM_SRGB: c_int = 80;
+// pub const SDL_GPU_TEXTUREFORMAT_ASTC_6x6_UNORM_SRGB: c_int = 81;
+// pub const SDL_GPU_TEXTUREFORMAT_ASTC_8x5_UNORM_SRGB: c_int = 82;
+// pub const SDL_GPU_TEXTUREFORMAT_ASTC_8x6_UNORM_SRGB: c_int = 83;
+// pub const SDL_GPU_TEXTUREFORMAT_ASTC_8x8_UNORM_SRGB: c_int = 84;
+// pub const SDL_GPU_TEXTUREFORMAT_ASTC_10x5_UNORM_SRGB: c_int = 85;
+// pub const SDL_GPU_TEXTUREFORMAT_ASTC_10x6_UNORM_SRGB: c_int = 86;
+// pub const SDL_GPU_TEXTUREFORMAT_ASTC_10x8_UNORM_SRGB: c_int = 87;
+// pub const SDL_GPU_TEXTUREFORMAT_ASTC_10x10_UNORM_SRGB: c_int = 88;
+// pub const SDL_GPU_TEXTUREFORMAT_ASTC_12x10_UNORM_SRGB: c_int = 89;
+// pub const SDL_GPU_TEXTUREFORMAT_ASTC_12x12_UNORM_SRGB: c_int = 90;
+// pub const SDL_GPU_TEXTUREFORMAT_ASTC_4x4_FLOAT: c_int = 91;
+// pub const SDL_GPU_TEXTUREFORMAT_ASTC_5x4_FLOAT: c_int = 92;
+// pub const SDL_GPU_TEXTUREFORMAT_ASTC_5x5_FLOAT: c_int = 93;
+// pub const SDL_GPU_TEXTUREFORMAT_ASTC_6x5_FLOAT: c_int = 94;
+// pub const SDL_GPU_TEXTUREFORMAT_ASTC_6x6_FLOAT: c_int = 95;
+// pub const SDL_GPU_TEXTUREFORMAT_ASTC_8x5_FLOAT: c_int = 96;
+// pub const SDL_GPU_TEXTUREFORMAT_ASTC_8x6_FLOAT: c_int = 97;
+// pub const SDL_GPU_TEXTUREFORMAT_ASTC_8x8_FLOAT: c_int = 98;
+// pub const SDL_GPU_TEXTUREFORMAT_ASTC_10x5_FLOAT: c_int = 99;
+// pub const SDL_GPU_TEXTUREFORMAT_ASTC_10x6_FLOAT: c_int = 100;
+// pub const SDL_GPU_TEXTUREFORMAT_ASTC_10x8_FLOAT: c_int = 101;
+// pub const SDL_GPU_TEXTUREFORMAT_ASTC_10x10_FLOAT: c_int = 102;
+// pub const SDL_GPU_TEXTUREFORMAT_ASTC_12x10_FLOAT: c_int = 103;
+// pub const SDL_GPU_TEXTUREFORMAT_ASTC_12x12_FLOAT: c_int = 104;
+// pub const enum_SDL_GPUTextureFormat = c_uint;
+// pub const SDL_GPUTextureFormat = enum_SDL_GPUTextureFormat;
+// pub const SDL_GPUTextureUsageFlags = Uint32;
+// pub const SDL_GPU_TEXTURETYPE_2D: c_int = 0;
+// pub const SDL_GPU_TEXTURETYPE_2D_ARRAY: c_int = 1;
+// pub const SDL_GPU_TEXTURETYPE_3D: c_int = 2;
+// pub const SDL_GPU_TEXTURETYPE_CUBE: c_int = 3;
+// pub const SDL_GPU_TEXTURETYPE_CUBE_ARRAY: c_int = 4;
+// pub const enum_SDL_GPUTextureType = c_uint;
+// pub const SDL_GPUTextureType = enum_SDL_GPUTextureType;
+// pub const SDL_GPU_SAMPLECOUNT_1: c_int = 0;
+// pub const SDL_GPU_SAMPLECOUNT_2: c_int = 1;
+// pub const SDL_GPU_SAMPLECOUNT_4: c_int = 2;
+// pub const SDL_GPU_SAMPLECOUNT_8: c_int = 3;
+// pub const enum_SDL_GPUSampleCount = c_uint;
+// pub const SDL_GPUSampleCount = enum_SDL_GPUSampleCount;
+// pub const SDL_GPU_CUBEMAPFACE_POSITIVEX: c_int = 0;
+// pub const SDL_GPU_CUBEMAPFACE_NEGATIVEX: c_int = 1;
+// pub const SDL_GPU_CUBEMAPFACE_POSITIVEY: c_int = 2;
+// pub const SDL_GPU_CUBEMAPFACE_NEGATIVEY: c_int = 3;
+// pub const SDL_GPU_CUBEMAPFACE_POSITIVEZ: c_int = 4;
+// pub const SDL_GPU_CUBEMAPFACE_NEGATIVEZ: c_int = 5;
+// pub const enum_SDL_GPUCubeMapFace = c_uint;
+// pub const SDL_GPUCubeMapFace = enum_SDL_GPUCubeMapFace;
+// pub const SDL_GPUBufferUsageFlags = Uint32;
+// pub const SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD: c_int = 0;
+// pub const SDL_GPU_TRANSFERBUFFERUSAGE_DOWNLOAD: c_int = 1;
+// pub const enum_SDL_GPUTransferBufferUsage = c_uint;
+// pub const SDL_GPUTransferBufferUsage = enum_SDL_GPUTransferBufferUsage;
+// pub const SDL_GPU_SHADERSTAGE_VERTEX: c_int = 0;
+// pub const SDL_GPU_SHADERSTAGE_FRAGMENT: c_int = 1;
+// pub const enum_SDL_GPUShaderStage = c_uint;
+// pub const SDL_GPUShaderStage = enum_SDL_GPUShaderStage;
+// pub const SDL_GPUShaderFormat = Uint32;
+// pub const SDL_GPU_VERTEXELEMENTFORMAT_INVALID: c_int = 0;
+// pub const SDL_GPU_VERTEXELEMENTFORMAT_INT: c_int = 1;
+// pub const SDL_GPU_VERTEXELEMENTFORMAT_INT2: c_int = 2;
+// pub const SDL_GPU_VERTEXELEMENTFORMAT_INT3: c_int = 3;
+// pub const SDL_GPU_VERTEXELEMENTFORMAT_INT4: c_int = 4;
+// pub const SDL_GPU_VERTEXELEMENTFORMAT_UINT: c_int = 5;
+// pub const SDL_GPU_VERTEXELEMENTFORMAT_UINT2: c_int = 6;
+// pub const SDL_GPU_VERTEXELEMENTFORMAT_UINT3: c_int = 7;
+// pub const SDL_GPU_VERTEXELEMENTFORMAT_UINT4: c_int = 8;
+// pub const SDL_GPU_VERTEXELEMENTFORMAT_FLOAT: c_int = 9;
+// pub const SDL_GPU_VERTEXELEMENTFORMAT_FLOAT2: c_int = 10;
+// pub const SDL_GPU_VERTEXELEMENTFORMAT_FLOAT3: c_int = 11;
+// pub const SDL_GPU_VERTEXELEMENTFORMAT_FLOAT4: c_int = 12;
+// pub const SDL_GPU_VERTEXELEMENTFORMAT_BYTE2: c_int = 13;
+// pub const SDL_GPU_VERTEXELEMENTFORMAT_BYTE4: c_int = 14;
+// pub const SDL_GPU_VERTEXELEMENTFORMAT_UBYTE2: c_int = 15;
+// pub const SDL_GPU_VERTEXELEMENTFORMAT_UBYTE4: c_int = 16;
+// pub const SDL_GPU_VERTEXELEMENTFORMAT_BYTE2_NORM: c_int = 17;
+// pub const SDL_GPU_VERTEXELEMENTFORMAT_BYTE4_NORM: c_int = 18;
+// pub const SDL_GPU_VERTEXELEMENTFORMAT_UBYTE2_NORM: c_int = 19;
+// pub const SDL_GPU_VERTEXELEMENTFORMAT_UBYTE4_NORM: c_int = 20;
+// pub const SDL_GPU_VERTEXELEMENTFORMAT_SHORT2: c_int = 21;
+// pub const SDL_GPU_VERTEXELEMENTFORMAT_SHORT4: c_int = 22;
+// pub const SDL_GPU_VERTEXELEMENTFORMAT_USHORT2: c_int = 23;
+// pub const SDL_GPU_VERTEXELEMENTFORMAT_USHORT4: c_int = 24;
+// pub const SDL_GPU_VERTEXELEMENTFORMAT_SHORT2_NORM: c_int = 25;
+// pub const SDL_GPU_VERTEXELEMENTFORMAT_SHORT4_NORM: c_int = 26;
+// pub const SDL_GPU_VERTEXELEMENTFORMAT_USHORT2_NORM: c_int = 27;
+// pub const SDL_GPU_VERTEXELEMENTFORMAT_USHORT4_NORM: c_int = 28;
+// pub const SDL_GPU_VERTEXELEMENTFORMAT_HALF2: c_int = 29;
+// pub const SDL_GPU_VERTEXELEMENTFORMAT_HALF4: c_int = 30;
+// pub const enum_SDL_GPUVertexElementFormat = c_uint;
+// pub const SDL_GPUVertexElementFormat = enum_SDL_GPUVertexElementFormat;
+// pub const SDL_GPU_VERTEXINPUTRATE_VERTEX: c_int = 0;
+// pub const SDL_GPU_VERTEXINPUTRATE_INSTANCE: c_int = 1;
+// pub const enum_SDL_GPUVertexInputRate = c_uint;
+// pub const SDL_GPUVertexInputRate = enum_SDL_GPUVertexInputRate;
+// pub const SDL_GPU_FILLMODE_FILL: c_int = 0;
+// pub const SDL_GPU_FILLMODE_LINE: c_int = 1;
+// pub const enum_SDL_GPUFillMode = c_uint;
+// pub const SDL_GPUFillMode = enum_SDL_GPUFillMode;
+// pub const SDL_GPU_CULLMODE_NONE: c_int = 0;
+// pub const SDL_GPU_CULLMODE_FRONT: c_int = 1;
+// pub const SDL_GPU_CULLMODE_BACK: c_int = 2;
+// pub const enum_SDL_GPUCullMode = c_uint;
+// pub const SDL_GPUCullMode = enum_SDL_GPUCullMode;
+// pub const SDL_GPU_FRONTFACE_COUNTER_CLOCKWISE: c_int = 0;
+// pub const SDL_GPU_FRONTFACE_CLOCKWISE: c_int = 1;
+// pub const enum_SDL_GPUFrontFace = c_uint;
+// pub const SDL_GPUFrontFace = enum_SDL_GPUFrontFace;
+// pub const SDL_GPU_COMPAREOP_INVALID: c_int = 0;
+// pub const SDL_GPU_COMPAREOP_NEVER: c_int = 1;
+// pub const SDL_GPU_COMPAREOP_LESS: c_int = 2;
+// pub const SDL_GPU_COMPAREOP_EQUAL: c_int = 3;
+// pub const SDL_GPU_COMPAREOP_LESS_OR_EQUAL: c_int = 4;
+// pub const SDL_GPU_COMPAREOP_GREATER: c_int = 5;
+// pub const SDL_GPU_COMPAREOP_NOT_EQUAL: c_int = 6;
+// pub const SDL_GPU_COMPAREOP_GREATER_OR_EQUAL: c_int = 7;
+// pub const SDL_GPU_COMPAREOP_ALWAYS: c_int = 8;
+// pub const enum_SDL_GPUCompareOp = c_uint;
+// pub const SDL_GPUCompareOp = enum_SDL_GPUCompareOp;
+// pub const SDL_GPU_STENCILOP_INVALID: c_int = 0;
+// pub const SDL_GPU_STENCILOP_KEEP: c_int = 1;
+// pub const SDL_GPU_STENCILOP_ZERO: c_int = 2;
+// pub const SDL_GPU_STENCILOP_REPLACE: c_int = 3;
+// pub const SDL_GPU_STENCILOP_INCREMENT_AND_CLAMP: c_int = 4;
+// pub const SDL_GPU_STENCILOP_DECREMENT_AND_CLAMP: c_int = 5;
+// pub const SDL_GPU_STENCILOP_INVERT: c_int = 6;
+// pub const SDL_GPU_STENCILOP_INCREMENT_AND_WRAP: c_int = 7;
+// pub const SDL_GPU_STENCILOP_DECREMENT_AND_WRAP: c_int = 8;
+// pub const enum_SDL_GPUStencilOp = c_uint;
+// pub const SDL_GPUStencilOp = enum_SDL_GPUStencilOp;
+// pub const SDL_GPU_BLENDOP_INVALID: c_int = 0;
+// pub const SDL_GPU_BLENDOP_ADD: c_int = 1;
+// pub const SDL_GPU_BLENDOP_SUBTRACT: c_int = 2;
+// pub const SDL_GPU_BLENDOP_REVERSE_SUBTRACT: c_int = 3;
+// pub const SDL_GPU_BLENDOP_MIN: c_int = 4;
+// pub const SDL_GPU_BLENDOP_MAX: c_int = 5;
+// pub const enum_SDL_GPUBlendOp = c_uint;
+// pub const SDL_GPUBlendOp = enum_SDL_GPUBlendOp;
+// pub const SDL_GPU_BLENDFACTOR_INVALID: c_int = 0;
+// pub const SDL_GPU_BLENDFACTOR_ZERO: c_int = 1;
+// pub const SDL_GPU_BLENDFACTOR_ONE: c_int = 2;
+// pub const SDL_GPU_BLENDFACTOR_SRC_COLOR: c_int = 3;
+// pub const SDL_GPU_BLENDFACTOR_ONE_MINUS_SRC_COLOR: c_int = 4;
+// pub const SDL_GPU_BLENDFACTOR_DST_COLOR: c_int = 5;
+// pub const SDL_GPU_BLENDFACTOR_ONE_MINUS_DST_COLOR: c_int = 6;
+// pub const SDL_GPU_BLENDFACTOR_SRC_ALPHA: c_int = 7;
+// pub const SDL_GPU_BLENDFACTOR_ONE_MINUS_SRC_ALPHA: c_int = 8;
+// pub const SDL_GPU_BLENDFACTOR_DST_ALPHA: c_int = 9;
+// pub const SDL_GPU_BLENDFACTOR_ONE_MINUS_DST_ALPHA: c_int = 10;
+// pub const SDL_GPU_BLENDFACTOR_CONSTANT_COLOR: c_int = 11;
+// pub const SDL_GPU_BLENDFACTOR_ONE_MINUS_CONSTANT_COLOR: c_int = 12;
+// pub const SDL_GPU_BLENDFACTOR_SRC_ALPHA_SATURATE: c_int = 13;
+// pub const enum_SDL_GPUBlendFactor = c_uint;
+// pub const SDL_GPUBlendFactor = enum_SDL_GPUBlendFactor;
+// pub const SDL_GPUColorComponentFlags = Uint8;
+// pub const SDL_GPU_FILTER_NEAREST: c_int = 0;
+// pub const SDL_GPU_FILTER_LINEAR: c_int = 1;
+// pub const enum_SDL_GPUFilter = c_uint;
+// pub const SDL_GPUFilter = enum_SDL_GPUFilter;
+// pub const SDL_GPU_SAMPLERMIPMAPMODE_NEAREST: c_int = 0;
+// pub const SDL_GPU_SAMPLERMIPMAPMODE_LINEAR: c_int = 1;
+// pub const enum_SDL_GPUSamplerMipmapMode = c_uint;
+// pub const SDL_GPUSamplerMipmapMode = enum_SDL_GPUSamplerMipmapMode;
+// pub const SDL_GPU_SAMPLERADDRESSMODE_REPEAT: c_int = 0;
+// pub const SDL_GPU_SAMPLERADDRESSMODE_MIRRORED_REPEAT: c_int = 1;
+// pub const SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE: c_int = 2;
+// pub const enum_SDL_GPUSamplerAddressMode = c_uint;
+// pub const SDL_GPUSamplerAddressMode = enum_SDL_GPUSamplerAddressMode;
+// pub const SDL_GPU_PRESENTMODE_VSYNC: c_int = 0;
+// pub const SDL_GPU_PRESENTMODE_IMMEDIATE: c_int = 1;
+// pub const SDL_GPU_PRESENTMODE_MAILBOX: c_int = 2;
+// pub const enum_SDL_GPUPresentMode = c_uint;
+// pub const SDL_GPUPresentMode = enum_SDL_GPUPresentMode;
+// pub const SDL_GPU_SWAPCHAINCOMPOSITION_SDR: c_int = 0;
+// pub const SDL_GPU_SWAPCHAINCOMPOSITION_SDR_LINEAR: c_int = 1;
+// pub const SDL_GPU_SWAPCHAINCOMPOSITION_HDR_EXTENDED_LINEAR: c_int = 2;
+// pub const SDL_GPU_SWAPCHAINCOMPOSITION_HDR10_ST2084: c_int = 3;
+// pub const enum_SDL_GPUSwapchainComposition = c_uint;
+// pub const SDL_GPUSwapchainComposition = enum_SDL_GPUSwapchainComposition;
+// pub const struct_SDL_GPUViewport = extern struct {
+//     x: f32 = @import("std").mem.zeroes(f32),
+//     y: f32 = @import("std").mem.zeroes(f32),
+//     w: f32 = @import("std").mem.zeroes(f32),
+//     h: f32 = @import("std").mem.zeroes(f32),
+//     min_depth: f32 = @import("std").mem.zeroes(f32),
+//     max_depth: f32 = @import("std").mem.zeroes(f32),
+// };
+// pub const SDL_GPUViewport = struct_SDL_GPUViewport;
+// pub const struct_SDL_GPUTextureTransferInfo = extern struct {
+//     transfer_buffer: ?*SDL_GPUTransferBuffer = @import("std").mem.zeroes(?*SDL_GPUTransferBuffer),
+//     offset: Uint32 = @import("std").mem.zeroes(Uint32),
+//     pixels_per_row: Uint32 = @import("std").mem.zeroes(Uint32),
+//     rows_per_layer: Uint32 = @import("std").mem.zeroes(Uint32),
+// };
+// pub const SDL_GPUTextureTransferInfo = struct_SDL_GPUTextureTransferInfo;
+// pub const struct_SDL_GPUTransferBufferLocation = extern struct {
+//     transfer_buffer: ?*SDL_GPUTransferBuffer = @import("std").mem.zeroes(?*SDL_GPUTransferBuffer),
+//     offset: Uint32 = @import("std").mem.zeroes(Uint32),
+// };
+// pub const SDL_GPUTransferBufferLocation = struct_SDL_GPUTransferBufferLocation;
+// pub const struct_SDL_GPUTextureLocation = extern struct {
+//     texture: ?*SDL_GPUTexture = @import("std").mem.zeroes(?*SDL_GPUTexture),
+//     mip_level: Uint32 = @import("std").mem.zeroes(Uint32),
+//     layer: Uint32 = @import("std").mem.zeroes(Uint32),
+//     x: Uint32 = @import("std").mem.zeroes(Uint32),
+//     y: Uint32 = @import("std").mem.zeroes(Uint32),
+//     z: Uint32 = @import("std").mem.zeroes(Uint32),
+// };
+// pub const SDL_GPUTextureLocation = struct_SDL_GPUTextureLocation;
+// pub const struct_SDL_GPUTextureRegion = extern struct {
+//     texture: ?*SDL_GPUTexture = @import("std").mem.zeroes(?*SDL_GPUTexture),
+//     mip_level: Uint32 = @import("std").mem.zeroes(Uint32),
+//     layer: Uint32 = @import("std").mem.zeroes(Uint32),
+//     x: Uint32 = @import("std").mem.zeroes(Uint32),
+//     y: Uint32 = @import("std").mem.zeroes(Uint32),
+//     z: Uint32 = @import("std").mem.zeroes(Uint32),
+//     w: Uint32 = @import("std").mem.zeroes(Uint32),
+//     h: Uint32 = @import("std").mem.zeroes(Uint32),
+//     d: Uint32 = @import("std").mem.zeroes(Uint32),
+// };
+// pub const SDL_GPUTextureRegion = struct_SDL_GPUTextureRegion;
+// pub const struct_SDL_GPUBlitRegion = extern struct {
+//     texture: ?*SDL_GPUTexture = @import("std").mem.zeroes(?*SDL_GPUTexture),
+//     mip_level: Uint32 = @import("std").mem.zeroes(Uint32),
+//     layer_or_depth_plane: Uint32 = @import("std").mem.zeroes(Uint32),
+//     x: Uint32 = @import("std").mem.zeroes(Uint32),
+//     y: Uint32 = @import("std").mem.zeroes(Uint32),
+//     w: Uint32 = @import("std").mem.zeroes(Uint32),
+//     h: Uint32 = @import("std").mem.zeroes(Uint32),
+// };
+// pub const SDL_GPUBlitRegion = struct_SDL_GPUBlitRegion;
+// pub const struct_SDL_GPUBufferLocation = extern struct {
+//     buffer: ?*SDL_GPUBuffer = @import("std").mem.zeroes(?*SDL_GPUBuffer),
+//     offset: Uint32 = @import("std").mem.zeroes(Uint32),
+// };
+// pub const SDL_GPUBufferLocation = struct_SDL_GPUBufferLocation;
+// pub const struct_SDL_GPUBufferRegion = extern struct {
+//     buffer: ?*SDL_GPUBuffer = @import("std").mem.zeroes(?*SDL_GPUBuffer),
+//     offset: Uint32 = @import("std").mem.zeroes(Uint32),
+//     size: Uint32 = @import("std").mem.zeroes(Uint32),
+// };
+// pub const SDL_GPUBufferRegion = struct_SDL_GPUBufferRegion;
+// pub const struct_SDL_GPUIndirectDrawCommand = extern struct {
+//     num_vertices: Uint32 = @import("std").mem.zeroes(Uint32),
+//     num_instances: Uint32 = @import("std").mem.zeroes(Uint32),
+//     first_vertex: Uint32 = @import("std").mem.zeroes(Uint32),
+//     first_instance: Uint32 = @import("std").mem.zeroes(Uint32),
+// };
+// pub const SDL_GPUIndirectDrawCommand = struct_SDL_GPUIndirectDrawCommand;
+// pub const struct_SDL_GPUIndexedIndirectDrawCommand = extern struct {
+//     num_indices: Uint32 = @import("std").mem.zeroes(Uint32),
+//     num_instances: Uint32 = @import("std").mem.zeroes(Uint32),
+//     first_index: Uint32 = @import("std").mem.zeroes(Uint32),
+//     vertex_offset: Sint32 = @import("std").mem.zeroes(Sint32),
+//     first_instance: Uint32 = @import("std").mem.zeroes(Uint32),
+// };
+// pub const SDL_GPUIndexedIndirectDrawCommand = struct_SDL_GPUIndexedIndirectDrawCommand;
+// pub const struct_SDL_GPUIndirectDispatchCommand = extern struct {
+//     groupcount_x: Uint32 = @import("std").mem.zeroes(Uint32),
+//     groupcount_y: Uint32 = @import("std").mem.zeroes(Uint32),
+//     groupcount_z: Uint32 = @import("std").mem.zeroes(Uint32),
+// };
+// pub const SDL_GPUIndirectDispatchCommand = struct_SDL_GPUIndirectDispatchCommand;
+// pub const struct_SDL_GPUSamplerCreateInfo = extern struct {
+//     min_filter: SDL_GPUFilter = @import("std").mem.zeroes(SDL_GPUFilter),
+//     mag_filter: SDL_GPUFilter = @import("std").mem.zeroes(SDL_GPUFilter),
+//     mipmap_mode: SDL_GPUSamplerMipmapMode = @import("std").mem.zeroes(SDL_GPUSamplerMipmapMode),
+//     address_mode_u: SDL_GPUSamplerAddressMode = @import("std").mem.zeroes(SDL_GPUSamplerAddressMode),
+//     address_mode_v: SDL_GPUSamplerAddressMode = @import("std").mem.zeroes(SDL_GPUSamplerAddressMode),
+//     address_mode_w: SDL_GPUSamplerAddressMode = @import("std").mem.zeroes(SDL_GPUSamplerAddressMode),
+//     mip_lod_bias: f32 = @import("std").mem.zeroes(f32),
+//     max_anisotropy: f32 = @import("std").mem.zeroes(f32),
+//     compare_op: SDL_GPUCompareOp = @import("std").mem.zeroes(SDL_GPUCompareOp),
+//     min_lod: f32 = @import("std").mem.zeroes(f32),
+//     max_lod: f32 = @import("std").mem.zeroes(f32),
+//     enable_anisotropy: bool = @import("std").mem.zeroes(bool),
+//     enable_compare: bool = @import("std").mem.zeroes(bool),
+//     padding1: Uint8 = @import("std").mem.zeroes(Uint8),
+//     padding2: Uint8 = @import("std").mem.zeroes(Uint8),
+//     props: SDL_PropertiesID = @import("std").mem.zeroes(SDL_PropertiesID),
+// };
+// pub const SDL_GPUSamplerCreateInfo = struct_SDL_GPUSamplerCreateInfo;
+// pub const struct_SDL_GPUVertexBufferDescription = extern struct {
+//     slot: Uint32 = @import("std").mem.zeroes(Uint32),
+//     pitch: Uint32 = @import("std").mem.zeroes(Uint32),
+//     input_rate: SDL_GPUVertexInputRate = @import("std").mem.zeroes(SDL_GPUVertexInputRate),
+//     instance_step_rate: Uint32 = @import("std").mem.zeroes(Uint32),
+// };
+// pub const SDL_GPUVertexBufferDescription = struct_SDL_GPUVertexBufferDescription;
+// pub const struct_SDL_GPUVertexAttribute = extern struct {
+//     location: Uint32 = @import("std").mem.zeroes(Uint32),
+//     buffer_slot: Uint32 = @import("std").mem.zeroes(Uint32),
+//     format: SDL_GPUVertexElementFormat = @import("std").mem.zeroes(SDL_GPUVertexElementFormat),
+//     offset: Uint32 = @import("std").mem.zeroes(Uint32),
+// };
+// pub const SDL_GPUVertexAttribute = struct_SDL_GPUVertexAttribute;
+// pub const struct_SDL_GPUVertexInputState = extern struct {
+//     vertex_buffer_descriptions: [*c]const SDL_GPUVertexBufferDescription = @import("std").mem.zeroes([*c]const SDL_GPUVertexBufferDescription),
+//     num_vertex_buffers: Uint32 = @import("std").mem.zeroes(Uint32),
+//     vertex_attributes: [*c]const SDL_GPUVertexAttribute = @import("std").mem.zeroes([*c]const SDL_GPUVertexAttribute),
+//     num_vertex_attributes: Uint32 = @import("std").mem.zeroes(Uint32),
+// };
+// pub const SDL_GPUVertexInputState = struct_SDL_GPUVertexInputState;
+// pub const struct_SDL_GPUStencilOpState = extern struct {
+//     fail_op: SDL_GPUStencilOp = @import("std").mem.zeroes(SDL_GPUStencilOp),
+//     pass_op: SDL_GPUStencilOp = @import("std").mem.zeroes(SDL_GPUStencilOp),
+//     depth_fail_op: SDL_GPUStencilOp = @import("std").mem.zeroes(SDL_GPUStencilOp),
+//     compare_op: SDL_GPUCompareOp = @import("std").mem.zeroes(SDL_GPUCompareOp),
+// };
+// pub const SDL_GPUStencilOpState = struct_SDL_GPUStencilOpState;
+// pub const struct_SDL_GPUColorTargetBlendState = extern struct {
+//     src_color_blendfactor: SDL_GPUBlendFactor = @import("std").mem.zeroes(SDL_GPUBlendFactor),
+//     dst_color_blendfactor: SDL_GPUBlendFactor = @import("std").mem.zeroes(SDL_GPUBlendFactor),
+//     color_blend_op: SDL_GPUBlendOp = @import("std").mem.zeroes(SDL_GPUBlendOp),
+//     src_alpha_blendfactor: SDL_GPUBlendFactor = @import("std").mem.zeroes(SDL_GPUBlendFactor),
+//     dst_alpha_blendfactor: SDL_GPUBlendFactor = @import("std").mem.zeroes(SDL_GPUBlendFactor),
+//     alpha_blend_op: SDL_GPUBlendOp = @import("std").mem.zeroes(SDL_GPUBlendOp),
+//     color_write_mask: SDL_GPUColorComponentFlags = @import("std").mem.zeroes(SDL_GPUColorComponentFlags),
+//     enable_blend: bool = @import("std").mem.zeroes(bool),
+//     enable_color_write_mask: bool = @import("std").mem.zeroes(bool),
+//     padding1: Uint8 = @import("std").mem.zeroes(Uint8),
+//     padding2: Uint8 = @import("std").mem.zeroes(Uint8),
+// };
+// pub const SDL_GPUColorTargetBlendState = struct_SDL_GPUColorTargetBlendState;
+// pub const struct_SDL_GPUShaderCreateInfo = extern struct {
+//     code_size: usize = @import("std").mem.zeroes(usize),
+//     code: [*c]const Uint8 = @import("std").mem.zeroes([*c]const Uint8),
+//     entrypoint: [*c]const u8 = @import("std").mem.zeroes([*c]const u8),
+//     format: SDL_GPUShaderFormat = @import("std").mem.zeroes(SDL_GPUShaderFormat),
+//     stage: SDL_GPUShaderStage = @import("std").mem.zeroes(SDL_GPUShaderStage),
+//     num_samplers: Uint32 = @import("std").mem.zeroes(Uint32),
+//     num_storage_textures: Uint32 = @import("std").mem.zeroes(Uint32),
+//     num_storage_buffers: Uint32 = @import("std").mem.zeroes(Uint32),
+//     num_uniform_buffers: Uint32 = @import("std").mem.zeroes(Uint32),
+//     props: SDL_PropertiesID = @import("std").mem.zeroes(SDL_PropertiesID),
+// };
+// pub const SDL_GPUShaderCreateInfo = struct_SDL_GPUShaderCreateInfo;
+// pub const struct_SDL_GPUTextureCreateInfo = extern struct {
+//     type: SDL_GPUTextureType = @import("std").mem.zeroes(SDL_GPUTextureType),
+//     format: SDL_GPUTextureFormat = @import("std").mem.zeroes(SDL_GPUTextureFormat),
+//     usage: SDL_GPUTextureUsageFlags = @import("std").mem.zeroes(SDL_GPUTextureUsageFlags),
+//     width: Uint32 = @import("std").mem.zeroes(Uint32),
+//     height: Uint32 = @import("std").mem.zeroes(Uint32),
+//     layer_count_or_depth: Uint32 = @import("std").mem.zeroes(Uint32),
+//     num_levels: Uint32 = @import("std").mem.zeroes(Uint32),
+//     sample_count: SDL_GPUSampleCount = @import("std").mem.zeroes(SDL_GPUSampleCount),
+//     props: SDL_PropertiesID = @import("std").mem.zeroes(SDL_PropertiesID),
+// };
+// pub const SDL_GPUTextureCreateInfo = struct_SDL_GPUTextureCreateInfo;
+// pub const struct_SDL_GPUBufferCreateInfo = extern struct {
+//     usage: SDL_GPUBufferUsageFlags = @import("std").mem.zeroes(SDL_GPUBufferUsageFlags),
+//     size: Uint32 = @import("std").mem.zeroes(Uint32),
+//     props: SDL_PropertiesID = @import("std").mem.zeroes(SDL_PropertiesID),
+// };
+// pub const SDL_GPUBufferCreateInfo = struct_SDL_GPUBufferCreateInfo;
+// pub const struct_SDL_GPUTransferBufferCreateInfo = extern struct {
+//     usage: SDL_GPUTransferBufferUsage = @import("std").mem.zeroes(SDL_GPUTransferBufferUsage),
+//     size: Uint32 = @import("std").mem.zeroes(Uint32),
+//     props: SDL_PropertiesID = @import("std").mem.zeroes(SDL_PropertiesID),
+// };
+// pub const SDL_GPUTransferBufferCreateInfo = struct_SDL_GPUTransferBufferCreateInfo;
+// pub const struct_SDL_GPURasterizerState = extern struct {
+//     fill_mode: SDL_GPUFillMode = @import("std").mem.zeroes(SDL_GPUFillMode),
+//     cull_mode: SDL_GPUCullMode = @import("std").mem.zeroes(SDL_GPUCullMode),
+//     front_face: SDL_GPUFrontFace = @import("std").mem.zeroes(SDL_GPUFrontFace),
+//     depth_bias_constant_factor: f32 = @import("std").mem.zeroes(f32),
+//     depth_bias_clamp: f32 = @import("std").mem.zeroes(f32),
+//     depth_bias_slope_factor: f32 = @import("std").mem.zeroes(f32),
+//     enable_depth_bias: bool = @import("std").mem.zeroes(bool),
+//     enable_depth_clip: bool = @import("std").mem.zeroes(bool),
+//     padding1: Uint8 = @import("std").mem.zeroes(Uint8),
+//     padding2: Uint8 = @import("std").mem.zeroes(Uint8),
+// };
+// pub const SDL_GPURasterizerState = struct_SDL_GPURasterizerState;
+// pub const struct_SDL_GPUMultisampleState = extern struct {
+//     sample_count: SDL_GPUSampleCount = @import("std").mem.zeroes(SDL_GPUSampleCount),
+//     sample_mask: Uint32 = @import("std").mem.zeroes(Uint32),
+//     enable_mask: bool = @import("std").mem.zeroes(bool),
+//     padding1: Uint8 = @import("std").mem.zeroes(Uint8),
+//     padding2: Uint8 = @import("std").mem.zeroes(Uint8),
+//     padding3: Uint8 = @import("std").mem.zeroes(Uint8),
+// };
+// pub const SDL_GPUMultisampleState = struct_SDL_GPUMultisampleState;
+// pub const struct_SDL_GPUDepthStencilState = extern struct {
+//     compare_op: SDL_GPUCompareOp = @import("std").mem.zeroes(SDL_GPUCompareOp),
+//     back_stencil_state: SDL_GPUStencilOpState = @import("std").mem.zeroes(SDL_GPUStencilOpState),
+//     front_stencil_state: SDL_GPUStencilOpState = @import("std").mem.zeroes(SDL_GPUStencilOpState),
+//     compare_mask: Uint8 = @import("std").mem.zeroes(Uint8),
+//     write_mask: Uint8 = @import("std").mem.zeroes(Uint8),
+//     enable_depth_test: bool = @import("std").mem.zeroes(bool),
+//     enable_depth_write: bool = @import("std").mem.zeroes(bool),
+//     enable_stencil_test: bool = @import("std").mem.zeroes(bool),
+//     padding1: Uint8 = @import("std").mem.zeroes(Uint8),
+//     padding2: Uint8 = @import("std").mem.zeroes(Uint8),
+//     padding3: Uint8 = @import("std").mem.zeroes(Uint8),
+// };
+// pub const SDL_GPUDepthStencilState = struct_SDL_GPUDepthStencilState;
+// pub const struct_SDL_GPUColorTargetDescription = extern struct {
+//     format: SDL_GPUTextureFormat = @import("std").mem.zeroes(SDL_GPUTextureFormat),
+//     blend_state: SDL_GPUColorTargetBlendState = @import("std").mem.zeroes(SDL_GPUColorTargetBlendState),
+// };
+// pub const SDL_GPUColorTargetDescription = struct_SDL_GPUColorTargetDescription;
+// pub const struct_SDL_GPUGraphicsPipelineTargetInfo = extern struct {
+//     color_target_descriptions: [*c]const SDL_GPUColorTargetDescription = @import("std").mem.zeroes([*c]const SDL_GPUColorTargetDescription),
+//     num_color_targets: Uint32 = @import("std").mem.zeroes(Uint32),
+//     depth_stencil_format: SDL_GPUTextureFormat = @import("std").mem.zeroes(SDL_GPUTextureFormat),
+//     has_depth_stencil_target: bool = @import("std").mem.zeroes(bool),
+//     padding1: Uint8 = @import("std").mem.zeroes(Uint8),
+//     padding2: Uint8 = @import("std").mem.zeroes(Uint8),
+//     padding3: Uint8 = @import("std").mem.zeroes(Uint8),
+// };
+// pub const SDL_GPUGraphicsPipelineTargetInfo = struct_SDL_GPUGraphicsPipelineTargetInfo;
+// pub const struct_SDL_GPUGraphicsPipelineCreateInfo = extern struct {
+//     vertex_shader: ?*SDL_GPUShader = @import("std").mem.zeroes(?*SDL_GPUShader),
+//     fragment_shader: ?*SDL_GPUShader = @import("std").mem.zeroes(?*SDL_GPUShader),
+//     vertex_input_state: SDL_GPUVertexInputState = @import("std").mem.zeroes(SDL_GPUVertexInputState),
+//     primitive_type: SDL_GPUPrimitiveType = @import("std").mem.zeroes(SDL_GPUPrimitiveType),
+//     rasterizer_state: SDL_GPURasterizerState = @import("std").mem.zeroes(SDL_GPURasterizerState),
+//     multisample_state: SDL_GPUMultisampleState = @import("std").mem.zeroes(SDL_GPUMultisampleState),
+//     depth_stencil_state: SDL_GPUDepthStencilState = @import("std").mem.zeroes(SDL_GPUDepthStencilState),
+//     target_info: SDL_GPUGraphicsPipelineTargetInfo = @import("std").mem.zeroes(SDL_GPUGraphicsPipelineTargetInfo),
+//     props: SDL_PropertiesID = @import("std").mem.zeroes(SDL_PropertiesID),
+// };
+// pub const SDL_GPUGraphicsPipelineCreateInfo = struct_SDL_GPUGraphicsPipelineCreateInfo;
+// pub const struct_SDL_GPUComputePipelineCreateInfo = extern struct {
+//     code_size: usize = @import("std").mem.zeroes(usize),
+//     code: [*c]const Uint8 = @import("std").mem.zeroes([*c]const Uint8),
+//     entrypoint: [*c]const u8 = @import("std").mem.zeroes([*c]const u8),
+//     format: SDL_GPUShaderFormat = @import("std").mem.zeroes(SDL_GPUShaderFormat),
+//     num_samplers: Uint32 = @import("std").mem.zeroes(Uint32),
+//     num_readonly_storage_textures: Uint32 = @import("std").mem.zeroes(Uint32),
+//     num_readonly_storage_buffers: Uint32 = @import("std").mem.zeroes(Uint32),
+//     num_readwrite_storage_textures: Uint32 = @import("std").mem.zeroes(Uint32),
+//     num_readwrite_storage_buffers: Uint32 = @import("std").mem.zeroes(Uint32),
+//     num_uniform_buffers: Uint32 = @import("std").mem.zeroes(Uint32),
+//     threadcount_x: Uint32 = @import("std").mem.zeroes(Uint32),
+//     threadcount_y: Uint32 = @import("std").mem.zeroes(Uint32),
+//     threadcount_z: Uint32 = @import("std").mem.zeroes(Uint32),
+//     props: SDL_PropertiesID = @import("std").mem.zeroes(SDL_PropertiesID),
+// };
+// pub const SDL_GPUComputePipelineCreateInfo = struct_SDL_GPUComputePipelineCreateInfo;
+// pub const struct_SDL_GPUColorTargetInfo = extern struct {
+//     texture: ?*SDL_GPUTexture = @import("std").mem.zeroes(?*SDL_GPUTexture),
+//     mip_level: Uint32 = @import("std").mem.zeroes(Uint32),
+//     layer_or_depth_plane: Uint32 = @import("std").mem.zeroes(Uint32),
+//     clear_color: SDL_FColor = @import("std").mem.zeroes(SDL_FColor),
+//     load_op: SDL_GPULoadOp = @import("std").mem.zeroes(SDL_GPULoadOp),
+//     store_op: SDL_GPUStoreOp = @import("std").mem.zeroes(SDL_GPUStoreOp),
+//     resolve_texture: ?*SDL_GPUTexture = @import("std").mem.zeroes(?*SDL_GPUTexture),
+//     resolve_mip_level: Uint32 = @import("std").mem.zeroes(Uint32),
+//     resolve_layer: Uint32 = @import("std").mem.zeroes(Uint32),
+//     cycle: bool = @import("std").mem.zeroes(bool),
+//     cycle_resolve_texture: bool = @import("std").mem.zeroes(bool),
+//     padding1: Uint8 = @import("std").mem.zeroes(Uint8),
+//     padding2: Uint8 = @import("std").mem.zeroes(Uint8),
+// };
+// pub const SDL_GPUColorTargetInfo = struct_SDL_GPUColorTargetInfo;
+// pub const struct_SDL_GPUDepthStencilTargetInfo = extern struct {
+//     texture: ?*SDL_GPUTexture = @import("std").mem.zeroes(?*SDL_GPUTexture),
+//     clear_depth: f32 = @import("std").mem.zeroes(f32),
+//     load_op: SDL_GPULoadOp = @import("std").mem.zeroes(SDL_GPULoadOp),
+//     store_op: SDL_GPUStoreOp = @import("std").mem.zeroes(SDL_GPUStoreOp),
+//     stencil_load_op: SDL_GPULoadOp = @import("std").mem.zeroes(SDL_GPULoadOp),
+//     stencil_store_op: SDL_GPUStoreOp = @import("std").mem.zeroes(SDL_GPUStoreOp),
+//     cycle: bool = @import("std").mem.zeroes(bool),
+//     clear_stencil: Uint8 = @import("std").mem.zeroes(Uint8),
+//     padding1: Uint8 = @import("std").mem.zeroes(Uint8),
+//     padding2: Uint8 = @import("std").mem.zeroes(Uint8),
+// };
+// pub const SDL_GPUDepthStencilTargetInfo = struct_SDL_GPUDepthStencilTargetInfo;
+// pub const struct_SDL_GPUBlitInfo = extern struct {
+//     source: SDL_GPUBlitRegion = @import("std").mem.zeroes(SDL_GPUBlitRegion),
+//     destination: SDL_GPUBlitRegion = @import("std").mem.zeroes(SDL_GPUBlitRegion),
+//     load_op: SDL_GPULoadOp = @import("std").mem.zeroes(SDL_GPULoadOp),
+//     clear_color: SDL_FColor = @import("std").mem.zeroes(SDL_FColor),
+//     flip_mode: SDL_FlipMode = @import("std").mem.zeroes(SDL_FlipMode),
+//     filter: SDL_GPUFilter = @import("std").mem.zeroes(SDL_GPUFilter),
+//     cycle: bool = @import("std").mem.zeroes(bool),
+//     padding1: Uint8 = @import("std").mem.zeroes(Uint8),
+//     padding2: Uint8 = @import("std").mem.zeroes(Uint8),
+//     padding3: Uint8 = @import("std").mem.zeroes(Uint8),
+// };
+// pub const SDL_GPUBlitInfo = struct_SDL_GPUBlitInfo;
+// pub const struct_SDL_GPUBufferBinding = extern struct {
+//     buffer: ?*SDL_GPUBuffer = @import("std").mem.zeroes(?*SDL_GPUBuffer),
+//     offset: Uint32 = @import("std").mem.zeroes(Uint32),
+// };
+// pub const SDL_GPUBufferBinding = struct_SDL_GPUBufferBinding;
+// pub const struct_SDL_GPUTextureSamplerBinding = extern struct {
+//     texture: ?*SDL_GPUTexture = @import("std").mem.zeroes(?*SDL_GPUTexture),
+//     sampler: ?*SDL_GPUSampler = @import("std").mem.zeroes(?*SDL_GPUSampler),
+// };
+// pub const SDL_GPUTextureSamplerBinding = struct_SDL_GPUTextureSamplerBinding;
+// pub const struct_SDL_GPUStorageBufferReadWriteBinding = extern struct {
+//     buffer: ?*SDL_GPUBuffer = @import("std").mem.zeroes(?*SDL_GPUBuffer),
+//     cycle: bool = @import("std").mem.zeroes(bool),
+//     padding1: Uint8 = @import("std").mem.zeroes(Uint8),
+//     padding2: Uint8 = @import("std").mem.zeroes(Uint8),
+//     padding3: Uint8 = @import("std").mem.zeroes(Uint8),
+// };
+// pub const SDL_GPUStorageBufferReadWriteBinding = struct_SDL_GPUStorageBufferReadWriteBinding;
+// pub const struct_SDL_GPUStorageTextureReadWriteBinding = extern struct {
+//     texture: ?*SDL_GPUTexture = @import("std").mem.zeroes(?*SDL_GPUTexture),
+//     mip_level: Uint32 = @import("std").mem.zeroes(Uint32),
+//     layer: Uint32 = @import("std").mem.zeroes(Uint32),
+//     cycle: bool = @import("std").mem.zeroes(bool),
+//     padding1: Uint8 = @import("std").mem.zeroes(Uint8),
+//     padding2: Uint8 = @import("std").mem.zeroes(Uint8),
+//     padding3: Uint8 = @import("std").mem.zeroes(Uint8),
+// };
+// pub const SDL_GPUStorageTextureReadWriteBinding = struct_SDL_GPUStorageTextureReadWriteBinding;
+// pub extern fn SDL_GPUSupportsShaderFormats(format_flags: SDL_GPUShaderFormat, name: [*c]const u8) bool;
+// pub extern fn SDL_GPUSupportsProperties(props: SDL_PropertiesID) bool;
+// pub extern fn SDL_CreateGPUDevice(format_flags: SDL_GPUShaderFormat, debug_mode: bool, name: [*c]const u8) ?*SDL_GPUDevice;
+// pub extern fn SDL_CreateGPUDeviceWithProperties(props: SDL_PropertiesID) ?*SDL_GPUDevice;
+// pub extern fn SDL_DestroyGPUDevice(device: ?*SDL_GPUDevice) void;
+// pub extern fn SDL_GetNumGPUDrivers() c_int;
+// pub extern fn SDL_GetGPUDriver(index: c_int) [*c]const u8;
+// pub extern fn SDL_GetGPUDeviceDriver(device: ?*SDL_GPUDevice) [*c]const u8;
+// pub extern fn SDL_GetGPUShaderFormats(device: ?*SDL_GPUDevice) SDL_GPUShaderFormat;
+// pub extern fn SDL_CreateGPUComputePipeline(device: ?*SDL_GPUDevice, createinfo: [*c]const SDL_GPUComputePipelineCreateInfo) ?*SDL_GPUComputePipeline;
+// pub extern fn SDL_CreateGPUGraphicsPipeline(device: ?*SDL_GPUDevice, createinfo: [*c]const SDL_GPUGraphicsPipelineCreateInfo) ?*SDL_GPUGraphicsPipeline;
+// pub extern fn SDL_CreateGPUSampler(device: ?*SDL_GPUDevice, createinfo: [*c]const SDL_GPUSamplerCreateInfo) ?*SDL_GPUSampler;
+// pub extern fn SDL_CreateGPUShader(device: ?*SDL_GPUDevice, createinfo: [*c]const SDL_GPUShaderCreateInfo) ?*SDL_GPUShader;
+// pub extern fn SDL_CreateGPUTexture(device: ?*SDL_GPUDevice, createinfo: [*c]const SDL_GPUTextureCreateInfo) ?*SDL_GPUTexture;
+// pub extern fn SDL_CreateGPUBuffer(device: ?*SDL_GPUDevice, createinfo: [*c]const SDL_GPUBufferCreateInfo) ?*SDL_GPUBuffer;
+// pub extern fn SDL_CreateGPUTransferBuffer(device: ?*SDL_GPUDevice, createinfo: [*c]const SDL_GPUTransferBufferCreateInfo) ?*SDL_GPUTransferBuffer;
+// pub extern fn SDL_SetGPUBufferName(device: ?*SDL_GPUDevice, buffer: ?*SDL_GPUBuffer, text: [*c]const u8) void;
+// pub extern fn SDL_SetGPUTextureName(device: ?*SDL_GPUDevice, texture: ?*SDL_GPUTexture, text: [*c]const u8) void;
+// pub extern fn SDL_InsertGPUDebugLabel(command_buffer: ?*SDL_GPUCommandBuffer, text: [*c]const u8) void;
+// pub extern fn SDL_PushGPUDebugGroup(command_buffer: ?*SDL_GPUCommandBuffer, name: [*c]const u8) void;
+// pub extern fn SDL_PopGPUDebugGroup(command_buffer: ?*SDL_GPUCommandBuffer) void;
+// pub extern fn SDL_ReleaseGPUTexture(device: ?*SDL_GPUDevice, texture: ?*SDL_GPUTexture) void;
+// pub extern fn SDL_ReleaseGPUSampler(device: ?*SDL_GPUDevice, sampler: ?*SDL_GPUSampler) void;
+// pub extern fn SDL_ReleaseGPUBuffer(device: ?*SDL_GPUDevice, buffer: ?*SDL_GPUBuffer) void;
+// pub extern fn SDL_ReleaseGPUTransferBuffer(device: ?*SDL_GPUDevice, transfer_buffer: ?*SDL_GPUTransferBuffer) void;
+// pub extern fn SDL_ReleaseGPUComputePipeline(device: ?*SDL_GPUDevice, compute_pipeline: ?*SDL_GPUComputePipeline) void;
+// pub extern fn SDL_ReleaseGPUShader(device: ?*SDL_GPUDevice, shader: ?*SDL_GPUShader) void;
+// pub extern fn SDL_ReleaseGPUGraphicsPipeline(device: ?*SDL_GPUDevice, graphics_pipeline: ?*SDL_GPUGraphicsPipeline) void;
+// pub extern fn SDL_AcquireGPUCommandBuffer(device: ?*SDL_GPUDevice) ?*SDL_GPUCommandBuffer;
+// pub extern fn SDL_PushGPUVertexUniformData(command_buffer: ?*SDL_GPUCommandBuffer, slot_index: Uint32, data: ?*const anyopaque, length: Uint32) void;
+// pub extern fn SDL_PushGPUFragmentUniformData(command_buffer: ?*SDL_GPUCommandBuffer, slot_index: Uint32, data: ?*const anyopaque, length: Uint32) void;
+// pub extern fn SDL_PushGPUComputeUniformData(command_buffer: ?*SDL_GPUCommandBuffer, slot_index: Uint32, data: ?*const anyopaque, length: Uint32) void;
+// pub extern fn SDL_BeginGPURenderPass(command_buffer: ?*SDL_GPUCommandBuffer, color_target_infos: [*c]const SDL_GPUColorTargetInfo, num_color_targets: Uint32, depth_stencil_target_info: [*c]const SDL_GPUDepthStencilTargetInfo) ?*SDL_GPURenderPass;
+// pub extern fn SDL_BindGPUGraphicsPipeline(render_pass: ?*SDL_GPURenderPass, graphics_pipeline: ?*SDL_GPUGraphicsPipeline) void;
+// pub extern fn SDL_SetGPUViewport(render_pass: ?*SDL_GPURenderPass, viewport: [*c]const SDL_GPUViewport) void;
+// pub extern fn SDL_SetGPUScissor(render_pass: ?*SDL_GPURenderPass, scissor: [*c]const SDL_Rect) void;
+// pub extern fn SDL_SetGPUBlendConstants(render_pass: ?*SDL_GPURenderPass, blend_constants: SDL_FColor) void;
+// pub extern fn SDL_SetGPUStencilReference(render_pass: ?*SDL_GPURenderPass, reference: Uint8) void;
+// pub extern fn SDL_BindGPUVertexBuffers(render_pass: ?*SDL_GPURenderPass, first_slot: Uint32, bindings: [*c]const SDL_GPUBufferBinding, num_bindings: Uint32) void;
+// pub extern fn SDL_BindGPUIndexBuffer(render_pass: ?*SDL_GPURenderPass, binding: [*c]const SDL_GPUBufferBinding, index_element_size: SDL_GPUIndexElementSize) void;
+// pub extern fn SDL_BindGPUVertexSamplers(render_pass: ?*SDL_GPURenderPass, first_slot: Uint32, texture_sampler_bindings: [*c]const SDL_GPUTextureSamplerBinding, num_bindings: Uint32) void;
+// pub extern fn SDL_BindGPUVertexStorageTextures(render_pass: ?*SDL_GPURenderPass, first_slot: Uint32, storage_textures: [*c]const ?*SDL_GPUTexture, num_bindings: Uint32) void;
+// pub extern fn SDL_BindGPUVertexStorageBuffers(render_pass: ?*SDL_GPURenderPass, first_slot: Uint32, storage_buffers: [*c]const ?*SDL_GPUBuffer, num_bindings: Uint32) void;
+// pub extern fn SDL_BindGPUFragmentSamplers(render_pass: ?*SDL_GPURenderPass, first_slot: Uint32, texture_sampler_bindings: [*c]const SDL_GPUTextureSamplerBinding, num_bindings: Uint32) void;
+// pub extern fn SDL_BindGPUFragmentStorageTextures(render_pass: ?*SDL_GPURenderPass, first_slot: Uint32, storage_textures: [*c]const ?*SDL_GPUTexture, num_bindings: Uint32) void;
+// pub extern fn SDL_BindGPUFragmentStorageBuffers(render_pass: ?*SDL_GPURenderPass, first_slot: Uint32, storage_buffers: [*c]const ?*SDL_GPUBuffer, num_bindings: Uint32) void;
+// pub extern fn SDL_DrawGPUIndexedPrimitives(render_pass: ?*SDL_GPURenderPass, num_indices: Uint32, num_instances: Uint32, first_index: Uint32, vertex_offset: Sint32, first_instance: Uint32) void;
+// pub extern fn SDL_DrawGPUPrimitives(render_pass: ?*SDL_GPURenderPass, num_vertices: Uint32, num_instances: Uint32, first_vertex: Uint32, first_instance: Uint32) void;
+// pub extern fn SDL_DrawGPUPrimitivesIndirect(render_pass: ?*SDL_GPURenderPass, buffer: ?*SDL_GPUBuffer, offset: Uint32, draw_count: Uint32) void;
+// pub extern fn SDL_DrawGPUIndexedPrimitivesIndirect(render_pass: ?*SDL_GPURenderPass, buffer: ?*SDL_GPUBuffer, offset: Uint32, draw_count: Uint32) void;
+// pub extern fn SDL_EndGPURenderPass(render_pass: ?*SDL_GPURenderPass) void;
+// pub extern fn SDL_BeginGPUComputePass(command_buffer: ?*SDL_GPUCommandBuffer, storage_texture_bindings: [*c]const SDL_GPUStorageTextureReadWriteBinding, num_storage_texture_bindings: Uint32, storage_buffer_bindings: [*c]const SDL_GPUStorageBufferReadWriteBinding, num_storage_buffer_bindings: Uint32) ?*SDL_GPUComputePass;
+// pub extern fn SDL_BindGPUComputePipeline(compute_pass: ?*SDL_GPUComputePass, compute_pipeline: ?*SDL_GPUComputePipeline) void;
+// pub extern fn SDL_BindGPUComputeSamplers(compute_pass: ?*SDL_GPUComputePass, first_slot: Uint32, texture_sampler_bindings: [*c]const SDL_GPUTextureSamplerBinding, num_bindings: Uint32) void;
+// pub extern fn SDL_BindGPUComputeStorageTextures(compute_pass: ?*SDL_GPUComputePass, first_slot: Uint32, storage_textures: [*c]const ?*SDL_GPUTexture, num_bindings: Uint32) void;
+// pub extern fn SDL_BindGPUComputeStorageBuffers(compute_pass: ?*SDL_GPUComputePass, first_slot: Uint32, storage_buffers: [*c]const ?*SDL_GPUBuffer, num_bindings: Uint32) void;
+// pub extern fn SDL_DispatchGPUCompute(compute_pass: ?*SDL_GPUComputePass, groupcount_x: Uint32, groupcount_y: Uint32, groupcount_z: Uint32) void;
+// pub extern fn SDL_DispatchGPUComputeIndirect(compute_pass: ?*SDL_GPUComputePass, buffer: ?*SDL_GPUBuffer, offset: Uint32) void;
+// pub extern fn SDL_EndGPUComputePass(compute_pass: ?*SDL_GPUComputePass) void;
+// pub extern fn SDL_MapGPUTransferBuffer(device: ?*SDL_GPUDevice, transfer_buffer: ?*SDL_GPUTransferBuffer, cycle: bool) ?*anyopaque;
+// pub extern fn SDL_UnmapGPUTransferBuffer(device: ?*SDL_GPUDevice, transfer_buffer: ?*SDL_GPUTransferBuffer) void;
+// pub extern fn SDL_BeginGPUCopyPass(command_buffer: ?*SDL_GPUCommandBuffer) ?*SDL_GPUCopyPass;
+// pub extern fn SDL_UploadToGPUTexture(copy_pass: ?*SDL_GPUCopyPass, source: [*c]const SDL_GPUTextureTransferInfo, destination: [*c]const SDL_GPUTextureRegion, cycle: bool) void;
+// pub extern fn SDL_UploadToGPUBuffer(copy_pass: ?*SDL_GPUCopyPass, source: [*c]const SDL_GPUTransferBufferLocation, destination: [*c]const SDL_GPUBufferRegion, cycle: bool) void;
+// pub extern fn SDL_CopyGPUTextureToTexture(copy_pass: ?*SDL_GPUCopyPass, source: [*c]const SDL_GPUTextureLocation, destination: [*c]const SDL_GPUTextureLocation, w: Uint32, h: Uint32, d: Uint32, cycle: bool) void;
+// pub extern fn SDL_CopyGPUBufferToBuffer(copy_pass: ?*SDL_GPUCopyPass, source: [*c]const SDL_GPUBufferLocation, destination: [*c]const SDL_GPUBufferLocation, size: Uint32, cycle: bool) void;
+// pub extern fn SDL_DownloadFromGPUTexture(copy_pass: ?*SDL_GPUCopyPass, source: [*c]const SDL_GPUTextureRegion, destination: [*c]const SDL_GPUTextureTransferInfo) void;
+// pub extern fn SDL_DownloadFromGPUBuffer(copy_pass: ?*SDL_GPUCopyPass, source: [*c]const SDL_GPUBufferRegion, destination: [*c]const SDL_GPUTransferBufferLocation) void;
+// pub extern fn SDL_EndGPUCopyPass(copy_pass: ?*SDL_GPUCopyPass) void;
+// pub extern fn SDL_GenerateMipmapsForGPUTexture(command_buffer: ?*SDL_GPUCommandBuffer, texture: ?*SDL_GPUTexture) void;
+// pub extern fn SDL_BlitGPUTexture(command_buffer: ?*SDL_GPUCommandBuffer, info: [*c]const SDL_GPUBlitInfo) void;
+// pub extern fn SDL_WindowSupportsGPUSwapchainComposition(device: ?*SDL_GPUDevice, window: ?*SDL_Window, swapchain_composition: SDL_GPUSwapchainComposition) bool;
+// pub extern fn SDL_WindowSupportsGPUPresentMode(device: ?*SDL_GPUDevice, window: ?*SDL_Window, present_mode: SDL_GPUPresentMode) bool;
+// pub extern fn SDL_ClaimWindowForGPUDevice(device: ?*SDL_GPUDevice, window: ?*SDL_Window) bool;
+// pub extern fn SDL_ReleaseWindowFromGPUDevice(device: ?*SDL_GPUDevice, window: ?*SDL_Window) void;
+// pub extern fn SDL_SetGPUSwapchainParameters(device: ?*SDL_GPUDevice, window: ?*SDL_Window, swapchain_composition: SDL_GPUSwapchainComposition, present_mode: SDL_GPUPresentMode) bool;
+// pub extern fn SDL_SetGPUAllowedFramesInFlight(device: ?*SDL_GPUDevice, allowed_frames_in_flight: Uint32) bool;
+// pub extern fn SDL_GetGPUSwapchainTextureFormat(device: ?*SDL_GPUDevice, window: ?*SDL_Window) SDL_GPUTextureFormat;
+// pub extern fn SDL_AcquireGPUSwapchainTexture(command_buffer: ?*SDL_GPUCommandBuffer, window: ?*SDL_Window, swapchain_texture: [*c]?*SDL_GPUTexture, swapchain_texture_width: [*c]Uint32, swapchain_texture_height: [*c]Uint32) bool;
+// pub extern fn SDL_WaitForGPUSwapchain(device: ?*SDL_GPUDevice, window: ?*SDL_Window) bool;
+// pub extern fn SDL_WaitAndAcquireGPUSwapchainTexture(command_buffer: ?*SDL_GPUCommandBuffer, window: ?*SDL_Window, swapchain_texture: [*c]?*SDL_GPUTexture, swapchain_texture_width: [*c]Uint32, swapchain_texture_height: [*c]Uint32) bool;
+// pub extern fn SDL_SubmitGPUCommandBuffer(command_buffer: ?*SDL_GPUCommandBuffer) bool;
+// pub extern fn SDL_SubmitGPUCommandBufferAndAcquireFence(command_buffer: ?*SDL_GPUCommandBuffer) ?*SDL_GPUFence;
+// pub extern fn SDL_CancelGPUCommandBuffer(command_buffer: ?*SDL_GPUCommandBuffer) bool;
+// pub extern fn SDL_WaitForGPUIdle(device: ?*SDL_GPUDevice) bool;
+// pub extern fn SDL_WaitForGPUFences(device: ?*SDL_GPUDevice, wait_all: bool, fences: [*c]const ?*SDL_GPUFence, num_fences: Uint32) bool;
+// pub extern fn SDL_QueryGPUFence(device: ?*SDL_GPUDevice, fence: ?*SDL_GPUFence) bool;
+// pub extern fn SDL_ReleaseGPUFence(device: ?*SDL_GPUDevice, fence: ?*SDL_GPUFence) void;
+// pub extern fn SDL_GPUTextureFormatTexelBlockSize(format: SDL_GPUTextureFormat) Uint32;
+// pub extern fn SDL_GPUTextureSupportsFormat(device: ?*SDL_GPUDevice, format: SDL_GPUTextureFormat, @"type": SDL_GPUTextureType, usage: SDL_GPUTextureUsageFlags) bool;
+// pub extern fn SDL_GPUTextureSupportsSampleCount(device: ?*SDL_GPUDevice, format: SDL_GPUTextureFormat, sample_count: SDL_GPUSampleCount) bool;
+// pub extern fn SDL_CalculateGPUTextureFormatSize(format: SDL_GPUTextureFormat, width: Uint32, height: Uint32, depth_or_layer_count: Uint32) Uint32;
+// pub const struct_SDL_Haptic = opaque {};
+// pub const SDL_Haptic = struct_SDL_Haptic;
+// pub const struct_SDL_HapticDirection = extern struct {
+//     type: Uint8 = @import("std").mem.zeroes(Uint8),
+//     dir: [3]Sint32 = @import("std").mem.zeroes([3]Sint32),
+// };
+// pub const SDL_HapticDirection = struct_SDL_HapticDirection;
+// pub const struct_SDL_HapticConstant = extern struct {
+//     type: Uint16 = @import("std").mem.zeroes(Uint16),
+//     direction: SDL_HapticDirection = @import("std").mem.zeroes(SDL_HapticDirection),
+//     length: Uint32 = @import("std").mem.zeroes(Uint32),
+//     delay: Uint16 = @import("std").mem.zeroes(Uint16),
+//     button: Uint16 = @import("std").mem.zeroes(Uint16),
+//     interval: Uint16 = @import("std").mem.zeroes(Uint16),
+//     level: Sint16 = @import("std").mem.zeroes(Sint16),
+//     attack_length: Uint16 = @import("std").mem.zeroes(Uint16),
+//     attack_level: Uint16 = @import("std").mem.zeroes(Uint16),
+//     fade_length: Uint16 = @import("std").mem.zeroes(Uint16),
+//     fade_level: Uint16 = @import("std").mem.zeroes(Uint16),
+// };
+// pub const SDL_HapticConstant = struct_SDL_HapticConstant;
+// pub const struct_SDL_HapticPeriodic = extern struct {
+//     type: Uint16 = @import("std").mem.zeroes(Uint16),
+//     direction: SDL_HapticDirection = @import("std").mem.zeroes(SDL_HapticDirection),
+//     length: Uint32 = @import("std").mem.zeroes(Uint32),
+//     delay: Uint16 = @import("std").mem.zeroes(Uint16),
+//     button: Uint16 = @import("std").mem.zeroes(Uint16),
+//     interval: Uint16 = @import("std").mem.zeroes(Uint16),
+//     period: Uint16 = @import("std").mem.zeroes(Uint16),
+//     magnitude: Sint16 = @import("std").mem.zeroes(Sint16),
+//     offset: Sint16 = @import("std").mem.zeroes(Sint16),
+//     phase: Uint16 = @import("std").mem.zeroes(Uint16),
+//     attack_length: Uint16 = @import("std").mem.zeroes(Uint16),
+//     attack_level: Uint16 = @import("std").mem.zeroes(Uint16),
+//     fade_length: Uint16 = @import("std").mem.zeroes(Uint16),
+//     fade_level: Uint16 = @import("std").mem.zeroes(Uint16),
+// };
+// pub const SDL_HapticPeriodic = struct_SDL_HapticPeriodic;
+// pub const struct_SDL_HapticCondition = extern struct {
+//     type: Uint16 = @import("std").mem.zeroes(Uint16),
+//     direction: SDL_HapticDirection = @import("std").mem.zeroes(SDL_HapticDirection),
+//     length: Uint32 = @import("std").mem.zeroes(Uint32),
+//     delay: Uint16 = @import("std").mem.zeroes(Uint16),
+//     button: Uint16 = @import("std").mem.zeroes(Uint16),
+//     interval: Uint16 = @import("std").mem.zeroes(Uint16),
+//     right_sat: [3]Uint16 = @import("std").mem.zeroes([3]Uint16),
+//     left_sat: [3]Uint16 = @import("std").mem.zeroes([3]Uint16),
+//     right_coeff: [3]Sint16 = @import("std").mem.zeroes([3]Sint16),
+//     left_coeff: [3]Sint16 = @import("std").mem.zeroes([3]Sint16),
+//     deadband: [3]Uint16 = @import("std").mem.zeroes([3]Uint16),
+//     center: [3]Sint16 = @import("std").mem.zeroes([3]Sint16),
+// };
+// pub const SDL_HapticCondition = struct_SDL_HapticCondition;
+// pub const struct_SDL_HapticRamp = extern struct {
+//     type: Uint16 = @import("std").mem.zeroes(Uint16),
+//     direction: SDL_HapticDirection = @import("std").mem.zeroes(SDL_HapticDirection),
+//     length: Uint32 = @import("std").mem.zeroes(Uint32),
+//     delay: Uint16 = @import("std").mem.zeroes(Uint16),
+//     button: Uint16 = @import("std").mem.zeroes(Uint16),
+//     interval: Uint16 = @import("std").mem.zeroes(Uint16),
+//     start: Sint16 = @import("std").mem.zeroes(Sint16),
+//     end: Sint16 = @import("std").mem.zeroes(Sint16),
+//     attack_length: Uint16 = @import("std").mem.zeroes(Uint16),
+//     attack_level: Uint16 = @import("std").mem.zeroes(Uint16),
+//     fade_length: Uint16 = @import("std").mem.zeroes(Uint16),
+//     fade_level: Uint16 = @import("std").mem.zeroes(Uint16),
+// };
+// pub const SDL_HapticRamp = struct_SDL_HapticRamp;
+// pub const struct_SDL_HapticLeftRight = extern struct {
+//     type: Uint16 = @import("std").mem.zeroes(Uint16),
+//     length: Uint32 = @import("std").mem.zeroes(Uint32),
+//     large_magnitude: Uint16 = @import("std").mem.zeroes(Uint16),
+//     small_magnitude: Uint16 = @import("std").mem.zeroes(Uint16),
+// };
+// pub const SDL_HapticLeftRight = struct_SDL_HapticLeftRight;
+// pub const struct_SDL_HapticCustom = extern struct {
+//     type: Uint16 = @import("std").mem.zeroes(Uint16),
+//     direction: SDL_HapticDirection = @import("std").mem.zeroes(SDL_HapticDirection),
+//     length: Uint32 = @import("std").mem.zeroes(Uint32),
+//     delay: Uint16 = @import("std").mem.zeroes(Uint16),
+//     button: Uint16 = @import("std").mem.zeroes(Uint16),
+//     interval: Uint16 = @import("std").mem.zeroes(Uint16),
+//     channels: Uint8 = @import("std").mem.zeroes(Uint8),
+//     period: Uint16 = @import("std").mem.zeroes(Uint16),
+//     samples: Uint16 = @import("std").mem.zeroes(Uint16),
+//     data: [*c]Uint16 = @import("std").mem.zeroes([*c]Uint16),
+//     attack_length: Uint16 = @import("std").mem.zeroes(Uint16),
+//     attack_level: Uint16 = @import("std").mem.zeroes(Uint16),
+//     fade_length: Uint16 = @import("std").mem.zeroes(Uint16),
+//     fade_level: Uint16 = @import("std").mem.zeroes(Uint16),
+// };
+// pub const SDL_HapticCustom = struct_SDL_HapticCustom;
+// pub const union_SDL_HapticEffect = extern union {
+//     type: Uint16,
+//     constant: SDL_HapticConstant,
+//     periodic: SDL_HapticPeriodic,
+//     condition: SDL_HapticCondition,
+//     ramp: SDL_HapticRamp,
+//     leftright: SDL_HapticLeftRight,
+//     custom: SDL_HapticCustom,
+// };
+// pub const SDL_HapticEffect = union_SDL_HapticEffect;
+// pub const SDL_HapticID = Uint32;
+// pub extern fn SDL_GetHaptics(count: [*c]c_int) [*c]SDL_HapticID;
+// pub extern fn SDL_GetHapticNameForID(instance_id: SDL_HapticID) [*c]const u8;
+// pub extern fn SDL_OpenHaptic(instance_id: SDL_HapticID) ?*SDL_Haptic;
+// pub extern fn SDL_GetHapticFromID(instance_id: SDL_HapticID) ?*SDL_Haptic;
+// pub extern fn SDL_GetHapticID(haptic: ?*SDL_Haptic) SDL_HapticID;
+// pub extern fn SDL_GetHapticName(haptic: ?*SDL_Haptic) [*c]const u8;
+// pub extern fn SDL_IsMouseHaptic() bool;
+// pub extern fn SDL_OpenHapticFromMouse() ?*SDL_Haptic;
+// pub extern fn SDL_IsJoystickHaptic(joystick: ?*SDL_Joystick) bool;
+// pub extern fn SDL_OpenHapticFromJoystick(joystick: ?*SDL_Joystick) ?*SDL_Haptic;
+// pub extern fn SDL_CloseHaptic(haptic: ?*SDL_Haptic) void;
+// pub extern fn SDL_GetMaxHapticEffects(haptic: ?*SDL_Haptic) c_int;
+// pub extern fn SDL_GetMaxHapticEffectsPlaying(haptic: ?*SDL_Haptic) c_int;
+// pub extern fn SDL_GetHapticFeatures(haptic: ?*SDL_Haptic) Uint32;
+// pub extern fn SDL_GetNumHapticAxes(haptic: ?*SDL_Haptic) c_int;
+// pub extern fn SDL_HapticEffectSupported(haptic: ?*SDL_Haptic, effect: [*c]const SDL_HapticEffect) bool;
+// pub extern fn SDL_CreateHapticEffect(haptic: ?*SDL_Haptic, effect: [*c]const SDL_HapticEffect) c_int;
+// pub extern fn SDL_UpdateHapticEffect(haptic: ?*SDL_Haptic, effect: c_int, data: [*c]const SDL_HapticEffect) bool;
+// pub extern fn SDL_RunHapticEffect(haptic: ?*SDL_Haptic, effect: c_int, iterations: Uint32) bool;
+// pub extern fn SDL_StopHapticEffect(haptic: ?*SDL_Haptic, effect: c_int) bool;
+// pub extern fn SDL_DestroyHapticEffect(haptic: ?*SDL_Haptic, effect: c_int) void;
+// pub extern fn SDL_GetHapticEffectStatus(haptic: ?*SDL_Haptic, effect: c_int) bool;
+// pub extern fn SDL_SetHapticGain(haptic: ?*SDL_Haptic, gain: c_int) bool;
+// pub extern fn SDL_SetHapticAutocenter(haptic: ?*SDL_Haptic, autocenter: c_int) bool;
+// pub extern fn SDL_PauseHaptic(haptic: ?*SDL_Haptic) bool;
+// pub extern fn SDL_ResumeHaptic(haptic: ?*SDL_Haptic) bool;
+// pub extern fn SDL_StopHapticEffects(haptic: ?*SDL_Haptic) bool;
+// pub extern fn SDL_HapticRumbleSupported(haptic: ?*SDL_Haptic) bool;
+// pub extern fn SDL_InitHapticRumble(haptic: ?*SDL_Haptic) bool;
+// pub extern fn SDL_PlayHapticRumble(haptic: ?*SDL_Haptic, strength: f32, length: Uint32) bool;
+// pub extern fn SDL_StopHapticRumble(haptic: ?*SDL_Haptic) bool;
+// pub const struct_SDL_hid_device = opaque {};
+// pub const SDL_hid_device = struct_SDL_hid_device;
+// pub const SDL_HID_API_BUS_UNKNOWN: c_int = 0;
+// pub const SDL_HID_API_BUS_USB: c_int = 1;
+// pub const SDL_HID_API_BUS_BLUETOOTH: c_int = 2;
+// pub const SDL_HID_API_BUS_I2C: c_int = 3;
+// pub const SDL_HID_API_BUS_SPI: c_int = 4;
+// pub const enum_SDL_hid_bus_type = c_uint;
+// pub const SDL_hid_bus_type = enum_SDL_hid_bus_type;
+// pub const struct_SDL_hid_device_info = extern struct {
+//     path: [*c]u8 = @import("std").mem.zeroes([*c]u8),
+//     vendor_id: c_ushort = @import("std").mem.zeroes(c_ushort),
+//     product_id: c_ushort = @import("std").mem.zeroes(c_ushort),
+//     serial_number: [*c]wchar_t = @import("std").mem.zeroes([*c]wchar_t),
+//     release_number: c_ushort = @import("std").mem.zeroes(c_ushort),
+//     manufacturer_string: [*c]wchar_t = @import("std").mem.zeroes([*c]wchar_t),
+//     product_string: [*c]wchar_t = @import("std").mem.zeroes([*c]wchar_t),
+//     usage_page: c_ushort = @import("std").mem.zeroes(c_ushort),
+//     usage: c_ushort = @import("std").mem.zeroes(c_ushort),
+//     interface_number: c_int = @import("std").mem.zeroes(c_int),
+//     interface_class: c_int = @import("std").mem.zeroes(c_int),
+//     interface_subclass: c_int = @import("std").mem.zeroes(c_int),
+//     interface_protocol: c_int = @import("std").mem.zeroes(c_int),
+//     bus_type: SDL_hid_bus_type = @import("std").mem.zeroes(SDL_hid_bus_type),
+//     next: [*c]struct_SDL_hid_device_info = @import("std").mem.zeroes([*c]struct_SDL_hid_device_info),
+// };
+// pub const SDL_hid_device_info = struct_SDL_hid_device_info;
+// pub extern fn SDL_hid_init() c_int;
+// pub extern fn SDL_hid_exit() c_int;
+// pub extern fn SDL_hid_device_change_count() Uint32;
+// pub extern fn SDL_hid_enumerate(vendor_id: c_ushort, product_id: c_ushort) [*c]SDL_hid_device_info;
+// pub extern fn SDL_hid_free_enumeration(devs: [*c]SDL_hid_device_info) void;
+// pub extern fn SDL_hid_open(vendor_id: c_ushort, product_id: c_ushort, serial_number: [*c]const wchar_t) ?*SDL_hid_device;
+// pub extern fn SDL_hid_open_path(path: [*c]const u8) ?*SDL_hid_device;
+// pub extern fn SDL_hid_write(dev: ?*SDL_hid_device, data: [*c]const u8, length: usize) c_int;
+// pub extern fn SDL_hid_read_timeout(dev: ?*SDL_hid_device, data: [*c]u8, length: usize, milliseconds: c_int) c_int;
+// pub extern fn SDL_hid_read(dev: ?*SDL_hid_device, data: [*c]u8, length: usize) c_int;
+// pub extern fn SDL_hid_set_nonblocking(dev: ?*SDL_hid_device, nonblock: c_int) c_int;
+// pub extern fn SDL_hid_send_feature_report(dev: ?*SDL_hid_device, data: [*c]const u8, length: usize) c_int;
+// pub extern fn SDL_hid_get_feature_report(dev: ?*SDL_hid_device, data: [*c]u8, length: usize) c_int;
+// pub extern fn SDL_hid_get_input_report(dev: ?*SDL_hid_device, data: [*c]u8, length: usize) c_int;
+// pub extern fn SDL_hid_close(dev: ?*SDL_hid_device) c_int;
+// pub extern fn SDL_hid_get_manufacturer_string(dev: ?*SDL_hid_device, string: [*c]wchar_t, maxlen: usize) c_int;
+// pub extern fn SDL_hid_get_product_string(dev: ?*SDL_hid_device, string: [*c]wchar_t, maxlen: usize) c_int;
+// pub extern fn SDL_hid_get_serial_number_string(dev: ?*SDL_hid_device, string: [*c]wchar_t, maxlen: usize) c_int;
+// pub extern fn SDL_hid_get_indexed_string(dev: ?*SDL_hid_device, string_index: c_int, string: [*c]wchar_t, maxlen: usize) c_int;
+// pub extern fn SDL_hid_get_device_info(dev: ?*SDL_hid_device) [*c]SDL_hid_device_info;
+// pub extern fn SDL_hid_get_report_descriptor(dev: ?*SDL_hid_device, buf: [*c]u8, buf_size: usize) c_int;
+// pub extern fn SDL_hid_ble_scan(active: bool) void;
+// pub const SDL_HINT_DEFAULT: c_int = 0;
+// pub const SDL_HINT_NORMAL: c_int = 1;
+// pub const SDL_HINT_OVERRIDE: c_int = 2;
+// pub const enum_SDL_HintPriority = c_uint;
+// pub const SDL_HintPriority = enum_SDL_HintPriority;
+// pub extern fn SDL_SetHintWithPriority(name: [*c]const u8, value: [*c]const u8, priority: SDL_HintPriority) bool;
+// pub extern fn SDL_SetHint(name: [*c]const u8, value: [*c]const u8) bool;
+// pub extern fn SDL_ResetHint(name: [*c]const u8) bool;
+// pub extern fn SDL_ResetHints() void;
+// pub extern fn SDL_GetHint(name: [*c]const u8) [*c]const u8;
+// pub extern fn SDL_GetHintBoolean(name: [*c]const u8, default_value: bool) bool;
+// pub const SDL_HintCallback = ?*const fn (?*anyopaque, [*c]const u8, [*c]const u8, [*c]const u8) callconv(.c) void;
+// pub extern fn SDL_AddHintCallback(name: [*c]const u8, callback: SDL_HintCallback, userdata: ?*anyopaque) bool;
+// pub extern fn SDL_RemoveHintCallback(name: [*c]const u8, callback: SDL_HintCallback, userdata: ?*anyopaque) void;
+// pub const SDL_InitFlags = Uint32;
+// pub const SDL_APP_CONTINUE: c_int = 0;
+// pub const SDL_APP_SUCCESS: c_int = 1;
+// pub const SDL_APP_FAILURE: c_int = 2;
+// pub const enum_SDL_AppResult = c_uint;
+// pub const SDL_AppResult = enum_SDL_AppResult;
+// pub const SDL_AppInit_func = ?*const fn ([*c]?*anyopaque, c_int, [*c][*c]u8) callconv(.c) SDL_AppResult;
+// pub const SDL_AppIterate_func = ?*const fn (?*anyopaque) callconv(.c) SDL_AppResult;
+// pub const SDL_AppEvent_func = ?*const fn (?*anyopaque, [*c]SDL_Event) callconv(.c) SDL_AppResult;
+// pub const SDL_AppQuit_func = ?*const fn (?*anyopaque, SDL_AppResult) callconv(.c) void;
+// pub extern fn SDL_Init(flags: SDL_InitFlags) bool;
+// pub extern fn SDL_InitSubSystem(flags: SDL_InitFlags) bool;
+// pub extern fn SDL_QuitSubSystem(flags: SDL_InitFlags) void;
+// pub extern fn SDL_WasInit(flags: SDL_InitFlags) SDL_InitFlags;
+// pub extern fn SDL_Quit() void;
+// pub extern fn SDL_IsMainThread() bool;
+// pub const SDL_MainThreadCallback = ?*const fn (?*anyopaque) callconv(.c) void;
+// pub extern fn SDL_RunOnMainThread(callback: SDL_MainThreadCallback, userdata: ?*anyopaque, wait_complete: bool) bool;
+// pub extern fn SDL_SetAppMetadata(appname: [*c]const u8, appversion: [*c]const u8, appidentifier: [*c]const u8) bool;
+// pub extern fn SDL_SetAppMetadataProperty(name: [*c]const u8, value: [*c]const u8) bool;
+// pub extern fn SDL_GetAppMetadataProperty(name: [*c]const u8) [*c]const u8;
+// pub const struct_SDL_SharedObject = opaque {};
+// pub const SDL_SharedObject = struct_SDL_SharedObject;
+// pub extern fn SDL_LoadObject(sofile: [*c]const u8) ?*SDL_SharedObject;
+// pub extern fn SDL_LoadFunction(handle: ?*SDL_SharedObject, name: [*c]const u8) SDL_FunctionPointer;
+// pub extern fn SDL_UnloadObject(handle: ?*SDL_SharedObject) void;
+// pub const struct_SDL_Locale = extern struct {
+//     language: [*c]const u8 = @import("std").mem.zeroes([*c]const u8),
+//     country: [*c]const u8 = @import("std").mem.zeroes([*c]const u8),
+// };
+// pub const SDL_Locale = struct_SDL_Locale;
+// pub extern fn SDL_GetPreferredLocales(count: [*c]c_int) [*c][*c]SDL_Locale;
+// pub const SDL_LOG_CATEGORY_APPLICATION: c_int = 0;
+// pub const SDL_LOG_CATEGORY_ERROR: c_int = 1;
+// pub const SDL_LOG_CATEGORY_ASSERT: c_int = 2;
+// pub const SDL_LOG_CATEGORY_SYSTEM: c_int = 3;
+// pub const SDL_LOG_CATEGORY_AUDIO: c_int = 4;
+// pub const SDL_LOG_CATEGORY_VIDEO: c_int = 5;
+// pub const SDL_LOG_CATEGORY_RENDER: c_int = 6;
+// pub const SDL_LOG_CATEGORY_INPUT: c_int = 7;
+// pub const SDL_LOG_CATEGORY_TEST: c_int = 8;
+// pub const SDL_LOG_CATEGORY_GPU: c_int = 9;
+// pub const SDL_LOG_CATEGORY_RESERVED2: c_int = 10;
+// pub const SDL_LOG_CATEGORY_RESERVED3: c_int = 11;
+// pub const SDL_LOG_CATEGORY_RESERVED4: c_int = 12;
+// pub const SDL_LOG_CATEGORY_RESERVED5: c_int = 13;
+// pub const SDL_LOG_CATEGORY_RESERVED6: c_int = 14;
+// pub const SDL_LOG_CATEGORY_RESERVED7: c_int = 15;
+// pub const SDL_LOG_CATEGORY_RESERVED8: c_int = 16;
+// pub const SDL_LOG_CATEGORY_RESERVED9: c_int = 17;
+// pub const SDL_LOG_CATEGORY_RESERVED10: c_int = 18;
+// pub const SDL_LOG_CATEGORY_CUSTOM: c_int = 19;
+// pub const enum_SDL_LogCategory = c_uint;
+// pub const SDL_LogCategory = enum_SDL_LogCategory;
+// pub const SDL_LOG_PRIORITY_INVALID: c_int = 0;
+// pub const SDL_LOG_PRIORITY_TRACE: c_int = 1;
+// pub const SDL_LOG_PRIORITY_VERBOSE: c_int = 2;
+// pub const SDL_LOG_PRIORITY_DEBUG: c_int = 3;
+// pub const SDL_LOG_PRIORITY_INFO: c_int = 4;
+// pub const SDL_LOG_PRIORITY_WARN: c_int = 5;
+// pub const SDL_LOG_PRIORITY_ERROR: c_int = 6;
+// pub const SDL_LOG_PRIORITY_CRITICAL: c_int = 7;
+// pub const SDL_LOG_PRIORITY_COUNT: c_int = 8;
+// pub const enum_SDL_LogPriority = c_uint;
+// pub const SDL_LogPriority = enum_SDL_LogPriority;
+// pub extern fn SDL_SetLogPriorities(priority: SDL_LogPriority) void;
+// pub extern fn SDL_SetLogPriority(category: c_int, priority: SDL_LogPriority) void;
+// pub extern fn SDL_GetLogPriority(category: c_int) SDL_LogPriority;
+// pub extern fn SDL_ResetLogPriorities() void;
+// pub extern fn SDL_SetLogPriorityPrefix(priority: SDL_LogPriority, prefix: [*c]const u8) bool;
+// pub extern fn SDL_Log(fmt: [*c]const u8, ...) void;
+// pub extern fn SDL_LogTrace(category: c_int, fmt: [*c]const u8, ...) void;
+// pub extern fn SDL_LogVerbose(category: c_int, fmt: [*c]const u8, ...) void;
+// pub extern fn SDL_LogDebug(category: c_int, fmt: [*c]const u8, ...) void;
+// pub extern fn SDL_LogInfo(category: c_int, fmt: [*c]const u8, ...) void;
+// pub extern fn SDL_LogWarn(category: c_int, fmt: [*c]const u8, ...) void;
+// pub extern fn SDL_LogError(category: c_int, fmt: [*c]const u8, ...) void;
+// pub extern fn SDL_LogCritical(category: c_int, fmt: [*c]const u8, ...) void;
+// pub extern fn SDL_LogMessage(category: c_int, priority: SDL_LogPriority, fmt: [*c]const u8, ...) void;
+// pub extern fn SDL_LogMessageV(category: c_int, priority: SDL_LogPriority, fmt: [*c]const u8, ap: [*c]struct___va_list_tag_1) void;
+// pub const SDL_LogOutputFunction = ?*const fn (?*anyopaque, c_int, SDL_LogPriority, [*c]const u8) callconv(.c) void;
+// pub extern fn SDL_GetDefaultLogOutputFunction() SDL_LogOutputFunction;
+// pub extern fn SDL_GetLogOutputFunction(callback: [*c]SDL_LogOutputFunction, userdata: [*c]?*anyopaque) void;
+// pub extern fn SDL_SetLogOutputFunction(callback: SDL_LogOutputFunction, userdata: ?*anyopaque) void;
+// pub const SDL_MessageBoxFlags = Uint32;
+// pub const SDL_MessageBoxButtonFlags = Uint32;
+// pub const struct_SDL_MessageBoxButtonData = extern struct {
+//     flags: SDL_MessageBoxButtonFlags = @import("std").mem.zeroes(SDL_MessageBoxButtonFlags),
+//     buttonID: c_int = @import("std").mem.zeroes(c_int),
+//     text: [*c]const u8 = @import("std").mem.zeroes([*c]const u8),
+// };
+// pub const SDL_MessageBoxButtonData = struct_SDL_MessageBoxButtonData;
+// pub const struct_SDL_MessageBoxColor = extern struct {
+//     r: Uint8 = @import("std").mem.zeroes(Uint8),
+//     g: Uint8 = @import("std").mem.zeroes(Uint8),
+//     b: Uint8 = @import("std").mem.zeroes(Uint8),
+// };
+// pub const SDL_MessageBoxColor = struct_SDL_MessageBoxColor;
+// pub const SDL_MESSAGEBOX_COLOR_BACKGROUND: c_int = 0;
+// pub const SDL_MESSAGEBOX_COLOR_TEXT: c_int = 1;
+// pub const SDL_MESSAGEBOX_COLOR_BUTTON_BORDER: c_int = 2;
+// pub const SDL_MESSAGEBOX_COLOR_BUTTON_BACKGROUND: c_int = 3;
+// pub const SDL_MESSAGEBOX_COLOR_BUTTON_SELECTED: c_int = 4;
+// pub const SDL_MESSAGEBOX_COLOR_COUNT: c_int = 5;
+// pub const enum_SDL_MessageBoxColorType = c_uint;
+// pub const SDL_MessageBoxColorType = enum_SDL_MessageBoxColorType;
+// pub const struct_SDL_MessageBoxColorScheme = extern struct {
+//     colors: [5]SDL_MessageBoxColor = @import("std").mem.zeroes([5]SDL_MessageBoxColor),
+// };
+// pub const SDL_MessageBoxColorScheme = struct_SDL_MessageBoxColorScheme;
+// pub const struct_SDL_MessageBoxData = extern struct {
+//     flags: SDL_MessageBoxFlags = @import("std").mem.zeroes(SDL_MessageBoxFlags),
+//     window: ?*SDL_Window = @import("std").mem.zeroes(?*SDL_Window),
+//     title: [*c]const u8 = @import("std").mem.zeroes([*c]const u8),
+//     message: [*c]const u8 = @import("std").mem.zeroes([*c]const u8),
+//     numbuttons: c_int = @import("std").mem.zeroes(c_int),
+//     buttons: [*c]const SDL_MessageBoxButtonData = @import("std").mem.zeroes([*c]const SDL_MessageBoxButtonData),
+//     colorScheme: [*c]const SDL_MessageBoxColorScheme = @import("std").mem.zeroes([*c]const SDL_MessageBoxColorScheme),
+// };
+// pub const SDL_MessageBoxData = struct_SDL_MessageBoxData;
+// pub extern fn SDL_ShowMessageBox(messageboxdata: [*c]const SDL_MessageBoxData, buttonid: [*c]c_int) bool;
+// pub extern fn SDL_ShowSimpleMessageBox(flags: SDL_MessageBoxFlags, title: [*c]const u8, message: [*c]const u8, window: ?*SDL_Window) bool;
+// pub const SDL_MetalView = ?*anyopaque;
+// pub extern fn SDL_Metal_CreateView(window: ?*SDL_Window) SDL_MetalView;
+// pub extern fn SDL_Metal_DestroyView(view: SDL_MetalView) void;
+// pub extern fn SDL_Metal_GetLayer(view: SDL_MetalView) ?*anyopaque;
+// pub extern fn SDL_OpenURL(url: [*c]const u8) bool;
+// pub extern fn SDL_GetPlatform() [*c]const u8;
+// pub const struct_SDL_Process = opaque {};
+// pub const SDL_Process = struct_SDL_Process;
+// pub extern fn SDL_CreateProcess(args: [*c]const [*c]const u8, pipe_stdio: bool) ?*SDL_Process;
+// pub const SDL_PROCESS_STDIO_INHERITED: c_int = 0;
+// pub const SDL_PROCESS_STDIO_NULL: c_int = 1;
+// pub const SDL_PROCESS_STDIO_APP: c_int = 2;
+// pub const SDL_PROCESS_STDIO_REDIRECT: c_int = 3;
+// pub const enum_SDL_ProcessIO = c_uint;
+// pub const SDL_ProcessIO = enum_SDL_ProcessIO;
+// pub extern fn SDL_CreateProcessWithProperties(props: SDL_PropertiesID) ?*SDL_Process;
+// pub extern fn SDL_GetProcessProperties(process: ?*SDL_Process) SDL_PropertiesID;
+// pub extern fn SDL_ReadProcess(process: ?*SDL_Process, datasize: [*c]usize, exitcode: [*c]c_int) ?*anyopaque;
+// pub extern fn SDL_GetProcessInput(process: ?*SDL_Process) ?*SDL_IOStream;
+// pub extern fn SDL_GetProcessOutput(process: ?*SDL_Process) ?*SDL_IOStream;
+// pub extern fn SDL_KillProcess(process: ?*SDL_Process, force: bool) bool;
+// pub extern fn SDL_WaitProcess(process: ?*SDL_Process, block: bool, exitcode: [*c]c_int) bool;
+// pub extern fn SDL_DestroyProcess(process: ?*SDL_Process) void;
+// pub const struct_SDL_Vertex = extern struct {
+//     position: SDL_FPoint = @import("std").mem.zeroes(SDL_FPoint),
+//     color: SDL_FColor = @import("std").mem.zeroes(SDL_FColor),
+//     tex_coord: SDL_FPoint = @import("std").mem.zeroes(SDL_FPoint),
+// };
+// pub const SDL_Vertex = struct_SDL_Vertex;
+// pub const SDL_TEXTUREACCESS_STATIC: c_int = 0;
+// pub const SDL_TEXTUREACCESS_STREAMING: c_int = 1;
+// pub const SDL_TEXTUREACCESS_TARGET: c_int = 2;
+// pub const enum_SDL_TextureAccess = c_uint;
+// pub const SDL_TextureAccess = enum_SDL_TextureAccess;
+// pub const SDL_LOGICAL_PRESENTATION_DISABLED: c_int = 0;
+// pub const SDL_LOGICAL_PRESENTATION_STRETCH: c_int = 1;
+// pub const SDL_LOGICAL_PRESENTATION_LETTERBOX: c_int = 2;
+// pub const SDL_LOGICAL_PRESENTATION_OVERSCAN: c_int = 3;
+// pub const SDL_LOGICAL_PRESENTATION_INTEGER_SCALE: c_int = 4;
+// pub const enum_SDL_RendererLogicalPresentation = c_uint;
+// pub const SDL_RendererLogicalPresentation = enum_SDL_RendererLogicalPresentation;
+// pub const struct_SDL_Renderer = opaque {};
+// pub const SDL_Renderer = struct_SDL_Renderer;
+// pub const struct_SDL_Texture = extern struct {
+//     format: SDL_PixelFormat = @import("std").mem.zeroes(SDL_PixelFormat),
+//     w: c_int = @import("std").mem.zeroes(c_int),
+//     h: c_int = @import("std").mem.zeroes(c_int),
+//     refcount: c_int = @import("std").mem.zeroes(c_int),
+// };
+// pub const SDL_Texture = struct_SDL_Texture;
+// pub extern fn SDL_GetNumRenderDrivers() c_int;
+// pub extern fn SDL_GetRenderDriver(index: c_int) [*c]const u8;
+// pub extern fn SDL_CreateWindowAndRenderer(title: [*c]const u8, width: c_int, height: c_int, window_flags: SDL_WindowFlags, window: [*c]?*SDL_Window, renderer: [*c]?*SDL_Renderer) bool;
+// pub extern fn SDL_CreateRenderer(window: ?*SDL_Window, name: [*c]const u8) ?*SDL_Renderer;
+// pub extern fn SDL_CreateRendererWithProperties(props: SDL_PropertiesID) ?*SDL_Renderer;
+// pub extern fn SDL_CreateSoftwareRenderer(surface: [*c]SDL_Surface) ?*SDL_Renderer;
+// pub extern fn SDL_GetRenderer(window: ?*SDL_Window) ?*SDL_Renderer;
+// pub extern fn SDL_GetRenderWindow(renderer: ?*SDL_Renderer) ?*SDL_Window;
+// pub extern fn SDL_GetRendererName(renderer: ?*SDL_Renderer) [*c]const u8;
+// pub extern fn SDL_GetRendererProperties(renderer: ?*SDL_Renderer) SDL_PropertiesID;
+// pub extern fn SDL_GetRenderOutputSize(renderer: ?*SDL_Renderer, w: [*c]c_int, h: [*c]c_int) bool;
+// pub extern fn SDL_GetCurrentRenderOutputSize(renderer: ?*SDL_Renderer, w: [*c]c_int, h: [*c]c_int) bool;
+// pub extern fn SDL_CreateTexture(renderer: ?*SDL_Renderer, format: SDL_PixelFormat, access: SDL_TextureAccess, w: c_int, h: c_int) [*c]SDL_Texture;
+// pub extern fn SDL_CreateTextureFromSurface(renderer: ?*SDL_Renderer, surface: [*c]SDL_Surface) [*c]SDL_Texture;
+// pub extern fn SDL_CreateTextureWithProperties(renderer: ?*SDL_Renderer, props: SDL_PropertiesID) [*c]SDL_Texture;
+// pub extern fn SDL_GetTextureProperties(texture: [*c]SDL_Texture) SDL_PropertiesID;
+// pub extern fn SDL_GetRendererFromTexture(texture: [*c]SDL_Texture) ?*SDL_Renderer;
+// pub extern fn SDL_GetTextureSize(texture: [*c]SDL_Texture, w: [*c]f32, h: [*c]f32) bool;
+// pub extern fn SDL_SetTextureColorMod(texture: [*c]SDL_Texture, r: Uint8, g: Uint8, b: Uint8) bool;
+// pub extern fn SDL_SetTextureColorModFloat(texture: [*c]SDL_Texture, r: f32, g: f32, b: f32) bool;
+// pub extern fn SDL_GetTextureColorMod(texture: [*c]SDL_Texture, r: [*c]Uint8, g: [*c]Uint8, b: [*c]Uint8) bool;
+// pub extern fn SDL_GetTextureColorModFloat(texture: [*c]SDL_Texture, r: [*c]f32, g: [*c]f32, b: [*c]f32) bool;
+// pub extern fn SDL_SetTextureAlphaMod(texture: [*c]SDL_Texture, alpha: Uint8) bool;
+// pub extern fn SDL_SetTextureAlphaModFloat(texture: [*c]SDL_Texture, alpha: f32) bool;
+// pub extern fn SDL_GetTextureAlphaMod(texture: [*c]SDL_Texture, alpha: [*c]Uint8) bool;
+// pub extern fn SDL_GetTextureAlphaModFloat(texture: [*c]SDL_Texture, alpha: [*c]f32) bool;
+// pub extern fn SDL_SetTextureBlendMode(texture: [*c]SDL_Texture, blendMode: SDL_BlendMode) bool;
+// pub extern fn SDL_GetTextureBlendMode(texture: [*c]SDL_Texture, blendMode: [*c]SDL_BlendMode) bool;
+// pub extern fn SDL_SetTextureScaleMode(texture: [*c]SDL_Texture, scaleMode: SDL_ScaleMode) bool;
+// pub extern fn SDL_GetTextureScaleMode(texture: [*c]SDL_Texture, scaleMode: [*c]SDL_ScaleMode) bool;
+// pub extern fn SDL_UpdateTexture(texture: [*c]SDL_Texture, rect: [*c]const SDL_Rect, pixels: ?*const anyopaque, pitch: c_int) bool;
+// pub extern fn SDL_UpdateYUVTexture(texture: [*c]SDL_Texture, rect: [*c]const SDL_Rect, Yplane: [*c]const Uint8, Ypitch: c_int, Uplane: [*c]const Uint8, Upitch: c_int, Vplane: [*c]const Uint8, Vpitch: c_int) bool;
+// pub extern fn SDL_UpdateNVTexture(texture: [*c]SDL_Texture, rect: [*c]const SDL_Rect, Yplane: [*c]const Uint8, Ypitch: c_int, UVplane: [*c]const Uint8, UVpitch: c_int) bool;
+// pub extern fn SDL_LockTexture(texture: [*c]SDL_Texture, rect: [*c]const SDL_Rect, pixels: [*c]?*anyopaque, pitch: [*c]c_int) bool;
+// pub extern fn SDL_LockTextureToSurface(texture: [*c]SDL_Texture, rect: [*c]const SDL_Rect, surface: [*c][*c]SDL_Surface) bool;
+// pub extern fn SDL_UnlockTexture(texture: [*c]SDL_Texture) void;
+// pub extern fn SDL_SetRenderTarget(renderer: ?*SDL_Renderer, texture: [*c]SDL_Texture) bool;
+// pub extern fn SDL_GetRenderTarget(renderer: ?*SDL_Renderer) [*c]SDL_Texture;
+// pub extern fn SDL_SetRenderLogicalPresentation(renderer: ?*SDL_Renderer, w: c_int, h: c_int, mode: SDL_RendererLogicalPresentation) bool;
+// pub extern fn SDL_GetRenderLogicalPresentation(renderer: ?*SDL_Renderer, w: [*c]c_int, h: [*c]c_int, mode: [*c]SDL_RendererLogicalPresentation) bool;
+// pub extern fn SDL_GetRenderLogicalPresentationRect(renderer: ?*SDL_Renderer, rect: [*c]SDL_FRect) bool;
+// pub extern fn SDL_RenderCoordinatesFromWindow(renderer: ?*SDL_Renderer, window_x: f32, window_y: f32, x: [*c]f32, y: [*c]f32) bool;
+// pub extern fn SDL_RenderCoordinatesToWindow(renderer: ?*SDL_Renderer, x: f32, y: f32, window_x: [*c]f32, window_y: [*c]f32) bool;
+// pub extern fn SDL_ConvertEventToRenderCoordinates(renderer: ?*SDL_Renderer, event: [*c]SDL_Event) bool;
+// pub extern fn SDL_SetRenderViewport(renderer: ?*SDL_Renderer, rect: [*c]const SDL_Rect) bool;
+// pub extern fn SDL_GetRenderViewport(renderer: ?*SDL_Renderer, rect: [*c]SDL_Rect) bool;
+// pub extern fn SDL_RenderViewportSet(renderer: ?*SDL_Renderer) bool;
+// pub extern fn SDL_GetRenderSafeArea(renderer: ?*SDL_Renderer, rect: [*c]SDL_Rect) bool;
+// pub extern fn SDL_SetRenderClipRect(renderer: ?*SDL_Renderer, rect: [*c]const SDL_Rect) bool;
+// pub extern fn SDL_GetRenderClipRect(renderer: ?*SDL_Renderer, rect: [*c]SDL_Rect) bool;
+// pub extern fn SDL_RenderClipEnabled(renderer: ?*SDL_Renderer) bool;
+// pub extern fn SDL_SetRenderScale(renderer: ?*SDL_Renderer, scaleX: f32, scaleY: f32) bool;
+// pub extern fn SDL_GetRenderScale(renderer: ?*SDL_Renderer, scaleX: [*c]f32, scaleY: [*c]f32) bool;
+// pub extern fn SDL_SetRenderDrawColor(renderer: ?*SDL_Renderer, r: Uint8, g: Uint8, b: Uint8, a: Uint8) bool;
+// pub extern fn SDL_SetRenderDrawColorFloat(renderer: ?*SDL_Renderer, r: f32, g: f32, b: f32, a: f32) bool;
+// pub extern fn SDL_GetRenderDrawColor(renderer: ?*SDL_Renderer, r: [*c]Uint8, g: [*c]Uint8, b: [*c]Uint8, a: [*c]Uint8) bool;
+// pub extern fn SDL_GetRenderDrawColorFloat(renderer: ?*SDL_Renderer, r: [*c]f32, g: [*c]f32, b: [*c]f32, a: [*c]f32) bool;
+// pub extern fn SDL_SetRenderColorScale(renderer: ?*SDL_Renderer, scale: f32) bool;
+// pub extern fn SDL_GetRenderColorScale(renderer: ?*SDL_Renderer, scale: [*c]f32) bool;
+// pub extern fn SDL_SetRenderDrawBlendMode(renderer: ?*SDL_Renderer, blendMode: SDL_BlendMode) bool;
+// pub extern fn SDL_GetRenderDrawBlendMode(renderer: ?*SDL_Renderer, blendMode: [*c]SDL_BlendMode) bool;
+// pub extern fn SDL_RenderClear(renderer: ?*SDL_Renderer) bool;
+// pub extern fn SDL_RenderPoint(renderer: ?*SDL_Renderer, x: f32, y: f32) bool;
+// pub extern fn SDL_RenderPoints(renderer: ?*SDL_Renderer, points: [*c]const SDL_FPoint, count: c_int) bool;
+// pub extern fn SDL_RenderLine(renderer: ?*SDL_Renderer, x1: f32, y1: f32, x2: f32, y2: f32) bool;
+// pub extern fn SDL_RenderLines(renderer: ?*SDL_Renderer, points: [*c]const SDL_FPoint, count: c_int) bool;
+// pub extern fn SDL_RenderRect(renderer: ?*SDL_Renderer, rect: [*c]const SDL_FRect) bool;
+// pub extern fn SDL_RenderRects(renderer: ?*SDL_Renderer, rects: [*c]const SDL_FRect, count: c_int) bool;
+// pub extern fn SDL_RenderFillRect(renderer: ?*SDL_Renderer, rect: [*c]const SDL_FRect) bool;
+// pub extern fn SDL_RenderFillRects(renderer: ?*SDL_Renderer, rects: [*c]const SDL_FRect, count: c_int) bool;
+// pub extern fn SDL_RenderTexture(renderer: ?*SDL_Renderer, texture: [*c]SDL_Texture, srcrect: [*c]const SDL_FRect, dstrect: [*c]const SDL_FRect) bool;
+// pub extern fn SDL_RenderTextureRotated(renderer: ?*SDL_Renderer, texture: [*c]SDL_Texture, srcrect: [*c]const SDL_FRect, dstrect: [*c]const SDL_FRect, angle: f64, center: [*c]const SDL_FPoint, flip: SDL_FlipMode) bool;
+// pub extern fn SDL_RenderTextureAffine(renderer: ?*SDL_Renderer, texture: [*c]SDL_Texture, srcrect: [*c]const SDL_FRect, origin: [*c]const SDL_FPoint, right: [*c]const SDL_FPoint, down: [*c]const SDL_FPoint) bool;
+// pub extern fn SDL_RenderTextureTiled(renderer: ?*SDL_Renderer, texture: [*c]SDL_Texture, srcrect: [*c]const SDL_FRect, scale: f32, dstrect: [*c]const SDL_FRect) bool;
+// pub extern fn SDL_RenderTexture9Grid(renderer: ?*SDL_Renderer, texture: [*c]SDL_Texture, srcrect: [*c]const SDL_FRect, left_width: f32, right_width: f32, top_height: f32, bottom_height: f32, scale: f32, dstrect: [*c]const SDL_FRect) bool;
+// pub extern fn SDL_RenderGeometry(renderer: ?*SDL_Renderer, texture: [*c]SDL_Texture, vertices: [*c]const SDL_Vertex, num_vertices: c_int, indices: [*c]const c_int, num_indices: c_int) bool;
+// pub extern fn SDL_RenderGeometryRaw(renderer: ?*SDL_Renderer, texture: [*c]SDL_Texture, xy: [*c]const f32, xy_stride: c_int, color: [*c]const SDL_FColor, color_stride: c_int, uv: [*c]const f32, uv_stride: c_int, num_vertices: c_int, indices: ?*const anyopaque, num_indices: c_int, size_indices: c_int) bool;
+// pub extern fn SDL_RenderReadPixels(renderer: ?*SDL_Renderer, rect: [*c]const SDL_Rect) [*c]SDL_Surface;
+// pub extern fn SDL_RenderPresent(renderer: ?*SDL_Renderer) bool;
+// pub extern fn SDL_DestroyTexture(texture: [*c]SDL_Texture) void;
+// pub extern fn SDL_DestroyRenderer(renderer: ?*SDL_Renderer) void;
+// pub extern fn SDL_FlushRenderer(renderer: ?*SDL_Renderer) bool;
+// pub extern fn SDL_GetRenderMetalLayer(renderer: ?*SDL_Renderer) ?*anyopaque;
+// pub extern fn SDL_GetRenderMetalCommandEncoder(renderer: ?*SDL_Renderer) ?*anyopaque;
+// pub extern fn SDL_AddVulkanRenderSemaphores(renderer: ?*SDL_Renderer, wait_stage_mask: Uint32, wait_semaphore: Sint64, signal_semaphore: Sint64) bool;
+// pub extern fn SDL_SetRenderVSync(renderer: ?*SDL_Renderer, vsync: c_int) bool;
+// pub extern fn SDL_GetRenderVSync(renderer: ?*SDL_Renderer, vsync: [*c]c_int) bool;
+// pub extern fn SDL_RenderDebugText(renderer: ?*SDL_Renderer, x: f32, y: f32, str: [*c]const u8) bool;
+// pub extern fn SDL_RenderDebugTextFormat(renderer: ?*SDL_Renderer, x: f32, y: f32, fmt: [*c]const u8, ...) bool;
+// pub const struct_SDL_StorageInterface = extern struct {
+//     version: Uint32 = @import("std").mem.zeroes(Uint32),
+//     close: ?*const fn (?*anyopaque) callconv(.c) bool = @import("std").mem.zeroes(?*const fn (?*anyopaque) callconv(.c) bool),
+//     ready: ?*const fn (?*anyopaque) callconv(.c) bool = @import("std").mem.zeroes(?*const fn (?*anyopaque) callconv(.c) bool),
+//     enumerate: ?*const fn (?*anyopaque, [*c]const u8, SDL_EnumerateDirectoryCallback, ?*anyopaque) callconv(.c) bool = @import("std").mem.zeroes(?*const fn (?*anyopaque, [*c]const u8, SDL_EnumerateDirectoryCallback, ?*anyopaque) callconv(.c) bool),
+//     info: ?*const fn (?*anyopaque, [*c]const u8, [*c]SDL_PathInfo) callconv(.c) bool = @import("std").mem.zeroes(?*const fn (?*anyopaque, [*c]const u8, [*c]SDL_PathInfo) callconv(.c) bool),
+//     read_file: ?*const fn (?*anyopaque, [*c]const u8, ?*anyopaque, Uint64) callconv(.c) bool = @import("std").mem.zeroes(?*const fn (?*anyopaque, [*c]const u8, ?*anyopaque, Uint64) callconv(.c) bool),
+//     write_file: ?*const fn (?*anyopaque, [*c]const u8, ?*const anyopaque, Uint64) callconv(.c) bool = @import("std").mem.zeroes(?*const fn (?*anyopaque, [*c]const u8, ?*const anyopaque, Uint64) callconv(.c) bool),
+//     mkdir: ?*const fn (?*anyopaque, [*c]const u8) callconv(.c) bool = @import("std").mem.zeroes(?*const fn (?*anyopaque, [*c]const u8) callconv(.c) bool),
+//     remove: ?*const fn (?*anyopaque, [*c]const u8) callconv(.c) bool = @import("std").mem.zeroes(?*const fn (?*anyopaque, [*c]const u8) callconv(.c) bool),
+//     rename: ?*const fn (?*anyopaque, [*c]const u8, [*c]const u8) callconv(.c) bool = @import("std").mem.zeroes(?*const fn (?*anyopaque, [*c]const u8, [*c]const u8) callconv(.c) bool),
+//     copy: ?*const fn (?*anyopaque, [*c]const u8, [*c]const u8) callconv(.c) bool = @import("std").mem.zeroes(?*const fn (?*anyopaque, [*c]const u8, [*c]const u8) callconv(.c) bool),
+//     space_remaining: ?*const fn (?*anyopaque) callconv(.c) Uint64 = @import("std").mem.zeroes(?*const fn (?*anyopaque) callconv(.c) Uint64),
+// };
+// pub const SDL_StorageInterface = struct_SDL_StorageInterface;
 // /home/gabe/Code/github.com/gabe-lee/Goolib/.zig-cache/o/3a9a5418a30d0d5a8a8c91bad20d9c47/SDL3/SDL_stdinc.h:203:42: warning: ignoring StaticAssert declaration
-pub const struct_SDL_Storage = opaque {};
-pub const SDL_Storage = struct_SDL_Storage;
-pub extern fn SDL_OpenTitleStorage(override: [*c]const u8, props: SDL_PropertiesID) ?*SDL_Storage;
-pub extern fn SDL_OpenUserStorage(org: [*c]const u8, app: [*c]const u8, props: SDL_PropertiesID) ?*SDL_Storage;
-pub extern fn SDL_OpenFileStorage(path: [*c]const u8) ?*SDL_Storage;
-pub extern fn SDL_OpenStorage(iface: [*c]const SDL_StorageInterface, userdata: ?*anyopaque) ?*SDL_Storage;
-pub extern fn SDL_CloseStorage(storage: ?*SDL_Storage) bool;
-pub extern fn SDL_StorageReady(storage: ?*SDL_Storage) bool;
-pub extern fn SDL_GetStorageFileSize(storage: ?*SDL_Storage, path: [*c]const u8, length: [*c]Uint64) bool;
-pub extern fn SDL_ReadStorageFile(storage: ?*SDL_Storage, path: [*c]const u8, destination: ?*anyopaque, length: Uint64) bool;
-pub extern fn SDL_WriteStorageFile(storage: ?*SDL_Storage, path: [*c]const u8, source: ?*const anyopaque, length: Uint64) bool;
-pub extern fn SDL_CreateStorageDirectory(storage: ?*SDL_Storage, path: [*c]const u8) bool;
-pub extern fn SDL_EnumerateStorageDirectory(storage: ?*SDL_Storage, path: [*c]const u8, callback: SDL_EnumerateDirectoryCallback, userdata: ?*anyopaque) bool;
-pub extern fn SDL_RemoveStoragePath(storage: ?*SDL_Storage, path: [*c]const u8) bool;
-pub extern fn SDL_RenameStoragePath(storage: ?*SDL_Storage, oldpath: [*c]const u8, newpath: [*c]const u8) bool;
-pub extern fn SDL_CopyStorageFile(storage: ?*SDL_Storage, oldpath: [*c]const u8, newpath: [*c]const u8) bool;
-pub extern fn SDL_GetStoragePathInfo(storage: ?*SDL_Storage, path: [*c]const u8, info: [*c]SDL_PathInfo) bool;
-pub extern fn SDL_GetStorageSpaceRemaining(storage: ?*SDL_Storage) Uint64;
-pub extern fn SDL_GlobStorageDirectory(storage: ?*SDL_Storage, path: [*c]const u8, pattern: [*c]const u8, flags: SDL_GlobFlags, count: [*c]c_int) [*c][*c]u8;
-pub const union__XEvent = opaque {};
-pub const XEvent = union__XEvent;
-pub const SDL_X11EventHook = ?*const fn (?*anyopaque, ?*XEvent) callconv(.c) bool;
-pub extern fn SDL_SetX11EventHook(callback: SDL_X11EventHook, userdata: ?*anyopaque) void;
-pub extern fn SDL_SetLinuxThreadPriority(threadID: Sint64, priority: c_int) bool;
-pub extern fn SDL_SetLinuxThreadPriorityAndPolicy(threadID: Sint64, sdlPriority: c_int, schedPolicy: c_int) bool;
-pub extern fn SDL_IsTablet() bool;
-pub extern fn SDL_IsTV() bool;
-pub const SDL_SANDBOX_NONE: c_int = 0;
-pub const SDL_SANDBOX_UNKNOWN_CONTAINER: c_int = 1;
-pub const SDL_SANDBOX_FLATPAK: c_int = 2;
-pub const SDL_SANDBOX_SNAP: c_int = 3;
-pub const SDL_SANDBOX_MACOS: c_int = 4;
-pub const enum_SDL_Sandbox = c_uint;
-pub const SDL_Sandbox = enum_SDL_Sandbox;
-pub extern fn SDL_GetSandbox() SDL_Sandbox;
-pub extern fn SDL_OnApplicationWillTerminate() void;
-pub extern fn SDL_OnApplicationDidReceiveMemoryWarning() void;
-pub extern fn SDL_OnApplicationWillEnterBackground() void;
-pub extern fn SDL_OnApplicationDidEnterBackground() void;
-pub extern fn SDL_OnApplicationWillEnterForeground() void;
-pub extern fn SDL_OnApplicationDidEnterForeground() void;
-pub const struct_SDL_DateTime = extern struct {
-    year: c_int = @import("std").mem.zeroes(c_int),
-    month: c_int = @import("std").mem.zeroes(c_int),
-    day: c_int = @import("std").mem.zeroes(c_int),
-    hour: c_int = @import("std").mem.zeroes(c_int),
-    minute: c_int = @import("std").mem.zeroes(c_int),
-    second: c_int = @import("std").mem.zeroes(c_int),
-    nanosecond: c_int = @import("std").mem.zeroes(c_int),
-    day_of_week: c_int = @import("std").mem.zeroes(c_int),
-    utc_offset: c_int = @import("std").mem.zeroes(c_int),
-};
-pub const SDL_DateTime = struct_SDL_DateTime;
-pub const SDL_DATE_FORMAT_YYYYMMDD: c_int = 0;
-pub const SDL_DATE_FORMAT_DDMMYYYY: c_int = 1;
-pub const SDL_DATE_FORMAT_MMDDYYYY: c_int = 2;
-pub const enum_SDL_DateFormat = c_uint;
-pub const SDL_DateFormat = enum_SDL_DateFormat;
-pub const SDL_TIME_FORMAT_24HR: c_int = 0;
-pub const SDL_TIME_FORMAT_12HR: c_int = 1;
-pub const enum_SDL_TimeFormat = c_uint;
-pub const SDL_TimeFormat = enum_SDL_TimeFormat;
-pub extern fn SDL_GetDateTimeLocalePreferences(dateFormat: [*c]SDL_DateFormat, timeFormat: [*c]SDL_TimeFormat) bool;
-pub extern fn SDL_GetCurrentTime(ticks: [*c]SDL_Time) bool;
+// pub const struct_SDL_Storage = opaque {};
+// pub const SDL_Storage = struct_SDL_Storage;
+// pub extern fn SDL_OpenTitleStorage(override: [*c]const u8, props: SDL_PropertiesID) ?*SDL_Storage;
+// pub extern fn SDL_OpenUserStorage(org: [*c]const u8, app: [*c]const u8, props: SDL_PropertiesID) ?*SDL_Storage;
+// pub extern fn SDL_OpenFileStorage(path: [*c]const u8) ?*SDL_Storage;
+// pub extern fn SDL_OpenStorage(iface: [*c]const SDL_StorageInterface, userdata: ?*anyopaque) ?*SDL_Storage;
+// pub extern fn SDL_CloseStorage(storage: ?*SDL_Storage) bool;
+// pub extern fn SDL_StorageReady(storage: ?*SDL_Storage) bool;
+// pub extern fn SDL_GetStorageFileSize(storage: ?*SDL_Storage, path: [*c]const u8, length: [*c]Uint64) bool;
+// pub extern fn SDL_ReadStorageFile(storage: ?*SDL_Storage, path: [*c]const u8, destination: ?*anyopaque, length: Uint64) bool;
+// pub extern fn SDL_WriteStorageFile(storage: ?*SDL_Storage, path: [*c]const u8, source: ?*const anyopaque, length: Uint64) bool;
+// pub extern fn SDL_CreateStorageDirectory(storage: ?*SDL_Storage, path: [*c]const u8) bool;
+// pub extern fn SDL_EnumerateStorageDirectory(storage: ?*SDL_Storage, path: [*c]const u8, callback: SDL_EnumerateDirectoryCallback, userdata: ?*anyopaque) bool;
+// pub extern fn SDL_RemoveStoragePath(storage: ?*SDL_Storage, path: [*c]const u8) bool;
+// pub extern fn SDL_RenameStoragePath(storage: ?*SDL_Storage, oldpath: [*c]const u8, newpath: [*c]const u8) bool;
+// pub extern fn SDL_CopyStorageFile(storage: ?*SDL_Storage, oldpath: [*c]const u8, newpath: [*c]const u8) bool;
+// pub extern fn SDL_GetStoragePathInfo(storage: ?*SDL_Storage, path: [*c]const u8, info: [*c]SDL_PathInfo) bool;
+// pub extern fn SDL_GetStorageSpaceRemaining(storage: ?*SDL_Storage) Uint64;
+// pub extern fn SDL_GlobStorageDirectory(storage: ?*SDL_Storage, path: [*c]const u8, pattern: [*c]const u8, flags: SDL_GlobFlags, count: [*c]c_int) [*c][*c]u8;
+// pub const union__XEvent = opaque {};
+// pub const XEvent = union__XEvent;
+// pub const SDL_X11EventHook = ?*const fn (?*anyopaque, ?*XEvent) callconv(.c) bool;
+// pub extern fn SDL_SetX11EventHook(callback: SDL_X11EventHook, userdata: ?*anyopaque) void;
+// pub extern fn SDL_SetLinuxThreadPriority(threadID: Sint64, priority: c_int) bool;
+// pub extern fn SDL_SetLinuxThreadPriorityAndPolicy(threadID: Sint64, sdlPriority: c_int, schedPolicy: c_int) bool;
+// pub extern fn SDL_IsTablet() bool;
+// pub extern fn SDL_IsTV() bool;
+// pub const SDL_SANDBOX_NONE: c_int = 0;
+// pub const SDL_SANDBOX_UNKNOWN_CONTAINER: c_int = 1;
+// pub const SDL_SANDBOX_FLATPAK: c_int = 2;
+// pub const SDL_SANDBOX_SNAP: c_int = 3;
+// pub const SDL_SANDBOX_MACOS: c_int = 4;
+// pub const enum_SDL_Sandbox = c_uint;
+// pub const SDL_Sandbox = enum_SDL_Sandbox;
+// pub extern fn SDL_GetSandbox() SDL_Sandbox;
+// pub extern fn SDL_OnApplicationWillTerminate() void;
+// pub extern fn SDL_OnApplicationDidReceiveMemoryWarning() void;
+// pub extern fn SDL_OnApplicationWillEnterBackground() void;
+// pub extern fn SDL_OnApplicationDidEnterBackground() void;
+// pub extern fn SDL_OnApplicationWillEnterForeground() void;
+// pub extern fn SDL_OnApplicationDidEnterForeground() void;
+// pub const struct_SDL_DateTime = extern struct {
+//     year: c_int = @import("std").mem.zeroes(c_int),
+//     month: c_int = @import("std").mem.zeroes(c_int),
+//     day: c_int = @import("std").mem.zeroes(c_int),
+//     hour: c_int = @import("std").mem.zeroes(c_int),
+//     minute: c_int = @import("std").mem.zeroes(c_int),
+//     second: c_int = @import("std").mem.zeroes(c_int),
+//     nanosecond: c_int = @import("std").mem.zeroes(c_int),
+//     day_of_week: c_int = @import("std").mem.zeroes(c_int),
+//     utc_offset: c_int = @import("std").mem.zeroes(c_int),
+// };
+// pub const SDL_DateTime = struct_SDL_DateTime;
+// pub const SDL_DATE_FORMAT_YYYYMMDD: c_int = 0;
+// pub const SDL_DATE_FORMAT_DDMMYYYY: c_int = 1;
+// pub const SDL_DATE_FORMAT_MMDDYYYY: c_int = 2;
+// pub const enum_SDL_DateFormat = c_uint;
+// pub const SDL_DateFormat = enum_SDL_DateFormat;
+// pub const SDL_TIME_FORMAT_24HR: c_int = 0;
+// pub const SDL_TIME_FORMAT_12HR: c_int = 1;
+// pub const enum_SDL_TimeFormat = c_uint;
+// pub const SDL_TimeFormat = enum_SDL_TimeFormat;
+// pub extern fn SDL_GetDateTimeLocalePreferences(dateFormat: [*c]SDL_DateFormat, timeFormat: [*c]SDL_TimeFormat) bool;
+// pub extern fn SDL_GetCurrentTime(ticks: [*c]SDL_Time) bool;
 pub extern fn SDL_TimeToDateTime(ticks: SDL_Time, dt: [*c]SDL_DateTime, localTime: bool) bool;
-pub extern fn SDL_DateTimeToTime(dt: [*c]const SDL_DateTime, ticks: [*c]SDL_Time) bool;
+// pub extern fn SDL_DateTimeToTime(dt: [*c]const SDL_DateTime, ticks: [*c]SDL_Time) bool;
 pub extern fn SDL_TimeToWindows(ticks: SDL_Time, dwLowDateTime: [*c]Uint32, dwHighDateTime: [*c]Uint32) void;
 pub extern fn SDL_TimeFromWindows(dwLowDateTime: Uint32, dwHighDateTime: Uint32) SDL_Time;
 pub extern fn SDL_GetDaysInMonth(year: c_int, month: c_int) c_int;
@@ -6957,13 +6956,13 @@ pub const SDL_loadso_h_ = "";
 pub const SDL_locale_h = "";
 pub const SDL_log_h_ = "";
 pub const SDL_messagebox_h_ = "";
-pub const SDL_MESSAGEBOX_ERROR = @as(c_uint, 0x00000010);
-pub const SDL_MESSAGEBOX_WARNING = @as(c_uint, 0x00000020);
-pub const SDL_MESSAGEBOX_INFORMATION = @as(c_uint, 0x00000040);
-pub const SDL_MESSAGEBOX_BUTTONS_LEFT_TO_RIGHT = @as(c_uint, 0x00000080);
-pub const SDL_MESSAGEBOX_BUTTONS_RIGHT_TO_LEFT = @as(c_uint, 0x00000100);
-pub const SDL_MESSAGEBOX_BUTTON_RETURNKEY_DEFAULT = @as(c_uint, 0x00000001);
-pub const SDL_MESSAGEBOX_BUTTON_ESCAPEKEY_DEFAULT = @as(c_uint, 0x00000002);
+// pub const SDL_MESSAGEBOX_ERROR = @as(c_uint, 0x00000010);
+// pub const SDL_MESSAGEBOX_WARNING = @as(c_uint, 0x00000020);
+// pub const SDL_MESSAGEBOX_INFORMATION = @as(c_uint, 0x00000040);
+// pub const SDL_MESSAGEBOX_BUTTONS_LEFT_TO_RIGHT = @as(c_uint, 0x00000080);
+// pub const SDL_MESSAGEBOX_BUTTONS_RIGHT_TO_LEFT = @as(c_uint, 0x00000100);
+// pub const SDL_MESSAGEBOX_BUTTON_RETURNKEY_DEFAULT = @as(c_uint, 0x00000001);
+// pub const SDL_MESSAGEBOX_BUTTON_ESCAPEKEY_DEFAULT = @as(c_uint, 0x00000002);
 pub const SDL_metal_h_ = "";
 pub const SDL_misc_h_ = "";
 pub const SDL_platform_h_ = "";
