@@ -1,3 +1,27 @@
+//! TODO Documentation
+//! #### License: Zlib
+//! #### Dependency Licenses:
+//! - SDL3: (Zlib) https://github.com/libsdl-org/SDL/blob/main/LICENSE.txt
+//! - SDL3 Zig Bindings: (Multi) https://github.com/castholm/SDL/blob/main/LICENSE.txt
+
+// Copyright (c) 2025, Gabriel Lee Anderson <gla.ander@gmail.com>
+//
+// This software is provided 'as-is', without any express or implied
+// warranty. In no event will the authors be held liable for any damages
+// arising from the use of this software.
+//
+// Permission is granted to anyone to use this software for any purpose,
+// including commercial applications, and to alter it and redistribute it
+// freely, subject to the following restrictions:
+//
+// 1. The origin of this software must not be misrepresented; you must not
+//    claim that you wrote the original software. If you use this software
+//    in a product, an acknowledgment in the product documentation would be
+//    appreciated but is not required.
+// 2. Altered source versions must be plainly marked as such, and must not be
+//    misrepresented as being the original software.
+// 3. This notice may not be removed or altered from any source distribution.
+
 const std = @import("std");
 const build = @import("builtin");
 const config = @import("config");
@@ -680,7 +704,7 @@ pub const IOStream = opaque {
         return ptr_cast_or_fail_err(*Surface, C.SDL_LoadBMP_IO(self.to_c(), close_stream));
     }
     pub fn load_bmp_from_surface(self: *IOStream, surface: *Surface, close_stream: bool) Error!void {
-        return ok_or_fail_err(C.SDL_SaveBMP_IO(surface.to_c(), self.to_c(), close_stream));
+        return ok_or_fail_err(C.SDL_SaveBMP_IO(surface.to_c_ptr(), self.to_c(), close_stream));
     }
     pub fn load_wav(self: *IOStream, close_stream: bool) Error!WaveAudio {
         var ptr: [*c]u8 = undefined;
@@ -693,6 +717,17 @@ pub const IOStream = opaque {
             .spec = spec,
         };
     }
+
+    pub const Props = struct {
+        pub const WINDOWS_HANDLE = Property.new(.POINTER, C.SDL_PROP_IOSTREAM_WINDOWS_HANDLE_POINTER);
+        pub const STD_IO_FILE = Property.new(.POINTER, C.SDL_PROP_IOSTREAM_STDIO_FILE_POINTER);
+        pub const FILE_DESCRIPTOR = Property.new(.INTEGER, C.SDL_PROP_IOSTREAM_FILE_DESCRIPTOR_NUMBER);
+        pub const ANDROID_AASSET = Property.new(.POINTER, C.SDL_PROP_IOSTREAM_ANDROID_AASSET_POINTER);
+        pub const MEMORY = Property.new(.POINTER, C.SDL_PROP_IOSTREAM_MEMORY_POINTER);
+        pub const MEMORY_SIZE = Property.new(.INTEGER, C.SDL_PROP_IOSTREAM_MEMORY_SIZE_NUMBER);
+        pub const DYNAMIC_MEMORY = Property.new(.POINTER, C.SDL_PROP_IOSTREAM_DYNAMIC_MEMORY_POINTER);
+        pub const DYNAMIC_CHUNKSIZE = Property.new(.INTEGER, C.SDL_PROP_IOSTREAM_DYNAMIC_CHUNKSIZE_NUMBER);
+    };
 };
 
 pub const IOMode = enum(u8) {
@@ -918,6 +953,13 @@ pub const Thread = opaque {
     //     _ = &props;
     //     return SDL_CreateThreadWithPropertiesRuntime(props, @import("std").zig.c_translation.cast(SDL_FunctionPointer, SDL_BeginThreadFunction), @import("std").zig.c_translation.cast(SDL_FunctionPointer, SDL_EndThreadFunction));
     // }
+    pub const CreateProps = struct {
+        //TODO
+        // pub const SDL_PROP_THREAD_CREATE_ENTRY_FUNCTION_POINTER = "SDL.thread.create.entry_function";
+        // pub const SDL_PROP_THREAD_CREATE_NAME_STRING = "SDL.thread.create.name";
+        // pub const SDL_PROP_THREAD_CREATE_USERDATA_POINTER = "SDL.thread.create.userdata";
+        // pub const SDL_PROP_THREAD_CREATE_STACKSIZE_NUMBER = "SDL.thread.create.stacksize";
+    };
 };
 
 pub const ThreadID = extern struct {
@@ -950,7 +992,7 @@ pub const InitState = extern struct {
 };
 
 pub const PropertyCleanupCallback = fn (userdata: ?*anyopaque, value_ptr: ?*anyopaque) callconv(.c) void;
-pub const EnumeratePropertiesCallback = fn (userdata: ?*anyopaque, props_id: u32, prop_name: [*:0]const u8) callconv(.c) void;
+pub const EnumeratePropertiesCallback = fn (userdata: ?*anyopaque, props_id: PropertiesID, prop_name: [*:0]const u8) callconv(.c) void;
 
 pub const PropertyType = enum(c_uint) {
     INVALID = C.SDL_PROPERTY_TYPE_INVALID,
@@ -1950,7 +1992,15 @@ pub const TextureWriteBytes = extern struct {
 pub const BlendMode = struct {
     mode: u32 = 0,
 
-    pub fn create(src_color_factor: BlendFactor, dst_color_factor: BlendFactor, color_operation: BlendOperation, src_alpha_factor: BlendFactor, dst_alpha_factor: BlendFactor, alpha_operation: BlendOperation) BlendMode {
+    pub const NONE = BlendMode{ .mode = C.SDL_BLENDMODE_NONE };
+    pub const BLEND = BlendMode{ .mode = C.SDL_BLENDMODE_BLEND };
+    pub const BLEND_PREMULTIPLIED = BlendMode{ .mode = C.SDL_BLENDMODE_BLEND_PREMULTIPLIED };
+    pub const ADD = BlendMode{ .mode = C.SDL_BLENDMODE_ADD };
+    pub const ADD_PREMULTIPLIED = BlendMode{ .mode = C.SDL_BLENDMODE_ADD_PREMULTIPLIED };
+    pub const MOD = BlendMode{ .mode = C.SDL_BLENDMODE_MOD };
+    pub const MUL = BlendMode{ .mode = C.SDL_BLENDMODE_MUL };
+
+    pub fn custom(src_color_factor: BlendFactor, dst_color_factor: BlendFactor, color_operation: BlendOperation, src_alpha_factor: BlendFactor, dst_alpha_factor: BlendFactor, alpha_operation: BlendOperation) BlendMode {
         return BlendMode{ .mode = C.SDL_ComposeCustomBlendMode(src_color_factor.to_c(), dst_color_factor.to_c(), color_operation.to_c(), src_alpha_factor.to_c(), dst_alpha_factor.to_c(), alpha_operation.to_c()) };
     }
 };
@@ -2007,35 +2057,17 @@ pub const PixelRect = extern struct {
     }
 };
 
-pub const Surface = opaque {
-    inline fn to_c(self: *Surface) *C.SDL_Surface {
-        return @ptrCast(@alignCast(self));
-    }
-    pub inline fn get_flags(self: *Surface) SurfaceFlags {
-        return SurfaceFlags{ .flags = self.to_c().flags };
-    }
-    pub inline fn get_format(self: *Surface) PixelFormat {
-        return @enumFromInt(self.to_c().format);
-    }
-    pub inline fn get_size(self: *Surface) Vec_c_int {
-        const c = self.to_c();
-        return Vec_c_int{
-            .x = c.w,
-            .y = c.h,
-        };
-    }
-    pub inline fn get_bytes_per_row(self: *Surface) c_int {
-        return self.to_c().pitch;
-    }
-    pub inline fn get_pixel_data_ptr(self: *Surface) ?[*]u8 {
-        return @ptrCast(@alignCast(self.to_c().pixels));
-    }
-    pub inline fn get_ref_count(self: *Surface) c_int {
-        return self.to_c().refcount;
-    }
-    pub inline fn get_reserved_ptr(self: *Surface) ?*anyopaque {
-        return self.to_c().reserved;
-    }
+pub const Surface = extern struct {
+    flags: SurfaceFlags = .blank(),
+    format: PixelFormat = .UNKNOWN,
+    size: Vec_c_int,
+    bytes_per_row: c_int = 0,
+    pixel_data: ?*anyopaque = null,
+    refcount: AtomicInt = .{ .val = 0 },
+    _reserved: ?*anyopaque = null,
+
+    pub usingnamespace c_non_opaque_conversions(Surface, C.SDL_Surface);
+
     pub fn create_surface(size: Vec_c_int, format: PixelFormat) Error!*Surface {
         return ptr_cast_or_fail_err(*Surface, C.SDL_CreateSurface(size.x, size.y, format));
     }
@@ -2043,180 +2075,190 @@ pub const Surface = opaque {
         return ptr_cast_or_fail_err(*Surface, C.SDL_CreateSurface(size.x, size.y, format, @ptrCast(@alignCast(pixel_data)), bytes_per_row));
     }
     pub fn destroy(self: *Surface) void {
-        C.SDL_DestroySurface(self.to_c());
+        C.SDL_DestroySurface(self.to_c_ptr());
     }
     pub fn get_properties(self: *Surface) Error!PropertiesID {
-        return PropertiesID{ .id = try nonzero_or_null_err(C.SDL_GetSurfaceProperties(self.to_c())) };
+        return PropertiesID{ .id = try nonzero_or_null_err(C.SDL_GetSurfaceProperties(self.to_c_ptr())) };
     }
     pub fn set_colorspace(self: *Surface, colorspace: Colorspace) Error!void {
-        try ok_or_fail_err(C.SDL_SetSurfaceColorspace(self.to_c(), colorspace.to_c()));
+        try ok_or_fail_err(C.SDL_SetSurfaceColorspace(self.to_c_ptr(), colorspace.to_c()));
     }
     pub fn get_colorspace(self: *Surface) Colorspace {
-        C.SDL_GetSurfaceColorspace(self.to_c());
+        C.SDL_GetSurfaceColorspace(self.to_c_ptr());
     }
     pub fn create_color_palette(self: *Surface) Error!*ColorPalette {
-        return ptr_cast_or_fail_err(*ColorPalette, C.SDL_CreateSurfacePalette(self.to_c()));
+        return ptr_cast_or_fail_err(*ColorPalette, C.SDL_CreateSurfacePalette(self.to_c_ptr()));
     }
     pub fn set_color_palette(self: *Surface, palette: ColorPalette) Error!void {
-        try ok_or_fail_err(C.SDL_SetSurfacePalette(self.to_c(), palette.to_c()));
+        try ok_or_fail_err(C.SDL_SetSurfacePalette(self.to_c_ptr(), palette.to_c()));
     }
     pub fn get_color_palette(self: *Surface) Error!*ColorPalette {
-        return ptr_cast_or_null_err(*ColorPalette, C.SDL_GetSurfacePalette(self.to_c()));
+        return ptr_cast_or_null_err(*ColorPalette, C.SDL_GetSurfacePalette(self.to_c_ptr()));
     }
     pub fn add_alternate_surface(self: *Surface, alternate: *Surface) Error!void {
-        try ok_or_fail_err(C.SDL_AddSurfaceAlternateImage(self.to_c(), alternate.to_c()));
+        try ok_or_fail_err(C.SDL_AddSurfaceAlternateImage(self.to_c_ptr(), alternate.to_c_ptr()));
     }
     pub fn has_alternate_surfaces(self: *Surface) bool {
-        return C.SDL_SurfaceHasAlternateImages(self.to_c());
+        return C.SDL_SurfaceHasAlternateImages(self.to_c_ptr());
     }
     pub fn get_all_alternate_surfaces(self: *Surface) Error!SurfaceList {
         var len: c_int = 0;
-        const ptr = try ptr_cast_or_null_err([*]*Surface, C.SDL_GetSurfaceImages(self.to_c(), &len));
+        const ptr = try ptr_cast_or_null_err([*]*Surface, C.SDL_GetSurfaceImages(self.to_c_ptr(), &len));
         return SurfaceList{ .list = ptr[0..len] };
     }
     pub fn remove_all_alternate_surfaces(self: *Surface) Error!void {
-        return ok_or_fail_err(C.SDL_RemoveSurfaceAlternateImages(self.to_c()));
+        return ok_or_fail_err(C.SDL_RemoveSurfaceAlternateImages(self.to_c_ptr()));
     }
     pub fn lock(self: *Surface) Error!void {
-        return ok_or_fail_err(C.SDL_LockSurface(self.to_c()));
+        return ok_or_fail_err(C.SDL_LockSurface(self.to_c_ptr()));
     }
     pub fn unlock(self: *Surface) Error!void {
-        return ok_or_fail_err(C.SDL_UnlockSurface(self.to_c()));
+        return ok_or_fail_err(C.SDL_UnlockSurface(self.to_c_ptr()));
     }
     pub fn load_from_bmp_file(bmp_path: [*:0]const u8) Error!*Surface {
         return ptr_cast_or_fail_err(*Surface, C.SDL_LoadBMP(bmp_path));
     }
     pub fn save_to_bmp_file(self: *Surface, bmp_path: [*:0]const u8) Error!void {
-        return ok_or_fail_err(C.SDL_SaveBMP(self.to_c(), bmp_path));
+        return ok_or_fail_err(C.SDL_SaveBMP(self.to_c_ptr(), bmp_path));
     }
     pub fn load_from_bmp_iostream(stream: *IOStream, close_stream: bool) Error!*Surface {
         return ptr_cast_or_fail_err(*Surface, C.SDL_LoadBMP_IO(stream.to_c(), close_stream));
     }
     pub fn save_to_bmp_iostream(self: *Surface, stream: *IOStream, close_stream: bool) Error!void {
-        return ok_or_fail_err(C.SDL_SaveBMP_IO(self.to_c(), stream.to_c(), close_stream));
+        return ok_or_fail_err(C.SDL_SaveBMP_IO(self.to_c_ptr(), stream.to_c(), close_stream));
     }
     pub fn set_RLE(self: *Surface, state: bool) Error!void {
-        return ok_or_fail_err(C.SDL_SetSurfaceRLE(self.to_c(), state));
+        return ok_or_fail_err(C.SDL_SetSurfaceRLE(self.to_c_ptr(), state));
     }
     pub fn is_RLE_set(self: *Surface) bool {
-        return ok_or_fail_err(C.SDL_SurfaceHasRLE(self.to_c()));
+        return ok_or_fail_err(C.SDL_SurfaceHasRLE(self.to_c_ptr()));
     }
     pub fn set_color_key(self: *Surface, state: bool, key: u32) Error!void {
-        return ok_or_fail_err(C.SDL_SetSurfaceColorKey(self.to_c(), state, key));
+        return ok_or_fail_err(C.SDL_SetSurfaceColorKey(self.to_c_ptr(), state, key));
     }
     pub fn has_color_key(self: *Surface) bool {
-        return ok_or_fail_err(C.SDL_SurfaceHasColorKey(self.to_c()));
+        return ok_or_fail_err(C.SDL_SurfaceHasColorKey(self.to_c_ptr()));
     }
     pub fn get_color_key(self: *Surface) Error!u32 {
         var key: u32 = 0;
-        try ok_or_fail_err(C.SDL_GetSurfaceColorKey(self.to_c(), &key));
+        try ok_or_fail_err(C.SDL_GetSurfaceColorKey(self.to_c_ptr(), &key));
         return key;
     }
     pub fn set_color_mod(self: *Surface, color: Color_RGB_u8) Error!void {
-        return ok_or_fail_err(C.SDL_SetSurfaceColorMod(self.to_c(), color.r, color.g, color.b));
+        return ok_or_fail_err(C.SDL_SetSurfaceColorMod(self.to_c_ptr(), color.r, color.g, color.b));
     }
     pub fn get_color_mod(self: *Surface) Error!Color_RGB_u8 {
         var color: Color_RGB_u8 = Color_RGB_u8{};
-        try ok_or_fail_err(C.SDL_GetSurfaceColorMod(self.to_c(), &color.r, &color.g, &color.b));
+        try ok_or_fail_err(C.SDL_GetSurfaceColorMod(self.to_c_ptr(), &color.r, &color.g, &color.b));
         return color;
     }
     pub fn set_alpha_mod(self: *Surface, alpha: u8) Error!void {
-        return ok_or_fail_err(C.SDL_SetSurfaceAlphaMod(self.to_c(), alpha));
+        return ok_or_fail_err(C.SDL_SetSurfaceAlphaMod(self.to_c_ptr(), alpha));
     }
     pub fn get_alpha_mod(self: *Surface) Error!u8 {
         var alpha: u8 = 0;
-        try ok_or_fail_err(C.SDL_GetSurfaceColorMod(self.to_c(), &alpha));
+        try ok_or_fail_err(C.SDL_GetSurfaceColorMod(self.to_c_ptr(), &alpha));
         return alpha;
     }
     pub fn set_blend_mode(self: *Surface, mode: BlendMode) Error!void {
-        return ok_or_fail_err(C.SDL_SetSurfaceBlendMode(self.to_c(), mode.mode));
+        return ok_or_fail_err(C.SDL_SetSurfaceBlendMode(self.to_c_ptr(), mode.mode));
     }
     pub fn get_blend_mode(self: *Surface) Error!BlendMode {
         var mode: u32 = 0;
-        try ok_or_fail_err(C.SDL_GetSurfaceBlendMode(self.to_c(), &mode));
+        try ok_or_fail_err(C.SDL_GetSurfaceBlendMode(self.to_c_ptr(), &mode));
         return BlendMode{ .mode = mode };
     }
     pub fn set_clip_rect(self: *Surface, rect: Rect_c_int) Error!void {
-        return ok_or_fail_err(C.SDL_SetSurfaceClipRect(self.to_c(), &rect));
+        return ok_or_fail_err(C.SDL_SetSurfaceClipRect(self.to_c_ptr(), &rect));
     }
     pub fn get_clip_rect(self: *Surface) Error!Rect_c_int {
         var rect = Rect_c_int{};
-        try ok_or_fail_err(C.SDL_GetSurfaceClipRect(self.to_c(), &rect));
+        try ok_or_fail_err(C.SDL_GetSurfaceClipRect(self.to_c_ptr(), &rect));
         return rect;
     }
     pub fn flip(self: *Surface, flip_mode: FlipMode) Error!void {
-        return ok_or_fail_err(C.SDL_FlipSurface(self.to_c(), flip_mode.to_c()));
+        return ok_or_fail_err(C.SDL_FlipSurface(self.to_c_ptr(), flip_mode.to_c()));
     }
     pub fn duplicate(self: *Surface) Error!*Surface {
-        return ptr_cast_or_fail_err(*Surface, C.SDL_DuplicateSurface(self.to_c()));
+        return ptr_cast_or_fail_err(*Surface, C.SDL_DuplicateSurface(self.to_c_ptr()));
     }
     pub fn scale_copy(self: *Surface, scale: Scale) Error!*Surface {
-        return ptr_cast_or_fail_err(*Surface, C.SDL_ScaleSurface(self.to_c(), scale.ratio.x, scale.ratio.y, scale.mode.to_c()));
+        return ptr_cast_or_fail_err(*Surface, C.SDL_ScaleSurface(self.to_c_ptr(), scale.ratio.x, scale.ratio.y, scale.mode.to_c()));
     }
     pub fn convert_to_format(self: *Surface, format: PixelFormat) Error!*Surface {
-        return ptr_cast_or_fail_err(*Surface, C.SDL_ConvertSurface(self.to_c(), format.to_c()));
+        return ptr_cast_or_fail_err(*Surface, C.SDL_ConvertSurface(self.to_c_ptr(), format.to_c()));
     }
     pub fn convert_to_format_and_colorspace(self: *Surface, format: PixelFormat, optional_palette: ?*ColorPalette, color_space: Colorspace, extra_color_props: PropertiesID) Error!*Surface {
-        return ptr_cast_or_fail_err(*Surface, C.SDL_ConvertSurface(self.to_c(), format.to_c(), @ptrCast(@alignCast(optional_palette)), color_space.to_c(), extra_color_props.id));
+        return ptr_cast_or_fail_err(*Surface, C.SDL_ConvertSurface(self.to_c_ptr(), format.to_c(), @ptrCast(@alignCast(optional_palette)), color_space.to_c(), extra_color_props.id));
     }
     pub fn premultiply_alpha(self: *Surface, linear: bool) Error!void {
-        return ok_or_fail_err(C.SDL_PremultiplySurfaceAlpha(self.to_c(), linear));
+        return ok_or_fail_err(C.SDL_PremultiplySurfaceAlpha(self.to_c_ptr(), linear));
     }
     pub fn clear(self: *Surface, color: Color_RGBA_f32) Error!void {
-        return ok_or_fail_err(C.SDL_ClearSurface(self.to_c(), color.r, color.g, color.b, color.a));
+        return ok_or_fail_err(C.SDL_ClearSurface(self.to_c_ptr(), color.r, color.g, color.b, color.a));
     }
     pub fn fill_rect(self: *Surface, rect: Rect_c_int, color: Color_RGBA_u8) Error!void {
-        return ok_or_fail_err(C.SDL_FillSurfaceRect(self.to_c(), @ptrCast(@alignCast(&rect)), color.to_raw_int()));
+        return ok_or_fail_err(C.SDL_FillSurfaceRect(self.to_c_ptr(), @ptrCast(@alignCast(&rect)), color.to_raw_int()));
     }
     pub fn fill_many_rects(self: *Surface, rects: []const Rect_c_int, color: Color_RGBA_u8) Error!void {
-        return ok_or_fail_err(C.SDL_FillSurfaceRects(self.to_c(), @ptrCast(@alignCast(rects.ptr)), @intCast(rects.len), color.to_raw_int()));
+        return ok_or_fail_err(C.SDL_FillSurfaceRects(self.to_c_ptr(), @ptrCast(@alignCast(rects.ptr)), @intCast(rects.len), color.to_raw_int()));
     }
     pub fn blit_to(self: *Surface, area: IArea, dst: *Surface, dst_area: IArea) Error!void {
-        return ok_or_fail_err(C.SDL_BlitSurface(self.to_c(), area.to_c(), dst.to_c(), dst_area.to_c()));
+        return ok_or_fail_err(C.SDL_BlitSurface(self.to_c_ptr(), area.to_c(), dst.to_c_ptr(), dst_area.to_c()));
     }
     pub fn blit_unchecked_to(self: *Surface, area: IArea, dst: *Surface, dst_area: IArea) Error!void {
-        return ok_or_fail_err(C.SDL_BlitSurfaceUnchecked(self.to_c(), area.to_c(), dst.to_c(), dst_area.to_c()));
+        return ok_or_fail_err(C.SDL_BlitSurfaceUnchecked(self.to_c_ptr(), area.to_c(), dst.to_c_ptr(), dst_area.to_c()));
     }
     pub fn blit_scaled_to(self: *Surface, area: IArea, dst: *Surface, dst_area: IArea, mode: ScaleMode) Error!void {
-        return ok_or_fail_err(C.SDL_BlitSurface(self.to_c(), area.to_c(), dst.to_c(), dst_area.to_c(), mode.to_c()));
+        return ok_or_fail_err(C.SDL_BlitSurface(self.to_c_ptr(), area.to_c(), dst.to_c_ptr(), dst_area.to_c(), mode.to_c()));
     }
     pub fn blit_scaled_unchecked_to(self: *Surface, area: IArea, dst: *Surface, dst_area: IArea, mode: ScaleMode) Error!void {
-        return ok_or_fail_err(C.SDL_BlitSurfaceUnchecked(self.to_c(), area.to_c(), dst.to_c(), dst_area.to_c(), mode.to_c()));
+        return ok_or_fail_err(C.SDL_BlitSurfaceUnchecked(self.to_c_ptr(), area.to_c(), dst.to_c_ptr(), dst_area.to_c(), mode.to_c()));
     }
     pub fn copy_stretched_to(self: *Surface, area: IArea, dst: *Surface, dst_area: IArea, mode: ScaleMode) Error!void {
-        return ok_or_fail_err(C.SDL_StretchSurface(self.to_c(), area.to_c(), dst.to_c(), dst_area.to_c(), mode.to_c()));
+        return ok_or_fail_err(C.SDL_StretchSurface(self.to_c_ptr(), area.to_c(), dst.to_c_ptr(), dst_area.to_c(), mode.to_c()));
     }
     pub fn blit_tiled_to(self: *Surface, area: IArea, dst: *Surface, dst_area: IArea) Error!void {
-        return ok_or_fail_err(C.SDL_BlitSurfaceTiled(self.to_c(), area.to_c(), dst.to_c(), dst_area.to_c()));
+        return ok_or_fail_err(C.SDL_BlitSurfaceTiled(self.to_c_ptr(), area.to_c(), dst.to_c_ptr(), dst_area.to_c()));
     }
     pub fn blit_tiled_scaled_to(self: *Surface, area: IArea, dst: *Surface, dst_area: IArea, scale: Scale) Error!void {
-        return ok_or_fail_err(C.SDL_BlitSurfaceTiledWithScale(self.to_c(), area.to_c(), scale.ratio, scale.mode.to_c(), dst.to_c(), dst_area.to_c()));
+        return ok_or_fail_err(C.SDL_BlitSurfaceTiledWithScale(self.to_c_ptr(), area.to_c(), scale.ratio, scale.mode.to_c(), dst.to_c_ptr(), dst_area.to_c()));
     }
     pub fn blit_nine_patch_to(self: *Surface, nine_patch: NinePatch_c_int, dst: *Surface, dst_area: IArea, scale: Scale) Error!void {
-        return ok_or_fail_err(C.SDL_BlitSurface9Grid(self.to_c(), nine_patch.rect_to_c(), nine_patch.left, nine_patch.right, nine_patch.top, nine_patch.bottom, scale.ratio, scale.mode.to_c(), dst.to_c(), dst_area.to_c()));
+        return ok_or_fail_err(C.SDL_BlitSurface9Grid(self.to_c_ptr(), nine_patch.rect_to_c(), nine_patch.left, nine_patch.right, nine_patch.top, nine_patch.bottom, scale.ratio, scale.mode.to_c(), dst.to_c_ptr(), dst_area.to_c()));
     }
     pub fn closest_valid_color_rgb(self: *Surface, color: Color_RGB_u8) Color_raw_u32 {
-        return Color_raw_u32{ .raw = C.SDL_MapSurfaceRGB(self.to_c(), color.r, color.g, color.b) };
+        return Color_raw_u32{ .raw = C.SDL_MapSurfaceRGB(self.to_c_ptr(), color.r, color.g, color.b) };
     }
     pub fn closest_valid_color_rgba(self: *Surface, color: Color_RGBA_u8) Color_raw_u32 {
-        return Color_raw_u32{ .raw = C.SDL_MapSurfaceRGBA(self.to_c(), color.r, color.g, color.b, color.a) };
+        return Color_raw_u32{ .raw = C.SDL_MapSurfaceRGBA(self.to_c_ptr(), color.r, color.g, color.b, color.a) };
     }
     pub fn read_pixel(self: *Surface, pos: Vec_c_int) Error!Color_RGBA_u8 {
         var color = Color_RGBA_u8{};
-        try ok_or_fail_err(C.SDL_ReadSurfacePixel(self.to_c(), pos.x, pos.y, &color.r, &color.g, &color.b, &color.a));
+        try ok_or_fail_err(C.SDL_ReadSurfacePixel(self.to_c_ptr(), pos.x, pos.y, &color.r, &color.g, &color.b, &color.a));
         return color;
     }
     pub fn read_pixel_float(self: *Surface, pos: Vec_c_int) Error!Color_RGBA_f32 {
         var color = Color_RGBA_f32{};
-        try ok_or_fail_err(C.SDL_ReadSurfacePixelFloat(self.to_c(), pos.x, pos.y, &color.r, &color.g, &color.b, &color.a));
+        try ok_or_fail_err(C.SDL_ReadSurfacePixelFloat(self.to_c_ptr(), pos.x, pos.y, &color.r, &color.g, &color.b, &color.a));
         return color;
     }
     pub fn write_pixel(self: *Surface, pos: Vec_c_int, color: Color_RGBA_u8) Error!void {
-        return ok_or_fail_err(C.SDL_ReadSurfacePixel(self.to_c(), pos.x, pos.y, color.r, color.g, color.b, color.a));
+        return ok_or_fail_err(C.SDL_ReadSurfacePixel(self.to_c_ptr(), pos.x, pos.y, color.r, color.g, color.b, color.a));
     }
     pub fn write_pixel_float(self: *Surface, pos: Vec_c_int, color: Color_RGBA_f32) Error!void {
-        return ok_or_fail_err(C.SDL_WriteSurfacePixelFloat(self.to_c(), pos.x, pos.y, color.r, color.g, color.b, color.a));
+        return ok_or_fail_err(C.SDL_WriteSurfacePixelFloat(self.to_c_ptr(), pos.x, pos.y, color.r, color.g, color.b, color.a));
     }
+
+    pub const Props = struct {
+        pub const SDR_WHITE_POINT = Property.new(.FLOAT, C.SDL_PROP_SURFACE_SDR_WHITE_POINT_FLOAT);
+        pub const HDR_HEADROOM = Property.new(.FLOAT, C.SDL_PROP_SURFACE_HDR_HEADROOM_FLOAT);
+        pub const TONEMAP_OPERATOR = Property.new(.STRING, C.SDL_PROP_SURFACE_TONEMAP_OPERATOR_STRING);
+        pub const HOTSPOT_X = Property.new(.INTEGER, C.SDL_PROP_SURFACE_HOTSPOT_X_NUMBER);
+        pub const HOTSPOT_Y = Property.new(.INTEGER, C.SDL_PROP_SURFACE_HOTSPOT_Y_NUMBER);
+    };
+
+    pub const chach = build.cpu.features
 };
 
 pub const SurfaceList = extern struct {
@@ -2233,11 +2275,12 @@ pub const SimpleVertex = extern struct {
     tex_coord: Vec_f32 = Vec_f32,
 };
 
-pub const SurfaceFlags = extern struct {
-    flags: FLAG_UINT = 0,
-
-    const FLAG_UINT: type = C.SDL_SurfaceFlags;
-};
+pub const SurfaceFlags = Flags(enum(C.SDL_SurfaceFlags) {
+    PREALLOCATED = C.SDL_SURFACE_PREALLOCATED,
+    LOCK_NEEDED = C.SDL_SURFACE_LOCK_NEEDED,
+    LOCKED = C.SDL_SURFACE_LOCKED,
+    SIMD_ALIGNED = C.SDL_SURFACE_SIMD_ALIGNED,
+}, null);
 
 pub const TextureAccessMode = enum(c_uint) {
     STATIC = C.SDL_TEXTUREACCESS_STATIC,
@@ -2465,7 +2508,7 @@ pub const SimpleTexture = extern struct {
     };
 };
 
-pub const BlendFactor = enum(c_uint) {
+pub const BlendFactor = enum(C.SDL_BlendFactor) {
     ZERO = C.SDL_BLENDFACTOR_ZERO,
     ONE = C.SDL_BLENDFACTOR_ONE,
     SRC_COLOR = C.SDL_BLENDFACTOR_SRC_COLOR,
@@ -2477,15 +2520,10 @@ pub const BlendFactor = enum(c_uint) {
     DST_ALPHA = C.SDL_BLENDFACTOR_DST_ALPHA,
     ONE_MINUS_DST_ALPHA = C.SDL_BLENDFACTOR_ONE_MINUS_DST_ALPHA,
 
-    inline fn to_c(self: BlendFactor) c_uint {
-        return @intFromEnum(self);
-    }
-    inline fn from_c(val: c_uint) BlendFactor {
-        return @enumFromInt(val);
-    }
+    pub usingnamespace c_enum_conversions(BlendFactor, C.SDL_BlendFactor);
 };
 
-pub const PixelType = enum(c_uint) {
+pub const PixelType = enum(C.SDL_PixelType) {
     UNKNOWN = C.SDL_PIXELTYPE_UNKNOWN,
     INDEX_1 = C.SDL_PIXELTYPE_INDEX1,
     INDEX_2 = C.SDL_PIXELTYPE_INDEX2,
@@ -2500,28 +2538,18 @@ pub const PixelType = enum(c_uint) {
     ARRAY_F16 = C.SDL_PIXELTYPE_ARRAYF16,
     ARRAY_F32 = C.SDL_PIXELTYPE_ARRAYF32,
 
-    inline fn to_c(self: PixelType) c_uint {
-        return @intFromEnum(self);
-    }
-    inline fn from_c(val: c_uint) PixelType {
-        return @enumFromInt(val);
-    }
+    pub usingnamespace c_enum_conversions(PixelType, C.SDL_PixelType);
 };
 
-pub const BitmapOrder = enum(c_uint) {
+pub const BitmapOrder = enum(C.SDL_BitmapOrder) {
     NONE = C.SDL_BITMAPORDER_NONE,
     _4321 = C.SDL_BITMAPORDER_4321,
     _1234 = C.SDL_BITMAPORDER_1234,
 
-    inline fn to_c(self: BitmapOrder) c_uint {
-        return @intFromEnum(self);
-    }
-    inline fn from_c(val: c_uint) BitmapOrder {
-        return @enumFromInt(val);
-    }
+    pub usingnamespace c_enum_conversions(BitmapOrder, C.SDL_BitmapOrder);
 };
 
-pub const PackedOrder = enum(c_uint) {
+pub const PackedOrder = enum(C.SDL_PackedOrder) {
     NONE = C.SDL_PACKEDORDER_NONE,
     XRGB = C.SDL_PACKEDORDER_XRGB,
     RGBX = C.SDL_PACKEDORDER_RGBX,
@@ -2532,15 +2560,10 @@ pub const PackedOrder = enum(c_uint) {
     ABGR = C.SDL_PACKEDORDER_ABGR,
     BGRA = C.SDL_PACKEDORDER_BGRA,
 
-    inline fn to_c(self: PackedOrder) c_uint {
-        return @intFromEnum(self);
-    }
-    inline fn from_c(val: c_uint) PackedOrder {
-        return @enumFromInt(val);
-    }
+    pub usingnamespace c_enum_conversions(PackedOrder, C.SDL_PackedOrder);
 };
 
-pub const ArrayOrder = enum(c_uint) {
+pub const ArrayOrder = enum(C.SDL_ArrayOrder) {
     NONE = C.SDL_ARRAYORDER_NONE,
     RGB = C.SDL_ARRAYORDER_RGB,
     RGBA = C.SDL_ARRAYORDER_RGBA,
@@ -2549,15 +2572,10 @@ pub const ArrayOrder = enum(c_uint) {
     BGRA = C.SDL_ARRAYORDER_BGRA,
     ABGR = C.SDL_ARRAYORDER_ABGR,
 
-    inline fn to_c(self: ArrayOrder) c_uint {
-        return @intFromEnum(self);
-    }
-    inline fn from_c(val: c_uint) ArrayOrder {
-        return @enumFromInt(val);
-    }
+    pub usingnamespace c_enum_conversions(ArrayOrder, C.SDL_ArrayOrder);
 };
 
-pub const PackedLayout = enum(c_uint) {
+pub const PackedLayout = enum(C.SDL_PackedLayout) {
     NONE = C.SDL_PACKEDLAYOUT_NONE,
     _332 = C.SDL_PACKEDLAYOUT_332,
     _4444 = C.SDL_PACKEDLAYOUT_4444,
@@ -2568,38 +2586,23 @@ pub const PackedLayout = enum(c_uint) {
     _2101010 = C.SDL_PACKEDLAYOUT_2101010,
     _1010102 = C.SDL_PACKEDLAYOUT_1010102,
 
-    inline fn to_c(self: PackedLayout) c_uint {
-        return @intFromEnum(self);
-    }
-    inline fn from_c(val: c_uint) PackedLayout {
-        return @enumFromInt(val);
-    }
+    pub usingnamespace c_enum_conversions(PackedLayout, C.SDL_PackedLayout);
 };
 
-pub const ColorType = enum(c_uint) {
+pub const ColorType = enum(C.SDL_ColorType) {
     UNKNOWN = C.SDL_COLOR_TYPE_UNKNOWN,
     RGB = C.SDL_COLOR_TYPE_RGB,
     YCBCR = C.SDL_COLOR_TYPE_YCBCR,
 
-    inline fn to_c(self: ColorType) c_uint {
-        return @intFromEnum(self);
-    }
-    inline fn from_c(val: c_uint) ColorType {
-        return @enumFromInt(val);
-    }
+    pub usingnamespace c_enum_conversions(ColorType, C.SDL_ColorType);
 };
 
-pub const ColorRange = enum(c_uint) {
+pub const ColorRange = enum(C.SDL_ColorRange) {
     UNKNOWN = C.SDL_COLOR_RANGE_UNKNOWN,
     LIMITED = C.SDL_COLOR_RANGE_LIMITED,
     FULL = C.SDL_COLOR_RANGE_FULL,
 
-    inline fn to_c(self: ColorRange) c_uint {
-        return @intFromEnum(self);
-    }
-    inline fn from_c(val: c_uint) ColorRange {
-        return @enumFromInt(val);
-    }
+    pub usingnamespace c_enum_conversions(ColorRange, C.SDL_ColorRange);
 };
 
 pub const System = struct {
@@ -2629,8 +2632,8 @@ pub const System = struct {
 };
 
 pub const Clipboard = struct {
-    pub fn get_text() Error!String {
-        return String{ .ptr = try nonempty_str_or_null_err(C.SDL_GetClipboardText()) };
+    pub fn get_text() Error!AllocatedString {
+        return AllocatedString{ .str = try nonempty_str_or_null_err(C.SDL_GetClipboardText()) };
     }
     pub fn set_text(text: [*:0]const u8) Error!void {
         return ok_or_fail_err(C.SDL_SetClipboardText(text));
@@ -2638,7 +2641,7 @@ pub const Clipboard = struct {
     pub fn has_text() bool {
         return C.SDL_HasClipboardText();
     }
-
+    //TODO
     // pub extern fn SDL_SetPrimarySelectionText(text: [*c]const u8) bool;
     // pub extern fn SDL_GetPrimarySelectionText() [*c]u8;
     // pub extern fn SDL_HasPrimarySelectionText() bool;
@@ -2651,15 +2654,15 @@ pub const Clipboard = struct {
     // pub extern fn SDL_GetClipboardMimeTypes(num_mime_types: [*c]usize) [*c][*c]u8;
 };
 
-pub const String = extern struct {
-    ptr: [*:0]u8,
+pub const AllocatedString = extern struct {
+    str: [*:0]u8,
 
-    pub fn slice(self: String) [:0]u8 {
-        return Root.Utils.make_slice_from_sentinel_ptr(u8, 0, self.ptr);
+    pub fn slice(self: AllocatedString) [:0]u8 {
+        return Types.make_slice_from_sentinel_ptr(u8, 0, self.str);
     }
 
-    pub fn free(self: String) void {
-        return Mem.free(self.ptr);
+    pub fn free(self: AllocatedString) void {
+        return Mem.free(self.str);
     }
 };
 
@@ -2759,7 +2762,7 @@ pub const DisplayModeData = extern struct {
     pub const External: type = C.SDL_DisplayModeData;
 };
 
-pub const PixelFormat = enum(c_uint) {
+pub const PixelFormat = enum(C.SDL_PixelFormat) {
     UNKNOWN = C.SDL_PIXELFORMAT_UNKNOWN,
     INDEX_1_LSB = C.SDL_PIXELFORMAT_INDEX1LSB,
     INDEX_1_MSB = C.SDL_PIXELFORMAT_INDEX1MSB,
@@ -2825,16 +2828,96 @@ pub const PixelFormat = enum(c_uint) {
     P010 = C.SDL_PIXELFORMAT_P010,
     EXTERNAL_OES = C.SDL_PIXELFORMAT_EXTERNAL_OES,
     MJPG = C.SDL_PIXELFORMAT_MJPG,
-    // RGBA_32 = C.SDL_PIXELFORMAT_RGBA32,
-    // ARGB_32 = C.SDL_PIXELFORMAT_ARGB32,
-    // BGRA_32 = C.SDL_PIXELFORMAT_BGRA32,
-    // ABGR_32 = C.SDL_PIXELFORMAT_ABGR32,
-    // RGBX_32 = C.SDL_PIXELFORMAT_RGBX32,
-    // XRGB_32 = C.SDL_PIXELFORMAT_XRGB32,
-    // BGRX_32 = C.SDL_PIXELFORMAT_BGRX32,
-    // XBGR_32 = C.SDL_PIXELFORMAT_XBGR32,
+    _,
 
-    pub usingnamespace c_enum_conversions(PixelFormat, c_uint);
+    pub const RGBA_32 = PixelFormat.from_c(C.SDL_PIXELFORMAT_RGBA32);
+    pub const ARGB_32 = PixelFormat.from_c(C.SDL_PIXELFORMAT_ARGB32);
+    pub const BGRA_32 = PixelFormat.from_c(C.SDL_PIXELFORMAT_BGRA32);
+    pub const ABGR_32 = PixelFormat.from_c(C.SDL_PIXELFORMAT_ABGR32);
+    pub const RGBX_32 = PixelFormat.from_c(C.SDL_PIXELFORMAT_RGBX32);
+    pub const XRGB_32 = PixelFormat.from_c(C.SDL_PIXELFORMAT_XRGB32);
+    pub const BGRX_32 = PixelFormat.from_c(C.SDL_PIXELFORMAT_BGRX32);
+    pub const XBGR_32 = PixelFormat.from_c(C.SDL_PIXELFORMAT_XBGR32);
+
+    pub fn custom_four_cc(str: []const u8) PixelFormat {
+        assert_with_reason(str.len == 4, @src(), @This(), "invalid four_cc code `{s}`: four_cc format codes must have exactly 4 chars (use space ` ` to fill spots if needed)", .{str});
+        return PixelFormat.from_c(C.SDL_DEFINE_PIXELFOURCC(str[0], str[1], str[2], str[3]));
+    }
+
+    pub fn custom(pixel_type: PixelType, order: PixelOrder, layout: PackedLayout, bits: c_uint, bytes: c_uint) PixelFormat {
+        return PixelFormat.from_c(C.SDL_DEFINE_PIXELFORMAT(pixel_type, order, layout, bits, bytes));
+    }
+
+    pub fn get_flags(self: PixelFormat) c_uint {
+        return @intCast(C.SDL_PIXELFLAG(self.to_c()));
+    }
+    pub fn get_pixel_type(self: PixelFormat) PixelType {
+        return PixelType.from_c(C.SDL_PIXELFLAG(self.to_c()));
+    }
+    pub fn get_pixel_order(self: PixelFormat) PixelOrder {
+        return @bitCast(@as(c_uint, @intCast(C.SDL_PIXELORDER(self.to_c()))));
+    }
+    pub fn get_pixel_layout(self: PixelFormat) PackedLayout {
+        return PackedLayout.from_c(C.SDL_PIXELLAYOUT(self.to_c()));
+    }
+
+    pub fn bits_per_pixel(self: PixelFormat) c_uint {
+        return @intCast(C.SDL_BITSPERPIXEL(self.to_c()));
+    }
+
+    pub fn bytes_per_pixel(self: PixelFormat) c_uint {
+        return @intCast(C.SDL_BYTESPERPIXEL(self.to_c()));
+    }
+
+    pub fn is_indexed(self: PixelFormat) bool {
+        return C.SDL_ISPIXELFORMAT_INDEXED(self.to_c());
+    }
+
+    pub fn is_packed(self: PixelFormat) bool {
+        return C.SDL_ISPIXELFORMAT_PACKED(self.to_c());
+    }
+
+    pub fn is_array(self: PixelFormat) bool {
+        return C.SDL_ISPIXELFORMAT_ARRAY(self.to_c());
+    }
+
+    pub fn is_10_bit(self: PixelFormat) bool {
+        return C.SDL_ISPIXELFORMAT_10BIT(self.to_c());
+    }
+
+    pub fn is_float(self: PixelFormat) bool {
+        return C.SDL_ISPIXELFORMAT_FLOAT(self.to_c());
+    }
+
+    pub fn is_integer(self: PixelFormat) bool {
+        return !C.SDL_ISPIXELFORMAT_FLOAT(self.to_c());
+    }
+
+    pub fn has_alpha(self: PixelFormat) bool {
+        return C.SDL_ISPIXELFORMAT_ALPHA(self.to_c());
+    }
+
+    pub fn is_four_cc(self: PixelFormat) bool {
+        return C.SDL_ISPIXELFORMAT_FOURCC(self.to_c());
+    }
+
+    pub const PixelOrder = extern union {
+        bitmap_order: BitmapOrder,
+        packed_order: PackedOrder,
+        array_order: ArrayOrder,
+
+        pub fn new_bitmap_order(order: BitmapOrder) PixelOrder {
+            return PixelOrder{ .bitmap_order = order };
+        }
+        pub fn new_packed_order(order: PackedOrder) PixelOrder {
+            return PixelOrder{ .packed_order = order };
+        }
+        pub fn new_array_order(order: ArrayOrder) PixelOrder {
+            return PixelOrder{ .array_order = order };
+        }
+    };
+
+    pub usingnamespace c_enum_conversions(PixelFormat, C.SDL_PixelFormat);
     //TODO
     // pub extern fn SDL_GetPixelFormatName(format: SDL_PixelFormat) [*c]const u8;
     // pub extern fn SDL_GetMasksForPixelFormat(format: SDL_PixelFormat, bpp: [*c]c_int, Rmask: [*c]Uint32, Gmask: [*c]Uint32, Bmask: [*c]Uint32, Amask: [*c]Uint32) bool;
@@ -3401,8 +3484,48 @@ pub const Colorspace = enum(C.SDL_Colorspace) {
     BT2020_FULL = C.SDL_COLORSPACE_BT2020_FULL,
     RGB_DEFAULT = C.SDL_COLORSPACE_RGB_DEFAULT,
     YUV_DEFAULT = C.SDL_COLORSPACE_YUV_DEFAULT,
+    _,
 
     pub usingnamespace c_enum_conversions(Colorspace, C.SDL_Colorspace);
+
+    pub fn custom(color_type: ColorType, range: ColorRange, primaries: ColorPrimaries, transfer: TransferCharacteristics, matrix: MatrixCoefficients, chroma_loc: ChromaLocation) Colorspace {
+        return Colorspace.from_c(C.SDL_DEFINE_COLORSPACE(color_type.to_c(), range.to_c(), primaries.to_c(), transfer.to_c(), matrix.to_c(), chroma_loc.to_c()));
+    }
+
+    pub fn get_type(self: Colorspace) ColorType {
+        return ColorType.from_c(C.SDL_COLORSPACETYPE(self.to_c()));
+    }
+    pub fn get_range(self: Colorspace) ColorRange {
+        return ColorRange.from_c(C.SDL_COLORSPACERANGE(self.to_c()));
+    }
+    pub fn get_chroma(self: Colorspace) ChromaLocation {
+        return ChromaLocation.from_c(C.SDL_COLORSPACERANGE(self.to_c()));
+    }
+    pub fn get_primaries(self: Colorspace) ColorPrimaries {
+        return ColorPrimaries.from_c(C.SDL_COLORSPACEPRIMARIES(self.to_c()));
+    }
+    pub fn get_transfer(self: Colorspace) TransferCharacteristics {
+        return TransferCharacteristics.from_c(C.SDL_COLORSPACETRANSFER(self.to_c()));
+    }
+    pub fn get_matrix(self: Colorspace) MatrixCoefficients {
+        return MatrixCoefficients.from_c(C.SDL_COLORSPACEMATRIX(self.to_c()));
+    }
+
+    pub fn matrix_is_bt601(self: Colorspace) bool {
+        return C.SDL_ISCOLORSPACE_MATRIX_BT601(self.to_c());
+    }
+    pub fn matrix_is_bt709(self: Colorspace) bool {
+        return C.SDL_ISCOLORSPACE_MATRIX_BT709(self.to_c());
+    }
+    pub fn matrix_is_bt2020_ncl(self: Colorspace) bool {
+        return C.SDL_ISCOLORSPACE_MATRIX_BT2020_NCL(self.to_c());
+    }
+    pub fn has_limited_range(self: Colorspace) bool {
+        return C.SDL_ISCOLORSPACE_LIMITED_RANGE(self.to_c());
+    }
+    pub fn has_full_range(self: Colorspace) bool {
+        return C.SDL_ISCOLORSPACE_FULL_RANGE(self.to_c());
+    }
 };
 
 pub const MetalLayer = opaque {};
@@ -4843,8 +4966,8 @@ pub const JoystickID = extern struct {
     pub fn get_real_gamepad_type(self: JoystickID) Error!GamepadType {
         return GamepadType.from_c(C.SDL_GetRealGamepadTypeForID(self.id));
     }
-    pub fn get_gamepad_mapping_string(self: JoystickID) Error!String {
-        return String{ .ptr = try ptr_cast_or_null_err([*:0]u8, C.SDL_GetGamepadMappingForID(self.id)) };
+    pub fn get_gamepad_mapping_string(self: JoystickID) Error!AllocatedString {
+        return AllocatedString{ .str = try ptr_cast_or_null_err([*:0]u8, C.SDL_GetGamepadMappingForID(self.id)) };
     }
     pub fn open_gamepad(self: JoystickID) Error!*Gamepad {
         return ptr_cast_or_null_err(*Gamepad, C.SDL_OpenGamepad(self.id));
