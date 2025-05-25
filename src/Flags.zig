@@ -6,14 +6,15 @@ const Log2IntCeil = math.Log2IntCeil;
 
 const Root = @import("./_root.zig");
 const Utils = Root.Utils;
+const Types = Root.Types;
 const Assert = Root.Assert;
 const assert_with_reason = Assert.assert_with_reason;
 
 pub fn Flags(comptime FLAGS_ENUM: type, comptime GROUPS_OR_NULL: ?Groups) type {
     const INFO_1 = @typeInfo(FLAGS_ENUM);
-    assert_with_reason(INFO_1 == .@"enum", @inComptime(), @src(), @This(), "parameter `FLAGS_ENUM` must be an enum type");
+    assert_with_reason(INFO_1 == .@"enum", @src(), @This(), "parameter `FLAGS_ENUM` must be an enum type", .{});
     const E_INFO = INFO_1.@"enum";
-    assert_with_reason(@typeInfo(E_INFO.tag_type).int.signedness == .unsigned, @inComptime(), @src(), @This(), "parameter `FLAGS_ENUM` tage type must be an unsigned integer type");
+    assert_with_reason(@typeInfo(E_INFO.tag_type).int.signedness == .unsigned, @src(), @This(), "parameter `FLAGS_ENUM` tage type must be an unsigned integer type", .{});
     const GROUPS = if (GROUPS_OR_NULL) |groups_struct| BuildGroups(groups_struct) else BuildGroups(Groups.none(FLAGS_ENUM));
     const A: E_INFO.tag_type = combine: {
         var a: E_INFO.tag_type = 0;
@@ -178,25 +179,25 @@ pub fn Flags(comptime FLAGS_ENUM: type, comptime GROUPS_OR_NULL: ?Groups) type {
             unreachable;
         }
 
-        pub inline fn all_flags__to_first_matching_group(self: Self) ?Group {
+        pub inline fn all_flags_to_first_matching_group(self: Self) ?Group {
             for (GroupsInfo.BITS[0..], 0..) |bits, idx| {
                 if (self.raw & bits == self.raw) return @enumFromInt(idx);
             }
             return null;
         }
-        pub inline fn all_flags__to_first_matching_group_guaranteed(self: Self) Group {
+        pub inline fn all_flags_to_first_matching_group_guaranteed(self: Self) Group {
             for (GroupsInfo.BITS[0..], 0..) |bits, idx| {
                 if (self.raw & bits == self.raw) return @enumFromInt(idx);
             }
             unreachable;
         }
-        pub inline fn all_flags__to_first_matching_group_subset(self: Self, group_subset: []const Group) ?Group {
+        pub inline fn all_flags_to_first_matching_group_subset(self: Self, group_subset: []const Group) ?Group {
             for (group_subset, 0..) |group, idx| {
                 if (self.raw & GroupsInfo.bits(group) == self.raw) return @enumFromInt(idx);
             }
             return null;
         }
-        pub inline fn all_flags__to_first_matching_group_subset_guaranteed(self: Self, group_subset: []const Group) Group {
+        pub inline fn all_flags_to_first_matching_group_subset_guaranteed(self: Self, group_subset: []const Group) Group {
             for (group_subset, 0..) |group, idx| {
                 if (self.raw & GroupsInfo.bits(group) == self.raw) return @enumFromInt(idx);
             }
@@ -211,9 +212,9 @@ pub const Groups = struct {
 
     fn none(comptime FLAGS_ENUM: type) Groups {
         const F_INFO = @typeInfo(FLAGS_ENUM);
-        assert_with_reason(F_INFO == .@"enum", @inComptime(), @src(), @This(), "parameter `FLAGS_ENUM` must be an enum type");
+        assert_with_reason(F_INFO == .@"enum", @src(), @This(), "parameter `FLAGS_ENUM` must be an enum type", .{});
         const FLAGS_INFO = F_INFO.@"enum";
-        assert_with_reason(@typeInfo(FLAGS_INFO.tag_type).int.signedness == .unsigned, @inComptime(), @src(), @This(), "parameter `FLAGS_ENUM` tage type must be an unsigned integer type");
+        assert_with_reason(@typeInfo(FLAGS_INFO.tag_type).int.signedness == .unsigned, @src(), @This(), "parameter `FLAGS_ENUM` tage type must be an unsigned integer type", .{});
         return Groups{
             .group_names_enum = enum(u8) {
                 NONE = 0,
@@ -229,12 +230,12 @@ pub fn BuildGroups(comptime groups: Groups) type {
     const GROUP_NAMES_ENUM = groups.group_names_enum;
     const GROUP_VALS_ENUM = groups.group_vals_enum;
     const N_INFO = @typeInfo(GROUP_NAMES_ENUM);
-    assert_with_reason(N_INFO == .@"enum", @inComptime(), @src(), @This(), "GROUP_NAMES_ENUM must be an enum type");
+    assert_with_reason(N_INFO == .@"enum", @src(), @This(), "GROUP_NAMES_ENUM must be an enum type", .{});
     const NAME_INFO = N_INFO.@"enum";
-    assert_with_reason(@typeInfo(NAME_INFO.tag_type).int.signedness == .unsigned, @inComptime(), @src(), @This(), "GROUP_NAMES_ENUM tag type must be an unsigned integer type");
-    assert_with_reason(Utils.all_enum_values_start_from_zero_with_no_gaps(GROUP_NAMES_ENUM), @inComptime(), @src(), @This(), "GROUP_NAMES_ENUM must use every tag value starting from zero up to the largest tag value with no gaps");
+    assert_with_reason(@typeInfo(NAME_INFO.tag_type).int.signedness == .unsigned, @src(), @This(), "GROUP_NAMES_ENUM tag type must be an unsigned integer type", .{});
+    assert_with_reason(Types.all_enum_values_start_from_zero_with_no_gaps(GROUP_NAMES_ENUM), @src(), @This(), "GROUP_NAMES_ENUM must use every tag value starting from zero up to the largest tag value with no gaps", .{});
     const V_INFO = @typeInfo(GROUP_VALS_ENUM);
-    assert_with_reason(V_INFO == .@"enum", @inComptime(), @src(), @This(), "GROUP_VALS_ENUM must be an enum type");
+    assert_with_reason(V_INFO == .@"enum", @src(), @This(), "GROUP_VALS_ENUM must be an enum type", .{});
     const VAL_INFO = V_INFO.@"enum";
     comptime var counts: [NAME_INFO.fields.len]usize = @splat(0);
     comptime var maps: [NAME_INFO.fields.len]VAL_INFO.tag_type = @splat(0);
@@ -248,7 +249,7 @@ pub fn BuildGroups(comptime groups: Groups) type {
         }
     }
     for (counts[0..]) |cnt| {
-        assert_with_reason(cnt == 1, @inComptime(), @src(), @This(), "all GROUP_NAMES_ENUM tags must have a matching tag with the same exact name in GROUP_VALS_ENUM");
+        assert_with_reason(cnt == 1, @src(), @This(), "all GROUP_NAMES_ENUM tags must have a matching tag with the same exact name in GROUP_VALS_ENUM", .{});
     }
     const M = comptime make_const: {
         break :make_const maps;

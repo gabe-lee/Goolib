@@ -1,9 +1,11 @@
 const std = @import("std");
 const build = @import("builtin");
+const config = @import("config");
 const init_zero = std.mem.zeroes;
 const assert = std.debug.assert;
 
 const Root = @import("./_root.zig");
+const Types = Root.Types;
 const Flags = Root.Flags.Flags;
 const FlagGroups = Root.Flags.Groups;
 const Utils = Root.Utils;
@@ -35,7 +37,8 @@ pub const C = @cImport({
     @cDefine("SDL_DISABLE_OLD_NAMES", {});
     @cInclude("SDL3/SDL.h");
     @cInclude("SDL3/SDL_revision.h");
-    @cDefine("SDL_MAIN_HANDLED", {});
+    if (config.SDL_USER_MAIN) @cDefine("SDL_MAIN_HANDLED", {});
+    if (config.SDL_USER_CALLBACKS) @cDefine("SDL_MAIN_USE_CALLBACKS", {});
     @cInclude("SDL3/SDL_main.h");
 });
 
@@ -68,8 +71,8 @@ fn c_opaque_conversions(comptime ZIG_TYPE: type, comptime C_TYPE: type) type {
 }
 
 fn c_enum_conversions(comptime ZIG_TYPE: type, comptime C_TYPE: type) type {
-    assert_with_reason(Utils.type_is_enum(ZIG_TYPE), "ZIG_TYPE not an enum");
-    assert_with_reason(Utils.type_is_int(C_TYPE), "C_TYPE not an integer");
+    assert_with_reason(Types.type_is_enum(ZIG_TYPE), @src(), @This(), "ZIG_TYPE not an enum", .{});
+    assert_with_reason(Types.type_is_int(C_TYPE), @src(), @This(), "C_TYPE not an integer", .{});
     return struct {
         pub fn to_c(self: ZIG_TYPE) C_TYPE {
             return @intFromEnum(self);
@@ -182,6 +185,7 @@ pub const Color_raw_u32 = extern struct {
     raw: u32,
 };
 pub const Time_NS = Root.Time.NSecs;
+pub const Time_MS = Root.Time.MSecs;
 
 pub const Video = struct {
     pub fn get_current_video_driver() Error![*:0]const u8 {
@@ -774,15 +778,15 @@ pub const NinePatch_F32 = extern struct {
 /// - `*IRect` == use specific rect
 ///
 /// As well as four values for edge widths
-pub const INinePatch = extern struct {
+pub const NinePatch_c_int = extern struct {
     rect_ptr: ?*const Rect_c_int = null,
     left: c_int = 0,
     right: c_int = 0,
     top: c_int = 0,
     bottom: c_int = 0,
 
-    pub fn rect(r: *const Rect_c_int, left: c_int, right: c_int, top: c_int, bottom: c_int) INinePatch {
-        return INinePatch{
+    pub fn rect(r: *const Rect_c_int, left: c_int, right: c_int, top: c_int, bottom: c_int) NinePatch_c_int {
+        return NinePatch_c_int{
             .rect_ptr = r,
             .left = left,
             .right = right,
@@ -790,8 +794,8 @@ pub const INinePatch = extern struct {
             .bottom = bottom,
         };
     }
-    pub fn entire_area(left: c_int, right: c_int, top: c_int, bottom: c_int) INinePatch {
-        return INinePatch{
+    pub fn entire_area(left: c_int, right: c_int, top: c_int, bottom: c_int) NinePatch_c_int {
+        return NinePatch_c_int{
             .rect_ptr = null,
             .left = left,
             .right = right,
@@ -799,7 +803,7 @@ pub const INinePatch = extern struct {
             .bottom = bottom,
         };
     }
-    pub inline fn rect_to_c(self: INinePatch) ?*C.SDL_Rect {
+    pub inline fn rect_to_c(self: NinePatch_c_int) ?*C.SDL_Rect {
         return @ptrCast(@alignCast(self.rect_ptr));
     }
 };
@@ -904,6 +908,16 @@ pub const Thread = opaque {
     // pub extern fn SDL_WaitThread(thread: ?*SDL_Thread, status: [*c]c_int) void;
     // pub extern fn SDL_GetThreadState(thread: ?*SDL_Thread) SDL_ThreadState;
     // pub extern fn SDL_DetachThread(thread: ?*SDL_Thread) void;
+    // pub inline fn SDL_CreateThread(@"fn": anytype, name: anytype, data: anytype) @TypeOf(SDL_CreateThreadRuntime(@"fn", name, data, @import("std").zig.c_translation.cast(SDL_FunctionPointer, SDL_BeginThreadFunction), @import("std").zig.c_translation.cast(SDL_FunctionPointer, SDL_EndThreadFunction))) {
+    //     _ = &@"fn";
+    //     _ = &name;
+    //     _ = &data;
+    //     return SDL_CreateThreadRuntime(@"fn", name, data, @import("std").zig.c_translation.cast(SDL_FunctionPointer, SDL_BeginThreadFunction), @import("std").zig.c_translation.cast(SDL_FunctionPointer, SDL_EndThreadFunction));
+    // }
+    // pub inline fn SDL_CreateThreadWithProperties(props: anytype) @TypeOf(SDL_CreateThreadWithPropertiesRuntime(props, @import("std").zig.c_translation.cast(SDL_FunctionPointer, SDL_BeginThreadFunction), @import("std").zig.c_translation.cast(SDL_FunctionPointer, SDL_EndThreadFunction))) {
+    //     _ = &props;
+    //     return SDL_CreateThreadWithPropertiesRuntime(props, @import("std").zig.c_translation.cast(SDL_FunctionPointer, SDL_BeginThreadFunction), @import("std").zig.c_translation.cast(SDL_FunctionPointer, SDL_EndThreadFunction));
+    // }
 };
 
 pub const ThreadID = extern struct {
@@ -1165,6 +1179,12 @@ pub const AtomicInt = extern struct {
     }
     pub fn get(self: *AtomicInt) c_int {
         return C.SDL_GetAtomicInt(self.to_c_ptr());
+    }
+    pub fn increment(self: *AtomicInt) c_int {
+        return C.SDL_AddAtomicInt(self.to_c_ptr(), 1);
+    }
+    pub fn decrement(self: *AtomicInt) c_int {
+        return C.SDL_AddAtomicInt(self.to_c_ptr(), -1);
     }
 };
 
@@ -1605,7 +1625,7 @@ pub const EGL_Attr = struct {
 pub const EGL_Int = struct {
     raw: C.SDL_EGLint,
 };
-
+//TODO
 // pub const SDL_EGLAttribArrayCallback = ?*const fn (?*anyopaque) callconv(.c) [*c]SDL_EGLAttrib;
 // pub const SDL_EGLIntArrayCallback = ?*const fn (?*anyopaque, SDL_EGLDisplay, SDL_EGLConfig) callconv(.c) [*c]SDL_EGLint;
 
@@ -2172,7 +2192,7 @@ pub const Surface = opaque {
     pub fn blit_tiled_scaled_to(self: *Surface, area: IArea, dst: *Surface, dst_area: IArea, scale: Scale) Error!void {
         return ok_or_fail_err(C.SDL_BlitSurfaceTiledWithScale(self.to_c(), area.to_c(), scale.ratio, scale.mode.to_c(), dst.to_c(), dst_area.to_c()));
     }
-    pub fn blit_nine_patch_to(self: *Surface, nine_patch: INinePatch, dst: *Surface, dst_area: IArea, scale: Scale) Error!void {
+    pub fn blit_nine_patch_to(self: *Surface, nine_patch: NinePatch_c_int, dst: *Surface, dst_area: IArea, scale: Scale) Error!void {
         return ok_or_fail_err(C.SDL_BlitSurface9Grid(self.to_c(), nine_patch.rect_to_c(), nine_patch.left, nine_patch.right, nine_patch.top, nine_patch.bottom, scale.ratio, scale.mode.to_c(), dst.to_c(), dst_area.to_c()));
     }
     pub fn closest_valid_color_rgb(self: *Surface, color: Color_RGB_u8) Color_raw_u32 {
@@ -2258,21 +2278,21 @@ pub const BlendOperation = enum(c_uint) {
         return @enumFromInt(val);
     }
 };
-pub const SimpleTexture = opaque {
-    pub inline fn width(self: *SimpleTexture) c_int {
-        return self.to_c_ptr().w;
+pub const SimpleTexture = extern struct {
+    format: PixelFormat = .UNKNOWN,
+    size: Vec_c_int = .ZERO_ZERO,
+    /// WARNING: changing this manually may be dangerous if not handled properly
+    ref_count: AtomicInt = .{ .val = 0 },
+    /// WARNING: changing this manually may be dangerous if not handled properly
+    pub fn increment_refs(self: *SimpleTexture) c_int {
+        return self.ref_count.increment();
     }
-    pub inline fn height(self: *SimpleTexture) c_int {
-        return self.to_c_ptr().h;
-    }
-    pub inline fn format(self: *SimpleTexture) PixelFormat {
-        return PixelFormat.from_c(self.to_c_ptr().format);
-    }
-    pub inline fn ref_count(self: *SimpleTexture) c_int {
-        return self.to_c_ptr().refcount;
+    /// WARNING: changing this manually may be dangerous if not handled properly
+    pub fn decrement_refs(self: *SimpleTexture) bool {
+        return self.ref_count.decrement() == 1;
     }
 
-    pub usingnamespace c_opaque_conversions(SimpleTexture, C.SDL_Texture);
+    pub usingnamespace c_non_opaque_conversions(SimpleTexture, C.SDL_Texture);
 
     pub fn destroy(self: *SimpleTexture) void {
         C.SDL_DestroyTexture(self.to_c_ptr());
@@ -2805,14 +2825,14 @@ pub const PixelFormat = enum(c_uint) {
     P010 = C.SDL_PIXELFORMAT_P010,
     EXTERNAL_OES = C.SDL_PIXELFORMAT_EXTERNAL_OES,
     MJPG = C.SDL_PIXELFORMAT_MJPG,
-    RGBA_32 = C.SDL_PIXELFORMAT_RGBA32,
-    ARGB_32 = C.SDL_PIXELFORMAT_ARGB32,
-    BGRA_32 = C.SDL_PIXELFORMAT_BGRA32,
-    ABGR_32 = C.SDL_PIXELFORMAT_ABGR32,
-    RGBX_32 = C.SDL_PIXELFORMAT_RGBX32,
-    XRGB_32 = C.SDL_PIXELFORMAT_XRGB32,
-    BGRX_32 = C.SDL_PIXELFORMAT_BGRX32,
-    XBGR_32 = C.SDL_PIXELFORMAT_XBGR32,
+    // RGBA_32 = C.SDL_PIXELFORMAT_RGBA32,
+    // ARGB_32 = C.SDL_PIXELFORMAT_ARGB32,
+    // BGRA_32 = C.SDL_PIXELFORMAT_BGRA32,
+    // ABGR_32 = C.SDL_PIXELFORMAT_ABGR32,
+    // RGBX_32 = C.SDL_PIXELFORMAT_RGBX32,
+    // XRGB_32 = C.SDL_PIXELFORMAT_XRGB32,
+    // BGRX_32 = C.SDL_PIXELFORMAT_BGRX32,
+    // XBGR_32 = C.SDL_PIXELFORMAT_XBGR32,
 
     pub usingnamespace c_enum_conversions(PixelFormat, c_uint);
     //TODO
@@ -2874,7 +2894,7 @@ pub const Window = opaque {
         return WindowsList{ .list = (try ptr_cast_or_null_err([*]*Window, C.SDL_GetWindows(&len)))[0..len] };
     }
     pub fn create(options: CreateWindowOptions) Error!*Window {
-        return ptr_cast_or_fail_err(*Window, C.SDL_CreateWindow(options.title.ptr, options.size.x, options.size.y, options.flags.flags));
+        return ptr_cast_or_fail_err(*Window, C.SDL_CreateWindow(options.title.ptr, options.size.x, options.size.y, options.flags.raw));
     }
     pub fn create_popup_window(parent: *Window, options: CreatePopupWindowOptions) Error!*Window {
         return ptr_cast_or_fail_err(*Window, C.SDL_CreatePopupWindow(parent.to_c_ptr(), options.x_offset, options.y_offset, options.width, options.height, options.flags));
@@ -3396,12 +3416,12 @@ pub const IndexType = enum(c_int) {
     pub usingnamespace c_enum_conversions(IndexType, c_int);
 };
 
-pub const AppProcess = enum(C.SDL_AppResult) {
+pub const AppResult = enum(C.SDL_AppResult) {
     CONTINUE = C.SDL_APP_CONTINUE,
     CLOSE_NORMAL = C.SDL_APP_SUCCESS,
     CLOSE_ERROR = C.SDL_APP_FAILURE,
 
-    pub usingnamespace c_enum_conversions(AppProcess, C.SDL_AppResult);
+    pub usingnamespace c_enum_conversions(AppResult, C.SDL_AppResult);
 };
 
 pub const LogicalPresentationMode = enum(C.SDL_RendererLogicalPresentation) {
@@ -3411,7 +3431,7 @@ pub const LogicalPresentationMode = enum(C.SDL_RendererLogicalPresentation) {
     OVERSCAN = C.SDL_LOGICAL_PRESENTATION_OVERSCAN,
     INTEGER_SCALE = C.SDL_LOGICAL_PRESENTATION_INTEGER_SCALE,
 
-    pub usingnamespace c_enum_conversions(AppProcess, C.SDL_RendererLogicalPresentation);
+    pub usingnamespace c_enum_conversions(AppResult, C.SDL_RendererLogicalPresentation);
 };
 
 pub const LogicalPresentation = extern struct {
@@ -5901,25 +5921,27 @@ pub const Keymod = extern struct {
     mod: u16 = 0,
 };
 
-pub fn runtime_version() c_int {
-    return C.SDL_GetVersion();
-}
-pub fn runtime_revision() [*:0]const u8 {
-    return C.SDL_GetRevision();
-}
-pub const BUILD_MAJOR_VERSION = C.SDL_MAJOR_VERSION;
-pub const BUILD_MINOR_VERSION = C.SDL_MINOR_VERSION;
-pub const BUILD_MICRO_VERSION = C.SDL_MICRO_VERSION;
-pub const BUILD_REVISION = C.SDL_REVISION;
-pub fn RUNTIME_MAJOR_VERSION(version: anytype) @TypeOf(@import("std").zig.c_translation.MacroArithmetic.div(version, @import("std").zig.c_translation.promoteIntLiteral(c_int, 1000000, .decimal))) {
-    return C.SDL_VERSIONNUM_MAJOR(version);
-}
-pub fn RUNTIME_MINOR_VERSION(version: anytype) @TypeOf(@import("std").zig.c_translation.MacroArithmetic.rem(@import("std").zig.c_translation.MacroArithmetic.div(version, @as(c_int, 1000)), @as(c_int, 1000))) {
-    return C.SDL_VERSIONNUM_MINOR(version);
-}
-pub fn RUNTIME_MICRO_VERSION(version: anytype) @TypeOf(@import("std").zig.c_translation.MacroArithmetic.rem(version, @as(c_int, 1000))) {
-    return C.SDL_VERSIONNUM_MICRO(version);
-}
+pub const Meta = struct {
+    pub fn runtime_version() c_int {
+        return C.SDL_GetVersion();
+    }
+    pub fn runtime_revision() [*:0]const u8 {
+        return C.SDL_GetRevision();
+    }
+    pub const BUILD_MAJOR_VERSION = C.SDL_MAJOR_VERSION;
+    pub const BUILD_MINOR_VERSION = C.SDL_MINOR_VERSION;
+    pub const BUILD_MICRO_VERSION = C.SDL_MICRO_VERSION;
+    pub const BUILD_REVISION = C.SDL_REVISION;
+    pub fn RUNTIME_MAJOR_VERSION(version: anytype) @TypeOf(@import("std").zig.c_translation.MacroArithmetic.div(version, @import("std").zig.c_translation.promoteIntLiteral(c_int, 1000000, .decimal))) {
+        return C.SDL_VERSIONNUM_MAJOR(version);
+    }
+    pub fn RUNTIME_MINOR_VERSION(version: anytype) @TypeOf(@import("std").zig.c_translation.MacroArithmetic.rem(@import("std").zig.c_translation.MacroArithmetic.div(version, @as(c_int, 1000)), @as(c_int, 1000))) {
+        return C.SDL_VERSIONNUM_MINOR(version);
+    }
+    pub fn RUNTIME_MICRO_VERSION(version: anytype) @TypeOf(@import("std").zig.c_translation.MacroArithmetic.rem(version, @as(c_int, 1000))) {
+        return C.SDL_VERSIONNUM_MICRO(version);
+    }
+};
 
 pub const GPU_Device = opaque {
     pub usingnamespace c_opaque_conversions(GPU_Device, C.SDL_GPUDevice);
@@ -7053,7 +7075,7 @@ pub const Mem = struct {
         return C.SDL_realloc(mem, new_bytes);
     }
     pub inline fn free(mem: ?*anyopaque) void {
-        return C.Mem.free(mem);
+        return C.SDL_free(mem);
     }
     pub inline fn aligned_alloc(alignment: usize, bytes: usize) ?*anyopaque {
         return C.SDL_aligned_alloc(alignment, bytes);
@@ -7197,11 +7219,20 @@ pub const App = struct {
     pub fn remove_hint_change_callback(hint_name: [*:0]const u8, callback: *const HintChangeCallback, userdata: ?*anyopaque) void {
         C.SDL_RemoveHintCallback(hint_name, callback, userdata);
     }
+    pub fn sdl_main(arg_count: c_int, arg_list: ?[*:null]?[*:0]u8) c_int {
+        return C.SDL_main(arg_count, arg_list);
+    }
+    pub fn set_main_ready() void {
+        C.SDL_SetMainReady();
+    }
     pub fn run_app(arg_count: c_int, arg_list: ?[*:null]?[*:0]u8, main_func: *const AppMainFunc) c_int {
         return C.SDL_RunApp(arg_count, @ptrCast(@alignCast(arg_list)), main_func, null);
     }
     pub fn run_app_with_callbacks(arg_count: c_int, arg_list: ?[*:null]?[*:0]u8, init_func: *const AppInitFunc, update_func: *const AppUpdateFunc, event_func: *const AppEventFunc, quit_func: *const AppQuitFunc) c_int {
-        return C.SDL_EnterAppMainCallbacks(arg_count, @ptrCast(@alignCast(arg_list)), init_func, update_func, event_func, quit_func);
+        return C.SDL_EnterAppMainCallbacks(arg_count, @ptrCast(@alignCast(arg_list)), Types.ptr_cast(init_func, C.SDL_AppInit_func), Types.ptr_cast(update_func, C.SDL_AppIterate_func), Types.ptr_cast(event_func, C.SDL_AppEvent_func), Types.ptr_cast(quit_func, C.SDL_AppQuit_func));
+    }
+    pub fn GDK_suspend_complete() void {
+        C.SDL_GDKSuspendComplete();
     }
     pub fn get_error_details() [*:0]const u8 {
         return C.SDL_GetError();
@@ -7216,27 +7247,6 @@ pub const App = struct {
     }
     pub inline fn clear_error() void {
         _ = C.SDL_ClearError();
-    }
-    pub fn wait_milliseconds(ms: u32) void {
-        C.SDL_Delay(ms);
-    }
-    pub fn wait_nanoseconds(ns: u64) void {
-        C.SDL_DelayNS(ns);
-    }
-    pub fn wait_milliseconds_precise(ms: u32) void {
-        C.SDL_DelayPrecise(ms);
-    }
-    pub fn get_ticks_ms() u64 {
-        return C.SDL_GetTicks();
-    }
-    pub fn get_ticks_ns() u64 {
-        return C.SDL_GetTicksNS();
-    }
-    pub fn get_performance_counter() u64 {
-        return C.SDL_GetPerformanceCounter();
-    }
-    pub fn get_performance_frequency() u64 {
-        return C.SDL_GetPerformanceFrequency();
     }
     pub fn set_metadata(app_name: [:0]const u8, app_version: [:0]const u8, app_identifier: [:0]const u8) Error!void {
         return ok_or_fail_err(C.SDL_SetAppMetadata(app_name.ptr, app_version.ptr, app_identifier.ptr));
@@ -7291,10 +7301,10 @@ pub const App = struct {
 };
 
 pub const AppMainFunc = fn (arg_count: c_int, arg_list: ?[*:null]?[*:0]u8) callconv(.c) c_int;
-pub const AppInitFunc = fn (app_state: ?*?*anyopaque, arg_count: c_int, arg_list: ?[*:null]?[*:0]u8) callconv(.c) c_uint;
-pub const AppUpdateFunc = fn (app_state: ?*anyopaque) callconv(.c) c_uint;
-pub const AppEventFunc = fn (app_state: ?*anyopaque, event: ?*C.SDL_Event) callconv(.c) c_uint;
-pub const AppQuitFunc = fn (app_state: ?*anyopaque, quit_process_state: c_uint) callconv(.c) void;
+pub const AppInitFunc = fn (app_state: ?*?*anyopaque, arg_count: c_int, arg_list: ?[*:null]?[*:0]u8) callconv(.c) AppResult;
+pub const AppUpdateFunc = fn (app_state: ?*anyopaque) callconv(.c) AppResult;
+pub const AppEventFunc = fn (app_state: ?*anyopaque, event: ?*Event) callconv(.c) AppResult;
+pub const AppQuitFunc = fn (app_state: ?*anyopaque, quit_process_state: AppResult) callconv(.c) void;
 
 pub const Sandbox = enum(C.SDL_Sandbox) {
     NONE = C.SDL_SANDBOX_NONE,
@@ -7562,7 +7572,93 @@ pub const TimeFormat = enum(C.SDL_TimeFormat) {
 };
 
 pub const Time = struct {
+    pub fn wait_milliseconds(ms: u32) void {
+        C.SDL_Delay(ms);
+    }
+    pub fn wait_nanoseconds(ns: u64) void {
+        C.SDL_DelayNS(ns);
+    }
+    pub fn wait_milliseconds_precise(ms: u32) void {
+        C.SDL_DelayPrecise(ms);
+    }
+    pub fn get_ticks_ms() u64 {
+        return C.SDL_GetTicks();
+    }
+    pub fn get_ticks_ns() u64 {
+        return C.SDL_GetTicksNS();
+    }
+    pub fn get_performance_counter() u64 {
+        return C.SDL_GetPerformanceCounter();
+    }
+    pub fn get_performance_frequency() u64 {
+        return C.SDL_GetPerformanceFrequency();
+    }
     //TODO
     // pub extern fn SDL_GetDateTimeLocalePreferences(dateFormat: [*c]SDL_DateFormat, timeFormat: [*c]SDL_TimeFormat) bool;
     // pub extern fn SDL_GetCurrentTime(ticks: [*c]SDL_Time) bool;
+    // pub extern fn SDL_TimeToDateTime(ticks: SDL_Time, dt: [*c]SDL_DateTime, localTime: bool) bool;
+    // pub extern fn SDL_TimeToWindows(ticks: SDL_Time, dwLowDateTime: [*c]Uint32, dwHighDateTime: [*c]Uint32) void;
+    // pub extern fn SDL_TimeFromWindows(dwLowDateTime: Uint32, dwHighDateTime: Uint32) SDL_Time;
+    // pub extern fn SDL_GetDaysInMonth(year: c_int, month: c_int) c_int;
+    // pub extern fn SDL_GetDayOfYear(year: c_int, month: c_int, day: c_int) c_int;
+    // pub extern fn SDL_GetDayOfWeek(year: c_int, month: c_int, day: c_int) c_int;
+    // pub extern fn SDL_AddTimer(interval: Uint32, callback: SDL_TimerCallback, userdata: ?*anyopaque) SDL_TimerID;
+    // pub extern fn SDL_AddTimerNS(interval: Uint64, callback: SDL_NSTimerCallback, userdata: ?*anyopaque) SDL_TimerID;
+    // pub extern fn SDL_RemoveTimer(id: SDL_TimerID) bool;
 };
+
+pub const TimerID = extern struct {
+    id: u32,
+};
+
+pub const TimerCallback_MS = fn (userdata: ?*anyopaque, timer_id: u32, current_interval: u32) callconv(.c) u32;
+pub const TimerCallback_NS = fn (userdata: ?*anyopaque, timer_id: u32, current_interval: u32) callconv(.c) u32;
+
+pub const Tray = opaque {
+    pub usingnamespace c_opaque_conversions(Tray, C.SDL_Tray);
+
+    //TODO
+    // pub extern fn SDL_UpdateTrays() void;
+    // pub extern fn SDL_CreateTray(icon: [*c]SDL_Surface, tooltip: [*c]const u8) ?*SDL_Tray;
+    // pub extern fn SDL_SetTrayIcon(tray: ?*SDL_Tray, icon: [*c]SDL_Surface) void;
+    // pub extern fn SDL_SetTrayTooltip(tray: ?*SDL_Tray, tooltip: [*c]const u8) void;
+    // pub extern fn SDL_CreateTrayMenu(tray: ?*SDL_Tray) ?*SDL_TrayMenu;
+    // pub extern fn SDL_GetTrayMenu(tray: ?*SDL_Tray) ?*SDL_TrayMenu;
+    // pub extern fn SDL_DestroyTray(tray: ?*SDL_Tray) void;
+};
+
+pub const TrayMenu = opaque {
+    pub usingnamespace c_opaque_conversions(TrayMenu, C.SDL_TrayMenu);
+    //TODO
+    // pub extern fn SDL_GetTrayEntries(menu: ?*SDL_TrayMenu, count: [*c]c_int) [*c]?*const SDL_TrayEntry;
+    // pub extern fn SDL_InsertTrayEntryAt(menu: ?*SDL_TrayMenu, pos: c_int, label: [*c]const u8, flags: SDL_TrayEntryFlags) ?*SDL_TrayEntry;
+    // pub extern fn SDL_GetTrayMenuParentEntry(menu: ?*SDL_TrayMenu) ?*SDL_TrayEntry;
+    // pub extern fn SDL_GetTrayMenuParentTray(menu: ?*SDL_TrayMenu) ?*SDL_Tray;
+};
+
+pub const TrayEntry = opaque {
+    pub usingnamespace c_opaque_conversions(TrayEntry, C.SDL_TrayEntry);
+    //TODO
+    // pub extern fn SDL_CreateTraySubmenu(entry: ?*SDL_TrayEntry) ?*SDL_TrayMenu;
+    // pub extern fn SDL_GetTraySubmenu(entry: ?*SDL_TrayEntry) ?*SDL_TrayMenu;
+    // pub extern fn SDL_RemoveTrayEntry(entry: ?*SDL_TrayEntry) void;
+    // pub extern fn SDL_SetTrayEntryLabel(entry: ?*SDL_TrayEntry, label: [*c]const u8) void;
+    // pub extern fn SDL_GetTrayEntryLabel(entry: ?*SDL_TrayEntry) [*c]const u8;
+    // pub extern fn SDL_SetTrayEntryChecked(entry: ?*SDL_TrayEntry, checked: bool) void;
+    // pub extern fn SDL_GetTrayEntryChecked(entry: ?*SDL_TrayEntry) bool;
+    // pub extern fn SDL_SetTrayEntryEnabled(entry: ?*SDL_TrayEntry, enabled: bool) void;
+    // pub extern fn SDL_GetTrayEntryEnabled(entry: ?*SDL_TrayEntry) bool;
+    // pub extern fn SDL_SetTrayEntryCallback(entry: ?*SDL_TrayEntry, callback: SDL_TrayCallback, userdata: ?*anyopaque) void;
+    // pub extern fn SDL_ClickTrayEntry(entry: ?*SDL_TrayEntry) void;
+    // pub extern fn SDL_GetTrayEntryParent(entry: ?*SDL_TrayEntry) ?*SDL_TrayMenu;
+};
+
+pub const TrayEntryFlags = Flags(enum(u32) {
+    BUTTON = C.SDL_TRAYENTRY_BUTTON,
+    CHECKBOX = C.SDL_TRAYENTRY_CHECKBOX,
+    SUBMENU = C.SDL_TRAYENTRY_SUBMENU,
+    DISABLED = C.SDL_TRAYENTRY_DISABLED,
+    CHECKED = C.SDL_TRAYENTRY_CHECKED,
+}, null);
+
+pub const TrayCallback = fn (userdata: ?*anyopaque, entry: ?*C.SDL_TrayEntry) callconv(.c) void;

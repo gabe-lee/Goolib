@@ -51,50 +51,52 @@ var attempts: u32 = 0;
 pub fn main() !u8 {
     app_err.reset();
     var empty_argv: [0:null]?[*:0]u8 = .{};
-    const status: u8 = @truncate(@as(c_uint, @bitCast(SDL.run_app(empty_argv.len, @ptrCast(&empty_argv), sdl_main_func))));
+    const status: u8 = @truncate(@as(c_uint, @bitCast(SDL.App.run_app(empty_argv.len, @ptrCast(&empty_argv), sdl_main_func))));
     return app_err.load() orelse status;
 }
 
-pub fn app_init(args_list: [][*:0]u8) anyerror!SDL.AppProcess {
-    _ = args_list;
+pub fn app_init(appstate: ?*?*anyopaque, arg_count: c_int, arg_list: ?[*:null]?[*:0]u8) anyerror!SDL.AppResult {
+    _ = appstate;
+    _ = arg_count;
+    _ = arg_list;
 
     var write_buf = std.BoundedArray(u8, 250).init(0) catch unreachable;
 
     sdl_log.debug("SDL build time version: {d}.{d}.{d}", .{
-        SDL.BUILD_MAJOR_VERSION,
-        SDL.BUILD_MINOR_VERSION,
-        SDL.BUILD_MICRO_VERSION,
+        SDL.Meta.BUILD_MAJOR_VERSION,
+        SDL.Meta.BUILD_MINOR_VERSION,
+        SDL.Meta.BUILD_MICRO_VERSION,
     });
-    sdl_log.debug("SDL build time revision: {s}", .{SDL.BUILD_REVISION});
+    sdl_log.debug("SDL build time revision: {s}", .{SDL.Meta.BUILD_REVISION});
     {
-        const version = SDL.runtime_version();
+        const version = SDL.Meta.runtime_version();
         sdl_log.debug("SDL runtime version: {d}.{d}.{d}", .{
-            SDL.RUNTIME_MAJOR_VERSION(version),
-            SDL.RUNTIME_MINOR_VERSION(version),
-            SDL.RUNTIME_MICRO_VERSION(version),
+            SDL.Meta.RUNTIME_MAJOR_VERSION(version),
+            SDL.Meta.RUNTIME_MINOR_VERSION(version),
+            SDL.Meta.RUNTIME_MICRO_VERSION(version),
         });
-        const revision: [*:0]const u8 = SDL.runtime_revision();
+        const revision: [*:0]const u8 = SDL.Meta.runtime_revision();
         sdl_log.debug("SDL runtime revision: {s}", .{revision});
     }
 
-    try SDL.set_metadata("Breakout Sample", "0.0.0", "sample.goolib.breakout");
-    try SDL.init(SDL.InitFlags.new(&.{ .VIDEO, .AUDIO, .GAMEPAD }));
+    try SDL.App.set_metadata("Breakout Sample", "0.0.0", "goolib.sample.breakout");
+    try SDL.App.init(SDL.InitFlags.flags(&.{ .VIDEO, .AUDIO, .GAMEPAD }));
     write_buf.clear();
     sdl_log.debug("SDL video drivers: {s}", .{try fmt_sdl_drivers(
         &write_buf,
-        try SDL.get_current_video_driver(),
-        SDL.get_num_video_drivers(),
-        SDL.get_video_driver,
+        try SDL.Video.get_current_video_driver(),
+        SDL.Video.get_num_video_drivers(),
+        SDL.Video.get_video_driver,
     )});
     write_buf.clear();
     sdl_log.debug("SDL audio drivers: {s}", .{try fmt_sdl_drivers(
         &write_buf,
-        try SDL.get_current_audio_driver(),
-        SDL.get_num_audio_drivers(),
-        SDL.get_audio_driver,
+        try SDL.Audio.get_current_audio_driver(),
+        SDL.Audio.get_num_audio_drivers(),
+        SDL.Audio.get_audio_driver,
     )});
 
-    SDL.set_hint(SDL.HINT.RENDER_VSYNC, "1") catch {};
+    SDL.App.set_hint(SDL.HINT.RENDER_VSYNC, "1") catch {};
 
     window = try SDL.Window.create(.{ .title = "Breakout Sample", .size = window_size });
     errdefer window.destroy();
@@ -155,14 +157,14 @@ pub fn app_init(args_list: [][*:0]u8) anyerror!SDL.AppProcess {
 
     try load_records();
 
-    timekeeper = .{ .tocks_per_s = SDL.get_performance_frequency() };
+    timekeeper = .{ .tocks_per_s = SDL.Time.get_performance_frequency() };
 
     try reset_game();
 
     fully_initialized = true;
     errdefer comptime unreachable;
 
-    return SDL.AppProcess.CONTINUE;
+    return SDL.AppResult.CONTINUE;
 }
 
 const Sprites = struct {
@@ -201,7 +203,7 @@ const ErrorStore = struct {
         _ = es.status.set(STATUS_NOT_STORED);
     }
 
-    fn store(es: *ErrorStore, err: anyerror) SDL.AppProcess {
+    fn store(es: *ErrorStore, err: anyerror) SDL.AppResult {
         if (es.status.compare_and_swap(STATUS_NOT_STORED, STATUS_STORING)) {
             es.err = err;
             if (@errorReturnTrace()) |src_trace| {
@@ -211,7 +213,7 @@ const ErrorStore = struct {
             }
             _ = es.status.set(STATUS_STORED);
         }
-        return SDL.AppProcess.CLOSE_ERROR;
+        return SDL.AppResult.CLOSE_ERROR;
     }
 
     fn load(es: *ErrorStore) ?anyerror {
@@ -398,9 +400,9 @@ fn fmt_sdl_drivers(write_buf: *std.BoundedArray(u8, 250), current_driver: [*:0]c
         const driver_name = try get_driver(i);
         // _ = c_strings_equal(driver_name, current_driver);
         const is_current = c_strings_equal(driver_name, current_driver);
-        if (is_current) _ = try writer.write(ANSI.BEGIN ++ ANSI.FG_GREEN ++ ANSI.END);
+        if (is_current) _ = try writer.write(ANSI.FG_GREEN);
         try writer.print("\n\t({d}) {s}", .{ i, driver_name });
-        if (is_current) _ = try writer.write(ANSI.BEGIN ++ ANSI.RESET ++ ANSI.END);
+        if (is_current) _ = try writer.write(ANSI.RESET);
     }
     return write_buf.slice();
 }
@@ -411,7 +413,7 @@ fn load_records() !void {
 
     while (!storage.is_ready()) {
         var total_time: u32 = 0;
-        SDL.wait_milliseconds(10);
+        SDL.Time.wait_milliseconds(10);
         total_time += 10;
         if (total_time > 10000) return error.load_best_score_ready_timeout;
     }
@@ -436,7 +438,7 @@ fn save_records() !void {
 
     while (!storage.is_ready()) {
         var total_time: u32 = 0;
-        SDL.wait_milliseconds(10);
+        SDL.Time.wait_milliseconds(10);
         total_time += 10;
         if (total_time > 10000) return error.save_best_score_ready_timeout;
     }
@@ -529,7 +531,9 @@ fn reset_game() !void {
     score_color = SDL.Color_RGBA_u8.new_opaque(0xff, 0xff, 0xff);
 }
 
-fn app_update() !SDL.AppProcess {
+fn app_update(appstate: ?*anyopaque) !SDL.AppResult {
+    _ = appstate;
+
     var sounds_to_play: std.EnumSet(enum {
         hit_wall,
         hit_paddle,
@@ -588,7 +592,7 @@ fn app_update() !SDL.AppProcess {
 
         if (vcon.reset_game and !prev_vcon.reset_game) {
             try reset_game();
-            return SDL.AppProcess.CONTINUE;
+            return SDL.AppResult.CONTINUE;
         }
 
         // Move the paddle.
@@ -836,15 +840,17 @@ fn app_update() !SDL.AppProcess {
         try renderer.present();
     }
 
-    timekeeper.produce(SDL.get_performance_counter());
+    timekeeper.produce(SDL.Time.get_performance_counter());
 
-    return SDL.AppProcess.CONTINUE;
+    return SDL.AppResult.CONTINUE;
 }
 
-fn handle_event(event: *SDL.Event) !SDL.AppProcess {
+fn handle_event(appstate: ?*anyopaque, event_: ?*SDL.Event) !SDL.AppResult {
+    _ = appstate;
+    const event = event_ orelse return SDL.AppResult.CONTINUE;
     switch (event.type) {
         .QUIT => {
-            return SDL.AppProcess.CLOSE_NORMAL;
+            return SDL.AppResult.CLOSE_NORMAL;
         },
         .KEY_DOWN, .KEY_UP => {
             const is_down = event.type == .KEY_DOWN;
@@ -904,16 +910,17 @@ fn handle_event(event: *SDL.Event) !SDL.AppProcess {
         else => {},
     }
 
-    return SDL.AppProcess.CONTINUE;
+    return SDL.AppResult.CONTINUE;
 }
 
-fn app_quit(result: anyerror!SDL.AppProcess) void {
+fn app_quit(appstate: ?*anyopaque, result: anyerror!SDL.AppResult) void {
+    _ = appstate;
     _ = result catch |err| switch (err) {
         SDL.Error.SDL_null_value,
         SDL.Error.SDL_operation_failure,
         SDL.Error.SDL_invalid_value,
         => {
-            sdl_log.err("{s}: {s}", .{ @errorName(err), SDL.get_error_details() });
+            sdl_log.err("{s}: {s}", .{ @errorName(err), SDL.App.get_error_details() });
         },
         else => {
             app_log.err("{s}", .{@errorName(err)});
@@ -936,29 +943,21 @@ fn app_quit(result: anyerror!SDL.AppProcess) void {
 }
 
 fn sdl_main_func(arg_count: c_int, arg_list: ?[*:null]?[*:0]u8) callconv(.c) c_int {
-    return SDL.run_app_with_callbacks(arg_count, arg_list, sdl_init_func, sdl_update_func, sdl_event_func, sdl_quit_func);
+    return SDL.App.run_app_with_callbacks(arg_count, arg_list, sdl_init_func, sdl_update_func, sdl_event_func, sdl_quit_func);
 }
 
-fn sdl_init_func(appstate: ?*?*anyopaque, arg_count: c_int, arg_list: ?[*:null]?[*:0]u8) callconv(.c) c_uint {
-    _ = appstate;
-    const zig_args = Goolib.Utils.c_args_to_zig_args(.c_args_list(arg_count, arg_list));
-    const process = app_init(zig_args) catch |err| app_err.store(err);
-    return @intFromEnum(process);
+fn sdl_init_func(appstate: ?*?*anyopaque, arg_count: c_int, arg_list: ?[*:null]?[*:0]u8) callconv(.c) SDL.AppResult {
+    return app_init(appstate, arg_count, arg_list) catch |err| app_err.store(err);
 }
 
-fn sdl_update_func(appstate: ?*anyopaque) callconv(.c) c_uint {
-    _ = appstate;
-    const process = app_update() catch |err| app_err.store(err);
-    return @intFromEnum(process);
+fn sdl_update_func(appstate: ?*anyopaque) callconv(.c) SDL.AppResult {
+    return app_update(appstate) catch |err| app_err.store(err);
 }
 
-fn sdl_event_func(appstate: ?*anyopaque, event: ?*SDL.C_Event) callconv(.c) c_uint {
-    _ = appstate;
-    const process = handle_event(SDL.Event.from_c(event.?)) catch |err| app_err.store(err);
-    return @intFromEnum(process);
+fn sdl_event_func(appstate: ?*anyopaque, event: ?*SDL.Event) callconv(.c) SDL.AppResult {
+    return handle_event(appstate, event) catch |err| app_err.store(err);
 }
 
-fn sdl_quit_func(appstate: ?*anyopaque, close_state: c_uint) callconv(.c) void {
-    _ = appstate;
-    app_quit(app_err.load() orelse @enumFromInt(close_state));
+fn sdl_quit_func(appstate: ?*anyopaque, close_result: SDL.AppResult) callconv(.c) void {
+    app_quit(appstate, app_err.load() orelse close_result);
 }
