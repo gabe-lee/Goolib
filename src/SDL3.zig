@@ -29,6 +29,7 @@ const init_zero = std.mem.zeroes;
 const assert = std.debug.assert;
 
 const Root = @import("./_root.zig");
+const VERSION = Root.VERSION;
 const Types = Root.Types;
 const Flags = Root.Flags.Flags;
 const FlagGroups = Root.Flags.Groups;
@@ -221,6 +222,10 @@ pub const Video = struct {
     pub fn get_video_driver(index: c_int) Error![*:0]const u8 {
         return ptr_cast_or_null_err([*:0]const u8, C.SDL_GetVideoDriver(index));
     }
+
+    pub const Props = struct {
+        pub const WAYLAND_WL_DISPLAY = Property.new(.POINTER, C.SDL_PROP_GLOBAL_VIDEO_WAYLAND_WL_DISPLAY_POINTER);
+    };
 };
 
 pub const HINT = struct {
@@ -1075,9 +1080,9 @@ pub const FileDialogFilter = extern struct {
 
 pub const FileDialogCallback = fn (userdata: ?*anyopaque, selected_files: ?[*:null]?[*:0]const u8, selected_filter_index: c_int) callconv(.c) void;
 
-pub const GlobFlags = struct {
-    flags: u32,
-};
+pub const GlobFlags = Flags(enum(u32) {
+    CASE_INSENSITIVE = C.SDL_GLOB_CASEINSENSITIVE,
+}, null);
 
 pub const Filesystem = struct {
     //TODO
@@ -1096,6 +1101,17 @@ pub const Filesystem = struct {
     // pub extern fn SDL_ShowSaveFileDialog(callback: SDL_DialogFileCallback, userdata: ?*anyopaque, window: ?*SDL_Window, filters: [*c]const SDL_DialogFileFilter, nfilters: c_int, default_location: [*c]const u8) void;
     // pub extern fn SDL_ShowOpenFolderDialog(callback: SDL_DialogFileCallback, userdata: ?*anyopaque, window: ?*SDL_Window, default_location: [*c]const u8, allow_many: bool) void;
     // pub extern fn SDL_ShowFileDialogWithProperties(@"type": SDL_FileDialogType, callback: SDL_DialogFileCallback, userdata: ?*anyopaque, props: SDL_PropertiesID) void;
+
+    pub const FileDialogProps = struct {
+        pub const FILTERS = Property.new(.POINTER, C.SDL_PROP_FILE_DIALOG_FILTERS_POINTER);
+        pub const NUM_FILTERS = Property.new(.INTEGER, C.SDL_PROP_FILE_DIALOG_NFILTERS_NUMBER);
+        pub const WINDOW = Property.new(.POINTER, C.SDL_PROP_FILE_DIALOG_WINDOW_POINTER);
+        pub const LOCATION = Property.new(.STRING, C.SDL_PROP_FILE_DIALOG_LOCATION_STRING);
+        pub const ALLOW_MANY = Property.new(.BOOLEAN, C.SDL_PROP_FILE_DIALOG_MANY_BOOLEAN);
+        pub const TITLE = Property.new(.STRING, C.SDL_PROP_FILE_DIALOG_TITLE_STRING);
+        pub const ACCEPT_STR = Property.new(.STRING, C.SDL_PROP_FILE_DIALOG_ACCEPT_STRING);
+        pub const CANCEL_STR = Property.new(.STRING, C.SDL_PROP_FILE_DIALOG_CANCEL_STRING);
+    };
 };
 
 pub const FileDialogType = enum(C.SDL_FileDialogType) {
@@ -1359,6 +1375,8 @@ pub const Sensor = opaque {
     // pub extern fn SDL_GetSensorData(sensor: ?*SDL_Sensor, data: [*c]f32, num_values: c_int) bool;
     // pub extern fn SDL_CloseSensor(sensor: ?*SDL_Sensor) void;
     // pub extern fn SDL_UpdateSensors() void;
+
+    pub const AccelerometerNeutralGravity = C.SDL_STANDARD_GRAVITY;
 };
 
 pub const HapticID = extern struct {
@@ -1621,7 +1639,7 @@ pub const GL_Attr = enum(C.SDL_GLAttr) {
     CONTEXT_MAJOR_VERSION = C.SDL_GL_CONTEXT_MAJOR_VERSION,
     CONTEXT_MINOR_VERSION = C.SDL_GL_CONTEXT_MINOR_VERSION,
     CONTEXT_FLAGS = C.SDL_GL_CONTEXT_FLAGS,
-    CONTEXT_PROFILE_MASK = C.SDL_GL_CONTEXT_PROFILE_MASK,
+    CONTEXT_PROFILE_FLAGS = C.SDL_GL_CONTEXT_PROFILE_MASK,
     SHARE_WITH_CURRENT_CONTEXT = C.SDL_GL_SHARE_WITH_CURRENT_CONTEXT,
     FRAMEBUFFER_SRGB_CAPABLE = C.SDL_GL_FRAMEBUFFER_SRGB_CAPABLE,
     CONTEXT_RELEASE_BEHAVIOR = C.SDL_GL_CONTEXT_RELEASE_BEHAVIOR,
@@ -1635,6 +1653,29 @@ pub const GL_Attr = enum(C.SDL_GLAttr) {
     // pub extern fn SDL_GL_SetAttribute(attr: SDL_GLAttr, value: c_int) bool;
     // pub extern fn SDL_GL_GetAttribute(attr: SDL_GLAttr, value: [*c]c_int) bool;
 };
+
+pub const GL_AttrProfileFlags = Flags(enum(c_uint) {
+    CORE = C.SDL_GL_CONTEXT_PROFILE_CORE,
+    COMPATIBILITY = C.SDL_GL_CONTEXT_PROFILE_COMPATIBILITY,
+    ES = C.SDL_GL_CONTEXT_PROFILE_ES,
+}, null);
+
+pub const GL_AttrContextFlags = Flags(enum(c_uint) {
+    DEBUG = C.SDL_GL_CONTEXT_DEBUG_FLAG,
+    FORWARD_COMPATIBLE = C.SDL_GL_CONTEXT_FORWARD_COMPATIBLE_FLAG,
+    ROBUST_ACCESS = C.SDL_GL_CONTEXT_ROBUST_ACCESS_FLAG,
+    RESET_ISOLATION = C.SDL_GL_CONTEXT_RESET_ISOLATION_FLAG,
+}, null);
+
+pub const GL_AttrReleaseFlags = Flags(enum(c_uint) {
+    NONE = C.SDL_GL_CONTEXT_RELEASE_BEHAVIOR_NONE,
+    FLUSH = C.SDL_GL_CONTEXT_RELEASE_BEHAVIOR_FLUSH,
+}, null);
+
+pub const GL_AttrResetFlags = Flags(enum(c_uint) {
+    NO_NOTIFICATION = C.SDL_GL_CONTEXT_RESET_NO_NOTIFICATION,
+    LOSE_CONTEXT = C.SDL_GL_CONTEXT_RESET_LOSE_CONTEXT,
+}, null);
 
 pub const GL_Profile = struct {
     raw: C.SDL_GLProfile,
@@ -1934,20 +1975,23 @@ pub const Renderer = opaque {
         return VSync.from_c(val);
     }
 
-    pub const SOFTWARE_RENDERER = C.SDL_SOFTWARE_RENDERER;
+    pub const SOFTWARE_RENDERER_NAME = C.SDL_SOFTWARE_RENDERER;
+    pub const DEBUG_TEXT_FONT_PX_SIZE = C.SDL_DEBUG_TEXT_FONT_CHARACTER_SIZE;
 
+    pub const CreateProps = struct {
+        pub const NAME = Property.new(.STRING, C.SDL_PROP_RENDERER_CREATE_NAME_STRING);
+        pub const WINDOW = Property.new(.POINTER, C.SDL_PROP_RENDERER_CREATE_WINDOW_POINTER);
+        pub const SURFACE = Property.new(.POINTER, C.SDL_PROP_RENDERER_CREATE_SURFACE_POINTER);
+        pub const OUTPUT_COLORSPACE = Property.new(.POINTER, C.SDL_PROP_RENDERER_CREATE_SURFACE_POINTER);
+        pub const PRESENT_VSYNC = Property.new(.INTEGER, C.SDL_PROP_RENDERER_CREATE_PRESENT_VSYNC_NUMBER);
+        pub const VULKAN_INSTANCE = Property.new(.POINTER, C.SDL_PROP_RENDERER_CREATE_VULKAN_INSTANCE_POINTER);
+        pub const VULKAN_SURFACE = Property.new(.INTEGER, C.SDL_PROP_RENDERER_CREATE_VULKAN_SURFACE_NUMBER);
+        pub const VULKAN_PHYSICAL_DEVICE = Property.new(.POINTER, C.SDL_PROP_RENDERER_CREATE_VULKAN_PHYSICAL_DEVICE_POINTER);
+        pub const VULKAN_DEVICE = Property.new(.POINTER, C.SDL_PROP_RENDERER_CREATE_VULKAN_DEVICE_POINTER);
+        pub const VULKAN_GRAPHICS_QUEUE_FAMILY_INDEX = Property.new(.INTEGER, C.SDL_PROP_RENDERER_CREATE_VULKAN_GRAPHICS_QUEUE_FAMILY_INDEX_NUMBER);
+        pub const VULKAN_PRESENT_QUEUE_FAMILY_INDEX = Property.new(.INTEGER, C.SDL_PROP_RENDERER_CREATE_VULKAN_PRESENT_QUEUE_FAMILY_INDEX_NUMBER);
+    };
     pub const Props = struct {
-        pub const CREATE_NAME = Property.new(.STRING, C.SDL_PROP_RENDERER_CREATE_NAME_STRING);
-        pub const CREATE_WINDOW = Property.new(.POINTER, C.SDL_PROP_RENDERER_CREATE_WINDOW_POINTER);
-        pub const CREATE_SURFACE = Property.new(.POINTER, C.SDL_PROP_RENDERER_CREATE_SURFACE_POINTER);
-        pub const CREATE_OUTPUT_COLORSPACE = Property.new(.POINTER, C.SDL_PROP_RENDERER_CREATE_SURFACE_POINTER);
-        pub const CREATE_PRESENT_VSYNC = Property.new(.INTEGER, C.SDL_PROP_RENDERER_CREATE_PRESENT_VSYNC_NUMBER);
-        pub const CREATE_VULKAN_INSTANCE = Property.new(.POINTER, C.SDL_PROP_RENDERER_CREATE_VULKAN_INSTANCE_POINTER);
-        pub const CREATE_VULKAN_SURFACE = Property.new(.INTEGER, C.SDL_PROP_RENDERER_CREATE_VULKAN_SURFACE_NUMBER);
-        pub const CREATE_VULKAN_PHYSICAL_DEVICE = Property.new(.POINTER, C.SDL_PROP_RENDERER_CREATE_VULKAN_PHYSICAL_DEVICE_POINTER);
-        pub const CREATE_VULKAN_DEVICE = Property.new(.POINTER, C.SDL_PROP_RENDERER_CREATE_VULKAN_DEVICE_POINTER);
-        pub const CREATE_VULKAN_GRAPHICS_QUEUE_FAMILY_INDEX = Property.new(.INTEGER, C.SDL_PROP_RENDERER_CREATE_VULKAN_GRAPHICS_QUEUE_FAMILY_INDEX_NUMBER);
-        pub const CREATE_VULKAN_PRESENT_QUEUE_FAMILY_INDEX = Property.new(.INTEGER, C.SDL_PROP_RENDERER_CREATE_VULKAN_PRESENT_QUEUE_FAMILY_INDEX_NUMBER);
         pub const NAME = Property.new(.STRING, C.SDL_PROP_RENDERER_NAME_STRING);
         pub const WINDOW = Property.new(.POINTER, C.SDL_PROP_RENDERER_WINDOW_POINTER);
         pub const SURFACE = Property.new(.POINTER, C.SDL_PROP_RENDERER_SURFACE_POINTER);
@@ -2257,8 +2301,6 @@ pub const Surface = extern struct {
         pub const HOTSPOT_X = Property.new(.INTEGER, C.SDL_PROP_SURFACE_HOTSPOT_X_NUMBER);
         pub const HOTSPOT_Y = Property.new(.INTEGER, C.SDL_PROP_SURFACE_HOTSPOT_Y_NUMBER);
     };
-
-    pub const chach = build.cpu.features
 };
 
 pub const SurfaceList = extern struct {
@@ -2739,6 +2781,11 @@ pub const DisplayID = extern struct {
     pub fn get_display_for_rect(rect: Rect_c_int) Error!DisplayID {
         return DisplayID{ .id = try nonzero_or_null_err(C.SDL_GetDisplayForRect(@ptrCast(@alignCast(&rect)))) };
     }
+
+    pub const Props = struct {
+        pub const HDR_ENABLED = Property.new(.BOOLEAN, C.SDL_PROP_DISPLAY_HDR_ENABLED_BOOLEAN);
+        pub const KMSDRM_PANEL_ORIENTATION = Property.new(.INTEGER, C.SDL_PROP_DISPLAY_KMSDRM_PANEL_ORIENTATION_NUMBER);
+    };
 };
 
 pub const ClosestDisplayModeOptions = struct {
@@ -3215,6 +3262,91 @@ pub const Window = opaque {
     // pub extern fn SDL_GL_SwapWindow(window: ?*SDL_Window) bool;
     // pub extern fn SDL_ShowSimpleMessageBox(flags: SDL_MessageBoxFlags, title: [*c]const u8, message: [*c]const u8, window: ?*SDL_Window) bool;
     // pub extern fn SDL_Metal_CreateView(window: ?*SDL_Window) SDL_MetalView;
+
+    pub const CreateProps = struct {
+        pub const ALWAYS_ON_TOP = Property.new(.BOOLEAN, C.SDL_PROP_WINDOW_CREATE_ALWAYS_ON_TOP_BOOLEAN);
+        pub const BORDERLESS = Property.new(.BOOLEAN, C.SDL_PROP_WINDOW_CREATE_BORDERLESS_BOOLEAN);
+        pub const FOCUSABLE = Property.new(.BOOLEAN, C.SDL_PROP_WINDOW_CREATE_FOCUSABLE_BOOLEAN);
+        pub const EXTERNAL_GRAPHICS_CONTEXT = Property.new(.BOOLEAN, C.SDL_PROP_WINDOW_CREATE_EXTERNAL_GRAPHICS_CONTEXT_BOOLEAN);
+        pub const FLAGS = Property.new(.INTEGER, C.SDL_PROP_WINDOW_CREATE_FLAGS_NUMBER);
+        pub const FULLSCREEN = Property.new(.BOOLEAN, C.SDL_PROP_WINDOW_CREATE_FULLSCREEN_BOOLEAN);
+        pub const HEIGHT = Property.new(.INTEGER, C.SDL_PROP_WINDOW_CREATE_HEIGHT_NUMBER);
+        pub const HIDDEN = Property.new(.BOOLEAN, C.SDL_PROP_WINDOW_CREATE_HIDDEN_BOOLEAN);
+        pub const HIGH_PIXEL_DENSITY = Property.new(.BOOLEAN, C.SDL_PROP_WINDOW_CREATE_HIGH_PIXEL_DENSITY_BOOLEAN);
+        pub const MAXIMIZED = Property.new(.BOOLEAN, C.SDL_PROP_WINDOW_CREATE_MAXIMIZED_BOOLEAN);
+        pub const MENU = Property.new(.BOOLEAN, C.SDL_PROP_WINDOW_CREATE_MENU_BOOLEAN);
+        pub const METAL = Property.new(.BOOLEAN, C.SDL_PROP_WINDOW_CREATE_METAL_BOOLEAN);
+        pub const MINIMIZED = Property.new(.BOOLEAN, C.SDL_PROP_WINDOW_CREATE_MINIMIZED_BOOLEAN);
+        pub const MODAL = Property.new(.BOOLEAN, C.SDL_PROP_WINDOW_CREATE_MODAL_BOOLEAN);
+        pub const GRAB_MOUSE = Property.new(.BOOLEAN, C.SDL_PROP_WINDOW_CREATE_MOUSE_GRABBED_BOOLEAN);
+        pub const OPENGL = Property.new(.BOOLEAN, C.SDL_PROP_WINDOW_CREATE_OPENGL_BOOLEAN);
+        pub const PARENT = Property.new(.POINTER, C.SDL_PROP_WINDOW_CREATE_PARENT_POINTER);
+        pub const RESIZABLE = Property.new(.BOOLEAN, C.SDL_PROP_WINDOW_CREATE_RESIZABLE_BOOLEAN);
+        pub const TITLE = Property.new(.STRING, C.SDL_PROP_WINDOW_CREATE_TITLE_STRING);
+        pub const TRANSPARENT = Property.new(.BOOLEAN, C.SDL_PROP_WINDOW_CREATE_TRANSPARENT_BOOLEAN);
+        pub const TOOLTIP = Property.new(.BOOLEAN, C.SDL_PROP_WINDOW_CREATE_TOOLTIP_BOOLEAN);
+        pub const UTILITY = Property.new(.BOOLEAN, C.SDL_PROP_WINDOW_CREATE_UTILITY_BOOLEAN);
+        pub const VULKAN = Property.new(.BOOLEAN, C.SDL_PROP_WINDOW_CREATE_VULKAN_BOOLEAN);
+        pub const WIDTH = Property.new(.INTEGER, C.SDL_PROP_WINDOW_CREATE_WIDTH_NUMBER);
+        pub const X_POS = Property.new(.INTEGER, C.SDL_PROP_WINDOW_CREATE_X_NUMBER);
+        pub const Y_POS = Property.new(.INTEGER, C.SDL_PROP_WINDOW_CREATE_Y_NUMBER);
+        pub const POS_DONT_CARE: i64 = @intCast(C.SDL_WINDOWPOS_UNDEFINED);
+        pub const POS_CENTERED: i64 = @intCast(C.SDL_WINDOWPOS_CENTERED);
+        pub const COCOA_WINDOW = Property.new(.POINTER, C.SDL_PROP_WINDOW_CREATE_COCOA_WINDOW_POINTER);
+        pub const COCOA_VIEW = Property.new(.POINTER, C.SDL_PROP_WINDOW_CREATE_COCOA_VIEW_POINTER);
+        pub const WAYLAND_SURFACE_ROLE_CUSTOM = Property.new(.BOOLEAN, C.SDL_PROP_WINDOW_CREATE_WAYLAND_SURFACE_ROLE_CUSTOM_BOOLEAN);
+        pub const WAYLAND_CREATE_EGL_WINDOW = Property.new(.BOOLEAN, C.SDL_PROP_WINDOW_CREATE_WAYLAND_CREATE_EGL_WINDOW_BOOLEAN);
+        pub const WAYLAND_WL_SURFACE = Property.new(.POINTER, C.SDL_PROP_WINDOW_CREATE_WAYLAND_WL_SURFACE_POINTER);
+        pub const WIN32_HWND = Property.new(.POINTER, C.SDL_PROP_WINDOW_CREATE_WIN32_HWND_POINTER);
+        pub const WIN32_PIXEL_FORMAT_HWND = Property.new(.POINTER, C.SDL_PROP_WINDOW_CREATE_WIN32_PIXEL_FORMAT_HWND_POINTER);
+        pub const X11_WINDOW = Property.new(.INTEGER, C.SDL_PROP_WINDOW_CREATE_X11_WINDOW_NUMBER);
+    };
+
+    pub const Props = struct {
+        pub const SHAPE = Property.new(.POINTER, C.SDL_PROP_WINDOW_SHAPE_POINTER);
+        pub const HDR_ENABLED = Property.new(.BOOLEAN, C.SDL_PROP_WINDOW_HDR_ENABLED_BOOLEAN);
+        pub const SDR_WHITE_LEVEL = Property.new(.FLOAT, C.SDL_PROP_WINDOW_SDR_WHITE_LEVEL_FLOAT);
+        pub const HDR_HEADROOM = Property.new(.FLOAT, C.SDL_PROP_WINDOW_HDR_HEADROOM_FLOAT);
+        pub const ANDROID_WINDOW = Property.new(.POINTER, C.SDL_PROP_WINDOW_ANDROID_WINDOW_POINTER);
+        pub const ANDROID_SURFACE = Property.new(.POINTER, C.SDL_PROP_WINDOW_ANDROID_SURFACE_POINTER);
+        pub const UIKIT_WINDOW = Property.new(.POINTER, C.SDL_PROP_WINDOW_UIKIT_WINDOW_POINTER);
+        pub const UIKIT_METAL_VIEW_TAG = Property.new(.INTEGER, C.SDL_PROP_WINDOW_UIKIT_METAL_VIEW_TAG_NUMBER);
+        pub const UIKIT_OPENGL_FRAMEBUFFER = Property.new(.INTEGER, C.SDL_PROP_WINDOW_UIKIT_OPENGL_FRAMEBUFFER_NUMBER);
+        pub const UIKIT_OPENGL_RENDERBUFFER = Property.new(.INTEGER, C.SDL_PROP_WINDOW_UIKIT_OPENGL_RENDERBUFFER_NUMBER);
+        pub const UIKIT_OPENGL_RESOLVE_FRAMEBUFFER = Property.new(.INTEGER, C.SDL_PROP_WINDOW_UIKIT_OPENGL_RESOLVE_FRAMEBUFFER_NUMBER);
+        pub const KMSDRM_DEVICE_INDEX = Property.new(.INTEGER, C.SDL_PROP_WINDOW_KMSDRM_DEVICE_INDEX_NUMBER);
+        pub const KMSDRM_DRM_FD = Property.new(.INTEGER, C.SDL_PROP_WINDOW_KMSDRM_DRM_FD_NUMBER);
+        pub const KMSDRM_GBM_DEVICE = Property.new(.POINTER, C.SDL_PROP_WINDOW_KMSDRM_GBM_DEVICE_POINTER);
+        pub const COCOA_WINDOW = Property.new(.POINTER, C.SDL_PROP_WINDOW_COCOA_WINDOW_POINTER);
+        pub const COCOA_METAL_VIEW_TAG = Property.new(.INTEGER, C.SDL_PROP_WINDOW_COCOA_METAL_VIEW_TAG_NUMBER);
+        pub const OPENVR_OVERLAY = Property.new(.INTEGER, C.SDL_PROP_WINDOW_OPENVR_OVERLAY_ID);
+        pub const VIVANTE_DISPLAY = Property.new(.POINTER, C.SDL_PROP_WINDOW_VIVANTE_DISPLAY_POINTER);
+        pub const VIVANTE_WINDOW = Property.new(.POINTER, C.SDL_PROP_WINDOW_VIVANTE_WINDOW_POINTER);
+        pub const VIVANTE_SURFACE = Property.new(.POINTER, C.SDL_PROP_WINDOW_VIVANTE_SURFACE_POINTER);
+        pub const WIN32_HWND = Property.new(.POINTER, C.SDL_PROP_WINDOW_WIN32_HWND_POINTER);
+        pub const WIN32_HDC = Property.new(.POINTER, C.SDL_PROP_WINDOW_WIN32_HDC_POINTER);
+        pub const WIN32_INSTANCE = Property.new(.POINTER, C.SDL_PROP_WINDOW_WIN32_INSTANCE_POINTER);
+        pub const WAYLAND_DISPLAY = Property.new(.POINTER, C.SDL_PROP_WINDOW_WAYLAND_DISPLAY_POINTER);
+        pub const WAYLAND_SURFACE = Property.new(.POINTER, C.SDL_PROP_WINDOW_WAYLAND_SURFACE_POINTER);
+        pub const WAYLAND_VIEWPORT = Property.new(.POINTER, C.SDL_PROP_WINDOW_WAYLAND_VIEWPORT_POINTER);
+        pub const WAYLAND_EGL_WINDOW = Property.new(.POINTER, C.SDL_PROP_WINDOW_WAYLAND_EGL_WINDOW_POINTER);
+        pub const WAYLAND_XDG_SURFACE = Property.new(.POINTER, C.SDL_PROP_WINDOW_WAYLAND_XDG_SURFACE_POINTER);
+        pub const WAYLAND_XDG_TOPLEVEL = Property.new(.POINTER, C.SDL_PROP_WINDOW_WAYLAND_XDG_TOPLEVEL_POINTER);
+        pub const WAYLAND_XDG_TOPLEVEL_EXPORT_HANDLE = Property.new(.STRING, C.SDL_PROP_WINDOW_WAYLAND_XDG_TOPLEVEL_EXPORT_HANDLE_STRING);
+        pub const WAYLAND_XDG_POPUP = Property.new(.POINTER, C.SDL_PROP_WINDOW_WAYLAND_XDG_POPUP_POINTER);
+        pub const WAYLAND_XDG_POSITIONER = Property.new(.POINTER, C.SDL_PROP_WINDOW_WAYLAND_XDG_POSITIONER_POINTER);
+        pub const X11_DISPLAY = Property.new(.POINTER, C.SDL_PROP_WINDOW_X11_DISPLAY_POINTER);
+        pub const X11_SCREEN = Property.new(.INTEGER, C.SDL_PROP_WINDOW_X11_SCREEN_NUMBER);
+        pub const X11_WINDOW = Property.new(.INTEGER, C.SDL_PROP_WINDOW_X11_WINDOW_NUMBER);
+    };
+
+    pub const TextInputProps = struct {
+        pub const TYPE = Property.new(.INTEGER, C.SDL_PROP_TEXTINPUT_TYPE_NUMBER);
+        pub const CAPITALIZATION = Property.new(.INTEGER, C.SDL_PROP_TEXTINPUT_CAPITALIZATION_NUMBER);
+        pub const AUTOCORRECT = Property.new(.BOOLEAN, C.SDL_PROP_TEXTINPUT_AUTOCORRECT_BOOLEAN);
+        pub const MULTILINE = Property.new(.BOOLEAN, C.SDL_PROP_TEXTINPUT_MULTILINE_BOOLEAN);
+        pub const ANDROID_INPUTTYPE = Property.new(.INTEGER, C.SDL_PROP_TEXTINPUT_ANDROID_INPUTTYPE_NUMBER);
+    };
 };
 
 pub const Keyboard = struct {
@@ -3231,7 +3363,7 @@ pub const Keyboard = struct {
     // pub extern fn SDL_HasScreenKeyboardSupport() bool;
 };
 
-pub const TextInputType = enum(c_uint) {
+pub const TextInputType = enum(C.SDL_TextInputType) {
     TEXT = C.SDL_TEXTINPUT_TYPE_TEXT,
     TEXT_NAME = C.SDL_TEXTINPUT_TYPE_TEXT_NAME,
     TEXT_EMAIL = C.SDL_TEXTINPUT_TYPE_TEXT_EMAIL,
@@ -3245,7 +3377,7 @@ pub const TextInputType = enum(c_uint) {
     pub usingnamespace c_enum_conversions(TextInputType, C.SDL_TextInputType);
 };
 
-pub const Capitalization = enum(c_uint) {
+pub const Capitalization = enum(C.SDL_Capitalization) {
     NONE = C.SDL_CAPITALIZE_NONE,
     SENTENCES = C.SDL_CAPITALIZE_SENTENCES,
     WORDS = C.SDL_CAPITALIZE_WORDS,
@@ -3254,7 +3386,7 @@ pub const Capitalization = enum(c_uint) {
     pub usingnamespace c_enum_conversions(Capitalization, C.SDL_Capitalization);
 };
 
-pub const FlashMode = enum(c_uint) {
+pub const FlashMode = enum(C.SDL_FlashOperation) {
     CANCEL = C.SDL_FLASH_CANCEL,
     BRIEFLY = C.SDL_FLASH_BRIEFLY,
     UNTIL_FOCUSED = C.SDL_FLASH_UNTIL_FOCUSED,
@@ -3262,7 +3394,7 @@ pub const FlashMode = enum(c_uint) {
     pub usingnamespace c_enum_conversions(FlashMode, C.SDL_FlashOperation);
 };
 
-pub const WindowHitTestResult = enum(c_uint) {
+pub const WindowHitTestResult = enum(C.SDL_HitTestResult) {
     NORMAL = C.SDL_HITTEST_NORMAL,
     DRAGGABLE = C.SDL_HITTEST_DRAGGABLE,
     RESIZE_TOPLEFT = C.SDL_HITTEST_RESIZE_TOPLEFT,
@@ -3274,13 +3406,7 @@ pub const WindowHitTestResult = enum(c_uint) {
     RESIZE_BOTTOMLEFT = C.SDL_HITTEST_RESIZE_BOTTOMLEFT,
     RESIZE_LEFT = C.SDL_HITTEST_RESIZE_LEFT,
 
-    inline fn to_c(self: WindowHitTestResult) c_uint {
-        return @intFromEnum(self);
-    }
-
-    inline fn from_c(val: c_uint) WindowHitTestResult {
-        return @enumFromInt(val);
-    }
+    pub usingnamespace c_enum_conversions(WindowHitTestResult, C.SDL_HitTestResult);
 };
 
 pub const WindowHittestFn = fn (window: *Window, test_point: *Vec_c_int, custom_data: ?*anyopaque) callconv(.c) WindowHitTestResult;
@@ -4453,27 +4579,25 @@ pub const MouseButton = enum(u8) {
     LEFT = C.SDL_BUTTON_LEFT,
     MIDDLE = C.SDL_BUTTON_MIDDLE,
     RIGHT = C.SDL_BUTTON_RIGHT,
-    MOUSE_4 = C.SDL_BUTTON_X1,
-    MOUSE_5 = C.SDL_BUTTON_X2,
+    SIDE_1 = C.SDL_BUTTON_X1,
+    SIDE_2 = C.SDL_BUTTON_X2,
     _,
 
     pub usingnamespace c_enum_conversions(MouseButton, u8);
 
-    pub inline fn to_mask(self: MouseButton) Mask {
-        return @enumFromInt(@as(u32, 1) << @intCast(@intFromEnum(self) - @as(u8, 1)));
+    pub inline fn to_flag(self: MouseButton) MouseButtonFlags {
+        return MouseButtonFlags.from_bit(@intCast(self.to_c() - 1));
     }
-
-    pub const Mask = enum(u32) {
-        LEFT = to_mask(MouseButton.LEFT),
-        MIDDLE = to_mask(MouseButton.MIDDLE),
-        RIGHT = to_mask(MouseButton.RIGHT),
-        MOUSE_4 = to_mask(MouseButton.MOUSE_4),
-        MOUSE_5 = to_mask(MouseButton.MOUSE_5),
-        _,
-
-        pub usingnamespace c_enum_conversions(Mask, u32);
-    };
 };
+
+pub const MouseButtonFlags = Flags(enum(u32) {
+    LEFT = C.SDL_BUTTON_LMASK,
+    MIDDLE = C.SDL_BUTTON_MMASK,
+    RIGHT = C.SDL_BUTTON_RMASK,
+    SIDE_1 = C.SDL_BUTTON_X1MASK,
+    SIDE_2 = C.SDL_BUTTON_X2MASK,
+    _,
+}, null);
 
 pub const MouseWheelEvent = extern struct {
     type: EventType = .NONE,
@@ -4870,6 +4994,9 @@ pub const SystemCursor = enum(C.SDL_SystemCursor) {
 
 pub const MouseID = extern struct {
     id: u32 = 0,
+
+    pub const VIRTUAL_FROM_TOUCH = MouseID{ .id = C.SDL_TOUCH_MOUSEID };
+    pub const VIRTUAL_FROM_PEN = MouseID{ .id = C.SDL_PEN_MOUSEID };
     //TODO
     // pub extern fn SDL_GetMouseNameForID(instance_id: SDL_MouseID) [*c]const u8;
 };
@@ -5127,6 +5254,17 @@ pub const Gamepad = opaque {
     pub fn close(self: *Gamepad) void {
         C.SDL_CloseGamepad(self.to_c_ptr());
     }
+
+    pub const AxisMax = C.SDL_JOYSTICK_AXIS_MAX;
+    pub const AxisMin = C.SDL_JOYSTICK_AXIS_MIN;
+
+    pub const Props = struct {
+        pub const HAS_MONO_LED = Property.new(.BOOLEAN, C.SDL_PROP_JOYSTICK_CAP_MONO_LED_BOOLEAN);
+        pub const HAS_RGB_LED = Property.new(.BOOLEAN, C.SDL_PROP_JOYSTICK_CAP_RGB_LED_BOOLEAN);
+        pub const HAS_PLAYER_LED = Property.new(.BOOLEAN, C.SDL_PROP_JOYSTICK_CAP_PLAYER_LED_BOOLEAN);
+        pub const HAS_RUMBLE = Property.new(.BOOLEAN, C.SDL_PROP_JOYSTICK_CAP_RUMBLE_BOOLEAN);
+        pub const HAS_TRIGGER_RUMBLE = Property.new(.BOOLEAN, C.SDL_PROP_JOYSTICK_CAP_TRIGGER_RUMBLE_BOOLEAN);
+    };
 };
 
 pub const Joystick = opaque {
@@ -5178,7 +5316,32 @@ pub const Joystick = opaque {
     // pub extern fn SDL_IsJoystickHaptic(joystick: ?*SDL_Joystick) bool;
     // pub extern fn SDL_OpenHapticFromJoystick(joystick: ?*SDL_Joystick) ?*SDL_Haptic;
     // pub extern fn SDL_GetJoystickFromPlayerIndex(player_index: c_int) ?*SDL_Joystick;
+
+    pub const AxisMax = C.SDL_JOYSTICK_AXIS_MAX;
+    pub const AxisMin = C.SDL_JOYSTICK_AXIS_MIN;
+
+    pub const Props = struct {
+        pub const HAS_MONO_LED = Property.new(.BOOLEAN, C.SDL_PROP_JOYSTICK_CAP_MONO_LED_BOOLEAN);
+        pub const HAS_RGB_LED = Property.new(.BOOLEAN, C.SDL_PROP_JOYSTICK_CAP_RGB_LED_BOOLEAN);
+        pub const HAS_PLAYER_LED = Property.new(.BOOLEAN, C.SDL_PROP_JOYSTICK_CAP_PLAYER_LED_BOOLEAN);
+        pub const HAS_RUMBLE = Property.new(.BOOLEAN, C.SDL_PROP_JOYSTICK_CAP_RUMBLE_BOOLEAN);
+        pub const HAS_TRIGGER_RUMBLE = Property.new(.BOOLEAN, C.SDL_PROP_JOYSTICK_CAP_TRIGGER_RUMBLE_BOOLEAN);
+    };
 };
+
+pub const JoystickHatPos = Flags(enum(u8) {
+    CENTERED = C.SDL_HAT_CENTERED,
+    UP = C.SDL_HAT_UP,
+    RIGHT = C.SDL_HAT_RIGHT,
+    DOWN = C.SDL_HAT_DOWN,
+    LEFT = C.SDL_HAT_LEFT,
+    RIGHT_UP = C.SDL_HAT_RIGHTUP,
+    RIGHT_DOWN = C.SDL_HAT_RIGHTDOWN,
+    LEFT_UP = C.SDL_HAT_LEFTUP,
+    LEFT_DOWN = C.SDL_HAT_LEFTDOWN,
+}, enum(u8) {
+    NOT_CENTERED = C.SDL_HAT_UP | C.SDL_HAT_RIGHT | C.SDL_HAT_DOWN | C.SDL_HAT_LEFT,
+});
 
 pub const VirtualJoystickTouchpadDesc = extern struct {
     num_fingers: u16 = 0,
@@ -5563,6 +5726,9 @@ pub const CameraID = extern struct {
 
 pub const TouchID = extern struct {
     id: u64 = 0,
+
+    pub const VIRTUAL_FROM_MOUSE = MouseID{ .id = C.SDL_MOUSE_TOUCHID };
+    pub const VIRTUAL_FROM_PEN = MouseID{ .id = C.SDL_PEN_TOUCHID };
     //TODO
     // pub extern fn SDL_GetTouchDevices(count: [*c]c_int) [*c]SDL_TouchID;
     // pub extern fn SDL_GetTouchDeviceName(touchID: SDL_TouchID) [*c]const u8;
@@ -5574,13 +5740,16 @@ pub const FingerID = extern struct {
     id: u64 = 0,
 };
 
-pub const MouseButtonFlags = extern struct {
-    flags: u32 = 0,
-};
-
-pub const PenInputFlags = extern struct {
-    flags: u32 = 0,
-};
+pub const PenInputFlags = Flags(enum(u32) {
+    DOWN = C.SDL_PEN_INPUT_DOWN,
+    BUTTON_1 = C.SDL_PEN_INPUT_BUTTON_1,
+    BUTTON_2 = C.SDL_PEN_INPUT_BUTTON_2,
+    BUTTON_3 = C.SDL_PEN_INPUT_BUTTON_3,
+    BUTTON_4 = C.SDL_PEN_INPUT_BUTTON_4,
+    BUTTON_5 = C.SDL_PEN_INPUT_BUTTON_5,
+    ERASER_TIP = C.SDL_PEN_INPUT_ERASER_TIP,
+    _,
+}, null);
 
 pub const Mouse = struct {
     //TODO
@@ -5639,7 +5808,7 @@ pub const EventAction = enum(C.SDL_EventAction) {
     pub usingnamespace c_enum_conversions(EventAction, C.SDL_EventAction);
 };
 
-pub const EventType = enum(u32) {
+pub const EventType = enum(C.SDL_EventType) {
     NONE = 0,
     QUIT = C.SDL_EVENT_QUIT,
     TERMINATING = C.SDL_EVENT_TERMINATING,
@@ -5772,10 +5941,10 @@ pub const EventType = enum(u32) {
         return @enumFromInt(@as(u32, @intCast(int)));
     }
 
-    pub usingnamespace c_enum_conversions(EventType, c_uint);
+    pub usingnamespace c_enum_conversions(EventType, C.SDL_EventType);
 };
 
-pub const Scancode = enum(c_uint) {
+pub const Scancode = enum(C.SDL_Scancode) {
     UNKNOWN = C.SDL_SCANCODE_UNKNOWN,
     A = C.SDL_SCANCODE_A,
     B = C.SDL_SCANCODE_B,
@@ -6022,11 +6191,12 @@ pub const Scancode = enum(c_uint) {
     SOFTRIGHT = C.SDL_SCANCODE_SOFTRIGHT,
     CALL = C.SDL_SCANCODE_CALL,
     ENDCALL = C.SDL_SCANCODE_ENDCALL,
+    _,
 
     pub const RESERVED = C.SDL_SCANCODE_RESERVED;
     pub const COUNT = C.SDL_SCANCODE_COUNT;
 
-    pub usingnamespace c_enum_conversions(Scancode, c_uint);
+    pub usingnamespace c_enum_conversions(Scancode, C.SDL_Scancode);
 
     //TODO
     // pub extern fn SDL_GetKeyFromScancode(scancode: SDL_Scancode, modstate: SDL_Keymod, key_event: bool) SDL_Keycode;
@@ -6034,15 +6204,293 @@ pub const Scancode = enum(c_uint) {
     // pub extern fn SDL_GetScancodeName(scancode: SDL_Scancode) [*c]const u8;
 };
 
-pub const Keycode = extern struct {
-    code: u32 = 0,
+pub const Keycode = enum(C.SDL_Keycode) {
+    UNKNOWN = C.SDLK_UNKNOWN,
+    RETURN = C.SDLK_RETURN,
+    ESCAPE = C.SDLK_ESCAPE,
+    BACKSPACE = C.SDLK_BACKSPACE,
+    TAB = C.SDLK_TAB,
+    SPACE = C.SDLK_SPACE,
+    EXCLAIM = C.SDLK_EXCLAIM,
+    DBLAPOSTROPHE = C.SDLK_DBLAPOSTROPHE,
+    HASH = C.SDLK_HASH,
+    DOLLAR = C.SDLK_DOLLAR,
+    PERCENT = C.SDLK_PERCENT,
+    AMPERSAND = C.SDLK_AMPERSAND,
+    APOSTROPHE = C.SDLK_APOSTROPHE,
+    LEFTPAREN = C.SDLK_LEFTPAREN,
+    RIGHTPAREN = C.SDLK_RIGHTPAREN,
+    ASTERISK = C.SDLK_ASTERISK,
+    PLUS = C.SDLK_PLUS,
+    COMMA = C.SDLK_COMMA,
+    MINUS = C.SDLK_MINUS,
+    PERIOD = C.SDLK_PERIOD,
+    SLASH = C.SDLK_SLASH,
+    _0 = C.SDLK_0,
+    _1 = C.SDLK_1,
+    _2 = C.SDLK_2,
+    _3 = C.SDLK_3,
+    _4 = C.SDLK_4,
+    _5 = C.SDLK_5,
+    _6 = C.SDLK_6,
+    _7 = C.SDLK_7,
+    _8 = C.SDLK_8,
+    _9 = C.SDLK_9,
+    COLON = C.SDLK_COLON,
+    SEMICOLON = C.SDLK_SEMICOLON,
+    LESS = C.SDLK_LESS,
+    EQUALS = C.SDLK_EQUALS,
+    GREATER = C.SDLK_GREATER,
+    QUESTION = C.SDLK_QUESTION,
+    AT = C.SDLK_AT,
+    LEFTBRACKET = C.SDLK_LEFTBRACKET,
+    BACKSLASH = C.SDLK_BACKSLASH,
+    RIGHTBRACKET = C.SDLK_RIGHTBRACKET,
+    CARET = C.SDLK_CARET,
+    UNDERSCORE = C.SDLK_UNDERSCORE,
+    GRAVE = C.SDLK_GRAVE,
+    A = C.SDLK_A,
+    B = C.SDLK_B,
+    C = C.SDLK_C,
+    D = C.SDLK_D,
+    E = C.SDLK_E,
+    F = C.SDLK_F,
+    G = C.SDLK_G,
+    H = C.SDLK_H,
+    I = C.SDLK_I,
+    J = C.SDLK_J,
+    K = C.SDLK_K,
+    L = C.SDLK_L,
+    M = C.SDLK_M,
+    N = C.SDLK_N,
+    O = C.SDLK_O,
+    P = C.SDLK_P,
+    Q = C.SDLK_Q,
+    R = C.SDLK_R,
+    S = C.SDLK_S,
+    T = C.SDLK_T,
+    U = C.SDLK_U,
+    V = C.SDLK_V,
+    W = C.SDLK_W,
+    X = C.SDLK_X,
+    Y = C.SDLK_Y,
+    Z = C.SDLK_Z,
+    LEFTBRACE = C.SDLK_LEFTBRACE,
+    PIPE = C.SDLK_PIPE,
+    RIGHTBRACE = C.SDLK_RIGHTBRACE,
+    TILDE = C.SDLK_TILDE,
+    DELETE = C.SDLK_DELETE,
+    PLUSMINUS = C.SDLK_PLUSMINUS,
+    CAPSLOCK = C.SDLK_CAPSLOCK,
+    F1 = C.SDLK_F1,
+    F2 = C.SDLK_F2,
+    F3 = C.SDLK_F3,
+    F4 = C.SDLK_F4,
+    F5 = C.SDLK_F5,
+    F6 = C.SDLK_F6,
+    F7 = C.SDLK_F7,
+    F8 = C.SDLK_F8,
+    F9 = C.SDLK_F9,
+    F10 = C.SDLK_F10,
+    F11 = C.SDLK_F11,
+    F12 = C.SDLK_F12,
+    PRINTSCREEN = C.SDLK_PRINTSCREEN,
+    SCROLLLOCK = C.SDLK_SCROLLLOCK,
+    PAUSE = C.SDLK_PAUSE,
+    INSERT = C.SDLK_INSERT,
+    HOME = C.SDLK_HOME,
+    PAGEUP = C.SDLK_PAGEUP,
+    END = C.SDLK_END,
+    PAGEDOWN = C.SDLK_PAGEDOWN,
+    RIGHT = C.SDLK_RIGHT,
+    LEFT = C.SDLK_LEFT,
+    DOWN = C.SDLK_DOWN,
+    UP = C.SDLK_UP,
+    NUMLOCKCLEAR = C.SDLK_NUMLOCKCLEAR,
+    KP_DIVIDE = C.SDLK_KP_DIVIDE,
+    KP_MULTIPLY = C.SDLK_KP_MULTIPLY,
+    KP_MINUS = C.SDLK_KP_MINUS,
+    KP_PLUS = C.SDLK_KP_PLUS,
+    KP_ENTER = C.SDLK_KP_ENTER,
+    KP_1 = C.SDLK_KP_1,
+    KP_2 = C.SDLK_KP_2,
+    KP_3 = C.SDLK_KP_3,
+    KP_4 = C.SDLK_KP_4,
+    KP_5 = C.SDLK_KP_5,
+    KP_6 = C.SDLK_KP_6,
+    KP_7 = C.SDLK_KP_7,
+    KP_8 = C.SDLK_KP_8,
+    KP_9 = C.SDLK_KP_9,
+    KP_0 = C.SDLK_KP_0,
+    KP_PERIOD = C.SDLK_KP_PERIOD,
+    APPLICATION = C.SDLK_APPLICATION,
+    POWER = C.SDLK_POWER,
+    KP_EQUALS = C.SDLK_KP_EQUALS,
+    F13 = C.SDLK_F13,
+    F14 = C.SDLK_F14,
+    F15 = C.SDLK_F15,
+    F16 = C.SDLK_F16,
+    F17 = C.SDLK_F17,
+    F18 = C.SDLK_F18,
+    F19 = C.SDLK_F19,
+    F20 = C.SDLK_F20,
+    F21 = C.SDLK_F21,
+    F22 = C.SDLK_F22,
+    F23 = C.SDLK_F23,
+    F24 = C.SDLK_F24,
+    EXECUTE = C.SDLK_EXECUTE,
+    HELP = C.SDLK_HELP,
+    MENU = C.SDLK_MENU,
+    SELECT = C.SDLK_SELECT,
+    STOP = C.SDLK_STOP,
+    AGAIN = C.SDLK_AGAIN,
+    UNDO = C.SDLK_UNDO,
+    CUT = C.SDLK_CUT,
+    COPY = C.SDLK_COPY,
+    PASTE = C.SDLK_PASTE,
+    FIND = C.SDLK_FIND,
+    MUTE = C.SDLK_MUTE,
+    VOLUMEUP = C.SDLK_VOLUMEUP,
+    VOLUMEDOWN = C.SDLK_VOLUMEDOWN,
+    KP_COMMA = C.SDLK_KP_COMMA,
+    KP_EQUALSAS400 = C.SDLK_KP_EQUALSAS400,
+    ALTERASE = C.SDLK_ALTERASE,
+    SYSREQ = C.SDLK_SYSREQ,
+    CANCEL = C.SDLK_CANCEL,
+    CLEAR = C.SDLK_CLEAR,
+    PRIOR = C.SDLK_PRIOR,
+    RETURN2 = C.SDLK_RETURN2,
+    SEPARATOR = C.SDLK_SEPARATOR,
+    OUT = C.SDLK_OUT,
+    OPER = C.SDLK_OPER,
+    CLEARAGAIN = C.SDLK_CLEARAGAIN,
+    CRSEL = C.SDLK_CRSEL,
+    EXSEL = C.SDLK_EXSEL,
+    KP_00 = C.SDLK_KP_00,
+    KP_000 = C.SDLK_KP_000,
+    THOUSANDSSEPARATOR = C.SDLK_THOUSANDSSEPARATOR,
+    DECIMALSEPARATOR = C.SDLK_DECIMALSEPARATOR,
+    CURRENCYUNIT = C.SDLK_CURRENCYUNIT,
+    CURRENCYSUBUNIT = C.SDLK_CURRENCYSUBUNIT,
+    KP_LEFTPAREN = C.SDLK_KP_LEFTPAREN,
+    KP_RIGHTPAREN = C.SDLK_KP_RIGHTPAREN,
+    KP_LEFTBRACE = C.SDLK_KP_LEFTBRACE,
+    KP_RIGHTBRACE = C.SDLK_KP_RIGHTBRACE,
+    KP_TAB = C.SDLK_KP_TAB,
+    KP_BACKSPACE = C.SDLK_KP_BACKSPACE,
+    KP_A = C.SDLK_KP_A,
+    KP_B = C.SDLK_KP_B,
+    KP_C = C.SDLK_KP_C,
+    KP_D = C.SDLK_KP_D,
+    KP_E = C.SDLK_KP_E,
+    KP_F = C.SDLK_KP_F,
+    KP_XOR = C.SDLK_KP_XOR,
+    KP_POWER = C.SDLK_KP_POWER,
+    KP_PERCENT = C.SDLK_KP_PERCENT,
+    KP_LESS = C.SDLK_KP_LESS,
+    KP_GREATER = C.SDLK_KP_GREATER,
+    KP_AMPERSAND = C.SDLK_KP_AMPERSAND,
+    KP_DBLAMPERSAND = C.SDLK_KP_DBLAMPERSAND,
+    KP_VERTICALBAR = C.SDLK_KP_VERTICALBAR,
+    KP_DBLVERTICALBAR = C.SDLK_KP_DBLVERTICALBAR,
+    KP_COLON = C.SDLK_KP_COLON,
+    KP_HASH = C.SDLK_KP_HASH,
+    KP_SPACE = C.SDLK_KP_SPACE,
+    KP_AT = C.SDLK_KP_AT,
+    KP_EXCLAM = C.SDLK_KP_EXCLAM,
+    KP_MEMSTORE = C.SDLK_KP_MEMSTORE,
+    KP_MEMRECALL = C.SDLK_KP_MEMRECALL,
+    KP_MEMCLEAR = C.SDLK_KP_MEMCLEAR,
+    KP_MEMADD = C.SDLK_KP_MEMADD,
+    KP_MEMSUBTRACT = C.SDLK_KP_MEMSUBTRACT,
+    KP_MEMMULTIPLY = C.SDLK_KP_MEMMULTIPLY,
+    KP_MEMDIVIDE = C.SDLK_KP_MEMDIVIDE,
+    KP_PLUSMINUS = C.SDLK_KP_PLUSMINUS,
+    KP_CLEAR = C.SDLK_KP_CLEAR,
+    KP_CLEARENTRY = C.SDLK_KP_CLEARENTRY,
+    KP_BINARY = C.SDLK_KP_BINARY,
+    KP_OCTAL = C.SDLK_KP_OCTAL,
+    KP_DECIMAL = C.SDLK_KP_DECIMAL,
+    KP_HEXADECIMAL = C.SDLK_KP_HEXADECIMAL,
+    LCTRL = C.SDLK_LCTRL,
+    LSHIFT = C.SDLK_LSHIFT,
+    LALT = C.SDLK_LALT,
+    LGUI = C.SDLK_LGUI,
+    RCTRL = C.SDLK_RCTRL,
+    RSHIFT = C.SDLK_RSHIFT,
+    RALT = C.SDLK_RALT,
+    RGUI = C.SDLK_RGUI,
+    MODE = C.SDLK_MODE,
+    SLEEP = C.SDLK_SLEEP,
+    WAKE = C.SDLK_WAKE,
+    CHANNEL_INCREMENT = C.SDLK_CHANNEL_INCREMENT,
+    CHANNEL_DECREMENT = C.SDLK_CHANNEL_DECREMENT,
+    MEDIA_PLAY = C.SDLK_MEDIA_PLAY,
+    MEDIA_PAUSE = C.SDLK_MEDIA_PAUSE,
+    MEDIA_RECORD = C.SDLK_MEDIA_RECORD,
+    MEDIA_FAST_FORWARD = C.SDLK_MEDIA_FAST_FORWARD,
+    MEDIA_REWIND = C.SDLK_MEDIA_REWIND,
+    MEDIA_NEXT_TRACK = C.SDLK_MEDIA_NEXT_TRACK,
+    MEDIA_PREVIOUS_TRACK = C.SDLK_MEDIA_PREVIOUS_TRACK,
+    MEDIA_STOP = C.SDLK_MEDIA_STOP,
+    MEDIA_EJECT = C.SDLK_MEDIA_EJECT,
+    MEDIA_PLAY_PAUSE = C.SDLK_MEDIA_PLAY_PAUSE,
+    MEDIA_SELECT = C.SDLK_MEDIA_SELECT,
+    AC_NEW = C.SDLK_AC_NEW,
+    AC_OPEN = C.SDLK_AC_OPEN,
+    AC_CLOSE = C.SDLK_AC_CLOSE,
+    AC_EXIT = C.SDLK_AC_EXIT,
+    AC_SAVE = C.SDLK_AC_SAVE,
+    AC_PRINT = C.SDLK_AC_PRINT,
+    AC_PROPERTIES = C.SDLK_AC_PROPERTIES,
+    AC_SEARCH = C.SDLK_AC_SEARCH,
+    AC_HOME = C.SDLK_AC_HOME,
+    AC_BACK = C.SDLK_AC_BACK,
+    AC_FORWARD = C.SDLK_AC_FORWARD,
+    AC_STOP = C.SDLK_AC_STOP,
+    AC_REFRESH = C.SDLK_AC_REFRESH,
+    AC_BOOKMARKS = C.SDLK_AC_BOOKMARKS,
+    SOFTLEFT = C.SDLK_SOFTLEFT,
+    SOFTRIGHT = C.SDLK_SOFTRIGHT,
+    CALL = C.SDLK_CALL,
+    ENDCALL = C.SDLK_ENDCALL,
+    LEFT_TAB = C.SDLK_LEFT_TAB,
+    LEVEL5_SHIFT = C.SDLK_LEVEL5_SHIFT,
+    MULTI_KEY_COMPOSE = C.SDLK_MULTI_KEY_COMPOSE,
+    LMETA = C.SDLK_LMETA,
+    RMETA = C.SDLK_RMETA,
+    LHYPER = C.SDLK_LHYPER,
+    RHYPER = C.SDLK_RHYPER,
+
     //TODO
     // pub extern fn SDL_GetScancodeFromKey(key: SDL_Keycode, modstate: [*c]SDL_Keymod) SDL_Scancode;
     // pub extern fn SDL_GetKeyName(key: SDL_Keycode) [*c]const u8;
 };
-pub const Keymod = extern struct {
-    mod: u16 = 0,
-};
+pub const Keymod = Flags(enum(u16) {
+    NONE = C.SDL_KMOD_NONE,
+    L_SHIFT = C.SDL_KMOD_LSHIFT,
+    R_SHIFT = C.SDL_KMOD_RSHIFT,
+    LEVEL5_SHIFT = C.SDL_KMOD_LEVEL5,
+    L_CTRL = C.SDL_KMOD_LCTRL,
+    R_CTRL = C.SDL_KMOD_RCTRL,
+    L_ALT = C.SDL_KMOD_LALT,
+    R_ALT = C.SDL_KMOD_RALT,
+    L_GUI = C.SDL_KMOD_LGUI,
+    R_GUI = C.SDL_KMOD_RGUI,
+    NUM_LOCK = C.SDL_KMOD_NUM,
+    CAPS_LOCK = C.SDL_KMOD_CAPS,
+    ALT_INPUT_MODE = C.SDL_KMOD_MODE,
+    SCROLL_LOCK = C.SDL_KMOD_SCROLL,
+    CTRL = C.SDL_KMOD_CTRL,
+    SHIFT = C.SDL_KMOD_SHIFT,
+    ALT = C.SDL_KMOD_ALT,
+    GUI = C.SDL_KMOD_GUI,
+}, enum(u16) {
+    ANY_CTRL = C.SDL_KMOD_CTRL,
+    ANY_SHIFT = C.SDL_KMOD_SHIFT,
+    ANY_ALT = C.SDL_KMOD_ALT,
+    ANY_GUI = C.SDL_KMOD_GUI,
+});
 
 pub const Meta = struct {
     pub fn runtime_version() c_int {
@@ -6054,6 +6502,7 @@ pub const Meta = struct {
     pub const BUILD_MAJOR_VERSION = C.SDL_MAJOR_VERSION;
     pub const BUILD_MINOR_VERSION = C.SDL_MINOR_VERSION;
     pub const BUILD_MICRO_VERSION = C.SDL_MICRO_VERSION;
+    pub const BUILD_VERSION = C.SDL_VERSION;
     pub const BUILD_REVISION = C.SDL_REVISION;
     pub fn RUNTIME_MAJOR_VERSION(version: anytype) @TypeOf(@import("std").zig.c_translation.MacroArithmetic.div(version, @import("std").zig.c_translation.promoteIntLiteral(c_int, 1000000, .decimal))) {
         return C.SDL_VERSIONNUM_MAJOR(version);
@@ -6064,6 +6513,15 @@ pub const Meta = struct {
     pub fn RUNTIME_MICRO_VERSION(version: anytype) @TypeOf(@import("std").zig.c_translation.MacroArithmetic.rem(version, @as(c_int, 1000))) {
         return C.SDL_VERSIONNUM_MICRO(version);
     }
+    pub fn RUNTIME_VERSION(major: anytype, minor: anytype, patch: anytype) c_int {
+        return C.SDL_VERSIONNUM(major, minor, patch);
+    }
+
+    pub fn version_is_at_least(major: anytype, minor: anytype, patch: anytype) bool {
+        return C.SDL_VERSION_ATLEAST(major, minor, patch);
+    }
+
+    pub const SDL_REVISION = C.SDL_REVISION[0 .. C.SDL_REVISION.len - 1] ++ "https://github.com/gabe-lee/Goolib " ++ VERSION ++ ")";
 };
 
 pub const GPU_Device = opaque {
@@ -6192,6 +6650,19 @@ pub const GPU_Device = opaque {
     pub fn texture_supports_sample_count(self: *GPU_Device, tex_format: GPU_TextureFormat, sample_count: GPU_SampleCount) bool {
         return C.SDL_GPUTextureSupportsFormat(self.to_c_ptr(), tex_format.to_c(), sample_count.to_c());
     }
+
+    pub const CreateProps = struct {
+        pub const DEBUG_MODE = Property.new(.BOOLEAN, C.SDL_PROP_GPU_DEVICE_CREATE_DEBUGMODE_BOOLEAN);
+        pub const PREFER_LOW_POWER = Property.new(.BOOLEAN, C.SDL_PROP_GPU_DEVICE_CREATE_PREFERLOWPOWER_BOOLEAN);
+        pub const NAME = Property.new(.STRING, C.SDL_PROP_GPU_DEVICE_CREATE_NAME_STRING);
+        pub const SHADERS_PRIVATE = Property.new(.BOOLEAN, C.SDL_PROP_GPU_DEVICE_CREATE_SHADERS_PRIVATE_BOOLEAN);
+        pub const SHADERS_SPIRV = Property.new(.BOOLEAN, C.SDL_PROP_GPU_DEVICE_CREATE_SHADERS_SPIRV_BOOLEAN);
+        pub const SHADERS_DXBC = Property.new(.BOOLEAN, C.SDL_PROP_GPU_DEVICE_CREATE_SHADERS_DXBC_BOOLEAN);
+        pub const SHADERS_DXIL = Property.new(.BOOLEAN, C.SDL_PROP_GPU_DEVICE_CREATE_SHADERS_DXIL_BOOLEAN);
+        pub const SHADERS_MSL = Property.new(.BOOLEAN, C.SDL_PROP_GPU_DEVICE_CREATE_SHADERS_MSL_BOOLEAN);
+        pub const SHADERS_METALLIB = Property.new(.BOOLEAN, C.SDL_PROP_GPU_DEVICE_CREATE_SHADERS_METALLIB_BOOLEAN);
+        pub const D3D12_SEMANTIC_NAME = Property.new(.STRING, C.SDL_PROP_GPU_DEVICE_CREATE_D3D12_SEMANTIC_NAME_STRING);
+    };
 };
 
 pub const GPU_TransferBufferCreateInfo = extern struct {
@@ -6200,6 +6671,10 @@ pub const GPU_TransferBufferCreateInfo = extern struct {
     props: PropertiesID = .NULL,
 
     pub usingnamespace c_non_opaque_conversions(GPU_TransferBufferCreateInfo, C.SDL_GPUTransferBufferCreateInfo);
+
+    pub const CreateProps = struct {
+        pub const NAME = Property.new(.STRING, C.SDL_PROP_GPU_TRANSFERBUFFER_CREATE_NAME_STRING);
+    };
 };
 
 pub const GPU_BufferCreateInfo = extern struct {
@@ -6208,6 +6683,10 @@ pub const GPU_BufferCreateInfo = extern struct {
     props: PropertiesID = .NULL,
 
     pub usingnamespace c_non_opaque_conversions(GPU_BufferCreateInfo, C.SDL_GPUBufferCreateInfo);
+
+    pub const CreateProps = struct {
+        pub const NAME = Property.new(.STRING, C.SDL_PROP_GPU_BUFFER_CREATE_NAME_STRING);
+    };
 };
 
 pub const GPU_TextureCreateInfo = extern struct {
@@ -6222,6 +6701,16 @@ pub const GPU_TextureCreateInfo = extern struct {
     props: PropertiesID = .NULL,
 
     pub usingnamespace c_non_opaque_conversions(GPU_TextureCreateInfo, C.SDL_GPUTextureCreateInfo);
+
+    pub const CreateProps = struct {
+        pub const D3D12_CLEAR_RED = Property.new(.FLOAT, C.SDL_PROP_GPU_TEXTURE_CREATE_D3D12_CLEAR_R_FLOAT);
+        pub const D3D12_CLEAR_GREEN = Property.new(.FLOAT, C.SDL_PROP_GPU_TEXTURE_CREATE_D3D12_CLEAR_G_FLOAT);
+        pub const D3D12_CLEAR_BLUE = Property.new(.FLOAT, C.SDL_PROP_GPU_TEXTURE_CREATE_D3D12_CLEAR_B_FLOAT);
+        pub const D3D12_CLEAR_ALPHA = Property.new(.FLOAT, C.SDL_PROP_GPU_TEXTURE_CREATE_D3D12_CLEAR_A_FLOAT);
+        pub const D3D12_CLEAR_DEPTH = Property.new(.FLOAT, C.SDL_PROP_GPU_TEXTURE_CREATE_D3D12_CLEAR_DEPTH_FLOAT);
+        pub const D3D12_CLEAR_STENCIL = Property.new(.INTEGER, C.SDL_PROP_GPU_TEXTURE_CREATE_D3D12_CLEAR_STENCIL_NUMBER);
+        pub const NAME = Property.new(.STRING, C.SDL_PROP_GPU_TEXTURE_CREATE_NAME_STRING);
+    };
 };
 
 pub const GPU_ShaderCreateInfo = extern struct {
@@ -6237,6 +6726,10 @@ pub const GPU_ShaderCreateInfo = extern struct {
     props: PropertiesID = .{},
 
     pub usingnamespace c_non_opaque_conversions(GPU_ShaderCreateInfo, C.SDL_GPUShaderCreateInfo);
+
+    pub const CreateProps = struct {
+        pub const NAME = Property.new(.STRING, C.SDL_PROP_GPU_SHADER_CREATE_NAME_STRING);
+    };
 };
 
 pub const GPU_ComputePipelineCreateInfo = extern struct {
@@ -6256,6 +6749,10 @@ pub const GPU_ComputePipelineCreateInfo = extern struct {
     props: PropertiesID = 0,
 
     pub usingnamespace c_non_opaque_conversions(GPU_ComputePipelineCreateInfo, C.SDL_GPUComputePipelineCreateInfo);
+
+    pub const CreateProps = struct {
+        pub const NAME = Property.new(.STRING, C.SDL_PROP_GPU_COMPUTEPIPELINE_CREATE_NAME_STRING);
+    };
 };
 
 pub const GPU_GraphicsPipelineCreateInfo = extern struct {
@@ -6270,6 +6767,10 @@ pub const GPU_GraphicsPipelineCreateInfo = extern struct {
     props: PropertiesID = .{},
 
     pub usingnamespace c_non_opaque_conversions(GPU_GraphicsPipelineCreateInfo, C.SDL_GPUGraphicsPipelineCreateInfo);
+
+    pub const CreateProps = struct {
+        pub const NAME = Property.new(.STRING, C.SDL_PROP_GPU_GRAPHICSPIPELINE_CREATE_NAME_STRING);
+    };
 };
 
 pub const GPU_VertexInputState = extern struct {
@@ -6499,6 +7000,10 @@ pub const GPU_SamplerCreateInfo = extern struct {
     props: PropertiesID = .{},
 
     pub usingnamespace c_non_opaque_conversions(GPU_SamplerCreateInfo, C.SDL_GPUSamplerCreateInfo);
+
+    pub const CreateProps = struct {
+        pub const NAME = Property.new(.STRING, C.SDL_PROP_GPU_SAMPLER_CREATE_NAME_STRING);
+    };
 };
 
 pub const GPU_ColorTargetInfo = extern struct {
@@ -6627,7 +7132,7 @@ pub const GPU_ShaderStage = enum(c_uint) {
     VERTEX = C.SDL_SHADERSTAGE_VERTEX,
     FRAGMENT = C.SDL_SHADERSTAGE_FRAGMENT,
 
-    pub usingnamespace c_enum_conversions(GPU_ShaderStage, c_uint);
+    pub usingnamespace c_enum_conversions(GPU_ShaderStage, C.SDL_GPUShaderStage);
 };
 
 pub const GPU_VertexInputRate = enum(c_uint) {
@@ -7122,13 +7627,13 @@ pub const GPU_TextureFormat = enum(C.SDL_GPUTextureFormat) {
 };
 
 pub const GPU_TextureUsageFlags = Flags(enum(u32) {
-    SAMPLER = C.SDL_TEXTUREUSAGE_SAMPLER,
-    COLOR_TARGET = C.SDL_TEXTUREUSAGE_COLOR_TARGET,
-    DEPTH_STENCIL_TARGET = C.SDL_TEXTUREUSAGE_DEPTH_STENCIL_TARGET,
-    GRAPHICS_STORAGE_READ = C.SDL_TEXTUREUSAGE_GRAPHICS_STORAGE_READ,
-    COMPUTE_STORAGE_READ = C.SDL_TEXTUREUSAGE_COMPUTE_STORAGE_READ,
-    COMPUTE_STORAGE_WRITE = C.SDL_TEXTUREUSAGE_COMPUTE_STORAGE_WRITE,
-    COMPUTE_STORAGE_SIMULTANEOUS_READ_WRITE = C.SDL_TEXTUREUSAGE_COMPUTE_STORAGE_SIMULTANEOUS_READ_WRITE,
+    SAMPLER = C.SDL_GPU_TEXTUREUSAGE_SAMPLER,
+    COLOR_TARGET = C.SDL_GPU_TEXTUREUSAGE_COLOR_TARGET,
+    DEPTH_STENCIL_TARGET = C.SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET,
+    GRAPHICS_STORAGE_READ = C.SDL_GPU_TEXTUREUSAGE_GRAPHICS_STORAGE_READ,
+    COMPUTE_STORAGE_READ = C.SDL_GPU_TEXTUREUSAGE_COMPUTE_STORAGE_READ,
+    COMPUTE_STORAGE_WRITE = C.SDL_GPU_TEXTUREUSAGE_COMPUTE_STORAGE_WRITE,
+    COMPUTE_STORAGE_SIMULTANEOUS_READ_WRITE = C.SDL_GPU_TEXTUREUSAGE_COMPUTE_STORAGE_SIMULTANEOUS_READ_WRITE,
 }, null);
 
 pub const GPU_TextureType = enum(c_uint) {
@@ -7162,31 +7667,28 @@ pub const GPU_CubeMapFace = enum(c_uint) {
 };
 
 pub const GPU_BufferUsageFlags = Flags(enum(u32) {
-    VERTEX = C.SDL_BUFFERUSAGE_VERTEX,
-    INDEX = C.SDL_BUFFERUSAGE_INDEX,
-    INDIRECT = C.SDL_BUFFERUSAGE_INDIRECT,
-    GRAPHICS_STORAGE_READ = C.SDL_BUFFERUSAGE_GRAPHICS_STORAGE_READ,
-    COMPUTE_STORAGE_READ = C.SDL_BUFFERUSAGE_COMPUTE_STORAGE_READ,
-    COMPUTE_STORAGE_WRITE = C.SDL_BUFFERUSAGE_COMPUTE_STORAGE_WRITE,
+    VERTEX = C.SDL_GPU_BUFFERUSAGE_VERTEX,
+    INDEX = C.SDL_GPU_BUFFERUSAGE_INDEX,
+    INDIRECT = C.SDL_GPU_BUFFERUSAGE_INDIRECT,
+    GRAPHICS_STORAGE_READ = C.SDL_GPU_BUFFERUSAGE_GRAPHICS_STORAGE_READ,
+    COMPUTE_STORAGE_READ = C.SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_READ,
+    COMPUTE_STORAGE_WRITE = C.SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_WRITE,
 }, null);
-
 pub const GPU_ShaderFormatFlags = Flags(enum(u32) {
-    INVALID = C.SDL_SHADERFORMAT_INVALID,
-    PRIVATE = C.SDL_SHADERFORMAT_PRIVATE,
-    SPIRV = C.SDL_SHADERFORMAT_SPIRV,
-    DXBC = C.SDL_SHADERFORMAT_DXBC,
-    DXIL = C.SDL_SHADERFORMAT_DXIL,
-    MSL = C.SDL_SHADERFORMAT_MSL,
-    METALLIB = C.SDL_SHADERFORMAT_METALLIB,
+    INVALID = C.SDL_GPU_SHADERFORMAT_INVALID,
+    PRIVATE = C.SDL_GPU_SHADERFORMAT_PRIVATE,
+    SPIRV = C.SDL_GPU_SHADERFORMAT_SPIRV,
+    DXBC = C.SDL_GPU_SHADERFORMAT_DXBC,
+    DXIL = C.SDL_GPU_SHADERFORMAT_DXIL,
+    MSL = C.SDL_GPU_SHADERFORMAT_MSL,
+    METALLIB = C.SDL_GPU_SHADERFORMAT_METALLIB,
 }, null);
-
 pub const GPU_ColorComponentFlags = Flags(enum(u8) {
-    R = C.SDL_COLORCOMPONENT_R,
-    G = C.SDL_COLORCOMPONENT_G,
-    B = C.SDL_COLORCOMPONENT_B,
-    A = C.SDL_COLORCOMPONENT_A,
+    R = C.SDL_GPU_COLORCOMPONENT_R,
+    G = C.SDL_GPU_COLORCOMPONENT_G,
+    B = C.SDL_GPU_COLORCOMPONENT_B,
+    A = C.SDL_GPU_COLORCOMPONENT_A,
 }, null);
-
 pub const Mem = struct {
     pub inline fn malloc(bytes: usize) ?*anyopaque {
         return C.SDL_malloc(bytes);
