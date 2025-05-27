@@ -51,6 +51,10 @@ pub fn define_vec2_type(comptime T: type) type {
         pub const ZERO_ONE = T_Vec2{ .x = 0, .y = 1 };
         pub const ONE_ZERO = T_Vec2{ .x = 1, .y = 0 };
         pub const ONE_ONE = T_Vec2{ .x = 1, .y = 1 };
+        pub const MIN_MIN = T_Vec2{ .x = MIN, .y = MIN };
+        pub const MAX_MAX = T_Vec2{ .x = MAX, .y = MAX };
+        pub const MIN = if (IS_FLOAT) -math.inf(T) else math.minInt(T);
+        pub const MAX = if (IS_FLOAT) math.inf(T) else math.maxInt(T);
 
         pub fn new(x: T, y: T) T_Vec2 {
             return T_Vec2{ .x = x, .y = y };

@@ -581,7 +581,6 @@ pub const IOStream = opaque {
     pub fn c_printf(self: *IOStream, fmt: [*:0]const u8, args: anytype) Error!usize {
         return nonzero_or_fail_err(@call(.auto, C.SDL_IOprintf, .{ self.to_c(), fmt } ++ args));
     }
-    // pub extern fn SDL_IOvprintf(context: ?*SDL_IOStream, fmt: [*c]const u8, ap: [*c]struct___va_list_tag_1) usize;
     pub fn flush(self: *IOStream) Error!void {
         return ok_or_fail_err(C.SDL_FlushIO(self.to_c()));
     }
@@ -936,52 +935,81 @@ pub const PropertiesID = extern struct {
     }
 };
 
+pub const ActionFuncCallback = fn () callconv(.c) void;
+
 pub const Thread = opaque {
     pub usingnamespace c_opaque_conversions(Thread, C.SDL_Thread);
-    //TODO
-    // pub extern fn SDL_CreateThreadRuntime(@"fn": SDL_ThreadFunction, name: [*c]const u8, data: ?*anyopaque, pfnBeginThread: SDL_FunctionPointer, pfnEndThread: SDL_FunctionPointer) ?*SDL_Thread;
-    // pub extern fn SDL_CreateThreadWithPropertiesRuntime(props: SDL_PropertiesID, pfnBeginThread: SDL_FunctionPointer, pfnEndThread: SDL_FunctionPointer) ?*SDL_Thread;
-    // pub extern fn SDL_GetThreadName(thread: ?*SDL_Thread) [*c]const u8;
-    // pub extern fn SDL_GetCurrentThreadID() SDL_ThreadID;
-    // pub extern fn SDL_GetThreadID(thread: ?*SDL_Thread) SDL_ThreadID;
-    // pub extern fn SDL_SetCurrentThreadPriority(priority: SDL_ThreadPriority) bool;
-    // pub extern fn SDL_WaitThread(thread: ?*SDL_Thread, status: [*c]c_int) void;
-    // pub extern fn SDL_GetThreadState(thread: ?*SDL_Thread) SDL_ThreadState;
-    // pub extern fn SDL_DetachThread(thread: ?*SDL_Thread) void;
-    // pub inline fn SDL_CreateThread(@"fn": anytype, name: anytype, data: anytype) @TypeOf(SDL_CreateThreadRuntime(@"fn", name, data, @import("std").zig.c_translation.cast(SDL_FunctionPointer, SDL_BeginThreadFunction), @import("std").zig.c_translation.cast(SDL_FunctionPointer, SDL_EndThreadFunction))) {
-    //     _ = &@"fn";
-    //     _ = &name;
-    //     _ = &data;
-    //     return SDL_CreateThreadRuntime(@"fn", name, data, @import("std").zig.c_translation.cast(SDL_FunctionPointer, SDL_BeginThreadFunction), @import("std").zig.c_translation.cast(SDL_FunctionPointer, SDL_EndThreadFunction));
-    // }
-    // pub inline fn SDL_CreateThreadWithProperties(props: anytype) @TypeOf(SDL_CreateThreadWithPropertiesRuntime(props, @import("std").zig.c_translation.cast(SDL_FunctionPointer, SDL_BeginThreadFunction), @import("std").zig.c_translation.cast(SDL_FunctionPointer, SDL_EndThreadFunction))) {
-    //     _ = &props;
-    //     return SDL_CreateThreadWithPropertiesRuntime(props, @import("std").zig.c_translation.cast(SDL_FunctionPointer, SDL_BeginThreadFunction), @import("std").zig.c_translation.cast(SDL_FunctionPointer, SDL_EndThreadFunction));
-    // }
+
+    pub fn create_thread_with_begin_end(thread_func: ?*const ThreadFunc, name: [*:0]const u8, userdata: ?*anyopaque, begin_func: ?*const ActionFuncCallback, end_func: ?*const ActionFuncCallback) Error!*Thread {
+        return ptr_cast_or_fail_err(*Thread, C.SDL_CreateThreadRuntime(Types.ptr_cast(thread_func, C.SDL_ThreadFunction), name, userdata, begin_func, end_func));
+    }
+    pub fn create_thread_with_props_begin_end(props: PropertiesID, begin_func: ?*const ActionFuncCallback, end_func: ?*const ActionFuncCallback) Error!*Thread {
+        return ptr_cast_or_fail_err(*Thread, C.SDL_CreateThreadWithPropertiesRuntime(props.id, begin_func, end_func));
+    }
+    pub fn create_thread(thread_func: ?*const ThreadFunc, name: [*:0]const u8, userdata: ?*anyopaque) Error!*Thread {
+        return create_thread_with_begin_end(thread_func, name, userdata, null, null);
+    }
+    pub fn create_thread_with_props(props: PropertiesID) Error!*Thread {
+        return create_thread_with_props_begin_end(props, null, null);
+    }
+    pub fn get_name(self: *Thread) Error![*:0]const u8 {
+        return ptr_cast_or_null_err([*:0]const u8, C.SDL_GetThreadName(self.to_c_ptr()));
+    }
+    pub fn get_thread_id(self: *Thread) Error!ThreadID {
+        ThreadID{ .id = try nonzero_or_null_err(C.SDL_GetThreadID(self.to_c_ptr())) };
+    }
+    pub fn get_current_thread_id() Error!ThreadID {
+        return ThreadID{ .id = try nonzero_or_null_err(C.SDL_GetCurrentThreadID()) };
+    }
+    pub fn set_current_thread_priority(priority: ThreadPriority) Error!void {
+        return ok_or_fail_err(C.SDL_SetCurrentThreadPriority(priority.to_c()));
+    }
+    pub fn wait_for_completion(self: *Thread) Error!c_int {
+        var result: c_int = 0;
+        C.SDL_WaitThread(self.to_c_ptr(), &result);
+        return positive_or_invalid_err(result);
+    }
+    pub fn get_thread_state(self: *Thread) ThreadState {
+        return ThreadState.from_c(C.SDL_GetThreadState(self.to_c_ptr()));
+    }
+    pub fn detatch(self: *Thread) void {
+        C.SDL_DetachThread(self.to_c_ptr());
+    }
     pub const CreateProps = struct {
-        //TODO
-        // pub const SDL_PROP_THREAD_CREATE_ENTRY_FUNCTION_POINTER = "SDL.thread.create.entry_function";
-        // pub const SDL_PROP_THREAD_CREATE_NAME_STRING = "SDL.thread.create.name";
-        // pub const SDL_PROP_THREAD_CREATE_USERDATA_POINTER = "SDL.thread.create.userdata";
-        // pub const SDL_PROP_THREAD_CREATE_STACKSIZE_NUMBER = "SDL.thread.create.stacksize";
+        pub const ENTRY_FUNC = Property.new(.POINTER, C.SDL_PROP_THREAD_CREATE_ENTRY_FUNCTION_POINTER);
+        pub const NAME = Property.new(.STRING, C.SDL_PROP_THREAD_CREATE_NAME_STRING);
+        pub const USERDATA = Property.new(.POINTER, C.SDL_PROP_THREAD_CREATE_USERDATA_POINTER);
+        pub const STACK_SIZE = Property.new(.INTEGER, C.SDL_PROP_THREAD_CREATE_STACKSIZE_NUMBER);
     };
 };
 
 pub const ThreadID = extern struct {
-    id: u64 = 0,
-    //TODO
-    // pub extern fn SDL_SetLinuxThreadPriority(threadID: Sint64, priority: c_int) bool;
-    // pub extern fn SDL_SetLinuxThreadPriorityAndPolicy(threadID: Sint64, sdlPriority: c_int, schedPolicy: c_int) bool;
+    id: C.SDL_ThreadID = 0,
+    pub fn set_linux_thread_priority(self: ThreadID, priority: c_int) Error!void {
+        return ok_or_fail_err(C.SDL_SetLinuxThreadPriority(@intCast(self.id), priority));
+    }
+    pub fn set_linux_thread_priority_and_policy(self: ThreadID, priority: c_int, schedule_policy: c_int) Error!void {
+        return ok_or_fail_err(C.SDL_SetLinuxThreadPriorityAndPolicy(@intCast(self.id), priority, schedule_policy));
+    }
 };
 
 pub const Mutex = opaque {
     pub usingnamespace c_opaque_conversions(Mutex, C.SDL_Mutex);
-    //TODO
-    // pub extern fn SDL_CreateMutex() ?*SDL_Mutex;
-    // pub extern fn SDL_LockMutex(mutex: ?*SDL_Mutex) void;
-    // pub extern fn SDL_TryLockMutex(mutex: ?*SDL_Mutex) bool;
-    // pub extern fn SDL_UnlockMutex(mutex: ?*SDL_Mutex) void;
-    // pub extern fn SDL_DestroyMutex(mutex: ?*SDL_Mutex) void;
+    pub fn create() Error!*Mutex {
+        return ptr_cast_or_fail_err(*Mutex, C.SDL_CreateMutex());
+    }
+    pub fn wait_lock(self: *Mutex) void {
+        C.SDL_LockMutex(self.to_c_ptr());
+    }
+    pub fn try_lock(self: *Mutex) bool {
+        return C.SDL_TryLockMutex(self.to_c_ptr());
+    }
+    pub fn unlock(self: *Mutex) void {
+        C.SDL_UnlockMutex(self.to_c_ptr());
+    }
+    pub fn destroy(self: *Mutex) void {
+        C.SDL_DestroyMutex(self.to_c_ptr());
+    }
 };
 
 pub const InitState = extern struct {
@@ -990,10 +1018,15 @@ pub const InitState = extern struct {
     _reserved: ?*anyopaque = null,
 
     pub usingnamespace c_non_opaque_conversions(InitState, C.SDL_InitState);
-    //TODO
-    // pub extern fn SDL_ShouldInit(state: [*c]SDL_InitState) bool;
-    // pub extern fn SDL_ShouldQuit(state: [*c]SDL_InitState) bool;
-    // pub extern fn SDL_SetInitialized(state: [*c]SDL_InitState, initialized: bool) void;
+    pub fn should_init(self: *InitState) bool {
+        return C.SDL_ShouldInit(self.to_c_ptr());
+    }
+    pub fn should_quit(self: *InitState) bool {
+        return C.SDL_ShouldQuit(self.to_c_ptr());
+    }
+    pub fn set_initialized_state(self: *InitState, state: bool) void {
+        return C.SDL_SetInitialized(self.to_c_ptr(), state);
+    }
 };
 
 pub const PropertyCleanupCallback = fn (userdata: ?*anyopaque, value_ptr: ?*anyopaque) callconv(.c) void;
@@ -1086,8 +1119,17 @@ pub const GlobFlags = Flags(enum(u32) {
 
 pub const Filesystem = struct {
     //TODO
-    // pub extern fn SDL_GetBasePath() [*c]const u8;
-    // pub extern fn SDL_GetPrefPath(org: [*c]const u8, app: [*c]const u8) [*c]u8;
+
+    pub fn get_app_executable_directory() Error![*:0]const u8 {
+        return ptr_cast_or_null_err([*:0]const u8, C.SDL_GetBasePath());
+    }
+    pub fn get_user_data_directory(org_name: [*:0]const u8, app_name: [*:0]const u8) Error!AllocatedString {
+        return AllocatedString{ .str = try ptr_cast_or_null_err([*:0]u8, C.SDL_GetPrefPath(org_name, app_name)) };
+    }
+    pub fn get_user_folder(folder_kind: UserFolder) Error!AllocatedString {
+        return ptr_cast_or_null_err([*:0]const u8, C.SDL_GetUserFolder(folder_kind.to_c()));
+    }
+    //CHECKPOINT
     // pub extern fn SDL_GetUserFolder(folder: SDL_Folder) [*c]const u8;
     // pub extern fn SDL_CreateDirectory(path: [*c]const u8) bool;
     // pub extern fn SDL_EnumerateDirectory(path: [*c]const u8, callback: SDL_EnumerateDirectoryCallback, userdata: ?*anyopaque) bool;
@@ -8025,7 +8067,7 @@ pub const Logging = struct {
     // pub extern fn SDL_SetLogOutputFunction(callback: SDL_LogOutputFunction, userdata: ?*anyopaque) void;
 };
 
-pub const LogHandlerFunc = fn (userdata: ?*anyopaque, msg_category: c_int, msg_priority: C.SDL_LogPriority, msg: [*:0]const u8) callconv(.c) void;
+pub const LogHandlerFunc = fn (userdata: ?*anyopaque, msg_category: c_int, msg_priority: LogPriority, msg: [*:0]const u8) callconv(.c) void;
 
 pub const AssertionHandlerReturn = struct {
     func: *const AssertionHandler,

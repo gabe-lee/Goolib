@@ -278,12 +278,25 @@ pub inline fn type_is_float(comptime T: type) bool {
 pub inline fn type_is_int(comptime T: type) bool {
     return @typeInfo(T) == .int or @typeInfo(T) == .comptime_int;
 }
+pub inline fn type_is_numeric(comptime T: type) bool {
+    return @typeInfo(T) == .int or @typeInfo(T) == .comptime_int or @typeInfo(T) == .float or @typeInfo(T) == .comptime_float;
+}
+pub inline fn type_is_unsigned_int(comptime T: type) bool {
+    return @typeInfo(T) == .int and @typeInfo(T).int.signedness == .unsigned;
+}
+pub inline fn type_is_signed_int(comptime T: type) bool {
+    return @typeInfo(T) == .int and @typeInfo(T).int.signedness == .signed;
+}
 pub inline fn type_is_bool(comptime T: type) bool {
     return T == bool;
 }
 pub inline fn type_is_enum(comptime T: type) bool {
     return @typeInfo(T) == .@"enum";
 }
+pub inline fn type_is_struct(comptime T: type) bool {
+    return @typeInfo(T) == .@"struct";
+}
+// pub inline fn all_struct_fields_are_same_type(comptime T: type, comptime T_FIELD: type) bool {}
 
 pub fn is_valid_value_for_enum(comptime ENUM_TYPE: type, int_value: anytype) bool {
     const enum_info = @typeInfo(ENUM_TYPE).@"enum";
@@ -371,88 +384,4 @@ pub fn can_get_ptr_len(comptime ptr_type: type) bool {
         },
         else => return false,
     }
-}
-
-pub inline fn ptr_cast(from: anytype, comptime TO: type) TO {
-    const FROM = @TypeOf(from);
-    const FI = @typeInfo(FROM);
-    const TI = @typeInfo(TO);
-    var raw_addr: usize = 0;
-    switch (FI) {
-        .pointer => |PTR_INFO| switch (PTR_INFO.size) {
-            .slice => raw_addr = @intFromPtr(from.ptr),
-            else => raw_addr = @intFromPtr(from),
-        },
-        .optional => |OPT_INFO| {
-            if (from == null) {
-                raw_addr == 0;
-            } else {
-                const OPT_CHILD_INFO = @typeInfo(OPT_INFO.child);
-                switch (OPT_CHILD_INFO) {
-                    .pointer => |CHILD_PTR_INFO| switch (CHILD_PTR_INFO.size) {
-                        .slice => raw_addr = @intFromPtr(from.?.ptr),
-                        else => raw_addr = @intFromPtr(from.?),
-                    },
-                    .int => |INT_INFO| {
-                        assert_with_reason(INT_INFO.signedness == .unsigned and INT_INFO.bits == @bitSizeOf(usize), @src(), @This(), "integers must be unsigned and the exact same size as `usize`", .{});
-                        raw_addr = @intCast(from.?);
-                    },
-                    else => assert_with_reason(false, @src(), @This(), "cannot convert from type {s}", .{@typeName(FROM)}),
-                }
-            }
-        },
-        .int => |INT_INFO| {
-            assert_with_reason(INT_INFO.signedness == .unsigned and INT_INFO.bits == @bitSizeOf(usize), @src(), @This(), "integers must be unsigned and the exact same size as `usize`", .{});
-            raw_addr = @intCast(from);
-        },
-        else => assert_with_reason(false, @src(), @This(), "cannot convert from type {s}", .{@typeName(FROM)}),
-    }
-    switch (TI) {
-        .pointer => |PTR_INFO| switch (PTR_INFO.size) {
-            .slice => {
-                assert_with_reason(mem.isAligned(raw_addr, PTR_INFO.alignment), @src(), @This(), "address {d} was not aligned to required alignment for type {s} ({d})", .{ raw_addr, @typeName(TO), PTR_INFO.alignment });
-                var to: TO = undefined;
-                to.ptr = @ptrFromInt(raw_addr);
-                to.len = 0;
-                return to;
-            },
-            else => {
-                assert_with_reason(mem.isAligned(raw_addr, PTR_INFO.alignment), @src(), @This(), "address {d} was not aligned to required alignment for type {s} ({d})", .{ raw_addr, @typeName(TO), PTR_INFO.alignment });
-                return @ptrFromInt(raw_addr);
-            },
-        },
-        .optional => |OPT_INFO| {
-            if (raw_addr == 0) {
-                return null;
-            } else {
-                const OPT_CHILD_INFO = @typeInfo(OPT_INFO.child);
-                switch (OPT_CHILD_INFO) {
-                    .pointer => |CHILD_PTR_INFO| switch (CHILD_PTR_INFO.size) {
-                        .slice => {
-                            assert_with_reason(mem.isAligned(raw_addr, CHILD_PTR_INFO.alignment), @src(), @This(), "address {d} was not aligned to required alignment for type {s} ({d})", .{ raw_addr, @typeName(TO), CHILD_PTR_INFO.alignment });
-                            var to: TO = undefined;
-                            to.ptr = @ptrFromInt(raw_addr);
-                            to.len = 0;
-                            return to;
-                        },
-                        else => {
-                            assert_with_reason(mem.isAligned(raw_addr, CHILD_PTR_INFO.alignment), @src(), @This(), "address {d} was not aligned to required alignment for type {s} ({d})", .{ raw_addr, @typeName(TO), CHILD_PTR_INFO.alignment });
-                            return @ptrFromInt(raw_addr);
-                        },
-                    },
-                    .int => |INT_INFO| {
-                        assert_with_reason(INT_INFO.signedness == .unsigned and INT_INFO.bits == @bitSizeOf(usize), @src(), @This(), "integers must be unsigned and the exact same size as `usize`", .{});
-                        return @intCast(raw_addr);
-                    },
-                    else => assert_with_reason(false, @src(), @This(), "cannot convert into type {s}", .{@typeName(TO)}),
-                }
-            }
-        },
-        .int => |INT_INFO| {
-            assert_with_reason(INT_INFO.signedness == .unsigned and INT_INFO.bits == @bitSizeOf(usize), @src(), @This(), "integers must be unsigned and the exact same size as `usize`", .{});
-            return @intCast(raw_addr);
-        },
-        else => assert_with_reason(false, @src(), @This(), "cannot convert into type {s}", .{@typeName(TO)}),
-    }
-    unreachable;
 }

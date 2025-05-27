@@ -22,7 +22,6 @@
 const std = @import("std");
 const builtin = std.builtin;
 const SourceLocation = builtin.SourceLocation;
-const assert = std.debug.assert;
 const build = @import("builtin");
 
 const Root = @import("./_root.zig");
@@ -64,6 +63,8 @@ pub inline fn assert_with_reason(condition: bool, comptime src_loc: ?SourceLocat
             unreachable;
         }
     } else {
-        assert(condition);
+        if (!condition) {
+            unreachable;
+        }
     }
 }
