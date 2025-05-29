@@ -1,6 +1,8 @@
 //! //TODO Documentation
 //! #### License: Zlib
 
+// zlib license
+//
 // Copyright (c) 2025, Gabriel Lee Anderson <gla.ander@gmail.com>
 //
 // This software is provided 'as-is', without any express or implied
@@ -308,4 +310,11 @@ pub fn memcopy(from_src: anytype, to_dst: anytype, count: usize) void {
         }
     } else @compileError("memcopy `to_dst` must be a mutable pointer type");
     @memcpy(raw_to[0..raw_count], raw_from[0..raw_count]);
+}
+
+pub inline fn matches_any(comptime T: type, val: T, set: []const T) bool {
+    for (set) |item| {
+        if (val == item) return true;
+    }
+    return false;
 }

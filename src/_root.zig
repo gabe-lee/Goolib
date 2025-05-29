@@ -1,6 +1,8 @@
 //! //TODO Documentation
 //! #### License: Zlib
 
+// zlib license
+//
 // Copyright (c) 2025, Gabriel Lee Anderson <gla.ander@gmail.com>
 //
 // This software is provided 'as-is', without any express or implied
@@ -42,6 +44,7 @@ pub const DummyAllocator = @import("./DummyAllocator.zig");
 pub const EnumMap = @import("./EnumMap.zig");
 // pub const Filegen = @import("./Filegen.zig");
 pub const Flags = @import("./Flags.zig");
+pub const FlexSlice = @import("./FlexSlice.zig");
 // pub const Format = @import("./Format.zig");
 pub const InsertionSort = @import("./InsertionSort.zig");
 pub const List = @import("./List.zig");
@@ -51,7 +54,6 @@ pub const Reader = @import("./Reader.zig");
 pub const Rect2 = @import("./Rect2.zig");
 // pub const ReturnWrappers = @import("./ReturnWrappers.zig");
 pub const SDL3 = @import("./SDL3.zig");
-pub const Slice = @import("./Slice.zig");
 
 // pub const StaticAllocVectorizedStructOfArrays = @import("./StaticAllocVectorizedStructOfArrays.zig");
 // pub const Template = @import("./Template.zig");
@@ -81,6 +83,8 @@ comptime {
         _ = @import("./EnumMap.zig");
         // _ = @import("./Filegen.zig");
         _ = @import("./Flags.zig");
+        _ = @import("./FlexSlice.zig");
+
         // _ = @import("./Format.zig");
         _ = @import("./InsertionSort.zig");
         _ = @import("./List.zig");
@@ -89,7 +93,6 @@ comptime {
         _ = @import("./Reader.zig");
         _ = @import("./Rect2.zig");
         _ = @import("./SDL3.zig");
-        _ = @import("./Slice.zig");
         // _ = @import("./ReturnWrappers.zig");
 
         // _ = @import("./StaticAllocVectorizedStructOfArrays.zig");

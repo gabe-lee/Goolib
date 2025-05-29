@@ -4,6 +4,8 @@
 //! - SDL3: (Zlib) https://github.com/libsdl-org/SDL/blob/main/LICENSE.txt
 //! - SDL3 Zig Bindings: (Multi) https://github.com/castholm/SDL/blob/main/LICENSE.txt
 
+// zlib license
+//
 // Copyright (c) 2025, Gabriel Lee Anderson <gla.ander@gmail.com>
 //
 // This software is provided 'as-is', without any express or implied
@@ -32,7 +34,6 @@ const Root = @import("./_root.zig");
 const VERSION = Root.VERSION;
 const Types = Root.Types;
 const Flags = Root.Flags.Flags;
-const FlagGroups = Root.Flags.Groups;
 const Utils = Root.Utils;
 const Assert = Root.Assert;
 const assert_with_reason = Assert.assert_with_reason;
@@ -1578,30 +1579,23 @@ pub const HapticEffect = extern union {
     pub const INFINITE_DURATION: u32 = C.SDL_HAPTIC_INFINITY;
 };
 
-pub const HapticType = Flags(enum(u16) {
-    CONSTANT = C.SDL_HAPTIC_CONSTANT,
-    SINE = C.SDL_HAPTIC_SINE,
-    SQUARE = C.SDL_HAPTIC_SQUARE,
-    TRIANGLE = C.SDL_HAPTIC_TRIANGLE,
-    SAWTOOTHUP = C.SDL_HAPTIC_SAWTOOTHUP,
-    SAWTOOTHDOWN = C.SDL_HAPTIC_SAWTOOTHDOWN,
-    RAMP = C.SDL_HAPTIC_RAMP,
-    SPRING = C.SDL_HAPTIC_SPRING,
-    DAMPER = C.SDL_HAPTIC_DAMPER,
-    INERTIA = C.SDL_HAPTIC_INERTIA,
-    FRICTION = C.SDL_HAPTIC_FRICTION,
-    DUAL_MOTOR = C.SDL_HAPTIC_LEFTRIGHT,
-    CUSTOM = C.SDL_HAPTIC_CUSTOM,
-}, FlagGroups{
-    .group_names_enum = enum(u8) {
-        CONSTANT,
-        PERIODIC,
-        RAMP,
-        CONDITION,
-        DUAL_MOTOR,
-        CUSTOM,
+pub const HapticType = Flags(
+    enum(u16) {
+        CONSTANT = C.SDL_HAPTIC_CONSTANT,
+        SINE = C.SDL_HAPTIC_SINE,
+        SQUARE = C.SDL_HAPTIC_SQUARE,
+        TRIANGLE = C.SDL_HAPTIC_TRIANGLE,
+        SAWTOOTHUP = C.SDL_HAPTIC_SAWTOOTHUP,
+        SAWTOOTHDOWN = C.SDL_HAPTIC_SAWTOOTHDOWN,
+        RAMP = C.SDL_HAPTIC_RAMP,
+        SPRING = C.SDL_HAPTIC_SPRING,
+        DAMPER = C.SDL_HAPTIC_DAMPER,
+        INERTIA = C.SDL_HAPTIC_INERTIA,
+        FRICTION = C.SDL_HAPTIC_FRICTION,
+        DUAL_MOTOR = C.SDL_HAPTIC_LEFTRIGHT,
+        CUSTOM = C.SDL_HAPTIC_CUSTOM,
     },
-    .group_vals_enum = enum(u16) {
+    enum(u16) {
         CONSTANT = C.SDL_HAPTIC_CONSTANT,
         PERIODIC = C.SDL_HAPTIC_SINE | C.SDL_HAPTIC_SINE | C.SDL_HAPTIC_SQUARE | C.SDL_HAPTIC_TRIANGLE | C.SDL_HAPTIC_SAWTOOTHUP | C.SDL_HAPTIC_SAWTOOTHDOWN,
         RAMP = C.SDL_HAPTIC_RAMP,
@@ -1609,7 +1603,7 @@ pub const HapticType = Flags(enum(u16) {
         DUAL_MOTOR = C.SDL_HAPTIC_LEFTRIGHT,
         CUSTOM = C.SDL_HAPTIC_CUSTOM,
     },
-});
+);
 
 pub const HapticFeatures = Flags(enum(c_uint) {
     CONSTANT = C.SDL_HAPTIC_CONSTANT,

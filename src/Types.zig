@@ -1,6 +1,8 @@
 //! //TODO Documentation
 //! #### License: Zlib
 
+// zlib license
+//
 // Copyright (c) 2025, Gabriel Lee Anderson <gla.ander@gmail.com>
 //
 // This software is provided 'as-is', without any express or implied
@@ -296,6 +298,10 @@ pub inline fn type_is_enum(comptime T: type) bool {
 pub inline fn type_is_struct(comptime T: type) bool {
     return @typeInfo(T) == .@"struct";
 }
+pub inline fn type_is_void(comptime T: type) bool {
+    return @typeInfo(T) == .void;
+}
+
 // pub inline fn all_struct_fields_are_same_type(comptime T: type, comptime T_FIELD: type) bool {}
 
 pub fn is_valid_value_for_enum(comptime ENUM_TYPE: type, int_value: anytype) bool {
@@ -367,6 +373,7 @@ pub fn get_ptr_len(ptr: anytype) usize {
         else => assert_with_reason(false, @src(), @This(), "`ptr` must be a pointer type, got type {s}", .{@typeName(T)}),
     }
 }
+
 pub fn can_get_ptr_len(comptime ptr_type: type) bool {
     const T = ptr_type;
     const I = @typeInfo(T);
@@ -384,4 +391,16 @@ pub fn can_get_ptr_len(comptime ptr_type: type) bool {
         },
         else => return false,
     }
+}
+
+pub inline fn union_tag_type(comptime T: type) type {
+    const TI = @typeInfo(T);
+    assert_with_reason(TI == .@"union", @src(), @This(), "`T` must be a union type", .{});
+    const U_INFO = TI.@"union";
+    assert_with_reason(U_INFO.tag_type != null, @src(), @This(), "union type `{s}` has no defined tag type", .{@typeName(T)});
+    return U_INFO.tag_type.?;
+}
+
+pub inline fn union_tag(union_val: anytype) union_tag_type(@TypeOf(union_val)) {
+    return @enumFromInt(@intFromEnum(union_val));
 }

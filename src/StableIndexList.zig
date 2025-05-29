@@ -33,8 +33,6 @@ const ArrayList = std.ArrayListUnmanaged;
 const Type = std.builtin.Type;
 
 const Root = @import("./_root.zig");
-const Assert = Root.Assert;
-const assert_with_reason = Assert.assert_with_reason;
 const FlexSlice = Root.FlexSlice.FlexSlice;
 const Mutability = Root.CommonTypes.Mutability;
 const Quicksort = Root.Quicksort;
@@ -150,7 +148,6 @@ pub const Impl = struct {
     }
 
     pub fn from_owned_slice(comptime List: type, from_slice: List.Slice) List {
-        assert_with_reason(!List.IS_LINKED_LIST, @src(), @This(), "cannot rebuild a linked list from a slice", .{});
         return List{
             .ptr = from_slice.ptr,
             .len = from_slice.len,
@@ -159,7 +156,6 @@ pub const Impl = struct {
     }
 
     pub fn from_owned_slice_sentinel(comptime List: type, comptime sentinel: List.Elem, from_slice: [:sentinel]List.Elem) List {
-        assert_with_reason(!List.IS_LINKED_LIST, @src(), @This(), "cannot rebuild a linked list from a slice", .{});
         return List{
             .ptr = from_slice.ptr,
             .len = from_slice.len,
@@ -771,9 +767,9 @@ pub const Impl = struct {
     }
 };
 
-pub fn define_manually_managed_list_type(comptime options: ListOptions) type {
+pub fn define_manually_managed_list_type(comptime base_options: ListOptions) type {
     const opt = comptime check: {
-        var opts = options;
+        var opts = base_options;
         if (opts.alignment) |a| {
             if (a == @alignOf(opts.T)) {
                 opts.alignment = null;
@@ -790,19 +786,23 @@ pub fn define_manually_managed_list_type(comptime options: ListOptions) type {
         len: Idx = 0,
         cap: Idx = 0,
 
-        pub const ALIGN = options.alignment;
-        pub const ALLOC_ERROR_BEHAVIOR = options.alloc_error_behavior;
-        pub const GROWTH = options.growth_model;
-        pub const RETURN_ERRORS = options.alloc_error_behavior == .ALLOCATION_ERRORS_RETURN_ERROR;
-        pub const SECURE_WIPE = options.secure_wipe_bytes;
+        pub const ALIGN = base_options.alignment;
+        pub const ALLOC_ERROR_BEHAVIOR = base_options.alloc_error_behavior;
+        pub const GROWTH = base_options.growth_model;
+        pub const RETURN_ERRORS = base_options.alloc_error_behavior == .ALLOCATION_ERRORS_RETURN_ERROR;
+        pub const SECURE_WIPE = base_options.secure_wipe_bytes;
         pub const UNINIT_PTR: Ptr = @ptrFromInt(if (ALIGN) |a| mem.alignBackward(usize, math.maxInt(usize), @intCast(a)) else mem.alignBackward(usize, math.maxInt(usize), @alignOf(Elem)));
         pub const ATOMIC_PADDING = @as(comptime_int, @max(1, std.atomic.cache_line / @sizeOf(Elem)));
-        pub const EMPTY = List{};
+        pub const EMPTY = List{
+            .ptr = UNINIT_PTR,
+            .len = 0,
+            .cap = 0,
+        };
 
         const List = @This();
         pub const Error = Allocator.Error;
-        pub const Elem = options.element_type;
-        pub const Idx = options.index_type;
+        pub const Elem = base_options.element_type;
+        pub const Idx = base_options.index_type;
         pub const Ptr = if (ALIGN) |a| [*]align(a) Elem else [*]Elem;
         pub const Slice = if (ALIGN) |a| ([]align(a) Elem) else []Elem;
         pub fn SentinelSlice(comptime sentinel: Elem) type {
@@ -2001,7 +2001,7 @@ pub fn define_cached_allocator_list_type(comptime base_options: ListOptions) typ
     };
 }
 
-test "List.zig" {
+test "StableINdexList.zig" {
     const t = std.testing;
     const alloc = std.heap.page_allocator;
     const base_opts = ListOptions{

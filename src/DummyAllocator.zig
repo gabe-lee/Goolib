@@ -1,6 +1,8 @@
 //! //TODO Documentation
 //! #### License: Zlib
 
+// zlib license
+//
 // Copyright (c) 2025, Gabriel Lee Anderson <gla.ander@gmail.com>
 //
 // This software is provided 'as-is', without any express or implied

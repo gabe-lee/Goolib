@@ -1,6 +1,8 @@
 //! //TODO Documentation
 //! #### License: Zlib
 
+// zlib license
+//
 // Copyright (c) 2025, Gabriel Lee Anderson <gla.ander@gmail.com>
 //
 // This software is provided 'as-is', without any express or implied
@@ -31,13 +33,16 @@ const Types = Root.Types;
 const Assert = Root.Assert;
 const assert_with_reason = Assert.assert_with_reason;
 
-pub fn Flags(comptime FLAGS_ENUM: type, comptime GROUPS_OR_NULL: ?Groups) type {
+pub fn Flags(comptime FLAGS_ENUM: type, comptime GROUPS_OR_NULL: ?type) type {
     const INFO_1 = @typeInfo(FLAGS_ENUM);
     assert_with_reason(INFO_1 == .@"enum", @src(), @This(), "parameter `FLAGS_ENUM` must be an enum type", .{});
     const E_INFO = INFO_1.@"enum";
     assert_with_reason(@typeInfo(E_INFO.tag_type).int.signedness == .unsigned, @src(), @This(), "parameter `FLAGS_ENUM` tag type must be an unsigned integer type", .{});
-    const GROUPS = if (GROUPS_OR_NULL) |groups_struct| BuildGroups(groups_struct) else BuildGroups(Groups.none(FLAGS_ENUM));
-    assert_with_reason(GROUPS.ValRaw == E_INFO.tag_type, @src(), @This(), "parameter `GROUPS_OR_NULL.group_vals_enum` tag type must be the same as param `FLAGS_ENUM` tag type", .{});
+    const GROUPS = if (GROUPS_OR_NULL) |groups_type| groups_type else enum(E_INFO.tag_type) {};
+    const INFO_2 = @typeInfo(GROUPS);
+    assert_with_reason(INFO_2 == .@"enum", @src(), @This(), "parameter `GROUPS_OR_NULL` must be `null` or an enum type", .{});
+    const G_INFO = INFO_2.@"enum";
+    assert_with_reason(G_INFO.tag_type == E_INFO.tag_type, @src(), @This(), "parameter `GROUPS_OR_NULL` (if not null) must have the exact same tag type as `FLAGS_ENUM`", .{});
     const F: E_INFO.tag_type = @as(E_INFO.tag_type, @bitCast(math.maxInt(meta.Int(.unsigned, @bitSizeOf(E_INFO.tag_type)))));
     const A: E_INFO.tag_type = combine: {
         if (!E_INFO.is_exhaustive) break :combine F;
@@ -47,8 +52,8 @@ pub fn Flags(comptime FLAGS_ENUM: type, comptime GROUPS_OR_NULL: ?Groups) type {
         }
         break :combine a;
     };
-    for (GROUPS.BITS[0..], 0..) |bits, idx| {
-        assert_with_reason(bits & ~A == 0, @src(), @This(), "group `{s}` has invalid bits for flags enum:\nbits to set = {b:0>64}\nvalid range = {b:0>64}\ninvalid pos = {b:0>64}bits to set = {b:0>64}\nvalid range = {b:0>64}\ninvalid pos = {b:0>64}", .{ GROUPS.tag_name_from_idx(idx), bits, A, bits & ~A });
+    for (G_INFO.fields) |group_field| {
+        assert_with_reason(group_field.value & ~A == 0, @src(), @This(), "group `{s}` has invalid bits for flags enum:\nbits to set = {b:0>64}\nvalid range = {b:0>64}\ninvalid pos = {b:0>64}", .{ group_field.name, group_field.value, A, group_field.value & ~A });
     }
     return packed struct {
         raw: RawInt = 0,
@@ -58,16 +63,25 @@ pub fn Flags(comptime FLAGS_ENUM: type, comptime GROUPS_OR_NULL: ?Groups) type {
         pub const BitIndex = Log2Int(RawInt);
         pub const BitCount = Log2IntCeil(RawInt);
         pub const Flag = FLAGS_ENUM;
-        pub const GroupsInfo = GROUPS;
-        pub const Group = GroupsInfo.Name;
+        pub const Group = GROUPS;
         pub const ALL = Self{ .raw = A };
         const FULL = F;
         const NEEDS_VALID_ASSERT = ALL != FULL;
 
-        fn assert_valid_bits(raw: RawInt) void {
+        inline fn assert_valid_bits(raw: RawInt) void {
             if (NEEDS_VALID_ASSERT) {
                 assert_with_reason(raw & ~ALL == 0, @src(), @This(), "invalid bits for flags type {s}:\nbits to set = {b:0>64}\nvalid range = {b:0>64}\ninvalid pos = {b:0>64}", .{ @typeName(Self), raw, ALL, raw & ~ALL });
             }
+        }
+
+        inline fn bits(flag_or_group: anytype) RawInt {
+            return @intFromEnum(flag_or_group);
+        }
+        inline fn inv_bits(flag_or_group: anytype) RawInt {
+            return ~@intFromEnum(flag_or_group);
+        }
+        inline fn ctz(flag_or_group: anytype) BitCount {
+            return @ctz(@intFromEnum(flag_or_group));
         }
 
         pub inline fn blank() Self {
@@ -117,7 +131,7 @@ pub fn Flags(comptime FLAGS_ENUM: type, comptime GROUPS_OR_NULL: ?Groups) type {
         }
 
         pub inline fn set(self: *Self, flag: Flag) void {
-            self.raw |= @intFromEnum(flag);
+            self.raw |= bits(flag);
         }
         pub inline fn set_raw(self: *Self, raw: RawInt) void {
             assert_valid_bits(raw);
@@ -128,9 +142,9 @@ pub fn Flags(comptime FLAGS_ENUM: type, comptime GROUPS_OR_NULL: ?Groups) type {
             assert_valid_bits(raw);
             self.raw |= raw;
         }
-        pub inline fn set_many(self: *Self, flags_: []const Flag) void {
-            for (flags_) |flag_| {
-                self.raw |= @intFromEnum(flag_);
+        pub inline fn set_many(self: *Self, flags: []const Flag) void {
+            for (flags) |flag| {
+                self.raw |= bits(flag);
             }
         }
         pub inline fn set_many_raw(self: *Self, raws: []const RawInt) void {
@@ -150,34 +164,34 @@ pub fn Flags(comptime FLAGS_ENUM: type, comptime GROUPS_OR_NULL: ?Groups) type {
             self.raw = composite;
         }
 
-        pub inline fn clear_group_then_set(self: *Self, group: Group, flag_: Flag) void {
-            self.raw &= GroupsInfo.inverse_bits(group);
-            self.raw |= @intFromEnum(flag_);
+        pub inline fn clear_group_then_set(self: *Self, group: Group, flag: Flag) void {
+            self.raw &= inv_bits(group);
+            self.raw |= bits(flag);
         }
-        pub inline fn clear_group_then_set_many(self: *Self, group: Group, flags_: []const Flag) void {
-            self.raw &= GroupsInfo.inverse_bits(group);
-            for (flags_) |flag_| {
-                self.raw |= @intFromEnum(flag_);
+        pub inline fn clear_group_then_set_many(self: *Self, group: Group, flags: []const Flag) void {
+            self.raw &= inv_bits(group);
+            for (flags) |flag| {
+                self.raw |= bits(flag);
             }
         }
-        pub inline fn clear_many_groups_then_set_many(self: *Self, groups: []const Group, flags_: []const Flag) void {
+        pub inline fn clear_many_groups_then_set_many(self: *Self, groups: []const Group, flags: []const Flag) void {
             for (groups) |group| {
-                self.raw &= GroupsInfo.inverse_bits(group);
+                self.raw &= inv_bits(group);
             }
-            for (flags_) |flag_| {
-                self.raw |= @intFromEnum(flag_);
+            for (flags) |flag| {
+                self.raw |= bits(flag);
             }
         }
 
         pub inline fn clear_all(self: *Self) void {
             self.raw = 0;
         }
-        pub inline fn clear(self: *Self, flag_: Flag) void {
-            self.raw &= ~@intFromEnum(flag_);
+        pub inline fn clear(self: *Self, flag: Flag) void {
+            self.raw &= inv_bits(flag);
         }
-        pub inline fn clear_many(self: *Self, flags_: []const Flag) void {
-            for (flags_) |flag_| {
-                self.raw &= ~@intFromEnum(flag_);
+        pub inline fn clear_many(self: *Self, flags: []const Flag) void {
+            for (flags) |flag| {
+                self.raw &= inv_bits(flag);
             }
         }
         pub inline fn clear_raw(self: *Self, raw: RawInt) void {
@@ -200,32 +214,73 @@ pub fn Flags(comptime FLAGS_ENUM: type, comptime GROUPS_OR_NULL: ?Groups) type {
             }
             self.raw &= ~composite;
         }
-        pub inline fn has_flag(self: Self, flag_: Flag) bool {
-            return self.raw & @intFromEnum(flag_) == @intFromEnum(flag_);
+        pub inline fn has_flag(self: Self, flag: Flag) bool {
+            return self.raw & bits(flag) == bits(flag);
         }
-        pub inline fn has_only_flag(self: Self, flag_: Flag) bool {
-            return self.raw == @intFromEnum(flag_);
+        pub inline fn has_only_this_flag(self: Self, flag: Flag) bool {
+            return self.raw == bits(flag);
         }
-        pub inline fn has_all_flags(self: Self, flags_: []const Flag) bool {
+        pub inline fn has_all_flags(self: Self, flags: []const Flag) bool {
             var composite: RawInt = 0;
-            for (flags_) |flag_| {
-                composite |= @intFromEnum(flag_);
+            for (flags) |flag| {
+                composite |= bits(flag);
             }
             return self.raw & composite == composite;
         }
-        pub inline fn has_only_these_flags(self: Self, flags_: []const Flag) bool {
+        pub inline fn has_only_these_flags(self: Self, flags: []const Flag) bool {
             var composite: RawInt = 0;
-            for (flags_) |flag_| {
-                composite |= @intFromEnum(flag_);
+            for (flags) |flag| {
+                composite |= bits(flag);
             }
             return self.raw == composite;
         }
-        pub inline fn has_none_of_these_flags(self: Self, flags_: []const Flag) bool {
+        pub inline fn has_none_of_these_flags(self: Self, flags: []const Flag) bool {
             var composite: RawInt = 0;
-            for (flags_) |flag_| {
-                composite |= @intFromEnum(flag_);
+            for (flags) |flag| {
+                composite |= bits(flag);
             }
             return self.raw & composite == 0;
+        }
+        pub inline fn has_any_of_these_flags(self: Self, flags: []const Flag) bool {
+            var composite: RawInt = 0;
+            for (flags) |flag| {
+                composite |= bits(flag);
+            }
+            return self.raw & composite > 0;
+        }
+        pub inline fn has_flag_in_group(self: Self, flag: Flag, group: Group) bool {
+            return self.raw & bits(group) & bits(flag) == bits(flag);
+        }
+        pub inline fn has_only_flag_in_group(self: Self, flag: Flag, group: Group) bool {
+            return self.raw & bits(group) == bits(flag);
+        }
+        pub inline fn has_all_flags_in_group(self: Self, flags: []const Flag, group: Group) bool {
+            var composite: RawInt = 0;
+            for (flags) |flag| {
+                composite |= bits(flag);
+            }
+            return self.raw & bits(group) & composite == composite;
+        }
+        pub inline fn has_only_these_flags_in_group(self: Self, flags: []const Flag, group: Group) bool {
+            var composite: RawInt = 0;
+            for (flags) |flag| {
+                composite |= bits(flag);
+            }
+            return self.raw & bits(group) == composite;
+        }
+        pub inline fn has_none_of_these_flags_in_group(self: Self, flags: []const Flag, group: Group) bool {
+            var composite: RawInt = 0;
+            for (flags) |flag| {
+                composite |= bits(flag);
+            }
+            return self.raw & bits(group) & composite == 0;
+        }
+        pub inline fn has_any_of_these_flags_in_group(self: Self, flags: []const Flag, group: Group) bool {
+            var composite: RawInt = 0;
+            for (flags) |flag| {
+                composite |= bits(flag);
+            }
+            return self.raw & bits(group) & composite > 0;
         }
         pub inline fn has_raw(self: Self, raw: RawInt) bool {
             return self.raw & raw == raw;
@@ -254,7 +309,47 @@ pub fn Flags(comptime FLAGS_ENUM: type, comptime GROUPS_OR_NULL: ?Groups) type {
             }
             return self.raw & composite == 0;
         }
-
+        pub inline fn has_any_of_these_raws(self: Self, raws: []const RawInt) bool {
+            var composite: RawInt = 0;
+            for (raws) |raw| {
+                composite |= raw;
+            }
+            return self.raw & composite > 0;
+        }
+        pub inline fn has_raw_in_group(self: Self, raw: RawInt, group: Group) bool {
+            return self.raw & bits(group) & raw == raw;
+        }
+        pub inline fn has_only_raw_in_group(self: Self, raw: RawInt, group: Group) bool {
+            return self.raw & bits(group) == raw;
+        }
+        pub inline fn has_all_raws_in_group(self: Self, raws: []const RawInt, group: Group) bool {
+            var composite: RawInt = 0;
+            for (raws) |raw| {
+                composite |= raw;
+            }
+            return self.raw & bits(group) & composite == composite;
+        }
+        pub inline fn has_only_these_raws_in_group(self: Self, raws: []const RawInt, group: Group) bool {
+            var composite: RawInt = 0;
+            for (raws) |raw| {
+                composite |= raw;
+            }
+            return self.raw & bits(group) == composite;
+        }
+        pub inline fn has_none_of_these_raws_in_group(self: Self, raws: []const RawInt, group: Group) bool {
+            var composite: RawInt = 0;
+            for (raws) |raw| {
+                composite |= raw;
+            }
+            return self.raw & bits(group) & composite == 0;
+        }
+        pub inline fn has_any_of_these_raws_in_group(self: Self, raws: []const RawInt, group: Group) bool {
+            var composite: RawInt = 0;
+            for (raws) |raw| {
+                composite |= raw;
+            }
+            return self.raw & bits(group) & composite > 0;
+        }
         pub inline fn has_bit(self: Self, bit_index: BitIndex) bool {
             const bit = (@as(RawInt, 1) << bit_index);
             return self.raw & bit == bit;
@@ -284,272 +379,153 @@ pub fn Flags(comptime FLAGS_ENUM: type, comptime GROUPS_OR_NULL: ?Groups) type {
             }
             return self.raw & composite == 0;
         }
-
+        pub inline fn has_any_of_these_bits(self: Self, bit_indexes: []const BitIndex) bool {
+            var composite: RawInt = 0;
+            for (bit_indexes) |index| {
+                composite |= (@as(RawInt, 1) << index);
+            }
+            return self.raw & composite > 0;
+        }
+        pub inline fn has_bit_in_group(self: Self, bit_index: BitIndex, group: Group) bool {
+            const bit = (@as(RawInt, 1) << bit_index);
+            return self.raw & bits(group) & bit == bit;
+        }
+        pub inline fn has_only_bit_in_group(self: Self, bit_index: BitIndex, group: Group) bool {
+            const bit = (@as(RawInt, 1) << bit_index);
+            return self.raw & bits(group) == bit;
+        }
+        pub inline fn has_all_bits_in_group(self: Self, bit_indexes: []const BitIndex, group: Group) bool {
+            var composite: RawInt = 0;
+            for (bit_indexes) |index| {
+                composite |= (@as(RawInt, 1) << index);
+            }
+            return self.raw & bits(group) & composite == composite;
+        }
+        pub inline fn has_only_these_bits_in_group(self: Self, bit_indexes: []const BitIndex, group: Group) bool {
+            var composite: RawInt = 0;
+            for (bit_indexes) |index| {
+                composite |= (@as(RawInt, 1) << index);
+            }
+            return self.raw & bits(group) == composite;
+        }
+        pub inline fn has_none_of_these_bits_in_group(self: Self, bit_indexes: []const BitIndex, group: Group) bool {
+            var composite: RawInt = 0;
+            for (bit_indexes) |index| {
+                composite |= (@as(RawInt, 1) << index);
+            }
+            return self.raw & bits(group) & composite == 0;
+        }
+        pub inline fn has_any_bits_in_group(self: Self, bit_indexes: []const BitIndex, group: Group) bool {
+            var composite: RawInt = 0;
+            for (bit_indexes) |index| {
+                composite |= (@as(RawInt, 1) << index);
+            }
+            return self.raw & bits(group) & composite > 0;
+        }
         pub inline fn isolate_group(self: Self, group: Group) Self {
-            return Self{ .raw = self.raw & GroupsInfo.bits(group) };
+            return Self{ .raw = self.raw & bits(group) };
         }
         pub inline fn isolate_group_as_int_aligned_to_bit_0(self: Self, group: Group) RawInt {
-            return (self.raw & GroupsInfo.bits(group)) >> GroupsInfo.ctz(group);
+            return (self.raw & bits(group)) >> ctz(group);
         }
         pub inline fn clear_group(self: *Self, group: Group) void {
-            self.raw &= GroupsInfo.inverse_bits(group);
+            self.raw &= inv_bits(group);
         }
         pub inline fn set_entire_group(self: *Self, group: Group) void {
-            self.raw |= GroupsInfo.bits(group);
+            self.raw |= bits(group);
         }
         pub inline fn has_entire_group_set(self: Self, group: Group) bool {
-            const group_bits = GroupsInfo.bits(group);
+            const group_bits = bits(group);
             return self.raw & group_bits == group_bits;
         }
         pub inline fn has_only_this_entire_group_set(self: Self, group: Group) bool {
-            const group_bits = GroupsInfo.bits(group);
+            const group_bits = bits(group);
             return self.raw == group_bits;
         }
         pub inline fn has_any_flag_in_group_set(self: Self, group: Group) bool {
-            return self.raw & GroupsInfo.bits(group) > 0;
+            return self.raw & bits(group) > 0;
         }
         pub inline fn has_any_flag_in_only_this_group_set(self: Self, group: Group) bool {
-            return (self.raw & GroupsInfo.bits(group) > 0) and (self.raw & GroupsInfo.inverse_bits(group) == 0);
+            return (self.raw & bits(group) > 0) and (self.raw & inv_bits(group) == 0);
         }
         pub inline fn has_no_flags_outside_this_group_set(self: Self, group: Group) bool {
-            return self.raw & GroupsInfo.inverse_bits(group) == 0;
+            return self.raw & inv_bits(group) == 0;
         }
         pub inline fn set_group_from_int_aligned_at_bit_0(self: *Self, group: Group, val: RawInt) void {
-            const masked_val = ((val) << GroupsInfo.ctz(group)) & GroupsInfo.bits(group);
+            const masked_val = ((val) << ctz(group)) & bits(group);
             self.raw |= masked_val;
         }
         pub inline fn clear_and_set_group_from_int_aligned_at_bit_0(self: *Self, group: Group, val: RawInt) void {
-            self.raw &= GroupsInfo.inverse_bits(group);
-            const masked_val = ((val) << GroupsInfo.ctz(group)) & GroupsInfo.bits(group);
+            self.raw &= inv_bits(group);
+            const masked_val = ((val) << ctz(group)) & bits(group);
             self.raw |= masked_val;
         }
         pub inline fn partial_clear_group_from_inverse_of_int_aligned_at_bit_0(self: *Self, group: Group, val: RawInt) void {
-            const masked_val = ((val) << GroupsInfo.ctz(group)) & GroupsInfo.bits(group);
+            const masked_val = ((val) << ctz(group)) & bits(group);
             self.raw &= ~masked_val;
         }
         pub inline fn set_group_from_int_aligned_at_bit_0_dont_mask(self: *Self, group: Group, val: RawInt) void {
-            const unmasked_val = ((val) << GroupsInfo.ctz(group));
+            const unmasked_val = ((val) << ctz(group));
             self.raw |= unmasked_val;
         }
         pub inline fn clear_and_set_group_from_int_aligned_at_bit_0_dont_mask(self: *Self, group: Group, val: RawInt) void {
-            self.raw &= GroupsInfo.inverse_bits(group);
-            const unmasked_val = ((val) << GroupsInfo.ctz(group));
+            self.raw &= inv_bits(group);
+            const unmasked_val = ((val) << ctz(group));
             self.raw |= unmasked_val;
         }
         pub inline fn partial_clear_group_from_inverse_of_int_aligned_at_bit_0_dont_mask(self: *Self, group: Group, val: RawInt) void {
-            const unmasked_val = ((val) << GroupsInfo.ctz(group));
+            const unmasked_val = ((val) << ctz(group));
             self.raw &= ~unmasked_val;
         }
 
-        pub inline fn flag_to_first_matching_group(flag_: Flag) ?Group {
-            for (GroupsInfo.BITS[0..], 0..) |bits, idx| {
-                if (@intFromEnum(flag_) & bits == @intFromEnum(flag_)) return @enumFromInt(idx);
+        pub inline fn flag_to_first_matching_group(flag: Flag) ?Group {
+            for (G_INFO.fields) |field| {
+                if (bits(flag) & field.value == bits(flag)) return @enumFromInt(field.value);
             }
             return null;
         }
-        pub inline fn flag_to_first_matching_group_guaranteed(flag_: Flag) Group {
-            for (GroupsInfo.BITS[0..], 0..) |bits, idx| {
-                if (@intFromEnum(flag_) & bits == @intFromEnum(flag_)) return @enumFromInt(idx);
+        pub inline fn flag_to_first_matching_group_guaranteed(flag: Flag) Group {
+            for (G_INFO.fields) |field| {
+                if (bits(flag) & field.value == bits(flag)) return @enumFromInt(field.value);
             }
             unreachable;
         }
-        pub inline fn flag_to_first_matching_group_subset(flag_: Flag, group_subset: []const Group) ?Group {
-            for (group_subset, 0..) |group, idx| {
-                if (@intFromEnum(flag_) & GroupsInfo.bits(group) == @intFromEnum(flag_)) return @enumFromInt(idx);
+        pub inline fn flag_to_first_matching_group_in_set(flag: Flag, group_set: []const Group) ?Group {
+            for (group_set) |group| {
+                if (bits(flag) & bits(group) == bits(flag)) return group;
             }
             return null;
         }
-        pub inline fn flag_to_first_matching_group_subset_guaranteed(flag_: Flag, group_subset: []const Group) Group {
-            for (group_subset, 0..) |group, idx| {
-                if (@intFromEnum(flag_) & GroupsInfo.bits(group) == @intFromEnum(flag_)) return @enumFromInt(idx);
+        pub inline fn flag_to_first_matching_group_in_set_guaranteed(flag: Flag, group_set: []const Group) Group {
+            for (group_set) |group| {
+                if (bits(flag) & bits(group) == bits(flag)) return group;
             }
             unreachable;
         }
 
         pub inline fn all_flags_to_first_matching_group(self: Self) ?Group {
-            for (GroupsInfo.BITS[0..], 0..) |bits, idx| {
-                if (self.raw & bits == self.raw) return @enumFromInt(idx);
+            for (G_INFO.fields) |field| {
+                if (self.raw & field.value == self.raw) return @enumFromInt(field.value);
             }
             return null;
         }
         pub inline fn all_flags_to_first_matching_group_guaranteed(self: Self) Group {
-            for (GroupsInfo.BITS[0..], 0..) |bits, idx| {
-                if (self.raw & bits == self.raw) return @enumFromInt(idx);
+            for (G_INFO.fields) |field| {
+                if (self.raw & field.value == self.raw) return @enumFromInt(field.value);
             }
             unreachable;
         }
-        pub inline fn all_flags_to_first_matching_group_subset(self: Self, group_subset: []const Group) ?Group {
-            for (group_subset, 0..) |group, idx| {
-                if (self.raw & GroupsInfo.bits(group) == self.raw) return @enumFromInt(idx);
+        pub inline fn all_flags_to_first_matching_group_in_set(self: Self, group_set: []const Group) ?Group {
+            for (group_set) |group| {
+                if (self.raw & bits(group) == self.raw) return group;
             }
             return null;
         }
-        pub inline fn all_flags_to_first_matching_group_subset_guaranteed(self: Self, group_subset: []const Group) Group {
-            for (group_subset, 0..) |group, idx| {
-                if (self.raw & GroupsInfo.bits(group) == self.raw) return @enumFromInt(idx);
+        pub inline fn all_flags_to_first_matching_group_in_set_guaranteed(self: Self, group_set: []const Group) Group {
+            for (group_set) |group| {
+                if (self.raw & bits(group) == self.raw) return group;
             }
             unreachable;
-        }
-    };
-}
-
-pub const Groups = struct {
-    group_names_enum: type,
-    group_vals_enum: type,
-
-    fn none(comptime FLAGS_ENUM: type) Groups {
-        const F_INFO = @typeInfo(FLAGS_ENUM);
-        assert_with_reason(F_INFO == .@"enum", @src(), @This(), "parameter `FLAGS_ENUM` must be an enum type", .{});
-        const FLAGS_INFO = F_INFO.@"enum";
-        assert_with_reason(@typeInfo(FLAGS_INFO.tag_type).int.signedness == .unsigned, @src(), @This(), "parameter `FLAGS_ENUM` tage type must be an unsigned integer type", .{});
-        return Groups{
-            .group_names_enum = enum(u8) {
-                NONE = 0,
-            },
-            .group_vals_enum = enum(FLAGS_INFO.tag_type) {
-                NONE = 0,
-            },
-        };
-    }
-};
-
-pub fn BuildGroups(comptime groups: Groups) type {
-    const GROUP_NAMES_ENUM = groups.group_names_enum;
-    const GROUP_VALS_ENUM = groups.group_vals_enum;
-    const N_INFO = @typeInfo(GROUP_NAMES_ENUM);
-    assert_with_reason(N_INFO == .@"enum", @src(), @This(), "GROUP_NAMES_ENUM must be an enum type", .{});
-    const NAME_INFO = N_INFO.@"enum";
-    assert_with_reason(@typeInfo(NAME_INFO.tag_type).int.signedness == .unsigned, @src(), @This(), "GROUP_NAMES_ENUM tag type must be an unsigned integer type", .{});
-    assert_with_reason(Types.all_enum_values_start_from_zero_with_no_gaps(GROUP_NAMES_ENUM), @src(), @This(), "GROUP_NAMES_ENUM must use every tag value starting from zero up to the largest tag value with no gaps", .{});
-    const V_INFO = @typeInfo(GROUP_VALS_ENUM);
-    assert_with_reason(V_INFO == .@"enum", @src(), @This(), "GROUP_VALS_ENUM must be an enum type", .{});
-    const VAL_INFO = V_INFO.@"enum";
-    comptime var counts: [NAME_INFO.fields.len]usize = @splat(0);
-    comptime var maps: [NAME_INFO.fields.len]VAL_INFO.tag_type = @splat(0);
-    comptime var names: [NAME_INFO.fields.len][:0]const u8 = undefined;
-    for (NAME_INFO.fields) |name_field| {
-        inner: for (VAL_INFO.fields) |val_field| {
-            if (std.mem.eql(u8, name_field.name, val_field.name)) {
-                counts[name_field.value] += 1;
-                maps[name_field.value] = val_field.value;
-                names[name_field.value] = name_field.name;
-                break :inner;
-            }
-        }
-    }
-    for (counts[0..]) |cnt| {
-        assert_with_reason(cnt == 1, @src(), @This(), "all GROUP_NAMES_ENUM tags must have a matching tag with the same exact name in GROUP_VALS_ENUM", .{});
-    }
-    const M = comptime make_const: {
-        break :make_const maps;
-    };
-    const N = comptime make_const: {
-        break :make_const names;
-    };
-    const IM = comptime make_const: {
-        var inv: [M.len]VAL_INFO.tag_type = @splat(0);
-        for (M[0..], 0..) |val, idx| {
-            inv[idx] = ~val;
-        }
-        break :make_const inv;
-    };
-    const CT = comptime make_const: {
-        var trail_count: [M.len]Log2IntCeil(VAL_INFO.tag_type) = @splat(0);
-        for (M[0..], 0..) |val, idx| {
-            trail_count[idx] = @ctz(val);
-        }
-        break :make_const trail_count;
-    };
-    const CL = comptime make_const: {
-        var lead_count: [M.len]Log2IntCeil(VAL_INFO.tag_type) = @splat(0);
-        for (M[0..], 0..) |val, idx| {
-            lead_count[idx] = @clz(val);
-        }
-        break :make_const lead_count;
-    };
-    const POP = comptime make_const: {
-        var pop_count: [M.len]Log2IntCeil(VAL_INFO.tag_type) = @splat(0);
-        for (M[0..], 0..) |val, idx| {
-            pop_count[idx] = @popCount(val);
-        }
-        break :make_const pop_count;
-    };
-    const RNG = comptime make_const: {
-        const BITS: Log2IntCeil(VAL_INFO.tag_type) = @intCast(@typeInfo(VAL_INFO.tag_type).int.bits);
-        var range: [M.len]Log2IntCeil(VAL_INFO.tag_type) = @splat(0);
-        for (CL[0..], CT[0..], 0..) |leading, trailing, idx| {
-            range[idx] = (BITS - leading) -| trailing;
-        }
-        break :make_const range;
-    };
-    const CONT = comptime make_const: {
-        var contig: [M.len]bool = @splat(false);
-        for (RNG[0..], POP[0..], 0..) |range, pop, idx| {
-            contig[idx] = range == pop;
-        }
-        break :make_const contig;
-    };
-    return struct {
-        pub const Name = GROUP_NAMES_ENUM;
-        pub const Val = GROUP_VALS_ENUM;
-        pub const ValRaw = VAL_INFO.tag_type;
-        pub const COUNT = M.len;
-        pub const BITS = M;
-        pub const INV_BITS = IM;
-        pub const CLZ = CL;
-        pub const CTZ = CT;
-        pub const BIT_COUNT = POP;
-        pub const BIT_RANGE = RNG;
-        pub const CONTIGUOUS = CONT;
-        pub const TAG_NAMES = N;
-
-        pub inline fn tag_name(group: Name) [:0]const u8 {
-            return @tagName(group);
-        }
-        pub inline fn bits(group_name: Name) ValRaw {
-            return BITS[@intFromEnum(group_name)];
-        }
-        pub inline fn inverse_bits(group_name: Name) ValRaw {
-            return INV_BITS[@intFromEnum(group_name)];
-        }
-        pub inline fn clz(group_name: Name) Log2IntCeil(ValRaw) {
-            return CLZ[@intFromEnum(group_name)];
-        }
-        pub inline fn ctz(group_name: Name) Log2IntCeil(ValRaw) {
-            return CTZ[@intFromEnum(group_name)];
-        }
-        pub inline fn bit_count(group_name: Name) Log2IntCeil(ValRaw) {
-            return BIT_COUNT[@intFromEnum(group_name)];
-        }
-        pub inline fn bit_range(group_name: Name) Log2IntCeil(ValRaw) {
-            return BIT_RANGE[@intFromEnum(group_name)];
-        }
-        pub inline fn contiguous(group_name: Name) bool {
-            return CONTIGUOUS[@intFromEnum(group_name)];
-        }
-        pub inline fn tag_name_from_idx(group_idx: usize) [:0]const u8 {
-            return TAG_NAMES[group_idx];
-        }
-        pub inline fn bits_from_idx(group_idx: usize) ValRaw {
-            return BITS[group_idx];
-        }
-        pub inline fn inverse_bits_from_idx(group_idx: usize) ValRaw {
-            return INV_BITS[group_idx];
-        }
-        pub inline fn clz_from_idx(group_idx: usize) Log2IntCeil(ValRaw) {
-            return CLZ[group_idx];
-        }
-        pub inline fn ctz_from_idx(group_idx: usize) Log2IntCeil(ValRaw) {
-            return CTZ[group_idx];
-        }
-        pub inline fn bit_count_from_idx(group_idx: usize) Log2IntCeil(ValRaw) {
-            return BIT_COUNT[group_idx];
-        }
-        pub inline fn bit_range_from_idx(group_idx: usize) Log2IntCeil(ValRaw) {
-            return BIT_RANGE[group_idx];
-        }
-        pub inline fn contiguous_from_idx(group_idx: usize) bool {
-            return CONTIGUOUS[group_idx];
         }
     };
 }

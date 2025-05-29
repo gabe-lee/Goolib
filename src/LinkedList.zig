@@ -56,55 +56,12 @@ pub const ListOptions = struct {
     secure_wipe_bytes: bool = false,
 };
 
-/// A struct containing all common operations used internally for the various List
+/// A struct containing all common operations used internally for the various LinkedList
 /// paradigms
 ///
 /// These are not intended for normal use, but are provided here for ease of use
 /// when implementing a custom list/collection type
 pub const Impl = struct {
-    pub inline fn slice(comptime List: type, self: List) List.Slice(List.Elem) {
-        return self.ptr[0..@intCast(self.len)];
-    }
-
-    pub inline fn flex_slice(comptime List: type, self: List, comptime mutability: Mutability) FlexSlice(List.Elem, List.Idx, mutability) {
-        return FlexSlice(List.Elem, List.Idx, mutability){
-            .ptr = self.ptr,
-            .len = self.len,
-        };
-    }
-
-    pub fn array_ptr(comptime List: type, self: List, start: List.Idx, comptime length: List.Idx) *[length]List.Elem {
-        assert(start + length <= self.len);
-        return &(self.ptr[start..self.len][0..length]);
-    }
-
-    pub fn vector_ptr(comptime List: type, self: List, start: List.Idx, comptime length: List.Idx) *@Vector(length, List.Elem) {
-        assert(start + length <= self.len);
-        return self.ptr[start..self.len][0..length];
-    }
-
-    pub fn slice_with_sentinel(comptime List: type, self: List, comptime sentinel: List.Elem) List.ZigSentinelSlice(List.Elem) {
-        assert(self.len < self.cap);
-        self.ptr[self.len] = sentinel;
-        return self.ptr[0..self.len :sentinel];
-    }
-
-    pub fn slice_full_capacity(comptime List: type, self: List) List.Slice {
-        return self.ptr[0..self.cap];
-    }
-
-    pub fn slice_unused_capacity(comptime List: type, self: List) []List.Elem {
-        return self.ptr[self.len..self.cap];
-    }
-
-    pub fn set_len(comptime List: type, self: *List, new_len: List.Idx) void {
-        assert(new_len <= self.cap);
-        if (List.SECURE_WIPE and new_len < self.len) {
-            crypto.secureZero(List.Elem, self.ptr[new_len..self.len]);
-        }
-        self.len = new_len;
-    }
-
     pub fn new_empty(comptime List: type) List {
         return List.EMPTY;
     }
@@ -124,49 +81,7 @@ pub const Impl = struct {
         append_slice_assume_capacity(List, &new_list, self.ptr[0..self.len]);
         return new_list;
     }
-
-    pub fn to_owned_slice(comptime List: type, self: *List, alloc: Allocator) if (List.RETURN_ERRORS) List.Error!List.Slice else List.Slice {
-        const old_memory = self.ptr[0..self.cap];
-        if (alloc.remap(old_memory, self.len)) |new_items| {
-            self.* = List.EMPTY;
-            return new_items;
-        }
-        const new_memory = alloc.alignedAlloc(List.Elem, List.ALIGN, self.len) catch |err| return handle_alloc_error(List, err);
-        @memcpy(new_memory, self.ptr[0..self.len]);
-        clear_and_free(List, self);
-        return new_memory;
-    }
-
-    pub fn to_owned_slice_sentinel(comptime List: type, self: *List, comptime sentinel: List.Elem, alloc: Allocator) if (List.RETURN_ERRORS) List.Error!List.ZigSentinelSlice(sentinel) else List.ZigSentinelSlice(sentinel) {
-        if (List.RETURN_ERRORS) {
-            try ensure_total_capacity_exact(List, self, self.len + 1, alloc);
-        } else {
-            ensure_total_capacity_exact(List, self, self.len + 1, alloc);
-        }
-        self.ptr[self.len] = sentinel;
-        self.len += 1;
-        const result: List.Slice = if (List.RETURN_ERRORS) try to_owned_slice(List, self, alloc) else to_owned_slice(List, self, alloc);
-        return result[0 .. result.len - 1 :sentinel];
-    }
-
-    pub fn from_owned_slice(comptime List: type, from_slice: List.Slice) List {
-        assert_with_reason(!List.IS_LINKED_LIST, @src(), @This(), "cannot rebuild a linked list from a slice", .{});
-        return List{
-            .ptr = from_slice.ptr,
-            .len = from_slice.len,
-            .cap = from_slice.len,
-        };
-    }
-
-    pub fn from_owned_slice_sentinel(comptime List: type, comptime sentinel: List.Elem, from_slice: [:sentinel]List.Elem) List {
-        assert_with_reason(!List.IS_LINKED_LIST, @src(), @This(), "cannot rebuild a linked list from a slice", .{});
-        return List{
-            .ptr = from_slice.ptr,
-            .len = from_slice.len,
-            .cap = from_slice.len,
-        };
-    }
-
+    //CHECKPOINT rework/prune normal list funcs
     pub fn insert_slot(comptime List: type, self: *List, idx: List.Idx, alloc: Allocator) if (List.RETURN_ERRORS) List.Error!*List.Elem else *List.Elem {
         if (List.RETURN_ERRORS) {
             try ensure_unused_capacity(List, self, 1, alloc);
@@ -2001,7 +1916,7 @@ pub fn define_cached_allocator_list_type(comptime base_options: ListOptions) typ
     };
 }
 
-test "List.zig" {
+test "LinkedList.zig" {
     const t = std.testing;
     const alloc = std.heap.page_allocator;
     const base_opts = ListOptions{
