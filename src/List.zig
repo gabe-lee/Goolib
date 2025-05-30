@@ -41,7 +41,7 @@ const Quicksort = Root.Quicksort;
 const Pivot = Quicksort.Pivot;
 const InsertionSort = Root.InsertionSort;
 const insertion_sort = InsertionSort.insertion_sort;
-const AllocErrorBehavior = Root.CommonTypes.AllocErrorBehavior;
+const ErrorBehavior = Root.CommonTypes.ErrorBehavior;
 const GrowthModel = Root.CommonTypes.GrowthModel;
 const SortAlgorithm = Root.CommonTypes.SortAlgorithm;
 const DummyAllocator = Root.DummyAllocator;
@@ -50,7 +50,7 @@ const BinarySearch = Root.BinarySearch;
 pub const ListOptions = struct {
     element_type: type,
     alignment: ?u29 = null,
-    alloc_error_behavior: AllocErrorBehavior = .ALLOCATION_ERRORS_PANIC,
+    error_behavior: ErrorBehavior = .ERRORS_PANIC,
     growth_model: GrowthModel = .GROW_BY_50_PERCENT_ATOMIC_PADDING,
     index_type: type = usize,
     secure_wipe_bytes: bool = false,
@@ -764,9 +764,9 @@ pub const Impl = struct {
 
     pub fn handle_alloc_error(comptime List: type, err: Allocator.Error) if (List.RETURN_ERRORS) List.Error else noreturn {
         switch (List.ALLOC_ERROR_BEHAVIOR) {
-            AllocErrorBehavior.ALLOCATION_ERRORS_RETURN_ERROR => return err,
-            AllocErrorBehavior.ALLOCATION_ERRORS_PANIC => std.debug.panic("List's backing allocator failed to allocate memory: Allocator.Error.{s}", .{@errorName(err)}),
-            AllocErrorBehavior.ALLOCATION_ERRORS_ARE_UNREACHABLE => unreachable,
+            ErrorBehavior.RETURN_ERRORS => return err,
+            ErrorBehavior.ALLOCATION_ERRORS_PANIC => std.debug.panic("List's backing allocator failed to allocate memory: Allocator.Error.{s}", .{@errorName(err)}),
+            ErrorBehavior.ALLOCATION_ERRORS_ARE_UNREACHABLE => unreachable,
         }
     }
 };
@@ -791,9 +791,9 @@ pub fn define_manually_managed_list_type(comptime options: ListOptions) type {
         cap: Idx = 0,
 
         pub const ALIGN = options.alignment;
-        pub const ALLOC_ERROR_BEHAVIOR = options.alloc_error_behavior;
+        pub const ALLOC_ERROR_BEHAVIOR = options.error_behavior;
         pub const GROWTH = options.growth_model;
-        pub const RETURN_ERRORS = options.alloc_error_behavior == .ALLOCATION_ERRORS_RETURN_ERROR;
+        pub const RETURN_ERRORS = options.error_behavior == .RETURN_ERRORS;
         pub const SECURE_WIPE = options.secure_wipe_bytes;
         pub const UNINIT_PTR: Ptr = @ptrFromInt(if (ALIGN) |a| mem.alignBackward(usize, math.maxInt(usize), @intCast(a)) else mem.alignBackward(usize, math.maxInt(usize), @alignOf(Elem)));
         pub const ATOMIC_PADDING = @as(comptime_int, @max(1, std.atomic.cache_line / @sizeOf(Elem)));
@@ -1195,9 +1195,9 @@ pub fn define_static_allocator_list_type(comptime base_options: ListOptions, com
 
         pub const ALLOC = alloc_ptr;
         pub const ALIGN = base_options.alignment;
-        pub const ALLOC_ERROR_BEHAVIOR = base_options.alloc_error_behavior;
+        pub const ALLOC_ERROR_BEHAVIOR = base_options.error_behavior;
         pub const GROWTH = base_options.growth_model;
-        pub const RETURN_ERRORS = base_options.alloc_error_behavior == .ALLOCATION_ERRORS_RETURN_ERROR;
+        pub const RETURN_ERRORS = base_options.error_behavior == .RETURN_ERRORS;
         pub const SECURE_WIPE = base_options.secure_wipe_bytes;
         pub const UNINIT_PTR: Ptr = @ptrFromInt(if (ALIGN) |a| mem.alignBackward(usize, math.maxInt(usize), @intCast(a)) else mem.alignBackward(usize, math.maxInt(usize), @alignOf(Elem)));
         pub const ATOMIC_PADDING = @as(comptime_int, @max(1, std.atomic.cache_line / @sizeOf(Elem)));
@@ -1600,9 +1600,9 @@ pub fn define_cached_allocator_list_type(comptime base_options: ListOptions) typ
         cap: Idx = 0,
 
         pub const ALIGN = base_options.alignment;
-        pub const ALLOC_ERROR_BEHAVIOR = base_options.alloc_error_behavior;
+        pub const ALLOC_ERROR_BEHAVIOR = base_options.error_behavior;
         pub const GROWTH = base_options.growth_model;
-        pub const RETURN_ERRORS = base_options.alloc_error_behavior == .ALLOCATION_ERRORS_RETURN_ERROR;
+        pub const RETURN_ERRORS = base_options.error_behavior == .RETURN_ERRORS;
         pub const SECURE_WIPE = base_options.secure_wipe_bytes;
         pub const UNINIT_PTR: Ptr = @ptrFromInt(if (ALIGN) |a| mem.alignBackward(usize, math.maxInt(usize), @intCast(a)) else mem.alignBackward(usize, math.maxInt(usize), @alignOf(Elem)));
         pub const ATOMIC_PADDING = @as(comptime_int, @max(1, std.atomic.cache_line / @sizeOf(Elem)));
@@ -2005,7 +2005,7 @@ test "List.zig" {
     const t = std.testing;
     const alloc = std.heap.page_allocator;
     const base_opts = ListOptions{
-        .alloc_error_behavior = .ALLOCATION_ERRORS_PANIC,
+        .error_behavior = .ALLOCATION_ERRORS_PANIC,
         .element_type = u8,
         .index_type = u32,
     };

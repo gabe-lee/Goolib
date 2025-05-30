@@ -21,9 +21,9 @@
 //    misrepresented as being the original software.
 // 3. This notice may not be removed or altered from any source distribution.
 
-const builtin = @import("builtin");
+const build = @import("builtin");
 const std = @import("std");
-const assert = std.debug.assert;
+const SourceLocation = std.builtin.SourceLocation;
 const mem = std.mem;
 const math = std.math;
 const crypto = std.crypto;
@@ -41,103 +41,460 @@ const Quicksort = Root.Quicksort;
 const Pivot = Quicksort.Pivot;
 const InsertionSort = Root.InsertionSort;
 const insertion_sort = InsertionSort.insertion_sort;
-const AllocErrorBehavior = Root.CommonTypes.AllocErrorBehavior;
+const ErrorBehavior = Root.CommonTypes.ErrorBehavior;
 const GrowthModel = Root.CommonTypes.GrowthModel;
 const SortAlgorithm = Root.CommonTypes.SortAlgorithm;
 const DummyAllocator = Root.DummyAllocator;
 const BinarySearch = Root.BinarySearch;
 
-pub const ListOptions = struct {
-    element_type: type,
-    alignment: ?u29 = null,
-    alloc_error_behavior: AllocErrorBehavior = .ALLOCATION_ERRORS_PANIC,
-    growth_model: GrowthModel = .GROW_BY_50_PERCENT_ATOMIC_PADDING,
-    index_type: type = usize,
-    secure_wipe_bytes: bool = false,
-};
+pub const ListOptions = struct { element_type: type, alignment: ?u29 = null, error_behavior: ErrorBehavior = .ERRORS_PANIC, growth_model: GrowthModel = .GROW_BY_50_PERCENT_ATOMIC_PADDING, index_type: type = usize, secure_wipe_bytes: bool = false, extra_data_type: ?type = null, implementation_overrides };
+
+pub fn ListCallbacks(comptime options: ListOptions) type {
+    const Ptr = if (options.alignment) |a| ?[*]align(a) options.element_type else ?[*]options.element_type;
+    const Idx = options.index_type;
+    const Elem = options.element_type;
+    const Extra = if (options.extra_data_type) |ex| ex else void;
+    return struct {
+        on_element_moved: ?*const fn (ptr: *Ptr, len: *Idx, cap: *Idx, extra_data: *Extra, element: *Elem, old_idx: Idx, new_idx: Idx) void = null,
+        on_element_added: ?*const fn (ptr: *Ptr, len: *Idx, cap: *Idx, extra_data: *Extra, element: *Elem, new_idx: Idx) void = null,
+        on_element_removed: ?*const fn (ptr: *Ptr, len: *Idx, cap: *Idx, extra_data: *Extra, element: Elem, old_idx: Idx) void = null,
+        on_list_resized: ?*const fn (ptr: *Ptr, len: *Idx, cap: *Idx, extra_data: *Extra, old_cap: Idx) void = null,
+        on_list_relocated: ?*const fn (ptr: *Ptr, len: *Idx, cap: *Idx, extra_data: *Extra, old_ptr: Ptr) void = null,
+    };
+}
 
 pub const ListConstants = struct {
+    List: type,
+    Error: type,
     Elem: type,
     Ptr: type,
+    Idx: type,
+    Extra: type,
     Slice: type,
+    NullableSlice: type,
+    FlexSlice: type,
+    ALIGN: ?u29,
+    ERROR_BEHAVIOR: ErrorBehavior,
+    GROWTH: GrowthModel,
+    RETURN_ERRORS: bool,
+    SECURE_WIPE: bool,
+    ATOMIC_PADDING: comptime_int,
+    PTR_FIELD: []const u8,
+    LEN_FIELD: []const u8,
+    CAP_FIELD: []const u8,
+    EXTRA_FIELD: []const u8,
+    fn_on_moved: ?*anyopaque,
+    fn_on_added: ?*anyopaque,
+    fn_on_removed: ?*anyopaque,
+    fn_on_resized: ?*anyopaque,
+    fn_on_relocated: ?*anyopaque,
 
+    pub inline fn create(comptime LIST: type, comptime ERROR: type, comptime PTR_FIELD: []const u8, comptime LEN_FIELD: []const u8, comptime CAP_FIELD: []const u8, comptime EXTRA_FIELD: []const u8, comptime OPTIONS: ListOptions, comptime CALLBACKS: ?ListCallbacks(OPTIONS)) ListConstants {
+        return ListConstants{
+            .ALIGN = OPTIONS.alignment,
+            .ERROR_BEHAVIOR = OPTIONS.error_behavior,
+            .GROWTH = OPTIONS.growth_model,
+            .RETURN_ERRORS = OPTIONS.growth_model == .ALLOCATION_ERRORS_RETURN_ERROR,
+            .SECURE_WIPE = OPTIONS.secure_wipe_bytes,
+            .ATOMIC_PADDING = @as(comptime_int, @max(1, std.atomic.cache_line / @sizeOf(OPTIONS.element_type))),
+            .PTR_FIELD = PTR_FIELD,
+            .LEN_FIELD = LEN_FIELD,
+            .CAP_FIELD = CAP_FIELD,
+            .EXTRA_FIELD = EXTRA_FIELD,
+            .Error = ERROR,
+            .Extra = if (OPTIONS.extra_data_type) |ex| ex else void,
+            .Elem = OPTIONS.element_type,
+            .Idx = OPTIONS.index_type,
+            .Ptr = if (OPTIONS.alignment) |a| ?[*]align(a) OPTIONS.element_type else ?[*]OPTIONS.element_type,
+            .Slice = if (OPTIONS.alignment) |a| []align(a) OPTIONS.element_type else []OPTIONS.element_type,
+            .NullableSlice = if (OPTIONS.alignment) |a| ?[]align(a) OPTIONS.element_type else ?[]OPTIONS.element_type,
+            .List = LIST,
+            .fn_on_moved = if (CALLBACKS) |CALL| CALL.on_element_moved else null,
+            .fn_on_added = if (CALLBACKS) |CALL| CALL.on_element_added else null,
+            .fn_on_removed = if (CALLBACKS) |CALL| CALL.on_element_removed else null,
+            .fn_on_resized = if (CALLBACKS) |CALL| CALL.on_list_resized else null,
+            .fn_on_relocated = if (CALLBACKS) |CALL| CALL.on_list_relocated else null,
+        };
+    }
+
+    pub inline fn SentinelSlice(comptime self: ListConstants, comptime sentinel: self.Elem) type {
+        return if (self.ALIGN) |a| ([:sentinel]align(a) self.Elem) else [:sentinel]self.Elem;
+    }
+    pub inline fn NullableSentinelSlice(comptime self: ListConstants, comptime sentinel: self.Elem) type {
+        return if (self.ALIGN) |a| (?[:sentinel]align(a) self.Elem) else ?[:sentinel]self.Elem;
+    }
+    pub inline fn MetaListMutable(comptime self: ListConstants) type {
+        return struct {
+            ptr: *self.Ptr,
+            len: *self.Idx,
+            cap: *self.Idx,
+            extra: *self.Extra,
+
+            pub const on_element_moved: ?*const fn (ptr: *self.Ptr, len: *self.Idx, cap: *self.Idx, extra_data: *self.Extra, element: *self.Elem, old_idx: self.Idx, new_idx: self.Idx) void = @ptrCast(self.fn_on_moved);
+            pub const on_element_added: ?*const fn (ptr: *self.Ptr, len: *self.Idx, cap: *self.Idx, extra_data: *self.Extra, element: *self.Elem, new_idx: self.Idx) void = @ptrCast(self.fn_on_added);
+            pub const on_element_removed: ?*const fn (ptr: *self.Ptr, len: *self.Idx, cap: *self.Idx, extra_data: *self.Extra, element: self.Elem, old_idx: self.Idx) void = @ptrCast(self.fn_on_removed);
+            pub const on_list_resized: ?*const fn (ptr: *self.Ptr, len: *self.Idx, cap: *self.Idx, extra_data: *self.Extra, old_cap: self.Idx) void = @ptrCast(self.fn_on_resized);
+            pub const on_list_relocated: ?*const fn (ptr: *self.Ptr, len: *self.Idx, cap: *self.Idx, extra_data: *self.Extra, old_ptr: self.Ptr) void = @ptrCast(self.fn_on_relocated);
+        };
+    }
+    pub inline fn MetaList(comptime self: ListConstants) type {
+        return struct {
+            ptr: self.Ptr,
+            len: self.Idx,
+            cap: self.Idx,
+        };
+    }
+    pub inline fn meta_list_mutable(comptime self: ListConstants, list: *self.List) MetaListMutable(self) {
+        return MetaListMutable(self){
+            .ptr = &@field(list, self.PTR_FIELD),
+            .len = &@field(list, self.LEN_FIELD),
+            .cap = &@field(list, self.CAP_FIELD),
+        };
+    }
+    pub inline fn meta_list(comptime self: ListConstants, list: self.List) MetaList(self) {
+        return MetaList(self){
+            .ptr = @field(list, self.PTR_FIELD),
+            .len = @field(list, self.LEN_FIELD),
+            .cap = @field(list, self.CAP_FIELD),
+        };
+    }
+    pub inline fn uninit_list(comptime self: ListConstants) self.List {
+        return self.List{
+            .ptr = null,
+            .len = 0,
+            .cap = 0,
+        };
+    }
 };
 
-/// A struct containing all common operations used internally for the various LinkedList
+const ERR_IOOB_LEN_CAP_SENT = "index out of bounds: len ({d}) >= cap ({d}), in order to make a sentinel slice, at least one extra slot is required between len and cap";
+const ERR_IOOB_START_LEN = "index out of bounds: start + length ({d}) > list.len ({d})";
+const ERR_IOOB_INDEX = "index out of bounds: index ({d}) > list.len ({d})";
+const ERR_OP_NULL_PTR = "attempted to operate on null pointer";
+const ERR_NEW_LEN_CAP = "new length ({d}) is greater than capacity ({d})";
+
+/// A struct containing all common operations used internally for the various List
 /// paradigms
 ///
 /// These are not intended for normal use, but are provided here for ease of use
 /// when implementing a custom list/collection type
 pub const Impl = struct {
-    pub fn new_empty(comptime List: type) List {
-        return List.EMPTY;
+    fn handle_possible_relocate(comptime L: ListConstants, list: L.MetaListMutable(), old_ptr: L.Ptr) void {
+        const Meta = comptime L.MetaListMutable();
+        if (Meta.on_list_relocated) |on_relocate| {
+            if (list.ptr.* != old_ptr) {
+                on_relocate(list.ptr, list.len, list.cap, list.extra, old_ptr);
+            }
+        }
     }
 
-    pub fn new_with_capacity(comptime List: type, capacity: List.Idx, alloc: Allocator) if (List.RETURN_ERRORS) List.Error!List else List {
-        var self = List.EMPTY;
-        if (List.RETURN_ERRORS) {
-            try ensure_total_capacity_exact(List, &self, capacity, alloc);
+    fn handle_relocate(comptime L: ListConstants, list: L.MetaListMutable(), old_ptr: L.Ptr) void {
+        const Meta = comptime L.MetaListMutable();
+        if (Meta.on_list_relocated) |on_relocate| {
+            on_relocate(list.ptr, list.len, list.cap, list.extra, old_ptr);
+        }
+    }
+
+    fn handle_moved(comptime L: ListConstants, list: L.MetaListMutable(), old_idx: L.Idx, new_idx: L.Idx) void {
+        const Meta = comptime L.MetaListMutable();
+        if (Meta.on_element_moved) |on_move| {
+            const elem: *L.Elem = &(list.ptr.*.?[@intCast(new_idx)]);
+            on_move(list.ptr, list.len, list.cap, list.extra, elem, old_idx, new_idx);
+        }
+    }
+
+    fn handle_added(comptime L: ListConstants, list: L.MetaListMutable(), new_idx: L.Idx) void {
+        const Meta = comptime L.MetaListMutable();
+        if (Meta.on_element_added) |on_add| {
+            const elem: *L.Elem = &(list.ptr.*.?[@intCast(new_idx)]);
+            on_add(list.ptr, list.len, list.cap, list.extra, elem, new_idx);
+        }
+    }
+
+    fn handle_range_added(comptime L: ListConstants, list: L.MetaListMutable(), start_idx: L.Idx, end_idx: L.Idx) void {
+        const Meta = comptime L.MetaListMutable();
+        if (Meta.on_element_added) |on_add| {
+            var i: L.Idx = start_idx;
+            while (i < end_idx) : (i += 1) {
+                const elem: *L.Elem = &(list.ptr.*.?[@intCast(i)]);
+                on_add(list.ptr, list.len, list.cap, list.extra, elem, i);
+            }
+        }
+    }
+
+    fn handle_removed(comptime L: ListConstants, list: L.MetaListMutable(), elem: L.Elem, old_idx: L.Idx) void {
+        const Meta = comptime L.MetaListMutable();
+        if (Meta.on_element_removed) |on_remove| {
+            on_remove(list.ptr, list.len, list.cap, list.extra, elem, old_idx);
+        }
+    }
+
+    fn handle_resize(comptime L: ListConstants, list: L.MetaListMutable(), old_cap: L.Id) void {
+        const Meta = comptime L.MetaListMutable();
+        if (Meta.on_list_resized) |on_resize| {
+            on_resize(list.ptr, list.len, list.cap, list.extra, old_cap);
+        }
+    }
+
+    fn copy_leftward(comptime L: ListConstants, list: L.MetaListMutable(), start_idx: L.Idx, end_idx: L.Idx, shift_by_n: L.Idx) void {
+        const Meta = comptime L.MetaListMutable();
+        var i: L.Idx = start_idx;
+        var ii: L.Idx = i - shift_by_n;
+        while (i < end_idx) {
+            list.ptr.*.?[ii] = list.ptr.*.?[i];
+            if (Meta.on_element_moved) |on_moved| {
+                on_moved(list.ptr, list.len, list.cap, list.extra, &list.ptr.*.?[ii], i, ii);
+            }
+            i += 1;
+            ii += 1;
+        }
+    }
+
+    fn copy_rightward(comptime L: ListConstants, list: L.MetaListMutable(), start_idx: L.Idx, end_idx: L.Idx, shift_by_n: L.Idx) void {
+        const Meta = comptime L.MetaListMutable();
+        var i: L.Idx = end_idx - 1;
+        var ii: L.Idx = i + shift_by_n;
+        while (i >= start_idx) {
+            list.ptr.*.?[ii] = list.ptr.*.?[i];
+            if (Meta.on_element_moved) |on_moved| {
+                on_moved(list.ptr, list.len, list.cap, list.extra, &list.ptr.*.?[ii], i, ii);
+            }
+            if (i == start_idx) break;
+            i -= 1;
+            ii -= 1;
+        }
+    }
+
+    pub inline fn slice(comptime L: ListConstants, self: L.List) L.Slice {
+        const list = L.meta_list(self);
+        assert_with_reason(list.ptr != null, @src(), @This(), ERR_OP_NULL_PTR, .{});
+        return list.ptr.?[0..@intCast(list.len)];
+    }
+
+    pub inline fn nullable_slice(comptime L: ListConstants, self: L.List) L.NullableSlice {
+        const list = L.meta_list(self);
+        if (list.ptr == null) return null;
+        return list.ptr.?[0..@intCast(list.len)];
+    }
+
+    pub inline fn flex_slice(comptime L: ListConstants, self: L.List, comptime mutability: Mutability) FlexSlice(L.Elem, L.Idx, mutability) {
+        const list = L.meta_list(self);
+        return FlexSlice(L.Elem, L.Idx, mutability){
+            .ptr = list.ptr,
+            .len = list.len,
+        };
+    }
+
+    pub fn array_ptr(comptime L: ListConstants, self: L.List, start: L.Idx, comptime length: L.Idx) *[length]L.Elem {
+        const end = start + length;
+        const list = L.meta_list(self);
+        assert_with_reason(list.ptr != null, @src(), @This(), ERR_OP_NULL_PTR, .{});
+        assert_with_reason(end <= list.len, @src(), @This(), ERR_IOOB_START_LEN, .{ end, list.len });
+        return &(list.ptr.?[start..list.len][0..length]);
+    }
+
+    pub fn nullable_array_ptr(comptime L: ListConstants, self: L.List, start: L.Idx, comptime length: L.Idx) ?*[length]L.Elem {
+        const end = start + length;
+        const list = L.meta_list(self);
+        assert_with_reason(list.ptr != null, @src(), @This(), ERR_OP_NULL_PTR, .{});
+        assert_with_reason(end <= list.len, @src(), @This(), ERR_IOOB_START_LEN, .{ end, list.len });
+        return &(list.ptr.?[start..list.len][0..length]);
+    }
+
+    pub fn vector_ptr(comptime L: ListConstants, self: L.List, start: L.Idx, comptime length: L.Idx) *@Vector(length, L.Elem) {
+        const end = start + length;
+        const list = L.meta_list(self);
+        assert_with_reason(end <= list.len, @src(), @This(), ERR_IOOB_START_LEN, .{ end, list.len });
+        return &(list.ptr[start..list.len][0..length]);
+    }
+
+    pub fn nullable_vector_ptr(comptime L: ListConstants, self: L.List, start: L.Idx, comptime length: L.Idx) ?*@Vector(length, L.Elem) {
+        const list = L.meta_list(self);
+        if (list.ptr == null) return null;
+        const end = start + length;
+        assert_with_reason(end <= list.len, @src(), @This(), ERR_IOOB_START_LEN, .{ end, list.len });
+        return &(list.ptr.?[start..list.len][0..length]);
+    }
+
+    pub fn slice_with_sentinel(comptime L: ListConstants, self: L.List, comptime sentinel: L.Elem) L.SentinelSlice(sentinel) {
+        const list = L.meta_list(self);
+        assert_with_reason(list.ptr != null, @src(), @This(), ERR_OP_NULL_PTR, .{});
+        assert_with_reason(list.len < list.cap, @src(), @This(), ERR_IOOB_LEN_CAP_SENT, .{ list.len, list.cap });
+        list.ptr.?[list.len] = sentinel;
+        return list.ptr.?[0..list.len :sentinel];
+    }
+
+    pub fn nullable_slice_with_sentinel(comptime L: ListConstants, self: L.List, comptime sentinel: L.Elem) ?L.SentinelSlice(sentinel) {
+        const list = L.meta_list(self);
+        if (list.ptr == null) return null;
+        assert_with_reason(list.len < list.cap, @src(), @This(), ERR_IOOB_LEN_CAP_SENT, .{ list.len, list.cap });
+        list.ptr.?[list.len] = sentinel;
+        return list.ptr.?[0..list.len :sentinel];
+    }
+
+    pub fn slice_full_capacity(comptime L: ListConstants, self: L.List) L.Slice {
+        const list = L.meta_list(self);
+        assert_with_reason(list.ptr != null, @src(), @This(), ERR_OP_NULL_PTR, .{});
+        return list.ptr.?[0..list.cap];
+    }
+
+    pub fn nullable_slice_full_capacity(comptime L: ListConstants, self: L.List) ?L.Slice {
+        const list = L.meta_list(self);
+        if (list.ptr == null) return null;
+        return list.ptr.?[0..list.cap];
+    }
+
+    pub fn slice_unused_capacity(comptime L: ListConstants, self: L.List) []L.Elem {
+        const list = L.meta_list(self);
+        assert_with_reason(list.ptr != null, @src(), @This(), ERR_OP_NULL_PTR, .{});
+        return list.ptr.?[list.len..list.cap];
+    }
+    pub fn nullable_slice_unused_capacity(comptime L: ListConstants, self: L.List) ?[]L.Elem {
+        const list = L.meta_list(self);
+        if (list.ptr == null) return null;
+        return list.ptr.?[list.len..list.cap];
+    }
+
+    pub fn set_len(comptime L: ListConstants, self: *L.List, new_len: L.Idx) void {
+        const list = L.meta_list_mutable(self);
+        assert_with_reason(list.ptr.* != null, @src(), @This(), ERR_OP_NULL_PTR, .{});
+        assert_with_reason(new_len <= list.cap.*, @src(), @This(), ERR_NEW_LEN_CAP, .{ new_len, list.cap.* });
+        if (L.SECURE_WIPE and new_len < list.len.*) {
+            crypto.secureZero(L.Elem, list.ptr.*.?[new_len..list.len.*]);
+        }
+        list.len.* = new_len;
+    }
+
+    pub inline fn new_uninit(comptime L: ListConstants) L.List {
+        return L.uninit_list();
+    }
+
+    pub fn new_with_capacity(comptime L: ListConstants, capacity: L.Idx, alloc: Allocator) if (L.RETURN_ERRORS) L.Error!L.List else L.List {
+        var self = L.uninit_list();
+        if (L.RETURN_ERRORS) {
+            try ensure_total_capacity_exact(L, &self, capacity, alloc);
         } else {
-            ensure_total_capacity_exact(List, &self, capacity, alloc);
+            ensure_total_capacity_exact(L, &self, capacity, alloc);
         }
         return self;
     }
 
-    pub fn clone(comptime List: type, self: List, alloc: Allocator) if (List.RETURN_ERRORS) List.Error!List else List {
-        var new_list = if (List.RETURN_ERRORS) try new_with_capacity(List, self.cap, alloc) else new_with_capacity(List, self.cap, alloc);
-        append_slice_assume_capacity(List, &new_list, self.ptr[0..self.len]);
+    pub fn clone(comptime L: ListConstants, self: L.List, alloc: Allocator) if (L.RETURN_ERRORS) L.Error!L.List else L.List {
+        const list = L.meta_list(self);
+        if (list.ptr == null) return L.uninit_list();
+        var new_list = if (L.RETURN_ERRORS) try new_with_capacity(L, list.cap, alloc) else new_with_capacity(L, list.cap, alloc);
+        append_slice_assume_capacity(L, &new_list, list.ptr.?[0..list.len]);
         return new_list;
     }
-    //CHECKPOINT rework/prune normal list funcs
-    pub fn insert_slot(comptime List: type, self: *List, idx: List.Idx, alloc: Allocator) if (List.RETURN_ERRORS) List.Error!*List.Elem else *List.Elem {
-        if (List.RETURN_ERRORS) {
-            try ensure_unused_capacity(List, self, 1, alloc);
+
+    // pub fn to_owned_slice(comptime L: ListConstants, self: *L.List, alloc: Allocator) if (L.RETURN_ERRORS) L.Error!L.Slice else L.Slice {
+    //     const list = L.meta_list_mutable(self);
+    //     assert_with_reason(list.ptr.* != null, @src(), @This(), ERR_OP_NULL_PTR, .{});
+    //     const old_memory = list.ptr.*.?[0..list.cap];
+    //     if (alloc.remap(old_memory, list.len.*)) |new_items| {
+    //         const old_ptr = list.ptr.*;
+    //         list.ptr.* = new_items.ptr;
+    //         handle_possible_relocate(L, list, old_ptr);
+    //         self.* = L.uninit_list();
+    //         return new_items;
+    //     }
+    //     const new_memory = alloc.alignedAlloc(L.Elem, L.ALIGN, list.len.*) catch |err| return handle_alloc_error(L, @src(), @This(), err);
+    //     @memcpy(new_memory, list.ptr.*.?[0..@intCast(list.len.*)]);
+    //     const old_ptr = list.ptr.*;
+    //     list.ptr.* = new_memory.ptr;
+    //     handle_relocate(L, list, old_ptr);
+    //     clear_and_free(L, self, alloc);
+    //     return new_memory;
+    // }
+
+    // pub fn to_owned_slice_sentinel(comptime L: ListConstants, self: *L.List, comptime sentinel: L.Elem, alloc: Allocator) if (L.RETURN_ERRORS) L.Error!L.SentinelSlice(sentinel) else L.SentinelSlice(sentinel) {
+    //     var list = L.meta_list_mutable(self);
+    //     assert_with_reason(list.ptr.* != null, @src(), @This(), ERR_OP_NULL_PTR, .{});
+    //     if (L.RETURN_ERRORS) {
+    //         try ensure_total_capacity_exact(L, self, list.len.* + 1, alloc);
+    //     } else {
+    //         ensure_total_capacity_exact(L, self, list.len.* + 1, alloc);
+    //     }
+    //     list.ptr.*.?[@intCast(list.len.*)] = sentinel;
+    //     list.len.* += 1;
+    //     const result: L.Slice = if (L.RETURN_ERRORS) try to_owned_slice(L, self, alloc) else to_owned_slice(L, self, alloc);
+    //     return result[0 .. result.len - 1 :sentinel];
+    // }
+
+    // pub fn from_owned_slice(comptime L: ListConstants, from_slice: L.Slice) L.List {
+    //     var self = L.List;
+    //     var list = L.meta_list_mutable(self);
+
+    //     return L.List{
+    //         .ptr = from_slice.ptr,
+    //         .len = from_slice.len,
+    //         .cap = from_slice.len,
+    //         .ex
+    //     };
+    // }
+
+    // pub fn from_owned_slice_sentinel(comptime List: type, comptime sentinel: List.Elem, from_slice: [:sentinel]List.Elem) List {
+    //     assert_with_reason(!List.IS_LINKED_LIST, @src(), @This(), "cannot rebuild a linked list from a slice", .{});
+    //     return List{
+    //         .ptr = from_slice.ptr,
+    //         .len = from_slice.len,
+    //         .cap = from_slice.len,
+    //     };
+    // }
+
+    pub fn insert_slot(comptime L: ListConstants, self: *L.List, idx: L.Idx, alloc: Allocator) if (L.RETURN_ERRORS) L.Error!*L.Elem else *L.Elem {
+        if (L.RETURN_ERRORS) {
+            try ensure_unused_capacity(L, self, 1, alloc);
         } else {
-            ensure_unused_capacity(List, self, 1, alloc);
+            ensure_unused_capacity(L, self, 1, alloc);
         }
-        return insert_slot_assume_capacity(List, self, idx);
+        return insert_slot_assume_capacity(L, self, idx);
     }
 
-    pub fn insert_slot_assume_capacity(comptime List: type, self: *List, idx: List.Idx) *List.Elem {
-        assert(idx <= self.len);
-        mem.copyBackwards(List.Elem, self.ptr[idx + 1 .. self.len + 1], self.ptr[idx..self.len]);
-        self.len += 1;
-        return &self.ptr[idx];
+    pub fn insert_slot_assume_capacity(comptime L: ListConstants, self: *L.List, idx: L.Idx) *L.Elem {
+        const list = L.meta_list_mutable(self);
+        assert_with_reason(list.ptr.* != null, @src(), @This(), ERR_OP_NULL_PTR, .{});
+        assert_with_reason(idx <= list.len.*, @src(), @This(), ERR_IOOB_INDEX, .{ idx, list.len.* });
+        copy_rightward(L, list, idx, list.len.*, 1);
+        list.len.* += 1;
+        return &list.ptr.*.?[idx];
     }
 
-    pub fn insert(comptime List: type, self: *List, idx: List.Idx, item: List.Elem, alloc: Allocator) if (List.RETURN_ERRORS) List.Error!void else void {
-        const ptr = if (List.RETURN_ERRORS) try insert_slot(List, self, idx, alloc) else insert_slot(List, self, idx, alloc);
+    pub fn insert(comptime L: ListConstants, self: *L.List, idx: L.Idx, item: L.Elem, alloc: Allocator) if (L.RETURN_ERRORS) L.Error!void else void {
+        const ptr = if (L.RETURN_ERRORS) try insert_slot(L, self, idx, alloc) else insert_slot(L, self, idx, alloc);
         ptr.* = item;
     }
 
-    pub fn insert_assume_capacity(comptime List: type, self: *List, idx: List.Idx, item: List.Elem) void {
-        const ptr = insert_slot_assume_capacity(List, self, idx);
+    pub fn insert_assume_capacity(comptime L: ListConstants, self: *L.List, idx: L.Idx, item: L.Elem) void {
+        const ptr = insert_slot_assume_capacity(L, self, idx);
         ptr.* = item;
     }
 
-    pub fn insert_many_slots(comptime List: type, self: *List, idx: List.Idx, count: List.Idx, alloc: Allocator) if (List.RETURN_ERRORS) List.Error![]List.Elem else []List.Elem {
-        if (List.RETURN_ERRORS) {
-            try ensure_unused_capacity(List, self, count, alloc);
+    pub fn insert_many_slots(comptime L: ListConstants, self: *L.List, idx: L.Idx, count: L.Idx, alloc: Allocator) if (L.RETURN_ERRORS) L.Error![]L.Elem else []L.Elem {
+        if (L.RETURN_ERRORS) {
+            try ensure_unused_capacity(L, self, count, alloc);
         } else {
-            ensure_unused_capacity(List, self, count, alloc);
+            ensure_unused_capacity(L, self, count, alloc);
         }
-        return insert_many_slots_assume_capacity(List, self, idx, count);
+        return insert_many_slots_assume_capacity(L, self, idx, count);
     }
 
-    pub fn insert_many_slots_assume_capacity(comptime List: type, self: *List, idx: List.Idx, count: List.Idx) []List.Elem {
-        assert(idx + count <= self.len);
-        mem.copyBackwards(List.Elem, self.ptr[idx + count .. self.len + count], self.ptr[idx..self.len]);
-        self.len += count;
-        return self.ptr[idx .. idx + count];
+    pub fn insert_many_slots_assume_capacity(comptime L: ListConstants, self: *L.List, idx: L.Idx, count: L.Idx) []L.Elem {
+        const list = L.meta_list_mutable(self);
+        assert_with_reason(list.ptr.* != null, @src(), @This(), ERR_OP_NULL_PTR, .{});
+        assert_with_reason(idx + count <= list.len.*, @src(), @This(), ERR_IOOB_START_LEN, .{ idx + count, list.len.* });
+        copy_rightward(L, list, idx, list.len.*, count);
+        list.len.* += count;
+        return list.ptr.*.?[idx .. idx + count];
     }
 
-    pub fn insert_slice(comptime List: type, self: *List, idx: List.Idx, items: []const List.Elem, alloc: Allocator) if (List.RETURN_ERRORS) List.Error!void else void {
-        const slots = if (List.RETURN_ERRORS) try insert_many_slots(List, self, idx, @intCast(items.len), alloc) else insert_many_slots(List, self, idx, @intCast(items.len), alloc);
+    pub fn insert_slice(comptime L: ListConstants, self: *L.List, idx: L.Idx, items: []const L.Elem, alloc: Allocator) if (L.RETURN_ERRORS) L.Error!void else void {
+        const slots = if (L.RETURN_ERRORS) try insert_many_slots(L, self, idx, @intCast(items.len), alloc) else insert_many_slots(L, self, idx, @intCast(items.len), alloc);
         @memcpy(slots, items);
     }
 
-    pub fn insert_slice_assume_capacity(comptime List: type, self: *List, idx: List.Idx, items: []const List.Elem) void {
-        const slots = insert_many_slots_assume_capacity(List, self, idx, @intCast(items.len));
+    pub fn insert_slice_assume_capacity(comptime L: ListConstants, self: *L.List, idx: L.Idx, items: []const L.Elem) void {
+        const slots = insert_many_slots_assume_capacity(L, self, idx, @intCast(items.len));
         @memcpy(slots, items);
     }
 
@@ -231,8 +588,8 @@ pub const Impl = struct {
         @memcpy(slots, items);
     }
 
-    pub fn append_slice_assume_capacity(comptime List: type, self: *List, items: []const List.Elem) void {
-        const slots = append_many_slots_assume_capacity(List, self, @intCast(items.len));
+    pub fn append_slice_assume_capacity(comptime L: ListConstants, self: *L.List, items: []const L.Elem) void {
+        const slots = append_many_slots_assume_capacity(L, self, @intCast(items.len));
         @memcpy(slots, items);
     }
 
@@ -325,16 +682,16 @@ pub const Impl = struct {
         return ensure_total_capacity_exact(List, self, true_capacity_for_grow(List, self.cap, new_capacity), alloc);
     }
 
-    pub fn ensure_total_capacity_exact(comptime List: type, self: *List, new_capacity: List.Idx, alloc: Allocator) if (List.RETURN_ERRORS) List.Error!void else void {
-        if (@sizeOf(List.Elem) == 0) {
-            self.cap = math.maxInt(List.Idx);
+    pub fn ensure_total_capacity_exact(comptime L: ListConstants, self: *L.List, new_capacity: L.Idx, alloc: Allocator) if (L.RETURN_ERRORS) L.Error!void else void {
+        if (@sizeOf(L.Elem) == 0) {
+            self.cap = math.maxInt(L.Idx);
             return;
         }
 
         if (self.cap >= new_capacity) return;
 
         if (new_capacity < self.len) {
-            if (List.SECURE_WIPE) crypto.secureZero(List.Elem, self.ptr[new_capacity..self.len]);
+            if (L.SECURE_WIPE) crypto.secureZero(L.Elem, self.ptr[new_capacity..self.len]);
             self.len = new_capacity;
         }
 
@@ -343,17 +700,17 @@ pub const Impl = struct {
             self.ptr = new_memory.ptr;
             self.cap = @intCast(new_memory.len);
         } else {
-            const new_memory = alloc.alignedAlloc(List.Elem, List.ALIGN, new_capacity) catch |err| return handle_alloc_error(List, err);
+            const new_memory = alloc.alignedAlloc(L.Elem, L.ALIGN, new_capacity) catch |err| return handle_alloc_error(L.List, err);
             @memcpy(new_memory[0..self.len], self.ptr[0..self.len]);
-            if (List.SECURE_WIPE) crypto.secureZero(List.Elem, self.ptr[0..self.len]);
+            if (L.SECURE_WIPE) crypto.secureZero(L.Elem, self.ptr[0..self.len]);
             alloc.free(old_memory);
             self.ptr = new_memory.ptr;
-            self.cap = @as(List.Idx, @intCast(new_memory.len));
+            self.cap = @as(L.Idx, @intCast(new_memory.len));
         }
     }
 
-    pub fn ensure_unused_capacity(comptime List: type, self: *List, additional_count: List.Idx, alloc: Allocator) if (List.RETURN_ERRORS) List.Error!void else void {
-        const new_total_cap = if (List.RETURN_ERRORS) try add_or_error(List, self.len, additional_count) else add_or_error(List, self.len, additional_count);
+    pub fn ensure_unused_capacity(comptime L: ListConstants, self: *L.List, additional_count: L.Idx, alloc: Allocator) if (L.RETURN_ERRORS) L.Error!void else void {
+        const new_total_cap = if (L.RETURN_ERRORS) try add_or_error(L, self.len, additional_count) else add_or_error(List, self.len, additional_count);
         return ensure_total_capacity(List, self, new_total_cap, alloc);
     }
 
@@ -380,7 +737,7 @@ pub const Impl = struct {
         return append_many_slots_assume_capacity(List, self, count);
     }
 
-    pub fn append_many_slots_assume_capacity(comptime List: type, self: *List, count: List.Idx) []List.Elem {
+    pub fn append_many_slots_assume_capacity(comptime L: ListConstants, self: *L.List, count: L.Idx) []L.Elem {
         const new_len = self.len + count;
         assert(new_len <= self.cap);
         const prev_len = self.len;
@@ -424,8 +781,8 @@ pub const Impl = struct {
         return get_last(List, self);
     }
 
-    pub fn add_or_error(comptime List: type, a: List.Idx, b: List.Idx) if (List.RETURN_ERRORS) error{OutOfMemory}!List.Idx else List.Idx {
-        if (!List.RETURN_ERRORS) return a + b;
+    pub fn add_or_error(comptime L: ListConstants, a: L.Idx, b: L.Idx) if (L.RETURN_ERRORS) error{OutOfMemory}!L.Idx else L.Idx {
+        if (!L.RETURN_ERRORS) return a + b;
         const result, const overflow = @addWithOverflow(a, b);
         if (overflow != 0) return error.OutOfMemory;
         return result;
@@ -684,16 +1041,14 @@ pub const Impl = struct {
     //     return null;
     // }
 
-    pub fn handle_alloc_error(comptime List: type, err: Allocator.Error) if (List.RETURN_ERRORS) List.Error else noreturn {
-        switch (List.ALLOC_ERROR_BEHAVIOR) {
-            AllocErrorBehavior.ALLOCATION_ERRORS_RETURN_ERROR => return err,
-            AllocErrorBehavior.ALLOCATION_ERRORS_PANIC => std.debug.panic("List's backing allocator failed to allocate memory: Allocator.Error.{s}", .{@errorName(err)}),
-            AllocErrorBehavior.ALLOCATION_ERRORS_ARE_UNREACHABLE => unreachable,
+    pub fn handle_alloc_error(comptime L: ListConstants, comptime src: SourceLocation, comptime this: type, err: L.Error) if (L.RETURN_ERRORS) L.Error else noreturn {
+        switch (L.ERROR_BEHAVIOR) {
+            ErrorBehavior.RETURN_ERRORS => return err,
+            ErrorBehavior.ERRORS_PANIC => assert_with_reason(false, src, this, "upstream error: {s}", .{@errorName(err)}),
+            ErrorBehavior.ERRORS_ARE_UNREACHABLE => unreachable,
         }
     }
 };
-
-
 
 pub fn define_manually_managed_list_type(comptime options: ListOptions) type {
     const opt = comptime check: {
@@ -710,12 +1065,14 @@ pub fn define_manually_managed_list_type(comptime options: ListOptions) type {
     }
     if (@typeInfo(opt.index_type) != Type.int or @typeInfo(opt.index_type).int.signedness != .unsigned) @panic("index_type must be an unsigned integer type");
     return extern struct {
-        list: 
+        ptr: Ptr = UNINIT_PTR,
+        len: Idx = 0,
+        cap: Idx = 0,
 
         pub const ALIGN = options.alignment;
-        pub const ALLOC_ERROR_BEHAVIOR = options.alloc_error_behavior;
+        pub const ALLOC_ERROR_BEHAVIOR = options.error_behavior;
         pub const GROWTH = options.growth_model;
-        pub const RETURN_ERRORS = options.alloc_error_behavior == .ALLOCATION_ERRORS_RETURN_ERROR;
+        pub const RETURN_ERRORS = options.error_behavior == .ALLOCATION_ERRORS_RETURN_ERROR;
         pub const SECURE_WIPE = options.secure_wipe_bytes;
         pub const UNINIT_PTR: Ptr = @ptrFromInt(if (ALIGN) |a| mem.alignBackward(usize, math.maxInt(usize), @intCast(a)) else mem.alignBackward(usize, math.maxInt(usize), @alignOf(Elem)));
         pub const ATOMIC_PADDING = @as(comptime_int, @max(1, std.atomic.cache_line / @sizeOf(Elem)));
@@ -764,7 +1121,7 @@ pub fn define_manually_managed_list_type(comptime options: ListOptions) type {
         }
 
         pub inline fn new_empty() List {
-            return Impl.new_empty(List);
+            return Impl.new_uninit(List);
         }
 
         pub inline fn new_with_capacity(capacity: Idx, alloc: Allocator) if (RETURN_ERRORS) Error!List else List {
@@ -1117,9 +1474,9 @@ pub fn define_static_allocator_list_type(comptime base_options: ListOptions, com
 
         pub const ALLOC = alloc_ptr;
         pub const ALIGN = base_options.alignment;
-        pub const ALLOC_ERROR_BEHAVIOR = base_options.alloc_error_behavior;
+        pub const ALLOC_ERROR_BEHAVIOR = base_options.error_behavior;
         pub const GROWTH = base_options.growth_model;
-        pub const RETURN_ERRORS = base_options.alloc_error_behavior == .ALLOCATION_ERRORS_RETURN_ERROR;
+        pub const RETURN_ERRORS = base_options.error_behavior == .ALLOCATION_ERRORS_RETURN_ERROR;
         pub const SECURE_WIPE = base_options.secure_wipe_bytes;
         pub const UNINIT_PTR: Ptr = @ptrFromInt(if (ALIGN) |a| mem.alignBackward(usize, math.maxInt(usize), @intCast(a)) else mem.alignBackward(usize, math.maxInt(usize), @alignOf(Elem)));
         pub const ATOMIC_PADDING = @as(comptime_int, @max(1, std.atomic.cache_line / @sizeOf(Elem)));
@@ -1172,7 +1529,7 @@ pub fn define_static_allocator_list_type(comptime base_options: ListOptions, com
         }
 
         pub inline fn new_empty() List {
-            return Impl.new_empty(List);
+            return Impl.new_uninit(List);
         }
 
         pub inline fn new_with_capacity(capacity: Idx) if (RETURN_ERRORS) Error!List else List {
@@ -1522,9 +1879,9 @@ pub fn define_cached_allocator_list_type(comptime base_options: ListOptions) typ
         cap: Idx = 0,
 
         pub const ALIGN = base_options.alignment;
-        pub const ALLOC_ERROR_BEHAVIOR = base_options.alloc_error_behavior;
+        pub const ALLOC_ERROR_BEHAVIOR = base_options.error_behavior;
         pub const GROWTH = base_options.growth_model;
-        pub const RETURN_ERRORS = base_options.alloc_error_behavior == .ALLOCATION_ERRORS_RETURN_ERROR;
+        pub const RETURN_ERRORS = base_options.error_behavior == .ALLOCATION_ERRORS_RETURN_ERROR;
         pub const SECURE_WIPE = base_options.secure_wipe_bytes;
         pub const UNINIT_PTR: Ptr = @ptrFromInt(if (ALIGN) |a| mem.alignBackward(usize, math.maxInt(usize), @intCast(a)) else mem.alignBackward(usize, math.maxInt(usize), @alignOf(Elem)));
         pub const ATOMIC_PADDING = @as(comptime_int, @max(1, std.atomic.cache_line / @sizeOf(Elem)));
@@ -1591,7 +1948,7 @@ pub fn define_cached_allocator_list_type(comptime base_options: ListOptions) typ
         }
 
         pub inline fn new_empty(alloc: Allocator) List {
-            const list: List = Impl.new_empty(List);
+            const list: List = Impl.new_uninit(List);
             list.set_alloc(alloc);
             return list;
         }
@@ -1923,11 +2280,11 @@ pub fn define_cached_allocator_list_type(comptime base_options: ListOptions) typ
     };
 }
 
-test "LinkedList.zig" {
+test "List.zig" {
     const t = std.testing;
     const alloc = std.heap.page_allocator;
     const base_opts = ListOptions{
-        .alloc_error_behavior = .ALLOCATION_ERRORS_PANIC,
+        .error_behavior = .ALLOCATION_ERRORS_PANIC,
         .element_type = u8,
         .index_type = u32,
     };

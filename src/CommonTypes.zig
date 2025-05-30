@@ -35,13 +35,13 @@ pub const PointOrientation = enum {
 };
 
 /// TODO documentation
-pub const AllocErrorBehavior = enum {
+pub const ErrorBehavior = enum {
     /// TODO documentation
-    ALLOCATION_ERRORS_RETURN_ERROR,
+    RETURN_ERRORS,
     /// TODO documentation
-    ALLOCATION_ERRORS_PANIC,
+    ERRORS_PANIC,
     /// TODO documentation
-    ALLOCATION_ERRORS_ARE_UNREACHABLE,
+    ERRORS_ARE_UNREACHABLE,
 };
 
 /// TODO documentation
@@ -117,4 +117,19 @@ pub const PosMutability = enum {
     increase_only,
     decrease_only,
     increase_or_decrease,
+};
+
+pub const PathKind = enum(u8) {
+    ABSOLUTE,
+    RELATIVE_CWD,
+};
+
+pub const Path = union(PathKind) {
+    ABSOLUTE: []const u8,
+    RELATIVE_CWD: []const u8,
+};
+
+pub const TuplePointer = struct {
+    tuple_type: type,
+    opaque_ptr: *anyopaque
 };

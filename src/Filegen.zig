@@ -21,150 +21,114 @@
 //    misrepresented as being the original software.
 // 3. This notice may not be removed or altered from any source distribution.
 
-// const std = @import("std");
-// const build = @import("builtin");
-// const io = std.io;
-// const fs = std.fs;
-// const process = std.process;
-// const DirOpenOptions = fs.Dir.OpenOptions;
-// const FileCreateFlags = fs.File.CreateFlags;
-// const FileOpenMode = fs.File.OpenMode;
-// const TemplateMap = std.StaticStringMap([]const u8);
+const std = @import("std");
+const build = @import("builtin");
+const FileBuffer = std.ArrayList(u8);
+const io = std.io;
+const fs = std.fs;
+const process = std.process;
+const DirOpenOptions = fs.Dir.OpenOptions;
+const FileCreateFlags = fs.File.CreateFlags;
+const File = fs.File;
+const FileOpenMode = fs.File.OpenMode;
+const FileOpenFlags = fs.File.OpenFlags;
+const Allocator = std.mem.Allocator;
 
-// const Root = @import("./_root.zig");
-// const Buffer = Root.CollectionTypes.StaticAllocList.define_list_type(.{
-//     .alignment = 1,
-//     .alloc_error_behavior = .ALLOCATION_ERRORS_PANIC,
-//     .allocator = &std.heap.page_allocator,
-//     .element_type = u8,
-//     .index_type = usize,
-//     .growth_model = .GROW_BY_50_PERCENT,
-// });
-// const FILE_CREATE_FLAGS = FileCreateFlags{
-//     .read = false,
-//     .exclusive = false,
-//     .lock = .exclusive,
-//     .lock_nonblocking = false,
-//     .truncate = true,
-//     .mode = fs.File.default_mode,
-// };
+const Root = @import("./_root.zig");
+const Path = Root.CommonTypes.Path;
+const Assert = Root.Assert;
+const assert_with_reason = Assert.assert_with_reason;
+const Types = Root.Types;
 
-// pub const Generator = struct {
-//     buffer: Buffer = Buffer{},
+const Self = @This();
+const CREATE_FLAGS = FileCreateFlags{
+    .exclusive = false,
+    .lock = .exclusive,
+    .lock_nonblocking = false,
+    .read = false,
+    .truncate = true,
+    .mode = fs.File.default_mode,
+};
 
-//     pub inline fn new() Generator {
-//         return Generator{
-//             .buffer = Buffer{},
-//         };
-//     }
+path: Path,
+file: File,
+buffer: FileBuffer,
+is_open: bool,
 
-//     pub inline fn fresh_writer(self: *Generator) Buffer.Writer {
-//         self.buffer.clear_retaining_capacity();
-//         return self.buffer.get_writer();
-//     }
+pub fn create(allocator: Allocator) anyerror!Self {
+    return Self{
+        .file = undefined,
+        .buffer = FileBuffer.initCapacity(allocator, std.heap.page_size_min),
+        .path = .{ .ABSOLUTE = "" },
+        .is_open = false,
+    };
+}
 
-//     pub fn save_buffer_to_file(self: *Generator, directory_path_relative_to_cwd: []const u8, filename: []const u8) void {
-//         self.buffer.clear_retaining_capacity();
-//         const cwd = fs.cwd();
-//         cwd.makePath(directory_path_relative_to_cwd) catch |err| std.debug.panic("Generator failed to find or create output directory `(cwd)/{s}`: {s}", .{ directory_path_relative_to_cwd, @errorName(err) });
-//         const file_dir = cwd.openDir(directory_path_relative_to_cwd, .{}) catch |err| std.debug.panic("Generator failed to open output directory `(cwd)/{s}`: {s}", .{ directory_path_relative_to_cwd, @errorName(err) });
-//         defer file_dir.close();
-//         const file = file_dir.createFile(filename, FILE_CREATE_FLAGS) catch |err| std.debug.panic("Generator failed to create or open output file `(cwd)/{s}/{s}`: {s}", .{ directory_path_relative_to_cwd, filename, @errorName(err) });
-//         defer file.close();
-//         file.writeAll(self.buffer[0..self.buffer.len]) catch |err| std.debug.panic("Generator failed to write to file `(cwd)/{s}/{s}`: {s}", .{ directory_path_relative_to_cwd, filename, @errorName(err) });
-//     }
+pub fn destroy(self: *Self) anyerror!void {
+    assert_with_reason(!self.is_open, @src(), @This(), "cannot destroy filegen while a file is open", .{});
+    self.buffer.deinit();
+}
 
-//     pub inline fn release_memory(self: *Generator) void {
-//         self.buffer.clear_and_free();
-//     }
-// };
+pub fn create_filegen_and_start_generating_file(path: Path, allocator: Allocator) anyerror!Self {
+    const file = try switch (path) {
+        .ABSOLUTE => |abs| fs.createFileAbsolute(abs, CREATE_FLAGS),
+        .RELATIVE_CWD => |rel| fs.cwd().createFile(rel, CREATE_FLAGS),
+    };
+    return Self{
+        .file = file,
+        .buffer = FileBuffer.initCapacity(allocator, std.heap.page_size_min),
+        .path = path,
+        .is_open = true,
+    };
+}
 
-// // pub const PACKED = "packed ";
-// // pub const EXTERN = "extern ";
-// // pub const PACKED_STRUCT = "packed struct {\n";
-// // pub const EXTERN_STRUCT = "extern struct {\n";
-// // pub const PUB = "pub ";
-// // pub const INLINE = "inline ";
-// // pub const PUB_INLINE_FN = "pub inline fn ";
-// // pub const INLINE_FN = "inline fn ";
-// // pub const PUB_FN = "pub fn ";
-// // pub const EMPTY = "";
-// // pub const FN = "fn ";
-// // pub const CONST = "const ";
-// // pub const VAR = "var ";
-// // pub const STRUCT = "struct {\n";
-// // pub const END_STRUCT = "\n};\n";
-// // pub const END_FN = "\n}\n";
-// // pub const U8 = "u8";
-// // pub const I8 = "i8";
-// // pub const U16 = "u16";
-// // pub const I16 = "i16";
-// // pub const U32 = "u32";
-// // pub const I32 = "i32";
-// // pub const U64 = "u64";
-// // pub const I64 = "i64";
-// // pub const U128 = "u128";
-// // pub const I128 = "i128";
-// // pub const USIZE = "usize";
-// // pub const ISIZE = "isize";
-// // pub const F16 = "f16";
-// // pub const F32 = "f32";
-// // pub const F64 = "f64";
-// // pub const F80 = "f80";
-// // pub const F128 = "f128";
-// // pub const BOOL = "bool";
-// // pub const VOID = "void";
+pub fn stage_bytes(self: *Self, bytes: []const u8) anyerror!void {
+    assert_with_reason(self.is_open, @src(), @This(), "no file is open", .{});
+    try self.buffer.appendSlice(bytes);
+}
 
-// // pub inline fn ANY_ERROR_UNION(comptime good_type: []const u8) []const u8 {
-// //     return "!" + good_type;
-// // }
+pub fn commit_bytes(self: *Self) anyerror!void {
+    assert_with_reason(self.is_open, @src(), @This(), "no file is open", .{});
+    try self.file.writeAll(self.buffer.items);
+    self.buffer.clearRetainingCapacity();
+}
 
-// // pub inline fn ERROR_UNION(comptime err_type: []const u8, comptime good_type: []const u8) []const u8 {
-// //     return err_type ++ "!" + good_type;
-// // }
+pub fn finish_generating_file(self: *Self) anyerror!void {
+    assert_with_reason(self.is_open, @src(), @This(), "no file is open", .{});
+    if (self.buffer.items.len > 0) {
+        try self.file.writeAll(self.buffer.items);
+        self.buffer.clearRetainingCapacity();
+    }
+    self.file.close();
+    self.is_open = false;
+}
 
-// // pub inline fn OPTIONAL(comptime exists_type: []const u8) []const u8 {
-// //     return "?" ++ exists_type;
-// // }
+pub fn start_generating_file(self: *Self, path: Path) anyerror!void {
+    assert_with_reason(!self.is_open, @src(), @This(), "cannot create new file while a file is already open", .{});
+    self.file = try switch (path) {
+        .ABSOLUTE => |abs| fs.createFileAbsolute(abs, CREATE_FLAGS),
+        .RELATIVE_CWD => |rel| fs.cwd().createFile(rel, CREATE_FLAGS),
+    };
+    self.is_open = true;
+    self.path = path;
+}
 
-// // pub inline fn SLICE(comptime child_type: []const u8) []const u8 {
-// //     return "[]" ++ child_type;
-// // }
+pub fn foreach_field_stage_formatted(self: *Self, comptime fmt: []const u8, payload: anytype) anyerror!void {
+    assert_with_reason(self.is_open, @src(), @This(), "no file is open", .{});
+    const T_PAYLOADS = @TypeOf(payload);
+    assert_with_reason(Types.type_is_tuple(T_PAYLOADS), @src(), @This(), "`payload` must be a tuple type", .{});
+    const INFO = @typeInfo(T_PAYLOADS).@"struct";
+    var writer = self.buffer.writer();
+    inline for (INFO.fields) |field| {
+        try writer.print(fmt, @field(payload, field.name));
+    }
+}
 
-// // pub inline fn SLICE_CONST(comptime child: []const u8) []const u8 {
-// //     return "[]const " ++ child;
-// // }
-
-// // pub inline fn SLICE_ALIGN(comptime with_align: []const u8, comptime child: []const u8) []const u8 {
-// //     return "[]align(" ++ with_align ++ ") " ++ child;
-// // }
-
-// // pub inline fn SLICE_CONST_ALIGN(comptime with_align: []const u8, comptime child: []const u8) []const u8 {
-// //     return "[]const align(" ++ with_align ++ ") " ++ child;
-// // }
-
-// // pub fn if_else(comptime T: type, comptime cond: bool, comptime if_true: T, comptime if_false: T) T {
-// //     if (cond) return if_true;
-// //     return if_false;
-// // }
-
-// // pub fn INLINE_if(comptime cond: bool) []const u8 {
-// //     if (cond) return INLINE;
-// //     return EMPTY;
-// // }
-// // pub fn PUB_if(comptime cond: bool) []const u8 {
-// //     if (cond) return PUB;
-// //     return EMPTY;
-// // }
-// // pub fn PACKED_if(comptime cond: bool) []const u8 {
-// //     if (cond) return PACKED;
-// //     return EMPTY;
-// // }
-// // pub fn EXTERN_if(comptime cond: bool) []const u8 {
-// //     if (cond) return EXTERN;
-// //     return EMPTY;
-// // }
-// // pub fn CONST_if(comptime cond: bool) []const u8 {
-// //     if (cond) return CONST;
-// //     return VAR;
-// // }
+pub fn stage_if_true_else(self: *Self, condition: bool, comptime true_fmt: []const u8, true_payload: anytype, comptime false_fmt: []const u8, false_payload: anytype) anyerror!void {
+    var writer = self.buffer.writer();
+    if (condition) {
+        try writer.print(true_fmt, true_payload);
+    } else {
+        try writer.print(false_fmt, false_payload);
+    }
+}

@@ -298,6 +298,9 @@ pub inline fn type_is_enum(comptime T: type) bool {
 pub inline fn type_is_struct(comptime T: type) bool {
     return @typeInfo(T) == .@"struct";
 }
+pub inline fn type_is_tuple(comptime T: type) bool {
+    return @typeInfo(T) == .@"struct" and @typeInfo(T).@"struct".is_tuple == true;
+}
 pub inline fn type_is_void(comptime T: type) bool {
     return @typeInfo(T) == .void;
 }

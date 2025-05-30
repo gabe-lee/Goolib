@@ -42,7 +42,7 @@ pub const Composition = @import("./Composition.zig");
 // pub const Compare = @import("./Compare.zig");
 pub const DummyAllocator = @import("./DummyAllocator.zig");
 pub const EnumMap = @import("./EnumMap.zig");
-// pub const Filegen = @import("./Filegen.zig");
+pub const Filegen = @import("./Filegen.zig");
 pub const Flags = @import("./Flags.zig");
 pub const FlexSlice = @import("./FlexSlice.zig");
 // pub const Format = @import("./Format.zig");
@@ -81,7 +81,7 @@ comptime {
         // _ = @import("./Compare.zig");
         _ = @import("./DummyAllocator.zig");
         _ = @import("./EnumMap.zig");
-        // _ = @import("./Filegen.zig");
+        _ = @import("./Filegen.zig");
         _ = @import("./Flags.zig");
         _ = @import("./FlexSlice.zig");
 

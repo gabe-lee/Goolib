@@ -89,6 +89,23 @@ pub fn build(b: *std.Build) void {
     const test_step = b.step("test", "Run library tests");
     test_step.dependOn(&run_lib_tests.step);
 
+    //FILEGEN
+    const filegen = b.addExecutable(.{
+        .target = target,
+        .optimize = optimize,
+        .name = "filegen",
+        .root_source_file = b.path("srcgen/main.zig"),
+    });
+    filegen.root_module.addImport("Goolib", lib);
+    b.installArtifact(filegen);
+
+    const run_filegen = b.addRunArtifact(filegen);
+    if (b.args) |args| run_filegen.addArgs(args);
+    run_filegen.step.dependOn(b.getInstallStep());
+
+    const run_filegen_cmd = b.step("filegen", "Automatically generate files for the library");
+    run_filegen_cmd.dependOn(&run_filegen.step);
+
     //BREAKOUT SAMPLE APP
     const breakout = b.addExecutable(.{
         .target = target,
