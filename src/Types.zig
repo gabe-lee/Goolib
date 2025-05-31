@@ -162,6 +162,13 @@ pub fn enum_defined_field_count(comptime ENUM: type) comptime_int {
     return @intCast(E_INFO.fields.len);
 }
 
+pub fn enum_is_exhaustive(comptime ENUM: type) bool {
+    const EI = @typeInfo(ENUM);
+    assert_with_reason(EI == .@"enum", @src(), "input `ENUM` must be an enum type", .{});
+    const E_INFO = EI.@"enum";
+    return E_INFO.is_exhaustive;
+}
+
 pub fn ptr_with_sentinel_has_min_len(comptime T: type, comptime S: T, ptr: [*:S]const T, len: usize) bool {
     var i: usize = 0;
     while (ptr[i] != S) : (i += 1) {

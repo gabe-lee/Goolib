@@ -55,33 +55,30 @@ pub const LinkedListOptions = struct {
     element_idx_cache_field: ?[]const u8 = null,
     force_cache_last_index: bool = true,
     force_cache_first_index: bool = true,
-    linked_sets: LinkedSets = .USED_AND_FREE_SETS,
+    /// This enum must list all desired linked sets ('used', 'free', etc...)
+    /// with tag values starting from 0 and increasing with no gaps
+    linked_set_enum: type = DefaultSet,
+};
+
+pub const DefaultSet = enum {
+    USED = 0,
+    FREE = 1,
 };
 
 pub const ElementStateAccess = struct {
     field: []const u8,
     field_type: type,
     state_mask: comptime_int,
-    free_flag: comptime_int,
-    used_flag: comptime_int,
+    /// This field must provide all flag values for each of the stated enum
+    /// values in `linked_set_enum`
+    /// 
+    /// Index 0 represents enum tag value 0, index 1 represents tag 1, etc
+    state_flags: []const comptime_int,
 };
 
-pub const LinkedSets = enum {
-    USED_AND_FREE_SETS,
-    USED_SET_ONLY,
-    FREE_SET_ONLY,
-};
-
-pub const Traverse = enum {
-    USED_FORWARD,
-    USED_BACKWARD,
-    FREE_FORWARD,
-    FREE_BACKWARD,
-};
-
-pub const ItemSet = enum {
-    USED,
-    FREE,
+const Direction = enum {
+    FORWARD,
+    BACKWARD,
 };
 
 // const ERR_START_PLUS_COUNT_OOB = "start ({d}) + count ({d}) == {d}, which is out of bounds for list.len ({d})";
@@ -94,6 +91,7 @@ pub fn define_manual_allocator_inked_list_type(comptime options: LinkedListOptio
     const B = options.backward_linkage != null;
     const S = options.element_state_access != null;
     const C = options.element_idx_cache_field != null;
+    assert_with_reason(Types.all_enum_values_start_from_zero_with_no_gaps(options.linked_set_enum), @src(), "all enum tag values in linked_set_enum must start from zero and increase with no gaps between values", .{});
     if (F) {
         const F_FIELD = options.forward_linkage.?;
         assert_with_reason(@hasField(options.list_options.element_type, F_FIELD), @src(), "element type `{s}` has no field named `{s}`", .{ @typeName(options.list_options.element_type), F_FIELD });
@@ -115,9 +113,17 @@ pub fn define_manual_allocator_inked_list_type(comptime options: LinkedListOptio
         assert_with_reason(Types.type_is_int(S_TYPE), @src(), "element state field `.{s}` on element type `{s}` is not an integer type", .{ S_FIELD, @typeName(options.list_options.element_type) });
         assert_with_reason(S_TYPE == options.element_state_access.?.field_type, @src(), "element state field `.{s}` on element type `{s}` does not match stated type {s}", .{ S_FIELD, @typeName(options.list_options.element_type), @typeName(options.element_state_access.?.field_type) });
         assert_with_reason(options.element_state_access.?.state_mask > 0, @src(), "element state mask == 0, has no bits and cannot isolate state bits", .{});
-        const composite_used_free = options.element_state_access.?.used_flag | options.element_state_access.?.free_flag;
-        const inv_composite = ~composite_used_free;
-        assert_with_reason(options.element_state_access.?.state_mask & inv_composite == 0, @src(), "either element state used flag or free flag are not covered by state mask, cannot isolate state bits", .{});
+        assert_with_reason(options.element_state_access.?.state_flags.len == Types.enum_defined_field_count(options.linked_set_enum), @src(), "number of flags provided in `element_state_access.state_flags` doe not match the number of tags in `linked_set_enum`", .{});
+        assert_with_reason(Types.enum_is_exhaustive(options.linked_set_enum), @src(), "`linked_set_enum` must be exhaustive", .{});
+        const composite_flags = comptime make: {
+            var comp: comptime_int = 0;
+            for (options.element_state_access.?.state_flags) |flag| {
+                comp |= flag;
+            }
+            break :make comp;
+        };
+        const inv_composite = ~composite_flags;
+        assert_with_reason(options.element_state_access.?.state_mask & inv_composite == 0, @src(), "one of the flags in `options.element_state_access.state_flags` are not covered by `options.element_state_access.state_mask`, cannot isolate all state bits", .{});
     }
     if (C) {
         const C_FIELD = options.element_idx_cache_field.?;
@@ -125,15 +131,18 @@ pub fn define_manual_allocator_inked_list_type(comptime options: LinkedListOptio
         const C_TYPE = @FieldType(options.list_options.element_type, C_FIELD);
         assert_with_reason(C_TYPE == options.list_options.index_type, @src(), "element state field `.{s}` on element type `{s}` does not match options.list_options.index_type `{s}`", .{ C_FIELD, @typeName(options.list_options.element_type), @typeName(options.list_options.index_type) });
     }
+    const SETS_ARRAY: if (S) [options.element_state_access.?.state_flags.len]options.element_state_access.?.field_type else void = if (S) make: {
+        var arr: [options.element_state_access.?.state_flags.len]options.element_state_access.?.field_type = undefined;
+        for (0..options.element_state_access.?.state_flags.len) |idx| {
+            arr[idx] = options.element_state_access.?.state_flags.ptr[idx];
+        }
+        break :make arr;
+    } else void{};
     return extern struct {
         list: BaseList = BaseList.UNINIT,
-        first_used_index: if (HEAD and USED) Idx else void = if (HEAD and USED) 0 else void{},
-        last_used_index: if (TAIL and USED) Idx else void = if (TAIL and USED) 0 else void{},
-        used_count: if (USED) Idx else void = if (USED) 0 else void{},
-        first_free_index: if (HEAD and FREE) Idx else void = if (HEAD and FREE) 0 else void{},
-        last_free_index: if (TAIL and FREE) Idx else void = if (TAIL and FREE) 0 else void{},
-        free_count: if (FREE) Idx else void = if (FREE) 0 else void{},
+        sets: [SET_COUNT]SetData = UNINIT_SETS,
 
+        pub const SET_COUNT = Types.enum_defined_field_count(options.linked_set_enum);
         pub const FORWARD = options.forward_linkage != null;
         pub const NEXT_FIELD = if (FORWARD) options.forward_linkage.?.next_index_field else "";
         pub const BACKWARD = options.backward_linkage != null;
@@ -150,10 +159,21 @@ pub fn define_manual_allocator_inked_list_type(comptime options: LinkedListOptio
         pub const UNINIT = List{};
         pub const RETURN_ERRORS = options.list_options.error_behavior == .RETURN_ERRORS;
         pub const NULL_IDX = math.maxInt(Idx);
-        pub const FREE_FLAG: if (STATE) options.element_state_access.?.field_type else comptime_int = if (STATE) options.element_state_access.?.free_flag else 0;
-        pub const USED_FLAG: if (STATE) options.element_state_access.?.field_type else comptime_int = if (STATE) options.element_state_access.?.used_flag else 0;
+        pub const STATE_FLAGS = SETS_ARRAY;
         pub const STATE_MASK: if (STATE) options.element_state_access.?.field_type else comptime_int = if (STATE) options.element_state_access.?.state_mask else 0;
         pub const STATE_CLEAR_MASK: if (STATE) options.element_state_access.?.field_type else comptime_int = if (STATE) ~options.element_state_access.?.state_mask else 0b1111111111111111111111111111111111111111111111111111111111111111;
+        const HEAD_TAIL: u2 = (@as(u2, @intFromBool(HEAD)) << 1) | @as(u2, @intFromBool(TAIL));
+        const HAS_HEAD_HAS_TAIL: u2 = 0b11;
+        const HAS_HEAD_NO_TAIL: u2 = 0b10;
+        const NO_HEAD_HAS_TAIL: u2 = 0b01;
+        const UNINIT_SETS: [SET_COUNT]SetData = comptime build: {
+            var sets: [SET_COUNT]SetData = undefined;
+            for (0..SET_COUNT) |idx| {
+                sets[idx] = SetData{};
+            }
+            break :build sets;
+        };
+        
 
         const List = @This();
         pub const BaseList = Root.List.define_manual_allocator_list_type(options.list_options);
@@ -161,6 +181,23 @@ pub fn define_manual_allocator_inked_list_type(comptime options: LinkedListOptio
         pub const Elem = options.list_options.element_type;
         pub const Idx = options.list_options.index_type;
         pub const Iterator = LinkedListIterator(List);
+        pub const Set = options.linked_set_enum;
+        pub const SetData = switch (HEAD_TAIL) {
+            HAS_HEAD_HAS_TAIL => struct {
+                first_idx: Idx = 0,
+                last_idx: Idx = 0,
+                count: Idx = 0,
+            },
+            HAS_HEAD_NO_TAIL => struct {
+                first_idx: Idx = 0,
+                count: Idx = 0,
+            },
+            NO_HEAD_HAS_TAIL => struct {
+                last_idx: Idx = 0,
+                count: Idx = 0,
+            },
+            else => unreachable,
+        };
 
         pub inline fn new_iterator(self: *List) Iterator {
             return Iterator{
@@ -216,64 +253,47 @@ pub fn define_manual_allocator_inked_list_type(comptime options: LinkedListOptio
             @field(elem, CACHE_FIELD) = idx;
         }
 
-        inline fn set_state_used(elem: *Elem) void {
+        inline fn set_linked_set(elem: *Elem, set: Set) void {
             @field(elem, STATE_FIELD) &= STATE_CLEAR_MASK;
-            @field(elem, STATE_FIELD) |= USED_FLAG;
-        }
-        inline fn set_state_free(elem: *Elem) void {
-            @field(elem, STATE_FIELD) &= STATE_CLEAR_MASK;
-            @field(elem, STATE_FIELD) |= FREE_FLAG;
+            @field(elem, STATE_FIELD) |= STATE_FLAGS[@intFromEnum(set)];
         }
         inline fn get_state(elem: *Elem) T_STATE {
             return @field(elem, STATE_FIELD) & STATE_MASK;
         }
-        inline fn is_used(elem: *Elem) bool {
-            return @field(elem, STATE_FIELD) & STATE_MASK == USED_FLAG;
-        }
-        inline fn is_free(elem: *Elem) bool {
-            return @field(elem, STATE_FIELD) & STATE_MASK == FREE_FLAG;
+        inline fn is_in_set(elem: *Elem, set: Set) bool {
+            return @field(elem, STATE_FIELD) & STATE_MASK == STATE_FLAGS[@intFromEnum(set)];
         }
 
-        pub fn traverse_to_find_item_index_preceding(self: List, idx: Idx, mode: Traverse) Idx {
+        pub fn traverse_to_find_item_index_preceding(self: List, idx: Idx, set: Set, dir: Direction) Idx {
             var i: Idx = undefined;
             var c: Idx = 0;
-            const limit = switch (mode) {
-                .FREE_BACKWARD => get: {
-                    assert_with_reason(BACKWARD and FREE, @src(), "linked list does not track `free` elements in the backward direction", .{});
-                    i = self.last_free_index;
-                    break :get self.free_count;
+            const limit = self.sets[@intFromEnum(set)].count;
+            switch (dir) {
+                .BACKWARD => {
+                    assert_with_reason(BACKWARD, @src(), "linked list does not link elements in the backward direction", .{});
+                    i = self.sets[@intFromEnum(set)].last_idx;
                 },
-                .FREE_FORWARD => get: {
-                    assert_with_reason(FORWARD and FREE, @src(), "linked list does not track `free` elements in the forward direction", .{});
-                    i = self.first_free_index;
-                    break :get self.free_count;
+                .BACKWARD => {
+                    assert_with_reason(FORWARD, @src(), "linked list does not link elements in the forward direction", .{});
+                    i = self.sets[@intFromEnum(set)].first_idx;
                 },
-                .USED_BACKWARD => get: {
-                    assert_with_reason(BACKWARD and USED, @src(), "linked list does not track `used` elements in the backward direction", .{});
-                    i = self.last_used_index;
-                    break :get self.used_count;
-                },
-                .USED_FORWARD => get: {
-                    assert_with_reason(FORWARD and USED, @src(), "linked list does not track `used` elements in the forward direction", .{});
-                    i = self.first_used_index;
-                    break :get self.used_count;
-                },
-            };
+            }
+            
             while (c < limit) {
-                assert_with_reason(i < self.list.len, @src(), "while traversing list/direction `{s}`, index {d} was found, which is out of bounds for list.len {d}: used/free count does not match list state", .{ @tagName(mode), i, self.list.len });
+                assert_with_reason(i < self.list.len, @src(), "while traversing set {s} in direction {s}, index {d} was found, which is out of bounds for list.len {d}: used/free count does not match list state", .{ @tagName(set), @tagName(dir), i, self.list.len });
                 const this_item: *const Elem = self.list.ptr[i];
-                const following_idx = switch (mode) {
-                    .FREE_FORWARD, .USED_FORWARD => get_next_idx(this_item),
-                    .FREE_BACKWARD, .USED_BACKWARD => get_prev_idx(this_item),
+                const following_idx = switch (dir) {
+                    .FORWARD => get_next_idx(this_item),
+                    .BACKWARD => get_prev_idx(this_item),
                 };
                 if (following_idx == idx) return i;
                 i = following_idx;
                 c += 1;
             }
-            assert_with_reason(false, @src(), "no item found referencing index {d} in list/direction {s}: broken list or item in wrong set", .{ idx, @tagName(mode) });
+            assert_with_reason(false, @src(), "no item found referencing index {d} in set {d} direction {s}: broken list or item in wrong set", .{ idx, @tagName(set), @tagName(dir) });
         }
 
-        fn connect_inner_links_and_set_state_in_index_list(self: *List, comptime item_set: ItemSet, indexes: []const Idx, comptime already_inner_linked: bool, comptime already_in_state: bool) void {
+        fn connect_inner_links_and_set_state_in_index_list(self: *List, set: Set, indexes: []const Idx, comptime already_inner_linked: bool, comptime already_in_state: bool) void {
             if (already_in_state and already_inner_linked) return;
             var i = 1;
             while (i < indexes.len) : (i += 1) {
@@ -289,20 +309,16 @@ pub fn define_manual_allocator_inked_list_type(comptime options: LinkedListOptio
                         set_prev_idx(this_new_item, prev_new_idx);
                     }
                 }
-                if (!already_in_state and STATE) switch (item_set) {
-                    .FREE => set_state_free(this_new_item),
-                    .USED => set_state_used(this_new_item),
-                };
+                if (!already_in_state and STATE) {
+                    set_linked_set(this_new_item, set);
+                }
             }
         }
 
-        fn connect_before(self: *List, comptime item_set: ItemSet, this_idx: Idx, new_item_idx: Idx) void {
+        fn connect_before(self: *List, set: Set, this_idx: Idx, new_item_idx: Idx) void {
             const this_item: *Elem = &self.list.ptr[this_idx];
             const new_item: *Elem = &self.list.ptr[new_item_idx];
-            const prev_idx = if (BACKWARD) get_prev_idx(this_item) else find: {
-                const mode: Traverse = if (item_set == .FREE) Traverse.FREE_FORWARD else Traverse.USED_FORWARD;
-                break :find self.traverse_to_find_item_index_preceding(this_idx, mode);
-            };
+            const prev_idx = if (BACKWARD) get_prev_idx(this_item) else self.traverse_to_find_item_index_preceding(this_idx, set, .FORWARD);
             if (FORWARD) {
                 const prev_item: *Elem = &self.list.ptr[prev_idx];
                 set_next_idx(new_item, this_idx);
@@ -312,27 +328,17 @@ pub fn define_manual_allocator_inked_list_type(comptime options: LinkedListOptio
                 set_prev_idx(new_item, prev_idx);
                 set_prev_idx(this_item, new_item_idx);
             }
-            switch (item_set) {
-                .FREE => {
-                    self.free_count += 1;
-                    if (STATE) set_state_free(new_item);
-                },
-                .USED => {
-                    self.used_count += 1;
-                    if (STATE) set_state_used(new_item);
-                },
-            }
+            self.sets[@intFromEnum(set)].count += 1;
+            set_linked_set(new_item, set);
         }
 
-        fn connect_many_before(self: *List, comptime item_set: ItemSet, this_idx: Idx, new_item_indexes: []const Idx, comptime already_inner_linked: bool, comptime already_in_state: bool) void {
+        fn connect_many_before(self: *List, set: Set, this_idx: Idx, new_item_indexes: []const Idx, comptime already_inner_linked: bool, comptime already_in_state: bool) void {
             const this_item: *Elem = &self.list.ptr[this_idx];
             const first_new_item: *Elem = &self.list.ptr[new_item_indexes[0]];
             const last_new_item_idx = new_item_indexes[new_item_indexes.len - 1];
             const last_new_item: *Elem = &self.list.ptr[last_new_item_idx];
-            const prev_idx = if (BACKWARD) get_prev_idx(this_item) else find: {
-                const mode: Traverse = if (item_set == .FREE) Traverse.FREE_FORWARD else Traverse.USED_FORWARD;
-                break :find self.traverse_to_find_item_index_preceding(this_idx, mode);
-            };
+            const prev_idx = if (BACKWARD) get_prev_idx(this_item) else self.traverse_to_find_item_index_preceding(this_idx, set, .FORWARD);
+            
             if (FORWARD) {
                 const prev_item: *Elem = &self.list.ptr[prev_idx];
                 set_next_idx(last_new_item, this_idx);
@@ -342,26 +348,15 @@ pub fn define_manual_allocator_inked_list_type(comptime options: LinkedListOptio
                 set_prev_idx(first_new_item, prev_idx);
                 set_prev_idx(this_item, last_new_item_idx);
             }
-            self.connect_inner_links_and_set_state_in_index_list(item_set, new_item_indexes, already_inner_linked, already_in_state);
-            switch (item_set) {
-                .FREE => {
-                    self.free_count += @intCast(new_item_indexes.len);
-                    if (STATE) set_state_free(first_new_item);
-                },
-                .USED => {
-                    self.used_count += @intCast(new_item_indexes.len);
-                    if (STATE) set_state_used(first_new_item);
-                },
-            }
+            self.connect_inner_links_and_set_state_in_index_list(set, new_item_indexes, already_inner_linked, already_in_state);
+            self.sets[@intFromEnum(set)].count += @intCast(new_item_indexes.len);
+            set_linked_set(first_new_item, set);
         }
 
-        fn connect_after(self: *List, comptime item_set: ItemSet, this_idx: Idx, new_item_idx: Idx) void {
+        fn connect_after(self: *List, set: Set, this_idx: Idx, new_item_idx: Idx) void {
             const this_item: *Elem = &self.list.ptr[this_idx];
             const new_item: *Elem = &self.list.ptr[new_item_idx];
-            const next_idx = if (FORWARD) get_next_idx(this_item) else find: {
-                const mode: Traverse = if (item_set == .FREE) Traverse.FREE_BACKWARD else Traverse.USED_BACKWARD;
-                break :find self.traverse_to_find_item_index_preceding(this_idx, mode);
-            };
+            const next_idx = if (FORWARD) get_next_idx(this_item) else self.traverse_to_find_item_index_preceding(this_idx, set, .BACKWARD);
             if (BACKWARD) {
                 const next_item: *Elem = &self.list.ptr[next_idx];
                 set_prev_idx(new_item, this_idx);
@@ -371,27 +366,16 @@ pub fn define_manual_allocator_inked_list_type(comptime options: LinkedListOptio
                 set_next_idx(new_item, next_idx);
                 set_next_idx(this_item, new_item_idx);
             }
-            switch (item_set) {
-                .FREE => {
-                    self.free_count += 1;
-                    if (STATE) set_state_free(new_item);
-                },
-                .USED => {
-                    self.used_count += 1;
-                    if (STATE) set_state_used(new_item);
-                },
-            }
+            self.sets[@intFromEnum(set)].count += 1;
+            set_linked_set(new_item, set);
         }
 
-        fn connect_many_after(self: *List, comptime item_set: ItemSet, this_idx: Idx, new_item_indexes: []const Idx, comptime already_inner_linked: bool, comptime already_in_state: bool) void {
+        fn connect_many_after(self: *List, set: Set, this_idx: Idx, new_item_indexes: []const Idx, comptime already_inner_linked: bool, comptime already_in_state: bool) void {
             const this_item: *Elem = &self.list.ptr[this_idx];
             const first_new_item: *Elem = &self.list.ptr[new_item_indexes[0]];
             const last_new_item_idx = new_item_indexes[new_item_indexes.len - 1];
             const last_new_item: *Elem = &self.list.ptr[last_new_item_idx];
-            const next_idx = if (FORWARD) get_next_idx(this_item) else find: {
-                const mode: Traverse = if (item_set == .FREE) Traverse.FREE_BACKWARD else Traverse.USED_BACKWARD;
-                break :find self.traverse_to_find_item_index_preceding(this_idx, mode);
-            };
+            const next_idx = if (FORWARD) get_next_idx(this_item) else self.traverse_to_find_item_index_preceding(this_idx, set, .FORWARD);
             if (BACKWARD) {
                 const next_item: *Elem = &self.list.ptr[next_idx];
                 set_prev_idx(first_new_item, this_idx);
@@ -401,21 +385,17 @@ pub fn define_manual_allocator_inked_list_type(comptime options: LinkedListOptio
                 set_next_idx(last_new_item, next_idx);
                 set_next_idx(this_item, new_item_indexes[0]);
             }
-            self.connect_inner_links_and_set_state_in_index_list(item_set, new_item_indexes, already_inner_linked, already_in_state);
-            switch (item_set) {
-                .FREE => {
-                    self.free_count += @intCast(new_item_indexes.len);
-                    if (STATE) set_state_free(first_new_item);
-                },
-                .USED => {
-                    self.used_count += @intCast(new_item_indexes.len);
-                    if (STATE) set_state_used(first_new_item);
-                },
-            }
+            self.connect_inner_links_and_set_state_in_index_list(set, new_item_indexes, already_inner_linked, already_in_state);
+            self.sets[@intFromEnum(set)].count += @intCast(new_item_indexes.len);
+            set_linked_set(first_new_item, set);
         }
+
+        //CHECKPOINT
+        fn disconnect(self: *List, set: Set, item: ) void {}
 
         pub fn claim_free_slot(self: *List) if (RETURN_ERRORS) Error!*Elem else *Elem {
             //CHECKPOINT
+            if 
         }
 
         pub fn insert_slot_after_assume_capacity(self: *List, item: *Elem) *Elem {
