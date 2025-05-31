@@ -55,18 +55,18 @@ pub const ListOptions = struct {
     secure_wipe_bytes: bool = false,
 };
 
-const ERR_START_PLUS_COUNT_OOB = "start ({d}) + count ({d}) == {d}, which is out of bounds for list.len ({d})";
-const ERR_LEN_EQUALS_CAP_SENT = "list.len ({d}) >= list.cap ({d}): unable to make sentinel slice without an additional slot for sentinel value";
-const ERR_LEN_EQUALS_CAP = "list.len ({d}) >= list.cap ({d}): cannot add additional item";
-const ERR_LEN_PLUS_COUNT_GREATER_CAP = "list.len ({d}) + new_item_count ({d}) == {d} > list.cap ({d}): cannot add additional items";
-const ERR_NEW_LEN_GREATER_CAP = "new len ({d}) > list.cap ({d}): unable to set new len";
-const ERR_NEW_LEN_GREATER_LEN = "new len ({d}) > list.len ({d}): shrink operation must have smaller or equal new len";
-const ERR_IDX_GREATER_LEN = "idx ({d}) > list.len ({d}): unable to insert item or slot at index";
-const ERR_IDX_GREATER_EQL_LEN = "idx ({d}) >= list.len ({d}): unable to operate on index out of bounds";
-const ERR_LAST_IDX_GREATER_LEN = "end of index range ({d}) > list.len ({d}): unable to operate on index out of bounds";
-const ERR_LIST_EMPTY = "list.len == 0: unable to return any items from list";
+pub const ERR_START_PLUS_COUNT_OOB = "start ({d}) + count ({d}) == {d}, which is out of bounds for list.len ({d})";
+pub const ERR_LEN_EQUALS_CAP_SENT = "list.len ({d}) >= list.cap ({d}): unable to make sentinel slice without an additional slot for sentinel value";
+pub const ERR_LEN_EQUALS_CAP = "list.len ({d}) >= list.cap ({d}): cannot add additional item";
+pub const ERR_LEN_PLUS_COUNT_GREATER_CAP = "list.len ({d}) + new_item_count ({d}) == {d} > list.cap ({d}): cannot add additional items";
+pub const ERR_NEW_LEN_GREATER_CAP = "new len ({d}) > list.cap ({d}): unable to set new len";
+pub const ERR_NEW_LEN_GREATER_LEN = "new len ({d}) > list.len ({d}): shrink operation must have smaller or equal new len";
+pub const ERR_IDX_GREATER_LEN = "idx ({d}) > list.len ({d}): unable to insert item or slot at index";
+pub const ERR_IDX_GREATER_EQL_LEN = "idx ({d}) >= list.len ({d}): unable to operate on index out of bounds";
+pub const ERR_LAST_IDX_GREATER_LEN = "end of index range ({d}) > list.len ({d}): unable to operate on index out of bounds";
+pub const ERR_LIST_EMPTY = "list.len == 0: unable to return any items from list";
 
-/// This is the core list paradigm, both other paradigms ('statically managed' and 'cached_allocator')
+/// This is the core list paradigm, both other paradigms ('static_allocator' and 'cached_allocator')
 /// simply call this type's methods and provide their own allocator
 pub fn define_manual_allocator_list_type(comptime options: ListOptions) type {
     const opt = comptime check: {
@@ -97,7 +97,6 @@ pub fn define_manual_allocator_list_type(comptime options: ListOptions) type {
         pub const UNINIT = List{};
 
         const List = @This();
-        const StaticList = @This();
         pub const Error = Allocator.Error;
         pub const Elem = options.element_type;
         pub const Idx = options.index_type;
@@ -879,7 +878,7 @@ pub fn define_static_allocator_list_type(comptime options: ListOptions, comptime
         };
 
         const List = @This();
-        const ManualList = define_manual_allocator_list_type(options);
+        pub const ManualList = define_manual_allocator_list_type(options);
         pub const Error = Allocator.Error;
         pub const Elem = options.element_type;
         pub const Idx = options.index_type;
@@ -1799,7 +1798,7 @@ pub fn ListIterator(comptime List: type) type {
     };
 }
 
-test "zig" {
+test "List.zig" {
     const t = std.testing;
     const alloc = std.heap.page_allocator;
     const opts = ListOptions{
