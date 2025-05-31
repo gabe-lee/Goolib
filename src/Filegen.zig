@@ -65,7 +65,7 @@ pub fn create(allocator: Allocator) anyerror!Self {
 }
 
 pub fn destroy(self: *Self) anyerror!void {
-    assert_with_reason(!self.is_open, @src(), @This(), "cannot destroy filegen while a file is open", .{});
+    assert_with_reason(!self.is_open, @src(), "cannot destroy filegen while a file is open", .{});
     self.buffer.deinit();
 }
 
@@ -83,18 +83,18 @@ pub fn create_filegen_and_start_generating_file(path: Path, allocator: Allocator
 }
 
 pub fn stage_bytes(self: *Self, bytes: []const u8) anyerror!void {
-    assert_with_reason(self.is_open, @src(), @This(), "no file is open", .{});
+    assert_with_reason(self.is_open, @src(), "no file is open", .{});
     try self.buffer.appendSlice(bytes);
 }
 
 pub fn commit_bytes(self: *Self) anyerror!void {
-    assert_with_reason(self.is_open, @src(), @This(), "no file is open", .{});
+    assert_with_reason(self.is_open, @src(), "no file is open", .{});
     try self.file.writeAll(self.buffer.items);
     self.buffer.clearRetainingCapacity();
 }
 
 pub fn finish_generating_file(self: *Self) anyerror!void {
-    assert_with_reason(self.is_open, @src(), @This(), "no file is open", .{});
+    assert_with_reason(self.is_open, @src(), "no file is open", .{});
     if (self.buffer.items.len > 0) {
         try self.file.writeAll(self.buffer.items);
         self.buffer.clearRetainingCapacity();
@@ -104,7 +104,7 @@ pub fn finish_generating_file(self: *Self) anyerror!void {
 }
 
 pub fn start_generating_file(self: *Self, path: Path) anyerror!void {
-    assert_with_reason(!self.is_open, @src(), @This(), "cannot create new file while a file is already open", .{});
+    assert_with_reason(!self.is_open, @src(), "cannot create new file while a file is already open", .{});
     self.file = try switch (path) {
         .ABSOLUTE => |abs| fs.createFileAbsolute(abs, CREATE_FLAGS),
         .RELATIVE_CWD => |rel| fs.cwd().createFile(rel, CREATE_FLAGS),
@@ -114,9 +114,9 @@ pub fn start_generating_file(self: *Self, path: Path) anyerror!void {
 }
 
 pub fn foreach_field_stage_formatted(self: *Self, comptime fmt: []const u8, payload: anytype) anyerror!void {
-    assert_with_reason(self.is_open, @src(), @This(), "no file is open", .{});
+    assert_with_reason(self.is_open, @src(), "no file is open", .{});
     const T_PAYLOADS = @TypeOf(payload);
-    assert_with_reason(Types.type_is_tuple(T_PAYLOADS), @src(), @This(), "`payload` must be a tuple type", .{});
+    assert_with_reason(Types.type_is_tuple(T_PAYLOADS), @src(), "`payload` must be a tuple type", .{});
     const INFO = @typeInfo(T_PAYLOADS).@"struct";
     var writer = self.buffer.writer();
     inline for (INFO.fields) |field| {

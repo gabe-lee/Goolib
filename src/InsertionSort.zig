@@ -28,8 +28,8 @@ const build = @import("builtin");
 const Root = @import("./_root.zig");
 const LOG_PREFIX = Root.LOG_PREFIX;
 const Utils = Root.Utils;
-const assert_with_reason = Utils.assert_with_reason;
-const comptime_assert_with_reason = Utils.comptime_assert_with_reason;
+const Assert = Root.Assert;
+const assert_with_reason = Assert.assert_with_reason;
 const infered_greater_than = Utils.infered_greater_than;
 const SortAlgorithm = Root.CommonTypes.SortAlgorithm;
 const Compare = Root.Compare;
@@ -39,7 +39,7 @@ const inline_swap = Root.Utils.inline_swap;
 // const greater_than = Compare.greater_than;
 
 pub fn insertion_sort(comptime T: type, buffer: []T) void {
-    comptime_assert_with_reason(Utils.can_infer_type_order(T), "cannot inherently order type " ++ @typeName(T));
+    assert_with_reason(Utils.can_infer_type_order(T), @src(), "cannot inherently order type " ++ @typeName(T), .{});
     var i: usize = 1;
     var j: usize = undefined;
     var jj: usize = undefined;
@@ -62,7 +62,7 @@ pub fn insertion_sort(comptime T: type, buffer: []T) void {
 }
 
 pub inline fn insertion_sort_with_transform_and_user_data(comptime T: type, buffer: []T, comptime TX: type, transform_fn: *const fn (in: T, user_data: ?*anyopaque) TX, user_data: ?*anyopaque) void {
-    comptime_assert_with_reason(Utils.can_infer_type_order(TX), "cannot inherently order type " ++ @typeName(TX));
+    assert_with_reason(Utils.can_infer_type_order(TX), @src(), "cannot inherently order type " ++ @typeName(TX), .{});
     var i: usize = 1;
     var j: usize = undefined;
     var jj: usize = undefined;
@@ -89,7 +89,7 @@ pub inline fn insertion_sort_with_transform_and_user_data(comptime T: type, buff
 }
 
 pub inline fn insertion_sort_with_transform(comptime T: type, buffer: []T, comptime TX: type, transform_fn: *const fn (in: T) TX) void {
-    comptime_assert_with_reason(Utils.can_infer_type_order(TX), "cannot inherently order type " ++ @typeName(TX));
+    assert_with_reason(Utils.can_infer_type_order(TX), @src(), "cannot inherently order type " ++ @typeName(TX), .{});
     var i: usize = 1;
     var j: usize = undefined;
     var jj: usize = undefined;

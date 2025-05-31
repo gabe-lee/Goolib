@@ -42,17 +42,17 @@ pub fn AccessorReturn(comptime Self: type, comptime T: type) type {
 }
 
 pub fn build_accessors(comptime container: type, comptime field_chain: []const []const u8, comptime final_type: type) AccessorReturn(container, final_type) {
-    comptime assert_with_reason(field_chain.len >= 1, @src(), @This(), "INPUTS:\ncontainer: {s}\nfield_chain = {s}\nfinal_type = {s}\nvvvv\n`field_chain` must have a length >= 1", .{ @typeName(container), field_chain, @typeName(final_type) });
+    comptime assert_with_reason(field_chain.len >= 1, @src(), "INPUTS:\ncontainer: {s}\nfield_chain = {s}\nfinal_type = {s}\nvvvv\n`field_chain` must have a length >= 1", .{ @typeName(container), field_chain, @typeName(final_type) });
     comptime var offset: usize = 0;
     comptime var current_type: type = container;
     comptime var i: usize = 0;
     inline while (i < field_chain.len) : (i += 1) {
-        comptime assert_with_reason(@hasField(current_type, field_chain[i]), @src(), @This(), "INPUTS:\ncontainer: {s}\nfield_chain = {s}\nfinal_type = {s}\nvvvv\nfield `{s}` does not exist in type {s}", .{ @typeName(container), field_chain, @typeName(final_type), field_chain[i], @typeName(current_type) });
+        comptime assert_with_reason(@hasField(current_type, field_chain[i]), @src(), "INPUTS:\ncontainer: {s}\nfield_chain = {s}\nfinal_type = {s}\nvvvv\nfield `{s}` does not exist in type {s}", .{ @typeName(container), field_chain, @typeName(final_type), field_chain[i], @typeName(current_type) });
         offset += @offsetOf(current_type, field_chain[i]);
         current_type = @FieldType(current_type, field_chain[i]);
     }
-    comptime assert_with_reason(current_type == final_type, @src(), @This(), "INPUTS:\ncontainer: {s}\nfield_chain = {s}\nfinal_type = {s}\nvvvv\nreal final type {s} did not match requested final type {s}", .{ @typeName(container), field_chain, @typeName(final_type), @typeName(current_type), @typeName(final_type) });
-    comptime assert_with_reason(std.mem.isAligned(offset, @alignOf(field_chain.final_type)), @src(), @This(), "INPUTS:\ncontainer: {s}\nfield_chain = {s}\nfinal_type = {s}\nvvvv\nfinal offset {d} is not aligned to required alignment of final type {s} ({d})", .{ @typeName(container), field_chain, @typeName(final_type), offset, @typeName(final_type), @alignOf(final_type) });
+    comptime assert_with_reason(current_type == final_type, @src(), "INPUTS:\ncontainer: {s}\nfield_chain = {s}\nfinal_type = {s}\nvvvv\nreal final type {s} did not match requested final type {s}", .{ @typeName(container), field_chain, @typeName(final_type), @typeName(current_type), @typeName(final_type) });
+    comptime assert_with_reason(std.mem.isAligned(offset, @alignOf(field_chain.final_type)), @src(), "INPUTS:\ncontainer: {s}\nfield_chain = {s}\nfinal_type = {s}\nvvvv\nfinal offset {d} is not aligned to required alignment of final type {s} ({d})", .{ @typeName(container), field_chain, @typeName(final_type), offset, @typeName(final_type), @alignOf(final_type) });
     const prototype = struct {
         fn acc_cnst(self: *const container) *const final_type {
             const base_addr = @intFromPtr(self);

@@ -159,8 +159,8 @@ pub inline fn can_infer_type_order(comptime T: type) bool {
 pub inline fn infered_less_than(a: anytype, b: anytype) bool {
     const A = @TypeOf(a);
     const B = @TypeOf(b);
-    assert_with_reason(can_infer_type_order(A), @inComptime(), @src(), @This(), "type of `a` (" ++ @typeName(A) ++ ") cannot infer order");
-    assert_with_reason(can_infer_type_order(B), @inComptime(), @src(), @This(), "type of `b` (" ++ @typeName(B) ++ ") cannot infer order");
+    assert_with_reason(can_infer_type_order(A), @src(), "type of `a` (" ++ @typeName(A) ++ ") cannot infer order", .{});
+    assert_with_reason(can_infer_type_order(B), @src(), "type of `b` (" ++ @typeName(B) ++ ") cannot infer order", .{});
     const aa = if (Types.type_is_pointer_or_slice(A)) unwrap: {
         const AA = Types.pointer_child_type(A);
         break :unwrap if (Types.type_is_bool(AA)) @intFromBool(a.*) else if (Types.type_is_enum(AA)) @intFromEnum(a.*) else a.*;
@@ -175,8 +175,8 @@ pub inline fn infered_less_than(a: anytype, b: anytype) bool {
 pub inline fn infered_greater_than(a: anytype, b: anytype) bool {
     const A = @TypeOf(a);
     const B = @TypeOf(b);
-    assert_with_reason(can_infer_type_order(A), @inComptime(), @src(), @This(), "type of `a` (" ++ @typeName(A) ++ ") cannot infer order");
-    assert_with_reason(can_infer_type_order(B), @inComptime(), @src(), @This(), "type of `b` (" ++ @typeName(B) ++ ") cannot infer order");
+    assert_with_reason(can_infer_type_order(A), @src(), "type of `a` (" ++ @typeName(A) ++ ") cannot infer order", .{});
+    assert_with_reason(can_infer_type_order(B), @src(), "type of `b` (" ++ @typeName(B) ++ ") cannot infer order", .{});
     const aa = if (Types.type_is_pointer_or_slice(A)) unwrap: {
         const AA = Types.pointer_child_type(A);
         break :unwrap if (Types.type_is_bool(AA)) @intFromBool(a.*) else if (Types.type_is_enum(AA)) @intFromEnum(a.*) else a.*;
@@ -191,8 +191,8 @@ pub inline fn infered_greater_than(a: anytype, b: anytype) bool {
 pub inline fn infered_less_than_or_equal(a: anytype, b: anytype) bool {
     const A = @TypeOf(a);
     const B = @TypeOf(b);
-    assert_with_reason(can_infer_type_order(A), @inComptime(), @src(), @This(), "type of `a` (" ++ @typeName(A) ++ ") cannot infer order");
-    assert_with_reason(can_infer_type_order(B), @inComptime(), @src(), @This(), "type of `b` (" ++ @typeName(B) ++ ") cannot infer order");
+    assert_with_reason(can_infer_type_order(A), @src(), "type of `a` (" ++ @typeName(A) ++ ") cannot infer order", .{});
+    assert_with_reason(can_infer_type_order(B), @src(), "type of `b` (" ++ @typeName(B) ++ ") cannot infer order", .{});
     const aa = if (Types.type_is_pointer_or_slice(A)) unwrap: {
         const AA = Types.pointer_child_type(A);
         break :unwrap if (Types.type_is_bool(AA)) @intFromBool(a.*) else if (Types.type_is_enum(AA)) @intFromEnum(a.*) else a.*;
@@ -207,8 +207,8 @@ pub inline fn infered_less_than_or_equal(a: anytype, b: anytype) bool {
 pub inline fn infered_greater_than_or_equal(a: anytype, b: anytype) bool {
     const A = @TypeOf(a);
     const B = @TypeOf(b);
-    assert_with_reason(can_infer_type_order(A), @inComptime(), @src(), @This(), "type of `a` (" ++ @typeName(A) ++ ") cannot infer order");
-    assert_with_reason(can_infer_type_order(B), @inComptime(), @src(), @This(), "type of `b` (" ++ @typeName(B) ++ ") cannot infer order");
+    assert_with_reason(can_infer_type_order(A), @src(), "type of `a` (" ++ @typeName(A) ++ ") cannot infer order", .{});
+    assert_with_reason(can_infer_type_order(B), @src(), "type of `b` (" ++ @typeName(B) ++ ") cannot infer order", .{});
     const aa = if (Types.type_is_pointer_or_slice(A)) unwrap: {
         const AA = Types.pointer_child_type(A);
         break :unwrap if (Types.type_is_bool(AA)) @intFromBool(a.*) else if (Types.type_is_enum(AA)) @intFromEnum(a.*) else a.*;
@@ -223,8 +223,8 @@ pub inline fn infered_greater_than_or_equal(a: anytype, b: anytype) bool {
 pub inline fn infered_equal(a: anytype, b: anytype) bool {
     const A = @TypeOf(a);
     const B = @TypeOf(b);
-    assert_with_reason(can_infer_type_order(A), @inComptime(), @src(), @This(), "type of `a` (" ++ @typeName(A) ++ ") cannot infer order");
-    assert_with_reason(can_infer_type_order(B), @inComptime(), @src(), @This(), "type of `b` (" ++ @typeName(B) ++ ") cannot infer order");
+    assert_with_reason(can_infer_type_order(A), @src(), "type of `a` (" ++ @typeName(A) ++ ") cannot infer order", .{});
+    assert_with_reason(can_infer_type_order(B), @src(), "type of `b` (" ++ @typeName(B) ++ ") cannot infer order", .{});
     const aa = if (Types.type_is_pointer_or_slice(A)) unwrap: {
         const AA = Types.pointer_child_type(A);
         break :unwrap if (Types.type_is_bool(AA)) @intFromBool(a.*) else if (Types.type_is_enum(AA)) @intFromEnum(a.*) else a.*;
@@ -286,26 +286,26 @@ pub fn memcopy(from_src: anytype, to_dst: anytype, count: usize) void {
         const ptr_type = TO;
         const child_type = Types.pointer_child_type(ptr_type);
         if (Types.pointer_is_slice(ptr_type)) {
-            assert_with_reason(to_dst_not_null.len >= count, @inComptime(), @src(), @This(), "`to_dst` ({s}) cannot recieve {d} items (has {d} capacity)", .{ @typeName(TO), count, to_dst_not_null.len });
-            assert_with_reason(child_type == copy_type, @inComptime(), @src(), @This(), "`to_dst` (" ++ @typeName(TO) ++ ") does not have a matching child type for `from_src` (" ++ @typeName(FROM) ++ ")");
+            assert_with_reason(to_dst_not_null.len >= count, @src(), "`to_dst` ({s}) cannot recieve {d} items (has {d} capacity)", .{ @typeName(TO), count, to_dst_not_null.len });
+            assert_with_reason(child_type == copy_type, @src(), "`to_dst` (" ++ @typeName(TO) ++ ") does not have a matching child type for `from_src` (" ++ @typeName(FROM) ++ ")");
             raw_to = @ptrCast(@alignCast(to_dst_not_null.ptr));
         } else if (Types.pointer_is_single(ptr_type)) {
             if (Types.type_is_array_or_vector(child_type)) {
                 assert_with_reason(to_dst_not_null.len >= count, "memcopy `to_dst` ({s}) cannot recieve {d} items (has {d} capacity)", .{ @typeName(TO), count, to_dst_not_null.len });
-                assert_with_reason(Types.array_or_vector_child_type(child_type) == copy_type, @inComptime(), @src(), @This(), "`to_dst` (" ++ @typeName(TO) ++ ") does not have a matching child type for `from_src` (" ++ @typeName(FROM) ++ ")");
+                assert_with_reason(Types.array_or_vector_child_type(child_type) == copy_type, @src(), "`to_dst` (" ++ @typeName(TO) ++ ") does not have a matching child type for `from_src` (" ++ @typeName(FROM) ++ ")");
                 raw_to = @ptrCast(@alignCast(to_dst_not_null));
             } else {
-                assert_with_reason(count == 1, @inComptime(), @src(), @This(), "`to_dst` ({s}) cannot recieve {d} items (has 1 item capacity, single item pointer to non-array/vector)", .{ @typeName(TO), count });
-                assert_with_reason(child_type == copy_type, @inComptime(), @src(), @This(), "`to_dst` (" ++ @typeName(TO) ++ ") does not have a matching child type for `from_src` (" ++ @typeName(FROM) ++ ")");
+                assert_with_reason(count == 1, @src(), "`to_dst` ({s}) cannot recieve {d} items (has 1 item capacity, single item pointer to non-array/vector)", .{ @typeName(TO), count });
+                assert_with_reason(child_type == copy_type, @src(), "`to_dst` (" ++ @typeName(TO) ++ ") does not have a matching child type for `from_src` (" ++ @typeName(FROM) ++ ")");
                 raw_to = @ptrCast(@alignCast(to_dst_not_null));
             }
         } else if (Types.pointer_is_many(ptr_type)) {
             if (Types.pointer_type_has_sentinel(ptr_type) and (build.mode == .Debug or build.mode == .ReleaseSafe)) {
                 const sentinel = Types.pointer_type_sentinel(ptr_type);
                 const len_check_slice = Types.make_const_slice_from_sentinel_ptr_max_len(child_type, sentinel.*, to_dst_not_null, count);
-                assert_with_reason(len_check_slice.len >= count, @inComptime(), @src(), @This(), "`to_dst` ({s}) cannot recieve {d} items (has {d} capacity)", .{ @typeName(TO), count, to_dst_not_null.len });
+                assert_with_reason(len_check_slice.len >= count, @src(), "`to_dst` ({s}) cannot recieve {d} items (has {d} capacity)", .{ @typeName(TO), count, to_dst_not_null.len });
             }
-            assert_with_reason(child_type == copy_type, @inComptime(), @src(), @This(), "`to_dst` (" ++ @typeName(TO) ++ ") does not have a matching child type for `from_src` (" ++ @typeName(FROM) ++ ")");
+            assert_with_reason(child_type == copy_type, @src(), "`to_dst` (" ++ @typeName(TO) ++ ") does not have a matching child type for `from_src` (" ++ @typeName(FROM) ++ ")");
             raw_to = @ptrCast(@alignCast(to_dst_not_null));
         }
     } else @compileError("memcopy `to_dst` must be a mutable pointer type");

@@ -207,19 +207,19 @@ pub const PanelListOptions = struct {
 };
 
 pub fn define_layout_manager(comptime settings: LayoutManagerSettings) type {
-    assert_with_reason(Types.type_is_unsigned_int(settings.panel_id_type), @src(), @This(), "`settings.panel_id_type` must be an unsigned integer type, got type `{s}`", .{@typeName(settings.panel_id_type)});
-    assert_with_reason(Types.type_is_unsigned_int(settings.reference_id_type), @src(), @This(), "`settings.reference_id_type` must be an unsigned integer type, got type `{s}`", .{@typeName(settings.panel_id_type)});
-    assert_with_reason(Types.type_is_numeric(settings.padding_dimension_type), @src(), @This(), "`settings.padding_type` must be a numeric type, got type `{s}`", .{@typeName(settings.padding_dimension_type)});
-    assert_with_reason(Types.type_is_numeric(settings.gap_dimension_type), @src(), @This(), "`settings.gap_type` must be a numeric type, got type `{s}`", .{@typeName(settings.gap_dimension_type)});
-    assert_with_reason(Types.type_is_numeric(settings.dimension_type), @src(), @This(), "`settings.dimension_type` must be a numeric type, got type `{s}`", .{@typeName(settings.dimension_type)});
-    assert_with_reason(Types.type_is_numeric(settings.z_index_type), @src(), @This(), "`settings.z_index_type` must be a numeric type, got type `{s}`", .{@typeName(settings.z_index_type)});
-    assert_with_reason(Types.type_is_struct(settings.user_state_type) or Types.type_is_void(settings.user_state_type), @src(), @This(), "`settings.user_state_type` must be a struct type or void, got type `{s}`", .{@typeName(settings.user_state_type)});
+    assert_with_reason(Types.type_is_unsigned_int(settings.panel_id_type), @src(), "`settings.panel_id_type` must be an unsigned integer type, got type `{s}`", .{@typeName(settings.panel_id_type)});
+    assert_with_reason(Types.type_is_unsigned_int(settings.reference_id_type), @src(), "`settings.reference_id_type` must be an unsigned integer type, got type `{s}`", .{@typeName(settings.panel_id_type)});
+    assert_with_reason(Types.type_is_numeric(settings.padding_dimension_type), @src(), "`settings.padding_type` must be a numeric type, got type `{s}`", .{@typeName(settings.padding_dimension_type)});
+    assert_with_reason(Types.type_is_numeric(settings.gap_dimension_type), @src(), "`settings.gap_type` must be a numeric type, got type `{s}`", .{@typeName(settings.gap_dimension_type)});
+    assert_with_reason(Types.type_is_numeric(settings.dimension_type), @src(), "`settings.dimension_type` must be a numeric type, got type `{s}`", .{@typeName(settings.dimension_type)});
+    assert_with_reason(Types.type_is_numeric(settings.z_index_type), @src(), "`settings.z_index_type` must be a numeric type, got type `{s}`", .{@typeName(settings.z_index_type)});
+    assert_with_reason(Types.type_is_struct(settings.user_state_type) or Types.type_is_void(settings.user_state_type), @src(), "`settings.user_state_type` must be a struct type or void, got type `{s}`", .{@typeName(settings.user_state_type)});
     if (Types.type_is_int(settings.z_index_type)) {
         const union_tag = Types.union_tag(settings.z_index_child_growth);
-        assert_with_reason(Utils.matches_any(ZIndexChildGrowthKind, union_tag, &.{ .DEPTH_ADD_INT, .DEPTH_MULTIPLY_INT, .DEPTH_POWER_INT }), @src(), @This(), "`settings.z_index_child_growth` must indicate an integer growth mode when `settings.z_index_child_growth` is an integer type, got `.{s}`", .{@tagName(union_tag)});
+        assert_with_reason(Utils.matches_any(ZIndexChildGrowthKind, union_tag, &.{ .DEPTH_ADD_INT, .DEPTH_MULTIPLY_INT, .DEPTH_POWER_INT }), @src(), "`settings.z_index_child_growth` must indicate an integer growth mode when `settings.z_index_child_growth` is an integer type, got `.{s}`", .{@tagName(union_tag)});
     } else if (Types.type_is_float(settings.z_index_type)) {
         const union_tag = Types.union_tag(settings.z_index_child_growth);
-        assert_with_reason(Utils.matches_any(ZIndexChildGrowthKind, union_tag, &.{ .DEPTH_ADD_FLOAT, .DEPTH_MULTIPLY_FLOAT, .DEPTH_POWER_FLOAT }), @src(), @This(), "`settings.z_index_child_growth` must indicate a float growth mode when `settings.z_index_child_growth` is a float type, got `.{s}`", .{@tagName(union_tag)});
+        assert_with_reason(Utils.matches_any(ZIndexChildGrowthKind, union_tag, &.{ .DEPTH_ADD_FLOAT, .DEPTH_MULTIPLY_FLOAT, .DEPTH_POWER_FLOAT }), @src(), "`settings.z_index_child_growth` must indicate a float growth mode when `settings.z_index_child_growth` is a float type, got `.{s}`", .{@tagName(union_tag)});
     }
     return struct {
         const Self = @This();

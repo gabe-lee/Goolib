@@ -97,8 +97,8 @@ fn c_opaque_conversions(comptime ZIG_TYPE: type, comptime C_TYPE: type) type {
 }
 
 fn c_enum_conversions(comptime ZIG_TYPE: type, comptime C_TYPE: type) type {
-    assert_with_reason(Types.type_is_enum(ZIG_TYPE), @src(), @This(), "ZIG_TYPE not an enum", .{});
-    assert_with_reason(Types.type_is_int(C_TYPE), @src(), @This(), "C_TYPE not an integer", .{});
+    assert_with_reason(Types.type_is_enum(ZIG_TYPE), @src(), "ZIG_TYPE not an enum", .{});
+    assert_with_reason(Types.type_is_int(C_TYPE), @src(), "C_TYPE not an integer", .{});
     return struct {
         pub fn to_c(self: ZIG_TYPE) C_TYPE {
             return @intFromEnum(self);
@@ -2923,7 +2923,7 @@ pub const PixelFormat = enum(C.SDL_PixelFormat) {
     pub const XBGR_32 = PixelFormat.from_c(C.SDL_PIXELFORMAT_XBGR32);
 
     pub fn custom_four_cc(str: []const u8) PixelFormat {
-        assert_with_reason(str.len == 4, @src(), @This(), "invalid four_cc code `{s}`: four_cc format codes must have exactly 4 chars (use space ` ` to fill spots if needed)", .{str});
+        assert_with_reason(str.len == 4, @src(), "invalid four_cc code `{s}`: four_cc format codes must have exactly 4 chars (use space ` ` to fill spots if needed)", .{str});
         return PixelFormat.from_c(C.SDL_DEFINE_PIXELFOURCC(str[0], str[1], str[2], str[3]));
     }
 
@@ -8020,7 +8020,7 @@ pub const LogCategory = enum(C.SDL_LogCategory) {
     pub usingnamespace c_enum_conversions(LogCategory, C.SDL_LogCategory);
 
     pub fn custom(tag_val: C.SDL_LogCategory) LogCategory {
-        assert_with_reason(tag_val >= CUSTOM_START, @src(), @This(), "custom log categories must have a tag value greater than or equal to {d}", .{CUSTOM_START});
+        assert_with_reason(tag_val >= CUSTOM_START, @src(), "custom log categories must have a tag value greater than or equal to {d}", .{CUSTOM_START});
         return LogCategory.from_c(tag_val);
     }
 };

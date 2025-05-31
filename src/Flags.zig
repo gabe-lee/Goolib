@@ -35,14 +35,14 @@ const assert_with_reason = Assert.assert_with_reason;
 
 pub fn Flags(comptime FLAGS_ENUM: type, comptime GROUPS_OR_NULL: ?type) type {
     const INFO_1 = @typeInfo(FLAGS_ENUM);
-    assert_with_reason(INFO_1 == .@"enum", @src(), @This(), "parameter `FLAGS_ENUM` must be an enum type", .{});
+    assert_with_reason(INFO_1 == .@"enum", @src(), "parameter `FLAGS_ENUM` must be an enum type", .{});
     const E_INFO = INFO_1.@"enum";
-    assert_with_reason(@typeInfo(E_INFO.tag_type).int.signedness == .unsigned, @src(), @This(), "parameter `FLAGS_ENUM` tag type must be an unsigned integer type", .{});
+    assert_with_reason(@typeInfo(E_INFO.tag_type).int.signedness == .unsigned, @src(), "parameter `FLAGS_ENUM` tag type must be an unsigned integer type", .{});
     const GROUPS = if (GROUPS_OR_NULL) |groups_type| groups_type else enum(E_INFO.tag_type) {};
     const INFO_2 = @typeInfo(GROUPS);
-    assert_with_reason(INFO_2 == .@"enum", @src(), @This(), "parameter `GROUPS_OR_NULL` must be `null` or an enum type", .{});
+    assert_with_reason(INFO_2 == .@"enum", @src(), "parameter `GROUPS_OR_NULL` must be `null` or an enum type", .{});
     const G_INFO = INFO_2.@"enum";
-    assert_with_reason(G_INFO.tag_type == E_INFO.tag_type, @src(), @This(), "parameter `GROUPS_OR_NULL` (if not null) must have the exact same tag type as `FLAGS_ENUM`", .{});
+    assert_with_reason(G_INFO.tag_type == E_INFO.tag_type, @src(), "parameter `GROUPS_OR_NULL` (if not null) must have the exact same tag type as `FLAGS_ENUM`", .{});
     const F: E_INFO.tag_type = @as(E_INFO.tag_type, @bitCast(math.maxInt(meta.Int(.unsigned, @bitSizeOf(E_INFO.tag_type)))));
     const A: E_INFO.tag_type = combine: {
         if (!E_INFO.is_exhaustive) break :combine F;
@@ -53,7 +53,7 @@ pub fn Flags(comptime FLAGS_ENUM: type, comptime GROUPS_OR_NULL: ?type) type {
         break :combine a;
     };
     for (G_INFO.fields) |group_field| {
-        assert_with_reason(group_field.value & ~A == 0, @src(), @This(), "group `{s}` has invalid bits for flags enum:\nbits to set = {b:0>64}\nvalid range = {b:0>64}\ninvalid pos = {b:0>64}", .{ group_field.name, group_field.value, A, group_field.value & ~A });
+        assert_with_reason(group_field.value & ~A == 0, @src(), "group `{s}` has invalid bits for flags enum:\nbits to set = {b:0>64}\nvalid range = {b:0>64}\ninvalid pos = {b:0>64}", .{ group_field.name, group_field.value, A, group_field.value & ~A });
     }
     return packed struct {
         raw: RawInt = 0,
@@ -70,7 +70,7 @@ pub fn Flags(comptime FLAGS_ENUM: type, comptime GROUPS_OR_NULL: ?type) type {
 
         inline fn assert_valid_bits(raw: RawInt) void {
             if (NEEDS_VALID_ASSERT) {
-                assert_with_reason(raw & ~ALL == 0, @src(), @This(), "invalid bits for flags type {s}:\nbits to set = {b:0>64}\nvalid range = {b:0>64}\ninvalid pos = {b:0>64}", .{ @typeName(Self), raw, ALL, raw & ~ALL });
+                assert_with_reason(raw & ~ALL == 0, @src(), "invalid bits for flags type {s}:\nbits to set = {b:0>64}\nvalid range = {b:0>64}\ninvalid pos = {b:0>64}", .{ @typeName(Self), raw, ALL, raw & ~ALL });
             }
         }
 

@@ -254,7 +254,7 @@ pub fn define_aabb2_type(comptime T: type) type {
             const overlap_x_max = @min(self.x_max + threshold, other.x_max + threshold);
             const overlap_y_min = @max(self.y_min - threshold, other.y_min - threshold);
             const overlap_y_max = @min(self.y_max + threshold, other.y_max + threshold);
-            Utils.assert_with_reason(overlap_x_min < overlap_x_max and overlap_y_min < overlap_y_max, @src(), @This(), "", .{});
+            Utils.assert_with_reason(overlap_x_min < overlap_x_max and overlap_y_min < overlap_y_max, @src(), "", .{});
             return T_AABB2{
                 .x_min = overlap_x_min,
                 .x_max = overlap_x_max,

@@ -117,7 +117,7 @@ pub fn FlexSlice(comptime T: type, comptime Idx: type, ELEM_MUTABILITY: Mutabili
         }
 
         pub inline fn to_slice(self: Self) if (MUTABLE) []T else []const T {
-            assert_with_reason(self.ptr != null, @src(), @This(), "cannot cast Slice({s}).ptr == `null` to native zig slice []{s}", .{ @typeName(T), @typeName(T) });
+            assert_with_reason(self.ptr != null, @src(), "cannot cast Slice({s}).ptr == `null` to native zig slice []{s}", .{ @typeName(T), @typeName(T) });
             return self.ptr.?[0..@intCast(self.len)];
         }
 
@@ -138,70 +138,70 @@ pub fn FlexSlice(comptime T: type, comptime Idx: type, ELEM_MUTABILITY: Mutabili
             return Self{ .ptr = ptr, .len = len };
         }
         pub inline fn new_with_start_end(ptr: [*]T, start: Idx, end: Idx) Self {
-            assert_with_reason(end >= start, @src(), @This(), ERR_START_END_REVERSED, .{ start, end });
+            assert_with_reason(end >= start, @src(), ERR_START_END_REVERSED, .{ start, end });
             return Self{ .ptr = ptr + start, .len = end - start };
         }
 
         pub inline fn grow_right(self: Self, count: Idx) Self {
-            assert_with_reason(self.ptr != null, @src(), @This(), ERR_OPERATE_NULL, .{});
+            assert_with_reason(self.ptr != null, @src(), ERR_OPERATE_NULL, .{});
             return Self{ .ptr = self.ptr, .len = self.len + count };
         }
 
         pub inline fn grow_left(self: Self, count: Idx) Self {
-            assert_with_reason(self.ptr != null, @src(), @This(), ERR_OPERATE_NULL, .{});
+            assert_with_reason(self.ptr != null, @src(), ERR_OPERATE_NULL, .{});
             return Self{ .ptr = self.ptr.? - count, .len = self.len + count };
         }
 
         pub inline fn shrink_right(self: Self, count: Idx) Self {
-            assert_with_reason(self.ptr != null, @src(), @This(), ERR_OPERATE_NULL, .{});
-            assert_with_reason(self.len >= count, @src(), @This(), ERR_SHRINK_OOB, .{ count, self.len });
+            assert_with_reason(self.ptr != null, @src(), ERR_OPERATE_NULL, .{});
+            assert_with_reason(self.len >= count, @src(), ERR_SHRINK_OOB, .{ count, self.len });
             return Self{ .ptr = self.ptr, .len = self.len - count };
         }
 
         pub inline fn shrink_left(self: Self, count: Idx) Self {
-            assert_with_reason(self.ptr != null, @src(), @This(), ERR_OPERATE_NULL, .{});
-            assert_with_reason(self.len >= count, @src(), @This(), ERR_SHRINK_OOB, .{ count, self.len });
+            assert_with_reason(self.ptr != null, @src(), ERR_OPERATE_NULL, .{});
+            assert_with_reason(self.len >= count, @src(), ERR_SHRINK_OOB, .{ count, self.len });
             return Self{ .ptr = self.ptr.? + count, .len = self.len - count };
         }
 
         pub inline fn shift_right(self: Self, count: Idx) Self {
-            assert_with_reason(self.ptr != null, @src(), @This(), ERR_OPERATE_NULL, .{});
+            assert_with_reason(self.ptr != null, @src(), ERR_OPERATE_NULL, .{});
             return Self{ .ptr = self.ptr.? + count, .len = self.len };
         }
 
         pub inline fn shift_left(self: Self, count: Idx) Self {
-            assert_with_reason(self.ptr != null, @src(), @This(), ERR_OPERATE_NULL, .{});
+            assert_with_reason(self.ptr != null, @src(), ERR_OPERATE_NULL, .{});
             return Self{ .ptr = self.ptr.? - count, .len = self.len };
         }
 
         pub inline fn sub_slice_start_len(self: Self, start: Idx, len: Idx) Self {
-            assert_with_reason(self.ptr != null, @src(), @This(), ERR_OPERATE_NULL, .{});
-            assert_with_reason(start + len <= self.len, @src(), @This(), ERR_INDEX_CHUNK_OOB, .{ start, len, start + len, self.len });
+            assert_with_reason(self.ptr != null, @src(), ERR_OPERATE_NULL, .{});
+            assert_with_reason(start + len <= self.len, @src(), ERR_INDEX_CHUNK_OOB, .{ start, len, start + len, self.len });
             return Self{ .ptr = self.ptr.? + start, .len = len };
         }
 
         pub inline fn sub_slice_start_end(self: Self, start: Idx, end: Idx) Self {
-            assert_with_reason(end >= start, @src(), @This(), ERR_START_END_REVERSED, .{ start, end });
-            assert_with_reason(self.ptr != null, @src(), @This(), ERR_OPERATE_NULL, .{});
-            assert_with_reason(end <= self.len, @src(), @This(), ERR_INDEX_CHUNK_OOB, .{ start, end - start, end, self.len });
+            assert_with_reason(end >= start, @src(), ERR_START_END_REVERSED, .{ start, end });
+            assert_with_reason(self.ptr != null, @src(), ERR_OPERATE_NULL, .{});
+            assert_with_reason(end <= self.len, @src(), ERR_INDEX_CHUNK_OOB, .{ start, end - start, end, self.len });
             return Self{ .ptr = self.ptr.? + start, .len = end - start };
         }
 
         pub inline fn sub_slice_from_start(self: Self, len: Idx) Self {
-            assert_with_reason(self.ptr != null, @src(), @This(), ERR_OPERATE_NULL, .{});
-            assert_with_reason(len <= self.len, @src(), @This(), ERR_INDEX_CHUNK_OOB, .{ 0, len, len, self.len });
+            assert_with_reason(self.ptr != null, @src(), ERR_OPERATE_NULL, .{});
+            assert_with_reason(len <= self.len, @src(), ERR_INDEX_CHUNK_OOB, .{ 0, len, len, self.len });
             return Self{ .ptr = self.ptr, .len = len };
         }
 
         pub inline fn sub_slice_from_end(self: Self, len: Idx) Self {
-            assert_with_reason(self.ptr != null, @src(), @This(), ERR_OPERATE_NULL, .{});
-            assert_with_reason(len <= self.len, @src(), @This(), ERR_INDEX_CHUNK_OOB, .{ self.len - len, len, self.len, self.len });
+            assert_with_reason(self.ptr != null, @src(), ERR_OPERATE_NULL, .{});
+            assert_with_reason(len <= self.len, @src(), ERR_INDEX_CHUNK_OOB, .{ self.len - len, len, self.len, self.len });
             const diff = self.len - len;
             return Self{ .ptr = self.ptr.? + diff, .len = len };
         }
 
         pub inline fn with_new_len(self: Self, new_len: Idx) Self {
-            assert_with_reason(self.ptr != null, @src(), @This(), ERR_OPERATE_NULL, .{});
+            assert_with_reason(self.ptr != null, @src(), ERR_OPERATE_NULL, .{});
             return Self{ .ptr = self.ptr, .len = new_len };
         }
 
@@ -210,148 +210,148 @@ pub fn FlexSlice(comptime T: type, comptime Idx: type, ELEM_MUTABILITY: Mutabili
         }
 
         pub inline fn new_slice_adjacent_before(self: Self, len: Idx) Self {
-            assert_with_reason(self.ptr != null, @src(), @This(), ERR_OPERATE_NULL, .{});
+            assert_with_reason(self.ptr != null, @src(), ERR_OPERATE_NULL, .{});
             return Self{ .ptr = self.ptr.? - len, .len = len };
         }
 
         pub inline fn new_slice_adjacent_after(self: Self, len: Idx) Self {
-            assert_with_reason(self.ptr != null, @src(), @This(), ERR_OPERATE_NULL, .{});
+            assert_with_reason(self.ptr != null, @src(), ERR_OPERATE_NULL, .{});
             return Self{ .ptr = self.ptr.? + self.len, .len = len };
         }
 
         pub inline fn get_item_ptr(self: Self, idx: Idx) *T {
-            assert_with_reason(self.ptr != null, @src(), @This(), ERR_OPERATE_NULL, .{});
-            assert_with_reason(idx < self.len, @src(), @This(), ERR_INDEX_OOB, .{ idx, self.len });
+            assert_with_reason(self.ptr != null, @src(), ERR_OPERATE_NULL, .{});
+            assert_with_reason(idx < self.len, @src(), ERR_INDEX_OOB, .{ idx, self.len });
             return &self.ptr.?[idx];
         }
 
         pub inline fn get_last_item_ptr(self: Self) *T {
-            assert_with_reason(self.ptr != null, @src(), @This(), ERR_OPERATE_NULL, .{});
-            assert_with_reason(self.len > 0, @src(), @This(), ERR_INDEX_OOB, .{ -1, self.len });
+            assert_with_reason(self.ptr != null, @src(), ERR_OPERATE_NULL, .{});
+            assert_with_reason(self.len > 0, @src(), ERR_INDEX_OOB, .{ -1, self.len });
             return &self.ptr.?[self.len - 1];
         }
 
         pub inline fn get_first_item_ptr(self: Self) *T {
-            assert_with_reason(self.ptr != null, @src(), @This(), ERR_OPERATE_NULL, .{});
-            assert_with_reason(self.len > 0, @src(), @This(), ERR_INDEX_OOB, .{ 0, self.len });
+            assert_with_reason(self.ptr != null, @src(), ERR_OPERATE_NULL, .{});
+            assert_with_reason(self.len > 0, @src(), ERR_INDEX_OOB, .{ 0, self.len });
             return &self.ptr.?[0];
         }
 
         pub inline fn get_item_const_ptr(self: Self, idx: Idx) *const T {
-            assert_with_reason(self.ptr != null, @src(), @This(), ERR_OPERATE_NULL, .{});
-            assert_with_reason(idx < self.len, @src(), @This(), ERR_INDEX_OOB, .{ idx, self.len });
+            assert_with_reason(self.ptr != null, @src(), ERR_OPERATE_NULL, .{});
+            assert_with_reason(idx < self.len, @src(), ERR_INDEX_OOB, .{ idx, self.len });
             return &self.ptr.?[idx];
         }
 
         pub inline fn get_last_item_const_ptr(self: Self) *const T {
-            assert_with_reason(self.ptr != null, @src(), @This(), ERR_OPERATE_NULL, .{});
-            assert_with_reason(self.len > 0, @src(), @This(), ERR_INDEX_OOB, .{ -1, self.len });
+            assert_with_reason(self.ptr != null, @src(), ERR_OPERATE_NULL, .{});
+            assert_with_reason(self.len > 0, @src(), ERR_INDEX_OOB, .{ -1, self.len });
             return &self.ptr.?[self.len - 1];
         }
 
         pub inline fn get_first_item_const_ptr(self: Self) *const T {
-            assert_with_reason(self.ptr != null, @src(), @This(), ERR_OPERATE_NULL, .{});
-            assert_with_reason(self.len > 0, @src(), @This(), ERR_INDEX_OOB, .{ 0, self.len });
+            assert_with_reason(self.ptr != null, @src(), ERR_OPERATE_NULL, .{});
+            assert_with_reason(self.len > 0, @src(), ERR_INDEX_OOB, .{ 0, self.len });
             return &self.ptr.?[0];
         }
 
         pub inline fn get_item(self: Self, idx: Idx) T {
-            assert_with_reason(self.ptr != null, @src(), @This(), ERR_OPERATE_NULL, .{});
-            assert_with_reason(idx < self.len, @src(), @This(), ERR_INDEX_OOB, .{ idx, self.len });
+            assert_with_reason(self.ptr != null, @src(), ERR_OPERATE_NULL, .{});
+            assert_with_reason(idx < self.len, @src(), ERR_INDEX_OOB, .{ idx, self.len });
             return self.ptr.?[idx];
         }
 
         pub inline fn get_last_item(self: Self) T {
-            assert_with_reason(self.ptr != null, @src(), @This(), ERR_OPERATE_NULL, .{});
-            assert_with_reason(self.len > 0, @src(), @This(), ERR_INDEX_OOB, .{ -1, self.len });
+            assert_with_reason(self.ptr != null, @src(), ERR_OPERATE_NULL, .{});
+            assert_with_reason(self.len > 0, @src(), ERR_INDEX_OOB, .{ -1, self.len });
             return self.ptr.?[self.len - 1];
         }
 
         pub inline fn get_first_item(self: Self) T {
-            assert_with_reason(self.ptr != null, @src(), @This(), ERR_OPERATE_NULL, .{});
-            assert_with_reason(self.len > 0, @src(), @This(), ERR_INDEX_OOB, .{ 0, self.len });
+            assert_with_reason(self.ptr != null, @src(), ERR_OPERATE_NULL, .{});
+            assert_with_reason(self.len > 0, @src(), ERR_INDEX_OOB, .{ 0, self.len });
             return self.ptr.?[0];
         }
 
         pub inline fn get_item_ptr_from_end(self: Self, idx: Idx) *T {
-            assert_with_reason(self.ptr != null, @src(), @This(), ERR_OPERATE_NULL, .{});
-            assert_with_reason(idx < self.len, @src(), @This(), ERR_INDEX_OOB, .{ idx, self.len });
+            assert_with_reason(self.ptr != null, @src(), ERR_OPERATE_NULL, .{});
+            assert_with_reason(idx < self.len, @src(), ERR_INDEX_OOB, .{ idx, self.len });
             return &self.ptr.?[self.len - 1 - idx];
         }
 
         pub inline fn get_item_const_ptr_from_end(self: Self, idx: Idx) *const T {
-            assert_with_reason(self.ptr != null, @src(), @This(), ERR_OPERATE_NULL, .{});
-            assert_with_reason(idx < self.len, @src(), @This(), ERR_INDEX_OOB, .{ idx, self.len });
+            assert_with_reason(self.ptr != null, @src(), ERR_OPERATE_NULL, .{});
+            assert_with_reason(idx < self.len, @src(), ERR_INDEX_OOB, .{ idx, self.len });
             return &self.ptr.?[self.len - 1 - idx];
         }
 
         pub inline fn get_item_from_end(self: Self, idx: Idx) T {
-            assert_with_reason(self.ptr != null, @src(), @This(), ERR_OPERATE_NULL, .{});
-            assert_with_reason(idx < self.len, @src(), @This(), ERR_INDEX_OOB, .{ idx, self.len });
+            assert_with_reason(self.ptr != null, @src(), ERR_OPERATE_NULL, .{});
+            assert_with_reason(idx < self.len, @src(), ERR_INDEX_OOB, .{ idx, self.len });
             return self.ptr.?[self.len - 1 - idx];
         }
 
         pub inline fn set_item(self: Self, idx: Idx, val: T) void {
-            assert_with_reason(self.ptr != null, @src(), @This(), ERR_OPERATE_NULL, .{});
-            assert_with_reason(idx < self.len, @src(), @This(), ERR_INDEX_OOB, .{ idx, self.len });
+            assert_with_reason(self.ptr != null, @src(), ERR_OPERATE_NULL, .{});
+            assert_with_reason(idx < self.len, @src(), ERR_INDEX_OOB, .{ idx, self.len });
             self.ptr.?[idx] = val;
         }
 
         pub inline fn set_last_item(self: Self, val: T) void {
-            assert_with_reason(self.ptr != null, @src(), @This(), ERR_OPERATE_NULL, .{});
-            assert_with_reason(self.len > 0, @src(), @This(), ERR_INDEX_OOB, .{ -1, self.len });
+            assert_with_reason(self.ptr != null, @src(), ERR_OPERATE_NULL, .{});
+            assert_with_reason(self.len > 0, @src(), ERR_INDEX_OOB, .{ -1, self.len });
             self.ptr.?[self.len - 1] = val;
         }
 
         pub inline fn set_first_item(self: Self, val: T) void {
-            assert_with_reason(self.ptr != null, @src(), @This(), ERR_OPERATE_NULL, .{});
-            assert_with_reason(self.len > 0, @src(), @This(), ERR_INDEX_OOB, .{ 0, self.len });
+            assert_with_reason(self.ptr != null, @src(), ERR_OPERATE_NULL, .{});
+            assert_with_reason(self.len > 0, @src(), ERR_INDEX_OOB, .{ 0, self.len });
             self.ptr.?[0] = val;
         }
 
         pub inline fn set_item_from_end(self: Self, idx: Idx, val: T) void {
-            assert_with_reason(self.ptr != null, @src(), @This(), ERR_OPERATE_NULL, .{});
-            assert_with_reason(idx < self.len, @src(), @This(), ERR_INDEX_OOB, .{ idx, self.len });
+            assert_with_reason(self.ptr != null, @src(), ERR_OPERATE_NULL, .{});
+            assert_with_reason(idx < self.len, @src(), ERR_INDEX_OOB, .{ idx, self.len });
             self.ptr.?[self.len - 1 - idx] = val;
         }
 
         pub inline fn memcopy_to(self: Self, other: anytype) void {
-            assert_with_reason(self.ptr != null, @src(), @This(), ERR_OPERATE_NULL, .{});
+            assert_with_reason(self.ptr != null, @src(), ERR_OPERATE_NULL, .{});
             Utils.memcopy(self.ptr.?, other, @intCast(self.len));
         }
 
         pub inline fn memcopy_from(self: Self, other: anytype) void {
-            assert_with_reason(self.ptr != null, @src(), @This(), ERR_OPERATE_NULL, .{});
+            assert_with_reason(self.ptr != null, @src(), ERR_OPERATE_NULL, .{});
             Utils.memcopy(other, self.ptr.?, self.len);
         }
 
         pub inline fn memset(self: Self, val: T) void {
-            assert_with_reason(self.ptr != null, @src(), @This(), ERR_OPERATE_NULL, .{});
+            assert_with_reason(self.ptr != null, @src(), ERR_OPERATE_NULL, .{});
             @memset(self.to_slice(), val);
         }
 
         pub inline fn secure_zero(self: Self) void {
-            assert_with_reason(self.ptr != null, @src(), @This(), ERR_OPERATE_NULL, .{});
+            assert_with_reason(self.ptr != null, @src(), ERR_OPERATE_NULL, .{});
             u_secure_zero(T, self.ptr.?[0..self.len]);
         }
 
         pub inline fn secure_memset_undefined(self: Self) void {
-            assert_with_reason(self.ptr != null, @src(), @This(), ERR_OPERATE_NULL, .{});
+            assert_with_reason(self.ptr != null, @src(), ERR_OPERATE_NULL, .{});
             u_secure_memset_undefined(T, self.ptr.?[0..self.len]);
         }
 
         pub inline fn secure_memset(self: Self, val: T) void {
-            assert_with_reason(self.ptr != null, @src(), @This(), ERR_OPERATE_NULL, .{});
+            assert_with_reason(self.ptr != null, @src(), ERR_OPERATE_NULL, .{});
             u_secure_memset(T, self.ptr.?[0..self.len], val);
         }
 
         pub inline fn secure_memset_const(self: Self, comptime val: T) void {
-            assert_with_reason(self.ptr != null, @src(), @This(), ERR_OPERATE_NULL, .{});
+            assert_with_reason(self.ptr != null, @src(), ERR_OPERATE_NULL, .{});
             u_secure_memset_const(T, self.ptr.?[0..self.len], val);
         }
 
         pub fn copy_rightward(self: Self, count: Idx) Self {
-            assert_with_reason(self.ptr != null, @src(), @This(), ERR_OPERATE_NULL, .{});
+            assert_with_reason(self.ptr != null, @src(), ERR_OPERATE_NULL, .{});
             const new_slice = self.shift_right(count);
             if (count > self.len) {
                 @memcpy(new_slice.to_slice(), self.to_slice());
@@ -362,7 +362,7 @@ pub fn FlexSlice(comptime T: type, comptime Idx: type, ELEM_MUTABILITY: Mutabili
         }
 
         pub fn copy_rightward_and_zero_old(self: Self, count: Idx) Self {
-            assert_with_reason(self.ptr != null, @src(), @This(), ERR_OPERATE_NULL, .{});
+            assert_with_reason(self.ptr != null, @src(), ERR_OPERATE_NULL, .{});
             const new_slice = self.shift_right(count);
             if (count > self.len) {
                 @memcpy(new_slice.to_slice(), self.to_slice());
@@ -374,7 +374,7 @@ pub fn FlexSlice(comptime T: type, comptime Idx: type, ELEM_MUTABILITY: Mutabili
         }
 
         pub fn copy_leftward(self: Self, count: Idx) Self {
-            assert_with_reason(self.ptr != null, @src(), @This(), ERR_OPERATE_NULL, .{});
+            assert_with_reason(self.ptr != null, @src(), ERR_OPERATE_NULL, .{});
             const new_slice = self.shift_left(count);
             if (count > self.len) {
                 @memcpy(new_slice.to_slice(), self.to_slice());
@@ -385,7 +385,7 @@ pub fn FlexSlice(comptime T: type, comptime Idx: type, ELEM_MUTABILITY: Mutabili
         }
 
         pub fn copy_leftward_and_zero_old(self: Self, count: Idx) Self {
-            assert_with_reason(self.ptr != null, @src(), @This(), ERR_OPERATE_NULL, .{});
+            assert_with_reason(self.ptr != null, @src(), ERR_OPERATE_NULL, .{});
             const new_slice = self.shift_left(count);
             if (count > self.len) {
                 @memcpy(new_slice.to_slice(), self.to_slice());
@@ -413,7 +413,7 @@ pub fn FlexSlice(comptime T: type, comptime Idx: type, ELEM_MUTABILITY: Mutabili
         }
 
         pub fn find_item_idx(self: Self, comptime Param: type, param: Param, match_fn: *const fn (param: Param, item: *const T) bool) ?Idx {
-            assert_with_reason(self.ptr != null, @src(), @This(), ERR_OPERATE_NULL, .{});
+            assert_with_reason(self.ptr != null, @src(), ERR_OPERATE_NULL, .{});
             var i: Idx = 0;
             while (i < self.len) : (i += 1) {
                 const item: *const T = &(self.ptr.?[@intCast(i)]);
@@ -423,7 +423,7 @@ pub fn FlexSlice(comptime T: type, comptime Idx: type, ELEM_MUTABILITY: Mutabili
         }
 
         pub fn find_item_ptr(self: Self, comptime Param: type, param: Param, match_fn: *const fn (param: Param, item: *const T) bool) ?*T {
-            assert_with_reason(self.ptr != null, @src(), @This(), ERR_OPERATE_NULL, .{});
+            assert_with_reason(self.ptr != null, @src(), ERR_OPERATE_NULL, .{});
             var i: Idx = 0;
             while (i < self.len) : (i += 1) {
                 const item: *T = &(self.ptr.?[@intCast(i)]);
@@ -433,7 +433,7 @@ pub fn FlexSlice(comptime T: type, comptime Idx: type, ELEM_MUTABILITY: Mutabili
         }
 
         pub fn find_item_const_ptr(self: Self, comptime Param: type, param: Param, match_fn: *const fn (param: Param, item: *const T) bool) ?*const T {
-            assert_with_reason(self.ptr != null, @src(), @This(), ERR_OPERATE_NULL, .{});
+            assert_with_reason(self.ptr != null, @src(), ERR_OPERATE_NULL, .{});
             var i: Idx = 0;
             while (i < self.len) : (i += 1) {
                 const item: *const T = &(self.ptr.?[@intCast(i)]);
@@ -443,7 +443,7 @@ pub fn FlexSlice(comptime T: type, comptime Idx: type, ELEM_MUTABILITY: Mutabili
         }
 
         pub fn find_item_and_copy(self: Self, comptime Param: type, param: Param, match_fn: *const fn (param: Param, item: *const T) bool) ?T {
-            assert_with_reason(self.ptr != null, @src(), @This(), ERR_OPERATE_NULL, .{});
+            assert_with_reason(self.ptr != null, @src(), ERR_OPERATE_NULL, .{});
             var i: Idx = 0;
             while (i < self.len) : (i += 1) {
                 const item: *const T = &(self.ptr.?[@intCast(i)]);
@@ -453,7 +453,7 @@ pub fn FlexSlice(comptime T: type, comptime Idx: type, ELEM_MUTABILITY: Mutabili
         }
 
         pub fn find_exactly_n_item_indexes_from_n_params_in_order(self: Self, comptime Param: type, params: []const Param, match_fn: *const fn (param: Param, item: *const T) bool, output_buf: []Idx) bool {
-            assert_with_reason(self.ptr != null, @src(), @This(), ERR_OPERATE_NULL, .{});
+            assert_with_reason(self.ptr != null, @src(), ERR_OPERATE_NULL, .{});
             assert(output_buf.len >= params.len);
             var i: usize = 0;
             var o: usize = 0;
@@ -469,7 +469,7 @@ pub fn FlexSlice(comptime T: type, comptime Idx: type, ELEM_MUTABILITY: Mutabili
         }
 
         pub fn find_exactly_n_item_pointers_from_n_params_in_order(self: Self, comptime Param: type, params: []const Param, match_fn: *const fn (param: Param, item: *const T) bool, output_buf: []*T) bool {
-            assert_with_reason(self.ptr != null, @src(), @This(), ERR_OPERATE_NULL, .{});
+            assert_with_reason(self.ptr != null, @src(), ERR_OPERATE_NULL, .{});
             assert(output_buf.len >= params.len);
             var i: usize = 0;
             var o: usize = 0;
@@ -485,7 +485,7 @@ pub fn FlexSlice(comptime T: type, comptime Idx: type, ELEM_MUTABILITY: Mutabili
         }
 
         pub fn find_exactly_n_const_item_pointers_from_n_params_in_order(self: Self, comptime Param: type, params: []const Param, match_fn: *const fn (param: Param, item: *const T) bool, output_buf: []*const T) bool {
-            assert_with_reason(self.ptr != null, @src(), @This(), ERR_OPERATE_NULL, .{});
+            assert_with_reason(self.ptr != null, @src(), ERR_OPERATE_NULL, .{});
             assert(output_buf.len >= params.len);
             var i: usize = 0;
             var o: usize = 0;
@@ -501,7 +501,7 @@ pub fn FlexSlice(comptime T: type, comptime Idx: type, ELEM_MUTABILITY: Mutabili
         }
 
         pub fn find_exactly_n_item_copies_from_n_params_in_order(self: Self, comptime Param: type, params: []const Param, match_fn: *const fn (param: Param, item: *const T) bool, output_buf: []*const T) bool {
-            assert_with_reason(self.ptr != null, @src(), @This(), ERR_OPERATE_NULL, .{});
+            assert_with_reason(self.ptr != null, @src(), ERR_OPERATE_NULL, .{});
             assert(output_buf.len >= params.len);
             var i: usize = 0;
             var o: usize = 0;
@@ -517,22 +517,22 @@ pub fn FlexSlice(comptime T: type, comptime Idx: type, ELEM_MUTABILITY: Mutabili
         }
 
         pub fn insertion_sort(self: *Self) void {
-            assert_with_reason(self.ptr != null, @src(), @This(), ERR_OPERATE_NULL, .{});
+            assert_with_reason(self.ptr != null, @src(), ERR_OPERATE_NULL, .{});
             InsertionSort.insertion_sort(T, self.ptr.?[0..self.len]);
         }
 
         pub fn insertion_sort_with_transform(self: *Self, comptime TX: type, transform_fn: *const fn (item: T) TX) void {
-            assert_with_reason(self.ptr != null, @src(), @This(), ERR_OPERATE_NULL, .{});
+            assert_with_reason(self.ptr != null, @src(), ERR_OPERATE_NULL, .{});
             InsertionSort.insertion_sort_with_transform(T, self.ptr.?[0..self.len], TX, transform_fn);
         }
 
         pub fn insertion_sort_with_transform_and_user_data(self: *Self, comptime TX: type, transform_fn: *const fn (item: T, user_data: ?*anyopaque) TX, user_data: ?*anyopaque) void {
-            assert_with_reason(self.ptr != null, @src(), @This(), ERR_OPERATE_NULL, .{});
+            assert_with_reason(self.ptr != null, @src(), ERR_OPERATE_NULL, .{});
             InsertionSort.insertion_sort_with_transform_and_user_data(T, self.ptr.?[0..self.len], TX, transform_fn, user_data);
         }
 
         pub fn is_sorted(self: Self) bool {
-            assert_with_reason(self.ptr != null, @src(), @This(), ERR_OPERATE_NULL, .{});
+            assert_with_reason(self.ptr != null, @src(), ERR_OPERATE_NULL, .{});
             var i: usize = 1;
             while (i < self.len) : (i += 1) {
                 if (Utils.infered_less_than(self.ptr.?[i], self.ptr.?[i - 1])) return false;
@@ -541,7 +541,7 @@ pub fn FlexSlice(comptime T: type, comptime Idx: type, ELEM_MUTABILITY: Mutabili
         }
 
         pub fn is_sorted_with_transform(self: Self, comptime TX: type, transform_fn: *const fn (item: T) TX) bool {
-            assert_with_reason(self.ptr != null, @src(), @This(), ERR_OPERATE_NULL, .{});
+            assert_with_reason(self.ptr != null, @src(), ERR_OPERATE_NULL, .{});
             var i: usize = 1;
             while (i < self.len) : (i += 1) {
                 if (Utils.infered_less_than(transform_fn(self.ptr.?[i]), transform_fn(self.ptr.?[i - 1]))) return false;
@@ -550,7 +550,7 @@ pub fn FlexSlice(comptime T: type, comptime Idx: type, ELEM_MUTABILITY: Mutabili
         }
 
         pub fn is_sorted_with_transform_and_user_data(self: Self, comptime TX: type, transform_fn: *const fn (item: T, user_data: ?*anyopaque) TX, user_data: ?*anyopaque) bool {
-            assert_with_reason(self.ptr != null, @src(), @This(), ERR_OPERATE_NULL, .{});
+            assert_with_reason(self.ptr != null, @src(), ERR_OPERATE_NULL, .{});
             var i: usize = 1;
             while (i < self.len) : (i += 1) {
                 if (Utils.infered_less_than(transform_fn(self.ptr.?[i], user_data), transform_fn(self.ptr.?[i - 1], user_data))) return false;
@@ -559,7 +559,7 @@ pub fn FlexSlice(comptime T: type, comptime Idx: type, ELEM_MUTABILITY: Mutabili
         }
 
         pub fn is_reverse_sorted(self: Self) bool {
-            assert_with_reason(self.ptr != null, @src(), @This(), ERR_OPERATE_NULL, .{});
+            assert_with_reason(self.ptr != null, @src(), ERR_OPERATE_NULL, .{});
             var i: usize = 1;
             while (i < self.len) : (i += 1) {
                 if (Utils.infered_greater_than(self.ptr.?[i], self.ptr.?[i - 1])) return false;
@@ -568,7 +568,7 @@ pub fn FlexSlice(comptime T: type, comptime Idx: type, ELEM_MUTABILITY: Mutabili
         }
 
         pub fn is_reverse_sorted_with_transform(self: Self, comptime TX: type, transform_fn: *const fn (item: T) TX) bool {
-            assert_with_reason(self.ptr != null, @src(), @This(), ERR_OPERATE_NULL, .{});
+            assert_with_reason(self.ptr != null, @src(), ERR_OPERATE_NULL, .{});
             var i: usize = 1;
             while (i < self.len) : (i += 1) {
                 if (Utils.infered_greater_than(transform_fn(self.ptr.?[i]), transform_fn(self.ptr.?[i - 1]))) return false;
@@ -577,7 +577,7 @@ pub fn FlexSlice(comptime T: type, comptime Idx: type, ELEM_MUTABILITY: Mutabili
         }
 
         pub fn is_reverse_sorted_with_transform_and_user_data(self: Self, comptime TX: type, transform_fn: *const fn (item: T, user_data: ?*anyopaque) TX, user_data: ?*anyopaque) bool {
-            assert_with_reason(self.ptr != null, @src(), @This(), ERR_OPERATE_NULL, .{});
+            assert_with_reason(self.ptr != null, @src(), ERR_OPERATE_NULL, .{});
             var i: usize = 1;
             while (i < self.len) : (i += 1) {
                 if (Utils.infered_greater_than(transform_fn(self.ptr.?[i], user_data), transform_fn(self.ptr.?[i - 1], user_data))) return false;

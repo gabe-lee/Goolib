@@ -37,7 +37,7 @@ const assert_with_reason = Assert.assert_with_reason;
 pub fn raw_ptr_cast_const(ptr_or_slice: anytype) [*]const u8 {
     const PTR = @TypeOf(ptr_or_slice);
     const P_INFO = @typeInfo(PTR);
-    assert_with_reason(P_INFO == .pointer, @inComptime(), @src(), @This(), "input `ptr` must be a pointer type");
+    assert_with_reason(P_INFO == .pointer, @inComptime(), @src(), "input `ptr` must be a pointer type");
     const PTR_INFO = P_INFO.pointer;
     return if (PTR_INFO.size == .slice) @ptrCast(@alignCast(ptr_or_slice.ptr)) else @ptrCast(@alignCast(ptr_or_slice));
 }
@@ -45,7 +45,7 @@ pub fn raw_ptr_cast_const(ptr_or_slice: anytype) [*]const u8 {
 pub fn raw_ptr_cast(ptr_or_slice: anytype) [*]u8 {
     const PTR = @TypeOf(ptr_or_slice);
     const P_INFO = @typeInfo(PTR);
-    assert_with_reason(P_INFO == .pointer, @inComptime(), @src(), @This(), "input `ptr` must be a pointer type");
+    assert_with_reason(P_INFO == .pointer, @inComptime(), @src(), "input `ptr` must be a pointer type");
     const PTR_INFO = P_INFO.pointer;
     return if (PTR_INFO.size == .slice) @ptrCast(@alignCast(ptr_or_slice.ptr)) else @ptrCast(@alignCast(ptr_or_slice));
 }
@@ -53,7 +53,7 @@ pub fn raw_ptr_cast(ptr_or_slice: anytype) [*]u8 {
 pub fn raw_slice_cast_const(slice_or_many_with_sentinel: anytype) []const u8 {
     const SLICE = @TypeOf(slice_or_many_with_sentinel);
     const S_INFO = @typeInfo(SLICE);
-    assert_with_reason(S_INFO == .pointer and (S_INFO.pointer.size == .slice or (S_INFO.pointer.size == .many and S_INFO.pointer.sentinel_ptr != null)), @inComptime(), @src(), @This(), "input `slice` must be a slice or many-item-pointer with a sentinel");
+    assert_with_reason(S_INFO == .pointer and (S_INFO.pointer.size == .slice or (S_INFO.pointer.size == .many and S_INFO.pointer.sentinel_ptr != null)), @inComptime(), @src(), "input `slice` must be a slice or many-item-pointer with a sentinel");
     const SLICE_INFO = S_INFO.pointer;
     const CHILD = SLICE_INFO.child;
     const SIZE = @sizeOf(CHILD);
@@ -69,7 +69,7 @@ pub fn raw_slice_cast_const(slice_or_many_with_sentinel: anytype) []const u8 {
 pub fn raw_slice_cast(slice_or_many_with_sentinel: anytype) []u8 {
     const SLICE = @TypeOf(slice_or_many_with_sentinel);
     const S_INFO = @typeInfo(SLICE);
-    assert_with_reason(S_INFO == .pointer and (S_INFO.pointer.size == .slice or (S_INFO.pointer.size == .many and S_INFO.pointer.sentinel_ptr != null)), @inComptime(), @src(), @This(), "input `slice` must be a slice or many-item-pointer with a sentinel");
+    assert_with_reason(S_INFO == .pointer and (S_INFO.pointer.size == .slice or (S_INFO.pointer.size == .many and S_INFO.pointer.sentinel_ptr != null)), @inComptime(), @src(), "input `slice` must be a slice or many-item-pointer with a sentinel");
     const SLICE_INFO = S_INFO.pointer;
     const CHILD = SLICE_INFO.child;
     const SIZE = @sizeOf(CHILD);
@@ -87,7 +87,7 @@ pub fn all_enum_values_start_from_zero_with_no_gaps(comptime ENUM: type) bool {
     if (min != 0) return false;
     const max = enum_max_value(ENUM);
     const EI = @typeInfo(ENUM);
-    assert_with_reason(EI == .@"enum", @src(), @This(), "input `ENUM` must be an enum type", .{});
+    assert_with_reason(EI == .@"enum", @src(), "input `ENUM` must be an enum type", .{});
     const E_INFO = EI.@"enum";
     const range = (max - min) + 1;
     return (range - E_INFO.fields.len) == 0;
@@ -95,7 +95,7 @@ pub fn all_enum_values_start_from_zero_with_no_gaps(comptime ENUM: type) bool {
 
 pub fn count_enum_gaps_between_raw_min_and_enum_max_val(comptime ENUM: type) comptime_int {
     const EI = @typeInfo(ENUM);
-    assert_with_reason(EI == .@"enum", @src(), @This(), "input `ENUM` must be an enum type", .{});
+    assert_with_reason(EI == .@"enum", @src(), "input `ENUM` must be an enum type", .{});
     const E_INFO = EI.@"enum";
     if (!E_INFO.is_exhaustive) return 0;
     const raw_smallest = std.math.minInt(E_INFO.tag_type);
@@ -106,7 +106,7 @@ pub fn count_enum_gaps_between_raw_min_and_enum_max_val(comptime ENUM: type) com
 
 pub fn count_enum_gaps_between_zero_and_enum_max_val(comptime ENUM: type) comptime_int {
     const EI = @typeInfo(ENUM);
-    assert_with_reason(EI == .@"enum", @src(), @This(), "input `ENUM` must be an enum type", .{});
+    assert_with_reason(EI == .@"enum", @src(), "input `ENUM` must be an enum type", .{});
     const E_INFO = EI.@"enum";
     if (!E_INFO.is_exhaustive) return 0;
     const largest = enum_max_value(ENUM);
@@ -115,7 +115,7 @@ pub fn count_enum_gaps_between_zero_and_enum_max_val(comptime ENUM: type) compti
 
 pub fn count_enum_gaps_between_enum_min_and_enum_max_val(comptime ENUM: type) comptime_int {
     const EI = @typeInfo(ENUM);
-    assert_with_reason(EI == .@"enum", @src(), @This(), "input `ENUM` must be an enum type", .{});
+    assert_with_reason(EI == .@"enum", @src(), "input `ENUM` must be an enum type", .{});
     const E_INFO = EI.@"enum";
     if (!E_INFO.is_exhaustive) return 0;
     const largest = enum_max_value(ENUM);
@@ -126,7 +126,7 @@ pub fn count_enum_gaps_between_enum_min_and_enum_max_val(comptime ENUM: type) co
 
 pub fn enum_min_value(comptime ENUM: type) comptime_int {
     const EI = @typeInfo(ENUM);
-    assert_with_reason(EI == .@"enum", @src(), @This(), "input `ENUM` must be an enum type", .{});
+    assert_with_reason(EI == .@"enum", @src(), "input `ENUM` must be an enum type", .{});
     const E_INFO = EI.@"enum";
     const raw_largest: comptime_int = std.math.maxInt(E_INFO.tag_type);
     var smallest: comptime_int = raw_largest;
@@ -137,7 +137,7 @@ pub fn enum_min_value(comptime ENUM: type) comptime_int {
 }
 pub fn enum_max_value(comptime ENUM: type) comptime_int {
     const EI = @typeInfo(ENUM);
-    assert_with_reason(EI == .@"enum", @src(), @This(), "input `ENUM` must be an enum type", .{});
+    assert_with_reason(EI == .@"enum", @src(), "input `ENUM` must be an enum type", .{});
     const E_INFO = EI.@"enum";
     const raw_smallest: comptime_int = std.math.minInt(E_INFO.tag_type);
     var largest: comptime_int = raw_smallest;
@@ -149,7 +149,7 @@ pub fn enum_max_value(comptime ENUM: type) comptime_int {
 
 pub fn enum_max_field_count(comptime ENUM: type) comptime_int {
     const EI = @typeInfo(ENUM);
-    assert_with_reason(EI == .@"enum", @src(), @This(), "input `ENUM` must be an enum type", .{});
+    assert_with_reason(EI == .@"enum", @src(), "input `ENUM` must be an enum type", .{});
     const E_INFO = EI.@"enum";
     if (!E_INFO.is_exhaustive) return @intCast(std.math.maxInt(E_INFO.tag_type));
     return @intCast(E_INFO.fields.len);
@@ -157,7 +157,7 @@ pub fn enum_max_field_count(comptime ENUM: type) comptime_int {
 
 pub fn enum_defined_field_count(comptime ENUM: type) comptime_int {
     const EI = @typeInfo(ENUM);
-    assert_with_reason(EI == .@"enum", @src(), @This(), "input `ENUM` must be an enum type", .{});
+    assert_with_reason(EI == .@"enum", @src(), "input `ENUM` must be an enum type", .{});
     const E_INFO = EI.@"enum";
     return @intCast(E_INFO.fields.len);
 }
@@ -363,17 +363,17 @@ pub fn get_ptr_len(ptr: anytype) usize {
                     return ptr.len;
                 },
                 .many => {
-                    assert_with_reason(INFO.sentinel_ptr != null, @src(), @This(), "many-item pointers must have sentinel values to find their length", .{});
+                    assert_with_reason(INFO.sentinel_ptr != null, @src(), "many-item pointers must have sentinel values to find their length", .{});
                     const sent_ptr: *const INFO.child = @ptrCast(@alignCast(INFO.sentinel_ptr.?));
                     const sent = sent_ptr.*;
                     var i: usize = 0;
                     while (ptr[i] != sent) : (i += 1) {}
                     return i;
                 },
-                else => assert_with_reason(false, @src(), @This(), "only slices or many-item pointers with sentinel values can return their length", .{}),
+                else => assert_with_reason(false, @src(), "only slices or many-item pointers with sentinel values can return their length", .{}),
             }
         },
-        else => assert_with_reason(false, @src(), @This(), "`ptr` must be a pointer type, got type {s}", .{@typeName(T)}),
+        else => assert_with_reason(false, @src(), "`ptr` must be a pointer type, got type {s}", .{@typeName(T)}),
     }
 }
 
@@ -398,9 +398,9 @@ pub fn can_get_ptr_len(comptime ptr_type: type) bool {
 
 pub inline fn union_tag_type(comptime T: type) type {
     const TI = @typeInfo(T);
-    assert_with_reason(TI == .@"union", @src(), @This(), "`T` must be a union type", .{});
+    assert_with_reason(TI == .@"union", @src(), "`T` must be a union type", .{});
     const U_INFO = TI.@"union";
-    assert_with_reason(U_INFO.tag_type != null, @src(), @This(), "union type `{s}` has no defined tag type", .{@typeName(T)});
+    assert_with_reason(U_INFO.tag_type != null, @src(), "union type `{s}` has no defined tag type", .{@typeName(T)});
     return U_INFO.tag_type.?;
 }
 
