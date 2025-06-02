@@ -67,3 +67,14 @@ pub inline fn assert_with_reason(condition: bool, comptime src_loc: ?SourceLocat
         }
     }
 }
+
+pub fn assert_pointer_resides_in_slice(comptime T: type, slice: []const T, pointer: *const T, comptime src_loc: ?SourceLocation) void {
+    const start_addr = @intFromPtr(slice.ptr);
+    const end_addr = @intFromPtr(slice.ptr + slice.len - 1);
+    const ptr_addr = @intFromPtr(pointer);
+    assert_with_reason(start_addr <= ptr_addr and ptr_addr <= end_addr, src_loc, "pointer to `{s}` ({X}) does not reside within slice [{X} -> {X}]", .{ @typeName(T), ptr_addr, start_addr, end_addr });
+}
+
+pub fn assert_idx_less_than_len(idx: anytype, len: anytype, src_loc: ?SourceLocation) void {
+    assert_with_reason(idx < len, src_loc, "index ({s}) out of bounds for slice/list len ({s})", .{ idx, len });
+}
