@@ -49,7 +49,7 @@ const BinarySearch = Root.BinarySearch;
 pub const ListOptions = struct {
     element_type: type,
     alignment: ?u29 = null,
-    error_behavior: ErrorBehavior = .ERRORS_PANIC,
+    alloc_error_behavior: ErrorBehavior = .ERRORS_PANIC,
     growth_model: GrowthModel = .GROW_BY_50_PERCENT_ATOMIC_PADDING,
     index_type: type = usize,
     secure_wipe_bytes: bool = false,
@@ -88,9 +88,9 @@ pub fn define_manual_allocator_list_type(comptime options: ListOptions) type {
         cap: Idx = 0,
 
         pub const ALIGN = options.alignment;
-        pub const ALLOC_ERROR_BEHAVIOR = options.error_behavior;
+        pub const ALLOC_ERROR_BEHAVIOR = options.alloc_error_behavior;
         pub const GROWTH = options.growth_model;
-        pub const RETURN_ERRORS = options.error_behavior == .RETURN_ERRORS;
+        pub const RETURN_ERRORS = options.alloc_error_behavior == .RETURN_ERRORS;
         pub const SECURE_WIPE = options.secure_wipe_bytes;
         pub const UNINIT_PTR: Ptr = @ptrFromInt(if (ALIGN) |a| mem.alignBackward(usize, math.maxInt(usize), @intCast(a)) else mem.alignBackward(usize, math.maxInt(usize), @alignOf(Elem)));
         pub const ATOMIC_PADDING = @as(comptime_int, @max(1, std.atomic.cache_line / @sizeOf(Elem)));
@@ -865,9 +865,9 @@ pub fn define_static_allocator_list_type(comptime options: ListOptions, comptime
 
         pub const ALLOC = alloc_ptr;
         pub const ALIGN = options.alignment;
-        pub const ALLOC_ERROR_BEHAVIOR = options.error_behavior;
+        pub const ALLOC_ERROR_BEHAVIOR = options.alloc_error_behavior;
         pub const GROWTH = options.growth_model;
-        pub const RETURN_ERRORS = options.error_behavior == .RETURN_ERRORS;
+        pub const RETURN_ERRORS = options.alloc_error_behavior == .RETURN_ERRORS;
         pub const SECURE_WIPE = options.secure_wipe_bytes;
         pub const UNINIT_PTR: Ptr = @ptrFromInt(if (ALIGN) |a| mem.alignBackward(usize, math.maxInt(usize), @intCast(a)) else mem.alignBackward(usize, math.maxInt(usize), @alignOf(Elem)));
         pub const ATOMIC_PADDING = @as(comptime_int, @max(1, std.atomic.cache_line / @sizeOf(Elem)));
@@ -1284,9 +1284,9 @@ pub fn define_cached_allocator_list_type(comptime options: ListOptions) type {
         alloc_vtable: *const Allocator.VTable,
 
         pub const ALIGN = options.alignment;
-        pub const ALLOC_ERROR_BEHAVIOR = options.error_behavior;
+        pub const ALLOC_ERROR_BEHAVIOR = options.alloc_error_behavior;
         pub const GROWTH = options.growth_model;
-        pub const RETURN_ERRORS = options.error_behavior == .RETURN_ERRORS;
+        pub const RETURN_ERRORS = options.alloc_error_behavior == .RETURN_ERRORS;
         pub const SECURE_WIPE = options.secure_wipe_bytes;
         pub const UNINIT_PTR: Ptr = @ptrFromInt(if (ALIGN) |a| mem.alignBackward(usize, math.maxInt(usize), @intCast(a)) else mem.alignBackward(usize, math.maxInt(usize), @alignOf(Elem)));
         pub const ATOMIC_PADDING = @as(comptime_int, @max(1, std.atomic.cache_line / @sizeOf(Elem)));
@@ -1802,7 +1802,7 @@ test "List.zig" {
     const t = std.testing;
     const alloc = std.heap.page_allocator;
     const opts = ListOptions{
-        .error_behavior = .ERRORS_PANIC,
+        .alloc_error_behavior = .ERRORS_PANIC,
         .element_type = u8,
         .index_type = u32,
     };

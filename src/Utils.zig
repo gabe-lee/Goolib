@@ -318,3 +318,31 @@ pub inline fn matches_any(comptime T: type, val: T, set: []const T) bool {
     }
     return false;
 }
+
+pub inline fn debug_switch(debug_val: anytype, else_val: anytype) if (build.mode == .Debug) @TypeOf(debug_val) else @TypeOf(else_val) {
+    return if (build.mode == .Debug) debug_val else else_val;
+}
+
+pub inline fn safe_switch(debug_rel_safe_val: anytype, else_val: anytype) if (build.mode == .Debug or build.mode == .ReleaseSafe) @TypeOf(debug_rel_safe_val) else @TypeOf(else_val) {
+    return if (build.mode == .Debug or build.mode == .ReleaseSafe) debug_rel_safe_val else else_val;
+}
+
+pub inline fn comp_switch(comptime cond: bool, true_val: anytype, false_val: anytype) if (cond) @TypeOf(true_val) else @TypeOf(false_val) {
+    if (cond) return true_val;
+    return false_val;
+}
+
+pub fn pointer_resides_in_slice(comptime T: type, slice: []const T, pointer: *const T) bool {
+    const start_addr = @intFromPtr(slice.ptr);
+    const end_addr = @intFromPtr(slice.ptr + slice.len - 1);
+    const ptr_addr = @intFromPtr(pointer);
+    return start_addr <= ptr_addr and ptr_addr <= end_addr;
+}
+
+pub fn slice_resides_in_slice(comptime T: type, slice: []const T, sub_slice: []const T) bool {
+    const start_addr = @intFromPtr(slice.ptr);
+    const end_addr = @intFromPtr(slice.ptr + slice.len - 1);
+    const sub_start_addr = @intFromPtr(sub_slice.ptr);
+    const sub_end_addr = @intFromPtr(sub_slice.ptr + sub_slice.len - 1);
+    return start_addr <= sub_start_addr and sub_end_addr <= end_addr;
+}

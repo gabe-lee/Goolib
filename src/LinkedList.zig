@@ -23,6 +23,8 @@
 
 const build = @import("builtin");
 const std = @import("std");
+const builtin = std.builtin;
+const SourceLocation = builtin.SourceLocation;
 const mem = std.mem;
 const math = std.math;
 const crypto = std.crypto;
@@ -33,10 +35,15 @@ const Type = std.builtin.Type;
 
 const Root = @import("./_root.zig");
 const Assert = Root.Assert;
-
 const assert_with_reason = Assert.assert_with_reason;
 const assert_pointer_resides_in_slice = Assert.assert_pointer_resides_in_slice;
+const assert_slice_resides_in_slice = Assert.assert_slice_resides_in_slice;
 const assert_idx_less_than_len = Assert.assert_idx_less_than_len;
+const assert_idx_and_pointer_reside_in_slice_and_match = Assert.assert_idx_and_pointer_reside_in_slice_and_match;
+const Utils = Root.Utils;
+const debug_switch = Utils.debug_switch;
+const safe_switch = Utils.safe_switch;
+const comp_switch = Utils.comp_switch;
 const Types = Root.Types;
 const FlexSlice = Root.FlexSlice.FlexSlice;
 const Mutability = Root.CommonTypes.Mutability;
@@ -63,6 +70,7 @@ pub const LinkedListOptions = struct {
     /// This enum must list all desired linked sets ('used', 'free', etc...)
     /// with tag values starting from 0 and increasing with no gaps
     linked_set_enum: type = DefaultSet,
+    stronger_asserts: bool = true,
 };
 
 pub const DefaultSet = enum(u8) {
@@ -77,7 +85,7 @@ pub const ElementStateAccess = struct {
     /// This field must provide all flag values for each of the stated enum
     /// values in `linked_set_enum`
     ///
-    /// Index 0 represents enum tag value 0, index 1 represents tag 1, etc
+    /// Index 0 represents enum tag value 0, index 1 represents tag value 1, etc
     state_flags: []const comptime_int,
 };
 
@@ -90,7 +98,7 @@ pub const Direction = enum {
 
 /// This is the core linked list paradigm, both other paradigms ('static_allocator' and 'cached_allocator')
 /// simply call this type's methods and provide their own allocator
-pub fn define_manual_allocator_inked_list_type(comptime options: LinkedListOptions) type {
+pub fn define_manual_allocator_linked_list_type(comptime options: LinkedListOptions) type {
     assert_with_reason(options.forward_linkage != null or options.backward_linkage != null, @src(), "either `forward_linkage` or `backward_linkage` must be provided, both cannot be left null", .{});
     const F = options.forward_linkage != null;
     const B = options.backward_linkage != null;
@@ -147,27 +155,29 @@ pub fn define_manual_allocator_inked_list_type(comptime options: LinkedListOptio
         list: BaseList = BaseList.UNINIT,
         sets: [SET_COUNT]SetData = UNINIT_SETS,
 
-        pub const SET_COUNT = Types.enum_defined_field_count(options.linked_set_enum);
-        pub const FORWARD = options.forward_linkage != null;
-        pub const NEXT_FIELD = if (FORWARD) options.forward_linkage.?.next_index_field else "";
-        pub const BACKWARD = options.backward_linkage != null;
-        pub const BIDIRECTION = BACKWARD and FORWARD;
-        pub const HEAD = FORWARD or options.force_cache_first_index;
-        pub const TAIL = BACKWARD or options.force_cache_last_index;
-        pub const PREV_FIELD = if (BACKWARD) options.backward_linkage.?.prev_index_field else "";
-        pub const USED = options.linked_sets == .USED_SET_ONLY or options.linked_sets == .USED_AND_FREE_SETS;
-        pub const FREE = options.linked_sets == .FREE_SET_ONLY or options.linked_sets == .USED_AND_FREE_SETS;
-        pub const STATE = options.element_state_access != null;
-        pub const CACHE = options.element_idx_cache_field != null;
-        pub const CACHE_FIELD = if (CACHE) options.element_idx_cache_field.? else "";
-        pub const T_STATE = if (STATE) options.element_state_access.?.field_type else void;
-        pub const STATE_FIELD = if (STATE) options.element_state_access.?.field else "";
-        pub const UNINIT = List{};
-        pub const RETURN_ERRORS = options.list_options.error_behavior == .RETURN_ERRORS;
-        pub const NULL_IDX = math.maxInt(Idx);
-        pub const STATE_FLAGS = SETS_ARRAY;
-        pub const STATE_MASK: if (STATE) options.element_state_access.?.field_type else comptime_int = if (STATE) options.element_state_access.?.state_mask else 0;
-        pub const STATE_CLEAR_MASK: if (STATE) options.element_state_access.?.field_type else comptime_int = if (STATE) ~options.element_state_access.?.state_mask else 0b1111111111111111111111111111111111111111111111111111111111111111;
+        const SET_COUNT = Types.enum_defined_field_count(options.linked_set_enum);
+        const FORWARD = options.forward_linkage != null;
+        const HEAD_NO_FORWARD = HEAD and !FORWARD;
+        const NEXT_FIELD = if (FORWARD) options.forward_linkage.?.next_index_field else "";
+        const BACKWARD = options.backward_linkage != null;
+        const TAIL_NO_BACKWARD = TAIL and !BACKWARD;
+        const BIDIRECTION = BACKWARD and FORWARD;
+        const HEAD = FORWARD or options.force_cache_first_index;
+        const TAIL = BACKWARD or options.force_cache_last_index;
+        const PREV_FIELD = if (BACKWARD) options.backward_linkage.?.prev_index_field else "";
+        const USED = options.linked_sets == .USED_SET_ONLY or options.linked_sets == .USED_AND_FREE_SETS;
+        const FREE = options.linked_sets == .FREE_SET_ONLY or options.linked_sets == .USED_AND_FREE_SETS;
+        const STATE = options.element_state_access != null;
+        const CACHE = options.element_idx_cache_field != null;
+        const CACHE_FIELD = if (CACHE) options.element_idx_cache_field.? else "";
+        const T_STATE = if (STATE) options.element_state_access.?.field_type else void;
+        const STATE_FIELD = if (STATE) options.element_state_access.?.field else "";
+        const UNINIT = List{};
+        const RETURN_ERRORS = options.list_options.error_behavior == .RETURN_ERRORS;
+        const NULL_IDX = math.maxInt(Idx);
+        const STATE_FLAGS = SETS_ARRAY;
+        const STATE_MASK: if (STATE) options.element_state_access.?.field_type else comptime_int = if (STATE) options.element_state_access.?.state_mask else 0;
+        const STATE_CLEAR_MASK: if (STATE) options.element_state_access.?.field_type else comptime_int = if (STATE) ~options.element_state_access.?.state_mask else 0b1111111111111111111111111111111111111111111111111111111111111111;
         const HEAD_TAIL: u2 = (@as(u2, @intFromBool(HEAD)) << 1) | @as(u2, @intFromBool(TAIL));
         const HAS_HEAD_HAS_TAIL: u2 = 0b11;
         const HAS_HEAD_NO_TAIL: u2 = 0b10;
@@ -204,32 +214,58 @@ pub fn define_manual_allocator_inked_list_type(comptime options: LinkedListOptio
             else => unreachable,
         };
         pub const Item = struct {
-            ptr: *Elem = @ptrFromInt(mem.alignBackward(usize, math.maxInt(usize), @alignOf(Elem))),
-            idx: Idx = 0,
+            ptr: *Elem = &DUMMY_ELEM,
+            idx: Idx = NULL_IDX,
         };
-        pub const StartEnd = struct {
-            start: Idx = 0,
-            end: Idx = 0,
+        pub const FirstLastItem = struct {
+            first: Item = Item{},
+            last: Item = Item{},
+
+            pub fn single(item: Item) FirstLastItem {
+                return FirstLastItem{
+                    .first = item,
+                    .last = item,
+                };
+            }
+
+            pub fn combine(left: FirstLastItem, right: FirstLastItem) FirstLastItem {
+                return FirstLastItem{
+                    .first = left.first,
+                    .last = right.last,
+                };
+            }
         };
-        pub const IdxPtrIdx = struct {
+        const IdxPtrIdx = struct {
             idx_ptr: *Idx = &DUMMY_IDX,
-            idx: Idx = 0,
+            idx: Idx = NULL_IDX,
         };
-        pub const ConnLeft = choose: {
+        const ConnLeft = choose: {
             if (BIDIRECTION) break :choose IdxPtrIdx;
             if (FORWARD) break :choose *Idx;
             if (BACKWARD) break :choose Idx;
             unreachable;
         };
-        pub const ConnRight = choose: {
+        const ConnRight = choose: {
             if (BIDIRECTION) break :choose IdxPtrIdx;
             if (FORWARD) break :choose Idx;
             if (BACKWARD) break :choose *Idx;
             unreachable;
         };
-        pub const ConnLeftRight = struct {
+        const ConnLeftRight = struct {
             left: ConnLeft,
             right: ConnRight,
+
+            pub inline fn new(left: ConnLeft, right: ConnRight) ConnLeftRight {
+                return ConnLeftRight{ .left = left, .right = right };
+            }
+        };
+        const ConnInsert = struct {
+            first: ConnRight,
+            last: ConnLeft,
+
+            pub inline fn new(first: ConnRight, last: ConnLeft) ConnInsert {
+                return ConnInsert{ .first = first, .last = last };
+            }
         };
         pub const SetPtr = struct {
             set: LinkSet,
@@ -243,121 +279,211 @@ pub fn define_manual_allocator_inked_list_type(comptime options: LinkedListOptio
             set: LinkSet,
             idx: Idx,
         };
-        var DUMMY_IDX: Idx = 0;
+        pub const SetIdxList = struct {
+            set: LinkSet,
+            idxs: []const Idx,
+        };
+        pub const SetPtrList = struct {
+            set: LinkSet,
+            ptrs: []const *Elem,
+        };
+        pub const SetItemList = struct {
+            set: LinkSet,
+            items: []const Item,
+        };
+        pub const SetCount = struct {
+            set: LinkSet,
+            count: Idx,
+        };
+        var DUMMY_IDX: Idx = NULL_IDX;
+        var DUMMY_ELEM: Elem = undefined;
 
-        pub const GetMode = enum {
-            BRAND_NEW,
-            TRY_FIRST_HEAD_FROM_SET_ELSE_NEW,
-            TRY_LAST_TAIL_FROM_SET_ELSE_NEW,
-            FIRST_FROM_SET_HEAD,
-            LAST_FROM_SET_TAIL,
-            USING_INDEX,
-            USING_PTR,
-            USING_ITEM,
+        pub const RemoveMode = enum {
+            ONE_NEW,
+            FIRST_FROM_SET_ELSE_NEW,
+            LAST_FROM_SET_ELSE_NEW,
+            FIRST_FROM_SET,
+            LAST_FROM_SET,
+            ONE_INDEX,
+            ONE_PTR,
+            ONE_ITEM,
+            MANY_NEW,
+            FIRST_N_FROM_SET,
+            LAST_N_FROM_SET,
+            FIRST_N_FROM_SET_ELSE_NEW,
+            LAST_N_FROM_SET_ELSE_NEW,
+            SPARSE_LIST_OF_INDEXES_FROM_SAME_SET,
+            SPARSE_LIST_OF_POINTERS_FROM_SAME_SET,
+            SPARSE_LIST_OF_ITEMS_FROM_SAME_SET,
+            SPARSE_LIST_OF_INDEXES_FROM_ANY_SET,
+            SPARSE_LIST_OF_POINTERS_FROM_ANY_SET,
+            SPARSE_LIST_OF_ITEMS_FROM_ANY_SET,
         };
 
-        pub const GetSlot = union(GetMode) {
-            BRAND_NEW: void,
-            TRY_FIRST_HEAD_FROM_SET_ELSE_NEW: LinkSet,
-            TRY_LAST_TAIL_FROM_SET_ELSE_NEW: LinkSet,
-            FIRST_FROM_SET_HEAD: LinkSet,
-            LAST_FROM_SET_TAIL: LinkSet,
-            USING_INDEX: SetIdx,
-            USING_PTR: SetPtr,
-            USING_ITEM: SetItem,
+        pub const RemoveLocation = union(RemoveMode) {
+            ONE_NEW: void,
+            FIRST_FROM_SET_ELSE_NEW: LinkSet,
+            LAST_FROM_SET_ELSE_NEW: LinkSet,
+            FIRST_FROM_SET: LinkSet,
+            LAST_FROM_SET: LinkSet,
+            ONE_INDEX: SetIdx,
+            ONE_PTR: SetPtr,
+            ONE_ITEM: SetItem,
+            MANY_NEW: Idx,
+            FIRST_N_FROM_SET: SetCount,
+            LAST_N_FROM_SET: SetCount,
+            FIRST_N_FROM_SET_ELSE_NEW: SetCount,
+            LAST_N_FROM_SET_ELSE_NEW: SetCount,
+            SPARSE_LIST_OF_INDEXES_FROM_SAME_SET: SetIdxList,
+            SPARSE_LIST_OF_POINTERS_FROM_SAME_SET: SetPtrList,
+            SPARSE_LIST_OF_ITEMS_FROM_SAME_SET: SetItemList,
+            SPARSE_LIST_OF_INDEXES_FROM_ANY_SET: []const SetIdx,
+            SPARSE_LIST_OF_POINTERS_FROM_ANY_SET: []const SetPtr,
+            SPARSE_LIST_OF_ITEMS_FROM_ANY_SET: []const SetItem,
 
-            pub inline fn brand_new() GetSlot {
-                return GetSlot{ .BRAND_NEW = void{} };
+            pub inline fn one_new() RemoveLocation {
+                return RemoveLocation{ .ONE_NEW = void{} };
             }
 
-            pub inline fn try_first_head_from_set_else_new(set: LinkSet) GetSlot {
-                return GetSlot{ .TRY_FIRST_HEAD_FROM_SET_ELSE_NEW = set };
+            pub inline fn first_from_set_else_new(set: LinkSet) RemoveLocation {
+                return RemoveLocation{ .FIRST_FROM_SET_ELSE_NEW = set };
             }
 
-            pub inline fn try_last_tail_from_set_else_new(set: LinkSet) GetSlot {
-                return GetSlot{ .TRY_LAST_TAIL_FROM_SET_ELSE_NEW = set };
+            pub inline fn last_from_set_else_new(set: LinkSet) RemoveLocation {
+                return RemoveLocation{ .LAST_FROM_SET_ELSE_NEW = set };
             }
 
-            pub inline fn first_from_set(set: LinkSet) GetSlot {
-                return GetSlot{ .FIRST_FROM_SET_HEAD = set };
+            pub inline fn first_from_set(set: LinkSet) RemoveLocation {
+                return RemoveLocation{ .FIRST_FROM_SET = set };
             }
 
-            pub inline fn last_from_set(set: LinkSet) GetSlot {
-                return GetSlot{ .LAST_FROM_SET_TAIL = set };
+            pub inline fn last_from_set(set: LinkSet) RemoveLocation {
+                return RemoveLocation{ .LAST_FROM_SET = set };
             }
 
-            pub inline fn using_index(idx_and_set: SetIdx) GetSlot {
-                return GetSlot{ .USING_INDEX = idx_and_set };
+            pub inline fn one_index(idx_and_set: SetIdx) RemoveLocation {
+                return RemoveLocation{ .ONE_INDEX = idx_and_set };
             }
 
-            pub inline fn using_ptr(ptr_and_set: SetPtr) GetSlot {
-                return GetSlot{ .USING_PTR = ptr_and_set };
+            pub inline fn one_ptr(ptr_and_set: SetPtr) RemoveLocation {
+                return RemoveLocation{ .ONE_PTR = ptr_and_set };
             }
 
-            pub inline fn using_item(item_and_set: SetItem) GetSlot {
-                return GetSlot{ .USING_ITEM = item_and_set };
+            pub inline fn one_item(item_and_set: SetItem) RemoveLocation {
+                return RemoveLocation{ .ONE_ITEM = item_and_set };
+            }
+
+            pub inline fn many_new(count: Idx) RemoveLocation {
+                return RemoveLocation{ .MANY_NEW = count };
+            }
+
+            pub inline fn first_n_from_set(set_count: SetCount) RemoveLocation {
+                return RemoveLocation{ .FIRST_N_FROM_SET = set_count };
+            }
+
+            pub inline fn last_n_from_set(set_count: SetCount) RemoveLocation {
+                return RemoveLocation{ .LAST_N_FROM_SET = set_count };
+            }
+
+            pub inline fn first_n_from_set_else_new(set_count: SetCount) RemoveLocation {
+                return RemoveLocation{ .FIRST_N_FROM_SET_ELSE_NEW = set_count };
+            }
+
+            pub inline fn last_n_from_set_else_new(set_count: SetCount) RemoveLocation {
+                return RemoveLocation{ .LAST_N_FROM_SET_ELSE_NEW = set_count };
+            }
+
+            pub inline fn sparse_list_of_indexes_from_same_set(set_idx_list: SetIdxList) RemoveLocation {
+                return RemoveLocation{ .SPARSE_LIST_OF_INDEXES_FROM_SAME_SET = set_idx_list };
+            }
+
+            pub inline fn sparse_list_of_pointers_from_same_set(set_ptr_list: SetPtrList) RemoveLocation {
+                return RemoveLocation{ .SPARSE_LIST_OF_POINTERS_FROM_SAME_SET = set_ptr_list };
+            }
+
+            pub inline fn sparse_list_of_items_from_same_set(set_item_list: SetItemList) RemoveLocation {
+                return RemoveLocation{ .SPARSE_LIST_OF_ITEMS_FROM_SAME_SET = set_item_list };
+            }
+
+            pub inline fn sparse_list_of_indexes_from_any_set(set_idx_list: []const SetIdx) RemoveLocation {
+                return RemoveLocation{ .SPARSE_LIST_OF_INDEXES_FROM_ANY_SET = set_idx_list };
+            }
+
+            pub inline fn sparse_list_of_pointers_from_any_set(set_ptr_list: []const SetPtr) RemoveLocation {
+                return RemoveLocation{ .SPARSE_LIST_OF_POINTERS_FROM_ANY_SET = set_ptr_list };
+            }
+
+            pub inline fn sparse_list_of_items_from_any_set(set_item_list: []const SetItem) RemoveLocation {
+                return RemoveLocation{ .SPARSE_LIST_OF_ITEMS_FROM_ANY_SET = set_item_list };
             }
         };
 
         pub const InsertMode = enum {
-            AT_BEGINNING_HEAD_OF_SET,
-            AT_END_TAIL_OF_SET,
+            AT_BEGINNING_OF_SET,
+            AT_END_OF_SET,
             AFTER_INDEX,
             AFTER_PTR,
             AFTER_ITEM,
             BEFORE_INDEX,
             BEFORE_PTR,
             BEFORE_ITEM,
-            DESTROY,
+            LEAK_TO_NOWHERE,
         };
-
-        pub const InsertSlot = union(InsertMode) {
-            AT_BEGINNING_HEAD_OF_SET: LinkSet,
-            AT_END_TAIL_OF_SET: LinkSet,
+        // CHECKPOINT make this a comptime fn that returns a type based on InsertMode
+        pub const InsertLocation = union(InsertMode) {
+            AT_BEGINNING_OF_SET: LinkSet,
+            AT_END_OF_SET: LinkSet,
             AFTER_INDEX: SetIdx,
             AFTER_PTR: SetPtr,
             AFTER_ITEM: SetItem,
             BEFORE_INDEX: SetIdx,
             BEFORE_PTR: SetPtr,
             BEFORE_ITEM: SetItem,
+            LEAK_TO_NOWHERE: void,
 
-            pub inline fn at_beginning_head_of_set(set: LinkSet) InsertSlot {
-                return InsertSlot{ .AT_BEGINNING_HEAD_OF_SET = set };
+            pub inline fn at_beginning_head_of_set(set: LinkSet) InsertLocation {
+                return InsertLocation{ .AT_BEGINNING_OF_SET = set };
             }
 
-            pub inline fn at_end_tail_of_set(set: LinkSet) InsertSlot {
-                return InsertSlot{ .AT_END_TAIL_OF_SET = set };
+            pub inline fn at_end_tail_of_set(set: LinkSet) InsertLocation {
+                return InsertLocation{ .AT_END_OF_SET = set };
             }
 
-            pub inline fn after_index(idx_and_set: SetIdx) InsertSlot {
-                return InsertSlot{ .AFTER_INDEX = idx_and_set };
+            pub inline fn after_index(idx_and_set: SetIdx) InsertLocation {
+                return InsertLocation{ .AFTER_INDEX = idx_and_set };
             }
 
-            pub inline fn after_ptr(ptr_and_set: SetPtr) InsertSlot {
-                return InsertSlot{ .AFTER_PTR = ptr_and_set };
+            pub inline fn after_ptr(ptr_and_set: SetPtr) InsertLocation {
+                return InsertLocation{ .AFTER_PTR = ptr_and_set };
             }
 
-            pub inline fn after_item(item_and_set: SetItem) InsertSlot {
-                return InsertSlot{ .AFTER_ITEM = item_and_set };
+            pub inline fn after_item(item_and_set: SetItem) InsertLocation {
+                return InsertLocation{ .AFTER_ITEM = item_and_set };
             }
 
-            pub inline fn before_index(idx_and_set: SetIdx) InsertSlot {
-                return InsertSlot{ .BEFORE_INDEX = idx_and_set };
+            pub inline fn before_index(idx_and_set: SetIdx) InsertLocation {
+                return InsertLocation{ .BEFORE_INDEX = idx_and_set };
             }
 
-            pub inline fn before_ptr(ptr_and_set: SetPtr) InsertSlot {
-                return InsertSlot{ .BEFORE_PTR = ptr_and_set };
+            pub inline fn before_ptr(ptr_and_set: SetPtr) InsertLocation {
+                return InsertLocation{ .BEFORE_PTR = ptr_and_set };
             }
 
-            pub inline fn before_item(item_and_set: SetItem) InsertSlot {
-                return InsertSlot{ .BEFORE_ITEM = item_and_set };
+            pub inline fn before_item(item_and_set: SetItem) InsertLocation {
+                return InsertLocation{ .BEFORE_ITEM = item_and_set };
+            }
+
+            pub inline fn leak_to_nowhere() InsertLocation {
+                return InsertLocation{ .LEAK_TO_NOWHERE = void{} };
             }
         };
 
-        /// All functions in this namespace should be considered DANGEROUS to use
-        /// if you do not manually manage and maintain a valid linked list state
+        /// All functions/structs in this namespace fall in at least one of 3 categories:
+        /// - DANGEROUS to use if you do not manually manage and maintain a valid linked list state
+        /// - Are only useful for asserting/creating intenal state
+        /// - Cover VERY niche use cases (used internally) and are placed here to keep the top-level namespace less polluted
         ///
-        /// They are provided here to facilitate special user use cases
+        /// They are provided here publicly to facilitate special user use cases
         pub const Internal = struct {
             pub inline fn set_next_idx(ptr: *Elem, idx: Idx) void {
                 if (FORWARD) @field(ptr, NEXT_FIELD) = idx;
@@ -406,235 +532,591 @@ pub fn define_manual_allocator_inked_list_type(comptime options: LinkedListOptio
                 }
             }
 
-            pub fn link_item_chain(items: []const Item) void {
+            pub fn set_link_set_on_set_items(items: []const SetItem, set: LinkSet) void {
+                if (!STATE) return;
+                var i: usize = 0;
+                while (i < items.len) : (i += 1) {
+                    set_link_set(items[i].item.ptr, set);
+                }
+            }
+
+            pub fn set_state_on_items_first_last(self: *List, first_item: Item, last_item: Item, comptime forward: bool, set: LinkSet) void {
+                if (!STATE) return;
+                var idx = if (forward) first_item.idx else last_item.idx;
+                var ptr = if (forward) first_item.ptr else last_item.ptr;
+                const final_idx = if (forward) last_item.idx else first_item.idx;
+                while (true) {
+                    set_link_set(ptr, set);
+                    if (idx == final_idx) break;
+                    idx = if (forward) get_next_idx_from_ptr(self, set, ptr) else get_prev_idx_from_ptr(self, set, ptr);
+                    ptr = get_ptr(self, idx);
+                }
+            }
+
+            pub fn set_link_set_on_ptrs(ptrs: []const *Elem, set: LinkSet) void {
+                if (!STATE) return;
+                var i: usize = 0;
+                while (i < ptrs.len) : (i += 1) {
+                    set_link_set(ptrs[i], set);
+                }
+            }
+
+            pub fn set_link_set_on_set_ptrs(ptrs: []const SetPtr, set: LinkSet) void {
+                if (!STATE) return;
+                var i: usize = 0;
+                while (i < ptrs.len) : (i += 1) {
+                    set_link_set(ptrs[i].ptr, set);
+                }
+            }
+
+            pub fn set_link_set_on_ptrs_first_last(self: *List, first_ptr: *Elem, last_ptr: *Elem, comptime forward: bool, set: LinkSet) void {
+                if (!STATE) return;
+                var idx = if (forward) get_idx(self, first_ptr) else get_idx(self, last_ptr);
+                var ptr = if (forward) first_ptr else last_ptr;
+                const final_idx = if (forward) get_idx(self, last_ptr) else get_idx(self, first_ptr);
+                while (true) {
+                    set_link_set(ptr, set);
+                    if (idx == final_idx) break;
+                    idx = if (forward) get_next_idx_from_ptr(self, set, ptr) else get_prev_idx_from_ptr(self, set, ptr);
+                    ptr = get_ptr(self, idx);
+                }
+            }
+
+            pub fn set_link_set_on_indexes(self: *const List, indexes: []const Idx, set: LinkSet) void {
+                if (!STATE) return;
+                var i: usize = 0;
+                while (i < indexes.len) : (i += 1) {
+                    set_link_set(get_ptr(self, indexes[i]), set);
+                }
+            }
+
+            pub fn set_link_set_on_set_indexes(self: *const List, indexes: []const SetIdx, set: LinkSet) void {
+                if (!STATE) return;
+                var i: usize = 0;
+                while (i < indexes.len) : (i += 1) {
+                    set_link_set(get_ptr(self, indexes[i].idx), set);
+                }
+            }
+
+            pub fn set_link_set_on_indexes_first_last(self: *List, first_idx: Idx, last_idx: Idx, comptime forward: bool, set: LinkSet) void {
+                if (!STATE) return;
+                var idx = if (forward) first_idx else last_idx;
+                var ptr = if (forward) get_ptr(self, first_idx) else get_ptr(self, last_idx);
+                const final_idx = if (forward) last_idx else first_idx;
+                while (true) {
+                    set_link_set(ptr, set);
+                    if (idx == final_idx) break;
+                    idx = if (forward) get_next_idx_from_ptr(self, set, ptr) else get_prev_idx_from_ptr(self, set, ptr);
+                    ptr = get_ptr(self, idx);
+                }
+            }
+
+            pub fn link_sparse_item_slice(self: *List, set: LinkSet, items: []const Item) void {
                 var i = 1;
                 while (i < items.len) : (i += 1) {
-                    const this_item = items[i];
-                    const prev_item = items[i - 1];
-                    connect_two_items_on_same_set(prev_item, this_item);
+                    const left = get_conn_left_from_item(self, set, items[i]);
+                    const right = get_conn_right_from_item(self, set, items[i - 1]);
+                    connect(left, right);
                 }
             }
 
-            pub inline fn connect_one_before(prev_item: ConnLeft, this_item: ConnRight, new_item: Item) void {
+            pub fn link_sparse_set_item_slice(self: *List, set: LinkSet, items: []const SetItem) void {
+                var i = 1;
+                while (i < items.len) : (i += 1) {
+                    const left = get_conn_left_from_item(self, set, items[i].item);
+                    const right = get_conn_right_from_item(self, set, items[i - 1].item);
+                    connect(left, right);
+                }
+            }
+
+            pub fn link_and_set_state_on_new_indexes(self: *List, set: LinkSet, first_idx: Idx, count: Idx) void {
+                var left_idx = first_idx;
+                var right_idx = first_idx + 1;
+                const last_right_idx = left_idx + count - 1;
+                set_link_set(&self.list.ptr[left_idx], set);
+                while (right_idx < last_right_idx) {
+                    const right_item = Item{ .idx = right_idx, .ptr = &self.list.ptr[right_idx] };
+                    const left_item = Item{ .idx = left_idx, .ptr = &self.list.ptr[left_idx] };
+                    set_link_set(right_item.ptr, set);
+                    const left = get_conn_left_from_item(self, set, left_item);
+                    const right = get_conn_right_from_item(self, set, right_item);
+                    connect(left, right);
+                    left_idx += 1;
+                    right_idx += 1;
+                }
+            }
+
+            pub fn link_sparse_index_slice(self: *List, set: LinkSet, indexes: []const Idx) void {
+                var i = 1;
+                while (i < indexes.len) : (i += 1) {
+                    const left = get_conn_left_from_idx(self, set, indexes[i]);
+                    const right = get_conn_right_from_idx(set, indexes[i - 1]);
+                    connect(left, right);
+                }
+            }
+
+            pub fn link_sparse_set_index_slice(self: *List, set: LinkSet, indexes: []const SetIdx) void {
+                var i = 1;
+                while (i < indexes.len) : (i += 1) {
+                    const left = get_conn_left_from_idx(self, set, indexes[i].idx);
+                    const right = get_conn_right_from_idx(self, set, indexes[i - 1].idx);
+                    connect(left, right);
+                }
+            }
+
+            pub fn link_sparse_ptr_slice(self: *List, ptrs: []const *Elem) void {
+                var i = 1;
+                while (i < ptrs.len) : (i += 1) {
+                    const left = get_conn_left_from_ptr(self, ptrs[i]);
+                    const right = get_conn_right_from_ptr(self, ptrs[i - 1]);
+                    connect(left, right);
+                }
+            }
+
+            pub fn link_sparse_set_ptr_slice(self: *List, ptrs: []const SetPtr) void {
+                var i = 1;
+                while (i < ptrs.len) : (i += 1) {
+                    const left = get_conn_left_from_ptr(self, ptrs[i].ptr);
+                    const right = get_conn_right_from_ptr(self, ptrs[i - 1].ptr);
+                    connect(left, right);
+                }
+            }
+
+            pub fn disconnect_sparse_ptr_slice(self: *List, set: LinkSet, ptrs: []const *Elem) void {
+                var i = 0;
+                while (i < ptrs.len) : (i += 1) {
+                    const ptr = ptrs[i];
+                    const left_idx = get_prev_idx_from_ptr(self, set, ptr);
+                    const right_idx = get_next_idx_from_ptr(self, set, ptr);
+                    const left = get_conn_left_from_idx(self, set, left_idx);
+                    const right = get_conn_right_from_idx(self, set, right_idx);
+                    connect(left, right);
+                }
+            }
+
+            pub fn disconnect_sparse_set_ptr_slice(self: *List, ptrs: []const SetPtr) void {
+                var i = 0;
+                while (i < ptrs.len) : (i += 1) {
+                    const ptr = ptrs[i].ptr;
+                    const set = ptrs[i].set;
+                    const left_idx = get_prev_idx_from_ptr(self, set, ptr);
+                    const right_idx = get_next_idx_from_ptr(self, set, ptr);
+                    const left = get_conn_left_from_idx(self, set, left_idx);
+                    const right = get_conn_right_from_idx(self, set, right_idx);
+                    connect(left, right);
+                }
+            }
+
+            pub fn disconnect_sparse_index_slice(self: *List, set: LinkSet, indexes: []const Idx) void {
+                var i = 0;
+                while (i < indexes.len) : (i += 1) {
+                    const idx = indexes[i];
+                    const left_idx = get_prev_idx_from_idx(self, set, idx);
+                    const right_idx = get_next_idx_from_idx(self, set, idx);
+                    const left = get_conn_left_from_idx(self, set, left_idx);
+                    const right = get_conn_right_from_idx(self, set, right_idx);
+                    connect(left, right);
+                }
+            }
+
+            pub fn disconnect_sparse_set_index_slice(self: *List, indexes: []const SetIdx) void {
+                var i = 0;
+                while (i < indexes.len) : (i += 1) {
+                    const idx = indexes[i].idx;
+                    const set = indexes[i].set;
+                    const left_idx = get_prev_idx_from_idx(self, set, idx);
+                    const right_idx = get_next_idx_from_idx(self, set, idx);
+                    const left = get_conn_left_from_idx(self, set, left_idx);
+                    const right = get_conn_right_from_idx(self, set, right_idx);
+                    connect(left, right);
+                }
+            }
+
+            pub fn disconnect_sparse_item_slice(self: *List, set: LinkSet, items: []const Item) void {
+                var i = 0;
+                while (i < items.len) : (i += 1) {
+                    const ptr = items[i].ptr;
+                    const left_idx = get_prev_idx_from_ptr(self, set, ptr);
+                    const right_idx = get_next_idx_from_ptr(self, set, ptr);
+                    const left = get_conn_left_from_idx(self, set, left_idx);
+                    const right = get_conn_right_from_idx(self, set, right_idx);
+                    connect(left, right);
+                }
+            }
+
+            pub fn disconnect_sparse_set_item_slice(self: *List, items: []const SetItem) void {
+                var i = 0;
+                while (i < items.len) : (i += 1) {
+                    const ptr = items[i].item.ptr;
+                    const set = items[i].set;
+                    const left_idx = get_prev_idx_from_ptr(self, set, ptr);
+                    const right_idx = get_next_idx_from_ptr(self, set, ptr);
+                    const left = get_conn_left_from_idx(self, set, left_idx);
+                    const right = get_conn_right_from_idx(self, set, right_idx);
+                    connect(left, right);
+                }
+            }
+
+            pub inline fn connect_with_insert(left_edge: ConnLeft, first_insert: ConnRight, last_insert: ConnLeft, right_edge: ConnRight) void {
                 if (FORWARD) {
                     if (BIDIRECTION) {
-                        set_next_idx(prev_item.idx_ptr, new_item.idx);
-                        set_next_idx(new_item.ptr, this_item.idx);
+                        set_next_idx(left_edge.idx_ptr, first_insert.idx);
+                        set_next_idx(last_insert.idx_ptr, right_edge.idx);
                     } else {
-                        set_next_idx(prev_item, new_item.idx);
-                        set_next_idx(new_item.ptr, this_item);
+                        set_next_idx(left_edge, first_insert);
+                        set_next_idx(last_insert, right_edge);
                     }
                 }
                 if (BACKWARD) {
                     if (BIDIRECTION) {
-                        set_prev_idx(this_item.idx_ptr, new_item.idx);
-                        set_prev_idx(new_item.ptr, prev_item.idx);
+                        set_prev_idx(right_edge.idx_ptr, last_insert.idx);
+                        set_prev_idx(first_insert.idx_ptr, left_edge.idx);
                     } else {
-                        set_prev_idx(this_item, new_item.idx);
-                        set_prev_idx(new_item.ptr, prev_item);
+                        set_prev_idx(right_edge, last_insert);
+                        set_prev_idx(first_insert, left_edge);
                     }
                 }
             }
 
-            pub inline fn connect_chain_before(prev_item: ConnLeft, this_item: ConnRight, first_new_item: ConnRight, last_new_item: ConnLeft) void {
+            pub inline fn connect(left_edge: ConnLeft, right_edge: ConnRight) void {
                 if (FORWARD) {
                     if (BIDIRECTION) {
-                        set_next_idx(prev_item.idx_ptr, first_new_item.idx);
-                        set_next_idx(last_new_item.idx_ptr, this_item.idx);
+                        set_next_idx(left_edge.idx_ptr, right_edge.idx);
                     } else {
-                        set_next_idx(prev_item, first_new_item);
-                        set_next_idx(last_new_item, this_item);
+                        set_next_idx(left_edge, right_edge);
                     }
                 }
                 if (BACKWARD) {
                     if (BIDIRECTION) {
-                        set_prev_idx(this_item.idx_ptr, last_new_item.idx);
-                        set_prev_idx(first_new_item.idx_ptr, prev_item.idx);
+                        set_prev_idx(right_edge.idx_ptr, left_edge.idx);
                     } else {
-                        set_prev_idx(this_item, last_new_item);
-                        set_prev_idx(first_new_item, prev_item);
+                        set_prev_idx(right_edge, left_edge);
                     }
                 }
             }
 
-            pub inline fn connect_one_after(this_item: ConnLeft, next_item: ConnRight, new_item: Item) void {
+            pub inline fn get_conn_left_from_idx(self: *const List, set: LinkSet, idx: Idx) ConnLeft {
+                if (BIDIRECTION) return IdxPtrIdx{
+                    .idx = idx,
+                    .idx_ptr = if (idx == NULL_IDX) get_head_index_ref(self, set) else &@field(get_ptr(self, idx), NEXT_FIELD),
+                };
+                if (FORWARD) if (idx == NULL_IDX) get_head_index_ref(self, set) else &@field(get_ptr(self, idx), NEXT_FIELD);
+                if (BACKWARD) return idx;
+            }
+
+            pub inline fn get_conn_left_from_ptr(self: *const List, ptr: *Elem) ConnLeft {
+                if (BIDIRECTION) return IdxPtrIdx{
+                    .idx = get_idx(self, ptr),
+                    .idx_ptr = &@field(ptr, NEXT_FIELD),
+                };
+                if (FORWARD) return &@field(ptr, NEXT_FIELD);
+                if (BACKWARD) return get_idx(self, ptr);
+            }
+
+            pub inline fn get_conn_left_from_item(self: *const List, set: LinkSet, item: Item) ConnLeft {
+                if (BIDIRECTION) return IdxPtrIdx{
+                    .idx = item.idx,
+                    .idx_ptr = if (item.idx == NULL_IDX) get_head_index_ref(self, set) else &@field(item.ptr, NEXT_FIELD),
+                };
+                if (FORWARD) return &@field(item.ptr, NEXT_FIELD);
+                if (BACKWARD) return item.idx;
+            }
+
+            pub inline fn get_conn_left_from_set_head(self: *List, set: LinkSet) ConnLeft {
+                if (BIDIRECTION) return IdxPtrIdx{
+                    .idx = NULL_IDX,
+                    .idx_ptr = get_head_index_ref(self, set),
+                };
+                if (FORWARD) return get_head_index_ref(self, set);
+                if (BACKWARD) return NULL_IDX;
+            }
+
+            pub inline fn get_conn_right_from_idx(self: *const List, set: LinkSet, idx: Idx) ConnRight {
+                if (BIDIRECTION) return IdxPtrIdx{
+                    .idx = idx,
+                    .ptr = if (idx == NULL_IDX) get_tail_index_ref(self, set) else &@field(get_ptr(self, idx), PREV_FIELD),
+                };
+                if (FORWARD) return idx;
+                if (BACKWARD) return if (idx == NULL_IDX) get_tail_index_ref(self, set) else &@field(get_ptr(self, idx), PREV_FIELD);
+            }
+
+            pub inline fn get_conn_right_from_ptr(self: *const List, ptr: *Elem) ConnRight {
+                if (BIDIRECTION) return IdxPtrIdx{
+                    .idx = get_idx(self, ptr),
+                    .ptr = &@field(ptr, PREV_FIELD),
+                };
+                if (FORWARD) return &@field(ptr, PREV_FIELD);
+                if (BACKWARD) return ptr;
+            }
+
+            pub inline fn get_conn_right_from_item(self: *const List, set: LinkSet, item: Item) ConnRight {
+                if (BIDIRECTION) return IdxPtrIdx{
+                    .idx = item.idx,
+                    .idx_ptr = if (item.idx == NULL_IDX) get_tail_index_ref(self, set) else &@field(item.ptr, PREV_FIELD),
+                };
+                if (FORWARD) return item.idx;
+                if (BACKWARD) return if (item.idx == NULL_IDX) get_tail_index_ref(self, set) else &@field(item.ptr, PREV_FIELD);
+            }
+
+            pub inline fn get_conn_right_from_index_after_ptr(self: *const List, set: LinkSet, ptr: *const Elem) ConnRight {
+                const next_idx = get_next_idx_from_ptr(self, set, ptr);
+                return get_conn_right_from_idx(self, set, next_idx);
+            }
+
+            pub inline fn get_conn_left_from_index_before_ptr(self: *const List, set: LinkSet, ptr: *const Elem) ConnLeft {
+                const prev_idx = get_prev_idx_from_ptr(self, set, ptr);
+                return get_conn_left_from_idx(self, set, prev_idx);
+            }
+
+            pub inline fn get_conn_right_from_set_tail(self: *List, set: LinkSet) ConnRight {
+                if (BIDIRECTION) return IdxPtrIdx{
+                    .idx = NULL_IDX,
+                    .idx_ptr = get_tail_index_ref(self, set),
+                };
+                if (FORWARD) return NULL_IDX;
+                if (BACKWARD) return get_tail_index_ref(self, set);
+            }
+
+            pub inline fn get_conn_insert_from_item(self: *const List, set: LinkSet, item: Item) ConnInsert {
+                return ConnInsert{
+                    .first = get_conn_right_from_item(self, set, item),
+                    .last = get_conn_left_from_item(self, set, item),
+                };
+            }
+
+            pub inline fn get_conn_insert_from_item_first_last(self: *const List, set: LinkSet, items: FirstLastItem) ConnInsert {
+                return ConnInsert{
+                    .first = get_conn_right_from_item(self, set, items.first),
+                    .last = get_conn_left_from_item(self, set, items.last),
+                };
+            }
+
+            pub inline fn get_conn_insert_from_item_chain_slice(self: *const List, set: LinkSet, item_chain: []const Item) ConnInsert {
+                return ConnInsert{
+                    .first = get_conn_right_from_item(self, set, item_chain[0]),
+                    .last = get_conn_left_from_item(self, set, item_chain[item_chain.len - 1]),
+                };
+            }
+
+            pub inline fn get_conn_insert_from_item_chain_first_last(self: *const List, set: LinkSet, first_item: Item, last_item: Item) ConnInsert {
+                return ConnInsert{
+                    .first = get_conn_right_from_item(self, set, first_item),
+                    .last = get_conn_left_from_item(self, set, last_item),
+                };
+            }
+
+            pub inline fn get_conn_insert_from_index_chain_slice(self: *const List, set: LinkSet, index_chain: []const Idx) ConnInsert {
+                return ConnInsert{
+                    .first = get_conn_right_from_idx(self, set, index_chain[0]),
+                    .last = get_conn_left_from_idx(self, set, index_chain[index_chain.len - 1]),
+                };
+            }
+
+            pub inline fn get_conn_insert_from_index_chain_first_last(self: *const List, set: LinkSet, first_idx: Idx, last_idx: Idx) ConnInsert {
+                return ConnInsert{
+                    .first = get_conn_right_from_idx(self, set, first_idx),
+                    .last = get_conn_left_from_idx(self, set, last_idx),
+                };
+            }
+
+            pub inline fn get_conn_insert_from_ptr_chain_slice(self: *const List, ptr_chain: []const *Elem) ConnInsert {
+                return ConnInsert{
+                    .first = get_conn_right_from_ptr(self, ptr_chain[0]),
+                    .last = get_conn_left_from_ptr(self, ptr_chain[ptr_chain.len - 1]),
+                };
+            }
+
+            pub inline fn get_conn_insert_from_ptr_chain_first_last(self: *const List, first_ptr: *Elem, last_ptr: *Elem) ConnInsert {
+                return ConnInsert{
+                    .first = get_conn_right_from_ptr(self, first_ptr),
+                    .last = get_conn_left_from_ptr(self, last_ptr),
+                };
+            }
+
+            pub inline fn get_next_idx_from_ptr(self: *const List, set: LinkSet, ptr: *const Elem) Idx {
+                if (FORWARD) return @field(ptr, NEXT_FIELD);
+                const idx = get_idx(self, ptr);
+                return traverse_to_find_index_preceding_this_one_in_direction(self, idx, set, .BACKWARD);
+            }
+
+            pub inline fn get_prev_idx_from_ptr(self: *const List, set: LinkSet, ptr: *const Elem) Idx {
+                if (BACKWARD) return @field(ptr, PREV_FIELD);
+                const idx = get_idx(self, ptr);
+                return traverse_to_find_index_preceding_this_one_in_direction(self, idx, set, .FORWARD);
+            }
+
+            pub inline fn get_next_idx_from_idx(self: *const List, set: LinkSet, idx: Idx) Idx {
                 if (FORWARD) {
-                    if (BIDIRECTION) {
-                        set_next_idx(this_item.idx_ptr, new_item.idx);
-                        set_next_idx(new_item.ptr, next_item.idx);
-                    } else {
-                        set_next_idx(this_item, new_item.idx);
-                        set_next_idx(new_item.ptr, next_item);
-                    }
+                    const ptr = get_ptr(self, idx);
+                    return @field(ptr, NEXT_FIELD);
                 }
+                return traverse_to_find_index_preceding_this_one_in_direction(self, idx, set, .BACKWARD);
+            }
+
+            pub inline fn get_prev_idx_from_idx(self: *const List, set: LinkSet, idx: Idx) Idx {
                 if (BACKWARD) {
-                    if (BIDIRECTION) {
-                        set_prev_idx(next_item.idx_ptr, new_item.idx);
-                        set_prev_idx(new_item.ptr, this_item.idx);
-                    } else {
-                        set_prev_idx(next_item, new_item.idx);
-                        set_prev_idx(new_item.ptr, this_item);
-                    }
+                    const ptr = get_ptr(self, idx);
+                    return @field(ptr, PREV_FIELD);
+                }
+                return traverse_to_find_index_preceding_this_one_in_direction(self, idx, set, .FORWARD);
+            }
+
+            pub inline fn get_head_index_ref(self: *List, set: LinkSet) *Idx {
+                return &self.sets[@intFromEnum(set)].first_idx;
+            }
+
+            pub inline fn get_tail_index_ref(self: *List, set: LinkSet) *Idx {
+                return &self.sets[@intFromEnum(set)].last_idx;
+            }
+
+            pub inline fn get_ptr(self: *const List, idx: Idx) *Elem {
+                assert_valid_items_indexes_or_pointers(self, idx, @src());
+                return &self.list.ptr[idx];
+            }
+
+            pub inline fn get_idx(self: *const List, ptr: *const Elem) Idx {
+                assert_valid_items_indexes_or_pointers(self, ptr, @src());
+                if (CACHE) return @field(self, CACHE_FIELD);
+                const base_addr = @intFromPtr(self.list.ptr);
+                const ptr_addr = @intFromPtr(ptr);
+                const delta = ptr_addr - base_addr;
+                return @intCast(delta / @sizeOf(Elem));
+            }
+
+            pub inline fn get_element_ref_from_prev_idx_field_ref(prev_idx_field_ref: *Idx) *Elem {
+                assert_with_reason(BACKWARD, @src(), "elements do not cache the previous index, cannnot use a pointer to previous index field to find pointer to `*Elem`", .{});
+                return @as(*Elem, @fieldParentPtr(PREV_FIELD, prev_idx_field_ref));
+            }
+
+            pub inline fn get_element_index_from_prev_idx_field_ref(self: *const List, prev_idx_field_ref: *Idx) Idx {
+                return get_idx(self, get_element_ref_from_prev_idx_field_ref(prev_idx_field_ref));
+            }
+
+            pub inline fn get_element_ref_from_next_idx_field_ref(next_idx_field_ref: *Idx) *Elem {
+                assert_with_reason(FORWARD, @src(), "elements do not cache the next index, cannnot use a pointer to next index field to find pointer to `*Elem`", .{});
+                return @as(*Elem, @fieldParentPtr(NEXT_FIELD, next_idx_field_ref));
+            }
+
+            pub inline fn get_element_index_from_next_idx_field_ref(self: *const List, next_idx_field_ref: *Idx) Idx {
+                return get_idx(self, get_element_ref_from_next_idx_field_ref(next_idx_field_ref));
+            }
+
+            pub inline fn assert_valid_items_indexes_or_pointers(self: *const List, input: anytype, src_loc: ?SourceLocation) void {
+                const T = @TypeOf(input);
+                switch (T) {
+                    Item => assert_idx_and_pointer_reside_in_slice_and_match(Elem, self.list.slice(), input.idx, input.ptr, src_loc),
+                    []const Item => for (input) |item| {
+                        assert_idx_and_pointer_reside_in_slice_and_match(Elem, self.list.slice(), item.idx, item.ptr, src_loc);
+                    },
+                    SetItem => assert_idx_and_pointer_reside_in_slice_and_match(Elem, self.list.slice(), input.item.idx, input.item.ptr, src_loc),
+                    []const SetItem => for (input) |set_item| {
+                        assert_idx_and_pointer_reside_in_slice_and_match(Elem, self.list.slice(), set_item.item.idx, set_item.item.ptr, src_loc);
+                    },
+                    SetItemList => for (input.items) |item| {
+                        assert_idx_and_pointer_reside_in_slice_and_match(Elem, self.list.slice(), item.idx, item.ptr, src_loc);
+                    },
+                    Idx => assert_idx_less_than_len(input, self.list.len, src_loc),
+                    []const Idx => for (input) |idx| {
+                        assert_idx_less_than_len(idx, self.list.len, src_loc);
+                    },
+                    SetIdx => assert_idx_less_than_len(input.idx, self.list.len, src_loc),
+                    []const SetIdx => for (input) |setidx| {
+                        assert_idx_less_than_len(setidx.idx, self.list.len, src_loc);
+                    },
+                    SetIdxList => for (input.idxs) |idx| {
+                        assert_idx_less_than_len(idx, self.list.len, src_loc);
+                    },
+                    *Elem, *const Elem => assert_pointer_resides_in_slice(Elem, self.list.slice(), input, src_loc),
+                    []const *Elem, []const *const Elem, []*Elem, []*const Elem => for (input) |ptr| {
+                        assert_pointer_resides_in_slice(Elem, self.list.slice(), ptr, src_loc);
+                    },
+                    []Elem, []const Elem => assert_slice_resides_in_slice(Elem, self.list.slice(), input, src_loc),
+                    SetPtr => assert_pointer_resides_in_slice(Elem, self.list.slice(), input.ptr, src_loc),
+                    []const SetPtr => for (input) |set_ptr| {
+                        assert_pointer_resides_in_slice(Elem, self.list.slice(), set_ptr.ptr, src_loc);
+                    },
+                    SetPtrList => for (input.ptrs) |ptr| {
+                        assert_pointer_resides_in_slice(Elem, self.list.slice(), ptr, src_loc);
+                    },
+                    else => assert_with_reason(false, src_loc, "invalid type {s} is not an Item, *Elem, Idx, []Elem, or helper struct containing one or slice of many", .{@typeName(T)}),
                 }
             }
 
-            pub inline fn connect_chain_after(this_item: ConnLeft, next_item: ConnRight, first_new_item: ConnRight, last_new_item: ConnLeft) void {
-                if (FORWARD) {
-                    if (BIDIRECTION) {
-                        set_next_idx(this_item.idx_ptr, first_new_item.idx);
-                        set_next_idx(last_new_item.idx_ptr, next_item.idx);
-                    } else {
-                        set_next_idx(this_item, first_new_item);
-                        set_next_idx(last_new_item, next_item);
-                    }
+            pub fn traverse_to_get_first_item_in_set(self: *const List, set: LinkSet) Item {
+                var ii = Item{};
+                var i = self.get_item_from_idx(self.get_first_index_in_set(set));
+                var c: if (DEBUG) Idx else void = if (DEBUG) 0 else void{};
+                const limit: if (DEBUG) Idx else void = if (DEBUG) self.get_item_count(set) else void{};
+                while (i.idx != NULL_IDX) {
+                    ii = i;
+                    if (DEBUG) c += 1;
+                    i = self.get_item_from_idx(get_prev_idx_from_ptr(self, set, i.ptr));
                 }
-                if (BACKWARD) {
-                    if (BIDIRECTION) {
-                        set_prev_idx(next_item.idx_ptr, last_new_item.idx);
-                        set_prev_idx(first_new_item.idx_ptr, this_item.idx);
-                    } else {
-                        set_prev_idx(next_item, last_new_item);
-                        set_prev_idx(first_new_item, this_item);
-                    }
-                }
+                if (DEBUG) assert_with_reason(c == limit, @src(), "found null-index in set `{s}` while traversing in `BACKWARD` direction, but the number of traversed items ({d}) does not match the total in that set ({d})", .{ @tagName(set), c, limit });
+                return ii;
             }
 
-            pub fn connect_to_head(self: *List, set: LinkSet, item: ConnRight) void {
-                if (FORWARD) {
-                    if (BIDIRECTION) {
-                        set_first_index(self, set, item.idx);
-                    } else {
-                        set_first_index(self, set, item);
-                    }
+            pub fn traverse_to_get_last_item_in_set(self: *const List, set: LinkSet) Item {
+                var ii = Item{};
+                var i = self.get_item_from_idx(self.get_first_index_in_set(set));
+                var c: if (DEBUG) Idx else void = if (DEBUG) 0 else void{};
+                const limit: if (DEBUG) Idx else void = if (DEBUG) self.get_item_count(set) else void{};
+                while (i.idx != NULL_IDX) {
+                    ii = i;
+                    if (DEBUG) c += 1;
+                    i = self.get_item_from_idx(get_next_idx_from_ptr(self, set, i.ptr));
                 }
-                if (BACKWARD) {
-                    if (BIDIRECTION) {
-                        set_prev_idx(item.idx_ptr, NULL_IDX);
-                    } else {
-                        set_prev_idx(item, NULL_IDX);
-                    }
-                }
+                if (DEBUG) assert_with_reason(c == limit, @src(), "found null-index in set `{s}` while traversing in `FORWARD` direction, but the number of traversed items ({d}) does not match the total in that set ({d})", .{ @tagName(set), c, limit });
+                return ii;
             }
 
-            pub fn connect_to_tail(self: *List, set: LinkSet, item: ConnLeft) void {
-                if (FORWARD) {
-                    if (BIDIRECTION) {
-                        set_next_idx(item.idx_ptr, NULL_IDX);
-                    } else {
-                        set_next_idx(item, NULL_IDX);
-                    }
+            pub fn traverse_and_report_if_found_idx_in_set(self: *const List, set: LinkSet, idx: Idx) bool {
+                var i: Idx = if (FORWARD) self.get_first_index_in_set(set) else self.get_first_index_in_set(set);
+                var c: Idx = 0;
+                const limit: Idx = self.get_item_count(set);
+                while (i != NULL_IDX and (if (DEBUG) c < limit else true)) {
+                    if (i == idx) return true;
+                    i = if (FORWARD) Internal.get_next_idx_from_idx(set, i) else Internal.get_prev_idx_from_idx(self, set, i);
+                    if (DEBUG) c += 1;
                 }
-                if (BACKWARD) {
-                    if (BIDIRECTION) {
-                        set_last_index(self, set, item.idx);
-                    } else {
-                        set_last_index(self, set, item);
-                    }
-                }
+                if (DEBUG) assert_with_reason(c == limit, @src(), "found null-index in set `{s}`, but the number of traversed items ({d}) does not match the total in that set ({d})", .{ @tagName(set), c, limit });
+                return false;
             }
 
-            pub inline fn connect_two_items_on_same_set(left_item: ConnLeft, right_item: ConnRight) void {
-                if (FORWARD) {
-                    if (BIDIRECTION) {
-                        set_next_idx(left_item.idx_ptr, right_item.idx);
-                    } else {
-                        set_next_idx(left_item, right_item);
-                    }
+            pub fn traverse_to_find_index_preceding_this_one_in_direction(self: List, idx: Idx, set: LinkSet, dir: Direction) Idx {
+                var curr_idx: Idx = undefined;
+                var count: Idx = 0;
+                const limit = self.get_item_count(set);
+                switch (dir) {
+                    .BACKWARD => {
+                        assert_with_reason(BACKWARD, @src(), "linked list does not link elements in the backward direction", .{});
+                        curr_idx = self.get_last_index_in_set(set);
+                    },
+                    .FORWARD => {
+                        assert_with_reason(FORWARD, @src(), "linked list does not link elements in the forward direction", .{});
+                        curr_idx = self.get_first_index_in_set(set);
+                    },
                 }
-                if (BACKWARD) {
-                    if (BIDIRECTION) {
-                        set_prev_idx(right_item.idx_ptr, left_item.idx);
-                    } else {
-                        set_prev_idx(right_item, left_item);
-                    }
+                while (curr_idx != NULL_IDX) {
+                    if (DEBUG) assert_with_reason(count < limit, @src(), "already traversed {d} (total set count) items in set `{s}`, but there are more non-null indexes after the last", .{ limit, @tagName(set) });
+                    assert_with_reason(curr_idx < self.list.len, @src(), "while traversing set `{s}` in direction `{s}`, index {d} was found, which is out of bounds for list.len {d}", .{ @tagName(set), @tagName(dir), curr_idx, self.list.len });
+                    const following_idx = switch (dir) {
+                        .FORWARD => Internal.get_next_idx_from_idx(self, set, curr_idx),
+                        .BACKWARD => Internal.get_prev_idx_from_idx(self, set, curr_idx),
+                    };
+                    if (following_idx == idx) return curr_idx;
+                    curr_idx = following_idx;
+                    if (DEBUG) count += 1;
                 }
+                if (DEBUG) assert_with_reason(count == limit, @src(), "found null-index in set `{s}`, but the number of traversed items ({d}) does not match the total in that set ({d})\nALSO: no item found referencing index {d} in set `{s}` direction `{s}`: broken list or item in wrong set", .{ @tagName(set), count, limit, idx, @tagName(set), @tagName(dir) });
+                assert_with_reason(false, @src(), "no item found referencing index {d} in set `{s}` direction `{s}`: broken list or item in wrong set", .{ idx, @tagName(set), @tagName(dir) });
+            }
+
+            pub inline fn get_state(ptr: *const Elem) T_STATE {
+                assert_with_reason(STATE, @src(), "cannot return item state when items do not cache their own state", .{});
+                return @field(ptr, STATE_FIELD) & STATE_MASK;
             }
         };
-
-        pub inline fn get_item_from_ptr(self: *const List, ptr: *Elem) Item {
-            return Item{
-                .idx = self.get_idx(ptr),
-                .ptr = ptr,
-            };
-        }
-
-        pub inline fn get_item_from_idx(self: *const List, idx: Idx) Item {
-            return Item{
-                .idx = idx,
-                .ptr = self.get_ptr(idx),
-            };
-        }
-
-        pub inline fn get_conn_left_from_idx(self: *const List, idx: Idx) ConnLeft {
-            if (BIDIRECTION) return IdxPtrIdx{
-                .idx = idx,
-                .idx_ptr = &@field(self.get_ptr(idx), NEXT_FIELD),
-            };
-            if (FORWARD) return &@field(self.get_ptr(idx), NEXT_FIELD);
-            if (BACKWARD) return idx;
-        }
-
-        pub inline fn get_conn_left_from_ptr(self: *const List, ptr: *Elem) ConnLeft {
-            if (BIDIRECTION) return IdxPtrIdx{
-                .idx = self.get_idx(ptr),
-                .idx_ptr = &@field(ptr, NEXT_FIELD),
-            };
-            if (FORWARD) return &@field(ptr, NEXT_FIELD);
-            if (BACKWARD) return self.get_idx(ptr);
-        }
-
-        pub inline fn get_conn_left_from_item(item: Item) ConnLeft {
-            if (BIDIRECTION) return IdxPtrIdx{
-                .idx = item.idx,
-                .idx_ptr = &@field(item.ptr, NEXT_FIELD),
-            };
-            if (FORWARD) return &@field(item.ptr, NEXT_FIELD);
-            if (BACKWARD) return item.idx;
-        }
-        pub inline fn get_conn_left_from_set_head(self: *List, set: LinkSet) ConnLeft {
-            if (BIDIRECTION) return IdxPtrIdx{
-                .idx = NULL_IDX,
-                .idx_ptr = self.get_first_index_ref(set),
-            };
-            if (FORWARD) return self.get_first_index_ref(set);
-            if (BACKWARD) return NULL_IDX;
-        }
-
-        pub inline fn get_conn_right_from_idx(self: *const List, idx: Idx) ConnRight {
-            if (BIDIRECTION) return IdxPtrIdx{
-                .idx = idx,
-                .ptr = &@field(self.get_ptr(idx), PREV_FIELD),
-            };
-            if (FORWARD) return idx;
-            if (BACKWARD) return &@field(self.get_ptr(idx), PREV_FIELD);
-        }
-
-        pub inline fn get_conn_right_from_ptr(self: *const List, ptr: *Elem) ConnRight {
-            if (BIDIRECTION) return IdxPtrIdx{
-                .idx = self.get_idx(ptr),
-                .ptr = &@field(ptr, PREV_FIELD),
-            };
-            if (FORWARD) return &@field(ptr, PREV_FIELD);
-            if (BACKWARD) return ptr;
-        }
-
-        pub inline fn get_conn_right_from_item(item: Item) ConnRight {
-            if (BIDIRECTION) return IdxPtrIdx{
-                .idx = item.idx,
-                .idx_ptr = &@field(item.ptr, PREV_FIELD),
-            };
-            if (FORWARD) return item.idx;
-            if (BACKWARD) return &@field(item.ptr, PREV_FIELD);
-        }
-
-        pub inline fn get_conn_right_set_tail(self: *List, set: LinkSet) ConnRight {
-            if (BIDIRECTION) return IdxPtrIdx{
-                .idx = NULL_IDX,
-                .idx_ptr = self.get_last_index_ref(set),
-            };
-            if (FORWARD) return NULL_IDX;
-            if (BACKWARD) return self.get_last_index_ref(set);
-        }
 
         pub inline fn new_iterator(self: *List) Iterator {
             return Iterator{
@@ -650,9 +1132,9 @@ pub fn define_manual_allocator_inked_list_type(comptime options: LinkedListOptio
         pub fn new_with_capacity(capacity: Idx, alloc: Allocator) if (RETURN_ERRORS) Error!List else List {
             var self = UNINIT;
             if (RETURN_ERRORS) {
-                try self.ensure_total_capacity_exact(capacity, alloc);
+                try self.list.ensure_total_capacity_exact(capacity, alloc);
             } else {
-                self.ensure_total_capacity_exact(capacity, alloc);
+                self.list.ensure_total_capacity_exact(capacity, alloc);
             }
             return self;
         }
@@ -663,1700 +1145,581 @@ pub fn define_manual_allocator_inked_list_type(comptime options: LinkedListOptio
             return new_list;
         }
 
-        pub inline fn get_next_idx_from_ptr(self: *const List, set: LinkSet, ptr: *const Elem) Idx {
-            if (FORWARD) return @field(ptr, NEXT_FIELD);
-            const idx = self.get_idx(ptr);
-            return self.traverse_to_find_item_index_preceding_this_one_in_direction(idx, set, .BACKWARD);
-        }
-
-        pub inline fn get_prev_idx_from_ptr(self: *const List, set: LinkSet, ptr: *const Elem) Idx {
-            if (BACKWARD) return @field(ptr, PREV_FIELD);
-            const idx = self.get_idx(ptr);
-            return self.traverse_to_find_item_index_preceding_this_one_in_direction(idx, set, .FORWARD);
-        }
-
-        pub inline fn get_next_idx_from_idx(self: *const List, set: LinkSet, idx: Idx) Idx {
-            if (FORWARD) {
-                const ptr = self.get_ptr(idx);
-                return @field(ptr, NEXT_FIELD);
-            }
-            return self.traverse_to_find_item_index_preceding_this_one_in_direction(idx, set, .BACKWARD);
-        }
-
-        pub inline fn get_prev_idx_from_idx(self: *const List, set: LinkSet, idx: Idx) Idx {
-            if (BACKWARD) {
-                const ptr = self.get_ptr(idx);
-                return @field(ptr, PREV_FIELD);
-            }
-            return self.traverse_to_find_item_index_preceding_this_one_in_direction(idx, set, .FORWARD);
-        }
-
-        pub inline fn get_ptr(self: *const List, idx: Idx) *Elem {
-            assert_idx_less_than_len(idx, self.list.len, @src());
-            return &self.list.ptr[idx];
-        }
-
-        pub inline fn get_idx(self: *const List, ptr: *const Elem) Idx {
-            Assert.assert_pointer_resides_in_slice(Elem, self.list.slice(), ptr, @src());
-            if (CACHE) return @field(self, CACHE_FIELD);
-            const base_addr = @intFromPtr(self.list.ptr);
-            const ptr_addr = @intFromPtr(ptr);
-            const delta = ptr_addr - base_addr;
-            return @intCast(delta / @sizeOf(Elem));
-        }
-
-        pub inline fn get_head_index(self: *List, set: LinkSet) Idx {
-            assert_with_reason(HEAD, @src(), "linked list does not cache the first/head index", .{});
-            return self.sets[@intFromEnum(set)].first_idx;
-        }
-
-        pub inline fn get_first_index_ref(self: *List, set: LinkSet) *Idx {
-            assert_with_reason(HEAD, @src(), "linked list does not cache the first/head index", .{});
-            return &self.sets[@intFromEnum(set)].first_idx;
-        }
-
-        pub inline fn get_tail_index(self: *List, set: LinkSet) Idx {
-            assert_with_reason(TAIL, @src(), "linked list does not cache the last/tail index", .{});
-            return self.sets[@intFromEnum(set)].last_idx;
-        }
-
-        pub inline fn get_last_index_ref(self: *List, set: LinkSet) *Idx {
-            assert_with_reason(TAIL, @src(), "linked list does not cache the last/tail index", .{});
-            return &self.sets[@intFromEnum(set)].last_idx;
-        }
-
-        pub inline fn get_link_set_count(self: *List, set: LinkSet) Idx {
+        pub inline fn get_item_count(self: *List, set: LinkSet) Idx {
             return self.sets[@intFromEnum(set)].count;
         }
 
-        pub inline fn get_state(ptr: *const Elem) T_STATE {
-            assert_with_reason(STATE, @src(), "cannot return item state when items do not cache their own state", .{});
-            return @field(ptr, STATE_FIELD) & STATE_MASK;
+        pub inline fn get_item_from_ptr(self: *const List, ptr: *Elem) Item {
+            return Item{
+                .idx = Internal.get_idx(self, ptr),
+                .ptr = ptr,
+            };
         }
 
-        pub fn traverse_and_report_if_found_idx_in_set(self: *const List, set: LinkSet, idx: Idx) bool {
-            var i: Idx = if (FORWARD) self.get_head_index(set) else self.get_tail_index(set);
-            var c: Idx = 0;
-            const limit: Idx = self.get_link_set_count(set);
-            while (i != NULL_IDX and (if (DEBUG) c < limit else true)) {
-                if (i == idx) return true;
-                const i_item = self.get_item(i);
-                i = if (FORWARD) self.get_n(set, i_item) else self.get_prev_idx(set, i_item);
-                if (DEBUG) c += 1;
+        pub inline fn get_item_from_idx(self: *const List, idx: Idx) Item {
+            return Item{
+                .idx = idx,
+                .ptr = Internal.get_ptr(self, idx),
+            };
+        }
+
+        pub fn get_item_with_index_n_in_set_from_start(self: *const List, set: LinkSet, n: Idx) Item {
+            assert_with_reason(FORWARD, @src(), "cannot find index {n} in set {s} in the forward direction because items are not linked in the forward direction", .{ n, @tagName(set) });
+            const set_count = self.get_item_count(set);
+            assert_with_reason(n < set_count, @src(), "index {d} is out of bounds for set {s} (len = {d})", .{ @tagName(set), n, set_count });
+            var c = 0;
+            var idx = self.get_first_index_in_set(set);
+            while (c != n) : (c += 1) {
+                idx = Internal.get_next_idx_from_idx(self, set, idx);
             }
-            if (DEBUG) assert_with_reason(c == limit, @src(), "found null-index in set `{s}`, but the number of traversed items ({d}) does not match the total in that set ({d})", .{ @tagName(set), c, limit });
-            return false;
+            return idx;
+        }
+
+        pub fn get_item_with_index_n_in_set_from_end(self: *const List, set: LinkSet, n: Idx) Item {
+            assert_with_reason(BACKWARD, @src(), "cannot find index {n} in set {s} in the backward direction because items are not linked in the backward direction", .{ n, @tagName(set) });
+            const set_count = self.get_item_count(set);
+            assert_with_reason(n < set_count, @src(), "index {d} is out of bounds for set {s} (len = {d})", .{ @tagName(set), n, set_count });
+            var c = 0;
+            var idx = self.get_last_index_in_set(set);
+            while (c != n) : (c += 1) {
+                idx = Internal.get_prev_idx_from_idx(self, set, idx);
+            }
+            return idx;
         }
 
         pub inline fn idx_is_in_set(self: *const List, idx: Idx, set: LinkSet) bool {
             if (STATE) {
-                const ptr = self.get_ptr(idx);
+                const ptr = Internal.get_ptr(self, idx);
                 return @field(ptr, STATE_FIELD) & STATE_MASK == STATE_FLAGS[@intFromEnum(set)];
             }
-            return self.traverse_and_report_if_found_idx_in_set(set, idx);
+            return Internal.traverse_and_report_if_found_idx_in_set(self, set, idx);
         }
 
         pub inline fn ptr_is_in_set(self: *const List, ptr: *const Elem, set: LinkSet) bool {
             if (STATE) return @field(ptr, STATE_FIELD) & STATE_MASK == STATE_FLAGS[@intFromEnum(set)];
-            const idx = self.get_idx(ptr);
-            return self.traverse_and_report_if_found_idx_in_set(set, idx);
+            const idx = Internal.get_idx(self, ptr);
+            return Internal.traverse_and_report_if_found_idx_in_set(self, set, idx);
         }
+
         pub inline fn item_is_in_set(self: *const List, item: Item, set: LinkSet) bool {
             if (STATE) return @field(item.ptr, STATE_FIELD) & STATE_MASK == STATE_FLAGS[@intFromEnum(set)];
-            return self.traverse_and_report_if_found_idx_in_set(set, item.idx);
+            return Internal.traverse_and_report_if_found_idx_in_set(self, set, item.idx);
         }
 
-        pub fn traverse_to_find_index_preceding_this_one_in_direction(self: List, idx: Idx, set: LinkSet, dir: Direction) Idx {
-            var curr_idx: Idx = undefined;
-            var count: Idx = 0;
-            const limit = self.get_link_set_count(set);
-            switch (dir) {
-                .BACKWARD => {
-                    assert_with_reason(BACKWARD, @src(), "linked list does not link elements in the backward direction", .{});
-                    curr_idx = self.get_tail_index(set);
-                },
-                .FORWARD => {
-                    assert_with_reason(FORWARD, @src(), "linked list does not link elements in the forward direction", .{});
-                    curr_idx = self.get_head_index(set);
-                },
-            }
-            while (curr_idx != NULL_IDX) {
-                if (DEBUG) assert_with_reason(count < limit, @src(), "already traversed {d} (total set count) items in set `{s}`, but there are more non-null indexes after the last", .{ limit, @tagName(set) });
-                assert_with_reason(curr_idx < self.list.len, @src(), "while traversing set `{s}` in direction `{s}`, index {d} was found, which is out of bounds for list.len {d}", .{ @tagName(set), @tagName(dir), curr_idx, self.list.len });
-                const following_idx = switch (dir) {
-                    .FORWARD => get_next_idx_from_idx(curr_idx),
-                    .BACKWARD => get_prev_idx_from_idx(curr_idx),
-                };
-                if (following_idx == idx) return curr_idx;
-                curr_idx = following_idx;
-                if (DEBUG) count += 1;
-            }
-            if (DEBUG) assert_with_reason(count == limit, @src(), "found null-index in set `{s}`, but the number of traversed items ({d}) does not match the total in that set ({d})\nALSO: no item found referencing index {d} in set `{s}` direction `{s}`: broken list or item in wrong set", .{ @tagName(set), count, limit, idx, @tagName(set), @tagName(dir) });
-            assert_with_reason(false, @src(), "no item found referencing index {d} in set `{s}` direction `{s}`: broken list or item in wrong set", .{ idx, @tagName(set), @tagName(dir) });
+        pub inline fn get_first_index_in_set(self: *const List, set: LinkSet) Idx {
+            if (HEAD) return self.sets[@intFromEnum(set)].first_idx;
+            return Internal.traverse_to_get_first_item_in_set(self, set).idx;
         }
 
-        pub fn get_first_item_in_set(self: *const List, set: LinkSet) Item {
-            if (HEAD) return self.get_head_index(set);
-            var ii = Item{};
-            var i = self.get_item_from_idx(self.get_tail_index(set));
-            var c: if (DEBUG) Idx else void = if (DEBUG) 0 else void{};
-            const limit: if (DEBUG) Idx else void = if (DEBUG) self.get_link_set_count(set) else void{};
-            while (i.idx != NULL_IDX) {
-                ii = i;
-                if (DEBUG) c += 1;
-                i = self.get_item_from_idx(self.get_prev_idx_from_ptr(set, i.ptr));
-            }
-            if (DEBUG) assert_with_reason(c == limit, @src(), "found null-index in set `{s}` while traversing in `BACKWARD` direction, but the number of traversed items ({d}) does not match the total in that set ({d})", .{ @tagName(set), c, limit });
-            return ii;
+        pub inline fn get_first_item_in_set(self: *const List, set: LinkSet) Item {
+            if (HEAD) return self.get_item_from_idx(self.sets[@intFromEnum(set)].first_idx);
+            return Internal.traverse_to_get_first_item_in_set(self, set);
         }
 
-        pub fn get_last_item_in_set(self: *const List, set: LinkSet) Item {
-            if (TAIL) return self.get_tail_index(set);
-            var ii = Item{};
-            var i = self.get_item_from_idx(self.get_head_index(set));
-            var c: if (DEBUG) Idx else void = if (DEBUG) 0 else void{};
-            const limit: if (DEBUG) Idx else void = if (DEBUG) self.get_link_set_count(set) else void{};
-            while (i.idx != NULL_IDX) {
-                ii = i;
-                if (DEBUG) c += 1;
-                i = self.get_item_from_idx(self.get_next_idx_from_ptr(set, i.ptr));
-            }
-            if (DEBUG) assert_with_reason(c == limit, @src(), "found null-index in set `{s}` while traversing in `FORWARD` direction, but the number of traversed items ({d}) does not match the total in that set ({d})", .{ @tagName(set), c, limit });
-            return ii;
+        pub inline fn get_last_index_in_set(self: *const List, set: LinkSet) Idx {
+            if (TAIL) return self.sets[@intFromEnum(set)].last_idx;
+            return Internal.traverse_to_get_last_item_in_set(self, set).idx;
         }
 
-        pub fn get_item_slot_and_insert_at_assume_capacity(self: *List, get_slot_from: GetSlot, insert_slot_at: InsertSlot) Item {
-            var conn: ConnLeftRight = undefined;
-            switch (insert_slot_at) {
+        pub inline fn get_last_item_in_set(self: *const List, set: LinkSet) Item {
+            if (TAIL) return self.get_item_from_idx(self.sets[@intFromEnum(set)].last_idx);
+            return Internal.traverse_to_get_last_item_in_set(self, set);
+        }
+
+        fn get_item_slot_and_insert_at_internal(self: *List, get_from: RemoveLocation, insert_at: InsertLocation, alloc: Allocator, comptime ASSUME_CAP: bool) if (!ASSUME_CAP and RETURN_ERRORS) Error!FirstLastItem else FirstLastItem {
+            var insert_edges: ConnLeftRight = undefined;
+            var needs_reconnect = true;
+            var insert_set: LinkSet = undefined;
+            switch (insert_at) {
                 .AFTER_INDEX => |after| {
-                    conn.left = self.get_conn_left_from_idx(after.idx);
-                    const next_idx = self.get_next_idx_from_idx(after.set, after.idx);
-                    conn.right = self.get_conn_right_from_idx(next_idx);
+                    Internal.assert_valid_items_indexes_or_pointers(self, after.idx, @src());
+                    insert_edges.left = Internal.get_conn_left_from_idx(self, after.set, after.idx);
+                    const next_idx = Internal.get_next_idx_from_idx(self, after.set, after.idx);
+                    insert_edges.right = Internal.get_conn_right_from_idx(self, after.set, next_idx);
+                    insert_set = after.set;
                 },
                 .AFTER_ITEM => |after| {
-                    conn.left = self.get_conn_left_from_item(after.item);
-                    const next_idx = self.get_next_idx_from_idx(after.set, after.item.idx);
-                    conn.right = self.get_conn_right_from_idx(next_idx);
+                    Internal.assert_valid_items_indexes_or_pointers(self, after.item, @src());
+                    self.assert_valid_item(after.item, @src());
+                    insert_edges.left = self.get_conn_left_from_item(after.set, after.item);
+                    const next_idx = Internal.get_next_idx_from_idx(self, after.set, after.item.idx);
+                    insert_edges.right = Internal.get_conn_right_from_idx(self, after.set, next_idx);
+                    insert_set = after.set;
                 },
                 .AFTER_PTR => |after| {
-                    conn.left = self.get_conn_left_from_item(after.ptr);
-                    const next_idx = self.get_next_idx_from_ptr(after.set, after.ptr);
-                    conn.right = self.get_conn_right_from_idx(next_idx);
+                    Internal.assert_valid_items_indexes_or_pointers(self, after.ptr, @src());
+                    insert_edges.left = Internal.get_conn_left_from_ptr(self, after.ptr);
+                    const next_idx = Internal.get_next_idx_from_ptr(self, after.set, after.ptr);
+                    insert_edges.right = Internal.get_conn_right_from_idx(self, after.set, next_idx);
+                    insert_set = after.set;
                 },
                 .BEFORE_INDEX => |before| {
-                    conn.right = self.get_conn_right_from_idx(before.idx);
-                    const prev_idx = self.get_prev_idx_from_idx(before.set, before.idx);
-                    conn.left = self.get_conn_left_from_idx(prev_idx);
+                    Internal.assert_valid_items_indexes_or_pointers(self, before.idx, @src());
+                    insert_edges.right = Internal.get_conn_right_from_idx(self, before.set, before.idx);
+                    const prev_idx = Internal.get_prev_idx_from_idx(self, before.set, before.idx);
+                    insert_edges.left = Internal.get_conn_left_from_idx(self, before.set, prev_idx);
+                    insert_set = before.set;
                 },
                 .BEFORE_ITEM => |before| {
-                    conn.right = self.get_conn_right_from_item(before.item);
-                    const prev_idx = self.get_prev_idx_from_idx(before.set, before.item.idx);
-                    conn.left = self.get_conn_left_from_idx(prev_idx);
+                    Internal.assert_valid_items_indexes_or_pointers(self, before.item, @src());
+                    insert_edges.right = Internal.get_conn_right_from_item(self, before.set, before.item);
+                    const prev_idx = Internal.get_prev_idx_from_idx(self, before.set, before.item.idx);
+                    insert_edges.left = Internal.get_conn_left_from_idx(self, before.set, prev_idx);
+                    insert_set = before.set;
                 },
                 .BEFORE_PTR => |before| {
-                    conn.right = self.get_conn_right_from_item(before.ptr);
-                    const prev_idx = self.get_prev_idx_from_ptr(before.set, before.ptr);
-                    conn.left = self.get_conn_left_from_idx(prev_idx);
+                    Internal.assert_valid_items_indexes_or_pointers(self, before.ptr, @src());
+                    insert_edges.right = Internal.get_conn_right_from_ptr(self, before.ptr);
+                    const prev_idx = Internal.get_prev_idx_from_ptr(self, before.set, before.ptr);
+                    insert_edges.left = Internal.get_conn_left_from_idx(self, before.set, prev_idx);
+                    insert_set = before.set;
                 },
-                .AT_BEGINNING_HEAD_OF_SET => |set| {
-                    conn.left = self.get_conn_left_from_set_head(set);
-                    const next_item = self.get_first_item_in_set(set);
-                    conn.right = self.get_conn_right_from_item(next_item);
+                .AT_BEGINNING_OF_SET => |set| {
+                    insert_edges.left = Internal.get_conn_left_from_set_head(self, set);
+                    const next_index = self.get_first_index_in_set(set);
+                    insert_edges.right = Internal.get_conn_right_from_idx(self, set, next_index);
+                    insert_set = set;
                 },
-                .AT_END_TAIL_OF_SET => |set| {
-                    conn.right = self.get_conn_right_set_tail(set);
-                    const prev_item = self.get_last_item_in_set(set);
-                    conn.left = self.get_conn_left_from_item(prev_item);
+                .AT_END_OF_SET => |set| {
+                    insert_edges.right = Internal.get_conn_right_from_set_tail(self, set);
+                    const prev_index = self.get_last_index_in_set(set);
+                    insert_edges.left = Internal.get_conn_left_from_idx(self, set, prev_index);
+                    insert_set = set;
+                },
+                .LEAK_TO_NOWHERE => {
+                    needs_reconnect = false;
                 },
             }
-            //CHECKPOINT finish function
-            switch (get_slot_from) {
-                .BRAND_NEW => {},
-                .FIRST_FROM_SET_HEAD => |set| {},
-                .LAST_FROM_SET_TAIL => |set| {},
-                .TRY_FIRST_HEAD_FROM_SET_ELSE_NEW => |set| {},
-                .TRY_LAST_TAIL_FROM_SET_ELSE_NEW => |set| {},
-                .USING_INDEX => |using| {},
-                .USING_ITEM => |using| {},
-                .USING_PTR => |using| {},
-            }
-        }
-
-        pub fn insert_slot_after_ptr_assume_capacity(self: *List, ptr: *Elem) *Elem {
-            self.len += 1;
-            return &self.ptr[idx];
-        }
-
-        pub fn insert(self: *List, idx: Idx, item: Elem, alloc: Allocator) if (RETURN_ERRORS) Error!void else void {
-            const ptr = if (RETURN_ERRORS) try self.insert_slot(idx, alloc) else self.insert_slot(idx, alloc);
-            ptr.* = item;
-        }
-
-        pub fn insert_assume_capacity(self: *List, idx: Idx, item: Elem) void {
-            const ptr = self.insert_slot_assume_capacity(idx);
-            ptr.* = item;
-        }
-
-        pub fn insert_many_slots(self: *List, idx: Idx, count: Idx, alloc: Allocator) if (RETURN_ERRORS) Error![]Elem else []Elem {
-            if (RETURN_ERRORS) {
-                try self.ensure_unused_capacity(count, alloc);
-            } else {
-                self.ensure_unused_capacity(count, alloc);
-            }
-            return self.insert_many_slots_assume_capacity(idx, count);
-        }
-
-        pub fn insert_many_slots_assume_capacity(self: *List, idx: Idx, count: Idx) []Elem {
-            assert_with_reason(idx + count <= self.len, @src(), ERR_START_PLUS_COUNT_OOB, .{ idx, count, idx + count, self.len });
-            mem.copyBackwards(Elem, self.ptr[idx + count .. self.len + count], self.ptr[idx..self.len]);
-            self.len += count;
-            return self.ptr[idx .. idx + count];
-        }
-
-        pub fn insert_slice(self: *List, idx: Idx, items: []const Elem, alloc: Allocator) if (RETURN_ERRORS) Error!void else void {
-            const slots = if (RETURN_ERRORS) try self.insert_many_slots(idx, @intCast(items.len), alloc) else self.insert_many_slots(idx, @intCast(items.len), alloc);
-            @memcpy(slots, items);
-        }
-
-        pub fn insert_slice_assume_capacity(self: *List, idx: Idx, items: []const Elem) void {
-            const slots = self.insert_many_slots_assume_capacity(idx, @intCast(items.len));
-            @memcpy(slots, items);
-        }
-
-        pub fn replace_range(self: *List, start: Idx, length: Idx, new_items: []const Elem, alloc: Allocator) if (RETURN_ERRORS) Error!void else void {
-            if (new_items.len > length) {
-                const additional_needed: Idx = @as(Idx, @intCast(new_items.len)) - length;
-                if (RETURN_ERRORS) {
-                    try self.ensure_unused_capacity(additional_needed, alloc);
-                } else {
-                    self.ensure_unused_capacity(additional_needed, alloc);
-                }
-            }
-            self.replace_range_assume_capacity(start, length, new_items);
-        }
-
-        pub fn replace_range_assume_capacity(self: *List, start: Idx, length: Idx, new_items: []const Elem) void {
-            const end_of_range = start + length;
-            assert_with_reason(end_of_range <= self.len, @src(), ERR_LAST_IDX_GREATER_LEN, .{ end_of_range, self.len });
-            const range = self.ptr[start..end_of_range];
-            if (range.len == new_items.len)
-                @memcpy(range[0..new_items.len], new_items)
-            else if (range.len < new_items.len) {
-                const within_range = new_items[0..range.len];
-                const leftover = new_items[range.len..];
-                @memcpy(range[0..within_range.len], within_range);
-                const new_slots = self.insert_many_slots_assume_capacity(end_of_range, @intCast(leftover.len));
-                @memcpy(new_slots, leftover);
-            } else {
-                const unused_slots: Idx = @intCast(range.len - new_items.len);
-                @memcpy(range[0..new_items.len], new_items);
-                std.mem.copyForwards(Elem, self.ptr[end_of_range - unused_slots .. self.len], self.ptr[end_of_range..self.len]);
-                if (SECURE_WIPE) {
-                    crypto.secureZero(Elem, self.ptr[self.len - unused_slots .. self.len]);
-                }
-                self.len -= unused_slots;
-            }
-        }
-
-        pub fn append(self: *List, item: Elem, alloc: Allocator) if (RETURN_ERRORS) Error!void else void {
-            const slot = if (RETURN_ERRORS) try self.append_slot(alloc) else self.append_slot(alloc);
-            slot.* = item;
-        }
-
-        pub fn append_assume_capacity(self: *List, item: Elem) void {
-            const slot = self.append_slot_assume_capacity();
-            slot.* = item;
-        }
-
-        pub fn remove(self: *List, idx: Idx) Elem {
-            const val: Elem = self.ptr[idx];
-            self.delete(idx);
-            return val;
-        }
-
-        pub fn swap_remove(self: *List, idx: Idx) Elem {
-            const val: Elem = self.ptr[idx];
-            self.swap_delete(idx);
-            return val;
-        }
-
-        pub fn delete(self: *List, idx: Idx) void {
-            assert_with_reason(idx < self.len, @src(), ERR_IDX_GREATER_EQL_LEN, .{ idx, self.len });
-            std.mem.copyForwards(Elem, self.ptr[idx..self.len], self.ptr[idx + 1 .. self.len]);
-            if (SECURE_WIPE) {
-                crypto.secureZero(Elem, self.ptr[self.len - 1 .. self.len]);
-            }
-            self.len -= 1;
-        }
-
-        pub fn delete_range(self: *List, start: Idx, length: Idx) void {
-            const end_of_range = start + length;
-            assert_with_reason(end_of_range <= self.len, @src(), ERR_LAST_IDX_GREATER_LEN, .{ end_of_range, self.len });
-            std.mem.copyForwards(Elem, self.ptr[start..self.len], self.ptr[end_of_range..self.len]);
-            if (SECURE_WIPE) {
-                crypto.secureZero(Elem, self.ptr[self.len - length .. self.len]);
-            }
-            self.len -= length;
-        }
-
-        pub fn swap_delete(self: *List, idx: Idx) void {
-            assert_with_reason(idx < self.len, @src(), ERR_IDX_GREATER_EQL_LEN, .{ idx, self.len });
-            self.ptr[idx] = self.ptr[self.list.items.len - 1];
-            if (SECURE_WIPE) {
-                crypto.secureZero(Elem, self.ptr[self.len - 1 .. self.len]);
-            }
-            self.len -= 1;
-        }
-
-        pub fn append_slice(self: *List, items: []const Elem, alloc: Allocator) if (RETURN_ERRORS) Error!void else void {
-            const slots = if (RETURN_ERRORS) try self.append_many_slots(@intCast(items.len), alloc) else self.append_many_slots(@intCast(items.len), alloc);
-            @memcpy(slots, items);
-        }
-
-        pub fn append_slice_assume_capacity(self: *List, items: []const Elem) void {
-            const slots = self.append_many_slots_assume_capacity(@intCast(items.len));
-            @memcpy(slots, items);
-        }
-
-        pub fn append_slice_unaligned(self: *List, items: []align(1) const Elem, alloc: Allocator) if (RETURN_ERRORS) Error!void else void {
-            const slots = if (RETURN_ERRORS) try self.append_many_slots(@intCast(items.len), alloc) else self.append_many_slots(@intCast(items.len), alloc);
-            @memcpy(slots, items);
-        }
-
-        pub fn append_slice_unaligned_assume_capacity(self: *List, items: []align(1) const Elem) void {
-            const slots = self.append_many_slots_assume_capacity(@intCast(items.len));
-            @memcpy(slots, items);
-        }
-
-        pub fn append_n_times(self: *List, value: Elem, count: Idx, alloc: Allocator) if (RETURN_ERRORS) Error!void else void {
-            const slots = if (RETURN_ERRORS) try self.append_many_slots(count, alloc) else self.append_many_slots(count, alloc);
-            @memset(slots, value);
-        }
-
-        pub fn append_n_times_assume_capacity(self: *List, value: Elem, count: Idx) void {
-            const slots = self.append_many_slots_assume_capacity(count);
-            @memset(slots, value);
-        }
-
-        pub fn resize(self: *List, new_len: Idx, alloc: Allocator) if (RETURN_ERRORS) Error!void else void {
-            if (RETURN_ERRORS) {
-                try self.ensure_total_capacity(new_len, alloc);
-            } else {
-                self.ensure_total_capacity(new_len, alloc);
-            }
-            if (SECURE_WIPE and new_len < self.len) {
-                crypto.secureZero(Elem, self.ptr[new_len..self.len]);
-            }
-            self.len = new_len;
-        }
-
-        pub fn shrink_and_free(self: *List, new_len: Idx, alloc: Allocator) void {
-            assert_with_reason(new_len <= self.len, @src(), ERR_NEW_LEN_GREATER_LEN, .{ new_len, self.len });
-            if (@sizeOf(Elem) == 0) {
-                self.len = new_len;
-                return;
-            }
-
-            if (SECURE_WIPE) {
-                crypto.secureZero(Elem, self.ptr[new_len..self.len]);
-            }
-
-            const old_memory = self.ptr[0..self.cap];
-            if (alloc.remap(old_memory, new_len)) |new_items| {
-                self.ptr = new_items.ptr;
-                self.len = new_items.len;
-                self.cap = new_items.len;
-                return;
-            }
-
-            const new_memory = alloc.alignedAlloc(Elem, ALIGN, new_len) catch |err| return handle_alloc_error(err);
-
-            @memcpy(new_memory, self.ptr[0..new_len]);
-            alloc.free(old_memory);
-            self.ptr = new_memory.ptr;
-            self.len = new_memory.len;
-            self.cap = new_memory.len;
-        }
-
-        pub fn shrink_retaining_capacity(self: *List, new_len: Idx) void {
-            assert_with_reason(new_len <= self.len, @src(), ERR_NEW_LEN_GREATER_LEN, .{ new_len, self.len });
-            if (SECURE_WIPE) {
-                crypto.secureZero(Elem, self.ptr[new_len..self.len]);
-            }
-            self.len = new_len;
-        }
-
-        pub fn clear_retaining_capacity(self: *List) void {
-            if (SECURE_WIPE) {
-                std.crypto.secureZero(Elem, self.ptr[0..self.len]);
-            }
-            self.len = 0;
-        }
-
-        pub fn clear_and_free(self: *List, alloc: Allocator) void {
-            if (SECURE_WIPE) {
-                std.crypto.secureZero(Elem, self.ptr[0..self.len]);
-            }
-            alloc.free(self.ptr[0..self.cap]);
-            self.* = UNINIT;
-        }
-
-        pub fn ensure_total_capacity(self: *List, new_capacity: Idx, alloc: Allocator) if (RETURN_ERRORS) Error!void else void {
-            if (self.cap >= new_capacity) return;
-            return self.ensure_total_capacity_exact(true_capacity_for_grow(self.cap, new_capacity), alloc);
-        }
-
-        pub fn ensure_total_capacity_exact(self: *List, new_capacity: Idx, alloc: Allocator) if (RETURN_ERRORS) Error!void else void {
-            if (@sizeOf(Elem) == 0) {
-                self.cap = math.maxInt(Idx);
-                return;
-            }
-
-            if (self.cap >= new_capacity) return;
-
-            if (new_capacity < self.len) {
-                if (SECURE_WIPE) crypto.secureZero(Elem, self.ptr[new_capacity..self.len]);
-                self.len = new_capacity;
-            }
-
-            const old_memory = self.ptr[0..self.cap];
-            if (alloc.remap(old_memory, new_capacity)) |new_memory| {
-                self.ptr = new_memory.ptr;
-                self.cap = @intCast(new_memory.len);
-            } else {
-                const new_memory = alloc.alignedAlloc(Elem, ALIGN, new_capacity) catch |err| return handle_alloc_error(err);
-                @memcpy(new_memory[0..self.len], self.ptr[0..self.len]);
-                if (SECURE_WIPE) crypto.secureZero(Elem, self.ptr[0..self.len]);
-                alloc.free(old_memory);
-                self.ptr = new_memory.ptr;
-                self.cap = @as(Idx, @intCast(new_memory.len));
-            }
-        }
-
-        pub fn ensure_unused_capacity(self: *List, additional_count: Idx, alloc: Allocator) if (RETURN_ERRORS) Error!void else void {
-            const new_total_cap = if (RETURN_ERRORS) try add_or_error(self.len, additional_count) else add_or_error(self.len, additional_count);
-            return self.ensure_total_capacity(new_total_cap, alloc);
-        }
-
-        pub fn expand_to_capacity(self: *List) void {
-            self.len = self.cap;
-        }
-
-        pub fn append_slot(self: *List, alloc: Allocator) if (RETURN_ERRORS) Error!*Elem else *Elem {
-            const new_len = self.len + 1;
-            if (RETURN_ERRORS) try self.ensure_total_capacity(new_len, alloc) else self.ensure_total_capacity(new_len, alloc);
-            return self.append_slot_assume_capacity();
-        }
-
-        pub fn append_slot_assume_capacity(self: *List) *Elem {
-            assert_with_reason(self.len < self.cap, @src(), ERR_LEN_EQUALS_CAP, .{ self.len, self.cap });
-            const idx = self.len;
-            self.len += 1;
-            return &self.ptr[idx];
-        }
-
-        pub fn append_many_slots(self: *List, count: Idx, alloc: Allocator) if (RETURN_ERRORS) Error![]Elem else []Elem {
-            const new_len = self.len + count;
-            if (RETURN_ERRORS) try self.ensure_total_capacity(new_len, alloc) else self.ensure_total_capacity(new_len, alloc);
-            return self.append_many_slots_assume_capacity(count);
-        }
-
-        pub fn append_many_slots_assume_capacity(self: *List, count: Idx) []Elem {
-            const new_len = self.len + count;
-            assert_with_reason(new_len <= self.cap, @src(), ERR_LEN_PLUS_COUNT_GREATER_CAP, .{ self.len, count, self.len + count, self.cap });
-            const prev_len = self.len;
-            self.len = new_len;
-            return self.ptr[prev_len..][0..count];
-        }
-
-        pub fn append_many_slots_as_array(self: *List, comptime count: Idx, alloc: Allocator) if (RETURN_ERRORS) Error!*[count]Elem else *[count]Elem {
-            const new_len = self.len + count;
-            if (RETURN_ERRORS) try self.ensure_total_capacity(new_len, alloc) else self.ensure_total_capacity(new_len, alloc);
-            return self.append_many_slots_as_array_assume_capacity(count);
-        }
-
-        pub fn append_many_slots_as_array_assume_capacity(self: *List, comptime count: Idx) *[count]Elem {
-            const new_len = self.len + count;
-            assert_with_reason(new_len <= self.cap, @src(), ERR_LEN_PLUS_COUNT_GREATER_CAP, .{ self.len, count, self.len + count, self.cap });
-            const prev_len = self.len;
-            self.len = new_len;
-            return self.ptr[prev_len..][0..count];
-        }
-
-        pub fn pop(self: *List) Elem {
-            assert_with_reason(self.len > 0, @src(), ERR_LIST_EMPTY, .{});
-            const new_len = self.len - 1;
-            self.len = new_len;
-            return self.ptr[new_len];
-        }
-
-        pub fn pop_or_null(self: *List) ?Elem {
-            if (self.len == 0) return null;
-            return self.pop();
-        }
-
-        pub fn get_last(self: List) Elem {
-            assert_with_reason(self.len > 0, @src(), ERR_LIST_EMPTY, .{});
-            return self.ptr[self.len - 1];
-        }
-
-        pub fn get_last_or_null(self: List) ?Elem {
-            if (self.len == 0) return null;
-            return self.get_last();
-        }
-
-        pub fn add_or_error(a: Idx, b: Idx) if (RETURN_ERRORS) error{OutOfMemory}!Idx else Idx {
-            if (!RETURN_ERRORS) return a + b;
-            const result, const overflow = @addWithOverflow(a, b);
-            if (overflow != 0) return error.OutOfMemory;
-            return result;
-        }
-
-        pub fn true_capacity_for_grow(current: Idx, minimum: Idx) Idx {
-            switch (GROWTH) {
-                GrowthModel.GROW_EXACT_NEEDED => {
-                    return minimum;
+            var return_items: FirstLastItem = undefined;
+            var needs_disconnect = true;
+            var disconnect_set: LinkSet = undefined;
+            var disconnect_count: Idx = 1;
+            var disconnect_edges: ConnLeftRight = undefined;
+            var mid_conn: ConnLeftRight = undefined;
+            var needs_mid_conn = false;
+            var insert_count: Idx = 1;
+            rmv: switch (get_from) {
+                .ONE_NEW => {
+                    return_items = FirstLastItem.single(Item{
+                        .idx = self.list.len,
+                        .ptr = if (ASSUME_CAP) self.list.append_slot_assume_capacity() else (if (RETURN_ERRORS) try self.list.append_slot(alloc) else self.list.append_slot(alloc)),
+                    });
+                    needs_disconnect = false;
                 },
-                GrowthModel.GROW_EXACT_NEEDED_ATOMIC_PADDING => {
-                    return minimum + ATOMIC_PADDING;
-                },
-                else => {
-                    var new = current;
-                    while (true) {
-                        switch (GROWTH) {
-                            GrowthModel.GROW_BY_100_PERCENT => {
-                                new +|= new;
-                                if (new >= minimum) return new;
-                            },
-                            GrowthModel.GROW_BY_100_PERCENT_ATOMIC_PADDING => {
-                                new +|= new;
-                                const new_with_padding = new +| ATOMIC_PADDING;
-                                if (new_with_padding >= minimum) return new_with_padding;
-                            },
-                            GrowthModel.GROW_BY_50_PERCENT => {
-                                new +|= new / 2;
-                                if (new >= minimum) return new;
-                            },
-                            GrowthModel.GROW_BY_50_PERCENT_ATOMIC_PADDING => {
-                                new +|= new / 2;
-                                const new_with_padding = new +| ATOMIC_PADDING;
-                                if (new_with_padding >= minimum) return new_with_padding;
-                            },
-                            GrowthModel.GROW_BY_25_PERCENT => {
-                                new +|= new / 4;
-                                if (new >= minimum) return new;
-                            },
-                            GrowthModel.GROW_BY_25_PERCENT_ATOMIC_PADDING => {
-                                new +|= new / 4;
-                                const new_with_padding = new +| ATOMIC_PADDING;
-                                if (new_with_padding >= minimum) return new_with_padding;
-                            },
-                            else => unreachable,
-                        }
+                .FIRST_FROM_SET, .FIRST_FROM_SET_ELSE_NEW => |set| {
+                    const set_count: debug_switch(Idx, void) = debug_switch(self.get_item_count(set), void{});
+                    const set_first_idx = self.get_first_index_in_set(set);
+                    if (get_from == .FIRST_FROM_SET_ELSE_NEW and (debug_switch(set_count == 0, false) or set_first_idx == NULL_IDX)) {
+                        continue :rmv RemoveLocation.one_new();
                     }
+                    assert_with_reason(debug_switch(set_count > 0, true) and set_first_idx < self.list.len, @src(), "tried to 'get' linked list item from head/beginning of set `{s}`, but that set reports an item count of {d} and the first idx is {d} (list.len = {d})", .{ @tagName(set), debug_switch(set_count, 0), set_first_idx, self.list.len });
+                    return_items = FirstLastItem.single(self.get_item_from_idx(set_first_idx));
+                    disconnect_edges.left = Internal.get_conn_left_from_index_before_ptr(self, disconnect_set, return_items.first.ptr);
+                    disconnect_edges.right = Internal.get_conn_right_from_index_after_ptr(self, disconnect_set, return_items.last.ptr);
+                    disconnect_set = set;
                 },
+                .LAST_FROM_SET, .LAST_FROM_SET_ELSE_NEW => |set| {
+                    const set_count: debug_switch(Idx, void) = debug_switch(self.get_item_count(set), void{});
+                    const set_last_idx = self.get_last_index_in_set(set);
+                    if (get_from == .LAST_FROM_SET_ELSE_NEW and (debug_switch(set_count == 0, false) or set_last_idx == NULL_IDX)) {
+                        continue :rmv RemoveLocation.one_new();
+                    }
+                    assert_with_reason(debug_switch(set_count > 0, true) and set_last_idx < self.list.len, @src(), "tried to 'get' linked list item from head/beginning of set `{s}`, but that set reports an item count of {d} and the first idx is {d} (list.len = {d})", .{ @tagName(set), debug_switch(set_count, 0), set_last_idx, self.list.len });
+                    return_items = FirstLastItem.single(self.get_item_from_idx(set_last_idx));
+                    disconnect_edges.left = Internal.get_conn_left_from_index_before_ptr(self, disconnect_set, return_items.first.ptr);
+                    disconnect_edges.right = Internal.get_conn_right_from_index_after_ptr(self, disconnect_set, return_items.last.ptr);
+                    disconnect_set = set;
+                },
+                .ONE_INDEX => |using| {
+                    Internal.assert_valid_items_indexes_or_pointers(self, using.idx, @src());
+                    return_items = FirstLastItem.single(self.get_item_from_idx(using.idx));
+                    disconnect_edges.left = Internal.get_conn_left_from_index_before_ptr(self, disconnect_set, return_items.first.ptr);
+                    disconnect_edges.right = Internal.get_conn_right_from_index_after_ptr(self, disconnect_set, return_items.last.ptr);
+                    disconnect_set = using.set;
+                },
+                .ONE_ITEM => |using| {
+                    Internal.assert_valid_items_indexes_or_pointers(self, using.item, @src());
+                    return_items = FirstLastItem.single(using.item);
+                    disconnect_edges.left = Internal.get_conn_left_from_index_before_ptr(self, disconnect_set, return_items.first.ptr);
+                    disconnect_edges.right = Internal.get_conn_right_from_index_after_ptr(self, disconnect_set, return_items.last.ptr);
+                    disconnect_set = using.set;
+                },
+                .ONE_PTR => |using| {
+                    Internal.assert_valid_items_indexes_or_pointers(self, using.ptr, @src());
+                    return_items = FirstLastItem.single(self.get_item_from_ptr(using.ptr));
+                    disconnect_edges.left = Internal.get_conn_left_from_index_before_ptr(self, disconnect_set, return_items.first.ptr);
+                    disconnect_edges.right = Internal.get_conn_right_from_index_after_ptr(self, disconnect_set, return_items.last.ptr);
+                    disconnect_set = using.set;
+                },
+                .MANY_NEW => |count| {
+                    assert_with_reason(count > 0, @src(), "cannot insert `0` items", .{});
+                    const first_slot_idx = self.list.len;
+                    const last_slot_idx = self.list.len + count - 1;
+                    _ = if (ASSUME_CAP) self.list.append_many_slots_assume_capacity(count) else (if (RETURN_ERRORS) try self.list.append_many_slots(count, alloc) else self.list.append_many_slots(count, alloc));
+                    Internal.link_and_set_state_on_new_indexes(self, insert_set, first_slot_idx, count);
+                    return_items.first = self.get_item_from_idx(first_slot_idx);
+                    return_items.last = self.get_item_from_idx(last_slot_idx);
+                    needs_disconnect = false;
+                    insert_count = count;
+                },
+                .FIRST_N_FROM_SET => |set_count| {
+                    assert_with_reason(set_count.count > 0, @src(), "cannot insert `0` items", .{});
+                    assert_with_reason(self.get_item_count(set_count.set) >= set_count.count, @src(), "requested {d} items from set {s}, but set only has {d} items", .{ set_count.count, @tagName(set_count.set), self.get_item_count(disconnect_set) });
+                    return_items.first = self.get_first_item_in_set(set_count.set);
+                    return_items.last = self.get_item_with_index_n_in_set_from_start(set_count.set, set_count.count - 1);
+                    Internal.set_state_on_items_first_last(self, return_items.first, return_items.last, true, set_count.set);
+                    disconnect_edges.left = Internal.get_conn_left_from_index_before_ptr(self, disconnect_set, return_items.first.ptr);
+                    disconnect_edges.right = Internal.get_conn_right_from_index_after_ptr(self, disconnect_set, return_items.last.ptr);
+                    disconnect_count = set_count.count;
+                    disconnect_set = set_count.set;
+                    insert_count = set_count.count;
+                },
+                .LAST_N_FROM_SET => |set_count| {
+                    assert_with_reason(set_count.count > 0, @src(), "cannot insert `0` items", .{});
+                    assert_with_reason(self.get_item_count(set_count.set) >= set_count.count, @src(), "requested {d} items from set {s}, but set only has {d} items", .{ set_count.count, @tagName(set_count.set), self.get_item_count(disconnect_set) });
+                    return_items.last = self.get_last_item_in_set(set_count.set);
+                    return_items.first = self.get_item_with_index_n_in_set_from_end(set_count.set, set_count.count - 1);
+                    Internal.set_state_on_items_first_last(self, return_items.first, return_items.last, false, set_count.set);
+                    disconnect_edges.left = Internal.get_conn_left_from_index_before_ptr(self, disconnect_set, return_items.first.ptr);
+                    disconnect_edges.right = Internal.get_conn_right_from_index_after_ptr(self, disconnect_set, return_items.last.ptr);
+                    disconnect_count = set_count.count;
+                    disconnect_set = set_count.set;
+                    insert_count = set_count.count;
+                },
+                .FIRST_N_FROM_SET_ELSE_NEW => |set_count| {
+                    assert_with_reason(set_count.count > 0, @src(), "cannot insert `0` items", .{});
+                    const count_from_set = @max(self.get_item_count(set_count.set), set_count.count);
+                    const count_from_new = set_count.count - count_from_set;
+                    if (count_from_new == set_count.count) continue :rmv RemoveLocation.many_new(set_count.count);
+                    if (count_from_set == set_count.count) continue :rmv RemoveLocation.first_n_from_set(set_count);
+                    // new slots
+                    const first_slot_idx = self.list.len;
+                    const last_slot_idx = self.list.len + count_from_new - 1;
+                    _ = if (ASSUME_CAP) self.list.append_many_slots_assume_capacity(count_from_new) else (if (RETURN_ERRORS) try self.list.append_many_slots(count_from_new, alloc) else self.list.append_many_slots(count_from_new, alloc));
+                    Internal.link_and_set_state_on_new_indexes(self, insert_set, first_slot_idx, count_from_new);
+                    const first_new_item = self.get_item_from_idx(first_slot_idx);
+                    return_items.last = self.get_item_from_idx(last_slot_idx);
+                    // moved items
+                    return_items.first = self.get_first_item_in_set(set_count.set);
+                    const last_moved_item = self.get_item_with_index_n_in_set_from_start(set_count.set, count_from_set - 1);
+                    Internal.set_state_on_items_first_last(self, return_items.first, last_moved_item, true, set_count.set);
+                    mid_conn.left = Internal.get_conn_left_from_item(self, set_count.set, last_moved_item);
+                    mid_conn.right = Internal.get_conn_right_from_item(self, set_count.set, first_new_item);
+                    needs_mid_conn = true;
+                    disconnect_edges.left = Internal.get_conn_left_from_index_before_ptr(self, disconnect_set, return_items.first.ptr);
+                    disconnect_edges.right = Internal.get_conn_right_from_index_after_ptr(self, disconnect_set, last_moved_item.ptr);
+                    disconnect_count = count_from_set;
+                    disconnect_set = set_count.set;
+                    insert_count = set_count.count;
+                },
+                .LAST_N_FROM_SET_ELSE_NEW => |set_count| {
+                    assert_with_reason(set_count.count > 0, @src(), "cannot insert `0` items", .{});
+                    const count_from_set = @max(self.get_item_count(set_count.set), set_count.count);
+                    const count_from_new = set_count.count - count_from_set;
+                    if (count_from_new == set_count.count) continue :rmv RemoveLocation.many_new(set_count.count);
+                    if (count_from_set == set_count.count) continue :rmv RemoveLocation.last_n_from_set(set_count);
+                    // new slots
+                    const first_slot_idx = self.list.len;
+                    const last_slot_idx = self.list.len + count_from_new - 1;
+                    _ = if (ASSUME_CAP) self.list.append_many_slots_assume_capacity(count_from_new) else (if (RETURN_ERRORS) try self.list.append_many_slots(count_from_new, alloc) else self.list.append_many_slots(count_from_new, alloc));
+                    Internal.link_and_set_state_on_new_indexes(self, insert_set, first_slot_idx, count_from_new);
+                    const first_new_item = self.get_item_from_idx(first_slot_idx);
+                    return_items.last = self.get_item_from_idx(last_slot_idx);
+                    // moved items
+                    return_items.first = self.get_item_with_index_n_in_set_from_end(set_count.set, count_from_set - 1);
+                    const last_moved_item = self.get_last_item_in_set(set_count.set);
+                    Internal.set_state_on_items_first_last(self, return_items.first, last_moved_item, false, set_count.set);
+                    mid_conn.left = Internal.get_conn_left_from_item(self, set_count.set, last_moved_item);
+                    mid_conn.right = Internal.get_conn_right_from_item(self, set_count.set, first_new_item);
+                    needs_mid_conn = true;
+                    disconnect_edges.left = Internal.get_conn_left_from_index_before_ptr(self, disconnect_set, return_items.first.ptr);
+                    disconnect_edges.right = Internal.get_conn_right_from_index_after_ptr(self, disconnect_set, last_moved_item.ptr);
+                    disconnect_count = count_from_set;
+                    disconnect_set = set_count.set;
+                    insert_count = set_count.count;
+                },
+                //CHECKPOINT
+                .SPARSE_LIST_OF_INDEXES_FROM_SAME_SET => |set_idx_list| {},
+                .SPARSE_LIST_OF_POINTERS_FROM_SAME_SET => |set_ptr_list| {},
+                .SPARSE_LIST_OF_ITEMS_FROM_SAME_SET => |set_item_list| {},
+                .SPARSE_LIST_OF_INDEXES_FROM_ANY_SET => |set_idx_list| {},
+                .SPARSE_LIST_OF_POINTERS_FROM_ANY_SET => |set_ptr_list| {},
+                .SPARSE_LIST_OF_ITEMS_FROM_ANY_SET => |set_item_list| {},
             }
-        }
-
-        pub fn find_idx(self: List, comptime Param: type, param: Param, match_fn: *const fn (param: Param, item: *const Elem) bool) ?Idx {
-            for (self.slice(), 0..) |*item, idx| {
-                if (match_fn(param, item)) return @intCast(idx);
-            }
-            return null;
-        }
-
-        pub fn find_ptr(self: List, comptime Param: type, param: Param, match_fn: *const fn (param: Param, item: *const Elem) bool) ?*Elem {
-            if (self.find_idx(Param, param, match_fn)) |idx| {
-                return &self.ptr[idx];
-            }
-            return null;
-        }
-
-        pub fn find_const_ptr(self: List, comptime Param: type, param: Param, match_fn: *const fn (param: Param, item: *const Elem) bool) ?*const Elem {
-            if (self.find_idx(Param, param, match_fn)) |idx| {
-                return &self.ptr[idx];
-            }
-            return null;
-        }
-
-        pub fn find_and_copy(self: *List, comptime Param: type, param: Param, match_fn: *const fn (param: Param, item: *const Elem) bool) ?Elem {
-            if (self.find_idx(Param, param, match_fn)) |idx| {
-                return self.ptr[idx];
-            }
-            return null;
-        }
-
-        pub fn find_and_remove(self: *List, comptime Param: type, param: Param, match_fn: *const fn (param: Param, item: *const Elem) bool) ?Elem {
-            if (self.find_idx(Param, param, match_fn)) |idx| {
-                return self.remove(idx);
-            }
-            return null;
-        }
-
-        pub fn find_and_delete(self: *List, comptime Param: type, param: Param, match_fn: *const fn (param: Param, item: *const Elem) bool) bool {
-            if (self.find_idx(Param, param, match_fn)) |idx| {
-                self.delete(idx);
-                return true;
-            }
-            return false;
-        }
-
-        pub inline fn find_exactly_n_item_indexes_from_n_params_in_order(self: List, comptime Param: type, params: []const Param, match_fn: *const fn (param: Param, item: *const Elem) bool, output_buf: []Idx) bool {
-            return self.flex_slice(.immutable).find_exactly_n_item_indexes_from_n_params_in_order(Param, params, match_fn, output_buf);
-        }
-
-        pub inline fn find_exactly_n_item_pointers_from_n_params_in_order(self: List, comptime Param: type, params: []const Param, match_fn: *const fn (param: Param, item: *const Elem) bool, output_buf: []*Elem) bool {
-            return self.flex_slice(.mutable).find_exactly_n_item_pointers_from_n_params_in_order(Param, params, match_fn, output_buf);
-        }
-
-        pub inline fn find_exactly_n_const_item_pointers_from_n_params_in_order(self: List, comptime Param: type, params: []const Param, match_fn: *const fn (param: Param, item: *const Elem) bool, output_buf: []*const Elem) bool {
-            return self.flex_slice(.immutable).find_exactly_n_const_item_pointers_from_n_params_in_order(Param, params, match_fn, output_buf);
-        }
-
-        pub inline fn find_exactly_n_item_copies_from_n_params_in_order(self: List, comptime Param: type, params: []const Param, match_fn: *const fn (param: Param, item: *const Elem) bool, output_buf: []Elem) bool {
-            return self.flex_slice(.immutable).find_exactly_n_item_copies_from_n_params_in_order(Param, params, match_fn, output_buf);
-        }
-
-        pub fn delete_ordered_indexes(self: *List, indexes: []const Idx) void {
-            assert_with_reason(indexes.len <= self.len, @src(), "more indexes provided ({d}) than exist in list ({d})", .{ indexes.len, self.len });
-            assert_with_reason(check: {
-                var i: usize = 1;
-                while (i < indexes.len) : (i += 1) {
-                    if (indexes[i - 1] >= indexes[i]) break :check false;
+            if (needs_disconnect) {
+                Internal.connect(disconnect_edges.left, disconnect_edges.right);
+                Internal.decrease_link_set_count(self, disconnect_set, disconnect_count);
+                if (TAIL_NO_BACKWARD and disconnect_edges.right == NULL_IDX) {
+                    const last_rem_idx = if (self.get_item_count(disconnect_set) > 0) Internal.get_element_index_from_next_idx_field_ref(self, disconnect_edges.left) else NULL_IDX;
+                    Internal.set_last_index(self, disconnect_set, last_rem_idx);
                 }
-                break :check true;
-            }, @src(), "not all indexes are in increasing order (with no duplicates) as is required by this function", .{});
-            assert_with_reason(check: {
-                var i: usize = 0;
-                while (i < indexes.len) : (i += 1) {
-                    if (indexes[i] >= self.len) break :check false;
+                if (HEAD_NO_FORWARD and disconnect_edges.left == NULL_IDX) {
+                    const first_rem_idx = if (self.get_item_count(disconnect_set) > 0) Internal.get_element_index_from_prev_idx_field_ref(self, disconnect_edges.right) else NULL_IDX;
+                    Internal.set_first_index(self, disconnect_set, first_rem_idx);
                 }
-                break :check true;
-            }, @src(), "some indexes provided are out of bounds for list len ({d})", .{self.len});
-            var shift_down: usize = 0;
-            var i: usize = 0;
-            var src_start: Idx = undefined;
-            var src_end: Idx = undefined;
-            var dst_start: Idx = undefined;
-            var dst_end: Idx = undefined;
-            while (i < indexes.len) {
-                var consecutive: Idx = 1;
-                var end_index: Idx = i + consecutive;
-                while (end_index < indexes.len) {
-                    if (indexes[end_index] != indexes[end_index - 1] + 1) break;
-                    consecutive += 1;
-                    end_index += 1;
-                }
-                const start_idx = end_index - 1;
-                shift_down += consecutive;
-                src_start = indexes[start_idx];
-                src_end = if (end_index >= indexes.len) self.len else indexes[end_index];
-                dst_start = src_start - shift_down;
-                dst_end = src_end - shift_down;
-                std.mem.copyForwards(Idx, self.ptr[dst_start..dst_end], self.ptr[src_start..src_end]);
-                i += consecutive;
             }
-            self.len -= indexes.len;
+            if (needs_mid_conn) {
+                Internal.connect(mid_conn.left, mid_conn.right);
+            }
+            if (needs_reconnect) {
+                const insert_new = Internal.get_conn_insert_from_item_first_last(self, insert_set, return_items);
+                Internal.connect_with_insert(insert_edges.left, insert_new.first, insert_new.last, insert_edges.right);
+                Internal.increase_link_set_count(self, insert_set, insert_count);
+                if (TAIL_NO_BACKWARD and insert_edges.right == NULL_IDX) {
+                    Internal.set_last_index(self, insert_set, return_items.last.idx);
+                }
+                if (HEAD_NO_FORWARD and insert_edges.left == NULL_IDX) {
+                    Internal.set_first_index(self, insert_set, return_items.first.idx);
+                }
+                return return_items;
+            }
         }
 
-        //TODO pub fn insert_slots_at_ordered_indexes()
-
-        pub inline fn insertion_sort(self: *List) void {
-            return self.flex_slice(.mutable).insertion_sort();
+        pub fn get_item_slot_and_insert_at_assume_capacity(self: *List, get_slot_from: RemoveLocation, insert_slot_at: InsertLocation) Item {
+            return self.get_item_slot_and_insert_at_internal(get_slot_from, insert_slot_at, DummyAllocator.allocator, true);
         }
 
-        pub inline fn insertion_sort_with_transform(self: *List, comptime TX: type, transform_fn: *const fn (item: Elem) TX) void {
-            return self.flex_slice(.mutable).insertion_sort_with_transform(TX, transform_fn);
+        pub fn get_item_slot_and_insert_at(self: *List, get_slot_from: RemoveLocation, insert_slot_at: InsertLocation, alloc: Allocator) if (RETURN_ERRORS) Error!Item else Item {
+            return self.get_item_slot_and_insert_at_internal(get_slot_from, insert_slot_at, alloc, false);
         }
 
-        pub inline fn insertion_sort_with_transform_and_user_data(self: *List, comptime TX: type, transform_fn: *const fn (item: Elem, userdata: ?*anyopaque) TX, userdata: ?*anyopaque) void {
-            return self.flex_slice(.mutable).insertion_sort_with_transform_and_user_data(TX, transform_fn, userdata);
-        }
-
-        pub inline fn is_sorted(self: *List) bool {
-            return self.flex_slice(.immutable).is_sorted();
-        }
-
-        pub inline fn is_sorted_with_transform(self: *List, comptime TX: type, transform_fn: *const fn (item: Elem) TX) bool {
-            return self.flex_slice(.immutable).is_sorted_with_transform(TX, transform_fn);
-        }
-
-        pub inline fn is_sorted_with_transform_and_user_data(self: *List, comptime TX: type, transform_fn: *const fn (item: Elem, userdata: ?*anyopaque) TX, userdata: ?*anyopaque) bool {
-            return self.flex_slice(.immutable).is_sorted_with_transform_and_user_data(TX, transform_fn, userdata);
-        }
-
-        pub inline fn is_reverse_sorted(self: *List) bool {
-            return self.flex_slice(.immutable).is_reverse_sorted();
-        }
-
-        pub inline fn is_reverse_sorted_with_transform(self: *List, comptime TX: type, transform_fn: *const fn (item: Elem) TX) bool {
-            return self.flex_slice(.immutable).is_reverse_sorted_with_transform(TX, transform_fn);
-        }
-
-        pub inline fn is_reverse_sorted_with_transform_and_user_data(self: *List, comptime TX: type, transform_fn: *const fn (item: Elem, userdata: ?*anyopaque) TX, userdata: ?*anyopaque) bool {
-            return self.flex_slice(.immutable).is_reverse_sorted_with_transform_and_user_data(TX, transform_fn, userdata);
-        }
-
-        // pub inline fn insert_one_sorted( self: *List, item: Elem, alloc: Allocator) if (RETURN_ERRORS) Error!Idx else Idx {
-        //     return insert_one_sorted_custom(List, self, item, DEFAULT_COMPARE_PKG.greater_than, DEFAULT_MATCH_FN, alloc);
-        // }
-
-        // pub fn insert_one_sorted_custom( self: *List, item: Elem, greater_than_fn: *const CompareFn(Elem), equal_order_fn: *const CompareFn(Elem), alloc: Allocator) if (RETURN_ERRORS) Error!Idx else Idx {
-        //     const insert_idx: Idx = @intCast(BinarySearch.binary_search_insert_index(Elem, &item, self.ptr[0..self.len], greater_than_fn, equal_order_fn));
-        //     if (RETURN_ERRORS) try insert(List, self, insert_idx, item, alloc) else insert(List, self, insert_idx, item, alloc);
-        //     return insert_idx;
-        // }
-
-        // pub inline fn find_equal_order_idx_sorted( self: *List, item_to_compare: *const Elem) ?Idx {
-        //     return find_equal_order_idx_sorted_custom(List, self, item_to_compare, DEFAULT_COMPARE_PKG.greater_than, DEFAULT_MATCH_FN);
-        // }
-
-        // pub fn find_equal_order_idx_sorted_custom( self: *List, item_to_compare: *const Elem, greater_than_fn: *const CompareFn(Elem), equal_order_fn: *const CompareFn(Elem)) ?Idx {
-        //     const insert_idx = BinarySearch.binary_search_by_order(Elem, item_to_compare, self.ptr[0..self.len], greater_than_fn, equal_order_fn);
-        //     if (insert_idx) |idx| return @intCast(idx);
-        //     return null;
-        // }
-
-        // pub inline fn find_matching_item_idx_sorted( self: *List, item_to_find: *const Elem) ?Idx {
-        //     return find_matching_item_idx_sorted_custom(List, self, item_to_find, DEFAULT_COMPARE_PKG.greater_than, DEFAULT_COMPARE_PKG.equals, DEFAULT_MATCH_FN);
-        // }
-
-        // pub fn find_matching_item_idx_sorted_custom( self: *List, item_to_find: *const Elem, greater_than_fn: *const CompareFn(Elem), equal_order_fn: *const CompareFn(Elem), exact_match_fn: *const CompareFn(Elem)) ?Idx {
-        //     const insert_idx = BinarySearch.binary_search_exact_match(Elem, item_to_find, self.ptr[0..self.len], greater_than_fn, equal_order_fn, exact_match_fn);
-        //     if (insert_idx) |idx| return @intCast(idx);
-        //     return null;
-        // }
-
-        // pub inline fn find_matching_item_idx( self: *List, item_to_find: *const Elem) ?Idx {
-        //     return find_matching_item_idx_custom(List, self, item_to_find, DEFAULT_MATCH_FN);
-        // }
-
-        // pub fn find_matching_item_idx_custom( self: *List, item_to_find: *const Elem, exact_match_fn: *const CompareFn(Elem)) ?Idx {
-        //     if (self.len == 0) return null;
-        //     const buf = self.ptr[0..self.len];
-        //     var idx: Idx = 0;
-        //     var found_exact = exact_match_fn(item_to_find, &buf[idx]);
-        //     const limit = self.len - 1;
-        //     while (!found_exact and idx < limit) {
-        //         idx += 1;
-        //         found_exact = exact_match_fn(item_to_find, &buf[idx]);
+        // pub fn find_idx(self: List, comptime Param: type, param: Param, match_fn: *const fn (param: Param, item: *const Elem) bool) ?Idx {
+        //     for (self.slice(), 0..) |*item, idx| {
+        //         if (match_fn(param, item)) return @intCast(idx);
         //     }
-        //     if (found_exact) return idx;
         //     return null;
         // }
 
-        pub fn handle_alloc_error(err: Allocator.Error) if (RETURN_ERRORS) Error else noreturn {
-            switch (ALLOC_ERROR_BEHAVIOR) {
-                ErrorBehavior.RETURN_ERRORS => return err,
-                ErrorBehavior.ERRORS_PANIC => std.debug.panic("List's backing allocator failed to allocate memory: Allocator.Error.{s}", .{@errorName(err)}),
-                ErrorBehavior.ERRORS_ARE_UNREACHABLE => unreachable,
-            }
-        }
-
-        //**************************
-        // std.io.Writer interface *
-        //**************************
-        const StdWriterHandle = struct {
-            list: *List,
-            alloc: Allocator,
-        };
-        const StdWriterHandleNoGrow = struct {
-            list: *List,
-        };
-
-        pub const StdWriter = if (Elem != u8)
-            @compileError("The Writer interface is only defined for child type `u8` " ++
-                "but the given type is " ++ @typeName(Elem))
-        else
-            std.io.Writer(StdWriterHandle, Allocator.Error, std_write);
-
-        pub fn get_std_writer(self: *List, alloc: Allocator) StdWriter {
-            return StdWriter{ .context = .{ .list = self, .alloc = alloc } };
-        }
-
-        fn std_write(handle: StdWriterHandle, bytes: []const u8) Allocator.Error!usize {
-            try handle.list.append_slice(bytes, handle.alloc);
-            return bytes.len;
-        }
-
-        pub const StdWriterNoGrow = if (Elem != u8)
-            @compileError("The Writer interface is only defined for child type `u8` " ++
-                "but the given type is " ++ @typeName(Elem))
-        else
-            std.io.Writer(StdWriterHandleNoGrow, Allocator.Error, std_write_no_grow);
-
-        pub fn get_std_writer_no_grow(self: *List) StdWriterNoGrow {
-            return StdWriterNoGrow{ .context = .{ .list = self } };
-        }
-
-        fn std_write_no_grow(handle: StdWriterHandle, bytes: []const u8) error{OutOfMemory}!usize {
-            const available_capacity = handle.list.list.capacity - handle.list.list.items.len;
-            if (bytes.len > available_capacity) return error.OutOfMemory;
-            handle.list.append_slice_assume_capacity(bytes);
-            return bytes.len;
-        }
-    };
-}
-
-pub fn define_static_allocator_list_type(comptime options: ListOptions, comptime alloc_ptr: *const Allocator) type {
-    const opt = comptime check: {
-        var opts = options;
-        if (opts.alignment) |a| {
-            if (a == @alignOf(opts.T)) {
-                opts.alignment = null;
-            }
-        }
-        break :check opts;
-    };
-    if (opt.alignment) |a| {
-        if (!math.isPowerOfTwo(a)) @panic("alignment must be a power of 2");
-    }
-    if (@typeInfo(opt.index_type) != Type.int or @typeInfo(opt.index_type).int.signedness != .unsigned) @panic("index_type must be an unsigned integer type");
-    return extern struct {
-        ptr: Ptr = UNINIT_PTR,
-        len: Idx = 0,
-        cap: Idx = 0,
-
-        pub const ALLOC = alloc_ptr;
-        pub const ALIGN = options.alignment;
-        pub const ALLOC_ERROR_BEHAVIOR = options.error_behavior;
-        pub const GROWTH = options.growth_model;
-        pub const RETURN_ERRORS = options.error_behavior == .RETURN_ERRORS;
-        pub const SECURE_WIPE = options.secure_wipe_bytes;
-        pub const UNINIT_PTR: Ptr = @ptrFromInt(if (ALIGN) |a| mem.alignBackward(usize, math.maxInt(usize), @intCast(a)) else mem.alignBackward(usize, math.maxInt(usize), @alignOf(Elem)));
-        pub const ATOMIC_PADDING = @as(comptime_int, @max(1, std.atomic.cache_line / @sizeOf(Elem)));
-        pub const UNINIT = List{
-            .ptr = UNINIT_PTR,
-            .len = 0,
-            .cap = 0,
-        };
-
-        const List = @This();
-        const ManualList = define_manual_allocator_list_type(options);
-        pub const Error = Allocator.Error;
-        pub const Elem = options.element_type;
-        pub const Idx = options.index_type;
-        pub const Ptr = if (ALIGN) |a| [*]align(a) Elem else [*]Elem;
-        pub const Slice = if (ALIGN) |a| ([]align(a) Elem) else []Elem;
-        pub fn SentinelSlice(comptime sentinel: Elem) type {
-            return if (ALIGN) |a| ([:sentinel]align(a) Elem) else [:sentinel]Elem;
-        }
-
-        pub inline fn to_manually_managed_list(self: List) ManualList {
-            return @bitCast(self);
-        }
-        pub inline fn as_manually_managed_list(self: *List) *ManualList {
-            return @ptrCast(@alignCast(self));
-        }
-        pub inline fn from_manually_managed_list(list: ManualList) List {
-            return @bitCast(list);
-        }
-
-        pub const Iterator = ListIterator(List);
-
-        pub inline fn new_iterator(self: *List) Iterator {
-            return Iterator{
-                .list_ref = self,
-                .next_idx = 0,
-            };
-        }
-
-        pub inline fn flex_slice(self: List, comptime mutability: Mutability) FlexSlice(Elem, Idx, mutability) {
-            return self.as_manually_managed_list_const().flex_slice(mutability);
-        }
-
-        pub inline fn slice(self: List) Slice {
-            return self.as_manually_managed_list_const().slice();
-        }
-
-        pub inline fn array_ptr(self: List, start: Idx, comptime length: Idx) *[length]Elem {
-            return self.as_manually_managed_list_const().array_ptr(start, length);
-        }
-
-        pub inline fn vector_ptr(self: List, start: Idx, comptime length: Idx) *@Vector(length, Elem) {
-            return self.as_manually_managed_list_const().vector_ptr(start, length);
-        }
-
-        pub inline fn slice_with_sentinel(self: List, comptime sentinel: Elem) SentinelSlice(Elem) {
-            return self.as_manually_managed_list_const().slice_with_sentinel(sentinel);
-        }
-
-        pub inline fn slice_full_capacity(self: List) Slice {
-            return self.as_manually_managed_list_const().slice_full_capacity();
-        }
-
-        pub inline fn slice_unused_capacity(self: List) []Elem {
-            return self.as_manually_managed_list_const().slice_unused_capacity();
-        }
-
-        pub inline fn set_len(self: *List, new_len: Idx) void {
-            return self.as_manually_managed_list().set_len(new_len);
-        }
-
-        pub inline fn new_empty() List {
-            return UNINIT;
-        }
-
-        pub inline fn new_with_capacity(capacity: Idx) if (RETURN_ERRORS) Error!List else List {
-            if (RETURN_ERRORS) {
-                return from_manually_managed_list(try ManualList.new_with_capacity(capacity, ALLOC.*));
-            } else {
-                return from_manually_managed_list(ManualList.new_with_capacity(capacity, ALLOC.*));
-            }
-        }
-
-        pub inline fn clone(self: List) if (RETURN_ERRORS) Error!List else List {
-            if (RETURN_ERRORS) {
-                return from_manually_managed_list(try self.to_manually_managed_list().clone(ALLOC.*));
-            } else {
-                return from_manually_managed_list(self.to_manually_managed_list().clone(ALLOC.*));
-            }
-        }
-
-        pub inline fn to_owned_slice(self: *List) if (RETURN_ERRORS) Error!Slice else Slice {
-            return self.as_manually_managed_list().to_owned_slice(ALLOC.*);
-        }
-
-        pub inline fn to_owned_slice_sentinel(self: *List, comptime sentinel: Elem) if (RETURN_ERRORS) Error!SentinelSlice(sentinel) else SentinelSlice(sentinel) {
-            return self.as_manually_managed_list().to_owned_slice_sentinel(sentinel, ALLOC.*);
-        }
-
-        pub inline fn from_owned_slice(from_slice: Slice) List {
-            return from_manually_managed_list(ManualList.from_owned_slice(from_slice));
-        }
-
-        pub inline fn from_owned_slice_sentinel(comptime sentinel: Elem, from_slice: [:sentinel]Elem) List {
-            return from_manually_managed_list(ManualList.from_owned_slice_sentinel(sentinel, from_slice));
-        }
-
-        pub inline fn insert_slot(self: *List, idx: Idx) if (RETURN_ERRORS) Error!*Elem else *Elem {
-            return self.as_manually_managed_list().insert_slot(idx, ALLOC.*);
-        }
-
-        pub inline fn insert_slot_assume_capacity(self: *List, idx: Idx) *Elem {
-            return self.as_manually_managed_list().insert_slot_assume_capacity(idx);
-        }
-
-        pub inline fn insert(self: *List, idx: Idx, item: Elem) if (RETURN_ERRORS) Error!void else void {
-            return self.as_manually_managed_list().insert(idx, item, ALLOC.*);
-        }
-
-        pub inline fn insert_assume_capacity(self: *List, idx: Idx, item: Elem) void {
-            return self.as_manually_managed_list().insert_assume_capacity(idx, item);
-        }
-
-        pub inline fn insert_many_slots(self: *List, idx: Idx, count: Idx) if (RETURN_ERRORS) Error![]Elem else []Elem {
-            return self.as_manually_managed_list().insert_many_slots(idx, count, ALLOC.*);
-        }
-
-        pub inline fn insert_many_slots_assume_capacity(self: *List, idx: Idx, count: Idx) []Elem {
-            return self.as_manually_managed_list().insert_many_slots_assume_capacity(idx, count);
-        }
-
-        pub inline fn insert_slice(self: *List, idx: Idx, items: []const Elem) if (RETURN_ERRORS) Error!void else void {
-            return self.as_manually_managed_list().insert_slice(idx, items, ALLOC.*);
-        }
-
-        pub inline fn insert_slice_assume_capacity(self: *List, idx: Idx, items: []const Elem) void {
-            return self.as_manually_managed_list().insert_slice_assume_capacity(idx, items);
-        }
-
-        pub inline fn replace_range(self: *List, start: Idx, length: Idx, new_items: []const Elem) if (RETURN_ERRORS) Error!void else void {
-            return self.as_manually_managed_list().replace_range(start, length, new_items, ALLOC.*);
-        }
-
-        pub inline fn replace_range_assume_capacity(self: *List, start: Idx, length: Idx, new_items: []const Elem) void {
-            return self.as_manually_managed_list().replace_range_assume_capacity(start, length, new_items);
-        }
-
-        pub inline fn append(self: *List, item: Elem) if (RETURN_ERRORS) Error!void else void {
-            return self.as_manually_managed_list().append(item, ALLOC.*);
-        }
-
-        pub inline fn append_assume_capacity(self: *List, item: Elem) void {
-            return self.as_manually_managed_list().append_assume_capacity(item);
-        }
-
-        pub inline fn remove(self: *List, idx: Idx) Elem {
-            return self.as_manually_managed_list().remove(idx);
-        }
-
-        pub inline fn swap_remove(self: *List, idx: Idx) Elem {
-            return self.as_manually_managed_list().swap_remove(idx);
-        }
-
-        pub inline fn delete(self: *List, idx: Idx) void {
-            return self.as_manually_managed_list().delete(idx);
-        }
-
-        pub inline fn delete_range(self: *List, start: Idx, length: Idx) void {
-            return self.as_manually_managed_list().delete_range(start, length);
-        }
-
-        pub inline fn swap_delete(self: *List, idx: Idx) void {
-            return self.as_manually_managed_list().swap_delete(idx);
-        }
-
-        pub inline fn append_slice(self: *List, items: []const Elem) if (RETURN_ERRORS) Error!void else void {
-            return self.as_manually_managed_list().append_slice(items, ALLOC.*);
-        }
-
-        pub inline fn append_slice_assume_capacity(self: *List, items: []const Elem) void {
-            return self.as_manually_managed_list().append_slice_assume_capacity(items);
-        }
-
-        pub inline fn append_slice_unaligned(self: *List, items: []align(1) const Elem) if (RETURN_ERRORS) Error!void else void {
-            return self.as_manually_managed_list().append_slice_unaligned(items, ALLOC.*);
-        }
-
-        pub inline fn append_slice_unaligned_assume_capacity(self: *List, items: []align(1) const Elem) void {
-            return self.as_manually_managed_list().append_slice_unaligned_assume_capacity(items);
-        }
-
-        pub inline fn append_n_times(self: *List, value: Elem, count: Idx) if (RETURN_ERRORS) Error!void else void {
-            return self.as_manually_managed_list().append_n_times(value, count, ALLOC.*);
-        }
-
-        pub inline fn append_n_times_assume_capacity(self: *List, value: Elem, count: Idx) void {
-            return self.as_manually_managed_list().append_n_times_assume_capacity(value, count);
-        }
-
-        pub inline fn resize(self: *List, new_len: Idx) if (RETURN_ERRORS) Error!void else void {
-            return self.as_manually_managed_list().resize(new_len, ALLOC.*);
-        }
-
-        pub inline fn shrink_and_free(self: *List, new_len: Idx) void {
-            return self.as_manually_managed_list().shrink_and_free(new_len, ALLOC.*);
-        }
-
-        pub inline fn shrink_retaining_capacity(self: *List, new_len: Idx) void {
-            return self.as_manually_managed_list().shrink_retaining_capacity(new_len);
-        }
-
-        pub inline fn clear_retaining_capacity(self: *List) void {
-            return self.as_manually_managed_list().clear_retaining_capacity();
-        }
-
-        pub inline fn clear_and_free(self: *List) void {
-            return self.as_manually_managed_list().clear_and_free(ALLOC.*);
-        }
-
-        pub inline fn ensure_total_capacity(self: *List, new_capacity: Idx) if (RETURN_ERRORS) Error!void else void {
-            return self.as_manually_managed_list().ensure_total_capacity(new_capacity, ALLOC.*);
-        }
-
-        pub inline fn ensure_total_capacity_exact(self: *List, new_capacity: Idx) if (RETURN_ERRORS) Error!void else void {
-            return self.as_manually_managed_list().ensure_total_capacity_exact(new_capacity, ALLOC.*);
-        }
-
-        pub inline fn ensure_unused_capacity(self: *List, additional_count: Idx) if (RETURN_ERRORS) Error!void else void {
-            return self.as_manually_managed_list().ensure_unused_capacity(additional_count, ALLOC.*);
-        }
-
-        pub inline fn expand_to_capacity(self: *List) void {
-            return self.as_manually_managed_list().expand_to_capacity();
-        }
-
-        pub inline fn append_slot(self: *List) if (RETURN_ERRORS) Error!*Elem else *Elem {
-            return self.as_manually_managed_list().append_slot(ALLOC.*);
-        }
-
-        pub inline fn append_slot_assume_capacity(self: *List) *Elem {
-            return self.as_manually_managed_list().append_slot_assume_capacity();
-        }
-
-        pub inline fn append_many_slots(self: *List, count: Idx) if (RETURN_ERRORS) Error![]Elem else []Elem {
-            return self.as_manually_managed_list().append_many_slots(count, ALLOC.*);
-        }
-
-        pub inline fn append_many_slots_assume_capacity(self: *List, count: Idx) []Elem {
-            return self.as_manually_managed_list().append_many_slots_assume_capacity(count);
-        }
-
-        pub inline fn append_many_slots_as_array(self: *List, comptime count: Idx) if (RETURN_ERRORS) Error!*[count]Elem else *[count]Elem {
-            return self.as_manually_managed_list().append_many_slots_as_array(count, ALLOC.*);
-        }
-
-        pub inline fn append_many_slots_as_array_assume_capacity(self: *List, comptime count: Idx) *[count]Elem {
-            return self.as_manually_managed_list().append_many_slots_as_array_assume_capacity(count);
-        }
-
-        pub inline fn pop_or_null(self: *List) ?Elem {
-            return self.as_manually_managed_list().pop_or_null();
-        }
-
-        pub inline fn pop(self: *List) Elem {
-            return self.as_manually_managed_list().pop();
-        }
-
-        pub inline fn get_last(self: List) Elem {
-            return self.to_manually_managed_list().get_last();
-        }
-
-        pub inline fn get_last_or_null(self: List) ?Elem {
-            return self.to_manually_managed_list().get_last_or_null();
-        }
-
-        pub inline fn find_idx(self: List, comptime Param: type, match_param: Param, match_fn: *const fn (param: Param, item: *const Elem) bool) ?Idx {
-            return self.to_manually_managed_list().find_idx(Param, match_param, match_fn);
-        }
-
-        pub inline fn find_ptr(self: List, comptime Param: type, match_param: Param, match_fn: *const fn (param: Param, item: *const Elem) bool) ?*Elem {
-            return self.to_manually_managed_list().find_ptr(Param, match_param, match_fn);
-        }
-
-        pub inline fn find_const_ptr(self: List, comptime Param: type, match_param: Param, match_fn: *const fn (param: Param, item: *const Elem) bool) ?*const Elem {
-            return self.to_manually_managed_list().find_const_ptr(Param, match_param, match_fn);
-        }
-
-        pub inline fn find_and_copy(self: List, comptime Param: type, match_param: Param, match_fn: *const fn (param: Param, item: *const Elem) bool) ?Elem {
-            return self.to_manually_managed_list().find_and_copy(Param, match_param, match_fn);
-        }
-
-        pub inline fn find_and_remove(self: List, comptime Param: type, match_param: Param, match_fn: *const fn (param: Param, item: *const Elem) bool) ?Elem {
-            return self.to_manually_managed_list().find_and_remove(Param, match_param, match_fn);
-        }
-
-        pub inline fn find_and_delete(self: List, comptime Param: type, match_param: Param, match_fn: *const fn (param: Param, item: *const Elem) bool) bool {
-            return self.to_manually_managed_list().find_and_delete(Param, match_param, match_fn);
-        }
-
-        pub inline fn find_exactly_n_item_indexes_from_n_params_in_order(self: List, comptime Param: type, params: []const Param, match_fn: *const fn (param: Param, item: *const Elem) bool, output_buf: []Idx) bool {
-            return self.flex_slice(.immutable).find_exactly_n_item_indexes_from_n_params_in_order(Param, params, match_fn, output_buf);
-        }
-
-        pub inline fn find_exactly_n_item_pointers_from_n_params_in_order(self: List, comptime Param: type, params: []const Param, match_fn: *const fn (param: Param, item: *const Elem) bool, output_buf: []*Elem) bool {
-            return self.flex_slice(.mutable).find_exactly_n_item_pointers_from_n_params_in_order(Param, params, match_fn, output_buf);
-        }
-
-        pub inline fn find_exactly_n_const_item_pointers_from_n_params_in_order(self: List, comptime Param: type, params: []const Param, match_fn: *const fn (param: Param, item: *const Elem) bool, output_buf: []*const Elem) bool {
-            return self.flex_slice(.immutable).find_exactly_n_const_item_pointers_from_n_params_in_order(Param, params, match_fn, output_buf);
-        }
-
-        pub inline fn find_exactly_n_item_copies_from_n_params_in_order(self: List, comptime Param: type, params: []const Param, match_fn: *const fn (param: Param, item: *const Elem) bool, output_buf: []Elem) bool {
-            return self.flex_slice(.immutable).find_exactly_n_item_copies_from_n_params_in_order(Param, params, match_fn, output_buf);
-        }
-
-        pub fn delete_ordered_indexes(self: *List, indexes: []const Idx) void {
-            return self.as_manually_managed_list().delete_ordered_indexes(indexes);
-        }
-
-        //TODO pub fn insert_slots_at_ordered_indexes()
-
-        pub inline fn insertion_sort(self: *List) void {
-            return self.flex_slice(.mutable).insertion_sort();
-        }
-
-        pub inline fn insertion_sort_with_transform(self: *List, comptime TX: type, transform_fn: *const fn (item: Elem) TX) void {
-            return self.flex_slice(.mutable).insertion_sort_with_transform(TX, transform_fn);
-        }
-
-        pub inline fn insertion_sort_with_transform_and_user_data(self: *List, comptime TX: type, transform_fn: *const fn (item: Elem, userdata: ?*anyopaque) TX, userdata: ?*anyopaque) void {
-            return self.flex_slice(.mutable).insertion_sort_with_transform_and_user_data(TX, transform_fn, userdata);
-        }
-
-        pub inline fn is_sorted(self: *List) bool {
-            return self.flex_slice(.immutable).is_sorted();
-        }
-
-        pub inline fn is_sorted_with_transform(self: *List, comptime TX: type, transform_fn: *const fn (item: Elem) TX) bool {
-            return self.flex_slice(.immutable).is_sorted_with_transform(TX, transform_fn);
-        }
-
-        pub inline fn is_sorted_with_transform_and_user_data(self: *List, comptime TX: type, transform_fn: *const fn (item: Elem, userdata: ?*anyopaque) TX, userdata: ?*anyopaque) bool {
-            return self.flex_slice(.immutable).is_sorted_with_transform_and_user_data(TX, transform_fn, userdata);
-        }
-
-        pub inline fn is_reverse_sorted(self: *List) bool {
-            return self.flex_slice(.immutable).is_reverse_sorted();
-        }
-
-        pub inline fn is_reverse_sorted_with_transform(self: *List, comptime TX: type, transform_fn: *const fn (item: Elem) TX) bool {
-            return self.flex_slice(.immutable).is_reverse_sorted_with_transform(TX, transform_fn);
-        }
-
-        pub inline fn is_reverse_sorted_with_transform_and_user_data(self: *List, comptime TX: type, transform_fn: *const fn (item: Elem, userdata: ?*anyopaque) TX, userdata: ?*anyopaque) bool {
-            return self.flex_slice(.immutable).is_reverse_sorted_with_transform_and_user_data(TX, transform_fn, userdata);
-        }
-
-        // pub inline fn insert_one_sorted(self: *List, item: Elem) if (RETURN_ERRORS) Error!Idx else Idx {
-        //     return Internal.insert_one_sorted(List, self, item, ALLOC.*);
+        // pub fn find_ptr(self: List, comptime Param: type, param: Param, match_fn: *const fn (param: Param, item: *const Elem) bool) ?*Elem {
+        //     if (self.find_idx(Param, param, match_fn)) |idx| {
+        //         return &self.ptr[idx];
+        //     }
+        //     return null;
         // }
 
-        // pub inline fn insert_one_sorted_custom(self: *List, item: Elem, compare_fn: *const CompareFn(Elem), comptime shortcut_equal_order: bool) if (RETURN_ERRORS) Error!Idx else Idx {
-        //     return Internal.insert_one_sorted_custom(List, self, item, compare_fn, shortcut_equal_order, ALLOC.*);
+        // pub fn find_const_ptr(self: List, comptime Param: type, param: Param, match_fn: *const fn (param: Param, item: *const Elem) bool) ?*const Elem {
+        //     if (self.find_idx(Param, param, match_fn)) |idx| {
+        //         return &self.ptr[idx];
+        //     }
+        //     return null;
         // }
 
-        // pub inline fn find_equal_order_idx_sorted(self: *const List, item_to_compare: *const Elem) ?Idx {
-        //     return Internal.find_equal_order_idx_sorted(List, self, item_to_compare);
+        // pub fn find_and_copy(self: *List, comptime Param: type, param: Param, match_fn: *const fn (param: Param, item: *const Elem) bool) ?Elem {
+        //     if (self.find_idx(Param, param, match_fn)) |idx| {
+        //         return self.ptr[idx];
+        //     }
+        //     return null;
         // }
 
-        // pub fn find_equal_order_idx_sorted_custom(self: *const List, item_to_compare: *const Elem, compare_fn: *const CompareFn(Elem)) ?Idx {
-        //     return Internal.find_equal_order_idx_sorted_custom(List, self, item_to_compare, compare_fn);
+        // pub fn find_and_remove(self: *List, comptime Param: type, param: Param, match_fn: *const fn (param: Param, item: *const Elem) bool) ?Elem {
+        //     if (self.find_idx(Param, param, match_fn)) |idx| {
+        //         return self.remove(idx);
+        //     }
+        //     return null;
         // }
 
-        // pub inline fn find_matching_item_idx_sorted(self: *const List, item_to_find: *const Elem) ?Idx {
-        //     return Internal.find_matching_item_idx_sorted(List, self, item_to_find);
+        // pub fn find_and_delete(self: *List, comptime Param: type, param: Param, match_fn: *const fn (param: Param, item: *const Elem) bool) bool {
+        //     if (self.find_idx(Param, param, match_fn)) |idx| {
+        //         self.delete(idx);
+        //         return true;
+        //     }
+        //     return false;
         // }
 
-        // pub fn find_matching_item_idx_sorted_custom(self: *const List, item_to_find: *const Elem, compare_fn: *const CompareFn(Elem), match_fn: *const CompareFn(Elem)) ?Idx {
-        //     return Internal.find_matching_item_idx_sorted_custom(List, self, item_to_find, compare_fn, match_fn);
+        // pub inline fn find_exactly_n_item_indexes_from_n_params_in_order(self: List, comptime Param: type, params: []const Param, match_fn: *const fn (param: Param, item: *const Elem) bool, output_buf: []Idx) bool {
+        //     return self.flex_slice(.immutable).find_exactly_n_item_indexes_from_n_params_in_order(Param, params, match_fn, output_buf);
         // }
 
-        //**************************
-        // std.io.Writer interface *
-        //**************************
-        pub fn get_std_writer(self: *List) ManualList.StdWriter {
-            return self.as_manually_managed_list().get_std_writer(ALLOC.*);
-        }
-
-        pub fn get_std_writer_no_grow(self: *List) ManualList.StdWriterNoGrow {
-            return self.as_manually_managed_list().get_std_writer_no_grow();
-        }
-    };
-}
-
-pub fn define_cached_allocator_list_type(comptime options: ListOptions) type {
-    const opt = comptime check: {
-        var opts = options;
-        if (opts.alignment) |a| {
-            if (a == @alignOf(opts.T)) {
-                opts.alignment = null;
-            }
-        }
-        break :check opts;
-    };
-    if (opt.alignment) |a| {
-        if (!math.isPowerOfTwo(a)) @panic("alignment must be a power of 2");
-    }
-    if (@typeInfo(opt.index_type) != Type.int or @typeInfo(opt.index_type).int.signedness != .unsigned) @panic("index_type must be an unsigned integer type");
-    return extern struct {
-        ptr: Ptr = UNINIT_PTR,
-        len: Idx = 0,
-        cap: Idx = 0,
-        alloc_ptr: *anyopaque,
-        alloc_vtable: *const Allocator.VTable,
-
-        pub const ALIGN = options.alignment;
-        pub const ALLOC_ERROR_BEHAVIOR = options.error_behavior;
-        pub const GROWTH = options.growth_model;
-        pub const RETURN_ERRORS = options.error_behavior == .RETURN_ERRORS;
-        pub const SECURE_WIPE = options.secure_wipe_bytes;
-        pub const UNINIT_PTR: Ptr = @ptrFromInt(if (ALIGN) |a| mem.alignBackward(usize, math.maxInt(usize), @intCast(a)) else mem.alignBackward(usize, math.maxInt(usize), @alignOf(Elem)));
-        pub const ATOMIC_PADDING = @as(comptime_int, @max(1, std.atomic.cache_line / @sizeOf(Elem)));
-        pub const UNINIT = List{
-            .ptr = UNINIT_PTR,
-            .alloc_ptr = DummyAllocator.allocator.ptr,
-            .alloc_vtable = DummyAllocator.allocator.vtable,
-            .len = 0,
-            .cap = 0,
-        };
-
-        const List = @This();
-        pub const ManualList = define_manual_allocator_list_type(options);
-        pub const Error = Allocator.Error;
-        pub const Elem = options.element_type;
-        pub const Idx = options.index_type;
-        pub const Ptr = if (ALIGN) |a| [*]align(a) Elem else [*]Elem;
-        pub const Slice = if (ALIGN) |a| ([]align(a) Elem) else []Elem;
-        pub fn SentinelSlice(comptime sentinel: Elem) type {
-            return if (ALIGN) |a| ([:sentinel]align(a) Elem) else [:sentinel]Elem;
-        }
-
-        pub inline fn to_manual_alloc_list(self: List) ManualList {
-            return ManualList{
-                .ptr = self.ptr,
-                .len = self.len,
-                .cap = self.cap,
-            };
-        }
-        pub inline fn as_manual_alloc_list(self: *List) *ManualList {
-            return @ptrCast(@alignCast(self));
-        }
-        pub inline fn from_manual_alloc_list(list: ManualList, alloc: Allocator) List {
-            return List{
-                .ptr = list.ptr,
-                .len = list.len,
-                .cap = list.cap,
-                .alloc_ptr = alloc.ptr,
-                .alloc_vtable = alloc.vtable,
-            };
-        }
-
-        pub const Iterator = ListIterator(List);
-
-        pub inline fn new_iterator(self: *List) Iterator {
-            return Iterator{
-                .list_ref = self,
-                .next_idx = 0,
-            };
-        }
-
-        pub inline fn get_alloc(self: List) Allocator {
-            return Allocator{
-                .ptr = self.alloc_ptr,
-                .vtable = self.alloc_vtable,
-            };
-        }
-
-        pub inline fn flex_slice(self: List, comptime mutability: Mutability) FlexSlice(Elem, Idx, mutability) {
-            return self.to_manual_alloc_list().flex_slice(mutability);
-        }
-
-        pub inline fn slice(self: List) Slice {
-            return self.to_manual_alloc_list().slice();
-        }
-
-        pub inline fn array_ptr(self: List, start: Idx, comptime length: Idx) *[length]Elem {
-            return self.to_manual_alloc_list().array_ptr(start, length);
-        }
-
-        pub inline fn vector_ptr(self: List, start: Idx, comptime length: Idx) *@Vector(length, Elem) {
-            return self.to_manual_alloc_list().vector_ptr(start, length);
-        }
-
-        pub inline fn slice_with_sentinel(self: List, comptime sentinel: Elem) SentinelSlice(Elem) {
-            return self.to_manual_alloc_list().slice_with_sentinel(sentinel);
-        }
-
-        pub inline fn slice_full_capacity(self: List) Slice {
-            return self.to_manual_alloc_list().slice_full_capacity();
-        }
-
-        pub inline fn slice_unused_capacity(self: List) []Elem {
-            return self.to_manual_alloc_list().slice_unused_capacity();
-        }
-
-        pub inline fn set_len(self: *List, new_len: Idx) void {
-            return self.as_manual_alloc_list().set_len(new_len);
-        }
-
-        pub inline fn new_empty(alloc: Allocator) List {
-            var list = UNINIT;
-            list.alloc_ptr = alloc.ptr;
-            list.alloc_vtable = alloc.vtable;
-            return list;
-        }
-
-        pub inline fn new_with_capacity(capacity: Idx, alloc: Allocator) if (RETURN_ERRORS) Error!List else List {
-            var list: List = undefined;
-            if (RETURN_ERRORS) {
-                list = from_manual_alloc_list(try ManualList.new_with_capacity(capacity, alloc));
-            } else {
-                list = from_manual_alloc_list(ManualList.new_with_capacity(capacity, alloc));
-            }
-            list.alloc_ptr = alloc.ptr;
-            list.alloc_vtable = alloc.vtable;
-        }
-
-        pub inline fn clone(self: List) if (RETURN_ERRORS) Error!List else List {
-            if (RETURN_ERRORS) {
-                return from_manual_alloc_list(try self.to_manual_alloc_list().clone(self.get_alloc()));
-            } else {
-                return from_manual_alloc_list(self.to_manual_alloc_list().clone(self.get_alloc()));
-            }
-        }
-
-        pub inline fn to_owned_slice(self: *List) if (RETURN_ERRORS) Error!Slice else Slice {
-            return self.as_manual_alloc_list().to_owned_slice(self.get_alloc());
-        }
-
-        pub inline fn to_owned_slice_sentinel(self: *List, comptime sentinel: Elem) if (RETURN_ERRORS) Error!SentinelSlice(sentinel) else SentinelSlice(sentinel) {
-            return self.as_manual_alloc_list().to_owned_slice_sentinel(sentinel, self.get_alloc());
-        }
-
-        pub inline fn from_owned_slice(from_slice: Slice) List {
-            return from_manual_alloc_list(ManualList.from_owned_slice(from_slice));
-        }
-
-        pub inline fn from_owned_slice_sentinel(comptime sentinel: Elem, from_slice: [:sentinel]Elem) List {
-            return from_manual_alloc_list(ManualList.from_owned_slice_sentinel(sentinel, from_slice));
-        }
-
-        pub inline fn insert_slot(self: *List, idx: Idx) if (RETURN_ERRORS) Error!*Elem else *Elem {
-            return self.as_manual_alloc_list().insert_slot(idx, self.get_alloc());
-        }
-
-        pub inline fn insert_slot_assume_capacity(self: *List, idx: Idx) *Elem {
-            return self.as_manual_alloc_list().insert_slot_assume_capacity(idx);
-        }
-
-        pub inline fn insert(self: *List, idx: Idx, item: Elem) if (RETURN_ERRORS) Error!void else void {
-            return self.as_manual_alloc_list().insert(idx, item, self.get_alloc());
-        }
-
-        pub inline fn insert_assume_capacity(self: *List, idx: Idx, item: Elem) void {
-            return self.as_manual_alloc_list().insert_assume_capacity(idx, item);
-        }
-
-        pub inline fn insert_many_slots(self: *List, idx: Idx, count: Idx) if (RETURN_ERRORS) Error![]Elem else []Elem {
-            return self.as_manual_alloc_list().insert_many_slots(idx, count, self.get_alloc());
-        }
-
-        pub inline fn insert_many_slots_assume_capacity(self: *List, idx: Idx, count: Idx) []Elem {
-            return self.as_manual_alloc_list().insert_many_slots_assume_capacity(idx, count);
-        }
-
-        pub inline fn insert_slice(self: *List, idx: Idx, items: []const Elem) if (RETURN_ERRORS) Error!void else void {
-            return self.as_manual_alloc_list().insert_slice(idx, items, self.get_alloc());
-        }
-
-        pub inline fn insert_slice_assume_capacity(self: *List, idx: Idx, items: []const Elem) void {
-            return self.as_manual_alloc_list().insert_slice_assume_capacity(idx, items);
-        }
-
-        pub inline fn replace_range(self: *List, start: Idx, length: Idx, new_items: []const Elem) if (RETURN_ERRORS) Error!void else void {
-            return self.as_manual_alloc_list().replace_range(start, length, new_items, self.get_alloc());
-        }
-
-        pub inline fn replace_range_assume_capacity(self: *List, start: Idx, length: Idx, new_items: []const Elem) void {
-            return self.as_manual_alloc_list().replace_range_assume_capacity(start, length, new_items);
-        }
-
-        pub inline fn append(self: *List, item: Elem) if (RETURN_ERRORS) Error!void else void {
-            return self.as_manual_alloc_list().append(item, self.get_alloc());
-        }
-
-        pub inline fn append_assume_capacity(self: *List, item: Elem) void {
-            return self.as_manual_alloc_list().append_assume_capacity(item);
-        }
-
-        pub inline fn remove(self: *List, idx: Idx) Elem {
-            return self.as_manual_alloc_list().remove(idx);
-        }
-
-        pub inline fn swap_remove(self: *List, idx: Idx) Elem {
-            return self.as_manual_alloc_list().swap_remove(idx);
-        }
-
-        pub inline fn delete(self: *List, idx: Idx) void {
-            return self.as_manual_alloc_list().delete(idx);
-        }
-
-        pub inline fn delete_range(self: *List, start: Idx, length: Idx) void {
-            return self.as_manual_alloc_list().delete_range(start, length);
-        }
-
-        pub inline fn swap_delete(self: *List, idx: Idx) void {
-            return self.as_manual_alloc_list().swap_delete(idx);
-        }
-
-        pub inline fn append_slice(self: *List, items: []const Elem) if (RETURN_ERRORS) Error!void else void {
-            return self.as_manual_alloc_list().append_slice(items, self.get_alloc());
-        }
-
-        pub inline fn append_slice_assume_capacity(self: *List, items: []const Elem) void {
-            return self.as_manual_alloc_list().append_slice_assume_capacity(items);
-        }
-
-        pub inline fn append_slice_unaligned(self: *List, items: []align(1) const Elem) if (RETURN_ERRORS) Error!void else void {
-            return self.as_manual_alloc_list().append_slice_unaligned(items, self.get_alloc());
-        }
-
-        pub inline fn append_slice_unaligned_assume_capacity(self: *List, items: []align(1) const Elem) void {
-            return self.as_manual_alloc_list().append_slice_unaligned_assume_capacity(items);
-        }
-
-        pub inline fn append_n_times(self: *List, value: Elem, count: Idx) if (RETURN_ERRORS) Error!void else void {
-            return self.as_manual_alloc_list().append_n_times(value, count, self.get_alloc());
-        }
-
-        pub inline fn append_n_times_assume_capacity(self: *List, value: Elem, count: Idx) void {
-            return self.as_manual_alloc_list().append_n_times_assume_capacity(value, count);
-        }
-
-        pub inline fn resize(self: *List, new_len: Idx) if (RETURN_ERRORS) Error!void else void {
-            return self.as_manual_alloc_list().resize(new_len, self.get_alloc());
-        }
-
-        pub inline fn shrink_and_free(self: *List, new_len: Idx) void {
-            return self.as_manual_alloc_list().shrink_and_free(new_len, self.get_alloc());
-        }
-
-        pub inline fn shrink_retaining_capacity(self: *List, new_len: Idx) void {
-            return self.as_manual_alloc_list().shrink_retaining_capacity(new_len);
-        }
-
-        pub inline fn clear_retaining_capacity(self: *List) void {
-            return self.as_manual_alloc_list().clear_retaining_capacity();
-        }
-
-        pub inline fn clear_and_free(self: *List) void {
-            return self.as_manual_alloc_list().clear_and_free(self.get_alloc());
-        }
-
-        pub inline fn ensure_total_capacity(self: *List, new_capacity: Idx) if (RETURN_ERRORS) Error!void else void {
-            return self.as_manual_alloc_list().ensure_total_capacity(new_capacity, self.get_alloc());
-        }
-
-        pub inline fn ensure_total_capacity_exact(self: *List, new_capacity: Idx) if (RETURN_ERRORS) Error!void else void {
-            return self.as_manual_alloc_list().ensure_total_capacity_exact(new_capacity, self.get_alloc());
-        }
-
-        pub inline fn ensure_unused_capacity(self: *List, additional_count: Idx) if (RETURN_ERRORS) Error!void else void {
-            return self.as_manual_alloc_list().ensure_unused_capacity(additional_count, self.get_alloc());
-        }
-
-        pub inline fn expand_to_capacity(self: *List) void {
-            return self.as_manual_alloc_list().expand_to_capacity();
-        }
-
-        pub inline fn append_slot(self: *List) if (RETURN_ERRORS) Error!*Elem else *Elem {
-            return self.as_manual_alloc_list().append_slot(self.get_alloc());
-        }
-
-        pub inline fn append_slot_assume_capacity(self: *List) *Elem {
-            return self.as_manual_alloc_list().append_slot_assume_capacity();
-        }
-
-        pub inline fn append_many_slots(self: *List, count: Idx) if (RETURN_ERRORS) Error![]Elem else []Elem {
-            return self.as_manual_alloc_list().append_many_slots(count, self.get_alloc());
-        }
-
-        pub inline fn append_many_slots_assume_capacity(self: *List, count: Idx) []Elem {
-            return self.as_manual_alloc_list().append_many_slots_assume_capacity(count);
-        }
-
-        pub inline fn append_many_slots_as_array(self: *List, comptime count: Idx) if (RETURN_ERRORS) Error!*[count]Elem else *[count]Elem {
-            return self.as_manual_alloc_list().append_many_slots_as_array(count, self.get_alloc());
-        }
-
-        pub inline fn append_many_slots_as_array_assume_capacity(self: *List, comptime count: Idx) *[count]Elem {
-            return self.as_manual_alloc_list().append_many_slots_as_array_assume_capacity(count);
-        }
-
-        pub inline fn pop_or_null(self: *List) ?Elem {
-            return self.as_manual_alloc_list().pop_or_null();
-        }
-
-        pub inline fn pop(self: *List) Elem {
-            return self.as_manual_alloc_list().pop();
-        }
-
-        pub inline fn get_last(self: List) Elem {
-            return self.to_manual_alloc_list().get_last();
-        }
-
-        pub inline fn get_last_or_null(self: List) ?Elem {
-            return self.to_manual_alloc_list().get_last_or_null();
-        }
-
-        pub inline fn find_idx(self: List, comptime Param: type, match_param: Param, match_fn: *const fn (param: Param, item: *const Elem) bool) ?Idx {
-            return self.to_manual_alloc_list().find_idx(Param, match_param, match_fn);
-        }
-
-        pub inline fn find_ptr(self: List, comptime Param: type, match_param: Param, match_fn: *const fn (param: Param, item: *const Elem) bool) ?*Elem {
-            return self.to_manual_alloc_list().find_ptr(Param, match_param, match_fn);
-        }
-
-        pub inline fn find_const_ptr(self: List, comptime Param: type, match_param: Param, match_fn: *const fn (param: Param, item: *const Elem) bool) ?*const Elem {
-            return self.to_manual_alloc_list().find_const_ptr(Param, match_param, match_fn);
-        }
-
-        pub inline fn find_and_copy(self: List, comptime Param: type, match_param: Param, match_fn: *const fn (param: Param, item: *const Elem) bool) ?Elem {
-            return self.to_manual_alloc_list().find_and_copy(Param, match_param, match_fn);
-        }
-
-        pub inline fn find_and_remove(self: List, comptime Param: type, match_param: Param, match_fn: *const fn (param: Param, item: *const Elem) bool) ?Elem {
-            return self.to_manual_alloc_list().find_and_remove(Param, match_param, match_fn);
-        }
-
-        pub inline fn find_and_delete(self: List, comptime Param: type, match_param: Param, match_fn: *const fn (param: Param, item: *const Elem) bool) bool {
-            return self.to_manual_alloc_list().find_and_delete(Param, match_param, match_fn);
-        }
-
-        pub inline fn find_exactly_n_item_indexes_from_n_params_in_order(self: List, comptime Param: type, params: []const Param, match_fn: *const fn (param: Param, item: *const Elem) bool, output_buf: []Idx) bool {
-            return self.flex_slice(.immutable).find_exactly_n_item_indexes_from_n_params_in_order(Param, params, match_fn, output_buf);
-        }
-
-        pub inline fn find_exactly_n_item_pointers_from_n_params_in_order(self: List, comptime Param: type, params: []const Param, match_fn: *const fn (param: Param, item: *const Elem) bool, output_buf: []*Elem) bool {
-            return self.flex_slice(.mutable).find_exactly_n_item_pointers_from_n_params_in_order(Param, params, match_fn, output_buf);
-        }
-
-        pub inline fn find_exactly_n_const_item_pointers_from_n_params_in_order(self: List, comptime Param: type, params: []const Param, match_fn: *const fn (param: Param, item: *const Elem) bool, output_buf: []*const Elem) bool {
-            return self.flex_slice(.immutable).find_exactly_n_const_item_pointers_from_n_params_in_order(Param, params, match_fn, output_buf);
-        }
-
-        pub inline fn find_exactly_n_item_copies_from_n_params_in_order(self: List, comptime Param: type, params: []const Param, match_fn: *const fn (param: Param, item: *const Elem) bool, output_buf: []Elem) bool {
-            return self.flex_slice(.immutable).find_exactly_n_item_copies_from_n_params_in_order(Param, params, match_fn, output_buf);
-        }
-
-        pub fn delete_ordered_indexes(self: *List, indexes: []const Idx) void {
-            return self.as_manual_alloc_list().delete_ordered_indexes(indexes);
-        }
-
-        //TODO pub fn insert_slots_at_ordered_indexes()
-
-        pub inline fn insertion_sort(self: *List) void {
-            return self.flex_slice(.mutable).insertion_sort();
-        }
-
-        pub inline fn insertion_sort_with_transform(self: *List, comptime TX: type, transform_fn: *const fn (item: Elem) TX) void {
-            return self.flex_slice(.mutable).insertion_sort_with_transform(TX, transform_fn);
-        }
-
-        pub inline fn insertion_sort_with_transform_and_user_data(self: *List, comptime TX: type, transform_fn: *const fn (item: Elem, userdata: ?*anyopaque) TX, userdata: ?*anyopaque) void {
-            return self.flex_slice(.mutable).insertion_sort_with_transform_and_user_data(TX, transform_fn, userdata);
-        }
-
-        pub inline fn is_sorted(self: *List) bool {
-            return self.flex_slice(.immutable).is_sorted();
-        }
-
-        pub inline fn is_sorted_with_transform(self: *List, comptime TX: type, transform_fn: *const fn (item: Elem) TX) bool {
-            return self.flex_slice(.immutable).is_sorted_with_transform(TX, transform_fn);
-        }
-
-        pub inline fn is_sorted_with_transform_and_user_data(self: *List, comptime TX: type, transform_fn: *const fn (item: Elem, userdata: ?*anyopaque) TX, userdata: ?*anyopaque) bool {
-            return self.flex_slice(.immutable).is_sorted_with_transform_and_user_data(TX, transform_fn, userdata);
-        }
-
-        pub inline fn is_reverse_sorted(self: *List) bool {
-            return self.flex_slice(.immutable).is_reverse_sorted();
-        }
-
-        pub inline fn is_reverse_sorted_with_transform(self: *List, comptime TX: type, transform_fn: *const fn (item: Elem) TX) bool {
-            return self.flex_slice(.immutable).is_reverse_sorted_with_transform(TX, transform_fn);
-        }
-
-        pub inline fn is_reverse_sorted_with_transform_and_user_data(self: *List, comptime TX: type, transform_fn: *const fn (item: Elem, userdata: ?*anyopaque) TX, userdata: ?*anyopaque) bool {
-            return self.flex_slice(.immutable).is_reverse_sorted_with_transform_and_user_data(TX, transform_fn, userdata);
-        }
-
-        // pub inline fn insert_one_sorted(self: *List, item: Elem) if (RETURN_ERRORS) Error!Idx else Idx {
-        //     return Internal.insert_one_sorted(List, self, item, self.get_alloc());
+        // pub inline fn find_exactly_n_item_pointers_from_n_params_in_order(self: List, comptime Param: type, params: []const Param, match_fn: *const fn (param: Param, item: *const Elem) bool, output_buf: []*Elem) bool {
+        //     return self.flex_slice(.mutable).find_exactly_n_item_pointers_from_n_params_in_order(Param, params, match_fn, output_buf);
         // }
 
-        // pub inline fn insert_one_sorted_custom(self: *List, item: Elem, compare_fn: *const CompareFn(Elem), comptime shortcut_equal_order: bool) if (RETURN_ERRORS) Error!Idx else Idx {
-        //     return Internal.insert_one_sorted_custom(List, self, item, compare_fn, shortcut_equal_order, self.get_alloc());
+        // pub inline fn find_exactly_n_const_item_pointers_from_n_params_in_order(self: List, comptime Param: type, params: []const Param, match_fn: *const fn (param: Param, item: *const Elem) bool, output_buf: []*const Elem) bool {
+        //     return self.flex_slice(.immutable).find_exactly_n_const_item_pointers_from_n_params_in_order(Param, params, match_fn, output_buf);
         // }
 
-        // pub inline fn find_equal_order_idx_sorted(self: *const List, item_to_compare: *const Elem) ?Idx {
-        //     return Internal.find_equal_order_idx_sorted(List, self, item_to_compare);
+        // pub inline fn find_exactly_n_item_copies_from_n_params_in_order(self: List, comptime Param: type, params: []const Param, match_fn: *const fn (param: Param, item: *const Elem) bool, output_buf: []Elem) bool {
+        //     return self.flex_slice(.immutable).find_exactly_n_item_copies_from_n_params_in_order(Param, params, match_fn, output_buf);
         // }
 
-        // pub fn find_equal_order_idx_sorted_custom(self: *const List, item_to_compare: *const Elem, compare_fn: *const CompareFn(Elem)) ?Idx {
-        //     return Internal.find_equal_order_idx_sorted_custom(List, self, item_to_compare, compare_fn);
+        // pub fn delete_ordered_indexes(self: *List, indexes: []const Idx) void {
+        //     assert_with_reason(indexes.len <= self.len, @src(), "more indexes provided ({d}) than exist in list ({d})", .{ indexes.len, self.len });
+        //     assert_with_reason(check: {
+        //         var i: usize = 1;
+        //         while (i < indexes.len) : (i += 1) {
+        //             if (indexes[i - 1] >= indexes[i]) break :check false;
+        //         }
+        //         break :check true;
+        //     }, @src(), "not all indexes are in increasing order (with no duplicates) as is required by this function", .{});
+        //     assert_with_reason(check: {
+        //         var i: usize = 0;
+        //         while (i < indexes.len) : (i += 1) {
+        //             if (indexes[i] >= self.len) break :check false;
+        //         }
+        //         break :check true;
+        //     }, @src(), "some indexes provided are out of bounds for list len ({d})", .{self.len});
+        //     var shift_down: usize = 0;
+        //     var i: usize = 0;
+        //     var src_start: Idx = undefined;
+        //     var src_end: Idx = undefined;
+        //     var dst_start: Idx = undefined;
+        //     var dst_end: Idx = undefined;
+        //     while (i < indexes.len) {
+        //         var consecutive: Idx = 1;
+        //         var end_index: Idx = i + consecutive;
+        //         while (end_index < indexes.len) {
+        //             if (indexes[end_index] != indexes[end_index - 1] + 1) break;
+        //             consecutive += 1;
+        //             end_index += 1;
+        //         }
+        //         const start_idx = end_index - 1;
+        //         shift_down += consecutive;
+        //         src_start = indexes[start_idx];
+        //         src_end = if (end_index >= indexes.len) self.len else indexes[end_index];
+        //         dst_start = src_start - shift_down;
+        //         dst_end = src_end - shift_down;
+        //         std.mem.copyForwards(Idx, self.ptr[dst_start..dst_end], self.ptr[src_start..src_end]);
+        //         i += consecutive;
+        //     }
+        //     self.len -= indexes.len;
         // }
 
-        // pub inline fn find_matching_item_idx_sorted(self: *const List, item_to_find: *const Elem) ?Idx {
-        //     return Internal.find_matching_item_idx_sorted(List, self, item_to_find);
+        // //TODO pub fn insert_slots_at_ordered_indexes()
+
+        // pub inline fn insertion_sort(self: *List) void {
+        //     return self.flex_slice(.mutable).insertion_sort();
         // }
 
-        // pub fn find_matching_item_idx_sorted_custom(self: *const List, item_to_find: *const Elem, compare_fn: *const CompareFn(Elem), match_fn: *const CompareFn(Elem)) ?Idx {
-        //     return Internal.find_matching_item_idx_sorted_custom(List, self, item_to_find, compare_fn, match_fn);
+        // pub inline fn insertion_sort_with_transform(self: *List, comptime TX: type, transform_fn: *const fn (item: Elem) TX) void {
+        //     return self.flex_slice(.mutable).insertion_sort_with_transform(TX, transform_fn);
         // }
 
-        //**************************
-        // std.io.Writer interface *
-        //**************************
-        pub fn get_std_writer(self: *List) ManualList.StdWriter {
-            return self.as_manual_alloc_list().get_std_writer(self.get_alloc());
-        }
+        // pub inline fn insertion_sort_with_transform_and_user_data(self: *List, comptime TX: type, transform_fn: *const fn (item: Elem, userdata: ?*anyopaque) TX, userdata: ?*anyopaque) void {
+        //     return self.flex_slice(.mutable).insertion_sort_with_transform_and_user_data(TX, transform_fn, userdata);
+        // }
 
-        pub fn get_std_writer_no_grow(self: *List) ManualList.StdWriterNoGrow {
-            return self.as_manual_alloc_list().get_std_writer_no_grow();
-        }
+        // pub inline fn is_sorted(self: *List) bool {
+        //     return self.flex_slice(.immutable).is_sorted();
+        // }
+
+        // pub inline fn is_sorted_with_transform(self: *List, comptime TX: type, transform_fn: *const fn (item: Elem) TX) bool {
+        //     return self.flex_slice(.immutable).is_sorted_with_transform(TX, transform_fn);
+        // }
+
+        // pub inline fn is_sorted_with_transform_and_user_data(self: *List, comptime TX: type, transform_fn: *const fn (item: Elem, userdata: ?*anyopaque) TX, userdata: ?*anyopaque) bool {
+        //     return self.flex_slice(.immutable).is_sorted_with_transform_and_user_data(TX, transform_fn, userdata);
+        // }
+
+        // pub inline fn is_reverse_sorted(self: *List) bool {
+        //     return self.flex_slice(.immutable).is_reverse_sorted();
+        // }
+
+        // pub inline fn is_reverse_sorted_with_transform(self: *List, comptime TX: type, transform_fn: *const fn (item: Elem) TX) bool {
+        //     return self.flex_slice(.immutable).is_reverse_sorted_with_transform(TX, transform_fn);
+        // }
+
+        // pub inline fn is_reverse_sorted_with_transform_and_user_data(self: *List, comptime TX: type, transform_fn: *const fn (item: Elem, userdata: ?*anyopaque) TX, userdata: ?*anyopaque) bool {
+        //     return self.flex_slice(.immutable).is_reverse_sorted_with_transform_and_user_data(TX, transform_fn, userdata);
+        // }
+
+        // // pub inline fn insert_one_sorted( self: *List, item: Elem, alloc: Allocator) if (RETURN_ERRORS) Error!Idx else Idx {
+        // //     return insert_one_sorted_custom(List, self, item, DEFAULT_COMPARE_PKG.greater_than, DEFAULT_MATCH_FN, alloc);
+        // // }
+
+        // // pub fn insert_one_sorted_custom( self: *List, item: Elem, greater_than_fn: *const CompareFn(Elem), equal_order_fn: *const CompareFn(Elem), alloc: Allocator) if (RETURN_ERRORS) Error!Idx else Idx {
+        // //     const insert_idx: Idx = @intCast(BinarySearch.binary_search_insert_index(Elem, &item, self.ptr[0..self.len], greater_than_fn, equal_order_fn));
+        // //     if (RETURN_ERRORS) try insert(List, self, insert_idx, item, alloc) else insert(List, self, insert_idx, item, alloc);
+        // //     return insert_idx;
+        // // }
+
+        // // pub inline fn find_equal_order_idx_sorted( self: *List, item_to_compare: *const Elem) ?Idx {
+        // //     return find_equal_order_idx_sorted_custom(List, self, item_to_compare, DEFAULT_COMPARE_PKG.greater_than, DEFAULT_MATCH_FN);
+        // // }
+
+        // // pub fn find_equal_order_idx_sorted_custom( self: *List, item_to_compare: *const Elem, greater_than_fn: *const CompareFn(Elem), equal_order_fn: *const CompareFn(Elem)) ?Idx {
+        // //     const insert_idx = BinarySearch.binary_search_by_order(Elem, item_to_compare, self.ptr[0..self.len], greater_than_fn, equal_order_fn);
+        // //     if (insert_idx) |idx| return @intCast(idx);
+        // //     return null;
+        // // }
+
+        // // pub inline fn find_matching_item_idx_sorted( self: *List, item_to_find: *const Elem) ?Idx {
+        // //     return find_matching_item_idx_sorted_custom(List, self, item_to_find, DEFAULT_COMPARE_PKG.greater_than, DEFAULT_COMPARE_PKG.equals, DEFAULT_MATCH_FN);
+        // // }
+
+        // // pub fn find_matching_item_idx_sorted_custom( self: *List, item_to_find: *const Elem, greater_than_fn: *const CompareFn(Elem), equal_order_fn: *const CompareFn(Elem), exact_match_fn: *const CompareFn(Elem)) ?Idx {
+        // //     const insert_idx = BinarySearch.binary_search_exact_match(Elem, item_to_find, self.ptr[0..self.len], greater_than_fn, equal_order_fn, exact_match_fn);
+        // //     if (insert_idx) |idx| return @intCast(idx);
+        // //     return null;
+        // // }
+
+        // // pub inline fn find_matching_item_idx( self: *List, item_to_find: *const Elem) ?Idx {
+        // //     return find_matching_item_idx_custom(List, self, item_to_find, DEFAULT_MATCH_FN);
+        // // }
+
+        // // pub fn find_matching_item_idx_custom( self: *List, item_to_find: *const Elem, exact_match_fn: *const CompareFn(Elem)) ?Idx {
+        // //     if (self.len == 0) return null;
+        // //     const buf = self.ptr[0..self.len];
+        // //     var idx: Idx = 0;
+        // //     var found_exact = exact_match_fn(item_to_find, &buf[idx]);
+        // //     const limit = self.len - 1;
+        // //     while (!found_exact and idx < limit) {
+        // //         idx += 1;
+        // //         found_exact = exact_match_fn(item_to_find, &buf[idx]);
+        // //     }
+        // //     if (found_exact) return idx;
+        // //     return null;
+        // // }
+
+        // pub fn handle_alloc_error(err: Allocator.Error) if (RETURN_ERRORS) Error else noreturn {
+        //     switch (ALLOC_ERROR_BEHAVIOR) {
+        //         ErrorBehavior.RETURN_ERRORS => return err,
+        //         ErrorBehavior.ERRORS_PANIC => std.debug.panic("List's backing allocator failed to allocate memory: Allocator.Error.{s}", .{@errorName(err)}),
+        //         ErrorBehavior.ERRORS_ARE_UNREACHABLE => unreachable,
+        //     }
+        // }
+
+        // //**************************
+        // // std.io.Writer interface *
+        // //**************************
+        // const StdWriterHandle = struct {
+        //     list: *List,
+        //     alloc: Allocator,
+        // };
+        // const StdWriterHandleNoGrow = struct {
+        //     list: *List,
+        // };
+
+        // pub const StdWriter = if (Elem != u8)
+        //     @compileError("The Writer interface is only defined for child type `u8` " ++
+        //         "but the given type is " ++ @typeName(Elem))
+        // else
+        //     std.io.Writer(StdWriterHandle, Allocator.Error, std_write);
+
+        // pub fn get_std_writer(self: *List, alloc: Allocator) StdWriter {
+        //     return StdWriter{ .context = .{ .list = self, .alloc = alloc } };
+        // }
+
+        // fn std_write(handle: StdWriterHandle, bytes: []const u8) Allocator.Error!usize {
+        //     try handle.list.append_slice(bytes, handle.alloc);
+        //     return bytes.len;
+        // }
+
+        // pub const StdWriterNoGrow = if (Elem != u8)
+        //     @compileError("The Writer interface is only defined for child type `u8` " ++
+        //         "but the given type is " ++ @typeName(Elem))
+        // else
+        //     std.io.Writer(StdWriterHandleNoGrow, Allocator.Error, std_write_no_grow);
+
+        // pub fn get_std_writer_no_grow(self: *List) StdWriterNoGrow {
+        //     return StdWriterNoGrow{ .context = .{ .list = self } };
+        // }
+
+        // fn std_write_no_grow(handle: StdWriterHandle, bytes: []const u8) error{OutOfMemory}!usize {
+        //     const available_capacity = handle.list.list.capacity - handle.list.list.items.len;
+        //     if (bytes.len > available_capacity) return error.OutOfMemory;
+        //     handle.list.append_slice_assume_capacity(bytes);
+        //     return bytes.len;
+        // }
     };
 }
 
