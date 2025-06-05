@@ -124,7 +124,7 @@ pub fn define_manual_allocator_linked_list_type(comptime options: LinkedListOpti
         assert_with_reason(S_TYPE == options.element_state_access.?.field_type, @src(), "element state field `.{s}` on element type `{s}` does not match stated type {s}", .{ S_FIELD, @typeName(options.list_options.element_type), @typeName(options.element_state_access.?.field_type) });
         const tag_count = Types.enum_max_field_count(options.linked_set_enum);
         const flag_count = 1 << options.element_state_access.?.field_bit_count;
-        assert_with_reason(flag_count >= tag_count, @src(), "options.element_state_access.field_bit_count {d} (max val = {d}) cannot hold all tag values for options.linked_set_enum {d}", .{options.element_state_access.?.field_bit_count, flag_count, tag_count});
+        assert_with_reason(flag_count >= tag_count, @src(), "options.element_state_access.field_bit_count {d} (max val = {d}) cannot hold all tag values for options.linked_set_enum {d}", .{ options.element_state_access.?.field_bit_count, flag_count, tag_count });
     }
     if (C) {
         const C_FIELD = options.element_idx_cache_field.?;
@@ -181,7 +181,7 @@ pub fn define_manual_allocator_linked_list_type(comptime options: LinkedListOpti
         pub const Error = Allocator.Error;
         pub const Elem = options.list_options.element_type;
         pub const Idx = options.list_options.index_type;
-        pub const Iterator = LinkedListIterator(List);
+        // pub const Iterator = LinkedListIterator(List);
         pub const State = options.linked_set_enum;
         const StateTag = Types.enum_tag_type(State);
         pub const StateData = switch (HEAD_TAIL) {
@@ -265,10 +265,6 @@ pub fn define_manual_allocator_linked_list_type(comptime options: LinkedListOpti
             state: State,
             idx: Idx,
         };
-        pub const StateIdxList = struct {
-            state: State,
-            idxs: []const Idx,
-        };
         pub const StateCount = struct {
             state: State,
             count: Idx,
@@ -326,6 +322,10 @@ pub fn define_manual_allocator_linked_list_type(comptime options: LinkedListOpti
             };
         }
 
+        /// Represents a slice of logical items in a Linked List
+        ///
+        /// Manually altering its internal fields should be considered unsafe if done incorrectly,
+        /// use the provided methods on
         pub const LLSlice = struct {
             state: State,
             first: Idx,
@@ -357,26 +357,35 @@ pub fn define_manual_allocator_linked_list_type(comptime options: LinkedListOpti
                 };
             }
 
+            pub fn to_cursor_slice(self: LLSlice, list_ref: *List) LLCursorSlice {
+                return LLCursorSlice{
+                    .slice = self,
+                    .list_ref = list_ref,
+                    .cursor_pos = 0,
+                    .cursor_idx = self.first,
+                };
+            }
+
             pub fn grow_end_rightward(self: *LLSlice, list: *const List, count: Idx) void {
-                const new_last = Internal.find_idx_n_places_after_this_one_with_fallback_start(self.state, self.last, count, null);
+                const new_last = Internal.find_idx_n_places_after_this_one_with_fallback_start(list, self.state, self.last, count, false, 0);
                 self.count += count;
                 self.last = new_last;
             }
 
             pub fn shrink_end_leftward(self: *LLSlice, list: *const List, count: Idx) void {
-                const new_last = Internal.find_idx_n_places_before_this_one_with_fallback_start(self.state, self.last, count, self.first);
+                const new_last = Internal.find_idx_n_places_before_this_one_with_fallback_start(list, self.state, self.last, count, true, self.first);
                 self.count += count;
                 self.last = new_last;
             }
 
             pub fn grow_start_leftward(self: *LLSlice, list: *const List, count: Idx) void {
-                const new_first = Internal.find_idx_n_places_before_this_one_with_fallback_start(self.state, self.first, count, null);
+                const new_first = Internal.find_idx_n_places_before_this_one_with_fallback_start(list, self.state, self.first, count, false, 0);
                 self.count += count;
                 self.first = new_first;
             }
 
             pub fn shrink_start_rightward(self: *LLSlice, list: *const List, count: Idx) void {
-                const new_first = Internal.find_idx_n_places_after_this_one_with_fallback_start(self.state, self.first, count, self.last);
+                const new_first = Internal.find_idx_n_places_after_this_one_with_fallback_start(list, self.state, self.first, count, true, self.last);
                 self.count += count;
                 self.first = new_first;
             }
@@ -391,9 +400,126 @@ pub fn define_manual_allocator_linked_list_type(comptime options: LinkedListOpti
                 self.shrink_end_leftward(list, count);
             }
         };
+
+        /// Variant of `LLSlice` used for the purpose of supplying a function
+        /// with arbitrary items to draw from before any new items are created
         pub const LLSupplySlice = struct {
             slice: LLSlice,
             total_needed: Idx,
+        };
+
+        /// A variant of `LLSlice` that keeps track of a logical cursor index within the slice
+        /// and holds a reference to the list to which it belongs for convenience.
+        ///
+        /// Users can lookup items based on their logical nth position in the list,
+        /// and traversing the list may be faster in some cases by determining if it would
+        /// be faster to get there from the current cursor position or from the start/end
+        /// of the list
+        pub const LLCursorSlice = struct {
+            slice: LLSlice,
+            list_ref: *List,
+            cursor_pos: Idx,
+            cursor_idx: Idx,
+
+            pub fn goto_pos(self: *LLCursorSlice, pos: Idx) void {
+                assert_with_reason(pos < self.slice.count, @src(), "pos {d} is out of bounds for LLSlice (count/len = {d})", .{ pos, self.slice.count });
+                if (pos > self.cursor_pos) {
+                    self.move_forward_n_positions(pos - self.cursor_pos);
+                } else {
+                    self.move_backward_n_positions(self.cursor_pos - pos);
+                }
+            }
+
+            pub fn move_forward_n_positions(self: *LLCursorSlice, n: Idx) void {
+                assert_with_reason(self.cursor_pos + n < self.slice.count, @src(), "cursor pos {d} (curr {d} + {d}) is out of bounds for slice count/len ({d})", .{ self.cursor_pos + n, self.cursor_pos, n, self.slice.count });
+                if (FORWARD) {
+                    const from_curr = n;
+                    if (BACKWARD) {
+                        const from_end = self.slice.count - self.cursor_pos + n;
+                        if (from_end < from_curr) {
+                            self.cursor_idx = Internal.find_idx_n_places_before_this_one_with_fallback_start(self.list_ref, self.slice.state, self.slice.last, from_end, false, 0);
+                        } else {
+                            self.cursor_idx = Internal.find_idx_n_places_after_this_one_with_fallback_start(self.list_ref, self.slice.state, self.cursor_idx, from_curr, false, 0);
+                        }
+                    } else {
+                        self.cursor_idx = Internal.find_idx_n_places_after_this_one_with_fallback_start(self.list_ref, self.slice.state, self.cursor_idx, from_curr, false, 0);
+                    }
+                } else {
+                    const from_end = self.slice.count - self.cursor_pos + n;
+                    self.cursor_idx = Internal.find_idx_n_places_before_this_one_with_fallback_start(self.list_ref, self.slice.state, self.slice.last, from_end, false, 0);
+                }
+                self.cursor_pos += n;
+            }
+
+            pub fn move_backward_n_positions(self: *LLCursorSlice, n: Idx) void {
+                assert_with_reason(self.cursor_pos >= n, @src(), "cursor pos {d} (curr {d} - {d}) is out of bounds for slice count/len ({d})", .{ self.cursor_pos - n, self.cursor_pos, n, self.slice.count });
+                if (BACKWARD) {
+                    const from_curr = n;
+                    if (FORWARD) {
+                        const from_start = self.cursor_pos - n;
+                        if (from_start < from_curr) {
+                            self.cursor_idx = Internal.find_idx_n_places_after_this_one_with_fallback_start(self.list_ref, self.slice.state, self.slice.first, from_start, false, 0);
+                        } else {
+                            self.cursor_idx = Internal.find_idx_n_places_before_this_one_with_fallback_start(self.list_ref, self.slice.state, self.cursor_idx, from_curr, false, 0);
+                        }
+                    } else {
+                        self.cursor_idx = Internal.find_idx_n_places_before_this_one_with_fallback_start(self.list_ref, self.slice.state, self.cursor_idx, from_curr, false, 0);
+                    }
+                } else {
+                    const from_start = self.cursor_pos - n;
+                    self.cursor_idx = Internal.find_idx_n_places_after_this_one_with_fallback_start(self.list_ref, self.slice.state, self.slice.first, from_start, false, 0);
+                }
+                self.cursor_pos -= n;
+            }
+
+            pub fn get_current_ptr(self: LLCursorSlice) *Elem {
+                return self.list_ref.get_ptr(self.cursor_idx);
+            }
+
+            pub fn grow_end_rightward(self: *LLCursorSlice, count: Idx) void {
+                self.slice.grow_end_rightward(self.list_ref, count);
+            }
+
+            pub fn shrink_end_leftward(self: *LLCursorSlice, count: Idx) void {
+                self.slice.shrink_end_leftward(self.list_ref, count);
+                if (self.cursor_pos >= self.slice.count) {
+                    self.cursor_pos = self.slice.count - 1;
+                    self.cursor_idx = self.slice.last;
+                }
+            }
+
+            pub fn grow_start_leftward(self: *LLCursorSlice, count: Idx) void {
+                self.slice.grow_start_leftward(self.list_ref, count);
+                self.cursor_pos += count;
+            }
+
+            pub fn shrink_start_rightward(self: *LLCursorSlice, count: Idx) void {
+                self.slice.shrink_start_rightward(self.list_ref, count);
+                if (self.cursor_pos < count) {
+                    self.cursor_pos = 0;
+                    self.cursor_idx = self.slice.first;
+                } else {
+                    self.cursor_pos -= count;
+                }
+            }
+
+            pub fn slide_right(self: *LLCursorSlice, count: Idx) void {
+                self.slice.slide_right(self.list_ref, count);
+                if (self.cursor_pos < count) {
+                    self.cursor_pos = 0;
+                    self.cursor_idx = self.slice.first;
+                } else {
+                    self.cursor_pos -= count;
+                }
+            }
+
+            pub fn slide_left(self: *LLCursorSlice, count: Idx) void {
+                self.slice.slide_left(self.list_ref, count);
+                if (self.slice.count - self.cursor_pos <= count) {
+                    self.cursor_pos = self.slice.count - 1;
+                    self.cursor_idx = self.slice.last;
+                }
+            }
         };
 
         /// All functions/structs in this namespace fall in at least one of 3 categories:
@@ -403,23 +529,19 @@ pub fn define_manual_allocator_linked_list_type(comptime options: LinkedListOpti
         ///
         /// They are provided here publicly to facilitate special user use cases
         pub const Internal = struct {
-            pub fn validate_slice(self: *const List, slice: LLSlice) void {
-
-            }
-
-            pub fn find_idx_n_places_after_this_one_with_fallback_start(self: *const List, state: State, idx: Idx, count: Idx, fallback_start_idx: ?Idx) Idx {
+            pub fn find_idx_n_places_after_this_one_with_fallback_start(self: *const List, state: State, idx: Idx, count: Idx, comptime use_fallback_start: bool, fallback_start_idx: Idx) Idx {
                 if (FORWARD) {
                     return traverse_forward_to_find_idx_n_places_after_this_one(self, state, idx, count);
                 } else {
-                    return traverse_backward_to_find_idx_n_places_after_this_one_start_at(self, state, idx, count, fallback_start_idx);
+                    return traverse_backward_to_find_idx_n_places_after_this_one_start_at(self, state, idx, count, use_fallback_start, fallback_start_idx);
                 }
             }
 
-            pub fn find_idx_n_places_before_this_one_with_fallback_start(self: *const List, state: State, idx: Idx, count: Idx, fallback_start_idx: ?Idx) Idx {
+            pub fn find_idx_n_places_before_this_one_with_fallback_start(self: *const List, state: State, idx: Idx, count: Idx, comptime use_fallback_start: bool, fallback_start_idx: Idx) Idx {
                 if (BACKWARD) {
                     return traverse_backward_to_find_idx_n_places_before_this_one(self, state, idx, count);
                 } else {
-                    return traverse_forward_to_find_idx_n_places_before_this_one_start_at(self, state, idx, count, fallback_start_idx);
+                    return traverse_forward_to_find_idx_n_places_before_this_one_start_at(self, state, idx, count, use_fallback_start, fallback_start_idx);
                 }
             }
 
@@ -430,8 +552,8 @@ pub fn define_manual_allocator_linked_list_type(comptime options: LinkedListOpti
                     result = Internal.get_next_idx_fwd(self, result);
                     delta += 1;
                 }
-                assert_with_reason(result != NULL_IDX, @src(), "idx {d} was not found in set `{s}`", .{idx, @tagName(state)});
-                assert_with_reason(delta == count, @src(), "there are not {d} more items after idx {d} in set `{s}`, (only {d})", .{count, idx, @tagName(state)}, delta);
+                assert_with_reason(result != NULL_IDX, @src(), "idx {d} was not found in set `{s}`", .{ idx, @tagName(state) });
+                assert_with_reason(delta == count, @src(), "there are not {d} more items after idx {d} in set `{s}`, (only {d})", .{ count, idx, @tagName(state) }, delta);
                 return result;
             }
 
@@ -442,21 +564,21 @@ pub fn define_manual_allocator_linked_list_type(comptime options: LinkedListOpti
                     result = Internal.get_prev_idx_bkd(self, result);
                     delta += 1;
                 }
-                assert_with_reason(result != NULL_IDX, @src(), "idx {d} was not found in set `{s}`", .{idx, @tagName(state)});
-                assert_with_reason(delta == count, @src(), "there are not {d} more items after idx {d} in set `{s}`, (only {d})", .{count, idx, @tagName(state)}, delta);
+                assert_with_reason(result != NULL_IDX, @src(), "idx {d} was not found in set `{s}`", .{ idx, @tagName(state) });
+                assert_with_reason(delta == count, @src(), "there are not {d} more items after idx {d} in set `{s}`, (only {d})", .{ count, idx, @tagName(state) }, delta);
                 return result;
             }
 
-            pub fn traverse_backward_to_find_idx_n_places_after_this_one_start_at(self: *const List, state: State, idx: Idx, count: Idx, start: ?Idx) Idx {
+            pub fn traverse_backward_to_find_idx_n_places_after_this_one_start_at(self: *const List, state: State, idx: Idx, count: Idx, comptime use_start: bool, start: Idx) Idx {
                 var delta: Idx = 0;
-                var probe: Idx = if (start) |s| s else self.get_last_index_in_state(state);
+                var probe: Idx = if (use_start) start else self.get_last_index_in_state(state);
                 var result: Idx = probe;
                 while (delta < count and probe != idx and probe != NULL_IDX) {
                     probe = Internal.get_prev_idx_bkd(self, probe);
                     delta += 1;
                 }
-                assert_with_reason(probe != NULL_IDX, @src(), "idx {d} was not found in set `{s}`", .{idx, @tagName(state)});
-                assert_with_reason(delta == count, @src(), "there are not {d} more items after idx {d} in set `{s}`, (only {d})", .{count, idx, @tagName(state)}, delta);
+                assert_with_reason(probe != NULL_IDX, @src(), "idx {d} was not found in set `{s}`", .{ idx, @tagName(state) });
+                assert_with_reason(delta == count, @src(), "there are not {d} more items after idx {d} in set `{s}`, (only {d})", .{ count, idx, @tagName(state) }, delta);
                 while (probe != idx) {
                     probe = Internal.get_prev_idx_bkd(self, probe);
                     result = Internal.get_prev_idx_bkd(self, result);
@@ -464,16 +586,16 @@ pub fn define_manual_allocator_linked_list_type(comptime options: LinkedListOpti
                 return result;
             }
 
-            pub fn traverse_forward_to_find_idx_n_places_before_this_one_start_at(self: *const List, state: State, idx: Idx, count: Idx, start: ?Idx) Idx {
+            pub fn traverse_forward_to_find_idx_n_places_before_this_one_start_at(self: *const List, state: State, idx: Idx, count: Idx, comptime use_start: bool, start: Idx) Idx {
                 var delta: Idx = 0;
-                var probe: Idx = if (start) |s| s else self.get_first_index_in_state(state);
+                var probe: Idx = if (use_start) start else self.get_first_index_in_state(state);
                 var result: Idx = probe;
                 while (delta < count and probe != idx and probe != NULL_IDX) {
                     probe = Internal.get_next_idx_fwd(self, probe);
                     delta += 1;
                 }
-                assert_with_reason(probe != NULL_IDX, @src(), "idx {d} was not found in set `{s}`", .{idx, @tagName(state)});
-                assert_with_reason(delta == count, @src(), "there are not {d} more items before idx {d} in set `{s}`, (only {d})", .{count, idx, @tagName(state)}, delta);
+                assert_with_reason(probe != NULL_IDX, @src(), "idx {d} was not found in set `{s}`", .{ idx, @tagName(state) });
+                assert_with_reason(delta == count, @src(), "there are not {d} more items before idx {d} in set `{s}`, (only {d})", .{ count, idx, @tagName(state) }, delta);
                 while (probe != idx) {
                     probe = Internal.get_next_idx_fwd(self, probe);
                     result = Internal.get_next_idx_fwd(self, result);
@@ -494,44 +616,43 @@ pub fn define_manual_allocator_linked_list_type(comptime options: LinkedListOpti
             }
 
             pub inline fn set_first_index(self: *List, state: State, idx: Idx) void {
-                if (HEAD) self.sets[@intFromEnum(set)].first_idx = idx;
+                if (HEAD) self.sets[@intFromEnum(state)].first_idx = idx;
             }
 
             pub inline fn set_last_index(self: *List, state: State, idx: Idx) void {
-                if (TAIL) self.sets[@intFromEnum(set)].last_idx = idx;
+                if (TAIL) self.sets[@intFromEnum(state)].last_idx = idx;
             }
 
             pub inline fn set_link_set_count(self: *List, state: State, count: Idx) void {
-                self.sets[@intFromEnum(set)].count = count;
+                self.sets[@intFromEnum(state)].count = count;
             }
 
             pub inline fn increase_link_set_count(self: *List, state: State, amount: Idx) void {
-                self.sets[@intFromEnum(set)].count += amount;
+                self.sets[@intFromEnum(state)].count += amount;
             }
 
             pub inline fn decrease_link_set_count(self: *List, state: State, amount: Idx) void {
-                self.sets[@intFromEnum(set)].count -= amount;
+                self.sets[@intFromEnum(state)].count -= amount;
             }
 
-            pub inline fn set_state(ptr: *Elem, set: ?State) void {
+            pub inline fn set_state(ptr: *Elem, state: State) void {
                 if (STATE) {
                     @field(ptr, STATE_FIELD) &= STATE_CLEAR_MASK;
-                    const new_state: T_STATE_FIELD = if (set) |s| @as(T_STATE_FIELD, @intCast(@intFromEnum(s))) else NULL_STATE_FLAG;
+                    const new_state: T_STATE_FIELD = @as(T_STATE_FIELD, @intCast(@intFromEnum(state)));
                     const new_state_shifted = new_state << STATE_OFFSET;
                     @field(ptr, STATE_FIELD) |= new_state_shifted;
                 }
             }
 
-            pub fn set_state_on_items_first_last(self: *List, first_item: Item, last_item: Item,  state: ?State) void {
+            pub fn set_state_on_indexes_first_last(self: *List, first_idx: Idx, last_idx: Idx, state: State) void {
                 if (!STATE) return;
-                var idx = if (FORWARD) first_item.idx else last_item.idx;
-                var ptr = if (FORWARD) first_item.ptr else last_item.ptr;
-                const final_idx = if (FORWARD) last_item.idx else first_item.idx;
+                var idx = if (FORWARD) first_idx else last_idx;
+                const final_idx = if (FORWARD) last_idx else first_idx;
                 while (true) {
+                    const ptr = get_ptr(self, idx);
                     set_state(ptr, state);
                     if (idx == final_idx) break;
                     idx = if (FORWARD) get_next_idx_fwd(self, ptr) else get_prev_idx_bkd(self, ptr);
-                    ptr = get_ptr(self, idx);
                 }
             }
 
@@ -539,8 +660,8 @@ pub fn define_manual_allocator_linked_list_type(comptime options: LinkedListOpti
                 var left_idx = first_idx;
                 var right_idx = first_idx + 1;
                 while (right_idx <= last_idx) {
-                    const left = Internal.get_conn_left(self, set, left_idx);
-                    const right = Internal.get_conn_right(self, set, right_idx);
+                    const left = Internal.get_conn_left(self, state, left_idx);
+                    const right = Internal.get_conn_right(self, state, right_idx);
                     connect(left, right);
                     left_idx += 1;
                     right_idx += 1;
@@ -560,14 +681,14 @@ pub fn define_manual_allocator_linked_list_type(comptime options: LinkedListOpti
             }
 
             pub fn disconnect_many_first_last(self: *List, state: State, first_idx: Idx, last_idx: Idx, count: Idx) void {
-                const disconn = Internal.get_conn_left_right_before_first_and_after_last(self, first_idx, last_idx, set);
+                const disconn = Internal.get_conn_left_right_before_first_and_after_last(self, first_idx, last_idx, state);
                 Internal.connect(disconn.left, disconn.right);
                 Internal.decrease_link_set_count(self, disconn.set, count);
                 if (TAIL_NO_BACKWARD and disconn.right == NULL_IDX) {
-                    Internal.set_last_index(self, set, first_idx);
+                    Internal.set_last_index(self, state, first_idx);
                 }
                 if (HEAD_NO_FORWARD and disconn.left == NULL_IDX) {
-                    Internal.set_first_index(self, set, last_idx);
+                    Internal.set_first_index(self, state, last_idx);
                 }
             }
 
@@ -611,138 +732,58 @@ pub fn define_manual_allocator_linked_list_type(comptime options: LinkedListOpti
 
             pub inline fn get_conn_left(self: *const List, state: State, idx: Idx) ConnLeft {
                 if (BIDIRECTION) return IdxPtrIdx{
-                    .idx = val,
-                    .idx_ptr = if (val == NULL_IDX) get_head_index_ref(self, set) else &@field(get_ptr(self, val), NEXT_FIELD),
+                    .idx = idx,
+                    .idx_ptr = if (idx == NULL_IDX) get_head_index_ref(self, state) else &@field(get_ptr(self, idx), NEXT_FIELD),
                 };
-                if (FORWARD) if (val == NULL_IDX) get_head_index_ref(self, set) else &@field(get_ptr(self, val), NEXT_FIELD);
-                if (BACKWARD) return val;
+                if (FORWARD) if (idx == NULL_IDX) get_head_index_ref(self, state) else &@field(get_ptr(self, idx), NEXT_FIELD);
+                if (BACKWARD) return idx;
             }
 
             pub inline fn get_conn_left_from_set_head(self: *List, state: State) ConnLeft {
                 if (BIDIRECTION) return IdxPtrIdx{
                     .idx = NULL_IDX,
-                    .idx_ptr = get_head_index_ref(self, set),
+                    .idx_ptr = get_head_index_ref(self, state),
                 };
-                if (FORWARD) return get_head_index_ref(self, set);
+                if (FORWARD) return get_head_index_ref(self, state);
                 if (BACKWARD) return NULL_IDX;
             }
 
             pub inline fn get_conn_right(self: *const List, state: State, idx: Idx) ConnRight {
                 if (BIDIRECTION) return IdxPtrIdx{
-                    .idx = val,
-                    .ptr = if (val == NULL_IDX) get_tail_index_ref(self, set) else &@field(get_ptr(self, val), PREV_FIELD),
+                    .idx = idx,
+                    .ptr = if (idx == NULL_IDX) get_tail_index_ref(self, state) else &@field(get_ptr(self, idx), PREV_FIELD),
                 };
-                if (FORWARD) return val;
-                if (BACKWARD) return if (val == NULL_IDX) get_tail_index_ref(self, set) else &@field(get_ptr(self, val), PREV_FIELD);
-                
+                if (FORWARD) return idx;
+                if (BACKWARD) return if (idx == NULL_IDX) get_tail_index_ref(self, state) else &@field(get_ptr(self, idx), PREV_FIELD);
             }
 
             pub inline fn get_conn_right_from_set_tail(self: *List, state: State) ConnRight {
                 if (BIDIRECTION) return IdxPtrIdx{
                     .idx = NULL_IDX,
-                    .idx_ptr = get_tail_index_ref(self, set),
+                    .idx_ptr = get_tail_index_ref(self, state),
                 };
                 if (FORWARD) return NULL_IDX;
-                if (BACKWARD) return get_tail_index_ref(self, set);
+                if (BACKWARD) return get_tail_index_ref(self, state);
             }
 
-            
-
-            pub inline fn get_next_idx_fwd(self: *const List, val: idx) Idx {
-                const T = @TypeOf(val);
-                assert_valid_items_indexes_or_pointers(self, val, @src());
-                assert_with_reason(FORWARD, @src(), "this func must be called on a linked list that is linked in the FORWARD direction", .{});
-                if (T == *Elem or T == *const Elem) {
-                    return @field(val, NEXT_FIELD);
-                }
-                if (T == Idx) {
-                    const ptr = self.get_ptr(val);
-                    return @field(ptr, NEXT_FIELD);
-                }
-                assert_with_reason(false, @src(), "invalid type {s} is not an Item, *Elem, *const Elem, or Idx", .{@typeName(T)});
+            pub inline fn get_next_idx_fwd(self: *const List, idx: Idx) Idx {
+                assert_idx_less_than_len(idx, self.list.len, @src());
+                const ptr = self.get_ptr(idx);
+                return @field(ptr, NEXT_FIELD);
             }
 
-            pub inline fn get_prev_idx_bkd(self: *const List, val: idx) Idx {
-                const T = @TypeOf(val);
-                assert_valid_items_indexes_or_pointers(self, val, @src());
-                assert_with_reason(BACKWARD, @src(), "this func must be called on a linked list that is linked in the FORWARD direction", .{});
-                if (T == *Elem or T == *const Elem) {
-                    return @field(val, PREV_FIELD);
-                }
-                if (T == Idx) {
-                    const ptr = self.get_ptr(val);
-                    return @field(ptr, PREV_FIELD);
-                }
-                assert_with_reason(false, @src(), "invalid type {s} is not an Item, *Elem, *const Elem, or Idx", .{@typeName(T)});
+            pub inline fn get_prev_idx_bkd(self: *const List, idx: Idx) Idx {
+                assert_idx_less_than_len(idx, self.list.len, @src());
+                const ptr = self.get_ptr(idx);
+                return @field(ptr, PREV_FIELD);
             }
-
-            
 
             pub inline fn get_head_index_ref(self: *List, state: State) *Idx {
-                return &self.sets[@intFromEnum(set)].first_idx;
+                return &self.sets[@intFromEnum(state)].first_idx;
             }
 
             pub inline fn get_tail_index_ref(self: *List, state: State) *Idx {
-                return &self.sets[@intFromEnum(set)].last_idx;
-            }
-
-            pub inline fn get_idx(self: *const List, ptr: *const Elem) Idx {
-                assert_valid_items_indexes_or_pointers(self, ptr, @src());
-                if (CACHE) return @field(self, CACHE_FIELD);
-                const base_addr = @intFromPtr(self.list.ptr);
-                const ptr_addr = @intFromPtr(ptr);
-                const delta = ptr_addr - base_addr;
-                return @intCast(delta / @sizeOf(Elem));
-            }
-
-            pub inline fn assert_valid_items_indexes_or_pointers(self: *const List, input: anytype, src_loc: ?SourceLocation) void {
-                const T = @TypeOf(input);
-                switch (T) {
-                    Item => assert_idx_and_pointer_reside_in_slice_and_match(Elem, self.list.slice(), input.idx, input.ptr, src_loc),
-                    []const Item => for (input) |item| {
-                        assert_idx_and_pointer_reside_in_slice_and_match(Elem, self.list.slice(), item.idx, item.ptr, src_loc);
-                    },
-                    SetItem => assert_idx_and_pointer_reside_in_slice_and_match(Elem, self.list.slice(), input.item.idx, input.item.ptr, src_loc),
-                    []const SetItem => for (input) |set_item| {
-                        assert_idx_and_pointer_reside_in_slice_and_match(Elem, self.list.slice(), set_item.item.idx, set_item.item.ptr, src_loc);
-                    },
-                    SetItemList => for (input.items) |item| {
-                        assert_idx_and_pointer_reside_in_slice_and_match(Elem, self.list.slice(), item.idx, item.ptr, src_loc);
-                    },
-                    Idx => assert_idx_less_than_len(input, self.list.len, src_loc),
-                    []const Idx => for (input) |idx| {
-                        assert_idx_less_than_len(idx, self.list.len, src_loc);
-                    },
-                    StateIdx => assert_idx_less_than_len(input.idx, self.list.len, src_loc),
-                    []const StateIdx => for (input) |setidx| {
-                        assert_idx_less_than_len(setidx.idx, self.list.len, src_loc);
-                    },
-                    StateIdxList => for (input.idxs) |idx| {
-                        assert_idx_less_than_len(idx, self.list.len, src_loc);
-                    },
-                    *Elem, *const Elem => assert_pointer_resides_in_slice(Elem, self.list.slice(), input, src_loc),
-                    []const *Elem, []const *const Elem, []*Elem, []*const Elem => for (input) |ptr| {
-                        assert_pointer_resides_in_slice(Elem, self.list.slice(), ptr, src_loc);
-                    },
-                    []Elem, []const Elem => assert_slice_resides_in_slice(Elem, self.list.slice(), input, src_loc),
-                    SetPtr => assert_pointer_resides_in_slice(Elem, self.list.slice(), input.ptr, src_loc),
-                    []const SetPtr => for (input) |set_ptr| {
-                        assert_pointer_resides_in_slice(Elem, self.list.slice(), set_ptr.ptr, src_loc);
-                    },
-                    SetPtrList => for (input.ptrs) |ptr| {
-                        assert_pointer_resides_in_slice(Elem, self.list.slice(), ptr, src_loc);
-                    },
-                    else => assert_with_reason(false, src_loc, "invalid type {s} is not an Item, *Elem, Idx, []Elem, or helper struct containing one or slice of many", .{@typeName(T)}),
-                }
-            }
-
-            pub fn get_ptr_from_any(self: *const List, val: anytype) *Elem {
-                const T = @TypeOf(val);
-                if (T == Item) return val.ptr;
-                if (T == *const Elem) return @constCast(val);
-                if (T == *Elem) return val;
-                if (T == Idx) return Internal.get_ptr(self, val);
-                assert_with_reason(false, @src(), "invalid type {s} cannot become an *Elem", .{@typeName(T)});
+                return &self.sets[@intFromEnum(state)].last_idx;
             }
 
             pub fn get_conn_left_right_directly_before_this(self: *const List, this: Idx, state: State) ConnLeftRight {
@@ -786,100 +827,99 @@ pub fn define_manual_allocator_linked_list_type(comptime options: LinkedListOpti
                 return result;
             }
 
-            pub fn traverse_to_get_first_item_in_set(self: *const List, state: State) Item {
-                var ii = Item{};
-                var i = self.get_item_from_idx(self.get_last_index_in_state(set));
+            pub fn traverse_to_get_first_idx_in_set(self: *const List, state: State) Idx {
+                var ii: Idx = NULL_IDX;
+                var i = self.get_last_index_in_state(state);
                 var c: if (DEBUG) Idx else void = if (DEBUG) 0 else void{};
-                const limit: if (DEBUG) Idx else void = if (DEBUG) self.get_item_count(set) else void{};
-                while (i.idx != NULL_IDX) {
+                const limit: if (DEBUG) Idx else void = if (DEBUG) self.get_state_count(state) else void{};
+                while (i != NULL_IDX) {
                     ii = i;
                     if (DEBUG) c += 1;
-                    i = self.get_item_from_idx(get_prev_idx(self, set, i.ptr));
+                    i = get_prev_idx(self, state, i);
                 }
-                if (DEBUG) assert_with_reason(c == limit, @src(), "found null-index in set `{s}` while traversing in `BACKWARD` direction, but the number of traversed items ({d}) does not match the total in that set ({d})", .{ @tagName(set), c, limit });
+                if (DEBUG) assert_with_reason(c == limit, @src(), "found null-index in set `{s}` while traversing in `BACKWARD` direction, but the number of traversed items ({d}) does not match the total in that set ({d})", .{ @tagName(state), c, limit });
                 return ii;
             }
 
-            pub fn traverse_to_get_last_item_in_set(self: *const List, state: State) Item {
-                var ii = Item{};
-                var i = self.get_item_from_idx(self.get_first_index_in_state(set));
+            pub fn traverse_to_get_last_item_in_set(self: *const List, state: State) Idx {
+                var ii: Idx = NULL_IDX;
+                var i = self.get_first_index_in_state(state);
                 var c: if (DEBUG) Idx else void = if (DEBUG) 0 else void{};
-                const limit: if (DEBUG) Idx else void = if (DEBUG) self.get_item_count(set) else void{};
-                while (i.idx != NULL_IDX) {
+                const limit: if (DEBUG) Idx else void = if (DEBUG) self.get_state_count(state) else void{};
+                while (i != NULL_IDX) {
                     ii = i;
                     if (DEBUG) c += 1;
-                    i = self.get_item_from_idx(get_next_idx(self, set, i.ptr));
+                    i = get_next_idx(self, state, i.ptr);
                 }
-                if (DEBUG) assert_with_reason(c == limit, @src(), "found null-index in set `{s}` while traversing in `FORWARD` direction, but the number of traversed items ({d}) does not match the total in that set ({d})", .{ @tagName(set), c, limit });
+                if (DEBUG) assert_with_reason(c == limit, @src(), "found null-index in set `{s}` while traversing in `FORWARD` direction, but the number of traversed items ({d}) does not match the total in that set ({d})", .{ @tagName(state), c, limit });
                 return ii;
             }
 
             pub fn traverse_and_report_if_found_idx_in_set(self: *const List, state: State, idx: Idx) bool {
-                var i: Idx = if (FORWARD) self.get_first_index_in_state(set) else self.get_first_index_in_state(set);
+                var i: Idx = if (FORWARD) self.get_first_index_in_state(state) else self.get_first_index_in_state(state);
                 var c: Idx = 0;
-                const limit: Idx = self.get_item_count(set);
+                const limit: Idx = self.get_state_count(state);
                 while (i != NULL_IDX and (if (DEBUG) c < limit else true)) {
                     if (i == idx) return true;
-                    i = if (FORWARD) Internal.get_next_idx(self, set, i) else Internal.get_prev_idx(self, set, i);
+                    i = if (FORWARD) get_next_idx(self, state, i) else get_prev_idx(self, state, i);
                     if (DEBUG) c += 1;
                 }
-                if (DEBUG) assert_with_reason(c == limit, @src(), "found null-index in set `{s}`, but the number of traversed items ({d}) does not match the total in that set ({d})", .{ @tagName(set), c, limit });
+                if (DEBUG) assert_with_reason(c == limit, @src(), "found null-index in set `{s}`, but the number of traversed items ({d}) does not match the total in that set ({d})", .{ @tagName(state), c, limit });
                 return false;
             }
 
-            pub fn traverse_to_find_index_preceding_this_one_in_direction(self: List, idx: Idx, state: State, dir: Direction) Idx {
+            pub fn traverse_to_find_index_preceding_this_one_in_direction(self: List, idx: Idx, state: State, comptime dir: Direction) Idx {
                 var curr_idx: Idx = undefined;
                 var count: Idx = 0;
-                const limit = self.get_item_count(set);
+                const limit = self.get_state_count(state);
                 switch (dir) {
                     .BACKWARD => {
                         assert_with_reason(BACKWARD, @src(), "linked list does not link elements in the backward direction", .{});
-                        curr_idx = self.get_last_index_in_state(set);
+                        curr_idx = self.get_last_index_in_state(state);
                     },
                     .FORWARD => {
                         assert_with_reason(FORWARD, @src(), "linked list does not link elements in the forward direction", .{});
-                        curr_idx = self.get_first_index_in_state(set);
+                        curr_idx = self.get_first_index_in_state(state);
                     },
                 }
                 while (curr_idx != NULL_IDX) {
-                    if (DEBUG) assert_with_reason(count < limit, @src(), "already traversed {d} (total set count) items in set `{s}`, but there are more non-null indexes after the last", .{ limit, @tagName(set) });
-                    assert_with_reason(curr_idx < self.list.len, @src(), "while traversing set `{s}` in direction `{s}`, index {d} was found, which is out of bounds for list.len {d}", .{ @tagName(set), @tagName(dir), curr_idx, self.list.len });
+                    if (DEBUG) assert_with_reason(count < limit, @src(), "already traversed {d} (total set count) items in set `{s}`, but there are more non-null indexes after the last", .{ limit, @tagName(state) });
+                    assert_with_reason(curr_idx < self.list.len, @src(), "while traversing set `{s}` in direction `{s}`, index {d} was found, which is out of bounds for list.len {d}", .{ @tagName(state), @tagName(dir), curr_idx, self.list.len });
                     const following_idx = switch (dir) {
-                        .FORWARD => Internal.get_next_idx(self, set, curr_idx),
-                        .BACKWARD => Internal.get_prev_idx(self, set, curr_idx),
+                        .FORWARD => get_next_idx(self, state, curr_idx),
+                        .BACKWARD => get_prev_idx(self, state, curr_idx),
                     };
                     if (following_idx == idx) return curr_idx;
                     curr_idx = following_idx;
                     if (DEBUG) count += 1;
                 }
-                if (DEBUG) assert_with_reason(count == limit, @src(), "found null-index in set `{s}`, but the number of traversed items ({d}) does not match the total in that set ({d})\nALSO: no item found referencing index {d} in set `{s}` direction `{s}`: broken list or item in wrong set", .{ @tagName(set), count, limit, idx, @tagName(set), @tagName(dir) });
-                assert_with_reason(false, @src(), "no item found referencing index {d} in set `{s}` direction `{s}`: broken list or item in wrong set", .{ idx, @tagName(set), @tagName(dir) });
+                if (DEBUG) assert_with_reason(count == limit, @src(), "found null-index in set `{s}`, but the number of traversed items ({d}) does not match the total in that set ({d})\nALSO: no item found referencing index {d} in set `{s}` direction `{s}`: broken list or item in wrong set", .{ @tagName(state), count, limit, idx, @tagName(state), @tagName(dir) });
+                assert_with_reason(false, @src(), "no item found referencing index {d} in set `{s}` direction `{s}`: broken list or item in wrong set", .{ idx, @tagName(state), @tagName(dir) });
             }
 
-            pub inline fn get_state(ptr: *const Elem) T_STATE_FIELD {
-                assert_with_reason(STATE, @src(), "cannot return item state when items do not cache their own state", .{});
-                return @field(ptr, STATE_FIELD) & STATE_MASK;
+            pub inline fn get_state_raw(ptr: *const Elem) StateTag {
+                return @as(StateTag, @intCast((@field(ptr, STATE_FIELD) & STATE_MASK) >> STATE_OFFSET));
             }
 
-            pub fn assert_valid_state_idx(self: *const List, set_idx_: StateIdx, src_loc: ?SourceLocation) void {
+            pub fn assert_valid_state_idx(self: *const List, state_idx: StateIdx, src_loc: ?SourceLocation) void {
                 if (@inComptime() or build.mode == .Debug or build.mode == .ReleaseSafe) {
-                    assert_idx_less_than_len(set_idx_.idx, self.list.len, src_loc);
-                    const ptr = Internal.get_ptr(self, set_idx_.idx);
-                    if (STATE) assert_with_reason(return @field(ptr, STATE_FIELD) & STATE_MASK == STATE_FLAGS[@intFromEnum(set_idx_.set)], src_loc, "set {s} on SetIdx does not match state on elem at idx {d}", .{ @tagName(set_idx_.set), set_idx_.idx });
+                    assert_idx_less_than_len(state_idx.idx, self.list.len, src_loc);
+                    const ptr = get_ptr(self, state_idx.idx);
+                    if (STATE) assert_with_reason(get_state_raw(ptr) == @intFromEnum(state_idx.state), src_loc, "set {s} on SetIdx does not match state on elem at idx {d}", .{ @tagName(state_idx.state), state_idx.idx });
                     if (STRONG_ASSERT) {
-                        const found_in_list = Internal.traverse_and_report_if_found_idx_in_set(self, set_idx_.set, set_idx_.idx);
-                        assert_with_reason(found_in_list, src_loc, "while verifying idx {d} is in set {s}, the idx was not found when traversing the set", .{ set_idx_.idx, @tagName(set_idx_.set) });
+                        const found_in_list = Internal.traverse_and_report_if_found_idx_in_set(self, state_idx.state, state_idx.idx);
+                        assert_with_reason(found_in_list, src_loc, "while verifying idx {d} is in set {s}, the idx was not found when traversing the set", .{ state_idx.idx, @tagName(state_idx.set) });
                     }
                 }
             }
-            pub fn assert_valid_set_idx_list(self: *const List, set_idx_list: StateIdxList, src_loc: ?SourceLocation) void {
+            pub fn assert_valid_state_idx_list(self: *const List, set_idx_list: StateIdxList, src_loc: ?SourceLocation) void {
                 if (@inComptime() or build.mode == .Debug or build.mode == .ReleaseSafe) {
                     for (set_idx_list.idxs) |idx| {
                         Internal.assert_valid_state_idx(self, StateIdx{ .set = set_idx_list.set, .idx = idx }, src_loc);
                     }
                 }
             }
-            pub fn assert_valid_list_of_set_idxs(self: *const List, set_idx_list: []const StateIdx, src_loc: ?SourceLocation) void {
+            pub fn assert_valid_list_of_state_idxs(self: *const List, set_idx_list: []const StateIdx, src_loc: ?SourceLocation) void {
                 if (@inComptime() or build.mode == .Debug or build.mode == .ReleaseSafe) {
                     for (set_idx_list) |set_idx_| {
                         Internal.assert_valid_state_idx(self, set_idx_, src_loc);
@@ -891,8 +931,8 @@ pub fn define_manual_allocator_linked_list_type(comptime options: LinkedListOpti
                 assert_idx_less_than_len(slice.first, self.list.len, src_loc);
                 assert_idx_less_than_len(slice.last, self.list.len, src_loc);
                 if (!STRONG_ASSERT and STATE) {
-                    assert_with_reason(self.idx_is_in_state(slice.first, slice.state), src_loc, "first index {d} is not in state `{s}`", .{slice.first, @tagName(slice.state)});
-                    assert_with_reason(self.idx_is_in_state(slice.last, slice.state), src_loc, "last index {d} is not in state `{s}`", .{slice.last, @tagName(slice.state)});
+                    assert_with_reason(self.idx_is_in_state(slice.first, slice.state), src_loc, "first index {d} is not in state `{s}`", .{ slice.first, @tagName(slice.state) });
+                    assert_with_reason(self.idx_is_in_state(slice.last, slice.state), src_loc, "last index {d} is not in state `{s}`", .{ slice.last, @tagName(slice.state) });
                 }
                 if (STRONG_ASSERT) {
                     var c: Idx = 1;
@@ -900,32 +940,24 @@ pub fn define_manual_allocator_linked_list_type(comptime options: LinkedListOpti
                     assert_idx_less_than_len(idx, self.list.len, @src());
                     const state = slice.state;
                     const last_idx = if (FORWARD) slice.last else slice.first;
-                    Internal.assert_valid_state_idx(self, StateIdx{.state = state, .idx = idx}, src_loc);
+                    Internal.assert_valid_state_idx(self, StateIdx{ .state = state, .idx = idx }, src_loc);
                     while (idx != last_idx and idx != NULL_IDX) {
                         idx = if (FORWARD) get_next_idx_fwd(self, idx) else get_prev_idx_bkd(self, idx);
                         c += 1;
-                        Internal.assert_valid_state_idx(self, StateIdx{.state = state, .idx = idx}, src_loc);
+                        Internal.assert_valid_state_idx(self, StateIdx{ .state = state, .idx = idx }, src_loc);
                     }
-                    assert_with_reason(idx == last_idx, src_loc, "idx `first` ({d}) is not linked with idx `last` ({d})", .{input.first, input.last});
-                    assert_with_reason(c == slice.count, src_loc, "the slice count {d} did not match the number of traversed items between `first` and `last` ({d})", .{input.count, c});
+                    assert_with_reason(idx == last_idx, src_loc, "idx `first` ({d}) is not linked with idx `last` ({d})", .{ slice.first, slice.last });
+                    assert_with_reason(c == slice.count, src_loc, "the slice count {d} did not match the number of traversed items between `first` and `last` ({d})", .{ slice.count, c });
                 }
-            }
-
-            pub inline fn get_item_from_idx(self: *const List, idx: Idx) Item {
-                return Item{
-                    .idx = idx,
-                    .ptr = Internal.get_ptr(self, idx),
-                };
             }
         };
 
-
-        pub inline fn new_iterator(self: *List) Iterator {
-            return Iterator{
-                .list_ref = self,
-                .next_idx = 0,
-            };
-        }
+        // pub inline fn new_iterator(self: *List) Iterator {
+        //     return Iterator{
+        //         .list_ref = self,
+        //         .next_idx = 0,
+        //     };
+        // }
 
         pub fn new_empty() List {
             return UNINIT;
@@ -947,7 +979,7 @@ pub fn define_manual_allocator_linked_list_type(comptime options: LinkedListOpti
             return new_list;
         }
 
-        pub inline fn get_item_count(self: *List, state: State) Idx {
+        pub inline fn get_state_count(self: *List, state: State) Idx {
             return self.sets[@intFromEnum(state)].count;
         }
 
@@ -962,7 +994,6 @@ pub fn define_manual_allocator_linked_list_type(comptime options: LinkedListOpti
                 return @field(ptr, PREV_FIELD);
             }
             return Internal.traverse_to_find_index_preceding_this_one_in_direction(self, this_idx, state, .FORWARD);
-            
         }
 
         pub inline fn get_next_idx(self: *const List, state: State, this_idx: Idx) Idx {
@@ -974,46 +1005,46 @@ pub fn define_manual_allocator_linked_list_type(comptime options: LinkedListOpti
         }
 
         pub fn get_nth_idx_from_start_of_state(self: *const List, state: State, n: Idx) Idx {
-            const set_count = self.get_item_count(set);
-            assert_with_reason(n < set_count, @src(), "index {d} is out of bounds for set {s} (len = {d})", .{ @tagName(set), n, set_count });
+            const set_count = self.get_state_count(state);
+            assert_with_reason(n < set_count, @src(), "index {d} is out of bounds for set {s} (len = {d})", .{ @tagName(state), n, set_count });
             if (FORWARD) {
                 var c = 0;
-                var idx = self.get_first_index_in_state(set);
+                var idx = self.get_first_index_in_state(state);
                 while (c != n) {
                     c += 1;
-                    idx = Internal.get_next_idx(self, set, idx);
+                    idx = get_next_idx(self, state, idx);
                 }
                 return idx;
             } else {
                 var c: Idx = 0;
-                var idx = self.get_last_index_in_state(set);
+                var idx = self.get_last_index_in_state(state);
                 const nn = set_count - n;
                 while (c < nn) {
                     c += 1;
-                    idx = Internal.get_prev_idx(self, set, idx);
+                    idx = get_prev_idx(self, state, idx);
                 }
                 return idx;
             }
         }
 
         pub fn get_nth_idx_from_end_of_state(self: *const List, state: State, n: Idx) Idx {
-            const set_count = self.get_item_count(set);
-            assert_with_reason(n < set_count, @src(), "index {d} is out of bounds for set {s} (len = {d})", .{ @tagName(set), n, set_count });
+            const count = self.get_state_count(state);
+            assert_with_reason(n < count, @src(), "index {d} is out of bounds for set {s} (len = {d})", .{ @tagName(state), n, count });
             if (BACKWARD) {
                 var c = 0;
-                var idx = self.get_last_index_in_state(set);
+                var idx = self.get_last_index_in_state(state);
                 while (c != n) {
                     c += 1;
-                    idx = Internal.get_prev_idx(self, set, idx);
+                    idx = get_prev_idx(self, state, idx);
                 }
                 return idx;
             } else {
                 var c: Idx = 0;
-                var idx = self.get_first_index_in_state(set);
-                const nn = set_count - n;
+                var idx = self.get_first_index_in_state(state);
+                const nn = count - n;
                 while (c < nn) {
                     c += 1;
-                    idx = Internal.get_next_idx(self, set, idx);
+                    idx = get_next_idx(self, state, idx);
                 }
                 return idx;
             }
@@ -1021,8 +1052,8 @@ pub fn define_manual_allocator_linked_list_type(comptime options: LinkedListOpti
 
         pub inline fn idx_is_in_state(self: *const List, idx: Idx, state: State) bool {
             if (STATE) {
-                const ptr = Internal.get_ptr(self, idx);
-                return @field(ptr, STATE_FIELD) & STATE_MASK == STATE_FLAGS[@intFromEnum(state)];
+                const ptr = get_ptr(self, idx);
+                return Internal.get_state_raw(ptr) == @intFromEnum(state);
             }
             return Internal.traverse_and_report_if_found_idx_in_set(self, state, idx);
         }
@@ -1037,12 +1068,12 @@ pub fn define_manual_allocator_linked_list_type(comptime options: LinkedListOpti
                         const s: State = @enumFromInt(e);
                         var state_idx = if (FORWARD) self.get_first_index_in_state(s) else self.get_last_index_in_state(s);
                         while (state_idx != NULL_IDX) {
-                            if (state_idx == idx) assert_with_reason(e == cached_val, @src(), "idx {d} was found in state list `{s}`, but the value cached on the item indicates state `{s}`", .{idx, @tagName(s), if (cached_val > MAX_STATE_TAG) "(INVALID STATE)" else @as(State, @enumFromInt(cached_val))});
+                            if (state_idx == idx) assert_with_reason(e == cached_val, @src(), "idx {d} was found in state list `{s}`, but the value cached on the item indicates state `{s}`", .{ idx, @tagName(s), if (cached_val > MAX_STATE_TAG) "(INVALID STATE)" else @as(State, @enumFromInt(cached_val)) });
                             state_idx = if (FORWARD) Internal.get_next_idx(self, s, state_idx) else Internal.get_prev_idx(self, s, state_idx);
                         }
                     }
                 }
-                assert_with_reason(cached_val <= MAX_STATE_TAG, @src(), "idx {d} has an invalid tag for State enum {d}", .{idx, cached_val});
+                assert_with_reason(cached_val <= MAX_STATE_TAG, @src(), "idx {d} has an invalid tag for State enum {d}", .{ idx, cached_val });
                 return @as(State, @enumFromInt(cached_val));
             }
             var e: StateTag = 0;
@@ -1058,13 +1089,13 @@ pub fn define_manual_allocator_linked_list_type(comptime options: LinkedListOpti
         }
 
         pub inline fn get_first_index_in_state(self: *const List, state: State) Idx {
-            if (HEAD) return self.sets[@intFromEnum(set)].first_idx;
-            return Internal.traverse_to_get_first_item_in_set(self, set).idx;
+            if (HEAD) return self.sets[@intFromEnum(state)].first_idx;
+            return Internal.traverse_to_get_first_idx_in_set(self, state).idx;
         }
 
         pub inline fn get_last_index_in_state(self: *const List, state: State) Idx {
-            if (TAIL) return self.sets[@intFromEnum(set)].last_idx;
-            return Internal.traverse_to_get_last_item_in_set(self, set).idx;
+            if (TAIL) return self.sets[@intFromEnum(state)].last_idx;
+            return Internal.traverse_to_get_last_item_in_set(self, state).idx;
         }
 
         fn get_items_and_insert_at_internal(self: *List, comptime get_mode: GetMode, get_val: GetVal(get_mode), comptime insert_mode: InsertMode, insert_val: InsertVal(insert_mode), alloc: Allocator, comptime ASSUME_CAP: bool) if (!ASSUME_CAP and RETURN_ERRORS) Error!LLSlice else LLSlice {
@@ -1075,43 +1106,51 @@ pub fn define_manual_allocator_linked_list_type(comptime options: LinkedListOpti
                     const state_idx: StateIdx = insert_val;
                     Internal.assert_valid_state_idx(self, state_idx, @src());
                     insert_edges = Internal.get_conn_left_right_directly_after_this(self, state_idx.idx, state_idx.state);
+                    insert_state = state_idx.state;
                 },
                 .BEFORE_INDEX => {
                     const state_idx: StateIdx = insert_val;
                     Internal.assert_valid_state_idx(self, state_idx, @src());
                     insert_edges = Internal.get_conn_left_right_directly_before_this(self, state_idx.idx, state_idx.state);
+                    insert_state = state_idx.state;
                 },
                 .AT_BEGINNING_OF_SET => {
                     const state: State = insert_val;
                     insert_edges = Internal.get_conn_left_right_for_head_of_set(self, state);
+                    insert_state = state;
                 },
                 .AT_END_OF_SET => {
                     const state: State = insert_val;
                     insert_edges = Internal.get_conn_left_right_for_tail_of_set(self, state);
+                    insert_state = state;
                 },
                 .AFTER_NTH_ITEM_FROM_END_OF_SET => {
                     const state_idx: StateIdx = insert_val;
                     Internal.assert_valid_state_idx(self, state_idx, @src());
                     const nth_idx = self.get_nth_idx_from_end_of_state(state_idx.state, state_idx.idx);
                     insert_edges = Internal.get_conn_left_right_directly_after_this(self, nth_idx, state_idx.state);
+                    insert_state = state_idx.state;
                 },
                 .BEFORE_NTH_ITEM_FROM_END_OF_SET => {
                     const state_idx: StateIdx = insert_val;
                     Internal.assert_valid_state_idx(self, state_idx, @src());
                     const nth_idx = self.get_nth_idx_from_end_of_state(state_idx.state, state_idx.idx);
                     insert_edges = Internal.get_connect_data_directly_before_this(self, nth_idx, state_idx.state);
+                    insert_state = state_idx.state;
                 },
                 .AFTER_NTH_ITEM_FROM_START_OF_SET => {
                     const state_idx: StateIdx = insert_val;
                     Internal.assert_valid_state_idx(self, state_idx, @src());
                     const nth_idx = self.get_nth_idx_from_start_of_state(state_idx.state, state_idx.idx);
                     insert_edges = Internal.get_conn_left_right_directly_after_this(self, nth_idx, state_idx.state);
+                    insert_state = state_idx.state;
                 },
                 .BEFORE_NTH_ITEM_FROM_START_OF_SET => {
                     const state_idx: StateIdx = insert_val;
                     Internal.assert_valid_state_idx(self, state_idx, @src());
                     const nth_idx = self.get_nth_idx_from_start_of_state(state_idx.state, state_idx.idx);
                     insert_edges = Internal.get_conn_left_right_directly_before_this(self, nth_idx, state_idx.state);
+                    insert_state = state_idx.state;
                 },
             }
             var return_items: LLSlice = undefined;
@@ -1124,7 +1163,7 @@ pub fn define_manual_allocator_linked_list_type(comptime options: LinkedListOpti
                 },
                 .FIRST_FROM_SET, .FIRST_FROM_SET_ELSE_NEW => {
                     const state: State = get_val;
-                    const state_count: debug_switch(Idx, void) = debug_switch(self.get_item_count(state), void{});
+                    const state_count: debug_switch(Idx, void) = debug_switch(self.get_state_count(state), void{});
                     const first_idx = self.get_first_index_in_state(state);
                     if (get_mode == .FIRST_FROM_SET_ELSE_NEW and (debug_switch(state_count == 0, false) or first_idx == NULL_IDX)) {
                         const new_idx = if (ASSUME_CAP) self.list.append_slot_assume_capacity() else (if (RETURN_ERRORS) try self.list.append_slot(alloc) else self.list.append_slot(alloc));
@@ -1141,7 +1180,7 @@ pub fn define_manual_allocator_linked_list_type(comptime options: LinkedListOpti
                 },
                 .LAST_FROM_SET, .LAST_FROM_SET_ELSE_NEW => {
                     const state: State = get_val;
-                    const state_count: debug_switch(Idx, void) = debug_switch(self.get_item_count(state), void{});
+                    const state_count: debug_switch(Idx, void) = debug_switch(self.get_state_count(state), void{});
                     const last_idx = self.get_last_index_in_state(state);
                     if (get_mode == .LAST_FROM_SET_ELSE_NEW and (debug_switch(state_count == 0, false) or last_idx == NULL_IDX)) {
                         const new_idx = if (ASSUME_CAP) self.list.append_slot_assume_capacity() else (if (RETURN_ERRORS) try self.list.append_slot(alloc) else self.list.append_slot(alloc));
@@ -1178,7 +1217,7 @@ pub fn define_manual_allocator_linked_list_type(comptime options: LinkedListOpti
                 .FIRST_N_FROM_SET => {
                     const state_count: StateCount = get_val;
                     assert_with_reason(state_count.count > 0, @src(), "cannot get `0` items", .{});
-                    assert_with_reason(self.get_item_count(state_count.set) >= state_count.count, @src(), "requested {d} items from set {s}, but set only has {d} items", .{ state_count.count, @tagName(state_count.state), self.get_item_count(state_count.state) });
+                    assert_with_reason(self.get_state_count(state_count.set) >= state_count.count, @src(), "requested {d} items from set {s}, but set only has {d} items", .{ state_count.count, @tagName(state_count.state), self.get_state_count(state_count.state) });
                     return_items.first = self.get_first_index_in_state(state_count.set);
                     return_items.last = self.get_nth_idx_from_start_of_state(state_count.state, state_count.count - 1);
                     return_items.count = state_count.count;
@@ -1187,7 +1226,7 @@ pub fn define_manual_allocator_linked_list_type(comptime options: LinkedListOpti
                 .LAST_N_FROM_SET => {
                     const state_count: StateCount = get_val;
                     assert_with_reason(state_count.count > 0, @src(), "cannot insert `0` items", .{});
-                    assert_with_reason(self.get_item_count(state_count.state) >= state_count.count, @src(), "requested {d} items from set {s}, but set only has {d} items", .{ state_count.count, @tagName(state_count.state), self.get_item_count(state_count.state) });
+                    assert_with_reason(self.get_state_count(state_count.state) >= state_count.count, @src(), "requested {d} items from set {s}, but set only has {d} items", .{ state_count.count, @tagName(state_count.state), self.get_state_count(state_count.state) });
                     return_items.last = self.get_last_index_in_state(state_count.state);
                     return_items.first = self.get_nth_idx_from_end_of_state(state_count.state, state_count.count - 1);
                     return_items.count = state_count.count;
@@ -1196,19 +1235,19 @@ pub fn define_manual_allocator_linked_list_type(comptime options: LinkedListOpti
                 .FIRST_N_FROM_SET_ELSE_NEW => {
                     const state_count: StateCount = get_val;
                     assert_with_reason(state_count.count > 0, @src(), "cannot insert `0` items", .{});
-                    const count_from_state = @max(self.get_item_count(state_count.state), state_count.count);
+                    const count_from_state = @max(self.get_state_count(state_count.state), state_count.count);
                     const count_from_new = state_count.count - count_from_state;
                     var first_new_idx: Idx = undefined;
                     var last_moved_idx: Idx = undefined;
                     const needs_new = count_from_new > 0;
                     const needs_move = count_from_state > 0;
                     if (needs_new) {
-                        const first_new_idx = self.list.len;
+                        first_new_idx = self.list.len;
                         const last_new_idx = self.list.len + count_from_new - 1;
                         _ = if (ASSUME_CAP) self.list.append_many_slots_assume_capacity(count_from_new) else (if (RETURN_ERRORS) try self.list.append_many_slots(count_from_new, alloc) else self.list.append_many_slots(count_from_new, alloc));
                         Internal.link_new_indexes(self, state_count, first_new_idx, last_new_idx);
                         if (needs_move) {
-                            first_new_item = first_new_idx;
+                            first_new_idx = first_new_idx;
                         } else {
                             return_items.first = first_new_idx;
                         }
@@ -1217,8 +1256,8 @@ pub fn define_manual_allocator_linked_list_type(comptime options: LinkedListOpti
                     if (needs_move) {
                         return_items.first = self.get_first_index_in_state(state_count.state);
                         if (needs_new) {
-                            last_moved_item = self.get_nth_idx_from_start_of_state(state_count.state, count_from_state - 1);
-                            Internal.disconnect_many_first_last(self, state_count.state, return_items.first, last_moved_item, count_from_state);
+                            last_moved_idx = self.get_nth_idx_from_start_of_state(state_count.state, count_from_state - 1);
+                            Internal.disconnect_many_first_last(self, state_count.state, return_items.first, last_moved_idx, count_from_state);
                         } else {
                             return_items.last = self.get_nth_idx_from_start_of_state(state_count.state, count_from_state - 1);
                             Internal.disconnect_many_first_last(self, state_count.state, return_items.first, return_items.last, count_from_state);
@@ -1234,14 +1273,14 @@ pub fn define_manual_allocator_linked_list_type(comptime options: LinkedListOpti
                 .LAST_N_FROM_SET_ELSE_NEW => {
                     const state_count: StateCount = get_val;
                     assert_with_reason(state_count.count > 0, @src(), "cannot insert `0` items", .{});
-                    const count_from_state = @max(self.get_item_count(state_count.state), state_count.count);
+                    const count_from_state = @max(self.get_state_count(state_count.state), state_count.count);
                     const count_from_new = state_count.count - count_from_state;
                     var first_new_idx: Idx = undefined;
                     var last_moved_idx: Idx = undefined;
                     const needs_new = count_from_new > 0;
                     const needs_move = count_from_state > 0;
                     if (needs_new) {
-                        const first_new_idx = self.list.len;
+                        first_new_idx = self.list.len;
                         const last_new_idx = self.list.len + count_from_new - 1;
                         _ = if (ASSUME_CAP) self.list.append_many_slots_assume_capacity(count_from_new) else (if (RETURN_ERRORS) try self.list.append_many_slots(count_from_new, alloc) else self.list.append_many_slots(count_from_new, alloc));
                         Internal.link_new_indexes(self, state_count, first_new_idx, last_new_idx);
@@ -1268,54 +1307,83 @@ pub fn define_manual_allocator_linked_list_type(comptime options: LinkedListOpti
                         Internal.connect(mid_left, mid_right);
                     }
                 },
-                // CHECKPOINT go through and fix 
                 .SPARSE_LIST_FROM_SAME_SET => {
-                    const set_idx_list: StateIdxList = get_val;
-                    Internal.assert_valid_set_idx_list(self, set_idx_list, @src());
-                    return_items.first = self.get_item_from_idx(set_idx_list.idxs[0]);
-                    Internal.disconnect_one_item(self, set_idx_list.state, return_items.first);
-                    var prev_item: Item = return_items.first;
-                    for (set_idx_list.idxs[1..]) |idx| {
-                        const this_item = self.get_item_from_idx(idx);
-                        Internal.disconnect_one_item(self, set_idx_list.state, this_item);
-                        const conn_left = Internal.get_conn_left(self, set_idx_list.state, prev_item);
-                        const conn_right = Internal.get_conn_right(self, set_idx_list.state, this_item);
+                    const state_idx_list: StateIdxList = get_val;
+                    Internal.assert_valid_state_idx_list(self, state_idx_list, @src());
+                    return_items.first = state_idx_list.idxs[0];
+                    Internal.disconnect_one(self, state_idx_list.state, return_items.first);
+                    var prev_idx: Idx = return_items.first;
+                    for (state_idx_list.idxs[1..]) |this_idx| {
+                        Internal.disconnect_one(self, state_idx_list.state, this_idx);
+                        const conn_left = Internal.get_conn_left(self, state_idx_list.state, prev_idx);
+                        const conn_right = Internal.get_conn_right(self, state_idx_list.state, this_idx);
                         Internal.connect(conn_left, conn_right);
-                        prev_item = this_item;
+                        prev_idx = this_idx;
                     }
-                    return_items.last = prev_item;
-                    return_items.count = @intCast(set_idx_list.idxs.len);
-                    insert_edges.count = return_items.count;
+                    return_items.last = prev_idx;
+                    return_items.count = @intCast(state_idx_list.idxs.len);
                 },
                 .SPARSE_LIST_FROM_ANY_SET => {
-                    const set_idxs: []const StateIdx = get_val;
-                    Internal.assert_valid_list_of_set_idxs(self, set_idxs, @src());
-                    return_items.first = self.get_item_from_idx(set_idxs[0]);
-                    Internal.disconnect_one_item(self, set_idxs[0].state, return_items.first);
-                    var prev_item: Item = return_items.first;
-                    for (set_idxs[1..]) |set_idx| {
-                        const this_item = self.get_item_from_idx(set_idx.idx);
-                        Internal.disconnect_one_item(self, set_idx.state, this_item);
-                        const conn_left = Internal.get_conn_left(self, set_idx.state, prev_item);
-                        const conn_right = Internal.get_conn_right(self, set_idx.state, this_item);
+                    const state_idxs: []const StateIdx = get_val;
+                    Internal.assert_valid_list_of_state_idxs(self, state_idxs, @src());
+                    return_items.first = state_idxs[0];
+                    Internal.disconnect_one(self, state_idxs[0].state, return_items.first);
+                    var prev_idx: Idx = return_items.first;
+                    for (state_idxs[1..]) |state_idx| {
+                        const this_idx = state_idx.idx;
+                        Internal.disconnect_one(self, state_idx.state, this_idx.idx);
+                        const conn_left = Internal.get_conn_left(self, state_idx.state, prev_idx);
+                        const conn_right = Internal.get_conn_right(self, state_idx.state, this_idx);
                         Internal.connect(conn_left, conn_right);
-                        prev_item = this_item;
+                        prev_idx = this_idx;
                     }
-                    return_items.last = prev_item;
-                    return_items.count = @intCast(set_idxs.len);
-                    insert_edges.count = return_items.count;
+                    return_items.last = prev_idx;
+                    return_items.count = @intCast(state_idxs.len);
                 },
                 .SLICE => {
                     const slice: LLSlice = get_val;
-                    //CHECKPOINT
                     Internal.assert_valid_slice(self, slice, @src());
-                    return_items.first = Internal.get_item_from_idx(self, idx: Idx)
+                    return_items.first = slice.first;
+                    return_items.last = slice.last;
+                    return_items.count = slice.count;
                 },
-                .FROM_LEAKED_ITEMS_CONNECTED => {
-                    // const first_last: FirstLastIdx = get_val;
-                    // assert_idx_less_than_len(first_last.first, self.list.len, @src());
-                    // assert_idx_less_than_len(first_last.last, self.list.len, @src());
-                    // Internal.as
+                .SLICE_ELSE_NEW => {
+                    const supp_slice: LLSupplySlice = get_val;
+                    Internal.assert_valid_slice(self, supp_slice.slice, @src());
+                    const count_from_slice = @max(self.get_state_count(supp_slice.slice.count), supp_slice.total_needed);
+                    const count_from_new = supp_slice.total_needed - count_from_slice;
+                    var first_new_idx: Idx = undefined;
+                    var last_moved_idx: Idx = undefined;
+                    const needs_new = count_from_new > 0;
+                    const needs_move = count_from_slice > 0;
+                    if (needs_new) {
+                        first_new_idx = self.list.len;
+                        const last_new_idx = self.list.len + count_from_new - 1;
+                        _ = if (ASSUME_CAP) self.list.append_many_slots_assume_capacity(count_from_new) else (if (RETURN_ERRORS) try self.list.append_many_slots(count_from_new, alloc) else self.list.append_many_slots(count_from_new, alloc));
+                        Internal.link_new_indexes(self, supp_slice.slice.state, first_new_idx, last_new_idx);
+                        if (needs_move) {
+                            first_new_idx = first_new_idx;
+                        } else {
+                            return_items.first = first_new_idx;
+                        }
+                        return_items.last = last_new_idx;
+                    }
+                    if (needs_move) {
+                        return_items.first = self.get_nth_idx_from_end_of_state(supp_slice.slice.state, count_from_slice - 1);
+                        if (needs_new) {
+                            last_moved_idx = self.get_last_index_in_state(supp_slice.slice.state);
+                            Internal.disconnect_many_first_last(self, supp_slice.slice.state, return_items.first, last_moved_idx, count_from_slice);
+                        } else {
+                            return_items.last = self.get_last_index_in_state(supp_slice.slice.state);
+                            Internal.disconnect_items_first_last(self, supp_slice.slice.state, return_items.first, return_items.last, count_from_slice);
+                        }
+                    }
+                    if (needs_new and needs_move) {
+                        const mid_left = Internal.get_conn_left(self, supp_slice.slice.state, last_moved_idx);
+                        const mid_right = Internal.get_conn_right(self, supp_slice.slice.state, first_new_idx);
+                        Internal.connect(mid_left, mid_right);
+                    }
+                    return_items.count = supp_slice.total_needed;
                 },
             }
             const insert_first = Internal.get_conn_right(self, insert_edges.state, return_items.first);
@@ -1328,8 +1396,8 @@ pub fn define_manual_allocator_linked_list_type(comptime options: LinkedListOpti
             if (HEAD_NO_FORWARD and insert_edges.edges.left == NULL_IDX) {
                 Internal.set_first_index(self, insert_edges.set, return_items.first.idx);
             }
-            Internal.set_state_on_items_first_last(self, return_items.first, return_items.last, FORWARD, insert_edges.set);
-        
+            Internal.set_state_on_indexes_first_last(self, return_items.first, return_items.last, FORWARD, insert_edges.set);
+            return_items.state = insert_state;
             return return_items;
         }
 
@@ -1581,97 +1649,97 @@ pub fn define_manual_allocator_linked_list_type(comptime options: LinkedListOpti
     };
 }
 
-pub fn LinkedListIterator(comptime List: type) type {
-    return struct {
-        next_idx: List.Idx = 0,
-        list_ref: *List,
+// pub fn LinkedListIterator(comptime List: type) type {
+//     return struct {
+//         next_idx: List.Idx = 0,
+//         list_ref: *List,
 
-        const Self = @This();
+//         const Self = @This();
 
-        pub inline fn reset_index_to_start(self: *Self) void {
-            self.next_idx = 0;
-        }
+//         pub inline fn reset_index_to_start(self: *Self) void {
+//             self.next_idx = 0;
+//         }
 
-        pub inline fn set_index(self: *Self, index: List.Idx) void {
-            self.next_idx = index;
-        }
+//         pub inline fn set_index(self: *Self, index: List.Idx) void {
+//             self.next_idx = index;
+//         }
 
-        pub inline fn decrease_index_safe(self: *Self, count: List.Idx) void {
-            self.next_idx -|= count;
-        }
-        pub inline fn decrease_index(self: *Self, count: List.Idx) void {
-            self.next_idx -= count;
-        }
-        pub inline fn increase_index(self: *Self, count: List.Idx) void {
-            self.next_idx += count;
-        }
-        pub inline fn increase_index_safe(self: *Self, count: List.Idx) void {
-            self.next_idx +|= count;
-        }
+//         pub inline fn decrease_index_safe(self: *Self, count: List.Idx) void {
+//             self.next_idx -|= count;
+//         }
+//         pub inline fn decrease_index(self: *Self, count: List.Idx) void {
+//             self.next_idx -= count;
+//         }
+//         pub inline fn increase_index(self: *Self, count: List.Idx) void {
+//             self.next_idx += count;
+//         }
+//         pub inline fn increase_index_safe(self: *Self, count: List.Idx) void {
+//             self.next_idx +|= count;
+//         }
 
-        pub inline fn has_next(self: Self) bool {
-            return self.next_idx < self.list_ref.len;
-        }
+//         pub inline fn has_next(self: Self) bool {
+//             return self.next_idx < self.list_ref.len;
+//         }
 
-        pub fn get_next_copy(self: *Self) ?List.Elem {
-            if (self.next_idx >= self.list_ref.len) return null;
-            const item = self.list_ref.ptr[self.next_idx];
-            self.next_idx += 1;
-            return item;
-        }
+//         pub fn get_next_copy(self: *Self) ?List.Elem {
+//             if (self.next_idx >= self.list_ref.len) return null;
+//             const item = self.list_ref.ptr[self.next_idx];
+//             self.next_idx += 1;
+//             return item;
+//         }
 
-        pub fn get_next_copy_guaranteed(self: *Self) List.Elem {
-            assert_with_reason(self.next_idx < self.list_ref.len, @src(), "interator index ({d}) is out of bounds (list.len = {d})", .{ self.next_idx, self.list_ref.len });
-            const item = self.list_ref.ptr[self.next_idx];
-            self.next_idx += 1;
-            return item;
-        }
+//         pub fn get_next_copy_guaranteed(self: *Self) List.Elem {
+//             assert_with_reason(self.next_idx < self.list_ref.len, @src(), "interator index ({d}) is out of bounds (list.len = {d})", .{ self.next_idx, self.list_ref.len });
+//             const item = self.list_ref.ptr[self.next_idx];
+//             self.next_idx += 1;
+//             return item;
+//         }
 
-        pub fn get_next_ref(self: *Self) ?*List.Elem {
-            if (self.next_idx >= self.list_ref.len) return null;
-            const item: *List.Elem = &self.list_ref.ptr[self.next_idx];
-            self.next_idx += 1;
-            return item;
-        }
+//         pub fn get_next_ref(self: *Self) ?*List.Elem {
+//             if (self.next_idx >= self.list_ref.len) return null;
+//             const item: *List.Elem = &self.list_ref.ptr[self.next_idx];
+//             self.next_idx += 1;
+//             return item;
+//         }
 
-        pub fn get_next_ref_guaranteed(self: *Self) *List.Elem {
-            assert_with_reason(self.next_idx < self.list_ref.len, @src(), "interator index ({d}) is out of bounds (list.len = {d})", .{ self.next_idx, self.list_ref.len });
-            const item: *List.Elem = &self.list_ref.ptr[self.next_idx];
-            self.next_idx += 1;
-            return item;
-        }
+//         pub fn get_next_ref_guaranteed(self: *Self) *List.Elem {
+//             assert_with_reason(self.next_idx < self.list_ref.len, @src(), "interator index ({d}) is out of bounds (list.len = {d})", .{ self.next_idx, self.list_ref.len });
+//             const item: *List.Elem = &self.list_ref.ptr[self.next_idx];
+//             self.next_idx += 1;
+//             return item;
+//         }
 
-        /// Returns `true` if action was performed at least one time, `false` if iterator had zero items left
-        pub fn perform_action_on_remaining_items(self: *Self, callback: *const IteratorAction, userdata: ?*anyopaque) bool {
-            var idx: List.Idx = self.next_idx;
-            var exec_count: List.Idx = 0;
-            var should_continue: bool = true;
-            while (should_continue and idx < self.list_ref.len) : (idx += 1) {
-                const item: *List.Elem = &self.list_ref.ptr[idx];
-                should_continue = callback(self.list_ref, idx, item, userdata);
-                exec_count += 1;
-            }
-            return exec_count > 0;
-        }
+//         /// Returns `true` if action was performed at least one time, `false` if iterator had zero items left
+//         pub fn perform_action_on_remaining_items(self: *Self, callback: *const IteratorAction, userdata: ?*anyopaque) bool {
+//             var idx: List.Idx = self.next_idx;
+//             var exec_count: List.Idx = 0;
+//             var should_continue: bool = true;
+//             while (should_continue and idx < self.list_ref.len) : (idx += 1) {
+//                 const item: *List.Elem = &self.list_ref.ptr[idx];
+//                 should_continue = callback(self.list_ref, idx, item, userdata);
+//                 exec_count += 1;
+//             }
+//             return exec_count > 0;
+//         }
 
-        /// Returns `true` if action was performed on exactly `count` items, `false` if iterator ran out of items early
-        pub fn perform_action_on_next_n_items(self: *Self, count: List.Idx, callback: *const IteratorAction, userdata: ?*anyopaque) bool {
-            var idx: List.Idx = self.next_idx;
-            const limit = @min(idx + count, self.list_ref.len);
-            var exec_count: List.Idx = 0;
-            var should_continue: bool = true;
-            while (should_continue and idx < limit) : (idx += 1) {
-                const item: *List.Elem = &self.list_ref.ptr[idx];
-                should_continue = callback(self.list_ref, idx, item, userdata);
-                exec_count += 1;
-            }
-            return exec_count == count;
-        }
+//         /// Returns `true` if action was performed on exactly `count` items, `false` if iterator ran out of items early
+//         pub fn perform_action_on_next_n_items(self: *Self, count: List.Idx, callback: *const IteratorAction, userdata: ?*anyopaque) bool {
+//             var idx: List.Idx = self.next_idx;
+//             const limit = @min(idx + count, self.list_ref.len);
+//             var exec_count: List.Idx = 0;
+//             var should_continue: bool = true;
+//             while (should_continue and idx < limit) : (idx += 1) {
+//                 const item: *List.Elem = &self.list_ref.ptr[idx];
+//                 should_continue = callback(self.list_ref, idx, item, userdata);
+//                 exec_count += 1;
+//             }
+//             return exec_count == count;
+//         }
 
-        /// Should return `true` if iteration should continue, or `false` if iteration should stop
-        pub const IteratorAction = fn (list: *List, index: List.Idx, item: *List.Elem, userdata: ?*anyopaque) bool;
-    };
-}
+//         /// Should return `true` if iteration should continue, or `false` if iteration should stop
+//         pub const IteratorAction = fn (list: *List, index: List.Idx, item: *List.Elem, userdata: ?*anyopaque) bool;
+//     };
+// }
 
 test "LinkedList.zig" {
     // const t = std.testing;
