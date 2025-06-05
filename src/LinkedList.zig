@@ -82,12 +82,8 @@ pub const DefaultSet = enum(u8) {
 pub const ElementStateAccess = struct {
     field: []const u8,
     field_type: type,
-    state_mask: comptime_int,
-    /// This field must provide all flag values for each of the stated enum
-    /// values in `linked_set_enum`
-    ///
-    /// Index 0 represents enum tag value 0, index 1 represents tag value 1, etc
-    state_flags: []const comptime_int,
+    field_bit_offset: comptime_int,
+    field_bit_count: comptime_int,
 };
 
 pub const Direction = enum {
@@ -126,18 +122,9 @@ pub fn define_manual_allocator_linked_list_type(comptime options: LinkedListOpti
         const S_TYPE = @FieldType(options.list_options.element_type, S_FIELD);
         assert_with_reason(Types.type_is_int(S_TYPE), @src(), "element state field `.{s}` on element type `{s}` is not an integer type", .{ S_FIELD, @typeName(options.list_options.element_type) });
         assert_with_reason(S_TYPE == options.element_state_access.?.field_type, @src(), "element state field `.{s}` on element type `{s}` does not match stated type {s}", .{ S_FIELD, @typeName(options.list_options.element_type), @typeName(options.element_state_access.?.field_type) });
-        assert_with_reason(options.element_state_access.?.state_mask > 0, @src(), "element state mask == 0, has no bits and cannot isolate state bits", .{});
-        assert_with_reason(options.element_state_access.?.state_flags.len == Types.enum_defined_field_count(options.linked_set_enum), @src(), "number of flags provided in `element_state_access.state_flags` doe not match the number of tags in `linked_set_enum`", .{});
-        assert_with_reason(Types.enum_is_exhaustive(options.linked_set_enum), @src(), "`linked_set_enum` must be exhaustive", .{});
-        const composite_flags = comptime make: {
-            var comp: comptime_int = 0;
-            for (options.element_state_access.?.state_flags) |flag| {
-                comp |= flag;
-            }
-            break :make comp;
-        };
-        const inv_composite = ~composite_flags;
-        assert_with_reason(options.element_state_access.?.state_mask & inv_composite == 0, @src(), "one of the flags in `options.element_state_access.state_flags` are not covered by `options.element_state_access.state_mask`, cannot isolate all state bits", .{});
+        const tag_count = Types.enum_max_field_count(options.linked_set_enum);
+        const flag_count = 1 << options.element_state_access.?.field_bit_count;
+        assert_with_reason(flag_count >= tag_count, @src(), "options.element_state_access.field_bit_count {d} (max val = {d}) cannot hold all tag values for options.linked_set_enum {d}", .{options.element_state_access.?.field_bit_count, flag_count, tag_count});
     }
     if (C) {
         const C_FIELD = options.element_idx_cache_field.?;
@@ -145,16 +132,9 @@ pub fn define_manual_allocator_linked_list_type(comptime options: LinkedListOpti
         const C_TYPE = @FieldType(options.list_options.element_type, C_FIELD);
         assert_with_reason(C_TYPE == options.list_options.index_type, @src(), "element state field `.{s}` on element type `{s}` does not match options.list_options.index_type `{s}`", .{ C_FIELD, @typeName(options.list_options.element_type), @typeName(options.list_options.index_type) });
     }
-    const SETS_ARRAY: if (S) [options.element_state_access.?.state_flags.len]options.element_state_access.?.field_type else void = if (S) make: {
-        var arr: [options.element_state_access.?.state_flags.len]options.element_state_access.?.field_type = undefined;
-        for (0..options.element_state_access.?.state_flags.len) |idx| {
-            arr[idx] = options.element_state_access.?.state_flags.ptr[idx];
-        }
-        break :make arr;
-    } else void{};
     return extern struct {
         list: BaseList = BaseList.UNINIT,
-        sets: [SET_COUNT]SetData = UNINIT_SETS,
+        sets: [SET_COUNT]StateData = UNINIT_SETS,
 
         const STRONG_ASSERT = options.stronger_asserts;
         const SET_COUNT = Types.enum_defined_field_count(options.linked_set_enum);
@@ -172,22 +152,26 @@ pub fn define_manual_allocator_linked_list_type(comptime options: LinkedListOpti
         const STATE = options.element_state_access != null;
         const CACHE = options.element_idx_cache_field != null;
         const CACHE_FIELD = if (CACHE) options.element_idx_cache_field.? else "";
-        const T_STATE = if (STATE) options.element_state_access.?.field_type else void;
+        const T_STATE_FIELD = if (STATE) options.element_state_access.?.field_type else void;
         const STATE_FIELD = if (STATE) options.element_state_access.?.field else "";
+        const STATE_OFFSET = if (STATE) options.element_state_access.?.field_bit_offset else 0;
         const UNINIT = List{};
         const RETURN_ERRORS = options.list_options.error_behavior == .RETURN_ERRORS;
         const NULL_IDX = math.maxInt(Idx);
-        const STATE_FLAGS = SETS_ARRAY;
-        const STATE_MASK: if (STATE) options.element_state_access.?.field_type else comptime_int = if (STATE) options.element_state_access.?.state_mask else 0;
-        const STATE_CLEAR_MASK: if (STATE) options.element_state_access.?.field_type else comptime_int = if (STATE) ~options.element_state_access.?.state_mask else 0b1111111111111111111111111111111111111111111111111111111111111111;
+        const MAX_STATE_TAG = Types.enum_max_value(State);
+        const STATE_MASK: if (STATE) options.element_state_access.?.field_type else comptime_int = if (STATE) build: {
+            const mask_unshifted = 1 << options.element_state_access.?.field_bit_count;
+            break :build mask_unshifted << options.element_state_access.?.field_bit_offset;
+        } else 0;
+        const STATE_CLEAR_MASK: if (STATE) options.element_state_access.?.field_type else comptime_int = if (STATE) ~STATE_MASK else 0b1111111111111111111111111111111111111111111111111111111111111111;
         const HEAD_TAIL: u2 = (@as(u2, @intFromBool(HEAD)) << 1) | @as(u2, @intFromBool(TAIL));
         const HAS_HEAD_HAS_TAIL: u2 = 0b11;
         const HAS_HEAD_NO_TAIL: u2 = 0b10;
         const NO_HEAD_HAS_TAIL: u2 = 0b01;
-        const UNINIT_SETS: [SET_COUNT]SetData = build: {
-            var sets: [SET_COUNT]SetData = undefined;
+        const UNINIT_SETS: [SET_COUNT]StateData = build: {
+            var sets: [SET_COUNT]StateData = undefined;
             for (0..SET_COUNT) |idx| {
-                sets[idx] = SetData{};
+                sets[idx] = StateData{};
             }
             break :build sets;
         };
@@ -198,8 +182,9 @@ pub fn define_manual_allocator_linked_list_type(comptime options: LinkedListOpti
         pub const Elem = options.list_options.element_type;
         pub const Idx = options.list_options.index_type;
         pub const Iterator = LinkedListIterator(List);
-        pub const LinkSet = options.linked_set_enum;
-        pub const SetData = switch (HEAD_TAIL) {
+        pub const State = options.linked_set_enum;
+        const StateTag = Types.enum_tag_type(State);
+        pub const StateData = switch (HEAD_TAIL) {
             HAS_HEAD_HAS_TAIL => struct {
                 first_idx: Idx = 0,
                 last_idx: Idx = 0,
@@ -215,27 +200,29 @@ pub fn define_manual_allocator_linked_list_type(comptime options: LinkedListOpti
             },
             else => unreachable,
         };
-        pub const Item = struct {
-            ptr: *Elem = &DUMMY_ELEM,
-            idx: Idx = NULL_IDX,
+        pub const FirstLastIdx = struct {
+            first: Idx,
+            last: Idx,
         };
-        pub const FirstLastItem = struct {
-            first: Item = Item{},
-            last: Item = Item{},
-
-            pub fn single(item: Item) FirstLastItem {
-                return FirstLastItem{
-                    .first = item,
-                    .last = item,
-                };
-            }
-
-            pub fn combine(left: FirstLastItem, right: FirstLastItem) FirstLastItem {
-                return FirstLastItem{
-                    .first = left.first,
-                    .last = right.last,
-                };
-            }
+        pub const StateFirstLastIdx = struct {
+            state: State,
+            first: Idx,
+            last: Idx,
+        };
+        pub const FirstLastIdxCount = struct {
+            first: Idx,
+            last: Idx,
+            count: Idx,
+        };
+        pub const StateFirstLastIdxCount = struct {
+            state: State,
+            first: Idx,
+            last: Idx,
+            count: Idx,
+        };
+        pub const StateIdxList = struct {
+            state: State,
+            idxs: []const Idx,
         };
         const IdxPtrIdx = struct {
             idx_ptr: *Idx = &DUMMY_IDX,
@@ -270,42 +257,20 @@ pub fn define_manual_allocator_linked_list_type(comptime options: LinkedListOpti
             }
         };
         const ConnData = struct {
-            set: LinkSet,
+            state: State,
             edges: ConnLeftRight,
             count: Idx,
         };
-        const ConnInsertData = struct {
-            set: LinkSet,
-            edges: ConnLeftRight,
-            new: FirstLastItem,
-            count: Idx,
-        };
-        pub const SetPtr = struct {
-            set: LinkSet,
-            ptr: *Elem,
-        };
-        pub const SetItem = struct {
-            set: LinkSet,
-            item: Item,
-        };
-        pub const SetIdx = struct {
-            set: LinkSet,
+        pub const StateIdx = struct {
+            state: State,
             idx: Idx,
         };
-        pub const SetIdxList = struct {
-            set: LinkSet,
+        pub const StateIdxList = struct {
+            state: State,
             idxs: []const Idx,
         };
-        pub const SetPtrList = struct {
-            set: LinkSet,
-            ptrs: []const *Elem,
-        };
-        pub const SetItemList = struct {
-            set: LinkSet,
-            items: []const Item,
-        };
-        pub const SetCount = struct {
-            set: LinkSet,
+        pub const StateCount = struct {
+            state: State,
             count: Idx,
         };
         var DUMMY_IDX: Idx = NULL_IDX;
@@ -318,81 +283,117 @@ pub fn define_manual_allocator_linked_list_type(comptime options: LinkedListOpti
             FIRST_FROM_SET,
             LAST_FROM_SET,
             ONE_INDEX,
-            ONE_PTR,
-            ONE_ITEM,
             MANY_NEW,
             FIRST_N_FROM_SET,
             LAST_N_FROM_SET,
             FIRST_N_FROM_SET_ELSE_NEW,
             LAST_N_FROM_SET_ELSE_NEW,
-            SPARSE_LIST_OF_INDEXES_FROM_SAME_SET,
-            SPARSE_LIST_OF_POINTERS_FROM_SAME_SET,
-            SPARSE_LIST_OF_ITEMS_FROM_SAME_SET,
-            SPARSE_LIST_OF_INDEXES_FROM_ANY_SET,
-            SPARSE_LIST_OF_POINTERS_FROM_ANY_SET,
-            SPARSE_LIST_OF_ITEMS_FROM_ANY_SET,
+            SPARSE_LIST_FROM_SAME_SET,
+            SPARSE_LIST_FROM_ANY_SET,
+            SLICE,
+            SLICE_ELSE_NEW,
         };
 
         pub fn GetVal(comptime M: GetMode) type {
             return switch (M) {
-                .FIRST_FROM_SET, .FIRST_FROM_SET_ELSE_NEW, .LAST_FROM_SET, .LAST_FROM_SET_ELSE_NEW => LinkSet,
-                .FIRST_N_FROM_SET, .FIRST_N_FROM_SET_ELSE_NEW, .LAST_N_FROM_SET, .LAST_N_FROM_SET_ELSE_NEW => SetCount,
+                .FIRST_FROM_SET, .FIRST_FROM_SET_ELSE_NEW, .LAST_FROM_SET, .LAST_FROM_SET_ELSE_NEW => State,
+                .FIRST_N_FROM_SET, .FIRST_N_FROM_SET_ELSE_NEW, .LAST_N_FROM_SET, .LAST_N_FROM_SET_ELSE_NEW => StateCount,
                 .ONE_NEW => void,
-                .ONE_INDEX => SetIdx,
-                .ONE_ITEM => SetItem,
-                .ONE_PTR => SetPtr,
+                .ONE_INDEX => StateIdx,
                 .MANY_NEW => Idx,
-                .SPARSE_LIST_OF_INDEXES_FROM_SAME_SET => SetIdxList,
-                .SPARSE_LIST_OF_POINTERS_FROM_SAME_SET => SetPtrList,
-                .SPARSE_LIST_OF_ITEMS_FROM_SAME_SET => SetItemList,
-                .SPARSE_LIST_OF_INDEXES_FROM_ANY_SET => []const SetIdx,
-                .SPARSE_LIST_OF_ITEMS_FROM_ANY_SET => []const SetItem,
-                .SPARSE_LIST_OF_POINTERS_FROM_ANY_SET => []const SetPtr,
+                .SLICE => LLSlice,
+                .SLICE_ELSE_NEW => LLSupplySlice,
+                .SPARSE_LIST_FROM_SAME_SET => StateIdxList,
+                .SPARSE_LIST_FROM_ANY_SET => []const StateIdx,
             };
         }
-
-        const GetUni = union {
-            set: LinkSet,
-            set_count: SetCount,
-            set_idx: SetIdx,
-            set_item: SetItem,
-            set_ptr: SetPtr,
-            idx: Idx,
-            set_idx_list: SetIdxList,
-            set_ptr_list: SetPtrList,
-            set_item_list: SetItemList,
-            list_of_set_idx: []const SetIdx,
-            list_of_set_item: []const SetItem,
-            list_of_set_ptr: []const SetPtr,
-        };
 
         pub const InsertMode = enum {
             AT_BEGINNING_OF_SET,
             AT_END_OF_SET,
             AFTER_INDEX,
-            AFTER_PTR,
-            AFTER_ITEM,
             BEFORE_INDEX,
-            BEFORE_PTR,
-            BEFORE_ITEM,
-            LEAK_TO_NOWHERE,
+            AFTER_NTH_ITEM_FROM_END_OF_SET,
+            BEFORE_NTH_ITEM_FROM_END_OF_SET,
+            AFTER_NTH_ITEM_FROM_START_OF_SET,
+            BEFORE_NTH_ITEM_FROM_START_OF_SET,
         };
 
         pub fn InsertVal(comptime M: InsertMode) type {
             return switch (M) {
-                .AT_BEGINNING_OF_SET, .AT_END_OF_SET => LinkSet,
-                .AFTER_INDEX, .BEFORE_INDEX => SetIdx,
-                .AFTER_PTR, .BEFORE_PTR => SetPtr,
-                .AFTER_ITEM, .BEFORE_ITEM => SetItem,
-                .LEAK_TO_NOWHERE => void,
+                .AT_BEGINNING_OF_SET, .AT_END_OF_SET => State,
+                .AFTER_INDEX, .BEFORE_INDEX, .AFTER_NTH_ITEM_FROM_END_OF_SET, .BEFORE_NTH_ITEM_FROM_END_OF_SET, .AFTER_NTH_ITEM_FROM_START_OF_SET, .BEFORE_NTH_ITEM_FROM_START_OF_SET => StateIdx,
             };
         }
 
-        const InsUni = union {
-            set: LinkSet,
-            set_idx: SetIdx,
-            set_ptr: SetPtr,
-            set_item: SetItem,
+        pub const LLSlice = struct {
+            state: State,
+            first: Idx,
+            last: Idx,
+            count: Idx,
+
+            pub fn single(state: State, idx: Idx) LLSlice {
+                return LLSlice{
+                    .state = state,
+                    .first = idx,
+                    .last = idx,
+                    .count = 1,
+                };
+            }
+
+            pub fn new(state: State, first: Idx, last: Idx, count: Idx) LLSlice {
+                return LLSlice{
+                    .state = state,
+                    .first = first,
+                    .last = last,
+                    .count = count,
+                };
+            }
+
+            pub fn to_supply_slice(self: LLSlice, total_needed: Idx) LLSupplySlice {
+                return LLSupplySlice{
+                    .total_needed = total_needed,
+                    .slice = self,
+                };
+            }
+
+            pub fn grow_end_rightward(self: *LLSlice, list: *const List, count: Idx) void {
+                const new_last = Internal.find_idx_n_places_after_this_one_with_fallback_start(self.state, self.last, count, null);
+                self.count += count;
+                self.last = new_last;
+            }
+
+            pub fn shrink_end_leftward(self: *LLSlice, list: *const List, count: Idx) void {
+                const new_last = Internal.find_idx_n_places_before_this_one_with_fallback_start(self.state, self.last, count, self.first);
+                self.count += count;
+                self.last = new_last;
+            }
+
+            pub fn grow_start_leftward(self: *LLSlice, list: *const List, count: Idx) void {
+                const new_first = Internal.find_idx_n_places_before_this_one_with_fallback_start(self.state, self.first, count, null);
+                self.count += count;
+                self.first = new_first;
+            }
+
+            pub fn shrink_start_rightward(self: *LLSlice, list: *const List, count: Idx) void {
+                const new_first = Internal.find_idx_n_places_after_this_one_with_fallback_start(self.state, self.first, count, self.last);
+                self.count += count;
+                self.first = new_first;
+            }
+
+            pub fn slide_right(self: *LLSlice, list: *const List, count: Idx) void {
+                self.grow_end_rightward(list, count);
+                self.shrink_start_rightward(list, count);
+            }
+
+            pub fn slide_left(self: *LLSlice, list: *const List, count: Idx) void {
+                self.grow_start_leftward(list, count);
+                self.shrink_end_leftward(list, count);
+            }
+        };
+        pub const LLSupplySlice = struct {
+            slice: LLSlice,
+            total_needed: Idx,
         };
 
         /// All functions/structs in this namespace fall in at least one of 3 categories:
@@ -402,6 +403,84 @@ pub fn define_manual_allocator_linked_list_type(comptime options: LinkedListOpti
         ///
         /// They are provided here publicly to facilitate special user use cases
         pub const Internal = struct {
+            pub fn validate_slice(self: *const List, slice: LLSlice) void {
+
+            }
+
+            pub fn find_idx_n_places_after_this_one_with_fallback_start(self: *const List, state: State, idx: Idx, count: Idx, fallback_start_idx: ?Idx) Idx {
+                if (FORWARD) {
+                    return traverse_forward_to_find_idx_n_places_after_this_one(self, state, idx, count);
+                } else {
+                    return traverse_backward_to_find_idx_n_places_after_this_one_start_at(self, state, idx, count, fallback_start_idx);
+                }
+            }
+
+            pub fn find_idx_n_places_before_this_one_with_fallback_start(self: *const List, state: State, idx: Idx, count: Idx, fallback_start_idx: ?Idx) Idx {
+                if (BACKWARD) {
+                    return traverse_backward_to_find_idx_n_places_before_this_one(self, state, idx, count);
+                } else {
+                    return traverse_forward_to_find_idx_n_places_before_this_one_start_at(self, state, idx, count, fallback_start_idx);
+                }
+            }
+
+            pub fn traverse_forward_to_find_idx_n_places_after_this_one(self: *const List, state: State, idx: Idx, count: Idx) Idx {
+                var delta: Idx = 0;
+                var result: Idx = idx;
+                while (delta < count and result != idx and result != NULL_IDX) {
+                    result = Internal.get_next_idx_fwd(self, result);
+                    delta += 1;
+                }
+                assert_with_reason(result != NULL_IDX, @src(), "idx {d} was not found in set `{s}`", .{idx, @tagName(state)});
+                assert_with_reason(delta == count, @src(), "there are not {d} more items after idx {d} in set `{s}`, (only {d})", .{count, idx, @tagName(state)}, delta);
+                return result;
+            }
+
+            pub fn traverse_backward_to_find_idx_n_places_before_this_one(self: *const List, state: State, idx: Idx, count: Idx) Idx {
+                var delta: Idx = 0;
+                var result: Idx = idx;
+                while (delta < count and result != idx and result != NULL_IDX) {
+                    result = Internal.get_prev_idx_bkd(self, result);
+                    delta += 1;
+                }
+                assert_with_reason(result != NULL_IDX, @src(), "idx {d} was not found in set `{s}`", .{idx, @tagName(state)});
+                assert_with_reason(delta == count, @src(), "there are not {d} more items after idx {d} in set `{s}`, (only {d})", .{count, idx, @tagName(state)}, delta);
+                return result;
+            }
+
+            pub fn traverse_backward_to_find_idx_n_places_after_this_one_start_at(self: *const List, state: State, idx: Idx, count: Idx, start: ?Idx) Idx {
+                var delta: Idx = 0;
+                var probe: Idx = if (start) |s| s else self.get_last_index_in_state(state);
+                var result: Idx = probe;
+                while (delta < count and probe != idx and probe != NULL_IDX) {
+                    probe = Internal.get_prev_idx_bkd(self, probe);
+                    delta += 1;
+                }
+                assert_with_reason(probe != NULL_IDX, @src(), "idx {d} was not found in set `{s}`", .{idx, @tagName(state)});
+                assert_with_reason(delta == count, @src(), "there are not {d} more items after idx {d} in set `{s}`, (only {d})", .{count, idx, @tagName(state)}, delta);
+                while (probe != idx) {
+                    probe = Internal.get_prev_idx_bkd(self, probe);
+                    result = Internal.get_prev_idx_bkd(self, result);
+                }
+                return result;
+            }
+
+            pub fn traverse_forward_to_find_idx_n_places_before_this_one_start_at(self: *const List, state: State, idx: Idx, count: Idx, start: ?Idx) Idx {
+                var delta: Idx = 0;
+                var probe: Idx = if (start) |s| s else self.get_first_index_in_state(state);
+                var result: Idx = probe;
+                while (delta < count and probe != idx and probe != NULL_IDX) {
+                    probe = Internal.get_next_idx_fwd(self, probe);
+                    delta += 1;
+                }
+                assert_with_reason(probe != NULL_IDX, @src(), "idx {d} was not found in set `{s}`", .{idx, @tagName(state)});
+                assert_with_reason(delta == count, @src(), "there are not {d} more items before idx {d} in set `{s}`, (only {d})", .{count, idx, @tagName(state)}, delta);
+                while (probe != idx) {
+                    probe = Internal.get_next_idx_fwd(self, probe);
+                    result = Internal.get_next_idx_fwd(self, result);
+                }
+                return result;
+            }
+
             pub inline fn set_next_idx(ptr: *Elem, idx: Idx) void {
                 if (FORWARD) @field(ptr, NEXT_FIELD) = idx;
             }
@@ -414,65 +493,49 @@ pub fn define_manual_allocator_linked_list_type(comptime options: LinkedListOpti
                 if (CACHE) @field(ptr, CACHE_FIELD) = idx;
             }
 
-            pub inline fn set_first_index(self: *List, set: LinkSet, idx: Idx) void {
+            pub inline fn set_first_index(self: *List, state: State, idx: Idx) void {
                 if (HEAD) self.sets[@intFromEnum(set)].first_idx = idx;
             }
 
-            pub inline fn set_last_index(self: *List, set: LinkSet, idx: Idx) void {
+            pub inline fn set_last_index(self: *List, state: State, idx: Idx) void {
                 if (TAIL) self.sets[@intFromEnum(set)].last_idx = idx;
             }
 
-            pub inline fn set_link_set_count(self: *List, set: LinkSet, count: Idx) void {
+            pub inline fn set_link_set_count(self: *List, state: State, count: Idx) void {
                 self.sets[@intFromEnum(set)].count = count;
             }
 
-            pub inline fn increase_link_set_count(self: *List, set: LinkSet, amount: Idx) void {
+            pub inline fn increase_link_set_count(self: *List, state: State, amount: Idx) void {
                 self.sets[@intFromEnum(set)].count += amount;
             }
 
-            pub inline fn decrease_link_set_count(self: *List, set: LinkSet, amount: Idx) void {
+            pub inline fn decrease_link_set_count(self: *List, state: State, amount: Idx) void {
                 self.sets[@intFromEnum(set)].count -= amount;
             }
 
-            pub inline fn set_state(ptr: *Elem, set: LinkSet) void {
+            pub inline fn set_state(ptr: *Elem, set: ?State) void {
                 if (STATE) {
                     @field(ptr, STATE_FIELD) &= STATE_CLEAR_MASK;
-                    @field(ptr, STATE_FIELD) |= STATE_FLAGS[@intFromEnum(set)];
+                    const new_state: T_STATE_FIELD = if (set) |s| @as(T_STATE_FIELD, @intCast(@intFromEnum(s))) else NULL_STATE_FLAG;
+                    const new_state_shifted = new_state << STATE_OFFSET;
+                    @field(ptr, STATE_FIELD) |= new_state_shifted;
                 }
             }
 
-            pub fn set_state_on_items_first_last(self: *List, first_item: Item, last_item: Item, comptime forward: bool, set: LinkSet) void {
+            pub fn set_state_on_items_first_last(self: *List, first_item: Item, last_item: Item,  state: ?State) void {
                 if (!STATE) return;
-                var idx = if (forward) first_item.idx else last_item.idx;
-                var ptr = if (forward) first_item.ptr else last_item.ptr;
-                const final_idx = if (forward) last_item.idx else first_item.idx;
+                var idx = if (FORWARD) first_item.idx else last_item.idx;
+                var ptr = if (FORWARD) first_item.ptr else last_item.ptr;
+                const final_idx = if (FORWARD) last_item.idx else first_item.idx;
                 while (true) {
-                    set_state(ptr, set);
+                    set_state(ptr, state);
                     if (idx == final_idx) break;
-                    idx = if (forward) get_next_idx(self, set, ptr) else get_prev_idx(self, set, ptr);
+                    idx = if (FORWARD) get_next_idx_fwd(self, ptr) else get_prev_idx_bkd(self, ptr);
                     ptr = get_ptr(self, idx);
                 }
             }
 
-            pub fn link_sparse_item_slice(self: *List, set: LinkSet, items: []const Item) void {
-                var i = 1;
-                while (i < items.len) : (i += 1) {
-                    const left = get_conn_left_from_item(self, set, items[i]);
-                    const right = get_conn_right_from_item(self, set, items[i - 1]);
-                    connect(left, right);
-                }
-            }
-
-            pub fn link_sparse_set_item_slice(self: *List, set: LinkSet, items: []const SetItem) void {
-                var i = 1;
-                while (i < items.len) : (i += 1) {
-                    const left = get_conn_left_from_item(self, set, items[i].item);
-                    const right = get_conn_right_from_item(self, set, items[i - 1].item);
-                    connect(left, right);
-                }
-            }
-
-            pub fn link_new_indexes(self: *List, set: LinkSet, first_idx: Idx, last_idx: Idx) void {
+            pub fn link_new_indexes(self: *List, state: State, first_idx: Idx, last_idx: Idx) void {
                 var left_idx = first_idx;
                 var right_idx = first_idx + 1;
                 while (right_idx <= last_idx) {
@@ -484,114 +547,27 @@ pub fn define_manual_allocator_linked_list_type(comptime options: LinkedListOpti
                 }
             }
 
-            pub fn link_sparse_index_slice(self: *List, set: LinkSet, indexes: []const Idx) void {
-                var i = 1;
-                while (i < indexes.len) : (i += 1) {
-                    const left = get_conn_left_from_idx(self, set, indexes[i]);
-                    const right = get_conn_right_from_idx(set, indexes[i - 1]);
-                    connect(left, right);
+            pub fn disconnect_one(self: *List, state: State, idx: Idx) void {
+                const disconn = Internal.get_conn_left_right_before_first_and_after_last(self, idx, idx, state);
+                Internal.connect(disconn.left, disconn.right);
+                Internal.decrease_link_set_count(self, state, 1);
+                if (TAIL_NO_BACKWARD and disconn.right == NULL_IDX) {
+                    Internal.set_last_index(self, state, idx);
+                }
+                if (HEAD_NO_FORWARD and disconn.left == NULL_IDX) {
+                    Internal.set_first_index(self, state, idx);
                 }
             }
 
-            pub fn link_sparse_set_index_slice(self: *List, set: LinkSet, indexes: []const SetIdx) void {
-                var i = 1;
-                while (i < indexes.len) : (i += 1) {
-                    const left = get_conn_left_from_idx(self, set, indexes[i].idx);
-                    const right = get_conn_right_from_idx(self, set, indexes[i - 1].idx);
-                    connect(left, right);
+            pub fn disconnect_many_first_last(self: *List, state: State, first_idx: Idx, last_idx: Idx, count: Idx) void {
+                const disconn = Internal.get_conn_left_right_before_first_and_after_last(self, first_idx, last_idx, set);
+                Internal.connect(disconn.left, disconn.right);
+                Internal.decrease_link_set_count(self, disconn.set, count);
+                if (TAIL_NO_BACKWARD and disconn.right == NULL_IDX) {
+                    Internal.set_last_index(self, set, first_idx);
                 }
-            }
-
-            pub fn link_sparse_ptr_slice(self: *List, ptrs: []const *Elem) void {
-                var i = 1;
-                while (i < ptrs.len) : (i += 1) {
-                    const left = get_conn_left_from_ptr(self, ptrs[i]);
-                    const right = get_conn_right_from_ptr(self, ptrs[i - 1]);
-                    connect(left, right);
-                }
-            }
-
-            pub fn link_sparse_set_ptr_slice(self: *List, ptrs: []const SetPtr) void {
-                var i = 1;
-                while (i < ptrs.len) : (i += 1) {
-                    const left = get_conn_left_from_ptr(self, ptrs[i].ptr);
-                    const right = get_conn_right_from_ptr(self, ptrs[i - 1].ptr);
-                    connect(left, right);
-                }
-            }
-
-            pub fn disconnect_sparse_ptr_slice(self: *List, set: LinkSet, ptrs: []const *Elem) void {
-                var i = 0;
-                while (i < ptrs.len) : (i += 1) {
-                    const ptr = ptrs[i];
-                    const left_idx = get_prev_idx_from_ptr(self, set, ptr);
-                    const right_idx = get_next_idx_from_ptr(self, set, ptr);
-                    const left = get_conn_left_from_idx(self, set, left_idx);
-                    const right = get_conn_right_from_idx(self, set, right_idx);
-                    connect(left, right);
-                }
-            }
-
-            pub fn disconnect_sparse_set_ptr_slice(self: *List, ptrs: []const SetPtr) void {
-                var i = 0;
-                while (i < ptrs.len) : (i += 1) {
-                    const ptr = ptrs[i].ptr;
-                    const set = ptrs[i].set;
-                    const left_idx = get_prev_idx_from_ptr(self, set, ptr);
-                    const right_idx = get_next_idx_from_ptr(self, set, ptr);
-                    const left = get_conn_left_from_idx(self, set, left_idx);
-                    const right = get_conn_right_from_idx(self, set, right_idx);
-                    connect(left, right);
-                }
-            }
-
-            pub fn disconnect_sparse_index_slice(self: *List, set: LinkSet, indexes: []const Idx) void {
-                var i = 0;
-                while (i < indexes.len) : (i += 1) {
-                    const idx = indexes[i];
-                    const left_idx = get_prev_idx_from_idx(self, set, idx);
-                    const right_idx = get_next_idx_from_idx(self, set, idx);
-                    const left = get_conn_left_from_idx(self, set, left_idx);
-                    const right = get_conn_right_from_idx(self, set, right_idx);
-                    connect(left, right);
-                }
-            }
-
-            pub fn disconnect_sparse_set_index_slice(self: *List, indexes: []const SetIdx) void {
-                var i = 0;
-                while (i < indexes.len) : (i += 1) {
-                    const idx = indexes[i].idx;
-                    const set = indexes[i].set;
-                    const left_idx = get_prev_idx_from_idx(self, set, idx);
-                    const right_idx = get_next_idx_from_idx(self, set, idx);
-                    const left = get_conn_left_from_idx(self, set, left_idx);
-                    const right = get_conn_right_from_idx(self, set, right_idx);
-                    connect(left, right);
-                }
-            }
-
-            pub fn disconnect_sparse_item_slice(self: *List, set: LinkSet, items: []const Item) void {
-                var i = 0;
-                while (i < items.len) : (i += 1) {
-                    const ptr = items[i].ptr;
-                    const left_idx = get_prev_idx_from_ptr(self, set, ptr);
-                    const right_idx = get_next_idx_from_ptr(self, set, ptr);
-                    const left = get_conn_left_from_idx(self, set, left_idx);
-                    const right = get_conn_right_from_idx(self, set, right_idx);
-                    connect(left, right);
-                }
-            }
-
-            pub fn disconnect_sparse_set_item_slice(self: *List, items: []const SetItem) void {
-                var i = 0;
-                while (i < items.len) : (i += 1) {
-                    const ptr = items[i].item.ptr;
-                    const set = items[i].set;
-                    const left_idx = get_prev_idx_from_ptr(self, set, ptr);
-                    const right_idx = get_next_idx_from_ptr(self, set, ptr);
-                    const left = get_conn_left_from_idx(self, set, left_idx);
-                    const right = get_conn_right_from_idx(self, set, right_idx);
-                    connect(left, right);
+                if (HEAD_NO_FORWARD and disconn.left == NULL_IDX) {
+                    Internal.set_first_index(self, set, last_idx);
                 }
             }
 
@@ -633,37 +609,16 @@ pub fn define_manual_allocator_linked_list_type(comptime options: LinkedListOpti
                 }
             }
 
-            pub inline fn get_conn_left(self: *const List, set: LinkSet, val: anytype) ConnLeft {
-                const T = @TypeOf(val);
-                assert_valid_items_indexes_or_pointers(self, val, @src());
-                if (T == Item) {
-                    if (BIDIRECTION) return IdxPtrIdx{
-                        .idx = val.idx,
-                        .idx_ptr = if (val.idx == NULL_IDX) get_head_index_ref(self, set) else &@field(val.ptr, NEXT_FIELD),
-                    };
-                    if (FORWARD) return &@field(val.ptr, NEXT_FIELD);
-                    if (BACKWARD) return val.idx;
-                }
-                if (T == *Elem or T == *const Elem) {
-                    if (BIDIRECTION) return IdxPtrIdx{
-                        .idx = get_idx(self, val),
-                        .idx_ptr = &@field(val, NEXT_FIELD),
-                    };
-                    if (FORWARD) return &@field(val, NEXT_FIELD);
-                    if (BACKWARD) return get_idx(self, val);
-                }
-                if (T == Idx) {
-                    if (BIDIRECTION) return IdxPtrIdx{
-                        .idx = val,
-                        .idx_ptr = if (val == NULL_IDX) get_head_index_ref(self, set) else &@field(get_ptr(self, val), NEXT_FIELD),
-                    };
-                    if (FORWARD) if (val == NULL_IDX) get_head_index_ref(self, set) else &@field(get_ptr(self, val), NEXT_FIELD);
-                    if (BACKWARD) return val;
-                }
-                assert_with_reason(false, @src(), "invalid type {s} is not an Item, *Elem, *const Elem, or Idx", .{@typeName(T)});
+            pub inline fn get_conn_left(self: *const List, state: State, idx: Idx) ConnLeft {
+                if (BIDIRECTION) return IdxPtrIdx{
+                    .idx = val,
+                    .idx_ptr = if (val == NULL_IDX) get_head_index_ref(self, set) else &@field(get_ptr(self, val), NEXT_FIELD),
+                };
+                if (FORWARD) if (val == NULL_IDX) get_head_index_ref(self, set) else &@field(get_ptr(self, val), NEXT_FIELD);
+                if (BACKWARD) return val;
             }
 
-            pub inline fn get_conn_left_from_set_head(self: *List, set: LinkSet) ConnLeft {
+            pub inline fn get_conn_left_from_set_head(self: *List, state: State) ConnLeft {
                 if (BIDIRECTION) return IdxPtrIdx{
                     .idx = NULL_IDX,
                     .idx_ptr = get_head_index_ref(self, set),
@@ -672,47 +627,17 @@ pub fn define_manual_allocator_linked_list_type(comptime options: LinkedListOpti
                 if (BACKWARD) return NULL_IDX;
             }
 
-            pub inline fn get_conn_right(self: *const List, set: LinkSet, val: anytype) ConnRight {
-                const T = @TypeOf(val);
-                assert_valid_items_indexes_or_pointers(self, val, @src());
-                if (T == Item) {
-                    if (BIDIRECTION) return IdxPtrIdx{
-                        .idx = val.idx,
-                        .idx_ptr = if (val.idx == NULL_IDX) get_tail_index_ref(self, set) else &@field(val.ptr, PREV_FIELD),
-                    };
-                    if (FORWARD) return val.idx;
-                    if (BACKWARD) return if (val.idx == NULL_IDX) get_tail_index_ref(self, set) else &@field(val.ptr, PREV_FIELD);
-                }
-                if (T == *Elem or T == *const Elem) {
-                    if (BIDIRECTION) return IdxPtrIdx{
-                        .idx = get_idx(self, val),
-                        .ptr = &@field(val, PREV_FIELD),
-                    };
-                    if (FORWARD) return &@field(val, PREV_FIELD);
-                    if (BACKWARD) return val;
-                }
-                if (T == Idx) {
-                    if (BIDIRECTION) return IdxPtrIdx{
-                        .idx = val,
-                        .ptr = if (val == NULL_IDX) get_tail_index_ref(self, set) else &@field(get_ptr(self, val), PREV_FIELD),
-                    };
-                    if (FORWARD) return val;
-                    if (BACKWARD) return if (val == NULL_IDX) get_tail_index_ref(self, set) else &@field(get_ptr(self, val), PREV_FIELD);
-                }
-                assert_with_reason(false, @src(), "invalid type {s} is not an Item, *Elem, *const Elem, or Idx", .{@typeName(T)});
+            pub inline fn get_conn_right(self: *const List, state: State, idx: Idx) ConnRight {
+                if (BIDIRECTION) return IdxPtrIdx{
+                    .idx = val,
+                    .ptr = if (val == NULL_IDX) get_tail_index_ref(self, set) else &@field(get_ptr(self, val), PREV_FIELD),
+                };
+                if (FORWARD) return val;
+                if (BACKWARD) return if (val == NULL_IDX) get_tail_index_ref(self, set) else &@field(get_ptr(self, val), PREV_FIELD);
+                
             }
 
-            // pub inline fn get_conn_right_from_index_after_ptr(self: *const List, set: LinkSet, ptr: *const Elem) ConnRight {
-            //     const next_idx = get_next_idx_from_ptr(self, set, ptr);
-            //     return get_conn_right_from_idx(self, set, next_idx);
-            // }
-
-            // pub inline fn get_conn_left_from_index_before_ptr(self: *const List, set: LinkSet, ptr: *const Elem) ConnLeft {
-            //     const prev_idx = get_prev_idx_from_ptr(self, set, ptr);
-            //     return get_conn_left_from_idx(self, set, prev_idx);
-            // }
-
-            pub inline fn get_conn_right_from_set_tail(self: *List, set: LinkSet) ConnRight {
+            pub inline fn get_conn_right_from_set_tail(self: *List, state: State) ConnRight {
                 if (BIDIRECTION) return IdxPtrIdx{
                     .idx = NULL_IDX,
                     .idx_ptr = get_tail_index_ref(self, set),
@@ -721,117 +646,44 @@ pub fn define_manual_allocator_linked_list_type(comptime options: LinkedListOpti
                 if (BACKWARD) return get_tail_index_ref(self, set);
             }
 
-            // pub inline fn get_conn_insert_from_item(self: *const List, set: LinkSet, item: Item) ConnInsert {
-            //     return ConnInsert{
-            //         .first = get_conn_right_from_item(self, set, item),
-            //         .last = get_conn_left_from_item(self, set, item),
-            //     };
-            // }
+            
 
-            // pub inline fn get_conn_insert_from_item_first_last(self: *const List, set: LinkSet, items: FirstLastItem) ConnInsert {
-            //     return ConnInsert{
-            //         .first = get_conn_right_from_item(self, set, items.first),
-            //         .last = get_conn_left_from_item(self, set, items.last),
-            //     };
-            // }
-
-            // pub inline fn get_conn_insert_from_item_chain_slice(self: *const List, set: LinkSet, item_chain: []const Item) ConnInsert {
-            //     return ConnInsert{
-            //         .first = get_conn_right_from_item(self, set, item_chain[0]),
-            //         .last = get_conn_left_from_item(self, set, item_chain[item_chain.len - 1]),
-            //     };
-            // }
-
-            // pub inline fn get_conn_insert_from_item_chain_first_last(self: *const List, set: LinkSet, first_item: Item, last_item: Item) ConnInsert {
-            //     return ConnInsert{
-            //         .first = get_conn_right_from_item(self, set, first_item),
-            //         .last = get_conn_left_from_item(self, set, last_item),
-            //     };
-            // }
-
-            // pub inline fn get_conn_insert_from_index_chain_slice(self: *const List, set: LinkSet, index_chain: []const Idx) ConnInsert {
-            //     return ConnInsert{
-            //         .first = get_conn_right_from_idx(self, set, index_chain[0]),
-            //         .last = get_conn_left_from_idx(self, set, index_chain[index_chain.len - 1]),
-            //     };
-            // }
-
-            // pub inline fn get_conn_insert_from_index_chain_first_last(self: *const List, set: LinkSet, first_idx: Idx, last_idx: Idx) ConnInsert {
-            //     return ConnInsert{
-            //         .first = get_conn_right_from_idx(self, set, first_idx),
-            //         .last = get_conn_left_from_idx(self, set, last_idx),
-            //     };
-            // }
-
-            // pub inline fn get_conn_insert_from_ptr_chain_slice(self: *const List, ptr_chain: []const *Elem) ConnInsert {
-            //     return ConnInsert{
-            //         .first = get_conn_right_from_ptr(self, ptr_chain[0]),
-            //         .last = get_conn_left_from_ptr(self, ptr_chain[ptr_chain.len - 1]),
-            //     };
-            // }
-
-            // pub inline fn get_conn_insert_from_ptr_chain_first_last(self: *const List, first_ptr: *Elem, last_ptr: *Elem) ConnInsert {
-            //     return ConnInsert{
-            //         .first = get_conn_right_from_ptr(self, first_ptr),
-            //         .last = get_conn_left_from_ptr(self, last_ptr),
-            //     };
-            // }
-
-            pub inline fn get_next_idx(self: *const List, set: LinkSet, val: anytype) Idx {
+            pub inline fn get_next_idx_fwd(self: *const List, val: idx) Idx {
                 const T = @TypeOf(val);
                 assert_valid_items_indexes_or_pointers(self, val, @src());
-                if (T == Item) {
-                    if (FORWARD) return @field(val.ptr, NEXT_FIELD);
-                    return traverse_to_find_index_preceding_this_one_in_direction(self, val.idx, set, .BACKWARD);
-                }
+                assert_with_reason(FORWARD, @src(), "this func must be called on a linked list that is linked in the FORWARD direction", .{});
                 if (T == *Elem or T == *const Elem) {
-                    if (FORWARD) return @field(val, NEXT_FIELD);
-                    const idx = get_idx(self, val);
-                    return traverse_to_find_index_preceding_this_one_in_direction(self, idx, set, .BACKWARD);
+                    return @field(val, NEXT_FIELD);
                 }
                 if (T == Idx) {
-                    if (FORWARD) {
-                        const ptr = get_ptr(self, val);
-                        return @field(ptr, NEXT_FIELD);
-                    }
-                    return traverse_to_find_index_preceding_this_one_in_direction(self, val, set, .BACKWARD);
+                    const ptr = self.get_ptr(val);
+                    return @field(ptr, NEXT_FIELD);
                 }
                 assert_with_reason(false, @src(), "invalid type {s} is not an Item, *Elem, *const Elem, or Idx", .{@typeName(T)});
             }
 
-            pub inline fn get_prev_idx(self: *const List, set: LinkSet, val: anytype) Idx {
+            pub inline fn get_prev_idx_bkd(self: *const List, val: idx) Idx {
                 const T = @TypeOf(val);
                 assert_valid_items_indexes_or_pointers(self, val, @src());
-                if (T == Item) {
-                    if (BACKWARD) return @field(val.ptr, PREV_FIELD);
-                    return traverse_to_find_index_preceding_this_one_in_direction(self, val.idx, set, .FORWARD);
-                }
+                assert_with_reason(BACKWARD, @src(), "this func must be called on a linked list that is linked in the FORWARD direction", .{});
                 if (T == *Elem or T == *const Elem) {
-                    if (BACKWARD) return @field(val, PREV_FIELD);
-                    const idx = get_idx(self, val);
-                    return traverse_to_find_index_preceding_this_one_in_direction(self, idx, set, .FORWARD);
+                    return @field(val, PREV_FIELD);
                 }
                 if (T == Idx) {
-                    if (BACKWARD) {
-                        const ptr = get_ptr(self, val);
-                        return @field(ptr, PREV_FIELD);
-                    }
-                    return traverse_to_find_index_preceding_this_one_in_direction(self, val, set, .FORWARD);
+                    const ptr = self.get_ptr(val);
+                    return @field(ptr, PREV_FIELD);
                 }
                 assert_with_reason(false, @src(), "invalid type {s} is not an Item, *Elem, *const Elem, or Idx", .{@typeName(T)});
             }
 
-            pub inline fn get_head_index_ref(self: *List, set: LinkSet) *Idx {
+            
+
+            pub inline fn get_head_index_ref(self: *List, state: State) *Idx {
                 return &self.sets[@intFromEnum(set)].first_idx;
             }
 
-            pub inline fn get_tail_index_ref(self: *List, set: LinkSet) *Idx {
+            pub inline fn get_tail_index_ref(self: *List, state: State) *Idx {
                 return &self.sets[@intFromEnum(set)].last_idx;
-            }
-
-            pub inline fn get_ptr(self: *const List, idx: Idx) *Elem {
-                assert_valid_items_indexes_or_pointers(self, idx, @src());
-                return &self.list.ptr[idx];
             }
 
             pub inline fn get_idx(self: *const List, ptr: *const Elem) Idx {
@@ -841,24 +693,6 @@ pub fn define_manual_allocator_linked_list_type(comptime options: LinkedListOpti
                 const ptr_addr = @intFromPtr(ptr);
                 const delta = ptr_addr - base_addr;
                 return @intCast(delta / @sizeOf(Elem));
-            }
-
-            pub inline fn get_element_ref_from_prev_idx_field_ref(prev_idx_field_ref: *Idx) *Elem {
-                assert_with_reason(BACKWARD, @src(), "elements do not cache the previous index, cannnot use a pointer to previous index field to find pointer to `*Elem`", .{});
-                return @as(*Elem, @fieldParentPtr(PREV_FIELD, prev_idx_field_ref));
-            }
-
-            pub inline fn get_element_index_from_prev_idx_field_ref(self: *const List, prev_idx_field_ref: *Idx) Idx {
-                return get_idx(self, get_element_ref_from_prev_idx_field_ref(prev_idx_field_ref));
-            }
-
-            pub inline fn get_element_ref_from_next_idx_field_ref(next_idx_field_ref: *Idx) *Elem {
-                assert_with_reason(FORWARD, @src(), "elements do not cache the next index, cannnot use a pointer to next index field to find pointer to `*Elem`", .{});
-                return @as(*Elem, @fieldParentPtr(NEXT_FIELD, next_idx_field_ref));
-            }
-
-            pub inline fn get_element_index_from_next_idx_field_ref(self: *const List, next_idx_field_ref: *Idx) Idx {
-                return get_idx(self, get_element_ref_from_next_idx_field_ref(next_idx_field_ref));
             }
 
             pub inline fn assert_valid_items_indexes_or_pointers(self: *const List, input: anytype, src_loc: ?SourceLocation) void {
@@ -879,11 +713,11 @@ pub fn define_manual_allocator_linked_list_type(comptime options: LinkedListOpti
                     []const Idx => for (input) |idx| {
                         assert_idx_less_than_len(idx, self.list.len, src_loc);
                     },
-                    SetIdx => assert_idx_less_than_len(input.idx, self.list.len, src_loc),
-                    []const SetIdx => for (input) |setidx| {
+                    StateIdx => assert_idx_less_than_len(input.idx, self.list.len, src_loc),
+                    []const StateIdx => for (input) |setidx| {
                         assert_idx_less_than_len(setidx.idx, self.list.len, src_loc);
                     },
-                    SetIdxList => for (input.idxs) |idx| {
+                    StateIdxList => for (input.idxs) |idx| {
                         assert_idx_less_than_len(idx, self.list.len, src_loc);
                     },
                     *Elem, *const Elem => assert_pointer_resides_in_slice(Elem, self.list.slice(), input, src_loc),
@@ -908,64 +742,53 @@ pub fn define_manual_allocator_linked_list_type(comptime options: LinkedListOpti
                 if (T == *const Elem) return @constCast(val);
                 if (T == *Elem) return val;
                 if (T == Idx) return Internal.get_ptr(self, val);
-                assert_with_reason(false, @src(), "invalid type {s} cannot become a *Elem", .{@typeName(T)});
+                assert_with_reason(false, @src(), "invalid type {s} cannot become an *Elem", .{@typeName(T)});
             }
 
-            pub fn get_connect_data_directly_before_this(self: *const List, this: anytype, set: LinkSet) ConnData {
-                Internal.assert_valid_items_indexes_or_pointers(self, this, @src());
-                var result: ConnData = undefined;
-                result.edges.right = Internal.get_conn_right(self, set, this);
-                const prev_idx = Internal.get_prev_idx(self, set, this);
-                result.edges.left = Internal.get_conn_left(self, set, prev_idx);
-                result.set = set;
-                result.count = 0;
+            pub fn get_conn_left_right_directly_before_this(self: *const List, this: Idx, state: State) ConnLeftRight {
+                var result: ConnLeftRight = undefined;
+                result.left = Internal.get_conn_right(self, state, this);
+                const prev_idx = self.get_next_idx(self, state, this);
+                result.right = Internal.get_conn_right(self, state, prev_idx);
                 return result;
             }
 
-            pub fn get_connect_data_directly_after_this(self: *const List, this: anytype, set: LinkSet) ConnData {
-                var result: ConnData = undefined;
-                result.edges.left = Internal.get_conn_left(self, set, this);
-                const next_idx = Internal.get_next_idx(self, set, this);
-                result.edges.right = Internal.get_conn_right(self, set, next_idx);
-                result.set = set;
-                result.count = 0;
+            pub fn get_conn_left_right_directly_after_this(self: *const List, this: Idx, state: State) ConnLeftRight {
+                var result: ConnLeftRight = undefined;
+                result.left = Internal.get_conn_left(self, state, this);
+                const next_idx = Internal.get_next_idx(self, state, this);
+                result.right = Internal.get_conn_right(self, state, next_idx);
                 return result;
             }
 
-            pub fn get_connect_data_before_first_and_after_last(self: *const List, first: anytype, last: anytype, count: Idx, set: LinkSet) ConnData {
-                var result: ConnData = undefined;
-                const left_idx = Internal.get_prev_idx(self, set, first);
-                result.edges.left = Internal.get_conn_left(self, set, left_idx);
-                const next_idx = Internal.get_next_idx(self, set, last);
-                result.edges.right = Internal.get_conn_right(self, set, next_idx);
-                result.set = set;
-                result.count = count;
+            pub fn get_conn_left_right_before_first_and_after_last(self: *const List, first: Idx, last: Idx, state: State) ConnLeftRight {
+                var result: ConnLeftRight = undefined;
+                const left_idx = self.get_prev_idx(state, first);
+                result.edges.left = Internal.get_conn_left(self, state, left_idx);
+                const next_idx = self.get_next_idx(state, last);
+                result.edges.right = Internal.get_conn_right(self, state, next_idx);
                 return result;
             }
 
-            pub fn get_connect_data_for_tail_of_set(self: *const List, set: LinkSet) ConnData {
-                var result: ConnData = undefined;
-                result.edges.right = Internal.get_conn_right_from_set_tail(self, set);
-                const last_index = self.get_last_index_in_set(set);
-                result.edges.left = Internal.get_conn_left(self, set, last_index);
-                result.set = set;
-                result.count = 0;
+            pub fn get_conn_left_right_for_tail_of_set(self: *const List, state: State) ConnLeftRight {
+                var result: ConnLeftRight = undefined;
+                result.edges.right = Internal.get_conn_right_from_set_tail(self, state);
+                const last_index = self.get_last_index_in_state(state);
+                result.edges.left = Internal.get_conn_left(self, state, last_index);
                 return result;
             }
 
-            pub fn get_connect_data_for_head_of_set(self: *const List, set: LinkSet) ConnData {
-                var result: ConnData = undefined;
-                result.edges.left = Internal.get_conn_left_from_set_head(self, set);
-                const first_index = self.get_first_index_in_set(set);
-                result.edges.right = Internal.get_conn_right_from_idx(self, set, first_index);
-                result.set = set;
-                result.count = 0;
+            pub fn get_conn_left_right_for_head_of_set(self: *const List, state: State) ConnLeftRight {
+                var result: ConnLeftRight = undefined;
+                result.edges.left = Internal.get_conn_left_from_set_head(self, state);
+                const first_index = self.get_first_index_in_state(state);
+                result.edges.right = Internal.get_conn_right(self, state, first_index);
                 return result;
             }
 
-            pub fn traverse_to_get_first_item_in_set(self: *const List, set: LinkSet) Item {
+            pub fn traverse_to_get_first_item_in_set(self: *const List, state: State) Item {
                 var ii = Item{};
-                var i = self.get_item_from_idx(self.get_last_index_in_set(set));
+                var i = self.get_item_from_idx(self.get_last_index_in_state(set));
                 var c: if (DEBUG) Idx else void = if (DEBUG) 0 else void{};
                 const limit: if (DEBUG) Idx else void = if (DEBUG) self.get_item_count(set) else void{};
                 while (i.idx != NULL_IDX) {
@@ -977,9 +800,9 @@ pub fn define_manual_allocator_linked_list_type(comptime options: LinkedListOpti
                 return ii;
             }
 
-            pub fn traverse_to_get_last_item_in_set(self: *const List, set: LinkSet) Item {
+            pub fn traverse_to_get_last_item_in_set(self: *const List, state: State) Item {
                 var ii = Item{};
-                var i = self.get_item_from_idx(self.get_first_index_in_set(set));
+                var i = self.get_item_from_idx(self.get_first_index_in_state(set));
                 var c: if (DEBUG) Idx else void = if (DEBUG) 0 else void{};
                 const limit: if (DEBUG) Idx else void = if (DEBUG) self.get_item_count(set) else void{};
                 while (i.idx != NULL_IDX) {
@@ -991,8 +814,8 @@ pub fn define_manual_allocator_linked_list_type(comptime options: LinkedListOpti
                 return ii;
             }
 
-            pub fn traverse_and_report_if_found_idx_in_set(self: *const List, set: LinkSet, idx: Idx) bool {
-                var i: Idx = if (FORWARD) self.get_first_index_in_set(set) else self.get_first_index_in_set(set);
+            pub fn traverse_and_report_if_found_idx_in_set(self: *const List, state: State, idx: Idx) bool {
+                var i: Idx = if (FORWARD) self.get_first_index_in_state(set) else self.get_first_index_in_state(set);
                 var c: Idx = 0;
                 const limit: Idx = self.get_item_count(set);
                 while (i != NULL_IDX and (if (DEBUG) c < limit else true)) {
@@ -1004,18 +827,18 @@ pub fn define_manual_allocator_linked_list_type(comptime options: LinkedListOpti
                 return false;
             }
 
-            pub fn traverse_to_find_index_preceding_this_one_in_direction(self: List, idx: Idx, set: LinkSet, dir: Direction) Idx {
+            pub fn traverse_to_find_index_preceding_this_one_in_direction(self: List, idx: Idx, state: State, dir: Direction) Idx {
                 var curr_idx: Idx = undefined;
                 var count: Idx = 0;
                 const limit = self.get_item_count(set);
                 switch (dir) {
                     .BACKWARD => {
                         assert_with_reason(BACKWARD, @src(), "linked list does not link elements in the backward direction", .{});
-                        curr_idx = self.get_last_index_in_set(set);
+                        curr_idx = self.get_last_index_in_state(set);
                     },
                     .FORWARD => {
                         assert_with_reason(FORWARD, @src(), "linked list does not link elements in the forward direction", .{});
-                        curr_idx = self.get_first_index_in_set(set);
+                        curr_idx = self.get_first_index_in_state(set);
                     },
                 }
                 while (curr_idx != NULL_IDX) {
@@ -1033,41 +856,12 @@ pub fn define_manual_allocator_linked_list_type(comptime options: LinkedListOpti
                 assert_with_reason(false, @src(), "no item found referencing index {d} in set `{s}` direction `{s}`: broken list or item in wrong set", .{ idx, @tagName(set), @tagName(dir) });
             }
 
-            pub inline fn get_state(ptr: *const Elem) T_STATE {
+            pub inline fn get_state(ptr: *const Elem) T_STATE_FIELD {
                 assert_with_reason(STATE, @src(), "cannot return item state when items do not cache their own state", .{});
                 return @field(ptr, STATE_FIELD) & STATE_MASK;
             }
 
-            // pub fn handle_final_connect_op(self: *List, comptime needs_disconnect: bool, disconnect: if (needs_disconnect) ConnData else void, comptime needs_mid_conn: bool, mid: if (needs_mid_conn) ConnLeftRight else void, comptime needs_insert: bool, insert: if (needs_insert) ConnInsertData) void {
-            //     if (needs_disconnect) {
-            //         Internal.connect(disconnect.edges.left, disconnect.edges.right);
-            //         Internal.decrease_link_set_count(self, disconnect.set, disconnect.count);
-            //         if (TAIL_NO_BACKWARD and disconnect.edges.right == NULL_IDX) {
-            //             const last_rem_idx = if (self.get_item_count(disconnect.set) > 0) Internal.get_element_index_from_next_idx_field_ref(self, disconnect.edges.left) else NULL_IDX;
-            //             Internal.set_last_index(self, disconnect.set, last_rem_idx);
-            //         }
-            //         if (HEAD_NO_FORWARD and disconnect.edges.left == NULL_IDX) {
-            //             const first_rem_idx = if (self.get_item_count(disconnect.set) > 0) Internal.get_element_index_from_prev_idx_field_ref(self, disconnect.edges.right) else NULL_IDX;
-            //             Internal.set_first_index(self, disconnect.set, first_rem_idx);
-            //         }
-            //     }
-            //     if (needs_mid_conn) {
-            //         Internal.connect(mid.left, mid.right);
-            //     }
-            //     if (needs_insert) {
-            //         const insert_inner = Internal.get_conn_insert_from_item_first_last(self, insert.set, insert.new);
-            //         Internal.connect_with_insert(insert.edges.left, insert_inner.first, insert_inner.last, insert.edges.right);
-            //         Internal.increase_link_set_count(self, insert.set, insert.count);
-            //         if (TAIL_NO_BACKWARD and insert.edges.right == NULL_IDX) {
-            //             Internal.set_last_index(self, insert.set, insert.new.last.idx);
-            //         }
-            //         if (HEAD_NO_FORWARD and insert.edges.left == NULL_IDX) {
-            //             Internal.set_first_index(self, insert.set, insert.new.first.idx);
-            //         }
-            //     }
-            // }
-
-            pub fn assert_valid_set_idx(self: *const List, set_idx_: SetIdx, src_loc: ?SourceLocation) void {
+            pub fn assert_valid_state_idx(self: *const List, set_idx_: StateIdx, src_loc: ?SourceLocation) void {
                 if (@inComptime() or build.mode == .Debug or build.mode == .ReleaseSafe) {
                     assert_idx_less_than_len(set_idx_.idx, self.list.len, src_loc);
                     const ptr = Internal.get_ptr(self, set_idx_.idx);
@@ -1078,70 +872,53 @@ pub fn define_manual_allocator_linked_list_type(comptime options: LinkedListOpti
                     }
                 }
             }
-            pub fn assert_valid_set_item(self: *const List, set_item: SetItem, src_loc: ?SourceLocation) void {
-                if (@inComptime() or build.mode == .Debug or build.mode == .ReleaseSafe) {
-                    assert_idx_and_pointer_reside_in_slice_and_match(Elem, self.list.slice(), set_item.item.idx, set_item.item.ptr, src_loc);
-                    if (STATE) assert_with_reason(return @field(set_item.item.ptr, STATE_FIELD) & STATE_MASK == STATE_FLAGS[@intFromEnum(set_item.set)], src_loc, "set {s} on SetIdx does not match state on elem at idx {d}", .{ @tagName(set_item.set), set_item.item.idx });
-                    if (STRONG_ASSERT) {
-                        const found_in_list = Internal.traverse_and_report_if_found_idx_in_set(self, set_item.set, set_item.item.idx);
-                        assert_with_reason(found_in_list, src_loc, "while verifying idx {d} is in set {s}, the idx was not found when traversing the set", .{ set_item.item.idx, @tagName(set_item.set) });
-                    }
-                }
-            }
-            pub fn assert_valid_set_ptr(self: *const List, set_ptr: SetPtr, src_loc: ?SourceLocation) void {
-                if (@inComptime() or build.mode == .Debug or build.mode == .ReleaseSafe) {
-                    assert_pointer_resides_in_slice(Elem, self.list.slice(), set_ptr.ptr, src_loc);
-                    const idx = Internal.get_idx(self, set_ptr.ptr);
-                    if (STATE) assert_with_reason(return @field(set_ptr.ptr, STATE_FIELD) & STATE_MASK == STATE_FLAGS[@intFromEnum(set_ptr.set)], src_loc, "set {s} on SetIdx does not match state on elem at idx {d}", .{ @tagName(set_ptr.set), idx });
-                    if (STRONG_ASSERT) {
-                        const found_in_list = Internal.traverse_and_report_if_found_idx_in_set(self, set_ptr.set, idx);
-                        assert_with_reason(found_in_list, src_loc, "while verifying idx {d} is in set {s}, the idx was not found when traversing the set", .{ idx, @tagName(set_ptr.set) });
-                    }
-                }
-            }
-            pub fn assert_valid_set_idx_list(self: *const List, set_idx_list: SetIdxList, src_loc: ?SourceLocation) void {
+            pub fn assert_valid_set_idx_list(self: *const List, set_idx_list: StateIdxList, src_loc: ?SourceLocation) void {
                 if (@inComptime() or build.mode == .Debug or build.mode == .ReleaseSafe) {
                     for (set_idx_list.idxs) |idx| {
-                        Internal.assert_valid_set_idx(self, SetIdx{ .set = set_idx_list.set, .idx = idx }, src_loc);
+                        Internal.assert_valid_state_idx(self, StateIdx{ .set = set_idx_list.set, .idx = idx }, src_loc);
                     }
                 }
             }
-            pub fn assert_valid_set_item_list(self: *const List, set_item_list: SetItemList, src_loc: ?SourceLocation) void {
-                if (@inComptime() or build.mode == .Debug or build.mode == .ReleaseSafe) {
-                    for (set_item_list.items) |item| {
-                        Internal.assert_valid_set_item(self, SetItem{ .set = set_item_list.set, .item = item }, src_loc);
-                    }
-                }
-            }
-            pub fn assert_valid_set_ptr_list(self: *const List, set_ptr_list: SetPtrList, src_loc: ?SourceLocation) void {
-                if (@inComptime() or build.mode == .Debug or build.mode == .ReleaseSafe) {
-                    for (set_ptr_list.ptrs) |ptr| {
-                        Internal.assert_valid_set_ptr(self, SetPtr{ .set = set_ptr_list.set, .ptr = ptr }, src_loc);
-                    }
-                }
-            }
-            pub fn assert_valid_list_of_set_idxs(self: *const List, set_idx_list: []const SetIdx, src_loc: ?SourceLocation) void {
+            pub fn assert_valid_list_of_set_idxs(self: *const List, set_idx_list: []const StateIdx, src_loc: ?SourceLocation) void {
                 if (@inComptime() or build.mode == .Debug or build.mode == .ReleaseSafe) {
                     for (set_idx_list) |set_idx_| {
-                        Internal.assert_valid_set_idx(self, set_idx_, src_loc);
+                        Internal.assert_valid_state_idx(self, set_idx_, src_loc);
                     }
                 }
             }
-            pub fn assert_valid_list_of_set_items(self: *const List, set_item_list: []const SetItem, src_loc: ?SourceLocation) void {
-                if (@inComptime() or build.mode == .Debug or build.mode == .ReleaseSafe) {
-                    for (set_item_list) |set_item| {
-                        Internal.assert_valid_set_item(self, set_item, src_loc);
+
+            pub fn assert_valid_slice(self: *const List, slice: LLSlice, src_loc: ?SourceLocation) void {
+                assert_idx_less_than_len(slice.first, self.list.len, src_loc);
+                assert_idx_less_than_len(slice.last, self.list.len, src_loc);
+                if (!STRONG_ASSERT and STATE) {
+                    assert_with_reason(self.idx_is_in_state(slice.first, slice.state), src_loc, "first index {d} is not in state `{s}`", .{slice.first, @tagName(slice.state)});
+                    assert_with_reason(self.idx_is_in_state(slice.last, slice.state), src_loc, "last index {d} is not in state `{s}`", .{slice.last, @tagName(slice.state)});
+                }
+                if (STRONG_ASSERT) {
+                    var c: Idx = 1;
+                    var idx = if (FORWARD) slice.first else slice.last;
+                    assert_idx_less_than_len(idx, self.list.len, @src());
+                    const state = slice.state;
+                    const last_idx = if (FORWARD) slice.last else slice.first;
+                    Internal.assert_valid_state_idx(self, StateIdx{.state = state, .idx = idx}, src_loc);
+                    while (idx != last_idx and idx != NULL_IDX) {
+                        idx = if (FORWARD) get_next_idx_fwd(self, idx) else get_prev_idx_bkd(self, idx);
+                        c += 1;
+                        Internal.assert_valid_state_idx(self, StateIdx{.state = state, .idx = idx}, src_loc);
                     }
+                    assert_with_reason(idx == last_idx, src_loc, "idx `first` ({d}) is not linked with idx `last` ({d})", .{input.first, input.last});
+                    assert_with_reason(c == slice.count, src_loc, "the slice count {d} did not match the number of traversed items between `first` and `last` ({d})", .{input.count, c});
                 }
             }
-            pub fn assert_valid_list_of_set_ptrs(self: *const List, set_ptr_list: []const SetPtr, src_loc: ?SourceLocation) void {
-                if (@inComptime() or build.mode == .Debug or build.mode == .ReleaseSafe) {
-                    for (set_ptr_list) |set_ptr| {
-                        Internal.assert_valid_set_ptr(self, set_ptr, src_loc);
-                    }
-                }
+
+            pub inline fn get_item_from_idx(self: *const List, idx: Idx) Item {
+                return Item{
+                    .idx = idx,
+                    .ptr = Internal.get_ptr(self, idx),
+                };
             }
         };
+
 
         pub inline fn new_iterator(self: *List) Iterator {
             return Iterator{
@@ -1170,368 +947,397 @@ pub fn define_manual_allocator_linked_list_type(comptime options: LinkedListOpti
             return new_list;
         }
 
-        pub inline fn get_item_count(self: *List, set: LinkSet) Idx {
-            return self.sets[@intFromEnum(set)].count;
+        pub inline fn get_item_count(self: *List, state: State) Idx {
+            return self.sets[@intFromEnum(state)].count;
         }
 
-        pub inline fn get_item_from_ptr(self: *const List, ptr: *Elem) Item {
-            return Item{
-                .idx = Internal.get_idx(self, ptr),
-                .ptr = ptr,
-            };
+        pub inline fn get_ptr(self: *const List, idx: Idx) *Elem {
+            assert_idx_less_than_len(idx, self.list.len, @src());
+            return &self.list.ptr[idx];
         }
 
-        pub inline fn get_item_from_idx(self: *const List, idx: Idx) Item {
-            return Item{
-                .idx = idx,
-                .ptr = Internal.get_ptr(self, idx),
-            };
+        pub inline fn get_prev_idx(self: *const List, state: State, this_idx: Idx) Idx {
+            if (BACKWARD) {
+                const ptr = get_ptr(self, this_idx);
+                return @field(ptr, PREV_FIELD);
+            }
+            return Internal.traverse_to_find_index_preceding_this_one_in_direction(self, this_idx, state, .FORWARD);
+            
         }
 
-        pub fn get_item_with_index_n_in_set_from_start(self: *const List, set: LinkSet, n: Idx) Item {
-            assert_with_reason(FORWARD, @src(), "cannot find index {n} in set {s} in the forward direction because items are not linked in the forward direction", .{ n, @tagName(set) });
+        pub inline fn get_next_idx(self: *const List, state: State, this_idx: Idx) Idx {
+            if (FORWARD) {
+                const ptr = get_ptr(self, this_idx);
+                return @field(ptr, NEXT_FIELD);
+            }
+            return Internal.traverse_to_find_index_preceding_this_one_in_direction(self, this_idx, state, .BACKWARD);
+        }
+
+        pub fn get_nth_idx_from_start_of_state(self: *const List, state: State, n: Idx) Idx {
             const set_count = self.get_item_count(set);
             assert_with_reason(n < set_count, @src(), "index {d} is out of bounds for set {s} (len = {d})", .{ @tagName(set), n, set_count });
-            var c = 0;
-            var idx = self.get_first_index_in_set(set);
-            while (c != n) : (c += 1) {
-                idx = Internal.get_next_idx_from_idx(self, set, idx);
+            if (FORWARD) {
+                var c = 0;
+                var idx = self.get_first_index_in_state(set);
+                while (c != n) {
+                    c += 1;
+                    idx = Internal.get_next_idx(self, set, idx);
+                }
+                return idx;
+            } else {
+                var c: Idx = 0;
+                var idx = self.get_last_index_in_state(set);
+                const nn = set_count - n;
+                while (c < nn) {
+                    c += 1;
+                    idx = Internal.get_prev_idx(self, set, idx);
+                }
+                return idx;
             }
-            return idx;
         }
 
-        pub fn get_item_with_index_n_in_set_from_end(self: *const List, set: LinkSet, n: Idx) Item {
-            assert_with_reason(BACKWARD, @src(), "cannot find index {n} in set {s} in the backward direction because items are not linked in the backward direction", .{ n, @tagName(set) });
+        pub fn get_nth_idx_from_end_of_state(self: *const List, state: State, n: Idx) Idx {
             const set_count = self.get_item_count(set);
             assert_with_reason(n < set_count, @src(), "index {d} is out of bounds for set {s} (len = {d})", .{ @tagName(set), n, set_count });
-            var c = 0;
-            var idx = self.get_last_index_in_set(set);
-            while (c != n) : (c += 1) {
-                idx = Internal.get_prev_idx_from_idx(self, set, idx);
+            if (BACKWARD) {
+                var c = 0;
+                var idx = self.get_last_index_in_state(set);
+                while (c != n) {
+                    c += 1;
+                    idx = Internal.get_prev_idx(self, set, idx);
+                }
+                return idx;
+            } else {
+                var c: Idx = 0;
+                var idx = self.get_first_index_in_state(set);
+                const nn = set_count - n;
+                while (c < nn) {
+                    c += 1;
+                    idx = Internal.get_next_idx(self, set, idx);
+                }
+                return idx;
             }
-            return idx;
         }
 
-        pub inline fn idx_is_in_set(self: *const List, idx: Idx, set: LinkSet) bool {
+        pub inline fn idx_is_in_state(self: *const List, idx: Idx, state: State) bool {
             if (STATE) {
                 const ptr = Internal.get_ptr(self, idx);
-                return @field(ptr, STATE_FIELD) & STATE_MASK == STATE_FLAGS[@intFromEnum(set)];
+                return @field(ptr, STATE_FIELD) & STATE_MASK == STATE_FLAGS[@intFromEnum(state)];
             }
-            return Internal.traverse_and_report_if_found_idx_in_set(self, set, idx);
+            return Internal.traverse_and_report_if_found_idx_in_set(self, state, idx);
         }
 
-        pub inline fn ptr_is_in_set(self: *const List, ptr: *const Elem, set: LinkSet) bool {
-            if (STATE) return @field(ptr, STATE_FIELD) & STATE_MASK == STATE_FLAGS[@intFromEnum(set)];
-            const idx = Internal.get_idx(self, ptr);
-            return Internal.traverse_and_report_if_found_idx_in_set(self, set, idx);
+        pub inline fn find_state_idx_is_in(self: *const List, idx: Idx) State {
+            if (STATE) {
+                const ptr = self.get_ptr(idx);
+                const cached_val: StateTag = @as(StateTag, @intCast((@field(ptr, STATE_FIELD) & STATE_MASK) >> STATE_OFFSET));
+                if (STRONG_ASSERT) {
+                    var e: StateTag = 0;
+                    while (e <= MAX_STATE_TAG) : (e += 1) {
+                        const s: State = @enumFromInt(e);
+                        var state_idx = if (FORWARD) self.get_first_index_in_state(s) else self.get_last_index_in_state(s);
+                        while (state_idx != NULL_IDX) {
+                            if (state_idx == idx) assert_with_reason(e == cached_val, @src(), "idx {d} was found in state list `{s}`, but the value cached on the item indicates state `{s}`", .{idx, @tagName(s), if (cached_val > MAX_STATE_TAG) "(INVALID STATE)" else @as(State, @enumFromInt(cached_val))});
+                            state_idx = if (FORWARD) Internal.get_next_idx(self, s, state_idx) else Internal.get_prev_idx(self, s, state_idx);
+                        }
+                    }
+                }
+                assert_with_reason(cached_val <= MAX_STATE_TAG, @src(), "idx {d} has an invalid tag for State enum {d}", .{idx, cached_val});
+                return @as(State, @enumFromInt(cached_val));
+            }
+            var e: StateTag = 0;
+            while (e <= MAX_STATE_TAG) : (e += 1) {
+                const s: State = @enumFromInt(e);
+                var state_idx = if (FORWARD) self.get_first_index_in_state(s) else self.get_last_index_in_state(s);
+                while (state_idx != NULL_IDX) {
+                    if (state_idx == idx) return s;
+                    state_idx = if (FORWARD) Internal.get_next_idx(self, s, state_idx) else Internal.get_prev_idx(self, s, state_idx);
+                }
+            }
+            assert_with_reason(false, @src(), "idx {d} was not found in any state list", .{idx});
         }
 
-        pub inline fn item_is_in_set(self: *const List, item: Item, set: LinkSet) bool {
-            if (STATE) return @field(item.ptr, STATE_FIELD) & STATE_MASK == STATE_FLAGS[@intFromEnum(set)];
-            return Internal.traverse_and_report_if_found_idx_in_set(self, set, item.idx);
-        }
-
-        pub inline fn get_first_index_in_set(self: *const List, set: LinkSet) Idx {
+        pub inline fn get_first_index_in_state(self: *const List, state: State) Idx {
             if (HEAD) return self.sets[@intFromEnum(set)].first_idx;
             return Internal.traverse_to_get_first_item_in_set(self, set).idx;
         }
 
-        pub inline fn get_first_item_in_set(self: *const List, set: LinkSet) Item {
-            if (HEAD) return self.get_item_from_idx(self.sets[@intFromEnum(set)].first_idx);
-            return Internal.traverse_to_get_first_item_in_set(self, set);
-        }
-
-        pub inline fn get_last_index_in_set(self: *const List, set: LinkSet) Idx {
+        pub inline fn get_last_index_in_state(self: *const List, state: State) Idx {
             if (TAIL) return self.sets[@intFromEnum(set)].last_idx;
             return Internal.traverse_to_get_last_item_in_set(self, set).idx;
         }
 
-        pub inline fn get_last_item_in_set(self: *const List, set: LinkSet) Item {
-            if (TAIL) return self.get_item_from_idx(self.sets[@intFromEnum(set)].last_idx);
-            return Internal.traverse_to_get_last_item_in_set(self, set);
-        }
-
-        fn get_items_and_insert_at_internal(self: *List, comptime get_mode: GetMode, get_val: GetVal(get_mode), comptime insert_mode: InsertMode, insert_val: InsertVal(insert_mode), alloc: Allocator, comptime ASSUME_CAP: bool) if (!ASSUME_CAP and RETURN_ERRORS) Error!FirstLastItem else FirstLastItem {
-            var needs_reconnect = true;
-            var insert_data: ConnData = undefined;
+        fn get_items_and_insert_at_internal(self: *List, comptime get_mode: GetMode, get_val: GetVal(get_mode), comptime insert_mode: InsertMode, insert_val: InsertVal(insert_mode), alloc: Allocator, comptime ASSUME_CAP: bool) if (!ASSUME_CAP and RETURN_ERRORS) Error!LLSlice else LLSlice {
+            var insert_edges: ConnLeftRight = undefined;
+            var insert_state: State = undefined;
             switch (insert_mode) {
                 .AFTER_INDEX => {
-                    const set_idx: SetIdx = insert_val;
-                    Internal.assert_valid_set_idx(self, set_idx, @src());
-                    insert_data = Internal.get_connect_data_directly_after_this(self, set_idx.idx, set_idx.set);
-                },
-                .AFTER_ITEM => {
-                    const set_item: SetItem = insert_val;
-                    Internal.assert_valid_set_item(self, set_item, @src());
-                    insert_data = Internal.get_connect_data_directly_after_this(self, set_item.item, set_item.set);
-                },
-                .AFTER_PTR => {
-                    const set_ptr: SetPtr = insert_val;
-                    Internal.assert_valid_set_item(self, set_ptr, @src());
-                    insert_data = Internal.get_connect_data_directly_after_this(self, set_ptr.ptr, set_ptr.set);
+                    const state_idx: StateIdx = insert_val;
+                    Internal.assert_valid_state_idx(self, state_idx, @src());
+                    insert_edges = Internal.get_conn_left_right_directly_after_this(self, state_idx.idx, state_idx.state);
                 },
                 .BEFORE_INDEX => {
-                    const set_idx: SetIdx = insert_val;
-                    Internal.assert_valid_set_idx(self, set_idx, @src());
-                    insert_data = Internal.get_connect_data_directly_before_this(self, set_idx.idx, set_idx.set);
-                },
-                .BEFORE_ITEM => {
-                    const set_item: SetItem = insert_val;
-                    Internal.assert_valid_set_item(self, set_item, @src());
-                    insert_data = Internal.get_connect_data_directly_before_this(self, set_item.item, set_item.set);
-                },
-                .BEFORE_PTR => {
-                    const set_ptr: SetPtr = insert_val;
-                    Internal.assert_valid_set_item(self, set_ptr, @src());
-                    insert_data = Internal.get_connect_data_directly_before_this(self, set_ptr.ptr, set_ptr.set);
+                    const state_idx: StateIdx = insert_val;
+                    Internal.assert_valid_state_idx(self, state_idx, @src());
+                    insert_edges = Internal.get_conn_left_right_directly_before_this(self, state_idx.idx, state_idx.state);
                 },
                 .AT_BEGINNING_OF_SET => {
-                    const set: LinkSet = insert_val;
-                    insert_data = Internal.get_connect_data_for_head_of_set(self, set);
+                    const state: State = insert_val;
+                    insert_edges = Internal.get_conn_left_right_for_head_of_set(self, state);
                 },
                 .AT_END_OF_SET => {
-                    const set: LinkSet = insert_val;
-                    insert_data = Internal.get_connect_data_for_tail_of_set(self, set);
+                    const state: State = insert_val;
+                    insert_edges = Internal.get_conn_left_right_for_tail_of_set(self, state);
                 },
-                .LEAK_TO_NOWHERE => {
-                    needs_reconnect = false;
-                    insert_data.set = @enumFromInt(0);
+                .AFTER_NTH_ITEM_FROM_END_OF_SET => {
+                    const state_idx: StateIdx = insert_val;
+                    Internal.assert_valid_state_idx(self, state_idx, @src());
+                    const nth_idx = self.get_nth_idx_from_end_of_state(state_idx.state, state_idx.idx);
+                    insert_edges = Internal.get_conn_left_right_directly_after_this(self, nth_idx, state_idx.state);
+                },
+                .BEFORE_NTH_ITEM_FROM_END_OF_SET => {
+                    const state_idx: StateIdx = insert_val;
+                    Internal.assert_valid_state_idx(self, state_idx, @src());
+                    const nth_idx = self.get_nth_idx_from_end_of_state(state_idx.state, state_idx.idx);
+                    insert_edges = Internal.get_connect_data_directly_before_this(self, nth_idx, state_idx.state);
+                },
+                .AFTER_NTH_ITEM_FROM_START_OF_SET => {
+                    const state_idx: StateIdx = insert_val;
+                    Internal.assert_valid_state_idx(self, state_idx, @src());
+                    const nth_idx = self.get_nth_idx_from_start_of_state(state_idx.state, state_idx.idx);
+                    insert_edges = Internal.get_conn_left_right_directly_after_this(self, nth_idx, state_idx.state);
+                },
+                .BEFORE_NTH_ITEM_FROM_START_OF_SET => {
+                    const state_idx: StateIdx = insert_val;
+                    Internal.assert_valid_state_idx(self, state_idx, @src());
+                    const nth_idx = self.get_nth_idx_from_start_of_state(state_idx.state, state_idx.idx);
+                    insert_edges = Internal.get_conn_left_right_directly_before_this(self, nth_idx, state_idx.state);
                 },
             }
-            var return_items: FirstLastItem = undefined;
-            var needs_disconnect = true;
-            var disconnect_data: ConnData = undefined;
+            var return_items: LLSlice = undefined;
             switch (get_mode) {
                 .ONE_NEW => {
-                    return_items = FirstLastItem.single(Item{
-                        .idx = self.list.len,
-                        .ptr = if (ASSUME_CAP) self.list.append_slot_assume_capacity() else (if (RETURN_ERRORS) try self.list.append_slot(alloc) else self.list.append_slot(alloc)),
-                    });
-                    insert_data.count = 1;
-                    needs_disconnect = false;
+                    const new_idx = if (ASSUME_CAP) self.list.append_slot_assume_capacity() else (if (RETURN_ERRORS) try self.list.append_slot(alloc) else self.list.append_slot(alloc));
+                    return_items.first = new_idx;
+                    return_items.last = new_idx;
+                    return_items.count = 1;
                 },
                 .FIRST_FROM_SET, .FIRST_FROM_SET_ELSE_NEW => {
-                    const set: LinkSet = get_val;
-                    const set_count: debug_switch(Idx, void) = debug_switch(self.get_item_count(set), void{});
-                    const set_first_idx = self.get_first_index_in_set(set);
-                    if (get_mode == .FIRST_FROM_SET_ELSE_NEW and (debug_switch(set_count == 0, false) or set_first_idx == NULL_IDX)) {
-                        return_items = FirstLastItem.single(Item{
-                            .idx = self.list.len,
-                            .ptr = if (ASSUME_CAP) self.list.append_slot_assume_capacity() else (if (RETURN_ERRORS) try self.list.append_slot(alloc) else self.list.append_slot(alloc)),
-                        });
-                        insert_data.count = 1;
-                        needs_disconnect = false;
+                    const state: State = get_val;
+                    const state_count: debug_switch(Idx, void) = debug_switch(self.get_item_count(state), void{});
+                    const first_idx = self.get_first_index_in_state(state);
+                    if (get_mode == .FIRST_FROM_SET_ELSE_NEW and (debug_switch(state_count == 0, false) or first_idx == NULL_IDX)) {
+                        const new_idx = if (ASSUME_CAP) self.list.append_slot_assume_capacity() else (if (RETURN_ERRORS) try self.list.append_slot(alloc) else self.list.append_slot(alloc));
+                        return_items.first = new_idx;
+                        return_items.last = new_idx;
+                        return_items.count = 1;
                     } else {
-                        assert_with_reason(debug_switch(set_count > 0, true) and set_first_idx < self.list.len, @src(), "tried to 'get' linked list item from head/beginning of set `{s}`, but that set reports an item count of {d} and the first idx is {d} (list.len = {d})", .{ @tagName(set), debug_switch(set_count, 0), set_first_idx, self.list.len });
-                        return_items = FirstLastItem.single(self.get_item_from_idx(set_first_idx));
-                        disconnect_data = Internal.get_connect_data_before_first_and_after_last(self, return_items.first, return_items.last, 1, set);
-                        insert_data.count = 1;
+                        assert_with_reason(debug_switch(state_count > 0, true) and first_idx < self.list.len, @src(), "tried to 'get' linked list item from head/beginning of set `{s}`, but that set reports an item count of {d} and the first idx is {d} (list.len = {d})", .{ @tagName(state), debug_switch(state_count, 0), first_idx, self.list.len });
+                        return_items.first = first_idx;
+                        return_items.last = first_idx;
+                        return_items.count = 1;
+                        Internal.disconnect_one(self, state, first_idx);
                     }
                 },
                 .LAST_FROM_SET, .LAST_FROM_SET_ELSE_NEW => {
-                    const set: LinkSet = get_val;
-                    const set_count: debug_switch(Idx, void) = debug_switch(self.get_item_count(set), void{});
-                    const set_last_idx = self.get_last_index_in_set(set);
-                    if (get_mode == .LAST_FROM_SET_ELSE_NEW and (debug_switch(set_count == 0, false) or set_last_idx == NULL_IDX)) {
-                        return_items = FirstLastItem.single(Item{
-                            .idx = self.list.len,
-                            .ptr = if (ASSUME_CAP) self.list.append_slot_assume_capacity() else (if (RETURN_ERRORS) try self.list.append_slot(alloc) else self.list.append_slot(alloc)),
-                        });
-                        insert_data.count = 1;
-                        needs_disconnect = false;
+                    const state: State = get_val;
+                    const state_count: debug_switch(Idx, void) = debug_switch(self.get_item_count(state), void{});
+                    const last_idx = self.get_last_index_in_state(state);
+                    if (get_mode == .LAST_FROM_SET_ELSE_NEW and (debug_switch(state_count == 0, false) or last_idx == NULL_IDX)) {
+                        const new_idx = if (ASSUME_CAP) self.list.append_slot_assume_capacity() else (if (RETURN_ERRORS) try self.list.append_slot(alloc) else self.list.append_slot(alloc));
+                        return_items.first = new_idx;
+                        return_items.last = new_idx;
+                        return_items.count = 1;
                     } else {
-                        assert_with_reason(debug_switch(set_count > 0, true) and set_last_idx < self.list.len, @src(), "tried to 'get' linked list item from head/beginning of set `{s}`, but that set reports an item count of {d} and the first idx is {d} (list.len = {d})", .{ @tagName(set), debug_switch(set_count, 0), set_last_idx, self.list.len });
-                        return_items = FirstLastItem.single(self.get_item_from_idx(set_last_idx));
-                        disconnect_data = Internal.get_connect_data_before_first_and_after_last(self, return_items.first, return_items.last, 1, set);
-                        insert_data.count = 1;
+                        assert_with_reason(debug_switch(state_count > 0, true) and last_idx < self.list.len, @src(), "tried to 'get' linked list item from head/beginning of set `{s}`, but that set reports an item count of {d} and the first idx is {d} (list.len = {d})", .{ @tagName(state), debug_switch(state_count, 0), last_idx, self.list.len });
+                        return_items.first = last_idx;
+                        return_items.last = last_idx;
+                        return_items.count = 1;
+                        Internal.disconnect_one(self, state, last_idx);
                     }
                 },
                 .ONE_INDEX => {
-                    const set_idx: SetIdx = get_val;
-                    Internal.assert_valid_set_idx(self, set_idx, @src());
-                    return_items = FirstLastItem.single(self.get_item_from_idx(set_idx.idx));
-                    disconnect_data = Internal.get_connect_data_before_first_and_after_last(self, return_items.first, return_items.last, 1, set_idx.set);
-                    insert_data.count = 1;
-                },
-                .ONE_ITEM => {
-                    const set_item: SetItem = get_val;
-                    Internal.assert_valid_set_item(self, set_item, @src());
-                    return_items = FirstLastItem.single(set_item.item);
-                    disconnect_data = Internal.get_connect_data_before_first_and_after_last(self, return_items.first, return_items.last, 1, set_item.set);
-                    insert_data.count = 1;
-                },
-                .ONE_PTR => {
-                    const set_ptr: SetPtr = get_val;
-                    Internal.assert_valid_set_ptr(self, set_ptr, @src());
-                    return_items = FirstLastItem.single(self.get_item_from_ptr(set_ptr.ptr));
-                    disconnect_data = Internal.get_connect_data_before_first_and_after_last(self, return_items.first, return_items.last, 1, set_ptr.set);
-                    insert_data.count = 1;
+                    const state_idx: StateIdx = get_val;
+                    Internal.assert_valid_state_idx(self, state_idx, @src());
+                    return_items.first = state_idx.idx;
+                    return_items.last = state_idx.idx;
+                    return_items.count = 1;
+                    Internal.disconnect_one(self, state_idx.set, state_idx.idx);
                 },
                 .MANY_NEW => {
                     const count: Idx = get_val;
-                    assert_with_reason(count > 0, @src(), "cannot get `0` items", .{});
-                    const first_slot_idx = self.list.len;
-                    const last_slot_idx = self.list.len + count - 1;
+                    assert_with_reason(count > 0, @src(), "cannot get `0` new items", .{});
+                    const first_idx = self.list.len;
+                    const last_idx = self.list.len + count - 1;
                     _ = if (ASSUME_CAP) self.list.append_many_slots_assume_capacity(count) else (if (RETURN_ERRORS) try self.list.append_many_slots(count, alloc) else self.list.append_many_slots(count, alloc));
-                    Internal.link_new_indexes(self, insert_data.set, first_slot_idx, count);
-                    return_items.first = self.get_item_from_idx(first_slot_idx);
-                    return_items.last = self.get_item_from_idx(last_slot_idx);
-                    needs_disconnect = false;
-                    insert_data.count = count;
+                    Internal.link_new_indexes(self, insert_edges.set, first_idx, count);
+                    return_items.first = first_idx;
+                    return_items.last = last_idx;
+                    return_items.count = count;
                 },
                 .FIRST_N_FROM_SET => {
-                    const set_count: SetCount = get_val;
-                    assert_with_reason(set_count.count > 0, @src(), "cannot get `0` items", .{});
-                    assert_with_reason(self.get_item_count(set_count.set) >= set_count.count, @src(), "requested {d} items from set {s}, but set only has {d} items", .{ set_count.count, @tagName(set_count.set), self.get_item_count(set_count.set) });
-                    return_items.first = self.get_first_item_in_set(set_count.set);
-                    return_items.last = self.get_item_with_index_n_in_set_from_start(set_count.set, set_count.count - 1);
-                    disconnect_data = Internal.get_connect_data_before_first_and_after_last(self, return_items.first, return_items.last, set_count.count, set_count.set);
-                    insert_data.count = set_count.count;
+                    const state_count: StateCount = get_val;
+                    assert_with_reason(state_count.count > 0, @src(), "cannot get `0` items", .{});
+                    assert_with_reason(self.get_item_count(state_count.set) >= state_count.count, @src(), "requested {d} items from set {s}, but set only has {d} items", .{ state_count.count, @tagName(state_count.state), self.get_item_count(state_count.state) });
+                    return_items.first = self.get_first_index_in_state(state_count.set);
+                    return_items.last = self.get_nth_idx_from_start_of_state(state_count.state, state_count.count - 1);
+                    return_items.count = state_count.count;
+                    Internal.disconnect_many_first_last(self, state_count.state, return_items.first, return_items.last, state_count.count);
                 },
                 .LAST_N_FROM_SET => {
-                    const set_count: SetCount = get_val;
-                    assert_with_reason(set_count.count > 0, @src(), "cannot insert `0` items", .{});
-                    assert_with_reason(self.get_item_count(set_count.set) >= set_count.count, @src(), "requested {d} items from set {s}, but set only has {d} items", .{ set_count.count, @tagName(set_count.set), self.get_item_count(set_count.set) });
-                    return_items.last = self.get_last_item_in_set(set_count.set);
-                    return_items.first = self.get_item_with_index_n_in_set_from_end(set_count.set, set_count.count - 1);
-                    disconnect_data = Internal.get_connect_data_before_first_and_after_last(self, return_items.first, return_items.last, set_count.count, set_count.set);
-                    insert_data.count = set_count.count;
+                    const state_count: StateCount = get_val;
+                    assert_with_reason(state_count.count > 0, @src(), "cannot insert `0` items", .{});
+                    assert_with_reason(self.get_item_count(state_count.state) >= state_count.count, @src(), "requested {d} items from set {s}, but set only has {d} items", .{ state_count.count, @tagName(state_count.state), self.get_item_count(state_count.state) });
+                    return_items.last = self.get_last_index_in_state(state_count.state);
+                    return_items.first = self.get_nth_idx_from_end_of_state(state_count.state, state_count.count - 1);
+                    return_items.count = state_count.count;
+                    Internal.disconnect_many_first_last(self, state_count.state, return_items.first, return_items.last, state_count.count);
                 },
                 .FIRST_N_FROM_SET_ELSE_NEW => {
-                    const set_count: SetCount = get_val;
-                    assert_with_reason(set_count.count > 0, @src(), "cannot insert `0` items", .{});
-                    const count_from_set = @max(self.get_item_count(set_count.set), set_count.count);
-                    const count_from_new = set_count.count - count_from_set;
-                    var first_new_item: Item = undefined;
-                    var last_moved_item: Item = undefined;
+                    const state_count: StateCount = get_val;
+                    assert_with_reason(state_count.count > 0, @src(), "cannot insert `0` items", .{});
+                    const count_from_state = @max(self.get_item_count(state_count.state), state_count.count);
+                    const count_from_new = state_count.count - count_from_state;
+                    var first_new_idx: Idx = undefined;
+                    var last_moved_idx: Idx = undefined;
                     const needs_new = count_from_new > 0;
-                    const needs_move = count_from_set > 0;
+                    const needs_move = count_from_state > 0;
                     if (needs_new) {
                         const first_new_idx = self.list.len;
                         const last_new_idx = self.list.len + count_from_new - 1;
                         _ = if (ASSUME_CAP) self.list.append_many_slots_assume_capacity(count_from_new) else (if (RETURN_ERRORS) try self.list.append_many_slots(count_from_new, alloc) else self.list.append_many_slots(count_from_new, alloc));
-                        Internal.link_new_indexes(self, set_count, first_new_idx, last_new_idx);
+                        Internal.link_new_indexes(self, state_count, first_new_idx, last_new_idx);
                         if (needs_move) {
-                            first_new_item = self.get_item_from_idx(first_new_idx);
+                            first_new_item = first_new_idx;
                         } else {
-                            return_items.first = self.get_item_from_idx(first_new_idx);
+                            return_items.first = first_new_idx;
                         }
-                        return_items.last = self.get_item_from_idx(last_new_idx);
+                        return_items.last = last_new_idx;
                     }
                     if (needs_move) {
-                        return_items.first = self.get_first_item_in_set(set_count.set);
+                        return_items.first = self.get_first_index_in_state(state_count.state);
                         if (needs_new) {
-                            last_moved_item = self.get_item_with_index_n_in_set_from_start(set_count.set, count_from_set - 1);
-                            disconnect_data = Internal.get_connect_data_before_first_and_after_last(self, return_items.first, last_moved_item, count_from_set, set_count.set);
+                            last_moved_item = self.get_nth_idx_from_start_of_state(state_count.state, count_from_state - 1);
+                            Internal.disconnect_many_first_last(self, state_count.state, return_items.first, last_moved_item, count_from_state);
                         } else {
-                            return_items.last = self.get_item_with_index_n_in_set_from_start(set_count.set, count_from_set - 1);
-                            disconnect_data = Internal.get_connect_data_before_first_and_after_last(self, return_items.first, return_items.last, count_from_set, set_count.set);
+                            return_items.last = self.get_nth_idx_from_start_of_state(state_count.state, count_from_state - 1);
+                            Internal.disconnect_many_first_last(self, state_count.state, return_items.first, return_items.last, count_from_state);
                         }
                     }
                     if (needs_new and needs_move) {
-                        const mid_left = Internal.get_conn_left(self, set_count.set, last_moved_item);
-                        const mid_right = Internal.get_conn_right(self, set_count.set, first_new_item);
+                        const mid_left = Internal.get_conn_left(self, state_count.state, last_moved_idx);
+                        const mid_right = Internal.get_conn_right(self, state_count.state, first_new_idx);
                         Internal.connect(mid_left, mid_right);
                     }
-                    if (!needs_move) needs_disconnect = false;
-                    insert_data.count = set_count.set;
+                    return_items.count = state_count.count;
                 },
                 .LAST_N_FROM_SET_ELSE_NEW => {
-                    const set_count: SetCount = get_val;
-                    assert_with_reason(set_count.count > 0, @src(), "cannot insert `0` items", .{});
-                    const count_from_set = @max(self.get_item_count(set_count.set), set_count.count);
-                    const count_from_new = set_count.count - count_from_set;
-                    var first_new_item: Item = undefined;
-                    var last_moved_item: Item = undefined;
+                    const state_count: StateCount = get_val;
+                    assert_with_reason(state_count.count > 0, @src(), "cannot insert `0` items", .{});
+                    const count_from_state = @max(self.get_item_count(state_count.state), state_count.count);
+                    const count_from_new = state_count.count - count_from_state;
+                    var first_new_idx: Idx = undefined;
+                    var last_moved_idx: Idx = undefined;
                     const needs_new = count_from_new > 0;
-                    const needs_move = count_from_set > 0;
+                    const needs_move = count_from_state > 0;
                     if (needs_new) {
                         const first_new_idx = self.list.len;
                         const last_new_idx = self.list.len + count_from_new - 1;
                         _ = if (ASSUME_CAP) self.list.append_many_slots_assume_capacity(count_from_new) else (if (RETURN_ERRORS) try self.list.append_many_slots(count_from_new, alloc) else self.list.append_many_slots(count_from_new, alloc));
-                        Internal.link_new_indexes(self, set_count, first_new_idx, last_new_idx);
+                        Internal.link_new_indexes(self, state_count, first_new_idx, last_new_idx);
                         if (needs_move) {
-                            first_new_item = self.get_item_from_idx(first_new_idx);
+                            first_new_idx = first_new_idx;
                         } else {
-                            return_items.first = self.get_item_from_idx(first_new_idx);
+                            return_items.first = first_new_idx;
                         }
-                        return_items.last = self.get_item_from_idx(last_new_idx);
+                        return_items.last = last_new_idx;
                     }
                     if (needs_move) {
-                        return_items.first = self.get_item_with_index_n_in_set_from_end(set_count.set, count_from_set - 1);
+                        return_items.first = self.get_nth_idx_from_end_of_state(state_count.state, count_from_state - 1);
                         if (needs_new) {
-                            last_moved_item = self.get_last_item_in_set(set_count.set);
-                            disconnect_data = Internal.get_connect_data_before_first_and_after_last(self, return_items.first, last_moved_item, count_from_set, set_count.set);
+                            last_moved_idx = self.get_last_index_in_state(state_count.state);
+                            Internal.disconnect_many_first_last(self, state_count.state, return_items.first, last_moved_idx, count_from_state);
                         } else {
-                            return_items.last = self.get_last_item_in_set(set_count.set);
-                            disconnect_data = Internal.get_connect_data_before_first_and_after_last(self, return_items.first, return_items.last, count_from_set, set_count.set);
+                            return_items.last = self.get_last_index_in_state(state_count.state);
+                            Internal.disconnect_items_first_last(self, state_count.state, return_items.first, return_items.last, count_from_state);
                         }
                     }
                     if (needs_new and needs_move) {
-                        const mid_left = Internal.get_conn_left(self, set_count.set, last_moved_item);
-                        const mid_right = Internal.get_conn_right(self, set_count.set, first_new_item);
+                        const mid_left = Internal.get_conn_left(self, state_count.state, last_moved_idx);
+                        const mid_right = Internal.get_conn_right(self, state_count.state, first_new_idx);
                         Internal.connect(mid_left, mid_right);
                     }
-                    if (!needs_move) needs_disconnect = false;
-                    insert_data.count = set_count.set;
                 },
-                //CHECKPOINT
-                .SPARSE_LIST_OF_INDEXES_FROM_SAME_SET => {
-                    const set_idx_list: SetIdxList = get_val;
+                // CHECKPOINT go through and fix 
+                .SPARSE_LIST_FROM_SAME_SET => {
+                    const set_idx_list: StateIdxList = get_val;
                     Internal.assert_valid_set_idx_list(self, set_idx_list, @src());
+                    return_items.first = self.get_item_from_idx(set_idx_list.idxs[0]);
+                    Internal.disconnect_one_item(self, set_idx_list.state, return_items.first);
+                    var prev_item: Item = return_items.first;
+                    for (set_idx_list.idxs[1..]) |idx| {
+                        const this_item = self.get_item_from_idx(idx);
+                        Internal.disconnect_one_item(self, set_idx_list.state, this_item);
+                        const conn_left = Internal.get_conn_left(self, set_idx_list.state, prev_item);
+                        const conn_right = Internal.get_conn_right(self, set_idx_list.state, this_item);
+                        Internal.connect(conn_left, conn_right);
+                        prev_item = this_item;
+                    }
+                    return_items.last = prev_item;
+                    return_items.count = @intCast(set_idx_list.idxs.len);
+                    insert_edges.count = return_items.count;
                 },
-                .SPARSE_LIST_OF_POINTERS_FROM_SAME_SET => {
-                    const set_ptr_list: SetPtrList = get_val;
-                    Internal.assert_valid_set_ptr_list(self, set_ptr_list, @src());
-                },
-                .SPARSE_LIST_OF_ITEMS_FROM_SAME_SET => {
-                    const set_item_list: SetItemList = get_val;
-                    Internal.assert_valid_set_item_list(self, set_item_list, @src());
-                },
-                .SPARSE_LIST_OF_INDEXES_FROM_ANY_SET => {
-                    const set_idxs: []const SetIdx = get_val;
+                .SPARSE_LIST_FROM_ANY_SET => {
+                    const set_idxs: []const StateIdx = get_val;
                     Internal.assert_valid_list_of_set_idxs(self, set_idxs, @src());
+                    return_items.first = self.get_item_from_idx(set_idxs[0]);
+                    Internal.disconnect_one_item(self, set_idxs[0].state, return_items.first);
+                    var prev_item: Item = return_items.first;
+                    for (set_idxs[1..]) |set_idx| {
+                        const this_item = self.get_item_from_idx(set_idx.idx);
+                        Internal.disconnect_one_item(self, set_idx.state, this_item);
+                        const conn_left = Internal.get_conn_left(self, set_idx.state, prev_item);
+                        const conn_right = Internal.get_conn_right(self, set_idx.state, this_item);
+                        Internal.connect(conn_left, conn_right);
+                        prev_item = this_item;
+                    }
+                    return_items.last = prev_item;
+                    return_items.count = @intCast(set_idxs.len);
+                    insert_edges.count = return_items.count;
                 },
-                .SPARSE_LIST_OF_POINTERS_FROM_ANY_SET => {
-                    const set_ptrs: []const SetPtr = get_val;
-                    Internal.assert_valid_list_of_set_ptrs(self, set_ptrs, @src());
+                .SLICE => {
+                    const slice: LLSlice = get_val;
+                    //CHECKPOINT
+                    Internal.assert_valid_slice(self, slice, @src());
+                    return_items.first = Internal.get_item_from_idx(self, idx: Idx)
                 },
-                .SPARSE_LIST_OF_ITEMS_FROM_ANY_SET => {
-                    const set_items: []const SetItem = get_val;
-                    Internal.assert_valid_list_of_set_items(self, set_items, @src());
+                .FROM_LEAKED_ITEMS_CONNECTED => {
+                    // const first_last: FirstLastIdx = get_val;
+                    // assert_idx_less_than_len(first_last.first, self.list.len, @src());
+                    // assert_idx_less_than_len(first_last.last, self.list.len, @src());
+                    // Internal.as
                 },
             }
-            // if (needs_disconnect) {
-            //     Internal.connect(disconnect_edges.left, disconnect_edges.right);
-            //     Internal.decrease_link_set_count(self, disconnect_set, disconnect_count);
-            //     if (TAIL_NO_BACKWARD and disconnect_edges.right == NULL_IDX) {
-            //         const last_rem_idx = if (self.get_item_count(disconnect_set) > 0) Internal.get_element_index_from_next_idx_field_ref(self, disconnect_edges.left) else NULL_IDX;
-            //         Internal.set_last_index(self, disconnect_set, last_rem_idx);
-            //     }
-            //     if (HEAD_NO_FORWARD and disconnect_edges.left == NULL_IDX) {
-            //         const first_rem_idx = if (self.get_item_count(disconnect_set) > 0) Internal.get_element_index_from_prev_idx_field_ref(self, disconnect_edges.right) else NULL_IDX;
-            //         Internal.set_first_index(self, disconnect_set, first_rem_idx);
-            //     }
-            // }
-            // if (needs_reconnect) {
-            //     const insert_new = Internal.get_conn_insert_from_item_first_last(self, insert_set, return_items);
-            //     Internal.connect_with_insert(insert_edges.left, insert_new.first, insert_new.last, insert_edges.right);
-            //     Internal.increase_link_set_count(self, insert_set, insert_count);
-            //     if (TAIL_NO_BACKWARD and insert_edges.right == NULL_IDX) {
-            //         Internal.set_last_index(self, insert_set, return_items.last.idx);
-            //     }
-            //     if (HEAD_NO_FORWARD and insert_edges.left == NULL_IDX) {
-            //         Internal.set_first_index(self, insert_set, return_items.first.idx);
-            //     }
-            //     return return_items;
-            // }
+            const insert_first = Internal.get_conn_right(self, insert_edges.state, return_items.first);
+            const insert_last = Internal.get_conn_left(self, insert_edges.state, return_items.last);
+            Internal.connect_with_insert(insert_edges.edges.left, insert_first, insert_last, insert_edges.edges.right);
+            Internal.increase_link_set_count(self, insert_edges.state, insert_edges.count);
+            if (TAIL_NO_BACKWARD and insert_edges.edges.right == NULL_IDX) {
+                Internal.state_last_index(self, insert_edges.state, return_items.last.idx);
+            }
+            if (HEAD_NO_FORWARD and insert_edges.edges.left == NULL_IDX) {
+                Internal.set_first_index(self, insert_edges.set, return_items.first.idx);
+            }
+            Internal.set_state_on_items_first_last(self, return_items.first, return_items.last, FORWARD, insert_edges.set);
+        
+            return return_items;
         }
 
-        pub inline fn get_items_and_insert_at_assume_capacity(self: *List, comptime get_mode: GetMode, get_val: GetVal(get_mode), comptime insert_mode: InsertMode, insert_val: InsertVal(insert_mode)) FirstLastItem {
+        pub inline fn get_items_and_insert_at_assume_capacity(self: *List, comptime get_mode: GetMode, get_val: GetVal(get_mode), comptime insert_mode: InsertMode, insert_val: InsertVal(insert_mode)) LLSlice {
             return self.get_items_and_insert_at_internal(get_mode, get_val, insert_mode, insert_val, DummyAllocator.allocator, true);
         }
 
-        pub fn get_items_and_insert_at(self: *List, comptime get_mode: GetMode, get_val: GetVal(get_mode), comptime insert_mode: InsertMode, insert_val: InsertVal(insert_mode), alloc: Allocator) if (RETURN_ERRORS) Error!FirstLastItem else FirstLastItem {
+        pub fn get_items_and_insert_at(self: *List, comptime get_mode: GetMode, get_val: GetVal(get_mode), comptime insert_mode: InsertMode, insert_val: InsertVal(insert_mode), alloc: Allocator) if (RETURN_ERRORS) Error!LLSlice else LLSlice {
             return self.get_items_and_insert_at_internal(get_mode, get_val, insert_mode, insert_val, alloc, false);
         }
 

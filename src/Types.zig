@@ -403,9 +403,16 @@ pub fn can_get_ptr_len(comptime ptr_type: type) bool {
     }
 }
 
+pub inline fn enum_tag_type(comptime T: type) type {
+    const TI = @typeInfo(T);
+    assert_with_reason(TI == .@"enum", @src(), "`T` must be an enum type", .{});
+    const E_INFO = TI.@"enum";
+    return E_INFO.tag_type;
+}
+
 pub inline fn union_tag_type(comptime T: type) type {
     const TI = @typeInfo(T);
-    assert_with_reason(TI == .@"union", @src(), "`T` must be a union type", .{});
+    assert_with_reason(TI == .@"union", @src(), "`T` must be an union type", .{});
     const U_INFO = TI.@"union";
     assert_with_reason(U_INFO.tag_type != null, @src(), "union type `{s}` has no defined tag type", .{@typeName(T)});
     return U_INFO.tag_type.?;
