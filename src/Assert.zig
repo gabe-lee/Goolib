@@ -84,12 +84,12 @@ pub fn assert_slice_resides_in_slice(comptime T: type, slice: []const T, sub_sli
     assert_with_reason(start_addr <= sub_start_addr and sub_end_addr <= end_addr, src_loc, "sub-slice of `{s}` [{X} -> {X}] does not reside within slice [{X} -> {X}]", .{ @typeName(T), sub_start_addr, sub_end_addr, start_addr, end_addr });
 }
 
-pub fn assert_idx_less_than_len(idx: anytype, len: anytype, src_loc: ?SourceLocation) void {
-    assert_with_reason(idx < len, src_loc, "index ({s}) out of bounds for slice/list len ({s})", .{ idx, len });
+pub fn assert_idx_less_than_len(idx: anytype, len: anytype, comptime src_loc: ?SourceLocation) void {
+    assert_with_reason(idx < len, src_loc, "index ({d}) out of bounds for slice/list len ({d})", .{ idx, len });
 }
 
 pub fn assert_idx_and_pointer_reside_in_slice_and_match(comptime T: type, slice: []const T, idx: usize, pointer: *const T, comptime src_loc: ?SourceLocation) void {
-    assert_with_reason(idx < slice.len, src_loc, "index ({s}) out of bounds for slice/list len ({s})", .{ idx, slice.len });
+    assert_with_reason(idx < slice.len, src_loc, "index ({d}) out of bounds for slice/list len ({d})", .{ idx, slice.len });
     const idx_addr = @intFromPtr(&slice[idx]);
     const ptr_addr = @intFromPtr(pointer);
     assert_with_reason(idx_addr == ptr_addr, "pointer to `{s}` ({X}) does not match pointer to slice[{d}] ({d})", .{ @typeName(T), ptr_addr, idx, idx_addr });

@@ -32,6 +32,7 @@ const ArrayList = std.ArrayListUnmanaged;
 const Type = std.builtin.Type;
 
 const Root = @import("./_root.zig");
+const Utils = Root.Utils;
 const Assert = Root.Assert;
 const assert_with_reason = Assert.assert_with_reason;
 const FlexSlice = Root.FlexSlice.FlexSlice;
@@ -152,7 +153,7 @@ pub fn define_manual_allocator_list_type(comptime options: ListOptions) type {
         pub fn set_len(self: *List, new_len: Idx) void {
             assert_with_reason(new_len <= self.cap, @src(), ERR_NEW_LEN_GREATER_CAP, .{ new_len, self.cap });
             if (SECURE_WIPE and new_len < self.len) {
-                crypto.secureZero(Elem, self.ptr[new_len..self.len]);
+                Utils.secure_zero(Elem, self.ptr[new_len..self.len]);
             }
             self.len = new_len;
         }
@@ -298,7 +299,7 @@ pub fn define_manual_allocator_list_type(comptime options: ListOptions) type {
                 @memcpy(range[0..new_items.len], new_items);
                 std.mem.copyForwards(Elem, self.ptr[end_of_range - unused_slots .. self.len], self.ptr[end_of_range..self.len]);
                 if (SECURE_WIPE) {
-                    crypto.secureZero(Elem, self.ptr[self.len - unused_slots .. self.len]);
+                    Utils.secure_zero(Elem, self.ptr[self.len - unused_slots .. self.len]);
                 }
                 self.len -= unused_slots;
             }
@@ -330,7 +331,7 @@ pub fn define_manual_allocator_list_type(comptime options: ListOptions) type {
             assert_with_reason(idx < self.len, @src(), ERR_IDX_GREATER_EQL_LEN, .{ idx, self.len });
             std.mem.copyForwards(Elem, self.ptr[idx..self.len], self.ptr[idx + 1 .. self.len]);
             if (SECURE_WIPE) {
-                crypto.secureZero(Elem, self.ptr[self.len - 1 .. self.len]);
+                Utils.secure_zero(Elem, self.ptr[self.len - 1 .. self.len]);
             }
             self.len -= 1;
         }
@@ -340,7 +341,7 @@ pub fn define_manual_allocator_list_type(comptime options: ListOptions) type {
             assert_with_reason(end_of_range <= self.len, @src(), ERR_LAST_IDX_GREATER_LEN, .{ end_of_range, self.len });
             std.mem.copyForwards(Elem, self.ptr[start..self.len], self.ptr[end_of_range..self.len]);
             if (SECURE_WIPE) {
-                crypto.secureZero(Elem, self.ptr[self.len - length .. self.len]);
+                Utils.secure_zero(Elem, self.ptr[self.len - length .. self.len]);
             }
             self.len -= length;
         }
@@ -349,7 +350,7 @@ pub fn define_manual_allocator_list_type(comptime options: ListOptions) type {
             assert_with_reason(idx < self.len, @src(), ERR_IDX_GREATER_EQL_LEN, .{ idx, self.len });
             self.ptr[idx] = self.ptr[self.list.items.len - 1];
             if (SECURE_WIPE) {
-                crypto.secureZero(Elem, self.ptr[self.len - 1 .. self.len]);
+                Utils.secure_zero(Elem, self.ptr[self.len - 1 .. self.len]);
             }
             self.len -= 1;
         }
@@ -391,7 +392,7 @@ pub fn define_manual_allocator_list_type(comptime options: ListOptions) type {
                 self.ensure_total_capacity(new_len, alloc);
             }
             if (SECURE_WIPE and new_len < self.len) {
-                crypto.secureZero(Elem, self.ptr[new_len..self.len]);
+                Utils.secure_zero(Elem, self.ptr[new_len..self.len]);
             }
             self.len = new_len;
         }
@@ -404,7 +405,7 @@ pub fn define_manual_allocator_list_type(comptime options: ListOptions) type {
             }
 
             if (SECURE_WIPE) {
-                crypto.secureZero(Elem, self.ptr[new_len..self.len]);
+                Utils.secure_zero(Elem, self.ptr[new_len..self.len]);
             }
 
             const old_memory = self.ptr[0..self.cap];
@@ -427,21 +428,21 @@ pub fn define_manual_allocator_list_type(comptime options: ListOptions) type {
         pub fn shrink_retaining_capacity(self: *List, new_len: Idx) void {
             assert_with_reason(new_len <= self.len, @src(), ERR_NEW_LEN_GREATER_LEN, .{ new_len, self.len });
             if (SECURE_WIPE) {
-                crypto.secureZero(Elem, self.ptr[new_len..self.len]);
+                Utils.secure_zero(Elem, self.ptr[new_len..self.len]);
             }
             self.len = new_len;
         }
 
         pub fn clear_retaining_capacity(self: *List) void {
             if (SECURE_WIPE) {
-                std.crypto.secureZero(Elem, self.ptr[0..self.len]);
+                std.Utils.secure_zero(Elem, self.ptr[0..self.len]);
             }
             self.len = 0;
         }
 
         pub fn clear_and_free(self: *List, alloc: Allocator) void {
             if (SECURE_WIPE) {
-                std.crypto.secureZero(Elem, self.ptr[0..self.len]);
+                std.Utils.secure_zero(Elem, self.ptr[0..self.len]);
             }
             alloc.free(self.ptr[0..self.cap]);
             self.* = UNINIT;
@@ -461,7 +462,7 @@ pub fn define_manual_allocator_list_type(comptime options: ListOptions) type {
             if (self.cap >= new_capacity) return;
 
             if (new_capacity < self.len) {
-                if (SECURE_WIPE) crypto.secureZero(Elem, self.ptr[new_capacity..self.len]);
+                if (SECURE_WIPE) Utils.secure_zero(Elem, self.ptr[new_capacity..self.len]);
                 self.len = new_capacity;
             }
 
@@ -472,7 +473,7 @@ pub fn define_manual_allocator_list_type(comptime options: ListOptions) type {
             } else {
                 const new_memory = alloc.alignedAlloc(Elem, ALIGN, new_capacity) catch |err| return handle_alloc_error(err);
                 @memcpy(new_memory[0..self.len], self.ptr[0..self.len]);
-                if (SECURE_WIPE) crypto.secureZero(Elem, self.ptr[0..self.len]);
+                if (SECURE_WIPE) Utils.secure_zero(Elem, self.ptr[0..self.len]);
                 alloc.free(old_memory);
                 self.ptr = new_memory.ptr;
                 self.cap = @as(Idx, @intCast(new_memory.len));
@@ -512,6 +513,7 @@ pub fn define_manual_allocator_list_type(comptime options: ListOptions) type {
             assert_with_reason(new_len <= self.cap, @src(), ERR_LEN_PLUS_COUNT_GREATER_CAP, .{ self.len, count, self.len + count, self.cap });
             const prev_len = self.len;
             self.len = new_len;
+
             return self.ptr[prev_len..][0..count];
         }
 
@@ -567,33 +569,33 @@ pub fn define_manual_allocator_list_type(comptime options: ListOptions) type {
                     return minimum + ATOMIC_PADDING;
                 },
                 else => {
-                    var new = current;
+                    var new: Idx = current;
                     while (true) {
                         switch (GROWTH) {
                             GrowthModel.GROW_BY_100_PERCENT => {
-                                new +|= new;
+                                new +|= @max(1, new);
                                 if (new >= minimum) return new;
                             },
                             GrowthModel.GROW_BY_100_PERCENT_ATOMIC_PADDING => {
-                                new +|= new;
+                                new +|= @max(1, new);
                                 const new_with_padding = new +| ATOMIC_PADDING;
                                 if (new_with_padding >= minimum) return new_with_padding;
                             },
                             GrowthModel.GROW_BY_50_PERCENT => {
-                                new +|= new / 2;
+                                new +|= @max(1, new / 2);
                                 if (new >= minimum) return new;
                             },
                             GrowthModel.GROW_BY_50_PERCENT_ATOMIC_PADDING => {
-                                new +|= new / 2;
+                                new +|= @max(1, new / 2);
                                 const new_with_padding = new +| ATOMIC_PADDING;
                                 if (new_with_padding >= minimum) return new_with_padding;
                             },
                             GrowthModel.GROW_BY_25_PERCENT => {
-                                new +|= new / 4;
+                                new +|= @max(1, new / 4);
                                 if (new >= minimum) return new;
                             },
                             GrowthModel.GROW_BY_25_PERCENT_ATOMIC_PADDING => {
-                                new +|= new / 4;
+                                new +|= @max(1, new / 4);
                                 const new_with_padding = new +| ATOMIC_PADDING;
                                 if (new_with_padding >= minimum) return new_with_padding;
                             },

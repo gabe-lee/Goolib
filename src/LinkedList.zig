@@ -45,6 +45,7 @@ const debug_switch = Utils.debug_switch;
 const safe_switch = Utils.safe_switch;
 const comp_switch = Utils.comp_switch;
 const Types = Root.Types;
+const Iterator = Root.Iterator.Iterator;
 const FlexSlice = Root.FlexSlice.FlexSlice;
 const Mutability = Root.CommonTypes.Mutability;
 const Quicksort = Root.Quicksort;
@@ -91,6 +92,12 @@ pub const Direction = enum {
     BACKWARD,
 };
 
+pub const IterDirection = enum {
+    FORWARD,
+    BACKWARD,
+    BI_DIRECTIONAL,
+};
+
 // const ERR_START_PLUS_COUNT_OOB = "start ({d}) + count ({d}) == {d}, which is out of bounds for list.len ({d})";
 
 /// This is the core linked list paradigm, both other paradigms ('static_allocator' and 'cached_allocator')
@@ -132,7 +139,7 @@ pub fn define_manual_allocator_linked_list_type(comptime options: LinkedListOpti
         const C_TYPE = @FieldType(options.list_options.element_type, C_FIELD);
         assert_with_reason(C_TYPE == options.list_options.index_type, @src(), "element state field `.{s}` on element type `{s}` does not match options.list_options.index_type `{s}`", .{ C_FIELD, @typeName(options.list_options.element_type), @typeName(options.list_options.index_type) });
     }
-    return extern struct {
+    return struct {
         list: BaseList = BaseList.UNINIT,
         sets: [SET_COUNT]StateData = UNINIT_SETS,
 
@@ -140,13 +147,13 @@ pub fn define_manual_allocator_linked_list_type(comptime options: LinkedListOpti
         const SET_COUNT = Types.enum_defined_field_count(options.linked_set_enum);
         const FORWARD = options.forward_linkage != null;
         const HEAD_NO_FORWARD = HEAD and !FORWARD;
-        const NEXT_FIELD = if (FORWARD) options.forward_linkage.?.next_index_field else "";
+        const NEXT_FIELD = if (FORWARD) options.forward_linkage.? else "";
         const BACKWARD = options.backward_linkage != null;
         const TAIL_NO_BACKWARD = TAIL and !BACKWARD;
         const BIDIRECTION = BACKWARD and FORWARD;
         const HEAD = FORWARD or options.force_cache_first_index;
         const TAIL = BACKWARD or options.force_cache_last_index;
-        const PREV_FIELD = if (BACKWARD) options.backward_linkage.?.prev_index_field else "";
+        const PREV_FIELD = if (BACKWARD) options.backward_linkage.? else "";
         const USED = options.linked_sets == .USED_SET_ONLY or options.linked_sets == .USED_AND_FREE_SETS;
         const FREE = options.linked_sets == .FREE_SET_ONLY or options.linked_sets == .USED_AND_FREE_SETS;
         const STATE = options.element_state_access != null;
@@ -156,7 +163,7 @@ pub fn define_manual_allocator_linked_list_type(comptime options: LinkedListOpti
         const STATE_FIELD = if (STATE) options.element_state_access.?.field else "";
         const STATE_OFFSET = if (STATE) options.element_state_access.?.field_bit_offset else 0;
         const UNINIT = List{};
-        const RETURN_ERRORS = options.list_options.error_behavior == .RETURN_ERRORS;
+        const RETURN_ERRORS = options.list_options.alloc_error_behavior == .RETURN_ERRORS;
         const NULL_IDX = math.maxInt(Idx);
         const MAX_STATE_TAG = Types.enum_max_value(State);
         const STATE_MASK: if (STATE) options.element_state_access.?.field_type else comptime_int = if (STATE) build: {
@@ -186,16 +193,16 @@ pub fn define_manual_allocator_linked_list_type(comptime options: LinkedListOpti
         const StateTag = Types.enum_tag_type(State);
         pub const StateData = switch (HEAD_TAIL) {
             HAS_HEAD_HAS_TAIL => struct {
-                first_idx: Idx = 0,
-                last_idx: Idx = 0,
+                first_idx: Idx = NULL_IDX,
+                last_idx: Idx = NULL_IDX,
                 count: Idx = 0,
             },
             HAS_HEAD_NO_TAIL => struct {
-                first_idx: Idx = 0,
+                first_idx: Idx = NULL_IDX,
                 count: Idx = 0,
             },
             NO_HEAD_HAS_TAIL => struct {
-                last_idx: Idx = 0,
+                last_idx: Idx = NULL_IDX,
                 count: Idx = 0,
             },
             else => unreachable,
@@ -328,9 +335,9 @@ pub fn define_manual_allocator_linked_list_type(comptime options: LinkedListOpti
         /// use the provided methods on
         pub const LLSlice = struct {
             state: State,
-            first: Idx,
-            last: Idx,
-            count: Idx,
+            first: Idx = NULL_IDX,
+            last: Idx = NULL_IDX,
+            count: Idx = 0,
 
             pub fn single(state: State, idx: Idx) LLSlice {
                 return LLSlice{
@@ -418,8 +425,8 @@ pub fn define_manual_allocator_linked_list_type(comptime options: LinkedListOpti
         pub const LLCursorSlice = struct {
             slice: LLSlice,
             list_ref: *List,
-            cursor_pos: Idx,
-            cursor_idx: Idx,
+            cursor_pos: Idx = NULL_IDX,
+            cursor_idx: Idx = NULL_IDX,
 
             pub fn goto_pos(self: *LLCursorSlice, pos: Idx) void {
                 assert_with_reason(pos < self.slice.count, @src(), "pos {d} is out of bounds for LLSlice (count/len = {d})", .{ pos, self.slice.count });
@@ -553,7 +560,7 @@ pub fn define_manual_allocator_linked_list_type(comptime options: LinkedListOpti
                     delta += 1;
                 }
                 assert_with_reason(result != NULL_IDX, @src(), "idx {d} was not found in set `{s}`", .{ idx, @tagName(state) });
-                assert_with_reason(delta == count, @src(), "there are not {d} more items after idx {d} in set `{s}`, (only {d})", .{ count, idx, @tagName(state) }, delta);
+                assert_with_reason(delta == count, @src(), "there are not {d} more items after idx {d} in set `{s}`, (only {d})", .{ count, idx, @tagName(state), delta });
                 return result;
             }
 
@@ -565,7 +572,7 @@ pub fn define_manual_allocator_linked_list_type(comptime options: LinkedListOpti
                     delta += 1;
                 }
                 assert_with_reason(result != NULL_IDX, @src(), "idx {d} was not found in set `{s}`", .{ idx, @tagName(state) });
-                assert_with_reason(delta == count, @src(), "there are not {d} more items after idx {d} in set `{s}`, (only {d})", .{ count, idx, @tagName(state) }, delta);
+                assert_with_reason(delta == count, @src(), "there are not {d} more items after idx {d} in set `{s}`, (only {d})", .{ count, idx, @tagName(state), delta });
                 return result;
             }
 
@@ -578,7 +585,7 @@ pub fn define_manual_allocator_linked_list_type(comptime options: LinkedListOpti
                     delta += 1;
                 }
                 assert_with_reason(probe != NULL_IDX, @src(), "idx {d} was not found in set `{s}`", .{ idx, @tagName(state) });
-                assert_with_reason(delta == count, @src(), "there are not {d} more items after idx {d} in set `{s}`, (only {d})", .{ count, idx, @tagName(state) }, delta);
+                assert_with_reason(delta == count, @src(), "there are not {d} more items after idx {d} in set `{s}`, (only {d})", .{ count, idx, @tagName(state), delta });
                 while (probe != idx) {
                     probe = Internal.get_prev_idx_bkd(self, probe);
                     result = Internal.get_prev_idx_bkd(self, result);
@@ -595,7 +602,7 @@ pub fn define_manual_allocator_linked_list_type(comptime options: LinkedListOpti
                     delta += 1;
                 }
                 assert_with_reason(probe != NULL_IDX, @src(), "idx {d} was not found in set `{s}`", .{ idx, @tagName(state) });
-                assert_with_reason(delta == count, @src(), "there are not {d} more items before idx {d} in set `{s}`, (only {d})", .{ count, idx, @tagName(state) }, delta);
+                assert_with_reason(delta == count, @src(), "there are not {d} more items before idx {d} in set `{s}`, (only {d})", .{ count, idx, @tagName(state), delta });
                 while (probe != idx) {
                     probe = Internal.get_next_idx_fwd(self, probe);
                     result = Internal.get_next_idx_fwd(self, result);
@@ -603,12 +610,30 @@ pub fn define_manual_allocator_linked_list_type(comptime options: LinkedListOpti
                 return result;
             }
 
-            pub inline fn set_next_idx(ptr: *Elem, idx: Idx) void {
-                if (FORWARD) @field(ptr, NEXT_FIELD) = idx;
+            pub inline fn set_next_idx(self: *List, any: anytype, idx: Idx) void {
+                if (FORWARD) {
+                    const T = @TypeOf(any);
+                    if (T == Idx) {
+                        const ptr = get_ptr(self, any);
+                        @field(ptr, NEXT_FIELD) = idx;
+                    }
+                    if (T == *Elem) {
+                        @field(any, NEXT_FIELD) = idx;
+                    }
+                }
             }
 
-            pub inline fn set_prev_idx(ptr: *Elem, idx: Idx) void {
-                if (BACKWARD) @field(ptr, PREV_FIELD) = idx;
+            pub inline fn set_prev_idx(self: *List, any: anytype, idx: Idx) void {
+                if (BACKWARD) {
+                    const T = @TypeOf(any);
+                    if (T == Idx) {
+                        const ptr = get_ptr(self, any);
+                        @field(ptr, PREV_FIELD) = idx;
+                    }
+                    if (T == *Elem) {
+                        @field(any, PREV_FIELD) = idx;
+                    }
+                }
             }
 
             pub inline fn set_idx(ptr: *Elem, idx: Idx) void {
@@ -652,7 +677,7 @@ pub fn define_manual_allocator_linked_list_type(comptime options: LinkedListOpti
                     const ptr = get_ptr(self, idx);
                     set_state(ptr, state);
                     if (idx == final_idx) break;
-                    idx = if (FORWARD) get_next_idx_fwd(self, ptr) else get_prev_idx_bkd(self, ptr);
+                    idx = if (FORWARD) get_next_idx_fwd(self, idx) else get_prev_idx_bkd(self, idx);
                 }
             }
 
@@ -662,7 +687,7 @@ pub fn define_manual_allocator_linked_list_type(comptime options: LinkedListOpti
                 while (right_idx <= last_idx) {
                     const left = Internal.get_conn_left(self, state, left_idx);
                     const right = Internal.get_conn_right(self, state, right_idx);
-                    connect(left, right);
+                    connect(self, left, right);
                     left_idx += 1;
                     right_idx += 1;
                 }
@@ -692,45 +717,45 @@ pub fn define_manual_allocator_linked_list_type(comptime options: LinkedListOpti
                 }
             }
 
-            pub inline fn connect_with_insert(left_edge: ConnLeft, first_insert: ConnRight, last_insert: ConnLeft, right_edge: ConnRight) void {
+            pub inline fn connect_with_insert(self: *List, left_edge: ConnLeft, first_insert: ConnRight, last_insert: ConnLeft, right_edge: ConnRight) void {
                 if (FORWARD) {
                     if (BIDIRECTION) {
-                        set_next_idx(left_edge.idx_ptr, first_insert.idx);
-                        set_next_idx(last_insert.idx_ptr, right_edge.idx);
+                        set_next_idx(self, left_edge.idx_ptr, first_insert.idx);
+                        set_next_idx(self, last_insert.idx_ptr, right_edge.idx);
                     } else {
-                        set_next_idx(left_edge, first_insert);
-                        set_next_idx(last_insert, right_edge);
+                        set_next_idx(self, left_edge, first_insert);
+                        set_next_idx(self, last_insert, right_edge);
                     }
                 }
                 if (BACKWARD) {
                     if (BIDIRECTION) {
-                        set_prev_idx(right_edge.idx_ptr, last_insert.idx);
-                        set_prev_idx(first_insert.idx_ptr, left_edge.idx);
+                        set_prev_idx(self, right_edge.idx_ptr, last_insert.idx);
+                        set_prev_idx(self, first_insert.idx_ptr, left_edge.idx);
                     } else {
-                        set_prev_idx(right_edge, last_insert);
-                        set_prev_idx(first_insert, left_edge);
+                        set_prev_idx(self, right_edge, last_insert);
+                        set_prev_idx(self, first_insert, left_edge);
                     }
                 }
             }
 
-            pub inline fn connect(left_edge: ConnLeft, right_edge: ConnRight) void {
+            pub inline fn connect(self: *List, left_edge: ConnLeft, right_edge: ConnRight) void {
                 if (FORWARD) {
                     if (BIDIRECTION) {
-                        set_next_idx(left_edge.idx_ptr, right_edge.idx);
+                        set_next_idx(self, left_edge.idx, right_edge.idx);
                     } else {
-                        set_next_idx(left_edge, right_edge);
+                        set_next_idx(self, left_edge, right_edge);
                     }
                 }
                 if (BACKWARD) {
                     if (BIDIRECTION) {
-                        set_prev_idx(right_edge.idx_ptr, left_edge.idx);
+                        set_prev_idx(self, right_edge.idx_ptr, left_edge.idx);
                     } else {
-                        set_prev_idx(right_edge, left_edge);
+                        set_prev_idx(self, right_edge, left_edge);
                     }
                 }
             }
 
-            pub inline fn get_conn_left(self: *const List, state: State, idx: Idx) ConnLeft {
+            pub inline fn get_conn_left(self: *List, state: State, idx: Idx) ConnLeft {
                 if (BIDIRECTION) return IdxPtrIdx{
                     .idx = idx,
                     .idx_ptr = if (idx == NULL_IDX) get_head_index_ref(self, state) else &@field(get_ptr(self, idx), NEXT_FIELD),
@@ -748,10 +773,10 @@ pub fn define_manual_allocator_linked_list_type(comptime options: LinkedListOpti
                 if (BACKWARD) return NULL_IDX;
             }
 
-            pub inline fn get_conn_right(self: *const List, state: State, idx: Idx) ConnRight {
+            pub inline fn get_conn_right(self: *List, state: State, idx: Idx) ConnRight {
                 if (BIDIRECTION) return IdxPtrIdx{
                     .idx = idx,
-                    .ptr = if (idx == NULL_IDX) get_tail_index_ref(self, state) else &@field(get_ptr(self, idx), PREV_FIELD),
+                    .idx_ptr = if (idx == NULL_IDX) get_tail_index_ref(self, state) else &@field(get_ptr(self, idx), PREV_FIELD),
                 };
                 if (FORWARD) return idx;
                 if (BACKWARD) return if (idx == NULL_IDX) get_tail_index_ref(self, state) else &@field(get_ptr(self, idx), PREV_FIELD);
@@ -766,16 +791,30 @@ pub fn define_manual_allocator_linked_list_type(comptime options: LinkedListOpti
                 if (BACKWARD) return get_tail_index_ref(self, state);
             }
 
-            pub inline fn get_next_idx_fwd(self: *const List, idx: Idx) Idx {
-                assert_idx_less_than_len(idx, self.list.len, @src());
-                const ptr = self.get_ptr(idx);
-                return @field(ptr, NEXT_FIELD);
+            pub inline fn get_next_idx_fwd(self: *const List, any: anytype) Idx {
+                const T = @TypeOf(any);
+                if (T == Idx) {
+                    assert_idx_less_than_len(any, self.list.len, @src());
+                    const ptr = self.get_ptr(any);
+                    return @field(ptr, NEXT_FIELD);
+                }
+                if (T == *Elem or T == *const Elem) {
+                    assert_pointer_resides_in_slice(Elem, self.list.slice(), any, @src());
+                    return @field(any, NEXT_FIELD);
+                }
             }
 
-            pub inline fn get_prev_idx_bkd(self: *const List, idx: Idx) Idx {
-                assert_idx_less_than_len(idx, self.list.len, @src());
-                const ptr = self.get_ptr(idx);
-                return @field(ptr, PREV_FIELD);
+            pub inline fn get_prev_idx_bkd(self: *const List, any: anytype) Idx {
+                const T = @TypeOf(any);
+                if (T == Idx) {
+                    assert_idx_less_than_len(any, self.list.len, @src());
+                    const ptr = self.get_ptr(any);
+                    return @field(ptr, PREV_FIELD);
+                }
+                if (T == *Elem or T == *const Elem) {
+                    assert_pointer_resides_in_slice(Elem, self.list.slice(), any, @src());
+                    return @field(any, PREV_FIELD);
+                }
             }
 
             pub inline fn get_head_index_ref(self: *List, state: State) *Idx {
@@ -786,7 +825,7 @@ pub fn define_manual_allocator_linked_list_type(comptime options: LinkedListOpti
                 return &self.sets[@intFromEnum(state)].last_idx;
             }
 
-            pub fn get_conn_left_right_directly_before_this(self: *const List, this: Idx, state: State) ConnLeftRight {
+            pub fn get_conn_left_right_directly_before_this(self: *List, this: Idx, state: State) ConnLeftRight {
                 var result: ConnLeftRight = undefined;
                 result.left = Internal.get_conn_right(self, state, this);
                 const prev_idx = self.get_next_idx(self, state, this);
@@ -794,7 +833,7 @@ pub fn define_manual_allocator_linked_list_type(comptime options: LinkedListOpti
                 return result;
             }
 
-            pub fn get_conn_left_right_directly_after_this(self: *const List, this: Idx, state: State) ConnLeftRight {
+            pub fn get_conn_left_right_directly_after_this(self: *List, this: Idx, state: State) ConnLeftRight {
                 var result: ConnLeftRight = undefined;
                 result.left = Internal.get_conn_left(self, state, this);
                 const next_idx = Internal.get_next_idx(self, state, this);
@@ -802,28 +841,28 @@ pub fn define_manual_allocator_linked_list_type(comptime options: LinkedListOpti
                 return result;
             }
 
-            pub fn get_conn_left_right_before_first_and_after_last(self: *const List, first: Idx, last: Idx, state: State) ConnLeftRight {
+            pub fn get_conn_left_right_before_first_and_after_last(self: *List, first: Idx, last: Idx, state: State) ConnLeftRight {
                 var result: ConnLeftRight = undefined;
                 const left_idx = self.get_prev_idx(state, first);
-                result.edges.left = Internal.get_conn_left(self, state, left_idx);
+                result.left = Internal.get_conn_left(self, state, left_idx);
                 const next_idx = self.get_next_idx(state, last);
-                result.edges.right = Internal.get_conn_right(self, state, next_idx);
+                result.right = Internal.get_conn_right(self, state, next_idx);
                 return result;
             }
 
-            pub fn get_conn_left_right_for_tail_of_set(self: *const List, state: State) ConnLeftRight {
+            pub fn get_conn_left_right_for_tail_of_set(self: *List, state: State) ConnLeftRight {
                 var result: ConnLeftRight = undefined;
-                result.edges.right = Internal.get_conn_right_from_set_tail(self, state);
+                result.right = Internal.get_conn_right_from_set_tail(self, state);
                 const last_index = self.get_last_index_in_state(state);
-                result.edges.left = Internal.get_conn_left(self, state, last_index);
+                result.left = Internal.get_conn_left(self, state, last_index);
                 return result;
             }
 
-            pub fn get_conn_left_right_for_head_of_set(self: *const List, state: State) ConnLeftRight {
+            pub fn get_conn_left_right_for_head_of_set(self: *List, state: State) ConnLeftRight {
                 var result: ConnLeftRight = undefined;
-                result.edges.left = Internal.get_conn_left_from_set_head(self, state);
+                result.left = Internal.get_conn_left_from_set_head(self, state);
                 const first_index = self.get_first_index_in_state(state);
-                result.edges.right = Internal.get_conn_right(self, state, first_index);
+                result.right = Internal.get_conn_right(self, state, first_index);
                 return result;
             }
 
@@ -952,12 +991,139 @@ pub fn define_manual_allocator_linked_list_type(comptime options: LinkedListOpti
             }
         };
 
-        // pub inline fn new_iterator(self: *List) Iterator {
-        //     return Iterator{
-        //         .list_ref = self,
-        //         .next_idx = 0,
-        //     };
-        // }
+        fn iter_has_next(self: *anyopaque) bool {
+            if (FORWARD) {
+                const iter: *IteratorState = @ptrCast(@alignCast(self));
+                return iter.right_idx != NULL_IDX;
+            }
+        }
+        fn iter_get_next(self: *anyopaque) *Elem {
+            if (FORWARD) {
+                const iter: *IteratorState = @ptrCast(@alignCast(self));
+                assert_idx_less_than_len(iter.right_idx, iter.list.list.len, @src());
+                const curr_idx = iter.right_idx;
+                iter.right_idx = iter.list.get_next_idx(iter.state, iter.right_idx);
+                return iter.list.get_ptr(curr_idx);
+            }
+        }
+        fn iter_get_next_or_null(self: *anyopaque) ?*Elem {
+            if (FORWARD) {
+                const iter: *IteratorState = @ptrCast(@alignCast(self));
+                if (iter.right_idx == NULL_IDX) return null;
+                const curr_idx = iter.right_idx;
+                iter.right_idx = iter.list.get_next_idx(iter.state, iter.right_idx);
+                return iter.list.get_ptr(curr_idx);
+            }
+        }
+        fn iter_has_prev(self: *anyopaque) bool {
+            if (BACKWARD) {
+                const iter: *IteratorState = @ptrCast(@alignCast(self));
+                return iter.list.get_prev_idx(iter.state, iter.left_idx) != NULL_IDX;
+            }
+        }
+        fn iter_get_prev(self: *anyopaque) *Elem {
+            if (BACKWARD) {
+                const iter: *IteratorState = @ptrCast(@alignCast(self));
+                const prev_idx = iter.list.get_prev_idx(iter.state, iter.next_idx);
+                assert_idx_less_than_len(prev_idx, iter.list.list.len, @src());
+                iter.next_idx = prev_idx;
+                return iter.list.get_ptr(prev_idx);
+            }
+        }
+        fn iter_get_prev_or_null(self: *anyopaque) ?*Elem {
+            if (BACKWARD) {
+                const iter: *IteratorState = @ptrCast(@alignCast(self));
+                const prev_idx = iter.list.get_prev_idx(iter.state, iter.next_idx);
+                if (prev_idx == NULL_IDX) return null;
+                iter.next_idx = prev_idx;
+                return iter.list.get_ptr(prev_idx);
+            }
+        }
+        fn iter_reset(self: *anyopaque) void {
+            const iter: *IteratorState = @ptrCast(@alignCast(self));
+            if (FORWARD) {
+                iter.right_idx = iter.list.get_first_index_in_state(iter.state);
+            } else {
+                iter.left_idx = iter.list.get_last_index_in_state(iter.state);
+            }
+        }
+
+        pub const IteratorState = if (BIDIRECTION) struct {
+            list: *List,
+            state: State,
+            left_idx: Idx,
+            right_idx: Idx,
+
+            pub fn iterator(self: *IteratorState) Iterator(Elem, true, true) {
+                return Iterator(Elem, true, true){
+                    .implementor = @ptrCast(self),
+                    .vtable = Iterator(Elem, true, true).VTable{
+                        .reset = iter_reset,
+                        .has_next = iter_has_next,
+                        .get_next = iter_get_next,
+                        .get_next_or_null = iter_get_next_or_null,
+                        .has_prev = iter_has_next,
+                        .get_prev = iter_get_prev,
+                        .get_prev_or_null = iter_get_next_or_null,
+                    },
+                };
+            }
+        } else if (FORWARD) struct {
+            list: *List,
+            state: State,
+            right_idx: Idx,
+
+            pub fn iterator(self: *IteratorState) Iterator(Elem, false, true) {
+                return Iterator(Elem, true, true){
+                    .implementor = @ptrCast(self),
+                    .vtable = Iterator(Elem, true, true).VTable{
+                        .reset = iter_reset,
+                        .has_next = iter_has_next,
+                        .get_next = iter_get_next,
+                        .get_next_or_null = iter_get_next_or_null,
+                    },
+                };
+            }
+        } else struct {
+            list: *List,
+            state: State,
+            left_idx: Idx,
+
+            pub fn iterator(self: *IteratorState) Iterator(Elem, false, true) {
+                return Iterator(Elem, true, true){
+                    .implementor = @ptrCast(self),
+                    .vtable = Iterator(Elem, true, true).VTable{
+                        .reset = iter_reset,
+                        .has_next = iter_has_prev,
+                        .get_next = iter_get_prev,
+                        .get_next_or_null = iter_get_prev_or_null,
+                    },
+                };
+            }
+        };
+
+        pub inline fn new_iterator_state(self: *List, state: State) IteratorState {
+            if (BIDIRECTION) {
+                return IteratorState{
+                    .list = self,
+                    .state = state,
+                    .left_idx = NULL_IDX,
+                    .right_idx = self.get_first_index_in_state(state),
+                };
+            } else if (FORWARD) {
+                return IteratorState{
+                    .list = self,
+                    .state = state,
+                    .right_idx = self.get_first_index_in_state(state),
+                };
+            } else {
+                return IteratorState{
+                    .list = self,
+                    .state = state,
+                    .left_idx = self.get_last_index_in_state(state),
+                };
+            }
+        }
 
         pub fn new_empty() List {
             return UNINIT;
@@ -1006,7 +1172,7 @@ pub fn define_manual_allocator_linked_list_type(comptime options: LinkedListOpti
 
         pub fn get_nth_idx_from_start_of_state(self: *const List, state: State, n: Idx) Idx {
             const set_count = self.get_state_count(state);
-            assert_with_reason(n < set_count, @src(), "index {d} is out of bounds for set {s} (len = {d})", .{ @tagName(state), n, set_count });
+            assert_with_reason(n < set_count, @src(), "index {d} is out of bounds for set {s} (len = {d})", .{ n, @tagName(state), set_count });
             if (FORWARD) {
                 var c = 0;
                 var idx = self.get_first_index_in_state(state);
@@ -1029,7 +1195,7 @@ pub fn define_manual_allocator_linked_list_type(comptime options: LinkedListOpti
 
         pub fn get_nth_idx_from_end_of_state(self: *const List, state: State, n: Idx) Idx {
             const count = self.get_state_count(state);
-            assert_with_reason(n < count, @src(), "index {d} is out of bounds for set {s} (len = {d})", .{ @tagName(state), n, count });
+            assert_with_reason(n < count, @src(), "index {d} is out of bounds for set {s} (len = {d})", .{ n, @tagName(state), count });
             if (BACKWARD) {
                 var c = 0;
                 var idx = self.get_last_index_in_state(state);
@@ -1068,7 +1234,7 @@ pub fn define_manual_allocator_linked_list_type(comptime options: LinkedListOpti
                         const s: State = @enumFromInt(e);
                         var state_idx = if (FORWARD) self.get_first_index_in_state(s) else self.get_last_index_in_state(s);
                         while (state_idx != NULL_IDX) {
-                            if (state_idx == idx) assert_with_reason(e == cached_val, @src(), "idx {d} was found in state list `{s}`, but the value cached on the item indicates state `{s}`", .{ idx, @tagName(s), if (cached_val > MAX_STATE_TAG) "(INVALID STATE)" else @as(State, @enumFromInt(cached_val)) });
+                            if (state_idx == idx) assert_with_reason(e == cached_val, @src(), "idx {d} was found in state list `{s}`, but the value cached on the item indicates state `{s}`", .{ idx, @tagName(s), if (cached_val > MAX_STATE_TAG) "(INVALID STATE)" else @tagName(@as(State, @enumFromInt(cached_val))) });
                             state_idx = if (FORWARD) Internal.get_next_idx(self, s, state_idx) else Internal.get_prev_idx(self, s, state_idx);
                         }
                     }
@@ -1205,11 +1371,12 @@ pub fn define_manual_allocator_linked_list_type(comptime options: LinkedListOpti
                 },
                 .MANY_NEW => {
                     const count: Idx = get_val;
+
                     assert_with_reason(count > 0, @src(), "cannot get `0` new items", .{});
                     const first_idx = self.list.len;
                     const last_idx = self.list.len + count - 1;
                     _ = if (ASSUME_CAP) self.list.append_many_slots_assume_capacity(count) else (if (RETURN_ERRORS) try self.list.append_many_slots(count, alloc) else self.list.append_many_slots(count, alloc));
-                    Internal.link_new_indexes(self, insert_edges.set, first_idx, count);
+                    Internal.link_new_indexes(self, insert_state, first_idx, last_idx);
                     return_items.first = first_idx;
                     return_items.last = last_idx;
                     return_items.count = count;
@@ -1386,17 +1553,17 @@ pub fn define_manual_allocator_linked_list_type(comptime options: LinkedListOpti
                     return_items.count = supp_slice.total_needed;
                 },
             }
-            const insert_first = Internal.get_conn_right(self, insert_edges.state, return_items.first);
-            const insert_last = Internal.get_conn_left(self, insert_edges.state, return_items.last);
-            Internal.connect_with_insert(insert_edges.edges.left, insert_first, insert_last, insert_edges.edges.right);
-            Internal.increase_link_set_count(self, insert_edges.state, insert_edges.count);
-            if (TAIL_NO_BACKWARD and insert_edges.edges.right == NULL_IDX) {
-                Internal.state_last_index(self, insert_edges.state, return_items.last.idx);
+            const insert_first = Internal.get_conn_right(self, insert_state, return_items.first);
+            const insert_last = Internal.get_conn_left(self, insert_state, return_items.last);
+            Internal.connect_with_insert(self, insert_edges.left, insert_first, insert_last, insert_edges.right);
+            Internal.increase_link_set_count(self, insert_state, return_items.count);
+            if (TAIL_NO_BACKWARD and insert_edges.right == NULL_IDX) {
+                Internal.state_last_index(self, insert_state, return_items.last.idx);
             }
-            if (HEAD_NO_FORWARD and insert_edges.edges.left == NULL_IDX) {
-                Internal.set_first_index(self, insert_edges.set, return_items.first.idx);
+            if (HEAD_NO_FORWARD and insert_edges.left == NULL_IDX) {
+                Internal.set_first_index(self, insert_state, return_items.first.idx);
             }
-            Internal.set_state_on_indexes_first_last(self, return_items.first, return_items.last, FORWARD, insert_edges.set);
+            Internal.set_state_on_indexes_first_last(self, return_items.first, return_items.last, insert_state);
             return_items.state = insert_state;
             return return_items;
         }
@@ -1742,8 +1909,50 @@ pub fn define_manual_allocator_linked_list_type(comptime options: LinkedListOpti
 // }
 
 test "LinkedList.zig" {
-    // const t = std.testing;
-    // const alloc = std.heap.page_allocator;
+    const t = std.testing;
+    t.log_level = .debug;
+    const alloc = std.heap.page_allocator;
+    const elem = struct {
+        prev: u16,
+        val: u8,
+        idx: u16,
+        state: u8,
+        next: u16,
+    };
+    const states = enum(u8) {
+        USED,
+        FREE,
+    };
+    const opts = LinkedListOptions{
+        .list_options = Root.List.ListOptions{
+            .alignment = null,
+            .alloc_error_behavior = .ERRORS_PANIC,
+            .element_type = elem,
+            .growth_model = .GROW_BY_25_PERCENT,
+            .index_type = u16,
+            .secure_wipe_bytes = true,
+        },
+        .linked_set_enum = states,
+        .forward_linkage = "next",
+        .backward_linkage = "prev",
+        .element_idx_cache_field = "idx",
+        .force_cache_first_index = true,
+        .force_cache_last_index = true,
+        .element_state_access = ElementStateAccess{
+            .field = "state",
+            .field_bit_offset = 1,
+            .field_bit_count = 2,
+            .field_type = u8,
+        },
+        .stronger_asserts = true,
+    };
+    const List = define_manual_allocator_linked_list_type(opts);
+    var list = List.new_empty();
+    _ = list.get_items_and_insert_at(.MANY_NEW, 20, .AT_BEGINNING_OF_SET, .FREE, alloc);
+    try t.expectEqual(20, list.get_state_count(.FREE));
+    try t.expectEqual(0, list.get_state_count(.USED));
+    try t.expectEqual(List.NULL_IDX, list.get_first_index_in_state(.USED));
+    try t.expectEqual(List.NULL_IDX, list.get_last_index_in_state(.USED));
     // const opts = ListOptions{
     //     .error_behavior = .ERRORS_PANIC,
     //     .element_type = u8,

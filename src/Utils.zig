@@ -123,7 +123,9 @@ pub const CArgsList = struct {
 };
 
 pub inline fn secure_zero(comptime T: type, slice: []volatile T) void {
-    @memset(slice, 0);
+    const raw_len = slice.len * @sizeOf(T);
+    const u8_ptr: [*]volatile u8 = @ptrCast(slice.ptr);
+    @memset(u8_ptr[0..raw_len], 0);
 }
 pub inline fn secure_memset_undefined(comptime T: type, slice: []volatile T) void {
     if (build.mode == .Debug or build.mode == .ReleaseSafe) {
