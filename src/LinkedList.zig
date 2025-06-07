@@ -352,15 +352,6 @@ pub fn define_manual_allocator_linked_list_type(comptime options: LinkedListOpti
                 };
             }
 
-            pub inline fn to_cursor_slice(self: LLSlice, list_ref: *LinkedList) LLCursorSlice {
-                return LLCursorSlice{
-                    .slice = self,
-                    .list_ref = list_ref,
-                    .cursor_pos = 0,
-                    .cursor_idx = self.first,
-                };
-            }
-
             pub fn grow_end_rightward(self: *LLSlice, list: *const LinkedList, count: Idx) void {
                 const new_last = Internal.find_idx_n_places_after_this_one_with_fallback_start(list, self.list, self.last, count, false, 0);
                 self.count += count;
@@ -394,6 +385,80 @@ pub fn define_manual_allocator_linked_list_type(comptime options: LinkedListOpti
                 self.grow_start_leftward(list, count);
                 self.shrink_end_leftward(list, count);
             }
+
+            pub const SliceIteratorState = struct {
+                linked_list: *LinkedList,
+                slice: *const LLSlice,
+                left_idx: Idx,
+                right_idx: Idx,
+
+                pub fn iterator(self: *SliceIteratorState) Iterator(Elem) {
+                    return Iterator(Elem){
+                        .implementor = @ptrCast(self),
+                        .vtable = &Iterator(Elem).VTable{
+                            .reset = s_iter_reset,
+                            .advance_next = s_iter_advance_next,
+                            .peek_next_or_null = s_iter_peek_next_or_null,
+                            .advance_prev = s_iter_advance_prev,
+                            .peek_prev_or_null = s_iter_peek_prev_or_null,
+                        },
+                    };
+                }
+            };
+
+            fn s_iter_peek_prev_or_null(self: *anyopaque) ?*Elem {
+                if (!BACKWARD) return false;
+                const iter: *SliceIteratorState = @ptrCast(@alignCast(self));
+                if (iter.left_idx == NULL_IDX or iter.right_idx == iter.slice.first) return null;
+                return iter.linked_list.get_ptr(iter.left_idx);
+            }
+            fn s_iter_advance_prev(self: *anyopaque) bool {
+                if (!BACKWARD) return false;
+                const iter: *SliceIteratorState = @ptrCast(@alignCast(self));
+                if (iter.left_idx == NULL_IDX or iter.right_idx == iter.slice.first) return false;
+                iter.left_idx = iter.linked_list.get_prev_idx(iter.slice.list, iter.left_idx);
+                return true;
+            }
+            fn s_iter_peek_next_or_null(self: *anyopaque) ?*Elem {
+                if (!FORWARD) return false;
+                const iter: *SliceIteratorState = @ptrCast(@alignCast(self));
+                if (iter.right_idx == NULL_IDX or iter.left_idx == iter.slice.last) return null;
+                return iter.linked_list.get_ptr(iter.right_idx);
+            }
+            fn s_iter_advance_next(self: *anyopaque) bool {
+                if (!FORWARD) return false;
+                const iter: *SliceIteratorState = @ptrCast(@alignCast(self));
+                if (iter.right_idx == NULL_IDX or iter.left_idx == iter.slice.last) return false;
+                iter.right_idx = iter.linked_list.get_next_idx(iter.slice.list, iter.right_idx);
+                return true;
+            }
+            fn s_iter_reset(self: *anyopaque) void {
+                const iter: *SliceIteratorState = @ptrCast(@alignCast(self));
+                if (FORWARD) {
+                    iter.right_idx = iter.slice.first;
+                    iter.left_idx = NULL_IDX;
+                } else {
+                    iter.left_idx = iter.slice.last;
+                    iter.right_idx = NULL_IDX;
+                }
+            }
+
+            pub inline fn new_iterator_state_at_start_of_slice(self: *const LLSlice, linked_list: *LinkedList) SliceIteratorState {
+                return SliceIteratorState{
+                    .linked_list = linked_list,
+                    .slice = self,
+                    .left_idx = NULL_IDX,
+                    .right_idx = if (FORWARD) self.first else NULL_IDX,
+                };
+            }
+            pub inline fn new_iterator_state_at_end_of_slice(self: *const LLSlice, linked_list: *LinkedList) SliceIteratorState {
+                return SliceIteratorState{
+                    .linked_list = linked_list,
+                    .slice = self,
+                    .left_idx = if (BACKWARD) self.last else NULL_IDX,
+                    .right_idx = NULL_IDX,
+                };
+            }
         };
 
         /// Variant of `LLSlice` used for the purpose of supplying a function
@@ -401,120 +466,6 @@ pub fn define_manual_allocator_linked_list_type(comptime options: LinkedListOpti
         pub const LLSliceWithTotalNeeded = struct {
             slice: LLSlice,
             total_needed: Idx,
-        };
-
-        /// A variant of `LLSlice` that keeps track of a logical cursor index within the slice
-        /// and holds a reference to the list to which it belongs for convenience.
-        ///
-        /// Users can lookup items based on their logical nth position in the list,
-        /// and traversing the list may be faster in some cases by determining if it would
-        /// be faster to get there from the current cursor position or from the start/end
-        /// of the list
-        pub const LLCursorSlice = struct {
-            slice: LLSlice,
-            list_ref: *LinkedList,
-            cursor_pos: Idx = NULL_IDX,
-            cursor_idx: Idx = NULL_IDX,
-
-            pub fn goto_pos(self: *LLCursorSlice, pos: Idx) void {
-                assert_with_reason(pos < self.slice.count, @src(), "pos {d} is out of bounds for LLSlice (count/len = {d})", .{ pos, self.slice.count });
-                if (pos > self.cursor_pos) {
-                    self.move_forward_n_positions(pos - self.cursor_pos);
-                } else {
-                    self.move_backward_n_positions(self.cursor_pos - pos);
-                }
-            }
-
-            pub fn move_forward_n_positions(self: *LLCursorSlice, n: Idx) void {
-                assert_with_reason(self.cursor_pos + n < self.slice.count, @src(), "cursor pos {d} (curr {d} + {d}) is out of bounds for slice count/len ({d})", .{ self.cursor_pos + n, self.cursor_pos, n, self.slice.count });
-                if (FORWARD) {
-                    const from_curr = n;
-                    if (BACKWARD) {
-                        const from_end = self.slice.count - self.cursor_pos + n;
-                        if (from_end < from_curr) {
-                            self.cursor_idx = Internal.find_idx_n_places_before_this_one_with_fallback_start(self.list_ref, self.slice.list, self.slice.last, from_end, false, 0);
-                        } else {
-                            self.cursor_idx = Internal.find_idx_n_places_after_this_one_with_fallback_start(self.list_ref, self.slice.list, self.cursor_idx, from_curr, false, 0);
-                        }
-                    } else {
-                        self.cursor_idx = Internal.find_idx_n_places_after_this_one_with_fallback_start(self.list_ref, self.slice.list, self.cursor_idx, from_curr, false, 0);
-                    }
-                } else {
-                    const from_end = self.slice.count - self.cursor_pos + n;
-                    self.cursor_idx = Internal.find_idx_n_places_before_this_one_with_fallback_start(self.list_ref, self.slice.list, self.slice.last, from_end, false, 0);
-                }
-                self.cursor_pos += n;
-            }
-
-            pub fn move_backward_n_positions(self: *LLCursorSlice, n: Idx) void {
-                assert_with_reason(self.cursor_pos >= n, @src(), "cursor pos {d} (curr {d} - {d}) is out of bounds for slice count/len ({d})", .{ self.cursor_pos - n, self.cursor_pos, n, self.slice.count });
-                if (BACKWARD) {
-                    const from_curr = n;
-                    if (FORWARD) {
-                        const from_start = self.cursor_pos - n;
-                        if (from_start < from_curr) {
-                            self.cursor_idx = Internal.find_idx_n_places_after_this_one_with_fallback_start(self.list_ref, self.slice.list, self.slice.first, from_start, false, 0);
-                        } else {
-                            self.cursor_idx = Internal.find_idx_n_places_before_this_one_with_fallback_start(self.list_ref, self.slice.list, self.cursor_idx, from_curr, false, 0);
-                        }
-                    } else {
-                        self.cursor_idx = Internal.find_idx_n_places_before_this_one_with_fallback_start(self.list_ref, self.slice.list, self.cursor_idx, from_curr, false, 0);
-                    }
-                } else {
-                    const from_start = self.cursor_pos - n;
-                    self.cursor_idx = Internal.find_idx_n_places_after_this_one_with_fallback_start(self.list_ref, self.slice.list, self.slice.first, from_start, false, 0);
-                }
-                self.cursor_pos -= n;
-            }
-
-            pub fn get_current_ptr(self: LLCursorSlice) *Elem {
-                return self.list_ref.get_ptr(self.cursor_idx);
-            }
-
-            pub fn grow_end_rightward(self: *LLCursorSlice, count: Idx) void {
-                self.slice.grow_end_rightward(self.list_ref, count);
-            }
-
-            pub fn shrink_end_leftward(self: *LLCursorSlice, count: Idx) void {
-                self.slice.shrink_end_leftward(self.list_ref, count);
-                if (self.cursor_pos >= self.slice.count) {
-                    self.cursor_pos = self.slice.count - 1;
-                    self.cursor_idx = self.slice.last;
-                }
-            }
-
-            pub fn grow_start_leftward(self: *LLCursorSlice, count: Idx) void {
-                self.slice.grow_start_leftward(self.list_ref, count);
-                self.cursor_pos += count;
-            }
-
-            pub fn shrink_start_rightward(self: *LLCursorSlice, count: Idx) void {
-                self.slice.shrink_start_rightward(self.list_ref, count);
-                if (self.cursor_pos < count) {
-                    self.cursor_pos = 0;
-                    self.cursor_idx = self.slice.first;
-                } else {
-                    self.cursor_pos -= count;
-                }
-            }
-
-            pub fn slide_right(self: *LLCursorSlice, count: Idx) void {
-                self.slice.slide_right(self.list_ref, count);
-                if (self.cursor_pos < count) {
-                    self.cursor_pos = 0;
-                    self.cursor_idx = self.slice.first;
-                } else {
-                    self.cursor_pos -= count;
-                }
-            }
-
-            pub fn slide_left(self: *LLCursorSlice, count: Idx) void {
-                self.slice.slide_left(self.list_ref, count);
-                if (self.slice.count - self.cursor_pos <= count) {
-                    self.cursor_pos = self.slice.count - 1;
-                    self.cursor_idx = self.slice.last;
-                }
-            }
         };
 
         /// All functions/structs in this namespace fall in at least one of 3 categories:
@@ -660,7 +611,7 @@ pub fn define_manual_allocator_linked_list_type(comptime options: LinkedListOpti
             pub fn disconnect_many_first_last(self: *LinkedList, list: List, first_idx: Idx, last_idx: Idx, count: Idx) void {
                 const disconn = Internal.get_conn_left_right_before_first_and_after_last(self, first_idx, last_idx, list);
                 Internal.connect(disconn.left, disconn.right);
-                Internal.decrease_link_set_count(self, disconn.set, count);
+                Internal.decrease_link_set_count(self, list, count);
             }
 
             pub inline fn connect_with_insert(left_edge: ConnLeft, first_insert: ConnRight, last_insert: ConnLeft, right_edge: ConnRight) void {
@@ -1001,8 +952,8 @@ pub fn define_manual_allocator_linked_list_type(comptime options: LinkedListOpti
                     .FIRST_N_FROM_LIST => {
                         const list_count: CountFromList = get_val;
                         assert_with_reason(list_count.count > 0, @src(), "cannot get `0` items", .{});
-                        assert_with_reason(self.get_list_len(list_count.set) >= list_count.count, @src(), "requested {d} items from set {s}, but set only has {d} items", .{ list_count.count, @tagName(list_count.list), self.get_list_len(list_count.list) });
-                        return_items.first = self.get_first_index_in_list(list_count.set);
+                        assert_with_reason(self.get_list_len(list_count.list) >= list_count.count, @src(), "requested {d} items from set {s}, but set only has {d} items", .{ list_count.count, @tagName(list_count.list), self.get_list_len(list_count.list) });
+                        return_items.first = self.get_first_index_in_list(list_count.list);
                         return_items.last = self.get_nth_item_from_start_of_list(list_count.list, list_count.count - 1);
                         return_items.count = list_count.count;
                         Internal.disconnect_many_first_last(self, list_count.list, return_items.first, return_items.last, list_count.count);
@@ -1180,65 +1131,45 @@ pub fn define_manual_allocator_linked_list_type(comptime options: LinkedListOpti
                 return return_items;
             }
 
-            fn iter_has_next(self: *anyopaque) bool {
-                if (FORWARD) {
-                    const iter: *IteratorState = @ptrCast(@alignCast(self));
-                    return iter.right_idx != NULL_IDX;
-                }
+            fn iter_peek_prev_or_null(self: *anyopaque) ?*Elem {
+                if (!BACKWARD) return false;
+                const iter: *IteratorState = @ptrCast(@alignCast(self));
+                if (iter.left_idx == NULL_IDX) return null;
+                return iter.linked_list.get_ptr(iter.left_idx);
             }
-            fn iter_get_next(self: *anyopaque) *Elem {
-                if (FORWARD) {
-                    const iter: *IteratorState = @ptrCast(@alignCast(self));
-                    assert_idx_less_than_len(iter.right_idx, iter.linked_list.list.len, @src());
-                    const curr_idx = iter.right_idx;
-                    iter.right_idx = iter.linked_list.get_next_idx(iter.list, iter.right_idx);
-                    return iter.linked_list.get_ptr(curr_idx);
-                }
+            fn iter_advance_prev(self: *anyopaque) bool {
+                if (!BACKWARD) return false;
+                const iter: *IteratorState = @ptrCast(@alignCast(self));
+                if (iter.left_idx == NULL_IDX) return false;
+                iter.left_idx = iter.linked_list.get_prev_idx(iter.list, iter.left_idx);
+                return true;
             }
-            fn iter_get_next_or_null(self: *anyopaque) ?*Elem {
-                if (FORWARD) {
-                    const iter: *IteratorState = @ptrCast(@alignCast(self));
-                    if (iter.right_idx == NULL_IDX) return null;
-                    const curr_idx = iter.right_idx;
-                    iter.right_idx = iter.linked_list.get_next_idx(iter.list, iter.right_idx);
-                    return iter.linked_list.get_ptr(curr_idx);
-                }
+            fn iter_peek_next_or_null(self: *anyopaque) ?*Elem {
+                if (!FORWARD) return false;
+                const iter: *IteratorState = @ptrCast(@alignCast(self));
+                if (iter.right_idx == NULL_IDX) return null;
+                return iter.linked_list.get_ptr(iter.right_idx);
             }
-            fn iter_has_prev(self: *anyopaque) bool {
-                if (BACKWARD) {
-                    const iter: *IteratorState = @ptrCast(@alignCast(self));
-                    return iter.linked_list.get_prev_idx(iter.list, iter.left_idx) != NULL_IDX;
-                }
-            }
-            fn iter_get_prev(self: *anyopaque) *Elem {
-                if (BACKWARD) {
-                    const iter: *IteratorState = @ptrCast(@alignCast(self));
-                    const prev_idx = iter.linked_list.get_prev_idx(iter.list, iter.next_idx);
-                    assert_idx_less_than_len(prev_idx, iter.linked_list.list.len, @src());
-                    iter.next_idx = prev_idx;
-                    return iter.linked_list.get_ptr(prev_idx);
-                }
-            }
-            fn iter_get_prev_or_null(self: *anyopaque) ?*Elem {
-                if (BACKWARD) {
-                    const iter: *IteratorState = @ptrCast(@alignCast(self));
-                    const prev_idx = iter.linked_list.get_prev_idx(iter.list, iter.next_idx);
-                    if (prev_idx == NULL_IDX) return null;
-                    iter.next_idx = prev_idx;
-                    return iter.linked_list.get_ptr(prev_idx);
-                }
+            fn iter_advance_next(self: *anyopaque) bool {
+                if (!FORWARD) return false;
+                const iter: *IteratorState = @ptrCast(@alignCast(self));
+                if (iter.right_idx == NULL_IDX) return false;
+                iter.right_idx = iter.linked_list.get_next_idx(iter.list, iter.right_idx);
+                return true;
             }
             fn iter_reset(self: *anyopaque) void {
                 const iter: *IteratorState = @ptrCast(@alignCast(self));
                 if (FORWARD) {
                     iter.right_idx = iter.linked_list.get_first_index_in_list(iter.list);
+                    iter.left_idx = NULL_IDX;
                 } else {
                     iter.left_idx = iter.linked_list.get_last_index_in_list(iter.list);
+                    iter.right_idx = NULL_IDX;
                 }
             }
         };
 
-        pub const IteratorState = if (BIDIRECTION) struct {
+        pub const IteratorState = struct {
             linked_list: *LinkedList,
             list: List,
             left_idx: Idx,
@@ -1247,72 +1178,32 @@ pub fn define_manual_allocator_linked_list_type(comptime options: LinkedListOpti
             pub fn iterator(self: *IteratorState) Iterator(Elem, true, true) {
                 return Iterator(Elem, true, true){
                     .implementor = @ptrCast(self),
-                    .vtable = Iterator(Elem, true, true).VTable{
+                    .vtable = Iterator(Elem).VTable{
                         .reset = Internal.iter_reset,
-                        .has_next = Internal.iter_has_next,
-                        .get_next = Internal.iter_get_next,
-                        .get_next_or_null = Internal.iter_get_next_or_null,
-                        .has_prev = Internal.iter_has_next,
-                        .get_prev = Internal.iter_get_prev,
-                        .get_prev_or_null = Internal.iter_get_next_or_null,
-                    },
-                };
-            }
-        } else if (FORWARD) struct {
-            linked_list: *LinkedList,
-            list: List,
-            right_idx: Idx,
-
-            pub fn iterator(self: *IteratorState) Iterator(Elem, false, true) {
-                return Iterator(Elem, true, true){
-                    .implementor = @ptrCast(self),
-                    .vtable = Iterator(Elem, true, true).VTable{
-                        .reset = Internal.iter_reset,
-                        .has_next = Internal.iter_has_next,
-                        .get_next = Internal.iter_get_next,
-                        .get_next_or_null = Internal.iter_get_next_or_null,
-                    },
-                };
-            }
-        } else struct {
-            linked_list: *LinkedList,
-            list: List,
-            left_idx: Idx,
-
-            pub fn iterator(self: *IteratorState) Iterator(Elem, false, true) {
-                return Iterator(Elem, true, true){
-                    .implementor = @ptrCast(self),
-                    .vtable = Iterator(Elem, true, true).VTable{
-                        .reset = Internal.iter_reset,
-                        .has_next = Internal.iter_has_prev,
-                        .get_next = Internal.iter_get_prev,
-                        .get_next_or_null = Internal.iter_get_prev_or_null,
+                        .advance_next = Internal.iter_advance_next,
+                        .peek_next_or_null = Internal.iter_peek_next_or_null,
+                        .advance_prev = Internal.iter_advance_prev,
+                        .peek_prev_or_null = Internal.iter_peek_prev_or_null,
                     },
                 };
             }
         };
 
-        pub inline fn new_iterator_list(self: *LinkedList, list: List) IteratorState {
-            if (BIDIRECTION) {
-                return IteratorState{
-                    .linked_list = self,
-                    .list = list,
-                    .left_idx = NULL_IDX,
-                    .right_idx = self.get_first_index_in_list(list),
-                };
-            } else if (FORWARD) {
-                return IteratorState{
-                    .linked_list = self,
-                    .list = list,
-                    .right_idx = self.get_first_index_in_list(list),
-                };
-            } else {
-                return IteratorState{
-                    .linked_list = self,
-                    .list = list,
-                    .left_idx = self.get_last_index_in_list(list),
-                };
-            }
+        pub inline fn new_iterator_state_at_start_of_list(self: *LinkedList, list: List) IteratorState {
+            return IteratorState{
+                .linked_list = self,
+                .list = list,
+                .left_idx = NULL_IDX,
+                .right_idx = if (HEAD) self.get_first_index_in_list(list) else NULL_IDX,
+            };
+        }
+        pub inline fn new_iterator_state_at_end_of_list(self: *LinkedList, list: List) IteratorState {
+            return IteratorState{
+                .linked_list = self,
+                .list = list,
+                .left_idx = if (TAIL) self.get_last_index_in_list(list) else NULL_IDX,
+                .right_idx = NULL_IDX,
+            };
         }
 
         pub fn new_empty() LinkedList {
@@ -1360,11 +1251,11 @@ pub fn define_manual_allocator_linked_list_type(comptime options: LinkedListOpti
             return Internal.traverse_to_find_index_preceding_this_one_in_direction(self, this_idx, list, .BACKWARD);
         }
 
-        pub fn get_nth_item_from_start_of_list(self: *const LinkedList, list: List, n: Idx) Idx {
+        pub fn get_nth_item_from_start_of_list(self: *LinkedList, list: List, n: Idx) Idx {
             const set_count = self.get_list_len(list);
             assert_with_reason(n < set_count, @src(), "index {d} is out of bounds for set {s} (len = {d})", .{ n, @tagName(list), set_count });
             if (FORWARD) {
-                var c = 0;
+                var c: Idx = 0;
                 var idx = self.get_first_index_in_list(list);
                 while (c != n) {
                     c += 1;
@@ -1383,7 +1274,7 @@ pub fn define_manual_allocator_linked_list_type(comptime options: LinkedListOpti
             }
         }
 
-        pub fn get_nth_item_from_end_of_list(self: *const LinkedList, list: List, n: Idx) Idx {
+        pub fn get_nth_item_from_end_of_list(self: *LinkedList, list: List, n: Idx) Idx {
             const count = self.get_list_len(list);
             assert_with_reason(n < count, @src(), "index {d} is out of bounds for set {s} (len = {d})", .{ n, @tagName(list), count });
             if (BACKWARD) {
@@ -1858,7 +1749,13 @@ test "LinkedList.zig" {
         },
         .stronger_asserts = true,
     };
-
+    const Action = struct {
+        fn set_value_from_string(elem: *TestElem, userdata: ?*anyopaque) void {
+            const string: *[]const u8 = @ptrCast(@alignCast(userdata.?));
+            elem.val = string.*[0];
+            string.* = string.*[1..];
+        }
+    };
     const List = define_manual_allocator_linked_list_type(opts);
     const expect = struct {
         fn list_is_valid(linked_list: *List, list: TestState, case_indexes: []const u16, case_vals: []const u8) !void {
@@ -2029,8 +1926,8 @@ test "LinkedList.zig" {
         }
     };
     var linked_list = List.new_empty();
-    const result = linked_list.get_items_and_insert_at(.CREATE_MANY_NEW, 20, .AT_BEGINNING_OF_LIST, .FREE, alloc);
-    try t.expect_shallow_equal(result, "linked_list.get_items_and_insert_at(.CREATE_MANY_NEW, 20, .AT_BEGINNING_OF_LIST, .FREE, alloc)", List.LLSlice{ .count = 20, .first = 0, .last = 19, .list = .FREE }, "List.LLSlice{.count = 20, .first = 0, .last = 19, .list = .FREE}", "unexpected result from function", .{});
+    var slice_result = linked_list.get_items_and_insert_at(.CREATE_MANY_NEW, 20, .AT_BEGINNING_OF_LIST, .FREE, alloc);
+    try t.expect_shallow_equal(slice_result, "get_items_and_insert_at(.CREATE_MANY_NEW, 20, .AT_BEGINNING_OF_LIST, .FREE, alloc)", List.LLSlice{ .count = 20, .first = 0, .last = 19, .list = .FREE }, "List.LLSlice{.count = 20, .first = 0, .last = 19, .list = .FREE}", "unexpected result from function", .{});
     // zig fmt: off
     try expect.full_ll_list(
         &linked_list,
@@ -2038,6 +1935,36 @@ test "LinkedList.zig" {
         &.{}, // used_vals
         &.{ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19 }, // free_indexes
         &.{ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,  0,  0,  0,  0,  0,  0,  0,  0,  0 },  // free_vals
+        &.{}, // invalid_indexes
+        &.{}, // invalid_vals
+    );
+    // zig fmt: on
+    slice_result = linked_list.get_items_and_insert_at(.FIRST_N_FROM_LIST, List.CountFromList.new(.FREE, 8), .AT_BEGINNING_OF_LIST, .USED, alloc);
+    try t.expect_shallow_equal(slice_result, "get_items_and_insert_at(.FIRST_N_FROM_LIST, List.CountFromList.new(.FREE, 8), .AT_BEGINNING_OF_LIST, .USED, alloc)", List.LLSlice{ .count = 8, .first = 0, .last = 7, .list = .USED }, "List.LLSlice{ .count = 8, .first = 0, .last = 7, .list = .USED }", "unexpected result from function", .{});
+    // zig fmt: off
+    try expect.full_ll_list(
+        &linked_list,
+        &.{ 0, 1, 2, 3, 4, 5, 6, 7}, // used_indexes
+        &.{ 0, 0, 0, 0, 0, 0, 0, 0}, // used_vals
+        &.{ 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19 }, // free_indexes
+        &.{ 0, 0, 0,  0,  0,  0,  0,  0,  0,  0,  0,  0 },  // free_vals
+        &.{}, // invalid_indexes
+        &.{}, // invalid_vals
+    );
+    // zig fmt: on
+    var slice_iter_state = slice_result.new_iterator_state_at_start_of_slice(&linked_list);
+    try t.expect_shallow_equal(slice_iter_state, "slice_result.new_iterator_state_at_start_of_slice(&linked_list)", List.LLSlice.SliceIteratorState{ .linked_list = &linked_list, .left_idx = List.NULL_IDX, .right_idx = slice_result.first, .slice = &slice_result }, "SliceIteratorState{ .linked_list = &linked_list, .left_idx = List.NULL_IDX, .right_idx = slice_result.first, .slice = &slice_result }", "unexpected result from function", .{});
+    var slice_iter = slice_iter_state.iterator();
+    var str: []const u8 = "abcdefgh";
+    const bool_result = slice_iter.perform_action_on_each_next_item(Action.set_value_from_string, @ptrCast(&str));
+    try t.expect_true(bool_result, "slice_iter.perform_action_on_each_next_item(Action.set_value_from_string, &\"abcdefghijklmnopqrst\");", "iterator set values failed", .{});
+    // zig fmt: off
+    try expect.full_ll_list(
+        &linked_list,
+        &.{ 0, 1, 2, 3, 4, 5, 6, 7}, // used_indexes
+        "abcdefgh", // used_vals
+        &.{ 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19 }, // free_indexes
+        &.{ 0, 0, 0,  0,  0,  0,  0,  0,  0,  0,  0,  0 },  // free_vals
         &.{}, // invalid_indexes
         &.{}, // invalid_vals
     );

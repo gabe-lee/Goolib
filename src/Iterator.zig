@@ -21,165 +21,101 @@
 //    misrepresented as being the original software.
 // 3. This notice may not be removed or altered from any source distribution.
 
-pub fn Iterator(comptime T: type, comptime bi_directional: bool, comptime can_reset: bool) type {
-    return switch (bi_directional) {
-        false => switch (can_reset) {
-            false => struct {
-                implementor: *anyopaque,
-                vtable: *const VTable,
+pub fn Iterator(comptime T: type) type {
+    return struct {
+        implementor: *anyopaque,
+        vtable: *const VTable,
 
-                pub const VTable = struct {
-                    /// Return whether at least one more item can be returned
-                    /// in the forward direction
-                    has_next: *const fn (inplementor: *anyopaque) bool,
-                    /// Return next item or panic if none exists,
-                    /// and increment iterator
-                    get_next: *const fn (inplementor: *anyopaque) *T,
-                    /// Return next item or null if none exists,
-                    /// and increment iterator
-                    get_next_or_null: *const fn (inplementor: *anyopaque) ?*T,
-                };
-                const Self = @This();
+        pub const VTable = struct {
+            /// Reset the Iterator to its initial state,
+            /// returning `false` if the implementation cannot
+            /// reset or some other condition prevented it,
+            reset: *const fn (inplementor: *anyopaque) void,
+            /// Advance the iterator to the right/next position,
+            /// returning `false` if the position didn't move
+            /// or some other condition prevented it
+            advance_next: *const fn (inplementor: *anyopaque) bool,
+            /// Return pointer to next item or null if none exists,
+            /// without advancing iterator
+            peek_next_or_null: *const fn (inplementor: *anyopaque) ?*T,
+            /// Advance the iterator to the left/prev position,
+            /// returning `false` if the position didn't move
+            /// or some other condition prevented it
+            advance_prev: *const fn (inplementor: *anyopaque) bool,
+            /// Return pointer to prev item or null if none exists,
+            /// without advancing iterator
+            peek_prev_or_null: *const fn (inplementor: *anyopaque) ?*T,
+        };
+        const Self = @This();
 
-                pub inline fn has_next(self: Self) bool {
-                    return self.vtable.has_next(self.implementor);
-                }
-                pub inline fn get_next(self: Self) *T {
-                    return self.vtable.get_next(self.implementor);
-                }
-                pub inline fn get_next_or_null(self: Self) ?*T {
-                    return self.vtable.get_next_or_null(self.implementor);
-                }
-            },
-            true => struct {
-                implementor: *anyopaque,
-                vtable: *const VTable,
-
-                pub const VTable = struct {
-                    /// Reset the Iterator to its initial state
-                    reset: *const fn (inplementor: *anyopaque) void,
-                    /// Return whether at least one more item can be returned
-                    /// in the forward direction
-                    has_next: *const fn (inplementor: *anyopaque) bool,
-                    /// Return next item or panic if none exists,
-                    /// and increment iterator
-                    get_next: *const fn (inplementor: *anyopaque) *T,
-                    /// Return next item or null if none exists,
-                    /// and increment iterator
-                    get_next_or_null: *const fn (inplementor: *anyopaque) ?*T,
-                };
-                const Self = @This();
-
-                pub inline fn reset(self: Self) bool {
-                    return self.vtable.reset(self.implementor);
-                }
-                pub inline fn has_next(self: Self) bool {
-                    return self.vtable.has_next(self.implementor);
-                }
-                pub inline fn get_next(self: Self) *T {
-                    return self.vtable.get_next(self.implementor);
-                }
-                pub inline fn get_next_or_null(self: Self) ?*T {
-                    return self.vtable.get_next_or_null(self.implementor);
-                }
-            },
-        },
-        true => switch (can_reset) {
-            false => struct {
-                implementor: *anyopaque,
-                vtable: *const VTable,
-
-                pub const VTable = struct {
-                    /// Return whether at least one more item can be returned
-                    /// in the forward direction
-                    has_next: *const fn (inplementor: *anyopaque) bool,
-                    /// Return next item or panic if none exists,
-                    /// and increment iterator
-                    get_next: *const fn (inplementor: *anyopaque) *T,
-                    /// Return next item or null if none exists,
-                    /// and increment iterator
-                    get_next_or_null: *const fn (inplementor: *anyopaque) ?*T,
-                    /// Return whether at least one more item can be returned
-                    /// in the backward direction
-                    has_prev: *const fn (inplementor: *anyopaque) bool,
-                    /// Return prev item or panic if none exists,
-                    /// and increment iterator
-                    get_prev: *const fn (inplementor: *anyopaque) *T,
-                    /// Return prev item or null if none exists,
-                    /// and increment iterator
-                    get_prev_or_null: *const fn (inplementor: *anyopaque) ?*T,
-                };
-                const Self = @This();
-
-                pub inline fn has_next(self: Self) bool {
-                    return self.vtable.has_next(self.implementor);
-                }
-                pub inline fn get_next(self: Self) *T {
-                    return self.vtable.get_next(self.implementor);
-                }
-                pub inline fn get_next_or_null(self: Self) ?*T {
-                    return self.vtable.get_next_or_null(self.implementor);
-                }
-                pub inline fn has_prev(self: Self) bool {
-                    return self.vtable.has_prev(self.implementor);
-                }
-                pub inline fn get_prev(self: Self) *T {
-                    return self.vtable.get_prev(self.implementor);
-                }
-                pub inline fn get_prev_or_null(self: Self) ?*T {
-                    return self.vtable.get_prev_or_null(self.implementor);
-                }
-            },
-            true => struct {
-                implementor: *anyopaque,
-                vtable: *const VTable,
-
-                pub const VTable = struct {
-                    /// Reset the Iterator to its initial state
-                    reset: *const fn (inplementor: *anyopaque) void,
-                    /// Return whether at least one more item can be returned
-                    /// in the forward direction
-                    has_next: *const fn (inplementor: *anyopaque) bool,
-                    /// Return next item or panic if none exists,
-                    /// and increment iterator
-                    get_next: *const fn (inplementor: *anyopaque) *T,
-                    /// Return next item or null if none exists,
-                    /// and increment iterator
-                    get_next_or_null: *const fn (inplementor: *anyopaque) ?*T,
-                    /// Return whether at least one more item can be returned
-                    /// in the backward direction
-                    has_prev: *const fn (inplementor: *anyopaque) bool,
-                    /// Return prev item or panic if none exists,
-                    /// and increment iterator
-                    get_prev: *const fn (inplementor: *anyopaque) *T,
-                    /// Return prev item or null if none exists,
-                    /// and increment iterator
-                    get_prev_or_null: *const fn (inplementor: *anyopaque) ?*T,
-                };
-                const Self = @This();
-
-                pub inline fn reset(self: Self) bool {
-                    return self.vtable.reset(self.implementor);
-                }
-                pub inline fn has_next(self: Self) bool {
-                    return self.vtable.has_next(self.implementor);
-                }
-                pub inline fn get_next(self: Self) *T {
-                    return self.vtable.get_next(self.implementor);
-                }
-                pub inline fn get_next_or_null(self: Self) ?*T {
-                    return self.vtable.get_next_or_null(self.implementor);
-                }
-                pub inline fn has_prev(self: Self) bool {
-                    return self.vtable.has_prev(self.implementor);
-                }
-                pub inline fn get_prev(self: Self) *T {
-                    return self.vtable.get_prev(self.implementor);
-                }
-                pub inline fn get_prev_or_null(self: Self) ?*T {
-                    return self.vtable.get_prev_or_null(self.implementor);
-                }
-            },
-        },
+        pub inline fn reset(self: Self) bool {
+            return self.vtable.reset(self.implementor);
+        }
+        pub inline fn has_next(self: Self) bool {
+            return self.vtable.peek_next_or_null(self.implementor) != null;
+        }
+        pub inline fn peek_next(self: Self) *T {
+            return self.vtable.peek_next_or_null(self.implementor).?;
+        }
+        pub inline fn peek_next_or_null(self: Self) ?*T {
+            return self.vtable.peek_next_or_null(self.implementor);
+        }
+        pub inline fn get_next(self: Self) *T {
+            const result = self.vtable.peek_next_or_null(self.implementor).?;
+            self.vtable.advance_next(self.implementor);
+            return result;
+        }
+        pub inline fn get_next_or_null(self: Self) ?*T {
+            const result = self.vtable.peek_next_or_null(self.implementor).?;
+            if (result == null) return null;
+            _ = self.vtable.advance_next(self.implementor);
+            return result;
+        }
+        pub inline fn skip_next(self: Self) bool {
+            return self.vtable.advance_next(self.implementor);
+        }
+        pub inline fn has_prev(self: Self) bool {
+            return self.vtable.peek_prev_or_null(self.implementor) != null;
+        }
+        pub inline fn peek_prev(self: Self) *T {
+            return self.vtable.peek_prev_or_null(self.implementor).?;
+        }
+        pub inline fn peek_prev_or_null(self: Self) ?*T {
+            return self.vtable.peek_prev_or_null(self.implementor);
+        }
+        pub inline fn get_prev(self: Self) *T {
+            const result = self.vtable.peek_next_or_null(self.implementor).?;
+            self.vtable.advance_next(self.implementor);
+            return result;
+        }
+        pub inline fn get_prev_or_null(self: Self) ?*T {
+            const result = self.vtable.peek_prev_or_null(self.implementor).?;
+            if (result == null) return null;
+            _ = self.vtable.advance_prev(self.implementor);
+            return result;
+        }
+        pub inline fn skip_prev(self: Self) bool {
+            return self.vtable.advance_prev(self.implementor);
+        }
+        pub fn perform_action_on_each_next_item(self: Self, action: *const fn (item: *T, userdata: ?*anyopaque) void, userdata: ?*anyopaque) bool {
+            var item_or_null: ?*T = self.vtable.peek_next_or_null(self.implementor);
+            if (item_or_null == null) return false;
+            while (item_or_null != null) {
+                _ = self.vtable.advance_next(self.implementor);
+                action(item_or_null.?, userdata);
+                item_or_null = self.vtable.peek_next_or_null(self.implementor);
+            }
+            return true;
+        }
+        pub fn perform_action_on_each_prev_item(self: Self, action: *const fn (item: *T, userdata: ?*anyopaque) void, userdata: ?*anyopaque) bool {
+            var item_or_null: ?*T = self.vtable.peek_prev_or_null(self.implementor);
+            if (item_or_null == null) return false;
+            while (item_or_null != null) {
+                _ = self.vtable.advance_prev(self.implementor);
+                action(item_or_null.?, userdata);
+                item_or_null = self.vtable.peek_prev_or_null(self.implementor);
+            }
+            return true;
+        }
     };
 }
