@@ -348,3 +348,255 @@ pub fn slice_resides_in_slice(comptime T: type, slice: []const T, sub_slice: []c
     const sub_end_addr = @intFromPtr(sub_slice.ptr + sub_slice.len - 1);
     return start_addr <= sub_start_addr and sub_end_addr <= end_addr;
 }
+
+pub fn deep_equal(val_a: anytype, val_b: anytype) bool {
+    const A = @TypeOf(val_a);
+    const B = @TypeOf(val_b);
+    const INFO_A = @typeInfo(A);
+    const INFO_B = @typeInfo(B);
+    const NAME_A = @typeName(A);
+    switch (INFO_A) {
+        .noreturn,
+        .@"opaque",
+        .frame,
+        .@"anyframe",
+        .undefined,
+        .null,
+        .void,
+        => @compileError("values of type " ++ NAME_A ++ " cannot be equal"),
+
+        .type,
+        .bool,
+        .int,
+        .float,
+        .comptime_float,
+        .comptime_int,
+        .enum_literal,
+        .@"enum",
+        .@"fn",
+        .error_set,
+        => return val_a == val_b,
+
+        .pointer => {
+            if (INFO_A.pointer.child != INFO_B.pointer.child) return false;
+            switch (INFO_A.pointer.size) {
+                .c, .many => return val_a == val_b,
+                .one => {
+                    switch (@typeInfo(INFO_A.pointer.child)) {
+                        .@"fn", .@"opaque" => return val_a == val_b,
+                        else => return deep_equal(val_a.*, val_b.*),
+                    }
+                },
+                .slice => {
+                    if (val_a.len != val_b.len) return false;
+                    var i: usize = 0;
+                    while (i < val_a.len) : (i += 1) {
+                        if (!deep_equal(val_a[i], val_b[i])) return false;
+                    }
+                    return true;
+                },
+            }
+        },
+
+        .array, .vector => {
+            const child_a = if (INFO_A == .vector) INFO_A.vector.child else INFO_A.array.child;
+            const child_b = if (INFO_B == .vector) INFO_B.vector.child else INFO_B.array.child;
+            if (child_a != child_b) return false;
+            const len_a = if (INFO_A == .vector) INFO_A.vector.len else INFO_A.array.len;
+            const len_b = if (INFO_B == .vector) INFO_B.vector.len else INFO_B.array.len;
+            if (len_a != len_b) return false;
+            var i: usize = 0;
+            while (i < val_a.len) : (i += 1) {
+                if (!deep_equal(val_a[i], val_b[i])) return false;
+            }
+            return true;
+        },
+
+        .@"struct" => |s_info| {
+            if (A != B) return false;
+            inline for (s_info.fields) |field| {
+                if (!deep_equal(@field(val_a, field.name), @field(val_b, field.name))) return false;
+            }
+            return true;
+        },
+
+        .@"union" => |union_info| {
+            if (A != B) return false;
+            if (union_info.tag_type == null) {
+                @compileError("Unable to compare untagged union values for type " ++ NAME_A);
+            }
+
+            const Tag = std.meta.Tag(A);
+
+            const tag_a = @as(Tag, val_a);
+            const tag_b = @as(Tag, val_b);
+
+            if (tag_a != tag_b) return false;
+
+            // we only reach this switch if the tags are equal
+            switch (val_a) {
+                inline else => |val, tag| {
+                    if (!deep_equal(val, @field(val_b, @tagName(tag)))) return false;
+                },
+            }
+            return true;
+        },
+
+        .optional => {
+            if (val_a) |payload_a| {
+                if (val_b) |payload_b| {
+                    if (A != B) return false;
+                    return deep_equal(payload_a, payload_b);
+                } else {
+                    return false;
+                }
+            } else {
+                if (val_b) |_| {
+                    return false;
+                } else {
+                    return true;
+                }
+            }
+        },
+
+        .error_union => {
+            if (val_a) |payload_a| {
+                if (val_b) |payload_b| {
+                    if (A != B) return false;
+                    return deep_equal(payload_a, payload_b);
+                } else |_| {
+                    return false;
+                }
+            } else |error_a| {
+                if (val_b) |_| {
+                    return false;
+                } else |error_b| {
+                    return deep_equal(error_a, error_b);
+                }
+            }
+        },
+    }
+}
+
+pub fn shallow_equal(val_a: anytype, val_b: anytype) bool {
+    const A = @TypeOf(val_a);
+    const B = @TypeOf(val_b);
+    const INFO_A = @typeInfo(A);
+    const INFO_B = @typeInfo(B);
+    const NAME_A = @typeName(A);
+    switch (INFO_A) {
+        .noreturn,
+        .@"opaque",
+        .frame,
+        .@"anyframe",
+        .undefined,
+        .null,
+        .void,
+        => @compileError("values of type " ++ NAME_A ++ " cannot be equal"),
+
+        .type,
+        .bool,
+        .int,
+        .float,
+        .comptime_float,
+        .comptime_int,
+        .enum_literal,
+        .@"enum",
+        .@"fn",
+        .error_set,
+        => return val_a == val_b,
+
+        .pointer => {
+            if (INFO_A.pointer.child != INFO_B.pointer.child) return false;
+            switch (INFO_A.pointer.size) {
+                .one, .c, .many => return val_a == val_b,
+                .slice => {
+                    if (val_a.len != val_b.len) return false;
+                    var i: usize = 0;
+                    while (i < val_a.len) : (i += 1) {
+                        if (!shallow_equal(val_a[i], val_b[i])) return false;
+                    }
+                    return true;
+                },
+            }
+        },
+
+        .array, .vector => {
+            const child_a = if (INFO_A == .vector) INFO_A.vector.child else INFO_A.array.child;
+            const child_b = if (INFO_B == .vector) INFO_B.vector.child else INFO_B.array.child;
+            if (child_a != child_b) return false;
+            const len_a = if (INFO_A == .vector) INFO_A.vector.len else INFO_A.array.len;
+            const len_b = if (INFO_B == .vector) INFO_B.vector.len else INFO_B.array.len;
+            if (len_a != len_b) return false;
+            var i: usize = 0;
+            while (i < val_a.len) : (i += 1) {
+                if (!shallow_equal(val_a[i], val_b[i])) return false;
+            }
+            return true;
+        },
+
+        .@"struct" => {
+            if (A != B) return false;
+            inline for (INFO_A.@"struct".fields) |field| {
+                if (!shallow_equal(@field(val_a, field.name), @field(val_b, field.name))) return false;
+            }
+            return true;
+        },
+
+        .@"union" => {
+            if (A != B) return false;
+            if (INFO_A.@"union".tag_type == null) {
+                @compileError("Unable to compare untagged union values for type " ++ NAME_A);
+            }
+
+            const Tag = std.meta.Tag(A);
+
+            const tag_a = @as(Tag, val_a);
+            const tag_b = @as(Tag, val_b);
+
+            if (tag_a != tag_b) return false;
+
+            // we only reach this switch if the tags are equal
+            switch (val_a) {
+                inline else => |val, tag| {
+                    if (!shallow_equal(val, @field(val_b, @tagName(tag)))) return false;
+                },
+            }
+            return true;
+        },
+
+        .optional => {
+            if (val_a) |payload_a| {
+                if (val_b) |payload_b| {
+                    if (A != B) return false;
+                    return shallow_equal(payload_a, payload_b);
+                } else {
+                    return false;
+                }
+            } else {
+                if (val_b) |_| {
+                    return false;
+                } else {
+                    return true;
+                }
+            }
+        },
+
+        .error_union => {
+            if (val_a) |payload_a| {
+                if (val_b) |payload_b| {
+                    if (A != B) return false;
+                    return shallow_equal(payload_a, payload_b);
+                } else |_| {
+                    return false;
+                }
+            } else |error_a| {
+                if (val_b) |_| {
+                    return false;
+                } else |error_b| {
+                    return shallow_equal(error_a, error_b);
+                }
+            }
+        },
+    }
+}

@@ -54,6 +54,7 @@ pub const ListOptions = struct {
     growth_model: GrowthModel = .GROW_BY_50_PERCENT_ATOMIC_PADDING,
     index_type: type = usize,
     secure_wipe_bytes: bool = false,
+    memset_uninit_val: ?*const anyopaque = null,
 };
 
 pub const ERR_START_PLUS_COUNT_OOB = "start ({d}) + count ({d}) == {d}, which is out of bounds for list.len ({d})";
@@ -88,14 +89,16 @@ pub fn define_manual_allocator_list_type(comptime options: ListOptions) type {
         len: Idx = 0,
         cap: Idx = 0,
 
-        pub const ALIGN = options.alignment;
-        pub const ALLOC_ERROR_BEHAVIOR = options.alloc_error_behavior;
-        pub const GROWTH = options.growth_model;
-        pub const RETURN_ERRORS = options.alloc_error_behavior == .RETURN_ERRORS;
-        pub const SECURE_WIPE = options.secure_wipe_bytes;
-        pub const UNINIT_PTR: Ptr = @ptrFromInt(if (ALIGN) |a| mem.alignBackward(usize, math.maxInt(usize), @intCast(a)) else mem.alignBackward(usize, math.maxInt(usize), @alignOf(Elem)));
-        pub const ATOMIC_PADDING = @as(comptime_int, @max(1, std.atomic.cache_line / @sizeOf(Elem)));
+        const ALIGN = options.alignment;
+        const ALLOC_ERROR_BEHAVIOR = options.alloc_error_behavior;
+        const GROWTH = options.growth_model;
+        const RETURN_ERRORS = options.alloc_error_behavior == .RETURN_ERRORS;
+        const SECURE_WIPE = options.secure_wipe_bytes;
+        const UNINIT_PTR: Ptr = @ptrFromInt(if (ALIGN) |a| mem.alignBackward(usize, math.maxInt(usize), @intCast(a)) else mem.alignBackward(usize, math.maxInt(usize), @alignOf(Elem)));
+        const ATOMIC_PADDING = @as(comptime_int, @max(1, std.atomic.cache_line / @sizeOf(Elem)));
         pub const UNINIT = List{};
+        const MEMSET = options.memset_uninit_val != null;
+        const UNINIT_VAL: if (MEMSET) Elem else void = if (MEMSET) @as(*const Elem, @ptrCast(@alignCast(options.memset_uninit_val.?))).* else void{};
 
         const List = @This();
         pub const Error = Allocator.Error;
@@ -468,11 +471,17 @@ pub fn define_manual_allocator_list_type(comptime options: ListOptions) type {
 
             const old_memory = self.ptr[0..self.cap];
             if (alloc.remap(old_memory, new_capacity)) |new_memory| {
+                if (MEMSET) {
+                    @memset(new_memory[self.cap..new_memory.len], UNINIT_VAL);
+                }
                 self.ptr = new_memory.ptr;
                 self.cap = @intCast(new_memory.len);
             } else {
                 const new_memory = alloc.alignedAlloc(Elem, ALIGN, new_capacity) catch |err| return handle_alloc_error(err);
                 @memcpy(new_memory[0..self.len], self.ptr[0..self.len]);
+                if (MEMSET) {
+                    @memset(new_memory[self.len..new_memory.len], UNINIT_VAL);
+                }
                 if (SECURE_WIPE) Utils.secure_zero(Elem, self.ptr[0..self.len]);
                 alloc.free(old_memory);
                 self.ptr = new_memory.ptr;

@@ -59,6 +59,7 @@ pub const Rect2 = @import("./Rect2.zig");
 pub const SDL3 = @import("./SDL3.zig");
 // pub const StaticAllocVectorizedStructOfArrays = @import("./StaticAllocVectorizedStructOfArrays.zig");
 // pub const Template = @import("./Template.zig");
+pub const Testing = @import("./Testing.zig");
 pub const Time = @import("./Time.zig");
 pub const Types = @import("./Types.zig");
 pub const Utils = @import("./Utils.zig");
@@ -100,6 +101,7 @@ comptime {
         _ = @import("./SDL3.zig");
         // _ = @import("./StaticAllocVectorizedStructOfArrays.zig");
         // _ = @import("./Template.zig");
+        _ = @import("./Testing.zig");
         _ = @import("./Time.zig");
         _ = @import("./Types.zig");
         _ = @import("./Utils.zig");
