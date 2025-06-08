@@ -30,7 +30,7 @@ pub fn Iterator(comptime T: type) type {
             /// Reset the Iterator to its initial state,
             /// returning `false` if the implementation cannot
             /// reset or some other condition prevented it,
-            reset: *const fn (inplementor: *anyopaque) void,
+            reset: *const fn (inplementor: *anyopaque) bool,
             /// Advance the iterator to the right/next position,
             /// returning `false` if the position didn't move
             /// or some other condition prevented it
