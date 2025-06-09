@@ -33,17 +33,16 @@ const Types = Root.Types;
 const Assert = Root.Assert;
 const assert_with_reason = Assert.assert_with_reason;
 
-pub fn Flags(comptime FLAGS_ENUM: type, comptime GROUPS_OR_NULL: ?type) type {
+pub fn Flags(comptime FLAGS_ENUM: type, comptime GROUPS: type) type {
     const INFO_1 = @typeInfo(FLAGS_ENUM);
     assert_with_reason(INFO_1 == .@"enum", @src(), "parameter `FLAGS_ENUM` must be an enum type", .{});
     const E_INFO = INFO_1.@"enum";
     assert_with_reason(@typeInfo(E_INFO.tag_type).int.signedness == .unsigned, @src(), "parameter `FLAGS_ENUM` tag type must be an unsigned integer type", .{});
-    const GROUPS = if (GROUPS_OR_NULL) |groups_type| groups_type else enum(E_INFO.tag_type) {};
     const INFO_2 = @typeInfo(GROUPS);
     assert_with_reason(INFO_2 == .@"enum", @src(), "parameter `GROUPS_OR_NULL` must be `null` or an enum type", .{});
     const G_INFO = INFO_2.@"enum";
     assert_with_reason(G_INFO.tag_type == E_INFO.tag_type, @src(), "parameter `GROUPS_OR_NULL` (if not null) must have the exact same tag type as `FLAGS_ENUM`", .{});
-    const F: E_INFO.tag_type = @as(E_INFO.tag_type, @bitCast(math.maxInt(meta.Int(.unsigned, @bitSizeOf(E_INFO.tag_type)))));
+    const F: E_INFO.tag_type = @as(E_INFO.tag_type, math.maxInt(meta.Int(.unsigned, @bitSizeOf(E_INFO.tag_type))));
     const A: E_INFO.tag_type = combine: {
         if (!E_INFO.is_exhaustive) break :combine F;
         var a: E_INFO.tag_type = 0;

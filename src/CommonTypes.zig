@@ -23,6 +23,10 @@
 
 const std = @import("std");
 const build = @import("builtin");
+const math = std.math;
+
+const Root = @import("./_root.zig");
+const FlexSlice = Root.FlexSlice.FlexSlice;
 
 /// TODO documentation
 pub const PointOrientation = enum {
@@ -129,7 +133,34 @@ pub const Path = union(PathKind) {
     RELATIVE_CWD: []const u8,
 };
 
-pub const TuplePointer = struct {
-    tuple_type: type,
-    opaque_ptr: *anyopaque
-};
+pub const TuplePointer = struct { tuple_type: type, opaque_ptr: *anyopaque };
+
+pub fn ArrayLen(comptime N: comptime_int, comptime T: type) type {
+    return struct {
+        arr: [N]T,
+        len: usize,
+
+        const Self = @This();
+
+        pub inline fn slice(self: *Self) []T {
+            return self.arr[0..self.len];
+        }
+        pub inline fn slice_const(self: *const Self) []const T {
+            return self.arr[0..self.len];
+        }
+
+        pub inline fn flex_slice(self: *Self) FlexSlice(T, math.IntFittingRange(0, N), .mutable) {
+            return FlexSlice(T, math.IntFittingRange(0, N), .mutable){
+                .ptr = &self.arr[0],
+                .len = self.len,
+            };
+        }
+
+        pub inline fn flex_slice_const(self: *const Self) FlexSlice(T, math.IntFittingRange(0, N), .immutable) {
+            return FlexSlice(T, math.IntFittingRange(0, N), .immutable){
+                .ptr = &self.arr[0],
+                .len = self.len,
+            };
+        }
+    };
+}

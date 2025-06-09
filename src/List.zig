@@ -21,8 +21,9 @@
 //    misrepresented as being the original software.
 // 3. This notice may not be removed or altered from any source distribution.
 
-const builtin = @import("builtin");
+const build = @import("builtin");
 const std = @import("std");
+const builtin = std.builtin;
 const mem = std.mem;
 const math = std.math;
 const crypto = std.crypto;
@@ -46,6 +47,7 @@ const GrowthModel = Root.CommonTypes.GrowthModel;
 const SortAlgorithm = Root.CommonTypes.SortAlgorithm;
 const DummyAllocator = Root.DummyAllocator;
 const BinarySearch = Root.BinarySearch;
+const SourceLocation = builtin.SourceLocation;
 
 pub const ListOptions = struct {
     element_type: type,
@@ -55,6 +57,15 @@ pub const ListOptions = struct {
     index_type: type = usize,
     secure_wipe_bytes: bool = false,
     memset_uninit_val: ?*const anyopaque = null,
+    /// If set to `true`, an additional field exists on the `List` that caches the `Allocator`
+    /// that should be used in all methods that may perform allocation operations.
+    /// The `init` and `init_with_capacity` methods will use the provided allocator and cache it in this field,
+    /// and all operations that take an `Allocator` will assert that its pointers match the one initially provided
+    /// in `Debug` and `ReleaseSafe` modes.
+    ///
+    /// If set to `false`, *OR* when in `ReleaseFast` or `ReleaseSmall` modes, no additional field is cached, no double check is performed, and the allocator
+    /// passed to `init` is discarded and ignored (`init_with_capacity` uses the provided allocator but does not cache it).
+    assert_correct_allocator: bool = true,
 };
 
 pub const ERR_START_PLUS_COUNT_OOB = "start ({d}) + count ({d}) == {d}, which is out of bounds for list.len ({d})";
@@ -67,6 +78,10 @@ pub const ERR_IDX_GREATER_LEN = "idx ({d}) > list.len ({d}): unable to insert it
 pub const ERR_IDX_GREATER_EQL_LEN = "idx ({d}) >= list.len ({d}): unable to operate on index out of bounds";
 pub const ERR_LAST_IDX_GREATER_LEN = "end of index range ({d}) > list.len ({d}): unable to operate on index out of bounds";
 pub const ERR_LIST_EMPTY = "list.len == 0: unable to return any items from list";
+
+fn assert_correct_allocator(alloc_a: Allocator, alloc_b: Allocator, comptime src_loc: ?SourceLocation) void {
+    assert_with_reason(Utils.shallow_equal(alloc_a, alloc_b), src_loc, "provided allocator does not match the one provided to `init` or `init_with_capacity`", .{});
+}
 
 /// This is the core list paradigm, both other paradigms ('static_allocator' and 'cached_allocator')
 /// simply call this type's methods and provide their own allocator
@@ -88,8 +103,10 @@ pub fn define_manual_allocator_list_type(comptime options: ListOptions) type {
         ptr: Ptr = UNINIT_PTR,
         len: Idx = 0,
         cap: Idx = 0,
+        assert_alloc: if (ASSERT_ALLOC) Allocator else void = if (ASSERT_ALLOC) DummyAllocator.allocator else void{},
 
         const ALIGN = options.alignment;
+        const ASSERT_ALLOC = options.assert_correct_allocator;
         const ALLOC_ERROR_BEHAVIOR = options.alloc_error_behavior;
         const GROWTH = options.growth_model;
         const RETURN_ERRORS = options.alloc_error_behavior == .RETURN_ERRORS;
@@ -161,12 +178,20 @@ pub fn define_manual_allocator_list_type(comptime options: ListOptions) type {
             self.len = new_len;
         }
 
-        pub fn new_empty() List {
+        pub fn new_empty(assert_alloc: Allocator) List {
+            if (ASSERT_ALLOC) {
+                var uninit = UNINIT;
+                uninit.assert_alloc = assert_alloc;
+                return uninit;
+            }
             return UNINIT;
         }
 
         pub fn new_with_capacity(capacity: Idx, alloc: Allocator) if (RETURN_ERRORS) Error!List else List {
             var self = UNINIT;
+            if (ASSERT_ALLOC) {
+                self.assert_alloc = alloc;
+            }
             if (RETURN_ERRORS) {
                 try self.ensure_total_capacity_exact(capacity, alloc);
             } else {
@@ -182,6 +207,7 @@ pub fn define_manual_allocator_list_type(comptime options: ListOptions) type {
         }
 
         pub fn to_owned_slice(self: *List, alloc: Allocator) if (RETURN_ERRORS) Error!Slice else Slice {
+            if (ASSERT_ALLOC) assert_correct_allocator(alloc, self.assert_alloc, @src());
             const old_memory = self.ptr[0..self.cap];
             if (alloc.remap(old_memory, self.len)) |new_items| {
                 self.* = UNINIT;
@@ -401,6 +427,7 @@ pub fn define_manual_allocator_list_type(comptime options: ListOptions) type {
         }
 
         pub fn shrink_and_free(self: *List, new_len: Idx, alloc: Allocator) void {
+            if (ASSERT_ALLOC) assert_correct_allocator(alloc, self.assert_alloc, @src());
             assert_with_reason(new_len <= self.len, @src(), ERR_NEW_LEN_GREATER_LEN, .{ new_len, self.len });
             if (@sizeOf(Elem) == 0) {
                 self.len = new_len;
@@ -444,6 +471,7 @@ pub fn define_manual_allocator_list_type(comptime options: ListOptions) type {
         }
 
         pub fn clear_and_free(self: *List, alloc: Allocator) void {
+            if (ASSERT_ALLOC) assert_correct_allocator(alloc, self.assert_alloc, @src());
             if (SECURE_WIPE) {
                 std.Utils.secure_zero(Elem, self.ptr[0..self.len]);
             }
@@ -457,6 +485,7 @@ pub fn define_manual_allocator_list_type(comptime options: ListOptions) type {
         }
 
         pub fn ensure_total_capacity_exact(self: *List, new_capacity: Idx, alloc: Allocator) if (RETURN_ERRORS) Error!void else void {
+            if (ASSERT_ALLOC) assert_correct_allocator(alloc, self.assert_alloc, @src());
             if (@sizeOf(Elem) == 0) {
                 self.cap = math.maxInt(Idx);
                 return;
@@ -851,868 +880,6 @@ pub fn define_manual_allocator_list_type(comptime options: ListOptions) type {
             if (bytes.len > available_capacity) return error.OutOfMemory;
             handle.list.append_slice_assume_capacity(bytes);
             return bytes.len;
-        }
-    };
-}
-
-pub fn define_static_allocator_list_type(comptime options: ListOptions, comptime alloc_ptr: *const Allocator) type {
-    const opt = comptime check: {
-        var opts = options;
-        if (opts.alignment) |a| {
-            if (a == @alignOf(opts.T)) {
-                opts.alignment = null;
-            }
-        }
-        break :check opts;
-    };
-    if (opt.alignment) |a| {
-        if (!math.isPowerOfTwo(a)) @panic("alignment must be a power of 2");
-    }
-    if (@typeInfo(opt.index_type) != Type.int or @typeInfo(opt.index_type).int.signedness != .unsigned) @panic("index_type must be an unsigned integer type");
-    return extern struct {
-        ptr: Ptr = UNINIT_PTR,
-        len: Idx = 0,
-        cap: Idx = 0,
-
-        pub const ALLOC = alloc_ptr;
-        pub const ALIGN = options.alignment;
-        pub const ALLOC_ERROR_BEHAVIOR = options.alloc_error_behavior;
-        pub const GROWTH = options.growth_model;
-        pub const RETURN_ERRORS = options.alloc_error_behavior == .RETURN_ERRORS;
-        pub const SECURE_WIPE = options.secure_wipe_bytes;
-        pub const UNINIT_PTR: Ptr = @ptrFromInt(if (ALIGN) |a| mem.alignBackward(usize, math.maxInt(usize), @intCast(a)) else mem.alignBackward(usize, math.maxInt(usize), @alignOf(Elem)));
-        pub const ATOMIC_PADDING = @as(comptime_int, @max(1, std.atomic.cache_line / @sizeOf(Elem)));
-        pub const UNINIT = List{
-            .ptr = UNINIT_PTR,
-            .len = 0,
-            .cap = 0,
-        };
-
-        const List = @This();
-        pub const ManualList = define_manual_allocator_list_type(options);
-        pub const Error = Allocator.Error;
-        pub const Elem = options.element_type;
-        pub const Idx = options.index_type;
-        pub const Ptr = if (ALIGN) |a| [*]align(a) Elem else [*]Elem;
-        pub const Slice = if (ALIGN) |a| ([]align(a) Elem) else []Elem;
-        pub fn SentinelSlice(comptime sentinel: Elem) type {
-            return if (ALIGN) |a| ([:sentinel]align(a) Elem) else [:sentinel]Elem;
-        }
-
-        pub inline fn to_manually_managed_list(self: List) ManualList {
-            return @bitCast(self);
-        }
-        pub inline fn as_manually_managed_list(self: *List) *ManualList {
-            return @ptrCast(@alignCast(self));
-        }
-        pub inline fn from_manually_managed_list(list: ManualList) List {
-            return @bitCast(list);
-        }
-
-        pub const Iterator = ListIterator(List);
-
-        pub inline fn new_iterator(self: *List) Iterator {
-            return Iterator{
-                .list_ref = self,
-                .next_idx = 0,
-            };
-        }
-
-        pub inline fn flex_slice(self: List, comptime mutability: Mutability) FlexSlice(Elem, Idx, mutability) {
-            return self.as_manually_managed_list_const().flex_slice(mutability);
-        }
-
-        pub inline fn slice(self: List) Slice {
-            return self.as_manually_managed_list_const().slice();
-        }
-
-        pub inline fn array_ptr(self: List, start: Idx, comptime length: Idx) *[length]Elem {
-            return self.as_manually_managed_list_const().array_ptr(start, length);
-        }
-
-        pub inline fn vector_ptr(self: List, start: Idx, comptime length: Idx) *@Vector(length, Elem) {
-            return self.as_manually_managed_list_const().vector_ptr(start, length);
-        }
-
-        pub inline fn slice_with_sentinel(self: List, comptime sentinel: Elem) SentinelSlice(Elem) {
-            return self.as_manually_managed_list_const().slice_with_sentinel(sentinel);
-        }
-
-        pub inline fn slice_full_capacity(self: List) Slice {
-            return self.as_manually_managed_list_const().slice_full_capacity();
-        }
-
-        pub inline fn slice_unused_capacity(self: List) []Elem {
-            return self.as_manually_managed_list_const().slice_unused_capacity();
-        }
-
-        pub inline fn set_len(self: *List, new_len: Idx) void {
-            return self.as_manually_managed_list().set_len(new_len);
-        }
-
-        pub inline fn new_empty() List {
-            return UNINIT;
-        }
-
-        pub inline fn new_with_capacity(capacity: Idx) if (RETURN_ERRORS) Error!List else List {
-            if (RETURN_ERRORS) {
-                return from_manually_managed_list(try ManualList.new_with_capacity(capacity, ALLOC.*));
-            } else {
-                return from_manually_managed_list(ManualList.new_with_capacity(capacity, ALLOC.*));
-            }
-        }
-
-        pub inline fn clone(self: List) if (RETURN_ERRORS) Error!List else List {
-            if (RETURN_ERRORS) {
-                return from_manually_managed_list(try self.to_manually_managed_list().clone(ALLOC.*));
-            } else {
-                return from_manually_managed_list(self.to_manually_managed_list().clone(ALLOC.*));
-            }
-        }
-
-        pub inline fn to_owned_slice(self: *List) if (RETURN_ERRORS) Error!Slice else Slice {
-            return self.as_manually_managed_list().to_owned_slice(ALLOC.*);
-        }
-
-        pub inline fn to_owned_slice_sentinel(self: *List, comptime sentinel: Elem) if (RETURN_ERRORS) Error!SentinelSlice(sentinel) else SentinelSlice(sentinel) {
-            return self.as_manually_managed_list().to_owned_slice_sentinel(sentinel, ALLOC.*);
-        }
-
-        pub inline fn from_owned_slice(from_slice: Slice) List {
-            return from_manually_managed_list(ManualList.from_owned_slice(from_slice));
-        }
-
-        pub inline fn from_owned_slice_sentinel(comptime sentinel: Elem, from_slice: [:sentinel]Elem) List {
-            return from_manually_managed_list(ManualList.from_owned_slice_sentinel(sentinel, from_slice));
-        }
-
-        pub inline fn insert_slot(self: *List, idx: Idx) if (RETURN_ERRORS) Error!*Elem else *Elem {
-            return self.as_manually_managed_list().insert_slot(idx, ALLOC.*);
-        }
-
-        pub inline fn insert_slot_assume_capacity(self: *List, idx: Idx) *Elem {
-            return self.as_manually_managed_list().insert_slot_assume_capacity(idx);
-        }
-
-        pub inline fn insert(self: *List, idx: Idx, item: Elem) if (RETURN_ERRORS) Error!void else void {
-            return self.as_manually_managed_list().insert(idx, item, ALLOC.*);
-        }
-
-        pub inline fn insert_assume_capacity(self: *List, idx: Idx, item: Elem) void {
-            return self.as_manually_managed_list().insert_assume_capacity(idx, item);
-        }
-
-        pub inline fn insert_many_slots(self: *List, idx: Idx, count: Idx) if (RETURN_ERRORS) Error![]Elem else []Elem {
-            return self.as_manually_managed_list().insert_many_slots(idx, count, ALLOC.*);
-        }
-
-        pub inline fn insert_many_slots_assume_capacity(self: *List, idx: Idx, count: Idx) []Elem {
-            return self.as_manually_managed_list().insert_many_slots_assume_capacity(idx, count);
-        }
-
-        pub inline fn insert_slice(self: *List, idx: Idx, items: []const Elem) if (RETURN_ERRORS) Error!void else void {
-            return self.as_manually_managed_list().insert_slice(idx, items, ALLOC.*);
-        }
-
-        pub inline fn insert_slice_assume_capacity(self: *List, idx: Idx, items: []const Elem) void {
-            return self.as_manually_managed_list().insert_slice_assume_capacity(idx, items);
-        }
-
-        pub inline fn replace_range(self: *List, start: Idx, length: Idx, new_items: []const Elem) if (RETURN_ERRORS) Error!void else void {
-            return self.as_manually_managed_list().replace_range(start, length, new_items, ALLOC.*);
-        }
-
-        pub inline fn replace_range_assume_capacity(self: *List, start: Idx, length: Idx, new_items: []const Elem) void {
-            return self.as_manually_managed_list().replace_range_assume_capacity(start, length, new_items);
-        }
-
-        pub inline fn append(self: *List, item: Elem) if (RETURN_ERRORS) Error!void else void {
-            return self.as_manually_managed_list().append(item, ALLOC.*);
-        }
-
-        pub inline fn append_assume_capacity(self: *List, item: Elem) void {
-            return self.as_manually_managed_list().append_assume_capacity(item);
-        }
-
-        pub inline fn remove(self: *List, idx: Idx) Elem {
-            return self.as_manually_managed_list().remove(idx);
-        }
-
-        pub inline fn swap_remove(self: *List, idx: Idx) Elem {
-            return self.as_manually_managed_list().swap_remove(idx);
-        }
-
-        pub inline fn delete(self: *List, idx: Idx) void {
-            return self.as_manually_managed_list().delete(idx);
-        }
-
-        pub inline fn delete_range(self: *List, start: Idx, length: Idx) void {
-            return self.as_manually_managed_list().delete_range(start, length);
-        }
-
-        pub inline fn swap_delete(self: *List, idx: Idx) void {
-            return self.as_manually_managed_list().swap_delete(idx);
-        }
-
-        pub inline fn append_slice(self: *List, items: []const Elem) if (RETURN_ERRORS) Error!void else void {
-            return self.as_manually_managed_list().append_slice(items, ALLOC.*);
-        }
-
-        pub inline fn append_slice_assume_capacity(self: *List, items: []const Elem) void {
-            return self.as_manually_managed_list().append_slice_assume_capacity(items);
-        }
-
-        pub inline fn append_slice_unaligned(self: *List, items: []align(1) const Elem) if (RETURN_ERRORS) Error!void else void {
-            return self.as_manually_managed_list().append_slice_unaligned(items, ALLOC.*);
-        }
-
-        pub inline fn append_slice_unaligned_assume_capacity(self: *List, items: []align(1) const Elem) void {
-            return self.as_manually_managed_list().append_slice_unaligned_assume_capacity(items);
-        }
-
-        pub inline fn append_n_times(self: *List, value: Elem, count: Idx) if (RETURN_ERRORS) Error!void else void {
-            return self.as_manually_managed_list().append_n_times(value, count, ALLOC.*);
-        }
-
-        pub inline fn append_n_times_assume_capacity(self: *List, value: Elem, count: Idx) void {
-            return self.as_manually_managed_list().append_n_times_assume_capacity(value, count);
-        }
-
-        pub inline fn resize(self: *List, new_len: Idx) if (RETURN_ERRORS) Error!void else void {
-            return self.as_manually_managed_list().resize(new_len, ALLOC.*);
-        }
-
-        pub inline fn shrink_and_free(self: *List, new_len: Idx) void {
-            return self.as_manually_managed_list().shrink_and_free(new_len, ALLOC.*);
-        }
-
-        pub inline fn shrink_retaining_capacity(self: *List, new_len: Idx) void {
-            return self.as_manually_managed_list().shrink_retaining_capacity(new_len);
-        }
-
-        pub inline fn clear_retaining_capacity(self: *List) void {
-            return self.as_manually_managed_list().clear_retaining_capacity();
-        }
-
-        pub inline fn clear_and_free(self: *List) void {
-            return self.as_manually_managed_list().clear_and_free(ALLOC.*);
-        }
-
-        pub inline fn ensure_total_capacity(self: *List, new_capacity: Idx) if (RETURN_ERRORS) Error!void else void {
-            return self.as_manually_managed_list().ensure_total_capacity(new_capacity, ALLOC.*);
-        }
-
-        pub inline fn ensure_total_capacity_exact(self: *List, new_capacity: Idx) if (RETURN_ERRORS) Error!void else void {
-            return self.as_manually_managed_list().ensure_total_capacity_exact(new_capacity, ALLOC.*);
-        }
-
-        pub inline fn ensure_unused_capacity(self: *List, additional_count: Idx) if (RETURN_ERRORS) Error!void else void {
-            return self.as_manually_managed_list().ensure_unused_capacity(additional_count, ALLOC.*);
-        }
-
-        pub inline fn expand_to_capacity(self: *List) void {
-            return self.as_manually_managed_list().expand_to_capacity();
-        }
-
-        pub inline fn append_slot(self: *List) if (RETURN_ERRORS) Error!*Elem else *Elem {
-            return self.as_manually_managed_list().append_slot(ALLOC.*);
-        }
-
-        pub inline fn append_slot_assume_capacity(self: *List) *Elem {
-            return self.as_manually_managed_list().append_slot_assume_capacity();
-        }
-
-        pub inline fn append_many_slots(self: *List, count: Idx) if (RETURN_ERRORS) Error![]Elem else []Elem {
-            return self.as_manually_managed_list().append_many_slots(count, ALLOC.*);
-        }
-
-        pub inline fn append_many_slots_assume_capacity(self: *List, count: Idx) []Elem {
-            return self.as_manually_managed_list().append_many_slots_assume_capacity(count);
-        }
-
-        pub inline fn append_many_slots_as_array(self: *List, comptime count: Idx) if (RETURN_ERRORS) Error!*[count]Elem else *[count]Elem {
-            return self.as_manually_managed_list().append_many_slots_as_array(count, ALLOC.*);
-        }
-
-        pub inline fn append_many_slots_as_array_assume_capacity(self: *List, comptime count: Idx) *[count]Elem {
-            return self.as_manually_managed_list().append_many_slots_as_array_assume_capacity(count);
-        }
-
-        pub inline fn pop_or_null(self: *List) ?Elem {
-            return self.as_manually_managed_list().pop_or_null();
-        }
-
-        pub inline fn pop(self: *List) Elem {
-            return self.as_manually_managed_list().pop();
-        }
-
-        pub inline fn get_last(self: List) Elem {
-            return self.to_manually_managed_list().get_last();
-        }
-
-        pub inline fn get_last_or_null(self: List) ?Elem {
-            return self.to_manually_managed_list().get_last_or_null();
-        }
-
-        pub inline fn find_idx(self: List, comptime Param: type, match_param: Param, match_fn: *const fn (param: Param, item: *const Elem) bool) ?Idx {
-            return self.to_manually_managed_list().find_idx(Param, match_param, match_fn);
-        }
-
-        pub inline fn find_ptr(self: List, comptime Param: type, match_param: Param, match_fn: *const fn (param: Param, item: *const Elem) bool) ?*Elem {
-            return self.to_manually_managed_list().find_ptr(Param, match_param, match_fn);
-        }
-
-        pub inline fn find_const_ptr(self: List, comptime Param: type, match_param: Param, match_fn: *const fn (param: Param, item: *const Elem) bool) ?*const Elem {
-            return self.to_manually_managed_list().find_const_ptr(Param, match_param, match_fn);
-        }
-
-        pub inline fn find_and_copy(self: List, comptime Param: type, match_param: Param, match_fn: *const fn (param: Param, item: *const Elem) bool) ?Elem {
-            return self.to_manually_managed_list().find_and_copy(Param, match_param, match_fn);
-        }
-
-        pub inline fn find_and_remove(self: List, comptime Param: type, match_param: Param, match_fn: *const fn (param: Param, item: *const Elem) bool) ?Elem {
-            return self.to_manually_managed_list().find_and_remove(Param, match_param, match_fn);
-        }
-
-        pub inline fn find_and_delete(self: List, comptime Param: type, match_param: Param, match_fn: *const fn (param: Param, item: *const Elem) bool) bool {
-            return self.to_manually_managed_list().find_and_delete(Param, match_param, match_fn);
-        }
-
-        pub inline fn find_exactly_n_item_indexes_from_n_params_in_order(self: List, comptime Param: type, params: []const Param, match_fn: *const fn (param: Param, item: *const Elem) bool, output_buf: []Idx) bool {
-            return self.flex_slice(.immutable).find_exactly_n_item_indexes_from_n_params_in_order(Param, params, match_fn, output_buf);
-        }
-
-        pub inline fn find_exactly_n_item_pointers_from_n_params_in_order(self: List, comptime Param: type, params: []const Param, match_fn: *const fn (param: Param, item: *const Elem) bool, output_buf: []*Elem) bool {
-            return self.flex_slice(.mutable).find_exactly_n_item_pointers_from_n_params_in_order(Param, params, match_fn, output_buf);
-        }
-
-        pub inline fn find_exactly_n_const_item_pointers_from_n_params_in_order(self: List, comptime Param: type, params: []const Param, match_fn: *const fn (param: Param, item: *const Elem) bool, output_buf: []*const Elem) bool {
-            return self.flex_slice(.immutable).find_exactly_n_const_item_pointers_from_n_params_in_order(Param, params, match_fn, output_buf);
-        }
-
-        pub inline fn find_exactly_n_item_copies_from_n_params_in_order(self: List, comptime Param: type, params: []const Param, match_fn: *const fn (param: Param, item: *const Elem) bool, output_buf: []Elem) bool {
-            return self.flex_slice(.immutable).find_exactly_n_item_copies_from_n_params_in_order(Param, params, match_fn, output_buf);
-        }
-
-        pub fn delete_ordered_indexes(self: *List, indexes: []const Idx) void {
-            return self.as_manually_managed_list().delete_ordered_indexes(indexes);
-        }
-
-        //TODO pub fn insert_slots_at_ordered_indexes()
-
-        pub inline fn insertion_sort(self: *List) void {
-            return self.flex_slice(.mutable).insertion_sort();
-        }
-
-        pub inline fn insertion_sort_with_transform(self: *List, comptime TX: type, transform_fn: *const fn (item: Elem) TX) void {
-            return self.flex_slice(.mutable).insertion_sort_with_transform(TX, transform_fn);
-        }
-
-        pub inline fn insertion_sort_with_transform_and_user_data(self: *List, comptime TX: type, transform_fn: *const fn (item: Elem, userdata: ?*anyopaque) TX, userdata: ?*anyopaque) void {
-            return self.flex_slice(.mutable).insertion_sort_with_transform_and_user_data(TX, transform_fn, userdata);
-        }
-
-        pub inline fn is_sorted(self: *List) bool {
-            return self.flex_slice(.immutable).is_sorted();
-        }
-
-        pub inline fn is_sorted_with_transform(self: *List, comptime TX: type, transform_fn: *const fn (item: Elem) TX) bool {
-            return self.flex_slice(.immutable).is_sorted_with_transform(TX, transform_fn);
-        }
-
-        pub inline fn is_sorted_with_transform_and_user_data(self: *List, comptime TX: type, transform_fn: *const fn (item: Elem, userdata: ?*anyopaque) TX, userdata: ?*anyopaque) bool {
-            return self.flex_slice(.immutable).is_sorted_with_transform_and_user_data(TX, transform_fn, userdata);
-        }
-
-        pub inline fn is_reverse_sorted(self: *List) bool {
-            return self.flex_slice(.immutable).is_reverse_sorted();
-        }
-
-        pub inline fn is_reverse_sorted_with_transform(self: *List, comptime TX: type, transform_fn: *const fn (item: Elem) TX) bool {
-            return self.flex_slice(.immutable).is_reverse_sorted_with_transform(TX, transform_fn);
-        }
-
-        pub inline fn is_reverse_sorted_with_transform_and_user_data(self: *List, comptime TX: type, transform_fn: *const fn (item: Elem, userdata: ?*anyopaque) TX, userdata: ?*anyopaque) bool {
-            return self.flex_slice(.immutable).is_reverse_sorted_with_transform_and_user_data(TX, transform_fn, userdata);
-        }
-
-        // pub inline fn insert_one_sorted(self: *List, item: Elem) if (RETURN_ERRORS) Error!Idx else Idx {
-        //     return Internal.insert_one_sorted(List, self, item, ALLOC.*);
-        // }
-
-        // pub inline fn insert_one_sorted_custom(self: *List, item: Elem, compare_fn: *const CompareFn(Elem), comptime shortcut_equal_order: bool) if (RETURN_ERRORS) Error!Idx else Idx {
-        //     return Internal.insert_one_sorted_custom(List, self, item, compare_fn, shortcut_equal_order, ALLOC.*);
-        // }
-
-        // pub inline fn find_equal_order_idx_sorted(self: *const List, item_to_compare: *const Elem) ?Idx {
-        //     return Internal.find_equal_order_idx_sorted(List, self, item_to_compare);
-        // }
-
-        // pub fn find_equal_order_idx_sorted_custom(self: *const List, item_to_compare: *const Elem, compare_fn: *const CompareFn(Elem)) ?Idx {
-        //     return Internal.find_equal_order_idx_sorted_custom(List, self, item_to_compare, compare_fn);
-        // }
-
-        // pub inline fn find_matching_item_idx_sorted(self: *const List, item_to_find: *const Elem) ?Idx {
-        //     return Internal.find_matching_item_idx_sorted(List, self, item_to_find);
-        // }
-
-        // pub fn find_matching_item_idx_sorted_custom(self: *const List, item_to_find: *const Elem, compare_fn: *const CompareFn(Elem), match_fn: *const CompareFn(Elem)) ?Idx {
-        //     return Internal.find_matching_item_idx_sorted_custom(List, self, item_to_find, compare_fn, match_fn);
-        // }
-
-        //**************************
-        // std.io.Writer interface *
-        //**************************
-        pub fn get_std_writer(self: *List) ManualList.StdWriter {
-            return self.as_manually_managed_list().get_std_writer(ALLOC.*);
-        }
-
-        pub fn get_std_writer_no_grow(self: *List) ManualList.StdWriterNoGrow {
-            return self.as_manually_managed_list().get_std_writer_no_grow();
-        }
-    };
-}
-
-pub fn define_cached_allocator_list_type(comptime options: ListOptions) type {
-    const opt = comptime check: {
-        var opts = options;
-        if (opts.alignment) |a| {
-            if (a == @alignOf(opts.T)) {
-                opts.alignment = null;
-            }
-        }
-        break :check opts;
-    };
-    if (opt.alignment) |a| {
-        if (!math.isPowerOfTwo(a)) @panic("alignment must be a power of 2");
-    }
-    if (@typeInfo(opt.index_type) != Type.int or @typeInfo(opt.index_type).int.signedness != .unsigned) @panic("index_type must be an unsigned integer type");
-    return extern struct {
-        ptr: Ptr = UNINIT_PTR,
-        len: Idx = 0,
-        cap: Idx = 0,
-        alloc_ptr: *anyopaque,
-        alloc_vtable: *const Allocator.VTable,
-
-        pub const ALIGN = options.alignment;
-        pub const ALLOC_ERROR_BEHAVIOR = options.alloc_error_behavior;
-        pub const GROWTH = options.growth_model;
-        pub const RETURN_ERRORS = options.alloc_error_behavior == .RETURN_ERRORS;
-        pub const SECURE_WIPE = options.secure_wipe_bytes;
-        pub const UNINIT_PTR: Ptr = @ptrFromInt(if (ALIGN) |a| mem.alignBackward(usize, math.maxInt(usize), @intCast(a)) else mem.alignBackward(usize, math.maxInt(usize), @alignOf(Elem)));
-        pub const ATOMIC_PADDING = @as(comptime_int, @max(1, std.atomic.cache_line / @sizeOf(Elem)));
-        pub const UNINIT = List{
-            .ptr = UNINIT_PTR,
-            .alloc_ptr = DummyAllocator.allocator.ptr,
-            .alloc_vtable = DummyAllocator.allocator.vtable,
-            .len = 0,
-            .cap = 0,
-        };
-
-        const List = @This();
-        pub const ManualList = define_manual_allocator_list_type(options);
-        pub const Error = Allocator.Error;
-        pub const Elem = options.element_type;
-        pub const Idx = options.index_type;
-        pub const Ptr = if (ALIGN) |a| [*]align(a) Elem else [*]Elem;
-        pub const Slice = if (ALIGN) |a| ([]align(a) Elem) else []Elem;
-        pub fn SentinelSlice(comptime sentinel: Elem) type {
-            return if (ALIGN) |a| ([:sentinel]align(a) Elem) else [:sentinel]Elem;
-        }
-
-        pub inline fn to_manual_alloc_list(self: List) ManualList {
-            return ManualList{
-                .ptr = self.ptr,
-                .len = self.len,
-                .cap = self.cap,
-            };
-        }
-        pub inline fn as_manual_alloc_list(self: *List) *ManualList {
-            return @ptrCast(@alignCast(self));
-        }
-        pub inline fn from_manual_alloc_list(list: ManualList, alloc: Allocator) List {
-            return List{
-                .ptr = list.ptr,
-                .len = list.len,
-                .cap = list.cap,
-                .alloc_ptr = alloc.ptr,
-                .alloc_vtable = alloc.vtable,
-            };
-        }
-
-        pub const Iterator = ListIterator(List);
-
-        pub inline fn new_iterator(self: *List) Iterator {
-            return Iterator{
-                .list_ref = self,
-                .next_idx = 0,
-            };
-        }
-
-        pub inline fn get_alloc(self: List) Allocator {
-            return Allocator{
-                .ptr = self.alloc_ptr,
-                .vtable = self.alloc_vtable,
-            };
-        }
-
-        pub inline fn flex_slice(self: List, comptime mutability: Mutability) FlexSlice(Elem, Idx, mutability) {
-            return self.to_manual_alloc_list().flex_slice(mutability);
-        }
-
-        pub inline fn slice(self: List) Slice {
-            return self.to_manual_alloc_list().slice();
-        }
-
-        pub inline fn array_ptr(self: List, start: Idx, comptime length: Idx) *[length]Elem {
-            return self.to_manual_alloc_list().array_ptr(start, length);
-        }
-
-        pub inline fn vector_ptr(self: List, start: Idx, comptime length: Idx) *@Vector(length, Elem) {
-            return self.to_manual_alloc_list().vector_ptr(start, length);
-        }
-
-        pub inline fn slice_with_sentinel(self: List, comptime sentinel: Elem) SentinelSlice(Elem) {
-            return self.to_manual_alloc_list().slice_with_sentinel(sentinel);
-        }
-
-        pub inline fn slice_full_capacity(self: List) Slice {
-            return self.to_manual_alloc_list().slice_full_capacity();
-        }
-
-        pub inline fn slice_unused_capacity(self: List) []Elem {
-            return self.to_manual_alloc_list().slice_unused_capacity();
-        }
-
-        pub inline fn set_len(self: *List, new_len: Idx) void {
-            return self.as_manual_alloc_list().set_len(new_len);
-        }
-
-        pub inline fn new_empty(alloc: Allocator) List {
-            var list = UNINIT;
-            list.alloc_ptr = alloc.ptr;
-            list.alloc_vtable = alloc.vtable;
-            return list;
-        }
-
-        pub inline fn new_with_capacity(capacity: Idx, alloc: Allocator) if (RETURN_ERRORS) Error!List else List {
-            var list: List = undefined;
-            if (RETURN_ERRORS) {
-                list = from_manual_alloc_list(try ManualList.new_with_capacity(capacity, alloc));
-            } else {
-                list = from_manual_alloc_list(ManualList.new_with_capacity(capacity, alloc));
-            }
-            list.alloc_ptr = alloc.ptr;
-            list.alloc_vtable = alloc.vtable;
-        }
-
-        pub inline fn clone(self: List) if (RETURN_ERRORS) Error!List else List {
-            if (RETURN_ERRORS) {
-                return from_manual_alloc_list(try self.to_manual_alloc_list().clone(self.get_alloc()));
-            } else {
-                return from_manual_alloc_list(self.to_manual_alloc_list().clone(self.get_alloc()));
-            }
-        }
-
-        pub inline fn to_owned_slice(self: *List) if (RETURN_ERRORS) Error!Slice else Slice {
-            return self.as_manual_alloc_list().to_owned_slice(self.get_alloc());
-        }
-
-        pub inline fn to_owned_slice_sentinel(self: *List, comptime sentinel: Elem) if (RETURN_ERRORS) Error!SentinelSlice(sentinel) else SentinelSlice(sentinel) {
-            return self.as_manual_alloc_list().to_owned_slice_sentinel(sentinel, self.get_alloc());
-        }
-
-        pub inline fn from_owned_slice(from_slice: Slice) List {
-            return from_manual_alloc_list(ManualList.from_owned_slice(from_slice));
-        }
-
-        pub inline fn from_owned_slice_sentinel(comptime sentinel: Elem, from_slice: [:sentinel]Elem) List {
-            return from_manual_alloc_list(ManualList.from_owned_slice_sentinel(sentinel, from_slice));
-        }
-
-        pub inline fn insert_slot(self: *List, idx: Idx) if (RETURN_ERRORS) Error!*Elem else *Elem {
-            return self.as_manual_alloc_list().insert_slot(idx, self.get_alloc());
-        }
-
-        pub inline fn insert_slot_assume_capacity(self: *List, idx: Idx) *Elem {
-            return self.as_manual_alloc_list().insert_slot_assume_capacity(idx);
-        }
-
-        pub inline fn insert(self: *List, idx: Idx, item: Elem) if (RETURN_ERRORS) Error!void else void {
-            return self.as_manual_alloc_list().insert(idx, item, self.get_alloc());
-        }
-
-        pub inline fn insert_assume_capacity(self: *List, idx: Idx, item: Elem) void {
-            return self.as_manual_alloc_list().insert_assume_capacity(idx, item);
-        }
-
-        pub inline fn insert_many_slots(self: *List, idx: Idx, count: Idx) if (RETURN_ERRORS) Error![]Elem else []Elem {
-            return self.as_manual_alloc_list().insert_many_slots(idx, count, self.get_alloc());
-        }
-
-        pub inline fn insert_many_slots_assume_capacity(self: *List, idx: Idx, count: Idx) []Elem {
-            return self.as_manual_alloc_list().insert_many_slots_assume_capacity(idx, count);
-        }
-
-        pub inline fn insert_slice(self: *List, idx: Idx, items: []const Elem) if (RETURN_ERRORS) Error!void else void {
-            return self.as_manual_alloc_list().insert_slice(idx, items, self.get_alloc());
-        }
-
-        pub inline fn insert_slice_assume_capacity(self: *List, idx: Idx, items: []const Elem) void {
-            return self.as_manual_alloc_list().insert_slice_assume_capacity(idx, items);
-        }
-
-        pub inline fn replace_range(self: *List, start: Idx, length: Idx, new_items: []const Elem) if (RETURN_ERRORS) Error!void else void {
-            return self.as_manual_alloc_list().replace_range(start, length, new_items, self.get_alloc());
-        }
-
-        pub inline fn replace_range_assume_capacity(self: *List, start: Idx, length: Idx, new_items: []const Elem) void {
-            return self.as_manual_alloc_list().replace_range_assume_capacity(start, length, new_items);
-        }
-
-        pub inline fn append(self: *List, item: Elem) if (RETURN_ERRORS) Error!void else void {
-            return self.as_manual_alloc_list().append(item, self.get_alloc());
-        }
-
-        pub inline fn append_assume_capacity(self: *List, item: Elem) void {
-            return self.as_manual_alloc_list().append_assume_capacity(item);
-        }
-
-        pub inline fn remove(self: *List, idx: Idx) Elem {
-            return self.as_manual_alloc_list().remove(idx);
-        }
-
-        pub inline fn swap_remove(self: *List, idx: Idx) Elem {
-            return self.as_manual_alloc_list().swap_remove(idx);
-        }
-
-        pub inline fn delete(self: *List, idx: Idx) void {
-            return self.as_manual_alloc_list().delete(idx);
-        }
-
-        pub inline fn delete_range(self: *List, start: Idx, length: Idx) void {
-            return self.as_manual_alloc_list().delete_range(start, length);
-        }
-
-        pub inline fn swap_delete(self: *List, idx: Idx) void {
-            return self.as_manual_alloc_list().swap_delete(idx);
-        }
-
-        pub inline fn append_slice(self: *List, items: []const Elem) if (RETURN_ERRORS) Error!void else void {
-            return self.as_manual_alloc_list().append_slice(items, self.get_alloc());
-        }
-
-        pub inline fn append_slice_assume_capacity(self: *List, items: []const Elem) void {
-            return self.as_manual_alloc_list().append_slice_assume_capacity(items);
-        }
-
-        pub inline fn append_slice_unaligned(self: *List, items: []align(1) const Elem) if (RETURN_ERRORS) Error!void else void {
-            return self.as_manual_alloc_list().append_slice_unaligned(items, self.get_alloc());
-        }
-
-        pub inline fn append_slice_unaligned_assume_capacity(self: *List, items: []align(1) const Elem) void {
-            return self.as_manual_alloc_list().append_slice_unaligned_assume_capacity(items);
-        }
-
-        pub inline fn append_n_times(self: *List, value: Elem, count: Idx) if (RETURN_ERRORS) Error!void else void {
-            return self.as_manual_alloc_list().append_n_times(value, count, self.get_alloc());
-        }
-
-        pub inline fn append_n_times_assume_capacity(self: *List, value: Elem, count: Idx) void {
-            return self.as_manual_alloc_list().append_n_times_assume_capacity(value, count);
-        }
-
-        pub inline fn resize(self: *List, new_len: Idx) if (RETURN_ERRORS) Error!void else void {
-            return self.as_manual_alloc_list().resize(new_len, self.get_alloc());
-        }
-
-        pub inline fn shrink_and_free(self: *List, new_len: Idx) void {
-            return self.as_manual_alloc_list().shrink_and_free(new_len, self.get_alloc());
-        }
-
-        pub inline fn shrink_retaining_capacity(self: *List, new_len: Idx) void {
-            return self.as_manual_alloc_list().shrink_retaining_capacity(new_len);
-        }
-
-        pub inline fn clear_retaining_capacity(self: *List) void {
-            return self.as_manual_alloc_list().clear_retaining_capacity();
-        }
-
-        pub inline fn clear_and_free(self: *List) void {
-            return self.as_manual_alloc_list().clear_and_free(self.get_alloc());
-        }
-
-        pub inline fn ensure_total_capacity(self: *List, new_capacity: Idx) if (RETURN_ERRORS) Error!void else void {
-            return self.as_manual_alloc_list().ensure_total_capacity(new_capacity, self.get_alloc());
-        }
-
-        pub inline fn ensure_total_capacity_exact(self: *List, new_capacity: Idx) if (RETURN_ERRORS) Error!void else void {
-            return self.as_manual_alloc_list().ensure_total_capacity_exact(new_capacity, self.get_alloc());
-        }
-
-        pub inline fn ensure_unused_capacity(self: *List, additional_count: Idx) if (RETURN_ERRORS) Error!void else void {
-            return self.as_manual_alloc_list().ensure_unused_capacity(additional_count, self.get_alloc());
-        }
-
-        pub inline fn expand_to_capacity(self: *List) void {
-            return self.as_manual_alloc_list().expand_to_capacity();
-        }
-
-        pub inline fn append_slot(self: *List) if (RETURN_ERRORS) Error!*Elem else *Elem {
-            return self.as_manual_alloc_list().append_slot(self.get_alloc());
-        }
-
-        pub inline fn append_slot_assume_capacity(self: *List) *Elem {
-            return self.as_manual_alloc_list().append_slot_assume_capacity();
-        }
-
-        pub inline fn append_many_slots(self: *List, count: Idx) if (RETURN_ERRORS) Error![]Elem else []Elem {
-            return self.as_manual_alloc_list().append_many_slots(count, self.get_alloc());
-        }
-
-        pub inline fn append_many_slots_assume_capacity(self: *List, count: Idx) []Elem {
-            return self.as_manual_alloc_list().append_many_slots_assume_capacity(count);
-        }
-
-        pub inline fn append_many_slots_as_array(self: *List, comptime count: Idx) if (RETURN_ERRORS) Error!*[count]Elem else *[count]Elem {
-            return self.as_manual_alloc_list().append_many_slots_as_array(count, self.get_alloc());
-        }
-
-        pub inline fn append_many_slots_as_array_assume_capacity(self: *List, comptime count: Idx) *[count]Elem {
-            return self.as_manual_alloc_list().append_many_slots_as_array_assume_capacity(count);
-        }
-
-        pub inline fn pop_or_null(self: *List) ?Elem {
-            return self.as_manual_alloc_list().pop_or_null();
-        }
-
-        pub inline fn pop(self: *List) Elem {
-            return self.as_manual_alloc_list().pop();
-        }
-
-        pub inline fn get_last(self: List) Elem {
-            return self.to_manual_alloc_list().get_last();
-        }
-
-        pub inline fn get_last_or_null(self: List) ?Elem {
-            return self.to_manual_alloc_list().get_last_or_null();
-        }
-
-        pub inline fn find_idx(self: List, comptime Param: type, match_param: Param, match_fn: *const fn (param: Param, item: *const Elem) bool) ?Idx {
-            return self.to_manual_alloc_list().find_idx(Param, match_param, match_fn);
-        }
-
-        pub inline fn find_ptr(self: List, comptime Param: type, match_param: Param, match_fn: *const fn (param: Param, item: *const Elem) bool) ?*Elem {
-            return self.to_manual_alloc_list().find_ptr(Param, match_param, match_fn);
-        }
-
-        pub inline fn find_const_ptr(self: List, comptime Param: type, match_param: Param, match_fn: *const fn (param: Param, item: *const Elem) bool) ?*const Elem {
-            return self.to_manual_alloc_list().find_const_ptr(Param, match_param, match_fn);
-        }
-
-        pub inline fn find_and_copy(self: List, comptime Param: type, match_param: Param, match_fn: *const fn (param: Param, item: *const Elem) bool) ?Elem {
-            return self.to_manual_alloc_list().find_and_copy(Param, match_param, match_fn);
-        }
-
-        pub inline fn find_and_remove(self: List, comptime Param: type, match_param: Param, match_fn: *const fn (param: Param, item: *const Elem) bool) ?Elem {
-            return self.to_manual_alloc_list().find_and_remove(Param, match_param, match_fn);
-        }
-
-        pub inline fn find_and_delete(self: List, comptime Param: type, match_param: Param, match_fn: *const fn (param: Param, item: *const Elem) bool) bool {
-            return self.to_manual_alloc_list().find_and_delete(Param, match_param, match_fn);
-        }
-
-        pub inline fn find_exactly_n_item_indexes_from_n_params_in_order(self: List, comptime Param: type, params: []const Param, match_fn: *const fn (param: Param, item: *const Elem) bool, output_buf: []Idx) bool {
-            return self.flex_slice(.immutable).find_exactly_n_item_indexes_from_n_params_in_order(Param, params, match_fn, output_buf);
-        }
-
-        pub inline fn find_exactly_n_item_pointers_from_n_params_in_order(self: List, comptime Param: type, params: []const Param, match_fn: *const fn (param: Param, item: *const Elem) bool, output_buf: []*Elem) bool {
-            return self.flex_slice(.mutable).find_exactly_n_item_pointers_from_n_params_in_order(Param, params, match_fn, output_buf);
-        }
-
-        pub inline fn find_exactly_n_const_item_pointers_from_n_params_in_order(self: List, comptime Param: type, params: []const Param, match_fn: *const fn (param: Param, item: *const Elem) bool, output_buf: []*const Elem) bool {
-            return self.flex_slice(.immutable).find_exactly_n_const_item_pointers_from_n_params_in_order(Param, params, match_fn, output_buf);
-        }
-
-        pub inline fn find_exactly_n_item_copies_from_n_params_in_order(self: List, comptime Param: type, params: []const Param, match_fn: *const fn (param: Param, item: *const Elem) bool, output_buf: []Elem) bool {
-            return self.flex_slice(.immutable).find_exactly_n_item_copies_from_n_params_in_order(Param, params, match_fn, output_buf);
-        }
-
-        pub fn delete_ordered_indexes(self: *List, indexes: []const Idx) void {
-            return self.as_manual_alloc_list().delete_ordered_indexes(indexes);
-        }
-
-        //TODO pub fn insert_slots_at_ordered_indexes()
-
-        pub inline fn insertion_sort(self: *List) void {
-            return self.flex_slice(.mutable).insertion_sort();
-        }
-
-        pub inline fn insertion_sort_with_transform(self: *List, comptime TX: type, transform_fn: *const fn (item: Elem) TX) void {
-            return self.flex_slice(.mutable).insertion_sort_with_transform(TX, transform_fn);
-        }
-
-        pub inline fn insertion_sort_with_transform_and_user_data(self: *List, comptime TX: type, transform_fn: *const fn (item: Elem, userdata: ?*anyopaque) TX, userdata: ?*anyopaque) void {
-            return self.flex_slice(.mutable).insertion_sort_with_transform_and_user_data(TX, transform_fn, userdata);
-        }
-
-        pub inline fn is_sorted(self: *List) bool {
-            return self.flex_slice(.immutable).is_sorted();
-        }
-
-        pub inline fn is_sorted_with_transform(self: *List, comptime TX: type, transform_fn: *const fn (item: Elem) TX) bool {
-            return self.flex_slice(.immutable).is_sorted_with_transform(TX, transform_fn);
-        }
-
-        pub inline fn is_sorted_with_transform_and_user_data(self: *List, comptime TX: type, transform_fn: *const fn (item: Elem, userdata: ?*anyopaque) TX, userdata: ?*anyopaque) bool {
-            return self.flex_slice(.immutable).is_sorted_with_transform_and_user_data(TX, transform_fn, userdata);
-        }
-
-        pub inline fn is_reverse_sorted(self: *List) bool {
-            return self.flex_slice(.immutable).is_reverse_sorted();
-        }
-
-        pub inline fn is_reverse_sorted_with_transform(self: *List, comptime TX: type, transform_fn: *const fn (item: Elem) TX) bool {
-            return self.flex_slice(.immutable).is_reverse_sorted_with_transform(TX, transform_fn);
-        }
-
-        pub inline fn is_reverse_sorted_with_transform_and_user_data(self: *List, comptime TX: type, transform_fn: *const fn (item: Elem, userdata: ?*anyopaque) TX, userdata: ?*anyopaque) bool {
-            return self.flex_slice(.immutable).is_reverse_sorted_with_transform_and_user_data(TX, transform_fn, userdata);
-        }
-
-        // pub inline fn insert_one_sorted(self: *List, item: Elem) if (RETURN_ERRORS) Error!Idx else Idx {
-        //     return Internal.insert_one_sorted(List, self, item, self.get_alloc());
-        // }
-
-        // pub inline fn insert_one_sorted_custom(self: *List, item: Elem, compare_fn: *const CompareFn(Elem), comptime shortcut_equal_order: bool) if (RETURN_ERRORS) Error!Idx else Idx {
-        //     return Internal.insert_one_sorted_custom(List, self, item, compare_fn, shortcut_equal_order, self.get_alloc());
-        // }
-
-        // pub inline fn find_equal_order_idx_sorted(self: *const List, item_to_compare: *const Elem) ?Idx {
-        //     return Internal.find_equal_order_idx_sorted(List, self, item_to_compare);
-        // }
-
-        // pub fn find_equal_order_idx_sorted_custom(self: *const List, item_to_compare: *const Elem, compare_fn: *const CompareFn(Elem)) ?Idx {
-        //     return Internal.find_equal_order_idx_sorted_custom(List, self, item_to_compare, compare_fn);
-        // }
-
-        // pub inline fn find_matching_item_idx_sorted(self: *const List, item_to_find: *const Elem) ?Idx {
-        //     return Internal.find_matching_item_idx_sorted(List, self, item_to_find);
-        // }
-
-        // pub fn find_matching_item_idx_sorted_custom(self: *const List, item_to_find: *const Elem, compare_fn: *const CompareFn(Elem), match_fn: *const CompareFn(Elem)) ?Idx {
-        //     return Internal.find_matching_item_idx_sorted_custom(List, self, item_to_find, compare_fn, match_fn);
-        // }
-
-        //**************************
-        // std.io.Writer interface *
-        //**************************
-        pub fn get_std_writer(self: *List) ManualList.StdWriter {
-            return self.as_manual_alloc_list().get_std_writer(self.get_alloc());
-        }
-
-        pub fn get_std_writer_no_grow(self: *List) ManualList.StdWriterNoGrow {
-            return self.as_manual_alloc_list().get_std_writer_no_grow();
         }
     };
 }

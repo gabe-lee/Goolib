@@ -26,16 +26,14 @@ const assert = std.debug.assert;
 const build = @import("builtin");
 
 const Root = @import("./_root.zig");
-const LOG_PREFIX = Root.LOG_PREFIX;
 const Utils = Root.Utils;
 const Assert = Root.Assert;
 const assert_with_reason = Assert.assert_with_reason;
 const infered_greater_than = Utils.infered_greater_than;
 const SortAlgorithm = Root.CommonTypes.SortAlgorithm;
-const Compare = Root.Compare;
-const CompareFn = Compare.CompareFn;
-const ComparePackage = Compare.ComparePackage;
 const inline_swap = Root.Utils.inline_swap;
+const Iterator = Root.Iterator;
+const IterCaps = Iterator.IteratorCapabilities;
 // const greater_than = Compare.greater_than;
 
 pub fn insertion_sort(comptime T: type, buffer: []T) void {
@@ -113,6 +111,49 @@ pub inline fn insertion_sort_with_transform(comptime T: type, buffer: []T, compt
         buffer[j] = x;
         i += 1;
     }
+}
+
+pub fn insertion_sort_iterator(comptime T: type, iter: Iterator.Iterator(T), move_data_fn: *const fn (from_item: *const T, to_item: *T, userdata: ?*anyopaque) void, greater_than_fn: *const fn (a: *const T, b: *const T, userdata: ?*anyopaque) bool, userdata: ?*anyopaque) void {
+    const caps = iter.capabilities();
+    assert_with_reason(caps.has_entire_group_set(IterCaps.Group.DIRECTION), @src(), "iterator must support `FORWARD` and `BACKWARD` capabilities", .{});
+    assert_with_reason(caps.isolate_group_as_int_aligned_to_bit_0(IterCaps.Group.SAVE_LOAD) >= 1,  @src(), "iterator must support at least 1 save/load slot (`SAVE_LOAD_1_SLOT`)", .{});
+    _ = iter.reset();
+    var x: T = undefined;
+    var prev_item: ?*T = null;
+    _ = iter.skip_next();
+    var this_item: ?*T = iter.peek_next_or_null();
+    if (this_item == null) return;
+    while (this_item != null) {
+        assert_with_reason(iter.save_state(0), @src(), "iterator save state to slot `0` failed", .{});
+        move_data_fn(this_item.?, &x, userdata);
+        prev_item = iter.get_prev_or_null();
+        inner: while (prev_item != null) {
+            if (greater_than_fn(prev_item.?, &x, userdata)) {
+                move_data_fn(prev_item.?, this_item.?, userdata);
+                this_item = prev_item;
+                prev_item = iter.get_prev_or_null();
+            } else break :inner;
+        }
+        move_data_fn(&x, this_item.?, userdata);
+        assert_with_reason(iter.load_state(0), @src(), "iterator load state from slot `0` failed", .{});
+        _ = iter.skip_next();
+        this_item = iter.peek_next_or_null();
+    }
+    // while (i < buffer.len) {
+    //     x = buffer[i];
+    //     j = i;
+    //     inner: while (j > 0) {
+    //         jj = j - 1;
+    //         if (infered_greater_than(buffer[jj], x)) {
+    //             buffer[j] = buffer[jj];
+    //             j -= 1;
+    //         } else {
+    //             break :inner;
+    //         }
+    //     }
+    //     buffer[j] = x;
+    //     i += 1;
+    // }
 }
 
 test "InsertionSort.zig" {
