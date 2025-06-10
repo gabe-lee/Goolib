@@ -237,7 +237,7 @@ pub fn define_linked_list_manager(comptime options: LinkedListManagerOptions) ty
     }
     return struct {
         list: BaseList = BaseList.UNINIT,
-        sets: [SET_COUNT]ListData = UNINIT_SETS,
+        lists: [SET_COUNT]ListData = UNINIT_SETS,
         assert_alloc: if (ASSERT_ALLOC) Allocator else void = if (ASSERT_ALLOC) DummyAllocator.allocator else void{},
 
         const STRONG_ASSERT = options.stronger_asserts;
@@ -384,7 +384,7 @@ pub fn define_linked_list_manager(comptime options: LinkedListManagerOptions) ty
         };
 
         pub const Get = struct {
-            pub const CreateOne = struct {};
+            pub const CreateOneNew = struct {};
             pub const FirstFromList = struct { list: ListTag };
             pub const LastFromList = struct { list: ListTag };
             pub const FirstFromListElseCreateNew = struct { list: ListTag };
@@ -412,7 +412,7 @@ pub fn define_linked_list_manager(comptime options: LinkedListManagerOptions) ty
             pub const BeforeIndexInList = struct { idx: Idx, list: ListTag };
             pub const AtBeginningOfChildren = struct { parent_idx: Idx };
             pub const AtEndOfChildren = struct { parent_idx: Idx };
-            pub const InUntrackedList = struct {};
+            pub const Untracked = struct {};
         };
 
         /// Represents a slice of logical items in a Linked List
@@ -649,7 +649,7 @@ pub fn define_linked_list_manager(comptime options: LinkedListManagerOptions) ty
                 return result;
             }
 
-            pub fn traverse_backward_to_find_idx_n_places_after_this_one_start_at(self: *const LinkedList, list: ListTag, this_idx: Idx, count: Idx, start_idx: Idx) Idx {
+            pub fn traverse_backward_to_find_idx_n_places_after_this_one_start_at(self: *const LinkedList, this_idx: Idx, count: Idx, start_idx: Idx) Idx {
                 var delta: Idx = 0;
                 var probe: Idx = start_idx;
                 var result: Idx = probe;
@@ -670,19 +670,19 @@ pub fn define_linked_list_manager(comptime options: LinkedListManagerOptions) ty
                 return result;
             }
 
-            pub fn traverse_forward_to_find_idx_n_places_before_this_one_start_at(self: *const LinkedList, idx: Idx, count: Idx, start_idx: Idx) Idx {
+            pub fn traverse_forward_to_find_idx_n_places_before_this_one_start_at(self: *const LinkedList, this_idx: Idx, count: Idx, start_idx: Idx) Idx {
                 var delta: Idx = 0;
-                var probe: Idx = if (use_start) start_idx else self.get_first_index_in_list(list);
+                var probe: Idx = start_idx;
                 var result: Idx = probe;
                 var c: if (STRONG_ASSERT) Idx else void = if (STRONG_ASSERT) 0 else void{};
                 const limit: if (STRONG_ASSERT) Idx else void = if (STRONG_ASSERT) @as(Idx, @intCast(self.list.len)) else void{};
-                while (delta < count and probe != idx and probe != NULL_IDX and (if (STRONG_ASSERT) c <= limit else true)) {
+                while (delta < count and probe != this_idx and probe != NULL_IDX and (if (STRONG_ASSERT) c <= limit else true)) {
                     probe = self.get_next_idx(probe);
                     delta += 1;
                     if (STRONG_ASSERT) c += 1;
                 }
-                assert_with_reason(delta == count, @src(), "there are not {d} more items before idx {d}, (only {d})", .{ count, idx, delta });
-                while (probe != idx and (if (STRONG_ASSERT) c <= limit else true)) {
+                assert_with_reason(delta == count, @src(), "there are not {d} more items before idx {d}, (only {d})", .{ count, this_idx, delta });
+                while (probe != this_idx and (if (STRONG_ASSERT) c <= limit else true)) {
                     probe = self.get_next_idx(probe);
                     result = self.get_next_idx(result);
                     if (STRONG_ASSERT) c += 1;
@@ -697,12 +697,12 @@ pub fn define_linked_list_manager(comptime options: LinkedListManagerOptions) ty
 
             pub inline fn increase_link_set_count(self: *LinkedList, list: ListTag, amount: Idx) void {
                 if (list == UNTRACKED_LIST) return;
-                self.sets[@intFromEnum(list)].count += amount;
+                self.lists[@intFromEnum(list)].count += amount;
             }
 
             pub inline fn decrease_link_set_count(self: *LinkedList, list: ListTag, amount: Idx) void {
                 if (list == UNTRACKED_LIST) return;
-                self.sets[@intFromEnum(list)].count -= amount;
+                self.lists[@intFromEnum(list)].count -= amount;
             }
 
             pub inline fn set_list(ptr: *Elem, list: ListTag) void {
@@ -732,31 +732,33 @@ pub fn define_linked_list_manager(comptime options: LinkedListManagerOptions) ty
                 if (init_list) Internal.set_list(ptr, list);
             }
 
-            pub fn initialize_indexes(self: *LinkedList, first_idx: Idx, last_idx: Idx, comptime init_link: bool, comptime init_list: bool, list: ListTag, comptime init_idx: bool, comptime init_parent: bool, parent: Idx) void {
+            pub fn initialize_concurrent_indexes(self: *LinkedList, first_idx: Idx, last_idx: Idx, comptime init_link: bool, comptime init_list: bool, list: ListTag, comptime init_idx: bool, comptime init_parent: bool, parent: Idx) void {
                 var left_idx = first_idx;
                 var right_idx = first_idx + 1;
-                var left_ptr = self.get_ptr(left_idx);
+                const left_ptr = self.get_ptr(left_idx);
                 var right_ptr = undefined;
                 Internal.initialize_element(left_ptr, init_list, list, init_idx, left_idx, init_parent, parent);
                 while (right_idx <= last_idx) {
                     right_ptr = self.get_ptr(right_idx);
                     Internal.initialize_element(right_ptr, init_list, list, init_idx, right_idx, init_parent, parent);
-                    const left = Internal.get_conn_left(self, list, left_idx);
-                    const right = Internal.get_conn_right(self, list, right_idx);
-                    connect(left, right);
+                    if (init_link) {
+                        const left = Internal.get_conn_left(self, list, left_idx);
+                        const right = Internal.get_conn_right(self, list, right_idx);
+                        connect(left, right);
+                    }
                     left_idx += 1;
                     right_idx += 1;
                 }
             }
 
             pub fn disconnect_one(self: *LinkedList, list: ListTag, idx: Idx) void {
-                const disconn = Internal.get_conn_left_right_before_first_and_after_last(self, idx, idx, list);
+                const disconn = Internal.get_conn_left_right_before_first_and_after_last_valid_indexes(self, idx, idx, list);
                 Internal.connect(disconn.left, disconn.right);
                 Internal.decrease_link_set_count(self, list, 1);
             }
 
             pub fn disconnect_many_first_last(self: *LinkedList, list: ListTag, first_idx: Idx, last_idx: Idx, count: Idx) void {
-                const disconn = Internal.get_conn_left_right_before_first_and_after_last(self, first_idx, last_idx, list);
+                const disconn = Internal.get_conn_left_right_before_first_and_after_last_valid_indexes(self, first_idx, last_idx, list);
                 Internal.connect(disconn.left, disconn.right);
                 Internal.decrease_link_set_count(self, list, count);
             }
@@ -799,18 +801,23 @@ pub fn define_linked_list_manager(comptime options: LinkedListManagerOptions) ty
                 }
             }
 
-            pub inline fn get_conn_left(self: *LinkedList, list: ListTag, left_idx: Idx, sibling_idx: Idx) ConnLeft {
+            pub inline fn get_conn_left(self: *LinkedList, list: ListTag, left_idx: Idx, idx_on_same_list: Idx) ConnLeft {
                 var conn: ConnLeft = undefined;
                 if (BIDIRECTION or FORWARD) {
                     if (left_idx == NULL_IDX) {
                         if (list == UNTRACKED_LIST) {
-                            if (PARENT and FIRST_CHILD and sibling_idx != NULL_IDX) {
-                                conn.idx_ptr = &@field(self.get_ptr(@field(self.get_ptr(sibling_idx), PARENT_FIELD)), FIRST_CHILD_FIELD);
+                            if (PARENT and FIRST_CHILD and (left_idx != NULL_IDX or idx_on_same_list != NULL_IDX)) {
+                                const parent_idx = if (left_idx != NULL_IDX) self.get_parent_idx(left_idx) else self.get_parent_idx(idx_on_same_list);
+                                if (parent_idx != NULL_IDX) {
+                                    conn.idx_ptr = &@field(self.get_ptr(parent_idx), FIRST_CHILD_FIELD);
+                                } else {
+                                    conn.idx_ptr = &DUMMY_IDX;
+                                }
                             } else {
                                 conn.idx_ptr = &DUMMY_IDX;
                             }
                         } else {
-                            conn.idx_ptr = &self.sets[@intFromEnum(list)].first_idx;
+                            conn.idx_ptr = &self.lists[@intFromEnum(list)].first_idx;
                         }
                     } else {
                         conn.idx_ptr = &@field(get_ptr(self, left_idx), NEXT_FIELD);
@@ -822,18 +829,67 @@ pub fn define_linked_list_manager(comptime options: LinkedListManagerOptions) ty
                 return conn;
             }
 
-            pub inline fn get_conn_right(self: *LinkedList, list: ListTag, right_idx: Idx, sibling_idx: Idx) ConnLeft {
+            pub inline fn get_conn_left_from_first_child(self: *LinkedList, parent_idx: Idx) ConnLeft {
+                var conn: ConnLeft = undefined;
+                if (BIDIRECTION or FORWARD) {
+                    conn.idx_ptr = &@field(get_ptr(self, parent_idx), FIRST_CHILD_FIELD);
+                }
+                if (BIDIRECTION or BACKWARD) {
+                    conn.idx = NULL_IDX;
+                }
+                return conn;
+            }
+
+            pub inline fn get_conn_left_from_list_head(self: *LinkedList, list: ListTag) ConnLeft {
+                var conn: ConnLeft = undefined;
+                if (BIDIRECTION or FORWARD) {
+                    conn.idx_ptr = &self.lists[@intFromEnum(list)].first_idx;
+                }
+                if (BIDIRECTION or BACKWARD) {
+                    conn.idx = NULL_IDX;
+                }
+                return conn;
+            }
+
+            pub inline fn get_conn_left_dummy_end() ConnLeft {
+                var conn: ConnLeft = undefined;
+                if (BIDIRECTION or FORWARD) {
+                    conn.idx_ptr = &DUMMY_IDX;
+                }
+                if (BIDIRECTION or BACKWARD) {
+                    conn.idx = NULL_IDX;
+                }
+                return conn;
+            }
+
+            pub inline fn get_conn_left_valid_index(self: *LinkedList, left_idx: Idx) ConnLeft {
+                var conn: ConnLeft = undefined;
+                if (BIDIRECTION or FORWARD) {
+                    conn.idx_ptr = &@field(get_ptr(self, left_idx), NEXT_FIELD);
+                }
+                if (BIDIRECTION or BACKWARD) {
+                    conn.idx = left_idx;
+                }
+                return conn;
+            }
+
+            pub inline fn get_conn_right(self: *LinkedList, list: ListTag, right_idx: Idx, idx_on_same_list: Idx) ConnLeft {
                 var conn: ConnLeft = undefined;
                 if (BIDIRECTION or BACKWARD) {
                     if (right_idx == NULL_IDX) {
                         if (list == UNTRACKED_LIST) {
-                            if (PARENT and LAST_CHILD and sibling_idx != NULL_IDX) {
-                                conn.idx_ptr = &@field(self.get_ptr(@field(self.get_ptr(sibling_idx), PARENT_FIELD)), LAST_CHILD_FIELD);
+                            if (PARENT and LAST_CHILD and (right_idx != NULL_IDX or idx_on_same_list != NULL_IDX)) {
+                                const parent_idx = if (right_idx != NULL_IDX) self.get_parent_idx(right_idx) else self.get_parent_idx(idx_on_same_list);
+                                if (parent_idx != NULL_IDX) {
+                                    conn.idx_ptr = &@field(self.get_ptr(parent_idx), LAST_CHILD_FIELD);
+                                } else {
+                                    conn.idx_ptr = &DUMMY_IDX;
+                                }
                             } else {
                                 conn.idx_ptr = &DUMMY_IDX;
                             }
                         } else {
-                            conn.idx_ptr = &self.sets[@intFromEnum(list)].last_idx;
+                            conn.idx_ptr = &self.lists[@intFromEnum(list)].last_idx;
                         }
                     } else {
                         conn.idx_ptr = &@field(get_ptr(self, right_idx), PREV_FIELD);
@@ -845,45 +901,125 @@ pub fn define_linked_list_manager(comptime options: LinkedListManagerOptions) ty
                 return conn;
             }
 
-            pub fn get_conn_left_right_directly_before_this(self: *LinkedList, this_idx: Idx, list: ListTag) ConnLeftRight {
+            pub inline fn get_conn_right_from_last_child(self: *LinkedList, parent_idx: Idx) ConnRight {
+                var conn: ConnRight = undefined;
+                if (BIDIRECTION or BACKWARD) {
+                    conn.idx_ptr = &@field(get_ptr(self, parent_idx), LAST_CHILD_FIELD);
+                }
+                if (BIDIRECTION or FORWARD) {
+                    conn.idx = NULL_IDX;
+                }
+                return conn;
+            }
+
+            pub inline fn get_conn_right_from_list_tail(self: *LinkedList, list: ListTag) ConnRight {
+                var conn: ConnRight = undefined;
+                if (BIDIRECTION or BACKWARD) {
+                    conn.idx_ptr = &self.lists[@intFromEnum(list)].last_idx;
+                }
+                if (BIDIRECTION or FORWARD) {
+                    conn.idx = NULL_IDX;
+                }
+                return conn;
+            }
+
+            pub inline fn get_conn_right_dummy_end() ConnRight {
+                var conn: ConnRight = undefined;
+                if (BIDIRECTION or BACKWARD) {
+                    conn.idx_ptr = &DUMMY_IDX;
+                }
+                if (BIDIRECTION or FORWARD) {
+                    conn.idx = NULL_IDX;
+                }
+                return conn;
+            }
+
+            pub inline fn get_conn_right_valid_index(self: *LinkedList, right_idx: Idx) ConnRight {
+                var conn: ConnRight = undefined;
+                if (BIDIRECTION or BACKWARD) {
+                    conn.idx_ptr = &@field(get_ptr(self, right_idx), PREV_FIELD);
+                }
+                if (BIDIRECTION or FORWARD) {
+                    conn.idx = right_idx;
+                }
+                return conn;
+            }
+
+            pub fn get_conn_left_right_directly_before_this_valid_index(self: *LinkedList, this_idx: Idx, list: ListTag) ConnLeftRight {
                 var result: ConnLeftRight = undefined;
                 const prev_idx = self.get_prev_idx(this_idx);
-                result.right = Internal.get_conn_right(self, list, this_idx, prev_idx);
+                result.right = Internal.get_conn_right_valid_index(self, this_idx);
                 result.left = Internal.get_conn_left(self, list, prev_idx, this_idx);
                 return result;
             }
 
-            pub fn get_conn_left_right_directly_after_this(self: *LinkedList, this_idx: Idx, list: ListTag) ConnLeftRight {
+            pub fn get_conn_left_right_from_first_child_position(self: *LinkedList, parent_idx: Idx) ConnLeftRight {
+                var result: ConnLeftRight = undefined;
+                result.left = Internal.get_conn_left_from_first_child(self, parent_idx);
+                const first_child_idx = self.get_first_child(parent_idx);
+                if (first_child_idx != NULL_IDX) {
+                    result.right = Internal.get_conn_right_valid_index(self, first_child_idx);
+                } else if (LAST_CHILD) {
+                    result.right = Internal.get_conn_right_from_last_child(self, parent_idx);
+                } else {
+                    result.right = Internal.get_conn_right_dummy_end();
+                }
+                return result;
+            }
+
+            pub fn get_conn_left_right_from_last_child_position(self: *LinkedList, parent_idx: Idx) ConnLeftRight {
+                var result: ConnLeftRight = undefined;
+                result.right = Internal.get_conn_right_from_last_child(self, parent_idx);
+                const last_child_idx = self.get_last_child(parent_idx);
+                if (last_child_idx != NULL_IDX) {
+                    result.left = Internal.get_conn_left_valid_index(self, last_child_idx);
+                } else if (FIRST_CHILD) {
+                    result.left = Internal.get_conn_left_from_first_child(self, parent_idx);
+                } else {
+                    result.left = Internal.get_conn_left_dummy_end();
+                }
+                return result;
+            }
+
+            pub fn get_conn_left_right_directly_after_this_valid_index(self: *LinkedList, this_idx: Idx, list: ListTag) ConnLeftRight {
                 var result: ConnLeftRight = undefined;
                 const next_idx = self.get_next_idx(this_idx);
-                result.left = Internal.get_conn_left(self, list, this_idx, next_idx);
+                result.left = Internal.get_conn_left_valid_index(self, this_idx);
                 result.right = Internal.get_conn_right(self, list, next_idx, this_idx);
                 return result;
             }
 
-            pub fn get_conn_left_right_before_first_and_after_last(self: *LinkedList, first: Idx, last: Idx, list: ListTag) ConnLeftRight {
+            pub fn get_conn_left_right_before_first_and_after_last_valid_indexes(self: *LinkedList, first_idx: Idx, last_idx: Idx, list: ListTag) ConnLeftRight {
                 var result: ConnLeftRight = undefined;
-                const left_idx = self.get_prev_idx(list, first);
-                result.left = Internal.get_conn_left(self, list, left_idx);
-                const next_idx = self.get_next_idx(list, last);
-                result.right = Internal.get_conn_right(self, list, next_idx);
+                const left_idx = self.get_prev_idx(list, first_idx);
+                const right_idx = self.get_next_idx(list, last_idx);
+                result.left = Internal.get_conn_left(self, list, left_idx, first_idx);
+                result.right = Internal.get_conn_right(self, list, right_idx, last_idx);
                 return result;
             }
 
-            pub fn get_conn_left_right_for_tail_of_set(self: *LinkedList, list: ListTag) ConnLeftRight {
-                var result: ConnLeftRight = undefined;
-                result.right = Internal.get_conn_right_from_set_tail(self, list);
+            pub fn get_conn_left_right_for_tail_of_list(self: *LinkedList, list: ListTag) ConnLeftRight {
                 const last_index = self.get_last_index_in_list(list);
-                result.left = Internal.get_conn_left(self, list, last_index);
-                return result;
+                var conn: ConnLeftRight = undefined;
+                conn.right = Internal.get_conn_right_from_list_tail(self, list);
+                if (last_index != NULL_IDX) {
+                    conn.left = Internal.get_conn_left_valid_index(self, last_index);
+                } else {
+                    conn.left = Internal.get_conn_left_from_list_head(self, list);
+                }
+                return conn;
             }
 
-            pub fn get_conn_left_right_for_head_of_set(self: *LinkedList, list: ListTag) ConnLeftRight {
-                var result: ConnLeftRight = undefined;
-                result.left = Internal.get_conn_left_from_list_head(self, list);
+            pub fn get_conn_left_right_for_head_of_list(self: *LinkedList, list: ListTag) ConnLeftRight {
                 const first_index = self.get_first_index_in_list(list);
-                result.right = Internal.get_conn_right(self, list, first_index);
-                return result;
+                var conn: ConnLeftRight = undefined;
+                conn.left = Internal.get_conn_left_from_list_head(self, list);
+                if (first_index != NULL_IDX) {
+                    conn.right = Internal.get_conn_right_valid_index(self, first_index);
+                } else {
+                    conn.right = Internal.get_conn_right_from_list_tail(self, list);
+                }
+                return conn;
             }
 
             pub fn traverse_backward_to_get_first_index_in_list_from_start_index(self: *const LinkedList, start_idx: Idx) Idx {
@@ -1000,28 +1136,28 @@ pub fn define_linked_list_manager(comptime options: LinkedListManagerOptions) ty
                 return @as(ListTagInt, @intCast((@field(ptr, STATE_FIELD) & STATE_MASK) >> STATE_OFFSET));
             }
 
-            pub fn assert_valid_list_idx(self: *LinkedList, list_idx: IndexInList, comptime src_loc: ?SourceLocation) void {
+            pub fn assert_valid_list_idx(self: *LinkedList, idx: Idx, list: ListTag, comptime src_loc: ?SourceLocation) void {
                 if (@inComptime() or build.mode == .Debug or build.mode == .ReleaseSafe) {
-                    assert_idx_less_than_len(list_idx.idx, self.list.len, src_loc);
-                    const ptr = get_ptr(self, list_idx.idx);
-                    if (STATE) assert_with_reason(get_list_tag_raw(ptr) == @intFromEnum(list_idx.list), src_loc, "set {s} on SetIdx does not match list on elem at idx {d}", .{ @tagName(list_idx.list), list_idx.idx });
+                    assert_idx_less_than_len(idx, self.list.len, src_loc);
+                    const ptr = get_ptr(self, idx);
+                    if (STATE) assert_with_reason(get_list_tag_raw(ptr) == @intFromEnum(list), src_loc, "set {s} on SetIdx does not match list on elem at idx {d}", .{ @tagName(list), idx });
                     if (STRONG_ASSERT) {
-                        const found_in_list = Internal.traverse_and_report_if_found_idx_in_set(self, list_idx.list, list_idx.idx);
-                        assert_with_reason(found_in_list, src_loc, "while verifying idx {d} is in set {s}, the idx was not found when traversing the set", .{ list_idx.idx, @tagName(list_idx.list) });
+                        const found_in_list = if (FORWARD) Internal.traverse_forward_from_idx_and_report_if_found_target_idx(self, self.get_first_index_in_list(list), idx) else Internal.traverse_backward_from_idx_and_report_if_found_target_idx(self, self.get_last_index_in_list(list), idx);
+                        assert_with_reason(found_in_list, src_loc, "while verifying idx {d} is in set {s}, the idx was not found when traversing the set", .{ idx, @tagName(list) });
                     }
                 }
             }
-            pub fn assert_valid_list_idx_list(self: *LinkedList, set_idx_list: IndexesInSameList, comptime src_loc: ?SourceLocation) void {
+            pub fn assert_valid_list_idx_list(self: *LinkedList, list: ListTag, indexes: []const Idx, comptime src_loc: ?SourceLocation) void {
                 if (@inComptime() or build.mode == .Debug or build.mode == .ReleaseSafe) {
-                    for (set_idx_list.idxs) |idx| {
-                        Internal.assert_valid_list_idx(self, IndexInList{ .list = set_idx_list.list, .idx = idx }, src_loc);
+                    for (indexes) |idx| {
+                        Internal.assert_valid_list_idx(self, idx, list, src_loc);
                     }
                 }
             }
-            pub fn assert_valid_list_of_list_idxs(self: *LinkedList, set_idx_list: []const IndexInList, comptime src_loc: ?SourceLocation) void {
+            pub fn assert_valid_list_of_list_idxs(self: *LinkedList, set_idx_list: []const ListIdx, comptime src_loc: ?SourceLocation) void {
                 if (@inComptime() or build.mode == .Debug or build.mode == .ReleaseSafe) {
                     for (set_idx_list) |list_idx| {
-                        Internal.assert_valid_list_idx(self, list_idx, src_loc);
+                        Internal.assert_valid_list_idx(self, list_idx.idx, list_idx.list, src_loc);
                     }
                 }
             }
@@ -1050,47 +1186,112 @@ pub fn define_linked_list_manager(comptime options: LinkedListManagerOptions) ty
                 }
             }
 
-            //CHECKPOINT refactor to take `anytypes` and switch on their type
-            fn get_items_and_insert_at_internal(self: *LinkedList, comptime get_mode: GetMode, get_val: GetVal(get_mode), comptime insert_mode: InsertMode, insert_val: InsertVal(insert_mode), alloc: Allocator, comptime ASSUME_CAP: bool) if (!ASSUME_CAP and RETURN_ERRORS) Error!LLSlice else LLSlice {
+            fn get_items_and_insert_at_internal(self: *LinkedList, get_from: anytype, insert_to: anytype, alloc: Allocator, comptime ASSUME_CAP: bool) if (!ASSUME_CAP and RETURN_ERRORS) Error!LLSlice else LLSlice {
+                const FROM = @TypeOf(get_from);
+                const TO = @TypeOf(insert_to);
                 var insert_edges: ConnLeftRight = undefined;
                 var insert_list: ListTag = undefined;
-                switch (insert_mode) {
-                    .AFTER_INDEX => {
-                        const list_idx: IndexInList = insert_val;
-                        Internal.assert_valid_list_idx(self, list_idx, @src());
-                        insert_edges = Internal.get_conn_left_right_directly_after_this(self, list_idx.idx, list_idx.list);
-                        insert_list = list_idx.list;
+                var insert_untracked: bool = false;
+                var insert_parent: Idx = NULL_IDX;
+                switch (TO) {
+                    Insert.AfterIndex => {
+                        const idx: Idx = insert_to.idx;
+                        assert_idx_less_than_len(idx, self.list.len, @src());
+                        const list: ListTag = self.get_list_tag(idx);
+                        insert_edges = Internal.get_conn_left_right_directly_after_this_valid_index(self, idx, list);
+                        insert_list = list;
+                        insert_parent = self.get_parent_idx(idx);
                     },
-                    .BEFORE_INDEX => {
-                        const list_idx: IndexInList = insert_val;
-                        Internal.assert_valid_list_idx(self, list_idx, @src());
-                        insert_edges = Internal.get_conn_left_right_directly_before_this(self, list_idx.idx, list_idx.list);
-                        insert_list = list_idx.list;
+                    Insert.AfterIndexInList => {
+                        const idx: Idx = insert_to.idx;
+                        const list: Idx = insert_to.list;
+                        assert_valid_list_idx(self, idx, list, @src());
+                        insert_edges = Internal.get_conn_left_right_directly_after_this_valid_index(self, idx, list);
+                        insert_list = list;
+                        insert_parent = self.get_parent_idx(idx);
                     },
-                    .AT_BEGINNING_OF_LIST => {
-                        const list: ListTag = insert_val;
-                        insert_edges = Internal.get_conn_left_right_for_head_of_set(self, list);
+                    Insert.BeforeIndex => {
+                        const idx: Idx = insert_to.idx;
+                        assert_idx_less_than_len(idx, self.list.len, @src());
+                        const list: ListTag = self.get_list_tag(idx);
+                        insert_edges = Internal.get_conn_left_right_directly_before_this_valid_index(self, idx, list);
+                        insert_list = list;
+                        insert_parent = self.get_parent_idx(idx);
+                    },
+                    Insert.BeforeIndexInList => {
+                        const idx: Idx = insert_to.idx;
+                        const list: Idx = insert_to.list;
+                        assert_valid_list_idx(self, idx, list, @src());
+                        insert_edges = Internal.get_conn_left_right_directly_before_this_valid_index(self, idx, list);
+                        insert_list = list;
+                        insert_parent = self.get_parent_idx(idx);
+                    },
+                    Insert.AtBeginningOfList => {
+                        const list: ListTag = insert_to.list;
+                        assert_with_reason(list != UNTRACKED_LIST, @src(), "cannot insert to beginning of the 'untracked' list (it has no begining or end)", .{});
+                        insert_edges = Internal.get_conn_left_right_for_head_of_list(self, list);
                         insert_list = list;
                     },
-                    .AT_END_OF_LIST => {
-                        const list: ListTag = insert_val;
-                        insert_edges = Internal.get_conn_left_right_for_tail_of_set(self, list);
+                    Insert.AtEndOfList => {
+                        const list: ListTag = insert_to.list;
+                        assert_with_reason(list != UNTRACKED_LIST, @src(), "cannot insert to end of the 'untracked' list (it has no begining or end)", .{});
+                        insert_edges = Internal.get_conn_left_right_for_tail_of_list(self, list);
                         insert_list = list;
                     },
+                    Insert.AtBeginningOfChildren => {
+                        assert_with_reason(FIRST_CHILD or (LAST_CHILD and BACKWARD), @src(), "cannot insert at beginning of children when items do not cache either the first child index, or last child index and is also linked in backward direction", .{});
+                        const parent_idx: Idx = insert_to.parent_idx;
+                        assert_idx_less_than_len(parent_idx, self.list.len, @src());
+                        insert_parent = parent_idx;
+                        if (FIRST_CHILD) {
+                            insert_edges = Internal.get_conn_left_right_from_first_child_position(self, parent_idx);
+                            insert_list = UNTRACKED_LIST;
+                        } else {
+                            assert_with_reason(ALLOW_SLOW, @src(), "slow fallbacks not allowed", .{});
+                            const last_child_idx = self.get_last_child(parent_idx);
+                            const first_child_idx = Internal.traverse_backward_to_get_first_index_in_list_from_start_index(self, last_child_idx);
+                            insert_edges.left = Internal.get_conn_left_dummy_end();
+                            insert_edges.right = if (first_child_idx != NULL_IDX) Internal.get_conn_right_valid_index(self, first_child_idx) else Internal.get_conn_right_from_last_child(self, parent_idx);
+                            insert_list = UNTRACKED_LIST;
+                        }
+                    },
+                    Insert.AtEndOfChildren => {
+                        assert_with_reason(LAST_CHILD or (FIRST_CHILD and FORWARD), @src(), "cannot insert children when items do not cache either the first child index, or last child index and is also linked in backward direction", .{});
+                        const parent_idx: Idx = insert_to.parent_idx;
+                        assert_idx_less_than_len(parent_idx, self.list.len, @src());
+                        insert_parent = parent_idx;
+                        if (LAST_CHILD) {
+                            insert_edges = Internal.get_conn_left_right_from_last_child_position(self, parent_idx);
+                            insert_list = UNTRACKED_LIST;
+                        } else {
+                            assert_with_reason(ALLOW_SLOW, @src(), "slow fallbacks not allowed", .{});
+                            const first_child_idx = self.get_first_child(parent_idx);
+                            const last_child_idx = Internal.traverse_forward_to_get_last_index_in_list_from_start_index(self, first_child_idx);
+                            insert_edges.right = Internal.get_conn_right_dummy_end();
+                            insert_edges.left = if (last_child_idx != NULL_IDX) Internal.get_conn_left_valid_index(self, last_child_idx) else Internal.get_conn_left_from_first_child(self, parent_idx);
+                            insert_list = UNTRACKED_LIST;
+                        }
+                    },
+                    Insert.Untracked => {
+                        insert_list = UNTRACKED_LIST;
+                        insert_untracked = true;
+                    },
+                    else => assert_with_reason(false, @src(), "invalid type `{s}` input for parameter `insert_to`. All valid input types are contained in `Insert`", .{@typeName(TO)}),
                 }
                 var return_items: LLSlice = undefined;
-                switch (get_mode) {
-                    .CREATE_ONE_NEW => {
+                switch (FROM) {
+                    Get.CreateOneNew => {
                         const new_idx = if (ASSUME_CAP) self.list.append_slot_assume_capacity() else (if (RETURN_ERRORS) try self.list.append_slot(alloc) else self.list.append_slot(alloc));
                         return_items.first = new_idx;
                         return_items.last = new_idx;
                         return_items.count = 1;
                     },
-                    .FIRST_FROM_LIST, .FIRST_FROM_LIST_ELSE_CREATE_NEW => {
-                        const list: ListTag = get_val;
+                    Get.FirstFromList, Get.FirstFromListElseCreateNew => {
+                        const list: ListTag = get_from.list;
+                        assert_with_reason(list != UNTRACKED_LIST, @src(), "cannot get items from the 'untracked' list without specific indexes", .{});
                         const list_count: debug_switch(Idx, void) = debug_switch(self.get_list_len(list), void{});
                         const first_idx = self.get_first_index_in_list(list);
-                        if (get_mode == .FIRST_FROM_LIST_ELSE_CREATE_NEW and (debug_switch(list_count == 0, false) or first_idx == NULL_IDX)) {
+                        if (FROM == Get.FirstFromListElseCreateNew and (debug_switch(list_count == 0, false) or first_idx == NULL_IDX)) {
                             const new_idx = self.list.len;
                             _ = if (ASSUME_CAP) self.list.append_slot_assume_capacity() else (if (RETURN_ERRORS) try self.list.append_slot(alloc) else self.list.append_slot(alloc));
                             return_items.first = new_idx;
@@ -1104,11 +1305,12 @@ pub fn define_linked_list_manager(comptime options: LinkedListManagerOptions) ty
                             Internal.disconnect_one(self, list, first_idx);
                         }
                     },
-                    .LAST_FROM_LIST, .LAST_FROM_LIST_ELSE_CREATE_NEW => {
-                        const list: ListTag = get_val;
+                    Get.LastFromList, Get.LastFromListElseCreateNew => {
+                        const list: ListTag = get_from.list;
+                        assert_with_reason(list != UNTRACKED_LIST, @src(), "cannot get items from the 'untracked' list without specific indexes", .{});
                         const list_count: debug_switch(Idx, void) = debug_switch(self.get_list_len(list), void{});
                         const last_idx = self.get_last_index_in_list(list);
-                        if (get_mode == .LAST_FROM_LIST_ELSE_CREATE_NEW and (debug_switch(list_count == 0, false) or last_idx == NULL_IDX)) {
+                        if (FROM == Get.LastFromListElseCreateNew and (debug_switch(list_count == 0, false) or last_idx == NULL_IDX)) {
                             const new_idx = self.list.len;
                             _ = if (ASSUME_CAP) self.list.append_slot_assume_capacity() else (if (RETURN_ERRORS) try self.list.append_slot(alloc) else self.list.append_slot(alloc));
                             return_items.first = new_idx;
@@ -1122,48 +1324,63 @@ pub fn define_linked_list_manager(comptime options: LinkedListManagerOptions) ty
                             Internal.disconnect_one(self, list, last_idx);
                         }
                     },
-                    .ONE_INDEX => {
-                        const list_idx: IndexInList = get_val;
-                        Internal.assert_valid_list_idx(self, list_idx, @src());
-                        return_items.first = list_idx.idx;
-                        return_items.last = list_idx.idx;
+                    Get.OneIndex => {
+                        const idx: Idx = get_from.idx;
+                        assert_idx_less_than_len(idx, self.list.len, @src());
+                        const list: ListTag = self.get_list_tag(idx);
+                        return_items.first = idx;
+                        return_items.last = idx;
                         return_items.count = 1;
-                        Internal.disconnect_one(self, list_idx.set, list_idx.idx);
+                        Internal.disconnect_one(self, list, idx);
                     },
-                    .CREATE_MANY_NEW => {
-                        const count: Idx = get_val;
-                        assert_with_reason(count > 0, @src(), "cannot get `0` new items", .{});
+                    Get.OneIndexInList => {
+                        const idx: Idx = get_from.idx;
+                        const list: ListTag = get_from.list;
+                        assert_valid_list_idx(self, idx, list, @src());
+                        return_items.first = idx;
+                        return_items.last = idx;
+                        return_items.count = 1;
+                        Internal.disconnect_one(self, list, idx);
+                    },
+                    Get.CreateManyNew => {
+                        const count: Idx = get_from.count;
+                        assert_with_reason(count > 0, @src(), "cannot create `0` new items", .{});
                         const first_idx = self.list.len;
                         const last_idx = self.list.len + count - 1;
                         _ = if (ASSUME_CAP) self.list.append_many_slots_assume_capacity(count) else (if (RETURN_ERRORS) try self.list.append_many_slots(count, alloc) else self.list.append_many_slots(count, alloc));
-                        Internal.initialize_new_indexes(self, insert_list, first_idx, last_idx);
+                        Internal.initialize_concurrent_indexes(self, first_idx, last_idx, true, false, insert_list, false, NULL_IDX);
                         return_items.first = first_idx;
                         return_items.last = last_idx;
                         return_items.count = count;
                     },
-                    .FIRST_N_FROM_LIST => {
-                        const list_count: CountFromList = get_val;
-                        assert_with_reason(list_count.count > 0, @src(), "cannot get `0` items", .{});
-                        assert_with_reason(self.get_list_len(list_count.list) >= list_count.count, @src(), "requested {d} items from set {s}, but set only has {d} items", .{ list_count.count, @tagName(list_count.list), self.get_list_len(list_count.list) });
-                        return_items.first = self.get_first_index_in_list(list_count.list);
-                        return_items.last = self.get_nth_item_from_start_of_list(list_count.list, list_count.count - 1);
-                        return_items.count = list_count.count;
-                        Internal.disconnect_many_first_last(self, list_count.list, return_items.first, return_items.last, list_count.count);
+                    Get.FirstCountFromList => {
+                        const list: ListTag = get_from.list;
+                        const count: Idx = get_from.count;
+                        assert_with_reason(count > 0, @src(), "cannot get `0` items", .{});
+                        assert_with_reason(list != UNTRACKED_LIST, @src(), "cannot get items from the 'untracked' list without specific indexes", .{});
+                        assert_with_reason(self.get_list_len(list) >= count, @src(), "requested {d} items from set {s}, but set only has {d} items", .{ count, @tagName(list), self.get_list_len(list) });
+                        return_items.first = self.get_first_index_in_list(list);
+                        return_items.last = self.get_nth_index_from_start_of_list(list, count - 1);
+                        return_items.count = count;
+                        Internal.disconnect_many_first_last(self, list, return_items.first, return_items.last, count);
                     },
-                    .LAST_N_FROM_LIST => {
-                        const list_count: CountFromList = get_val;
-                        assert_with_reason(list_count.count > 0, @src(), "cannot insert `0` items", .{});
-                        assert_with_reason(self.get_list_len(list_count.list) >= list_count.count, @src(), "requested {d} items from set {s}, but set only has {d} items", .{ list_count.count, @tagName(list_count.list), self.get_list_len(list_count.list) });
-                        return_items.last = self.get_last_index_in_list(list_count.list);
-                        return_items.first = self.get_nth_item_from_end_of_list(list_count.list, list_count.count - 1);
-                        return_items.count = list_count.count;
-                        Internal.disconnect_many_first_last(self, list_count.list, return_items.first, return_items.last, list_count.count);
+                    Get.LastCountFromList => {
+                        const list: ListTag = get_from.list;
+                        const count: Idx = get_from.count;
+                        assert_with_reason(count > 0, @src(), "cannot get `0` items", .{});
+                        assert_with_reason(list != UNTRACKED_LIST, @src(), "cannot get items from the 'untracked' list without specific indexes", .{});
+                        assert_with_reason(self.get_list_len(list) >= count, @src(), "requested {d} items from set {s}, but set only has {d} items", .{ count, @tagName(list), self.get_list_len(list) });
+                        return_items.last = self.get_last_index_in_list(list);
+                        return_items.first = self.get_nth_index_from_end_of_list(list, count - 1);
+                        return_items.count = count;
+                        Internal.disconnect_many_first_last(self, list, return_items.first, return_items.last, count);
                     },
-                    .FIRST_N_FROM_LIST_ELSE_CREATE_NEW => {
-                        const list_count: CountFromList = get_val;
-                        assert_with_reason(list_count.count > 0, @src(), "cannot insert `0` items", .{});
-                        const count_from_list = @min(self.get_list_len(list_count.list), list_count.count);
-                        const count_from_new = list_count.count - count_from_list;
+                    Get.FirstCountFromListElseCreateNew => {
+                        const list: ListTag = get_from.list;
+                        const count: Idx = get_from.count;
+                        assert_with_reason(count > 0, @src(), "cannot get `0` items", .{});
+                        const count_from_list = @min(self.get_list_len(list), count);
+                        const count_from_new = count - count_from_list;
                         var first_new_idx: Idx = undefined;
                         var last_moved_idx: Idx = undefined;
                         const needs_new = count_from_new > 0;
@@ -1172,7 +1389,7 @@ pub fn define_linked_list_manager(comptime options: LinkedListManagerOptions) ty
                             first_new_idx = self.list.len;
                             const last_new_idx = self.list.len + count_from_new - 1;
                             _ = if (ASSUME_CAP) self.list.append_many_slots_assume_capacity(count_from_new) else (if (RETURN_ERRORS) try self.list.append_many_slots(count_from_new, alloc) else self.list.append_many_slots(count_from_new, alloc));
-                            Internal.initialize_new_indexes(self, list_count.list, first_new_idx, last_new_idx);
+                            Internal.initialize_concurrent_indexes(self, first_new_idx, last_new_idx, true, false, insert_list, false, NULL_IDX);
                             if (needs_move) {
                                 first_new_idx = first_new_idx;
                             } else {
@@ -1181,27 +1398,27 @@ pub fn define_linked_list_manager(comptime options: LinkedListManagerOptions) ty
                             return_items.last = last_new_idx;
                         }
                         if (needs_move) {
-                            return_items.first = self.get_first_index_in_list(list_count.list);
+                            return_items.first = self.get_first_index_in_list(list);
                             if (needs_new) {
-                                last_moved_idx = self.get_nth_item_from_start_of_list(list_count.list, count_from_list - 1);
-                                Internal.disconnect_many_first_last(self, list_count.list, return_items.first, last_moved_idx, count_from_list);
+                                last_moved_idx = self.get_nth_index_from_start_of_list(list, count_from_list - 1);
+                                Internal.disconnect_many_first_last(self, list, return_items.first, last_moved_idx, count_from_list);
                             } else {
-                                return_items.last = self.get_nth_item_from_start_of_list(list_count.list, count_from_list - 1);
-                                Internal.disconnect_many_first_last(self, list_count.list, return_items.first, return_items.last, count_from_list);
+                                return_items.last = self.get_nth_index_from_start_of_list(list, count_from_list - 1);
+                                Internal.disconnect_many_first_last(self, list, return_items.first, return_items.last, count_from_list);
                             }
                         }
                         if (needs_new and needs_move) {
-                            const mid_left = Internal.get_conn_left(self, list_count.list, last_moved_idx);
-                            const mid_right = Internal.get_conn_right(self, list_count.list, first_new_idx);
-                            Internal.connect(mid_left, mid_right);
+                            const mid_conn = Internal.get_conn_left_right_before_first_and_after_last_valid_indexes(self, last_moved_idx, first_new_idx, list);
+                            Internal.connect(mid_conn.left, mid_conn.right);
                         }
-                        return_items.count = list_count.count;
+                        return_items.count = count;
                     },
-                    .LAST_N_FROM_LIST_ELSE_CREATE_NEW => {
-                        const list_count: CountFromList = get_val;
-                        assert_with_reason(list_count.count > 0, @src(), "cannot insert `0` items", .{});
-                        const count_from_list = @min(self.get_list_len(list_count.list), list_count.count);
-                        const count_from_new = list_count.count - count_from_list;
+                    Get.LastCountFromListElseCreateNew => {
+                        const list: ListTag = get_from.list;
+                        const count: Idx = get_from.count;
+                        assert_with_reason(count > 0, @src(), "cannot get `0` items", .{});
+                        const count_from_list = @min(self.get_list_len(list), count);
+                        const count_from_new = count - count_from_list;
                         var first_new_idx: Idx = undefined;
                         var last_moved_idx: Idx = undefined;
                         const needs_new = count_from_new > 0;
@@ -1210,7 +1427,7 @@ pub fn define_linked_list_manager(comptime options: LinkedListManagerOptions) ty
                             first_new_idx = self.list.len;
                             const last_new_idx = self.list.len + count_from_new - 1;
                             _ = if (ASSUME_CAP) self.list.append_many_slots_assume_capacity(count_from_new) else (if (RETURN_ERRORS) try self.list.append_many_slots(count_from_new, alloc) else self.list.append_many_slots(count_from_new, alloc));
-                            Internal.initialize_new_indexes(self, list_count.list, first_new_idx, last_new_idx);
+                            Internal.initialize_concurrent_indexes(self, first_new_idx, last_new_idx, true, false, insert_list, false, NULL_IDX);
                             if (needs_move) {
                                 first_new_idx = first_new_idx;
                             } else {
@@ -1219,45 +1436,64 @@ pub fn define_linked_list_manager(comptime options: LinkedListManagerOptions) ty
                             return_items.last = last_new_idx;
                         }
                         if (needs_move) {
-                            return_items.first = self.get_nth_item_from_end_of_list(list_count.list, count_from_list - 1);
+                            return_items.first = self.get_nth_index_from_end_of_list(list, count_from_list - 1);
                             if (needs_new) {
-                                last_moved_idx = self.get_last_index_in_list(list_count.list);
-                                Internal.disconnect_many_first_last(self, list_count.list, return_items.first, last_moved_idx, count_from_list);
+                                last_moved_idx = self.get_last_index_in_list(list);
+                                Internal.disconnect_many_first_last(self, list, return_items.first, last_moved_idx, count_from_list);
                             } else {
-                                return_items.last = self.get_last_index_in_list(list_count.list);
-                                Internal.disconnect_many_first_last(self, list_count.list, return_items.first, return_items.last, count_from_list);
+                                return_items.last = self.get_last_index_in_list(list);
+                                Internal.disconnect_many_first_last(self, list, return_items.first, return_items.last, count_from_list);
                             }
                         }
                         if (needs_new and needs_move) {
-                            const mid_left = Internal.get_conn_left(self, list_count.list, last_moved_idx);
-                            const mid_right = Internal.get_conn_right(self, list_count.list, first_new_idx);
-                            Internal.connect(mid_left, mid_right);
+                            const mid_conn = Internal.get_conn_left_right_before_first_and_after_last_valid_indexes(self, last_moved_idx, first_new_idx, list);
+                            Internal.connect(mid_conn.left, mid_conn.right);
                         }
-                        return_items.count = list_count.count;
+                        return_items.count = count;
                     },
-                    .SPARSE_LIST_FROM_SAME_SET => {
-                        const list_idx_list: IndexesInSameList = get_val;
-                        Internal.assert_valid_list_idx_list(self, list_idx_list, @src());
-                        return_items.first = list_idx_list.idxs[0];
-                        Internal.disconnect_one(self, list_idx_list.list, return_items.first);
+                    Get.SparseIndexesFromSameList => {
+                        const list: ListTag = get_from.list;
+                        const indexes: []const Idx = get_from.indexes;
+                        Internal.assert_valid_list_idx_list(self, list, indexes, @src());
+                        return_items.first = indexes[0];
+                        Internal.disconnect_one(self, list, return_items.first);
                         var prev_idx: Idx = return_items.first;
-                        for (list_idx_list.idxs[1..]) |this_idx| {
-                            Internal.disconnect_one(self, list_idx_list.list, this_idx);
-                            const conn_left = Internal.get_conn_left(self, list_idx_list.list, prev_idx);
-                            const conn_right = Internal.get_conn_right(self, list_idx_list.list, this_idx);
-                            Internal.connect(conn_left, conn_right);
+                        for (indexes[1..]) |this_idx| {
+                            const conn = Internal.get_conn_left_right_before_first_and_after_last_valid_indexes(self, prev_idx, this_idx, list);
+                            Internal.disconnect_one(self, list, this_idx);
+                            Internal.connect(conn.left, conn.right);
                             prev_idx = this_idx;
                         }
                         return_items.last = prev_idx;
-                        return_items.count = @intCast(list_idx_list.idxs.len);
+                        return_items.count = @intCast(indexes.len);
                     },
-                    .SPARSE_LIST_FROM_ANY_SET => {
-                        const list_idxs: []const IndexInList = get_val;
-                        Internal.assert_valid_list_of_list_idxs(self, list_idxs, @src());
-                        return_items.first = list_idxs[0].idx;
-                        Internal.disconnect_one(self, list_idxs[0].list, return_items.first);
+                    Get.SparseIndexes => {
+                        const indexes: []const Idx = get_from.indexes;
+                        assert_with_reason(indexes.len > 0, @src(), "cannot get 0 items", .{});
+                        assert_idx_less_than_len(indexes[0], self.list.len, @src());
+                        var list = self.get_list_tag(indexes[0]);
+                        Internal.disconnect_one(self, list, indexes[0]);
+                        return_items.first = indexes[0];
+                        var prev_idx = indexes[0];
+                        for (indexes[1..]) |idx| {
+                            assert_idx_less_than_len(idx, self.list.len, @src());
+                            list = self.get_list_tag(idx);
+                            const conn_left = Internal.get_conn_left(self, list, prev_idx, idx);
+                            const conn_right = Internal.get_conn_right(self, list, idx, prev_idx);
+                            Internal.disconnect_one(self, list, idx);
+                            Internal.connect(conn_left, conn_right);
+                            prev_idx = idx;
+                        }
+                        return_items.last = prev_idx;
+                        return_items.count = @intCast(indexes.len);
+                    },
+                    Get.SparseIndexesFromAnyList => {
+                        const indexes: []const ListIdx = get_from.indexes;
+                        Internal.assert_valid_list_of_list_idxs(self, indexes, @src());
+                        return_items.first = indexes[0].idx;
+                        Internal.disconnect_one(self, indexes[0].list, return_items.first);
                         var prev_idx: Idx = return_items.first;
-                        for (list_idxs[1..]) |list_idx| {
+                        for (indexes[1..]) |list_idx| {
                             const this_idx = list_idx.idx;
                             Internal.disconnect_one(self, list_idx.list, this_idx);
                             const conn_left = Internal.get_conn_left(self, list_idx.list, prev_idx);
@@ -1266,8 +1502,9 @@ pub fn define_linked_list_manager(comptime options: LinkedListManagerOptions) ty
                             prev_idx = this_idx;
                         }
                         return_items.last = prev_idx;
-                        return_items.count = @intCast(list_idxs.len);
+                        return_items.count = @intCast(indexes.len);
                     },
+                    //CHECKPOINT
                     .FROM_SLICE => {
                         const slice: LLSlice = get_val;
                         Internal.assert_valid_slice(self, slice, @src());
@@ -1361,6 +1598,78 @@ pub fn define_linked_list_manager(comptime options: LinkedListManagerOptions) ty
                 }
                 return true;
             }
+
+            pub fn traverse_to_find_what_list_idx_is_in(self: *LinkedList, idx: Idx) ListTag {
+                var c: if (STRONG_ASSERT) Idx else void = if (STRONG_ASSERT) 0 else void{};
+                const limit: if (STRONG_ASSERT) Idx else void = if (STRONG_ASSERT) @as(Idx, @intCast(self.list.len)) else void{};
+                if ((FORWARD and TAIL) or (BACKWARD and HEAD)) {
+                    var left_idx: Idx = idx;
+                    var right_idx: Idx = idx;
+                    while (if (STRONG_ASSERT) c <= limit else true) {
+                        if (BACKWARD and HEAD) {
+                            const next_left = self.get_prev_idx(left_idx);
+                            if (left_idx != NULL_IDX) {
+                                left_idx = next_left;
+                            } else {
+                                for (self.lists, 0..) |list, tag_raw| {
+                                    if (list.first_idx == left_idx) return @enumFromInt(@as(ListTagInt, @intCast(tag_raw)));
+                                }
+                                return UNTRACKED_LIST;
+                            }
+                        }
+                        if (FORWARD and TAIL) {
+                            const next_right = self.get_next_idx(left_idx);
+                            if (right_idx != NULL_IDX) {
+                                right_idx = next_right;
+                            } else {
+                                for (self.lists, 0..) |list, tag_raw| {
+                                    if (list.last_idx == left_idx) return @enumFromInt(@as(ListTagInt, @intCast(tag_raw)));
+                                }
+                                return UNTRACKED_LIST;
+                            }
+                        }
+                        if (STRONG_ASSERT) c += 1;
+                    }
+                    assert_with_reason(false, @src(), "traversed more than {d} elements (total len of underlying element list) starting from index {d} in either forward or backward direction without finding a NULL_IDX: list is cyclic and using this function will create an infinite loop", .{ limit, idx });
+                } else {
+                    for (self.lists, 0..) |list, tag_raw| {
+                        const list_tag = @as(ListTag, @enumFromInt(@as(ListTagInt, @intCast(tag_raw))));
+                        if (FORWARD) {
+                            var curr_idx: Idx = self.get_first_index_in_list(list);
+                            while (curr_idx != NULL_IDX and (if (STRONG_ASSERT) c <= limit else true)) {
+                                if (curr_idx == idx) return list_tag;
+                                curr_idx = self.get_next_idx(curr_idx);
+                                c += 1;
+                            }
+                        } else {
+                            var curr_idx: Idx = self.get_last_index_in_list(list);
+                            while (curr_idx != NULL_IDX and (if (STRONG_ASSERT) c <= limit else true)) {
+                                if (curr_idx == idx) return list_tag;
+                                curr_idx = self.get_next_idx(curr_idx);
+                                c += 1;
+                            }
+                        }
+                    }
+                    if (STRONG_ASSERT) assert_with_reason(c <= limit, @src(), "traversed more than {d} elements (total len of underlying element list) through all lists without finding index {d}: list is cyclic and using this function will create an infinite loop", .{ limit, idx });
+                    return UNTRACKED_LIST;
+                }
+            }
+
+            pub inline fn get_parent_idx(self: *const LinkedList, this_idx: Idx) Idx {
+                assert_idx_less_than_len(this_idx, self.list.len, @src());
+                if (PARENT) return @field(self.get_ptr(this_idx), PARENT_FIELD);
+                return NULL_IDX;
+            }
+            pub inline fn get_first_child_idx_ref(self: *const LinkedList, this_idx: Idx) *Idx {
+                assert_idx_less_than_len(this_idx, self.list.len, @src());
+                assert_with_reason(FIRST_CHILD, @src(), "items do not cache their first child index", .{});
+                return &@field(self.get_ptr(this_idx), FIRST_CHILD_FIELD);
+            }
+            pub inline fn get_last_child_idx_ref(self: *const LinkedList, this_idx: Idx) *Idx {
+                assert_idx_less_than_len(this_idx, self.list.len, @src());
+                assert_with_reason(LAST_CHILD, @src(), "items do not cache their last child index", .{});
+                return &@field(self.get_ptr(this_idx), LAST_CHILD_FIELD);
+            }
         };
 
         pub const IteratorState = struct {
@@ -1423,7 +1732,8 @@ pub fn define_linked_list_manager(comptime options: LinkedListManagerOptions) ty
         }
 
         pub inline fn get_list_len(self: *LinkedList, list: ListTag) Idx {
-            return self.sets[@intFromEnum(list)].count;
+            if (list == UNTRACKED_LIST) return 0;
+            return self.lists[@intFromEnum(list)].count;
         }
 
         pub inline fn get_ptr(self: *const LinkedList, idx: Idx) *Elem {
@@ -1431,46 +1741,86 @@ pub fn define_linked_list_manager(comptime options: LinkedListManagerOptions) ty
             return &self.list.ptr[idx];
         }
 
-        pub inline fn get_prev_idx(self: *const LinkedList, this_idx: Idx) Idx {
-            assert_with_reason(BACKWARD, @src(), "cannot use `get_prev_idx()` when items do not cache the indexes of the 'prev' item in list, provide an option for `backward_linkage` when defining a LinkedListManager, or use `get_prev_idx_fallback()` instead", .{});
-            const ptr = get_ptr(self, this_idx);
-            return @field(ptr, PREV_FIELD);
+        pub fn get_prev_idx(self: *const LinkedList, this_idx: Idx) Idx {
+            assert_idx_less_than_len(this_idx, self.lists.len, @src());
+            assert_with_reason(BACKWARD or STATE or (PARENT and FIRST_CHILD), @src(), "cannot use `get_prev_idx()`, provide an option for `backward_linkage` when defining a LinkedListManager or allow items to cache their own list, or use `get_prev_idx_fallback()` instead", .{});
+            if (BACKWARD) {
+                const ptr = get_ptr(self, this_idx);
+                return @field(ptr, PREV_FIELD);
+            }
+            assert_with_reason(ALLOW_SLOW, @src(), "slow fallbacks disallowed", .{});
+            if (STATE) {
+                const list = self.get_list_tag(this_idx);
+                if (list != UNTRACKED_LIST) {
+                    const first_in_list = self.get_first_index_in_list(list);
+                    return Internal.traverse_to_find_index_before_this_one_forward_from_known_idx_before(self, this_idx, first_in_list);
+                }
+            }
+            const parent_idx = self.get_parent_idx(this_idx);
+            assert_with_reason(PARENT and FIRST_CHILD and parent_idx != NULL_IDX, @src(), "cannot find a previous index if items arent linked in the backward direction OR items dont cache the list they belong to and are not in an 'untracked' list, OR they don't cache both their parent and first-child and their parent idx != NULL_IDX", .{});
+            const known_prev_idx = @field(self.get_ptr(parent_idx), FIRST_CHILD_FIELD);
+            assert_with_reason(known_prev_idx != NULL_IDX, @src(), "parent idx wasn't NULL_IDX, but parent ptr 'first child' field had a value of NULL_IDX, broken list", .{});
+            return Internal.traverse_to_find_index_before_this_one_forward_from_known_idx_before(self, this_idx, known_prev_idx);
         }
 
-        pub inline fn get_prev_idx_fallback(self: *const LinkedList, this_idx: Idx, known_idx_before: Idx) Idx {
+        pub inline fn get_prev_idx_fallback(self: *const LinkedList, this_idx: Idx, known_idx_before_this: Idx) Idx {
             if (BACKWARD) return self.get_prev_idx(this_idx);
-            return Internal.traverse_to_find_index_before_this_one_forward_from_known_idx_before(self, this_idx, known_idx_before);
+            assert_idx_less_than_len(this_idx, self.list.len, @src());
+            assert_idx_less_than_len(known_idx_before_this, self.list.len, @src());
+            return Internal.traverse_to_find_index_before_this_one_forward_from_known_idx_before(self, this_idx, known_idx_before_this);
         }
 
-        pub inline fn get_next_idx(self: *const LinkedList, this_idx: Idx) Idx {
-            assert_with_reason(FORWARD, @src(), "cannot use `get_next_idx()` when items do not cache the indexes of the 'next' item in list, provide an option for `forward_linkage` when defining a LinkedListManager, or use `get_next_idx_fallback()` instead", .{});
-            const ptr = get_ptr(self, this_idx);
-            return @field(ptr, NEXT_FIELD);
+        pub fn get_next_idx(self: *const LinkedList, this_idx: Idx) Idx {
+            assert_idx_less_than_len(this_idx, self.lists.len, @src());
+            assert_with_reason(FORWARD or STATE or (PARENT and LAST_CHILD), @src(), "cannot use `get_next_idx()`, provide an option for `forward_linkage` when defining a LinkedListManager or allow items to cache their own list, or use `get_next_idx_fallback()` instead", .{});
+            if (FORWARD) {
+                const ptr = get_ptr(self, this_idx);
+                return @field(ptr, NEXT_FIELD);
+            }
+            assert_with_reason(ALLOW_SLOW, @src(), "slow fallbacks disallowed", .{});
+            if (STATE) {
+                const list = self.get_list_tag(this_idx);
+                if (list != UNTRACKED_LIST) {
+                    const last_in_list = self.get_last_index_in_list(list);
+                    return Internal.traverse_to_find_index_after_this_one_backward_from_known_idx_after(self, this_idx, last_in_list);
+                }
+            }
+            const parent_idx = self.get_parent_idx(this_idx);
+            assert_with_reason(PARENT and LAST_CHILD and parent_idx != NULL_IDX, @src(), "cannot find a next index if items arent linked in the forward direction OR items dont cache the list they belong to and are not in an 'untracked' list, OR they don't cache both their parent and last-child and their parent idx != NULL_IDX", .{});
+            const known_next_idx = @field(self.get_ptr(parent_idx), LAST_CHILD_FIELD);
+            assert_with_reason(known_next_idx != NULL_IDX, @src(), "parent idx wasn't NULL_IDX, but parent ptr 'last child' field had a value of NULL_IDX, broken list", .{});
+            return Internal.traverse_to_find_index_after_this_one_backward_from_known_idx_after(self, this_idx, known_next_idx);
         }
 
-        pub inline fn get_next_idx_fallback(self: *const LinkedList, this_idx: Idx, known_idx_after: Idx) Idx {
+        pub inline fn get_next_idx_fallback(self: *const LinkedList, this_idx: Idx, known_idx_after_this: Idx) Idx {
             if (FORWARD) return self.get_next_idx(this_idx);
-            return Internal.traverse_to_find_index_after_this_one_backward_from_known_idx_after(self, this_idx, known_idx_after);
+            assert_idx_less_than_len(this_idx, self.list.len, @src());
+            assert_idx_less_than_len(known_idx_after_this, self.list.len, @src());
+            return Internal.traverse_to_find_index_after_this_one_backward_from_known_idx_after(self, this_idx, known_idx_after_this);
         }
 
         pub inline fn get_list_tag(self: *const LinkedList, this_idx: Idx) ListTag {
             if (STATE) return @enumFromInt(Internal.get_list_tag_raw(self.get_ptr(this_idx)));
-            return UNTRACKED_LIST;
+            assert_with_reason(ALLOW_SLOW, @src(), "slow fallbacks not allowed", .{});
+            return Internal.traverse_to_find_what_list_idx_is_in(self, this_idx);
         }
         pub inline fn get_parent_idx(self: *const LinkedList, this_idx: Idx) Idx {
+            assert_idx_less_than_len(this_idx, self.list.len, @src());
             if (PARENT) return @field(self.get_ptr(this_idx), PARENT_FIELD);
             return NULL_IDX;
         }
         pub inline fn get_first_child(self: *const LinkedList, this_idx: Idx) Idx {
+            assert_idx_less_than_len(this_idx, self.list.len, @src());
             if (FIRST_CHILD) return @field(self.get_ptr(this_idx), FIRST_CHILD_FIELD);
             return NULL_IDX;
         }
         pub inline fn get_last_child(self: *const LinkedList, this_idx: Idx) Idx {
+            assert_idx_less_than_len(this_idx, self.list.len, @src());
             if (LAST_CHILD) return @field(self.get_ptr(this_idx), LAST_CHILD_FIELD);
             return NULL_IDX;
         }
 
-        pub fn get_nth_item_from_start_of_list(self: *LinkedList, list: ListTag, n: Idx) Idx {
+        pub fn get_nth_index_from_start_of_list(self: *LinkedList, list: ListTag, n: Idx) Idx {
             const set_count = self.get_list_len(list);
             assert_with_reason(n < set_count, @src(), "index {d} is out of bounds for set {s} (len = {d})", .{ n, @tagName(list), set_count });
             if (FORWARD) {
@@ -1493,7 +1843,7 @@ pub fn define_linked_list_manager(comptime options: LinkedListManagerOptions) ty
             }
         }
 
-        pub fn get_nth_item_from_end_of_list(self: *LinkedList, list: ListTag, n: Idx) Idx {
+        pub fn get_nth_index_from_end_of_list(self: *LinkedList, list: ListTag, n: Idx) Idx {
             const count = self.get_list_len(list);
             assert_with_reason(n < count, @src(), "index {d} is out of bounds for set {s} (len = {d})", .{ n, @tagName(list), count });
             if (BACKWARD) {
@@ -1539,7 +1889,7 @@ pub fn define_linked_list_manager(comptime options: LinkedListManagerOptions) ty
 
         pub inline fn get_first_index_in_list(self: *const LinkedList, list: ListTag) Idx {
             assert_with_reason(list != UNTRACKED_LIST, @src(), "cannot find first index in the 'untracked' list (list with larget enum tag value) without an indx to start from", .{});
-            if (HEAD) return self.sets[@intFromEnum(list)].first_idx;
+            if (HEAD) return self.lists[@intFromEnum(list)].first_idx;
             assert_with_reason(ALLOW_SLOW, @src(), "slow fallbacks disallowed", .{});
             return Internal.traverse_backward_to_get_first_index_in_list_from_start_index(self, self.get_last_index_in_list(list));
         }
@@ -1568,7 +1918,7 @@ pub fn define_linked_list_manager(comptime options: LinkedListManagerOptions) ty
 
         pub inline fn get_last_index_in_list(self: *const LinkedList, list: ListTag) Idx {
             assert_with_reason(list != UNTRACKED_LIST, @src(), "cannot find last index in the 'untracked' list (list with larget enum tag value) without an indx to start from", .{});
-            if (TAIL) return self.sets[@intFromEnum(list)].last_idx;
+            if (TAIL) return self.lists[@intFromEnum(list)].last_idx;
             assert_with_reason(ALLOW_SLOW, @src(), "slow fallbacks disallowed", .{});
             return Internal.traverse_forward_to_get_last_index_in_list_from_start_index(self, self.get_first_index_in_list(list));
         }
@@ -1595,12 +1945,12 @@ pub fn define_linked_list_manager(comptime options: LinkedListManagerOptions) ty
             }
         }
 
-        pub inline fn get_items_and_insert_at(self: *LinkedList, comptime get_mode: GetMode, get_val: GetVal(get_mode), comptime ins_mode: InsertMode, ins_val: InsertVal(ins_mode), alloc: Allocator) if (RETURN_ERRORS) Error!LLSlice else LLSlice {
-            return Internal.get_items_and_insert_at_internal(self, get_mode, get_val, ins_mode, ins_val, alloc, false);
+        pub inline fn get_items_and_insert_at(self: *LinkedList, get_from: anytype, insert_to: anytype, alloc: Allocator) if (RETURN_ERRORS) Error!LLSlice else LLSlice {
+            return Internal.get_items_and_insert_at_internal(self, get_from, insert_to, alloc, false);
         }
 
-        pub inline fn get_items_and_insert_at_assume_capacity(self: *LinkedList, comptime get_mode: GetMode, get_val: GetVal(get_mode), comptime ins_mode: InsertMode, ins_val: InsertVal(ins_mode)) LLSlice {
-            return Internal.get_items_and_insert_at_internal(self, get_mode, get_val, ins_mode, ins_val, DummyAllocator.allocator, true);
+        pub inline fn get_items_and_insert_at_assume_capacity(self: *LinkedList, get_from: anytype, insert_to: anytype) LLSlice {
+            return Internal.get_items_and_insert_at_internal(self, get_from, insert_to, DummyAllocator.allocator, true);
         }
 
         pub fn list_is_cyclic_forward(self: *LinkedList, list: ListTag) bool {
