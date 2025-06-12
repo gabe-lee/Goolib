@@ -24,266 +24,293 @@
 const std = @import("std");
 const build = @import("builtin");
 const mem = std.mem;
-const assert = std.debug.assert;
+const Endian = std.builtin.Endian;
 
-/// Same as `std.builtin.Endian`, but with better clarity and convenience constant for native endian
-pub const Endian = enum(@typeInfo(std.builtin.Endian).@"enum".tag_type) {
-    little_endian = @intFromEnum(std.builtin.Endian.little),
-    big_endian = @intFromEnum(std.builtin.Endian.big),
+const Root = @import("./_root.zig");
+const Assert = Root.Assert;
+const assert_with_reason = Assert.assert_with_reason;
+const Iterator = Root.Iterator.Iterator;
+const IterCaps = Root.Iterator.IteratorCapabilities;
 
-    pub inline fn native_endian() Endian {
-        switch (build.cpu.arch.endian()) {
-            .big => return Endian.big_endian,
-            .little => return Endian.little_endian,
-        }
-    }
+pub const NATIVE_ENDIAN = build.cpu.arch.endian();
 
-    pub inline fn to_std_endian(self: Endian) std.builtin.Endian {
-        return @enumFromInt(@intFromEnum(self));
-    }
+pub const SrcDst = struct {
+    src: [*]const u8,
+    dst: [*]u8,
 
-    pub inline fn from_std_endian(std_endian: std.builtin.Endian) Endian {
-        return @enumFromInt(@intFromEnum(std_endian));
-    }
-};
-
-/// TODO documentation
-pub const BufferProperties = struct {
-    endianness: Endian = .native_endian(),
-    packed_elements: bool = false,
-};
-
-/// TODO documentation
-pub const BufferPropertiesPair = struct {
-    read_properties: BufferProperties = BufferProperties{},
-    write_properties: BufferProperties = BufferProperties{},
-};
-
-/// TODO documentation
-pub const CopyRange = struct {
-    element_count: usize,
-    read_stride: usize,
-    write_stride: usize,
-    total_read_len: usize,
-    total_write_len: usize,
-
-    ///TODO documentation
-    pub fn from_count_and_adapter(count: usize, adapter: CopyAdapter) CopyRange {
-        const read_stride = adapter.read_padding_before + adapter.packed_size + adapter.read_padding_after;
-        const write_stride = adapter.write_padding_before + adapter.packed_size + adapter.write_padding_after;
-        const real_count = count * adapter.base_multiple;
-        return CopyRange{
-            .element_count = real_count,
-            .read_stride = read_stride,
-            .write_stride = write_stride,
-            .total_read_len = read_stride * real_count,
-            .total_write_len = write_stride * real_count,
+    pub inline fn advance(self: SrcDst, src_adv: usize, dst_adv: usize) SrcDst {
+        return SrcDst{
+            .src = self.src + src_adv,
+            .dst = self.dst + dst_adv,
         };
     }
-
-    ///TODO documentation
-    pub fn flip_direction(self: CopyRange) CopyRange {
-        return CopyRange{
-            .element_count = self.element_count,
-            .read_stride = self.write_stride,
-            .total_read_len = self.total_write_len,
-            .write_stride = self.read_stride,
-            .total_write_len = self.total_read_len,
+    pub inline fn advance_src(self: SrcDst, src_adv: usize) SrcDst {
+        return SrcDst{
+            .src = self.src + src_adv,
+            .dst = self.dst,
         };
     }
-
-    ///TODO documentation
-    pub fn with_new_count(self: CopyRange, new_count: usize) CopyRange {
-        return CopyRange{
-            .element_count = new_count,
-            .read_stride = self.read_stride,
-            .total_read_len = self.read_stride * new_count,
-            .write_stride = self.write_stride,
-            .total_write_len = self.write_stride * new_count,
+    pub inline fn advance_dst(self: SrcDst, dst_adv: usize) SrcDst {
+        return SrcDst{
+            .src = self.src,
+            .dst = self.dst + dst_adv,
         };
     }
 };
 
-/// TODO documentation
-pub const CopyAdapter = struct {
-    element_type: type,
-    base_type: type,
-    base_multiple: usize,
-    packed_size: usize,
-    read_padding_before: usize,
-    read_padding_after: usize,
-    read_endianness: Endian,
-    write_padding_before: usize,
-    write_padding_after: usize,
-    write_endianness: Endian,
-
-    ///TODO documentation
-    pub fn from_type_and_buffer_properties_pair(comptime element_type: type, comptime buf_properties_pair: BufferPropertiesPair) CopyAdapter {
-        return CopyAdapter.from_type_and_buffer_properties(element_type, buf_properties_pair.read_buf, buf_properties_pair.write_buf);
-    }
-
-    ///TODO documentation
-    pub fn from_type_and_buffer_properties(comptime element_type: type, comptime read_buf_properties: BufferProperties, comptime write_buf_properties: BufferProperties) CopyAdapter {
-        comptime var base_multiple: usize = 1;
-        comptime var base_type = element_type;
-        comptime while (true) {
-            switch (@typeInfo(base_type)) {
-                .void, .int, .float, .@"enum", .bool => break,
-                .@"union" => |union_info| {
-                    if (union_info.layout == .@"packed") {
-                        break;
-                    } else @compileError("union types that do not use a `packed` layout do not have a stable memory layout. Use a custom read/write procedure instead");
-                },
-                .@"struct" => |struct_info| {
-                    if (struct_info.layout == .@"packed") {
-                        break;
-                    } else @compileError("struct types that do not use a `packed` layout do not have a stable memory layout. Use a custom read/write procedure instead");
-                },
-                .array => |info| {
-                    base_type = info.child;
-                    base_multiple *= info.len;
-                },
-                .vector => |info| {
-                    base_type = info.child;
-                    base_multiple *= info.len;
-                },
-                .pointer => @compileError("Cannot implicitly read/write pointer types, instead dereference them as their child type"),
-                .comptime_int, .comptime_float => @compileError("Types `comptime_int` and `comptime_float` cannot be implicitly read/written, use a concrete type instead"),
-                .error_set, .error_union => @compileError("Types `error_set` and `error_union` do not have stable tag values, use a custom enum/union instead, or manually cast/convert the error tag to an integer or string and read/write that instead"),
-                .optional => @compileError("optional types (`?T`) may not have a stable memory layout or tag value and writing bytes directly into their pointer address may not result in a valid instance of that type. Instead, manually read/write the tag and optional payload separately"),
-                else => |bad_info| @compileError("Type " ++ @typeName(@Type(bad_info)) ++ " has no defined read/write procedure."),
-            }
-        };
-        const padded_byte_size = comptime @sizeOf(base_type);
-        const exact_byte_size = comptime mem.alignForward(usize, @bitSizeOf(base_type), 8) >> 3;
-        const padding = comptime padded_byte_size - exact_byte_size;
-        const read_padding_before = if (read_buf_properties.packed_elements) 0 else if (read_buf_properties.endianness == .big_endian) padding else 0;
-        const read_padding_after = if (read_buf_properties.packed_elements) 0 else if (read_buf_properties.endianness == .big_endian) 0 else padding;
-        const write_padding_before = if (write_buf_properties.packed_elements) 0 else if (write_buf_properties.endianness == .big_endian) padding else 0;
-        const write_padding_after = if (write_buf_properties.packed_elements) 0 else if (write_buf_properties.endianness == .big_endian) 0 else padding;
-        return CopyAdapter{
-            .element_type = element_type,
-            .base_type = base_type,
-            .base_multiple = base_multiple,
-            .packed_size = exact_byte_size,
-            .read_endianness = read_buf_properties.endianness,
-            .read_padding_after = read_padding_after,
-            .read_padding_before = read_padding_before,
-            .write_endianness = write_buf_properties.endianness,
-            .write_padding_after = write_padding_after,
-            .write_padding_before = write_padding_before,
-        };
-    }
-
-    ///TODO documentation
-    pub fn flip_direction(self: CopyAdapter) CopyAdapter {
-        return CopyAdapter{
-            .base_type = self.base_type,
-            .base_multiple = self.base_multiple,
-            .packed_size = self.packed_size,
-            .read_padding_before = self.write_padding_before,
-            .read_padding_after = self.write_padding_after,
-            .read_endianness = self.write_endianness,
-            .write_padding_before = self.read_padding_before,
-            .write_padding_after = self.read_padding_after,
-            .write_endianness = self.read_endianness,
-        };
-    }
-};
-
-/// Copy bytes from the src buffer to the dst buffer,
-/// with the assumption that the bytes represent an array of elements of a specific type,
-/// with arbirary endianness, and arbitrary padding between elements
+/// This function unconditionally coerces the source pointer/slice `src`
+/// and destination ptr/slice `dst` to `[*]u8` pointers
 ///
-/// This version takes a runtime-known `CopyRange` and comptime-known `CopyAdapter`
-pub fn copy_elements_with_count(dst: []u8, src: []const u8, count: usize, comptime adapter: CopyAdapter) void {
-    const copy_range = CopyRange.from_count_and_adapter(count, adapter);
-    return copy_elements_with_range(dst, src, copy_range, adapter);
+/// It performs NO safety checks or assertions except that
+/// `src` and `dst` must be pointer/slice types
+pub fn coerce_src_dst(src: anytype, dst: anytype) SrcDst {
+    const S = @TypeOf(src);
+    const SI = @typeInfo(S);
+    const D = @TypeOf(dst);
+    const DI = @typeInfo(D);
+    const src_ptr: [*]const u8 = switch (SI) {
+        .pointer => |SPI| switch (SPI.size) {
+            .one, .c, .many => @ptrFromInt(@intFromPtr(src)),
+            .slice => @ptrFromInt(@intFromPtr(src.ptr)),
+        },
+        else => assert_with_reason(false, @src(), "`src` must be a pointer or slice type, got {s}", .{@typeName(S)}),
+    };
+    const dst_ptr: [*]u8 = switch (DI) {
+        .pointer => |DPI| switch (DPI.size) {
+            .one, .c, .many => @ptrFromInt(@intFromPtr(dst)),
+            .slice => @ptrFromInt(@intFromPtr(dst.ptr)),
+        },
+        else => assert_with_reason(false, @src(), "`dst` must be a pointer or slice type, got {s}", .{@typeName(D)}),
+    };
+    return SrcDst{
+        .dst = dst_ptr,
+        .src = src_ptr,
+    };
 }
 
-/// Copy bytes from the src buffer to the dst buffer,
-/// with the assumption that the bytes represent an array of elements of a specific type,
-/// with arbirary endianness, and arbitrary padding between elements
+/// This function unconditionally coerces the source pointer/slice `src`
+/// and destination ptr/slice `dst` to `[*]u8` pointers,
+/// and writes `byte_count` bytes from `src`  into `dst`,
+/// while optionally swapping endianess.
 ///
-/// This version takes a runtime-known `CopyRange` and comptime-known `CopyAdapter`
-pub fn copy_elements_with_range(dst: []u8, src: []const u8, copy_range: CopyRange, comptime adapter: CopyAdapter) void {
-    assert(copy_range.total_read_len <= src.len);
-    assert(copy_range.total_write_len <= dst.len);
-    if ((adapter.read_endianness == adapter.write_endianness or adapter.exact_byte_size == 1) and copy_range.total_read_len == copy_range.total_write_len) {
-        @memcpy(dst[0..copy_range.total_write_len], src[0..copy_range.total_read_len]);
+/// It performs NO safety checks or assertions except that
+/// `src` and `dst` must be pointer/slice types
+pub inline fn raw_write(src: anytype, dst: anytype, byte_count: usize, swap_endian: bool) void {
+    const ptrs = coerce_src_dst(src, dst);
+    raw_write_internal(ptrs, byte_count, swap_endian);
+}
+
+fn raw_write_internal(ptrs: SrcDst, byte_count: usize, swap_endian: bool) void {
+    if (swap_endian) {
+        var s: usize = 0;
+        var d: usize = byte_count - 1;
+        inline while (s < byte_count) {
+            ptrs.dst[d] = ptrs.src[s];
+            s += 1;
+            d -= 1;
+        }
     } else {
-        const read_start = adapter.read_padding_before;
-        const read_end = read_start + adapter.exact_byte_size;
-        const write_start = adapter.write_padding_before;
-        const write_end = write_start + adapter.exact_byte_size;
-        var idx_vec: @Vector(5, usize) = .{ read_start, read_end, write_start, write_end, 0 };
-        const idx_add_vec: @Vector(5, usize) = .{ copy_range.read_stride, copy_range.read_stride, copy_range.write_stride, copy_range.write_stride, 1 };
-        while (idx_vec[ELEMENT_IDX] < copy_range.element_count) {
-            if (adapter.read_endianness == adapter.write_endianness) {
-                @memcpy(dst[idx_vec[WRITE_START]..idx_vec[WRITE_END]], src[idx_vec[READ_START]..idx_vec[READ_END]]);
-            } else {
-                var read_byte_idx = idx_vec[READ_END];
-                var write_byte_idx = idx_vec[WRITE_START];
-                while (write_byte_idx < idx_vec[WRITE_END]) {
-                    dst[write_byte_idx] = src[read_byte_idx];
-                    read_byte_idx -= 1;
-                    write_byte_idx += 1;
-                }
-            }
-            idx_vec += idx_add_vec;
-        }
+        @memcpy(ptrs.dst[0..byte_count], ptrs.src[0..byte_count]);
     }
-    return;
 }
 
-/// Copy bytes from the src buffer to the dst buffer,
-/// with the assumption that the bytes represent elements of a specific type,
-/// arbirary endianness, and arbitrary padding between elements
-///
-/// This version takes a comptime-known `count` and `CopyAdapter`
-pub fn copy_elements_with_comptime_count(dst: []u8, src: []const u8, comptime count: usize, comptime adapter: CopyAdapter) void {
-    const copy_range = comptime CopyRange.from_count_and_adapter(count, adapter);
-    return copy_elements_with_comptime_range(dst, src, copy_range, adapter);
+pub inline fn copy_8(src: anytype, dst: anytype) void {
+    raw_write(src, dst, 1, false);
 }
-
-/// Copy bytes from the src buffer to the dst buffer,
-/// with the assumption that the bytes represent an array of elements of a specific type,
-/// with arbirary endianness, and arbitrary padding between elements
-///
-/// This version takes a comptime-known `CopyRange` and `CopyAdapter`
-pub fn copy_elements_with_comptime_range(dst: []u8, src: []const u8, comptime copy_range: CopyRange, comptime adapter: CopyAdapter) void {
-    assert(copy_range.total_read_len <= src.len);
-    assert(copy_range.total_write_len <= dst.len);
-    if ((adapter.read_endianness == adapter.write_endianness or adapter.packed_size == 1) and copy_range.total_read_len == copy_range.total_write_len) {
-        @memcpy(dst[0..copy_range.total_write_len], src[0..copy_range.total_read_len]);
-    } else {
-        const read_start = adapter.read_padding_before;
-        const read_end = read_start + adapter.exact_byte_size;
-        const write_start = adapter.write_padding_before;
-        const write_end = write_start + adapter.exact_byte_size;
-        var idx_vec: IdxVec = .{ read_start, read_end, write_start, write_end, 0 };
-        const idx_add_vec: IdxVec = .{ copy_range.read_stride, copy_range.read_stride, copy_range.write_stride, copy_range.write_stride, 1 };
-        while (idx_vec[ELEMENT_IDX] < copy_range.element_count) {
-            if (adapter.read_endianness == adapter.write_endianness) {
-                @memcpy(dst[idx_vec[WRITE_START]..idx_vec[WRITE_END]], src[idx_vec[READ_START]..idx_vec[READ_END]]);
-            } else {
-                var read_byte_idx = idx_vec[READ_END];
-                var write_byte_idx = idx_vec[WRITE_START];
-                while (write_byte_idx < idx_vec[WRITE_END]) {
-                    dst[write_byte_idx] = src[read_byte_idx];
-                    read_byte_idx -= 1;
-                    write_byte_idx += 1;
-                }
-            }
-            idx_vec += idx_add_vec;
-        }
+pub inline fn copy_8_N(src: anytype, dst: anytype, count: usize) void {
+    raw_write(src, dst, count, false);
+}
+pub inline fn copy_8_N_sparse(src: anytype, src_offset: usize, src_stride: usize, dst: anytype, dst_offset: usize, dst_stride: usize, count: usize) void {
+    var ptrs = coerce_src_dst(src, dst);
+    ptrs = ptrs.advance(src_offset, dst_offset);
+    var c: usize = 0;
+    while (c < count) : (c += 1) {
+        raw_write_internal(ptrs, 1, false);
+        ptrs.advance(src_stride, dst_stride);
     }
-    return;
 }
 
-const IdxVec = @Vector(5, usize);
-const READ_START: comptime_int = 0;
-const READ_END: comptime_int = 1;
-const WRITE_START: comptime_int = 2;
-const WRITE_END: comptime_int = 3;
-const ELEMENT_IDX: comptime_int = 4;
+pub inline fn copy_16(src: anytype, dst: anytype, swap_endian: bool) void {
+    raw_write(src, dst, 2, swap_endian);
+}
+pub inline fn copy_16_N(src: anytype, dst: anytype, count: usize, swap_endian: bool) void {
+    var ptrs = coerce_src_dst(src, dst);
+    var c: usize = 0;
+    while (c < count) : (c += 1) {
+        raw_write_internal(ptrs, 2, swap_endian);
+        ptrs.advance(2, 2);
+    }
+}
+pub inline fn copy_16_N_sparse(src: anytype, src_offset: usize, src_stride: usize, dst: anytype, dst_offset: usize, dst_stride: usize, count: usize, swap_endian: bool) void {
+    var ptrs = coerce_src_dst(src, dst);
+    ptrs = ptrs.advance(src_offset, dst_offset);
+    var c: usize = 0;
+    while (c < count) : (c += 1) {
+        raw_write_internal(ptrs, 2, swap_endian);
+        ptrs.advance(src_stride, dst_stride);
+    }
+}
+
+pub inline fn copy_32(src: anytype, dst: anytype, swap_endian: bool) void {
+    raw_write(src, dst, 4, swap_endian);
+}
+pub inline fn copy_32_N(src: anytype, dst: anytype, count: usize, swap_endian: bool) void {
+    var ptrs = coerce_src_dst(src, dst);
+    var c: usize = 0;
+    while (c < count) : (c += 1) {
+        raw_write_internal(ptrs, 4, swap_endian);
+        ptrs.advance(4, 4);
+    }
+}
+pub inline fn copy_32_N_sparse(src: anytype, src_offset: usize, src_stride: usize, dst: anytype, dst_offset: usize, dst_stride: usize, count: usize, swap_endian: bool) void {
+    var ptrs = coerce_src_dst(src, dst);
+    ptrs = ptrs.advance(src_offset, dst_offset);
+    var c: usize = 0;
+    while (c < count) : (c += 1) {
+        raw_write_internal(ptrs, 4, swap_endian);
+        ptrs.advance(src_stride, dst_stride);
+    }
+}
+
+pub inline fn copy_64(src: anytype, dst: anytype, swap_endian: bool) void {
+    raw_write(src, dst, 8, swap_endian);
+}
+pub inline fn copy_64_N(src: anytype, dst: anytype, count: usize, swap_endian: bool) void {
+    var ptrs = coerce_src_dst(src, dst);
+    var c: usize = 0;
+    while (c < count) : (c += 1) {
+        raw_write_internal(ptrs, 8, swap_endian);
+        ptrs.advance(8, 8);
+    }
+}
+pub inline fn copy_64_N_sparse(src: anytype, src_offset: usize, src_stride: usize, dst: anytype, dst_offset: usize, dst_stride: usize, count: usize, swap_endian: bool) void {
+    var ptrs = coerce_src_dst(src, dst);
+    ptrs = ptrs.advance(src_offset, dst_offset);
+    var c: usize = 0;
+    while (c < count) : (c += 1) {
+        raw_write_internal(ptrs, 8, swap_endian);
+        ptrs.advance(src_stride, dst_stride);
+    }
+}
+
+pub inline fn copy_128(src: anytype, dst: anytype, swap_endian: bool) void {
+    raw_write(src, dst, 16, swap_endian);
+}
+pub inline fn copy_128_N(src: anytype, dst: anytype, count: usize, swap_endian: bool) void {
+    var ptrs = coerce_src_dst(src, dst);
+    var c: usize = 0;
+    while (c < count) : (c += 1) {
+        raw_write_internal(ptrs, 16, swap_endian);
+        ptrs.advance(16, 16);
+    }
+}
+pub inline fn copy_128_N_sparse(src: anytype, src_offset: usize, src_stride: usize, dst: anytype, dst_offset: usize, dst_stride: usize, count: usize, swap_endian: bool) void {
+    var ptrs = coerce_src_dst(src, dst);
+    ptrs = ptrs.advance(src_offset, dst_offset);
+    var c: usize = 0;
+    while (c < count) : (c += 1) {
+        raw_write_internal(ptrs, 16, swap_endian);
+        ptrs.advance(src_stride, dst_stride);
+    }
+}
+
+pub fn CopyElementPkg(comptime element_size: usize) type {
+    return struct {
+        pub inline fn copy(src: anytype, dst: anytype, swap_endian: bool) void {
+            raw_write(src, dst, element_size, swap_endian);
+        }
+        pub inline fn copy_N(src: anytype, dst: anytype, count: usize, swap_endian: bool) void {
+            var ptrs = coerce_src_dst(src, dst);
+            var c: usize = 0;
+            while (c < count) : (c += 1) {
+                raw_write_internal(ptrs, element_size, swap_endian);
+                ptrs.advance(element_size, element_size);
+            }
+        }
+        pub inline fn copy_N_sparse(src: anytype, src_offset: usize, src_stride: usize, dst: anytype, dst_offset: usize, dst_stride: usize, count: usize, swap_endian: bool) void {
+            var ptrs = coerce_src_dst(src, dst);
+            ptrs = ptrs.advance(src_offset, dst_offset);
+            var c: usize = 0;
+            while (c < count) : (c += 1) {
+                raw_write_internal(ptrs, element_size, swap_endian);
+                ptrs.advance(src_stride, dst_stride);
+            }
+        }
+    };
+}
+
+pub fn CopyOperation(comptime element_size: usize, comptime count: usize, comptime src_offset: usize, comptime src_stride: usize, comptime dst_offset: usize, comptime dst_stride: usize, comptime swap_endian: bool) type {
+    return struct {
+        pub fn copy(src: anytype, dst: anytype) void {
+            var ptrs = coerce_src_dst(src, dst);
+            ptrs = ptrs.advance(src_offset, dst_offset);
+            var c: usize = 0;
+            while (c < count) : (c += 1) {
+                raw_write_internal(ptrs, element_size, swap_endian);
+                ptrs.advance(src_stride, dst_stride);
+            }
+        }
+    };
+}
+
+pub fn CompactSparseBytes(comptime OFFSET: type) type {
+    return struct {
+        source_ptr: [*]u8,
+        offsets: []OFFSET,
+
+        const Self = @This();
+
+        const VTABLE = Iterator(u8).VTable{
+            .reset = iter_noop,
+            .advance_next = iter_adv_next,
+            .peek_next_or_null = iter_adv_next,
+            .advance_prev = iter_noop,
+            .peek_prev_or_null = iter_noop_ptr,
+            .capabilities = iter_caps,
+            .load_state = iter_load_save,
+            .save_state = iter_load_save,
+        };
+
+        fn iter_noop(self_opaque: *anyopaque) bool {
+            _ = self_opaque;
+            return false;
+        }
+        fn iter_noop_ptr(self_opaque: *anyopaque) ?*u8 {
+            _ = self_opaque;
+            return null;
+        }
+        fn iter_adv_next(self_opaque: *anyopaque) bool {
+            const self: *Self = @ptrCast(@alignCast(self_opaque));
+            if (self.offsets.len == 0) return false;
+            self.offsets.ptr += 1;
+            self.offsets.len -= 1;
+            return true;
+        }
+        fn iter_peek_next(self_opaque: *anyopaque) ?*u8 {
+            const self: *Self = @ptrCast(@alignCast(self_opaque));
+            if (self.offsets.len == 0) return null;
+            const base_addr: usize = @intFromPtr(self.source_ptr);
+            const offset: usize = @intCast(self.offsets[0]);
+            return @ptrFromInt(base_addr + offset);
+        }
+        fn iter_caps() IterCaps {
+            return IterCaps.from_flag(.FORWARD);
+        }
+        fn iter_load_save(self_opaque: *anyopaque, slot: usize) bool {
+            _ = slot;
+            _ = self_opaque;
+            return false;
+        }
+
+        pub fn iterator(self: *Self) Iterator(u8) {
+            return Iterator(u8){
+                .implementor = @ptrCast(self),
+                .vtable = &VTABLE,
+            };
+        }
+    };
+}
+
+pub const CompactSparseBytesMicro = CompactSparseBytes(u8);
+pub const CompactSparseBytesSmall = CompactSparseBytes(u16);
+pub const CompactSparseBytesMedium = CompactSparseBytes(u32);

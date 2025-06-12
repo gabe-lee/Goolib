@@ -98,10 +98,7 @@ pub const ReadError = error{
 
 /// TODO documentation
 pub const WriteError = error{
-    /// TODO documentation
     write_buffer_too_short,
-    /// TODO documentation
-    source_too_short_for_given_range,
 };
 
 pub const Mutability = enum {

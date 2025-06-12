@@ -29,7 +29,7 @@ const math = std.math;
 const meta = std.meta;
 const mem = std.mem;
 
-const Root = @import("root");
+const Root = @import("./_root.zig");
 const Bytes = Root.Bytes;
 const WriteError = Root.CommonTypes.WriteError;
 const CopyAdapter = Bytes.CopyAdapter;
@@ -38,9 +38,9 @@ const BufferProperties = Bytes.BufferProperties;
 const BufferPropertiesPair = Bytes.BufferPropertiesPair;
 
 /// A type-erased pointer to the object that implements this interface
-_opaque: *anyopaque,
+implementor: *anyopaque,
 /// A function pointer table that matches the minimum required interface functions to their implementations
-_vtable: VTable,
+vtable: VTable,
 
 /// A function pointer table that matches the minimum required interface functions to their implementations
 pub const VTable = struct {
@@ -48,7 +48,7 @@ pub const VTable = struct {
     ///
     /// If the full slice size cannot be returned by the implementation, it should return
     /// a zero-length slice instead and NOT advance the write position
-    try_get_write_slice: *const fn (_opaque: *anyopaque, byte_count: usize) []u8,
+    try_get_write_slice: *const fn (implementor: *anyopaque, byte_count: usize) []u8,
 };
 
 const ByteWriter = @This();
@@ -95,7 +95,7 @@ pub fn write_range(self: *ByteWriter, comptime type_adapter: CopyAdapter, range:
         else => @compileError("`source` must be one of the following types:\n\t[]T, []const T, *T, *const T, T\nwhere T == `type_adapter.element_type`"),
     }
     if (src_raw.len < range.total_read_len) return WriteError.source_too_short_for_given_range;
-    const write_slice = self._vtable.try_get_write_slice(self._opaque, range.total_write_len);
+    const write_slice = self.vtable.try_get_write_slice(self.implementor, range.total_write_len);
     if (write_slice.len < range.total_write_len) return WriteError.write_buffer_too_short;
     Bytes.copy_elements_with_range(write_slice, src_raw, range, type_adapter);
     return;
@@ -123,7 +123,7 @@ pub fn write_comptime_range(self: *ByteWriter, comptime type_adapter: CopyAdapte
         else => @compileError("`source` must be one of the following types:\n\t[]T, []const T, *T, *const T, T\nwhere T == `type_adapter.element_type`"),
     }
     if (src_raw.len < range.total_read_len) return WriteError.source_too_short_for_given_range;
-    const write_slice = self._vtable.try_get_write_slice(self._opaque, range.total_write_len);
+    const write_slice = self.vtable.try_get_write_slice(self.implementor, range.total_write_len);
     if (write_slice.len < range.total_write_len) return WriteError.write_buffer_too_short;
     Bytes.copy_elements_with_comptime_range(write_slice, src_raw, range, type_adapter);
     return;
@@ -152,8 +152,8 @@ pub const SimpleByteWriter = struct {
     /// Get the actual ByteWriter interface object
     pub fn byte_reader(self: *SimpleByteWriter) ByteWriter {
         return ByteWriter{
-            ._opaque = @ptrCast(self),
-            ._vtable = VTable{
+            .implementor = @ptrCast(self),
+            .vtable = VTable{
                 .try_get_write_slice = try_get_write_slice,
             },
         };

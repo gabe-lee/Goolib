@@ -421,3 +421,11 @@ pub inline fn union_tag_type(comptime T: type) type {
 pub inline fn union_tag(union_val: anytype) union_tag_type(@TypeOf(union_val)) {
     return @enumFromInt(@intFromEnum(union_val));
 }
+
+pub fn is_error(error_union: anytype) bool {
+    return if (error_union) |_| false else |_| true;
+}
+
+pub fn not_error(error_union: anytype) bool {
+    return if (error_union) |_| true else |_| false;
+}

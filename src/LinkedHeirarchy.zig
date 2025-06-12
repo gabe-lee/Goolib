@@ -59,95 +59,64 @@ const SortAlgorithm = Root.CommonTypes.SortAlgorithm;
 const DummyAllocator = Root.DummyAllocator;
 const BinarySearch = Root.BinarySearch;
 
-pub const LinkedListManagerOptions = struct {
-    /// options for the underlying `List` that holds all the real memory
-    /// for this `LinkedList`
-    list_options: Root.List.ListOptions,
-    /// The field name on your user type that holds
-    /// the index of the 'next' item in the list.
-    ///
-    /// If set to `null`, the `LinkedList` will not track items in the
-    /// forward/next direction at all,
-    forward_linkage: ?[]const u8 = null,
-    /// The field name on your user type that holds
-    /// the index of the 'previous' item in the list.
-    ///
-    /// If set to `null`, the `LinkedList` will not track items in the
-    /// backward/previous direction at all,
-    backward_linkage: ?[]const u8 = null,
-    /// The field name on your user type that holds
-    /// the index of the first child of the element, if any
-    ///
-    /// If set to `null`, the `LinkedList` will not track children in the forward/next direction,
-    /// even if `force_cache_first_index` is true
-    first_child_linkage: ?[]const u8 = null,
-    /// The field name on your user type that holds
-    /// the index of the last child of the element, if any
-    ///
-    /// If set to `null`, the `LinkedList` will not track children in the backward/prev direction,
-    /// even if `force_cache_last_index` is true
-    last_child_linkage: ?[]const u8 = null,
-    /// The field name on your user type that holds
-    /// the index of the parent of the element, if any
-    ///
-    /// If set to `null`, the `LinkedList` will not track element parents
-    parent_linkage: ?[]const u8 = null,
-    /// The details describing how your user type caches the 'master list'
-    /// state of an item within itself.
-    ///
-    /// If included, the user type can
-    /// determine what master list it belongs to without having to traverse
-    /// through the list to find what list it belongs to.
-    ///
-    /// If set to `null`, the `LinkedList` will not cache
-    /// master list state on the user type.
-    element_list_flag_access: ?ElementStateAccess = null,
-    /// The field name on your user type that holds
-    /// a cached value of the item's real index in the `LinkedList`'s
-    /// underlying memory buffer.
-    ///
-    /// If set to `null`, the `LinkedList` will not cache the items index
-    /// inside the user type.
-    ///
-    /// This is not strictly speaking necessary if memory footprint of the user
-    /// type is a concern, as the index can be calculated from a *pointer* to the
-    /// element in O(1) time with a few additional arithmetic operations.
-    element_idx_cache_field: ?[]const u8 = null,
-    /// Forces the `LinkedList` to cache the last/tail index of lists
-    /// even if the user type items themselves are not linked in the backward/previous
-    /// direction.
-    ///
-    /// This allows appending an item to the tail of a forward singly-linked list
-    force_cache_last_index: bool = true,
-    /// Forces the `LinkedList` to cache the first/head index of lists
-    /// even if the user type items themselves are not linked in the forward/next
-    /// direction.
-    ///
-    /// This allows appending an item to the head of a backward singly-linked list
-    force_cache_first_index: bool = true,
-    /// This enum must list all desired master lists ('used', 'free', 'none', etc...)
-    /// with tag values starting from 0 and increasing with no gaps
-    ///
-    /// The ***LAST*** list tag (largest tag value) is considred the 'untracked'
-    /// or 'leaked' list, meaning the LinkedList does not track the head and/or
-    /// tail index for that list.
-    ///
-    /// That list is intended for isolated lists
-    /// whose head/tail indexes are cached by the user somewhere else, and if the user
-    /// loses those indexes they are essentially 'leaked' until the LinkedList's base
-    /// memory is released back to the allocator.
-    master_list_enum: type = DefaultSet,
+pub const LinkedHeirarchyManagerOptions = struct {
+    /// Options for the underlying `List` that holds all the element memory
+    /// for this `LinkedHeirarchyManager`
+    element_memory_options: Root.List.ListOptions,
+    /// Options for the underlying `List` that holds all the manager
+    /// state data for this `LinkedHeirarchyManager`
+    manager_memory_options: Root.List.ListOptions,
+    /// The unsigned integer type used to differentiate separate heirarchies
+    heirarchy_id_type: type,
+    force_cache_top_level_first_sibling: bool,
+    force_cache_top_level_last_sibling: bool,
+    cache_element_count: bool,
+
     /// Inserts additional (usually O(N) or O(N^2) time) asserts in comptime, Debug, or ReleaseSafe
     stronger_asserts: bool = false,
     /// Allows slower fallback operations when the faster alternative is impossible
     ///
-    /// For example, if your LinkedList does not link in the backward/previous direction,
-    /// calling `get_prev_index()` can be achieved by traversing forward from the start
+    /// For example, if your linked list does not link in the backward/previous direction,
+    /// calling `get_prev_sibling()` can be achieved by traversing forward from the start
     /// of the list until you find the item that points to the one provided
     ///
     /// Setting this to `false` makes slow fallback paths panic
     allow_slow_fallbacks: bool = false,
 };
+
+pub const LinkageOptionsKind = enum(u8) {
+    Opaque,
+    Transparent,
+};
+
+pub const LinkageOptions = union(LinkageOptionsKind) {
+    Opaque: OpaqueLinkageOptions,
+    Transparent: TransparentLinkageOptions,
+};
+
+pub const OpaqueLinkageOptions = struct {
+    link_prev_sibling: bool = false,
+    link_next_sibling: bool = false,
+    link_parent: bool = false,
+    link_first_child: bool = false,
+    link_last_child: bool = false,
+    cache_own_index: bool = false,
+    cache_depth: bool = false,
+    cache_heirarchy_id: bool = false,
+};
+
+pub const TransparentLinkageOptions = struct {
+    prev_sibling_field: ?[]const u8 = null,
+    link_next_sibling: ?[]const u8 = null,
+    link_parent: ?[]const u8 = null,
+    link_first_child: ?[]const u8 = null,
+    link_last_child: ?[]const u8 = null,
+    cache_own_index_field: ?[]const u8 = null,
+    cache_depth_field: ?[]const u8 = null,
+    cache_heirarchy_id_field: ?[]const u8 = null,
+};
+
+//CHECKPOINT
 
 pub const DefaultSet = enum(u8) {
     USED = 0,
@@ -177,7 +146,7 @@ pub const Direction = enum {
     BACKWARD,
 };
 
-pub fn define_linked_list_manager(comptime options: LinkedListManagerOptions) type {
+pub fn define_linked_heirarchy_manager(comptime options: LinkedHeirarchyManagerOptions) type {
     assert_with_reason(options.forward_linkage != null or options.backward_linkage != null, @src(), "either `forward_linkage` or `backward_linkage` must be provided, both cannot be left null", .{});
     const F = options.forward_linkage != null;
     const B = options.backward_linkage != null;
@@ -189,51 +158,51 @@ pub fn define_linked_list_manager(comptime options: LinkedListManagerOptions) ty
     assert_with_reason(Types.all_enum_values_start_from_zero_with_no_gaps(options.master_list_enum), @src(), "all enum tag values in linked_set_enum must start from zero and increase with no gaps between values", .{});
     if (F) {
         const F_FIELD = options.forward_linkage.?;
-        assert_with_reason(@hasField(options.list_options.element_type, F_FIELD), @src(), "element type `{s}` has no field named `{s}`", .{ @typeName(options.list_options.element_type), F_FIELD });
-        const F_TYPE = @FieldType(options.list_options.element_type, F_FIELD);
-        assert_with_reason(Types.type_is_int(F_TYPE), @src(), "next index field `.{s}` on element type `{s}` is not an integer type", .{ F_FIELD, @typeName(options.list_options.element_type) });
-        assert_with_reason(F_TYPE == options.list_options.index_type, @src(), "next index field `.{s}` on element type `{s}` does not match options.list_options.index_type `{s}`", .{ F_FIELD, @typeName(options.list_options.element_type), @typeName(options.list_options.index_type) });
+        assert_with_reason(@hasField(options.base_memory_options.element_type, F_FIELD), @src(), "element type `{s}` has no field named `{s}`", .{ @typeName(options.base_memory_options.element_type), F_FIELD });
+        const F_TYPE = @FieldType(options.base_memory_options.element_type, F_FIELD);
+        assert_with_reason(Types.type_is_int(F_TYPE), @src(), "next index field `.{s}` on element type `{s}` is not an integer type", .{ F_FIELD, @typeName(options.base_memory_options.element_type) });
+        assert_with_reason(F_TYPE == options.base_memory_options.index_type, @src(), "next index field `.{s}` on element type `{s}` does not match options.list_options.index_type `{s}`", .{ F_FIELD, @typeName(options.base_memory_options.element_type), @typeName(options.base_memory_options.index_type) });
     }
     if (B) {
         const B_FIELD = options.backward_linkage.?;
-        assert_with_reason(@hasField(options.list_options.element_type, B_FIELD), @src(), "element type `{s}` has no field named `{s}`", .{ @typeName(options.list_options.element_type), B_FIELD });
-        const B_TYPE = @FieldType(options.list_options.element_type, B_FIELD);
-        assert_with_reason(Types.type_is_int(B_TYPE), @src(), "prev index field `.{s}` on element type `{s}` is not an integer type", .{ B_FIELD, @typeName(options.list_options.element_type) });
-        assert_with_reason(B_TYPE == options.list_options.index_type, @src(), "prev index field `.{s}` on element type `{s}` does not match options.list_options.index_type `{s}`", .{ B_FIELD, @typeName(options.list_options.element_type), @typeName(options.list_options.index_type) });
+        assert_with_reason(@hasField(options.base_memory_options.element_type, B_FIELD), @src(), "element type `{s}` has no field named `{s}`", .{ @typeName(options.base_memory_options.element_type), B_FIELD });
+        const B_TYPE = @FieldType(options.base_memory_options.element_type, B_FIELD);
+        assert_with_reason(Types.type_is_int(B_TYPE), @src(), "prev index field `.{s}` on element type `{s}` is not an integer type", .{ B_FIELD, @typeName(options.base_memory_options.element_type) });
+        assert_with_reason(B_TYPE == options.base_memory_options.index_type, @src(), "prev index field `.{s}` on element type `{s}` does not match options.list_options.index_type `{s}`", .{ B_FIELD, @typeName(options.base_memory_options.element_type), @typeName(options.base_memory_options.index_type) });
     }
     if (S) {
         const S_FIELD = options.element_list_flag_access.?.field;
-        assert_with_reason(@hasField(options.list_options.element_type, S_FIELD), @src(), "element type `{s}` has no field named `{s}`", .{ @typeName(options.list_options.element_type), S_FIELD });
-        const S_TYPE = @FieldType(options.list_options.element_type, S_FIELD);
-        assert_with_reason(Types.type_is_int(S_TYPE), @src(), "element list field `.{s}` on element type `{s}` is not an integer type", .{ S_FIELD, @typeName(options.list_options.element_type) });
-        assert_with_reason(S_TYPE == options.element_list_flag_access.?.field_type, @src(), "element list field `.{s}` on element type `{s}` does not match listd type {s}", .{ S_FIELD, @typeName(options.list_options.element_type), @typeName(options.element_list_flag_access.?.field_type) });
+        assert_with_reason(@hasField(options.base_memory_options.element_type, S_FIELD), @src(), "element type `{s}` has no field named `{s}`", .{ @typeName(options.base_memory_options.element_type), S_FIELD });
+        const S_TYPE = @FieldType(options.base_memory_options.element_type, S_FIELD);
+        assert_with_reason(Types.type_is_int(S_TYPE), @src(), "element list field `.{s}` on element type `{s}` is not an integer type", .{ S_FIELD, @typeName(options.base_memory_options.element_type) });
+        assert_with_reason(S_TYPE == options.element_list_flag_access.?.field_type, @src(), "element list field `.{s}` on element type `{s}` does not match listd type {s}", .{ S_FIELD, @typeName(options.base_memory_options.element_type), @typeName(options.element_list_flag_access.?.field_type) });
         const tag_count = Types.enum_max_field_count(options.master_list_enum);
         const flag_count = 1 << options.element_list_flag_access.?.field_bit_count;
         assert_with_reason(flag_count >= tag_count, @src(), "options.element_list_access.field_bit_count {d} (max val = {d}) cannot hold all tag values for options.linked_set_enum {d}", .{ options.element_list_flag_access.?.field_bit_count, flag_count, tag_count });
     }
     if (C) {
         const C_FIELD = options.element_idx_cache_field.?;
-        assert_with_reason(@hasField(options.list_options.element_type, C_FIELD), @src(), "element type `{s}` has no field named `{s}`", .{ @typeName(options.list_options.element_type), C_FIELD });
-        const C_TYPE = @FieldType(options.list_options.element_type, C_FIELD);
-        assert_with_reason(C_TYPE == options.list_options.index_type, @src(), "element list field `.{s}` on element type `{s}` does not match options.list_options.index_type `{s}`", .{ C_FIELD, @typeName(options.list_options.element_type), @typeName(options.list_options.index_type) });
+        assert_with_reason(@hasField(options.base_memory_options.element_type, C_FIELD), @src(), "element type `{s}` has no field named `{s}`", .{ @typeName(options.base_memory_options.element_type), C_FIELD });
+        const C_TYPE = @FieldType(options.base_memory_options.element_type, C_FIELD);
+        assert_with_reason(C_TYPE == options.base_memory_options.index_type, @src(), "element list field `.{s}` on element type `{s}` does not match options.list_options.index_type `{s}`", .{ C_FIELD, @typeName(options.base_memory_options.element_type), @typeName(options.base_memory_options.index_type) });
     }
     if (FC) {
         const FC_FIELD = options.first_child_linkage.?;
-        assert_with_reason(@hasField(options.list_options.element_type, FC_FIELD), @src(), "element type `{s}` has no field named `{s}`", .{ @typeName(options.list_options.element_type), FC_FIELD });
-        const FC_TYPE = @FieldType(options.list_options.element_type, FC_FIELD);
-        assert_with_reason(FC_TYPE == options.list_options.index_type, @src(), "element list field `.{s}` on element type `{s}` does not match options.list_options.index_type `{s}`", .{ FC_FIELD, @typeName(options.list_options.element_type), @typeName(options.list_options.index_type) });
+        assert_with_reason(@hasField(options.base_memory_options.element_type, FC_FIELD), @src(), "element type `{s}` has no field named `{s}`", .{ @typeName(options.base_memory_options.element_type), FC_FIELD });
+        const FC_TYPE = @FieldType(options.base_memory_options.element_type, FC_FIELD);
+        assert_with_reason(FC_TYPE == options.base_memory_options.index_type, @src(), "element list field `.{s}` on element type `{s}` does not match options.list_options.index_type `{s}`", .{ FC_FIELD, @typeName(options.base_memory_options.element_type), @typeName(options.base_memory_options.index_type) });
     }
     if (LC) {
         const LC_FIELD = options.last_child_linkage.?;
-        assert_with_reason(@hasField(options.list_options.element_type, LC_FIELD), @src(), "element type `{s}` has no field named `{s}`", .{ @typeName(options.list_options.element_type), LC_FIELD });
-        const LC_TYPE = @FieldType(options.list_options.element_type, LC_FIELD);
-        assert_with_reason(LC_TYPE == options.list_options.index_type, @src(), "element list field `.{s}` on element type `{s}` does not match options.list_options.index_type `{s}`", .{ LC_FIELD, @typeName(options.list_options.element_type), @typeName(options.list_options.index_type) });
+        assert_with_reason(@hasField(options.base_memory_options.element_type, LC_FIELD), @src(), "element type `{s}` has no field named `{s}`", .{ @typeName(options.base_memory_options.element_type), LC_FIELD });
+        const LC_TYPE = @FieldType(options.base_memory_options.element_type, LC_FIELD);
+        assert_with_reason(LC_TYPE == options.base_memory_options.index_type, @src(), "element list field `.{s}` on element type `{s}` does not match options.list_options.index_type `{s}`", .{ LC_FIELD, @typeName(options.base_memory_options.element_type), @typeName(options.base_memory_options.index_type) });
     }
     if (P) {
         const P_FIELD = options.parent_linkage.?;
-        assert_with_reason(@hasField(options.list_options.element_type, P_FIELD), @src(), "element type `{s}` has no field named `{s}`", .{ @typeName(options.list_options.element_type), P_FIELD });
-        const P_TYPE = @FieldType(options.list_options.element_type, P_FIELD);
-        assert_with_reason(P_TYPE == options.list_options.index_type, @src(), "element list field `.{s}` on element type `{s}` does not match options.list_options.index_type `{s}`", .{ P_FIELD, @typeName(options.list_options.element_type), @typeName(options.list_options.index_type) });
+        assert_with_reason(@hasField(options.base_memory_options.element_type, P_FIELD), @src(), "element type `{s}` has no field named `{s}`", .{ @typeName(options.base_memory_options.element_type), P_FIELD });
+        const P_TYPE = @FieldType(options.base_memory_options.element_type, P_FIELD);
+        assert_with_reason(P_TYPE == options.base_memory_options.index_type, @src(), "element list field `.{s}` on element type `{s}` does not match options.list_options.index_type `{s}`", .{ P_FIELD, @typeName(options.base_memory_options.element_type), @typeName(options.base_memory_options.index_type) });
     }
     return struct {
         list: BaseList = BaseList.UNINIT,
@@ -266,7 +235,7 @@ pub fn define_linked_list_manager(comptime options: LinkedListManagerOptions) ty
         const STATE_FIELD = if (STATE) options.element_list_flag_access.?.field else "";
         const STATE_OFFSET = if (STATE) options.element_list_flag_access.?.field_bit_offset else 0;
         const UNINIT = LinkedList{};
-        const RETURN_ERRORS = options.list_options.alloc_error_behavior == .RETURN_ERRORS;
+        const RETURN_ERRORS = options.base_memory_options.alloc_error_behavior == .RETURN_ERRORS;
         const NULL_IDX = math.maxInt(Idx);
         const MAX_STATE_TAG = Types.enum_max_value(ListTag);
         const UNTRACKED_LIST: ListTag = @enumFromInt(MAX_STATE_TAG);
@@ -291,10 +260,10 @@ pub fn define_linked_list_manager(comptime options: LinkedListManagerOptions) ty
         };
 
         const LinkedList = @This();
-        pub const BaseList = Root.List.define_manual_allocator_list_type(options.list_options);
+        pub const BaseList = Root.List.define_manual_allocator_list_type(options.base_memory_options);
         pub const Error = Allocator.Error;
-        pub const Elem = options.list_options.element_type;
-        pub const Idx = options.list_options.index_type;
+        pub const Elem = options.base_memory_options.element_type;
+        pub const Idx = options.base_memory_options.index_type;
         // pub const Iterator = LinkedListIterator(List);
         pub const ListTag = options.master_list_enum;
         const ListTagInt = Types.enum_tag_type(ListTag);
@@ -2352,8 +2321,8 @@ test "LinkedList.zig - Linear Doubly Linked" {
         .list = 0xAA,
         .val = 0,
     };
-    const opts = LinkedListManagerOptions{
-        .list_options = Root.List.ListOptions{
+    const opts = LinkedHeirarchyManagerOptions{
+        .base_memory_options = Root.List.ListOptions{
             .alignment = null,
             .alloc_error_behavior = .ERRORS_PANIC,
             .element_type = TestElem,
@@ -2391,7 +2360,7 @@ test "LinkedList.zig - Linear Doubly Linked" {
             return a.val > b.val;
         }
     };
-    const List = define_linked_list_manager(opts);
+    const List = define_linked_heirarchy_manager(opts);
     const expect = struct {
         fn list_is_valid(linked_list: *List, list: TestState, case_indexes: []const u16, case_vals: []const u8) !void {
             errdefer debug_list(linked_list, list);
