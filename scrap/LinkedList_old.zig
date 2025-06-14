@@ -68,6 +68,10 @@
 //     manager_memory_options: Root.List.ListOptions,
 //     /// The unsigned integer type used to differentiate separate heirarchies
 //     heirarchy_id_type: type,
+//     force_cache_top_level_first_sibling: bool,
+//     force_cache_top_level_last_sibling: bool,
+//     cache_element_count: bool,
+
 //     /// Inserts additional (usually O(N) or O(N^2) time) asserts in comptime, Debug, or ReleaseSafe
 //     stronger_asserts: bool = false,
 //     /// Allows slower fallback operations when the faster alternative is impossible
@@ -253,14 +257,6 @@
 //                 sets[idx] = ListData{};
 //             }
 //             break :build sets;
-//         };
-
-//         pub const Node = struct {
-//             next_idx: Idx,
-//             prev_idx: Idx,
-//             first_child_idx: Idx,
-//             parent_idx: Idx,
-//             data: Elem,
 //         };
 
 //         const LinkedList = @This();

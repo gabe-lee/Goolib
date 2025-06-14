@@ -600,3 +600,11 @@ pub fn shallow_equal(val_a: anytype, val_b: anytype) bool {
         },
     }
 }
+
+pub fn index_from_pointer(comptime T: type, comptime IDX: type, base_ptr: [*]const T, elem_ptr: *const T) IDX {
+    const base_addr = @intFromPtr(base_ptr);
+    const elem_addr = @intFromPtr(elem_ptr);
+    assert_with_reason(elem_addr >= base_addr, @src(), "elem_addr {x} < base_addr {x}, pointer cannot possibly be part of the base collection", .{ elem_addr, base_addr });
+    const addr_delta = @intFromPtr(elem_ptr) - @intFromPtr(base_ptr);
+    return @intCast(addr_delta / @sizeOf(T));
+}

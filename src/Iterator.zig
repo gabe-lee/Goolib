@@ -33,17 +33,20 @@ pub const IteratorCapabilities = Flags(enum(u8) {
     RESET = 1 << 0,
     FORWARD = 1 << 1,
     BACKWARD = 1 << 2,
-    SAVE_LOAD_1_SLOT = 1 << 3,
-    SAVE_LOAD_2_SLOTS = 2 << 3,
-    SAVE_LOAD_3_SLOTS = 3 << 3,
-    SAVE_LOAD_4_SLOTS = 4 << 3,
-    SAVE_LOAD_5_SLOTS = 5 << 3,
-    SAVE_LOAD_6_SLOTS = 6 << 3,
-    SAVE_LOAD_7_SLOTS = 7 << 3,
+    LEFT_CHILD = 1 << 3,
+    RIGHT_CHILD = 1 << 4,
+    SAVE_LOAD_1_SLOT = 1 << 5,
+    SAVE_LOAD_2_SLOTS = 2 << 5,
+    SAVE_LOAD_3_SLOTS = 3 << 5,
+    SAVE_LOAD_4_SLOTS = 4 << 5,
+    SAVE_LOAD_5_SLOTS = 5 << 5,
+    SAVE_LOAD_6_SLOTS = 6 << 5,
+    SAVE_LOAD_7_SLOTS = 7 << 5,
 }, enum(u8) {
     RESET = 0b1,
-    DIRECTION = 0b000110,
-    SAVE_LOAD = 0b111000,
+    DIRECTION = 0b00000110,
+    CHILDREN = 0b00011000,
+    SAVE_LOAD = 0b11100000,
 });
 
 pub fn Iterator(comptime T: type) type {
@@ -71,25 +74,52 @@ pub fn Iterator(comptime T: type) type {
             /// reloading state or some other consition prevented it
             /// (for example no state was previously saved to the slot)
             load_state: *const fn (implementor: *anyopaque, state_slot: usize) bool,
-            /// Advance the iterator to the right/next position,
-            /// returning `false` if the implementation does not support
-            /// advancing forward, the position didn't move,
-            /// or some other condition caused it to fail
-            advance_next: *const fn (implementor: *anyopaque) bool,
             /// Return pointer to next item or null if none exists (or the
             /// implementation does not support peeking forward),
             /// without advancing iterator
-            peek_next_or_null: *const fn (implementor: *anyopaque) ?*T,
-            /// Advance the iterator to the left/prev position,
-            /// returning `false` if the implementation does not support
-            /// advancing forward, the position didn't move,
-            /// or some other condition caused it to fail
-            advance_prev: *const fn (implementor: *anyopaque) bool,
+            get_next_or_null: *const fn (implementor: *anyopaque) ?T,
             /// Return pointer to prev item or null if none exists,
             /// without advancing iterator
-            peek_prev_or_null: *const fn (implementor: *anyopaque) ?*T,
+            get_prev_or_null: *const fn (implementor: *anyopaque) ?T,
+            get_left_child_or_null: 
         };
         const Self = @This();
+
+        pub const NOOP = struct {
+            fn capabilities() IteratorCapabilities {
+                return IteratorCapabilities.blank();
+            }
+            fn reset(implementor: *anyopaque) bool {
+                _ = implementor;
+                return false;
+            }
+            fn save_state(implementor: *anyopaque, state_slot: usize) bool {
+                _ = implementor;
+                _ = state_slot;
+                return false;
+            }
+            fn load_state(implementor: *anyopaque, state_slot: usize) bool {
+                _ = implementor;
+                _ = state_slot;
+                return false;
+            }
+            fn advance_next(implementor: *anyopaque) bool {
+                _ = implementor;
+                return false;
+            }
+            fn peek_next_or_null(implementor: *anyopaque) ?T {
+                _ = implementor;
+                return null;
+            }
+            fn advance_prev(implementor: *anyopaque) bool {
+                _ = implementor;
+                return false;
+            }
+            fn peek_prev_or_null(implementor: *anyopaque) ?T {
+                _ = implementor;
+                return null;
+            }
+        };
 
         pub inline fn capabilities(self: Self) IteratorCapabilities {
             return self.vtable.capabilities();
@@ -109,7 +139,7 @@ pub fn Iterator(comptime T: type) type {
         pub inline fn peek_next(self: Self) *T {
             return self.vtable.peek_next_or_null(self.implementor).?;
         }
-        pub inline fn peek_next_or_null(self: Self) ?*T {
+        pub inline fn peek_next_or_null(self: Self) ?T {
             return self.vtable.peek_next_or_null(self.implementor);
         }
         pub inline fn get_next(self: Self) *T {
@@ -117,7 +147,7 @@ pub fn Iterator(comptime T: type) type {
             self.vtable.advance_next(self.implementor);
             return result;
         }
-        pub inline fn get_next_or_null(self: Self) ?*T {
+        pub inline fn get_next_or_null(self: Self) ?T {
             const result = self.vtable.peek_next_or_null(self.implementor);
             if (result == null) return null;
             _ = self.vtable.advance_next(self.implementor);
@@ -140,18 +170,18 @@ pub fn Iterator(comptime T: type) type {
         pub inline fn has_prev(self: Self) bool {
             return self.vtable.peek_prev_or_null(self.implementor) != null;
         }
-        pub inline fn peek_prev(self: Self) *T {
+        pub inline fn peek_prev(self: Self) T {
             return self.vtable.peek_prev_or_null(self.implementor).?;
         }
-        pub inline fn peek_prev_or_null(self: Self) ?*T {
+        pub inline fn peek_prev_or_null(self: Self) ?T {
             return self.vtable.peek_prev_or_null(self.implementor);
         }
-        pub inline fn get_prev(self: Self) *T {
+        pub inline fn get_prev(self: Self) T {
             const result = self.vtable.peek_next_or_null(self.implementor).?;
             self.vtable.advance_next(self.implementor);
             return result;
         }
-        pub inline fn get_prev_or_null(self: Self) ?*T {
+        pub inline fn get_prev_or_null(self: Self) ?T {
             const result = self.vtable.peek_prev_or_null(self.implementor);
             if (result == null) return null;
             _ = self.vtable.advance_prev(self.implementor);
@@ -171,8 +201,8 @@ pub fn Iterator(comptime T: type) type {
             }
             return i;
         }
-        pub fn perform_action_on_all_next_items(self: Self, action: *const fn (item: *T, userdata: ?*anyopaque) void, userdata: ?*anyopaque) bool {
-            var item_or_null: ?*T = self.vtable.peek_next_or_null(self.implementor);
+        pub fn perform_action_on_all_next_items(self: Self, action: *const fn (item: T, userdata: ?*anyopaque) void, userdata: ?*anyopaque) bool {
+            var item_or_null: ?T = self.vtable.peek_next_or_null(self.implementor);
             if (item_or_null == null) return false;
             while (item_or_null != null) {
                 _ = self.vtable.advance_next(self.implementor);
@@ -181,8 +211,8 @@ pub fn Iterator(comptime T: type) type {
             }
             return true;
         }
-        pub fn perform_action_on_next_n_items(self: Self, count: usize, action: *const fn (item: *T, userdata: ?*anyopaque) void, userdata: ?*anyopaque) usize {
-            var item_or_null: ?*T = self.vtable.peek_next_or_null(self.implementor);
+        pub fn perform_action_on_next_n_items(self: Self, count: usize, action: *const fn (item: T, userdata: ?*anyopaque) void, userdata: ?*anyopaque) usize {
+            var item_or_null: ?T = self.vtable.peek_next_or_null(self.implementor);
             if (item_or_null == null) return 0;
             var i: usize = 0;
             while (item_or_null != null and i < count) {
@@ -193,8 +223,8 @@ pub fn Iterator(comptime T: type) type {
             }
             return i;
         }
-        pub fn perform_action_on_all_prev_items(self: Self, action: *const fn (item: *T, userdata: ?*anyopaque) void, userdata: ?*anyopaque) bool {
-            var item_or_null: ?*T = self.vtable.peek_prev_or_null(self.implementor);
+        pub fn perform_action_on_all_prev_items(self: Self, action: *const fn (item: T, userdata: ?*anyopaque) void, userdata: ?*anyopaque) bool {
+            var item_or_null: ?T = self.vtable.peek_prev_or_null(self.implementor);
             if (item_or_null == null) return false;
             while (item_or_null != null) {
                 _ = self.vtable.advance_prev(self.implementor);
@@ -203,8 +233,8 @@ pub fn Iterator(comptime T: type) type {
             }
             return true;
         }
-        pub fn perform_action_on_prev_n_items(self: Self, count: usize, action: *const fn (item: *T, userdata: ?*anyopaque) void, userdata: ?*anyopaque) usize {
-            var item_or_null: ?*T = self.vtable.peek_prev_or_null(self.implementor);
+        pub fn perform_action_on_prev_n_items(self: Self, count: usize, action: *const fn (item: T, userdata: ?*anyopaque) void, userdata: ?*anyopaque) usize {
+            var item_or_null: ?T = self.vtable.peek_prev_or_null(self.implementor);
             if (item_or_null == null) return 0;
             var i: usize = 0;
             while (item_or_null != null and i < count) {
@@ -215,8 +245,8 @@ pub fn Iterator(comptime T: type) type {
             }
             return i;
         }
-        pub fn find_next_item_that_matches_filter(self: Self, filter: *const fn (item: *T, userdata: ?*anyopaque) bool, userdata: ?*anyopaque) ?*T {
-            var item_or_null: ?*T = self.vtable.peek_next_or_null(self.implementor);
+        pub fn find_next_item_that_matches_filter(self: Self, filter: *const fn (item: T, userdata: ?*anyopaque) bool, userdata: ?*anyopaque) ?T {
+            var item_or_null: ?T = self.vtable.peek_next_or_null(self.implementor);
             if (item_or_null == null) return null;
             while (item_or_null != null) {
                 _ = self.vtable.advance_next(self.implementor);
@@ -225,9 +255,9 @@ pub fn Iterator(comptime T: type) type {
             }
             return null;
         }
-        pub fn find_next_n_items_that_match_filter(self: Self, count: usize, out_buffer: []*T, filter: *const fn (item: *T, userdata: ?*anyopaque) bool, userdata: ?*anyopaque) usize {
+        pub fn find_next_n_items_that_match_filter(self: Self, count: usize, out_buffer: []T, filter: *const fn (item: T, userdata: ?*anyopaque) bool, userdata: ?*anyopaque) usize {
             assert_with_reason(count <= out_buffer.len, @src(), "`out_buffer` is too small to hold the requested {d} values", .{count});
-            var item_or_null: ?*T = self.vtable.peek_next_or_null(self.implementor);
+            var item_or_null: ?T = self.vtable.peek_next_or_null(self.implementor);
             if (item_or_null == null) return 0;
             var i: usize = 0;
             while (item_or_null != null and i < count) {
@@ -240,8 +270,8 @@ pub fn Iterator(comptime T: type) type {
             }
             return i;
         }
-        pub fn find_next_n_items_that_match_filter_to_array(self: Self, comptime count: usize, filter: *const fn (item: *T, userdata: ?*anyopaque) bool, userdata: ?*anyopaque) ArrayLen(count, *T) {
-            var item_or_null: ?*T = self.vtable.peek_next_or_null(self.implementor);
+        pub fn find_next_n_items_that_match_filter_to_array(self: Self, comptime count: usize, filter: *const fn (item: T, userdata: ?*anyopaque) bool, userdata: ?*anyopaque) ArrayLen(count, T) {
+            var item_or_null: ?T = self.vtable.peek_next_or_null(self.implementor);
             if (item_or_null == null) return 0;
             var result = ArrayLen(count, *T){ .arr = undefined, .len = 0 };
             while (item_or_null != null and result.len < count) {
@@ -254,8 +284,8 @@ pub fn Iterator(comptime T: type) type {
             }
             return result;
         }
-        pub fn find_prev_item_that_matches_filter(self: Self, filter: *const fn (item: *T, userdata: ?*anyopaque) bool, userdata: ?*anyopaque) ?*T {
-            var item_or_null: ?*T = self.vtable.peek_prev_or_null(self.implementor);
+        pub fn find_prev_item_that_matches_filter(self: Self, filter: *const fn (item: T, userdata: ?*anyopaque) bool, userdata: ?*anyopaque) ?T {
+            var item_or_null: ?T = self.vtable.peek_prev_or_null(self.implementor);
             if (item_or_null == null) return null;
             while (item_or_null != null) {
                 _ = self.vtable.advance_prev(self.implementor);
@@ -264,9 +294,9 @@ pub fn Iterator(comptime T: type) type {
             }
             return null;
         }
-        pub fn find_prev_n_items_that_match_filter(self: Self, count: usize, out_buffer: []*T, filter: *const fn (item: *T, userdata: ?*anyopaque) bool, userdata: ?*anyopaque) usize {
+        pub fn find_prev_n_items_that_match_filter(self: Self, count: usize, out_buffer: []T, filter: *const fn (item: T, userdata: ?*anyopaque) bool, userdata: ?*anyopaque) usize {
             assert_with_reason(count <= out_buffer.len, @src(), "`out_buffer` is too small to hold the requested {d} values", .{count});
-            var item_or_null: ?*T = self.vtable.peek_prev_or_null(self.implementor);
+            var item_or_null: ?T = self.vtable.peek_prev_or_null(self.implementor);
             if (item_or_null == null) return 0;
             var i: usize = 0;
             while (item_or_null != null and i < count) {
@@ -279,10 +309,10 @@ pub fn Iterator(comptime T: type) type {
             }
             return i;
         }
-        pub fn find_prev_n_items_that_match_filter_to_array(self: Self, comptime count: usize, filter: *const fn (item: *T, userdata: ?*anyopaque) bool, userdata: ?*anyopaque) ArrayLen(count, *T) {
-            var item_or_null: ?*T = self.vtable.peek_prev_or_null(self.implementor);
+        pub fn find_prev_n_items_that_match_filter_to_array(self: Self, comptime count: usize, filter: *const fn (item: T, userdata: ?*anyopaque) bool, userdata: ?*anyopaque) ArrayLen(count, T) {
+            var item_or_null: ?T = self.vtable.peek_prev_or_null(self.implementor);
             if (item_or_null == null) return 0;
-            var result = ArrayLen(count, *T){ .arr = undefined, .len = 0 };
+            var result = ArrayLen(count, T){ .arr = undefined, .len = 0 };
             while (item_or_null != null and result.len < count) {
                 _ = self.vtable.advance_prev(self.implementor);
                 if (filter(item_or_null.?, userdata)) {

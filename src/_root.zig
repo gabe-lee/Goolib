@@ -24,15 +24,15 @@
 const std = @import("std");
 const build = @import("builtin");
 
-pub const VERSION = "0.2.0";
+pub const VERSION = "0.3.0";
 pub const NAME = "Goolib";
 
 pub const AABB2 = @import("./AABB2.zig");
+pub const AllocatorInfallible = @import("./AllocatorInfallible.zig");
 pub const ANSI = @import("./ANSI.zig");
 pub const Assert = @import("./Assert.zig");
 pub const BinarySearch = @import("./BinarySearch.zig");
 pub const BucketAllocator = @import("./BucketAllocator.zig");
-pub const Buffer = @import("./Buffer.zig");
 pub const Bytes = @import("./Bytes.zig");
 pub const ByteWriter = @import("./ByteWriter.zig");
 pub const C_Allocator = @import("./C_Allocator.zig");
@@ -63,6 +63,7 @@ pub const SDL3 = @import("./SDL3.zig");
 // pub const Template = @import("./Template.zig");
 pub const Testing = @import("./Testing.zig");
 pub const Time = @import("./Time.zig");
+pub const Traverser = @import("./Traverser.zig");
 pub const Types = @import("./Types.zig");
 pub const Utils = @import("./Utils.zig");
 pub const Vec2 = @import("./Vec2.zig");
@@ -72,11 +73,11 @@ pub const Vec2 = @import("./Vec2.zig");
 comptime {
     if (build.mode == .Debug) {
         _ = @import("./AABB2.zig");
+        _ = @import("./AllocatorInfallible.zig");
         _ = @import("./ANSI.zig");
         _ = @import("./Assert.zig");
         _ = @import("./BinarySearch.zig");
         _ = @import("./BucketAllocator.zig");
-        _ = @import("./Buffer.zig");
         _ = @import("./Bytes.zig");
         _ = @import("./ByteWriter.zig");
         _ = @import("./C_Allocator.zig");
@@ -107,6 +108,7 @@ comptime {
         // _ = @import("./Template.zig");
         _ = @import("./Testing.zig");
         _ = @import("./Time.zig");
+        _ = @import("./Traverser.zig");
         _ = @import("./Types.zig");
         _ = @import("./Utils.zig");
         _ = @import("./Vec2.zig");
