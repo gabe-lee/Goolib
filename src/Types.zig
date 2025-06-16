@@ -429,3 +429,9 @@ pub fn is_error(error_union: anytype) bool {
 pub fn not_error(error_union: anytype) bool {
     return if (error_union) |_| true else |_| false;
 }
+
+pub fn both_or_neither_null(a: anytype, b: anytype) bool {
+    var c: u8 = @intCast(@intFromBool(a == null));
+    c += @intCast(@intFromBool(b == null));
+    return c != 1;
+}
