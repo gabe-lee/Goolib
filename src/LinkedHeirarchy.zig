@@ -34,6 +34,7 @@ const ArrayList = std.ArrayListUnmanaged;
 const Type = std.builtin.Type;
 
 const Root = @import("./_root.zig");
+const Auto = Root.CommonTypes.Auto;
 const Assert = Root.Assert;
 const assert_with_reason = Assert.assert_with_reason;
 const assert_pointer_resides_in_slice = Assert.assert_pointer_resides_in_slice;
@@ -58,6 +59,7 @@ const GrowthModel = Root.CommonTypes.GrowthModel;
 const SortAlgorithm = Root.CommonTypes.SortAlgorithm;
 const DummyAllocator = Root.DummyAllocator;
 const BinarySearch = Root.BinarySearch;
+const AllocInfal = Root.AllocatorInfallible;
 
 /// Options that define the fundamental behavior and capabilities of the `LinkedHeirarchy`
 ///
@@ -67,7 +69,8 @@ const BinarySearch = Root.BinarySearch;
 /// - Binary Tree (with or without parent ref)
 /// - N-ary/B tree/B+ tree (with specific user care/constraints)
 /// - Heirarchy/DOM
-/// - Any generic graph where each node has 7 or fewer links (requires functions in `Internal`, but possible)
+/// - Any generic graph where each node has 7 or fewer links
+///   - (NOT ideal, but possible, requires careful manual use of functions in `Internal`)
 pub const LinkedHeirarchyOptions = struct {
     /// Options for the underlying `List` that holds all the element memory
     /// for this `LinkedHeirarchy`
@@ -123,36 +126,16 @@ pub const LinkedHeirarchyOptions = struct {
     ///
     /// This must not be `null` if `generation_details` is also not `null`
     own_id_field: ?[]const u8 = null,
-    // /// The field on the user element type that will hold the element's own id (if desired).
-    // /// This should be a field with the same type as `element_id_type`
-    // depth_field: ?[]const u8 = null,
-    // depth_field_type: ?type = null,
-    // /// Inserts additional (usually O(N) or O(N^2) time) asserts in comptime, Debug, or ReleaseSafe
-    // stronger_asserts: bool = false,
-    /// Allows slower fallback operations when the faster alternative is impossible
+    /// A custom callback that will copy ONLY the 'value' portion of the user element type,
+    /// and none of the 'connection' or 'id' fields
     ///
-    /// For example, if your linked list does not link in the backward/previous direction,
-    /// calling `get_prev_sibling()` can be achieved by traversing forward from the start
-    /// of the list until you find the item that points to the one provided
-    ///
-    /// Setting this to `false` makes slow fallback paths panic
+    /// Use this if your user type has a relatively small 'value/data' field(s) in comparison to the size of
+    /// all the 'connection/id' type fields, otherwise a less-efficient default copy implementation will
+    /// be used
+    custom_copy_only_value_fn: ?*const fn (from_elem_ptr: *anyopaque, to_elem_ptr: *anyopaque) void,
+    /// Allow slower O(N) fallback routines for finding connecting nodes when elements do no normally
+    /// cache the node connection themselves
     allow_slow_fallbacks: bool = false,
-    /// The order in which free items are re-used
-    ///
-    /// You may have *slightly* different performance characteristics
-    /// for each.
-    /// - You may have *slightly* fewer cache misses with `FIRST_IN_FIRST_OUT`
-    /// - The generation counter (if used) will increase more evenly and slowly with `FIRST_IN_LAST_OUT`
-    free_item_order: FreeOrder = .FIRST_IN_FIRST_OUT,
-};
-
-pub const FreeOrder = enum(u8) {
-    /// Free items are stored in a 'stack', the *most* recently
-    /// freed items are the first to be re-used
-    FIRST_IN_FIRST_OUT = 0,
-    /// Free items are stored in a 'queue', the *least* recently
-    /// freed items are the first to be re-used
-    FIRST_IN_LAST_OUT = 1,
 };
 
 // pub const GenerationDetailsKind = enum(u8) {
@@ -249,6 +232,7 @@ pub fn LinkedHeirarchy(comptime options: LinkedHeirarchyOptions) type {
         const HAS_LAST_R_CHILD = options.last_right_child_field != null;
         const LAST_R_CHILD_FIELD = if (HAS_LAST_R_CHILD) options.last_right_child_field.? else "";
         const FREE_FIELD = F_LINK;
+        const ALLOW_SLOW = options.allow_slow_fallbacks;
         const HAS_OWN_ID = options.own_id_field != null;
         const OWN_ID_FIELD = if (HAS_OWN_ID) options.own_id_field.? else "";
         const HAS_GEN = options.generation_details != null;
@@ -257,11 +241,41 @@ pub fn LinkedHeirarchy(comptime options: LinkedHeirarchyOptions) type {
         const IDX_CLEAR: Id = if (HAS_GEN) ~IDX_MASK else 0;
         const GEN_MASK: Id = if (HAS_GEN) ~IDX_MASK else 0;
         const GEN_CLEAR: Id = if (HAS_GEN) IDX_MASK else 0;
+        const FREE_FROM_END = options.free_item_order == .FIRST_IN_LAST_OUT;
         const UNINIT = Heirarchy{};
+        const UNINIT_ELEM: Elem = make: {
+            var elem: Elem = undefined;
+            Internal.set_own_id(&elem, NULL_ID);
+            Internal.set_prev_sib_id(&elem, NULL_ID);
+            Internal.set_next_sib_id(&elem, NULL_ID);
+            Internal.set_parent_id(&elem, NULL_ID);
+            Internal.set_first_l_child_id(&elem, NULL_ID);
+            Internal.set_first_r_child_id(&elem, NULL_ID);
+            Internal.set_last_l_child_id(&elem, NULL_ID);
+            Internal.set_last_r_child_id(&elem, NULL_ID);
+            break :make elem;
+        };
         const NULL_ID = math.maxInt(Id);
         const NULL_INDEX = math.maxInt(Index);
         const NULL_GEN = if (HAS_GEN) (NULL_ID & ~IDX_MASK) else 0;
         const GEN_ONE: Id = if (HAS_GEN) @as(Id, 1) << GEN_OFFSET else 1;
+        const MUST_PROVIDE_PREV_ID = !HAS_PREV;
+        const MUST_PROVIDE_NEXT_ID = !HAS_NEXT;
+        const MUST_PROVIDE_PARENT_ID = (HAS_FIRST_L_CHILD or HAS_FIRST_R_CHILD or HAS_LAST_L_CHILD or HAS_LAST_R_CHILD) and !HAS_PARENT;
+        const MUST_CHECK_CHILD_KEY_POSITIONS = HAS_PARENT and (HAS_FIRST_L_CHILD or HAS_FIRST_R_CHILD or HAS_LAST_L_CHILD or HAS_LAST_R_CHILD);
+        const MUST_CHECK_CHILD_IS_FIRST_LEFT = HAS_PARENT and HAS_FIRST_L_CHILD;
+        const MUST_CHECK_CHILD_IS_FIRST_RIGHT = HAS_PARENT and HAS_FIRST_R_CHILD;
+        const MUST_CHECK_CHILD_IS_LAST_LEFT = HAS_PARENT and HAS_LAST_L_CHILD;
+        const MUST_CHECK_CHILD_IS_LAST_RIGHT = HAS_PARENT and HAS_LAST_R_CHILD;
+        const MUST_CHECK_CHILD_IS_FIRST = MUST_CHECK_CHILD_IS_LAST_LEFT or MUST_CHECK_CHILD_IS_LAST_RIGHT;
+        const MUST_CHECK_CHILD_IS_LAST = MUST_CHECK_CHILD_IS_LAST_LEFT or MUST_CHECK_CHILD_IS_LAST_RIGHT;
+        const CHILD_NODES_COUNT: u8 = @as(u8, @intCast(@intFromBool(HAS_FIRST_L_CHILD))) + @as(u8, @intCast(@intFromBool(HAS_LAST_L_CHILD))) + @as(u8, @intCast(@intFromBool(HAS_FIRST_R_CHILD))) + @as(u8, @intCast(@intFromBool(HAS_LAST_R_CHILD)));
+        const MULTIPLE_CHILD_NODES = CHILD_NODES_COUNT > 1;
+        const HAS_LEFT_CHILDREN = HAS_FIRST_L_CHILD or HAS_LAST_L_CHILD;
+        const HAS_RIGHT_CHILDREN = HAS_FIRST_R_CHILD or HAS_LAST_R_CHILD;
+        const HAS_ONLY_ONE_CHILD_SIDE = (HAS_LEFT_CHILDREN and !HAS_RIGHT_CHILDREN) or (HAS_RIGHT_CHILDREN and !HAS_LEFT_CHILDREN);
+        const HAS_CHILD_NODES = CHILD_NODES_COUNT > 0;
+        const COPY_VAL_FN = options.custom_copy_only_value_fn;
         // const ALLOW_SLOW = options.allow_slow_fallbacks;
 
         const Heirarchy = @This();
@@ -273,9 +287,22 @@ pub fn LinkedHeirarchy(comptime options: LinkedHeirarchyOptions) type {
             index: Index = NULL_INDEX,
             gen: if (HAS_GEN) Id else void = if (HAS_GEN) NULL_GEN else void{},
         };
+        pub const Item = struct {
+            id: Id,
+            ptr: *Elem,
+        };
         const IdPtrId = struct {
             id_ptr: *Id = &DUMMY_ID,
             id: Id = NULL_ID,
+        };
+        const FirstLast = struct {
+            first: Id = NULL_ID,
+            last: Id = NULL_ID,
+        };
+        const FirstLastParent = struct {
+            first: Id = NULL_ID,
+            last: Id = NULL_ID,
+            parent: Id = NULL_ID,
         };
         const ConnPrev = choose: {
             if (HAS_NEXT and HAS_PREV) break :choose IdPtrId;
@@ -389,19 +416,19 @@ pub fn LinkedHeirarchy(comptime options: LinkedHeirarchyOptions) type {
             if (!HAS_NEXT) return NULL_ID;
             return @field(ptr, NEXT_FIELD);
         }
-        pub inline fn get_first_l_child_id(ptr: *const Elem) Id {
+        pub inline fn get_first_left_child_id(ptr: *const Elem) Id {
             if (!HAS_FIRST_L_CHILD) return NULL_ID;
             return @field(ptr, FIRST_L_CHILD_FIELD);
         }
-        pub inline fn get_first_r_child_id(ptr: *const Elem) Id {
+        pub inline fn get_first_right_child_id(ptr: *const Elem) Id {
             if (!HAS_FIRST_R_CHILD) return NULL_ID;
             return @field(ptr, FIRST_R_CHILD_FIELD);
         }
-        pub inline fn get_last_l_child_id(ptr: *const Elem) Id {
+        pub inline fn get_last_left_child_id(ptr: *const Elem) Id {
             if (!HAS_LAST_L_CHILD) return NULL_ID;
             return @field(ptr, LAST_L_CHILD_FIELD);
         }
-        pub inline fn get_last_r_child_id(ptr: *const Elem) Id {
+        pub inline fn get_last_right_child_id(ptr: *const Elem) Id {
             if (!HAS_LAST_R_CHILD) return NULL_ID;
             return @field(ptr, LAST_R_CHILD_FIELD);
         }
@@ -464,41 +491,48 @@ pub fn LinkedHeirarchy(comptime options: LinkedHeirarchyOptions) type {
                 if (@field(ptr, OWN_ID_FIELD).* & GEN_MASK == GEN_MASK) @field(ptr, OWN_ID_FIELD).* &= GEN_CLEAR;
             }
             pub fn swap_data_only(a: *Elem, b: *Elem) void {
-                const old_a = a.*;
-                const old_b = b.*;
-                a.* = old_b;
-                b.* = old_a;
-                if (HAS_PREV) {
-                    set_prev_sib_id(a, get_prev_sib_id(old_a));
-                    set_prev_sib_id(b, get_prev_sib_id(old_b));
-                }
-                if (HAS_NEXT) {
-                    set_next_sib_id(a, get_next_sib_id(old_a));
-                    set_next_sib_id(b, get_next_sib_id(old_b));
-                }
-                if (HAS_FIRST_L_CHILD) {
-                    set_first_l_child_id(a, get_first_l_child_id(old_a));
-                    set_first_l_child_id(b, get_first_l_child_id(old_b));
-                }
-                if (HAS_FIRST_R_CHILD) {
-                    set_first_r_child_id(a, get_first_r_child_id(old_a));
-                    set_first_r_child_id(b, get_first_r_child_id(old_b));
-                }
-                if (HAS_LAST_L_CHILD) {
-                    set_last_l_child_id(a, get_last_l_child_id(old_a));
-                    set_last_l_child_id(b, get_last_l_child_id(old_b));
-                }
-                if (HAS_LAST_R_CHILD) {
-                    set_last_r_child_id(a, get_last_r_child_id(old_a));
-                    set_last_r_child_id(b, get_last_r_child_id(old_b));
-                }
-                if (HAS_PARENT) {
-                    set_parent_id(a, get_parent_id(old_a));
-                    set_parent_id(b, get_parent_id(old_b));
-                }
-                if (HAS_OWN_ID) {
-                    set_own_id(a, get_own_id(old_a));
-                    set_own_id(b, get_own_id(old_b));
+                if (COPY_VAL_FN) |copy| {
+                    var temp: Elem = undefined;
+                    copy(a, &temp);
+                    copy(b, a);
+                    copy(&temp, b);
+                } else {
+                    const old_a = a.*;
+                    const old_b = b.*;
+                    a.* = old_b;
+                    b.* = old_a;
+                    if (HAS_PREV) {
+                        set_prev_sib_id(a, get_prev_sib_id(old_a));
+                        set_prev_sib_id(b, get_prev_sib_id(old_b));
+                    }
+                    if (HAS_NEXT) {
+                        set_next_sib_id(a, get_next_sib_id(old_a));
+                        set_next_sib_id(b, get_next_sib_id(old_b));
+                    }
+                    if (HAS_FIRST_L_CHILD) {
+                        set_first_l_child_id(a, get_first_left_child_id(old_a));
+                        set_first_l_child_id(b, get_first_left_child_id(old_b));
+                    }
+                    if (HAS_FIRST_R_CHILD) {
+                        set_first_r_child_id(a, get_first_right_child_id(old_a));
+                        set_first_r_child_id(b, get_first_right_child_id(old_b));
+                    }
+                    if (HAS_LAST_L_CHILD) {
+                        set_last_l_child_id(a, get_last_left_child_id(old_a));
+                        set_last_l_child_id(b, get_last_left_child_id(old_b));
+                    }
+                    if (HAS_LAST_R_CHILD) {
+                        set_last_r_child_id(a, get_last_right_child_id(old_a));
+                        set_last_r_child_id(b, get_last_right_child_id(old_b));
+                    }
+                    if (HAS_PARENT) {
+                        set_parent_id(a, get_parent_id(old_a));
+                        set_parent_id(b, get_parent_id(old_b));
+                    }
+                    if (HAS_OWN_ID) {
+                        set_own_id(a, get_own_id(old_a));
+                        set_own_id(b, get_own_id(old_b));
+                    }
                 }
             }
 
@@ -612,6 +646,32 @@ pub fn LinkedHeirarchy(comptime options: LinkedHeirarchyOptions) type {
                 assert_with_reason(false, @src(), "invalid type pair:  a = {s}, b = {s}", .{ @typeName(A), @typeName(B) });
             }
 
+            pub inline fn connect_siblings(self: *const Heirarchy, prev: Id, next: Id) void {
+                const a = get_conn_prev(self, prev);
+                const b = get_conn_next(self, next);
+                connect(a, b);
+            }
+            pub inline fn connect_parent_first_left(self: *const Heirarchy, parent: Id, child: Id) void {
+                const a = get_conn_parent_first_left(self, parent);
+                const b = get_conn_child_first_left(self, child);
+                connect(a, b);
+            }
+            pub inline fn connect_parent_first_right(self: *const Heirarchy, parent: Id, child: Id) void {
+                const a = get_conn_parent_first_right(self, parent);
+                const b = get_conn_child_first_right(self, child);
+                connect(a, b);
+            }
+            pub inline fn connect_parent_last_left(self: *const Heirarchy, parent: Id, child: Id) void {
+                const a = get_conn_parent_last_left(self, parent);
+                const b = get_conn_child_last_left(self, child);
+                connect(a, b);
+            }
+            pub inline fn connect_parent_last_right(self: *const Heirarchy, parent: Id, child: Id) void {
+                const a = get_conn_parent_last_right(self, parent);
+                const b = get_conn_child_last_right(self, child);
+                connect(a, b);
+            }
+
             pub fn update_parent_from_siblings(self: *Heirarchy, this_id: Id) void {
                 if (HAS_PARENT) {
                     const this_ptr = self.get_ptr(this_id);
@@ -637,22 +697,26 @@ pub fn LinkedHeirarchy(comptime options: LinkedHeirarchyOptions) type {
                 }
             }
 
-            pub fn initialize_new_index(self: *Heirarchy, new_idx: Index, parent_id: Id) void {
-                const new_id: Id = @intCast(new_idx);
-                const new_ptr = self.get_ptr(new_id);
-                set_own_id(new_ptr, new_id);
-                set_parent_id(new_ptr, parent_id);
+            pub fn initialize_new_index(self: *Heirarchy, parent_id: Id) Id {
+                const new_id: Id = @intCast(self.list.len);
+                var new_elem = UNINIT_ELEM;
+                set_own_id(&new_elem, new_id);
+                set_parent_id(&new_elem, parent_id);
+                _ = self.list.append_assume_capacity(new_elem);
+                return new_id;
             }
 
-            pub fn initialize_new_indexes_as_siblings(self: *Heirarchy, first_idx: Index, last_idx: Index, parent_id: Id) void {
-                var left_id: Id = @intCast(first_idx);
+            pub fn initialize_new_indexes_as_siblings(self: *Heirarchy, count: Index, parent_id: Id) FirstLast {
+                const first_id: Id = @intCast(self.list.len);
+                var left_id: Id = first_id;
+                _ = self.list.append_n_times_assume_capacity(UNINIT_ELEM, count);
                 var right_id: Id = left_id + 1;
-                const last_id: Id = @intCast(last_idx);
                 const left_ptr = self.get_ptr(left_id);
                 var right_ptr = undefined;
                 set_own_id(left_ptr, left_id);
                 set_parent_id(left_ptr, parent_id);
-                while (right_id <= last_id) {
+                const c: Index = 1;
+                while (c < count) : (c += 1) {
                     right_ptr = self.get_ptr(right_id);
                     set_own_id(right_ptr, right_id);
                     set_parent_id(right_ptr, parent_id);
@@ -662,12 +726,17 @@ pub fn LinkedHeirarchy(comptime options: LinkedHeirarchyOptions) type {
                     left_id += 1;
                     right_id += 1;
                 }
+                return FirstLast{
+                    .first = first_id,
+                    .last = left_id,
+                };
             }
 
-            pub fn initialize_new_indexes_as_first_left_children(self: *Heirarchy, first_idx: Index, last_idx: Index, root_parent_id: Id) void {
-                var next_parent_id: Id = @intCast(first_idx);
+            pub fn initialize_new_indexes_as_first_left_children(self: *Heirarchy, count: Index, root_parent_id: Id) FirstLast {
+                const first_id: Id = @intCast(self.list.len);
+                var next_parent_id: Id = first_id;
+                _ = self.list.append_n_times_assume_capacity(UNINIT_ELEM, count);
                 var child_id: Id = next_parent_id + 1;
-                const last_id: Id = @intCast(last_idx);
                 const next_parent_ptr = self.get_ptr(next_parent_id);
                 var child_ptr = undefined;
                 set_own_id(next_parent_ptr, next_parent_id);
@@ -675,7 +744,8 @@ pub fn LinkedHeirarchy(comptime options: LinkedHeirarchyOptions) type {
                 var parent_conn = get_conn_parent_first_left(self, root_parent_id);
                 var child_conn = get_conn_child_first_left(self, next_parent_id);
                 connect(parent_conn, child_conn);
-                while (child_id <= last_id) {
+                const c: Index = 1;
+                while (c < count) : (c += 1) {
                     child_ptr = self.get_ptr(child_id);
                     set_own_id(child_ptr, child_id);
                     set_parent_id(child_ptr, next_parent_id);
@@ -685,11 +755,16 @@ pub fn LinkedHeirarchy(comptime options: LinkedHeirarchyOptions) type {
                     next_parent_id += 1;
                     child_id += 1;
                 }
+                return FirstLast{
+                    .first = first_id,
+                    .last = next_parent_id,
+                };
             }
-            pub fn initialize_new_indexes_as_last_left_children(self: *Heirarchy, first_idx: Index, last_idx: Index, root_parent_id: Id) void {
-                var next_parent_id: Id = @intCast(first_idx);
+            pub fn initialize_new_indexes_as_last_left_children(self: *Heirarchy, count: Index, root_parent_id: Id) FirstLast {
+                const first_id: Id = @intCast(self.list.len);
+                var next_parent_id: Id = first_id;
+                _ = self.list.append_n_times_assume_capacity(UNINIT_ELEM, count);
                 var child_id: Id = next_parent_id + 1;
-                const last_id: Id = @intCast(last_idx);
                 const next_parent_ptr = self.get_ptr(next_parent_id);
                 var child_ptr = undefined;
                 set_own_id(next_parent_ptr, next_parent_id);
@@ -697,7 +772,8 @@ pub fn LinkedHeirarchy(comptime options: LinkedHeirarchyOptions) type {
                 var parent_conn = get_conn_parent_last_left(self, root_parent_id);
                 var child_conn = get_conn_child_last_left(self, next_parent_id);
                 connect(parent_conn, child_conn);
-                while (child_id <= last_id) {
+                const c: Index = 1;
+                while (c < count) : (c += 1) {
                     child_ptr = self.get_ptr(child_id);
                     set_own_id(child_ptr, child_id);
                     set_parent_id(child_ptr, next_parent_id);
@@ -707,11 +783,16 @@ pub fn LinkedHeirarchy(comptime options: LinkedHeirarchyOptions) type {
                     next_parent_id += 1;
                     child_id += 1;
                 }
+                return FirstLast{
+                    .first = first_id,
+                    .last = next_parent_id,
+                };
             }
-            pub fn initialize_new_indexes_as_first_right_children(self: *Heirarchy, first_idx: Index, last_idx: Index, root_parent_id: Id) void {
-                var next_parent_id: Id = @intCast(first_idx);
+            pub fn initialize_new_indexes_as_first_right_children(self: *Heirarchy, count: Index, root_parent_id: Id) FirstLast {
+                const first_id: Id = @intCast(self.list.len);
+                var next_parent_id: Id = first_id;
+                _ = self.list.append_n_times_assume_capacity(UNINIT_ELEM, count);
                 var child_id: Id = next_parent_id + 1;
-                const last_id: Id = @intCast(last_idx);
                 const next_parent_ptr = self.get_ptr(next_parent_id);
                 var child_ptr = undefined;
                 set_own_id(next_parent_ptr, next_parent_id);
@@ -719,7 +800,8 @@ pub fn LinkedHeirarchy(comptime options: LinkedHeirarchyOptions) type {
                 var parent_conn = get_conn_parent_first_right(self, root_parent_id);
                 var child_conn = get_conn_child_first_right(self, next_parent_id);
                 connect(parent_conn, child_conn);
-                while (child_id <= last_id) {
+                const c: Index = 1;
+                while (c < count) : (c += 1) {
                     child_ptr = self.get_ptr(child_id);
                     set_own_id(child_ptr, child_id);
                     set_parent_id(child_ptr, next_parent_id);
@@ -729,11 +811,16 @@ pub fn LinkedHeirarchy(comptime options: LinkedHeirarchyOptions) type {
                     next_parent_id += 1;
                     child_id += 1;
                 }
+                return FirstLast{
+                    .first = first_id,
+                    .last = next_parent_id,
+                };
             }
-            pub fn initialize_new_indexes_as_last_right_children(self: *Heirarchy, first_idx: Index, last_idx: Index, root_parent_id: Id) void {
-                var next_parent_id: Id = @intCast(first_idx);
+            pub fn initialize_new_indexes_as_last_right_children(self: *Heirarchy, count: Index, root_parent_id: Id) FirstLast {
+                const first_id: Id = @intCast(self.list.len);
+                var next_parent_id: Id = first_id;
+                _ = self.list.append_n_times_assume_capacity(UNINIT_ELEM, count);
                 var child_id: Id = next_parent_id + 1;
-                const last_id: Id = @intCast(last_idx);
                 const next_parent_ptr = self.get_ptr(next_parent_id);
                 var child_ptr = undefined;
                 set_own_id(next_parent_ptr, next_parent_id);
@@ -741,7 +828,8 @@ pub fn LinkedHeirarchy(comptime options: LinkedHeirarchyOptions) type {
                 var parent_conn = get_conn_parent_last_right(self, root_parent_id);
                 var child_conn = get_conn_child_last_right(self, next_parent_id);
                 connect(parent_conn, child_conn);
-                while (child_id <= last_id) {
+                const c: Index = 1;
+                while (c < count) : (c += 1) {
                     child_ptr = self.get_ptr(child_id);
                     set_own_id(child_ptr, child_id);
                     set_parent_id(child_ptr, next_parent_id);
@@ -751,1037 +839,1470 @@ pub fn LinkedHeirarchy(comptime options: LinkedHeirarchyOptions) type {
                     next_parent_id += 1;
                     child_id += 1;
                 }
-            }
-
-            //CHECKPOINT get/put to free list funcs
-
-            pub fn disconnect_one(self: *Heirarchy, list: ListTag, idx: Index) void {
-                const disconn = Internal.get_conn_left_right_before_first_and_after_last_valid_indexes(self, idx, idx, list);
-                Internal.connect(disconn.left, disconn.right);
-                Internal.decrease_link_set_count(self, list, 1);
-            }
-
-            pub fn disconnect_many_first_last(self: *Heirarchy, list: ListTag, first_idx: Index, last_idx: Index, count: Index) void {
-                const disconn = Internal.get_conn_left_right_before_first_and_after_last_valid_indexes(self, first_idx, last_idx, list);
-                Internal.connect(disconn.left, disconn.right);
-                Internal.decrease_link_set_count(self, list, count);
-            }
-
-            pub fn get_conn_left_right_directly_before_this_valid_index(self: *Heirarchy, this_idx: Index, list: ListTag) ConnLeftRight {
-                var result: ConnLeftRight = undefined;
-                const prev_idx = self.get_prev_idx(this_idx);
-                result.right = Internal.get_conn_right_valid_index(self, this_idx);
-                result.left = Internal.get_conn_left(self, list, prev_idx, this_idx);
-                return result;
-            }
-
-            pub fn get_conn_left_right_from_first_child_position(self: *Heirarchy, parent_idx: Index) ConnLeftRight {
-                var result: ConnLeftRight = undefined;
-                result.left = Internal.get_conn_left_from_first_child(self, parent_idx);
-                const first_child_idx = self.get_first_child(parent_idx);
-                if (first_child_idx != NULL_ID) {
-                    result.right = Internal.get_conn_right_valid_index(self, first_child_idx);
-                } else if (LAST_CHILD) {
-                    result.right = Internal.get_conn_right_from_last_child(self, parent_idx);
-                } else {
-                    result.right = Internal.get_conn_right_dummy_end();
-                }
-                return result;
-            }
-
-            pub fn get_conn_left_right_from_last_child_position(self: *Heirarchy, parent_idx: Index) ConnLeftRight {
-                var result: ConnLeftRight = undefined;
-                result.right = Internal.get_conn_right_from_last_child(self, parent_idx);
-                const last_child_idx = self.get_last_child(parent_idx);
-                if (last_child_idx != NULL_ID) {
-                    result.left = Internal.get_conn_left_valid_index(self, last_child_idx);
-                } else if (FIRST_CHILD) {
-                    result.left = Internal.get_conn_left_from_first_child(self, parent_idx);
-                } else {
-                    result.left = Internal.get_conn_left_dummy_end();
-                }
-                return result;
-            }
-
-            pub fn get_conn_left_right_directly_after_this_valid_index(self: *Heirarchy, this_idx: Index, list: ListTag) ConnLeftRight {
-                var result: ConnLeftRight = undefined;
-                const next_idx = self.get_next_idx(this_idx);
-                result.left = Internal.get_conn_left_valid_index(self, this_idx);
-                result.right = Internal.get_conn_right(self, list, next_idx, this_idx);
-                return result;
-            }
-
-            pub fn get_conn_left_right_before_first_and_after_last_valid_indexes(self: *Heirarchy, first_idx: Index, last_idx: Index, list: ListTag) ConnLeftRight {
-                var result: ConnLeftRight = undefined;
-                const left_idx = self.get_prev_idx(list, first_idx);
-                const right_idx = self.get_next_idx(list, last_idx);
-                result.left = Internal.get_conn_left(self, list, left_idx, first_idx);
-                result.right = Internal.get_conn_right(self, list, right_idx, last_idx);
-                return result;
-            }
-
-            pub fn get_conn_left_right_for_tail_of_list(self: *Heirarchy, list: ListTag) ConnLeftRight {
-                const last_index = self.get_last_index_in_list(list);
-                var conn: ConnLeftRight = undefined;
-                conn.right = Internal.get_conn_right_from_list_tail(self, list);
-                if (last_index != NULL_ID) {
-                    conn.left = Internal.get_conn_left_valid_index(self, last_index);
-                } else {
-                    conn.left = Internal.get_conn_left_from_list_head(self, list);
-                }
-                return conn;
-            }
-
-            pub fn get_conn_left_right_for_head_of_list(self: *Heirarchy, list: ListTag) ConnLeftRight {
-                const first_index = self.get_first_index_in_list(list);
-                var conn: ConnLeftRight = undefined;
-                conn.left = Internal.get_conn_left_from_list_head(self, list);
-                if (first_index != NULL_ID) {
-                    conn.right = Internal.get_conn_right_valid_index(self, first_index);
-                } else {
-                    conn.right = Internal.get_conn_right_from_list_tail(self, list);
-                }
-                return conn;
-            }
-
-            pub fn traverse_backward_to_get_first_index_in_list_from_start_index(self: *const Heirarchy, start_idx: Index) Index {
-                var first_idx: Index = NULL_ID;
-                var curr_idx = start_idx;
-                var c: if (STRONG_ASSERT) Index else void = if (STRONG_ASSERT) 0 else void{};
-                const limit: if (STRONG_ASSERT) Index else void = if (STRONG_ASSERT) @as(Index, @intCast(self.list.len)) else void{};
-                while (curr_idx != NULL_ID) {
-                    first_idx = curr_idx;
-                    if (STRONG_ASSERT) c += 1;
-                    curr_idx = get_prev_idx(self, curr_idx.ptr);
-                }
-                if (STRONG_ASSERT) assert_with_reason(c <= limit, @src(), "traversed more than {d} elements (total len of underlying element list) starting from index {d} in backward direction without finding a NULL_IDX: list is cyclic and using this function will create an infinite loop", .{ limit, start_idx });
-                return first_idx;
-            }
-
-            pub fn traverse_forward_to_get_last_index_in_list_from_start_index(self: *const Heirarchy, start_idx: Index) Index {
-                var last_idx: Index = NULL_ID;
-                var curr_idx = start_idx;
-                var c: if (STRONG_ASSERT) Index else void = if (STRONG_ASSERT) 0 else void{};
-                const limit: if (STRONG_ASSERT) Index else void = if (STRONG_ASSERT) @as(Index, @intCast(self.list.len)) else void{};
-                while (curr_idx != NULL_ID) {
-                    last_idx = curr_idx;
-                    if (STRONG_ASSERT) c += 1;
-                    curr_idx = get_next_idx(self, curr_idx.ptr);
-                }
-                if (STRONG_ASSERT) assert_with_reason(c <= limit, @src(), "traversed more than {d} elements (total len of underlying element list) starting from index {d} in forward direction without finding a NULL_IDX: list is cyclic and using this function will create an infinite loop", .{ limit, start_idx });
-                return last_idx;
-            }
-
-            pub fn traverse_forward_from_idx_and_report_if_found_target_idx(self: *Heirarchy, start_idx: Index, target_idx: Index) bool {
-                var curr_idx: Index = start_idx;
-                var c: if (STRONG_ASSERT) Index else void = if (STRONG_ASSERT) 0 else void{};
-                const limit: if (STRONG_ASSERT) Index else void = if (STRONG_ASSERT) @as(Index, @intCast(self.list.len)) else void{};
-                while (curr_idx != NULL_ID and (if (STRONG_ASSERT) c <= limit else true)) {
-                    if (curr_idx == target_idx) return true;
-                    curr_idx = get_next_idx(self, curr_idx);
-                    if (STRONG_ASSERT) c += 1;
-                }
-                if (STRONG_ASSERT) assert_with_reason(c <= limit, @src(), "traversed more than {d} elements (total len of underlying element list) starting from index {d} in forward direction without finding target index {d}: list is cyclic and using this function will create an infinite loop", .{ limit, start_idx, target_idx });
-                return false;
-            }
-
-            pub fn traverse_all_lists_forward_and_report_list_found_in(self: *Heirarchy, this_idx: Index) ListTag {
-                var t: ListTagInt = 0;
-                var idx: Index = undefined;
-                while (t < UNTRACKED_LIST_RAW) : (t += 1) {
-                    idx = self.get_first_index_in_list(@enumFromInt(t));
-                    while (idx != NULL_ID) {
-                        if (idx == this_idx) return @enumFromInt(t);
-                        idx = self.get_next_idx(idx);
-                    }
-                }
-                return UNTRACKED_LIST;
-            }
-            pub fn traverse_all_lists_backward_and_report_list_found_in(self: *Heirarchy, this_idx: Index) ListTag {
-                var t: ListTagInt = 0;
-                var idx: Index = undefined;
-                while (t < UNTRACKED_LIST_RAW) : (t += 1) {
-                    idx = self.get_last_index_in_list(@enumFromInt(t));
-                    while (idx != NULL_ID) {
-                        if (idx == this_idx) return @enumFromInt(t);
-                        idx = self.get_prev_idx(idx);
-                    }
-                }
-                return UNTRACKED_LIST;
-            }
-
-            pub fn traverse_backward_from_idx_and_report_if_found_target_idx(self: *Heirarchy, start_idx: Index, target_idx: Index) bool {
-                var curr_idx: Index = start_idx;
-                var c: if (STRONG_ASSERT) Index else void = if (STRONG_ASSERT) 0 else void{};
-                const limit: if (STRONG_ASSERT) Index else void = if (STRONG_ASSERT) @as(Index, @intCast(self.list.len)) else void{};
-                while (curr_idx != NULL_ID and (if (STRONG_ASSERT) c <= limit else true)) {
-                    if (curr_idx == target_idx) return true;
-                    curr_idx = get_prev_idx(self, curr_idx);
-                    if (STRONG_ASSERT) c += 1;
-                }
-                if (STRONG_ASSERT) assert_with_reason(c <= limit, @src(), "traversed more than {d} elements (total len of underlying element list) starting from index {d} in forward direction without finding target index {d}: list is cyclic and using this function will create an infinite loop", .{ limit, start_idx, target_idx });
-                return false;
-            }
-
-            pub fn traverse_to_find_index_before_this_one_forward_from_known_idx_before(self: Heirarchy, this_idx: Index, known_prev: Index) Index {
-                var curr_idx: Index = known_prev;
-                var c: if (STRONG_ASSERT) Index else void = if (STRONG_ASSERT) 0 else void{};
-                const limit: if (STRONG_ASSERT) Index else void = if (STRONG_ASSERT) @as(Index, @intCast(self.list.len)) else void{};
-                while (curr_idx != NULL_ID and (if (STRONG_ASSERT) c <= limit else true)) {
-                    assert_with_reason(curr_idx < self.list.len, @src(), "while traversing forward from index {d}, index {d} was found, which is out of bounds for list.len {d}, but is not NULL_IDX", .{ known_prev, curr_idx, self.list.len });
-                    const next_idx = self.get_next_idx(curr_idx);
-                    if (next_idx == this_idx) return curr_idx;
-                    curr_idx = next_idx;
-                    if (STRONG_ASSERT) c += 1;
-                }
-                if (STRONG_ASSERT) assert_with_reason(c <= limit, @src(), "traversed more than {d} elements (total len of underlying element list) starting from 'known prev' index {d} in forward direction without finding this index {d}: list is cyclic and using this function will create an infinite loop", .{ limit, known_prev, this_idx });
-                assert_with_reason(false, @src(), "no item found referencing index {d} while traversing from index {d} in forward direction: broken list or `known_prev` wasn't actually before `idx`", .{ this_idx, known_prev });
-            }
-
-            pub fn traverse_to_find_index_after_this_one_backward_from_known_idx_after(self: Heirarchy, this_idx: Index, known_next: Index) Index {
-                var curr_idx: Index = undefined;
-                var c: if (STRONG_ASSERT) Index else void = if (STRONG_ASSERT) 0 else void{};
-                const limit: if (STRONG_ASSERT) Index else void = if (STRONG_ASSERT) @as(Index, @intCast(self.list.len)) else void{};
-                curr_idx = known_next;
-                while (curr_idx != NULL_ID and (if (STRONG_ASSERT) c <= limit else true)) {
-                    assert_with_reason(curr_idx < self.list.len, @src(), "while traversing backward from index {d}, index {d} was found, which is out of bounds for list.len {d}, but is not NULL_IDX", .{ known_next, curr_idx, self.list.len });
-                    const prev_idx = self.get_prev_idx(curr_idx);
-                    if (prev_idx == this_idx) return curr_idx;
-                    curr_idx = prev_idx;
-                    if (STRONG_ASSERT) c += 1;
-                }
-                if (STRONG_ASSERT) assert_with_reason(c <= limit, @src(), "traversed more than {d} elements (total len of underlying element list) starting from 'known next' index {d} in backward direction without finding this index {d}: list is cyclic and using this function will create an infinite loop", .{ limit, known_next, this_idx });
-                assert_with_reason(false, @src(), "no item found referencing index {d} while traversing from index {d} in backward direction: broken list or `known_next` wasn't actually after `idx`", .{ this_idx, known_next });
-            }
-
-            pub inline fn get_list_tag_raw(ptr: *const Elem) ListTagInt {
-                return @as(ListTagInt, @intCast((@field(ptr, STATE_FIELD) & STATE_MASK) >> STATE_OFFSET));
-            }
-
-            pub fn assert_valid_list_idx(self: *Heirarchy, idx: Index, list: ListTag, comptime src_loc: ?SourceLocation) void {
-                if (@inComptime() or build.mode == .Debug or build.mode == .ReleaseSafe) {
-                    assert_idx_less_than_len(idx, self.list.len, src_loc);
-                    const ptr = get_ptr(self, idx);
-                    if (STATE) assert_with_reason(get_list_tag_raw(ptr) == @intFromEnum(list), src_loc, "set {s} on SetIdx does not match list on elem at idx {d}", .{ @tagName(list), idx });
-                    if (STRONG_ASSERT) {
-                        const found_in_list = if (FORWARD) Internal.traverse_forward_from_idx_and_report_if_found_target_idx(self, self.get_first_index_in_list(list), idx) else Internal.traverse_backward_from_idx_and_report_if_found_target_idx(self, self.get_last_index_in_list(list), idx);
-                        assert_with_reason(found_in_list, src_loc, "while verifying idx {d} is in set {s}, the idx was not found when traversing the set", .{ idx, @tagName(list) });
-                    }
-                }
-            }
-            pub fn assert_valid_list_idx_list(self: *Heirarchy, list: ListTag, indexes: []const Index, comptime src_loc: ?SourceLocation) void {
-                if (@inComptime() or build.mode == .Debug or build.mode == .ReleaseSafe) {
-                    for (indexes) |idx| {
-                        Internal.assert_valid_list_idx(self, idx, list, src_loc);
-                    }
-                }
-            }
-            pub fn assert_valid_list_of_list_idxs(self: *Heirarchy, set_idx_list: []const ListIdx, comptime src_loc: ?SourceLocation) void {
-                if (@inComptime() or build.mode == .Debug or build.mode == .ReleaseSafe) {
-                    for (set_idx_list) |list_idx| {
-                        Internal.assert_valid_list_idx(self, list_idx.idx, list_idx.list, src_loc);
-                    }
-                }
-            }
-
-            pub fn assert_valid_slice(self: *Heirarchy, slice: LLSlice, comptime src_loc: ?SourceLocation) void {
-                assert_idx_less_than_len(slice.first, self.list.len, src_loc);
-                assert_idx_less_than_len(slice.last, self.list.len, src_loc);
-                if (!STRONG_ASSERT and STATE) {
-                    assert_with_reason(self.index_is_in_list(slice.first, slice.list), src_loc, "first index {d} is not in list `{s}`", .{ slice.first, @tagName(slice.list) });
-                    assert_with_reason(self.index_is_in_list(slice.last, slice.list), src_loc, "last index {d} is not in list `{s}`", .{ slice.last, @tagName(slice.list) });
-                }
-                if (STRONG_ASSERT) {
-                    var c: Index = 1;
-                    var idx = if (FORWARD) slice.first else slice.last;
-                    assert_idx_less_than_len(idx, self.list.len, @src());
-                    const list = slice.list;
-                    const last_idx = if (FORWARD) slice.last else slice.first;
-                    Internal.assert_valid_list_idx(self, IndexInList{ .list = list, .idx = idx }, src_loc);
-                    while (idx != last_idx and idx != NULL_ID) {
-                        idx = if (FORWARD) self.get_next_idx(slice.list, idx) else self.get_prev_idx(idx);
-                        c += 1;
-                        Internal.assert_valid_list_idx(self, IndexInList{ .list = list, .idx = idx }, src_loc);
-                    }
-                    assert_with_reason(idx == last_idx, src_loc, "idx `first` ({d}) is not linked with idx `last` ({d})", .{ slice.first, slice.last });
-                    assert_with_reason(c == slice.count, src_loc, "the slice count {d} did not match the number of traversed items between `first` and `last` ({d})", .{ slice.count, c });
-                }
-            }
-
-            fn get_items_and_insert_at_internal(self: *Heirarchy, get_from: anytype, insert_to: anytype, alloc: Allocator, comptime ASSUME_CAP: bool) if (!ASSUME_CAP and RETURN_ERRORS) Error!LLSlice else LLSlice {
-                const FROM = @TypeOf(get_from);
-                const TO = @TypeOf(insert_to);
-                var insert_edges: ConnLeftRight = undefined;
-                var insert_list: ListTag = undefined;
-                var insert_untracked: bool = false;
-                var insert_parent: Index = NULL_ID;
-                switch (TO) {
-                    Insert.AfterIndex => {
-                        const idx: Index = insert_to.idx;
-                        assert_idx_less_than_len(idx, self.list.len, @src());
-                        const list: ListTag = self.get_list_tag(idx);
-                        insert_edges = Internal.get_conn_left_right_directly_after_this_valid_index(self, idx, list);
-                        insert_list = list;
-                        insert_parent = self.get_parent_idx(idx);
-                    },
-                    Insert.AfterIndexInList => {
-                        const idx: Index = insert_to.idx;
-                        const list: Index = insert_to.list;
-                        assert_valid_list_idx(self, idx, list, @src());
-                        insert_edges = Internal.get_conn_left_right_directly_after_this_valid_index(self, idx, list);
-                        insert_list = list;
-                        insert_parent = self.get_parent_idx(idx);
-                    },
-                    Insert.BeforeIndex => {
-                        const idx: Index = insert_to.idx;
-                        assert_idx_less_than_len(idx, self.list.len, @src());
-                        const list: ListTag = self.get_list_tag(idx);
-                        insert_edges = Internal.get_conn_left_right_directly_before_this_valid_index(self, idx, list);
-                        insert_list = list;
-                        insert_parent = self.get_parent_idx(idx);
-                    },
-                    Insert.BeforeIndexInList => {
-                        const idx: Index = insert_to.idx;
-                        const list: Index = insert_to.list;
-                        assert_valid_list_idx(self, idx, list, @src());
-                        insert_edges = Internal.get_conn_left_right_directly_before_this_valid_index(self, idx, list);
-                        insert_list = list;
-                        insert_parent = self.get_parent_idx(idx);
-                    },
-                    Insert.AtBeginningOfList => {
-                        const list: ListTag = insert_to.list;
-                        assert_with_reason(list != UNTRACKED_LIST, @src(), "cannot insert to beginning of the 'untracked' list (it has no begining or end)", .{});
-                        insert_edges = Internal.get_conn_left_right_for_head_of_list(self, list);
-                        insert_list = list;
-                    },
-                    Insert.AtEndOfList => {
-                        const list: ListTag = insert_to.list;
-                        assert_with_reason(list != UNTRACKED_LIST, @src(), "cannot insert to end of the 'untracked' list (it has no begining or end)", .{});
-                        insert_edges = Internal.get_conn_left_right_for_tail_of_list(self, list);
-                        insert_list = list;
-                    },
-                    Insert.AtBeginningOfChildren => {
-                        assert_with_reason(FIRST_CHILD or (LAST_CHILD and BACKWARD), @src(), "cannot insert at beginning of children when items do not cache either the first child index, or last child index and is also linked in backward direction", .{});
-                        const parent_idx: Index = insert_to.parent_idx;
-                        assert_idx_less_than_len(parent_idx, self.list.len, @src());
-                        insert_parent = parent_idx;
-                        if (FIRST_CHILD) {
-                            insert_edges = Internal.get_conn_left_right_from_first_child_position(self, parent_idx);
-                            insert_list = UNTRACKED_LIST;
-                        } else {
-                            assert_with_reason(ALLOW_SLOW, @src(), "slow fallbacks not allowed", .{});
-                            const last_child_idx = self.get_last_child(parent_idx);
-                            const first_child_idx = Internal.traverse_backward_to_get_first_index_in_list_from_start_index(self, last_child_idx);
-                            insert_edges.left = Internal.get_conn_left_dummy_end();
-                            insert_edges.right = if (first_child_idx != NULL_ID) Internal.get_conn_right_valid_index(self, first_child_idx) else Internal.get_conn_right_from_last_child(self, parent_idx);
-                            insert_list = UNTRACKED_LIST;
-                        }
-                    },
-                    Insert.AtEndOfChildren => {
-                        assert_with_reason(LAST_CHILD or (FIRST_CHILD and FORWARD), @src(), "cannot insert children when items do not cache either the first child index, or last child index and is also linked in backward direction", .{});
-                        const parent_idx: Index = insert_to.parent_idx;
-                        assert_idx_less_than_len(parent_idx, self.list.len, @src());
-                        insert_parent = parent_idx;
-                        if (LAST_CHILD) {
-                            insert_edges = Internal.get_conn_left_right_from_last_child_position(self, parent_idx);
-                            insert_list = UNTRACKED_LIST;
-                        } else {
-                            assert_with_reason(ALLOW_SLOW, @src(), "slow fallbacks not allowed", .{});
-                            const first_child_idx = self.get_first_child(parent_idx);
-                            const last_child_idx = Internal.traverse_forward_to_get_last_index_in_list_from_start_index(self, first_child_idx);
-                            insert_edges.right = Internal.get_conn_right_dummy_end();
-                            insert_edges.left = if (last_child_idx != NULL_ID) Internal.get_conn_left_valid_index(self, last_child_idx) else Internal.get_conn_left_from_first_child(self, parent_idx);
-                            insert_list = UNTRACKED_LIST;
-                        }
-                    },
-                    Insert.Untracked => {
-                        insert_list = UNTRACKED_LIST;
-                        insert_untracked = true;
-                    },
-                    else => assert_with_reason(false, @src(), "invalid type `{s}` input for parameter `insert_to`. All valid input types are contained in `Insert`", .{@typeName(TO)}),
-                }
-                var return_items: LLSlice = undefined;
-                switch (FROM) {
-                    Get.CreateOneNew => {
-                        const new_idx = if (ASSUME_CAP) self.list.append_slot_assume_capacity() else (if (RETURN_ERRORS) try self.list.append_slot(alloc) else self.list.append_slot(alloc));
-                        return_items.first = new_idx;
-                        return_items.last = new_idx;
-                        return_items.count = 1;
-                    },
-                    Get.FirstFromList, Get.FirstFromListElseCreateNew => {
-                        const list: ListTag = get_from.list;
-                        assert_with_reason(list != UNTRACKED_LIST, @src(), "cannot get items from the 'untracked' list without specific indexes", .{});
-                        const list_count: debug_switch(Index, void) = debug_switch(self.get_list_len(list), void{});
-                        const first_idx = self.get_first_index_in_list(list);
-                        if (FROM == Get.FirstFromListElseCreateNew and (debug_switch(list_count == 0, false) or first_idx == NULL_ID)) {
-                            const new_idx = self.list.len;
-                            _ = if (ASSUME_CAP) self.list.append_slot_assume_capacity() else (if (RETURN_ERRORS) try self.list.append_slot(alloc) else self.list.append_slot(alloc));
-                            return_items.first = new_idx;
-                            return_items.last = new_idx;
-                            return_items.count = 1;
-                        } else {
-                            assert_with_reason(debug_switch(list_count > 0, true) and first_idx < self.list.len, @src(), "tried to 'get' linked list item from head/beginning of set `{s}`, but that set reports an item count of {d} and the first idx is {d} (list.len = {d})", .{ @tagName(list), debug_switch(list_count, 0), first_idx, self.list.len });
-                            return_items.first = first_idx;
-                            return_items.last = first_idx;
-                            return_items.count = 1;
-                            Internal.disconnect_one(self, list, first_idx);
-                        }
-                    },
-                    Get.LastFromList, Get.LastFromListElseCreateNew => {
-                        const list: ListTag = get_from.list;
-                        assert_with_reason(list != UNTRACKED_LIST, @src(), "cannot get items from the 'untracked' list without specific indexes", .{});
-                        const list_count: debug_switch(Index, void) = debug_switch(self.get_list_len(list), void{});
-                        const last_idx = self.get_last_index_in_list(list);
-                        if (FROM == Get.LastFromListElseCreateNew and (debug_switch(list_count == 0, false) or last_idx == NULL_ID)) {
-                            const new_idx = self.list.len;
-                            _ = if (ASSUME_CAP) self.list.append_slot_assume_capacity() else (if (RETURN_ERRORS) try self.list.append_slot(alloc) else self.list.append_slot(alloc));
-                            return_items.first = new_idx;
-                            return_items.last = new_idx;
-                            return_items.count = 1;
-                        } else {
-                            assert_with_reason(debug_switch(list_count > 0, true) and last_idx < self.list.len, @src(), "tried to 'get' linked list item from head/beginning of set `{s}`, but that set reports an item count of {d} and the first idx is {d} (list.len = {d})", .{ @tagName(list), debug_switch(list_count, 0), last_idx, self.list.len });
-                            return_items.first = last_idx;
-                            return_items.last = last_idx;
-                            return_items.count = 1;
-                            Internal.disconnect_one(self, list, last_idx);
-                        }
-                    },
-                    Get.OneIndex => {
-                        const idx: Index = get_from.idx;
-                        assert_idx_less_than_len(idx, self.list.len, @src());
-                        const list: ListTag = self.get_list_tag(idx);
-                        return_items.first = idx;
-                        return_items.last = idx;
-                        return_items.count = 1;
-                        Internal.disconnect_one(self, list, idx);
-                    },
-                    Get.OneIndexInList => {
-                        const idx: Index = get_from.idx;
-                        const list: ListTag = get_from.list;
-                        assert_valid_list_idx(self, idx, list, @src());
-                        return_items.first = idx;
-                        return_items.last = idx;
-                        return_items.count = 1;
-                        Internal.disconnect_one(self, list, idx);
-                    },
-                    Get.CreateManyNew => {
-                        const count: Index = get_from.count;
-                        assert_with_reason(count > 0, @src(), "cannot create `0` new items", .{});
-                        const first_idx = self.list.len;
-                        const last_idx = self.list.len + count - 1;
-                        _ = if (ASSUME_CAP) self.list.append_many_slots_assume_capacity(count) else (if (RETURN_ERRORS) try self.list.append_many_slots(count, alloc) else self.list.append_many_slots(count, alloc));
-                        Internal.initialize_concurrent_indexes(self, first_idx, last_idx, true, false, insert_list, false, NULL_ID);
-                        return_items.first = first_idx;
-                        return_items.last = last_idx;
-                        return_items.count = count;
-                    },
-                    Get.FirstCountFromList => {
-                        const list: ListTag = get_from.list;
-                        const count: Index = get_from.count;
-                        assert_with_reason(count > 0, @src(), "cannot get `0` items", .{});
-                        assert_with_reason(list != UNTRACKED_LIST, @src(), "cannot get items from the 'untracked' list without specific indexes", .{});
-                        assert_with_reason(self.get_list_len(list) >= count, @src(), "requested {d} items from set {s}, but set only has {d} items", .{ count, @tagName(list), self.get_list_len(list) });
-                        return_items.first = self.get_first_index_in_list(list);
-                        return_items.last = self.get_nth_index_from_start_of_list(list, count - 1);
-                        return_items.count = count;
-                        Internal.disconnect_many_first_last(self, list, return_items.first, return_items.last, count);
-                    },
-                    Get.LastCountFromList => {
-                        const list: ListTag = get_from.list;
-                        const count: Index = get_from.count;
-                        assert_with_reason(count > 0, @src(), "cannot get `0` items", .{});
-                        assert_with_reason(list != UNTRACKED_LIST, @src(), "cannot get items from the 'untracked' list without specific indexes", .{});
-                        assert_with_reason(self.get_list_len(list) >= count, @src(), "requested {d} items from set {s}, but set only has {d} items", .{ count, @tagName(list), self.get_list_len(list) });
-                        return_items.last = self.get_last_index_in_list(list);
-                        return_items.first = self.get_nth_index_from_end_of_list(list, count - 1);
-                        return_items.count = count;
-                        Internal.disconnect_many_first_last(self, list, return_items.first, return_items.last, count);
-                    },
-                    Get.FirstCountFromListElseCreateNew => {
-                        const list: ListTag = get_from.list;
-                        const count: Index = get_from.count;
-                        assert_with_reason(count > 0, @src(), "cannot get `0` items", .{});
-                        const count_from_list = @min(self.get_list_len(list), count);
-                        const count_from_new = count - count_from_list;
-                        var first_new_idx: Index = undefined;
-                        var last_moved_idx: Index = undefined;
-                        const needs_new = count_from_new > 0;
-                        const needs_move = count_from_list > 0;
-                        if (needs_new) {
-                            first_new_idx = self.list.len;
-                            const last_new_idx = self.list.len + count_from_new - 1;
-                            _ = if (ASSUME_CAP) self.list.append_many_slots_assume_capacity(count_from_new) else (if (RETURN_ERRORS) try self.list.append_many_slots(count_from_new, alloc) else self.list.append_many_slots(count_from_new, alloc));
-                            Internal.initialize_concurrent_indexes(self, first_new_idx, last_new_idx, true, false, insert_list, false, NULL_ID);
-                            if (needs_move) {
-                                first_new_idx = first_new_idx;
-                            } else {
-                                return_items.first = first_new_idx;
-                            }
-                            return_items.last = last_new_idx;
-                        }
-                        if (needs_move) {
-                            return_items.first = self.get_first_index_in_list(list);
-                            if (needs_new) {
-                                last_moved_idx = self.get_nth_index_from_start_of_list(list, count_from_list - 1);
-                                Internal.disconnect_many_first_last(self, list, return_items.first, last_moved_idx, count_from_list);
-                            } else {
-                                return_items.last = self.get_nth_index_from_start_of_list(list, count_from_list - 1);
-                                Internal.disconnect_many_first_last(self, list, return_items.first, return_items.last, count_from_list);
-                            }
-                        }
-                        if (needs_new and needs_move) {
-                            const mid_conn = Internal.get_conn_left_right_before_first_and_after_last_valid_indexes(self, last_moved_idx, first_new_idx, list);
-                            Internal.connect(mid_conn.left, mid_conn.right);
-                        }
-                        return_items.count = count;
-                    },
-                    Get.LastCountFromListElseCreateNew => {
-                        const list: ListTag = get_from.list;
-                        const count: Index = get_from.count;
-                        assert_with_reason(count > 0, @src(), "cannot get `0` items", .{});
-                        const count_from_list = @min(self.get_list_len(list), count);
-                        const count_from_new = count - count_from_list;
-                        var first_new_idx: Index = undefined;
-                        var last_moved_idx: Index = undefined;
-                        const needs_new = count_from_new > 0;
-                        const needs_move = count_from_list > 0;
-                        if (needs_new) {
-                            first_new_idx = self.list.len;
-                            const last_new_idx = self.list.len + count_from_new - 1;
-                            _ = if (ASSUME_CAP) self.list.append_many_slots_assume_capacity(count_from_new) else (if (RETURN_ERRORS) try self.list.append_many_slots(count_from_new, alloc) else self.list.append_many_slots(count_from_new, alloc));
-                            Internal.initialize_concurrent_indexes(self, first_new_idx, last_new_idx, true, false, insert_list, false, NULL_ID);
-                            if (needs_move) {
-                                first_new_idx = first_new_idx;
-                            } else {
-                                return_items.first = first_new_idx;
-                            }
-                            return_items.last = last_new_idx;
-                        }
-                        if (needs_move) {
-                            return_items.first = self.get_nth_index_from_end_of_list(list, count_from_list - 1);
-                            if (needs_new) {
-                                last_moved_idx = self.get_last_index_in_list(list);
-                                Internal.disconnect_many_first_last(self, list, return_items.first, last_moved_idx, count_from_list);
-                            } else {
-                                return_items.last = self.get_last_index_in_list(list);
-                                Internal.disconnect_many_first_last(self, list, return_items.first, return_items.last, count_from_list);
-                            }
-                        }
-                        if (needs_new and needs_move) {
-                            const mid_conn = Internal.get_conn_left_right_before_first_and_after_last_valid_indexes(self, last_moved_idx, first_new_idx, list);
-                            Internal.connect(mid_conn.left, mid_conn.right);
-                        }
-                        return_items.count = count;
-                    },
-                    Get.SparseIndexesFromSameList => {
-                        const list: ListTag = get_from.list;
-                        const indexes: []const Index = get_from.indexes;
-                        Internal.assert_valid_list_idx_list(self, list, indexes, @src());
-                        return_items.first = indexes[0];
-                        Internal.disconnect_one(self, list, return_items.first);
-                        var prev_idx: Index = return_items.first;
-                        for (indexes[1..]) |this_idx| {
-                            const conn = Internal.get_conn_left_right_before_first_and_after_last_valid_indexes(self, prev_idx, this_idx, list);
-                            Internal.disconnect_one(self, list, this_idx);
-                            Internal.connect(conn.left, conn.right);
-                            prev_idx = this_idx;
-                        }
-                        return_items.last = prev_idx;
-                        return_items.count = @intCast(indexes.len);
-                    },
-                    Get.SparseIndexes => {
-                        const indexes: []const Index = get_from.indexes;
-                        assert_with_reason(indexes.len > 0, @src(), "cannot get 0 items", .{});
-                        assert_idx_less_than_len(indexes[0], self.list.len, @src());
-                        var list = self.get_list_tag(indexes[0]);
-                        Internal.disconnect_one(self, list, indexes[0]);
-                        return_items.first = indexes[0];
-                        var prev_idx = indexes[0];
-                        for (indexes[1..]) |idx| {
-                            assert_idx_less_than_len(idx, self.list.len, @src());
-                            list = self.get_list_tag(idx);
-                            const conn_left = Internal.get_conn_left(self, list, prev_idx, idx);
-                            const conn_right = Internal.get_conn_right(self, list, idx, prev_idx);
-                            Internal.disconnect_one(self, list, idx);
-                            Internal.connect(conn_left, conn_right);
-                            prev_idx = idx;
-                        }
-                        return_items.last = prev_idx;
-                        return_items.count = @intCast(indexes.len);
-                    },
-                    Get.SparseIndexesFromAnyList => {
-                        const indexes: []const ListIdx = get_from.indexes;
-                        Internal.assert_valid_list_of_list_idxs(self, indexes, @src());
-                        return_items.first = indexes[0].idx;
-                        Internal.disconnect_one(self, indexes[0].list, return_items.first);
-                        var prev_idx: Index = return_items.first;
-                        for (indexes[1..]) |list_idx| {
-                            const this_idx = list_idx.idx;
-                            Internal.disconnect_one(self, list_idx.list, this_idx);
-                            const conn_left = Internal.get_conn_left(self, list_idx.list, prev_idx);
-                            const conn_right = Internal.get_conn_right(self, list_idx.list, this_idx);
-                            Internal.connect(conn_left, conn_right);
-                            prev_idx = this_idx;
-                        }
-                        return_items.last = prev_idx;
-                        return_items.count = @intCast(indexes.len);
-                    },
-                    //CHECKPOINT
-                    .FROM_SLICE => {
-                        const slice: LLSlice = get_val;
-                        Internal.assert_valid_slice(self, slice, @src());
-                        return_items.first = slice.first;
-                        return_items.last = slice.last;
-                        return_items.count = slice.count;
-                    },
-                    .FROM_SLICE_ELSE_CREATE_NEW => {
-                        const supp_slice: LLSliceWithTotalNeeded = get_val;
-                        Internal.assert_valid_slice(self, supp_slice.slice, @src());
-                        const count_from_slice = @min(supp_slice.slice.count, supp_slice.total_needed);
-                        const count_from_new = supp_slice.total_needed - count_from_slice;
-                        var first_new_idx: Index = undefined;
-                        var last_moved_idx: Index = undefined;
-                        const needs_new = count_from_new > 0;
-                        const needs_move = count_from_slice > 0;
-                        if (needs_new) {
-                            first_new_idx = self.list.len;
-                            const last_new_idx = self.list.len + count_from_new - 1;
-                            _ = if (ASSUME_CAP) self.list.append_many_slots_assume_capacity(count_from_new) else (if (RETURN_ERRORS) try self.list.append_many_slots(count_from_new, alloc) else self.list.append_many_slots(count_from_new, alloc));
-                            Internal.initialize_new_indexes(self, supp_slice.slice.list, first_new_idx, last_new_idx);
-                            if (needs_move) {
-                                first_new_idx = first_new_idx;
-                            } else {
-                                return_items.first = first_new_idx;
-                            }
-                            return_items.last = last_new_idx;
-                        }
-                        if (needs_move) {
-                            return_items.first = supp_slice.slice.first;
-                            if (needs_new) {
-                                last_moved_idx = supp_slice.slice.last;
-                            } else {
-                                return_items.last = supp_slice.slice.last;
-                            }
-                            Internal.disconnect_many_first_last(self, supp_slice.slice.list, supp_slice.slice.first, supp_slice.slice.last, count_from_slice);
-                        }
-                        if (needs_new and needs_move) {
-                            const mid_left = Internal.get_conn_left(self, supp_slice.slice.list, last_moved_idx);
-                            const mid_right = Internal.get_conn_right(self, supp_slice.slice.list, first_new_idx);
-                            Internal.connect(mid_left, mid_right);
-                        }
-                        return_items.count = supp_slice.total_needed;
-                    },
-                }
-                const insert_first = Internal.get_conn_right(self, insert_list, return_items.first);
-                const insert_last = Internal.get_conn_left(self, insert_list, return_items.last);
-                Internal.connect_with_insert(insert_edges.left, insert_first, insert_last, insert_edges.right);
-                Internal.increase_link_set_count(self, insert_list, return_items.count);
-                Internal.set_list_on_indexes_first_last(self, return_items.first, return_items.last, insert_list);
-                return_items.list = insert_list;
-                return return_items;
-            }
-
-            fn iter_peek_prev_or_null(self: *anyopaque) ?*Elem {
-                if (!BACKWARD) return false;
-                const iter: *IteratorState = @ptrCast(@alignCast(self));
-                if (iter.left_idx == NULL_ID) return null;
-                return iter.linked_list.get_ptr(iter.left_idx);
-            }
-            fn iter_advance_prev(self: *anyopaque) bool {
-                if (!BACKWARD) return false;
-                const iter: *IteratorState = @ptrCast(@alignCast(self));
-                if (iter.left_idx == NULL_ID) return false;
-                iter.right_idx = iter.left_idx;
-                iter.left_idx = iter.linked_list.get_prev_idx(iter.list, iter.left_idx);
-                return true;
-            }
-            fn iter_peek_next_or_null(self: *anyopaque) ?*Elem {
-                if (!FORWARD) return false;
-                const iter: *IteratorState = @ptrCast(@alignCast(self));
-                if (iter.right_idx == NULL_ID) return null;
-                return iter.linked_list.get_ptr(iter.right_idx);
-            }
-            fn iter_advance_next(self: *anyopaque) bool {
-                if (!FORWARD) return false;
-                const iter: *IteratorState = @ptrCast(@alignCast(self));
-                if (iter.right_idx == NULL_ID) return false;
-                iter.left_idx = iter.right_idx;
-                iter.right_idx = iter.linked_list.get_next_idx(iter.list, iter.right_idx);
-                return true;
-            }
-            fn iter_reset(self: *anyopaque) bool {
-                const iter: *IteratorState = @ptrCast(@alignCast(self));
-                if (FORWARD) {
-                    iter.right_idx = iter.linked_list.get_first_index_in_list(iter.list);
-                    iter.left_idx = NULL_ID;
-                } else {
-                    iter.left_idx = iter.linked_list.get_last_index_in_list(iter.list);
-                    iter.right_idx = NULL_ID;
-                }
-                return true;
-            }
-
-            pub fn traverse_to_find_what_list_idx_is_in(self: *Heirarchy, idx: Index) ListTag {
-                var c: if (STRONG_ASSERT) Index else void = if (STRONG_ASSERT) 0 else void{};
-                const limit: if (STRONG_ASSERT) Index else void = if (STRONG_ASSERT) @as(Index, @intCast(self.list.len)) else void{};
-                if ((FORWARD and TAIL) or (BACKWARD and HEAD)) {
-                    var left_idx: Index = idx;
-                    var right_idx: Index = idx;
-                    while (if (STRONG_ASSERT) c <= limit else true) {
-                        if (BACKWARD and HEAD) {
-                            const next_left = self.get_prev_idx(left_idx);
-                            if (left_idx != NULL_ID) {
-                                left_idx = next_left;
-                            } else {
-                                for (self.lists, 0..) |list, tag_raw| {
-                                    if (list.first_idx == left_idx) return @enumFromInt(@as(ListTagInt, @intCast(tag_raw)));
-                                }
-                                return UNTRACKED_LIST;
-                            }
-                        }
-                        if (FORWARD and TAIL) {
-                            const next_right = self.get_next_idx(left_idx);
-                            if (right_idx != NULL_ID) {
-                                right_idx = next_right;
-                            } else {
-                                for (self.lists, 0..) |list, tag_raw| {
-                                    if (list.last_idx == left_idx) return @enumFromInt(@as(ListTagInt, @intCast(tag_raw)));
-                                }
-                                return UNTRACKED_LIST;
-                            }
-                        }
-                        if (STRONG_ASSERT) c += 1;
-                    }
-                    assert_with_reason(false, @src(), "traversed more than {d} elements (total len of underlying element list) starting from index {d} in either forward or backward direction without finding a NULL_IDX: list is cyclic and using this function will create an infinite loop", .{ limit, idx });
-                } else {
-                    for (self.lists, 0..) |list, tag_raw| {
-                        const list_tag = @as(ListTag, @enumFromInt(@as(ListTagInt, @intCast(tag_raw))));
-                        if (FORWARD) {
-                            var curr_idx: Index = self.get_first_index_in_list(list);
-                            while (curr_idx != NULL_ID and (if (STRONG_ASSERT) c <= limit else true)) {
-                                if (curr_idx == idx) return list_tag;
-                                curr_idx = self.get_next_idx(curr_idx);
-                                c += 1;
-                            }
-                        } else {
-                            var curr_idx: Index = self.get_last_index_in_list(list);
-                            while (curr_idx != NULL_ID and (if (STRONG_ASSERT) c <= limit else true)) {
-                                if (curr_idx == idx) return list_tag;
-                                curr_idx = self.get_next_idx(curr_idx);
-                                c += 1;
-                            }
-                        }
-                    }
-                    if (STRONG_ASSERT) assert_with_reason(c <= limit, @src(), "traversed more than {d} elements (total len of underlying element list) through all lists without finding index {d}: list is cyclic and using this function will create an infinite loop", .{ limit, idx });
-                    return UNTRACKED_LIST;
-                }
-            }
-        };
-
-        pub const IteratorState = struct {
-            linked_list: *Heirarchy,
-            list: ListTag,
-            left_idx: Index,
-            right_idx: Index,
-
-            pub fn iterator(self: *IteratorState) Iterator(Elem, true, true) {
-                return Iterator(Elem, true, true){
-                    .implementor = @ptrCast(self),
-                    .vtable = Iterator(Elem).VTable{
-                        .reset = Internal.iter_reset,
-                        .advance_forward = Internal.iter_advance_next,
-                        .peek_next_or_null = Internal.iter_peek_next_or_null,
-                        .advance_prev = Internal.iter_advance_prev,
-                        .peek_prev_or_null = Internal.iter_peek_prev_or_null,
-                    },
+                return FirstLast{
+                    .first = first_id,
+                    .last = next_parent_id,
                 };
             }
+
+            pub fn pop_free_item(self: *Heirarchy) Id {
+                assert_with_reason(self.free_count > 0 and self.first_free_id != NULL_ID, @src(), "no free items to pop", .{});
+                const id = self.first_free_id;
+                const ptr = self.get_ptr(id);
+                const next_free = @field(ptr, FREE_FIELD);
+                self.first_free_id = next_free;
+                self.free_count -= 1;
+                return id;
+            }
+
+            pub fn pop_free_item_set_parent(self: *Heirarchy, parent_id: Id) Id {
+                assert_with_reason(self.free_count > 0 and self.first_free_id != NULL_ID, @src(), "no free items to pop", .{});
+                const id = self.first_free_id;
+                const ptr = self.get_ptr(id);
+                const next_free = @field(ptr, FREE_FIELD);
+                self.first_free_id = next_free;
+                set_parent_id(ptr, parent_id);
+                self.free_count -= 1;
+                return id;
+            }
+
+            pub fn push_free_item(self: *Heirarchy, id: Id) void {
+                assert_with_reason(id != NULL_ID, @src(), "cannot push NULL_ID to free list", .{});
+                const ptr = self.get_ptr(id);
+                if (options.element_memory_options.secure_wipe_bytes) {
+                    ptr.* = UNINIT_ELEM;
+                } else {
+                    set_last_l_child_id(ptr, NULL_ID);
+                    set_last_r_child_id(ptr, NULL_ID);
+                    set_first_l_child_id(ptr, NULL_ID);
+                    set_first_r_child_id(ptr, NULL_ID);
+                    set_prev_sib_id(ptr, NULL_ID);
+                    set_next_sib_id(ptr, NULL_ID);
+                    set_parent_id(ptr, NULL_ID);
+                }
+                @field(ptr, FREE_FIELD).* = self.first_free_id;
+                self.first_free_id = id;
+                self.free_count += 1;
+            }
+
+            pub fn pop_and_initialize_free_items_as_siblings(self: *Heirarchy, count: Index, parent_id: Id) FirstLast {
+                assert_with_reason(count > 0, @src(), "cannot pop 0 free items", .{});
+                assert_with_reason(self.free_count >= count, @src(), "too few free items", .{});
+                const first_free = pop_free_item(self);
+                const prev_ptr = self.get_ptr(first_free);
+                set_parent_id(prev_ptr, parent_id);
+                var c: Index = 1;
+                var prev_id = first_free;
+                while (c < count) : (c += 1) {
+                    const next_id = pop_free_item(self);
+                    const next_ptr = self.get_ptr(next_id);
+                    set_parent_id(next_ptr, parent_id);
+                    const left = get_conn_prev(self, prev_id);
+                    const right = get_conn_next(self, next_id);
+                    connect(left, right);
+                    prev_id = next_id;
+                }
+                return FirstLast{
+                    .first = first_free,
+                    .last = prev_id,
+                };
+            }
+
+            pub fn pop_and_initialize_free_items_as_first_left_children(self: *Heirarchy, count: Index, first_parent_id: Id) FirstLast {
+                assert_with_reason(count > 0, @src(), "cannot pop 0 free items", .{});
+                assert_with_reason(self.free_count >= count, @src(), "too few free items", .{});
+                const first_free = pop_free_item(self);
+                var parent = get_conn_parent_first_left(self, first_parent_id);
+                var child = get_conn_child_first_left(self, first_free);
+                connect(parent, child);
+                var c: Index = 1;
+                var prev_id = first_free;
+                while (c < count) : (c += 1) {
+                    const next_id = pop_free_item(self);
+                    parent = get_conn_parent_first_left(self, prev_id);
+                    child = get_conn_child_first_left(self, next_id);
+                    connect(parent, child);
+                    prev_id = next_id;
+                }
+                return FirstLast{
+                    .first = first_free,
+                    .last = prev_id,
+                };
+            }
+
+            pub fn pop_and_initialize_free_items_as_first_right_children(self: *Heirarchy, count: Index, first_parent_id: Id) FirstLast {
+                assert_with_reason(count > 0, @src(), "cannot pop 0 free items", .{});
+                assert_with_reason(self.free_count >= count, @src(), "too few free items", .{});
+                const first_free = pop_free_item(self);
+                var parent = get_conn_parent_first_right(self, first_parent_id);
+                var child = get_conn_child_first_right(self, first_free);
+                connect(parent, child);
+                var c: Index = 1;
+                var prev_id = first_free;
+                while (c < count) : (c += 1) {
+                    const next_id = pop_free_item(self);
+                    parent = get_conn_parent_first_right(self, prev_id);
+                    child = get_conn_child_first_right(self, next_id);
+                    connect(parent, child);
+                    prev_id = next_id;
+                }
+                return FirstLast{
+                    .first = first_free,
+                    .last = prev_id,
+                };
+            }
+
+            pub fn pop_and_initialize_free_items_as_last_left_children(self: *Heirarchy, count: Index, first_parent_id: Id) FirstLast {
+                assert_with_reason(count > 0, @src(), "cannot pop 0 free items", .{});
+                assert_with_reason(self.free_count >= count, @src(), "too few free items", .{});
+                const first_free = pop_free_item(self);
+                var parent = get_conn_parent_last_left(self, first_parent_id);
+                var child = get_conn_child_last_left(self, first_free);
+                connect(parent, child);
+                var c: Index = 1;
+                var prev_id = first_free;
+                while (c < count) : (c += 1) {
+                    const next_id = pop_free_item(self);
+                    parent = get_conn_parent_last_left(self, prev_id);
+                    child = get_conn_child_last_left(self, next_id);
+                    connect(parent, child);
+                    prev_id = next_id;
+                }
+                return FirstLast{
+                    .first = first_free,
+                    .last = prev_id,
+                };
+            }
+
+            pub fn pop_and_initialize_free_items_as_last_right_children(self: *Heirarchy, count: Index, first_parent_id: Id) FirstLast {
+                assert_with_reason(count > 0, @src(), "cannot pop 0 free items", .{});
+                assert_with_reason(self.free_count >= count, @src(), "too few free items", .{});
+                const first_free = pop_free_item(self);
+                var parent = get_conn_parent_last_right(self, first_parent_id);
+                var child = get_conn_child_last_right(self, first_free);
+                connect(parent, child);
+                var c: Index = 1;
+                var prev_id = first_free;
+                while (c < count) : (c += 1) {
+                    const next_id = pop_free_item(self);
+                    parent = get_conn_parent_last_right(self, prev_id);
+                    child = get_conn_child_last_right(self, next_id);
+                    connect(parent, child);
+                    prev_id = next_id;
+                }
+                return FirstLast{
+                    .first = first_free,
+                    .last = prev_id,
+                };
+            }
+
+            pub fn initialize_one_item(self: *Heirarchy, parent_id: Id) Id {
+                if (self.free_count > 0) {
+                    return pop_free_item_set_parent(self, parent_id);
+                } else {
+                    const id: Id = @intCast(self.list.len);
+                    var new: Elem = UNINIT_ELEM;
+                    set_own_id(&new, id);
+                    set_parent_id(&new, parent_id);
+                    self.list.append_assume_capacity(UNINIT_ELEM);
+                    return id;
+                }
+            }
+
+            pub fn initialize_items_as_siblings(self: *Heirarchy, count: Index, parent_id: Id) FirstLast {
+                var result: FirstLast = undefined;
+                const from_free = @min(count, self.free_count);
+                const from_new = count - from_free;
+                if (from_free > 0) {
+                    result = pop_and_initialize_free_items_as_siblings(self, from_free, parent_id);
+                }
+                if (from_new > 0) {
+                    const new_result = initialize_new_indexes_as_siblings(self, count, parent_id);
+                    if (from_free == 0) {
+                        result = new_result;
+                    } else {
+                        const left = get_conn_prev(self, result.last);
+                        const right = get_conn_next(self, new_result.first);
+                        connect(left, right);
+                        result.last = new_result.last;
+                    }
+                }
+                return result;
+            }
+
+            pub fn initialize_items_as_first_left_children(self: *Heirarchy, count: Index, first_parent_id: Id) FirstLast {
+                var result: FirstLast = undefined;
+                const from_free = @min(count, self.free_count);
+                const from_new = count - from_free;
+                if (from_free > 0) {
+                    result = pop_and_initialize_free_items_as_first_left_children(self, from_free, first_parent_id);
+                }
+                if (from_new > 0) {
+                    if (from_free == 0) {
+                        const new_result = pop_and_initialize_free_items_as_first_left_children(self, count, first_parent_id);
+                        result = new_result;
+                    } else {
+                        const new_result = pop_and_initialize_free_items_as_first_left_children(self, count, result.last);
+                        result.last = new_result.last;
+                    }
+                }
+                return result;
+            }
+
+            pub fn initialize_items_as_first_right_children(self: *Heirarchy, count: Index, first_parent_id: Id) FirstLast {
+                var result: FirstLast = undefined;
+                const from_free = @min(count, self.free_count);
+                const from_new = count - from_free;
+                if (from_free > 0) {
+                    result = pop_and_initialize_free_items_as_first_right_children(self, from_free, first_parent_id);
+                }
+                if (from_new > 0) {
+                    if (from_free == 0) {
+                        const new_result = pop_and_initialize_free_items_as_first_right_children(self, count, first_parent_id);
+                        result = new_result;
+                    } else {
+                        const new_result = pop_and_initialize_free_items_as_first_right_children(self, count, result.last);
+                        result.last = new_result.last;
+                    }
+                }
+                return result;
+            }
+
+            pub fn initialize_items_as_last_left_children(self: *Heirarchy, count: Index, first_parent_id: Id) FirstLast {
+                var result: FirstLast = undefined;
+                const from_free = @min(count, self.free_count);
+                const from_new = count - from_free;
+                if (from_free > 0) {
+                    result = pop_and_initialize_free_items_as_last_left_children(self, from_free, first_parent_id);
+                }
+                if (from_new > 0) {
+                    if (from_free == 0) {
+                        const new_result = pop_and_initialize_free_items_as_last_left_children(self, count, first_parent_id);
+                        result = new_result;
+                    } else {
+                        const new_result = pop_and_initialize_free_items_as_last_left_children(self, count, result.last);
+                        result.last = new_result.last;
+                    }
+                }
+                return result;
+            }
+
+            pub fn initialize_items_as_last_right_children(self: *Heirarchy, count: Index, first_parent_id: Id) FirstLast {
+                var result: FirstLast = undefined;
+                const from_free = @min(count, self.free_count);
+                const from_new = count - from_free;
+                if (from_free > 0) {
+                    result = pop_and_initialize_free_items_as_last_right_children(self, from_free, first_parent_id);
+                }
+                if (from_new > 0) {
+                    if (from_free == 0) {
+                        const new_result = pop_and_initialize_free_items_as_last_right_children(self, count, first_parent_id);
+                        result = new_result;
+                    } else {
+                        const new_result = pop_and_initialize_free_items_as_last_right_children(self, count, result.last);
+                        result.last = new_result.last;
+                    }
+                }
+                return result;
+            }
+
+            // pub fn get_left_right_parent_from_auto_or_ids(self: *Heirarchy, left: anytype, right: anytype, parent: anytype) FirstLastParent {
+            //     const L = @TypeOf(left);
+            //     const R = @TypeOf(right);
+            //     const P = @TypeOf(parent);
+            //     assert_with_reason((L == Auto or L == Id), @src(), "invalid type for `left`: {s}, can only be an Auto or Id", .{@typeName(L)});
+            //     assert_with_reason((R == Auto or R == Id), @src(), "invalid type for `right`: {s}, can only be an Auto or Id", .{@typeName(R)});
+            //     assert_with_reason((P == Auto or P == Id), @src(), "invalid type for `parent`: {s}, can only be an Auto or Id", .{@typeName(P)});
+            //     const branch = comptime Utils.bools_to_switchable_integer(3, .{ L != Auto, R != Auto, P != Auto });
+            //     var result = FirstLastParent{};
+            //     switch (branch) {
+            //         // L == Auto, R == Auto, P == Auto
+            //         // L == Auto, R == Auto, P == Id
+            //         0, 4 => {
+            //             assert_with_reason(false, @src(), "cannot infer (Auto) `left` and (Auto) `right`: if parent is `Auto` or NULL_ID this will overwrite and forget entire current heirarchy, and even if Parent is non-null, there is no way to infer at what child position to insert at", .{});
+            //         },
+            //         1 => { // L == Id, R == Auto, P == Auto
+            //             if (left != NULL_ID) {
+            //                 result.first = left;
+            //                 const l_ptr = self.get_ptr(left);
+            //                 if (HAS_PARENT) result.parent = get_parent_id(l_ptr);
+            //                 if (HAS_NEXT) result.last = get_next_sib_id(l_ptr);
+            //             }
+            //         },
+            //         2 => { // L == Auto, R == Id, P == Auto
+            //             if (right != NULL_ID) {
+            //                 result.last = right;
+            //                 const r_ptr = self.get_ptr(right);
+            //                 if (HAS_PARENT) result.parent = get_parent_id(r_ptr);
+            //                 if (HAS_PREV) result.first = get_prev_sib_id(r_ptr);
+            //             }
+            //         },
+            //         3 => { // L == Id, R == Id, P == Auto
+            //             const right_non_null = right != null;
+            //             const left_non_null = left != null;
+            //             if (right_non_null) {
+            //                 result.last = right;
+            //                 const r_ptr = self.get_ptr(right);
+            //                 if (HAS_PARENT) result.parent = get_parent_id(r_ptr);
+            //                 if (HAS_PREV) {
+            //                     Internal.assert_real_prev_cached_prev_match(self, left, right, @src());
+            //                     result.first = get_prev_sib_id(r_ptr);
+            //                 }
+            //             }
+            //             if (left_non_null) {
+            //                 result.first = left;
+            //                 const l_ptr = self.get_ptr(left);
+            //                 if (HAS_PARENT) result.parent = get_parent_id(l_ptr);
+            //                 if (HAS_NEXT) {
+            //                     Internal.assert_real_next_cached_next_match(self, left, right, @src());
+            //                     result.last = get_next_sib_id(l_ptr);
+            //                 }
+            //             }
+            //             if (left_non_null and right_non_null) {
+            //                 Internal.assert_siblings_same_parent(self, left, right, @src());
+            //             }
+            //         },
+            //         5 => { // L == Id, R == Auto, P == Id
+            //             if (left != NULL_ID) {
+            //                 result.first = left;
+            //                 result.parent = parent;
+            //                 const l_ptr = self.get_ptr(left);
+            //                 if (HAS_PARENT) result.parent = get_parent_id(l_ptr);
+            //                 if (HAS_NEXT) result.last = get_next_sib_id(l_ptr);
+            //             }
+            //         },
+            //         6 => { // L == Auto, R == Id, P == Id
+
+            //         },
+            //         7 => { // L == Id, R == Id, P == Id
+
+            //         },
+            //         else => unreachable,
+            //     }
+            //     const l: Id = switch (L) {
+            //         Auto => if (R == Auto) NULL_ID else get_prev: {
+            //             assert_with_reason(HAS_PREV, @src(), "`left_id` was type `Auto`, but elements do not cache their 'prev sibling', cannot automatically get `left_id` from `right_id`", .{});
+            //             const r_ptr = self.get_ptr(right);
+            //             break :get_prev get_prev_sib_id(r_ptr);
+            //         },
+            //         Id => left,
+            //         else => assert_with_reason(false, @src(), "invalid type for `left_id` {s}, can only be an `Id` or `Auto`", .{@typeName(L)}),
+            //     };
+            //     const r: Id = switch (R) {
+            //         Auto => if (L == Auto) NULL_ID else get_next: {
+            //             assert_with_reason(HAS_NEXT, @src(), "`right_id` was type `Auto`, but elements do not cache their 'next sibling', cannot automatically get `right_id` from `left_id`", .{});
+            //             const l_ptr = self.get_ptr(left);
+            //             break :get_next get_next_sib_id(l_ptr);
+            //         },
+            //         Id => right,
+            //         else => assert_with_reason(false, @src(), "invalid type for `right_id` {s}, can only be an `Id` or `Auto`", .{@typeName(R)}),
+            //     };
+            //     return FirstLast{
+            //         .first = l,
+            //         .last = r,
+            //     };
+            // }
+
+            // pub fn get_parent_from_auto_or_ids(self: *Heirarchy, child_a: anytype, child_b: anytype, parent_id: anytype) Id {}
+
+            pub fn get_left_right_from_auto_or_ids(self: *Heirarchy, left: anytype, right: anytype) FirstLast {
+                const L = @TypeOf(left);
+                const R = @TypeOf(right);
+                assert_with_reason((L == Auto or L == Id), @src(), "invalid type for `left`: {s}, can only be an Auto or Id", .{@typeName(L)});
+                assert_with_reason((R == Auto or R == Id), @src(), "invalid type for `right`: {s}, can only be an Auto or Id", .{@typeName(R)});
+                assert_with_reason(L != Auto or R != Auto, @src(), "cannot infer (Auto) `left` and (Auto) `right`", .{});
+                const branch = comptime Utils.bools_to_switchable_integer(2, .{ L != Auto, R != Auto });
+                var result = FirstLast{};
+                switch (branch) {
+                    1 => { // L == Id, R == Auto
+                        assert_with_reason(HAS_NEXT, @src(), "cannot find (Auto) right if elements do not cache their 'next' siblings", .{});
+                        if (left != NULL_ID) {
+                            result.first = left;
+                            const l_ptr = self.get_ptr(left);
+                            result.last = get_next_sib_id(l_ptr);
+                        }
+                    },
+                    2 => { // L == Auto, R == Id
+                        assert_with_reason(HAS_PREV, @src(), "cannot find (Auto) left if elements do not cache their 'prev' siblings", .{});
+                        if (right != NULL_ID) {
+                            result.last = right;
+                            const r_ptr = self.get_ptr(right);
+                            result.first = get_prev_sib_id(r_ptr);
+                        }
+                    },
+                    3 => { // L == Id, R == Id
+                        if (right != NULL_ID) {
+                            result.last = right;
+                            if (HAS_PREV) Internal.assert_real_prev_cached_prev_match(self, left, right, @src());
+                        }
+                        if (left != NULL_ID) {
+                            result.first = left;
+                            if (HAS_NEXT) Internal.assert_real_next_cached_next_match(self, left, right, @src());
+                        }
+                    },
+                    else => unreachable,
+                }
+                return result;
+            }
+
+            pub fn insert_slots_between_siblings_internal(self: *Heirarchy, left_id: Id, first_new_id: Id, last_new_id: Id, right_id: Id, parent_id: Id) void {
+                assert_with_reason(first_new_id != NULL_ID and last_new_id != NULL_ID, @src(), "neither first_new_id nor last_new_id can be NULL_ID", .{});
+                Internal.assert_adjacent_siblings_link_to_each_other_and_have_parent(self, left_id, right_id, parent_id, @src());
+                const was_first = left_id == NULL_ID;
+                const was_last = right_id == NULL_ID;
+                const branch = Utils.bools_to_switchable_integer(2, .{ was_first, was_last });
+                switch (branch) {
+                    0 => { // neither first nor last
+                        Internal.connect_siblings(self, left_id, first_new_id);
+                        Internal.connect_siblings(self, last_new_id, right_id);
+                    },
+                    1 => { // first, not last
+                        Internal.connect_siblings(self, last_new_id, right_id);
+                        if (parent_id != NULL_ID) {
+                            if (MUST_CHECK_CHILD_IS_FIRST) {
+                                const parent_ptr = self.get_ptr(parent_id);
+                                var found_first = false;
+                                if (MUST_CHECK_CHILD_IS_LAST_LEFT) {
+                                    const parent_first_left = get_first_left_child_id(parent_ptr);
+                                    if (parent_first_left == right_id) {
+                                        Internal.set_first_l_child_id(parent_ptr, first_new_id);
+                                        found_first = true;
+                                    }
+                                }
+                                if (MUST_CHECK_CHILD_IS_LAST_RIGHT) {
+                                    const parent_first_right = get_first_right_child_id(parent_ptr);
+                                    if (parent_first_right == right_id) {
+                                        Internal.set_first_r_child_id(parent_ptr, first_new_id);
+                                        found_first = true;
+                                    }
+                                }
+                                assert_with_reason(found_first, @src(), "item (index {d}) was the first sibling with a non-null parent (index {d}), but parent didn't have it cached in either the 'first-left' or 'first-right' field", .{ get_index(right_id), get_index(parent_id) });
+                            }
+                        } else {
+                            assert_with_reason(self.first_root_id == right_id, @src(), "item (index {d}) was the 'first sibling' with a NULL parent, but it wasnt the index cached in 'Heriarchy.first_root_id' ({d})", .{ get_index(right_id), get_index(self.first_root_id) });
+                            self.first_root_id = first_new_id;
+                        }
+                    },
+                    2 => { // last, not first
+                        Internal.connect_siblings(self, left_id, first_new_id);
+                        if (parent_id != NULL_ID) {
+                            if (MUST_CHECK_CHILD_IS_LAST) {
+                                const parent_ptr = self.get_ptr(parent_id);
+                                var found_last = false;
+                                if (MUST_CHECK_CHILD_IS_LAST_LEFT) {
+                                    const parent_last_left = get_last_left_child_id(parent_ptr);
+                                    if (parent_last_left == left_id) {
+                                        Internal.set_last_l_child_id(parent_ptr, last_new_id);
+                                        found_last = true;
+                                    }
+                                }
+                                if (MUST_CHECK_CHILD_IS_LAST_RIGHT) {
+                                    const parent_last_right = get_last_right_child_id(parent_ptr);
+                                    if (parent_last_right == left_id) {
+                                        Internal.set_last_r_child_id(parent_ptr, last_new_id);
+                                        found_last = true;
+                                    }
+                                }
+                                assert_with_reason(false, @src(), "item (index {d}) was the last sibling with a non-null parent (index {d}), but parent didn't have it cached in either the 'last-left' or 'last-right' field", .{ get_index(left_id), get_index(parent_id) });
+                            }
+                        } else {
+                            assert_with_reason(self.last_root_id == left_id, @src(), "item (index {d}) was the 'last sibling' with a NULL parent, but it wasnt the index cached in 'Heriarchy.first_root_id' ({d})", .{ get_index(left_id), get_index(self.last_root_id) });
+                            self.last_root_id = last_new_id;
+                        }
+                    },
+                    3 => { // last AND first
+                        if (parent_id != null) {
+                            const parent_ptr = self.get_ptr(parent_id);
+                            assert_with_reason(HAS_ONLY_ONE_CHILD_SIDE, @src(), "cannot infer which side (left/right) to add new child node to on parent with multiple child sides when no siblings exist for new child node to infer the correct side", .{});
+                            if (HAS_FIRST_L_CHILD) set_first_l_child_id(parent_ptr, first_new_id);
+                            if (HAS_FIRST_R_CHILD) set_first_r_child_id(parent_ptr, first_new_id);
+                            if (HAS_LAST_L_CHILD) set_last_l_child_id(parent_ptr, last_new_id);
+                            if (HAS_LAST_R_CHILD) set_last_r_child_id(parent_ptr, last_new_id);
+                        } else {
+                            assert_with_reason(self.first_root_id == NULL_ID and self.last_root_id == NULL_ID, @src(), "adding a 'new sibling' between 2 NULL_ID siblings, and with a NULL_ID parent implies that you are adding the first node to the root of the list. HOWEVER, `first_root_id` and `last_root_id` did not equal NULL_ID. This would cause the entire existing list to be 'leaked' and forgotten/lost and replaced with the new node", .{});
+                            self.first_root_id = first_new_id;
+                            self.last_root_id = last_new_id;
+                        }
+                    },
+                    else => unreachable,
+                }
+            }
+
+            pub fn insert_slot_as_next_sibling_internal(self: *Heirarchy, this_id: Id, parent_id: Id) Id {
+                assert_with_reason(HAS_NEXT, @src(), "cannot directly insert slot to next sibling when items are not linked to their next sibling", .{});
+                const index = get_index(this_id);
+                assert_with_reason(index < self.list.len, @src(), "id {x}: index {d} out of bounds for element memory list (len = {d})", .{ this_id, index, self.list.len });
+                const this_ptr = get_ptr(self, this_id);
+                const old_next_id = self.get_next_sib_id(this_ptr);
+                const was_last = old_next_id == NULL_ID;
+                const new_next_id = Internal.initialize_one_item(self, parent_id);
+                Internal.connect_siblings(self, this_id, new_next_id);
+                if (was_last) {
+                    if (parent_id != NULL_ID) {
+                        if (MUST_CHECK_CHILD_IS_LAST) {
+                            const parent_ptr = self.get_ptr(this_id);
+                            var found_last: bool = false;
+                            if (MUST_CHECK_CHILD_IS_LAST_LEFT) {
+                                const parent_last_left = get_last_left_child_id(parent_ptr);
+                                if (parent_last_left == this_id) {
+                                    Internal.set_last_l_child_id(parent_ptr, new_next_id);
+                                    found_last = true;
+                                }
+                            }
+                            if (MUST_CHECK_CHILD_IS_LAST_RIGHT) {
+                                const parent_last_right = get_last_right_child_id(parent_ptr);
+                                if (parent_last_right == this_id) {
+                                    Internal.set_last_r_child_id(parent_ptr, new_next_id);
+                                    found_last = true;
+                                }
+                            }
+                            assert_with_reason(false, @src(), "item (index {d}) was the last sibling with a non-null parent (index {d}), but parent didn't have it cached in either the 'last-left' or 'last-right' field", .{ get_index(this_id), get_index(parent_id) });
+                        }
+                    } else {
+                        assert_with_reason(self.last_root_id == this_id, @src(), "item (index {d}) was the 'last sibling' with a NULL parent, but it wasnt the index cached in 'Heriarchy.last_root_id' ({d})", .{ get_index(this_id), get_index(self.last_root_id) });
+                        self.last_root_id = new_next_id;
+                    }
+                } else {
+                    Internal.connect_siblings(self, new_next_id, old_next_id);
+                }
+                return new_next_id;
+            }
+
+            pub fn disconnect_sibling_internal(self: *Heirarchy, prev_id: Id, this_id: Id, next_id: Id, parent_id: Id) void {
+                const conn_left: ConnPrev = get_conn_prev(self, prev_id);
+                const conn_right: ConnPrev = get_conn_next(self, next_id);
+                if (prev_id == NULL_ID) {
+                    if (parent_id != NULL_ID) {
+                        if (MUST_CHECK_CHILD_IS_FIRST) {
+                            const parent_ptr = self.get_ptr(this_id);
+                            var found_first: bool = false;
+                            if (MUST_CHECK_CHILD_IS_LAST_LEFT) {
+                                const parent_first_left = get_first_left_child_id(parent_ptr);
+                                if (parent_first_left == this_id) {
+                                    Internal.set_first_l_child_id(parent_ptr, next_id);
+                                    found_first = true;
+                                }
+                            }
+                            if (MUST_CHECK_CHILD_IS_LAST_RIGHT) {
+                                const parent_first_right = get_first_right_child_id(parent_ptr);
+                                if (parent_first_right == this_id) {
+                                    Internal.set_first_r_child_id(parent_ptr, next_id);
+                                    found_first = true;
+                                }
+                            }
+                            assert_with_reason(false, @src(), "item (index {d}) was the first sibling with a non-null parent (index {d}), but parent didn't have it cached in either the 'first-left' or 'first-right' field", .{ get_index(this_id), get_index(parent_id) });
+                        }
+                    } else {
+                        assert_with_reason(self.first_root_id == this_id, @src(), "item (index {d}) was the 'first sibling' with a NULL parent, but it wasnt the index cached in 'Heriarchy.first_root_id' ({d})", .{ get_index(this_id), get_index(self.first_root_id) });
+                        self.first_root_id = next_id;
+                    }
+                }
+                if (next_id == NULL_ID) {
+                    if (parent_id != NULL_ID) {
+                        if (MUST_CHECK_CHILD_IS_LAST) {
+                            const parent_ptr = self.get_ptr(this_id);
+                            var found_last: bool = false;
+                            if (MUST_CHECK_CHILD_IS_LAST_LEFT) {
+                                const parent_last_left = get_last_left_child_id(parent_ptr);
+                                if (parent_last_left == this_id) {
+                                    Internal.set_last_l_child_id(parent_ptr, prev_id);
+                                    found_last = true;
+                                }
+                            }
+                            if (MUST_CHECK_CHILD_IS_LAST_RIGHT) {
+                                const parent_last_right = get_last_right_child_id(parent_ptr);
+                                if (parent_last_right == this_id) {
+                                    Internal.set_last_r_child_id(parent_ptr, prev_id);
+                                    found_last = true;
+                                }
+                            }
+                            assert_with_reason(false, @src(), "item (index {d}) was the ;last sibling with a non-null parent (index {d}), but parent didn't have it cached in either the 'last-left' or 'last-right' field", .{ get_index(this_id), get_index(parent_id) });
+                        }
+                    } else {
+                        assert_with_reason(self.last_root_id == this_id, @src(), "item (index {d}) was the 'last sibling' with a NULL parent, but it wasnt the index cached in 'Heriarchy.last_root_id' ({d})", .{ get_index(this_id), get_index(self.last_root_id) });
+                        self.last_root_id = next_id;
+                    }
+                }
+                Internal.connect(conn_left, conn_right);
+                const this_ptr = self.get_ptr(this_id);
+                set_parent_id(this_ptr, NULL_ID);
+                set_prev_sib_id(this_ptr, NULL_ID);
+                set_next_sib_id(this_ptr, NULL_ID);
+            }
+
+            fn assert_real_prev_cached_prev_match(self: *Heirarchy, real_prev: Id, real_next: Id, src_loc: ?SourceLocation) void {
+                const cached_prev = get_prev_sib_id(self.get_ptr(real_next));
+                assert_with_reason(real_prev == cached_prev, src_loc, "real prev id (gen = {d}, idx = {d}) does not match the cached prev id (gen = {d}, idx = {d}) on the next sibling (gen = {d}, idx = {d})", .{ get_gen_index(real_prev).gen, get_index(real_prev), get_gen_index(cached_prev).gen, get_index(cached_prev), get_gen_index(real_next).gen, get_index(real_next) });
+            }
+
+            fn assert_real_next_cached_next_match(self: *Heirarchy, real_prev: Id, real_next: Id, src_loc: ?SourceLocation) void {
+                const cached_next = get_next_sib_id(self.get_ptr(real_prev));
+                assert_with_reason(real_next == cached_next, src_loc, "real next id (gen = {d}, idx = {d}) does not match the cached next id (gen = {d}, idx = {d}) on the prev sibling (gen = {d}, idx = {d})", .{ get_gen_index(real_next).gen, get_index(real_next), get_gen_index(cached_next).gen, get_index(cached_next), get_gen_index(real_prev).gen, get_index(real_prev) });
+            }
+
+            fn assert_adjacent_siblings_link_to_each_other_and_have_parent(self: *Heirarchy, left: Id, right: Id, parent: Id, src_loc: ?SourceLocation) void {
+                if (HAS_NEXT and left != NULL_ID) assert_real_next_cached_next_match(self, left, right, src_loc);
+                if (HAS_PREV and right != NULL_ID) assert_real_prev_cached_prev_match(self, left, right, src_loc);
+                if (HAS_PARENT and left != NULL_ID) assert_cached_parent_matches_provided(self, left, parent, src_loc);
+                if (HAS_PARENT and right != NULL_ID) assert_cached_parent_matches_provided(self, right, parent, src_loc);
+            }
+
+            fn assert_cached_parent_matches_provided(self: *Heirarchy, child: Id, parent: Id, src_loc: ?SourceLocation) void {
+                const parent_cached = get_parent_id(self.get_ptr(child));
+                assert_with_reason(parent_cached == parent, src_loc, "child (gen = {d}, idx = {d}) -> parent (gen = {d}, idx = {d}) does not match the given parent (gen = {d}, idx = {d})", .{ get_gen_index(child).gen, get_index(child), get_gen_index(parent_cached).gen, get_index(parent_cached), get_gen_index(parent).gen, get_index(parent) });
+            }
+
+            fn assert_siblings_same_parent(self: *Heirarchy, a: Id, b: Id, src_loc: ?SourceLocation) void {
+                const a_parent = get_parent_id(self.get_ptr(a));
+                const b_parent = get_parent_id(self.get_ptr(b));
+                assert_with_reason(a == b, src_loc, "sibling id A (gen = {d}, idx = {d}) -> parent (gen = {d}, idx = {d}) does not match the sibling id B (gen = {d}, idx = {d}) -> parent (gen = {d}, idx = {d})", .{ get_gen_index(a).gen, get_index(a), get_gen_index(a_parent).gen, get_index(a_parent), get_gen_index(b).gen, get_index(b), get_gen_index(b_parent).gen, get_index(b_parent) });
+            }
+
+            // pub fn disconnect_one(self: *Heirarchy, list: ListTag, idx: Index) void {
+            //     const disconn = Internal.get_conn_left_right_before_first_and_after_last_valid_indexes(self, idx, idx, list);
+            //     Internal.connect(disconn.left, disconn.right);
+            //     Internal.decrease_link_set_count(self, list, 1);
+            // }
+
+            // pub fn disconnect_many_first_last(self: *Heirarchy, list: ListTag, first_idx: Index, last_idx: Index, count: Index) void {
+            //     const disconn = Internal.get_conn_left_right_before_first_and_after_last_valid_indexes(self, first_idx, last_idx, list);
+            //     Internal.connect(disconn.left, disconn.right);
+            //     Internal.decrease_link_set_count(self, list, count);
+            // }
+
+            // pub fn get_conn_left_right_directly_before_this_valid_index(self: *Heirarchy, this_idx: Index, list: ListTag) ConnLeftRight {
+            //     var result: ConnLeftRight = undefined;
+            //     const prev_idx = self.get_prev_idx(this_idx);
+            //     result.right = Internal.get_conn_right_valid_index(self, this_idx);
+            //     result.left = Internal.get_conn_left(self, list, prev_idx, this_idx);
+            //     return result;
+            // }
+
+            // pub fn get_conn_left_right_from_first_child_position(self: *Heirarchy, parent_idx: Index) ConnLeftRight {
+            //     var result: ConnLeftRight = undefined;
+            //     result.left = Internal.get_conn_left_from_first_child(self, parent_idx);
+            //     const first_child_idx = self.get_first_child(parent_idx);
+            //     if (first_child_idx != NULL_ID) {
+            //         result.right = Internal.get_conn_right_valid_index(self, first_child_idx);
+            //     } else if (LAST_CHILD) {
+            //         result.right = Internal.get_conn_right_from_last_child(self, parent_idx);
+            //     } else {
+            //         result.right = Internal.get_conn_right_dummy_end();
+            //     }
+            //     return result;
+            // }
+
+            // pub fn get_conn_left_right_from_last_child_position(self: *Heirarchy, parent_idx: Index) ConnLeftRight {
+            //     var result: ConnLeftRight = undefined;
+            //     result.right = Internal.get_conn_right_from_last_child(self, parent_idx);
+            //     const last_child_idx = self.get_last_child(parent_idx);
+            //     if (last_child_idx != NULL_ID) {
+            //         result.left = Internal.get_conn_left_valid_index(self, last_child_idx);
+            //     } else if (FIRST_CHILD) {
+            //         result.left = Internal.get_conn_left_from_first_child(self, parent_idx);
+            //     } else {
+            //         result.left = Internal.get_conn_left_dummy_end();
+            //     }
+            //     return result;
+            // }
+
+            // pub fn get_conn_left_right_directly_after_this_valid_index(self: *Heirarchy, this_idx: Index, list: ListTag) ConnLeftRight {
+            //     var result: ConnLeftRight = undefined;
+            //     const next_idx = self.get_next_idx(this_idx);
+            //     result.left = Internal.get_conn_left_valid_index(self, this_idx);
+            //     result.right = Internal.get_conn_right(self, list, next_idx, this_idx);
+            //     return result;
+            // }
+
+            // pub fn get_conn_left_right_before_first_and_after_last_valid_indexes(self: *Heirarchy, first_idx: Index, last_idx: Index, list: ListTag) ConnLeftRight {
+            //     var result: ConnLeftRight = undefined;
+            //     const left_idx = self.get_prev_idx(list, first_idx);
+            //     const right_idx = self.get_next_idx(list, last_idx);
+            //     result.left = Internal.get_conn_left(self, list, left_idx, first_idx);
+            //     result.right = Internal.get_conn_right(self, list, right_idx, last_idx);
+            //     return result;
+            // }
+
+            // pub fn get_conn_left_right_for_tail_of_list(self: *Heirarchy, list: ListTag) ConnLeftRight {
+            //     const last_index = self.get_last_index_in_list(list);
+            //     var conn: ConnLeftRight = undefined;
+            //     conn.right = Internal.get_conn_right_from_list_tail(self, list);
+            //     if (last_index != NULL_ID) {
+            //         conn.left = Internal.get_conn_left_valid_index(self, last_index);
+            //     } else {
+            //         conn.left = Internal.get_conn_left_from_list_head(self, list);
+            //     }
+            //     return conn;
+            // }
+
+            // pub fn get_conn_left_right_for_head_of_list(self: *Heirarchy, list: ListTag) ConnLeftRight {
+            //     const first_index = self.get_first_index_in_list(list);
+            //     var conn: ConnLeftRight = undefined;
+            //     conn.left = Internal.get_conn_left_from_list_head(self, list);
+            //     if (first_index != NULL_ID) {
+            //         conn.right = Internal.get_conn_right_valid_index(self, first_index);
+            //     } else {
+            //         conn.right = Internal.get_conn_right_from_list_tail(self, list);
+            //     }
+            //     return conn;
+            // }
+
+            // pub fn traverse_backward_to_get_first_index_in_list_from_start_index(self: *const Heirarchy, start_idx: Index) Index {
+            //     var first_idx: Index = NULL_ID;
+            //     var curr_idx = start_idx;
+            //     var c: if (STRONG_ASSERT) Index else void = if (STRONG_ASSERT) 0 else void{};
+            //     const limit: if (STRONG_ASSERT) Index else void = if (STRONG_ASSERT) @as(Index, @intCast(self.list.len)) else void{};
+            //     while (curr_idx != NULL_ID) {
+            //         first_idx = curr_idx;
+            //         if (STRONG_ASSERT) c += 1;
+            //         curr_idx = get_prev_idx(self, curr_idx.ptr);
+            //     }
+            //     if (STRONG_ASSERT) assert_with_reason(c <= limit, @src(), "traversed more than {d} elements (total len of underlying element list) starting from index {d} in backward direction without finding a NULL_IDX: list is cyclic and using this function will create an infinite loop", .{ limit, start_idx });
+            //     return first_idx;
+            // }
+
+            // pub fn traverse_forward_to_get_last_index_in_list_from_start_index(self: *const Heirarchy, start_idx: Index) Index {
+            //     var last_idx: Index = NULL_ID;
+            //     var curr_idx = start_idx;
+            //     var c: if (STRONG_ASSERT) Index else void = if (STRONG_ASSERT) 0 else void{};
+            //     const limit: if (STRONG_ASSERT) Index else void = if (STRONG_ASSERT) @as(Index, @intCast(self.list.len)) else void{};
+            //     while (curr_idx != NULL_ID) {
+            //         last_idx = curr_idx;
+            //         if (STRONG_ASSERT) c += 1;
+            //         curr_idx = get_next_idx(self, curr_idx.ptr);
+            //     }
+            //     if (STRONG_ASSERT) assert_with_reason(c <= limit, @src(), "traversed more than {d} elements (total len of underlying element list) starting from index {d} in forward direction without finding a NULL_IDX: list is cyclic and using this function will create an infinite loop", .{ limit, start_idx });
+            //     return last_idx;
+            // }
+
+            // pub fn traverse_forward_from_idx_and_report_if_found_target_idx(self: *Heirarchy, start_idx: Index, target_idx: Index) bool {
+            //     var curr_idx: Index = start_idx;
+            //     var c: if (STRONG_ASSERT) Index else void = if (STRONG_ASSERT) 0 else void{};
+            //     const limit: if (STRONG_ASSERT) Index else void = if (STRONG_ASSERT) @as(Index, @intCast(self.list.len)) else void{};
+            //     while (curr_idx != NULL_ID and (if (STRONG_ASSERT) c <= limit else true)) {
+            //         if (curr_idx == target_idx) return true;
+            //         curr_idx = get_next_idx(self, curr_idx);
+            //         if (STRONG_ASSERT) c += 1;
+            //     }
+            //     if (STRONG_ASSERT) assert_with_reason(c <= limit, @src(), "traversed more than {d} elements (total len of underlying element list) starting from index {d} in forward direction without finding target index {d}: list is cyclic and using this function will create an infinite loop", .{ limit, start_idx, target_idx });
+            //     return false;
+            // }
+
+            // pub fn traverse_all_lists_forward_and_report_list_found_in(self: *Heirarchy, this_idx: Index) ListTag {
+            //     var t: ListTagInt = 0;
+            //     var idx: Index = undefined;
+            //     while (t < UNTRACKED_LIST_RAW) : (t += 1) {
+            //         idx = self.get_first_index_in_list(@enumFromInt(t));
+            //         while (idx != NULL_ID) {
+            //             if (idx == this_idx) return @enumFromInt(t);
+            //             idx = self.get_next_idx(idx);
+            //         }
+            //     }
+            //     return UNTRACKED_LIST;
+            // }
+            // pub fn traverse_all_lists_backward_and_report_list_found_in(self: *Heirarchy, this_idx: Index) ListTag {
+            //     var t: ListTagInt = 0;
+            //     var idx: Index = undefined;
+            //     while (t < UNTRACKED_LIST_RAW) : (t += 1) {
+            //         idx = self.get_last_index_in_list(@enumFromInt(t));
+            //         while (idx != NULL_ID) {
+            //             if (idx == this_idx) return @enumFromInt(t);
+            //             idx = self.get_prev_idx(idx);
+            //         }
+            //     }
+            //     return UNTRACKED_LIST;
+            // }
+
+            // pub fn traverse_backward_from_idx_and_report_if_found_target_idx(self: *Heirarchy, start_idx: Index, target_idx: Index) bool {
+            //     var curr_idx: Index = start_idx;
+            //     var c: if (STRONG_ASSERT) Index else void = if (STRONG_ASSERT) 0 else void{};
+            //     const limit: if (STRONG_ASSERT) Index else void = if (STRONG_ASSERT) @as(Index, @intCast(self.list.len)) else void{};
+            //     while (curr_idx != NULL_ID and (if (STRONG_ASSERT) c <= limit else true)) {
+            //         if (curr_idx == target_idx) return true;
+            //         curr_idx = get_prev_idx(self, curr_idx);
+            //         if (STRONG_ASSERT) c += 1;
+            //     }
+            //     if (STRONG_ASSERT) assert_with_reason(c <= limit, @src(), "traversed more than {d} elements (total len of underlying element list) starting from index {d} in forward direction without finding target index {d}: list is cyclic and using this function will create an infinite loop", .{ limit, start_idx, target_idx });
+            //     return false;
+            // }
+
+            // pub fn traverse_to_find_index_before_this_one_forward_from_known_idx_before(self: Heirarchy, this_idx: Index, known_prev: Index) Index {
+            //     var curr_idx: Index = known_prev;
+            //     var c: if (STRONG_ASSERT) Index else void = if (STRONG_ASSERT) 0 else void{};
+            //     const limit: if (STRONG_ASSERT) Index else void = if (STRONG_ASSERT) @as(Index, @intCast(self.list.len)) else void{};
+            //     while (curr_idx != NULL_ID and (if (STRONG_ASSERT) c <= limit else true)) {
+            //         assert_with_reason(curr_idx < self.list.len, @src(), "while traversing forward from index {d}, index {d} was found, which is out of bounds for list.len {d}, but is not NULL_IDX", .{ known_prev, curr_idx, self.list.len });
+            //         const next_idx = self.get_next_idx(curr_idx);
+            //         if (next_idx == this_idx) return curr_idx;
+            //         curr_idx = next_idx;
+            //         if (STRONG_ASSERT) c += 1;
+            //     }
+            //     if (STRONG_ASSERT) assert_with_reason(c <= limit, @src(), "traversed more than {d} elements (total len of underlying element list) starting from 'known prev' index {d} in forward direction without finding this index {d}: list is cyclic and using this function will create an infinite loop", .{ limit, known_prev, this_idx });
+            //     assert_with_reason(false, @src(), "no item found referencing index {d} while traversing from index {d} in forward direction: broken list or `known_prev` wasn't actually before `idx`", .{ this_idx, known_prev });
+            // }
+
+            // pub fn traverse_to_find_index_after_this_one_backward_from_known_idx_after(self: Heirarchy, this_idx: Index, known_next: Index) Index {
+            //     var curr_idx: Index = undefined;
+            //     var c: if (STRONG_ASSERT) Index else void = if (STRONG_ASSERT) 0 else void{};
+            //     const limit: if (STRONG_ASSERT) Index else void = if (STRONG_ASSERT) @as(Index, @intCast(self.list.len)) else void{};
+            //     curr_idx = known_next;
+            //     while (curr_idx != NULL_ID and (if (STRONG_ASSERT) c <= limit else true)) {
+            //         assert_with_reason(curr_idx < self.list.len, @src(), "while traversing backward from index {d}, index {d} was found, which is out of bounds for list.len {d}, but is not NULL_IDX", .{ known_next, curr_idx, self.list.len });
+            //         const prev_idx = self.get_prev_idx(curr_idx);
+            //         if (prev_idx == this_idx) return curr_idx;
+            //         curr_idx = prev_idx;
+            //         if (STRONG_ASSERT) c += 1;
+            //     }
+            //     if (STRONG_ASSERT) assert_with_reason(c <= limit, @src(), "traversed more than {d} elements (total len of underlying element list) starting from 'known next' index {d} in backward direction without finding this index {d}: list is cyclic and using this function will create an infinite loop", .{ limit, known_next, this_idx });
+            //     assert_with_reason(false, @src(), "no item found referencing index {d} while traversing from index {d} in backward direction: broken list or `known_next` wasn't actually after `idx`", .{ this_idx, known_next });
+            // }
+
+            // pub inline fn get_list_tag_raw(ptr: *const Elem) ListTagInt {
+            //     return @as(ListTagInt, @intCast((@field(ptr, STATE_FIELD) & STATE_MASK) >> STATE_OFFSET));
+            // }
+
+            // pub fn assert_valid_list_idx(self: *Heirarchy, idx: Index, list: ListTag, comptime src_loc: ?SourceLocation) void {
+            //     if (@inComptime() or build.mode == .Debug or build.mode == .ReleaseSafe) {
+            //         assert_idx_less_than_len(idx, self.list.len, src_loc);
+            //         const ptr = get_ptr(self, idx);
+            //         if (STATE) assert_with_reason(get_list_tag_raw(ptr) == @intFromEnum(list), src_loc, "set {s} on SetIdx does not match list on elem at idx {d}", .{ @tagName(list), idx });
+            //         if (STRONG_ASSERT) {
+            //             const found_in_list = if (FORWARD) Internal.traverse_forward_from_idx_and_report_if_found_target_idx(self, self.get_first_index_in_list(list), idx) else Internal.traverse_backward_from_idx_and_report_if_found_target_idx(self, self.get_last_index_in_list(list), idx);
+            //             assert_with_reason(found_in_list, src_loc, "while verifying idx {d} is in set {s}, the idx was not found when traversing the set", .{ idx, @tagName(list) });
+            //         }
+            //     }
+            // }
+            // pub fn assert_valid_list_idx_list(self: *Heirarchy, list: ListTag, indexes: []const Index, comptime src_loc: ?SourceLocation) void {
+            //     if (@inComptime() or build.mode == .Debug or build.mode == .ReleaseSafe) {
+            //         for (indexes) |idx| {
+            //             Internal.assert_valid_list_idx(self, idx, list, src_loc);
+            //         }
+            //     }
+            // }
+            // pub fn assert_valid_list_of_list_idxs(self: *Heirarchy, set_idx_list: []const ListIdx, comptime src_loc: ?SourceLocation) void {
+            //     if (@inComptime() or build.mode == .Debug or build.mode == .ReleaseSafe) {
+            //         for (set_idx_list) |list_idx| {
+            //             Internal.assert_valid_list_idx(self, list_idx.idx, list_idx.list, src_loc);
+            //         }
+            //     }
+            // }
+
+            // pub fn assert_valid_slice(self: *Heirarchy, slice: LLSlice, comptime src_loc: ?SourceLocation) void {
+            //     assert_idx_less_than_len(slice.first, self.list.len, src_loc);
+            //     assert_idx_less_than_len(slice.last, self.list.len, src_loc);
+            //     if (!STRONG_ASSERT and STATE) {
+            //         assert_with_reason(self.index_is_in_list(slice.first, slice.list), src_loc, "first index {d} is not in list `{s}`", .{ slice.first, @tagName(slice.list) });
+            //         assert_with_reason(self.index_is_in_list(slice.last, slice.list), src_loc, "last index {d} is not in list `{s}`", .{ slice.last, @tagName(slice.list) });
+            //     }
+            //     if (STRONG_ASSERT) {
+            //         var c: Index = 1;
+            //         var idx = if (FORWARD) slice.first else slice.last;
+            //         assert_idx_less_than_len(idx, self.list.len, @src());
+            //         const list = slice.list;
+            //         const last_idx = if (FORWARD) slice.last else slice.first;
+            //         Internal.assert_valid_list_idx(self, IndexInList{ .list = list, .idx = idx }, src_loc);
+            //         while (idx != last_idx and idx != NULL_ID) {
+            //             idx = if (FORWARD) self.get_next_idx(slice.list, idx) else self.get_prev_idx(idx);
+            //             c += 1;
+            //             Internal.assert_valid_list_idx(self, IndexInList{ .list = list, .idx = idx }, src_loc);
+            //         }
+            //         assert_with_reason(idx == last_idx, src_loc, "idx `first` ({d}) is not linked with idx `last` ({d})", .{ slice.first, slice.last });
+            //         assert_with_reason(c == slice.count, src_loc, "the slice count {d} did not match the number of traversed items between `first` and `last` ({d})", .{ slice.count, c });
+            //     }
+            // }
+
+            // fn get_items_and_insert_at_internal(self: *Heirarchy, get_from: anytype, insert_to: anytype, alloc: Allocator, comptime ASSUME_CAP: bool) if (!ASSUME_CAP and RETURN_ERRORS) Error!LLSlice else LLSlice {
+            //     const FROM = @TypeOf(get_from);
+            //     const TO = @TypeOf(insert_to);
+            //     var insert_edges: ConnLeftRight = undefined;
+            //     var insert_list: ListTag = undefined;
+            //     var insert_untracked: bool = false;
+            //     var insert_parent: Index = NULL_ID;
+            //     switch (TO) {
+            //         Insert.AfterIndex => {
+            //             const idx: Index = insert_to.idx;
+            //             assert_idx_less_than_len(idx, self.list.len, @src());
+            //             const list: ListTag = self.get_list_tag(idx);
+            //             insert_edges = Internal.get_conn_left_right_directly_after_this_valid_index(self, idx, list);
+            //             insert_list = list;
+            //             insert_parent = self.get_parent_idx(idx);
+            //         },
+            //         Insert.AfterIndexInList => {
+            //             const idx: Index = insert_to.idx;
+            //             const list: Index = insert_to.list;
+            //             assert_valid_list_idx(self, idx, list, @src());
+            //             insert_edges = Internal.get_conn_left_right_directly_after_this_valid_index(self, idx, list);
+            //             insert_list = list;
+            //             insert_parent = self.get_parent_idx(idx);
+            //         },
+            //         Insert.BeforeIndex => {
+            //             const idx: Index = insert_to.idx;
+            //             assert_idx_less_than_len(idx, self.list.len, @src());
+            //             const list: ListTag = self.get_list_tag(idx);
+            //             insert_edges = Internal.get_conn_left_right_directly_before_this_valid_index(self, idx, list);
+            //             insert_list = list;
+            //             insert_parent = self.get_parent_idx(idx);
+            //         },
+            //         Insert.BeforeIndexInList => {
+            //             const idx: Index = insert_to.idx;
+            //             const list: Index = insert_to.list;
+            //             assert_valid_list_idx(self, idx, list, @src());
+            //             insert_edges = Internal.get_conn_left_right_directly_before_this_valid_index(self, idx, list);
+            //             insert_list = list;
+            //             insert_parent = self.get_parent_idx(idx);
+            //         },
+            //         Insert.AtBeginningOfList => {
+            //             const list: ListTag = insert_to.list;
+            //             assert_with_reason(list != UNTRACKED_LIST, @src(), "cannot insert to beginning of the 'untracked' list (it has no begining or end)", .{});
+            //             insert_edges = Internal.get_conn_left_right_for_head_of_list(self, list);
+            //             insert_list = list;
+            //         },
+            //         Insert.AtEndOfList => {
+            //             const list: ListTag = insert_to.list;
+            //             assert_with_reason(list != UNTRACKED_LIST, @src(), "cannot insert to end of the 'untracked' list (it has no begining or end)", .{});
+            //             insert_edges = Internal.get_conn_left_right_for_tail_of_list(self, list);
+            //             insert_list = list;
+            //         },
+            //         Insert.AtBeginningOfChildren => {
+            //             assert_with_reason(FIRST_CHILD or (LAST_CHILD and BACKWARD), @src(), "cannot insert at beginning of children when items do not cache either the first child index, or last child index and is also linked in backward direction", .{});
+            //             const parent_idx: Index = insert_to.parent_idx;
+            //             assert_idx_less_than_len(parent_idx, self.list.len, @src());
+            //             insert_parent = parent_idx;
+            //             if (FIRST_CHILD) {
+            //                 insert_edges = Internal.get_conn_left_right_from_first_child_position(self, parent_idx);
+            //                 insert_list = UNTRACKED_LIST;
+            //             } else {
+            //                 assert_with_reason(ALLOW_SLOW, @src(), "slow fallbacks not allowed", .{});
+            //                 const last_child_idx = self.get_last_child(parent_idx);
+            //                 const first_child_idx = Internal.traverse_backward_to_get_first_index_in_list_from_start_index(self, last_child_idx);
+            //                 insert_edges.left = Internal.get_conn_left_dummy_end();
+            //                 insert_edges.right = if (first_child_idx != NULL_ID) Internal.get_conn_right_valid_index(self, first_child_idx) else Internal.get_conn_right_from_last_child(self, parent_idx);
+            //                 insert_list = UNTRACKED_LIST;
+            //             }
+            //         },
+            //         Insert.AtEndOfChildren => {
+            //             assert_with_reason(LAST_CHILD or (FIRST_CHILD and FORWARD), @src(), "cannot insert children when items do not cache either the first child index, or last child index and is also linked in backward direction", .{});
+            //             const parent_idx: Index = insert_to.parent_idx;
+            //             assert_idx_less_than_len(parent_idx, self.list.len, @src());
+            //             insert_parent = parent_idx;
+            //             if (LAST_CHILD) {
+            //                 insert_edges = Internal.get_conn_left_right_from_last_child_position(self, parent_idx);
+            //                 insert_list = UNTRACKED_LIST;
+            //             } else {
+            //                 assert_with_reason(ALLOW_SLOW, @src(), "slow fallbacks not allowed", .{});
+            //                 const first_child_idx = self.get_first_child(parent_idx);
+            //                 const last_child_idx = Internal.traverse_forward_to_get_last_index_in_list_from_start_index(self, first_child_idx);
+            //                 insert_edges.right = Internal.get_conn_right_dummy_end();
+            //                 insert_edges.left = if (last_child_idx != NULL_ID) Internal.get_conn_left_valid_index(self, last_child_idx) else Internal.get_conn_left_from_first_child(self, parent_idx);
+            //                 insert_list = UNTRACKED_LIST;
+            //             }
+            //         },
+            //         Insert.Untracked => {
+            //             insert_list = UNTRACKED_LIST;
+            //             insert_untracked = true;
+            //         },
+            //         else => assert_with_reason(false, @src(), "invalid type `{s}` input for parameter `insert_to`. All valid input types are contained in `Insert`", .{@typeName(TO)}),
+            //     }
+            //     var return_items: LLSlice = undefined;
+            //     switch (FROM) {
+            //         Get.CreateOneNew => {
+            //             const new_idx = if (ASSUME_CAP) self.list.append_slot_assume_capacity() else (if (RETURN_ERRORS) try self.list.append_slot(alloc) else self.list.append_slot(alloc));
+            //             return_items.first = new_idx;
+            //             return_items.last = new_idx;
+            //             return_items.count = 1;
+            //         },
+            //         Get.FirstFromList, Get.FirstFromListElseCreateNew => {
+            //             const list: ListTag = get_from.list;
+            //             assert_with_reason(list != UNTRACKED_LIST, @src(), "cannot get items from the 'untracked' list without specific indexes", .{});
+            //             const list_count: debug_switch(Index, void) = debug_switch(self.get_list_len(list), void{});
+            //             const first_idx = self.get_first_index_in_list(list);
+            //             if (FROM == Get.FirstFromListElseCreateNew and (debug_switch(list_count == 0, false) or first_idx == NULL_ID)) {
+            //                 const new_idx = self.list.len;
+            //                 _ = if (ASSUME_CAP) self.list.append_slot_assume_capacity() else (if (RETURN_ERRORS) try self.list.append_slot(alloc) else self.list.append_slot(alloc));
+            //                 return_items.first = new_idx;
+            //                 return_items.last = new_idx;
+            //                 return_items.count = 1;
+            //             } else {
+            //                 assert_with_reason(debug_switch(list_count > 0, true) and first_idx < self.list.len, @src(), "tried to 'get' linked list item from head/beginning of set `{s}`, but that set reports an item count of {d} and the first idx is {d} (list.len = {d})", .{ @tagName(list), debug_switch(list_count, 0), first_idx, self.list.len });
+            //                 return_items.first = first_idx;
+            //                 return_items.last = first_idx;
+            //                 return_items.count = 1;
+            //                 Internal.disconnect_one(self, list, first_idx);
+            //             }
+            //         },
+            //         Get.LastFromList, Get.LastFromListElseCreateNew => {
+            //             const list: ListTag = get_from.list;
+            //             assert_with_reason(list != UNTRACKED_LIST, @src(), "cannot get items from the 'untracked' list without specific indexes", .{});
+            //             const list_count: debug_switch(Index, void) = debug_switch(self.get_list_len(list), void{});
+            //             const last_idx = self.get_last_index_in_list(list);
+            //             if (FROM == Get.LastFromListElseCreateNew and (debug_switch(list_count == 0, false) or last_idx == NULL_ID)) {
+            //                 const new_idx = self.list.len;
+            //                 _ = if (ASSUME_CAP) self.list.append_slot_assume_capacity() else (if (RETURN_ERRORS) try self.list.append_slot(alloc) else self.list.append_slot(alloc));
+            //                 return_items.first = new_idx;
+            //                 return_items.last = new_idx;
+            //                 return_items.count = 1;
+            //             } else {
+            //                 assert_with_reason(debug_switch(list_count > 0, true) and last_idx < self.list.len, @src(), "tried to 'get' linked list item from head/beginning of set `{s}`, but that set reports an item count of {d} and the first idx is {d} (list.len = {d})", .{ @tagName(list), debug_switch(list_count, 0), last_idx, self.list.len });
+            //                 return_items.first = last_idx;
+            //                 return_items.last = last_idx;
+            //                 return_items.count = 1;
+            //                 Internal.disconnect_one(self, list, last_idx);
+            //             }
+            //         },
+            //         Get.OneIndex => {
+            //             const idx: Index = get_from.idx;
+            //             assert_idx_less_than_len(idx, self.list.len, @src());
+            //             const list: ListTag = self.get_list_tag(idx);
+            //             return_items.first = idx;
+            //             return_items.last = idx;
+            //             return_items.count = 1;
+            //             Internal.disconnect_one(self, list, idx);
+            //         },
+            //         Get.OneIndexInList => {
+            //             const idx: Index = get_from.idx;
+            //             const list: ListTag = get_from.list;
+            //             assert_valid_list_idx(self, idx, list, @src());
+            //             return_items.first = idx;
+            //             return_items.last = idx;
+            //             return_items.count = 1;
+            //             Internal.disconnect_one(self, list, idx);
+            //         },
+            //         Get.CreateManyNew => {
+            //             const count: Index = get_from.count;
+            //             assert_with_reason(count > 0, @src(), "cannot create `0` new items", .{});
+            //             const first_idx = self.list.len;
+            //             const last_idx = self.list.len + count - 1;
+            //             _ = if (ASSUME_CAP) self.list.append_many_slots_assume_capacity(count) else (if (RETURN_ERRORS) try self.list.append_many_slots(count, alloc) else self.list.append_many_slots(count, alloc));
+            //             Internal.initialize_concurrent_indexes(self, first_idx, last_idx, true, false, insert_list, false, NULL_ID);
+            //             return_items.first = first_idx;
+            //             return_items.last = last_idx;
+            //             return_items.count = count;
+            //         },
+            //         Get.FirstCountFromList => {
+            //             const list: ListTag = get_from.list;
+            //             const count: Index = get_from.count;
+            //             assert_with_reason(count > 0, @src(), "cannot get `0` items", .{});
+            //             assert_with_reason(list != UNTRACKED_LIST, @src(), "cannot get items from the 'untracked' list without specific indexes", .{});
+            //             assert_with_reason(self.get_list_len(list) >= count, @src(), "requested {d} items from set {s}, but set only has {d} items", .{ count, @tagName(list), self.get_list_len(list) });
+            //             return_items.first = self.get_first_index_in_list(list);
+            //             return_items.last = self.get_nth_index_from_start_of_list(list, count - 1);
+            //             return_items.count = count;
+            //             Internal.disconnect_many_first_last(self, list, return_items.first, return_items.last, count);
+            //         },
+            //         Get.LastCountFromList => {
+            //             const list: ListTag = get_from.list;
+            //             const count: Index = get_from.count;
+            //             assert_with_reason(count > 0, @src(), "cannot get `0` items", .{});
+            //             assert_with_reason(list != UNTRACKED_LIST, @src(), "cannot get items from the 'untracked' list without specific indexes", .{});
+            //             assert_with_reason(self.get_list_len(list) >= count, @src(), "requested {d} items from set {s}, but set only has {d} items", .{ count, @tagName(list), self.get_list_len(list) });
+            //             return_items.last = self.get_last_index_in_list(list);
+            //             return_items.first = self.get_nth_index_from_end_of_list(list, count - 1);
+            //             return_items.count = count;
+            //             Internal.disconnect_many_first_last(self, list, return_items.first, return_items.last, count);
+            //         },
+            //         Get.FirstCountFromListElseCreateNew => {
+            //             const list: ListTag = get_from.list;
+            //             const count: Index = get_from.count;
+            //             assert_with_reason(count > 0, @src(), "cannot get `0` items", .{});
+            //             const count_from_list = @min(self.get_list_len(list), count);
+            //             const count_from_new = count - count_from_list;
+            //             var first_new_idx: Index = undefined;
+            //             var last_moved_idx: Index = undefined;
+            //             const needs_new = count_from_new > 0;
+            //             const needs_move = count_from_list > 0;
+            //             if (needs_new) {
+            //                 first_new_idx = self.list.len;
+            //                 const last_new_idx = self.list.len + count_from_new - 1;
+            //                 _ = if (ASSUME_CAP) self.list.append_many_slots_assume_capacity(count_from_new) else (if (RETURN_ERRORS) try self.list.append_many_slots(count_from_new, alloc) else self.list.append_many_slots(count_from_new, alloc));
+            //                 Internal.initialize_concurrent_indexes(self, first_new_idx, last_new_idx, true, false, insert_list, false, NULL_ID);
+            //                 if (needs_move) {
+            //                     first_new_idx = first_new_idx;
+            //                 } else {
+            //                     return_items.first = first_new_idx;
+            //                 }
+            //                 return_items.last = last_new_idx;
+            //             }
+            //             if (needs_move) {
+            //                 return_items.first = self.get_first_index_in_list(list);
+            //                 if (needs_new) {
+            //                     last_moved_idx = self.get_nth_index_from_start_of_list(list, count_from_list - 1);
+            //                     Internal.disconnect_many_first_last(self, list, return_items.first, last_moved_idx, count_from_list);
+            //                 } else {
+            //                     return_items.last = self.get_nth_index_from_start_of_list(list, count_from_list - 1);
+            //                     Internal.disconnect_many_first_last(self, list, return_items.first, return_items.last, count_from_list);
+            //                 }
+            //             }
+            //             if (needs_new and needs_move) {
+            //                 const mid_conn = Internal.get_conn_left_right_before_first_and_after_last_valid_indexes(self, last_moved_idx, first_new_idx, list);
+            //                 Internal.connect(mid_conn.left, mid_conn.right);
+            //             }
+            //             return_items.count = count;
+            //         },
+            //         Get.LastCountFromListElseCreateNew => {
+            //             const list: ListTag = get_from.list;
+            //             const count: Index = get_from.count;
+            //             assert_with_reason(count > 0, @src(), "cannot get `0` items", .{});
+            //             const count_from_list = @min(self.get_list_len(list), count);
+            //             const count_from_new = count - count_from_list;
+            //             var first_new_idx: Index = undefined;
+            //             var last_moved_idx: Index = undefined;
+            //             const needs_new = count_from_new > 0;
+            //             const needs_move = count_from_list > 0;
+            //             if (needs_new) {
+            //                 first_new_idx = self.list.len;
+            //                 const last_new_idx = self.list.len + count_from_new - 1;
+            //                 _ = if (ASSUME_CAP) self.list.append_many_slots_assume_capacity(count_from_new) else (if (RETURN_ERRORS) try self.list.append_many_slots(count_from_new, alloc) else self.list.append_many_slots(count_from_new, alloc));
+            //                 Internal.initialize_concurrent_indexes(self, first_new_idx, last_new_idx, true, false, insert_list, false, NULL_ID);
+            //                 if (needs_move) {
+            //                     first_new_idx = first_new_idx;
+            //                 } else {
+            //                     return_items.first = first_new_idx;
+            //                 }
+            //                 return_items.last = last_new_idx;
+            //             }
+            //             if (needs_move) {
+            //                 return_items.first = self.get_nth_index_from_end_of_list(list, count_from_list - 1);
+            //                 if (needs_new) {
+            //                     last_moved_idx = self.get_last_index_in_list(list);
+            //                     Internal.disconnect_many_first_last(self, list, return_items.first, last_moved_idx, count_from_list);
+            //                 } else {
+            //                     return_items.last = self.get_last_index_in_list(list);
+            //                     Internal.disconnect_many_first_last(self, list, return_items.first, return_items.last, count_from_list);
+            //                 }
+            //             }
+            //             if (needs_new and needs_move) {
+            //                 const mid_conn = Internal.get_conn_left_right_before_first_and_after_last_valid_indexes(self, last_moved_idx, first_new_idx, list);
+            //                 Internal.connect(mid_conn.left, mid_conn.right);
+            //             }
+            //             return_items.count = count;
+            //         },
+            //         Get.SparseIndexesFromSameList => {
+            //             const list: ListTag = get_from.list;
+            //             const indexes: []const Index = get_from.indexes;
+            //             Internal.assert_valid_list_idx_list(self, list, indexes, @src());
+            //             return_items.first = indexes[0];
+            //             Internal.disconnect_one(self, list, return_items.first);
+            //             var prev_idx: Index = return_items.first;
+            //             for (indexes[1..]) |this_idx| {
+            //                 const conn = Internal.get_conn_left_right_before_first_and_after_last_valid_indexes(self, prev_idx, this_idx, list);
+            //                 Internal.disconnect_one(self, list, this_idx);
+            //                 Internal.connect(conn.left, conn.right);
+            //                 prev_idx = this_idx;
+            //             }
+            //             return_items.last = prev_idx;
+            //             return_items.count = @intCast(indexes.len);
+            //         },
+            //         Get.SparseIndexes => {
+            //             const indexes: []const Index = get_from.indexes;
+            //             assert_with_reason(indexes.len > 0, @src(), "cannot get 0 items", .{});
+            //             assert_idx_less_than_len(indexes[0], self.list.len, @src());
+            //             var list = self.get_list_tag(indexes[0]);
+            //             Internal.disconnect_one(self, list, indexes[0]);
+            //             return_items.first = indexes[0];
+            //             var prev_idx = indexes[0];
+            //             for (indexes[1..]) |idx| {
+            //                 assert_idx_less_than_len(idx, self.list.len, @src());
+            //                 list = self.get_list_tag(idx);
+            //                 const conn_left = Internal.get_conn_left(self, list, prev_idx, idx);
+            //                 const conn_right = Internal.get_conn_right(self, list, idx, prev_idx);
+            //                 Internal.disconnect_one(self, list, idx);
+            //                 Internal.connect(conn_left, conn_right);
+            //                 prev_idx = idx;
+            //             }
+            //             return_items.last = prev_idx;
+            //             return_items.count = @intCast(indexes.len);
+            //         },
+            //         Get.SparseIndexesFromAnyList => {
+            //             const indexes: []const ListIdx = get_from.indexes;
+            //             Internal.assert_valid_list_of_list_idxs(self, indexes, @src());
+            //             return_items.first = indexes[0].idx;
+            //             Internal.disconnect_one(self, indexes[0].list, return_items.first);
+            //             var prev_idx: Index = return_items.first;
+            //             for (indexes[1..]) |list_idx| {
+            //                 const this_idx = list_idx.idx;
+            //                 Internal.disconnect_one(self, list_idx.list, this_idx);
+            //                 const conn_left = Internal.get_conn_left(self, list_idx.list, prev_idx);
+            //                 const conn_right = Internal.get_conn_right(self, list_idx.list, this_idx);
+            //                 Internal.connect(conn_left, conn_right);
+            //                 prev_idx = this_idx;
+            //             }
+            //             return_items.last = prev_idx;
+            //             return_items.count = @intCast(indexes.len);
+            //         },
+            //         //CHECKPOINT
+            //         .FROM_SLICE => {
+            //             const slice: LLSlice = get_val;
+            //             Internal.assert_valid_slice(self, slice, @src());
+            //             return_items.first = slice.first;
+            //             return_items.last = slice.last;
+            //             return_items.count = slice.count;
+            //         },
+            //         .FROM_SLICE_ELSE_CREATE_NEW => {
+            //             const supp_slice: LLSliceWithTotalNeeded = get_val;
+            //             Internal.assert_valid_slice(self, supp_slice.slice, @src());
+            //             const count_from_slice = @min(supp_slice.slice.count, supp_slice.total_needed);
+            //             const count_from_new = supp_slice.total_needed - count_from_slice;
+            //             var first_new_idx: Index = undefined;
+            //             var last_moved_idx: Index = undefined;
+            //             const needs_new = count_from_new > 0;
+            //             const needs_move = count_from_slice > 0;
+            //             if (needs_new) {
+            //                 first_new_idx = self.list.len;
+            //                 const last_new_idx = self.list.len + count_from_new - 1;
+            //                 _ = if (ASSUME_CAP) self.list.append_many_slots_assume_capacity(count_from_new) else (if (RETURN_ERRORS) try self.list.append_many_slots(count_from_new, alloc) else self.list.append_many_slots(count_from_new, alloc));
+            //                 Internal.initialize_new_indexes(self, supp_slice.slice.list, first_new_idx, last_new_idx);
+            //                 if (needs_move) {
+            //                     first_new_idx = first_new_idx;
+            //                 } else {
+            //                     return_items.first = first_new_idx;
+            //                 }
+            //                 return_items.last = last_new_idx;
+            //             }
+            //             if (needs_move) {
+            //                 return_items.first = supp_slice.slice.first;
+            //                 if (needs_new) {
+            //                     last_moved_idx = supp_slice.slice.last;
+            //                 } else {
+            //                     return_items.last = supp_slice.slice.last;
+            //                 }
+            //                 Internal.disconnect_many_first_last(self, supp_slice.slice.list, supp_slice.slice.first, supp_slice.slice.last, count_from_slice);
+            //             }
+            //             if (needs_new and needs_move) {
+            //                 const mid_left = Internal.get_conn_left(self, supp_slice.slice.list, last_moved_idx);
+            //                 const mid_right = Internal.get_conn_right(self, supp_slice.slice.list, first_new_idx);
+            //                 Internal.connect(mid_left, mid_right);
+            //             }
+            //             return_items.count = supp_slice.total_needed;
+            //         },
+            //     }
+            //     const insert_first = Internal.get_conn_right(self, insert_list, return_items.first);
+            //     const insert_last = Internal.get_conn_left(self, insert_list, return_items.last);
+            //     Internal.connect_with_insert(insert_edges.left, insert_first, insert_last, insert_edges.right);
+            //     Internal.increase_link_set_count(self, insert_list, return_items.count);
+            //     Internal.set_list_on_indexes_first_last(self, return_items.first, return_items.last, insert_list);
+            //     return_items.list = insert_list;
+            //     return return_items;
+            // }
+
+            // fn iter_peek_prev_or_null(self: *anyopaque) ?*Elem {
+            //     if (!BACKWARD) return false;
+            //     const iter: *IteratorState = @ptrCast(@alignCast(self));
+            //     if (iter.left_idx == NULL_ID) return null;
+            //     return iter.linked_list.get_ptr(iter.left_idx);
+            // }
+            // fn iter_advance_prev(self: *anyopaque) bool {
+            //     if (!BACKWARD) return false;
+            //     const iter: *IteratorState = @ptrCast(@alignCast(self));
+            //     if (iter.left_idx == NULL_ID) return false;
+            //     iter.right_idx = iter.left_idx;
+            //     iter.left_idx = iter.linked_list.get_prev_idx(iter.list, iter.left_idx);
+            //     return true;
+            // }
+            // fn iter_peek_next_or_null(self: *anyopaque) ?*Elem {
+            //     if (!FORWARD) return false;
+            //     const iter: *IteratorState = @ptrCast(@alignCast(self));
+            //     if (iter.right_idx == NULL_ID) return null;
+            //     return iter.linked_list.get_ptr(iter.right_idx);
+            // }
+            // fn iter_advance_next(self: *anyopaque) bool {
+            //     if (!FORWARD) return false;
+            //     const iter: *IteratorState = @ptrCast(@alignCast(self));
+            //     if (iter.right_idx == NULL_ID) return false;
+            //     iter.left_idx = iter.right_idx;
+            //     iter.right_idx = iter.linked_list.get_next_idx(iter.list, iter.right_idx);
+            //     return true;
+            // }
+            // fn iter_reset(self: *anyopaque) bool {
+            //     const iter: *IteratorState = @ptrCast(@alignCast(self));
+            //     if (FORWARD) {
+            //         iter.right_idx = iter.linked_list.get_first_index_in_list(iter.list);
+            //         iter.left_idx = NULL_ID;
+            //     } else {
+            //         iter.left_idx = iter.linked_list.get_last_index_in_list(iter.list);
+            //         iter.right_idx = NULL_ID;
+            //     }
+            //     return true;
+            // }
+
+            // pub fn traverse_to_find_what_list_idx_is_in(self: *Heirarchy, idx: Index) ListTag {
+            //     var c: if (STRONG_ASSERT) Index else void = if (STRONG_ASSERT) 0 else void{};
+            //     const limit: if (STRONG_ASSERT) Index else void = if (STRONG_ASSERT) @as(Index, @intCast(self.list.len)) else void{};
+            //     if ((FORWARD and TAIL) or (BACKWARD and HEAD)) {
+            //         var left_idx: Index = idx;
+            //         var right_idx: Index = idx;
+            //         while (if (STRONG_ASSERT) c <= limit else true) {
+            //             if (BACKWARD and HEAD) {
+            //                 const next_left = self.get_prev_idx(left_idx);
+            //                 if (left_idx != NULL_ID) {
+            //                     left_idx = next_left;
+            //                 } else {
+            //                     for (self.lists, 0..) |list, tag_raw| {
+            //                         if (list.first_idx == left_idx) return @enumFromInt(@as(ListTagInt, @intCast(tag_raw)));
+            //                     }
+            //                     return UNTRACKED_LIST;
+            //                 }
+            //             }
+            //             if (FORWARD and TAIL) {
+            //                 const next_right = self.get_next_idx(left_idx);
+            //                 if (right_idx != NULL_ID) {
+            //                     right_idx = next_right;
+            //                 } else {
+            //                     for (self.lists, 0..) |list, tag_raw| {
+            //                         if (list.last_idx == left_idx) return @enumFromInt(@as(ListTagInt, @intCast(tag_raw)));
+            //                     }
+            //                     return UNTRACKED_LIST;
+            //                 }
+            //             }
+            //             if (STRONG_ASSERT) c += 1;
+            //         }
+            //         assert_with_reason(false, @src(), "traversed more than {d} elements (total len of underlying element list) starting from index {d} in either forward or backward direction without finding a NULL_IDX: list is cyclic and using this function will create an infinite loop", .{ limit, idx });
+            //     } else {
+            //         for (self.lists, 0..) |list, tag_raw| {
+            //             const list_tag = @as(ListTag, @enumFromInt(@as(ListTagInt, @intCast(tag_raw))));
+            //             if (FORWARD) {
+            //                 var curr_idx: Index = self.get_first_index_in_list(list);
+            //                 while (curr_idx != NULL_ID and (if (STRONG_ASSERT) c <= limit else true)) {
+            //                     if (curr_idx == idx) return list_tag;
+            //                     curr_idx = self.get_next_idx(curr_idx);
+            //                     c += 1;
+            //                 }
+            //             } else {
+            //                 var curr_idx: Index = self.get_last_index_in_list(list);
+            //                 while (curr_idx != NULL_ID and (if (STRONG_ASSERT) c <= limit else true)) {
+            //                     if (curr_idx == idx) return list_tag;
+            //                     curr_idx = self.get_next_idx(curr_idx);
+            //                     c += 1;
+            //                 }
+            //             }
+            //         }
+            //         if (STRONG_ASSERT) assert_with_reason(c <= limit, @src(), "traversed more than {d} elements (total len of underlying element list) through all lists without finding index {d}: list is cyclic and using this function will create an infinite loop", .{ limit, idx });
+            //         return UNTRACKED_LIST;
+            //     }
+            // }
         };
 
-        pub inline fn new_iterator_state_at_start_of_list(self: *Heirarchy, list: ListTag) IteratorState {
-            return IteratorState{
-                .linked_list = self,
-                .list = list,
-                .left_idx = NULL_ID,
-                .right_idx = if (HEAD) self.get_first_index_in_list(list) else NULL_ID,
-            };
-        }
-        pub inline fn new_iterator_state_at_end_of_list(self: *Heirarchy, list: ListTag) IteratorState {
-            return IteratorState{
-                .linked_list = self,
-                .list = list,
-                .left_idx = if (TAIL) self.get_last_index_in_list(list) else NULL_ID,
-                .right_idx = NULL_ID,
-            };
-        }
+        // pub const IteratorState = struct {
+        //     linked_list: *Heirarchy,
+        //     list: ListTag,
+        //     left_idx: Index,
+        //     right_idx: Index,
 
-        pub fn new_empty(assert_alloc: Allocator) Heirarchy {
+        //     pub fn iterator(self: *IteratorState) Iterator(Elem, true, true) {
+        //         return Iterator(Elem, true, true){
+        //             .implementor = @ptrCast(self),
+        //             .vtable = Iterator(Elem).VTable{
+        //                 .reset = Internal.iter_reset,
+        //                 .advance_forward = Internal.iter_advance_next,
+        //                 .peek_next_or_null = Internal.iter_peek_next_or_null,
+        //                 .advance_prev = Internal.iter_advance_prev,
+        //                 .peek_prev_or_null = Internal.iter_peek_prev_or_null,
+        //             },
+        //         };
+        //     }
+        // };
+
+        // pub inline fn new_iterator_state_at_start_of_list(self: *Heirarchy, list: ListTag) IteratorState {
+        //     return IteratorState{
+        //         .linked_list = self,
+        //         .list = list,
+        //         .left_idx = NULL_ID,
+        //         .right_idx = if (HEAD) self.get_first_index_in_list(list) else NULL_ID,
+        //     };
+        // }
+        // pub inline fn new_iterator_state_at_end_of_list(self: *Heirarchy, list: ListTag) IteratorState {
+        //     return IteratorState{
+        //         .linked_list = self,
+        //         .list = list,
+        //         .left_idx = if (TAIL) self.get_last_index_in_list(list) else NULL_ID,
+        //         .right_idx = NULL_ID,
+        //     };
+        // }
+
+        pub fn new_empty(assert_alloc: AllocInfal) Heirarchy {
             var uninit = UNINIT;
             uninit.list = List.new_empty(assert_alloc);
             return uninit;
         }
 
-        pub fn new_with_capacity(capacity: Index, alloc: Allocator) if (RETURN_ERRORS) Error!Heirarchy else Heirarchy {
+        pub fn new_with_capacity(capacity: Index, alloc: AllocInfal) Heirarchy {
             var self = UNINIT;
-            if (RETURN_ERRORS) {
-                try self.list.ensure_total_capacity_exact(capacity, alloc);
-            } else {
-                self.list.ensure_total_capacity_exact(capacity, alloc);
-            }
+            self.list.ensure_total_capacity_exact(capacity, alloc);
             return self;
         }
 
-        pub fn clone(self: *const Heirarchy, alloc: Allocator) if (RETURN_ERRORS) Error!Heirarchy else Heirarchy {
+        pub fn clone(self: *const Heirarchy, alloc: Allocator) Heirarchy {
             var new_list = self.*;
-            new_list.list = if (RETURN_ERRORS) try self.list.clone(alloc) else self.list.clone(alloc);
+            new_list.list = self.list.clone(alloc);
             return new_list;
         }
 
-        // pub inline fn get_list_len(self: *Heirarchy, list: ListTag) Index {
-        //     if (list == UNTRACKED_LIST) return 0;
-        //     return self.lists[@intFromEnum(list)].count;
-        // }
+        pub inline fn insert_slot_between_siblings(self: *Heirarchy, prev_sibling_id: Id, next_sibling_id: Id, parent_id: Id, alloc: AllocInfal) Id {
+            self.list.ensure_unused_capacity(1, alloc);
+            return self.insert_slot_between_siblings_assume_capacity(prev_sibling_id, next_sibling_id, parent_id);
+        }
 
-        // pub fn get_prev_idx(self: *const Heirarchy, this_idx: Index) Index {
-        //     assert_idx_less_than_len(this_idx, self.lists.len, @src());
-        //     assert_with_reason(BACKWARD or STATE or (PARENT and FIRST_CHILD), @src(), "cannot use `get_prev_idx()`, provide an option for `backward_linkage` when defining a LinkedListManager or allow items to cache their own list, or use `get_prev_idx_fallback()` instead", .{});
-        //     if (BACKWARD) {
-        //         const ptr = get_ptr(self, this_idx);
-        //         return @field(ptr, PREV_FIELD);
-        //     }
-        //     assert_with_reason(ALLOW_SLOW, @src(), "slow fallbacks disallowed", .{});
-        //     if (STATE) {
-        //         const list = self.get_list_tag(this_idx);
-        //         if (list != UNTRACKED_LIST) {
-        //             const first_in_list = self.get_first_index_in_list(list);
-        //             return Internal.traverse_to_find_index_before_this_one_forward_from_known_idx_before(self, this_idx, first_in_list);
-        //         }
-        //     }
-        //     const parent_idx = self.get_parent_idx(this_idx);
-        //     assert_with_reason(PARENT and FIRST_CHILD and parent_idx != NULL_ID, @src(), "cannot find a previous index if items arent linked in the backward direction OR items dont cache the list they belong to and are not in an 'untracked' list, OR they don't cache both their parent and first-child and their parent idx != NULL_IDX", .{});
-        //     const known_prev_idx = @field(self.get_ptr(parent_idx), FIRST_CHILD_FIELD);
-        //     assert_with_reason(known_prev_idx != NULL_ID, @src(), "parent idx wasn't NULL_IDX, but parent ptr 'first child' field had a value of NULL_IDX, broken list", .{});
-        //     return Internal.traverse_to_find_index_before_this_one_forward_from_known_idx_before(self, this_idx, known_prev_idx);
-        // }
+        pub inline fn insert_slot_between_siblings_assume_capacity(self: *Heirarchy, prev_sibling_id: Id, next_sibling_id: Id, parent_id: Id) Id {
+            const new_id = Internal.initialize_new_index(self, parent_id);
+            Internal.insert_slots_between_siblings_internal(self, prev_sibling_id, new_id, new_id, next_sibling_id, parent_id);
+            return new_id;
+        }
 
-        // pub inline fn get_prev_idx_fallback(self: *const Heirarchy, this_idx: Index, known_idx_before_this: Index) Index {
-        //     if (BACKWARD) return self.get_prev_idx(this_idx);
-        //     assert_idx_less_than_len(this_idx, self.list.len, @src());
-        //     assert_idx_less_than_len(known_idx_before_this, self.list.len, @src());
-        //     return Internal.traverse_to_find_index_before_this_one_forward_from_known_idx_before(self, this_idx, known_idx_before_this);
-        // }
+        pub inline fn insert_many_slots_between_siblings(self: *Heirarchy, count: Index, prev_sibling_id: Id, next_sibling_id: Id, parent_id: Id, alloc: AllocInfal) FirstLast {
+            self.list.ensure_unused_capacity(count, alloc);
+            return self.insert_many_slots_between_siblings_assume_capacity(count, prev_sibling_id, next_sibling_id, parent_id);
+        }
 
-        // pub fn get_next_idx(self: *const Heirarchy, this_idx: Index) Index {
-        //     assert_idx_less_than_len(this_idx, self.lists.len, @src());
-        //     assert_with_reason(FORWARD or STATE or (PARENT and LAST_CHILD), @src(), "cannot use `get_next_idx()`, provide an option for `forward_linkage` when defining a LinkedListManager or allow items to cache their own list, or use `get_next_idx_fallback()` instead", .{});
+        pub inline fn insert_many_slots_between_siblings_assume_capacity(self: *Heirarchy, count: Index, prev_sibling_id: Id, next_sibling_id: Id, parent_id: Id) FirstLast {
+            const first_last = Internal.initialize_items_as_siblings(self, count, parent_id);
+            Internal.insert_slots_between_siblings_internal(self, prev_sibling_id, first_last.first, first_last.last, next_sibling_id, parent_id);
+            return first_last;
+        }
+
+        //CHECKPOINT ... before/after variations, then parent/child variations
+
+        // pub fn list_is_cyclic_forward(self: *Heirarchy, list: ListTag) bool {
         //     if (FORWARD) {
-        //         const ptr = get_ptr(self, this_idx);
-        //         return @field(ptr, NEXT_FIELD);
-        //     }
-        //     assert_with_reason(ALLOW_SLOW, @src(), "slow fallbacks disallowed", .{});
-        //     if (STATE) {
-        //         const list = self.get_list_tag(this_idx);
-        //         if (list != UNTRACKED_LIST) {
-        //             const last_in_list = self.get_last_index_in_list(list);
-        //             return Internal.traverse_to_find_index_after_this_one_backward_from_known_idx_after(self, this_idx, last_in_list);
+        //         const start_idx = self.get_first_index_in_list(list);
+        //         if (start_idx == NULL_ID) return false;
+        //         if (STATE or STRONG_ASSERT) assert_with_reason(self.index_is_in_list(start_idx, list), @src(), "provided idx {d} was not in list `{s}`", .{ start_idx, @tagName(list) });
+        //         var slow_idx = start_idx;
+        //         var fast_idx = start_idx;
+        //         var next_fast: Index = undefined;
+        //         while (true) {
+        //             next_fast = self.get_next_idx(list, fast_idx);
+        //             if (next_fast == NULL_ID) return false;
+        //             next_fast = self.get_next_idx(list, next_fast);
+        //             if (next_fast == NULL_ID) return false;
+        //             fast_idx = next_fast;
+        //             slow_idx = self.get_next_idx(list, slow_idx);
+        //             if (slow_idx == fast_idx) return true;
         //         }
+        //     } else {
+        //         return false;
         //     }
-        //     const parent_idx = self.get_parent_idx(this_idx);
-        //     assert_with_reason(PARENT and LAST_CHILD and parent_idx != NULL_ID, @src(), "cannot find a next index if items arent linked in the forward direction OR items dont cache the list they belong to and are not in an 'untracked' list, OR they don't cache both their parent and last-child and their parent idx != NULL_IDX", .{});
-        //     const known_next_idx = @field(self.get_ptr(parent_idx), LAST_CHILD_FIELD);
-        //     assert_with_reason(known_next_idx != NULL_ID, @src(), "parent idx wasn't NULL_IDX, but parent ptr 'last child' field had a value of NULL_IDX, broken list", .{});
-        //     return Internal.traverse_to_find_index_after_this_one_backward_from_known_idx_after(self, this_idx, known_next_idx);
         // }
 
-        // pub inline fn get_next_idx_fallback(self: *const Heirarchy, this_idx: Index, known_idx_after_this: Index) Index {
-        //     if (FORWARD) return self.get_next_idx(this_idx);
-        //     assert_idx_less_than_len(this_idx, self.list.len, @src());
-        //     assert_idx_less_than_len(known_idx_after_this, self.list.len, @src());
-        //     return Internal.traverse_to_find_index_after_this_one_backward_from_known_idx_after(self, this_idx, known_idx_after_this);
+        // pub fn list_is_cyclic_backward(self: *Heirarchy, list: ListTag) bool {
+        //     if (FORWARD) {
+        //         const start_idx = self.get_last_index_in_list(list);
+        //         if (start_idx == NULL_ID) return false;
+        //         if (STATE or STRONG_ASSERT) assert_with_reason(self.index_is_in_list(start_idx, list), @src(), "provided idx {d} was not in list `{s}`", .{ start_idx, @tagName(list) });
+        //         var slow_idx = start_idx;
+        //         var fast_idx = start_idx;
+        //         var next_fast: Index = undefined;
+        //         while (true) {
+        //             next_fast = self.get_prev_idx(list, fast_idx);
+        //             if (next_fast == NULL_ID) return false;
+        //             next_fast = self.get_prev_idx(list, next_fast);
+        //             if (next_fast == NULL_ID) return false;
+        //             fast_idx = next_fast;
+        //             slow_idx = self.get_prev_idx(list, slow_idx);
+        //             if (slow_idx == fast_idx) return true;
+        //         }
+        //     } else {
+        //         return false;
+        //     }
         // }
-
-        pub inline fn get_list_tag(self: *const Heirarchy, this_idx: Index) ListTag {
-            if (STATE) return @enumFromInt(Internal.get_list_tag_raw(self.get_ptr(this_idx)));
-            assert_with_reason(ALLOW_SLOW, @src(), "slow fallbacks not allowed", .{});
-            return Internal.traverse_to_find_what_list_idx_is_in(self, this_idx);
-        }
-
-        pub fn get_nth_index_from_start_of_list(self: *Heirarchy, list: ListTag, n: Index) Index {
-            const set_count = self.get_list_len(list);
-            assert_with_reason(n < set_count, @src(), "index {d} is out of bounds for set {s} (len = {d})", .{ n, @tagName(list), set_count });
-            if (FORWARD) {
-                var c: Index = 0;
-                var idx = self.get_first_index_in_list(list);
-                while (c != n) {
-                    c += 1;
-                    idx = get_next_idx(self, list, idx);
-                }
-                return idx;
-            } else {
-                var c: Index = 0;
-                var idx = self.get_last_index_in_list(list);
-                const nn = set_count - n;
-                while (c < nn) {
-                    c += 1;
-                    idx = get_prev_idx(self, list, idx);
-                }
-                return idx;
-            }
-        }
-
-        pub fn get_nth_index_from_end_of_list(self: *Heirarchy, list: ListTag, n: Index) Index {
-            const count = self.get_list_len(list);
-            assert_with_reason(n < count, @src(), "index {d} is out of bounds for set {s} (len = {d})", .{ n, @tagName(list), count });
-            if (BACKWARD) {
-                var c: Index = 0;
-                var idx = self.get_last_index_in_list(list);
-                while (c != n) {
-                    c += 1;
-                    idx = get_prev_idx(self, list, idx);
-                }
-                return idx;
-            } else {
-                var c: Index = 0;
-                var idx = self.get_first_index_in_list(list);
-                const nn = count - n;
-                while (c < nn) {
-                    c += 1;
-                    idx = get_next_idx(self, list, idx);
-                }
-                return idx;
-            }
-        }
-
-        pub inline fn index_is_in_list(self: *Heirarchy, idx: Index, list: ListTag) bool {
-            if (STATE) {
-                const ptr = get_ptr(self, idx);
-                if (STRONG_ASSERT) {
-                    if (Internal.get_list_tag_raw(ptr) != @intFromEnum(list)) return false;
-                } else {
-                    return Internal.get_list_tag_raw(ptr) == @intFromEnum(list);
-                }
-            }
-            if (list == UNTRACKED_LIST) {
-                if (ALLOW_SLOW) return true; //TODO iterate ALL lists and verify its not in any?
-                return true;
-            }
-            assert_with_reason(ALLOW_SLOW, @src(), "slow fallbacks disallowed", .{});
-            if (FORWARD) {
-                return Internal.traverse_forward_from_idx_and_report_if_found_target_idx(self, self.get_first_index_in_list(list), idx);
-            } else {
-                return Internal.traverse_backward_from_idx_and_report_if_found_target_idx(self, self.get_last_index_in_list(list), idx);
-            }
-        }
-
-        pub inline fn get_first_index_in_list(self: *const Heirarchy, list: ListTag) Index {
-            assert_with_reason(list != UNTRACKED_LIST, @src(), "cannot find first index in the 'untracked' list (list with larget enum tag value) without an indx to start from", .{});
-            if (HEAD) return self.lists[@intFromEnum(list)].first_idx;
-            assert_with_reason(ALLOW_SLOW, @src(), "slow fallbacks disallowed", .{});
-            return Internal.traverse_backward_to_get_first_index_in_list_from_start_index(self, self.get_last_index_in_list(list));
-        }
-
-        pub inline fn get_first_index_in_same_list_as_this_index(self: *const Heirarchy, this_idx: Index) Index {
-            assert_with_reason(this_idx != NULL_ID, @src(), "cannot find first index in same list as NULL_IDX, it has no list association", .{});
-            if (STATE) {
-                const list = self.get_list_tag(this_idx);
-                if (list != UNTRACKED_LIST) {
-                    if (HEAD) return self.get_first_index_in_list(list);
-                } else if (PARENT and FIRST_CHILD) {
-                    const parent_idx = self.get_parent_idx(this_idx);
-                    const parent_ptr = self.get_ptr(parent_idx);
-                    return @field(parent_ptr, FIRST_CHILD_FIELD);
-                }
-            }
-            if (BACKWARD) {
-                return Internal.traverse_backward_to_get_first_index_in_list_from_start_index(self, this_idx);
-            } else {
-                assert_with_reason(ALLOW_SLOW, @src(), "slow fallbacks disallowed", .{});
-                const list = Internal.traverse_all_lists_forward_and_report_list_found_in(self, this_idx);
-                assert_with_reason(list != UNTRACKED_LIST, @src(), "final fallback failed: items not linked in backward direction and item not in any tracked list", .{});
-                return self.get_first_index_in_list(list);
-            }
-        }
-
-        pub inline fn get_last_index_in_list(self: *const Heirarchy, list: ListTag) Index {
-            assert_with_reason(list != UNTRACKED_LIST, @src(), "cannot find last index in the 'untracked' list (list with larget enum tag value) without an indx to start from", .{});
-            if (TAIL) return self.lists[@intFromEnum(list)].last_idx;
-            assert_with_reason(ALLOW_SLOW, @src(), "slow fallbacks disallowed", .{});
-            return Internal.traverse_forward_to_get_last_index_in_list_from_start_index(self, self.get_first_index_in_list(list));
-        }
-
-        pub inline fn get_last_index_in_same_list_as_this_index(self: *const Heirarchy, this_idx: Index) Index {
-            assert_with_reason(this_idx != NULL_ID, @src(), "cannot find last index in same list as NULL_IDX, it has no list association", .{});
-            if (STATE) {
-                const list = self.get_list_tag(this_idx);
-                if (list != UNTRACKED_LIST) {
-                    if (TAIL) return self.get_last_index_in_list(list);
-                } else if (PARENT and LAST_CHILD) {
-                    const parent_idx = self.get_parent_idx(this_idx);
-                    const parent_ptr = self.get_ptr(parent_idx);
-                    return @field(parent_ptr, LAST_CHILD_FIELD);
-                }
-            }
-            if (FORWARD) {
-                return Internal.traverse_forward_to_get_last_index_in_list_from_start_index(self, this_idx);
-            } else {
-                assert_with_reason(ALLOW_SLOW, @src(), "slow fallbacks disallowed", .{});
-                const list = Internal.traverse_all_lists_forward_and_report_list_found_in(self, this_idx);
-                assert_with_reason(list != UNTRACKED_LIST, @src(), "final fallback failed: items not linked in forward direction and item not in any tracked list", .{});
-                return self.get_last_index_in_list(list);
-            }
-        }
-
-        pub inline fn get_items_and_insert_at(self: *Heirarchy, get_from: anytype, insert_to: anytype, alloc: Allocator) if (RETURN_ERRORS) Error!LLSlice else LLSlice {
-            return Internal.get_items_and_insert_at_internal(self, get_from, insert_to, alloc, false);
-        }
-
-        pub inline fn get_items_and_insert_at_assume_capacity(self: *Heirarchy, get_from: anytype, insert_to: anytype) LLSlice {
-            return Internal.get_items_and_insert_at_internal(self, get_from, insert_to, DummyAllocator.allocator, true);
-        }
-
-        pub fn list_is_cyclic_forward(self: *Heirarchy, list: ListTag) bool {
-            if (FORWARD) {
-                const start_idx = self.get_first_index_in_list(list);
-                if (start_idx == NULL_ID) return false;
-                if (STATE or STRONG_ASSERT) assert_with_reason(self.index_is_in_list(start_idx, list), @src(), "provided idx {d} was not in list `{s}`", .{ start_idx, @tagName(list) });
-                var slow_idx = start_idx;
-                var fast_idx = start_idx;
-                var next_fast: Index = undefined;
-                while (true) {
-                    next_fast = self.get_next_idx(list, fast_idx);
-                    if (next_fast == NULL_ID) return false;
-                    next_fast = self.get_next_idx(list, next_fast);
-                    if (next_fast == NULL_ID) return false;
-                    fast_idx = next_fast;
-                    slow_idx = self.get_next_idx(list, slow_idx);
-                    if (slow_idx == fast_idx) return true;
-                }
-            } else {
-                return false;
-            }
-        }
-
-        pub fn list_is_cyclic_backward(self: *Heirarchy, list: ListTag) bool {
-            if (FORWARD) {
-                const start_idx = self.get_last_index_in_list(list);
-                if (start_idx == NULL_ID) return false;
-                if (STATE or STRONG_ASSERT) assert_with_reason(self.index_is_in_list(start_idx, list), @src(), "provided idx {d} was not in list `{s}`", .{ start_idx, @tagName(list) });
-                var slow_idx = start_idx;
-                var fast_idx = start_idx;
-                var next_fast: Index = undefined;
-                while (true) {
-                    next_fast = self.get_prev_idx(list, fast_idx);
-                    if (next_fast == NULL_ID) return false;
-                    next_fast = self.get_prev_idx(list, next_fast);
-                    if (next_fast == NULL_ID) return false;
-                    fast_idx = next_fast;
-                    slow_idx = self.get_prev_idx(list, slow_idx);
-                    if (slow_idx == fast_idx) return true;
-                }
-            } else {
-                return false;
-            }
-        }
 
         // pub fn find_idx(self: List, comptime Param: type, param: Param, match_fn: *const fn (param: Param, item: *const Elem) bool) ?Idx {
         //     for (self.slice(), 0..) |*item, idx| {
@@ -2116,475 +2637,475 @@ pub fn LinkedHeirarchy(comptime options: LinkedHeirarchyOptions) type {
 // }
 
 test "LinkedList.zig - Linear Doubly Linked" {
-    const t = Root.Testing;
-    const alloc = std.heap.page_allocator;
-    const TestElem = struct {
-        prev: u16,
-        val: u8,
-        idx: u16,
-        list: u8,
-        next: u16,
-    };
-    const TestState = enum(u8) {
-        USED,
-        FREE,
-        INVALID,
-        NONE,
-    };
-    const uninit_val = TestElem{
-        .idx = 0xAAAA,
-        .prev = 0xAAAA,
-        .next = 0xAAAA,
-        .list = 0xAA,
-        .val = 0,
-    };
-    const opts = LinkedHeirarchyManagerOptions{
-        .base_memory_options = Root.List.ListOptions{
-            .alignment = null,
-            .alloc_error_behavior = .ERRORS_PANIC,
-            .element_type = TestElem,
-            .growth_model = .GROW_BY_25_PERCENT,
-            .index_type = u16,
-            .secure_wipe_bytes = true,
-            .memset_uninit_val = &uninit_val,
-        },
-        .master_list_enum = TestState,
-        .forward_linkage = "next",
-        .backward_linkage = "prev",
-        .element_idx_cache_field = "idx",
-        .force_cache_first_index = true,
-        .force_cache_last_index = true,
-        .element_list_flag_access = ElementStateAccess{
-            .field = "list",
-            .field_bit_offset = 1,
-            .field_bit_count = 2,
-            .field_type = u8,
-        },
-        .stronger_asserts = true,
-    };
-    const Action = struct {
-        fn set_value_from_string(elem: *TestElem, userdata: ?*anyopaque) void {
-            const string: *[]const u8 = @ptrCast(@alignCast(userdata.?));
-            elem.val = string.*[0];
-            string.* = string.*[1..];
-        }
-        fn move_data(from_item: *const TestElem, to_item: *TestElem, userdata: ?*anyopaque) void {
-            _ = userdata;
-            to_item.val = from_item.val;
-        }
-        fn greater_than(a: *const TestElem, b: *const TestElem, userdata: ?*anyopaque) bool {
-            _ = userdata;
-            return a.val > b.val;
-        }
-    };
-    const List = define_linked_heirarchy_manager(opts);
-    const expect = struct {
-        fn list_is_valid(linked_list: *List, list: TestState, case_indexes: []const u16, case_vals: []const u8) !void {
-            errdefer debug_list(linked_list, list);
-            var i: List.Idx = 0;
-            var c: List.Idx = 0;
-            const list_count = linked_list.get_list_len(list);
-            try t.expect_equal(case_indexes.len, "indexes.len", case_vals.len, "vals.len", "text case indexes and vals have different len", .{});
-            try t.expect_equal(list_count, "list_count", case_vals.len, "vals.len", "list {s} count mismatch with test case vals len", .{@tagName(list)});
-            //FORWARD
-            var start_idx = linked_list.get_first_index_in_list(list);
-            if (start_idx == List.NULL_IDX) {
-                try t.expect_equal(list_count, "list_count", c, "real_count", "list list {s} mismatch count", .{@tagName(list)});
-            } else {
-                try t.expect_true(linked_list.index_is_in_list(start_idx, list), "list.idx_is_in_list(start_idx, list)", "list list {s} first idx {d} cached list mismatch", .{ @tagName(list), start_idx });
-                var slow_idx = start_idx;
-                var fast_idx = start_idx;
-                var fast_ptr = linked_list.get_ptr(fast_idx);
-                var prev_fast_idx: List.Idx = List.NULL_IDX;
-                try t.expect_equal(fast_idx, "fast_idx", @field(fast_ptr, List.CACHE_FIELD), "@field(start_ptr, List.CACHE_FIELD)", "list list {s} first idx {d} cached idx mismatch", .{ @tagName(list), start_idx });
-                try t.expect_equal(@intFromEnum(list), "@intFromEnum(list)", List.Internal.get_list_tag_raw(fast_ptr), "List.Internal.get_list_raw(start_idx)", "list list {s} first idx {d} cached list mismatch", .{ @tagName(list), start_idx });
-                try t.expect_equal(@field(fast_ptr, List.PREV_FIELD), "@field(fast_ptr, List.PREV_FIELD)", prev_fast_idx, "prev_fast_idx", "list list {s} first idx {d} cached prev isnt NULL_IDX", .{ @tagName(list), start_idx });
-                try t.expect_less_than(i, "i", case_vals.len, " case_vals.len", "list list {s} current position {d} out of bounds for test case vals", .{ @tagName(list), i });
-                try t.expect_equal(fast_idx, "fast_idx", case_indexes[i], "case_indexes[i]", "list list {s} element at pos {d} idx mismatch", .{ @tagName(list), i });
-                try t.expect_equal(@field(fast_ptr, "val"), "@field(fast_ptr, \"val\")", case_vals[i], "case_vals[i]", "list list {s} element at pos {d} val mismatch", .{ @tagName(list), i });
-                i = 1;
-                c = 1;
-                check: while (true) {
-                    prev_fast_idx = fast_idx;
-                    fast_idx = linked_list.get_next_idx(list, fast_idx);
-                    if (fast_idx == List.NULL_IDX) {
-                        try t.expect_equal(list_count, "list_count", c, "real_count", "list list {s} mismatch count", .{@tagName(list)});
-                        break :check;
-                    }
-                    try t.expect_greater_than(linked_list.list.len, "list.list.len", fast_idx, "fast_idx", "list list {s} next idx out of bounds but not NULL_IDX", .{@tagName(list)});
-                    fast_ptr = linked_list.get_ptr(fast_idx);
-                    try t.expect_equal(fast_idx, "fast_idx", @field(fast_ptr, List.CACHE_FIELD), "@field(fast_ptr, List.CACHE_FIELD)", "list list {s} idx {d} cached idx mismatch", .{ @tagName(list), fast_idx });
-                    try t.expect_equal(@intFromEnum(list), "@intFromEnum(list)", List.Internal.get_list_tag_raw(fast_ptr), "List.Internal.get_list_raw(fast_ptr)", "list list {s} idx {d} cached list mismatch", .{ @tagName(list), fast_idx });
-                    try t.expect_equal(@field(fast_ptr, List.PREV_FIELD), "@field(fast_ptr, List.PREV_FIELD)", prev_fast_idx, "prev_fast_idx", "list list {s} idx {d} cached prev isnt previous fast idx {d}", .{ @tagName(list), fast_idx, prev_fast_idx });
-                    try t.expect_less_than(i, "i", case_vals.len, " case_vals.len", "list list {s} current position {d} out of bounds for test case vals", .{ @tagName(list), i });
-                    try t.expect_equal(fast_idx, "fast_idx", case_indexes[i], "case_indexes[i]", "list list {s} element at pos {d} idx mismatch", .{ @tagName(list), i });
-                    try t.expect_equal(@field(fast_ptr, "val"), "@field(fast_ptr, \"val\")", case_vals[i], "case_vals[i]", "list list {s} element at pos {d} val mismatch", .{ @tagName(list), i });
-                    i += 1;
-                    c += 1;
-                    prev_fast_idx = fast_idx;
-                    fast_idx = linked_list.get_next_idx(list, fast_idx);
-                    if (fast_idx == List.NULL_IDX) {
-                        try t.expect_equal(list_count, "list_count", c, "real_count", "list list {s} mismatch count", .{@tagName(list)});
-                        break :check;
-                    }
-                    fast_ptr = linked_list.get_ptr(fast_idx);
-                    try t.expect_equal(fast_idx, "fast_idx", @field(fast_ptr, List.CACHE_FIELD), "@field(fast_ptr, List.CACHE_FIELD)", "list list {s} idx {d} cached idx mismatch", .{ @tagName(list), fast_idx });
-                    try t.expect_equal(@intFromEnum(list), "@intFromEnum(list)", List.Internal.get_list_tag_raw(fast_ptr), "List.Internal.get_list_raw(fast_ptr)", "list list {s} idx {d} cached list mismatch", .{ @tagName(list), fast_idx });
-                    try t.expect_equal(@field(fast_ptr, List.PREV_FIELD), "@field(fast_ptr, List.PREV_FIELD)", prev_fast_idx, "prev_fast_idx", "list list {s} idx {d} cached prev isnt previous fast idx {d}", .{ @tagName(list), fast_idx, prev_fast_idx });
-                    try t.expect_less_than(i, "i", case_vals.len, " case_vals.len", "list list {s} current position {d} out of bounds for test case vals", .{ @tagName(list), i });
-                    try t.expect_equal(fast_idx, "fast_idx", case_indexes[i], "case_indexes[i]", "list list {s} element at pos {d} idx mismatch", .{ @tagName(list), i });
-                    try t.expect_equal(@field(fast_ptr, "val"), "@field(fast_ptr, \"val\")", case_vals[i], "case_vals[i]", "list list {s} element at pos {d} val mismatch", .{ @tagName(list), i });
-                    i += 1;
-                    c += 1;
-                    slow_idx = linked_list.get_next_idx(list, slow_idx);
-                    try t.expect_not_equal(fast_idx, "fast_idx", slow_idx, "slow_idx", "list list {s} was cyclic", .{@tagName(list)});
-                }
-            }
-            //BACKWARD
-            i = @intCast(case_indexes.len -| 1);
-            c = 0;
-            start_idx = linked_list.get_last_index_in_list(list);
-            if (start_idx == List.NULL_IDX) {
-                try t.expect_equal(list_count, "list_count", c, "real_count", "list list {s} mismatch count", .{@tagName(list)});
-            } else {
-                try t.expect_true(linked_list.index_is_in_list(start_idx, list), "list.idx_is_in_list(start_idx, list)", "list list {s} first idx {d} cached list mismatch", .{ @tagName(list), start_idx });
-                var slow_idx = start_idx;
-                var fast_idx = start_idx;
-                var fast_ptr = linked_list.get_ptr(fast_idx);
-                var prev_fast_idx: List.Idx = List.NULL_IDX;
-                try t.expect_equal(fast_idx, "fast_idx", @field(fast_ptr, List.CACHE_FIELD), "@field(start_ptr, List.CACHE_FIELD)", "list list {s} first idx {d} cached idx mismatch", .{ @tagName(list), start_idx });
-                try t.expect_equal(@intFromEnum(list), "@intFromEnum(list)", List.Internal.get_list_tag_raw(fast_ptr), "List.Internal.get_list_raw(start_idx)", "list list {s} first idx {d} cached list mismatch", .{ @tagName(list), start_idx });
-                try t.expect_equal(@field(fast_ptr, List.NEXT_FIELD), "@field(fast_ptr, List.NEXT_FIELD)", prev_fast_idx, "prev_fast_idx", "list list {s} first idx {d} cached next isnt NULL_IDX", .{ @tagName(list), start_idx });
-                try t.expect_less_than(i, "i", case_vals.len, " case_vals.len", "list list {s} current position {d} out of bounds for test case vals", .{ @tagName(list), i });
-                try t.expect_equal(fast_idx, "fast_idx", case_indexes[i], "case_indexes[i]", "list list {s} element at pos {d} idx mismatch", .{ @tagName(list), i });
-                try t.expect_equal(@field(fast_ptr, "val"), "@field(fast_ptr, \"val\")", case_vals[i], "case_vals[i]", "list list {s} element at pos {d} val mismatch", .{ @tagName(list), i });
-                i -|= 1;
-                c = 1;
-                check: while (true) {
-                    prev_fast_idx = fast_idx;
-                    fast_idx = linked_list.get_prev_idx(list, fast_idx);
-                    if (fast_idx == List.NULL_IDX) {
-                        try t.expect_equal(list_count, "list_count", c, "real_count", "list list {s} mismatch count", .{@tagName(list)});
-                        break :check;
-                    }
-                    try t.expect_greater_than(linked_list.list.len, "list.list.len", fast_idx, "fast_idx", "list list {s} next idx out of bounds but not NULL_IDX", .{@tagName(list)});
-                    fast_ptr = linked_list.get_ptr(fast_idx);
-                    try t.expect_equal(fast_idx, "fast_idx", @field(fast_ptr, List.CACHE_FIELD), "@field(fast_ptr, List.CACHE_FIELD)", "list list {s} idx {d} cached idx mismatch", .{ @tagName(list), fast_idx });
-                    try t.expect_equal(@intFromEnum(list), "@intFromEnum(list)", List.Internal.get_list_tag_raw(fast_ptr), "List.Internal.get_list_raw(fast_ptr)", "list list {s} idx {d} cached list mismatch", .{ @tagName(list), fast_idx });
-                    try t.expect_equal(@field(fast_ptr, List.NEXT_FIELD), "@field(fast_ptr, List.NEXT_FIELD)", prev_fast_idx, "prev_fast_idx", "list list {s} idx {d} cached next isnt previous fast idx {d}", .{ @tagName(list), fast_idx, prev_fast_idx });
-                    try t.expect_less_than(i, "i", case_vals.len, " case_vals.len", "list list {s} current position {d} out of bounds for test case vals", .{ @tagName(list), i });
-                    try t.expect_equal(fast_idx, "fast_idx", case_indexes[i], "case_indexes[i]", "list list {s} element at pos {d} idx mismatch", .{ @tagName(list), i });
-                    try t.expect_equal(@field(fast_ptr, "val"), "@field(fast_ptr, \"val\")", case_vals[i], "case_vals[i]", "list list {s} element at pos {d} val mismatch", .{ @tagName(list), i });
-                    i -|= 1;
-                    c += 1;
-                    prev_fast_idx = fast_idx;
-                    fast_idx = linked_list.get_prev_idx(list, fast_idx);
-                    if (fast_idx == List.NULL_IDX) {
-                        try t.expect_equal(list_count, "list_count", c, "real_count", "list list {s} mismatch count", .{@tagName(list)});
-                        break :check;
-                    }
-                    fast_ptr = linked_list.get_ptr(fast_idx);
-                    try t.expect_equal(fast_idx, "fast_idx", @field(fast_ptr, List.CACHE_FIELD), "@field(fast_ptr, List.CACHE_FIELD)", "list list {s} idx {d} cached idx mismatch", .{ @tagName(list), fast_idx });
-                    try t.expect_equal(@intFromEnum(list), "@intFromEnum(list)", List.Internal.get_list_tag_raw(fast_ptr), "List.Internal.get_list_raw(fast_ptr)", "list list {s} idx {d} cached list mismatch", .{ @tagName(list), fast_idx });
-                    try t.expect_equal(@field(fast_ptr, List.NEXT_FIELD), "@field(fast_ptr, List.NEXT_FIELD)", prev_fast_idx, "prev_fast_idx", "list list {s} idx {d} cached prev isnt previous fast idx {d}", .{ @tagName(list), fast_idx, prev_fast_idx });
-                    try t.expect_less_than(i, "i", case_vals.len, " case_vals.len", "list list {s} current position {d} out of bounds for test case vals", .{ @tagName(list), i });
-                    try t.expect_equal(fast_idx, "fast_idx", case_indexes[i], "case_indexes[i]", "list list {s} element at pos {d} idx mismatch", .{ @tagName(list), i });
-                    try t.expect_equal(@field(fast_ptr, "val"), "@field(fast_ptr, \"val\")", case_vals[i], "case_vals[i]", "list list {s} element at pos {d} val mismatch", .{ @tagName(list), i });
-                    i -|= 1;
-                    c += 1;
-                    slow_idx = linked_list.get_prev_idx(list, slow_idx);
-                    try t.expect_not_equal(fast_idx, "fast_idx", slow_idx, "slow_idx", "list list {s} was cyclic", .{@tagName(list)});
-                }
-            }
-        }
-        fn full_ll_state(list: *List, used_indexes: []const u16, used_vals: []const u8, free_indexes: []const u16, free_vals: []const u8, invalid_indexes: []const u16, invalid_vals: []const u8) !void {
-            try list_is_valid(list, .FREE, free_indexes, free_vals);
-            try list_is_valid(list, .USED, used_indexes, used_vals);
-            try list_is_valid(list, .INVALID, invalid_indexes, invalid_vals);
-            if (list.get_list_len(.FREE) == 0) {
-                try t.expect_equal(list.get_first_index_in_list(.FREE), "list.get_first_index_in_list(.FREE)", List.NULL_IDX, "List.NULL_IDX", "empty list `FREE` does not have NULL_IDX for first index", .{});
-                try t.expect_equal(list.get_last_index_in_list(.FREE), "list.get_last_index_in_list(.FREE)", List.NULL_IDX, "List.NULL_IDX", "empty list `FREE` does not have NULL_IDX for last index", .{});
-            }
-            if (list.get_list_len(.USED) == 0) {
-                try t.expect_equal(list.get_first_index_in_list(.USED), "list.get_first_index_in_list(.USED)", List.NULL_IDX, "List.NULL_IDX", "empty list `USED` does not have NULL_IDX for first index", .{});
-                try t.expect_equal(list.get_last_index_in_list(.USED), "list.get_last_index_in_list(.USED)", List.NULL_IDX, "List.NULL_IDX", "empty list `USED` does not have NULL_IDX for last index", .{});
-            }
-            if (list.get_list_len(.INVALID) == 0) {
-                try t.expect_equal(list.get_first_index_in_list(.INVALID), "list.get_first_index_in_list(.INVALID)", List.NULL_IDX, "List.NULL_IDX", "empty list `INVALID` does not have NULL_IDX for first index", .{});
-                try t.expect_equal(list.get_last_index_in_list(.INVALID), "list.get_last_index_in_list(.INVALID)", List.NULL_IDX, "List.NULL_IDX", "empty list `INVALID` does not have NULL_IDX for last index", .{});
-            }
-            const total_count = list.get_list_len(.USED) + list.get_list_len(.FREE) + list.get_list_len(.INVALID);
-            try t.expect_equal(total_count, "total_count", list.list.len, "list.list.len", "total list list counts did not equal underlying list len (leaked indexes)", .{});
-        }
-        fn debug_list(linked_list: *List, list: TestState) void {
-            t.print("\nERROR STATE: {s}\ncount:     {d: >2}\nfirst_idx: {d: >2}\nlast_idx:  {d: >2}\n", .{
-                @tagName(list),
-                linked_list.get_list_len(list),
-                linked_list.get_first_index_in_list(list),
-                linked_list.get_last_index_in_list(list),
-            });
-            var idx = linked_list.get_first_index_in_list(list);
-            var ptr: *List.Elem = undefined;
-            t.print("forward:      ", .{});
-            while (idx != List.NULL_IDX) {
-                ptr = linked_list.get_ptr(idx);
-                t.print("{d} -> ", .{idx});
-                idx = @field(ptr, List.NEXT_FIELD);
-            }
+    // const t = Root.Testing;
+    // const alloc = std.heap.page_allocator;
+    // const TestElem = struct {
+    //     prev: u16,
+    //     val: u8,
+    //     idx: u16,
+    //     list: u8,
+    //     next: u16,
+    // };
+    // const TestState = enum(u8) {
+    //     USED,
+    //     FREE,
+    //     INVALID,
+    //     NONE,
+    // };
+    // const uninit_val = TestElem{
+    //     .idx = 0xAAAA,
+    //     .prev = 0xAAAA,
+    //     .next = 0xAAAA,
+    //     .list = 0xAA,
+    //     .val = 0,
+    // };
+    // const opts = LinkedHeirarchyManagerOptions{
+    //     .base_memory_options = Root.List.ListOptions{
+    //         .alignment = null,
+    //         .alloc_error_behavior = .ERRORS_PANIC,
+    //         .element_type = TestElem,
+    //         .growth_model = .GROW_BY_25_PERCENT,
+    //         .index_type = u16,
+    //         .secure_wipe_bytes = true,
+    //         .memset_uninit_val = &uninit_val,
+    //     },
+    //     .master_list_enum = TestState,
+    //     .forward_linkage = "next",
+    //     .backward_linkage = "prev",
+    //     .element_idx_cache_field = "idx",
+    //     .force_cache_first_index = true,
+    //     .force_cache_last_index = true,
+    //     .element_list_flag_access = ElementStateAccess{
+    //         .field = "list",
+    //         .field_bit_offset = 1,
+    //         .field_bit_count = 2,
+    //         .field_type = u8,
+    //     },
+    //     .stronger_asserts = true,
+    // };
+    // const Action = struct {
+    //     fn set_value_from_string(elem: *TestElem, userdata: ?*anyopaque) void {
+    //         const string: *[]const u8 = @ptrCast(@alignCast(userdata.?));
+    //         elem.val = string.*[0];
+    //         string.* = string.*[1..];
+    //     }
+    //     fn move_data(from_item: *const TestElem, to_item: *TestElem, userdata: ?*anyopaque) void {
+    //         _ = userdata;
+    //         to_item.val = from_item.val;
+    //     }
+    //     fn greater_than(a: *const TestElem, b: *const TestElem, userdata: ?*anyopaque) bool {
+    //         _ = userdata;
+    //         return a.val > b.val;
+    //     }
+    // };
+    // const List = define_linked_heirarchy_manager(opts);
+    // const expect = struct {
+    //     fn list_is_valid(linked_list: *List, list: TestState, case_indexes: []const u16, case_vals: []const u8) !void {
+    //         errdefer debug_list(linked_list, list);
+    //         var i: List.Idx = 0;
+    //         var c: List.Idx = 0;
+    //         const list_count = linked_list.get_list_len(list);
+    //         try t.expect_equal(case_indexes.len, "indexes.len", case_vals.len, "vals.len", "text case indexes and vals have different len", .{});
+    //         try t.expect_equal(list_count, "list_count", case_vals.len, "vals.len", "list {s} count mismatch with test case vals len", .{@tagName(list)});
+    //         //FORWARD
+    //         var start_idx = linked_list.get_first_index_in_list(list);
+    //         if (start_idx == List.NULL_IDX) {
+    //             try t.expect_equal(list_count, "list_count", c, "real_count", "list list {s} mismatch count", .{@tagName(list)});
+    //         } else {
+    //             try t.expect_true(linked_list.index_is_in_list(start_idx, list), "list.idx_is_in_list(start_idx, list)", "list list {s} first idx {d} cached list mismatch", .{ @tagName(list), start_idx });
+    //             var slow_idx = start_idx;
+    //             var fast_idx = start_idx;
+    //             var fast_ptr = linked_list.get_ptr(fast_idx);
+    //             var prev_fast_idx: List.Idx = List.NULL_IDX;
+    //             try t.expect_equal(fast_idx, "fast_idx", @field(fast_ptr, List.CACHE_FIELD), "@field(start_ptr, List.CACHE_FIELD)", "list list {s} first idx {d} cached idx mismatch", .{ @tagName(list), start_idx });
+    //             try t.expect_equal(@intFromEnum(list), "@intFromEnum(list)", List.Internal.get_list_tag_raw(fast_ptr), "List.Internal.get_list_raw(start_idx)", "list list {s} first idx {d} cached list mismatch", .{ @tagName(list), start_idx });
+    //             try t.expect_equal(@field(fast_ptr, List.PREV_FIELD), "@field(fast_ptr, List.PREV_FIELD)", prev_fast_idx, "prev_fast_idx", "list list {s} first idx {d} cached prev isnt NULL_IDX", .{ @tagName(list), start_idx });
+    //             try t.expect_less_than(i, "i", case_vals.len, " case_vals.len", "list list {s} current position {d} out of bounds for test case vals", .{ @tagName(list), i });
+    //             try t.expect_equal(fast_idx, "fast_idx", case_indexes[i], "case_indexes[i]", "list list {s} element at pos {d} idx mismatch", .{ @tagName(list), i });
+    //             try t.expect_equal(@field(fast_ptr, "val"), "@field(fast_ptr, \"val\")", case_vals[i], "case_vals[i]", "list list {s} element at pos {d} val mismatch", .{ @tagName(list), i });
+    //             i = 1;
+    //             c = 1;
+    //             check: while (true) {
+    //                 prev_fast_idx = fast_idx;
+    //                 fast_idx = linked_list.get_next_idx(list, fast_idx);
+    //                 if (fast_idx == List.NULL_IDX) {
+    //                     try t.expect_equal(list_count, "list_count", c, "real_count", "list list {s} mismatch count", .{@tagName(list)});
+    //                     break :check;
+    //                 }
+    //                 try t.expect_greater_than(linked_list.list.len, "list.list.len", fast_idx, "fast_idx", "list list {s} next idx out of bounds but not NULL_IDX", .{@tagName(list)});
+    //                 fast_ptr = linked_list.get_ptr(fast_idx);
+    //                 try t.expect_equal(fast_idx, "fast_idx", @field(fast_ptr, List.CACHE_FIELD), "@field(fast_ptr, List.CACHE_FIELD)", "list list {s} idx {d} cached idx mismatch", .{ @tagName(list), fast_idx });
+    //                 try t.expect_equal(@intFromEnum(list), "@intFromEnum(list)", List.Internal.get_list_tag_raw(fast_ptr), "List.Internal.get_list_raw(fast_ptr)", "list list {s} idx {d} cached list mismatch", .{ @tagName(list), fast_idx });
+    //                 try t.expect_equal(@field(fast_ptr, List.PREV_FIELD), "@field(fast_ptr, List.PREV_FIELD)", prev_fast_idx, "prev_fast_idx", "list list {s} idx {d} cached prev isnt previous fast idx {d}", .{ @tagName(list), fast_idx, prev_fast_idx });
+    //                 try t.expect_less_than(i, "i", case_vals.len, " case_vals.len", "list list {s} current position {d} out of bounds for test case vals", .{ @tagName(list), i });
+    //                 try t.expect_equal(fast_idx, "fast_idx", case_indexes[i], "case_indexes[i]", "list list {s} element at pos {d} idx mismatch", .{ @tagName(list), i });
+    //                 try t.expect_equal(@field(fast_ptr, "val"), "@field(fast_ptr, \"val\")", case_vals[i], "case_vals[i]", "list list {s} element at pos {d} val mismatch", .{ @tagName(list), i });
+    //                 i += 1;
+    //                 c += 1;
+    //                 prev_fast_idx = fast_idx;
+    //                 fast_idx = linked_list.get_next_idx(list, fast_idx);
+    //                 if (fast_idx == List.NULL_IDX) {
+    //                     try t.expect_equal(list_count, "list_count", c, "real_count", "list list {s} mismatch count", .{@tagName(list)});
+    //                     break :check;
+    //                 }
+    //                 fast_ptr = linked_list.get_ptr(fast_idx);
+    //                 try t.expect_equal(fast_idx, "fast_idx", @field(fast_ptr, List.CACHE_FIELD), "@field(fast_ptr, List.CACHE_FIELD)", "list list {s} idx {d} cached idx mismatch", .{ @tagName(list), fast_idx });
+    //                 try t.expect_equal(@intFromEnum(list), "@intFromEnum(list)", List.Internal.get_list_tag_raw(fast_ptr), "List.Internal.get_list_raw(fast_ptr)", "list list {s} idx {d} cached list mismatch", .{ @tagName(list), fast_idx });
+    //                 try t.expect_equal(@field(fast_ptr, List.PREV_FIELD), "@field(fast_ptr, List.PREV_FIELD)", prev_fast_idx, "prev_fast_idx", "list list {s} idx {d} cached prev isnt previous fast idx {d}", .{ @tagName(list), fast_idx, prev_fast_idx });
+    //                 try t.expect_less_than(i, "i", case_vals.len, " case_vals.len", "list list {s} current position {d} out of bounds for test case vals", .{ @tagName(list), i });
+    //                 try t.expect_equal(fast_idx, "fast_idx", case_indexes[i], "case_indexes[i]", "list list {s} element at pos {d} idx mismatch", .{ @tagName(list), i });
+    //                 try t.expect_equal(@field(fast_ptr, "val"), "@field(fast_ptr, \"val\")", case_vals[i], "case_vals[i]", "list list {s} element at pos {d} val mismatch", .{ @tagName(list), i });
+    //                 i += 1;
+    //                 c += 1;
+    //                 slow_idx = linked_list.get_next_idx(list, slow_idx);
+    //                 try t.expect_not_equal(fast_idx, "fast_idx", slow_idx, "slow_idx", "list list {s} was cyclic", .{@tagName(list)});
+    //             }
+    //         }
+    //         //BACKWARD
+    //         i = @intCast(case_indexes.len -| 1);
+    //         c = 0;
+    //         start_idx = linked_list.get_last_index_in_list(list);
+    //         if (start_idx == List.NULL_IDX) {
+    //             try t.expect_equal(list_count, "list_count", c, "real_count", "list list {s} mismatch count", .{@tagName(list)});
+    //         } else {
+    //             try t.expect_true(linked_list.index_is_in_list(start_idx, list), "list.idx_is_in_list(start_idx, list)", "list list {s} first idx {d} cached list mismatch", .{ @tagName(list), start_idx });
+    //             var slow_idx = start_idx;
+    //             var fast_idx = start_idx;
+    //             var fast_ptr = linked_list.get_ptr(fast_idx);
+    //             var prev_fast_idx: List.Idx = List.NULL_IDX;
+    //             try t.expect_equal(fast_idx, "fast_idx", @field(fast_ptr, List.CACHE_FIELD), "@field(start_ptr, List.CACHE_FIELD)", "list list {s} first idx {d} cached idx mismatch", .{ @tagName(list), start_idx });
+    //             try t.expect_equal(@intFromEnum(list), "@intFromEnum(list)", List.Internal.get_list_tag_raw(fast_ptr), "List.Internal.get_list_raw(start_idx)", "list list {s} first idx {d} cached list mismatch", .{ @tagName(list), start_idx });
+    //             try t.expect_equal(@field(fast_ptr, List.NEXT_FIELD), "@field(fast_ptr, List.NEXT_FIELD)", prev_fast_idx, "prev_fast_idx", "list list {s} first idx {d} cached next isnt NULL_IDX", .{ @tagName(list), start_idx });
+    //             try t.expect_less_than(i, "i", case_vals.len, " case_vals.len", "list list {s} current position {d} out of bounds for test case vals", .{ @tagName(list), i });
+    //             try t.expect_equal(fast_idx, "fast_idx", case_indexes[i], "case_indexes[i]", "list list {s} element at pos {d} idx mismatch", .{ @tagName(list), i });
+    //             try t.expect_equal(@field(fast_ptr, "val"), "@field(fast_ptr, \"val\")", case_vals[i], "case_vals[i]", "list list {s} element at pos {d} val mismatch", .{ @tagName(list), i });
+    //             i -|= 1;
+    //             c = 1;
+    //             check: while (true) {
+    //                 prev_fast_idx = fast_idx;
+    //                 fast_idx = linked_list.get_prev_idx(list, fast_idx);
+    //                 if (fast_idx == List.NULL_IDX) {
+    //                     try t.expect_equal(list_count, "list_count", c, "real_count", "list list {s} mismatch count", .{@tagName(list)});
+    //                     break :check;
+    //                 }
+    //                 try t.expect_greater_than(linked_list.list.len, "list.list.len", fast_idx, "fast_idx", "list list {s} next idx out of bounds but not NULL_IDX", .{@tagName(list)});
+    //                 fast_ptr = linked_list.get_ptr(fast_idx);
+    //                 try t.expect_equal(fast_idx, "fast_idx", @field(fast_ptr, List.CACHE_FIELD), "@field(fast_ptr, List.CACHE_FIELD)", "list list {s} idx {d} cached idx mismatch", .{ @tagName(list), fast_idx });
+    //                 try t.expect_equal(@intFromEnum(list), "@intFromEnum(list)", List.Internal.get_list_tag_raw(fast_ptr), "List.Internal.get_list_raw(fast_ptr)", "list list {s} idx {d} cached list mismatch", .{ @tagName(list), fast_idx });
+    //                 try t.expect_equal(@field(fast_ptr, List.NEXT_FIELD), "@field(fast_ptr, List.NEXT_FIELD)", prev_fast_idx, "prev_fast_idx", "list list {s} idx {d} cached next isnt previous fast idx {d}", .{ @tagName(list), fast_idx, prev_fast_idx });
+    //                 try t.expect_less_than(i, "i", case_vals.len, " case_vals.len", "list list {s} current position {d} out of bounds for test case vals", .{ @tagName(list), i });
+    //                 try t.expect_equal(fast_idx, "fast_idx", case_indexes[i], "case_indexes[i]", "list list {s} element at pos {d} idx mismatch", .{ @tagName(list), i });
+    //                 try t.expect_equal(@field(fast_ptr, "val"), "@field(fast_ptr, \"val\")", case_vals[i], "case_vals[i]", "list list {s} element at pos {d} val mismatch", .{ @tagName(list), i });
+    //                 i -|= 1;
+    //                 c += 1;
+    //                 prev_fast_idx = fast_idx;
+    //                 fast_idx = linked_list.get_prev_idx(list, fast_idx);
+    //                 if (fast_idx == List.NULL_IDX) {
+    //                     try t.expect_equal(list_count, "list_count", c, "real_count", "list list {s} mismatch count", .{@tagName(list)});
+    //                     break :check;
+    //                 }
+    //                 fast_ptr = linked_list.get_ptr(fast_idx);
+    //                 try t.expect_equal(fast_idx, "fast_idx", @field(fast_ptr, List.CACHE_FIELD), "@field(fast_ptr, List.CACHE_FIELD)", "list list {s} idx {d} cached idx mismatch", .{ @tagName(list), fast_idx });
+    //                 try t.expect_equal(@intFromEnum(list), "@intFromEnum(list)", List.Internal.get_list_tag_raw(fast_ptr), "List.Internal.get_list_raw(fast_ptr)", "list list {s} idx {d} cached list mismatch", .{ @tagName(list), fast_idx });
+    //                 try t.expect_equal(@field(fast_ptr, List.NEXT_FIELD), "@field(fast_ptr, List.NEXT_FIELD)", prev_fast_idx, "prev_fast_idx", "list list {s} idx {d} cached prev isnt previous fast idx {d}", .{ @tagName(list), fast_idx, prev_fast_idx });
+    //                 try t.expect_less_than(i, "i", case_vals.len, " case_vals.len", "list list {s} current position {d} out of bounds for test case vals", .{ @tagName(list), i });
+    //                 try t.expect_equal(fast_idx, "fast_idx", case_indexes[i], "case_indexes[i]", "list list {s} element at pos {d} idx mismatch", .{ @tagName(list), i });
+    //                 try t.expect_equal(@field(fast_ptr, "val"), "@field(fast_ptr, \"val\")", case_vals[i], "case_vals[i]", "list list {s} element at pos {d} val mismatch", .{ @tagName(list), i });
+    //                 i -|= 1;
+    //                 c += 1;
+    //                 slow_idx = linked_list.get_prev_idx(list, slow_idx);
+    //                 try t.expect_not_equal(fast_idx, "fast_idx", slow_idx, "slow_idx", "list list {s} was cyclic", .{@tagName(list)});
+    //             }
+    //         }
+    //     }
+    //     fn full_ll_state(list: *List, used_indexes: []const u16, used_vals: []const u8, free_indexes: []const u16, free_vals: []const u8, invalid_indexes: []const u16, invalid_vals: []const u8) !void {
+    //         try list_is_valid(list, .FREE, free_indexes, free_vals);
+    //         try list_is_valid(list, .USED, used_indexes, used_vals);
+    //         try list_is_valid(list, .INVALID, invalid_indexes, invalid_vals);
+    //         if (list.get_list_len(.FREE) == 0) {
+    //             try t.expect_equal(list.get_first_index_in_list(.FREE), "list.get_first_index_in_list(.FREE)", List.NULL_IDX, "List.NULL_IDX", "empty list `FREE` does not have NULL_IDX for first index", .{});
+    //             try t.expect_equal(list.get_last_index_in_list(.FREE), "list.get_last_index_in_list(.FREE)", List.NULL_IDX, "List.NULL_IDX", "empty list `FREE` does not have NULL_IDX for last index", .{});
+    //         }
+    //         if (list.get_list_len(.USED) == 0) {
+    //             try t.expect_equal(list.get_first_index_in_list(.USED), "list.get_first_index_in_list(.USED)", List.NULL_IDX, "List.NULL_IDX", "empty list `USED` does not have NULL_IDX for first index", .{});
+    //             try t.expect_equal(list.get_last_index_in_list(.USED), "list.get_last_index_in_list(.USED)", List.NULL_IDX, "List.NULL_IDX", "empty list `USED` does not have NULL_IDX for last index", .{});
+    //         }
+    //         if (list.get_list_len(.INVALID) == 0) {
+    //             try t.expect_equal(list.get_first_index_in_list(.INVALID), "list.get_first_index_in_list(.INVALID)", List.NULL_IDX, "List.NULL_IDX", "empty list `INVALID` does not have NULL_IDX for first index", .{});
+    //             try t.expect_equal(list.get_last_index_in_list(.INVALID), "list.get_last_index_in_list(.INVALID)", List.NULL_IDX, "List.NULL_IDX", "empty list `INVALID` does not have NULL_IDX for last index", .{});
+    //         }
+    //         const total_count = list.get_list_len(.USED) + list.get_list_len(.FREE) + list.get_list_len(.INVALID);
+    //         try t.expect_equal(total_count, "total_count", list.list.len, "list.list.len", "total list list counts did not equal underlying list len (leaked indexes)", .{});
+    //     }
+    //     fn debug_list(linked_list: *List, list: TestState) void {
+    //         t.print("\nERROR STATE: {s}\ncount:     {d: >2}\nfirst_idx: {d: >2}\nlast_idx:  {d: >2}\n", .{
+    //             @tagName(list),
+    //             linked_list.get_list_len(list),
+    //             linked_list.get_first_index_in_list(list),
+    //             linked_list.get_last_index_in_list(list),
+    //         });
+    //         var idx = linked_list.get_first_index_in_list(list);
+    //         var ptr: *List.Elem = undefined;
+    //         t.print("forward:      ", .{});
+    //         while (idx != List.NULL_IDX) {
+    //             ptr = linked_list.get_ptr(idx);
+    //             t.print("{d} -> ", .{idx});
+    //             idx = @field(ptr, List.NEXT_FIELD);
+    //         }
 
-            t.print("NULL\n", .{});
-            idx = linked_list.get_first_index_in_list(list);
-            t.print("forward str:  ", .{});
-            while (idx != List.NULL_IDX) {
-                ptr = linked_list.get_ptr(idx);
-                t.print("{c}", .{@field(ptr, "val")});
-                idx = @field(ptr, List.NEXT_FIELD);
-            }
-            t.print("\n", .{});
-            idx = linked_list.get_last_index_in_list(list);
-            t.print("backward:     ", .{});
-            while (idx != List.NULL_IDX) {
-                ptr = linked_list.get_ptr(idx);
-                t.print("{d} -> ", .{idx});
-                idx = @field(ptr, List.PREV_FIELD);
-            }
-            t.print("NULL\n", .{});
-            idx = linked_list.get_last_index_in_list(list);
-            t.print("backward str: ", .{});
-            while (idx != List.NULL_IDX) {
-                ptr = linked_list.get_ptr(idx);
-                t.print("{c}", .{@field(ptr, "val")});
-                idx = @field(ptr, List.PREV_FIELD);
-            }
-            t.print("\n", .{});
-        }
-    };
-    var linked_list = List.new_empty();
-    var slice_result = linked_list.get_items_and_insert_at(.CREATE_MANY_NEW, 20, .AT_BEGINNING_OF_LIST, .FREE, alloc);
-    try t.expect_shallow_equal(slice_result, "get_items_and_insert_at(.CREATE_MANY_NEW, 20, .AT_BEGINNING_OF_LIST, .FREE, alloc)", List.LLSlice{ .count = 20, .first = 0, .last = 19, .list = .FREE }, "List.LLSlice{.count = 20, .first = 0, .last = 19, .list = .FREE}", "unexpected result from function", .{});
-    // zig fmt: off
-    try expect.full_ll_state(
-        &linked_list,
-        &.{}, // used_indexes
-        &.{}, // used_vals
-        &.{ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19 }, // free_indexes
-        &.{ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,  0,  0,  0,  0,  0,  0,  0,  0,  0 },  // free_vals
-        &.{}, // invalid_indexes
-        &.{}, // invalid_vals
-    );
-    // zig fmt: on
-    slice_result = linked_list.get_items_and_insert_at(.FIRST_N_FROM_LIST, List.CountFromList.new(.FREE, 8), .AT_BEGINNING_OF_LIST, .USED, alloc);
-    try t.expect_shallow_equal(slice_result, "get_items_and_insert_at(.FIRST_N_FROM_LIST, List.CountFromList.new(.FREE, 8), .AT_BEGINNING_OF_LIST, .USED, alloc)", List.LLSlice{ .count = 8, .first = 0, .last = 7, .list = .USED }, "List.LLSlice{ .count = 8, .first = 0, .last = 7, .list = .USED }", "unexpected result from function", .{});
-    // zig fmt: off
-    try expect.full_ll_state(
-        &linked_list,
-        &.{ 0, 1, 2, 3, 4, 5, 6, 7}, // used_indexes
-        &.{ 0, 0, 0, 0, 0, 0, 0, 0}, // used_vals
-        &.{ 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19 }, // free_indexes
-        &.{ 0, 0, 0,  0,  0,  0,  0,  0,  0,  0,  0,  0 },  // free_vals
-        &.{}, // invalid_indexes
-        &.{}, // invalid_vals
-    );
-    // zig fmt: on
-    var slice_iter_state = slice_result.new_iterator_state_at_start_of_slice(&linked_list, 0);
-    try t.expect_shallow_equal(slice_iter_state, "slice_result.new_iterator_state_at_start_of_slice(&linked_list)", List.LLSlice.SliceIteratorState(0){ .linked_list = &linked_list, .left_idx = List.NULL_IDX, .right_idx = slice_result.first, .slice = &slice_result, .state_slots = undefined }, "SliceIteratorState{ .linked_list = &linked_list, .left_idx = List.NULL_IDX, .right_idx = slice_result.first, .slice = &slice_result }", "unexpected result from function", .{});
-    var slice_iter = slice_iter_state.iterator();
-    var str: []const u8 = "abcdefgh";
-    const bool_result = slice_iter.perform_action_on_all_next_items(Action.set_value_from_string, @ptrCast(&str));
-    try t.expect_true(bool_result, "slice_iter.perform_action_on_all_next_items(Action.set_value_from_string, &\"abcdefghijklmnopqrst\");", "iterator set values failed", .{});
-    // zig fmt: off
-    try expect.full_ll_state(
-        &linked_list,
-        &.{ 0, 1, 2, 3, 4, 5, 6, 7}, // used_indexes
-        "abcdefgh", // used_vals
-        &.{ 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19 }, // free_indexes
-        &.{ 0, 0, 0,  0,  0,  0,  0,  0,  0,  0,  0,  0 },  // free_vals
-        &.{}, // invalid_indexes
-        &.{}, // invalid_vals
-    );
-    // zig fmt: on
-    slice_result = linked_list.get_items_and_insert_at(.LAST_N_FROM_LIST, List.CountFromList.new(.USED, 3), .AT_BEGINNING_OF_LIST, .INVALID, alloc);
-    try t.expect_shallow_equal(slice_result, "get_items_and_insert_at(.LAST_N_FROM_LIST, List.CountFromList.new(.USED, 3), .AT_BEGINNING_OF_LIST, .INVALID, alloc)", List.LLSlice{ .count = 3, .first = 5, .last = 7, .list = .INVALID }, "LLSlice{ .count = 3, .first = 5, .last = 7, .list = .INVALID }", "unexpected result from function", .{});
-    // zig fmt: off
-    try expect.full_ll_state(
-        &linked_list,
-        &.{ 0, 1, 2, 3, 4}, // used_indexes
-        "abcde", // used_vals
-        &.{ 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19 }, // free_indexes
-        &.{ 0, 0, 0,  0,  0,  0,  0,  0,  0,  0,  0,  0 },  // free_vals
-        &.{5, 6, 7}, // invalid_indexes
-        "fgh", // invalid_vals
-    );
-    // zig fmt: on
-    slice_result = linked_list.get_items_and_insert_at(.LAST_N_FROM_LIST, List.CountFromList.new(.FREE, 5), .AFTER_INDEX, List.IndexInList.new(.USED, 2), alloc);
-    try t.expect_shallow_equal(slice_result, "get_items_and_insert_at(.LAST_N_FROM_LIST, 5, .AFTER_INDEX, List.IndexInList.new(.USED, 2), alloc)", List.LLSlice{ .count = 5, .first = 15, .last = 19, .list = .USED }, "LLSlice{ .count = 5, .first = 15, .last = 19, .list = .USED }", "unexpected result from function", .{});
-    // zig fmt: off
-    try expect.full_ll_state(
-        &linked_list,
-        &.{ 0, 1, 2, 15, 16, 17, 18, 19, 3, 4}, // used_indexes
-        "abc\x00\x00\x00\x00\x00de", // used_vals
-        &.{ 8, 9, 10, 11, 12, 13, 14 }, // free_indexes
-        &.{ 0, 0, 0,  0,  0,  0,  0 },  // free_vals
-        &.{5, 6, 7}, // invalid_indexes
-        "fgh", // invalid_vals
-    );
-    // zig fmt: on
-    slice_iter_state = slice_result.new_iterator_state_at_end_of_slice(&linked_list, 0);
-    slice_iter = slice_iter_state.iterator();
-    str = "ijklm";
-    _ = slice_iter.perform_action_on_all_prev_items(Action.set_value_from_string, @ptrCast(&str));
-    // zig fmt: off
-    try expect.full_ll_state(
-        &linked_list,
-        &.{ 0, 1, 2, 15, 16, 17, 18, 19, 3, 4}, // used_indexes
-        "abcmlkjide", // used_vals
-        &.{ 8, 9, 10, 11, 12, 13, 14 }, // free_indexes
-        &.{ 0, 0, 0,  0,  0,  0,  0 },  // free_vals
-        &.{5, 6, 7}, // invalid_indexes
-        "fgh", // invalid_vals
-    );
-    // zig fmt: on
-    slice_result = linked_list.get_items_and_insert_at(.SPARSE_LIST_FROM_SAME_SET, List.IndexesInSameList.new(.USED, &.{ 18, 2, 15, 0 }), .BEFORE_INDEX, List.IndexInList.new(.INVALID, 6), alloc);
-    try t.expect_shallow_equal(slice_result, "get_items_and_insert_at(.SPARSE_LIST_FROM_SAME_SET, List.IndexesInSameList.new(.USED, &.{ 18, 2, 15, 0 }), .BEFORE_INDEX, List.IndexInList.new(.INVALID, 6), alloc)", List.LLSlice{ .count = 4, .first = 18, .last = 0, .list = .INVALID }, "LLSlice{ .count = 4, .first = 18, .last = 0, .list = .INVALID }", "unexpected result from function", .{});
-    // zig fmt: off
-    try expect.full_ll_state(
-        &linked_list,
-        &.{ 1, 16, 17, 19, 3, 4}, // used_indexes
-        "blkide", // used_vals
-        &.{ 8, 9, 10, 11, 12, 13, 14 }, // free_indexes
-        &.{ 0, 0, 0,  0,  0,  0,  0 },  // free_vals
-        &.{5, 18, 2, 15, 0, 6, 7}, // invalid_indexes
-        "fjcmagh", // invalid_vals
-    );
-    // zig fmt: on
-    slice_result = linked_list.get_items_and_insert_at(.SPARSE_LIST_FROM_ANY_SET, &.{ List.IndexInList.new(.USED, 19), List.IndexInList.new(.FREE, 11), List.IndexInList.new(.INVALID, 7), List.IndexInList.new(.FREE, 8) }, .AT_BEGINNING_OF_LIST, .USED, alloc);
-    try t.expect_shallow_equal(slice_result, "get_items_and_insert_at(.SPARSE_LIST_FROM_ANY_SET, &.{ List.IndexInList.new(.USED, 19), List.IndexInList.new(.FREE, 11), List.IndexInList.new(.INVALID, 7), List.IndexInList.new(.FREE, 8) }, .AT_BEGINNING_OF_LIST, .USED, alloc)", List.LLSlice{ .count = 4, .first = 19, .last = 8, .list = .USED }, "LLSlice{ .count = 4, .first = 19, .last = 8, .list = .USED }", "unexpected result from function", .{});
-    // zig fmt: off
-    try expect.full_ll_state(
-        &linked_list,
-        &.{ 19, 11, 7, 8, 1, 16, 17, 3, 4}, // used_indexes
-        "i\x00h\x00blkde", // used_vals
-        &.{ 9, 10, 12, 13, 14 }, // free_indexes
-        &.{ 0, 0,  0,  0,  0 },  // free_vals
-        &.{5, 18, 2, 15, 0, 6}, // invalid_indexes
-        "fjcmag", // invalid_vals
-    );
-    // zig fmt: on
-    slice_iter_state = slice_result.new_iterator_state_at_start_of_slice(&linked_list, 0);
-    slice_iter = slice_iter_state.iterator();
-    str = "wxyz";
-    _ = slice_iter.perform_action_on_all_next_items(Action.set_value_from_string, @ptrCast(&str));
-    // zig fmt: off
-    try expect.full_ll_state(
-        &linked_list,
-        &.{ 19, 11, 7, 8, 1, 16, 17, 3, 4}, // used_indexes
-        "wxyzblkde", // used_vals
-        &.{ 9, 10, 12, 13, 14 }, // free_indexes
-        &.{ 0, 0,  0,  0,  0 },  // free_vals
-        &.{5, 18, 2, 15, 0, 6}, // invalid_indexes
-        "fjcmag", // invalid_vals
-    );
-    // zig fmt: on
-    slice_result = linked_list.get_items_and_insert_at(.FIRST_FROM_LIST_ELSE_CREATE_NEW, .FREE, .AT_END_OF_LIST, .USED, alloc);
-    try t.expect_shallow_equal(slice_result, "get_items_and_insert_at(.FIRST_FROM_LIST_ELSE_CREATE_NEW, .FREE, .AT_END_OF_LIST, .USED, alloc)", List.LLSlice{ .count = 1, .first = 9, .last = 9, .list = .USED }, "LLSlice{ .count = 1, .first = 9, .last = 9, .list = .USED }", "unexpected result from function", .{});
-    linked_list.list.ptr[slice_result.first].val = 'v';
-    // zig fmt: off
-    try expect.full_ll_state(
-        &linked_list,
-        &.{ 19, 11, 7, 8, 1, 16, 17, 3, 4, 9}, // used_indexes
-        "wxyzblkdev", // used_vals
-        &.{ 10, 12, 13, 14 }, // free_indexes
-        &.{ 0,  0,  0,  0 },  // free_vals
-        &.{5, 18, 2, 15, 0, 6}, // invalid_indexes
-        "fjcmag", // invalid_vals
-    );
-    // zig fmt: on
-    slice_result = linked_list.get_items_and_insert_at(.LAST_N_FROM_LIST_ELSE_CREATE_NEW, List.CountFromList.new(.FREE, 6), .AFTER_INDEX, List.IndexInList.new(.USED, 17), alloc);
-    try t.expect_shallow_equal(slice_result, "get_items_and_insert_at(.LAST_N_FROM_LIST_ELSE_CREATE_NEW, List.CountFromList.new(.FREE, 6), .AFTER_INDEX, List.IndexInList.new(.USED, 17), alloc)", List.LLSlice{ .count = 6, .first = 10, .last = 21, .list = .USED }, "LLSlice{ .count = 6, .first = 10, .last = 21, .list = .USED }", "unexpected result from function", .{});
-    // zig fmt: off
-    try expect.full_ll_state(
-        &linked_list,
-        &.{ 19, 11, 7, 8, 1, 16, 17, 10, 12, 13, 14, 20, 21, 3, 4, 9}, // used_indexes
-        "wxyzblk\x00\x00\x00\x00\x00\x00dev", // used_vals
-        &.{ }, // free_indexes
-        &.{ }, // free_vals
-        &.{5, 18, 2, 15, 0, 6}, // invalid_indexes
-        "fjcmag", // invalid_vals
-    );
-    // zig fmt: on
-    slice_iter_state = slice_result.new_iterator_state_at_start_of_slice(&linked_list, 0);
-    slice_iter = slice_iter_state.iterator();
-    str = "123456";
-    _ = slice_iter.perform_action_on_all_next_items(Action.set_value_from_string, @ptrCast(&str));
-    // zig fmt: off
-    try expect.full_ll_state(
-        &linked_list,
-        &.{ 19, 11, 7, 8, 1, 16, 17, 10, 12, 13, 14, 20, 21, 3, 4, 9}, // used_indexes
-        "wxyzblk123456dev", // used_vals
-        &.{ }, // free_indexes
-        &.{ }, // free_vals
-        &.{5, 18, 2, 15, 0, 6}, // invalid_indexes
-        "fjcmag", // invalid_vals
-    );
-    // zig fmt: on
-    slice_result.slide_left(&linked_list, 1);
-    _ = slice_iter.reset();
-    str = "123456";
-    _ = slice_iter.perform_action_on_all_next_items(Action.set_value_from_string, @ptrCast(&str));
-    // zig fmt: off
-    try expect.full_ll_state(
-        &linked_list,
-        &.{ 19, 11, 7, 8, 1, 16, 17, 10, 12, 13, 14, 20, 21, 3, 4, 9}, // used_indexes
-        "wxyzbl1234566dev", // used_vals
-        &.{ }, // free_indexes
-        &.{ }, // free_vals
-        &.{5, 18, 2, 15, 0, 6}, // invalid_indexes
-        "fjcmag", // invalid_vals
-    );
-    // zig fmt: on
-    slice_result = List.LLSlice{ .count = 3, .first = 18, .last = 15, .list = .INVALID };
-    slice_result = linked_list.get_items_and_insert_at(.FROM_SLICE_ELSE_CREATE_NEW, List.LLSliceWithTotalNeeded{ .slice = slice_result, .total_needed = 4 }, .AFTER_INDEX, List.IndexInList.new(.USED, 10), alloc);
-    try t.expect_shallow_equal(slice_result, "get_items_and_insert_at(.FROM_SLICE_ELSE_CREATE_NEW, List.LLSliceWithTotalNeeded{ .slice = slice_result, .total_needed = 4 }, .AFTER_INDEX, List.IndexInList.new(.USED, 10), alloc)", List.LLSlice{ .count = 4, .first = 18, .last = 22, .list = .USED }, "LLSlice{ .count = 4, .first = 18, .last = 22, .list = .USED }", "unexpected result from function", .{});
-    // zig fmt: off
-    try expect.full_ll_state(
-        &linked_list,
-        &.{ 19, 11, 7, 8, 1, 16, 17, 10, 18, 2, 15, 22, 12, 13, 14, 20, 21, 3, 4, 9}, // used_indexes
-        "wxyzbl12jcm\x0034566dev", // used_vals
-        &.{ }, // free_indexes
-        &.{ }, // free_vals
-        &.{5, 0, 6}, // invalid_indexes
-        &.{102, 97, 103}, // invalid_vals 
-    );
-    // zig fmt: on
-    slice_iter_state = slice_result.new_iterator_state_at_start_of_slice(&linked_list, 0);
-    slice_iter = slice_iter_state.iterator();
-    str = "7890";
-    _ = slice_iter.perform_action_on_all_next_items(Action.set_value_from_string, @ptrCast(&str));
-    // zig fmt: off
-    try expect.full_ll_state(
-        &linked_list,
-        &.{ 19, 11, 7, 8, 1, 16, 17, 10, 18, 2, 15, 22, 12, 13, 14, 20, 21, 3, 4, 9}, // used_indexes
-        "wxyzbl12789034566dev", // used_vals
-        &.{ }, // free_indexes
-        &.{ }, // free_vals
-        &.{5, 0, 6}, // invalid_indexes
-        &.{102, 97, 103}, // invalid_vals 
-    );
-    // zig fmt: on
-    slice_result.slide_left(&linked_list, 2);
-    slice_result.grow_end_rightward(&linked_list, 7);
-    var slice_iter_state_with_slot = slice_result.new_iterator_state_at_start_of_slice(&linked_list, 1);
-    slice_iter = slice_iter_state_with_slot.iterator();
-    InsertionSort.insertion_sort_iterator(TestElem, slice_iter, Action.move_data, Action.greater_than, null);
-    // zig fmt: off
-    try expect.full_ll_state(
-        &linked_list,
-        &.{ 19, 11, 7, 8, 1, 16, 17, 10, 18, 2, 15, 22, 12, 13, 14, 20, 21, 3, 4, 9}, // used_indexes
-        "wxyzbl01234566789dev", // used_vals
-        &.{ }, // free_indexes
-        &.{ }, // free_vals
-        &.{5, 0, 6}, // invalid_indexes
-        &.{102, 97, 103}, // invalid_vals 
-    );
-    // zig fmt: on
+    //         t.print("NULL\n", .{});
+    //         idx = linked_list.get_first_index_in_list(list);
+    //         t.print("forward str:  ", .{});
+    //         while (idx != List.NULL_IDX) {
+    //             ptr = linked_list.get_ptr(idx);
+    //             t.print("{c}", .{@field(ptr, "val")});
+    //             idx = @field(ptr, List.NEXT_FIELD);
+    //         }
+    //         t.print("\n", .{});
+    //         idx = linked_list.get_last_index_in_list(list);
+    //         t.print("backward:     ", .{});
+    //         while (idx != List.NULL_IDX) {
+    //             ptr = linked_list.get_ptr(idx);
+    //             t.print("{d} -> ", .{idx});
+    //             idx = @field(ptr, List.PREV_FIELD);
+    //         }
+    //         t.print("NULL\n", .{});
+    //         idx = linked_list.get_last_index_in_list(list);
+    //         t.print("backward str: ", .{});
+    //         while (idx != List.NULL_IDX) {
+    //             ptr = linked_list.get_ptr(idx);
+    //             t.print("{c}", .{@field(ptr, "val")});
+    //             idx = @field(ptr, List.PREV_FIELD);
+    //         }
+    //         t.print("\n", .{});
+    //     }
+    // };
+    // var linked_list = List.new_empty();
+    // var slice_result = linked_list.get_items_and_insert_at(.CREATE_MANY_NEW, 20, .AT_BEGINNING_OF_LIST, .FREE, alloc);
+    // try t.expect_shallow_equal(slice_result, "get_items_and_insert_at(.CREATE_MANY_NEW, 20, .AT_BEGINNING_OF_LIST, .FREE, alloc)", List.LLSlice{ .count = 20, .first = 0, .last = 19, .list = .FREE }, "List.LLSlice{.count = 20, .first = 0, .last = 19, .list = .FREE}", "unexpected result from function", .{});
+    // // zig fmt: off
+    // try expect.full_ll_state(
+    //     &linked_list,
+    //     &.{}, // used_indexes
+    //     &.{}, // used_vals
+    //     &.{ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19 }, // free_indexes
+    //     &.{ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,  0,  0,  0,  0,  0,  0,  0,  0,  0 },  // free_vals
+    //     &.{}, // invalid_indexes
+    //     &.{}, // invalid_vals
+    // );
+    // // zig fmt: on
+    // slice_result = linked_list.get_items_and_insert_at(.FIRST_N_FROM_LIST, List.CountFromList.new(.FREE, 8), .AT_BEGINNING_OF_LIST, .USED, alloc);
+    // try t.expect_shallow_equal(slice_result, "get_items_and_insert_at(.FIRST_N_FROM_LIST, List.CountFromList.new(.FREE, 8), .AT_BEGINNING_OF_LIST, .USED, alloc)", List.LLSlice{ .count = 8, .first = 0, .last = 7, .list = .USED }, "List.LLSlice{ .count = 8, .first = 0, .last = 7, .list = .USED }", "unexpected result from function", .{});
+    // // zig fmt: off
+    // try expect.full_ll_state(
+    //     &linked_list,
+    //     &.{ 0, 1, 2, 3, 4, 5, 6, 7}, // used_indexes
+    //     &.{ 0, 0, 0, 0, 0, 0, 0, 0}, // used_vals
+    //     &.{ 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19 }, // free_indexes
+    //     &.{ 0, 0, 0,  0,  0,  0,  0,  0,  0,  0,  0,  0 },  // free_vals
+    //     &.{}, // invalid_indexes
+    //     &.{}, // invalid_vals
+    // );
+    // // zig fmt: on
+    // var slice_iter_state = slice_result.new_iterator_state_at_start_of_slice(&linked_list, 0);
+    // try t.expect_shallow_equal(slice_iter_state, "slice_result.new_iterator_state_at_start_of_slice(&linked_list)", List.LLSlice.SliceIteratorState(0){ .linked_list = &linked_list, .left_idx = List.NULL_IDX, .right_idx = slice_result.first, .slice = &slice_result, .state_slots = undefined }, "SliceIteratorState{ .linked_list = &linked_list, .left_idx = List.NULL_IDX, .right_idx = slice_result.first, .slice = &slice_result }", "unexpected result from function", .{});
+    // var slice_iter = slice_iter_state.iterator();
+    // var str: []const u8 = "abcdefgh";
+    // const bool_result = slice_iter.perform_action_on_all_next_items(Action.set_value_from_string, @ptrCast(&str));
+    // try t.expect_true(bool_result, "slice_iter.perform_action_on_all_next_items(Action.set_value_from_string, &\"abcdefghijklmnopqrst\");", "iterator set values failed", .{});
+    // // zig fmt: off
+    // try expect.full_ll_state(
+    //     &linked_list,
+    //     &.{ 0, 1, 2, 3, 4, 5, 6, 7}, // used_indexes
+    //     "abcdefgh", // used_vals
+    //     &.{ 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19 }, // free_indexes
+    //     &.{ 0, 0, 0,  0,  0,  0,  0,  0,  0,  0,  0,  0 },  // free_vals
+    //     &.{}, // invalid_indexes
+    //     &.{}, // invalid_vals
+    // );
+    // // zig fmt: on
+    // slice_result = linked_list.get_items_and_insert_at(.LAST_N_FROM_LIST, List.CountFromList.new(.USED, 3), .AT_BEGINNING_OF_LIST, .INVALID, alloc);
+    // try t.expect_shallow_equal(slice_result, "get_items_and_insert_at(.LAST_N_FROM_LIST, List.CountFromList.new(.USED, 3), .AT_BEGINNING_OF_LIST, .INVALID, alloc)", List.LLSlice{ .count = 3, .first = 5, .last = 7, .list = .INVALID }, "LLSlice{ .count = 3, .first = 5, .last = 7, .list = .INVALID }", "unexpected result from function", .{});
+    // // zig fmt: off
+    // try expect.full_ll_state(
+    //     &linked_list,
+    //     &.{ 0, 1, 2, 3, 4}, // used_indexes
+    //     "abcde", // used_vals
+    //     &.{ 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19 }, // free_indexes
+    //     &.{ 0, 0, 0,  0,  0,  0,  0,  0,  0,  0,  0,  0 },  // free_vals
+    //     &.{5, 6, 7}, // invalid_indexes
+    //     "fgh", // invalid_vals
+    // );
+    // // zig fmt: on
+    // slice_result = linked_list.get_items_and_insert_at(.LAST_N_FROM_LIST, List.CountFromList.new(.FREE, 5), .AFTER_INDEX, List.IndexInList.new(.USED, 2), alloc);
+    // try t.expect_shallow_equal(slice_result, "get_items_and_insert_at(.LAST_N_FROM_LIST, 5, .AFTER_INDEX, List.IndexInList.new(.USED, 2), alloc)", List.LLSlice{ .count = 5, .first = 15, .last = 19, .list = .USED }, "LLSlice{ .count = 5, .first = 15, .last = 19, .list = .USED }", "unexpected result from function", .{});
+    // // zig fmt: off
+    // try expect.full_ll_state(
+    //     &linked_list,
+    //     &.{ 0, 1, 2, 15, 16, 17, 18, 19, 3, 4}, // used_indexes
+    //     "abc\x00\x00\x00\x00\x00de", // used_vals
+    //     &.{ 8, 9, 10, 11, 12, 13, 14 }, // free_indexes
+    //     &.{ 0, 0, 0,  0,  0,  0,  0 },  // free_vals
+    //     &.{5, 6, 7}, // invalid_indexes
+    //     "fgh", // invalid_vals
+    // );
+    // // zig fmt: on
+    // slice_iter_state = slice_result.new_iterator_state_at_end_of_slice(&linked_list, 0);
+    // slice_iter = slice_iter_state.iterator();
+    // str = "ijklm";
+    // _ = slice_iter.perform_action_on_all_prev_items(Action.set_value_from_string, @ptrCast(&str));
+    // // zig fmt: off
+    // try expect.full_ll_state(
+    //     &linked_list,
+    //     &.{ 0, 1, 2, 15, 16, 17, 18, 19, 3, 4}, // used_indexes
+    //     "abcmlkjide", // used_vals
+    //     &.{ 8, 9, 10, 11, 12, 13, 14 }, // free_indexes
+    //     &.{ 0, 0, 0,  0,  0,  0,  0 },  // free_vals
+    //     &.{5, 6, 7}, // invalid_indexes
+    //     "fgh", // invalid_vals
+    // );
+    // // zig fmt: on
+    // slice_result = linked_list.get_items_and_insert_at(.SPARSE_LIST_FROM_SAME_SET, List.IndexesInSameList.new(.USED, &.{ 18, 2, 15, 0 }), .BEFORE_INDEX, List.IndexInList.new(.INVALID, 6), alloc);
+    // try t.expect_shallow_equal(slice_result, "get_items_and_insert_at(.SPARSE_LIST_FROM_SAME_SET, List.IndexesInSameList.new(.USED, &.{ 18, 2, 15, 0 }), .BEFORE_INDEX, List.IndexInList.new(.INVALID, 6), alloc)", List.LLSlice{ .count = 4, .first = 18, .last = 0, .list = .INVALID }, "LLSlice{ .count = 4, .first = 18, .last = 0, .list = .INVALID }", "unexpected result from function", .{});
+    // // zig fmt: off
+    // try expect.full_ll_state(
+    //     &linked_list,
+    //     &.{ 1, 16, 17, 19, 3, 4}, // used_indexes
+    //     "blkide", // used_vals
+    //     &.{ 8, 9, 10, 11, 12, 13, 14 }, // free_indexes
+    //     &.{ 0, 0, 0,  0,  0,  0,  0 },  // free_vals
+    //     &.{5, 18, 2, 15, 0, 6, 7}, // invalid_indexes
+    //     "fjcmagh", // invalid_vals
+    // );
+    // // zig fmt: on
+    // slice_result = linked_list.get_items_and_insert_at(.SPARSE_LIST_FROM_ANY_SET, &.{ List.IndexInList.new(.USED, 19), List.IndexInList.new(.FREE, 11), List.IndexInList.new(.INVALID, 7), List.IndexInList.new(.FREE, 8) }, .AT_BEGINNING_OF_LIST, .USED, alloc);
+    // try t.expect_shallow_equal(slice_result, "get_items_and_insert_at(.SPARSE_LIST_FROM_ANY_SET, &.{ List.IndexInList.new(.USED, 19), List.IndexInList.new(.FREE, 11), List.IndexInList.new(.INVALID, 7), List.IndexInList.new(.FREE, 8) }, .AT_BEGINNING_OF_LIST, .USED, alloc)", List.LLSlice{ .count = 4, .first = 19, .last = 8, .list = .USED }, "LLSlice{ .count = 4, .first = 19, .last = 8, .list = .USED }", "unexpected result from function", .{});
+    // // zig fmt: off
+    // try expect.full_ll_state(
+    //     &linked_list,
+    //     &.{ 19, 11, 7, 8, 1, 16, 17, 3, 4}, // used_indexes
+    //     "i\x00h\x00blkde", // used_vals
+    //     &.{ 9, 10, 12, 13, 14 }, // free_indexes
+    //     &.{ 0, 0,  0,  0,  0 },  // free_vals
+    //     &.{5, 18, 2, 15, 0, 6}, // invalid_indexes
+    //     "fjcmag", // invalid_vals
+    // );
+    // // zig fmt: on
+    // slice_iter_state = slice_result.new_iterator_state_at_start_of_slice(&linked_list, 0);
+    // slice_iter = slice_iter_state.iterator();
+    // str = "wxyz";
+    // _ = slice_iter.perform_action_on_all_next_items(Action.set_value_from_string, @ptrCast(&str));
+    // // zig fmt: off
+    // try expect.full_ll_state(
+    //     &linked_list,
+    //     &.{ 19, 11, 7, 8, 1, 16, 17, 3, 4}, // used_indexes
+    //     "wxyzblkde", // used_vals
+    //     &.{ 9, 10, 12, 13, 14 }, // free_indexes
+    //     &.{ 0, 0,  0,  0,  0 },  // free_vals
+    //     &.{5, 18, 2, 15, 0, 6}, // invalid_indexes
+    //     "fjcmag", // invalid_vals
+    // );
+    // // zig fmt: on
+    // slice_result = linked_list.get_items_and_insert_at(.FIRST_FROM_LIST_ELSE_CREATE_NEW, .FREE, .AT_END_OF_LIST, .USED, alloc);
+    // try t.expect_shallow_equal(slice_result, "get_items_and_insert_at(.FIRST_FROM_LIST_ELSE_CREATE_NEW, .FREE, .AT_END_OF_LIST, .USED, alloc)", List.LLSlice{ .count = 1, .first = 9, .last = 9, .list = .USED }, "LLSlice{ .count = 1, .first = 9, .last = 9, .list = .USED }", "unexpected result from function", .{});
+    // linked_list.list.ptr[slice_result.first].val = 'v';
+    // // zig fmt: off
+    // try expect.full_ll_state(
+    //     &linked_list,
+    //     &.{ 19, 11, 7, 8, 1, 16, 17, 3, 4, 9}, // used_indexes
+    //     "wxyzblkdev", // used_vals
+    //     &.{ 10, 12, 13, 14 }, // free_indexes
+    //     &.{ 0,  0,  0,  0 },  // free_vals
+    //     &.{5, 18, 2, 15, 0, 6}, // invalid_indexes
+    //     "fjcmag", // invalid_vals
+    // );
+    // // zig fmt: on
+    // slice_result = linked_list.get_items_and_insert_at(.LAST_N_FROM_LIST_ELSE_CREATE_NEW, List.CountFromList.new(.FREE, 6), .AFTER_INDEX, List.IndexInList.new(.USED, 17), alloc);
+    // try t.expect_shallow_equal(slice_result, "get_items_and_insert_at(.LAST_N_FROM_LIST_ELSE_CREATE_NEW, List.CountFromList.new(.FREE, 6), .AFTER_INDEX, List.IndexInList.new(.USED, 17), alloc)", List.LLSlice{ .count = 6, .first = 10, .last = 21, .list = .USED }, "LLSlice{ .count = 6, .first = 10, .last = 21, .list = .USED }", "unexpected result from function", .{});
+    // // zig fmt: off
+    // try expect.full_ll_state(
+    //     &linked_list,
+    //     &.{ 19, 11, 7, 8, 1, 16, 17, 10, 12, 13, 14, 20, 21, 3, 4, 9}, // used_indexes
+    //     "wxyzblk\x00\x00\x00\x00\x00\x00dev", // used_vals
+    //     &.{ }, // free_indexes
+    //     &.{ }, // free_vals
+    //     &.{5, 18, 2, 15, 0, 6}, // invalid_indexes
+    //     "fjcmag", // invalid_vals
+    // );
+    // // zig fmt: on
+    // slice_iter_state = slice_result.new_iterator_state_at_start_of_slice(&linked_list, 0);
+    // slice_iter = slice_iter_state.iterator();
+    // str = "123456";
+    // _ = slice_iter.perform_action_on_all_next_items(Action.set_value_from_string, @ptrCast(&str));
+    // // zig fmt: off
+    // try expect.full_ll_state(
+    //     &linked_list,
+    //     &.{ 19, 11, 7, 8, 1, 16, 17, 10, 12, 13, 14, 20, 21, 3, 4, 9}, // used_indexes
+    //     "wxyzblk123456dev", // used_vals
+    //     &.{ }, // free_indexes
+    //     &.{ }, // free_vals
+    //     &.{5, 18, 2, 15, 0, 6}, // invalid_indexes
+    //     "fjcmag", // invalid_vals
+    // );
+    // // zig fmt: on
+    // slice_result.slide_left(&linked_list, 1);
+    // _ = slice_iter.reset();
+    // str = "123456";
+    // _ = slice_iter.perform_action_on_all_next_items(Action.set_value_from_string, @ptrCast(&str));
+    // // zig fmt: off
+    // try expect.full_ll_state(
+    //     &linked_list,
+    //     &.{ 19, 11, 7, 8, 1, 16, 17, 10, 12, 13, 14, 20, 21, 3, 4, 9}, // used_indexes
+    //     "wxyzbl1234566dev", // used_vals
+    //     &.{ }, // free_indexes
+    //     &.{ }, // free_vals
+    //     &.{5, 18, 2, 15, 0, 6}, // invalid_indexes
+    //     "fjcmag", // invalid_vals
+    // );
+    // // zig fmt: on
+    // slice_result = List.LLSlice{ .count = 3, .first = 18, .last = 15, .list = .INVALID };
+    // slice_result = linked_list.get_items_and_insert_at(.FROM_SLICE_ELSE_CREATE_NEW, List.LLSliceWithTotalNeeded{ .slice = slice_result, .total_needed = 4 }, .AFTER_INDEX, List.IndexInList.new(.USED, 10), alloc);
+    // try t.expect_shallow_equal(slice_result, "get_items_and_insert_at(.FROM_SLICE_ELSE_CREATE_NEW, List.LLSliceWithTotalNeeded{ .slice = slice_result, .total_needed = 4 }, .AFTER_INDEX, List.IndexInList.new(.USED, 10), alloc)", List.LLSlice{ .count = 4, .first = 18, .last = 22, .list = .USED }, "LLSlice{ .count = 4, .first = 18, .last = 22, .list = .USED }", "unexpected result from function", .{});
+    // // zig fmt: off
+    // try expect.full_ll_state(
+    //     &linked_list,
+    //     &.{ 19, 11, 7, 8, 1, 16, 17, 10, 18, 2, 15, 22, 12, 13, 14, 20, 21, 3, 4, 9}, // used_indexes
+    //     "wxyzbl12jcm\x0034566dev", // used_vals
+    //     &.{ }, // free_indexes
+    //     &.{ }, // free_vals
+    //     &.{5, 0, 6}, // invalid_indexes
+    //     &.{102, 97, 103}, // invalid_vals
+    // );
+    // // zig fmt: on
+    // slice_iter_state = slice_result.new_iterator_state_at_start_of_slice(&linked_list, 0);
+    // slice_iter = slice_iter_state.iterator();
+    // str = "7890";
+    // _ = slice_iter.perform_action_on_all_next_items(Action.set_value_from_string, @ptrCast(&str));
+    // // zig fmt: off
+    // try expect.full_ll_state(
+    //     &linked_list,
+    //     &.{ 19, 11, 7, 8, 1, 16, 17, 10, 18, 2, 15, 22, 12, 13, 14, 20, 21, 3, 4, 9}, // used_indexes
+    //     "wxyzbl12789034566dev", // used_vals
+    //     &.{ }, // free_indexes
+    //     &.{ }, // free_vals
+    //     &.{5, 0, 6}, // invalid_indexes
+    //     &.{102, 97, 103}, // invalid_vals
+    // );
+    // // zig fmt: on
+    // slice_result.slide_left(&linked_list, 2);
+    // slice_result.grow_end_rightward(&linked_list, 7);
+    // var slice_iter_state_with_slot = slice_result.new_iterator_state_at_start_of_slice(&linked_list, 1);
+    // slice_iter = slice_iter_state_with_slot.iterator();
+    // InsertionSort.insertion_sort_iterator(TestElem, slice_iter, Action.move_data, Action.greater_than, null);
+    // // zig fmt: off
+    // try expect.full_ll_state(
+    //     &linked_list,
+    //     &.{ 19, 11, 7, 8, 1, 16, 17, 10, 18, 2, 15, 22, 12, 13, 14, 20, 21, 3, 4, 9}, // used_indexes
+    //     "wxyzbl01234566789dev", // used_vals
+    //     &.{ }, // free_indexes
+    //     &.{ }, // free_vals
+    //     &.{5, 0, 6}, // invalid_indexes
+    //     &.{102, 97, 103}, // invalid_vals
+    // );
+    // // zig fmt: on
 }

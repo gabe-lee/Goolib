@@ -95,4 +95,3 @@ pub fn assert_idx_and_pointer_reside_in_slice_and_match(comptime T: type, slice:
     const ptr_addr = @intFromPtr(pointer);
     assert_with_reason(idx_addr == ptr_addr, "pointer to `{s}` ({X}) does not match pointer to slice[{d}] ({d})", .{ @typeName(T), ptr_addr, idx, idx_addr });
 }
-

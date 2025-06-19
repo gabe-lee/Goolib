@@ -608,3 +608,12 @@ pub fn index_from_pointer(comptime T: type, comptime IDX: type, base_ptr: [*]con
     const addr_delta = @intFromPtr(elem_ptr) - @intFromPtr(base_ptr);
     return @intCast(addr_delta / @sizeOf(T));
 }
+
+pub fn bools_to_switchable_integer(comptime count: comptime_int, bools: [count]bool) std.meta.Int(.unsigned, count) {
+    const RESULT = std.meta.Int(.unsigned, count);
+    var result: RESULT = 0;
+    inline for (bools, 0..) |b, shift| {
+        result |= @as(RESULT, @intCast(@intFromBool(b))) << @intCast(shift);
+    }
+    return result;
+}

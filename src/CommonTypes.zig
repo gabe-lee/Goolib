@@ -28,6 +28,13 @@ const math = std.math;
 const Root = @import("./_root.zig");
 const FlexSlice = Root.FlexSlice.FlexSlice;
 
+/// A placeholder type intended for use in methods that take an `anytype` parameter
+///
+/// This signals to the function that either:
+/// - It should infer the type/value of this parameter based on the types/values of other paremeters provided
+/// - It should choose some default type/value for this parameter
+pub const Auto = struct {};
+
 /// TODO documentation
 pub const PointOrientation = enum {
     /// TODO documentation
@@ -36,6 +43,11 @@ pub const PointOrientation = enum {
     WINDING_CCW,
     /// TODO documentation
     WINDING_CW,
+};
+
+pub const Side = enum {
+    LEFT,
+    RIGHT,
 };
 
 /// TODO documentation
