@@ -43,6 +43,7 @@ const AllocatorInfal = @This();
 const Root = @import("./_root.zig");
 const Assert = Root.Assert;
 const assert_with_reason = Assert.assert_with_reason;
+const DummyAlloc = Root.DummyAllocator;
 
 pub const Log2Align = math.Log2Int(usize);
 
@@ -220,3 +221,7 @@ pub fn clone_sentinel(self: AllocatorInfal, comptime T: type, this_mem: []const 
     new_m[this_mem.len] = sentinel;
     return new_m[0..this_mem.len :sentinel];
 }
+
+pub const DummyAllocInfal = AllocatorInfal{
+    .allocator = DummyAlloc.allocator,
+};
