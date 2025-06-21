@@ -1302,29 +1302,34 @@ pub fn LinkedHeirarchy(comptime options: ForwardLinkedHeirarchyOptions) type {
 
         //zig fmt: off
         pub const HeirarchyTraverseFlags = Flags.Flags(enum(u8) {
-            BEFORE_LEFT_CHILDREN            = 0b000_0_0_000,
-            ON_LEFT_CHILDREN                = 0b000_0_0_001,
-            BETWEEN_LEFT_AND_RIGHT_CHILDREN = 0b000_0_0_010,
-            ON_RIGHT_CHILDREN               = 0b000_0_0_011,
-            AFTER_RIGHT_CHILDREN            = 0b000_0_0_100,
-            IS_FIRST_CHILD                  = 0b000_0_1_000,
-            IS_LAST_CHILD                   = 0b000_1_0_000,
+            BEFORE_LEFT_CHILDREN            = 0b00_0_0_00_00,
+            BETWEEN_LEFT_AND_RIGHT_CHILDREN = 0b00_0_0_00_01,
+            AFTER_RIGHT_CHILDREN            = 0b00_0_0_00_10,
+            IS_FIRST_CHILD                  = 0b00_0_1_00_00,
+            IS_LAST_CHILD                   = 0b00_1_0_00_00,
+            
         }, enum (u8) {
-            PROGRESS = 0b000_0_0_111,
-            IS_FIRST = 0b000_0_1_000,
-            IS_LAST  = 0b000_1_0_000,
+            PROGRESS      = 0b00_0_0_00_11,
         });
+        pub const HeirarchyTraverseProg = enum(u8) {
+            BEFORE_LEFT_CHILDREN            = 0b00_0_0_00_00,
+            BETWEEN_LEFT_AND_RIGHT_CHILDREN = 0b00_0_0_00_01,
+            AFTER_RIGHT_CHILDREN            = 0b00_0_0_00_10,
+        };
         // zig fmt: on
 
         pub const HeirarchyTraverseFrame = struct {
             curr_id: Id = NULL_ID,
-            flags: HeirarchyTraverseFlags = HeirarchyTraverseFlags.from_flags(if (HAS_NEXT) &.{ .BEFORE_LEFT_CHILDREN, .IS_FIRST_CHILD } else &.{ .BEFORE_LEFT_CHILDREN, .IS_FIRST_CHILD, .IS_LAST_CHILD }),
+            flags: HeirarchyTraverseFlags = HeirarchyTraverseFlags.from_flags(if (HAS_NEXT) &.{ .IS_FIRST_CHILD, .NEXT_BETWEEN_LEFT_AND_RIGHT } else &.{ .IS_FIRST_CHILD, .IS_LAST_CHILD, .NEXT_BETWEEN_LEFT_AND_RIGHT }),
 
-            inline fn set_progress_at_least(self: *HeirarchyTraverseFrame, new_prog: HeirarchyTraverseFlags.Flag) void {
+            pub inline fn set_progress_at_least(self: *HeirarchyTraverseFrame, new_prog: HeirarchyTraverseProg) void {
                 const prog = self.flags.isolate_group(.PROGRESS);
                 const max_prog: HeirarchyTraverseFlags.RawInt = @max(@intFromEnum(prog), @intFromEnum(new_prog));
-                self.flags.clear_group(.PROGRESS);
-                self.flags.set_raw(max_prog);
+                self.flags.clear_group_then_set_raw(.PROGRESS, max_prog);
+            }
+
+            pub inline fn set_progress(self: *HeirarchyTraverseFrame, new_prog: HeirarchyTraverseProg) void {
+                self.flags.clear_group_then_set_raw(.PROGRESS, @intFromEnum(new_prog));
             }
         };
 
@@ -1348,6 +1353,30 @@ pub fn LinkedHeirarchy(comptime options: ForwardLinkedHeirarchyOptions) type {
                 return self.heirarchy.get_ptr(self.get_current_id());
             }
 
+            pub inline fn get_current_progress(self: *const HeirarchyTraverser) HeirarchyTraverseProg {
+                const last_flags: HeirarchyTraverseFlags = self.frames.get_last().flags;
+                return @enumFromInt(last_flags.isolate_group(.PROGRESS).raw);
+            }
+
+            pub inline fn set_current_progress(self: *HeirarchyTraverser, prog: HeirarchyTraverseProg) void {
+                const last_frame: *HeirarchyTraverseFrame = self.frames.get_last_ptr();
+                last_frame.flags.clear_group_then_set_raw(.PROGRESS, @intFromEnum(prog));
+            }
+
+            pub fn clone_to_stack(self: *const HeirarchyTraverser, buffer: []HeirarchyTraverseFrame) HeirarchyTraverser {
+                var new = self.heirarchy.create_heirarchy_traverser_on_stack(buffer);
+                @memcpy(new.frames.ptr[0..self.frames.len], self.frames.ptr[0..self.frames.len]);
+                new.frames.len = self.frames.len;
+                return new;
+            }
+
+            pub fn clone_to_heap(self: *const HeirarchyTraverser, alloc: AllocInfal) HeirarchyTraverser {
+                var new = self.heirarchy.create_heirarchy_traverser_on_heap(alloc);
+                @memcpy(new.frames.ptr[0..self.frames.len], self.frames.ptr[0..self.frames.len]);
+                new.frames.len = self.frames.len;
+                return new;
+            }
+
             pub inline fn goto_next(self: *HeirarchyTraverser) bool {
                 if (!HAS_NEXT or self.frames.len == 0) return false;
                 const last_frame: *HeirarchyTraverseFrame = self.frames.get_last_ptr();
@@ -1366,45 +1395,33 @@ pub fn LinkedHeirarchy(comptime options: ForwardLinkedHeirarchyOptions) type {
             pub fn goto_first_left_child(self: *HeirarchyTraverser) bool {
                 if (self.frames.len == 0) return false;
                 const last_frame: *HeirarchyTraverseFrame = self.frames.get_last_ptr();
-                if (!HAS_LEFT_CHILDREN) {
-                    last_frame.set_progress_at_least(.BETWEEN_LEFT_AND_RIGHT_CHILDREN);
-                    return false;
-                }
+                defer last_frame.set_progress(.BETWEEN_LEFT_AND_RIGHT_CHILDREN);
+                if (!HAS_LEFT_CHILDREN) return false;
                 const curr_id = last_frame.curr_id;
                 const curr_ptr = self.heirarchy.get_ptr(curr_id);
                 const left_child_id = get_left_child_id(curr_ptr);
-                if (left_child_id == NULL_ID) {
-                    last_frame.set_progress_at_least(.BETWEEN_LEFT_AND_RIGHT_CHILDREN);
-                    return false;
-                }
+                if (left_child_id == NULL_ID) return false;
                 self.frames.append(HeirarchyTraverseFrame{ .curr_id = left_child_id });
                 const new_last_frame: *HeirarchyTraverseFrame = self.frames.get_last_ptr();
                 const next_id = get_next_id(self.heirarchy.get_ptr(left_child_id));
                 if (next_id == NULL_ID) new_last_frame.flags.set(.IS_LAST_CHILD);
-                last_frame.set_progress_at_least(.ON_LEFT_CHILDREN);
                 return true;
             }
 
             pub fn goto_first_right_child(self: *HeirarchyTraverser) bool {
                 if (self.frames.len == 0) return false;
                 var last_frame: *HeirarchyTraverseFrame = self.frames.get_last_ptr();
-                if (!HAS_RIGHT_CHILDREN) {
-                    last_frame.flags.clear_group_then_set(.PROGRESS, .AFTER_RIGHT_CHILDREN);
-                    return false;
-                }
+                defer last_frame.set_progress(.AFTER_RIGHT_CHILDREN);
+                if (!HAS_RIGHT_CHILDREN) return false;
                 const curr_id = last_frame.curr_id;
                 const curr_ptr = self.heirarchy.get_ptr(curr_id);
                 const right_child_id = get_right_child_id(curr_ptr);
-                if (right_child_id == NULL_ID) {
-                    last_frame.flags.clear_group_then_set(.PROGRESS, .AFTER_RIGHT_CHILDREN);
-                    return false;
-                }
+                if (right_child_id == NULL_ID) return false;
                 self.frames.append(HeirarchyTraverseFrame{ .curr_id = right_child_id });
                 const new_last_frame: *HeirarchyTraverseFrame = self.frames.get_last_ptr();
                 const next_id = get_next_id(self.heirarchy.get_ptr(right_child_id));
                 if (next_id == NULL_ID) new_last_frame.flags.set(.IS_LAST_CHILD);
                 last_frame = self.frames.ptr[self.frames.len - 2];
-                last_frame.set_progress_at_least(.ON_RIGHT_CHILDREN);
                 return true;
             }
 
@@ -1414,27 +1431,17 @@ pub fn LinkedHeirarchy(comptime options: ForwardLinkedHeirarchyOptions) type {
                 if (curr_id == self.custom_last_id) return false;
                 self.frames.set_len(self.frames.len - 1);
                 if (self.frames.len == 0) return false;
-                const last_frame: *HeirarchyTraverseFrame = self.frames.get_last_ptr();
-                if (last_frame.flags.has_flag(.ON_LEFT_CHILDREN)) {
-                    last_frame.flags.clear_group_then_set(.PROGRESS, .BETWEEN_LEFT_AND_RIGHT_CHILDREN);
-                } else if (last_frame.flags.has_flag(.ON_RIGHT_CHILDREN)) {
-                    last_frame.flags.clear_group_then_set(.PROGRESS, .AFTER_RIGHT_CHILDREN);
-                } else {
-                    assert_with_reason(false, @src(), "attempted to traverse back up to parent (index = {d}) from child (index = {d}), but parent did not have progress `ON_LEFT_CHILDREN` or `ON_RIGHT_CHILDREN`, possible manual tampering created invalid state", .{ get_index(last_frame.curr_id), get_index(curr_id) });
-                }
                 return true;
             }
 
             fn init(self: *HeirarchyTraverser, start_id: Id) void {
-                if (start_id == NULL_ID) return;
                 self.frames.clear_retaining_capacity();
-                if (self.frames.len == 0) return;
+                if (start_id == NULL_ID) return;
                 self.frames.append(HeirarchyTraverseFrame{ .curr_id = start_id }, self.alloc);
                 var last_frame: *HeirarchyTraverseFrame = self.frames.get_last_ptr();
                 if (get_next_id(self.heirarchy.get_ptr(last_frame.curr_id)) == NULL_ID) {
                     last_frame.flags.set(.IS_LAST_CHILD);
                 }
-                self.should_continue = true;
             }
 
             pub fn reset_and_traverse_through_heirarchy_depth_first_and_do_actions_on_all_items(self: *HeirarchyTraverser, comptime actions: TraverseActions, userdata: ?*anyopaque) void {
@@ -1481,36 +1488,36 @@ pub fn LinkedHeirarchy(comptime options: ForwardLinkedHeirarchyOptions) type {
                         }
                         if (self.goto_first_left_child()) continue :loop;
                     }
-                    assert_with_reason(last_frame.flags.isolate_group_as_int_aligned_to_bit_0(.PROGRESS) > AT_LEAST_BETWEEN_LEFT_AND_RIGHT_CHILDREN, @src(), "invalid flag state `{s}`, should be at least on state `BETWEEN_LEFT_AND_RIGHT_CHILDREN`", .{@tagName(@as(HeirarchyTraverseFlags.Flag, @enumFromInt(last_frame.flags.isolate_group(.PROGRESS).raw)))});
                     if (last_frame.flags.has_flag(.BETWEEN_LEFT_AND_RIGHT_CHILDREN)) {
                         if (actions.action_after_left_before_right_children) |middle_action| {
                             if (!middle_action(self, userdata)) break :loop;
                         }
                         if (self.goto_first_right_child()) continue :loop;
                     }
-                    assert_with_reason(last_frame.flags.has_flag(.AFTER_RIGHT_CHILDREN), @src(), "invalid flag state `{s}`, should be on state `AFTER_RIGHT_CHILDREN`", .{@tagName(@as(HeirarchyTraverseFlags.Flag, @enumFromInt(last_frame.flags.isolate_group(.PROGRESS).raw)))});
                     if (actions.action_after_right_children) |after_action| {
                         if (!after_action(self.heirarchy, self.frames.slice(), userdata)) break :loop;
                     }
                     if (actions.action_after_exiting_item) |exit_action| {
                         const exit_id = last_frame.curr_id;
                         var exit_kind: TraversalExitKind = .EXITED_BY_HITTING_END_OF_TRAVERSAL;
-                        var did_move = self.goto_next();
-                        if (did_move) exit_kind = .EXITED_BY_MOVING_TO_NEXT_SIBLING;
-                        if (!did_move) did_move = self.goto_parent();
-                        if (did_move) exit_kind = .EXITED_BY_MOVING_TO_PARENT
-                        if (!exit_action(self, exit_id, exit_kind, userdata: ?*anyopaque)) break :loop;
+                        var did_move = false;
+                        if (self.goto_next()) {
+                            did_move = true;
+                            exit_kind = .EXITED_BY_MOVING_TO_NEXT_SIBLING;
+                        } else if (self.goto_parent()) {
+                            did_move = true;
+                            exit_kind == .EXITED_BY_MOVING_TO_PARENT;
+                        }
+                        if (!exit_action(self, exit_id, exit_kind, userdata)) break :loop;
                         if (did_move) continue :loop;
                     } else {
                         if (self.goto_next()) continue :loop;
                         if (self.goto_parent()) continue :loop;
                     }
-                    
+
                     break :loop;
                 }
             }
-
-            const AT_LEAST_BETWEEN_LEFT_AND_RIGHT_CHILDREN = HeirarchyTraverseFlags.from_flags(&.{ .BEFORE_LEFT_CHILDREN, .ON_LEFT_CHILDREN }).isolate_group_as_int_aligned_to_bit_0(.PROGRESS);
         };
 
         pub const TraverseActions = struct {

@@ -167,6 +167,10 @@ pub fn Flags(comptime FLAGS_ENUM: type, comptime GROUPS: type) type {
             self.raw &= inv_bits(group);
             self.raw |= bits(flag);
         }
+        pub inline fn clear_group_then_set_raw(self: *Self, group: Group, raw: RawInt) void {
+            self.raw &= inv_bits(group);
+            self.raw |= raw;
+        }
         pub inline fn clear_group_then_set_many(self: *Self, group: Group, flags: []const Flag) void {
             self.raw &= inv_bits(group);
             for (flags) |flag| {
