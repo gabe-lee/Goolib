@@ -78,6 +78,7 @@ pub const ListOptions = struct {
         };
     }
 };
+
 pub const ListOptionsWithoutElem = struct {
     alignment: ?u29 = null,
     growth_model: GrowthModel = .GROW_BY_50_PERCENT_ATOMIC_PADDING,
@@ -106,7 +107,9 @@ pub const ERR_LAST_IDX_GREATER_LEN = "end of index range ({d}) > list.len ({d}):
 pub const ERR_LIST_EMPTY = "list.len == 0: unable to return any items from list";
 
 fn assert_correct_allocator(alloc_a: AllocInfal, alloc_b: AllocInfal, comptime src_loc: ?SourceLocation) void {
-    assert_with_reason(Utils.shallow_equal(alloc_a, alloc_b), src_loc, "provided allocator does not match the one provided to `init` or `init_with_capacity`", .{});
+    // Sadly we cannot do a simple `shallow_equals` here, because some allocators define `.ptr = undefined`, and cannot compare undefined values
+    // assert_with_reason(@intFromPtr(alloc_a.allocator.ptr) == @intFromPtr(alloc_b.allocator.ptr), src_loc, "provided allocator does not match the one provided to `init` or `init_with_capacity`", .{});
+    assert_with_reason(alloc_a.allocator.vtable == alloc_b.allocator.vtable, src_loc, "provided allocator does not match the one provided to `init` or `init_with_capacity`", .{});
 }
 
 pub fn List(comptime options: ListOptions) type {
@@ -123,11 +126,11 @@ pub fn List(comptime options: ListOptions) type {
         assert_with_reason(math.isPowerOfTwo(a), @src(), "alignment must be a power of 2", .{});
     }
     assert_with_reason(@typeInfo(opt.index_type) == Type.int and @typeInfo(opt.index_type).int.signedness == .unsigned, @src(), "index_type must be an unsigned integer type", .{});
-    return extern struct {
+    return struct {
         ptr: Ptr = UNINIT_PTR,
         len: Idx = 0,
         cap: Idx = 0,
-        assert_alloc: if (ASSERT_ALLOC) AllocInfal else void = if (ASSERT_ALLOC) DummyAllocator.allocator else void{},
+        assert_alloc: if (ASSERT_ALLOC) AllocInfal else void = if (ASSERT_ALLOC) AllocInfal.DummyAllocInfal else void{},
 
         const ALIGN = options.alignment;
         const ASSERT_ALLOC = options.assert_correct_allocator;
@@ -464,7 +467,7 @@ pub fn List(comptime options: ListOptions) type {
 
         pub fn clear_retaining_capacity(self: *Self) void {
             if (SECURE_WIPE) {
-                std.Utils.secure_zero(Elem, self.ptr[0..self.len]);
+                Utils.secure_zero(Elem, self.ptr[0..self.len]);
             }
             self.len = 0;
         }
@@ -505,7 +508,7 @@ pub fn List(comptime options: ListOptions) type {
                 self.ptr = new_memory.ptr;
                 self.cap = @intCast(new_memory.len);
             } else {
-                const new_memory = alloc.alloc_align(Elem, new_capacity, ALIGN);
+                const new_memory = if (ALIGN) |a| alloc.alloc_align(Elem, new_capacity, a) else alloc.alloc(Elem, new_capacity);
                 @memcpy(new_memory[0..self.len], self.ptr[0..self.len]);
                 if (MEMSET) {
                     @memset(new_memory[self.len..new_memory.len], UNINIT_VAL);
@@ -971,14 +974,13 @@ pub fn ListIterator(comptime ListType: type) type {
 
 test "List.zig" {
     const t = std.testing;
-    const alloc = std.heap.page_allocator;
+    const alloc = AllocInfal{ .allocator = std.heap.page_allocator };
     const opts = ListOptions{
-        .alloc_error_behavior = .ERRORS_PANIC,
         .element_type = u8,
         .index_type = u32,
     };
     const ListType = List(opts);
-    var list = ListType.new_empty();
+    var list = ListType.new_empty(alloc);
 
     list.append('H', alloc);
     list.append('e', alloc);

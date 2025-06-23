@@ -36,7 +36,10 @@ const WriteError = Root.CommonTypes.WriteError;
 pub const SourceKind = enum(u8) {
     Block,
     Clusters,
-    Singles,
+    Sparse,
+    CompactSparseMicro,
+    CompactSparseSmall,
+    CompactSparseMedium,
 };
 
 pub const Source = union(SourceKind) {

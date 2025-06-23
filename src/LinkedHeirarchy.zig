@@ -120,7 +120,7 @@ pub const ForwardLinkedHeirarchyOptions = struct {
     /// Use this if your user type has a relatively small 'value/data' field(s) in comparison to the size of
     /// all the 'connection/id' type fields, otherwise a less-efficient default copy implementation will
     /// be used
-    custom_copy_only_value_fn: ?*const fn (from_elem_ptr: *anyopaque, to_elem_ptr: *anyopaque) void,
+    custom_copy_only_value_fn: ?*const fn (from_elem_ptr: *const anyopaque, to_elem_ptr: *anyopaque) void,
     /// Add additional O(N) time asserts in some functions. Most of these validate
     /// that inputs are in the state the user claimed (are siblings in order, child of parent, no cyclic references, etc.)
     strong_asserts: bool = true,
@@ -134,7 +134,7 @@ pub const GenerationDetails = struct {
     generation_bits: comptime_int,
 };
 
-fn assert_field_type_matches_index_type(comptime elem: type, comptime index: type, comptime field: ?[]const u8) usize {
+fn assert_field_type_matches_id_type(comptime elem: type, comptime index: type, comptime field: ?[]const u8) usize {
     if (field) |F| {
         assert_with_reason(@hasField(elem, F), @src(), "element type `{s}` has no field named `{s}`", .{ @typeName(elem), F });
         const T = @FieldType(elem, F);
@@ -146,11 +146,10 @@ fn assert_field_type_matches_index_type(comptime elem: type, comptime index: typ
 
 pub fn LinkedHeirarchy(comptime options: ForwardLinkedHeirarchyOptions) type {
     const E = options.element_memory_options.element_type;
-    const I = options.element_memory_options.index_type;
-    var linkage_count = assert_field_type_matches_index_type(E, I, options.prev_sibling_field);
-    linkage_count += assert_field_type_matches_index_type(E, I, options.next_field);
-    linkage_count += assert_field_type_matches_index_type(E, I, options.left_children_field);
-    linkage_count += assert_field_type_matches_index_type(E, I, options.right_children_field);
+    const I = options.element_id_type;
+    var linkage_count = assert_field_type_matches_id_type(E, I, options.next_field);
+    linkage_count += assert_field_type_matches_id_type(E, I, options.left_children_field);
+    linkage_count += assert_field_type_matches_id_type(E, I, options.right_children_field);
     assert_with_reason(linkage_count > 0, @src(), "LinkedHeirarchy must have at least 1 linkage field", .{});
     const F_IS_LEFT = options.left_children_field != null;
     const F_IS_RIGHT = options.right_children_field != null;
@@ -175,8 +174,8 @@ pub fn LinkedHeirarchy(comptime options: ForwardLinkedHeirarchyOptions) type {
         free_count: Id = 0,
         first_root_id: Id = NULL_ID,
 
-        const HAS_NEXT = options.next_sibling_field != null;
-        const NEXT_FIELD = if (HAS_NEXT) options.next_sibling_field.? else "";
+        const HAS_NEXT = options.next_field != null;
+        const NEXT_FIELD = if (HAS_NEXT) options.next_field.? else "";
         const HAS_LEFT_CHILDREN = options.left_children_field != null;
         const LEFT_CHILDREN_FIELD = if (HAS_LEFT_CHILDREN) options.left_children_field.? else "";
         const HAS_RIGHT_CHILDREN = options.right_children_field != null;
@@ -185,7 +184,7 @@ pub fn LinkedHeirarchy(comptime options: ForwardLinkedHeirarchyOptions) type {
         const HAS_OWN_ID = options.own_id_field != null;
         const OWN_ID_FIELD = if (HAS_OWN_ID) options.own_id_field.? else "";
         const HAS_GEN = options.generation_details != null;
-        const GEN_OFFSET = if (HAS_GEN) options.generation_details.PackedWithCachedIndex.index_bits else 0;
+        const GEN_OFFSET = if (HAS_GEN) options.generation_details.?.index_bits else 0;
         const IDX_MASK: Id = if (HAS_GEN) (@as(Id, 1) << GEN_OFFSET) - 1 else math.maxInt(Id);
         const IDX_CLEAR: Id = if (HAS_GEN) ~IDX_MASK else 0;
         const GEN_MASK: Id = if (HAS_GEN) ~IDX_MASK else 0;
@@ -198,15 +197,16 @@ pub fn LinkedHeirarchy(comptime options: ForwardLinkedHeirarchyOptions) type {
         const MAX_DEPTH = if (HAS_MAX_DEPTH) options.traverse_with_stack_memory_and_max_depth.? else 0;
         const UNINIT = Heirarchy{};
         const UNINIT_ELEM: Elem = make: {
-            var elem: [1]Elem = undefined;
-            if (options.element_memory_options.secure_wipe_bytes) {
-                Utils.secure_zero(Elem, &elem);
+            var elem: Elem = undefined;
+            if (options.element_memory_options.memset_uninit_val) |uninit_val| {
+                const uninit_elem: *const Elem = @ptrCast(@alignCast(uninit_val));
+                elem = uninit_elem.*;
             }
-            Internal.set_own_id(&elem[0], NULL_ID);
-            Internal.set_next_id(&elem[0], NULL_ID);
-            Internal.set_left_child_id(&elem[0], NULL_ID);
-            Internal.set_right_child_id(&elem[0], NULL_ID);
-            break :make elem[0];
+            Internal.set_own_id(&elem, NULL_ID);
+            Internal.set_next_id(&elem, NULL_ID);
+            Internal.set_left_child_id(&elem, NULL_ID);
+            Internal.set_right_child_id(&elem, NULL_ID);
+            break :make elem;
         };
         const NULL_ID = math.maxInt(Id);
         const NULL_INDEX = math.maxInt(Index);
@@ -219,7 +219,7 @@ pub fn LinkedHeirarchy(comptime options: ForwardLinkedHeirarchyOptions) type {
         const TRACE_LIST_OPTIONS = Root.List.ListOptions.from_options_without_elem(options.traversal_trace_options, HeirarchyTraverseFrame, @ptrCast(&UNINIT_TRACE_FRAME));
 
         const Heirarchy = @This();
-        pub const List = Root.List.List(options.base_memory_options);
+        pub const List = Root.List.List(options.element_memory_options);
         pub const Elem = options.element_memory_options.element_type;
         pub const Index = options.element_memory_options.index_type;
         pub const Id = options.element_id_type;
@@ -591,7 +591,7 @@ pub fn LinkedHeirarchy(comptime options: ForwardLinkedHeirarchyOptions) type {
             const ptr = &self.list.ptr[idx];
             if (HAS_GEN) {
                 const own_id = get_own_id(ptr);
-                assert_with_reason(same_gen(id, own_id), @src(), "generation on id requested did not match the generation stored on element", .{});
+                assert_with_reason(same_gen(id, own_id), @src(), "generation on id requested (index {d}, gen {d}) did not match the generation stored on element {d}", .{get_index(id), get_gen(id), get_gen(own_id)});
             }
             return ptr;
         }
@@ -625,26 +625,44 @@ pub fn LinkedHeirarchy(comptime options: ForwardLinkedHeirarchyOptions) type {
         ///
         /// They are provided here publicly to facilitate opt-in special user use cases
         pub const Internal = struct {
+            pub inline fn get_ptr_ignore_gen(self: *Heirarchy, id: Id) *Elem {
+                const idx = get_index(id);
+                assert_idx_less_than_len(idx, self.list.len, @src());
+                const ptr = &self.list.ptr[idx];
+                return ptr;
+            }
+            pub inline fn get_ptr_const_ignore_gen(self: *const Heirarchy, id: Id) *const Elem {
+                const idx = get_index(id);
+                assert_idx_less_than_len(idx, self.list.len, @src());
+                const ptr = &self.list.ptr[idx];
+                return ptr;
+            }
             pub inline fn set_next_id(ptr: *Elem, val: Id) void {
                 if (!HAS_NEXT) return;
-                @field(ptr, NEXT_FIELD).* = val;
+                const next_ptr: *Id = &@field(ptr, NEXT_FIELD);
+                next_ptr.* = val;
             }
             pub inline fn set_left_child_id(ptr: *Elem, val: Id) void {
                 if (!HAS_LEFT_CHILDREN) return;
-                @field(ptr, LEFT_CHILDREN_FIELD).* = val;
+                const left_ptr: *Id = &@field(ptr, LEFT_CHILDREN_FIELD);
+                left_ptr.* = val;
             }
             pub inline fn set_right_child_id(ptr: *Elem, val: Id) void {
                 if (!HAS_RIGHT_CHILDREN) return;
-                @field(ptr, RIGHT_CHILDREN_FIELD).* = val;
+                const right_ptr: *Id = &@field(ptr, RIGHT_CHILDREN_FIELD);
+                right_ptr.* = val;
             }
             pub inline fn set_own_id(ptr: *Elem, val: Id) void {
                 if (!HAS_OWN_ID) return;
-                @field(ptr, OWN_ID_FIELD).* = val;
+                const id_ptr: *Id = &@field(ptr, OWN_ID_FIELD);
+                id_ptr.* = val;
+                assert_with_reason(@field(ptr, OWN_ID_FIELD) == val, @src(), "DEBUG: val wasnt written", .{});//DEBUG
             }
             pub inline fn increment_gen(ptr: *Elem) void {
                 if (!HAS_GEN) return;
-                @field(ptr, OWN_ID_FIELD).* += GEN_ONE;
-                if (@field(ptr, OWN_ID_FIELD).* & GEN_MASK == GEN_MASK) @field(ptr, OWN_ID_FIELD).* &= GEN_CLEAR;
+                const id_ptr: *Id = &@field(ptr, OWN_ID_FIELD);
+                id_ptr.* += GEN_ONE;
+                if (id_ptr.* & GEN_MASK == GEN_MASK) id_ptr.* &= GEN_CLEAR;
             }
             pub fn swap_data_only(a: *Elem, b: *Elem) void {
                 if (COPY_VAL_FN) |copy| {
@@ -691,12 +709,12 @@ pub fn LinkedHeirarchy(comptime options: ForwardLinkedHeirarchyOptions) type {
                 var this_id: Id = first_id;
                 _ = self.list.append_n_times_assume_capacity(UNINIT_ELEM, count);
                 while (this_id < last_id) {
-                    const this_ptr = self.get_ptr(this_id);
+                    const this_ptr = Internal.get_ptr_ignore_gen(self, this_id);
                     set_own_id(this_ptr, this_id);
                     this_id += 1;
                     set_next_id(this_ptr, this_id);
                 }
-                const this_ptr = self.get_ptr(this_id);
+                const this_ptr = Internal.get_ptr_ignore_gen(self, this_id);
                 set_own_id(this_ptr, this_id);
                 return Range{
                     .first = first_id,
@@ -708,8 +726,9 @@ pub fn LinkedHeirarchy(comptime options: ForwardLinkedHeirarchyOptions) type {
                 assert_with_reason(self.free_count > 0 and self.first_free_id != NULL_ID, @src(), "no free items to pop", .{});
                 const id = self.first_free_id;
                 const ptr = self.get_ptr(id);
-                const next_free = @field(ptr, FREE_FIELD);
-                @field(ptr, FREE_FIELD).* = NULL_ID;
+                const free_ptr = &@field(ptr, FREE_FIELD);
+                const next_free = free_ptr.*;
+                free_ptr.* = NULL_ID;
                 self.first_free_id = next_free;
                 self.free_count -= 1;
                 return id;
@@ -725,7 +744,8 @@ pub fn LinkedHeirarchy(comptime options: ForwardLinkedHeirarchyOptions) type {
                     if (!FREE_IS_RIGHT) set_right_child_id(ptr, NULL_ID);
                     if (!FREE_IS_NEXT) set_next_id(ptr, NULL_ID);
                 }
-                @field(ptr, FREE_FIELD).* = self.first_free_id;
+                const free_ptr = &@field(ptr, FREE_FIELD);
+                free_ptr.* = self.first_free_id;
                 self.first_free_id = id;
                 self.free_count += 1;
             }
@@ -873,24 +893,24 @@ pub fn LinkedHeirarchy(comptime options: ForwardLinkedHeirarchyOptions) type {
             //     set_next_id(this_ptr, NULL_ID);
             // }
 
-            fn assert_real_next_cached_next_match(self: *Heirarchy, this_id: Id, real_next: Id, src_loc: ?SourceLocation) void {
+            fn assert_real_next_cached_next_match(self: *Heirarchy, this_id: Id, real_next: Id, comptime src_loc: ?SourceLocation) void {
                 const cached_next = get_next_id(self.get_ptr(this_id));
                 assert_with_reason(real_next == cached_next, src_loc, "real next id (gen = {d}, idx = {d}) does not match the cached next id (gen = {d}, idx = {d}) on the prev sibling (gen = {d}, idx = {d})", .{ get_gen_index(real_next).gen, get_index(real_next), get_gen_index(cached_next).gen, get_index(cached_next), get_gen_index(this_id).gen, get_index(this_id) });
             }
 
-            fn assert_siblings_mode(src_loc: ?SourceLocation) void {
+            fn assert_siblings_mode(comptime src_loc: ?SourceLocation) void {
                 assert_with_reason(HAS_NEXT, src_loc, "cannot connect elements as siblings when tree/linked-list does not allow siblings (no 'next' field)", .{});
             }
 
-            fn assert_tree_left_mode(src_loc: ?SourceLocation) void {
+            fn assert_tree_left_mode(comptime src_loc: ?SourceLocation) void {
                 assert_with_reason(HAS_LEFT_CHILDREN, src_loc, "cannot connect elements as left children when tree/linked-list/heirarchy does not allow left children (no 'left children' field)", .{});
             }
 
-            fn assert_tree_right_mode(src_loc: ?SourceLocation) void {
+            fn assert_tree_right_mode(comptime src_loc: ?SourceLocation) void {
                 assert_with_reason(HAS_RIGHT_CHILDREN, src_loc, "cannot connect elements as right children when tree/linked-list/heirarchy does not allow right children (no 'right children' field)", .{});
             }
 
-            fn assert_2_siblings_in_order_no_cycles(self: *Heirarchy, a: Id, b: Id, comptime a_b_can_equal: bool, comptime b_can_be_null: bool, src_loc: ?SourceLocation) void {
+            fn assert_2_siblings_in_order_no_cycles(self: *Heirarchy, a: Id, b: Id, comptime a_b_can_equal: bool, comptime b_can_be_null: bool, comptime src_loc: ?SourceLocation) void {
                 assert_idx_less_than_len(get_index(a), self.list.len, src_loc);
                 assert_idx_less_than_len(get_index(b), self.list.len, src_loc);
                 assert_with_reason(a != NULL_ID, src_loc, "id 'a' was NULL_ID", .{});
@@ -1169,11 +1189,9 @@ pub fn LinkedHeirarchy(comptime options: ForwardLinkedHeirarchyOptions) type {
             Internal.connect_new_slots_between_siblings(self, this_id, disconnected_items.first, disconnected_items.last, right_id);
         }
 
-        pub fn disconnect_item_range_after(self: *Heirarchy, this_id: Id, last_disconnect_id: Id) Range {
-            const right_id = get_next_id(self.get_ptr(last_disconnect_id));
-            const first_disconnect_id = get_next_id(self.get_ptr(this_id));
-            Internal.disconnect_items_between_siblings(self, this_id, first_disconnect_id, last_disconnect_id, right_id);
-            return Range{.first = first_disconnect_id, .last = last_disconnect_id};
+        pub inline fn insert_slot_at_beginning_of_left_children(self: *Heirarchy, parent_id: Id, alloc: AllocInfal) Id {
+            self.list.ensure_unused_capacity(1, alloc);
+            return self.insert_slot_at_beginning_of_left_children_assume_capacity(parent_id);
         }
 
         pub fn insert_slot_at_beginning_of_left_children_assume_capacity(self: *Heirarchy, parent_id: Id) Id {
@@ -1201,6 +1219,16 @@ pub fn LinkedHeirarchy(comptime options: ForwardLinkedHeirarchyOptions) type {
             Internal.set_next_id(new_last_ptr, old_first_left);
             Internal.set_left_child_id(parent_ptr, range.first);
             return range;
+        }
+
+        pub fn insert_disconnected_items_at_beginning_of_left_children(self: *Heirarchy, parent_id: Id, disconnected_items: Range) void {
+            Internal.assert_tree_left_mode(@src());
+            const parent_ptr = self.get_ptr(parent_id);
+            const old_first_left = get_left_child_id(parent_ptr);
+            const last_disconn_ptr = self.get_ptr(disconnected_items.last);
+            assert_with_reason(get_next_id(last_disconn_ptr) == NULL_ID, @src(), "last disconnected item (index {d}) did not have a 'next' field that pointed to NULL_ID, it wasnt fully disconnected", .{get_index(disconnected_items.last)});
+            Internal.set_next_id(last_disconn_ptr, old_first_left);
+            Internal.set_left_child_id(parent_ptr, disconnected_items.first);
         }
 
         pub inline fn insert_slot_at_beginning_of_right_children(self: *Heirarchy, parent_id: Id, alloc: AllocInfal) Id {
@@ -1235,7 +1263,57 @@ pub fn LinkedHeirarchy(comptime options: ForwardLinkedHeirarchyOptions) type {
             return range;
         }
 
+        pub fn insert_disconnected_items_at_beginning_of_right_children(self: *Heirarchy, parent_id: Id, disconnected_items: Range) void {
+            Internal.assert_tree_right_mode(@src());
+            const parent_ptr = self.get_ptr(parent_id);
+            const old_first_right = get_right_child_id(parent_ptr);
+            const last_disconn_ptr = self.get_ptr(disconnected_items.last);
+            assert_with_reason(get_next_id(last_disconn_ptr) == NULL_ID, @src(), "last disconnected item (index {d}) did not have a 'next' field that pointed to NULL_ID, it wasnt fully disconnected", .{get_index(disconnected_items.last)});
+            Internal.set_next_id(last_disconn_ptr, old_first_right);
+            Internal.set_left_child_id(parent_ptr, disconnected_items.first);
+        }
+
+        pub inline fn insert_slot_at_beginning_of_heirarchy_root(self: *Heirarchy, alloc: AllocInfal) Id {
+            self.list.ensure_unused_capacity(1, alloc);
+            return self.insert_slot_at_beginning_of_heirarchy_root_assume_capacity();
+        }
+
+        pub fn insert_slot_at_beginning_of_heirarchy_root_assume_capacity(self: *Heirarchy) Id {
+            const new_id = Internal.initialize_new_index(self);
+            const new_ptr = self.get_ptr(new_id);
+            Internal.set_next_id(new_ptr, self.first_root_id);
+            self.first_root_id = new_id;
+            return new_id;
+        }
+
+        pub inline fn insert_many_slots_at_beginning_of_heirarchy_root(self: *Heirarchy, count: Index, alloc: AllocInfal) Range {
+            self.list.ensure_unused_capacity(count, alloc);
+            return self.insert_many_slots_at_beginning_of_heirarchy_root_assume_capacity(count);
+        }
+
+        pub fn insert_many_slots_at_beginning_of_heirarchy_root_assume_capacity(self: *Heirarchy,  count: Index) Range {
+            const range = Internal.initialize_new_indexes_as_siblings(self, count);
+            const new_last_ptr = self.get_ptr(range.last);
+            Internal.set_next_id(new_last_ptr, self.first_root_id);
+            self.first_root_id = range.first;
+            return range;
+        }
+
+        pub fn insert_disconnected_items_at_beginning_of_heirarchy_root(self: *Heirarchy, disconnected_items: Range) void {
+            const last_disconn_ptr = self.get_ptr(disconnected_items.last);
+            assert_with_reason(get_next_id(last_disconn_ptr) == NULL_ID, @src(), "last disconnected item (index {d}) did not have a 'next' field that pointed to NULL_ID, it wasnt fully disconnected", .{get_index(disconnected_items.last)});
+            Internal.set_next_id(last_disconn_ptr, self.first_root_id);
+            self.first_root_id = disconnected_items.first;
+        }
+
         //CHECKPOINT remove children funcs
+
+        pub fn disconnect_item_range_after(self: *Heirarchy, this_id: Id, last_disconnect_id: Id) Range {
+            const right_id = get_next_id(self.get_ptr(last_disconnect_id));
+            const first_disconnect_id = get_next_id(self.get_ptr(this_id));
+            Internal.disconnect_items_between_siblings(self, this_id, first_disconnect_id, last_disconnect_id, right_id);
+            return Range{.first = first_disconnect_id, .last = last_disconnect_id};
+        }
 
         pub inline fn free_disconnected_items_with_new_heap_traverser(self: *Heirarchy, first_disconected_id: Id, alloc: AllocInfal) void {
             var new_traverser = self.create_heirarchy_traverser_on_heap(alloc);
@@ -1247,24 +1325,6 @@ pub fn LinkedHeirarchy(comptime options: ForwardLinkedHeirarchyOptions) type {
             var new_traverser = self.create_heirarchy_traverser_on_stack(buffer);
             defer new_traverser.free();
             self.free_disconnected_items_with_traverser(first_disconected_id, &new_traverser);
-        }
-
-        fn add_to_free_action(traverser: *const HeirarchyTraverser, exit_id: Id, exit_kind: TraversalExitKind, userdata: ?*anyopaque) bool {
-            _ = exit_kind;
-            _ = traverser;
-            Internal.push_free_item(traverser.heirarchy, exit_id);
-            return true;
-        }
-
-        pub inline fn free_disconnected_items_with_traverser(self: *Heirarchy, first_disconected_id: Id, traverser: *HeirarchyTraverser) void {
-            traverser.custom_start_traverse_through_heirarchy_depth_first_and_do_actions_on_all_items(first_disconected_id, TraverseActions{
-                .action_after_exiting_item = add_to_free_action,
-            }, null);
-        }
-
-        pub inline fn insert_slot_at_beginning_of_left_children(self: *Heirarchy, parent_id: Id, alloc: AllocInfal) Id {
-            self.list.ensure_unused_capacity(1, alloc);
-            return self.insert_slot_at_beginning_of_left_children_assume_capacity(parent_id);
         }
 
         pub fn find_last_sibling(self: *Heirarchy, this_id: Id) Id {
@@ -1282,7 +1342,6 @@ pub fn LinkedHeirarchy(comptime options: ForwardLinkedHeirarchyOptions) type {
             return HeirarchyTraverser{
                 .alloc = alloc,
                 .frames = HeirarchyTraverser.FramesList.new_empty(alloc),
-                .should_continue = true,
                 .heirarchy = self,
             };
         }
@@ -1291,11 +1350,10 @@ pub fn LinkedHeirarchy(comptime options: ForwardLinkedHeirarchyOptions) type {
             return HeirarchyTraverser{
                 .frames = HeirarchyTraverser.FramesList{
                     .assert_alloc = AllocInfal.DummyAllocInfal,
-                    .cap = buffer.len,
+                    .cap = @intCast(buffer.len),
                     .len = 0,
                     .ptr = buffer.ptr,
                 },
-                .should_continue = true,
                 .heirarchy = self,
             };
         }
@@ -1320,7 +1378,7 @@ pub fn LinkedHeirarchy(comptime options: ForwardLinkedHeirarchyOptions) type {
 
         pub const HeirarchyTraverseFrame = struct {
             curr_id: Id = NULL_ID,
-            flags: HeirarchyTraverseFlags = HeirarchyTraverseFlags.from_flags(if (HAS_NEXT) &.{ .IS_FIRST_CHILD, .NEXT_BETWEEN_LEFT_AND_RIGHT } else &.{ .IS_FIRST_CHILD, .IS_LAST_CHILD, .NEXT_BETWEEN_LEFT_AND_RIGHT }),
+            flags: HeirarchyTraverseFlags = HeirarchyTraverseFlags.from_flags(if (HAS_NEXT) &.{.IS_FIRST_CHILD} else &.{ .IS_FIRST_CHILD, .IS_LAST_CHILD }),
 
             pub inline fn set_progress_at_least(self: *HeirarchyTraverseFrame, new_prog: HeirarchyTraverseProg) void {
                 const prog = self.flags.isolate_group(.PROGRESS);
@@ -1401,13 +1459,12 @@ pub fn LinkedHeirarchy(comptime options: ForwardLinkedHeirarchyOptions) type {
                 const curr_ptr = self.heirarchy.get_ptr(curr_id);
                 const left_child_id = get_left_child_id(curr_ptr);
                 if (left_child_id == NULL_ID) return false;
-                self.frames.append(HeirarchyTraverseFrame{ .curr_id = left_child_id });
+                self.frames.append(HeirarchyTraverseFrame{ .curr_id = left_child_id }, self.alloc);
                 const new_last_frame: *HeirarchyTraverseFrame = self.frames.get_last_ptr();
                 const next_id = get_next_id(self.heirarchy.get_ptr(left_child_id));
                 if (next_id == NULL_ID) new_last_frame.flags.set(.IS_LAST_CHILD);
                 return true;
             }
-
             pub fn goto_first_right_child(self: *HeirarchyTraverser) bool {
                 if (self.frames.len == 0) return false;
                 var last_frame: *HeirarchyTraverseFrame = self.frames.get_last_ptr();
@@ -1417,24 +1474,21 @@ pub fn LinkedHeirarchy(comptime options: ForwardLinkedHeirarchyOptions) type {
                 const curr_ptr = self.heirarchy.get_ptr(curr_id);
                 const right_child_id = get_right_child_id(curr_ptr);
                 if (right_child_id == NULL_ID) return false;
-                self.frames.append(HeirarchyTraverseFrame{ .curr_id = right_child_id });
+                self.frames.append(HeirarchyTraverseFrame{ .curr_id = right_child_id }, self.alloc);
                 const new_last_frame: *HeirarchyTraverseFrame = self.frames.get_last_ptr();
                 const next_id = get_next_id(self.heirarchy.get_ptr(right_child_id));
                 if (next_id == NULL_ID) new_last_frame.flags.set(.IS_LAST_CHILD);
-                last_frame = self.frames.ptr[self.frames.len - 2];
                 return true;
             }
 
             pub fn goto_parent(self: *HeirarchyTraverser) bool {
                 if (!HAS_LEFT_CHILDREN or !HAS_RIGHT_CHILDREN or self.frames.len == 0) return false;
-                const curr_id = self.frames.get_last().curr_id;
-                if (curr_id == self.custom_last_id) return false;
                 self.frames.set_len(self.frames.len - 1);
                 if (self.frames.len == 0) return false;
                 return true;
             }
 
-            fn init(self: *HeirarchyTraverser, start_id: Id) void {
+            pub fn init(self: *HeirarchyTraverser, start_id: Id) void {
                 self.frames.clear_retaining_capacity();
                 if (start_id == NULL_ID) return;
                 self.frames.append(HeirarchyTraverseFrame{ .curr_id = start_id }, self.alloc);
@@ -1478,7 +1532,21 @@ pub fn LinkedHeirarchy(comptime options: ForwardLinkedHeirarchyOptions) type {
                 self.traverse_through_heirarchy_depth_first_and_do_actions_on_items(actions, true, stop_before_id, userdata);
             }
 
-            fn traverse_through_heirarchy_depth_first_and_do_actions_on_items(self: *HeirarchyTraverser, comptime actions: TraverseActions, comptime use_stop_id: bool, stop_id: Id, userdata: ?*anyopaque) void {
+            fn add_to_free_action(traverser: *const HeirarchyTraverser, exit_id: Id, exit_kind: TraversalExitKind, userdata: ?*anyopaque) bool {
+                _ = exit_kind;
+                _ = userdata;
+                Internal.push_free_item(traverser.heirarchy, exit_id);
+                return true;
+            }
+
+            pub inline fn free_disconnected_items_with_traverser(self: *HeirarchyTraverser, first_disconected_id: Id) void {
+                self.custom_start_traverse_through_heirarchy_depth_first_and_do_actions_on_all_items(first_disconected_id, TraverseActions{
+                    .action_after_exiting_item = add_to_free_action,
+                }, null);
+            }
+
+            fn traverse_through_heirarchy_depth_first_and_do_actions_on_items(self: *HeirarchyTraverser, actions: TraverseActions, comptime use_stop_id: bool, stop_id: Id, userdata: ?*anyopaque) void {
+                //CHECKPOINT make this a labeled switch statement for better control flow
                 loop: while (true) {
                     const last_frame: *HeirarchyTraverseFrame = self.frames.get_last_ptr();
                     if (use_stop_id and last_frame.curr_id == stop_id) break :loop;
@@ -1495,7 +1563,7 @@ pub fn LinkedHeirarchy(comptime options: ForwardLinkedHeirarchyOptions) type {
                         if (self.goto_first_right_child()) continue :loop;
                     }
                     if (actions.action_after_right_children) |after_action| {
-                        if (!after_action(self.heirarchy, self.frames.slice(), userdata)) break :loop;
+                        if (!after_action(self, userdata)) break :loop;
                     }
                     if (actions.action_after_exiting_item) |exit_action| {
                         const exit_id = last_frame.curr_id;
@@ -1506,7 +1574,7 @@ pub fn LinkedHeirarchy(comptime options: ForwardLinkedHeirarchyOptions) type {
                             exit_kind = .EXITED_BY_MOVING_TO_NEXT_SIBLING;
                         } else if (self.goto_parent()) {
                             did_move = true;
-                            exit_kind == .EXITED_BY_MOVING_TO_PARENT;
+                            exit_kind = .EXITED_BY_RETURNING_TO_PARENT;
                         }
                         if (!exit_action(self, exit_id, exit_kind, userdata)) break :loop;
                         if (did_move) continue :loop;
@@ -1521,10 +1589,11 @@ pub fn LinkedHeirarchy(comptime options: ForwardLinkedHeirarchyOptions) type {
         };
 
         pub const TraverseActions = struct {
-            action_before_left_children: ?*const fn (traverser: *const HeirarchyTraverser, userdata: ?*anyopaque) bool,
-            action_after_left_before_right_children: ?*const fn (traverser: *const HeirarchyTraverser, userdata: ?*anyopaque) bool,
-            action_after_right_children: ?*const fn (traverser: *const HeirarchyTraverser, userdata: ?*anyopaque) bool,
-            action_after_exiting_item: ?*const fn (traverser: *const HeirarchyTraverser, exited_id: Id, exit_kind: TraversalExitKind, userdata: ?*anyopaque) bool,
+            // action_before_entering_item: ?*const fn (traverser: *const HeirarchyTraverser, entering_id: Id, enter_kind: TraversalEnterKind, userdata: ?*anyopaque) bool,
+            action_before_left_children: ?*const fn (traverser: *const HeirarchyTraverser, userdata: ?*anyopaque) bool = null,
+            action_after_left_before_right_children: ?*const fn (traverser: *const HeirarchyTraverser, userdata: ?*anyopaque) bool = null,
+            action_after_right_children: ?*const fn (traverser: *const HeirarchyTraverser, userdata: ?*anyopaque) bool = null,
+            action_after_exiting_item: ?*const fn (traverser: *const HeirarchyTraverser, exited_id: Id, exit_kind: TraversalExitKind, userdata: ?*anyopaque) bool = null,
         };
 
         // pub fn traverse_and_do_actions_on_each(self: *Heirarchy) void {}
@@ -1905,482 +1974,258 @@ pub fn LinkedHeirarchy(comptime options: ForwardLinkedHeirarchyOptions) type {
 //     };
 // }
 
-test "LinkedList.zig - Linear Doubly Linked" {
-    // const t = Root.Testing;
-    // const alloc = std.heap.page_allocator;
-    // const TestElem = struct {
-    //     prev: u16,
-    //     val: u8,
-    //     idx: u16,
-    //     list: u8,
-    //     next: u16,
-    // };
-    // const TestState = enum(u8) {
-    //     USED,
-    //     FREE,
-    //     INVALID,
-    //     NONE,
-    // };
-    // const uninit_val = TestElem{
-    //     .idx = 0xAAAA,
-    //     .prev = 0xAAAA,
-    //     .next = 0xAAAA,
-    //     .list = 0xAA,
-    //     .val = 0,
-    // };
-    // const opts = LinkedHeirarchyManagerOptions{
-    //     .base_memory_options = Root.List.ListOptions{
-    //         .alignment = null,
-    //         .alloc_error_behavior = .ERRORS_PANIC,
-    //         .element_type = TestElem,
-    //         .growth_model = .GROW_BY_25_PERCENT,
-    //         .index_type = u16,
-    //         .secure_wipe_bytes = true,
-    //         .memset_uninit_val = &uninit_val,
-    //     },
-    //     .master_list_enum = TestState,
-    //     .forward_linkage = "next",
-    //     .backward_linkage = "prev",
-    //     .element_idx_cache_field = "idx",
-    //     .force_cache_first_index = true,
-    //     .force_cache_last_index = true,
-    //     .element_list_flag_access = ElementStateAccess{
-    //         .field = "list",
-    //         .field_bit_offset = 1,
-    //         .field_bit_count = 2,
-    //         .field_type = u8,
-    //     },
-    //     .stronger_asserts = true,
-    // };
-    // const Action = struct {
-    //     fn set_value_from_string(elem: *TestElem, userdata: ?*anyopaque) void {
-    //         const string: *[]const u8 = @ptrCast(@alignCast(userdata.?));
-    //         elem.val = string.*[0];
-    //         string.* = string.*[1..];
-    //     }
-    //     fn move_data(from_item: *const TestElem, to_item: *TestElem, userdata: ?*anyopaque) void {
-    //         _ = userdata;
-    //         to_item.val = from_item.val;
-    //     }
-    //     fn greater_than(a: *const TestElem, b: *const TestElem, userdata: ?*anyopaque) bool {
-    //         _ = userdata;
-    //         return a.val > b.val;
-    //     }
-    // };
-    // const List = define_linked_heirarchy_manager(opts);
-    // const expect = struct {
-    //     fn list_is_valid(linked_list: *List, list: TestState, case_indexes: []const u16, case_vals: []const u8) !void {
-    //         errdefer debug_list(linked_list, list);
-    //         var i: List.Idx = 0;
-    //         var c: List.Idx = 0;
-    //         const list_count = linked_list.get_list_len(list);
-    //         try t.expect_equal(case_indexes.len, "indexes.len", case_vals.len, "vals.len", "text case indexes and vals have different len", .{});
-    //         try t.expect_equal(list_count, "list_count", case_vals.len, "vals.len", "list {s} count mismatch with test case vals len", .{@tagName(list)});
-    //         //FORWARD
-    //         var start_idx = linked_list.get_first_index_in_list(list);
-    //         if (start_idx == List.NULL_IDX) {
-    //             try t.expect_equal(list_count, "list_count", c, "real_count", "list list {s} mismatch count", .{@tagName(list)});
-    //         } else {
-    //             try t.expect_true(linked_list.index_is_in_list(start_idx, list), "list.idx_is_in_list(start_idx, list)", "list list {s} first idx {d} cached list mismatch", .{ @tagName(list), start_idx });
-    //             var slow_idx = start_idx;
-    //             var fast_idx = start_idx;
-    //             var fast_ptr = linked_list.get_ptr(fast_idx);
-    //             var prev_fast_idx: List.Idx = List.NULL_IDX;
-    //             try t.expect_equal(fast_idx, "fast_idx", @field(fast_ptr, List.CACHE_FIELD), "@field(start_ptr, List.CACHE_FIELD)", "list list {s} first idx {d} cached idx mismatch", .{ @tagName(list), start_idx });
-    //             try t.expect_equal(@intFromEnum(list), "@intFromEnum(list)", List.Internal.get_list_tag_raw(fast_ptr), "List.Internal.get_list_raw(start_idx)", "list list {s} first idx {d} cached list mismatch", .{ @tagName(list), start_idx });
-    //             try t.expect_equal(@field(fast_ptr, List.PREV_FIELD), "@field(fast_ptr, List.PREV_FIELD)", prev_fast_idx, "prev_fast_idx", "list list {s} first idx {d} cached prev isnt NULL_IDX", .{ @tagName(list), start_idx });
-    //             try t.expect_less_than(i, "i", case_vals.len, " case_vals.len", "list list {s} current position {d} out of bounds for test case vals", .{ @tagName(list), i });
-    //             try t.expect_equal(fast_idx, "fast_idx", case_indexes[i], "case_indexes[i]", "list list {s} element at pos {d} idx mismatch", .{ @tagName(list), i });
-    //             try t.expect_equal(@field(fast_ptr, "val"), "@field(fast_ptr, \"val\")", case_vals[i], "case_vals[i]", "list list {s} element at pos {d} val mismatch", .{ @tagName(list), i });
-    //             i = 1;
-    //             c = 1;
-    //             check: while (true) {
-    //                 prev_fast_idx = fast_idx;
-    //                 fast_idx = linked_list.get_next_idx(list, fast_idx);
-    //                 if (fast_idx == List.NULL_IDX) {
-    //                     try t.expect_equal(list_count, "list_count", c, "real_count", "list list {s} mismatch count", .{@tagName(list)});
-    //                     break :check;
-    //                 }
-    //                 try t.expect_greater_than(linked_list.list.len, "list.list.len", fast_idx, "fast_idx", "list list {s} next idx out of bounds but not NULL_IDX", .{@tagName(list)});
-    //                 fast_ptr = linked_list.get_ptr(fast_idx);
-    //                 try t.expect_equal(fast_idx, "fast_idx", @field(fast_ptr, List.CACHE_FIELD), "@field(fast_ptr, List.CACHE_FIELD)", "list list {s} idx {d} cached idx mismatch", .{ @tagName(list), fast_idx });
-    //                 try t.expect_equal(@intFromEnum(list), "@intFromEnum(list)", List.Internal.get_list_tag_raw(fast_ptr), "List.Internal.get_list_raw(fast_ptr)", "list list {s} idx {d} cached list mismatch", .{ @tagName(list), fast_idx });
-    //                 try t.expect_equal(@field(fast_ptr, List.PREV_FIELD), "@field(fast_ptr, List.PREV_FIELD)", prev_fast_idx, "prev_fast_idx", "list list {s} idx {d} cached prev isnt previous fast idx {d}", .{ @tagName(list), fast_idx, prev_fast_idx });
-    //                 try t.expect_less_than(i, "i", case_vals.len, " case_vals.len", "list list {s} current position {d} out of bounds for test case vals", .{ @tagName(list), i });
-    //                 try t.expect_equal(fast_idx, "fast_idx", case_indexes[i], "case_indexes[i]", "list list {s} element at pos {d} idx mismatch", .{ @tagName(list), i });
-    //                 try t.expect_equal(@field(fast_ptr, "val"), "@field(fast_ptr, \"val\")", case_vals[i], "case_vals[i]", "list list {s} element at pos {d} val mismatch", .{ @tagName(list), i });
-    //                 i += 1;
-    //                 c += 1;
-    //                 prev_fast_idx = fast_idx;
-    //                 fast_idx = linked_list.get_next_idx(list, fast_idx);
-    //                 if (fast_idx == List.NULL_IDX) {
-    //                     try t.expect_equal(list_count, "list_count", c, "real_count", "list list {s} mismatch count", .{@tagName(list)});
-    //                     break :check;
-    //                 }
-    //                 fast_ptr = linked_list.get_ptr(fast_idx);
-    //                 try t.expect_equal(fast_idx, "fast_idx", @field(fast_ptr, List.CACHE_FIELD), "@field(fast_ptr, List.CACHE_FIELD)", "list list {s} idx {d} cached idx mismatch", .{ @tagName(list), fast_idx });
-    //                 try t.expect_equal(@intFromEnum(list), "@intFromEnum(list)", List.Internal.get_list_tag_raw(fast_ptr), "List.Internal.get_list_raw(fast_ptr)", "list list {s} idx {d} cached list mismatch", .{ @tagName(list), fast_idx });
-    //                 try t.expect_equal(@field(fast_ptr, List.PREV_FIELD), "@field(fast_ptr, List.PREV_FIELD)", prev_fast_idx, "prev_fast_idx", "list list {s} idx {d} cached prev isnt previous fast idx {d}", .{ @tagName(list), fast_idx, prev_fast_idx });
-    //                 try t.expect_less_than(i, "i", case_vals.len, " case_vals.len", "list list {s} current position {d} out of bounds for test case vals", .{ @tagName(list), i });
-    //                 try t.expect_equal(fast_idx, "fast_idx", case_indexes[i], "case_indexes[i]", "list list {s} element at pos {d} idx mismatch", .{ @tagName(list), i });
-    //                 try t.expect_equal(@field(fast_ptr, "val"), "@field(fast_ptr, \"val\")", case_vals[i], "case_vals[i]", "list list {s} element at pos {d} val mismatch", .{ @tagName(list), i });
-    //                 i += 1;
-    //                 c += 1;
-    //                 slow_idx = linked_list.get_next_idx(list, slow_idx);
-    //                 try t.expect_not_equal(fast_idx, "fast_idx", slow_idx, "slow_idx", "list list {s} was cyclic", .{@tagName(list)});
-    //             }
-    //         }
-    //         //BACKWARD
-    //         i = @intCast(case_indexes.len -| 1);
-    //         c = 0;
-    //         start_idx = linked_list.get_last_index_in_list(list);
-    //         if (start_idx == List.NULL_IDX) {
-    //             try t.expect_equal(list_count, "list_count", c, "real_count", "list list {s} mismatch count", .{@tagName(list)});
-    //         } else {
-    //             try t.expect_true(linked_list.index_is_in_list(start_idx, list), "list.idx_is_in_list(start_idx, list)", "list list {s} first idx {d} cached list mismatch", .{ @tagName(list), start_idx });
-    //             var slow_idx = start_idx;
-    //             var fast_idx = start_idx;
-    //             var fast_ptr = linked_list.get_ptr(fast_idx);
-    //             var prev_fast_idx: List.Idx = List.NULL_IDX;
-    //             try t.expect_equal(fast_idx, "fast_idx", @field(fast_ptr, List.CACHE_FIELD), "@field(start_ptr, List.CACHE_FIELD)", "list list {s} first idx {d} cached idx mismatch", .{ @tagName(list), start_idx });
-    //             try t.expect_equal(@intFromEnum(list), "@intFromEnum(list)", List.Internal.get_list_tag_raw(fast_ptr), "List.Internal.get_list_raw(start_idx)", "list list {s} first idx {d} cached list mismatch", .{ @tagName(list), start_idx });
-    //             try t.expect_equal(@field(fast_ptr, List.NEXT_FIELD), "@field(fast_ptr, List.NEXT_FIELD)", prev_fast_idx, "prev_fast_idx", "list list {s} first idx {d} cached next isnt NULL_IDX", .{ @tagName(list), start_idx });
-    //             try t.expect_less_than(i, "i", case_vals.len, " case_vals.len", "list list {s} current position {d} out of bounds for test case vals", .{ @tagName(list), i });
-    //             try t.expect_equal(fast_idx, "fast_idx", case_indexes[i], "case_indexes[i]", "list list {s} element at pos {d} idx mismatch", .{ @tagName(list), i });
-    //             try t.expect_equal(@field(fast_ptr, "val"), "@field(fast_ptr, \"val\")", case_vals[i], "case_vals[i]", "list list {s} element at pos {d} val mismatch", .{ @tagName(list), i });
-    //             i -|= 1;
-    //             c = 1;
-    //             check: while (true) {
-    //                 prev_fast_idx = fast_idx;
-    //                 fast_idx = linked_list.get_prev_idx(list, fast_idx);
-    //                 if (fast_idx == List.NULL_IDX) {
-    //                     try t.expect_equal(list_count, "list_count", c, "real_count", "list list {s} mismatch count", .{@tagName(list)});
-    //                     break :check;
-    //                 }
-    //                 try t.expect_greater_than(linked_list.list.len, "list.list.len", fast_idx, "fast_idx", "list list {s} next idx out of bounds but not NULL_IDX", .{@tagName(list)});
-    //                 fast_ptr = linked_list.get_ptr(fast_idx);
-    //                 try t.expect_equal(fast_idx, "fast_idx", @field(fast_ptr, List.CACHE_FIELD), "@field(fast_ptr, List.CACHE_FIELD)", "list list {s} idx {d} cached idx mismatch", .{ @tagName(list), fast_idx });
-    //                 try t.expect_equal(@intFromEnum(list), "@intFromEnum(list)", List.Internal.get_list_tag_raw(fast_ptr), "List.Internal.get_list_raw(fast_ptr)", "list list {s} idx {d} cached list mismatch", .{ @tagName(list), fast_idx });
-    //                 try t.expect_equal(@field(fast_ptr, List.NEXT_FIELD), "@field(fast_ptr, List.NEXT_FIELD)", prev_fast_idx, "prev_fast_idx", "list list {s} idx {d} cached next isnt previous fast idx {d}", .{ @tagName(list), fast_idx, prev_fast_idx });
-    //                 try t.expect_less_than(i, "i", case_vals.len, " case_vals.len", "list list {s} current position {d} out of bounds for test case vals", .{ @tagName(list), i });
-    //                 try t.expect_equal(fast_idx, "fast_idx", case_indexes[i], "case_indexes[i]", "list list {s} element at pos {d} idx mismatch", .{ @tagName(list), i });
-    //                 try t.expect_equal(@field(fast_ptr, "val"), "@field(fast_ptr, \"val\")", case_vals[i], "case_vals[i]", "list list {s} element at pos {d} val mismatch", .{ @tagName(list), i });
-    //                 i -|= 1;
-    //                 c += 1;
-    //                 prev_fast_idx = fast_idx;
-    //                 fast_idx = linked_list.get_prev_idx(list, fast_idx);
-    //                 if (fast_idx == List.NULL_IDX) {
-    //                     try t.expect_equal(list_count, "list_count", c, "real_count", "list list {s} mismatch count", .{@tagName(list)});
-    //                     break :check;
-    //                 }
-    //                 fast_ptr = linked_list.get_ptr(fast_idx);
-    //                 try t.expect_equal(fast_idx, "fast_idx", @field(fast_ptr, List.CACHE_FIELD), "@field(fast_ptr, List.CACHE_FIELD)", "list list {s} idx {d} cached idx mismatch", .{ @tagName(list), fast_idx });
-    //                 try t.expect_equal(@intFromEnum(list), "@intFromEnum(list)", List.Internal.get_list_tag_raw(fast_ptr), "List.Internal.get_list_raw(fast_ptr)", "list list {s} idx {d} cached list mismatch", .{ @tagName(list), fast_idx });
-    //                 try t.expect_equal(@field(fast_ptr, List.NEXT_FIELD), "@field(fast_ptr, List.NEXT_FIELD)", prev_fast_idx, "prev_fast_idx", "list list {s} idx {d} cached prev isnt previous fast idx {d}", .{ @tagName(list), fast_idx, prev_fast_idx });
-    //                 try t.expect_less_than(i, "i", case_vals.len, " case_vals.len", "list list {s} current position {d} out of bounds for test case vals", .{ @tagName(list), i });
-    //                 try t.expect_equal(fast_idx, "fast_idx", case_indexes[i], "case_indexes[i]", "list list {s} element at pos {d} idx mismatch", .{ @tagName(list), i });
-    //                 try t.expect_equal(@field(fast_ptr, "val"), "@field(fast_ptr, \"val\")", case_vals[i], "case_vals[i]", "list list {s} element at pos {d} val mismatch", .{ @tagName(list), i });
-    //                 i -|= 1;
-    //                 c += 1;
-    //                 slow_idx = linked_list.get_prev_idx(list, slow_idx);
-    //                 try t.expect_not_equal(fast_idx, "fast_idx", slow_idx, "slow_idx", "list list {s} was cyclic", .{@tagName(list)});
-    //             }
-    //         }
-    //     }
-    //     fn full_ll_state(list: *List, used_indexes: []const u16, used_vals: []const u8, free_indexes: []const u16, free_vals: []const u8, invalid_indexes: []const u16, invalid_vals: []const u8) !void {
-    //         try list_is_valid(list, .FREE, free_indexes, free_vals);
-    //         try list_is_valid(list, .USED, used_indexes, used_vals);
-    //         try list_is_valid(list, .INVALID, invalid_indexes, invalid_vals);
-    //         if (list.get_list_len(.FREE) == 0) {
-    //             try t.expect_equal(list.get_first_index_in_list(.FREE), "list.get_first_index_in_list(.FREE)", List.NULL_IDX, "List.NULL_IDX", "empty list `FREE` does not have NULL_IDX for first index", .{});
-    //             try t.expect_equal(list.get_last_index_in_list(.FREE), "list.get_last_index_in_list(.FREE)", List.NULL_IDX, "List.NULL_IDX", "empty list `FREE` does not have NULL_IDX for last index", .{});
-    //         }
-    //         if (list.get_list_len(.USED) == 0) {
-    //             try t.expect_equal(list.get_first_index_in_list(.USED), "list.get_first_index_in_list(.USED)", List.NULL_IDX, "List.NULL_IDX", "empty list `USED` does not have NULL_IDX for first index", .{});
-    //             try t.expect_equal(list.get_last_index_in_list(.USED), "list.get_last_index_in_list(.USED)", List.NULL_IDX, "List.NULL_IDX", "empty list `USED` does not have NULL_IDX for last index", .{});
-    //         }
-    //         if (list.get_list_len(.INVALID) == 0) {
-    //             try t.expect_equal(list.get_first_index_in_list(.INVALID), "list.get_first_index_in_list(.INVALID)", List.NULL_IDX, "List.NULL_IDX", "empty list `INVALID` does not have NULL_IDX for first index", .{});
-    //             try t.expect_equal(list.get_last_index_in_list(.INVALID), "list.get_last_index_in_list(.INVALID)", List.NULL_IDX, "List.NULL_IDX", "empty list `INVALID` does not have NULL_IDX for last index", .{});
-    //         }
-    //         const total_count = list.get_list_len(.USED) + list.get_list_len(.FREE) + list.get_list_len(.INVALID);
-    //         try t.expect_equal(total_count, "total_count", list.list.len, "list.list.len", "total list list counts did not equal underlying list len (leaked indexes)", .{});
-    //     }
-    //     fn debug_list(linked_list: *List, list: TestState) void {
-    //         t.print("\nERROR STATE: {s}\ncount:     {d: >2}\nfirst_idx: {d: >2}\nlast_idx:  {d: >2}\n", .{
-    //             @tagName(list),
-    //             linked_list.get_list_len(list),
-    //             linked_list.get_first_index_in_list(list),
-    //             linked_list.get_last_index_in_list(list),
-    //         });
-    //         var idx = linked_list.get_first_index_in_list(list);
-    //         var ptr: *List.Elem = undefined;
-    //         t.print("forward:      ", .{});
-    //         while (idx != List.NULL_IDX) {
-    //             ptr = linked_list.get_ptr(idx);
-    //             t.print("{d} -> ", .{idx});
-    //             idx = @field(ptr, List.NEXT_FIELD);
-    //         }
+const Test = if (build.mode == .Debug) struct {
+    const t = Root.Testing;
+    const alloc = AllocInfal{ .allocator = std.heap.page_allocator };
+    const TestElem = struct {
+        id: u32,
+        next: u32,
+        left: u32,
+        right: u32,
+        val: u8,
+    };
+    const uninit_val = TestElem{
+        .id = 0xAAAAAAAA,
+        .next = 0xAAAA,
+        .left = 0xAAAA,
+        .right = 0xAAAA,
+        .val = 0,
+    };
+    const Copy = struct {
+        fn action(from_item: *const anyopaque, to_item: *anyopaque) void {
+            const from_cast: *const TestElem = @ptrCast(@alignCast(from_item));
+            const to_cast: *TestElem = @ptrCast(@alignCast(to_item));
+            to_cast.val = from_cast.val;
+        }
+    };
+    const opts = ForwardLinkedHeirarchyOptions{
+        .element_memory_options = Root.List.ListOptions{
+            .alignment = null,
+            .assert_correct_allocator = true,
+            .element_type = TestElem,
+            .growth_model = .GROW_BY_25_PERCENT,
+            .index_type = u16,
+            .secure_wipe_bytes = true,
+            .memset_uninit_val = &uninit_val,
+        },
+        .next_field = "next",
+        .left_children_field = "left",
+        .right_children_field = "right",
+        .custom_copy_only_value_fn = Copy.action,
+        .element_id_type = u32,
+        .generation_details = GenerationDetails{
+            .generation_bits = 16,
+            .index_bits = 16,
+        },
+        .own_id_field = "id",
+        .strong_asserts = true,
+        .traversal_trace_options = Root.List.ListOptionsWithoutElem{
+            .alignment = null,
+            .assert_correct_allocator = true,
+            .growth_model = .GROW_EXACT_NEEDED,
+            .index_type = u8,
+            .secure_wipe_bytes = true,
+        },
+    };
+    const List = LinkedHeirarchy(opts);
+    const node_tracker_ids_opts = Root.List.ListOptions{
+        .alignment = null,
+        .assert_correct_allocator = true,
+        .element_type = u32,
+        .growth_model = .GROW_BY_25_PERCENT,
+        .index_type = u16,
+        .memset_uninit_val = null,
+        .secure_wipe_bytes = true,
+    };
+    const node_tracker_chars_opts = Root.List.ListOptions{
+        .alignment = null,
+        .assert_correct_allocator = true,
+        .element_type = u8,
+        .growth_model = .GROW_BY_25_PERCENT,
+        .index_type = u16,
+        .memset_uninit_val = null,
+        .secure_wipe_bytes = true,
+    };
+    const NodeTrackerIdList = Root.List.List(node_tracker_ids_opts);
+    const NodeTrackerCharList = Root.List.List(node_tracker_chars_opts);
+    const NodeTracker = struct {
+        ids: NodeTrackerIdList,
+        chars: NodeTrackerCharList,
+        expected: []const u8,
+        name: []const u8,
+    };
+    const NodeTrackerSet = struct {
+        before: NodeTracker,
+        middle: NodeTracker,
+        after: NodeTracker,
+        exit: NodeTracker,
+        errors: bool = false,
+    };
+    const Action = struct {
+        fn set_value_from_string(traverser: *const List.HeirarchyTraverser, userdata: ?*anyopaque) bool {
+            const string: *[]const u8 = @ptrCast(@alignCast(userdata.?));
+            const curr_ptr = traverser.get_current_ptr();
+            curr_ptr.val = string.*[0];
+            string.* = string.*[1..];
+            return string.len > 0;
+        }
+        fn greater_than(a: *const TestElem, b: *const TestElem, userdata: ?*anyopaque) bool {
+            _ = userdata;
+            return a.val > b.val;
+        }
+        fn node_match(param: NodeTrackerIdList.Elem, item: *const NodeTrackerIdList.Elem) bool {
+            return item.* == param;
+        }
+        fn assert_node_before(traverser: *const List.HeirarchyTraverser, userdata: ?*anyopaque) bool {
+            var tracker_set: *NodeTrackerSet = @ptrCast(@alignCast(userdata.?));
+            var tracker = &tracker_set.before;
+            const curr_ptr: *TestElem = traverser.get_current_ptr();
+            const duplicate = tracker.ids.find_idx(NodeTrackerIdList.Elem, curr_ptr.id, node_match);
+            if (duplicate) |dupe| {
+                t.expect_null(duplicate, "duplicate_id", "tracker {s} found duplicate id (index = {d}, gen = {d})", .{ tracker.name, List.get_index(dupe), List.get_gen(dupe) }) catch {
+                    tracker_set.errors = true;
+                    return false;
+                };
+            }
+            t.expect_less_than(tracker.ids.len, "tracker.list.len", tracker.expected.len, "tracker.expected.len", "found more nodes than expected", .{}) catch {
+                tracker_set.errors = true;
+                return false;
+            };
+            tracker.ids.append(curr_ptr.id, alloc);
+            tracker.chars.append(curr_ptr.val, alloc);
+            return true;
+        }
+        fn assert_node_middle(traverser: *const List.HeirarchyTraverser, userdata: ?*anyopaque) bool {
+            var tracker_set: *NodeTrackerSet = @ptrCast(@alignCast(userdata.?));
+            var tracker = &tracker_set.middle;
+            const curr_ptr: *TestElem = traverser.get_current_ptr();
+            const duplicate = tracker.ids.find_idx(NodeTrackerIdList.Elem, curr_ptr.id, node_match);
+            if (duplicate) |dupe| {
+                t.expect_null(duplicate, "duplicate_id", "tracker {s} found duplicate id (index = {d}, gen = {d})", .{ tracker.name, List.get_index(dupe), List.get_gen(dupe) }) catch {
+                    tracker_set.errors = true;
+                    return false;
+                };
+            }
+            t.expect_less_than(tracker.ids.len, "tracker.list.len", tracker.expected.len, "tracker.expected.len", "found more nodes than expected", .{}) catch {
+                tracker_set.errors = true;
+                return false;
+            };
+            tracker.ids.append(curr_ptr.id, alloc);
+            tracker.chars.append(curr_ptr.val, alloc);
+            return true;
+        }
+        fn assert_node_after(traverser: *const List.HeirarchyTraverser, userdata: ?*anyopaque) bool {
+            var tracker_set: *NodeTrackerSet = @ptrCast(@alignCast(userdata.?));
+            var tracker = &tracker_set.after;
+            const curr_ptr: *TestElem = traverser.get_current_ptr();
+            const duplicate = tracker.ids.find_idx(NodeTrackerIdList.Elem, curr_ptr.id, node_match);
+            if (duplicate) |dupe| {
+                t.expect_null(duplicate, "duplicate_id", "tracker {s} found duplicate id (index = {d}, gen = {d})", .{ tracker.name, List.get_index(dupe), List.get_gen(dupe) }) catch {
+                    tracker_set.errors = true;
+                    return false;
+                };
+            }
+            t.expect_less_than(tracker.ids.len, "tracker.list.len", tracker.expected.len, "tracker.expected.len", "found more nodes than expected", .{}) catch {
+                tracker_set.errors = true;
+                return false;
+            };
+            tracker.ids.append(curr_ptr.id, alloc);
+            tracker.chars.append(curr_ptr.val, alloc);
+            return true;
+        }
+        fn assert_node_exit(traverser: *const List.HeirarchyTraverser, exit_id: List.Id, exit_kind: TraversalExitKind, userdata: ?*anyopaque) bool {
+            _ = exit_kind;
+            var tracker_set: *NodeTrackerSet = @ptrCast(@alignCast(userdata.?));
+            var tracker = &tracker_set.exit;
+            const exit_ptr: *TestElem = &traverser.heirarchy.list.ptr[List.get_index(exit_id)];
+            const duplicate = tracker.ids.find_idx(NodeTrackerIdList.Elem, exit_id, node_match);
+            if (duplicate) |dupe| {
+                t.expect_null(duplicate, "duplicate_id", "tracker {s} found duplicate id (index = {d}, gen = {d})", .{ tracker.name, List.get_index(dupe), List.get_gen(dupe) }) catch {
+                    tracker_set.errors = true;
+                    return false;
+                };
+            }
+            t.expect_less_than(tracker.ids.len, "tracker.list.len", tracker.expected.len, "tracker.expected.len", "found more nodes than expected", .{}) catch {
+                tracker_set.errors = true;
+                return false;
+            };
+            tracker.ids.append(exit_id, alloc);
+            tracker.chars.append(exit_ptr.val, alloc);
+            return true;
+        }
+    };
+    const assert_node_actions = List.TraverseActions{
+        .action_before_left_children = Action.assert_node_before,
+        .action_after_left_before_right_children = Action.assert_node_middle,
+        .action_after_right_children = Action.assert_node_after,
+        .action_after_exiting_item = Action.assert_node_exit,
+    };
+    const write_node_actions = List.TraverseActions{
+        .action_after_left_before_right_children = Action.set_value_from_string,
+    };
+    const expect = struct {
+        fn traversal_yields(traverser: *List.HeirarchyTraverser, node_trackers: *NodeTrackerSet, start_id: List.Id, pre_order: []const u8, in_order: []const u8, post_order: []const u8) !void {
+            node_trackers.errors = false;
+            node_trackers.before.ids.clear_retaining_capacity();
+            node_trackers.middle.ids.clear_retaining_capacity();
+            node_trackers.after.ids.clear_retaining_capacity();
+            node_trackers.exit.ids.clear_retaining_capacity();
+            node_trackers.before.chars.clear_retaining_capacity();
+            node_trackers.middle.chars.clear_retaining_capacity();
+            node_trackers.after.chars.clear_retaining_capacity();
+            node_trackers.exit.chars.clear_retaining_capacity();
+            node_trackers.before.expected = pre_order;
+            node_trackers.middle.expected = in_order;
+            node_trackers.after.expected = post_order;
+            node_trackers.exit.expected = post_order;
+            traverser.custom_start_traverse_through_heirarchy_depth_first_and_do_actions_on_all_items(start_id, assert_node_actions, @ptrCast(node_trackers));
+            try t.expect_false(node_trackers.errors, "node_trackers.errors", "At least one error", .{});
+            try t.expect_equal(node_trackers.before.ids.len, "node_trackers.before.ids.len", pre_order.len, "pre_order.len", "tracker {s} preformed actions on {d} items, but expected {d} items", .{ node_trackers.before.name, node_trackers.before.ids.len, pre_order.len });
+            try t.expect_equal(node_trackers.middle.ids.len, "node_trackers.middle.ids.len", in_order.len, "in_order.len", "tracker {s} preformed actions on {d} items, but expected {d} items", .{ node_trackers.middle.name, node_trackers.middle.ids.len, in_order.len });
+            try t.expect_equal(node_trackers.after.ids.len, "node_trackers.after.list.len", post_order.len, "post_order.len", "tracker {s} preformed actions on {d} items, but expected {d} items", .{ node_trackers.after.name, node_trackers.after.ids.len, post_order.len });
+            try t.expect_equal(node_trackers.exit.ids.len, "node_trackers.exit.list.len", post_order.len, "post_order.len", "tracker {s} preformed actions on {d} items, but expected {d} items", .{ node_trackers.exit.name, node_trackers.exit.ids.len, post_order.len });
+            try t.expect_slices_equal(node_trackers.before.chars.slice(), "node_trackers.before.chars.slice()", node_trackers.before.expected, "node_trackers.before.expected", "mismatch traversal result", .{});
+            try t.expect_slices_equal(node_trackers.middle.chars.slice(), "node_trackers.middle.chars.slice()", node_trackers.middle.expected, "node_trackers.middle.expected", "mismatch traversal result", .{});
+            try t.expect_slices_equal(node_trackers.after.chars.slice(), "node_trackers.after.chars.slice()", node_trackers.after.expected, "node_trackers.after.expected", "mismatch traversal result", .{});
+            try t.expect_slices_equal(node_trackers.exit.chars.slice(), "node_trackers.exit.chars.slice()", node_trackers.exit.expected, "node_trackers.exit.expected", "mismatch traversal result", .{});
+        }
+    };
+};
 
-    //         t.print("NULL\n", .{});
-    //         idx = linked_list.get_first_index_in_list(list);
-    //         t.print("forward str:  ", .{});
-    //         while (idx != List.NULL_IDX) {
-    //             ptr = linked_list.get_ptr(idx);
-    //             t.print("{c}", .{@field(ptr, "val")});
-    //             idx = @field(ptr, List.NEXT_FIELD);
-    //         }
-    //         t.print("\n", .{});
-    //         idx = linked_list.get_last_index_in_list(list);
-    //         t.print("backward:     ", .{});
-    //         while (idx != List.NULL_IDX) {
-    //             ptr = linked_list.get_ptr(idx);
-    //             t.print("{d} -> ", .{idx});
-    //             idx = @field(ptr, List.PREV_FIELD);
-    //         }
-    //         t.print("NULL\n", .{});
-    //         idx = linked_list.get_last_index_in_list(list);
-    //         t.print("backward str: ", .{});
-    //         while (idx != List.NULL_IDX) {
-    //             ptr = linked_list.get_ptr(idx);
-    //             t.print("{c}", .{@field(ptr, "val")});
-    //             idx = @field(ptr, List.PREV_FIELD);
-    //         }
-    //         t.print("\n", .{});
-    //     }
-    // };
-    // var linked_list = List.new_empty();
-    // var slice_result = linked_list.get_items_and_insert_at(.CREATE_MANY_NEW, 20, .AT_BEGINNING_OF_LIST, .FREE, alloc);
-    // try t.expect_shallow_equal(slice_result, "get_items_and_insert_at(.CREATE_MANY_NEW, 20, .AT_BEGINNING_OF_LIST, .FREE, alloc)", List.LLSlice{ .count = 20, .first = 0, .last = 19, .list = .FREE }, "List.LLSlice{.count = 20, .first = 0, .last = 19, .list = .FREE}", "unexpected result from function", .{});
-    // // zig fmt: off
-    // try expect.full_ll_state(
-    //     &linked_list,
-    //     &.{}, // used_indexes
-    //     &.{}, // used_vals
-    //     &.{ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19 }, // free_indexes
-    //     &.{ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,  0,  0,  0,  0,  0,  0,  0,  0,  0 },  // free_vals
-    //     &.{}, // invalid_indexes
-    //     &.{}, // invalid_vals
-    // );
-    // // zig fmt: on
-    // slice_result = linked_list.get_items_and_insert_at(.FIRST_N_FROM_LIST, List.CountFromList.new(.FREE, 8), .AT_BEGINNING_OF_LIST, .USED, alloc);
-    // try t.expect_shallow_equal(slice_result, "get_items_and_insert_at(.FIRST_N_FROM_LIST, List.CountFromList.new(.FREE, 8), .AT_BEGINNING_OF_LIST, .USED, alloc)", List.LLSlice{ .count = 8, .first = 0, .last = 7, .list = .USED }, "List.LLSlice{ .count = 8, .first = 0, .last = 7, .list = .USED }", "unexpected result from function", .{});
-    // // zig fmt: off
-    // try expect.full_ll_state(
-    //     &linked_list,
-    //     &.{ 0, 1, 2, 3, 4, 5, 6, 7}, // used_indexes
-    //     &.{ 0, 0, 0, 0, 0, 0, 0, 0}, // used_vals
-    //     &.{ 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19 }, // free_indexes
-    //     &.{ 0, 0, 0,  0,  0,  0,  0,  0,  0,  0,  0,  0 },  // free_vals
-    //     &.{}, // invalid_indexes
-    //     &.{}, // invalid_vals
-    // );
-    // // zig fmt: on
-    // var slice_iter_state = slice_result.new_iterator_state_at_start_of_slice(&linked_list, 0);
-    // try t.expect_shallow_equal(slice_iter_state, "slice_result.new_iterator_state_at_start_of_slice(&linked_list)", List.LLSlice.SliceIteratorState(0){ .linked_list = &linked_list, .left_idx = List.NULL_IDX, .right_idx = slice_result.first, .slice = &slice_result, .state_slots = undefined }, "SliceIteratorState{ .linked_list = &linked_list, .left_idx = List.NULL_IDX, .right_idx = slice_result.first, .slice = &slice_result }", "unexpected result from function", .{});
-    // var slice_iter = slice_iter_state.iterator();
-    // var str: []const u8 = "abcdefgh";
-    // const bool_result = slice_iter.perform_action_on_all_next_items(Action.set_value_from_string, @ptrCast(&str));
-    // try t.expect_true(bool_result, "slice_iter.perform_action_on_all_next_items(Action.set_value_from_string, &\"abcdefghijklmnopqrst\");", "iterator set values failed", .{});
-    // // zig fmt: off
-    // try expect.full_ll_state(
-    //     &linked_list,
-    //     &.{ 0, 1, 2, 3, 4, 5, 6, 7}, // used_indexes
-    //     "abcdefgh", // used_vals
-    //     &.{ 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19 }, // free_indexes
-    //     &.{ 0, 0, 0,  0,  0,  0,  0,  0,  0,  0,  0,  0 },  // free_vals
-    //     &.{}, // invalid_indexes
-    //     &.{}, // invalid_vals
-    // );
-    // // zig fmt: on
-    // slice_result = linked_list.get_items_and_insert_at(.LAST_N_FROM_LIST, List.CountFromList.new(.USED, 3), .AT_BEGINNING_OF_LIST, .INVALID, alloc);
-    // try t.expect_shallow_equal(slice_result, "get_items_and_insert_at(.LAST_N_FROM_LIST, List.CountFromList.new(.USED, 3), .AT_BEGINNING_OF_LIST, .INVALID, alloc)", List.LLSlice{ .count = 3, .first = 5, .last = 7, .list = .INVALID }, "LLSlice{ .count = 3, .first = 5, .last = 7, .list = .INVALID }", "unexpected result from function", .{});
-    // // zig fmt: off
-    // try expect.full_ll_state(
-    //     &linked_list,
-    //     &.{ 0, 1, 2, 3, 4}, // used_indexes
-    //     "abcde", // used_vals
-    //     &.{ 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19 }, // free_indexes
-    //     &.{ 0, 0, 0,  0,  0,  0,  0,  0,  0,  0,  0,  0 },  // free_vals
-    //     &.{5, 6, 7}, // invalid_indexes
-    //     "fgh", // invalid_vals
-    // );
-    // // zig fmt: on
-    // slice_result = linked_list.get_items_and_insert_at(.LAST_N_FROM_LIST, List.CountFromList.new(.FREE, 5), .AFTER_INDEX, List.IndexInList.new(.USED, 2), alloc);
-    // try t.expect_shallow_equal(slice_result, "get_items_and_insert_at(.LAST_N_FROM_LIST, 5, .AFTER_INDEX, List.IndexInList.new(.USED, 2), alloc)", List.LLSlice{ .count = 5, .first = 15, .last = 19, .list = .USED }, "LLSlice{ .count = 5, .first = 15, .last = 19, .list = .USED }", "unexpected result from function", .{});
-    // // zig fmt: off
-    // try expect.full_ll_state(
-    //     &linked_list,
-    //     &.{ 0, 1, 2, 15, 16, 17, 18, 19, 3, 4}, // used_indexes
-    //     "abc\x00\x00\x00\x00\x00de", // used_vals
-    //     &.{ 8, 9, 10, 11, 12, 13, 14 }, // free_indexes
-    //     &.{ 0, 0, 0,  0,  0,  0,  0 },  // free_vals
-    //     &.{5, 6, 7}, // invalid_indexes
-    //     "fgh", // invalid_vals
-    // );
-    // // zig fmt: on
-    // slice_iter_state = slice_result.new_iterator_state_at_end_of_slice(&linked_list, 0);
-    // slice_iter = slice_iter_state.iterator();
-    // str = "ijklm";
-    // _ = slice_iter.perform_action_on_all_prev_items(Action.set_value_from_string, @ptrCast(&str));
-    // // zig fmt: off
-    // try expect.full_ll_state(
-    //     &linked_list,
-    //     &.{ 0, 1, 2, 15, 16, 17, 18, 19, 3, 4}, // used_indexes
-    //     "abcmlkjide", // used_vals
-    //     &.{ 8, 9, 10, 11, 12, 13, 14 }, // free_indexes
-    //     &.{ 0, 0, 0,  0,  0,  0,  0 },  // free_vals
-    //     &.{5, 6, 7}, // invalid_indexes
-    //     "fgh", // invalid_vals
-    // );
-    // // zig fmt: on
-    // slice_result = linked_list.get_items_and_insert_at(.SPARSE_LIST_FROM_SAME_SET, List.IndexesInSameList.new(.USED, &.{ 18, 2, 15, 0 }), .BEFORE_INDEX, List.IndexInList.new(.INVALID, 6), alloc);
-    // try t.expect_shallow_equal(slice_result, "get_items_and_insert_at(.SPARSE_LIST_FROM_SAME_SET, List.IndexesInSameList.new(.USED, &.{ 18, 2, 15, 0 }), .BEFORE_INDEX, List.IndexInList.new(.INVALID, 6), alloc)", List.LLSlice{ .count = 4, .first = 18, .last = 0, .list = .INVALID }, "LLSlice{ .count = 4, .first = 18, .last = 0, .list = .INVALID }", "unexpected result from function", .{});
-    // // zig fmt: off
-    // try expect.full_ll_state(
-    //     &linked_list,
-    //     &.{ 1, 16, 17, 19, 3, 4}, // used_indexes
-    //     "blkide", // used_vals
-    //     &.{ 8, 9, 10, 11, 12, 13, 14 }, // free_indexes
-    //     &.{ 0, 0, 0,  0,  0,  0,  0 },  // free_vals
-    //     &.{5, 18, 2, 15, 0, 6, 7}, // invalid_indexes
-    //     "fjcmagh", // invalid_vals
-    // );
-    // // zig fmt: on
-    // slice_result = linked_list.get_items_and_insert_at(.SPARSE_LIST_FROM_ANY_SET, &.{ List.IndexInList.new(.USED, 19), List.IndexInList.new(.FREE, 11), List.IndexInList.new(.INVALID, 7), List.IndexInList.new(.FREE, 8) }, .AT_BEGINNING_OF_LIST, .USED, alloc);
-    // try t.expect_shallow_equal(slice_result, "get_items_and_insert_at(.SPARSE_LIST_FROM_ANY_SET, &.{ List.IndexInList.new(.USED, 19), List.IndexInList.new(.FREE, 11), List.IndexInList.new(.INVALID, 7), List.IndexInList.new(.FREE, 8) }, .AT_BEGINNING_OF_LIST, .USED, alloc)", List.LLSlice{ .count = 4, .first = 19, .last = 8, .list = .USED }, "LLSlice{ .count = 4, .first = 19, .last = 8, .list = .USED }", "unexpected result from function", .{});
-    // // zig fmt: off
-    // try expect.full_ll_state(
-    //     &linked_list,
-    //     &.{ 19, 11, 7, 8, 1, 16, 17, 3, 4}, // used_indexes
-    //     "i\x00h\x00blkde", // used_vals
-    //     &.{ 9, 10, 12, 13, 14 }, // free_indexes
-    //     &.{ 0, 0,  0,  0,  0 },  // free_vals
-    //     &.{5, 18, 2, 15, 0, 6}, // invalid_indexes
-    //     "fjcmag", // invalid_vals
-    // );
-    // // zig fmt: on
-    // slice_iter_state = slice_result.new_iterator_state_at_start_of_slice(&linked_list, 0);
-    // slice_iter = slice_iter_state.iterator();
-    // str = "wxyz";
-    // _ = slice_iter.perform_action_on_all_next_items(Action.set_value_from_string, @ptrCast(&str));
-    // // zig fmt: off
-    // try expect.full_ll_state(
-    //     &linked_list,
-    //     &.{ 19, 11, 7, 8, 1, 16, 17, 3, 4}, // used_indexes
-    //     "wxyzblkde", // used_vals
-    //     &.{ 9, 10, 12, 13, 14 }, // free_indexes
-    //     &.{ 0, 0,  0,  0,  0 },  // free_vals
-    //     &.{5, 18, 2, 15, 0, 6}, // invalid_indexes
-    //     "fjcmag", // invalid_vals
-    // );
-    // // zig fmt: on
-    // slice_result = linked_list.get_items_and_insert_at(.FIRST_FROM_LIST_ELSE_CREATE_NEW, .FREE, .AT_END_OF_LIST, .USED, alloc);
-    // try t.expect_shallow_equal(slice_result, "get_items_and_insert_at(.FIRST_FROM_LIST_ELSE_CREATE_NEW, .FREE, .AT_END_OF_LIST, .USED, alloc)", List.LLSlice{ .count = 1, .first = 9, .last = 9, .list = .USED }, "LLSlice{ .count = 1, .first = 9, .last = 9, .list = .USED }", "unexpected result from function", .{});
-    // linked_list.list.ptr[slice_result.first].val = 'v';
-    // // zig fmt: off
-    // try expect.full_ll_state(
-    //     &linked_list,
-    //     &.{ 19, 11, 7, 8, 1, 16, 17, 3, 4, 9}, // used_indexes
-    //     "wxyzblkdev", // used_vals
-    //     &.{ 10, 12, 13, 14 }, // free_indexes
-    //     &.{ 0,  0,  0,  0 },  // free_vals
-    //     &.{5, 18, 2, 15, 0, 6}, // invalid_indexes
-    //     "fjcmag", // invalid_vals
-    // );
-    // // zig fmt: on
-    // slice_result = linked_list.get_items_and_insert_at(.LAST_N_FROM_LIST_ELSE_CREATE_NEW, List.CountFromList.new(.FREE, 6), .AFTER_INDEX, List.IndexInList.new(.USED, 17), alloc);
-    // try t.expect_shallow_equal(slice_result, "get_items_and_insert_at(.LAST_N_FROM_LIST_ELSE_CREATE_NEW, List.CountFromList.new(.FREE, 6), .AFTER_INDEX, List.IndexInList.new(.USED, 17), alloc)", List.LLSlice{ .count = 6, .first = 10, .last = 21, .list = .USED }, "LLSlice{ .count = 6, .first = 10, .last = 21, .list = .USED }", "unexpected result from function", .{});
-    // // zig fmt: off
-    // try expect.full_ll_state(
-    //     &linked_list,
-    //     &.{ 19, 11, 7, 8, 1, 16, 17, 10, 12, 13, 14, 20, 21, 3, 4, 9}, // used_indexes
-    //     "wxyzblk\x00\x00\x00\x00\x00\x00dev", // used_vals
-    //     &.{ }, // free_indexes
-    //     &.{ }, // free_vals
-    //     &.{5, 18, 2, 15, 0, 6}, // invalid_indexes
-    //     "fjcmag", // invalid_vals
-    // );
-    // // zig fmt: on
-    // slice_iter_state = slice_result.new_iterator_state_at_start_of_slice(&linked_list, 0);
-    // slice_iter = slice_iter_state.iterator();
-    // str = "123456";
-    // _ = slice_iter.perform_action_on_all_next_items(Action.set_value_from_string, @ptrCast(&str));
-    // // zig fmt: off
-    // try expect.full_ll_state(
-    //     &linked_list,
-    //     &.{ 19, 11, 7, 8, 1, 16, 17, 10, 12, 13, 14, 20, 21, 3, 4, 9}, // used_indexes
-    //     "wxyzblk123456dev", // used_vals
-    //     &.{ }, // free_indexes
-    //     &.{ }, // free_vals
-    //     &.{5, 18, 2, 15, 0, 6}, // invalid_indexes
-    //     "fjcmag", // invalid_vals
-    // );
-    // // zig fmt: on
-    // slice_result.slide_left(&linked_list, 1);
-    // _ = slice_iter.reset();
-    // str = "123456";
-    // _ = slice_iter.perform_action_on_all_next_items(Action.set_value_from_string, @ptrCast(&str));
-    // // zig fmt: off
-    // try expect.full_ll_state(
-    //     &linked_list,
-    //     &.{ 19, 11, 7, 8, 1, 16, 17, 10, 12, 13, 14, 20, 21, 3, 4, 9}, // used_indexes
-    //     "wxyzbl1234566dev", // used_vals
-    //     &.{ }, // free_indexes
-    //     &.{ }, // free_vals
-    //     &.{5, 18, 2, 15, 0, 6}, // invalid_indexes
-    //     "fjcmag", // invalid_vals
-    // );
-    // // zig fmt: on
-    // slice_result = List.LLSlice{ .count = 3, .first = 18, .last = 15, .list = .INVALID };
-    // slice_result = linked_list.get_items_and_insert_at(.FROM_SLICE_ELSE_CREATE_NEW, List.LLSliceWithTotalNeeded{ .slice = slice_result, .total_needed = 4 }, .AFTER_INDEX, List.IndexInList.new(.USED, 10), alloc);
-    // try t.expect_shallow_equal(slice_result, "get_items_and_insert_at(.FROM_SLICE_ELSE_CREATE_NEW, List.LLSliceWithTotalNeeded{ .slice = slice_result, .total_needed = 4 }, .AFTER_INDEX, List.IndexInList.new(.USED, 10), alloc)", List.LLSlice{ .count = 4, .first = 18, .last = 22, .list = .USED }, "LLSlice{ .count = 4, .first = 18, .last = 22, .list = .USED }", "unexpected result from function", .{});
-    // // zig fmt: off
-    // try expect.full_ll_state(
-    //     &linked_list,
-    //     &.{ 19, 11, 7, 8, 1, 16, 17, 10, 18, 2, 15, 22, 12, 13, 14, 20, 21, 3, 4, 9}, // used_indexes
-    //     "wxyzbl12jcm\x0034566dev", // used_vals
-    //     &.{ }, // free_indexes
-    //     &.{ }, // free_vals
-    //     &.{5, 0, 6}, // invalid_indexes
-    //     &.{102, 97, 103}, // invalid_vals
-    // );
-    // // zig fmt: on
-    // slice_iter_state = slice_result.new_iterator_state_at_start_of_slice(&linked_list, 0);
-    // slice_iter = slice_iter_state.iterator();
-    // str = "7890";
-    // _ = slice_iter.perform_action_on_all_next_items(Action.set_value_from_string, @ptrCast(&str));
-    // // zig fmt: off
-    // try expect.full_ll_state(
-    //     &linked_list,
-    //     &.{ 19, 11, 7, 8, 1, 16, 17, 10, 18, 2, 15, 22, 12, 13, 14, 20, 21, 3, 4, 9}, // used_indexes
-    //     "wxyzbl12789034566dev", // used_vals
-    //     &.{ }, // free_indexes
-    //     &.{ }, // free_vals
-    //     &.{5, 0, 6}, // invalid_indexes
-    //     &.{102, 97, 103}, // invalid_vals
-    // );
-    // // zig fmt: on
-    // slice_result.slide_left(&linked_list, 2);
-    // slice_result.grow_end_rightward(&linked_list, 7);
-    // var slice_iter_state_with_slot = slice_result.new_iterator_state_at_start_of_slice(&linked_list, 1);
-    // slice_iter = slice_iter_state_with_slot.iterator();
-    // InsertionSort.insertion_sort_iterator(TestElem, slice_iter, Action.move_data, Action.greater_than, null);
-    // // zig fmt: off
-    // try expect.full_ll_state(
-    //     &linked_list,
-    //     &.{ 19, 11, 7, 8, 1, 16, 17, 10, 18, 2, 15, 22, 12, 13, 14, 20, 21, 3, 4, 9}, // used_indexes
-    //     "wxyzbl01234566789dev", // used_vals
-    //     &.{ }, // free_indexes
-    //     &.{ }, // free_vals
-    //     &.{5, 0, 6}, // invalid_indexes
-    //     &.{102, 97, 103}, // invalid_vals
-    // );
-    // // zig fmt: on
+test "Full_Heirarchy" {
+    const List = Test.List;
+    const alloc = Test.alloc;
+    var heirarchy = List.new_empty(Test.alloc);
+    var traverser_buf: [10]List.HeirarchyTraverseFrame = undefined;
+    var traverser = heirarchy.create_heirarchy_traverser_on_stack(&traverser_buf);
+    var node_trackers = Test.NodeTrackerSet{
+        .before = Test.NodeTracker{ .ids = Test.NodeTrackerIdList.new_with_capacity(1024, alloc), .chars = Test.NodeTrackerCharList.new_with_capacity(1024, alloc), .name = "'pre-order'", .expected = "" },
+        .middle = Test.NodeTracker{ .ids = Test.NodeTrackerIdList.new_with_capacity(1024, alloc), .chars = Test.NodeTrackerCharList.new_with_capacity(1024, alloc), .name = "'in-order'", .expected = "" },
+        .after = Test.NodeTracker{ .ids = Test.NodeTrackerIdList.new_with_capacity(1024, alloc), .chars = Test.NodeTrackerCharList.new_with_capacity(1024, alloc), .name = "'post-order'", .expected = "" },
+        .exit = Test.NodeTracker{ .ids = Test.NodeTrackerIdList.new_with_capacity(1024, alloc), .chars = Test.NodeTrackerCharList.new_with_capacity(1024, alloc), .name = "'post-order' (exit)", .expected = "" },
+    };
+    try Test.expect.traversal_yields(&traverser, &node_trackers, heirarchy.first_root_id, "", "", "");
+    var range = heirarchy.insert_many_slots_at_beginning_of_heirarchy_root(5, alloc);
+    try Test.expect.traversal_yields(&traverser, &node_trackers, heirarchy.first_root_id, "\x00\x00\x00\x00\x00", "\x00\x00\x00\x00\x00", "\x00\x00\x00\x00\x00");
+    var str: []const u8 = "hello";
+    traverser.custom_start_traverse_through_heirarchy_depth_first_and_do_actions_on_all_items(range.first, Test.write_node_actions, @ptrCast(&str));
+    try Test.expect.traversal_yields(&traverser, &node_trackers, heirarchy.first_root_id, "hello", "hello", "hello");
+    range = heirarchy.insert_many_slots_at_beginning_of_left_children(heirarchy.first_root_id, 3, alloc);
+    str = "123";
+    traverser.custom_start_traverse_through_heirarchy_depth_first_and_do_actions_on_all_items(range.first, Test.write_node_actions, @ptrCast(&str));
+    // if (true) @panic("here"); //DEBUG
+    try Test.expect.traversal_yields(&traverser, &node_trackers, heirarchy.first_root_id, "h123ello", "123hello", "123hello");
 }
 
 pub const TraversalExitKind = enum(u8) {
-    EXITED_BY_MOVING_TO_NEXT_SIBLING,
-    EXITED_BY_MOVING_TO_PARENT,
     EXITED_BY_HITTING_END_OF_TRAVERSAL,
+    EXITED_BY_MOVING_TO_NEXT_SIBLING,
+    EXITED_BY_RETURNING_TO_PARENT,
 };
+
+// pub const TraversalEnterKind = enum(u8) {
+//     ENTERED_BY_BEGINNING_TRAVERSAL,
+//     ENTERED_BY_MOVING_FROM_PREV_SIBLING,
+//     ENTERED_BY_MOVING_TO_LEFT_CHILD_OF_PARENT,
+//     ENTERED_BY_MOVING_TO_RIGHT_CHILD_OF_PARENT,
+// };

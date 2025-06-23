@@ -27,7 +27,7 @@ const Allocator = std.mem.Allocator;
 const Alignment = std.mem.Alignment;
 
 pub const allocator = Allocator{
-    .ptr = &DUMMY_VTABLE,
+    .ptr = undefined,
     .vtable = &DUMMY_VTABLE,
 };
 pub const DUMMY_VTABLE = Allocator.VTable{
@@ -59,10 +59,10 @@ pub fn dummy_remap(self: *anyopaque, memory: []u8, alignment: mem.Alignment, new
     _ = ret_addr;
     return null;
 }
-pub fn dummy_free(self: *anyopaque, memory: []u8, alignment: mem.Alignment, ret_addr: usize) ?[*]u8 {
+pub fn dummy_free(self: *anyopaque, memory: []u8, alignment: mem.Alignment, ret_addr: usize) void {
     _ = self;
     _ = memory;
     _ = alignment;
     _ = ret_addr;
-    return null;
+    return;
 }
