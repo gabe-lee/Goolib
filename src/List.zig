@@ -475,7 +475,7 @@ pub fn List(comptime options: ListOptions) type {
         pub fn clear_and_free(self: *Self, alloc: AllocInfal) void {
             if (ASSERT_ALLOC) assert_correct_allocator(alloc, self.assert_alloc, @src());
             if (SECURE_WIPE) {
-                std.Utils.secure_zero(Elem, self.ptr[0..self.len]);
+                Utils.secure_zero(Elem, self.ptr[0..self.len]);
             }
             alloc.free(self.ptr[0..self.cap]);
             self.* = UNINIT;

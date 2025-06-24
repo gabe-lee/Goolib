@@ -47,8 +47,6 @@ const debug_switch = Utils.debug_switch;
 const safe_switch = Utils.safe_switch;
 const comp_switch = Utils.comp_switch;
 const Types = Root.Types;
-const Iterator = Root.Iterator.Iterator;
-const IterCaps = Root.Iterator.IteratorCapabilities;
 const FlexSlice = Root.FlexSlice.FlexSlice;
 const Mutability = Root.CommonTypes.Mutability;
 const Quicksort = Root.Quicksort;
@@ -74,7 +72,13 @@ pub const ForwardLinkedHeirarchyOptions = struct {
     element_memory_options: Root.List.ListOptions,
     /// Options for the `List` that holds the traversal stack trace when
     /// traversing/iterating the `LinkedHeirarchy`
-    traversal_trace_options: Root.List.ListOptionsWithoutElem,
+    ///
+    /// This stack holds a record of all of the current node's parents,
+    /// (and in the case of iterators each node's 'progress' through its children),
+    /// allowing traversal back up through the tree/heriarchy without
+    /// caching each node's parent id and/or tree depth on the elements
+    /// directly
+    traversal_stack_options: Root.List.ListOptionsWithoutElem,
     /// The unsigned integer type used to identify a node
     ///
     /// This must be one of two forms:
@@ -215,8 +219,10 @@ pub fn LinkedHeirarchy(comptime options: ForwardLinkedHeirarchyOptions) type {
         const HAS_ONLY_ONE_CHILD_SIDE = (HAS_LEFT_CHILDREN and !HAS_RIGHT_CHILDREN) or (HAS_RIGHT_CHILDREN and !HAS_LEFT_CHILDREN);
         const HAS_CHILD_NODES = HAS_LEFT_CHILDREN or HAS_RIGHT_CHILDREN;
         const COPY_VAL_FN = options.custom_copy_only_value_fn;
-        const UNINIT_TRACE_FRAME = HeirarchyTraverseFrame{};
-        const TRACE_LIST_OPTIONS = Root.List.ListOptions.from_options_without_elem(options.traversal_trace_options, HeirarchyTraverseFrame, @ptrCast(&UNINIT_TRACE_FRAME));
+        const UNINIT_ITER_FRAME = IteratorFrame{};
+        const UNINIT_TRAV_FRAME = TraverserFrame{};
+        const ITER_STACK_OPTIONS = Root.List.ListOptions.from_options_without_elem(options.traversal_stack_options, IteratorFrame, @ptrCast(&UNINIT_ITER_FRAME));
+        const TRAV_STACK_OPTIONS = Root.List.ListOptions.from_options_without_elem(options.traversal_stack_options, TraverserFrame, @ptrCast(&UNINIT_TRAV_FRAME));
 
         const Heirarchy = @This();
         pub const List = Root.List.List(options.element_memory_options);
@@ -656,7 +662,6 @@ pub fn LinkedHeirarchy(comptime options: ForwardLinkedHeirarchyOptions) type {
                 if (!HAS_OWN_ID) return;
                 const id_ptr: *Id = &@field(ptr, OWN_ID_FIELD);
                 id_ptr.* = val;
-                assert_with_reason(@field(ptr, OWN_ID_FIELD) == val, @src(), "DEBUG: val wasnt written", .{});//DEBUG
             }
             pub inline fn increment_gen(ptr: *Elem) void {
                 if (!HAS_GEN) return;
@@ -939,7 +944,7 @@ pub fn LinkedHeirarchy(comptime options: ForwardLinkedHeirarchyOptions) type {
                 }
             }
 
-            fn assert_4_siblings_in_order_no_cycles_b_c_can_be_same_d_can_be_null(self: *Heirarchy, a: Id, b: Id, c: Id, d: Id, src_loc: ?SourceLocation) void {
+            fn assert_4_siblings_in_order_no_cycles_b_c_can_be_same_d_can_be_null(self: *Heirarchy, a: Id, b: Id, c: Id, d: Id, comptime src_loc: ?SourceLocation) void {
                 assert_with_reason(get_index(a) != get_index(b) and get_index(a) != get_index(c) and get_index(a) != get_index(d) and get_index(d) != get_index(b) and get_index(d) != get_index(c), src_loc, "duplicate Id indexes a == (b, c, or d) or d == (a, b, or c): {d}, {d}, {d}, {d}", .{ get_index(a), get_index(b), get_index(c), get_index(d) });
                 assert_with_reason(a != NULL_ID, src_loc, "id 'a' was NULL_ID", .{});
                 assert_with_reason(b != NULL_ID, src_loc, "id 'b' was NULL_ID", .{});
@@ -952,7 +957,7 @@ pub fn LinkedHeirarchy(comptime options: ForwardLinkedHeirarchyOptions) type {
                     const ids: [3]Id = .{ b, c, d };
                     var slow = a;
                     var fast = a;
-                    var fast_ptr = undefined;
+                    var fast_ptr: *Elem = undefined;
                     var next_match: usize = 0;
                     while (true) {
                         fast_ptr = self.get_ptr(fast);
@@ -1316,13 +1321,13 @@ pub fn LinkedHeirarchy(comptime options: ForwardLinkedHeirarchyOptions) type {
         }
 
         pub inline fn free_disconnected_items_with_new_heap_traverser(self: *Heirarchy, first_disconected_id: Id, alloc: AllocInfal) void {
-            var new_traverser = self.create_heirarchy_traverser_on_heap(alloc);
+            var new_traverser = self.create_iterator_on_heap(alloc);
             defer new_traverser.free();
             self.free_disconnected_items_with_traverser(first_disconected_id, &new_traverser);
         }
 
-        pub inline fn free_disconnected_items_with_new_stack_traverser(self: *Heirarchy, first_disconected_id: Id, buffer: []HeirarchyTraverseFrame) void {
-            var new_traverser = self.create_heirarchy_traverser_on_stack(buffer);
+        pub inline fn free_disconnected_items_with_new_stack_traverser(self: *Heirarchy, first_disconected_id: Id, buffer: []IteratorFrame) void {
+            var new_traverser = self.create_iterator_on_stack(buffer);
             defer new_traverser.free();
             self.free_disconnected_items_with_traverser(first_disconected_id, &new_traverser);
         }
@@ -1338,17 +1343,37 @@ pub fn LinkedHeirarchy(comptime options: ForwardLinkedHeirarchyOptions) type {
             return curr_id;
         }
 
-        pub fn create_heirarchy_traverser_on_heap(self: *Heirarchy, alloc: AllocInfal) HeirarchyTraverser {
-            return HeirarchyTraverser{
+        pub fn create_iterator_on_heap(self: *Heirarchy, alloc: AllocInfal) Iterator {
+            return Iterator{
                 .alloc = alloc,
-                .frames = HeirarchyTraverser.FramesList.new_empty(alloc),
+                .frames = Iterator.FramesList.new_empty(alloc),
                 .heirarchy = self,
             };
         }
 
-        pub fn create_heirarchy_traverser_on_stack(self: *Heirarchy, buffer: []HeirarchyTraverseFrame) HeirarchyTraverser {
-            return HeirarchyTraverser{
-                .frames = HeirarchyTraverser.FramesList{
+        pub fn create_iterator_on_stack(self: *Heirarchy, buffer: []IteratorFrame) Iterator {
+            return Iterator{
+                .frames = Iterator.FramesList{
+                    .assert_alloc = AllocInfal.DummyAllocInfal,
+                    .cap = @intCast(buffer.len),
+                    .len = 0,
+                    .ptr = buffer.ptr,
+                },
+                .heirarchy = self,
+            };
+        }
+
+        pub fn create_traverser_on_heap(self: *Heirarchy, alloc: AllocInfal) Traverser {
+            return Traverser{
+                .alloc = alloc,
+                .frames = Traverser.FramesList.new_empty(alloc),
+                .heirarchy = self,
+            };
+        }
+
+        pub fn create_traverser_on_stack(self: *Heirarchy, buffer: []TraverserFrame) Traverser {
+            return Traverser{
+                .frames = Traverser.FramesList{
                     .assert_alloc = AllocInfal.DummyAllocInfal,
                     .cap = @intCast(buffer.len),
                     .len = 0,
@@ -1359,241 +1384,458 @@ pub fn LinkedHeirarchy(comptime options: ForwardLinkedHeirarchyOptions) type {
         }
 
         //zig fmt: off
-        pub const HeirarchyTraverseFlags = Flags.Flags(enum(u8) {
-            BEFORE_LEFT_CHILDREN            = 0b00_0_0_00_00,
-            BETWEEN_LEFT_AND_RIGHT_CHILDREN = 0b00_0_0_00_01,
-            AFTER_RIGHT_CHILDREN            = 0b00_0_0_00_10,
-            IS_FIRST_CHILD                  = 0b00_0_1_00_00,
-            IS_LAST_CHILD                   = 0b00_1_0_00_00,
-            
-        }, enum (u8) {
-            PROGRESS      = 0b00_0_0_00_11,
-        });
-        pub const HeirarchyTraverseProg = enum(u8) {
-            BEFORE_LEFT_CHILDREN            = 0b00_0_0_00_00,
-            BETWEEN_LEFT_AND_RIGHT_CHILDREN = 0b00_0_0_00_01,
-            AFTER_RIGHT_CHILDREN            = 0b00_0_0_00_10,
+        pub const NodeProgress = enum(u8) {
+            BEFORE_LEFT_CHILDREN            = 0b00,
+            BETWEEN_LEFT_AND_RIGHT_CHILDREN = 0b01,
+            AFTER_RIGHT_CHILDREN            = 0b10,
+            EXITED                          = 0b11,
         };
         // zig fmt: on
 
-        pub const HeirarchyTraverseFrame = struct {
+        pub const IteratorFrame = struct {
             curr_id: Id = NULL_ID,
-            flags: HeirarchyTraverseFlags = HeirarchyTraverseFlags.from_flags(if (HAS_NEXT) &.{.IS_FIRST_CHILD} else &.{ .IS_FIRST_CHILD, .IS_LAST_CHILD }),
+            progress: NodeProgress = .BEFORE_LEFT_CHILDREN,
 
-            pub inline fn set_progress_at_least(self: *HeirarchyTraverseFrame, new_prog: HeirarchyTraverseProg) void {
-                const prog = self.flags.isolate_group(.PROGRESS);
-                const max_prog: HeirarchyTraverseFlags.RawInt = @max(@intFromEnum(prog), @intFromEnum(new_prog));
-                self.flags.clear_group_then_set_raw(.PROGRESS, max_prog);
-            }
-
-            pub inline fn set_progress(self: *HeirarchyTraverseFrame, new_prog: HeirarchyTraverseProg) void {
-                self.flags.clear_group_then_set_raw(.PROGRESS, @intFromEnum(new_prog));
+            pub inline fn set_progress_at_least(self: *IteratorFrame, new_prog: NodeProgress) void {
+                self.progress = @enumFromInt(@max(@intFromEnum(self.progress), @intFromEnum(new_prog)));
             }
         };
 
-        pub const HeirarchyTraverser = struct {
+        pub const Iterator = struct {
             frames: FramesList = FramesList.UNINIT,
             heirarchy: *Heirarchy,
             alloc: AllocInfal = AllocInfal.DummyAllocInfal,
 
-            pub const FramesList = Root.List.List(TRACE_LIST_OPTIONS);
+            pub const FramesList = Root.List.List(ITER_STACK_OPTIONS);
 
-            pub inline fn free(self: *HeirarchyTraverser) void {
+            pub inline fn free(self: *Iterator) void {
                 self.frames.clear_and_free(self.alloc);
             }
 
-            pub inline fn get_current_id(self: *const HeirarchyTraverser) Id {
+            pub inline fn get_current_id(self: *const Iterator) Id {
                 if (self.frames.len == 0) return NULL_ID;
                 return self.frames.get_last().curr_id;
             }
 
-            pub inline fn get_current_ptr(self: *const HeirarchyTraverser) *Elem {
+            pub inline fn get_current_ptr(self: *const Iterator) *Elem {
                 return self.heirarchy.get_ptr(self.get_current_id());
             }
 
-            pub inline fn get_current_progress(self: *const HeirarchyTraverser) HeirarchyTraverseProg {
-                const last_flags: HeirarchyTraverseFlags = self.frames.get_last().flags;
-                return @enumFromInt(last_flags.isolate_group(.PROGRESS).raw);
+            pub inline fn get_current_progress(self: *const Iterator) NodeProgress {
+                return self.frames.get_last().progress;
             }
 
-            pub inline fn set_current_progress(self: *HeirarchyTraverser, prog: HeirarchyTraverseProg) void {
-                const last_frame: *HeirarchyTraverseFrame = self.frames.get_last_ptr();
-                last_frame.flags.clear_group_then_set_raw(.PROGRESS, @intFromEnum(prog));
+            pub inline fn get_parent_progress(self: *const Iterator) NodeProgress {
+                if (self.frames.len == 1) return NodeProgress.EXITED;
+                return self.frames.ptr[self.frames.len - 2].progress;
             }
 
-            pub fn clone_to_stack(self: *const HeirarchyTraverser, buffer: []HeirarchyTraverseFrame) HeirarchyTraverser {
-                var new = self.heirarchy.create_heirarchy_traverser_on_stack(buffer);
+            pub fn clone_to_stack(self: *const Iterator, buffer: []IteratorFrame) Iterator {
+                var new = self.heirarchy.create_iterator_on_stack(buffer);
                 @memcpy(new.frames.ptr[0..self.frames.len], self.frames.ptr[0..self.frames.len]);
                 new.frames.len = self.frames.len;
                 return new;
             }
 
-            pub fn clone_to_heap(self: *const HeirarchyTraverser, alloc: AllocInfal) HeirarchyTraverser {
-                var new = self.heirarchy.create_heirarchy_traverser_on_heap(alloc);
+            pub fn clone_to_heap(self: *const Iterator, alloc: AllocInfal) Iterator {
+                var new = self.heirarchy.create_iterator_on_heap(alloc);
+                new.frames.ensure_total_capacity(self.frames.cap, alloc);
                 @memcpy(new.frames.ptr[0..self.frames.len], self.frames.ptr[0..self.frames.len]);
                 new.frames.len = self.frames.len;
                 return new;
             }
 
-            pub inline fn goto_next(self: *HeirarchyTraverser) bool {
+            pub fn clone_to_stack_as_traverser(self: *const Iterator, buffer: []IteratorFrame) Traverser {
+                var new = self.heirarchy.create_traverser_on_stack(buffer);
+                for (self.frames.slice(), 0..) |elem, idx| {
+                    new.frames.ptr[idx] = elem.curr_id;
+                }
+                new.frames.len = self.frames.len;
+                return new;
+            }
+
+            pub fn clone_to_heap_as_traverser(self: *const Iterator, alloc: AllocInfal) Traverser {
+                var new = self.heirarchy.create_traverser_on_heap(alloc);
+                new.frames.ensure_total_capacity(self.frames.cap, alloc);
+                for (self.frames.slice(), 0..) |elem, idx| {
+                    new.frames.ptr[idx] = elem.curr_id;
+                }
+                new.frames.len = self.frames.len;
+                return new;
+            }
+
+            fn goto_next(self: *Iterator) bool {
                 if (!HAS_NEXT or self.frames.len == 0) return false;
-                const last_frame: *HeirarchyTraverseFrame = self.frames.get_last_ptr();
+                const last_frame: *IteratorFrame = self.frames.get_last_ptr();
                 const curr_id = last_frame.curr_id;
                 const curr_ptr = self.heirarchy.get_ptr(curr_id);
                 const next_id = get_next_id(curr_ptr);
                 if (next_id == NULL_ID) return false;
                 last_frame.curr_id = next_id;
-                last_frame.flags.clear_group_then_set(.PROGRESS, .BEFORE_LEFT_CHILDREN);
-                last_frame.flags.clear(.IS_FIRST_CHILD);
-                const next_next_id = get_next_id(self.heirarchy.get_ptr(next_id));
-                if (next_next_id == NULL_ID) last_frame.flags.set(.IS_LAST_CHILD);
                 return true;
             }
 
-            pub fn goto_first_left_child(self: *HeirarchyTraverser) bool {
-                if (self.frames.len == 0) return false;
-                const last_frame: *HeirarchyTraverseFrame = self.frames.get_last_ptr();
-                defer last_frame.set_progress(.BETWEEN_LEFT_AND_RIGHT_CHILDREN);
-                if (!HAS_LEFT_CHILDREN) return false;
+            fn goto_first_left_child(self: *Iterator) bool {
+                if (!HAS_LEFT_CHILDREN or self.frames.len == 0) return false;
+                const last_frame: *IteratorFrame = self.frames.get_last_ptr();
                 const curr_id = last_frame.curr_id;
                 const curr_ptr = self.heirarchy.get_ptr(curr_id);
                 const left_child_id = get_left_child_id(curr_ptr);
                 if (left_child_id == NULL_ID) return false;
-                self.frames.append(HeirarchyTraverseFrame{ .curr_id = left_child_id }, self.alloc);
-                const new_last_frame: *HeirarchyTraverseFrame = self.frames.get_last_ptr();
-                const next_id = get_next_id(self.heirarchy.get_ptr(left_child_id));
-                if (next_id == NULL_ID) new_last_frame.flags.set(.IS_LAST_CHILD);
+                self.frames.append(IteratorFrame{ .curr_id = left_child_id }, self.alloc);
                 return true;
             }
-            pub fn goto_first_right_child(self: *HeirarchyTraverser) bool {
-                if (self.frames.len == 0) return false;
-                var last_frame: *HeirarchyTraverseFrame = self.frames.get_last_ptr();
-                defer last_frame.set_progress(.AFTER_RIGHT_CHILDREN);
-                if (!HAS_RIGHT_CHILDREN) return false;
+
+            fn goto_first_right_child(self: *Iterator) bool {
+                if (!HAS_RIGHT_CHILDREN or self.frames.len == 0) return false;
+                const last_frame: *IteratorFrame = self.frames.get_last_ptr();
                 const curr_id = last_frame.curr_id;
                 const curr_ptr = self.heirarchy.get_ptr(curr_id);
                 const right_child_id = get_right_child_id(curr_ptr);
                 if (right_child_id == NULL_ID) return false;
-                self.frames.append(HeirarchyTraverseFrame{ .curr_id = right_child_id }, self.alloc);
-                const new_last_frame: *HeirarchyTraverseFrame = self.frames.get_last_ptr();
-                const next_id = get_next_id(self.heirarchy.get_ptr(right_child_id));
-                if (next_id == NULL_ID) new_last_frame.flags.set(.IS_LAST_CHILD);
+                self.frames.append(IteratorFrame{ .curr_id = right_child_id }, self.alloc);
                 return true;
             }
 
-            pub fn goto_parent(self: *HeirarchyTraverser) bool {
-                if (!HAS_LEFT_CHILDREN or !HAS_RIGHT_CHILDREN or self.frames.len == 0) return false;
+            fn goto_parent(self: *Iterator) bool {
+                if (!(HAS_LEFT_CHILDREN or HAS_RIGHT_CHILDREN) or self.frames.len < 2) return false;
                 self.frames.set_len(self.frames.len - 1);
-                if (self.frames.len == 0) return false;
+                return self.frames.len > 0;
+            }
+
+            fn init(self: *Iterator, start_id: Id) bool {
+                self.frames.clear_retaining_capacity();
+                if (start_id == NULL_ID) return false;
+                self.frames.append(IteratorFrame{ .curr_id = start_id }, self.alloc);
                 return true;
             }
 
-            pub fn init(self: *HeirarchyTraverser, start_id: Id) void {
-                self.frames.clear_retaining_capacity();
-                if (start_id == NULL_ID) return;
-                self.frames.append(HeirarchyTraverseFrame{ .curr_id = start_id }, self.alloc);
-                var last_frame: *HeirarchyTraverseFrame = self.frames.get_last_ptr();
-                if (get_next_id(self.heirarchy.get_ptr(last_frame.curr_id)) == NULL_ID) {
-                    last_frame.flags.set(.IS_LAST_CHILD);
-                }
+            pub fn reset_and_iterate_depth_first_and_do_actions_on_all_items(self: *Iterator, comptime actions: IteratorActions, userdata: ?*anyopaque) void {
+                if (!self.init(self.heirarchy.first_root_id)) return;
+                self.iterate_through_heirarchy_depth_first_and_do_actions_on_items(actions, false, NULL_ID, userdata);
             }
 
-            pub fn reset_and_traverse_through_heirarchy_depth_first_and_do_actions_on_all_items(self: *HeirarchyTraverser, comptime actions: TraverseActions, userdata: ?*anyopaque) void {
-                self.init(self.heirarchy.first_root_id);
+            pub fn reset_and_iterate_depth_first_and_do_actions_on_items_before_id(self: *Iterator, stop_before_id: Id, comptime actions: IteratorActions, userdata: ?*anyopaque) void {
+                if (!self.init(self.heirarchy.first_root_id)) return;
+                self.iterate_through_heirarchy_depth_first_and_do_actions_on_items(actions, true, stop_before_id, userdata);
+            }
+
+            pub fn continue_to_iterate_depth_first_and_do_actions_on_all_remaining_items(self: *Iterator, comptime actions: IteratorActions, userdata: ?*anyopaque) void {
                 if (self.frames.len == 0) return;
-                self.traverse_through_heirarchy_depth_first_and_do_actions_on_items(actions, false, NULL_ID, userdata);
+                self.iterate_through_heirarchy_depth_first_and_do_actions_on_items(actions, false, NULL_ID, userdata);
             }
 
-            pub fn reset_and_traverse_through_heirarchy_depth_first_and_do_actions_on_items_before_id(self: *HeirarchyTraverser, stop_before_id: Id, comptime actions: TraverseActions, userdata: ?*anyopaque) void {
-                self.init(self.heirarchy.first_root_id);
+            pub fn continue_to_iterate_depth_first_and_do_actions_on_remaining_items_before_id(self: *Iterator, stop_before_id: Id, comptime actions: IteratorActions, userdata: ?*anyopaque) void {
                 if (self.frames.len == 0) return;
-                self.traverse_through_heirarchy_depth_first_and_do_actions_on_items(actions, true, stop_before_id, userdata);
+                self.iterate_through_heirarchy_depth_first_and_do_actions_on_items(actions, true, stop_before_id, userdata);
             }
 
-            pub fn continue_to_traverse_through_heirarchy_depth_first_and_do_actions_on_all_remaining_items(self: *HeirarchyTraverser, comptime actions: TraverseActions, userdata: ?*anyopaque) void {
-                if (self.frames.len == 0) return;
-                self.traverse_through_heirarchy_depth_first_and_do_actions_on_items(actions, false, NULL_ID, userdata);
+            pub fn custom_start_iterate_depth_first_and_do_actions_on_all_items(self: *Iterator, start_id: Id, comptime actions: IteratorActions, userdata: ?*anyopaque) void {
+                if (!self.init(start_id)) return;
+                self.iterate_through_heirarchy_depth_first_and_do_actions_on_items(actions, false, NULL_ID, userdata);
             }
 
-            pub fn continue_to_traverse_through_heirarchy_depth_first_and_do_actions_on_remaining_items_before_id(self: *HeirarchyTraverser, stop_before_id: Id, comptime actions: TraverseActions, userdata: ?*anyopaque) void {
-                if (self.frames.len == 0) return;
-                self.traverse_through_heirarchy_depth_first_and_do_actions_on_items(actions, true, stop_before_id, userdata);
+            pub fn custom_start_iterate_depth_first_and_do_actions_on_items_before_id(self: *Iterator, start_id: Id, stop_before_id: Id, comptime actions: IteratorActions, userdata: ?*anyopaque) void {
+                if (!self.init(start_id)) return;
+                self.iterate_through_heirarchy_depth_first_and_do_actions_on_items(actions, true, stop_before_id, userdata);
             }
 
-            pub fn custom_start_traverse_through_heirarchy_depth_first_and_do_actions_on_all_items(self: *HeirarchyTraverser, start_id: Id, comptime actions: TraverseActions, userdata: ?*anyopaque) void {
-                self.init(start_id);
-                if (self.frames.len == 0) return;
-                self.traverse_through_heirarchy_depth_first_and_do_actions_on_items(actions, false, NULL_ID, userdata);
-            }
-
-            pub fn custom_start_traverse_through_heirarchy_depth_first_and_do_actions_on_items_before_id(self: *HeirarchyTraverser, start_id: Id, stop_before_id: Id, comptime actions: TraverseActions, userdata: ?*anyopaque) void {
-                self.init(start_id);
-                if (self.frames.len == 0) return;
-                self.traverse_through_heirarchy_depth_first_and_do_actions_on_items(actions, true, stop_before_id, userdata);
-            }
-
-            fn add_to_free_action(traverser: *const HeirarchyTraverser, exit_id: Id, exit_kind: TraversalExitKind, userdata: ?*anyopaque) bool {
+            fn add_to_free_action(traverser: *const Iterator, exit_id: Id, exit_kind: NodeExitKind, userdata: ?*anyopaque) bool {
                 _ = exit_kind;
                 _ = userdata;
                 Internal.push_free_item(traverser.heirarchy, exit_id);
                 return true;
             }
 
-            pub inline fn free_disconnected_items_with_traverser(self: *HeirarchyTraverser, first_disconected_id: Id) void {
-                self.custom_start_traverse_through_heirarchy_depth_first_and_do_actions_on_all_items(first_disconected_id, TraverseActions{
-                    .action_after_exiting_item = add_to_free_action,
+            pub fn free_disconnected_items(self: *Iterator, first_disconected_id: Id) void {
+                self.custom_start_iterate_depth_first_and_do_actions_on_all_items(first_disconected_id, IteratorActions{
+                    .after_exiting_item = add_to_free_action,
                 }, null);
             }
 
-            fn traverse_through_heirarchy_depth_first_and_do_actions_on_items(self: *HeirarchyTraverser, actions: TraverseActions, comptime use_stop_id: bool, stop_id: Id, userdata: ?*anyopaque) void {
-                //CHECKPOINT make this a labeled switch statement for better control flow
-                loop: while (true) {
-                    const last_frame: *HeirarchyTraverseFrame = self.frames.get_last_ptr();
-                    if (use_stop_id and last_frame.curr_id == stop_id) break :loop;
-                    if (last_frame.flags.has_flag(.BEFORE_LEFT_CHILDREN)) {
-                        if (actions.action_before_left_children) |before_action| {
-                            if (!before_action(self, userdata)) break :loop;
+            fn iterate_through_heirarchy_depth_first_and_do_actions_on_items(self: *Iterator, actions: IteratorActions, comptime use_stop_id: bool, stop_id: Id, userdata: ?*anyopaque) void {
+                var last_frame: *IteratorFrame = self.frames.get_last_ptr();
+                traversal: switch (last_frame.progress) {
+                    NodeProgress.BEFORE_LEFT_CHILDREN => {
+                        if (use_stop_id and last_frame.curr_id == stop_id) break :traversal;
+                        if (actions.before_left_children) |before_action| {
+                            if (!before_action(self, userdata)) break :traversal;
                         }
-                        if (self.goto_first_left_child()) continue :loop;
-                    }
-                    if (last_frame.flags.has_flag(.BETWEEN_LEFT_AND_RIGHT_CHILDREN)) {
-                        if (actions.action_after_left_before_right_children) |middle_action| {
-                            if (!middle_action(self, userdata)) break :loop;
+                        last_frame.progress = .BETWEEN_LEFT_AND_RIGHT_CHILDREN;
+                        if (self.goto_first_left_child()) {
+                            last_frame = self.frames.get_last_ptr();
+                            last_frame.progress = .BEFORE_LEFT_CHILDREN;
+                            continue :traversal NodeProgress.BEFORE_LEFT_CHILDREN;
                         }
-                        if (self.goto_first_right_child()) continue :loop;
-                    }
-                    if (actions.action_after_right_children) |after_action| {
-                        if (!after_action(self, userdata)) break :loop;
-                    }
-                    if (actions.action_after_exiting_item) |exit_action| {
-                        const exit_id = last_frame.curr_id;
-                        var exit_kind: TraversalExitKind = .EXITED_BY_HITTING_END_OF_TRAVERSAL;
-                        var did_move = false;
-                        if (self.goto_next()) {
-                            did_move = true;
-                            exit_kind = .EXITED_BY_MOVING_TO_NEXT_SIBLING;
-                        } else if (self.goto_parent()) {
-                            did_move = true;
-                            exit_kind = .EXITED_BY_RETURNING_TO_PARENT;
+                        continue :traversal NodeProgress.BETWEEN_LEFT_AND_RIGHT_CHILDREN;
+                    },
+                    NodeProgress.BETWEEN_LEFT_AND_RIGHT_CHILDREN => {
+                        if (use_stop_id and last_frame.curr_id == stop_id) break :traversal;
+                        if (actions.after_left_before_right_children) |middle_action| {
+                            if (!middle_action(self, userdata)) break :traversal;
                         }
-                        if (!exit_action(self, exit_id, exit_kind, userdata)) break :loop;
-                        if (did_move) continue :loop;
-                    } else {
-                        if (self.goto_next()) continue :loop;
-                        if (self.goto_parent()) continue :loop;
-                    }
-
-                    break :loop;
+                        last_frame.progress = .AFTER_RIGHT_CHILDREN;
+                        if (self.goto_first_right_child()) {
+                            last_frame = self.frames.get_last_ptr();
+                            last_frame.progress = .BEFORE_LEFT_CHILDREN;
+                            continue :traversal NodeProgress.BEFORE_LEFT_CHILDREN;
+                        }
+                        continue :traversal NodeProgress.AFTER_RIGHT_CHILDREN;
+                    },
+                    NodeProgress.AFTER_RIGHT_CHILDREN => {
+                        if (use_stop_id and last_frame.curr_id == stop_id) break :traversal;
+                        if (actions.after_right_children) |after_action| {
+                            if (!after_action(self, userdata)) break :traversal;
+                        }
+                        last_frame.progress = .EXITED;
+                        if (actions.after_exiting_item) |exit_action| {
+                            const exit_id = last_frame.curr_id;
+                            var exit_kind: NodeExitKind = .EXITED_BY_HITTING_END_OF_ITERATOR;
+                            var did_move = false;
+                            if (self.goto_next()) {
+                                did_move = true;
+                                exit_kind = .EXITED_BY_MOVING_TO_NEXT_SIBLING;
+                                last_frame.progress = .BEFORE_LEFT_CHILDREN;
+                            } else if (self.goto_parent()) {
+                                did_move = true;
+                                last_frame = self.frames.get_last_ptr();
+                                exit_kind = .EXITED_BY_RETURNING_TO_PARENT;
+                            }
+                            if (!exit_action(self, exit_id, exit_kind, userdata)) break :traversal;
+                            if (did_move) {
+                                continue :traversal last_frame.progress;
+                            }
+                        } else {
+                            if (self.goto_next()) {
+                                last_frame.progress = .BEFORE_LEFT_CHILDREN;
+                                continue :traversal NodeProgress.BEFORE_LEFT_CHILDREN;
+                            }
+                            if (self.goto_parent()) {
+                                last_frame = self.frames.get_last_ptr();
+                                continue :traversal last_frame.progress;
+                            }
+                        }
+                    },
+                    NodeProgress.EXITED => {
+                        assert_with_reason(false, @src(), "iteration should never return to an 'exited' node", .{});
+                    },
                 }
             }
         };
 
-        pub const TraverseActions = struct {
+        pub const IteratorActions = struct {
             // action_before_entering_item: ?*const fn (traverser: *const HeirarchyTraverser, entering_id: Id, enter_kind: TraversalEnterKind, userdata: ?*anyopaque) bool,
-            action_before_left_children: ?*const fn (traverser: *const HeirarchyTraverser, userdata: ?*anyopaque) bool = null,
-            action_after_left_before_right_children: ?*const fn (traverser: *const HeirarchyTraverser, userdata: ?*anyopaque) bool = null,
-            action_after_right_children: ?*const fn (traverser: *const HeirarchyTraverser, userdata: ?*anyopaque) bool = null,
-            action_after_exiting_item: ?*const fn (traverser: *const HeirarchyTraverser, exited_id: Id, exit_kind: TraversalExitKind, userdata: ?*anyopaque) bool = null,
+            before_left_children: ?*const fn (traverser: *const Iterator, userdata: ?*anyopaque) bool = null,
+            after_left_before_right_children: ?*const fn (traverser: *const Iterator, userdata: ?*anyopaque) bool = null,
+            after_right_children: ?*const fn (traverser: *const Iterator, userdata: ?*anyopaque) bool = null,
+            after_exiting_item: ?*const fn (traverser: *const Iterator, exited_id: Id, exit_kind: NodeExitKind, userdata: ?*anyopaque) bool = null,
+        };
+
+        pub const TraverserFrame = struct {
+            curr_id: Id = NULL_ID,
+        };
+
+        pub const Traverser = struct {
+            frames: FramesList = FramesList.UNINIT,
+            heirarchy: *Heirarchy,
+            alloc: AllocInfal = AllocInfal.DummyAllocInfal,
+
+            pub const FramesList = Root.List.List(TRAV_STACK_OPTIONS);
+
+            pub inline fn free(self: *Traverser) void {
+                self.frames.clear_and_free(self.alloc);
+            }
+
+            pub inline fn get_current_id(self: *const Traverser) Id {
+                assert_with_reason(self.frames.len > 0, @src(), "no current location, traversal frames empty", .{});
+                return self.frames.get_last().curr_id;
+            }
+
+            pub inline fn get_current_index(self: *const Traverser) Index {
+                assert_with_reason(self.frames.len > 0, @src(), "no current location, traversal frames empty", .{});
+                return get_index(self.frames.get_last().curr_id);
+            }
+
+            pub inline fn get_current_ptr(self: *const Traverser) *Elem {
+                assert_with_reason(self.frames.len > 0, @src(), "no current location, traversal frames empty", .{});
+                return self.heirarchy.get_ptr(self.get_current_id());
+            }
+
+            pub inline fn get_parent_id(self: *const Traverser) Id {
+                assert_with_reason(self.frames.len > 1, @src(), "no parent in traversal stack, either already at top level, or traverser at the same lever it was 'started' at (no parents saved above start location)", .{});
+                return self.frames.ptr[self.frames.len - 2].curr_id;
+            }
+
+            pub inline fn get_parent_index(self: *const Traverser) Index {
+                assert_with_reason(self.frames.len > 1, @src(), "no parent in traversal stack, either already at top level, or traverser at the same lever it was 'started' at (no parents saved above start location)", .{});
+                return get_index(self.frames.ptr[self.frames.len - 2].curr_id);
+            }
+
+            pub inline fn get_parent_ptr(self: *const Traverser) *Elem {
+                assert_with_reason(self.frames.len > 1, @src(), "no parent in traversal stack, either already at top level, or traverser at the same lever it was 'started' at (no parents saved above start location)", .{});
+                return self.heirarchy.get_ptr(self.frames.ptr[self.frames.len - 2].curr_id);
+            }
+
+            pub inline fn get_nth_parent_id(self: *const Traverser, n: Index) Id {
+                assert_with_reason(self.frames.len > n, @src(), "no {d}-th parent in traversal stack, only {d} more parents above current", .{ n, self.frames.len -| 1 });
+                if (self.frames.len == 0) return NULL_ID;
+                return self.frames.ptr[self.frames.len - n - 1].curr_id;
+            }
+
+            pub inline fn get_nth_parent_index(self: *const Traverser, n: Index) Index {
+                assert_with_reason(self.frames.len > n, @src(), "no {d}-th parent in traversal stack, only {d} more parents above current", .{ n, self.frames.len -| 1 });
+                if (self.frames.len == 0) return NULL_ID;
+                return get_index(self.frames.ptr[self.frames.len - n - 1].curr_id);
+            }
+
+            pub inline fn get_nth_parent_ptr(self: *const Traverser, n: Index) *Elem {
+                assert_with_reason(self.frames.len > n, @src(), "no {d}-th parent in traversal stack, only {d} more parents above current", .{ n, self.frames.len -| 1 });
+                return self.heirarchy.get_ptr(self.frames.ptr[self.frames.len - n - 1].curr_id);
+            }
+
+            pub fn clone_to_stack(self: *const Traverser, buffer: []TraverserFrame) Traverser {
+                var new = self.heirarchy.create_traverser_on_stack(buffer);
+                @memcpy(new.frames.ptr[0..self.frames.len], self.frames.ptr[0..self.frames.len]);
+                new.frames.len = self.frames.len;
+                return new;
+            }
+
+            pub fn clone_to_heap(self: *const Traverser, alloc: AllocInfal) Traverser {
+                var new = self.heirarchy.create_traverser_on_heap(alloc);
+                @memcpy(new.frames.ptr[0..self.frames.len], self.frames.ptr[0..self.frames.len]);
+                new.frames.len = self.frames.len;
+                return new;
+            }
+
+            pub fn goto_next(self: *Traverser) bool {
+                if (!HAS_NEXT or self.frames.len == 0) return false;
+                const last_frame: *TraverserFrame = self.frames.get_last_ptr();
+                const curr_id = last_frame.curr_id;
+                const curr_ptr = self.heirarchy.get_ptr(curr_id);
+                const next_id = get_next_id(curr_ptr);
+                if (next_id == NULL_ID) return false;
+                last_frame.curr_id = next_id;
+                return true;
+            }
+
+            pub fn goto_nth_next(self: *Traverser, count: Index) usize {
+                var c: Index = 0;
+                while (c < count) {
+                    if (self.goto_next()) {
+                        c += 1;
+                    } else break;
+                }
+                return c;
+            }
+
+            pub fn goto_last_sibling(self: *Traverser) usize {
+                var c: Index = 0;
+                while (true) {
+                    if (self.goto_next()) {
+                        c += 1;
+                    } else break;
+                }
+                return c;
+            }
+
+            pub fn goto_first_left_child(self: *Traverser) bool {
+                if (!HAS_LEFT_CHILDREN or self.frames.len == 0) return false;
+                const last_frame: *TraverserFrame = self.frames.get_last_ptr();
+                const curr_id = last_frame.curr_id;
+                const curr_ptr = self.heirarchy.get_ptr(curr_id);
+                const left_child_id = get_left_child_id(curr_ptr);
+                if (left_child_id == NULL_ID) return false;
+                self.frames.append(TraverserFrame{ .curr_id = left_child_id }, self.alloc);
+                return true;
+            }
+
+            pub fn goto_nth_first_left_child(self: *Traverser, count: Index) usize {
+                var c: Index = 0;
+                while (c < count) {
+                    if (self.goto_first_left_child()) {
+                        c += 1;
+                    } else break;
+                }
+                return c;
+            }
+
+            pub fn goto_bottom_first_left_child(self: *Traverser) usize {
+                var c: Index = 0;
+                while (true) {
+                    if (self.goto_first_left_child()) {
+                        c += 1;
+                    } else break;
+                }
+                return c;
+            }
+
+            pub fn goto_first_right_child(self: *Traverser) bool {
+                if (!HAS_RIGHT_CHILDREN or self.frames.len == 0) return false;
+                const last_frame: *TraverserFrame = self.frames.get_last_ptr();
+                const curr_id = last_frame.curr_id;
+                const curr_ptr = self.heirarchy.get_ptr(curr_id);
+                const right_child_id = get_right_child_id(curr_ptr);
+                if (right_child_id == NULL_ID) return false;
+                self.frames.append(TraverserFrame{ .curr_id = right_child_id }, self.alloc);
+                return true;
+            }
+
+            pub fn goto_nth_first_right_child(self: *Traverser, count: Index) usize {
+                var c: Index = 0;
+                while (c < count) {
+                    if (self.goto_first_right_child()) {
+                        c += 1;
+                    } else break;
+                }
+                return c;
+            }
+
+            pub fn goto_bottom_first_right_child(self: *Traverser) usize {
+                var c: Index = 0;
+                while (true) {
+                    if (self.goto_first_right_child()) {
+                        c += 1;
+                    } else break;
+                }
+                return c;
+            }
+
+            pub fn goto_parent(self: *Traverser) bool {
+                if (!HAS_CHILD_NODES or self.frames.len < 2) return false;
+                self.frames.set_len(self.frames.len - 1);
+                return self.frames.len > 0;
+            }
+
+            pub fn goto_nth_parent(self: *Traverser, count: Index) usize {
+                var c: Index = 0;
+                while (c < count) {
+                    if (self.goto_parent()) {
+                        c += 1;
+                    } else break;
+                }
+                return c;
+            }
+
+            pub fn goto_top_parent(self: *Traverser) usize {
+                var c: Index = 0;
+                while (true) {
+                    if (self.goto_parent()) {
+                        c += 1;
+                    } else break;
+                }
+                return c;
+            }
+
+            pub fn start_from_root(self: *Traverser) void {
+                return self.start_from(self.heirarchy.first_root_id);
+            }
+
+            pub fn start_from(self: *Traverser, start_id: Id) bool {
+                self.frames.clear_retaining_capacity();
+                if (start_id == NULL_ID) return false;
+                self.frames.append(TraverserFrame{ .curr_id = start_id }, self.alloc);
+                return true;
+            }
         };
 
         // pub fn traverse_and_do_actions_on_each(self: *Heirarchy) void {}
@@ -2019,7 +2261,7 @@ const Test = if (build.mode == .Debug) struct {
         },
         .own_id_field = "id",
         .strong_asserts = true,
-        .traversal_trace_options = Root.List.ListOptionsWithoutElem{
+        .traversal_stack_options = Root.List.ListOptionsWithoutElem{
             .alignment = null,
             .assert_correct_allocator = true,
             .growth_model = .GROW_EXACT_NEEDED,
@@ -2062,7 +2304,7 @@ const Test = if (build.mode == .Debug) struct {
         errors: bool = false,
     };
     const Action = struct {
-        fn set_value_from_string(traverser: *const List.HeirarchyTraverser, userdata: ?*anyopaque) bool {
+        fn set_value_from_string(traverser: *const List.Iterator, userdata: ?*anyopaque) bool {
             const string: *[]const u8 = @ptrCast(@alignCast(userdata.?));
             const curr_ptr = traverser.get_current_ptr();
             curr_ptr.val = string.*[0];
@@ -2076,7 +2318,7 @@ const Test = if (build.mode == .Debug) struct {
         fn node_match(param: NodeTrackerIdList.Elem, item: *const NodeTrackerIdList.Elem) bool {
             return item.* == param;
         }
-        fn assert_node_before(traverser: *const List.HeirarchyTraverser, userdata: ?*anyopaque) bool {
+        fn assert_node_before(traverser: *const List.Iterator, userdata: ?*anyopaque) bool {
             var tracker_set: *NodeTrackerSet = @ptrCast(@alignCast(userdata.?));
             var tracker = &tracker_set.before;
             const curr_ptr: *TestElem = traverser.get_current_ptr();
@@ -2095,7 +2337,7 @@ const Test = if (build.mode == .Debug) struct {
             tracker.chars.append(curr_ptr.val, alloc);
             return true;
         }
-        fn assert_node_middle(traverser: *const List.HeirarchyTraverser, userdata: ?*anyopaque) bool {
+        fn assert_node_middle(traverser: *const List.Iterator, userdata: ?*anyopaque) bool {
             var tracker_set: *NodeTrackerSet = @ptrCast(@alignCast(userdata.?));
             var tracker = &tracker_set.middle;
             const curr_ptr: *TestElem = traverser.get_current_ptr();
@@ -2114,7 +2356,7 @@ const Test = if (build.mode == .Debug) struct {
             tracker.chars.append(curr_ptr.val, alloc);
             return true;
         }
-        fn assert_node_after(traverser: *const List.HeirarchyTraverser, userdata: ?*anyopaque) bool {
+        fn assert_node_after(traverser: *const List.Iterator, userdata: ?*anyopaque) bool {
             var tracker_set: *NodeTrackerSet = @ptrCast(@alignCast(userdata.?));
             var tracker = &tracker_set.after;
             const curr_ptr: *TestElem = traverser.get_current_ptr();
@@ -2133,7 +2375,7 @@ const Test = if (build.mode == .Debug) struct {
             tracker.chars.append(curr_ptr.val, alloc);
             return true;
         }
-        fn assert_node_exit(traverser: *const List.HeirarchyTraverser, exit_id: List.Id, exit_kind: TraversalExitKind, userdata: ?*anyopaque) bool {
+        fn assert_node_exit(traverser: *const List.Iterator, exit_id: List.Id, exit_kind: NodeExitKind, userdata: ?*anyopaque) bool {
             _ = exit_kind;
             var tracker_set: *NodeTrackerSet = @ptrCast(@alignCast(userdata.?));
             var tracker = &tracker_set.exit;
@@ -2154,17 +2396,17 @@ const Test = if (build.mode == .Debug) struct {
             return true;
         }
     };
-    const assert_node_actions = List.TraverseActions{
-        .action_before_left_children = Action.assert_node_before,
-        .action_after_left_before_right_children = Action.assert_node_middle,
-        .action_after_right_children = Action.assert_node_after,
-        .action_after_exiting_item = Action.assert_node_exit,
+    const assert_node_actions = List.IteratorActions{
+        .before_left_children = Action.assert_node_before,
+        .after_left_before_right_children = Action.assert_node_middle,
+        .after_right_children = Action.assert_node_after,
+        .after_exiting_item = Action.assert_node_exit,
     };
-    const write_node_actions = List.TraverseActions{
-        .action_after_left_before_right_children = Action.set_value_from_string,
+    const write_node_actions = List.IteratorActions{
+        .after_left_before_right_children = Action.set_value_from_string,
     };
     const expect = struct {
-        fn traversal_yields(traverser: *List.HeirarchyTraverser, node_trackers: *NodeTrackerSet, start_id: List.Id, pre_order: []const u8, in_order: []const u8, post_order: []const u8) !void {
+        fn traversal_yields(traverser: *List.Iterator, node_trackers: *NodeTrackerSet, start_id: List.Id, pre_order: []const u8, in_order: []const u8, post_order: []const u8) !void {
             node_trackers.errors = false;
             node_trackers.before.ids.clear_retaining_capacity();
             node_trackers.middle.ids.clear_retaining_capacity();
@@ -2178,16 +2420,16 @@ const Test = if (build.mode == .Debug) struct {
             node_trackers.middle.expected = in_order;
             node_trackers.after.expected = post_order;
             node_trackers.exit.expected = post_order;
-            traverser.custom_start_traverse_through_heirarchy_depth_first_and_do_actions_on_all_items(start_id, assert_node_actions, @ptrCast(node_trackers));
+            traverser.custom_start_iterate_depth_first_and_do_actions_on_all_items(start_id, assert_node_actions, @ptrCast(node_trackers));
             try t.expect_false(node_trackers.errors, "node_trackers.errors", "At least one error", .{});
             try t.expect_equal(node_trackers.before.ids.len, "node_trackers.before.ids.len", pre_order.len, "pre_order.len", "tracker {s} preformed actions on {d} items, but expected {d} items", .{ node_trackers.before.name, node_trackers.before.ids.len, pre_order.len });
             try t.expect_equal(node_trackers.middle.ids.len, "node_trackers.middle.ids.len", in_order.len, "in_order.len", "tracker {s} preformed actions on {d} items, but expected {d} items", .{ node_trackers.middle.name, node_trackers.middle.ids.len, in_order.len });
             try t.expect_equal(node_trackers.after.ids.len, "node_trackers.after.list.len", post_order.len, "post_order.len", "tracker {s} preformed actions on {d} items, but expected {d} items", .{ node_trackers.after.name, node_trackers.after.ids.len, post_order.len });
             try t.expect_equal(node_trackers.exit.ids.len, "node_trackers.exit.list.len", post_order.len, "post_order.len", "tracker {s} preformed actions on {d} items, but expected {d} items", .{ node_trackers.exit.name, node_trackers.exit.ids.len, post_order.len });
-            try t.expect_slices_equal(node_trackers.before.chars.slice(), "node_trackers.before.chars.slice()", node_trackers.before.expected, "node_trackers.before.expected", "mismatch traversal result", .{});
-            try t.expect_slices_equal(node_trackers.middle.chars.slice(), "node_trackers.middle.chars.slice()", node_trackers.middle.expected, "node_trackers.middle.expected", "mismatch traversal result", .{});
-            try t.expect_slices_equal(node_trackers.after.chars.slice(), "node_trackers.after.chars.slice()", node_trackers.after.expected, "node_trackers.after.expected", "mismatch traversal result", .{});
-            try t.expect_slices_equal(node_trackers.exit.chars.slice(), "node_trackers.exit.chars.slice()", node_trackers.exit.expected, "node_trackers.exit.expected", "mismatch traversal result", .{});
+            try t.expect_strings_equal(node_trackers.before.chars.slice(), "node_trackers.before.chars.slice()", node_trackers.before.expected, "node_trackers.before.expected", "mismatch traversal result", .{});
+            try t.expect_strings_equal(node_trackers.middle.chars.slice(), "node_trackers.middle.chars.slice()", node_trackers.middle.expected, "node_trackers.middle.expected", "mismatch traversal result", .{});
+            try t.expect_strings_equal(node_trackers.after.chars.slice(), "node_trackers.after.chars.slice()", node_trackers.after.expected, "node_trackers.after.expected", "mismatch traversal result", .{});
+            try t.expect_strings_equal(node_trackers.exit.chars.slice(), "node_trackers.exit.chars.slice()", node_trackers.exit.expected, "node_trackers.exit.expected", "mismatch traversal result", .{});
         }
     };
 };
@@ -2196,29 +2438,63 @@ test "Full_Heirarchy" {
     const List = Test.List;
     const alloc = Test.alloc;
     var heirarchy = List.new_empty(Test.alloc);
-    var traverser_buf: [10]List.HeirarchyTraverseFrame = undefined;
-    var traverser = heirarchy.create_heirarchy_traverser_on_stack(&traverser_buf);
+    var iter_buf: [10]List.IteratorFrame = undefined;
+    var trav_buf: [10]List.TraverserFrame = undefined;
+    var iterator = heirarchy.create_iterator_on_stack(&iter_buf);
+    defer iterator.free();
+    var traverser = heirarchy.create_traverser_on_stack(&trav_buf);
+    defer traverser.free();
     var node_trackers = Test.NodeTrackerSet{
         .before = Test.NodeTracker{ .ids = Test.NodeTrackerIdList.new_with_capacity(1024, alloc), .chars = Test.NodeTrackerCharList.new_with_capacity(1024, alloc), .name = "'pre-order'", .expected = "" },
         .middle = Test.NodeTracker{ .ids = Test.NodeTrackerIdList.new_with_capacity(1024, alloc), .chars = Test.NodeTrackerCharList.new_with_capacity(1024, alloc), .name = "'in-order'", .expected = "" },
         .after = Test.NodeTracker{ .ids = Test.NodeTrackerIdList.new_with_capacity(1024, alloc), .chars = Test.NodeTrackerCharList.new_with_capacity(1024, alloc), .name = "'post-order'", .expected = "" },
         .exit = Test.NodeTracker{ .ids = Test.NodeTrackerIdList.new_with_capacity(1024, alloc), .chars = Test.NodeTrackerCharList.new_with_capacity(1024, alloc), .name = "'post-order' (exit)", .expected = "" },
     };
-    try Test.expect.traversal_yields(&traverser, &node_trackers, heirarchy.first_root_id, "", "", "");
+    try Test.t.expect_equal(heirarchy.free_count, "heirarchy.free_count", 0, "0", "no items have been freed yet, but free list is not empty", .{});
+    try Test.t.expect_equal(heirarchy.first_free_id, "heirarchy.first_free_id", List.NULL_ID, "NULL_ID", "no items have been freed yet, but free list is not empty", .{});
+    try Test.t.expect_equal(heirarchy.first_root_id, "heirarchy.first_root_id", List.NULL_ID, "NULL_ID", "no items have been added yet, but root list is not empty", .{});
+    try Test.expect.traversal_yields(&iterator, &node_trackers, heirarchy.first_root_id, "", "", "");
     var range = heirarchy.insert_many_slots_at_beginning_of_heirarchy_root(5, alloc);
-    try Test.expect.traversal_yields(&traverser, &node_trackers, heirarchy.first_root_id, "\x00\x00\x00\x00\x00", "\x00\x00\x00\x00\x00", "\x00\x00\x00\x00\x00");
+    try Test.expect.traversal_yields(&iterator, &node_trackers, heirarchy.first_root_id, "\x00\x00\x00\x00\x00", "\x00\x00\x00\x00\x00", "\x00\x00\x00\x00\x00");
     var str: []const u8 = "hello";
-    traverser.custom_start_traverse_through_heirarchy_depth_first_and_do_actions_on_all_items(range.first, Test.write_node_actions, @ptrCast(&str));
-    try Test.expect.traversal_yields(&traverser, &node_trackers, heirarchy.first_root_id, "hello", "hello", "hello");
+    iterator.custom_start_iterate_depth_first_and_do_actions_on_all_items(range.first, Test.write_node_actions, @ptrCast(&str));
+    try Test.expect.traversal_yields(&iterator, &node_trackers, heirarchy.first_root_id, "hello", "hello", "hello");
     range = heirarchy.insert_many_slots_at_beginning_of_left_children(heirarchy.first_root_id, 3, alloc);
     str = "123";
-    traverser.custom_start_traverse_through_heirarchy_depth_first_and_do_actions_on_all_items(range.first, Test.write_node_actions, @ptrCast(&str));
-    // if (true) @panic("here"); //DEBUG
-    try Test.expect.traversal_yields(&traverser, &node_trackers, heirarchy.first_root_id, "h123ello", "123hello", "123hello");
+    iterator.custom_start_iterate_depth_first_and_do_actions_on_all_items(range.first, Test.write_node_actions, @ptrCast(&str));
+    try Test.expect.traversal_yields(&iterator, &node_trackers, heirarchy.first_root_id, "h123ello", "123hello", "123hello");
+    range = heirarchy.insert_many_slots_at_beginning_of_right_children(heirarchy.first_root_id, 3, alloc);
+    str = "456";
+    iterator.custom_start_iterate_depth_first_and_do_actions_on_all_items(range.first, Test.write_node_actions, @ptrCast(&str));
+    try Test.expect.traversal_yields(&iterator, &node_trackers, heirarchy.first_root_id, "h123456ello", "123h456ello", "123456hello");
+    try Test.t.expect_true(traverser.start_from(range.first), "traverser.start_from(range.first)", "failed to start from id", .{});
+    try Test.t.expect_true(traverser.goto_next(), "traverser.goto_next()", "failed to move to next node", .{});
+    range = heirarchy.insert_many_slots_at_beginning_of_left_children(traverser.get_current_id(), 2, alloc);
+    str = "--";
+    iterator.custom_start_iterate_depth_first_and_do_actions_on_all_items(range.first, Test.write_node_actions, @ptrCast(&str));
+    try Test.expect.traversal_yields(&iterator, &node_trackers, heirarchy.first_root_id, "h12345--6ello", "123h4--56ello", "1234--56hello");
+    range = heirarchy.insert_many_slots_at_beginning_of_right_children(traverser.get_current_id(), 2, alloc);
+    str = "++";
+    iterator.custom_start_iterate_depth_first_and_do_actions_on_all_items(range.first, Test.write_node_actions, @ptrCast(&str));
+    try Test.expect.traversal_yields(&iterator, &node_trackers, heirarchy.first_root_id, "h12345--++6ello", "123h4--5++6ello", "1234--++56hello");
+    range = heirarchy.insert_many_slots_at_beginning_of_left_children(traverser.get_current_id(), 2, alloc);
+    str = "$$";
+    iterator.custom_start_iterate_depth_first_and_do_actions_on_all_items(range.first, Test.write_node_actions, @ptrCast(&str));
+    try Test.expect.traversal_yields(&iterator, &node_trackers, heirarchy.first_root_id, "h12345$$--++6ello", "123h4$$--5++6ello", "1234$$--++56hello");
+    try Test.t.expect_equal(heirarchy.free_count, "heirarchy.free_count", 0, "0", "no items have been freed yet, but free list is not empty", .{});
+    try Test.t.expect_equal(heirarchy.first_free_id, "heirarchy.first_free_id", List.NULL_ID, "NULL_ID", "no items have been freed yet, but free list is not empty", .{});
+    try Test.t.expect_true(traverser.start_from(range.last), "traverser.start_from(range.last)", "failed to start from id", .{});
+    const disconn_this: List.Id = traverser.get_current_id();
+    try Test.t.expect_equal(traverser.goto_nth_next(2), "traverser.goto_nth_next(2)", 2, "2", "failed to move to next node", .{});
+    const disconn_last: List.Id = traverser.get_current_id();
+    range = heirarchy.disconnect_item_range_after(disconn_this, disconn_last);
+    iterator.free_disconnected_items(range.first);
+    try Test.t.expect_equal(heirarchy.free_count, "heirarchy.free_count", 2, "2", "mismatch free count", .{});
+    try Test.expect.traversal_yields(&iterator, &node_trackers, heirarchy.first_root_id, "h12345$$++6ello", "123h4$$5++6ello", "1234$$++56hello");
 }
 
-pub const TraversalExitKind = enum(u8) {
-    EXITED_BY_HITTING_END_OF_TRAVERSAL,
+pub const NodeExitKind = enum(u8) {
+    EXITED_BY_HITTING_END_OF_ITERATOR,
     EXITED_BY_MOVING_TO_NEXT_SIBLING,
     EXITED_BY_RETURNING_TO_PARENT,
 };
