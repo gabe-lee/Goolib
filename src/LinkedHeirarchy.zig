@@ -222,6 +222,8 @@ pub fn LinkedHeirarchy(comptime options: ForwardLinkedHeirarchyOptions) type {
         const LAST_LEFT_CHILD_FIELD = if (HAS_LAST_LEFT_CHILD) options.last_left_child_field.? else "";
         const HAS_LAST_RIGHT_CHILD = options.last_right_child_field != null;
         const LAST_RIGHT_CHILD_FIELD = if (HAS_LAST_RIGHT_CHILD) options.last_right_child_field.? else "";
+        const HAS_DEPTH = HAS_FIRST_CHILD_NODES or HAS_LAST_CHILD_NODES or HAS_PARENT;
+        const HAS_SIBLINGS = HAS_PREV or HAS_NEXT;
         const FREE_FIELD = F_LINK;
         const HAS_OWN_ID = options.own_id_field != null;
         const OWN_ID_FIELD = if (HAS_OWN_ID) options.own_id_field.? else "";
@@ -251,8 +253,12 @@ pub fn LinkedHeirarchy(comptime options: ForwardLinkedHeirarchyOptions) type {
             }
             Internal.set_own_id(&elem, NULL_ID);
             Internal.set_next_id(&elem, NULL_ID);
+            Internal.set_prev_id(&elem, NULL_ID);
+            Internal.set_parent_id(&elem, NULL_ID);
             Internal.set_first_left_child_id(&elem, NULL_ID);
+            Internal.set_last_left_child_id(&elem, NULL_ID);
             Internal.set_first_right_child_id(&elem, NULL_ID);
+            Internal.set_last_right_child_id(&elem, NULL_ID);
             break :make elem;
         };
         const NULL_ID = math.maxInt(Id);
@@ -771,6 +777,14 @@ pub fn LinkedHeirarchy(comptime options: ForwardLinkedHeirarchyOptions) type {
                         set_next_id(a, get_next_id(old_a));
                         set_next_id(b, get_next_id(old_b));
                     }
+                    if (HAS_PREV) {
+                        set_prev_id(a, get_prev_id(old_a));
+                        set_prev_id(b, get_prev_id(old_b));
+                    }
+                    if (HAS_PARENT) {
+                        set_parent_id(a, get_parent_id(old_a));
+                        set_parent_id(b, get_parent_id(old_b));
+                    }
                     if (HAS_FIRST_LEFT_CHILD) {
                         set_first_left_child_id(a, get_first_left_child_id(old_a));
                         set_first_left_child_id(b, get_first_left_child_id(old_b));
@@ -778,6 +792,14 @@ pub fn LinkedHeirarchy(comptime options: ForwardLinkedHeirarchyOptions) type {
                     if (HAS_FIRST_RIGHT_CHILD) {
                         set_first_right_child_id(a, get_first_right_child_id(old_a));
                         set_first_right_child_id(b, get_first_right_child_id(old_b));
+                    }
+                    if (HAS_LAST_LEFT_CHILD) {
+                        set_last_left_child_id(a, get_last_left_child_id(old_a));
+                        set_last_left_child_id(b, get_last_left_child_id(old_b));
+                    }
+                    if (HAS_LAST_RIGHT_CHILD) {
+                        set_last_right_child_id(a, get_last_right_child_id(old_a));
+                        set_last_right_child_id(b, get_last_right_child_id(old_b));
                     }
                     if (HAS_OWN_ID) {
                         set_own_id(a, get_own_id(old_a));
@@ -980,28 +1002,186 @@ pub fn LinkedHeirarchy(comptime options: ForwardLinkedHeirarchyOptions) type {
                         }
                     }
                 }
+                if (HAS_PARENT and (HAS_NEXT or HAS_PREV)) {
+                    const parent_id = if (leftmost != NULL_ID) self.get_parent_id(self.get_ptr(leftmost)) else self.get_parent_id(self.get_ptr(rightmost));
+                    Internal.set_parent_on_range(self, parent_id, leftmost, first_new, last_new, rightmost);
+                }
             }
 
-            pub fn disconnect_items_between_siblings(self: *Heirarchy, left_id: Id, first_removed_id: Id, last_removed_id: Id, right_id: Id) void {
-                assert_has_next(@src());
-                assert_with_reason(left_id != NULL_ID, @src(), "left_id cannot be NULL_ID", .{});
-                assert_with_reason(first_removed_id != NULL_ID and last_removed_id != NULL_ID, @src(), "neither first_removed_id nor last_removed_id can be NULL_ID", .{});
-                Internal.assert_4_siblings_in_order_no_cycles_b_c_can_be_same_d_can_be_null(self, left_id, first_removed_id, last_removed_id, right_id, @src());
-                const left_ptr = self.get_ptr(left_id);
-                set_next_id(left_ptr, right_id);
-                const last_removed_ptr = self.get_ptr(last_removed_id);
-                set_next_id(last_removed_ptr, NULL_ID);
+            pub fn set_parent_on_range(self: *Heirarchy, parent_id: Id, left_limit: Id, first_new: Id, last_new: Id, right_limit: Id) void {
+                if (HAS_NEXT) {
+                    var id = first_new;
+                    while (id != right_limit) {
+                        const ptr = self.get_ptr(id);
+                        Internal.set_parent_id(ptr, parent_id);
+                        id = self.get_next_id(ptr);
+                    }
+                } else if (HAS_PREV) {
+                    var id = last_new;
+                    while (id != left_limit) {
+                        const ptr = self.get_ptr(id);
+                        Internal.set_parent_id(ptr, parent_id);
+                        id = self.get_prev_id(ptr);
+                    }
+                }
             }
 
-            pub fn disconnect_all_items_after(self: *Heirarchy, left_id: Id, first_removed_id: Id, last_removed_id: Id, right_id: Id) void {
-                assert_has_next(@src());
-                assert_with_reason(left_id != NULL_ID, @src(), "left_id cannot be NULL_ID", .{});
-                assert_with_reason(first_removed_id != NULL_ID and last_removed_id != NULL_ID, @src(), "neither first_removed_id nor last_removed_id can be NULL_ID", .{});
-                Internal.assert_4_siblings_in_order_no_cycles_b_c_can_be_same_d_can_be_null(self, left_id, first_removed_id, last_removed_id, right_id, @src());
-                const left_ptr = self.get_ptr(left_id);
-                set_next_id(left_ptr, right_id);
-                const last_removed_ptr = self.get_ptr(last_removed_id);
-                set_next_id(last_removed_ptr, NULL_ID);
+            pub fn remove_id_range(self: *Heirarchy, leftmost: Id, first_removed_id: Id, last_removed_id: Id, rightmost: Id, known_parent_id: ?Id) void {
+                assert_with_reason(first_removed_id != NULL_ID and last_removed_id != NULL_ID, @src(), "cannot remove NULL_ID's between items", .{});
+                Internal.assert_range_and_ends_adjacent_siblings(self, leftmost, first_removed_id, last_removed_id, rightmost, @src());
+                const branch = Utils.bools_to_switchable_integer(2, .{leftmost != NULL_ID, rightmost != NULL_ID});
+                const parent_id = get: {
+                    if (HAS_PARENT) {
+                        const parent = self.get_parent_id(self.get_ptr(first_removed_id));
+                        if (known_parent_id) |k_parent| {
+                            assert_with_reason(parent == k_parent, @src(), "cached parent on 'first removed id' (idx = {d}) did not match the provided 'known parent id' (idx = {d})", .{get_index(parent), get_index(k_parent)});
+                        }
+                        break :get parent;
+                    } else if (HAS_DEPTH) {
+                        assert_with_reason(known_parent_id != null, @src(), "if heirarchy has depth (parents and children) but items do not cache their parent id on them, a known parent id must be provided", .{});
+                        break :get known_parent_id.?;
+                    } else break :get NULL_ID;
+                };
+                switch (branch) {
+                    0 => {// left and right == NULL_ID
+                        if (HAS_DEPTH) {
+                            Internal.assert_has_parent(@src());
+                            if (parent_id == NULL_ID) {
+                                self.first_root_id = NULL_ID;
+                                if (HAS_LAST_ROOT) self.last_root_id = NULL_ID;
+                            } else {
+                                const parent_ptr = self.get_ptr(parent_id);
+                                var found: usize = 0;
+                                if (HAS_FIRST_LEFT_CHILD) {
+                                    const cached_first_left = self.get_first_left_child_id(parent_ptr);
+                                    if (cached_first_left == first_removed_id) {
+                                        Internal.set_first_left_child_id(parent_ptr, NULL_ID);
+                                        Internal.set_last_left_child_id(parent_ptr, NULL_ID);
+                                        found += 1;
+                                    }
+                                } else if (HAS_LAST_LEFT_CHILD) {
+                                    const cached_last_left = self.get_last_left_child_id(parent_ptr);
+                                    if (cached_last_left == last_removed_id) {
+                                        Internal.set_first_left_child_id(parent_ptr, NULL_ID);
+                                        Internal.set_last_left_child_id(parent_ptr, NULL_ID);
+                                        found += 1;
+                                    }
+                                }
+                                if (HAS_FIRST_RIGHT_CHILD) {
+                                    const cached_first_right = self.get_first_right_child_id(parent_ptr);
+                                    if (cached_first_right == first_removed_id) {
+                                        Internal.set_first_right_child_id(parent_ptr, NULL_ID);
+                                        Internal.set_last_right_child_id(parent_ptr, NULL_ID);
+                                        found += 1;
+                                    }
+                                } else if (HAS_LAST_RIGHT_CHILD) {
+                                    const cached_last_right = self.get_last_right_child_id(parent_ptr);
+                                    if (cached_last_right == last_removed_id) {
+                                        Internal.set_first_right_child_id(parent_ptr, NULL_ID);
+                                        Internal.set_last_right_child_id(parent_ptr, NULL_ID);
+                                        found += 1;
+                                    }
+                                }
+                                assert_with_reason(found > 0, @src(), "did not find first or last item in range on parent (idx = {d}) connections", .{get_index(parent_id)});
+                            }
+                        } else {
+                            self.first_root_id = NULL_ID;
+                            if (HAS_LAST_ROOT) self.last_root_id = NULL_ID;
+                        }
+                    },
+                    1 => {// left valid, right == NULL_ID
+                        if (HAS_NEXT) {
+                            const left_ptr = self.get_ptr(leftmost);
+                            Internal.set_next_id(left_ptr, rightmost);
+                        }
+                        if (HAS_PREV) {
+                            const first_ptr = self.get_ptr(first_removed_id);
+                            Internal.set_prev_id(first_ptr, NULL_ID);
+                        }
+                        if (HAS_DEPTH) {
+                            Internal.assert_has_parent(@src());
+                            if (parent_id == NULL_ID) {
+                                if (HAS_LAST_ROOT) self.last_root_id = NULL_ID;
+                            } else {
+                                const parent_ptr = self.get_ptr(parent_id);
+                                var found: usize = 0;
+                                if (HAS_FIRST_RIGHT_CHILD) {
+                                    const cached_first_right = self.get_first_right_child_id(parent_ptr);
+                                    if (cached_first_right == first_removed_id) {
+                                        Internal.set_first_right_child_id(parent_ptr, NULL_ID);
+                                        Internal.set_last_right_child_id(parent_ptr, NULL_ID);
+                                        found += 1;
+                                    }
+                                } else if (HAS_LAST_RIGHT_CHILD) {
+                                    const cached_last_right = self.get_last_right_child_id(parent_ptr);
+                                    if (cached_last_right == last_removed_id) {
+                                        Internal.set_first_right_child_id(parent_ptr, NULL_ID);
+                                        Internal.set_last_right_child_id(parent_ptr, NULL_ID);
+                                        found += 1;
+                                    }
+                                }
+                                assert_with_reason(found > 0, @src(), "did not find first or last item in range on parent (idx = {d}) connections", .{get_index(parent_id)});
+                            }
+                        } else {
+                            if (HAS_LAST_ROOT) self.last_root_id = NULL_ID;
+                        }
+                    },
+                    2 => {// right valid, left == NULL_ID
+                    if (HAS_DEPTH) {
+                            Internal.assert_has_parent(@src());
+                            if (parent_id == NULL_ID) {
+                                self.first_root_id = NULL_ID;
+                            } else {
+                                const parent_ptr = self.get_ptr(parent_id);
+                                var found: usize = 0;
+                                if (HAS_FIRST_LEFT_CHILD) {
+                                    const cached_first_left = self.get_first_left_child_id(parent_ptr);
+                                    if (cached_first_left == first_removed_id) {
+                                        Internal.set_first_left_child_id(parent_ptr, NULL_ID);
+                                        Internal.set_last_left_child_id(parent_ptr, NULL_ID);
+                                        found += 1;
+                                    }
+                                } else if (HAS_LAST_LEFT_CHILD) {
+                                    const cached_last_left = self.get_last_left_child_id(parent_ptr);
+                                    if (cached_last_left == last_removed_id) {
+                                        Internal.set_first_left_child_id(parent_ptr, NULL_ID);
+                                        Internal.set_last_left_child_id(parent_ptr, NULL_ID);
+                                        found += 1;
+                                    }
+                                }
+                                assert_with_reason(found > 0, @src(), "did not find first or last item in range on parent (idx = {d}) connections", .{get_index(parent_id)});
+                            }
+                        } else {
+                            self.first_root_id = NULL_ID;
+                        }
+                        if (HAS_NEXT) {
+                            const last_ptr = self.get_ptr(last_removed_id);
+                            Internal.set_next_id(last_ptr, NULL_ID);
+                        }
+                        if (HAS_PREV) {
+                            const right_ptr = self.get_ptr(rightmost);
+                            Internal.set_prev_id(right_ptr, last_removed_id);
+                        }
+                    },
+                    3 => {// laft and right valid
+                        if (HAS_NEXT) {
+                            const left_ptr = self.get_ptr(leftmost);
+                            Internal.set_next_id(left_ptr, rightmost);
+                            const last_ptr = self.get_ptr(last_removed_id);
+                            Internal.set_next_id(last_ptr, NULL_ID);
+                        }
+                        if (HAS_PREV) {
+                            const first_ptr = self.get_ptr(first_removed_id);
+                            Internal.set_prev_id(first_ptr, NULL_ID);
+                            const right_ptr = self.get_ptr(rightmost);
+                            Internal.set_prev_id(right_ptr, last_removed_id);
+                        }
+                    },
+                    else => unreachable,
+                }
+                if (HAS_PARENT) {
+                    Internal.set_parent_on_range(self, NULL_ID, NULL_ID, first_removed_id, last_removed_id, NULL_ID);
+                }
             }
 
             // pub fn disconnect_sibling_internal(self: *Heirarchy, prev_id: Id, this_id: Id, next_id: Id, parent_id: Id) void {
@@ -1066,45 +1246,68 @@ pub fn LinkedHeirarchy(comptime options: ForwardLinkedHeirarchyOptions) type {
             //     set_next_id(this_ptr, NULL_ID);
             // }
 
-            fn assert_real_next_cached_next_match(self: *Heirarchy, this_id: Id, real_next: Id, comptime src_loc: ?SourceLocation) void {
+            pub fn assert_real_next_cached_next_match(self: *Heirarchy, this_id: Id, real_next: Id, comptime src_loc: ?SourceLocation) void {
                 const cached_next = get_next_id(self.get_ptr(this_id));
                 assert_with_reason(real_next == cached_next, src_loc, "real next id (gen = {d}, idx = {d}) does not match the cached next id (gen = {d}, idx = {d}) on the prev sibling (gen = {d}, idx = {d})", .{ get_gen_index(real_next).gen, get_index(real_next), get_gen_index(cached_next).gen, get_index(cached_next), get_gen_index(this_id).gen, get_index(this_id) });
             }
 
-            fn assert_has_next(comptime src_loc: ?SourceLocation) void {
+            pub fn assert_has_next(comptime src_loc: ?SourceLocation) void {
                 assert_with_reason(HAS_NEXT, src_loc, "cannot connect element as next sibling when elements do not have a 'next' field", .{});
             }
 
-            fn assert_has_prev(comptime src_loc: ?SourceLocation) void {
+            pub fn assert_has_prev(comptime src_loc: ?SourceLocation) void {
                 assert_with_reason(HAS_PREV, src_loc, "cannot connect element as next sibling when elements do not have a 'prev' field", .{});
             }
 
-            fn assert_has_parent(comptime src_loc: ?SourceLocation) void {
+            pub fn assert_has_parent(comptime src_loc: ?SourceLocation) void {
                 assert_with_reason(HAS_PARENT, src_loc, "cannot connect element as parent when elements do not have a 'parent' field", .{});
             }
 
-            fn assert_has_first_left(comptime src_loc: ?SourceLocation) void {
+            pub fn assert_has_first_left(comptime src_loc: ?SourceLocation) void {
                 assert_with_reason(HAS_FIRST_LEFT_CHILD, src_loc, "cannot connect element as first left child when elements do not have a 'first left child' field", .{});
             }
 
-            fn assert_has_first_right(comptime src_loc: ?SourceLocation) void {
+            pub fn assert_has_first_right(comptime src_loc: ?SourceLocation) void {
                 assert_with_reason(HAS_FIRST_RIGHT_CHILD, src_loc, "cannot connect element as first right child when elements do not have a 'first right child' field", .{});
             }
 
-            fn assert_has_last_left(comptime src_loc: ?SourceLocation) void {
+            pub fn assert_has_last_left(comptime src_loc: ?SourceLocation) void {
                 assert_with_reason(HAS_LAST_LEFT_CHILD, src_loc, "cannot connect element as last left child when elements do not have a 'last left child' field", .{});
             }
 
-            fn assert_has_last_right(comptime src_loc: ?SourceLocation) void {
+            pub fn assert_has_last_right(comptime src_loc: ?SourceLocation) void {
                 assert_with_reason(HAS_LAST_RIGHT_CHILD, src_loc, "cannot connect element as last right child when elements do not have a 'last right child' field", .{});
             }
 
-            fn assert_disconnect_range_is_isolated(self: *Heirarchy, range: Range, comptime src_loc: ?SourceLocation) void {
+            pub fn assert_has_root_last(comptime src_loc: ?SourceLocation) void {
+                assert_with_reason(HAS_LAST_ROOT, src_loc, "cannot access 'last root sibling' because the Heirarchy does not cache it", .{});
+            }
+
+            pub fn assert_range_and_ends_adjacent_siblings(self: *Heirarchy, leftmost: Id, range_first: Id, range_last: Id, rightmost: Id, comptime src_loc: ?SourceLocation) void {
+                if (HAS_NEXT) {
+                    const right_cached = self.get_next_id(self.get_ptr(range_last));
+                    assert_with_reason(right_cached == rightmost, src_loc, "last item in range (idx = {d}) did not point to rightmost item (idx = {d})", .{get_index(range_last), get_index(rightmost)});
+                    if (leftmost != NULL_ID) {
+                        const first_cached = self.get_next_id(self.get_ptr(leftmost));
+                        assert_with_reason(first_cached == range_first, src_loc, "leftmost item (idx = {d}) did not point to first item in range (idx = {d})", .{get_index(leftmost), get_index(range_first)});
+                    }
+                }
+                if (HAS_PREV) {
+                    const left_cached = self.get_prev_id(self.get_ptr(range_first));
+                    assert_with_reason(left_cached == leftmost, src_loc, "first item in range (idx = {d}) did not point to leftmost item (idx = {d})", .{get_index(range_first), get_index(leftmost)});
+                    if (rightmost != NULL_ID) {
+                        const last_cached = self.get_prev_id(self.get_ptr(rightmost));
+                        assert_with_reason(last_cached == range_last, src_loc, "rightmost item (idx = {d}) did not point to last item in range (idx = {d})", .{get_index(rightmost), get_index(range_last)});
+                    }
+                }
+            }
+
+            pub fn assert_disconnect_range_is_isolated(self: *Heirarchy, range: Range, comptime src_loc: ?SourceLocation) void {
                 if (HAS_NEXT) assert_with_reason(get_next_id(self.get_ptr(range.last)) == NULL_ID, src_loc, "last disconnected item (index {d}) did not have a 'next' field that pointed to NULL_ID, it wasnt fully disconnected", .{get_index(range.last)});
                 if (HAS_PREV) assert_with_reason(get_prev_id(self.get_ptr(range.first)) == NULL_ID, src_loc, "first disconnected item (index {d}) did not have a 'prev' field that pointed to NULL_ID, it wasnt fully disconnected", .{get_index(range.first)});
             }
 
-            fn assert_2_siblings_in_order_no_cycles(self: *Heirarchy, a: Id, b: Id, comptime a_b_can_equal: bool, comptime b_can_be_null: bool, comptime src_loc: ?SourceLocation) void {
+            pub fn assert_2_siblings_in_order_no_cycles(self: *Heirarchy, a: Id, b: Id, comptime a_b_can_equal: bool, comptime b_can_be_null: bool, comptime src_loc: ?SourceLocation) void {
                 assert_idx_less_than_len(get_index(a), self.list.len, src_loc);
                 assert_idx_less_than_len(get_index(b), self.list.len, src_loc);
                 assert_with_reason(a != NULL_ID, src_loc, "id 'a' was NULL_ID", .{});
@@ -1133,7 +1336,7 @@ pub fn LinkedHeirarchy(comptime options: ForwardLinkedHeirarchyOptions) type {
                 }
             }
 
-            fn assert_4_siblings_in_order_no_cycles_b_c_can_be_same_d_can_be_null(self: *Heirarchy, a: Id, b: Id, c: Id, d: Id, comptime src_loc: ?SourceLocation) void {
+            pub fn assert_4_siblings_in_order_no_cycles_b_c_can_be_same_d_can_be_null(self: *Heirarchy, a: Id, b: Id, c: Id, d: Id, comptime src_loc: ?SourceLocation) void {
                 assert_with_reason(get_index(a) != get_index(b) and get_index(a) != get_index(c) and get_index(a) != get_index(d) and get_index(d) != get_index(b) and get_index(d) != get_index(c), src_loc, "duplicate Id indexes a == (b, c, or d) or d == (a, b, or c): {d}, {d}, {d}, {d}", .{ get_index(a), get_index(b), get_index(c), get_index(d) });
                 assert_with_reason(a != NULL_ID, src_loc, "id 'a' was NULL_ID", .{});
                 assert_with_reason(b != NULL_ID, src_loc, "id 'b' was NULL_ID", .{});
@@ -1352,26 +1555,22 @@ pub fn LinkedHeirarchy(comptime options: ForwardLinkedHeirarchyOptions) type {
             return new_list;
         }
 
-        pub inline fn insert_slot_after(self: *Heirarchy, this_id: Id, alloc: AllocInfal) Id {
-            self.list.ensure_unused_capacity(1, alloc);
-            return self.insert_slot_after_assume_capacity(this_id);
-        }
-
-        pub fn insert_slot_after_assume_capacity(self: *Heirarchy, this_id: Id) Id {
+        pub fn insert_slot_after(self: *Heirarchy, this_id: Id, alloc_else_assume_cap: ?AllocInfal) Id {
             Internal.assert_has_next(@src());
+            if (alloc_else_assume_cap) |alloc| {
+                self.list.ensure_unused_capacity(1, alloc);
+            }
             const new_id = Internal.initialize_new_index(self);
             const right_id = get_next_id(self.get_ptr(this_id));
             Internal.insert_new_ids_as_siblings(self, this_id, new_id, new_id, right_id);
             return new_id;
         }
 
-        pub inline fn insert_many_slots_after(self: *Heirarchy, this_id: Id, count: Index, alloc: AllocInfal) Range {
-            self.list.ensure_unused_capacity(count, alloc);
-            return self.insert_many_slots_after_assume_capacity(this_id, count);
-        }
-
-        pub fn insert_many_slots_after_assume_capacity(self: *Heirarchy, this_id: Id, count: Index) Range {
+        pub fn insert_many_slots_after(self: *Heirarchy, this_id: Id, count: Index, alloc_else_assume_cap: ?AllocInfal) Range {
             Internal.assert_has_next(@src());
+            if (alloc_else_assume_cap) |alloc| {
+                self.list.ensure_unused_capacity(count, alloc);
+            }
             const range = Internal.initialize_items_as_siblings(self, count);
             const right_id = get_next_id(self.get_ptr(this_id));
             Internal.insert_new_ids_as_siblings(self, this_id, range.first, range.last, right_id);
@@ -1385,26 +1584,22 @@ pub fn LinkedHeirarchy(comptime options: ForwardLinkedHeirarchyOptions) type {
             Internal.insert_new_ids_as_siblings(self, this_id, disconnected_items.first, disconnected_items.last, right_id);
         }
 
-        pub inline fn insert_slot_before(self: *Heirarchy, this_id: Id, alloc: AllocInfal) Id {
-            self.list.ensure_unused_capacity(1, alloc);
-            return self.insert_slot_before_assume_capacity(this_id);
-        }
-
-        pub fn insert_slot_before_assume_capacity(self: *Heirarchy, this_id: Id) Id {
+        pub fn insert_slot_before(self: *Heirarchy, this_id: Id, alloc_else_assume_cap: ?AllocInfal) Id {
             Internal.assert_has_prev(@src());
+            if (alloc_else_assume_cap) |alloc| {
+                self.list.ensure_unused_capacity(1, alloc);
+            }
             const new_id = Internal.initialize_new_index(self);
             const left_id = get_prev_id(self.get_ptr(this_id));
             Internal.insert_new_ids_as_siblings(self, left_id, new_id, new_id, this_id);
             return new_id;
         }
 
-        pub inline fn insert_many_slots_before(self: *Heirarchy, this_id: Id, count: Index, alloc: AllocInfal) Range {
-            self.list.ensure_unused_capacity(count, alloc);
-            return self.insert_many_slots_before_assume_capacity(this_id, count);
-        }
-
-        pub fn insert_many_slots_before_assume_capacity(self: *Heirarchy, this_id: Id, count: Index) Range {
+        pub fn insert_many_slots_before(self: *Heirarchy, this_id: Id, count: Index, alloc_else_assume_cap: ?AllocInfal) Range {
             Internal.assert_has_prev(@src());
+            if (alloc_else_assume_cap) |alloc| {
+                self.list.ensure_unused_capacity(count, alloc);
+            }
             const range = Internal.initialize_items_as_siblings(self, count);
             const left_id = get_prev_id(self.get_ptr(this_id));
             Internal.insert_new_ids_as_siblings(self, left_id, range.first, range.last, this_id);
@@ -1417,14 +1612,12 @@ pub fn LinkedHeirarchy(comptime options: ForwardLinkedHeirarchyOptions) type {
             const left_id = get_prev_id(self.get_ptr(this_id));
             Internal.insert_new_ids_as_siblings(self, left_id, disconnected_items.first, disconnected_items.last, this_id);
         }
-        
-        pub inline fn insert_slot_at_beginning_of_left_children(self: *Heirarchy, parent_id: Id, alloc: AllocInfal) Id {
-            self.list.ensure_unused_capacity(1, alloc);
-            return self.insert_slot_at_beginning_of_left_children_assume_capacity(parent_id);
-        }
 
-        pub fn insert_slot_at_beginning_of_left_children_assume_capacity(self: *Heirarchy, parent_id: Id) Id {
+        pub fn insert_slot_at_beginning_of_left_children(self: *Heirarchy, parent_id: Id, alloc_else_assume_cap: ?AllocInfal) Id {
             Internal.assert_has_first_left(@src());
+            if (alloc_else_assume_cap) |alloc| {
+                self.list.ensure_unused_capacity(1, alloc);
+            }
             const new_id = Internal.initialize_new_index(self);
             const parent_ptr = self.get_ptr(parent_id);
             const old_first_left = get_first_left_child_id(parent_ptr);
@@ -1437,80 +1630,87 @@ pub fn LinkedHeirarchy(comptime options: ForwardLinkedHeirarchyOptions) type {
             return new_id;
         }
 
-        pub inline fn insert_many_slots_at_beginning_of_left_children(self: *Heirarchy, parent_id: Id, count: Index, alloc: AllocInfal) Range {
-            self.list.ensure_unused_capacity(count, alloc);
-            return self.insert_many_slots_at_beginning_of_left_children_assume_capacity(parent_id, count);
-        }
-
-        pub fn insert_many_slots_at_beginning_of_left_children_assume_capacity(self: *Heirarchy, parent_id: Id, count: Index) Range {
+        pub fn insert_many_slots_at_beginning_of_left_children(self: *Heirarchy, parent_id: Id, count: Index, alloc_else_assume_cap: ?AllocInfal) Range {
             Internal.assert_has_first_left(@src());
+            if (alloc_else_assume_cap) |alloc| {
+                self.list.ensure_unused_capacity(count, alloc);
+            }
             const range = Internal.initialize_new_indexes_as_siblings(self, count);
             const parent_ptr = self.get_ptr(parent_id);
             const old_first_left = get_first_left_child_id(parent_ptr);
             const new_last_ptr = self.get_ptr(range.last);
             Internal.set_next_id(new_last_ptr, old_first_left);
             Internal.set_first_left_child_id(parent_ptr, range.first);
+            if (HAS_PARENT) {
+                Internal.set_parent_on_range(self, parent_id, NULL_ID, range.first, range.last, old_first_left);
+            }
             return range;
         }
 
         pub fn insert_disconnected_items_at_beginning_of_left_children(self: *Heirarchy, parent_id: Id, disconnected_items: Range) void {
             Internal.assert_has_first_left(@src());
+            Internal.assert_disconnect_range_is_isolated(self, disconnected_items, @src());
             const parent_ptr = self.get_ptr(parent_id);
             const old_first_left = get_first_left_child_id(parent_ptr);
             const last_disconn_ptr = self.get_ptr(disconnected_items.last);
-            assert_with_reason(get_next_id(last_disconn_ptr) == NULL_ID, @src(), "last disconnected item (index {d}) did not have a 'next' field that pointed to NULL_ID, it wasnt fully disconnected", .{get_index(disconnected_items.last)});
             Internal.set_next_id(last_disconn_ptr, old_first_left);
             Internal.set_first_left_child_id(parent_ptr, disconnected_items.first);
+            if (HAS_PARENT) {
+                Internal.set_parent_on_range(self, parent_id, NULL_ID, disconnected_items.first, disconnected_items.last, old_first_left);
+            }
         }
 
-        pub inline fn insert_slot_at_beginning_of_right_children(self: *Heirarchy, parent_id: Id, alloc: AllocInfal) Id {
-            self.list.ensure_unused_capacity(1, alloc);
-            return self.insert_slot_at_beginning_of_right_children_assume_capacity(parent_id);
-        }
-
-        pub fn insert_slot_at_beginning_of_right_children_assume_capacity(self: *Heirarchy, parent_id: Id) Id {
+        pub fn insert_slot_at_beginning_of_right_children(self: *Heirarchy, parent_id: Id, alloc_else_assume_cap: ?AllocInfal) Id {
             Internal.assert_has_first_right(@src());
+            if (alloc_else_assume_cap) |alloc| {
+                self.list.ensure_unused_capacity(1, alloc);
+            }
             const new_id = Internal.initialize_new_index(self);
             const parent_ptr = self.get_ptr(parent_id);
             const old_first_right = get_first_right_child_id(parent_ptr);
             const new_ptr = self.get_ptr(new_id);
             Internal.set_next_id(new_ptr, old_first_right);
             Internal.set_first_right_child_id(parent_ptr, new_id);
+            if (HAS_PARENT) {
+                Internal.set_parent_id(new_ptr, parent_id);
+            }
             return new_id;
         }
 
-        pub inline fn insert_many_slots_at_beginning_of_right_children(self: *Heirarchy, parent_id: Id, count: Index, alloc: AllocInfal) Range {
-            self.list.ensure_unused_capacity(count, alloc);
-            return self.insert_many_slots_at_beginning_of_right_children_assume_capacity(parent_id, count);
-        }
-
-        pub fn insert_many_slots_at_beginning_of_right_children_assume_capacity(self: *Heirarchy, parent_id: Id, count: Index) Range {
+        pub fn insert_many_slots_at_beginning_of_right_children(self: *Heirarchy, parent_id: Id, count: Index, alloc_else_assume_cap: ?AllocInfal) Range {
             Internal.assert_has_first_right(@src());
+            if (alloc_else_assume_cap) |alloc| {
+                self.list.ensure_unused_capacity(count, alloc);
+            }
             const range = Internal.initialize_new_indexes_as_siblings(self, count);
             const parent_ptr = self.get_ptr(parent_id);
             const old_first_right = get_first_right_child_id(parent_ptr);
             const new_last_ptr = self.get_ptr(range.last);
             Internal.set_next_id(new_last_ptr, old_first_right);
             Internal.set_first_right_child_id(parent_ptr, range.first);
+            if (HAS_PARENT) {
+                Internal.set_parent_on_range(self, parent_id, old_first_right, range.first, range.last, NULL_ID);
+            }
             return range;
         }
 
         pub fn insert_disconnected_items_at_beginning_of_right_children(self: *Heirarchy, parent_id: Id, disconnected_items: Range) void {
             Internal.assert_has_first_right(@src());
+            Internal.assert_disconnect_range_is_isolated(self, disconnected_items, @src());
             const parent_ptr = self.get_ptr(parent_id);
             const old_first_right = get_first_right_child_id(parent_ptr);
             const last_disconn_ptr = self.get_ptr(disconnected_items.last);
-            assert_with_reason(get_next_id(last_disconn_ptr) == NULL_ID, @src(), "last disconnected item (index {d}) did not have a 'next' field that pointed to NULL_ID, it wasnt fully disconnected", .{get_index(disconnected_items.last)});
             Internal.set_next_id(last_disconn_ptr, old_first_right);
             Internal.set_first_left_child_id(parent_ptr, disconnected_items.first);
+            if (HAS_PARENT) {
+                Internal.set_parent_on_range(self, parent_id, old_first_right, disconnected_items.first, disconnected_items.last, NULL_ID);
+            }
         }
 
-        pub inline fn insert_slot_at_beginning_of_heirarchy_root(self: *Heirarchy, alloc: AllocInfal) Id {
-            self.list.ensure_unused_capacity(1, alloc);
-            return self.insert_slot_at_beginning_of_heirarchy_root_assume_capacity();
-        }
-
-        pub fn insert_slot_at_beginning_of_heirarchy_root_assume_capacity(self: *Heirarchy) Id {
+        pub fn insert_slot_at_beginning_of_heirarchy_root(self: *Heirarchy, alloc_else_assume_cap: ?AllocInfal) Id {
+            if (alloc_else_assume_cap) |alloc| {
+                self.list.ensure_unused_capacity(1, alloc);
+            }
             const new_id = Internal.initialize_new_index(self);
             const new_ptr = self.get_ptr(new_id);
             Internal.set_next_id(new_ptr, self.first_root_id);
@@ -1518,12 +1718,10 @@ pub fn LinkedHeirarchy(comptime options: ForwardLinkedHeirarchyOptions) type {
             return new_id;
         }
 
-        pub inline fn insert_many_slots_at_beginning_of_heirarchy_root(self: *Heirarchy, count: Index, alloc: AllocInfal) Range {
-            self.list.ensure_unused_capacity(count, alloc);
-            return self.insert_many_slots_at_beginning_of_heirarchy_root_assume_capacity(count);
-        }
-
-        pub fn insert_many_slots_at_beginning_of_heirarchy_root_assume_capacity(self: *Heirarchy,  count: Index) Range {
+        pub fn insert_many_slots_at_beginning_of_heirarchy_root(self: *Heirarchy,  count: Index, alloc_else_assume_cap: ?AllocInfal) Range {
+            if (alloc_else_assume_cap) |alloc| {
+                self.list.ensure_unused_capacity(count, alloc);
+            }
             const range = Internal.initialize_new_indexes_as_siblings(self, count);
             const new_last_ptr = self.get_ptr(range.last);
             Internal.set_next_id(new_last_ptr, self.first_root_id);
@@ -1533,15 +1731,48 @@ pub fn LinkedHeirarchy(comptime options: ForwardLinkedHeirarchyOptions) type {
 
         pub fn insert_disconnected_items_at_beginning_of_heirarchy_root(self: *Heirarchy, disconnected_items: Range) void {
             const last_disconn_ptr = self.get_ptr(disconnected_items.last);
-            assert_with_reason(get_next_id(last_disconn_ptr) == NULL_ID, @src(), "last disconnected item (index {d}) did not have a 'next' field that pointed to NULL_ID, it wasnt fully disconnected", .{get_index(disconnected_items.last)});
+            Internal.assert_disconnect_range_is_isolated(self, disconnected_items, @src());
             Internal.set_next_id(last_disconn_ptr, self.first_root_id);
             self.first_root_id = disconnected_items.first;
         }
 
+        pub fn insert_slot_at_end_of_heirarchy_root(self: *Heirarchy, alloc_else_assume_cap: ?AllocInfal) Id {
+            Internal.assert_has_root_last(@src());
+            if (alloc_else_assume_cap) |alloc| {
+                self.list.ensure_unused_capacity(1, alloc);
+            }
+            const new_id = Internal.initialize_new_index(self);
+            const new_ptr = self.get_ptr(new_id);
+            Internal.set_next_id(new_ptr, self.last_root_id);
+            self.last_root_id = new_id;        
+            return new_id;
+        }
+
+        pub fn insert_many_slots_at_end_of_heirarchy_root(self: *Heirarchy,  count: Index, alloc_else_assume_cap: ?AllocInfal) Range {
+            Internal.assert_has_root_last(@src());
+            if (alloc_else_assume_cap) |alloc| {
+                self.list.ensure_unused_capacity(count, alloc);
+            }
+            const range = Internal.initialize_new_indexes_as_siblings(self, count);
+            const new_last_ptr = self.get_ptr(range.last);
+            Internal.set_next_id(new_last_ptr, self.last_root_id);
+            self.last_root_id = range.first;
+            return range;
+        }
+
+        pub fn insert_disconnected_items_at_end_of_heirarchy_root(self: *Heirarchy, disconnected_items: Range) void {
+            Internal.assert_has_root_last(@src());
+            Internal.assert_disconnect_range_is_isolated(self, disconnected_items, @src());
+            const last_disconn_ptr = self.get_ptr(disconnected_items.last);
+            Internal.set_next_id(last_disconn_ptr, self.last_root_id);
+            self.last_root_id = disconnected_items.first;
+        }
+
         pub fn disconnect_item_range_after(self: *Heirarchy, this_id: Id, last_disconnect_id: Id) Range {
+            Internal.assert_has_next(@src());
             const right_id = get_next_id(self.get_ptr(last_disconnect_id));
             const first_disconnect_id = get_next_id(self.get_ptr(this_id));
-            Internal.disconnect_items_between_siblings(self, this_id, first_disconnect_id, last_disconnect_id, right_id);
+            Internal.remove_id_range(self, this_id, first_disconnect_id, last_disconnect_id, right_id);
             return Range{.first = first_disconnect_id, .last = last_disconnect_id};
         }
 
