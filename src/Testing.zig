@@ -30,6 +30,8 @@ pub const TestError = error{
     test_expected_any_error,
     test_expected_specific_error,
     test_expected_no_error,
+    test_struct_equal_structs_didnt_have_fn_equals,
+    test_struct_equal_structs_different_struct_types,
 };
 
 pub fn expect_true(condition: bool, comptime condition_str: []const u8, comptime fail_description: []const u8, fail_args: anytype) !void {
@@ -48,8 +50,28 @@ pub fn expect_false(condition: bool, condition_str: []const u8, comptime fail_de
     }
 }
 
+pub fn expect_equal_struct(val_a: anytype, str_a: []const u8, val_b: anytype, str_b: []const u8, comptime fail_description: []const u8, fail_args: anytype) !void {
+    if (!std.meta.hasMethod(@TypeOf(val_a), "equals")) return TestError.test_struct_equal_structs_didnt_have_fn_equals;
+    if (@TypeOf(val_a) != @TypeOf(val_b)) return TestError.test_struct_equal_structs_different_struct_types;
+    if (!val_a.equals(val_b)) {
+        print("\nFAILURE: " ++ fail_description, fail_args);
+        print("\n\tEXPECT: {s} == {s}\n\tEXPECT: {any} == {any}\n\tACTUAL: {any} != {any}\n", .{ str_a, str_b, val_a, val_b, val_a, val_b });
+        return TestError.test_expected_equal;
+    }
+}
+
+pub fn expect_not_equal_struct(val_a: anytype, str_a: []const u8, val_b: anytype, str_b: []const u8, comptime fail_description: []const u8, fail_args: anytype) !void {
+    if (!std.meta.hasMethod(@TypeOf(val_a), "equals")) return TestError.test_struct_equal_structs_didnt_have_fn_equals;
+    if (@TypeOf(val_a) != @TypeOf(val_b)) return TestError.test_struct_equal_structs_different_struct_types;
+    if (val_a.equals(val_b)) {
+        print("\nFAILURE: " ++ fail_description, fail_args);
+        print("\n\tEXPECT: {s} != {s}\n\tEXPECT: {any} != {any}\n\tACTUAL: {any} == {any}\n", .{ str_a, str_b, val_a, val_b, val_a, val_b });
+        return TestError.test_expected_not_equal;
+    }
+}
+
 pub fn expect_equal(val_a: anytype, str_a: []const u8, val_b: anytype, str_b: []const u8, comptime fail_description: []const u8, fail_args: anytype) !void {
-    if (val_a != val_b) {
+    if ((std.meta.hasMethod(@TypeOf(val_a), "equals") and !val_a.equals(val_b)) or val_a != val_b) {
         print("\nFAILURE: " ++ fail_description, fail_args);
         print("\n\tEXPECT: {s} == {s}\n\tEXPECT: {any} == {any}\n\tACTUAL: {any} != {any}\n", .{ str_a, str_b, val_a, val_b, val_a, val_b });
         return TestError.test_expected_equal;
@@ -57,7 +79,7 @@ pub fn expect_equal(val_a: anytype, str_a: []const u8, val_b: anytype, str_b: []
 }
 
 pub fn expect_not_equal(val_a: anytype, str_a: []const u8, val_b: anytype, str_b: []const u8, comptime fail_description: []const u8, fail_args: anytype) !void {
-    if (val_a == val_b) {
+    if ((std.meta.hasMethod(@TypeOf(val_a), "equals") and val_a.equals(val_b)) or val_a == val_b) {
         print("\nFAILURE: " ++ fail_description, fail_args);
         print("\n\tEXPECT: {s} != {s}\n\tEXPECT: {any} != {any}\n\tACTUAL: {any} == {any}\n", .{ str_a, str_b, val_a, val_b, val_a, val_b });
         return TestError.test_expected_not_equal;

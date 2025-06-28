@@ -56,15 +56,15 @@ pub const ListOptions = struct {
     index_type: type = usize,
     secure_wipe_bytes: bool = false,
     memset_uninit_val: ?*const anyopaque = null,
-    /// If set to `true`, an additional field exists on the `List` that caches the `Allocator`
-    /// that should be used in all methods that may perform allocation operations.
-    /// The `init` and `init_with_capacity` methods will use the provided allocator and cache it in this field,
-    /// and all operations that take an `Allocator` will assert that it's pointers match the one initially provided
-    /// in `Debug` and `ReleaseSafe` modes.
-    ///
-    /// If set to `false`, *OR* when in `ReleaseFast` or `ReleaseSmall` modes, no additional field is cached, no double check is performed, and the allocator
-    /// passed to `init` is discarded and ignored (`init_with_capacity` uses the provided allocator but does not cache it).
-    assert_correct_allocator: bool = true,
+    // /// If set to `true`, an additional field exists on the `List` that caches the `Allocator`
+    // /// that should be used in all methods that may perform allocation operations.
+    // /// The `init` and `init_with_capacity` methods will use the provided allocator and cache it in this field,
+    // /// and all operations that take an `Allocator` will assert that it's pointers match the one initially provided
+    // /// in `Debug` and `ReleaseSafe` modes.
+    // ///
+    // /// If set to `false`, *OR* when in `ReleaseFast` or `ReleaseSmall` modes, no additional field is cached, no double check is performed, and the allocator
+    // /// passed to `init` is discarded and ignored (`init_with_capacity` uses the provided allocator but does not cache it).
+    // assert_correct_allocator: bool = true,
 
     pub fn from_options_without_elem(comptime opts: ListOptionsWithoutElem, comptime elem: type, comptime memset_uninit_val: ?*const anyopaque) ListOptions {
         return ListOptions{
@@ -74,7 +74,7 @@ pub const ListOptions = struct {
             .index_type = opts.index_type,
             .secure_wipe_bytes = opts.secure_wipe_bytes,
             .memset_uninit_val = memset_uninit_val,
-            .assert_correct_allocator = opts.assert_correct_allocator,
+            // .assert_correct_allocator = opts.assert_correct_allocator,
         };
     }
 };
@@ -84,15 +84,15 @@ pub const ListOptionsWithoutElem = struct {
     growth_model: GrowthModel = .GROW_BY_50_PERCENT_ATOMIC_PADDING,
     index_type: type = usize,
     secure_wipe_bytes: bool = false,
-    /// If set to `true`, an additional field exists on the `List` that caches the `Allocator`
-    /// that should be used in all methods that may perform allocation operations.
-    /// The `init` and `init_with_capacity` methods will use the provided allocator and cache it in this field,
-    /// and all operations that take an `Allocator` will assert that it's pointers match the one initially provided
-    /// in `Debug` and `ReleaseSafe` modes.
-    ///
-    /// If set to `false`, *OR* when in `ReleaseFast` or `ReleaseSmall` modes, no additional field is cached, no double check is performed, and the allocator
-    /// passed to `init` is discarded and ignored (`init_with_capacity` uses the provided allocator but does not cache it).
-    assert_correct_allocator: bool = true,
+    // /// If set to `true`, an additional field exists on the `List` that caches the `Allocator`
+    // /// that should be used in all methods that may perform allocation operations.
+    // /// The `init` and `init_with_capacity` methods will use the provided allocator and cache it in this field,
+    // /// and all operations that take an `Allocator` will assert that it's pointers match the one initially provided
+    // /// in `Debug` and `ReleaseSafe` modes.
+    // ///
+    // /// If set to `false`, *OR* when in `ReleaseFast` or `ReleaseSmall` modes, no additional field is cached, no double check is performed, and the allocator
+    // /// passed to `init` is discarded and ignored (`init_with_capacity` uses the provided allocator but does not cache it).
+    // assert_correct_allocator: bool = true,
 };
 
 pub const ERR_START_PLUS_COUNT_OOB = "start ({d}) + count ({d}) == {d}, which is out of bounds for list.len ({d})";
@@ -106,11 +106,11 @@ pub const ERR_IDX_GREATER_EQL_LEN = "idx ({d}) >= list.len ({d}): unable to oper
 pub const ERR_LAST_IDX_GREATER_LEN = "end of index range ({d}) > list.len ({d}): unable to operate on index out of bounds";
 pub const ERR_LIST_EMPTY = "list.len == 0: unable to return any items from list";
 
-fn assert_correct_allocator(alloc_a: AllocInfal, alloc_b: AllocInfal, comptime src_loc: ?SourceLocation) void {
-    // Sadly we cannot do a simple `shallow_equals` here, because some allocators define `.ptr = undefined`, and cannot compare undefined values
-    // assert_with_reason(@intFromPtr(alloc_a.allocator.ptr) == @intFromPtr(alloc_b.allocator.ptr), src_loc, "provided allocator does not match the one provided to `init` or `init_with_capacity`", .{});
-    assert_with_reason(alloc_a.allocator.vtable == alloc_b.allocator.vtable, src_loc, "provided allocator does not match the one provided to `init` or `init_with_capacity`", .{});
-}
+// fn assert_correct_allocator(alloc_a: AllocInfal, alloc_b: AllocInfal, comptime src_loc: ?SourceLocation) void {
+//     // Sadly we cannot do a simple `shallow_equals` here, because some allocators define `.ptr = undefined`, and cannot compare undefined values
+//     // assert_with_reason(@intFromPtr(alloc_a.allocator.ptr) == @intFromPtr(alloc_b.allocator.ptr), src_loc, "provided allocator does not match the one provided to `init` or `init_with_capacity`", .{});
+//     assert_with_reason(alloc_a.allocator.vtable == alloc_b.allocator.vtable, src_loc, "provided allocator does not match the one provided to `init` or `init_with_capacity`", .{});
+// }
 
 pub fn List(comptime options: ListOptions) type {
     const opt = comptime check: {
@@ -130,10 +130,8 @@ pub fn List(comptime options: ListOptions) type {
         ptr: Ptr = UNINIT_PTR,
         len: Idx = 0,
         cap: Idx = 0,
-        assert_alloc: if (ASSERT_ALLOC) AllocInfal else void = if (ASSERT_ALLOC) AllocInfal.DummyAllocInfal else void{},
 
         const ALIGN = options.alignment;
-        const ASSERT_ALLOC = options.assert_correct_allocator;
         const ALLOC_ERROR_BEHAVIOR = options.alloc_error_behavior;
         const GROWTH = options.growth_model;
         const SECURE_WIPE = options.secure_wipe_bytes;
@@ -203,20 +201,12 @@ pub fn List(comptime options: ListOptions) type {
             self.len = new_len;
         }
 
-        pub fn new_empty(assert_alloc: AllocInfal) Self {
-            if (ASSERT_ALLOC) {
-                var uninit = UNINIT;
-                uninit.assert_alloc = assert_alloc;
-                return uninit;
-            }
+        pub fn new_empty() Self {
             return UNINIT;
         }
 
         pub fn new_with_capacity(capacity: Idx, alloc: AllocInfal) Self {
             var self = UNINIT;
-            if (ASSERT_ALLOC) {
-                self.assert_alloc = alloc;
-            }
             self.ensure_total_capacity_exact(capacity, alloc);
 
             return self;
@@ -229,7 +219,7 @@ pub fn List(comptime options: ListOptions) type {
         }
 
         pub fn to_owned_slice(self: *Self, alloc: AllocInfal) Slice {
-            if (ASSERT_ALLOC) assert_correct_allocator(alloc, self.assert_alloc, @src());
+            // if (ASSERT_ALLOC) assert_correct_allocator(alloc, self.assert_alloc, @src());
             const old_memory = self.ptr[0..self.cap];
             if (alloc.remap(old_memory, self.len)) |new_items| {
                 self.* = UNINIT;
@@ -265,59 +255,39 @@ pub fn List(comptime options: ListOptions) type {
             };
         }
 
-        pub fn insert_slot(self: *Self, idx: Idx, alloc: AllocInfal) *Elem {
-            self.ensure_unused_capacity(1, alloc);
-            return self.insert_slot_assume_capacity(idx);
-        }
-
-        pub fn insert_slot_assume_capacity(self: *Self, idx: Idx) *Elem {
+        pub fn insert_slot(self: *Self, idx: Idx, alloc_else_assume_cap: ?AllocInfal) *Elem {
+            if (alloc_else_assume_cap) |alloc| self.ensure_unused_capacity(1, alloc);
             assert_with_reason(idx <= self.len, @src(), ERR_IDX_GREATER_LEN, .{ idx, self.len });
             mem.copyBackwards(Elem, self.ptr[idx + 1 .. self.len + 1], self.ptr[idx..self.len]);
             self.len += 1;
             return &self.ptr[idx];
         }
 
-        pub fn insert(self: *Self, idx: Idx, item: Elem, alloc: AllocInfal) void {
-            const ptr = self.insert_slot(idx, alloc);
+        pub fn insert(self: *Self, idx: Idx, item: Elem, alloc_else_assume_cap: ?AllocInfal) void {
+            const ptr = self.insert(idx, alloc_else_assume_cap);
             ptr.* = item;
         }
 
-        pub fn insert_assume_capacity(self: *Self, idx: Idx, item: Elem) void {
-            const ptr = self.insert_slot_assume_capacity(idx);
-            ptr.* = item;
-        }
-
-        pub fn insert_many_slots(self: *Self, idx: Idx, count: Idx, alloc: AllocInfal) []Elem {
-            self.ensure_unused_capacity(count, alloc);
-            return self.insert_many_slots_assume_capacity(idx, count);
-        }
-
-        pub fn insert_many_slots_assume_capacity(self: *Self, idx: Idx, count: Idx) []Elem {
+        pub fn insert_many_slots(self: *Self, idx: Idx, count: Idx, alloc_else_assume_cap: ?AllocInfal) []Elem {
+            if (alloc_else_assume_cap) |alloc| self.ensure_unused_capacity(count, alloc);
             assert_with_reason(idx + count <= self.len, @src(), ERR_START_PLUS_COUNT_OOB, .{ idx, count, idx + count, self.len });
             mem.copyBackwards(Elem, self.ptr[idx + count .. self.len + count], self.ptr[idx..self.len]);
             self.len += count;
             return self.ptr[idx .. idx + count];
         }
 
-        pub fn insert_slice(self: *Self, idx: Idx, items: []const Elem, alloc: AllocInfal) void {
-            const slots = self.insert_many_slots(idx, @intCast(items.len), alloc);
+        pub fn insert_slice(self: *Self, idx: Idx, items: []const Elem, alloc_else_assume_cap: ?AllocInfal) void {
+            const slots = self.insert_many_slots(idx, @intCast(items.len), alloc_else_assume_cap);
             @memcpy(slots, items);
         }
 
-        pub fn insert_slice_assume_capacity(self: *Self, idx: Idx, items: []const Elem) void {
-            const slots = self.insert_many_slots_assume_capacity(idx, @intCast(items.len));
-            @memcpy(slots, items);
-        }
-
-        pub fn replace_range(self: *Self, start: Idx, length: Idx, new_items: []const Elem, alloc: AllocInfal) void {
-            if (new_items.len > length) {
-                const additional_needed: Idx = @as(Idx, @intCast(new_items.len)) - length;
-                self.ensure_unused_capacity(additional_needed, alloc);
+        pub fn replace_range(self: *Self, start: Idx, length: Idx, new_items: []const Elem, alloc_else_assume_cap: ?AllocInfal) void {
+            if (alloc_else_assume_cap) |alloc| {
+                if (new_items.len > length) {
+                    const additional_needed: Idx = @as(Idx, @intCast(new_items.len)) - length;
+                    self.ensure_unused_capacity(additional_needed, alloc);
+                }
             }
-            self.replace_range_assume_capacity(start, length, new_items);
-        }
-
-        pub fn replace_range_assume_capacity(self: *Self, start: Idx, length: Idx, new_items: []const Elem) void {
             const end_of_range = start + length;
             assert_with_reason(end_of_range <= self.len, @src(), ERR_LAST_IDX_GREATER_LEN, .{ end_of_range, self.len });
             const range = self.ptr[start..end_of_range];
@@ -327,7 +297,7 @@ pub fn List(comptime options: ListOptions) type {
                 const within_range = new_items[0..range.len];
                 const leftover = new_items[range.len..];
                 @memcpy(range[0..within_range.len], within_range);
-                const new_slots = self.insert_many_slots_assume_capacity(end_of_range, @intCast(leftover.len));
+                const new_slots = self.insert_many_slots(end_of_range, @intCast(leftover.len), null);
                 @memcpy(new_slots, leftover);
             } else {
                 const unused_slots: Idx = @intCast(range.len - new_items.len);
@@ -340,13 +310,8 @@ pub fn List(comptime options: ListOptions) type {
             }
         }
 
-        pub fn append(self: *Self, item: Elem, alloc: AllocInfal) void {
-            const slot = self.append_slot(alloc);
-            slot.* = item;
-        }
-
-        pub fn append_assume_capacity(self: *Self, item: Elem) void {
-            const slot = self.append_slot_assume_capacity();
+        pub fn append(self: *Self, item: Elem, alloc_else_assume_cap: ?AllocInfal) void {
+            const slot = self.append_slot(alloc_else_assume_cap);
             slot.* = item;
         }
 
@@ -390,38 +355,23 @@ pub fn List(comptime options: ListOptions) type {
             self.len -= 1;
         }
 
-        pub fn append_slice(self: *Self, items: []const Elem, alloc: AllocInfal) void {
-            const slots = self.append_many_slots(@intCast(items.len), alloc);
+        pub fn append_slice(self: *Self, items: []const Elem, alloc_else_assume_cap: ?AllocInfal) void {
+            const slots = self.append_many_slots(@intCast(items.len), alloc_else_assume_cap);
             @memcpy(slots, items);
         }
 
-        pub fn append_slice_assume_capacity(self: *Self, items: []const Elem) void {
-            const slots = self.append_many_slots_assume_capacity(@intCast(items.len));
+        pub fn append_slice_unaligned(self: *Self, items: []align(1) const Elem, alloc_else_assume_cap: ?AllocInfal) void {
+            const slots = self.append_many_slots(@intCast(items.len), alloc_else_assume_cap);
             @memcpy(slots, items);
         }
 
-        pub fn append_slice_unaligned(self: *Self, items: []align(1) const Elem, alloc: AllocInfal) void {
-            const slots = self.append_many_slots(@intCast(items.len), alloc);
-            @memcpy(slots, items);
-        }
-
-        pub fn append_slice_unaligned_assume_capacity(self: *Self, items: []align(1) const Elem) void {
-            const slots = self.append_many_slots_assume_capacity(@intCast(items.len));
-            @memcpy(slots, items);
-        }
-
-        pub fn append_n_times(self: *Self, value: Elem, count: Idx, alloc: AllocInfal) void {
-            const slots = self.append_many_slots(count, alloc);
+        pub fn append_n_times(self: *Self, value: Elem, count: Idx, alloc_else_assume_cap: ?AllocInfal) void {
+            const slots = self.append_many_slots(count, alloc_else_assume_cap);
             @memset(slots, value);
         }
 
-        pub fn append_n_times_assume_capacity(self: *Self, value: Elem, count: Idx) void {
-            const slots = self.append_many_slots_assume_capacity(count);
-            @memset(slots, value);
-        }
-
-        pub fn resize(self: *Self, new_len: Idx, alloc: AllocInfal) void {
-            self.ensure_total_capacity(new_len, alloc);
+        pub fn resize(self: *Self, new_len: Idx, alloc_else_assume_cap: ?AllocInfal) void {
+            if (alloc_else_assume_cap) |alloc| self.ensure_total_capacity(new_len, alloc);
             if (SECURE_WIPE and new_len < self.len) {
                 Utils.secure_zero(Elem, self.ptr[new_len..self.len]);
             }
@@ -429,7 +379,7 @@ pub fn List(comptime options: ListOptions) type {
         }
 
         pub fn shrink_and_free(self: *Self, new_len: Idx, alloc: AllocInfal) void {
-            if (ASSERT_ALLOC) assert_correct_allocator(alloc, self.assert_alloc, @src());
+            // if (ASSERT_ALLOC) assert_correct_allocator(alloc, self.assert_alloc, @src());
             assert_with_reason(new_len <= self.len, @src(), ERR_NEW_LEN_GREATER_LEN, .{ new_len, self.len });
             if (@sizeOf(Elem) == 0) {
                 self.len = new_len;
@@ -473,7 +423,7 @@ pub fn List(comptime options: ListOptions) type {
         }
 
         pub fn clear_and_free(self: *Self, alloc: AllocInfal) void {
-            if (ASSERT_ALLOC) assert_correct_allocator(alloc, self.assert_alloc, @src());
+            // if (ASSERT_ALLOC) assert_correct_allocator(alloc, self.assert_alloc, @src());
             if (SECURE_WIPE) {
                 Utils.secure_zero(Elem, self.ptr[0..self.len]);
             }
@@ -487,7 +437,7 @@ pub fn List(comptime options: ListOptions) type {
         }
 
         pub fn ensure_total_capacity_exact(self: *Self, new_capacity: Idx, alloc: AllocInfal) void {
-            if (ASSERT_ALLOC) assert_correct_allocator(alloc, self.assert_alloc, @src());
+            // if (ASSERT_ALLOC) assert_correct_allocator(alloc, self.assert_alloc, @src());
             if (@sizeOf(Elem) == 0) {
                 self.cap = math.maxInt(Idx);
                 return;
@@ -529,26 +479,16 @@ pub fn List(comptime options: ListOptions) type {
             self.len = self.cap;
         }
 
-        pub fn append_slot(self: *Self, alloc: AllocInfal) *Elem {
-            const new_len = self.len + 1;
-            self.ensure_total_capacity(new_len, alloc);
-            return self.append_slot_assume_capacity();
-        }
-
-        pub fn append_slot_assume_capacity(self: *Self) *Elem {
+        pub fn append_slot(self: *Self, alloc_else_assume_cap: ?AllocInfal) *Elem {
+            if (alloc_else_assume_cap) |alloc| self.ensure_unused_capacity(1, alloc);
             assert_with_reason(self.len < self.cap, @src(), ERR_LEN_EQUALS_CAP, .{ self.len, self.cap });
             const idx = self.len;
             self.len += 1;
             return &self.ptr[idx];
         }
 
-        pub fn append_many_slots(self: *Self, count: Idx, alloc: AllocInfal) []Elem {
-            const new_len = self.len + count;
-            self.ensure_total_capacity(new_len, alloc);
-            return self.append_many_slots_assume_capacity(count);
-        }
-
-        pub fn append_many_slots_assume_capacity(self: *Self, count: Idx) []Elem {
+        pub fn append_many_slots(self: *Self, count: Idx, alloc_else_assume_cap: ?AllocInfal) []Elem {
+            if (alloc_else_assume_cap) |alloc| self.ensure_unused_capacity(count, alloc);
             const new_len = self.len + count;
             assert_with_reason(new_len <= self.cap, @src(), ERR_LEN_PLUS_COUNT_GREATER_CAP, .{ self.len, count, self.len + count, self.cap });
             const prev_len = self.len;
@@ -556,13 +496,8 @@ pub fn List(comptime options: ListOptions) type {
             return self.ptr[prev_len..][0..count];
         }
 
-        pub fn append_many_slots_as_array(self: *Self, comptime count: Idx, alloc: AllocInfal) *[count]Elem {
-            const new_len = self.len + count;
-            self.ensure_total_capacity(new_len, alloc);
-            return self.append_many_slots_as_array_assume_capacity(count);
-        }
-
-        pub fn append_many_slots_as_array_assume_capacity(self: *Self, comptime count: Idx) *[count]Elem {
+        pub fn append_many_slots_as_array(self: *Self, comptime count: Idx, alloc_else_assume_cap: ?AllocInfal) *[count]Elem {
+            if (alloc_else_assume_cap) |alloc| self.ensure_unused_capacity(count, alloc);
             const new_len = self.len + count;
             assert_with_reason(new_len <= self.cap, @src(), ERR_LEN_PLUS_COUNT_GREATER_CAP, .{ self.len, count, self.len + count, self.cap });
             const prev_len = self.len;
@@ -980,7 +915,7 @@ test "List.zig" {
         .index_type = u32,
     };
     const ListType = List(opts);
-    var list = ListType.new_empty(alloc);
+    var list = ListType.new_empty();
 
     list.append('H', alloc);
     list.append('e', alloc);
