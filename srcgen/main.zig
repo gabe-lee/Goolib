@@ -1,11 +1,11 @@
-const std = @import("std");
+// const std = @import("std");
 
-const Goolib = @import("Goolib");
+// const Goolib = @import("Goolib");
 
-const List = @import("./List.zig");
+// const List = @import("./List.zig");
 pub fn main() !void {
-    var filegen = try Goolib.Filegen.create(std.heap.page_allocator);
-    defer filegen.destroy();
+    // var filegen = try Goolib.Filegen.create(std.heap.page_allocator);
+    // defer filegen.destroy();
 
-    try List.gen(&filegen);
+    // try List.gen(&filegen);
 }

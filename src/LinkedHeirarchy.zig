@@ -972,73 +972,34 @@ pub fn LinkedHeirarchy(comptime options: ForwardLinkedHeirarchyOptions) type {
                 return result;
             }
 
-            pub fn insert_new_ids_as_siblings(self: *Heirarchy, leftmost: Id, first_new: Id, last_new: Id, rightmost: Id, known_parent_id: ?Id, comptime known_side_left: ?bool) void {
-                assert_with_reason(first_new.not_null() and last_new.not_null(), @src(), "cannot insert 'null' ids between items", .{});
-                if (leftmost.is_null() and rightmost.is_null()) {
-                    if (leftmost.is_null_parent_is_root() or rightmost.is_null_parent_is_root()) {
-                        assert_with_reason(leftmost.is_null_parent_is_root() and rightmost.is_null_parent_is_root(), @src(), "if both leftmost or rightmost are 'null' and either one is 'null on root', the other must also be 'null on root', got left = {any}, right = {any}", .{leftmost, rightmost});
-                        assert_with_reason(self.first_root_id.is_null(), @src(), "an attempt to insert new id's between 2 'null on root' ids implies inserting to an empty root, but root wasn't empty", .{});
-                        if (HAS_LAST_ROOT) assert_with_reason(self.last_root_id.is_null(), @src(), "an attempt to insert new id's between 2 'null on root' ids implies inserting to an empty root, but root wasn't empty", .{});
-                        self.first_root_id = first_new;
-                        if (HAS_LAST_ROOT) {
-                            self.last_root_id = last_new;
+            pub inline fn insert_items_siblings_methods() type {
+                if (HAS_DEPTH and HAS_PARENT) {
+                    return struct {
+                        pub fn insert_many_slots_after(self: *Heirarchy, this_id: Id, count: Index, alloc_else_assume_cap: ?AllocInfal) void {
+                            Internal.assert_has_next(@src());
+                            if (alloc_else_assume_cap) |alloc| self.ensure_unused_capacity(count, alloc);
+                            const range = Internal.initialize_items_as_siblings(self, count);
+                            const right_id = get_next_id(self.get_ptr(this_id));
+                            Internal.insert_new_ids_as_siblings(self, this_id, range.first, range.last, right_id);
+                            
+                            return range;
                         }
-                        return;
-                    }
-                    if (HAS_ANY_CHILD_NODES) {
-                        assert_with_reason(known_parent_id != null, @src(), "Heirarchy links child nodes, but an attempt to insert new items between 2 'null' ids that weren't 'null on root' implies adding the new items to a parent, but no known parent id was provided", .{});
-                        const parent_id = known_parent_id.?;
-                        const parent_ptr = self.get_ptr(parent_id);
-                        if (!HAS_ONLY_ONE_CHILD_SIDE) assert_with_reason(known_side_left != null, @src(), "Heirarchy links child nodes, but an attempt to insert new items between 2 'null' ids that weren't 'null on root' implies adding the new items to a parent, parents have 2 child sides and the side wasn't specified", .{});
-                        const left_side = if (known_side_left) |side| side else if (HAS_LEFT_CHILD_NODES) true else false;
-                        if (left_side) {
-                            Internal.set_first_left_child_id(parent_ptr, first_new);
-                            Internal.set_last_left_child_id(parent_ptr, last_new);
-                        } else {
-                            Internal.set_first_right_child_id(parent_ptr, first_new);
-                            Internal.set_last_right_child_id(parent_ptr, last_new);
-                        }
-                    }
-                    return;
+                    };
+                } else if (HAS_DEPTH and !HAS_PARENT) {
+                    return struct {};
+                } else {
+                    return struct {};
                 }
+            }
+
+            pub fn insert_new_ids_as_siblings(self: *Heirarchy, leftmost: Id, first_new: Id, last_new: Id, rightmost: Id) void {
+                assert_with_reason(first_new.not_null() and last_new.not_null(), @src(), "cannot insert 'null' ids between items", .{});
                 if (HAS_NEXT) {
                     const last_new_ptr = self.get_ptr(last_new);
                     Internal.set_next_id(last_new_ptr, rightmost);
                     if (leftmost.not_null()) {
                         const left_ptr = self.get_ptr(leftmost);
                         Internal.set_next_id(left_ptr, first_new);
-                    } else {
-                        if (!HAS_PARENT) {
-                            assert_with_reason(self.first_root_id.equals(rightmost), @src(), "an attempt to insert new id's after a leftmost 'null' id, and the parent is 'null on root', implies inserting to the beginning of the root level, but the previous 'first root id' didn't match the provided rightmost id", .{});
-                            self.first_root_id = first_new;
-                        } else {
-                            const parent_id = rightmost.parent_id(self);
-                            if (parent_id.is_null()) {
-                                if (parent_id.is_null_parent_is_root()) {
-                                    assert_with_reason(self.first_root_id.equals(rightmost), @src(), "an attempt to insert new id's after a leftmost 'null' id, and the parent is 'null on root', implies inserting to the beginning of the root level, but the previous 'first root id' didn't match the provided rightmost id", .{});
-                                    self.first_root_id = first_new;
-                                }
-                            } else if (HAS_FIRST_CHILD_NODES) {
-                                const parent_ptr = self.get_ptr(parent_id);
-                                const found: usize = 0;
-                                if (HAS_FIRST_LEFT_CHILD) {
-                                    const old_first_left = self.get_first_left_child_id(parent_ptr);
-                                    if (old_first_left.equals(rightmost)) {
-                                        Internal.set_first_left_child_id(parent_ptr, first_new);
-                                        found += 1;
-                                    }
-                                }
-                                if (HAS_FIRST_RIGHT_CHILD) {
-                                    const old_first_right = self.get_first_right_child_id(parent_ptr);
-                                    if (old_first_right == rightmost) {
-                                        Internal.set_first_right_child_id(parent_ptr, first_new);
-                                        found += 1;
-                                    }
-                                }
-                                assert_with_reason(found != 2, @src(), "found id {any} on both the first-left-child and first-right-child connections simultaneously, tree is broken", .{rightmost});
-                                assert_with_reason(found != 0, @src(), "did not find id {any} on either the first-left-child or first-right-child connections, but it was the first sibling (has parent, no prev id), tree is broken", .{rightmost});
-                            }
-                        }
                     }
                 }
                 if (HAS_PREV) {
@@ -1047,49 +1008,177 @@ pub fn LinkedHeirarchy(comptime options: ForwardLinkedHeirarchyOptions) type {
                     if (rightmost.not_null()) {
                         const right_ptr = self.get_ptr(rightmost);
                         Internal.set_prev_id(right_ptr, last_new);
-                    } else {
-                        if (!HAS_PARENT) {
-                            if (HAS_LAST_ROOT) {
-                                assert_with_reason(self.last_root_id == leftmost, @src(), "an attempt to insert new id's before a NULL_ID as the rightmost id (and no parent) implies inserting to the end of the root level, but the previous 'lest root id' didn't match the provided leftmost id", .{});
-                                self.last_root_id = last_new;
-                            }
-                        } else {
-                            const parent_id = self.get_parent_id(self.get_ptr(leftmost));
-                            if (parent_id.is_null()) {
-                                if (parent_id.is_null_parent_is_root()) {
-                                    if (HAS_LAST_ROOT) {
-                                        assert_with_reason(self.last_root_id == leftmost, @src(), "an attempt to insert new id's before a NULL_ID as the rightmost id (and no parent) implies inserting to the end of the root level, but the previous 'lest root id' didn't match the provided leftmost id", .{});
-                                        self.last_root_id = last_new;
-                                    }
-                                }
-                            } else if (HAS_LAST_CHILD_NODES) {
-                                const parent_ptr = self.get_ptr(parent_id);
-                                const found: usize = 0;
-                                if (HAS_LAST_LEFT_CHILD) {
-                                    const old_last_left = self.get_last_left_child_id(parent_ptr);
-                                    if (old_last_left == leftmost) {
-                                        Internal.set_last_left_child_id(parent_ptr, last_new);
-                                        found += 1;
-                                    }
-                                }
-                                if (HAS_LAST_RIGHT_CHILD) {
-                                    const old_last_right = self.get_last_right_child_id(parent_ptr);
-                                    if (old_last_right == leftmost) {
-                                        Internal.set_last_right_child_id(parent_ptr, last_new);
-                                        found += 1;
-                                    }
-                                }
-                                assert_with_reason(found != 2, @src(), "found id {any} on both the last-left-child and lasr-right-child connections simultaneously, tree is broken", .{leftmost});
-                                assert_with_reason(found != 0, @src(), "did not find id {any} on either the last-left-child or last-right-child connections, but it was the last sibling (has parent, no next id), tree is broken", .{leftmost});
-                            }
-                        }
                     }
                 }
-                if (HAS_PARENT and (HAS_NEXT or HAS_PREV)) {
-                    const parent_id = if (known_parent_id) |par| par else if (leftmost.not_null()) self.get_parent_id(self.get_ptr(leftmost)) else self.get_parent_id(self.get_ptr(rightmost));
-                    Internal.set_parent_on_range(self, parent_id, leftmost, first_new, last_new, rightmost);
-                }
             }
+
+            // pub fn insert_new_ids_as_siblings_to_beginning_of_children(self: *Heirarchy, parent_id: Id, first_new: Id, last_new: Id, rightmost: Id, comptime left: bool) void {
+            //     assert_with_reason(first_new.not_null() and last_new.not_null(), @src(), "cannot insert 'null' ids between items", .{});
+            //     assert_with_reason(parent_id.not_null() and rightmost.not_null(), @src(), "cannot insert ids at beginning of children when either 'parent id' or 'rightmos id' are null parent_id{} rightmost{}", .{parent_id, rightmost});
+            //     if (HAS_NEXT) {
+            //         const last_new_ptr = self.get_ptr(last_new);
+            //         Internal.set_next_id(last_new_ptr, rightmost);
+            //     }
+            //     if (HAS_PREV) {
+            //         const right_ptr = self.get_ptr(rightmost);
+            //         Internal.set_prev_id(right_ptr, last_new);
+            //     }
+            //     if (HAS_FIRST_LEFT_CHILD and left) {
+            //         const parent_ptr = self.get_ptr(parent_id);
+            //         Internal.set_first_left_child_id(parent_ptr, first_new);
+            //     } else if (HAS_FIRST_RIGHT_CHILD and !left) {
+            //         const parent_ptr = self.get_ptr(parent_id);
+            //         Internal.set_first_right_child_id(parent_ptr, first_new);
+            //     }
+            //     if (HAS_PARENT) {
+            //         Internal.set_parent_on_range(self, parent_id, Id.NULL_NONE, first_new, last_new, rightmost);
+            //     }
+            // }
+
+            // pub fn insert_new_ids_as_siblings_to_end_of_children(self: *Heirarchy, parent_id: Id, first_new: Id, last_new: Id, comptime left: bool) void {
+            //     assert_with_reason(first_new.not_null() and last_new.not_null(), @src(), "cannot insert 'null' ids between items", .{});
+            //     assert_with_reason(parent_id.not_null(), @src(), "cannot insert ids at end of children when either 'parent id' is 'null' parent_id{}", .{parent_id});
+            //     const leftmost = 
+            //     assert_with_reason(parent_id.not_null() and leftmost.not_null(), @src(), "cannot insert ids at end of children when either 'parent id' or 'leftmost id' are null parent_id{} leftmost{}", .{parent_id, leftmost});
+            //     if (HAS_NEXT) {
+            //         const left_ptr = self.get_ptr(leftmost);
+            //         Internal.set_next_id(left_ptr, first_new);
+            //     }
+            //     if (HAS_PREV) {
+            //         const first_new_ptr = self.get_ptr(first_new);
+            //         Internal.set_prev_id(first_new_ptr, leftmost);
+            //     }
+            //     if (HAS_LAST_LEFT_CHILD and left) {
+            //         const parent_ptr = self.get_ptr(parent_id);
+            //         Internal.set_last_left_child_id(parent_ptr, last_new);
+            //     } else if (HAS_FIRST_RIGHT_CHILD and !left) {
+            //         const parent_ptr = self.get_ptr(parent_id);
+            //         Internal.set_last_right_child_id(parent_ptr, last_new);
+            //     }
+            //     if (HAS_PARENT) {
+            //         Internal.set_parent_on_range(self, parent_id, Id.NULL_NONE, first_new, last_new, rightmost);
+            //     }
+            // }
+
+            // pub fn insert_new_ids_as_siblings(self: *Heirarchy, leftmost: Id, first_new: Id, last_new: Id, rightmost: Id, known_parent_id: ?Id, comptime known_side_left: ?bool) void {
+            //     assert_with_reason(first_new.not_null() and last_new.not_null(), @src(), "cannot insert 'null' ids between items", .{});
+            //     if (leftmost.is_null() and rightmost.is_null()) {
+            //         if (leftmost.is_null_parent_is_root() or rightmost.is_null_parent_is_root()) {
+            //             assert_with_reason(leftmost.is_null_parent_is_root() and rightmost.is_null_parent_is_root(), @src(), "if both leftmost or rightmost are 'null' and either one is 'null on root', the other must also be 'null on root', got left = {any}, right = {any}", .{leftmost, rightmost});
+            //             assert_with_reason(self.first_root_id.is_null(), @src(), "an attempt to insert new id's between 2 'null on root' ids implies inserting to an empty root, but root wasn't empty", .{});
+            //             if (HAS_LAST_ROOT) assert_with_reason(self.last_root_id.is_null(), @src(), "an attempt to insert new id's between 2 'null on root' ids implies inserting to an empty root, but root wasn't empty", .{});
+            //             self.first_root_id = first_new;
+            //             if (HAS_LAST_ROOT) {
+            //                 self.last_root_id = last_new;
+            //             }
+            //             return;
+            //         }
+            //         if (HAS_ANY_CHILD_NODES) {
+            //             assert_with_reason(known_parent_id != null, @src(), "Heirarchy links child nodes, but an attempt to insert new items between 2 'null' ids that weren't 'null on root' implies adding the new items to a parent, but no known parent id was provided", .{});
+            //             const parent_id = known_parent_id.?;
+            //             const parent_ptr = self.get_ptr(parent_id);
+            //             if (!HAS_ONLY_ONE_CHILD_SIDE) assert_with_reason(known_side_left != null, @src(), "Heirarchy links child nodes, but an attempt to insert new items between 2 'null' ids that weren't 'null on root' implies adding the new items to a parent, parents have 2 child sides and the side wasn't specified", .{});
+            //             const left_side = if (known_side_left) |side| side else if (HAS_LEFT_CHILD_NODES) true else false;
+            //             if (left_side) {
+            //                 Internal.set_first_left_child_id(parent_ptr, first_new);
+            //                 Internal.set_last_left_child_id(parent_ptr, last_new);
+            //             } else {
+            //                 Internal.set_first_right_child_id(parent_ptr, first_new);
+            //                 Internal.set_last_right_child_id(parent_ptr, last_new);
+            //             }
+            //         }
+            //         return;
+            //     }
+            //     if (HAS_NEXT) {
+            //         const last_new_ptr = self.get_ptr(last_new);
+            //         Internal.set_next_id(last_new_ptr, rightmost);
+            //         if (leftmost.not_null()) {
+            //             const left_ptr = self.get_ptr(leftmost);
+            //             Internal.set_next_id(left_ptr, first_new);
+            //         } else {
+            //             if (!HAS_PARENT) {
+            //                 assert_with_reason(self.first_root_id.equals(rightmost), @src(), "an attempt to insert new id's after a leftmost 'null' id, and the parent is 'null on root', implies inserting to the beginning of the root level, but the previous 'first root id' didn't match the provided rightmost id", .{});
+            //                 self.first_root_id = first_new;
+            //             } else {
+            //                 const parent_id = rightmost.parent_id(self);
+            //                 if (parent_id.is_null()) {
+            //                     if (parent_id.is_null_parent_is_root()) {
+            //                         assert_with_reason(self.first_root_id.equals(rightmost), @src(), "an attempt to insert new id's after a leftmost 'null' id, and the parent is 'null on root', implies inserting to the beginning of the root level, but the previous 'first root id' didn't match the provided rightmost id", .{});
+            //                         self.first_root_id = first_new;
+            //                     }
+            //                 } else if (HAS_FIRST_CHILD_NODES) {
+            //                     const parent_ptr = self.get_ptr(parent_id);
+            //                     const found: usize = 0;
+            //                     if (HAS_FIRST_LEFT_CHILD) {
+            //                         const old_first_left = self.get_first_left_child_id(parent_ptr);
+            //                         if (old_first_left.equals(rightmost)) {
+            //                             Internal.set_first_left_child_id(parent_ptr, first_new);
+            //                             found += 1;
+            //                         }
+            //                     }
+            //                     if (HAS_FIRST_RIGHT_CHILD) {
+            //                         const old_first_right = self.get_first_right_child_id(parent_ptr);
+            //                         if (old_first_right == rightmost) {
+            //                             Internal.set_first_right_child_id(parent_ptr, first_new);
+            //                             found += 1;
+            //                         }
+            //                     }
+            //                     assert_with_reason(found != 2, @src(), "found id {any} on both the first-left-child and first-right-child connections simultaneously, tree is broken", .{rightmost});
+            //                     assert_with_reason(found != 0, @src(), "did not find id {any} on either the first-left-child or first-right-child connections, but it was the first sibling (has parent, no prev id), tree is broken", .{rightmost});
+            //                 }
+            //             }
+            //         }
+            //     }
+            //     if (HAS_PREV) {
+            //         const first_new_ptr = self.get_ptr(first_new);
+            //         Internal.set_prev_id(first_new_ptr, leftmost);
+            //         if (rightmost.not_null()) {
+            //             const right_ptr = self.get_ptr(rightmost);
+            //             Internal.set_prev_id(right_ptr, last_new);
+            //         } else {
+            //             if (!HAS_PARENT) {
+            //                 if (HAS_LAST_ROOT) {
+            //                     assert_with_reason(self.last_root_id == leftmost, @src(), "an attempt to insert new id's before a NULL_ID as the rightmost id (and no parent) implies inserting to the end of the root level, but the previous 'lest root id' didn't match the provided leftmost id", .{});
+            //                     self.last_root_id = last_new;
+            //                 }
+            //             } else {
+            //                 const parent_id = self.get_parent_id(self.get_ptr(leftmost));
+            //                 if (parent_id.is_null()) {
+            //                     if (parent_id.is_null_parent_is_root()) {
+            //                         if (HAS_LAST_ROOT) {
+            //                             assert_with_reason(self.last_root_id == leftmost, @src(), "an attempt to insert new id's before a NULL_ID as the rightmost id (and no parent) implies inserting to the end of the root level, but the previous 'lest root id' didn't match the provided leftmost id", .{});
+            //                             self.last_root_id = last_new;
+            //                         }
+            //                     }
+            //                 } else if (HAS_LAST_CHILD_NODES) {
+            //                     const parent_ptr = self.get_ptr(parent_id);
+            //                     const found: usize = 0;
+            //                     if (HAS_LAST_LEFT_CHILD) {
+            //                         const old_last_left = self.get_last_left_child_id(parent_ptr);
+            //                         if (old_last_left == leftmost) {
+            //                             Internal.set_last_left_child_id(parent_ptr, last_new);
+            //                             found += 1;
+            //                         }
+            //                     }
+            //                     if (HAS_LAST_RIGHT_CHILD) {
+            //                         const old_last_right = self.get_last_right_child_id(parent_ptr);
+            //                         if (old_last_right == leftmost) {
+            //                             Internal.set_last_right_child_id(parent_ptr, last_new);
+            //                             found += 1;
+            //                         }
+            //                     }
+            //                     assert_with_reason(found != 2, @src(), "found id {any} on both the last-left-child and lasr-right-child connections simultaneously, tree is broken", .{leftmost});
+            //                     assert_with_reason(found != 0, @src(), "did not find id {any} on either the last-left-child or last-right-child connections, but it was the last sibling (has parent, no next id), tree is broken", .{leftmost});
+            //                 }
+            //             }
+            //         }
+            //     }
+
+            //     if (HAS_PARENT and (HAS_NEXT or HAS_PREV)) {
+            //         const parent_id = if (known_parent_id) |par| par else if (leftmost.not_null()) self.get_parent_id(self.get_ptr(leftmost)) else self.get_parent_id(self.get_ptr(rightmost));
+            //         Internal.set_parent_on_range(self, parent_id, leftmost, first_new, last_new, rightmost);
+            //     }
+            // }
 
             pub fn set_parent_on_range(self: *Heirarchy, parent_id: Id, left_limit: Id, first_new: Id, last_new: Id, right_limit: Id) void {
                 if (HAS_NEXT) {

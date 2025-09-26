@@ -40,18 +40,18 @@ pub fn num_cast(from: anytype, comptime TO: type) TO {
     const TO_FLOAT: u8 = 0b010;
     const TO_ENUM: u8 = 0b100;
     const TO_BOOL: u8 = 0b110;
-    const from_kind: u8 = comptime switch (FI) {
+    const from_kind: u8 = switch (FI) {
         .int, .comptime_int, .@"enum", .bool => FROM_INT,
         .float, .comptime_float => FROM_FLOAT,
         else => assert_with_reason(false, @src(), "`from` type must be an integer, float, enum, or bool, got type `{s}`", .{@typeName(FROM)}),
     };
-    const cast_from = comptime switch (FI) {
+    const cast_from = switch (FI) {
         .int, .comptime_int, .float, .comptime_float => from,
         .@"enum" => @intFromEnum(from),
         .bool => @intFromBool(from),
         else => unreachable,
     };
-    const to_kind: u8 = switch (FI) {
+    const to_kind: u8 = switch (TI) {
         .int, .comptime_int => TO_INT,
         .float, .comptime_float => TO_FLOAT,
         .@"enum" => TO_ENUM,
@@ -61,7 +61,7 @@ pub fn num_cast(from: anytype, comptime TO: type) TO {
     const FROM_INT_TO_INT = FROM_INT | TO_INT;
     const FROM_INT_TO_FLOAT = FROM_INT | TO_FLOAT;
     const FROM_INT_TO_BOOL = FROM_INT | TO_BOOL;
-    const FROM_INT_TO_ENUM = FROM_INT | TO_BOOL;
+    const FROM_INT_TO_ENUM = FROM_INT | TO_ENUM;
     const FROM_FLOAT_TO_INT = FROM_FLOAT | TO_INT;
     const FROM_FLOAT_TO_FLOAT = FROM_FLOAT | TO_FLOAT;
     const FROM_FLOAT_TO_BOOL = FROM_FLOAT | TO_BOOL;

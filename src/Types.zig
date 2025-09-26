@@ -34,10 +34,37 @@ const BinarySearch = Root.BinarySearch;
 const Assert = Root.Assert;
 const assert_with_reason = Assert.assert_with_reason;
 
+pub fn ptr_cast_const(ptr_or_slice: anytype, comptime new_type: type) *const new_type {
+    const PTR = @TypeOf(ptr_or_slice);
+    const P_INFO = @typeInfo(PTR);
+    assert_with_reason(P_INFO == .pointer, @src(), "input `ptr_or_slice` must be a pointer type", .{});
+    const PTR_INFO = P_INFO.pointer;
+    return switch (PTR_INFO.size) {
+        .slice => @ptrCast(@alignCast(ptr_or_slice.ptr)),
+        else => @ptrCast(@alignCast(ptr_or_slice)),
+    };
+}
+pub fn ptr_cast(ptr_or_slice: anytype, comptime new_type: type) *new_type {
+    const PTR = @TypeOf(ptr_or_slice);
+    const P_INFO = @typeInfo(PTR);
+    assert_with_reason(P_INFO == .pointer, @src(), "input `ptr_or_slice` must be a pointer type", .{});
+    const PTR_INFO = P_INFO.pointer;
+    return switch (PTR_INFO.size) {
+        .slice => switch (PTR_INFO.is_const) {
+            true => @ptrCast(@alignCast(@constCast(ptr_or_slice.ptr))),
+            false => @ptrCast(@alignCast(ptr_or_slice.ptr)),
+        },
+        else => switch (PTR_INFO.is_const) {
+            true => @ptrCast(@alignCast(@constCast(ptr_or_slice))),
+            false => @ptrCast(@alignCast(ptr_or_slice)),
+        },
+    };
+}
+
 pub fn raw_ptr_cast_const(ptr_or_slice: anytype) [*]const u8 {
     const PTR = @TypeOf(ptr_or_slice);
     const P_INFO = @typeInfo(PTR);
-    assert_with_reason(P_INFO == .pointer, @inComptime(), @src(), "input `ptr` must be a pointer type");
+    assert_with_reason(P_INFO == .pointer, @src(), "input `ptr_or_slice` must be a pointer type", .{});
     const PTR_INFO = P_INFO.pointer;
     return if (PTR_INFO.size == .slice) @ptrCast(@alignCast(ptr_or_slice.ptr)) else @ptrCast(@alignCast(ptr_or_slice));
 }
@@ -45,7 +72,7 @@ pub fn raw_ptr_cast_const(ptr_or_slice: anytype) [*]const u8 {
 pub fn raw_ptr_cast(ptr_or_slice: anytype) [*]u8 {
     const PTR = @TypeOf(ptr_or_slice);
     const P_INFO = @typeInfo(PTR);
-    assert_with_reason(P_INFO == .pointer, @inComptime(), @src(), "input `ptr` must be a pointer type");
+    assert_with_reason(P_INFO == .pointer, @src(), "input `ptr_or_slice` must be a pointer type", .{});
     const PTR_INFO = P_INFO.pointer;
     return if (PTR_INFO.size == .slice) @ptrCast(@alignCast(ptr_or_slice.ptr)) else @ptrCast(@alignCast(ptr_or_slice));
 }

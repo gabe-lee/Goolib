@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
@@ -22,10 +23,10 @@ pub fn build(b: *std.Build) void {
         "Produce position-independent code (default: varies)",
     ) orelse true;
     const link_time_optimize = b.option(
-        bool,
+        std.zig.LtoMode,
         "link_time_optimize",
         "Perform link time optimization (default: varies)",
-    ) orelse (optimize != .Debug);
+    ) orelse if (optimize == .Debug) std.zig.LtoMode.none else std.zig.LtoMode.full;
     const sdl_emscripten_pthreads = b.option(
         bool,
         "sdl_emscripten_pthreads",
@@ -77,9 +78,7 @@ pub fn build(b: *std.Build) void {
     lib.linkLibrary(sdl_lib);
 
     const lib_tests = b.addTest(.{
-        .root_source_file = b.path("src/_root.zig"),
-        .target = target,
-        .optimize = optimize,
+        .root_module = lib,
     });
 
     lib.addOptions("config", options);
@@ -90,11 +89,14 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_lib_tests.step);
 
     //FILEGEN
-    const filegen = b.addExecutable(.{
-        .target = target,
+    const filegen_mod = b.addModule("filegen", .{
         .optimize = optimize,
-        .name = "filegen",
+        .target = target,
         .root_source_file = b.path("srcgen/main.zig"),
+    });
+    const filegen = b.addExecutable(.{
+        .name = "filegen",
+        .root_module = filegen_mod,
     });
     filegen.root_module.addImport("Goolib", lib);
     b.installArtifact(filegen);
@@ -107,11 +109,14 @@ pub fn build(b: *std.Build) void {
     run_filegen_cmd.dependOn(&run_filegen.step);
 
     //BREAKOUT SAMPLE APP
-    const breakout = b.addExecutable(.{
-        .target = target,
+    const breakout_mod = b.addModule("breakout", .{
         .optimize = optimize,
-        .name = "breakout",
+        .target = target,
         .root_source_file = b.path("samples/breakout.zig"),
+    });
+    const breakout = b.addExecutable(.{
+        .name = "breakout",
+        .root_module = breakout_mod,
     });
     breakout.want_lto = optimize != .Debug;
     breakout.root_module.addImport("Goolib", lib);

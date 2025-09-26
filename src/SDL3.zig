@@ -33,6 +33,7 @@ const assert = std.debug.assert;
 const Root = @import("./_root.zig");
 const VERSION = Root.VERSION;
 const Types = Root.Types;
+const Cast = Root.Cast;
 const Flags = Root.Flags.Flags;
 const Utils = Root.Utils;
 const Assert = Root.Assert;
@@ -475,7 +476,8 @@ pub const SeekRelativeTo = enum(C.SDL_IOWhence) {
     RELATIVE_TO_CURRENT = C.SDL_IO_SEEK_CUR,
     RELATIVE_TO_END = C.SDL_IO_SEEK_END,
 
-    pub usingnamespace c_enum_conversions(SeekRelativeTo, C.SDL_IOWhence);
+    pub const to_c = c_enum_conversions(SeekRelativeTo, C.SDL_IOWhence).to_c;
+    pub const from_c = c_enum_conversions(SeekRelativeTo, C.SDL_IOWhence).from_c;
 };
 
 pub const IOStatus = enum(C.SDL_IOStatus) {
@@ -486,7 +488,8 @@ pub const IOStatus = enum(C.SDL_IOStatus) {
     READONLY = C.SDL_IO_STATUS_READONLY,
     WRITEONLY = C.SDL_IO_STATUS_WRITEONLY,
 
-    pub usingnamespace c_enum_conversions(IOStatus, C.SDL_IOStatus);
+    pub const to_c = c_enum_conversions(IOStatus, C.SDL_IOStatus).to_c;
+    pub const from_c = c_enum_conversions(IOStatus, C.SDL_IOStatus).from_c;
 };
 
 pub const IOStreamInterface = extern struct {
@@ -939,10 +942,11 @@ pub const PropertiesID = extern struct {
 pub const ActionFuncCallback = fn () callconv(.c) void;
 
 pub const Thread = opaque {
-    pub usingnamespace c_opaque_conversions(Thread, C.SDL_Thread);
+    pub const to_c = c_opaque_conversions(Thread, C.SDL_Thread).to_c_ptr;
+    pub const from_c = c_opaque_conversions(Thread, C.SDL_Thread).from_c_ptr;
 
     pub fn create_thread_with_begin_end(thread_func: ?*const ThreadFunc, name: [*:0]const u8, userdata: ?*anyopaque, begin_func: ?*const ActionFuncCallback, end_func: ?*const ActionFuncCallback) Error!*Thread {
-        return ptr_cast_or_fail_err(*Thread, C.SDL_CreateThreadRuntime(Types.ptr_cast(thread_func, C.SDL_ThreadFunction), name, userdata, begin_func, end_func));
+        return ptr_cast_or_fail_err(*Thread, C.SDL_CreateThreadRuntime(Cast.ptr_cast(thread_func, C.SDL_ThreadFunction), name, userdata, begin_func, end_func));
     }
     pub fn create_thread_with_props_begin_end(props: PropertiesID, begin_func: ?*const ActionFuncCallback, end_func: ?*const ActionFuncCallback) Error!*Thread {
         return ptr_cast_or_fail_err(*Thread, C.SDL_CreateThreadWithPropertiesRuntime(props.id, begin_func, end_func));
@@ -995,7 +999,8 @@ pub const ThreadID = extern struct {
 };
 
 pub const Mutex = opaque {
-    pub usingnamespace c_opaque_conversions(Mutex, C.SDL_Mutex);
+    pub const to_c = c_opaque_conversions(Mutex, C.SDL_Mutex).to_c_ptr;
+    pub const from_c = c_opaque_conversions(Mutex, C.SDL_Mutex).from_c_ptr;
     pub fn create() Error!*Mutex {
         return ptr_cast_or_fail_err(*Mutex, C.SDL_CreateMutex());
     }
@@ -1018,7 +1023,10 @@ pub const InitState = extern struct {
     thread: ThreadID = .{},
     _reserved: ?*anyopaque = null,
 
-    pub usingnamespace c_non_opaque_conversions(InitState, C.SDL_InitState);
+    pub const to_c_ptr = c_non_opaque_conversions(InitState, C.SDL_InitState).to_c_ptr;
+    pub const from_c_ptr = c_non_opaque_conversions(InitState, C.SDL_InitState).from_c_ptr;
+    pub const to_c = c_non_opaque_conversions(InitState, C.SDL_InitState).to_c;
+    pub const from_c = c_non_opaque_conversions(InitState, C.SDL_InitState).from_c;
     pub fn should_init(self: *InitState) bool {
         return C.SDL_ShouldInit(self.to_c_ptr());
     }
@@ -1041,7 +1049,8 @@ pub const PropertyType = enum(c_uint) {
     FLOAT = C.SDL_PROPERTY_TYPE_FLOAT,
     BOOLEAN = C.SDL_PROPERTY_TYPE_BOOLEAN,
 
-    pub usingnamespace c_enum_conversions(PropertyType, c_uint);
+    pub const to_c = c_enum_conversions(PropertyType, c_uint).to_c;
+    pub const from_c = c_enum_conversions(PropertyType, c_uint).from_c;
 };
 
 pub const Property = struct {
@@ -1073,7 +1082,8 @@ pub const InitStatus = enum(C.SDL_InitStatus) {
     INIT = C.SDL_INIT_STATUS_INITIALIZED,
     UNINIT_IN_PROGRESS = C.SDL_INIT_STATUS_UNINITIALIZING,
 
-    pub usingnamespace c_enum_conversions(InitStatus, C.SDL_InitStatus);
+    pub const to_c = c_enum_conversions(InitStatus, C.SDL_InitStatus).to_c;
+    pub const from_c = c_enum_conversions(InitStatus, C.SDL_InitStatus).from_c;
 };
 
 pub const InitFlags = Flags(enum(u32) {
@@ -1085,7 +1095,7 @@ pub const InitFlags = Flags(enum(u32) {
     EVENTS = C.SDL_INIT_EVENTS,
     SENSOR = C.SDL_INIT_SENSOR,
     CAMERA = C.SDL_INIT_CAMERA,
-}, null);
+}, enum(u32) {});
 
 pub const UserFolder = enum(C.SDL_Folder) {
     HOME = C.SDL_FOLDER_HOME,
@@ -1102,14 +1112,18 @@ pub const UserFolder = enum(C.SDL_Folder) {
 
     pub const COUNT = C.SDL_FOLDER_COUNT;
 
-    pub usingnamespace c_enum_conversions(UserFolder, C.SDL_Folder);
+    pub const to_c = c_enum_conversions(UserFolder, C.SDL_Folder).to_c;
+    pub const from_c = c_enum_conversions(UserFolder, C.SDL_Folder).from_c;
 };
 
 pub const FileDialogFilter = extern struct {
     name: ?[*:0]const u8 = null,
     pattern: ?[*:0]const u8 = null,
 
-    pub usingnamespace c_non_opaque_conversions(FileDialogFilter, C.SDL_DialogFileFilter);
+    pub const to_c_ptr = c_non_opaque_conversions(FileDialogFilter, C.SDL_DialogFileFilter).to_c_ptr;
+    pub const from_c_ptr = c_non_opaque_conversions(FileDialogFilter, C.SDL_DialogFileFilter).from_c_ptr;
+    pub const to_c = c_non_opaque_conversions(FileDialogFilter, C.SDL_DialogFileFilter).to_c;
+    pub const from_c = c_non_opaque_conversions(FileDialogFilter, C.SDL_DialogFileFilter).from_c;
 };
 
 pub const FileDialogCallback = fn (userdata: ?*anyopaque, selected_files: ?[*:null]?[*:0]const u8, selected_filter_index: c_int) callconv(.c) void;
@@ -1162,11 +1176,13 @@ pub const FileDialogType = enum(C.SDL_FileDialogType) {
     SAVE_FILE = C.SDL_FILEDIALOG_SAVEFILE,
     OPEN_FOLDER = C.SDL_FILEDIALOG_OPENFOLDER,
 
-    pub usingnamespace c_enum_conversions(FileDialogType, C.SDL_FileDialogType);
+    pub const to_c = c_enum_conversions(FileDialogType, C.SDL_FileDialogType).to_c;
+    pub const from_c = c_enum_conversions(FileDialogType, C.SDL_FileDialogType).from_c;
 };
 
 pub const AsyncIO = opaque {
-    pub usingnamespace c_opaque_conversions(AsyncIO, C.SDL_AsyncIO);
+    pub const to_c_ptr = c_opaque_conversions(AsyncIO, C.SDL_AsyncIO).to_c_ptr;
+    pub const from_c_ptr = c_opaque_conversions(AsyncIO, C.SDL_AsyncIO).from_c_ptr;
 
     pub inline fn from_file(file_path: [*:0]const u8, mode: IOMode) Error!*AsyncIO {
         return ptr_cast_or_null_err(*AsyncIO, C.SDL_AsyncIOFromFile(file_path, mode.to_c()));
@@ -1191,7 +1207,8 @@ pub const AsyncIOTaskType = enum(C.SDL_AsyncIOTaskType) {
     WRITE = C.SDL_ASYNCIO_TASK_WRITE,
     CLOSE = C.SDL_ASYNCIO_TASK_CLOSE,
 
-    pub usingnamespace c_enum_conversions(AsyncIOTaskType, C.SDL_AsyncIOTaskType);
+    pub const to_c = c_enum_conversions(AsyncIOTaskType, C.SDL_AsyncIOTaskType).to_c;
+    pub const from_c = c_enum_conversions(AsyncIOTaskType, C.SDL_AsyncIOTaskType).from_c;
 };
 
 pub const AsyncIOResult = enum(C.SDL_AsyncIOResult) {
@@ -1199,7 +1216,8 @@ pub const AsyncIOResult = enum(C.SDL_AsyncIOResult) {
     FAILURE = C.SDL_ASYNCIO_FAILURE,
     CANCELED = C.SDL_ASYNCIO_CANCELED,
 
-    pub usingnamespace c_enum_conversions(AsyncIOResult, C.SDL_AsyncIOResult);
+    pub const to_c = c_enum_conversions(AsyncIOResult, C.SDL_AsyncIOResult).to_c;
+    pub const from_c = c_enum_conversions(AsyncIOResult, C.SDL_AsyncIOResult).from_c;
 };
 
 pub const AsyncIOOutcome = extern struct {
@@ -1212,11 +1230,15 @@ pub const AsyncIOOutcome = extern struct {
     bytes_transferred: u64 = 0,
     userdata: ?*anyopaque = null,
 
-    pub usingnamespace c_non_opaque_conversions(AsyncIOOutcome, C.SDL_AsyncIOOutcome);
+    pub const to_c_ptr = c_non_opaque_conversions(AsyncIOOutcome, C.SDL_AsyncIOOutcome).to_c_ptr;
+    pub const from_c_ptr = c_non_opaque_conversions(AsyncIOOutcome, C.SDL_AsyncIOOutcome).from_c_ptr;
+    pub const to_c = c_non_opaque_conversions(AsyncIOOutcome, C.SDL_AsyncIOOutcome).to_c;
+    pub const from_c = c_non_opaque_conversions(AsyncIOOutcome, C.SDL_AsyncIOOutcome).from_c;
 };
 
 pub const AsyncIOQueue = opaque {
-    pub usingnamespace c_opaque_conversions(AsyncIOQueue, C.SDL_AsyncIOQueue);
+    pub const to_c_ptr = c_opaque_conversions(AsyncIOQueue, C.SDL_AsyncIOQueue).to_c_ptr;
+    pub const from_c_ptr = c_opaque_conversions(AsyncIOQueue, C.SDL_AsyncIOQueue).from_c_ptr;
     pub inline fn create() Error!*AsyncIOQueue {
         return ptr_cast_or_fail_err(*AsyncIOQueue, C.SDL_CreateAsyncIOQueue());
     }
@@ -1267,7 +1289,10 @@ pub const AsyncIOQueue = opaque {
 pub const AtomicInt = extern struct {
     val: c_int = 0,
 
-    pub usingnamespace c_non_opaque_conversions(AtomicInt, C.SDL_AtomicInt);
+    pub const to_c_ptr = c_non_opaque_conversions(AtomicInt, C.SDL_AtomicInt).to_c_ptr;
+    pub const from_c_ptr = c_non_opaque_conversions(AtomicInt, C.SDL_AtomicInt).from_c_ptr;
+    pub const to_c = c_non_opaque_conversions(AtomicInt, C.SDL_AtomicInt).to_c;
+    pub const from_c = c_non_opaque_conversions(AtomicInt, C.SDL_AtomicInt).from_c;
 
     pub fn compare_and_swap(self: *AtomicInt, old_val_matches: c_int, new_val: c_int) bool {
         return C.SDL_CompareAndSwapAtomicInt(self.to_c_ptr(), old_val_matches, new_val);
@@ -1292,7 +1317,10 @@ pub const AtomicInt = extern struct {
 pub const TSL_ID = extern struct {
     id: AtomicInt,
 
-    pub usingnamespace c_non_opaque_conversions(TSL_ID, C.SDL_TLSID);
+    pub const to_c_ptr = c_non_opaque_conversions(TSL_ID, C.SDL_TLSID).to_c_ptr;
+    pub const from_c_ptr = c_non_opaque_conversions(TSL_ID, C.SDL_TLSID).from_c_ptr;
+    pub const to_c = c_non_opaque_conversions(TSL_ID, C.SDL_TLSID).to_c;
+    pub const from_c = c_non_opaque_conversions(TSL_ID, C.SDL_TLSID).from_c;
     //TODO
     // pub extern fn SDL_GetTLS(id: [*c]SDL_TLSID) ?*anyopaque;
     // pub const SDL_TLSDestructorCallback = ?*const fn (?*anyopaque) callconv(.c) void;
@@ -1308,7 +1336,8 @@ pub const ThreadPriority = enum(C.SDL_ThreadPriority) {
     HIGH = C.SDL_THREAD_PRIORITY_HIGH,
     TIME_CRITICAL = C.SDL_THREAD_PRIORITY_TIME_CRITICAL,
 
-    pub usingnamespace c_enum_conversions(ThreadPriority, C.SDL_ThreadPriority);
+    pub const to_c = c_enum_conversions(ThreadPriority, C.SDL_ThreadPriority).to_c;
+    pub const from_c = c_enum_conversions(ThreadPriority, C.SDL_ThreadPriority).from_c;
 };
 
 pub const ThreadState = enum(C.SDL_ThreadState) {
@@ -1317,13 +1346,15 @@ pub const ThreadState = enum(C.SDL_ThreadState) {
     DETACHED = C.SDL_THREAD_DETACHED,
     COMPLETE = C.SDL_THREAD_COMPLETE,
 
-    pub usingnamespace c_enum_conversions(ThreadState, C.SDL_ThreadState);
+    pub const to_c = c_enum_conversions(ThreadState, C.SDL_ThreadState).to_c;
+    pub const from_c = c_enum_conversions(ThreadState, C.SDL_ThreadState).from_c;
 };
 
 pub const ThreadFunc = fn (userdata: ?*anyopaque) callconv(.c) c_int;
 
 pub const RWLock = opaque {
-    pub usingnamespace c_opaque_conversions(RWLock, C.SDL_RWLock);
+    pub const to_c_ptr = c_opaque_conversions(RWLock, C.SDL_RWLock).to_c_ptr;
+    pub const from_c_ptr = c_opaque_conversions(RWLock, C.SDL_RWLock).from_c_ptr;
     //TODO
     // pub extern fn SDL_CreateRWLock() ?*SDL_RWLock;
     // pub extern fn SDL_LockRWLockForReading(rwlock: ?*SDL_RWLock) void;
@@ -1335,7 +1366,8 @@ pub const RWLock = opaque {
 };
 
 pub const Semaphore = opaque {
-    pub usingnamespace c_opaque_conversions(Semaphore, C.SDL_Semaphore);
+    pub const to_c_ptr = c_opaque_conversions(Semaphore, C.SDL_Semaphore).to_c_ptr;
+    pub const from_c_ptr = c_opaque_conversions(Semaphore, C.SDL_Semaphore).from_c_ptr;
     //TODO
     // pub extern fn SDL_CreateSemaphore(initial_value: Uint32) ?*SDL_Semaphore;
     // pub extern fn SDL_DestroySemaphore(sem: ?*SDL_Semaphore) void;
@@ -1347,7 +1379,8 @@ pub const Semaphore = opaque {
 };
 
 pub const Condition = opaque {
-    pub usingnamespace c_opaque_conversions(Condition, C.SDL_Condition);
+    pub const to_c_ptr = c_opaque_conversions(Condition, C.SDL_Condition).to_c_ptr;
+    pub const from_c_ptr = c_opaque_conversions(Condition, C.SDL_Condition).from_c_ptr;
     //TODO
     // pub extern fn SDL_CreateCondition() ?*SDL_Condition;
     // pub extern fn SDL_DestroyCondition(cond: ?*SDL_Condition) void;
@@ -1368,7 +1401,8 @@ pub const AudioFormat = enum(C.SDL_AudioFormat) {
     F32_BE = C.SDL_AUDIO_F32LE,
     F32_LE = C.SDL_AUDIO_F32BE,
 
-    pub usingnamespace c_enum_conversions(AudioFormat, C.SDL_AudioFormat);
+    pub const to_c = c_enum_conversions(AudioFormat, C.SDL_AudioFormat).to_c;
+    pub const from_c = c_enum_conversions(AudioFormat, C.SDL_AudioFormat).from_c;
 
     pub fn bit_size(self: AudioFormat) c_uint {
         return @intCast(C.SDL_AUDIO_BITSIZE(self.to_c()));
@@ -1404,11 +1438,13 @@ pub const FlipMode = enum(c_uint) {
     VERTICAL = C.SDL_FLIP_VERTICAL,
     // HORIZ_VERT = C.SDL_FLIP_HORIZONTAL | C.SDL_FLIP_VERTICAL,
 
-    pub usingnamespace c_enum_conversions(FlipMode, C.SDL_FlipMode);
+    pub const to_c = c_enum_conversions(FlipMode, C.SDL_FlipMode).to_c;
+    pub const from_c = c_enum_conversions(FlipMode, C.SDL_FlipMode).from_c;
 };
 
 pub const Sensor = opaque {
-    pub usingnamespace c_opaque_conversions(Sensor, C.SDL_Sensor);
+    pub const to_c_ptr = c_opaque_conversions(Sensor, C.SDL_Sensor).to_c_ptr;
+    pub const from_c_ptr = c_opaque_conversions(Sensor, C.SDL_Sensor).from_c_ptr;
     //TODO
     // pub extern fn SDL_GetSensorProperties(sensor: ?*SDL_Sensor) SDL_PropertiesID;
     // pub extern fn SDL_GetSensorName(sensor: ?*SDL_Sensor) [*c]const u8;
@@ -1432,7 +1468,8 @@ pub const HapticID = extern struct {
 };
 
 pub const Haptic = opaque {
-    pub usingnamespace c_opaque_conversions(Haptic, C.SDL_Haptic);
+    pub const to_c_ptr = c_opaque_conversions(Haptic, C.SDL_Haptic).to_c_ptr;
+    pub const from_c_ptr = c_opaque_conversions(Haptic, C.SDL_Haptic).from_c_ptr;
     //TODO
     // pub extern fn SDL_GetHapticID(haptic: ?*SDL_Haptic) SDL_HapticID;
     // pub extern fn SDL_GetHapticName(haptic: ?*SDL_Haptic) [*c]const u8;
@@ -1465,7 +1502,10 @@ pub const HapticDirection = extern struct {
     type: HapticDirectionType = .POLAR,
     dir: [3]i32 = @splat(0),
 
-    pub usingnamespace c_non_opaque_conversions(HapticDirection, C.SDL_HapticDirection);
+    pub const to_c_ptr = c_non_opaque_conversions(HapticDirection, C.SDL_HapticDirection).to_c_ptr;
+    pub const from_c_ptr = c_non_opaque_conversions(HapticDirection, C.SDL_HapticDirection).from_c_ptr;
+    pub const to_c = c_non_opaque_conversions(HapticDirection, C.SDL_HapticDirection).to_c;
+    pub const from_c = c_non_opaque_conversions(HapticDirection, C.SDL_HapticDirection).from_c;
 };
 
 pub const HapticConstant = extern struct {
@@ -1481,7 +1521,10 @@ pub const HapticConstant = extern struct {
     max_to_end_ratio_ms: u16 = 0,
     end_ratio: u16 = 32767,
 
-    pub usingnamespace c_non_opaque_conversions(HapticConstant, C.SDL_HapticConstant);
+    pub const to_c_ptr = c_non_opaque_conversions(HapticConstant, C.SDL_HapticConstant).to_c_ptr;
+    pub const from_c_ptr = c_non_opaque_conversions(HapticConstant, C.SDL_HapticConstant).from_c_ptr;
+    pub const to_c = c_non_opaque_conversions(HapticConstant, C.SDL_HapticConstant).to_c;
+    pub const from_c = c_non_opaque_conversions(HapticConstant, C.SDL_HapticConstant).from_c;
 };
 
 pub const HapticPeriodic = extern struct {
@@ -1500,7 +1543,10 @@ pub const HapticPeriodic = extern struct {
     max_to_end_ratio_ms: u16 = 0,
     end_ratio: u16 = 32767,
 
-    pub usingnamespace c_non_opaque_conversions(HapticPeriodic, C.SDL_HapticPeriodic);
+    pub const to_c_ptr = c_non_opaque_conversions(HapticPeriodic, C.SDL_HapticPeriodic).to_c_ptr;
+    pub const from_c_ptr = c_non_opaque_conversions(HapticPeriodic, C.SDL_HapticPeriodic).from_c_ptr;
+    pub const to_c = c_non_opaque_conversions(HapticPeriodic, C.SDL_HapticPeriodic).to_c;
+    pub const from_c = c_non_opaque_conversions(HapticPeriodic, C.SDL_HapticPeriodic).from_c;
 };
 
 pub const HapticCondition = extern struct {
@@ -1517,7 +1563,10 @@ pub const HapticCondition = extern struct {
     deadband: [3]u16 = @splat(0),
     center: [3]i16 = @splat(0),
 
-    pub usingnamespace c_non_opaque_conversions(HapticCondition, C.SDL_HapticCondition);
+    pub const to_c_ptr = c_non_opaque_conversions(HapticCondition, C.SDL_HapticCondition).to_c_ptr;
+    pub const from_c_ptr = c_non_opaque_conversions(HapticCondition, C.SDL_HapticCondition).from_c_ptr;
+    pub const to_c = c_non_opaque_conversions(HapticCondition, C.SDL_HapticCondition).to_c;
+    pub const from_c = c_non_opaque_conversions(HapticCondition, C.SDL_HapticCondition).from_c;
 };
 
 pub const HapticRamp = extern struct {
@@ -1534,7 +1583,10 @@ pub const HapticRamp = extern struct {
     max_to_end_ratio_ms: u16 = 0,
     end_ratio: u16 = 32767,
 
-    pub usingnamespace c_non_opaque_conversions(HapticRamp, C.SDL_HapticRamp);
+    pub const to_c_ptr = c_non_opaque_conversions(HapticRamp, C.SDL_HapticRamp).to_c_ptr;
+    pub const from_c_ptr = c_non_opaque_conversions(HapticRamp, C.SDL_HapticRamp).from_c_ptr;
+    pub const to_c = c_non_opaque_conversions(HapticRamp, C.SDL_HapticRamp).to_c;
+    pub const from_c = c_non_opaque_conversions(HapticRamp, C.SDL_HapticRamp).from_c;
 };
 
 pub const HapticDualMotor = extern struct {
@@ -1543,7 +1595,10 @@ pub const HapticDualMotor = extern struct {
     large_magnitude: u16 = 0,
     small_magnitude: u16 = 0,
 
-    pub usingnamespace c_non_opaque_conversions(HapticDualMotor, C.SDL_HapticLeftRight);
+    pub const to_c_ptr = c_non_opaque_conversions(HapticDualMotor, C.SDL_HapticLeftRight).to_c_ptr;
+    pub const from_c_ptr = c_non_opaque_conversions(HapticDualMotor, C.SDL_HapticLeftRight).from_c_ptr;
+    pub const to_c = c_non_opaque_conversions(HapticDualMotor, C.SDL_HapticLeftRight).to_c;
+    pub const from_c = c_non_opaque_conversions(HapticDualMotor, C.SDL_HapticLeftRight).from_c;
 };
 
 pub const HapticCustom = extern struct {
@@ -1562,7 +1617,10 @@ pub const HapticCustom = extern struct {
     max_to_end_ratio_ms: u16 = 0,
     end_ratio: u16 = 32767,
 
-    pub usingnamespace c_non_opaque_conversions(HapticDualMotor, C.SDL_HapticCustom);
+    pub const to_c_ptr = c_non_opaque_conversions(HapticDualMotor, C.SDL_HapticCustom).to_c_ptr;
+    pub const from_c_ptr = c_non_opaque_conversions(HapticDualMotor, C.SDL_HapticCustom).from_c_ptr;
+    pub const to_c = c_non_opaque_conversions(HapticDualMotor, C.SDL_HapticCustom).to_c;
+    pub const from_c = c_non_opaque_conversions(HapticDualMotor, C.SDL_HapticCustom).from_c;
 };
 
 pub const HapticEffect = extern union {
@@ -1574,7 +1632,10 @@ pub const HapticEffect = extern union {
     dual_motor: HapticDualMotor,
     custom: HapticCustom,
 
-    pub usingnamespace c_non_opaque_conversions(HapticEffect, C.SDL_HapticEffect);
+    pub const to_c_ptr = c_non_opaque_conversions(HapticEffect, C.SDL_HapticEffect).to_c_ptr;
+    pub const from_c_ptr = c_non_opaque_conversions(HapticEffect, C.SDL_HapticEffect).from_c_ptr;
+    pub const to_c = c_non_opaque_conversions(HapticEffect, C.SDL_HapticEffect).to_c;
+    pub const from_c = c_non_opaque_conversions(HapticEffect, C.SDL_HapticEffect).from_c;
 
     pub const INFINITE_DURATION: u32 = C.SDL_HAPTIC_INFINITY;
 };
@@ -1631,7 +1692,8 @@ pub const HapticDirectionType = enum(u8) {
     SPHERICAL = C.SDL_HAPTIC_SPHERICAL,
     STEERING_AXIS = C.SDL_HAPTIC_STEERING_AXIS,
 
-    pub usingnamespace c_enum_conversions(HapticDirectionType, u8);
+    pub const to_c = c_enum_conversions(HapticDirectionType, u8).to_c;
+    pub const from_c = c_enum_conversions(HapticDirectionType, u8).from_c;
 };
 
 pub const OpenGL = struct {
@@ -1648,7 +1710,8 @@ pub const OpenGL = struct {
 };
 
 pub const GL_Context = opaque {
-    pub usingnamespace c_opaque_conversions(GL_Context, C.struct_SDL_GLContextState);
+    pub const to_c_ptr = c_opaque_conversions(GL_Context, C.struct_SDL_GLContextState).to_c_ptr;
+    pub const from_c_ptr = c_opaque_conversions(GL_Context, C.struct_SDL_GLContextState).from_c_ptr;
     //TODO
     // pub extern fn SDL_GL_GetCurrentContext() SDL_GLContext;
     // pub extern fn SDL_GL_DestroyContext(context: SDL_GLContext) bool;
@@ -1684,7 +1747,8 @@ pub const GL_Attr = enum(C.SDL_GLAttr) {
     FLOAT_BUFFERS = C.SDL_GL_FLOATBUFFERS,
     EGL_PLATFORM = C.SDL_GL_EGL_PLATFORM,
 
-    pub usingnamespace c_enum_conversions(GL_Attr, C.SDL_GLAttr);
+    pub const to_c = c_enum_conversions(GL_Attr, C.SDL_GLAttr).to_c;
+    pub const from_c = c_enum_conversions(GL_Attr, C.SDL_GLAttr).from_c;
     //TODO
     // pub extern fn SDL_GL_SetAttribute(attr: SDL_GLAttr, value: c_int) bool;
     // pub extern fn SDL_GL_GetAttribute(attr: SDL_GLAttr, value: [*c]c_int) bool;
@@ -1771,7 +1835,8 @@ pub const EGL_Int = struct {
 // pub extern fn SDL_GL_DestroyContext(context: SDL_GLContext) bool;
 
 pub const Renderer = opaque {
-    pub usingnamespace c_opaque_conversions(Renderer, C.SDL_Renderer);
+    pub const to_c_ptr = c_opaque_conversions(Renderer, C.SDL_Renderer).to_c_ptr;
+    pub const from_c_ptr = c_opaque_conversions(Renderer, C.SDL_Renderer).from_c_ptr;
 
     pub fn get_driver_count() c_int {
         return C.SDL_GetNumRenderDrivers();
@@ -2146,7 +2211,10 @@ pub const Surface = extern struct {
     refcount: AtomicInt = .{ .val = 0 },
     _reserved: ?*anyopaque = null,
 
-    pub usingnamespace c_non_opaque_conversions(Surface, C.SDL_Surface);
+    pub const to_c_ptr = c_non_opaque_conversions(Surface, C.SDL_Surface).to_c_ptr;
+    pub const from_c_ptr = c_non_opaque_conversions(Surface, C.SDL_Surface).from_c_ptr;
+    pub const to_c = c_non_opaque_conversions(Surface, C.SDL_Surface).to_c;
+    pub const from_c = c_non_opaque_conversions(Surface, C.SDL_Surface).from_c;
 
     pub fn create_surface(size: Vec_c_int, format: PixelFormat) Error!*Surface {
         return ptr_cast_or_fail_err(*Surface, C.SDL_CreateSurface(size.x, size.y, format));
@@ -2358,7 +2426,7 @@ pub const SurfaceFlags = Flags(enum(C.SDL_SurfaceFlags) {
     LOCK_NEEDED = C.SDL_SURFACE_LOCK_NEEDED,
     LOCKED = C.SDL_SURFACE_LOCKED,
     SIMD_ALIGNED = C.SDL_SURFACE_SIMD_ALIGNED,
-}, null);
+}, enum(C.SDL_SurfaceFlags) {});
 
 pub const TextureAccessMode = enum(c_uint) {
     STATIC = C.SDL_TEXTUREACCESS_STATIC,
@@ -2413,7 +2481,10 @@ pub const SimpleTexture = extern struct {
         return self.ref_count.decrement() == 1;
     }
 
-    pub usingnamespace c_non_opaque_conversions(SimpleTexture, C.SDL_Texture);
+    pub const to_c_ptr = c_non_opaque_conversions(SimpleTexture, C.SDL_Texture).to_c_ptr;
+    pub const from_c_ptr = c_non_opaque_conversions(SimpleTexture, C.SDL_Texture).from_c_ptr;
+    pub const to_c = c_non_opaque_conversions(SimpleTexture, C.SDL_Texture).to_c;
+    pub const from_c = c_non_opaque_conversions(SimpleTexture, C.SDL_Texture).from_c;
 
     pub fn destroy(self: *SimpleTexture) void {
         C.SDL_DestroyTexture(self.to_c_ptr());
@@ -2598,7 +2669,8 @@ pub const BlendFactor = enum(C.SDL_BlendFactor) {
     DST_ALPHA = C.SDL_BLENDFACTOR_DST_ALPHA,
     ONE_MINUS_DST_ALPHA = C.SDL_BLENDFACTOR_ONE_MINUS_DST_ALPHA,
 
-    pub usingnamespace c_enum_conversions(BlendFactor, C.SDL_BlendFactor);
+    pub const to_c = c_enum_conversions(BlendFactor, C.SDL_BlendFactor).to_c;
+    pub const from_c = c_enum_conversions(BlendFactor, C.SDL_BlendFactor).from_c;
 };
 
 pub const PixelType = enum(C.SDL_PixelType) {
@@ -2616,7 +2688,8 @@ pub const PixelType = enum(C.SDL_PixelType) {
     ARRAY_F16 = C.SDL_PIXELTYPE_ARRAYF16,
     ARRAY_F32 = C.SDL_PIXELTYPE_ARRAYF32,
 
-    pub usingnamespace c_enum_conversions(PixelType, C.SDL_PixelType);
+    pub const to_c = c_enum_conversions(PixelType, C.SDL_PixelType).to_c;
+    pub const from_c = c_enum_conversions(PixelType, C.SDL_PixelType).from_c;
 };
 
 pub const BitmapOrder = enum(C.SDL_BitmapOrder) {
@@ -2624,7 +2697,8 @@ pub const BitmapOrder = enum(C.SDL_BitmapOrder) {
     _4321 = C.SDL_BITMAPORDER_4321,
     _1234 = C.SDL_BITMAPORDER_1234,
 
-    pub usingnamespace c_enum_conversions(BitmapOrder, C.SDL_BitmapOrder);
+    pub const to_c = c_enum_conversions(BitmapOrder, C.SDL_BitmapOrder).to_c;
+    pub const from_c = c_enum_conversions(BitmapOrder, C.SDL_BitmapOrder).from_c;
 };
 
 pub const PackedOrder = enum(C.SDL_PackedOrder) {
@@ -2638,7 +2712,8 @@ pub const PackedOrder = enum(C.SDL_PackedOrder) {
     ABGR = C.SDL_PACKEDORDER_ABGR,
     BGRA = C.SDL_PACKEDORDER_BGRA,
 
-    pub usingnamespace c_enum_conversions(PackedOrder, C.SDL_PackedOrder);
+    pub const to_c = c_enum_conversions(PackedOrder, C.SDL_PackedOrder).to_c;
+    pub const from_c = c_enum_conversions(PackedOrder, C.SDL_PackedOrder).from_c;
 };
 
 pub const ArrayOrder = enum(C.SDL_ArrayOrder) {
@@ -2650,7 +2725,8 @@ pub const ArrayOrder = enum(C.SDL_ArrayOrder) {
     BGRA = C.SDL_ARRAYORDER_BGRA,
     ABGR = C.SDL_ARRAYORDER_ABGR,
 
-    pub usingnamespace c_enum_conversions(ArrayOrder, C.SDL_ArrayOrder);
+    pub const to_c = c_enum_conversions(ArrayOrder, C.SDL_ArrayOrder).to_c;
+    pub const from_c = c_enum_conversions(ArrayOrder, C.SDL_ArrayOrder).from_c;
 };
 
 pub const PackedLayout = enum(C.SDL_PackedLayout) {
@@ -2664,7 +2740,8 @@ pub const PackedLayout = enum(C.SDL_PackedLayout) {
     _2101010 = C.SDL_PACKEDLAYOUT_2101010,
     _1010102 = C.SDL_PACKEDLAYOUT_1010102,
 
-    pub usingnamespace c_enum_conversions(PackedLayout, C.SDL_PackedLayout);
+    pub const to_c = c_enum_conversions(PackedLayout, C.SDL_PackedLayout).to_c;
+    pub const from_c = c_enum_conversions(PackedLayout, C.SDL_PackedLayout).from_c;
 };
 
 pub const ColorType = enum(C.SDL_ColorType) {
@@ -2672,7 +2749,8 @@ pub const ColorType = enum(C.SDL_ColorType) {
     RGB = C.SDL_COLOR_TYPE_RGB,
     YCBCR = C.SDL_COLOR_TYPE_YCBCR,
 
-    pub usingnamespace c_enum_conversions(ColorType, C.SDL_ColorType);
+    pub const to_c = c_enum_conversions(ColorType, C.SDL_ColorType).to_c;
+    pub const from_c = c_enum_conversions(ColorType, C.SDL_ColorType).from_c;
 };
 
 pub const ColorRange = enum(C.SDL_ColorRange) {
@@ -2680,7 +2758,8 @@ pub const ColorRange = enum(C.SDL_ColorRange) {
     LIMITED = C.SDL_COLOR_RANGE_LIMITED,
     FULL = C.SDL_COLOR_RANGE_FULL,
 
-    pub usingnamespace c_enum_conversions(ColorRange, C.SDL_ColorRange);
+    pub const to_c = c_enum_conversions(ColorRange, C.SDL_ColorRange).to_c;
+    pub const from_c = c_enum_conversions(ColorRange, C.SDL_ColorRange).from_c;
 };
 
 pub const System = struct {
@@ -3000,7 +3079,8 @@ pub const PixelFormat = enum(C.SDL_PixelFormat) {
         }
     };
 
-    pub usingnamespace c_enum_conversions(PixelFormat, C.SDL_PixelFormat);
+    pub const to_c = c_enum_conversions(PixelFormat, C.SDL_PixelFormat).to_c;
+    pub const from_c = c_enum_conversions(PixelFormat, C.SDL_PixelFormat).from_c;
     //TODO
     // pub extern fn SDL_GetPixelFormatName(format: SDL_PixelFormat) [*c]const u8;
     // pub extern fn SDL_GetMasksForPixelFormat(format: SDL_PixelFormat, bpp: [*c]c_int, Rmask: [*c]Uint32, Gmask: [*c]Uint32, Bmask: [*c]Uint32, Amask: [*c]Uint32) bool;
@@ -3029,11 +3109,13 @@ pub const SystemTheme = enum(c_uint) {
     LIGHT = C.SDL_SYSTEM_THEME_LIGHT,
     DARK = C.SDL_SYSTEM_THEME_DARK,
 
-    pub usingnamespace c_enum_conversions(SystemTheme, C.SDL_SystemTheme);
+    pub const to_c = c_enum_conversions(SystemTheme, C.SDL_SystemTheme).to_c;
+    pub const from_c = c_enum_conversions(SystemTheme, C.SDL_SystemTheme).from_c;
 };
 
 pub const Window = opaque {
-    pub usingnamespace c_opaque_conversions(Window, C.SDL_Window);
+    pub const to_c_ptr = c_opaque_conversions(Window, C.SDL_Window).to_c_ptr;
+    pub const from_c_ptr = c_opaque_conversions(Window, C.SDL_Window).from_c_ptr;
     pub fn try_get_display_id(self: *Window) Error!DisplayID {
         return DisplayID{ .id = try nonzero_or_null_err(C.SDL_GetDisplayForWindow(self.to_c_ptr())) };
     }
@@ -3410,7 +3492,8 @@ pub const TextInputType = enum(C.SDL_TextInputType) {
     NUMBER_PASSWORD_HIDDEN = C.SDL_TEXTINPUT_TYPE_NUMBER_PASSWORD_HIDDEN,
     NUMBER_PASSWORD_VISIBLE = C.SDL_TEXTINPUT_TYPE_NUMBER_PASSWORD_VISIBLE,
 
-    pub usingnamespace c_enum_conversions(TextInputType, C.SDL_TextInputType);
+    pub const to_c = c_enum_conversions(TextInputType, C.SDL_TextInputType).to_c;
+    pub const from_c = c_enum_conversions(TextInputType, C.SDL_TextInputType).from_c;
 };
 
 pub const Capitalization = enum(C.SDL_Capitalization) {
@@ -3419,7 +3502,8 @@ pub const Capitalization = enum(C.SDL_Capitalization) {
     WORDS = C.SDL_CAPITALIZE_WORDS,
     LETTERS = C.SDL_CAPITALIZE_LETTERS,
 
-    pub usingnamespace c_enum_conversions(Capitalization, C.SDL_Capitalization);
+    pub const to_c = c_enum_conversions(Capitalization, C.SDL_Capitalization).to_c;
+    pub const from_c = c_enum_conversions(Capitalization, C.SDL_Capitalization).from_c;
 };
 
 pub const FlashMode = enum(C.SDL_FlashOperation) {
@@ -3427,7 +3511,8 @@ pub const FlashMode = enum(C.SDL_FlashOperation) {
     BRIEFLY = C.SDL_FLASH_BRIEFLY,
     UNTIL_FOCUSED = C.SDL_FLASH_UNTIL_FOCUSED,
 
-    pub usingnamespace c_enum_conversions(FlashMode, C.SDL_FlashOperation);
+    pub const to_c = c_enum_conversions(FlashMode, C.SDL_FlashOperation).to_c;
+    pub const from_c = c_enum_conversions(FlashMode, C.SDL_FlashOperation).from_c;
 };
 
 pub const WindowHitTestResult = enum(C.SDL_HitTestResult) {
@@ -3442,7 +3527,8 @@ pub const WindowHitTestResult = enum(C.SDL_HitTestResult) {
     RESIZE_BOTTOMLEFT = C.SDL_HITTEST_RESIZE_BOTTOMLEFT,
     RESIZE_LEFT = C.SDL_HITTEST_RESIZE_LEFT,
 
-    pub usingnamespace c_enum_conversions(WindowHitTestResult, C.SDL_HitTestResult);
+    pub const to_c = c_enum_conversions(WindowHitTestResult, C.SDL_HitTestResult).to_c;
+    pub const from_c = c_enum_conversions(WindowHitTestResult, C.SDL_HitTestResult).from_c;
 };
 
 pub const WindowHittestFn = fn (window: *Window, test_point: *Vec_c_int, custom_data: ?*anyopaque) callconv(.c) WindowHitTestResult;
@@ -3456,7 +3542,8 @@ pub const VSync = enum(c_int) {
         return @enumFromInt(n);
     }
 
-    pub usingnamespace c_enum_conversions(VSync, c_int);
+    pub const to_c = c_enum_conversions(VSync, c_int).to_c;
+    pub const from_c = c_enum_conversions(VSync, c_int).from_c;
 };
 
 pub const BorderSizes = extern struct {
@@ -3556,7 +3643,7 @@ pub const WindowFlags = Flags(enum(u64) {
     METAL = C.SDL_WINDOW_METAL,
     TRANSPARENT = C.SDL_WINDOW_TRANSPARENT,
     NOT_FOCUSABLE = C.SDL_WINDOW_NOT_FOCUSABLE,
-}, null);
+}, enum(u64) {});
 
 /// Helper struct for SDL functions that expect a `?*IRect` where:
 /// - `null` == use entire area
@@ -3610,7 +3697,8 @@ pub const Scale = extern struct {
 };
 
 pub const ColorPalette = opaque {
-    pub usingnamespace c_opaque_conversions(ColorPalette, C.SDL_Palette);
+    pub const to_c_ptr = c_opaque_conversions(ColorPalette, C.SDL_Palette).to_c_ptr;
+    pub const from_c_ptr = c_opaque_conversions(ColorPalette, C.SDL_Palette).from_c_ptr;
 
     pub fn colors(self: *ColorPalette) []const Color_RGBA_u8 {
         const c = self.to_c_ptr();
@@ -3648,7 +3736,8 @@ pub const Colorspace = enum(C.SDL_Colorspace) {
     YUV_DEFAULT = C.SDL_COLORSPACE_YUV_DEFAULT,
     _,
 
-    pub usingnamespace c_enum_conversions(Colorspace, C.SDL_Colorspace);
+    pub const to_c = c_enum_conversions(Colorspace, C.SDL_Colorspace).to_c;
+    pub const from_c = c_enum_conversions(Colorspace, C.SDL_Colorspace).from_c;
 
     pub fn custom(color_type: ColorType, range: ColorRange, primaries: ColorPrimaries, transfer: TransferCharacteristics, matrix: MatrixCoefficients, chroma_loc: ChromaLocation) Colorspace {
         return Colorspace.from_c(C.SDL_DEFINE_COLORSPACE(color_type.to_c(), range.to_c(), primaries.to_c(), transfer.to_c(), matrix.to_c(), chroma_loc.to_c()));
@@ -3698,7 +3787,8 @@ pub const IndexType = enum(c_int) {
     U16 = 2,
     U32 = 4,
 
-    pub usingnamespace c_enum_conversions(IndexType, c_int);
+    pub const to_c = c_enum_conversions(IndexType, c_int).to_c;
+    pub const from_c = c_enum_conversions(IndexType, c_int).from_c;
 };
 
 pub const AppResult = enum(C.SDL_AppResult) {
@@ -3706,7 +3796,8 @@ pub const AppResult = enum(C.SDL_AppResult) {
     CLOSE_NORMAL = C.SDL_APP_SUCCESS,
     CLOSE_ERROR = C.SDL_APP_FAILURE,
 
-    pub usingnamespace c_enum_conversions(AppResult, C.SDL_AppResult);
+    pub const to_c = c_enum_conversions(AppResult, C.SDL_AppResult).to_c;
+    pub const from_c = c_enum_conversions(AppResult, C.SDL_AppResult).from_c;
 };
 
 pub const LogicalPresentationMode = enum(C.SDL_RendererLogicalPresentation) {
@@ -3716,7 +3807,8 @@ pub const LogicalPresentationMode = enum(C.SDL_RendererLogicalPresentation) {
     OVERSCAN = C.SDL_LOGICAL_PRESENTATION_OVERSCAN,
     INTEGER_SCALE = C.SDL_LOGICAL_PRESENTATION_INTEGER_SCALE,
 
-    pub usingnamespace c_enum_conversions(AppResult, C.SDL_RendererLogicalPresentation);
+    pub const to_c = c_enum_conversions(AppResult, C.SDL_RendererLogicalPresentation).to_c;
+    pub const from_c = c_enum_conversions(AppResult, C.SDL_RendererLogicalPresentation).from_c;
 };
 
 pub const LogicalPresentation = extern struct {
@@ -3784,7 +3876,8 @@ pub const ColorPrimaries = enum(c_uint) {
     EBU3213 = C.SDL_COLOR_PRIMARIES_EBU3213,
     CUSTOM = C.SDL_COLOR_PRIMARIES_CUSTOM,
 
-    pub usingnamespace c_enum_conversions(ColorPrimaries, c_uint);
+    pub const to_c = c_enum_conversions(ColorPrimaries, c_uint).to_c;
+    pub const from_c = c_enum_conversions(ColorPrimaries, c_uint).from_c;
 };
 
 pub const TransferCharacteristics = enum(C.SDL_TransferCharacteristics) {
@@ -3808,7 +3901,8 @@ pub const TransferCharacteristics = enum(C.SDL_TransferCharacteristics) {
     HLG = C.SDL_TRANSFER_CHARACTERISTICS_HLG,
     CUSTOM = C.SDL_TRANSFER_CHARACTERISTICS_CUSTOM,
 
-    pub usingnamespace c_enum_conversions(TransferCharacteristics, C.SDL_TransferCharacteristics);
+    pub const to_c = c_enum_conversions(TransferCharacteristics, C.SDL_TransferCharacteristics).to_c;
+    pub const from_c = c_enum_conversions(TransferCharacteristics, C.SDL_TransferCharacteristics).from_c;
 };
 
 pub const MatrixCoefficients = enum(C.SDL_MatrixCoefficients) {
@@ -3828,7 +3922,8 @@ pub const MatrixCoefficients = enum(C.SDL_MatrixCoefficients) {
     ICTCP = C.SDL_MATRIX_COEFFICIENTS_ICTCP,
     CUSTOM = C.SDL_MATRIX_COEFFICIENTS_CUSTOM,
 
-    pub usingnamespace c_enum_conversions(MatrixCoefficients, C.SDL_MatrixCoefficients);
+    pub const to_c = c_enum_conversions(MatrixCoefficients, C.SDL_MatrixCoefficients).to_c;
+    pub const from_c = c_enum_conversions(MatrixCoefficients, C.SDL_MatrixCoefficients).from_c;
 };
 
 pub const ChromaLocation = enum(C.SDL_ChromaLocation) {
@@ -3837,7 +3932,8 @@ pub const ChromaLocation = enum(C.SDL_ChromaLocation) {
     CENTER = C.SDL_CHROMA_LOCATION_CENTER,
     TOPLEFT = C.SDL_CHROMA_LOCATION_TOPLEFT,
 
-    pub usingnamespace c_enum_conversions(ChromaLocation, C.SDL_ChromaLocation);
+    pub const to_c = c_enum_conversions(ChromaLocation, C.SDL_ChromaLocation).to_c;
+    pub const from_c = c_enum_conversions(ChromaLocation, C.SDL_ChromaLocation).from_c;
 };
 
 pub const PixelFormatDetails = extern struct {
@@ -3858,7 +3954,10 @@ pub const PixelFormatDetails = extern struct {
     Bshift: u8 = 0,
     Ashift: u8 = 0,
 
-    pub usingnamespace c_non_opaque_conversions(PixelFormatDetails, C.SDL_PixelFormatDetails);
+    pub const to_c_ptr = c_non_opaque_conversions(PixelFormatDetails, C.SDL_PixelFormatDetails).to_c_ptr;
+    pub const from_c_ptr = c_non_opaque_conversions(PixelFormatDetails, C.SDL_PixelFormatDetails).from_c_ptr;
+    pub const to_c = c_non_opaque_conversions(PixelFormatDetails, C.SDL_PixelFormatDetails).to_c;
+    pub const from_c = c_non_opaque_conversions(PixelFormatDetails, C.SDL_PixelFormatDetails).from_c;
 
     //TODO
     // pub extern fn SDL_MapRGB(format: [*c]const SDL_PixelFormatDetails, palette: [*c]const SDL_Palette, r: Uint8, g: Uint8, b: Uint8) Uint32;
@@ -3872,7 +3971,10 @@ pub const AudioSpec = extern struct {
     channels: c_int = 0,
     freq: c_int = 0,
 
-    pub usingnamespace c_non_opaque_conversions(AudioSpec, C.SDL_AudioSpec);
+    pub const to_c_ptr = c_non_opaque_conversions(AudioSpec, C.SDL_AudioSpec).to_c_ptr;
+    pub const from_c_ptr = c_non_opaque_conversions(AudioSpec, C.SDL_AudioSpec).from_c_ptr;
+    pub const to_c = c_non_opaque_conversions(AudioSpec, C.SDL_AudioSpec).to_c;
+    pub const from_c = c_non_opaque_conversions(AudioSpec, C.SDL_AudioSpec).from_c;
 
     pub fn frame_size(self: *AudioSpec) c_int {
         return @as(c_int, @intCast(self.format.byte_size())) * self.channels;
@@ -4145,7 +4247,8 @@ pub const GamepadType = enum(C.SDL_GamepadType) {
 
     pub const COUNT: C.SDL_GamepadType = C.SDL_GAMEPAD_TYPE_COUNT;
 
-    pub usingnamespace c_enum_conversions(GamepadType, C.SDL_GamepadType);
+    pub const to_c = c_enum_conversions(GamepadType, C.SDL_GamepadType).to_c;
+    pub const from_c = c_enum_conversions(GamepadType, C.SDL_GamepadType).from_c;
 
     pub fn from_string(str: [*:0]const u8) GamepadType {
         return GamepadType.from_c(C.SDL_GetGamepadTypeFromString(str));
@@ -4194,7 +4297,8 @@ pub const GamepadButton = enum(u8) {
         return @enumFromInt(@as(u8, @intCast(val)));
     }
 
-    pub usingnamespace c_enum_conversions(GamepadButton, u8);
+    pub const to_c = c_enum_conversions(GamepadButton, u8).to_c;
+    pub const from_c = c_enum_conversions(GamepadButton, u8).from_c;
 
     pub fn from_string(str: [*:0]const u8) GamepadButton {
         return GamepadButton.from_c(C.SDL_GetGamepadButtonFromString(str));
@@ -4215,7 +4319,8 @@ pub const GamepadFaceButtonLabel = enum(c_uint) {
     SQUARE = C.SDL_GAMEPAD_BUTTON_LABEL_SQUARE,
     TRIANGLE = C.SDL_GAMEPAD_BUTTON_LABEL_TRIANGLE,
 
-    pub usingnamespace c_enum_conversions(GamepadFaceButtonLabel, c_uint);
+    pub const to_c = c_enum_conversions(GamepadFaceButtonLabel, c_uint).to_c;
+    pub const from_c = c_enum_conversions(GamepadFaceButtonLabel, c_uint).from_c;
 };
 
 pub const GamepadAxis = enum(u8) {
@@ -4228,7 +4333,8 @@ pub const GamepadAxis = enum(u8) {
 
     pub const COUNT: u8 = C.SDL_GAMEPAD_AXIS_COUNT;
 
-    pub usingnamespace c_enum_conversions(GamepadAxis, u8);
+    pub const to_c = c_enum_conversions(GamepadAxis, u8).to_c;
+    pub const from_c = c_enum_conversions(GamepadAxis, u8).from_c;
 
     pub fn from_string(str: [*:0]const u8) GamepadAxis {
         return GamepadAxis.from_c(C.SDL_GetGamepadAxisFromString(str));
@@ -4244,7 +4350,8 @@ pub const GamepadBindingType = enum(c_uint) {
     AXIS = C.SDL_GAMEPAD_BINDTYPE_AXIS,
     HAT = C.SDL_GAMEPAD_BINDTYPE_HAT,
 
-    pub usingnamespace c_enum_conversions(GamepadBindingType, c_uint);
+    pub const to_c = c_enum_conversions(GamepadBindingType, c_uint).to_c;
+    pub const from_c = c_enum_conversions(GamepadBindingType, c_uint).from_c;
 };
 
 pub const StorageInterface = extern struct {
@@ -4263,7 +4370,8 @@ pub const StorageInterface = extern struct {
 };
 
 pub const Storage = opaque {
-    pub usingnamespace c_opaque_conversions(Storage, C.SDL_Storage);
+    pub const to_c_ptr = c_opaque_conversions(Storage, C.SDL_Storage).to_c_ptr;
+    pub const from_c_ptr = c_opaque_conversions(Storage, C.SDL_Storage).from_c_ptr;
     pub fn open_app_readonly_storage_folder(override: [:0]const u8, properties: PropertiesID) Error!*Storage {
         return ptr_cast_or_fail_err(*Storage, C.SDL_OpenTitleStorage(override.ptr, properties));
     }
@@ -4332,7 +4440,8 @@ pub const EnumerationResult = enum(C.SDL_EnumerationResult) {
     SUCCESS = C.SDL_ENUM_SUCCESS,
     FAILURE = C.SDL_ENUM_FAILURE,
 
-    pub usingnamespace c_enum_conversions(EnumerationResult, C.SDL_EnumerationResult);
+    pub const to_c = c_enum_conversions(EnumerationResult, C.SDL_EnumerationResult).to_c;
+    pub const from_c = c_enum_conversions(EnumerationResult, C.SDL_EnumerationResult).from_c;
 };
 
 pub const PathInfo = extern struct {
@@ -4349,7 +4458,8 @@ pub const PathType = enum(C.SDL_PathType) {
     DIRECTORY = C.SDL_PATHTYPE_DIRECTORY,
     OTHER = C.SDL_PATHTYPE_OTHER,
 
-    pub usingnamespace c_enum_conversions(PathType, C.SDL_PathType);
+    pub const to_c = c_enum_conversions(PathType, C.SDL_PathType).to_c;
+    pub const from_c = c_enum_conversions(PathType, C.SDL_PathType).from_c;
 };
 
 pub const DirectoryGlob = extern struct {
@@ -4373,7 +4483,8 @@ pub const KeyboardID = extern struct {
 };
 
 pub const Camera = opaque {
-    pub usingnamespace c_opaque_conversions(Camera, C.SDL_Camera);
+    pub const to_c_ptr = c_opaque_conversions(Camera, C.SDL_Camera).to_c_ptr;
+    pub const from_c_ptr = c_opaque_conversions(Camera, C.SDL_Camera).from_c_ptr;
     //TODO
     // pub extern fn SDL_GetCameraPermissionState(camera: ?*SDL_Camera) c_int;
     // pub extern fn SDL_GetCameraID(camera: ?*SDL_Camera) SDL_CameraID;
@@ -4392,7 +4503,10 @@ pub const CameraSpec = extern struct {
     framerate_numerator: c_int = 0,
     framerate_denominator: c_int = 0,
 
-    pub usingnamespace c_non_opaque_conversions(CameraSpec, C.SDL_CameraSpec);
+    pub const to_c_ptr = c_non_opaque_conversions(CameraSpec, C.SDL_CameraSpec).to_c_ptr;
+    pub const from_c_ptr = c_non_opaque_conversions(CameraSpec, C.SDL_CameraSpec).from_c_ptr;
+    pub const to_c = c_non_opaque_conversions(CameraSpec, C.SDL_CameraSpec).to_c;
+    pub const from_c = c_non_opaque_conversions(CameraSpec, C.SDL_CameraSpec).from_c;
 };
 
 pub const CameraPosition = enum(c_uint) {
@@ -4400,7 +4514,8 @@ pub const CameraPosition = enum(c_uint) {
     FRONT_FACING = C.SDL_CAMERA_POSITION_FRONT_FACING,
     BACK_FACING = C.SDL_CAMERA_POSITION_BACK_FACING,
 
-    pub usingnamespace c_enum_conversions(CameraPosition, C.SDL_CameraPosition);
+    pub const to_c = c_enum_conversions(CameraPosition, C.SDL_CameraPosition).to_c;
+    pub const from_c = c_enum_conversions(CameraPosition, C.SDL_CameraPosition).from_c;
 };
 
 pub const Event = extern union {
@@ -4444,7 +4559,10 @@ pub const Event = extern union {
     clipboard: ClipboardEvent,
     _FORCE_SIZE: [128]u8,
 
-    pub usingnamespace c_non_opaque_conversions(Event, C.SDL_Event);
+    pub const to_c_ptr = c_non_opaque_conversions(Event, C.SDL_Event).to_c_ptr;
+    pub const from_c_ptr = c_non_opaque_conversions(Event, C.SDL_Event).from_c_ptr;
+    pub const to_c = c_non_opaque_conversions(Event, C.SDL_Event).to_c;
+    pub const from_c = c_non_opaque_conversions(Event, C.SDL_Event).from_c;
 
     pub fn convert_coords_to_render_coords(self: *Event, renderer: *Renderer) Error!void {
         return ok_or_fail_err(C.SDL_ConvertEventToRenderCoordinates(renderer.to_c_ptr(), self.to_c()));
@@ -4478,7 +4596,10 @@ pub const CommonEvent = extern struct {
     reserved: u32 = 0,
     timestamp: u64 = 0,
 
-    pub usingnamespace c_non_opaque_conversions(CommonEvent, C.SDL_CommonEvent);
+    pub const to_c_ptr = c_non_opaque_conversions(CommonEvent, C.SDL_CommonEvent).to_c_ptr;
+    pub const from_c_ptr = c_non_opaque_conversions(CommonEvent, C.SDL_CommonEvent).from_c_ptr;
+    pub const to_c = c_non_opaque_conversions(CommonEvent, C.SDL_CommonEvent).to_c;
+    pub const from_c = c_non_opaque_conversions(CommonEvent, C.SDL_CommonEvent).from_c;
 };
 
 pub const DisplayEvent = extern struct {
@@ -4489,7 +4610,10 @@ pub const DisplayEvent = extern struct {
     data_1: i32 = 0,
     data_2: i32 = 0,
 
-    pub usingnamespace c_non_opaque_conversions(DisplayEvent, C.SDL_DisplayEvent);
+    pub const to_c_ptr = c_non_opaque_conversions(DisplayEvent, C.SDL_DisplayEvent).to_c_ptr;
+    pub const from_c_ptr = c_non_opaque_conversions(DisplayEvent, C.SDL_DisplayEvent).from_c_ptr;
+    pub const to_c = c_non_opaque_conversions(DisplayEvent, C.SDL_DisplayEvent).to_c;
+    pub const from_c = c_non_opaque_conversions(DisplayEvent, C.SDL_DisplayEvent).from_c;
 };
 
 pub const WindowEvent = extern struct {
@@ -4500,7 +4624,10 @@ pub const WindowEvent = extern struct {
     data_1: i32 = 0,
     data_2: i32 = 0,
 
-    pub usingnamespace c_non_opaque_conversions(WindowEvent, C.SDL_WindowEvent);
+    pub const to_c_ptr = c_non_opaque_conversions(WindowEvent, C.SDL_WindowEvent).to_c_ptr;
+    pub const from_c_ptr = c_non_opaque_conversions(WindowEvent, C.SDL_WindowEvent).from_c_ptr;
+    pub const to_c = c_non_opaque_conversions(WindowEvent, C.SDL_WindowEvent).to_c;
+    pub const from_c = c_non_opaque_conversions(WindowEvent, C.SDL_WindowEvent).from_c;
 };
 
 pub const KeyboardDeviceEvent = extern struct {
@@ -4509,7 +4636,10 @@ pub const KeyboardDeviceEvent = extern struct {
     timestamp: u64 = 0,
     keyboard_id: KeyboardID = .{},
 
-    pub usingnamespace c_non_opaque_conversions(KeyboardDeviceEvent, C.SDL_KeyboardDeviceEvent);
+    pub const to_c_ptr = c_non_opaque_conversions(KeyboardDeviceEvent, C.SDL_KeyboardDeviceEvent).to_c_ptr;
+    pub const from_c_ptr = c_non_opaque_conversions(KeyboardDeviceEvent, C.SDL_KeyboardDeviceEvent).from_c_ptr;
+    pub const to_c = c_non_opaque_conversions(KeyboardDeviceEvent, C.SDL_KeyboardDeviceEvent).to_c;
+    pub const from_c = c_non_opaque_conversions(KeyboardDeviceEvent, C.SDL_KeyboardDeviceEvent).from_c;
 };
 
 pub const KeyboardEvent = extern struct {
@@ -4519,13 +4649,16 @@ pub const KeyboardEvent = extern struct {
     window_id: WindowID = .{},
     keyboard_id: KeyboardID = .{},
     scancode: Scancode = .UNKNOWN,
-    key: Keycode = .{},
+    key: Keycode = .UNKNOWN,
     mod: Keymod = .{},
     raw: u16 = 0,
     down: bool = false,
     repeat: bool = false,
 
-    pub usingnamespace c_non_opaque_conversions(KeyboardEvent, C.SDL_KeyboardEvent);
+    pub const to_c_ptr = c_non_opaque_conversions(KeyboardEvent, C.SDL_KeyboardEvent).to_c_ptr;
+    pub const from_c_ptr = c_non_opaque_conversions(KeyboardEvent, C.SDL_KeyboardEvent).from_c_ptr;
+    pub const to_c = c_non_opaque_conversions(KeyboardEvent, C.SDL_KeyboardEvent).to_c;
+    pub const from_c = c_non_opaque_conversions(KeyboardEvent, C.SDL_KeyboardEvent).from_c;
 };
 
 pub const TextEditEvent = extern struct {
@@ -4537,7 +4670,10 @@ pub const TextEditEvent = extern struct {
     start: i32 = 0,
     length: i32 = 0,
 
-    pub usingnamespace c_non_opaque_conversions(TextEditEvent, C.SDL_TextEditingEvent);
+    pub const to_c_ptr = c_non_opaque_conversions(TextEditEvent, C.SDL_TextEditingEvent).to_c_ptr;
+    pub const from_c_ptr = c_non_opaque_conversions(TextEditEvent, C.SDL_TextEditingEvent).from_c_ptr;
+    pub const to_c = c_non_opaque_conversions(TextEditEvent, C.SDL_TextEditingEvent).to_c;
+    pub const from_c = c_non_opaque_conversions(TextEditEvent, C.SDL_TextEditingEvent).from_c;
 };
 
 pub const TextEditCandidateEvent = extern struct {
@@ -4553,7 +4689,10 @@ pub const TextEditCandidateEvent = extern struct {
     _padding_2: u8 = 0,
     _padding_3: u8 = 0,
 
-    pub usingnamespace c_non_opaque_conversions(TextEditCandidateEvent, C.SDL_TextEditingCandidatesEvent);
+    pub const to_c_ptr = c_non_opaque_conversions(TextEditCandidateEvent, C.SDL_TextEditingCandidatesEvent).to_c_ptr;
+    pub const from_c_ptr = c_non_opaque_conversions(TextEditCandidateEvent, C.SDL_TextEditingCandidatesEvent).from_c_ptr;
+    pub const to_c = c_non_opaque_conversions(TextEditCandidateEvent, C.SDL_TextEditingCandidatesEvent).to_c;
+    pub const from_c = c_non_opaque_conversions(TextEditCandidateEvent, C.SDL_TextEditingCandidatesEvent).from_c;
 };
 
 pub const TextInputEvent = extern struct {
@@ -4563,7 +4702,10 @@ pub const TextInputEvent = extern struct {
     window_id: WindowID = .{},
     text: ?[*:0]const u8 = null,
 
-    pub usingnamespace c_non_opaque_conversions(TextInputEvent, C.SDL_TextInputEvent);
+    pub const to_c_ptr = c_non_opaque_conversions(TextInputEvent, C.SDL_TextInputEvent).to_c_ptr;
+    pub const from_c_ptr = c_non_opaque_conversions(TextInputEvent, C.SDL_TextInputEvent).from_c_ptr;
+    pub const to_c = c_non_opaque_conversions(TextInputEvent, C.SDL_TextInputEvent).to_c;
+    pub const from_c = c_non_opaque_conversions(TextInputEvent, C.SDL_TextInputEvent).from_c;
 };
 
 pub const MouseDeviceEvent = extern struct {
@@ -4572,7 +4714,10 @@ pub const MouseDeviceEvent = extern struct {
     timestamp: u64 = 0,
     mouse_id: MouseID = .{},
 
-    pub usingnamespace c_non_opaque_conversions(MouseDeviceEvent, C.SDL_MouseDeviceEvent);
+    pub const to_c_ptr = c_non_opaque_conversions(MouseDeviceEvent, C.SDL_MouseDeviceEvent).to_c_ptr;
+    pub const from_c_ptr = c_non_opaque_conversions(MouseDeviceEvent, C.SDL_MouseDeviceEvent).from_c_ptr;
+    pub const to_c = c_non_opaque_conversions(MouseDeviceEvent, C.SDL_MouseDeviceEvent).to_c;
+    pub const from_c = c_non_opaque_conversions(MouseDeviceEvent, C.SDL_MouseDeviceEvent).from_c;
 };
 
 pub const MouseMotionEvent = extern struct {
@@ -4585,7 +4730,10 @@ pub const MouseMotionEvent = extern struct {
     pos: Vec_f32 = Vec_f32{},
     delta: Vec_f32 = Vec_f32{},
 
-    pub usingnamespace c_non_opaque_conversions(MouseMotionEvent, C.SDL_MouseMotionEvent);
+    pub const to_c_ptr = c_non_opaque_conversions(MouseMotionEvent, C.SDL_MouseMotionEvent).to_c_ptr;
+    pub const from_c_ptr = c_non_opaque_conversions(MouseMotionEvent, C.SDL_MouseMotionEvent).from_c_ptr;
+    pub const to_c = c_non_opaque_conversions(MouseMotionEvent, C.SDL_MouseMotionEvent).to_c;
+    pub const from_c = c_non_opaque_conversions(MouseMotionEvent, C.SDL_MouseMotionEvent).from_c;
 
     pub fn convert_coords_to_render_coords(self: *MouseMotionEvent, renderer: *Renderer) Error!void {
         return ok_or_fail_err(C.SDL_ConvertEventToRenderCoordinates(renderer.to_c_ptr(), self.to_c_event()));
@@ -4604,7 +4752,10 @@ pub const MouseButtonEvent = extern struct {
     _padding: u8 = 0,
     pos: Vec_f32 = Vec_f32{},
 
-    pub usingnamespace c_non_opaque_conversions(MouseButtonEvent, C.SDL_MouseButtonEvent);
+    pub const to_c_ptr = c_non_opaque_conversions(MouseButtonEvent, C.SDL_MouseButtonEvent).to_c_ptr;
+    pub const from_c_ptr = c_non_opaque_conversions(MouseButtonEvent, C.SDL_MouseButtonEvent).from_c_ptr;
+    pub const to_c = c_non_opaque_conversions(MouseButtonEvent, C.SDL_MouseButtonEvent).to_c;
+    pub const from_c = c_non_opaque_conversions(MouseButtonEvent, C.SDL_MouseButtonEvent).from_c;
 
     pub fn convert_coords_to_render_coords(self: *MouseButtonEvent, renderer: *Renderer) Error!void {
         return ok_or_fail_err(C.SDL_ConvertEventToRenderCoordinates(renderer.to_c_ptr(), self.to_c_event()));
@@ -4619,7 +4770,8 @@ pub const MouseButton = enum(u8) {
     SIDE_2 = C.SDL_BUTTON_X2,
     _,
 
-    pub usingnamespace c_enum_conversions(MouseButton, u8);
+    pub const to_c = c_enum_conversions(MouseButton, u8).to_c;
+    pub const from_c = c_enum_conversions(MouseButton, u8).from_c;
 
     pub inline fn to_flag(self: MouseButton) MouseButtonFlags {
         return MouseButtonFlags.from_bit(@intCast(self.to_c() - 1));
@@ -4633,7 +4785,7 @@ pub const MouseButtonFlags = Flags(enum(u32) {
     SIDE_1 = C.SDL_BUTTON_X1MASK,
     SIDE_2 = C.SDL_BUTTON_X2MASK,
     _,
-}, null);
+}, enum(u32) {});
 
 pub const MouseWheelEvent = extern struct {
     type: EventType = .NONE,
@@ -4645,7 +4797,10 @@ pub const MouseWheelEvent = extern struct {
     direction: MouseWheelDirection = .NORMAL,
     pos: Vec_f32 = Vec_f32{},
 
-    pub usingnamespace c_non_opaque_conversions(MouseWheelEvent, C.SDL_MouseWheelEvent);
+    pub const to_c_ptr = c_non_opaque_conversions(MouseWheelEvent, C.SDL_MouseWheelEvent).to_c_ptr;
+    pub const from_c_ptr = c_non_opaque_conversions(MouseWheelEvent, C.SDL_MouseWheelEvent).from_c_ptr;
+    pub const to_c = c_non_opaque_conversions(MouseWheelEvent, C.SDL_MouseWheelEvent).to_c;
+    pub const from_c = c_non_opaque_conversions(MouseWheelEvent, C.SDL_MouseWheelEvent).from_c;
 
     pub fn convert_coords_to_render_coords(self: *MouseWheelEvent, renderer: *Renderer) Error!void {
         return ok_or_fail_err(C.SDL_ConvertEventToRenderCoordinates(renderer.to_c_ptr(), self.to_c_event()));
@@ -4664,7 +4819,10 @@ pub const JoyAxisEvent = extern struct {
     value: i16 = 0,
     _padding_4: u16 = 0,
 
-    pub usingnamespace c_non_opaque_conversions(JoyAxisEvent, C.SDL_JoyAxisEvent);
+    pub const to_c_ptr = c_non_opaque_conversions(JoyAxisEvent, C.SDL_JoyAxisEvent).to_c_ptr;
+    pub const from_c_ptr = c_non_opaque_conversions(JoyAxisEvent, C.SDL_JoyAxisEvent).from_c_ptr;
+    pub const to_c = c_non_opaque_conversions(JoyAxisEvent, C.SDL_JoyAxisEvent).to_c;
+    pub const from_c = c_non_opaque_conversions(JoyAxisEvent, C.SDL_JoyAxisEvent).from_c;
 };
 
 pub const JoyBallEvent = extern struct {
@@ -4678,7 +4836,10 @@ pub const JoyBallEvent = extern struct {
     _padding_3: u8 = 0,
     delta: Vec_i16 = Vec_i16{},
 
-    pub usingnamespace c_non_opaque_conversions(JoyBallEvent, C.SDL_JoyBallEvent);
+    pub const to_c_ptr = c_non_opaque_conversions(JoyBallEvent, C.SDL_JoyBallEvent).to_c_ptr;
+    pub const from_c_ptr = c_non_opaque_conversions(JoyBallEvent, C.SDL_JoyBallEvent).from_c_ptr;
+    pub const to_c = c_non_opaque_conversions(JoyBallEvent, C.SDL_JoyBallEvent).to_c;
+    pub const from_c = c_non_opaque_conversions(JoyBallEvent, C.SDL_JoyBallEvent).from_c;
 
     pub fn convert_coords_to_render_coords(self: *JoyBallEvent, renderer: *Renderer) Error!void {
         return ok_or_fail_err(C.SDL_ConvertEventToRenderCoordinates(renderer.to_c_ptr(), self.to_c_event()));
@@ -4695,7 +4856,10 @@ pub const JoyHatEvent = extern struct {
     _padding_1: u8 = 0,
     _padding_2: u8 = 0,
 
-    pub usingnamespace c_non_opaque_conversions(JoyHatEvent, C.SDL_JoyHatEvent);
+    pub const to_c_ptr = c_non_opaque_conversions(JoyHatEvent, C.SDL_JoyHatEvent).to_c_ptr;
+    pub const from_c_ptr = c_non_opaque_conversions(JoyHatEvent, C.SDL_JoyHatEvent).from_c_ptr;
+    pub const to_c = c_non_opaque_conversions(JoyHatEvent, C.SDL_JoyHatEvent).to_c;
+    pub const from_c = c_non_opaque_conversions(JoyHatEvent, C.SDL_JoyHatEvent).from_c;
 };
 
 pub const JoyButtonEvent = extern struct {
@@ -4708,7 +4872,10 @@ pub const JoyButtonEvent = extern struct {
     _padding_1: u8 = 0,
     _padding_2: u8 = 0,
 
-    pub usingnamespace c_non_opaque_conversions(JoyButtonEvent, C.SDL_JoyButtonEvent);
+    pub const to_c_ptr = c_non_opaque_conversions(JoyButtonEvent, C.SDL_JoyButtonEvent).to_c_ptr;
+    pub const from_c_ptr = c_non_opaque_conversions(JoyButtonEvent, C.SDL_JoyButtonEvent).from_c_ptr;
+    pub const to_c = c_non_opaque_conversions(JoyButtonEvent, C.SDL_JoyButtonEvent).to_c;
+    pub const from_c = c_non_opaque_conversions(JoyButtonEvent, C.SDL_JoyButtonEvent).from_c;
 };
 
 pub const JoyDeviceEvent = extern struct {
@@ -4717,7 +4884,10 @@ pub const JoyDeviceEvent = extern struct {
     timestamp: u64 = 0,
     controller_id: JoystickID = .{},
 
-    pub usingnamespace c_non_opaque_conversions(JoyDeviceEvent, C.SDL_JoyDeviceEvent);
+    pub const to_c_ptr = c_non_opaque_conversions(JoyDeviceEvent, C.SDL_JoyDeviceEvent).to_c_ptr;
+    pub const from_c_ptr = c_non_opaque_conversions(JoyDeviceEvent, C.SDL_JoyDeviceEvent).from_c_ptr;
+    pub const to_c = c_non_opaque_conversions(JoyDeviceEvent, C.SDL_JoyDeviceEvent).to_c;
+    pub const from_c = c_non_opaque_conversions(JoyDeviceEvent, C.SDL_JoyDeviceEvent).from_c;
 };
 
 pub const JoyBatteryEvent = extern struct {
@@ -4728,7 +4898,10 @@ pub const JoyBatteryEvent = extern struct {
     state: PowerState = .UNKNOWN,
     percent: c_int = 0,
 
-    pub usingnamespace c_non_opaque_conversions(JoyBatteryEvent, C.SDL_JoyBatteryEvent);
+    pub const to_c_ptr = c_non_opaque_conversions(JoyBatteryEvent, C.SDL_JoyBatteryEvent).to_c_ptr;
+    pub const from_c_ptr = c_non_opaque_conversions(JoyBatteryEvent, C.SDL_JoyBatteryEvent).from_c_ptr;
+    pub const to_c = c_non_opaque_conversions(JoyBatteryEvent, C.SDL_JoyBatteryEvent).to_c;
+    pub const from_c = c_non_opaque_conversions(JoyBatteryEvent, C.SDL_JoyBatteryEvent).from_c;
 };
 
 pub const GamepadAxisEvent = extern struct {
@@ -4743,7 +4916,10 @@ pub const GamepadAxisEvent = extern struct {
     value: i16 = 0,
     _padding_4: u16 = 0,
 
-    pub usingnamespace c_non_opaque_conversions(GamepadAxisEvent, C.SDL_GamepadAxisEvent);
+    pub const to_c_ptr = c_non_opaque_conversions(GamepadAxisEvent, C.SDL_GamepadAxisEvent).to_c_ptr;
+    pub const from_c_ptr = c_non_opaque_conversions(GamepadAxisEvent, C.SDL_GamepadAxisEvent).from_c_ptr;
+    pub const to_c = c_non_opaque_conversions(GamepadAxisEvent, C.SDL_GamepadAxisEvent).to_c;
+    pub const from_c = c_non_opaque_conversions(GamepadAxisEvent, C.SDL_GamepadAxisEvent).from_c;
 };
 
 pub const GamepadButtonEvent = extern struct {
@@ -4756,7 +4932,10 @@ pub const GamepadButtonEvent = extern struct {
     _padding_1: u8 = 0,
     _padding_2: u8 = 0,
 
-    pub usingnamespace c_non_opaque_conversions(GamepadButtonEvent, C.SDL_GamepadButtonEvent);
+    pub const to_c_ptr = c_non_opaque_conversions(GamepadButtonEvent, C.SDL_GamepadButtonEvent).to_c_ptr;
+    pub const from_c_ptr = c_non_opaque_conversions(GamepadButtonEvent, C.SDL_GamepadButtonEvent).from_c_ptr;
+    pub const to_c = c_non_opaque_conversions(GamepadButtonEvent, C.SDL_GamepadButtonEvent).to_c;
+    pub const from_c = c_non_opaque_conversions(GamepadButtonEvent, C.SDL_GamepadButtonEvent).from_c;
 };
 
 pub const GamepadDeviceEvent = extern struct {
@@ -4765,7 +4944,10 @@ pub const GamepadDeviceEvent = extern struct {
     timestamp: u64 = 0,
     controller_id: JoystickID = .{},
 
-    pub usingnamespace c_non_opaque_conversions(GamepadDeviceEvent, C.SDL_GamepadDeviceEvent);
+    pub const to_c_ptr = c_non_opaque_conversions(GamepadDeviceEvent, C.SDL_GamepadDeviceEvent).to_c_ptr;
+    pub const from_c_ptr = c_non_opaque_conversions(GamepadDeviceEvent, C.SDL_GamepadDeviceEvent).from_c_ptr;
+    pub const to_c = c_non_opaque_conversions(GamepadDeviceEvent, C.SDL_GamepadDeviceEvent).to_c;
+    pub const from_c = c_non_opaque_conversions(GamepadDeviceEvent, C.SDL_GamepadDeviceEvent).from_c;
 };
 
 pub const GamepadTouchpadEvent = extern struct {
@@ -4778,7 +4960,10 @@ pub const GamepadTouchpadEvent = extern struct {
     pos: Vec_f32 = Vec_f32{},
     pressure: f32 = 0,
 
-    pub usingnamespace c_non_opaque_conversions(GamepadTouchpadEvent, C.SDL_GamepadTouchpadEvent);
+    pub const to_c_ptr = c_non_opaque_conversions(GamepadTouchpadEvent, C.SDL_GamepadTouchpadEvent).to_c_ptr;
+    pub const from_c_ptr = c_non_opaque_conversions(GamepadTouchpadEvent, C.SDL_GamepadTouchpadEvent).from_c_ptr;
+    pub const to_c = c_non_opaque_conversions(GamepadTouchpadEvent, C.SDL_GamepadTouchpadEvent).to_c;
+    pub const from_c = c_non_opaque_conversions(GamepadTouchpadEvent, C.SDL_GamepadTouchpadEvent).from_c;
 
     pub fn convert_coords_to_render_coords(self: *GamepadTouchpadEvent, renderer: *Renderer) Error!void {
         return ok_or_fail_err(C.SDL_ConvertEventToRenderCoordinates(renderer.to_c_ptr(), self.to_c_event()));
@@ -4794,7 +4979,10 @@ pub const GamepadSensorEvent = extern struct {
     data: [3]f32 = @splat(0.0),
     sensor_timestamp: u64 = 0,
 
-    pub usingnamespace c_non_opaque_conversions(GamepadSensorEvent, C.SDL_GamepadSensorEvent);
+    pub const to_c_ptr = c_non_opaque_conversions(GamepadSensorEvent, C.SDL_GamepadSensorEvent).to_c_ptr;
+    pub const from_c_ptr = c_non_opaque_conversions(GamepadSensorEvent, C.SDL_GamepadSensorEvent).from_c_ptr;
+    pub const to_c = c_non_opaque_conversions(GamepadSensorEvent, C.SDL_GamepadSensorEvent).to_c;
+    pub const from_c = c_non_opaque_conversions(GamepadSensorEvent, C.SDL_GamepadSensorEvent).from_c;
 };
 
 pub const AudioDeviceEvent = extern struct {
@@ -4807,7 +4995,10 @@ pub const AudioDeviceEvent = extern struct {
     _padding_2: u8 = 0,
     _padding_3: u8 = 0,
 
-    pub usingnamespace c_non_opaque_conversions(AudioDeviceEvent, C.SDL_AudioDeviceEvent);
+    pub const to_c_ptr = c_non_opaque_conversions(AudioDeviceEvent, C.SDL_AudioDeviceEvent).to_c_ptr;
+    pub const from_c_ptr = c_non_opaque_conversions(AudioDeviceEvent, C.SDL_AudioDeviceEvent).from_c_ptr;
+    pub const to_c = c_non_opaque_conversions(AudioDeviceEvent, C.SDL_AudioDeviceEvent).to_c;
+    pub const from_c = c_non_opaque_conversions(AudioDeviceEvent, C.SDL_AudioDeviceEvent).from_c;
 };
 
 pub const CameraDeviceEvent = extern struct {
@@ -4816,7 +5007,10 @@ pub const CameraDeviceEvent = extern struct {
     timestamp: u64 = 0,
     device_id: CameraID = .{},
 
-    pub usingnamespace c_non_opaque_conversions(CameraDeviceEvent, C.SDL_CameraDeviceEvent);
+    pub const to_c_ptr = c_non_opaque_conversions(CameraDeviceEvent, C.SDL_CameraDeviceEvent).to_c_ptr;
+    pub const from_c_ptr = c_non_opaque_conversions(CameraDeviceEvent, C.SDL_CameraDeviceEvent).from_c_ptr;
+    pub const to_c = c_non_opaque_conversions(CameraDeviceEvent, C.SDL_CameraDeviceEvent).to_c;
+    pub const from_c = c_non_opaque_conversions(CameraDeviceEvent, C.SDL_CameraDeviceEvent).from_c;
 };
 
 pub const RenderEvent = extern struct {
@@ -4825,7 +5019,10 @@ pub const RenderEvent = extern struct {
     timestamp: u64 = 0,
     window_id: WindowID = .{},
 
-    pub usingnamespace c_non_opaque_conversions(RenderEvent, C.SDL_RenderEvent);
+    pub const to_c_ptr = c_non_opaque_conversions(RenderEvent, C.SDL_RenderEvent).to_c_ptr;
+    pub const from_c_ptr = c_non_opaque_conversions(RenderEvent, C.SDL_RenderEvent).from_c_ptr;
+    pub const to_c = c_non_opaque_conversions(RenderEvent, C.SDL_RenderEvent).to_c;
+    pub const from_c = c_non_opaque_conversions(RenderEvent, C.SDL_RenderEvent).from_c;
 };
 
 pub const TouchFingerEvent = extern struct {
@@ -4839,7 +5036,10 @@ pub const TouchFingerEvent = extern struct {
     pressure: f32 = 0,
     window_id: WindowID = .{},
 
-    pub usingnamespace c_non_opaque_conversions(TouchFingerEvent, C.SDL_TouchFingerEvent);
+    pub const to_c_ptr = c_non_opaque_conversions(TouchFingerEvent, C.SDL_TouchFingerEvent).to_c_ptr;
+    pub const from_c_ptr = c_non_opaque_conversions(TouchFingerEvent, C.SDL_TouchFingerEvent).from_c_ptr;
+    pub const to_c = c_non_opaque_conversions(TouchFingerEvent, C.SDL_TouchFingerEvent).to_c;
+    pub const from_c = c_non_opaque_conversions(TouchFingerEvent, C.SDL_TouchFingerEvent).from_c;
 
     pub fn convert_coords_to_render_coords(self: *TouchFingerEvent, renderer: *Renderer) Error!void {
         return ok_or_fail_err(C.SDL_ConvertEventToRenderCoordinates(renderer.to_c_ptr(), self.to_c_event()));
@@ -4853,7 +5053,10 @@ pub const PenProximityEvent = extern struct {
     window_id: WindowID = .{},
     pen_id: PenID = .{},
 
-    pub usingnamespace c_non_opaque_conversions(PenProximityEvent, C.SDL_PenProximityEvent);
+    pub const to_c_ptr = c_non_opaque_conversions(PenProximityEvent, C.SDL_PenProximityEvent).to_c_ptr;
+    pub const from_c_ptr = c_non_opaque_conversions(PenProximityEvent, C.SDL_PenProximityEvent).from_c_ptr;
+    pub const to_c = c_non_opaque_conversions(PenProximityEvent, C.SDL_PenProximityEvent).to_c;
+    pub const from_c = c_non_opaque_conversions(PenProximityEvent, C.SDL_PenProximityEvent).from_c;
 };
 
 pub const PenMotionEvent = extern struct {
@@ -4865,7 +5068,10 @@ pub const PenMotionEvent = extern struct {
     pen_state: PenInputFlags = .{},
     pos: Vec_f32 = Vec_f32{},
 
-    pub usingnamespace c_non_opaque_conversions(PenMotionEvent, C.SDL_PenMotionEvent);
+    pub const to_c_ptr = c_non_opaque_conversions(PenMotionEvent, C.SDL_PenMotionEvent).to_c_ptr;
+    pub const from_c_ptr = c_non_opaque_conversions(PenMotionEvent, C.SDL_PenMotionEvent).from_c_ptr;
+    pub const to_c = c_non_opaque_conversions(PenMotionEvent, C.SDL_PenMotionEvent).to_c;
+    pub const from_c = c_non_opaque_conversions(PenMotionEvent, C.SDL_PenMotionEvent).from_c;
 
     pub fn convert_coords_to_render_coords(self: *PenMotionEvent, renderer: *Renderer) Error!void {
         return ok_or_fail_err(C.SDL_ConvertEventToRenderCoordinates(renderer.to_c_ptr(), self.to_c_event()));
@@ -4883,7 +5089,10 @@ pub const PenTouchEvent = extern struct {
     eraser: bool = false,
     down: bool = false,
 
-    pub usingnamespace c_non_opaque_conversions(PenTouchEvent, C.SDL_PenTouchEvent);
+    pub const to_c_ptr = c_non_opaque_conversions(PenTouchEvent, C.SDL_PenTouchEvent).to_c_ptr;
+    pub const from_c_ptr = c_non_opaque_conversions(PenTouchEvent, C.SDL_PenTouchEvent).from_c_ptr;
+    pub const to_c = c_non_opaque_conversions(PenTouchEvent, C.SDL_PenTouchEvent).to_c;
+    pub const from_c = c_non_opaque_conversions(PenTouchEvent, C.SDL_PenTouchEvent).from_c;
 
     pub fn convert_coords_to_render_coords(self: *PenTouchEvent, renderer: *Renderer) Error!void {
         return ok_or_fail_err(C.SDL_ConvertEventToRenderCoordinates(renderer.to_c_ptr(), self.to_c_event()));
@@ -4901,7 +5110,10 @@ pub const PenButtonEvent = extern struct {
     button: u8 = 0,
     down: bool = false,
 
-    pub usingnamespace c_non_opaque_conversions(PenButtonEvent, C.SDL_PenButtonEvent);
+    pub const to_c_ptr = c_non_opaque_conversions(PenButtonEvent, C.SDL_PenButtonEvent).to_c_ptr;
+    pub const from_c_ptr = c_non_opaque_conversions(PenButtonEvent, C.SDL_PenButtonEvent).from_c_ptr;
+    pub const to_c = c_non_opaque_conversions(PenButtonEvent, C.SDL_PenButtonEvent).to_c;
+    pub const from_c = c_non_opaque_conversions(PenButtonEvent, C.SDL_PenButtonEvent).from_c;
 
     pub fn convert_coords_to_render_coords(self: *PenButtonEvent, renderer: *Renderer) Error!void {
         return ok_or_fail_err(C.SDL_ConvertEventToRenderCoordinates(renderer.to_c_ptr(), self.to_c_event()));
@@ -4919,7 +5131,10 @@ pub const PenAxisEvent = extern struct {
     axis: PenAxis = .PRESSURE,
     value: f32 = 0.0,
 
-    pub usingnamespace c_non_opaque_conversions(PenAxisEvent, C.SDL_PenAxisEvent);
+    pub const to_c_ptr = c_non_opaque_conversions(PenAxisEvent, C.SDL_PenAxisEvent).to_c_ptr;
+    pub const from_c_ptr = c_non_opaque_conversions(PenAxisEvent, C.SDL_PenAxisEvent).from_c_ptr;
+    pub const to_c = c_non_opaque_conversions(PenAxisEvent, C.SDL_PenAxisEvent).to_c;
+    pub const from_c = c_non_opaque_conversions(PenAxisEvent, C.SDL_PenAxisEvent).from_c;
 
     pub fn convert_coords_to_render_coords(self: *PenAxisEvent, renderer: *Renderer) Error!void {
         return ok_or_fail_err(C.SDL_ConvertEventToRenderCoordinates(renderer.to_c_ptr(), self.to_c_event()));
@@ -4935,7 +5150,10 @@ pub const DropEvent = extern struct {
     source: ?[*]const u8 = null,
     data: ?[*]const u8 = null,
 
-    pub usingnamespace c_non_opaque_conversions(DropEvent, C.SDL_DropEvent);
+    pub const to_c_ptr = c_non_opaque_conversions(DropEvent, C.SDL_DropEvent).to_c_ptr;
+    pub const from_c_ptr = c_non_opaque_conversions(DropEvent, C.SDL_DropEvent).from_c_ptr;
+    pub const to_c = c_non_opaque_conversions(DropEvent, C.SDL_DropEvent).to_c;
+    pub const from_c = c_non_opaque_conversions(DropEvent, C.SDL_DropEvent).from_c;
 
     pub fn convert_coords_to_render_coords(self: *DropEvent, renderer: *Renderer) Error!void {
         return ok_or_fail_err(C.SDL_ConvertEventToRenderCoordinates(renderer.to_c_ptr(), self.to_c_event()));
@@ -4950,7 +5168,10 @@ pub const ClipboardEvent = extern struct {
     num_mime_types: i32 = 0,
     mime_types: ?[*]const [*:0]const u8 = null,
 
-    pub usingnamespace c_non_opaque_conversions(ClipboardEvent, C.SDL_ClipboardEvent);
+    pub const to_c_ptr = c_non_opaque_conversions(ClipboardEvent, C.SDL_ClipboardEvent).to_c_ptr;
+    pub const from_c_ptr = c_non_opaque_conversions(ClipboardEvent, C.SDL_ClipboardEvent).from_c_ptr;
+    pub const to_c = c_non_opaque_conversions(ClipboardEvent, C.SDL_ClipboardEvent).to_c;
+    pub const from_c = c_non_opaque_conversions(ClipboardEvent, C.SDL_ClipboardEvent).from_c;
 };
 
 pub const SensorEvent = extern struct {
@@ -4961,7 +5182,10 @@ pub const SensorEvent = extern struct {
     data: [6]f32 = @splat(0),
     sensor_timestamp: u64 = 0,
 
-    pub usingnamespace c_non_opaque_conversions(SensorEvent, C.SDL_SensorEvent);
+    pub const to_c_ptr = c_non_opaque_conversions(SensorEvent, C.SDL_SensorEvent).to_c_ptr;
+    pub const from_c_ptr = c_non_opaque_conversions(SensorEvent, C.SDL_SensorEvent).from_c_ptr;
+    pub const to_c = c_non_opaque_conversions(SensorEvent, C.SDL_SensorEvent).to_c;
+    pub const from_c = c_non_opaque_conversions(SensorEvent, C.SDL_SensorEvent).from_c;
 };
 
 pub const QuitEvent = extern struct {
@@ -4969,7 +5193,10 @@ pub const QuitEvent = extern struct {
     reserved: u32 = 0,
     timestamp: u64 = 0,
 
-    pub usingnamespace c_non_opaque_conversions(QuitEvent, C.SDL_QuitEvent);
+    pub const to_c_ptr = c_non_opaque_conversions(QuitEvent, C.SDL_QuitEvent).to_c_ptr;
+    pub const from_c_ptr = c_non_opaque_conversions(QuitEvent, C.SDL_QuitEvent).from_c_ptr;
+    pub const to_c = c_non_opaque_conversions(QuitEvent, C.SDL_QuitEvent).to_c;
+    pub const from_c = c_non_opaque_conversions(QuitEvent, C.SDL_QuitEvent).from_c;
 };
 
 pub const UserEvent = extern struct {
@@ -4981,11 +5208,15 @@ pub const UserEvent = extern struct {
     userdata_1: ?*anyopaque = null,
     userdata_2: ?*anyopaque = null,
 
-    pub usingnamespace c_non_opaque_conversions(UserEvent, C.SDL_UserEvent);
+    pub const to_c_ptr = c_non_opaque_conversions(UserEvent, C.SDL_UserEvent).to_c_ptr;
+    pub const from_c_ptr = c_non_opaque_conversions(UserEvent, C.SDL_UserEvent).from_c_ptr;
+    pub const to_c = c_non_opaque_conversions(UserEvent, C.SDL_UserEvent).to_c;
+    pub const from_c = c_non_opaque_conversions(UserEvent, C.SDL_UserEvent).from_c;
 };
 
 pub const Cursor = opaque {
-    pub usingnamespace c_opaque_conversions(Cursor, C.SDL_Cursor);
+    pub const to_c_ptr = c_opaque_conversions(Cursor, C.SDL_Cursor).to_c_ptr;
+    pub const from_c_ptr = c_opaque_conversions(Cursor, C.SDL_Cursor).from_c_ptr;
     //TODO
     // pub extern fn SDL_CreateCursor(data: [*c]const Uint8, mask: [*c]const Uint8, w: c_int, h: c_int, hot_x: c_int, hot_y: c_int) ?*SDL_Cursor;
     // pub extern fn SDL_CreateColorCursor(surface: [*c]SDL_Surface, hot_x: c_int, hot_y: c_int) ?*SDL_Cursor;
@@ -5023,7 +5254,8 @@ pub const SystemCursor = enum(C.SDL_SystemCursor) {
 
     pub const COUNT = C.SDL_SYSTEM_CURSOR_COUNT;
 
-    pub usingnamespace c_enum_conversions(SystemCursor, C.SDL_SystemCursor);
+    pub const to_c = c_enum_conversions(SystemCursor, C.SDL_SystemCursor).to_c;
+    pub const from_c = c_enum_conversions(SystemCursor, C.SDL_SystemCursor).from_c;
     //TODO
     // pub extern fn SDL_CreateSystemCursor(id: SDL_SystemCursor) ?*SDL_Cursor;
 };
@@ -5059,7 +5291,8 @@ pub const TouchDeviceType = enum(C.SDL_TouchDeviceType) {
     INDIRECT_ABSOLUTE = C.SDL_TOUCH_DEVICE_INDIRECT_ABSOLUTE,
     INDIRECT_RELATIVE = C.SDL_TOUCH_DEVICE_INDIRECT_RELATIVE,
 
-    pub usingnamespace c_enum_conversions(TouchDeviceType, C.SDL_TouchDeviceType);
+    pub const to_c = c_enum_conversions(TouchDeviceType, C.SDL_TouchDeviceType).to_c;
+    pub const from_c = c_enum_conversions(TouchDeviceType, C.SDL_TouchDeviceType).from_c;
 };
 
 pub const JoystickType = enum(C.SDL_JoystickType) {
@@ -5076,7 +5309,8 @@ pub const JoystickType = enum(C.SDL_JoystickType) {
 
     pub const COUNT = C.SDL_JOYSTICK_TYPE_COUNT;
 
-    pub usingnamespace c_enum_conversions(JoystickType, C.SDL_JoystickType);
+    pub const to_c = c_enum_conversions(JoystickType, C.SDL_JoystickType).to_c;
+    pub const from_c = c_enum_conversions(JoystickType, C.SDL_JoystickType).from_c;
 };
 
 pub const JoystickID = extern struct {
@@ -5165,7 +5399,8 @@ pub const JoystickID = extern struct {
 };
 
 pub const Gamepad = opaque {
-    pub usingnamespace c_opaque_conversions(Gamepad, C.SDL_Gamepad);
+    pub const to_c_ptr = c_opaque_conversions(Gamepad, C.SDL_Gamepad).to_c_ptr;
+    pub const from_c_ptr = c_opaque_conversions(Gamepad, C.SDL_Gamepad).from_c_ptr;
 
     pub fn set_events_enabled(state: bool) void {
         C.SDL_SetGamepadEventsEnabled(state);
@@ -5304,7 +5539,8 @@ pub const Gamepad = opaque {
 };
 
 pub const Joystick = opaque {
-    pub usingnamespace c_opaque_conversions(Joystick, C.SDL_Joystick);
+    pub const to_c_ptr = c_opaque_conversions(Joystick, C.SDL_Joystick).to_c_ptr;
+    pub const from_c_ptr = c_opaque_conversions(Joystick, C.SDL_Joystick).from_c_ptr;
     //TODO
     // pub extern fn SDL_AttachVirtualJoystick(desc: [*c]const SDL_VirtualJoystickDesc) SDL_JoystickID;
     // pub extern fn SDL_DetachVirtualJoystick(instance_id: SDL_JoystickID) bool;
@@ -5383,14 +5619,20 @@ pub const VirtualJoystickTouchpadDesc = extern struct {
     num_fingers: u16 = 0,
     _padding: [3]u16 = @splat(0),
 
-    pub usingnamespace c_non_opaque_conversions(VirtualJoystickTouchpadDesc, C.SDL_VirtualJoystickTouchpadDesc);
+    pub const to_c_ptr = c_non_opaque_conversions(VirtualJoystickTouchpadDesc, C.SDL_VirtualJoystickTouchpadDesc).to_c_ptr;
+    pub const from_c_ptr = c_non_opaque_conversions(VirtualJoystickTouchpadDesc, C.SDL_VirtualJoystickTouchpadDesc).from_c_ptr;
+    pub const to_c = c_non_opaque_conversions(VirtualJoystickTouchpadDesc, C.SDL_VirtualJoystickTouchpadDesc).to_c;
+    pub const from_c = c_non_opaque_conversions(VirtualJoystickTouchpadDesc, C.SDL_VirtualJoystickTouchpadDesc).from_c;
 };
 
 pub const VirtualJoystickSensorDesc = extern struct {
     type: SensorType = .UNKNOWN,
     rate: f32 = 0.0,
 
-    pub usingnamespace c_non_opaque_conversions(VirtualJoystickSensorDesc, C.SDL_VirtualJoystickSensorDesc);
+    pub const to_c_ptr = c_non_opaque_conversions(VirtualJoystickSensorDesc, C.SDL_VirtualJoystickSensorDesc).to_c_ptr;
+    pub const from_c_ptr = c_non_opaque_conversions(VirtualJoystickSensorDesc, C.SDL_VirtualJoystickSensorDesc).from_c_ptr;
+    pub const to_c = c_non_opaque_conversions(VirtualJoystickSensorDesc, C.SDL_VirtualJoystickSensorDesc).to_c;
+    pub const from_c = c_non_opaque_conversions(VirtualJoystickSensorDesc, C.SDL_VirtualJoystickSensorDesc).from_c;
 };
 
 pub const VirtualJoystickDesc = extern struct {
@@ -5421,7 +5663,10 @@ pub const VirtualJoystickDesc = extern struct {
     set_sensors_enabled: ?*const fn (userdata: ?*anyopaque, enabled: bool) callconv(.c) bool = null,
     cleanup: ?*const fn (userdata: ?*anyopaque) callconv(.c) void = null,
 
-    pub usingnamespace c_non_opaque_conversions(VirtualJoystickDesc, C.SDL_VirtualJoystickDesc);
+    pub const to_c_ptr = c_non_opaque_conversions(VirtualJoystickDesc, C.SDL_VirtualJoystickDesc).to_c_ptr;
+    pub const from_c_ptr = c_non_opaque_conversions(VirtualJoystickDesc, C.SDL_VirtualJoystickDesc).from_c_ptr;
+    pub const to_c = c_non_opaque_conversions(VirtualJoystickDesc, C.SDL_VirtualJoystickDesc).to_c;
+    pub const from_c = c_non_opaque_conversions(VirtualJoystickDesc, C.SDL_VirtualJoystickDesc).from_c;
 };
 
 pub const HID_InitHandle = extern struct {
@@ -5461,7 +5706,8 @@ pub const HID_DeviceChangeTracker = extern struct {
 };
 
 pub const HID_Device = opaque {
-    pub usingnamespace c_opaque_conversions(HID_Device, C.SDL_hid_device);
+    pub const to_c_ptr = c_opaque_conversions(HID_Device, C.SDL_hid_device).to_c_ptr;
+    pub const from_c_ptr = c_opaque_conversions(HID_Device, C.SDL_hid_device).from_c_ptr;
     //TODO
     // pub extern fn SDL_hid_open(vendor_id: c_ushort, product_id: c_ushort, serial_number: [*c]const wchar_t) ?*SDL_hid_device;
     // pub extern fn SDL_hid_open_path(path: [*c]const u8) ?*SDL_hid_device;
@@ -5489,7 +5735,8 @@ pub const HID_BusType = enum(C.SDL_hid_bus_type) {
     I2C = C.SDL_HID_API_BUS_I2C,
     SPI = C.SDL_HID_API_BUS_SPI,
 
-    pub usingnamespace c_enum_conversions(HID_BusType, C.SDL_hid_bus_type);
+    pub const to_c = c_enum_conversions(HID_BusType, C.SDL_hid_bus_type).to_c;
+    pub const from_c = c_enum_conversions(HID_BusType, C.SDL_hid_bus_type).from_c;
 };
 
 pub const HID_DeviceInfo = extern struct {
@@ -5509,7 +5756,10 @@ pub const HID_DeviceInfo = extern struct {
     bus_type: HID_BusType = .UNKNOWN,
     next: ?*HID_DeviceInfo = null,
 
-    pub usingnamespace c_non_opaque_conversions(HID_DeviceInfo, C.SDL_hid_device_info);
+    pub const to_c_ptr = c_non_opaque_conversions(HID_DeviceInfo, C.SDL_hid_device_info).to_c_ptr;
+    pub const from_c_ptr = c_non_opaque_conversions(HID_DeviceInfo, C.SDL_hid_device_info).from_c_ptr;
+    pub const to_c = c_non_opaque_conversions(HID_DeviceInfo, C.SDL_hid_device_info).to_c;
+    pub const from_c = c_non_opaque_conversions(HID_DeviceInfo, C.SDL_hid_device_info).from_c;
 };
 
 pub const HID_List = struct {
@@ -5531,7 +5781,10 @@ pub const Finger = extern struct {
     position: Vec_f32 = .{},
     pressure: f32 = 0,
 
-    pub usingnamespace c_non_opaque_conversions(Finger, C.SDL_Finger);
+    pub const to_c_ptr = c_non_opaque_conversions(Finger, C.SDL_Finger).to_c_ptr;
+    pub const from_c_ptr = c_non_opaque_conversions(Finger, C.SDL_Finger).from_c_ptr;
+    pub const to_c = c_non_opaque_conversions(Finger, C.SDL_Finger).to_c;
+    pub const from_c = c_non_opaque_conversions(Finger, C.SDL_Finger).from_c;
 };
 
 pub const FingerState = extern struct {
@@ -5569,7 +5822,8 @@ pub const SensorType = enum(c_int) {
     ACCEL_R = C.SDL_SENSOR_ACCEL_R,
     GYRO_R = C.SDL_SENSOR_GYRO_R,
 
-    pub usingnamespace c_enum_conversions(SensorType, c_int);
+    pub const to_c = c_enum_conversions(SensorType, c_int).to_c;
+    pub const from_c = c_enum_conversions(SensorType, c_int).from_c;
 };
 
 pub const AxisPosition = extern struct {
@@ -5644,7 +5898,8 @@ pub const ControllerConnectionState = enum(c_int) {
     WIRED = C.SDL_JOYSTICK_CONNECTION_WIRED,
     WIRELESS = C.SDL_JOYSTICK_CONNECTION_WIRELESS,
 
-    pub usingnamespace c_enum_conversions(ControllerConnectionState, c_int);
+    pub const to_c = c_enum_conversions(ControllerConnectionState, c_int).to_c;
+    pub const from_c = c_enum_conversions(ControllerConnectionState, c_int).from_c;
 };
 
 /// https://partner.steamgames.com/doc/api/ISteamInput#InputHandle_t
@@ -5741,7 +5996,10 @@ pub const GamepadsList = struct {
 pub const GUID = extern struct {
     data: [16]u8 = @splat(0),
 
-    pub usingnamespace c_non_opaque_conversions(GUID, C.SDL_GUID);
+    pub const to_c_ptr = c_non_opaque_conversions(GUID, C.SDL_GUID).to_c_ptr;
+    pub const from_c_ptr = c_non_opaque_conversions(GUID, C.SDL_GUID).from_c_ptr;
+    pub const to_c = c_non_opaque_conversions(GUID, C.SDL_GUID).to_c;
+    pub const from_c = c_non_opaque_conversions(GUID, C.SDL_GUID).from_c;
 
     // pub extern fn SDL_GUIDToString(guid: SDL_GUID, pszGUID: [*c]u8, cbGUID: c_int) void;
     // pub extern fn SDL_StringToGUID(pchGUID: [*c]const u8) SDL_GUID;
@@ -5785,7 +6043,7 @@ pub const PenInputFlags = Flags(enum(u32) {
     BUTTON_5 = C.SDL_PEN_INPUT_BUTTON_5,
     ERASER_TIP = C.SDL_PEN_INPUT_ERASER_TIP,
     _,
-}, null);
+}, enum(u32) {});
 
 pub const Mouse = struct {
     //TODO
@@ -5810,14 +6068,16 @@ pub const PenAxis = enum(C.SDL_PenAxis) {
 
     pub const AXIS_COUNT: c_uint = C.SDL_PEN_AXIS_COUNT;
 
-    pub usingnamespace c_enum_conversions(PenAxis, C.SDL_PenAxis);
+    pub const to_c = c_enum_conversions(PenAxis, C.SDL_PenAxis).to_c;
+    pub const from_c = c_enum_conversions(PenAxis, C.SDL_PenAxis).from_c;
 };
 
 pub const MouseWheelDirection = enum(C.SDL_MouseWheelDirection) {
     NORMAL = C.SDL_MOUSEWHEEL_NORMAL,
     FLIPPED = C.SDL_MOUSEWHEEL_FLIPPED,
 
-    pub usingnamespace c_enum_conversions(MouseWheelDirection, C.SDL_MouseWheelDirection);
+    pub const to_c = c_enum_conversions(MouseWheelDirection, C.SDL_MouseWheelDirection).to_c;
+    pub const from_c = c_enum_conversions(MouseWheelDirection, C.SDL_MouseWheelDirection).from_c;
 };
 
 pub const PowerState = enum(c_int) {
@@ -5828,7 +6088,8 @@ pub const PowerState = enum(c_int) {
     CHARGING = C.SDL_POWERSTATE_CHARGING,
     CHARGED = C.SDL_POWERSTATE_CHARGED,
 
-    pub usingnamespace c_enum_conversions(PowerState, c_int);
+    pub const to_c = c_enum_conversions(PowerState, c_int).to_c;
+    pub const from_c = c_enum_conversions(PowerState, c_int).from_c;
     //TODO
     // pub fn get_power_info() PowerInfoWithTime {
     //     pub extern fn SDL_GetPowerInfo(seconds: [*c]c_int, percent: [*c]c_int) SDL_PowerState;
@@ -5841,7 +6102,8 @@ pub const EventAction = enum(C.SDL_EventAction) {
     PEEK_EVENT = C.SDL_PEEKEVENT,
     GET_EVENT = C.SDL_GETEVENT,
 
-    pub usingnamespace c_enum_conversions(EventAction, C.SDL_EventAction);
+    pub const to_c = c_enum_conversions(EventAction, C.SDL_EventAction).to_c;
+    pub const from_c = c_enum_conversions(EventAction, C.SDL_EventAction).from_c;
 };
 
 pub const EventType = enum(C.SDL_EventType) {
@@ -5977,7 +6239,8 @@ pub const EventType = enum(C.SDL_EventType) {
         return @enumFromInt(@as(u32, @intCast(int)));
     }
 
-    pub usingnamespace c_enum_conversions(EventType, C.SDL_EventType);
+    pub const to_c = c_enum_conversions(EventType, C.SDL_EventType).to_c;
+    pub const from_c = c_enum_conversions(EventType, C.SDL_EventType).from_c;
 };
 
 pub const Scancode = enum(C.SDL_Scancode) {
@@ -6232,7 +6495,8 @@ pub const Scancode = enum(C.SDL_Scancode) {
     pub const RESERVED = C.SDL_SCANCODE_RESERVED;
     pub const COUNT = C.SDL_SCANCODE_COUNT;
 
-    pub usingnamespace c_enum_conversions(Scancode, C.SDL_Scancode);
+    pub const to_c = c_enum_conversions(Scancode, C.SDL_Scancode).to_c;
+    pub const from_c = c_enum_conversions(Scancode, C.SDL_Scancode).from_c;
 
     //TODO
     // pub extern fn SDL_GetKeyFromScancode(scancode: SDL_Scancode, modstate: SDL_Keymod, key_event: bool) SDL_Keycode;
@@ -6561,7 +6825,8 @@ pub const Meta = struct {
 };
 
 pub const GPU_Device = opaque {
-    pub usingnamespace c_opaque_conversions(GPU_Device, C.SDL_GPUDevice);
+    pub const to_c_ptr = c_opaque_conversions(GPU_Device, C.SDL_GPUDevice).to_c_ptr;
+    pub const from_c_ptr = c_opaque_conversions(GPU_Device, C.SDL_GPUDevice).from_c_ptr;
 
     pub fn get_num_drivers() c_int {
         return C.SDL_GetNumGPUDrivers();
@@ -6706,7 +6971,10 @@ pub const GPU_TransferBufferCreateInfo = extern struct {
     size: u32 = 0,
     props: PropertiesID = .NULL,
 
-    pub usingnamespace c_non_opaque_conversions(GPU_TransferBufferCreateInfo, C.SDL_GPUTransferBufferCreateInfo);
+    pub const to_c_ptr = c_non_opaque_conversions(GPU_TransferBufferCreateInfo, C.SDL_GPUTransferBufferCreateInfo).to_c_ptr;
+    pub const from_c_ptr = c_non_opaque_conversions(GPU_TransferBufferCreateInfo, C.SDL_GPUTransferBufferCreateInfo).from_c_ptr;
+    pub const to_c = c_non_opaque_conversions(GPU_TransferBufferCreateInfo, C.SDL_GPUTransferBufferCreateInfo).to_c;
+    pub const from_c = c_non_opaque_conversions(GPU_TransferBufferCreateInfo, C.SDL_GPUTransferBufferCreateInfo).from_c;
 
     pub const CreateProps = struct {
         pub const NAME = Property.new(.STRING, C.SDL_PROP_GPU_TRANSFERBUFFER_CREATE_NAME_STRING);
@@ -6718,7 +6986,10 @@ pub const GPU_BufferCreateInfo = extern struct {
     size: u32 = 0,
     props: PropertiesID = .NULL,
 
-    pub usingnamespace c_non_opaque_conversions(GPU_BufferCreateInfo, C.SDL_GPUBufferCreateInfo);
+    pub const to_c_ptr = c_non_opaque_conversions(GPU_BufferCreateInfo, C.SDL_GPUBufferCreateInfo).to_c_ptr;
+    pub const from_c_ptr = c_non_opaque_conversions(GPU_BufferCreateInfo, C.SDL_GPUBufferCreateInfo).from_c_ptr;
+    pub const to_c = c_non_opaque_conversions(GPU_BufferCreateInfo, C.SDL_GPUBufferCreateInfo).to_c;
+    pub const from_c = c_non_opaque_conversions(GPU_BufferCreateInfo, C.SDL_GPUBufferCreateInfo).from_c;
 
     pub const CreateProps = struct {
         pub const NAME = Property.new(.STRING, C.SDL_PROP_GPU_BUFFER_CREATE_NAME_STRING);
@@ -6736,7 +7007,10 @@ pub const GPU_TextureCreateInfo = extern struct {
     sample_count: GPU_SampleCount = ._1,
     props: PropertiesID = .NULL,
 
-    pub usingnamespace c_non_opaque_conversions(GPU_TextureCreateInfo, C.SDL_GPUTextureCreateInfo);
+    pub const to_c_ptr = c_non_opaque_conversions(GPU_TextureCreateInfo, C.SDL_GPUTextureCreateInfo).to_c_ptr;
+    pub const from_c_ptr = c_non_opaque_conversions(GPU_TextureCreateInfo, C.SDL_GPUTextureCreateInfo).from_c_ptr;
+    pub const to_c = c_non_opaque_conversions(GPU_TextureCreateInfo, C.SDL_GPUTextureCreateInfo).to_c;
+    pub const from_c = c_non_opaque_conversions(GPU_TextureCreateInfo, C.SDL_GPUTextureCreateInfo).from_c;
 
     pub const CreateProps = struct {
         pub const D3D12_CLEAR_RED = Property.new(.FLOAT, C.SDL_PROP_GPU_TEXTURE_CREATE_D3D12_CLEAR_R_FLOAT);
@@ -6761,7 +7035,10 @@ pub const GPU_ShaderCreateInfo = extern struct {
     num_uniform_buffers: u32 = 0,
     props: PropertiesID = .{},
 
-    pub usingnamespace c_non_opaque_conversions(GPU_ShaderCreateInfo, C.SDL_GPUShaderCreateInfo);
+    pub const to_c_ptr = c_non_opaque_conversions(GPU_ShaderCreateInfo, C.SDL_GPUShaderCreateInfo).to_c_ptr;
+    pub const from_c_ptr = c_non_opaque_conversions(GPU_ShaderCreateInfo, C.SDL_GPUShaderCreateInfo).from_c_ptr;
+    pub const to_c = c_non_opaque_conversions(GPU_ShaderCreateInfo, C.SDL_GPUShaderCreateInfo).to_c;
+    pub const from_c = c_non_opaque_conversions(GPU_ShaderCreateInfo, C.SDL_GPUShaderCreateInfo).from_c;
 
     pub const CreateProps = struct {
         pub const NAME = Property.new(.STRING, C.SDL_PROP_GPU_SHADER_CREATE_NAME_STRING);
@@ -6784,7 +7061,10 @@ pub const GPU_ComputePipelineCreateInfo = extern struct {
     thread_count_z: u32 = 0,
     props: PropertiesID = 0,
 
-    pub usingnamespace c_non_opaque_conversions(GPU_ComputePipelineCreateInfo, C.SDL_GPUComputePipelineCreateInfo);
+    pub const to_c_ptr = c_non_opaque_conversions(GPU_ComputePipelineCreateInfo, C.SDL_GPUComputePipelineCreateInfo).to_c_ptr;
+    pub const from_c_ptr = c_non_opaque_conversions(GPU_ComputePipelineCreateInfo, C.SDL_GPUComputePipelineCreateInfo).from_c_ptr;
+    pub const to_c = c_non_opaque_conversions(GPU_ComputePipelineCreateInfo, C.SDL_GPUComputePipelineCreateInfo).to_c;
+    pub const from_c = c_non_opaque_conversions(GPU_ComputePipelineCreateInfo, C.SDL_GPUComputePipelineCreateInfo).from_c;
 
     pub const CreateProps = struct {
         pub const NAME = Property.new(.STRING, C.SDL_PROP_GPU_COMPUTEPIPELINE_CREATE_NAME_STRING);
@@ -6802,7 +7082,10 @@ pub const GPU_GraphicsPipelineCreateInfo = extern struct {
     target_info: GPU_GraphicsPipelineTargetInfo = .{},
     props: PropertiesID = .{},
 
-    pub usingnamespace c_non_opaque_conversions(GPU_GraphicsPipelineCreateInfo, C.SDL_GPUGraphicsPipelineCreateInfo);
+    pub const to_c_ptr = c_non_opaque_conversions(GPU_GraphicsPipelineCreateInfo, C.SDL_GPUGraphicsPipelineCreateInfo).to_c_ptr;
+    pub const from_c_ptr = c_non_opaque_conversions(GPU_GraphicsPipelineCreateInfo, C.SDL_GPUGraphicsPipelineCreateInfo).from_c_ptr;
+    pub const to_c = c_non_opaque_conversions(GPU_GraphicsPipelineCreateInfo, C.SDL_GPUGraphicsPipelineCreateInfo).to_c;
+    pub const from_c = c_non_opaque_conversions(GPU_GraphicsPipelineCreateInfo, C.SDL_GPUGraphicsPipelineCreateInfo).from_c;
 
     pub const CreateProps = struct {
         pub const NAME = Property.new(.STRING, C.SDL_PROP_GPU_GRAPHICSPIPELINE_CREATE_NAME_STRING);
@@ -6815,7 +7098,10 @@ pub const GPU_VertexInputState = extern struct {
     vertex_attributes: ?[*]const GPU_VertexAttribute = null,
     num_vertex_attributes: u32 = 0,
 
-    pub usingnamespace c_non_opaque_conversions(GPU_VertexInputState, C.SDL_GPUVertexInputState);
+    pub const to_c_ptr = c_non_opaque_conversions(GPU_VertexInputState, C.SDL_GPUVertexInputState).to_c_ptr;
+    pub const from_c_ptr = c_non_opaque_conversions(GPU_VertexInputState, C.SDL_GPUVertexInputState).from_c_ptr;
+    pub const to_c = c_non_opaque_conversions(GPU_VertexInputState, C.SDL_GPUVertexInputState).to_c;
+    pub const from_c = c_non_opaque_conversions(GPU_VertexInputState, C.SDL_GPUVertexInputState).from_c;
 };
 
 pub const GPU_VertexBufferDescription = extern struct {
@@ -6824,7 +7110,10 @@ pub const GPU_VertexBufferDescription = extern struct {
     input_rate: GPU_VertexInputRate = .VERTEX,
     instance_step_rate: u32 = 0,
 
-    pub usingnamespace c_non_opaque_conversions(GPU_VertexBufferDescription, C.SDL_GPUVertexBufferDescription);
+    pub const to_c_ptr = c_non_opaque_conversions(GPU_VertexBufferDescription, C.SDL_GPUVertexBufferDescription).to_c_ptr;
+    pub const from_c_ptr = c_non_opaque_conversions(GPU_VertexBufferDescription, C.SDL_GPUVertexBufferDescription).from_c_ptr;
+    pub const to_c = c_non_opaque_conversions(GPU_VertexBufferDescription, C.SDL_GPUVertexBufferDescription).to_c;
+    pub const from_c = c_non_opaque_conversions(GPU_VertexBufferDescription, C.SDL_GPUVertexBufferDescription).from_c;
 };
 
 pub const GPU_VertexAttribute = extern struct {
@@ -6833,7 +7122,10 @@ pub const GPU_VertexAttribute = extern struct {
     format: GPU_VertexElementFormat = .INVALID,
     offset: u32 = 0,
 
-    pub usingnamespace c_non_opaque_conversions(GPU_VertexAttribute, C.SDL_GPUVertexAttribute);
+    pub const to_c_ptr = c_non_opaque_conversions(GPU_VertexAttribute, C.SDL_GPUVertexAttribute).to_c_ptr;
+    pub const from_c_ptr = c_non_opaque_conversions(GPU_VertexAttribute, C.SDL_GPUVertexAttribute).from_c_ptr;
+    pub const to_c = c_non_opaque_conversions(GPU_VertexAttribute, C.SDL_GPUVertexAttribute).to_c;
+    pub const from_c = c_non_opaque_conversions(GPU_VertexAttribute, C.SDL_GPUVertexAttribute).from_c;
 };
 
 pub const GPU_RasterizerState = extern struct {
@@ -6848,7 +7140,10 @@ pub const GPU_RasterizerState = extern struct {
     _padding1: u8 = 0,
     _padding2: u8 = 0,
 
-    pub usingnamespace c_non_opaque_conversions(GPU_RasterizerState, C.SDL_GPURasterizerState);
+    pub const to_c_ptr = c_non_opaque_conversions(GPU_RasterizerState, C.SDL_GPURasterizerState).to_c_ptr;
+    pub const from_c_ptr = c_non_opaque_conversions(GPU_RasterizerState, C.SDL_GPURasterizerState).from_c_ptr;
+    pub const to_c = c_non_opaque_conversions(GPU_RasterizerState, C.SDL_GPURasterizerState).to_c;
+    pub const from_c = c_non_opaque_conversions(GPU_RasterizerState, C.SDL_GPURasterizerState).from_c;
 };
 
 pub const GPU_MultisampleState = extern struct {
@@ -6859,7 +7154,10 @@ pub const GPU_MultisampleState = extern struct {
     _padding2: u8 = 0,
     _padding3: u8 = 0,
 
-    pub usingnamespace c_non_opaque_conversions(GPU_MultisampleState, C.SDL_GPUMultisampleState);
+    pub const to_c_ptr = c_non_opaque_conversions(GPU_MultisampleState, C.SDL_GPUMultisampleState).to_c_ptr;
+    pub const from_c_ptr = c_non_opaque_conversions(GPU_MultisampleState, C.SDL_GPUMultisampleState).from_c_ptr;
+    pub const to_c = c_non_opaque_conversions(GPU_MultisampleState, C.SDL_GPUMultisampleState).to_c;
+    pub const from_c = c_non_opaque_conversions(GPU_MultisampleState, C.SDL_GPUMultisampleState).from_c;
 };
 
 pub const GPU_DepthStencilState = extern struct {
@@ -6875,7 +7173,10 @@ pub const GPU_DepthStencilState = extern struct {
     _padding2: u8 = 0,
     _padding3: u8 = 0,
 
-    pub usingnamespace c_non_opaque_conversions(GPU_DepthStencilState, C.SDL_GPUDepthStencilState);
+    pub const to_c_ptr = c_non_opaque_conversions(GPU_DepthStencilState, C.SDL_GPUDepthStencilState).to_c_ptr;
+    pub const from_c_ptr = c_non_opaque_conversions(GPU_DepthStencilState, C.SDL_GPUDepthStencilState).from_c_ptr;
+    pub const to_c = c_non_opaque_conversions(GPU_DepthStencilState, C.SDL_GPUDepthStencilState).to_c;
+    pub const from_c = c_non_opaque_conversions(GPU_DepthStencilState, C.SDL_GPUDepthStencilState).from_c;
 };
 
 pub const GPU_StencilOpState = extern struct {
@@ -6884,7 +7185,10 @@ pub const GPU_StencilOpState = extern struct {
     depth_fail_op: GPU_StencilOp = .INVALID,
     compare_op: GPU_CompareOp = .INVALID,
 
-    pub usingnamespace c_non_opaque_conversions(GPU_StencilOpState, C.SDL_GPUStencilOpState);
+    pub const to_c_ptr = c_non_opaque_conversions(GPU_StencilOpState, C.SDL_GPUStencilOpState).to_c_ptr;
+    pub const from_c_ptr = c_non_opaque_conversions(GPU_StencilOpState, C.SDL_GPUStencilOpState).from_c_ptr;
+    pub const to_c = c_non_opaque_conversions(GPU_StencilOpState, C.SDL_GPUStencilOpState).to_c;
+    pub const from_c = c_non_opaque_conversions(GPU_StencilOpState, C.SDL_GPUStencilOpState).from_c;
 };
 
 pub const GPU_GraphicsPipelineTargetInfo = extern struct {
@@ -6896,14 +7200,20 @@ pub const GPU_GraphicsPipelineTargetInfo = extern struct {
     _padding2: u8 = 0,
     _padding3: u8 = 0,
 
-    pub usingnamespace c_non_opaque_conversions(GPU_GraphicsPipelineTargetInfo, C.SDL_GPUGraphicsPipelineTargetInfo);
+    pub const to_c_ptr = c_non_opaque_conversions(GPU_GraphicsPipelineTargetInfo, C.SDL_GPUGraphicsPipelineTargetInfo).to_c_ptr;
+    pub const from_c_ptr = c_non_opaque_conversions(GPU_GraphicsPipelineTargetInfo, C.SDL_GPUGraphicsPipelineTargetInfo).from_c_ptr;
+    pub const to_c = c_non_opaque_conversions(GPU_GraphicsPipelineTargetInfo, C.SDL_GPUGraphicsPipelineTargetInfo).to_c;
+    pub const from_c = c_non_opaque_conversions(GPU_GraphicsPipelineTargetInfo, C.SDL_GPUGraphicsPipelineTargetInfo).from_c;
 };
 
 pub const GPU_ColorTargetDescription = extern struct {
     format: GPU_TextureFormat = .INVALID,
     blend_state: GPU_ColorTargetBlendState = .{},
 
-    pub usingnamespace c_non_opaque_conversions(GPU_ColorTargetDescription, C.SDL_GPUColorTargetDescription);
+    pub const to_c_ptr = c_non_opaque_conversions(GPU_ColorTargetDescription, C.SDL_GPUColorTargetDescription).to_c_ptr;
+    pub const from_c_ptr = c_non_opaque_conversions(GPU_ColorTargetDescription, C.SDL_GPUColorTargetDescription).from_c_ptr;
+    pub const to_c = c_non_opaque_conversions(GPU_ColorTargetDescription, C.SDL_GPUColorTargetDescription).to_c;
+    pub const from_c = c_non_opaque_conversions(GPU_ColorTargetDescription, C.SDL_GPUColorTargetDescription).from_c;
 };
 
 pub const GPU_ColorTargetBlendState = extern struct {
@@ -6919,7 +7229,10 @@ pub const GPU_ColorTargetBlendState = extern struct {
     _padding1: u8 = 0,
     _padding2: u8 = 0,
 
-    pub usingnamespace c_non_opaque_conversions(GPU_ColorTargetBlendState, C.SDL_GPUColorTargetBlendState);
+    pub const to_c_ptr = c_non_opaque_conversions(GPU_ColorTargetBlendState, C.SDL_GPUColorTargetBlendState).to_c_ptr;
+    pub const from_c_ptr = c_non_opaque_conversions(GPU_ColorTargetBlendState, C.SDL_GPUColorTargetBlendState).from_c_ptr;
+    pub const to_c = c_non_opaque_conversions(GPU_ColorTargetBlendState, C.SDL_GPUColorTargetBlendState).to_c;
+    pub const from_c = c_non_opaque_conversions(GPU_ColorTargetBlendState, C.SDL_GPUColorTargetBlendState).from_c;
 };
 
 pub const GPU_IndirectDispatchCommand = extern struct {
@@ -6927,7 +7240,10 @@ pub const GPU_IndirectDispatchCommand = extern struct {
     groupcount_y: u32 = 0,
     groupcount_z: u32 = 0,
 
-    pub usingnamespace c_non_opaque_conversions(GPU_IndirectDispatchCommand, C.SDL_GPUIndirectDispatchCommand);
+    pub const to_c_ptr = c_non_opaque_conversions(GPU_IndirectDispatchCommand, C.SDL_GPUIndirectDispatchCommand).to_c_ptr;
+    pub const from_c_ptr = c_non_opaque_conversions(GPU_IndirectDispatchCommand, C.SDL_GPUIndirectDispatchCommand).from_c_ptr;
+    pub const to_c = c_non_opaque_conversions(GPU_IndirectDispatchCommand, C.SDL_GPUIndirectDispatchCommand).to_c;
+    pub const from_c = c_non_opaque_conversions(GPU_IndirectDispatchCommand, C.SDL_GPUIndirectDispatchCommand).from_c;
 };
 
 pub const GPU_IndexedIndirectDrawCommand = extern struct {
@@ -6937,7 +7253,10 @@ pub const GPU_IndexedIndirectDrawCommand = extern struct {
     vertex_offset: i32 = 0,
     first_instance: u32 = 0,
 
-    pub usingnamespace c_non_opaque_conversions(GPU_IndexedIndirectDrawCommand, C.SDL_GPUIndexedIndirectDrawCommand);
+    pub const to_c_ptr = c_non_opaque_conversions(GPU_IndexedIndirectDrawCommand, C.SDL_GPUIndexedIndirectDrawCommand).to_c_ptr;
+    pub const from_c_ptr = c_non_opaque_conversions(GPU_IndexedIndirectDrawCommand, C.SDL_GPUIndexedIndirectDrawCommand).from_c_ptr;
+    pub const to_c = c_non_opaque_conversions(GPU_IndexedIndirectDrawCommand, C.SDL_GPUIndexedIndirectDrawCommand).to_c;
+    pub const from_c = c_non_opaque_conversions(GPU_IndexedIndirectDrawCommand, C.SDL_GPUIndexedIndirectDrawCommand).from_c;
 };
 
 pub const GPU_IndirectDrawCommand = extern struct {
@@ -6946,7 +7265,10 @@ pub const GPU_IndirectDrawCommand = extern struct {
     first_vertex: u32 = 0,
     first_instance: u32 = 0,
 
-    pub usingnamespace c_non_opaque_conversions(GPU_IndirectDrawCommand, C.SDL_GPUIndirectDrawCommand);
+    pub const to_c_ptr = c_non_opaque_conversions(GPU_IndirectDrawCommand, C.SDL_GPUIndirectDrawCommand).to_c_ptr;
+    pub const from_c_ptr = c_non_opaque_conversions(GPU_IndirectDrawCommand, C.SDL_GPUIndirectDrawCommand).from_c_ptr;
+    pub const to_c = c_non_opaque_conversions(GPU_IndirectDrawCommand, C.SDL_GPUIndirectDrawCommand).to_c;
+    pub const from_c = c_non_opaque_conversions(GPU_IndirectDrawCommand, C.SDL_GPUIndirectDrawCommand).from_c;
 };
 
 pub const GPU_BufferRegion = extern struct {
@@ -6954,14 +7276,20 @@ pub const GPU_BufferRegion = extern struct {
     offset: u32 = 0,
     size: u32 = 0,
 
-    pub usingnamespace c_non_opaque_conversions(GPU_BufferRegion, C.SDL_GPUBufferRegion);
+    pub const to_c_ptr = c_non_opaque_conversions(GPU_BufferRegion, C.SDL_GPUBufferRegion).to_c_ptr;
+    pub const from_c_ptr = c_non_opaque_conversions(GPU_BufferRegion, C.SDL_GPUBufferRegion).from_c_ptr;
+    pub const to_c = c_non_opaque_conversions(GPU_BufferRegion, C.SDL_GPUBufferRegion).to_c;
+    pub const from_c = c_non_opaque_conversions(GPU_BufferRegion, C.SDL_GPUBufferRegion).from_c;
 };
 
 pub const GPU_BufferLocation = extern struct {
     buffer: ?*GPU_Buffer = null,
     offset: u32 = u32,
 
-    pub usingnamespace c_non_opaque_conversions(GPU_BufferLocation, C.SDL_GPUBufferLocation);
+    pub const to_c_ptr = c_non_opaque_conversions(GPU_BufferLocation, C.SDL_GPUBufferLocation).to_c_ptr;
+    pub const from_c_ptr = c_non_opaque_conversions(GPU_BufferLocation, C.SDL_GPUBufferLocation).from_c_ptr;
+    pub const to_c = c_non_opaque_conversions(GPU_BufferLocation, C.SDL_GPUBufferLocation).to_c;
+    pub const from_c = c_non_opaque_conversions(GPU_BufferLocation, C.SDL_GPUBufferLocation).from_c;
 };
 
 pub const GPU_BlitRegion = extern struct {
@@ -6973,7 +7301,10 @@ pub const GPU_BlitRegion = extern struct {
     w: u32 = 0,
     h: u32 = 0,
 
-    pub usingnamespace c_non_opaque_conversions(GPU_BlitRegion, C.SDL_GPUBlitRegion);
+    pub const to_c_ptr = c_non_opaque_conversions(GPU_BlitRegion, C.SDL_GPUBlitRegion).to_c_ptr;
+    pub const from_c_ptr = c_non_opaque_conversions(GPU_BlitRegion, C.SDL_GPUBlitRegion).from_c_ptr;
+    pub const to_c = c_non_opaque_conversions(GPU_BlitRegion, C.SDL_GPUBlitRegion).to_c;
+    pub const from_c = c_non_opaque_conversions(GPU_BlitRegion, C.SDL_GPUBlitRegion).from_c;
 };
 
 pub const GPU_TextureRegion = extern struct {
@@ -6987,7 +7318,10 @@ pub const GPU_TextureRegion = extern struct {
     h: u32 = 0,
     d: u32 = 0,
 
-    pub usingnamespace c_non_opaque_conversions(GPU_TextureRegion, C.SDL_GPUTextureRegion);
+    pub const to_c_ptr = c_non_opaque_conversions(GPU_TextureRegion, C.SDL_GPUTextureRegion).to_c_ptr;
+    pub const from_c_ptr = c_non_opaque_conversions(GPU_TextureRegion, C.SDL_GPUTextureRegion).from_c_ptr;
+    pub const to_c = c_non_opaque_conversions(GPU_TextureRegion, C.SDL_GPUTextureRegion).to_c;
+    pub const from_c = c_non_opaque_conversions(GPU_TextureRegion, C.SDL_GPUTextureRegion).from_c;
 };
 
 pub const GPU_TextureLocation = extern struct {
@@ -6998,14 +7332,20 @@ pub const GPU_TextureLocation = extern struct {
     y: u32 = 0,
     z: u32 = 0,
 
-    pub usingnamespace c_non_opaque_conversions(GPU_TextureLocation, C.SDL_GPUTextureLocation);
+    pub const to_c_ptr = c_non_opaque_conversions(GPU_TextureLocation, C.SDL_GPUTextureLocation).to_c_ptr;
+    pub const from_c_ptr = c_non_opaque_conversions(GPU_TextureLocation, C.SDL_GPUTextureLocation).from_c_ptr;
+    pub const to_c = c_non_opaque_conversions(GPU_TextureLocation, C.SDL_GPUTextureLocation).to_c;
+    pub const from_c = c_non_opaque_conversions(GPU_TextureLocation, C.SDL_GPUTextureLocation).from_c;
 };
 
 pub const GPU_TransferBufferLocation = extern struct {
     transfer_buffer: ?*GPU_TransferBuffer = null,
     offset: u32 = 0,
 
-    pub usingnamespace c_non_opaque_conversions(GPU_TransferBufferLocation, C.SDL_GPUTransferBufferLocation);
+    pub const to_c_ptr = c_non_opaque_conversions(GPU_TransferBufferLocation, C.SDL_GPUTransferBufferLocation).to_c_ptr;
+    pub const from_c_ptr = c_non_opaque_conversions(GPU_TransferBufferLocation, C.SDL_GPUTransferBufferLocation).from_c_ptr;
+    pub const to_c = c_non_opaque_conversions(GPU_TransferBufferLocation, C.SDL_GPUTransferBufferLocation).to_c;
+    pub const from_c = c_non_opaque_conversions(GPU_TransferBufferLocation, C.SDL_GPUTransferBufferLocation).from_c;
 };
 
 pub const GPU_TextureTransferInfo = extern struct {
@@ -7014,7 +7354,10 @@ pub const GPU_TextureTransferInfo = extern struct {
     pixels_per_row: u32 = 0,
     rows_per_layer: u32 = 0,
 
-    pub usingnamespace c_non_opaque_conversions(GPU_TextureTransferInfo, C.SDL_GPUTextureTransferInfo);
+    pub const to_c_ptr = c_non_opaque_conversions(GPU_TextureTransferInfo, C.SDL_GPUTextureTransferInfo).to_c_ptr;
+    pub const from_c_ptr = c_non_opaque_conversions(GPU_TextureTransferInfo, C.SDL_GPUTextureTransferInfo).from_c_ptr;
+    pub const to_c = c_non_opaque_conversions(GPU_TextureTransferInfo, C.SDL_GPUTextureTransferInfo).to_c;
+    pub const from_c = c_non_opaque_conversions(GPU_TextureTransferInfo, C.SDL_GPUTextureTransferInfo).from_c;
 };
 
 pub const GPU_SamplerCreateInfo = extern struct {
@@ -7035,7 +7378,10 @@ pub const GPU_SamplerCreateInfo = extern struct {
     _padding2: u8 = 0,
     props: PropertiesID = .{},
 
-    pub usingnamespace c_non_opaque_conversions(GPU_SamplerCreateInfo, C.SDL_GPUSamplerCreateInfo);
+    pub const to_c_ptr = c_non_opaque_conversions(GPU_SamplerCreateInfo, C.SDL_GPUSamplerCreateInfo).to_c_ptr;
+    pub const from_c_ptr = c_non_opaque_conversions(GPU_SamplerCreateInfo, C.SDL_GPUSamplerCreateInfo).from_c_ptr;
+    pub const to_c = c_non_opaque_conversions(GPU_SamplerCreateInfo, C.SDL_GPUSamplerCreateInfo).to_c;
+    pub const from_c = c_non_opaque_conversions(GPU_SamplerCreateInfo, C.SDL_GPUSamplerCreateInfo).from_c;
 
     pub const CreateProps = struct {
         pub const NAME = Property.new(.STRING, C.SDL_PROP_GPU_SAMPLER_CREATE_NAME_STRING);
@@ -7057,7 +7403,10 @@ pub const GPU_ColorTargetInfo = extern struct {
     _padding1: u8 = 0,
     _padding2: u8 = 0,
 
-    pub usingnamespace c_non_opaque_conversions(GPU_ColorTargetInfo, C.SDL_GPUColorTargetInfo);
+    pub const to_c_ptr = c_non_opaque_conversions(GPU_ColorTargetInfo, C.SDL_GPUColorTargetInfo).to_c_ptr;
+    pub const from_c_ptr = c_non_opaque_conversions(GPU_ColorTargetInfo, C.SDL_GPUColorTargetInfo).from_c_ptr;
+    pub const to_c = c_non_opaque_conversions(GPU_ColorTargetInfo, C.SDL_GPUColorTargetInfo).to_c;
+    pub const from_c = c_non_opaque_conversions(GPU_ColorTargetInfo, C.SDL_GPUColorTargetInfo).from_c;
 };
 
 pub const GPU_DepthStencilTargetInfo = extern struct {
@@ -7072,7 +7421,10 @@ pub const GPU_DepthStencilTargetInfo = extern struct {
     _padding1: u8 = 0,
     _padding2: u8 = 0,
 
-    pub usingnamespace c_non_opaque_conversions(GPU_DepthStencilTargetInfo, C.SDL_GPUDepthStencilTargetInfo);
+    pub const to_c_ptr = c_non_opaque_conversions(GPU_DepthStencilTargetInfo, C.SDL_GPUDepthStencilTargetInfo).to_c_ptr;
+    pub const from_c_ptr = c_non_opaque_conversions(GPU_DepthStencilTargetInfo, C.SDL_GPUDepthStencilTargetInfo).from_c_ptr;
+    pub const to_c = c_non_opaque_conversions(GPU_DepthStencilTargetInfo, C.SDL_GPUDepthStencilTargetInfo).to_c;
+    pub const from_c = c_non_opaque_conversions(GPU_DepthStencilTargetInfo, C.SDL_GPUDepthStencilTargetInfo).from_c;
 };
 
 pub const GPU_Viewport = extern struct {
@@ -7094,21 +7446,30 @@ pub const GPU_Viewport = extern struct {
         };
     }
 
-    pub usingnamespace c_non_opaque_conversions(GPU_Viewport, C.SDL_GPUViewport);
+    pub const to_c_ptr = c_non_opaque_conversions(GPU_Viewport, C.SDL_GPUViewport).to_c_ptr;
+    pub const from_c_ptr = c_non_opaque_conversions(GPU_Viewport, C.SDL_GPUViewport).from_c_ptr;
+    pub const to_c = c_non_opaque_conversions(GPU_Viewport, C.SDL_GPUViewport).to_c;
+    pub const from_c = c_non_opaque_conversions(GPU_Viewport, C.SDL_GPUViewport).from_c;
 };
 
 pub const GPU_BufferBinding = extern struct {
     buffer: ?*GPU_Buffer = null,
     offset: u32 = 0,
 
-    pub usingnamespace c_non_opaque_conversions(GPU_BufferBinding, C.SDL_GPUBufferBinding);
+    pub const to_c_ptr = c_non_opaque_conversions(GPU_BufferBinding, C.SDL_GPUBufferBinding).to_c_ptr;
+    pub const from_c_ptr = c_non_opaque_conversions(GPU_BufferBinding, C.SDL_GPUBufferBinding).from_c_ptr;
+    pub const to_c = c_non_opaque_conversions(GPU_BufferBinding, C.SDL_GPUBufferBinding).to_c;
+    pub const from_c = c_non_opaque_conversions(GPU_BufferBinding, C.SDL_GPUBufferBinding).from_c;
 };
 
 pub const GPU_TextureSamplerBinding = extern struct {
     texture: ?*GPU_Texture = null,
     sampler: ?*GPU_TextureSampler = null,
 
-    pub usingnamespace c_non_opaque_conversions(GPU_TextureSamplerBinding, C.SDL_GPUTextureSamplerBinding);
+    pub const to_c_ptr = c_non_opaque_conversions(GPU_TextureSamplerBinding, C.SDL_GPUTextureSamplerBinding).to_c_ptr;
+    pub const from_c_ptr = c_non_opaque_conversions(GPU_TextureSamplerBinding, C.SDL_GPUTextureSamplerBinding).from_c_ptr;
+    pub const to_c = c_non_opaque_conversions(GPU_TextureSamplerBinding, C.SDL_GPUTextureSamplerBinding).to_c;
+    pub const from_c = c_non_opaque_conversions(GPU_TextureSamplerBinding, C.SDL_GPUTextureSamplerBinding).from_c;
 };
 
 pub const GPU_StorageBufferReadWriteBinding = extern struct {
@@ -7118,7 +7479,10 @@ pub const GPU_StorageBufferReadWriteBinding = extern struct {
     _padding2: u8 = 0,
     _padding3: u8 = 0,
 
-    pub usingnamespace c_non_opaque_conversions(GPU_StorageBufferReadWriteBinding, C.SDL_GPUStorageBufferReadWriteBinding);
+    pub const to_c_ptr = c_non_opaque_conversions(GPU_StorageBufferReadWriteBinding, C.SDL_GPUStorageBufferReadWriteBinding).to_c_ptr;
+    pub const from_c_ptr = c_non_opaque_conversions(GPU_StorageBufferReadWriteBinding, C.SDL_GPUStorageBufferReadWriteBinding).from_c_ptr;
+    pub const to_c = c_non_opaque_conversions(GPU_StorageBufferReadWriteBinding, C.SDL_GPUStorageBufferReadWriteBinding).to_c;
+    pub const from_c = c_non_opaque_conversions(GPU_StorageBufferReadWriteBinding, C.SDL_GPUStorageBufferReadWriteBinding).from_c;
 };
 
 pub const GPU_StorageTextureReadWriteBinding = extern struct {
@@ -7130,7 +7494,10 @@ pub const GPU_StorageTextureReadWriteBinding = extern struct {
     _padding2: u8 = 0,
     _padding3: u8 = 0,
 
-    pub usingnamespace c_non_opaque_conversions(GPU_StorageTextureReadWriteBinding, C.SDL_GPUStorageTextureReadWriteBinding);
+    pub const to_c_ptr = c_non_opaque_conversions(GPU_StorageTextureReadWriteBinding, C.SDL_GPUStorageTextureReadWriteBinding).to_c_ptr;
+    pub const from_c_ptr = c_non_opaque_conversions(GPU_StorageTextureReadWriteBinding, C.SDL_GPUStorageTextureReadWriteBinding).from_c_ptr;
+    pub const to_c = c_non_opaque_conversions(GPU_StorageTextureReadWriteBinding, C.SDL_GPUStorageTextureReadWriteBinding).to_c;
+    pub const from_c = c_non_opaque_conversions(GPU_StorageTextureReadWriteBinding, C.SDL_GPUStorageTextureReadWriteBinding).from_c;
 };
 
 pub const GPU_BlitInfo = extern struct {
@@ -7145,7 +7512,10 @@ pub const GPU_BlitInfo = extern struct {
     _padding2: u8 = 0,
     _padding3: u8 = 0,
 
-    pub usingnamespace c_non_opaque_conversions(GPU_BlitInfo, C.SDL_GPUBlitInfo);
+    pub const to_c_ptr = c_non_opaque_conversions(GPU_BlitInfo, C.SDL_GPUBlitInfo).to_c_ptr;
+    pub const from_c_ptr = c_non_opaque_conversions(GPU_BlitInfo, C.SDL_GPUBlitInfo).from_c_ptr;
+    pub const to_c = c_non_opaque_conversions(GPU_BlitInfo, C.SDL_GPUBlitInfo).to_c;
+    pub const from_c = c_non_opaque_conversions(GPU_BlitInfo, C.SDL_GPUBlitInfo).from_c;
 };
 
 pub const GPU_SwapchainComposition = enum(c_uint) {
@@ -7154,42 +7524,48 @@ pub const GPU_SwapchainComposition = enum(c_uint) {
     HDR_EXTENDED_LINEAR = C.SDL_GPU_SWAPCHAINCOMPOSITION_HDR_EXTENDED_LINEAR,
     HDR10_ST2084 = C.SDL_GPU_SWAPCHAINCOMPOSITION_HDR10_ST2084,
 
-    pub usingnamespace c_enum_conversions(GPU_SwapchainComposition, c_uint);
+    pub const to_c = c_enum_conversions(GPU_SwapchainComposition, c_uint).to_c;
+    pub const from_c = c_enum_conversions(GPU_SwapchainComposition, c_uint).from_c;
 };
 
 pub const GPU_TransferBufferUsage = enum(c_uint) {
     UPLOAD = C.SDL_TRANSFERBUFFERUSAGE_UPLOAD,
     DOWNLOAD = C.SDL_TRANSFERBUFFERUSAGE_DOWNLOAD,
 
-    pub usingnamespace c_enum_conversions(GPU_TransferBufferUsage, c_uint);
+    pub const to_c = c_enum_conversions(GPU_TransferBufferUsage, c_uint).to_c;
+    pub const from_c = c_enum_conversions(GPU_TransferBufferUsage, c_uint).from_c;
 };
 
 pub const GPU_ShaderStage = enum(c_uint) {
     VERTEX = C.SDL_SHADERSTAGE_VERTEX,
     FRAGMENT = C.SDL_SHADERSTAGE_FRAGMENT,
 
-    pub usingnamespace c_enum_conversions(GPU_ShaderStage, C.SDL_GPUShaderStage);
+    pub const to_c = c_enum_conversions(GPU_ShaderStage, C.SDL_GPUShaderStage).to_c;
+    pub const from_c = c_enum_conversions(GPU_ShaderStage, C.SDL_GPUShaderStage).from_c;
 };
 
 pub const GPU_VertexInputRate = enum(c_uint) {
     VERTEX = C.SDL_VERTEXINPUTRATE_VERTEX,
     INSTANCE = C.SDL_VERTEXINPUTRATE_INSTANCE,
 
-    pub usingnamespace c_enum_conversions(GPU_VertexInputRate, c_uint);
+    pub const to_c = c_enum_conversions(GPU_VertexInputRate, c_uint).to_c;
+    pub const from_c = c_enum_conversions(GPU_VertexInputRate, c_uint).from_c;
 };
 
 pub const GPU_FilterMode = enum(c_uint) {
     NEAREST = C.SDL_FILTER_NEAREST,
     LINEAR = C.SDL_FILTER_LINEAR,
 
-    pub usingnamespace c_enum_conversions(GPU_FilterMode, c_uint);
+    pub const to_c = c_enum_conversions(GPU_FilterMode, c_uint).to_c;
+    pub const from_c = c_enum_conversions(GPU_FilterMode, c_uint).from_c;
 };
 
 pub const GPU_SamplerMipmapMode = enum(c_uint) {
     NEAREST = C.SDL_SAMPLERMIPMAPMODE_NEAREST,
     LINEAR = C.SDL_SAMPLERMIPMAPMODE_LINEAR,
 
-    pub usingnamespace c_enum_conversions(GPU_SamplerMipmapMode, c_uint);
+    pub const to_c = c_enum_conversions(GPU_SamplerMipmapMode, c_uint).to_c;
+    pub const from_c = c_enum_conversions(GPU_SamplerMipmapMode, c_uint).from_c;
 };
 
 pub const GPU_SamplerAddressMode = enum(c_uint) {
@@ -7197,7 +7573,8 @@ pub const GPU_SamplerAddressMode = enum(c_uint) {
     MIRRORED_REPEAT = C.SDL_SAMPLERADDRESSMODE_MIRRORED_REPEAT,
     CLAMP_TO_EDGE = C.SDL_SAMPLERADDRESSMODE_CLAMP_TO_EDGE,
 
-    pub usingnamespace c_enum_conversions(GPU_SamplerAddressMode, c_uint);
+    pub const to_c = c_enum_conversions(GPU_SamplerAddressMode, c_uint).to_c;
+    pub const from_c = c_enum_conversions(GPU_SamplerAddressMode, c_uint).from_c;
 };
 
 pub const GPU_PresentMode = enum(c_uint) {
@@ -7205,7 +7582,8 @@ pub const GPU_PresentMode = enum(c_uint) {
     IMMEDIATE = C.SDL_PRESENTMODE_IMMEDIATE,
     MAILBOX = C.SDL_PRESENTMODE_MAILBOX,
 
-    pub usingnamespace c_enum_conversions(GPU_PresentMode, c_uint);
+    pub const to_c = c_enum_conversions(GPU_PresentMode, c_uint).to_c;
+    pub const from_c = c_enum_conversions(GPU_PresentMode, c_uint).from_c;
 };
 
 pub const GPU_BlendFactor = enum(c_uint) {
@@ -7224,7 +7602,8 @@ pub const GPU_BlendFactor = enum(c_uint) {
     ONE_MINUS_CONSTANT_COLOR = C.SDL_BLENDFACTOR_ONE_MINUS_CONSTANT_COLOR,
     SRC_ALPHA_SATURATE = C.SDL_BLENDFACTOR_SRC_ALPHA_SATURATE,
 
-    pub usingnamespace c_enum_conversions(GPU_BlendFactor, c_uint);
+    pub const to_c = c_enum_conversions(GPU_BlendFactor, c_uint).to_c;
+    pub const from_c = c_enum_conversions(GPU_BlendFactor, c_uint).from_c;
 };
 
 pub const GPU_BlendOp = enum(c_uint) {
@@ -7235,7 +7614,8 @@ pub const GPU_BlendOp = enum(c_uint) {
     MIN = C.SDL_BLENDOP_MIN,
     MAX = C.SDL_BLENDOP_MAX,
 
-    pub usingnamespace c_enum_conversions(GPU_BlendOp, c_uint);
+    pub const to_c = c_enum_conversions(GPU_BlendOp, c_uint).to_c;
+    pub const from_c = c_enum_conversions(GPU_BlendOp, c_uint).from_c;
 };
 
 pub const GPU_CompareOp = enum(c_uint) {
@@ -7249,7 +7629,8 @@ pub const GPU_CompareOp = enum(c_uint) {
     GREATER_OR_EQUAL = C.SDL_COMPAREOP_GREATER_OR_EQUAL,
     ALWAYS = C.SDL_COMPAREOP_ALWAYS,
 
-    pub usingnamespace c_enum_conversions(GPU_CompareOp, c_uint);
+    pub const to_c = c_enum_conversions(GPU_CompareOp, c_uint).to_c;
+    pub const from_c = c_enum_conversions(GPU_CompareOp, c_uint).from_c;
 };
 
 pub const GPU_StencilOp = enum(c_uint) {
@@ -7263,14 +7644,16 @@ pub const GPU_StencilOp = enum(c_uint) {
     INCREMENT_AND_WRAP = C.SDL_STENCILOP_INCREMENT_AND_WRAP,
     DECREMENT_AND_WRAP = C.SDL_STENCILOP_DECREMENT_AND_WRAP,
 
-    pub usingnamespace c_enum_conversions(GPU_StencilOp, c_uint);
+    pub const to_c = c_enum_conversions(GPU_StencilOp, c_uint).to_c;
+    pub const from_c = c_enum_conversions(GPU_StencilOp, c_uint).from_c;
 };
 
 pub const GPU_FillMode = enum(c_uint) {
     FILL = C.SDL_FILLMODE_FILL,
     LINE = C.SDL_FILLMODE_LINE,
 
-    pub usingnamespace c_enum_conversions(GPU_FillMode, c_uint);
+    pub const to_c = c_enum_conversions(GPU_FillMode, c_uint).to_c;
+    pub const from_c = c_enum_conversions(GPU_FillMode, c_uint).from_c;
 };
 
 pub const GPU_CullMode = enum(c_uint) {
@@ -7278,14 +7661,16 @@ pub const GPU_CullMode = enum(c_uint) {
     FRONT = C.SDL_CULLMODE_FRONT,
     BACK = C.SDL_CULLMODE_BACK,
 
-    pub usingnamespace c_enum_conversions(GPU_CullMode, c_uint);
+    pub const to_c = c_enum_conversions(GPU_CullMode, c_uint).to_c;
+    pub const from_c = c_enum_conversions(GPU_CullMode, c_uint).from_c;
 };
 
 pub const GPU_FrontFaceWinding = enum(c_uint) {
     CCW = C.SDL_FRONTFACE_COUNTER_CLOCKWISE,
     CW = C.SDL_FRONTFACE_CLOCKWISE,
 
-    pub usingnamespace c_enum_conversions(GPU_FrontFaceWinding, c_uint);
+    pub const to_c = c_enum_conversions(GPU_FrontFaceWinding, c_uint).to_c;
+    pub const from_c = c_enum_conversions(GPU_FrontFaceWinding, c_uint).from_c;
 };
 
 pub const GPU_VertexElementFormat = enum(c_uint) {
@@ -7321,39 +7706,48 @@ pub const GPU_VertexElementFormat = enum(c_uint) {
     F16_x2 = C.SDL_VERTEXELEMENTFORMAT_HALF2,
     F16_x4 = C.SDL_VERTEXELEMENTFORMAT_HALF4,
 
-    pub usingnamespace c_enum_conversions(GPU_VertexElementFormat, c_uint);
+    pub const to_c = c_enum_conversions(GPU_VertexElementFormat, c_uint).to_c;
+    pub const from_c = c_enum_conversions(GPU_VertexElementFormat, c_uint).from_c;
 };
 
 pub const GPU_Buffer = opaque {
-    pub usingnamespace c_opaque_conversions(GPU_Buffer, C.SDL_GPUBuffer);
+    pub const to_c_ptr = c_opaque_conversions(GPU_Buffer, C.SDL_GPUBuffer).to_c_ptr;
+    pub const from_c_ptr = c_opaque_conversions(GPU_Buffer, C.SDL_GPUBuffer).from_c_ptr;
 };
 
 pub const GPU_TransferBuffer = opaque {
-    pub usingnamespace c_opaque_conversions(GPU_TransferBuffer, C.SDL_GPUTransferBuffer);
+    pub const to_c_ptr = c_opaque_conversions(GPU_TransferBuffer, C.SDL_GPUTransferBuffer).to_c_ptr;
+    pub const from_c_ptr = c_opaque_conversions(GPU_TransferBuffer, C.SDL_GPUTransferBuffer).from_c_ptr;
 };
 
 pub const GPU_Texture = opaque {
-    pub usingnamespace c_opaque_conversions(GPU_Texture, C.SDL_GPUTexture);
+    pub const to_c_ptr = c_opaque_conversions(GPU_Texture, C.SDL_GPUTexture).to_c_ptr;
+    pub const from_c_ptr = c_opaque_conversions(GPU_Texture, C.SDL_GPUTexture).from_c_ptr;
 };
 
 pub const GPU_TextureSampler = opaque {
-    pub usingnamespace c_opaque_conversions(GPU_TextureSampler, C.SDL_GPUSampler);
+    pub const to_c_ptr = c_opaque_conversions(GPU_TextureSampler, C.SDL_GPUSampler).to_c_ptr;
+    pub const from_c_ptr = c_opaque_conversions(GPU_TextureSampler, C.SDL_GPUSampler).from_c_ptr;
 };
 
 pub const GPU_Shader = opaque {
-    pub usingnamespace c_opaque_conversions(GPU_Shader, C.SDL_GPUShader);
+    pub const to_c_ptr = c_opaque_conversions(GPU_Shader, C.SDL_GPUShader).to_c_ptr;
+    pub const from_c_ptr = c_opaque_conversions(GPU_Shader, C.SDL_GPUShader).from_c_ptr;
 };
 
 pub const GPU_ComputePipeline = opaque {
-    pub usingnamespace c_opaque_conversions(GPU_ComputePipeline, C.SDL_GPUComputePipeline);
+    pub const to_c_ptr = c_opaque_conversions(GPU_ComputePipeline, C.SDL_GPUComputePipeline).to_c_ptr;
+    pub const from_c_ptr = c_opaque_conversions(GPU_ComputePipeline, C.SDL_GPUComputePipeline).from_c_ptr;
 };
 
 pub const GPU_GraphicsPipeline = opaque {
-    pub usingnamespace c_opaque_conversions(GPU_GraphicsPipeline, C.SDL_GPUGraphicsPipeline);
+    pub const to_c_ptr = c_opaque_conversions(GPU_GraphicsPipeline, C.SDL_GPUGraphicsPipeline).to_c_ptr;
+    pub const from_c_ptr = c_opaque_conversions(GPU_GraphicsPipeline, C.SDL_GPUGraphicsPipeline).from_c_ptr;
 };
 
 pub const GPU_CommandBuffer = opaque {
-    pub usingnamespace c_opaque_conversions(GPU_CommandBuffer, C.SDL_GPUCommandBuffer);
+    pub const to_c_ptr = c_opaque_conversions(GPU_CommandBuffer, C.SDL_GPUCommandBuffer).to_c_ptr;
+    pub const from_c_ptr = c_opaque_conversions(GPU_CommandBuffer, C.SDL_GPUCommandBuffer).from_c_ptr;
 
     pub fn insert_debug_label(self: *GPU_CommandBuffer, text: [*:0]const u8) void {
         C.SDL_InsertGPUDebugLabel(self.to_c_ptr(), text);
@@ -7419,7 +7813,8 @@ pub const GPU_SwapchainTexture = struct {
 };
 
 pub const GPU_RenderPass = opaque {
-    pub usingnamespace c_opaque_conversions(GPU_RenderPass, C.SDL_GPURenderPass);
+    pub const to_c_ptr = c_opaque_conversions(GPU_RenderPass, C.SDL_GPURenderPass).to_c_ptr;
+    pub const from_c_ptr = c_opaque_conversions(GPU_RenderPass, C.SDL_GPURenderPass).from_c_ptr;
 
     pub fn bind_graphics_pipeline(self: *GPU_RenderPass, pipeline: *GPU_GraphicsPipeline) void {
         C.SDL_BindGPUGraphicsPipeline(self.to_c_ptr(), pipeline.to_c());
@@ -7484,7 +7879,8 @@ pub const GPU_RenderPass = opaque {
 };
 
 pub const GPU_ComputePass = opaque {
-    pub usingnamespace c_opaque_conversions(GPU_ComputePass, C.SDL_GPUComputePass);
+    pub const to_c_ptr = c_opaque_conversions(GPU_ComputePass, C.SDL_GPUComputePass).to_c_ptr;
+    pub const from_c_ptr = c_opaque_conversions(GPU_ComputePass, C.SDL_GPUComputePass).from_c_ptr;
     //TODO
     // pub extern fn SDL_BindGPUComputePipeline(compute_pass: ?*SDL_GPUComputePass, compute_pipeline: ?*SDL_GPUComputePipeline) void;
     // pub extern fn SDL_BindGPUComputeSamplers(compute_pass: ?*SDL_GPUComputePass, first_slot: Uint32, texture_sampler_bindings: [*c]const SDL_GPUTextureSamplerBinding, num_bindings: Uint32) void;
@@ -7496,7 +7892,8 @@ pub const GPU_ComputePass = opaque {
 };
 
 pub const GPU_CopyPass = opaque {
-    pub usingnamespace c_opaque_conversions(GPU_CopyPass, C.SDL_GPUCopyPass);
+    pub const to_c_ptr = c_opaque_conversions(GPU_CopyPass, C.SDL_GPUCopyPass).to_c_ptr;
+    pub const from_c_ptr = c_opaque_conversions(GPU_CopyPass, C.SDL_GPUCopyPass).from_c_ptr;
     //TODO
     // pub extern fn SDL_UploadToGPUTexture(copy_pass: ?*SDL_GPUCopyPass, source: [*c]const SDL_GPUTextureTransferInfo, destination: [*c]const SDL_GPUTextureRegion, cycle: bool) void;
     // pub extern fn SDL_UploadToGPUBuffer(copy_pass: ?*SDL_GPUCopyPass, source: [*c]const SDL_GPUTransferBufferLocation, destination: [*c]const SDL_GPUBufferRegion, cycle: bool) void;
@@ -7508,7 +7905,8 @@ pub const GPU_CopyPass = opaque {
 };
 
 pub const GPU_Fence = opaque {
-    pub usingnamespace c_opaque_conversions(GPU_Fence, C.SDL_GPUFence);
+    pub const to_c_ptr = c_opaque_conversions(GPU_Fence, C.SDL_GPUFence).to_c_ptr;
+    pub const from_c_ptr = c_opaque_conversions(GPU_Fence, C.SDL_GPUFence).from_c_ptr;
 };
 
 pub const GPU_PrimitiveType = enum(c_uint) {
@@ -7518,7 +7916,8 @@ pub const GPU_PrimitiveType = enum(c_uint) {
     LINE_STRIP = C.SDL_PRIMITIVETYPE_LINESTRIP,
     POINT_LIST = C.SDL_PRIMITIVETYPE_POINTLIST,
 
-    pub usingnamespace c_enum_conversions(GPU_PrimitiveType, c_uint);
+    pub const to_c = c_enum_conversions(GPU_PrimitiveType, c_uint).to_c;
+    pub const from_c = c_enum_conversions(GPU_PrimitiveType, c_uint).from_c;
 };
 
 pub const GPU_LoadOp = enum(c_uint) {
@@ -7526,7 +7925,8 @@ pub const GPU_LoadOp = enum(c_uint) {
     CLEAR = C.SDL_LOADOP_CLEAR,
     DONT_CARE = C.SDL_LOADOP_DONT_CARE,
 
-    pub usingnamespace c_enum_conversions(GPU_LoadOp, c_uint);
+    pub const to_c = c_enum_conversions(GPU_LoadOp, c_uint).to_c;
+    pub const from_c = c_enum_conversions(GPU_LoadOp, c_uint).from_c;
 };
 
 pub const GPU_StoreOp = enum(c_uint) {
@@ -7535,14 +7935,16 @@ pub const GPU_StoreOp = enum(c_uint) {
     RESOLVE = C.SDL_STOREOP_RESOLVE,
     RESOLVE_AND_STORE = C.SDL_STOREOP_RESOLVE_AND_STORE,
 
-    pub usingnamespace c_enum_conversions(GPU_StoreOp, c_uint);
+    pub const to_c = c_enum_conversions(GPU_StoreOp, c_uint).to_c;
+    pub const from_c = c_enum_conversions(GPU_StoreOp, c_uint).from_c;
 };
 
 pub const GPU_IndexTypeSize = enum(c_uint) {
     U16 = C.SDL_INDEXELEMENTSIZE_16BIT,
     U32 = C.SDL_INDEXELEMENTSIZE_32BIT,
 
-    pub usingnamespace c_enum_conversions(GPU_IndexTypeSize, C.SDL_GPUIndexElementSize);
+    pub const to_c = c_enum_conversions(GPU_IndexTypeSize, C.SDL_GPUIndexElementSize).to_c;
+    pub const from_c = c_enum_conversions(GPU_IndexTypeSize, C.SDL_GPUIndexElementSize).from_c;
 };
 
 pub const GPU_TextureFormat = enum(C.SDL_GPUTextureFormat) {
@@ -7652,7 +8054,8 @@ pub const GPU_TextureFormat = enum(C.SDL_GPUTextureFormat) {
     ASTC_12x10_FLOAT = C.SDL_TEXTUREFORMAT_ASTC_12x10_FLOAT,
     ASTC_12x12_FLOAT = C.SDL_TEXTUREFORMAT_ASTC_12x12_FLOAT,
 
-    pub usingnamespace c_enum_conversions(GPU_TextureFormat, C.SDL_GPUTextureFormat);
+    pub const to_c = c_enum_conversions(GPU_TextureFormat, C.SDL_GPUTextureFormat).to_c;
+    pub const from_c = c_enum_conversions(GPU_TextureFormat, C.SDL_GPUTextureFormat).from_c;
 
     pub fn texel_block_size(self: GPU_TextureFormat) u32 {
         return C.SDL_GPUTextureFormatTexelBlockSize(self.to_c());
@@ -7679,7 +8082,8 @@ pub const GPU_TextureType = enum(c_uint) {
     CUBE = C.SDL_TEXTURETYPE_CUBE,
     CUBE_ARRAY = C.SDL_TEXTURETYPE_CUBE_ARRAY,
 
-    pub usingnamespace c_enum_conversions(GPU_TextureType, c_uint);
+    pub const to_c = c_enum_conversions(GPU_TextureType, c_uint).to_c;
+    pub const from_c = c_enum_conversions(GPU_TextureType, c_uint).from_c;
 };
 
 pub const GPU_SampleCount = enum(c_uint) {
@@ -7688,7 +8092,8 @@ pub const GPU_SampleCount = enum(c_uint) {
     _4 = C.SDL_SAMPLECOUNT_4,
     _8 = C.SDL_SAMPLECOUNT_8,
 
-    pub usingnamespace c_enum_conversions(GPU_SampleCount, c_uint);
+    pub const to_c = c_enum_conversions(GPU_SampleCount, c_uint).to_c;
+    pub const from_c = c_enum_conversions(GPU_SampleCount, c_uint).from_c;
 };
 
 pub const GPU_CubeMapFace = enum(c_uint) {
@@ -7699,7 +8104,8 @@ pub const GPU_CubeMapFace = enum(c_uint) {
     POSITIVE_Z = C.SDL_CUBEMAPFACE_POSITIVEZ,
     NEGATIVE_Z = C.SDL_CUBEMAPFACE_NEGATIVEZ,
 
-    pub usingnamespace c_enum_conversions(GPU_CubeMapFace, c_uint);
+    pub const to_c = c_enum_conversions(GPU_CubeMapFace, c_uint).to_c;
+    pub const from_c = c_enum_conversions(GPU_CubeMapFace, c_uint).from_c;
 };
 
 pub const GPU_BufferUsageFlags = Flags(enum(u32) {
@@ -7775,7 +8181,8 @@ pub const MemoryFuncs = struct {
 };
 
 pub const Environment = opaque {
-    pub usingnamespace c_opaque_conversions(Environment, C.SDL_Environment);
+    pub const to_c_ptr = c_opaque_conversions(Environment, C.SDL_Environment).to_c_ptr;
+    pub const from_c_ptr = c_opaque_conversions(Environment, C.SDL_Environment).from_c_ptr;
 
     pub inline fn get_environment() Error!*Environment {
         return ptr_cast_or_null_err(*Environment, C.SDL_GetEnvironment());
@@ -7828,7 +8235,8 @@ pub const HintPriority = enum(C.SDL_HintPriority) {
     NORMAL = C.SDL_HINT_NORMAL,
     OVERRIDE = C.SDL_HINT_OVERRIDE,
 
-    pub usingnamespace c_enum_conversions(HintPriority, C.SDL_HintPriority);
+    pub const to_c = c_enum_conversions(HintPriority, C.SDL_HintPriority).to_c;
+    pub const from_c = c_enum_conversions(HintPriority, C.SDL_HintPriority).from_c;
 };
 
 pub const HintChangeCallback = fn (userdata: ?*anyopaque, hint_name: ?[*:0]const u8, old_value: ?[*:0]const u8, new_value: ?[*:0]const u8) callconv(.c) void;
@@ -7890,7 +8298,7 @@ pub const App = struct {
         return C.SDL_RunApp(arg_count, @ptrCast(@alignCast(arg_list)), main_func, null);
     }
     pub fn run_app_with_callbacks(arg_count: c_int, arg_list: ?[*:null]?[*:0]u8, init_func: *const AppInitFunc, update_func: *const AppUpdateFunc, event_func: *const AppEventFunc, quit_func: *const AppQuitFunc) c_int {
-        return C.SDL_EnterAppMainCallbacks(arg_count, @ptrCast(@alignCast(arg_list)), Types.ptr_cast(init_func, C.SDL_AppInit_func), Types.ptr_cast(update_func, C.SDL_AppIterate_func), Types.ptr_cast(event_func, C.SDL_AppEvent_func), Types.ptr_cast(quit_func, C.SDL_AppQuit_func));
+        return C.SDL_EnterAppMainCallbacks(arg_count, @ptrCast(@alignCast(arg_list)), Cast.ptr_cast(init_func, C.SDL_AppInit_func), Cast.ptr_cast(update_func, C.SDL_AppIterate_func), Cast.ptr_cast(event_func, C.SDL_AppEvent_func), Cast.ptr_cast(quit_func, C.SDL_AppQuit_func));
     }
     pub fn GDK_suspend_complete() void {
         C.SDL_GDKSuspendComplete();
@@ -7974,13 +8382,15 @@ pub const Sandbox = enum(C.SDL_Sandbox) {
     SNAP = C.SDL_SANDBOX_SNAP,
     MACOS = C.SDL_SANDBOX_MACOS,
 
-    pub usingnamespace c_enum_conversions(Sandbox, C.SDL_Sandbox);
+    pub const to_c = c_enum_conversions(Sandbox, C.SDL_Sandbox).to_c;
+    pub const from_c = c_enum_conversions(Sandbox, C.SDL_Sandbox).from_c;
     //TODO
     // pub extern fn SDL_GetSandbox() SDL_Sandbox;
 };
 
 pub const SharedObject = opaque {
-    pub usingnamespace c_opaque_conversions(SharedObject, C.SDL_SharedObject);
+    pub const to_c_ptr = c_opaque_conversions(SharedObject, C.SDL_SharedObject).to_c_ptr;
+    pub const from_c_ptr = c_opaque_conversions(SharedObject, C.SDL_SharedObject).from_c_ptr;
     //TODO
     // pub extern fn SDL_LoadObject(sofile: [*c]const u8) ?*SDL_SharedObject;
     // pub extern fn SDL_LoadFunction(handle: ?*SDL_SharedObject, name: [*c]const u8) SDL_FunctionPointer;
@@ -7991,7 +8401,10 @@ pub const Locale = extern struct {
     language: ?[*:0]const u8 = null,
     country: ?[*:0]const u8 = null,
 
-    pub usingnamespace c_non_opaque_conversions(Locale, C.SDL_Locale);
+    pub const to_c_ptr = c_non_opaque_conversions(Locale, C.SDL_Locale).to_c_ptr;
+    pub const from_c_ptr = c_non_opaque_conversions(Locale, C.SDL_Locale).from_c_ptr;
+    pub const to_c = c_non_opaque_conversions(Locale, C.SDL_Locale).to_c;
+    pub const from_c = c_non_opaque_conversions(Locale, C.SDL_Locale).from_c;
     //TODO
     // pub extern fn SDL_GetPreferredLocales(count: [*c]c_int) [*c][*c]SDL_Locale;
 };
@@ -8017,7 +8430,8 @@ pub const LogCategory = enum(C.SDL_LogCategory) {
     _,
     pub const CUSTOM_START = C.SDL_LOG_CATEGORY_CUSTOM;
 
-    pub usingnamespace c_enum_conversions(LogCategory, C.SDL_LogCategory);
+    pub const to_c = c_enum_conversions(LogCategory, C.SDL_LogCategory).to_c;
+    pub const from_c = c_enum_conversions(LogCategory, C.SDL_LogCategory).from_c;
 
     pub fn custom(tag_val: C.SDL_LogCategory) LogCategory {
         assert_with_reason(tag_val >= CUSTOM_START, @src(), "custom log categories must have a tag value greater than or equal to {d}", .{CUSTOM_START});
@@ -8037,7 +8451,8 @@ pub const LogPriority = enum(C.SDL_LogPriority) {
 
     pub const COUNT = C.SDL_LOG_PRIORITY_COUNT;
 
-    pub usingnamespace c_enum_conversions(LogPriority, C.SDL_LogPriority);
+    pub const to_c = c_enum_conversions(LogPriority, C.SDL_LogPriority).to_c;
+    pub const from_c = c_enum_conversions(LogPriority, C.SDL_LogPriority).from_c;
 };
 
 pub const Logging = struct {
@@ -8096,13 +8511,17 @@ pub const MessageBoxColorSlot = enum(C.SDL_MessageBoxColorType) {
 
     pub const COUNT = C.SDL_MESSAGEBOX_COLOR_COUNT;
 
-    pub usingnamespace c_enum_conversions(MessageBoxColorSlot, C.SDL_MessageBoxColorType);
+    pub const to_c = c_enum_conversions(MessageBoxColorSlot, C.SDL_MessageBoxColorType).to_c;
+    pub const from_c = c_enum_conversions(MessageBoxColorSlot, C.SDL_MessageBoxColorType).from_c;
 };
 
 pub const MessageBoxColorScheme = extern struct {
     colors: [5]Color_RGB_u8 = @splat(Color_RGB_u8.BLACK),
 
-    pub usingnamespace c_non_opaque_conversions(MessageBoxColorScheme, C.SDL_MessageBoxColorScheme);
+    pub const to_c_ptr = c_non_opaque_conversions(MessageBoxColorScheme, C.SDL_MessageBoxColorScheme).to_c_ptr;
+    pub const from_c_ptr = c_non_opaque_conversions(MessageBoxColorScheme, C.SDL_MessageBoxColorScheme).from_c_ptr;
+    pub const to_c = c_non_opaque_conversions(MessageBoxColorScheme, C.SDL_MessageBoxColorScheme).to_c;
+    pub const from_c = c_non_opaque_conversions(MessageBoxColorScheme, C.SDL_MessageBoxColorScheme).from_c;
 };
 
 pub const MessageBoxData = extern struct {
@@ -8114,7 +8533,10 @@ pub const MessageBoxData = extern struct {
     buttons: ?[*]const MessageBoxButtonData = null,
     color_scheme: ?*const MessageBoxColorScheme = null,
 
-    pub usingnamespace c_non_opaque_conversions(MessageBoxData, C.SDL_MessageBoxData);
+    pub const to_c_ptr = c_non_opaque_conversions(MessageBoxData, C.SDL_MessageBoxData).to_c_ptr;
+    pub const from_c_ptr = c_non_opaque_conversions(MessageBoxData, C.SDL_MessageBoxData).from_c_ptr;
+    pub const to_c = c_non_opaque_conversions(MessageBoxData, C.SDL_MessageBoxData).to_c;
+    pub const from_c = c_non_opaque_conversions(MessageBoxData, C.SDL_MessageBoxData).from_c;
 
     //TODO
     // pub extern fn SDL_ShowMessageBox(messageboxdata: [*c]const SDL_MessageBoxData, buttonid: [*c]c_int) bool;
@@ -8133,7 +8555,8 @@ pub const AssertState = enum(C.SDL_AssertState) {
     IGNORE = C.SDL_ASSERTION_IGNORE,
     ALWAYS_IGNORE = C.SDL_ASSERTION_ALWAYS_IGNORE,
 
-    pub usingnamespace c_enum_conversions(AssertState, C.SDL_AssertState);
+    pub const to_c = c_enum_conversions(AssertState, C.SDL_AssertState).to_c;
+    pub const from_c = c_enum_conversions(AssertState, C.SDL_AssertState).from_c;
 };
 
 pub const AssertData = extern struct {
@@ -8145,13 +8568,17 @@ pub const AssertData = extern struct {
     function_name: ?[*:0]const u8 = null,
     next: ?*const AssertData = null,
 
-    pub usingnamespace c_non_opaque_conversions(AssertData, C.SDL_AssertData);
+    pub const to_c_ptr = c_non_opaque_conversions(AssertData, C.SDL_AssertData).to_c_ptr;
+    pub const from_c_ptr = c_non_opaque_conversions(AssertData, C.SDL_AssertData).from_c_ptr;
+    pub const to_c = c_non_opaque_conversions(AssertData, C.SDL_AssertData).to_c;
+    pub const from_c = c_non_opaque_conversions(AssertData, C.SDL_AssertData).from_c;
 };
 
 pub const AssertionHandler = fn (assert_data: *C.SDL_AssertData, userdata: ?*anyopaque) callconv(.c) C.SDL_AssertState;
 
 pub const Process = opaque {
-    pub usingnamespace c_opaque_conversions(Process, C.SDL_Process);
+    pub const to_c_ptr = c_opaque_conversions(Process, C.SDL_Process).to_c_ptr;
+    pub const from_c_ptr = c_opaque_conversions(Process, C.SDL_Process).from_c_ptr;
     //TODO
     // pub extern fn SDL_CreateProcess(args: [*c]const [*c]const u8, pipe_stdio: bool) ?*SDL_Process;
     // pub extern fn SDL_GetProcessProperties(process: ?*SDL_Process) SDL_PropertiesID;
@@ -8187,11 +8614,13 @@ pub const ProcessIO = enum(C.SDL_ProcessIO) {
     APP = C.SDL_PROCESS_STDIO_APP,
     REDIRECT = C.SDL_PROCESS_STDIO_REDIRECT,
 
-    pub usingnamespace c_enum_conversions(ProcessIO, C.SDL_ProcessIO);
+    pub const to_c = c_enum_conversions(ProcessIO, C.SDL_ProcessIO).to_c;
+    pub const from_c = c_enum_conversions(ProcessIO, C.SDL_ProcessIO).from_c;
 };
 
 pub const X11_Event = opaque {
-    pub usingnamespace c_opaque_conversions(X11_Event, C.XEvent);
+    pub const to_c_ptr = c_opaque_conversions(X11_Event, C.XEvent).to_c_ptr;
+    pub const from_c_ptr = c_opaque_conversions(X11_Event, C.XEvent).from_c_ptr;
 };
 
 pub const X11_EventHook = fn (userdata: ?*anyopaque, event: ?*C.XEvent) callconv(.c) bool;
@@ -8212,7 +8641,10 @@ pub const DateTime = extern struct {
     day_of_week: c_int = 0,
     utc_offset: c_int = 0,
 
-    pub usingnamespace c_non_opaque_conversions(DateTime, C.SDL_DateTime);
+    pub const to_c_ptr = c_non_opaque_conversions(DateTime, C.SDL_DateTime).to_c_ptr;
+    pub const from_c_ptr = c_non_opaque_conversions(DateTime, C.SDL_DateTime).from_c_ptr;
+    pub const to_c = c_non_opaque_conversions(DateTime, C.SDL_DateTime).to_c;
+    pub const from_c = c_non_opaque_conversions(DateTime, C.SDL_DateTime).from_c;
     //TODO
     // pub extern fn SDL_DateTimeToTime(dt: [*c]const SDL_DateTime, ticks: [*c]SDL_Time) bool;
 };
@@ -8222,14 +8654,16 @@ pub const DateFormat = enum(C.SDL_DateFormat) {
     DD_MM_YYYY = C.SDL_DATE_FORMAT_DDMMYYYY,
     MM_DD_YYYY = C.SDL_DATE_FORMAT_MMDDYYYY,
 
-    pub usingnamespace c_enum_conversions(DateFormat, C.SDL_DateFormat);
+    pub const to_c = c_enum_conversions(DateFormat, C.SDL_DateFormat).to_c;
+    pub const from_c = c_enum_conversions(DateFormat, C.SDL_DateFormat).from_c;
 };
 
 pub const TimeFormat = enum(C.SDL_TimeFormat) {
     _24_HR = C.SDL_TIME_FORMAT_24HR,
     _12_HR = C.SDL_TIME_FORMAT_12HR,
 
-    pub usingnamespace c_enum_conversions(TimeFormat, C.SDL_TimeFormat);
+    pub const to_c = c_enum_conversions(TimeFormat, C.SDL_TimeFormat).to_c;
+    pub const from_c = c_enum_conversions(TimeFormat, C.SDL_TimeFormat).from_c;
 };
 
 pub const Time = struct {
@@ -8276,7 +8710,8 @@ pub const TimerCallback_MS = fn (userdata: ?*anyopaque, timer_id: u32, current_i
 pub const TimerCallback_NS = fn (userdata: ?*anyopaque, timer_id: u32, current_interval: u32) callconv(.c) u32;
 
 pub const Tray = opaque {
-    pub usingnamespace c_opaque_conversions(Tray, C.SDL_Tray);
+    pub const to_c_ptr = c_opaque_conversions(Tray, C.SDL_Tray).to_c_ptr;
+    pub const from_c_ptr = c_opaque_conversions(Tray, C.SDL_Tray).from_c_ptr;
 
     //TODO
     // pub extern fn SDL_UpdateTrays() void;
@@ -8289,7 +8724,8 @@ pub const Tray = opaque {
 };
 
 pub const TrayMenu = opaque {
-    pub usingnamespace c_opaque_conversions(TrayMenu, C.SDL_TrayMenu);
+    pub const to_c_ptr = c_opaque_conversions(TrayMenu, C.SDL_TrayMenu).to_c_ptr;
+    pub const from_c_ptr = c_opaque_conversions(TrayMenu, C.SDL_TrayMenu).from_c_ptr;
     //TODO
     // pub extern fn SDL_GetTrayEntries(menu: ?*SDL_TrayMenu, count: [*c]c_int) [*c]?*const SDL_TrayEntry;
     // pub extern fn SDL_InsertTrayEntryAt(menu: ?*SDL_TrayMenu, pos: c_int, label: [*c]const u8, flags: SDL_TrayEntryFlags) ?*SDL_TrayEntry;
@@ -8298,7 +8734,8 @@ pub const TrayMenu = opaque {
 };
 
 pub const TrayEntry = opaque {
-    pub usingnamespace c_opaque_conversions(TrayEntry, C.SDL_TrayEntry);
+    pub const to_c_ptr = c_opaque_conversions(TrayEntry, C.SDL_TrayEntry).to_c_ptr;
+    pub const from_c_ptr = c_opaque_conversions(TrayEntry, C.SDL_TrayEntry).from_c_ptr;
     //TODO
     // pub extern fn SDL_CreateTraySubmenu(entry: ?*SDL_TrayEntry) ?*SDL_TrayMenu;
     // pub extern fn SDL_GetTraySubmenu(entry: ?*SDL_TrayEntry) ?*SDL_TrayMenu;

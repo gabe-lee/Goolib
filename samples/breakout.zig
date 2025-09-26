@@ -38,7 +38,7 @@ var app_err: ErrorStore = .{};
 
 var paddle: Paddle = undefined;
 var ball: Ball = undefined;
-var bricks: std.BoundedArray(Brick, 100) = undefined;
+var bricks: BoundedArray(Brick, 100) = undefined;
 
 var won = false;
 var records_need_save = false;
@@ -60,7 +60,7 @@ pub fn app_init(appstate: ?*?*anyopaque, arg_count: c_int, arg_list: ?[*:null]?[
     _ = arg_count;
     _ = arg_list;
 
-    var write_buf = std.BoundedArray(u8, 250).init(0) catch unreachable;
+    var write_buf = BoundedArray(u8, 250){};
 
     sdl_log.debug("SDL build time version: {d}.{d}.{d}", .{
         SDL.Meta.BUILD_MAJOR_VERSION,
@@ -80,7 +80,7 @@ pub fn app_init(appstate: ?*?*anyopaque, arg_count: c_int, arg_list: ?[*:null]?[
     }
 
     try SDL.App.set_metadata("Breakout Sample", "0.0.0", "goolib.sample.breakout");
-    try SDL.App.init(SDL.InitFlags.flags(&.{ .VIDEO, .AUDIO, .GAMEPAD }));
+    try SDL.App.init(SDL.InitFlags.from_flags(&.{ .VIDEO, .AUDIO, .GAMEPAD }));
     write_buf.clear();
     sdl_log.debug("SDL video drivers: {s}", .{try fmt_sdl_drivers(
         &write_buf,
@@ -393,8 +393,9 @@ const Brick = struct {
     src_rect: *const SDL.Rect_f32,
 };
 
-fn fmt_sdl_drivers(write_buf: *std.BoundedArray(u8, 250), current_driver: [*:0]const u8, num_drivers: c_int, get_driver: *const fn (c_int) SDL.Error![*:0]const u8) anyerror![]const u8 {
-    var writer = write_buf.writer();
+fn fmt_sdl_drivers(write_buf: *BoundedArray(u8, 250), current_driver: [*:0]const u8, num_drivers: c_int, get_driver: *const fn (c_int) SDL.Error![*:0]const u8) anyerror![]const u8 {
+    var w: BoundedArray(u8, 250).Writer = write_buf.writer();
+    var writer: *std.Io.Writer = &w.interface;
     var i: c_int = 0;
     while (i < num_drivers) : (i += 1) {
         const driver_name = try get_driver(i);
@@ -460,8 +461,8 @@ fn reset_game() !void {
     attempts += 1;
     paddle = .{
         .box = .{
-            .x = Cast.to(f32, window_size.x) * 0.5 - Sprites.paddle.w * 0.5,
-            .y = Cast.to(f32, window_size.y) - Sprites.paddle.h,
+            .x = Cast.num_cast(window_size.x, f32) * 0.5 - Sprites.paddle.w * 0.5,
+            .y = Cast.num_cast(window_size.y, f32) - Sprites.paddle.h,
             .w = Sprites.paddle.w,
             .h = Sprites.paddle.h,
         },
@@ -482,7 +483,7 @@ fn reset_game() !void {
 
     bricks = .{};
     {
-        const x = Cast.to(f32, window_size.x) * 0.5;
+        const x = Cast.num_cast(window_size.x, f32) * 0.5;
         const h = Sprites.brick_1x1_gray.h;
         const gap = 5;
         for ([_][2]*const SDL.Rect_f32{
@@ -496,7 +497,7 @@ fn reset_game() !void {
             const y = gap + (h + gap) * (@as(f32, @floatFromInt(row)) + 1);
             var large = row % 2 == 0;
             var src_rect = src_rects[@intFromBool(large)];
-            try bricks.append(.{
+            bricks.append(.{
                 .box = .{
                     .x = x - src_rect.w * 0.5,
                     .y = y,
@@ -513,7 +514,7 @@ fn reset_game() !void {
                 src_rect = src_rects[@intFromBool(large)];
                 rel_x += src_rect.w * 0.5;
                 for ([_]f32{ -1, 1 }) |sign| {
-                    try bricks.append(.{
+                    bricks.append(.{
                         .box = .{
                             .x = x - src_rect.w * 0.5 + rel_x * sign,
                             .y = y,
@@ -960,4 +961,60 @@ fn sdl_event_func(appstate: ?*anyopaque, event: ?*SDL.Event) callconv(.c) SDL.Ap
 
 fn sdl_quit_func(appstate: ?*anyopaque, close_result: SDL.AppResult) callconv(.c) void {
     app_quit(appstate, app_err.load() orelse close_result);
+}
+
+fn BoundedArray(comptime T: type, comptime N: usize) type {
+    return struct {
+        const Self = @This();
+
+        arr: [N]T = undefined,
+        len: usize = 0,
+
+        pub fn clear(self: *Self) void {
+            self.len = 0;
+        }
+        pub fn slice(self: *Self) []T {
+            return self.arr[0..self.len];
+        }
+        pub fn append(self: *Self, val: T) void {
+            self.arr[self.len] = val;
+            self.len += 1;
+        }
+        pub fn swapRemove(self: *Self, idx: usize) T {
+            const rem = self.arr[idx];
+            self.arr[idx] = self.arr[self.len - 1];
+            self.len -= 1;
+            return rem;
+        }
+
+        pub fn writer(self: *Self) Writer {
+            const empty: [0]u8 = undefined;
+            return .{ .buf = self, .interface = std.Io.Writer{
+                .end = 0,
+                .buffer = empty[0..0],
+                .vtable = &VT,
+            } };
+        }
+        const VT = std.Io.Writer.VTable{
+            .drain = Writer.drain,
+        };
+
+        pub const Writer = struct {
+            buf: *Self,
+            interface: std.Io.Writer,
+            // this has a bunch of other fields
+
+            fn drain(io_w: *std.Io.Writer, data: []const []const u8, splat: usize) !usize {
+                _ = splat;
+                const self: *Writer = @fieldParentPtr("interface", io_w);
+                const old_n = self.buf.len;
+                for (data) |d| {
+                    const n = d.len;
+                    @memcpy(self.buf.arr[self.buf.len .. self.buf.len + n], d);
+                    self.buf.len += n;
+                }
+                return self.buf.len - old_n;
+            }
+        };
+    };
 }
