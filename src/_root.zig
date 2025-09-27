@@ -49,6 +49,7 @@ pub const Flags = @import("./Flags.zig");
 pub const FlexSlice = @import("./FlexSlice.zig");
 // pub const Format = @import("./Format.zig");
 pub const GenId = @import("./GenId.zig");
+pub const IList_SliceAdapter = @import("./IList_SliceAdapter.zig");
 pub const IList = @import("./IList.zig");
 pub const InsertionSort = @import("./InsertionSort.zig");
 pub const Iterator = @import("./Iterator.zig");
@@ -96,6 +97,7 @@ comptime {
         _ = @import("./FlexSlice.zig");
         // _ = @import("./Format.zig");
         _ = @import("./GenId.zig");
+        _ = @import("./IList_SliceAdapter.zig");
         _ = @import("./IList.zig");
         _ = @import("./InsertionSort.zig");
         _ = @import("./Iterator.zig");

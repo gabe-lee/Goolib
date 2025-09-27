@@ -617,3 +617,48 @@ pub fn bools_to_switchable_integer(comptime count: comptime_int, bools: [count]b
     }
     return result;
 }
+
+pub fn slice_move_one(comptime T: type, slice: []T, old_idx: usize, new_idx: usize) void {
+    var widx: isize = @intCast(old_idx);
+    const step: isize = if (new_idx > old_idx) 1 else -1;
+    var ridx: isize = widx + step;
+    const val: T = slice[old_idx];
+    while (widx != new_idx) {
+        slice[widx] = slice[ridx];
+        widx = ridx;
+        ridx += step;
+    }
+    slice[widx] = val;
+}
+
+pub fn slice_move_many(comptime T: type, slice: []T, old_first: usize, old_last_inclusive: usize, new_first: usize) void {
+    Assert.assert_with_reason(old_first <= old_last_inclusive, @src(), "`old_first` MUST be <= `old_last_inclusive`, got ({d}, {d})", .{ old_first, old_last_inclusive });
+    const len_a = (old_last_inclusive - old_first) + 1;
+    const slice_a = slice[old_first .. old_first + len_a];
+    var total_range: []T = undefined;
+    var slice_b: []T = undefined;
+    if (new_first < old_first) {
+        total_range = slice[new_first .. old_last_inclusive + 1];
+        slice_b = slice[new_first..old_first];
+    } else {
+        total_range = slice[old_first .. new_first + len_a];
+        slice_b = slice[old_last_inclusive + 1 .. new_first + len_a];
+    }
+    slice_reverse(T, slice_a);
+    slice_reverse(T, slice_b);
+    slice_reverse(T, total_range);
+}
+
+pub fn slice_reverse(comptime T: type, slice: []T) void {
+    if (slice.len == 0) return;
+    var left: usize = 0;
+    var right: usize = slice.len - 1;
+    var tmp: T = undefined;
+    while (left < right) {
+        tmp = slice[right];
+        slice[right] = slice[left];
+        slice[left] = tmp;
+        left += 1;
+        right -= 1;
+    }
+}
