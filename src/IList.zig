@@ -27,9 +27,11 @@ const Types = Root.Types;
 const Assert = Root.Assert;
 const Allocator = std.mem.Allocator;
 const AllocInfal = Root.AllocatorInfallible;
+const DummyAllocator = Root.DummyAllocator;
 
 pub const ListError = error{
     list_is_empty,
+    too_few_items_in_list,
     index_out_of_bounds,
     invalid_index,
     invalid_range,
@@ -46,8 +48,9 @@ pub fn IList(comptime T: type, comptime PTR: type, comptime IDX: type) type {
 
         object: *anyopaque,
         vtable: *const VTable,
+        alloc: Allocator = DummyAllocator.allocator,
 
-        fn _fn_none_ret_bool_panic(comptime fn_name: []const u8, comptime OUT: type) *const fn () OUT {
+        fn _fn_none_panic(comptime fn_name: []const u8, comptime OUT: type) *const fn () OUT {
             const proto = struct {
                 const func = fn () OUT{@panic("IList." ++ fn_name ++ "(): not implemented")};
             };
@@ -62,12 +65,6 @@ pub fn IList(comptime T: type, comptime PTR: type, comptime IDX: type) type {
         fn _fn_self_alloc_panic(comptime fn_name: []const u8, comptime OUT: type) *const fn (object: *anyopaque, alloc: Allocator) OUT {
             const proto = struct {
                 const func = fn (object: *anyopaque, alloc: Allocator) OUT{@panic("IList." ++ fn_name ++ "(): not implemented")};
-            };
-            return &proto.func;
-        }
-        fn _fn_self_alloc_alloc_panic(comptime fn_name: []const u8, comptime OUT: type) *const fn (object: *anyopaque, alloc: Allocator, alloc2: Allocator) OUT {
-            const proto = struct {
-                const func = fn (object: *anyopaque, alloc: Allocator, alloc2: Allocator) OUT{@panic("IList." ++ fn_name ++ "(): not implemented")};
             };
             return &proto.func;
         }
@@ -89,18 +86,6 @@ pub fn IList(comptime T: type, comptime PTR: type, comptime IDX: type) type {
             };
             return &proto.func;
         }
-        fn _fn_self_range_alloc_panic(comptime fn_name: []const u8, comptime OUT: type) *const fn (object: *anyopaque, rng: Range, alloc: Allocator) OUT {
-            const proto = struct {
-                const func = fn (object: *anyopaque, rng: Range, alloc: Allocator) OUT{@panic("IList." ++ fn_name ++ "(): not implemented")};
-            };
-            return &proto.func;
-        }
-        fn _fn_self_range_alloc_alloc_panic(comptime fn_name: []const u8, comptime OUT: type) *const fn (object: *anyopaque, rng: Range, alloc: Allocator, alloc2: Allocator) OUT {
-            const proto = struct {
-                const func = fn (object: *anyopaque, rng: Range, alloc: Allocator, alloc2: Allocator) OUT{@panic("IList." ++ fn_name ++ "(): not implemented")};
-            };
-            return &proto.func;
-        }
         fn _fn_self_idx_idx_panic(comptime fn_name: []const u8, comptime OUT: type) *const fn (object: *anyopaque, idx: IDX, idx2: IDX) OUT {
             const proto = struct {
                 const func = fn (object: *anyopaque, idx: IDX, idx2: IDX) OUT{@panic("IList." ++ fn_name ++ "(): not implemented")};
@@ -110,12 +95,6 @@ pub fn IList(comptime T: type, comptime PTR: type, comptime IDX: type) type {
         fn _fn_self_range_idx_panic(comptime fn_name: []const u8, comptime OUT: type) *const fn (object: *anyopaque, rng: Range, idx: IDX) OUT {
             const proto = struct {
                 const func = fn (object: *anyopaque, rng: Range, idx: IDX) OUT{@panic("IList." ++ fn_name ++ "(): not implemented")};
-            };
-            return &proto.func;
-        }
-        fn _fn_self_idx_idx_idx_panic(comptime fn_name: []const u8, comptime OUT: type) *const fn (object: *anyopaque, idx: IDX, idx2: IDX, idx3: IDX) OUT {
-            const proto = struct {
-                const func = fn (object: *anyopaque, idx: IDX, idx2: IDX, idx3: IDX) OUT{@panic("IList." ++ fn_name ++ "(): not implemented")};
             };
             return &proto.func;
         }
@@ -139,7 +118,7 @@ pub fn IList(comptime T: type, comptime PTR: type, comptime IDX: type) type {
             ///
             /// Returning the correct value will allow some operations to use alternate,
             /// more efficient algorithms
-            prefer_linear_ops: *const fn () bool = _fn_none_ret_bool_panic("prefer_linear_ops", bool),
+            prefer_linear_ops: *const fn () bool = _fn_none_panic("prefer_linear_ops", bool),
             /// Should return a constant boolean value describing whether consecutive indexes,
             /// (eg. `0, 1, 2, 3, 4, 5`) are in their logical/proper order (not necessarily sorted)
             ///
@@ -148,7 +127,7 @@ pub fn IList(comptime T: type, comptime PTR: type, comptime IDX: type) type {
             /// An example where this would be false is an implementation of a linked list
             ///
             /// This allows some algorithms to use more efficient paths
-            consecutive_indexes_in_order: *const fn () bool = _fn_none_ret_bool_panic("consecutive_indexes_in_order", bool),
+            consecutive_indexes_in_order: *const fn () bool = _fn_none_panic("consecutive_indexes_in_order", bool),
             /// Should return a constant boolean value describing whether all indexes greater-than-or-equal-to
             /// `0` AND less-than `slice.len()` are valid
             ///
@@ -157,7 +136,7 @@ pub fn IList(comptime T: type, comptime PTR: type, comptime IDX: type) type {
             /// An example where this would be false is an implementation of a linked list
             ///
             /// This allows some algorithms to use more efficient paths
-            all_indexes_zero_to_len_valid: *const fn () bool = _fn_none_ret_bool_panic("all_indexes_zero_to_len_valid", bool),
+            all_indexes_zero_to_len_valid: *const fn () bool = _fn_none_panic("all_indexes_zero_to_len_valid", bool),
             /// Returns whether the given index is valid for the slice
             idx_valid: *const fn (object: *anyopaque, idx: IDX) bool = _fn_self_idx_panic("idx_valid", bool),
             /// Returns whether the given index range is valid for the slice
@@ -165,7 +144,7 @@ pub fn IList(comptime T: type, comptime PTR: type, comptime IDX: type) type {
             /// The following MUST be true:
             ///   - `first_idx` comes logically before OR is equal to `last_idx`
             ///   - all indexes including and between `first_idx` and `last_idx` are valid for the slice
-            range_valid: *const fn (object: *anyopaque, range: Range) bool = _fn_self_idx_idx_panic("range_valid", bool),
+            range_valid: *const fn (object: *anyopaque, range: Range) bool = _fn_self_range_panic("range_valid", bool),
             /// Split an index range (roughly) in half, returning the index in the middle of the range
             ///
             /// Assumes `range_valid(first_idx, last_idx) == true`, and if so,
@@ -188,24 +167,6 @@ pub fn IList(comptime T: type, comptime PTR: type, comptime IDX: type) type {
             /// move the data from located between and including `first_idx` and `last_idx`,
             /// to the position `newfirst_idx`, shifting the values at that location out of the way
             move_range: *const fn (object: *anyopaque, range: Range, new_first_idx: IDX) void = _fn_self_range_idx_panic("move_range", void),
-            /// Return another `IList(T, PTR, IDX)` that holds values in range [first, last] (inclusive),
-            /// and should reference the same values as this one. Any changes in the new slice should be reflected in this one.
-            ///
-            /// Returned slice may or may not have full list capabilites, dependant on implementation
-            ///
-            /// The supplied `obj_alloc` allocator is used to create the object pointed to by `IList.object`,
-            /// which may allocate on the stack or heap. The `mem_alloc` Allocator to use for the new IList should be the same
-            /// one used to originally allocate *this* IList.object's *memory*.
-            slice: *const fn (object: *anyopaque, range: Range, obj_alloc: Allocator) ILIST = _fn_self_range_alloc_panic("slice", ILIST),
-            /// Return another `IList(T, PTR, IDX)` that holds a copy of the values in range [first, last] (inclusive),
-            /// and should reference new memory. Any changes in the new slice should not affect this one.
-            ///
-            /// Returned slice may or may not have full list capabilites, dependant on implementation
-            ///
-            /// The supplied `obj_alloc` allocator is used to create the object pointed to by `IList.object`,
-            /// while `mem_alloc` is the allocator used to allocate the *memory* needed by the concrete object. They may be the same allocator,
-            /// an may allocate on the stack or the heap.
-            clone: *const fn (object: *anyopaque, range: Range, obj_alloc: Allocator, mem_alloc: Allocator) ILIST = _fn_self_range_alloc_alloc_panic("clone", ILIST),
             /// Return the first index in the slice.
             ///
             /// If the slice is empty, the index returned should
@@ -252,7 +213,7 @@ pub fn IList(comptime T: type, comptime PTR: type, comptime IDX: type) type {
             ///
             /// The supplied `mem_alloc` allocator should be the same one used when creating/allocating the
             /// original concrete implementation object's *memory*, not the one used to create `IList.object`, if any
-            try_ensure_free_slots: *const fn (object: *anyopaque, count: IDX, mem_alloc: Allocator) bool = _fn_self_idx_alloc_panic("try_ensure_free_slots", bool),
+            try_ensure_free_slots: *const fn (object: *anyopaque, count: IDX, alloc: Allocator) bool = _fn_self_idx_alloc_panic("try_ensure_free_slots", bool),
             /// Insert `n` new slots directly before existing index, shifting all existing items
             /// at and after that index forward.
             ///
@@ -286,21 +247,23 @@ pub fn IList(comptime T: type, comptime PTR: type, comptime IDX: type) type {
             increment_start: *const fn (object: *anyopaque, n: IDX) void = _fn_self_idx_panic("increment_start", void),
             /// Free the list's memory, if applicable, and set it to an empty state
             ///
-            /// The supplied `mem_alloc` allocator should be the same one used when creating/allocating the
-            /// original concrete implementation object's *memory*, not the one used to create `IList.object`, if any
-            free: *const fn (object: *anyopaque, mem_alloc: Allocator) void = _fn_self_alloc_panic("free", void),
-            /// Free the list's implementation object (*not* its memory), if applicable. This should only be done after calling
-            /// `free()` if needed, and attempting to use the IList after calling this should be considered
-            /// undefined behavior.
-            ///
-            /// The supplied `obj_alloc` allocator should be the same one used when creating/allocating the
-            /// original concrete implementation object, if any, not the one used to create the object's *memory*, if any
-            destroy: *const fn (object: *anyopaque, obj_alloc: Allocator) void = _fn_self_alloc_panic("destroy", void),
+            /// The supplied allocator should be the same one used when creating/allocating the
+            /// original concrete implementation object's *memory*
+            free: *const fn (object: *anyopaque, alloc: Allocator) void = _fn_self_alloc_panic("free", void),
+        };
+        const PITER_OVERWRITE = enum {
+            none,
+            first_idx,
+            last_idx,
+            nth_from_start,
+            nth_from_end,
+            nth_from_first,
+            nth_from_last,
         };
         pub const PartialIterator = struct {
             src: IteratorSource,
-            overwrite_first: bool = false,
-            overwrite_last: bool = false,
+            overwrite_first: PITER_OVERWRITE = .none,
+            overwrite_last: PITER_OVERWRITE = .none,
             want_count: IDX = std.math.maxInt(IDX),
             forward: bool = true,
 
@@ -337,44 +300,74 @@ pub fn IList(comptime T: type, comptime PTR: type, comptime IDX: type) type {
             pub fn entire_list() PartialIterator {
                 return PartialIterator{
                     .src = IteratorSource{ .range = .new_range(0, 0) },
-                    .overwrite_first = true,
-                    .overwrite_last = true,
+                    .overwrite_first = .first_idx,
+                    .overwrite_last = .last_idx,
                     .want_count = std.math.maxInt(IDX),
                 };
             }
             pub fn entire_list_max_count(max_count: IDX) PartialIterator {
                 return PartialIterator{
                     .src = IteratorSource{ .range = .new_range(0, 0) },
-                    .overwrite_first = true,
-                    .overwrite_last = true,
+                    .overwrite_first = .first_idx,
+                    .overwrite_last = .last_idx,
                     .want_count = max_count,
+                };
+            }
+            pub fn first_n_items(count: IDX) PartialIterator {
+                return PartialIterator{
+                    .src = IteratorSource{ .range = .new_range(0, count - 1) },
+                    .overwrite_first = .first_idx,
+                    .overwrite_last = .nth_from_start,
+                    .want_count = count,
+                };
+            }
+            pub fn last_n_items(count: IDX) PartialIterator {
+                return PartialIterator{
+                    .src = IteratorSource{ .range = .new_range(count - 1, 0) },
+                    .overwrite_first = .nth_from_end,
+                    .overwrite_last = .last_idx,
+                    .want_count = count,
+                };
+            }
+            pub fn start_idx_count_total(idx: IDX, count: IDX) PartialIterator {
+                return PartialIterator{
+                    .src = IteratorSource{ .range = .new_range(idx, count - 1) },
+                    .overwrite_last = .nth_from_first,
+                    .want_count = count,
+                };
+            }
+            pub fn end_idx_count_total(idx: IDX, count: IDX) PartialIterator {
+                return PartialIterator{
+                    .src = IteratorSource{ .range = .new_range(count - 1, idx) },
+                    .overwrite_first = .nth_from_last,
+                    .want_count = count,
                 };
             }
             pub fn start_to_idx(last: IDX) PartialIterator {
                 return PartialIterator{
                     .src = IteratorSource{ .range = .new_range(0, last) },
-                    .overwrite_first = true,
+                    .overwrite_first = .first_idx,
                     .want_count = std.math.maxInt(IDX),
                 };
             }
             pub fn start_to_idx_max_count(last: IDX, max_count: IDX) PartialIterator {
                 return PartialIterator{
                     .src = IteratorSource{ .range = .new_range(0, last) },
-                    .overwrite_first = true,
+                    .overwrite_first = .first_idx,
                     .want_count = max_count,
                 };
             }
             pub fn idx_to_end(first: IDX) PartialIterator {
                 return PartialIterator{
                     .src = IteratorSource{ .range = .new_range(first, 0) },
-                    .overwrite_first = true,
+                    .overwrite_last = .last_idx,
                     .want_count = std.math.maxInt(IDX),
                 };
             }
             pub fn idx_to_end_max_count(first: IDX, max_count: IDX) PartialIterator {
                 return PartialIterator{
                     .src = IteratorSource{ .range = .new_range(first, 0) },
-                    .overwrite_first = true,
+                    .overwrite_last = .last_idx,
                     .want_count = max_count,
                 };
             }
@@ -428,8 +421,8 @@ pub fn IList(comptime T: type, comptime PTR: type, comptime IDX: type) type {
             pub fn entire_list_rev() PartialIterator {
                 return PartialIterator{
                     .src = IteratorSource{ .range = .new_range(0, 0) },
-                    .overwrite_first = true,
-                    .overwrite_last = true,
+                    .overwrite_first = .first_idx,
+                    .overwrite_last = .last_idx,
                     .want_count = std.math.maxInt(IDX),
                     .forward = false,
                 };
@@ -437,16 +430,50 @@ pub fn IList(comptime T: type, comptime PTR: type, comptime IDX: type) type {
             pub fn entire_list_max_count_rev(max_count: IDX) PartialIterator {
                 return PartialIterator{
                     .src = IteratorSource{ .range = .new_range(0, 0) },
-                    .overwrite_first = true,
-                    .overwrite_last = true,
+                    .overwrite_first = .first_idx,
+                    .overwrite_last = .last_idx,
                     .want_count = max_count,
+                    .forward = false,
+                };
+            }
+            pub fn first_n_items_rev(count: IDX) PartialIterator {
+                return PartialIterator{
+                    .src = IteratorSource{ .range = .new_range(0, count - 1) },
+                    .overwrite_first = .first_idx,
+                    .overwrite_last = .nth_from_start,
+                    .want_count = count,
+                    .forward = false,
+                };
+            }
+            pub fn last_n_items_rev(count: IDX) PartialIterator {
+                return PartialIterator{
+                    .src = IteratorSource{ .range = .new_range(count - 1, 0) },
+                    .overwrite_first = .nth_from_last,
+                    .overwrite_last = .last_idx,
+                    .want_count = count,
+                    .forward = false,
+                };
+            }
+            pub fn start_idx_count_total_rev(idx: IDX, count: IDX) PartialIterator {
+                return PartialIterator{
+                    .src = IteratorSource{ .range = .new_range(idx, count - 1) },
+                    .overwrite_last = .nth_from_first,
+                    .want_count = count,
+                    .forward = false,
+                };
+            }
+            pub fn end_idx_count_total_rev(idx: IDX, count: IDX) PartialIterator {
+                return PartialIterator{
+                    .src = IteratorSource{ .range = .new_range(count - 1, idx) },
+                    .overwrite_first = .nth_from_last,
+                    .want_count = count,
                     .forward = false,
                 };
             }
             pub fn start_to_idx_rev(last: IDX) PartialIterator {
                 return PartialIterator{
                     .src = IteratorSource{ .range = .new_range(0, last) },
-                    .overwrite_first = true,
+                    .overwrite_first = .first_idx,
                     .want_count = std.math.maxInt(IDX),
                     .forward = false,
                 };
@@ -454,7 +481,7 @@ pub fn IList(comptime T: type, comptime PTR: type, comptime IDX: type) type {
             pub fn start_to_idx_max_count_rev(last: IDX, max_count: IDX) PartialIterator {
                 return PartialIterator{
                     .src = IteratorSource{ .range = .new_range(0, last) },
-                    .overwrite_first = true,
+                    .overwrite_first = .first_idx,
                     .want_count = max_count,
                     .forward = false,
                 };
@@ -462,7 +489,7 @@ pub fn IList(comptime T: type, comptime PTR: type, comptime IDX: type) type {
             pub fn idx_to_end_rev(first: IDX) PartialIterator {
                 return PartialIterator{
                     .src = IteratorSource{ .range = .new_range(first, 0) },
-                    .overwrite_first = true,
+                    .overwrite_last = .last_idx,
                     .want_count = std.math.maxInt(IDX),
                     .forward = false,
                 };
@@ -470,7 +497,7 @@ pub fn IList(comptime T: type, comptime PTR: type, comptime IDX: type) type {
             pub fn idx_to_end_max_count_rev(first: IDX, max_count: IDX) PartialIterator {
                 return PartialIterator{
                     .src = IteratorSource{ .range = .new_range(first, 0) },
-                    .overwrite_first = true,
+                    .overwrite_last = .last_idx,
                     .want_count = max_count,
                     .forward = false,
                 };
@@ -504,11 +531,47 @@ pub fn IList(comptime T: type, comptime PTR: type, comptime IDX: type) type {
                     },
                     .range => |rng| {
                         var new_rng = rng;
-                        if (self.overwrite_first) {
-                            new_rng.first_idx = list.first_idx();
+                        switch (self.overwrite_first) {
+                            .none => {},
+                            .first_idx => {
+                                new_rng.first_idx = list.first_idx();
+                            },
+                            .last_idx => {
+                                new_rng.first_idx = list.last_idx();
+                            },
+                            .nth_from_start => {
+                                new_rng.first_idx = list.nth_idx(rng.first_idx);
+                            },
+                            .nth_from_end => {
+                                new_rng.first_idx = list.nth_idx_from_end(rng.first_idx);
+                            },
+                            .nth_from_first => {
+                                new_rng.first_idx = list.nth_next_idx(rng.first_idx, rng.first_idx);
+                            },
+                            .nth_from_last => {
+                                new_rng.first_idx = list.nth_prev_idx(rng.last_idx, rng.first_idx);
+                            },
                         }
-                        if (self.overwrite_last) {
-                            new_rng.last_idx = list.last_idx();
+                        switch (self.overwrite_last) {
+                            .none => {},
+                            .first_idx => {
+                                new_rng.last_idx = list.first_idx();
+                            },
+                            .last_idx => {
+                                new_rng.last_idx = list.last_idx();
+                            },
+                            .nth_from_start => {
+                                new_rng.last_idx = list.nth_idx(rng.last_idx);
+                            },
+                            .nth_from_end => {
+                                new_rng.last_idx = list.nth_idx_from_end(rng.last_idx);
+                            },
+                            .nth_from_first => {
+                                new_rng.last_idx = list.nth_next_idx(rng.first_idx, rng.last_idx);
+                            },
+                            .nth_from_last => {
+                                new_rng.last_idx = list.nth_prev_idx(rng.last_idx, rng.last_idx);
+                            },
                         }
                         iter.src = new_rng;
                         if (self.forward) {
@@ -607,6 +670,44 @@ pub fn IList(comptime T: type, comptime PTR: type, comptime IDX: type) type {
                     .prev = list.first_idx(),
                     .want_count = max_count,
                     .done = max_count == 0,
+                };
+            }
+            pub fn first_n_items(list: ILIST, count: IDX) Iterator {
+                return Iterator{
+                    .list = list,
+                    .src = IteratorSource{ .range = .new_range(list.first_idx(), list.nth_idx(count - 1)) },
+                    .curr = list.first_idx(),
+                    .prev = list.first_idx(),
+                    .want_count = count,
+                };
+            }
+            pub fn last_n_items(list: ILIST, count: IDX) Iterator {
+                const idx = list.nth_idx_from_end(count - 1);
+                return Iterator{
+                    .list = list,
+                    .src = IteratorSource{ .range = .new_range(idx, list.last_idx()) },
+                    .curr = idx,
+                    .prev = idx,
+                    .want_count = count,
+                };
+            }
+            pub fn start_idx_count_total(list: ILIST, idx: IDX, count: IDX) Iterator {
+                return Iterator{
+                    .list = list,
+                    .src = IteratorSource{ .range = .new_range(idx, list.nth_next_idx(count - 1)) },
+                    .curr = idx,
+                    .prev = idx,
+                    .want_count = count,
+                };
+            }
+            pub fn end_idx_count_total(list: ILIST, idx: IDX, count: IDX) Iterator {
+                const fidx = list.nth_prev_idx(idx, count - 1);
+                return Iterator{
+                    .list = list,
+                    .src = IteratorSource{ .range = .new_range(fidx, idx) },
+                    .curr = fidx,
+                    .prev = fidx,
+                    .want_count = count,
                 };
             }
             pub fn start_to_idx(list: ILIST, last: IDX) Iterator {
@@ -737,6 +838,49 @@ pub fn IList(comptime T: type, comptime PTR: type, comptime IDX: type) type {
                     .prev = list.last_idx(),
                     .want_count = max_count,
                     .done = max_count == 0,
+                    .forward = false,
+                };
+            }
+            pub fn first_n_items_rev(list: ILIST, count: IDX) Iterator {
+                const idx = list.nth_idx_from_end(count - 1);
+                return Iterator{
+                    .list = list,
+                    .src = IteratorSource{ .range = .new_range(list.first_idx(), idx) },
+                    .curr = idx,
+                    .prev = idx,
+                    .want_count = count,
+                    .forward = false,
+                };
+            }
+            pub fn last_n_items_rev(list: ILIST, count: IDX) Iterator {
+                const idx = list.nth_idx_from_end(count - 1);
+                return Iterator{
+                    .list = list,
+                    .src = IteratorSource{ .range = .new_range(idx, list.last_idx()) },
+                    .curr = list.last_idx(),
+                    .prev = list.last_idx(),
+                    .want_count = count,
+                    .forward = false,
+                };
+            }
+            pub fn start_idx_count_total_rev(list: ILIST, idx: IDX, count: IDX) Iterator {
+                return Iterator{
+                    .list = list,
+                    .src = IteratorSource{ .range = .new_range(idx, list.nth_next_idx(count - 1)) },
+                    .curr = idx,
+                    .prev = idx,
+                    .want_count = count,
+                    .forward = false,
+                };
+            }
+            pub fn end_idx_count_total_rev(list: ILIST, idx: IDX, count: IDX) Iterator {
+                const fidx = list.nth_prev_idx(idx, count - 1);
+                return Iterator{
+                    .list = list,
+                    .src = IteratorSource{ .range = .new_range(fidx, idx) },
+                    .curr = fidx,
+                    .prev = fidx,
+                    .want_count = count,
                     .forward = false,
                 };
             }
@@ -1259,18 +1403,6 @@ pub fn IList(comptime T: type, comptime PTR: type, comptime IDX: type) type {
             }
             self.vtable.move_range(self.object, first_idx_, last_idx_, new_first_idx);
         }
-        /// Return another `IList(T, IDX)` that holds values in range [first, last] (inclusive)
-        ///
-        /// Analogous to slice[first..last+1]
-        pub fn slice(self: ILIST, range: Range, obj_alloc: Allocator) ILIST {
-            self.vtable.slice(self.object, range, obj_alloc);
-        }
-        /// Return another `IList(T, IDX)` that holds values in range [first, last] (inclusive)
-        ///
-        /// Analogous to slice[first..last+1]
-        pub fn clone(self: ILIST, range: Range, obj_alloc: Allocator, mem_alloc: Allocator) ILIST {
-            self.vtable.clone(self.object, range, obj_alloc, mem_alloc);
-        }
         /// Return the first index in the slice.
         ///
         /// If the slice is empty, the index returned will
@@ -1331,12 +1463,11 @@ pub fn IList(comptime T: type, comptime PTR: type, comptime IDX: type) type {
         ///
         /// If free space cannot be ensured and attempting to add `count` more items
         /// will definitely fail or cause undefined behaviour, `ok == false`
-        pub fn try_ensure_free_slots(self: ILIST, count: IDX, mem_alloc: Allocator) ListError!void {
-            const ok = self.vtable.try_ensure_free_slots(self.object, count, mem_alloc);
+        pub fn try_ensure_free_slots(self: ILIST, count: IDX) ListError!void {
+            const ok = self.vtable.try_ensure_free_slots(self.object, count, self.alloc);
             if (!ok) {
                 return ListError.failed_to_grow_list;
             }
-            return void{};
         }
         /// Insert `n` new slots directly before existing index, shifting all existing items
         /// at and after that index forward.
@@ -1381,16 +1512,8 @@ pub fn IList(comptime T: type, comptime PTR: type, comptime IDX: type) type {
             self.vtable.increment_start(self.object, n);
         }
         /// Free the list's memory, if applicable, and set it to an uinitialized state
-        pub fn free(self: ILIST, mem_alloc: Allocator) void {
-            self.vtable.free(self.object, mem_alloc);
-        }
-        /// Free the list's memory, if applicable, and set it to an uinitialized state
-        pub fn destroy(self: ILIST, obj_alloc: Allocator) void {
-            self.vtable.destroy(self.object, obj_alloc);
-        }
-        pub fn free_and_destroy(self: ILIST, mem_alloc: Allocator, obj_alloc: Allocator) void {
-            self.vtable.free(self.object, mem_alloc);
-            self.vtable.destroy(self.object, obj_alloc);
+        pub fn free(self: ILIST) void {
+            self.vtable.free(self.object, self.alloc);
         }
 
         pub fn all_idx_valid_zig(self: ILIST, idxs: []IDX) bool {
@@ -1515,6 +1638,22 @@ pub fn IList(comptime T: type, comptime PTR: type, comptime IDX: type) type {
                 return ListError.list_is_empty;
             }
             idx = self.nth_next_idx(idx, n);
+            if (!self.idx_valid(idx)) {
+                return ListError.index_out_of_bounds;
+            }
+            return idx;
+        }
+        pub fn nth_idx_from_end(self: ILIST, n: IDX) IDX {
+            var idx = self.last_idx();
+            idx = self.nth_prev_idx(idx, n);
+            return idx;
+        }
+        pub fn try_nth_idx_from_end(self: ILIST, n: IDX) ListError!IDX {
+            var idx = self.last_idx();
+            if (!self.idx_valid(idx)) {
+                return ListError.list_is_empty;
+            }
+            idx = self.nth_prev_idx(idx, n);
             if (!self.idx_valid(idx)) {
                 return ListError.index_out_of_bounds;
             }
@@ -1758,6 +1897,9 @@ pub fn IList(comptime T: type, comptime PTR: type, comptime IDX: type) type {
         pub fn copy_from_to(source: ILIST, source_range: PartialIterator, dest_range: Iterator) CopyResult {
             return copy_from_to_advanced(source, source_range, dest_range, .use_count_limit, .no_error_checks, .no_filter, null, null, .no_filter, null, null);
         }
+        pub fn try_copy_from_to(source: ILIST, source_range: PartialIterator, dest_range: Iterator) ListError!CopyResult {
+            return copy_from_to_advanced(source, source_range, dest_range, .use_count_limit, .error_checks, .no_filter, null, null, .no_filter, null, null);
+        }
         pub fn copy_from_to_advanced(
             source: ILIST,
             source_range: PartialIterator,
@@ -1894,6 +2036,9 @@ pub fn IList(comptime T: type, comptime PTR: type, comptime IDX: type) type {
             }
             return true;
         }
+        fn _implicit_eq(left: T, right: T) bool {
+            return left == right;
+        }
         fn _implicit_gt(left: T, right: T) bool {
             return left > right;
         }
@@ -1961,14 +2106,10 @@ pub fn IList(comptime T: type, comptime PTR: type, comptime IDX: type) type {
             var lo: IDX = undefined;
             var mid: Range = undefined;
             var rng: Range = undefined;
-            var ok: bool = undefined;
             lo = self.first_idx();
             hi = self.last_idx();
             partition_stack.clear();
-            ok = partition_stack.try_ensure_free_slots(2);
-            if (!ok) {
-                return ListError.failed_to_grow_list;
-            }
+            try partition_stack.try_ensure_free_slots(2);
             partition_stack.append_slots_assume_capacity(2);
             partition_stack.set(rng.first_idx, lo);
             partition_stack.set(rng.last_idx, hi);
@@ -1979,10 +2120,7 @@ pub fn IList(comptime T: type, comptime PTR: type, comptime IDX: type) type {
                     continue;
                 }
                 mid = _quicksort_partition(self, greater_than, less_than, lo, hi);
-                ok = partition_stack.try_ensure_free_slots(4);
-                if (!ok) {
-                    return ListError.failed_to_grow_list;
-                }
+                try partition_stack.try_ensure_free_slots(4);
                 rng = partition_stack.append_slots_assume_capacity(2);
                 partition_stack.set(rng.first_idx, lo);
                 partition_stack.set(rng.first_idx, self.prev_idx(mid.first_idx));
@@ -2087,7 +2225,10 @@ pub fn IList(comptime T: type, comptime PTR: type, comptime IDX: type) type {
             return self_iter.count_result();
         }
         pub fn for_each(self: ILIST, self_range: PartialIterator, userdata: anytype, action: *const fn (item: IteratorItem, userdata: @TypeOf(userdata)) bool) CountResult {
-            return for_each_advanced(self, self_range, userdata, action, .no_count_limit, .error_checks, .no_filter, null);
+            return for_each_advanced(self, self_range, userdata, action, .use_count_limit, .no_error_checks, .no_filter, null);
+        }
+        pub fn try_for_each(self: ILIST, self_range: PartialIterator, userdata: anytype, action: *const fn (item: IteratorItem, userdata: @TypeOf(userdata)) bool) ListError!CountResult {
+            return for_each_advanced(self, self_range, userdata, action, .use_count_limit, .error_checks, .no_filter, null);
         }
         pub fn filter_indexes_advanced(
             self: ILIST,
@@ -2102,9 +2243,10 @@ pub fn IList(comptime T: type, comptime PTR: type, comptime IDX: type) type {
             var self_iter = self_range.to_iter(self);
             var next_self = self_iter.next_advanced(count_limit, error_checks, .advance, .use_filter, userdata, filter_func);
             while (next_self) |ok_next_self| {
-                const ok = output_list.try_ensure_free_slots(1);
-                if (error_checks == .error_checks and !ok) {
-                    return ListError.failed_to_grow_list;
+                if (error_checks == .error_checks) {
+                    try output_list.try_ensure_free_slots(1);
+                } else {
+                    output_list.ensure_free_slots(1);
                 }
                 const out_idx = output_list.append_slots_assume_capacity(1);
                 output_list.set(out_idx, ok_next_self.idx);
@@ -2119,6 +2261,9 @@ pub fn IList(comptime T: type, comptime PTR: type, comptime IDX: type) type {
         }
         pub fn filter_indexes(self: ILIST, self_range: PartialIterator, userdata: anytype, filter_func: *const fn (item: IteratorItem, userdata: @TypeOf(userdata)) Iterator.IterSelect, output_list: IIdxList) CountResult {
             return self.filter_indexes_advanced(self, self_range, userdata, filter_func, output_list, .use_count_limit, .no_error_checks);
+        }
+        pub fn try_filter_indexes(self: ILIST, self_range: PartialIterator, userdata: anytype, filter_func: *const fn (item: IteratorItem, userdata: @TypeOf(userdata)) Iterator.IterSelect, output_list: IIdxList) ListError!CountResult {
+            return self.filter_indexes_advanced(self, self_range, userdata, filter_func, output_list, .use_count_limit, .error_checks);
         }
         pub fn transform_values_advanced(
             self: ILIST,
@@ -2137,9 +2282,10 @@ pub fn IList(comptime T: type, comptime PTR: type, comptime IDX: type) type {
             var self_iter = self_range.to_iter(self);
             var next_self = self_iter.next_advanced(count_limit, error_checks, .advance, filter, userdata, filter_func);
             while (next_self) |ok_next_self| {
-                const ok = output_list.try_ensure_free_slots(1);
-                if (error_checks == .error_checks and !ok) {
-                    return ListError.failed_to_grow_list;
+                if (error_checks == .error_checks) {
+                    try output_list.try_ensure_free_slots(1);
+                } else {
+                    output_list.ensure_free_slots(1);
                 }
                 const out_idx = output_list.append_slots_assume_capacity(1);
                 const new_val = transform_func(ok_next_self, userdata);
@@ -2155,6 +2301,9 @@ pub fn IList(comptime T: type, comptime PTR: type, comptime IDX: type) type {
         }
         pub fn transform_values(self: ILIST, self_range: PartialIterator, userdata: anytype, comptime OUT_TYPE: type, comptime OUT_PTR: type, transform_func: *const fn (item: IteratorItem, userdata: @TypeOf(userdata)) OUT_TYPE, output_list: IList(OUT_TYPE, OUT_PTR, IDX)) CountResult {
             return self.transform_values_advanced(self_range, userdata, OUT_TYPE, OUT_PTR, transform_func, output_list, .use_count_limit, .no_error_checks, .no_filter, null);
+        }
+        pub fn try_transform_values(self: ILIST, self_range: PartialIterator, userdata: anytype, comptime OUT_TYPE: type, comptime OUT_PTR: type, transform_func: *const fn (item: IteratorItem, userdata: @TypeOf(userdata)) OUT_TYPE, output_list: IList(OUT_TYPE, OUT_PTR, IDX)) ListError!CountResult {
+            return self.transform_values_advanced(self_range, userdata, OUT_TYPE, OUT_PTR, transform_func, output_list, .use_count_limit, .error_checks, .no_filter, null);
         }
         pub fn accumulate_result_advanced(
             self: ILIST,
@@ -2193,26 +2342,33 @@ pub fn IList(comptime T: type, comptime PTR: type, comptime IDX: type) type {
         ) AccumulateResult(@TypeOf(initial_accumulation)) {
             return self.accumulate_result_advanced(self_range, initial_accumulation, userdata, accumulate_func, .use_count_limit, .no_error_checks, .no_filter, null);
         }
-        pub fn ensure_free_slots(self: ILIST, count: IDX, mem_alloc: Allocator) void {
-            self.try_ensure_free_slots(count, mem_alloc);
+        pub fn try_accumulate_result(
+            self: ILIST,
+            self_range: PartialIterator,
+            initial_accumulation: anytype,
+            userdata: anytype,
+            accumulate_func: *const fn (item: IteratorItem, old_accumulation: @TypeOf(initial_accumulation), userdata: @TypeOf(userdata)) @TypeOf(initial_accumulation),
+        ) ListError!AccumulateResult(@TypeOf(initial_accumulation)) {
+            return self.accumulate_result_advanced(self_range, initial_accumulation, userdata, accumulate_func, .use_count_limit, .error_checks, .no_filter, null);
         }
-        pub fn append_slots(self: ILIST, count: IDX, mem_alloc: Allocator) Range {
-            self.ensure_free_slots(count, mem_alloc);
+        pub fn ensure_free_slots(self: ILIST, count: IDX) void {
+            const ok = self.vtable.try_ensure_free_slots(self.object, count, self.alloc);
+            Assert.assert_with_reason(ok, @src(), "failed to grow list, current: len = {d}, cap = {d}, need {d} more slots", .{ self.len(), self.cap(), count });
+        }
+        pub fn append_slots(self: ILIST, count: IDX) Range {
+            self.ensure_free_slots(count);
             return self.append_slots_assume_capacity(count);
         }
-        pub fn try_append_slots(self: ILIST, count: IDX, mem_alloc: Allocator) ListError!Range {
-            const ok = self.try_ensure_free_slots(count, mem_alloc);
-            if (!ok) {
-                return ListError.failed_to_grow_list;
-            }
+        pub fn try_append_slots(self: ILIST, count: IDX) ListError!Range {
+            try self.try_ensure_free_slots(count);
             return self.append_slots_assume_capacity(count);
         }
-        pub fn append_zig_slice(self: ILIST, slice_: []T, mem_alloc: Allocator) Range {
-            self.ensure_free_slots(slice_.len, mem_alloc);
+        pub fn append_zig_slice(self: ILIST, slice_: []T) Range {
+            self.ensure_free_slots(slice_.len);
             return _append_zig_slice(self, slice_);
         }
-        pub fn try_append_zig_slice(self: ILIST, slice_: []T, mem_alloc: Allocator) ListError!Range {
-            try self.try_ensure_free_slots(slice_.len, mem_alloc);
+        pub fn try_append_zig_slice(self: ILIST, slice_: []T) ListError!Range {
+            try self.try_ensure_free_slots(slice_.len);
             return _append_zig_slice(self, slice_);
         }
         fn _append_zig_slice(self: ILIST, slice_: []T) Range {
@@ -2226,59 +2382,56 @@ pub fn IList(comptime T: type, comptime PTR: type, comptime IDX: type) type {
             }
             return append_range;
         }
-        pub fn append(self: ILIST, val: T, mem_alloc: Allocator) IDX {
-            self.ensure_free_slots(1, mem_alloc);
+        pub fn append(self: ILIST, val: T) IDX {
+            self.ensure_free_slots(1);
             const append_range = self.append_slots_assume_capacity(1);
             self.set(append_range.first_idx, val);
             return append_range.first_idx;
         }
-        pub fn try_append(self: ILIST, val: T, mem_alloc: Allocator) ListError!IDX {
-            try self.try_ensure_free_slots(1, mem_alloc);
+        pub fn try_append(self: ILIST, val: T) ListError!IDX {
+            try self.try_ensure_free_slots(1);
             const append_range = self.append_slots_assume_capacity(1);
             self.set(append_range.first_idx, val);
             return append_range.first_idx;
         }
-        pub fn append_list(self: ILIST, list: ILIST, mem_alloc: Allocator) Range {
-            self.ensure_free_slots(list.len, mem_alloc);
+        pub fn append_list(self: ILIST, list: ILIST) Range {
+            self.ensure_free_slots(list.len);
             const append_range = self.append_slots_assume_capacity(list.len);
             list.copy_from_to(.entire_list(), .use_range(self, append_range));
             return append_range;
         }
-        pub fn try_append_list(self: ILIST, list: ILIST, mem_alloc: Allocator) ListError!Range {
-            try self.try_ensure_free_slots(list.len, mem_alloc);
+        pub fn try_append_list(self: ILIST, list: ILIST) ListError!Range {
+            try self.try_ensure_free_slots(list.len);
             const append_range = self.append_slots_assume_capacity(list.len);
             list.copy_from_to(.entire_list(), .use_range(self, append_range));
             return append_range;
         }
-        pub fn append_list_range(self: ILIST, list: ILIST, list_range: Range, mem_alloc: Allocator) Range {
-            self.ensure_free_slots(list.len, mem_alloc);
+        pub fn append_list_range(self: ILIST, list: ILIST, list_range: Range) Range {
+            self.ensure_free_slots(list.len);
             const append_range = self.append_slots_assume_capacity(list.len);
             list.copy_from_to(.use_range(list_range), .use_range(self, append_range));
             return append_range;
         }
-        pub fn try_append_list_range(self: ILIST, list: ILIST, list_range: Range, mem_alloc: Allocator) ListError!Range {
-            try self.try_ensure_free_slots(list.len, mem_alloc);
+        pub fn try_append_list_range(self: ILIST, list: ILIST, list_range: Range) ListError!Range {
+            try self.try_ensure_free_slots(list.len);
             const append_range = self.append_slots_assume_capacity(list.len);
             list.copy_from_to(.use_range(list_range), .use_range(self, append_range));
             return append_range;
         }
-        pub fn insert_slots(self: ILIST, idx: IDX, count: IDX, mem_alloc: Allocator) Range {
-            self.ensure_free_slots(count, mem_alloc);
+        pub fn insert_slots(self: ILIST, idx: IDX, count: IDX) Range {
+            self.ensure_free_slots(count);
             return self.insert_slots_assume_capacity(idx, count);
         }
-        pub fn try_insert_slots(self: ILIST, idx: IDX, count: IDX, mem_alloc: Allocator) ListError!Range {
-            const ok = self.try_ensure_free_slots(count, mem_alloc);
-            if (!ok) {
-                return ListError.failed_to_grow_list;
-            }
+        pub fn try_insert_slots(self: ILIST, idx: IDX, count: IDX) ListError!Range {
+            try self.try_ensure_free_slots(count);
             return self.insert_slots_assume_capacity(idx, count);
         }
-        pub fn insert_zig_slice(self: ILIST, idx: IDX, slice_: []T, mem_alloc: Allocator) Range {
-            self.ensure_free_slots(slice_.len, mem_alloc);
+        pub fn insert_zig_slice(self: ILIST, idx: IDX, slice_: []T) Range {
+            self.ensure_free_slots(slice_.len);
             return _insert_zig_slice(self, idx, slice_);
         }
-        pub fn try_insert_zig_slice(self: ILIST, idx: IDX, slice_: []T, mem_alloc: Allocator) ListError!Range {
-            try self.try_ensure_free_slots(slice_.len, mem_alloc);
+        pub fn try_insert_zig_slice(self: ILIST, idx: IDX, slice_: []T) ListError!Range {
+            try self.try_ensure_free_slots(slice_.len);
             return _insert_zig_slice(self, idx, slice_);
         }
         fn _insert_zig_slice(self: ILIST, idx: IDX, slice_: []T) Range {
@@ -2292,38 +2445,38 @@ pub fn IList(comptime T: type, comptime PTR: type, comptime IDX: type) type {
             }
             return insert_range;
         }
-        pub fn insert(self: ILIST, idx: IDX, val: T, mem_alloc: Allocator) IDX {
-            self.ensure_free_slots(1, mem_alloc);
+        pub fn insert(self: ILIST, idx: IDX, val: T) IDX {
+            self.ensure_free_slots(1);
             const insert_range = self.insert_slots_assume_capacity(idx, 1);
             self.set(insert_range.first_idx, val);
             return insert_range.first_idx;
         }
-        pub fn try_insert(self: ILIST, idx: IDX, val: T, mem_alloc: Allocator) ListError!Range {
-            try self.try_ensure_free_slots(1, mem_alloc);
+        pub fn try_insert(self: ILIST, idx: IDX, val: T) ListError!Range {
+            try self.try_ensure_free_slots(1);
             const insert_range = self.insert_slots_assume_capacity(idx, 1);
             self.set(insert_range.first_idx, val);
             return insert_range.first_idx;
         }
-        pub fn insert_list(self: ILIST, idx: IDX, list: ILIST, mem_alloc: Allocator) Range {
-            self.ensure_free_slots(list.len, mem_alloc);
+        pub fn insert_list(self: ILIST, idx: IDX, list: ILIST) Range {
+            self.ensure_free_slots(list.len);
             const insert_range = self.insert_slots_assume_capacity(idx, list.len);
             list.copy_from_to(.entire_list(), .use_range(self, insert_range));
             return insert_range;
         }
-        pub fn try_insert_list(self: ILIST, idx: IDX, list: ILIST, mem_alloc: Allocator) ListError!Range {
-            try self.try_ensure_free_slots(list.len, mem_alloc);
+        pub fn try_insert_list(self: ILIST, idx: IDX, list: ILIST) ListError!Range {
+            try self.try_ensure_free_slots(list.len);
             const insert_range = self.insert_slots_assume_capacity(idx, list.len);
             list.copy_from_to(.entire_list(), .use_range(self, insert_range));
             return insert_range;
         }
-        pub fn insert_list_range(self: ILIST, idx: IDX, list: ILIST, list_range: Range, mem_alloc: Allocator) Range {
-            self.ensure_free_slots(list.len, mem_alloc);
+        pub fn insert_list_range(self: ILIST, idx: IDX, list: ILIST, list_range: Range) Range {
+            self.ensure_free_slots(list.len);
             const insert_range = self.insert_slots_assume_capacity(idx, list.len);
             list.copy_from_to(.use_range(list_range), .use_range(self, insert_range));
             return insert_range;
         }
-        pub fn try_insert_list_range(self: ILIST, idx: IDX, list: ILIST, list_range: Range, mem_alloc: Allocator) ListError!Range {
-            try self.try_ensure_free_slots(list.len, mem_alloc);
+        pub fn try_insert_list_range(self: ILIST, idx: IDX, list: ILIST, list_range: Range) ListError!Range {
+            try self.try_ensure_free_slots(list.len);
             const insert_range = self.insert_slots_assume_capacity(idx, list.len);
             list.copy_from_to(.use_range(list_range), .use_range(self, insert_range));
             return insert_range;
@@ -2532,7 +2685,337 @@ pub fn IList(comptime T: type, comptime PTR: type, comptime IDX: type) type {
             self.delete_range(.single_idx(last_idx_));
             return val;
         }
-        //CHECKPOINT queue-like funcs
+        /// Increment the start point of the list by `count` items, effectivly discarding the first
+        /// `count` items without moving any items
+        pub fn discard(self: ILIST, count: IDX) void {
+            self.increment_start(count);
+        }
+        /// Increment the start point of the list by `count` items, effectivly discarding the first
+        /// `count` items without moving any items
+        pub fn try_discard(self: ILIST, count: IDX) ListError!void {
+            if (self.len() < count) {
+                return ListError.too_few_items_in_list;
+            }
+            self.increment_start(count);
+        }
+        /// Increment the start point of the list by `len()` items, effectivly discarding the entire
+        /// list without moving any items in memory.
+        pub fn discard_all(self: ILIST) void {
+            self.increment_start(self.len());
+        }
+        pub fn peek_queue_overwrite_list(self: ILIST, count: IDX, peek_output: ILIST) void {
+            peek_output.clear();
+            peek_output.ensure_free_slots(count);
+            const rng = peek_output.append_slots_assume_capacity(count);
+            self.copy_from_to(.first_n_items(count), .use_range(peek_output, rng));
+        }
+        pub fn try_peek_queue_overwrite_list(self: ILIST, count: IDX, peek_output: ILIST) ListError!void {
+            peek_output.clear();
+            try peek_output.try_ensure_free_slots(count);
+            const rng = peek_output.append_slots_assume_capacity(count);
+            return self.try_copy_from_to(.first_n_items(count), .use_range(peek_output, rng));
+        }
+        pub fn peek_queue_append_list(self: ILIST, count: IDX, peek_output: ILIST) void {
+            peek_output.ensure_free_slots(count);
+            const rng = peek_output.append_slots_assume_capacity(count);
+            self.copy_from_to(.first_n_items(count), .use_range(peek_output, rng));
+        }
+        pub fn try_peek_queue_append_list(self: ILIST, count: IDX, peek_output: ILIST) ListError!void {
+            try peek_output.try_ensure_free_slots(count);
+            const rng = peek_output.append_slots_assume_capacity(count);
+            return self.try_copy_from_to(.first_n_items(count), .use_range(peek_output, rng));
+        }
+        pub fn dequeue_overwrite_list(self: ILIST, count: IDX, peek_output: ILIST) void {
+            self.peek_queue_overwrite_list(count, peek_output);
+            self.discard(count);
+        }
+        pub fn try_dequeue_overwrite_list(self: ILIST, count: IDX, peek_output: ILIST) ListError!void {
+            try self.try_peek_queue_overwrite_list(count, peek_output);
+            return self.try_discard(count);
+        }
+        pub fn dequeue_append_list(self: ILIST, count: IDX, peek_output: ILIST) void {
+            self.peek_queue_append_list(count, peek_output);
+            self.discard(count);
+        }
+        pub fn try_dequeue_append_list(self: ILIST, count: IDX, peek_output: ILIST) ListError!void {
+            try self.try_peek_queue_append_list(count, peek_output);
+            return self.try_discard(count);
+        }
+        const LocateResult = struct {
+            idx: IDX = 0,
+            found: bool = false,
+            exit_hi: bool = false,
+            exit_lo: bool = false,
+        };
+        pub const SearchResult = struct {
+            idx: IDX = 0,
+            found: bool = false,
+        };
+        pub const InsertIndexResult = struct {
+            idx: IDX = 0,
+            append: bool = false,
+        };
+        fn _sorted_binary_locate(
+            self: ILIST,
+            orig_lo: IDX,
+            orig_hi: IDX,
+            locate_val: anytype,
+            equal_func: *const fn (this_val: T, find_val: @TypeOf(locate_val)) bool,
+            greater_than_func: *const fn (this_val: T, find_val: @TypeOf(locate_val)) bool,
+        ) LocateResult {
+            var hi = orig_hi;
+            var lo = orig_lo;
+            var val: T = undefined;
+            var idx: IDX = undefined;
+            var result = LocateResult{};
+            while (true) {
+                idx = self.split_range(.new_range(lo, hi));
+                val = self.get(idx);
+                if (equal_func(val, locate_val)) {
+                    result.found = true;
+                    result.idx = idx;
+                    return result;
+                }
+                if (greater_than_func(val, locate_val)) {
+                    if (idx == lo) {
+                        result.exit_lo = idx == orig_lo;
+                        result.idx = idx;
+                        return result;
+                    }
+                    hi = self.prev_idx(idx);
+                } else {
+                    if (idx == hi) {
+                        result.exit_hi = idx == orig_hi;
+                        if (!result.exit_hi) {
+                            idx = self.next_idx(hi);
+                        }
+                        result.idx = idx;
+                        return result;
+                    }
+                    lo = self.next_idx(idx);
+                }
+            }
+        }
+        fn _sorted_linear_locate(
+            self: ILIST,
+            orig_lo: IDX,
+            orig_hi: IDX,
+            locate_val: anytype,
+            equal_func: *const fn (this_val: T, find_val: @TypeOf(locate_val)) bool,
+            greater_than_func: *const fn (this_val: T, find_val: @TypeOf(locate_val)) bool,
+        ) LocateResult {
+            var val: T = undefined;
+            var idx: IDX = orig_lo;
+            var result = LocateResult{};
+            while (true) {
+                val = self.get(idx);
+                if (equal_func(val, locate_val)) {
+                    result.found = true;
+                    result.idx = idx;
+                    return result;
+                }
+                if (greater_than_func(val, locate_val)) {
+                    result.idx = idx;
+                    return result;
+                } else {
+                    if (idx == orig_hi) {
+                        result.exit_hi = true;
+                        result.idx = idx;
+                        return result;
+                    }
+                    idx = self.next_idx(idx);
+                }
+            }
+        }
+
+        fn _sorted_binary_search(
+            self: ILIST,
+            locate_val: anytype,
+            equal_func: *const fn (this_val: T, find_val: @TypeOf(locate_val)) bool,
+            greater_than_func: *const fn (this_val: T, find_val: @TypeOf(locate_val)) bool,
+        ) SearchResult {
+            const lo = self.first_idx();
+            const hi = self.last_idx();
+            const ok = self.idx_valid(lo) and self.idx_valid(hi);
+            if (!ok) {
+                return SearchResult{};
+            }
+            const loc_result = _sorted_binary_locate(self, lo, hi, locate_val, equal_func, greater_than_func);
+            return SearchResult{
+                .found = loc_result.found,
+                .idx = loc_result.idx,
+            };
+        }
+
+        fn _sorted_linear_search(
+            self: ILIST,
+            locate_val: anytype,
+            equal_func: *const fn (this_val: T, find_val: @TypeOf(locate_val)) bool,
+            greater_than_func: *const fn (this_val: T, find_val: @TypeOf(locate_val)) bool,
+        ) SearchResult {
+            const lo = self.first_idx();
+            const hi = self.last_idx();
+            const ok = self.idx_valid(lo) and self.idx_valid(hi);
+            if (!ok) {
+                return SearchResult{};
+            }
+            const loc_result = _sorted_linear_locate(self, lo, hi, locate_val, equal_func, greater_than_func);
+            return SearchResult{
+                .found = loc_result.found,
+                .idx = loc_result.idx,
+            };
+        }
+
+        fn _sorted_binary_insert_index(
+            self: ILIST,
+            locate_val: anytype,
+            equal_func: *const fn (this_val: T, find_val: @TypeOf(locate_val)) bool,
+            greater_than_func: *const fn (this_val: T, find_val: @TypeOf(locate_val)) bool,
+        ) InsertIndexResult {
+            const lo = self.first_idx();
+            const hi = self.last_idx();
+            const ok = self.idx_valid(lo) and self.idx_valid(hi);
+            if (!ok) {
+                return InsertIndexResult{};
+            }
+            const loc_result = _sorted_binary_locate(self, lo, hi, locate_val, equal_func, greater_than_func);
+            return InsertIndexResult{
+                .append = !loc_result.found and loc_result.exit_hi,
+                .idx = loc_result.idx,
+            };
+        }
+
+        fn _sorted_linear_insert_index(
+            self: ILIST,
+            locate_val: anytype,
+            equal_func: *const fn (this_val: T, find_val: @TypeOf(locate_val)) bool,
+            greater_than_func: *const fn (this_val: T, find_val: @TypeOf(locate_val)) bool,
+        ) InsertIndexResult {
+            const lo = self.first_idx();
+            const hi = self.last_idx();
+            const ok = self.idx_valid(lo) and self.idx_valid(hi);
+            if (!ok) {
+                return InsertIndexResult{};
+            }
+            const loc_result = _sorted_linear_locate(self, lo, hi, locate_val, equal_func, greater_than_func);
+            return InsertIndexResult{
+                .append = !loc_result.found and loc_result.exit_hi,
+                .idx = loc_result.idx,
+            };
+        }
+
+        fn _sorted_binary_insert(
+            self: ILIST,
+            val: T,
+            equal_func: *const fn (this_val: T, find_val: T) bool,
+            greater_than_func: *const fn (this_val: T, find_val: T) bool,
+        ) IDX {
+            const ins_result = _sorted_binary_insert_index(self, val, equal_func, greater_than_func);
+            var idx: IDX = undefined;
+            if (ins_result.append) {
+                idx = self.append(val);
+            } else {
+                idx = self.insert(ins_result.idx, val);
+            }
+            return idx;
+        }
+
+        fn _sorted_linear_insert(
+            self: ILIST,
+            val: T,
+            equal_func: *const fn (this_val: T, find_val: T) bool,
+            greater_than_func: *const fn (this_val: T, find_val: T) bool,
+        ) IDX {
+            const ins_result = _sorted_linear_insert_index(self, val, equal_func, greater_than_func);
+            var idx: IDX = undefined;
+            if (ins_result.append) {
+                idx = self.append(val);
+            } else {
+                idx = self.insert(ins_result.idx, val);
+            }
+            return idx;
+        }
+
+        pub fn sorted_insert(
+            self: ILIST,
+            val: T,
+            equal_func: *const fn (this_val: T, find_val: T) bool,
+            greater_than_func: *const fn (this_val: T, find_val: T) bool,
+        ) IDX {
+            if (self.prefer_linear_ops()) {
+                return self._sorted_linear_insert(val, equal_func, greater_than_func);
+            } else {
+                return self._sorted_binary_insert(val, equal_func, greater_than_func);
+            }
+        }
+        pub fn sorted_insert_implicit(self: ILIST, val: T) IDX {
+            if (self.prefer_linear_ops()) {
+                return self._sorted_linear_insert(val, _implicit_eq, _implicit_gt);
+            } else {
+                return self._sorted_binary_insert(val, _implicit_eq, _implicit_gt);
+            }
+        }
+
+        pub fn sorted_insert_index(
+            self: ILIST,
+            val: T,
+            equal_func: *const fn (this_val: T, find_val: T) bool,
+            greater_than_func: *const fn (this_val: T, find_val: T) bool,
+        ) InsertIndexResult {
+            if (self.prefer_linear_ops()) {
+                return self._sorted_linear_insert_index(val, equal_func, greater_than_func);
+            } else {
+                return self._sorted_binary_insert_index(val, equal_func, greater_than_func);
+            }
+        }
+        pub fn sorted_insert_index_implicit(self: ILIST, val: T) InsertIndexResult {
+            if (self.prefer_linear_ops()) {
+                return self._sorted_linear_insert_index(val, _implicit_eq, _implicit_gt);
+            } else {
+                return self._sorted_binary_insert_index(val, _implicit_eq, _implicit_gt);
+            }
+        }
+        pub fn sorted_search(
+            self: ILIST,
+            val: T,
+            equal_func: *const fn (this_val: T, find_val: T) bool,
+            greater_than_func: *const fn (this_val: T, find_val: T) bool,
+        ) SearchResult {
+            if (self.prefer_linear_ops()) {
+                return self._sorted_linear_search(val, equal_func, greater_than_func);
+            } else {
+                return self._sorted_binary_search(val, equal_func, greater_than_func);
+            }
+        }
+        pub fn sorted_search_implicit(self: ILIST, val: T) SearchResult {
+            if (self.prefer_linear_ops()) {
+                return self._sorted_linear_search(val, _implicit_eq, _implicit_gt);
+            } else {
+                return self._sorted_binary_search(val, _implicit_eq, _implicit_gt);
+            }
+        }
+        pub fn search(self: ILIST, find_val: anytype, equal_func: *const fn (this_val: T, find_val: @TypeOf(find_val)) bool) SearchResult {
+            var val: T = undefined;
+            var idx: IDX = self.first_idx();
+            var ok = self.idx_valid(idx);
+            var result = LocateResult{};
+            while (ok) {
+                val = self.get(idx);
+                if (equal_func(val, find_val)) {
+                    result.found = true;
+                    result.idx = idx;
+                    break;
+                }
+                idx = self.next_idx(idx);
+                ok = self.idx_valid(idx);
+            }
+            return result;
+        }
+        pub fn search_implicit(self: ILIST, val: T) SearchResult {
+            return self.search(val, _implicit_eq);
+        }
+
+        //CHECKPOINT extra funcs
     };
 }
 
