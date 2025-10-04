@@ -100,6 +100,10 @@ pub const MONTH_PER_YEAR  = 12;
 pub const Years = extern struct {
     val: i64 = 0,
 
+    pub inline fn new(val: i64) Years {
+        return Years{ .val = val };
+    }
+
     pub inline fn to_months(self: Years) Months {
         return Months{ .val = self.val * MONTH_PER_YEAR };
     }
@@ -164,6 +168,10 @@ pub const Years = extern struct {
 pub const Months = extern struct {
     val: i64 = 0,
 
+    pub inline fn new(val: i64) Months {
+        return Months{ .val = val };
+    }
+
     pub inline fn to_years(self: Months) Years {
         return Years{ .val = self.val / MONTH_PER_YEAR };
     }
@@ -194,6 +202,10 @@ pub const Months = extern struct {
 };
 pub const Weeks = extern struct {
     val: i64 = 0,
+
+    pub inline fn new(val: i64) Weeks {
+        return Weeks{ .val = val };
+    }
 
     pub inline fn to_years(self: Weeks) Years {
         return Years{ .val = self.val / WEEK_PER_YEAR };
@@ -226,6 +238,23 @@ pub const Weeks = extern struct {
 pub const Days = extern struct {
     val: i64 = 0,
 
+    pub inline fn new(val: i64) Days {
+        return Days{ .val = val };
+    }
+
+    pub inline fn add(self: Days, t: Days) Days {
+        return Days{ .val = self.val + t.val };
+    }
+    pub inline fn sub(self: Days, t: Days) Days {
+        return Days{ .val = self.val - t.val };
+    }
+    pub inline fn mult(self: Days, t: Days) Days {
+        return Days{ .val = self.val * t.val };
+    }
+    pub inline fn div(self: Days, t: Days) Days {
+        return Days{ .val = self.val / t.val };
+    }
+
     pub inline fn to_years(self: Days) Years {
         return Years{ .val = self.val / DAY_PER_YEAR };
     }
@@ -256,6 +285,23 @@ pub const Days = extern struct {
 };
 pub const Hours = extern struct {
     val: i64 = 0,
+
+    pub inline fn new(val: i64) Hours {
+        return Hours{ .val = val };
+    }
+
+    pub inline fn add(self: Hours, t: Hours) Hours {
+        return Hours{ .val = self.val + t.val };
+    }
+    pub inline fn sub(self: Hours, t: Hours) Hours {
+        return Hours{ .val = self.val - t.val };
+    }
+    pub inline fn mult(self: Hours, t: Hours) Hours {
+        return Hours{ .val = self.val * t.val };
+    }
+    pub inline fn div(self: Hours, t: Hours) Hours {
+        return Hours{ .val = self.val / t.val };
+    }
 
     pub inline fn to_years(self: Hours) Years {
         return Years{ .val = self.val / HOUR_PER_YEAR_EXACT };
@@ -288,6 +334,23 @@ pub const Hours = extern struct {
 pub const Mins = extern struct {
     val: i64 = 0,
 
+    pub inline fn new(val: i64) Mins {
+        return Mins{ .val = val };
+    }
+
+    pub inline fn add(self: Mins, t: Mins) Mins {
+        return Mins{ .val = self.val + t.val };
+    }
+    pub inline fn sub(self: Mins, t: Mins) Mins {
+        return Mins{ .val = self.val - t.val };
+    }
+    pub inline fn mult(self: Mins, t: Mins) Mins {
+        return Mins{ .val = self.val * t.val };
+    }
+    pub inline fn div(self: Mins, t: Mins) Mins {
+        return Mins{ .val = self.val / t.val };
+    }
+
     pub inline fn to_years(self: Mins) Years {
         return Years{ .val = self.val / MIN_PER_YEAR_EXACT };
     }
@@ -318,6 +381,27 @@ pub const Mins = extern struct {
 };
 pub const Secs = extern struct {
     val: i64 = 0,
+
+    pub inline fn new(val: i64) Secs {
+        return Secs{ .val = val };
+    }
+
+    pub inline fn now() Secs {
+        return Secs{ .val = std.time.timestamp() };
+    }
+
+    pub inline fn add(self: Secs, t: Secs) Secs {
+        return Secs{ .val = self.val + t.val };
+    }
+    pub inline fn sub(self: Secs, t: Secs) Secs {
+        return Secs{ .val = self.val - t.val };
+    }
+    pub inline fn mult(self: Secs, t: Secs) Secs {
+        return Secs{ .val = self.val * t.val };
+    }
+    pub inline fn div(self: Secs, t: Secs) Secs {
+        return Secs{ .val = self.val / t.val };
+    }
 
     pub inline fn to_years(self: Secs) Years {
         return Years{ .val = self.val / SEC_PER_YEAR_EXACT };
@@ -350,6 +434,27 @@ pub const Secs = extern struct {
 pub const MSecs = extern struct {
     val: i64 = 0,
 
+    pub inline fn new(val: i64) MSecs {
+        return MSecs{ .val = val };
+    }
+
+    pub inline fn now() MSecs {
+        return MSecs{ .val = std.time.milliTimestamp() };
+    }
+
+    pub inline fn add(self: MSecs, t: MSecs) MSecs {
+        return MSecs{ .val = self.val + t.val };
+    }
+    pub inline fn sub(self: MSecs, t: MSecs) MSecs {
+        return MSecs{ .val = self.val - t.val };
+    }
+    pub inline fn mult(self: MSecs, t: MSecs) MSecs {
+        return MSecs{ .val = self.val * t.val };
+    }
+    pub inline fn div(self: MSecs, t: MSecs) MSecs {
+        return MSecs{ .val = self.val / t.val };
+    }
+
     pub inline fn to_years(self: MSecs) Years {
         return Years{ .val = self.val / MS_PER_YEAR_EXACT };
     }
@@ -381,6 +486,27 @@ pub const MSecs = extern struct {
 pub const USecs = extern struct {
     val: i64 = 0,
 
+    pub inline fn new(val: i64) USecs {
+        return USecs{ .val = val };
+    }
+
+    pub inline fn now() USecs {
+        return USecs{ .val = std.time.microTimestamp() };
+    }
+
+    pub inline fn add(self: USecs, t: USecs) USecs {
+        return USecs{ .val = self.val + t.val };
+    }
+    pub inline fn sub(self: USecs, t: USecs) USecs {
+        return USecs{ .val = self.val - t.val };
+    }
+    pub inline fn mult(self: USecs, t: USecs) USecs {
+        return USecs{ .val = self.val * t.val };
+    }
+    pub inline fn div(self: USecs, t: USecs) USecs {
+        return USecs{ .val = self.val / t.val };
+    }
+
     pub inline fn to_years(self: USecs) Years {
         return Years{ .val = self.val / US_PER_YEAR_EXACT };
     }
@@ -411,6 +537,23 @@ pub const USecs = extern struct {
 };
 pub const NSecs = extern struct {
     val: i64 = 0,
+
+    pub inline fn new(nsecs: i64) NSecs {
+        return NSecs{ .val = nsecs };
+    }
+
+    pub inline fn add(self: NSecs, t: NSecs) NSecs {
+        return NSecs{ .val = self.val + t.val };
+    }
+    pub inline fn sub(self: NSecs, t: NSecs) NSecs {
+        return NSecs{ .val = self.val - t.val };
+    }
+    pub inline fn mult(self: NSecs, t: NSecs) NSecs {
+        return NSecs{ .val = self.val * t.val };
+    }
+    pub inline fn div(self: NSecs, t: NSecs) NSecs {
+        return NSecs{ .val = self.val / t.val };
+    }
 
     pub inline fn to_years(self: NSecs) Years {
         return Years{ .val = self.val / NS_PER_YEAR_EXACT };

@@ -624,11 +624,11 @@ pub fn slice_move_one(comptime T: type, slice: []T, old_idx: usize, new_idx: usi
     var ridx: isize = widx + step;
     const val: T = slice[old_idx];
     while (widx != new_idx) {
-        slice[widx] = slice[ridx];
+        slice[@intCast(widx)] = slice[@intCast(ridx)];
         widx = ridx;
         ridx += step;
     }
-    slice[widx] = val;
+    slice[@intCast(widx)] = val;
 }
 
 pub fn slice_move_many(comptime T: type, slice: []T, old_first: usize, old_last_inclusive: usize, new_first: usize) void {
@@ -661,4 +661,128 @@ pub fn slice_reverse(comptime T: type, slice: []T) void {
         left += 1;
         right -= 1;
     }
+}
+
+const HEX = [16]u8{ '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'A', 'B', 'C', 'D', 'E', 'F' };
+const HEX_MASK = 0b00001111;
+const HEX_SHIFT = 4;
+const QHEX_OFFSET: u8 = 'A';
+
+const DEC = [10]u8{ '0', '1', '2', '3', '4', '5', '6', '7', '8', '9' };
+
+pub fn quick_hex(val: anytype) [@sizeOf(@TypeOf(val)) * 2]u8 {
+    const T = @TypeOf(val);
+    const I = @typeInfo(T);
+    var out: [@sizeOf(T) * 2]u8 = undefined;
+    var uval: u64 = undefined;
+    const LIMIT = @sizeOf(T);
+    assert_with_reason(LIMIT > 0 and LIMIT <= 8, @src(), "can only quick_hex() on types with size > 0 and size <= 8, got type {s} (size = {d})", .{ @typeName(T), LIMIT });
+    switch (I) {
+        .int, .float, .@"enum", .pointer => {
+            const uint: @Type(.{ .int = .{ .bits = @bitSizeOf(T), .signedness = .unsigned } }) = @bitCast(val);
+            uval = @intCast(uint);
+        },
+        .comptime_int => {
+            uval = val;
+        },
+        .comptime_float => {
+            const flt: f64 = val;
+            const uint: @Type(.{ .int = .{ .bits = @bitSizeOf(T), .signedness = .unsigned } }) = @bitCast(flt);
+            uval = @intCast(uint);
+        },
+        .bool => {
+            uval = @intCast(@intFromBool(val));
+        },
+        else => {
+            assert_with_reason(false, @src(), "invalid type for quick_hex(): {s}", .{@typeName(T)});
+        },
+    }
+    var i: usize = LIMIT * 2;
+    while (i > 0) {
+        i -= 1;
+        var h = uval & HEX_MASK;
+        out[i] = HEX[h];
+        uval >>= HEX_SHIFT;
+        i -= 1;
+        h = uval & HEX_MASK;
+        out[i] = HEX[h];
+        uval >>= HEX_SHIFT;
+    }
+    return out;
+}
+
+pub fn quick_unhex(bytes: []const u8, comptime T: type) T {
+    var val: u64 = 0;
+    var i: usize = 0;
+    while (i < bytes.len) {
+        const b = bytes[i];
+        const v = switch (b) {
+            '0'...'9' => b - '0',
+            'A'...'F' => b - 'A' + 10,
+            'a'...'f' => b - 'a' + 10,
+            else => 0,
+        };
+        val |= v;
+        val <<= HEX_SHIFT;
+        i += 1;
+    }
+    const I = @typeInfo(T);
+    switch (I) {
+        .int, .float, .@"enum", .pointer => {
+            const uint: @Type(.{ .int = .{ .bits = @bitSizeOf(T), .signedness = .unsigned } }) = @intCast(val);
+            return @bitCast(uint);
+        },
+        .bool => {
+            return val > 0;
+        },
+        else => {
+            assert_with_reason(false, @src(), "invalid type for quick_unhex(): {s}", .{@typeName(T)});
+            unreachable;
+        },
+    }
+}
+
+pub const QuickDecResult = struct {
+    data: [20]u8 = @splat(' '),
+    start: u8 = 20,
+
+    pub fn bytes(self: *QuickDecResult) []u8 {
+        return self.data[self.start..20];
+    }
+};
+
+pub fn quick_dec(val: anytype) QuickDecResult {
+    var out = QuickDecResult{};
+    var uval: u64 = undefined;
+    const T = @TypeOf(val);
+    const I = @typeInfo(T);
+    const LIMIT = @sizeOf(T);
+    assert_with_reason(LIMIT > 0 and LIMIT <= 8, @src(), "can only quick_hex() on types with size > 0 and size <= 8, got type {s} (size = {d})", .{ @typeName(T), LIMIT });
+    switch (I) {
+        .int, .float, .@"enum", .pointer => {
+            const uint: @Type(.{ .int = .{ .bits = @bitSizeOf(T), .signedness = .unsigned } }) = @bitCast(val);
+            uval = @intCast(uint);
+        },
+        .comptime_int => {
+            uval = val;
+        },
+        .comptime_float => {
+            const flt: f64 = val;
+            const uint: @Type(.{ .int = .{ .bits = @bitSizeOf(T), .signedness = .unsigned } }) = @bitCast(flt);
+            uval = @intCast(uint);
+        },
+        .bool => {
+            uval = @intCast(@intFromBool(val));
+        },
+        else => {
+            assert_with_reason(false, @src(), "invalid type for quick_hex(): {s}", .{@typeName(T)});
+        },
+    }
+    while (out.start > 0 and (uval > 0 or out.start >= 20)) {
+        out.start -= 1;
+        const b = @as(u8, @intCast(val % 10));
+        uval = uval / 10;
+        out.data[out.start] = b;
+    }
+    return out;
 }

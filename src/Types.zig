@@ -259,6 +259,9 @@ pub inline fn type_has_field_with_any_float_type(comptime T: type, comptime fiel
 pub inline fn type_has_decl_with_type(comptime T: type, comptime decl: []const u8, comptime T_DECL: type) bool {
     return @hasDecl(T, decl) and @TypeOf(@field(T, decl)) == T_DECL;
 }
+pub inline fn type_has_decl_with_type_and_val(comptime T: type, comptime decl: []const u8, comptime T_DECL: type, comptime V_DECL: T_DECL) bool {
+    return @hasDecl(T, decl) and @TypeOf(@field(T, decl)) == T_DECL and @field(T, decl) == V_DECL;
+}
 pub inline fn type_has_decl_with_any_pointer_type(comptime T: type, comptime decl: []const u8) bool {
     return @hasDecl(T, decl) and @typeInfo(@TypeOf(@field(T, decl))) == .pointer;
 }
