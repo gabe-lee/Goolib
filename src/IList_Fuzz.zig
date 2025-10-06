@@ -55,47 +55,48 @@ pub fn make_slice_adapter_alloc_test(comptime T: type) Fuzz.FuzzTest {
     const PROTO = struct {
         const T_IList = Root.IList.IList(T);
         const T_List = std.ArrayList(T);
-        const AUX_STATE = struct {
-            is_init: bool = false,
-            slice_adapter: SliceAdapter(u8).AdapterWithAlloc,
+        const STATE = struct {
+            ref_list: T_List,
+            test_list: T_IList,
+            slice_adapter: SliceAdapter(T).AdapterWithAlloc,
         };
-        pub fn INIT(rand: Random, state_opaque: *anyopaque, alloc: Allocator) ?anyerror {
+        pub fn INIT(state_opaque: **anyopaque, alloc: Allocator) ?anyerror {
+            var state = alloc.create(STATE) catch |err| return err;
+            state.ref_list = T_List.initCapacity(alloc, LARGEST_LEN) catch |err| return err;
+            var s: []T = undefined;
+            s.len = 0;
+            state.slice_adapter = SliceAdapter(T).adapt_with_alloc(s, alloc);
+            state.test_list = state.slice_adapter.interface();
+            state_opaque.* = @ptrCast(state);
+            return null;
+        }
+        pub fn START_SEED(rand: Random, state_opaque: *anyopaque, alloc: Allocator) ?anyerror {
+            var state: *STATE = @ptrCast(@alignCast(state_opaque));
             const len = rand.uintLessThan(usize, 256);
-            if (!state.aux_state.is_init) { //CHECKPOINT
-                var state = alloc.create(Fuzz.OpaqueState.CONCRETE(T_List, T_IList, AUX_STATE));
-                state.ref_obj.* = std.ArrayList(u8).initCapacity(alloc, len) catch |err| return err;
-                const new_test_slice = alloc.alloc(u8, len) catch |err| return err;
-                state.aux_state.slice_adapter = SliceAdapter(u8).adapt_with_alloc(new_test_slice, alloc);
-                state.test_obj.* = state.aux_state.slice_adapter.interface();
-                state.aux_state.is_init = true;
+            state.ref_list.clearRetainingCapacity();
+            if (alloc.remap(state.slice_adapter.slice, len)) |new| {
+                state.slice_adapter.slice = new;
             } else {
-                state.ref_obj.clearRetainingCapacity();
-                if (alloc.remap(state.aux_state.slice_adapter.slice, len)) |new| {
-                    state.aux_state.slice_adapter.slice = new;
-                } else {
-                    alloc.free(state.aux_state.slice_adapter.slice);
-                    state.aux_state.slice_adapter.slice = alloc.alloc(u8, len) catch |err| return err;
-                }
+                alloc.free(state.slice_adapter.slice);
+                state.slice_adapter.slice = alloc.alloc(u8, len) catch |err| return err;
             }
-            state.ref_obj.ensureTotalCapacity(alloc, len) catch |err| return err;
-            state.ref_obj.items.len = len;
+            state.ref_list.ensureTotalCapacity(alloc, len) catch |err| return err;
+            state.ref_list.items.len = len;
             if (len > 0) {
-                rand.bytes(state.ref_obj.items);
-                @memcpy(state.aux_state.slice_adapter.slice[0..len], state.ref_obj.items[0..len]);
-                state.test_obj.* = state.aux_state.slice_adapter.interface();
+                rand.bytes(state.ref_list.items);
+                @memcpy(state.slice_adapter.slice[0..len], state.ref_list.items[0..len]);
             }
-            return _OPS.verify_whole_state(state_opaque);
+            return _OPS.verify_whole_state(state);
         }
 
-        pub fn DEINIT(state_opaque: Fuzz.OpaqueState, alloc: Allocator) void {
-            const state = state_opaque.open(T_List, T_IList, AUX_STATE);
-            if (state.aux_state.is_init) {
-                state.ref_obj.clearAndFree(alloc);
-                alloc.free(state.aux_state.slice_adapter.slice);
-            }
+        pub fn DEINIT(state_opaque: *anyopaque, alloc: Allocator) void {
+            const state: *STATE = @ptrCast(@alignCast(state_opaque));
+            state.ref_list.clearAndFree(alloc);
+            alloc.free(state.slice_adapter.slice);
+            alloc.destroy(state);
         }
 
-        const _OPS = make_op_table(u8, AUX_STATE);
+        const _OPS = make_op_table(STATE);
         pub const OPS = _OPS.OPS;
     };
     return Fuzz.FuzzTest{
@@ -103,110 +104,109 @@ pub fn make_slice_adapter_alloc_test(comptime T: type) Fuzz.FuzzTest {
             .name = "SliceAdapter_alloc_" ++ @typeName(T),
         },
         .init_func = PROTO.INIT,
+        .start_seed_func = PROTO.START_SEED,
         .op_table = PROTO.OPS[0..],
         .deinit_func = PROTO.DEINIT,
     };
 }
 
-pub fn make_op_table(comptime T: type, comptime AUX_STATE: type) type {
+pub fn make_op_table(comptime STATE: type) type {
     return struct {
-        fn verify_whole_state(state_opq: Fuzz.OpaqueState) ?anyerror {
-            const state = state_opq.open(std.ArrayList(T), IList.IList(T), AUX_STATE);
-            _ = state.aux_state;
-            if (state.ref_obj.items.len != state.test_obj.len()) return Error.len_mismatch;
-            if (state.test_obj.cap() < state.test_obj.len()) return Error.cap_less_than_len;
-            if (state.ref_obj.items.len == 0) {
-                if (state.test_obj.idx_valid(state.test_obj.first_idx())) return Error.valid_first_idx_in_empty_list;
-                if (state.test_obj.idx_valid(state.test_obj.last_idx())) return Error.valid_last_idx_in_empty_list;
+        fn verify_whole_state(state: *STATE) ?anyerror {
+            if (state.ref_list.items.len != state.test_list.len()) return Error.len_mismatch;
+            if (state.test_list.cap() < state.test_list.len()) return Error.cap_less_than_len;
+            if (state.ref_list.items.len == 0) {
+                if (state.test_list.idx_valid(state.test_list.first_idx())) return Error.valid_first_idx_in_empty_list;
+                if (state.test_list.idx_valid(state.test_list.last_idx())) return Error.valid_last_idx_in_empty_list;
             } else {
-                if (!state.test_obj.idx_valid(state.test_obj.first_idx())) return Error.invalid_first_idx_in_filled_list;
-                if (!state.test_obj.idx_valid(state.test_obj.last_idx())) return Error.invalid_last_idx_in_filled_list;
+                if (!state.test_list.idx_valid(state.test_list.first_idx())) return Error.invalid_first_idx_in_filled_list;
+                if (!state.test_list.idx_valid(state.test_list.last_idx())) return Error.invalid_last_idx_in_filled_list;
             }
-            var curr_idx = state.test_obj.first_idx();
+            var curr_idx = state.test_list.first_idx();
             var curr_n: usize = 0;
-            while (curr_n < state.ref_obj.items.len) {
-                if (!state.test_obj.idx_valid(curr_idx)) return Error.invalid_idx_in_middle_of_list_traversing_forward;
-                const exp_val = state.ref_obj.items[curr_n];
-                const got_val = state.test_obj.get(curr_idx);
+            while (curr_n < state.ref_list.items.len) {
+                if (!state.test_list.idx_valid(curr_idx)) return Error.invalid_idx_in_middle_of_list_traversing_forward;
+                const exp_val = state.ref_list.items[curr_n];
+                const got_val = state.test_list.get(curr_idx);
                 if (exp_val != got_val) return Error.value_mismatch;
                 curr_n = curr_n + 1;
-                curr_idx = state.test_obj.next_idx(curr_idx);
+                curr_idx = state.test_list.next_idx(curr_idx);
             }
-            if (state.test_obj.idx_valid(curr_idx)) return Error.valid_idx_beyond_list_len;
-            curr_idx = state.test_obj.last_idx();
+            if (state.test_list.idx_valid(curr_idx)) return Error.valid_idx_beyond_list_len;
+            curr_idx = state.test_list.last_idx();
             while (curr_n > 0) {
                 curr_n = curr_n - 1;
-                if (!state.test_obj.idx_valid(curr_idx)) return Error.invalid_idx_in_middle_of_list_traversing_backward;
-                const exp_val = state.ref_obj.items[curr_n];
-                const got_val = state.test_obj.get(curr_idx);
+                if (!state.test_list.idx_valid(curr_idx)) return Error.invalid_idx_in_middle_of_list_traversing_backward;
+                const exp_val = state.ref_list.items[curr_n];
+                const got_val = state.test_list.get(curr_idx);
                 if (exp_val != got_val) return Error.value_mismatch;
 
-                curr_idx = state.test_obj.prev_idx(curr_idx);
+                curr_idx = state.test_list.prev_idx(curr_idx);
             }
-            if (state.test_obj.idx_valid(curr_idx)) return Error.valid_idx_before_list_start;
-            curr_idx = state.test_obj.first_idx();
+            if (state.test_list.idx_valid(curr_idx)) return Error.valid_idx_before_list_start;
+            curr_idx = state.test_list.first_idx();
             curr_n = 0;
 
             return null;
         }
 
-        fn get_nth(rand: Random, state_opq: Fuzz.OpaqueState, alloc: Allocator) ?anyerror {
+        fn get_nth(rand: Random, state_opaque: *anyopaque, alloc: Allocator) ?anyerror {
             _ = alloc;
-            const state = state_opq.open(std.ArrayList(T), IList.IList(T), AUX_STATE);
-            if (state.ref_obj.items.len == 0) return null;
-            const n = rand.uintLessThan(usize, state.ref_obj.items.len);
-            const idx = state.test_obj.nth_idx(n);
-            const exp_val = state.ref_obj.items[n];
-            const got_val = state.test_obj.get(idx);
+            const state: *STATE = @ptrCast(@alignCast(state_opaque));
+            if (state.ref_list.items.len == 0) return null;
+            const n = rand.uintLessThan(usize, state.ref_list.items.len);
+            const idx = state.test_list.nth_idx(n);
+            const exp_val = state.ref_list.items[n];
+            const got_val = state.test_list.get(idx);
             if (exp_val != got_val) return Error.value_mismatch;
-            return verify_whole_state(state_opq);
+            return verify_whole_state(state);
         }
-        fn get_nth_ptr(rand: Random, state_opq: Fuzz.OpaqueState, alloc: Allocator) ?anyerror {
+        fn get_nth_ptr(rand: Random, state_opaque: *anyopaque, alloc: Allocator) ?anyerror {
             _ = alloc;
-            const state = state_opq.open(std.ArrayList(T), IList.IList(T), AUX_STATE);
-            if (state.ref_obj.items.len == 0) return null;
-            const n = rand.uintLessThan(usize, state.ref_obj.items.len);
-            const idx = state.test_obj.nth_idx(n);
-            const exp_val = state.ref_obj.items[n];
-            const got_ptr = state.test_obj.get_ptr(idx);
+            const state: *STATE = @ptrCast(@alignCast(state_opaque));
+            if (state.ref_list.items.len == 0) return null;
+            const n = rand.uintLessThan(usize, state.ref_list.items.len);
+            const idx = state.test_list.nth_idx(n);
+            const exp_val = state.ref_list.items[n];
+            const got_ptr = state.test_list.get_ptr(idx);
             const got_val = got_ptr.*;
             if (exp_val != got_val) return Error.value_mismatch;
             got_ptr.* = 42;
-            const got_val_2 = state.test_obj.get(idx);
+            const got_val_2 = state.test_list.get(idx);
             if (got_val_2 != 42) return Error.pointer_mismatch;
             got_ptr.* = exp_val;
-            const got_val_3 = state.test_obj.get(idx);
+            const got_val_3 = state.test_list.get(idx);
             if (got_val_3 != exp_val) return Error.pointer_mismatch;
-            return verify_whole_state(state_opq);
+            return verify_whole_state(state);
         }
-        fn set_nth(rand: Random, state_opq: Fuzz.OpaqueState, alloc: Allocator) ?anyerror {
+        fn set_nth(rand: Random, state_opaque: *anyopaque, alloc: Allocator) ?anyerror {
             _ = alloc;
-            const state = state_opq.open(std.ArrayList(T), IList.IList(T), AUX_STATE);
-            if (state.ref_obj.items.len == 0) return null;
-            const n = rand.uintLessThan(usize, state.ref_obj.items.len);
+            const state: *STATE = @ptrCast(@alignCast(state_opaque));
+            if (state.ref_list.items.len == 0) return null;
+            const n = rand.uintLessThan(usize, state.ref_list.items.len);
             var b: [1]u8 = undefined;
             rand.bytes(b[0..1]);
-            const idx = state.test_obj.nth_idx(n);
-            state.ref_obj.items[n] = b[0];
-            state.test_obj.set(idx, b[0]);
-            return verify_whole_state(state_opq);
+            const idx = state.test_list.nth_idx(n);
+            state.ref_list.items[n] = b[0];
+            state.test_list.set(idx, b[0]);
+            return verify_whole_state(state);
         }
-        fn check_nth_idx(rand: Random, state_opq: Fuzz.OpaqueState, alloc: Allocator) ?anyerror {
+        fn check_nth_idx(rand: Random, state_opaque: *anyopaque, alloc: Allocator) ?anyerror {
             _ = alloc;
-            const state = state_opq.open(std.ArrayList(T), IList.IList(T), AUX_STATE);
-            const n = rand.uintLessThan(usize, 1 + (state.ref_obj.items.len * 2));
-            const idx_1 = state.test_obj.nth_idx(n);
-            const idx_2 = state.test_obj.nth_idx_from_end(n);
-            if (n >= state.ref_obj.items.len) {
-                if (state.test_obj.idx_valid(idx_1)) return Error.valid_idx_beyond_list_len;
-                if (state.test_obj.idx_valid(idx_2)) return Error.valid_idx_before_list_start;
+            const state: *STATE = @ptrCast(@alignCast(state_opaque));
+            const n = rand.uintLessThan(usize, 1 + (state.ref_list.items.len * 2));
+            const idx_1 = state.test_list.nth_idx(n);
+            const idx_2 = state.test_list.nth_idx_from_end(n);
+            if (n >= state.ref_list.items.len) {
+                if (state.test_list.idx_valid(idx_1)) return Error.valid_idx_beyond_list_len;
+                if (state.test_list.idx_valid(idx_2)) return Error.valid_idx_before_list_start;
             } else {
-                if (!state.test_obj.idx_valid(idx_1)) return Error.invalid_idx_in_middle_of_list_traversing_forward;
-                if (!state.test_obj.idx_valid(idx_2)) return Error.invalid_idx_in_middle_of_list_traversing_backward;
+                if (!state.test_list.idx_valid(idx_1)) return Error.invalid_idx_in_middle_of_list_traversing_forward;
+                if (!state.test_list.idx_valid(idx_2)) return Error.invalid_idx_in_middle_of_list_traversing_backward;
             }
-            return verify_whole_state(state_opq);
+            return verify_whole_state(state);
         }
-        pub const OPS = [4]*const fn (rand: Random, state_opq: Fuzz.OpaqueState, alloc: Allocator) ?anyerror{
+        pub const OPS = [_]*const fn (rand: Random, state_opq: *anyopaque, alloc: Allocator) ?anyerror{
             get_nth,
             get_nth_ptr,
             set_nth,

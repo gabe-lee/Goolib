@@ -47,10 +47,12 @@ const EXT = ".seeds";
 const SEP = std.fs.path.sep;
 const NEWLINE: u8 = "\n";
 const FILE_OP_COUNT: u8 = '#';
-const FUZZ_BATCH_HEADER_ = "~~~~~~BEGINNING FUZZ TESTS~~~~~~   TIME:    15s  30s  45s  60s  75s  90s  105s 120s 135s 150s 165s 180s";
-const FUZZ_BATCH_INTERLD = "                                   TIME:    15s  30s  45s  60s  75s  90s  105s 120s 135s 150s 165s 180s";
+const FUZZ_BATCH_HEADER_ = "~~~~~~BEGINNING FUZZ TESTS~~~~~~   TIME:    15s  30s  45s  60s  75s  90s  105s 120s 135s 150s 165s 180s SEEDS       OPS";
+const FUZZ_BATCH_INTERLD = "                                   TIME:    15s  30s  45s  60s  75s  90s  105s 120s 135s 150s 165s 180s SEEDS       OPS";
 const FUZZ_LINE_TEMPLATE = "┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┨     :    :    :    :    :    :    :    :    :    :    :    : ┃";
-const FUZZ_BATCH_FOOTER_ = "~~~~~~FUZZ TESTS COMPLETE~~~~~~~   TIME:    15s  30s  45s  60s  75s  90s  105s 120s 135s 150s 165s 180s";
+const FUZZ_BATCH_FOOTER_ = "~~~~~~FUZZ TESTS COMPLETE~~~~~~~   TIME:    15s  30s  45s  60s  75s  90s  105s 120s 135s 150s 165s 180s SEEDS       OPS";
+
+const MAX_THREAD_COUNT = 8;
 
 pub const FuzzSeed = struct {
     seed: u64 = 0,
@@ -83,41 +85,50 @@ pub const FuzzOptions = struct {
 
 pub const FuzzTest = struct {
     options: FuzzOptions,
-    init_func: *const fn (rand: Random, state_opq: OpaqueState, alloc: Allocator) ?anyerror = noop_init,
-    op_table: []const *const fn (rand: Random, state_opq: OpaqueState, alloc: Allocator) ?anyerror = noop_table[0..0],
-    deinit_func: *const fn (state_opq: OpaqueState, alloc: Allocator) void = noop_deinit,
+    /// Run once at the beginning of every fuzz test, usually used to instantiate the objects to be tested
+    init_func: *const fn (state_opq: **anyopaque, alloc: Allocator) ?anyerror = noop_init,
+    /// Run once at the beginning of every seed, usually used to reset the test objects and fill them with new values
+    /// as a starting point for the seed
+    start_seed_func: *const fn (rand: Random, state_opq: *anyopaque, alloc: Allocator) ?anyerror = noop_start_seed,
+    /// A table of operations to randomly select to perform on the test objects
+    op_table: []const *const fn (rand: Random, state_opq: *anyopaque, alloc: Allocator) ?anyerror = noop_table[0..0],
+    /// Run once at the end of every fuzz test, used to deallocate/deinit any resources created during the fuzz test
+    deinit_func: *const fn (state_opq: *anyopaque, alloc: Allocator) void = noop_deinit,
 };
 
-fn noop_init(rand: Random, state_opq: OpaqueState, alloc: Allocator) ?anyerror {
+fn noop_start_seed(rand: Random, state_opq: *anyopaque, alloc: Allocator) ?anyerror {
     _ = rand;
     _ = state_opq;
     _ = alloc;
     return null;
 }
 
-fn noop_deinit(state_opq: OpaqueState, alloc: Allocator) void {
+fn noop_init(state_opq: **anyopaque, alloc: Allocator) ?anyerror {
+    _ = state_opq;
+    _ = alloc;
+    return null;
+}
+
+fn noop_deinit(state_opq: *anyopaque, alloc: Allocator) void {
     _ = state_opq;
     _ = alloc;
 }
 
-const noop_table: [0]*const fn (rand: Random, state_opq: OpaqueState, alloc: Allocator) ?anyerror = undefined;
+fn noop_op(rand: Random, state_opq: *anyopaque, alloc: Allocator) ?anyerror {
+    _ = rand;
+    _ = state_opq;
+    _ = alloc;
+    return null;
+}
 
-pub const OpaqueState = struct {
-    pub fn OPENED(comptime REF_OBJ: type, comptime TEST_OBJ: type, comptime AUX_STATE: type) type {
-        return *CONCRETE(REF_OBJ, TEST_OBJ, AUX_STATE);
-    }
-    pub fn CONCRETE(comptime REF_OBJ: type, comptime TEST_OBJ: type, comptime AUX_STATE: type) type {
-        return struct {
-            ref_obj: REF_OBJ,
-            test_obj: TEST_OBJ,
-            aux_state: AUX_STATE,
-        };
-    }
+fn fail_op(rand: Random, state_opq: *anyopaque, alloc: Allocator) ?anyerror {
+    _ = rand;
+    _ = state_opq;
+    _ = alloc;
+    return error{debug_test_failure}.debug_test_failure;
+}
 
-    pub fn open(state_opq: *anyopaque, comptime REF_OBJ: type, comptime TEST_OBJ: type, comptime AUX_STATE: type) OPENED(REF_OBJ, TEST_OBJ, AUX_STATE) {
-        return @ptrCast(@alignCast(state_opq));
-    }
-};
+const noop_table: [1]*const fn (rand: Random, state_opq: *anyopaque, alloc: Allocator) ?anyerror = .{noop_op};
 
 pub const DiffFuzzer = struct {
     const Self = @This();
@@ -125,7 +136,7 @@ pub const DiffFuzzer = struct {
     fuzz_seed: FuzzSeed = undefined,
     fail_count: u64 = 0,
     seeds_file: File = undefined,
-    err_list: ErrList = undefined,
+    err: anyerror = undefined,
     test_list: []const FuzzTest = undefined,
     next_sec: Time.MSecs = undefined,
     end_time: Time.MSecs = undefined,
@@ -133,11 +144,13 @@ pub const DiffFuzzer = struct {
     first_block: bool = true,
     is_init: bool = false,
     name: []const u8 = "<none>",
-    duration: Secs = Secs.new(10),
+    duration: Secs = Secs.new(15),
     max_failures: u64 = 5,
     one_seed: ?u64 = null,
     min_ops_per_seed: u64 = 10,
     max_ops_per_seed: u64 = 100,
+    seeds: u64 = 0,
+    ops: u64 = 0,
     total: u64 = 0,
     pass: u64 = 0,
     fail: u64 = 0,
@@ -146,19 +159,20 @@ pub const DiffFuzzer = struct {
     fail_list: StrList,
     fail_reason: StrList,
     console: File,
-    init_func: *const fn (rand: Random, state_opq: OpaqueState, alloc: Allocator) ?anyerror = noop_init,
-    op_table: []const *const fn (rand: Random, state_opq: OpaqueState, alloc: Allocator) ?anyerror = noop_table[0..0],
-    deinit_func: *const fn (state_opq: OpaqueState, alloc: Allocator) void = noop_deinit,
+    init_func: *const fn (state_opq: **anyopaque, alloc: Allocator) ?anyerror = noop_init,
+    start_seed_func: *const fn (rand: Random, state_opq: *anyopaque, alloc: Allocator) ?anyerror = noop_start_seed,
+    op_table: []const *const fn (rand: Random, state_opq: *anyopaque, alloc: Allocator) ?anyerror = noop_table[0..0],
+    deinit_func: *const fn (state_opq: *anyopaque, alloc: Allocator) void = noop_deinit,
 
-    pub fn init(alloc: Allocator, test_list: []const FuzzTest) anyerror!Self {
+    pub fn init(alloc: Allocator, duration: Time.Secs, test_list: []const FuzzTest) anyerror!Self {
         return Self{
             .alloc = alloc,
             .pass_list = try StrList.initCapacity(alloc, test_list.len),
             .fail_list = try StrList.initCapacity(alloc, test_list.len),
             .fail_reason = try StrList.initCapacity(alloc, test_list.len),
             .console = std.fs.File.stdout(),
-            .err_list = try ErrList.initCapacity(alloc, 8),
             .test_list = test_list,
+            .duration = duration,
         };
     }
 
@@ -166,29 +180,39 @@ pub const DiffFuzzer = struct {
         self.pass_list.deinit(self.alloc);
         self.fail_list.deinit(self.alloc);
         self.fail_reason.deinit(self.alloc);
-        self.err_list.deinit(self.alloc);
     }
 
     pub fn fuzz_all(self: *Self) anyerror!void {
+        try self.print_header();
+        var i: usize = 0;
         for (self.test_list) |t| {
+            if (i > 4) {
+                i = 0;
+                try self.print_interlude();
+            }
             try self.fuzz(t);
+            i += 1;
         }
+        try self.print_footer();
     }
 
     pub fn fuzz(self: *Self, fuzz_test: FuzzTest) anyerror!void {
         self.init_func = fuzz_test.init_func;
+        self.start_seed_func = fuzz_test.start_seed_func;
         self.op_table = fuzz_test.op_table;
         self.deinit_func = fuzz_test.deinit_func;
         self.name = fuzz_test.options.name;
         self.max_failures = fuzz_test.options.max_failures;
         self.min_ops_per_seed = fuzz_test.options.min_ops_per_seed;
         self.max_ops_per_seed = fuzz_test.options.max_ops_per_seed;
-        defer self.deinit_func(self.state_opq, self.alloc);
-        defer self.err_list.clearRetainingCapacity();
         self.next_sec = Time.MSecs.now();
         self.end_time = self.next_sec.add(self.duration.to_msecs());
         self.next_sec = self.next_sec.add(.new(1000));
-        _ = try self.console.write("\n");
+        self.seeds = 0;
+        self.ops = 0;
+        self.fail_count = 0;
+        if (self.init_func(&self.state_opq, self.alloc)) |err| return err;
+        defer self.deinit_func(self.state_opq, self.alloc);
         _ = try self.console.write(FUZZ_LINE_TEMPLATE);
         _ = try self.console.write("\x1b[1G");
         _ = try self.console.write(self.name);
@@ -227,6 +251,13 @@ pub const DiffFuzzer = struct {
             more = try self._run_seed(seed, false, 0);
             more = more and try self._check_time();
         }
+        if (self.fail_count == 0) {
+            try self._add_pass(self.name);
+            try self._print_success(self.name);
+        } else {
+            try self._add_fail(self.name, @errorName(self.err));
+            try self._print_failure(self.name);
+        }
     }
 
     fn _add_pass(self: *Self, name: []const u8) anyerror!void {
@@ -246,19 +277,36 @@ pub const DiffFuzzer = struct {
         _ = try self.console.write("\x1b[1G\x1b[32m┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈\x1b[0m");
         _ = try self.console.write("\x1b[1G\x1b[32m");
         _ = try self.console.write(name);
-        _ = try self.console.write("\x1b[0m\n");
+        _ = try self.console.write("\x1b[0m\x1b[105G");
+        var total = Utils.quick_dec(self.seeds);
+        _ = try self.console.write(total.bytes());
+        _ = try self.console.write("\x1b[117G");
+        total = Utils.quick_dec(self.ops);
+        _ = try self.console.write(total.bytes());
+        _ = try self.console.write("\n");
     }
 
     fn _print_failure(self: *Self, name: []const u8) anyerror!void {
         _ = try self.console.write("\x1b[1G\x1b[31m┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈\x1b[0m");
         _ = try self.console.write("\x1b[1G\x1b[31m");
         _ = try self.console.write(name);
-        _ = try self.console.write("\x1b[0m\n");
+        _ = try self.console.write("\x1b[0m\x1b[105G");
+        var total = Utils.quick_dec(self.seeds);
+        _ = try self.console.write(total.bytes());
+        _ = try self.console.write("\x1b[117G");
+        total = Utils.quick_dec(self.ops);
+        _ = try self.console.write(total.bytes());
+        _ = try self.console.write("\n");
     }
 
     pub fn print_header(self: *Self) anyerror!void {
         _ = try self.console.write("\x1b[?25l");
         _ = try self.console.write(FUZZ_BATCH_HEADER_);
+        _ = try self.console.write("\n");
+    }
+    pub fn print_interlude(self: *Self) anyerror!void {
+        _ = try self.console.write(FUZZ_BATCH_INTERLD);
+        _ = try self.console.write("\n");
     }
     pub fn print_footer(self: *Self) anyerror!void {
         _ = try self.console.write(FUZZ_BATCH_FOOTER_);
@@ -297,9 +345,10 @@ pub const DiffFuzzer = struct {
             _ = try self.console.write("\x1b[0m\n");
         }
         if (self.pass == self.total) {
-            _ = try self.console.write("\x1b[0;32mALL TESTS PASS!\x1b[0m");
+            _ = try self.console.write("\x1b[0;32mALL TESTS PASS!\x1b[0m\x1b[?25h\n");
+        } else {
+            _ = try self.console.write("\x1b[?25h");
         }
-        _ = try self.console.write("\x1b[?25h\n");
     }
 
     pub fn _check_time(self: *Self) anyerror!bool {
@@ -328,12 +377,6 @@ pub const DiffFuzzer = struct {
             self.next_sec = self.next_sec.add(.new(1000));
         }
         if (now.val >= self.end_time.val) {
-            if (self.fail_count > 0) {
-                try self._print_failure(self.name);
-                return false;
-            }
-            try self._add_pass(self.name);
-            try self._print_success(self.name);
             return false;
         }
         return true;
@@ -342,16 +385,18 @@ pub const DiffFuzzer = struct {
     fn _run_seed(self: *Self, seed: u64, comptime from_file: bool, file_min: u64) anyerror!bool {
         var seed_result: SeedResult = undefined;
         self.fuzz_seed.set_seed(seed);
+        self.seeds += 1;
         seed_result = run: {
             var random = self.fuzz_seed.prng.random();
             var result = SeedResult{};
-            result.err = self.init_func(random, self.state_opq, self.alloc);
+            result.err = self.start_seed_func(random, self.state_opq, self.alloc);
             if (result.err != null) {
                 break :run result;
             }
             const total_ops = @max(self.min_ops_per_seed, random.uintAtMost(u64, self.max_ops_per_seed), file_min);
             while (result.op_count < total_ops) {
                 result.op_count += 1;
+                self.ops += 1;
                 const op_idx = random.uintLessThan(usize, self.op_table.len);
                 result.err = self.op_table[op_idx](random, self.state_opq, self.alloc);
                 if (result.err != null) {
@@ -361,7 +406,7 @@ pub const DiffFuzzer = struct {
             break :run result;
         };
         if (seed_result.err) |err| {
-            try self.err_list.append(self.alloc, err);
+            self.err = err;
             self.fail_count += 1;
             if (from_file) {
                 if (seed_result.op_count > file_min) {
@@ -376,11 +421,7 @@ pub const DiffFuzzer = struct {
                 _ = try self.seeds_file.write(count_hex[0..16]);
                 _ = try self.seeds_file.write("\n");
             }
-            try self._add_fail(self.name, @errorName(err));
-            if (self.fail_count >= self.max_failures) {
-                try self._print_failure(self.name);
-                return false;
-            }
+            return false;
         }
         return true;
     }
@@ -404,3 +445,11 @@ pub fn discard_until_newline(file: File) anyerror!void {
     }
     return;
 }
+
+pub const OVERHEAD_TEST = FuzzTest{
+    .options = .{ .name = "FUZZ_OVERHEAD" },
+    .init_func = noop_init,
+    .deinit_func = noop_deinit,
+    .op_table = noop_table[0..1],
+    .start_seed_func = noop_start_seed,
+};

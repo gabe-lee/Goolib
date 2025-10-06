@@ -746,7 +746,7 @@ pub const QuickDecResult = struct {
     data: [20]u8 = @splat(' '),
     start: u8 = 20,
 
-    pub fn bytes(self: *QuickDecResult) []u8 {
+    pub fn bytes(self: *const QuickDecResult) []const u8 {
         return self.data[self.start..20];
     }
 };
@@ -780,9 +780,9 @@ pub fn quick_dec(val: anytype) QuickDecResult {
     }
     while (out.start > 0 and (uval > 0 or out.start >= 20)) {
         out.start -= 1;
-        const b = @as(u8, @intCast(val % 10));
+        const b = @as(u8, @intCast(uval % 10));
         uval = uval / 10;
-        out.data[out.start] = b;
+        out.data[out.start] = DEC[b];
     }
     return out;
 }
