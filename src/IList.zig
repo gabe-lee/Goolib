@@ -150,6 +150,14 @@ pub fn IList(comptime T: type) type {
             ///
             /// This allows some algorithms to use more efficient paths
             all_indexes_zero_to_len_valid: bool = true,
+            /// If set to `true`, calling `list.try_ensure_free_slots(count)` will not change the result
+            /// of `list.cap()`, but a `true` result still indicates that an append or insert is expected
+            /// to behave as expected.
+            ///
+            /// An example of this being true may be an interface for a `File` or slice `[]T`, where
+            /// there is no concept of allocated-but-unused memory, but can still be appended to
+            /// (with re-allocation)
+            ensure_free_doesnt_change_cap: bool = false,
             /// Should be an index that will ALWAYS result in `IList.idx_valid(always_invalid_idx) == false`
             ///
             /// Used for initialization of some data structures and algorithms
@@ -216,17 +224,21 @@ pub fn IList(comptime T: type) type {
             nth_prev_idx: *const fn (object: *anyopaque, this_idx: usize, n: usize) usize = _fn_self_idx_idx_panic("nth_prev_idx", usize),
             /// Return the current number of values in the slice/list
             ///
-            /// It is not guaranteed that all indexes less than `len` are valid for the slice
+            /// It is not guaranteed that all indexes less than `len` are valid for the list,
+            /// but it should be assumed that `list.idx_valid(list.nth_idx(len - 1)) == true`
             len: *const fn (object: *anyopaque) usize = _fn_self_panic("len", usize),
             /// Return the number of items between (and including) `first_idx` and `last_idx`
             ///
             /// `slice.range_len(slice.first_idx(), slice.last_idx())` MUST equal `slice.len()`
             range_len: *const fn (object: *anyopaque, range: Range) usize = _fn_self_range_panic("range_len", usize),
             /// Ensure at least `n` empty capacity spaces exist to add new items without reallocating
-            /// the memory or performing any other expensive reorganization procedure
+            /// the memory again or performing any other expensive reorganization procedure
             ///
             /// If free space cannot be ensured and attempting to add `count` more items
-            /// will definitely fail or cause undefined behaviour, `ok == false`
+            /// will definitely fail or cause undefined behaviour, `ok == false`. If free space
+            /// cannot be ensured, BUT attempting to add `count` more items should still pass,
+            /// such as an interface for a file that does not have any allocated-but-unused space,
+            /// this should still return `true`
             ///
             /// The supplied allocator should be the same one used when creating/allocating the
             /// original concrete implementation object's *memory*
@@ -366,14 +378,17 @@ pub fn IList(comptime T: type) type {
         pub const CompareFunc = fn (left_or_this: T, right_or_test: T) bool;
         pub const IIdxList = IList(usize, *usize, usize);
         pub const IListList = IList(ILIST, *ILIST, usize);
-        fn prefer_linear_ops(self: ILIST) bool {
-            return self.vtable.prefer_linear_ops();
+        pub fn prefer_linear_ops(self: ILIST) bool {
+            return self.vtable.prefer_linear_ops;
         }
-        fn consecutive_indexes_in_order(self: ILIST) bool {
-            return self.vtable.consecutive_indexes_in_order();
+        pub fn consecutive_indexes_in_order(self: ILIST) bool {
+            return self.vtable.consecutive_indexes_in_order;
         }
-        fn all_indexes_less_than_len_valid(self: ILIST) bool {
-            return self.vtable.all_indexes_zero_to_len_valid();
+        pub fn all_indexes_less_than_len_valid(self: ILIST) bool {
+            return self.vtable.all_indexes_zero_to_len_valid;
+        }
+        pub fn ensure_free_doesnt_change_cap(self: ILIST) bool {
+            return self.vtable.ensure_free_doesnt_change_cap;
         }
 
         /// Return `true` if the given index is a valid index for the list, `false` otherwise
@@ -423,8 +438,8 @@ pub fn IList(comptime T: type) type {
         }
         /// move the data from located between and including `first_idx` and `last_idx`,
         /// to the position `new_first_idx`, shifting the values in the way ether forward or backward
-        pub fn move_range(self: ILIST, first_idx_: usize, last_idx_: usize, new_first_idx: usize) void {
-            self.vtable.move_range(self.object, first_idx_, last_idx_, new_first_idx);
+        pub fn move_range(self: ILIST, range: Range, new_first_idx: usize) void {
+            self.vtable.move_range(self.object, range, new_first_idx);
         }
         /// move the data from located between and including `first_idx` and `last_idx`,
         /// to the position `new_first_idx`, shifting the values in the way ether forward or backward
@@ -502,11 +517,8 @@ pub fn IList(comptime T: type) type {
         ///
         /// If free space cannot be ensured and attempting to add `count` more items
         /// will definitely fail or cause undefined behaviour, `ok == false`
-        pub fn try_ensure_free_slots(self: ILIST, count: usize) ListError!void {
-            const ok = self.vtable.try_ensure_free_slots(self.object, count);
-            if (!ok) {
-                return ListError.failed_to_grow_list;
-            }
+        pub fn try_ensure_free_slots(self: ILIST, count: usize) bool {
+            return self.vtable.try_ensure_free_slots(self.object, count);
         }
         /// Insert `n` new slots directly before existing index, shifting all existing items
         /// at and after that index forward.

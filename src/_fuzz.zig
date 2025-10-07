@@ -12,10 +12,10 @@ const IList = Goolib.IList;
 const IListFuzzer = IList._Fuzzer;
 const IListFuzzerSliceAdapterU8Alloc = IList._Fuzzer.SLICE_ADAPTER_U8_ALLOC;
 pub fn main() anyerror!void {
-    var fuzzer = try Fuzz.DiffFuzzer.init(std.heap.smp_allocator, Time.Secs.new(@intCast(opts.time_opt)), &.{
+    var fuzzer = try Fuzz.DiffFuzzer.init(std.heap.smp_allocator, Fuzz.MAX_THREAD_COUNT, &.{
         // Fuzz.OVERHEAD_TEST,
         IListFuzzerSliceAdapterU8Alloc,
     });
     defer fuzzer.deinit();
-    try fuzzer.fuzz_all();
+    try fuzzer.fuzz_all(Time.Secs.new(@intCast(opts.time_opt)));
 }

@@ -21,6 +21,7 @@
 //    misrepresented as being the original software.
 // 3. This notice may not be removed or altered from any source distribution.
 const std = @import("std");
+const build = @import("builtin");
 const math = std.math;
 const Root = @import("./_root.zig");
 const SliceAdapter = Root.IList_SliceAdapter;
@@ -41,6 +42,11 @@ const Random = std.Random;
 const ErrList = std.ArrayList(anyerror);
 const TestList = std.ArrayList(FuzzTest);
 const StrList = std.ArrayList([]const u8);
+const LineList = std.ArrayList(SeedLine);
+const FailList = std.ArrayList(SeedFailure);
+const U8List = std.ArrayList(u8);
+const Atomic = std.atomic;
+const Thread = std.Thread;
 
 pub var FUZZ_CACHE_DIR: []const u8 = ".zig-fuzz-goolib";
 const EXT = ".seeds";
@@ -52,7 +58,9 @@ const FUZZ_BATCH_INTERLD = "                                   TIME:    15s  30s
 const FUZZ_LINE_TEMPLATE = "┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┨     :    :    :    :    :    :    :    :    :    :    :    : ┃";
 const FUZZ_BATCH_FOOTER_ = "~~~~~~FUZZ TESTS COMPLETE~~~~~~~   TIME:    15s  30s  45s  60s  75s  90s  105s 120s 135s 150s 165s 180s SEEDS       OPS";
 
-const MAX_THREAD_COUNT = 8;
+pub const MAX_THREAD_COUNT = 8;
+
+const Atom = Atomic.Value(usize);
 
 pub const FuzzSeed = struct {
     seed: u64 = 0,
@@ -74,11 +82,20 @@ pub const FuzzSeed = struct {
         self.seed = seed;
         self.prng = Prng.init(self.seed);
     }
+    pub fn rand_seed_domain(self: *FuzzSeed, thread_num: u64, thread_total: u64) void {
+        const PER_THREAD = math.maxInt(u64) / thread_total;
+        std.posix.getrandom(std.mem.asBytes(&self.seed)) catch {
+            const nseed: u128 = @bitCast(std.time.nanoTimestamp());
+            self.seed = @as(u64, @intCast(nseed & 0xFFFFFFFFFFFFFFFF));
+            self.seed = self.seed % PER_THREAD;
+            self.seed = self.seed + (thread_num * PER_THREAD);
+        };
+        self.prng = Prng.init(self.seed);
+    }
 };
 
 pub const FuzzOptions = struct {
     name: []const u8 = "<none>",
-    max_failures: u64 = 1,
     min_ops_per_seed: u64 = 10,
     max_ops_per_seed: u64 = 100,
 };
@@ -86,13 +103,15 @@ pub const FuzzOptions = struct {
 pub const FuzzTest = struct {
     options: FuzzOptions,
     /// Run once at the beginning of every fuzz test, usually used to instantiate the objects to be tested
-    init_func: *const fn (state_opq: **anyopaque, alloc: Allocator) ?anyerror = noop_init,
+    /// on the stack/heap using the provided allocator
+    init_func: *const fn (state_opq: **anyopaque, alloc: Allocator) anyerror!void = noop_init,
     /// Run once at the beginning of every seed, usually used to reset the test objects and fill them with new values
     /// as a starting point for the seed
     start_seed_func: *const fn (rand: Random, state_opq: *anyopaque, alloc: Allocator) ?anyerror = noop_start_seed,
     /// A table of operations to randomly select to perform on the test objects
     op_table: []const *const fn (rand: Random, state_opq: *anyopaque, alloc: Allocator) ?anyerror = noop_table[0..0],
-    /// Run once at the end of every fuzz test, used to deallocate/deinit any resources created during the fuzz test
+    /// Run once at the end of every fuzz test, used to deallocate/deinit any resources created during the fuzz test,
+    /// including those created during the init function
     deinit_func: *const fn (state_opq: *anyopaque, alloc: Allocator) void = noop_deinit,
 };
 
@@ -103,10 +122,9 @@ fn noop_start_seed(rand: Random, state_opq: *anyopaque, alloc: Allocator) ?anyer
     return null;
 }
 
-fn noop_init(state_opq: **anyopaque, alloc: Allocator) ?anyerror {
+fn noop_init(state_opq: **anyopaque, alloc: Allocator) anyerror!void {
     _ = state_opq;
     _ = alloc;
-    return null;
 }
 
 fn noop_deinit(state_opq: *anyopaque, alloc: Allocator) void {
@@ -128,61 +146,82 @@ fn fail_op(rand: Random, state_opq: *anyopaque, alloc: Allocator) ?anyerror {
     return error{debug_test_failure}.debug_test_failure;
 }
 
+pub const SeedFailure = struct {
+    seed: u64 = 0,
+    count: u64 = 0,
+    err: anyerror = error{no_error}.no_error,
+};
+
+const SeedLine = struct {
+    line: []const u8,
+    seed: u64,
+    count: u64,
+    pos: u64,
+};
+
 const noop_table: [1]*const fn (rand: Random, state_opq: *anyopaque, alloc: Allocator) ?anyerror = .{noop_op};
 
 pub const DiffFuzzer = struct {
     const Self = @This();
-    state_opq: *anyopaque = undefined,
-    fuzz_seed: FuzzSeed = undefined,
-    fail_count: u64 = 0,
+    thread_count: u64 = undefined,
+    states: [MAX_THREAD_COUNT]*anyopaque = undefined,
+    seeds: [MAX_THREAD_COUNT]FuzzSeed = undefined,
+    seed_fails: [MAX_THREAD_COUNT]?SeedFailure = undefined,
+    total_ops: [MAX_THREAD_COUNT]u64 = undefined,
+    total_seeds: [MAX_THREAD_COUNT]u64 = undefined,
+    all_total_ops: u64 = 0,
+    all_total_seeds: u64 = 0,
     seeds_file: File = undefined,
-    err: anyerror = undefined,
     test_list: []const FuzzTest = undefined,
     next_sec: Time.MSecs = undefined,
     end_time: Time.MSecs = undefined,
     block_num: u8 = 0,
     first_block: bool = true,
-    is_init: bool = false,
     name: []const u8 = "<none>",
     duration: Secs = Secs.new(15),
-    max_failures: u64 = 5,
     one_seed: ?u64 = null,
+    one_seed_cnt: ?u64 = null,
+    one_test: ?[]const u8 = null,
     min_ops_per_seed: u64 = 10,
     max_ops_per_seed: u64 = 100,
-    seeds: u64 = 0,
-    ops: u64 = 0,
-    total: u64 = 0,
-    pass: u64 = 0,
-    fail: u64 = 0,
+    total_fuzzes: u64 = 0,
+    total_pass: u64 = 0,
+    total_fail: u64 = 0,
     alloc: Allocator,
-    pass_list: StrList,
     fail_list: StrList,
-    fail_reason: StrList,
+    fail_details: FailList,
     console: File,
-    init_func: *const fn (state_opq: **anyopaque, alloc: Allocator) ?anyerror = noop_init,
+    stop_fuzz: Atom = Atom.init(0),
+    threads_done: Atom = Atom.init(0),
+    seed_file_string: U8List,
+    seed_file_list: LineList,
+    init_func: *const fn (state_opq: **anyopaque, alloc: Allocator) anyerror!void = noop_init,
     start_seed_func: *const fn (rand: Random, state_opq: *anyopaque, alloc: Allocator) ?anyerror = noop_start_seed,
     op_table: []const *const fn (rand: Random, state_opq: *anyopaque, alloc: Allocator) ?anyerror = noop_table[0..0],
     deinit_func: *const fn (state_opq: *anyopaque, alloc: Allocator) void = noop_deinit,
 
-    pub fn init(alloc: Allocator, duration: Time.Secs, test_list: []const FuzzTest) anyerror!Self {
+    pub fn init(alloc: Allocator, thread_count: u64, test_list: []const FuzzTest) anyerror!Self {
         return Self{
             .alloc = alloc,
-            .pass_list = try StrList.initCapacity(alloc, test_list.len),
+            .thread_count = @max(@min(thread_count, Thread.getCpuCount() catch 1), 1),
             .fail_list = try StrList.initCapacity(alloc, test_list.len),
-            .fail_reason = try StrList.initCapacity(alloc, test_list.len),
+            .fail_details = try FailList.initCapacity(alloc, test_list.len),
+            .seed_file_string = try U8List.initCapacity(alloc, 512),
+            .seed_file_list = try LineList.initCapacity(alloc, 10),
             .console = std.fs.File.stdout(),
             .test_list = test_list,
-            .duration = duration,
         };
     }
 
     pub fn deinit(self: *Self) void {
-        self.pass_list.deinit(self.alloc);
         self.fail_list.deinit(self.alloc);
-        self.fail_reason.deinit(self.alloc);
+        self.fail_details.deinit(self.alloc);
+        self.seed_file_list.deinit(self.alloc);
+        self.seed_file_string.deinit(self.alloc);
     }
 
-    pub fn fuzz_all(self: *Self) anyerror!void {
+    pub fn fuzz_all(self: *Self, duration: Time.Secs) anyerror!void {
+        self.duration = duration;
         try self.print_header();
         var i: usize = 0;
         for (self.test_list) |t| {
@@ -196,23 +235,42 @@ pub const DiffFuzzer = struct {
         try self.print_footer();
     }
 
+    fn do_inits(self: *Self) anyerror!void {
+        var i: u64 = 0;
+        while (i < self.thread_count) {
+            try self.init_func(&self.states[i], self.alloc);
+            i += 1;
+        }
+    }
+    fn do_deinits(self: *Self) void {
+        var i: u64 = 0;
+        while (i < self.thread_count) {
+            self.deinit_func(self.states[i], self.alloc);
+            i += 1;
+        }
+    }
+
     pub fn fuzz(self: *Self, fuzz_test: FuzzTest) anyerror!void {
         self.init_func = fuzz_test.init_func;
         self.start_seed_func = fuzz_test.start_seed_func;
         self.op_table = fuzz_test.op_table;
         self.deinit_func = fuzz_test.deinit_func;
         self.name = fuzz_test.options.name;
-        self.max_failures = fuzz_test.options.max_failures;
         self.min_ops_per_seed = fuzz_test.options.min_ops_per_seed;
         self.max_ops_per_seed = fuzz_test.options.max_ops_per_seed;
         self.next_sec = Time.MSecs.now();
         self.end_time = self.next_sec.add(self.duration.to_msecs());
         self.next_sec = self.next_sec.add(.new(1000));
-        self.seeds = 0;
-        self.ops = 0;
-        self.fail_count = 0;
-        if (self.init_func(&self.state_opq, self.alloc)) |err| return err;
-        defer self.deinit_func(self.state_opq, self.alloc);
+        self.total_seeds = @splat(0);
+        self.total_ops = @splat(0);
+        self.seed_fails = @splat(null);
+        self.threads_done = Atom.init(0);
+        self.stop_fuzz = Atom.init(0);
+        self.all_total_seeds = 0;
+        self.all_total_ops = 0;
+        var i: u64 = 0;
+        try self.do_inits();
+        defer self.do_deinits();
         _ = try self.console.write(FUZZ_LINE_TEMPLATE);
         _ = try self.console.write("\x1b[1G");
         _ = try self.console.write(self.name);
@@ -230,47 +288,114 @@ pub const DiffFuzzer = struct {
             .read = true,
         });
         defer self.seeds_file.close();
-        var line_buf: [32]u8 = undefined;
-        var line_bytes = try self.seeds_file.read(line_buf[0..32]);
-        var seed: u64 = undefined;
-        var count: u64 = undefined;
-        var more: bool = true;
+        self.seed_file_string.clearRetainingCapacity();
+        const seeds_file_stat = try self.seeds_file.stat();
+        try self.seed_file_string.ensureTotalCapacity(self.alloc, @intCast(seeds_file_stat.size));
+        self.seed_file_string.items.len = seeds_file_stat.size;
+        _ = try self.seeds_file.readAll(self.seed_file_string.items);
+        self.seed_file_list.clearRetainingCapacity();
+        var seed_iter = std.mem.splitScalar(u8, self.seed_file_string.items, '\n');
+        var pos: usize = 0;
+        while (seed_iter.next()) |seedline| {
+            if (seedline.len < 32) {
+                pos += 1 + seedline.len;
+                continue;
+            }
+            const line = SeedLine{
+                .line = seedline,
+                .seed = Utils.quick_unhex(seedline[0..16], u64),
+                .count = Utils.quick_unhex(seedline[16..32], u64),
+                .pos = pos,
+            };
+            try self.seed_file_list.append(self.alloc, line);
+            pos += 1 + seedline.len;
+        }
         self.first_block = true;
         self.block_num = 0;
-        while (more and line_bytes == 32) {
-            seed = Utils.quick_unhex(line_buf[0..16], u64);
-            count = Utils.quick_unhex(line_buf[16..32], u64);
-            more = try self._run_seed(seed, true, count);
-            try discard_until_newline(self.seeds_file);
-            line_bytes = try self.seeds_file.read(line_buf[0..32]);
-            more = more and try self._check_time();
+        i = 1;
+        while (i < self.thread_count) {
+            _ = try Thread.spawn(.{ .allocator = std.heap.smp_allocator }, sub_fuzz, .{ self, i, self.states[i], &self.seeds[i], &self.total_seeds[i], &self.total_ops[i], &self.seed_fails[i], false });
+            i += 1;
         }
-        while (more) {
-            self.fuzz_seed.rand_seed();
-            seed = self.fuzz_seed.seed;
-            more = try self._run_seed(seed, false, 0);
-            more = more and try self._check_time();
+        try self.sub_fuzz(0, self.states[0], &self.seeds[0], &self.total_seeds[0], &self.total_ops[0], &self.seed_fails[0], true);
+        var failure: ?SeedFailure = null;
+        i = 0;
+        while (i < self.thread_count) {
+            self.all_total_seeds += self.total_seeds[i];
+            self.all_total_ops += self.total_ops[i];
+            if (self.seed_fails[i]) |this_fail| {
+                var was_existing: bool = false;
+                for (self.seed_file_list.items) |existing_fail| {
+                    if (this_fail.seed == existing_fail.seed and this_fail.count > existing_fail.count) {
+                        try self.seeds_file.seekTo(existing_fail.pos + 16);
+                        _ = try self.seeds_file.write(Utils.quick_hex(this_fail.count)[0..]);
+                        was_existing = true;
+                        break;
+                    }
+                }
+                if (!was_existing) {
+                    try self.seeds_file.seekFromEnd(0);
+                    _ = try self.seeds_file.write("\n");
+                    _ = try self.seeds_file.write(Utils.quick_hex(this_fail.seed)[0..]);
+                    _ = try self.seeds_file.write(Utils.quick_hex(this_fail.count)[0..]);
+                }
+                if (failure == null) {
+                    failure = this_fail;
+                }
+            }
+            i += 1;
         }
-        if (self.fail_count == 0) {
-            try self._add_pass(self.name);
-            try self._print_success(self.name);
-        } else {
-            try self._add_fail(self.name, @errorName(self.err));
+        if (failure) |f| {
+            try self._add_fail(self.name, f);
             try self._print_failure(self.name);
+        } else {
+            try self._add_pass();
+            try self._print_success(self.name);
         }
     }
 
-    fn _add_pass(self: *Self, name: []const u8) anyerror!void {
-        try self.pass_list.append(self.alloc, name);
-        self.total += 1;
-        self.pass += 1;
+    fn sub_fuzz(self: *Self, thread_num: u64, state: *anyopaque, seed: *FuzzSeed, total_seeds: *u64, total_ops: *u64, fail: *?SeedFailure, comptime primary: bool) !void {
+        var more: bool = true;
+        if (primary) {
+            var seed_line: SeedLine = undefined;
+            var i: usize = 0;
+            while (more and i < self.seed_file_list.items.len) {
+                seed_line = self.seed_file_list.items[i];
+                i += 1;
+                more = self._run_seed(thread_num, state, seed, total_seeds, total_ops, fail, true, seed_line.seed, seed_line.count);
+                more = more and try self._check_time() and self.stop_fuzz.load(.monotonic) == 0;
+            }
+            while (more) {
+                more = self._run_seed(thread_num, state, seed, total_seeds, total_ops, fail, false, 0, 0);
+                more = more and try self._check_time() and self.stop_fuzz.load(.monotonic) == 0;
+            }
+            self.stop_fuzz.store(1, .monotonic);
+            _ = self.threads_done.fetchAdd(1, .monotonic);
+            var all_done: bool = false;
+            while (!all_done) {
+                all_done = self.threads_done.load(.monotonic) == self.thread_count;
+                Thread.sleep(std.time.ns_per_ms * 100);
+            }
+        } else {
+            while (more) {
+                more = self._run_seed(thread_num, state, seed, total_seeds, total_ops, fail, false, 0, 0);
+                more = more and self.stop_fuzz.load(.monotonic) == 0;
+            }
+            self.stop_fuzz.store(1, .monotonic);
+            _ = self.threads_done.fetchAdd(1, .monotonic);
+        }
     }
 
-    fn _add_fail(self: *Self, name: []const u8, reason: []const u8) anyerror!void {
+    fn _add_pass(self: *Self) anyerror!void {
+        self.total_fuzzes += 1;
+        self.total_pass += 1;
+    }
+
+    fn _add_fail(self: *Self, name: []const u8, failure: SeedFailure) anyerror!void {
         try self.fail_list.append(self.alloc, name);
-        try self.fail_reason.append(self.alloc, reason);
-        self.total += 1;
-        self.fail += 1;
+        try self.fail_details.append(self.alloc, failure);
+        self.total_fuzzes += 1;
+        self.total_fail += 1;
     }
 
     fn _print_success(self: *Self, name: []const u8) anyerror!void {
@@ -278,10 +403,10 @@ pub const DiffFuzzer = struct {
         _ = try self.console.write("\x1b[1G\x1b[32m");
         _ = try self.console.write(name);
         _ = try self.console.write("\x1b[0m\x1b[105G");
-        var total = Utils.quick_dec(self.seeds);
+        var total = Utils.quick_dec(self.all_total_seeds);
         _ = try self.console.write(total.bytes());
         _ = try self.console.write("\x1b[117G");
-        total = Utils.quick_dec(self.ops);
+        total = Utils.quick_dec(self.all_total_ops);
         _ = try self.console.write(total.bytes());
         _ = try self.console.write("\n");
     }
@@ -291,10 +416,10 @@ pub const DiffFuzzer = struct {
         _ = try self.console.write("\x1b[1G\x1b[31m");
         _ = try self.console.write(name);
         _ = try self.console.write("\x1b[0m\x1b[105G");
-        var total = Utils.quick_dec(self.seeds);
+        var total = Utils.quick_dec(self.all_total_seeds);
         _ = try self.console.write(total.bytes());
         _ = try self.console.write("\x1b[117G");
-        total = Utils.quick_dec(self.ops);
+        total = Utils.quick_dec(self.all_total_ops);
         _ = try self.console.write(total.bytes());
         _ = try self.console.write("\n");
     }
@@ -312,39 +437,41 @@ pub const DiffFuzzer = struct {
         _ = try self.console.write(FUZZ_BATCH_FOOTER_);
         _ = try self.console.write("\n");
         var num: Utils.QuickDecResult = undefined;
-        if (self.pass > 0) {
+        if (self.total_pass > 0) {
             _ = try self.console.write("\x1b[32mSUCCESS: ");
-            num = Utils.quick_dec(self.pass);
+            num = Utils.quick_dec(self.total_pass);
             _ = try self.console.write(num.bytes());
             _ = try self.console.write(" / ");
-            num = Utils.quick_dec(self.total);
+            num = Utils.quick_dec(self.total_fuzzes);
             _ = try self.console.write(num.bytes());
-            for (self.pass_list.items) |pass_name| {
-                _ = try self.console.write("\n  ✓ ");
-                _ = try self.console.write(pass_name);
-            }
             _ = try self.console.write("\x1b[0m\n");
         }
-        if (self.fail > 0) {
+        if (self.total_fail > 0) {
             _ = try self.console.write("\x1b[31mFAILURE: ");
-            num = Utils.quick_dec(self.fail);
+            num = Utils.quick_dec(self.total_fail);
             _ = try self.console.write(num.bytes());
             _ = try self.console.write(" / ");
-            num = Utils.quick_dec(self.total);
+            num = Utils.quick_dec(self.total_fuzzes);
             _ = try self.console.write(num.bytes());
             var i: usize = 0;
             while (i < self.fail_list.items.len) {
                 const fail_name = self.fail_list.items[i];
-                const fail_reason = self.fail_reason.items[i];
+                const details = self.fail_details.items[i];
                 _ = try self.console.write("\n  X ");
                 _ = try self.console.write(fail_name);
+                _ = try self.console.write(" seed=");
+                const numhex = Utils.quick_hex(details.seed);
+                _ = try self.console.write(numhex[0..]);
+                _ = try self.console.write(" op_num=");
+                num = Utils.quick_dec(details.count);
+                _ = try self.console.write(num.bytes());
                 _ = try self.console.write(": ");
-                _ = try self.console.write(fail_reason);
+                _ = try self.console.write(@errorName(details.err));
                 i += 1;
             }
             _ = try self.console.write("\x1b[0m\n");
         }
-        if (self.pass == self.total) {
+        if (self.total_pass == self.total_fuzzes) {
             _ = try self.console.write("\x1b[0;32mALL TESTS PASS!\x1b[0m\x1b[?25h\n");
         } else {
             _ = try self.console.write("\x1b[?25h");
@@ -382,45 +509,38 @@ pub const DiffFuzzer = struct {
         return true;
     }
 
-    fn _run_seed(self: *Self, seed: u64, comptime from_file: bool, file_min: u64) anyerror!bool {
-        var seed_result: SeedResult = undefined;
-        self.fuzz_seed.set_seed(seed);
-        self.seeds += 1;
-        seed_result = run: {
-            var random = self.fuzz_seed.prng.random();
-            var result = SeedResult{};
-            result.err = self.start_seed_func(random, self.state_opq, self.alloc);
-            if (result.err != null) {
-                break :run result;
+    fn _run_seed(self: *Self, thread_num: u64, state: *anyopaque, seed: *FuzzSeed, total_seeds: *u64, total_ops: *u64, fail: *?SeedFailure, comptime from_file: bool, file_seed: u64, file_min: u64) bool {
+        if (from_file) {
+            seed.set_seed(file_seed);
+        } else {
+            seed.rand_seed_domain(thread_num, self.thread_count);
+        }
+        total_seeds.* = total_seeds.* + 1;
+        var op_count: u64 = 0;
+        const err: ?anyerror = run: {
+            var random = seed.prng.random();
+            var e = self.start_seed_func(random, state, self.alloc);
+            if (e != null) {
+                break :run e;
             }
-            const total_ops = @max(self.min_ops_per_seed, random.uintAtMost(u64, self.max_ops_per_seed), file_min);
-            while (result.op_count < total_ops) {
-                result.op_count += 1;
-                self.ops += 1;
+            const max_ops = @max(1, self.min_ops_per_seed, random.uintAtMost(u64, self.max_ops_per_seed), file_min);
+            while (op_count < max_ops) {
+                op_count += 1;
+                total_ops.* += 1;
                 const op_idx = random.uintLessThan(usize, self.op_table.len);
-                result.err = self.op_table[op_idx](random, self.state_opq, self.alloc);
-                if (result.err != null) {
-                    break :run result;
+                e = self.op_table[op_idx](random, state, self.alloc);
+                if (e != null) {
+                    break :run e;
                 }
             }
-            break :run result;
+            break :run null;
         };
-        if (seed_result.err) |err| {
-            self.err = err;
-            self.fail_count += 1;
-            if (from_file) {
-                if (seed_result.op_count > file_min) {
-                    const new_count = Utils.quick_hex(seed_result.op_count);
-                    try self.seeds_file.seekBy(-16);
-                    _ = try self.seeds_file.write(new_count[0..16]);
-                }
-            } else {
-                const seed_hex = Utils.quick_hex(seed);
-                const count_hex = Utils.quick_hex(seed_result.op_count);
-                _ = try self.seeds_file.write(seed_hex[0..16]);
-                _ = try self.seeds_file.write(count_hex[0..16]);
-                _ = try self.seeds_file.write("\n");
-            }
+        if (err) |e| {
+            fail.* = SeedFailure{
+                .seed = seed.seed,
+                .count = op_count,
+                .err = e,
+            };
             return false;
         }
         return true;
@@ -432,19 +552,19 @@ pub const SeedResult = struct {
     err: ?anyerror = null,
 };
 
-pub fn discard_until_newline(file: File) anyerror!void {
-    var b: [1]u8 = .{1};
-    while (b[0] != '\n' and b[0] != '\r') {
-        const n = try file.read(b[0..1]);
-        if (n == 0) {
-            return;
-        }
-        if (b[0] == '\r') {
-            _ = try file.read(b[0..1]);
-        }
-    }
-    return;
-}
+// pub fn discard_until_newline(file: File) anyerror!void {
+//     var b: [1]u8 = .{1};
+//     while (b[0] != '\n' and b[0] != '\r') {
+//         const n = try file.read(b[0..1]);
+//         if (n == 0) {
+//             return;
+//         }
+//         if (b[0] == '\r') {
+//             _ = try file.read(b[0..1]);
+//         }
+//     }
+//     return;
+// }
 
 pub const OVERHEAD_TEST = FuzzTest{
     .options = .{ .name = "FUZZ_OVERHEAD" },

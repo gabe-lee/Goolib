@@ -281,6 +281,9 @@ pub inline fn type_has_decl_with_any_float_type(comptime T: type, comptime decl:
 pub inline fn type_is_pointer_or_slice(comptime T: type) bool {
     return @typeInfo(T) == .pointer;
 }
+pub inline fn type_is_slice(comptime T: type) bool {
+    return @typeInfo(T) == .pointer and @typeInfo(T).pointer.size == .slice;
+}
 pub inline fn pointer_is_slice(comptime T: type) bool {
     return @typeInfo(T).pointer.size == .slice;
 }

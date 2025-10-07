@@ -6,6 +6,7 @@ pub fn build(b: *std.Build) void {
     const optimize = b.standardOptimizeOption(.{});
 
     // OPTIONS
+    const no_sdl = b.option(bool, "no-sdl", "do not include SDL3 when building") orelse false;
 
     const preferred_linkage = b.option(
         std.builtin.LinkMode,
@@ -51,9 +52,10 @@ pub fn build(b: *std.Build) void {
     const options = b.addOptions();
     options.addOption(bool, "SDL_USER_MAIN", sdl_user_handles_main);
     options.addOption(bool, "SDL_USER_CALLBACKS", sdl_user_provides_callbacks);
+    options.addOption(bool, "NO_SDL", no_sdl);
 
     //DEPENDENCIES
-
+    if (!no_sdl) {}
     const sdl_dep = b.dependency("sdl", .{
         .target = target,
         .optimize = optimize,
@@ -75,7 +77,9 @@ pub fn build(b: *std.Build) void {
         .pic = pos_independant_code,
         .strip = strip_debug,
     });
-    lib.linkLibrary(sdl_lib);
+    if (!no_sdl) {
+        lib.linkLibrary(sdl_lib);
+    }
 
     const lib_tests = b.addTest(.{
         .root_module = lib,
@@ -130,8 +134,8 @@ pub fn build(b: *std.Build) void {
     run_breakout_cmd.dependOn(&run_breakout.step);
 
     // FUZZ TESTS
-    const seed_opt = b.option([]const u8, "seed", "provide a specific seed+count when running the library fuzz tests. This should be 32 bytes of hexidecimal chars.") orelse "";
-    const time_opt = b.option(u64, "secs", "provide a specific duration for each fuzz test, in seconds. Defaults to 15 seconds.") orelse 15;
+    const seed_opt = b.option([]const u8, "fuzz-seed", "provide a specific seed+count when running the library fuzz tests. This should be 32 bytes of hexidecimal chars.") orelse "";
+    const time_opt = b.option(u64, "fuzz-secs", "provide a specific duration for each fuzz test, in seconds. Defaults to 15 seconds.") orelse 15;
     const fuzztest_mod = b.addModule("fuzztest", .{
         .optimize = optimize,
         .target = target,

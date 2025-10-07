@@ -34,7 +34,6 @@ const u_secure_memset_const = Utils.secure_memset_const;
 const u_secure_zero = Utils.secure_zero;
 const u_secure_memset_undefined = Utils.secure_memset_undefined;
 const assert_with_reason = Utils.assert_with_reason;
-const comptime_assert_with_reason = Utils.comptime_assert_with_reason;
 const InsertionSort = Root.InsertionSort;
 const BinarySearch = Root.BinarySearch;
 

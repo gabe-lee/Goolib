@@ -23,6 +23,7 @@
 
 const std = @import("std");
 const build = @import("builtin");
+const config = @import("config");
 
 pub const VERSION = "0.3.0";
 pub const NAME = "Goolib";
@@ -65,7 +66,7 @@ pub const Quicksort = @import("./Quicksort.zig");
 pub const Reader = @import("./Reader.zig");
 pub const Rect2 = @import("./Rect2.zig");
 pub const Result = @import("./Result.zig");
-pub const SDL3 = @import("./SDL3.zig");
+pub const SDL3 = if (!config.NO_SDL) @import("./SDL3.zig") else struct {};
 // pub const StaticAllocVectorizedStructOfArrays = @import("./StaticAllocVectorizedStructOfArrays.zig");
 // pub const Template = @import("./Template.zig");
 pub const Testing = @import("./Testing.zig");
@@ -117,7 +118,7 @@ comptime {
         _ = @import("./Reader.zig");
         _ = @import("./Rect2.zig");
         _ = @import("./Result.zig");
-        _ = @import("./SDL3.zig");
+        _ = if (!config.NO_SDL) @import("./SDL3.zig") else struct {}{};
         // _ = @import("./StaticAllocVectorizedStructOfArrays.zig");
         // _ = @import("./Template.zig");
         _ = @import("./Testing.zig");

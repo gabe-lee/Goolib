@@ -69,6 +69,7 @@ pub fn SliceAdapter(comptime T: type) type {
             .all_indexes_zero_to_len_valid = true,
             .consecutive_indexes_in_order = true,
             .prefer_linear_ops = false,
+            .ensure_free_doesnt_change_cap = true,
             .always_invalid_idx = math.maxInt(usize),
             .idx_valid = impl_idx_valid,
             .range_valid = impl_range_valid,
@@ -105,7 +106,7 @@ pub fn SliceAdapter(comptime T: type) type {
         }
         fn impl_split_range(object: *anyopaque, range: IList.Range) usize {
             _ = object;
-            return ((range.last_idx - range.first_idx) >> 1) + range.last_idx;
+            return ((range.last_idx - range.first_idx) >> 1) + range.first_idx;
         }
         fn impl_get(object: *anyopaque, idx: usize) T {
             const self: *AdapterWithAlloc = @ptrCast(@alignCast(object));
@@ -121,11 +122,11 @@ pub fn SliceAdapter(comptime T: type) type {
         }
         fn impl_move(object: *anyopaque, old_idx: usize, new_idx: usize) void {
             const self: *AdapterWithAlloc = @ptrCast(@alignCast(object));
-            Utils.slice_move_one(T, self.slice, old_idx, new_idx);
+            Utils.slice_move_one(self.slice, old_idx, new_idx);
         }
         fn impl_move_range(object: *anyopaque, range: IList.Range, new_first_idx: usize) void {
             const self: *AdapterWithAlloc = @ptrCast(@alignCast(object));
-            Utils.slice_move_many(T, self.slice, range.first_idx, range.last_idx, new_first_idx);
+            Utils.slice_move_many(self.slice, range.first_idx, range.last_idx, new_first_idx);
         }
         fn impl_first(object: *anyopaque) usize {
             _ = object;
@@ -169,16 +170,18 @@ pub fn SliceAdapter(comptime T: type) type {
             const new_len = self.slice.len + count;
             const remaped_slice = self.alloc.remap(self.slice, new_len);
             const start = self.slice.len;
-            const end = new_len - 1;
+            const end = new_len;
             if (remaped_slice) |reslice| {
                 self.slice = reslice;
             } else {
                 const new_alloc = self.alloc.alloc(T, new_len) catch {
                     Assert.assert_with_reason(false, @src(), "failed to allocate new memory", .{});
                 };
+                @memcpy(new_alloc[0..self.slice.len], self.slice[0..]);
+                self.alloc.free(self.slice);
                 self.slice = new_alloc;
             }
-            return IList.Range.new_range(start, end);
+            return IList.Range.new_range(start, end - 1);
         }
         fn impl_insert(object: *anyopaque, idx: usize, count: usize) IList.Range {
             const self: *AdapterWithAlloc = @ptrCast(@alignCast(object));
@@ -189,13 +192,7 @@ pub fn SliceAdapter(comptime T: type) type {
             const end = idx + count;
             if (remaped_slice) |reslice| {
                 self.slice = reslice;
-                var ridx = old_len - 1;
-                var widx = self.slice.len - 1;
-                while (widx >= end) {
-                    self.slice[widx] = self.slice[ridx];
-                    ridx -= 1;
-                    widx -= 1;
-                }
+                std.mem.copyBackwards(T, self.slice[idx + count .. new_len], self.slice[idx..old_len]);
             } else {
                 const new_slice = self.alloc.alloc(T, new_len) catch {
                     Assert.assert_with_reason(false, @src(), "failed to allocate new memory", .{});
@@ -209,13 +206,7 @@ pub fn SliceAdapter(comptime T: type) type {
         }
         fn impl_delete(object: *anyopaque, range: IList.Range) void {
             const self: *AdapterWithAlloc = @ptrCast(@alignCast(object));
-            var widx = range.first_idx;
-            var ridx = range.last_idx + 1;
-            while (ridx < self.slice.len) {
-                self.slice[widx] = self.slice[ridx];
-                widx += 1;
-                ridx += 1;
-            }
+            std.mem.copyForwards(T, self.slice[range.first_idx..], self.slice[range.last_idx + 1 ..]);
             const rem_count = (range.last_idx - range.first_idx) + 1;
             const new_len = self.slice.len - rem_count;
             if (self.alloc.remap(self.slice, new_len)) |reslice| {

@@ -618,7 +618,9 @@ pub fn bools_to_switchable_integer(comptime count: comptime_int, bools: [count]b
     return result;
 }
 
-pub fn slice_move_one(comptime T: type, slice: []T, old_idx: usize, new_idx: usize) void {
+pub fn slice_move_one(slice: anytype, old_idx: usize, new_idx: usize) void {
+    Assert.assert_with_reason(Types.type_is_slice(@TypeOf(slice)), @src(), "type of `slice` was not a slice type, got {s}", .{@typeName(@TypeOf(slice))});
+    const T = @typeInfo(@TypeOf(slice)).pointer.child;
     var widx: isize = @intCast(old_idx);
     const step: isize = if (new_idx > old_idx) 1 else -1;
     var ridx: isize = widx + step;
@@ -631,7 +633,9 @@ pub fn slice_move_one(comptime T: type, slice: []T, old_idx: usize, new_idx: usi
     slice[@intCast(widx)] = val;
 }
 
-pub fn slice_move_many(comptime T: type, slice: []T, old_first: usize, old_last_inclusive: usize, new_first: usize) void {
+pub fn slice_move_many(slice: anytype, old_first: usize, old_last_inclusive: usize, new_first: usize) void {
+    Assert.assert_with_reason(Types.type_is_slice(@TypeOf(slice)), @src(), "type of `slice` was not a slice type, got {s}", .{@typeName(@TypeOf(slice))});
+    const T = @typeInfo(@TypeOf(slice)).pointer.child;
     Assert.assert_with_reason(old_first <= old_last_inclusive, @src(), "`old_first` MUST be <= `old_last_inclusive`, got ({d}, {d})", .{ old_first, old_last_inclusive });
     const len_a = (old_last_inclusive - old_first) + 1;
     const slice_a = slice[old_first .. old_first + len_a];
@@ -757,7 +761,7 @@ pub fn quick_dec(val: anytype) QuickDecResult {
     const T = @TypeOf(val);
     const I = @typeInfo(T);
     const LIMIT = @sizeOf(T);
-    assert_with_reason(LIMIT > 0 and LIMIT <= 8, @src(), "can only quick_hex() on types with size > 0 and size <= 8, got type {s} (size = {d})", .{ @typeName(T), LIMIT });
+    assert_with_reason(LIMIT > 0 and LIMIT <= 8, @src(), "can only quick_dec() on types with size > 0 and size <= 8, got type {s} (size = {d})", .{ @typeName(T), LIMIT });
     switch (I) {
         .int, .float, .@"enum", .pointer => {
             const uint: @Type(.{ .int = .{ .bits = @bitSizeOf(T), .signedness = .unsigned } }) = @bitCast(val);
@@ -775,7 +779,7 @@ pub fn quick_dec(val: anytype) QuickDecResult {
             uval = @intCast(@intFromBool(val));
         },
         else => {
-            assert_with_reason(false, @src(), "invalid type for quick_hex(): {s}", .{@typeName(T)});
+            assert_with_reason(false, @src(), "invalid type for quick_dec(): {s}", .{@typeName(T)});
         },
     }
     while (out.start > 0 and (uval > 0 or out.start >= 20)) {
