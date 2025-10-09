@@ -134,8 +134,6 @@ pub fn build(b: *std.Build) void {
     run_breakout_cmd.dependOn(&run_breakout.step);
 
     // FUZZ TESTS
-    const seed_opt = b.option([]const u8, "fuzz-seed", "provide a specific seed+count when running the library fuzz tests. This should be 32 bytes of hexidecimal chars.") orelse "";
-    const time_opt = b.option(u64, "fuzz-secs", "provide a specific duration for each fuzz test, in seconds. Defaults to 15 seconds.") orelse 15;
     const fuzztest_mod = b.addModule("fuzztest", .{
         .optimize = optimize,
         .target = target,
@@ -145,11 +143,7 @@ pub fn build(b: *std.Build) void {
         .name = "fuzztest",
         .root_module = fuzztest_mod,
     });
-    const fuzztest_options = b.addOptions();
-    fuzztest_options.addOption([]const u8, "seed_opt", seed_opt);
-    fuzztest_options.addOption(u64, "time_opt", time_opt);
     fuzztest.root_module.addImport("Goolib", lib);
-    fuzztest.root_module.addOptions("opts", fuzztest_options);
     b.installArtifact(fuzztest);
 
     const run_fuzztest = b.addRunArtifact(fuzztest);

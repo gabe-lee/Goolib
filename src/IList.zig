@@ -558,7 +558,8 @@ pub fn IList(comptime T: type) type {
         /// `n` positions. The new 'first' item in the queue should be the item
         /// that would have previously been returned by `list.nth_next_idx(list.first_idx(), n)`
         ///
-        /// This may or may not irrevertibly consume the first `n` items in the list
+        /// This may or may not irrevertibly consume the first `n` items in the list,
+        /// depending on the implementation
         pub fn increment_start(self: ILIST, n: usize) void {
             self.vtable.increment_start(self.object, n);
         }

@@ -344,6 +344,9 @@ pub inline fn type_is_tuple(comptime T: type) bool {
 pub inline fn type_is_void(comptime T: type) bool {
     return @typeInfo(T) == .void;
 }
+pub inline fn type_is_func(comptime T: type) bool {
+    return @typeInfo(T) == .@"fn";
+}
 
 // pub inline fn all_struct_fields_are_same_type(comptime T: type, comptime T_FIELD: type) bool {}
 

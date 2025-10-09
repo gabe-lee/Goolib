@@ -27,6 +27,9 @@ const SourceLocation = builtin.SourceLocation;
 const mem = std.mem;
 const assert = std.debug.assert;
 const build = @import("builtin");
+const Allocator = std.mem.Allocator;
+const Writer = std.Io.Writer;
+const fmt = std.fmt;
 
 const Root = @import("./_root.zig");
 const ANSI = Root.ANSI;
@@ -34,6 +37,8 @@ const BinarySearch = Root.BinarySearch;
 const Assert = Root.Assert;
 const Types = Root.Types;
 const assert_with_reason = Assert.assert_with_reason;
+
+pub const _Fuzzer = @import("./Utils_Fuzz.zig");
 
 pub inline fn inline_swap(comptime T: type, a: *T, b: *T, temp: *T) void {
     temp.* = a.*;
@@ -722,12 +727,12 @@ pub fn quick_unhex(bytes: []const u8, comptime T: type) T {
         const b = bytes[i];
         const v = switch (b) {
             '0'...'9' => b - '0',
-            'A'...'F' => b - 'A' + 10,
-            'a'...'f' => b - 'a' + 10,
+            'A'...'F' => (b - 'A') + 10,
+            'a'...'f' => (b - 'a') + 10,
             else => 0,
         };
-        val |= v;
         val <<= HEX_SHIFT;
+        val |= v;
         i += 1;
     }
     const I = @typeInfo(T);
@@ -789,4 +794,58 @@ pub fn quick_dec(val: anytype) QuickDecResult {
         out.data[out.start] = DEC[b];
     }
     return out;
+}
+
+pub fn quick_undec(bytes: []const u8, comptime T: type) T {
+    var val: u64 = 0;
+    var i: usize = 0;
+    while (i < bytes.len) {
+        const b = bytes[i];
+        const v = switch (b) {
+            '0'...'9' => b - '0',
+            else => 0,
+        };
+        val *= 10;
+        val += v;
+        i += 1;
+    }
+    const I = @typeInfo(T);
+    switch (I) {
+        .int, .float, .@"enum", .pointer => {
+            const uint: @Type(.{ .int = .{ .bits = @bitSizeOf(T), .signedness = .unsigned } }) = @intCast(val);
+            return @bitCast(uint);
+        },
+        .bool => {
+            return val > 0;
+        },
+        else => {
+            assert_with_reason(false, @src(), "invalid type for quick_unhex(): {s}", .{@typeName(T)});
+            unreachable;
+        },
+    }
+}
+
+pub const SrcFmt = struct {
+    src: builtin.SourceLocation,
+
+    pub fn new(src: builtin.SourceLocation) SrcFmt {
+        return SrcFmt{ .src = src };
+    }
+
+    pub fn format(self: SrcFmt, writer: *Writer) !void {
+        _ = try writer.write(self.src.file);
+        _ = try writer.write(":");
+        try writer.printInt(self.src.line, 10, .lower, .{});
+        _ = try writer.write(":");
+        try writer.printInt(self.src.column, 10, .lower, .{});
+    }
+};
+
+pub fn alloc_fail_err(alloc: Allocator, comptime src: builtin.SourceLocation, err: anyerror) []const u8 {
+    return fmt.allocPrint(alloc, "{f} -> {s}", .{ SrcFmt.new(src), @errorName(err) }) catch return @errorName(err);
+}
+
+pub fn alloc_fail_str(alloc: Allocator, comptime src: builtin.SourceLocation, comptime str: []const u8, args: anytype) []const u8 {
+    const fullargs = .{SrcFmt.new(src)} ++ args;
+    return fmt.allocPrint(alloc, "{f} -> " ++ str, fullargs) catch return str;
 }

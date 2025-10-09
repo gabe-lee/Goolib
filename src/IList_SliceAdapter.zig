@@ -23,6 +23,7 @@
 const std = @import("std");
 const math = std.math;
 const Root = @import("./_root.zig");
+const Type = std.builtin.Type;
 const Types = Root.Types;
 const Assert = Root.Assert;
 const AllocatorInfallible = Root.AllocatorInfallible;
@@ -49,7 +50,7 @@ pub fn SliceAdapter(comptime T: type) type {
             pub fn interface(self: *Adapter) ILIST {
                 return ILIST{
                     .object = @ptrCast(@alignCast(self)),
-                    .vtable = &ILIST_VTABLE_ALLOC,
+                    .vtable = &ILIST_VTABLE_NO_ALLOC,
                 };
             }
         };
@@ -71,61 +72,114 @@ pub fn SliceAdapter(comptime T: type) type {
             .prefer_linear_ops = false,
             .ensure_free_doesnt_change_cap = true,
             .always_invalid_idx = math.maxInt(usize),
-            .idx_valid = impl_idx_valid,
-            .range_valid = impl_range_valid,
-            .get = impl_get,
-            .get_ptr = impl_get_ptr,
-            .set = impl_set,
+            .idx_valid = impl_idx_valid_alloc,
+            .range_valid = impl_range_valid_alloc,
+            .get = impl_get_alloc,
+            .get_ptr = impl_get_ptr_alloc,
+            .set = impl_set_alloc,
             .split_range = impl_split_range,
-            .move = impl_move,
-            .move_range = impl_move_range,
+            .move = impl_move_alloc,
+            .move_range = impl_move_range_alloc,
             .first_idx = impl_first,
-            .last_idx = impl_last,
+            .last_idx = impl_last_alloc,
             .next_idx = impl_next,
             .prev_idx = impl_prev,
             .nth_next_idx = impl_nth_next,
             .nth_prev_idx = impl_nth_prev,
-            .len = impl_len,
+            .len = impl_len_alloc,
             .range_len = impl_range_len,
             .try_ensure_free_slots = impl_ensure_free,
-            .append_slots_assume_capacity = impl_append,
-            .insert_slots_assume_capacity = impl_insert,
-            .delete_range = impl_delete,
-            .clear = impl_clear,
+            .append_slots_assume_capacity = impl_append_alloc,
+            .insert_slots_assume_capacity = impl_insert_alloc,
+            .delete_range = impl_delete_alloc,
+            .clear = impl_clear_alloc,
             .cap = impl_cap,
-            .increment_start = impl_increment_start,
-            .free = impl_free,
+            .free = impl_free_alloc,
         };
-        fn impl_idx_valid(object: *anyopaque, idx: usize) bool {
+        const ILIST_VTABLE_NO_ALLOC = ILIST.VTable{
+            .all_indexes_zero_to_len_valid = true,
+            .consecutive_indexes_in_order = true,
+            .prefer_linear_ops = false,
+            .ensure_free_doesnt_change_cap = true,
+            .always_invalid_idx = math.maxInt(usize),
+            .idx_valid = impl_idx_valid_no_alloc,
+            .range_valid = impl_range_valid_no_alloc,
+            .get = impl_get_no_alloc,
+            .get_ptr = impl_get_ptr_no_alloc,
+            .set = impl_set_no_alloc,
+            .split_range = impl_split_range,
+            .move = impl_move_no_alloc,
+            .move_range = impl_move_range_no_alloc,
+            .first_idx = impl_first,
+            .last_idx = impl_last_no_alloc,
+            .next_idx = impl_next,
+            .prev_idx = impl_prev,
+            .nth_next_idx = impl_nth_next,
+            .nth_prev_idx = impl_nth_prev,
+            .len = impl_len_no_alloc,
+            .range_len = impl_range_len,
+            .cap = impl_cap,
+            .clear = impl_clear_no_alloc,
+            .free = impl_free_no_alloc,
+        };
+        fn impl_idx_valid_alloc(object: *anyopaque, idx: usize) bool {
             const self: *AdapterWithAlloc = @ptrCast(@alignCast(object));
             return idx < self.slice.len;
         }
-        fn impl_range_valid(object: *anyopaque, range: IList.Range) bool {
+        fn impl_idx_valid_no_alloc(object: *anyopaque, idx: usize) bool {
+            const self: *Adapter = @ptrCast(@alignCast(object));
+            return idx < self.slice.len;
+        }
+        fn impl_range_valid_alloc(object: *anyopaque, range: IList.Range) bool {
             const self: *AdapterWithAlloc = @ptrCast(@alignCast(object));
+            return range.first_idx <= range.last_idx and range.last_idx < self.slice.len;
+        }
+        fn impl_range_valid_no_alloc(object: *anyopaque, range: IList.Range) bool {
+            const self: *Adapter = @ptrCast(@alignCast(object));
             return range.first_idx <= range.last_idx and range.last_idx < self.slice.len;
         }
         fn impl_split_range(object: *anyopaque, range: IList.Range) usize {
             _ = object;
             return ((range.last_idx - range.first_idx) >> 1) + range.first_idx;
         }
-        fn impl_get(object: *anyopaque, idx: usize) T {
+        fn impl_get_alloc(object: *anyopaque, idx: usize) T {
             const self: *AdapterWithAlloc = @ptrCast(@alignCast(object));
             return self.slice[idx];
         }
-        fn impl_get_ptr(object: *anyopaque, idx: usize) *T {
+        fn impl_get_no_alloc(object: *anyopaque, idx: usize) T {
+            const self: *Adapter = @ptrCast(@alignCast(object));
+            return self.slice[idx];
+        }
+        fn impl_get_ptr_alloc(object: *anyopaque, idx: usize) *T {
             const self: *AdapterWithAlloc = @ptrCast(@alignCast(object));
             return &self.slice[idx];
         }
-        fn impl_set(object: *anyopaque, idx: usize, val: T) void {
+        fn impl_get_ptr_no_alloc(object: *anyopaque, idx: usize) *T {
+            const self: *Adapter = @ptrCast(@alignCast(object));
+            return &self.slice[idx];
+        }
+        fn impl_set_alloc(object: *anyopaque, idx: usize, val: T) void {
             const self: *AdapterWithAlloc = @ptrCast(@alignCast(object));
             self.slice[idx] = val;
         }
-        fn impl_move(object: *anyopaque, old_idx: usize, new_idx: usize) void {
+        fn impl_set_no_alloc(object: *anyopaque, idx: usize, val: T) void {
+            const self: *Adapter = @ptrCast(@alignCast(object));
+            self.slice[idx] = val;
+        }
+        fn impl_move_alloc(object: *anyopaque, old_idx: usize, new_idx: usize) void {
             const self: *AdapterWithAlloc = @ptrCast(@alignCast(object));
             Utils.slice_move_one(self.slice, old_idx, new_idx);
         }
-        fn impl_move_range(object: *anyopaque, range: IList.Range, new_first_idx: usize) void {
+        fn impl_move_no_alloc(object: *anyopaque, old_idx: usize, new_idx: usize) void {
+            const self: *Adapter = @ptrCast(@alignCast(object));
+            Utils.slice_move_one(self.slice, old_idx, new_idx);
+        }
+        fn impl_move_range_alloc(object: *anyopaque, range: IList.Range, new_first_idx: usize) void {
             const self: *AdapterWithAlloc = @ptrCast(@alignCast(object));
+            Utils.slice_move_many(self.slice, range.first_idx, range.last_idx, new_first_idx);
+        }
+        fn impl_move_range_no_alloc(object: *anyopaque, range: IList.Range, new_first_idx: usize) void {
+            const self: *Adapter = @ptrCast(@alignCast(object));
             Utils.slice_move_many(self.slice, range.first_idx, range.last_idx, new_first_idx);
         }
         fn impl_first(object: *anyopaque) usize {
@@ -140,8 +194,12 @@ pub fn SliceAdapter(comptime T: type) type {
             _ = object;
             return idx + n;
         }
-        fn impl_last(object: *anyopaque) usize {
+        fn impl_last_alloc(object: *anyopaque) usize {
             const self: *AdapterWithAlloc = @ptrCast(@alignCast(object));
+            return self.slice.len -% 1;
+        }
+        fn impl_last_no_alloc(object: *anyopaque) usize {
+            const self: *Adapter = @ptrCast(@alignCast(object));
             return self.slice.len -% 1;
         }
         fn impl_prev(object: *anyopaque, idx: usize) usize {
@@ -152,7 +210,11 @@ pub fn SliceAdapter(comptime T: type) type {
             _ = object;
             return idx -% n;
         }
-        fn impl_len(object: *anyopaque) usize {
+        fn impl_len_alloc(object: *anyopaque) usize {
+            const self: *AdapterWithAlloc = @ptrCast(@alignCast(object));
+            return self.slice.len;
+        }
+        fn impl_len_no_alloc(object: *anyopaque) usize {
             const self: *AdapterWithAlloc = @ptrCast(@alignCast(object));
             return self.slice.len;
         }
@@ -165,7 +227,7 @@ pub fn SliceAdapter(comptime T: type) type {
             _ = count;
             return true;
         }
-        fn impl_append(object: *anyopaque, count: usize) IList.Range {
+        fn impl_append_alloc(object: *anyopaque, count: usize) IList.Range {
             const self: *AdapterWithAlloc = @ptrCast(@alignCast(object));
             const new_len = self.slice.len + count;
             const remaped_slice = self.alloc.remap(self.slice, new_len);
@@ -183,7 +245,7 @@ pub fn SliceAdapter(comptime T: type) type {
             }
             return IList.Range.new_range(start, end - 1);
         }
-        fn impl_insert(object: *anyopaque, idx: usize, count: usize) IList.Range {
+        fn impl_insert_alloc(object: *anyopaque, idx: usize, count: usize) IList.Range {
             const self: *AdapterWithAlloc = @ptrCast(@alignCast(object));
             const new_len = self.slice.len + count;
             const remaped_slice = self.alloc.remap(self.slice, new_len);
@@ -204,7 +266,7 @@ pub fn SliceAdapter(comptime T: type) type {
             }
             return IList.Range.new_range(start, end - 1);
         }
-        fn impl_delete(object: *anyopaque, range: IList.Range) void {
+        fn impl_delete_alloc(object: *anyopaque, range: IList.Range) void {
             const self: *AdapterWithAlloc = @ptrCast(@alignCast(object));
             std.mem.copyForwards(T, self.slice[range.first_idx..], self.slice[range.last_idx + 1 ..]);
             const rem_count = (range.last_idx - range.first_idx) + 1;
@@ -215,7 +277,7 @@ pub fn SliceAdapter(comptime T: type) type {
                 self.slice.len = new_len;
             }
         }
-        fn impl_clear(object: *anyopaque) void {
+        fn impl_clear_alloc(object: *anyopaque) void {
             const self: *AdapterWithAlloc = @ptrCast(@alignCast(object));
             if (self.alloc.remap(self.slice, 0)) |reslice| {
                 self.slice = reslice;
@@ -223,23 +285,21 @@ pub fn SliceAdapter(comptime T: type) type {
                 self.slice.len = 0;
             }
         }
+        fn impl_clear_no_alloc(object: *anyopaque) void {
+            const self: *Adapter = @ptrCast(@alignCast(object));
+            self.slice.len = 0;
+        }
         fn impl_cap(object: *anyopaque) usize {
             const self: *AdapterWithAlloc = @ptrCast(@alignCast(object));
             return self.slice.len;
         }
-        fn impl_increment_start(object: *anyopaque, count: usize) void {
-            const self: *AdapterWithAlloc = @ptrCast(@alignCast(object));
-            const rcount = @min(count, self.slice.len);
-            const old_slice = self.slice;
-            self.slice.ptr = self.slice.ptr + rcount;
-            self.slice.len -= rcount;
-            if (self.slice.len == 0) {
-                self.alloc.free(old_slice);
-            }
-        }
-        fn impl_free(object: *anyopaque) void {
+        fn impl_free_alloc(object: *anyopaque) void {
             const self: *AdapterWithAlloc = @ptrCast(@alignCast(object));
             self.alloc.free(self.slice);
+            self.slice.len = 0;
+        }
+        fn impl_free_no_alloc(object: *anyopaque) void {
+            const self: *Adapter = @ptrCast(@alignCast(object));
             self.slice.len = 0;
         }
     };
