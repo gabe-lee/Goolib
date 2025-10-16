@@ -29,119 +29,152 @@ const AllocatorInfallible = Root.AllocatorInfallible;
 const Allocator = std.mem.Allocator;
 const IList = Root.IList;
 const Utils = Root.Utils;
+const DummyAlloc = Root.DummyAllocator;
 
-pub fn List(comptime T: type, comptime IDX: type) type {
+pub fn List(comptime T: type) type {
     return struct {
         const Self = @This();
 
-        ptr: [*]T,
-        len: IDX,
-        cap: IDX,
+        ptr: [*]T = @ptrFromInt(std.mem.alignBackward(usize, math.maxInt(usize), @alignOf(T))),
+        len: u32 = 0,
+        cap: u32 = 0,
 
-        const ILIST = IList.IList(T, *T, IDX);
+        pub fn init_empty() Self {
+            return Self{};
+        }
+
+        pub fn init_capacity(cap: usize, alloc: Allocator) Self {
+            const mem = alloc.alloc(T, cap) catch |err| Assert.assert_allocation_failure(@src(), T, cap, err);
+            return Self{
+                .ptr = mem.ptr,
+                .cap = @intCast(mem.len),
+                .len = 0,
+            };
+        }
+
+        pub fn free(self: *Self, alloc: Allocator) void {
+            alloc.free(self.ptr[0..self.cap]);
+            self.len = 0;
+            self.cap = 0;
+        }
+
+        pub fn interface(self: *Self, alloc: Allocator) ILIST {
+            return ILIST{
+                .alloc = alloc,
+                .object = @ptrCast(self),
+                .vtable = &ILIST_VTABLE,
+            };
+        }
+        pub fn interface_no_alloc(self: *Self) ILIST {
+            return ILIST{
+                .alloc = DummyAlloc.allocator_shrink_only,
+                .object = @ptrCast(self),
+                .vtable = &ILIST_VTABLE,
+            };
+        }
+
+        const ILIST = IList.IList(T);
         const ILIST_VTABLE = ILIST.VTable{
-            .all_indexes_zero_to_len_valid = impl_true,
-            .consecutive_indexes_in_order = impl_true,
-            .prefer_linear_ops = impl_false,
+            .all_indexes_zero_to_len_valid = true,
+            .consecutive_indexes_in_order = true,
+            .ensure_free_doesnt_change_cap = false,
+            .prefer_linear_ops = false,
+            .always_invalid_idx = math.maxInt(usize),
             .idx_valid = impl_idx_valid,
             .range_valid = impl_range_valid,
+            .split_range = impl_split_range,
+            .range_len = impl_range_len,
+            .len = impl_len,
+            .cap = impl_cap,
             .get = impl_get,
             .get_ptr = impl_get_ptr,
             .set = impl_set,
-            .split_range = impl_split_range,
             .move = impl_move,
             .move_range = impl_move_range,
             .first_idx = impl_first,
             .last_idx = impl_last,
             .next_idx = impl_next,
-            .prev_idx = impl_prev,
             .nth_next_idx = impl_nth_next,
+            .prev_idx = impl_prev,
             .nth_prev_idx = impl_nth_prev,
-            .len = impl_len,
-            .range_len = impl_range_len,
             .try_ensure_free_slots = impl_ensure_free,
             .append_slots_assume_capacity = impl_append,
             .insert_slots_assume_capacity = impl_insert,
             .delete_range = impl_delete,
             .clear = impl_clear,
-            .cap = impl_cap,
             .free = impl_free,
+            .shrink_cap_reserve_at_most = impl_shrink_reserve,
         };
 
-        fn impl_true() bool {
-            return true;
-        }
-        fn impl_false() bool {
-            return false;
-        }
-        fn impl_idx_valid(object: *anyopaque, idx: IDX) bool {
+        fn impl_idx_valid(object: *anyopaque, idx: usize) bool {
             const self: *Self = @ptrCast(@alignCast(object));
             return idx < self.len;
         }
-        fn impl_range_valid(object: *anyopaque, range: ILIST.Range) bool {
+        fn impl_range_valid(object: *anyopaque, range: IList.Range) bool {
             const self: *Self = @ptrCast(@alignCast(object));
             return range.first_idx <= range.last_idx and range.last_idx < self.len;
         }
-        fn impl_split_range(object: *anyopaque, range: ILIST.Range) IDX {
-            _ = object;
-            return ((range.last_idx - range.first_idx) >> 1) + range.last_idx;
+        fn impl_split_range(_: *anyopaque, range: IList.Range) usize {
+            return ((range.last_idx - range.first_idx) >> 1) + range.first_idx;
         }
-        fn impl_get(object: *anyopaque, idx: IDX) T {
+        fn impl_range_len(_: *anyopaque, range: IList.Range) usize {
+            return range.consecutive_len();
+        }
+        fn impl_get(object: *anyopaque, idx: usize) T {
             const self: *Self = @ptrCast(@alignCast(object));
+            Assert.assert_idx_less_than_len(idx, Types.intcast(self.len, usize), @src());
             return self.ptr[idx];
         }
-        fn impl_get_ptr(object: *anyopaque, idx: IDX) *T {
+        fn impl_get_ptr(object: *anyopaque, idx: usize) *T {
             const self: *Self = @ptrCast(@alignCast(object));
+            Assert.assert_idx_less_than_len(idx, Types.intcast(self.len, usize), @src());
             return &self.ptr[idx];
         }
-        fn impl_set(object: *anyopaque, idx: IDX, val: T) void {
+        fn impl_set(object: *anyopaque, idx: usize, val: T) void {
             const self: *Self = @ptrCast(@alignCast(object));
+            Assert.assert_idx_less_than_len(idx, Types.intcast(self.len, usize), @src());
             self.ptr[idx] = val;
         }
-        fn impl_move(object: *anyopaque, old_idx: IDX, new_idx: IDX) void {
+        fn impl_move(object: *anyopaque, old_idx: usize, new_idx: usize) void {
             const self: *Self = @ptrCast(@alignCast(object));
-            Utils.slice_move_one(T, self.ptr[0..self.len], old_idx, new_idx);
+            Utils.slice_move_one(self.ptr[0..self.len], old_idx, new_idx);
         }
-        fn impl_move_range(object: *anyopaque, range: ILIST.Range, new_first_idx: IDX) void {
+        fn impl_move_range(object: *anyopaque, range: IList.Range, new_first_idx: usize) void {
             const self: *Self = @ptrCast(@alignCast(object));
-            Utils.slice_move_many(T, self.ptr[0..self.len], range.first_idx, range.last_idx, new_first_idx);
+            Utils.slice_move_many(self.ptr[0..self.len], range.first_idx, range.last_idx, new_first_idx);
         }
-        fn impl_first(object: *anyopaque) IDX {
+        fn impl_first(object: *anyopaque) usize {
             _ = object;
             return 0;
         }
-        fn impl_next(object: *anyopaque, idx: IDX) IDX {
+        fn impl_next(object: *anyopaque, idx: usize) usize {
             _ = object;
             return idx + 1;
         }
-        fn impl_nth_next(object: *anyopaque, idx: IDX, n: IDX) IDX {
+        fn impl_nth_next(object: *anyopaque, idx: usize, n: usize) usize {
             _ = object;
             return idx + n;
         }
-        fn impl_last(object: *anyopaque) IDX {
+        fn impl_last(object: *anyopaque) usize {
             const self: *Self = @ptrCast(@alignCast(object));
-            return self.len -% 1;
+            return @intCast(self.len -% 1);
         }
-        fn impl_prev(object: *anyopaque, idx: IDX) IDX {
+        fn impl_prev(object: *anyopaque, idx: usize) usize {
             _ = object;
             return idx -% 1;
         }
-        fn impl_nth_prev(object: *anyopaque, idx: IDX, n: IDX) IDX {
+        fn impl_nth_prev(object: *anyopaque, idx: usize, n: usize) usize {
             _ = object;
             return idx -% n;
         }
-        fn impl_len(object: *anyopaque) IDX {
+        fn impl_len(object: *anyopaque) usize {
             const self: *Self = @ptrCast(@alignCast(object));
-            return self.len;
+            return @intCast(self.len);
         }
-        fn impl_range_len(object: *anyopaque, first: IDX, last: IDX) IDX {
-            _ = object;
-            return (last - first) + 1;
-        }
-        fn impl_ensure_free(object: *anyopaque, count: IDX, alloc: Allocator) bool {
+        fn impl_ensure_free(object: *anyopaque, count: usize, alloc: Allocator) bool {
             const self: *Self = @ptrCast(@alignCast(object));
-            const free_ = self.cap - self.len;
-            if (free_ >= count) {
+            const have = self.cap - self.len;
+            if (have >= count) {
                 return true;
             }
             const new_cap = (self.len + count);
@@ -160,60 +193,57 @@ pub fn List(comptime T: type, comptime IDX: type) type {
             }
             return true;
         }
-        fn impl_append(object: *anyopaque, count: IDX, alloc: Allocator) ILIST.Range {
+        fn impl_append(object: *anyopaque, count: usize, alloc: Allocator) IList.Range {
             _ = alloc;
             const self: *Self = @ptrCast(@alignCast(object));
             Assert.assert_with_reason(count <= self.cap - self.len, @src(), "not enough unused capacity (len = {d}, cap = {d}, free = {d}, need = {d}): use IList.try_ensure_free_slots({d}) first", .{ self.len, self.cap, self.cap - self.len, count, count });
-            self.len += count;
-            return ILIST.Range.new_range(self.len - count, self.len - 1);
+            const first: usize = @intCast(self.len);
+            self.len += @intCast(count);
+            return IList.Range.new_range(first, @intCast(self.len - 1));
         }
-        fn impl_insert(object: *anyopaque, idx: IDX, count: IDX, alloc: Allocator) ILIST.Range {
+        fn impl_insert(object: *anyopaque, idx: usize, count: usize, alloc: Allocator) IList.Range {
             const self: *Self = @ptrCast(@alignCast(object));
             if (idx == self.len) {
                 return impl_append(object, count, alloc);
             }
             Assert.assert_with_reason(count <= self.cap - self.len, @src(), "not enough unused capacity (len = {d}, cap = {d}, free = {d}, need = {d}): use IList.try_ensure_free_slots({d}) first", .{ self.len, self.cap, self.cap - self.len, count, count });
-            const old_len = self.len;
-            self.len += count;
-            const start = idx;
-            const end = idx + count;
-            var ridx = old_len - 1;
-            var widx = self.len - 1;
-            while (widx >= end) {
-                self.ptr[widx] = self.ptr[ridx];
-                ridx -= 1;
-                widx -= 1;
-            }
-            return ILIST.Range.new_range(start, end - 1);
+            Utils.mem_insert(self.ptr, &self.len, idx, count);
+            return IList.Range.new_range(idx, idx + count - 1);
         }
-        fn impl_delete(object: *anyopaque, range: ILIST.Range, alloc: Allocator) void {
+        fn impl_delete(object: *anyopaque, range: IList.Range, alloc: Allocator) void {
             _ = alloc;
             const self: *Self = @ptrCast(@alignCast(object));
-            var widx = range.first_idx;
-            var ridx = range.last_idx + 1;
-            while (ridx < self.len) {
-                self.ptr[widx] = self.ptr[ridx];
-                widx += 1;
-                ridx += 1;
+            const rlen = range.consecutive_len();
+            Utils.mem_remove(self.ptr, &self.len, range.first_idx, rlen);
+        }
+        fn impl_shrink_reserve(object: *anyopaque, reserve_at_most: usize, alloc: Allocator) void {
+            const self: *Self = @ptrCast(@alignCast(object));
+            const space: usize = @intCast(self.cap - self.len);
+            if (space <= reserve_at_most) return;
+            const new_cap = Types.intcast(self.len, usize) + reserve_at_most;
+            if (alloc.remap(self.ptr[0..self.cap], new_cap)) |new_mem| {
+                self.ptr = new_mem.ptr;
+                self.cap = @intCast(new_mem.len);
+            } else {
+                const new_mem = alloc.alloc(T, new_cap) catch return;
+                @memcpy(new_mem[0..self.len], self.ptr[0..self.len]);
+                alloc.free(self.ptr[0..self.cap]);
+                self.ptr = new_mem.ptr;
+                self.cap = @intCast(new_mem.len);
             }
-            const rem_count = (range.last_idx - range.first_idx) + 1;
-            const new_len = self.len - rem_count;
-            self.len = new_len;
         }
         fn impl_clear(object: *anyopaque, alloc: Allocator) void {
             _ = alloc;
             const self: *Self = @ptrCast(@alignCast(object));
             self.len = 0;
         }
-        fn impl_cap(object: *anyopaque) IDX {
+        fn impl_cap(object: *anyopaque) usize {
             const self: *Self = @ptrCast(@alignCast(object));
             return self.cap;
         }
-        fn impl_free(object: *anyopaque, mem_alloc: Allocator) void {
+        fn impl_free(object: *anyopaque, alloc: Allocator) void {
             const self: *Self = @ptrCast(@alignCast(object));
-            mem_alloc.free(self.ptr[0..self.cap]);
-            self.len = 0;
-            self.cap = 0;
+            self.free(alloc);
         }
     };
 }

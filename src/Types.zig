@@ -34,6 +34,12 @@ const BinarySearch = Root.BinarySearch;
 const Assert = Root.Assert;
 const assert_with_reason = Assert.assert_with_reason;
 
+pub fn intcast(val: anytype, comptime T: type) T {
+    const V = @TypeOf(val);
+    assert_with_reason(type_is_int(V), @src(), "cannot @intCast() type {s} to {s}", .{ @typeName(V), @typeName(T) });
+    return @as(T, @intCast(val));
+}
+
 pub fn ptr_cast_const(ptr_or_slice: anytype, comptime new_type: type) *const new_type {
     const PTR = @TypeOf(ptr_or_slice);
     const P_INFO = @typeInfo(PTR);
@@ -284,6 +290,15 @@ pub inline fn type_is_pointer_or_slice(comptime T: type) bool {
 pub inline fn type_is_slice(comptime T: type) bool {
     return @typeInfo(T) == .pointer and @typeInfo(T).pointer.size == .slice;
 }
+pub inline fn type_is_many_item_pointer(comptime T: type) bool {
+    return @typeInfo(T) == .pointer and @typeInfo(T).pointer.size == .many;
+}
+pub inline fn type_is_single_item_pointer(comptime T: type) bool {
+    return @typeInfo(T) == .pointer and @typeInfo(T).pointer.size == .one;
+}
+pub inline fn type_is_slice_or_pointer_to_slice(comptime T: type) bool {
+    return @typeInfo(T) == .pointer and (@typeInfo(T).pointer.size == .slice or (@typeInfo(@typeInfo(T).pointer.child) == .pointer and @typeInfo(@typeInfo(T).pointer.child).pointer.size == .slice));
+}
 pub inline fn pointer_is_slice(comptime T: type) bool {
     return @typeInfo(T).pointer.size == .slice;
 }
@@ -470,4 +485,59 @@ pub fn both_or_neither_null(a: anytype, b: anytype) bool {
     var c: u8 = @intCast(@intFromBool(a == null));
     c += @intCast(@intFromBool(b == null));
     return c != 1;
+}
+
+pub fn unimplemented_5_params(comptime NAME: []const u8, comptime P1: type, comptime P2: type, comptime P3: type, comptime P4: type, comptime P5: type, comptime OUT: type) fn (P1, P2, P3, P4, P5) OUT {
+    const PROTO = struct {
+        fn FUNC(_: P1, _: P2, _: P3, _: P4, _: P5) OUT {
+            assert_with_reason(false, null, "function {s} is not implemented.", .{NAME});
+            unreachable;
+        }
+    };
+    return PROTO.FUNC;
+}
+pub fn unimplemented_4_params(comptime NAME: []const u8, comptime P1: type, comptime P2: type, comptime P3: type, comptime P4: type, comptime OUT: type) fn (P1, P2, P3, P4) OUT {
+    const PROTO = struct {
+        fn FUNC(_: P1, _: P2, _: P3, _: P4) OUT {
+            assert_with_reason(false, null, "function {s} is not implemented.", .{NAME});
+            unreachable;
+        }
+    };
+    return PROTO.FUNC;
+}
+pub fn unimplemented_3_params(comptime NAME: []const u8, comptime P1: type, comptime P2: type, comptime P3: type, comptime OUT: type) fn (P1, P2, P3) OUT {
+    const PROTO = struct {
+        fn FUNC(_: P1, _: P2, _: P3) OUT {
+            assert_with_reason(false, null, "function {s} is not implemented.", .{NAME});
+            unreachable;
+        }
+    };
+    return PROTO.FUNC;
+}
+pub fn unimplemented_2_params(comptime NAME: []const u8, comptime P1: type, comptime P2: type, comptime OUT: type) fn (P1, P2) OUT {
+    const PROTO = struct {
+        fn FUNC(_: P1, _: P2) OUT {
+            assert_with_reason(false, null, "function {s} is not implemented.", .{NAME});
+            unreachable;
+        }
+    };
+    return PROTO.FUNC;
+}
+pub fn unimplemented_1_params(comptime NAME: []const u8, comptime P1: type, comptime OUT: type) fn (P1) OUT {
+    const PROTO = struct {
+        fn FUNC(_: P1) OUT {
+            assert_with_reason(false, null, "function {s} is not implemented.", .{NAME});
+            unreachable;
+        }
+    };
+    return PROTO.FUNC;
+}
+pub fn unimplemented_0_params(comptime NAME: []const u8, comptime OUT: type) fn () OUT {
+    const PROTO = struct {
+        fn FUNC() OUT {
+            assert_with_reason(false, null, "function {s} is not implemented.", .{NAME});
+            unreachable;
+        }
+    };
+    return PROTO.FUNC;
 }

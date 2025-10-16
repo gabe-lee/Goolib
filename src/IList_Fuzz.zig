@@ -19,7 +19,6 @@
 // 3. This notice may not be removed or altered from any source distribution.
 const std = @import("std");
 const Root = @import("./_root.zig");
-const opts = @import("opts");
 const Random = std.Random;
 const math = std.math;
 const Allocator = std.mem.Allocator;
@@ -28,78 +27,25 @@ const fmt = std.fmt;
 
 const SliceAdapter = Root.IList_SliceAdapter.SliceAdapter;
 const ArrayListAdapter = Root.IList_ArrayListAdapter.ArrayListAdapter;
+const RingList = Root.IList_RingList.RingList;
+const List = Root.IList_List.List;
 const Assert = Root.Assert;
 const Types = Root.Types;
 const IList = Root.IList;
 const Fuzz = Root.Fuzz;
 const Utils = Root.Utils;
+const Flags = Root.Flags;
 
 const LARGEST_LEN: usize = 1024;
 const SMALL_LEN: usize = 256;
 const LARGEST_COPY: usize = 128;
 
-pub const SLICE_ADAPTER_U8_ALLOC = make_slice_adapter_alloc_test(u8);
-pub const SLICE_ADAPTER_U8_NO_ALLOC = make_slice_adapter_test(u8);
-pub const ARRAY_LIST_ADAPTER_U8 = make_array_list_adapter_test(u8);
+pub const IList_SliceAdapter_u8 = make_slice_interface_test(u8);
+pub const IList_ArrayListAdapter_u8 = make_array_list_adapter_test(u8);
+pub const IList_RingList_u8 = make_ring_list_adapter_test(u8);
+pub const IList_List_u8 = make_list_interface_test(u8);
 
-pub fn make_slice_adapter_alloc_test(comptime T: type) Fuzz.FuzzTest {
-    const PROTO = struct {
-        const T_IList = Root.IList.IList(T);
-        const T_List = std.ArrayList(T);
-        const STATE = struct {
-            ref_list: T_List,
-            test_list: T_IList,
-            slice_adapter: SliceAdapter(T).AdapterWithAlloc,
-        };
-        pub fn INIT(state_opaque: **anyopaque, alloc: Allocator) anyerror!void {
-            var state = try alloc.create(STATE);
-            state.ref_list = try T_List.initCapacity(alloc, LARGEST_LEN);
-            var s: []T = undefined;
-            s.len = 0;
-            state.slice_adapter = SliceAdapter(T).adapt_with_alloc(s, alloc);
-            state.test_list = state.slice_adapter.interface();
-            state_opaque.* = @ptrCast(state);
-        }
-        pub fn START_SEED(rand: Random, state_opaque: *anyopaque, alloc: Allocator) ?[]const u8 {
-            var state: *STATE = @ptrCast(@alignCast(state_opaque));
-            const len = rand.uintLessThan(usize, SMALL_LEN);
-            state.ref_list.clearRetainingCapacity();
-            if (alloc.remap(state.slice_adapter.slice, len)) |new| {
-                state.slice_adapter.slice = new;
-            } else {
-                alloc.free(state.slice_adapter.slice);
-                state.slice_adapter.slice = alloc.alloc(u8, len) catch |err| return Utils.alloc_fail_err(alloc, @src(), err);
-            }
-            state.ref_list.ensureTotalCapacity(alloc, len) catch |err| return Utils.alloc_fail_err(alloc, @src(), err);
-            state.ref_list.items.len = len;
-            if (len > 0) {
-                rand.bytes(state.ref_list.items);
-                @memcpy(state.slice_adapter.slice[0..len], state.ref_list.items[0..len]);
-            }
-            return _OPS.verify_whole_state(state, "start_seed", 0, 0, 0, alloc);
-        }
-
-        pub fn DEINIT(state_opaque: *anyopaque, alloc: Allocator) void {
-            const state: *STATE = @ptrCast(@alignCast(state_opaque));
-            state.ref_list.clearAndFree(alloc);
-            alloc.free(state.slice_adapter.slice);
-            alloc.destroy(state);
-        }
-
-        const _OPS = make_op_table(T, STATE, 0, true, false);
-        pub const OPS = _OPS.OPS;
-    };
-    return Fuzz.FuzzTest{
-        .options = Fuzz.FuzzOptions{
-            .name = "IList_SliceAdapter_alloc_" ++ @typeName(T),
-        },
-        .init_func = PROTO.INIT,
-        .start_seed_func = PROTO.START_SEED,
-        .op_table = PROTO.OPS[0..],
-        .deinit_func = PROTO.DEINIT,
-    };
-}
-pub fn make_slice_adapter_test(comptime T: type) Fuzz.FuzzTest {
+pub fn make_slice_interface_test(comptime T: type) Fuzz.FuzzTest {
     const PROTO = struct {
         const T_IList = Root.IList.IList(T);
         const T_List = std.ArrayList(T);
@@ -107,23 +53,21 @@ pub fn make_slice_adapter_test(comptime T: type) Fuzz.FuzzTest {
             ref_list: T_List,
             test_list: T_IList,
             slice_arr: [SMALL_LEN]u8 = @splat(0),
-            slice_adapter: SliceAdapter(T).Adapter,
-            last_op: usize = math.maxInt(usize),
-            this_op: usize = math.maxInt(usize),
+            slice: []T = undefined,
         };
         pub fn INIT(state_opaque: **anyopaque, alloc: Allocator) anyerror!void {
             var state = try alloc.create(STATE);
             state.ref_list = try T_List.initCapacity(alloc, SMALL_LEN);
-            state.slice_adapter = SliceAdapter(T).adapt(state.slice_arr[0..SMALL_LEN]);
-            state.test_list = state.slice_adapter.interface();
+            state.slice = state.slice_arr[0..0];
+            state.test_list = SliceAdapter(T).interface_no_alloc(&state.slice);
             state_opaque.* = @ptrCast(state);
         }
-        pub fn START_SEED(rand: Random, state_opaque: *anyopaque, alloc: Allocator) ?[]const u8 {
+        pub fn START_SEED(rand: Random, state_opaque: *anyopaque, alloc: Allocator, _: *Fuzz.BenchTime) ?[]const u8 {
             var state: *STATE = @ptrCast(@alignCast(state_opaque));
             state.ref_list.items.len = SMALL_LEN;
-            state.slice_adapter.slice.len = SMALL_LEN;
+            state.slice.len = SMALL_LEN;
             rand.bytes(state.ref_list.items);
-            @memcpy(state.slice_adapter.slice[0..SMALL_LEN], state.ref_list.items[0..SMALL_LEN]);
+            @memcpy(state.slice[0..SMALL_LEN], state.ref_list.items[0..SMALL_LEN]);
             return _OPS.verify_whole_state(state, "start_seed", 0, 0, 0, alloc);
         }
 
@@ -132,12 +76,12 @@ pub fn make_slice_adapter_test(comptime T: type) Fuzz.FuzzTest {
             state.ref_list.clearAndFree(alloc);
             alloc.destroy(state);
         }
-        const _OPS = make_op_table(T, STATE, 0, false, false);
+        const _OPS = make_op_table(T, STATE, 0, false);
         pub const OPS = _OPS.OPS;
     };
     return Fuzz.FuzzTest{
         .options = Fuzz.FuzzOptions{
-            .name = "IList_SliceAdapter_no_alloc_" ++ @typeName(T),
+            .name = "IList_SliceAdapter_" ++ @typeName(T),
         },
         .init_func = PROTO.INIT,
         .start_seed_func = PROTO.START_SEED,
@@ -152,28 +96,27 @@ pub fn make_array_list_adapter_test(comptime T: type) Fuzz.FuzzTest {
         const STATE = struct {
             ref_list: T_List,
             test_list: T_IList,
-            list_adapter: ArrayListAdapter(T).Adapter,
+            list: ArrayList(T),
         };
         pub fn INIT(state_opaque: **anyopaque, alloc: Allocator) anyerror!void {
             var state = try alloc.create(STATE);
             state.ref_list = try T_List.initCapacity(alloc, LARGEST_LEN);
-            const l = try ArrayList(T).initCapacity(alloc, LARGEST_LEN);
-            state.list_adapter = ArrayListAdapter(T).adapt(l, alloc);
-            state.test_list = state.list_adapter.interface();
+            state.list = try ArrayList(T).initCapacity(alloc, LARGEST_LEN);
+            state.test_list = ArrayListAdapter(T).interface(&state.list, alloc);
             state_opaque.* = @ptrCast(state);
         }
-        pub fn START_SEED(rand: Random, state_opaque: *anyopaque, alloc: Allocator) ?[]const u8 {
+        pub fn START_SEED(rand: Random, state_opaque: *anyopaque, alloc: Allocator, _: *Fuzz.BenchTime) ?[]const u8 {
             var state: *STATE = @ptrCast(@alignCast(state_opaque));
             const len = rand.uintLessThan(usize, SMALL_LEN);
             state.ref_list.clearRetainingCapacity();
-            state.list_adapter.list.clearRetainingCapacity();
+            state.list.clearRetainingCapacity();
             state.ref_list.ensureTotalCapacity(alloc, len) catch |err| return Utils.alloc_fail_err(alloc, @src(), err);
-            state.list_adapter.list.ensureTotalCapacity(alloc, len) catch |err| return Utils.alloc_fail_err(alloc, @src(), err);
+            state.list.ensureTotalCapacity(alloc, len) catch |err| return Utils.alloc_fail_err(alloc, @src(), err);
             state.ref_list.items.len = len;
-            state.list_adapter.list.items.len = len;
+            state.list.items.len = len;
             if (len > 0) {
                 rand.bytes(state.ref_list.items);
-                @memcpy(state.list_adapter.list.items[0..len], state.ref_list.items[0..len]);
+                @memcpy(state.list.items[0..len], state.ref_list.items[0..len]);
             }
             return _OPS.verify_whole_state(state, "start_seed", 0, 0, 0, alloc);
         }
@@ -181,11 +124,11 @@ pub fn make_array_list_adapter_test(comptime T: type) Fuzz.FuzzTest {
         pub fn DEINIT(state_opaque: *anyopaque, alloc: Allocator) void {
             const state: *STATE = @ptrCast(@alignCast(state_opaque));
             state.ref_list.clearAndFree(alloc);
-            state.list_adapter.list.clearAndFree(alloc);
+            state.list.clearAndFree(alloc);
             alloc.destroy(state);
         }
 
-        const _OPS = make_op_table(T, STATE, 0, true, false);
+        const _OPS = make_op_table(T, STATE, 0, true);
         pub const OPS = _OPS.OPS;
     };
     return Fuzz.FuzzTest{
@@ -198,8 +141,117 @@ pub fn make_array_list_adapter_test(comptime T: type) Fuzz.FuzzTest {
         .deinit_func = PROTO.DEINIT,
     };
 }
+pub fn list_interface_state(comptime T: type) type {
+    return struct {
+        ref_list: std.ArrayList(T),
+        test_list: Root.IList.IList(T),
+        list: List(T),
+    };
+}
+pub fn make_list_interface_test(comptime T: type) Fuzz.FuzzTest {
+    const PROTO = struct {
+        const T_IList = Root.IList.IList(T);
+        const T_List = std.ArrayList(T);
+        pub const STATE = list_interface_state(T);
+        pub fn INIT(state_opaque: **anyopaque, alloc: Allocator) anyerror!void {
+            var state = try alloc.create(STATE);
+            state.ref_list = try T_List.initCapacity(alloc, LARGEST_LEN);
+            state.list = List(T).init_capacity(LARGEST_LEN, alloc);
+            state.test_list = state.list.interface(alloc);
+            state_opaque.* = @ptrCast(state);
+        }
+        pub fn START_SEED(rand: Random, state_opaque: *anyopaque, alloc: Allocator, _: *Fuzz.BenchTime) ?[]const u8 {
+            var state: *STATE = @ptrCast(@alignCast(state_opaque));
+            const len = rand.uintLessThan(usize, SMALL_LEN);
+            state.ref_list.clearRetainingCapacity();
+            state.list.len = 0;
+            state.ref_list.ensureTotalCapacity(alloc, len) catch |err| return Utils.alloc_fail_err(alloc, @src(), err);
+            const ok = state.test_list.try_ensure_free_slots(len);
+            if (!ok) return Utils.alloc_fail_str(alloc, @src(), "failed to ensure free slots", .{});
+            state.ref_list.items.len = len;
+            state.list.len = @intCast(len);
+            if (len > 0) {
+                rand.bytes(state.ref_list.items);
+                @memcpy(state.list.ptr[0..len], state.ref_list.items[0..len]);
+            }
+            return _OPS.verify_whole_state(state, "start_seed", 0, 0, 0, alloc);
+        }
 
-pub fn make_op_table(comptime T: type, comptime STATE: type, comptime UNINIT: T, comptime LIST_LIKE: bool, comptime QUEUE_LIKE: bool) type {
+        pub fn DEINIT(state_opaque: *anyopaque, alloc: Allocator) void {
+            const state: *STATE = @ptrCast(@alignCast(state_opaque));
+            state.ref_list.clearAndFree(alloc);
+            state.list.free(alloc);
+            alloc.destroy(state);
+        }
+
+        const _OPS = make_op_table(T, STATE, 0, true);
+        pub const OPS = _OPS.OPS;
+    };
+    return Fuzz.FuzzTest{
+        .options = Fuzz.FuzzOptions{
+            .name = "IList_List_" ++ @typeName(T),
+        },
+        .init_func = PROTO.INIT,
+        .start_seed_func = PROTO.START_SEED,
+        .op_table = PROTO.OPS[0..],
+        .deinit_func = PROTO.DEINIT,
+    };
+}
+
+pub fn make_ring_list_adapter_test(comptime T: type) Fuzz.FuzzTest {
+    const PROTO = struct {
+        const T_IList = Root.IList.IList(T);
+        const T_List = std.ArrayList(T);
+        const STATE = struct {
+            ref_list: T_List,
+            test_list: T_IList,
+            ring_list: RingList(T),
+        };
+        pub fn INIT(state_opaque: **anyopaque, alloc: Allocator) anyerror!void {
+            var state = try alloc.create(STATE);
+            state.ref_list = try T_List.initCapacity(alloc, SMALL_LEN);
+            state.ring_list = RingList(T).init_capacity(SMALL_LEN, alloc);
+            state.test_list = state.ring_list.interface(alloc);
+            state_opaque.* = @ptrCast(state);
+        }
+        pub fn START_SEED(rand: Random, state_opaque: *anyopaque, alloc: Allocator, _: *Fuzz.BenchTime) ?[]const u8 {
+            var state: *STATE = @ptrCast(@alignCast(state_opaque));
+            const len = rand.uintLessThan(usize, LARGEST_LEN);
+            state.ref_list.clearRetainingCapacity();
+            state.test_list.clear();
+            state.ref_list.ensureTotalCapacity(alloc, len) catch |err| return Utils.alloc_fail_err(alloc, @src(), err);
+            state.test_list.ensure_free_slots(len);
+            state.ref_list.items.len = len;
+            state.ring_list.len = @intCast(len);
+            if (len > 0) {
+                rand.bytes(state.ref_list.items);
+                @memcpy(state.ring_list.ptr[0..len], state.ref_list.items[0..len]);
+            }
+            return _OPS.verify_whole_state(state, "start_seed", 0, 0, 0, alloc);
+        }
+
+        pub fn DEINIT(state_opaque: *anyopaque, alloc: Allocator) void {
+            const state: *STATE = @ptrCast(@alignCast(state_opaque));
+            state.ref_list.clearAndFree(alloc);
+            state.test_list.free();
+            alloc.destroy(state);
+        }
+
+        const _OPS = make_op_table(T, STATE, 0, true);
+        pub const OPS = _OPS.OPS;
+    };
+    return Fuzz.FuzzTest{
+        .options = Fuzz.FuzzOptions{
+            .name = "IList_RingList_" ++ @typeName(T),
+        },
+        .init_func = PROTO.INIT,
+        .start_seed_func = PROTO.START_SEED,
+        .op_table = PROTO.OPS[0..],
+        .deinit_func = PROTO.DEINIT,
+    };
+}
+
+pub fn make_op_table(comptime T: type, comptime STATE: type, comptime UNINIT: T, comptime LIST_LIKE: bool) type {
     Assert.assert_with_reason(Types.type_has_field_with_type(STATE, "ref_list", std.ArrayList(T)), @src(), "to use this automatic op generator, type `STATE` must have a field named `ref_list` that is of type `ArrayList({s})`", .{@typeName(T)});
     Assert.assert_with_reason(Types.type_has_field_with_type(STATE, "test_list", IList.IList(T)), @src(), "to use this automatic op generator, type `STATE` must have a field named `test_list` that is of type `IList({s})`", .{@typeName(T)});
     return struct {
@@ -219,13 +271,13 @@ pub fn make_op_table(comptime T: type, comptime STATE: type, comptime UNINIT: T,
                 if (curr_n < 2) UNINIT else state.ref_list.items[curr_n - 2],
                 if (curr_n < 1) UNINIT else state.ref_list.items[curr_n - 1],
                 state.ref_list.items[curr_n],
-                if (curr_n > state.ref_list.items.len - 2) UNINIT else state.ref_list.items[curr_n + 1],
-                if (curr_n > state.ref_list.items.len - 3) UNINIT else state.ref_list.items[curr_n + 2],
+                if (curr_n > Types.intcast(state.ref_list.items.len, isize) - 2) UNINIT else state.ref_list.items[curr_n + 1],
+                if (curr_n > Types.intcast(state.ref_list.items.len, isize) - 3) UNINIT else state.ref_list.items[curr_n + 2],
                 if (curr_n < 2) UNINIT else state.test_list.get(state.test_list.nth_prev_idx(curr_idx, 2)),
                 if (curr_n < 1) UNINIT else state.test_list.get(state.test_list.nth_prev_idx(curr_idx, 1)),
                 state.test_list.get(curr_idx),
-                if (curr_n > state.ref_list.items.len - 2) UNINIT else state.test_list.get(state.test_list.nth_next_idx(curr_idx, 1)),
-                if (curr_n > state.ref_list.items.len - 3) UNINIT else state.test_list.get(state.test_list.nth_next_idx(curr_idx, 2)),
+                if (curr_n > Types.intcast(state.ref_list.items.len, isize) - 2) UNINIT else state.test_list.get(state.test_list.nth_next_idx(curr_idx, 1)),
+                if (curr_n > Types.intcast(state.ref_list.items.len, isize) - 3) UNINIT else state.test_list.get(state.test_list.nth_next_idx(curr_idx, 2)),
                 state.test_list.nth_prev_idx(curr_idx, 2),
                 state.test_list.nth_prev_idx(curr_idx, 1),
                 curr_idx,
@@ -234,43 +286,43 @@ pub fn make_op_table(comptime T: type, comptime STATE: type, comptime UNINIT: T,
             });
         }
         fn verify_whole_state(state: *STATE, comptime op_name: []const u8, param_1: usize, param_2: usize, param_3: usize, alloc: Allocator) ?[]const u8 {
-            if (state.ref_list.items.len != state.test_list.len()) return Utils.alloc_fail_str(alloc, @src(), op_name ++ ": ref len != test len ({d} != {d})", .{ state.ref_list.items.len, state.test_list.len() });
-            if (state.test_list.cap() < state.test_list.len()) return Utils.alloc_fail_str(alloc, @src(), op_name ++ ": cap < len ({d} < {d})", .{ state.test_list.cap(), state.test_list.len() });
+            if (state.ref_list.items.len != state.test_list.len()) return Utils.alloc_fail_str(alloc, @src(), op_name ++ "({any}, {any}, {any}): ref len != test len ({d} != {d})", .{ param_1, param_2, param_3, state.ref_list.items.len, state.test_list.len() });
+            if (state.test_list.cap() < state.test_list.len()) return Utils.alloc_fail_str(alloc, @src(), op_name ++ "({any}, {any}, {any}): cap < len ({d} < {d})", .{ param_1, param_2, param_3, state.test_list.cap(), state.test_list.len() });
             if (state.ref_list.items.len == 0) {
-                if (state.test_list.idx_valid(state.test_list.first_idx())) return Utils.alloc_fail_str(alloc, @src(), op_name ++ ": list is empty, but first idx ({d}) was `valid`", .{state.test_list.first_idx()});
-                if (state.test_list.idx_valid(state.test_list.last_idx())) return Utils.alloc_fail_str(alloc, @src(), op_name ++ ": list is empty, but last idx ({d}) was `valid`", .{state.test_list.last_idx()});
+                if (state.test_list.idx_valid(state.test_list.first_idx())) return Utils.alloc_fail_str(alloc, @src(), op_name ++ "({any}, {any}, {any}): list is empty, but first idx ({d}) was `valid`", .{ param_1, param_2, param_3, state.test_list.first_idx() });
+                if (state.test_list.idx_valid(state.test_list.last_idx())) return Utils.alloc_fail_str(alloc, @src(), op_name ++ "({any}, {any}, {any}): list is empty, but last idx ({d}) was `valid`", .{ param_1, param_2, param_3, state.test_list.last_idx() });
             } else {
-                if (!state.test_list.idx_valid(state.test_list.first_idx())) return Utils.alloc_fail_str(alloc, @src(), op_name ++ ": list is not empty, but first idx ({d}) was `invalid`", .{state.test_list.first_idx()});
-                if (!state.test_list.idx_valid(state.test_list.last_idx())) return Utils.alloc_fail_str(alloc, @src(), op_name ++ ": list is not empty, but last idx ({d}) was `invalid`", .{state.test_list.last_idx()});
+                if (!state.test_list.idx_valid(state.test_list.first_idx())) return Utils.alloc_fail_str(alloc, @src(), op_name ++ "({any}, {any}, {any}): list is not empty, but first idx ({d}) was `invalid`", .{ param_1, param_2, param_3, state.test_list.first_idx() });
+                if (!state.test_list.idx_valid(state.test_list.last_idx())) return Utils.alloc_fail_str(alloc, @src(), op_name ++ "({any}, {any}, {any}): list is not empty, but last idx ({d}) was `invalid`", .{ param_1, param_2, param_3, state.test_list.last_idx() });
             }
             var curr_idx = state.test_list.first_idx();
             var curr_n: usize = 0;
             while (curr_n < state.ref_list.items.len) {
-                if (!state.test_list.idx_valid(curr_idx)) return Utils.alloc_fail_str(alloc, @src(), op_name ++ ": found invalid idx in middle of list while traversing forward: N={d}, IDX={d}, LEN = {d}", .{ curr_n, curr_idx, state.ref_list.items.len });
+                if (!state.test_list.idx_valid(curr_idx)) return Utils.alloc_fail_str(alloc, @src(), op_name ++ "({any}, {any}, {any}): found invalid idx in middle of list while traversing forward: N={d}, IDX={d}, LEN = {d}", .{ param_1, param_2, param_3, curr_n, curr_idx, state.ref_list.items.len });
                 const exp_val = state.ref_list.items[curr_n];
                 const got_val = state.test_list.get(curr_idx);
                 if (exp_val != got_val) return val_mismatch(state, @src(), op_name, alloc, "traversing forward", curr_n, curr_idx, param_1, param_2, param_3);
                 curr_n = curr_n + 1;
                 curr_idx = state.test_list.next_idx(curr_idx);
             }
-            if (state.test_list.idx_valid(curr_idx)) return Utils.alloc_fail_str(alloc, @src(), op_name ++ ": found `valid` idx beyond the end of the list while traversing forward: N={d}, IDX={d}, LEN = {d}", .{ curr_n, curr_idx, state.ref_list.items.len });
+            if (state.test_list.idx_valid(curr_idx)) return Utils.alloc_fail_str(alloc, @src(), op_name ++ "({any}, {any}, {any}): found `valid` idx beyond the end of the list while traversing forward: N={d}, IDX={d}, LEN = {d}", .{ param_1, param_2, param_3, curr_n, curr_idx, state.ref_list.items.len });
             curr_idx = state.test_list.last_idx();
             while (curr_n > 0) {
                 curr_n = curr_n - 1;
-                if (!state.test_list.idx_valid(curr_idx)) return Utils.alloc_fail_str(alloc, @src(), op_name ++ ": found invalid idx in middle of list while traversing backward: N={d}, IDX={d}, LEN = {d}", .{ curr_n, curr_idx, state.ref_list.items.len });
+                if (!state.test_list.idx_valid(curr_idx)) return Utils.alloc_fail_str(alloc, @src(), op_name ++ "({any}, {any}, {any}): found invalid idx in middle of list while traversing backward: N={d}, IDX={d}, LEN = {d}", .{ param_1, param_2, param_3, curr_n, curr_idx, state.ref_list.items.len });
                 const exp_val = state.ref_list.items[curr_n];
                 const got_val = state.test_list.get(curr_idx);
                 if (exp_val != got_val) return val_mismatch(state, @src(), op_name, alloc, "traversing backward", curr_n, curr_idx, param_1, param_2, param_3);
                 curr_idx = state.test_list.prev_idx(curr_idx);
             }
-            if (state.test_list.idx_valid(curr_idx)) return Utils.alloc_fail_str(alloc, @src(), op_name ++ ": found `valid` idx before the start of the list while traversing backward: N={d}, IDX={d}, LEN = {d}", .{ curr_n, curr_idx, state.ref_list.items.len });
+            if (state.test_list.idx_valid(curr_idx)) return Utils.alloc_fail_str(alloc, @src(), op_name ++ "({any}, {any}, {any}): found `valid` idx before the start of the list while traversing backward: N={d}, IDX={d}, LEN = {d}", .{ param_1, param_2, param_3, curr_n, curr_idx, state.ref_list.items.len });
             curr_idx = state.test_list.first_idx();
             curr_n = 0;
-            if (state.test_list.idx_valid(state.test_list.vtable.always_invalid_idx)) return Utils.alloc_fail_str(alloc, @src(), op_name ++ ": `always invalid` index reported as valid ({d})", .{state.test_list.vtable.always_invalid_idx});
+            if (state.test_list.idx_valid(state.test_list.vtable.always_invalid_idx)) return Utils.alloc_fail_str(alloc, @src(), op_name ++ "({any}, {any}, {any}): `always invalid` index reported as valid ({d})", .{ param_1, param_2, param_3, state.test_list.vtable.always_invalid_idx });
             return null;
         }
 
-        fn get_nth(rand: Random, state_opaque: *anyopaque, alloc: Allocator) ?[]const u8 {
+        fn get_nth(rand: Random, state_opaque: *anyopaque, alloc: Allocator, _: *Fuzz.BenchTime) ?[]const u8 {
             const state: *STATE = @ptrCast(@alignCast(state_opaque));
             if (state.ref_list.items.len == 0) return null;
             const n = rand.uintLessThan(usize, state.ref_list.items.len);
@@ -280,7 +332,7 @@ pub fn make_op_table(comptime T: type, comptime STATE: type, comptime UNINIT: T,
             if (exp_val != got_val) return val_mismatch(state, @src(), "get_nth", alloc, "at nth position", n, idx, idx, 0, 0);
             return verify_whole_state(state, "get_nth", idx, 0, 0, alloc);
         }
-        fn get_nth_ptr(rand: Random, state_opaque: *anyopaque, alloc: Allocator) ?[]const u8 {
+        fn get_nth_ptr(rand: Random, state_opaque: *anyopaque, alloc: Allocator, _: *Fuzz.BenchTime) ?[]const u8 {
             const state: *STATE = @ptrCast(@alignCast(state_opaque));
             if (state.ref_list.items.len == 0) return null;
             const n = rand.uintLessThan(usize, state.ref_list.items.len);
@@ -297,7 +349,7 @@ pub fn make_op_table(comptime T: type, comptime STATE: type, comptime UNINIT: T,
             if (got_val_3 != exp_val) return Utils.alloc_fail_str(alloc, @src(), "get_nth_ptr(): setting value to pointer didn't affect value returned by get(): N={d}, IDX={d}, SET={any}, GOT={any}", .{ n, idx, exp_val, got_val_3 });
             return verify_whole_state(state, "get_nth_ptr", idx, 0, 0, alloc);
         }
-        fn set_nth(rand: Random, state_opaque: *anyopaque, alloc: Allocator) ?[]const u8 {
+        fn set_nth(rand: Random, state_opaque: *anyopaque, alloc: Allocator, _: *Fuzz.BenchTime) ?[]const u8 {
             const state: *STATE = @ptrCast(@alignCast(state_opaque));
             if (state.ref_list.items.len == 0) return null;
             const n = rand.uintLessThan(usize, state.ref_list.items.len);
@@ -308,7 +360,7 @@ pub fn make_op_table(comptime T: type, comptime STATE: type, comptime UNINIT: T,
             state.test_list.set(idx, b[0]);
             return verify_whole_state(state, "set_nth", idx, @intCast(b[0]), 0, alloc);
         }
-        fn check_nth_idx(rand: Random, state_opaque: *anyopaque, alloc: Allocator) ?[]const u8 {
+        fn check_nth_idx(rand: Random, state_opaque: *anyopaque, alloc: Allocator, _: *Fuzz.BenchTime) ?[]const u8 {
             const state: *STATE = @ptrCast(@alignCast(state_opaque));
             const n = rand.uintLessThan(usize, 1 + (state.ref_list.items.len * 2));
             const idx_1 = state.test_list.nth_idx(n);
@@ -322,7 +374,7 @@ pub fn make_op_table(comptime T: type, comptime STATE: type, comptime UNINIT: T,
             }
             return verify_whole_state(state, "check_nth_idx", idx_1, idx_2, 0, alloc);
         }
-        pub fn idx_range_valid(rand: Random, state_opaque: *anyopaque, alloc: Allocator) ?[]const u8 {
+        pub fn idx_range_valid(rand: Random, state_opaque: *anyopaque, alloc: Allocator, _: *Fuzz.BenchTime) ?[]const u8 {
             const state: *STATE = @ptrCast(@alignCast(state_opaque));
             const n1 = rand.uintAtMost(usize, state.ref_list.items.len * 2);
             const n2 = rand.uintAtMost(usize, state.ref_list.items.len * 2);
@@ -345,7 +397,7 @@ pub fn make_op_table(comptime T: type, comptime STATE: type, comptime UNINIT: T,
             }
             return verify_whole_state(state, "idx_range_valid", idx_1, idx_2, 0, alloc);
         }
-        pub fn split_range(rand: Random, state_opaque: *anyopaque, alloc: Allocator) ?[]const u8 {
+        pub fn split_range(rand: Random, state_opaque: *anyopaque, alloc: Allocator, _: *Fuzz.BenchTime) ?[]const u8 {
             const state: *STATE = @ptrCast(@alignCast(state_opaque));
             if (state.ref_list.items.len == 0) return null;
             var n1 = rand.uintLessThan(usize, state.ref_list.items.len);
@@ -367,7 +419,7 @@ pub fn make_op_table(comptime T: type, comptime STATE: type, comptime UNINIT: T,
             }
             return verify_whole_state(state, "split_range", idx_1, idx_3, 0, alloc);
         }
-        pub fn move(rand: Random, state_opaque: *anyopaque, alloc: Allocator) ?[]const u8 {
+        pub fn move(rand: Random, state_opaque: *anyopaque, alloc: Allocator, _: *Fuzz.BenchTime) ?[]const u8 {
             const state: *STATE = @ptrCast(@alignCast(state_opaque));
             if (state.ref_list.items.len == 0) return null;
             const n1 = rand.uintLessThan(usize, state.ref_list.items.len);
@@ -378,7 +430,7 @@ pub fn make_op_table(comptime T: type, comptime STATE: type, comptime UNINIT: T,
             state.test_list.move(idx_1, idx_2);
             return verify_whole_state(state, "move", idx_1, idx_2, 0, alloc);
         }
-        pub fn move_range(rand: Random, state_opaque: *anyopaque, alloc: Allocator) ?[]const u8 {
+        pub fn move_range(rand: Random, state_opaque: *anyopaque, alloc: Allocator, _: *Fuzz.BenchTime) ?[]const u8 {
             const state: *STATE = @ptrCast(@alignCast(state_opaque));
             if (state.ref_list.items.len == 0) return null;
             var n1 = rand.uintLessThan(usize, state.ref_list.items.len);
@@ -398,7 +450,7 @@ pub fn make_op_table(comptime T: type, comptime STATE: type, comptime UNINIT: T,
             state.test_list.move_range(.new_range(idx_1, idx_2), idx_3);
             return verify_whole_state(state, "move_range", idx_1, idx_2, idx_3, alloc);
         }
-        pub fn range_len(rand: Random, state_opaque: *anyopaque, alloc: Allocator) ?[]const u8 {
+        pub fn range_len(rand: Random, state_opaque: *anyopaque, alloc: Allocator, _: *Fuzz.BenchTime) ?[]const u8 {
             const state: *STATE = @ptrCast(@alignCast(state_opaque));
             if (state.ref_list.items.len == 0) return null;
             var n1 = rand.uintLessThan(usize, state.ref_list.items.len);
@@ -414,7 +466,7 @@ pub fn make_op_table(comptime T: type, comptime STATE: type, comptime UNINIT: T,
             if (rlen != ((n2 - n1) + 1)) return Utils.alloc_fail_str(alloc, @src(), "range_len(): returned len  was incorrect got_len({d}) != exp_len({d}) ((({d} - {d}) + 1)))", .{ rlen, ((n2 - n1) + 1), n2, n1 });
             return verify_whole_state(state, "range_len", idx_1, idx_2, 0, alloc);
         }
-        pub fn ensure_free_slots(rand: Random, state_opaque: *anyopaque, alloc: Allocator) ?[]const u8 {
+        pub fn ensure_free_slots(rand: Random, state_opaque: *anyopaque, alloc: Allocator, _: *Fuzz.BenchTime) ?[]const u8 {
             const state: *STATE = @ptrCast(@alignCast(state_opaque));
             const count = @min(@max(1, rand.uintLessThan(usize, LARGEST_COPY)), LARGEST_LEN - state.ref_list.items.len);
             if (count == 0) return null;
@@ -423,7 +475,7 @@ pub fn make_op_table(comptime T: type, comptime STATE: type, comptime UNINIT: T,
             if (did_ensure and !state.test_list.ensure_free_doesnt_change_cap() and (state.test_list.cap() - state.test_list.len() < count)) return Utils.alloc_fail_str(alloc, @src(), "ensure_free_slots(): try_ensure_free_slots() didnt provide enough capacity: WANT={d}, CAP={d}, LEN={d}, HAVE={d}", .{ count, state.test_list.cap(), state.test_list.len(), state.test_list.cap() - state.test_list.len() });
             return verify_whole_state(state, "ensure_free_slots", count, 0, 0, alloc);
         }
-        pub fn append_slots(rand: Random, state_opaque: *anyopaque, alloc: Allocator) ?[]const u8 {
+        pub fn append_slots(rand: Random, state_opaque: *anyopaque, alloc: Allocator, _: *Fuzz.BenchTime) ?[]const u8 {
             const state: *STATE = @ptrCast(@alignCast(state_opaque));
             const count = @min(@max(1, rand.uintLessThan(usize, LARGEST_COPY)), LARGEST_LEN - state.ref_list.items.len);
             if (count == 0) return null;
@@ -441,9 +493,9 @@ pub fn make_op_table(comptime T: type, comptime STATE: type, comptime UNINIT: T,
             }
             return verify_whole_state(state, "append_slots", count, 0, 0, alloc);
         }
-        pub fn insert_slots(rand: Random, state_opaque: *anyopaque, alloc: Allocator) ?[]const u8 {
+        pub fn insert_slots(rand: Random, state_opaque: *anyopaque, alloc: Allocator, bench: *Fuzz.BenchTime) ?[]const u8 {
             const state: *STATE = @ptrCast(@alignCast(state_opaque));
-            if (state.ref_list.items.len == 0) return append_slots(rand, state, alloc);
+            if (state.ref_list.items.len == 0) return append_slots(rand, state, alloc, bench);
             const count = @min(@max(1, rand.uintLessThan(usize, LARGEST_COPY)), LARGEST_LEN - state.ref_list.items.len);
             if (count == 0) return null;
             const n = rand.uintLessThan(usize, state.ref_list.items.len);
@@ -462,7 +514,7 @@ pub fn make_op_table(comptime T: type, comptime STATE: type, comptime UNINIT: T,
             }
             return verify_whole_state(state, "insert_slots", idx, count, 0, alloc);
         }
-        pub fn delete_range(rand: Random, state_opaque: *anyopaque, alloc: Allocator) ?[]const u8 {
+        pub fn delete_range(rand: Random, state_opaque: *anyopaque, alloc: Allocator, _: *Fuzz.BenchTime) ?[]const u8 {
             const state: *STATE = @ptrCast(@alignCast(state_opaque));
             if (state.ref_list.items.len == 0) return null;
             var n1 = rand.uintLessThan(usize, state.ref_list.items.len);
@@ -479,15 +531,31 @@ pub fn make_op_table(comptime T: type, comptime STATE: type, comptime UNINIT: T,
             state.test_list.delete_range(.new_range(idx_1, idx_2));
             return verify_whole_state(state, "delete_range", idx_1, idx_2, 0, alloc);
         }
-        pub fn increment_start(rand: Random, state_opaque: *anyopaque, alloc: Allocator) ?[]const u8 {
+        pub fn shrink_cap(rand: Random, state_opaque: *anyopaque, alloc: Allocator, _: *Fuzz.BenchTime) ?[]const u8 {
+            const state: *STATE = @ptrCast(@alignCast(state_opaque));
+            if (state.ref_list.items.len == 0) return null;
+            const n = rand.uintAtMost(usize, LARGEST_COPY);
+            const new_cap = @min(state.ref_list.items.len + n, state.ref_list.capacity);
+            const len = state.ref_list.items.len;
+            state.ref_list.items.len = new_cap;
+            state.ref_list.shrinkRetainingCapacity(state.ref_list.items.len);
+            state.ref_list.items.len = len;
+            const min_test_n = @min(n, state.test_list.cap() - state.test_list.len());
+            state.test_list.shrink_cap_reserve_at_most(n);
+            if (state.test_list.cap() - state.test_list.len() < min_test_n) return Utils.alloc_fail_str(alloc, @src(), "shrink_cap({d}) failed to leave at least {d} free slots (@min(old_cap - len, {d}))", .{ n, min_test_n, n });
+            return verify_whole_state(state, "shrink_cap", n, 0, 0, alloc);
+        }
+        pub fn increment_start(rand: Random, state_opaque: *anyopaque, alloc: Allocator, _: *Fuzz.BenchTime) ?[]const u8 {
             const state: *STATE = @ptrCast(@alignCast(state_opaque));
             if (state.ref_list.items.len == 0) return null;
             const n = @min(@max(1, rand.uintAtMost(usize, LARGEST_COPY)), state.ref_list.items.len);
-            state.ref_list.replaceRange(alloc, 0, n, &.{});
+            const nn = state.ref_list.items[n..].len;
+            @memmove(state.ref_list.items[0..nn], state.ref_list.items[n..]);
+            state.ref_list.items.len -= n;
             state.test_list.increment_start(n);
             return verify_whole_state(state, "increment_start", n, 0, 0, alloc);
         }
-        pub fn clear(rand: Random, state_opaque: *anyopaque, alloc: Allocator) ?[]const u8 {
+        pub fn clear(rand: Random, state_opaque: *anyopaque, alloc: Allocator, _: *Fuzz.BenchTime) ?[]const u8 {
             _ = rand;
             const state: *STATE = @ptrCast(@alignCast(state_opaque));
             state.ref_list.clearRetainingCapacity();
@@ -495,25 +563,7 @@ pub fn make_op_table(comptime T: type, comptime STATE: type, comptime UNINIT: T,
             return verify_whole_state(state, "clear", 0, 0, 0, alloc);
         }
 
-        pub const IDX = struct {
-            pub const GET_NTH = 0;
-            pub const GET_NTH_PTR = 1;
-            pub const SET_NTH = 2;
-            pub const CHECK_NTH_IDX = 3;
-            pub const IDX_RANGE_VALID = 4;
-            pub const SPLIT_RANGE = 5;
-            pub const MOVE = 6;
-            pub const MOVE_RANGE = 7;
-            pub const RANGE_LEN = 8;
-            pub const ENSURE_FREE_SLOTS = 9;
-            pub const APPEND_SLOTS = 10;
-            pub const INSERT_SLOTS = 11;
-            pub const DELETE_RANGE = 12;
-            pub const INCREASE_START = 13;
-            pub const CLEAR = 14;
-        };
-
-        pub const OPS = [_]*const fn (rand: Random, state_opq: *anyopaque, alloc: Allocator) ?[]const u8{
+        pub const OPS = [_]*const fn (rand: Random, state_opq: *anyopaque, alloc: Allocator, _: *Fuzz.BenchTime) ?[]const u8{
             get_nth,
             get_nth_ptr,
             set_nth,
@@ -527,8 +577,124 @@ pub fn make_op_table(comptime T: type, comptime STATE: type, comptime UNINIT: T,
             if (LIST_LIKE) append_slots else set_nth,
             if (LIST_LIKE) insert_slots else check_nth_idx,
             if (LIST_LIKE) delete_range else idx_range_valid,
-            if (QUEUE_LIKE) increment_start else move,
+            if (LIST_LIKE) shrink_cap else split_range,
             if (LIST_LIKE) clear else move_range,
         };
     };
 }
+
+pub fn make_bench_table_random_ins_del_get_set(comptime T: type, comptime STATE: type) type {
+    Assert.assert_with_reason(Types.type_has_field_with_type(STATE, "test_list", IList.IList(T)), @src(), "to use this automatic op generator, type `STATE` must have a field named `test_list` that is of type `IList({s})`", .{@typeName(T)});
+    Assert.assert_with_reason(Types.type_has_field_with_type(STATE, "tmp_val", T), @src(), "to use this automatic op generator, type `STATE` must have a field named `tmp_val` that is of type `{s}`", .{@typeName(T)});
+    Assert.assert_with_reason(Types.type_has_field_with_type(STATE, "tmp_range", IList.Range), @src(), "to use this automatic op generator, type `STATE` must have a field named `tmp_range` that is of type `IList.Range`", .{@typeName(T)});
+    return struct {
+        fn get_nth(rand: Random, state_opaque: *anyopaque, _: Allocator, bench: *Fuzz.BenchTime) ?[]const u8 {
+            const state: *STATE = @ptrCast(@alignCast(state_opaque));
+            const len = state.test_list.len();
+            if (len == 0) return null;
+            const n = rand.uintLessThan(usize, state.ref_list.items.len);
+            bench.start();
+            state.tmp_val = state.test_list.get_nth(n);
+            bench.end();
+        }
+        fn set_nth(rand: Random, state_opaque: *anyopaque, _: Allocator, bench: *Fuzz.BenchTime) ?[]const u8 {
+            const state: *STATE = @ptrCast(@alignCast(state_opaque));
+            const len = state.test_list.len();
+            if (len == 0) return null;
+            const n = rand.uintLessThan(usize, state.ref_list.items.len);
+            bench.start();
+            state.tmp_val = state.test_list.get_nth(n);
+            bench.end();
+        }
+        pub fn insert(rand: Random, state_opaque: *anyopaque, _: Allocator, bench: *Fuzz.BenchTime) ?[]const u8 {
+            const state: *STATE = @ptrCast(@alignCast(state_opaque));
+            const len = state.test_list.len();
+            const count = @min(@max(1, rand.uintLessThan(usize, LARGEST_COPY)), LARGEST_LEN - len);
+            const n = rand.uintLessThan(usize, len);
+            bench.start();
+            const idx = state.test_list.nth_idx(n);
+            state.tmp_range = state.test_list.insert_slots(idx, count);
+            bench.end();
+        }
+        pub fn append(rand: Random, state_opaque: *anyopaque, _: Allocator, bench: *Fuzz.BenchTime) ?[]const u8 {
+            const state: *STATE = @ptrCast(@alignCast(state_opaque));
+            const len = state.test_list.len();
+            const count = @min(@max(1, rand.uintLessThan(usize, LARGEST_COPY)), LARGEST_LEN - len);
+            bench.start();
+            state.tmp_range = state.test_list.append_slots(count);
+            bench.end();
+        }
+        pub fn delete(rand: Random, state_opaque: *anyopaque, _: Allocator, bench: *Fuzz.BenchTime) ?[]const u8 {
+            const state: *STATE = @ptrCast(@alignCast(state_opaque));
+            const len = state.test_list.len();
+            if (len == 0) return null;
+            var n1 = rand.uintLessThan(usize, len);
+            var n2 = rand.uintLessThan(usize, len);
+            if (n1 > n2) {
+                const tmp = n2;
+                n2 = n1;
+                n1 = tmp;
+            }
+            bench.start();
+            const idx_1: usize = state.test_list.nth_idx(n1);
+            const idx_2: usize = state.test_list.nth_idx(n2);
+            state.test_list.delete_range(.new_range(idx_1, idx_2));
+            bench.end();
+        }
+
+        pub const OPS = [_]*const fn (rand: Random, state_opq: *anyopaque, alloc: Allocator, bench: *Fuzz.BenchTime) ?[]const u8{
+            get_nth,
+            set_nth,
+            insert,
+            append,
+            delete,
+        };
+    };
+}
+
+// pub const Functionality = struct {
+//     const REF = std.ArrayList(u8);
+//     const TEST = IList.IList(u8);
+//     const TEST_BASE = ArrayListAdapter(u8).Adapter;
+//     const STATE = struct {
+//         ref_list: REF,
+//         test_list: TEST,
+//         test_base: TEST_BASE,
+//     };
+//     const IMPL_OPS = make_op_table(u8, STATE, 0, true, comptime QUEUE_LIKE: bool)
+//     pub fn INIT(state_opaque: **anyopaque, alloc: Allocator) anyerror!void {
+//         var state = try alloc.create(STATE);
+//         state.ref_list = try REF.initCapacity(alloc, LARGEST_LEN);
+//         const test_base = try REF.initCapacity(alloc, LARGEST_LEN);
+//         state.test_base = TEST_BASE.adapt(test_base, alloc);
+//         state.test_list = state.test_base.interface();
+//         state_opaque.* = @ptrCast(state);
+//     }
+//     pub fn START_SEED(rand: Random, state_opaque: *anyopaque, alloc: Allocator) ?[]const u8 {
+//         var state: *STATE = @ptrCast(@alignCast(state_opaque));
+//         const len = rand.uintLessThan(usize, SMALL_LEN);
+//         state.ref_list.clearRetainingCapacity();
+//         state.test_base.list.clearRetainingCapacity();
+//         state.ref_list.ensureTotalCapacity(alloc, len) catch |err| return Utils.alloc_fail_err(alloc, @src(), err);
+//         state.test_base.list.ensureTotalCapacity(alloc, len) catch |err| return Utils.alloc_fail_err(alloc, @src(), err);
+//         state.ref_list.items.len = len;
+//         state.test_base.list.items.len = len;
+//         if (len > 0) {
+//             rand.bytes(state.ref_list.items);
+//             @memcpy(state.test_base.list.items[0..len], state.ref_list.items[0..len]);
+//         }
+//     }
+
+//     pub fn DEINIT(state_opaque: *anyopaque, alloc: Allocator) void {
+//         const state: *STATE = @ptrCast(@alignCast(state_opaque));
+//         state.ref_list.clearAndFree(alloc);
+//         state.test_base.list.clearAndFree(alloc);
+//         alloc.destroy(state);
+//     }
+
+//     fn reverse(rand: Random, state_opaque: *anyopaque, alloc: Allocator) ?[]const u8 {
+//         const state: *STATE = @ptrCast(@alignCast(state_opaque));
+//         std.mem.reverse(u8, state.ref_list.items);
+//         state.
+//     }
+// };

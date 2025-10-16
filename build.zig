@@ -152,4 +152,24 @@ pub fn build(b: *std.Build) void {
 
     const run_fuzztest_cmd = b.step("fuzztest", "Run all (or one) library fuzz tests");
     run_fuzztest_cmd.dependOn(&run_fuzztest.step);
+
+    // BENCH TESTS
+    const benchtest_mod = b.addModule("benchtest", .{
+        .optimize = optimize,
+        .target = target,
+        .root_source_file = b.path("src/_bench.zig"),
+    });
+    const benchtest = b.addExecutable(.{
+        .name = "benchtest",
+        .root_module = benchtest_mod,
+    });
+    benchtest.root_module.addImport("Goolib", lib);
+    b.installArtifact(benchtest);
+
+    const run_benchtest = b.addRunArtifact(benchtest);
+    if (b.args) |args| run_benchtest.addArgs(args);
+    run_benchtest.step.dependOn(b.getInstallStep());
+
+    const run_benchtest_cmd = b.step("benchtest", "Run all (or one) library bench tests");
+    run_benchtest_cmd.dependOn(&run_benchtest.step);
 }

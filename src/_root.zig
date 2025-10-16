@@ -54,6 +54,7 @@ pub const GenId = @import("./GenId.zig");
 pub const IList_ArrayListAdapter = @import("./IList_ArrayListAdapter.zig");
 pub const IList_Iterator = @import("./IList_Iterator.zig");
 pub const IList_List = @import("./IList_List.zig");
+pub const IList_RingList = @import("./IList_RingList.zig");
 pub const IList_SliceAdapter = @import("./IList_SliceAdapter.zig");
 pub const IList = @import("./IList.zig");
 pub const InsertionSort = @import("./InsertionSort.zig");
@@ -107,6 +108,7 @@ comptime {
         _ = @import("./IList_ArrayListAdapter.zig");
         _ = @import("./IList_Iterator.zig");
         _ = @import("./IList_List.zig");
+        _ = @import("./IList_RingList.zig");
         _ = @import("./IList_SliceAdapter.zig");
         _ = @import("./IList.zig");
         _ = @import("./InsertionSort.zig");

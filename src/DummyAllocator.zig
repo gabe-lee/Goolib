@@ -36,33 +36,33 @@ pub const DUMMY_VTABLE = Allocator.VTable{
     .remap = dummy_remap,
     .free = dummy_free,
 };
-pub fn dummy_alloc(self: *anyopaque, len: usize, alignment: mem.Alignment, ret_addr: usize) ?[*]u8 {
-    _ = self;
-    _ = len;
-    _ = alignment;
-    _ = ret_addr;
+pub fn dummy_alloc(_: *anyopaque, _: usize, _: mem.Alignment, _: usize) ?[*]u8 {
     return null;
 }
-pub fn dummy_resize(self: *anyopaque, memory: []u8, alignment: mem.Alignment, new_len: usize, ret_addr: usize) bool {
-    _ = self;
-    _ = memory;
-    _ = new_len;
-    _ = alignment;
-    _ = ret_addr;
+pub fn dummy_resize(_: *anyopaque, _: []u8, _: mem.Alignment, _: usize, _: usize) bool {
     return false;
 }
-pub fn dummy_remap(self: *anyopaque, memory: []u8, alignment: mem.Alignment, new_len: usize, ret_addr: usize) ?[*]u8 {
-    _ = self;
-    _ = memory;
-    _ = new_len;
-    _ = alignment;
-    _ = ret_addr;
+pub fn dummy_remap(_: *anyopaque, _: []u8, _: mem.Alignment, _: usize, _: usize) ?[*]u8 {
     return null;
 }
-pub fn dummy_free(self: *anyopaque, memory: []u8, alignment: mem.Alignment, ret_addr: usize) void {
-    _ = self;
-    _ = memory;
-    _ = alignment;
-    _ = ret_addr;
+pub fn dummy_free(_: *anyopaque, _: []u8, _: mem.Alignment, _: usize) void {
     return;
+}
+
+pub const allocator_shrink_only = Allocator{
+    .ptr = undefined,
+    .vtable = &DUMMY_VTABLE_SHRINK_ONLY,
+};
+pub const DUMMY_VTABLE_SHRINK_ONLY = Allocator.VTable{
+    .alloc = dummy_alloc,
+    .resize = dummy_resize_shrink_only,
+    .remap = dummy_remap_shrink_only,
+    .free = dummy_free,
+};
+pub fn dummy_resize_shrink_only(_: *anyopaque, memory: []u8, _: mem.Alignment, new_len: usize, _: usize) bool {
+    return new_len <= memory.len;
+}
+pub fn dummy_remap_shrink_only(_: *anyopaque, memory: []u8, _: mem.Alignment, new_len: usize, _: usize) ?[*]u8 {
+    if (new_len <= memory.len) return memory.ptr;
+    return null;
 }

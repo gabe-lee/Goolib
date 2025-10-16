@@ -34,23 +34,14 @@ const Utils = Root.Utils;
 pub fn ArrayListAdapter(comptime T: type) type {
     const AList = std.ArrayList(T);
     return struct {
-        pub fn adapt(list: AList, alloc: Allocator) Adapter {
-            return Adapter{
-                .list = list,
+        pub fn interface(list: *std.ArrayList(T), alloc: Allocator) ILIST {
+            return ILIST{
                 .alloc = alloc,
+                .object = @ptrCast(list),
+                .vtable = &ILIST_VTABLE,
             };
         }
-        pub const Adapter = struct {
-            list: AList,
-            alloc: Allocator,
 
-            pub fn interface(self: *Adapter) ILIST {
-                return ILIST{
-                    .object = @ptrCast(@alignCast(self)),
-                    .vtable = &ILIST_VTABLE,
-                };
-            }
-        };
         const ILIST = IList.IList(T);
         const ILIST_VTABLE = ILIST.VTable{
             .all_indexes_zero_to_len_valid = true,
@@ -78,41 +69,42 @@ pub fn ArrayListAdapter(comptime T: type) type {
             .append_slots_assume_capacity = impl_append,
             .insert_slots_assume_capacity = impl_insert,
             .delete_range = impl_delete,
+            .shrink_cap_reserve_at_most = impl_shrink_cap,
             .clear = impl_clear,
             .cap = impl_cap,
             .free = impl_free,
         };
         fn impl_idx_valid(object: *anyopaque, idx: usize) bool {
-            const self: *Adapter = @ptrCast(@alignCast(object));
-            return idx < self.list.items.len;
+            const list: *AList = @ptrCast(@alignCast(object));
+            return idx < list.items.len;
         }
         fn impl_range_valid(object: *anyopaque, range: IList.Range) bool {
-            const self: *Adapter = @ptrCast(@alignCast(object));
-            return range.first_idx <= range.last_idx and range.last_idx < self.list.items.len;
+            const list: *AList = @ptrCast(@alignCast(object));
+            return range.first_idx <= range.last_idx and range.last_idx < list.items.len;
         }
         fn impl_split_range(object: *anyopaque, range: IList.Range) usize {
             _ = object;
             return ((range.last_idx - range.first_idx) >> 1) + range.first_idx;
         }
         fn impl_get(object: *anyopaque, idx: usize) T {
-            const self: *Adapter = @ptrCast(@alignCast(object));
-            return self.list.items[idx];
+            const list: *AList = @ptrCast(@alignCast(object));
+            return list.items[idx];
         }
         fn impl_get_ptr(object: *anyopaque, idx: usize) *T {
-            const self: *Adapter = @ptrCast(@alignCast(object));
-            return &self.list.items[idx];
+            const list: *AList = @ptrCast(@alignCast(object));
+            return &list.items[idx];
         }
         fn impl_set(object: *anyopaque, idx: usize, val: T) void {
-            const self: *Adapter = @ptrCast(@alignCast(object));
-            self.list.items[idx] = val;
+            const list: *AList = @ptrCast(@alignCast(object));
+            list.items[idx] = val;
         }
         fn impl_move(object: *anyopaque, old_idx: usize, new_idx: usize) void {
-            const self: *Adapter = @ptrCast(@alignCast(object));
-            Utils.slice_move_one(self.list.items, old_idx, new_idx);
+            const list: *AList = @ptrCast(@alignCast(object));
+            Utils.slice_move_one(list.items, old_idx, new_idx);
         }
         fn impl_move_range(object: *anyopaque, range: IList.Range, new_first_idx: usize) void {
-            const self: *Adapter = @ptrCast(@alignCast(object));
-            Utils.slice_move_many(self.list.items, range.first_idx, range.last_idx, new_first_idx);
+            const list: *AList = @ptrCast(@alignCast(object));
+            Utils.slice_move_many(list.items, range.first_idx, range.last_idx, new_first_idx);
         }
         fn impl_first(object: *anyopaque) usize {
             _ = object;
@@ -127,8 +119,8 @@ pub fn ArrayListAdapter(comptime T: type) type {
             return idx + n;
         }
         fn impl_last(object: *anyopaque) usize {
-            const self: *Adapter = @ptrCast(@alignCast(object));
-            return self.list.items.len -% 1;
+            const list: *AList = @ptrCast(@alignCast(object));
+            return list.items.len -% 1;
         }
         fn impl_prev(object: *anyopaque, idx: usize) usize {
             _ = object;
@@ -139,52 +131,58 @@ pub fn ArrayListAdapter(comptime T: type) type {
             return idx -% n;
         }
         fn impl_len(object: *anyopaque) usize {
-            const self: *Adapter = @ptrCast(@alignCast(object));
-            return self.list.items.len;
+            const list: *AList = @ptrCast(@alignCast(object));
+            return list.items.len;
         }
         fn impl_range_len(object: *anyopaque, range: IList.Range) usize {
             _ = object;
             return (range.last_idx - range.first_idx) + 1;
         }
-        fn impl_ensure_free(object: *anyopaque, count: usize) bool {
-            const self: *Adapter = @ptrCast(@alignCast(object));
-            self.list.ensureUnusedCapacity(self.alloc, count) catch return false;
+        fn impl_ensure_free(object: *anyopaque, count: usize, alloc: Allocator) bool {
+            const list: *AList = @ptrCast(@alignCast(object));
+            list.ensureUnusedCapacity(alloc, count) catch return false;
             return true;
         }
-        fn impl_append(object: *anyopaque, count: usize) IList.Range {
-            const self: *Adapter = @ptrCast(@alignCast(object));
-            const new_len = self.list.items.len + count;
-            const start = self.list.items.len;
+        fn impl_append(object: *anyopaque, count: usize, _: Allocator) IList.Range {
+            const list: *AList = @ptrCast(@alignCast(object));
+            const new_len = list.items.len + count;
+            const start = list.items.len;
             const end = new_len;
-            _ = self.list.addManyAt(self.alloc, self.list.items.len, count) catch unreachable;
+            _ = list.addManyAtAssumeCapacity(list.items.len, count);
             return IList.Range.new_range(start, end - 1);
         }
-        fn impl_insert(object: *anyopaque, idx: usize, count: usize) IList.Range {
-            const self: *Adapter = @ptrCast(@alignCast(object));
+        fn impl_insert(object: *anyopaque, idx: usize, count: usize, _: Allocator) IList.Range {
+            const list: *AList = @ptrCast(@alignCast(object));
             const start = idx;
             const end = idx + count;
-            _ = self.list.addManyAt(self.alloc, idx, count) catch unreachable;
+            _ = list.addManyAtAssumeCapacity(idx, count);
             return IList.Range.new_range(start, end - 1);
         }
-        fn impl_delete(object: *anyopaque, range: IList.Range) void {
-            const self: *Adapter = @ptrCast(@alignCast(object));
-            self.list.replaceRange(self.alloc, range.first_idx, (range.last_idx - range.first_idx) + 1, &.{}) catch unreachable;
-            // std.mem.copyForwards(T, self.list.items[range.first_idx..], self.list.items[range.last_idx + 1 ..]);
-            // const rem_count = (range.last_idx - range.first_idx) + 1;
-            // const new_len = self.list.items.len - rem_count;
-            // self.list.items.len = new_len;
+        fn impl_delete(object: *anyopaque, range: IList.Range, _: Allocator) void {
+            const list: *AList = @ptrCast(@alignCast(object));
+            // list.replaceRange(alloc, range.first_idx, (range.last_idx - range.first_idx) + 1, &.{}) catch unreachable;
+            std.mem.copyForwards(T, list.items[range.first_idx..], list.items[range.last_idx + 1 ..]);
+            list.items.len -= (range.last_idx - range.first_idx) + 1;
         }
-        fn impl_clear(object: *anyopaque) void {
-            const self: *Adapter = @ptrCast(@alignCast(object));
-            self.list.clearRetainingCapacity();
+        fn impl_shrink_cap(object: *anyopaque, n: usize, _: Allocator) void {
+            const list: *AList = @ptrCast(@alignCast(object));
+            const new_cap = @min(list.items.len + n, list.capacity);
+            const len = list.items.len;
+            list.items.len = new_cap;
+            list.shrinkRetainingCapacity(list.items.len);
+            list.items.len = len;
+        }
+        fn impl_clear(object: *anyopaque, _: Allocator) void {
+            const list: *AList = @ptrCast(@alignCast(object));
+            list.clearRetainingCapacity();
         }
         fn impl_cap(object: *anyopaque) usize {
-            const self: *Adapter = @ptrCast(@alignCast(object));
-            return self.list.capacity;
+            const list: *AList = @ptrCast(@alignCast(object));
+            return list.capacity;
         }
-        fn impl_free(object: *anyopaque) void {
-            const self: *Adapter = @ptrCast(@alignCast(object));
-            self.list.clearAndFree(self.alloc);
+        fn impl_free(object: *anyopaque, alloc: Allocator) void {
+            const list: *AList = @ptrCast(@alignCast(object));
+            list.clearAndFree(alloc);
         }
     };
 }

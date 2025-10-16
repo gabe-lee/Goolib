@@ -849,3 +849,55 @@ pub fn alloc_fail_str(alloc: Allocator, comptime src: builtin.SourceLocation, co
     const fullargs = .{SrcFmt.new(src)} ++ args;
     return fmt.allocPrint(alloc, "{f} -> " ++ str, fullargs) catch return str;
 }
+
+/// This method moves all items at `data_ptr[start..]` up `n` places,
+/// and alters `len_ptr` to reflect the new length
+///
+/// Assumes `data_ptr[0..(len_ptr.* + n)]` is a valid slice (sufficient memory is allocated)
+pub fn mem_insert(data_ptr: anytype, len_ptr: anytype, start: usize, n: usize) void {
+    const PTR = @TypeOf(data_ptr);
+    const LEN_PTR = @TypeOf(len_ptr);
+    assert_with_reason(Types.type_is_many_item_pointer(PTR), @src(), "type of `data_ptr` must be a many-item-pointer, got type {s}", .{@typeName(PTR)});
+    assert_with_reason(Types.type_is_single_item_pointer(LEN_PTR), @src(), "type of `len_ptr` must be a single-item-pointer to an integer type, got type {s}", .{@typeName(LEN_PTR)});
+    const LEN = @typeInfo(LEN_PTR).pointer.child;
+    assert_with_reason(Types.type_is_int(LEN), @src(), "type of `len_ptr` must be a single-item-pointer to an integer type, got type {s}", .{@typeName(LEN_PTR)});
+    const new_start = start + n;
+    const move_len: usize = @as(usize, @intCast(len_ptr.*)) - start;
+    @memmove(data_ptr[new_start .. new_start + move_len], data_ptr[start .. start + move_len]);
+    len_ptr.* += @intCast(n);
+}
+
+/// This method moves all items at `data_ptr[start+n..]` down `n` places,
+/// and alters `len_ptr` to reflect the new length
+pub fn mem_remove(data_ptr: anytype, len_ptr: anytype, start: usize, n: usize) void {
+    const PTR = @TypeOf(data_ptr);
+    const LEN_PTR = @TypeOf(len_ptr);
+    assert_with_reason(Types.type_is_many_item_pointer(PTR), @src(), "type of `data_ptr` must be a many-item-pointer, got type {s}", .{@typeName(PTR)});
+    assert_with_reason(Types.type_is_single_item_pointer(LEN_PTR), @src(), "type of `len_ptr` must be a single-item-pointer to an integer type, got type {s}", .{@typeName(LEN_PTR)});
+    const LEN = @typeInfo(LEN_PTR).pointer.child;
+    assert_with_reason(Types.type_is_int(LEN), @src(), "type of `len_ptr` must be a single-item-pointer to an integer type, got type {s}", .{@typeName(LEN_PTR)});
+    const new_start = start + n;
+    const move_len: usize = @as(usize, @intCast(len_ptr.*)) - new_start;
+    @memmove(data_ptr[start .. start + move_len], data_ptr[new_start .. new_start + move_len]);
+    len_ptr.* -= @intCast(n);
+}
+
+pub fn mem_realloc(comptime T: type, comptime I: type, ptr: *[*]T, len: I, cap: *I, new_cap: I, alloc: Allocator, comptime RET_BOOL: bool) if (RET_BOOL) bool else void {
+    assert_with_reason(Types.type_is_unsigned_int(I), @src(), "type `I` was not an unsigned integer type, got {s}", .{@typeName(I)});
+    const old_slice = ptr.*[0..cap.*];
+    if (alloc.remap(old_slice, @intCast(new_cap))) |new_mem| {
+        ptr.* = new_mem.ptr;
+        cap.* = @intCast(new_mem.len);
+    } else {
+        const new_mem = alloc.alloc(T, @intCast(new_cap)) catch |err| {
+            if (RET_BOOL) return false;
+            Assert.assert_allocation_failure(@src(), T, new_cap, err);
+            unreachable;
+        };
+        @memcpy(new_mem[0..len], ptr.*[0..len]);
+        alloc.free(old_slice);
+        ptr.* = new_mem.ptr;
+        cap.* = @intCast(new_mem.len);
+    }
+    if (RET_BOOL) return true;
+}

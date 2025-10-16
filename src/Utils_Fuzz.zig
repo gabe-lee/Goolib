@@ -40,7 +40,7 @@ pub const Utils_quick_hex_dec_u64 = make_quick_dec_hex_fuzzer(u64);
 
 pub fn make_quick_dec_hex_fuzzer(comptime T: type) Fuzz.FuzzTest {
     const PROTO = struct {
-        fn check_round_trip(rand: Random, _: *anyopaque, alloc: Allocator) ?[]const u8 {
+        fn check_round_trip(rand: Random, _: *anyopaque, alloc: Allocator, _: *Fuzz.BenchTime) ?[]const u8 {
             const val = rand.int(u64);
             const bytes1 = Utils.quick_hex(val);
             const trip_1 = Utils.quick_unhex(bytes1[0..], u64);
@@ -56,7 +56,7 @@ pub fn make_quick_dec_hex_fuzzer(comptime T: type) Fuzz.FuzzTest {
         pub fn INIT(_: **anyopaque, _: Allocator) anyerror!void {
             return;
         }
-        pub fn START_SEED(_: Random, _: *anyopaque, _: Allocator) ?[]const u8 {
+        pub fn START_SEED(_: Random, _: *anyopaque, _: Allocator, _: *Fuzz.BenchTime) ?[]const u8 {
             return null;
         }
 
@@ -64,7 +64,7 @@ pub fn make_quick_dec_hex_fuzzer(comptime T: type) Fuzz.FuzzTest {
             return;
         }
 
-        pub const OPS = [_]*const fn (rand: Random, state_opaque: *anyopaque, alloc: Allocator) ?[]const u8{
+        pub const OPS = [_]*const fn (rand: Random, state_opaque: *anyopaque, alloc: Allocator, bench_time: *Fuzz.BenchTime) ?[]const u8{
             check_round_trip,
         };
     };

@@ -33,6 +33,7 @@ const _Flags = Root.Flags;
 const IteratorState = Root.IList_Iterator.IteratorState;
 
 pub const _Fuzzer = @import("./IList_Fuzz.zig");
+pub const _Bencher = @import("./IList_Bench.zig");
 
 // pub const Flags = _Flags.Flags(enum(u32) {
 //     goto_nth_item_in_constant_time,
@@ -60,63 +61,8 @@ pub fn IList(comptime T: type) type {
 
         object: *anyopaque,
         vtable: *const VTable,
+        alloc: Allocator,
 
-        fn _fn_none_panic(comptime fn_name: []const u8, comptime OUT: type) *const fn () OUT {
-            const proto = struct {
-                fn func() OUT {
-                    @panic("IList." ++ fn_name ++ "(): not implemented");
-                }
-            };
-            return &proto.func;
-        }
-        fn _fn_self_panic(comptime fn_name: []const u8, comptime OUT: type) *const fn (object: *anyopaque) OUT {
-            const proto = struct {
-                fn func(_: *anyopaque) OUT {
-                    @panic("IList." ++ fn_name ++ "(): not implemented");
-                }
-            };
-            return &proto.func;
-        }
-        fn _fn_self_idx_panic(comptime fn_name: []const u8, comptime OUT: type) *const fn (object: *anyopaque, idx: usize) OUT {
-            const proto = struct {
-                fn func(_: *anyopaque, _: usize) OUT {
-                    @panic("IList." ++ fn_name ++ "(): not implemented");
-                }
-            };
-            return &proto.func;
-        }
-        fn _fn_self_range_panic(comptime fn_name: []const u8, comptime OUT: type) *const fn (object: *anyopaque, rng: Range) OUT {
-            const proto = struct {
-                fn func(_: *anyopaque, _: Range) OUT {
-                    @panic("IList." ++ fn_name ++ "(): not implemented");
-                }
-            };
-            return &proto.func;
-        }
-        fn _fn_self_idx_idx_panic(comptime fn_name: []const u8, comptime OUT: type) *const fn (object: *anyopaque, idx: usize, idx2: usize) OUT {
-            const proto = struct {
-                fn func(_: *anyopaque, _: usize, _: usize) OUT {
-                    @panic("IList." ++ fn_name ++ "(): not implemented");
-                }
-            };
-            return &proto.func;
-        }
-        fn _fn_self_range_idx_panic(comptime fn_name: []const u8, comptime OUT: type) *const fn (object: *anyopaque, rng: Range, idx: usize) OUT {
-            const proto = struct {
-                fn func(_: *anyopaque, _: Range, _: usize) OUT {
-                    @panic("IList." ++ fn_name ++ "(): not implemented");
-                }
-            };
-            return &proto.func;
-        }
-        fn _fn_self_idx_val_panic(comptime fn_name: []const u8, comptime OUT: type) *const fn (object: *anyopaque, idx: usize, val: T) OUT {
-            const proto = struct {
-                fn func(_: *anyopaque, _: usize, _: T) OUT {
-                    @panic("IList." ++ fn_name ++ "(): not implemented");
-                }
-            };
-            return &proto.func;
-        }
         pub const VTable = struct {
             /// Should hold a constant boolean value describing whether
             /// certain operations will peform better with linear operations
@@ -163,13 +109,13 @@ pub fn IList(comptime T: type) type {
             /// Used for initialization of some data structures and algorithms
             always_invalid_idx: usize = math.maxInt(usize),
             /// Returns whether the given index is valid for the slice
-            idx_valid: *const fn (object: *anyopaque, idx: usize) bool = _fn_self_idx_panic("idx_valid", bool),
+            idx_valid: *const fn (object: *anyopaque, idx: usize) bool = Types.unimplemented_2_params("IList.vtable.idx_valid", *anyopaque, usize, bool),
             /// Returns whether the given index range is valid for the slice
             ///
             /// The following MUST be true:
             ///   - `first_idx` comes logically before OR is equal to `last_idx`
             ///   - all indexes including and between `first_idx` and `last_idx` are valid for the slice
-            range_valid: *const fn (object: *anyopaque, range: Range) bool = _fn_self_range_panic("range_valid", bool),
+            range_valid: *const fn (object: *anyopaque, range: Range) bool = Types.unimplemented_2_params("IList.vtable.range_valid", *anyopaque, Range, bool),
             /// Split an index range (roughly) in half, returning the index in the middle of the range
             ///
             /// Assumes `range_valid(first_idx, last_idx) == true`, and if so,
@@ -179,58 +125,61 @@ pub fn IList(comptime T: type) type {
             /// as possible, but it is not required to as long as the returned index IS between or equal to
             /// the first and/or last indexes. HOWEVER, some algorithms will have inconsitent performance
             /// if the returned index is far from the true middle index
-            split_range: *const fn (object: *anyopaque, range: Range) usize = _fn_self_range_panic("split_range", usize),
+            split_range: *const fn (object: *anyopaque, range: Range) usize = Types.unimplemented_2_params("IList.vtable.split_range", *anyopaque, Range, usize),
             /// get the value at the provided index
-            get: *const fn (object: *anyopaque, idx: usize) T = _fn_self_idx_panic("get", T),
+            get: *const fn (object: *anyopaque, idx: usize) T = Types.unimplemented_2_params("IList.vtable.get", *anyopaque, usize, T),
             /// get a pointer to the value at the provided index
-            get_ptr: *const fn (object: *anyopaque, idx: usize) *T = _fn_self_idx_panic("get_ptr", *T),
+            get_ptr: *const fn (object: *anyopaque, idx: usize) *T = Types.unimplemented_2_params("IList.vtable.get_ptr", *anyopaque, usize, *T),
             /// set the value at the provided index to the given value
-            set: *const fn (object: *anyopaque, idx: usize, val: T) void = _fn_self_idx_val_panic("set", void),
+            set: *const fn (object: *anyopaque, idx: usize, val: T) void = Types.unimplemented_3_params("IList.vtable.set", *anyopaque, usize, T, void),
             /// move the data located at `old_idx` to `new_idx`, shifting all
             /// values in between either up or down
-            move: *const fn (object: *anyopaque, old_idx: usize, new_idx: usize) void = _fn_self_idx_idx_panic("move", void),
+            move: *const fn (object: *anyopaque, old_idx: usize, new_idx: usize) void = Types.unimplemented_3_params("IList.vtable.move", *anyopaque, usize, usize, void),
             /// move the data from located between and including `first_idx` and `last_idx`,
             /// to the position `newfirst_idx`, shifting the values at that location out of the way
-            move_range: *const fn (object: *anyopaque, range: Range, new_first_idx: usize) void = _fn_self_range_idx_panic("move_range", void),
+            ///
+            /// This function does not change list length, meaning `new_first_idx` MUST be an index
+            /// that is `list.range_len(range) - 1` positions from the end of the list
+            move_range: *const fn (object: *anyopaque, range: Range, new_first_idx: usize) void = Types.unimplemented_3_params("IList.vtable.move_range", *anyopaque, Range, usize, void),
             /// Return the first index in the slice.
             ///
             /// If the slice is empty, the index returned should
             /// result in `idx_valid(idx) == false`
-            first_idx: *const fn (object: *anyopaque) usize = _fn_self_panic("first_idx", usize),
+            first_idx: *const fn (object: *anyopaque) usize = Types.unimplemented_1_params("IList.vtable.first_idx", *anyopaque, usize),
             /// Return the last index in the slice.
             ///
             /// If the slice is empty, the index returned should
             /// result in `idx_valid(idx) == false`
-            last_idx: *const fn (object: *anyopaque) usize = _fn_self_panic("last_idx", usize),
+            last_idx: *const fn (object: *anyopaque) usize = Types.unimplemented_1_params("IList.vtable.last_idx", *anyopaque, usize),
             /// Return the next index after the current index in the slice.
             ///
             /// If the given index is invalid or no next index exists,
             /// the index returned should result in `idx_valid(idx) == false`
-            next_idx: *const fn (object: *anyopaque, this_idx: usize) usize = _fn_self_idx_panic("next_idx", usize),
+            next_idx: *const fn (object: *anyopaque, this_idx: usize) usize = Types.unimplemented_2_params("IList.vtable.next_idx", *anyopaque, usize, usize),
             /// Return the index `n` places after the current index in the slice.
             ///
             /// If the given index is invalid or no nth next index exists,
             /// the index returned should result in `idx_valid(idx) == false`
-            nth_next_idx: *const fn (object: *anyopaque, this_idx: usize, n: usize) usize = _fn_self_idx_idx_panic("nth_next_idx", usize),
+            nth_next_idx: *const fn (object: *anyopaque, this_idx: usize, n: usize) usize = Types.unimplemented_3_params("IList.vtable.nth_next_idx", *anyopaque, usize, usize, usize),
             /// Return the prev index before the current index in the slice.
             ///
             /// If the given index is invalid or no prev index exists,
             /// the index returned should result in `idx_valid(idx) == false`
-            prev_idx: *const fn (object: *anyopaque, this_idx: usize) usize = _fn_self_idx_panic("prev_idx", usize),
+            prev_idx: *const fn (object: *anyopaque, this_idx: usize) usize = Types.unimplemented_2_params("IList.vtable.prev_idx", *anyopaque, usize, usize),
             /// Return the index `n` places before the current index in the slice.
             ///
             /// If the given index is invalid or no nth previous index exists,
             /// the index returned should result in `idx_valid(idx) == false`
-            nth_prev_idx: *const fn (object: *anyopaque, this_idx: usize, n: usize) usize = _fn_self_idx_idx_panic("nth_prev_idx", usize),
+            nth_prev_idx: *const fn (object: *anyopaque, this_idx: usize, n: usize) usize = Types.unimplemented_3_params("IList.vtable.nth_prev_idx", *anyopaque, usize, usize, usize),
             /// Return the current number of values in the slice/list
             ///
             /// It is not guaranteed that all indexes less than `len` are valid for the list,
             /// but it should be assumed that `list.idx_valid(list.nth_idx(len - 1)) == true`
-            len: *const fn (object: *anyopaque) usize = _fn_self_panic("len", usize),
+            len: *const fn (object: *anyopaque) usize = Types.unimplemented_1_params("IList.vtable.len", *anyopaque, usize),
             /// Return the number of items between (and including) `first_idx` and `last_idx`
             ///
             /// `slice.range_len(slice.first_idx(), slice.last_idx())` MUST equal `slice.len()`
-            range_len: *const fn (object: *anyopaque, range: Range) usize = _fn_self_range_panic("range_len", usize),
+            range_len: *const fn (object: *anyopaque, range: Range) usize = Types.unimplemented_2_params("IList.vtable.range_len", *anyopaque, Range, usize),
             /// Ensure at least `n` empty capacity spaces exist to add new items without reallocating
             /// the memory again or performing any other expensive reorganization procedure
             ///
@@ -242,7 +191,7 @@ pub fn IList(comptime T: type) type {
             ///
             /// The supplied allocator should be the same one used when creating/allocating the
             /// original concrete implementation object's *memory*
-            try_ensure_free_slots: *const fn (object: *anyopaque, count: usize) bool = _fn_self_idx_panic("try_ensure_free_slots", bool),
+            try_ensure_free_slots: *const fn (object: *anyopaque, count: usize, alloc: Allocator) bool = Types.unimplemented_3_params("IList.vtable.try_ensure_free_slots", *anyopaque, usize, Allocator, bool),
             /// Insert `n` new slots directly before existing index, shifting all existing items
             /// at and after that index forward.
             ///
@@ -253,7 +202,7 @@ pub fn IList(comptime T: type) type {
             /// calling this function with a valid insert idx should not fail
             ///
             /// The supplied allocator may or may not be used dependant on the specific implementation
-            insert_slots_assume_capacity: *const fn (object: *anyopaque, idx: usize, count: usize) Range = _fn_self_idx_idx_panic("insert_slots_assume_capacity", Range),
+            insert_slots_assume_capacity: *const fn (object: *anyopaque, idx: usize, count: usize, alloc: Allocator) Range = Types.unimplemented_4_params("IList.vtable.insert_slots_assume_capacity", *anyopaque, usize, usize, Allocator, Range),
             /// Append `n` new slots at the end of the list.
             ///
             /// Returns the first new slot and the last new slot, inclusive
@@ -262,33 +211,29 @@ pub fn IList(comptime T: type) type {
             /// calling this function with a valid insert idx should not fail
             ///
             /// The supplied allocator may or may not be used dependant on the specific implementation
-            append_slots_assume_capacity: *const fn (object: *anyopaque, count: usize) Range = _fn_self_idx_panic("append_slots_assume_capacity", Range),
+            append_slots_assume_capacity: *const fn (object: *anyopaque, count: usize, alloc: Allocator) Range = Types.unimplemented_3_params("IList.vtable.append_slots_assume_capacity", *anyopaque, usize, Allocator, Range),
             /// Remove all items between `firstRemoveIdx` and `last_removed_idx`, inclusive
             ///
             /// All items after `last_removed_idx` are shifted backward
+            delete_range: *const fn (object: *anyopaque, range: Range, alloc: Allocator) void = Types.unimplemented_3_params("IList.vtable.delete_range", *anyopaque, Range, Allocator, void),
+            /// Reset list to an empty state without fully freeing it
             ///
-            /// The supplied allocator may or may not be used dependant on the specific implementation
-            delete_range: *const fn (object: *anyopaque, range: Range) void = _fn_self_range_panic("delete_range", void),
-            /// Reset list to an empty state. The list's capacity may or may not be retained,
-            /// but the list must remain in a usable state
-            ///
-            /// The supplied allocator may or may not be used dependant on the specific implementation
-            clear: *const fn (object: *anyopaque) void = _fn_self_panic("clear", void),
+            /// The implementation may choose to retain allocated capacity or not, but the list
+            /// must remain in a usable state
+            clear: *const fn (object: *anyopaque, alloc: Allocator) void = Types.unimplemented_2_params("IList.vtable.clear", *anyopaque, Allocator, void),
             /// Return the total number of values the slice/list can hold
-            cap: *const fn (object: *anyopaque) usize = _fn_self_panic("cap", usize),
-            /// Increment the start location (index/pointer/etc.) of this list by
-            /// `n` positions. The new 'first' index in the list should be the index
-            /// that would have previously been returned by `list.nth_next_idx(list.first_idx(), n)`
+            cap: *const fn (object: *anyopaque) usize = Types.unimplemented_1_params("IList.vtable.cap", *anyopaque, usize),
+            /// Shrink the allocated capacity of the list (using the provded allocator if necessary),
+            /// while reserving at most `n_reserved_cap` extra capacity above the list len.
+            /// The real resulting free space may be smaller than this if the original free space
+            /// was smaller than the `at-most` value
             ///
-            /// This action may or may not be reversable (for example using `clear()` or some other implementation specific method)
-            ///
-            /// The supplied allocator may or may not be used dependant on the specific implementation
-            increment_start: *const fn (object: *anyopaque, n: usize) void = _fn_self_idx_panic("increment_start", void),
-            /// Free the list's memory, if applicable, and set it to an empty state
-            ///
-            /// The supplied allocator should be the same one used when creating/allocating the
-            /// original concrete implementation object's *memory*
-            free: *const fn (object: *anyopaque) void = _fn_self_panic("free", void),
+            /// This may or may not reallocate the list data, dependant on the implementation.
+            shrink_cap_reserve_at_most: *const fn (object: *anyopaque, reserve_at_most: usize, alloc: Allocator) void = Types.unimplemented_3_params("IList.vtable.shrink_cap_reserve_n", *anyopaque, usize, Allocator, void),
+            /// Free the list's memory, if applicable, and set it to an empty, unusable state.
+            /// Attempting to re-use the list should be considered undefined behavior without
+            /// calling some other re-initialization method.
+            free: *const fn (object: *anyopaque, alloc: Allocator) void = Types.unimplemented_2_params("IList.vtable.free", *anyopaque, Allocator, void),
         };
         pub fn iterator_state(self: ILIST, self_range: IteratorState(T).Partial) IteratorState(T).Full {
             return self_range.to_iter(self);
@@ -518,7 +463,7 @@ pub fn IList(comptime T: type) type {
         /// If free space cannot be ensured and attempting to add `count` more items
         /// will definitely fail or cause undefined behaviour, `ok == false`
         pub fn try_ensure_free_slots(self: ILIST, count: usize) bool {
-            return self.vtable.try_ensure_free_slots(self.object, count);
+            return self.vtable.try_ensure_free_slots(self.object, count, self.alloc);
         }
         /// Insert `n` new slots directly before existing index, shifting all existing items
         /// at and after that index forward.
@@ -529,7 +474,7 @@ pub fn IList(comptime T: type) type {
         /// The implementation should assume that as long as `try_ensure_free_slots(count)` returns `true`,
         /// calling this function with a valid insert idx should not fail
         pub fn insert_slots_assume_capacity(self: ILIST, idx: usize, count: usize) Range {
-            return self.vtable.insert_slots_assume_capacity(self.object, idx, count);
+            return self.vtable.insert_slots_assume_capacity(self.object, idx, count, self.alloc);
         }
         /// Append `n` new slots at the end of the list.
         ///
@@ -538,34 +483,32 @@ pub fn IList(comptime T: type) type {
         /// The implementation should assume that as long as `try_ensure_free_slots(count)` returns `true`,
         /// calling this function should not fail
         pub fn append_slots_assume_capacity(self: ILIST, count: usize) Range {
-            return self.vtable.append_slots_assume_capacity(self.object, count);
+            return self.vtable.append_slots_assume_capacity(self.object, count, self.alloc);
         }
         /// Remove all items between `firstRemoveIdx` and `last_removed_idx`, inclusive
         ///
         /// All items after `last_removed_idx` are shifted backward
         pub fn delete_range(self: ILIST, range: Range) void {
-            self.vtable.delete_range(self.object, range);
+            self.vtable.delete_range(self.object, range, self.alloc);
         }
         /// Reset list to an empty state. The list's capacity may or may not be retained.
         pub fn clear(self: ILIST) void {
-            self.vtable.clear(self.object);
+            self.vtable.clear(self.object, self.alloc);
         }
         /// Return the total number of values the slice/list can hold
         pub fn cap(self: ILIST) usize {
             return self.vtable.cap(self.object);
         }
-        /// Increment the start location (index/pointer/etc.) of this list by
-        /// `n` positions. The new 'first' item in the queue should be the item
-        /// that would have previously been returned by `list.nth_next_idx(list.first_idx(), n)`
+        /// Shrink the allocated capacity of the list,
+        /// while reserving at least `n_reserved_cap` extra capacity above the list len.
         ///
-        /// This may or may not irrevertibly consume the first `n` items in the list,
-        /// depending on the implementation
-        pub fn increment_start(self: ILIST, n: usize) void {
-            self.vtable.increment_start(self.object, n);
+        /// This may or may not reallocate the list data, dependant on the implementation.
+        pub fn shrink_cap_reserve_at_most(self: ILIST, reserve_at_most: usize) void {
+            self.vtable.shrink_cap_reserve_at_most(self.object, reserve_at_most, self.alloc);
         }
         /// Free the list's memory, if applicable, and set it to an uinitialized state
         pub fn free(self: ILIST) void {
-            self.vtable.free(self.object);
+            self.vtable.free(self.object, self.alloc);
         }
 
         pub fn all_idx_valid_zig(self: ILIST, idxs: []usize) bool {
@@ -759,28 +702,28 @@ pub fn IList(comptime T: type) type {
             const idx = try self.try_first_idx();
             return self.set(idx, val);
         }
-        pub fn get_nth(self: ILIST) T {
-            const idx = self.nth_idx();
+        pub fn get_nth(self: ILIST, n: usize) T {
+            const idx = self.nth_idx(n);
             return self.get(idx);
         }
-        pub fn try_get_nth(self: ILIST) ListError!T {
-            const idx = try self.try_nth_idx();
+        pub fn try_get_nth(self: ILIST, n: usize) ListError!T {
+            const idx = try self.try_nth_idx(n);
             return self.get(idx);
         }
-        pub fn get_nth_ptr(self: ILIST) *T {
-            const idx = self.nth_idx();
+        pub fn get_nth_ptr(self: ILIST, n: usize) *T {
+            const idx = self.nth_idx(n);
             return self.get_ptr(idx);
         }
-        pub fn try_get_nth_ptr(self: ILIST) ListError!*T {
-            const idx = try self.try_nth_idx();
+        pub fn try_get_nth_ptr(self: ILIST, n: usize) ListError!*T {
+            const idx = try self.try_nth_idx(n);
             return self.get_ptr(idx);
         }
-        pub fn set_nth(self: ILIST, val: T) void {
-            const idx = self.nth_idx();
+        pub fn set_nth(self: ILIST, n: usize, val: T) void {
+            const idx = self.nth_idx(n);
             return self.set(idx, val);
         }
-        pub fn try_set_nth(self: ILIST, val: T) ListError!void {
-            const idx = try self.try_nth_idx();
+        pub fn try_set_nth(self: ILIST, n: usize, val: T) ListError!void {
+            const idx = try self.try_nth_idx(n);
             return self.set(idx, val);
         }
         pub fn set_from(self: ILIST, self_idx: usize, source: ILIST, source_idx: usize) void {
@@ -1405,7 +1348,7 @@ pub fn IList(comptime T: type) type {
             return self.accumulate_result_advanced(self_range, initial_accumulation, userdata, accumulate_func, .use_count_limit, .error_checks, .no_filter, null);
         }
         pub fn ensure_free_slots(self: ILIST, count: usize) void {
-            const ok = self.vtable.try_ensure_free_slots(self.object, count);
+            const ok = self.vtable.try_ensure_free_slots(self.object, count, self.alloc);
             Assert.assert_with_reason(ok, @src(), "failed to grow list, current: len = {d}, cap = {d}, need {d} more slots", .{ self.len(), self.cap(), count });
         }
         pub fn append_slots(self: ILIST, count: usize) Range {
@@ -2417,6 +2360,12 @@ pub fn list_from_slice(comptime T: type, slice_ptr: *[]T) IList(T, *T, usize) {
 pub const Range = struct {
     first_idx: usize = 0,
     last_idx: usize = 0,
+
+    /// Assumes all consecutive increasing indexes between `first_idx` and `last_idx`
+    /// represent consecutive items in theri proper order
+    pub fn consecutive_len(self: Range) usize {
+        return (self.last_idx - self.first_idx) + 1;
+    }
 
     pub fn new_range(first: usize, last: usize) Range {
         return Range{

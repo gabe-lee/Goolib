@@ -95,3 +95,8 @@ pub fn assert_idx_and_pointer_reside_in_slice_and_match(comptime T: type, slice:
     const ptr_addr = @intFromPtr(pointer);
     assert_with_reason(idx_addr == ptr_addr, "pointer to `{s}` ({X}) does not match pointer to slice[{d}] ({d})", .{ @typeName(T), ptr_addr, idx, idx_addr });
 }
+
+pub fn assert_allocation_failure(comptime src: ?SourceLocation, comptime T: type, count: usize, err: anyerror) noreturn {
+    assert_with_reason(false, src, "failed to allocate memory for {d} items of type {s} (size needed = {d} bytes), error = {s}", .{ count, @typeName(T), count * @sizeOf(T), @errorName(err) });
+    unreachable;
+}
