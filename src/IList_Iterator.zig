@@ -43,10 +43,73 @@ const PITER_OVERWRITE = enum {
     nth_from_last,
 };
 
+const IdxState = enum(u8) {
+    CONSUMED,
+    UNCONSUMED,
+};
+
 pub fn IteratorState(comptime T: type) type {
     return struct {
         const T_LIST = IList.IList(T);
         const IDX_LIST = IList.IList(usize);
+
+        pub const IndexIter = struct {
+            list: IList,
+            range: IList.Range,
+            curr: usize,
+            state: IdxState = .UNCONSUMED,
+
+            pub fn new(list: IList, range: IList.Range, start: usize) IndexIter {
+                return IndexIter{
+                    .list = list,
+                    .range = range,
+                    .curr = start,
+                };
+            }
+
+            pub fn next(self: *IndexIter) ?usize {
+                switch (self.state) {
+                    .CONSUMED => {
+                        @branchHint(.likely);
+                        if (self.curr == self.range.last_idx) return null;
+                        const next_idx = self.list.next_idx(self.curr);
+                        if (!self.list.idx_valid(next_idx)) return null;
+                        self.curr = next_idx;
+                        return next_idx;
+                    },
+                    .UNCONSUMED => {
+                        @branchHint(.unlikely);
+                        if (!self.list.idx_valid(self.curr)) return null;
+                        self.state = .CONSUMED;
+                        return self.curr;
+                    },
+                }
+            }
+
+            pub fn prev(self: *IndexIter) ?usize {
+                switch (self.state) {
+                    .CONSUMED => {
+                        @branchHint(.likely);
+                        if (self.curr == self.range.first_idx) return null;
+                        const prev_idx = self.list.prev_idx(self.curr);
+                        if (!self.list.idx_valid(prev_idx)) return null;
+                        self.curr = prev_idx;
+                        return prev_idx;
+                    },
+                    .UNCONSUMED => {
+                        @branchHint(.unlikely);
+                        if (!self.list.idx_valid(self.curr)) return null;
+                        if (self.curr == self.range.first_idx) return null;
+                        const prev_idx = self.list.prev_idx(self.curr);
+                        if (!self.list.idx_valid(prev_idx)) return null;
+                        self.state = .CONSUMED;
+                        self.curr = prev_idx;
+                        return prev_idx;
+                    },
+                }
+            }
+        };
+
         pub const Partial = struct {
             src: Source,
             overwrite_first: PITER_OVERWRITE = .none,

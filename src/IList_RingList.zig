@@ -339,6 +339,7 @@ pub fn RingList(comptime T: type) type {
             .idx_valid = impl_idx_valid,
             .range_valid = impl_range_valid,
             .split_range = impl_split_range,
+            .idx_in_range = impl_idx_in_range,
             .range_len = impl_range_len,
             .get = impl_get,
             .get_ptr = impl_get_ptr,
@@ -387,6 +388,9 @@ pub fn RingList(comptime T: type) type {
             const self: *Self = @ptrCast(@alignCast(object));
             return idx < @as(usize, @intCast(self.len));
         }
+        fn impl_idx_in_range(_: *anyopaque, range: IList.Range, idx: usize) bool {
+            return range.first_idx <= idx and idx <= range.last_idx;
+        }
         fn impl_range_valid(object: *anyopaque, range: IList.Range) bool {
             const self: *Self = @ptrCast(@alignCast(object));
             return range.first_idx <= range.last_idx and range.last_idx < @as(usize, @intCast(self.len));
@@ -398,15 +402,15 @@ pub fn RingList(comptime T: type) type {
             return (range.last_idx - range.first_idx) + 1;
         }
 
-        fn impl_get(object: *anyopaque, idx: usize) T {
+        fn impl_get(object: *anyopaque, idx: usize, _: Allocator) T {
             const self: *Self = @ptrCast(@alignCast(object));
             return self.ptr[self.real_idx(idx)];
         }
-        fn impl_get_ptr(object: *anyopaque, idx: usize) *T {
+        fn impl_get_ptr(object: *anyopaque, idx: usize, _: Allocator) *T {
             const self: *Self = @ptrCast(@alignCast(object));
             return &self.ptr[self.real_idx(idx)];
         }
-        fn impl_set(object: *anyopaque, idx: usize, val: T) void {
+        fn impl_set(object: *anyopaque, idx: usize, val: T, _: Allocator) void {
             const self: *Self = @ptrCast(@alignCast(object));
             self.ptr[self.real_idx(idx)] = val;
         }
@@ -438,7 +442,7 @@ pub fn RingList(comptime T: type) type {
             return @intCast(self.cap);
         }
 
-        fn impl_move(object: *anyopaque, old: usize, new: usize) void {
+        fn impl_move(object: *anyopaque, old: usize, new: usize, _: Allocator) void {
             const self: *Self = @ptrCast(@alignCast(object));
             if (old == new) return;
             const sidx = self.real_idx(new);
@@ -465,7 +469,7 @@ pub fn RingList(comptime T: type) type {
             self.ptr[ridx.idx] = tmp;
         }
 
-        fn impl_move_range(object: *anyopaque, range: IList.Range, new_first: usize) void {
+        fn impl_move_range(object: *anyopaque, range: IList.Range, new_first: usize, _: Allocator) void {
             if (range.first_idx == new_first) return;
             const self: *Self = @ptrCast(@alignCast(object));
             const len_a = range.consecutive_len();

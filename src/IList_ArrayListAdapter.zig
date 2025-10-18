@@ -50,6 +50,7 @@ pub fn ArrayListAdapter(comptime T: type) type {
             .ensure_free_doesnt_change_cap = false,
             .always_invalid_idx = math.maxInt(usize),
             .idx_valid = impl_idx_valid,
+            .idx_in_range = impl_idx_in_range,
             .range_valid = impl_range_valid,
             .get = impl_get,
             .get_ptr = impl_get_ptr,
@@ -82,27 +83,30 @@ pub fn ArrayListAdapter(comptime T: type) type {
             const list: *AList = @ptrCast(@alignCast(object));
             return range.first_idx <= range.last_idx and range.last_idx < list.items.len;
         }
+        fn impl_idx_in_range(_: *anyopaque, range: IList.Range, idx: usize) bool {
+            return range.first_idx <= idx and idx <= range.last_idx;
+        }
         fn impl_split_range(object: *anyopaque, range: IList.Range) usize {
             _ = object;
             return ((range.last_idx - range.first_idx) >> 1) + range.first_idx;
         }
-        fn impl_get(object: *anyopaque, idx: usize) T {
+        fn impl_get(object: *anyopaque, idx: usize, _: Allocator) T {
             const list: *AList = @ptrCast(@alignCast(object));
             return list.items[idx];
         }
-        fn impl_get_ptr(object: *anyopaque, idx: usize) *T {
+        fn impl_get_ptr(object: *anyopaque, idx: usize, _: Allocator) *T {
             const list: *AList = @ptrCast(@alignCast(object));
             return &list.items[idx];
         }
-        fn impl_set(object: *anyopaque, idx: usize, val: T) void {
+        fn impl_set(object: *anyopaque, idx: usize, val: T, _: Allocator) void {
             const list: *AList = @ptrCast(@alignCast(object));
             list.items[idx] = val;
         }
-        fn impl_move(object: *anyopaque, old_idx: usize, new_idx: usize) void {
+        fn impl_move(object: *anyopaque, old_idx: usize, new_idx: usize, _: Allocator) void {
             const list: *AList = @ptrCast(@alignCast(object));
             Utils.slice_move_one(list.items, old_idx, new_idx);
         }
-        fn impl_move_range(object: *anyopaque, range: IList.Range, new_first_idx: usize) void {
+        fn impl_move_range(object: *anyopaque, range: IList.Range, new_first_idx: usize, _: Allocator) void {
             const list: *AList = @ptrCast(@alignCast(object));
             Utils.slice_move_many(list.items, range.first_idx, range.last_idx, new_first_idx);
         }

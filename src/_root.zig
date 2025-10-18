@@ -63,6 +63,7 @@ pub const Layout = @import("./Layout.zig");
 pub const LinkedHeirarchy = @import("./LinkedHeirarchy.zig");
 pub const List = @import("./List.zig");
 pub const Math = @import("./Math.zig");
+pub const ParamTable = @import("./ParamTable.zig");
 pub const QuickWriter = @import("./QuickWriter.zig");
 pub const Quicksort = @import("./Quicksort.zig");
 pub const Reader = @import("./Reader.zig");
@@ -117,6 +118,7 @@ comptime {
         _ = @import("./LinkedHeirarchy.zig");
         _ = @import("./List.zig");
         _ = @import("./Math.zig");
+        _ = @import("./ParamTable.zig");
         _ = @import("./QuickWriter.zig");
         _ = @import("./Quicksort.zig");
         _ = @import("./Reader.zig");

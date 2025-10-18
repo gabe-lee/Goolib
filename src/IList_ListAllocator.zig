@@ -31,13 +31,22 @@ const IList = Root.IList;
 const Utils = Root.Utils;
 const DummyAlloc = Root.DummyAllocator;
 
-pub fn List(comptime T: type) type {
+const List = Root.IList_List.List;
+const SegList = List(Segment);
+
+const Segment = struct {
+    start: u32,
+    len: u32,
+};
+
+pub fn ListAllocator(comptime T: type) type {
     return struct {
         const Self = @This();
 
         ptr: [*]T = @ptrFromInt(std.mem.alignBackward(usize, math.maxInt(usize), @alignOf(T))),
         len: u32 = 0,
         cap: u32 = 0,
+        free_segs: SegList,
 
         pub fn init_empty() Self {
             return Self{};
@@ -81,7 +90,6 @@ pub fn List(comptime T: type) type {
             .prefer_linear_ops = false,
             .always_invalid_idx = math.maxInt(usize),
             .idx_valid = impl_idx_valid,
-            .idx_in_range = impl_idx_in_range,
             .range_valid = impl_range_valid,
             .split_range = impl_split_range,
             .range_len = impl_range_len,
@@ -118,32 +126,29 @@ pub fn List(comptime T: type) type {
         fn impl_split_range(_: *anyopaque, range: IList.Range) usize {
             return ((range.last_idx - range.first_idx) >> 1) + range.first_idx;
         }
-        fn impl_idx_in_range(_: *anyopaque, range: IList.Range, idx: usize) bool {
-            return range.first_idx <= idx and idx <= range.last_idx;
-        }
         fn impl_range_len(_: *anyopaque, range: IList.Range) usize {
             return range.consecutive_len();
         }
-        fn impl_get(object: *anyopaque, idx: usize, _: Allocator) T {
+        fn impl_get(object: *anyopaque, idx: usize) T {
             const self: *Self = @ptrCast(@alignCast(object));
             Assert.assert_idx_less_than_len(idx, Types.intcast(self.len, usize), @src());
             return self.ptr[idx];
         }
-        fn impl_get_ptr(object: *anyopaque, idx: usize, _: Allocator) *T {
+        fn impl_get_ptr(object: *anyopaque, idx: usize) *T {
             const self: *Self = @ptrCast(@alignCast(object));
             Assert.assert_idx_less_than_len(idx, Types.intcast(self.len, usize), @src());
             return &self.ptr[idx];
         }
-        fn impl_set(object: *anyopaque, idx: usize, val: T, _: Allocator) void {
+        fn impl_set(object: *anyopaque, idx: usize, val: T) void {
             const self: *Self = @ptrCast(@alignCast(object));
             Assert.assert_idx_less_than_len(idx, Types.intcast(self.len, usize), @src());
             self.ptr[idx] = val;
         }
-        fn impl_move(object: *anyopaque, old_idx: usize, new_idx: usize, _: Allocator) void {
+        fn impl_move(object: *anyopaque, old_idx: usize, new_idx: usize) void {
             const self: *Self = @ptrCast(@alignCast(object));
             Utils.slice_move_one(self.ptr[0..self.len], old_idx, new_idx);
         }
-        fn impl_move_range(object: *anyopaque, range: IList.Range, new_first_idx: usize, _: Allocator) void {
+        fn impl_move_range(object: *anyopaque, range: IList.Range, new_first_idx: usize) void {
             const self: *Self = @ptrCast(@alignCast(object));
             Utils.slice_move_many(self.ptr[0..self.len], range.first_idx, range.last_idx, new_first_idx);
         }

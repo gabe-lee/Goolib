@@ -116,6 +116,9 @@ pub fn IList(comptime T: type) type {
             ///   - `first_idx` comes logically before OR is equal to `last_idx`
             ///   - all indexes including and between `first_idx` and `last_idx` are valid for the slice
             range_valid: *const fn (object: *anyopaque, range: Range) bool = Types.unimplemented_2_params("IList.vtable.range_valid", *anyopaque, Range, bool),
+            /// Returns whether the given index is within the given range, including
+            /// the first and last indexes.
+            idx_in_range: *const fn (object: *anyopaque, range: Range, idx: usize) bool = Types.unimplemented_3_params("IList.vtable.range_valid", *anyopaque, Range, usize, bool),
             /// Split an index range (roughly) in half, returning the index in the middle of the range
             ///
             /// Assumes `range_valid(first_idx, last_idx) == true`, and if so,
@@ -127,20 +130,20 @@ pub fn IList(comptime T: type) type {
             /// if the returned index is far from the true middle index
             split_range: *const fn (object: *anyopaque, range: Range) usize = Types.unimplemented_2_params("IList.vtable.split_range", *anyopaque, Range, usize),
             /// get the value at the provided index
-            get: *const fn (object: *anyopaque, idx: usize) T = Types.unimplemented_2_params("IList.vtable.get", *anyopaque, usize, T),
+            get: *const fn (object: *anyopaque, idx: usize, alloc: Allocator) T = Types.unimplemented_3_params("IList.vtable.get", *anyopaque, usize, Allocator, T),
             /// get a pointer to the value at the provided index
-            get_ptr: *const fn (object: *anyopaque, idx: usize) *T = Types.unimplemented_2_params("IList.vtable.get_ptr", *anyopaque, usize, *T),
+            get_ptr: *const fn (object: *anyopaque, idx: usize, alloc: Allocator) *T = Types.unimplemented_3_params("IList.vtable.get_ptr", *anyopaque, usize, Allocator, *T),
             /// set the value at the provided index to the given value
-            set: *const fn (object: *anyopaque, idx: usize, val: T) void = Types.unimplemented_3_params("IList.vtable.set", *anyopaque, usize, T, void),
+            set: *const fn (object: *anyopaque, idx: usize, val: T, alloc: Allocator) void = Types.unimplemented_4_params("IList.vtable.set", *anyopaque, usize, T, Allocator, void),
             /// move the data located at `old_idx` to `new_idx`, shifting all
             /// values in between either up or down
-            move: *const fn (object: *anyopaque, old_idx: usize, new_idx: usize) void = Types.unimplemented_3_params("IList.vtable.move", *anyopaque, usize, usize, void),
+            move: *const fn (object: *anyopaque, old_idx: usize, new_idx: usize, alloc: Allocator) void = Types.unimplemented_4_params("IList.vtable.move", *anyopaque, usize, usize, Allocator, void),
             /// move the data from located between and including `first_idx` and `last_idx`,
             /// to the position `newfirst_idx`, shifting the values at that location out of the way
             ///
             /// This function does not change list length, meaning `new_first_idx` MUST be an index
             /// that is `list.range_len(range) - 1` positions from the end of the list
-            move_range: *const fn (object: *anyopaque, range: Range, new_first_idx: usize) void = Types.unimplemented_3_params("IList.vtable.move_range", *anyopaque, Range, usize, void),
+            move_range: *const fn (object: *anyopaque, range: Range, new_first_idx: usize, alloc: Allocator) void = Types.unimplemented_4_params("IList.vtable.move_range", *anyopaque, Range, usize, Allocator, void),
             /// Return the first index in the slice.
             ///
             /// If the slice is empty, the index returned should
@@ -237,6 +240,9 @@ pub fn IList(comptime T: type) type {
         };
         pub fn iterator_state(self: ILIST, self_range: IteratorState(T).Partial) IteratorState(T).Full {
             return self_range.to_iter(self);
+        }
+        pub fn idx_iterator(self: ILIST, range: Range, start: usize) IteratorState(T).IndexIter {
+            return IteratorState(T).IndexIter.new(self, range, start);
         }
         pub const Reader = struct {
             src: ILIST,
@@ -344,6 +350,10 @@ pub fn IList(comptime T: type) type {
         pub fn range_valid(self: ILIST, range: Range) bool {
             return self.vtable.range_valid(self.object, range);
         }
+        /// Return `true` if the given index is located within the given range (inclusive of both ends)
+        pub fn idx_in_range(self: ILIST, range: Range, idx: usize) bool {
+            return self.vtable.idx_in_range(self.object, range, idx);
+        }
         /// Split an index range (roughly) in half, returning the index in the middle of the range
         ///
         /// Assumes `range_valid(first_idx, last_idx) == true`, and if so,
@@ -358,20 +368,20 @@ pub fn IList(comptime T: type) type {
         }
         /// get the value at the provided index
         pub fn get(self: ILIST, idx: usize) T {
-            return self.vtable.get(self.object, idx);
+            return self.vtable.get(self.object, idx, self.alloc);
         }
         /// get a pointer to the value at the provided index
         pub fn get_ptr(self: ILIST, idx: usize) *T {
-            return self.vtable.get_ptr(self.object, idx);
+            return self.vtable.get_ptr(self.object, idx, self.alloc);
         }
         /// set the value at the provided index to the given value
         pub fn set(self: ILIST, idx: usize, val: T) void {
-            self.vtable.set(self.object, idx, val);
+            self.vtable.set(self.object, idx, val, self.alloc);
         }
         /// move the data located at `old_idx` to `new_idx`, shifting all
         /// values in between either up or down
         pub fn move(self: ILIST, old_idx: usize, new_idx: usize) void {
-            self.vtable.move(self.object, old_idx, new_idx);
+            self.vtable.move(self.object, old_idx, new_idx, self.alloc);
         }
         /// move the data located at `old_idx` to `new_idx`, shifting all
         /// values in between either up or down
@@ -384,7 +394,7 @@ pub fn IList(comptime T: type) type {
         /// move the data from located between and including `first_idx` and `last_idx`,
         /// to the position `new_first_idx`, shifting the values in the way ether forward or backward
         pub fn move_range(self: ILIST, range: Range, new_first_idx: usize) void {
-            self.vtable.move_range(self.object, range, new_first_idx);
+            self.vtable.move_range(self.object, range, new_first_idx, self.alloc);
         }
         /// move the data from located between and including `first_idx` and `last_idx`,
         /// to the position `new_first_idx`, shifting the values in the way ether forward or backward
@@ -1681,64 +1691,16 @@ pub fn IList(comptime T: type) type {
             self.delete_range(.single_idx(last_idx_));
             return val;
         }
-        /// Increment the start point of the list by `count` items, effectivly discarding the first
-        /// `count` items without moving any items
-        pub fn discard(self: ILIST, count: usize) void {
-            self.increment_start(count);
-        }
-        /// Increment the start point of the list by `count` items, effectivly discarding the first
-        /// `count` items without moving any items
-        pub fn try_discard(self: ILIST, count: usize) ListError!void {
-            if (self.len() < count) {
-                return ListError.too_few_items_in_list;
-            }
-            self.increment_start(count);
-        }
-        /// Increment the start point of the list by `len()` items, effectivly discarding the entire
-        /// list without moving any items in memory.
-        pub fn discard_all(self: ILIST) void {
-            self.increment_start(self.len());
-        }
-        pub fn peek_queue_overwrite_list(self: ILIST, count: usize, peek_output: ILIST) void {
-            peek_output.clear();
-            peek_output.ensure_free_slots(count);
-            const rng = peek_output.append_slots_assume_capacity(count);
-            self.copy_from_to(.first_n_items(count), .use_range(peek_output, rng));
-        }
-        pub fn try_peek_queue_overwrite_list(self: ILIST, count: usize, peek_output: ILIST) ListError!void {
-            peek_output.clear();
-            try peek_output.try_ensure_free_slots(count);
-            const rng = peek_output.append_slots_assume_capacity(count);
-            return self.try_copy_from_to(.first_n_items(count), .use_range(peek_output, rng));
-        }
-        pub fn peek_queue_append_list(self: ILIST, count: usize, peek_output: ILIST) void {
-            peek_output.ensure_free_slots(count);
-            const rng = peek_output.append_slots_assume_capacity(count);
-            self.copy_from_to(.first_n_items(count), .use_range(peek_output, rng));
-        }
-        pub fn try_peek_queue_append_list(self: ILIST, count: usize, peek_output: ILIST) ListError!void {
-            try peek_output.try_ensure_free_slots(count);
-            const rng = peek_output.append_slots_assume_capacity(count);
-            return self.try_copy_from_to(.first_n_items(count), .use_range(peek_output, rng));
-        }
-        pub fn dequeue_overwrite_list(self: ILIST, count: usize, peek_output: ILIST) void {
-            self.peek_queue_overwrite_list(count, peek_output);
-            self.discard(count);
-        }
-        pub fn try_dequeue_overwrite_list(self: ILIST, count: usize, peek_output: ILIST) ListError!void {
-            try self.try_peek_queue_overwrite_list(count, peek_output);
-            return self.try_discard(count);
-        }
-        pub fn dequeue_append_list(self: ILIST, count: usize, peek_output: ILIST) void {
-            self.peek_queue_append_list(count, peek_output);
-            self.discard(count);
-        }
-        pub fn try_dequeue_append_list(self: ILIST, count: usize, peek_output: ILIST) ListError!void {
-            try self.try_peek_queue_append_list(count, peek_output);
-            return self.try_discard(count);
-        }
+
         const LocateResult = struct {
             idx: usize = 0,
+            found: bool = false,
+            exit_hi: bool = false,
+            exit_lo: bool = false,
+        };
+        const LocateResultIndirect = struct {
+            idx: usize = 0,
+            idx_idx: usize = 0,
             found: bool = false,
             exit_hi: bool = false,
             exit_lo: bool = false,
@@ -1747,8 +1709,18 @@ pub fn IList(comptime T: type) type {
             idx: usize = 0,
             found: bool = false,
         };
+        pub const SearchResultIndirect = struct {
+            idx: usize = 0,
+            idx_idx: usize = 0,
+            found: bool = false,
+        };
         pub const InsertIndexResult = struct {
             idx: usize = 0,
+            append: bool = false,
+        };
+        pub const InsertIndexResultIndirect = struct {
+            idx: usize = 0,
+            idx_idx: usize = 0,
             append: bool = false,
         };
         fn _sorted_binary_locate(
@@ -1824,6 +1796,93 @@ pub fn IList(comptime T: type) type {
             }
         }
 
+        fn _sorted_binary_locate_indirect(
+            self: ILIST,
+            comptime IDX: type,
+            idx_list: IList(IDX),
+            orig_lo: usize,
+            orig_hi: usize,
+            locate_val: anytype,
+            equal_func: *const fn (this_val: T, find_val: @TypeOf(locate_val)) bool,
+            greater_than_func: *const fn (this_val: T, find_val: @TypeOf(locate_val)) bool,
+        ) LocateResultIndirect {
+            var hi = orig_hi;
+            var lo = orig_lo;
+            var val: T = undefined;
+            var idx: usize = undefined;
+            var idx_idx: usize = undefined;
+            var result = LocateResultIndirect{};
+            while (true) {
+                idx_idx = idx_list.split_range(.new_range(lo, hi));
+                idx = @intCast(idx_list.get(idx_idx));
+                val = self.get(idx);
+                if (equal_func(val, locate_val)) {
+                    result.found = true;
+                    result.idx_idx = idx_idx;
+                    result.idx = idx;
+                    return result;
+                }
+                if (greater_than_func(val, locate_val)) {
+                    if (idx_idx == lo) {
+                        result.exit_lo = idx_idx == orig_lo;
+                        result.idx_idx = idx_idx;
+                        result.idx = idx;
+                        return result;
+                    }
+                    hi = idx_list.prev_idx(idx_idx);
+                } else {
+                    if (idx_idx == hi) {
+                        result.exit_hi = idx_idx == orig_hi;
+                        if (!result.exit_hi) {
+                            idx_idx = idx_list.next_idx(hi);
+                        }
+                        result.idx_idx = idx_idx;
+                        result.idx = idx;
+                        return result;
+                    }
+                    lo = idx_list.next_idx(idx_idx);
+                }
+            }
+        }
+        fn _sorted_linear_locate_indirect(
+            self: ILIST,
+            comptime IDX: type,
+            idx_list: IList(IDX),
+            orig_lo: usize,
+            orig_hi: usize,
+            locate_val: anytype,
+            equal_func: *const fn (this_val: T, find_val: @TypeOf(locate_val)) bool,
+            greater_than_func: *const fn (this_val: T, find_val: @TypeOf(locate_val)) bool,
+        ) LocateResultIndirect {
+            var val: T = undefined;
+            var idx: usize = undefined;
+            var idx_idx: usize = orig_lo;
+            var result = LocateResultIndirect{};
+            while (true) {
+                idx = @intCast(idx_list.get(idx_idx));
+                val = self.get(idx);
+                if (equal_func(val, locate_val)) {
+                    result.found = true;
+                    result.idx_idx = idx_idx;
+                    result.idx = idx;
+                    return result;
+                }
+                if (greater_than_func(val, locate_val)) {
+                    result.idx_idx = idx_idx;
+                    result.idx = idx;
+                    return result;
+                } else {
+                    if (idx_idx == orig_hi) {
+                        result.exit_hi = true;
+                        result.idx_idx = idx_idx;
+                        result.idx = idx;
+                        return result;
+                    }
+                    idx_idx = idx_list.next_idx(idx_idx);
+                }
+            }
+        }
+
         fn _sorted_binary_search(
             self: ILIST,
             locate_val: anytype,
@@ -1859,6 +1918,50 @@ pub fn IList(comptime T: type) type {
             return SearchResult{
                 .found = loc_result.found,
                 .idx = loc_result.idx,
+            };
+        }
+
+        fn _sorted_binary_search_indirect(
+            self: ILIST,
+            comptime IDX: type,
+            idx_list: IList(IDX),
+            locate_val: anytype,
+            equal_func: *const fn (this_val: T, find_val: @TypeOf(locate_val)) bool,
+            greater_than_func: *const fn (this_val: T, find_val: @TypeOf(locate_val)) bool,
+        ) SearchResultIndirect {
+            const lo = idx_list.first_idx();
+            const hi = idx_list.last_idx();
+            const ok = idx_list.idx_valid(lo) and idx_list.idx_valid(hi);
+            if (!ok) {
+                return SearchResultIndirect{};
+            }
+            const loc_result = _sorted_binary_locate_indirect(self, IDX, idx_list, lo, hi, locate_val, equal_func, greater_than_func);
+            return SearchResultIndirect{
+                .found = loc_result.found,
+                .idx = loc_result.idx,
+                .idx_idx = loc_result.idx_idx,
+            };
+        }
+
+        fn _sorted_linear_search_indirect(
+            self: ILIST,
+            comptime IDX: type,
+            idx_list: IList(IDX),
+            locate_val: anytype,
+            equal_func: *const fn (this_val: T, find_val: @TypeOf(locate_val)) bool,
+            greater_than_func: *const fn (this_val: T, find_val: @TypeOf(locate_val)) bool,
+        ) SearchResultIndirect {
+            const lo = idx_list.first_idx();
+            const hi = idx_list.last_idx();
+            const ok = idx_list.idx_valid(lo) and idx_list.idx_valid(hi);
+            if (!ok) {
+                return SearchResultIndirect{};
+            }
+            const loc_result = _sorted_linear_locate_indirect(self, IDX, idx_list, lo, hi, locate_val, equal_func, greater_than_func);
+            return SearchResultIndirect{
+                .found = loc_result.found,
+                .idx = loc_result.idx,
+                .idx_idx = loc_result.idx_idx,
             };
         }
 
@@ -1900,6 +2003,50 @@ pub fn IList(comptime T: type) type {
             };
         }
 
+        fn _sorted_binary_insert_index_indirect(
+            self: ILIST,
+            comptime IDX: type,
+            idx_list: IList(IDX),
+            locate_val: anytype,
+            equal_func: *const fn (this_val: T, find_val: @TypeOf(locate_val)) bool,
+            greater_than_func: *const fn (this_val: T, find_val: @TypeOf(locate_val)) bool,
+        ) InsertIndexResultIndirect {
+            const lo = idx_list.first_idx();
+            const hi = idx_list.last_idx();
+            const ok = idx_list.idx_valid(lo) and idx_list.idx_valid(hi);
+            if (!ok) {
+                return InsertIndexResultIndirect{};
+            }
+            const loc_result = _sorted_binary_locate_indirect(self, IDX, idx_list, lo, hi, locate_val, equal_func, greater_than_func);
+            return InsertIndexResultIndirect{
+                .append = !loc_result.found and loc_result.exit_hi,
+                .idx = loc_result.idx,
+                .idx_idx = loc_result.idx_idx,
+            };
+        }
+
+        fn _sorted_linear_insert_index_indirect(
+            self: ILIST,
+            comptime IDX: type,
+            idx_list: IList(IDX),
+            locate_val: anytype,
+            equal_func: *const fn (this_val: T, find_val: @TypeOf(locate_val)) bool,
+            greater_than_func: *const fn (this_val: T, find_val: @TypeOf(locate_val)) bool,
+        ) InsertIndexResultIndirect {
+            const lo = idx_list.first_idx();
+            const hi = idx_list.last_idx();
+            const ok = idx_list.idx_valid(lo) and idx_list.idx_valid(hi);
+            if (!ok) {
+                return InsertIndexResultIndirect{};
+            }
+            const loc_result = _sorted_linear_locate_indirect(self, IDX, idx_list, lo, hi, locate_val, equal_func, greater_than_func);
+            return InsertIndexResultIndirect{
+                .append = !loc_result.found and loc_result.exit_hi,
+                .idx = loc_result.idx,
+                .idx_idx = loc_result.idx_idx,
+            };
+        }
+
         fn _sorted_binary_insert(
             self: ILIST,
             val: T,
@@ -1932,6 +2079,42 @@ pub fn IList(comptime T: type) type {
             return idx;
         }
 
+        fn _sorted_binary_insert_indirect(
+            self: ILIST,
+            comptime IDX: type,
+            idx_list: IList(IDX),
+            val: T,
+            equal_func: *const fn (this_val: T, find_val: T) bool,
+            greater_than_func: *const fn (this_val: T, find_val: T) bool,
+        ) usize {
+            const ins_result = _sorted_binary_insert_index_indirect(self, IDX, idx_list, val, equal_func, greater_than_func);
+            var idx: usize = undefined;
+            if (ins_result.append) {
+                idx = idx_list.append(ins_result.idx);
+            } else {
+                idx = idx_list.insert(ins_result.idx_idx, ins_result.idx);
+            }
+            return idx;
+        }
+
+        fn _sorted_linear_insert_indirect(
+            self: ILIST,
+            comptime IDX: type,
+            idx_list: IList(IDX),
+            val: T,
+            equal_func: *const fn (this_val: T, find_val: T) bool,
+            greater_than_func: *const fn (this_val: T, find_val: T) bool,
+        ) usize {
+            const ins_result = _sorted_linear_insert_index_indirect(self, IDX, idx_list, val, equal_func, greater_than_func);
+            var idx: usize = undefined;
+            if (ins_result.append) {
+                idx = idx_list.append(ins_result.idx);
+            } else {
+                idx = idx_list.insert(ins_result.idx_idx, ins_result.idx);
+            }
+            return idx;
+        }
+
         pub fn sorted_insert(
             self: ILIST,
             val: T,
@@ -1944,11 +2127,35 @@ pub fn IList(comptime T: type) type {
                 return self._sorted_binary_insert(val, equal_func, greater_than_func);
             }
         }
+
+        pub fn sorted_insert_indirect(
+            self: ILIST,
+            comptime IDX: type,
+            idx_list: IList(IDX),
+            val: T,
+            equal_func: *const fn (this_val: T, find_val: T) bool,
+            greater_than_func: *const fn (this_val: T, find_val: T) bool,
+        ) usize {
+            if (self.prefer_linear_ops()) {
+                return self._sorted_linear_insert_indirect(val, IDX, idx_list, equal_func, greater_than_func);
+            } else {
+                return self._sorted_binary_insert_indirect(val, IDX, idx_list, equal_func, greater_than_func);
+            }
+        }
+
         pub fn sorted_insert_implicit(self: ILIST, val: T) usize {
             if (self.prefer_linear_ops()) {
                 return self._sorted_linear_insert(val, _implicit_eq, _implicit_gt);
             } else {
                 return self._sorted_binary_insert(val, _implicit_eq, _implicit_gt);
+            }
+        }
+
+        pub fn sorted_insert_implicit_indirect(self: ILIST, comptime IDX: type, idx_list: IList(IDX), val: T) usize {
+            if (self.prefer_linear_ops()) {
+                return self._sorted_linear_insert_indirect(val, IDX, idx_list, _implicit_eq, _implicit_gt);
+            } else {
+                return self._sorted_binary_insert_indirect(val, IDX, idx_list, _implicit_eq, _implicit_gt);
             }
         }
 
@@ -1964,11 +2171,35 @@ pub fn IList(comptime T: type) type {
                 return self._sorted_binary_insert_index(val, equal_func, greater_than_func);
             }
         }
+
+        pub fn sorted_insert_index_indirect(
+            self: ILIST,
+            comptime IDX: type,
+            idx_list: IList(IDX),
+            val: T,
+            equal_func: *const fn (this_val: T, find_val: T) bool,
+            greater_than_func: *const fn (this_val: T, find_val: T) bool,
+        ) InsertIndexResultIndirect {
+            if (self.prefer_linear_ops()) {
+                return self._sorted_linear_insert_index_indirect(val, IDX, idx_list, equal_func, greater_than_func);
+            } else {
+                return self._sorted_binary_insert_index_indirect(val, IDX, idx_list, equal_func, greater_than_func);
+            }
+        }
+
         pub fn sorted_insert_index_implicit(self: ILIST, val: T) InsertIndexResult {
             if (self.prefer_linear_ops()) {
                 return self._sorted_linear_insert_index(val, _implicit_eq, _implicit_gt);
             } else {
                 return self._sorted_binary_insert_index(val, _implicit_eq, _implicit_gt);
+            }
+        }
+
+        pub fn sorted_insert_index_implicit_indirect(self: ILIST, comptime IDX: type, idx_list: IList(IDX), val: T) InsertIndexResultIndirect {
+            if (self.prefer_linear_ops()) {
+                return self._sorted_linear_insert_index_indirect(val, IDX, idx_list, _implicit_eq, _implicit_gt);
+            } else {
+                return self._sorted_binary_insert_index_indirect(val, IDX, idx_list, _implicit_eq, _implicit_gt);
             }
         }
         pub fn sorted_search(
@@ -1983,12 +2214,92 @@ pub fn IList(comptime T: type) type {
                 return self._sorted_binary_search(val, equal_func, greater_than_func);
             }
         }
+        pub fn sorted_search_indirect(
+            self: ILIST,
+            comptime IDX: type,
+            idx_list: IList(IDX),
+            val: T,
+            equal_func: *const fn (this_val: T, find_val: T) bool,
+            greater_than_func: *const fn (this_val: T, find_val: T) bool,
+        ) SearchResultIndirect {
+            if (self.prefer_linear_ops()) {
+                return self._sorted_linear_search_indirect(val, IDX, idx_list, equal_func, greater_than_func);
+            } else {
+                return self._sorted_binary_search_indirect(val, IDX, idx_list, equal_func, greater_than_func);
+            }
+        }
         pub fn sorted_search_implicit(self: ILIST, val: T) SearchResult {
             if (self.prefer_linear_ops()) {
                 return self._sorted_linear_search(val, _implicit_eq, _implicit_gt);
             } else {
                 return self._sorted_binary_search(val, _implicit_eq, _implicit_gt);
             }
+        }
+        pub fn sorted_search_implicit_indirect(self: ILIST, comptime IDX: type, idx_list: IList(IDX), val: T) SearchResultIndirect {
+            if (self.prefer_linear_ops()) {
+                return self._sorted_linear_search_indirect(val, IDX, idx_list, _implicit_eq, _implicit_gt);
+            } else {
+                return self._sorted_binary_search_indirect(val, IDX, idx_list, _implicit_eq, _implicit_gt);
+            }
+        }
+
+        pub fn sorted_set_and_resort(self: ILIST, idx: usize, val: T, greater_than_func: *const fn (this_val: T, find_val: T) bool) usize {
+            var new_idx = idx;
+            var adj_idx = self.next_idx(new_idx);
+            var adj_val: T = undefined;
+            while (self.idx_valid(adj_idx) and next_is_less: {
+                adj_val = self.get(adj_idx);
+                break :next_is_less greater_than_func(val, adj_val);
+            }) {
+                self.set(new_idx, adj_val);
+                new_idx = adj_idx;
+                adj_idx = self.next_idx(adj_idx);
+            }
+            adj_idx = self.prev_idx(new_idx);
+            while (self.idx_valid(adj_idx) and prev_is_greater: {
+                adj_val = self.get(adj_idx);
+                break :prev_is_greater greater_than_func(adj_val, val);
+            }) {
+                self.set(new_idx, adj_val);
+                new_idx = adj_idx;
+                adj_idx = self.prev_idx(adj_idx);
+            }
+            self.set(new_idx, val);
+            return new_idx;
+        }
+        pub fn sorted_set_and_resort_implicit(self: ILIST, idx: usize, val: T) usize {
+            return self.sorted_set_and_resort(idx, val, _implicit_gt);
+        }
+        pub fn sorted_set_and_resort_indirect(self: ILIST, comptime IDX: type, idx_list: IList(IDX), idx_idx: usize, val: T, greater_than_func: *const fn (this_val: T, find_val: T) bool) usize {
+            var new_idx_idx = idx_idx;
+            const real_idx: usize = @intCast(idx_list.get(idx_idx));
+            var adj_idx_idx = idx_list.next_idx(new_idx_idx);
+            var adj_idx: usize = undefined;
+            var adj_val: T = undefined;
+            while (idx_list.idx_valid(adj_idx_idx) and next_is_less: {
+                adj_idx = @intCast(idx_list.get(adj_idx_idx));
+                adj_val = self.get(adj_idx);
+                break :next_is_less greater_than_func(val, adj_val);
+            }) {
+                idx_list.set(new_idx_idx, adj_idx);
+                new_idx_idx = adj_idx_idx;
+                adj_idx_idx = idx_list.next_idx(adj_idx_idx);
+            }
+            adj_idx_idx = idx_list.prev_idx(new_idx_idx);
+            while (idx_list.idx_valid(adj_idx_idx) and prev_is_greater: {
+                adj_idx = @intCast(idx_list.get(adj_idx_idx));
+                adj_val = self.get(adj_idx_idx);
+                break :prev_is_greater greater_than_func(adj_val, val);
+            }) {
+                idx_list.set(new_idx_idx, adj_idx);
+                new_idx_idx = adj_idx_idx;
+                adj_idx_idx = self.prev_idx(adj_idx_idx);
+            }
+            idx_list.set(new_idx_idx, real_idx);
+            return new_idx_idx;
+        }
+        pub fn sorted_set_and_resort_implicit_indirect(self: ILIST, comptime IDX: type, idx_list: IList(IDX), idx_idx: usize, val: T) usize {
+            return self.sorted_set_and_resort_indirect(IDX, idx_list, idx_idx, val, _implicit_gt);
         }
         pub fn search(self: ILIST, find_val: anytype, equal_func: *const fn (this_val: T, find_val: @TypeOf(find_val)) bool) SearchResult {
             var val: T = undefined;
