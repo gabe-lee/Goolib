@@ -70,6 +70,11 @@ pub inline fn assert_with_reason(condition: bool, comptime src_loc: ?SourceLocat
     }
 }
 
+pub inline fn assert_unreachable(comptime src_loc: ?SourceLocation, reason_fmt: []const u8, reason_args: anytype) noreturn {
+    assert_with_reason(false, src_loc, reason_fmt, reason_args);
+    unreachable;
+}
+
 pub fn assert_pointer_resides_in_slice(comptime T: type, slice: []const T, pointer: *const T, comptime src_loc: ?SourceLocation) void {
     const start_addr = @intFromPtr(slice.ptr);
     const end_addr = @intFromPtr(slice.ptr + slice.len - 1);

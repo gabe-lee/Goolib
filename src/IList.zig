@@ -23,7 +23,6 @@
 const std = @import("std");
 const math = std.math;
 const Root = @import("./_root.zig");
-const SliceAdapter = Root.IList_SliceAdapter;
 const Types = Root.Types;
 const Assert = Root.Assert;
 const Allocator = std.mem.Allocator;
@@ -56,7 +55,6 @@ pub const ListError = error{
 
 pub fn IList(comptime T: type) type {
     return struct {
-        const __GOOLIB_ILIST = true;
         const ILIST = @This();
 
         object: *anyopaque,
@@ -267,7 +265,7 @@ pub fn IList(comptime T: type) type {
                     while (!result.full_dest_copied and !buf_result.full_source_copied) {
                         if (self.buf_start == self.buf_end) {
                             self.buf_start = 0;
-                            const buf_list = list_from_slice(T, &buf);
+                            const buf_list = list_from_slice_no_alloc(T, &buf);
                             buf_result = self.src.copy_from_to(.idx_to_end(self.src_pos), .use_range(buf_list, .new_range(self.buf_start, buf.len - 1)));
                             self.src_pos = self.src.next_idx(buf_result.source_range.last_idx);
                             self.buf_end = buf_result.dest_range.last_idx + 1;
@@ -1369,22 +1367,24 @@ pub fn IList(comptime T: type) type {
             try self.try_ensure_free_slots(count);
             return self.append_slots_assume_capacity(count);
         }
-        pub fn append_zig_slice(self: ILIST, slice_: []T) Range {
-            self.ensure_free_slots(slice_.len);
-            return _append_zig_slice(self, slice_);
+        pub fn append_zig_slice(self: ILIST, slice: []const T) Range {
+            self.ensure_free_slots(slice.len);
+            return _append_zig_slice(self, slice);
         }
-        pub fn try_append_zig_slice(self: ILIST, slice_: []T) ListError!Range {
-            try self.try_ensure_free_slots(slice_.len);
-            return _append_zig_slice(self, slice_);
+        pub fn try_append_zig_slice(self: ILIST, slice: []const T) ListError!Range {
+            try self.try_ensure_free_slots(slice.len);
+            return _append_zig_slice(self, slice);
         }
-        fn _append_zig_slice(self: ILIST, slice_: []T) Range {
-            var slice_list = list_from_slice(T, &slice_);
-            var slice_iter = slice_list.iterator_state(.entire_list());
-            const append_range = self.append_slots_assume_capacity(slice_.len);
-            var append_iter = self.iterator_state(.use_range(append_range));
-            while (append_iter.next()) |to| {
-                const from = slice_iter.next();
-                to.list.set(to.idx, from.?.val);
+        fn _append_zig_slice(self: ILIST, slice: []const T) Range {
+            if (slice.len == 0) return Range.single_idx(self.vtable.always_invalid_idx);
+            const append_range = self.append_slots_assume_capacity(slice.len);
+            var ii: usize = append_range.first_idx;
+            var i: usize = 0;
+            while (true) {
+                self.set(ii, slice[i]);
+                if (ii == append_range.last_idx) break;
+                ii = self.next_idx(ii);
+                i += 1;
             }
             return append_range;
         }
@@ -1441,7 +1441,7 @@ pub fn IList(comptime T: type) type {
             return _insert_zig_slice(self, idx, slice_);
         }
         fn _insert_zig_slice(self: ILIST, idx: usize, slice_: []T) Range {
-            var slice_list = list_from_slice(T, &slice_);
+            var slice_list = list_from_slice_no_alloc(T, &slice_);
             var slice_iter = slice_list.iterator_state(.entire_list());
             const insert_range = self.insert_slots_assume_capacity(idx, slice_.len);
             var insert_iter = self.iterator_state(.use_range(insert_range));
@@ -1692,37 +1692,6 @@ pub fn IList(comptime T: type) type {
             return val;
         }
 
-        const LocateResult = struct {
-            idx: usize = 0,
-            found: bool = false,
-            exit_hi: bool = false,
-            exit_lo: bool = false,
-        };
-        const LocateResultIndirect = struct {
-            idx: usize = 0,
-            idx_idx: usize = 0,
-            found: bool = false,
-            exit_hi: bool = false,
-            exit_lo: bool = false,
-        };
-        pub const SearchResult = struct {
-            idx: usize = 0,
-            found: bool = false,
-        };
-        pub const SearchResultIndirect = struct {
-            idx: usize = 0,
-            idx_idx: usize = 0,
-            found: bool = false,
-        };
-        pub const InsertIndexResult = struct {
-            idx: usize = 0,
-            append: bool = false,
-        };
-        pub const InsertIndexResultIndirect = struct {
-            idx: usize = 0,
-            idx_idx: usize = 0,
-            append: bool = false,
-        };
         fn _sorted_binary_locate(
             self: ILIST,
             orig_lo: usize,
@@ -2090,9 +2059,9 @@ pub fn IList(comptime T: type) type {
             const ins_result = _sorted_binary_insert_index_indirect(self, IDX, idx_list, val, equal_func, greater_than_func);
             var idx: usize = undefined;
             if (ins_result.append) {
-                idx = idx_list.append(ins_result.idx);
+                idx = idx_list.append(@intCast(ins_result.idx));
             } else {
-                idx = idx_list.insert(ins_result.idx_idx, ins_result.idx);
+                idx = idx_list.insert(ins_result.idx_idx, @intCast(ins_result.idx));
             }
             return idx;
         }
@@ -2108,9 +2077,9 @@ pub fn IList(comptime T: type) type {
             const ins_result = _sorted_linear_insert_index_indirect(self, IDX, idx_list, val, equal_func, greater_than_func);
             var idx: usize = undefined;
             if (ins_result.append) {
-                idx = idx_list.append(ins_result.idx);
+                idx = idx_list.append(@intCast(ins_result.idx));
             } else {
-                idx = idx_list.insert(ins_result.idx_idx, ins_result.idx);
+                idx = idx_list.insert(ins_result.idx_idx, @intCast(ins_result.idx));
             }
             return idx;
         }
@@ -2137,9 +2106,9 @@ pub fn IList(comptime T: type) type {
             greater_than_func: *const fn (this_val: T, find_val: T) bool,
         ) usize {
             if (self.prefer_linear_ops()) {
-                return self._sorted_linear_insert_indirect(val, IDX, idx_list, equal_func, greater_than_func);
+                return self._sorted_linear_insert_indirect(IDX, idx_list, val, equal_func, greater_than_func);
             } else {
-                return self._sorted_binary_insert_indirect(val, IDX, idx_list, equal_func, greater_than_func);
+                return self._sorted_binary_insert_indirect(IDX, idx_list, val, equal_func, greater_than_func);
             }
         }
 
@@ -2153,9 +2122,9 @@ pub fn IList(comptime T: type) type {
 
         pub fn sorted_insert_implicit_indirect(self: ILIST, comptime IDX: type, idx_list: IList(IDX), val: T) usize {
             if (self.prefer_linear_ops()) {
-                return self._sorted_linear_insert_indirect(val, IDX, idx_list, _implicit_eq, _implicit_gt);
+                return self._sorted_linear_insert_indirect(IDX, idx_list, val, _implicit_eq, _implicit_gt);
             } else {
-                return self._sorted_binary_insert_indirect(val, IDX, idx_list, _implicit_eq, _implicit_gt);
+                return self._sorted_binary_insert_indirect(IDX, idx_list, val, _implicit_eq, _implicit_gt);
             }
         }
 
@@ -2181,9 +2150,9 @@ pub fn IList(comptime T: type) type {
             greater_than_func: *const fn (this_val: T, find_val: T) bool,
         ) InsertIndexResultIndirect {
             if (self.prefer_linear_ops()) {
-                return self._sorted_linear_insert_index_indirect(val, IDX, idx_list, equal_func, greater_than_func);
+                return self._sorted_linear_insert_index_indirect(IDX, idx_list, val, equal_func, greater_than_func);
             } else {
-                return self._sorted_binary_insert_index_indirect(val, IDX, idx_list, equal_func, greater_than_func);
+                return self._sorted_binary_insert_index_indirect(IDX, idx_list, val, equal_func, greater_than_func);
             }
         }
 
@@ -2197,9 +2166,9 @@ pub fn IList(comptime T: type) type {
 
         pub fn sorted_insert_index_implicit_indirect(self: ILIST, comptime IDX: type, idx_list: IList(IDX), val: T) InsertIndexResultIndirect {
             if (self.prefer_linear_ops()) {
-                return self._sorted_linear_insert_index_indirect(val, IDX, idx_list, _implicit_eq, _implicit_gt);
+                return self._sorted_linear_insert_index_indirect(IDX, idx_list, val, _implicit_eq, _implicit_gt);
             } else {
-                return self._sorted_binary_insert_index_indirect(val, IDX, idx_list, _implicit_eq, _implicit_gt);
+                return self._sorted_binary_insert_index_indirect(IDX, idx_list, val, _implicit_eq, _implicit_gt);
             }
         }
         pub fn sorted_search(
@@ -2223,9 +2192,9 @@ pub fn IList(comptime T: type) type {
             greater_than_func: *const fn (this_val: T, find_val: T) bool,
         ) SearchResultIndirect {
             if (self.prefer_linear_ops()) {
-                return self._sorted_linear_search_indirect(val, IDX, idx_list, equal_func, greater_than_func);
+                return self._sorted_linear_search_indirect(IDX, idx_list, val, equal_func, greater_than_func);
             } else {
-                return self._sorted_binary_search_indirect(val, IDX, idx_list, equal_func, greater_than_func);
+                return self._sorted_binary_search_indirect(IDX, idx_list, val, equal_func, greater_than_func);
             }
         }
         pub fn sorted_search_implicit(self: ILIST, val: T) SearchResult {
@@ -2237,9 +2206,9 @@ pub fn IList(comptime T: type) type {
         }
         pub fn sorted_search_implicit_indirect(self: ILIST, comptime IDX: type, idx_list: IList(IDX), val: T) SearchResultIndirect {
             if (self.prefer_linear_ops()) {
-                return self._sorted_linear_search_indirect(val, IDX, idx_list, _implicit_eq, _implicit_gt);
+                return self._sorted_linear_search_indirect(IDX, idx_list, val, _implicit_eq, _implicit_gt);
             } else {
-                return self._sorted_binary_search_indirect(val, IDX, idx_list, _implicit_eq, _implicit_gt);
+                return self._sorted_binary_search_indirect(IDX, idx_list, val, _implicit_eq, _implicit_gt);
             }
         }
 
@@ -2272,30 +2241,59 @@ pub fn IList(comptime T: type) type {
         }
         pub fn sorted_set_and_resort_indirect(self: ILIST, comptime IDX: type, idx_list: IList(IDX), idx_idx: usize, val: T, greater_than_func: *const fn (this_val: T, find_val: T) bool) usize {
             var new_idx_idx = idx_idx;
+            const real_idx_list: *List(u8) = @ptrCast(@alignCast(idx_list.object)); //DEBUG
             const real_idx: usize = @intCast(idx_list.get(idx_idx));
+            std.debug.print("idx_idx : {d}, real_idx: {d}\n", .{ idx_idx, real_idx }); //DEBUG
             var adj_idx_idx = idx_list.next_idx(new_idx_idx);
             var adj_idx: usize = undefined;
             var adj_val: T = undefined;
             while (idx_list.idx_valid(adj_idx_idx) and next_is_less: {
                 adj_idx = @intCast(idx_list.get(adj_idx_idx));
                 adj_val = self.get(adj_idx);
+                // std.debug.print("next_is_less tested:\n", .{}); //DEBUG
                 break :next_is_less greater_than_func(val, adj_val);
             }) {
-                idx_list.set(new_idx_idx, adj_idx);
+                // std.debug.print("\ttrue, this {d} > {d} next\n", .{ val, adj_val }); //DEBUG
+                idx_list.set(new_idx_idx, @intCast(adj_idx));
                 new_idx_idx = adj_idx_idx;
                 adj_idx_idx = idx_list.next_idx(adj_idx_idx);
             }
             adj_idx_idx = idx_list.prev_idx(new_idx_idx);
             while (idx_list.idx_valid(adj_idx_idx) and prev_is_greater: {
                 adj_idx = @intCast(idx_list.get(adj_idx_idx));
-                adj_val = self.get(adj_idx_idx);
+                adj_val = self.get(adj_idx);
+                // std.debug.print("\nprev_is_greater tested:\n", .{}); //DEBUG
                 break :prev_is_greater greater_than_func(adj_val, val);
             }) {
-                idx_list.set(new_idx_idx, adj_idx);
+                // std.debug.print("\ttrue, prev {d} > {d} this\n", .{ adj_val, val }); //DEBUG
+                idx_list.set(new_idx_idx, @intCast(adj_idx));
                 new_idx_idx = adj_idx_idx;
-                adj_idx_idx = self.prev_idx(adj_idx_idx);
+                adj_idx_idx = idx_list.prev_idx(adj_idx_idx);
             }
-            idx_list.set(new_idx_idx, real_idx);
+            std.debug.print("new_idx_idx: {d}, real_idx: {d}\n", .{ new_idx_idx, real_idx }); //DEBUG
+            if (idx_idx < new_idx_idx) { //DEBUG
+                std.debug.print("new_range:{any}\n", .{real_idx_list.ptr[idx_idx..new_idx_idx]});
+                var iii = idx_idx;
+                std.debug.print("new_sorted_vals: {{ ", .{});
+                while (iii < new_idx_idx) {
+                    const idx: usize = @intCast(real_idx_list.ptr[iii]);
+                    std.debug.print("{d}, ", .{self.get(idx)});
+                    iii += 1;
+                }
+                std.debug.print("}}\n", .{});
+            } else {
+                std.debug.print("new_range:{any}\n", .{real_idx_list.ptr[new_idx_idx..idx_idx]});
+                var iii = new_idx_idx;
+                std.debug.print("new_sorted_vals: {{ ", .{});
+                while (iii < idx_idx) {
+                    const idx: usize = @intCast(real_idx_list.ptr[iii]);
+                    std.debug.print("{d}, ", .{self.get(idx)});
+                    iii += 1;
+                }
+                std.debug.print("}}\n", .{});
+            }
+
+            idx_list.set(new_idx_idx, @intCast(real_idx));
             return new_idx_idx;
         }
         pub fn sorted_set_and_resort_implicit_indirect(self: ILIST, comptime IDX: type, idx_list: IList(IDX), idx_idx: usize, val: T) usize {
@@ -2664,8 +2662,11 @@ pub fn IList(comptime T: type) type {
     };
 }
 
-pub fn list_from_slice(comptime T: type, slice_ptr: *[]T) IList(T, *T, usize) {
-    return SliceAdapter.SliceAdapter(T).adapt(slice_ptr);
+pub fn list_from_slice_no_alloc(comptime T: type, slice_ptr: *[]T) IList(T) {
+    return SliceAdapter(T).interface_no_alloc(slice_ptr);
+}
+pub fn list_from_slice(comptime T: type, slice_ptr: *[]T, alloc: Allocator) IList(T) {
+    return SliceAdapter(T).interface(slice_ptr, alloc);
 }
 
 pub const Range = struct {
@@ -2691,30 +2692,24 @@ pub const Range = struct {
         };
     }
     pub fn entire_list(list: anytype) Range {
-        assert_type_is_ilist(@TypeOf(list), @src());
         return Range{
             .first_idx = list.first_idx(),
             .last_idx = list.last_idx(),
         };
     }
     pub fn first_idx_to_list_end(list: anytype, first_idx_: usize) Range {
-        assert_type_is_ilist(@TypeOf(list), @src());
         return Range{
             .first_idx = first_idx_,
             .last_idx = list.last_idx(),
         };
     }
     pub fn list_start_to_last_idx(list: anytype, last_idx_: usize) Range {
-        assert_type_is_ilist(@TypeOf(list), @src());
         return Range{
             .first_idx = list.first_idx(),
             .last_idx = last_idx_,
         };
     }
 };
-fn assert_type_is_ilist(comptime L: type, src: ?std.builtin.SourceLocation) void {
-    Assert.assert_with_reason(Types.type_has_decl_with_type_and_val(L, "__GOOLIB_ILIST", bool, true), src, "type {s} is not an instance of an IList", .{@typeName(L)});
-}
 pub const CountResult = struct {
     count: usize = 0,
     count_matches_expected: bool = false,
@@ -2750,3 +2745,41 @@ pub const FilterMode = enum(u8) {
     no_filter,
     use_filter,
 };
+
+const LocateResult = struct {
+    idx: usize = 0,
+    found: bool = false,
+    exit_hi: bool = false,
+    exit_lo: bool = false,
+};
+const LocateResultIndirect = struct {
+    idx: usize = 0,
+    idx_idx: usize = 0,
+    found: bool = false,
+    exit_hi: bool = false,
+    exit_lo: bool = false,
+};
+pub const SearchResult = struct {
+    idx: usize = 0,
+    found: bool = false,
+};
+pub const SearchResultIndirect = struct {
+    idx: usize = 0,
+    idx_idx: usize = 0,
+    found: bool = false,
+};
+pub const InsertIndexResult = struct {
+    idx: usize = 0,
+    append: bool = false,
+};
+pub const InsertIndexResultIndirect = struct {
+    idx: usize = 0,
+    idx_idx: usize = 0,
+    append: bool = false,
+};
+
+pub const SliceAdapter = @import("./IList_SliceAdapter.zig").SliceAdapter;
+pub const ArrayListAdapter = @import("./IList_ArrayListAdapter.zig").ArrayListAdapter;
+pub const List = @import("./IList_List.zig").List;
+pub const RingList = @import("./IList_RingList.zig").RingList;
+pub const MultiSortList = @import("./IList_MultiSortList.zig").MultiSortList;

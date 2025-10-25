@@ -132,6 +132,14 @@ pub fn Flags(comptime FLAGS_ENUM: type, comptime GROUPS_ENUM: type) type {
         pub inline fn set(self: *Self, flag: Flag) void {
             self.raw |= bits(flag);
         }
+        pub inline fn set_one_bit_from_bool(self: *Self, flag: Flag, state: bool) void {
+            const off = ctz(flag);
+            const bit_lo: RawInt = @intCast(@intFromBool(state));
+            const bit = bit_lo << off;
+            const mask = 1 << off;
+            self.raw &= ~mask;
+            self.raw |= bit;
+        }
         pub inline fn set_raw(self: *Self, raw: RawInt) void {
             assert_valid_bits(raw);
             self.raw |= raw;

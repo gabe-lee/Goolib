@@ -15,7 +15,6 @@ pub fn main() anyerror!void {
     var fuzzer = try Fuzz.DiffFuzzer.init_bench(
         std.process.args(),
         std.heap.smp_allocator,
-        Fuzz.MAX_THREAD_COUNT,
         &.{},
         &.{
             .new_group(

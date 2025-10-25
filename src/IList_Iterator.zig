@@ -54,12 +54,12 @@ pub fn IteratorState(comptime T: type) type {
         const IDX_LIST = IList.IList(usize);
 
         pub const IndexIter = struct {
-            list: IList,
+            list: T_LIST,
             range: IList.Range,
             curr: usize,
             state: IdxState = .UNCONSUMED,
 
-            pub fn new(list: IList, range: IList.Range, start: usize) IndexIter {
+            pub fn new(list: T_LIST, range: IList.Range, start: usize) IndexIter {
                 return IndexIter{
                     .list = list,
                     .range = range,
@@ -224,7 +224,7 @@ pub fn IteratorState(comptime T: type) type {
             }
             pub fn zig_index_list(idx_list: *[]const usize) Partial {
                 return Partial{
-                    .src = Source{ .list = IList.list_from_slice(usize, idx_list) },
+                    .src = Source{ .list = IList.list_from_slice_no_alloc(usize, idx_list) },
                 };
             }
             pub fn zig_index_list_max_count(idx_list: *[]const usize, max_count: usize) Partial {
@@ -294,7 +294,6 @@ pub fn IteratorState(comptime T: type) type {
                     .src = self.src,
                     .max_count = self.want_count,
                     .use_max = self.use_max,
-                    .done = self.use_max and self.want_count == 0,
                     .forward = self.forward,
                     .prev_idx = list.vtable.always_invalid_idx,
                 };
@@ -343,7 +342,7 @@ pub fn IteratorState(comptime T: type) type {
                                 new_rng.last_idx = list.nth_prev_idx(rng.last_idx, rng.last_idx);
                             },
                         }
-                        iter.src = new_rng;
+                        iter.src = Source{ .range = rng };
                         if (self.forward) {
                             iter.curr_idx = new_rng.first_idx;
                         } else {
@@ -356,9 +355,9 @@ pub fn IteratorState(comptime T: type) type {
                         } else {
                             iter.curr_idx = lst.last_idx();
                         }
-                        iter.done = iter.done or lst.len() == 0;
                     },
                 }
+                return iter;
             }
         };
 
@@ -493,7 +492,7 @@ pub fn IteratorState(comptime T: type) type {
                 return index_list(list, idx_list).with_max_count(max_count);
             }
             pub fn zig_index_list(list: T_LIST, idx_list: *[]const usize) Full {
-                var llist = IList.list_from_slice(usize, idx_list);
+                var llist = IList.list_from_slice_no_alloc(usize, idx_list);
                 return Full{
                     .list = list,
                     .src = Source{ .list = llist },

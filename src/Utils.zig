@@ -623,6 +623,25 @@ pub fn bools_to_switchable_integer(comptime count: comptime_int, bools: [count]b
     return result;
 }
 
+// pub const NamedBool = struct {};
+
+// fn bools_to_named_switchable_enum_output(comptime IN_STRUCT: type) type {
+//     assert_with_reason(Types.type_is_struct(IN_STRUCT), @src(), "type `IN_STRUCT` must be a struct type, got type `{s}`", .{@typeName(IN_STRUCT)});
+//     assert_with_reason(Types.type_is_struct_with_all_fields_same_type(IN_STRUCT, bool), @src(), "type `IN_STRUCT` must be a struct type with all `bool` fields, got type `{s}`", .{@typeName(IN_STRUCT)});
+//     const bits :u16= @intCast(@typeInfo(@TypeOf(bools_struct)).@"struct".fields.len);
+//     const int = std.meta.Int(.unsigned, bits);
+
+// }
+
+// pub fn bools_to_named_switchable_enum(bools_struct: anytype) enum(std.meta.Int(.unsigned, )) {
+//     const RESULT = std.meta.Int(.unsigned, count);
+//     var result: RESULT = 0;
+//     inline for (bools, 0..) |b, shift| {
+//         result |= @as(RESULT, @intCast(@intFromBool(b))) << @intCast(shift);
+//     }
+//     return result;
+// }
+
 pub fn slice_move_one(slice: anytype, old_idx: usize, new_idx: usize) void {
     Assert.assert_with_reason(Types.type_is_slice(@TypeOf(slice)), @src(), "type of `slice` was not a slice type, got {s}", .{@typeName(@TypeOf(slice))});
     const T = @typeInfo(@TypeOf(slice)).pointer.child;
@@ -900,4 +919,50 @@ pub fn mem_realloc(comptime T: type, comptime I: type, ptr: *[*]T, len: I, cap: 
         cap.* = @intCast(new_mem.len);
     }
     if (RET_BOOL) return true;
+}
+
+pub const ForEachControl = struct {
+    end_exclusive_delta: isize = 0,
+    start_delta: isize = 0,
+    index_delta: isize = 1,
+    keep_going: bool = true,
+};
+
+pub fn for_each(comptime T: type, slice: []T, start: usize, end_exclusive: usize, userdata: anytype, action: fn (slice: []T, val: T, idx: usize, userdata: @TypeOf(userdata)) void) void {
+    var idx: usize = start;
+    while (idx < end_exclusive) {
+        action(slice, slice[idx], idx, userdata);
+        idx += 1;
+    }
+}
+pub fn for_each_reverse(comptime T: type, slice: []T, start: usize, end_exclusive: usize, userdata: anytype, action: fn (slice: []T, val: T, idx: usize, userdata: @TypeOf(userdata)) void) void {
+    var idx: usize = end_exclusive;
+    while (idx > start) {
+        idx -= 1;
+        action(slice, slice[idx], idx, userdata);
+    }
+}
+pub fn for_each_special(comptime T: type, slice: []T, start: usize, end_exclusive: usize, userdata: anytype, action: fn (slice: []T, val: T, idx: usize, userdata: @TypeOf(userdata)) ForEachControl) void {
+    var slice_start: usize = start;
+    var slice_end: usize = end_exclusive;
+    var idx: usize = start;
+    var control: ForEachControl = undefined;
+    while (control.keep_going and idx < slice_end) {
+        control = action(slice, slice[idx], idx, userdata);
+        slice_start = @intCast(Types.intcast(slice_start, isize) + control.start_delta);
+        slice_end = @intCast(Types.intcast(slice_end, isize) + control.end_exclusive_delta);
+        idx = @intCast(Types.intcast(idx, isize) + control.index_delta);
+    }
+}
+pub fn for_each_special_reverse(comptime T: type, slice: []T, start: usize, end_exclusive: usize, userdata: anytype, action: fn (slice: []T, val: T, idx: usize, userdata: @TypeOf(userdata)) ForEachControl) void {
+    var slice_start: usize = start;
+    var slice_end: usize = end_exclusive;
+    var idx: usize = end_exclusive;
+    var control: ForEachControl = undefined;
+    while (control.keep_going and idx > slice_start) {
+        idx = @intCast(Types.intcast(idx, isize) - control.index_delta);
+        control = action(slice, slice[idx], idx, userdata);
+        slice_start = @intCast(Types.intcast(slice_start, isize) + control.start_delta);
+        slice_end = @intCast(Types.intcast(slice_end, isize) + control.end_exclusive_delta);
+    }
 }

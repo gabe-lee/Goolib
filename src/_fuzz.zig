@@ -16,11 +16,11 @@ const IList_SliceAdapter_u8 = IList._Fuzzer.IList_SliceAdapter_u8;
 const IList_ArrayListAdapter_u8 = IList._Fuzzer.IList_ArrayListAdapter_u8;
 const IList_RingList_u8 = IList._Fuzzer.IList_RingList_u8;
 const IList_List_u8 = IList._Fuzzer.IList_List_u8;
+const IList_MultiSortList_u8 = IList._Fuzzer.IList_MultiSortList_u8;
 pub fn main() anyerror!void {
     var fuzzer = try Fuzz.DiffFuzzer.init_fuzz(
         std.process.args(),
         std.heap.smp_allocator,
-        Fuzz.MAX_THREAD_COUNT,
         &.{
             // Fuzz.FAILURE_TEST,
             // Fuzz.OVERHEAD_TEST,
@@ -29,6 +29,7 @@ pub fn main() anyerror!void {
             IList_ArrayListAdapter_u8,
             IList_RingList_u8,
             IList_List_u8,
+            IList_MultiSortList_u8,
         },
         &.{
             .new_group("IList", &.{
@@ -36,6 +37,7 @@ pub fn main() anyerror!void {
                 IList_ArrayListAdapter_u8,
                 IList_RingList_u8,
                 IList_List_u8,
+                IList_MultiSortList_u8,
             }),
             .new_group("Utils", &.{
                 Utils_quick_hex_dec_u64,

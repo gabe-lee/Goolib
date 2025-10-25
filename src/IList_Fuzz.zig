@@ -44,6 +44,7 @@ pub const IList_SliceAdapter_u8 = make_slice_interface_test(u8);
 pub const IList_ArrayListAdapter_u8 = make_array_list_adapter_test(u8);
 pub const IList_RingList_u8 = make_ring_list_adapter_test(u8);
 pub const IList_List_u8 = make_list_interface_test(u8);
+pub const IList_MultiSortList_u8 = make_mulit_sort_list_adapter_test(u8);
 
 pub fn make_slice_interface_test(comptime T: type) Fuzz.FuzzTest {
     const PROTO = struct {
@@ -76,7 +77,7 @@ pub fn make_slice_interface_test(comptime T: type) Fuzz.FuzzTest {
             state.ref_list.clearAndFree(alloc);
             alloc.destroy(state);
         }
-        const _OPS = make_op_table(T, STATE, 0, false);
+        const _OPS = make_op_table(T, STATE, 0, .test_access_to_pointers, .list_has_static_size, null);
         pub const OPS = _OPS.OPS;
     };
     return Fuzz.FuzzTest{
@@ -128,7 +129,7 @@ pub fn make_array_list_adapter_test(comptime T: type) Fuzz.FuzzTest {
             alloc.destroy(state);
         }
 
-        const _OPS = make_op_table(T, STATE, 0, true);
+        const _OPS = make_op_table(T, STATE, 0, .test_access_to_pointers, .list_can_grow_and_shrink, null);
         pub const OPS = _OPS.OPS;
     };
     return Fuzz.FuzzTest{
@@ -184,7 +185,7 @@ pub fn make_list_interface_test(comptime T: type) Fuzz.FuzzTest {
             alloc.destroy(state);
         }
 
-        const _OPS = make_op_table(T, STATE, 0, true);
+        const _OPS = make_op_table(T, STATE, 0, .test_access_to_pointers, .list_can_grow_and_shrink, null);
         pub const OPS = _OPS.OPS;
     };
     return Fuzz.FuzzTest{
@@ -237,7 +238,7 @@ pub fn make_ring_list_adapter_test(comptime T: type) Fuzz.FuzzTest {
             alloc.destroy(state);
         }
 
-        const _OPS = make_op_table(T, STATE, 0, true);
+        const _OPS = make_op_table(T, STATE, 0, .test_access_to_pointers, .list_can_grow_and_shrink, null);
         pub const OPS = _OPS.OPS;
     };
     return Fuzz.FuzzTest{
@@ -251,9 +252,180 @@ pub fn make_ring_list_adapter_test(comptime T: type) Fuzz.FuzzTest {
     };
 }
 
-pub fn make_op_table(comptime T: type, comptime STATE: type, comptime UNINIT: T, comptime LIST_LIKE: bool) type {
+pub fn make_mulit_sort_list_adapter_test(comptime T: type) Fuzz.FuzzTest {
+    const EXTRA_DEBUG = true;
+    const PROTO = struct {
+        const T_IList = Root.IList.IList(T);
+        const T_List = std.ArrayList(T);
+        const SORTS = enum(u8) {
+            NORM,
+            MOD_32_REV_LT_200,
+            MOD_89_GT_42,
+        };
+        const MS_LIST = IList.MultiSortList(T, 0, u32, SORTS);
+        fn equal_norm(a: T, b: T) bool {
+            return a == b;
+        }
+        fn greater_norm(a: T, b: T) bool {
+            return a > b;
+        }
+        fn equal_mod_32(a: T, b: T) bool {
+            return (a % 32) == (b % 32);
+        }
+        fn greater_mod_32(a: T, b: T) bool {
+            return (a % 32) < (b % 32);
+        }
+        fn filter_mod_32(v: T) bool {
+            return v < 200;
+        }
+        fn equal_mod_89(a: T, b: T) bool {
+            return (a % 89) == (b % 89);
+        }
+        fn greater_mod_89(a: T, b: T) bool {
+            return (a % 89) > (b % 89);
+        }
+        fn filter_mod_89(v: T) bool {
+            return v > 42;
+        }
+        fn exact_equal(a: T, b: T) bool {
+            return a == b;
+        }
+
+        const INIT_NORM = MS_LIST.SortInit{
+            .name = SORTS.NORM,
+            .equal = equal_norm,
+            .greater_than = greater_norm,
+        };
+        const INIT_MOD_32 = MS_LIST.SortInit{
+            .name = SORTS.MOD_32_REV_LT_200,
+            .equal = equal_mod_32,
+            .greater_than = greater_mod_32,
+            .filter = filter_mod_32,
+        };
+        const INIT_MOD_89 = MS_LIST.SortInit{
+            .name = SORTS.MOD_89_GT_42,
+            .equal = equal_mod_89,
+            .greater_than = greater_mod_89,
+            .filter = filter_mod_89,
+        };
+        const INITS = [_]MS_LIST.SortInit{
+            INIT_NORM,
+            INIT_MOD_32,
+            INIT_MOD_89,
+        };
+        const NAME = "IList_MultiSortList_" ++ @typeName(T);
+        fn extra_check(state: *STATE, comptime op_name: []const u8, param_1: usize, param_2: usize, param_3: usize, alloc: Allocator) ?[]const u8 {
+            for (state.ms_list.sort_lists[0..], 0..) |*sort, sort_tag| {
+                var i: usize = 0;
+                var should_be_in_sort: usize = 0;
+                while (i < state.ms_list.primary_list.len) {
+                    const val = state.ms_list.primary_list.ptr[i];
+                    if (sort.filter(val)) {
+                        should_be_in_sort += 1;
+                    }
+                    i += 1;
+                }
+                if (sort.idx_list.len != should_be_in_sort) {
+                    return Utils.alloc_fail_str(alloc, @src(), NAME ++ ": {s}({d}, {d}, {d}): sort `{s}` should have had {d} indexes, but had {d} instead", .{ op_name, param_1, param_2, param_3, @tagName(@as(SORTS, @enumFromInt(sort_tag))), should_be_in_sort, sort.idx_list.len });
+                }
+                if (sort.idx_list.len == 0) continue;
+                i = 1;
+                var idx: usize = @intCast(sort.idx_list.ptr[0]);
+                var next_idx: usize = undefined;
+                var val: T = state.ms_list.primary_list.ptr[idx];
+                if (!sort.filter(val)) {
+                    return Utils.alloc_fail_str(alloc, @src(), NAME ++ ": {s}({d}, {d}, {d}): sort `{s}` had a value that should not have been in the sorted list according to its filter (idx = {d}, val = {any})", .{ op_name, param_1, param_2, param_3, @tagName(@as(SORTS, @enumFromInt(sort_tag))), idx, val });
+                }
+                var next_val: T = undefined;
+                if (EXTRA_DEBUG) {
+                    state.extra_debug.clearRetainingCapacity();
+                }
+                while (i < sort.idx_list.len) {
+                    next_idx = @intCast(sort.idx_list.ptr[i]);
+                    if (next_idx >= state.ms_list.primary_list.len) {
+                        return Utils.alloc_fail_str(alloc, @src(), NAME ++ ": {s}({d}, {d}, {d}): sort `{s}` had an index ({d}) out of bounds for the primary list (len = {d})", .{ op_name, param_1, param_2, param_3, @tagName(@as(SORTS, @enumFromInt(sort_tag))), next_idx, state.ms_list.primary_list.len });
+                    }
+                    if (EXTRA_DEBUG) {
+                        if (std.mem.containsAtLeastScalar(u32, state.extra_debug.items, 1, @intCast(next_idx))) {
+                            return Utils.alloc_fail_str(alloc, @src(), NAME ++ ": {s}({d}, {d}, {d}): sort `{s}` had an index ({d}) that was duplicated", .{ op_name, param_1, param_2, param_3, @tagName(@as(SORTS, @enumFromInt(sort_tag))), next_idx });
+                        }
+                        state.extra_debug.append(alloc, @intCast(next_idx)) catch unreachable;
+                    }
+                    next_val = state.ms_list.primary_list.ptr[next_idx];
+                    if (!sort.filter(val)) {
+                        return Utils.alloc_fail_str(alloc, @src(), NAME ++ ": {s}({d}, {d}, {d}): sort `{s}` had a value that should not have been in the sorted list according to its filter (idx = {d}, val = {any})", .{ op_name, param_1, param_2, param_3, @tagName(@as(SORTS, @enumFromInt(sort_tag))), next_idx, next_val });
+                    }
+                    if (sort.greater_than(val, next_val)) {
+                        return Utils.alloc_fail_str(alloc, @src(), NAME ++ ": {s}({d}, {d}, {d}): sort `{s}` was not in order:\nREAL_INDEXES: {d}\t{d}\nSORT_INDEXES: {d}\t{d}\nREAL_VALUES:  {any}\t{any}\n", .{ op_name, param_1, param_2, param_3, @tagName(@as(SORTS, @enumFromInt(sort_tag))), idx, next_idx, i - 1, i, val, next_val });
+                    }
+                    i += 1;
+                    idx = next_idx;
+                    val = next_val;
+                }
+            }
+            return null;
+        }
+        const STATE = struct {
+            ref_list: T_List,
+            test_list: T_IList,
+            ms_list: MS_LIST,
+            extra_debug: std.ArrayList(u32),
+        };
+        pub fn INIT(state_opaque: **anyopaque, alloc: Allocator) anyerror!void {
+            var state = try alloc.create(STATE);
+            state.ref_list = try T_List.initCapacity(alloc, SMALL_LEN);
+            state.ms_list = MS_LIST.init_capacity(SMALL_LEN, SMALL_LEN, alloc, exact_equal, INITS[0..]);
+            state.test_list = state.ms_list.interface(alloc);
+            if (EXTRA_DEBUG) {
+                state.extra_debug = try std.ArrayList(u32).initCapacity(alloc, SMALL_LEN);
+            }
+            state_opaque.* = @ptrCast(state);
+        }
+        pub fn START_SEED(rand: Random, state_opaque: *anyopaque, alloc: Allocator, _: *Fuzz.BenchTime) ?[]const u8 {
+            var state: *STATE = @ptrCast(@alignCast(state_opaque));
+            const len = rand.uintLessThan(usize, LARGEST_LEN);
+            state.ref_list.clearRetainingCapacity();
+            state.test_list.clear();
+            state.ref_list.ensureTotalCapacity(alloc, len) catch |err| return Utils.alloc_fail_err(alloc, @src(), err);
+            state.test_list.ensure_free_slots(len);
+            state.ref_list.items.len = len;
+            if (len > 0) {
+                rand.bytes(state.ref_list.items);
+                _ = state.test_list.append_zig_slice(state.ref_list.items);
+            }
+            return _OPS.verify_whole_state(state, "start_seed", 0, 0, 0, alloc);
+        }
+
+        pub fn DEINIT(state_opaque: *anyopaque, alloc: Allocator) void {
+            const state: *STATE = @ptrCast(@alignCast(state_opaque));
+            state.ref_list.deinit(alloc);
+            state.test_list.free();
+            if (EXTRA_DEBUG) {
+                state.extra_debug.deinit(alloc);
+            }
+            alloc.destroy(state);
+        }
+
+        const _OPS = make_op_table(T, STATE, 0xAA, .no_access_to_pointers, .list_can_grow_and_shrink, extra_check);
+        pub const OPS = _OPS.OPS;
+    };
+
+    return Fuzz.FuzzTest{
+        .options = Fuzz.FuzzOptions{
+            .name = PROTO.NAME,
+        },
+        .init_func = PROTO.INIT,
+        .start_seed_func = PROTO.START_SEED,
+        .op_table = PROTO.OPS[0..],
+        .deinit_func = PROTO.DEINIT,
+    };
+}
+
+pub fn make_op_table(comptime T: type, comptime STATE: type, comptime UNINIT: T, comptime POINTERS: AllowPtr, comptime GROWABLE: Growable, comptime extra_check_whole_state: ?*const fn (state: *STATE, comptime op_name: []const u8, param_1: usize, param_2: usize, param_3: usize, alloc: Allocator) ?[]const u8) type {
     Assert.assert_with_reason(Types.type_has_field_with_type(STATE, "ref_list", std.ArrayList(T)), @src(), "to use this automatic op generator, type `STATE` must have a field named `ref_list` that is of type `ArrayList({s})`", .{@typeName(T)});
     Assert.assert_with_reason(Types.type_has_field_with_type(STATE, "test_list", IList.IList(T)), @src(), "to use this automatic op generator, type `STATE` must have a field named `test_list` that is of type `IList({s})`", .{@typeName(T)});
+    const LIST_LIKE = GROWABLE == .list_can_grow_and_shrink;
+    const ALLOW_PTR = POINTERS == .test_access_to_pointers;
     return struct {
         fn val_mismatch(state: *STATE, comptime src: std.builtin.SourceLocation, comptime op_name: []const u8, alloc: Allocator, comptime context: []const u8, curr_n: usize, curr_idx: usize, param_1: usize, param_2: usize, param_3: usize) []const u8 {
             return Utils.alloc_fail_str(alloc, src, op_name ++ "({d}, {d}, {d}): mismatched values " ++ context ++ ":\nN={d}, IDX={d}, LEN={d}\nIDX:{d} {d} {d} {d} {d}\nREF:{any} {any} {any} {any} {any}\nTES:{any} {any} {any} {any} {any}\nIDX:{d} {d} {d} {d} {d}\n", .{
@@ -319,6 +491,9 @@ pub fn make_op_table(comptime T: type, comptime STATE: type, comptime UNINIT: T,
             curr_idx = state.test_list.first_idx();
             curr_n = 0;
             if (state.test_list.idx_valid(state.test_list.vtable.always_invalid_idx)) return Utils.alloc_fail_str(alloc, @src(), op_name ++ "({any}, {any}, {any}): `always invalid` index reported as valid ({d})", .{ param_1, param_2, param_3, state.test_list.vtable.always_invalid_idx });
+            if (extra_check_whole_state) |ex_check| {
+                return ex_check(state, op_name, param_1, param_2, param_3, alloc);
+            }
             return null;
         }
 
@@ -565,7 +740,7 @@ pub fn make_op_table(comptime T: type, comptime STATE: type, comptime UNINIT: T,
 
         pub const OPS = [_]*const fn (rand: Random, state_opq: *anyopaque, alloc: Allocator, _: *Fuzz.BenchTime) ?[]const u8{
             get_nth,
-            get_nth_ptr,
+            if (ALLOW_PTR) get_nth_ptr else get_nth,
             set_nth,
             check_nth_idx,
             idx_range_valid,
@@ -583,75 +758,15 @@ pub fn make_op_table(comptime T: type, comptime STATE: type, comptime UNINIT: T,
     };
 }
 
-pub fn make_bench_table_random_ins_del_get_set(comptime T: type, comptime STATE: type) type {
-    Assert.assert_with_reason(Types.type_has_field_with_type(STATE, "test_list", IList.IList(T)), @src(), "to use this automatic op generator, type `STATE` must have a field named `test_list` that is of type `IList({s})`", .{@typeName(T)});
-    Assert.assert_with_reason(Types.type_has_field_with_type(STATE, "tmp_val", T), @src(), "to use this automatic op generator, type `STATE` must have a field named `tmp_val` that is of type `{s}`", .{@typeName(T)});
-    Assert.assert_with_reason(Types.type_has_field_with_type(STATE, "tmp_range", IList.Range), @src(), "to use this automatic op generator, type `STATE` must have a field named `tmp_range` that is of type `IList.Range`", .{@typeName(T)});
-    return struct {
-        fn get_nth(rand: Random, state_opaque: *anyopaque, _: Allocator, bench: *Fuzz.BenchTime) ?[]const u8 {
-            const state: *STATE = @ptrCast(@alignCast(state_opaque));
-            const len = state.test_list.len();
-            if (len == 0) return null;
-            const n = rand.uintLessThan(usize, state.ref_list.items.len);
-            bench.start();
-            state.tmp_val = state.test_list.get_nth(n);
-            bench.end();
-        }
-        fn set_nth(rand: Random, state_opaque: *anyopaque, _: Allocator, bench: *Fuzz.BenchTime) ?[]const u8 {
-            const state: *STATE = @ptrCast(@alignCast(state_opaque));
-            const len = state.test_list.len();
-            if (len == 0) return null;
-            const n = rand.uintLessThan(usize, state.ref_list.items.len);
-            bench.start();
-            state.tmp_val = state.test_list.get_nth(n);
-            bench.end();
-        }
-        pub fn insert(rand: Random, state_opaque: *anyopaque, _: Allocator, bench: *Fuzz.BenchTime) ?[]const u8 {
-            const state: *STATE = @ptrCast(@alignCast(state_opaque));
-            const len = state.test_list.len();
-            const count = @min(@max(1, rand.uintLessThan(usize, LARGEST_COPY)), LARGEST_LEN - len);
-            const n = rand.uintLessThan(usize, len);
-            bench.start();
-            const idx = state.test_list.nth_idx(n);
-            state.tmp_range = state.test_list.insert_slots(idx, count);
-            bench.end();
-        }
-        pub fn append(rand: Random, state_opaque: *anyopaque, _: Allocator, bench: *Fuzz.BenchTime) ?[]const u8 {
-            const state: *STATE = @ptrCast(@alignCast(state_opaque));
-            const len = state.test_list.len();
-            const count = @min(@max(1, rand.uintLessThan(usize, LARGEST_COPY)), LARGEST_LEN - len);
-            bench.start();
-            state.tmp_range = state.test_list.append_slots(count);
-            bench.end();
-        }
-        pub fn delete(rand: Random, state_opaque: *anyopaque, _: Allocator, bench: *Fuzz.BenchTime) ?[]const u8 {
-            const state: *STATE = @ptrCast(@alignCast(state_opaque));
-            const len = state.test_list.len();
-            if (len == 0) return null;
-            var n1 = rand.uintLessThan(usize, len);
-            var n2 = rand.uintLessThan(usize, len);
-            if (n1 > n2) {
-                const tmp = n2;
-                n2 = n1;
-                n1 = tmp;
-            }
-            bench.start();
-            const idx_1: usize = state.test_list.nth_idx(n1);
-            const idx_2: usize = state.test_list.nth_idx(n2);
-            state.test_list.delete_range(.new_range(idx_1, idx_2));
-            bench.end();
-        }
+pub const Growable = enum(u8) {
+    list_can_grow_and_shrink,
+    list_has_static_size,
+};
 
-        pub const OPS = [_]*const fn (rand: Random, state_opq: *anyopaque, alloc: Allocator, bench: *Fuzz.BenchTime) ?[]const u8{
-            get_nth,
-            set_nth,
-            insert,
-            append,
-            delete,
-        };
-    };
-}
-
+pub const AllowPtr = enum(u8) {
+    test_access_to_pointers,
+    no_access_to_pointers,
+};
 // pub const Functionality = struct {
 //     const REF = std.ArrayList(u8);
 //     const TEST = IList.IList(u8);

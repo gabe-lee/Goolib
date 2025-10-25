@@ -362,6 +362,13 @@ pub inline fn type_is_void(comptime T: type) bool {
 pub inline fn type_is_func(comptime T: type) bool {
     return @typeInfo(T) == .@"fn";
 }
+pub inline fn type_is_struct_with_all_fields_same_type(comptime T: type, comptime F: type) bool {
+    const INFO = @typeInfo(T).@"struct";
+    for (INFO.fields) |field| {
+        if (field.type != F) return false;
+    }
+    return true;
+}
 
 // pub inline fn all_struct_fields_are_same_type(comptime T: type, comptime T_FIELD: type) bool {}
 

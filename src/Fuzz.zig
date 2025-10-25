@@ -282,12 +282,13 @@ pub const DiffFuzzer = struct {
     op_table: []const *const fn (rand: Random, state_opq: *anyopaque, alloc: Allocator, bench_time: *BenchTime) ?[]const u8 = noop_table[0..0],
     deinit_func: *const fn (state_opq: *anyopaque, alloc: Allocator) void = noop_deinit,
 
-    pub fn init_fuzz(args: std.process.ArgIterator, alloc: Allocator, thread_count: u64, test_list: []const FuzzTest, groups: []const FuzzTestGroup) anyerror!Self {
+    pub fn init_fuzz(args: std.process.ArgIterator, alloc: Allocator, test_list: []const FuzzTest, groups: []const FuzzTestGroup) anyerror!Self {
         var secs: ?u64 = null;
         var seed: ?u64 = null;
         var name: ?[]const u8 = null;
         var nops: ?u64 = null;
         var grup: ?[]const u8 = null;
+        var thrd: ?u64 = null;
         var args_ = args;
         _ = args_.next();
         while (args_.next()) |arg| {
@@ -306,14 +307,19 @@ pub const DiffFuzzer = struct {
                 name = val;
             } else if (std.mem.eql(u8, key, "grup")) {
                 grup = val;
+            } else if (std.mem.eql(u8, key, "thrd")) {
+                thrd = Utils.quick_undec(val, u64);
             } else {
                 std.debug.panic("invalid option `{s}`", .{arg});
             }
         }
+        if (thrd == null) {
+            thrd = MAX_THREAD_COUNT;
+        }
 
         var s = Self{
             .alloc = alloc,
-            .thread_count = @max(@min(thread_count, Thread.getCpuCount() catch 1), 1),
+            .thread_count = @max(@min(MAX_THREAD_COUNT, thrd.?, Thread.getCpuCount() catch 1), 1),
             .fail_list = try StrList.initCapacity(alloc, test_list.len),
             .fail_details = try FailList.initCapacity(alloc, test_list.len),
             .seed_file_string = try U8List.initCapacity(alloc, 512),
@@ -347,9 +353,10 @@ pub const DiffFuzzer = struct {
         return s;
     }
 
-    pub fn init_bench(args: std.process.ArgIterator, alloc: Allocator, thread_count: u64, test_list: []const FuzzTest, groups: []const FuzzTestGroup) anyerror!Self {
+    pub fn init_bench(args: std.process.ArgIterator, alloc: Allocator, test_list: []const FuzzTest, groups: []const FuzzTestGroup) anyerror!Self {
         var secs: ?u64 = null;
         var seed: ?u64 = null;
+        var thrd: ?u64 = null;
         var name: ?[]const u8 = null;
         var grup: ?[]const u8 = null;
         var args_ = args;
@@ -369,13 +376,18 @@ pub const DiffFuzzer = struct {
                 name = val;
             } else if (std.mem.eql(u8, key, "grup")) {
                 grup = val;
+            } else if (std.mem.eql(u8, key, "thrd")) {
+                thrd = Utils.quick_undec(val, u64);
             } else {
                 std.debug.panic("invalid option `{s}`", .{arg});
             }
         }
+        if (thrd == null) {
+            thrd = MAX_THREAD_COUNT;
+        }
         var s = Self{
             .alloc = alloc,
-            .thread_count = @max(@min(thread_count, Thread.getCpuCount() catch 1), 1),
+            .thread_count = @max(@min(MAX_THREAD_COUNT, thrd.?, Thread.getCpuCount() catch 1), 1),
             .fail_list = try StrList.initCapacity(alloc, test_list.len),
             .fail_details = try FailList.initCapacity(alloc, test_list.len),
             .seed_file_string = try U8List.initCapacity(alloc, 512),
@@ -775,6 +787,10 @@ pub const DiffFuzzer = struct {
             const max_ops = @max(1, self.min_ops_per_seed, random.uintAtMost(u64, self.max_ops_per_seed), file_min);
             while (op_count < max_ops) {
                 op_count += 1;
+                if (op_count > 10000) {
+                    std.debug.print("debug thread: {d}, seed: {X}, op num: {d}\n", .{ thread_num, seed.seed, op_count }); //DEBUG
+                }
+
                 total_ops.* += 1;
                 const op_idx = random.uintLessThan(usize, self.op_table.len);
                 r = self.op_table[op_idx](random, state, self.alloc, &fake_bench);
