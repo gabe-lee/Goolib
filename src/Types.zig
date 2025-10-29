@@ -370,6 +370,31 @@ pub inline fn type_is_struct_with_all_fields_same_type(comptime T: type, comptim
     return true;
 }
 
+pub inline fn type_has_method_with_signature(comptime TYPE: type, comptime NAME: []const u8, comptime INPUTS: []const builtin.Type.Fn.Param, comptime OUTPUT: ?type) bool {
+    if (!@hasDecl(TYPE, NAME)) return false;
+    if (@typeInfo(@TypeOf(@field(TYPE, NAME))) != .@"fn") return false;
+    const FN_INFO = @typeInfo(@TypeOf(@field(TYPE, NAME))).@"fn";
+    if (FN_INFO.return_type == null) {
+        if (OUTPUT != null) return false;
+    } else {
+        if (OUTPUT == null) return false;
+        if (FN_INFO.return_type.? != OUTPUT.?) return false;
+    }
+    const INS = FN_INFO.params;
+    if (INS.len != INPUTS.len) return false;
+    for (INS[0..], INPUTS[0..]) |got_in, exp_in| {
+        if (got_in.is_generic != exp_in.is_generic) return false;
+        if (got_in.is_noalias != exp_in.is_noalias) return false;
+        if (got_in.type == null) {
+            if (exp_in.type != null) return false;
+        } else {
+            if (exp_in.type == null) return false;
+            if (got_in.type.? != exp_in.type.?) return false;
+        }
+    }
+    return true;
+}
+
 // pub inline fn all_struct_fields_are_same_type(comptime T: type, comptime T_FIELD: type) bool {}
 
 pub fn is_valid_value_for_enum(comptime ENUM_TYPE: type, int_value: anytype) bool {

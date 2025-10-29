@@ -32,21 +32,62 @@ const Utils = Root.Utils;
 const DummyAlloc = Root.DummyAllocator;
 
 const List = Root.IList_List.List;
+const MSLIst = Root.IList.MultiSortList;
 const SegList = List(Segment);
 
 const Segment = struct {
-    start: u32,
-    len: u32,
+    start: u32 = math.maxInt(u32),
+    len_and_free_flag: u32 = FREE_BIT,
+
+    const FREE_BIT: u32 = 1 << 31;
+    const LEN_MASK: u32 = ~FREE_BIT;
+
+    pub inline fn get_len(self: Segment) u32 {
+        return self.len_and_free_flag & LEN_MASK;
+    }
+    pub inline fn set_len(self: *Segment, len: u32) void {
+        Assert.assert_with_reason(len < FREE_BIT, @src(), "ListSegmentAllocator can only support allocations up to 2,147,483,648 items long, got len {d}", .{len});
+        const f = self.len_and_free_flag & FREE_BIT;
+        self.len_and_free_flag = len | f;
+    }
+
+    pub inline fn is_free(self: Segment) bool {
+        return self.len_and_free_flag & FREE_BIT == FREE_BIT;
+    }
+    pub inline fn set_free(self: *Segment) void {
+        self.len_and_free_flag = self.len_and_free_flag | FREE_BIT;
+    }
+    pub inline fn set_used(self: *Segment) void {
+        self.len_and_free_flag = self.len_and_free_flag & LEN_MASK;
+    }
 };
 
-pub fn ListAllocator(comptime T: type) type {
+const SORT_NAMES = enum(u8) {
+    FREE,
+    LOGICAL,
+};
+fn free_greater_than(a: Segment, b: Segment) bool {
+    return a.get_len() > b.get_len();
+}
+fn free_equal(a: Segment, b: Segment) bool {
+    return a.get_len() == b.get_len();
+}
+fn free_filter(seg: Segment) bool {
+    return seg.is_free();
+}
+fn logical_greater_than(a: Segment, b: Segment) bool {
+    return a.start > b.start;
+}
+fn logical_equal(a: Segment, b: Segment) bool {
+    return a.start == b.start;
+}
+
+pub fn ListSegmentAllocator(comptime T: type) type {
     return struct {
         const Self = @This();
 
-        ptr: [*]T = @ptrFromInt(std.mem.alignBackward(usize, math.maxInt(usize), @alignOf(T))),
-        len: u32 = 0,
-        cap: u32 = 0,
-        free_segs: SegList,
+        data: List(T),
+        segment_list: MSLIst(Segment, UNINIT, u32, SORT_NAMES),
 
         pub fn init_empty() Self {
             return Self{};

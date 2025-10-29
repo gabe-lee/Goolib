@@ -156,7 +156,7 @@ pub fn MultiSortList(comptime T: type, comptime UNINIT: T, comptime IDX: type, c
                 .sort_name = curr_sort_idx.sort_name,
             };
         }
-        pub fn prev_idx_indirect(self: *Self, curr_sort_idx: SortIdx) ?SortIdx {
+        pub fn prev_sorted_idx(self: *Self, curr_sort_idx: SortIdx) ?SortIdx {
             const sort = self.sort_lists[@intFromEnum(curr_sort_idx.sort_name)];
             if (curr_sort_idx.sort_list_idx == 0 or sort.idx_list.len == 0) return null;
             const prev = curr_sort_idx.sort_list_idx - 1;
@@ -166,7 +166,7 @@ pub fn MultiSortList(comptime T: type, comptime UNINIT: T, comptime IDX: type, c
                 .sort_name = curr_sort_idx.sort_name,
             };
         }
-        pub fn nth_prev_idx_indirect(self: *Self, curr_sort_idx: SortIdx, n: usize) ?SortIdx {
+        pub fn nth_prev_sorted_idx(self: *Self, curr_sort_idx: SortIdx, n: usize) ?SortIdx {
             const sort = self.sort_lists[@intFromEnum(curr_sort_idx.sort_name)];
             if (curr_sort_idx.sort_list_idx < n or sort.idx_list.len <= n) return null;
             const prev = curr_sort_idx.sort_list_idx - n;

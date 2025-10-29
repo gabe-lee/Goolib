@@ -966,3 +966,11 @@ pub fn for_each_special_reverse(comptime T: type, slice: []T, start: usize, end_
         slice_end = @intCast(Types.intcast(slice_end, isize) + control.end_exclusive_delta);
     }
 }
+
+pub fn slices_overlap(comptime T: type, a: []const T, b: []const T) bool {
+    const a1 = @intFromPtr(a.ptr);
+    const a2 = @intFromPtr(a.ptr + a.len);
+    const b1 = @intFromPtr(b.ptr);
+    const b2 = @intFromPtr(b.ptr + b.len);
+    return a2 > b1 and b2 > a1;
+}
