@@ -31,27 +31,23 @@ const DummyAllocator = Root.DummyAllocator;
 const _Flags = Root.Flags;
 const IteratorState = Root.IList_Iterator.IteratorState;
 
+pub const SliceAdapter = @import("./IList_SliceAdapter.zig").SliceAdapter;
+pub const ArrayListAdapter = @import("./IList_ArrayListAdapter.zig").ArrayListAdapter;
+pub const List = @import("./IList_List.zig").List;
+pub const RingList = @import("./IList_RingList.zig").RingList;
+pub const MultiSortList = @import("./IList_MultiSortList.zig").MultiSortList;
+pub const Concrete = @import("./IList_Concrete.zig");
+
+pub const FilterMode = Concrete.FilterMode;
+pub const CountResult = Concrete.CountResult;
+pub const CopyResult = Concrete.CopyResult;
+pub const LocateResult = Concrete.LocateResult;
+pub const SearchResult = Concrete.SearchResult;
+pub const InsertIndexResult = Concrete.InsertIndexResult;
+pub const ListError = Concrete.ListError;
+
 pub const _Fuzzer = @import("./IList_Fuzz.zig");
 pub const _Bencher = @import("./IList_Bench.zig");
-
-// pub const Flags = _Flags.Flags(enum(u32) {
-//     goto_nth_item_in_constant_time,
-//     consecutive_indexes_in_order,
-//     all_indexes_zero_to_less_than_len_valid,
-// }, enum(u32) {});
-
-pub const ListError = error{
-    list_is_empty,
-    too_few_items_in_list,
-    index_out_of_bounds,
-    invalid_index,
-    invalid_range,
-    no_items_after,
-    no_items_before,
-    failed_to_grow_list,
-    replace_dest_idx_list_smaller_than_source,
-    iterator_is_empty,
-};
 
 pub fn IList(comptime T: type) type {
     return struct {
@@ -177,6 +173,11 @@ pub fn IList(comptime T: type) type {
             /// It is not guaranteed that all indexes less than `len` are valid for the list,
             /// but it should be assumed that `list.idx_valid(list.nth_idx(len - 1)) == true`
             len: *const fn (object: *anyopaque) usize = Types.unimplemented_1_params("IList.vtable.len", *anyopaque, usize),
+            /// Return the current number of values in the slice/list
+            ///
+            /// It is not guaranteed that all indexes less than `len` are valid for the list,
+            /// but it should be assumed that `list.idx_valid(list.nth_idx(len - 1)) == true`
+            trim_len: *const fn (object: *anyopaque, trim_n: usize) void = Types.unimplemented_2_params("IList.vtable.trim_len", *anyopaque, usize, void),
             /// Return the number of items between (and including) `first_idx` and `last_idx`
             ///
             /// `slice.range_len(slice.first_idx(), slice.last_idx())` MUST equal `slice.len()`
@@ -192,7 +193,7 @@ pub fn IList(comptime T: type) type {
             ///
             /// The supplied allocator should be the same one used when creating/allocating the
             /// original concrete implementation object's *memory*
-            try_ensure_free_slots: *const fn (object: *anyopaque, count: usize, alloc: Allocator) bool = Types.unimplemented_3_params("IList.vtable.try_ensure_free_slots", *anyopaque, usize, Allocator, bool),
+            try_ensure_free_slots: *const fn (object: *anyopaque, count: usize, alloc: Allocator) error{failed_to_grow_list}!void = Types.unimplemented_3_params("IList.vtable.try_ensure_free_slots", *anyopaque, usize, Allocator, error{failed_to_grow_list}!void),
             /// Insert `n` new slots directly before existing index, shifting all existing items
             /// at and after that index forward.
             ///
@@ -213,7 +214,11 @@ pub fn IList(comptime T: type) type {
             ///
             /// The supplied allocator may or may not be used dependant on the specific implementation
             append_slots_assume_capacity: *const fn (object: *anyopaque, count: usize, alloc: Allocator) Range = Types.unimplemented_3_params("IList.vtable.append_slots_assume_capacity", *anyopaque, usize, Allocator, Range),
-            /// Remove all items between `firstRemoveIdx` and `last_removed_idx`, inclusive
+            /// Delete one item at the given index
+            ///
+            /// All items after `idx` are shifted backward
+            delete: *const fn (object: *anyopaque, idx: usize, alloc: Allocator) void = Types.unimplemented_3_params("IList.vtable.delete", *anyopaque, usize, Allocator, void),
+            /// Delete all items between `firstRemoveIdx` and `last_removed_idx`, inclusive
             ///
             /// All items after `last_removed_idx` are shifted backward
             delete_range: *const fn (object: *anyopaque, range: Range, alloc: Allocator) void = Types.unimplemented_3_params("IList.vtable.delete_range", *anyopaque, Range, Allocator, void),
@@ -236,94 +241,89 @@ pub fn IList(comptime T: type) type {
             /// calling some other re-initialization method.
             free: *const fn (object: *anyopaque, alloc: Allocator) void = Types.unimplemented_2_params("IList.vtable.free", *anyopaque, Allocator, void),
         };
-        pub fn iterator_state(self: ILIST, self_range: IteratorState(T).Partial) IteratorState(T).Full {
-            return self_range.to_iter(self);
-        }
-        pub fn idx_iterator(self: ILIST, range: Range, start: usize) IteratorState(T).IndexIter {
-            return IteratorState(T).IndexIter.new(self, range, start);
-        }
-        pub const Reader = struct {
-            src: ILIST,
-            buf: ?[]T = null,
-            src_pos: usize,
-            buf_start: usize = 0,
-            buf_end: usize = 0,
 
-            pub fn new(src: ILIST, buf: ?[]T) Reader {
-                return Reader{
-                    .src = src,
-                    .buf = buf,
-                    .src_pos = src.first_idx(),
-                };
-            }
+        // pub const Reader = struct {
+        //     src: ILIST,
+        //     buf: ?[]T = null,
+        //     src_pos: usize,
+        //     buf_start: usize = 0,
+        //     buf_end: usize = 0,
 
-            pub fn read_to(self: *Reader, out: IteratorState(T).Full) CountResult {
-                var result = CopyResult{};
-                if (self.buf) |buf| {
-                    var buf_result = CopyResult{};
-                    var count: usize = 0;
-                    while (!result.full_dest_copied and !buf_result.full_source_copied) {
-                        if (self.buf_start == self.buf_end) {
-                            self.buf_start = 0;
-                            const buf_list = list_from_slice_no_alloc(T, &buf);
-                            buf_result = self.src.copy_from_to(.idx_to_end(self.src_pos), .use_range(buf_list, .new_range(self.buf_start, buf.len - 1)));
-                            self.src_pos = self.src.next_idx(buf_result.source_range.last_idx);
-                            self.buf_end = buf_result.dest_range.last_idx + 1;
-                            if (buf_result.count == 0) {
-                                return out.count_result();
-                            }
-                        }
-                        result = buf.copy_from_to(.new_range(self.buf_start, self.buf_end - 1), out);
-                        count += result.count;
-                        if (result.full_source_copied) {
-                            self.buf_empty = true;
-                        }
-                    }
-                    return count;
-                } else {
-                    result = self.src.copy_from_to(.idx_to_end(self.src_pos), out);
-                    self.src_pos = self.src.next_idx(result.source_range.last_idx);
-                    return out.count_result();
-                }
-            }
+        //     pub fn new(src: ILIST, buf: ?[]T) Reader {
+        //         return Reader{
+        //             .src = src,
+        //             .buf = buf,
+        //             .src_pos = src.first_idx(),
+        //         };
+        //     }
 
-            pub fn peek_to(self: *Reader, out: ILIST) CountResult {
-                const pos = self.src_pos;
-                const res = self.read_to(out);
-                self.src_pos = pos;
-                self.buf_empty = true;
-                return res;
-            }
+        //     pub fn read_to(self: *Reader, out: IteratorState(T).Full) CountResult {
+        //         var result = CopyResult{};
+        //         if (self.buf) |buf| {
+        //             var buf_result = CopyResult{};
+        //             var count: usize = 0;
+        //             while (!result.full_dest_copied and !buf_result.full_source_copied) {
+        //                 if (self.buf_start == self.buf_end) {
+        //                     self.buf_start = 0;
+        //                     const buf_list = list_from_slice_no_alloc(T, &buf);
+        //                     buf_result = self.src.copy_from_to(.idx_to_end(self.src_pos), .use_range(buf_list, .new_range(self.buf_start, buf.len - 1)));
+        //                     self.src_pos = self.src.next_idx(buf_result.source_range.last_idx);
+        //                     self.buf_end = buf_result.dest_range.last_idx + 1;
+        //                     if (buf_result.count == 0) {
+        //                         return out.count_result();
+        //                     }
+        //                 }
+        //                 result = buf.copy_from_to(.new_range(self.buf_start, self.buf_end - 1), out);
+        //                 count += result.count;
+        //                 if (result.full_source_copied) {
+        //                     self.buf_empty = true;
+        //                 }
+        //             }
+        //             return count;
+        //         } else {
+        //             result = self.src.copy_from_to(.idx_to_end(self.src_pos), out);
+        //             self.src_pos = self.src.next_idx(result.source_range.last_idx);
+        //             return out.count_result();
+        //         }
+        //     }
 
-            fn _discard_action(item: IteratorState(T).Item, dd: *_discard_data) bool {
-                dd.left -= 1;
-                dd.last = item.idx;
-                if (dd.left == 0 or item.list.last_idx() == item.idx) {
-                    return false;
-                }
-                return true;
-            }
+        //     pub fn peek_to(self: *Reader, out: ILIST) CountResult {
+        //         const pos = self.src_pos;
+        //         const res = self.read_to(out);
+        //         self.src_pos = pos;
+        //         self.buf_empty = true;
+        //         return res;
+        //     }
 
-            const _discard_data = struct {
-                left: usize,
-                last: usize,
-            };
+        //     fn _discard_action(item: IteratorState(T).Item, dd: *_discard_data) bool {
+        //         dd.left -= 1;
+        //         dd.last = item.idx;
+        //         if (dd.left == 0 or item.list.last_idx() == item.idx) {
+        //             return false;
+        //         }
+        //         return true;
+        //     }
 
-            pub fn discard(self: *Reader, count: usize) void {
-                var left: usize = count;
+        //     const _discard_data = struct {
+        //         left: usize,
+        //         last: usize,
+        //     };
 
-                if (self.buf) |buf| {
-                    if (!self.buf_empty) {
-                        if (buf.prefer_linear_ops()) {
-                            var dd = _discard_data{ .left = count, .last = self.buf_pos };
-                            buf.for_each(.idx_to_end(self.buf_pos), &dd, _discard_action);
-                            left = dd.left;
-                        } else {}
-                    }
-                }
-                self.src_pos = self.src.nth_next_idx(self.src_pos, count);
-            }
-        };
+        //     pub fn discard(self: *Reader, count: usize) void {
+        //         var left: usize = count;
+
+        //         if (self.buf) |buf| {
+        //             if (!self.buf_empty) {
+        //                 if (buf.prefer_linear_ops()) {
+        //                     var dd = _discard_data{ .left = count, .last = self.buf_pos };
+        //                     buf.for_each(.idx_to_end(self.buf_pos), &dd, _discard_action);
+        //                     left = dd.left;
+        //                 } else {}
+        //             }
+        //         }
+        //         self.src_pos = self.src.nth_next_idx(self.src_pos, count);
+        //     }
+        // };
         pub const CompareFunc = fn (left_or_this: T, right_or_test: T) bool;
         pub const IIdxList = IList(usize, *usize, usize);
         pub const IListList = IList(ILIST, *ILIST, usize);
@@ -2710,87 +2710,13 @@ pub const Range = struct {
         };
     }
 };
-pub const CountResult = struct {
-    count: usize = 0,
-    count_matches_expected: bool = false,
-    next_idx: usize = 0,
-};
-pub fn AccumulateResult(comptime out: type) type {
-    return struct {
-        count_result: CountResult,
-        final_accumulation: out,
-    };
-}
-pub const CopyResult = struct {
-    count: usize = 0,
-    source_range: Range = .{},
-    dest_range: Range = .{},
-    count_matches_expected: bool = false,
-    full_source_copied: bool = false,
-    full_dest_copied: bool = false,
-};
-pub const SwizzleResult = struct {
-    count: usize = 0,
-    next_dest_idx: usize = 0,
-    count_matches_expected: bool = false,
-    all_selectors_done: bool = false,
-    full_dest_copied: bool = false,
-};
 
-pub const ErrorMode = enum(u8) {
-    no_error_checks,
-    error_checks,
-};
-pub const FilterMode = enum(u8) {
-    no_filter,
-    use_filter,
-};
+// pub const IndexSourceMode = enum(u8) {
+//     range,
+//     list,
+// };
 
-const LocateResult = struct {
-    idx: usize = 0,
-    found: bool = false,
-    exit_hi: bool = false,
-    exit_lo: bool = false,
-};
-const LocateResultIndirect = struct {
-    idx: usize = 0,
-    idx_idx: usize = 0,
-    found: bool = false,
-    exit_hi: bool = false,
-    exit_lo: bool = false,
-};
-pub const SearchResult = struct {
-    idx: usize = 0,
-    found: bool = false,
-};
-pub const SearchResultIndirect = struct {
-    idx: usize = 0,
-    idx_idx: usize = 0,
-    found: bool = false,
-};
-pub const InsertIndexResult = struct {
-    idx: usize = 0,
-    append: bool = false,
-};
-pub const InsertIndexResultIndirect = struct {
-    idx: usize = 0,
-    idx_idx: usize = 0,
-    append: bool = false,
-};
-
-pub const SliceAdapter = @import("./IList_SliceAdapter.zig").SliceAdapter;
-pub const ArrayListAdapter = @import("./IList_ArrayListAdapter.zig").ArrayListAdapter;
-pub const List = @import("./IList_List.zig").List;
-pub const RingList = @import("./IList_RingList.zig").RingList;
-pub const MultiSortList = @import("./IList_MultiSortList.zig").MultiSortList;
-pub const Concrete = @import("./IList_Concrete.zig");
-
-pub const IndexSourceMode = enum(u8) {
-    range,
-    list,
-};
-
-pub const IndexSource = union(IndexSourceMode) {
-    range: Range,
-    list: IList(usize),
-};
+// pub const IndexSource = union(IndexSourceMode) {
+//     range: Range,
+//     list: IList(usize),
+// };
