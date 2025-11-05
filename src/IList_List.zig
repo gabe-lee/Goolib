@@ -149,7 +149,7 @@ pub fn List(comptime T: type) type {
             fn p_delete_range(self: *Self, range: IList.Range, _: Allocator) void {
                 const rlen = range.consecutive_len();
                 if (range.last_idx == self.len - 1) {
-                    self.len -= rlen;
+                    self.len -= @intCast(rlen);
                     return;
                 }
                 Utils.mem_remove(self.ptr, &self.len, range.first_idx, rlen);
@@ -180,7 +180,7 @@ pub fn List(comptime T: type) type {
             .clear = P_FUNCS.p_clear,
             .free = P_FUNCS.p_free,
         };
-        const P = IList.Concrete.CreateConcretePrototypeNaturalIndexes(T, *Self, Allocator, "ptr", "len", "cap", PFX);
+        const P = IList.Concrete.CreateConcretePrototypeNaturalIndexes(T, *Self, Allocator, null, "ptr", null, "len", null, "cap", false, PFX);
         const VTABLE = P.VTABLE(true, true, false, false, math.maxInt(usize));
         //*** END PROTOTYPE***
 
@@ -302,8 +302,8 @@ pub fn List(comptime T: type) type {
         /// Shrink capacity while reserving at most `n` free slots
         /// for new items. Will not shrink below list length, and
         /// does nothing if `n`is greater than the existing free space.
-        pub fn shrink_cap_reserve_at_most(self: *Self, reserve_at_most: usize) void {
-            return P.shrink_cap_reserve_at_most(self, reserve_at_most, NO_ALLOC);
+        pub fn shrink_cap_reserve_at_most(self: *Self, reserve_at_most: usize, alloc: Allocator) void {
+            return P.shrink_cap_reserve_at_most(self, reserve_at_most, alloc);
         }
         /// Insert `n` value slots with undefined values at the given index,
         /// moving other items at or after that index to after the new ones.
@@ -560,11 +560,11 @@ pub fn List(comptime T: type) type {
         pub fn try_append_slots(self: *Self, count: usize, alloc: Allocator) ListError!Range {
             return P.try_append_slots(self, count, alloc);
         }
-        pub fn append_zig_slice(self: *Self, slice_: []const T, alloc: Allocator) Range {
-            return P.append_zig_slice(self, slice_, alloc);
+        pub fn append_zig_slice(self: *Self, alloc: Allocator, source: []const T) Range {
+            return P.append_zig_slice(self, source, alloc);
         }
-        pub fn try_append_zig_slice(self: *Self, slice_: []const T, alloc: Allocator) ListError!Range {
-            return P.try_append_zig_slice(self, slice_, alloc);
+        pub fn try_append_zig_slice(self: *Self, alloc: Allocator, source: []const T) ListError!Range {
+            return P.try_append_zig_slice(self, source, alloc);
         }
         pub fn append(self: *Self, val: T, alloc: Allocator) usize {
             return P.append(self, val, alloc);
@@ -572,11 +572,11 @@ pub fn List(comptime T: type) type {
         pub fn try_append(self: *Self, val: T, alloc: Allocator) ListError!usize {
             return P.try_append(self, val, alloc);
         }
-        pub fn append_many(self: *Self, list_range: P.RangeIter, alloc: Allocator) Range {
-            return P.append_many(self, alloc, list_range);
+        pub fn append_many(self: *Self, alloc: Allocator, source: P.RangeIter) Range {
+            return P.append_many(self, alloc, source);
         }
-        pub fn try_append_many(self: *Self, list_range: P.RangeIter, alloc: Allocator) ListError!Range {
-            return P.try_append_many(self, alloc, list_range);
+        pub fn try_append_many(self: *Self, alloc: Allocator, source: P.RangeIter) ListError!Range {
+            return P.try_append_many(self, alloc, source);
         }
         pub fn insert_slots(self: *Self, idx: usize, count: usize, alloc: Allocator) Range {
             return P.insert_slots(self, idx, count, alloc);
@@ -584,11 +584,11 @@ pub fn List(comptime T: type) type {
         pub fn try_insert_slots(self: *Self, idx: usize, count: usize, alloc: Allocator) ListError!Range {
             return P.try_insert_slots(self, idx, count, alloc);
         }
-        pub fn insert_zig_slice(self: *Self, idx: usize, slice_: []T, alloc: Allocator) Range {
-            return P.insert_zig_slice(self, idx, slice_, alloc);
+        pub fn insert_zig_slice(self: *Self, idx: usize, alloc: Allocator, source: []T) Range {
+            return P.insert_zig_slice(self, idx, source, alloc);
         }
-        pub fn try_insert_zig_slice(self: *Self, idx: usize, slice_: []T, alloc: Allocator) ListError!Range {
-            return P.try_insert_zig_slice(self, idx, slice_, alloc);
+        pub fn try_insert_zig_slice(self: *Self, idx: usize, alloc: Allocator, source: []T) ListError!Range {
+            return P.try_insert_zig_slice(self, idx, source, alloc);
         }
         pub fn insert(self: *Self, idx: usize, val: T, alloc: Allocator) usize {
             return P.insert(self, idx, val, alloc);
@@ -596,11 +596,11 @@ pub fn List(comptime T: type) type {
         pub fn try_insert(self: *Self, idx: usize, val: T, alloc: Allocator) ListError!usize {
             return P.try_insert(self, idx, val, alloc);
         }
-        pub fn insert_many(self: *Self, idx: usize, list_range: P.RangeIter, alloc: Allocator) Range {
-            return P.insert_many(self, idx, alloc, list_range);
+        pub fn insert_many(self: *Self, idx: usize, alloc: Allocator, source: P.RangeIter) Range {
+            return P.insert_many(self, idx, alloc, source);
         }
-        pub fn try_insert_many(self: *Self, idx: usize, list_range: P.RangeIter, alloc: Allocator) ListError!Range {
-            return P.try_insert_many(self, idx, alloc, list_range);
+        pub fn try_insert_many(self: *Self, idx: usize, alloc: Allocator, source: P.RangeIter) ListError!Range {
+            return P.try_insert_many(self, idx, alloc, source);
         }
         pub fn try_delete_range(self: *Self, range: Range) ListError!void {
             return P.try_delete_range(self, range, NO_ALLOC);

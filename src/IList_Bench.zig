@@ -232,7 +232,7 @@ pub fn make_list_interface_bench_maker(comptime T: type) fn (init_val: T, compti
                 pub fn START_SEED(rand: Random, state_opaque: *anyopaque, alloc: Allocator, _: *Fuzz.BenchTime) ?[]const u8 {
                     var state: *STATE = @ptrCast(@alignCast(state_opaque));
                     const len = rand.uintLessThan(usize, MAX_LEN);
-                    const ok = state.test_list.try_ensure_free_slots(len);
+                    const ok = Utils.not_error(state.test_list.try_ensure_free_slots(len));
                     if (!ok) return Utils.alloc_fail_str(alloc, @src(), "failed to ensure free slots", .{});
                     state.list.len = @intCast(len);
                     if (len > 0) {

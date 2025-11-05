@@ -113,7 +113,7 @@ pub fn IList(comptime T: type) type {
             range_valid: *const fn (object: *anyopaque, range: Range) bool = Types.unimplemented_2_params("IList.vtable.range_valid", *anyopaque, Range, bool),
             /// Returns whether the given index is within the given range, including
             /// the first and last indexes.
-            idx_in_range: *const fn (object: *anyopaque, range: Range, idx: usize) bool = Types.unimplemented_3_params("IList.vtable.range_valid", *anyopaque, Range, usize, bool),
+            idx_in_range: *const fn (object: *anyopaque, idx: usize, range: Range) bool = Types.unimplemented_3_params("IList.vtable.idx_in_range", *anyopaque, usize, Range, bool),
             /// Split an index range (roughly) in half, returning the index in the middle of the range
             ///
             /// Assumes `range_valid(first_idx, last_idx) == true`, and if so,

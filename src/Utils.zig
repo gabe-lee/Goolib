@@ -974,3 +974,18 @@ pub fn slices_overlap(comptime T: type, a: []const T, b: []const T) bool {
     const b2 = @intFromPtr(b.ptr + b.len);
     return a2 > b1 and b2 > a1;
 }
+
+pub fn not_error(err_union: anyerror!void) bool {
+    if (err_union) |_| {
+        return true;
+    } else |_| {
+        return false;
+    }
+}
+pub fn is_error(err_union: anyerror!void) bool {
+    if (err_union) |_| {
+        return false;
+    } else |_| {
+        return true;
+    }
+}

@@ -171,7 +171,7 @@ pub fn ConcreteTableIndexFuncs(comptime LIST: type) type {
     };
 }
 
-pub fn ConcreteTableIndexFuncsNaturalIndexes(comptime LIST: type, comptime LEN_FIELD: []const u8, comptime CAP_FIELD: []const u8, comptime ensure_free_doesnt_change_cap_: bool) ConcreteTableIndexFuncs(LIST) {
+pub fn ConcreteTableIndexFuncsNaturalIndexes(comptime LIST: type, comptime LEN_PARENT_FIELD: ?[]const u8, comptime LEN_FIELD: []const u8, comptime CAP_PARENT_FIELD: ?[]const u8, comptime CAP_FIELD: []const u8, comptime ensure_free_doesnt_change_cap_: bool) ConcreteTableIndexFuncs(LIST) {
     const PROTO = struct {
         fn prefer_linear_ops(_: LIST) bool {
             return false;
@@ -189,16 +189,24 @@ pub fn ConcreteTableIndexFuncsNaturalIndexes(comptime LIST: type, comptime LEN_F
             return math.maxInt(usize);
         }
         fn len(self: LIST) usize {
-            return @intCast(@field(self, LEN_FIELD));
+            if (LEN_PARENT_FIELD) |LEN_PARENT| {
+                return @intCast(@field(@field(self, LEN_PARENT), LEN_FIELD));
+            } else {
+                return @intCast(@field(self, LEN_FIELD));
+            }
         }
         fn cap(self: LIST) usize {
-            return @intCast(@field(self, CAP_FIELD));
+            if (CAP_PARENT_FIELD) |CAP_PARENT| {
+                return @intCast(@field(@field(self, CAP_PARENT), CAP_FIELD));
+            } else {
+                return @intCast(@field(self, CAP_FIELD));
+            }
         }
         fn first_idx(_: LIST) usize {
             return 0;
         }
         fn last_idx(self: LIST) usize {
-            return len(self) - 1;
+            return len(self) -% 1;
         }
         fn next_idx(_: LIST, this_idx: usize) usize {
             return this_idx + 1;
@@ -218,7 +226,7 @@ pub fn ConcreteTableIndexFuncsNaturalIndexes(comptime LIST: type, comptime LEN_F
         fn range_valid(self: LIST, range: Range) bool {
             return range.first_idx <= range.last_idx and range.last_idx < len(self);
         }
-        fn idx_in_range(_: LIST, range: Range, idx: usize) bool {
+        fn idx_in_range(_: LIST, idx: usize, range: Range) bool {
             return range.first_idx <= idx and idx <= range.last_idx;
         }
         fn split_range(_: LIST, range: Range) usize {
@@ -298,7 +306,7 @@ pub fn ConcreteTableIndexFuncsIList(comptime T: type) ConcreteTableIndexFuncs(IL
         fn range_valid(self: LIST, range: Range) bool {
             return self.vtable.range_valid(self.object, range);
         }
-        fn idx_in_range(self: LIST, range: Range, idx: usize) bool {
+        fn idx_in_range(self: LIST, idx: usize, range: Range) bool {
             return self.vtable.idx_in_range(self.object, range, idx);
         }
         fn split_range(self: LIST, range: Range) usize {
@@ -342,10 +350,10 @@ pub fn ConcreteTableValueFuncsIList(comptime T: type) ConcreteTableValueFuncs(T,
         fn set(self: LIST, idx: usize, val: T, alloc: Allocator) void {
             return self.vtable.set(self.object, idx, val, alloc);
         }
-        fn move(self: LIST, old_idx: usize, new_idx: T, alloc: Allocator) void {
+        fn move(self: LIST, old_idx: usize, new_idx: usize, alloc: Allocator) void {
             return self.vtable.move(self.object, old_idx, new_idx, alloc);
         }
-        fn move_range(self: LIST, range: Range, new_first_idx: T, alloc: Allocator) void {
+        fn move_range(self: LIST, range: Range, new_first_idx: usize, alloc: Allocator) void {
             return self.vtable.move_range(self.object, range, new_first_idx, alloc);
         }
         fn try_ensure_free_slots(self: LIST, count: usize, alloc: Allocator) error{failed_to_grow_list}!void {
@@ -405,13 +413,17 @@ pub fn ConcreteTableNativeSliceFuncs(comptime T: type, comptime LIST: type) type
     };
 }
 
-pub fn NativeRangeSliceNaturalIndexes(comptime T: type, comptime LIST: type, comptime PTR_FIELD: []const u8) ConcreteTableNativeSliceFuncs(T, LIST) {
+pub fn NativeRangeSliceNaturalIndexes(comptime T: type, comptime LIST: type, comptime PTR_PARENT_FIELD: ?[]const u8, comptime PTR_FIELD: []const u8) ConcreteTableNativeSliceFuncs(T, LIST) {
     const PROTO = struct {
         fn has_native_slice(_: LIST) bool {
             return true;
         }
         fn native_slice(self: LIST, range: Range) []T {
-            return @field(self, PTR_FIELD)[range.first_idx .. range.last_idx + 1];
+            if (PTR_PARENT_FIELD) |PTR_PARENT| {
+                return @field(@field(self, PTR_PARENT), PTR_FIELD)[range.first_idx .. range.last_idx + 1];
+            } else {
+                return @field(self, PTR_FIELD)[range.first_idx .. range.last_idx + 1];
+            }
         }
     };
     return ConcreteTableNativeSliceFuncs(T, LIST){
@@ -438,9 +450,9 @@ pub fn NativeRangeSliceIList(comptime T: type) ConcreteTableNativeSliceFuncs(T, 
     };
 }
 
-pub fn CreateConcretePrototypeNaturalIndexes(comptime T: type, comptime LIST: type, comptime ALLOC: type, comptime PTR_FIELD: []const u8, comptime LEN_FIELD: []const u8, comptime CAP_FIELD: []const u8, comptime val_funcs: ConcreteTableValueFuncs(T, LIST, ALLOC)) type {
-    const idx_funcs = ConcreteTableIndexFuncsNaturalIndexes(LIST, LEN_FIELD, CAP_FIELD);
-    const nat_slice = NativeRangeSliceNaturalIndexes(T, LIST, PTR_FIELD);
+pub fn CreateConcretePrototypeNaturalIndexes(comptime T: type, comptime LIST: type, comptime ALLOC: type, comptime PTR_PARENT_FIELD: ?[]const u8, comptime PTR_FIELD: []const u8, comptime LEN_PARENT_FIELD: ?[]const u8, comptime LEN_FIELD: []const u8, comptime CAP_PARENT_FIELD: ?[]const u8, comptime CAP_FIELD: []const u8, comptime ensure_free_doesnt_change_cap_: bool, comptime val_funcs: ConcreteTableValueFuncs(T, LIST, ALLOC)) type {
+    const idx_funcs = ConcreteTableIndexFuncsNaturalIndexes(LIST, LEN_PARENT_FIELD, LEN_FIELD, CAP_PARENT_FIELD, CAP_FIELD, ensure_free_doesnt_change_cap_);
+    const nat_slice = NativeRangeSliceNaturalIndexes(T, LIST, PTR_PARENT_FIELD, PTR_FIELD);
     return CreateConcretePrototype(T, LIST, ALLOC, val_funcs, idx_funcs, nat_slice);
 }
 
@@ -645,9 +657,9 @@ pub fn CreateConcretePrototype(comptime T: type, comptime LIST: type, comptime A
                 const self: LIST = @ptrCast(@alignCast(object));
                 return cap(self);
             }
-            fn iface_trim_len(object: *anyopaque, trim_n: usize) void {
+            fn iface_trim_len(object: *anyopaque, trim_n: usize, alloc: ALLOC) void {
                 const self: LIST = @ptrCast(@alignCast(object));
-                return trim_len(self, trim_n);
+                return trim_len(self, trim_n, alloc);
             }
             fn iface_idx_valid(object: *anyopaque, idx: usize) bool {
                 const self: LIST = @ptrCast(@alignCast(object));
@@ -1937,7 +1949,7 @@ pub fn CreateConcretePrototype(comptime T: type, comptime LIST: type, comptime A
         }
         pub fn ensure_free_slots(self: LIST, count: usize, alloc: ALLOC) void {
             const err = try_ensure_free_slots(self, count, alloc);
-            Assert.assert_with_reason(err == void{}, @src(), "failed to grow list, current: len = {d}, cap = {d}, need {d} more slots", .{ len(self), cap(self), count });
+            Assert.assert_with_reason(Utils.not_error(err), @src(), "failed to grow list, current: len = {d}, cap = {d}, need {d} more slots", .{ len(self), cap(self), count });
         }
         pub fn append_slots(self: LIST, count: usize, alloc: ALLOC) Range {
             ensure_free_slots(self, count, alloc);

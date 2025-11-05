@@ -29,10 +29,24 @@ const AllocatorInfallible = Root.AllocatorInfallible;
 const Allocator = std.mem.Allocator;
 const IList = Root.IList;
 const Utils = Root.Utils;
-const DummyAlloc = Root.DummyAllocator;
 const Flags = Root.Flags;
 
 const List = Root.IList_List.List;
+
+const DummyAlloc = Root.DummyAllocator;
+
+pub const Concrete = IList.Concrete;
+
+pub const FilterMode = Concrete.FilterMode;
+pub const CountResult = Concrete.CountResult;
+pub const CopyResult = Concrete.CopyResult;
+pub const LocateResult = Concrete.LocateResult;
+pub const SearchResult = Concrete.SearchResult;
+pub const InsertIndexResult = Concrete.InsertIndexResult;
+pub const ListError = Concrete.ListError;
+pub const Range = Concrete.Range;
+
+const NO_ALLOC = DummyAlloc.allocator_panic;
 
 pub fn MultiSortList(comptime T: type, comptime UNINIT: T, comptime IDX: type, comptime SORT_NAMES: type) type {
     Assert.assert_with_reason(Types.type_is_enum(SORT_NAMES), @src(), "type `SORT_NAMES` must be an enum type, got `{s}`", .{@typeName(SORT_NAMES)});
@@ -219,64 +233,981 @@ pub fn MultiSortList(comptime T: type, comptime UNINIT: T, comptime IDX: type, c
             return s;
         }
 
-        pub fn free(self: *Self, alloc: Allocator) void {
-            self.primary_list.free(alloc);
-            for (self.sort_lists[0..]) |*ex_sort| {
-                ex_sort.idx_list.free(alloc);
+        //*** BEGIN PROTOTYPE ***
+        const P_FUNCS = struct {
+            fn p_get(self: *Self, idx: usize, _: Allocator) T {
+                return self.primary_list.ptr[idx];
             }
-        }
+            fn p_get_ptr(self: *Self, idx: usize, _: Allocator) *T {
+                return &self.primary_list.ptr[idx];
+            }
+            fn p_set(self: *Self, idx: usize, val: T, _: Allocator) void {
+                self.primary_list.ptr[idx] = val;
+            }
+            fn p_move(self: *Self, old_idx: usize, new_idx: usize, _: Allocator) void {
+                if (old_idx == new_idx) return;
+                var smallest_other: usize = undefined;
+                var largest_other: usize = undefined;
+                var dir: ShiftDirection = undefined;
+                var delta: usize = undefined;
+                if (old_idx < new_idx) {
+                    smallest_other = old_idx + 1;
+                    largest_other = new_idx;
+                    delta = new_idx - old_idx;
+                    dir = .this_up__other_down;
+                } else {
+                    smallest_other = new_idx;
+                    largest_other = old_idx - 1;
+                    delta = old_idx - new_idx;
+                    dir = .this_down__other_up;
+                }
 
-        pub fn interface(self: *Self, alloc: Allocator) ILIST {
-            return ILIST{
+                var sort_reports: [SORT_COUNT]SortListReport = undefined;
+                for (self.sort_lists[0..], 0..) |*sort, sort_idx| {
+                    sort_reports[sort_idx] = move_one_indirect_indexes(sort, old_idx, delta, smallest_other, largest_other, dir);
+                }
+                Utils.slice_move_one(self.primary_list.ptr[0..self.primary_list.len], old_idx, new_idx);
+                switch (dir) {
+                    .this_up__other_down => {
+                        smallest_other -= 1;
+                        largest_other -= 1;
+                    },
+                    .this_down__other_up => {
+                        smallest_other += 1;
+                        largest_other += 1;
+                    },
+                }
+                for (self.sort_lists[0..], 0..) |*sort, sort_idx| {
+                    self.move_one_indirect_resort(sort, sort_reports[sort_idx], new_idx, smallest_other, largest_other, dir);
+                }
+            }
+            fn p_move_range(self: *Self, range: IList.Range, new_first_idx: usize, _: Allocator) void {
+                if (range.first_idx == new_first_idx) return;
+                const rlen: usize = range.consecutive_len();
+                var smallest_shifted_down: usize = undefined;
+                var largest_shifted_down: usize = undefined;
+                var smallest_shifted_up: usize = undefined;
+                var largest_shifted_up: usize = undefined;
+                var delta_up: usize = undefined;
+                var delta_down: usize = undefined;
+                if (range.first_idx < new_first_idx) {
+                    smallest_shifted_up = range.first_idx;
+                    largest_shifted_up = range.last_idx;
+                    smallest_shifted_down = range.last_idx + 1;
+                    largest_shifted_down = (new_first_idx + rlen) - 1;
+                    delta_up = (largest_shifted_down - smallest_shifted_down) + 1;
+                    delta_down = rlen;
+                } else {
+                    smallest_shifted_up = new_first_idx;
+                    largest_shifted_up = range.first_idx - 1;
+                    smallest_shifted_down = range.first_idx;
+                    largest_shifted_down = range.last_idx;
+                    delta_up = rlen;
+                    delta_down = (largest_shifted_up - smallest_shifted_up) + 1;
+                }
+                var sort_reports: [SORT_COUNT]SortListReport = undefined;
+                for (self.sort_lists[0..], 0..) |*sort, sort_idx| {
+                    sort_reports[sort_idx] = move_range_indirect_indexes(sort, smallest_shifted_up, largest_shifted_up, delta_up, smallest_shifted_down, largest_shifted_down, delta_down);
+                }
+                Utils.slice_move_many(self.primary_list.ptr[0..self.primary_list.len], range.first_idx, range.last_idx, new_first_idx);
+                smallest_shifted_down -= delta_down;
+                largest_shifted_down -= delta_down;
+                smallest_shifted_up += delta_up;
+                largest_shifted_up += delta_up;
+                for (self.sort_lists[0..], 0..) |*sort, sort_idx| {
+                    self.move_range_indirect_resort(sort, sort_reports[sort_idx], smallest_shifted_up, largest_shifted_up, smallest_shifted_down, largest_shifted_down);
+                }
+            }
+            fn p_try_ensure_free_slots(self: *Self, count: usize, alloc: Allocator) error{failed_to_grow_list}!void {
+                return self.primary_list.try_ensure_free_slots(count, alloc);
+            }
+            fn p_shrink_cap_reserve_at_most(self: *Self, reserve_at_most: usize, alloc: Allocator) void {
+                self.primary_list.shrink_cap_reserve_at_most(reserve_at_most, alloc);
+                for (self.sort_lists[0..]) |*sort| {
+                    sort.idx_list.shrink_cap_reserve_at_most(reserve_at_most, alloc);
+                }
+            }
+            fn p_append_slots_assume_capacity(self: *Self, count: usize, alloc: Allocator) IList.Range {
+                Assert.assert_with_reason(count <= self.primary_list.cap - self.primary_list.len, @src(), "not enough unused capacity (len = {d}, cap = {d}, free = {d}, need = {d}): use IList.try_ensure_free_slots({d}) first", .{ self.primary_list.len, self.primary_list.cap, self.primary_list.cap - self.primary_list.len, count, count });
+                for (self.sort_lists[0..]) |*sort| {
+                    add_uninit_range_indirect_indexes(sort, self.primary_list.len, count);
+                }
+                const range = self.primary_list.append_slots_assume_capacity(count);
+                @memset(self.primary_list.ptr[range.first_idx .. range.last_idx + 1], UNINIT);
+                for (self.sort_lists[0..]) |*sort| {
+                    self.add_uninit_range_indirect_insert(sort, range.first_idx, count, alloc);
+                }
+                return range;
+            }
+            fn p_insert_slots_assume_capacity(self: *Self, idx: usize, count: usize, alloc: Allocator) IList.Range {
+                if (idx == self.primary_list.len) {
+                    return p_append_slots_assume_capacity(self, count, alloc);
+                }
+                Assert.assert_with_reason(count <= self.primary_list.cap - self.primary_list.len, @src(), "not enough unused capacity (len = {d}, cap = {d}, free = {d}, need = {d}): use IList.try_ensure_free_slots({d}) first", .{ self.primary_list.len, self.primary_list.cap, self.primary_list.cap - self.primary_list.len, count, count });
+                for (self.sort_lists[0..]) |*sort| {
+                    add_uninit_range_indirect_indexes(sort, idx, count);
+                }
+                const range = self.primary_list.insert_slots_assume_capacity(idx, count);
+                @memset(self.primary_list.ptr[range.first_idx .. range.last_idx + 1], UNINIT);
+                for (self.sort_lists[0..]) |*sort| {
+                    self.add_uninit_range_indirect_insert(sort, idx, count, alloc);
+                }
+                return range;
+            }
+            fn p_trim_len(self: *Self, trim_n: usize, _: Allocator) void {
+                for (self.sort_lists[0..]) |*sort| {
+                    // sort_reports[sort_idx] = delete_range_indirect_indexes(sort, range, delete_count);
+                    _ = delete_range_indirect_indexes(sort, .new_range(self.primary_list.len - trim_n, self.primary_list.len - 1), trim_n);
+                }
+                self.primary_list.len -= @intCast(trim_n);
+            }
+            fn p_delete(self: *Self, idx: usize, alloc: Allocator) void {
+                if (idx == self.primary_list.len - 1) {
+                    p_trim_len(self, 1, alloc);
+                    return;
+                }
+                Utils.mem_remove(self.primary_list.ptr, &self.primary_list.len, idx, 1);
+            }
+            fn p_delete_range(self: *Self, range: IList.Range, alloc: Allocator) void {
+                const rlen = range.consecutive_len();
+                if (range.last_idx == self.primary_list.len - 1) {
+                    p_trim_len(self, rlen, alloc);
+                    return;
+                }
+                const delete_count = range.consecutive_len();
+                // var sort_reports: [SORT_COUNT]SortListReport = undefined;
+                for (self.sort_lists[0..]) |*sort| {
+                    // sort_reports[sort_idx] = delete_range_indirect_indexes(sort, range, delete_count);
+                    _ = delete_range_indirect_indexes(sort, range, delete_count);
+                }
+                Utils.mem_remove(self.primary_list.ptr, &self.primary_list.len, range.first_idx, delete_count);
+            }
+            fn p_clear(self: *Self, _: Allocator) void {
+                self.primary_list.clear();
+                for (self.sort_lists[0..]) |*sort| {
+                    sort.idx_list.clear();
+                }
+            }
+            fn p_free(self: *Self, alloc: Allocator) void {
+                self.primary_list.free(alloc);
+                for (self.sort_lists[0..]) |*sort| {
+                    sort.idx_list.free(alloc);
+                }
+            }
+        };
+        const PFX = IList.Concrete.ConcreteTableValueFuncs(T, *Self, Allocator){
+            .get = P_FUNCS.p_get,
+            .get_ptr = P_FUNCS.p_get_ptr,
+            .set = P_FUNCS.p_set,
+            .move = P_FUNCS.p_move,
+            .move_range = P_FUNCS.p_move_range,
+            .try_ensure_free_slots = P_FUNCS.p_try_ensure_free_slots,
+            .shrink_cap_reserve_at_most = P_FUNCS.p_shrink_cap_reserve_at_most,
+            .append_slots_assume_capacity = P_FUNCS.p_append_slots_assume_capacity,
+            .insert_slots_assume_capacity = P_FUNCS.p_insert_slots_assume_capacity,
+            .trim_len = P_FUNCS.p_trim_len,
+            .delete = P_FUNCS.p_delete,
+            .delete_range = P_FUNCS.p_delete_range,
+            .clear = P_FUNCS.p_clear,
+            .free = P_FUNCS.p_free,
+        };
+        const P = IList.Concrete.CreateConcretePrototypeNaturalIndexes(T, *Self, Allocator, "primary_list", "ptr", "primary_list", "len", "primary_list", "cap", false, PFX);
+        const VTABLE = P.VTABLE(true, true, false, false, math.maxInt(usize));
+        //*** END PROTOTYPE***
+
+        pub fn interface(self: *Self, alloc: Allocator) IList.IList(T) {
+            return IList.IList(T){
                 .alloc = alloc,
                 .object = @ptrCast(self),
-                .vtable = &ILIST_VTABLE,
+                .vtable = &VTABLE,
             };
         }
-
-        pub fn interface_no_alloc(self: *Self) ILIST {
-            return ILIST{
-                .alloc = DummyAlloc.allocator_shrink_only,
+        pub fn interface_no_alloc(self: *Self) IList.IList(T) {
+            return IList.IList(T){
+                .alloc = DummyAlloc.allocator_panic,
                 .object = @ptrCast(self),
-                .vtable = &ILIST_VTABLE,
+                .vtable = &VTABLE,
             };
         }
 
-        const ILIST = IList.IList(T);
-        const ILIST_VTABLE = ILIST.VTable{
-            .all_indexes_zero_to_len_valid = true,
-            .consecutive_indexes_in_order = true,
-            .ensure_free_doesnt_change_cap = false,
-            .prefer_linear_ops = false,
-            .always_invalid_idx = math.maxInt(usize),
-            .idx_in_range = impl.impl_idx_in_range,
-            .idx_valid = impl.impl_idx_valid,
-            .range_valid = impl.impl_range_valid,
-            .split_range = impl.impl_split_range,
-            .range_len = impl.impl_range_len,
-            .len = impl.impl_len,
-            .cap = impl.impl_cap,
-            .get = impl.impl_get,
-            .set = impl.impl_set,
-            .move = impl.impl_move,
-            .move_range = impl.impl_move_range,
-            .first_idx = impl.impl_first,
-            .last_idx = impl.impl_last,
-            .next_idx = impl.impl_next,
-            .nth_next_idx = impl.impl_nth_next,
-            .prev_idx = impl.impl_prev,
-            .nth_prev_idx = impl.impl_nth_prev,
-            .try_ensure_free_slots = impl.impl_ensure_free,
-            .append_slots_assume_capacity = impl.impl_append,
-            .insert_slots_assume_capacity = impl.impl_insert,
-            .delete_range = impl.impl_delete,
-            .clear = impl.impl_clear,
-            .free = impl.impl_free,
-            .shrink_cap_reserve_at_most = impl.impl_shrink_reserve,
-        };
-
-        fn split_range(first: usize, last: usize) usize {
-            return ((last - first) >> 1) + first;
+        /// Return the number of items in the list
+        pub fn len_usize(self: *Self) usize {
+            return P.len(self);
+        }
+        /// Reduce the number of items in the list by
+        /// dropping/deleting them from the end of the list
+        pub fn trim_len(self: *Self, trim_n: usize, alloc: Allocator) void {
+            return P.trim_len(self, trim_n, alloc);
+        }
+        /// Return the total number of items the list can hold
+        /// without reallocation
+        pub fn cap_usize(self: *Self) usize {
+            return P.cap(self);
+        }
+        /// Return the first index in the list
+        pub fn first_idx(self: *Self) usize {
+            return P.first_idx(self);
+        }
+        /// Return the last valid index in the list
+        pub fn last_idx(self: *Self) usize {
+            return P.last_idx(self);
+        }
+        /// Return the index directly after the given index in the list
+        pub fn next_idx(self: *Self, this_idx: usize) usize {
+            return P.next_idx(self, this_idx);
+        }
+        /// Return the index `n` places after the given index in the list,
+        /// which may be 0 (returning the given index)
+        pub fn nth_next_idx(self: *Self, this_idx: usize, n: usize) usize {
+            return P.nth_next_idx(self, this_idx, n);
+        }
+        /// Return the index directly before the given index in the list
+        pub fn prev_idx(self: *Self, this_idx: usize) usize {
+            return P.prev_idx(self, this_idx);
+        }
+        /// Return the index `n` places before the given index in the list,
+        /// which may be 0 (returning the given index)
+        pub fn nth_prev_idx(self: *Self, this_idx: usize, n: usize) usize {
+            return P.nth_prev_idx(self, this_idx, n);
+        }
+        /// Return `true` if the index is valid for the current state
+        /// of the list, `false` otherwise
+        pub fn idx_valid(self: *Self, idx: usize) bool {
+            return P.idx_valid(self, idx);
+        }
+        /// Return `true` if the range is valid for the current state
+        /// of the list, `false` otherwise. The first index must
+        /// come before or be equal to the last index, and all
+        /// indexes in between must also be valid
+        pub fn range_valid(self: *Self, range: Range) bool {
+            return P.range_valid(self, range);
+        }
+        /// Return whether the given index falls within the given range,
+        /// inclusive
+        pub fn idx_in_range(self: *Self, range: Range, idx: usize) bool {
+            return P.idx_in_range(self, range, idx);
+        }
+        /// Split a range roughly in half, returning an index
+        /// as close to the true center point as possible.
+        /// Implementations may choose not to return an index
+        /// close to the actual middle of the range if
+        /// finding that middle index is expensive
+        pub fn split_range(self: *Self, range: Range) usize {
+            return P.split_range(self, range);
+        }
+        /// Return the number of indexes included within a range,
+        /// inclusive of the last index
+        pub fn range_len(self: *Self, range: Range) usize {
+            return P.range_len(self, range);
+        }
+        /// Return the value at the given index
+        pub fn get(self: *Self, idx: usize) T {
+            return P.get(self, idx, NO_ALLOC);
+        }
+        /// Return a pointer to the value at a given index
+        pub fn get_ptr(self: *Self, idx: usize) *T {
+            return P.get_ptr(self, idx, NO_ALLOC);
+        }
+        /// Set the value at the given index
+        pub fn set(self: *Self, idx: usize, val: T) void {
+            return P.set(self, idx, val, NO_ALLOC);
+        }
+        /// Move one value to a new location within the list,
+        /// moving the values in between the old and new location
+        /// out of the way while maintaining their order
+        pub fn move(self: *Self, old_idx: usize, new_idx: usize) void {
+            return P.move(self, old_idx, new_idx, NO_ALLOC);
+        }
+        /// Move a range of values to a new location within the list,
+        /// moving the values in between the old and new location
+        /// out of the way while maintaining their order
+        pub fn move_range(self: *Self, range: Range, new_first_idx: usize) void {
+            return P.move_range(self, range, new_first_idx, NO_ALLOC);
+        }
+        /// Attempt to ensure at least 'n' free slots exist for adding new items,
+        /// returning error `failed_to_grow_list` if adding `n` new items will
+        /// definitely cause undefined behavior or some other error
+        pub fn try_ensure_free_slots(self: *Self, count: usize, alloc: Allocator) error{failed_to_grow_list}!void {
+            return P.try_ensure_free_slots(self, count, alloc);
+        }
+        /// Shrink capacity while reserving at most `n` free slots
+        /// for new items. Will not shrink below list length, and
+        /// does nothing if `n`is greater than the existing free space.
+        pub fn shrink_cap_reserve_at_most(self: *Self, reserve_at_most: usize) void {
+            return P.shrink_cap_reserve_at_most(self, reserve_at_most, NO_ALLOC);
+        }
+        /// Insert `n` value slots with undefined values at the given index,
+        /// moving other items at or after that index to after the new ones.
+        /// Assumes free space has already been ensured, though the allocator may
+        /// be used for some auxilliary purpose
+        pub fn insert_slots_assume_capacity(self: *Self, idx: usize, count: usize) Range {
+            return P.insert_slots_assume_capacity(self, idx, count, NO_ALLOC);
+        }
+        /// Append `n` value slots with undefined values at the end of the list.
+        /// Assumes free space has already been ensured, though the allocator may
+        /// be used for some auxilliary purpose
+        pub fn append_slots_assume_capacity(self: *Self, count: usize) Range {
+            return P.append_slots_assume_capacity(self, count, NO_ALLOC);
+        }
+        /// Delete one value at given index
+        pub fn delete(self: *Self, idx: usize) void {
+            return P.delete(self, idx, NO_ALLOC);
+        }
+        /// Delete many values within given range, inclusive
+        pub fn delete_range(self: *Self, range: Range) void {
+            return P.delete_range(self, range, NO_ALLOC);
+        }
+        /// Set list to an empty state, but retain existing capacity, if possible
+        pub fn clear(self: *Self) void {
+            return P.clear(self, NO_ALLOC);
+        }
+        /// Set list to an empty state and return memory to allocator
+        pub fn free(self: *Self, alloc: Allocator) void {
+            return P.free(self, alloc);
+        }
+        pub fn is_empty(self: *Self) bool {
+            return P.is_empty(self);
+        }
+        pub fn try_first_idx(self: *Self) ListError!usize {
+            return P.try_first_idx(self);
+        }
+        pub fn try_last_idx(self: *Self) ListError!usize {
+            return P.try_last_idx(self);
+        }
+        pub fn try_next_idx(self: *Self, this_idx: usize) ListError!usize {
+            return P.try_next_idx(self, this_idx);
+        }
+        pub fn try_prev_idx(self: *Self, this_idx: usize) ListError!usize {
+            return P.try_prev_idx(self, this_idx);
+        }
+        pub fn try_nth_next_idx(self: *Self, this_idx: usize, n: usize) ListError!usize {
+            return P.try_nth_next_idx(self, this_idx, n);
+        }
+        pub fn try_nth_prev_idx(self: *Self, this_idx: usize, n: usize) ListError!usize {
+            return P.try_nth_prev_idx(self, this_idx, n);
+        }
+        pub fn try_get(self: *Self, idx: usize) ListError!T {
+            return P.try_get(self, idx, NO_ALLOC);
+        }
+        pub fn try_get_ptr(self: *Self, idx: usize) ListError!*T {
+            return P.try_get_ptr(self, idx, NO_ALLOC);
+        }
+        pub fn try_set(self: *Self, idx: usize, val: T) ListError!void {
+            return P.try_set(self, idx, val, NO_ALLOC);
+        }
+        pub fn try_move(self: *Self, old_idx: usize, new_idx: usize) ListError!void {
+            return P.try_move(self, old_idx, new_idx, NO_ALLOC);
+        }
+        pub fn try_move_range(self: *Self, range: Range, new_first_idx: usize) ListError!void {
+            return P.try_move_range(self, range, new_first_idx, NO_ALLOC);
+        }
+        pub fn nth_idx(self: *Self, n: usize) usize {
+            return P.nth_idx(self, n);
+        }
+        pub fn nth_idx_from_end(self: *Self, n: usize) usize {
+            return P.nth_idx_from_end(self, n);
+        }
+        pub fn try_nth_idx(self: *Self, n: usize) ListError!usize {
+            return P.try_nth_idx(self, n);
+        }
+        pub fn try_nth_idx_from_end(self: *Self, n: usize) ListError!usize {
+            return P.try_nth_idx_from_end(self, n);
+        }
+        pub fn get_last(self: *Self) T {
+            return P.get_last(self, NO_ALLOC);
+        }
+        pub fn try_get_last(self: *Self) ListError!T {
+            return P.try_get_last(self, NO_ALLOC);
+        }
+        pub fn get_last_ptr(self: *Self) *T {
+            return P.get_last_ptr(self, NO_ALLOC);
+        }
+        pub fn try_get_last_ptr(self: *Self) ListError!*T {
+            return P.try_get_last_ptr(self, NO_ALLOC);
+        }
+        pub fn set_last(self: *Self, val: T) void {
+            return P.set_last(self, val, NO_ALLOC);
+        }
+        pub fn try_set_last(self: *Self, val: T) ListError!void {
+            return P.try_set_last(self, val, NO_ALLOC);
+        }
+        pub fn get_first(self: *Self) T {
+            return P.get_first(self, NO_ALLOC);
+        }
+        pub fn try_get_first(self: *Self) ListError!T {
+            return P.try_get_first(self, NO_ALLOC);
+        }
+        pub fn get_first_ptr(self: *Self) *T {
+            return P.get_first_ptr(self, NO_ALLOC);
+        }
+        pub fn try_get_first_ptr(self: *Self) ListError!*T {
+            return P.try_get_first_ptr(self, NO_ALLOC);
+        }
+        pub fn set_first(self: *Self, val: T) void {
+            return P.set_first(self, val, NO_ALLOC);
+        }
+        pub fn try_set_first(self: *Self, val: T) ListError!void {
+            return P.try_set_first(self, val, NO_ALLOC);
+        }
+        pub fn get_nth(self: *Self, n: usize) T {
+            return P.get_nth(self, n, NO_ALLOC);
+        }
+        pub fn try_get_nth(self: *Self, n: usize) ListError!T {
+            return P.try_get_nth(self, n, NO_ALLOC);
+        }
+        pub fn get_nth_ptr(self: *Self, n: usize) *T {
+            return P.get_nth_ptr(self, n, NO_ALLOC);
+        }
+        pub fn try_get_nth_ptr(self: *Self, n: usize) ListError!*T {
+            return P.try_get_nth_ptr(self, n, NO_ALLOC);
+        }
+        pub fn set_nth(self: *Self, n: usize, val: T) void {
+            return P.set_nth(self, n, val, NO_ALLOC);
+        }
+        pub fn try_set_nth(self: *Self, n: usize, val: T) ListError!void {
+            return P.try_set_nth(self, n, val, NO_ALLOC);
+        }
+        pub fn get_nth_from_end(self: *Self, n: usize) T {
+            return P.get_nth_from_end(self, n, NO_ALLOC);
+        }
+        pub fn try_get_nth_from_end(self: *Self, n: usize) ListError!T {
+            return P.try_get_nth_from_end(self, n, NO_ALLOC);
+        }
+        pub fn get_nth_ptr_from_end(self: *Self, n: usize) *T {
+            return P.get_nth_ptr_from_end(self, n, NO_ALLOC);
+        }
+        pub fn try_get_nth_ptr_from_end(self: *Self, n: usize) ListError!*T {
+            return P.try_get_nth_ptr_from_end(self, n, NO_ALLOC);
+        }
+        pub fn set_nth_from_end(self: *Self, n: usize, val: T) void {
+            return P.set_nth_from_end(self, n, val, NO_ALLOC);
+        }
+        pub fn try_set_nth_from_end(self: *Self, n: usize, val: T) ListError!void {
+            return P.try_set_nth_from_end(self, n, val, NO_ALLOC);
+        }
+        pub fn set_from(self: *Self, self_idx: usize, source: *Self, source_idx: usize) void {
+            return P.set_from(self, self_idx, NO_ALLOC, source, source_idx, NO_ALLOC);
+        }
+        pub fn try_set_from(self: *Self, self_idx: usize, source: *Self, source_idx: usize) ListError!void {
+            return P.try_set_from(self, self_idx, NO_ALLOC, source, source_idx, NO_ALLOC);
+        }
+        pub fn exchange(self: *Self, self_idx: usize, other: *Self, other_idx: usize) void {
+            return P.exchange(self, self_idx, NO_ALLOC, other, other_idx, NO_ALLOC);
+        }
+        pub fn try_exchange(self: *Self, self_idx: usize, other: *Self, other_idx: usize) ListError!void {
+            return P.try_exchange(self, self_idx, NO_ALLOC, other, other_idx, NO_ALLOC);
+        }
+        pub fn overwrite(self: *Self, source_idx: usize, dest_idx: usize) void {
+            return P.overwrite(self, source_idx, dest_idx, NO_ALLOC);
+        }
+        pub fn try_overwrite(self: *Self, source_idx: usize, dest_idx: usize) ListError!void {
+            return P.try_overwrite(self, source_idx, dest_idx, NO_ALLOC);
+        }
+        pub fn reverse(self: *Self, range: P.PartialRangeIter) void {
+            return P.reverse(self, range, NO_ALLOC);
+        }
+        pub fn rotate(self: *Self, range: P.PartialRangeIter, delta: isize) void {
+            return P.rotate(self, range, delta, NO_ALLOC);
+        }
+        pub fn fill(self: *Self, range: P.PartialRangeIter, val: T) usize {
+            return P.fill(self, range, val, NO_ALLOC);
+        }
+        pub fn copy(source: P.RangeIter, dest: P.RangeIter) usize {
+            return P.copy(source, dest);
+        }
+        pub fn copy_to(self: *Self, self_range: P.PartialRangeIter, dest: P.RangeIter) usize {
+            return P.copy_to(self, self_range, dest);
+        }
+        pub fn is_sorted(self: *Self, range: P.PartialRangeIter, greater_than: *const P.CompareFunc) bool {
+            return P.is_sorted(self, range, greater_than, NO_ALLOC);
+        }
+        pub fn is_sorted_implicit(self: *Self, range: P.PartialRangeIter) bool {
+            return P.is_sorted_implicit(self, range, NO_ALLOC);
+        }
+        pub fn insertion_sort(self: *Self, range: P.PartialRangeIter, greater_than: *const P.CompareFunc) bool {
+            return P.insertion_sort(self, range, greater_than, NO_ALLOC);
+        }
+        pub fn insertion_sort_implicit(self: *Self, range: P.PartialRangeIter) bool {
+            return P.insertion_sort_implicit(self, range, NO_ALLOC);
+        }
+        pub fn quicksort(self: *Self, range: P.PartialRangeIter, greater_than: *const P.CompareFunc, less_than: *const P.CompareFunc, comptime PARTITION_IDX: type, partition_stack: IList(PARTITION_IDX)) ListError!void {
+            return P.quicksort(self, range, NO_ALLOC, greater_than, less_than, PARTITION_IDX, partition_stack);
+        }
+        pub fn quicksort_implicit(self: *Self, range: P.PartialRangeIter, comptime PARTITION_IDX: type, partition_stack: IList(PARTITION_IDX)) ListError!void {
+            return P.quicksort_implicit(self, range, NO_ALLOC, PARTITION_IDX, partition_stack);
+        }
+        pub fn range_iterator(self: *Self, range: P.PartialRangeIter) P.RangeIter {
+            return P.range_iterator(self, range);
+        }
+        pub fn for_each(
+            self: *Self,
+            range: P.PartialRangeIter,
+            userdata: anytype,
+            action: *const fn (item: P.IterItem, userdata: @TypeOf(userdata)) bool,
+            comptime filter: Concrete.FilterMode,
+            filter_func: if (filter == .use_filter) *const fn (item: P.IterItem, userdata: @TypeOf(userdata)) bool else null,
+        ) usize {
+            return P.for_each(self, range, userdata, action, filter, filter_func);
+        }
+        pub fn filter_indexes(
+            self: *Self,
+            range: P.PartialRangeIter,
+            userdata: anytype,
+            filter_func: *const fn (item: P.IterItem, userdata: @TypeOf(userdata)) bool,
+            comptime OUT_IDX: type,
+            out_list: IList(OUT_IDX),
+        ) usize {
+            return P.filter_indexes(self, range, userdata, filter_func, OUT_IDX, out_list);
+        }
+        pub fn transform_values(
+            self: *Self,
+            range: P.PartialRangeIter,
+            userdata: anytype,
+            comptime OUT_TYPE: type,
+            transform_func: *const fn (item: P.IterItem, userdata: @TypeOf(userdata)) OUT_TYPE,
+            out_list: IList(OUT_TYPE),
+            comptime filter: Concrete.FilterMode,
+            filter_func: if (filter == .use_filter) *const fn (item: P.IterItem, userdata: @TypeOf(userdata)) bool else null,
+        ) usize {
+            return P.transform_values(self, range, userdata, OUT_TYPE, transform_func, out_list, filter, filter_func);
+        }
+        pub fn accumulate_result(
+            self: *Self,
+            range: P.PartialRangeIter,
+            initial_accumulation: anytype,
+            userdata: anytype,
+            accumulate_func: *const fn (item: P.IterItem, old_accumulation: @TypeOf(initial_accumulation), userdata: @TypeOf(userdata)) @TypeOf(initial_accumulation),
+            comptime filter: Concrete.FilterMode,
+            filter_func: if (filter == .use_filter) *const fn (item: P.IterItem, userdata: @TypeOf(userdata)) bool else null,
+        ) @TypeOf(initial_accumulation) {
+            return P.accumulate_result(self, range, initial_accumulation, userdata, accumulate_func, filter, filter_func);
+        }
+        pub fn ensure_free_slots(self: *Self, count: usize, alloc: Allocator) void {
+            return P.ensure_free_slots(self, count, alloc);
+        }
+        pub fn append_slots(self: *Self, count: usize, alloc: Allocator) Range {
+            return P.append_slots(self, count, alloc);
+        }
+        pub fn try_append_slots(self: *Self, count: usize, alloc: Allocator) ListError!Range {
+            return P.try_append_slots(self, count, alloc);
+        }
+        pub fn append_zig_slice(self: *Self, alloc: Allocator, source: []const T) Range {
+            return P.append_zig_slice(self, source, alloc);
+        }
+        pub fn try_append_zig_slice(self: *Self, alloc: Allocator, source: []const T) ListError!Range {
+            return P.try_append_zig_slice(self, source, alloc);
+        }
+        pub fn append(self: *Self, val: T, alloc: Allocator) usize {
+            return P.append(self, val, alloc);
+        }
+        pub fn try_append(self: *Self, val: T, alloc: Allocator) ListError!usize {
+            return P.try_append(self, val, alloc);
+        }
+        pub fn append_many(self: *Self, alloc: Allocator, source: P.RangeIter) Range {
+            return P.append_many(self, alloc, source);
+        }
+        pub fn try_append_many(self: *Self, alloc: Allocator, source: P.RangeIter) ListError!Range {
+            return P.try_append_many(self, alloc, source);
+        }
+        pub fn insert_slots(self: *Self, idx: usize, count: usize, alloc: Allocator) Range {
+            return P.insert_slots(self, idx, count, alloc);
+        }
+        pub fn try_insert_slots(self: *Self, idx: usize, count: usize, alloc: Allocator) ListError!Range {
+            return P.try_insert_slots(self, idx, count, alloc);
+        }
+        pub fn insert_zig_slice(self: *Self, idx: usize, alloc: Allocator, source: []T) Range {
+            return P.insert_zig_slice(self, idx, source, alloc);
+        }
+        pub fn try_insert_zig_slice(self: *Self, idx: usize, alloc: Allocator, source: []T) ListError!Range {
+            return P.try_insert_zig_slice(self, idx, source, alloc);
+        }
+        pub fn insert(self: *Self, idx: usize, val: T, alloc: Allocator) usize {
+            return P.insert(self, idx, val, alloc);
+        }
+        pub fn try_insert(self: *Self, idx: usize, val: T, alloc: Allocator) ListError!usize {
+            return P.try_insert(self, idx, val, alloc);
+        }
+        pub fn insert_many(self: *Self, idx: usize, alloc: Allocator, source: P.RangeIter) Range {
+            return P.insert_many(self, idx, alloc, source);
+        }
+        pub fn try_insert_many(self: *Self, idx: usize, alloc: Allocator, source: P.RangeIter) ListError!Range {
+            return P.try_insert_many(self, idx, alloc, source);
+        }
+        pub fn try_delete_range(self: *Self, range: Range) ListError!void {
+            return P.try_delete_range(self, range, NO_ALLOC);
+        }
+        pub fn delete_many(self: *Self, range: P.PartialRangeIter) void {
+            return P.delete_many(self, range);
+        }
+        pub fn try_delete_many(self: *Self, range: P.PartialRangeIter) ListError!void {
+            return P.try_delete_many(self, range);
+        }
+        pub fn try_delete(self: *Self, idx: usize) ListError!void {
+            return P.try_delete(self, idx, NO_ALLOC);
+        }
+        pub fn swap_delete(self: *Self, idx: usize) void {
+            return P.swap_delete(self, idx, NO_ALLOC);
+        }
+        pub fn try_swap_delete(self: *Self, idx: usize) ListError!void {
+            return P.try_swap_delete(self, idx, NO_ALLOC);
+        }
+        pub fn swap_delete_many(self: *Self, range: P.PartialRangeIter) void {
+            return P.swap_delete_many(self, range);
+        }
+        pub fn try_swap_delete_many(self: *Self, range: P.PartialRangeIter) ListError!void {
+            return P.try_swap_delete_many(self, range);
+        }
+        pub fn remove_range(self: *Self, self_range: P.PartialRangeIter, dest: *Self, dest_alloc: Allocator) Range {
+            return P.remove_range(self, self_range, dest, dest_alloc);
+        }
+        pub fn try_remove_range(self: *Self, self_range: P.PartialRangeIter, dest: *Self, dest_alloc: Allocator) ListError!Range {
+            return P.try_remove_range(self, self_range, dest, dest_alloc);
+        }
+        pub fn remove(self: *Self, idx: usize) T {
+            return P.remove(self, idx, NO_ALLOC);
+        }
+        pub fn try_remove(self: *Self, idx: usize) ListError!T {
+            return P.try_remove(self, idx, NO_ALLOC);
+        }
+        pub fn swap_remove(self: *Self, idx: usize) T {
+            return P.swap_remove(self, idx, NO_ALLOC);
+        }
+        pub fn try_swap_remove(self: *Self, idx: usize) ListError!T {
+            return P.try_swap_remove(self, idx, NO_ALLOC);
+        }
+        pub fn pop(self: *Self) T {
+            return P.pop(self, NO_ALLOC);
+        }
+        pub fn try_pop(self: *Self) ListError!T {
+            return P.try_pop(self, NO_ALLOC);
+        }
+        pub fn pop_many(self: *Self, count: usize, dest: *Self, dest_alloc: Allocator) Range {
+            return P.pop_many(self, count, NO_ALLOC, dest, dest_alloc);
+        }
+        pub fn try_pop_many(self: *Self, count: usize, dest: *Self, dest_alloc: Allocator) ListError!Range {
+            return P.try_pop_many(self, count, NO_ALLOC, dest, dest_alloc);
+        }
+        pub fn sorted_insert(
+            self: *Self,
+            val: T,
+            alloc: Allocator,
+            equal_func: *const fn (this_val: T, find_val: T) bool,
+            greater_than_func: *const fn (this_val: T, find_val: T) bool,
+        ) usize {
+            return P.sorted_insert(self, alloc, val, equal_func, greater_than_func);
+        }
+        pub fn sorted_insert_implicit(self: *Self, val: T, alloc: Allocator) usize {
+            return P.sorted_insert_implicit(self, val, alloc);
+        }
+        pub fn sorted_insert_index(
+            self: *Self,
+            val: T,
+            equal_func: *const fn (this_val: T, find_val: T) bool,
+            greater_than_func: *const fn (this_val: T, find_val: T) bool,
+        ) InsertIndexResult {
+            return P.sorted_insert_index(self, NO_ALLOC, val, equal_func, greater_than_func);
+        }
+        pub fn sorted_insert_index_implicit(self: *Self, val: T) InsertIndexResult {
+            return P.sorted_insert_index_implicit(self, val, NO_ALLOC);
+        }
+        pub fn sorted_search(
+            self: *Self,
+            val: T,
+            equal_func: *const fn (this_val: T, find_val: T) bool,
+            greater_than_func: *const fn (this_val: T, find_val: T) bool,
+        ) SearchResult {
+            return P.sorted_search(self, NO_ALLOC, val, equal_func, greater_than_func);
+        }
+        pub fn sorted_search_implicit(self: *Self, val: T) SearchResult {
+            return P.sorted_search_implicit(self, val, NO_ALLOC);
+        }
+        pub fn sorted_set_and_resort(self: *Self, idx: usize, val: T, greater_than_func: *const fn (this_val: T, find_val: T) bool) usize {
+            return P.sorted_set_and_resort(self, idx, val, NO_ALLOC, greater_than_func);
+        }
+        pub fn sorted_set_and_resort_implicit(self: *Self, idx: usize, val: T) usize {
+            return P.sorted_set_and_resort_implicit(self, idx, val, NO_ALLOC);
+        }
+        pub fn search(self: *Self, find_val: anytype, equal_func: *const fn (this_val: T, find_val: @TypeOf(find_val)) bool) SearchResult {
+            return P.search(self, find_val, NO_ALLOC, equal_func);
+        }
+        pub fn search_implicit(self: *Self, find_val: anytype) SearchResult {
+            return P.search_implicit(self, find_val, NO_ALLOC);
+        }
+        pub fn add_get(self: *Self, idx: usize, val: anytype) T {
+            return P.add_get(self, idx, val, NO_ALLOC);
+        }
+        pub fn try_add_get(self: *Self, idx: usize, val: anytype) ListError!T {
+            return P.try_add_get(self, idx, val, NO_ALLOC);
+        }
+        pub fn add_set(self: *Self, idx: usize, val: anytype) void {
+            return P.add_set(self, idx, val, NO_ALLOC);
+        }
+        pub fn try_add_set(self: *Self, idx: usize, val: anytype) ListError!void {
+            return P.try_add_set(self, idx, val, NO_ALLOC);
+        }
+        pub fn subtract_get(self: *Self, idx: usize, val: anytype) T {
+            return P.subtract_get(self, idx, val, NO_ALLOC);
+        }
+        pub fn try_subtract_get(self: *Self, idx: usize, val: anytype) ListError!T {
+            return P.try_subtract_get(self, idx, val, NO_ALLOC);
+        }
+        pub fn subtract_set(self: *Self, idx: usize, val: anytype) void {
+            return P.subtract_set(self, idx, val, NO_ALLOC);
+        }
+        pub fn try_subtract_set(self: *Self, idx: usize, val: anytype) ListError!void {
+            return P.try_subtract_set(self, idx, val, NO_ALLOC);
+        }
+        pub fn multiply_get(self: *Self, idx: usize, val: anytype) T {
+            return P.multiply_get(self, idx, val, NO_ALLOC);
+        }
+        pub fn try_multiply_get(self: *Self, idx: usize, val: anytype) ListError!T {
+            return P.try_multiply_get(self, idx, val, NO_ALLOC);
+        }
+        pub fn multiply_set(self: *Self, idx: usize, val: anytype) void {
+            return P.multiply_set(self, idx, val, NO_ALLOC);
+        }
+        pub fn try_multiply_set(self: *Self, idx: usize, val: anytype) ListError!void {
+            return P.try_multiply_set(self, idx, val, NO_ALLOC);
+        }
+        pub fn divide_get(self: *Self, idx: usize, val: anytype) T {
+            return P.divide_get(self, idx, val, NO_ALLOC);
+        }
+        pub fn try_divide_get(self: *Self, idx: usize, val: anytype) ListError!T {
+            return P.try_divide_get(self, idx, val, NO_ALLOC);
+        }
+        pub fn divide_set(self: *Self, idx: usize, val: anytype) void {
+            return P.divide_set(self, idx, val, NO_ALLOC);
+        }
+        pub fn try_divide_set(self: *Self, idx: usize, val: anytype) ListError!void {
+            return P.try_divide_set(self, idx, val, NO_ALLOC);
+        }
+        pub fn modulo_get(self: *Self, idx: usize, val: anytype) T {
+            return P.modulo_get(self, idx, val, NO_ALLOC);
+        }
+        pub fn try_modulo_get(self: *Self, idx: usize, val: anytype) ListError!T {
+            return P.try_modulo_get(self, idx, val, NO_ALLOC);
+        }
+        pub fn modulo_set(self: *Self, idx: usize, val: anytype) void {
+            return P.modulo_set(self, idx, val, NO_ALLOC);
+        }
+        pub fn try_modulo_set(self: *Self, idx: usize, val: anytype) ListError!void {
+            return P.try_modulo_set(self, idx, val, NO_ALLOC);
+        }
+        pub fn mod_rem_get(self: *Self, idx: usize, val: anytype) T {
+            return P.mod_rem_get(self, idx, val, NO_ALLOC);
+        }
+        pub fn try_mod_rem_get(self: *Self, idx: usize, val: anytype) ListError!T {
+            return P.try_mod_rem_get(self, idx, val, NO_ALLOC);
+        }
+        pub fn bit_and_get(self: *Self, idx: usize, val: anytype) T {
+            return P.bit_and_get(self, idx, val, NO_ALLOC);
+        }
+        pub fn try_bit_and_get(self: *Self, idx: usize, val: anytype) ListError!T {
+            return P.try_bit_and_get(self, idx, val, NO_ALLOC);
+        }
+        pub fn bit_and_set(self: *Self, idx: usize, val: anytype) void {
+            return P.bit_and_set(self, idx, val, NO_ALLOC);
+        }
+        pub fn try_bit_and_set(self: *Self, idx: usize, val: anytype) ListError!void {
+            return P.try_bit_and_set(self, idx, val, NO_ALLOC);
+        }
+        pub fn bit_or_get(self: *Self, idx: usize, val: anytype) T {
+            return P.bit_or_get(self, idx, val, NO_ALLOC);
+        }
+        pub fn try_bit_or_get(self: *Self, idx: usize, val: anytype) ListError!T {
+            return P.try_bit_or_get(self, idx, val, NO_ALLOC);
+        }
+        pub fn bit_or_set(self: *Self, idx: usize, val: anytype) void {
+            return P.bit_or_set(self, idx, val, NO_ALLOC);
+        }
+        pub fn try_bit_or_set(self: *Self, idx: usize, val: anytype) ListError!void {
+            return P.try_bit_or_set(self, idx, val, NO_ALLOC);
+        }
+        pub fn bit_xor_get(self: *Self, idx: usize, val: anytype) T {
+            return P.bit_xor_get(self, idx, val, NO_ALLOC);
+        }
+        pub fn try_bit_xor_get(self: *Self, idx: usize, val: anytype) ListError!T {
+            return P.try_bit_xor_get(self, idx, val, NO_ALLOC);
+        }
+        pub fn bit_xor_set(self: *Self, idx: usize, val: anytype) void {
+            return P.bit_xor_set(self, idx, val, NO_ALLOC);
+        }
+        pub fn try_bit_xor_set(self: *Self, idx: usize, val: anytype) ListError!void {
+            return P.try_bit_xor_set(self, idx, val, NO_ALLOC);
+        }
+        pub fn bit_invert_get(self: *Self, idx: usize) T {
+            return P.bit_invert_get(self, idx, NO_ALLOC);
+        }
+        pub fn try_bit_invert_get(self: *Self, idx: usize) ListError!T {
+            return P.try_bit_invert_get(self, idx, NO_ALLOC);
+        }
+        pub fn bit_invert_set(self: *Self, idx: usize) void {
+            return P.bit_invert_set(self, idx, NO_ALLOC);
+        }
+        pub fn try_bit_invert_set(self: *Self, idx: usize) ListError!void {
+            return P.try_bit_invert_set(self, idx, NO_ALLOC);
+        }
+        pub fn bool_and_get(self: *Self, idx: usize, val: bool) T {
+            return P.bool_and_get(self, idx, val, NO_ALLOC);
+        }
+        pub fn try_bool_and_get(self: *Self, idx: usize, val: bool) ListError!T {
+            return P.try_bool_and_get(self, idx, val, NO_ALLOC);
+        }
+        pub fn bool_and_set(self: *Self, idx: usize, val: bool) void {
+            return P.bool_and_set(self, idx, val, NO_ALLOC);
+        }
+        pub fn try_bool_and_set(self: *Self, idx: usize, val: bool) ListError!void {
+            return P.try_bool_and_set(self, idx, val, NO_ALLOC);
+        }
+        pub fn bool_or_get(self: *Self, idx: usize, val: bool) T {
+            return P.bool_or_get(self, idx, val, NO_ALLOC);
+        }
+        pub fn try_bool_or_get(self: *Self, idx: usize, val: bool) ListError!T {
+            return P.try_bool_or_get(self, idx, val, NO_ALLOC);
+        }
+        pub fn bool_or_set(self: *Self, idx: usize, val: bool) void {
+            return P.bool_or_set(self, idx, val, NO_ALLOC);
+        }
+        pub fn try_bool_or_set(self: *Self, idx: usize, val: bool) ListError!void {
+            return P.try_bool_or_set(self, idx, val, NO_ALLOC);
+        }
+        pub fn bool_xor_get(self: *Self, idx: usize, val: bool) T {
+            return P.bool_xor_get(self, idx, val, NO_ALLOC);
+        }
+        pub fn try_bool_xor_get(self: *Self, idx: usize, val: bool) ListError!T {
+            return P.try_bool_xor_get(self, idx, val, NO_ALLOC);
+        }
+        pub fn bool_xor_set(self: *Self, idx: usize, val: bool) void {
+            return P.bool_xor_set(self, idx, val, NO_ALLOC);
+        }
+        pub fn try_bool_xor_set(self: *Self, idx: usize, val: bool) ListError!void {
+            return P.try_bool_xor_set(self, idx, val, NO_ALLOC);
+        }
+        pub fn bool_invert_get(self: *Self, idx: usize) T {
+            return P.bool_invert_get(self, idx, NO_ALLOC);
+        }
+        pub fn try_bool_invert_get(self: *Self, idx: usize) ListError!T {
+            return P.try_bool_invert_get(self, idx, NO_ALLOC);
+        }
+        pub fn bool_invert_set(self: *Self, idx: usize) void {
+            return P.bool_invert_set(self, idx, NO_ALLOC);
+        }
+        pub fn try_bool_invert_set(self: *Self, idx: usize) ListError!void {
+            return P.try_bool_invert_set(self, idx, NO_ALLOC);
+        }
+        pub fn bit_l_shift_get(self: *Self, idx: usize, val: anytype) T {
+            return P.bit_l_shift_get(self, idx, val, NO_ALLOC);
+        }
+        pub fn try_bit_l_shift_get(self: *Self, idx: usize, val: anytype) ListError!T {
+            return P.try_bit_l_shift_get(self, idx, val, NO_ALLOC);
+        }
+        pub fn bit_l_shift_set(self: *Self, idx: usize, val: anytype) void {
+            return P.bit_l_shift_set(self, idx, val, NO_ALLOC);
+        }
+        pub fn try_bit_l_shift_set(self: *Self, idx: usize, val: anytype) ListError!void {
+            return P.try_bit_l_shift_set(self, idx, val, NO_ALLOC);
+        }
+        pub fn bit_r_shift_get(self: *Self, idx: usize, val: anytype) T {
+            return P.bit_r_shift_get(self, idx, val, NO_ALLOC);
+        }
+        pub fn try_bit_r_shift_get(self: *Self, idx: usize, val: anytype) ListError!T {
+            return P.try_bit_r_shift_get(self, idx, val, NO_ALLOC);
+        }
+        pub fn bit_r_shift_set(self: *Self, idx: usize, val: anytype) void {
+            return P.bit_r_shift_set(self, idx, val, NO_ALLOC);
+        }
+        pub fn try_bit_r_shift_set(self: *Self, idx: usize, val: anytype) ListError!void {
+            return P.try_bit_r_shift_set(self, idx, val, NO_ALLOC);
+        }
+        pub fn less_than_get(self: *Self, idx: usize, val: anytype) bool {
+            return P.less_than_get(self, idx, val, NO_ALLOC);
+        }
+        pub fn try_less_than_get(self: *Self, idx: usize, val: anytype) ListError!bool {
+            return P.try_less_than_get(self, idx, val, NO_ALLOC);
+        }
+        pub fn less_than_equal_get(self: *Self, idx: usize, val: anytype) bool {
+            return P.less_than_equal_get(self, idx, val, NO_ALLOC);
+        }
+        pub fn try_less_than_equal_get(self: *Self, idx: usize, val: anytype) ListError!bool {
+            return P.try_less_than_equal_get(self, idx, val, NO_ALLOC);
+        }
+        pub fn greater_than_get(self: *Self, idx: usize, val: anytype) bool {
+            return P.greater_than_get(self, idx, val, NO_ALLOC);
+        }
+        pub fn try_greater_than_get(self: *Self, idx: usize, val: anytype) ListError!bool {
+            return P.try_greater_than_get(self, idx, val, NO_ALLOC);
+        }
+        pub fn greater_than_equal_get(self: *Self, idx: usize, val: anytype) bool {
+            return P.greater_than_equal_get(self, idx, val, NO_ALLOC);
+        }
+        pub fn try_greater_than_equal_get(self: *Self, idx: usize, val: anytype) ListError!bool {
+            return P.try_greater_than_equal_get(self, idx, val, NO_ALLOC);
+        }
+        pub fn equals_get(self: *Self, idx: usize, val: anytype) bool {
+            return P.equals_get(self, idx, val, NO_ALLOC);
+        }
+        pub fn try_equals_get(self: *Self, idx: usize, val: anytype) ListError!bool {
+            return P.try_equals_get(self, idx, val, NO_ALLOC);
+        }
+        pub fn not_equals_get(self: *Self, idx: usize, val: anytype) bool {
+            return P.not_equals_get(self, idx, val, NO_ALLOC);
+        }
+        pub fn try_not_equals_get(self: *Self, idx: usize, val: anytype) ListError!bool {
+            return P.try_not_equals_get(self, idx, val, NO_ALLOC);
+        }
+        pub fn get_min_in_range(self: *Self, range: P.PartialRangeIter) P.Item {
+            return P.get_min_in_range(self, range);
+        }
+        pub fn try_get_min_in_range(self: *Self, range: P.PartialRangeIter) ListError!P.Item {
+            return P.try_get_min_in_range(self, range);
+        }
+        pub fn get_max_in_range(self: *Self, range: P.PartialRangeIter) P.Item {
+            return P.get_max_in_range(self, range);
+        }
+        pub fn try_get_max_in_range(self: *Self, range: P.PartialRangeIter) ListError!P.Item {
+            return P.try_get_max_in_range(self, range);
+        }
+        pub fn get_clamped(self: *Self, idx: usize, min: T, max: T) T {
+            return P.get_clamped(self, idx, min, max, NO_ALLOC);
+        }
+        pub fn try_get_clamped(self: *Self, idx: usize, min: T, max: T) ListError!T {
+            return P.try_get_clamped(self, idx, min, max, NO_ALLOC);
+        }
+        pub fn set_clamped(self: *Self, idx: usize, min: T, max: T) void {
+            return P.set_clamped(self, idx, min, max, NO_ALLOC);
+        }
+        pub fn try_set_clamped(self: *Self, idx: usize, min: T, max: T) ListError!void {
+            return P.try_set_clamped(self, idx, min, max, NO_ALLOC);
+        }
+        pub fn set_report_change(self: *Self, idx: usize, val: T) bool {
+            return P.set_report_change(self, idx, val, NO_ALLOC);
+        }
+        pub fn try_set_report_change(self: *Self, idx: usize, val: T) bool {
+            return P.try_set_report_change(self, idx, val, NO_ALLOC);
+        }
+        pub fn get_unsafe_cast(self: *Self, idx: usize, comptime TT: type) TT {
+            return P.get_unsafe_cast(self, idx, TT, NO_ALLOC);
+        }
+        pub fn try_get_unsafe_cast(self: *Self, idx: usize, comptime TT: type) ListError!TT {
+            return P.try_get_unsafe_cast(self, idx, TT, NO_ALLOC);
+        }
+        pub fn get_unsafe_ptr_cast(self: *Self, idx: usize, comptime TT: type) *TT {
+            return P.get_unsafe_ptr_cast(self, idx, TT, NO_ALLOC);
+        }
+        pub fn try_get_unsafe_ptr_cast(self: *Self, idx: usize, comptime TT: type) ListError!*TT {
+            return P.try_get_unsafe_ptr_cast(self, idx, TT, NO_ALLOC);
+        }
+        pub fn set_unsafe_cast(self: *Self, idx: usize, val: anytype) void {
+            return P.set_unsafe_cast(self, idx, val, NO_ALLOC);
+        }
+        pub fn try_set_unsafe_cast(self: *Self, idx: usize, val: anytype) ListError!void {
+            return P.try_set_unsafe_cast(self, idx, val, NO_ALLOC);
+        }
+        pub fn set_unsafe_cast_report_change(self: *Self, idx: usize, val: anytype) bool {
+            return P.set_unsafe_cast_report_change(self, idx, val, NO_ALLOC);
+        }
+        pub fn try_set_unsafe_cast_report_change(self: *Self, idx: usize, val: anytype) ListError!bool {
+            return P.try_set_unsafe_cast_report_change(self, idx, val, NO_ALLOC);
         }
 
         const InsertIdx = struct {
@@ -333,14 +1264,14 @@ pub fn MultiSortList(comptime T: type, comptime UNINIT: T, comptime IDX: type, c
             const this_idx = sort.idx_list.ptr[idx_idx];
             var this_val = self.primary_list.ptr[this_idx];
             var next_idx_idx = idx_idx + 1;
-            var next_idx: usize = undefined;
+            var next_idx_: usize = undefined;
             var next_val: T = undefined;
             var moved: bool = false;
             while (next_idx_idx < sort.idx_list.len) {
-                next_idx = @intCast(sort.idx_list.ptr[next_idx_idx]);
-                next_val = self.primary_list.ptr[next_idx];
-                if (sort.greater_than(next_val, this_val) or next_idx >= this_idx) break;
-                sort.idx_list.ptr[this_idx_idx] = @intCast(next_idx);
+                next_idx_ = @intCast(sort.idx_list.ptr[next_idx_idx]);
+                next_val = self.primary_list.ptr[next_idx_];
+                if (sort.greater_than(next_val, this_val) or next_idx_ >= this_idx) break;
+                sort.idx_list.ptr[this_idx_idx] = @intCast(next_idx_);
                 this_val = next_val;
                 this_idx_idx = next_idx_idx;
                 next_idx_idx += 1;
@@ -355,10 +1286,10 @@ pub fn MultiSortList(comptime T: type, comptime UNINIT: T, comptime IDX: type, c
             const this_val = self.primary_list.ptr[this_idx];
             const next_idx_idx = idx_idx + 1;
             if (next_idx_idx >= sort.idx_list.len) return false;
-            const next_idx = sort.idx_list.ptr[next_idx_idx];
-            const next_val: T = self.primary_list.ptr[next_idx];
-            if (sort.greater_than(next_val, this_val) or next_idx >= this_idx) return false;
-            sort.idx_list.ptr[this_idx_idx] = @intCast(next_idx);
+            const next_idx_ = sort.idx_list.ptr[next_idx_idx];
+            const next_val: T = self.primary_list.ptr[next_idx_];
+            if (sort.greater_than(next_val, this_val) or next_idx_ >= this_idx) return false;
+            sort.idx_list.ptr[this_idx_idx] = @intCast(next_idx_);
             sort.idx_list.ptr[next_idx_idx] = @intCast(this_idx);
             return true;
         }
@@ -368,15 +1299,15 @@ pub fn MultiSortList(comptime T: type, comptime UNINIT: T, comptime IDX: type, c
             const this_idx = sort.idx_list.ptr[idx_idx];
             var this_val = self.primary_list.ptr[this_idx];
             var prev_idx_idx = idx_idx;
-            var prev_idx: usize = undefined;
+            var prev_idx_: usize = undefined;
             var prev_val: T = undefined;
             var moved: bool = false;
             while (this_idx_idx > 0) {
                 prev_idx_idx -= 1;
-                prev_idx = @intCast(sort.idx_list.ptr[prev_idx_idx]);
-                prev_val = self.primary_list.ptr[prev_idx];
-                if (sort.greater_than(this_val, prev_val) or prev_idx <= this_idx) break;
-                sort.idx_list.ptr[this_idx_idx] = @intCast(prev_idx);
+                prev_idx_ = @intCast(sort.idx_list.ptr[prev_idx_idx]);
+                prev_val = self.primary_list.ptr[prev_idx_];
+                if (sort.greater_than(this_val, prev_val) or prev_idx_ <= this_idx) break;
+                sort.idx_list.ptr[this_idx_idx] = @intCast(prev_idx_);
                 this_val = prev_val;
                 this_idx_idx = prev_idx_idx;
                 moved = true;
@@ -390,10 +1321,10 @@ pub fn MultiSortList(comptime T: type, comptime UNINIT: T, comptime IDX: type, c
             const this_idx = sort.idx_list.ptr[this_idx_idx];
             const this_val = self.primary_list.ptr[this_idx];
             const prev_idx_idx = this_idx_idx - 1;
-            const prev_idx = sort.idx_list.ptr[prev_idx_idx];
-            const prev_val: T = self.primary_list.ptr[prev_idx];
-            if (sort.greater_than(this_val, prev_val) or prev_idx <= this_idx) return false;
-            sort.idx_list.ptr[this_idx_idx] = @intCast(prev_idx);
+            const prev_idx_ = sort.idx_list.ptr[prev_idx_idx];
+            const prev_val: T = self.primary_list.ptr[prev_idx_];
+            if (sort.greater_than(this_val, prev_val) or prev_idx_ <= this_idx) return false;
+            sort.idx_list.ptr[this_idx_idx] = @intCast(prev_idx_);
             sort.idx_list.ptr[prev_idx_idx] = @intCast(this_idx);
             return true;
         }
@@ -606,7 +1537,7 @@ pub fn MultiSortList(comptime T: type, comptime UNINIT: T, comptime IDX: type, c
         fn debug_assert_all_in_order(self: *Self, comptime src: ?std.builtin.SourceLocation) void {
             var last_val: T = undefined;
             var last_idx_idx: usize = 0;
-            var last_idx: usize = 0;
+            var last_idx_: usize = 0;
             var this_val: T = undefined;
             var should_be_in_sort: usize = 0;
             for (self.sort_lists[0..], 0..) |*sort, sort_tag| {
@@ -618,17 +1549,17 @@ pub fn MultiSortList(comptime T: type, comptime UNINIT: T, comptime IDX: type, c
                 if (sort.idx_list.len < 2) continue;
                 var idx_check_list = std.ArrayList(IDX).initCapacity(std.heap.page_allocator, sort.idx_list.len) catch unreachable;
                 last_idx_idx = 0;
-                last_idx = @intCast(sort.idx_list.ptr[0]);
-                idx_check_list.append(std.heap.page_allocator, @intCast(last_idx)) catch unreachable;
-                last_val = self.primary_list.ptr[last_idx];
+                last_idx_ = @intCast(sort.idx_list.ptr[0]);
+                idx_check_list.append(std.heap.page_allocator, @intCast(last_idx_)) catch unreachable;
+                last_val = self.primary_list.ptr[last_idx_];
                 for (sort.idx_list.ptr[1..sort.idx_list.len], 1..) |this_idx, this_idx_idx| {
                     Assert.assert_with_reason(this_idx < self.primary_list.len, src, "sort `{s}` had index `{d} that was out of bound for primary list (len = {d})`", .{ @tagName(@as(SORT_NAMES, @enumFromInt(sort_tag))), this_idx, self.primary_list.len });
                     Assert.assert_with_reason(!std.mem.containsAtLeastScalar(IDX, idx_check_list.items, 1, this_idx), src, "sort `{s}` had duplicate of index {d}", .{ @tagName(@as(SORT_NAMES, @enumFromInt(sort_tag))), this_idx });
                     idx_check_list.append(std.heap.page_allocator, this_idx) catch unreachable;
                     this_val = self.primary_list.ptr[this_idx];
-                    Assert.assert_with_reason(!sort.greater_than(last_val, this_val) and (!sort.equal(last_val, this_val) or last_idx < this_idx), src, "in sort `{s}`, the following values were out of order:\nIII: {d: >4} {d: >4}\nIDX: {d: >4} {d: >4}\nVAL: {d: >4} {d: >4}\n", .{ @tagName(@as(SORT_NAMES, @enumFromInt(sort_tag))), last_idx_idx, this_idx_idx, last_idx, this_idx, last_val, this_val });
+                    Assert.assert_with_reason(!sort.greater_than(last_val, this_val) and (!sort.equal(last_val, this_val) or last_idx_ < this_idx), src, "in sort `{s}`, the following values were out of order:\nIII: {d: >4} {d: >4}\nIDX: {d: >4} {d: >4}\nVAL: {d: >4} {d: >4}\n", .{ @tagName(@as(SORT_NAMES, @enumFromInt(sort_tag))), last_idx_idx, this_idx_idx, last_idx_, this_idx, last_val, this_val });
                     last_idx_idx = this_idx_idx;
-                    last_idx = this_idx;
+                    last_idx_ = this_idx;
                     last_val = this_val;
                 }
                 idx_check_list.deinit(std.heap.page_allocator);
@@ -815,16 +1746,16 @@ pub fn MultiSortList(comptime T: type, comptime UNINIT: T, comptime IDX: type, c
             initialize_new_indexes_in_sort(sort, uninit_range, sort_range);
         }
 
-        fn delete_range_indirect_indexes(sort: *SortList, delete_range: IList.Range, delete_count: usize) SortListReport {
+        fn delete_range_indirect_indexes(sort: *SortList, delete_range_: IList.Range, delete_count: usize) SortListReport {
             var result = SortListReport{};
             var write_idx_idx: usize = 0;
             var deleted: usize = 0;
             for (sort.idx_list.ptr[0..sort.idx_list.len]) |idx| {
-                if (delete_range.first_idx <= idx and idx <= delete_range.last_idx) {
+                if (delete_range_.first_idx <= idx and idx <= delete_range_.last_idx) {
                     deleted += 1;
                 } else {
                     var new_idx: IDX = idx;
-                    if (idx > delete_range.last_idx) {
+                    if (idx > delete_range_.last_idx) {
                         result.add_idx(write_idx_idx);
                         new_idx -= @intCast(delete_count);
                     }
@@ -836,9 +1767,9 @@ pub fn MultiSortList(comptime T: type, comptime UNINIT: T, comptime IDX: type, c
             return result;
         }
 
-        fn delete_range_indirect_resort(self: *Self, sort: *SortList, sort_report: SortListReport, delete_range: IList.Range) void {
+        fn delete_range_indirect_resort(self: *Self, sort: *SortList, sort_report: SortListReport, delete_range_: IList.Range) void {
             for (sort.idx_list.ptr[sort_report.smallest .. sort_report.largest + 1], sort_report.smallest..) |idx, idx_idx| {
-                if (idx >= delete_range.first_idx) {
+                if (idx >= delete_range_.first_idx) {
                     _ = self.resort_down_many(sort, idx_idx);
                 }
             }
@@ -847,205 +1778,6 @@ pub fn MultiSortList(comptime T: type, comptime UNINIT: T, comptime IDX: type, c
         const ShiftDirection = enum(u8) {
             this_up__other_down,
             this_down__other_up,
-        };
-
-        pub const impl = struct {
-            pub fn impl_idx_valid(object: *anyopaque, idx: usize) bool {
-                const self: *Self = @ptrCast(@alignCast(object));
-                return idx < self.primary_list.len;
-            }
-            pub fn impl_range_valid(object: *anyopaque, range: IList.Range) bool {
-                const self: *Self = @ptrCast(@alignCast(object));
-                return range.first_idx <= range.last_idx and range.last_idx < self.primary_list.len;
-            }
-            pub fn impl_idx_in_range(_: *anyopaque, range: IList.Range, idx: usize) bool {
-                return range.first_idx <= idx and idx <= range.last_idx;
-            }
-            pub fn impl_split_range(_: *anyopaque, range: IList.Range) usize {
-                return ((range.last_idx - range.first_idx) >> 1) + range.first_idx;
-            }
-            pub fn impl_range_len(_: *anyopaque, range: IList.Range) usize {
-                return range.consecutive_len();
-            }
-            pub fn impl_get(object: *anyopaque, idx: usize, _: Allocator) T {
-                const self: *Self = @ptrCast(@alignCast(object));
-                Assert.assert_idx_less_than_len(idx, Types.intcast(self.primary_list.len, usize), @src());
-                return self.primary_list.ptr[idx];
-            }
-            pub fn impl_set(object: *anyopaque, idx: usize, val: T, alloc: Allocator) void {
-                const self: *Self = @ptrCast(@alignCast(object));
-                Assert.assert_idx_less_than_len(idx, Types.intcast(self.primary_list.len, usize), @src());
-                const old_val = self.primary_list.ptr[idx];
-                for (self.sort_lists[0..]) |*sort| {
-                    self.set_and_resort_indirect(sort, old_val, val, idx, alloc);
-                }
-                self.primary_list.ptr[idx] = val;
-            }
-            pub fn impl_move(object: *anyopaque, old_idx: usize, new_idx: usize, _: Allocator) void {
-                const self: *Self = @ptrCast(@alignCast(object));
-                if (old_idx == new_idx) return;
-                var smallest_other: usize = undefined;
-                var largest_other: usize = undefined;
-                var dir: ShiftDirection = undefined;
-                var delta: usize = undefined;
-                if (old_idx < new_idx) {
-                    smallest_other = old_idx + 1;
-                    largest_other = new_idx;
-                    delta = new_idx - old_idx;
-                    dir = .this_up__other_down;
-                } else {
-                    smallest_other = new_idx;
-                    largest_other = old_idx - 1;
-                    delta = old_idx - new_idx;
-                    dir = .this_down__other_up;
-                }
-
-                var sort_reports: [SORT_COUNT]SortListReport = undefined;
-                for (self.sort_lists[0..], 0..) |*sort, sort_idx| {
-                    sort_reports[sort_idx] = move_one_indirect_indexes(sort, old_idx, delta, smallest_other, largest_other, dir);
-                }
-                Utils.slice_move_one(self.primary_list.ptr[0..self.primary_list.len], old_idx, new_idx);
-                switch (dir) {
-                    .this_up__other_down => {
-                        smallest_other -= 1;
-                        largest_other -= 1;
-                    },
-                    .this_down__other_up => {
-                        smallest_other += 1;
-                        largest_other += 1;
-                    },
-                }
-                for (self.sort_lists[0..], 0..) |*sort, sort_idx| {
-                    self.move_one_indirect_resort(sort, sort_reports[sort_idx], new_idx, smallest_other, largest_other, dir);
-                }
-            }
-
-            pub fn impl_move_range(object: *anyopaque, range: IList.Range, new_first_idx: usize, _: Allocator) void {
-                const self: *Self = @ptrCast(@alignCast(object));
-                if (range.first_idx == new_first_idx) return;
-                const range_len: usize = range.consecutive_len();
-                var smallest_shifted_down: usize = undefined;
-                var largest_shifted_down: usize = undefined;
-                var smallest_shifted_up: usize = undefined;
-                var largest_shifted_up: usize = undefined;
-                var delta_up: usize = undefined;
-                var delta_down: usize = undefined;
-                if (range.first_idx < new_first_idx) {
-                    smallest_shifted_up = range.first_idx;
-                    largest_shifted_up = range.last_idx;
-                    smallest_shifted_down = range.last_idx + 1;
-                    largest_shifted_down = (new_first_idx + range_len) - 1;
-                    delta_up = (largest_shifted_down - smallest_shifted_down) + 1;
-                    delta_down = range_len;
-                } else {
-                    smallest_shifted_up = new_first_idx;
-                    largest_shifted_up = range.first_idx - 1;
-                    smallest_shifted_down = range.first_idx;
-                    largest_shifted_down = range.last_idx;
-                    delta_up = range_len;
-                    delta_down = (largest_shifted_up - smallest_shifted_up) + 1;
-                }
-                var sort_reports: [SORT_COUNT]SortListReport = undefined;
-                for (self.sort_lists[0..], 0..) |*sort, sort_idx| {
-                    sort_reports[sort_idx] = move_range_indirect_indexes(sort, smallest_shifted_up, largest_shifted_up, delta_up, smallest_shifted_down, largest_shifted_down, delta_down);
-                }
-                Utils.slice_move_many(self.primary_list.ptr[0..self.primary_list.len], range.first_idx, range.last_idx, new_first_idx);
-                smallest_shifted_down -= delta_down;
-                largest_shifted_down -= delta_down;
-                smallest_shifted_up += delta_up;
-                largest_shifted_up += delta_up;
-                for (self.sort_lists[0..], 0..) |*sort, sort_idx| {
-                    self.move_range_indirect_resort(sort, sort_reports[sort_idx], smallest_shifted_up, largest_shifted_up, smallest_shifted_down, largest_shifted_down);
-                }
-            }
-            pub fn impl_first(object: *anyopaque) usize {
-                _ = object;
-                return 0;
-            }
-            pub fn impl_next(object: *anyopaque, idx: usize) usize {
-                _ = object;
-                return idx + 1;
-            }
-            pub fn impl_nth_next(object: *anyopaque, idx: usize, n: usize) usize {
-                _ = object;
-                return idx + n;
-            }
-            pub fn impl_last(object: *anyopaque) usize {
-                const self: *Self = @ptrCast(@alignCast(object));
-                return @intCast(self.primary_list.len -% 1);
-            }
-            pub fn impl_prev(object: *anyopaque, idx: usize) usize {
-                _ = object;
-                return idx -% 1;
-            }
-            pub fn impl_nth_prev(object: *anyopaque, idx: usize, n: usize) usize {
-                _ = object;
-                return idx -% n;
-            }
-            pub fn impl_len(object: *anyopaque) usize {
-                const self: *Self = @ptrCast(@alignCast(object));
-                return @intCast(self.primary_list.len);
-            }
-            pub fn impl_ensure_free(object: *anyopaque, count: usize, alloc: Allocator) error{failed_to_grow_list}!void {
-                const self: *Self = @ptrCast(@alignCast(object));
-                return List(T).impl.impl_ensure_free(@ptrCast(&self.primary_list), count, alloc);
-            }
-            pub fn impl_append(object: *anyopaque, count: usize, alloc: Allocator) IList.Range {
-                const self: *Self = @ptrCast(@alignCast(object));
-                for (self.sort_lists[0..]) |*sort| {
-                    add_uninit_range_indirect_indexes(sort, self.primary_list.len, count);
-                }
-                const range = List(T).impl.impl_append(@ptrCast(&self.primary_list), count, alloc);
-                @memset(self.primary_list.ptr[range.first_idx .. range.last_idx + 1], UNINIT);
-                for (self.sort_lists[0..]) |*sort| {
-                    self.add_uninit_range_indirect_insert(sort, range.first_idx, count, alloc);
-                }
-                return range;
-            }
-            pub fn impl_insert(object: *anyopaque, idx: usize, count: usize, alloc: Allocator) IList.Range {
-                const self: *Self = @ptrCast(@alignCast(object));
-                for (self.sort_lists[0..]) |*sort| {
-                    add_uninit_range_indirect_indexes(sort, idx, count);
-                }
-                const range = List(T).impl.impl_insert(@ptrCast(&self.primary_list), idx, count, alloc);
-                @memset(self.primary_list.ptr[range.first_idx .. range.last_idx + 1], UNINIT);
-                for (self.sort_lists[0..]) |*sort| {
-                    self.add_uninit_range_indirect_insert(sort, idx, count, alloc);
-                }
-                return range;
-            }
-            pub fn impl_delete(object: *anyopaque, range: IList.Range, alloc: Allocator) void {
-                _ = alloc;
-                const self: *Self = @ptrCast(@alignCast(object));
-                const delete_count = range.consecutive_len();
-                var sort_reports: [SORT_COUNT]SortListReport = undefined;
-                for (self.sort_lists[0..], 0..) |*sort, sort_idx| {
-                    sort_reports[sort_idx] = delete_range_indirect_indexes(sort, range, delete_count);
-                }
-                Utils.mem_remove(self.primary_list.ptr, &self.primary_list.len, range.first_idx, delete_count);
-            }
-            pub fn impl_shrink_reserve(object: *anyopaque, reserve_at_most: usize, alloc: Allocator) void {
-                const self: *Self = @ptrCast(@alignCast(object));
-                List(T).impl.impl_shrink_reserve(@ptrCast(&self.primary_list), reserve_at_most, alloc);
-                for (self.sort_lists[0..]) |*sort| {
-                    List(IDX).impl.impl_shrink_reserve(@ptrCast(&sort.idx_list), reserve_at_most, alloc);
-                }
-            }
-            pub fn impl_clear(object: *anyopaque, alloc: Allocator) void {
-                const self: *Self = @ptrCast(@alignCast(object));
-                List(T).impl.impl_clear(@ptrCast(&self.primary_list), alloc);
-                for (self.sort_lists[0..]) |*sort| {
-                    List(IDX).impl.impl_clear(@ptrCast(&sort.idx_list), alloc);
-                }
-            }
-            pub fn impl_cap(object: *anyopaque) usize {
-                const self: *Self = @ptrCast(@alignCast(object));
-                return self.primary_list.cap;
-            }
-            pub fn impl_free(object: *anyopaque, alloc: Allocator) void {
-                const self: *Self = @ptrCast(@alignCast(object));
-                self.free(alloc);
-            }
         };
     };
 }
