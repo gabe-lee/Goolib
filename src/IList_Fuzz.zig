@@ -167,7 +167,7 @@ pub fn make_list_interface_test(comptime T: type) Fuzz.FuzzTest {
             state.ref_list.clearRetainingCapacity();
             state.list.len = 0;
             state.ref_list.ensureTotalCapacity(alloc, len) catch |err| return Utils.alloc_fail_err(alloc, @src(), err);
-            const ok = state.test_list.try_ensure_free_slots(len);
+            const ok = state.test_list.try_ensure_free_slots(len) == void{};
             if (!ok) return Utils.alloc_fail_str(alloc, @src(), "failed to ensure free slots", .{});
             state.ref_list.items.len = len;
             state.list.len = @intCast(len);
@@ -646,7 +646,7 @@ pub fn make_op_table(comptime T: type, comptime STATE: type, comptime UNINIT: T,
             const count = @min(@max(1, rand.uintLessThan(usize, LARGEST_COPY)), LARGEST_LEN - state.ref_list.items.len);
             if (count == 0) return null;
             state.ref_list.ensureUnusedCapacity(alloc, count) catch |err| return Utils.alloc_fail_err(alloc, @src(), err);
-            const did_ensure = state.test_list.try_ensure_free_slots(count);
+            const did_ensure = state.test_list.try_ensure_free_slots(count) == void{};
             if (did_ensure and !state.test_list.ensure_free_doesnt_change_cap() and (state.test_list.cap() - state.test_list.len() < count)) return Utils.alloc_fail_str(alloc, @src(), "ensure_free_slots(): try_ensure_free_slots() didnt provide enough capacity: WANT={d}, CAP={d}, LEN={d}, HAVE={d}", .{ count, state.test_list.cap(), state.test_list.len(), state.test_list.cap() - state.test_list.len() });
             return verify_whole_state(state, "ensure_free_slots", count, 0, 0, alloc);
         }

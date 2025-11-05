@@ -986,7 +986,7 @@ pub fn MultiSortList(comptime T: type, comptime UNINIT: T, comptime IDX: type, c
                 const self: *Self = @ptrCast(@alignCast(object));
                 return @intCast(self.primary_list.len);
             }
-            pub fn impl_ensure_free(object: *anyopaque, count: usize, alloc: Allocator) bool {
+            pub fn impl_ensure_free(object: *anyopaque, count: usize, alloc: Allocator) error{failed_to_grow_list}!void {
                 const self: *Self = @ptrCast(@alignCast(object));
                 return List(T).impl.impl_ensure_free(@ptrCast(&self.primary_list), count, alloc);
             }

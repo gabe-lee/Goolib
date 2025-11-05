@@ -31,7 +31,6 @@ const DummyAllocator = Root.DummyAllocator;
 const Flags = Root.Flags.Flags;
 const IteratorState = Root.IList_Iterator.IteratorState;
 
-const Range = Root.IList.Range;
 const Utils = Root.Utils;
 const IList = Root.IList.IList;
 
@@ -68,6 +67,9 @@ pub fn ConcreteTableValueFuncs(comptime T: type, comptime LIST: type, comptime A
         /// Assumes free space has already been ensured, though the allocator may
         /// be used for some auxilliary purpose
         append_slots_assume_capacity: fn (self: LIST, count: usize, alloc: ALLOC) Range,
+        /// Reduce the number of items in the list by
+        /// dropping/deleting them from the end of the list
+        trim_len: fn (self: LIST, trim_n: usize, alloc: ALLOC) void,
         /// Delete one value at given index
         delete: fn (self: LIST, idx: usize, alloc: ALLOC) void,
         /// Delete many values within given range, inclusive
@@ -127,9 +129,6 @@ pub fn ConcreteTableIndexFuncs(comptime LIST: type) type {
         always_invalid_idx: fn (self: LIST) usize,
         /// Return the number of items in the list
         len: fn (self: LIST) usize,
-        /// Reduce the number of items in the list by
-        /// dropping/deleting them from the end of the list
-        trim_len: fn (self: LIST, trim_n: usize) void,
         /// Return the total number of items the list can hold
         /// without reallocation
         cap: fn (self: LIST) usize,
@@ -192,9 +191,6 @@ pub fn ConcreteTableIndexFuncsNaturalIndexes(comptime LIST: type, comptime LEN_F
         fn len(self: LIST) usize {
             return @intCast(@field(self, LEN_FIELD));
         }
-        fn trim_len(self: LIST, n_trim: usize) void {
-            @field(self, LEN_FIELD) -= @intCast(n_trim);
-        }
         fn cap(self: LIST) usize {
             return @intCast(@field(self, CAP_FIELD));
         }
@@ -239,7 +235,6 @@ pub fn ConcreteTableIndexFuncsNaturalIndexes(comptime LIST: type, comptime LEN_F
         .ensure_free_doesnt_change_cap = PROTO.ensure_free_doesnt_change_cap,
         .always_invalid_idx = PROTO.always_invalid_idx,
         .len = PROTO.len,
-        .trim_len = PROTO.trim_len,
         .cap = PROTO.cap,
         .first_idx = PROTO.first_idx,
         .last_idx = PROTO.last_idx,
@@ -275,9 +270,6 @@ pub fn ConcreteTableIndexFuncsIList(comptime T: type) ConcreteTableIndexFuncs(IL
         }
         fn len(self: LIST) usize {
             return self.vtable.len(self.object);
-        }
-        fn trim_len(self: LIST, trim_n: usize) void {
-            self.vtable.trim_len(self.object, trim_n);
         }
         fn cap(self: LIST) usize {
             return self.vtable.cap(self.object);
@@ -323,7 +315,6 @@ pub fn ConcreteTableIndexFuncsIList(comptime T: type) ConcreteTableIndexFuncs(IL
         .ensure_free_doesnt_change_cap = PROTO.ensure_free_doesnt_change_cap,
         .always_invalid_idx = PROTO.always_invalid_idx,
         .len = PROTO.len,
-        .trim_len = PROTO.trim_len,
         .cap = PROTO.cap,
         .first_idx = PROTO.first_idx,
         .last_idx = PROTO.last_idx,
@@ -369,6 +360,9 @@ pub fn ConcreteTableValueFuncsIList(comptime T: type) ConcreteTableValueFuncs(T,
         fn insert_slots_assume_capacity(self: LIST, idx: usize, count: usize, alloc: Allocator) Range {
             return self.vtable.insert_slots_assume_capacity(self.object, idx, count, alloc);
         }
+        fn trim_len(self: LIST, trim_n: usize, alloc: Allocator) void {
+            return self.vtable.trim_len(self.object, trim_n, alloc);
+        }
         fn delete(self: LIST, idx: usize, alloc: Allocator) void {
             return self.vtable.delete(self.object, idx, alloc);
         }
@@ -382,7 +376,7 @@ pub fn ConcreteTableValueFuncsIList(comptime T: type) ConcreteTableValueFuncs(T,
             return self.vtable.free(self.object, alloc);
         }
     };
-    return ConcreteTableValueFuncs(LIST){
+    return ConcreteTableValueFuncs(T, LIST, Allocator){
         .get = PROTO.get,
         .get_ptr = PROTO.get_ptr,
         .set = PROTO.set,
@@ -392,6 +386,7 @@ pub fn ConcreteTableValueFuncsIList(comptime T: type) ConcreteTableValueFuncs(T,
         .shrink_cap_reserve_at_most = PROTO.shrink_cap_reserve_at_most,
         .append_slots_assume_capacity = PROTO.append_slots_assume_capacity,
         .insert_slots_assume_capacity = PROTO.insert_slots_assume_capacity,
+        .trim_len = PROTO.trim_len,
         .delete = PROTO.delete,
         .delete_range = PROTO.delete_range,
         .clear = PROTO.clear,
@@ -503,9 +498,6 @@ pub fn CreateConcretePrototype(comptime T: type, comptime LIST: type, comptime A
         pub const always_invalid_idx = idx_funcs.always_invalid_idx;
         /// Return the number of items in the list
         pub const len = idx_funcs.len;
-        /// Reduce the number of items in the list by
-        /// dropping/deleting them from the end of the list
-        pub const trim_len = idx_funcs.trim_len;
         /// Return the total number of items the list can hold
         /// without reallocation
         pub const cap = idx_funcs.cap;
@@ -573,10 +565,13 @@ pub fn CreateConcretePrototype(comptime T: type, comptime LIST: type, comptime A
         /// Assumes free space has already been ensured, though the allocator may
         /// be used for some auxilliary purpose
         pub const insert_slots_assume_capacity = val_funcs.insert_slots_assume_capacity;
-        /// Insert `n` value slots with undefined values at the end of the list.
+        /// Append `n` value slots with undefined values at the end of the list.
         /// Assumes free space has already been ensured, though the allocator may
         /// be used for some auxilliary purpose
         pub const append_slots_assume_capacity = val_funcs.append_slots_assume_capacity;
+        /// Reduce the number of items in the list by
+        /// dropping/deleting them from the end of the list
+        pub const trim_len = val_funcs.trim_len;
         /// Delete one value at given index
         pub const delete = val_funcs.delete;
         /// Delete many values within given range, inclusive
@@ -585,6 +580,160 @@ pub fn CreateConcretePrototype(comptime T: type, comptime LIST: type, comptime A
         pub const clear = val_funcs.clear;
         /// Set list to an empty state and return memory to allocator
         pub const free = val_funcs.free;
+
+        pub fn VTABLE(
+            comptime all_indexes_zero_to_len_valid_: bool,
+            comptime consecutive_indexes_in_order_: bool,
+            comptime ensure_free_doesnt_change_cap_: bool,
+            comptime prefer_linear_ops_: bool,
+            comptime always_invalid_idx_: usize,
+        ) IList(T).VTable {
+            return IList(T).VTable{
+                .all_indexes_zero_to_len_valid = all_indexes_zero_to_len_valid_,
+                .consecutive_indexes_in_order = consecutive_indexes_in_order_,
+                .ensure_free_doesnt_change_cap = ensure_free_doesnt_change_cap_,
+                .prefer_linear_ops = prefer_linear_ops_,
+                .always_invalid_idx = always_invalid_idx_,
+                .get = IFACE.iface_get,
+                .get_ptr = IFACE.iface_get_ptr,
+                .set = IFACE.iface_set,
+                .len = IFACE.iface_len,
+                .trim_len = IFACE.iface_trim_len,
+                .cap = IFACE.iface_cap,
+                .idx_valid = IFACE.iface_idx_valid,
+                .range_valid = IFACE.iface_range_valid,
+                .idx_in_range = IFACE.iface_idx_in_range,
+                .range_len = IFACE.iface_range_len,
+                .split_range = IFACE.iface_split_range,
+                .first_idx = IFACE.iface_first_idx,
+                .last_idx = IFACE.iface_last_idx,
+                .next_idx = IFACE.iface_next_idx,
+                .nth_next_idx = IFACE.iface_nth_next_idx,
+                .prev_idx = IFACE.iface_prev_idx,
+                .nth_prev_idx = IFACE.iface_nth_prev_idx,
+                .move = IFACE.iface_move,
+                .move_range = IFACE.iface_move_range,
+                .try_ensure_free_slots = IFACE.iface_try_ensure_free_slots,
+                .shrink_cap_reserve_at_most = IFACE.iface_shrink_cap_reserve_at_most,
+                .append_slots_assume_capacity = IFACE.iface_append_slots_assume_capacity,
+                .insert_slots_assume_capacity = IFACE.iface_insert_slots_assume_capacity,
+                .delete = IFACE.iface_delete,
+                .delete_range = IFACE.iface_delete_range,
+                .clear = IFACE.iface_clear,
+                .free = IFACE.iface_free,
+            };
+        }
+
+        const IFACE = struct {
+            fn iface_get(object: *anyopaque, idx: usize, alloc: ALLOC) T {
+                const self: LIST = @ptrCast(@alignCast(object));
+                return get(self, idx, alloc);
+            }
+            fn iface_get_ptr(object: *anyopaque, idx: usize, alloc: ALLOC) *T {
+                const self: LIST = @ptrCast(@alignCast(object));
+                return get_ptr(self, idx, alloc);
+            }
+            fn iface_set(object: *anyopaque, idx: usize, val: T, alloc: ALLOC) void {
+                const self: LIST = @ptrCast(@alignCast(object));
+                return set(self, idx, val, alloc);
+            }
+            fn iface_len(object: *anyopaque) usize {
+                const self: LIST = @ptrCast(@alignCast(object));
+                return len(self);
+            }
+            fn iface_cap(object: *anyopaque) usize {
+                const self: LIST = @ptrCast(@alignCast(object));
+                return cap(self);
+            }
+            fn iface_trim_len(object: *anyopaque, trim_n: usize) void {
+                const self: LIST = @ptrCast(@alignCast(object));
+                return trim_len(self, trim_n);
+            }
+            fn iface_idx_valid(object: *anyopaque, idx: usize) bool {
+                const self: LIST = @ptrCast(@alignCast(object));
+                return idx_valid(self, idx);
+            }
+            fn iface_range_valid(object: *anyopaque, range: Range) bool {
+                const self: LIST = @ptrCast(@alignCast(object));
+                return range_valid(self, range);
+            }
+            fn iface_idx_in_range(object: *anyopaque, idx: usize, range: Range) bool {
+                const self: LIST = @ptrCast(@alignCast(object));
+                return idx_in_range(self, idx, range);
+            }
+            fn iface_range_len(object: *anyopaque, range: Range) usize {
+                const self: LIST = @ptrCast(@alignCast(object));
+                return range_len(self, range);
+            }
+            fn iface_split_range(object: *anyopaque, range: Range) usize {
+                const self: LIST = @ptrCast(@alignCast(object));
+                return split_range(self, range);
+            }
+            fn iface_first_idx(object: *anyopaque) usize {
+                const self: LIST = @ptrCast(@alignCast(object));
+                return first_idx(self);
+            }
+            fn iface_last_idx(object: *anyopaque) usize {
+                const self: LIST = @ptrCast(@alignCast(object));
+                return last_idx(self);
+            }
+            fn iface_next_idx(object: *anyopaque, this_idx: usize) usize {
+                const self: LIST = @ptrCast(@alignCast(object));
+                return next_idx(self, this_idx);
+            }
+            fn iface_prev_idx(object: *anyopaque, this_idx: usize) usize {
+                const self: LIST = @ptrCast(@alignCast(object));
+                return prev_idx(self, this_idx);
+            }
+            fn iface_nth_next_idx(object: *anyopaque, this_idx: usize, n: usize) usize {
+                const self: LIST = @ptrCast(@alignCast(object));
+                return nth_next_idx(self, this_idx, n);
+            }
+            fn iface_nth_prev_idx(object: *anyopaque, this_idx: usize, n: usize) usize {
+                const self: LIST = @ptrCast(@alignCast(object));
+                return nth_prev_idx(self, this_idx, n);
+            }
+            fn iface_move(object: *anyopaque, old_idx: usize, new_idx: usize, alloc: ALLOC) void {
+                const self: LIST = @ptrCast(@alignCast(object));
+                return move(self, old_idx, new_idx, alloc);
+            }
+            fn iface_move_range(object: *anyopaque, range: Range, new_first_idx: usize, alloc: ALLOC) void {
+                const self: LIST = @ptrCast(@alignCast(object));
+                return move_range(self, range, new_first_idx, alloc);
+            }
+            fn iface_try_ensure_free_slots(object: *anyopaque, count: usize, alloc: ALLOC) error{failed_to_grow_list}!void {
+                const self: LIST = @ptrCast(@alignCast(object));
+                return try_ensure_free_slots(self, count, alloc);
+            }
+            fn iface_shrink_cap_reserve_at_most(object: *anyopaque, reserve_at_most: usize, alloc: ALLOC) void {
+                const self: LIST = @ptrCast(@alignCast(object));
+                return shrink_cap_reserve_at_most(self, reserve_at_most, alloc);
+            }
+            fn iface_append_slots_assume_capacity(object: *anyopaque, count: usize, alloc: ALLOC) Range {
+                const self: LIST = @ptrCast(@alignCast(object));
+                return append_slots_assume_capacity(self, count, alloc);
+            }
+            fn iface_insert_slots_assume_capacity(object: *anyopaque, idx: usize, count: usize, alloc: ALLOC) Range {
+                const self: LIST = @ptrCast(@alignCast(object));
+                return insert_slots_assume_capacity(self, idx, count, alloc);
+            }
+            fn iface_delete(object: *anyopaque, idx: usize, alloc: ALLOC) void {
+                const self: LIST = @ptrCast(@alignCast(object));
+                return delete(self, idx, alloc);
+            }
+            fn iface_delete_range(object: *anyopaque, range: Range, alloc: ALLOC) void {
+                const self: LIST = @ptrCast(@alignCast(object));
+                return delete_range(self, range, alloc);
+            }
+            fn iface_clear(object: *anyopaque, alloc: ALLOC) void {
+                const self: LIST = @ptrCast(@alignCast(object));
+                return clear(self, alloc);
+            }
+            fn iface_free(object: *anyopaque, alloc: ALLOC) void {
+                const self: LIST = @ptrCast(@alignCast(object));
+                return free(self, alloc);
+            }
+        };
 
         //*** Derived funcs ***
 
@@ -791,13 +940,37 @@ pub fn CreateConcretePrototype(comptime T: type, comptime LIST: type, comptime A
             const idx = try try_nth_idx(self, n);
             return set(self, idx, val, alloc);
         }
-        pub fn set_from(self: LIST, self_idx: usize, source: LIST, source_idx: usize, alloc: ALLOC) void {
-            const val = source.get(source_idx);
-            set(self, self_idx, val, alloc);
+        pub fn get_nth_from_end(self: LIST, n: usize, alloc: ALLOC) T {
+            const idx = nth_idx_from_end(self, n);
+            return get(self, idx, alloc);
         }
-        pub fn try_set_from(self: LIST, self_idx: usize, source: LIST, source_idx: usize, alloc: ALLOC) ListError!void {
-            const val = try source.try_get(source_idx);
-            return try_set(self, self_idx, val, alloc);
+        pub fn try_get_nth_from_end(self: LIST, n: usize, alloc: ALLOC) ListError!T {
+            const idx = try try_nth_idx_from_end(self, n);
+            return get(self, idx, alloc);
+        }
+        pub fn get_nth_ptr_from_end(self: LIST, n: usize, alloc: ALLOC) *T {
+            const idx = nth_idx_from_end(self, n);
+            return get_ptr(self, idx, alloc);
+        }
+        pub fn try_get_nth_ptr_from_end(self: LIST, n: usize, alloc: ALLOC) ListError!*T {
+            const idx = try try_nth_idx_from_end(self, n);
+            return get_ptr(self, idx, alloc);
+        }
+        pub fn set_nth_from_end(self: LIST, n: usize, val: T, alloc: ALLOC) void {
+            const idx = nth_idx_from_end(self, n);
+            return set(self, idx, val, alloc);
+        }
+        pub fn try_set_nth_from_end(self: LIST, n: usize, val: T, alloc: ALLOC) ListError!void {
+            const idx = try try_nth_idx_from_end(self, n);
+            return set(self, idx, val, alloc);
+        }
+        pub fn set_from(self: LIST, self_idx: usize, self_alloc: ALLOC, source: LIST, source_idx: usize, source_alloc: ALLOC) void {
+            const val = get(source, source_idx, source_alloc);
+            set(self, self_idx, val, self_alloc);
+        }
+        pub fn try_set_from(self: LIST, self_idx: usize, self_alloc: ALLOC, source: LIST, source_idx: usize, source_alloc: ALLOC) ListError!void {
+            const val = try try_get(source, source_idx, source_alloc);
+            return try_set(self, self_idx, val, self_alloc);
         }
         pub fn swap(self: LIST, idx_a: usize, idx_b: usize, alloc: ALLOC) void {
             const val_a = get(self, idx_a, alloc);
@@ -1047,7 +1220,7 @@ pub fn CreateConcretePrototype(comptime T: type, comptime LIST: type, comptime A
             insertion_sort(self, _implicit_gt, alloc);
         }
 
-        pub fn quicksort(self: LIST, range: PartialRangeIter, self_alloc: Allocator, greater_than: *const CompareFunc, less_than: *const CompareFunc, partition_stack: IList(usize)) ListError!void {
+        pub fn quicksort(self: LIST, range: PartialRangeIter, self_alloc: Allocator, greater_than: *const CompareFunc, less_than: *const CompareFunc, comptime PARTITION_IDX: type, partition_stack: IList(PARTITION_IDX)) ListError!void {
             const range_iter = range.to_iter(self);
             const real_range = range_iter.range;
             const rlen = range_len(self, real_range);
@@ -1085,9 +1258,9 @@ pub fn CreateConcretePrototype(comptime T: type, comptime LIST: type, comptime A
                 partition_stack.set(rng.last_idx, hi);
             }
         }
-        pub fn quicksort_implicit(self: LIST, range: PartialRangeIter, self_alloc: Allocator, partition_stack: IList(usize)) ListError!void {
-            Assert.assert_with_reason(Types.type_is_numeric(T), @src(), "IList.quicksort_implicit() can only be used when element type `T` is numeric, got type {s}", @typeName(T));
-            quicksort(self, range, self_alloc, _implicit_gt, _implicit_lt, partition_stack);
+        pub fn quicksort_implicit(self: LIST, range: PartialRangeIter, self_alloc: Allocator, comptime PARTITION_IDX: type, partition_stack: IList(PARTITION_IDX)) ListError!void {
+            Assert.assert_with_reason(Types.type_is_numeric(T), @src(), "quicksort_implicit() can only be used when element type `T` is numeric, got type {s}", @typeName(T));
+            quicksort(self, range, self_alloc, _implicit_gt, _implicit_lt, PARTITION_IDX, partition_stack);
         }
         fn _quicksort_partition(self: LIST, self_alloc: Allocator, greater_than: *const CompareFunc, less_than: *const CompareFunc, lo: usize, hi: usize) Range {
             const pivot_idx: usize = lo;
@@ -1711,17 +1884,15 @@ pub fn CreateConcretePrototype(comptime T: type, comptime LIST: type, comptime A
             range: PartialRangeIter,
             userdata: anytype,
             filter_func: *const fn (item: IterItem, userdata: @TypeOf(userdata)) bool,
-            output_list: anytype,
-            output_alloc: anytype,
             comptime OUT_IDX: type,
-            output_append: *const fn (out_list: @TypeOf(output_list), val: OUT_IDX, out_alloc: @TypeOf(output_alloc)) usize,
+            out_list: IList(OUT_IDX),
         ) usize {
             var iter = range.to_iter(self);
             var c: usize = 0;
             while (iter.next_item()) |item| {
                 if (!filter_func(item, userdata)) continue;
                 c += 1;
-                _ = output_append(output_list, @intCast(item.idx), output_alloc);
+                _ = out_list.append(@intCast(item.idx));
             }
             return c;
         }
@@ -1732,9 +1903,7 @@ pub fn CreateConcretePrototype(comptime T: type, comptime LIST: type, comptime A
             userdata: anytype,
             comptime OUT_TYPE: type,
             transform_func: *const fn (item: IterItem, userdata: @TypeOf(userdata)) OUT_TYPE,
-            output_list: anytype,
-            output_alloc: anytype,
-            output_append: *const fn (out_list: @TypeOf(output_list), val: OUT_TYPE, out_alloc: @TypeOf(output_alloc)) usize,
+            out_list: IList(OUT_TYPE),
             comptime filter: FilterMode,
             filter_func: if (filter == .use_filter) *const fn (item: IterItem, userdata: @TypeOf(userdata)) bool else null,
         ) usize {
@@ -1744,7 +1913,7 @@ pub fn CreateConcretePrototype(comptime T: type, comptime LIST: type, comptime A
                 if (filter == .use_filter and !filter_func(item, userdata)) continue;
                 c += 1;
                 const out_val = transform_func(item, userdata);
-                _ = output_append(output_list, out_val, output_alloc);
+                _ = out_list.append(out_val);
             }
             return c;
         }
@@ -1767,17 +1936,15 @@ pub fn CreateConcretePrototype(comptime T: type, comptime LIST: type, comptime A
             return accum;
         }
         pub fn ensure_free_slots(self: LIST, count: usize, alloc: ALLOC) void {
-            const ok = try_ensure_free_slots(self, count, alloc);
-            Assert.assert_with_reason(ok, @src(), "failed to grow list, current: len = {d}, cap = {d}, need {d} more slots", .{ len(self), cap(self), count });
+            const err = try_ensure_free_slots(self, count, alloc);
+            Assert.assert_with_reason(err == void{}, @src(), "failed to grow list, current: len = {d}, cap = {d}, need {d} more slots", .{ len(self), cap(self), count });
         }
         pub fn append_slots(self: LIST, count: usize, alloc: ALLOC) Range {
             ensure_free_slots(self, count, alloc);
             return append_slots_assume_capacity(self, count, alloc);
         }
         pub fn try_append_slots(self: LIST, count: usize, alloc: ALLOC) ListError!Range {
-            if (!try_ensure_free_slots(self, count, alloc)) {
-                return ListError.failed_to_grow_list;
-            }
+            try try_ensure_free_slots(self, count, alloc);
             return append_slots_assume_capacity(self, count, alloc);
         }
         pub fn append_zig_slice(self: LIST, slice: []const T, alloc: ALLOC) Range {
@@ -1785,9 +1952,7 @@ pub fn CreateConcretePrototype(comptime T: type, comptime LIST: type, comptime A
             return _append_zig_slice(self, slice, alloc);
         }
         pub fn try_append_zig_slice(self: LIST, slice: []const T, alloc: ALLOC) ListError!Range {
-            if (!try_ensure_free_slots(self, slice.len, alloc)) {
-                return ListError.failed_to_grow_list;
-            }
+            try try_ensure_free_slots(self, slice.len, alloc);
             return _append_zig_slice(self, slice, alloc);
         }
         fn _append_zig_slice(self: LIST, slice: []const T, alloc: ALLOC) Range {
@@ -1815,25 +1980,21 @@ pub fn CreateConcretePrototype(comptime T: type, comptime LIST: type, comptime A
             return append_range.first_idx;
         }
         pub fn try_append(self: LIST, val: T, alloc: ALLOC) ListError!usize {
-            if (!try_ensure_free_slots(self, 1, alloc)) {
-                return ListError.failed_to_grow_list;
-            }
+            try try_ensure_free_slots(self, 1, alloc);
             const append_range = append_slots_assume_capacity(self, 1, alloc);
             set(self, append_range.first_idx, val, alloc);
             return append_range.first_idx;
         }
-        pub fn append_list(self: LIST, self_alloc: Allocator, list_range: RangeIter) Range {
+        pub fn append_many(self: LIST, self_alloc: Allocator, list_range: RangeIter) Range {
             const rlen = list_range.iter_len();
             ensure_free_slots(self, rlen, self_alloc);
             const append_range = append_slots_assume_capacity(self, rlen, self_alloc);
             _ = copy(list_range, RangeIter.use_range(self, append_range).with_alloc(self_alloc));
             return append_range;
         }
-        pub fn try_append_list(self: LIST, self_alloc: Allocator, list_range: RangeIter) ListError!Range {
+        pub fn try_append_many(self: LIST, self_alloc: Allocator, list_range: RangeIter) ListError!Range {
             const rlen = list_range.iter_len();
-            if (!try_ensure_free_slots(self, rlen, self_alloc)) {
-                return ListError.failed_to_grow_list;
-            }
+            try try_ensure_free_slots(self, rlen, self_alloc);
             const append_range = append_slots_assume_capacity(self, rlen, self_alloc);
             _ = copy(list_range, RangeIter.use_range(self, append_range).with_alloc(self_alloc));
             return append_range;
@@ -1843,9 +2004,7 @@ pub fn CreateConcretePrototype(comptime T: type, comptime LIST: type, comptime A
             return insert_slots_assume_capacity(self, idx, count, alloc);
         }
         pub fn try_insert_slots(self: LIST, idx: usize, count: usize, alloc: ALLOC) ListError!Range {
-            if (!try_ensure_free_slots(self, count, alloc)) {
-                return ListError.failed_to_grow_list;
-            }
+            try try_ensure_free_slots(self, count, alloc);
             return insert_slots_assume_capacity(self, idx, count, alloc);
         }
         pub fn insert_zig_slice(self: LIST, idx: usize, slice: []T, alloc: ALLOC) Range {
@@ -1853,9 +2012,7 @@ pub fn CreateConcretePrototype(comptime T: type, comptime LIST: type, comptime A
             return _insert_zig_slice(self, idx, slice, alloc);
         }
         pub fn try_insert_zig_slice(self: LIST, idx: usize, slice: []T, alloc: ALLOC) ListError!Range {
-            if (!try_ensure_free_slots(self, slice.len, alloc)) {
-                return ListError.failed_to_grow_list;
-            }
+            try try_ensure_free_slots(self, slice.len, alloc);
             return _insert_zig_slice(self, idx, slice, alloc);
         }
         fn _insert_zig_slice(self: LIST, idx: usize, slice: []T, alloc: ALLOC) Range {
@@ -1883,9 +2040,7 @@ pub fn CreateConcretePrototype(comptime T: type, comptime LIST: type, comptime A
             return insert_range.first_idx;
         }
         pub fn try_insert(self: LIST, idx: usize, val: T, alloc: ALLOC) ListError!Range {
-            if (!try_ensure_free_slots(self, 1, alloc)) {
-                return ListError.failed_to_grow_list;
-            }
+            try try_ensure_free_slots(self, 1, alloc);
             const insert_range = insert_slots_assume_capacity(self, idx, 1, alloc);
             set(self, insert_range.first_idx, val, alloc);
             return insert_range.first_idx;
@@ -1899,9 +2054,7 @@ pub fn CreateConcretePrototype(comptime T: type, comptime LIST: type, comptime A
         }
         pub fn try_insert_many(self: LIST, idx: usize, self_alloc: Allocator, list_range: RangeIter) ListError!Range {
             const rlen = list_range.iter_len();
-            if (!try_ensure_free_slots(self, rlen, self_alloc)) {
-                return ListError.failed_to_grow_list;
-            }
+            try try_ensure_free_slots(self, rlen, self_alloc);
             const insert_range = insert_slots_assume_capacity(self, idx, rlen, self_alloc);
             _ = copy(list_range, RangeIter.use_range(self, insert_range).with_alloc(self_alloc));
             return insert_range;
@@ -1929,13 +2082,13 @@ pub fn CreateConcretePrototype(comptime T: type, comptime LIST: type, comptime A
         pub fn swap_delete(self: LIST, idx: usize, alloc: ALLOC) void {
             const last = last_idx(self);
             overwrite(self, last, idx, alloc);
-            trim_len(self, last);
+            trim_len(self, 1);
         }
         pub fn try_swap_delete(self: LIST, idx: usize, alloc: ALLOC) ListError!void {
             if (len(self) == 0) return ListError.list_is_empty;
             const last = try try_last_idx(self);
             overwrite(self, last, idx, alloc);
-            trim_len(self, last);
+            trim_len(self, 1);
         }
         pub fn swap_delete_many(self: LIST, range: PartialRangeIter) void {
             var del_area = range.to_iter(self);
@@ -1953,7 +2106,7 @@ pub fn CreateConcretePrototype(comptime T: type, comptime LIST: type, comptime A
             return try_delete_range(self, swap_area.range, swap_area.alloc);
         }
 
-        pub fn remove_range(self: LIST, self_range: PartialRangeIter, dest: LIST, dest_alloc: Allocator) Range {
+        pub fn remove_range(self: LIST, self_range: PartialRangeIter, dest: LIST, dest_alloc: ALLOC) Range {
             const self_iter = self_range.to_iter(self);
             const rem_len = self_iter.iter_len();
             const dest_range = append_slots(dest, rem_len, dest_alloc);
@@ -1962,7 +2115,7 @@ pub fn CreateConcretePrototype(comptime T: type, comptime LIST: type, comptime A
             delete_range(self, self_iter.range, self_iter.alloc);
             return dest_range;
         }
-        pub fn try_remove_range(self: LIST, self_range: PartialRangeIter, dest: LIST, dest_alloc: Allocator) ListError!Range {
+        pub fn try_remove_range(self: LIST, self_range: PartialRangeIter, dest: LIST, dest_alloc: ALLOC) ListError!Range {
             const self_iter = self_range.to_iter(self);
             if (!range_valid(self, self_iter.range)) return ListError.invalid_range;
             const rem_len = self_iter.iter_len();
@@ -2472,6 +2625,66 @@ pub fn CreateConcretePrototype(comptime T: type, comptime LIST: type, comptime A
             set(self, idx, ~v, alloc);
         }
 
+        pub fn bool_and_get(self: LIST, idx: usize, val: bool, alloc: ALLOC) T {
+            return get(self, idx, alloc) and val;
+        }
+        pub fn try_bool_and_get(self: LIST, idx: usize, val: bool, alloc: ALLOC) ListError!T {
+            return (try try_get(self, idx, alloc)) and val;
+        }
+        pub fn bool_and_set(self: LIST, idx: usize, val: bool, alloc: ALLOC) void {
+            const v = get(self, idx, alloc);
+            set(self, idx, v and val, alloc);
+        }
+        pub fn try_bool_and_set(self: LIST, idx: usize, val: bool, alloc: ALLOC) ListError!void {
+            const v = try try_get(self, idx, alloc);
+            set(self, idx, v and val, alloc);
+        }
+
+        pub fn bool_or_get(self: LIST, idx: usize, val: bool, alloc: ALLOC) T {
+            return get(self, idx, alloc) or val;
+        }
+        pub fn try_bool_or_get(self: LIST, idx: usize, val: bool, alloc: ALLOC) ListError!T {
+            return (try try_get(self, idx, alloc)) or val;
+        }
+        pub fn bool_or_set(self: LIST, idx: usize, val: bool, alloc: ALLOC) void {
+            const v = get(self, idx, alloc);
+            set(self, idx, v or val, alloc);
+        }
+        pub fn try_bool_or_set(self: LIST, idx: usize, val: bool, alloc: ALLOC) ListError!void {
+            const v = try try_get(self, idx, alloc);
+            set(self, idx, v or val, alloc);
+        }
+
+        pub fn bool_xor_get(self: LIST, idx: usize, val: bool, alloc: ALLOC) T {
+            return get(self, idx, alloc) != val;
+        }
+        pub fn try_bool_xor_get(self: LIST, idx: usize, val: bool, alloc: ALLOC) ListError!T {
+            return (try try_get(self, idx, alloc)) != val;
+        }
+        pub fn bool_xor_set(self: LIST, idx: usize, val: bool, alloc: ALLOC) void {
+            const v = get(self, idx, alloc);
+            set(self, idx, v != val, alloc);
+        }
+        pub fn try_bool_xor_set(self: LIST, idx: usize, val: bool, alloc: ALLOC) ListError!void {
+            const v = try try_get(self, idx, alloc);
+            set(self, idx, v != val, alloc);
+        }
+
+        pub fn bool_invert_get(self: LIST, idx: usize, alloc: ALLOC) T {
+            return !get(self, idx, alloc);
+        }
+        pub fn try_bool_invert_get(self: LIST, idx: usize, alloc: ALLOC) ListError!T {
+            return !(try try_get(self, idx, alloc));
+        }
+        pub fn bool_invert_set(self: LIST, idx: usize, alloc: ALLOC) void {
+            const v = get(self, idx, alloc);
+            set(self, idx, !v, alloc);
+        }
+        pub fn try_bool_invert_set(self: LIST, idx: usize, alloc: ALLOC) ListError!void {
+            const v = try try_get(self, idx, alloc);
+            set(self, idx, !v, alloc);
+        }
+
         pub fn bit_l_shift_get(self: LIST, idx: usize, val: anytype, alloc: ALLOC) T {
             return get(self, idx, alloc) << val;
         }
@@ -2679,14 +2892,14 @@ pub fn CreateConcretePrototype(comptime T: type, comptime LIST: type, comptime A
             return try_set(self, idx, v.*, alloc);
         }
 
-        pub fn set_unsafe_cast_report_change(self: LIST, idx: usize, val: T, alloc: ALLOC) bool {
+        pub fn set_unsafe_cast_report_change(self: LIST, idx: usize, val: anytype, alloc: ALLOC) bool {
             const old = get(self, idx, alloc);
             const v: *T = @ptrCast(@alignCast(&val));
             set(self, idx, v.*, alloc);
             return v.* != old;
         }
 
-        pub fn try_set_unsafe_cast_report_change(self: LIST, idx: usize, val: T, alloc: ALLOC) ListError!bool {
+        pub fn try_set_unsafe_cast_report_change(self: LIST, idx: usize, val: anytype, alloc: ALLOC) ListError!bool {
             const old = get(self, idx, alloc);
             const v: *T = @ptrCast(@alignCast(&val));
             try try_set(self, idx, v.*, alloc);
@@ -2698,6 +2911,48 @@ pub fn CreateConcretePrototype(comptime T: type, comptime LIST: type, comptime A
 pub const FilterMode = enum(u8) {
     no_filter,
     use_filter,
+};
+
+pub const Range = struct {
+    first_idx: usize = 0,
+    last_idx: usize = 0,
+
+    /// Assumes all consecutive increasing indexes between `first_idx` and `last_idx`
+    /// represent consecutive items in theri proper order
+    pub fn consecutive_len(self: Range) usize {
+        return (self.last_idx - self.first_idx) + 1;
+    }
+
+    pub fn new_range(first: usize, last: usize) Range {
+        return Range{
+            .first_idx = first,
+            .last_idx = last,
+        };
+    }
+    pub fn single_idx(idx: usize) Range {
+        return Range{
+            .first_idx = idx,
+            .last_idx = idx,
+        };
+    }
+    pub fn entire_list(list: anytype) Range {
+        return Range{
+            .first_idx = list.first_idx(),
+            .last_idx = list.last_idx(),
+        };
+    }
+    pub fn first_idx_to_list_end(list: anytype, first_idx_: usize) Range {
+        return Range{
+            .first_idx = first_idx_,
+            .last_idx = list.last_idx(),
+        };
+    }
+    pub fn list_start_to_last_idx(list: anytype, last_idx_: usize) Range {
+        return Range{
+            .first_idx = list.first_idx(),
+            .last_idx = last_idx_,
+        };
+    }
 };
 
 pub const LocateResult = struct {

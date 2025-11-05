@@ -142,10 +142,10 @@ pub fn ArrayListAdapter(comptime T: type) type {
             _ = object;
             return (range.last_idx - range.first_idx) + 1;
         }
-        fn impl_ensure_free(object: *anyopaque, count: usize, alloc: Allocator) bool {
+        fn impl_ensure_free(object: *anyopaque, count: usize, alloc: Allocator) error{failed_to_grow_list}!void {
             const list: *AList = @ptrCast(@alignCast(object));
             list.ensureUnusedCapacity(alloc, count) catch return false;
-            return true;
+            return;
         }
         fn impl_append(object: *anyopaque, count: usize, _: Allocator) IList.Range {
             const list: *AList = @ptrCast(@alignCast(object));

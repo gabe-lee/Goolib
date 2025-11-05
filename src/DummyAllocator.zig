@@ -94,3 +94,29 @@ pub fn panic_remap(_: *anyopaque, _: []u8, _: mem.Alignment, _: usize, _: usize)
 pub fn panic_free(_: *anyopaque, _: []u8, _: mem.Alignment, _: usize) void {
     Assert.assert_unreachable(@src(), "dummy allocator `free()` was called!", .{});
 }
+
+pub const allocator_shrink_only_panic = Allocator{
+    .ptr = undefined,
+    .vtable = &DUMMY_VTABLE_SHRINK_ONLY_PANIC,
+};
+pub const DUMMY_VTABLE_SHRINK_ONLY_PANIC = Allocator.VTable{
+    .alloc = panic_alloc,
+    .resize = panic_resize,
+    .remap = panic_remap,
+    .free = panic_free,
+};
+
+pub fn shink_only_panic_alloc(_: *anyopaque, _: usize, _: mem.Alignment, _: usize) ?[*]u8 {
+    Assert.assert_unreachable(@src(), "dummy allocator `alloc()` was called!", .{});
+}
+pub fn shink_only_panic_resize(_: *anyopaque, old_mem: []u8, _: mem.Alignment, new_len: usize, _: usize) bool {
+    if (new_len <= old_mem.len) return true;
+    Assert.assert_unreachable(@src(), "dummy allocator `resize()` was called!", .{});
+}
+pub fn shink_only_panic_remap(_: *anyopaque, old_mem: []u8, _: mem.Alignment, new_len: usize, _: usize) ?[*]u8 {
+    if (new_len <= old_mem.len) return old_mem.ptr;
+    Assert.assert_unreachable(@src(), "dummy allocator `remap()` was called!", .{});
+}
+pub fn shink_only_panic_free(_: *anyopaque, _: []u8, _: mem.Alignment, _: usize) void {
+    Assert.assert_unreachable(@src(), "dummy allocator `free()` was called!", .{});
+}

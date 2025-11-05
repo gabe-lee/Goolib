@@ -255,7 +255,7 @@ pub fn RingList(comptime T: type) type {
             }
         }
 
-        fn special_mem_grow(self: *Self, new_cap: usize, alloc: Allocator) bool {
+        fn special_mem_grow(self: *Self, new_cap: usize, alloc: Allocator) error{failed_to_grow_list}!void {
             const was_split = self.is_split();
             if (alloc.remap(self.ptr[0..self.cap], new_cap)) |new_mem| {
                 if (was_split) {
@@ -272,7 +272,7 @@ pub fn RingList(comptime T: type) type {
                 self.ptr = new_mem.ptr;
                 self.cap = Types.intcast(new_mem.len, u32);
             } else {
-                const new_mem = alloc.alloc(T, new_cap) catch return false;
+                const new_mem = alloc.alloc(T, new_cap) catch return error{failed_to_grow_list}.failed_to_grow_list;
                 const seg_1_ = self.seg_1();
                 @memcpy(new_mem[0..seg_1_.len], seg_1_);
                 if (was_split) {
@@ -285,7 +285,7 @@ pub fn RingList(comptime T: type) type {
                 self.cap = Types.intcast(new_mem.len, u32);
                 self.start = 0;
             }
-            return true;
+            return;
         }
 
         fn special_mem_shrink(self: *Self, new_cap: usize, alloc: Allocator) void {
@@ -488,10 +488,10 @@ pub fn RingList(comptime T: type) type {
             self.reverse(total_range.first_idx, total_range.last_idx);
         }
 
-        fn impl_ensure_free(object: *anyopaque, n: usize, alloc: Allocator) bool {
+        fn impl_ensure_free(object: *anyopaque, n: usize, alloc: Allocator) error{failed_to_grow_list}!void {
             const self: *Self = @ptrCast(@alignCast(object));
             const have = @as(u32, @intCast(self.cap - self.len));
-            if (have >= n) return true;
+            if (have >= n) return;
             const new_cap = self.len + Types.intcast(n, u32);
             return self.special_mem_grow(new_cap, alloc);
         }
