@@ -181,7 +181,7 @@ pub fn List(comptime T: type) type {
             .free = P_FUNCS.p_free,
         };
         const P = IList.Concrete.CreateConcretePrototypeNaturalIndexes(T, *Self, Allocator, null, "ptr", null, "len", null, "cap", false, PFX);
-        const VTABLE = P.VTABLE(true, true, false, false, math.maxInt(usize));
+        const VTABLE = P.VTABLE(true, false, false, math.maxInt(usize));
         //*** END PROTOTYPE***
 
         pub fn interface(self: *Self, alloc: Allocator) IList.IList(T) {

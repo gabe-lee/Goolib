@@ -307,7 +307,7 @@ pub fn ConcreteTableIndexFuncsIList(comptime T: type) ConcreteTableIndexFuncs(IL
             return self.vtable.range_valid(self.object, range);
         }
         fn idx_in_range(self: LIST, idx: usize, range: Range) bool {
-            return self.vtable.idx_in_range(self.object, range, idx);
+            return self.vtable.idx_in_range(self.object, idx, range);
         }
         fn split_range(self: LIST, range: Range) usize {
             return self.vtable.split_range(self.object, range);
@@ -436,7 +436,7 @@ pub fn NativeRangeSliceIList(comptime T: type) ConcreteTableNativeSliceFuncs(T, 
     const LIST = IList(T);
     const PROTO = struct {
         fn has_native_slice(self: LIST) bool {
-            return self.vtable.all_indexes_zero_to_len_valid and self.vtable.consecutive_indexes_in_order;
+            return self.vtable.allow_native_slice;
         }
         fn native_slice(self: LIST, range: Range) []T {
             const ptr: [*]T = @ptrCast(self.vtable.get_ptr(self.object, range.first_idx, self.alloc));
@@ -594,15 +594,13 @@ pub fn CreateConcretePrototype(comptime T: type, comptime LIST: type, comptime A
         pub const free = val_funcs.free;
 
         pub fn VTABLE(
-            comptime all_indexes_zero_to_len_valid_: bool,
-            comptime consecutive_indexes_in_order_: bool,
+            comptime allow_native_slice_: bool,
             comptime ensure_free_doesnt_change_cap_: bool,
             comptime prefer_linear_ops_: bool,
             comptime always_invalid_idx_: usize,
         ) IList(T).VTable {
             return IList(T).VTable{
-                .all_indexes_zero_to_len_valid = all_indexes_zero_to_len_valid_,
-                .consecutive_indexes_in_order = consecutive_indexes_in_order_,
+                .allow_native_slice = allow_native_slice_,
                 .ensure_free_doesnt_change_cap = ensure_free_doesnt_change_cap_,
                 .prefer_linear_ops = prefer_linear_ops_,
                 .always_invalid_idx = always_invalid_idx_,
@@ -2930,9 +2928,15 @@ pub const Range = struct {
     last_idx: usize = 0,
 
     /// Assumes all consecutive increasing indexes between `first_idx` and `last_idx`
-    /// represent consecutive items in theri proper order
+    /// represent consecutive items in their proper order
     pub fn consecutive_len(self: Range) usize {
         return (self.last_idx - self.first_idx) + 1;
+    }
+
+    /// Assumes all consecutive increasing indexes between `first_idx` and `last_idx`
+    /// represent consecutive items in their proper order
+    pub fn consecutive_split(self: Range) usize {
+        return ((self.last_idx - self.first_idx) >> 1) + self.first_idx;
     }
 
     pub fn new_range(first: usize, last: usize) Range {

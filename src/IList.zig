@@ -73,24 +73,15 @@ pub fn IList(comptime T: type) type {
             /// Returning the correct value will allow some operations to use alternate,
             /// more efficient algorithms
             prefer_linear_ops: bool = false,
-            /// Should hold a constant boolean value describing whether consecutive indexes,
-            /// (eg. `0, 1, 2, 3, 4, 5`) are in their logical/proper order (not necessarily sorted)
+            /// Indicates whether a native zig slice `[]T` can be obtained by
+            /// using `get_ptr(idx)` and using that pointer to create a slice.
             ///
-            /// An example of this being true is the standard slice `[]T` and `SliceAdapter[T]`
+            /// If allowed, many operations can use faster branches for copying
+            /// data.
             ///
-            /// An example where this would be false is an implementation of a linked list
-            ///
-            /// This allows some algorithms to use more efficient paths
-            consecutive_indexes_in_order: bool = true,
-            /// Should hold a constant boolean value describing whether all indexes greater-than-or-equal-to
-            /// `0` AND less-than `slice.len()` are valid
-            ///
-            /// An example of this being true is the standard slice `[]T` and `SliceAdapter[T]`
-            ///
-            /// An example where this would be false is an implementation of a linked list
-            ///
-            /// This allows some algorithms to use more efficient paths
-            all_indexes_zero_to_len_valid: bool = true,
+            /// If this is true, it is required that consecutive indexes (0, 1, 2, 3, 4, ...etc)
+            /// MUST be located at consecutive memory addresses just as they would be natively.
+            allow_native_slice: bool = false,
             /// If set to `true`, calling `list.try_ensure_free_slots(count)` will not change the result
             /// of `list.cap()`, but a `true` result still indicates that an append or insert is expected
             /// to behave as expected.
@@ -383,7 +374,7 @@ pub fn IList(comptime T: type) type {
         /// Reduce the number of items in the list by
         /// dropping/deleting them from the end of the list
         pub fn trim_len(self: ILIST, trim_n: usize) void {
-            return P.trim_len(self, trim_n);
+            return P.trim_len(self, trim_n, self.alloc);
         }
         /// Return the total number of items the list can hold
         /// without reallocation
@@ -430,8 +421,8 @@ pub fn IList(comptime T: type) type {
         }
         /// Return whether the given index falls within the given range,
         /// inclusive
-        pub fn idx_in_range(self: ILIST, range: Range, idx: usize) bool {
-            return P.idx_in_range(self, range, idx);
+        pub fn idx_in_range(self: ILIST, idx: usize, range: Range) bool {
+            return P.idx_in_range(self, idx, range);
         }
         /// Split a range roughly in half, returning an index
         /// as close to the true center point as possible.

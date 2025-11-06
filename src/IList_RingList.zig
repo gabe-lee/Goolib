@@ -290,6 +290,7 @@ pub fn RingList(comptime T: type) type {
                 self.ptr[ridx.idx] = tmp;
             }
             fn p_move_range(self: *Self, range: IList.Range, new_first_idx: usize, _: Allocator) void {
+                if (range.first_idx == new_first_idx) return;
                 const len_a = range.consecutive_len();
                 const range_a = range;
                 var total_range: IList.Range = undefined;
@@ -448,7 +449,7 @@ pub fn RingList(comptime T: type) type {
             .free = P_FUNCS.p_free,
         };
         const P = IList.Concrete.CreateConcretePrototypeNaturalIndexes(T, *Self, Allocator, null, "ptr", null, "len", null, "cap", false, PFX);
-        const VTABLE = P.VTABLE(true, true, false, false, math.maxInt(usize));
+        const VTABLE = P.VTABLE(true, false, false, math.maxInt(usize));
         //*** END PROTOTYPE***
 
         const RIdx = struct {

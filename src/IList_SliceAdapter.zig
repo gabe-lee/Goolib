@@ -138,7 +138,7 @@ pub fn SliceAdapter(comptime T: type) type {
             .free = P_FUNCS.p_free,
         };
         const P = IList.Concrete.CreateConcretePrototypeNaturalIndexes(T, *[]T, Allocator, null, "ptr", null, "len", null, "len", true, PFX);
-        const VTABLE = P.VTABLE(true, true, true, false, math.maxInt(usize));
+        const VTABLE = P.VTABLE(true, true, false, math.maxInt(usize));
         //*** END PROTOTYPE***
 
         pub fn interface(self: *[]T, alloc: Allocator) IList.IList(T) {

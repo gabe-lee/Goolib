@@ -238,10 +238,15 @@ pub fn MultiSortList(comptime T: type, comptime UNINIT: T, comptime IDX: type, c
             fn p_get(self: *Self, idx: usize, _: Allocator) T {
                 return self.primary_list.ptr[idx];
             }
-            fn p_get_ptr(self: *Self, idx: usize, _: Allocator) *T {
-                return &self.primary_list.ptr[idx];
+            fn p_get_ptr(_: *Self, _: usize, _: Allocator) *T {
+                Assert.assert_unreachable(@src(), "using `get_ptr()` on a MultiSortList is not allowed: Making changes via a pointer does not propogate sorting updates.\nIf a pointer is absolutely needed, use `&ms_list.primary_list.ptr[idx]` instead", .{});
             }
-            fn p_set(self: *Self, idx: usize, val: T, _: Allocator) void {
+            fn p_set(self: *Self, idx: usize, val: T, alloc: Allocator) void {
+                Assert.assert_idx_less_than_len(idx, Types.intcast(self.primary_list.len, usize), @src());
+                const old_val = self.primary_list.ptr[idx];
+                for (self.sort_lists[0..]) |*sort| {
+                    self.set_and_resort_indirect(sort, old_val, val, idx, alloc);
+                }
                 self.primary_list.ptr[idx] = val;
             }
             fn p_move(self: *Self, old_idx: usize, new_idx: usize, _: Allocator) void {
@@ -366,6 +371,11 @@ pub fn MultiSortList(comptime T: type, comptime UNINIT: T, comptime IDX: type, c
                     p_trim_len(self, 1, alloc);
                     return;
                 }
+                const range = Range.single_idx(idx);
+                for (self.sort_lists[0..]) |*sort| {
+                    // sort_reports[sort_idx] = delete_range_indirect_indexes(sort, range, delete_count);
+                    _ = delete_range_indirect_indexes(sort, range, 1);
+                }
                 Utils.mem_remove(self.primary_list.ptr, &self.primary_list.len, idx, 1);
             }
             fn p_delete_range(self: *Self, range: IList.Range, alloc: Allocator) void {
@@ -412,7 +422,7 @@ pub fn MultiSortList(comptime T: type, comptime UNINIT: T, comptime IDX: type, c
             .free = P_FUNCS.p_free,
         };
         const P = IList.Concrete.CreateConcretePrototypeNaturalIndexes(T, *Self, Allocator, "primary_list", "ptr", "primary_list", "len", "primary_list", "cap", false, PFX);
-        const VTABLE = P.VTABLE(true, true, false, false, math.maxInt(usize));
+        const VTABLE = P.VTABLE(false, false, false, math.maxInt(usize));
         //*** END PROTOTYPE***
 
         pub fn interface(self: *Self, alloc: Allocator) IList.IList(T) {
@@ -1495,7 +1505,7 @@ pub fn MultiSortList(comptime T: type, comptime UNINIT: T, comptime IDX: type, c
             var list_val: T = undefined;
             var dir: MatchDirection = undefined;
             while (true) {
-                list_idx_idx = split_range(lo_idx_idx, hi_idx_idx);
+                list_idx_idx = Range.new_range(lo_idx_idx, hi_idx_idx).consecutive_split();
                 list_idx = @intCast(sort.idx_list.ptr[list_idx_idx]);
                 list_val = self.primary_list.ptr[list_idx];
                 dir = match_by_index_direction(sort, list_val, list_idx, find_val, find_idx);

@@ -594,6 +594,40 @@ pub fn make_op_table(comptime T: type, comptime STATE: type, comptime UNINIT: T,
             }
             return verify_whole_state(state, "split_range", idx_1, idx_3, 0, alloc);
         }
+        pub fn idx_in_range(rand: Random, state_opaque: *anyopaque, alloc: Allocator, _: *Fuzz.BenchTime) ?[]const u8 {
+            const state: *STATE = @ptrCast(@alignCast(state_opaque));
+            if (state.ref_list.items.len == 0) return null;
+            var n1 = rand.uintLessThan(usize, state.ref_list.items.len);
+            const n2 = rand.uintLessThan(usize, state.ref_list.items.len);
+            var n3 = rand.uintLessThan(usize, state.ref_list.items.len);
+            if (n1 > n3) {
+                const tmp = n3;
+                n3 = n1;
+                n1 = tmp;
+            }
+            const idx_1: usize = state.test_list.nth_idx(n1);
+            const idx_2: usize = state.test_list.nth_idx(n2);
+            const idx_3: usize = state.test_list.nth_idx(n3);
+            const range = IList.Range.new_range(idx_1, idx_3);
+            const should_be_in = n1 <= n2 and n2 <= n3;
+            const reported_in = state.test_list.idx_in_range(idx_2, range);
+            if (should_be_in != reported_in) {
+                return Utils.alloc_fail_str(alloc, @src(), "idx_in_range(): expected result does not match returned result: N1={d}, N2={d}, N3={d} (expected idx_in_range == '{any}') IDX1={d}, IDX2={d}, IDX3={d} (found idx_in_range == '{any}')", .{ n1, n2, n3, should_be_in, idx_1, idx_2, idx_3, reported_in });
+            }
+            var idx_x = idx_1;
+            while (true) {
+                if (should_be_in) {
+                    if (idx_x == idx_2) break;
+                    if (idx_x == idx_3) return Utils.alloc_fail_str(alloc, @src(), "idx_in_range(): reported that index should have been within range, but index was not found while travesing, N1={d}, N2={d}, N3={d}, IDX1={d}, IDX2={d}, IDX3={d}", .{ n1, n2, n3, idx_1, idx_2, idx_3 });
+                } else {
+                    if (idx_x == idx_2) return Utils.alloc_fail_str(alloc, @src(), "idx_in_range(): reported that index should NOT have been within range, but index WAS found while travesing, N1={d}, N2={d}, N3={d}, IDX1={d}, IDX2={d}, IDX3={d}", .{ n1, n2, n3, idx_1, idx_2, idx_3 });
+                    if (idx_x == idx_3) break;
+                }
+                idx_x = state.test_list.next_idx(idx_x);
+                if (!state.test_list.idx_valid(idx_x)) return Utils.alloc_fail_str(alloc, @src(), "idx_in_range(): reached invalid idx before traversing full range: N1={d}, N2={d}, N3={d} IDX1={d}, IDX2={d}, IDX3={d}, LEN={d}", .{ n1, n2, n3, idx_1, idx_2, idx_3, state.ref_list.items.len });
+            }
+            return verify_whole_state(state, "idx_in_range", idx_2, idx_1, idx_3, alloc);
+        }
         pub fn move(rand: Random, state_opaque: *anyopaque, alloc: Allocator, _: *Fuzz.BenchTime) ?[]const u8 {
             const state: *STATE = @ptrCast(@alignCast(state_opaque));
             if (state.ref_list.items.len == 0) return null;
@@ -689,6 +723,25 @@ pub fn make_op_table(comptime T: type, comptime STATE: type, comptime UNINIT: T,
             }
             return verify_whole_state(state, "insert_slots", idx, count, 0, alloc);
         }
+        pub fn delete_one(rand: Random, state_opaque: *anyopaque, alloc: Allocator, _: *Fuzz.BenchTime) ?[]const u8 {
+            const state: *STATE = @ptrCast(@alignCast(state_opaque));
+            if (state.ref_list.items.len == 0) return null;
+            const n1 = rand.uintLessThan(usize, state.ref_list.items.len);
+            const idx_1: usize = state.test_list.nth_idx(n1);
+            std.mem.copyForwards(T, state.ref_list.items[n1..], state.ref_list.items[n1 + 1 ..]);
+            state.ref_list.items.len -= 1;
+            state.test_list.delete(idx_1);
+            return verify_whole_state(state, "delete_one", idx_1, 0, 0, alloc);
+        }
+        pub fn trim_len(rand: Random, state_opaque: *anyopaque, alloc: Allocator, _: *Fuzz.BenchTime) ?[]const u8 {
+            const state: *STATE = @ptrCast(@alignCast(state_opaque));
+            if (state.ref_list.items.len == 0) return null;
+            var n1 = rand.uintLessThan(usize, state.ref_list.items.len);
+            n1 = n1 % LARGEST_COPY;
+            state.ref_list.items.len -= n1;
+            state.test_list.trim_len(n1);
+            return verify_whole_state(state, "trim_len", n1, 0, 0, alloc);
+        }
         pub fn delete_range(rand: Random, state_opaque: *anyopaque, alloc: Allocator, _: *Fuzz.BenchTime) ?[]const u8 {
             const state: *STATE = @ptrCast(@alignCast(state_opaque));
             if (state.ref_list.items.len == 0) return null;
@@ -720,16 +773,6 @@ pub fn make_op_table(comptime T: type, comptime STATE: type, comptime UNINIT: T,
             if (state.test_list.cap() - state.test_list.len() < min_test_n) return Utils.alloc_fail_str(alloc, @src(), "shrink_cap({d}) failed to leave at least {d} free slots (@min(old_cap - len, {d}))", .{ n, min_test_n, n });
             return verify_whole_state(state, "shrink_cap", n, 0, 0, alloc);
         }
-        pub fn increment_start(rand: Random, state_opaque: *anyopaque, alloc: Allocator, _: *Fuzz.BenchTime) ?[]const u8 {
-            const state: *STATE = @ptrCast(@alignCast(state_opaque));
-            if (state.ref_list.items.len == 0) return null;
-            const n = @min(@max(1, rand.uintAtMost(usize, LARGEST_COPY)), state.ref_list.items.len);
-            const nn = state.ref_list.items[n..].len;
-            @memmove(state.ref_list.items[0..nn], state.ref_list.items[n..]);
-            state.ref_list.items.len -= n;
-            state.test_list.increment_start(n);
-            return verify_whole_state(state, "increment_start", n, 0, 0, alloc);
-        }
         pub fn clear(rand: Random, state_opaque: *anyopaque, alloc: Allocator, _: *Fuzz.BenchTime) ?[]const u8 {
             _ = rand;
             const state: *STATE = @ptrCast(@alignCast(state_opaque));
@@ -748,12 +791,15 @@ pub fn make_op_table(comptime T: type, comptime STATE: type, comptime UNINIT: T,
             move,
             move_range,
             range_len,
+            idx_in_range,
             if (LIST_LIKE) ensure_free_slots else get_nth,
             if (LIST_LIKE) append_slots else set_nth,
             if (LIST_LIKE) insert_slots else check_nth_idx,
-            if (LIST_LIKE) delete_range else idx_range_valid,
-            if (LIST_LIKE) shrink_cap else split_range,
-            if (LIST_LIKE) clear else move_range,
+            if (LIST_LIKE) trim_len else idx_range_valid,
+            if (LIST_LIKE) delete_one else split_range,
+            if (LIST_LIKE) delete_range else move,
+            if (LIST_LIKE) shrink_cap else move_range,
+            if (LIST_LIKE) clear else range_len,
         };
     };
 }

@@ -158,7 +158,7 @@ pub fn ArrayListAdapter(comptime T: type) type {
             .free = P_FUNCS.p_free,
         };
         const P = IList.Concrete.CreateConcretePrototypeNaturalIndexes(T, *std.ArrayList(T), Allocator, "items", "ptr", "items", "len", null, "capacity", false, PFX);
-        const VTABLE = P.VTABLE(true, true, false, false, math.maxInt(usize));
+        const VTABLE = P.VTABLE(true, false, false, math.maxInt(usize));
         //*** END PROTOTYPE***
 
         pub fn interface(self: *std.ArrayList(T), alloc: Allocator) IList.IList(T) {
