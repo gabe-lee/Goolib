@@ -17,6 +17,8 @@ const IList_ArrayListAdapter_u8 = IList._Fuzzer.IList_ArrayListAdapter_u8;
 const IList_RingList_u8 = IList._Fuzzer.IList_RingList_u8;
 const IList_List_u8 = IList._Fuzzer.IList_List_u8;
 const IList_MultiSortList_u8 = IList._Fuzzer.IList_MultiSortList_u8;
+
+const ListSegmentAllocator_u8 = Goolib.ListSegmentAllocator.Internal.Fuzzer.make_list_segment_allocator_test(u8);
 pub fn main() anyerror!void {
     var fuzzer = try Fuzz.DiffFuzzer.init_fuzz(
         std.process.args(),
@@ -30,6 +32,7 @@ pub fn main() anyerror!void {
             IList_RingList_u8,
             IList_List_u8,
             IList_MultiSortList_u8,
+            ListSegmentAllocator_u8,
         },
         &.{
             .new_group("IList", &.{

@@ -35,9 +35,35 @@ const Assert = Root.Assert;
 const assert_with_reason = Assert.assert_with_reason;
 
 pub fn intcast(val: anytype, comptime T: type) T {
+    assert_with_reason(type_is_int(T), @src(), "output type T must be an integer type, got type `{s}`", .{@typeName(T)});
     const V = @TypeOf(val);
-    assert_with_reason(type_is_int(V), @src(), "cannot @intCast() type {s} to {s}", .{ @typeName(V), @typeName(T) });
-    return @as(T, @intCast(val));
+    if (type_is_int(V)) {
+        return @intCast(val);
+    } else if (type_is_float(V)) {
+        return @as(T, @intFromFloat(val));
+    } else if (type_is_enum(V)) {
+        return @as(T, @intCast(@intFromEnum(val)));
+    } else if (type_is_bool(V)) {
+        return @as(T, @intCast(@intFromBool(val)));
+    } else {
+        Assert.assert_unreachable(@src(), "cannot cast type `{s}` to an integer", .{@typeName(V)});
+    }
+}
+
+pub fn floatcast(val: anytype, comptime T: type) T {
+    assert_with_reason(type_is_float(T), @src(), "output type T must be a float type, got type `{s}`", .{@typeName(T)});
+    const V = @TypeOf(val);
+    if (type_is_float(V)) {
+        return @floatCast(val);
+    } else if (type_is_int(V)) {
+        return @as(T, @floatFromInt(val));
+    } else if (type_is_enum(V)) {
+        return @as(T, @floatFromInt(@intFromEnum(val)));
+    } else if (type_is_bool(V)) {
+        return @as(T, @floatFromInt(@intFromBool(val)));
+    } else {
+        Assert.assert_unreachable(@src(), "cannot cast type `{s}` to a float", .{@typeName(V)});
+    }
 }
 
 pub fn ptr_cast_const(ptr_or_slice: anytype, comptime new_type: type) *const new_type {
@@ -362,6 +388,23 @@ pub inline fn type_is_void(comptime T: type) bool {
 pub inline fn type_is_func(comptime T: type) bool {
     return @typeInfo(T) == .@"fn";
 }
+
+pub inline fn integer_type_A_has_bits_greater_than_B(comptime A: type, comptime B: type) bool {
+    return @typeInfo(A).int.bits > @typeInfo(B).int.bits;
+}
+
+pub inline fn integer_type_A_has_bits_greater_than_N(comptime A: type, comptime N: comptime_int) bool {
+    return @typeInfo(A).int.bits > N;
+}
+
+pub inline fn integer_type_A_has_bits_greater_than_or_equal_to_B(comptime A: type, comptime B: type) bool {
+    return @typeInfo(A).int.bits >= @typeInfo(B).int.bits;
+}
+
+pub inline fn integer_type_A_has_bits_greater_than_or_equal_to_N(comptime A: type, comptime N: comptime_int) bool {
+    return @typeInfo(A).int.bits >= N;
+}
+
 pub inline fn type_is_struct_with_all_fields_same_type(comptime T: type, comptime F: type) bool {
     const INFO = @typeInfo(T).@"struct";
     for (INFO.fields) |field| {

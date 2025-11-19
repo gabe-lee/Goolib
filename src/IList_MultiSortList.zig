@@ -99,6 +99,15 @@ pub fn MultiSortList(comptime T: type, comptime UNINIT: T, comptime IDX: type, c
             return self.find_idx_for_value_using_sort(sort_name, find_val, self.exact_equal);
         }
 
+        pub fn lookup_real_idx_from_sort_idx(self: *Self, sort_name: SORT_NAMES, sort_idx: usize) usize {
+            const real_idx = self.sort_lists[@intFromEnum(sort_name)].idx_list.ptr[sort_idx];
+            return @intCast(real_idx);
+        }
+
+        pub fn get_sort_list_len(self: *Self, sort_name: SORT_NAMES) usize {
+            return @intCast(self.sort_lists[@intFromEnum(sort_name)].idx_list.len);
+        }
+
         pub fn find_idx_for_value_using_sort(self: *Self, sort_name: SORT_NAMES, find_val: T, equal_func: *const fn (a: T, b: T) bool) ?SortIdx {
             const sort = self.sort_lists[@intFromEnum(sort_name)];
             if (sort.idx_list.len == 0) {
@@ -114,6 +123,7 @@ pub fn MultiSortList(comptime T: type, comptime UNINIT: T, comptime IDX: type, c
                 this_idx = sort.idx_list.ptr[this_idx_idx];
                 this_val = self.primary_list.ptr[this_idx];
                 if (equal_func(this_val, find_val)) {
+                    std.debug.print("this_idx_idx = {d}\nthis_idx = {d}\nthis_val = {any}\n", .{ this_idx_idx, this_idx, this_val }); //DEBUG
                     return SortIdx{
                         .sort_name = sort_name,
                         .real_idx = this_idx,
@@ -233,6 +243,192 @@ pub fn MultiSortList(comptime T: type, comptime UNINIT: T, comptime IDX: type, c
             return s;
         }
 
+        pub fn append_initialized_slots_assume_capacity(self: *Self, count: usize, init_val: T, alloc: Allocator) IList.Range {
+            Assert.assert_with_reason(count <= self.primary_list.cap - self.primary_list.len, @src(), "not enough unused capacity (len = {d}, cap = {d}, free = {d}, need = {d}): use IList.try_ensure_free_slots({d}) first", .{ self.primary_list.len, self.primary_list.cap, self.primary_list.cap - self.primary_list.len, count, count });
+            const range = self.primary_list.append_slots_assume_capacity(count);
+            @memset(self.primary_list.ptr[range.first_idx .. range.last_idx + 1], init_val);
+            for (self.sort_lists[0..]) |*sort| {
+                self.add_uninit_range_indirect_insert(sort, range.first_idx, count, alloc);
+            }
+            return range;
+        }
+        pub fn insert_initialized_slots_assume_capacity(self: *Self, idx: usize, count: usize, init_val: T, alloc: Allocator) IList.Range {
+            if (idx == self.primary_list.len) {
+                return append_initialized_slots_assume_capacity(self, count, init_val, alloc);
+            }
+            Assert.assert_with_reason(count <= self.primary_list.cap - self.primary_list.len, @src(), "not enough unused capacity (len = {d}, cap = {d}, free = {d}, need = {d}): use IList.try_ensure_free_slots({d}) first", .{ self.primary_list.len, self.primary_list.cap, self.primary_list.cap - self.primary_list.len, count, count });
+            for (self.sort_lists[0..]) |*sort| {
+                add_uninit_range_indirect_indexes(sort, idx, count);
+            }
+            const range = self.primary_list.insert_slots_assume_capacity(idx, count);
+            @memset(self.primary_list.ptr[range.first_idx .. range.last_idx + 1], init_val);
+            for (self.sort_lists[0..]) |*sort| {
+                self.add_uninit_range_indirect_insert(sort, idx, count, alloc);
+            }
+            return range;
+        }
+
+        pub fn append_1_initialized(self: *Self, val: T, alloc: Allocator) usize {
+            self.primary_list.ensure_free_slots(1, alloc);
+            const range = self.primary_list.append_slots_assume_capacity(1);
+            self.primary_list.ptr[range.first_idx] = val;
+            for (self.sort_lists[0..]) |*sort| {
+                self.add_one_init_indirect_insert(sort, range.first_idx, val, alloc);
+            }
+            self.debug_assert_all_in_order(@src()); //DEBUG
+            return range.first_idx;
+        }
+        pub fn insert_1_initialized(self: *Self, idx: usize, val: T, alloc: Allocator) usize {
+            self.primary_list.ensure_free_slots(1, alloc);
+            for (self.sort_lists[0..]) |*sort| {
+                add_uninit_range_indirect_indexes(sort, self.primary_list.len, 1);
+            }
+            const range = self.primary_list.insert_slots_assume_capacity(idx, 1);
+            self.primary_list.ptr[range.first_idx] = val;
+            for (self.sort_lists[0..]) |*sort| {
+                self.add_one_init_indirect_insert(sort, range.first_idx, val, alloc);
+            }
+            self.debug_assert_all_in_order(@src()); //DEBUG
+            return range;
+        }
+
+        pub fn append_2_initialized(self: *Self, val1: T, val2: T, alloc: Allocator) usize {
+            self.primary_list.ensure_free_slots(2, alloc);
+            const range = self.primary_list.append_slots_assume_capacity(2);
+            self.primary_list.ptr[range.first_idx] = val1;
+            self.primary_list.ptr[range.last_idx] = val2;
+            for (self.sort_lists[0..]) |*sort| {
+                self.add_two_init_indirect_insert(sort, range.first_idx, range.last_idx, val1, val2, alloc);
+            }
+            self.debug_assert_all_in_order(@src()); //DEBUG
+            return range;
+        }
+        pub fn insert_2_initialized(self: *Self, idx: usize, val1: T, val2: T, alloc: Allocator) usize {
+            self.primary_list.ensure_free_slots(2, alloc);
+            for (self.sort_lists[0..]) |*sort| {
+                add_uninit_range_indirect_indexes(sort, self.primary_list.len, 2);
+            }
+            const range = self.primary_list.insert_slots_assume_capacity(idx, 2);
+            self.primary_list.ptr[range.first_idx] = val1;
+            self.primary_list.ptr[range.last_idx] = val2;
+            for (self.sort_lists[0..]) |*sort| {
+                self.add_two_init_indirect_insert(sort, range.first_idx, range.last_idx, val1, val2, alloc);
+            }
+            self.debug_assert_all_in_order(@src()); //DEBUG
+            return range;
+        }
+
+        const OUT_IS_KNOWN: u2 = 0b00;
+        const OUT_BEFORE_KNOWN: u2 = 0b10;
+        const OUT_AFTER_KNOWN: u2 = 0b01;
+
+        /// Uses a known 'RealIndex' + 'SortIndex' + 'SortName' to set and resort a value, and returns the NEW
+        /// 'SortIndex' for the desired 'SortName' after it is resorted, which may be different than the input 'SortName'.
+        pub fn set_1_with_sort_idx(self: *Self, idx: SortIdx, set_val: T, comptime out_sort_name: SORT_NAMES, alloc: Allocator) ?usize {
+            Assert.assert_idx_less_than_len(idx.real_idx, Types.intcast(self.primary_list.len, usize), @src());
+            const sort_idx: usize = @intCast(@intFromEnum(idx.sort_name));
+            const out_sort_idx: usize = @intCast(@intFromEnum(out_sort_name));
+            const out_before: u2 = @as(u2, @intCast(@intFromBool(out_sort_idx < sort_idx))) << 1;
+            const out_after: u2 = @as(u2, @intCast(@intFromBool(out_sort_idx > sort_idx)));
+            const branch = out_before | out_after;
+            const old_val = self.primary_list.ptr[idx.real_idx];
+            var new_sort_idx: ?usize = undefined;
+            switch (branch) {
+                OUT_IS_KNOWN => {
+                    for (self.sort_lists[0..sort_idx]) |*sort| {
+                        self.set_and_resort_indirect(sort, old_val, set_val, idx.real_idx, alloc);
+                    }
+                    new_sort_idx = self.set_and_resort_indirect_known_sort_idx_with_result(&self.sort_lists[sort_idx], old_val, set_val, idx.real_idx, idx.sort_list_idx);
+                    for (self.sort_lists[sort_idx + 1 ..]) |*sort| {
+                        self.set_and_resort_indirect(sort, old_val, set_val, idx.real_idx, alloc);
+                    }
+                },
+                OUT_BEFORE_KNOWN => {
+                    for (self.sort_lists[0..out_sort_idx]) |*sort| {
+                        self.set_and_resort_indirect(sort, old_val, set_val, idx.real_idx, alloc);
+                    }
+                    new_sort_idx = self.set_and_resort_indirect_with_result(&self.sort_lists[out_sort_idx], old_val, set_val, idx.real_idx, alloc);
+                    for (self.sort_lists[out_sort_idx + 1 .. sort_idx]) |*sort| {
+                        self.set_and_resort_indirect(sort, old_val, set_val, idx.real_idx, alloc);
+                    }
+                    self.set_and_resort_indirect_known_sort_idx(&self.sort_lists[sort_idx], old_val, set_val, idx.real_idx, idx.sort_list_idx);
+                    for (self.sort_lists[sort_idx + 1 ..]) |*sort| {
+                        self.set_and_resort_indirect(sort, old_val, set_val, idx.real_idx, alloc);
+                    }
+                },
+                OUT_AFTER_KNOWN => {
+                    for (self.sort_lists[0..sort_idx]) |*sort| {
+                        self.set_and_resort_indirect(sort, old_val, set_val, idx.real_idx, alloc);
+                    }
+                    self.set_and_resort_indirect_known_sort_idx(&self.sort_lists[sort_idx], old_val, set_val, idx.real_idx, idx.sort_list_idx);
+                    for (self.sort_lists[sort_idx + 1 .. out_sort_idx]) |*sort| {
+                        self.set_and_resort_indirect(sort, old_val, set_val, idx.real_idx, alloc);
+                    }
+                    new_sort_idx = self.set_and_resort_indirect_with_result(&self.sort_lists[out_sort_idx], old_val, set_val, idx.real_idx, alloc);
+                    for (self.sort_lists[out_sort_idx + 1 ..]) |*sort| {
+                        self.set_and_resort_indirect(sort, old_val, set_val, idx.real_idx, alloc);
+                    }
+                },
+                else => unreachable,
+            }
+            self.debug_assert_all_in_order(@src()); //DEBUG;
+            return new_sort_idx;
+        }
+
+        pub fn set_1_delete_1(self: *Self, set_idx: usize, set_val: T, del_idx: usize, alloc: Allocator) void {
+            Assert.assert_idx_less_than_len(set_idx, Types.intcast(self.primary_list.len, usize), @src());
+            Assert.assert_idx_less_than_len(del_idx, Types.intcast(self.primary_list.len, usize), @src());
+            for (self.sort_lists[0..]) |*sort| {
+                delete_1_indirect_indexes(sort, del_idx);
+            }
+            if (del_idx == self.primary_list.len - 1) {
+                self.primary_list.len -= 1;
+            } else {
+                Utils.mem_remove(self.primary_list.ptr, &self.primary_list.len, del_idx, 1);
+            }
+            const set_idx_adjusted = if (set_idx > del_idx) set_idx - 1 else set_idx;
+            const old_val = self.primary_list.ptr[set_idx_adjusted];
+            for (self.sort_lists[0..]) |*sort| {
+                self.set_and_resort_indirect(sort, old_val, set_val, set_idx_adjusted, alloc);
+            }
+            self.primary_list.ptr[set_idx_adjusted] = set_val;
+            self.debug_assert_all_in_order(@src()); //DEBUG;
+        }
+
+        pub fn set_1_delete_2(self: *Self, set_idx: usize, set_val: T, del_idx_1: usize, del_idx_2: usize, alloc: Allocator) void {
+            Assert.assert_idx_less_than_len(set_idx, Types.intcast(self.primary_list.len, usize), @src());
+            Assert.assert_idx_less_than_len(del_idx_1, Types.intcast(self.primary_list.len, usize), @src());
+            Assert.assert_idx_less_than_len(del_idx_2, Types.intcast(self.primary_list.len, usize), @src());
+            for (self.sort_lists[0..]) |*sort| {
+                delete_2_indirect_indexes(sort, del_idx_1, del_idx_2);
+            }
+            var d_idx_1: usize = del_idx_1;
+            var d_idx_2: usize = del_idx_2;
+            if (del_idx_2 < del_idx_1) {
+                d_idx_1 = del_idx_2;
+                d_idx_2 = del_idx_1;
+            }
+            if (del_idx_2 == self.primary_list.len - 1) {
+                self.primary_list.len -= 1;
+                if (del_idx_1 == self.primary_list.len - 1) {
+                    self.primary_list.len -= 1;
+                } else {
+                    Utils.mem_remove(self.primary_list.ptr, &self.primary_list.len, del_idx_1, 1);
+                }
+            } else {
+                Utils.mem_remove_sparse_by_indexes_sorted_low_to_high(self.primary_list.ptr, &self.primary_list.len, &[2]usize{ d_idx_1, d_idx_2 });
+            }
+            var set_idx_adjusted = set_idx;
+            if (set_idx > d_idx_1) set_idx_adjusted -= 1;
+            if (set_idx > d_idx_2) set_idx_adjusted -= 1;
+            const old_val = self.primary_list.ptr[set_idx_adjusted];
+            for (self.sort_lists[0..]) |*sort| {
+                self.set_and_resort_indirect(sort, old_val, set_val, set_idx_adjusted, alloc);
+            }
+            self.primary_list.ptr[set_idx_adjusted] = set_val;
+            self.debug_assert_all_in_order(@src()); //DEBUG;
+        }
+
         //*** BEGIN PROTOTYPE ***
         const P_FUNCS = struct {
             fn p_get(self: *Self, idx: usize, _: Allocator) T {
@@ -333,36 +529,14 @@ pub fn MultiSortList(comptime T: type, comptime UNINIT: T, comptime IDX: type, c
                 }
             }
             fn p_append_slots_assume_capacity(self: *Self, count: usize, alloc: Allocator) IList.Range {
-                Assert.assert_with_reason(count <= self.primary_list.cap - self.primary_list.len, @src(), "not enough unused capacity (len = {d}, cap = {d}, free = {d}, need = {d}): use IList.try_ensure_free_slots({d}) first", .{ self.primary_list.len, self.primary_list.cap, self.primary_list.cap - self.primary_list.len, count, count });
-                for (self.sort_lists[0..]) |*sort| {
-                    add_uninit_range_indirect_indexes(sort, self.primary_list.len, count);
-                }
-                const range = self.primary_list.append_slots_assume_capacity(count);
-                @memset(self.primary_list.ptr[range.first_idx .. range.last_idx + 1], UNINIT);
-                for (self.sort_lists[0..]) |*sort| {
-                    self.add_uninit_range_indirect_insert(sort, range.first_idx, count, alloc);
-                }
-                return range;
+                return append_initialized_slots_assume_capacity(self, count, UNINIT, alloc);
             }
             fn p_insert_slots_assume_capacity(self: *Self, idx: usize, count: usize, alloc: Allocator) IList.Range {
-                if (idx == self.primary_list.len) {
-                    return p_append_slots_assume_capacity(self, count, alloc);
-                }
-                Assert.assert_with_reason(count <= self.primary_list.cap - self.primary_list.len, @src(), "not enough unused capacity (len = {d}, cap = {d}, free = {d}, need = {d}): use IList.try_ensure_free_slots({d}) first", .{ self.primary_list.len, self.primary_list.cap, self.primary_list.cap - self.primary_list.len, count, count });
-                for (self.sort_lists[0..]) |*sort| {
-                    add_uninit_range_indirect_indexes(sort, idx, count);
-                }
-                const range = self.primary_list.insert_slots_assume_capacity(idx, count);
-                @memset(self.primary_list.ptr[range.first_idx .. range.last_idx + 1], UNINIT);
-                for (self.sort_lists[0..]) |*sort| {
-                    self.add_uninit_range_indirect_insert(sort, idx, count, alloc);
-                }
-                return range;
+                return insert_initialized_slots_assume_capacity(self, idx, count, UNINIT, alloc);
             }
             fn p_trim_len(self: *Self, trim_n: usize, _: Allocator) void {
                 for (self.sort_lists[0..]) |*sort| {
-                    // sort_reports[sort_idx] = delete_range_indirect_indexes(sort, range, delete_count);
-                    _ = delete_range_indirect_indexes(sort, .new_range(self.primary_list.len - trim_n, self.primary_list.len - 1), trim_n);
+                    delete_range_indirect_indexes(sort, .new_range(self.primary_list.len - trim_n, self.primary_list.len - 1), trim_n);
                 }
                 self.primary_list.len -= @intCast(trim_n);
             }
@@ -373,8 +547,7 @@ pub fn MultiSortList(comptime T: type, comptime UNINIT: T, comptime IDX: type, c
                 }
                 const range = Range.single_idx(idx);
                 for (self.sort_lists[0..]) |*sort| {
-                    // sort_reports[sort_idx] = delete_range_indirect_indexes(sort, range, delete_count);
-                    _ = delete_range_indirect_indexes(sort, range, 1);
+                    delete_range_indirect_indexes(sort, range, 1);
                 }
                 Utils.mem_remove(self.primary_list.ptr, &self.primary_list.len, idx, 1);
             }
@@ -385,10 +558,8 @@ pub fn MultiSortList(comptime T: type, comptime UNINIT: T, comptime IDX: type, c
                     return;
                 }
                 const delete_count = range.consecutive_len();
-                // var sort_reports: [SORT_COUNT]SortListReport = undefined;
                 for (self.sort_lists[0..]) |*sort| {
-                    // sort_reports[sort_idx] = delete_range_indirect_indexes(sort, range, delete_count);
-                    _ = delete_range_indirect_indexes(sort, range, delete_count);
+                    delete_range_indirect_indexes(sort, range, delete_count);
                 }
                 Utils.mem_remove(self.primary_list.ptr, &self.primary_list.len, range.first_idx, delete_count);
             }
@@ -519,8 +690,8 @@ pub fn MultiSortList(comptime T: type, comptime UNINIT: T, comptime IDX: type, c
             return P.get_ptr(self, idx, NO_ALLOC);
         }
         /// Set the value at the given index
-        pub fn set(self: *Self, idx: usize, val: T) void {
-            return P.set(self, idx, val, NO_ALLOC);
+        pub fn set(self: *Self, idx: usize, val: T, alloc: Allocator) void {
+            return P.set(self, idx, val, alloc);
         }
         /// Move one value to a new location within the list,
         /// moving the values in between the old and new location
@@ -1447,7 +1618,7 @@ pub fn MultiSortList(comptime T: type, comptime UNINIT: T, comptime IDX: type, c
             }
         }
 
-        fn fix_indirect_value_changed(self: *Self, sort: *SortList, new_val: T, this_idx: usize, idx_idx: usize) void {
+        fn fix_indirect_value_changed(self: *Self, sort: *SortList, new_val: T, this_idx: usize, idx_idx: usize) usize {
             var this_idx_idx = idx_idx;
             var adjacent_idx_idx: usize = undefined;
             var adjacent_idx: usize = undefined;
@@ -1470,6 +1641,7 @@ pub fn MultiSortList(comptime T: type, comptime UNINIT: T, comptime IDX: type, c
                 this_idx_idx = adjacent_idx_idx;
             }
             sort.idx_list.ptr[this_idx_idx] = @intCast(this_idx);
+            return this_idx_idx;
         }
 
         fn match_by_index_direction(sort: *SortList, list_val: T, list_idx: usize, test_val: T, test_idx: usize) MatchDirection {
@@ -1567,7 +1739,12 @@ pub fn MultiSortList(comptime T: type, comptime UNINIT: T, comptime IDX: type, c
                     Assert.assert_with_reason(!std.mem.containsAtLeastScalar(IDX, idx_check_list.items, 1, this_idx), src, "sort `{s}` had duplicate of index {d}", .{ @tagName(@as(SORT_NAMES, @enumFromInt(sort_tag))), this_idx });
                     idx_check_list.append(std.heap.page_allocator, this_idx) catch unreachable;
                     this_val = self.primary_list.ptr[this_idx];
-                    Assert.assert_with_reason(!sort.greater_than(last_val, this_val) and (!sort.equal(last_val, this_val) or last_idx_ < this_idx), src, "in sort `{s}`, the following values were out of order:\nIII: {d: >4} {d: >4}\nIDX: {d: >4} {d: >4}\nVAL: {d: >4} {d: >4}\n", .{ @tagName(@as(SORT_NAMES, @enumFromInt(sort_tag))), last_idx_idx, this_idx_idx, last_idx_, this_idx, last_val, this_val });
+                    if (T == u8) {
+                        Assert.assert_with_reason(!sort.greater_than(last_val, this_val) and (!sort.equal(last_val, this_val) or last_idx_ < this_idx), src, "in sort `{s}`, the following values were out of order:\nIII: {d: >4} {d: >4}\nIDX: {d: >4} {d: >4}\nVAL: {d: >4} {d: >4}\n", .{ @tagName(@as(SORT_NAMES, @enumFromInt(sort_tag))), last_idx_idx, this_idx_idx, last_idx_, this_idx, last_val, this_val });
+                    } else {
+                        Assert.assert_with_reason(!sort.greater_than(last_val, this_val) and (!sort.equal(last_val, this_val) or last_idx_ < this_idx), src, "in sort `{s}`, the following values were out of order:\nIII: {d: >4} {d: >4}\nIDX: {d: >4} {d: >4}\nVAL: {any} {any}\n", .{ @tagName(@as(SORT_NAMES, @enumFromInt(sort_tag))), last_idx_idx, this_idx_idx, last_idx_, this_idx, last_val, this_val });
+                    }
+
                     last_idx_idx = this_idx_idx;
                     last_idx_ = this_idx;
                     last_val = this_val;
@@ -1607,32 +1784,61 @@ pub fn MultiSortList(comptime T: type, comptime UNINIT: T, comptime IDX: type, c
             std.debug.print("\x1b[0m\n", .{});
         }
 
-        fn set_and_resort_indirect(self: *Self, sort: *SortList, old_val: T, new_val: T, idx: usize, alloc: Allocator) void {
+        fn set_and_resort_indirect_with_result(self: *Self, sort: *SortList, old_val: T, new_val: T, idx: usize, alloc: Allocator) ?usize {
             const change = SortListChange.filter_old_new(sort.filter(old_val), sort.filter(new_val));
             switch (change) {
                 .NEITHER_IN_SORT => {
-                    return;
+                    return null;
                 },
                 .ADD_TO_SORT => {
                     const index = self.find_insert_location_indirect(sort, idx, new_val);
-                    var sort_iface = sort.idx_list.interface(alloc);
                     if (index.append) {
-                        _ = sort_iface.append(@intCast(idx));
+                        return sort.idx_list.append(@intCast(idx), alloc);
                     } else {
-                        _ = sort_iface.insert(index.idx_idx, @intCast(idx));
+                        return sort.idx_list.insert(index.idx_idx, @intCast(idx), alloc);
                     }
                 },
                 .REMOVE_FROM_SORT => {
                     const index = self.match_by_index_indirect(sort, old_val, idx);
                     var sort_iface = sort.idx_list.interface(alloc);
                     sort_iface.delete(index.idx_idx);
+                    return null;
                 },
                 .SET_AND_RESORT => {
-                    if (sort.equal(old_val, new_val)) return;
+                    if (sort.equal(old_val, new_val)) {
+                        const location = self.match_by_index_indirect(sort, old_val, idx);
+                        return location.idx_idx;
+                    }
                     const old_location = self.match_by_index_indirect(sort, old_val, idx);
-                    self.fix_indirect_value_changed(sort, new_val, idx, old_location.idx_idx);
+                    return self.fix_indirect_value_changed(sort, new_val, idx, old_location.idx_idx);
                 },
             }
+        }
+
+        fn set_and_resort_indirect(self: *Self, sort: *SortList, old_val: T, new_val: T, idx: usize, alloc: Allocator) void {
+            _ = self.set_and_resort_indirect_with_result(sort, old_val, new_val, idx, alloc);
+        }
+
+        fn set_and_resort_indirect_known_sort_idx_with_result(self: *Self, sort: *SortList, old_val: T, new_val: T, idx: usize, sort_idx: usize) ?usize {
+            const change = SortListChange.filter_old_new(sort.filter(old_val), sort.filter(new_val));
+            switch (change) {
+                .REMOVE_FROM_SORT => {
+                    sort.idx_list.delete(sort_idx);
+                    return null;
+                },
+                .SET_AND_RESORT => {
+                    if (sort.equal(old_val, new_val)) {
+                        const location = self.match_by_index_indirect(sort, old_val, idx);
+                        return location.idx_idx;
+                    }
+                    return self.fix_indirect_value_changed(sort, new_val, idx, sort_idx);
+                },
+                else => Assert.assert_unreachable(@src(), "expected known sort idx to be within sort list, but filter indicated it wasn't", .{}),
+            }
+        }
+
+        fn set_and_resort_indirect_known_sort_idx(self: *Self, sort: *SortList, old_val: T, new_val: T, idx: usize, sort_idx: usize) void {
+            _ = self.set_and_resort_indirect_known_sort_idx_with_result(sort, old_val, new_val, idx, sort_idx);
         }
 
         fn debug_check_number_of_items(self: *Self, comptime src: std.builtin.SourceLocation) void {
@@ -1731,6 +1937,25 @@ pub fn MultiSortList(comptime T: type, comptime UNINIT: T, comptime IDX: type, c
             }
         }
 
+        fn add_one_init_indirect_insert(self: *Self, sort: *SortList, insert_idx: usize, val: T, alloc: Allocator) void {
+            if (sort.filter(val)) {
+                const insert_idx_idx = self.find_insert_location_indirect(sort, insert_idx, val);
+                const sort_iface = sort.idx_list.interface(alloc);
+                var range: IList.Range = undefined;
+                if (insert_idx_idx.append) {
+                    range = sort_iface.append_slots(1);
+                } else {
+                    range = sort_iface.insert_slots(insert_idx_idx.idx_idx, 1);
+                }
+                sort.idx_list.ptr[range.first_idx] = @intCast(insert_idx);
+            }
+        }
+
+        fn add_two_init_indirect_insert(self: *Self, sort: *SortList, idx1: usize, idx2: usize, val1: T, val2: T, alloc: Allocator) void {
+            add_one_init_indirect_insert(self, sort, idx1, val1, alloc);
+            add_one_init_indirect_insert(self, sort, idx2, val2, alloc);
+        }
+
         fn add_uninit_range_indirect_insert(self: *Self, sort: *SortList, insert_idx: usize, count: usize, alloc: Allocator) void {
             if (sort.filter(UNINIT)) {
                 const insert_idx_idx = self.find_insert_location_indirect(sort, insert_idx, UNINIT);
@@ -1756,8 +1981,7 @@ pub fn MultiSortList(comptime T: type, comptime UNINIT: T, comptime IDX: type, c
             initialize_new_indexes_in_sort(sort, uninit_range, sort_range);
         }
 
-        fn delete_range_indirect_indexes(sort: *SortList, delete_range_: IList.Range, delete_count: usize) SortListReport {
-            var result = SortListReport{};
+        fn delete_range_indirect_indexes(sort: *SortList, delete_range_: IList.Range, delete_count: usize) void {
             var write_idx_idx: usize = 0;
             var deleted: usize = 0;
             for (sort.idx_list.ptr[0..sort.idx_list.len]) |idx| {
@@ -1766,7 +1990,6 @@ pub fn MultiSortList(comptime T: type, comptime UNINIT: T, comptime IDX: type, c
                 } else {
                     var new_idx: IDX = idx;
                     if (idx > delete_range_.last_idx) {
-                        result.add_idx(write_idx_idx);
                         new_idx -= @intCast(delete_count);
                     }
                     sort.idx_list.ptr[write_idx_idx] = new_idx;
@@ -1774,15 +1997,44 @@ pub fn MultiSortList(comptime T: type, comptime UNINIT: T, comptime IDX: type, c
                 }
             }
             sort.idx_list.len -= @intCast(deleted);
-            return result;
         }
 
-        fn delete_range_indirect_resort(self: *Self, sort: *SortList, sort_report: SortListReport, delete_range_: IList.Range) void {
-            for (sort.idx_list.ptr[sort_report.smallest .. sort_report.largest + 1], sort_report.smallest..) |idx, idx_idx| {
-                if (idx >= delete_range_.first_idx) {
-                    _ = self.resort_down_many(sort, idx_idx);
+        fn delete_2_indirect_indexes(sort: *SortList, del_idx_1: usize, del_idx_2: usize) void {
+            var write_idx_idx: usize = 0;
+            var deleted: usize = 0;
+            for (sort.idx_list.ptr[0..sort.idx_list.len]) |idx| {
+                if (del_idx_1 == idx or del_idx_2 == idx) {
+                    deleted += 1;
+                } else {
+                    var new_idx: IDX = idx;
+                    if (idx > del_idx_1) {
+                        new_idx -= 1;
+                    }
+                    if (idx > del_idx_2) {
+                        new_idx -= 1;
+                    }
+                    sort.idx_list.ptr[write_idx_idx] = new_idx;
+                    write_idx_idx += 1;
                 }
             }
+            sort.idx_list.len -= @intCast(deleted);
+        }
+        fn delete_1_indirect_indexes(sort: *SortList, del_idx_1: usize) void {
+            var write_idx_idx: usize = 0;
+            var deleted: usize = 0;
+            for (sort.idx_list.ptr[0..sort.idx_list.len]) |idx| {
+                if (del_idx_1 == idx) {
+                    deleted += 1;
+                } else {
+                    var new_idx: IDX = idx;
+                    if (idx > del_idx_1) {
+                        new_idx -= 1;
+                    }
+                    sort.idx_list.ptr[write_idx_idx] = new_idx;
+                    write_idx_idx += 1;
+                }
+            }
+            sort.idx_list.len -= @intCast(deleted);
         }
 
         const ShiftDirection = enum(u8) {

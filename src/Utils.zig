@@ -901,6 +901,94 @@ pub fn mem_remove(data_ptr: anytype, len_ptr: anytype, start: usize, n: usize) v
     len_ptr.* -= @intCast(n);
 }
 
+/// This method deletes all of the indexes from the provided list (sorted low to high)
+/// by moving all indexes above the first on in the list and not ALSO included in the list,
+/// down.
+pub fn mem_remove_sparse_by_indexes_sorted_low_to_high(data_ptr: anytype, len_ptr: anytype, sorted_indexes: []const usize) void {
+    if (sorted_indexes.len == 0 or sorted_indexes[0] >= len_ptr.*) return;
+    const PTR = @TypeOf(data_ptr);
+    const LEN_PTR = @TypeOf(len_ptr);
+    assert_with_reason(Types.type_is_many_item_pointer(PTR), @src(), "type of `data_ptr` must be a many-item-pointer, got type {s}", .{@typeName(PTR)});
+    const PTR_INFO = @typeInfo(PTR).pointer;
+    assert_with_reason(Types.type_is_single_item_pointer(LEN_PTR), @src(), "type of `len_ptr` must be a single-item-pointer to an integer type, got type {s}", .{@typeName(LEN_PTR)});
+    const LEN = @typeInfo(LEN_PTR).pointer.child;
+    assert_with_reason(Types.type_is_int(LEN), @src(), "type of `len_ptr` must be a single-item-pointer to an integer type, got type {s}", .{@typeName(LEN_PTR)});
+    var read_idx: usize = sorted_indexes[0] + 1;
+    var write_idx: usize = sorted_indexes[0];
+    var del_idx_idx: usize = 1;
+    var del_idx: usize = undefined;
+    const slice: []PTR_INFO.child = data_ptr[0..@as(usize, @intCast(len_ptr.*))];
+    while (del_idx_idx < sorted_indexes.len) {
+        del_idx = sorted_indexes[del_idx_idx];
+        while (read_idx < del_idx) {
+            slice[write_idx] = slice[read_idx];
+            read_idx += 1;
+            write_idx += 1;
+        }
+        read_idx += 1;
+        del_idx_idx += 1;
+    }
+    while (read_idx < slice.len) {
+        slice[write_idx] = slice[read_idx];
+        read_idx += 1;
+        write_idx += 1;
+    }
+    len_ptr.* -= @intCast(del_idx_idx);
+}
+
+/// This method deletes all of the indexes from the provided list (sorted low to high)
+/// by moving all indexes above the first on in the list and not ALSO included in the list,
+/// down.
+pub fn mem_remove_sparse_by_values_in_list_order(comptime T: type, data_ptr: [*]T, len_ptr: anytype, known_start_index: usize, equality_func: *const fn (a: T, b: T) bool, values_in_order: []const T) void {
+    if (values_in_order.len == 0) return;
+    const LEN_PTR = @TypeOf(len_ptr);
+    assert_with_reason(Types.type_is_single_item_pointer(LEN_PTR), @src(), "type of `len_ptr` must be a single-item-pointer to an integer type, got type {s}", .{@typeName(LEN_PTR)});
+    const LEN = @typeInfo(LEN_PTR).pointer.child;
+    assert_with_reason(Types.type_is_int(LEN), @src(), "type of `len_ptr` must be a single-item-pointer to an integer type, got type {s}", .{@typeName(LEN_PTR)});
+    var read_idx: usize = known_start_index;
+    var write_idx: usize = known_start_index;
+    var del_val_idx: usize = 0;
+    var del_val: T = values_in_order[0];
+    var found_at_least_one: bool = false;
+    const slice: []T = data_ptr[0..@as(usize, @intCast(len_ptr.*))];
+    while (read_idx < slice.len) {
+        const this_val = slice[read_idx];
+        if (equality_func(this_val, del_val)) {
+            del_val_idx += 1;
+            if (del_val_idx < values_in_order.len) {
+                del_val = values_in_order[del_val_idx];
+            }
+            write_idx = read_idx;
+            read_idx += 1;
+            found_at_least_one = true;
+            break;
+        } else {
+            read_idx += 1;
+        }
+    }
+    while (read_idx < slice.len and del_val_idx < values_in_order.len) {
+        const this_val = slice[read_idx];
+        if (equality_func(this_val, del_val)) {
+            del_val_idx += 1;
+            read_idx += 1;
+            if (del_val_idx < values_in_order.len) {
+                del_val = values_in_order[del_val_idx];
+            }
+        } else {
+            slice[write_idx] = slice[read_idx];
+            read_idx += 1;
+            write_idx += 1;
+        }
+    }
+    if (!found_at_least_one) return;
+    while (read_idx < slice.len) {
+        slice[write_idx] = slice[read_idx];
+        read_idx += 1;
+        write_idx += 1;
+    }
+    len_ptr.* -= @intCast(del_val_idx);
+}
+
 pub fn mem_realloc(comptime T: type, comptime I: type, ptr: *[*]T, len: I, cap: *I, new_cap: I, alloc: Allocator, comptime RET_BOOL: bool) if (RET_BOOL) bool else void {
     assert_with_reason(Types.type_is_unsigned_int(I), @src(), "type `I` was not an unsigned integer type, got {s}", .{@typeName(I)});
     const old_slice = ptr.*[0..cap.*];
@@ -988,4 +1076,9 @@ pub fn is_error(err_union: anyerror!void) bool {
     } else |_| {
         return true;
     }
+}
+
+pub inline fn print_src_location(comptime src_loc: SourceLocation) []const u8 {
+    const link = src_loc.file ++ ":" ++ std.fmt.comptimePrint("{d}", .{src_loc.line}) ++ ":" ++ std.fmt.comptimePrint("{d}", .{src_loc.column});
+    return link;
 }

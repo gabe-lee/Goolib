@@ -80,12 +80,12 @@ pub fn build(b: *std.Build) void {
     if (!no_sdl) {
         lib.linkLibrary(sdl_lib);
     }
+    
+    lib.addOptions("config", options);
 
     const lib_tests = b.addTest(.{
         .root_module = lib,
     });
-
-    lib.addOptions("config", options);
 
     const run_lib_tests = b.addRunArtifact(lib_tests);
 
