@@ -77,7 +77,7 @@ pub fn make_slice_interface_test(comptime T: type) Fuzz.FuzzTest {
             state.ref_list.clearAndFree(alloc);
             alloc.destroy(state);
         }
-        const _OPS = make_op_table(T, STATE, 0, .test_access_to_pointers, .list_has_static_size, null);
+        const _OPS = make_op_table(T, STATE, 0, .test_access_to_pointers, .list_has_static_size, null, null);
         pub const OPS = _OPS.OPS;
     };
     return Fuzz.FuzzTest{
@@ -129,7 +129,7 @@ pub fn make_array_list_adapter_test(comptime T: type) Fuzz.FuzzTest {
             alloc.destroy(state);
         }
 
-        const _OPS = make_op_table(T, STATE, 0, .test_access_to_pointers, .list_can_grow_and_shrink, null);
+        const _OPS = make_op_table(T, STATE, 0, .test_access_to_pointers, .list_can_grow_and_shrink, null, null);
         pub const OPS = _OPS.OPS;
     };
     return Fuzz.FuzzTest{
@@ -185,7 +185,7 @@ pub fn make_list_interface_test(comptime T: type) Fuzz.FuzzTest {
             alloc.destroy(state);
         }
 
-        const _OPS = make_op_table(T, STATE, 0, .test_access_to_pointers, .list_can_grow_and_shrink, null);
+        const _OPS = make_op_table(T, STATE, 0, .test_access_to_pointers, .list_can_grow_and_shrink, null, null);
         pub const OPS = _OPS.OPS;
     };
     return Fuzz.FuzzTest{
@@ -238,7 +238,7 @@ pub fn make_ring_list_adapter_test(comptime T: type) Fuzz.FuzzTest {
             alloc.destroy(state);
         }
 
-        const _OPS = make_op_table(T, STATE, 0, .test_access_to_pointers, .list_can_grow_and_shrink, null);
+        const _OPS = make_op_table(T, STATE, 0, .test_access_to_pointers, .list_can_grow_and_shrink, null, null);
         pub const OPS = _OPS.OPS;
     };
     return Fuzz.FuzzTest{
@@ -406,7 +406,7 @@ pub fn make_mulit_sort_list_adapter_test(comptime T: type) Fuzz.FuzzTest {
             alloc.destroy(state);
         }
 
-        const _OPS = make_op_table(T, STATE, 0xAA, .no_access_to_pointers, .list_can_grow_and_shrink, extra_check);
+        const _OPS = make_op_table(T, STATE, 0xAA, .no_access_to_pointers, .list_can_grow_and_shrink, extra_check, null);
         pub const OPS = _OPS.OPS;
     };
 
@@ -421,13 +421,28 @@ pub fn make_mulit_sort_list_adapter_test(comptime T: type) Fuzz.FuzzTest {
     };
 }
 
-pub fn make_op_table(comptime T: type, comptime STATE: type, comptime UNINIT: T, comptime POINTERS: AllowPtr, comptime GROWABLE: Growable, comptime extra_check_whole_state: ?*const fn (state: *STATE, comptime op_name: []const u8, param_1: usize, param_2: usize, param_3: usize, alloc: Allocator) ?[]const u8) type {
+pub fn DisallowVal(comptime T: type) type {
+    return struct {
+        disallowed: T,
+        replacement: T,
+    };
+}
+
+pub fn make_op_table(
+    comptime T: type,
+    comptime STATE: type,
+    comptime UNINIT: T,
+    comptime POINTERS: AllowPtr,
+    comptime GROWABLE: Growable,
+    comptime extra_check_whole_state: ?*const fn (state: *STATE, comptime op_name: []const u8, param_1: usize, param_2: usize, param_3: usize, alloc: Allocator) ?[]const u8,
+    comptime disallow_val: ?DisallowVal(T),
+) type {
     Assert.assert_with_reason(Types.type_has_field_with_type(STATE, "ref_list", std.ArrayList(T)), @src(), "to use this automatic op generator, type `STATE` must have a field named `ref_list` that is of type `ArrayList({s})`", .{@typeName(T)});
     Assert.assert_with_reason(Types.type_has_field_with_type(STATE, "test_list", IList.IList(T)), @src(), "to use this automatic op generator, type `STATE` must have a field named `test_list` that is of type `IList({s})`", .{@typeName(T)});
     const LIST_LIKE = GROWABLE == .list_can_grow_and_shrink;
     const ALLOW_PTR = POINTERS == .test_access_to_pointers;
     return struct {
-        fn val_mismatch(state: *STATE, comptime src: std.builtin.SourceLocation, comptime op_name: []const u8, alloc: Allocator, comptime context: []const u8, curr_n: usize, curr_idx: usize, param_1: usize, param_2: usize, param_3: usize) []const u8 {
+        pub fn val_mismatch(state: *STATE, comptime src: std.builtin.SourceLocation, comptime op_name: []const u8, alloc: Allocator, comptime context: []const u8, curr_n: usize, curr_idx: usize, param_1: usize, param_2: usize, param_3: usize) []const u8 {
             return Utils.alloc_fail_str(alloc, src, op_name ++ "({d}, {d}, {d}): mismatched values " ++ context ++ ":\nN={d}, IDX={d}, LEN={d}\nIDX:{d} {d} {d} {d} {d}\nREF:{any} {any} {any} {any} {any}\nTES:{any} {any} {any} {any} {any}\nIDX:{d} {d} {d} {d} {d}\n", .{
                 param_1,
                 param_2,
@@ -457,7 +472,7 @@ pub fn make_op_table(comptime T: type, comptime STATE: type, comptime UNINIT: T,
                 state.test_list.nth_next_idx(curr_idx, 2),
             });
         }
-        fn verify_whole_state(state: *STATE, comptime op_name: []const u8, param_1: usize, param_2: usize, param_3: usize, alloc: Allocator) ?[]const u8 {
+        pub fn verify_whole_state(state: *STATE, comptime op_name: []const u8, param_1: usize, param_2: usize, param_3: usize, alloc: Allocator) ?[]const u8 {
             if (state.ref_list.items.len != state.test_list.len()) return Utils.alloc_fail_str(alloc, @src(), op_name ++ "({any}, {any}, {any}): ref len != test len ({d} != {d})", .{ param_1, param_2, param_3, state.ref_list.items.len, state.test_list.len() });
             if (state.test_list.cap() < state.test_list.len()) return Utils.alloc_fail_str(alloc, @src(), op_name ++ "({any}, {any}, {any}): cap < len ({d} < {d})", .{ param_1, param_2, param_3, state.test_list.cap(), state.test_list.len() });
             if (state.ref_list.items.len == 0) {
@@ -528,12 +543,16 @@ pub fn make_op_table(comptime T: type, comptime STATE: type, comptime UNINIT: T,
             const state: *STATE = @ptrCast(@alignCast(state_opaque));
             if (state.ref_list.items.len == 0) return null;
             const n = rand.uintLessThan(usize, state.ref_list.items.len);
-            var b: [1]u8 = undefined;
-            rand.bytes(b[0..1]);
+            var v: T = undefined;
+            var b = std.mem.asBytes(&v);
+            rand.bytes(b[0..]);
+            if (disallow_val) |dis| {
+                if (v == dis.disallowed) v = dis.replacement;
+            }
             const idx = state.test_list.nth_idx(n);
-            state.ref_list.items[n] = b[0];
-            state.test_list.set(idx, b[0]);
-            return verify_whole_state(state, "set_nth", idx, @intCast(b[0]), 0, alloc);
+            state.ref_list.items[n] = v;
+            state.test_list.set(idx, v);
+            return verify_whole_state(state, "set_nth", idx, @intCast(v), 0, alloc);
         }
         fn check_nth_idx(rand: Random, state_opaque: *anyopaque, alloc: Allocator, _: *Fuzz.BenchTime) ?[]const u8 {
             const state: *STATE = @ptrCast(@alignCast(state_opaque));
@@ -813,49 +832,3 @@ pub const AllowPtr = enum(u8) {
     test_access_to_pointers,
     no_access_to_pointers,
 };
-// pub const Functionality = struct {
-//     const REF = std.ArrayList(u8);
-//     const TEST = IList.IList(u8);
-//     const TEST_BASE = ArrayListAdapter(u8).Adapter;
-//     const STATE = struct {
-//         ref_list: REF,
-//         test_list: TEST,
-//         test_base: TEST_BASE,
-//     };
-//     const IMPL_OPS = make_op_table(u8, STATE, 0, true, comptime QUEUE_LIKE: bool)
-//     pub fn INIT(state_opaque: **anyopaque, alloc: Allocator) anyerror!void {
-//         var state = try alloc.create(STATE);
-//         state.ref_list = try REF.initCapacity(alloc, LARGEST_LEN);
-//         const test_base = try REF.initCapacity(alloc, LARGEST_LEN);
-//         state.test_base = TEST_BASE.adapt(test_base, alloc);
-//         state.test_list = state.test_base.interface();
-//         state_opaque.* = @ptrCast(state);
-//     }
-//     pub fn START_SEED(rand: Random, state_opaque: *anyopaque, alloc: Allocator) ?[]const u8 {
-//         var state: *STATE = @ptrCast(@alignCast(state_opaque));
-//         const len = rand.uintLessThan(usize, SMALL_LEN);
-//         state.ref_list.clearRetainingCapacity();
-//         state.test_base.list.clearRetainingCapacity();
-//         state.ref_list.ensureTotalCapacity(alloc, len) catch |err| return Utils.alloc_fail_err(alloc, @src(), err);
-//         state.test_base.list.ensureTotalCapacity(alloc, len) catch |err| return Utils.alloc_fail_err(alloc, @src(), err);
-//         state.ref_list.items.len = len;
-//         state.test_base.list.items.len = len;
-//         if (len > 0) {
-//             rand.bytes(state.ref_list.items);
-//             @memcpy(state.test_base.list.items[0..len], state.ref_list.items[0..len]);
-//         }
-//     }
-
-//     pub fn DEINIT(state_opaque: *anyopaque, alloc: Allocator) void {
-//         const state: *STATE = @ptrCast(@alignCast(state_opaque));
-//         state.ref_list.clearAndFree(alloc);
-//         state.test_base.list.clearAndFree(alloc);
-//         alloc.destroy(state);
-//     }
-
-//     fn reverse(rand: Random, state_opaque: *anyopaque, alloc: Allocator) ?[]const u8 {
-//         const state: *STATE = @ptrCast(@alignCast(state_opaque));
-//         std.mem.reverse(u8, state.ref_list.items);
-//         state.
-//     }
-// };

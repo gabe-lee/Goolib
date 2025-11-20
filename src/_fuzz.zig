@@ -8,6 +8,7 @@ const Allocator = std.mem.Allocator;
 const Fuzz = Goolib.Fuzz;
 const Time = Goolib.Time;
 const Utils = Goolib.Utils;
+const CCAS = Goolib.CompactCoupledAllocationSystem;
 
 const Utils_quick_hex_dec_u64 = Utils._Fuzzer.Utils_quick_hex_dec_u64;
 const IList = Goolib.IList;
@@ -17,8 +18,10 @@ const IList_ArrayListAdapter_u8 = IList._Fuzzer.IList_ArrayListAdapter_u8;
 const IList_RingList_u8 = IList._Fuzzer.IList_RingList_u8;
 const IList_List_u8 = IList._Fuzzer.IList_List_u8;
 const IList_MultiSortList_u8 = IList._Fuzzer.IList_MultiSortList_u8;
+const IList_CCASList_mutexed_zeroed_u8 = CCAS.CompactCoupledAllocationSystem("FUZZ_TEST_CCAS_MS_Z", u32, u16, .multi_threaded_shared, .explicitly_zero_freed_data).Debug.make_list_interface_test(u8);
+const IList_CCASList_threadlocal_unzeroed_u8 = CCAS.CompactCoupledAllocationSystem("FUZZ_TEST_CCAS_MU_NZ", u32, u16, .multi_threaded_separate, .do_not_explicitly_zero_freed_data).Debug.make_list_interface_test(u8);
 
-const ListSegmentAllocator_u8 = Goolib.ListSegmentAllocator.Internal.Fuzzer.make_list_segment_allocator_test(u8);
+// const ListSegmentAllocator_u8 = Goolib.ListSegmentAllocator.Internal.Fuzzer.make_list_segment_allocator_test(u8);
 pub fn main() anyerror!void {
     var fuzzer = try Fuzz.DiffFuzzer.init_fuzz(
         std.process.args(),
@@ -32,7 +35,9 @@ pub fn main() anyerror!void {
             IList_RingList_u8,
             IList_List_u8,
             IList_MultiSortList_u8,
-            ListSegmentAllocator_u8,
+            // ListSegmentAllocator_u8,
+            IList_CCASList_mutexed_zeroed_u8,
+            IList_CCASList_threadlocal_unzeroed_u8,
         },
         &.{
             .new_group("IList", &.{
@@ -41,6 +46,8 @@ pub fn main() anyerror!void {
                 IList_RingList_u8,
                 IList_List_u8,
                 IList_MultiSortList_u8,
+                IList_CCASList_mutexed_zeroed_u8,
+                IList_CCASList_threadlocal_unzeroed_u8,
             }),
             .new_group("Utils", &.{
                 Utils_quick_hex_dec_u64,

@@ -1082,3 +1082,23 @@ pub inline fn print_src_location(comptime src_loc: SourceLocation) []const u8 {
     const link = src_loc.file ++ ":" ++ std.fmt.comptimePrint("{d}", .{src_loc.line}) ++ ":" ++ std.fmt.comptimePrint("{d}", .{src_loc.column});
     return link;
 }
+
+pub fn replace_key_value_in_buffer(comptime T: type, buf: []T, key_val: T, replace_val: T) void {
+    var rem_buf = buf;
+    while (rem_buf.len >= 8) {
+        if (rem_buf[0] == key_val) rem_buf[0] = replace_val;
+        if (rem_buf[1] == key_val) rem_buf[1] = replace_val;
+        if (rem_buf[2] == key_val) rem_buf[2] = replace_val;
+        if (rem_buf[3] == key_val) rem_buf[3] = replace_val;
+        if (rem_buf[4] == key_val) rem_buf[4] = replace_val;
+        if (rem_buf[5] == key_val) rem_buf[5] = replace_val;
+        if (rem_buf[6] == key_val) rem_buf[6] = replace_val;
+        if (rem_buf[7] == key_val) rem_buf[7] = replace_val;
+        rem_buf = rem_buf[8..];
+    }
+    var i: usize = 0;
+    while (i < rem_buf.len) {
+        if (rem_buf[i] == key_val) rem_buf[i] = replace_val;
+        i += 1;
+    }
+}

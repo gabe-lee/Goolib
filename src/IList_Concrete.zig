@@ -599,6 +599,116 @@ pub fn CreateConcretePrototype(comptime T: type, comptime LIST: type, comptime A
             comptime prefer_linear_ops_: bool,
             comptime always_invalid_idx_: usize,
         ) IList(T).VTable {
+            const IFACE = struct {
+                fn iface_get(object: *anyopaque, idx: usize, alloc: ALLOC) T {
+                    const self: LIST = @ptrCast(@alignCast(object));
+                    return get(self, idx, alloc);
+                }
+                fn iface_get_ptr(object: *anyopaque, idx: usize, alloc: ALLOC) *T {
+                    const self: LIST = @ptrCast(@alignCast(object));
+                    return get_ptr(self, idx, alloc);
+                }
+                fn iface_set(object: *anyopaque, idx: usize, val: T, alloc: ALLOC) void {
+                    const self: LIST = @ptrCast(@alignCast(object));
+                    return set(self, idx, val, alloc);
+                }
+                fn iface_len(object: *anyopaque) usize {
+                    const self: LIST = @ptrCast(@alignCast(object));
+                    return len(self);
+                }
+                fn iface_cap(object: *anyopaque) usize {
+                    const self: LIST = @ptrCast(@alignCast(object));
+                    return cap(self);
+                }
+                fn iface_trim_len(object: *anyopaque, trim_n: usize, alloc: ALLOC) void {
+                    const self: LIST = @ptrCast(@alignCast(object));
+                    return trim_len(self, trim_n, alloc);
+                }
+                fn iface_idx_valid(object: *anyopaque, idx: usize) bool {
+                    const self: LIST = @ptrCast(@alignCast(object));
+                    return idx_valid(self, idx);
+                }
+                fn iface_range_valid(object: *anyopaque, range: Range) bool {
+                    const self: LIST = @ptrCast(@alignCast(object));
+                    return range_valid(self, range);
+                }
+                fn iface_idx_in_range(object: *anyopaque, idx: usize, range: Range) bool {
+                    const self: LIST = @ptrCast(@alignCast(object));
+                    return idx_in_range(self, idx, range);
+                }
+                fn iface_range_len(object: *anyopaque, range: Range) usize {
+                    const self: LIST = @ptrCast(@alignCast(object));
+                    return range_len(self, range);
+                }
+                fn iface_split_range(object: *anyopaque, range: Range) usize {
+                    const self: LIST = @ptrCast(@alignCast(object));
+                    return split_range(self, range);
+                }
+                fn iface_first_idx(object: *anyopaque) usize {
+                    const self: LIST = @ptrCast(@alignCast(object));
+                    return first_idx(self);
+                }
+                fn iface_last_idx(object: *anyopaque) usize {
+                    const self: LIST = @ptrCast(@alignCast(object));
+                    return last_idx(self);
+                }
+                fn iface_next_idx(object: *anyopaque, this_idx: usize) usize {
+                    const self: LIST = @ptrCast(@alignCast(object));
+                    return next_idx(self, this_idx);
+                }
+                fn iface_prev_idx(object: *anyopaque, this_idx: usize) usize {
+                    const self: LIST = @ptrCast(@alignCast(object));
+                    return prev_idx(self, this_idx);
+                }
+                fn iface_nth_next_idx(object: *anyopaque, this_idx: usize, n: usize) usize {
+                    const self: LIST = @ptrCast(@alignCast(object));
+                    return nth_next_idx(self, this_idx, n);
+                }
+                fn iface_nth_prev_idx(object: *anyopaque, this_idx: usize, n: usize) usize {
+                    const self: LIST = @ptrCast(@alignCast(object));
+                    return nth_prev_idx(self, this_idx, n);
+                }
+                fn iface_move(object: *anyopaque, old_idx: usize, new_idx: usize, alloc: ALLOC) void {
+                    const self: LIST = @ptrCast(@alignCast(object));
+                    return move(self, old_idx, new_idx, alloc);
+                }
+                fn iface_move_range(object: *anyopaque, range: Range, new_first_idx: usize, alloc: ALLOC) void {
+                    const self: LIST = @ptrCast(@alignCast(object));
+                    return move_range(self, range, new_first_idx, alloc);
+                }
+                fn iface_try_ensure_free_slots(object: *anyopaque, count: usize, alloc: ALLOC) error{failed_to_grow_list}!void {
+                    const self: LIST = @ptrCast(@alignCast(object));
+                    return try_ensure_free_slots(self, count, alloc);
+                }
+                fn iface_shrink_cap_reserve_at_most(object: *anyopaque, reserve_at_most: usize, alloc: ALLOC) void {
+                    const self: LIST = @ptrCast(@alignCast(object));
+                    return shrink_cap_reserve_at_most(self, reserve_at_most, alloc);
+                }
+                fn iface_append_slots_assume_capacity(object: *anyopaque, count: usize, alloc: ALLOC) Range {
+                    const self: LIST = @ptrCast(@alignCast(object));
+                    return append_slots_assume_capacity(self, count, alloc);
+                }
+                fn iface_insert_slots_assume_capacity(object: *anyopaque, idx: usize, count: usize, alloc: ALLOC) Range {
+                    const self: LIST = @ptrCast(@alignCast(object));
+                    return insert_slots_assume_capacity(self, idx, count, alloc);
+                }
+                fn iface_delete(object: *anyopaque, idx: usize, alloc: ALLOC) void {
+                    const self: LIST = @ptrCast(@alignCast(object));
+                    return delete(self, idx, alloc);
+                }
+                fn iface_delete_range(object: *anyopaque, range: Range, alloc: ALLOC) void {
+                    const self: LIST = @ptrCast(@alignCast(object));
+                    return delete_range(self, range, alloc);
+                }
+                fn iface_clear(object: *anyopaque, alloc: ALLOC) void {
+                    const self: LIST = @ptrCast(@alignCast(object));
+                    return clear(self, alloc);
+                }
+                fn iface_free(object: *anyopaque, alloc: ALLOC) void {
+                    const self: LIST = @ptrCast(@alignCast(object));
+                    return free(self, alloc);
+                }
+            };
             return IList(T).VTable{
                 .allow_native_slice = allow_native_slice_,
                 .ensure_free_doesnt_change_cap = ensure_free_doesnt_change_cap_,
@@ -634,116 +744,323 @@ pub fn CreateConcretePrototype(comptime T: type, comptime LIST: type, comptime A
             };
         }
 
-        const IFACE = struct {
-            fn iface_get(object: *anyopaque, idx: usize, alloc: ALLOC) T {
-                const self: LIST = @ptrCast(@alignCast(object));
-                return get(self, idx, alloc);
-            }
-            fn iface_get_ptr(object: *anyopaque, idx: usize, alloc: ALLOC) *T {
-                const self: LIST = @ptrCast(@alignCast(object));
-                return get_ptr(self, idx, alloc);
-            }
-            fn iface_set(object: *anyopaque, idx: usize, val: T, alloc: ALLOC) void {
-                const self: LIST = @ptrCast(@alignCast(object));
-                return set(self, idx, val, alloc);
-            }
-            fn iface_len(object: *anyopaque) usize {
-                const self: LIST = @ptrCast(@alignCast(object));
-                return len(self);
-            }
-            fn iface_cap(object: *anyopaque) usize {
-                const self: LIST = @ptrCast(@alignCast(object));
-                return cap(self);
-            }
-            fn iface_trim_len(object: *anyopaque, trim_n: usize, alloc: ALLOC) void {
-                const self: LIST = @ptrCast(@alignCast(object));
-                return trim_len(self, trim_n, alloc);
-            }
-            fn iface_idx_valid(object: *anyopaque, idx: usize) bool {
-                const self: LIST = @ptrCast(@alignCast(object));
-                return idx_valid(self, idx);
-            }
-            fn iface_range_valid(object: *anyopaque, range: Range) bool {
-                const self: LIST = @ptrCast(@alignCast(object));
-                return range_valid(self, range);
-            }
-            fn iface_idx_in_range(object: *anyopaque, idx: usize, range: Range) bool {
-                const self: LIST = @ptrCast(@alignCast(object));
-                return idx_in_range(self, idx, range);
-            }
-            fn iface_range_len(object: *anyopaque, range: Range) usize {
-                const self: LIST = @ptrCast(@alignCast(object));
-                return range_len(self, range);
-            }
-            fn iface_split_range(object: *anyopaque, range: Range) usize {
-                const self: LIST = @ptrCast(@alignCast(object));
-                return split_range(self, range);
-            }
-            fn iface_first_idx(object: *anyopaque) usize {
-                const self: LIST = @ptrCast(@alignCast(object));
-                return first_idx(self);
-            }
-            fn iface_last_idx(object: *anyopaque) usize {
-                const self: LIST = @ptrCast(@alignCast(object));
-                return last_idx(self);
-            }
-            fn iface_next_idx(object: *anyopaque, this_idx: usize) usize {
-                const self: LIST = @ptrCast(@alignCast(object));
-                return next_idx(self, this_idx);
-            }
-            fn iface_prev_idx(object: *anyopaque, this_idx: usize) usize {
-                const self: LIST = @ptrCast(@alignCast(object));
-                return prev_idx(self, this_idx);
-            }
-            fn iface_nth_next_idx(object: *anyopaque, this_idx: usize, n: usize) usize {
-                const self: LIST = @ptrCast(@alignCast(object));
-                return nth_next_idx(self, this_idx, n);
-            }
-            fn iface_nth_prev_idx(object: *anyopaque, this_idx: usize, n: usize) usize {
-                const self: LIST = @ptrCast(@alignCast(object));
-                return nth_prev_idx(self, this_idx, n);
-            }
-            fn iface_move(object: *anyopaque, old_idx: usize, new_idx: usize, alloc: ALLOC) void {
-                const self: LIST = @ptrCast(@alignCast(object));
-                return move(self, old_idx, new_idx, alloc);
-            }
-            fn iface_move_range(object: *anyopaque, range: Range, new_first_idx: usize, alloc: ALLOC) void {
-                const self: LIST = @ptrCast(@alignCast(object));
-                return move_range(self, range, new_first_idx, alloc);
-            }
-            fn iface_try_ensure_free_slots(object: *anyopaque, count: usize, alloc: ALLOC) error{failed_to_grow_list}!void {
-                const self: LIST = @ptrCast(@alignCast(object));
-                return try_ensure_free_slots(self, count, alloc);
-            }
-            fn iface_shrink_cap_reserve_at_most(object: *anyopaque, reserve_at_most: usize, alloc: ALLOC) void {
-                const self: LIST = @ptrCast(@alignCast(object));
-                return shrink_cap_reserve_at_most(self, reserve_at_most, alloc);
-            }
-            fn iface_append_slots_assume_capacity(object: *anyopaque, count: usize, alloc: ALLOC) Range {
-                const self: LIST = @ptrCast(@alignCast(object));
-                return append_slots_assume_capacity(self, count, alloc);
-            }
-            fn iface_insert_slots_assume_capacity(object: *anyopaque, idx: usize, count: usize, alloc: ALLOC) Range {
-                const self: LIST = @ptrCast(@alignCast(object));
-                return insert_slots_assume_capacity(self, idx, count, alloc);
-            }
-            fn iface_delete(object: *anyopaque, idx: usize, alloc: ALLOC) void {
-                const self: LIST = @ptrCast(@alignCast(object));
-                return delete(self, idx, alloc);
-            }
-            fn iface_delete_range(object: *anyopaque, range: Range, alloc: ALLOC) void {
-                const self: LIST = @ptrCast(@alignCast(object));
-                return delete_range(self, range, alloc);
-            }
-            fn iface_clear(object: *anyopaque, alloc: ALLOC) void {
-                const self: LIST = @ptrCast(@alignCast(object));
-                return clear(self, alloc);
-            }
-            fn iface_free(object: *anyopaque, alloc: ALLOC) void {
-                const self: LIST = @ptrCast(@alignCast(object));
-                return free(self, alloc);
-            }
-        };
+        pub fn VTABLE_ALLOC_CONVERT(
+            comptime allow_native_slice_: bool,
+            comptime ensure_free_doesnt_change_cap_: bool,
+            comptime prefer_linear_ops_: bool,
+            comptime always_invalid_idx_: usize,
+            comptime alloc_convert: fn (iface_alloc: Allocator) ALLOC,
+        ) IList(T).VTable {
+            const IFACE = struct {
+                fn iface_get(object: *anyopaque, idx: usize, alloc: Allocator) T {
+                    const self: LIST = @ptrCast(@alignCast(object));
+                    const alloc_2 = alloc_convert(alloc);
+                    return get(self, idx, alloc_2);
+                }
+                fn iface_get_ptr(object: *anyopaque, idx: usize, alloc: Allocator) *T {
+                    const self: LIST = @ptrCast(@alignCast(object));
+                    const alloc_2 = alloc_convert(alloc);
+                    return get_ptr(self, idx, alloc_2);
+                }
+                fn iface_set(object: *anyopaque, idx: usize, val: T, alloc: Allocator) void {
+                    const self: LIST = @ptrCast(@alignCast(object));
+                    const alloc_2 = alloc_convert(alloc);
+                    return set(self, idx, val, alloc_2);
+                }
+                fn iface_len(object: *anyopaque) usize {
+                    const self: LIST = @ptrCast(@alignCast(object));
+                    return len(self);
+                }
+                fn iface_cap(object: *anyopaque) usize {
+                    const self: LIST = @ptrCast(@alignCast(object));
+                    return cap(self);
+                }
+                fn iface_trim_len(object: *anyopaque, trim_n: usize, alloc: Allocator) void {
+                    const self: LIST = @ptrCast(@alignCast(object));
+                    const alloc_2 = alloc_convert(alloc);
+                    return trim_len(self, trim_n, alloc_2);
+                }
+                fn iface_idx_valid(object: *anyopaque, idx: usize) bool {
+                    const self: LIST = @ptrCast(@alignCast(object));
+                    return idx_valid(self, idx);
+                }
+                fn iface_range_valid(object: *anyopaque, range: Range) bool {
+                    const self: LIST = @ptrCast(@alignCast(object));
+                    return range_valid(self, range);
+                }
+                fn iface_idx_in_range(object: *anyopaque, idx: usize, range: Range) bool {
+                    const self: LIST = @ptrCast(@alignCast(object));
+                    return idx_in_range(self, idx, range);
+                }
+                fn iface_range_len(object: *anyopaque, range: Range) usize {
+                    const self: LIST = @ptrCast(@alignCast(object));
+                    return range_len(self, range);
+                }
+                fn iface_split_range(object: *anyopaque, range: Range) usize {
+                    const self: LIST = @ptrCast(@alignCast(object));
+                    return split_range(self, range);
+                }
+                fn iface_first_idx(object: *anyopaque) usize {
+                    const self: LIST = @ptrCast(@alignCast(object));
+                    return first_idx(self);
+                }
+                fn iface_last_idx(object: *anyopaque) usize {
+                    const self: LIST = @ptrCast(@alignCast(object));
+                    return last_idx(self);
+                }
+                fn iface_next_idx(object: *anyopaque, this_idx: usize) usize {
+                    const self: LIST = @ptrCast(@alignCast(object));
+                    return next_idx(self, this_idx);
+                }
+                fn iface_prev_idx(object: *anyopaque, this_idx: usize) usize {
+                    const self: LIST = @ptrCast(@alignCast(object));
+                    return prev_idx(self, this_idx);
+                }
+                fn iface_nth_next_idx(object: *anyopaque, this_idx: usize, n: usize) usize {
+                    const self: LIST = @ptrCast(@alignCast(object));
+                    return nth_next_idx(self, this_idx, n);
+                }
+                fn iface_nth_prev_idx(object: *anyopaque, this_idx: usize, n: usize) usize {
+                    const self: LIST = @ptrCast(@alignCast(object));
+                    return nth_prev_idx(self, this_idx, n);
+                }
+                fn iface_move(object: *anyopaque, old_idx: usize, new_idx: usize, alloc: Allocator) void {
+                    const self: LIST = @ptrCast(@alignCast(object));
+                    const alloc_2 = alloc_convert(alloc);
+                    return move(self, old_idx, new_idx, alloc_2);
+                }
+                fn iface_move_range(object: *anyopaque, range: Range, new_first_idx: usize, alloc: Allocator) void {
+                    const self: LIST = @ptrCast(@alignCast(object));
+                    const alloc_2 = alloc_convert(alloc);
+                    return move_range(self, range, new_first_idx, alloc_2);
+                }
+                fn iface_try_ensure_free_slots(object: *anyopaque, count: usize, alloc: Allocator) error{failed_to_grow_list}!void {
+                    const self: LIST = @ptrCast(@alignCast(object));
+                    const alloc_2 = alloc_convert(alloc);
+                    return try_ensure_free_slots(self, count, alloc_2);
+                }
+                fn iface_shrink_cap_reserve_at_most(object: *anyopaque, reserve_at_most: usize, alloc: Allocator) void {
+                    const self: LIST = @ptrCast(@alignCast(object));
+                    const alloc_2 = alloc_convert(alloc);
+                    return shrink_cap_reserve_at_most(self, reserve_at_most, alloc_2);
+                }
+                fn iface_append_slots_assume_capacity(object: *anyopaque, count: usize, alloc: Allocator) Range {
+                    const self: LIST = @ptrCast(@alignCast(object));
+                    const alloc_2 = alloc_convert(alloc);
+                    return append_slots_assume_capacity(self, count, alloc_2);
+                }
+                fn iface_insert_slots_assume_capacity(object: *anyopaque, idx: usize, count: usize, alloc: Allocator) Range {
+                    const self: LIST = @ptrCast(@alignCast(object));
+                    const alloc_2 = alloc_convert(alloc);
+                    return insert_slots_assume_capacity(self, idx, count, alloc_2);
+                }
+                fn iface_delete(object: *anyopaque, idx: usize, alloc: Allocator) void {
+                    const self: LIST = @ptrCast(@alignCast(object));
+                    const alloc_2 = alloc_convert(alloc);
+                    return delete(self, idx, alloc_2);
+                }
+                fn iface_delete_range(object: *anyopaque, range: Range, alloc: Allocator) void {
+                    const self: LIST = @ptrCast(@alignCast(object));
+                    const alloc_2 = alloc_convert(alloc);
+                    return delete_range(self, range, alloc_2);
+                }
+                fn iface_clear(object: *anyopaque, alloc: Allocator) void {
+                    const self: LIST = @ptrCast(@alignCast(object));
+                    const alloc_2 = alloc_convert(alloc);
+                    return clear(self, alloc_2);
+                }
+                fn iface_free(object: *anyopaque, alloc: Allocator) void {
+                    const self: LIST = @ptrCast(@alignCast(object));
+                    const alloc_2 = alloc_convert(alloc);
+                    return free(self, alloc_2);
+                }
+            };
+            return IList(T).VTable{
+                .allow_native_slice = allow_native_slice_,
+                .ensure_free_doesnt_change_cap = ensure_free_doesnt_change_cap_,
+                .prefer_linear_ops = prefer_linear_ops_,
+                .always_invalid_idx = always_invalid_idx_,
+                .get = IFACE.iface_get,
+                .get_ptr = IFACE.iface_get_ptr,
+                .set = IFACE.iface_set,
+                .len = IFACE.iface_len,
+                .trim_len = IFACE.iface_trim_len,
+                .cap = IFACE.iface_cap,
+                .idx_valid = IFACE.iface_idx_valid,
+                .range_valid = IFACE.iface_range_valid,
+                .idx_in_range = IFACE.iface_idx_in_range,
+                .range_len = IFACE.iface_range_len,
+                .split_range = IFACE.iface_split_range,
+                .first_idx = IFACE.iface_first_idx,
+                .last_idx = IFACE.iface_last_idx,
+                .next_idx = IFACE.iface_next_idx,
+                .nth_next_idx = IFACE.iface_nth_next_idx,
+                .prev_idx = IFACE.iface_prev_idx,
+                .nth_prev_idx = IFACE.iface_nth_prev_idx,
+                .move = IFACE.iface_move,
+                .move_range = IFACE.iface_move_range,
+                .try_ensure_free_slots = IFACE.iface_try_ensure_free_slots,
+                .shrink_cap_reserve_at_most = IFACE.iface_shrink_cap_reserve_at_most,
+                .append_slots_assume_capacity = IFACE.iface_append_slots_assume_capacity,
+                .insert_slots_assume_capacity = IFACE.iface_insert_slots_assume_capacity,
+                .delete = IFACE.iface_delete,
+                .delete_range = IFACE.iface_delete_range,
+                .clear = IFACE.iface_clear,
+                .free = IFACE.iface_free,
+            };
+        }
+
+        pub fn VTABLE_ALLOC_STATIC(
+            comptime allow_native_slice_: bool,
+            comptime ensure_free_doesnt_change_cap_: bool,
+            comptime prefer_linear_ops_: bool,
+            comptime always_invalid_idx_: usize,
+            comptime alloc: ALLOC,
+        ) IList(T).VTable {
+            const IFACE = struct {
+                fn iface_get(object: *anyopaque, idx: usize, _: Allocator) T {
+                    const self: LIST = @ptrCast(@alignCast(object));
+                    return get(self, idx, alloc);
+                }
+                fn iface_get_ptr(object: *anyopaque, idx: usize, _: Allocator) *T {
+                    const self: LIST = @ptrCast(@alignCast(object));
+                    return get_ptr(self, idx, alloc);
+                }
+                fn iface_set(object: *anyopaque, idx: usize, val: T, _: Allocator) void {
+                    const self: LIST = @ptrCast(@alignCast(object));
+                    return set(self, idx, val, alloc);
+                }
+                fn iface_len(object: *anyopaque) usize {
+                    const self: LIST = @ptrCast(@alignCast(object));
+                    return len(self);
+                }
+                fn iface_cap(object: *anyopaque) usize {
+                    const self: LIST = @ptrCast(@alignCast(object));
+                    return cap(self);
+                }
+                fn iface_trim_len(object: *anyopaque, trim_n: usize, _: Allocator) void {
+                    const self: LIST = @ptrCast(@alignCast(object));
+                    return trim_len(self, trim_n, alloc);
+                }
+                fn iface_idx_valid(object: *anyopaque, idx: usize) bool {
+                    const self: LIST = @ptrCast(@alignCast(object));
+                    return idx_valid(self, idx);
+                }
+                fn iface_range_valid(object: *anyopaque, range: Range) bool {
+                    const self: LIST = @ptrCast(@alignCast(object));
+                    return range_valid(self, range);
+                }
+                fn iface_idx_in_range(object: *anyopaque, idx: usize, range: Range) bool {
+                    const self: LIST = @ptrCast(@alignCast(object));
+                    return idx_in_range(self, idx, range);
+                }
+                fn iface_range_len(object: *anyopaque, range: Range) usize {
+                    const self: LIST = @ptrCast(@alignCast(object));
+                    return range_len(self, range);
+                }
+                fn iface_split_range(object: *anyopaque, range: Range) usize {
+                    const self: LIST = @ptrCast(@alignCast(object));
+                    return split_range(self, range);
+                }
+                fn iface_first_idx(object: *anyopaque) usize {
+                    const self: LIST = @ptrCast(@alignCast(object));
+                    return first_idx(self);
+                }
+                fn iface_last_idx(object: *anyopaque) usize {
+                    const self: LIST = @ptrCast(@alignCast(object));
+                    return last_idx(self);
+                }
+                fn iface_next_idx(object: *anyopaque, this_idx: usize) usize {
+                    const self: LIST = @ptrCast(@alignCast(object));
+                    return next_idx(self, this_idx);
+                }
+                fn iface_prev_idx(object: *anyopaque, this_idx: usize) usize {
+                    const self: LIST = @ptrCast(@alignCast(object));
+                    return prev_idx(self, this_idx);
+                }
+                fn iface_nth_next_idx(object: *anyopaque, this_idx: usize, n: usize) usize {
+                    const self: LIST = @ptrCast(@alignCast(object));
+                    return nth_next_idx(self, this_idx, n);
+                }
+                fn iface_nth_prev_idx(object: *anyopaque, this_idx: usize, n: usize) usize {
+                    const self: LIST = @ptrCast(@alignCast(object));
+                    return nth_prev_idx(self, this_idx, n);
+                }
+                fn iface_move(object: *anyopaque, old_idx: usize, new_idx: usize, _: Allocator) void {
+                    const self: LIST = @ptrCast(@alignCast(object));
+                    return move(self, old_idx, new_idx, alloc);
+                }
+                fn iface_move_range(object: *anyopaque, range: Range, new_first_idx: usize, _: Allocator) void {
+                    const self: LIST = @ptrCast(@alignCast(object));
+                    return move_range(self, range, new_first_idx, alloc);
+                }
+                fn iface_try_ensure_free_slots(object: *anyopaque, count: usize, _: Allocator) error{failed_to_grow_list}!void {
+                    const self: LIST = @ptrCast(@alignCast(object));
+                    return try_ensure_free_slots(self, count, alloc);
+                }
+                fn iface_shrink_cap_reserve_at_most(object: *anyopaque, reserve_at_most: usize, _: Allocator) void {
+                    const self: LIST = @ptrCast(@alignCast(object));
+                    return shrink_cap_reserve_at_most(self, reserve_at_most, alloc);
+                }
+                fn iface_append_slots_assume_capacity(object: *anyopaque, count: usize, _: Allocator) Range {
+                    const self: LIST = @ptrCast(@alignCast(object));
+                    return append_slots_assume_capacity(self, count, alloc);
+                }
+                fn iface_insert_slots_assume_capacity(object: *anyopaque, idx: usize, count: usize, _: Allocator) Range {
+                    const self: LIST = @ptrCast(@alignCast(object));
+                    return insert_slots_assume_capacity(self, idx, count, alloc);
+                }
+                fn iface_delete(object: *anyopaque, idx: usize, _: Allocator) void {
+                    const self: LIST = @ptrCast(@alignCast(object));
+                    return delete(self, idx, alloc);
+                }
+                fn iface_delete_range(object: *anyopaque, range: Range, _: Allocator) void {
+                    const self: LIST = @ptrCast(@alignCast(object));
+                    return delete_range(self, range, alloc);
+                }
+                fn iface_clear(object: *anyopaque, _: Allocator) void {
+                    const self: LIST = @ptrCast(@alignCast(object));
+                    return clear(self, alloc);
+                }
+                fn iface_free(object: *anyopaque, _: Allocator) void {
+                    const self: LIST = @ptrCast(@alignCast(object));
+                    return free(self, alloc);
+                }
+            };
+            return IList(T).VTable{
+                .allow_native_slice = allow_native_slice_,
+                .ensure_free_doesnt_change_cap = ensure_free_doesnt_change_cap_,
+                .prefer_linear_ops = prefer_linear_ops_,
+                .always_invalid_idx = always_invalid_idx_,
+                .get = IFACE.iface_get,
+                .get_ptr = IFACE.iface_get_ptr,
+                .set = IFACE.iface_set,
+                .len = IFACE.iface_len,
+                .trim_len = IFACE.iface_trim_len,
+                .cap = IFACE.iface_cap,
+                .idx_valid = IFACE.iface_idx_valid,
+                .range_valid = IFACE.iface_range_valid,
+                .idx_in_range = IFACE.iface_idx_in_range,
+                .range_len = IFACE.iface_range_len,
+                .split_range = IFACE.iface_split_range,
+                .first_idx = IFACE.iface_first_idx,
+                .last_idx = IFACE.iface_last_idx,
+                .next_idx = IFACE.iface_next_idx,
+                .nth_next_idx = IFACE.iface_nth_next_idx,
+                .prev_idx = IFACE.iface_prev_idx,
+                .nth_prev_idx = IFACE.iface_nth_prev_idx,
+                .move = IFACE.iface_move,
+                .move_range = IFACE.iface_move_range,
+                .try_ensure_free_slots = IFACE.iface_try_ensure_free_slots,
+                .shrink_cap_reserve_at_most = IFACE.iface_shrink_cap_reserve_at_most,
+                .append_slots_assume_capacity = IFACE.iface_append_slots_assume_capacity,
+                .insert_slots_assume_capacity = IFACE.iface_insert_slots_assume_capacity,
+                .delete = IFACE.iface_delete,
+                .delete_range = IFACE.iface_delete_range,
+                .clear = IFACE.iface_clear,
+                .free = IFACE.iface_free,
+            };
+        }
 
         //*** Derived funcs ***
 

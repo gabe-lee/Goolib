@@ -41,6 +41,7 @@ pub const Cast = @import("./Cast.zig");
 // pub const Codegen = @import("./Codegen.zig");
 pub const Color = @import("./Color.zig");
 pub const CommonTypes = @import("./CommonTypes.zig");
+pub const CompactCoupledAllocationSystem = @import("./CompactCoupledAllocationSystem.zig");
 pub const Composition = @import("./Composition.zig");
 // pub const Compare = @import("./Compare.zig");
 pub const DummyAllocator = @import("./DummyAllocator.zig");
