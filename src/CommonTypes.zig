@@ -173,3 +173,103 @@ pub fn ArrayLen(comptime N: comptime_int, comptime T: type) type {
         }
     };
 }
+
+pub const Alignment = enum(u64) {
+    _1 = 1 << 0,
+    _2 = 1 << 1,
+    _4 = 1 << 2,
+    _8 = 1 << 3,
+    _16 = 1 << 4,
+    _32 = 1 << 5,
+    _64 = 1 << 6,
+    _128 = 1 << 7,
+    _256 = 1 << 8,
+    _512 = 1 << 9,
+    _1024 = 1 << 10,
+    _2048 = 1 << 11,
+    _4096 = 1 << 12,
+    _8192 = 1 << 13,
+    _16384 = 1 << 14,
+    _32768 = 1 << 15,
+    _65536 = 1 << 16,
+    _L_17 = 1 << 17,
+    _L_18 = 1 << 18,
+    _L_19 = 1 << 19,
+    _L_20 = 1 << 20,
+    _L_21 = 1 << 21,
+    _L_22 = 1 << 22,
+    _L_23 = 1 << 23,
+    _L_24 = 1 << 24,
+    _L_25 = 1 << 25,
+    _L_26 = 1 << 26,
+    _L_27 = 1 << 27,
+    _L_28 = 1 << 28,
+    _L_29 = 1 << 29,
+    _L_30 = 1 << 30,
+    _L_31 = 1 << 31,
+    _L_32 = 1 << 32,
+    _L_33 = 1 << 33,
+    _L_34 = 1 << 34,
+    _L_35 = 1 << 35,
+    _L_36 = 1 << 36,
+    _L_37 = 1 << 37,
+    _L_38 = 1 << 38,
+    _L_39 = 1 << 39,
+    _L_40 = 1 << 40,
+    _L_41 = 1 << 41,
+    _L_42 = 1 << 42,
+    _L_43 = 1 << 43,
+    _L_44 = 1 << 44,
+    _L_45 = 1 << 45,
+    _L_46 = 1 << 46,
+    _L_47 = 1 << 47,
+    _L_48 = 1 << 48,
+    _L_49 = 1 << 49,
+    _L_50 = 1 << 50,
+    _L_51 = 1 << 51,
+    _L_52 = 1 << 52,
+    _L_53 = 1 << 53,
+    _L_54 = 1 << 54,
+    _L_55 = 1 << 55,
+    _L_56 = 1 << 56,
+    _L_57 = 1 << 57,
+    _L_58 = 1 << 58,
+    _L_59 = 1 << 59,
+    _L_60 = 1 << 60,
+    _L_61 = 1 << 61,
+    _L_62 = 1 << 62,
+    _L_63 = 1 << 63,
+
+    pub fn to_usize(self: Alignment) usize {
+        return @intCast(@intFromEnum(self));
+    }
+    pub fn to_uint(self: Alignment, comptime T: type) T {
+        return @intCast(@intFromEnum(self));
+    }
+    pub fn to_std_align(self: Alignment) std.mem.Alignment {
+        const raw: usize = @intCast(@intFromEnum(self));
+        const log2: math.Log2Int(usize) = @intCast(63 - @clz(raw));
+        return @enumFromInt(log2);
+    }
+    pub fn from_uint(alignment: anytype) Alignment {
+        return @enumFromInt(@as(u64, @intCast(alignment)));
+    }
+    pub fn from_std_align(alignment: std.mem.Alignment) Alignment {
+        const log2: math.Log2Int(usize) = @intFromEnum(alignment);
+        const raw: usize = @as(usize, 1) << log2;
+        return @enumFromInt(@as(u64, @intCast(raw)));
+    }
+    pub fn from_type(comptime T: type) Alignment {
+        return @enumFromInt(@as(u64, @alignOf(T)));
+    }
+    pub fn align_address_forward(self: Alignment, addr: anytype) @TypeOf(addr) {
+        const T = @TypeOf(addr);
+        const alignment: T = self.to_uint(T);
+        return std.mem.alignForward(T, addr, alignment);
+    }
+    pub fn align_address_backward(self: Alignment, addr: anytype) @TypeOf(addr) {
+        const T = @TypeOf(addr);
+        const alignment: T = self.to_uint(T);
+        return std.mem.alignBackward(T, addr, alignment);
+    }
+};

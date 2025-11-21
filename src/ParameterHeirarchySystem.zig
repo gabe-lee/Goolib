@@ -34,24 +34,4 @@ const Flags = Root.Flags;
 const IList = Root.IList.IList;
 const List = Root.IList_List.List;
 const Range = Root.IList.Range;
-
-const IList8 = IList(u8);
-const IList16 = IList(u16);
-const IList32 = IList(u32);
-const IList64 = IList(u64);
-const IListSize = IList(usize);
-const List8 = List(u8);
-const List16 = List(u16);
-const List32 = List(u32);
-const List64 = List(u64);
-const ListSize = List(usize);
-
-pub const Table = struct {
-    alloc: Allocator,
-    list_8: List8,
-    list_16: List16,
-    list_32: List32,
-    list_64: List64,
-    list_size: ListSize,
-    
-};
+const CCAS = Root.CompactCoupledAllocationSystem;

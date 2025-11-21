@@ -39,6 +39,8 @@ const testing = std.testing;
 const Test = Root.Testing;
 const Range = IListConcrete.Range;
 const ListError = IListConcrete.ListError;
+const GenericAllocator = Root.GenericAllocator.GenericAllocator;
+const Alignment = Root.CommonTypes.Alignment;
 
 const assert_with_reason = Assert.assert_with_reason;
 const assert_unreachable = Assert.assert_unreachable;
@@ -58,12 +60,12 @@ pub const DataSecurityMode = enum(u8) {
     explicitly_zero_freed_data,
 };
 
-pub fn CompactCoupledAllocationSystem(comptime UNIQUE_IDENTIFIER: []const u8, comptime OFFSET_UINT: type, comptime LEN_UINT: type, comptime THREADING_MODE: ThreadingMode, comptime SECURITY_MODE: DataSecurityMode) type {
-    assert_with_reason(Types.type_is_unsigned_int(OFFSET_UINT), @src(), "type `OFFSET_UINT` must be an unsigned integer type, got type {s}", .{@typeName(OFFSET_UINT)});
+pub fn CompactCoupledAllocationSystem(comptime UNIQUE_IDENTIFIER: []const u8, comptime ADDRESS_UINT: type, comptime LEN_UINT: type, comptime THREADING_MODE: ThreadingMode, comptime SECURITY_MODE: DataSecurityMode) type {
+    assert_with_reason(Types.type_is_unsigned_int(ADDRESS_UINT), @src(), "type `OFFSET_UINT` must be an unsigned integer type, got type {s}", .{@typeName(ADDRESS_UINT)});
     assert_with_reason(Types.type_is_unsigned_int(LEN_UINT), @src(), "type `LEN_UINT` must be an unsigned integer type, got type {s}", .{@typeName(LEN_UINT)});
-    assert_with_reason(Types.integer_type_A_has_bits_greater_than_or_equal_to_B(OFFSET_UINT, LEN_UINT), @src(), "type `OFFSET_UINT` must have a bit count >= type `LEN_UINT`, got {d} < {d}", .{ @typeInfo(OFFSET_UINT).int.bits, @typeInfo(LEN_UINT).int.bits });
+    assert_with_reason(Types.integer_type_A_has_bits_greater_than_or_equal_to_B(ADDRESS_UINT, LEN_UINT), @src(), "type `OFFSET_UINT` must have a bit count >= type `LEN_UINT`, got {d} < {d}", .{ @typeInfo(ADDRESS_UINT).int.bits, @typeInfo(LEN_UINT).int.bits });
     return struct {
-        const ALLOC_UINT_BITS: usize = @intCast(@typeInfo(OFFSET_UINT).int.bits);
+        const ALLOC_UINT_BITS: usize = @intCast(@typeInfo(ADDRESS_UINT).int.bits);
         const ALLOC_UINT_BITS_MINUS_ONE = ALLOC_UINT_BITS - 1;
         const BUCKET_COUNT = (ALLOC_UINT_BITS >> 1) + 1;
         const USE_MUTEX = THREADING_MODE == .multi_threaded_shared;
@@ -83,27 +85,27 @@ pub fn CompactCoupledAllocationSystem(comptime UNIQUE_IDENTIFIER: []const u8, co
         const STATE = switch (THREADING_MODE) {
             .single_threaded => struct {
                 var data_ptr: [*]u8 = undefined;
-                var data_len: OFFSET_UINT = 0;
+                var data_len: ADDRESS_UINT = 0;
                 var meta_ptr: [*]Block = undefined;
-                var meta_len: OFFSET_UINT = 0;
-                var meta_cap: OFFSET_UINT = 0;
+                var meta_len: ADDRESS_UINT = 0;
+                var meta_cap: ADDRESS_UINT = 0;
                 var buckets: [BUCKET_COUNT]Bucket = @splat(Bucket{ .start = 0, .len = 0, .cap = 0 });
             },
             .multi_threaded_separate => struct {
                 threadlocal var data_ptr: [*]u8 = undefined;
-                threadlocal var data_len: OFFSET_UINT = 0;
+                threadlocal var data_len: ADDRESS_UINT = 0;
                 threadlocal var meta_ptr: [*]Block = undefined;
-                threadlocal var meta_len: OFFSET_UINT = 0;
-                threadlocal var meta_cap: OFFSET_UINT = 0;
+                threadlocal var meta_len: ADDRESS_UINT = 0;
+                threadlocal var meta_cap: ADDRESS_UINT = 0;
                 threadlocal var buckets: [BUCKET_COUNT]Bucket = @splat(Bucket{ .start = 0, .len = 0, .cap = 0 });
             },
             .multi_threaded_shared => struct {
                 var data_ptr: [*]u8 = undefined;
-                var data_len: OFFSET_UINT = 0;
+                var data_len: ADDRESS_UINT = 0;
                 var data_lock: Mutex = Mutex{};
                 var meta_ptr: [*]Block = undefined;
-                var meta_len: OFFSET_UINT = 0;
-                var meta_cap: OFFSET_UINT = 0;
+                var meta_len: ADDRESS_UINT = 0;
+                var meta_cap: ADDRESS_UINT = 0;
                 var meta_lock: Mutex = Mutex{};
                 var buckets: [BUCKET_COUNT]Bucket = @splat(Bucket{ .start = 0, .len = 0, .cap = 0 });
             },
@@ -125,13 +127,57 @@ pub fn CompactCoupledAllocationSystem(comptime UNIQUE_IDENTIFIER: []const u8, co
             if (USE_MUTEX) STATE.meta_lock.unlock();
         }
 
+        fn impl_gen_alloc(_: *anyopaque, len: LEN_UINT, alignement: Alignment) ADDRESS_UINT {
+            const block = claim_data_block(len, alignement.to_uint(LEN_UINT));
+            return block.start;
+        }
+        fn impl_gen_resize(_: *anyopaque, old_address: ADDRESS_UINT, old_len: LEN_UINT, new_len: LEN_UINT, _: Alignment) bool {
+            if (new_len >= old_len) return false;
+            const freed_block = Block{
+                .start = old_address + Types.intcast(new_len, ADDRESS_UINT),
+                .len = old_len - new_len,
+            };
+            release_data_block(freed_block);
+            return true;
+        }
+        fn impl_gen_remap(object: *anyopaque, old_address: ADDRESS_UINT, old_len: LEN_UINT, new_len: LEN_UINT, alignement: Alignment) ?ADDRESS_UINT {
+            if (impl_gen_resize(object, old_address, old_len, new_len, alignement)) return old_address;
+            return null;
+        }
+        fn impl_gen_free(_: *anyopaque, address: ADDRESS_UINT, len: LEN_UINT) void {
+            const freed_block = Block{
+                .start = address,
+                .len = len,
+            };
+            release_data_block(freed_block);
+        }
+        fn impl_gen_addr_to_usize(_: *anyopaque, address: ADDRESS_UINT) usize {
+            lock_data();
+            const real_addr: usize = @intFromPtr(STATE.data_ptr) + Types.intcast(address, usize);
+            unlock_data();
+            return real_addr;
+        }
+
+        pub fn generic_allocator() GenericAllocator(ADDRESS_UINT, LEN_UINT) {
+            return GenericAllocator(ADDRESS_UINT, LEN_UINT){
+                .object = @ptrFromInt(math.maxInt(usize)),
+                .vtable = GenericAllocator(ADDRESS_UINT, LEN_UINT).VTABLE{
+                    .alloc = impl_gen_alloc,
+                    .resize = impl_gen_resize,
+                    .remap = impl_gen_remap,
+                    .free = impl_gen_free,
+                    .addr_to_usize = impl_gen_addr_to_usize,
+                },
+            };
+        }
+
         fn remove_free_block_that_can_hold_size_at_align(size: LEN_UINT, alignment: LEN_UINT) ?Block {
             const bucket_idx = bucket_for_size(size);
             var block: Block = undefined;
             for (STATE.buckets[bucket_idx..]) |*bucket| {
                 if (bucket.len == 0) continue;
-                var b: OFFSET_UINT = (bucket.len - 1);
-                var i: OFFSET_UINT = bucket.start + b;
+                var b: ADDRESS_UINT = (bucket.len - 1);
+                var i: ADDRESS_UINT = bucket.start + b;
                 while (true) {
                     block = STATE.meta_ptr[i];
                     if (block_can_hold_size_with_align(block, size, alignment)) |aligned_start| {
@@ -146,15 +192,15 @@ pub fn CompactCoupledAllocationSystem(comptime UNIQUE_IDENTIFIER: []const u8, co
             }
             return null;
         }
-        fn block_can_hold_size_with_align(block: Block, size: OFFSET_UINT, alignment: OFFSET_UINT) ?OFFSET_UINT {
+        fn block_can_hold_size_with_align(block: Block, size: ADDRESS_UINT, alignment: ADDRESS_UINT) ?ADDRESS_UINT {
             if (block.len < size) return null;
-            const aligned_start = std.mem.alignForward(OFFSET_UINT, block.start, alignment);
+            const aligned_start = std.mem.alignForward(ADDRESS_UINT, block.start, alignment);
             const aligned_delta = aligned_start - block.start;
             if (block.len - aligned_delta < size) return null;
             return aligned_start;
         }
 
-        fn release_unused_portions_of_free_block_and_return_used_block(block: Block, size: OFFSET_UINT, aligned_start: OFFSET_UINT) Block {
+        fn release_unused_portions_of_free_block_and_return_used_block(block: Block, size: ADDRESS_UINT, aligned_start: ADDRESS_UINT) Block {
             const block_before = Block{
                 .start = block.start,
                 .len = aligned_start - block.start,
@@ -195,7 +241,7 @@ pub fn CompactCoupledAllocationSystem(comptime UNIQUE_IDENTIFIER: []const u8, co
             bucket.len += 1;
         }
 
-        fn split_new_free_block_for_size_and_align(free_block: Block, size: OFFSET_UINT, alignment: OFFSET_UINT) Block {
+        fn split_new_free_block_for_size_and_align(free_block: Block, size: ADDRESS_UINT, alignment: ADDRESS_UINT) Block {
             const aligned_start = block_can_hold_size_with_align(free_block, size, alignment) orelse assert_unreachable(@src(), "a brand new block was allocated for size {d} align {d}, but the block was found to be unable to hold the needed space: {any}", .{ size, alignment, free_block });
             return release_unused_portions_of_free_block_and_return_used_block(free_block, size, aligned_start);
         }
@@ -210,8 +256,8 @@ pub fn CompactCoupledAllocationSystem(comptime UNIQUE_IDENTIFIER: []const u8, co
                 const page_size = std.heap.pageSize();
                 const old_len = STATE.data_len;
                 const grow_amount = @max(size, alignment);
-                const new_data_len = @min(std.mem.alignForward(usize, Types.intcast(STATE.data_len, usize) + grow_amount, page_size), math.maxInt(OFFSET_UINT));
-                const new_block_len = Types.intcast(new_data_len, OFFSET_UINT) - STATE.data_len;
+                const new_data_len = @min(std.mem.alignForward(usize, Types.intcast(STATE.data_len, usize) + grow_amount, page_size), math.maxInt(ADDRESS_UINT));
+                const new_block_len = Types.intcast(new_data_len, ADDRESS_UINT) - STATE.data_len;
                 const new_data: []u8 = std.heap.page_allocator.realloc(STATE.data_ptr[0..STATE.data_len], new_data_len) catch |err| assert_allocation_failure(@src(), u8, new_data_len, err);
                 STATE.data_ptr = new_data.ptr;
                 STATE.data_len = @intCast(new_data.len);
@@ -227,6 +273,7 @@ pub fn CompactCoupledAllocationSystem(comptime UNIQUE_IDENTIFIER: []const u8, co
             }
         }
         fn release_data_block(block: Block) void {
+            if (block.len == 0) return;
             lock_meta();
             if (ZERO_DATA) {
                 lock_data();
@@ -249,22 +296,22 @@ pub fn CompactCoupledAllocationSystem(comptime UNIQUE_IDENTIFIER: []const u8, co
             unlock_meta();
         }
 
-        fn init_all_uninit_blocks_to_max_start_and_return_real_len() OFFSET_UINT {
-            var real_len: OFFSET_UINT = 0;
+        fn init_all_uninit_blocks_to_max_start_and_return_real_len() ADDRESS_UINT {
+            var real_len: ADDRESS_UINT = 0;
             for (STATE.buckets[0..]) |*bucket| {
                 const end = bucket.start + bucket.len;
                 const cap = bucket.start + bucket.cap;
                 real_len += bucket.len;
-                @memset(STATE.meta_ptr[end..cap], Block{ .start = math.maxInt(OFFSET_UINT), .len = 0 });
+                @memset(STATE.meta_ptr[end..cap], Block{ .start = math.maxInt(ADDRESS_UINT), .len = 0 });
             }
             return real_len;
         }
 
         fn insertion_sort_by_start() void {
             if (STATE.meta_len < 2) return;
-            var i: OFFSET_UINT = 1;
-            var j: OFFSET_UINT = undefined;
-            var jj: OFFSET_UINT = undefined;
+            var i: ADDRESS_UINT = 1;
+            var j: ADDRESS_UINT = undefined;
+            var jj: ADDRESS_UINT = undefined;
             var x: Block = undefined;
             while (i < STATE.meta_len) {
                 x = STATE.meta_ptr[i];
@@ -284,9 +331,9 @@ pub fn CompactCoupledAllocationSystem(comptime UNIQUE_IDENTIFIER: []const u8, co
         }
         fn insertion_sort_by_size() void {
             if (STATE.meta_len < 2) return;
-            var i: OFFSET_UINT = 1;
-            var j: OFFSET_UINT = undefined;
-            var jj: OFFSET_UINT = undefined;
+            var i: ADDRESS_UINT = 1;
+            var j: ADDRESS_UINT = undefined;
+            var jj: ADDRESS_UINT = undefined;
             var x: Block = undefined;
             while (i < STATE.meta_len) {
                 x = STATE.meta_ptr[i];
@@ -305,12 +352,12 @@ pub fn CompactCoupledAllocationSystem(comptime UNIQUE_IDENTIFIER: []const u8, co
             }
         }
 
-        fn combine_adjacent_free_blocks_and_return_len_delta() OFFSET_UINT {
+        fn combine_adjacent_free_blocks_and_return_len_delta() ADDRESS_UINT {
             if (STATE.meta_len < 2) return 0;
-            var delta: OFFSET_UINT = 0;
-            var check_idx: OFFSET_UINT = 1;
-            var combine_idx: OFFSET_UINT = 0;
-            var dont_combine_idx: OFFSET_UINT = 1;
+            var delta: ADDRESS_UINT = 0;
+            var check_idx: ADDRESS_UINT = 1;
+            var combine_idx: ADDRESS_UINT = 0;
+            var dont_combine_idx: ADDRESS_UINT = 1;
             while (check_idx < STATE.meta_len) {
                 const combine_end = STATE.meta_ptr[combine_idx].start + STATE.meta_ptr[combine_idx].len;
                 if (combine_end == STATE.meta_ptr[check_idx].start) {
@@ -328,12 +375,12 @@ pub fn CompactCoupledAllocationSystem(comptime UNIQUE_IDENTIFIER: []const u8, co
         }
 
         fn reindex_all_buckets() void {
-            var start: OFFSET_UINT = 0;
+            var start: ADDRESS_UINT = 0;
             var bucket: usize = 0;
-            var max: OFFSET_UINT = BUCKET_MAX_SIZES[bucket];
-            var end: OFFSET_UINT = 0;
-            var len: OFFSET_UINT = 0;
-            var size: OFFSET_UINT = undefined;
+            var max: ADDRESS_UINT = BUCKET_MAX_SIZES[bucket];
+            var end: ADDRESS_UINT = 0;
+            var len: ADDRESS_UINT = 0;
+            var size: ADDRESS_UINT = undefined;
             while (end < STATE.meta_len) {
                 size = STATE.meta_ptr[end].len;
                 if (size <= max) {
@@ -364,15 +411,15 @@ pub fn CompactCoupledAllocationSystem(comptime UNIQUE_IDENTIFIER: []const u8, co
         }
 
         const Bucket = struct {
-            start: OFFSET_UINT,
-            len: OFFSET_UINT,
-            cap: OFFSET_UINT,
+            start: ADDRESS_UINT,
+            len: ADDRESS_UINT,
+            cap: ADDRESS_UINT,
         };
         const Block = struct {
-            start: OFFSET_UINT,
-            len: OFFSET_UINT,
+            start: ADDRESS_UINT,
+            len: ADDRESS_UINT,
         };
-        fn bucket_for_size(size: OFFSET_UINT) usize {
+        fn bucket_for_size(size: ADDRESS_UINT) usize {
             assert_with_reason(size != 0, @src(), "size cannot be 0", .{});
             const log2 = ALLOC_UINT_BITS_MINUS_ONE - @clz(size);
             const add_one = @as(usize, @intCast(@intFromBool(log2 > 0)));
@@ -380,17 +427,17 @@ pub fn CompactCoupledAllocationSystem(comptime UNIQUE_IDENTIFIER: []const u8, co
             return bucket_idx;
         }
         pub const Addr = struct {
-            val: OFFSET_UINT = math.maxInt(OFFSET_UINT),
+            val: ADDRESS_UINT = math.maxInt(ADDRESS_UINT),
 
-            pub fn new(val: OFFSET_UINT) Addr {
+            pub fn new(val: ADDRESS_UINT) Addr {
                 return Addr{ .val = val };
             }
 
-            pub fn add(self: Addr, n: OFFSET_UINT) Addr {
+            pub fn add(self: Addr, n: ADDRESS_UINT) Addr {
                 return Addr{ .val = self.val + n };
             }
 
-            pub fn sub(self: Addr, n: OFFSET_UINT) Addr {
+            pub fn sub(self: Addr, n: ADDRESS_UINT) Addr {
                 return Addr{ .val = self.val - n };
             }
 
@@ -481,7 +528,7 @@ pub fn CompactCoupledAllocationSystem(comptime UNIQUE_IDENTIFIER: []const u8, co
                         .len = SIZE,
                     };
                     release_data_block(block);
-                    ptr.addr.val = math.maxInt(OFFSET_UINT);
+                    ptr.addr.val = math.maxInt(ADDRESS_UINT);
                 }
             };
         }
@@ -2616,7 +2663,7 @@ pub fn CompactCoupledAllocationSystem(comptime UNIQUE_IDENTIFIER: []const u8, co
                     const bucket_end = Types.intcast(bucket.start, usize) + Types.intcast(bucket.len, usize);
                     assert_with_reason(bucket_end <= STATE.meta_len, src, "a free bucket has a range outside the meta_len, bucket = {any}, meta_len = {d}", .{ bucket, STATE.meta_len });
                     for (STATE.meta_ptr[bucket.start .. bucket.start + bucket.len], 0..) |block, bb| {
-                        const bbidx: OFFSET_UINT = @intCast(bb);
+                        const bbidx: ADDRESS_UINT = @intCast(bb);
                         const block_end = Types.intcast(block.start, usize) + Types.intcast(block.len, usize);
                         assert_with_reason(block_end <= STATE.data_len, src, "a free block has a range outside the data_len, bucket = {d}, bucket size = {d}, bucket block idx = {d}, true block idx = {d}, block = {any}, data_len = {d}", .{ bidx, (@as(usize, 1) << (bidx << 1)) - 1, bbidx, bbidx + bucket.start, block, STATE.data_len });
                     }
@@ -2707,7 +2754,11 @@ pub fn CompactCoupledAllocationSystem(comptime UNIQUE_IDENTIFIER: []const u8, co
                         T,
                         FSTATE,
                         0,
-                        .test_access_to_pointers,
+                        // FIXME with the current implementation, there is a possiblity that pointers are invalidated
+                        // before they can be tested for data access by another thread forcing a reallocation.
+                        // This could be fixed by implementing a sharding system so only the relevant memory is relocated
+                        // (to a new/different 'shard' with enough space)
+                        .no_access_to_pointers,
                         .list_can_grow_and_shrink,
                         extra_checks,
                         if (T == u8) IList._Fuzzer.DisallowVal(T){ .disallowed = 0xAA, .replacement = 0x11 } else null,

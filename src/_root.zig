@@ -51,6 +51,7 @@ pub const Flags = @import("./Flags.zig");
 pub const FlexSlice = @import("./FlexSlice.zig");
 // pub const Format = @import("./Format.zig");
 pub const Fuzz = @import("./Fuzz.zig");
+pub const GenericAllocator = @import("./GenericAllocator.zig");
 pub const GenId = @import("./GenId.zig");
 pub const IList_ArrayListAdapter = @import("./IList_ArrayListAdapter.zig");
 pub const IList_Iterator = @import("./IList_Iterator.zig");
