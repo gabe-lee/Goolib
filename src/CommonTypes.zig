@@ -240,6 +240,12 @@ pub const Alignment = enum(u64) {
     _L_62 = 1 << 62,
     _L_63 = 1 << 63,
 
+    pub fn from_address(addr: usize) Alignment {
+        return @enumFromInt(@as(u64, 1) << @as(math.Log2Int(u64), @intCast(@ctz(addr))));
+    }
+    pub fn from_pointer(ptr: anytype) Alignment {
+        return @enumFromInt(@as(u64, 1) << @as(math.Log2Int(u64), @intCast(@ctz(@intFromPtr(ptr)))));
+    }
     pub fn to_usize(self: Alignment) usize {
         return @intCast(@intFromEnum(self));
     }

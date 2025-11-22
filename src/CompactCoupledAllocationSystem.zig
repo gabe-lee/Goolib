@@ -60,11 +60,34 @@ pub const DataSecurityMode = enum(u8) {
     explicitly_zero_freed_data,
 };
 
-pub fn CompactCoupledAllocationSystem(comptime UNIQUE_IDENTIFIER: []const u8, comptime ADDRESS_UINT: type, comptime LEN_UINT: type, comptime THREADING_MODE: ThreadingMode, comptime SECURITY_MODE: DataSecurityMode) type {
-    assert_with_reason(Types.type_is_unsigned_int(ADDRESS_UINT), @src(), "type `OFFSET_UINT` must be an unsigned integer type, got type {s}", .{@typeName(ADDRESS_UINT)});
-    assert_with_reason(Types.type_is_unsigned_int(LEN_UINT), @src(), "type `LEN_UINT` must be an unsigned integer type, got type {s}", .{@typeName(LEN_UINT)});
-    assert_with_reason(Types.integer_type_A_has_bits_greater_than_or_equal_to_B(ADDRESS_UINT, LEN_UINT), @src(), "type `OFFSET_UINT` must have a bit count >= type `LEN_UINT`, got {d} < {d}", .{ @typeInfo(ADDRESS_UINT).int.bits, @typeInfo(LEN_UINT).int.bits });
+pub const CCAS_Definition = struct {
+    UNIQUE_IDENTIFIER: []const u8 = "DEFAULT",
+    ADDRESS_UINT: type = u32,
+    LEN_UINT: type = u32,
+    THREADING_MODE: ThreadingMode = .single_threaded,
+    SECURITY_MODE: DataSecurityMode = .do_not_explicitly_zero_freed_data,
+
+    pub fn new(comptime UNIQUE_IDENTIFIER: []const u8, comptime ADDRESS_UINT: type, comptime LEN_UINT: type, comptime THREADING_MODE: ThreadingMode, comptime SECURITY_MODE: DataSecurityMode) CCAS_Definition {
+        return CCAS_Definition{
+            .UNIQUE_IDENTIFIER = UNIQUE_IDENTIFIER,
+            .ADDRESS_UINT = ADDRESS_UINT,
+            .LEN_UINT = LEN_UINT,
+            .THREADING_MODE = THREADING_MODE,
+            .SECURITY_MODE = SECURITY_MODE,
+        };
+    }
+};
+
+pub fn CompactCoupledAllocationSystem(comptime _DEFINITION: CCAS_Definition) type {
+    assert_with_reason(Types.type_is_unsigned_int(_DEFINITION.ADDRESS_UINT), @src(), "type `OFFSET_UINT` must be an unsigned integer type, got type {s}", .{@typeName(_DEFINITION.ADDRESS_UINT)});
+    assert_with_reason(Types.type_is_unsigned_int(_DEFINITION.LEN_UINT), @src(), "type `LEN_UINT` must be an unsigned integer type, got type {s}", .{@typeName(_DEFINITION.LEN_UINT)});
+    assert_with_reason(Types.integer_type_A_has_bits_greater_than_or_equal_to_B(_DEFINITION.ADDRESS_UINT, _DEFINITION.LEN_UINT), @src(), "type `OFFSET_UINT` must have a bit count >= type `LEN_UINT`, got {d} < {d}", .{ @typeInfo(_DEFINITION.ADDRESS_UINT).int.bits, @typeInfo(_DEFINITION.LEN_UINT).int.bits });
     return struct {
+        const UNIQUE_IDENTIFIER = _DEFINITION.UNIQUE_IDENTIFIER;
+        const ADDRESS_UINT = _DEFINITION.ADDRESS_UINT;
+        const LEN_UINT = _DEFINITION.LEN_UINT;
+        const THREADING_MODE = _DEFINITION.THREADING_MODE;
+        const SECURITY_MODE = _DEFINITION.SECURITY_MODE;
         const ALLOC_UINT_BITS: usize = @intCast(@typeInfo(ADDRESS_UINT).int.bits);
         const ALLOC_UINT_BITS_MINUS_ONE = ALLOC_UINT_BITS - 1;
         const BUCKET_COUNT = (ALLOC_UINT_BITS >> 1) + 1;
@@ -81,6 +104,8 @@ pub fn CompactCoupledAllocationSystem(comptime UNIQUE_IDENTIFIER: []const u8, co
             }
             break :make sizes;
         };
+
+        pub const DEFINITION = _DEFINITION;
 
         const STATE = switch (THREADING_MODE) {
             .single_threaded => struct {
@@ -400,7 +425,8 @@ pub fn CompactCoupledAllocationSystem(comptime UNIQUE_IDENTIFIER: []const u8, co
 
         pub fn create_ptr(comptime T: type) Ptr(T) {
             const size = @sizeOf(T);
-            const block = claim_data_block(size);
+            const alignment = Alignment.from_type(T).to_uint(LEN_UINT);
+            const block = claim_data_block(size, alignment);
             return Ptr(T){ .addr = Addr{ .val = block.start } };
         }
 

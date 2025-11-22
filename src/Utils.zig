@@ -36,9 +36,12 @@ const ANSI = Root.ANSI;
 const BinarySearch = Root.BinarySearch;
 const Assert = Root.Assert;
 const Types = Root.Types;
+const Test = Root.Testing;
 const assert_with_reason = Assert.assert_with_reason;
 
 pub const _Fuzzer = @import("./Utils_Fuzz.zig");
+
+pub const Alloc = @import("./Utils_Allocator.zig");
 
 pub inline fn inline_swap(comptime T: type, a: *T, b: *T, temp: *T) void {
     temp.* = a.*;
@@ -987,6 +990,163 @@ pub fn mem_remove_sparse_by_values_in_list_order(comptime T: type, data_ptr: [*]
         write_idx += 1;
     }
     len_ptr.* -= @intCast(del_val_idx);
+}
+
+pub const FilterResult = struct {
+    is_true: bool = false,
+    more_items: bool = true,
+
+    pub fn new(cond: bool, more: bool) FilterResult {
+        return FilterResult{
+            .is_true = cond,
+            .more_items = more,
+        };
+    }
+
+    pub fn cond_continue(cond: bool) FilterResult {
+        return FilterResult{
+            .is_true = cond,
+            .more_items = true,
+        };
+    }
+    pub fn cond_stop(cond: bool) FilterResult {
+        return FilterResult{
+            .is_true = cond,
+            .more_items = false,
+        };
+    }
+    pub fn true_continue() FilterResult {
+        return FilterResult{
+            .is_true = true,
+            .more_items = true,
+        };
+    }
+    pub fn true_stop() FilterResult {
+        return FilterResult{
+            .is_true = true,
+            .more_items = false,
+        };
+    }
+    pub fn false_continue() FilterResult {
+        return FilterResult{
+            .is_true = false,
+            .more_items = true,
+        };
+    }
+    pub fn false_stop() FilterResult {
+        return FilterResult{
+            .is_true = false,
+            .more_items = false,
+        };
+    }
+};
+
+/// This method deletes all of the indexes from the provided list where
+/// the value at that index results in `filter_func(val) == true`
+pub fn mem_remove_sparse_by_filter_func(comptime T: type, data_ptr: [*]T, len_ptr: anytype, start_index: usize, userdata: anytype, filter_func: *const fn (val: T, userdata: @TypeOf(userdata)) FilterResult) void {
+    const LEN_PTR = @TypeOf(len_ptr);
+    assert_with_reason(Types.type_is_single_item_pointer(LEN_PTR), @src(), "type of `len_ptr` must be a single-item-pointer to an integer type, got type {s}", .{@typeName(LEN_PTR)});
+    const LEN = @typeInfo(LEN_PTR).pointer.child;
+    assert_with_reason(Types.type_is_int(LEN), @src(), "type of `len_ptr` must be a single-item-pointer to an integer type, got type {s}", .{@typeName(LEN_PTR)});
+    var read_idx: usize = start_index;
+    var write_idx: usize = start_index;
+    var delete_count: usize = 0;
+    var filter_result = FilterResult{};
+    const slice: []T = data_ptr[0..@as(usize, @intCast(len_ptr.*))];
+    while (read_idx < slice.len and filter_result.more_items) {
+        const this_val = slice[read_idx];
+        filter_result = filter_func(this_val, userdata);
+        if (filter_result.is_true) {
+            write_idx = read_idx;
+            read_idx += 1;
+            delete_count += 1;
+            break;
+        } else {
+            read_idx += 1;
+        }
+    }
+    while (read_idx < slice.len and filter_result.more_items) {
+        const this_val = slice[read_idx];
+        filter_result = filter_func(this_val, userdata);
+        if (filter_result.is_true) {
+            read_idx += 1;
+            delete_count += 1;
+        } else {
+            slice[write_idx] = slice[read_idx];
+            read_idx += 1;
+            write_idx += 1;
+        }
+    }
+    if (delete_count == 0) return;
+    while (read_idx < slice.len) {
+        slice[write_idx] = slice[read_idx];
+        read_idx += 1;
+        write_idx += 1;
+    }
+    len_ptr.* -= @intCast(delete_count);
+}
+
+test mem_remove_sparse_by_filter_func {
+    const P = struct {
+        fn val_is_odd(v: u8, _: @TypeOf(null)) FilterResult {
+            return .cond_continue(v % 2 == 1);
+        }
+        fn val_is_even(v: u8, c: *usize) FilterResult {
+            var result: FilterResult = .cond_continue(v % 2 == 0);
+            if (result.is_true) c.* -= 1;
+            result.more_items = c.* > 0;
+            return result;
+        }
+        fn count_evens(slice: []u8) usize {
+            var c: usize = 0;
+            for (slice) |v| {
+                if (v % 2 == 0) c += 1;
+            }
+            return c;
+        }
+        fn count_odds(slice: []u8) usize {
+            var c: usize = 0;
+            for (slice) |v| {
+                if (v % 2 == 1) c += 1;
+            }
+            return c;
+        }
+        fn all_vals_even_and_match_count(slice: []u8, count: usize) bool {
+            var c: usize = 0;
+            for (slice) |v| {
+                if (v % 2 == 1) return false;
+                c += 1;
+            }
+            return c == count;
+        }
+        fn all_vals_odd_and_match_count(slice: []u8, count: usize) bool {
+            var c: usize = 0;
+            for (slice) |v| {
+                if (v % 2 == 0) return false;
+                c += 1;
+            }
+            return c == count;
+        }
+    };
+    var ARR: [128]u8 = undefined;
+    var buf: []u8 = ARR[0..];
+    var r = std.Random.DefaultPrng.init(@bitCast(std.time.microTimestamp()));
+    var rand = r.random();
+    var c: usize = undefined;
+    const CHECK_COUNT = 16;
+    for (0..CHECK_COUNT) |_| {
+        buf = ARR[0..];
+        rand.bytes(buf);
+        c = P.count_evens(buf);
+        mem_remove_sparse_by_filter_func(u8, buf.ptr, &buf.len, 0, null, P.val_is_odd);
+        try Test.expect_true(P.all_vals_even_and_match_count(buf, c), "P.all_vals_even_and_match_count(buf)", "mem_remove_sparse_by_filter_func(..., val_is_odd) did not remove all odd values or removed some even values", .{});
+        buf = ARR[0..];
+        rand.bytes(buf);
+        c = P.count_odds(buf);
+        var cc = ARR.len - c;
+        mem_remove_sparse_by_filter_func(u8, buf.ptr, &buf.len, 0, &cc, P.val_is_even);
+        try Test.expect_true(P.all_vals_odd_and_match_count(buf, c), "P.all_vals_odd_and_match_count(buf)", "mem_remove_sparse_by_filter_func(..., val_is_even) did not remove all even values or removed some odd values", .{});
+    }
 }
 
 pub fn mem_realloc(comptime T: type, comptime I: type, ptr: *[*]T, len: I, cap: *I, new_cap: I, alloc: Allocator, comptime RET_BOOL: bool) if (RET_BOOL) bool else void {
