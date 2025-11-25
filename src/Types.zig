@@ -76,6 +76,7 @@ pub fn ptr_cast_const(ptr_or_slice: anytype, comptime new_type: type) *const new
         else => @ptrCast(@alignCast(ptr_or_slice)),
     };
 }
+
 pub fn ptr_cast(ptr_or_slice: anytype, comptime new_type: type) *new_type {
     const PTR = @TypeOf(ptr_or_slice);
     const P_INFO = @typeInfo(PTR);
@@ -91,6 +92,47 @@ pub fn ptr_cast(ptr_or_slice: anytype, comptime new_type: type) *new_type {
             false => @ptrCast(@alignCast(ptr_or_slice)),
         },
     };
+}
+
+pub fn slice_cast(ptr_or_slice: anytype, comptime T: type, len: usize) []T {
+    const PTR = @TypeOf(ptr_or_slice);
+    const P_INFO = @typeInfo(PTR);
+    assert_with_reason(P_INFO == .pointer, @src(), "input `ptr_or_slice` must be a pointer type", .{});
+    const PTR_INFO = P_INFO.pointer;
+    const ptr: [*]T = switch (PTR_INFO.size) {
+        .slice => switch (PTR_INFO.is_const) {
+            true => @ptrCast(@alignCast(@constCast(ptr_or_slice.ptr))),
+            false => @ptrCast(@alignCast(ptr_or_slice.ptr)),
+        },
+        else => switch (PTR_INFO.is_const) {
+            true => @ptrCast(@alignCast(@constCast(ptr_or_slice))),
+            false => @ptrCast(@alignCast(ptr_or_slice)),
+        },
+    };
+    return ptr[0..len];
+}
+pub fn slice_cast_implicit_len(ptr_or_slice: anytype, comptime T: type) []T {
+    const PTR = @TypeOf(ptr_or_slice);
+    const P_INFO = @typeInfo(PTR);
+    assert_with_reason(P_INFO == .pointer, @src(), "input `ptr_or_slice` must be a pointer type", .{});
+    const PTR_INFO = P_INFO.pointer;
+    const ptr: [*]T = switch (PTR_INFO.size) {
+        .slice => switch (PTR_INFO.is_const) {
+            true => @ptrCast(@alignCast(@constCast(ptr_or_slice.ptr))),
+            false => @ptrCast(@alignCast(ptr_or_slice.ptr)),
+        },
+        else => switch (PTR_INFO.is_const) {
+            true => @ptrCast(@alignCast(@constCast(ptr_or_slice))),
+            false => @ptrCast(@alignCast(ptr_or_slice)),
+        },
+    };
+    const original_len: usize = switch (PTR_INFO.size) {
+        .slice => ptr_or_slice.len,
+        else => 1,
+    };
+    const raw_len = @sizeOf(PTR_INFO.child) * original_len;
+    const new_len = raw_len / @sizeOf(T);
+    return ptr[0..new_len];
 }
 
 pub fn raw_ptr_cast_const(ptr_or_slice: anytype) [*]const u8 {
@@ -615,4 +657,85 @@ pub fn unimplemented_0_params(comptime NAME: []const u8, comptime OUT: type) fn 
         }
     };
     return PROTO.FUNC;
+}
+
+pub fn child_type(comptime T: type) type {
+    const I = @typeInfo(T);
+    switch (I) {
+        .pointer => |P| {
+            return P.child;
+        },
+        .array => |A| {
+            return A.child;
+        },
+        .vector => |V| {
+            return V.child;
+        },
+        else => {
+            Assert.assert_unreachable(@src(), "type {s} does not have a child type", .{@typeName(T)});
+        },
+    }
+}
+
+pub fn type_has_equals(comptime T: type) bool {
+    const I = @typeInfo(T);
+    switch (I) {
+        .comptime_int, .comptime_float, .bool, .@"enum", .int, .float, .type, .enum_literal => return true,
+        .@"struct" => {
+            if (type_has_method_with_signature(T, "equals", &.{builtin.Type.Fn.Param{
+                .is_generic = false,
+                .is_noalias = false,
+                .type = T,
+            }}, bool)) {
+                return true;
+            } else {
+                return false;
+            }
+        },
+        else => return false,
+    }
+}
+
+pub const EqualsMode = enum(u8) {
+    none,
+    native,
+    slice,
+    method,
+};
+
+pub fn type_equals_mode(comptime T: type) EqualsMode {
+    const I = @typeInfo(T);
+    switch (I) {
+        .comptime_int, .comptime_float, .bool, .@"enum", .int, .float, .type, .enum_literal => return .native,
+        .@"struct" => {
+            if (type_has_method_with_signature(T, "equals", &.{builtin.Type.Fn.Param{
+                .is_generic = false,
+                .is_noalias = false,
+                .type = T,
+            }}, bool)) {
+                return .function;
+            } else {
+                return .none;
+            }
+        },
+        .array => |A| {
+            if (type_equals_mode(A.child) != .native) return .none;
+            return .slice;
+        },
+        .vector => |V| {
+            if (type_equals_mode(V.child) != .native) return .none;
+            return .slice;
+        },
+        .pointer => |P| {
+            switch (P.size) {
+                .one => return .native,
+                .slice => {
+                    if (type_equals_mode(P.child) != .native) return .none;
+                    return .slice;
+                },
+                else => return .none,
+            }
+        },
+        else => return .none,
+    }
 }

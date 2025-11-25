@@ -3256,6 +3256,13 @@ pub const Range = struct {
         return ((self.last_idx - self.first_idx) >> 1) + self.first_idx;
     }
 
+    pub fn from_idx_count(idx: usize, count: usize) Range {
+        return Range{
+            .first_idx = idx,
+            .last_idx = idx + count - 1,
+        };
+    }
+
     pub fn new_range(first: usize, last: usize) Range {
         return Range{
             .first_idx = first,

@@ -1262,3 +1262,22 @@ pub fn replace_key_value_in_buffer(comptime T: type, buf: []T, key_val: T, repla
         i += 1;
     }
 }
+
+pub fn equals_implicit(a: anytype, b: @TypeOf(a)) bool {
+    const T = @TypeOf(a);
+    switch (Types.type_equals_mode(T)) {
+        .native => {
+            return a == b;
+        },
+        .method => {
+            return a.equals(b);
+        },
+        .slice => {
+            const C = Types.child_type(T);
+            return std.mem.eql(C, a[0..], b[0..]);
+        },
+        .none => {
+            Assert.assert_unreachable(@src(), "type `{s}` does not have an implicit equality mode", .{@typeName(T)});
+        },
+    }
+}

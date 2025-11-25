@@ -36,25 +36,40 @@ const List = Root.IList_List.List;
 const Range = Root.IList.Range;
 
 const Meta = @import("./ParamTable_Meta.zig");
-const PTable = Root.ParamTable;
+const ParamTable = Root.ParamTable;
+
+const assert_with_reason = Assert.assert_with_reason;
+const assert_unreachable = Assert.assert_unreachable;
+const assert_allocation_failure = Assert.assert_allocation_failure;
 
 pub const MetaCalc = struct {
     calc_id: Meta.CalcID,
-    
 };
 
+pub const ParamCalc = fn (*const CalcInterface) void;
+
+fn assert_field_is_type(comptime field: std.builtin.Type.StructField, comptime T: type) void {
+    assert_with_reason(field.type == T, @src(), "reason_fmt: []const u8", reason_args: anytype)
+}
+
 pub const CalcInterface = struct {
-    table: *PTable.Table,
+    table: *ParamTable.Table,
     inputs: []Meta.ParamId,
     outputs: []Meta.ParamId,
 
-    pub fn get_inputs(self: *CalcInterface, comptime IN_STRUCT: type) IN_STRUCT {
-        const INFO = @typeInfo(IN_STRUCT);
-        Assert.assert_with_reason(Types.type_is_struct(IN_STRUCT), @src(), "type `IN_STRUCT` must be a struct type, got `{s}`", .{@typeName(IN_STRUCT)});
+    pub fn get_inputs(self: *CalcInterface, comptime INPUT_STRUCT: type) INPUT_STRUCT {
+        const INFO = @typeInfo(INPUT_STRUCT);
+        assert_with_reason(Types.type_is_struct(INPUT_STRUCT), @src(), "type `IN_STRUCT` must be a struct type, got `{s}`", .{@typeName(INPUT_STRUCT)});
         const STRUCT = INFO.@"struct";
-        Assert.assert_with_reason(STRUCT.fields.len == self.inputs.len, @src(), reason_fmt: []const u8, reason_args: anytype)
+        assert_with_reason(STRUCT.fields.len == self.inputs.len, @src(), "type `INPUT_STRUCT` must have exactly the same number of fields as `self.inputs.len`, got fileds = {d}, inputs = {d}", .{STRUCT.fields.len, self.inputs.len});
+        var inputs: INPUT_STRUCT = undefined;
         for (STRUCT.fields, self.inputs) |f, i| {
-
+            const metadata = self.table.metadata.get(i.id);
+            switch (metadata.param_type) {
+                .U64 => {}
+            }
         }
     }
 };
+
+pub const Param
