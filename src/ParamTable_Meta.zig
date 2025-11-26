@@ -38,7 +38,7 @@ const Range = Root.IList.Range;
 const ParamTable = Root.ParamTable;
 
 const IList16 = IList(u16);
-const List16 = List(u16);
+const ListParamId = List(ParamId);
 
 const assert_with_reason = Assert.assert_with_reason;
 const assert_unreachable = Assert.assert_unreachable;
@@ -47,9 +47,9 @@ const assert_allocation_failure = Assert.assert_allocation_failure;
 const intcast = Types.intcast;
 
 pub const Metadata = struct {
-    hookups_raw: List16,
+    hookups_raw: ListParamId,
     calc_id: CalcID,
-    val_idx: ValIdx,
+    val_idx: u16,
     param_type: ParamType,
     flags: PFlags,
     children_start: u8,
@@ -61,10 +61,10 @@ pub const Metadata = struct {
     pub fn is_used(self: Metadata) bool {
         return !self.flags.has_flag(.FREE);
     }
-    pub fn set_used(self: Metadata) void {
+    pub fn set_used(self: *Metadata) void {
         self.flags.clear(.FREE);
     }
-    pub fn set_free(self: Metadata) void {
+    pub fn set_free(self: *Metadata) void {
         self.flags.set(.FREE);
     }
 
@@ -74,10 +74,10 @@ pub const Metadata = struct {
     pub fn only_update_on_change(self: Metadata) bool {
         return !self.flags.has_flag(.ALWAYS_UPDATE);
     }
-    pub fn set_always_update(self: Metadata) void {
+    pub fn set_always_update(self: *Metadata) void {
         self.flags.set(.ALWAYS_UPDATE);
     }
-    pub fn set_only_update_on_change(self: Metadata) void {
+    pub fn set_only_update_on_change(self: *Metadata) void {
         self.flags.clear(.ALWAYS_UPDATE);
     }
 
@@ -87,10 +87,10 @@ pub const Metadata = struct {
     pub fn no_siblings(self: Metadata) bool {
         return !self.flags.has_flag(.HAS_SIBLINGS);
     }
-    pub fn set_has_siblings(self: Metadata) void {
+    pub fn set_has_siblings(self: *Metadata) void {
         self.flags.set(.HAS_SIBLINGS);
     }
-    pub fn set_no_siblings(self: Metadata) void {
+    pub fn set_no_siblings(self: *Metadata) void {
         self.flags.clear(.HAS_SIBLINGS);
     }
 
@@ -100,10 +100,10 @@ pub const Metadata = struct {
     pub fn no_parent(self: Metadata) bool {
         return !self.flags.has_flag(.HAS_PARENT);
     }
-    pub fn set_has_parent(self: Metadata) void {
+    pub fn set_has_parent(self: *Metadata) void {
         self.flags.set(.HAS_PARENT);
     }
-    pub fn set_no_parent(self: Metadata) void {
+    pub fn set_no_parent(self: *Metadata) void {
         self.flags.clear(.HAS_PARENT);
     }
 
@@ -113,10 +113,10 @@ pub const Metadata = struct {
     pub fn no_children(self: Metadata) bool {
         return !self.flags.has_flag(.HAS_CHILDREN);
     }
-    pub fn set_has_children(self: Metadata) void {
+    pub fn set_has_children(self: *Metadata) void {
         self.flags.set(.HAS_CHILDREN);
     }
-    pub fn set_no_children(self: Metadata) void {
+    pub fn set_no_children(self: *Metadata) void {
         self.flags.clear(.HAS_CHILDREN);
     }
 
@@ -126,10 +126,10 @@ pub const Metadata = struct {
     pub fn no_calc(self: Metadata) bool {
         return !self.flags.has_flag(.HAS_CALC);
     }
-    pub fn set_has_calc(self: Metadata) void {
+    pub fn set_has_calc(self: *Metadata) void {
         self.flags.set(.HAS_CALC);
     }
-    pub fn set_no_calc(self: Metadata) void {
+    pub fn set_no_calc(self: *Metadata) void {
         self.flags.clear(.HAS_CALC);
     }
 
@@ -138,161 +138,169 @@ pub const Metadata = struct {
     }
 
     pub fn get_hookups(self: Metadata, table: *ParamTable.Table) Hookups {
-        const p = self.hookups_raw.slice()[0..self.siblings_start];
-        const s = self.hookups_raw.slice()[self.siblings_start..self.children_start];
-        const c = self.hookups_raw.slice()[self.children_start..];
         return Hookups{
-            .parents = Types.slice_cast_implicit_len(p, ParamId),
-            .siblings = Types.slice_cast_implicit_len(s, ParamId),
-            .children = Types.slice_cast_implicit_len(c, ParamId),
-            .calc = if (self.has_calc()) table.calcs.get(@intCast(self.calc_id)) else null,
+            .parents = self.hookups_raw.slice()[0..self.siblings_start],
+            .siblings = self.hookups_raw.slice()[self.siblings_start..self.children_start],
+            .children = self.hookups_raw.slice()[self.children_start..],
+            .calc = if (self.has_calc()) table.calcs.get(@intCast(self.calc_id.id)) else null,
         };
     }
 
     pub fn get_children(self: Metadata) []ParamId {
-        const c = self.hookups_raw.slice()[self.children_start..];
-        return Types.slice_cast_implicit_len(c, ParamId);
+        return self.hookups_raw.slice()[self.children_start..];
     }
 
-    pub fn append_child(self: *Metadata, child: ParamId, alloc: Allocator) u16 {
-        const real_idx: u16 = @intCast(self.hookups_raw.append(child.id, alloc));
-        return real_idx - Types.intcast(self.children_start, u16);
+    fn doesnt_have_child(self: *Metadata, child: ParamId) bool {
+        const children = self.get_children();
+        for (children) |c| {
+            if (c.id == child.id) return false;
+        }
+        return true;
     }
 
-    pub fn append_children(self: *Metadata, children: []ParamId, alloc: Allocator) u16 {
-        const raw_children = Types.slice_cast_implicit_len(children, u16);
-        const real_idx: u16 = @intCast(self.hookups_raw.append_zig_slice(alloc, raw_children).first_idx);
-        return real_idx - Types.intcast(self.children_start, u16);
+    pub fn append_child(self: *Metadata, child: ParamId, alloc: Allocator) void {
+        if (self.doesnt_have_child(child)) {
+            _ = self.hookups_raw.append(child, alloc);
+            // const real_idx: u16 = @intCast(self.hookups_raw.append(child, alloc));
+            // return real_idx - Types.intcast(self.children_start, u16);
+        }
     }
 
-    pub fn insert_child(self: *Metadata, idx: u16, child: ParamId, alloc: Allocator) void {
-        const real_idx = Types.intcast(self.children_start, usize) + Types.intcast(idx, usize);
-        self.hookups_raw.insert(real_idx, child.id, alloc);
+    pub fn append_children(self: *Metadata, children: []const ParamId, alloc: Allocator) void {
+        for (children) |c| {
+            self.append_child(c, alloc);
+        }
+        // const real_idx: u16 = @intCast(self.hookups_raw.append_zig_slice(alloc, children).first_idx);
+        // return real_idx - Types.intcast(self.children_start, u16);
     }
 
-    pub fn insert_children(self: *Metadata, idx: u16, children: []ParamId, alloc: Allocator) void {
-        const raw_children = Types.slice_cast_implicit_len(children, u16);
-        const real_idx = Types.intcast(self.children_start, usize) + Types.intcast(idx, usize);
-        self.hookups_raw.insert_zig_slice(real_idx, alloc, raw_children);
-    }
+    // pub fn insert_child(self: *Metadata, idx: u16, child: ParamId, alloc: Allocator) void {
+    //     const real_idx = Types.intcast(self.children_start, usize) + Types.intcast(idx, usize);
+    //     self.hookups_raw.insert(real_idx, child.id, alloc);
+    // }
 
-    pub fn delete_child(self: *Metadata, idx: u16) void {
-        const real_idx = Types.intcast(self.children_start, usize) + Types.intcast(idx, usize);
-        self.hookups_raw.delete(real_idx);
-    }
+    // pub fn insert_children(self: *Metadata, idx: u16, children: []const ParamId, alloc: Allocator) void {
+    //     const real_idx = Types.intcast(self.children_start, usize) + Types.intcast(idx, usize);
+    //     self.hookups_raw.insert_zig_slice(real_idx, alloc, children);
+    // }
 
-    pub fn delete_children(self: *Metadata, idx: u16, count: u16) void {
-        const real_idx = Types.intcast(self.children_start, usize) + Types.intcast(idx, usize);
-        self.hookups_raw.delete_range(.from_idx_count(real_idx, count));
-    }
+    // pub fn delete_child(self: *Metadata, idx: u16) void {
+    //     const real_idx = Types.intcast(self.children_start, usize) + Types.intcast(idx, usize);
+    //     self.hookups_raw.delete(real_idx);
+    // }
+
+    // pub fn delete_children(self: *Metadata, idx: u16, count: u16) void {
+    //     const real_idx = Types.intcast(self.children_start, usize) + Types.intcast(idx, usize);
+    //     self.hookups_raw.delete_range(.from_idx_count(real_idx, count));
+    // }
 
     pub fn assert_can_add_parents_or_siblings(self: Metadata, n: u16, comptime src: std.builtin.SourceLocation) void {
-        assert_with_reason(intcast(self.children_start, u16) + n <= 255, src, "adding {d} more parents or siblings will exceed the limit (current children_start = {d}, only room for {d} more) (ParamType = {s}, ValIdx = {d})", .{ n, self.children_start, 255 - self.children_start, ParamType.NAMES[self.param_type], self.val_idx });
+        assert_with_reason(intcast(self.children_start, u16) + n <= 255, src, "adding {d} more parents or siblings will exceed the limit (current children_start = {d}, only room for {d} more) (ParamType = {s}, ValIdx = {d})", .{ n, self.children_start, 255 - self.children_start, self.param_type.name(), self.val_idx });
     }
 
     pub fn assert_can_delete_siblings(self: Metadata, start: u16, count: u16, comptime src: std.builtin.SourceLocation) void {
         const sib_start = intcast(self.siblings_start, u16) + start;
         const sib_end = sib_start + count;
-        assert_with_reason(sib_end <= intcast(self.children_start, u16), src, "cannot delete {d} siblings starting at sibling index {d}, only {d} siblings exist aftet that index (ParamType = {s}, ValIdx = {d})", .{ count, start, intcast(self.children_start, u16) - sib_start, ParamType.NAMES[self.param_type], self.val_idx });
+        assert_with_reason(sib_end <= intcast(self.children_start, u16), src, "cannot delete {d} siblings starting at sibling index {d}, only {d} siblings exist aftet that index (ParamType = {s}, ValIdx = {d})", .{ count, start, intcast(self.children_start, u16) - sib_start, self.param_type.name(), self.val_idx });
     }
 
     pub fn assert_can_delete_parents(self: Metadata, start: u16, count: u16, comptime src: std.builtin.SourceLocation) void {
         const par_start = start;
         const par_end = par_start + count;
-        assert_with_reason(par_end <= intcast(self.siblings_start, u16), src, "cannot delete {d} parents starting at parent index {d}, only {d} parents exist aftet that index (ParamType = {s}, ValIdx = {d})", .{ count, start, intcast(self.siblings_start, u16) - par_start, ParamType.NAMES[self.param_type], self.val_idx });
+        assert_with_reason(par_end <= intcast(self.siblings_start, u16), src, "cannot delete {d} parents starting at parent index {d}, only {d} parents exist aftet that index (ParamType = {s}, ValIdx = {d})", .{ count, start, intcast(self.siblings_start, u16) - par_start, self.param_type.name(), self.val_idx });
     }
 
-    pub fn append_sibling(self: *Metadata, sibling: ParamId, alloc: Allocator) u16 {
+    pub fn append_sibling(self: *Metadata, sibling: ParamId, alloc: Allocator) void {
         const real_idx = intcast(self.children_start, u16);
-        self.assert_can_add_parents_or_siblings(1);
+        self.assert_can_add_parents_or_siblings(1, @src());
         self.children_start += 1;
-        _ = self.hookups_raw.insert(real_idx, sibling.id, alloc);
-        return real_idx - intcast(self.siblings_start, u16);
+        _ = self.hookups_raw.insert(real_idx, sibling, alloc);
+        // return real_idx - intcast(self.siblings_start, u16);
     }
 
-    pub fn append_siblings(self: *Metadata, siblings: []ParamId, alloc: Allocator) u16 {
+    pub fn append_siblings(self: *Metadata, siblings: []const ParamId, alloc: Allocator) void {
         const real_idx = intcast(self.children_start, u16);
-        self.assert_can_add_parents_or_siblings(@intCast(siblings.len));
+        self.assert_can_add_parents_or_siblings(@intCast(siblings.len), @src());
         self.children_start += @intCast(siblings.len);
-        _ = self.hookups_raw.insert_zig_slice(real_idx, siblings, alloc);
-        return real_idx - intcast(self.siblings_start, u16);
+        _ = self.hookups_raw.insert_zig_slice(real_idx, alloc, siblings);
+        // return real_idx - intcast(self.siblings_start, u16);
     }
 
-    pub fn insert_sibling(self: *Metadata, idx: u16, sibling: ParamId, alloc: Allocator) u16 {
-        const real_idx = intcast(self.siblings_start, u16) + idx;
-        self.assert_can_add_parents_or_siblings(1);
-        self.children_start += 1;
-        _ = self.hookups_raw.insert(real_idx, sibling.id, alloc);
-        return real_idx - intcast(self.siblings_start, u16);
-    }
+    // pub fn insert_sibling(self: *Metadata, idx: u16, sibling: ParamId, alloc: Allocator) u16 {
+    //     const real_idx = intcast(self.siblings_start, u16) + idx;
+    //     self.assert_can_add_parents_or_siblings(1, @src());
+    //     self.children_start += 1;
+    //     _ = self.hookups_raw.insert(real_idx, sibling.id, alloc);
+    //     return real_idx - intcast(self.siblings_start, u16);
+    // }
 
-    pub fn insert_siblings(self: *Metadata, idx: u16, siblings: []ParamId, alloc: Allocator) u16 {
-        const real_idx = intcast(self.siblings_start, u16) + idx;
-        self.assert_can_add_parents_or_siblings(@intCast(siblings.len));
-        self.children_start += @intCast(siblings.len);
-        _ = self.hookups_raw.insert_zig_slice(real_idx, siblings, alloc);
-        return real_idx - intcast(self.siblings_start, u16);
-    }
+    // pub fn insert_siblings(self: *Metadata, idx: u16, siblings: []const ParamId, alloc: Allocator) u16 {
+    //     const real_idx = intcast(self.siblings_start, u16) + idx;
+    //     self.assert_can_add_parents_or_siblings(@intCast(siblings.len), @src());
+    //     self.children_start += @intCast(siblings.len);
+    //     _ = self.hookups_raw.insert_zig_slice(real_idx, alloc, siblings);
+    //     return real_idx - intcast(self.siblings_start, u16);
+    // }
 
-    pub fn delete_sibling(self: *Metadata, idx: u16) void {
-        const real_idx = intcast(self.siblings_start, u16) + idx;
-        self.assert_can_delete_siblings(1);
-        self.children_start -= @intCast(1);
-        _ = self.hookups_raw.delte(real_idx);
-    }
+    // pub fn delete_sibling(self: *Metadata, idx: u16) void {
+    //     const real_idx = intcast(self.siblings_start, u16) + idx;
+    //     self.assert_can_delete_siblings(1, @src());
+    //     self.children_start -= @intCast(1);
+    //     _ = self.hookups_raw.delte(real_idx);
+    // }
 
-    pub fn delete_siblings(self: *Metadata, idx: u16, count: u16) void {
-        const real_idx = intcast(self.siblings_start, u16) + idx;
-        self.assert_can_delete_siblings(count);
-        self.children_start -= @intCast(count);
-        _ = self.hookups_raw.delte_range(.from_idx_count(@intCast(real_idx), @intCast(count)));
-    }
+    // pub fn delete_siblings(self: *Metadata, idx: u16, count: u16) void {
+    //     const real_idx = intcast(self.siblings_start, u16) + idx;
+    //     self.assert_can_delete_siblings(count, @src());
+    //     self.children_start -= @intCast(count);
+    //     _ = self.hookups_raw.delte_range(.from_idx_count(@intCast(real_idx), @intCast(count)));
+    // }
 
-    pub fn append_parent(self: *Metadata, parent: ParamId, alloc: Allocator) u16 {
+    pub fn append_parent(self: *Metadata, parent: ParamId, alloc: Allocator) void {
         const real_idx = intcast(self.siblings_start, u16);
-        self.assert_can_add_parents_or_siblings(1);
+        self.assert_can_add_parents_or_siblings(1, @src());
         self.children_start += 1;
         self.siblings_start += 1;
         _ = self.hookups_raw.insert(real_idx, parent.id, alloc);
-        return real_idx;
+        // return real_idx;
     }
 
-    pub fn append_parents(self: *Metadata, parents: []ParamId, alloc: Allocator) u16 {
+    pub fn append_parents(self: *Metadata, parents: []const ParamId, alloc: Allocator) void {
         const real_idx = intcast(self.siblings_start, u16);
-        self.assert_can_add_parents_or_siblings(@intCast(parents.len));
+        self.assert_can_add_parents_or_siblings(@intCast(parents.len), @src());
         self.children_start += @intCast(parents.len);
         self.siblings_start += @intCast(parents.len);
         _ = self.hookups_raw.insert_zig_slice(real_idx, alloc, parents);
-        return real_idx;
+        // return real_idx;
     }
 
-    pub fn insert_parent(self: *Metadata, idx: u16, parent: ParamId, alloc: Allocator) void {
-        self.assert_can_add_parents_or_siblings(1);
-        self.children_start += 1;
-        self.siblings_start += 1;
-        _ = self.hookups_raw.insert(@intCast(idx), parent.id, alloc);
-    }
+    // pub fn insert_parent(self: *Metadata, idx: u16, parent: ParamId, alloc: Allocator) void {
+    //     self.assert_can_add_parents_or_siblings(1, @src());
+    //     self.children_start += 1;
+    //     self.siblings_start += 1;
+    //     _ = self.hookups_raw.insert(@intCast(idx), parent.id, alloc);
+    // }
 
-    pub fn insert_parents(self: *Metadata, idx: u16, parents: []ParamId, alloc: Allocator) void {
-        self.assert_can_add_parents_or_siblings(@intCast(parents.len));
-        self.children_start += @intCast(parents.len);
-        self.siblings_start += @intCast(parents.len);
-        _ = self.hookups_raw.insert_zig_slice(@intCast(idx), alloc, parents);
-    }
+    // pub fn insert_parents(self: *Metadata, idx: u16, parents: []const ParamId, alloc: Allocator) void {
+    //     self.assert_can_add_parents_or_siblings(@intCast(parents.len), @src());
+    //     self.children_start += @intCast(parents.len);
+    //     self.siblings_start += @intCast(parents.len);
+    //     _ = self.hookups_raw.insert_zig_slice(@intCast(idx), alloc, parents);
+    // }
 
-    pub fn delete_parent(self: *Metadata, idx: u16) void {
-        self.assert_can_delete_parents(1);
-        self.children_start -= @intCast(1);
-        self.siblings_start -= @intCast(1);
-        _ = self.hookups_raw.delete(@intCast(idx));
-    }
+    // pub fn delete_parent(self: *Metadata, idx: u16) void {
+    //     self.assert_can_delete_parents(1, @src());
+    //     self.children_start -= @intCast(1);
+    //     self.siblings_start -= @intCast(1);
+    //     _ = self.hookups_raw.delete(@intCast(idx));
+    // }
 
-    pub fn delete_parents(self: *Metadata, idx: u16, count: u16) void {
-        self.assert_can_delete_parents(count);
-        self.children_start -= @intCast(count);
-        self.siblings_start -= @intCast(count);
-        _ = self.hookups_raw.delte_range(.from_idx_count(@intCast(idx), @intCast(count)));
-    }
+    // pub fn delete_parents(self: *Metadata, idx: u16, count: u16) void {
+    //     self.assert_can_delete_parents(count, @src());
+    //     self.children_start -= @intCast(count);
+    //     self.siblings_start -= @intCast(count);
+    //     _ = self.hookups_raw.delte_range(.from_idx_count(@intCast(idx), @intCast(count)));
+    // }
 };
 
 pub const CalcID = struct {
@@ -303,7 +311,7 @@ pub const ParamId = struct {
     id: u16 = 0,
 };
 
-pub const ValIdx = struct {
+pub const @"u16" = struct {
     idx: u16 = 0,
 };
 

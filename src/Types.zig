@@ -431,6 +431,22 @@ pub inline fn type_is_func(comptime T: type) bool {
     return @typeInfo(T) == .@"fn";
 }
 
+pub inline fn type_is_one_of(comptime T: type, comptime Ts: []const type) bool {
+    inline for (Ts) |Tt| {
+        if (T == Tt) return true;
+    }
+    return false;
+}
+
+pub inline fn type_name_list(comptime Ts: []const type) [:0]const u8 {
+    comptime var S: [:0]const u8 = "{ ";
+    inline for (Ts) |T| {
+        S = S ++ @typeName(T) ++ " ";
+    }
+    S = S ++ "}";
+    return S;
+}
+
 pub inline fn integer_type_A_has_bits_greater_than_B(comptime A: type, comptime B: type) bool {
     return @typeInfo(A).int.bits > @typeInfo(B).int.bits;
 }

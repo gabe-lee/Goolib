@@ -584,10 +584,10 @@ pub fn List(comptime T: type) type {
         pub fn try_insert_slots(self: *Self, idx: usize, count: usize, alloc: Allocator) ListError!Range {
             return P.try_insert_slots(self, idx, count, alloc);
         }
-        pub fn insert_zig_slice(self: *Self, idx: usize, alloc: Allocator, source: []T) Range {
+        pub fn insert_zig_slice(self: *Self, idx: usize, alloc: Allocator, source: []const T) Range {
             return P.insert_zig_slice(self, idx, source, alloc);
         }
-        pub fn try_insert_zig_slice(self: *Self, idx: usize, alloc: Allocator, source: []T) ListError!Range {
+        pub fn try_insert_zig_slice(self: *Self, idx: usize, alloc: Allocator, source: []const T) ListError!Range {
             return P.try_insert_zig_slice(self, idx, source, alloc);
         }
         pub fn insert(self: *Self, idx: usize, val: T, alloc: Allocator) usize {

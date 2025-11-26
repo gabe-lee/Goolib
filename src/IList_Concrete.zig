@@ -2334,15 +2334,15 @@ pub fn CreateConcretePrototype(comptime T: type, comptime LIST: type, comptime A
             try try_ensure_free_slots(self, count, alloc);
             return insert_slots_assume_capacity(self, idx, count, alloc);
         }
-        pub fn insert_zig_slice(self: LIST, idx: usize, slice: []T, alloc: ALLOC) Range {
+        pub fn insert_zig_slice(self: LIST, idx: usize, slice: []const T, alloc: ALLOC) Range {
             ensure_free_slots(self, slice.len, alloc);
             return _insert_zig_slice(self, idx, slice, alloc);
         }
-        pub fn try_insert_zig_slice(self: LIST, idx: usize, slice: []T, alloc: ALLOC) ListError!Range {
+        pub fn try_insert_zig_slice(self: LIST, idx: usize, slice: []const T, alloc: ALLOC) ListError!Range {
             try try_ensure_free_slots(self, slice.len, alloc);
             return _insert_zig_slice(self, idx, slice, alloc);
         }
-        fn _insert_zig_slice(self: LIST, idx: usize, slice: []T, alloc: ALLOC) Range {
+        fn _insert_zig_slice(self: LIST, idx: usize, slice: []const T, alloc: ALLOC) Range {
             if (slice.len == 0) return Range.single_idx(always_invalid_idx(self));
             const insert_range = insert_slots_assume_capacity(self, idx, slice.len, alloc);
             if (has_native_slice(self)) {

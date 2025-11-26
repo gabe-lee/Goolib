@@ -31,8 +31,6 @@ const Root = @import("./_root.zig");
 const Utils = Root.Utils;
 const ANSI = Root.ANSI;
 
-
-
 pub inline fn assert_header(comptime BEFORE: []const u8, comptime tag: []const u8, comptime in_comptime: bool, comptime src_loc: ?SourceLocation, comptime log: []const u8, comptime AFTER: []const u8) []const u8 {
     const timing = if (in_comptime) "\n\x1b[1GCOMPTIME " else "\n\x1b[1GRUNTIME ";
     const newline = if (in_comptime) "\n" else "\n\t";
@@ -106,4 +104,12 @@ pub fn assert_idx_and_pointer_reside_in_slice_and_match(comptime T: type, slice:
 pub fn assert_allocation_failure(comptime src: ?SourceLocation, comptime T: type, count: usize, err: anyerror) noreturn {
     assert_with_reason(false, src, "failed to allocate memory for {d} items of type {s} (size needed = {d} bytes), error = {s}", .{ count, @typeName(T), count * @sizeOf(T), @errorName(err) });
     unreachable;
+}
+
+pub fn assert_field_is_type(comptime field: std.builtin.Type.StructField, comptime T: type) void {
+    assert_with_reason(field.type == T, @src(), "field `{s}` was type `{s}`, but needed to be type `{s}`", .{ field.name, @typeName(field.type), @typeName(T) });
+}
+
+pub fn assert_is_type(comptime THIS_T: type, comptime NEED_T: type) void {
+    assert_with_reason(THIS_T == NEED_T, @src(), "got type `{s}`, but needed type `{s}`", .{ @typeName(THIS_T), @typeName(NEED_T) });
 }

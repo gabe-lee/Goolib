@@ -60,9 +60,14 @@ const Table = ParamTable.Table;
 pub fn PTPtr(comptime T: type) type {
     return struct {
         const Self = @This();
+        pub const TYPE = T;
 
         ptr: *T = undefined,
         val_changed: bool = false,
+
+        pub fn equals(self: Self, other: Self) bool {
+            return self.ptr == other.ptr;
+        }
 
         pub fn from_opaque(ptr: *anyopaque) Self {
             return Self{
@@ -103,12 +108,17 @@ const NO_ALLOC = void{};
 pub fn PTList(comptime T: type) type {
     return struct {
         const Self = @This();
+        pub const TYPE = T;
 
         ptr: [*]T = undefined,
         len: u32 = 0,
         cap: u32 = 0,
         vals_changed: bool = false,
         table: *Table,
+
+        pub fn equals(self: Self, other: Self) bool {
+            return self.ptr == other.ptr and self.len == other.len and self.cap == other.cap;
+        }
 
         pub fn to_opaque(self: Self) PTListOpaque {
             return PTListOpaque{
