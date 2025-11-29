@@ -69,13 +69,13 @@ pub fn PTPtr(comptime T: type) type {
             return self.ptr == other.ptr;
         }
 
-        pub fn from_opaque(ptr: *anyopaque) Self {
+        pub fn from_opaque(ptr: ?*anyopaque) Self {
             return Self{
                 .ptr = @ptrCast(@alignCast(ptr)),
                 .val_changed = false,
             };
         }
-        pub fn to_opaque(self: Self) *anyopaque {
+        pub fn to_opaque(self: Self) ?*anyopaque {
             return @ptrCast(self.ptr);
         }
 
@@ -92,6 +92,60 @@ pub fn PTPtr(comptime T: type) type {
                 self.val_changed = true;
             }
             self.ptr.* = val;
+        }
+    };
+}
+
+pub fn PTPtrOrNull(comptime T: type) type {
+    return struct {
+        const Self = @This();
+        pub const TYPE = T;
+
+        ptr: ?*T = undefined,
+        val_changed: bool = false,
+
+        pub fn equals(self: Self, other: Self) bool {
+            return self.ptr == other.ptr;
+        }
+
+        pub fn from_opaque(ptr: ?*anyopaque) Self {
+            return Self{
+                .ptr = @ptrCast(@alignCast(ptr)),
+                .val_changed = false,
+            };
+        }
+        pub fn to_opaque(self: Self) ?*anyopaque {
+            return @ptrCast(self.ptr);
+        }
+
+        pub fn get(self: Self) ?T {
+            if (self.ptr) |p| {
+                return p.*;
+            } else {
+                return null;
+            }
+        }
+
+        pub fn set(self: Self, val: T) void {
+            if (self.ptr) |p| {
+                if (Types.type_has_equals(T)) {
+                    if (!Utils.equals_implicit(p.*, val)) {
+                        self.val_changed = true;
+                    }
+                } else {
+                    self.val_changed = true;
+                }
+                p.* = val;
+            } else {
+                assert_unreachable(@src(), "attempted to set a the location of null pointer to a value", .{});
+            }
+        }
+
+        pub fn set_ptr(self: Self, val_ptr: ?*T) void {
+            if (self.ptr != val_ptr) {
+                self.val_changed = true;
+                self.ptr = val_ptr;
+            }
         }
     };
 }

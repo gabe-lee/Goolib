@@ -55,11 +55,13 @@ pub fn RingList(comptime T: type) type {
         cap: u32 = 0,
 
         pub fn init_empty() Self {
+            Assert.warn_has_bug_somewhere(@src(), "RingList passes current test suite, but using `remove(0)` may return uninitialized/incorrect memory", .{});
             return Self{
                 .ptr = @ptrFromInt(std.mem.alignBackward(usize, math.maxInt(usize), @alignOf(T))),
             };
         }
         pub fn init_capacity(cap: usize, alloc: Allocator) Self {
+            Assert.warn_has_bug_somewhere(@src(), "RingList passes current test suite, but using `remove(0)` may return uninitialized/incorrect memory", .{});
             const new_mem = alloc.alloc(T, cap) catch |err| Assert.assert_allocation_failure(@src(), T, cap, err);
             return Self{
                 .ptr = new_mem.ptr,

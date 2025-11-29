@@ -309,6 +309,11 @@ pub const CalcID = struct {
 
 pub const ParamId = struct {
     id: u16 = 0,
+
+    pub const NULL = ParamId{ .id = math.maxInt(u16) };
+    pub inline fn new_null() ParamId {
+        return NULL;
+    }
 };
 
 pub const @"u16" = struct {
@@ -317,10 +322,14 @@ pub const @"u16" = struct {
 
 pub const ParamType = enum(u8) {
     INVALID,
+    COLOR,
+    // U128,
+    // X96,
     U64,
     I64,
     F64,
     PTR,
+    PTR_OR_NULL,
     LIST,
     U32,
     I32,
@@ -336,10 +345,14 @@ pub const ParamType = enum(u8) {
 
     pub const NAMES = [_COUNT][]const u8{
         "<INVALID>",
+        "COLOR",
+        // "U128",
+        // "X96",
         "U64",
         "I64",
         "F64",
         "PTR",
+        "PTR_OR_NULL",
         "LIST",
         "U32",
         "I32",

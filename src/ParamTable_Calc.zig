@@ -38,6 +38,7 @@ const Meta = @import("./ParamTable_Meta.zig");
 const _List = @import("./ParamTable_List.zig");
 const PTList = _List.PTList;
 const PTPtr = _List.PTPtr;
+const PTPtrOrNull = _List.PTPtrOrNull;
 const ParamTable = Root.ParamTable;
 const Table = ParamTable.Table;
 
@@ -147,10 +148,14 @@ pub const CalcInterface = struct {
                 else => {
                     const T = assert_type_ptptr_or_ptlist_and_get_base_type(f, .ptr);
                     const PTP = PTPtr(T);
+                    const PTPN = PTPtrOrNull(T);
                     const PTL = PTList(T);
                     switch (f.type) {
                         PTP => {
                             @field(object, f.name) = PTP.from_opaque(self.table.list_ptr.ptr[@intCast(metadata.val_idx)]);
+                        },
+                        PTPN => {
+                            assert_meta_is_type(p, metadata, .PTR_OR_NULL, @src());
                         },
                         PTL => {
                             @field(object, f.name) = PTL.from_opaque(self.table.list_list.ptr[@intCast(metadata.val_idx)], self.table);
@@ -207,10 +212,14 @@ pub const CalcInterface = struct {
                 else => {
                     const T = assert_type_ptptr_or_ptlist_and_get_base_type(f, .ptr);
                     const PTP = PTPtr(T);
+                    const PTPN = PTPtrOrNull(T);
                     const PTL = PTList(T);
                     switch (f.type) {
                         PTP => {
                             assert_meta_is_type(p, metadata, .PTR, @src());
+                        },
+                        PTPN => {
+                            assert_meta_is_type(p, metadata, .PTR_OR_NULL, @src());
                         },
                         PTL => {
                             assert_meta_is_type(p, metadata, .LIST, @src());

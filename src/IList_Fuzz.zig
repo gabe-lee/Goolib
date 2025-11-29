@@ -261,34 +261,41 @@ pub fn make_mulit_sort_list_adapter_test(comptime T: type) Fuzz.FuzzTest {
             NORM,
             MOD_32_REV_LT_200,
             MOD_89_GT_42,
+            BETWEEN_100_AND_200_UNSORTED,
         };
-        const MS_LIST = IList.MultiSortList(T, 0, u32, SORTS);
-        fn equal_norm(a: T, b: T) bool {
+        const MS_LIST = IList.MultiSortList(T, 0, u32, SORTS, void);
+        fn equal_norm(a: T, b: T, _: void) bool {
             return a == b;
         }
-        fn greater_norm(a: T, b: T) bool {
+        fn greater_norm(a: T, b: T, _: void) bool {
             return a > b;
         }
-        fn equal_mod_32(a: T, b: T) bool {
+        fn equal_mod_32(a: T, b: T, _: void) bool {
             return (a % 32) == (b % 32);
         }
-        fn greater_mod_32(a: T, b: T) bool {
+        fn greater_mod_32(a: T, b: T, _: void) bool {
             return (a % 32) < (b % 32);
         }
-        fn filter_mod_32(v: T) bool {
+        fn filter_mod_32(v: T, _: void) bool {
             return v < 200;
         }
-        fn equal_mod_89(a: T, b: T) bool {
+        fn equal_mod_89(a: T, b: T, _: void) bool {
             return (a % 89) == (b % 89);
         }
-        fn greater_mod_89(a: T, b: T) bool {
+        fn greater_mod_89(a: T, b: T, _: void) bool {
             return (a % 89) > (b % 89);
         }
-        fn filter_mod_89(v: T) bool {
+        fn filter_mod_89(v: T, _: void) bool {
             return v > 42;
         }
-        fn exact_equal(a: T, b: T) bool {
+        fn exact_equal(a: T, b: T, _: void) bool {
             return a == b;
+        }
+        fn equal_100_to_200(a: T, b: T, _: void) bool {
+            return a == b;
+        }
+        fn filter_100_to_200(v: T, _: void) bool {
+            return 100 <= v and v <= 200;
         }
 
         const INIT_NORM = MS_LIST.SortInit{
@@ -308,10 +315,17 @@ pub fn make_mulit_sort_list_adapter_test(comptime T: type) Fuzz.FuzzTest {
             .greater_than = greater_mod_89,
             .filter = filter_mod_89,
         };
+        const INIT_100_to_200 = MS_LIST.SortInit{
+            .name = SORTS.BETWEEN_100_AND_200_UNSORTED,
+            .equal = equal_100_to_200,
+            .greater_than = null,
+            .filter = filter_100_to_200,
+        };
         const INITS = [_]MS_LIST.SortInit{
             INIT_NORM,
             INIT_MOD_32,
             INIT_MOD_89,
+            INIT_100_to_200,
         };
         const NAME = "IList_MultiSortList_" ++ @typeName(T);
         fn extra_check(state: *STATE, comptime op_name: []const u8, param_1: usize, param_2: usize, param_3: usize, alloc: Allocator) ?[]const u8 {
@@ -320,7 +334,7 @@ pub fn make_mulit_sort_list_adapter_test(comptime T: type) Fuzz.FuzzTest {
                 var should_be_in_sort: usize = 0;
                 while (i < state.ms_list.primary_list.len) {
                     const val = state.ms_list.primary_list.ptr[i];
-                    if (sort.filter(val)) {
+                    if (sort.filter(val, state.ms_list.userdata)) {
                         should_be_in_sort += 1;
                     }
                     i += 1;
@@ -333,7 +347,7 @@ pub fn make_mulit_sort_list_adapter_test(comptime T: type) Fuzz.FuzzTest {
                 var idx: usize = @intCast(sort.idx_list.ptr[0]);
                 var next_idx: usize = undefined;
                 var val: T = state.ms_list.primary_list.ptr[idx];
-                if (!sort.filter(val)) {
+                if (!sort.filter(val, state.ms_list.userdata)) {
                     return Utils.alloc_fail_str(alloc, @src(), NAME ++ ": {s}({d}, {d}, {d}): sort `{s}` had a value that should not have been in the sorted list according to its filter (idx = {d}, val = {any})", .{ op_name, param_1, param_2, param_3, @tagName(@as(SORTS, @enumFromInt(sort_tag))), idx, val });
                 }
                 var next_val: T = undefined;
@@ -352,11 +366,13 @@ pub fn make_mulit_sort_list_adapter_test(comptime T: type) Fuzz.FuzzTest {
                         state.extra_debug.append(alloc, @intCast(next_idx)) catch unreachable;
                     }
                     next_val = state.ms_list.primary_list.ptr[next_idx];
-                    if (!sort.filter(val)) {
+                    if (!sort.filter(val, state.ms_list.userdata)) {
                         return Utils.alloc_fail_str(alloc, @src(), NAME ++ ": {s}({d}, {d}, {d}): sort `{s}` had a value that should not have been in the sorted list according to its filter (idx = {d}, val = {any})", .{ op_name, param_1, param_2, param_3, @tagName(@as(SORTS, @enumFromInt(sort_tag))), next_idx, next_val });
                     }
-                    if (sort.greater_than(val, next_val)) {
-                        return Utils.alloc_fail_str(alloc, @src(), NAME ++ ": {s}({d}, {d}, {d}): sort `{s}` was not in order:\nREAL_INDEXES: {d}\t{d}\nSORT_INDEXES: {d}\t{d}\nREAL_VALUES:  {any}\t{any}\n", .{ op_name, param_1, param_2, param_3, @tagName(@as(SORTS, @enumFromInt(sort_tag))), idx, next_idx, i - 1, i, val, next_val });
+                    if (sort.greater_than) |gt| {
+                        if (gt(val, next_val, state.ms_list.userdata)) {
+                            return Utils.alloc_fail_str(alloc, @src(), NAME ++ ": {s}({d}, {d}, {d}): sort `{s}` was not in order:\nREAL_INDEXES: {d}\t{d}\nSORT_INDEXES: {d}\t{d}\nREAL_VALUES:  {any}\t{any}\n", .{ op_name, param_1, param_2, param_3, @tagName(@as(SORTS, @enumFromInt(sort_tag))), idx, next_idx, i - 1, i, val, next_val });
+                        }
                     }
                     i += 1;
                     idx = next_idx;
@@ -374,7 +390,7 @@ pub fn make_mulit_sort_list_adapter_test(comptime T: type) Fuzz.FuzzTest {
         pub fn INIT(state_opaque: **anyopaque, alloc: Allocator) anyerror!void {
             var state = try alloc.create(STATE);
             state.ref_list = try T_List.initCapacity(alloc, SMALL_LEN);
-            state.ms_list = MS_LIST.init_capacity(SMALL_LEN, SMALL_LEN, alloc, exact_equal, INITS[0..]);
+            state.ms_list = MS_LIST.init_capacity(SMALL_LEN, SMALL_LEN, alloc, exact_equal, void{}, INITS[0..]);
             state.test_list = state.ms_list.interface(alloc);
             if (EXTRA_DEBUG) {
                 state.extra_debug = try std.ArrayList(u32).initCapacity(alloc, SMALL_LEN);

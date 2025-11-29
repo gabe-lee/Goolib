@@ -48,7 +48,7 @@ pub const Range = Concrete.Range;
 
 const NO_ALLOC = DummyAlloc.allocator_panic;
 
-pub fn MultiSortList(comptime T: type, comptime UNINIT: T, comptime IDX: type, comptime SORT_NAMES: type) type {
+pub fn MultiSortList(comptime T: type, comptime UNINIT: T, comptime IDX: type, comptime SORT_NAMES: type, comptime FN_USERDATA_TYPE: type) type {
     Assert.assert_with_reason(Types.type_is_enum(SORT_NAMES), @src(), "type `SORT_NAMES` must be an enum type, got `{s}`", .{@typeName(SORT_NAMES)});
     Assert.assert_with_reason(Types.enum_is_exhaustive(SORT_NAMES), @src(), "type `SORT_NAMES` must be an EXHAUSTIVE enum type", .{});
     Assert.assert_with_reason(Types.all_enum_values_start_from_zero_with_no_gaps(SORT_NAMES), @src(), "type `SORT_NAMES` must have all tag values satisfy the condition `0 <= tag_val < tag_count` with no gaps", .{});
@@ -60,23 +60,28 @@ pub fn MultiSortList(comptime T: type, comptime UNINIT: T, comptime IDX: type, c
         const Self = @This();
 
         primary_list: List(T) = .{},
-        exact_equal: *const fn (a: T, b: T) bool = noop_compare_true,
+        exact_equal: *const COMPARE_FN = noop_compare_true,
         sort_lists: [SORT_COUNT]SortList = @splat(SortList{}),
+        userdata: USERDATA,
 
         const IdxList = List(IDX);
 
+        pub const COMPARE_FN = fn (a: T, b: T, userdata: USERDATA) bool;
+        pub const TEST_FN = fn (val: T, userdata: USERDATA) bool;
+        pub const USERDATA = FN_USERDATA_TYPE;
+
         const SortList = struct {
             idx_list: IdxList = .{},
-            greater_than: *const fn (left_or_this: T, right_or_find: T) bool = noop_compare_false,
-            equal: *const fn (left_or_this: T, right_or_find: T) bool = noop_compare_true,
-            filter: *const fn (item: T) bool = noop_true,
+            greater_than: ?*const COMPARE_FN = noop_compare_false,
+            equal: *const COMPARE_FN = noop_compare_true,
+            filter: *const TEST_FN = noop_true,
         };
 
         pub const SortInit = struct {
             name: SORT_NAMES,
-            greater_than: *const fn (left_or_this: T, right_or_find: T) bool,
-            equal: *const fn (left_or_this: T, right_or_find: T) bool,
-            filter: *const fn (item: T) bool = noop_true,
+            greater_than: ?*const COMPARE_FN,
+            equal: *const COMPARE_FN,
+            filter: *const TEST_FN = noop_true,
         };
 
         pub const SortIdx = struct {
@@ -85,13 +90,13 @@ pub fn MultiSortList(comptime T: type, comptime UNINIT: T, comptime IDX: type, c
             real_idx: usize,
         };
 
-        fn noop_compare_false(_: T, _: T) bool {
+        fn noop_compare_false(_: T, _: T, _: USERDATA) bool {
             return false;
         }
-        fn noop_compare_true(_: T, _: T) bool {
+        fn noop_compare_true(_: T, _: T, _: USERDATA) bool {
             return true;
         }
-        fn noop_true(_: T) bool {
+        fn noop_true(_: T, _: USERDATA) bool {
             return true;
         }
 
@@ -110,6 +115,22 @@ pub fn MultiSortList(comptime T: type, comptime UNINIT: T, comptime IDX: type, c
 
         pub fn find_idx_for_value_using_sort(self: *Self, sort_name: SORT_NAMES, find_val: T, equal_func: *const fn (a: T, b: T) bool) ?SortIdx {
             const sort = self.sort_lists[@intFromEnum(sort_name)];
+            if (sort.greater_than == null) {
+                var i: usize = 0;
+                while (i < sort.idx_list.len) {
+                    const this_idx = sort.idx_list.ptr[i];
+                    const this_val = self.primary_list.ptr[this_idx];
+                    if (equal_func(this_val, find_val)) {
+                        return SortIdx{
+                            .sort_name = sort_name,
+                            .real_idx = this_idx,
+                            .sort_list_idx = i,
+                        };
+                    }
+                    i += 1;
+                }
+                return null;
+            }
             if (sort.idx_list.len == 0) {
                 return null;
             }
@@ -123,16 +144,15 @@ pub fn MultiSortList(comptime T: type, comptime UNINIT: T, comptime IDX: type, c
                 this_idx = sort.idx_list.ptr[this_idx_idx];
                 this_val = self.primary_list.ptr[this_idx];
                 if (equal_func(this_val, find_val)) {
-                    std.debug.print("this_idx_idx = {d}\nthis_idx = {d}\nthis_val = {any}\n", .{ this_idx_idx, this_idx, this_val }); //DEBUG
                     return SortIdx{
                         .sort_name = sort_name,
                         .real_idx = this_idx,
                         .sort_list_idx = this_idx_idx,
                     };
-                } else if (sort.greater_than(this_val, find_val)) {
+                } else if (sort.greater_than.?(this_val, find_val)) {
                     if (this_idx_idx == lo) return null;
                     hi = this_idx_idx - 1;
-                } else if (sort.greater_than(find_val, this_val)) {
+                } else if (sort.greater_than.?(find_val, this_val)) {
                     if (this_idx_idx == hi) return null;
                     lo = this_idx_idx + 1;
                 } else return null;
@@ -211,10 +231,11 @@ pub fn MultiSortList(comptime T: type, comptime UNINIT: T, comptime IDX: type, c
         const SET_ALTER_SORT: comptime_int = 0b11;
         const SET_UNCHANGED_SORT: comptime_int = 0b00;
 
-        pub fn init_empty(exact_equal: *const fn (a: T, b: T) bool, sort_inits: []const SortInit) Self {
+        pub fn init_empty(exact_equal: *const COMPARE_FN, userdata: USERDATA, sort_inits: []const SortInit) Self {
             var s = Self{
                 .primary_list = List(T).init_empty(),
                 .exact_equal = exact_equal,
+                .userdata = userdata,
             };
             for (sort_inits) |sinit| {
                 const idx = @intFromEnum(sinit.name);
@@ -227,10 +248,11 @@ pub fn MultiSortList(comptime T: type, comptime UNINIT: T, comptime IDX: type, c
             return s;
         }
 
-        pub fn init_capacity(cap: usize, sort_cap: usize, alloc: Allocator, exact_equal: *const fn (a: T, b: T) bool, sort_inits: []const SortInit) Self {
+        pub fn init_capacity(cap: usize, sort_cap: usize, alloc: Allocator, exact_equal: *const COMPARE_FN, userdata: USERDATA, sort_inits: []const SortInit) Self {
             var s = Self{
                 .primary_list = List(T).init_capacity(cap, alloc),
                 .exact_equal = exact_equal,
+                .userdata = userdata,
             };
             for (sort_inits) |sinit| {
                 const idx = @intFromEnum(sinit.name);
@@ -1403,9 +1425,9 @@ pub fn MultiSortList(comptime T: type, comptime UNINIT: T, comptime IDX: type, c
             found: bool = true,
         };
 
-        fn true_greater_than(sort: *SortList, a_val: T, a_idx: usize, b_val: T, b_idx: usize) bool {
-            if (sort.greater_than(a_val, b_val)) return true;
-            if (sort.equal(a_val, b_val)) return a_idx > b_idx;
+        fn true_greater_than(self: *Self, sort: *SortList, a_val: T, a_idx: usize, b_val: T, b_idx: usize) bool {
+            if (sort.greater_than.?(a_val, b_val, self.userdata)) return true;
+            if (sort.equal(a_val, b_val, self.userdata)) return a_idx > b_idx;
             return false;
         }
 
@@ -1451,7 +1473,7 @@ pub fn MultiSortList(comptime T: type, comptime UNINIT: T, comptime IDX: type, c
             while (next_idx_idx < sort.idx_list.len) {
                 next_idx_ = @intCast(sort.idx_list.ptr[next_idx_idx]);
                 next_val = self.primary_list.ptr[next_idx_];
-                if (sort.greater_than(next_val, this_val) or next_idx_ >= this_idx) break;
+                if (sort.greater_than.?(next_val, this_val, self.userdata) or next_idx_ >= this_idx) break;
                 sort.idx_list.ptr[this_idx_idx] = @intCast(next_idx_);
                 this_val = next_val;
                 this_idx_idx = next_idx_idx;
@@ -1469,7 +1491,7 @@ pub fn MultiSortList(comptime T: type, comptime UNINIT: T, comptime IDX: type, c
             if (next_idx_idx >= sort.idx_list.len) return false;
             const next_idx_ = sort.idx_list.ptr[next_idx_idx];
             const next_val: T = self.primary_list.ptr[next_idx_];
-            if (sort.greater_than(next_val, this_val) or next_idx_ >= this_idx) return false;
+            if (sort.greater_than.?(next_val, this_val, self.userdata) or next_idx_ >= this_idx) return false;
             sort.idx_list.ptr[this_idx_idx] = @intCast(next_idx_);
             sort.idx_list.ptr[next_idx_idx] = @intCast(this_idx);
             return true;
@@ -1487,7 +1509,7 @@ pub fn MultiSortList(comptime T: type, comptime UNINIT: T, comptime IDX: type, c
                 prev_idx_idx -= 1;
                 prev_idx_ = @intCast(sort.idx_list.ptr[prev_idx_idx]);
                 prev_val = self.primary_list.ptr[prev_idx_];
-                if (sort.greater_than(this_val, prev_val) or prev_idx_ <= this_idx) break;
+                if (sort.greater_than.?(this_val, prev_val, self.userdata) or prev_idx_ <= this_idx) break;
                 sort.idx_list.ptr[this_idx_idx] = @intCast(prev_idx_);
                 this_val = prev_val;
                 this_idx_idx = prev_idx_idx;
@@ -1504,7 +1526,7 @@ pub fn MultiSortList(comptime T: type, comptime UNINIT: T, comptime IDX: type, c
             const prev_idx_idx = this_idx_idx - 1;
             const prev_idx_ = sort.idx_list.ptr[prev_idx_idx];
             const prev_val: T = self.primary_list.ptr[prev_idx_];
-            if (sort.greater_than(this_val, prev_val) or prev_idx_ <= this_idx) return false;
+            if (sort.greater_than.?(this_val, prev_val, self.userdata) or prev_idx_ <= this_idx) return false;
             sort.idx_list.ptr[this_idx_idx] = @intCast(prev_idx_);
             sort.idx_list.ptr[prev_idx_idx] = @intCast(this_idx);
             return true;
@@ -1569,6 +1591,7 @@ pub fn MultiSortList(comptime T: type, comptime UNINIT: T, comptime IDX: type, c
         }
 
         fn move_one_indirect_resort(self: *Self, sort: *SortList, list_report: SortListReport, moved_idx: usize, smallest_other_idx: usize, largest_other_idx: usize, dir: ShiftDirection) void {
+            if (sort.greater_than == null) return;
             var idx_idx: usize = list_report.smallest;
             var incr: usize = 1;
             while (idx_idx < list_report.largest) {
@@ -1602,6 +1625,7 @@ pub fn MultiSortList(comptime T: type, comptime UNINIT: T, comptime IDX: type, c
         }
 
         fn move_range_indirect_resort(self: *Self, sort: *SortList, list_report: SortListReport, smallest_up_idx: usize, largest_up_idx: usize, smallest_down_idx: usize, largest_down_idx: usize) void {
+            if (sort.greater_than == null) return;
             var idx_idx: usize = list_report.smallest;
             var incr: usize = 1;
             while (idx_idx < list_report.largest) {
@@ -1619,6 +1643,7 @@ pub fn MultiSortList(comptime T: type, comptime UNINIT: T, comptime IDX: type, c
         }
 
         fn fix_indirect_value_changed(self: *Self, sort: *SortList, new_val: T, this_idx: usize, idx_idx: usize) usize {
+            if (sort.greater_than == null) return idx_idx;
             var this_idx_idx = idx_idx;
             var adjacent_idx_idx: usize = undefined;
             var adjacent_idx: usize = undefined;
@@ -1628,7 +1653,7 @@ pub fn MultiSortList(comptime T: type, comptime UNINIT: T, comptime IDX: type, c
                 adjacent_idx_idx = this_idx_idx + 1;
                 adjacent_idx = @intCast(sort.idx_list.ptr[adjacent_idx_idx]);
                 adjacent_val = self.primary_list.ptr[adjacent_idx];
-                if (!true_greater_than(sort, new_val, this_idx, adjacent_val, adjacent_idx)) break;
+                if (!self.true_greater_than(sort, new_val, this_idx, adjacent_val, adjacent_idx)) break;
                 sort.idx_list.ptr[this_idx_idx] = @intCast(adjacent_idx);
                 this_idx_idx = adjacent_idx_idx;
             }
@@ -1636,7 +1661,7 @@ pub fn MultiSortList(comptime T: type, comptime UNINIT: T, comptime IDX: type, c
                 adjacent_idx_idx = this_idx_idx - 1;
                 adjacent_idx = @intCast(sort.idx_list.ptr[adjacent_idx_idx]);
                 adjacent_val = self.primary_list.ptr[adjacent_idx];
-                if (!true_greater_than(sort, adjacent_val, adjacent_idx, new_val, this_idx)) break;
+                if (!self.true_greater_than(sort, adjacent_val, adjacent_idx, new_val, this_idx)) break;
                 sort.idx_list.ptr[this_idx_idx] = @intCast(adjacent_idx);
                 this_idx_idx = adjacent_idx_idx;
             }
@@ -1644,10 +1669,10 @@ pub fn MultiSortList(comptime T: type, comptime UNINIT: T, comptime IDX: type, c
             return this_idx_idx;
         }
 
-        fn match_by_index_direction(sort: *SortList, list_val: T, list_idx: usize, test_val: T, test_idx: usize) MatchDirection {
+        fn match_by_index_direction(self: *Self, sort: *SortList, list_val: T, list_idx: usize, test_val: T, test_idx: usize) MatchDirection {
             if (list_idx == test_idx) return .MATCH;
-            if (sort.greater_than(list_val, test_val)) return .SPLIT_LEFT;
-            if (sort.greater_than(test_val, list_val)) return .SPLIT_RIGHT;
+            if (sort.greater_than.?(list_val, test_val, self.userdata)) return .SPLIT_LEFT;
+            if (sort.greater_than.?(test_val, list_val, self.userdata)) return .SPLIT_RIGHT;
             if (list_idx > test_idx) return .SPLIT_LEFT;
             return .SPLIT_RIGHT;
         }
@@ -1670,6 +1695,17 @@ pub fn MultiSortList(comptime T: type, comptime UNINIT: T, comptime IDX: type, c
 
         fn match_by_index_indirect(self: *Self, sort: *SortList, find_val: T, find_idx: usize) MatchIdx {
             if (sort.idx_list.len == 0) Assert.assert_unreachable(@src(), "sort list was empty but should not have been", .{});
+            if (sort.greater_than == null) {
+                var i: usize = 0;
+                while (i < sort.idx_list.len) {
+                    const this_idx = sort.idx_list.ptr[i];
+                    if (this_idx == find_idx) {
+                        return MatchIdx{ .idx = this_idx, .idx_idx = i, .found = true };
+                    }
+                    i += 1;
+                }
+                return MatchIdx{ .found = false };
+            }
             var lo_idx_idx: usize = 0;
             var hi_idx_idx: usize = sort.idx_list.len - 1;
             var list_idx_idx: usize = undefined;
@@ -1680,7 +1716,7 @@ pub fn MultiSortList(comptime T: type, comptime UNINIT: T, comptime IDX: type, c
                 list_idx_idx = Range.new_range(lo_idx_idx, hi_idx_idx).consecutive_split();
                 list_idx = @intCast(sort.idx_list.ptr[list_idx_idx]);
                 list_val = self.primary_list.ptr[list_idx];
-                dir = match_by_index_direction(sort, list_val, list_idx, find_val, find_idx);
+                dir = self.match_by_index_direction(sort, list_val, list_idx, find_val, find_idx);
                 switch (dir) {
                     .MATCH => return MatchIdx{ .idx = list_idx, .idx_idx = list_idx_idx },
                     .SPLIT_LEFT => {
@@ -1785,7 +1821,7 @@ pub fn MultiSortList(comptime T: type, comptime UNINIT: T, comptime IDX: type, c
         }
 
         fn set_and_resort_indirect_with_result(self: *Self, sort: *SortList, old_val: T, new_val: T, idx: usize, alloc: Allocator) ?usize {
-            const change = SortListChange.filter_old_new(sort.filter(old_val), sort.filter(new_val));
+            const change = SortListChange.filter_old_new(sort.filter(old_val, self.userdata), sort.filter(new_val, self.userdata));
             switch (change) {
                 .NEITHER_IN_SORT => {
                     return null;
@@ -1805,7 +1841,7 @@ pub fn MultiSortList(comptime T: type, comptime UNINIT: T, comptime IDX: type, c
                     return null;
                 },
                 .SET_AND_RESORT => {
-                    if (sort.equal(old_val, new_val)) {
+                    if (sort.equal(old_val, new_val, self.userdata)) {
                         const location = self.match_by_index_indirect(sort, old_val, idx);
                         return location.idx_idx;
                     }
@@ -1828,8 +1864,7 @@ pub fn MultiSortList(comptime T: type, comptime UNINIT: T, comptime IDX: type, c
                 },
                 .SET_AND_RESORT => {
                     if (sort.equal(old_val, new_val)) {
-                        const location = self.match_by_index_indirect(sort, old_val, idx);
-                        return location.idx_idx;
+                        return sort_idx;
                     }
                     return self.fix_indirect_value_changed(sort, new_val, idx, sort_idx);
                 },
@@ -1871,6 +1906,10 @@ pub fn MultiSortList(comptime T: type, comptime UNINIT: T, comptime IDX: type, c
         };
 
         fn find_insert_location_indirect(self: *Self, sort: *SortList, primary_idx: usize, primary_val: T) IndirectInsertLoc {
+            if (sort.greater_than == null) return IndirectInsertLoc{
+                .append = true,
+                .idx_idx = sort.idx_list.len,
+            };
             var loc = IndirectInsertLoc{};
             if (sort.idx_list.len == 0) {
                 loc.append = true;
@@ -1888,13 +1927,13 @@ pub fn MultiSortList(comptime T: type, comptime UNINIT: T, comptime IDX: type, c
                 this_idx_idx = ((hi - lo) >> 1) + lo;
                 this_idx = sort.idx_list.ptr[this_idx_idx];
                 this_val = self.primary_list.ptr[this_idx];
-                if (sort.greater_than(this_val, test_val)) {
+                if (sort.greater_than.?(this_val, test_val, self.userdata)) {
                     if (this_idx_idx == lo) {
                         loc.idx_idx = this_idx_idx;
                         return loc;
                     }
                     hi = this_idx_idx - 1;
-                } else if (sort.greater_than(test_val, this_val)) {
+                } else if (sort.greater_than.?(test_val, this_val, self.userdata)) {
                     if (this_idx_idx == hi) {
                         if (this_idx_idx == max_hi) {
                             loc.append = true;
@@ -1957,7 +1996,7 @@ pub fn MultiSortList(comptime T: type, comptime UNINIT: T, comptime IDX: type, c
         }
 
         fn add_uninit_range_indirect_insert(self: *Self, sort: *SortList, insert_idx: usize, count: usize, alloc: Allocator) void {
-            if (sort.filter(UNINIT)) {
+            if (sort.filter(UNINIT, self.userdata)) {
                 const insert_idx_idx = self.find_insert_location_indirect(sort, insert_idx, UNINIT);
                 const sort_iface = sort.idx_list.interface(alloc);
                 var range: IList.Range = undefined;
@@ -1972,14 +2011,14 @@ pub fn MultiSortList(comptime T: type, comptime UNINIT: T, comptime IDX: type, c
             }
         }
 
-        fn append_uninit_range_indirect(self: *Self, sort: *SortList, uninit_range: IList.Range, count: usize, alloc: Allocator) void {
-            if (!sort.filter(UNINIT)) return;
-            var self_iface = self.primary_list.interface(alloc);
-            const sort_iface = sort.idx_list.interface(alloc);
-            const idx = self_iface.sorted_insert_index_indirect(IDX, sort_iface, UNINIT, sort.equal, sort.greater_than);
-            const sort_range = if (idx.append) sort_iface.append_slots(count) else sort_iface.insert_slots(idx.idx_idx, count);
-            initialize_new_indexes_in_sort(sort, uninit_range, sort_range);
-        }
+        // fn append_uninit_range_indirect(self: *Self, sort: *SortList, uninit_range: IList.Range, count: usize, alloc: Allocator) void {
+        //     if (!sort.filter(UNINIT)) return;
+        //     var self_iface = self.primary_list.interface(alloc);
+        //     const sort_iface = sort.idx_list.interface(alloc);
+        //     const idx = self_iface.sorted_insert_index_indirect(IDX, sort_iface, UNINIT, sort.equal, sort.greater_than);
+        //     const sort_range = if (idx.append) sort_iface.append_slots(count) else sort_iface.insert_slots(idx.idx_idx, count);
+        //     initialize_new_indexes_in_sort(sort, uninit_range, sort_range);
+        // }
 
         fn delete_range_indirect_indexes(sort: *SortList, delete_range_: IList.Range, delete_count: usize) void {
             var write_idx_idx: usize = 0;

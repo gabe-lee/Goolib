@@ -40,24 +40,72 @@ const assert_unreachable = Assert.assert_unreachable;
 const assert_allocation_failure = Assert.assert_allocation_failure;
 const assert_field_is_type = Assert.assert_field_is_type;
 
-const IList8 = IList(u8);
-const IList16 = IList(u16);
-const IList32 = IList(u32);
-const IList64 = IList(u64);
-const IListPtr = IList(*anyopaque);
 const List8 = List(u8);
 const List16 = List(u16);
 const List32 = List(u32);
 const List64 = List(u64);
-const ListPtr = List(*anyopaque);
+const List96 = List(U96);
+const List128 = List(u128);
+const ListPtr = List(?*anyopaque);
+
+pub const ParamSource = enum(u8) {
+    omit,
+    root,
+    derived_single,
+    derived_linked,
+    existing,
+};
+
+pub fn ParamFactorySlot(comptime N: comptime_int, comptime T: type) type {
+    return union(ParamSource) {
+        const Self = @This();
+
+        omit: struct {},
+        root: *const Table.InitRootFn(T),
+        derived_single: *const Table.InitDerivedFunc,
+        derived_linked: struct {
+            func: *const Table.InitLinkedDerivedFunc(N),
+            object: type,
+        },
+        existing: ParamId,
+
+        pub fn just_omit() Self {
+            return Self{ .omit = .{} };
+        }
+        pub fn new_root(func: *const Table.InitRootFn(T)) Self {
+            return Self{ .root = func };
+        }
+        pub fn new_derived_single(func: *const Table.InitDerivedFunc) Self {
+            return Self{ .derived_single = func };
+        }
+        pub fn new_derived_linked(func: *const Table.InitLinkedDerivedFunc(N), comptime object: type) Self {
+            return Self{ .derived_linked = .{
+                .func = func,
+                .object = object,
+            } };
+        }
+        pub fn use_existing(id: ParamId) Self {
+            return Self{ .existing = id };
+        }
+    };
+}
+
+const U96 = struct {
+    a: u32 = 0,
+    b: u32 = 0,
+    c: u32 = 0,
+};
+
+const Color32 = Root.Color.define_color_rgba_type(u32);
 
 pub const Meta = @import("./ParamTable_Meta.zig");
 const ListParamId = List(Meta.ParamId);
 pub const Calc = @import("./ParamTable_Calc.zig");
 pub const _PTList = @import("./ParamTable_List.zig");
 const PTListOpaque = _PTList.PTListOpaque;
-const PTList = _PTList.PTList;
-const PTPtr = _PTList.PTPtr;
+pub const PTList = _PTList.PTList;
+pub const PTPtr = _PTList.PTPtr;
+pub const PTPtrOrNull = _PTList.PTPtrOrNull;
 
 const ListPTList = List(PTListOpaque);
 
@@ -100,6 +148,8 @@ pub const Table = struct {
     calcs: ListCalcs,
     metadata: ListMeta,
     update_list: UpdateList,
+    update_idx: u32 = 0,
+    prevent_duplicate_updates: bool = true,
 
     pub fn init(param_cap: u16, alloc: Allocator) Table {
         return Table{
@@ -227,25 +277,44 @@ pub const Table = struct {
         const opq = self.list_list.get(@intCast(meta.val_idx));
         return PTList(T).from_opaque(opq);
     }
+    pub fn get_color(self: *Table, id: ParamId) Color32 {
+        const meta = self.get_meta_with_check(id, .COLOR, .must_be_init, .can_be_derived, .can_be_root);
+        return @bitCast(self.list_32.get(@intCast(meta.val_idx)));
+    }
 
     fn queue_children(self: *Table, meta: Metadata) void {
         const children = meta.get_children();
-        _ = self.update_list.append_zig_slice(self.alloc, children);
+        if (self.prevent_duplicate_updates) {
+            for (children) |new_update| {
+                var was_already_queued: bool = false;
+                for (self.update_list.ptr[self.update_idx..self.update_list.len]) |already_queued| {
+                    if (already_queued.id == new_update.id) {
+                        was_already_queued = true;
+                        break;
+                    }
+                }
+                if (!was_already_queued) {
+                    _ = self.update_list.append(new_update, self.alloc);
+                }
+            }
+        } else {
+            _ = self.update_list.append_zig_slice(self.alloc, children);
+        }
     }
 
     fn begin_update(self: *Table) void {
         self.update_list.clear();
+        self.update_idx = 0;
     }
 
     fn finish_update(self: *Table) void {
-        var has_next = self.update_list.len > 0;
         var next_id: ParamId = undefined;
         var meta: Metadata = undefined;
-        while (has_next) {
-            next_id = self.update_list.remove(0);
-            meta = self.metadata.get(@intCast(next_id.id));
+        while (self.update_idx < self.update_list.len) {
+            next_id = self.update_list.ptr[self.update_idx];
+            meta = self.metadata.ptr[@intCast(next_id.id)];
             self.do_update(next_id, meta);
-            has_next = self.update_list.len > 0;
+            self.update_idx += 1;
         }
     }
 
@@ -338,9 +407,21 @@ pub const Table = struct {
         self.finish_update();
     }
 
+    pub fn set_root_ptr_or_null(self: *Table, id: ParamId, comptime T: type, val: PTPtr(T)) void {
+        self.begin_update();
+        Internal._set_ptr(self, id, val, .must_be_init, .cannot_be_derived, .can_be_root);
+        self.finish_update();
+    }
+
     pub fn set_root_list(self: *Table, id: ParamId, comptime T: type, val: PTList(T)) void {
         self.begin_update();
         Internal._set_list(self, id, val, .must_be_init, .cannot_be_derived, .can_be_root);
+        self.finish_update();
+    }
+
+    pub fn set_root_color(self: *Table, id: ParamId, val: Color32) void {
+        self.begin_update();
+        Internal._set_color(self, id, val, .must_be_init, .cannot_be_derived, .can_be_root);
         self.finish_update();
     }
 
@@ -396,6 +477,18 @@ pub const Table = struct {
         };
     }
 
+    pub fn LinkedParamIdsObject(comptime LINKED_PARAM_OBJECT: type, comptime N: comptime_int, params: [N]ParamId) LINKED_PARAM_OBJECT {
+        assert_with_reason(Types.type_is_struct_with_all_fields_same_type(LINKED_PARAM_OBJECT, ParamId), @src(), "type `LINKED_PARAM_OBJECT` MUST be a struct type with all fields of type `ParamId`, got type `{s}`", .{@typeName(LINKED_PARAM_OBJECT)});
+        const INFO = @typeInfo(LINKED_PARAM_OBJECT).@"struct";
+        assert_with_reason(INFO.fields.len == N, @src(), "type `LINKED_PARAM_OBJECT` must have EXACTLY the same number of fields as `N`, got {d} != {d}", .{ INFO.fields.len, N });
+        var out: LINKED_PARAM_OBJECT = undefined;
+        inline for (INFO.fields, 0..) |f, i| {
+            const p = params[i];
+            @field(out, f.name) = p;
+        }
+        return out;
+    }
+
     fn new_metadata_derived_linked_uninit(self: *Table, val_idx: u16, set_type: Meta.ParamType, always_update: bool, calc_id: Meta.CalcID, parents: []const ParamId) ParamId {
         var meta = Metadata{
             .hookups_raw = ListParamId.init_empty(),
@@ -420,6 +513,10 @@ pub const Table = struct {
         always_update,
         only_update_when_value_changes,
     };
+
+    pub fn InitRootFn(comptime T: type) type {
+        return fn (self: *Table, val: T, always_update: UpdateMode) ParamId;
+    }
 
     pub fn init_root_u8(self: *Table, val: u8, always_update: UpdateMode) ParamId {
         const val_idx = Internal._new_val_u8(self, val);
@@ -491,29 +588,39 @@ pub const Table = struct {
         const id = self.new_metadata_root(val_idx, .LIST, always_update);
         return id;
     }
+    pub fn init_root_color(self: *Table, val: Color32, always_update: UpdateMode) ParamId {
+        const val_idx = Internal._new_val_color(self, val);
+        const id = self.new_metadata_root(val_idx, .COLOR, always_update);
+        return id;
+    }
 
     pub fn register_calc(self: *Table, calc: *const Calc.ParamCalc) Meta.CalcID {
         const idx = self.calcs.append(calc, self.alloc);
         return Meta.CalcID{ .id = @intCast(idx) };
     }
 
-    pub const TypeInit = struct {
+    pub const LinkedInit = struct {
         param_type: Meta.ParamType = .INVALID,
         update: UpdateMode = .only_update_when_value_changes,
 
-        pub fn new(param_type: Meta.ParamType, update: UpdateMode) TypeInit {
-            return TypeInit{
+        pub fn new(param_type: Meta.ParamType, update: UpdateMode) LinkedInit {
+            return LinkedInit{
                 .param_type = param_type,
                 .update = update,
             };
         }
-        pub fn comptime_new(comptime param_type: Meta.ParamType, comptime update: UpdateMode) TypeInit {
-            return TypeInit{
+        pub fn comptime_new(comptime param_type: Meta.ParamType, comptime update: UpdateMode) LinkedInit {
+            return LinkedInit{
                 .param_type = param_type,
                 .update = update,
             };
         }
     };
+
+    pub const InitDerivedFunc = fn (self: *Table, always_update: UpdateMode, calc_id: Meta.CalcID, inputs: []const ParamId) ParamId;
+    pub fn InitLinkedDerivedFunc(comptime N: comptime_int) type {
+        return fn (self: *Table, calc_idx: Meta.CalcID, inputs: []const ParamId, comptime N: comptime_int, comptime output_types: [N]LinkedInit) [N]ParamId;
+    }
 
     pub fn init_derived_u8(self: *Table, always_update: UpdateMode, calc_id: Meta.CalcID, inputs: []const ParamId) ParamId {
         const val_idx = Internal._new_val_u8(self, 0);
@@ -599,16 +706,23 @@ pub const Table = struct {
         self.do_update(meta_id.meta);
         return meta_id.id;
     }
+    pub fn init_derived_color(self: *Table, always_update: UpdateMode, calc_id: Meta.CalcID, inputs: []const ParamId) ParamId {
+        const val_idx = Internal._new_val_color(self, Color32{});
+        const meta_id = self.new_metadata_derived_single(val_idx, .COLOR, always_update == .always_update, calc_id, inputs);
+        self.do_update(meta_id.meta);
+        return meta_id.id;
+    }
 
-    pub fn init_derived_linked(self: *Table, calc_idx: Meta.CalcID, inputs: []const ParamId, comptime N: comptime_int, comptime output_types: [N]TypeInit) [N]ParamId {
+    pub fn init_derived_linked(self: *Table, calc_idx: Meta.CalcID, inputs: []const ParamId, comptime N: comptime_int, comptime output_types: [N]LinkedInit) [N]ParamId {
         var output_ids: [N]ParamId = undefined;
         for (output_types, 0..) |out, i| {
             const val_idx: u16 = switch (out.param_type) {
                 .U8, .I8, .BOOL => Internal._new_val_u8(self, 0),
                 .U16, .I16, .F16 => Internal._new_val_u16(self, 0),
-                .U32, .I32, .F32 => Internal._new_val_u32(self, 0),
+                .U32, .I32, .F32, .COLOR => Internal._new_val_u32(self, 0),
                 .U64, .I64, .F64 => Internal._new_val_u64(self, 0),
                 .PTR => Internal._new_val_ptr(self, u8, PTPtr(u8).from_opaque(@ptrFromInt(math.maxInt(usize)))),
+                .PTR_OR_NULL => Internal._new_val_ptr_or_null(self, u8, PTPtrOrNull(u8).from_opaque(@ptrFromInt(0))),
                 .LIST => Internal._new_val_list(self, u8, PTList(u8).from_opaque(PTListOpaque{}, self)),
                 .INVALID => assert_unreachable(@src(), "output value at idx {d} had invalid ParamType `INVALID`", .{i}),
             };
@@ -643,6 +757,7 @@ pub const Table = struct {
         pub const ListOrPtr = enum(u8) {
             list,
             ptr,
+            ptr_or_null,
         };
 
         pub fn assert_type_ptptr_or_ptlist_and_get_base_type(comptime T: type, comptime mode: ListOrPtr) type {
@@ -656,6 +771,11 @@ pub const Table = struct {
                 },
                 .ptr => {
                     const TTT = PTPtr(TT);
+                    Assert.assert_is_type(T, TTT);
+                    return TT;
+                },
+                .ptr => {
+                    const TTT = PTPtrOrNull(TT);
                     Assert.assert_is_type(T, TTT);
                     return TT;
                 },
@@ -701,8 +821,14 @@ pub const Table = struct {
         pub fn _new_val_ptr(self: *Table, comptime T: type, val: PTPtr(T)) u16 {
             return @intCast(self.list_ptr.append(val.to_opaque(), self.alloc));
         }
+        pub fn _new_val_ptr_or_null(self: *Table, comptime T: type, val: PTPtrOrNull(T)) u16 {
+            return @intCast(self.list_ptr.append(val.to_opaque(), self.alloc));
+        }
         pub fn _new_val_list(self: *Table, comptime T: type, val: PTList(T)) u16 {
             return @intCast(self.list_list.append(val.to_opaque(), self.alloc));
+        }
+        pub fn _new_val_color(self: *Table, val: Color32) u16 {
+            return @intCast(self.list_32.append(@bitCast(val), self.alloc));
         }
         pub fn _set_u8(self: *Table, id: ParamId, val: u8, comptime must_be_init: e_init, comptime cannot_be_derived: e_derived, comptime cannot_be_root: e_root) void {
             const meta = self.get_meta_with_check(id, .U8, must_be_init, cannot_be_derived, cannot_be_root);
@@ -795,10 +921,24 @@ pub const Table = struct {
                 self.queue_children(meta);
             }
         }
+        pub fn _set_ptr_or_null(self: *Table, id: ParamId, comptime T: type, val: PTPtrOrNull(T), comptime must_be_init: e_init, comptime cannot_be_derived: e_derived, comptime cannot_be_root: e_root) void {
+            const meta = self.get_meta_with_check(id, .PTR_OR_NULL, must_be_init, cannot_be_derived, cannot_be_root);
+            self.list_ptr.set(@intCast(meta.val_idx), val.to_opaque());
+            if (val.val_changed or meta.should_always_update()) {
+                self.queue_children(meta);
+            }
+        }
         pub fn _set_list(self: *Table, id: ParamId, comptime T: type, val: PTList(T), comptime must_be_init: e_init, comptime cannot_be_derived: e_derived, comptime cannot_be_root: e_root) void {
             const meta = self.get_meta_with_check(id, .LIST, must_be_init, cannot_be_derived, cannot_be_root);
             self.list_ptr.set(@intCast(meta.val_idx), val.to_opaque());
             if (val.vals_changed or meta.should_always_update()) {
+                self.queue_children(meta);
+            }
+        }
+        pub fn _set_color(self: *Table, id: ParamId, val: Color32, comptime must_be_init: e_init, comptime cannot_be_derived: e_derived, comptime cannot_be_root: e_root) void {
+            const meta = self.get_meta_with_check(id, .COLOR, must_be_init, cannot_be_derived, cannot_be_root);
+            const changed = self.list_32.set_report_change(@intCast(meta.val_idx), @bitCast(val));
+            if (changed or meta.should_always_update()) {
                 self.queue_children(meta);
             }
         }
@@ -855,13 +995,22 @@ pub const Table = struct {
                     assert_meta_is_type(id, meta, .BOOL, @src());
                     changed = self.list_8.set_report_change(@intCast(meta.val_idx), @bitCast(val));
                 },
+                Color32 => {
+                    assert_meta_is_type(id, meta, .COLOR, @src());
+                },
                 else => {
                     const TT = assert_type_ptptr_or_ptlist_and_get_base_type(T, .ptr);
                     const PTP = PTPtr(TT);
+                    const PTPN = PTPtrOrNull(TT);
                     const PTL = PTList(TT);
                     switch (T) {
                         PTP => {
                             assert_meta_is_type(id, meta, .PTR, @src());
+                            changed = self.list_ptr.set_report_change(@intCast(meta.val_idx), val.to_opaque());
+                            changed = changed or val.val_changed;
+                        },
+                        PTPN => {
+                            assert_meta_is_type(id, meta, .PTR_OR_NULL, @src());
                             changed = self.list_ptr.set_report_change(@intCast(meta.val_idx), val.to_opaque());
                             changed = changed or val.val_changed;
                         },
@@ -870,7 +1019,7 @@ pub const Table = struct {
                             changed = self.list_list.set_report_change(@intCast(meta.val_idx), val.to_opaque());
                             changed = changed or val.vals_changed;
                         },
-                        else => assert_unreachable(@src(), "type `T` MUST be one of the following types:\nbool, u8, i8, u16, i16, f16, u32, i32, f32, u64, i64, f64, PTPtr(TT), or PTList(TT)\ngot type {s}", .{@typeName(T)}),
+                        else => assert_unreachable(@src(), "type `T` MUST be one of the following types:\nbool, u8, i8, u16, i16, f16, u32, i32, f32, u64, i64, f64, PTPtr(TT), PTPtrOrNull(TT), or PTList(TT)\ngot type {s}", .{@typeName(T)}),
                     }
                 },
             }
@@ -1013,3 +1162,8 @@ test "ParamTable" {
         std.debug.print("TestTable MEM: {d} bytes\n", .{my_param_table.total_memory_footprint()});
     }
 }
+
+pub const RootOrDerived = enum(u8) {
+    root,
+    derived,
+};
