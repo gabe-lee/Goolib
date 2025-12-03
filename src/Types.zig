@@ -358,6 +358,9 @@ pub inline fn type_is_pointer_or_slice(comptime T: type) bool {
 pub inline fn type_is_slice(comptime T: type) bool {
     return @typeInfo(T) == .pointer and @typeInfo(T).pointer.size == .slice;
 }
+pub inline fn type_is_slice_with_child_type(comptime T: type, comptime C: type) bool {
+    return @typeInfo(T) == .pointer and @typeInfo(T).pointer.size == .slice and @typeInfo(T).pointer.child == C;
+}
 pub inline fn type_is_many_item_pointer(comptime T: type) bool {
     return @typeInfo(T) == .pointer and @typeInfo(T).pointer.size == .many;
 }
@@ -409,14 +412,29 @@ pub inline fn type_is_numeric(comptime T: type) bool {
 pub inline fn type_is_unsigned_int(comptime T: type) bool {
     return @typeInfo(T) == .int and @typeInfo(T).int.signedness == .unsigned;
 }
+pub inline fn type_is_unsigned_int_aligned(comptime T: type) bool {
+    switch (T) {
+        u8, u16, u32, u64, u128, usize => return true,
+        else => return false,
+    }
+}
 pub inline fn type_is_signed_int(comptime T: type) bool {
     return @typeInfo(T) == .int and @typeInfo(T).int.signedness == .signed;
+}
+pub inline fn type_is_signed_int_aligned(comptime T: type) bool {
+    switch (T) {
+        i8, i16, i32, i64, i128, isize => return true,
+        else => return false,
+    }
 }
 pub inline fn type_is_bool(comptime T: type) bool {
     return T == bool;
 }
 pub inline fn type_is_enum(comptime T: type) bool {
     return @typeInfo(T) == .@"enum";
+}
+pub inline fn type_is_union(comptime T: type) bool {
+    return @typeInfo(T) == .@"union";
 }
 pub inline fn type_is_struct(comptime T: type) bool {
     return @typeInfo(T) == .@"struct";
@@ -464,8 +482,25 @@ pub inline fn integer_type_A_has_bits_greater_than_or_equal_to_N(comptime A: typ
 }
 
 pub inline fn type_is_struct_with_all_fields_same_type(comptime T: type, comptime F: type) bool {
-    const INFO = @typeInfo(T).@"struct";
-    for (INFO.fields) |field| {
+    const INFO = @typeInfo(T);
+    switch (INFO) {
+        .@"struct" => {},
+        else => return false,
+    }
+    const STRUCT = INFO.@"struct";
+    for (STRUCT.fields) |field| {
+        if (field.type != F) return false;
+    }
+    return true;
+}
+pub inline fn type_is_union_with_all_fields_same_type(comptime T: type, comptime F: type) bool {
+    const INFO = @typeInfo(T);
+    switch (INFO) {
+        .@"union" => {},
+        else => return false,
+    }
+    const UNION = INFO.@"union";
+    for (UNION.fields) |field| {
         if (field.type != F) return false;
     }
     return true;

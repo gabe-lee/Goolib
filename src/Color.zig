@@ -23,7 +23,11 @@
 
 const std = @import("std");
 
-const Root = @import("root");
+const Root = @import("./_root.zig");
+const Types = Root.Types;
+const Assert = Root.Assert;
+
+const assert_with_reason = Assert.assert_with_reason;
 
 /// The order of color channels in packed color types
 /// - MSB -> LSB
@@ -42,14 +46,59 @@ pub const ChannelOrder = enum(c_uint) {
     BGRA = 8,
 };
 
-pub fn define_packed_color_type(comptime order: ChannelOrder, comptime red_bits: comptime_int, comptime green_bits: comptime_int, comptime blue_bits: comptime_int, comptime alpha_bits: comptime_int) type {
+pub const Channel = enum(u8) {
+    red,
+    green,
+    blue,
+    alpha,
+    depth,
+    _,
+
+    pub inline fn to_index(self: Channel) u8 {
+        return @intFromEnum(self);
+    }
+    pub inline fn from_index(idx: u8) Channel {
+        return @enumFromInt(idx);
+    }
+};
+
+pub fn define_arbitrary_color_type(comptime CHANNEL_UINT: type, comptime CHANNELS_ENUM: type) type {
+    assert_with_reason(Types.type_is_enum(CHANNELS_ENUM), @src(), "type `CHANNELS_ENUM` must be an enum type, got type `{s}`", .{@typeName(CHANNELS_ENUM)});
+    assert_with_reason(Types.enum_is_exhaustive(CHANNELS_ENUM), @src(), "type `CHANNELS_ENUM` must be an exhaustive enum type", .{@typeName(CHANNELS_ENUM)});
+    assert_with_reason(Types.all_enum_values_start_from_zero_with_no_gaps(CHANNELS_ENUM), @src(), "type `CHANNELS_ENUM` must be an enum type with all tags starting from value 0 to the max tag value, with no gaps", .{@typeName(CHANNELS_ENUM)});
+    assert_with_reason(Types.type_is_unsigned_int_aligned(CHANNEL_UINT), @src(), "type `CHANNEL_UINT` MUST be one of: u8, u16, u32, u64, u128, usize... got type `{s}`", .{@typeName(CHANNEL_UINT)});
+    return struct {
+        const Self = @This();
+        raw: [CHANNEL_COUNT]CHANNEL_UINT = @splat(0),
+
+        pub inline fn get(self: Self, comptime channel: CHANNELS_ENUM) CHANNEL_UINT {
+            return self.raw[@intFromEnum(channel)];
+        }
+        pub inline fn set(self: *Self, comptime channel: CHANNELS_ENUM, val: CHANNEL_UINT) void {
+            self.raw[@intFromEnum(channel)] = val;
+        }
+        pub inline fn with_set(self: Self, comptime channel: CHANNELS_ENUM, val: CHANNEL_UINT) Self {
+            var new_self = self;
+            new_self.raw[@intFromEnum(channel)] = val;
+            return new_self;
+        }
+
+        pub const CHANNEL_COUNT = @typeInfo(CHANNELS_ENUM).@"enum".fields.len;
+        pub const BYTE_SIZE = @sizeOf(CHANNEL_UINT) * CHANNEL_COUNT;
+        pub const ZERO = Self{};
+    };
+}
+
+pub fn define_packed_color_type(comptime integer_type: type, comptime order: ChannelOrder, comptime red_bits: comptime_int, comptime green_bits: comptime_int, comptime blue_bits: comptime_int, comptime alpha_bits: comptime_int) type {
+    assert_with_reason(Types.type_is_unsigned_int_aligned(integer_type), @src(), "type `integer_type` MUST be one of: u8, u16, u32, u64, u128, usize... got type `{s}`", .{@typeName(integer_type)});
     const R_INT = std.meta.Int(.unsigned, red_bits);
     const G_INT = std.meta.Int(.unsigned, green_bits);
     const B_INT = std.meta.Int(.unsigned, blue_bits);
     const A_INT = std.meta.Int(.unsigned, alpha_bits);
     const CHANNEL_BITS = red_bits + green_bits + blue_bits + alpha_bits;
     const CHANNEL_BYTES = ((CHANNEL_BITS + 7) >> 3);
-    const PAD = std.meta.Int(.unsigned, 32 - CHANNEL_BITS);
+    const INT_BITS = @typeInfo(integer_type).int.bits;
+    const PAD = std.meta.Int(.unsigned, INT_BITS - CHANNEL_BITS);
     switch (order) {
         ._RGB, .ARGB => return packed struct {
             b: B_INT = 0,

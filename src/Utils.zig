@@ -872,6 +872,35 @@ pub fn alloc_fail_str(alloc: Allocator, comptime src: builtin.SourceLocation, co
     return fmt.allocPrint(alloc, "{f} -> " ++ str, fullargs) catch return str;
 }
 
+/// Sorts a portion of a memory region using the provided `greater_than` function
+/// and the `insertion sort` algorithm
+///
+/// Assumes `data_ptr[0..end_exclusive]` is a valid slice (sufficient memory is allocated)
+pub fn mem_sort(data_ptr: anytype, start: usize, end_exclusive: usize, userdata: anytype, greater_than: *const fn (a: @typeInfo(@TypeOf(data_ptr)).pointer.child, b: @typeInfo(@TypeOf(data_ptr)).pointer.child, userdata: @TypeOf(userdata)) bool) void {
+    const PTR = @TypeOf(data_ptr);
+    assert_with_reason(Types.type_is_many_item_pointer(PTR), @src(), "type of `data_ptr` must be a many-item-pointer, got type {s}", .{@typeName(PTR)});
+    const T = @typeInfo(@TypeOf(data_ptr)).pointer.child;
+    var i: usize = start + 1;
+    var j: usize = undefined;
+    var jj: usize = undefined;
+    var move_val: T = undefined;
+    var test_val: T = undefined;
+    while (i < end_exclusive) {
+        move_val = data_ptr[i];
+        j = i - 1;
+        jj = i;
+        while (greater_than(test_val, move_val, userdata)) {
+            test_val = data_ptr[j];
+            data_ptr[jj] = data_ptr[j];
+            if (j == start) break;
+            jj = j;
+            j -= 1;
+        }
+        data_ptr[jj] = move_val;
+        i += 1;
+    }
+}
+
 /// This method moves all items at `data_ptr[start..]` up `n` places,
 /// and alters `len_ptr` to reflect the new length
 ///

@@ -2,8 +2,9 @@
 //! #### License: Zlib
 //! #### Dependency Licenses:
 //! - SDL3: (Zlib) https://github.com/libsdl-org/SDL/blob/main/LICENSE.txt
-//! - SDL3 Zig Bindings: (Multi) https://github.com/castholm/SDL/blob/main/LICENSE.txt
+//! - SDL3 Zig Bindings: (Multi/Zlib) https://github.com/castholm/SDL/blob/main/LICENSE.txt
 
+// THE FOLLOWING LICENSE APPLIES TO _THIS_ SOURCE FILE ONLY
 // zlib license
 //
 // Copyright (c) 2025, Gabriel Lee Anderson <gla.ander@gmail.com>

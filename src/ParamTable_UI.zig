@@ -336,6 +336,7 @@ pub const PanelFlagsEnum = enum(u32) {
     is_being_dragged = 1 << 20,
     use_sprite = 1 << 21,
     is_free_memory = 1 << 22,
+    clip_children = 1 << 23,
 
     pub const visible_and_use_mouse_hover = PanelFlagsEnum.visible.to_raw() | PanelFlagsEnum.use_mouse_hover.to_raw();
     pub const visible_and_use_mouse_down = PanelFlagsEnum.visible.to_raw() | PanelFlagsEnum.use_mouse_down_up.to_raw();

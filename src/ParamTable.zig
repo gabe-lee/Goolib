@@ -1059,26 +1059,26 @@ test "ParamTable" {
 
     const CALC = struct {
         pub fn a_plus_b(iface: Calc.CalcInterface) void {
-            const in = iface.get_inputs(TwoF32Object);
+            const in = iface.get_all_inputs(TwoF32Object);
             var out = iface.get_outputs_uninit(F32Object);
             out.a = in.a + in.b;
-            iface.commit_outputs(out);
+            iface.commit_all_outputs(out);
         }
 
         pub fn half_a_minus_2b(iface: Calc.CalcInterface) void {
-            const in = iface.get_inputs(TwoF32Object);
+            const in = iface.get_all_inputs(TwoF32Object);
             var out = iface.get_outputs_uninit(F32Object);
             out.a = (in.a * 0.5) - (in.b * 2.0);
-            iface.commit_outputs(out);
+            iface.commit_all_outputs(out);
         }
 
         pub fn linked_area_parent_and_button(iface: Calc.CalcInterface) void {
-            const in = iface.get_inputs(ParentSizeButtonSize);
+            const in = iface.get_all_inputs(ParentSizeButtonSize);
             var out = iface.get_outputs_uninit(ParentAreaButtonArea);
             out.pa = in.ph * in.pw;
             out.ba = in.bh * in.bw;
             out.ta = out.pa + out.ba;
-            iface.commit_outputs(out);
+            iface.commit_all_outputs(out);
         }
     };
 
