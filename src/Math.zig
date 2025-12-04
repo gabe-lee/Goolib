@@ -25,6 +25,11 @@ const std = @import("std");
 const math = std.math;
 const assert = std.debug.assert;
 
+const Root = @import("./_root.zig");
+const Assert = Root.Assert;
+const Types = Root.Types;
+const assert_with_reason = Assert.assert_with_reason;
+
 const Math = @This();
 
 pub fn deg_to_rad(comptime T: type, degrees: T) T {
@@ -37,6 +42,66 @@ pub fn rad_to_deg(comptime T: type, radians: T) T {
 
 pub fn lerp(comptime T: type, a: T, b: T, delta: T) T {
     return ((b - a) * delta) + a;
+}
+
+pub fn weighted_average(comptime T: type, a: T, b: T, b_weight: anytype) T {
+    const F = @TypeOf(b_weight);
+    assert_with_reason(Types.type_is_float(F), @src(), "the type of `b_weight` must be a float type, got type `{s}`", .{@typeName(F)});
+    if (Types.type_is_float(T)) {
+        return @floatCast(((@as(F, 1.0) - b_weight) * @as(F, @floatCast(a))) + (@as(F, @floatCast(b)) * b_weight));
+    } else {
+        return @intFromFloat(((@as(F, 1.0) - b_weight) * @as(F, @floatFromInt(a))) + (@as(F, @floatFromInt(b)) * b_weight));
+    }
+}
+
+pub fn median_of_3(comptime T: type, a: T, b: T, c: T) T {
+    return @max(@min(a, b), @min(@max(a, b), c));
+}
+
+pub fn clamp_0_to_1(comptime T: type, val: T) T {
+    if (val >= 0 and val <= 1) {
+        return val;
+    } else if (val < 0) {
+        return 0;
+    } else return 1;
+}
+pub fn clamp_0_to_max(comptime T: type, val: T, max: T) T {
+    if (val >= 0 and val <= max) {
+        return val;
+    } else if (val < 0) {
+        return 0;
+    } else return max;
+}
+pub fn clamp(comptime T: type, min: T, val: T, max: T) T {
+    if (val >= min and val <= max) {
+        return val;
+    } else if (val < min) {
+        return min;
+    } else return max;
+}
+/// returns:
+///   - -1 if val < 0
+///   - 0 if val == 0
+///   - 1 if val > 0
+pub fn sign(comptime T: type, val: T) T {
+    const raw = @as(i8, @intCast(@intFromBool(0 < val))) - @as(i8, @intCast(@intFromBool(val < 0)));
+    if (Types.type_is_float(T)) {
+        return @floatFromInt(raw);
+    } else {
+        return @intCast(raw);
+    }
+}
+
+/// returns:
+///   - -1 if val < 0
+///   - 1 if val >= 0
+pub fn sign_nonzero(comptime T: type, val: T) T {
+    const raw = (2 * @as(i8, @intCast(@intFromBool(val > 0)))) - 1;
+    if (Types.type_is_float(T)) {
+        return @floatFromInt(raw);
+    } else {
+        return @intCast(raw);
+    }
 }
 
 pub fn add_scale(comptime T: type, a: T, diff_ba: T, delta: T) T {

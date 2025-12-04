@@ -267,8 +267,8 @@ pub fn define_vec2_type(comptime T: type) type {
             return point.subtract(self).scale(inverse_time);
         }
 
-        pub fn to_new_type(self: T_Rect2, comptime NEW_T: type) define_vec2_type(NEW_T) {
-            const V = (NEW_T);
+        pub fn to_new_type(self: T_Vec2, comptime NEW_T: type) define_vec2_type(NEW_T) {
+            const V = define_vec2_type(NEW_T);
             const mode = @as(u8, @bitCast(IS_FLOAT)) | (@as(u8, @bitCast(V.IS_FLOAT)) << 1);
             const FLOAT_TO_FLOAT: u8 = 0b11;
             const FLOAT_TO_INT: u8 = 0b01;
