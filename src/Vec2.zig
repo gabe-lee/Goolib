@@ -33,6 +33,11 @@ const SDL3 = Root.SDL3;
 //     convert_SDL3: bool = false,
 // };
 
+pub const PerpendicularZero = enum(u8) {
+    perp_zero_is_zero,
+    perp_zero_is_y_magnitude_1,
+};
+
 pub fn define_vec2_type(comptime T: type) type {
     return extern struct {
         const T_Vec2 = @This();
@@ -66,12 +71,24 @@ pub fn define_vec2_type(comptime T: type) type {
             return T_Vec2{ .x = 1 / self.x, .y = 1 / self.y };
         }
 
-        pub fn dot(self: T_Vec2, other: T_Vec2) T {
+        pub fn dot_product(self: T_Vec2, other: T_Vec2) T {
             return (self.x * other.x) + (self.y * other.y);
         }
+        pub inline fn dot(self: T_Vec2, other: T_Vec2) T {
+            return self.dot_product(other);
+        }
+        pub fn dot_product_self(self: T_Vec2) T {
+            return (self.x * self.x) + (self.y * self.y);
+        }
+        pub inline fn dot_self(self: T_Vec2) T {
+            return self.dot_product_self();
+        }
 
-        pub fn cross(self: T_Vec2, other: T_Vec2) T {
+        pub fn cross_product(self: T_Vec2, other: T_Vec2) T {
             return (self.x * other.y) - (self.y * other.x);
+        }
+        pub inline fn cross(self: T_Vec2, other: T_Vec2) T {
+            return self.cross_product(other);
         }
 
         pub fn add(self: T_Vec2, other: T_Vec2) T_Vec2 {
@@ -140,6 +157,23 @@ pub fn define_vec2_type(comptime T: type) type {
             return T_Vec2{ .x = self.x / len, .y = self.y / len };
         }
 
+        pub fn orthoganal_normal_ccw(self: T_Vec2, comptime zero_behavior: PerpendicularZero) T_Vec2 {
+            if (self.is_zero()) {
+                @branchHint(.unlikely);
+                return .new(0, if (zero_behavior == .perp_zero_is_zero) 0 else 1);
+            }
+            const len = self.length();
+            return self.normalize_using_length(len).perp_ccw();
+        }
+        pub fn orthoganal_normal_cw(self: T_Vec2, comptime zero_behavior: PerpendicularZero) T_Vec2 {
+            if (self.is_zero()) {
+                @branchHint(.unlikely);
+                return .new(0, if (zero_behavior == .perp_zero_is_zero) 0 else -1);
+            }
+            const len = self.length();
+            return self.normalize_using_length(len).perp_cw();
+        }
+
         pub fn angle_between(self: T_Vec2, other: T_Vec2) T {
             const dot_prod = (self.x * other.x) + (self.y * other.y);
             const lengths_multiplied = math.sqrt((self.x * self.x) + (self.y * self.y)) * math.sqrt((other.x * other.x) + (other.y * other.y));
@@ -171,8 +205,24 @@ pub fn define_vec2_type(comptime T: type) type {
             return T_Vec2{ .x = self.y, .y = -self.x };
         }
 
-        pub fn lerp(self: T_Vec2, other: T_Vec2, percent: T) T_Vec2 {
-            return T_Vec2{ .x = ((other.x - self.x) * percent) + self.x, .y = ((other.y - self.y) * percent) + self.y };
+        pub fn lerp(self: T_Vec2, p2: T_Vec2, percent: T) T_Vec2 {
+            return T_Vec2{ .x = ((p2.x - self.x) * percent) + self.x, .y = ((p2.y - self.y) * percent) + self.y };
+        }
+        pub inline fn linear_interp(self: T_Vec2, p2: T_Vec2, percent: T) T_Vec2 {
+            return self.lerp(p2, percent);
+        }
+        pub fn quad_interp(self: T_Vec2, p2: T_Vec2, p3: T_Vec2, percent: T) T_Vec2 {
+            const p12 = self.lerp(p2, percent);
+            const p23 = p2.lerp(p3, percent);
+            return p12.lerp(p23, percent);
+        }
+        pub fn cubic_interp(self: T_Vec2, p2: T_Vec2, p3: T_Vec2, p4: T_Vec2, percent: T) T_Vec2 {
+            const p12 = self.lerp(p2, percent);
+            const p23 = p2.lerp(p3, percent);
+            const p34 = p3.lerp(p4, percent);
+            const p12_23 = p12.lerp(p23, percent);
+            const p23_34 = p23.lerp(p34, percent);
+            return p12_23.lerp(p23_34, percent);
         }
 
         pub fn lerp_delta_min_max(self: T_Vec2, other: T_Vec2, min_delta: T, max_delta: T, delta: T) T_Vec2 {
@@ -221,6 +271,9 @@ pub fn define_vec2_type(comptime T: type) type {
 
         pub fn is_zero(self: T_Vec2) bool {
             return self.x == 0 and self.y == 0;
+        }
+        pub fn non_zero(self: T_Vec2) bool {
+            return self.x != 0 or self.y != 0;
         }
 
         pub fn approx_colinear(self: T_Vec2, other_a: T_Vec2, other_b: T_Vec2) bool {
