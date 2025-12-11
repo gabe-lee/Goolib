@@ -23,12 +23,15 @@
 
 const std = @import("std");
 const math = std.math;
+const build = @import("builtin");
 const assert = std.debug.assert;
+const Type = std.builtin.Type;
 
 const Root = @import("./_root.zig");
 const Assert = Root.Assert;
 const Types = Root.Types;
 const Vec2 = Root.Vec2;
+const Utils = Root.Utils;
 const assert_with_reason = Assert.assert_with_reason;
 
 const Math = @This();
@@ -44,18 +47,35 @@ pub fn rad_to_deg(comptime T: type, radians: T) T {
     return radians * math.deg_per_rad;
 }
 
-pub fn lerp(comptime T: type, a: T, b: T, delta: T) T {
-    return ((b - a) * delta) + a;
+pub fn lerp(a: anytype, b: @TypeOf(a), delta: @TypeOf(a)) @TypeOf(a) {
+    const T = @TypeOf(a);
+    if (Types.type_is_float(T)) {
+        return @mulAdd(T, delta, b, @mulAdd(T, -delta, a, a));
+    } else {
+        return ((1 - delta) * a) + (delta * b);
+    }
+}
+pub fn upgrade_lerp(a: anytype, b: anytype, delta: anytype) Upgraded3Numbers(@TypeOf(a), @TypeOf(b), @TypeOf(delta)).T {
+    const nums = upgrade_3_numbers_for_math(a, b, delta);
+    const T = @FieldType(nums, "a");
+    if (Types.type_is_float(T)) {
+        return @mulAdd(T, delta, b, @mulAdd(T, -delta, a, a));
+    } else {
+        return ((1 - delta) * a) + (delta * b);
+    }
+}
+pub fn upgrade_lerp_out(a: anytype, b: anytype, delta: anytype, comptime OUT: type) OUT {
+    const nums = upgrade_3_numbers_for_math(a, b, delta);
+    const T = @FieldType(nums, "a");
+    const out: T = if (Types.type_is_float(T))
+        (@mulAdd(T, delta, b, @mulAdd(T, -delta, a, a)))
+    else
+        (((1 - delta) * a) + (delta * b));
+    return convert_number(out, OUT);
 }
 
-pub fn weighted_average(comptime T: type, a: T, b: T, b_weight: anytype) T {
-    const F = @TypeOf(b_weight);
-    assert_with_reason(Types.type_is_float(F), @src(), "the type of `b_weight` must be a float type, got type `{s}`", .{@typeName(F)});
-    if (Types.type_is_float(T)) {
-        return @floatCast(((@as(F, 1.0) - b_weight) * @as(F, @floatCast(a))) + (@as(F, @floatCast(b)) * b_weight));
-    } else {
-        return @intFromFloat(((@as(F, 1.0) - b_weight) * @as(F, @floatFromInt(a))) + (@as(F, @floatFromInt(b)) * b_weight));
-    }
+pub fn log_x_base(x: anytype, base: anytype) @TypeOf(x) {
+    return @log2(x) / @log2(base);
 }
 
 pub fn median_of_3(comptime T: type, a: T, b: T, c: T) T {
@@ -149,11 +169,328 @@ pub fn approx_equal(comptime T: type, a: T, b: T) bool {
     return a_max >= b_min and b_max >= a_min;
 }
 
-pub fn change_per_second_required_to_reach_val_at_time(comptime T: type, current: T, target: T, time: T) T {
+pub const NumberConversionMode = enum(u2) {
+    int_to_int = 0b00,
+    int_to_float = 0b01,
+    float_to_int = 0b10,
+    float_to_float = 0b11,
+};
+
+pub const NumberUpgradeMode = enum(u3) {
+    same_class_ints_A_large,
+    same_class_ints_B_large,
+    mixed_class_ints,
+    both_float_A_large,
+    both_float_B_large,
+    upgrade_A_to_float,
+    upgrade_B_to_float,
+};
+
+pub fn larger_float_type(comptime A: type, comptime B: type) type {
+    assert_with_reason(Types.type_is_float(A), @src(), "type `A` must be a float type, got type `{s}`", .{@typeName(A)});
+    assert_with_reason(Types.type_is_float(B), @src(), "type `B` must be a float type, got type `{s}`", .{@typeName(B)});
+    if (@typeInfo(A).float.bits > @typeInfo(B).float.bits) {
+        return A;
+    } else {
+        return B;
+    }
+}
+pub fn larger_unsigned_int_type(comptime A: type, comptime B: type) type {
+    assert_with_reason(Types.type_is_unsigned_int(A), @src(), "type `A` must be an unsigned integer type, got type `{s}`", .{@typeName(A)});
+    assert_with_reason(Types.type_is_unsigned_int(B), @src(), "type `B` must be an unsigned integer type, got type `{s}`", .{@typeName(B)});
+    if (@typeInfo(A).int.bits > @typeInfo(B).int.bits) {
+        return A;
+    } else {
+        return B;
+    }
+}
+pub fn larger_signed_int_type(comptime A: type, comptime B: type) type {
+    assert_with_reason(Types.type_is_signed_int(A), @src(), "type `A` must be a signed integer type, got type `{s}`", .{@typeName(A)});
+    assert_with_reason(Types.type_is_signed_int(B), @src(), "type `B` must be a signed integer type, got type `{s}`", .{@typeName(B)});
+    if (@typeInfo(A).int.bits > @typeInfo(B).int.bits) {
+        return A;
+    } else {
+        return B;
+    }
+}
+pub fn largest_int_type_for_math(comptime A: type, comptime B: type, comptime ABSOLUTE_MAX_BITS: u16) type {
+    assert_with_reason(Types.type_is_int(A), @src(), "type `A` must be an integer type, got type `{s}`", .{@typeName(A)});
+    assert_with_reason(Types.type_is_int(B), @src(), "type `B` must be an integer type, got type `{s}`", .{@typeName(B)});
+    const IA = @typeInfo(A).int;
+    const IB = @typeInfo(B).int;
+    const sign_a_bits = if (IA.signedness == .signed) 1 else 0;
+    const max_a_bits = IA.bits - sign_a_bits;
+    const sign_b_bits = if (IB.signedness == .signed) 1 else 0;
+    const max_b_bits = IB.bits - sign_b_bits;
+    const max_val_bits = @max(max_a_bits, max_b_bits);
+    const max_sign_bits = @max(sign_a_bits, sign_b_bits);
+    const final_signed: std.builtin.Signedness = if (max_sign_bits == 1) .signed else .unsigned;
+    const final_bits = @min(max_val_bits + max_sign_bits, ABSOLUTE_MAX_BITS);
+    return std.meta.Int(final_signed, final_bits);
+}
+
+pub const NumberUpgradeModeAndType = struct {
+    mode: NumberUpgradeMode,
+    type_A: type,
+    type_b: type,
+};
+
+pub fn upgrade_mode_and_types(comptime A: type, comptime B: type) NumberUpgradeModeAndType {
+    assert_with_reason(Types.type_is_numeric(A), @src(), "type `A` must be a numeric type, got type `{s}`", .{@typeName(A)});
+    assert_with_reason(Types.type_is_numeric(B), @src(), "type `B` must be a numeric type, got type `{s}`", .{@typeName(B)});
+    const AA: type = check: {
+        if (Types.type_is_comptime(A)) {
+            if (Types.type_is_float(A)) {
+                break :check f64;
+            } else {
+                break :check i64;
+            }
+        } else {
+            break :check A;
+        }
+    };
+    const BB: type = check: {
+        if (Types.type_is_comptime(B)) {
+            if (Types.type_is_float(B)) {
+                break :check f64;
+            } else {
+                break :check i64;
+            }
+        } else {
+            break :check B;
+        }
+    };
+    comptime var MODE: NumberUpgradeMode = undefined;
+    if (Types.type_is_float(AA) != Types.type_is_float(BB)) {
+        if (Types.type_is_int(AA)) {
+            MODE = .upgrade_A_to_float;
+        } else {
+            MODE = .upgrade_B_to_float;
+        }
+    } else {
+        if (Types.type_is_float(AA)) {
+            const IA = @typeInfo(AA).float;
+            const IB = @typeInfo(BB).float;
+            if (IA.bits > IB.bits) {
+                MODE = .both_float_A_large;
+            } else {
+                MODE = .both_float_B_large;
+            }
+        } else {
+            const IA = @typeInfo(AA).int;
+            const IB = @typeInfo(BB).int;
+            if (IA.signedness != IB.signedness) {
+                MODE = .mixed_class_ints;
+            } else if (IA.bits > IB.bits) {
+                MODE = .same_class_ints_A_large;
+            } else {
+                MODE = .same_class_ints_B_large;
+            }
+        }
+    }
+    return NumberUpgradeModeAndType{
+        .mode = MODE,
+        .type_A = AA,
+        .type_B = BB,
+    };
+}
+
+pub fn Upgraded2Numbers(comptime A: type, comptime B: type) type {
+    const mode_and_types = upgrade_mode_and_types(A, B);
+    const T_: type = switch (mode_and_types.mode) {
+        .same_class_ints_B_large, .both_float_B_large, .upgrade_A_to_float => mode_and_types.type_B,
+        .same_class_ints_A_large, .both_float_A_large, .upgrade_B_to_float => mode_and_types.type_A,
+        .mixed_class_ints => largest_int_type_for_math(mode_and_types.type_A, mode_and_types.type_B, 64),
+    };
+    return struct {
+        pub const T: type = T_;
+        a: T = 0,
+        b: T = 0,
+    };
+}
+
+pub fn upgrade_2_numbers_for_math(a: anytype, b: anytype) Upgraded2Numbers(@TypeOf(a), @TypeOf(b)) {
+    const A = @TypeOf(a);
+    const B = @TypeOf(b);
+    const MODE = upgrade_mode_and_types(A, B);
+    var result = Upgraded2Numbers(A, B){};
+    switch (MODE) {
+        .both_float_A_large => {
+            result.a = a;
+            result.b = @floatCast(b);
+        },
+        .both_float_B_large => {
+            result.a = @floatCast(a);
+            result.b = b;
+        },
+        .same_class_ints_A_large => {
+            result.a = a;
+            result.b = @intCast(b);
+        },
+        .same_class_ints_B_large => {
+            result.a = @intCast(a);
+            result.b = b;
+        },
+        .mixed_class_ints => {
+            result.a = @intCast(a);
+            result.b = @intCast(b);
+        },
+        .upgrade_A_to_float => {
+            result.a = @floatFromInt(a);
+            result.b = b;
+        },
+        .upgrade_B_to_float => {
+            result.a = a;
+            result.b = @floatFromInt(b);
+        },
+    }
+    return result;
+}
+
+pub fn Upgraded3Numbers(comptime A: type, comptime B: type, comptime C: type) type {
+    const AB = Upgraded2Numbers(A, B);
+    const ABC = Upgraded2Numbers(AB.T, C);
+    return struct {
+        pub const T: type = ABC.T;
+        a: T = 0,
+        b: T = 0,
+        c: T = 0,
+    };
+}
+
+pub fn upgrade_3_numbers_for_math(a: anytype, b: anytype, c: anytype) Upgraded3Numbers(@TypeOf(a), @TypeOf(b), @TypeOf(c)) {
+    const A = @TypeOf(a);
+    const B = @TypeOf(b);
+    const C = @TypeOf(c);
+    const RESULT = Upgraded3Numbers(A, B, C);
+    var result = RESULT{};
+    result.a = convert_number(a, RESULT.T);
+    result.b = convert_number(b, RESULT.T);
+    result.c = convert_number(c, RESULT.T);
+    return result;
+}
+
+pub fn conversion_mode(comptime IN: type, comptime OUT: type) NumberConversionMode {
+    assert_with_reason(Types.type_is_numeric(IN), @src(), "type `IN` must be a numeric type, got type `{s}`", .{@typeName(IN)});
+    assert_with_reason(Types.type_is_numeric(OUT), @src(), "type `OUT` must be a numeric type, got type `{s}`", .{@typeName(OUT)});
+    if (Types.type_is_int(IN) and Types.type_is_int(OUT)) {
+        return .int_to_int;
+    } else if (Types.type_is_int(IN) and Types.type_is_float(OUT)) {
+        return .int_to_float;
+    } else if (Types.type_is_float(IN) and Types.type_is_float(OUT)) {
+        return .float_to_float;
+    } else {
+        return .float_to_int;
+    }
+}
+
+pub fn convert_number(in: anytype, comptime OUT: type) OUT {
+    switch (conversion_mode(@TypeOf(in), OUT)) {
+        .int_to_int => return @intCast(in),
+        .float_to_float => return @floatCast(in),
+        .int_to_float => return @floatFromInt(in),
+        .float_to_int => return @intFromFloat(in),
+    }
+}
+
+pub fn upgrade_add_out(a: anytype, b: anytype, comptime OUT: type) OUT {
+    const nums = upgrade_2_numbers_for_math(a, b);
+    const c = nums.a + nums.b;
+    convert_number(c, OUT);
+}
+pub fn upgrade_add(a: anytype, b: anytype) Upgraded2Numbers(@TypeOf(a), @TypeOf(b)).T {
+    const nums = upgrade_2_numbers_for_math(a, b);
+    return nums.a + nums.b;
+}
+pub fn upgrade_subtract_out(a: anytype, b: anytype, comptime OUT: type) OUT {
+    const nums = upgrade_2_numbers_for_math(a, b);
+    const c = nums.a - nums.b;
+    convert_number(c, OUT);
+}
+pub fn upgrade_subtract(a: anytype, b: anytype) Upgraded2Numbers(@TypeOf(a), @TypeOf(b)).T {
+    const nums = upgrade_2_numbers_for_math(a, b);
+    return nums.a - nums.b;
+}
+pub fn upgrade_multiply_out(a: anytype, b: anytype, comptime OUT: type) OUT {
+    const nums = upgrade_2_numbers_for_math(a, b);
+    const c = nums.a * nums.b;
+    convert_number(c, OUT);
+}
+pub fn upgrade_multiply(a: anytype, b: anytype) Upgraded2Numbers(@TypeOf(a), @TypeOf(b)).T {
+    const nums = upgrade_2_numbers_for_math(a, b);
+    return nums.a * nums.b;
+}
+pub fn upgrade_divide_out(a: anytype, b: anytype, comptime OUT: type) OUT {
+    const nums = upgrade_2_numbers_for_math(a, b);
+    const c = nums.a / nums.b;
+    convert_number(c, OUT);
+}
+pub fn upgrade_divide(a: anytype, b: anytype) Upgraded2Numbers(@TypeOf(a), @TypeOf(b)).T {
+    const nums = upgrade_2_numbers_for_math(a, b);
+    return nums.a / nums.b;
+}
+pub fn upgrade_power_out(a: anytype, b: anytype, comptime OUT: type) OUT {
+    const nums = upgrade_2_numbers_for_math(a, b);
+    const C = @FieldType(nums, "a");
+    const c = math.pow(C, nums.a, nums.b);
+    convert_number(c, OUT);
+}
+pub fn upgrade_power(a: anytype, b: anytype) Upgraded2Numbers(@TypeOf(a), @TypeOf(b)).T {
+    const nums = upgrade_2_numbers_for_math(a, b);
+    return math.pow(@FieldType(nums, "a"), nums.a, nums.b);
+}
+pub fn upgrade_root_out(a: anytype, b: anytype, comptime OUT: type) OUT {
+    const nums = upgrade_2_numbers_for_math(a, b);
+    const C = @FieldType(nums, "a");
+    const c = math.pow(C, nums.a, 1 / nums.b);
+    convert_number(c, OUT);
+}
+pub fn upgrade_root(a: anytype, b: anytype) Upgraded2Numbers(@TypeOf(a), @TypeOf(b)).T {
+    const nums = upgrade_2_numbers_for_math(a, b);
+    return math.pow(@FieldType(nums, "a"), nums.a, 1 / nums.b);
+}
+pub fn upgrade_log_x_base_out(x: anytype, base: anytype, comptime OUT: type) OUT {
+    const nums = upgrade_2_numbers_for_math(x, base);
+    const c = log_x_base(nums.a, nums.b);
+    convert_number(c, OUT);
+}
+pub fn upgrade_log_x_base(a: anytype, b: anytype) Upgraded2Numbers(@TypeOf(a), @TypeOf(b)).T {
+    const nums = upgrade_2_numbers_for_math(a, b);
+    return log_x_base(nums.a, nums.b);
+}
+pub fn upgrade_modulo_out(a: anytype, b: anytype, comptime OUT: type) OUT {
+    const nums = upgrade_2_numbers_for_math(a, b);
+    const c = @mod(nums.a, nums.b);
+    convert_number(c, OUT);
+}
+pub fn upgrade_modulo(a: anytype, b: anytype) Upgraded2Numbers(@TypeOf(a), @TypeOf(b)).T {
+    const nums = upgrade_2_numbers_for_math(a, b);
+    return @mod(nums.a, nums.b);
+}
+pub fn upgrade_max_out(a: anytype, b: anytype, comptime OUT: type) OUT {
+    const nums = upgrade_2_numbers_for_math(a, b);
+    const c = @max(nums.a, nums.b);
+    convert_number(c, OUT);
+}
+pub fn upgrade_max(a: anytype, b: anytype) Upgraded2Numbers(@TypeOf(a), @TypeOf(b)).T {
+    const nums = upgrade_2_numbers_for_math(a, b);
+    return @max(nums.a, nums.b);
+}
+pub fn upgrade_min_out(a: anytype, b: anytype, comptime OUT: type) OUT {
+    const nums = upgrade_2_numbers_for_math(a, b);
+    const c = @min(nums.a, nums.b);
+    convert_number(c, OUT);
+}
+pub fn upgrade_min(a: anytype, b: anytype) Upgraded2Numbers(@TypeOf(a), @TypeOf(b)).T {
+    const nums = upgrade_2_numbers_for_math(a, b);
+    return @min(nums.a, nums.b);
+}
+
+pub fn change_per_unit_time_required_to_reach_val_at_time(comptime T: type, current: T, target: T, time: T) T {
     return (target - current) * (1.0 / time);
 }
 
-pub fn change_per_second_required_to_reach_val_at_inverse_time(comptime T: type, current: T, target: T, inverse_time: T) T {
+pub fn change_per_unit_time_required_to_reach_val_at_inverse_time(comptime T: type, current: T, target: T, inverse_time: T) T {
     return (target - current) * inverse_time;
 }
 
@@ -162,8 +499,17 @@ pub fn ScanlineIntersections(comptime MAX: comptime_int, comptime T: type) type 
         const Self = @This();
         const Point = Vec2.define_vec2_type(T);
 
-        intersections: [MAX]Point,
-        intersection_counts: u32,
+        points: [MAX]Point = @splat(.{}),
+        slopes: [MAX]T = @splat(0),
+        count: u32 = 0,
+
+        pub fn change_max_intersections(self: Self, comptime NEW_MAX: comptime_int) ScanlineIntersections(NEW_MAX, T) {
+            var new_scanlines = ScanlineIntersections(NEW_MAX, T){};
+            new_scanlines.count = self.count;
+            @memcpy(new_scanlines.points[0..self.count], self.points[0..self.count]);
+            @memcpy(new_scanlines.slopes[0..self.count], self.slopes[0..self.count]);
+            return new_scanlines;
+        }
     };
 }
 
@@ -230,16 +576,33 @@ pub fn PolynomialSolution(comptime N: comptime_int, comptime T: type) type {
     return struct {
         const Self = @This();
 
-        solution_x_vals: [N]T = @splat(0),
-        num_solutions: u32 = 0,
-        solutions_mode: SolutionCountMode = .no_solutions,
+        vals: [N]T = @splat(0),
+        count: u32 = 0,
+        mode: SolutionCountMode = .no_solutions,
 
         pub fn change_polynimial_degree(self: Self, comptime NN: comptime_int) PolynomialSolution(NN, T) {
             var new_solution = PolynomialSolution(NN, T){};
-            @memcpy(new_solution.solution_x_vals[0..self.num_solutions], self.solution_x_vals[0..self.num_solutions]);
-            new_solution.num_solutions = self.num_solutions;
-            new_solution.solutions_mode = self.solutions_mode;
+            @memcpy(new_solution.vals[0..self.count], self.vals[0..self.count]);
+            new_solution.count = self.count;
+            new_solution.mode = self.mode;
             return new_solution;
+        }
+
+        pub fn add_solution(self: *Self, x_val: T) void {
+            self.vals[self.count] = x_val;
+            self.count += 1;
+            if (self.mode == .no_solutions) self.mode = .finite_solutions;
+        }
+
+        pub fn add_finite_solutions_if_infinite(self: *Self, comptime count: comptime_int, x_vals: [count]T) void {
+            if (self.mode == .infinite_solutions) {
+                self.count = count;
+                @memcpy(self.vals[0..count], x_vals[0..count]);
+            }
+        }
+
+        pub fn sort_by_val_small_to_large(self: *Self) void {
+            Utils.mem_sort_implicit(self.vals[0..self.count].ptr, 0, @intCast(self.count));
         }
     };
 }
@@ -309,16 +672,16 @@ pub fn solve_linear_polynomial_for_zero(a: anytype, b: @TypeOf(a)) LinearSolutio
     if (a == 0) {
         if (b == 0) {
             // horizontal line with y == 0
-            result.solutions_mode = .infinite_solutions;
+            result.mode = .infinite_solutions;
         } else {
             // horizontal line with y != 0
-            result.solutions_mode = .no_solutions;
+            result.mode = .no_solutions;
         }
         return result;
     }
     result.solution_deltas[0] = -(b / a);
-    result.num_solutions = 1;
-    result.solutions_mode = .finite_solutions;
+    result.count = 1;
+    result.mode = .finite_solutions;
     return result;
 }
 
@@ -352,13 +715,13 @@ pub fn solve_quadratic_polynomial_for_zeros_advanced(a: anytype, b: @TypeOf(a), 
         const sqrt_descriminant = @sqrt(descriminant);
         result.solution_deltas[0] = (-b + sqrt_descriminant) / a2;
         result.solution_deltas[1] = (-b - sqrt_descriminant) / a2;
-        result.num_solutions = 2;
-        result.solutions_mode = .finite_solutions;
+        result.count = 2;
+        result.mode = .finite_solutions;
     } else if (descriminant == 0) {
         const a2 = 2 * a;
-        result.solution_x_vals[0] = -(b / a2);
-        result.num_solutions = 1;
-        result.solutions_mode = .finite_solutions;
+        result.vals[0] = -(b / a2);
+        result.count = 1;
+        result.mode = .finite_solutions;
     } else {
         return result;
     }
@@ -400,18 +763,18 @@ pub fn solve_cubic_polynomial_for_zeros_advanced(a: anytype, b: @TypeOf(a), c: @
         clamp(-1, t, 1);
         t = math.acos(t);
         q = @sqrt(q) * -2;
-        result.solution_x_vals[0] = (q * @cos(t / 3)) - third_a;
-        result.solution_x_vals[1] = (q * @cos((t + TAU) / 3)) - third_a;
-        result.solution_x_vals[3] = (q * @cos((t - TAU) / 3)) - third_a;
-        result.num_solutions = 3;
-        result.solutions_mode = .finite_solutions;
+        result.vals[0] = (q * @cos(t / 3)) - third_a;
+        result.vals[1] = (q * @cos((t + TAU) / 3)) - third_a;
+        result.vals[3] = (q * @cos((t - TAU) / 3)) - third_a;
+        result.count = 3;
+        result.mode = .finite_solutions;
         return result;
     } else {
         const s: T = if (r < 0) 1 else -1;
         const u = s * math.pow(T, @abs(r) + @sqrt(r_squared - q_cubed), @as(T, 1) / @as(T, 3));
         const v = if (u == 0) 0 else (q / u);
-        result.solution_x_vals[0] = (u + v) - third_a;
-        result.solutions_mode = .finite_solutions;
+        result.vals[0] = (u + v) - third_a;
+        result.mode = .finite_solutions;
         if (u == v or check_estimate: {
             switch (double_root_estimate) {
                 .exact => break :check_estimate false,
@@ -420,10 +783,10 @@ pub fn solve_cubic_polynomial_for_zeros_advanced(a: anytype, b: @TypeOf(a), c: @
                 },
             }
         }) {
-            result.solution_x_vals[1] = (-(u + v) / 2) - third_a;
-            result.num_solutions = 2;
+            result.vals[1] = (-(u + v) / 2) - third_a;
+            result.count = 2;
         } else {
-            result.num_solutions = 1;
+            result.count = 1;
         }
         return result;
     }

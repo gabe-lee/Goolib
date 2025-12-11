@@ -400,6 +400,9 @@ pub inline fn optional_type_child(comptime T: type) type {
     return @typeInfo(T).optional.child;
 }
 
+pub inline fn type_is_comptime(comptime T: type) bool {
+    return @typeInfo(T) == .comptime_int or @typeInfo(T) == .comptime_float;
+}
 pub inline fn type_is_float(comptime T: type) bool {
     return @typeInfo(T) == .float or @typeInfo(T) == .comptime_float;
 }

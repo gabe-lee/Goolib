@@ -29,6 +29,7 @@ const Allocator = std.mem.Allocator;
 
 const Root = @import("./_root.zig");
 const Utils = Root.Utils;
+const Types = Root.Types;
 const ANSI = Root.ANSI;
 
 pub const SHOULD_ASSERT = build.mode == .Debug or build.mode == .ReleaseSafe;
@@ -132,6 +133,19 @@ pub fn assert_field_is_type(comptime field: std.builtin.Type.StructField, compti
 
 pub fn assert_is_type(comptime THIS_T: type, comptime NEED_T: type) void {
     assert_with_reason(THIS_T == NEED_T, @src(), "got type `{s}`, but needed type `{s}`", .{ @typeName(THIS_T), @typeName(NEED_T) });
+}
+
+pub fn assert_is_float(comptime T: type, comptime src: ?SourceLocation) void {
+    assert_with_reason(Types.type_is_float(T), src, "type must be a float type, got type `{s}`", .{@typeName(T)});
+}
+pub fn assert_is_int(comptime T: type, comptime src: ?SourceLocation) void {
+    assert_with_reason(Types.type_is_int(T), src, "type must be an integer type, got type `{s}`", .{@typeName(T)});
+}
+pub fn assert_is_unsigned_int(comptime T: type, comptime src: ?SourceLocation) void {
+    assert_with_reason(Types.type_is_unsigned_int(T), src, "type must be an unsigned integer type, got type `{s}`", .{@typeName(T)});
+}
+pub fn assert_is_signed_int(comptime T: type, comptime src: ?SourceLocation) void {
+    assert_with_reason(Types.type_is_signed_int(T), src, "type must be a signed integer type, got type `{s}`", .{@typeName(T)});
 }
 
 pub fn warn_experimental(comptime src: SourceLocation, comptime msg: [:0]const u8, args: anytype) void {

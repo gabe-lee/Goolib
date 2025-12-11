@@ -54,6 +54,7 @@ pub fn BezierMultiSignedDistanceFieldGenerator(comptime FLOAT_TYPE: type) type {
         pub const CubicBezier = Bezier.CubicBezier(FLOAT_TYPE);
         pub const SignedDistance = Mathx.SignedDistance(FLOAT_TYPE);
         pub const SignedDistanceWithPercent = Mathx.SignedDistanceWithPercent(FLOAT_TYPE);
+        pub const ScanlineIntersections = Mathx.ScanlineIntersections(3, FLOAT_TYPE);
         pub const ITERATIVE_STEPS_FOR_CUBIC_MIN_SIGNED_DISTANCE = 4;
 
         /// Edge color specifies which color channels an edge belongs to.
@@ -139,12 +140,6 @@ pub fn BezierMultiSignedDistanceFieldGenerator(comptime FLOAT_TYPE: type) type {
                         return bezier.p[3];
                     },
                 }
-            }
-            pub fn reverse(self: *EdgeSegment) void {
-                _ = self;
-            }
-            pub fn clone(self: *EdgeSegment) *EdgeSegment {
-                _ = self;
             }
             pub fn interp_point(self: EdgeSegment, percent: FLOAT_TYPE) Point {
                 switch (self.points) {
@@ -250,46 +245,139 @@ pub fn BezierMultiSignedDistanceFieldGenerator(comptime FLOAT_TYPE: type) type {
                 }
                 return signed_dist;
             }
-            //     public:
-            //     EdgeColor color;
-
-            //     static EdgeSegment *create(Point2 p0, Point2 p1, EdgeColor edgeColor = WHITE);
-            //     static EdgeSegment *create(Point2 p0, Point2 p1, Point2 p2, EdgeColor edgeColor = WHITE);
-            //     static EdgeSegment *create(Point2 p0, Point2 p1, Point2 p2, Point2 p3, EdgeColor edgeColor = WHITE);
-
-            //     EdgeSegment(EdgeColor edgeColor = WHITE) : color(edgeColor) { }
-            //     virtual ~EdgeSegment() { }
-            //     /// Creates a copy of the edge segment.
-            //     virtual EdgeSegment *clone() const = 0;
-            //     /// Returns the numeric code of the edge segment's type.
-            //     virtual int type() const = 0;
-            //     /// Returns the array of control points.
-            //     virtual const Point2 *controlPoints() const = 0;
-            //     /// Returns the point on the edge specified by the parameter (between 0 and 1).
-            //     virtual Point2 point(double param) const = 0;
-            //     /// Returns the direction the edge has at the point specified by the parameter.
-            //     virtual Vector2 direction(double param) const = 0;
-            //     /// Returns the change of direction (second derivative) at the point specified by the parameter.
-            //     virtual Vector2 directionChange(double param) const = 0;
-            //     /// Returns the minimum signed distance between origin and the edge.
-            //     virtual SignedDistance signedDistance(Point2 origin, double &param) const = 0;
-            //     /// Converts a previously retrieved signed distance from origin to perpendicular distance.
-            //     virtual void distanceToPerpendicularDistance(SignedDistance &distance, Point2 origin, double param) const;
-            //     /// Outputs a list of (at most three) intersections (their X coordinates) with an infinite horizontal scanline at y and returns how many there are.
-            //     virtual int scanlineIntersections(double x[3], int dy[3], double y) const = 0;
-            //     /// Adjusts the bounding box to fit the edge segment.
-            //     virtual void bound(double &xMin, double &yMin, double &xMax, double &yMax) const = 0;
-
-            //     /// Reverses the edge (swaps its start point and end point).
-            //     virtual void reverse() = 0;
-            //     /// Moves the start point of the edge segment.
-            //     virtual void moveStartPoint(Point2 to) = 0;
-            //     /// Moves the end point of the edge segment.
-            //     virtual void moveEndPoint(Point2 to) = 0;
-            //     /// Splits the edge segments into thirds which together represent the original edge.
-            //     virtual void splitInThirds(EdgeSegment *&part0, EdgeSegment *&part1, EdgeSegment *&part2) const = 0;
-
-            // };
+            pub fn horizontal_intersections(self: EdgeSegment, point: Point) ScanlineIntersections {
+                switch (self.points) {
+                    .linear => |bezier| {
+                        return bezier.horizontal_intersections(point).change_max_intersections(3);
+                    },
+                    .quadratic => |bezier| {
+                        return bezier.horizontal_intersections(point, .estimate_linear_when_linear_coeff_more_than_N_times_quadratic(1e12)).change_max_intersections(3);
+                    },
+                    .cubic => |bezier| {
+                        return bezier.horizontal_intersections(point, .estimate_double_roots_when_u_minus_v_less_than_N_times_u_plus_v(1e-12), .estimate_quadratic_when_quadratic_coeff_more_than_N_times_cubic(1e6), .estimate_linear_when_linear_coeff_more_than_N_times_quadratic(1e12));
+                    },
+                }
+            }
+            pub fn add_bounds_to_aabb(self: EdgeSegment, aabb: *AABB) void {
+                switch (self.points) {
+                    .linear => |bezier| {
+                        bezier.add_bounds_to_aabb(aabb);
+                    },
+                    .quadratic => |bezier| {
+                        bezier.add_bounds_to_aabb(aabb);
+                    },
+                    .cubic => |bezier| {
+                        bezier.add_bounds_to_aabb(aabb);
+                    },
+                }
+            }
+            pub fn reverse(self: *EdgeSegment) void {
+                switch (self.points) {
+                    .linear => |*bezier| {
+                        bezier.reverse();
+                    },
+                    .quadratic => |*bezier| {
+                        bezier.reverse();
+                    },
+                    .cubic => |*bezier| {
+                        bezier.reverse();
+                    },
+                }
+            }
+            pub fn move_start_point(self: *EdgeSegment, new_start: Point) void {
+                switch (self.points) {
+                    .linear => |*bezier| {
+                        bezier.move_start_point(new_start);
+                    },
+                    .quadratic => |*bezier| {
+                        bezier.move_start_point(new_start);
+                    },
+                    .cubic => |*bezier| {
+                        bezier.move_start_point(new_start);
+                    },
+                }
+            }
+            pub fn move_end_point(self: *EdgeSegment, new_end: Point) void {
+                switch (self.points) {
+                    .linear => |*bezier| {
+                        bezier.move_end_point(new_end);
+                    },
+                    .quadratic => |*bezier| {
+                        bezier.move_end_point(new_end);
+                    },
+                    .cubic => |*bezier| {
+                        bezier.move_end_point(new_end);
+                    },
+                }
+            }
+            pub fn split_in_thirds(self: EdgeSegment) [3]EdgeSegment {
+                switch (self.points) {
+                    .linear => |bezier| {
+                        const thirds = bezier.split_in_thirds();
+                        return [3]EdgeSegment{
+                            EdgeSegment{
+                                .color = self.color,
+                                .points = EdgePoints{ .linear = thirds[0] },
+                            },
+                            EdgeSegment{
+                                .color = self.color,
+                                .points = EdgePoints{ .linear = thirds[1] },
+                            },
+                            EdgeSegment{
+                                .color = self.color,
+                                .points = EdgePoints{ .linear = thirds[2] },
+                            },
+                        };
+                    },
+                    .quadratic => |bezier| {
+                        const thirds = bezier.split_in_thirds();
+                        return [3]EdgeSegment{
+                            EdgeSegment{
+                                .color = self.color,
+                                .points = EdgePoints{ .quadratic = thirds[0] },
+                            },
+                            EdgeSegment{
+                                .color = self.color,
+                                .points = EdgePoints{ .quadratic = thirds[1] },
+                            },
+                            EdgeSegment{
+                                .color = self.color,
+                                .points = EdgePoints{ .quadratic = thirds[2] },
+                            },
+                        };
+                    },
+                    .cubic => |bezier| {
+                        const thirds = bezier.split_in_thirds();
+                        return [3]EdgeSegment{
+                            EdgeSegment{
+                                .color = self.color,
+                                .points = EdgePoints{ .cubic = thirds[0] },
+                            },
+                            EdgeSegment{
+                                .color = self.color,
+                                .points = EdgePoints{ .cubic = thirds[1] },
+                            },
+                            EdgeSegment{
+                                .color = self.color,
+                                .points = EdgePoints{ .cubic = thirds[2] },
+                            },
+                        };
+                    },
+                }
+            }
+            pub fn get_points(self: EdgeSegment) []Point {
+                switch (self.points) {
+                    .linear => |*bezier| {
+                        return bezier.p[0..];
+                    },
+                    .quadratic => |*bezier| {
+                        return bezier.p[0..];
+                    },
+                    .cubic => |*bezier| {
+                        return bezier.p[0..];
+                    },
+                }
+            }
         };
     };
 }

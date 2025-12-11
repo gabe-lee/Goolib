@@ -27,7 +27,12 @@ const assert = std.debug.assert;
 
 const Root = @import("./_root.zig");
 const PointOrientation = Root.CommonTypes.PointOrientation;
+const Assert = Root.Assert;
+const MathX = Root.Math;
 const SDL3 = Root.SDL3;
+
+const assert_is_float = Assert.assert_is_float;
+const assert_with_reason = Assert.assert_with_reason;
 
 // pub const Vec2ExtraOptions = struct {
 //     convert_SDL3: bool = false,
@@ -50,6 +55,11 @@ pub fn define_vec2_type(comptime T: type) type {
             i8, i16, i32, i64, i128, isize, u8, u16, u32, u64, u128, usize, c_short, c_int, c_long, c_longlong, c_char, c_ushort, c_uint, c_ulong, c_ulonglong => true,
             else => false,
         };
+        const IS_LARGE_INT = switch (T) {
+            i64, i128, isize, u64, u128, usize, c_long, c_longlong, c_ulong, c_ulonglong => true,
+            else => false,
+        };
+        pub const F = if (IS_FLOAT) T else if (IS_LARGE_INT) f64 else f32;
 
         x: T = 0,
         y: T = 0,
@@ -103,12 +113,16 @@ pub fn define_vec2_type(comptime T: type) type {
             return T_Vec2{ .x = self.x * other.x, .y = self.y * other.y };
         }
 
-        pub fn scale(self: T_Vec2, val: T) T_Vec2 {
-            return T_Vec2{ .x = self.x * val, .y = self.y * val };
+        pub fn scale(self: T_Vec2, val: anytype) T_Vec2 {
+            return T_Vec2{ .x = MathX.upgrade_multiply_out(self.x, val, T), .y = MathX.upgrade_multiply_out(self.y, val, T) };
         }
 
-        pub fn add_scale(self: T_Vec2, add_vec: T_Vec2, scale_add_vec_by: T) T_Vec2 {
-            return T_Vec2{ .x = self.x + (add_vec.x * scale_add_vec_by), .y = self.y + (add_vec.y * scale_add_vec_by) };
+        pub fn add_scale(self: T_Vec2, add_vec: T_Vec2, scale_add_vec_by: anytype) T_Vec2 {
+            return T_Vec2{ .x = self.x + MathX.upgrade_multiply_out(add_vec.x, scale_add_vec_by, T), .y = self.y + MathX.upgrade_multiply_out(add_vec.y, scale_add_vec_by, T) };
+        }
+
+        pub fn subtract_scale(self: T_Vec2, subtract_vec: T_Vec2, scale_subtract_vec_by: anytype) T_Vec2 {
+            return T_Vec2{ .x = self.x - MathX.upgrade_multiply_out(subtract_vec.x, scale_subtract_vec_by, T), .y = self.y - MathX.upgrade_multiply_out(subtract_vec.y, scale_subtract_vec_by, T) };
         }
 
         pub fn divide(self: T_Vec2, other: T_Vec2) T_Vec2 {
@@ -191,10 +205,15 @@ pub fn define_vec2_type(comptime T: type) type {
             return math.acos(dot_prod);
         }
 
-        pub fn ratio_a_to_b(a: T_Vec2, b: T_Vec2) T {
+        /// Assuming `a` and `b` are vectors from the origin (0, 0)
+        /// AND are colinear, return the ratio of the length
+        /// of `a` compared to the legnth of `b`
+        ///
+        /// equals `a.x / b.x` or `a.y / b.y`
+        pub fn colinear_ratio_a_of_b(a: T_Vec2, b: T_Vec2) T {
             assert(a.x != 0 or a.y != 0);
-            if (a.x == 0) return b.y / a.y;
-            return b.x / a.x;
+            if (a.x == 0) return a.y / b.y;
+            return a.x / b.x;
         }
 
         pub fn perp_ccw(self: T_Vec2) T_Vec2 {
@@ -205,51 +224,75 @@ pub fn define_vec2_type(comptime T: type) type {
             return T_Vec2{ .x = self.y, .y = -self.x };
         }
 
-        pub fn lerp(self: T_Vec2, p2: T_Vec2, percent: T) T_Vec2 {
-            return T_Vec2{ .x = ((p2.x - self.x) * percent) + self.x, .y = ((p2.y - self.y) * percent) + self.y };
+        pub fn lerp(self: T_Vec2, p2: T_Vec2, percent: anytype) T_Vec2 {
+            assert_is_float(@TypeOf(percent));
+            return T_Vec2{ .x = MathX.upgrade_lerp_out(self.x, p2.x, percent, T), .y = MathX.upgrade_lerp_out(self.y, p2.y, percent, T) };
         }
-        pub inline fn linear_interp(self: T_Vec2, p2: T_Vec2, percent: T) T_Vec2 {
-            return self.lerp(p2, percent);
+        pub inline fn linear_interp(p1: T_Vec2, p2: T_Vec2, percent: anytype) T_Vec2 {
+            return p1.lerp(p2, percent);
         }
-        pub fn quad_interp(self: T_Vec2, p2: T_Vec2, p3: T_Vec2, percent: T) T_Vec2 {
-            const p12 = self.lerp(p2, percent);
+        pub fn quadratic_interp(p1: T_Vec2, p2: T_Vec2, p3: T_Vec2, percent: anytype) T_Vec2 {
+            const p12 = p1.lerp(p2, percent);
             const p23 = p2.lerp(p3, percent);
             return p12.lerp(p23, percent);
         }
-        pub fn cubic_interp(self: T_Vec2, p2: T_Vec2, p3: T_Vec2, p4: T_Vec2, percent: T) T_Vec2 {
-            const p12 = self.lerp(p2, percent);
+        pub fn cubic_interp(p1: T_Vec2, p2: T_Vec2, p3: T_Vec2, p4: T_Vec2, percent: anytype) T_Vec2 {
+            const p12 = p1.lerp(p2, percent);
             const p23 = p2.lerp(p3, percent);
             const p34 = p3.lerp(p4, percent);
             const p12_23 = p12.lerp(p23, percent);
             const p23_34 = p23.lerp(p34, percent);
             return p12_23.lerp(p23_34, percent);
         }
-
-        pub fn lerp_delta_min_max(self: T_Vec2, other: T_Vec2, min_delta: T, max_delta: T, delta: T) T_Vec2 {
-            const percent = (delta - min_delta) / (max_delta - min_delta);
-            return T_Vec2{ .x = ((other.x - self.x) * percent) + self.x, .y = ((other.y - self.y) * percent) + self.y };
+        pub fn n_bezier_interp(comptime N: comptime_int, p: [N]T_Vec2, percent: anytype) T_Vec2 {
+            var tmp: [2][N]T_Vec2 = .{ p, @splat(T_Vec2{}) };
+            var curr: usize = 0;
+            var next: usize = 1;
+            var curr_points: usize = N;
+            var i: usize = undefined;
+            var j: usize = undefined;
+            while (curr_points > 1) {
+                i = 0;
+                j = 1;
+                while (j < curr_points) {
+                    tmp[next][i] = tmp[curr][i].lerp(tmp[curr][j], percent);
+                    i = j;
+                    j += 1;
+                }
+                curr_points -= 1;
+                curr = curr ^ 1;
+                next = next ^ 1;
+            }
+            return tmp[curr][0];
         }
 
-        pub fn lerp_delta_max(self: T_Vec2, other: T_Vec2, max_delta: T, delta: T) T_Vec2 {
-            const percent = delta / max_delta;
-            return T_Vec2{ .x = ((other.x - self.x) * percent) + self.x, .y = ((other.y - self.y) * percent) + self.y };
+        pub fn lerp_delta_range(self: T_Vec2, other: T_Vec2, min_delta: anytype, max_delta: anytype, range_delta: anytype) T_Vec2 {
+            const range = MathX.upgrade_subtract(max_delta, min_delta);
+            const range_percent = MathX.upgrade_multiply(range, range_delta);
+            const percent = MathX.upgrade_add(min_delta, range_percent);
+            return T_Vec2{ .x = MathX.upgrade_multiply_out((other.x - self.x), percent, T) + self.x, .y = MathX.upgrade_multiply_out((other.y - self.y), percent, T) + self.y };
         }
 
-        pub fn rotate_radians(self: T_Vec2, radians: T) T_Vec2 {
+        pub fn lerp_delta_delta(self: T_Vec2, other: T_Vec2, delta: anytype, delta_delta: anytype) T_Vec2 {
+            const percent = MathX.upgrade_multiply(delta, delta_delta);
+            return T_Vec2{ .x = MathX.upgrade_multiply_out((other.x - self.x), percent, T) + self.x, .y = MathX.upgrade_multiply_out((other.y - self.y), percent, T) + self.y };
+        }
+
+        pub fn rotate_radians(self: T_Vec2, radians: anytype) T_Vec2 {
             const cos = @cos(radians);
             const sin = @sin(radians);
-            return T_Vec2{ .x = (self.x * cos) - (self.y * sin), .y = (self.x * sin) + (self.y * cos) };
+            return T_Vec2{ .x = MathX.upgrade_multiply_out(self.x, cos, T) - MathX.upgrade_multiply_out(self.y, sin, T), .y = MathX.upgrade_multiply_out(self.x, sin, T) + MathX.upgrade_multiply_out(self.y, cos, T) };
         }
 
         pub fn rotate_degrees(self: T_Vec2, degrees: T) T_Vec2 {
             const rads = degrees * math.rad_per_deg;
             const cos = @cos(rads);
             const sin = @sin(rads);
-            return T_Vec2{ .x = (self.x * cos) - (self.y * sin), .y = (self.x * sin) + (self.y * cos) };
+            return T_Vec2{ .x = MathX.upgrade_multiply_out(self.x, cos, T) - MathX.upgrade_multiply_out(self.y, sin, T), .y = MathX.upgrade_multiply_out(self.x, sin, T) + MathX.upgrade_multiply_out(self.y, cos, T) };
         }
 
         pub fn rotate_sin_cos(self: T_Vec2, sin: T, cos: T) T_Vec2 {
-            return T_Vec2{ .x = (self.x * cos) - (self.y * sin), .y = (self.x * sin) + (self.y * cos) };
+            return T_Vec2{ .x = MathX.upgrade_multiply_out(self.x, cos, T) - MathX.upgrade_multiply_out(self.y, sin, T), .y = MathX.upgrade_multiply_out(self.x, sin, T) + MathX.upgrade_multiply_out(self.y, cos, T) };
         }
 
         pub fn reflect(self: T_Vec2, reflect_normal: T_Vec2) T_Vec2 {
@@ -312,11 +355,11 @@ pub fn define_vec2_type(comptime T: type) type {
             return line_aabb.point_within(self);
         }
 
-        pub fn velocity_required_to_reach_point_at_time(self: T_Vec2, point: T_Vec2, time: T) T_Vec2 {
+        pub fn rate_required_to_reach_point_at_time(self: T_Vec2, point: T_Vec2, time: anytype) T_Vec2 {
             return point.subtract(self).scale(1.0 / time);
         }
 
-        pub fn velocity_required_to_reach_point_inverse_time(self: T_Vec2, point: T_Vec2, inverse_time: T) T_Vec2 {
+        pub fn rate_required_to_reach_point_inverse_time(self: T_Vec2, point: T_Vec2, inverse_time: anytype) T_Vec2 {
             return point.subtract(self).scale(inverse_time);
         }
 
