@@ -1338,3 +1338,10 @@ pub fn equals_implicit(a: anytype, b: @TypeOf(a)) bool {
         },
     }
 }
+
+pub fn scalar_ptr_as_single_item_slice(ptr: anytype) []@typeInfo(@TypeOf(ptr)).pointer.child {
+    const P = @TypeOf(ptr);
+    assert_with_reason(Types.type_is_single_item_pointer(P), @src(), "input `ptr` must be a pointer type, got type `{s}`", .{@typeName(P)});
+    const T = @typeInfo(P).pointer.child;
+    return @as([*]T, @ptrCast(@alignCast(ptr)))[0..1];
+}
