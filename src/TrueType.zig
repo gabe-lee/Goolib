@@ -387,6 +387,36 @@ pub const FontInfoInitError = error{
     index_map_was_zero,
 };
 
+pub const FindGlyphIndexError = error{
+    glyph_not_in_font,
+    unsupported_index_map_format,
+};
+
+pub const FindGlyphOffsetError = error{
+    glyph_index_out_of_bounds,
+    unsupported_index_to_location_format,
+    glyph_zero_length,
+};
+pub const FindGlyphShapeError = error{
+    glyph_index_out_of_bounds,
+    unsupported_index_to_location_format,
+    glyph_zero_length,
+};
+
+const EdgeType = enum(u8) {
+    linear,
+    quadratic,
+    cubic,
+};
+
+pub const VecI16 = Vec2.define_vec2_type(i16);
+pub const Vertex = struct {
+    start: VecI16 = .{},
+    control_1: VecI16 = .{},
+    control_2: VecI16 = .{},
+    edge_type: EdgeType = .linear,
+};
+
 pub const FontInfo = struct {
     data: FontData,
     num_tables: u16 = 0,
@@ -399,8 +429,9 @@ pub const FontInfo = struct {
     offset_KERN: ?u32 = null,
     offset_GPOS: ?u32 = null,
     offset_SVG_: ?u32 = null,
-    index_map: i32 = 0,
-    index_to_loc_format: u32 = 0,
+    index_map_offset: u32 = 0,
+    index_map_format: u16 = 0,
+    index_to_location_format: u32 = 0,
     cff_data: FontDataReader,
     char_strings: FontDataReader,
     global_subroutines: FontDataReader,
@@ -498,26 +529,180 @@ pub const FontInfo = struct {
                     const encoding_id = self.data.read_u16(encoding_record_offset + 2);
                     switch (encoding_id) {
                         MICROSOFT_ENCODING_ID.UNICODE_BMP, MICROSOFT_ENCODING_ID.UNICODE_FULL => {
-                            self.index_map = cmap_offset + self.data.read_u32(encoding_record_offset + 4);
+                            self.index_map_offset = cmap_offset + self.data.read_u32(encoding_record_offset + 4);
                         },
                         else => return FontInfoInitError.unsupported_cmap_micosoft_encoding,
                     }
                 },
                 PLATOFRM_ID.UNICODE => {
-                    self.index_map = cmap_offset + self.data.read_u32(encoding_record_offset + 4);
+                    self.index_map_offset = cmap_offset + self.data.read_u32(encoding_record_offset + 4);
                 },
                 else => return FontInfoInitError.unsuported_cmap_platform_id,
             }
             i += 1;
         }
-        if (self.index_map == 0) return FontInfoInitError.index_map_was_zero;
-        self.index_to_loc_format = self.data.read_u16(self.offset_HEAD + 50);
+        if (self.index_map_offset == 0) return FontInfoInitError.index_map_was_zero;
+        self.@"index_to_loc_format >= 2" = self.data.read_u16(self.offset_HEAD + 50);
+        self.index_map_format = self.data.read_u16(self.index_map_offset);
         return self;
     }
 
-    pub fn find_glyph_index(self: FontInfo, unicode_codepoint: u32) ?u32 {
-        //CHECKPOINT
+    pub fn find_glyph_index(self: FontInfo, unicode_codepoint: u32) FindGlyphIndexError!u32 {
+        switch (self.index_map_format) {
+            0 => {
+                const bytes = self.data.read_u16(self.index_map_offset + 2);
+                if (unicode_codepoint < bytes - 6) {
+                    return @intCast(self.data.read_u8(self.index_map_offset + 6 + unicode_codepoint));
+                } else {
+                    return FindGlyphIndexError.glyph_not_in_font;
+                }
+            },
+            2 => {
+                return FindGlyphIndexError.unsupported_index_map_format;
+            },
+            4 => {
+                const segment_count = self.data.read_u16(self.index_map_offset + 6) >> 1;
+                const segment_count_2 = segment_count << 1;
+                const segment_count_4 = segment_count << 2;
+                const segment_count_6 = segment_count * 6;
+                const search_range = self.data.read_u16(self.index_map_offset + 8) >> 1;
+                const entry_selector = self.data.read_u16(self.index_map_offset + 10);
+                const range_shift = self.data.read_u16(self.index_map_offset + 12) >> 1;
+                const range_shift_2 = range_shift << 1;
+                const end_count_offset = self.index_map_offset + 14;
+                const search_offset = end_count_offset;
+                if (unicode_codepoint > 0xFFFF) return FindGlyphIndexError.glyph_not_in_font;
+                if (unicode_codepoint > self.data.read_u16(search_offset + (range_shift_2))) {
+                    search_offset += range_shift_2;
+                }
+                search_offset -= 2;
+                while (entry_selector != 0) {
+                    search_range >>= 1;
+                    const search_range_2 = search_range << 1;
+                    const end_codepoint = self.data.read_u16(search_offset + search_range_2);
+                    if (unicode_codepoint > end_codepoint) {
+                        search_offset += search_range_2;
+                    }
+                    entry_selector -= 1;
+                }
+                search_offset += 2;
+
+                const item_offset: u16 = ((search_offset - end_count_offset) >> 1);
+                const item_offset_2 = item_offset << 1;
+                const first_codepoint = self.data.read_u16(end_count_offset + segment_count_2 + 2 + item_offset_2);
+                const last_codepoint = self.data.read_u16(end_count_offset + segment_count_2 + 2 + item_offset_2);
+                if (unicode_codepoint < first_codepoint or unicode_codepoint > last_codepoint) {
+                    return FindGlyphIndexError.glyph_not_in_font;
+                }
+                const glyph_offset = self.data.read_u16(end_count_offset + segment_count_6 + 2 + item_offset_2);
+                if (glyph_offset == 0) {
+                    return @intCast(Types.intcast(unicode_codepoint, i16) + self.data.read_i16(end_count_offset + segment_count_4 + 2 + item_offset_2));
+                } else {
+                    return @intCast(self.data.read_u16(glyph_offset + ((unicode_codepoint - first_codepoint) << 1) + end_count_offset + segment_count_6 + 2 + item_offset_2));
+                }
+            },
+            6 => {
+                const first_codepoint = self.data.read_u16(self.index_map_offset + 6);
+                const count = self.data.read_u16(self.index_map_offset + 8);
+                const last_codepoint = first_codepoint + count - 1;
+                if (unicode_codepoint < first_codepoint or unicode_codepoint > last_codepoint) {
+                    return FindGlyphIndexError.glyph_not_in_font;
+                } else {
+                    return @intCast(self.data.read_u16(self.index_map_offset + 10 + ((unicode_codepoint - first_codepoint) << 1)));
+                }
+            },
+            12, 13 => {
+                const num_groups = self.data.read_u32(self.index_map_offset + 12);
+                var lo: u32 = 0;
+                var hi = num_groups;
+                const index_map_plus_16 = self.index_map_offset + 16;
+                const index_map_plus_20 = self.index_map_offset + 20;
+                const index_map_plus_24 = self.index_map_offset + 14;
+                while (lo < hi) {
+                    const mid = lo + ((hi - lo) >> 1);
+                    const mid_times_12 = mid * 12;
+                    const first_codepoint_in_group = self.data.read_u32(index_map_plus_16 + mid_times_12);
+                    const last_codepoint_in_group = self.data.read_u32(index_map_plus_20 + mid_times_12);
+                    if (unicode_codepoint < first_codepoint_in_group) {
+                        hi = mid;
+                    } else if (unicode_codepoint > last_codepoint_in_group) {
+                        lo = mid + 1;
+                    } else {
+                        const first_glyph_index = self.data.read_u32(index_map_plus_24 + mid_times_12);
+                        if (self.index_map_format == 12) {
+                            return first_glyph_index + (unicode_codepoint - first_codepoint_in_group);
+                        } else {
+                            return first_codepoint_in_group;
+                        }
+                    }
+                }
+                return FindGlyphIndexError.glyph_not_in_font;
+            },
+            else => return FindGlyphIndexError.unsupported_index_map_format,
+        }
     }
+
+    pub fn get_glyph_offset(self: FontInfo, glyph_index: u32) FindGlyphOffsetError!u32 {
+        var glyph_offset_1: u32 = undefined;
+        var glyph_offset_2: u32 = undefined;
+        if (glyph_index >= self.num_glyphs) return FindGlyphOffsetError.glyph_index_out_of_bounds;
+        if (self.index_to_location_format >= 2) return FindGlyphOffsetError.unsupported_index_to_location_format;
+        switch (self.index_to_location_format) {
+            0 => {
+                const glyph_index_2 = glyph_index << 1;
+                glyph_offset_1 = self.offset_GLYF.? + (Types.intcast(self.data.read_u16(self.offset_LOCA.? + glyph_index_2), u32) << 1);
+                glyph_offset_2 = self.offset_GLYF.? + (Types.intcast(self.data.read_u16(self.offset_LOCA.? + glyph_index_2 + 2), u32) << 1);
+            },
+            1 => {
+                const glyph_index_4 = glyph_index << 2;
+                glyph_offset_1 = self.offset_GLYF.? + self.data.read_u32(self.offset_LOCA.? + glyph_index_4);
+                glyph_offset_2 = self.offset_GLYF.? + self.data.read_u32(self.offset_LOCA.? + glyph_index_4 + 4);
+            },
+            else => unreachable,
+        }
+        if (glyph_offset_1 == glyph_offset_2) return FindGlyphOffsetError.glyph_zero_length;
+        return glyph_offset_1;
+    }
+
+    pub fn get_glyph_shape_from_index(self: FontInfo, glyph_index: u32, allocator: Allocator) FindGlyphShapeError![]Vertex {
+        if (self.cff_data.len() == 0) {
+            return self.get_glyph_shape_true_type(glyph_index, allocator);
+        } else {
+            return self.get_glyph_shape_type_2(glyph_index, allocator);
+        }
+    }
+
+    fn get_glyph_shape_true_type(self: *FontInfo, glyph_index: u32, allocator: Allocator) FindGlyphShapeError![]Vertex {
+        var num_vertexes: u32 = 0;
+        var end_of_contours_offset: u32 = undefined;
+        const glyph_offset = try self.get_glyph_offset(glyph_index);
+        const num_contours = self.data.read_i16(glyph_offset);
+        const num_contours_2 = num_contours << 1;
+        if (num_contours > 0) {
+            var flags: u8 = 0;
+            var flag_count: u8 = 0;
+            end_of_contours_offset = glyph_offset + 10;
+            var ins: u32 = undefined;
+            var i: u32 = undefined;
+            var j: u32 = 0;
+            var m: u32 = undefined;
+            var n: u32 = undefined;
+            var next_move: u32 = undefined;
+            var was_off: u32 = 0;
+            var off: u32 = undefined;
+            var start_off: u32 = 0;
+            var x: i32 = undefined;
+            var y: i32 = undefined;
+            var cx: i32 = undefined;
+            var cy: i32 = undefined;
+            var sx: i32 = undefined;
+            var sy: i32 = undefined;
+            var scx: i32 = undefined;
+            var scy: i32 = undefined;
+            //CHECKPOINT
+        }
+    }
+    fn get_glyph_shape_type_2(self: *FontInfo, glyph_index: u32, allocator: Allocator) FindGlyphShapeError![]Vertex {}
 };
 
 const PLATOFRM_ID = struct {
