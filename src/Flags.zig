@@ -228,6 +228,9 @@ pub fn Flags(comptime FLAGS_ENUM: type, comptime GROUPS_ENUM: type) type {
         pub inline fn has_flag(self: Self, flag: Flag) bool {
             return self.raw & bits(flag) == bits(flag);
         }
+        pub inline fn missing_flag(self: Self, flag: Flag) bool {
+            return self.raw & bits(flag) == 0;
+        }
         pub inline fn has_only_this_flag(self: Self, flag: Flag) bool {
             return self.raw == bits(flag);
         }

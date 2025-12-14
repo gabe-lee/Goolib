@@ -76,6 +76,9 @@ pub fn define_vec2_type(comptime T: type) type {
         pub fn new(x: T, y: T) T_Vec2 {
             return T_Vec2{ .x = x, .y = y };
         }
+        pub fn new_from_any(x: anytype, y: anytype) T_Vec2 {
+            return T_Vec2{ .x = MathX.convert_number(x, T), .y = MathX.convert_number(y, T) };
+        }
 
         pub fn inverse(self: T_Vec2) T_Vec2 {
             return T_Vec2{ .x = 1 / self.x, .y = 1 / self.y };

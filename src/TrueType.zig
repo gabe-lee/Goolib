@@ -46,9 +46,13 @@ const Vec2 = Root.Vec2;
 const AABB2 = Root.AABB2;
 const MathX = Root.Math;
 const Bezier = Root.Bezier;
+const Cast = Root.Cast;
+
+pub const VertexList = List(Vertex);
 
 const assert_with_reason = Assert.assert_with_reason;
 const assert_unreachable = Assert.assert_unreachable;
+const num_cast = Cast.num_cast;
 
 pub const FontData = struct {
     data: []const u8,
@@ -401,9 +405,11 @@ pub const FindGlyphShapeError = error{
     glyph_index_out_of_bounds,
     unsupported_index_to_location_format,
     glyph_zero_length,
+    unsupported_compound_contours_mode,
 };
 
-const EdgeType = enum(u8) {
+const VertexKind = enum(u8) {
+    move_to,
     linear,
     quadratic,
     cubic,
@@ -411,10 +417,30 @@ const EdgeType = enum(u8) {
 
 pub const VecI16 = Vec2.define_vec2_type(i16);
 pub const Vertex = struct {
-    start: VecI16 = .{},
+    point: VecI16 = .{},
     control_1: VecI16 = .{},
     control_2: VecI16 = .{},
-    edge_type: EdgeType = .linear,
+    flags: FLAGS = FLAGS.blank(),
+    kind: VertexKind = .move_to,
+
+    pub fn set(self: *Vertex, flags: FLAGS, kind: VertexKind, x: i32, y: i32, cx: i32, cy: i32) void {
+        self.flags = flags;
+        self.kind = kind;
+        self.point.x = @intCast(x);
+        self.point.y = @intCast(y);
+        self.control_1.x = @intCast(cx);
+        self.control_1.y = @intCast(cy);
+    }
+
+    pub const FLAGS = Flags.Flags(enum(u8) {
+        point_on_curve = 1 << 0,
+        dx_is_one_byte = 1 << 1,
+        dy_is_one_byte = 1 << 2,
+        flag_is_repeated = 1 << 3,
+        dx_one_byte_positive_or_dx_two_bytes_no_change = 1 << 4,
+        dy_one_byte_positive_or_dy_two_bytes_no_change = 1 << 5,
+        countours_might_overlap = 1 << 6,
+    }, enum(u8) {});
 };
 
 pub const FontInfo = struct {
@@ -664,7 +690,7 @@ pub const FontInfo = struct {
         return glyph_offset_1;
     }
 
-    pub fn get_glyph_shape_from_index(self: FontInfo, glyph_index: u32, allocator: Allocator) FindGlyphShapeError![]Vertex {
+    pub fn get_glyph_shape_from_index(self: FontInfo, glyph_index: u32, allocator: Allocator) FindGlyphShapeError!VertexList {
         if (self.cff_data.len() == 0) {
             return self.get_glyph_shape_true_type(glyph_index, allocator);
         } else {
@@ -672,37 +698,292 @@ pub const FontInfo = struct {
         }
     }
 
-    fn get_glyph_shape_true_type(self: *FontInfo, glyph_index: u32, allocator: Allocator) FindGlyphShapeError![]Vertex {
+    fn get_glyph_shape_true_type(self: *FontInfo, glyph_index: u32, allocator: Allocator) FindGlyphShapeError!VertexList {
         var num_vertexes: u32 = 0;
         var end_of_contours_offset: u32 = undefined;
         const glyph_offset = try self.get_glyph_offset(glyph_index);
         const num_contours = self.data.read_i16(glyph_offset);
         const num_contours_2 = num_contours << 1;
+        var vertexes: VertexList = undefined;
         if (num_contours > 0) {
-            var flags: u8 = 0;
-            var flag_count: u8 = 0;
+            var flags: Vertex.FLAGS = .{};
+            var flag_repeat_count: u8 = 0;
             end_of_contours_offset = glyph_offset + 10;
             var ins: u32 = undefined;
             var i: u32 = undefined;
             var j: u32 = 0;
-            var m: u32 = undefined;
-            var n: u32 = undefined;
+            var max_verts: u32 = undefined;
+            var num_verts: u32 = undefined;
             var next_move: u32 = undefined;
-            var was_off: u32 = 0;
-            var off: u32 = undefined;
-            var start_off: u32 = 0;
-            var x: i32 = undefined;
-            var y: i32 = undefined;
-            var cx: i32 = undefined;
-            var cy: i32 = undefined;
-            var sx: i32 = undefined;
-            var sy: i32 = undefined;
-            var scx: i32 = undefined;
-            var scy: i32 = undefined;
-            //CHECKPOINT
+            var prev_was_off_curve: bool = false;
+            var first_pass_offset: u32 = undefined;
+            var first_point_off_curve: bool = false;
+            var x: i32 = 0;
+            var y: i32 = 0;
+            var cx: i32 = 0;
+            var cy: i32 = 0;
+            var sx: i32 = 0;
+            var sy: i32 = 0;
+            var scx: i32 = 0;
+            var scy: i32 = 0;
+            var vertex_data_reader: FontDataReader = undefined;
+            const ins_offset = glyph_offset + 10 + num_contours_2;
+            ins = self.data.read_u16(ins_offset);
+            vertex_data_reader = FontDataReader.new_unknown_size(self.data, ins_offset + 2 + ins);
+            // points = self.data.data.ptr + ins_offset + 2 + ins;
+            num_verts = 1 + self.data.read_u16(end_of_contours_offset + num_contours_2 - 2);
+            max_verts = num_verts + num_contours_2;
+            vertexes = VertexList.init_capacity(@intCast(max_verts), allocator);
+            if (vertexes.cap == 0) {
+                unreachable; // this should be unreachable in this codebase, but existed in the original
+            }
+
+            next_move = 0;
+            flag_repeat_count = 0;
+
+            first_pass_offset = max_verts - num_verts;
+            vertexes.len = max_verts;
+
+            // Load all vertex types
+            i = 0;
+            while (i < num_verts) {
+                if (flag_repeat_count == 0) {
+                    flags = Vertex.FLAGS.from_raw(vertex_data_reader.read_u8());
+                    if (flags.has_flag(.flag_is_repeated)) {
+                        flag_repeat_count = vertex_data_reader.read_u8();
+                    }
+                } else {
+                    flag_repeat_count -= 1;
+                }
+                vertexes.ptr[first_pass_offset + i].flags = flags;
+                i += 1;
+            }
+
+            // Load all x coordinates
+            i = 0;
+            x = 0;
+            while (i < num_verts) {
+                flags = vertexes.ptr[first_pass_offset + i].flags;
+                if (flags.has_flag(.dx_is_one_byte)) {
+                    const dx: i32 = @intCast(vertex_data_reader.read_u8());
+                    x = if (flags.has_flag(.dx_one_byte_positive_or_dx_two_bytes_no_change)) x + dx else x - dx;
+                } else {
+                    if (flags.missing_flag(.dx_one_byte_positive_or_dx_two_bytes_no_change)) {
+                        x += Types.intcast(vertex_data_reader.read_i16(), i32);
+                    }
+                }
+                vertexes.ptr[first_pass_offset + i].point.x = @intCast(x);
+                i += 1;
+            }
+
+            // Load all y coordinates
+            i = 0;
+            y = 0;
+            while (i < num_verts) {
+                flags = vertexes.ptr[first_pass_offset + i].flags;
+                if (flags.has_flag(.dy_is_one_byte)) {
+                    const dy: i32 = @intCast(vertex_data_reader[0]);
+                    vertex_data_reader += 1;
+                    y = if (flags.has_flag(.dy_one_byte_positive_or_dy_two_bytes_no_change)) y + dy else y - dy;
+                } else {
+                    if (flags.missing_flag(.dy_one_byte_positive_or_dy_two_bytes_no_change)) {
+                        y += Types.intcast(vertex_data_reader.read_i16(), i32);
+                    }
+                }
+                vertexes.ptr[first_pass_offset + i].point.y = @intCast(y);
+                i += 1;
+            }
+
+            // Convert vertex format
+            i = 0;
+            while (i < num_verts) {
+                const ii = first_pass_offset + i;
+                const vert: *Vertex = &vertexes.ptr[ii];
+                flags = vert.flags;
+                x = vert.point.x;
+                y = vert.point.y;
+                if (next_move == i) { // This is a 'move to' instruction, close the current shape, if any
+                    if (i != 0) {
+                        num_vertexes = Internal.close_shape_and_increment_vertex_count(&vertexes, num_vertexes, prev_was_off_curve, first_point_off_curve, sx, sy, scx, scy, cx, cy, allocator);
+                    }
+                    first_point_off_curve = flags.missing_flag(.point_on_curve);
+                    if (first_point_off_curve) {
+                        // if we start off with an off-curve point, then when we need to find a point on the curve
+                        // where we can start, and we need to save some state for when we wraparound.
+                        scx = x;
+                        scy = y;
+                        const next_ii = ii + 1;
+                        if (vertexes.ptr[next_ii].flags.missing_flag(.point_on_curve)) {
+                            // next point is also an off-curve point, so interpolate an on-curve point
+                            // bewteen the two
+                            sx = x + Types.intcast(vertexes.ptr[next_ii].point.x >> 1, i32);
+                            sy = y + Types.intcast(vertexes.ptr[next_ii].point.y >> 1, i32);
+                        } else {
+                            // otherwise just use the next point as our start point
+                            sx = x + Types.intcast(vertexes.ptr[next_ii].point.x, i32);
+                            sy = y + Types.intcast(vertexes.ptr[next_ii].point.y, i32);
+                            i += 1; // we're using point i+1 as the starting point, so skip it
+                        }
+                    } else {
+                        sx = x;
+                        sy = y;
+                    }
+                    num_vertexes = Internal.set_vertex_and_increment_vertex_count(&vertexes, num_vertexes, .move_to, sx, sy, 0, 0);
+                    prev_was_off_curve = false;
+                    next_move = 1 + self.data.read_u16(end_of_contours_offset + (j << 1));
+                    j += 1;
+                } else {
+                    if (flags.missing_flag(.point_on_curve)) {
+                        // Its a control point
+                        if (prev_was_off_curve) {
+                            // two off-curve control points in a row means interpolate an implicit on-curve
+                            // point directly between the two
+                            num_vertexes = Internal.set_vertex_and_increment_vertex_count(&vertexes, num_vertexes, .quadratic, (sx + x) >> 1, (cy + y) >> 1, cx, cy);
+                        }
+                        cx = x;
+                        cy = y;
+                        prev_was_off_curve = true;
+                    } else {
+                        if (prev_was_off_curve) {
+                            num_vertexes = Internal.set_vertex_and_increment_vertex_count(&vertexes, num_vertexes, .quadratic, x, y, cx, cy);
+                        } else {
+                            num_vertexes = Internal.set_vertex_and_increment_vertex_count(&vertexes, num_vertexes, .linear, x, y, 0, 0);
+                        }
+                        prev_was_off_curve = false;
+                    }
+                }
+                i += 1;
+            }
+            num_vertexes = Internal.close_shape_and_increment_vertex_count(&vertexes, num_vertexes, prev_was_off_curve, first_point_off_curve, sx, sy, scx, scy, cx, cy);
+        } else if (num_contours < 0) {
+            // Compound shapes.
+            var more: bool = true;
+            var compound_reader = FontDataReader.new_unknown_size(self.data, glyph_offset + 10);
+            while (more) {
+                var flags: u16 = undefined;
+                var glyph_idx: u16 = undefined;
+                var matrix: [6]f32 = .{ 1, 0, 0, 1, 0, 0 };
+                var m: f32 = undefined;
+                var n: f32 = undefined;
+                flags = compound_reader.read_u16();
+                glyph_idx = compound_reader.read_u16();
+                if (flags & 2 == 2) {
+                    // XY values
+                    if (flags & 1 == 1) {
+                        // i16's
+                        matrix[4] = @floatFromInt(compound_reader.read_i16());
+                        matrix[5] = @floatFromInt(compound_reader.read_i16());
+                    } else {
+                        // i8's
+                        matrix[4] = @floatFromInt(compound_reader.read_i8());
+                        matrix[5] = @floatFromInt(compound_reader.read_i8());
+                    }
+                } else {
+                    return FindGlyphShapeError.unsupported_compound_contours_mode;
+                }
+                if (flags & 8 == 8) {
+                    // WE_HAVE_A_SCALE
+                    matrix[0] = num_cast(compound_reader.read_i16(), f32) / 16384.9;
+                    matrix[1] = 0;
+                    matrix[2] = 0;
+                    matrix[3] = matrix[0];
+                } else if (Flags & (1 << 6) == (1 << 6)) {
+                    // WE_HAVE_AN_X_AND_YSCALE
+                    matrix[0] = num_cast(compound_reader.read_i16(), f32) / 16384.9;
+                    matrix[1] = 0;
+                    matrix[2] = 0;
+                    matrix[3] = num_cast(compound_reader.read_i16(), f32) / 16384.9;
+                } else if (Flags & (1 << 7) == (1 << 7)) {
+                    // WE_HAVE_A_TWO_BY_TWO
+                    matrix[0] = num_cast(compound_reader.read_i16(), f32) / 16384.9;
+                    matrix[2] = num_cast(compound_reader.read_i16(), f32) / 16384.9;
+                    matrix[3] = num_cast(compound_reader.read_i16(), f32) / 16384.9;
+                    matrix[4] = num_cast(compound_reader.read_i16(), f32) / 16384.9;
+                }
+
+                // Find transformation scales.
+                m = @sqrt((matrix[0] * matrix[0]) + (matrix[1] * matrix[1]));
+                n = @sqrt((matrix[2] * matrix[2]) + (matrix[3] * matrix[3]));
+
+                // Get indexed glyph
+                const compound_verts = try self.get_glyph_shape_from_index(glyph_idx, allocator);
+                var x: i16 = undefined;
+                var y: i16 = undefined;
+                if (compound_verts.len > 0) {
+                    for (compound_verts.slice()) |*vert| {
+                        x = vert.point.x;
+                        y = vert.point.y;
+                        vert.point.x = num_cast(m * (MathX.upgrade_multiply_out(matrix[0], x, f32) + MathX.upgrade_multiply_out(matrix[2], y, f32) + matrix[4]), i16);
+                        vert.point.y = num_cast(n * (MathX.upgrade_multiply_out(matrix[1], x, f32) + MathX.upgrade_multiply_out(matrix[3], y, f32) + matrix[5]), i16);
+                        x = vert.control_1.x;
+                        y = vert.control_1.y;
+                        vert.control_1.x = num_cast(m * (MathX.upgrade_multiply_out(matrix[0], x, f32) + MathX.upgrade_multiply_out(matrix[2], y, f32) + matrix[4]), i16);
+                        vert.control_1.y = num_cast(n * (MathX.upgrade_multiply_out(matrix[1], x, f32) + MathX.upgrade_multiply_out(matrix[3], y, f32) + matrix[5]), i16);
+                    }
+                    // Append vertices.
+                    const new_slot_range = vertexes.append_slots(compound_verts.len, allocator);
+                    const new_slots = vertexes.slice_range(new_slot_range);
+                    @memcpy(new_slots, compound_verts.slice());
+                    compound_verts.free(allocator);
+                    num_vertexes += compound_verts.len;
+                }
+                more = flags & (1 << 5) == (1 << 5);
+            }
+        } else {
+            // numberOfCounters == 0, do nothing
         }
+        vertexes.len = num_vertexes;
+        return vertexes;
     }
-    fn get_glyph_shape_type_2(self: *FontInfo, glyph_index: u32, allocator: Allocator) FindGlyphShapeError![]Vertex {}
+    fn get_glyph_shape_type_2(self: *FontInfo, glyph_index: u32, allocator: Allocator) FindGlyphShapeError![]Vertex {
+        _ = self;
+        _ = glyph_index;
+        _ = allocator;
+        assert_unreachable(@src(), "not implemented", .{});
+    }
+
+    pub const Internal = struct {
+        pub fn set_vertex_and_increment_vertex_count(vertexes: *VertexList, curr_num_vertexes: u32, kind: VertexKind, x: i32, y: i32, cx: i32, cy: i32) u32 {
+            vertexes.ptr[curr_num_vertexes] = Vertex{
+                .point = .new_from_any(x, y),
+                .control_1 = .new_from_any(cx, cy),
+                .kind = kind,
+            };
+            return curr_num_vertexes + 1;
+        }
+        pub fn close_shape_and_increment_vertex_count(vertexes: *VertexList, curr_num_vertexes: u32, prev_was_off_curve: bool, first_point_off_curve: bool, sx: i32, sy: i32, scx: i32, scy: i32, cx: i32, cy: i32) u32 {
+            if (first_point_off_curve) {
+                if (prev_was_off_curve) {
+                    vertexes.ptr[curr_num_vertexes] = Vertex{
+                        .point = .new(@intCast((cx + scx) >> 1), @intCast((cy + scy) >> 1)),
+                        .control_1 = .new(@intCast(cx), @intCast(cy)),
+                        .kind = .quadratic,
+                    };
+                } else {
+                    vertexes.ptr[curr_num_vertexes] = Vertex{
+                        .point = .new(@intCast(sx), @intCast(sy)),
+                        .control_1 = .new(@intCast(scx), @intCast(scy)),
+                        .kind = .quadratic,
+                    };
+                }
+            } else {
+                if (prev_was_off_curve) {
+                    vertexes.ptr[curr_num_vertexes] = Vertex{
+                        .point = .new(@intCast(sx), @intCast(sy)),
+                        .control_1 = .new(@intCast(cx), @intCast(cy)),
+                        .kind = .quadratic,
+                    };
+                } else {
+                    vertexes.ptr[curr_num_vertexes] = Vertex{
+                        .point = .new(@intCast(sx), @intCast(sy)),
+                        .control_1 = .new(0, 0),
+                        .kind = .linear,
+                    };
+                }
+            }
+            return curr_num_vertexes + 1;
+        }
+    };
 };
 
 const PLATOFRM_ID = struct {
