@@ -42,6 +42,10 @@ pub const PerpendicularZero = enum(u8) {
     perp_zero_is_zero,
     perp_zero_is_y_magnitude_1,
 };
+pub const NormalizeZero = enum(u8) {
+    norm_zero_is_zero,
+    norm_zero_is_y_magnitude_1,
+};
 
 pub fn define_vec2_type(comptime T: type) type {
     return extern struct {
@@ -171,6 +175,20 @@ pub fn define_vec2_type(comptime T: type) type {
             assert(x_squared != 0 or y_squared != 0);
             assert(x_squared >= 0 and y_squared >= 0);
             const len = math.sqrt(x_squared + y_squared);
+            return T_Vec2{ .x = self.x / len, .y = self.y / len };
+        }
+
+        pub fn normalize_may_be_zero(self: T_Vec2, comptime zero_behavior: NormalizeZero) T_Vec2 {
+            if (self.x == 0 and self.y == 0) {
+                return T_Vec2.new(0, if (zero_behavior == .norm_zero_is_zero) 0 else 1);
+            }
+            const len = math.sqrt((self.x * self.x) + (self.y * self.y));
+            return T_Vec2{ .x = self.x / len, .y = self.y / len };
+        }
+        pub fn normalize_may_be_zero_with_length(self: T_Vec2, len: T, comptime zero_behavior: NormalizeZero) T_Vec2 {
+            if (len == 0) {
+                return T_Vec2.new(0, if (zero_behavior == .norm_zero_is_zero) 0 else 1);
+            }
             return T_Vec2{ .x = self.x / len, .y = self.y / len };
         }
 

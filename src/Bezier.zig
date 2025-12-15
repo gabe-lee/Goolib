@@ -86,7 +86,7 @@ pub fn LinearBezier(comptime T: type) type {
             return self.end.subtract(self.start);
         }
 
-        pub fn tangent(self: Self, percent: T) Vector {
+        pub fn tangent_at_interp(self: Self, percent: T) Vector {
             _ = percent;
             return self.delta();
         }

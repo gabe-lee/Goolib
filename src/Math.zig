@@ -527,6 +527,13 @@ pub fn SignedDistance(comptime T: type) type {
             };
         }
 
+        pub inline fn with_percent(self: Self, percent: T) SignedDistanceWithPercent(T) {
+            return SignedDistanceWithPercent(T){
+                .signed_dist = self,
+                .percent = percent,
+            };
+        }
+
         pub inline fn equals(a: Self, b: Self) bool {
             return @abs(a.distance) == @abs(b.distance);
         }
@@ -556,6 +563,13 @@ pub fn SignedDistanceWithPercent(comptime T: type) type {
                 .signed_dist = .new(dist, dot),
                 .percent = percent,
             };
+        }
+
+        pub inline fn distance(self: Self) T {
+            return self.signed_dist.distance;
+        }
+        pub inline fn dot_product(self: Self) T {
+            return self.signed_dist.dot_product;
         }
     };
 }
