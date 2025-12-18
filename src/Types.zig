@@ -289,6 +289,22 @@ pub inline fn type_is_pointer_with_child_type(comptime T: type, comptime CHILD: 
     const INFO = @typeInfo(T);
     return INFO == .pointer and INFO.pointer.child == CHILD;
 }
+pub inline fn type_is_pointer_with_child_int_type(comptime T: type) bool {
+    const INFO = @typeInfo(T);
+    return INFO == .pointer and @typeInfo(INFO.pointer.child) == .int;
+}
+pub inline fn type_is_pointer_with_child_unsigned_int_type(comptime T: type) bool {
+    const INFO = @typeInfo(T);
+    return INFO == .pointer and @typeInfo(INFO.pointer.child) == .int and @typeInfo(INFO.pointer.child).int.signedness == .unsigned;
+}
+pub inline fn type_is_pointer_with_child_signed_int_type(comptime T: type) bool {
+    const INFO = @typeInfo(T);
+    return INFO == .pointer and @typeInfo(INFO.pointer.child) == .int and @typeInfo(INFO.pointer.child).int.signedness == .signed;
+}
+pub inline fn type_is_pointer_with_child_float_type(comptime T: type) bool {
+    const INFO = @typeInfo(T);
+    return INFO == .pointer and @typeInfo(INFO.pointer.child) == .float;
+}
 
 pub inline fn pointer_field_child_type(comptime T: type, comptime field: []const u8) type {
     return @typeInfo(@FieldType(T, field)).pointer.child;
@@ -378,6 +394,12 @@ pub inline fn pointer_is_single(comptime T: type) bool {
 }
 pub inline fn pointer_is_many(comptime T: type) bool {
     return @typeInfo(T).pointer.size == .many;
+}
+pub inline fn pointer_is_single_or_many(comptime T: type) bool {
+    return @typeInfo(T).pointer.size == .one or @typeInfo(T).pointer.size == .many;
+}
+pub inline fn pointer_is_single_many_or_c(comptime T: type) bool {
+    return @typeInfo(T).pointer.size == .one or @typeInfo(T).pointer.size == .many or @typeInfo(T).pointer.size == .c;
 }
 pub inline fn type_is_array_or_vector(comptime T: type) bool {
     return @typeInfo(T) == .array or @typeInfo(T) == .vector;

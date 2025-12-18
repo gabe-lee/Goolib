@@ -37,7 +37,10 @@ const assert_with_reason = Assert.assert_with_reason;
 const Math = @This();
 
 pub const PI = math.pi;
+pub const HALF_PI = math.pi / 2;
 pub const TAU = math.tau;
+pub const DEG_TO_RAD = math.rad_per_deg;
+pub const RAD_TO_DEG = math.deg_per_rad;
 
 pub fn deg_to_rad(comptime T: type, degrees: T) T {
     return degrees * math.rad_per_deg;
@@ -107,13 +110,22 @@ pub fn clamp(min: anytype, val: anytype, max: anytype) @TypeOf(val) {
 ///   - -1 if val < 0
 ///   - 0 if val == 0
 ///   - 1 if val > 0
-pub fn sign(comptime T: type, val: T) T {
+pub fn sign(val: anytype) @TypeOf(val) {
+    const T = @TypeOf(val);
     const raw = @as(i8, @intCast(@intFromBool(0 < val))) - @as(i8, @intCast(@intFromBool(val < 0)));
     if (Types.type_is_float(T)) {
         return @floatFromInt(raw);
     } else {
         return @intCast(raw);
     }
+}
+/// returns:
+///   - -1 if val < 0
+///   - 0 if val == 0
+///   - 1 if val > 0
+pub fn sign_convert(val: anytype, comptime OUT: type) OUT {
+    const raw = @as(i8, @intCast(@intFromBool(0 < val))) - @as(i8, @intCast(@intFromBool(val < 0)));
+    return convert_number(raw, OUT);
 }
 
 /// returns:
@@ -127,6 +139,13 @@ pub fn sign_nonzero(val: anytype) @TypeOf(val) {
     } else {
         return @intCast(raw);
     }
+}
+/// returns:
+///   - -1 if val < 0
+///   - 1 if val >= 0
+pub fn sign_nonzero_convert(val: anytype, comptime OUT: type) OUT {
+    const raw = (2 * @as(i8, @intCast(@intFromBool(val > 0)))) - 1;
+    return convert_number(raw, OUT);
 }
 
 pub fn add_scale(comptime T: type, a: T, diff_ba: T, delta: T) T {
@@ -232,7 +251,7 @@ pub fn largest_int_type_for_math(comptime A: type, comptime B: type, comptime AB
 pub const NumberUpgradeModeAndType = struct {
     mode: NumberUpgradeMode,
     type_A: type,
-    type_b: type,
+    type_B: type,
 };
 
 pub fn upgrade_mode_and_types(comptime A: type, comptime B: type) NumberUpgradeModeAndType {
@@ -303,7 +322,7 @@ pub fn Upgraded2Numbers(comptime A: type, comptime B: type) type {
         .mixed_class_ints => largest_int_type_for_math(mode_and_types.type_A, mode_and_types.type_B, 64),
     };
     return struct {
-        pub const T: type = T_;
+        pub const T = T_;
         a: T = 0,
         b: T = 0,
     };
@@ -312,9 +331,9 @@ pub fn Upgraded2Numbers(comptime A: type, comptime B: type) type {
 pub fn upgrade_2_numbers_for_math(a: anytype, b: anytype) Upgraded2Numbers(@TypeOf(a), @TypeOf(b)) {
     const A = @TypeOf(a);
     const B = @TypeOf(b);
-    const MODE = upgrade_mode_and_types(A, B);
-    var result = Upgraded2Numbers(A, B){};
-    switch (MODE) {
+    const UPGRADE = upgrade_mode_and_types(A, B);
+    var result = Upgraded2Numbers(UPGRADE.type_A, UPGRADE.type_B){};
+    switch (UPGRADE.mode) {
         .both_float_A_large => {
             result.a = a;
             result.b = @floatCast(b);
@@ -385,11 +404,19 @@ pub fn conversion_mode(comptime IN: type, comptime OUT: type) NumberConversionMo
 }
 
 pub fn convert_number(in: anytype, comptime OUT: type) OUT {
-    switch (conversion_mode(@TypeOf(in), OUT)) {
+    switch (comptime conversion_mode(@TypeOf(in), OUT)) {
         .int_to_int => return @intCast(in),
         .float_to_float => return @floatCast(in),
         .int_to_float => return @floatFromInt(in),
         .float_to_int => return @intFromFloat(in),
+    }
+}
+
+pub fn upgrade_to_float(val: anytype, comptime UPGRADE_TYPE_IF_NEEDED: type) if (Types.type_is_float(@TypeOf(val))) @TypeOf(val) else UPGRADE_TYPE_IF_NEEDED {
+    if (Types.type_is_float(@TypeOf(val))) {
+        return val;
+    } else {
+        return convert_number(val, UPGRADE_TYPE_IF_NEEDED);
     }
 }
 
@@ -804,4 +831,79 @@ pub fn solve_cubic_polynomial_for_zeros_advanced(a: anytype, b: @TypeOf(a), c: @
         }
         return result;
     }
+}
+
+/// For any value where `low <= value <= (high - 1)`, returns:
+///   - `-1` if the value is closest to `low`
+///   - `0` if the value is closest to the midpoint of `low` and `high`
+///   - `1` if the value is closest to `high`
+///
+/// It is guaranteed for integer values, that adding together the results of all values in the range `low <= value <= (high - 1)`
+/// will always equal 0. (It is symetrical, the number of `-1` results will always equal the number of `1` results)
+pub fn range_trichotomy(low: anytype, value: anytype, high: anytype, comptime OUT: type) OUT {
+    const hi = high - low;
+    const val = value - low;
+    const hi_minus_1 = upgrade_subtract(hi, @as(f32, 1.0));
+    const ratio = upgrade_divide(val, hi_minus_1);
+    const scaled_ratio = upgrade_multiply(@as(f32, 2.875), ratio);
+    const result_unadjusted = @floor(3 + scaled_ratio - 1.4375 + 0.5);
+    return convert_number(result_unadjusted, OUT) - 3;
+}
+
+test range_trichotomy {
+    const t = std.testing;
+
+    try t.expectEqual(-1, range_trichotomy(0, 0, 10, i32));
+    try t.expectEqual(-1, range_trichotomy(0, 1, 10, i32));
+    try t.expectEqual(-1, range_trichotomy(0, 2, 10, i32));
+    try t.expectEqual(0, range_trichotomy(0, 3, 10, i32));
+    try t.expectEqual(0, range_trichotomy(0, 4, 10, i32));
+    try t.expectEqual(0, range_trichotomy(0, 5, 10, i32));
+    try t.expectEqual(0, range_trichotomy(0, 6, 10, i32));
+    try t.expectEqual(1, range_trichotomy(0, 7, 10, i32));
+    try t.expectEqual(1, range_trichotomy(0, 8, 10, i32));
+    try t.expectEqual(1, range_trichotomy(0, 9, 10, i32));
+    try t.expectEqual(-1, range_trichotomy(0, 0, 11, i32));
+    try t.expectEqual(-1, range_trichotomy(0, 1, 11, i32));
+    try t.expectEqual(-1, range_trichotomy(0, 2, 11, i32));
+    try t.expectEqual(-1, range_trichotomy(0, 3, 11, i32));
+    try t.expectEqual(0, range_trichotomy(0, 4, 11, i32));
+    try t.expectEqual(0, range_trichotomy(0, 5, 11, i32));
+    try t.expectEqual(0, range_trichotomy(0, 6, 11, i32));
+    try t.expectEqual(1, range_trichotomy(0, 7, 11, i32));
+    try t.expectEqual(1, range_trichotomy(0, 8, 11, i32));
+    try t.expectEqual(1, range_trichotomy(0, 9, 11, i32));
+    try t.expectEqual(1, range_trichotomy(0, 10, 11, i32));
+    try t.expectEqual(-1, range_trichotomy(0, 0, 1000000, i32));
+    try t.expectEqual(-1, range_trichotomy(0, 100000, 1000000, i32));
+    try t.expectEqual(-1, range_trichotomy(0, 200000, 1000000, i32));
+    try t.expectEqual(-1, range_trichotomy(0, 300000, 1000000, i32));
+    try t.expectEqual(0, range_trichotomy(0, 400000, 1000000, i32));
+    try t.expectEqual(0, range_trichotomy(0, 500000, 1000000, i32));
+    try t.expectEqual(0, range_trichotomy(0, 600000, 1000000, i32));
+    try t.expectEqual(1, range_trichotomy(0, 700000, 1000000, i32));
+    try t.expectEqual(1, range_trichotomy(0, 800000, 1000000, i32));
+    try t.expectEqual(1, range_trichotomy(0, 900000, 1000000, i32));
+    var total: i32 = 0;
+    var v: u32 = 0;
+    while (v < 1000000) {
+        total += range_trichotomy(0, v, 1000000, i32);
+        v += 1;
+    }
+    try t.expectEqual(0, total); // symetric
+    total = 0;
+    v = 0;
+    while (v < 1000003) {
+        total += range_trichotomy(0, v, 1000003, i32);
+        v += 1;
+    }
+    try t.expectEqual(0, total); // symetric
+}
+
+pub fn extract_partial_rand_from_rand(rand: anytype, val_less_than: anytype, comptime OUT: type) OUT {
+    assert_with_reason(Types.type_is_pointer_with_child_unsigned_int_type(rand), @src(), "type of `rand` must be a pointer to an unsigned integer type, got type `{s}", .{@typeName(@TypeOf(rand))});
+    assert_with_reason(Types.type_is_unsigned_int(val_less_than), @src(), "type of `max_val` must be an unsigned integer type, got type `{s}", .{@typeName(@TypeOf(rand))});
+    const r = rand.* % val_less_than;
+    rand.* = rand.* / val_less_than;
+    return convert_number(r, OUT);
 }

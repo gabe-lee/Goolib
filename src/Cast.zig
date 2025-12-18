@@ -28,52 +28,72 @@ const mem = std.mem;
 
 const Root = @import("./_root.zig");
 const Assert = Root.Assert;
+const Types = Root.Types;
 const assert_with_reason = Assert.assert_with_reason;
+const assert_unreachable = Assert.assert_unreachable;
 
 pub fn num_cast(from: anytype, comptime TO: type) TO {
     const FROM = @TypeOf(from);
     const FI = @typeInfo(FROM);
     const TI = @typeInfo(TO);
-    const FROM_INT: u8 = 0b0000;
-    const FROM_FLOAT: u8 = 0b0001;
-    const TO_INT: u8 = 0b000;
-    const TO_FLOAT: u8 = 0b010;
-    const TO_ENUM: u8 = 0b100;
-    const TO_BOOL: u8 = 0b110;
-    const from_kind: u8 = switch (FI) {
-        .int, .comptime_int, .@"enum", .bool => FROM_INT,
+    const FROM_INT: comptime_int = 0b0000;
+    const FROM_FLOAT: comptime_int = 0b0001;
+    const TO_INT: comptime_int = 0b0000;
+    const TO_FLOAT: comptime_int = 0b0010;
+    const TO_ENUM: comptime_int = 0b0100;
+    const TO_BOOL: comptime_int = 0b0110;
+    const TO_PTR: comptime_int = 0b1000;
+    const from_kind: comptime_int = switch (FI) {
+        .int, .comptime_int, .@"enum", .bool, .pointer => FROM_INT,
         .float, .comptime_float => FROM_FLOAT,
-        else => assert_with_reason(false, @src(), "`from` type must be an integer, float, enum, or bool, got type `{s}`", .{@typeName(FROM)}),
+        else => assert_unreachable(@src(), "`from` type must be an integer, float, enum, bool, *T, or [*]T, got type `{s}`", .{@typeName(FROM)}),
     };
     const cast_from = switch (FI) {
         .int, .comptime_int, .float, .comptime_float => from,
         .@"enum" => @intFromEnum(from),
         .bool => @intFromBool(from),
+        .pointer => get_addr: {
+            switch (FI.pointer.size) {
+                .c, .one, .many => break :get_addr @intFromPtr(from),
+                .slice => break :get_addr @intFromPtr(from.ptr),
+            }
+        },
         else => unreachable,
     };
-    const to_kind: u8 = switch (TI) {
+    const to_kind: comptime_int = switch (TI) {
         .int, .comptime_int => TO_INT,
         .float, .comptime_float => TO_FLOAT,
         .@"enum" => TO_ENUM,
         .bool => TO_BOOL,
-        else => assert_with_reason(false, @src(), "`TO` type must be an integer, float, enum, or bool, got type `{s}`", .{@typeName(TO)}),
+        .pointer => check: {
+            assert_with_reason(Types.pointer_is_single_many_or_c(TO), @src(), "`TO` type must be an integer, float, enum, bool, *T, or [*]T, got type `{s}`", .{@typeName(TO)});
+            break :check TO_PTR;
+        },
+        else => assert_unreachable(@src(), "`TO` type must be an integer, float, enum, bool, *T, or [*]T, got type `{s}`", .{@typeName(TO)}),
     };
     const FROM_INT_TO_INT = FROM_INT | TO_INT;
     const FROM_INT_TO_FLOAT = FROM_INT | TO_FLOAT;
     const FROM_INT_TO_BOOL = FROM_INT | TO_BOOL;
     const FROM_INT_TO_ENUM = FROM_INT | TO_ENUM;
+    const FROM_INT_TO_PTR = FROM_INT | TO_PTR;
     const FROM_FLOAT_TO_INT = FROM_FLOAT | TO_INT;
     const FROM_FLOAT_TO_FLOAT = FROM_FLOAT | TO_FLOAT;
     const FROM_FLOAT_TO_BOOL = FROM_FLOAT | TO_BOOL;
     const FROM_FLOAT_TO_ENUM = FROM_FLOAT | TO_ENUM;
-    return switch (from_kind | to_kind) {
+    const FROM_FLOAT_TO_PTR = FROM_FLOAT | TO_PTR;
+    const branch = comptime calc: {
+        break :calc from_kind | to_kind;
+    };
+    return switch (branch) {
         FROM_INT_TO_INT => @intCast(cast_from),
         FROM_INT_TO_FLOAT => @floatFromInt(cast_from),
         FROM_INT_TO_BOOL, FROM_FLOAT_TO_BOOL => cast_from != 0,
         FROM_INT_TO_ENUM => @enumFromInt(@as(TI.@"enum".tag_type, @intCast(cast_from))),
+        FROM_INT_TO_PTR => @ptrFromInt(@as(usize, @intCast(cast_from))),
         FROM_FLOAT_TO_INT => @intFromFloat(cast_from),
         FROM_FLOAT_TO_FLOAT => @floatCast(cast_from),
         FROM_FLOAT_TO_ENUM => @enumFromInt(@as(TI.@"enum".tag_type, @intFromFloat(cast_from))),
+        FROM_FLOAT_TO_PTR => @ptrFromInt(@as(usize, @intFromFloat(cast_from))),
         else => unreachable,
     };
 }

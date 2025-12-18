@@ -56,6 +56,10 @@ fn assert_field_is_type(comptime field: std.builtin.Type.StructField, comptime T
     assert_with_reason(field.type == T, @src(), "field `{s}` was type `{s}`, but needed to be type `{s}`", .{ field.name, @typeName(field.type), @typeName(T) });
 }
 
+fn assert_T_is_type(comptime T: type, comptime TT: type) void {
+    assert_with_reason(T == TT, @src(), "provided type was type `{s}`, but needed to be type `{s}`", .{ @typeName(T), @typeName(TT) });
+}
+
 const ListOrPtr = enum(u8) {
     list,
     ptr,
@@ -76,6 +80,12 @@ fn assert_field_ptptr_or_ptlist_and_get_base_type(comptime field: std.builtin.Ty
             return T;
         },
     }
+}
+
+fn assert_type_ptptr_or_ptlist_and_get_base_type(comptime T: type) type {
+    assert_with_reason(Types.type_has_decl_with_type(T, "TYPE", type), @src(), "type was not a `PTPtr(T)`, `PTPtrOrNull(T)`, or `PTList(T)` type (missing `pub const TYPE = T;`), got type `{s}`", .{@typeName(T)});
+    const TT = T.TYPE;
+    return TT;
 }
 
 fn assert_field_is_any_type(comptime field: std.builtin.Type.StructField, comptime Ts: []const type) void {
@@ -186,11 +196,10 @@ pub const CalcInterface = struct {
         return object;
     }
 
-    pub fn get_param(self: CalcInterface, comptime T: type, param: Meta.ParamId, comptime OBJECT: type, comptime INFO: std.builtin.Type.Struct, comptime FIELD_IDX: usize) T {
-        const f = INFO.fields[FIELD_IDX];
-        const p = params[i];
+    pub fn get_param(self: CalcInterface, comptime T: type, param: Meta.ParamId) T {
+        const p = param;
         const metadata = self.table.metadata.get(p.id);
-        switch (f.type) {
+        switch (T) {
             u64 => {
                 assert_param_is_type(p, metadata, .U64, @src());
                 return @bitCast(self.table.list_64.ptr[@intCast(metadata.val_idx)]);
@@ -240,11 +249,11 @@ pub const CalcInterface = struct {
                 return @bitCast(self.table.list_8.ptr[@intCast(metadata.val_idx)]);
             },
             else => {
-                const TT = assert_field_ptptr_or_ptlist_and_get_base_type(f, .ptr);
+                const TT = assert_type_ptptr_or_ptlist_and_get_base_type(T);
                 const PTP = PTPtr(TT);
                 const PTPN = PTPtrOrNull(TT);
                 const PTL = PTList(TT);
-                switch (f.type) {
+                switch (T) {
                     PTP => {
                         assert_param_is_type(p, metadata, .PTR, @src());
                         return PTP.from_opaque(self.table.list_ptr.ptr[@intCast(metadata.val_idx)]);
@@ -257,7 +266,7 @@ pub const CalcInterface = struct {
                         assert_param_is_type(p, metadata, .LIST, @src());
                         return PTL.from_opaque(self.table.list_list.ptr[@intCast(metadata.val_idx)], self.table);
                     },
-                    else => assert_unreachable(@src(), "ALL fields in ParamTable calculation input object must be one of the following types:\nbool, u8, i8, u16, i16, f16, u32, i32, f32, u64, i64, f64, PTPtr(T), or PTList(T)\ngot type {s}", .{@typeName(f.type)}),
+                    else => assert_unreachable(@src(), "ALL fields in ParamTable calculation input object must be one of the following types:\nbool, u8, i8, u16, i16, f16, u32, i32, f32, u64, i64, f64, PTPtr(T), or PTList(T)\ngot type {s}", .{@typeName(T)}),
                 }
             },
         }
@@ -349,11 +358,11 @@ pub const CalcInterface = struct {
                 assert_param_is_type(param, metadata, .BOOL, @src());
             },
             else => {
-                const T = assert_field_ptptr_or_ptlist_and_get_base_type(f, .ptr);
-                const PTP = PTPtr(T);
-                const PTPN = PTPtrOrNull(T);
-                const PTL = PTList(T);
-                switch (f.type) {
+                const TT = assert_field_ptptr_or_ptlist_and_get_base_type(T);
+                const PTP = PTPtr(TT);
+                const PTPN = PTPtrOrNull(TT);
+                const PTL = PTList(TT);
+                switch (T) {
                     PTP => {
                         assert_param_is_type(param, metadata, .PTR, @src());
                     },
@@ -363,7 +372,7 @@ pub const CalcInterface = struct {
                     PTL => {
                         assert_param_is_type(param, metadata, .LIST, @src());
                     },
-                    else => assert_unreachable(@src(), "ALL fields in ParamTable calculation input object must be one of the following types:\nbool, u8, i8, u16, i16, f16, u32, i32, f32, u64, i64, f64, PTPtr(T), PTPtrOrNull(T), or PTList(T)\ngot type {s}", .{@typeName(f.type)}),
+                    else => assert_unreachable(@src(), "ALL fields in ParamTable calculation input object must be one of the following types:\nbool, u8, i8, u16, i16, f16, u32, i32, f32, u64, i64, f64, PTPtr(T), PTPtrOrNull(T), or PTList(T)\ngot type {s}", .{@typeName(T)}),
                 }
             },
         }

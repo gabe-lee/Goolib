@@ -36,13 +36,13 @@ const FlexSlice = Root.FlexSlice.FlexSlice;
 pub const Auto = struct {};
 
 /// TODO documentation
-pub const PointOrientation = enum {
+pub const ShapeWinding = enum(i8) {
     /// TODO documentation
-    COLINEAR,
+    COLINEAR = 0,
     /// TODO documentation
-    WINDING_CCW,
+    WINDING_CCW = 1,
     /// TODO documentation
-    WINDING_CW,
+    WINDING_CW = -1,
 };
 
 pub const Side = enum {

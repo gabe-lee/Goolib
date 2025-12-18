@@ -67,6 +67,26 @@ pub fn LinearBezier(comptime T: type) type {
             } };
         }
 
+        pub fn upgrade_to_quadratic(self: Self) QuadraticBezier(T) {
+            return QuadraticBezier(T){
+                .p = .{
+                    self.p[0],
+                    self.interp_point(0.5),
+                    self.p[1],
+                },
+            };
+        }
+        pub fn upgrade_to_cubic(self: Self) CubicBezier(T) {
+            return CubicBezier(T){
+                .p = .{
+                    self.p[0],
+                    self.interp_point(1.0 / 3.0),
+                    self.interp_point(2.0 / 3.0),
+                    self.p[1],
+                },
+            };
+        }
+
         pub fn start(self: Self) Point {
             return self.p[0];
         }
@@ -189,6 +209,17 @@ pub fn QuadraticBezier(comptime T: type) type {
                 self.p[1].to_new_type(TT),
                 self.p[2].to_new_type(TT),
             } };
+        }
+
+        pub fn upgrade_to_cubic(self: Self) CubicBezier(T) {
+            return CubicBezier(T){
+                .p = .{
+                    self.p[0],
+                    self.p[0].lerp(self.p[1], 2.0 / 3.0),
+                    self.p[1].lerp(self.p[2], 1.0 / 3.0),
+                    self.p[2],
+                },
+            };
         }
 
         pub fn interp_point(self: Self, percent: anytype) Point {
