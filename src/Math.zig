@@ -540,6 +540,16 @@ pub fn ScanlineIntersections(comptime MAX: comptime_int, comptime T: type) type 
     };
 }
 
+pub fn SingleScanlineIntersection(comptime T: type) type {
+    return struct {
+        const Self = @This();
+        const Point = Vec2.define_vec2_type(T);
+
+        point: Point = .{},
+        slope: T = 0,
+    };
+}
+
 pub fn SignedDistance(comptime T: type) type {
     return struct {
         const Self = @This();

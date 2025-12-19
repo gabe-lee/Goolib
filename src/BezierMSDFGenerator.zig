@@ -71,6 +71,7 @@ pub fn BezierMultiSignedDistanceFieldGenerator(comptime FLOAT_TYPE: type, compti
         pub const SignedDistance = MathX.SignedDistance(FLOAT_TYPE);
         pub const SignedDistanceWithPercent = MathX.SignedDistanceWithPercent(FLOAT_TYPE);
         pub const ScanlineIntersections = MathX.ScanlineIntersections(3, FLOAT_TYPE);
+        pub const SingleScanlineIntersection = MathX.SingleScanlineIntersection(FLOAT_TYPE);
 
         /// Edge color specifies which color channels an edge belongs to.
         pub const EdgeColor = enum(u8) {
@@ -140,10 +141,10 @@ pub fn BezierMultiSignedDistanceFieldGenerator(comptime FLOAT_TYPE: type, compti
         };
 
         pub const EdgeType = enum(u8) {
-            point,
-            linear,
-            quadratic,
-            cubic,
+            point = 1,
+            linear = 2,
+            quadratic = 3,
+            cubic = 4,
         };
 
         pub const Range = struct {
@@ -334,7 +335,7 @@ pub fn BezierMultiSignedDistanceFieldGenerator(comptime FLOAT_TYPE: type, compti
             }
             pub fn tangent_at_interp(self: EdgeSegment, percent: FLOAT_TYPE) Vector {
                 switch (self.points) {
-                    .point =>  {
+                    .point => {
                         return .ZERO_ZERO;
                     },
                     .linear => |bezier| {
@@ -382,7 +383,7 @@ pub fn BezierMultiSignedDistanceFieldGenerator(comptime FLOAT_TYPE: type, compti
             }
             pub fn estimate_length(self: EdgeSegment) FLOAT_TYPE {
                 switch (self.points) {
-                    .point =>  {
+                    .point => {
                         return 0;
                     },
                     .linear => |bezier| {
@@ -448,19 +449,19 @@ pub fn BezierMultiSignedDistanceFieldGenerator(comptime FLOAT_TYPE: type, compti
                 }
                 return signed_dist;
             }
-            pub fn horizontal_intersections(self: EdgeSegment, point: Point) ScanlineIntersections {
+            pub fn horizontal_intersections(self: EdgeSegment, y_value: FLOAT_TYPE) ScanlineIntersections {
                 switch (self.points) {
                     .point => |p| {
                         return .{};
                     },
                     .linear => |bezier| {
-                        return bezier.horizontal_intersections(point).change_max_intersections(3);
+                        return bezier.horizontal_intersections(y_value).change_max_intersections(3);
                     },
                     .quadratic => |bezier| {
-                        return bezier.horizontal_intersections(point, .estimate_linear_when_linear_coeff_more_than_N_times_quadratic(1e12)).change_max_intersections(3);
+                        return bezier.horizontal_intersections(y_value, .estimate_linear_when_linear_coeff_more_than_N_times_quadratic(1e12)).change_max_intersections(3);
                     },
                     .cubic => |bezier| {
-                        return bezier.horizontal_intersections(point, .estimate_double_roots_when_u_minus_v_less_than_N_times_u_plus_v(1e-12), .estimate_quadratic_when_quadratic_coeff_more_than_N_times_cubic(1e6), .estimate_linear_when_linear_coeff_more_than_N_times_quadratic(1e12));
+                        return bezier.horizontal_intersections(y_value, .estimate_double_roots_when_u_minus_v_less_than_N_times_u_plus_v(1e-12), .estimate_quadratic_when_quadratic_coeff_more_than_N_times_cubic(1e6), .estimate_linear_when_linear_coeff_more_than_N_times_quadratic(1e12));
                     },
                 }
             }
@@ -532,7 +533,7 @@ pub fn BezierMultiSignedDistanceFieldGenerator(comptime FLOAT_TYPE: type, compti
                         return [3]EdgeSegment{
                             EdgeSegment{
                                 .color = self.color,
-                                .points = EdgePoints{ .point = p},
+                                .points = EdgePoints{ .point = p },
                             },
                             EdgeSegment{
                                 .color = self.color,
@@ -636,89 +637,128 @@ pub fn BezierMultiSignedDistanceFieldGenerator(comptime FLOAT_TYPE: type, compti
                 }
             }
 
-            pub fn _convergent_curve_ordering_internal(p: [12]Point, corner_idx: usize, control_points_before: usize, control_points_after: usize) i8 {
+            pub fn _convergent_curve_ordering_internal(p: [8]Point, control_points_before: usize, control_points_after: usize) i8 {
                 if (!(control_points_before > 0 and control_points_before > 0)) {
                     return 0;
                 }
+                const CORNER_IDX = 4;
                 var a1: Vector = undefined;
                 var a2: Vector = undefined;
                 var a3: Vector = undefined;
                 var b1: Vector = undefined;
                 var b2: Vector = undefined;
                 var b3: Vector = undefined;
-                a1 = p[corner_idx - 1].subtract(p[corner_idx]) ;
-                b1 = p[corner_idx + 1].subtract(p[corner_idx]);
+                a1 = p[CORNER_IDX - 1].subtract(p[CORNER_IDX]);
+                b1 = p[CORNER_IDX + 1].subtract(p[CORNER_IDX]);
                 if (control_points_before >= 2) {
-                    a2 = p[corner_idx - 1].subtract(p[corner_idx - 1]).subtract(a1);
+                    a2 = p[CORNER_IDX - 1].subtract(p[CORNER_IDX - 1]).subtract(a1);
                 }
                 if (control_points_after >= 2) {
-                    b2 = p[corner_idx + 2].subtract(p[corner_idx + 1]).subtract(b1);
+                    b2 = p[CORNER_IDX + 2].subtract(p[CORNER_IDX + 1]).subtract(b1);
                 }
                 if (control_points_before >= 3) {
-                    a3 = p[corner_idx - 3].subtract(p[corner_idx - 2]).subtract(p[corner_idx - 2].subtract(p[corner_idx - 1])).subtract(a2);
+                    a3 = p[CORNER_IDX - 3].subtract(p[CORNER_IDX - 2]).subtract(p[CORNER_IDX - 2].subtract(p[CORNER_IDX - 1])).subtract(a2);
                     a2 = a2.scale(3);
                 }
                 if (control_points_after >= 3) {
-                    b3 = p[corner_idx + 3].subtract(p[corner_idx + 2]).subtract(p[corner_idx + 2].subtract(p[corner_idx + 1])).subtract(b2);
+                    b3 = p[CORNER_IDX + 3].subtract(p[CORNER_IDX + 2]).subtract(p[CORNER_IDX + 2].subtract(p[CORNER_IDX + 1])).subtract(b2);
                     b2 = b2.scale(3);
                 }
                 a1 = a1.scale(control_points_before);
                 b1 = b1.scale(control_points_after);
                 // Non-degenerate case
-                //CHECKPOINT
-                // if (a1 && b1) {
-                //     double as = a1.length();
-                //     double bs = b1.length();
-                //     // Third derivative
-                //     if (double d = as*crossProduct(a1, b2) + bs*crossProduct(a2, b1))
-                //         return sign(d);
-                //     // Fourth derivative
-                //     if (double d = as*as*crossProduct(a1, b3) + as*bs*crossProduct(a2, b2) + bs*bs*crossProduct(a3, b1))
-                //         return sign(d);
-                //     // Fifth derivative
-                //     if (double d = as*crossProduct(a2, b3) + bs*crossProduct(a3, b2))
-                //         return sign(d);
-                //     // Sixth derivative
-                //     return sign(crossProduct(a3, b3));
-                // }
-                // // Degenerate curve after corner (control point after corner equals corner)
-                // int s = 1;
-                // if (a1) { // !b1
-                //     // Swap aN <-> bN and handle in if (b1)
-                //     b1 = a1;
-                //     a1 = b2, b2 = a2, a2 = a1;
-                //     a1 = b3, b3 = a3, a3 = a1;
-                //     s = -1; // make sure to also flip output
-                // }
-                // // Degenerate curve before corner (control point before corner equals corner)
-                // if (b1) { // !a1
-                //     // Two-and-a-half-th derivative
-                //     if (double d = crossProduct(a3, b1))
-                //         return s*sign(d);
-                //     // Third derivative
-                //     if (double d = crossProduct(a2, b2))
-                //         return s*sign(d);
-                //     // Three-and-a-half-th derivative
-                //     if (double d = crossProduct(a3, b2))
-                //         return s*sign(d);
-                //     // Fourth derivative
-                //     if (double d = crossProduct(a2, b3))
-                //         return s*sign(d);
-                //     // Four-and-a-half-th derivative
-                //     return s*sign(crossProduct(a3, b3));
-                // }
-                // // Degenerate curves on both sides of the corner (control point before and after corner equals corner)
-                // { // !a1 && !b1
-                //     // Two-and-a-half-th derivative
-                //     if (double d = sqrt(a2.length())*crossProduct(a2, b3) + sqrt(b2.length())*crossProduct(a3, b2))
-                //         return sign(d);
-                //     // Third derivative
-                //     return sign(crossProduct(a3, b3));
-                // }
+                if (a1.non_zero() and b1.non_zero()) {
+                    const a1_len = a1.length();
+                    const b1_len = b1.length();
+                    // Third derivative
+                    var d = (a1.cross(b2) * a1_len) + (a2.cross(b1) * b1_len);
+                    if (d != 0) {
+                        return MathX.sign_convert(d, i8);
+                    }
+                    // Fourth derivative
+                    d = (a1.cross(b3) * a1_len * a1_len) + (a2.cross(b2) * a1_len * b1_len) + (a3.cross(b1) * b1_len * b1_len);
+                    if (d != 0) {
+                        return MathX.sign_convert(d, i8);
+                    }
+                    // Fifth derivative
+                    d = (a2.cross(b3) * a1_len) + (a3.cross(b2) * b1_len);
+                    if (d != 0) {
+                        return MathX.sign_convert(d, i8);
+                    }
+                    // Sixth derivative
+                    d = a3.cross(b3);
+                    return MathX.sign_convert(d, i8);
+                }
+                // Degenerate curve after corner (control point after corner equals corner)
+                var s: i8 = 1;
+                if (a1.non_zero()) {
+                    // Swap aN <-> bN and handle in if (b1)
+                    b1 = a1;
+                    a1 = b2;
+                    b2 = a2;
+                    a2 = a1;
+                    a1 = b3;
+                    b3 = a3;
+                    a3 = a1;
+                    s = -1;
+                }
+                // Degenerate curve before corner (control point before corner equals corner)
+                if (b1.non_zero()) {
+                    // Two-and-a-half-th derivative
+                    var d = a3.cross(b1);
+                    if (d != 0) {
+                        return s * MathX.sign_convert(d, i8);
+                    }
+                    // Third derivative
+                    d = a2.cross(b2);
+                    if (d != 0) {
+                        return s * MathX.sign_convert(d, i8);
+                    }
+                    // Three-and-a-half-th derivative
+                    d = a3.cross(b2);
+                    if (d != 0) {
+                        return s * MathX.sign_convert(d, i8);
+                    }
+                    // Fourth derivative
+                    d = a2.cross(b3);
+                    if (d != 0) {
+                        return s * MathX.sign_convert(d, i8);
+                    }
+                    // Four-and-a-half-th derivative
+                    d = a3.cross(b3);
+                    return s * MathX.sign_convert(d, i8);
+                }
+                // Degenerate curves on both sides of the corner (control point before and after corner equals corner)
+                // Two-and-a-half-th derivative
+                var d = (@sqrt(a2.length()) * a2.cross(b3)) + (@sqrt(b2.length()) * a3.cross(b2));
+                if (d != 0) {
+                    return MathX.sign_convert(d, i8);
+                }
+                // Third derivative
+                d = a3.cross(b3);
+                return MathX.sign_convert(d, i8);
             }
-
-            pub fn convergent_curve_ordering(a: *EdgeSegment, b: *EdgeSegment) int32 {
-
+            /// For curves a, b converging at P = a->point(1) = b->point(0) with the same (opposite) direction,
+            /// determines the relative ordering in which they exit P
+            /// (i.e. whether a is to the left or right of b at the smallest positive radius around P)
+            pub fn convergent_curve_ordering(a: *EdgeSegment, b: *EdgeSegment) i8 {
+                // NOTE: this is greatly simplified from the original source code, which used a lot
+                // of pointer arithmetics and unneeded for-loop copying
+                var points: [8]Point = undefined;
+                const CORNER_IDX = 4;
+                if (a.edge_type() == .point or b.edge_type() == .point) {
+                    // Not implemented - only linear, quadratic, and cubic curves supported
+                    return 0;
+                }
+                // VERIFY unlike in the original source, the original edge segments are simplified in-place
+                // this *might* cause issues somewhere else in the pipeline, but I suspect it should be fine
+                a.simplify_degenerate_curve();
+                b.simplify_degenerate_curve();
+                const a_points = a.get_points();
+                const b_points = b.get_points();
+                @memcpy(points[CORNER_IDX .. CORNER_IDX + b_points.len], b_points);
+                @memcpy(points[CORNER_IDX - a_points.len .. CORNER_IDX], a_points);
+                return _convergent_curve_ordering_internal(points, a_points.len - 1, b_points.len - 1);
             }
         };
 
@@ -1140,7 +1180,7 @@ pub fn BezierMultiSignedDistanceFieldGenerator(comptime FLOAT_TYPE: type, compti
                 }
             }
 
-            pub fn add_miter_bounds_to_aabb(self: Contour, aabb: *AABB, border_size: FLOAT_TYPE, miter_limit: FLOAT_TYPE, polarity: FLOAT_TYPE) void {
+            pub fn add_mitered_bounds_to_aabb(self: Contour, aabb: *AABB, border_size: FLOAT_TYPE, miter_limit: FLOAT_TYPE, polarity: FLOAT_TYPE) void {
                 if (self.edges.is_empty()) return;
                 var prev_tangent = self.edges.get_last().edge.tangent_at_interp(1).normalize_may_be_zero(.norm_zero_is_zero);
                 var this_tangent: Vector = undefined;
@@ -1260,37 +1300,88 @@ pub fn BezierMultiSignedDistanceFieldGenerator(comptime FLOAT_TYPE: type, compti
                             curr_tangent = curr_edge_ref.edge.tangent_at_interp(0).normalize();
                             if (prev_tangent.dot(curr_tangent) < CORNER_DOT_EPSILON_MINUS_ONE) {
                                 axis = curr_tangent.subtract(prev_tangent).normalize().scale(DECONVERGE_FACTOR);
-                                if ()
+                                if (prev_edge_ref.edge.convergent_curve_ordering(curr_edge_ref.edge) < 0) {
+                                    axis = -axis;
+                                }
+                                prev_edge_ref.deconverge_edge(1, axis.perp_ccw());
+                                curr_edge_ref.deconverge_edge(0, axis.perp_cw());
                             }
+                            prev_edge_ref = curr_edge_ref;
                         }
                     }
                 }
-                // for (std::vector<Contour>::iterator contour = contours.begin(); contour != contours.end(); ++contour) {
-                //     if (contour->edges.size() == 1) {
-                //         EdgeSegment *parts[3] = { };
-                //         contour->edges[0]->splitInThirds(parts[0], parts[1], parts[2]);
-                //         contour->edges.clear();
-                //         contour->edges.push_back(EdgeHolder(parts[0]));
-                //         contour->edges.push_back(EdgeHolder(parts[1]));
-                //         contour->edges.push_back(EdgeHolder(parts[2]));
-                //     } else if (!contour->edges.empty()) {
-                //         // Push apart convergent edge segments
-                //         EdgeHolder *prevEdge = &contour->edges.back();
-                //         for (std::vector<EdgeHolder>::iterator edge = contour->edges.begin(); edge != contour->edges.end(); ++edge) {
-                //             Vector2 prevDir = (*prevEdge)->direction(1).normalize();
-                //             Vector2 curDir = (*edge)->direction(0).normalize();
-                //             if (dotProduct(prevDir, curDir) < MSDFGEN_CORNER_DOT_EPSILON-1) {
-                //                 double factor = DECONVERGE_OVERSHOOT*sqrt(1-(MSDFGEN_CORNER_DOT_EPSILON-1)*(MSDFGEN_CORNER_DOT_EPSILON-1))/(MSDFGEN_CORNER_DOT_EPSILON-1);
-                //                 Vector2 axis = factor*(curDir-prevDir).normalize();
-                //                 if (convergentCurveOrdering(*prevEdge, *edge) < 0)
-                //                     axis = -axis;
-                //                 deconvergeEdge(*prevEdge, 1, axis.getOrthogonal(true));
-                //                 deconvergeEdge(*edge, 0, axis.getOrthogonal(false));
-                //             }
-                //             prevEdge = &*edge;
-                //         }
-                //     }
-                // }
+            }
+
+            pub fn add_bounds_to_aabb(self: Shape, aabb: *AABB) void {
+                for (self.contours.slice()) |contour| {
+                    contour.add_bounds_to_aabb(aabb);
+                }
+            }
+
+            pub fn add_mitered_bounds_to_aabb(self: Shape, aabb: *AABB, border_width: FLOAT_TYPE, miter_limit: FLOAT_TYPE, polarity: FLOAT_TYPE) void {
+                for (self.contours.slice()) |contour| {
+                    contour.add_mitered_bounds_to_aabb(aabb, border_width, miter_limit, polarity);
+                }
+            }
+
+            pub fn get_bounds(self: Shape, border_width: FLOAT_TYPE, miter_limit: FLOAT_TYPE, polarity: FLOAT_TYPE) AABB {
+                var aabb = AABB{};
+                self.add_bounds_to_aabb(&aabb);
+                if (border_width > 0) {
+                    aabb.x_min -= border_width;
+                    aabb.y_min -= border_width;
+                    aabb.x_max += border_width;
+                    aabb.y_max += border_width;
+                    if (miter_limit > 0) {
+                        self.add_mitered_bounds_to_aabb(&aabb, border_width, miter_limit, polarity);
+                    }
+                }
+                return aabb;
+            }
+
+            pub const Intersections = struct {
+                intersections: List(SingleScanlineIntersection),
+                last_index: usize,
+
+                pub fn init_cap(cap: usize, alloc: Allocator) Intersections {
+                    return Intersections{
+                        .intersections = List(SingleScanlineIntersection).init_capacity(cap, alloc),
+                        .last_index = 0,
+                    };
+                }
+                pub fn free(self: *Intersections, alloc: Allocator) void {
+                    self.intersections.free(alloc);
+                }
+
+                pub fn pre_process(self: *Intersections) void {
+                    //CHECKPOINT
+                    // lastIndex = 0;
+                    // if (!intersections.empty()) {
+                    //     qsort(&intersections[0], intersections.size(), sizeof(Intersection), compareIntersections);
+                    //     int totalDirection = 0;
+                    //     for (std::vector<Intersection>::iterator intersection = intersections.begin(); intersection != intersections.end(); ++intersection) {
+                    //         totalDirection += intersection->direction;
+                    //         intersection->direction = totalDirection;
+                    //     }
+                    // }
+                }
+            };
+
+            pub fn get_horizontal_scanline_intersections(self: Shape, y_value: FLOAT_TYPE, alloc: Allocator) Intersections {
+                var intersections = Intersections.init_cap(8, alloc);
+                for (self.contours.slice()) |contour| {
+                    for (contour.edges.slice()) |edge_ref| {
+                        const edge_intersections = edge_ref.edge.horizontal_intersections(y_value);
+                        for (0..edge_intersections.count) |i| {
+                            const inter = SingleScanlineIntersection{
+                                .point = edge_intersections.points[i],
+                                .slope = edge_intersections.slopes[i],
+                            };
+                            _ = intersections.intersections.append(inter, alloc);
+                        }
+                    }
+                }
+                intersections.pre_process();
             }
         };
 
@@ -1309,3 +1400,11 @@ pub fn BezierMultiSignedDistanceFieldGenerator(comptime FLOAT_TYPE: type, compti
         }
     };
 }
+
+/// Fill rule dictates how intersection total is interpreted during rasterization.
+pub const FillRule = enum {
+    NONZERO,
+    EVEN_ODD,
+    POSITIVE,
+    NEGATIVE,
+};
