@@ -61,6 +61,7 @@ pub fn BezierMultiSignedDistanceFieldGenerator(comptime FLOAT_TYPE: type, compti
         pub const CORNER_DOT_EPSILON_MINUS_ONE_SQUARED = CORNER_DOT_EPSILON_MINUS_ONE * CORNER_DOT_EPSILON_MINUS_ONE;
         pub const DECONVERGE_OVERSHOOT = 1.11111111111111111;
         pub const DECONVERGE_FACTOR = DECONVERGE_OVERSHOOT * @sqrt(1 - CORNER_DOT_EPSILON_MINUS_ONE_SQUARED) / CORNER_DOT_EPSILON_MINUS_ONE;
+        pub const HALF_SQRT_5_MINUS_1 = 0.6180339887498948482045868343656381177203091798057628621354;
 
         pub const Point = Vec2.define_vec2_type(FLOAT_TYPE);
         pub const Vector = Point;
@@ -70,8 +71,8 @@ pub fn BezierMultiSignedDistanceFieldGenerator(comptime FLOAT_TYPE: type, compti
         pub const CubicBezier = Bezier.CubicBezier(FLOAT_TYPE);
         pub const SignedDistance = MathX.SignedDistance(FLOAT_TYPE);
         pub const SignedDistanceWithPercent = MathX.SignedDistanceWithPercent(FLOAT_TYPE);
-        pub const ScanlineIntersections = MathX.ScanlineIntersections(3, FLOAT_TYPE);
-        pub const SingleScanlineIntersection = MathX.SingleScanlineIntersection(FLOAT_TYPE);
+        pub const ScanlineIntersections = MathX.ScanlineIntersections(3, FLOAT_TYPE, .axis_only, .sign, i32);
+        pub const SingleScanlineIntersection = ScanlineIntersections.Intersection;
 
         /// Edge color specifies which color channels an edge belongs to.
         pub const EdgeColor = enum(u8) {
@@ -239,7 +240,7 @@ pub fn BezierMultiSignedDistanceFieldGenerator(comptime FLOAT_TYPE: type, compti
             cubic: CubicBezier,
 
             pub fn new_point(p: Point) EdgePoints {
-                return EdgePoints{ .point = p1 };
+                return EdgePoints{ .point = p };
             }
             pub fn new_linear(p1: Point, p2: Point) EdgePoints {
                 return EdgePoints{ .linear = .new(p1, p2) };
@@ -451,17 +452,17 @@ pub fn BezierMultiSignedDistanceFieldGenerator(comptime FLOAT_TYPE: type, compti
             }
             pub fn horizontal_intersections(self: EdgeSegment, y_value: FLOAT_TYPE) ScanlineIntersections {
                 switch (self.points) {
-                    .point => |p| {
+                    .point => {
                         return .{};
                     },
                     .linear => |bezier| {
-                        return bezier.horizontal_intersections(y_value).change_max_intersections(3);
+                        return bezier.horizontal_intersections(y_value, .axis_only, .sign, i32).change_max_intersections(3);
                     },
                     .quadratic => |bezier| {
-                        return bezier.horizontal_intersections(y_value, .estimate_linear_when_linear_coeff_more_than_N_times_quadratic(1e12)).change_max_intersections(3);
+                        return bezier.horizontal_intersections(y_value, .estimate_linear_when_linear_coeff_more_than_N_times_quadratic(1e12), .axis_only, .sign, i32).change_max_intersections(3);
                     },
                     .cubic => |bezier| {
-                        return bezier.horizontal_intersections(y_value, .estimate_double_roots_when_u_minus_v_less_than_N_times_u_plus_v(1e-12), .estimate_quadratic_when_quadratic_coeff_more_than_N_times_cubic(1e6), .estimate_linear_when_linear_coeff_more_than_N_times_quadratic(1e12));
+                        return bezier.horizontal_intersections(y_value, .estimate_double_roots_when_u_minus_v_less_than_N_times_u_plus_v(1e-12), .estimate_quadratic_when_quadratic_coeff_more_than_N_times_cubic(1e6), .estimate_linear_when_linear_coeff_more_than_N_times_quadratic(1e12), .axis_only, .sign, i32);
                     },
                 }
             }
@@ -1241,6 +1242,7 @@ pub fn BezierMultiSignedDistanceFieldGenerator(comptime FLOAT_TYPE: type, compti
 
         pub const Shape = struct {
             contours: List(Contour),
+            y_orientation: YAxisOrientation = .Y_DOWNWARD,
 
             pub fn init(cap: usize, alloc: Allocator) Shape {
                 return Shape{
@@ -1339,49 +1341,222 @@ pub fn BezierMultiSignedDistanceFieldGenerator(comptime FLOAT_TYPE: type, compti
                 return aabb;
             }
 
-            pub const Intersections = struct {
+            pub const Scanline = struct {
                 intersections: List(SingleScanlineIntersection),
                 last_index: usize,
 
-                pub fn init_cap(cap: usize, alloc: Allocator) Intersections {
-                    return Intersections{
+                pub fn init_cap(cap: usize, alloc: Allocator) Scanline {
+                    return Scanline{
                         .intersections = List(SingleScanlineIntersection).init_capacity(cap, alloc),
                         .last_index = 0,
                     };
                 }
-                pub fn free(self: *Intersections, alloc: Allocator) void {
+                pub fn free(self: *Scanline, alloc: Allocator) void {
                     self.intersections.free(alloc);
                 }
 
-                pub fn pre_process(self: *Intersections) void {
-                    //CHECKPOINT
-                    // lastIndex = 0;
-                    // if (!intersections.empty()) {
-                    //     qsort(&intersections[0], intersections.size(), sizeof(Intersection), compareIntersections);
-                    //     int totalDirection = 0;
-                    //     for (std::vector<Intersection>::iterator intersection = intersections.begin(); intersection != intersections.end(); ++intersection) {
-                    //         totalDirection += intersection->direction;
-                    //         intersection->direction = totalDirection;
-                    //     }
-                    // }
+                fn point_x_greater_than(a: Point, b: Point) bool {
+                    return a.x > b.x;
+                }
+
+                pub fn pre_process(self: *Scanline) void {
+                    self.last_index = 0;
+                    if (!self.intersections.is_empty()) {
+                        self.intersections.insertion_sort(.entire_list(), point_x_greater_than);
+                        var total_direction: FLOAT_TYPE = 0;
+                        for (self.intersections.slice()) |intersection| {
+                            total_direction += intersection.slope;
+                            intersection.slope = total_direction;
+                        }
+                    }
+                }
+
+                pub fn move_to(self: *Scanline, x_value: FLOAT_TYPE) ?usize {
+                    if (self.intersections.is_empty()) {
+                        return null;
+                    }
+                    while (x_value < self.intersections.ptr[self.last_index].point.x) {
+                        if (self.last_index == 0) {
+                            return null;
+                        }
+                        self.last_index -= 1;
+                    }
+                    while (x_value > self.intersections.ptr[self.last_index].point.x and self.last_index < self.intersections.len) {
+                        self.last_index += 1;
+                    }
+                    if (self.last_index >= self.intersections.len) {
+                        return null;
+                    }
+                    return self.last_index;
+                }
+
+                pub fn count_intersections(self: *Scanline, x_value: FLOAT_TYPE) usize {
+                    return self.move_to(x_value) + 1;
+                }
+
+                pub fn sum_intersections(self: *Scanline, x_value: FLOAT_TYPE) FLOAT_TYPE {
+                    const idx = self.move_to(x_value);
+                    if (idx) |i| {
+                        return self.intersections.ptr[i].slope;
+                    }
+                    return 0;
+                }
+
+                pub fn interpret_fill_rule(self: *Scanline, intersection_idx: usize, fill_rule: FillRule) bool {
+                    const slope = self.intersections.ptr[intersection_idx].slope;
+                    return switch (fill_rule) {
+                        .NONZERO => slope != 0,
+                        .EVEN_ODD => slope & 1 == 1,
+                        .POSITIVE => slope > 0,
+                        .NEGATIVE => slope < 0,
+                    };
+                }
+
+                pub fn overlap_amount(a: *Scanline, b: *Scanline, from_x: FLOAT_TYPE, to_x: FLOAT_TYPE, fill_rule: FillRule) FLOAT_TYPE {
+                    var total: FLOAT_TYPE = 0;
+                    var a_inside = false;
+                    var b_inside = false;
+                    var a_idx: usize = 0;
+                    var b_idx: usize = 0;
+                    var ax = if (!a.intersections.is_empty()) a.intersections.ptr[a_idx].point else to_x;
+                    var bx = if (!b.intersections.is_empty()) b.intersections.ptr[b_idx].point else to_x;
+                    while (ax < from_x or bx < from_x) {
+                        const next_x = @min(ax, bx);
+                        if (ax == next_x and a_idx < a.intersections.len) {
+                            a_inside = a.interpret_fill_rule(a_idx, fill_rule);
+                            a_idx += 1;
+                            ax = if (a_idx < a.intersections.len) a.intersections.ptr[a_idx].point else to_x;
+                        }
+                        if (bx == next_x and b_idx < b.intersections.len) {
+                            b_inside = b.interpret_fill_rule(b_idx, fill_rule);
+                            b_idx += 1;
+                            bx = if (b_idx < b.intersections.len) b.intersections.ptr[b_idx].point else to_x;
+                        }
+                    }
+                    var x = from_x;
+                    while (ax < to_x or bx < to_x) {
+                        const next_x = @min(ax, bx);
+                        if (a_inside == b_inside) {
+                            total += next_x - x;
+                        }
+                        if (ax == next_x and a_idx < a.intersections.len) {
+                            a_inside = a.interpret_fill_rule(a_idx, fill_rule);
+                            a_idx += 1;
+                            ax = if (a_idx < a.intersections.len) a.intersections.ptr[a_idx].point else to_x;
+                        }
+                        if (bx == next_x and b_idx < b.intersections.len) {
+                            b_inside = b.interpret_fill_rule(b_idx, fill_rule);
+                            b_idx += 1;
+                            bx = if (b_idx < b.intersections.len) b.intersections.ptr[b_idx].point else to_x;
+                        }
+                        x = next_x;
+                    }
+                    if (a_inside == b_inside) {
+                        total += to_x - x;
+                    }
+                    return total;
+                }
+
+                pub fn is_filled_at_x(self: *Scanline, x_value: FLOAT_TYPE, fill_rule: FillRule) bool {
+                    return self.interpret_fill_rule(self.sum_intersections(x_value), fill_rule);
                 }
             };
 
-            pub fn get_horizontal_scanline_intersections(self: Shape, y_value: FLOAT_TYPE, alloc: Allocator) Intersections {
-                var intersections = Intersections.init_cap(8, alloc);
+            pub fn get_horizontal_scanline_intersections(self: Shape, y_value: FLOAT_TYPE, alloc: Allocator) Scanline {
+                var intersections = Scanline.init_cap(8, alloc);
                 for (self.contours.slice()) |contour| {
                     for (contour.edges.slice()) |edge_ref| {
                         const edge_intersections = edge_ref.edge.horizontal_intersections(y_value);
                         for (0..edge_intersections.count) |i| {
-                            const inter = SingleScanlineIntersection{
-                                .point = edge_intersections.points[i],
-                                .slope = edge_intersections.slopes[i],
-                            };
+                            const inter = edge_intersections.intersections[i];
                             _ = intersections.intersections.append(inter, alloc);
                         }
                     }
                 }
                 intersections.pre_process();
+            }
+
+            pub fn edge_count(self: Shape) u32 {
+                var total: u32 = 0;
+                for (self.contours.slice()) |contour| {
+                    total += contour.edges.len;
+                }
+                return total;
+            }
+
+            pub const IntersectionWithCountourIdx = struct {
+                inter: ScanlineIntersections.Intersection,
+                contour_idx: usize,
+
+                pub fn x_greater_than(a: IntersectionWithCountourIdx, b: IntersectionWithCountourIdx) bool {
+                    return a.inter.point > b.inter.point;
+                }
+            };
+
+            pub fn orient_contours(self: *Shape, alloc: Allocator) void {
+                var orientations = List(i32).init_capacity(@intCast(self.contours.len), alloc);
+                defer orientations.free(alloc);
+                var intersections = List(IntersectionWithCountourIdx).init_capacity(@intCast(self.contours.len), alloc);
+                defer intersections.free(alloc);
+                for (self.contours.slice(), 0..) |contour, i| {
+                    if (i >= orientations.len and !contour.edges.is_empty()) {
+                        orientations.len = @intCast(i);
+                        const y0 = contour.edges.get_first().edge.interp_point(0).y;
+                        var y1 = y0;
+                        for (contour.edges.slice()) |edge_ref| {
+                            if (y0 != y1) break;
+                            y1 = edge_ref.edge.interp_point(1).y;
+                        }
+                        // in case all endpoints are in a horizontal line
+                        for (contour.edges.slice()) |edge_ref| {
+                            if (y0 != y1) break;
+                            y1 = edge_ref.edge.interp_point(HALF_SQRT_5_MINUS_1).y;
+                        }
+                        const y = MathX.lerp(y0, y1, HALF_SQRT_5_MINUS_1);
+                        for (self.contours.slice(), 0..) |contour_2, j| {
+                            for (contour_2.edges.slice()) |edge_ref| {
+                                const edge_intersections = edge_ref.edge.horizontal_intersections(y);
+                                var k: u32 = 0;
+                                while (k < intersections.count) {
+                                    const isection = IntersectionWithCountourIdx{
+                                        .inter = edge_intersections.intersections[k],
+                                        .contour_idx = j,
+                                    };
+                                    _ = intersections.append(isection, alloc);
+                                    k += 1;
+                                }
+                            }
+                        }
+                        if (!intersections.is_empty()) {
+                            intersections.insertion_sort(.entire_list(), IntersectionWithCountourIdx.x_greater_than);
+                            // Disqualify multiple intersections
+                            var j: u32 = 1;
+                            var jj: u32 = 0;
+                            while (j < intersections.len) {
+                                if (intersections.ptr[j].inter.point == intersections.ptr[jj].inter.point) {
+                                    intersections.ptr[j].inter.slope = 0;
+                                    intersections.ptr[jj].inter.slope = 0;
+                                }
+                                jj = j;
+                                j += 1;
+                            }
+                            j = 0;
+                            while (j < intersections.len) {
+                                if (intersections.ptr[j].inter.slope != 0) {
+                                    orientations.ptr[intersections.ptr[j].contour_idx] += (2 * (num_cast(j & 1, i32) ^ num_cast(intersections.ptr[j].inter.slope > 0, i32))) - 1;
+                                }
+                                j += 1;
+                            }
+                            intersections.clear();
+                        }
+                    }
+                }
+                // Reverse contours that have the opposite orientation
+                for (self.contours.slice(), 0..) |*contour, i| {
+                    if (orientations[i] < 0) {
+                        contour.reverse();
+                    }
+                }
             }
         };
 
@@ -1408,3 +1583,6 @@ pub const FillRule = enum {
     POSITIVE,
     NEGATIVE,
 };
+
+/// Specifies whether the Y component of the coordinate system increases in the upward or downward direction.
+pub const YAxisOrientation = enum { Y_UPWARD, Y_DOWNWARD };

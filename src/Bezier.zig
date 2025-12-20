@@ -47,6 +47,7 @@ const DoubleRootEstimate = MathX.DoubleRootEstimate;
 
 const assert_with_reason = Assert.assert_with_reason;
 const assert_unreachable = Assert.assert_unreachable;
+const num_cast = Root.Cast.num_cast;
 
 pub fn LinearBezier(comptime T: type) type {
     return struct {
@@ -147,14 +148,28 @@ pub fn LinearBezier(comptime T: type) type {
             self.p[1] = self.p[0];
             self.p[0] = tmp;
         }
-        pub fn horizontal_intersections(self: Self, y_value: T) ScanlineIntersections(1, T) {
-            var result = ScanlineIntersections(1, T){};
+        pub fn horizontal_intersections(self: Self, y_value: T, comptime POINT_MODE: MathX.ScanlinePointMode, comptime SLOPE_MODE: MathX.ScanlineSlopeMode, comptime SLOPE_TYPE: type) ScanlineIntersections(1, T, POINT_MODE, SLOPE_MODE, SLOPE_TYPE) {
+            var result = ScanlineIntersections(1, T, POINT_MODE, SLOPE_MODE, SLOPE_TYPE){};
             if ((y_value >= self.p[0].y and y_value < self.p[1].y) or (y_value >= self.p[1].y and y_value < self.p[0].y)) {
                 const slope = self.p[1].y - self.p[0].y;
                 const percent = (y_value - self.p[0].y) / slope;
-                result.points[0].x = MathX.weighted_average(self.p[0].x, self.p[1].x, percent);
-                result.points[0].y = y_value;
-                result.slopes[0] = slope;
+                switch (POINT_MODE) {
+                    .axis_only => {
+                        result.intersections[0].point = MathX.lerp(self.p[0].x, self.p[1].x, percent);
+                    },
+                    .point => {
+                        result.intersections[0].point.x = MathX.lerp(self.p[0].x, self.p[1].x, percent);
+                        result.intersections[0].point.y = y_value;
+                    },
+                }
+                switch (SLOPE_MODE) {
+                    .exact => {
+                        result.intersections[0].slope = num_cast(slope, SLOPE_TYPE);
+                    },
+                    .sign => {
+                        result.intersections[0].slope = MathX.sign_convert(slope, SLOPE_TYPE);
+                    },
+                }
                 result.count = 1;
             }
             return result;
@@ -347,14 +362,28 @@ pub fn QuadraticBezier(comptime T: type) type {
             self.p[2] = self.p[0];
             self.p[0] = tmp;
         }
-        pub fn horizontal_intersections(self: Self, y_value: T, comptime linear_estimate: LinearEstimate(T)) ScanlineIntersections(2, T) {
-            var result = ScanlineIntersections(2, T){};
-            var next_slope_sign: T = if (y_value > self.p[0].y) 1 else -1;
-            result.points[0].x = self.p[0].x;
+        pub fn horizontal_intersections(self: Self, y_value: T, comptime linear_estimate: LinearEstimate(T), comptime POINT_MODE: MathX.ScanlinePointMode, comptime SLOPE_MODE: MathX.ScanlineSlopeMode, comptime SLOPE_TYPE: type) ScanlineIntersections(2, T, POINT_MODE, SLOPE_MODE, SLOPE_TYPE) {
+            var result = ScanlineIntersections(2, T, POINT_MODE, SLOPE_MODE, SLOPE_TYPE){};
+            var next_slope_sign: SLOPE_TYPE = if (y_value > self.p[0].y) 1 else -1;
+            switch (POINT_MODE) {
+                .axis_only => {
+                    result.intersections[0].point = self.p[0].x;
+                },
+                .point => {
+                    result.intersections[0].point.x = self.p[0].x;
+                    result.intersections[0].point.y = y_value;
+                },
+            }
             if (self.p[0].y == y_value) {
                 if (self.p[0].y < self.p[1].y or (self.p[0].y == self.p[1].y and self.p[0].y < self.p[2].y)) {
-                    result.points[0].y = y_value;
-                    result.slopes[0] = 1;
+                    switch (SLOPE_MODE) {
+                        .exact => {
+                            result.intersections[0].slope = num_cast(self.tangent_at_interp(0).slope(), SLOPE_TYPE);
+                        },
+                        .sign => {
+                            result.intersections[0].slope = 1;
+                        },
+                    }
                     result.count += 1;
                 } else {
                     next_slope_sign = 1;
@@ -378,10 +407,25 @@ pub fn QuadraticBezier(comptime T: type) type {
                     const percent = solutions.vals[i];
                     if (percent >= 0 and percent <= 1) {
                         const x_val = self.p[0].x + (2 * percent * segment_1.x) + (percent * percent * segment_12_diff.x);
-                        result.points[result.count].x = x_val;
-                        result.points[result.count].y = y_value;
-                        if (next_slope_sign * (segment_1.y + (percent * segment_12_diff.y)) >= 0) {
-                            result.slopes[result.count] = next_slope_sign;
+                        switch (POINT_MODE) {
+                            .axis_only => {
+                                result.intersections[result.count].point = x_val;
+                            },
+                            .point => {
+                                result.intersections[result.count].point.x = x_val;
+                                result.intersections[result.count].point.y = y_value;
+                            },
+                        }
+                        const y_change = segment_1.y + (percent * segment_12_diff.y);
+                        if (MathX.upgrade_multiply(next_slope_sign, y_change) >= 0) {
+                            switch (SLOPE_MODE) {
+                                .exact => {
+                                    result.intersections[result.count].slope = num_cast(y_change / (segment_1.x + (percent * segment_12_diff.x)), SLOPE_TYPE);
+                                },
+                                .sign => {
+                                    result.intersections[result.count].slope = next_slope_sign;
+                                },
+                            }
                             next_slope_sign = -next_slope_sign;
                             result.count += 1;
                         }
@@ -395,10 +439,24 @@ pub fn QuadraticBezier(comptime T: type) type {
                     next_slope_sign = -1;
                 }
                 if ((self.p[2].y < self.p[1].y or (self.p[2].y == self.p[1].y and self.p[2].y < self.p[0].y)) and result.count < 2) {
-                    result.points[result.count].x = self.p[2].x;
-                    result.points[result.count].y - y_value;
+                    switch (POINT_MODE) {
+                        .axis_only => {
+                            result.intersections[result.count].point = self.p[2].x;
+                        },
+                        .point => {
+                            result.intersections[result.count].point.x = self.p[2].x;
+                            result.intersections[result.count].point.y = y_value;
+                        },
+                    }
                     if (next_slope_sign < 0) {
-                        result.slopes[result.count] = -1;
+                        switch (SLOPE_MODE) {
+                            .exact => {
+                                result.intersections[result.count].slope = num_cast(self.tangent_at_interp(1).slope(), SLOPE_TYPE);
+                            },
+                            .sign => {
+                                result.intersections[result.count].slope = -1;
+                            },
+                        }
                         result.count += 1;
                         next_slope_sign = 1;
                     }
@@ -409,10 +467,24 @@ pub fn QuadraticBezier(comptime T: type) type {
                     result.count -= 1;
                 } else {
                     if (@abs(self.p[2].y - y_value) < @abs(self.p[0].y - y_value)) {
-                        result.points[result.count].x = self.p[2].x;
-                        result.points[result.count].y = y_value;
+                        switch (POINT_MODE) {
+                            .axis_only => {
+                                result.intersections[result.count].point = self.p[2].x;
+                            },
+                            .point => {
+                                result.intersections[result.count].point.x = self.p[2].x;
+                                result.intersections[result.count].point.y = y_value;
+                            },
+                        }
                     }
-                    result.slopes[result.count] = next_slope_sign;
+                    switch (SLOPE_MODE) {
+                        .exact => {
+                            result.intersections[result.count].slope = num_cast(self.tangent_at_interp(1).slope(), SLOPE_TYPE);
+                        },
+                        .sign => {
+                            result.intersections[result.count].slope = next_slope_sign;
+                        },
+                    }
                     result.count += 1;
                 }
             }
@@ -652,14 +724,28 @@ pub fn CubicBezier(comptime T: type) type {
             self.p[0] = tmp_1;
             self.p[1] = tmp_2;
         }
-        pub fn horizontal_intersections(self: Self, y_value: T, comptime double_root_estimate: DoubleRootEstimate(T), comptime quadratic_estimate: QuadraticEstimate(T), comptime linear_estimate: LinearEstimate(T)) ScanlineIntersections(3, T) {
-            var result = ScanlineIntersections(2, T){};
-            var next_slope_sign: T = if (y_value > self.p[0].y) 1 else -1;
-            result.points[0].x = self.p[0].x;
-            result.points[0].y = y_value;
+        pub fn horizontal_intersections(self: Self, y_value: T, comptime double_root_estimate: DoubleRootEstimate(T), comptime quadratic_estimate: QuadraticEstimate(T), comptime linear_estimate: LinearEstimate(T), comptime POINT_MODE: MathX.ScanlinePointMode, comptime SLOPE_MODE: MathX.ScanlineSlopeMode, comptime SLOPE_TYPE: type) ScanlineIntersections(3, T, POINT_MODE, SLOPE_MODE, SLOPE_TYPE) {
+            var result = ScanlineIntersections(3, T, POINT_MODE, SLOPE_MODE, SLOPE_TYPE){};
+            var next_slope_sign: SLOPE_TYPE = if (y_value > self.p[0].y) 1 else -1;
+            switch (POINT_MODE) {
+                .axis_only => {
+                    result.intersections[result.count].point = self.p[0].x;
+                },
+                .point => {
+                    result.intersections[result.count].point.x = self.p[0].x;
+                    result.intersections[result.count].point.y = y_value;
+                },
+            }
             if (self.p[0].y == y_value) {
                 if (self.p[0].y < self.p[1].y or (self.p[0].y == self.p[1].y and (self.p[0].y < self.p[2].y or (self.p[0].y == self.p[2].y and self.p[0].y < self.p[3].y)))) {
-                    result.slopes[result.count] = 1;
+                    switch (SLOPE_MODE) {
+                        .exact => {
+                            result.intersections[result.count].slope = num_cast(self.tangent_at_interp(0).slope(), SLOPE_TYPE);
+                        },
+                        .sign => {
+                            result.intersections[result.count].slope = 1;
+                        },
+                    }
                     result.count += 1;
                 } else {
                     next_slope_sign = 1;
@@ -681,10 +767,24 @@ pub fn CubicBezier(comptime T: type) type {
                     const percent_squared = percent * percent;
                     const percent_cubed = percent_squared * percent;
                     if (percent >= 0 and percent <= 1) {
-                        result.points[result.count].x = self.p[0].x + (3 * percent * segment_1.x) + (3 * percent_squared * segment_12_diff.x) + (percent_cubed * segment_12d_23d_diff.x);
-                        result.points[result.count].y = y_value;
+                        switch (POINT_MODE) {
+                            .axis_only => {
+                                result.intersections[result.count].point = self.p[0].x + (3 * percent * segment_1.x) + (3 * percent_squared * segment_12_diff.x) + (percent_cubed * segment_12d_23d_diff.x);
+                            },
+                            .point => {
+                                result.intersections[result.count].point.x = self.p[0].x + (3 * percent * segment_1.x) + (3 * percent_squared * segment_12_diff.x) + (percent_cubed * segment_12d_23d_diff.x);
+                                result.intersections[result.count].point.y = y_value;
+                            },
+                        }
                         if (next_slope_sign * (segment_1.y + (2 * percent * segment_12_diff.y) + (percent_squared * segment_12d_23d_diff.y)) >= 0) {
-                            result.slopes[result.count] = next_slope_sign;
+                            switch (SLOPE_MODE) {
+                                .exact => {
+                                    result.intersections[result.count].slope = num_cast(self.tangent_at_interp(percent).slope(), SLOPE_TYPE);
+                                },
+                                .sign => {
+                                    result.intersections[result.count].slope = next_slope_sign;
+                                },
+                            }
                             result.count += 1;
                             next_slope_sign = -next_slope_sign;
                         }
@@ -697,10 +797,24 @@ pub fn CubicBezier(comptime T: type) type {
                     next_slope_sign = -1;
                 }
                 if ((self.p[3].y < self.p[2].y or (self.p[3].y == self.p[2].y and (self.p[3].y < self.p[1].y or (self.p[3].y == self.p[1].y and self.p[3].y < self.p[0].y)))) and result.count < 3) {
-                    result.points[result.count].x = self.p[3].x;
-                    result.points[result.count].y = y_value;
+                    switch (POINT_MODE) {
+                        .axis_only => {
+                            result.intersections[result.count].point = self.p[3].x;
+                        },
+                        .point => {
+                            result.intersections[result.count].point.x = self.p[3].x;
+                            result.intersections[result.count].point.y = y_value;
+                        },
+                    }
                     if (next_slope_sign < 0) {
-                        result.slopes[result.count] = -1;
+                        switch (SLOPE_MODE) {
+                            .exact => {
+                                result.intersections[result.count].slope = num_cast(self.tangent_at_interp(1).slope(), SLOPE_TYPE);
+                            },
+                            .sign => {
+                                result.intersections[result.count].slope = -1;
+                            },
+                        }
                         result.count += 1;
                         next_slope_sign = 1;
                     }
@@ -711,10 +825,24 @@ pub fn CubicBezier(comptime T: type) type {
                     result.count -= 1;
                 } else {
                     if (@abs(self.p[3].y - y_value) < @abs(self.p[0].y - y_value)) {
-                        result.points[result.count].x = self.p[3].x;
-                        result.points[result.count].y = y_value;
+                        switch (POINT_MODE) {
+                            .axis_only => {
+                                result.intersections[result.count].point = self.p[3].x;
+                            },
+                            .point => {
+                                result.intersections[result.count].point.x = self.p[3].x;
+                                result.intersections[result.count].point.y = y_value;
+                            },
+                        }
                     }
-                    result.slopes[result.count] = next_slope_sign;
+                    switch (SLOPE_MODE) {
+                        .exact => {
+                            result.intersections[result.count].slope = num_cast(self.tangent_at_interp(1).slope(), SLOPE_TYPE);
+                        },
+                        .sign => {
+                            result.intersections[result.count].slope = next_slope_sign;
+                        },
+                    }
                     result.count += 1;
                 }
             }

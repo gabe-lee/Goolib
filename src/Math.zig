@@ -521,32 +521,41 @@ pub fn change_per_unit_time_required_to_reach_val_at_inverse_time(comptime T: ty
     return (target - current) * inverse_time;
 }
 
-pub fn ScanlineIntersections(comptime MAX: comptime_int, comptime T: type) type {
+pub const ScanlinePointMode = enum {
+    axis_only,
+    point,
+};
+pub const ScanlineSlopeMode = enum {
+    exact,
+    sign,
+};
+
+pub fn ScanlineIntersections(comptime MAX: comptime_int, comptime AXIS_VALUE_TYPE: type, comptime POINT_MODE: ScanlinePointMode, comptime SLOPE_MODE: ScanlineSlopeMode, comptime SLOPE_TYPE: type) type {
     return struct {
         const Self = @This();
-        const Point = Vec2.define_vec2_type(T);
+        const Point = switch (POINT_MODE) {
+            .point => Vec2.define_vec2_type(AXIS_VALUE_TYPE),
+            .axis_only => AXIS_VALUE_TYPE,
+        };
+        const Slope = switch (SLOPE_MODE) {
+            .exact => AXIS_VALUE_TYPE,
+            .sign => SLOPE_TYPE,
+        };
 
-        points: [MAX]Point = @splat(.{}),
-        slopes: [MAX]T = @splat(0),
+        intersections: [MAX]Intersection = @splat(.{}),
         count: u32 = 0,
 
-        pub fn change_max_intersections(self: Self, comptime NEW_MAX: comptime_int) ScanlineIntersections(NEW_MAX, T) {
-            var new_scanlines = ScanlineIntersections(NEW_MAX, T){};
+        pub fn change_max_intersections(self: Self, comptime NEW_MAX: comptime_int) ScanlineIntersections(NEW_MAX, AXIS_VALUE_TYPE, POINT_MODE, SLOPE_MODE, SLOPE_TYPE) {
+            var new_scanlines = ScanlineIntersections(NEW_MAX, AXIS_VALUE_TYPE, POINT_MODE, SLOPE_MODE, SLOPE_TYPE){};
             new_scanlines.count = self.count;
-            @memcpy(new_scanlines.points[0..self.count], self.points[0..self.count]);
-            @memcpy(new_scanlines.slopes[0..self.count], self.slopes[0..self.count]);
+            @memcpy(new_scanlines.intersections[0..self.count], self.points[0..self.count]);
             return new_scanlines;
         }
-    };
-}
 
-pub fn SingleScanlineIntersection(comptime T: type) type {
-    return struct {
-        const Self = @This();
-        const Point = Vec2.define_vec2_type(T);
-
-        point: Point = .{},
-        slope: T = 0,
+        pub const Intersection = struct {
+            point: Point = if (POINT_MODE == .point) .{} else 0,
+            slope: Slope = 0,
+        };
     };
 }
 

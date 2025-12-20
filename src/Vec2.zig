@@ -459,6 +459,10 @@ pub fn define_vec2_type(comptime T: type) type {
             return self.x != 0 or self.y != 0;
         }
 
+        pub fn slope(self: T_Vec2) T {
+            return self.y / self.x;
+        }
+
         pub fn approx_colinear(self: T_Vec2, other_a: T_Vec2, other_b: T_Vec2) bool {
             const cross_3 = ((other_b.y - self.y) * (other_a.x - self.x)) - ((other_b.x - self.x) * (other_a.y - self.y));
             return @abs(cross_3) <= math.floatEpsAt(f32, cross_3);
