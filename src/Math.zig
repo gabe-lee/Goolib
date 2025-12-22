@@ -33,6 +33,7 @@ const Types = Root.Types;
 const Vec2 = Root.Vec2;
 const Utils = Root.Utils;
 const assert_with_reason = Assert.assert_with_reason;
+const num_cast = Root.Cast.num_cast;
 
 const Math = @This();
 
@@ -85,26 +86,21 @@ pub fn median_of_3(comptime T: type, a: T, b: T, c: T) T {
     return @max(@min(a, b), @min(@max(a, b), c));
 }
 
-pub fn clamp_0_to_1(comptime T: type, val: T) T {
-    if (val >= 0 and val <= 1) {
-        return val;
-    } else if (val < 0) {
-        return 0;
-    } else return 1;
+pub fn clamp_0_to_1(val: anytype) @TypeOf(val) {
+    return clamp(@as(@TypeOf(val), 0), val, @as(@TypeOf(val), 1));
 }
-pub fn clamp_0_to_max(comptime T: type, val: T, max: T) T {
-    if (val >= 0 and val <= max) {
-        return val;
-    } else if (val < 0) {
-        return 0;
-    } else return max;
+pub fn clamp_neg_1_to_1(val: anytype) @TypeOf(val) {
+    return clamp(@as(@TypeOf(val), -1), val, @as(@TypeOf(val), 1));
+}
+pub fn clamp_0_to_max(val: anytype, max: anytype) @TypeOf(val) {
+    return clamp(@as(@TypeOf(val), 0), val, max);
 }
 pub fn clamp(min: anytype, val: anytype, max: anytype) @TypeOf(val) {
-    if (val >= min and val <= max) {
-        return val;
-    } else if (val < min) {
-        return min;
-    } else return max;
+    if (@TypeOf(min) == @TypeOf(val) and @TypeOf(val) == @TypeOf(max)) {
+        return @min(@max(min, val), max);
+    } else {
+        return upgrade_min_out(upgrade_max(min, val), max, @TypeOf(val));
+    }
 }
 /// returns:
 ///   - -1 if val < 0
@@ -925,4 +921,20 @@ pub fn extract_partial_rand_from_rand(rand: anytype, val_less_than: anytype, com
     const r = rand.* % val_less_than;
     rand.* = rand.* / val_less_than;
     return convert_number(r, OUT);
+}
+
+pub fn normalized_float_to_int(float: anytype, comptime INT: type) INT {
+    const MAX_I: @TypeOf(float) = math.maxInt(INT);
+    const MIN_I: @TypeOf(float) = math.minInt(INT);
+    const f = clamp(MIN_I, @round(float * MAX_I), MAX_I);
+    return @intFromFloat(f);
+}
+pub fn int_to_normalized_float(int: anytype, comptime FLOAT: type) FLOAT {
+    const MAX_I: FLOAT = math.maxInt(@TypeOf(int));
+    const f: FLOAT = @floatFromInt(int);
+    if (Types.type_is_signed_int(@TypeOf(int))) {
+        return clamp_neg_1_to_1(f / MAX_I);
+    } else {
+        return clamp_0_to_1(f / MAX_I);
+    }
 }

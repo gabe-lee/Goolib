@@ -800,6 +800,28 @@ pub fn BezierMultiSignedDistanceFieldGenerator(comptime FLOAT_TYPE: type, compti
             }
         };
 
+        pub fn DistanceTypeAndMedian(comptime T: type) type {
+            return struct {
+                const Self = @This();
+
+                distance: T,
+                median: FLOAT_TYPE,
+
+                pub fn init_max_negative() DistanceTypeAndMedian {
+                    return DistanceTypeAndMedian{
+                        .distance = if (T == FLOAT_TYPE) MAX_NEGATIVE_FLOAT else T.init_max_negative(),
+                        .median = MAX_NEGATIVE_FLOAT,
+                    };
+                }
+                pub fn set_max_negative(self: *Self) void {
+                    self.distance = if (T == FLOAT_TYPE) MAX_NEGATIVE_FLOAT else T.init_max_negative();
+                    self.median = MAX_NEGATIVE_FLOAT;
+                }
+
+                pub const DISTANCE_TYPE = T;
+            };
+        }
+
         pub const TrueDistanceSelector = struct {
             point: Point,
             min_signed_distance: SignedDistance,
@@ -833,6 +855,16 @@ pub fn BezierMultiSignedDistanceFieldGenerator(comptime FLOAT_TYPE: type, compti
             pub fn distance(self: TrueDistanceSelector) FLOAT_TYPE {
                 return self.min_signed_distance.distance;
             }
+            pub fn median_distance(self: TrueDistanceSelector) FLOAT_TYPE {
+                return self.min_signed_distance.distance;
+            }
+            pub fn distance_and_median(self: TrueDistanceSelector) DistanceTypeAndMedian(FLOAT_TYPE) {
+                return DistanceTypeAndMedian(FLOAT_TYPE){
+                    .distance = self.min_signed_distance.distance,
+                    .median = self.min_signed_distance.distance,
+                };
+            }
+            pub const DISTANCE_AND_MEDIAN_TYPE = DistanceTypeAndMedian(FLOAT_TYPE);
 
             pub const EdgeCache = struct {
                 point: Point,
@@ -903,8 +935,22 @@ pub fn BezierMultiSignedDistanceFieldGenerator(comptime FLOAT_TYPE: type, compti
                 }
             }
 
-            pub fn calculate_distance(self: PerpendicularDistanceSelector) FLOAT_TYPE {
+            pub fn distance(self: PerpendicularDistanceSelector) FLOAT_TYPE {
                 return self.base.calculate_distance(self.point);
+            }
+            pub fn median_distance(self: PerpendicularDistanceSelector) FLOAT_TYPE {
+                return self.base.calculate_distance(self.point);
+            }
+            pub fn distance_and_median(self: TrueDistanceSelector) DistanceTypeAndMedian(FLOAT_TYPE) {
+                const d = self.base.calculate_distance(self.point);
+                return DistanceTypeAndMedian(FLOAT_TYPE){
+                    .distance = d,
+                    .median = d,
+                };
+            }
+            pub const DISTANCE_AND_MEDIAN_TYPE = DistanceTypeAndMedian(FLOAT_TYPE);
+            pub fn merge(self: *PerpendicularDistanceSelector, other: PerpendicularDistanceSelector) void {
+                self.base.merge(other.base);
             }
 
             pub const BaseData = struct {
@@ -1080,13 +1126,21 @@ pub fn BezierMultiSignedDistanceFieldGenerator(comptime FLOAT_TYPE: type, compti
                 self.chan_b.merge(other.chan_b);
             }
 
-            pub fn calculate_channel_distances(self: MultiDistanceSelector) MultiDistance {
+            pub fn distance(self: MultiDistanceSelector) MultiDistance {
                 return MultiDistance{
                     .r = self.chan_r.calculate_distance(self.point),
                     .g = self.chan_g.calculate_distance(self.point),
                     .b = self.chan_b.calculate_distance(self.point),
                 };
             }
+            pub fn distance_and_median(self: MultiDistanceSelector) DistanceTypeAndMedian(MultiDistance) {
+                const d = self.distance(self.point);
+                return DistanceTypeAndMedian(MultiDistance){
+                    .distance = d,
+                    .median = d.median_distance(),
+                };
+            }
+            pub const DISTANCE_AND_MEDIAN_TYPE = DistanceTypeAndMedian(MultiDistance);
 
             pub fn smallest_true_distance(self: MultiDistanceSelector) SignedDistance {
                 var smallest = self.chan_r.min_true_distance;
@@ -1104,8 +1158,8 @@ pub fn BezierMultiSignedDistanceFieldGenerator(comptime FLOAT_TYPE: type, compti
             true_dist_selector: TrueDistanceSelector = .{},
             multi_dist_selector: MultiDistanceSelector = .{},
 
-            pub fn calculate_all_distances(self: MultiAndTrueDistanceSelector) MultiAndTrueDistance {
-                const multi = self.multi_dist_selector.calculate_channel_distances();
+            pub fn distance(self: MultiAndTrueDistanceSelector) MultiAndTrueDistance {
+                const multi = self.multi_dist_selector.distance();
                 return MultiAndTrueDistance{
                     .r = multi.r,
                     .g = multi.g,
@@ -1113,6 +1167,15 @@ pub fn BezierMultiSignedDistanceFieldGenerator(comptime FLOAT_TYPE: type, compti
                     .a = self.true_dist_selector.distance(),
                 };
             }
+
+            pub fn distance_and_median(self: MultiAndTrueDistanceSelector) DistanceTypeAndMedian(MultiAndTrueDistance) {
+                const d = self.distance(self.point);
+                return DistanceTypeAndMedian(MultiAndTrueDistance){
+                    .distance = d,
+                    .median = d.median_colored_distance(),
+                };
+            }
+            pub const DISTANCE_AND_MEDIAN_TYPE = DistanceTypeAndMedian(MultiAndTrueDistance);
         };
 
         pub const EdgeSegmentRef = struct {
@@ -1562,17 +1625,139 @@ pub fn BezierMultiSignedDistanceFieldGenerator(comptime FLOAT_TYPE: type, compti
 
         pub fn SimpleContourCombiner(comptime EdgeSelectorType: type) type {
             return struct {
+                const Self = @This();
+
                 shape_edge_selector: EdgeSelectorType,
+
+                pub fn distance(self: Self) FLOAT_TYPE {
+                    return self.shape_edge_selector.distance();
+                }
+
+                pub fn edge_selector(self: Self, _: usize) EdgeSelectorType {
+                    return self.shape_edge_selector;
+                }
+
+                pub fn reset(self: *Self, point: Point) void {
+                    self.shape_edge_selector.reset(point);
+                }
             };
         }
 
         pub fn OverlappingContourCombiner(comptime EdgeSelectorType: type) type {
             return struct {
-                point: Point,
+                const Self = @This();
+
+                point: Point = .{},
                 windings: List(ShapeWinding),
                 selectors: List(EdgeSelectorType),
+
+                pub fn init_from_shape(shape: *Shape, alloc: Allocator) Self {
+                    var self = Self{
+                        .windings = List(ShapeWinding).init_capacity(shape.contours.len, alloc),
+                        .selectors = List(EdgeSelectorType).init_capacity(shape.contours.len, alloc),
+                    };
+                    self.selectors.len = shape.contours.len;
+                    for (shape.contours.slice()) |contour| {
+                        const idx = self.windings.append_slots_assume_capacity(1).first_idx;
+                        self.windings.ptr[idx] = contour.winding_orientation();
+                    }
+                }
+                pub fn free(self: *Self, alloc: Allocator) void {
+                    self.windings.free(alloc);
+                    self.selectors.free(alloc);
+                }
+
+                pub fn edge_selector(self: Self, idx: usize) EdgeSelectorType {
+                    return self.selectors.ptr[idx];
+                }
+
+                pub fn reset(self: *Self, point: Point) void {
+                    self.point = point;
+                    for (self.selectors.slice()) |*selector| {
+                        selector.reset(point);
+                    }
+                }
+
+                pub fn distance(self: *Self, alloc: Allocator) FLOAT_TYPE {
+                    const contour_count = self.selectors.len;
+                    var shape_edge_selector: EdgeSelectorType = undefined;
+                    var inner_edge_selector: EdgeSelectorType = undefined;
+                    var outer_edge_selector: EdgeSelectorType = undefined;
+                    var selector_distances = List(EdgeSelectorType.DISTANCE_AND_MEDIAN_TYPE).init_capacity(contour_count, alloc);
+                    defer selector_distances.free(alloc);
+                    selector_distances.len = contour_count;
+                    shape_edge_selector.reset(self.point);
+                    inner_edge_selector.reset(self.point);
+                    outer_edge_selector.reset(self.point);
+                    var i: u32 = 0;
+                    while (i < contour_count) : (i += 1) {
+                        const this_selector_distance = self.selectors.ptr[i].distance_and_median();
+                        selector_distances.ptr[i] = this_selector_distance;
+                        shape_edge_selector.merge(self.selectors.ptr[i]);
+                        if (self.windings.ptr[i] == .WINDING_CCW and this_selector_distance.median >= 0) {
+                            inner_edge_selector.merge(self.selectors.ptr[i]);
+                        }
+                        if (self.windings.ptr[i] == .WINDING_CW and this_selector_distance.median <= 0) {
+                            outer_edge_selector.merge(self.selectors.ptr[i]);
+                        }
+                    }
+
+                    const shape_distance = shape_edge_selector.distance_and_median();
+                    const inner_distance = inner_edge_selector.distance_and_median();
+                    const outer_distance = outer_edge_selector.distance_and_median();
+                    var final_distance = @TypeOf(shape_distance).init_max_negative();
+                    var winding: ShapeWinding = .COLINEAR;
+                    if (inner_distance.median >= 0 and inner_distance.median <= @abs(outer_distance.median)) {
+                        final_distance = inner_distance;
+                        winding = .WINDING_CCW;
+                        i = 0;
+                        while (i < contour_count) : (i += 1) {
+                            if (self.windings.ptr[i] == .WINDING_CCW) {
+                                const contour_distance = selector_distances.ptr[i];
+                                if (@abs(contour_distance.median) < @abs(outer_distance.median) and contour_distance.median > final_distance.median) {
+                                    final_distance = contour_distance;
+                                }
+                            }
+                        }
+                    } else if (outer_distance.median <= 0 and @abs(outer_distance.median) < @abs(inner_distance.median)) {
+                        final_distance = outer_distance;
+                        winding = .WINDING_CW;
+                        i = 0;
+                        while (i < contour_count) : (i += 1) {
+                            if (self.windings.ptr[i] == .WINDING_CW) {
+                                const contour_distance = selector_distances.ptr[i];
+                                if (@abs(contour_distance.median) < @abs(inner_distance.median) and contour_distance.median < final_distance.median) {
+                                    final_distance = contour_distance;
+                                }
+                            }
+                        }
+                    } else {
+                        return shape_distance.distance;
+                    }
+
+                    i = 0;
+                    while (i < contour_count) : (i += 1) {
+                        if (self.windings.ptr[i] != winding) {
+                            const contour_distance = selector_distances.ptr[i];
+                            if (contour_distance.median * final_distance.median >= 0 and @abs(contour_distance.median) < @abs(final_distance.median)) {
+                                final_distance = contour_distance;
+                            }
+                        }
+                    }
+                    if (final_distance.median == shape_distance.median) {
+                        final_distance = shape_distance;
+                    }
+                    return final_distance.distance;
+                }
             };
         }
+
+        pub const Projection = struct {
+            scale: Vector,
+            translate: Vector,
+
+            
+        };
     };
 }
 
@@ -1585,4 +1770,7 @@ pub const FillRule = enum {
 };
 
 /// Specifies whether the Y component of the coordinate system increases in the upward or downward direction.
-pub const YAxisOrientation = enum { Y_UPWARD, Y_DOWNWARD };
+pub const YAxisOrientation = enum {
+    Y_UPWARD,
+    Y_DOWNWARD,
+};
