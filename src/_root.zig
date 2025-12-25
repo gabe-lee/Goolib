@@ -35,6 +35,7 @@ pub const Assert = @import("./Assert.zig");
 pub const Bezier = @import("./Bezier.zig");
 pub const BezierMSDFGenerator = @import("./BezierMSDFGenerator.zig");
 pub const BinarySearch = @import("./BinarySearch.zig");
+pub const Bitmap = @import("./Bitmap.zig");
 pub const BucketAllocator = @import("./BucketAllocator.zig");
 pub const Bytes = @import("./Bytes.zig");
 pub const ByteWriter = @import("./ByteWriter.zig");

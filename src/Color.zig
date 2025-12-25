@@ -26,6 +26,7 @@ const std = @import("std");
 const Root = @import("./_root.zig");
 const Types = Root.Types;
 const Assert = Root.Assert;
+const MathX = Root.Math;
 
 const assert_with_reason = Assert.assert_with_reason;
 
@@ -62,29 +63,51 @@ pub const Channel = enum(u8) {
     }
 };
 
-pub fn define_arbitrary_color_type(comptime CHANNEL_UINT: type, comptime CHANNELS_ENUM: type) type {
+pub fn define_arbitrary_color_type(comptime CHANNEL_TYPE: type, comptime CHANNELS_ENUM: type) type {
     assert_with_reason(Types.type_is_enum(CHANNELS_ENUM), @src(), "type `CHANNELS_ENUM` must be an enum type, got type `{s}`", .{@typeName(CHANNELS_ENUM)});
     assert_with_reason(Types.enum_is_exhaustive(CHANNELS_ENUM), @src(), "type `CHANNELS_ENUM` must be an exhaustive enum type", .{@typeName(CHANNELS_ENUM)});
     assert_with_reason(Types.all_enum_values_start_from_zero_with_no_gaps(CHANNELS_ENUM), @src(), "type `CHANNELS_ENUM` must be an enum type with all tags starting from value 0 to the max tag value, with no gaps", .{@typeName(CHANNELS_ENUM)});
-    assert_with_reason(Types.type_is_unsigned_int_aligned(CHANNEL_UINT), @src(), "type `CHANNEL_UINT` MUST be one of: u8, u16, u32, u64, u128, usize... got type `{s}`", .{@typeName(CHANNEL_UINT)});
     return struct {
         const Self = @This();
-        raw: [CHANNEL_COUNT]CHANNEL_UINT = @splat(0),
+        raw: [CHANNEL_COUNT]CHANNEL_TYPE = @splat(0),
 
-        pub inline fn get(self: Self, comptime channel: CHANNELS_ENUM) CHANNEL_UINT {
+        pub inline fn get(self: Self, comptime channel: CHANNELS_ENUM) CHANNEL_TYPE {
             return self.raw[@intFromEnum(channel)];
         }
-        pub inline fn set(self: *Self, comptime channel: CHANNELS_ENUM, val: CHANNEL_UINT) void {
+        pub inline fn set(self: *Self, comptime channel: CHANNELS_ENUM, val: CHANNEL_TYPE) void {
             self.raw[@intFromEnum(channel)] = val;
         }
-        pub inline fn with_set(self: Self, comptime channel: CHANNELS_ENUM, val: CHANNEL_UINT) Self {
+        pub inline fn with_set(self: Self, comptime channel: CHANNELS_ENUM, val: CHANNEL_TYPE) Self {
             var new_self = self;
             new_self.raw[@intFromEnum(channel)] = val;
             return new_self;
         }
 
+        /// Linear interpolation on each channel
+        pub fn lerp(self: Self, other: Self, percent: anytype) Self {
+            var out = Self{};
+            inline for (0..CHANNEL_COUNT) |c| {
+                out.raw[c] = MathX.lerp(self.raw[c], other.raw[c], percent);
+            }
+            return out;
+        }
+        pub fn bilinear_interp_from_terms(constant: Self, linear: Self, quadratic: Self, percent: anytype) Self {
+            var out = Self{};
+            inline for (0..CHANNEL_COUNT) |c| {
+                out.raw[c] = MathX.upgrade_add_out(MathX.upgrade_multiply(percent, MathX.upgrade_add(MathX.upgrade_multiply(percent, quadratic.raw[c]), linear.raw[c])), constant.raw[c], CHANNEL_TYPE);
+            }
+            return out;
+        }
+        pub fn median_of_3_channels(self: Self, chan_a: CHANNELS_ENUM, chan_b: CHANNELS_ENUM, chan_c: CHANNELS_ENUM) CHANNEL_TYPE {
+            return MathX.median_of_3(CHANNEL_TYPE, self.get(chan_a), self.get(chan_b), self.get(chan_c));
+        }
+        /// returns `color[chan_b] - color[chan_a]`
+        pub fn channel_delta(self: Self, chan_a: CHANNELS_ENUM, chan_b: CHANNELS_ENUM) CHANNEL_TYPE {
+            return self.get(chan_b) - self.get(chan_a);
+        }
+
         pub const CHANNEL_COUNT = @typeInfo(CHANNELS_ENUM).@"enum".fields.len;
-        pub const BYTE_SIZE = @sizeOf(CHANNEL_UINT) * CHANNEL_COUNT;
+        pub const BYTE_SIZE = @sizeOf(CHANNEL_TYPE) * CHANNEL_COUNT;
         pub const ZERO = Self{};
     };
 }

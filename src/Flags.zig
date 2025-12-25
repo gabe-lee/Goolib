@@ -64,6 +64,7 @@ pub fn Flags(comptime FLAGS_ENUM: type, comptime GROUPS_ENUM: type) type {
         pub const Flag = FLAGS_ENUM;
         pub const Group = GROUPS_ENUM;
         pub const ALL = Self{ .raw = A };
+        pub const FLOOD = Self{ .raw = math.maxInt(RawInt) };
         const FULL = F;
         const NEEDS_VALID_ASSERT = ALL != FULL;
 
@@ -82,12 +83,21 @@ pub fn Flags(comptime FLAGS_ENUM: type, comptime GROUPS_ENUM: type) type {
         inline fn ctz(flag_or_group: anytype) BitCount {
             return @ctz(@intFromEnum(flag_or_group));
         }
+        inline fn clz(flag_or_group: anytype) BitCount {
+            return @clz(@intFromEnum(flag_or_group));
+        }
+        inline fn bit_count(flag_or_group: anytype) BitCount {
+            return @popCount(@intFromEnum(flag_or_group));
+        }
 
         pub inline fn blank() Self {
             return Self{ .raw = 0 };
         }
         pub inline fn all() Self {
             return ALL;
+        }
+        pub inline fn flood() Self {
+            return FLOOD;
         }
 
         pub fn from_flag(flag: Flag) Self {
@@ -97,6 +107,16 @@ pub fn Flags(comptime FLAGS_ENUM: type, comptime GROUPS_ENUM: type) type {
             var self = Self{ .raw = 0 };
             for (flags) |flag| {
                 self.raw |= @intFromEnum(flag);
+            }
+            return self;
+        }
+        pub fn from_full_group(group: Group) Self {
+            return Self{ .raw = @intFromEnum(group) };
+        }
+        pub fn from_combined_full_groups(groups: []const Group) Self {
+            var self = Self{ .raw = 0 };
+            for (groups) |group| {
+                self.raw |= @intFromEnum(group);
             }
             return self;
         }
@@ -132,7 +152,19 @@ pub fn Flags(comptime FLAGS_ENUM: type, comptime GROUPS_ENUM: type) type {
         pub inline fn set(self: *Self, flag: Flag) void {
             self.raw |= bits(flag);
         }
-        pub inline fn set_one_bit_from_bool(self: *Self, flag: Flag, state: bool) void {
+        pub inline fn set_one_bit_if_true(self: *Self, flag: Flag, state: bool) void {
+            const off = ctz(flag);
+            const bit_lo: RawInt = @intCast(@intFromBool(state));
+            const bit = bit_lo << off;
+            self.raw |= bit;
+        }
+        pub inline fn clear_one_bit_if_false(self: *Self, flag: Flag, state: bool) void {
+            const off = ctz(flag);
+            const bit_lo: RawInt = @intCast(@intFromBool(state));
+            const bit = bit_lo << off;
+            self.raw &= ~bit;
+        }
+        pub inline fn set_or_clear_one_bit_from_bool(self: *Self, flag: Flag, state: bool) void {
             const off = ctz(flag);
             const bit_lo: RawInt = @intCast(@intFromBool(state));
             const bit = bit_lo << off;
@@ -465,6 +497,34 @@ pub fn Flags(comptime FLAGS_ENUM: type, comptime GROUPS_ENUM: type) type {
         pub inline fn has_no_flags_outside_this_group_set(self: Self, group: Group) bool {
             return self.raw & inv_bits(group) == 0;
         }
+        pub inline fn has_one_or_zero_bits_set(self: Self) bool {
+            return (self.raw & (self.raw - 1)) == 0;
+        }
+        pub inline fn has_exactly_one_bit_set(self: Self) bool {
+            return self.raw != 0 and (self.raw & (self.raw - 1)) == 0;
+        }
+        pub inline fn has_more_than_one_bit_set(self: Self) bool {
+            return (self.raw & (self.raw - 1)) != 0;
+        }
+        pub inline fn has_exactly_n_bits_set(self: Self, n: anytype) bool {
+            return @popCount(self.raw) == n;
+        }
+        pub inline fn does_not_have_exactly_n_bits_set(self: Self, n: anytype) bool {
+            return @popCount(self.raw) != n;
+        }
+        pub inline fn has_at_least_n_bits_set(self: Self, n: anytype) bool {
+            return @popCount(self.raw) >= n;
+        }
+        pub inline fn has_more_than_n_bits_set(self: Self, n: anytype) bool {
+            return @popCount(self.raw) > n;
+        }
+        pub inline fn has_at_most_n_bits_set(self: Self, n: anytype) bool {
+            return @popCount(self.raw) <= n;
+        }
+        pub inline fn has_less_than_n_bits_set(self: Self, n: anytype) bool {
+            return @popCount(self.raw) < n;
+        }
+
         pub inline fn set_group_from_int_aligned_at_bit_0(self: *Self, group: Group, val: RawInt) void {
             const masked_val = ((val) << ctz(group)) & bits(group);
             self.raw |= masked_val;

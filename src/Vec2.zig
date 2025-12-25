@@ -81,8 +81,14 @@ pub fn define_vec2_type(comptime T: type) type {
         pub fn new(x: T, y: T) T_Vec2 {
             return T_Vec2{ .x = x, .y = y };
         }
+        pub fn new_same_xy(xy: T) T_Vec2 {
+            return T_Vec2{ .x = xy, .y = xy };
+        }
         pub fn new_from_any(x: anytype, y: anytype) T_Vec2 {
             return T_Vec2{ .x = num_cast(x, T), .y = num_cast(y, T) };
+        }
+        pub fn new_from_any_same_xy(xy: anytype) T_Vec2 {
+            return T_Vec2{ .x = num_cast(xy, T), .y = num_cast(xy, T) };
         }
 
         pub fn inverse(self: T_Vec2) T_Vec2 {
@@ -127,6 +133,9 @@ pub fn define_vec2_type(comptime T: type) type {
 
         pub fn scale(self: T_Vec2, val: anytype) T_Vec2 {
             return T_Vec2{ .x = MathX.upgrade_multiply_out(self.x, val, T), .y = MathX.upgrade_multiply_out(self.y, val, T) };
+        }
+        pub fn inverse_scale(self: T_Vec2, val: anytype) T_Vec2 {
+            return T_Vec2{ .x = MathX.upgrade_divide_out(self.x, val, T), .y = MathX.upgrade_divide_out(self.y, val, T) };
         }
 
         pub fn add_scale(self: T_Vec2, add_vec: T_Vec2, scale_add_vec_by: anytype) T_Vec2 {
