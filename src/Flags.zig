@@ -149,6 +149,10 @@ pub fn Flags(comptime FLAGS_ENUM: type, comptime GROUPS_ENUM: type) type {
             return Self{ .raw = self.raw };
         }
 
+        pub inline fn combine_with(self: *Self, other: Self) void {
+            self.raw |= other.raw;
+        }
+
         pub inline fn set(self: *Self, flag: Flag) void {
             self.raw |= bits(flag);
         }

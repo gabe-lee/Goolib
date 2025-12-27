@@ -43,11 +43,27 @@ pub const TAU = math.tau;
 pub const DEG_TO_RAD = math.rad_per_deg;
 pub const RAD_TO_DEG = math.deg_per_rad;
 
-pub fn deg_to_rad(comptime T: type, degrees: T) T {
+pub inline fn minor_major_coord_to_idx(minor: anytype, major: @TypeOf(minor), major_stride: @TypeOf(minor)) @TypeOf(minor) {
+    return minor + (major * major_stride);
+}
+pub fn MinorMajorCoord(comptime T: type) type {
+    return struct {
+        minor: T,
+        major: T,
+    };
+}
+pub inline fn idx_to_minor_major_coord(idx: anytype, major_stride: @TypeOf(idx)) MinorMajorCoord(@TypeOf(idx)) {
+    return MinorMajorCoord(@TypeOf(idx)){
+        .minor = idx % major_stride,
+        .major = idx / major_stride,
+    };
+}
+
+pub inline fn deg_to_rad(comptime T: type, degrees: T) T {
     return degrees * math.rad_per_deg;
 }
 
-pub fn rad_to_deg(comptime T: type, radians: T) T {
+pub inline fn rad_to_deg(comptime T: type, radians: T) T {
     return radians * math.deg_per_rad;
 }
 

@@ -1,6 +1,5 @@
 //! //TODO Documentation
 //! #### License: Zlib
-//! #### License for original source from which this source was adapted: MIT (https://github.com/Chlumsky/msdfgen/blob/master/LICENSE.txt)
 
 // zlib license
 //
@@ -36,10 +35,11 @@ const IList = Root.IList.IList;
 const List = Root.IList_List.List;
 const Range = Root.IList.Range;
 const Color_ = Root.Color;
-const Math = Root.Math;
+const MathX = Root.Math;
 
 const assert_with_reason = Assert.assert_with_reason;
 const assert_allocation_failure = Assert.assert_allocation_failure;
+const num_cast = Root.Cast.num_cast;
 
 pub const YOrder = enum(u8) {
     top_to_bottom,
@@ -69,6 +69,13 @@ pub const ResizeAnchor = enum(u8) {
     bottom_left,
     bottom_center,
     bottom_right,
+};
+
+pub const Origin = enum(u8) {
+    top_left,
+    top_right,
+    bot_left,
+    bot_right,
 };
 
 pub const RowColumnOrder = enum(u8) {
@@ -144,8 +151,10 @@ pub fn Bitmap(comptime DEFINITION: BitmapDefinition) type {
         pixels: [*]Pixel = @ptrFromInt(std.mem.alignBackward(usize, math.maxInt(usize), @alignOf(Pixel))),
         width: u32 = 0,
         height: u32 = 0,
+        major_stride: u32 = 0,
+        owns_memory: bool = false,
 
-        pub const CHANNEL_UINT = DEFINITION.CHANNEL_TYPE;
+        pub const CHANNEL_TYPE = DEFINITION.CHANNEL_TYPE;
         pub const CHANNELS = DEFINITION.CHANNELS_ENUM;
         pub const ROW_COLUMN_ORDER = DEFINITION.ROW_COLUMN_ORDER;
         pub const X_ORDER = DEFINITION.X_ORDER;
@@ -172,7 +181,7 @@ pub fn Bitmap(comptime DEFINITION: BitmapDefinition) type {
                 },
             },
         };
-        pub const Pixel = Color_.define_arbitrary_color_type(CHANNEL_UINT, CHANNELS);
+        pub const Pixel = Color_.define_arbitrary_color_type(CHANNEL_TYPE, CHANNELS);
         pub const NUM_CHANNELS = Pixel.CHANNEL_COUNT;
         pub const PIXEL_SIZE = Pixel.BYTE_SIZE;
 
@@ -183,143 +192,195 @@ pub fn Bitmap(comptime DEFINITION: BitmapDefinition) type {
                 .pixels = mem.ptr,
                 .width = width,
                 .height = height,
+                .major_stride = if (ROW_COLUMN_ORDER == .row_major) width else height,
+                .owns_memory = true,
             };
         }
         pub fn free(self: Self, alloc: Allocator) void {
+            assert_with_reason(self.owns_memory, @src(), "cannot free: this bitmap does not own its memory (it is a region-of or reference-to another bitmap, or is uninitialized)", .{});
             const total = self.width * self.height * PIXEL_SIZE;
             alloc.free(self.pixels[0..total]);
         }
 
-        pub fn get_idx(self: Self, x: u32, y: u32) u32 {
+        pub inline fn get_x_with_origin(self: Self, origin: Origin, x: u32) u32 {
+            return switch (origin) {
+                .bot_left, .top_left => if (X_ORDER == .left_to_right) x else (self.width - 1 - x),
+                .bot_right, .top_right => if (X_ORDER == .right_to_left) x else (self.width - 1 - x),
+            };
+        }
+        pub inline fn get_y_with_origin(self: Self, origin: Origin, y: u32) u32 {
+            return switch (origin) {
+                .top_left, .top_right => if (Y_ORDER == .top_to_bottom) y else (self.height - 1 - y),
+                .bot_left, .bot_right => if (Y_ORDER == .bottom_to_top) y else (self.height - 1 - y),
+            };
+        }
+        pub inline fn get_x_delta_with_origin(origin: Origin, x_delta: i32) i32 {
+            return switch (origin) {
+                .bot_left, .top_left => if (X_ORDER == .left_to_right) x_delta else -x_delta,
+                .bot_right, .top_right => if (X_ORDER == .right_to_left) x_delta else -x_delta,
+            };
+        }
+        pub inline fn get_y_delta_with_origin(origin: Origin, y_delta: i32) i32 {
+            return switch (origin) {
+                .top_left, .top_right => if (Y_ORDER == .top_to_bottom) y_delta else -y_delta,
+                .bot_left, .bot_right => if (Y_ORDER == .bottom_to_top) y_delta else -y_delta,
+            };
+        }
+        inline fn get_x_with_origin_float(self: Self, origin: Origin, comptime F: type, x: F) F {
+            return switch (origin) {
+                .bot_left, .top_left => if (X_ORDER == .left_to_right) x else (num_cast(self.width, F) - 1 - x),
+                .bot_right, .top_right => if (X_ORDER == .right_to_left) x else (num_cast(self.width, F) - 1 - x),
+            };
+        }
+        inline fn get_y_with_origin_float(self: Self, origin: Origin, comptime F: type, y: F) F {
+            return switch (origin) {
+                .top_left, .top_right => if (Y_ORDER == .top_to_bottom) y else (num_cast(self.height, F) - 1 - y),
+                .bot_left, .bot_right => if (Y_ORDER == .bottom_to_top) y else (num_cast(self.height, F) - 1 - y),
+            };
+        }
+        inline fn get_x_with_origin_and_width(self: Self, origin: Origin, x: u32, width: u32, width_direction: XOrder) u32 {
+            const xx = self.get_x_with_origin(origin, x);
+            return if (width_direction == X_ORDER) xx else xx - width;
+        }
+        inline fn get_y_with_origin_and_height(self: Self, origin: Origin, y: u32, height: u32, height_direction: XOrder) u32 {
+            const yy = self.get_y_with_origin(origin, y);
+            return if (height_direction == Y_ORDER) yy else yy - height;
+        }
+
+        pub fn move_pixel_ptr_many_native(self: Self, x_delta: i32, y_delta: i32, ptr: [*]Pixel) [*]Pixel {
+            const idx_delta = switch (ROW_COLUMN_ORDER) {
+                .row_major => return MathX.minor_major_coord_to_idx(x_delta, y_delta, num_cast(self.major_stride, i32)),
+                .column_major => MathX.minor_major_coord_to_idx(y_delta, x_delta, num_cast(self.major_stride, i32)),
+            };
+            return switch (idx_delta < 1) {
+                true => ptr - num_cast(@abs(idx_delta), usize),
+                false => ptr + num_cast(idx_delta, usize),
+            };
+        }
+        pub inline fn move_pixel_ptr_many_with_origin(self: Self, origin: Origin, x_delta: i32, y_delta: i32, ptr: [*]Pixel) [*]Pixel {
+            self.move_pixel_ptr_native(get_x_delta_with_origin(origin, x_delta), get_y_delta_with_origin(origin, y_delta), ptr);
+        }
+        pub fn move_pixel_ptr_native(self: Self, x_delta: i32, y_delta: i32, ptr: *Pixel) *Pixel {
+            return @ptrCast(self.move_pixel_ptr_many_native(x_delta, y_delta, @ptrCast(ptr)));
+        }
+        pub inline fn move_pixel_ptr_with_origin(self: Self, origin: Origin, x_delta: i32, y_delta: i32, ptr: *Pixel) *Pixel {
+            return @ptrCast(self.move_pixel_ptr_many_with_origin(origin, x_delta, y_delta, @ptrCast(ptr)));
+        }
+
+        pub fn get_idx_native(self: Self, x: u32, y: u32) u32 {
             assert_with_reason(x < self.width and y < self.height, @src(), "coordinate ({d}, {d}) is outside the bitmap width/height ({d}, {d})", .{ x, y, self.width, self.height });
-            switch (TOTAL_ORDER) {
-                .row_major__top_to_bottom__left_to_right => {
-                    return x + (y * self.width);
+            switch (ROW_COLUMN_ORDER) {
+                .row_major => {
+                    return MathX.minor_major_coord_to_idx(x, y, self.major_stride);
                 },
-                .row_major__top_to_bottom__right_to_left => {
-                    return (self.width - x - 1) + (y * self.width);
-                },
-                .row_major__bottom_to_top__left_to_right => {
-                    return x + ((self.height - y - 1) * self.width);
-                },
-                .row_major__bottom_to_top__right_to_left => {
-                    return (self.width - x - 1) + ((self.height - y - 1) * self.width);
-                },
-                .column_major__top_to_bottom__left_to_right => {
-                    return y + (x * self.height);
-                },
-                .column_major__top_to_bottom__right_to_left => {
-                    return (self.height - y - 1) + (x * self.height);
-                },
-                .column_major__bottom_to_top__left_to_right => {
-                    return y + ((self.width - x - 1) * self.height);
-                },
-                .column_major__bottom_to_top__right_to_left => {
-                    return (self.height - y - 1) + ((self.width - x - 1) * self.height);
+                .column_major => {
+                    return MathX.minor_major_coord_to_idx(y, x, self.major_stride);
                 },
             }
         }
-        pub fn get_idx_custom_order(self: Self, x: u32, y: u32, ordering: TOTAL_ORDER) u32 {
-            assert_with_reason(x < self.width and y < self.height, @src(), "coordinate ({d}, {d}) is outside the bitmap width/height ({d}, {d})", .{ x, y, self.width, self.height });
-            switch (ordering) {
-                .row_major__top_to_bottom__left_to_right => {
-                    return x + (y * self.width);
-                },
-                .row_major__top_to_bottom__right_to_left => {
-                    return (self.width - x - 1) + (y * self.width);
-                },
-                .row_major__bottom_to_top__left_to_right => {
-                    return x + ((self.height - y - 1) * self.width);
-                },
-                .row_major__bottom_to_top__right_to_left => {
-                    return (self.width - x - 1) + ((self.height - y - 1) * self.width);
-                },
-                .column_major__top_to_bottom__left_to_right => {
-                    return y + (x * self.height);
-                },
-                .column_major__top_to_bottom__right_to_left => {
-                    return (self.height - y - 1) + (x * self.height);
-                },
-                .column_major__bottom_to_top__left_to_right => {
-                    return y + ((self.width - x - 1) * self.height);
-                },
-                .column_major__bottom_to_top__right_to_left => {
-                    return (self.height - y - 1) + ((self.width - x - 1) * self.height);
-                },
-            }
+        pub inline fn get_idx_with_origin(self: Self, origin: Origin, x: u32, y: u32) u32 {
+            return self.get_idx_native(self.get_x_with_origin(origin, x), self.get_y_with_origin(origin, y));
         }
-        pub fn get_h_scanline(self: Self, x: u32, y: u32, width: u32) []Pixel {
+        pub fn get_scanline_native(self: Self, x: u32, y: u32, length: u32) []Pixel {
+            assert_with_reason(x < self.width and y < self.height, @src(), "coordinate ({d}, {d}) is outside the bitmap width/height ({d}, {d})", .{ x, y, self.width, self.height });
+            const start = self.get_idx_native(x, y);
+            const end = start + length;
+            assert_with_reason(end <= self.width * self.height, @src(), "scanline starting from ({d}, {d}) with length {d} (end index = {d}) is outside the bitmap length (len = {d})", .{ x, y, length, end, self.width * self.height });
+        }
+        pub fn get_h_scanline_native(self: Self, x: u32, y: u32, width: u32) []Pixel {
             Assert.assert_with_reason(ROW_COLUMN_ORDER == .row_major, @src(), "can only use `get_h_scanline` when `ROW_COLUMN_ORDER == .row_major`", .{});
-            const start = self.get_idx(x, y);
-            switch (X_ORDER) {
-                .left_to_right => {
-                    const end = start + width;
-                    assert_with_reason(end <= self.width * self.height, @src(), "scanline end index ({d}) falls outside the bitmap data range (len = {d})", .{ end, self.width * self.height });
-                    return self.pixels[start..end];
-                },
-                .right_to_left => {
-                    const real_end = start + 1;
-                    assert_with_reason(real_end >= width, @src(), "scanline start index ({d}) is negative, starts before bitmap data range", .{@as(isize, @intCast(real_end)) - @as(isize, @intCast(width))});
-                    const real_start = real_end - width;
-                    return self.pixels[real_start..real_end];
-                },
-            }
+            return self.get_scanline_native(x, y, width);
         }
-        pub fn get_v_scanline(self: Self, x: u32, y: u32, height: u32) []Pixel {
+        pub fn get_h_scanline_with_origin(self: Self, origin: Origin, x: u32, y: u32, width_direction: XOrder, width: u32) []Pixel {
+            return self.get_h_scanline_native(self.get_x_with_origin_and_width(origin, x, width, width_direction), y, width);
+        }
+        pub fn get_v_scanline_native(self: Self, x: u32, y: u32, height: u32) []Pixel {
             Assert.assert_with_reason(ROW_COLUMN_ORDER == .column_major, @src(), "can only use `get_v_scanline` when `ROW_COLUMN_ORDER == .column_major`", .{});
-            const start = self.get_idx(x, y);
-            switch (Y_ORDER) {
-                .top_to_bottom => {
-                    const end = start + height;
-                    assert_with_reason(end <= self.width * self.height, @src(), "scanline end index ({d}) falls outside the bitmap data range (len = {d})", .{ end, self.width * self.height });
-                    return self.pixels[start..end];
-                },
-                .bottom_to_top => {
-                    const real_end = start + 1;
-                    assert_with_reason(real_end >= height, @src(), "scanline start index ({d}) is negative, starts before bitmap data range", .{@as(isize, @intCast(real_end)) - @as(isize, @intCast(height))});
-                    const real_start = real_end - height;
-                    return self.pixels[real_start..real_end];
-                },
-            }
+            return self.get_scanline_native(x, y, height);
         }
-        pub fn get_pixel(self: Self, x: u32, y: u32) Pixel {
-            const idx = self.get_idx(x, y);
+        pub fn get_v_scanline_with_origin(self: Self, origin: Origin, x: u32, y: u32, height_direction: YOrder, height: u32) []Pixel {
+            return self.get_v_scanline_native(x, self.get_y_with_origin_and_height(origin, y, height, height_direction), height);
+        }
+        pub fn get_pixel_native(self: Self, x: u32, y: u32) Pixel {
+            const idx = self.get_idx_native(x, y);
             return self.pixels[idx];
         }
-        pub fn get_pixel_channel(self: Self, x: u32, y: u32, chan: CHANNELS) CHANNEL_UINT {
-            const idx = self.get_idx(x, y);
+        pub fn get_pixel_with_origin(self: Self, origin: Origin, x: u32, y: u32) Pixel {
+            const idx = self.get_idx_with_origin(origin, x, y);
+            return self.pixels[idx];
+        }
+        pub fn get_pixel_channel_native(self: Self, x: u32, y: u32, chan: CHANNELS) CHANNEL_TYPE {
+            const idx = self.get_idx_native(x, y);
             return self.pixels[idx].raw[@intFromEnum(chan)];
         }
-        pub fn get_pixel_channel_idx(self: Self, x: u32, y: u32, chan_idx: anytype) CHANNEL_UINT {
+        pub fn get_pixel_channel_with_origin(self: Self, origin: Origin, x: u32, y: u32, chan: CHANNELS) CHANNEL_TYPE {
+            const idx = self.get_idx_with_origin(origin, x, y);
+            return self.pixels[idx].raw[@intFromEnum(chan)];
+        }
+        pub fn get_pixel_channel_ptr_native(self: Self, x: u32, y: u32, chan: CHANNELS) *CHANNEL_TYPE {
+            const idx = self.get_idx_native(x, y);
+            return &self.pixels[idx].raw[@intFromEnum(chan)];
+        }
+        pub fn get_pixel_channel_ptr_with_origin(self: Self, origin: Origin, x: u32, y: u32, chan: CHANNELS) *CHANNEL_TYPE {
+            const idx = self.get_idx_with_origin(origin, x, y);
+            return &self.pixels[idx].raw[@intFromEnum(chan)];
+        }
+        pub fn get_pixel_channel_idx_native(self: Self, x: u32, y: u32, chan_idx: anytype) CHANNEL_TYPE {
             assert_with_reason(chan_idx < Types.enum_max_field_count(CHANNELS), @src(), "channel index `{d}` is outside the bounds for the number of channels (max index = {d})", .{ chan_idx, Types.enum_max_field_count(CHANNELS) - 1 });
-            const idx = self.get_idx(x, y);
+            const idx = self.get_idx_native(x, y);
             return self.pixels[idx].raw[chan_idx];
         }
-        pub fn get_pixel_ptr(self: Self, x: u32, y: u32) *Pixel {
-            const idx = self.get_idx(x, y);
+        pub fn get_pixel_channel_idx_with_origin(self: Self, origin: Origin, x: u32, y: u32, chan_idx: anytype) CHANNEL_TYPE {
+            assert_with_reason(chan_idx < Types.enum_max_field_count(CHANNELS), @src(), "channel index `{d}` is outside the bounds for the number of channels (max index = {d})", .{ chan_idx, Types.enum_max_field_count(CHANNELS) - 1 });
+            const idx = self.get_idx_with_origin(origin, x, y);
+            return self.pixels[idx].raw[chan_idx];
+        }
+        pub fn get_pixel_ptr_native(self: Self, x: u32, y: u32) *Pixel {
+            const idx = self.get_idx_native(x, y);
             return &self.pixels[idx];
         }
-        pub fn get_pixel_ptr_many(self: Self, x: u32, y: u32) [*]Pixel {
-            const idx = self.get_idx(x, y);
+        pub fn get_pixel_ptr_with_origin(self: Self, origin: Origin, x: u32, y: u32) *Pixel {
+            const idx = self.get_idx_with_origin(origin, x, y);
+            return &self.pixels[idx];
+        }
+        pub fn get_pixel_ptr_many_native(self: Self, x: u32, y: u32) [*]Pixel {
+            const idx = self.get_idx_native(x, y);
             return @ptrCast(&self.pixels[idx]);
         }
-        pub fn set_pixel(self: Self, x: u32, y: u32, val: Pixel) void {
-            const idx = self.get_idx(x, y);
+        pub fn get_pixel_ptr_many_with_origin(self: Self, origin: Origin, x: u32, y: u32) [*]Pixel {
+            const idx = self.get_idx_with_origin(origin, x, y);
+            return @ptrCast(&self.pixels[idx]);
+        }
+        pub fn set_pixel_native(self: Self, x: u32, y: u32, val: Pixel) void {
+            const idx = self.get_idx_native(x, y);
             self.pixels[idx] = val;
         }
-        pub fn set_pixel_channel(self: Self, x: u32, y: u32, chan: CHANNELS, val: CHANNEL_UINT) void {
-            const idx = self.get_idx(x, y);
+        pub fn set_pixel_with_origin(self: Self, origin: Origin, x: u32, y: u32, val: Pixel) void {
+            const idx = self.get_idx_with_origin(origin, x, y);
+            self.pixels[idx] = val;
+        }
+        pub fn set_pixel_channel_native(self: Self, x: u32, y: u32, chan: CHANNELS, val: CHANNEL_TYPE) void {
+            const idx = self.get_idx_native(x, y);
             self.pixels[idx].raw[@intFromEnum(chan)] = val;
         }
-        pub fn set_pixel_channel_idx(self: Self, x: u32, y: u32, chan_idx: anytype, val: CHANNEL_UINT) void {
+        pub fn set_pixel_channel_with_origin(self: Self, origin: Origin, x: u32, y: u32, chan: CHANNELS, val: CHANNEL_TYPE) void {
+            const idx = self.get_idx_with_origin(origin, x, y);
+            self.pixels[idx].raw[@intFromEnum(chan)] = val;
+        }
+        pub fn set_pixel_channel_idx_native(self: Self, x: u32, y: u32, chan_idx: anytype, val: CHANNEL_TYPE) void {
             assert_with_reason(chan_idx < Types.enum_max_field_count(CHANNELS), @src(), "channel index `{d}` is outside the bounds for the number of channels (max index = {d})", .{ chan_idx, Types.enum_max_field_count(CHANNELS) - 1 });
-            const idx = self.get_idx(x, y);
+            const idx = self.get_idx_native(x, y);
             self.pixels[idx].raw[chan_idx] = val;
         }
-        pub fn get_subpixel_mix_near(self: Self, comptime F: type, x: F, y: F) Pixel {
+        pub fn set_pixel_channel_idx_with_origin(self: Self, origin: Origin, x: u32, y: u32, chan_idx: anytype, val: CHANNEL_TYPE) void {
+            assert_with_reason(chan_idx < Types.enum_max_field_count(CHANNELS), @src(), "channel index `{d}` is outside the bounds for the number of channels (max index = {d})", .{ chan_idx, Types.enum_max_field_count(CHANNELS) - 1 });
+            const idx = self.get_idx_with_origin(origin, x, y);
+            self.pixels[idx].raw[chan_idx] = val;
+        }
+        pub fn get_subpixel_mix_near_native(self: Self, comptime F: type, x: F, y: F) Pixel {
             assert_with_reason(Types.type_is_float(F), @src(), "type `F` must be a float, got type `{s}`", .{@typeName(F)});
-            var xx = Math.clamp_0_to_max(F, x, @floatFromInt(self.width));
-            var yy = Math.clamp_0_to_max(F, y, @floatFromInt(self.height));
+            var xx = MathX.clamp_0_to_max(x, @as(f32, @floatFromInt(self.width)));
+            var yy = MathX.clamp_0_to_max(y, @as(f32, @floatFromInt(self.height)));
             xx -= 0.5;
             yy -= 0.5;
             const left_i: i32 = @intFromFloat(xx);
@@ -328,23 +389,26 @@ pub fn Bitmap(comptime DEFINITION: BitmapDefinition) type {
             const top_i: i32 = bot_i + 1;
             const weight_left_right: F = xx - @as(F, @floatFromInt(left_i));
             const weight_top_bottom: F = yy - @as(F, @floatFromInt(bot_i));
-            const left: u32 = @intCast(Math.clamp_0_to_max(i32, left_i, @intCast(self.width - 1)));
-            const right: u32 = @intCast(Math.clamp_0_to_max(i32, right_i, @intCast(self.width - 1)));
-            const top: u32 = @intCast(Math.clamp_0_to_max(i32, top_i, @intCast(self.height - 1)));
-            const bot: u32 = @intCast(Math.clamp_0_to_max(i32, bot_i, @intCast(self.height - 1)));
+            const left: u32 = @intCast(MathX.clamp_0_to_max(i32, left_i, @intCast(self.width - 1)));
+            const right: u32 = @intCast(MathX.clamp_0_to_max(i32, right_i, @intCast(self.width - 1)));
+            const top: u32 = @intCast(MathX.clamp_0_to_max(i32, top_i, @intCast(self.height - 1)));
+            const bot: u32 = @intCast(MathX.clamp_0_to_max(i32, bot_i, @intCast(self.height - 1)));
             const subpixel = Pixel{};
             inline for (0..NUM_CHANNELS) |c| {
-                subpixel.raw[c] = Math.weighted_average(
-                    CHANNEL_UINT,
-                    Math.weighted_average(CHANNEL_UINT, self.get_pixel_channel_idx(left, bot, c), self.get_pixel_channel_idx(right, bot, c), weight_left_right),
-                    Math.weighted_average(CHANNEL_UINT, self.get_pixel_channel_idx(left, top, c), self.get_pixel_channel_idx(right, top, c), weight_left_right),
+                subpixel.raw[c] = MathX.lerp(
+                    MathX.lerp(self.get_pixel_channel_idx_native(left, bot, c), self.get_pixel_channel_idx_native(right, bot, c), weight_left_right),
+                    MathX.lerp(self.get_pixel_channel_idx_native(left, top, c), self.get_pixel_channel_idx_native(right, top, c), weight_left_right),
                     weight_top_bottom,
                 );
             }
             return subpixel;
         }
+        pub fn get_subpixel_mix_near_with_origin(self: Self, origin: Origin, comptime F: type, x: F, y: F) Pixel {
+            self.get_subpixel_mix_near_native(F, self.get_x_with_origin_float(origin, F, x), self.get_y_with_origin_float(origin, F, y));
+        }
 
         pub fn discard_and_resize(self: Self, new_width: u32, new_height: u32, fill_color: ?Pixel, alloc: Allocator) Self {
+            assert_with_reason(self.owns_memory, @src(), "cannot resize: this bitmap does not own its memory (it is a region-of or reference-to another bitmap, or is uninitialized)", .{});
             if (self.width == 0 or self.height == 0) {
                 if (new_width == 0 or new_height == 0) return self;
                 return Self.init(new_width, new_height, alloc);
@@ -366,6 +430,7 @@ pub fn Bitmap(comptime DEFINITION: BitmapDefinition) type {
         }
 
         pub fn resize(self: Self, new_width: u32, new_height: u32, anchor: ResizeAnchor, fill_color: ?Pixel, alloc: Allocator) Self {
+            assert_with_reason(self.owns_memory, @src(), "cannot resize: this bitmap does not own its memory (it is a region-of or reference-to another bitmap, or is uninitialized)", .{});
             if (self.width == 0 or self.height == 0) {
                 if (new_width == 0 or new_height == 0) return self;
                 return Self.init(new_width, new_height, alloc);
@@ -477,16 +542,16 @@ pub fn Bitmap(comptime DEFINITION: BitmapDefinition) type {
             return new_bmp;
         }
 
-        fn fill_rect_internal(self: Self, x1: u32, y1: u32, x2: u32, y2: u32, width: u32, height: u32, fill_color: Pixel) void {
+        fn fill_rect_internal_native(self: Self, x1: u32, y1: u32, x2: u32, y2: u32, width: u32, height: u32, fill_color: Pixel) void {
             switch (ROW_COLUMN_ORDER) {
                 .row_major => {
                     if (y2 != y1) {
                         if (x1 == 0 and width == self.width) {
-                            const fill_block = self.get_h_scanline(x1, y1, self.width * (height));
+                            const fill_block = self.get_h_scanline_native(x1, y1, self.width * (height));
                             @memset(fill_block, fill_color);
                         } else {
                             for (y1..y2) |y| {
-                                const fill_line = self.get_h_scanline(x1, y, width);
+                                const fill_line = self.get_h_scanline_native(x1, y, width);
                                 @memset(fill_line, fill_color);
                             }
                         }
@@ -495,11 +560,11 @@ pub fn Bitmap(comptime DEFINITION: BitmapDefinition) type {
                 .column_major => {
                     if (x2 != x1) {
                         if (y1 == 0 and height == self.height) {
-                            const fill_block = self.get_v_scanline(x1, y1, self.height * (width));
+                            const fill_block = self.get_v_scanline_native(x1, y1, self.height * (width));
                             @memset(fill_block, fill_color);
                         } else {
                             for (x1..x2) |x| {
-                                const fill_line = self.get_v_scanline(x, y1, height);
+                                const fill_line = self.get_v_scanline_native(x, y1, height);
                                 @memset(fill_line, fill_color);
                             }
                         }
@@ -509,24 +574,44 @@ pub fn Bitmap(comptime DEFINITION: BitmapDefinition) type {
         }
 
         pub fn fill_all(self: Self, fill_color: Pixel) void {
-            self.fill_rect(0, 0, self.width, self.height, fill_color);
+            self.fill_rect_native(0, 0, self.width, self.height, fill_color);
         }
-        pub fn fill_rect(self: Self, x: u32, y: u32, width: u32, height: u32, fill_color: Pixel) void {
+        pub fn fill_rect_native(self: Self, x: u32, y: u32, width: u32, height: u32, fill_color: Pixel) void {
             assert_with_reason(x + width <= self.width and y + height <= self.height, @src(), "bottom-right coordinate ({d}, {d}) is outside the bitmap width/height ({d}, {d})", .{ x + width, y + height, self.width, self.height });
             const x2 = x + width;
             const y2 = y + height;
-            self.fill_rect_internal(x, y, x2, y2, width, height, fill_color);
+            self.fill_rect_internal_native(x, y, x2, y2, width, height, fill_color);
         }
-        pub fn fill_rect_xy(self: Self, x1: u32, y1: u32, x2: u32, y2: u32, fill_color: Pixel) void {
+        pub fn fill_rect_with_origin(self: Self, origin: Origin, x: u32, y: u32, width: u32, height: u32, width_dir: XOrder, height_dir: YOrder, fill_color: Pixel) void {
+            const x1 = self.get_x_with_origin_and_width(origin, x, width, width_dir);
+            const y1 = self.get_y_with_origin_and_height(origin, y, height, height_dir);
+            assert_with_reason(x1 + width <= self.width and y1 + height <= self.height, @src(), "max extent coordinate ({d}, {d}) is outside the bitmap width/height ({d}, {d})", .{ x1 + width, y1 + height, self.width, self.height });
+            const x2 = x + width;
+            const y2 = y + height;
+            self.fill_rect_internal_native(x1, y1, x2, y2, width, height, fill_color);
+        }
+        pub fn fill_rect_xy_native(self: Self, x1: u32, y1: u32, x2: u32, y2: u32, fill_color: Pixel) void {
             assert_with_reason(x1 <= x2, @src(), "x2 ({d}) is smaller than x1 ({d})", .{ x2, x1 });
             assert_with_reason(y1 <= y2, @src(), "y2 ({d}) is smaller than y1 ({d})", .{ y2, y1 });
             assert_with_reason(x2 <= self.width and y2 <= self.height, @src(), "bottom-right coordinate ({d}, {d}) is outside the bitmap width/height ({d}, {d})", .{ x2, y2, self.width, self.height });
             const width = x2 - x1;
             const height = y2 - y1;
-            self.fill_rect_internal(x1, y1, x2, y2, width, height, fill_color);
+            self.fill_rect_internal_native(x1, y1, x2, y2, width, height, fill_color);
+        }
+        pub fn fill_rect_xy_with_origin(self: Self, origin: Origin, x1: u32, y1: u32, x2: u32, y2: u32, fill_color: Pixel) void {
+            assert_with_reason(x1 <= x2, @src(), "x2 ({d}) is smaller than x1 ({d})", .{ x2, x1 });
+            assert_with_reason(y1 <= y2, @src(), "y2 ({d}) is smaller than y1 ({d})", .{ y2, y1 });
+            const width = x2 - x1;
+            const height = y2 - y1;
+            const xx1 = self.get_x_with_origin(origin, x1);
+            const xx2 = self.get_x_with_origin(origin, x2);
+            const yy1 = self.get_y_with_origin(origin, y1);
+            const yy2 = self.get_y_with_origin(origin, y2);
+            assert_with_reason(xx2 <= self.width and yy2 <= self.height, @src(), "max extent coordinate ({d}, {d}) is outside the bitmap width/height ({d}, {d})", .{ xx2, yy2, self.width, self.height });
+            self.fill_rect_internal_native(xx1, yy1, xx2, yy2, width, height, fill_color);
         }
 
-        fn copy_rect_to_internal(source: Self, x_src: u32, y_src: u32, width: u32, height: u32, dest: Self, x_dest: u32, y_dest: u32, comptime overlap: bool) void {
+        fn copy_rect_to_internal_native(source: Self, x_src: u32, y_src: u32, width: u32, height: u32, dest: Self, x_dest: u32, y_dest: u32, comptime overlap: bool) void {
             assert_with_reason(x_src + width <= source.width and y_src + height <= source.height, @src(), "bottom-right source coordinate ({d}, {d}) is outside the source bitmap width/height ({d}, {d})", .{ x_src + width, y_src + height, source.width, source.height });
             assert_with_reason(x_dest + width <= dest.width and y_dest + height <= dest.height, @src(), "bottom-right destination coordinate ({d}, {d}) is outside the destination bitmap width/height ({d}, {d})", .{ x_dest + width, y_dest + height, dest.width, dest.height });
             const y_src_2 = y_src + height;
@@ -583,261 +668,63 @@ pub fn Bitmap(comptime DEFINITION: BitmapDefinition) type {
             }
         }
 
-        pub fn copy_rect_to(source: Self, x_src: u32, y_src: u32, width: u32, height: u32, dest: Self, x_dest: u32, y_dest: u32) void {
-            source.copy_rect_to_internal(x_src, y_src, width, height, dest, x_dest, y_dest, false);
+        pub fn copy_rect_to_native(source: Self, x_src: u32, y_src: u32, width: u32, height: u32, dest: Self, x_dest: u32, y_dest: u32) void {
+            source.copy_rect_to_internal_native(x_src, y_src, width, height, dest, x_dest, y_dest, false);
+        }
+        pub fn copy_rect_to_with_origin(source: Self, origin: Origin, x_src: u32, y_src: u32, width: u32, height: u32, dest: Self, x_dest: u32, y_dest: u32, width_dir: XOrder, height_dir: YOrder) void {
+            const xx_src = source.get_x_with_origin_and_width(origin, x_src, width, width_dir);
+            const yy_src = source.get_y_with_origin_and_height(origin, y_src, height, height_dir);
+            const xx_dest = dest.get_x_with_origin_and_width(origin, x_dest, width, width_dir);
+            const yy_dest = dest.get_y_with_origin_and_height(origin, y_dest, height, height_dir);
+            source.copy_rect_to_internal_native(xx_src, yy_src, width, height, dest, xx_dest, yy_dest, false);
         }
 
-        pub fn copy_rect_to_possible_overlap(source: Self, x_src: u32, y_src: u32, width: u32, height: u32, dest: Self, x_dest: u32, y_dest: u32) void {
-            source.copy_rect_to_internal(x_src, y_src, width, height, dest, x_dest, y_dest, true);
+        pub fn copy_rect_to_possible_overlap_native(source: Self, x_src: u32, y_src: u32, width: u32, height: u32, dest: Self, x_dest: u32, y_dest: u32) void {
+            source.copy_rect_to_internal_native(x_src, y_src, width, height, dest, x_dest, y_dest, true);
+        }
+        pub fn copy_rect_to_possible_overlap_with_origin(source: Self, origin: Origin, x_src: u32, y_src: u32, width: u32, height: u32, dest: Self, x_dest: u32, y_dest: u32, width_dir: XOrder, height_dir: YOrder) void {
+            const xx_src = source.get_x_with_origin_and_width(origin, x_src, width, width_dir);
+            const yy_src = source.get_y_with_origin_and_height(origin, y_src, height, height_dir);
+            const xx_dest = dest.get_x_with_origin_and_width(origin, x_dest, width, width_dir);
+            const yy_dest = dest.get_y_with_origin_and_height(origin, y_dest, height, height_dir);
+            source.copy_rect_to_internal_native(xx_src, yy_src, width, height, dest, xx_dest, yy_dest, true);
         }
 
-        pub fn get_region(self: Self, x: u32, y: u32, width: u32, height: u32) Region {
+        pub fn get_region_native(self: Self, x: u32, y: u32, width: u32, height: u32) Self {
             assert_with_reason(x + width <= self.width and y + height <= self.height, @src(), "bottom-right coordinate ({d}, {d}) is outside the bitmap width/height ({d}, {d})", .{ x + width, y + height, self.width, self.height });
-            return Region{
-                .bmp = self,
-                .x = x,
-                .y = y,
+            const idx = self.get_idx_native(x, y);
+            return Self{
+                .pixels = self.pixels + idx,
                 .width = width,
                 .height = height,
+                .major_stride = self.major_stride,
+                .owns_memory = false,
             };
         }
-        // pub fn get_region_change_order(self: Self, x: u32, y: u32, width: u32, height: u32, x_invert: X_Invert, y_invert: Y_Invert) Region {
-        //     assert_with_reason(x + width <= self.width and y + height <= self.height, @src(), "bottom-right coordinate ({d}, {d}) is outside the bitmap width/height ({d}, {d})", .{ x + width, y + height, self.width, self.height });
-        //     return Region{
-        //         .bmp = self,
-        //         .x = x,
-        //         .y = y,
-        //         .width = width,
-        //         .height = height,
-        //         .x_invert = x_invert,
-        //         .y_invert = y_invert,
-        //     };
-        // }
-        pub fn get_region_xy(self: Self, x1: u32, y1: u32, x2: u32, y2: u32) Region {
-            assert_with_reason(x1 <= x2, @src(), "x2 ({d}) is smaller than x1 ({d})", .{ x2, x1 });
-            assert_with_reason(y1 <= y2, @src(), "y2 ({d}) is smaller than y1 ({d})", .{ y2, y1 });
-            assert_with_reason(x2 <= self.width and y2 <= self.height, @src(), "bottom-right coordinate ({d}, {d}) is outside the bitmap width/height ({d}, {d})", .{ x2, y2, self.width, self.height });
-            const width = x2 - x1;
-            const height = y2 - y1;
-            return Region{
-                .bmp = self,
-                .x = x1,
-                .y = y1,
-                .width = width,
-                .height = height,
-            };
+        pub fn get_region_with_origin(self: Self, origin: Origin, x: u32, y: u32, width: u32, width_direction: XOrder, height: u32, height_direction: YOrder) Self {
+            const xx = self.get_x_with_origin_and_width(origin, x, width, width_direction);
+            const yy = self.get_y_with_origin_and_height(origin, y, height, height_direction);
+            return self.get_region_native(xx, yy, width, height);
         }
-        // pub fn get_region_xy_change_order(self: Self, x1: u32, y1: u32, x2: u32, y2: u32, x_invert: X_Invert, y_invert: Y_Invert) Region {
-        //     assert_with_reason(x1 <= x2, @src(), "x2 ({d}) is smaller than x1 ({d})", .{ x2, x1 });
-        //     assert_with_reason(y1 <= y2, @src(), "y2 ({d}) is smaller than y1 ({d})", .{ y2, y1 });
-        //     assert_with_reason(x2 <= self.width and y2 <= self.height, @src(), "bottom-right coordinate ({d}, {d}) is outside the bitmap width/height ({d}, {d})", .{ x2, y2, self.width, self.height });
-        //     const width = x2 - x1;
-        //     const height = y2 - y1;
-        //     return Region{
-        //         .bmp = self,
-        //         .x = x1,
-        //         .y = y1,
-        //         .width = width,
-        //         .height = height,
-        //         .x_invert = x_invert,
-        //         .y_invert = y_invert,
-        //     };
-        // }
-
-        pub const Region = struct {
-            bmp: Self,
-            x: u32,
-            y: u32,
-            width: u32,
-            height: u32,
-            // x_invert: X_Invert = .same_x_order,
-            // y_invert: Y_Invert = .same_y_order,
-
-            pub fn major_stride(self: Region) u32 {
-                return switch (ROW_COLUMN_ORDER) {
-                    .row_major => self.bmp.width,
-                    .column_major => self.bmp.height,
-                };
-            }
-
-            pub fn get_idx(self: Region, x: u32, y: u32) u32 {
-                assert_with_reason(x < self.width and y < self.height, @src(), "coordinate ({d}, {d}) is outside the region width/height ({d}, {d})", .{ x, y, self.width, self.height });
-                // const xx = switch (self.x_invert) {
-                //     .same_x_order => x + self.x,
-                //     .invert_x => self.x + self.width - x,
-                // };
-                // const yy = switch (self.y_invert) {
-                //     .same_y_order => y + self.y,
-                //     .invert_y => self.y + self.height - y,
-                // };
-                return self.bmp.get_idx(x + self.x, y + self.y);
-            }
-            pub fn get_h_scanline(self: Region, x: u32, y: u32, width: u32) []Pixel {
-                const idx = self.get_idx(x, y);
-                return self.bmp.get_h_scanline(idx.x, idx.y, width);
-            }
-            pub fn get_v_scanline(self: Region, x: u32, y: u32, height: u32) []Pixel {
-                const idx = self.get_idx(x, y);
-                return self.bmp.get_v_scanline(idx.x, idx.y, height);
-            }
-
-            pub fn get_pixel(self: Region, x: u32, y: u32) Pixel {
-                const idx = self.get_idx(x, y);
-                return self.bmp.pixels[idx];
-            }
-            pub fn get_pixel_ptr(self: Region, x: u32, y: u32) *Pixel {
-                const idx = self.get_idx(x, y);
-                return &self.bmp.pixels[idx];
-            }
-            pub fn get_pixel_ptr_many(self: Region, x: u32, y: u32) [*]Pixel {
-                const idx = self.get_idx(x, y);
-                return @ptrCast(&self.bmp.pixels[idx]);
-            }
-            pub fn get_pixel_channel(self: Region, x: u32, y: u32, chan: CHANNELS) CHANNEL_UINT {
-                const idx = self.get_idx(x, y);
-                return self.bmp.pixels[idx].raw[@intFromEnum(chan)];
-            }
-            pub fn get_pixel_channel_idx(self: Region, x: u32, y: u32, chan_idx: anytype) CHANNEL_UINT {
-                const idx = self.get_idx(x, y);
-                return self.bmp.pixels[idx].raw[chan_idx];
-            }
-            pub fn set_pixel(self: Region, x: u32, y: u32, val: Pixel) void {
-                const idx = self.get_idx(x, y);
-                self.bmp.pixels[idx] = val;
-            }
-            pub fn set_pixel_channel(self: Region, x: u32, y: u32, chan: CHANNELS, val: CHANNEL_UINT) void {
-                const idx = self.get_idx(x, y);
-                self.bmp.pixels[idx].raw[@intFromEnum(chan)] = val;
-            }
-            pub fn set_pixel_channel_idx(self: Region, x: u32, y: u32, chan_idx: anytype, val: CHANNEL_UINT) void {
-                const idx = self.get_idx(x, y);
-                self.bmp.pixels[idx].raw[chan_idx] = val;
-            }
-
-            pub fn fill_all(self: Region, fill_color: Pixel) void {
-                self.fill_rect(0, 0, self.width, self.height, fill_color);
-            }
-
-            pub fn fill_rect(self: Region, x: u32, y: u32, width: u32, height: u32, fill_color: Pixel) void {
-                assert_with_reason(x + width < self.width and y + height < self.height, @src(), "bottom-right coordinate ({d}, {d}) is outside the region width/height ({d}, {d})", .{ x + width, y + height, self.width, self.height });
-                const x2 = x + width;
-                const y2 = y + height;
-                self.bmp.fill_rect_internal(x + self.x, y + self.y, x2 + self.x, y2 + self.y, width, height, fill_color);
-            }
-            pub fn fill_rect_xy(self: Region, x1: u32, y1: u32, x2: u32, y2: u32, fill_color: Pixel) void {
-                assert_with_reason(x2 < self.width and y2 < self.height, @src(), "bottom-right coordinate ({d}, {d}) is outside the region width/height ({d}, {d})", .{ x2, y2, self.width, self.height });
-                const width = x2 - x1;
-                const height = y2 - y1;
-                self.bmp.fill_rect_internal(x1 + self.x, y1 + self.y, x2 + self.x, y2 + self.y, width, height, fill_color);
-            }
-
-            pub fn copy_rect_to(source: Region, x_src: u32, y_src: u32, width: u32, height: u32, dest: Region, x_dest: u32, y_dest: u32) void {
-                assert_with_reason(x_src + width < source.width and y_src + height < source.height, @src(), "bottom-right source coordinate ({d}, {d}) is outside the source region width/height ({d}, {d})", .{ x_src + width, y_src + height, source.width, source.height });
-                assert_with_reason(x_dest + width < dest.width and y_dest + height < dest.height, @src(), "bottom-right destination coordinate ({d}, {d}) is outside the destination region width/height ({d}, {d})", .{ x_dest + width, y_dest + height, dest.width, dest.height });
-                source.bmp.copy_rect_to_internal(x_src, y_src, width, height, dest, x_dest, y_dest, false);
-            }
-
-            pub fn copy_rect_to_possible_overlap(source: Region, x_src: u32, y_src: u32, width: u32, height: u32, dest: Region, x_dest: u32, y_dest: u32) void {
-                assert_with_reason(x_src + width < source.width and y_src + height < source.height, @src(), "bottom-right source coordinate ({d}, {d}) is outside the source region width/height ({d}, {d})", .{ x_src + width, y_src + height, source.width, source.height });
-                assert_with_reason(x_dest + width < dest.width and y_dest + height < dest.height, @src(), "bottom-right destination coordinate ({d}, {d}) is outside the destination region width/height ({d}, {d})", .{ x_dest + width, y_dest + height, dest.width, dest.height });
-                source.bmp.copy_rect_to_internal(x_src + source.x, y_src + source.y, width, height, dest, x_dest + dest.x, y_dest + dest.y, true);
-            }
-
-            pub fn get_region(self: Region, x: u32, y: u32, width: u32, height: u32) Region {
-                assert_with_reason(x + width <= self.width and y + height <= self.height, @src(), "bottom-right coordinate ({d}, {d}) is outside the region width/height ({d}, {d})", .{ x + width, y + height, self.width, self.height });
-                return Region{
-                    .bmp = self,
-                    .x = self.x + x,
-                    .y = self.y + y,
-                    .width = width,
-                    .height = height,
-                    .x_invert = self.x_invert,
-                    .y_invert = self.y_invert,
-                };
-            }
-            // pub fn get_region_change_order(self: Region, x: u32, y: u32, width: u32, height: u32, x_invert: X_Invert, y_invert: Y_Invert) Region {
-            //     assert_with_reason(x + width <= self.width and y + height <= self.height, @src(), "bottom-right coordinate ({d}, {d}) is outside the region width/height ({d}, {d})", .{ x + width, y + height, self.width, self.height });
-            //     return Region{
-            //         .bmp = self,
-            //         .x = self.x + x,
-            //         .y = self.y + y,
-            //         .width = width,
-            //         .height = height,
-            //         .x_invert = if (x_invert == .invert_x) switch (self.x_invert) {
-            //             .invert_x => .same_x_order,
-            //             .same_x_order => .invert_x,
-            //         } else self.x_invert,
-            //         .y_invert = if (y_invert == .invert_y) switch (self.y_invert) {
-            //             .invert_y => .same_y_order,
-            //             .same_y_order => .invert_y,
-            //         } else self.y_invert,
-            //     };
-            // }
-            pub fn get_region_xy(self: Region, x1: u32, y1: u32, x2: u32, y2: u32) Region {
-                assert_with_reason(x1 <= x2, @src(), "x2 ({d}) is smaller than x1 ({d})", .{ x2, x1 });
-                assert_with_reason(y1 <= y2, @src(), "y2 ({d}) is smaller than y1 ({d})", .{ y2, y1 });
-                assert_with_reason(x2 <= self.width and y2 <= self.height, @src(), "bottom-right coordinate ({d}, {d}) is outside the region width/height ({d}, {d})", .{ x2, y2, self.width, self.height });
-                const width = x2 - x1;
-                const height = y2 - y1;
-                return Region{
-                    .bmp = self,
-                    .x = self.x + x1,
-                    .y = self.y + y1,
-                    .width = width,
-                    .height = height,
-                    .x_invert = self.x_invert,
-                    .y_invert = self.y_invert,
-                };
-            }
-            // pub fn get_region_xy_change_order(self: Region, x1: u32, y1: u32, x2: u32, y2: u32, x_invert: X_Invert, y_invert: Y_Invert) Region {
-            //     assert_with_reason(x1 <= x2, @src(), "x2 ({d}) is smaller than x1 ({d})", .{ x2, x1 });
-            //     assert_with_reason(y1 <= y2, @src(), "y2 ({d}) is smaller than y1 ({d})", .{ y2, y1 });
-            //     assert_with_reason(x2 <= self.width and y2 <= self.height, @src(), "bottom-right coordinate ({d}, {d}) is outside the region width/height ({d}, {d})", .{ x2, y2, self.width, self.height });
-            //     const width = x2 - x1;
-            //     const height = y2 - y1;
-            //     return Region{
-            //         .bmp = self,
-            //         .x = self.x + x1,
-            //         .y = self.y + y1,
-            //         .width = width,
-            //         .height = height,
-            //         .x_invert = if (x_invert == .invert_x) switch (self.x_invert) {
-            //             .invert_x => .same_x_order,
-            //             .same_x_order => .invert_x,
-            //         } else self.x_invert,
-            //         .y_invert = if (y_invert == .invert_y) switch (self.y_invert) {
-            //             .invert_y => .same_y_order,
-            //             .same_y_order => .invert_y,
-            //         } else self.y_invert,
-            //     };
-            // }
-            pub fn get_subpixel_mix4(self: Region, comptime F: type, x: F, y: F) Pixel {
-                assert_with_reason(Types.type_is_float(F), @src(), "type `F` must be a float, got type `{s}`", .{@typeName(F)});
-                var xx = Math.clamp_0_to_max(F, x, @floatFromInt(self.width));
-                var yy = Math.clamp_0_to_max(F, y, @floatFromInt(self.height));
-                xx -= 0.5;
-                yy -= 0.5;
-                const left_i: i32 = @intFromFloat(xx);
-                const bot_i: i32 = @intFromFloat(yy);
-                const right_i: i32 = left_i + 1;
-                const top_i: i32 = bot_i + 1;
-                const weight_left_right: F = xx - @as(F, @floatFromInt(left_i));
-                const weight_top_bottom: F = yy - @as(F, @floatFromInt(bot_i));
-                const left: u32 = @intCast(Math.clamp_0_to_max(i32, left_i, @intCast(self.width - 1)));
-                const right: u32 = @intCast(Math.clamp_0_to_max(i32, right_i, @intCast(self.width - 1)));
-                const top: u32 = @intCast(Math.clamp_0_to_max(i32, top_i, @intCast(self.height - 1)));
-                const bot: u32 = @intCast(Math.clamp_0_to_max(i32, bot_i, @intCast(self.height - 1)));
-                const subpixel = Pixel{};
-                inline for (0..NUM_CHANNELS) |c| {
-                    subpixel.raw[c] = Math.weighted_average(
-                        CHANNEL_UINT,
-                        Math.weighted_average(CHANNEL_UINT, self.get_pixel_channel_idx(left, bot, c), self.get_pixel_channel_idx(right, bot, c), weight_left_right),
-                        Math.weighted_average(CHANNEL_UINT, self.get_pixel_channel_idx(left, top, c), self.get_pixel_channel_idx(right, top, c), weight_left_right),
-                        weight_top_bottom,
-                    );
-                }
-                return subpixel;
-            }
-        };
+        pub fn get_region_xy_native(self: Self, x1: u32, y1: u32, x2: u32, y2: u32) Self {
+            const xx1 = @min(x1, x2);
+            const yy1 = @min(y1, y2);
+            const xx2 = @max(x1, x2);
+            const yy2 = @max(y1, y2);
+            const width = xx2 - xx1;
+            const height = yy2 - yy1;
+            return self.get_region_native(xx1, yy1, width, height);
+        }
+        pub fn get_region_xy_with_origin(self: Self, origin: Origin, x1: u32, y1: u32, x2: u32, y2: u32) Self {
+            const xx1 = @min(x1, x2);
+            const yy1 = @min(y1, y2);
+            const xx2 = @max(x1, x2);
+            const yy2 = @max(y1, y2);
+            const width = xx2 - xx1;
+            const height = yy2 - yy1;
+            const xxx1 = self.get_x_with_origin(origin, x1);
+            const yyy1 = self.get_y_with_origin(origin, y1);
+            return self.get_region_native(xxx1, yyy1, width, height);
+        }
     };
 }

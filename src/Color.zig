@@ -71,11 +71,31 @@ pub fn define_arbitrary_color_type(comptime CHANNEL_TYPE: type, comptime CHANNEL
         const Self = @This();
         raw: [CHANNEL_COUNT]CHANNEL_TYPE = @splat(0),
 
+        pub fn new_vals_in_order(vals: [CHANNEL_COUNT]CHANNEL_TYPE) Self {
+            var out = Self{};
+            inline for (0..CHANNEL_COUNT) |c| {
+                out.raw[c] = vals[c];
+            }
+            return out;
+        }
+
+        pub fn new_same_val_all_channels(val: CHANNEL_TYPE) Self {
+            var out = Self{};
+            inline for (0..CHANNEL_COUNT) |c| {
+                out.raw[c] = val;
+            }
+            return out;
+        }
         pub inline fn get(self: Self, comptime channel: CHANNELS_ENUM) CHANNEL_TYPE {
             return self.raw[@intFromEnum(channel)];
         }
         pub inline fn set(self: *Self, comptime channel: CHANNELS_ENUM, val: CHANNEL_TYPE) void {
             self.raw[@intFromEnum(channel)] = val;
+        }
+        pub inline fn set_all_channels(self: *Self, val: CHANNEL_TYPE) void {
+            inline for (0..CHANNEL_COUNT) |c| {
+                self.raw[c] = val;
+            }
         }
         pub inline fn with_set(self: Self, comptime channel: CHANNELS_ENUM, val: CHANNEL_TYPE) Self {
             var new_self = self;
@@ -104,6 +124,46 @@ pub fn define_arbitrary_color_type(comptime CHANNEL_TYPE: type, comptime CHANNEL
         /// returns `color[chan_b] - color[chan_a]`
         pub fn channel_delta(self: Self, chan_a: CHANNELS_ENUM, chan_b: CHANNELS_ENUM) CHANNEL_TYPE {
             return self.get(chan_b) - self.get(chan_a);
+        }
+        /// Adds each channel to the matching channel of the other color
+        pub fn add(self: Self, other: Self) Self {
+            var out = Self{};
+            inline for (0..CHANNEL_COUNT) |c| {
+                out.raw[c] = self.raw[c] + other.raw[c];
+            }
+            return out;
+        }
+        /// Subtracts each channel by the matching channel of the other color
+        pub fn subtract(self: Self, other: Self) Self {
+            var out = Self{};
+            inline for (0..CHANNEL_COUNT) |c| {
+                out.raw[c] = self.raw[c] + other.raw[c];
+            }
+            return out;
+        }
+        /// Multiplies each channel by the matching channel of the other color
+        pub fn multiply(self: Self, other: Self) Self {
+            var out = Self{};
+            inline for (0..CHANNEL_COUNT) |c| {
+                out.raw[c] = self.raw[c] * other.raw[c];
+            }
+            return out;
+        }
+        /// Divieds each channel by the matching channel of the other color
+        pub fn divide(self: Self, other: Self) Self {
+            var out = Self{};
+            inline for (0..CHANNEL_COUNT) |c| {
+                out.raw[c] = self.raw[c] / other.raw[c];
+            }
+            return out;
+        }
+        /// Negates each channel (only works with CHANNEL_TYPE's that can be negative)
+        pub fn negate(self: Self) Self {
+            var out = Self{};
+            inline for (0..CHANNEL_COUNT) |c| {
+                out.raw[c] = -self.raw[c];
+            }
+            return out;
         }
 
         pub const CHANNEL_COUNT = @typeInfo(CHANNELS_ENUM).@"enum".fields.len;

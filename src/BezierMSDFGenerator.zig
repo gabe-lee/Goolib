@@ -1852,14 +1852,14 @@ pub fn BezierMultiSignedDistanceFieldGenerator(comptime Float: type, comptime ES
         pub const ErrorStencilBitmap = Bitmap(ErrorStencilBitmapDef);
 
         pub const ErrorCorrector = struct {
-            stencil: ErrorStencilBitmap.Region = .{},
+            stencil: ErrorStencilBitmap = .{},
             transform: Transformation = .{},
             /// The minimum ratio between the actual and maximum expected distance delta to be considered an error.
             min_deviation_ratio: Float = DEFAULT_MIN_ERROR_DEVIATION_RATIO,
             /// The minimum ratio between the pre-correction distance error and the post-correction distance error.
             min_improve_ratio: Float = DEFAULT_MIN_ERROR_IMPROVE_RATIO,
 
-            pub fn init(stencil: Bitmap(ErrorStencilBitmapDef).Region, transform: Transformation) ErrorCorrector {
+            pub fn init(stencil: Bitmap(ErrorStencilBitmapDef), transform: Transformation) ErrorCorrector {
                 var self = ErrorCorrector{
                     .stencil = stencil,
                     .transform = transform,
@@ -1879,7 +1879,7 @@ pub fn BezierMultiSignedDistanceFieldGenerator(comptime Float: type, comptime ES
                             const common_color = prev_edge.color.bit_and(this_edge.color).as_flags();
                             // If the color changes from prevEdge to edge, this is a corner.
                             if (common_color.has_one_or_zero_bits_set()) {
-                                // Find the four texels that envelop the corner and mark them as protected.
+                                // Find the four pixels that envelop the corner and mark them as protected.
                                 const p = self.transform.projection.project(this_edge.interp_point(0));
                                 const min_x: i32 = @intFromFloat(p.x - 0.5);
                                 const min_y: i32 = @intFromFloat(p.y - 0.5);
@@ -1893,18 +1893,18 @@ pub fn BezierMultiSignedDistanceFieldGenerator(comptime Float: type, comptime ES
                                 // Protect the corner pixels that are in bounds
                                 if (min_x_in_bounds) {
                                     if (min_y_in_bounds) {
-                                        self.stencil.set_pixel_channel(@intCast(min_x), @intCast(min_y), .flags, ErrorFlags.PROTECTED);
+                                        self.stencil.set_pixel_channel_with_origin(.bot_left, @intCast(min_x), @intCast(min_y), .flags, ErrorFlags.PROTECTED);
                                     }
                                     if (max_y_in_bounds) {
-                                        self.stencil.set_pixel_channel(@intCast(min_x), @intCast(max_y), .flags, ErrorFlags.PROTECTED);
+                                        self.stencil.set_pixel_channel_with_origin(.bot_left, @intCast(min_x), @intCast(max_y), .flags, ErrorFlags.PROTECTED);
                                     }
                                 }
                                 if (max_x_in_bounds) {
                                     if (min_y_in_bounds) {
-                                        self.stencil.set_pixel_channel(@intCast(max_x), @intCast(min_y), .flags, ErrorFlags.PROTECTED);
+                                        self.stencil.set_pixel_channel_with_origin(.bot_left, @intCast(max_x), @intCast(min_y), .flags, ErrorFlags.PROTECTED);
                                     }
                                     if (max_y_in_bounds) {
-                                        self.stencil.set_pixel_channel(@intCast(max_x), @intCast(max_y), .flags, ErrorFlags.PROTECTED);
+                                        self.stencil.set_pixel_channel_with_origin(.bot_left, @intCast(max_x), @intCast(max_y), .flags, ErrorFlags.PROTECTED);
                                     }
                                 }
                             }
@@ -1914,57 +1914,59 @@ pub fn BezierMultiSignedDistanceFieldGenerator(comptime Float: type, comptime ES
                 }
             }
 
-            pub fn protect_edges(self: *ErrorCorrector, comptime NUM_CHANNELS: comptime_int, msdf_region: *FloatBitmap(NUM_CHANNELS).Region) void {
+            pub fn protect_edges(self: *ErrorCorrector, comptime NUM_CHANNELS: comptime_int, msdf_region: *FloatBitmap(NUM_CHANNELS)) void {
                 const BMP = FloatBitmap(NUM_CHANNELS);
+                const edge_util = EdgeMaskFuncs(NUM_CHANNELS);
                 var radius: Float = undefined;
-                // Horizontal texel pairs
+                // Horizontal pixel pairs
                 radius = PROTECTION_RADIUS_TOLERANCE * self.transform.projection.un_project_vec(Vector.new(self.transform.distance_mapping.calc_delta(.new(1)), 0)).length();
                 var y: u32 = 0;
                 var x: u32 = undefined;
                 while (y < msdf_region.height) : (y += 1) {
                     x = 0;
-                    const row_ptr: [*]BMP.Pixel = msdf_region.get_pixel_ptr_many(0, y);
+                    const row_ptr: [*]BMP.Pixel = msdf_region.get_pixel_ptr_many_with_origin(.bot_left, 0, y);
                     while (x < msdf_region.width - 1) : (x += 1) {
                         const left = row_ptr[x];
                         const right = row_ptr[x + 1];
                         const left_median = left.median_of_3_channels(.red, .green, .blue);
                         const right_median = right.median_of_3_channels(.red, .green, .blue);
                         if (@abs(left_median - 0.5) + @abs(right_median - 0.5) < radius) {
-                            const edge_mask = edge_mask_between_texels(BMP, left, right);
-                            const stencil_ptr = self.stencil.get_pixel_ptr_many(x, y);
-                            protect_extreme_channels(BMP, &stencil_ptr[0], left, left_median, edge_mask);
-                            protect_extreme_channels(BMP, &stencil_ptr[1], right, right_median, edge_mask);
+                            const edge_mask = edge_util.edge_mask_between_pixels(left, right);
+                            var stencil_ptr = self.stencil.get_pixel_ptr_with_origin(.bot_left, x, y);
+                            edge_util.protect_extreme_channels(stencil_ptr, left, left_median, edge_mask);
+                            stencil_ptr = self.stencil.move_pixel_ptr_with_origin(.bot_left, 1, 0, stencil_ptr);
+                            edge_util.protect_extreme_channels(stencil_ptr, right, right_median, edge_mask);
                         }
                     }
                 }
-                // Vertical texel pairs
+                // Vertical pixel pairs
                 radius = PROTECTION_RADIUS_TOLERANCE * self.transform.projection.un_project_vec(Vector.new(0, self.transform.distance_mapping.calc_delta(.new(1)))).length();
                 y = 0;
                 while (y < msdf_region.height - 1) : (y += 1) {
                     x = 0;
-                    const top_row_ptr: [*]BMP.Pixel = msdf_region.get_pixel_ptr_many(0, y);
-                    const bot_row_ptr: [*]BMP.Pixel = msdf_region.get_pixel_ptr_many(0, y + 1);
+                    const top_row_ptr: [*]BMP.Pixel = msdf_region.get_pixel_ptr_many_with_origin(.bot_left, 0, y + 1);
+                    const bot_row_ptr: [*]BMP.Pixel = msdf_region.get_pixel_ptr_many_with_origin(.bot_left, 0, y);
                     while (x < msdf_region.width) : (x += 1) {
                         const top = top_row_ptr[x];
                         const bottom = bot_row_ptr[x];
                         const top_median = top.median_of_3_channels(.red, .green, .blue);
                         const bottom_median = bottom.median_of_3_channels(.red, .green, .blue);
                         if (@abs(bottom_median - 0.5) + @abs(top_median - 0.5) < radius) {
-                            const edge_mask = edge_mask_between_texels(BMP, bottom_median, top_median);
-                            var stencil_ptr = self.stencil.get_pixel_ptr_many(x, y);
-                            protect_extreme_channels(BMP, &stencil_ptr[0], top, top_median, edge_mask);
-                            stencil_ptr += self.stencil.major_stride();
-                            protect_extreme_channels(BMP, &stencil_ptr[0], bottom, bottom_median, edge_mask);
+                            const edge_mask = edge_util.edge_mask_between_pixels(bottom_median, top_median);
+                            var stencil_ptr = self.stencil.get_pixel_ptr_with_origin(.bot_left, x, y);
+                            edge_util.protect_extreme_channels(stencil_ptr, bottom, bottom_median, edge_mask);
+                            stencil_ptr = self.stencil.move_pixel_ptr_with_origin(.bot_left, 0, 1, stencil_ptr);
+                            edge_util.protect_extreme_channels(stencil_ptr, top, top_median, edge_mask);
                         }
                     }
                 }
-                // Diagonal texel pairs
+                // Diagonal pixel pairs
                 radius = PROTECTION_RADIUS_TOLERANCE * self.transform.projection.un_project_vec(Vector.new_same_xy(self.transform.distance_mapping.calc_delta(.new(1)))).length();
                 y = 0;
                 while (y < msdf_region.height - 1) : (y += 1) {
                     x = 0;
-                    const top_row_ptr: [*]BMP.Pixel = msdf_region.get_pixel_ptr_many(0, y);
-                    const bot_row_ptr: [*]BMP.Pixel = msdf_region.get_pixel_ptr_many(0, y + 1);
+                    const top_row_ptr: [*]BMP.Pixel = msdf_region.get_pixel_ptr_many_with_origin(.bot_left, 0, y + 1);
+                    const bot_row_ptr: [*]BMP.Pixel = msdf_region.get_pixel_ptr_many_with_origin(.bot_left, 0, y);
                     while (x < msdf_region.width - 1) : (x += 1) {
                         const top_left = top_row_ptr[x];
                         const bottom_left = bot_row_ptr[x];
@@ -1975,62 +1977,153 @@ pub fn BezierMultiSignedDistanceFieldGenerator(comptime Float: type, comptime ES
                         const top_right_median = top_right.median_of_3_channels(.red, .green, .blue);
                         const bottom_right_median = bottom_right.median_of_3_channels(.red, .green, .blue);
                         if (@abs(top_left_median - 0.5) + @abs(bottom_right_median - 0.5) < radius) {
-                            const edge_mask = edge_mask_between_texels(BMP, bottom_right, top_left);
-                            var stencil_ptr = self.stencil.get_pixel_ptr_many(x, y);
-                            protect_extreme_channels(BMP, &stencil_ptr[0], top_left, top_left_median, edge_mask);
-                            stencil_ptr += self.stencil.major_stride() + 1;
-                            protect_extreme_channels(BMP, &stencil_ptr[0], bottom_right, bottom_right_median, edge_mask);
+                            const edge_mask = edge_util.edge_mask_between_pixels(bottom_right, top_left);
+                            var stencil_ptr = self.stencil.get_pixel_ptr_with_origin(.bot_left, x + 1, y);
+                            edge_util.protect_extreme_channels(stencil_ptr, bottom_right, bottom_right_median, edge_mask);
+                            stencil_ptr = self.stencil.move_pixel_ptr_with_origin(.bot_left, -1, 1, stencil_ptr);
+                            edge_util.protect_extreme_channels(stencil_ptr, top_left, top_left_median, edge_mask);
                         }
                         if (@abs(top_right_median - 0.5) + @abs(bottom_left_median - 0.5) < radius) {
-                            const edge_mask = edge_mask_between_texels(BMP, bottom_left, top_right);
-                            var stencil_ptr = self.stencil.get_pixel_ptr_many(x + 1, y);
-                            protect_extreme_channels(BMP, &stencil_ptr[0], top_right, top_right_median, edge_mask);
-                            stencil_ptr += self.stencil.major_stride() - 1;
-                            protect_extreme_channels(BMP, &stencil_ptr[0], bottom_left, bottom_left_median, edge_mask);
+                            const edge_mask = edge_util.edge_mask_between_pixels(bottom_left, top_right);
+                            var stencil_ptr = self.stencil.get_pixel_ptr_with_origin(.bot_left, x, y);
+                            edge_util.protect_extreme_channels(stencil_ptr, bottom_left, bottom_left_median, edge_mask);
+                            stencil_ptr = self.stencil.move_pixel_ptr_with_origin(.bot_left, 1, 1, stencil_ptr);
+                            edge_util.protect_extreme_channels(stencil_ptr, top_right, top_right_median, edge_mask);
+                        }
+                    }
+                }
+            }
+
+            pub fn find_errors_msdf_only(self: *ErrorCorrector, comptime NUM_CHANNELS: comptime_int, msdf_region: FloatBitmap(NUM_CHANNELS), alloc: Allocator) void {
+                // Compute the expected deltas between values of horizontally, vertically, and diagonally adjacent texels.
+                const horizontal_span = self.min_deviation_ratio * self.transform.projection.un_project_vec(.new(self.transform.distance_mapping.calc_delta(.new(1)), 0)).length();
+                const vertical_span = self.min_deviation_ratio * self.transform.projection.un_project_vec(.new(0, self.transform.distance_mapping.calc_delta(.new(1)))).length();
+                const diagonal_span = self.min_deviation_ratio * self.transform.projection.un_project_vec(.new_same_xy(self.transform.distance_mapping.calc_delta(.new(1)))).length();
+                // Inspect all texels.
+                var y: u32 = 0;
+                var x: u32 = undefined;
+                while (y < msdf_region.height) : (y += 1) {
+                    x = 0;
+                    while (x < msdf_region.width) : (x += 1) {
+                        const pixel = msdf_region.get_pixel_native(x, y);
+                        const pixel_median = pixel.median_of_3_channels(.red, .green, .blue);
+                        const stencil_flag_ptr: *ErrorFlags = self.stencil.get_pixel_channel_ptr_native(x, y);
+                        const is_protected = stencil_flag_ptr.has_flag(.PROTECTED);
+                        const horizontal_classifier = BaseArtifactClassifier.new(horizontal_span, is_protected);
+                        const vertical_classifier = BaseArtifactClassifier.new(vertical_span, is_protected);
+                        const diagonal_classifier = BaseArtifactClassifier.new(diagonal_span, is_protected);
+                        const check = ClassifierFuncs(BaseArtifactClassifier, NUM_CHANNELS);
+                        // Mark current pixel with the error flag if an artifact occurs when it's interpolated with any of its 8 neighbors.
+                        stencil_flag_ptr.set_one_bit_if_true(.ERROR,
+                            //
+                            (x > 0 and check.has_linear_artifact(horizontal_classifier, pixel_median, pixel, msdf_region.get_pixel_native(x - 1, y), alloc)) or
+                                (x < msdf_region.width - 1 and check.has_linear_artifact(horizontal_classifier, pixel_median, pixel, msdf_region.get_pixel_native(x + 1, y), alloc)) or
+                                (y > 0 and check.has_linear_artifact(vertical_classifier, pixel_median, pixel, msdf_region.get_pixel_native(x, y - 1), alloc)) or
+                                (y < msdf_region.height - 1 and check.has_linear_artifact(vertical_classifier, pixel_median, pixel, msdf_region.get_pixel_native(x, y + 1), alloc)) or
+                                (x > 0 and y > 0 and check.has_diagonal_artifact(diagonal_classifier, pixel_median, pixel, msdf_region.get_pixel_native(x - 1, y), msdf_region.get_pixel_native(x, y - 1), msdf_region.get_pixel_native(x - 1, y - 1), alloc)) or
+                                (x < msdf_region.width - 1 and y > 0 and check.has_diagonal_artifact(diagonal_classifier, pixel_median, pixel, msdf_region.get_pixel_native(x + 1, y), msdf_region.get_pixel_native(x, y - 1), msdf_region.get_pixel_native(x + 1, y - 1), alloc)) or
+                                (x > 0 and y < msdf_region.height - 1 and check.has_diagonal_artifact(diagonal_classifier, pixel_median, pixel, msdf_region.get_pixel_native(x - 1, y), msdf_region.get_pixel_native(x, y + 1), msdf_region.get_pixel_native(x - 1, y + 1), alloc)) or
+                                (x < msdf_region.width - 1 and y < msdf_region.height - 1 and check.has_diagonal_artifact(diagonal_classifier, pixel_median, pixel, msdf_region.get_pixel_native(x + 1, y), msdf_region.get_pixel_native(x, y + 1), msdf_region.get_pixel_native(x + 1, y + 1), alloc))
+                                //
+                        );
+                    }
+                }
+            }
+
+            pub fn find_errors_msdf_and_shape(self: *ErrorCorrector, comptime CONTOUR_COMBINER_TYPE: type, comptime NUM_CHANNELS: comptime_int, msdf_region: FloatBitmap(NUM_CHANNELS), shape: *Shape, alloc: Allocator) void {
+                // Compute the expected deltas between values of horizontally, vertically, and diagonally adjacent texels.
+                const horizontal_span = self.min_deviation_ratio * self.transform.projection.un_project_vec(.new(self.transform.distance_mapping.calc_delta(.new(1)), 0)).length();
+                const vertical_span = self.min_deviation_ratio * self.transform.projection.un_project_vec(.new(0, self.transform.distance_mapping.calc_delta(.new(1)))).length();
+                const diagonal_span = self.min_deviation_ratio * self.transform.projection.un_project_vec(.new_same_xy(self.transform.distance_mapping.calc_delta(.new(1)))).length();
+                var distance_checker = ShapeDistanceChecker(CONTOUR_COMBINER_TYPE, NUM_CHANNELS).init(msdf_region, shape, self.transform.projection, self.transform.distance_mapping, self.min_improve_ratio, alloc);
+                const check = ClassifierFuncs(ShapeDistanceChecker(CONTOUR_COMBINER_TYPE, NUM_CHANNELS).ArtifactClassifier, NUM_CHANNELS);
+                var reverse_x = false;
+                var y: u32 = 0;
+                var x: u32 = undefined;
+                var step_x: i32 = undefined;
+                var abs_x: u32 = undefined;
+                //TODO: enable some sort of optional multi-threading here?
+                // Inspect all texels.
+                while (y < msdf_region.height) : ({
+                    y += 1;
+                    reverse_x = !reverse_x;
+                }) {
+                    if (reverse_x) {
+                        x = msdf_region.width - 1;
+                        step_x = -1;
+                    } else {
+                        x = 0;
+                        step_x = 1;
+                    }
+                    abs_x = 0;
+                    while (abs_x < msdf_region.width) : ({
+                        abs_x += 1;
+                        x = MathX.upgrade_add_out(x, step_x, u32);
+                    }) {
+                        const stencil_flag_ptr = self.stencil.get_pixel_channel_ptr_native(x, y);
+                        if (stencil_flag_ptr.has_flag(.ERROR)) continue;
+                        const point = Point.new(num_cast(x, f32) + 0.5, num_cast(y, f32) + 0.5);
+                        distance_checker.shape_point = self.transform.projection.un_project(point);
+                        distance_checker.msdf_point = point;
+                        distance_checker.curr_pixel_ptr = msdf_region.get_pixel_ptr_native(@intCast(x), y);
+                        distance_checker.protected = stencil_flag_ptr.has_flag(.PROTECTED);
+                        const pixel = distance_checker.curr_pixel_ptr.*;
+                        const pixel_median = pixel.median_of_3_channels(.red, .green, .blue);
+                        // Mark current pixel with the error flag if an artifact occurs when it's interpolated with any of its 8 neighbors.
+                        stencil_flag_ptr.set_one_bit_if_true(.ERROR,
+                            //
+                            (x > 0 and check.has_linear_artifact(distance_checker.classifier(.new(-1, 0), horizontal_span), pixel_median, pixel, msdf_region.get_pixel_native(x - 1, y), alloc)) or
+                                (x < msdf_region.width - 1 and check.has_linear_artifact(distance_checker.classifier(.new(1, 0), horizontal_span), pixel_median, pixel, msdf_region.get_pixel_native(x + 1, y), alloc)) or
+                                (y > 0 and check.has_linear_artifact(distance_checker.classifier(.new(0, 1), vertical_span), pixel_median, pixel, msdf_region.get_pixel_native(x, y - 1), alloc)) or
+                                (y < msdf_region.height - 1 and check.has_linear_artifact(distance_checker.classifier(.new(0, -1), vertical_span), pixel_median, pixel, msdf_region.get_pixel_native(x, y + 1), alloc)) or
+                                (x > 0 and y > 0 and check.has_diagonal_artifact(distance_checker.classifier(.new(-1, 1), diagonal_span), pixel_median, pixel, msdf_region.get_pixel_native(x - 1, y), msdf_region.get_pixel_native(x, y - 1), msdf_region.get_pixel_native(x - 1, y - 1), alloc)) or
+                                (x < msdf_region.width - 1 and y > 0 and check.has_diagonal_artifact(distance_checker.classifier(.new(1, 1), diagonal_span), pixel_median, pixel, msdf_region.get_pixel_native(x + 1, y), msdf_region.get_pixel_native(x, y - 1), msdf_region.get_pixel_native(x + 1, y - 1), alloc)) or
+                                (x > 0 and y < msdf_region.height - 1 and check.has_diagonal_artifact(distance_checker.classifier(.new(-1, -1), diagonal_span), pixel_median, pixel, msdf_region.get_pixel_native(x - 1, y), msdf_region.get_pixel_native(x, y + 1), msdf_region.get_pixel_native(x - 1, y + 1), alloc)) or
+                                (x < msdf_region.width - 1 and y < msdf_region.height - 1 and check.has_diagonal_artifact(distance_checker.classifier(.new(1, -1), diagonal_span), pixel_median, pixel, msdf_region.get_pixel_native(x + 1, y), msdf_region.get_pixel_native(x, y + 1), msdf_region.get_pixel_native(x + 1, y + 1), alloc))
+                                //
+                        );
+                    }
+                }
+            }
+
+            pub fn apply_error_correction(self: *ErrorCorrector, comptime NUM_CHANNELS: comptime_int, msdf_region: FloatBitmap(NUM_CHANNELS)) void {
+                var y: u32 = 0;
+                var x: u32 = undefined;
+                var pixel_row: []FloatBitmap(NUM_CHANNELS).Pixel = undefined;
+                var stencil_row: []ErrorStencilBitmap.Pixel = undefined;
+                while (y < msdf_region.height) : (y += 1) {
+                    x = 0;
+                    pixel_row = msdf_region.get_h_scanline_native(0, y, msdf_region.width);
+                    stencil_row = self.stencil.get_h_scanline_native(0, y, msdf_region.width);
+                    while (x < msdf_region.width) : (x += 1) {
+                        const error_check = stencil_row.ptr[x].get(.flags);
+                        if (error_check.has_flag(.ERROR)) {
+                            // Set all color channels to the median.
+                            const pixel_ptr: *FloatBitmap(NUM_CHANNELS).Pixel = &pixel_row.ptr[x];
+                            const median = pixel_ptr.median_of_3_channels(.red, .green, .blue);
+                            pixel_ptr.set(.red, median);
+                            pixel_ptr.set(.green, median);
+                            pixel_ptr.set(.blue, median);
                         }
                     }
                 }
             }
         };
 
-        /// Determines if the channel contributes to an edge between the two texels a, b.
-        pub fn edge_is_between_texels_by_channel(comptime BITMAP_TYPE: type, texel_a: BITMAP_TYPE.Pixel, texel_b: BITMAP_TYPE.Pixel, channel: BITMAP_TYPE.CHANNELS) bool {
-            // Find interpolation ratio t (0 < t < 1) where an edge is expected (mix(a[channel], b[channel], t) == 0.5).
-            const t = (texel_a.get(channel) - 0.5) / (texel_a.get(channel) - texel_b.get(channel));
-            if (t > 0 and t < 1) {
-                // Interpolate all channel values at t.
-                const mixed_texel = texel_a.lerp(texel_b);
-                // This is only an edge if the zero-distance channel is the median.
-                return MathX.median_of_3(f32, mixed_texel.get(.red), mixed_texel.get(.green), mixed_texel.get(.blue)) == mixed_texel.get(channel);
-            }
-            return false;
-        }
-
-        pub fn edge_mask_between_texels(comptime BITMAP_TYPE: type, texel_a: BITMAP_TYPE.Pixel, texel_b: BITMAP_TYPE.Pixel) EdgeColor {
-            var flags = EdgeColor.black.as_flags();
-            flags.set_one_bit_if_true(.red, edge_is_between_texels_by_channel(BITMAP_TYPE, texel_a, texel_b, .red));
-            flags.set_one_bit_if_true(.green, edge_is_between_texels_by_channel(BITMAP_TYPE, texel_a, texel_b, .green));
-            flags.set_one_bit_if_true(.blue, edge_is_between_texels_by_channel(BITMAP_TYPE, texel_a, texel_b, .blue));
-            return EdgeColor.from_flags(flags);
-        }
-
-        /// Marks texel as protected if one of its non-median channels is present in the channel mask.
-        pub fn protect_extreme_channels(comptime BITMAP_TYPE: type, stencil_pixel: *ErrorStencilBitmap.Pixel, bitmap_pixel: BITMAP_TYPE.Pixel, median_channel_val: f32, edge_mask: EdgeColor) void {
-            if ((edge_mask.has_channel(.red) and bitmap_pixel.get(.red) != median_channel_val) or
-                (edge_mask.has_channel(.green) and bitmap_pixel.get(.green) != median_channel_val) or
-                (edge_mask.has_channel(.blue) and bitmap_pixel.get(.blue) != median_channel_val))
-            {
-                stencil_pixel.set(.flags, ErrorFlags.PROTECTED);
-            }
-        }
-
         pub const BaseArtifactClassifier = struct {
             span: Float,
             protected: bool,
 
+            pub fn new(span: Float, is_protected: bool) BaseArtifactClassifier {
+                return BaseArtifactClassifier{
+                    .span = span,
+                    .protected = is_protected,
+                };
+            }
+
             /// Evaluates if the median value xm interpolated at xt in the range between am at at and bm at bt indicates an artifact.
             pub fn range_test(self: BaseArtifactClassifier, at: Float, bt: Float, xt: Float, am: Float, bm: Float, xm: Float) ArtifactFlags {
-                // For protected texels, only consider inversion artifacts (interpolated median has different sign than boundaries). For the rest, it is sufficient that the interpolated median is outside its boundaries.
+                // For protected pixels, only consider inversion artifacts (interpolated median has different sign than boundaries). For the rest, it is sufficient that the interpolated median is outside its boundaries.
                 if ((am > 0.5 and bm > 0.5 and xm <= 0.5) or (am < 0.5 and bm < 0.5 and xm >= 0.5) or (!self.protected and MathX.median_of_3(Float, am, bm, xm) != xm)) {
                     const ax_span = (xt - at) * self.span;
                     const bx_span = (bt - xt) * self.span;
@@ -2083,9 +2176,9 @@ pub fn BezierMultiSignedDistanceFieldGenerator(comptime Float: type, comptime ES
                 curr_pixel_ptr: *BMP.Pixel = undefined,
                 protected: bool = false,
                 distance_finder: ShapeDistanceFinder(CONTOUR_COMBINER) = undefined,
-                msdf_bitmap: *BMP.Region = undefined,
+                msdf_bitmap: *BMP = undefined,
                 distance_mapping: DistanceMapping,
-                texel_size: Vector = .ONE_ONE,
+                pixel_size: Vector = .ONE_ONE,
                 min_improve_ratio: Float = DEFAULT_MIN_ERROR_IMPROVE_RATIO,
 
                 pub fn init(msdf_bitmap: *BMP, shape: *Shape, projection: Projection, dist_mapping: DistanceMapping, min_improve_ratio: Float, alloc: Allocator) Self {
@@ -2094,7 +2187,7 @@ pub fn BezierMultiSignedDistanceFieldGenerator(comptime Float: type, comptime ES
                         .msdf_bitmap = msdf_bitmap,
                         .distance_mapping = dist_mapping,
                         .min_improve_ratio = min_improve_ratio,
-                        .texel_size = projection.un_project_vec(.ONE_ONE),
+                        .pixel_size = projection.un_project_vec(.ONE_ONE),
                     };
                 }
 
@@ -2115,7 +2208,7 @@ pub fn BezierMultiSignedDistanceFieldGenerator(comptime Float: type, comptime ES
                     direction: Vector,
 
                     /// Returns true if the combined results of the tests performed on the median value m interpolated at t indicate an artifact.
-                    pub fn is_artifact(self: *ArtifactClassifier, t: Float, _: Float, flags: ArtifactFlags, alloc: Allocator) bool {
+                    pub fn is_artifact(self: ArtifactClassifier, t: Float, _: Float, flags: ArtifactFlags, alloc: Allocator) bool {
                         if (flags.has_flag(.candidate)) {
                             if (flags.has_flag(.artifact)) return true;
                             const t_vector = self.direction.scale(t);
@@ -2127,7 +2220,7 @@ pub fn BezierMultiSignedDistanceFieldGenerator(comptime Float: type, comptime ES
                             if (NUM_CHANNELS == 4) {
                                 new_pixel.set(.alpha, old_pixel.get(.alpha));
                             }
-                            // Compute the color that would be interpolated at the artifact candidate's position if error correction was applied on the current texel.
+                            // Compute the color that would be interpolated at the artifact candidate's position if error correction was applied on the current pixel.
                             const a_weight = (1 - @abs(t_vector.x)) * (1 - @abs(t_vector.y));
                             const a_psd = MathX.median_of_3(f32, self.parent.curr_pixel_ptr.get(.red), self.parent.curr_pixel_ptr.get(.green), self.parent.curr_pixel_ptr.get(.blue));
                             new_pixel.set(.red, old_pixel.get(.red) + (a_weight * (a_psd - self.parent.curr_pixel_ptr.get(.red))));
@@ -2136,42 +2229,188 @@ pub fn BezierMultiSignedDistanceFieldGenerator(comptime Float: type, comptime ES
                             // Compute the evaluated distance (interpolated median) before and after error correction, as well as the exact shape distance.
                             const old_psd = MathX.median_of_3(f32, old_pixel.get(.red), old_pixel.get(.green), old_pixel.get(.blue));
                             const new_psd = MathX.median_of_3(f32, new_pixel.get(.red), new_pixel.get(.green), new_pixel.get(.blue));
-                            const ref_psd = self.parent.distance_mapping.calc(self.parent.distance_finder.distance(self.parent.shape_point.add_scale(t_vector, self.parent.texel_size), alloc));
+                            const ref_psd = self.parent.distance_mapping.calc(self.parent.distance_finder.distance(self.parent.shape_point.add_scale(t_vector, self.parent.pixel_size), alloc));
                             // Compare the differences of the exact distance and the before and after distances.
                             return self.parent.min_improve_ratio * @abs(new_psd - ref_psd) < @abs(old_psd - ref_psd);
                         }
                         return false;
                     }
 
-                    pub fn has_linear_artifact_on_channel_pair(self: ArtifactClassifier, a_median: f32, b_median: f32, texel_a: BMP.Pixel, texel_b: BMP.Pixel, delta_a: f32, delta_b: f32, alloc: Allocator) bool {
-                        // Find interpolation ratio t (0 < t < 1) where two color channels are equal (mix(dA, dB, t) == 0).
-                        const percent = delta_a / (delta_a - delta_b);
-                        if (percent > ARTIFACT_T_EPSILON and percent < 1 - ARTIFACT_T_EPSILON) {
-                            // Interpolate median at t and let the classifier decide if its value indicates an artifact.
-                            const interp_median = texel_a.lerp(texel_b, percent);
-                            return self.is_artifact(percent, interp_median, self.base.range_test(0, 1, percent, a_median, b_median, interp_median), alloc);
-                        }
-                        return false;
+                    pub fn range_test(self: ArtifactClassifier, at: Float, bt: Float, xt: Float, am: Float, bm: Float, xm: Float) ArtifactFlags {
+                        return self.base.range_test(at, bt, xt, am, bm, xm);
                     }
-                    pub fn has_linear_artifact(self: ArtifactClassifier, a_median: f32, texel_a: BMP.Pixel, texel_b: BMP.Pixel, alloc: Allocator) bool {
-                        const b_median = texel_b.median_of_3_channels(.red, .green, .blue);
-                        return (
-                            // Out of the pair, only report artifacts for the texel further from the edge to minimize side effects.
-                            @abs(a_median - 0.5) >= @abs(b_median) and
-                                ( // Check points where each pair of color channels meets.
-                                    self.has_linear_artifact_on_channel_pair(a_median, b_median, texel_a, texel_b, texel_a.channel_delta(.red, .green), texel_b.channel_delta(.red, .green), alloc) or
-                                        self.has_linear_artifact_on_channel_pair(a_median, b_median, texel_a, texel_b, texel_a.channel_delta(.green, .blue), texel_b.channel_delta(.green, .blue), alloc) or
-                                        self.has_linear_artifact_on_channel_pair(a_median, b_median, texel_a, texel_b, texel_a.channel_delta(.blue, .red), texel_b.channel_delta(.blue, .red), alloc)
-                                        //
-                                )
+                };
+            };
+        }
+
+        pub fn EdgeMaskFuncs(comptime NUM_CHANNELS: comptime_int) type {
+            const BMP = FloatBitmap(NUM_CHANNELS);
+            return struct {
+                /// Determines if the channel contributes to an edge between the two pixels a, b.
+                pub fn edge_is_between_pixels_by_channel(pixel_a: BMP.Pixel, pixel_b: BMP.Pixel, channel: BMP.CHANNELS) bool {
+                    // Find interpolation ratio t (0 < t < 1) where an edge is expected (mix(a[channel], b[channel], t) == 0.5).
+                    const t = (pixel_a.get(channel) - 0.5) / (pixel_a.get(channel) - pixel_b.get(channel));
+                    if (t > 0 and t < 1) {
+                        // Interpolate all channel values at t.
+                        const mixed_pixel = pixel_a.lerp(pixel_b);
+                        // This is only an edge if the zero-distance channel is the median.
+                        return MathX.median_of_3(f32, mixed_pixel.get(.red), mixed_pixel.get(.green), mixed_pixel.get(.blue)) == mixed_pixel.get(channel);
+                    }
+                    return false;
+                }
+
+                pub fn edge_mask_between_pixels(pixel_a: BMP.Pixel, pixel_b: BMP.Pixel) EdgeColor {
+                    var flags = EdgeColor.black.as_flags();
+                    flags.set_one_bit_if_true(.red, edge_is_between_pixels_by_channel(pixel_a, pixel_b, .red));
+                    flags.set_one_bit_if_true(.green, edge_is_between_pixels_by_channel(pixel_a, pixel_b, .green));
+                    flags.set_one_bit_if_true(.blue, edge_is_between_pixels_by_channel(pixel_a, pixel_b, .blue));
+                    return EdgeColor.from_flags(flags);
+                }
+
+                /// Marks pixel as protected if one of its non-median channels is present in the channel mask.
+                pub fn protect_extreme_channels(stencil_pixel: *ErrorStencilBitmap.Pixel, bitmap_pixel: BMP.Pixel, median_channel_val: f32, edge_mask: EdgeColor) void {
+                    if ((edge_mask.has_channel(.red) and bitmap_pixel.get(.red) != median_channel_val) or
+                        (edge_mask.has_channel(.green) and bitmap_pixel.get(.green) != median_channel_val) or
+                        (edge_mask.has_channel(.blue) and bitmap_pixel.get(.blue) != median_channel_val))
+                    {
+                        stencil_pixel.set(.flags, ErrorFlags.PROTECTED);
+                    }
+                }
+            };
+        }
+
+        pub fn ClassifierFuncs(comptime CLASSIFIER_TYPE: type, comptime BMP_NUM_CHANNELS: comptime_int) type {
+            const BMP = FloatBitmap(BMP_NUM_CHANNELS);
+            return struct {
+                /// Determines if the channel contributes to an edge between the two pixels a, b.
+                pub fn edge_is_between_pixels_by_channel(comptime BITMAP_TYPE: type, pixel_a: BITMAP_TYPE.Pixel, pixel_b: BITMAP_TYPE.Pixel, channel: BITMAP_TYPE.CHANNELS) bool {
+                    // Find interpolation ratio t (0 < t < 1) where an edge is expected (mix(a[channel], b[channel], t) == 0.5).
+                    const t = (pixel_a.get(channel) - 0.5) / (pixel_a.get(channel) - pixel_b.get(channel));
+                    if (t > 0 and t < 1) {
+                        // Interpolate all channel values at t.
+                        const mixed_pixel = pixel_a.lerp(pixel_b);
+                        // This is only an edge if the zero-distance channel is the median.
+                        return MathX.median_of_3(f32, mixed_pixel.get(.red), mixed_pixel.get(.green), mixed_pixel.get(.blue)) == mixed_pixel.get(channel);
+                    }
+                    return false;
+                }
+
+                pub fn edge_mask_between_pixels(comptime BITMAP_TYPE: type, pixel_a: BITMAP_TYPE.Pixel, pixel_b: BITMAP_TYPE.Pixel) EdgeColor {
+                    var flags = EdgeColor.black.as_flags();
+                    flags.set_one_bit_if_true(.red, edge_is_between_pixels_by_channel(BITMAP_TYPE, pixel_a, pixel_b, .red));
+                    flags.set_one_bit_if_true(.green, edge_is_between_pixels_by_channel(BITMAP_TYPE, pixel_a, pixel_b, .green));
+                    flags.set_one_bit_if_true(.blue, edge_is_between_pixels_by_channel(BITMAP_TYPE, pixel_a, pixel_b, .blue));
+                    return EdgeColor.from_flags(flags);
+                }
+
+                /// Marks pixel as protected if one of its non-median channels is present in the channel mask.
+                pub fn protect_extreme_channels(comptime BITMAP_TYPE: type, stencil_pixel: *ErrorStencilBitmap.Pixel, bitmap_pixel: BITMAP_TYPE.Pixel, median_channel_val: f32, edge_mask: EdgeColor) void {
+                    if ((edge_mask.has_channel(.red) and bitmap_pixel.get(.red) != median_channel_val) or
+                        (edge_mask.has_channel(.green) and bitmap_pixel.get(.green) != median_channel_val) or
+                        (edge_mask.has_channel(.blue) and bitmap_pixel.get(.blue) != median_channel_val))
+                    {
+                        stencil_pixel.set(.flags, ErrorFlags.PROTECTED);
+                    }
+                }
+                pub fn has_linear_artifact_on_channel_pair(classifier: CLASSIFIER_TYPE, a_median: f32, b_median: f32, pixel_a: BMP.Pixel, pixel_b: BMP.Pixel, delta_a: f32, delta_b: f32, alloc: Allocator) bool {
+                    // Find interpolation ratio t (0 < t < 1) where two color channels are equal (mix(dA, dB, t) == 0).
+                    const percent = delta_a / (delta_a - delta_b);
+                    if (percent > ARTIFACT_T_EPSILON and percent < 1 - ARTIFACT_T_EPSILON) {
+                        // Interpolate median at t and let the classifier decide if its value indicates an artifact.
+                        const interp_median = pixel_a.lerp(pixel_b, percent);
+                        return classifier.is_artifact(percent, interp_median, classifier.range_test(0, 1, percent, a_median, b_median, interp_median), alloc);
+                    }
+                    return false;
+                }
+                pub fn has_linear_artifact(classifier: CLASSIFIER_TYPE, a_median: f32, pixel_a: BMP.Pixel, pixel_b: BMP.Pixel, alloc: Allocator) bool {
+                    const b_median = pixel_b.median_of_3_channels(.red, .green, .blue);
+                    return (
+                        // Out of the pair, only report artifacts for the pixel further from the edge to minimize side effects.
+                        @abs(a_median - 0.5) >= @abs(b_median) and
+                            ( // Check points where each pair of color channels meets.
+                                has_linear_artifact_on_channel_pair(classifier, a_median, b_median, pixel_a, pixel_b, pixel_a.channel_delta(.red, .green), pixel_b.channel_delta(.red, .green), alloc) or
+                                    has_linear_artifact_on_channel_pair(classifier, a_median, b_median, pixel_a, pixel_b, pixel_a.channel_delta(.green, .blue), pixel_b.channel_delta(.green, .blue), alloc) or
+                                    has_linear_artifact_on_channel_pair(classifier, a_median, b_median, pixel_a, pixel_b, pixel_a.channel_delta(.blue, .red), pixel_b.channel_delta(.blue, .red), alloc)
+                                    //
+                            )
+                            //
+                    );
+                }
+                pub fn has_diagonal_artifact_on_channel_pair(classifier: CLASSIFIER_TYPE, a_median: Float, d_median: Float, pixel_a: BMP.Pixel, pixel_a_linear_coeff: BMP.Pixel, pixel_a_quadratic_coeff: BMP.Pixel, delta_A: Float, delta_BC: Float, delta_D: Float, t_extreme_0: Float, t_extreme_1: Float, alloc: Allocator) bool {
+                    // Find interpolation ratios t (0 < t[i] < 1) where two color channels are equal.
+                    const solutions = MathX.solve_quadratic_polynomial_for_zeros(delta_D - delta_BC + delta_A, delta_BC - delta_A - delta_A, delta_A);
+                    var i: u32 = 0;
+                    while (i < solutions.count) : (i += 1) {
+                        // Solutions ts[i] == 0 and ts[i] == 1 are singularities and occur very often because two channels are usually equal at pixels.
+                        if (solutions.vals[i] > ARTIFACT_T_EPSILON and solutions.vals[i] < 1 - ARTIFACT_T_EPSILON) {
+                            // Interpolate median at t.
+                            const interp_median = pixel_a.bilinear_interp_from_terms(pixel_a_linear_coeff, pixel_a_quadratic_coeff, solutions.vals[i]);
+                            // Determine if interp_median deviates too much from medians of a, d.
+                            const artifact_flags = classifier.range_test(0, 1, solutions.vals[i], a_median, d_median, interp_median);
+                            // Additionally, check interp_median against the interpolated medians at the local extremes.
+                            var t_end: [2]Float = undefined;
+                            var extreme_medians: [2]Float = undefined;
+                            // Test t_extreme_0
+                            if (t_extreme_0 > 0 and t_extreme_0 < 1) {
+                                t_end[0] = 0;
+                                t_end[1] = 1;
+                                extreme_medians[0] = a_median;
+                                extreme_medians[1] = d_median;
+                                const t_end_idx = num_cast(t_extreme_0 > solutions.vals[i], u8);
+                                t_end[t_end_idx] = t_extreme_0;
+                                extreme_medians[t_end_idx] = pixel_a.bilinear_interp_from_terms(pixel_a_linear_coeff, pixel_a_quadratic_coeff, t_extreme_0);
+                                artifact_flags.combine_with(classifier.range_test(t_end[0], t_end[1], solutions.vals[i], extreme_medians[0], extreme_medians[1], interp_median));
+                            }
+                            // Test t_extreme_1
+                            if (t_extreme_1 > 0 and t_extreme_1 < 1) {
+                                t_end[0] = 0;
+                                t_end[1] = 1;
+                                extreme_medians[0] = a_median;
+                                extreme_medians[1] = d_median;
+                                const t_end_idx = num_cast(t_extreme_1 > solutions.vals[i], u8);
+                                t_end[t_end_idx] = t_extreme_1;
+                                extreme_medians[t_end_idx] = pixel_a.bilinear_interp_from_terms(pixel_a_linear_coeff, pixel_a_quadratic_coeff, t_extreme_1);
+                                artifact_flags.combine_with(classifier.range_test(t_end[0], t_end[1], solutions.vals[i], extreme_medians[0], extreme_medians[1], interp_median));
+                            }
+                            if (classifier.is_artifact(solutions.vals[i], interp_median, artifact_flags, alloc)) {
+                                return true;
+                            }
+                        }
+                    }
+                    return false;
+                }
+                pub fn has_diagonal_artifact(classifier: CLASSIFIER_TYPE, a_median: Float, pixel_a: BMP.Pixel, pixel_b: BMP.Pixel, pixel_c: BMP.Pixel, pixel_d: BMP.Pixel, alloc: Allocator) bool {
+                    const d_median = pixel_d.median_of_3_channels(.red, .green, .blue);
+                    // Out of the pair, only report artifacts for the texel further from the edge to minimize side effects.
+                    if (@abs(a_median - 0.5) >= @abs(d_median - 0.5)) {
+                        const sub_abc = pixel_a.subtract(pixel_b).subtract(pixel_c);
+                        // Compute the linear terms for bilinear interpolation.
+                        const linear = pixel_a.negate().subtract(sub_abc);
+                        // Compute the quadratic terms for bilinear interpolation.
+                        const quadratic = pixel_d.add(sub_abc);
+                        // Compute interpolation ratio extremes (0 < extremes[i] < 1) for the local extremes of each color channel (the derivative 2*quadratic[i]*extremes[i]+linear[i] == 0).
+                        const extremes = BMP.Pixel.new_same_val_all_channels(-0.5).multiply(linear).divide(quadratic);
+                        const a_delta_red_grn = pixel_a.channel_delta(.red, .green);
+                        const b_delta_red_grn = pixel_b.channel_delta(.red, .green);
+                        const c_delta_red_grn = pixel_c.channel_delta(.red, .green);
+                        const d_delta_red_grn = pixel_d.channel_delta(.red, .green);
+                        const a_delta_grn_blu = pixel_a.channel_delta(.green, .blue);
+                        const b_delta_grn_blu = pixel_b.channel_delta(.green, .blue);
+                        const c_delta_grn_blu = pixel_c.channel_delta(.green, .blue);
+                        const d_delta_grn_blu = pixel_d.channel_delta(.green, .blue);
+                        const a_delta_blu_red = pixel_a.channel_delta(.blue, .red);
+                        const b_delta_blu_red = pixel_b.channel_delta(.blue, .red);
+                        const c_delta_blu_red = pixel_c.channel_delta(.blue, .red);
+                        const d_delta_blu_red = pixel_d.channel_delta(.blue, .red);
+                        return ( // Check points where each pair of color channels meets.
+                            has_diagonal_artifact_on_channel_pair(classifier, a_median, d_median, pixel_a, linear, quadratic, a_delta_red_grn, b_delta_red_grn + c_delta_red_grn, d_delta_red_grn, extremes.get(.red), extremes.get(.green), alloc) or
+                                has_diagonal_artifact_on_channel_pair(classifier, a_median, d_median, pixel_a, linear, quadratic, a_delta_grn_blu, b_delta_grn_blu + c_delta_grn_blu, d_delta_grn_blu, extremes.get(.green), extremes.get(.blue), alloc) or
+                                has_diagonal_artifact_on_channel_pair(classifier, a_median, d_median, pixel_a, linear, quadratic, a_delta_blu_red, b_delta_blu_red + c_delta_blu_red, d_delta_blu_red, extremes.get(.blue), extremes.get(.red), alloc)
                                 //
                         );
                     }
-                    pub fn has_diagonal_artifact_on_channel_pair(self: ArtifactClassifier, a_median: f32, b_median: f32, texel_a: BMP.Pixel, texel_b: BMP.Pixel, delta_a: f32, delta_b: f32, alloc: Allocator) bool {
-                        //CHECKPOINT
-                    }
-                    pub fn has_diagonal_artifact(self: ArtifactClassifier, a_median: f32, texel_a: BMP.Pixel, texel_b: BMP.Pixel, alloc: Allocator) bool {}
-                };
+                    return false;
+                }
             };
         }
 
@@ -2256,10 +2495,10 @@ pub const YAxisOrientation = enum {
     Y_DOWNWARD,
 };
 
-pub const ErrorFlags = enum(u8) {
+pub const ErrorFlags = Flags.Flags(enum(u8) {
     NONE = 0,
-    /// Texel marked as potentially causing interpolation errors.
+    /// pixel marked as potentially causing interpolation errors.
     ERROR = 1,
-    /// Texel marked as protected. Protected texels are only given the error flag if they cause inversion artifacts.
+    /// pixel marked as protected. Protected pixels are only given the error flag if they cause inversion artifacts.
     PROTECTED = 2,
-};
+}, enum(u8) {});
