@@ -202,6 +202,10 @@ pub fn Bitmap(comptime DEFINITION: BitmapDefinition) type {
             alloc.free(self.pixels[0..total]);
         }
 
+        pub inline fn pixel_count(self: Self) u32 {
+            return self.width * self.height;
+        }
+
         pub inline fn get_x_with_origin(self: Self, origin: Origin, x: u32) u32 {
             return switch (origin) {
                 .bot_left, .top_left => if (X_ORDER == .left_to_right) x else (self.width - 1 - x),

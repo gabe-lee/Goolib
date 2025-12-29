@@ -29,6 +29,7 @@ const Assert = Root.Assert;
 const MathX = Root.Math;
 
 const assert_with_reason = Assert.assert_with_reason;
+const num_cast = Root.Cast.num_cast;
 
 /// The order of color channels in packed color types
 /// - MSB -> LSB
@@ -103,6 +104,29 @@ pub fn define_arbitrary_color_type(comptime CHANNEL_TYPE: type, comptime CHANNEL
             return new_self;
         }
 
+        pub fn cast_to(self: Self, comptime NEW_CHANNEL_TYPE: type) define_arbitrary_color_type(NEW_CHANNEL_TYPE, CHANNELS_ENUM) {
+            var out: define_arbitrary_color_type(NEW_CHANNEL_TYPE, CHANNELS_ENUM) = undefined;
+            inline for (0..CHANNEL_COUNT) |c| {
+                out.raw[c] = num_cast(self.raw[c], NEW_CHANNEL_TYPE);
+            }
+            return out;
+        }
+        pub fn cast_normalized_to(self: Self, comptime NEW_CHANNEL_TYPE: type) define_arbitrary_color_type(NEW_CHANNEL_TYPE, CHANNELS_ENUM) {
+            var out: define_arbitrary_color_type(NEW_CHANNEL_TYPE, CHANNELS_ENUM) = undefined;
+            inline for (0..CHANNEL_COUNT) |c| {
+                if (Types.type_is_float(NEW_CHANNEL_TYPE) and Types.type_is_int(CHANNEL_TYPE)) {
+                    out.raw[c] = MathX.int_to_normalized_float(self.raw[c], NEW_CHANNEL_TYPE);
+                } else if (Types.type_is_int(NEW_CHANNEL_TYPE) and Types.type_is_float(CHANNEL_TYPE)) {
+                    out.raw[c] = MathX.normalized_float_to_int(self.raw[c], NEW_CHANNEL_TYPE);
+                } else if (Types.type_is_int(NEW_CHANNEL_TYPE) and Types.type_is_int(CHANNEL_TYPE) and NEW_CHANNEL_TYPE != CHANNEL_TYPE) {
+                    out.raw[c] = MathX.normalized_float_to_int(MathX.int_to_normalized_float(self.raw[c], f64), NEW_CHANNEL_TYPE);
+                } else {
+                    out.raw[c] = num_cast(self.raw[c], NEW_CHANNEL_TYPE);
+                }
+            }
+            return out;
+        }
+
         /// Linear interpolation on each channel
         pub fn lerp(self: Self, other: Self, percent: anytype) Self {
             var out = Self{};
@@ -133,11 +157,35 @@ pub fn define_arbitrary_color_type(comptime CHANNEL_TYPE: type, comptime CHANNEL
             }
             return out;
         }
+        /// Adds value to each channel
+        pub fn add_scalar(self: Self, val: CHANNEL_TYPE) Self {
+            var out = Self{};
+            inline for (0..CHANNEL_COUNT) |c| {
+                out.raw[c] = self.raw[c] + val;
+            }
+            return out;
+        }
         /// Subtracts each channel by the matching channel of the other color
         pub fn subtract(self: Self, other: Self) Self {
             var out = Self{};
             inline for (0..CHANNEL_COUNT) |c| {
                 out.raw[c] = self.raw[c] + other.raw[c];
+            }
+            return out;
+        }
+        /// Subtracts value from each channel (chan = chan - val)
+        pub fn subtract_scalar(self: Self, val: CHANNEL_TYPE) Self {
+            var out = Self{};
+            inline for (0..CHANNEL_COUNT) |c| {
+                out.raw[c] = self.raw[c] - val;
+            }
+            return out;
+        }
+        /// Subtract channel value from scalar value (chan = val - chan)
+        pub fn subtract_from_scalar(self: Self, val: CHANNEL_TYPE) Self {
+            var out = Self{};
+            inline for (0..CHANNEL_COUNT) |c| {
+                out.raw[c] = val - self.raw[c];
             }
             return out;
         }
@@ -149,11 +197,35 @@ pub fn define_arbitrary_color_type(comptime CHANNEL_TYPE: type, comptime CHANNEL
             }
             return out;
         }
+        /// Multiplies each channel by value
+        pub fn multiply_scalar(self: Self, val: CHANNEL_TYPE) Self {
+            var out = Self{};
+            inline for (0..CHANNEL_COUNT) |c| {
+                out.raw[c] = self.raw[c] * val;
+            }
+            return out;
+        }
         /// Divieds each channel by the matching channel of the other color
         pub fn divide(self: Self, other: Self) Self {
             var out = Self{};
             inline for (0..CHANNEL_COUNT) |c| {
                 out.raw[c] = self.raw[c] / other.raw[c];
+            }
+            return out;
+        }
+        /// Divides each channel by value (chan = chan / val)
+        pub fn divide_scalar(self: Self, val: CHANNEL_TYPE) Self {
+            var out = Self{};
+            inline for (0..CHANNEL_COUNT) |c| {
+                out.raw[c] = self.raw[c] / val;
+            }
+            return out;
+        }
+        /// Divides value by each channel (chan = val / chan)
+        pub fn divide_scalar_inverse(self: Self, val: CHANNEL_TYPE) Self {
+            var out = Self{};
+            inline for (0..CHANNEL_COUNT) |c| {
+                out.raw[c] = val / self.raw[c];
             }
             return out;
         }
@@ -164,6 +236,93 @@ pub fn define_arbitrary_color_type(comptime CHANNEL_TYPE: type, comptime CHANNEL
                 out.raw[c] = -self.raw[c];
             }
             return out;
+        }
+
+        pub fn greater_than(self: Self, other: Self) define_arbitrary_color_type(bool, CHANNELS_ENUM) {
+            var out: define_arbitrary_color_type(bool, CHANNELS_ENUM) = undefined;
+            inline for (0..CHANNEL_COUNT) |c| {
+                out.raw[c] = self.raw[c] > other.raw[c];
+            }
+        }
+        pub fn greater_than_scalar(self: Self, val: CHANNEL_TYPE) define_arbitrary_color_type(bool, CHANNELS_ENUM) {
+            var out: define_arbitrary_color_type(bool, CHANNELS_ENUM) = undefined;
+            inline for (0..CHANNEL_COUNT) |c| {
+                out.raw[c] = self.raw[c] > val;
+            }
+        }
+        pub fn less_than(self: Self, other: Self) define_arbitrary_color_type(bool, CHANNELS_ENUM) {
+            var out: define_arbitrary_color_type(bool, CHANNELS_ENUM) = undefined;
+            inline for (0..CHANNEL_COUNT) |c| {
+                out.raw[c] = self.raw[c] < other.raw[c];
+            }
+        }
+        pub fn less_than_scalar(self: Self, val: CHANNEL_TYPE) define_arbitrary_color_type(bool, CHANNELS_ENUM) {
+            var out: define_arbitrary_color_type(bool, CHANNELS_ENUM) = undefined;
+            inline for (0..CHANNEL_COUNT) |c| {
+                out.raw[c] = self.raw[c] < val;
+            }
+        }
+        pub fn greater_than_or_equal(self: Self, other: Self) define_arbitrary_color_type(bool, CHANNELS_ENUM) {
+            var out: define_arbitrary_color_type(bool, CHANNELS_ENUM) = undefined;
+            inline for (0..CHANNEL_COUNT) |c| {
+                out.raw[c] = self.raw[c] >= other.raw[c];
+            }
+        }
+        pub fn greater_than_or_equal_scalar(self: Self, val: CHANNEL_TYPE) define_arbitrary_color_type(bool, CHANNELS_ENUM) {
+            var out: define_arbitrary_color_type(bool, CHANNELS_ENUM) = undefined;
+            inline for (0..CHANNEL_COUNT) |c| {
+                out.raw[c] = self.raw[c] >= val;
+            }
+        }
+        pub fn less_than_or_equal(self: Self, other: Self) define_arbitrary_color_type(bool, CHANNELS_ENUM) {
+            var out: define_arbitrary_color_type(bool, CHANNELS_ENUM) = undefined;
+            inline for (0..CHANNEL_COUNT) |c| {
+                out.raw[c] = self.raw[c] <= other.raw[c];
+            }
+        }
+        pub fn less_than_or_equal_scalar(self: Self, val: CHANNEL_TYPE) define_arbitrary_color_type(bool, CHANNELS_ENUM) {
+            var out: define_arbitrary_color_type(bool, CHANNELS_ENUM) = undefined;
+            inline for (0..CHANNEL_COUNT) |c| {
+                out.raw[c] = self.raw[c] <= val;
+            }
+        }
+        pub fn equals_by_channel(self: Self, other: Self) define_arbitrary_color_type(bool, CHANNELS_ENUM) {
+            var out: define_arbitrary_color_type(bool, CHANNELS_ENUM) = undefined;
+            inline for (0..CHANNEL_COUNT) |c| {
+                out.raw[c] = self.raw[c] == other.raw[c];
+            }
+        }
+        pub fn equals_by_channel_scalar(self: Self, val: CHANNEL_TYPE) define_arbitrary_color_type(bool, CHANNELS_ENUM) {
+            var out: define_arbitrary_color_type(bool, CHANNELS_ENUM) = undefined;
+            inline for (0..CHANNEL_COUNT) |c| {
+                out.raw[c] = self.raw[c] == val;
+            }
+        }
+        pub fn not_equal_by_channel(self: Self, other: Self) define_arbitrary_color_type(bool, CHANNELS_ENUM) {
+            var out: define_arbitrary_color_type(bool, CHANNELS_ENUM) = undefined;
+            inline for (0..CHANNEL_COUNT) |c| {
+                out.raw[c] = self.raw[c] != other.raw[c];
+            }
+        }
+        pub fn not_equal_by_channel_scalar(self: Self, val: CHANNEL_TYPE) define_arbitrary_color_type(bool, CHANNELS_ENUM) {
+            var out: define_arbitrary_color_type(bool, CHANNELS_ENUM) = undefined;
+            inline for (0..CHANNEL_COUNT) |c| {
+                out.raw[c] = self.raw[c] != val;
+            }
+        }
+        pub fn equals(self: Self, other: Self) bool {
+            var result: bool = true;
+            inline for (0..CHANNEL_COUNT) |c| {
+                result = result and self.raw[c] == other.raw[c];
+            }
+            return result;
+        }
+        pub fn not_equal(self: Self, other: Self) bool {
+            var result: bool = false;
+            inline for (0..CHANNEL_COUNT) |c| {
+                result = result or self.raw[c] != other.raw[c];
+            }
+            return result;
         }
 
         pub const CHANNEL_COUNT = @typeInfo(CHANNELS_ENUM).@"enum".fields.len;

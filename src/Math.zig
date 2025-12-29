@@ -940,15 +940,18 @@ pub fn extract_partial_rand_from_rand(rand: anytype, val_less_than: anytype, com
 }
 
 pub fn normalized_float_to_int(float: anytype, comptime INT: type) INT {
-    const MAX_I: @TypeOf(float) = math.maxInt(INT);
-    const MIN_I: @TypeOf(float) = math.minInt(INT);
+    const INT_INT = if (INT == bool) u1 else INT;
+    const MAX_I: @TypeOf(float) = math.maxInt(INT_INT);
+    const MIN_I: @TypeOf(float) = math.minInt(INT_INT);
     const f = clamp(MIN_I, @round(float * MAX_I), MAX_I);
-    return @intFromFloat(f);
+    const i = @as(INT_INT, @intFromFloat(f));
+    return if (INT == bool) @bitCast(i) else i;
 }
 pub fn int_to_normalized_float(int: anytype, comptime FLOAT: type) FLOAT {
-    const MAX_I: FLOAT = math.maxInt(@TypeOf(int));
-    const f: FLOAT = @floatFromInt(int);
-    if (Types.type_is_signed_int(@TypeOf(int))) {
+    const int_cast = if (@TypeOf(int) == bool) @intFromBool(int) else int;
+    const MAX_I: FLOAT = math.maxInt(@TypeOf(int_cast));
+    const f: FLOAT = @floatFromInt(int_cast);
+    if (Types.type_is_signed_int(@TypeOf(int_cast))) {
         return clamp_neg_1_to_1(f / MAX_I);
     } else {
         return clamp_0_to_1(f / MAX_I);

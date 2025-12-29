@@ -1432,6 +1432,10 @@ pub fn BezierMultiSignedDistanceFieldGenerator(comptime Float: type, comptime ES
                         .last_index = 0,
                     };
                 }
+                pub fn reset(self: *Scanline) void {
+                    self.intersections.clear();
+                    self.last_index = 0;
+                }
                 pub fn free(self: *Scanline, alloc: Allocator) void {
                     self.intersections.free(alloc);
                 }
@@ -1543,18 +1547,24 @@ pub fn BezierMultiSignedDistanceFieldGenerator(comptime Float: type, comptime ES
                 }
             };
 
-            pub fn get_horizontal_scanline_intersections(self: Shape, y_value: Float, alloc: Allocator) Scanline {
-                var intersections = Scanline.init_cap(8, alloc);
+            pub fn get_new_horizontal_scanline_intersections(self: Shape, y_value: Float, alloc: Allocator) Scanline {
+                var scanline = Scanline.init_cap(8, alloc);
+                self.get_horizontal_scanline_intersections(y_value, scanline, alloc);
+                return scanline;
+            }
+
+            pub fn get_horizontal_scanline_intersections(self: Shape, y_value: Float, scanline: *Scanline, alloc: Allocator) void {
+                scanline.reset();
                 for (self.contours.slice()) |contour| {
                     for (contour.edges.slice()) |edge_ref| {
                         const edge_intersections = edge_ref.edge.horizontal_intersections(y_value);
                         for (0..edge_intersections.count) |i| {
                             const inter = edge_intersections.intersections[i];
-                            _ = intersections.intersections.append(inter, alloc);
+                            _ = scanline.intersections.append(inter, alloc);
                         }
                     }
                 }
-                intersections.pre_process();
+                scanline.pre_process();
             }
 
             pub fn edge_count(self: Shape) u32 {
@@ -2478,6 +2488,126 @@ pub fn BezierMultiSignedDistanceFieldGenerator(comptime Float: type, comptime ES
                 }
             };
         }
+
+        pub const Rasterize = struct {
+            pub fn simple_rasterize_shape_to_bitmap(output: FloatBitmap(1), shape: *Shape, projection: Projection, fill_rule: FillRule, scanline: *Shape.Scanline, alloc: Allocator) void {
+                var y: u32 = 0;
+                var x: u32 = undefined;
+                var is_filled: bool = undefined;
+                while (y < output.height) : (y += 1) {
+                    x = 0;
+                    shape.get_horizontal_scanline_intersections(projection.un_project_y(num_cast(y, f32) + 0.5), scanline, alloc);
+                    while (x < output.width) : (x += 1) {
+                        is_filled = scanline.is_filled_at_x(projection.un_project_x(num_cast(x, f32) + 0.5), fill_rule);
+                        output.set_pixel_channel_with_origin(.bot_left, x, y, .alpha, num_cast(is_filled, f32));
+                    }
+                }
+            }
+
+            pub const SignCorrectMode = enum(u8) {
+                alpha_only,
+                color_only,
+                alpha_and_color,
+            };
+
+            pub fn correct_msdf_signs(mode: SignCorrectMode, comptime NUM_CHANNELS: comptime_int, msdf: FloatBitmap(NUM_CHANNELS), shape: *Shape, projection: Projection, signed_zero_value: f32, fill_rule: FillRule, scanline: *Shape.Scanline, alloc: Allocator) void {
+                var y: u32 = 0;
+                var x: u32 = undefined;
+                var m: usize = 0;
+                var is_filled: bool = undefined;
+                var ambiguous: bool = false;
+                const pixel_count = msdf.pixel_count();
+                var match_map: List(i8) = if (mode == .color_only or mode == .alpha_and_color) List(i8).init_capacity(@intCast(pixel_count), alloc) else List(i8).init_empty();
+                defer match_map.free(alloc);
+                if (mode == .color_only or mode == .alpha_and_color) {
+                    match_map.len = pixel_count;
+                    @memset(match_map.slice(), 0);
+                }
+                const double_signed_zero = signed_zero_value + signed_zero_value;
+                while (y < msdf.height) : (y += 1) {
+                    x = 0;
+                    shape.get_horizontal_scanline_intersections(projection.un_project_y(num_cast(y, f32) + 0.5), scanline, alloc);
+                    while (x < msdf.width) : (x += 1) {
+                        is_filled = scanline.is_filled_at_x(projection.un_project_x(num_cast(x, f32) + 0.5), fill_rule);
+                        const pixel = msdf.get_pixel_ptr_with_origin(.bot_left, x, y);
+                        switch (mode) {
+                            .alpha_only, .alpha_and_color => {
+                                assert_with_reason(NUM_CHANNELS == 1 or NUM_CHANNELS == 4, @src(), "an MSDF bitmap with {d} channels has no alpha (sdf) channel", .{NUM_CHANNELS});
+                                const pixel_alpha = pixel.get(.alpha);
+                                if ((pixel_alpha > signed_zero_value) != is_filled) {
+                                    pixel.set(.alpha, double_signed_zero - pixel_alpha);
+                                }
+                            },
+                            .color_only => {},
+                        }
+                        switch (mode) {
+                            .color_only, .alpha_and_color => {
+                                assert_with_reason(NUM_CHANNELS == 3 or NUM_CHANNELS == 4, @src(), "an MSDF bitmap with {d} channels has no color (msdf) channels", .{NUM_CHANNELS});
+                                const color_median = pixel.median_of_3_channels(.red, .green, .blue);
+                                if (color_median == signed_zero_value) {
+                                    ambiguous = true;
+                                } else if ((color_median > signed_zero_value) != is_filled) {
+                                    pixel.set(.red, double_signed_zero - pixel.get(.red));
+                                    pixel.set(.green, double_signed_zero - pixel.get(.green));
+                                    pixel.set(.blue, double_signed_zero - pixel.get(.blue));
+                                    match_map.ptr[m] = -1;
+                                } else {
+                                    match_map.ptr[m] = 1;
+                                }
+                                m += 1;
+                            },
+                            .alpha_only => {},
+                        }
+                    }
+                }
+                // This step is necessary to avoid artifacts when whole shape is inverted
+                if (ambiguous) {
+                    y = 0;
+                    m = 0;
+                    while (y < msdf.height) : (y += 1) {
+                        x = 0;
+                        while (x < msdf.width) : (x += 1) {
+                            if (match_map[m] == 0) {
+                                var neighbor_match: i8 = 0;
+                                if (x > 0) neighbor_match += match_map[m - 1];
+                                if (x < msdf.width - 1) neighbor_match += match_map[m + 1];
+                                if (y > 0) neighbor_match += match_map[m - num_cast(msdf.width, usize)];
+                                if (y < msdf.height - 1) neighbor_match += match_map[m + num_cast(msdf.width, usize)];
+                                if (neighbor_match < 0) {
+                                    const pixel = msdf.get_pixel_ptr_with_origin(.bot_left, x, y);
+                                    pixel.set(.red, double_signed_zero - pixel.get(.red));
+                                    pixel.set(.green, double_signed_zero - pixel.get(.green));
+                                    pixel.set(.blue, double_signed_zero - pixel.get(.blue));
+                                }
+                            }
+                            m += 1;
+                        }
+                    }
+                }
+            }
+
+            pub fn render_msdf_using_cpu(comptime OUTPUT_BMP_DEF: BitmapDef, output: Bitmap(OUTPUT_BMP_DEF), comptime MSDF_NUM_CHANNELS: comptime_int, msdf: FloatBitmap(MSDF_NUM_CHANNELS), signed_pixel_range: Range, signed_threshhold: f32) void {
+                const OUT_BMP = Bitmap(OUTPUT_BMP_DEF);
+                const scale = Vector.new(num_cast(msdf.width, f32) / num_cast(output.width, f32), num_cast(msdf.height, f32) / num_cast(output.height, f32));
+                var y: u32 = 0;
+                var x: u32 = undefined;
+                if (signed_pixel_range.low == signed_pixel_range.high) {
+                    while (y < output.height) : (y += 1) {
+                        x = 0;
+                        while (x < output.width) : (x += 1) {
+                            const msdf_point = Point.new(num_cast(x, f32) + 0.5, num_cast(y, f32) + 0.5).scale(scale);
+                            const msdf_interp = msdf.get_subpixel_mix_near_with_origin(.top_left, f32, msdf_point.x, msdf_point.y);
+                            if (OUT_BMP.NUM_CHANNELS == MSDF_NUM_CHANNELS) {
+                                const output_ptr = output.get_pixel_ptr_with_origin(.top_left, x, y);
+                                output_ptr.* = msdf_interp.greater_than_or_equal_scalar(signed_threshhold).cast_to(OUT_BMP.CHANNEL_TYPE);
+                            } else {}
+                        }
+                    }
+                } else {
+                    //
+                }
+            }
+        };
     };
 }
 
