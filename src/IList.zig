@@ -232,6 +232,14 @@ pub fn IList(comptime T: type) type {
             free: *const fn (object: *anyopaque, alloc: Allocator) void = Types.unimplemented_2_params("IList.vtable.free", *anyopaque, Allocator, void),
         };
 
+        
+
+        // pub const Reader = struct {
+        //     src: ILIST,
+        //     buf: ?[]T = null,
+        //     src_pos:
+        // };
+
         // pub const Reader = struct {
         //     src: ILIST,
         //     buf: ?[]T = null,

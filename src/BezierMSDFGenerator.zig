@@ -237,6 +237,12 @@ pub fn BezierMultiSignedDistanceFieldGenerator(comptime Float: type, comptime ES
             pub fn calc_delta(self: DistanceMapping, distance_delta: Delta) Float {
                 return self.scale * (distance_delta.value + self.translate);
             }
+            pub fn calc_biased_normalized(self: DistanceMapping, bias: Float, distance: Float) Float {
+                return MathX.normalized_num_cast(MathX.clamp_0_to_1(self.calc(distance + bias) + 0.5), Float);
+            }
+            pub fn calc_biased_normalized_out(self: DistanceMapping, bias: Float, distance: Float, comptime OUT: type) OUT {
+                return MathX.normalized_num_cast(MathX.clamp_0_to_1(self.calc(distance + bias) + 0.5), OUT);
+            }
 
             pub const Delta = struct {
                 value: Float = 0,
@@ -1549,7 +1555,7 @@ pub fn BezierMultiSignedDistanceFieldGenerator(comptime Float: type, comptime ES
 
             pub fn get_new_horizontal_scanline_intersections(self: Shape, y_value: Float, alloc: Allocator) Scanline {
                 var scanline = Scanline.init_cap(8, alloc);
-                self.get_horizontal_scanline_intersections(y_value, scanline, alloc);
+                self.get_horizontal_scanline_intersections(y_value, &scanline, alloc);
                 return scanline;
             }
 
@@ -2586,8 +2592,49 @@ pub fn BezierMultiSignedDistanceFieldGenerator(comptime Float: type, comptime ES
                 }
             }
 
-            pub fn render_msdf_using_cpu(comptime OUTPUT_BMP_DEF: BitmapDef, output: Bitmap(OUTPUT_BMP_DEF), comptime MSDF_NUM_CHANNELS: comptime_int, msdf: FloatBitmap(MSDF_NUM_CHANNELS), signed_pixel_range: Range, signed_threshhold: f32) void {
+            /// Renders an MSDF bitmap to an arbitrary output bitmap
+            ///
+            /// The output bitmap MUST have at least ONE of the following conditions:
+            ///   - all 3 of `.red` and `.green` and `.blue` channels
+            ///   - an `.alpha` channel
+            ///
+            /// The output will result in the following depending on the MSDF and output formats:
+            ///   - Output has alpha only:
+            ///     - MSDF has alpha:
+            ///       - MSDF alpha => Output alpha
+            ///       - MSDF color is ignored (if exists)
+            ///     - MSDF has color only:
+            ///       - Median of MSDF color => Output alpha
+            ///   - Output has color only:
+            ///     - MSDF has color:
+            ///       - MSDF color => Output color
+            ///       - MSDF alpha is ignored (if exists)
+            ///     - MSDF has alpha only:
+            ///       - MSDF alpha => Each Output color channel (greyscale)
+            ///   - Output has color and alpha:
+            ///     - MSDF has alpha only:
+            ///       - White (max vals) => Output color channels
+            ///       - MSDF alpha => Output alpha
+            ///     - MSDF has color only:
+            ///       - MSDF color => Output color
+            ///       - Opaque (max val) => Output alpha
+            ///     - MSDF has color and alpha:
+            ///       - MSDF color => Output color
+            ///       - MSDF alpha => Output alpha
+            pub fn render_msdf_using_cpu(comptime OUTPUT_BMP_DEF: BitmapDef, output: Bitmap(OUTPUT_BMP_DEF), comptime MSDF_NUM_CHANNELS: comptime_int, msdf: FloatBitmap(MSDF_NUM_CHANNELS), signed_pixel_range: Range, signed_threshhold: Float) void {
                 const OUT_BMP = Bitmap(OUTPUT_BMP_DEF);
+                const MSDF_BMP = FloatBitmap(MSDF_NUM_CHANNELS);
+                const msdf_has_alpha = comptime MSDF_BMP.has_all_channels(&BitmapModule.A_Channel.tag_names);
+                const msdf_has_color = comptime MSDF_BMP.has_all_channels(&BitmapModule.RGB_Channels.tag_names);
+                // const msdf_has_color_and_alpha = msdf_has_color and msdf_has_alpha;
+                const msdf_has_color_only = msdf_has_color and !msdf_has_alpha;
+                const msdf_has_alpha_only = !msdf_has_color and msdf_has_alpha;
+                const out_has_alpha = comptime OUT_BMP.has_all_channels(&BitmapModule.A_Channel.tag_names);
+                const out_has_color = comptime OUT_BMP.has_all_channels(&BitmapModule.RGB_Channels.tag_names);
+                const out_has_color_and_alpha = out_has_color and out_has_alpha;
+                const out_has_color_only = out_has_color and !out_has_alpha;
+                const out_has_alpha_only = !out_has_color and out_has_alpha;
+                assert_with_reason(out_has_color or out_has_alpha, @src(), "output bitmap format does not specify either RGB channels, an Alpha channel, or both, you must implement your own rendering algorithm", .{});
                 const scale = Vector.new(num_cast(msdf.width, f32) / num_cast(output.width, f32), num_cast(msdf.height, f32) / num_cast(output.height, f32));
                 var y: u32 = 0;
                 var x: u32 = undefined;
@@ -2597,14 +2644,88 @@ pub fn BezierMultiSignedDistanceFieldGenerator(comptime Float: type, comptime ES
                         while (x < output.width) : (x += 1) {
                             const msdf_point = Point.new(num_cast(x, f32) + 0.5, num_cast(y, f32) + 0.5).scale(scale);
                             const msdf_interp = msdf.get_subpixel_mix_near_with_origin(.top_left, f32, msdf_point.x, msdf_point.y);
-                            if (OUT_BMP.NUM_CHANNELS == MSDF_NUM_CHANNELS) {
-                                const output_ptr = output.get_pixel_ptr_with_origin(.top_left, x, y);
-                                output_ptr.* = msdf_interp.greater_than_or_equal_scalar(signed_threshhold).cast_to(OUT_BMP.CHANNEL_TYPE);
-                            } else {}
+                            const output_ptr = output.get_pixel_ptr_with_origin(.top_left, x, y);
+                            if (out_has_alpha_only) {
+                                if (msdf_has_alpha) {
+                                    output_ptr.set(.alpha, MathX.normalized_num_cast(msdf_interp.get(.alpha) >= signed_threshhold, OUT_BMP.CHANNEL_TYPE));
+                                } else {
+                                    const median = msdf_interp.median_of_3_channels(.red, .green, .blue);
+                                    output_ptr.set(.alpha, MathX.normalized_num_cast(median >= signed_threshhold, OUT_BMP.CHANNEL_TYPE));
+                                }
+                            } else if (out_has_color_only) {
+                                if (msdf_has_color) {
+                                    output_ptr.set(.red, MathX.normalized_num_cast(msdf_interp.get(.red) >= signed_threshhold, OUT_BMP.CHANNEL_TYPE));
+                                    output_ptr.set(.green, MathX.normalized_num_cast(msdf_interp.get(.green) >= signed_threshhold, OUT_BMP.CHANNEL_TYPE));
+                                    output_ptr.set(.blue, MathX.normalized_num_cast(msdf_interp.get(.blue) >= signed_threshhold, OUT_BMP.CHANNEL_TYPE));
+                                } else {
+                                    const greyscale = OUT_BMP.Pixel.MAX_VALS.multiply_scalar(MathX.normalized_num_cast(msdf_interp.get(.alpha) >= signed_threshhold, OUT_BMP.CHANNEL_TYPE));
+                                    output_ptr.* = greyscale;
+                                }
+                            } else if (out_has_color_and_alpha) {
+                                if (msdf_has_alpha_only) {
+                                    const white_with_alpha = OUT_BMP.Pixel.MAX_VALS.with_set(.alpha, MathX.normalized_num_cast(msdf_interp.get(.alpha) >= signed_threshhold, OUT_BMP.CHANNEL_TYPE));
+                                    output_ptr.* = white_with_alpha;
+                                } else if (msdf_has_color_only) {
+                                    var color_fully_opaque = OUT_BMP.Pixel.MAX_VALS.with_set(.red, MathX.normalized_num_cast(msdf_interp.get(.red) >= signed_threshhold, OUT_BMP.CHANNEL_TYPE));
+                                    color_fully_opaque.set(.green, MathX.normalized_num_cast(msdf_interp.get(.green) >= signed_threshhold, OUT_BMP.CHANNEL_TYPE));
+                                    color_fully_opaque.set(.blue, MathX.normalized_num_cast(msdf_interp.get(.blue) >= signed_threshhold, OUT_BMP.CHANNEL_TYPE));
+                                    output_ptr.* = color_fully_opaque;
+                                } else {
+                                    output_ptr.set(.red, MathX.normalized_num_cast(msdf_interp.get(.red) >= signed_threshhold, OUT_BMP.CHANNEL_TYPE));
+                                    output_ptr.set(.green, MathX.normalized_num_cast(msdf_interp.get(.green) >= signed_threshhold, OUT_BMP.CHANNEL_TYPE));
+                                    output_ptr.set(.blue, MathX.normalized_num_cast(msdf_interp.get(.blue) >= signed_threshhold, OUT_BMP.CHANNEL_TYPE));
+                                    output_ptr.set(.alpha, MathX.normalized_num_cast(msdf_interp.get(.alpha) >= signed_threshhold, OUT_BMP.CHANNEL_TYPE));
+                                }
+                            }
                         }
                     }
                 } else {
                     //
+                    const output_size_sum = num_cast(output.width + output.height, f32);
+                    const msdf_size_sum = num_cast(msdf.width + msdf.height, f32);
+                    const px_range_ratio = signed_pixel_range.multiplied_by(output_size_sum / msdf_size_sum);
+                    const dist_map = DistanceMapping.new_from_range_inverse(px_range_ratio);
+                    const bias = 0.5 - signed_threshhold;
+                    while (y < output.height) : (y += 1) {
+                        x = 0;
+                        while (x < output.width) : (x += 1) {
+                            const msdf_point = Point.new(num_cast(x, f32) + 0.5, num_cast(y, f32) + 0.5).scale(scale);
+                            const msdf_interp = msdf.get_subpixel_mix_near_with_origin(.top_left, f32, msdf_point.x, msdf_point.y);
+                            const output_ptr = output.get_pixel_ptr_with_origin(.top_left, x, y);
+                            if (out_has_alpha_only) {
+                                if (msdf_has_alpha) {
+                                    output_ptr.set(.alpha, dist_map.calc_biased_normalized_out(bias, msdf_interp.get(.alpha)));
+                                } else {
+                                    const median = msdf_interp.median_of_3_channels(.red, .green, .blue);
+                                    output_ptr.set(.alpha, dist_map.calc_biased_normalized_out(bias, median));
+                                }
+                            } else if (out_has_color_only) {
+                                if (msdf_has_color) {
+                                    output_ptr.set(.red, dist_map.calc_biased_normalized_out(bias, msdf_interp.get(.red)));
+                                    output_ptr.set(.green, dist_map.calc_biased_normalized_out(bias, msdf_interp.get(.green)));
+                                    output_ptr.set(.blue, dist_map.calc_biased_normalized_out(bias, msdf_interp.get(.blue)));
+                                } else {
+                                    const greyscale = OUT_BMP.Pixel.MAX_VALS.multiply_scalar(dist_map.calc_biased_normalized_out(bias, msdf_interp.get(.alpha)));
+                                    output_ptr.* = greyscale;
+                                }
+                            } else if (out_has_color_and_alpha) {
+                                if (msdf_has_alpha_only) {
+                                    const white_with_alpha = OUT_BMP.Pixel.MAX_VALS.with_set(.alpha, dist_map.calc_biased_normalized_out(bias, msdf_interp.get(.alpha)));
+                                    output_ptr.* = white_with_alpha;
+                                } else if (msdf_has_color_only) {
+                                    var color_fully_opaque = OUT_BMP.Pixel.MAX_VALS.with_set(.red, dist_map.calc_biased_normalized_out(bias, msdf_interp.get(.red)));
+                                    color_fully_opaque.set(.green, dist_map.calc_biased_normalized_out(bias, msdf_interp.get(.green)));
+                                    color_fully_opaque.set(.blue, dist_map.calc_biased_normalized_out(bias, msdf_interp.get(.blue)));
+                                    output_ptr.* = color_fully_opaque;
+                                } else {
+                                    output_ptr.set(.red, dist_map.calc_biased_normalized_out(bias, msdf_interp.get(.red)));
+                                    output_ptr.set(.green, dist_map.calc_biased_normalized_out(bias, msdf_interp.get(.green)));
+                                    output_ptr.set(.blue, dist_map.calc_biased_normalized_out(bias, msdf_interp.get(.blue)));
+                                    output_ptr.set(.alpha, dist_map.calc_biased_normalized_out(bias, msdf_interp.get(.alpha)));
+                                }
+                            }
+                        }
+                    }
                 }
             }
         };

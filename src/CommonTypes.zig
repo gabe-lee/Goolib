@@ -279,3 +279,10 @@ pub const Alignment = enum(u64) {
         return std.mem.alignBackward(T, addr, alignment);
     }
 };
+
+pub const Endian = enum(u8) {
+    LITTLE = 0,
+    BIG = 1,
+
+    pub const NATIVE = if (build.cpu.arch.endian() == .little) Endian.LITTLE else Endian.BIG;
+};

@@ -37,11 +37,18 @@ const num_cast = Root.Cast.num_cast;
 
 const Math = @This();
 
+pub const fsize = Types.fsize;
+
 pub const PI = math.pi;
 pub const HALF_PI = math.pi / 2;
 pub const TAU = math.tau;
 pub const DEG_TO_RAD = math.rad_per_deg;
 pub const RAD_TO_DEG = math.deg_per_rad;
+
+pub const MAX_EXACT_INTEGER_F16 = 1 << 11;
+pub const MAX_EXACT_INTEGER_F32 = 1 << 24;
+pub const MAX_EXACT_INTEGER_F64 = 1 << 53;
+pub const MAX_EXACT_INTEGER_F128 = 1 << 113;
 
 pub inline fn minor_major_coord_to_idx(minor: anytype, major: @TypeOf(minor), major_stride: @TypeOf(minor)) @TypeOf(minor) {
     return minor + (major * major_stride);
@@ -956,4 +963,33 @@ pub fn int_to_normalized_float(int: anytype, comptime FLOAT: type) FLOAT {
     } else {
         return clamp_0_to_1(f / MAX_I);
     }
+}
+/// Performs a numeric cast with the following conventions:
+///   - bools are treated as u1 integers (ether 0 or 1)
+///   - int to float converts using `int_val / MAX_POSITIVE_INT_VAL` resulting in range 0.0 to 1.0 for unsigned integers, or -1.0 to 1.0 for signed integers
+///   - float to int converts using `round(clamp(-1.0, float_val, 1.0) * MAX_POSITIVE_INT_VAL)`
+///     - if the input is negtive and the output cannot be negative, the output is clamped to 0
+///   - int to int converts using `(input_int_val / MAX_POSITIVE_INPUT_INT_VAL) * MAX_POSITIVE_OUTPUT_INT_VAL`
+///      - if the input is negtive and the output cannot be negative, the output is clamped to 0
+///   - float to float simply converts using `@floatCast(input_float_val)` and does not clamp the result between -1.0 and 1.0
+pub fn normalized_num_cast(from: anytype, comptime TO: type) TO {
+    const FROM = @TypeOf(from);
+    const FROM_CAST = if (FROM == bool) u1 else FROM;
+    const TO_CAST = if (TO == bool) u1 else TO;
+    const from_cast: FROM_CAST = if (FROM == bool) @intFromBool(from) else from;
+    const FROM_INT = Types.type_is_int(FROM_CAST);
+    const TO_INT = Types.type_is_int(TO_CAST);
+    if (!FROM_INT and !TO_INT) {
+        return @floatCast(from);
+    }
+    const FROM_FLOAT_TYPE = if (FROM_INT) Types.FloatSizeForMaxIntExact(FROM_CAST) else FROM_CAST;
+    const TO_FLOAT_TYPE = if (TO_INT) Types.FloatSizeForMaxIntExact(TO_CAST) else TO_CAST;
+    const ABS_MAX_FROM_FLOAT: FROM_FLOAT_TYPE = if (FROM_INT) math.maxInt(FROM_CAST) else 1.0;
+    const from_float: FROM_FLOAT_TYPE = if (FROM_INT) @floatFromInt(from_cast) else from_cast;
+    const ABS_MAX_TO_FLOAT: TO_FLOAT_TYPE = if (TO_INT) math.maxInt(TO_CAST) else 1.0;
+    const MIN_TO_FLOAT: TO_FLOAT_TYPE = if (TO_INT) math.minInt(TO_CAST) else -1.0;
+    const from_ratio = clamp(@as(FROM_FLOAT_TYPE, -1.0), from_float / ABS_MAX_FROM_FLOAT, @as(FROM_FLOAT_TYPE, 1.0));
+    const to_float = upgrade_max(MIN_TO_FLOAT, upgrade_multiply(from_ratio, ABS_MAX_TO_FLOAT));
+    const to_float_rounded = if (TO_INT) @round(to_float) else to_float;
+    return if (TO_INT) (if (TO == bool) @bitCast(@as(u1, @intFromFloat(to_float_rounded))) else @intFromFloat(to_float_rounded)) else @floatCast(to_float);
 }

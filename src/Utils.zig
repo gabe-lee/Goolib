@@ -1345,3 +1345,6 @@ pub fn scalar_ptr_as_single_item_slice(ptr: anytype) []@typeInfo(@TypeOf(ptr)).p
     const T = @typeInfo(P).pointer.child;
     return @as([*]T, @ptrCast(@alignCast(ptr)))[0..1];
 }
+pub fn scalar_ptr_as_byte_slice(ptr: anytype) []u8 {
+    return std.mem.sliceAsBytes(scalar_ptr_as_single_item_slice(ptr));
+}

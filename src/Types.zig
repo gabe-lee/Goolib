@@ -25,6 +25,7 @@ const std = @import("std");
 const builtin = std.builtin;
 const SourceLocation = builtin.SourceLocation;
 const mem = std.mem;
+const math = std.math;
 const assert = std.debug.assert;
 const build = @import("builtin");
 
@@ -32,7 +33,38 @@ const Root = @import("./_root.zig");
 const ANSI = Root.ANSI;
 const BinarySearch = Root.BinarySearch;
 const Assert = Root.Assert;
+const MathX = Root.Math;
 const assert_with_reason = Assert.assert_with_reason;
+const assert_unreachable = Assert.assert_unreachable;
+
+pub const fsize = switch (@bitSizeOf(usize)) {
+    16 => f16,
+    32 => f32,
+    64 => f64,
+    else => f32,
+};
+
+pub fn FloatSizeForMaxIntExact(comptime INT: type) type {
+    const MAX: comptime_int = math.maxInt(INT);
+    switch (MAX) {
+        0...MathX.MAX_EXACT_INTEGER_F16 => f16,
+        (MathX.MAX_EXACT_INTEGER_F16 + 1)...MathX.MAX_EXACT_INTEGER_F32 => f32,
+        (MathX.MAX_EXACT_INTEGER_F32 + 1)...MathX.MAX_EXACT_INTEGER_F64 => f64,
+        (MathX.MAX_EXACT_INTEGER_F64 + 1)...MathX.MAX_EXACT_INTEGER_F128 => f128,
+        else => assert_unreachable(@src(), "integer type has a max positive size of {d}, which is outside the range an f128 can exactly represent", .{MAX}),
+    }
+}
+
+pub fn UnsignedIntegerWithSameSize(comptime T: type) type {
+    return switch (@sizeOf(T)) {
+        1 => u8,
+        2 => u16,
+        4 => u32,
+        8 => u64,
+        16 => u128,
+        else => assert_unreachable(@src(), "type `{s}` does not have a native matching integer size, its size is `{d}`", .{ @typeName(T), @sizeOf(T) }),
+    };
+}
 
 pub fn intcast(val: anytype, comptime T: type) T {
     assert_with_reason(type_is_int(T), @src(), "output type T must be an integer type, got type `{s}`", .{@typeName(T)});
@@ -578,6 +610,14 @@ pub fn is_valid_value_for_enum(comptime ENUM_TYPE: type, int_value: anytype) boo
 
     if (BinarySearch.simple_binary_search(enum_info.tag_type, ordered_values[0..], int_value) == null) return false;
     return true;
+}
+
+pub fn is_valid_tag_name_for_enum(comptime ENUM_TYPE: type, tag_name: [:0]const u8) bool {
+    const enum_info = @typeInfo(ENUM_TYPE).@"enum";
+    for (enum_info.fields) |field| {
+        if (std.mem.eql(u8, field.name, tag_name)) return true;
+    }
+    return false;
 }
 
 pub fn make_slice_from_sentinel_ptr(comptime T: type, comptime S: T, ptr: [*:S]T) [:S]T {

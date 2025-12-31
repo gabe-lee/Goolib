@@ -27,6 +27,7 @@ const Root = @import("./_root.zig");
 const Types = Root.Types;
 const Assert = Root.Assert;
 const MathX = Root.Math;
+const math = std.math;
 
 const assert_with_reason = Assert.assert_with_reason;
 const num_cast = Root.Cast.num_cast;
@@ -87,6 +88,23 @@ pub fn define_arbitrary_color_type(comptime CHANNEL_TYPE: type, comptime CHANNEL
             }
             return out;
         }
+
+        pub const MAX_VALS = make: {
+            var out = Self{};
+            for (0..CHANNEL_COUNT) |c| {
+                if (Types.type_is_int(CHANNEL_TYPE)) {
+                    out.raw[c] = math.maxInt(CHANNEL_TYPE);
+                } else {
+                    out.raw[c] = 1.0;
+                }
+            }
+            break :make out;
+        };
+
+        pub inline fn new_max_values() Self {
+            return MAX_VALS;
+        }
+
         pub inline fn get(self: Self, comptime channel: CHANNELS_ENUM) CHANNEL_TYPE {
             return self.raw[@intFromEnum(channel)];
         }
@@ -104,14 +122,34 @@ pub fn define_arbitrary_color_type(comptime CHANNEL_TYPE: type, comptime CHANNEL
             return new_self;
         }
 
-        pub fn cast_to(self: Self, comptime NEW_CHANNEL_TYPE: type) define_arbitrary_color_type(NEW_CHANNEL_TYPE, CHANNELS_ENUM) {
+        pub fn cast_values_to(self: Self, comptime NEW_CHANNEL_TYPE: type) define_arbitrary_color_type(NEW_CHANNEL_TYPE, CHANNELS_ENUM) {
             var out: define_arbitrary_color_type(NEW_CHANNEL_TYPE, CHANNELS_ENUM) = undefined;
             inline for (0..CHANNEL_COUNT) |c| {
                 out.raw[c] = num_cast(self.raw[c], NEW_CHANNEL_TYPE);
             }
             return out;
         }
-        pub fn cast_normalized_to(self: Self, comptime NEW_CHANNEL_TYPE: type) define_arbitrary_color_type(NEW_CHANNEL_TYPE, CHANNELS_ENUM) {
+        pub fn reorder_channels_to(self: Self, comptime NEW_CHANNEL_ENUM: type) define_arbitrary_color_type(CHANNEL_TYPE, NEW_CHANNEL_ENUM) {
+            var out: define_arbitrary_color_type(CHANNEL_TYPE, NEW_CHANNEL_ENUM) = undefined;
+            const NEW_TAG_INFO = @typeInfo(NEW_CHANNEL_ENUM).@"enum".fields;
+            const OLD_TAG_INFO = @typeInfo(CHANNELS_ENUM).@"enum".fields;
+            inline for (NEW_TAG_INFO) |new_tag| {
+                var found = false;
+                inline for (OLD_TAG_INFO) |old_tag| {
+                    if (std.mem.eql(u8, new_tag.name, old_tag.name)) {
+                        out.raw[new_tag.value] = self.raw[old_tag.value];
+                        found = true;
+                        break;
+                    }
+                }
+                if (!found) {
+                    out.raw[new_tag.value] = std.mem.zeroes(CHANNEL_TYPE);
+                }
+            }
+            return out;
+        }
+
+        pub fn cast_values_normalized_to(self: Self, comptime NEW_CHANNEL_TYPE: type) define_arbitrary_color_type(NEW_CHANNEL_TYPE, CHANNELS_ENUM) {
             var out: define_arbitrary_color_type(NEW_CHANNEL_TYPE, CHANNELS_ENUM) = undefined;
             inline for (0..CHANNEL_COUNT) |c| {
                 if (Types.type_is_float(NEW_CHANNEL_TYPE) and Types.type_is_int(CHANNEL_TYPE)) {
@@ -323,6 +361,42 @@ pub fn define_arbitrary_color_type(comptime CHANNEL_TYPE: type, comptime CHANNEL
                 result = result or self.raw[c] != other.raw[c];
             }
             return result;
+        }
+        pub fn implicit_equals(self: Self, other: Self) bool {
+            const INT = Types.UnsignedIntegerWithSameSize(Self);
+            const self_int: INT = @bitCast(self);
+            const other_int: INT = @bitCast(other);
+            return self_int == other_int;
+        }
+        pub fn implicit_not_equals(self: Self, other: Self) bool {
+            const INT = Types.UnsignedIntegerWithSameSize(Self);
+            const self_int: INT = @bitCast(self);
+            const other_int: INT = @bitCast(other);
+            return self_int != other_int;
+        }
+        pub fn implicit_greater_than(self: Self, other: Self) bool {
+            const INT = Types.UnsignedIntegerWithSameSize(Self);
+            const self_int: INT = @bitCast(self);
+            const other_int: INT = @bitCast(other);
+            return self_int > other_int;
+        }
+        pub fn implicit_less_than(self: Self, other: Self) bool {
+            const INT = Types.UnsignedIntegerWithSameSize(Self);
+            const self_int: INT = @bitCast(self);
+            const other_int: INT = @bitCast(other);
+            return self_int < other_int;
+        }
+        pub fn implicit_greater_than_or_equal(self: Self, other: Self) bool {
+            const INT = Types.UnsignedIntegerWithSameSize(Self);
+            const self_int: INT = @bitCast(self);
+            const other_int: INT = @bitCast(other);
+            return self_int >= other_int;
+        }
+        pub fn implicit_less_than_or_equal(self: Self, other: Self) bool {
+            const INT = Types.UnsignedIntegerWithSameSize(Self);
+            const self_int: INT = @bitCast(self);
+            const other_int: INT = @bitCast(other);
+            return self_int <= other_int;
         }
 
         pub const CHANNEL_COUNT = @typeInfo(CHANNELS_ENUM).@"enum".fields.len;

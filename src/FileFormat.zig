@@ -20,30 +20,5 @@
 // 2. Altered source versions must be plainly marked as such, and must not be
 //    misrepresented as being the original software.
 // 3. This notice may not be removed or altered from any source distribution.
-const std = @import("std");
-const Writer = std.Io.Writer;
-const File = std.fs.File;
 
-pub fn writer(buf: []u8) Writer {
-    return Writer{
-        .buffer = buf,
-        .end = 0,
-        .vtable = &VTABLE,
-    };
-}
-
-const VTABLE = Writer.VTable{
-    .drain = impl_drain,
-    .flush = impl_flush,
-};
-
-fn impl_drain(w: *Writer, data: []const []const u8, splat: usize) Writer.Error!usize {
-    _ = w;
-    _ = data;
-    _ = splat;
-    return 0;
-}
-fn impl_flush(w: *Writer) Writer.Error!void {
-    _ = w;
-    return;
-}
+pub const Bitmap = @import("./FileFormat_Bitmap.zig");

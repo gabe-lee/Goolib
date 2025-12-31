@@ -50,15 +50,6 @@ pub const XOrder = enum(u8) {
     right_to_left,
 };
 
-pub const Y_Invert = enum(u8) {
-    same_y_order,
-    invert_y,
-};
-pub const X_Invert = enum(u8) {
-    same_x_order,
-    invert_x,
-};
-
 pub const ResizeAnchor = enum(u8) {
     top_left,
     top_center,
@@ -95,45 +86,94 @@ const TotalOrder = enum(u8) {
 };
 
 pub const RGB_Channels = enum(u8) {
-    red,
-    green,
-    blue,
+    red = 0,
+    green = 1,
+    blue = 2,
+
+    pub const tag_names = [_][:0]const u8{
+        "red",
+        "green",
+        "blue",
+    };
 };
 pub const BGR_Channels = enum(u8) {
-    blue,
-    green,
-    red,
+    blue = 0,
+    green = 1,
+    red = 2,
+
+    pub const tag_names = [_][:0]const u8{
+        "blue",
+        "green",
+        "red",
+    };
 };
 pub const RGBA_Channels = enum(u8) {
-    red,
-    green,
-    blue,
-    alpha,
+    red = 0,
+    green = 1,
+    blue = 2,
+    alpha = 3,
+
+    pub const tag_names = [_][:0]const u8{
+        "red",
+        "green",
+        "blue",
+        "alpha",
+    };
 };
 pub const ABGR_Channels = enum(u8) {
-    alpha,
-    blue,
-    green,
-    red,
+    alpha = 0,
+    blue = 1,
+    green = 2,
+    red = 3,
+
+    pub const tag_names = [_][:0]const u8{
+        "alpha",
+        "blue",
+        "green",
+        "red",
+    };
 };
 pub const ARGB_Channels = enum(u8) {
-    alpha,
-    red,
-    green,
-    blue,
+    alpha = 0,
+    red = 1,
+    green = 2,
+    blue = 3,
+
+    pub const tag_names = [_][:0]const u8{
+        "alpha",
+        "red",
+        "green",
+        "blue",
+    };
 };
 pub const BGRA_Channels = enum(u8) {
-    blue,
-    green,
-    red,
-    alpha,
+    blue = 0,
+    green = 1,
+    red = 2,
+    alpha = 3,
+
+    pub const tag_names = [_][:0]const u8{
+        "blue",
+        "green",
+        "red",
+        "alpha",
+    };
 };
 pub const RA_Channels = enum(u8) {
-    red,
-    alpha,
+    red = 0,
+    alpha = 1,
+
+    pub const tag_names = [_][:0]const u8{
+        "red",
+        "alpha",
+    };
 };
 pub const A_Channel = enum(u8) {
-    alpha,
+    alpha = 0,
+
+    pub const tag_names = [_][:0]const u8{
+        "alpha",
+    };
 };
 
 pub const BitmapDefinition = struct {
@@ -204,6 +244,16 @@ pub fn Bitmap(comptime DEFINITION: BitmapDefinition) type {
 
         pub inline fn pixel_count(self: Self) u32 {
             return self.width * self.height;
+        }
+        pub inline fn pixel_slice(self: Self) []Pixel {
+            return self.pixels[0..self.pixel_count()];
+        }
+
+        pub fn has_all_channels(comptime channel_tags: []const [:0]const u8) bool {
+            inline for (channel_tags) |tag| {
+                if (!Types.is_valid_tag_name_for_enum(CHANNELS, tag)) return false;
+            }
+            return true;
         }
 
         pub inline fn get_x_with_origin(self: Self, origin: Origin, x: u32) u32 {
