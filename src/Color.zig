@@ -73,6 +73,8 @@ pub fn define_arbitrary_color_type(comptime CHANNEL_TYPE: type, comptime CHANNEL
         const Self = @This();
         raw: [CHANNEL_COUNT]CHANNEL_TYPE = @splat(0),
 
+        pub const TYPE = CHANNEL_TYPE;
+
         pub fn new_vals_in_order(vals: [CHANNEL_COUNT]CHANNEL_TYPE) Self {
             var out = Self{};
             inline for (0..CHANNEL_COUNT) |c| {

@@ -184,11 +184,39 @@ pub const BitmapDefinition = struct {
     Y_ORDER: YOrder = .top_to_bottom,
 };
 
+pub const BitmapOpaque = struct {
+    bytes: List(u8),
+    bytes_width: u32,
+    bytes_height: u32,
+    bytes_major_stride: u32,
+    owns_memory: bool,
+
+    pub fn to_typed(self: BitmapOpaque, comptime DEF: BitmapDefinition) Bitmap(DEF) {
+        const BMP = Bitmap(DEF);
+        const new_width = self.bytes_width / @sizeOf(BMP.Pixel);
+        const new_height = self.bytes_height / @sizeOf(BMP.Pixel);
+        const new_stride = self.bytes_major_stride / @sizeOf(BMP.Pixel);
+        const recalced_width_bytes = new_width * @sizeOf(BMP.Pixel);
+        const recalced_height_bytes = new_height * @sizeOf(BMP.Pixel);
+        const recalced_stride_bytes = new_stride * @sizeOf(BMP.Pixel);
+        assert_with_reason(recalced_width_bytes == self.bytes_width, @src(), "cannot convert opaque bitmap to one with pixel type `{s} x {d}`, loss of width bytes", .{ @typeName(BMP.Pixel.TYPE), BMP.Pixel.CHANNEL_COUNT });
+        assert_with_reason(recalced_height_bytes == self.bytes_height, @src(), "cannot convert opaque bitmap to one with pixel type `{s} x {d}`, loss of height bytes", .{ @typeName(BMP.Pixel.TYPE), BMP.Pixel.CHANNEL_COUNT });
+        assert_with_reason(recalced_stride_bytes == self.bytes_major_stride, @src(), "cannot convert opaque bitmap to one with pixel type `{s} x {d}`, loss of stride bytes", .{ @typeName(BMP.Pixel.TYPE), BMP.Pixel.CHANNEL_COUNT });
+        return BMP{
+            .pixels = self.bytes.cast_to_type(BMP.Pixel),
+            .width = new_width,
+            .height = new_height,
+            .major_stride = new_stride,
+            .owns_memory = self.owns_memory,
+        };
+    }
+};
+
 pub fn Bitmap(comptime DEFINITION: BitmapDefinition) type {
     return struct {
         const Self = @This();
 
-        pixels: [*]Pixel = @ptrFromInt(std.mem.alignBackward(usize, math.maxInt(usize), @alignOf(Pixel))),
+        pixels: List(Pixel) = .{},
         width: u32 = 0,
         height: u32 = 0,
         major_stride: u32 = 0,
@@ -225,28 +253,78 @@ pub fn Bitmap(comptime DEFINITION: BitmapDefinition) type {
         pub const NUM_CHANNELS = Pixel.CHANNEL_COUNT;
         pub const PIXEL_SIZE = Pixel.BYTE_SIZE;
 
-        pub fn init(width: u32, height: u32, alloc: Allocator) Self {
+        pub fn init(width: u32, height: u32, fill_color: ?Pixel, alloc: Allocator) Self {
             const total = width * height * PIXEL_SIZE;
-            const mem = alloc.alloc(Pixel, total) catch |err| Assert.assert_allocation_failure(@src(), Pixel, total, err);
-            return Self{
-                .pixels = mem.ptr,
+            var self = Self{
+                .pixels = List(Pixel).init_capacity(total, alloc),
                 .width = width,
                 .height = height,
                 .major_stride = if (ROW_COLUMN_ORDER == .row_major) width else height,
                 .owns_memory = true,
             };
+            if (fill_color) |fill| {
+                self.fill_all(fill);
+            }
+            return self;
         }
-        pub fn free(self: Self, alloc: Allocator) void {
+        pub fn init_from_existing_pixel_buffer(width: u32, height: u32, fill_color: ?Pixel, buffer: List(Pixel), alloc: Allocator) Self {
+            const total = width * height * PIXEL_SIZE;
+            buffer.clear();
+            buffer.ensure_free_slots(total, alloc);
+            buffer.len = total;
+            var self = Self{
+                .pixels = buffer,
+                .width = width,
+                .height = height,
+                .major_stride = if (ROW_COLUMN_ORDER == .row_major) width else height,
+                .owns_memory = true,
+            };
+            if (fill_color) |fill| {
+                self.fill_all(fill);
+            }
+            return self;
+        }
+        pub fn free(self: *Self, alloc: Allocator) void {
             assert_with_reason(self.owns_memory, @src(), "cannot free: this bitmap does not own its memory (it is a region-of or reference-to another bitmap, or is uninitialized)", .{});
             const total = self.width * self.height * PIXEL_SIZE;
-            alloc.free(self.pixels[0..total]);
+            alloc.free(self.pixels.ptr[0..total]);
+            self.width = 0;
+            self.height = 0;
+            self.major_stride = 0;
+        }
+        pub fn free_retain_buffer(self: *Self) List(Pixel) {
+            assert_with_reason(self.owns_memory, @src(), "cannot free: this bitmap does not own its memory (it is a region-of or reference-to another bitmap, or is uninitialized)", .{});
+            self.width = 0;
+            self.height = 0;
+            self.major_stride = 0;
+            var buf = self.pixels.ptr;
+            self.pixels.ptr = .{};
+            self.owns_memory = false;
+            buf.clear();
+            return buf;
+        }
+        pub fn clear(self: *Self) void {
+            assert_with_reason(self.owns_memory, @src(), "cannot clear: this bitmap does not own its memory (it is a region-of or reference-to another bitmap, or is uninitialized)", .{});
+            self.pixels.ptr.clear();
+            self.width = 0;
+            self.height = 0;
+            self.major_stride = 0;
+        }
+        pub fn to_opaque(self: Self) BitmapOpaque {
+            return BitmapOpaque{
+                .bytes = self.pixels.cast_to_byte_list(),
+                .bytes_height = self.height * @sizeOf(Pixel),
+                .bytes_width = self.width * @sizeOf(Pixel),
+                .bytes_major_stride = self.major_stride * @sizeOf(Pixel),
+                .owns_memory = self.owns_memory,
+            };
         }
 
         pub inline fn pixel_count(self: Self) u32 {
             return self.width * self.height;
         }
         pub inline fn pixel_slice(self: Self) []Pixel {
-            return self.pixels[0..self.pixel_count()];
+            return self.pixels.ptr[0..self.pixel_count()];
         }
 
         pub fn has_all_channels(comptime channel_tags: []const [:0]const u8) bool {
@@ -357,79 +435,79 @@ pub fn Bitmap(comptime DEFINITION: BitmapDefinition) type {
         }
         pub fn get_pixel_native(self: Self, x: u32, y: u32) Pixel {
             const idx = self.get_idx_native(x, y);
-            return self.pixels[idx];
+            return self.pixels.ptr[idx];
         }
         pub fn get_pixel_with_origin(self: Self, origin: Origin, x: u32, y: u32) Pixel {
             const idx = self.get_idx_with_origin(origin, x, y);
-            return self.pixels[idx];
+            return self.pixels.ptr[idx];
         }
         pub fn get_pixel_channel_native(self: Self, x: u32, y: u32, chan: CHANNELS) CHANNEL_TYPE {
             const idx = self.get_idx_native(x, y);
-            return self.pixels[idx].raw[@intFromEnum(chan)];
+            return self.pixels.ptr[idx].raw[@intFromEnum(chan)];
         }
         pub fn get_pixel_channel_with_origin(self: Self, origin: Origin, x: u32, y: u32, chan: CHANNELS) CHANNEL_TYPE {
             const idx = self.get_idx_with_origin(origin, x, y);
-            return self.pixels[idx].raw[@intFromEnum(chan)];
+            return self.pixels.ptr[idx].raw[@intFromEnum(chan)];
         }
         pub fn get_pixel_channel_ptr_native(self: Self, x: u32, y: u32, chan: CHANNELS) *CHANNEL_TYPE {
             const idx = self.get_idx_native(x, y);
-            return &self.pixels[idx].raw[@intFromEnum(chan)];
+            return &self.pixels.ptr[idx].raw[@intFromEnum(chan)];
         }
         pub fn get_pixel_channel_ptr_with_origin(self: Self, origin: Origin, x: u32, y: u32, chan: CHANNELS) *CHANNEL_TYPE {
             const idx = self.get_idx_with_origin(origin, x, y);
-            return &self.pixels[idx].raw[@intFromEnum(chan)];
+            return &self.pixels.ptr[idx].raw[@intFromEnum(chan)];
         }
         pub fn get_pixel_channel_idx_native(self: Self, x: u32, y: u32, chan_idx: anytype) CHANNEL_TYPE {
             assert_with_reason(chan_idx < Types.enum_max_field_count(CHANNELS), @src(), "channel index `{d}` is outside the bounds for the number of channels (max index = {d})", .{ chan_idx, Types.enum_max_field_count(CHANNELS) - 1 });
             const idx = self.get_idx_native(x, y);
-            return self.pixels[idx].raw[chan_idx];
+            return self.pixels.ptr[idx].raw[chan_idx];
         }
         pub fn get_pixel_channel_idx_with_origin(self: Self, origin: Origin, x: u32, y: u32, chan_idx: anytype) CHANNEL_TYPE {
             assert_with_reason(chan_idx < Types.enum_max_field_count(CHANNELS), @src(), "channel index `{d}` is outside the bounds for the number of channels (max index = {d})", .{ chan_idx, Types.enum_max_field_count(CHANNELS) - 1 });
             const idx = self.get_idx_with_origin(origin, x, y);
-            return self.pixels[idx].raw[chan_idx];
+            return self.pixels.ptr[idx].raw[chan_idx];
         }
         pub fn get_pixel_ptr_native(self: Self, x: u32, y: u32) *Pixel {
             const idx = self.get_idx_native(x, y);
-            return &self.pixels[idx];
+            return &self.pixels.ptr[idx];
         }
         pub fn get_pixel_ptr_with_origin(self: Self, origin: Origin, x: u32, y: u32) *Pixel {
             const idx = self.get_idx_with_origin(origin, x, y);
-            return &self.pixels[idx];
+            return &self.pixels.ptr[idx];
         }
         pub fn get_pixel_ptr_many_native(self: Self, x: u32, y: u32) [*]Pixel {
             const idx = self.get_idx_native(x, y);
-            return @ptrCast(&self.pixels[idx]);
+            return @ptrCast(&self.pixels.ptr[idx]);
         }
         pub fn get_pixel_ptr_many_with_origin(self: Self, origin: Origin, x: u32, y: u32) [*]Pixel {
             const idx = self.get_idx_with_origin(origin, x, y);
-            return @ptrCast(&self.pixels[idx]);
+            return @ptrCast(&self.pixels.ptr[idx]);
         }
         pub fn set_pixel_native(self: Self, x: u32, y: u32, val: Pixel) void {
             const idx = self.get_idx_native(x, y);
-            self.pixels[idx] = val;
+            self.pixels.ptr[idx] = val;
         }
         pub fn set_pixel_with_origin(self: Self, origin: Origin, x: u32, y: u32, val: Pixel) void {
             const idx = self.get_idx_with_origin(origin, x, y);
-            self.pixels[idx] = val;
+            self.pixels.ptr[idx] = val;
         }
         pub fn set_pixel_channel_native(self: Self, x: u32, y: u32, chan: CHANNELS, val: CHANNEL_TYPE) void {
             const idx = self.get_idx_native(x, y);
-            self.pixels[idx].raw[@intFromEnum(chan)] = val;
+            self.pixels.ptr[idx].raw[@intFromEnum(chan)] = val;
         }
         pub fn set_pixel_channel_with_origin(self: Self, origin: Origin, x: u32, y: u32, chan: CHANNELS, val: CHANNEL_TYPE) void {
             const idx = self.get_idx_with_origin(origin, x, y);
-            self.pixels[idx].raw[@intFromEnum(chan)] = val;
+            self.pixels.ptr[idx].raw[@intFromEnum(chan)] = val;
         }
         pub fn set_pixel_channel_idx_native(self: Self, x: u32, y: u32, chan_idx: anytype, val: CHANNEL_TYPE) void {
             assert_with_reason(chan_idx < Types.enum_max_field_count(CHANNELS), @src(), "channel index `{d}` is outside the bounds for the number of channels (max index = {d})", .{ chan_idx, Types.enum_max_field_count(CHANNELS) - 1 });
             const idx = self.get_idx_native(x, y);
-            self.pixels[idx].raw[chan_idx] = val;
+            self.pixels.ptr[idx].raw[chan_idx] = val;
         }
         pub fn set_pixel_channel_idx_with_origin(self: Self, origin: Origin, x: u32, y: u32, chan_idx: anytype, val: CHANNEL_TYPE) void {
             assert_with_reason(chan_idx < Types.enum_max_field_count(CHANNELS), @src(), "channel index `{d}` is outside the bounds for the number of channels (max index = {d})", .{ chan_idx, Types.enum_max_field_count(CHANNELS) - 1 });
             const idx = self.get_idx_with_origin(origin, x, y);
-            self.pixels[idx].raw[chan_idx] = val;
+            self.pixels.ptr[idx].raw[chan_idx] = val;
         }
         pub fn get_subpixel_mix_near_native(self: Self, comptime F: type, x: F, y: F) Pixel {
             assert_with_reason(Types.type_is_float(F), @src(), "type `F` must be a float, got type `{s}`", .{@typeName(F)});
@@ -461,39 +539,36 @@ pub fn Bitmap(comptime DEFINITION: BitmapDefinition) type {
             self.get_subpixel_mix_near_native(F, self.get_x_with_origin_float(origin, F, x), self.get_y_with_origin_float(origin, F, y));
         }
 
-        pub fn discard_and_resize(self: Self, new_width: u32, new_height: u32, fill_color: ?Pixel, alloc: Allocator) Self {
+        pub fn discard_and_resize(self: *Self, new_width: u32, new_height: u32, fill_color: ?Pixel, alloc: Allocator) void {
             assert_with_reason(self.owns_memory, @src(), "cannot resize: this bitmap does not own its memory (it is a region-of or reference-to another bitmap, or is uninitialized)", .{});
             if (self.width == 0 or self.height == 0) {
-                if (new_width == 0 or new_height == 0) return self;
-                return Self.init(new_width, new_height, alloc);
+                if (new_width == 0 or new_height == 0) return;
+                self.* = init_from_existing_pixel_buffer(new_width, new_height, fill_color, self.pixels, alloc);
+                return;
             }
             if (new_width == 0 or new_height == 0) {
-                if (self.width == 0 or self.height == 0) return self;
-                const mem_len = self.width * self.height;
-                alloc.free(self.pixels[0..mem_len]);
-                return Self{};
+                if (self.width == 0 or self.height == 0) return;
+                self.clear(alloc);
+                return;
             }
-            const old_len = self.width * self.height;
             const new_len = new_width * new_height;
-            const new_mem = Utils.Alloc.realloc_custom(alloc, self.pixels[0..old_len], @intCast(new_len), .dont_copy_data, .init_new_custom_orelse_zero(fill_color), .dont_memset_old) catch |err| assert_allocation_failure(@src(), Pixel, new_len, err);
-            return Self{
-                .pixels = new_mem.ptr,
-                .width = new_width,
-                .height = new_height,
-            };
+            self.pixels.ptr.clear();
+            self.pixels.ptr.ensure_free_slots(@intCast(new_len), alloc);
+            self.width = new_width;
+            self.height = new_height;
         }
 
-        pub fn resize(self: Self, new_width: u32, new_height: u32, anchor: ResizeAnchor, fill_color: ?Pixel, alloc: Allocator) Self {
+        pub fn resize(self: *Self, new_width: u32, new_height: u32, anchor: ResizeAnchor, fill_color: ?Pixel, alloc: Allocator) void {
             assert_with_reason(self.owns_memory, @src(), "cannot resize: this bitmap does not own its memory (it is a region-of or reference-to another bitmap, or is uninitialized)", .{});
             if (self.width == 0 or self.height == 0) {
-                if (new_width == 0 or new_height == 0) return self;
-                return Self.init(new_width, new_height, alloc);
+                if (new_width == 0 or new_height == 0) return;
+                self.* = init_from_existing_pixel_buffer(new_width, new_height, fill_color, self.pixels, alloc);
+                return;
             }
             if (new_width == 0 or new_height == 0) {
-                if (self.width == 0 or self.height == 0) return self;
-                const mem_len = self.width * self.height;
-                alloc.free(self.pixels[0..mem_len]);
-                return Self{};
+                if (self.width == 0 or self.height == 0) return;
+                self.clear();
+                return;
             }
             const half_old_width = self.width >> 1;
             const half_old_height = self.height >> 1;
@@ -593,7 +668,7 @@ pub fn Bitmap(comptime DEFINITION: BitmapDefinition) type {
                     },
                 }
             }
-            return new_bmp;
+            self.* = new_bmp;
         }
 
         fn fill_rect_internal_native(self: Self, x1: u32, y1: u32, x2: u32, y2: u32, width: u32, height: u32, fill_color: Pixel) void {
@@ -748,7 +823,11 @@ pub fn Bitmap(comptime DEFINITION: BitmapDefinition) type {
             assert_with_reason(x + width <= self.width and y + height <= self.height, @src(), "bottom-right coordinate ({d}, {d}) is outside the bitmap width/height ({d}, {d})", .{ x + width, y + height, self.width, self.height });
             const idx = self.get_idx_native(x, y);
             return Self{
-                .pixels = self.pixels + idx,
+                .pixels = List(Pixel){
+                    .ptr = self.pixels.ptr + idx,
+                    .len = self.pixels.len - idx,
+                    .cap = self.pixels.cap - idx,
+                },
                 .width = width,
                 .height = height,
                 .major_stride = self.major_stride,

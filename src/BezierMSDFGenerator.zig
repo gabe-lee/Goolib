@@ -1663,6 +1663,14 @@ pub fn BezierMultiSignedDistanceFieldGenerator(comptime Float: type, comptime ES
 
                 pub const EDGE_SELECTOR_TYPE = EdgeSelectorType;
                 pub const EDGE_CACHE_TYPE = EDGE_SELECTOR_TYPE.EdgeCache;
+                pub const DISTANCE_TYPE = EdgeSelectorType.DISTANCE_TYPE;
+                pub const NUM_CHANNELS = switch (DISTANCE_TYPE) {
+                    Float => 1,
+                    MultiDistance => 3,
+                    MultiAndTrueDistance => 4,
+                    else => assert_unreachable(null, "invalid DISTANCE_TYPE, must be `Float` (the float type declared at comptime), `MultiDistance`, or `MultiAndTrueDistance`, got type `{s}`", .{@typeName(DISTANCE_TYPE)}),
+                };
+                pub const BITMAP_TYPE = FloatBitmap(NUM_CHANNELS);
 
                 shape_edge_selector: EdgeSelectorType = .{},
 
@@ -1697,6 +1705,14 @@ pub fn BezierMultiSignedDistanceFieldGenerator(comptime Float: type, comptime ES
 
                 pub const EDGE_SELECTOR_TYPE = EdgeSelectorType;
                 pub const EDGE_CACHE_TYPE = EDGE_SELECTOR_TYPE.EdgeCache;
+                pub const DISTANCE_TYPE = EdgeSelectorType.DISTANCE_TYPE;
+                pub const NUM_CHANNELS = switch (DISTANCE_TYPE) {
+                    Float => 1,
+                    MultiDistance => 3,
+                    MultiAndTrueDistance => 4,
+                    else => assert_unreachable(null, "invalid DISTANCE_TYPE, must be `Float` (the float type declared at comptime), `MultiDistance`, or `MultiAndTrueDistance`, got type `{s}`", .{@typeName(DISTANCE_TYPE)}),
+                };
+                pub const BITMAP_TYPE = FloatBitmap(NUM_CHANNELS);
 
                 pub fn init_from_shape(shape: *Shape, alloc: Allocator) Self {
                     var self = Self{
@@ -1854,6 +1870,12 @@ pub fn BezierMultiSignedDistanceFieldGenerator(comptime Float: type, comptime ES
                     .projection = projection,
                 };
             }
+            pub fn new_from_range(range: Range, projection: Projection) Transformation {
+                return Transformation{
+                    .distance_mapping = DistanceMapping.new_from_range(range),
+                    .projection = projection,
+                };
+            }
         };
 
         pub const ErrorStencilBitmapDefEnum = enum(u8) {
@@ -1863,6 +1885,7 @@ pub fn BezierMultiSignedDistanceFieldGenerator(comptime Float: type, comptime ES
         pub const ErrorStencilBitmapDef = BitmapDef{
             .CHANNEL_TYPE = ErrorFlags,
             .CHANNELS_ENUM = ErrorStencilBitmapDefEnum,
+            .Y_ORDER = .bottom_to_top,
         };
 
         pub const ErrorStencilBitmap = Bitmap(ErrorStencilBitmapDef);
@@ -1880,8 +1903,20 @@ pub fn BezierMultiSignedDistanceFieldGenerator(comptime Float: type, comptime ES
                     .stencil = stencil,
                     .transform = transform,
                 };
-                self.stencil.fill_all(ErrorFlags.NONE);
+                self.stencil.fill_all(ErrorStencilBitmap.Pixel{ .raw = .{ErrorFlags.from_flag(.NONE)} });
                 return self;
+            }
+
+            pub fn protect_all(self: *ErrorCorrector) void {
+                var y: u32 = 0;
+                var x: u32 = undefined;
+                while (y < self.stencil.height) : (y += 1) {
+                    x = 0;
+                    const row = self.stencil.get_h_scanline_native(0, y, self.stencil.width);
+                    while (x < self.stencil.width) : (x += 1) {
+                        row.ptr[x].set(.flags, ErrorStencilBitmap.Pixel{ .raw = .{ErrorFlags.from_flag(.PROTECTED)} });
+                    }
+                }
             }
 
             pub fn protect_corners(self: *ErrorCorrector, shape: *Shape) void {
@@ -1930,7 +1965,7 @@ pub fn BezierMultiSignedDistanceFieldGenerator(comptime Float: type, comptime ES
                 }
             }
 
-            pub fn protect_edges(self: *ErrorCorrector, comptime NUM_CHANNELS: comptime_int, msdf_region: *FloatBitmap(NUM_CHANNELS)) void {
+            pub fn protect_edges(self: *ErrorCorrector, comptime NUM_CHANNELS: comptime_int, msdf_region: FloatBitmap(NUM_CHANNELS)) void {
                 const BMP = FloatBitmap(NUM_CHANNELS);
                 const edge_util = EdgeMaskFuncs(NUM_CHANNELS);
                 var radius: Float = undefined;
@@ -2124,7 +2159,246 @@ pub fn BezierMultiSignedDistanceFieldGenerator(comptime Float: type, comptime ES
                     }
                 }
             }
+
+            pub fn perform_error_correction(comptime NUM_CHANNELS: comptime_int, msdf_bitmap: FloatBitmap(NUM_CHANNELS), shape: *Shape, transform: Transformation, config: Generator.GeneratorConfig) void {
+                if (config.msdf_error_correction_mode == .DISABLED) return;
+                config.error_stencil_buffer.discard_and_resize(msdf_bitmap.width, msdf_bitmap.height, ErrorStencilBitmap.Pixel{ .raw = .{ErrorFlags.from_flag(.NONE)} }, config.alloc);
+                var corrector = ErrorCorrector.init(config.error_stencil_buffer, transform);
+                corrector.min_deviation_ratio = config.min_deviation_ratio;
+                switch (config.msdf_error_correction_mode) {
+                    .FAST => {
+                        if (config.msdf_error_correction_fast_protection_mode == .PROTECT_ALL_PIXELS) {
+                            corrector.protect_all();
+                        }
+                        corrector.find_errors_msdf_only(NUM_CHANNELS, msdf_bitmap, config.alloc);
+                    },
+                    else => {
+                        corrector.min_improve_ratio = config.min_improve_ratio;
+                        switch (config.msdf_error_correction_mode) {
+                            .EDGE_PRIORITY => {
+                                corrector.protect_corners(shape);
+                                corrector.protect_edges(NUM_CHANNELS, msdf_bitmap);
+                            },
+                            .EDGE_ONLY => {
+                                corrector.protect_all();
+                            },
+                            else => {},
+                        }
+                        if (config.msdf_error_correction_distance_check_mode == .DO_NOT_CHECK_DISTANCE or (config.msdf_error_correction_distance_check_mode == .CHECK_DISTANCE_AT_EDGE and config.msdf_error_correction_mode != .EDGE_ONLY)) {
+                            corrector.find_errors_msdf_only(NUM_CHANNELS, msdf_bitmap, config.alloc);
+                            if (config.msdf_error_correction_distance_check_mode == .CHECK_DISTANCE_AT_EDGE) {
+                                corrector.protect_all();
+                            }
+                        }
+                        if (config.msdf_error_correction_distance_check_mode == .ALWAYS_CHECK_DISTANCE or config.msdf_error_correction_distance_check_mode == .CHECK_DISTANCE_AT_EDGE) {
+                            if (config.overlap_support == .HANDLE_OVERLAPPING_CONTOURS) {
+                                corrector.find_errors_msdf_and_shape(OverlappingContourCombiner(EdgeSelectorForNumChannels(NUM_CHANNELS)), NUM_CHANNELS, msdf_bitmap, shape, config.alloc);
+                            } else {
+                                corrector.find_errors_msdf_and_shape(SimpleContourCombiner(EdgeSelectorForNumChannels(NUM_CHANNELS)), NUM_CHANNELS, msdf_bitmap, shape, config.alloc);
+                            }
+                        }
+                    },
+                }
+                corrector.apply_error_correction(NUM_CHANNELS, msdf_bitmap);
+            }
         };
+
+        pub const Generator = struct {
+            /// Whether or not to support overlapping contours (uses more complex algorithm)
+            pub const ContourOverlapSupport = enum(u8) {
+                DO_NOT_HANDLE_OVERLAPPING_CONTOURS,
+                HANDLE_OVERLAPPING_CONTOURS,
+            };
+
+            pub const FastErrorProtectionMode = enum(u8) {
+                ONLY_PROTECT_EDGES_AND_CORNERS,
+                PROTECT_ALL_PIXELS,
+            };
+
+            pub const ErrorCorrectionMode = enum(u8) {
+                /// Skips error correction pass.
+                DISABLED,
+                /// Does not use the shape when perofrming error correction,
+                FAST,
+                /// Corrects all discontinuities of the distance field regardless if edges are adversely affected.
+                INDISCRIMINATE,
+                /// Corrects artifacts at edges and other discontinuous distances only if it does not affect edges or corners.
+                EDGE_PRIORITY,
+                /// Only corrects artifacts at edges.
+                EDGE_ONLY,
+            };
+
+            /// Configuration of whether to use an algorithm that computes the exact shape distance at the positions of suspected artifacts. This algorithm can be much slower.
+            pub const DistanceCheckMode = enum(u8) {
+                /// Never computes exact shape distance.
+                DO_NOT_CHECK_DISTANCE,
+                /// Only computes exact shape distance at edges. Provides a good balance between speed and precision.
+                CHECK_DISTANCE_AT_EDGE,
+                /// Computes and compares the exact shape distance for each suspected artifact.
+                ALWAYS_CHECK_DISTANCE,
+            };
+
+            /// The type of final signed distance field bitmap to produce
+            pub const GenerateType = enum(u8) {
+                /// true signed distance field, 1 channel
+                TSDF,
+                /// psuedo/perpendicular signed distance field, 1 channel
+                PSDF,
+                /// multi signed distance field, 3 channels
+                MSDF,
+                /// multi AND true signed distance field, 4 channels
+                MTSDF,
+            };
+
+            pub const GeneratorConfig = struct {
+                /// Whether or not to support overlapping contours (uses more complex algorithm)
+                overlap_support: ContourOverlapSupport = .HANDLE_OVERLAPPING_CONTOURS,
+                /// The minimum ratio between the actual and maximum expected distance delta to be considered an error.
+                min_deviation_ratio: Float = DEFAULT_MIN_ERROR_DEVIATION_RATIO,
+                /// The minimum ratio between the pre-correction distance error and the post-correction distance error. Has no effect for DO_NOT_CHECK_DISTANCE.
+                min_improve_ratio: Float = DEFAULT_MIN_ERROR_IMPROVE_RATIO,
+                /// Configuration of whether to use an algorithm that computes the exact shape distance at the positions of suspected artifacts. This algorithm can be much slower.
+                msdf_error_correction_distance_check_mode: DistanceCheckMode = .CHECK_DISTANCE_AT_EDGE,
+                /// How to apply/compute error correction for MSDF bitmaps, if any
+                msdf_error_correction_mode: ErrorCorrectionMode = .EDGE_PRIORITY,
+                /// Whether or not to protect ALL pixels in `.FAST` error correction mode
+                msdf_error_correction_fast_protection_mode: FastErrorProtectionMode = .ONLY_PROTECT_EDGES_AND_CORNERS,
+                /// re-usable error stencil buffer
+                error_stencil_buffer: ErrorStencilBitmap = .{},
+                /// whether or not to automatically free the error stencil or retain it for future use
+                free_error_stencil_buffer_after: bool = false,
+                /// the allocator to use for allocations,
+                alloc: Allocator,
+            };
+
+            fn generate_field_inner(comptime CONTOUR_COMBINER_TYPE: type, output: FloatBitmap(CONTOUR_COMBINER_TYPE.NUM_CHANNELS), shape: *Shape, transform: Transformation, config: GeneratorConfig) void {
+                const converter = DistancePixelConverter(CONTOUR_COMBINER_TYPE.DISTANCE_TYPE).new(transform.distance_mapping);
+                const distance_finder = ShapeDistanceFinder(CONTOUR_COMBINER_TYPE).init(shape, config.alloc);
+                var x_dir: i32 = 1;
+                var y: u32 = 0;
+                var x: i32 = undefined;
+                var abs_x: u32 = undefined;
+                //TODO enable some sort of multi-threading here?
+                while (y < output.height) : (y += 1) {
+                    abs_x = 0;
+                    x = if (x_dir == 1) 0 else @intCast(output.width - 1);
+                    while (abs_x < output.width) : ({
+                        abs_x += 1;
+                        x += x_dir;
+                    }) {
+                        const pixel_ptr = output.get_pixel_ptr_with_origin(.bot_left, @intCast(x), y);
+                        const point = transform.projection.un_project(.new(num_cast(x, Float) + 0.5, num_cast(y, Float) + 0.5));
+                        const distance = distance_finder.distance(point, config.alloc);
+                        converter.apply(pixel_ptr, distance);
+                    }
+                    x_dir = -x_dir;
+                }
+            }
+
+            pub fn generate_signed_distance_field_into_existing_bitmap_comptime_kind(comptime kind: GenerateType, output: BitmapTypeForGeneratorKind(kind), shape: *Shape, transform: Transformation, config: GeneratorConfig) void {
+                switch (kind) {
+                    .TSDF => switch (config.overlap_support) {
+                        .DO_NOT_HANDLE_OVERLAPPING_CONTOURS => {
+                            generate_field_inner(SimpleContourCombiner(TrueDistanceSelector), output, shape, transform, config);
+                        },
+                        .HANDLE_OVERLAPPING_CONTOURS => {
+                            generate_field_inner(OverlappingContourCombiner(TrueDistanceSelector), output, shape, transform, config);
+                        },
+                    },
+                    .PSDF => switch (config.overlap_support) {
+                        .DO_NOT_HANDLE_OVERLAPPING_CONTOURS => {
+                            generate_field_inner(SimpleContourCombiner(PerpendicularDistanceSelector), output, shape, transform, config);
+                        },
+                        .HANDLE_OVERLAPPING_CONTOURS => {
+                            generate_field_inner(OverlappingContourCombiner(PerpendicularDistanceSelector), output, shape, transform, config);
+                        },
+                    },
+                    .MSDF => switch (config.overlap_support) {
+                        .DO_NOT_HANDLE_OVERLAPPING_CONTOURS => {
+                            generate_field_inner(SimpleContourCombiner(MultiDistanceSelector), output, shape, transform, config);
+                            ErrorCorrector.perform_error_correction(3, output, shape, transform, config);
+                        },
+                        .HANDLE_OVERLAPPING_CONTOURS => {
+                            generate_field_inner(OverlappingContourCombiner(MultiDistanceSelector), output, shape, transform, config);
+                            ErrorCorrector.perform_error_correction(3, output, shape, transform, config);
+                        },
+                    },
+                    .MTSDF => switch (config.overlap_support) {
+                        .DO_NOT_HANDLE_OVERLAPPING_CONTOURS => {
+                            generate_field_inner(SimpleContourCombiner(MultiAndTrueDistanceSelector), output, shape, transform, config);
+                            ErrorCorrector.perform_error_correction(4, output, shape, transform, config);
+                        },
+                        .HANDLE_OVERLAPPING_CONTOURS => {
+                            generate_field_inner(OverlappingContourCombiner(MultiAndTrueDistanceSelector), output, shape, transform, config);
+                            ErrorCorrector.perform_error_correction(4, output, shape, transform, config);
+                        },
+                    },
+                }
+                if (config.free_error_stencil_buffer_after) {
+                    config.error_stencil_buffer.free(config.alloc);
+                }
+            }
+
+            // CHECKPOINT derive the framing/transformation code from the original MSDFGen/main.cpp cli code
+        };
+
+        pub fn BitmapTypeForGeneratorKind(comptime kind: Generator.GenerateType) type {
+            return switch (kind) {
+                .TSDF, .PSDF => FloatBitmap(1),
+                .MSDF => FloatBitmap(3),
+                .MTSDF => FloatBitmap(4),
+            };
+        }
+
+        pub fn EdgeSelectorForNumChannels(comptime NUM_CHANNELS: comptime_int) type {
+            return switch (NUM_CHANNELS) {
+                1 => TrueDistanceSelector,
+                3 => MultiDistanceSelector,
+                4 => MultiAndTrueDistanceSelector,
+                else => assert_unreachable(@src(), "invalid NUM_CHANNELS, must be 1 (TrueDistanceSelector), 3 (MultiDistanceSelector), or  4 (MultiAndTrueDistanceSelector), got `{d}`", .{NUM_CHANNELS}),
+            };
+        }
+
+        pub fn DistancePixelConverter(comptime DISTANCE_TYPE: type) type {
+            return struct {
+                const Self = @This();
+
+                mapping: DistanceMapping,
+
+                pub fn new(mapping: DistanceMapping) Self {
+                    return Self{
+                        .mapping = mapping,
+                    };
+                }
+
+                pub const BITMAP_TYPE = switch (DISTANCE_TYPE) {
+                    Float => FloatBitmap(1),
+                    MultiDistance => FloatBitmap(3),
+                    MultiAndTrueDistance => FloatBitmap(4),
+                    else => assert_unreachable(null, "invalid DISTANCE_TYPE, must be `Float` (the float type declared at comptime), `MultiDistance`, or `MultiAndTrueDistance`, got type `{s}`", .{@typeName(DISTANCE_TYPE)}),
+                };
+
+                pub fn apply(self: Self, pixel: *BITMAP_TYPE.Pixel, distance: DISTANCE_TYPE) void {
+                    switch (DISTANCE_TYPE) {
+                        Float => {
+                            pixel.set(.alpha, self.mapping.calc(distance));
+                        },
+                        MultiDistance => {
+                            pixel.set(.red, self.mapping.calc(distance.r));
+                            pixel.set(.green, self.mapping.calc(distance.g));
+                            pixel.set(.blue, self.mapping.calc(distance.b));
+                        },
+                        MultiAndTrueDistance => {
+                            pixel.set(.red, self.mapping.calc(distance.r));
+                            pixel.set(.green, self.mapping.calc(distance.g));
+                            pixel.set(.blue, self.mapping.calc(distance.b));
+                            pixel.set(.alpha, self.mapping.calc(distance.a));
+                        },
+                        else => assert_unreachable(@src(), "invalid DISTANCE_TYPE, must be `Float` (the float type declared at comptime), `MultiDistance`, or `MultiAndTrueDistance`, got type `{s}`", .{@typeName(DISTANCE_TYPE)}),
+                    }
+                }
+            };
+        }
 
         pub const BaseArtifactClassifier = struct {
             span: Float,
@@ -2167,10 +2441,10 @@ pub fn BezierMultiSignedDistanceFieldGenerator(comptime Float: type, comptime ES
 
         pub fn FloatBitmapDef(comptime NUM_CHANNELS: comptime_int) type {
             return switch (NUM_CHANNELS) {
-                1 => BitmapDef{ .CHANNEL_TYPE = f32, .CHANNELS_ENUM = BitmapModule.A_Channel },
-                2 => BitmapDef{ .CHANNEL_TYPE = f32, .CHANNELS_ENUM = BitmapModule.RA_Channels },
-                3 => BitmapDef{ .CHANNEL_TYPE = f32, .CHANNELS_ENUM = BitmapModule.RGB_Channels },
-                4 => BitmapDef{ .CHANNEL_TYPE = f32, .CHANNELS_ENUM = BitmapModule.RGBA_Channels },
+                1 => BitmapDef{ .CHANNEL_TYPE = f32, .CHANNELS_ENUM = BitmapModule.A_Channel, .Y_ORDER = .bottom_to_top },
+                2 => BitmapDef{ .CHANNEL_TYPE = f32, .CHANNELS_ENUM = BitmapModule.RA_Channels, .Y_ORDER = .bottom_to_top },
+                3 => BitmapDef{ .CHANNEL_TYPE = f32, .CHANNELS_ENUM = BitmapModule.RGB_Channels, .Y_ORDER = .bottom_to_top },
+                4 => BitmapDef{ .CHANNEL_TYPE = f32, .CHANNELS_ENUM = BitmapModule.RGBA_Channels, .Y_ORDER = .bottom_to_top },
                 else => assert_unreachable(@src(), "`NUM_CHANNELS` value (number of msdf bitmap channels) must be between 1-4, `{d}` not supported", .{NUM_CHANNELS}),
             };
         }

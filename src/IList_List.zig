@@ -31,6 +31,10 @@ const IList = Root.IList;
 const Utils = Root.Utils;
 const DummyAlloc = Root.DummyAllocator;
 
+const assert_with_reason = Assert.assert_with_reason;
+const assert_unreachable = Assert.assert_unreachable;
+const assert_allocation_failure = Assert.assert_allocation_failure;
+
 pub const Concrete = IList.Concrete;
 
 pub const FilterMode = Concrete.FilterMode;
@@ -70,6 +74,32 @@ pub fn List(comptime T: type) type {
         }
         pub fn slice_range(self: Self, range: Range) []T {
             return self.ptr[range.first_idx .. range.last_idx + 1];
+        }
+
+        pub fn cast_to_byte_list(self: Self) List(u8) {
+            if (T == u8) return self;
+            return List(u8){
+                .ptr = @ptrCast(@alignCast(self.ptr)),
+                .len = self.len * @sizeOf(T),
+                .cap = self.cap * @sizeOf(T),
+            };
+        }
+        pub fn cast_to_type(self: Self, comptime TT: type) List(TT) {
+            const byte_len = self.len * @sizeOf(T);
+            const byte_cap = self.cap * @sizeOf(T);
+            const new_t_len = byte_len / @sizeOf(T);
+            const new_t_cap = byte_cap / @sizeOf(T);
+            const new_t_byte_len = new_t_len * @sizeOf(TT);
+            const new_t_byte_cap = new_t_cap * @sizeOf(TT);
+            const addr = @intFromPtr(self.ptr);
+            assert_with_reason(std.mem.isAligned(addr, @alignOf(TT)), @src(), "cannot convert from list type `{s}` to `{s}`, pointer not aligned to `{d}` for new type", .{ @typeName(T), @typeName(TT), @alignOf(TT) });
+            assert_with_reason(new_t_byte_len == byte_len, @src(), "cannot convert from list type `{s}` to `{s}`, old len does not convert evenly into new len (loss of bytes)", .{ @typeName(T), @typeName(TT) });
+            assert_with_reason(new_t_byte_cap == byte_cap, @src(), "cannot convert from list type `{s}` to `{s}`, old cap does not convert evenly into new cap (loss of bytes)", .{ @typeName(T), @typeName(TT) });
+            return List(TT){
+                .ptr = @ptrCast(@alignCast(self.ptr)),
+                .len = new_t_len,
+                .cap = new_t_cap,
+            };
         }
 
         //*** BEGIN PROTOTYPE ***
