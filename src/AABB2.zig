@@ -80,6 +80,13 @@ pub fn define_aabb2_type(comptime T: type) type {
             return result;
         }
 
+        pub fn get_size(self: T_AABB2) T_Vec2 {
+            return T_Vec2{
+                .x = self.x_max - self.x_min,
+                .y = self.y_max - self.y_min,
+            };
+        }
+
         pub fn combine_with(self: T_AABB2, other: T_AABB2) T_AABB2 {
             return T_AABB2{
                 .x_min = @min(self.x_min, other.x_min),

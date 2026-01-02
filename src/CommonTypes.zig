@@ -286,3 +286,8 @@ pub const Endian = enum(u8) {
 
     pub const NATIVE = if (build.cpu.arch.endian() == .little) Endian.LITTLE else Endian.BIG;
 };
+
+pub const AngleType = enum(u8) {
+    RADIANS,
+    DEGREES,
+};
