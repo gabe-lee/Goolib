@@ -95,6 +95,27 @@ pub fn define_vec2_type(comptime T: type) type {
             return T_Vec2{ .x = 1 / self.x, .y = 1 / self.y };
         }
 
+        pub fn ceil(self: T_Vec2) T_Vec2 {
+            return T_Vec2{
+                .x = @ceil(self.x),
+                .y = @ceil(self.y),
+            };
+        }
+
+        pub fn floor(self: T_Vec2) T_Vec2 {
+            return T_Vec2{
+                .x = @floor(self.x),
+                .y = @floor(self.y),
+            };
+        }
+
+        pub fn round(self: T_Vec2) T_Vec2 {
+            return T_Vec2{
+                .x = @round(self.x),
+                .y = @round(self.y),
+            };
+        }
+
         pub fn dot_product(self: T_Vec2, other: T_Vec2) T {
             return (self.x * other.x) + (self.y * other.y);
         }

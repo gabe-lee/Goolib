@@ -28,6 +28,7 @@ const Allocator = std.mem.Allocator;
 
 const Root = @import("./_root.zig");
 const Utils = Root.Utils;
+const MathX = Root.Math;
 
 pub fn define_aabb2_type(comptime T: type) type {
     return extern struct {
@@ -78,6 +79,68 @@ pub fn define_aabb2_type(comptime T: type) type {
                 result.y_max = @min(result.y_max, point.y);
             }
             return result;
+        }
+
+        pub fn get_min_point(self: T_AABB2) T_Vec2 {
+            return T_Vec2.new(self.x_min, self.y_min);
+        }
+        pub fn get_max_point(self: T_AABB2) T_Vec2 {
+            return T_Vec2.new(self.x_max, self.y_max);
+        }
+
+        pub fn scale(self: T_AABB2, factor: anytype) T_AABB2 {
+            return T_AABB2{
+                .x_min = MathX.upgrade_multiply_out(self.x_min, factor, T),
+                .x_max = MathX.upgrade_multiply_out(self.x_max, factor, T),
+                .y_min = MathX.upgrade_multiply_out(self.y_min, factor, T),
+                .y_max = MathX.upgrade_multiply_out(self.y_max, factor, T),
+            };
+        }
+
+        pub fn multiply(self: T_AABB2, vec: T_Vec2) T_AABB2 {
+            return T_AABB2{
+                .x_min = self.x_min * vec.x,
+                .x_max = self.x_max * vec.x,
+                .y_min = self.y_min * vec.y,
+                .y_max = self.y_max * vec.y,
+            };
+        }
+
+        pub fn divide(self: T_AABB2, vec: T_Vec2) T_AABB2 {
+            return T_AABB2{
+                .x_min = self.x_min / vec.x,
+                .x_max = self.x_max / vec.x,
+                .y_min = self.y_min / vec.y,
+                .y_max = self.y_max / vec.y,
+            };
+        }
+
+        pub fn add_translate(self: T_AABB2, vec: T_Vec2) T_AABB2 {
+            return T_AABB2{
+                .x_min = self.x_min + vec.x,
+                .x_max = self.x_max + vec.x,
+                .y_min = self.y_min + vec.y,
+                .y_max = self.y_max + vec.y,
+            };
+        }
+
+        pub fn subtract_translate(self: T_AABB2, vec: T_Vec2) T_AABB2 {
+            return T_AABB2{
+                .x_min = self.x_min - vec.x,
+                .x_max = self.x_max - vec.x,
+                .y_min = self.y_min - vec.y,
+                .y_max = self.y_max - vec.y,
+            };
+        }
+
+        pub fn with_mins_shifted_to_zero(self: T_AABB2) T_AABB2 {
+            const shift = T_Vec2.new(self.x_min, self.y_min);
+            return T_AABB2{
+                .x_min = 0,
+                .y_min = 0,
+                .x_max = self.x_max - shift.x,
+                .y_max = self.y_max - shift.y,
+            };
         }
 
         pub fn get_size(self: T_AABB2) T_Vec2 {

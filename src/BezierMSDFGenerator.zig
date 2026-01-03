@@ -169,6 +169,10 @@ pub fn BezierMultiSignedDistanceFieldGenerator(comptime Float: type, comptime ES
             low: Float,
             high: Float,
 
+            pub fn width(self: Range) Float {
+                return self.high - self.low;
+            }
+
             pub fn multiplied_by(self: Range, factor: Float) Range {
                 return Range{
                     .low = self.low * factor,
@@ -1340,8 +1344,8 @@ pub fn BezierMultiSignedDistanceFieldGenerator(comptime Float: type, comptime ES
         };
 
         pub const Shape = struct {
-            contours: List(Contour),
-            y_orientation: YAxisOrientation = .Y_DOWNWARD,
+            contours: List(Contour) = .{},
+            y_orientation: YAxisOrientation = .Y_UPWARD,
 
             pub fn init(cap: usize, alloc: Allocator) Shape {
                 return Shape{
@@ -1375,22 +1379,22 @@ pub fn BezierMultiSignedDistanceFieldGenerator(comptime Float: type, comptime ES
                 return true;
             }
 
-            pub fn normalize(self: *Shape, alloc: Allocator) void {
+            pub fn normalize(self: *Shape, shape_alloc: Allocator) void {
                 for (self.contours.slice()) |*contour| {
                     if (contour.edges.len == 1) {
                         @branchHint(.unlikely);
                         const parts: [3]EdgeSegment = contour.edges.ptr[0].edge.split_in_thirds();
                         for (contour.edges.slice()) |edge_ref| {
-                            edge_ref.deallocate(alloc);
+                            edge_ref.deallocate(shape_alloc);
                         }
                         contour.edges.clear();
-                        var ref = EdgeSegmentRef.allocate_new(alloc);
+                        var ref = EdgeSegmentRef.allocate_new(shape_alloc);
                         ref.edge.* = parts[0];
-                        ref = EdgeSegmentRef.allocate_new(alloc);
+                        ref = EdgeSegmentRef.allocate_new(shape_alloc);
                         ref.edge.* = parts[1];
-                        ref = EdgeSegmentRef.allocate_new(alloc);
+                        ref = EdgeSegmentRef.allocate_new(shape_alloc);
                         ref.edge.* = parts[2];
-                        contour.edges.append(ref, alloc);
+                        contour.edges.append(ref, shape_alloc);
                     } else {
                         var prev_edge_ref: *EdgeSegmentRef = contour.edges.get_last_ptr();
                         var prev_tangent: Vector = undefined;
@@ -1408,6 +1412,16 @@ pub fn BezierMultiSignedDistanceFieldGenerator(comptime Float: type, comptime ES
                                 curr_edge_ref.deconverge_edge(0, axis.perp_cw());
                             }
                             prev_edge_ref = curr_edge_ref;
+                        }
+                    }
+                }
+            }
+
+            pub fn translate(self: *Shape, vec: Vector) void {
+                for (self.contours.slice()) |*contour| {
+                    for (contour.edges.slice()) |*edge_ref| {
+                        for (edge_ref.edge.get_points()) |*point| {
+                            point.* = point.add(vec);
                         }
                     }
                 }
@@ -1441,8 +1455,8 @@ pub fn BezierMultiSignedDistanceFieldGenerator(comptime Float: type, comptime ES
             }
 
             pub const Scanline = struct {
-                intersections: List(SingleScanlineIntersection),
-                last_index: usize,
+                intersections: List(SingleScanlineIntersection) = .{},
+                last_index: usize = 0,
 
                 pub fn init_cap(cap: usize, alloc: Allocator) Scanline {
                     return Scanline{
@@ -1571,14 +1585,14 @@ pub fn BezierMultiSignedDistanceFieldGenerator(comptime Float: type, comptime ES
                 return scanline;
             }
 
-            pub fn get_horizontal_scanline_intersections(self: Shape, y_value: Float, scanline: *Scanline, alloc: Allocator) void {
+            pub fn get_horizontal_scanline_intersections(self: Shape, y_value: Float, scanline: *Scanline, scanline_allocator: Allocator) void {
                 scanline.reset();
                 for (self.contours.slice()) |contour| {
                     for (contour.edges.slice()) |edge_ref| {
                         const edge_intersections = edge_ref.edge.horizontal_intersections(y_value);
                         for (0..edge_intersections.count) |i| {
                             const inter = edge_intersections.intersections[i];
-                            _ = scanline.intersections.append(inter, alloc);
+                            _ = scanline.intersections.append(inter, scanline_allocator);
                         }
                     }
                 }
@@ -1602,11 +1616,11 @@ pub fn BezierMultiSignedDistanceFieldGenerator(comptime Float: type, comptime ES
                 }
             };
 
-            pub fn orient_contours(self: *Shape, alloc: Allocator) void {
-                var orientations = List(i32).init_capacity(@intCast(self.contours.len), alloc);
-                defer orientations.free(alloc);
-                var intersections = List(IntersectionWithCountourIdx).init_capacity(@intCast(self.contours.len), alloc);
-                defer intersections.free(alloc);
+            pub fn orient_contours(self: *Shape, temp_alloc: Allocator) void {
+                var orientations = List(i32).init_capacity(@intCast(self.contours.len), temp_alloc);
+                defer orientations.free(temp_alloc);
+                var intersections = List(IntersectionWithCountourIdx).init_capacity(@intCast(self.contours.len), temp_alloc);
+                defer intersections.free(temp_alloc);
                 for (self.contours.slice(), 0..) |contour, i| {
                     if (i >= orientations.len and !contour.edges.is_empty()) {
                         orientations.len = @intCast(i);
@@ -1631,7 +1645,7 @@ pub fn BezierMultiSignedDistanceFieldGenerator(comptime Float: type, comptime ES
                                         .inter = edge_intersections.intersections[k],
                                         .contour_idx = j,
                                     };
-                                    _ = intersections.append(isection, alloc);
+                                    _ = intersections.append(isection, temp_alloc);
                                     k += 1;
                                 }
                             }
@@ -1668,7 +1682,7 @@ pub fn BezierMultiSignedDistanceFieldGenerator(comptime Float: type, comptime ES
                 }
             }
 
-            pub fn edge_coloring_simple(self: *Shape, corner_list: *List(usize), angle_threshold: Float, seed: *u64, alloc: Allocator) void {
+            pub fn edge_coloring_simple(self: *Shape, shape_alloc: Allocator, corner_list: *List(usize), corner_list_alloc: Allocator, angle_threshold: Float, seed: *u64) void {
                 const cross_product_threshold = @sin(angle_threshold);
                 var color = EdgeColor.init_color(seed);
                 corner_list.clear();
@@ -1681,7 +1695,7 @@ pub fn BezierMultiSignedDistanceFieldGenerator(comptime Float: type, comptime ES
                         const prev_tangent = contour.edges.get_last().edge.tangent_at_interp(1);
                         for (contour.edges.slice(), 0..) |edge_ref, edge_idx| {
                             if (prev_tangent.normalize().forms_corner_dot_or_cross_product_threshold(edge_ref.edge.tangent_at_interp(0).normalize(), cross_product_threshold)) {
-                                _ = corner_list.append(edge_idx, alloc);
+                                _ = corner_list.append(edge_idx, corner_list_alloc);
                             }
                             prev_tangent = edge_ref.edge.tangent_at_interp(1);
                         }
@@ -1735,9 +1749,9 @@ pub fn BezierMultiSignedDistanceFieldGenerator(comptime Float: type, comptime ES
                                 parts[2].color = colors[2];
                                 part_count = 3;
                             }
-                            contour.clear(alloc);
+                            contour.clear(shape_alloc);
                             for (0..part_count) |part_idx| {
-                                contour.allocate_and_add_edge(parts[part_idx], alloc);
+                                contour.allocate_and_add_edge(parts[part_idx], shape_alloc);
                             }
                         } else {
                             // multiple corners
@@ -1761,7 +1775,7 @@ pub fn BezierMultiSignedDistanceFieldGenerator(comptime Float: type, comptime ES
                 }
             }
 
-            pub fn edge_coloring_inktrap(self: *Shape, corner_list: *List(EdgeColoringInktrapCorner), angle_threshold: Float, seed: *u64, alloc: Allocator) void {
+            pub fn edge_coloring_inktrap(self: *Shape, shape_alloc: Allocator, corner_list: *List(EdgeColoringInktrapCorner), corner_list_alloc: Allocator, angle_threshold: Float, seed: *u64) void {
                 const cross_product_threshold = @sin(angle_threshold);
                 var color = EdgeColor.init_color(seed);
                 corner_list.clear();
@@ -1779,7 +1793,7 @@ pub fn BezierMultiSignedDistanceFieldGenerator(comptime Float: type, comptime ES
                                     .idx = edge_idx,
                                     .prev_edge_length_estimate = spline_length,
                                 };
-                                _ = corner_list.append(corner, alloc);
+                                _ = corner_list.append(corner, corner_list_alloc);
                                 spline_length = 0;
                             }
                             spline_length += edge_ref.edge.estimate_length();
@@ -1835,9 +1849,9 @@ pub fn BezierMultiSignedDistanceFieldGenerator(comptime Float: type, comptime ES
                                 parts[2].color = colors[2];
                                 part_count = 3;
                             }
-                            contour.clear(alloc);
+                            contour.clear(shape_alloc);
                             for (0..part_count) |part_idx| {
-                                contour.allocate_and_add_edge(parts[part_idx], alloc);
+                                contour.allocate_and_add_edge(parts[part_idx], shape_alloc);
                             }
                         } else {
                             // multiple corners
@@ -2437,16 +2451,22 @@ pub fn BezierMultiSignedDistanceFieldGenerator(comptime Float: type, comptime ES
             pub const DistanceCheckMode = enum(u8) {
                 /// Never computes exact shape distance.
                 DO_NOT_CHECK_DISTANCE,
-                /// An alternate pass that checks scanlines instead of exact pixel distance
-                SCANLINE_PASS,
                 /// Only computes exact shape distance at edges. Provides a good balance between speed and precision.
                 CHECK_DISTANCE_AT_EDGE,
                 /// Computes and compares the exact shape distance for each suspected artifact.
                 ALWAYS_CHECK_DISTANCE,
             };
 
+            /// Whther to perform a final scanline-pass for error correction, not compatible with `msdf_error_correction_distance_check_mode` other than `.DO_NOT_CHECK_DISTANCE`
+            pub const ErrorCorrectionScanlinePass = enum(u8) {
+                /// Do not perform any additional/alternate error correction
+                NO_SCANLINE_PASS,
+                /// Use an alternate/additional error correction pass using horizontal scanlines instead of pixel distance checks
+                PERFORM_SCANLINE_PASS,
+            };
+
             /// The type of final signed distance field bitmap to produce
-            pub const GenerateType = enum(u8) {
+            pub const GeneratedKind = enum(u8) {
                 /// true signed distance field, 1 channel
                 TSDF,
                 /// psuedo/perpendicular signed distance field, 1 channel
@@ -2483,6 +2503,16 @@ pub fn BezierMultiSignedDistanceFieldGenerator(comptime Float: type, comptime ES
                 REVERSE_EXISTING_WINDING,
             };
 
+            /// Which edge coloring algorithm to use for MSDF and MTSDF fields
+            pub const EdgeColoringMode = enum(u8) {
+                /// Do not perform edge coloring, for example if edge colors wre manually provided
+                SKIP,
+                /// Simple algorithm for determining edge color
+                SIMPLE,
+                /// Better algorithm for determining edge color
+                INKTRAP,
+            };
+
             pub const Angle = union(Root.CommonTypes.AngleType) {
                 RADIANS: Float,
                 DEGREES: Float,
@@ -2508,6 +2538,10 @@ pub fn BezierMultiSignedDistanceFieldGenerator(comptime Float: type, comptime ES
                 }
             };
 
+            /// Whether or not to print warnings about possible generation issues to STDERR
+            print_warnings_to_console: bool = false,
+            /// If provided, uses this integer for random bits when edge coloring
+            edge_coloring_seed: ?u64,
             /// Whether or not to support overlapping contours (uses more complex algorithm)
             overlap_support: ContourOverlapSupport = .HANDLE_OVERLAPPING_CONTOURS,
             /// The minimum ratio between the actual and maximum expected distance delta to be considered an error.
@@ -2520,27 +2554,615 @@ pub fn BezierMultiSignedDistanceFieldGenerator(comptime Float: type, comptime ES
             msdf_error_correction_mode: ErrorCorrectionMode = .EDGE_PRIORITY,
             /// Whether or not to protect ALL pixels in `.FAST` error correction mode
             msdf_error_correction_fast_protection_mode: FastErrorProtectionMode = .ONLY_PROTECT_EDGES_AND_CORNERS,
+            /// Whther to perform a final scanline-pass for error correction, not compatible with `msdf_error_correction_distance_check_mode` other than `.DO_NOT_CHECK_DISTANCE`
+            msdf_error_correction_scanline_pass: ErrorCorrectionScanlinePass = .NO_SCANLINE_PASS,
             /// re-usable error stencil buffer
             error_stencil_buffer: ErrorStencilBitmap = .{},
             /// whether or not to automatically free the error stencil or retain it for future use
             free_error_stencil_buffer_after: bool = false,
+            /// The allocator to use to resize or free the error_stencil (if needed)
+            error_stencil_allocator: Allocator = std.heap.page_allocator,
             /// Whether to check that shape is properly formed before generating
             shape_validation: ShapeValidation = .VALIDATE_SHAPE,
             /// Whether to perform a pass to orient shape contour windings
             shape_winding_preprocess: ShapeWindingPreprocess = .PERFORM_WINDING_PREPREOCESS,
             /// Whether to reverse shape contour windings
             shape_winding_change: ShapeWindingChange = .KEEP_EXISTING_WINDING,
-            /// Whether to skip the edge coloring pass for MSDF or MTSDF bitmaps
-            skip_edge_coloring: bool = false,
+            /// Which edge coloring algorithm to use for MSDF and MTSDF fields
+            edge_coloring_mode: EdgeColoringMode = .INKTRAP,
             /// re-usable index list for simple edge-coloring pass
             edge_coloring_corner_list_simple: List(usize) = .{},
             /// re-usable index list for inktrap edge-coloring pass
             edge_coloring_corner_list_inktrap: List(EdgeColoringInktrapCorner) = .{},
             /// whether or not to automatically free the `edge_coloring_corner_list_simple` and/or `edge_coloring_corner_list_inktrap` or retain them for future use
             free_edge_coloring_corner_list_after: bool = false,
+            /// The allocator to use for the `edge_coloring_corner_list_simple` or `edge_coloring_corner_list_inktrap` list
+            edge_coloring_corner_list_allocator: Allocator = std.heap.page_allocator,
+            /// A re-usable scanline object for processing purposes
+            scanline: Shape.Scanline = .{},
+            /// The allocator to use with the `scanline`
+            scanline_allocator: Allocator = std.heap.page_allocator,
+            /// the allocator to use for misc temporary allocations (temp lists within algorithms),
+            temp_allocator: Allocator = std.heap.page_allocator,
 
-            /// the allocator to use for allocations,
-            alloc: Allocator,
+            pub const ShapeProjectionMode = enum(u8) {
+                MANUAL,
+                AUTO,
+            };
+
+            pub const ShapeProjectionAuto = struct {
+                /// How many native shape units are equal to one pixel in the x direction
+                units_per_pixel_x: Float = 1,
+                /// How many native shape units are equal to one pixel in the y direction
+                units_per_pixel_y: Float = 1,
+                /// How many pixels or native shape units to add around the shape for
+                /// signed distance falloff
+                distance_falloff_padding: Float = 4,
+                /// Whether the `distance_falloff_padding` is measured in native shape units or pixels
+                distance_falloff_mode: ShapeRangeSettingMode = .PIXELS,
+
+                pub fn new_same_xy(units_per_pixel: Float, falloff_mode: ShapeRangeSettingMode, falloff_padding: Float) ShapeProjectionAuto {
+                    return ShapeProjectionAuto{
+                        .units_per_pixel_x = units_per_pixel,
+                        .units_per_pixel_y = units_per_pixel,
+                        .distance_falloff_mode = falloff_mode,
+                        .distance_falloff_padding = falloff_padding,
+                    };
+                }
+                pub fn new(units_per_pixel_x: Float, units_per_pixel_y: Float, falloff_mode: ShapeRangeSettingMode, falloff_padding: Float) ShapeProjectionAuto {
+                    return ShapeProjectionAuto{
+                        .units_per_pixel_x = units_per_pixel_x,
+                        .units_per_pixel_y = units_per_pixel_y,
+                        .distance_falloff_mode = falloff_mode,
+                        .distance_falloff_padding = falloff_padding,
+                    };
+                }
+            };
+
+            pub const ShapeProjectionSetting = union(ShapeProjectionMode) {
+                MANUAL: Projection,
+                AUTO: ShapeProjectionAuto,
+
+                pub fn manual(projection: Projection) ShapeProjectionSetting {
+                    return ShapeProjectionSetting{
+                        .MANUAL = projection,
+                    };
+                }
+
+                pub fn auto_same_xy(units_per_pixel: Float, falloff_mode: ShapeRangeSettingMode, falloff_padding: Float) ShapeProjectionSetting {
+                    return ShapeProjectionSetting{
+                        .AUTO = ShapeProjectionAuto.new_same_xy(units_per_pixel, falloff_mode, falloff_padding),
+                    };
+                }
+
+                pub fn auto(units_per_pixel_x: Float, units_per_pixel_y: Float, falloff_mode: ShapeRangeSettingMode, falloff_padding: Float) ShapeProjectionSetting {
+                    return ShapeProjectionSetting{
+                        .AUTO = ShapeProjectionAuto.new(units_per_pixel_x, units_per_pixel_y, falloff_mode, falloff_padding),
+                    };
+                }
+            };
+
+            /// Whather the shape range is given in native shape units or pixels
+            pub const ShapeRangeSettingMode = enum(u8) {
+                /// the distance range is given in terms of native units
+                NATIVE_UNITS,
+                /// the distance range is given in terms of rendered pixels
+                PIXELS,
+            };
+
+            /// Whether or not the shape is already located at the origin, and how to handle it if it isnt
+            pub const ShapeAtOrigin = enum(u8) {
+                /// Either the shape is already at the origin, or it should not be moved even if it isnt
+                SHAPE_AT_ORIGIN_OR_DO_NOT_MOVE,
+                /// Add a negative translation to the normal translation to offset how far the shape is from the origin
+                USE_NEGATIVE_OFFEST_TO_ORIGIN,
+                /// Move the entire shape itself to the origin (can be cached for future use with `SHAPE_GUARANTEED_AT_ORIGIN_OR_DO_NOT_MOVE`)
+                MOVE_SHAPE_TO_ORIGIN,
+            };
+
+            pub const ShapeBitmapSettingsMode = enum(u8) {
+                /// Use an existing bitmap. May or may not fit the final rendered distance field
+                EXISTING_BITMAP,
+                /// Allocate a new bitmap with the given Allocator
+                ALLOCATE_NEW_BITMAP,
+                /// Obtain a bitmap dyanmically from the given `BitmapProvider` mini-interface
+                FROM_BITMAP_PROVIDER,
+            };
+
+            pub fn ShapeBitmapDestination(comptime KIND: GeneratedKind) type {
+                return union(ShapeBitmapSettingsMode) {
+                    const Self = @This();
+
+                    EXISTING_BITMAP: BitmapTypeForGeneratedKind(KIND),
+                    ALLOCATE_NEW_BITMAP: Allocator,
+                    FROM_BITMAP_PROVIDER: BitmapProvider(KIND),
+
+                    pub fn existing_bitmap(bitmap: BitmapTypeForGeneratedKind(KIND)) Self {
+                        return Self{ .EXISTING_BITMAP = bitmap };
+                    }
+                    pub fn allocate_new_bitmap(bitmap_allocator: Allocator) Self {
+                        return Self{ .ALLOCATE_NEW_BITMAP = bitmap_allocator };
+                    }
+                    pub fn from_bitmap_provider(provider_opaque: *anyopaque, provider_fn: *const fn (provider: *anyopaque, width: u32, height: u32) ProvidedBitmap(KIND)) Self {
+                        return Self{ .FROM_BITMAP_PROVIDER = BitmapProvider(KIND){
+                            .provider = provider_opaque,
+                            .provide_fn = provider_fn,
+                        } };
+                    }
+                };
+            }
+
+            pub fn BitmapProvider(comptime KIND: GeneratedKind) type {
+                return struct {
+                    provider: *anyopaque,
+                    provide_fn: *const fn (provider: *anyopaque, width: u32, height: u32) ?ProvidedBitmap(KIND),
+                };
+            }
+
+            pub fn ProvidedBitmap(comptime KIND: GeneratedKind) type {
+                return struct {
+                    bitmap: BitmapTypeForGeneratedKind(KIND),
+                    native_x_offset_from_parent: u32,
+                    native_y_offset_from_parent: u32,
+                };
+            }
+
+            /// The settings related to the specific shape to be rendered into a signed distance field
+            pub fn ShapeSettings(comptime KIND: GeneratedKind) type {
+                return struct {
+                    /// The shape to create a signed distance field from
+                    shape: Shape,
+                    /// The allocator to use to resize the shape (if needed) and/or free it when finished (if specified)
+                    shape_allocator: Allocator = Root.DummyAllocator.allocator_panic,
+                    /// The pre-computed AABB for this shape in *native units* (with the given `border_width` and `miter_limit`, and assuming `needs_to_be_normalized == false` OR shape is already normalized)
+                    ///
+                    /// If provided, reduces the amount of computation needed.
+                    pre_computed_aabb: ?AABB = null,
+                    /// Whether or not to automatically free the shape after its been generated
+                    free_shape_after_generation: bool = false,
+                    /// How to scale/translate the given shape for rendering
+                    ///   - Manual mode assumes the user has knowledge of exactly the translation and scaling needed to render to the desired size or existing bitmap, requires slightly less processing
+                    ///   - Auto mode will scale the shape based on the 'units per pixel' settings provided and translating by the 'distance falloff padding' amount
+                    ///
+                    /// Neither mode is guaranteed to be correctly framed when `bitmap_destination` is set to `EXISTING_BITMAP`
+                    projection: ShapeProjectionSetting = .auto_same_xy(1, .PIXELS, 4),
+                    /// If specified > 0, the shape bounds will be calculated with this miter length limit (using `border_width` as well)
+                    miter_limit: Float = 0,
+                    /// If specified > 0, the shape bounds will be calculated with this border width (using `miter_limit` as well)
+                    border_width: Float = 0,
+                    /// The minimum angle between the end of one edge and the beginning of the next to be considered a corner
+                    corner_angle_threshold: Angle = .new_radians(DEFAULT_ANGLE_THRESHOLD_RADIANS),
+                    /// The fill rule to use when determining what part of the shape is filled
+                    fill_rule: FillRule = .NONZERO,
+                    /// whether or not the shape needs to be validated for proper formation (closed, no gaps, not empty, etc.)
+                    needs_to_be_validated: bool = true,
+                    /// Whether or not the shape comes pre-normalized
+                    needs_to_be_normalized: bool = true,
+                    /// Whether or not the shape is already located at the origin, and how to handle it if it isnt
+                    shape_origin_shift: ShapeAtOrigin = .SHAPE_AT_ORIGIN_OR_DO_NOT_MOVE,
+                    /// Whether or not to step through all shape windings and re-orient them based on some distance/vector math
+                    perform_shape_winding_pre_processing: bool = true,
+                    /// Whether or not to keep, explicitly reverse, or guess if need to reverse all shape windings before calculating distance field
+                    change_or_keep_shape_windings: ShapeWindingChange = .KEEP_EXISTING_WINDING,
+                    /// Whather the `distance_range_width` is given in native shape units or pixels
+                    range_mode: ShapeRangeSettingMode = .PIXELS,
+                    /// The range width between the lowest signed distance and the highest signed distance
+                    distance_range_width: Float = 4.0,
+                    /// Shifts the signed distance lower and upper bounds down by this much
+                    distance_shift: Float = 0.0,
+                    /// Where to create/render the final signed distance bitmap.
+                    ///
+                    /// Can provide an existing bitmap, allocate a new one from a specific allocator, or obtain one
+                    /// from a 'bitmap provider' (such as a texture atlas)
+                    bitmap_destination: ShapeBitmapDestination(KIND),
+                };
+            }
+
+            /// The settings related to the specific shape to be rendered into a signed distance field (WITHOUT BITMAP DESTINATION)
+            pub const ShapeSettingsNoBitmapDest = struct {
+                /// The shape to create a signed distance field from
+                shape: Shape,
+                /// The pre-computed AABB for this shape in *native units* (with the given `border_width` and `miter_limit`, and assuming `needs_to_be_normalized == false` OR shape is already normalized)
+                ///
+                /// If provided, reduces the amount of computation needed.
+                pre_computed_aabb: ?AABB = null,
+                /// The allocator to use to resize the shape (if needed) and/or free it when finished (if specified)
+                shape_allocator: Allocator = Root.DummyAllocator.allocator_panic,
+                /// Whether or not to automatically free the shape after its been generated
+                free_shape_after_generation: bool = false,
+                /// How to scale/translate the given shape for rendering
+                ///   - Manual mode assumes the user has knowledge of exactly the translation and scaling needed to render to the desired size or existing bitmap, requires slightly less processing
+                ///   - Auto mode will scale the shape based on the 'units per pixel' settings provided and translating by the 'distance falloff padding' amount
+                ///
+                /// Neither mode is guaranteed to be correctly framed when `bitmap_destination` is set to `EXISTING_BITMAP`
+                projection: ShapeProjectionSetting = .auto_same_xy(1, .PIXELS, 4),
+                /// If specified > 0, the shape bounds will be calculated with this miter length limit (using `border_width` as well)
+                miter_limit: Float = 0,
+                /// If specified > 0, the shape bounds will be calculated with this border width (using `miter_limit` as well)
+                border_width: Float = 0,
+                /// The minimum angle between the end of one edge and the beginning of the next to be considered a corner
+                corner_angle_threshold: Angle = .new_radians(DEFAULT_ANGLE_THRESHOLD_RADIANS),
+                /// The fill rule to use when determining what part of the shape is filled
+                fill_rule: FillRule = .NONZERO,
+                /// whether or not the shape needs to be validated for proper formation (closed, no gaps, not empty, etc.)
+                needs_to_be_validated: bool = true,
+                /// Whether or not the shape comes pre-normalized
+                needs_to_be_normalized: bool = true,
+                /// Whether or not the shape is already located at the origin, and how to handle it if it isnt
+                shape_origin_shift: ShapeAtOrigin = .SHAPE_AT_ORIGIN_OR_DO_NOT_MOVE,
+                /// Whether or not to step through all shape windings and re-orient them based on some distance/vector math
+                perform_shape_winding_pre_processing: bool = true,
+                /// Whether or not to keep, explicitly reverse, or guess if need to reverse all shape windings before calculating distance field
+                chage_or_keep_shape_windings: ShapeWindingChange = .KEEP_EXISTING_WINDING,
+                /// Whather the `distance_range_width` is given in native shape units or pixels
+                range_mode: ShapeRangeSettingMode = .PIXELS,
+                /// The range width between the lowest signed distance and the highest signed distance
+                distance_range_width: Float = 4.0,
+                /// Shifts the signed distance lower and upper bounds down by this much
+                distance_shift: Float = 0.0,
+
+                pub fn with_shape_and_bitmap_destination(self: ShapeSettingsNoBitmapDest, comptime KIND: GeneratedKind, shape: Shape, shape_alloc: Allocator, bitmap_dest: ShapeBitmapDestination(KIND)) ShapeSettings(KIND) {
+                    return ShapeSettings(KIND){
+                        .shape = shape,
+                        .pre_computed_aabb = self.pre_computed_aabb,
+                        .shape_allocator = shape_alloc,
+                        .free_shape_after_generation = self.free_shape_after_generation,
+                        .projection = self.projection,
+                        .miter_limit = self.miter_limit,
+                        .border_width = self.border_width,
+                        .corner_angle_threshold = self.corner_angle_threshold,
+                        .fill_rule = self.fill_rule,
+                        .needs_to_be_validated = self.needs_to_be_validated,
+                        .needs_to_be_normalized = self.needs_to_be_normalized,
+                        .shape_origin_shift = self.shape_origin_shift,
+                        .perform_shape_winding_pre_processing = self.perform_shape_winding_pre_processing,
+                        .change_or_keep_shape_windings = self.chage_or_keep_shape_windings,
+                        .range_mode = self.range_mode,
+                        .distance_range_width = self.distance_range_width,
+                        .distance_shift = self.distance_shift,
+                        .bitmap_destination = bitmap_dest,
+                    };
+                }
+
+                pub fn with_bitmap_destination(self: ShapeSettingsNoBitmapDest, comptime KIND: GeneratedKind, bitmap_dest: ShapeBitmapDestination(KIND)) ShapeSettings(KIND) {
+                    return ShapeSettings(KIND){
+                        .shape = self.shape,
+                        .pre_computed_aabb = self.pre_computed_aabb,
+                        .shape_allocator = self.shape_alloc,
+                        .free_shape_after_generation = self.free_shape_after_generation,
+                        .projection = self.projection,
+                        .miter_limit = self.miter_limit,
+                        .border_width = self.border_width,
+                        .corner_angle_threshold = self.corner_angle_threshold,
+                        .fill_rule = self.fill_rule,
+                        .needs_to_be_validated = self.needs_to_be_validated,
+                        .needs_to_be_normalized = self.needs_to_be_normalized,
+                        .shape_origin_shift = self.shape_origin_shift,
+                        .perform_shape_winding_pre_processing = self.perform_shape_winding_pre_processing,
+                        .change_or_keep_shape_windings = self.chage_or_keep_shape_windings,
+                        .range_mode = self.range_mode,
+                        .distance_range_width = self.distance_range_width,
+                        .distance_shift = self.distance_shift,
+                        .bitmap_destination = bitmap_dest,
+                    };
+                }
+            };
+
+            pub fn GeneratedResult(comptime OUTPUT_KIND: GeneratedKind) type {
+                return struct {
+                    const Self = @This();
+                    /// The source shape, possibly altered (normalized/oriented/reversed/edges added or removed)
+                    shape: Shape = null,
+                    /// The allocator used to allocate/resize the shape
+                    shape_allocator: Allocator = DummyAllocator.allocator_panic,
+                    /// The AABB of the shape in *native units*, including any provided border and miter
+                    ///
+                    /// You can reuse this computed AABB in future sdf generation calls to speed up pre-processing time
+                    aabb_native: AABB = .{},
+                    /// The AABB of the rendered shape in *pixels* within the rendered bitmap, including any provided border and miter
+                    ///
+                    /// AABB values are relative to the corner provided by `aabb_pixels_relative_to_corner`
+                    ///
+                    /// Example: `.bot_left`, (x = 2, y = 1)
+                    /// ```
+                    /// |  |
+                    /// |..+---
+                    /// |  .
+                    /// +------
+                    /// ```
+                    aabb_pixels: AABB = .{},
+                    /// The corner considered the `origin` for the `aabb_pixels` bounds
+                    ///
+                    /// Example: `.bot_left`, (x = 2, y = 1)
+                    /// ```
+                    /// |  |
+                    /// |..+---
+                    /// |  .
+                    /// +------
+                    /// ```
+                    aabb_pixels_relative_to_corner: BitmapModule.Origin = .bot_left,
+                    /// The transform used to position the shape within the final bitmap. If it was automatically calculated, future generations can cache and reuse the transform
+                    shape_transform: Transformation = .{},
+                    /// Whether or not the transform was generated from the `.AUTO` mode or `.MANUAL` mode
+                    projection_was_automatically_generated: bool = false,
+                    /// Whether or not the `shape_transform.projection` includes a calculate negative offset intended to move the shape to the origin.
+                    ///
+                    /// If so, future generations can use `.SHAPE_AT_ORIGIN_OR_DO_NOT_MOVE` with the new `.MANUAL` projection unconditionally
+                    projection_includes_negative_offset_to_origin: bool = false,
+                    /// Whether or not the shape was validated during processing. If so, future generations can skip the validation step for the same shape
+                    shape_was_validated: bool = false,
+                    /// Whether or not the shape was normalized during processing. If so, future generations can cache and reuse the new (altered) shape and skip the normailze step
+                    shape_was_normalized: bool = false,
+                    /// Whether or not the shape winding were pre-processed (re-oriented). If so, future generations can cache and reuse the new (altered) shape and skip the re-orient/pre-process step
+                    shape_windings_oriented: bool = false,
+                    /// Whether or not the shape itself was shifted to the origin before generation. If so, future generations can use `.SHAPE_AT_ORIGIN_OR_DO_NOT_MOVE` with the new shape unconditionally
+                    shape_was_shifted_to_origin: bool = false,
+                    /// Whether ot not the shape contours were reversed. If so, future generations can cache and reuse the new (altered) shape and skip the reverse step
+                    shape_contours_reversed: bool = false,
+                    /// Should only be non-zero when obtaining a bitmap via a `BitmapProvider`
+                    ///
+                    /// Indicates the x-offset in native parent bitmap x-direction pixels that THIS bitmap is located at
+                    native_x_offset_from_parent_bitmap: u32 = 0,
+                    /// Should only be non-zero when obtaining a bitmap via a `BitmapProvider`
+                    ///
+                    /// Indicates the y-offset in native parent bitmap y-direction pixels that THIS bitmap is located at
+                    native_y_offset_from_parent_bitmap: u32 = 0,
+                    /// The corner referenced by `shape_bounds_offset_from_bitmap_corner`
+                    shape_bounds_offset_reference_corner: BitmapModule.Origin = .bot_left,
+                    /// The final generated signed distance field bitmap,
+                    bitmap: BitmapTypeForGeneratedKind(OUTPUT_KIND) = .{},
+                    /// The allocator, if any, used to allocate the bitmap during generation time
+                    ///
+                    /// Should be `null` if `bitmap_destination` was `.EXISTING_BITMAP` or `.FROM_BITMAP_PROVIDER`
+                    bitmap_allocator: ?Allocator,
+                    /// The seed used for random bits for edge coloring
+                    coloring_seed: u64,
+                    pub fn free_shape(self: *Self) void {
+                        self.shape.free(self.shape_allocator);
+                    }
+                };
+            }
+
+            pub fn generate(self: *Generator, comptime KIND: GeneratedKind, shape_settings: ShapeSettings(KIND)) GeneratorError!GeneratedResult(KIND) {
+                const BMP = BitmapTypeForGeneratedKind(KIND);
+                const NUM_CHANNELS = BMP.NUM_CHANNELS;
+                var result: GeneratedResult(KIND) = .{};
+                var settings = shape_settings;
+                var shape: *Shape = &settings.shape;
+                if (settings.needs_to_be_validated) {
+                    if (!shape.is_valid()) {
+                        if (self.print_warnings_to_console) {
+                            Assert.warn_with_reason(false, @src(), "shape was invalid", .{});
+                        }
+                        return GeneratorError.shape_is_invalid;
+                    }
+                    result.shape_was_validated = true;
+                }
+                if (settings.perform_shape_winding_pre_processing) {
+                    shape.orient_contours(self.temp_allocator);
+                    result.shape_windings_oriented = true;
+                }
+                if (settings.needs_to_be_normalized) {
+                    shape.normalize(settings.shape_allocator);
+                    result.shape_was_normalized = true;
+                }
+                var aabb_native = if (settings.pre_computed_aabb) |pre_aabb| pre_aabb else calc: {
+                    break :calc shape.get_bounds(settings.border_width, settings.miter_limit, 0);
+                };
+                var use_negative_origin_shift: bool = false;
+                var negative_origin_shift: Vector = .ZERO_ZERO;
+                switch (settings.shape_origin_shift) {
+                    .SHAPE_AT_ORIGIN_OR_DO_NOT_MOVE => {},
+                    .USE_NEGATIVE_OFFEST_TO_ORIGIN => {
+                        negative_origin_shift = aabb_native.get_min_point().negate();
+                        use_negative_origin_shift = true;
+                    },
+                    .MOVE_SHAPE_TO_ORIGIN => {
+                        negative_origin_shift = aabb_native.get_min_point().negate();
+                        shape.translate(negative_origin_shift);
+                        aabb_native = aabb_native.with_mins_shifted_to_zero();
+                        result.shape_was_shifted_to_origin = true;
+                    },
+                }
+                const aabb_native_size = aabb_native.get_size();
+                const projection = switch (settings.projection) {
+                    .MANUAL => |proj| make: {
+                        var proj_2 = proj;
+                        if (use_negative_origin_shift) {
+                            proj_2.translate = proj_2.translate.add(negative_origin_shift);
+                            result.projection_includes_negative_offset_to_origin = true;
+                        }
+                        break :make proj_2;
+                    },
+                    .AUTO => |auto| make: {
+                        result.projection_was_automatically_generated = true;
+                        const scale = Vector.new(1.0 / auto.units_per_pixel_x, 1.0 / auto.units_per_pixel_y);
+                        var translate = Vector.new_same_xy(auto.distance_falloff_padding);
+                        if (auto.distance_falloff_mode == .PIXELS) {
+                            translate = translate.multiply(scale);
+                        }
+                        if (use_negative_origin_shift) {
+                            result.projection_includes_negative_offset_to_origin = true;
+                            if (auto.distance_falloff_mode == .PIXELS) {
+                                translate = translate.add(negative_origin_shift.multiply(scale));
+                            } else {
+                                translate = translate.add(negative_origin_shift);
+                            }
+                        }
+                        break :make Projection{
+                            .scale = Vector.new(1.0 / auto.units_per_pixel_x, 1.0 / auto.units_per_pixel_y),
+                            .translate = translate,
+                        };
+                    },
+                };
+                // var average_scale = 0.5 * (projection.scale.x + projection.scale.y);
+                var winding_change = settings.change_or_keep_shape_windings;
+                if (winding_change == .GUESS_CORRECT_WINDING) {
+                    // Get sign of signed distance outside bounds
+                    const point_out_of_bounds = Point.new(aabb_native.x_min - aabb_native_size.x - 1, aabb_native.y_min - aabb_native_size.y - 1);
+                    const distance_out_of_bounds = SimpleTrueShapeDistanceFinder.distance_skip_cache(shape, point_out_of_bounds, self.temp_allocator);
+                    winding_change = if (distance_out_of_bounds <= 0) .KEEP_EXISTING_WINDING else .REVERSE_EXISTING_WINDING;
+                }
+                if (winding_change == .REVERSE_EXISTING_WINDING) {
+                    for (shape.contours.slice()) |*contour| {
+                        contour.reverse();
+                    }
+                    result.shape_contours_reversed = true;
+                }
+                var unit_range: Range = Range.new_centered_at_zero(1.0);
+                var pixel_range: Range = Range.new_centered_at_zero(4.0);
+                switch (settings.range_mode) {
+                    .PIXELS => {
+                        pixel_range = Range.new_centered_at_zero(settings.distance_range_width);
+                        if (settings.distance_shift != 0) {
+                            const shift = -(settings.distance_shift * pixel_range.width());
+                            pixel_range.low += shift;
+                            pixel_range.high += shift;
+                        }
+                    },
+                    .NATIVE_UNITS => {
+                        unit_range = Range.new_centered_at_zero(settings.distance_range_width);
+                        if (settings.distance_shift != 0) {
+                            const shift = -(settings.distance_shift * unit_range.width());
+                            unit_range.low += shift;
+                            unit_range.high += shift;
+                        }
+                    },
+                }
+                const render_aabb = aabb_native.multiply(projection.scale).expand_by(projection.translate).combine_with_point(.ZERO_ZERO);
+                switch (settings.bitmap_destination) {
+                    .EXISTING_BITMAP => |bmp| {
+                        if (self.print_warnings_to_console) {
+                            Assert.warn_with_reason(render_aabb.x_min >= 0, @src(), "The final bounds minimium x value is less than zero ({d}), possible cutoff of shape", .{render_aabb.x_min});
+                            Assert.warn_with_reason(render_aabb.x_max <= bmp.width, @src(), "The final bounds maximum x value is greater than provided bitmap width ({d} > {d}), possible cutoff of shape", .{ render_aabb.x_max, bmp.width });
+                            Assert.warn_with_reason(render_aabb.y_min >= 0, @src(), "The final bounds minimium y value is less than zero ({d}), possible cutoff of shape", .{render_aabb.y_min});
+                            Assert.warn_with_reason(render_aabb.y_max <= bmp.height, @src(), "The final bounds maximum y value is greater than provided bitmap height ({d} > {d}), possible cutoff of shape", .{ render_aabb.y_max, bmp.height });
+                        }
+                        result.bitmap = bmp;
+                    },
+                    .ALLOCATE_NEW_BITMAP, .FROM_BITMAP_PROVIDER => {
+                        if (self.print_warnings_to_console) {
+                            Assert.warn_with_reason(render_aabb.x_min >= 0, @src(), "The final bounds minimium x value is less than zero ({d}), possible cutoff of shape", .{render_aabb.x_min});
+                            Assert.warn_with_reason(render_aabb.y_min >= 0, @src(), "The final bounds minimium y value is less than zero ({d}), possible cutoff of shape", .{render_aabb.y_min});
+                        }
+                        const render_aabb_max = render_aabb.get_max_point();
+                        const pixel_max = render_aabb_max.ceil().to_new_type(u32);
+                        switch (settings.bitmap_destination) {
+                            .ALLOCATE_NEW_BITMAP => |bmp_alloc| {
+                                result.bitmap_allocator = bmp_alloc;
+                                result.bitmap = BMP.init(pixel_max.x, pixel_max.y, BMP.Pixel{}, bmp_alloc);
+                            },
+                            .FROM_BITMAP_PROVIDER => |provider| {
+                                if (provider.provide_fn(provider.provider, pixel_max.x, pixel_max.y)) |provided_bmp| {
+                                    result.bitmap = provided_bmp.bitmap;
+                                    result.native_x_offset_from_parent_bitmap = provided_bmp.native_x_offset_from_parent;
+                                    result.native_y_offset_from_parent_bitmap = provided_bmp.native_y_offset_from_parent;
+                                } else {
+                                    if (self.print_warnings_to_console) {
+                                        Assert.warn_with_reason(false, @src(), "the bitmap provider did not return a bitmap with the given dimensions ({d} x {d})", .{ pixel_max.x, pixel_max.y });
+                                    }
+                                    return GeneratorError.bitmap_provider_failed_to_provide_bitmap;
+                                }
+                            },
+                        }
+                    },
+                }
+                const range = switch (settings.range_mode) {
+                    .NATIVE_UNITS => unit_range,
+                    .PIXELS => pixel_range.divided_by(@min(projection.scale.x, projection.scale.y)),
+                };
+                const transform = Transformation.new_from_range(range, projection);
+                const error_check_mode_before_scanline_check = self.msdf_error_correction_mode;
+                if (self.msdf_error_correction_scanline_pass == .PERFORM_SCANLINE_PASS and self.msdf_error_correction_mode != .DISABLED and self.msdf_error_correction_distance_check_mode != .DO_NOT_CHECK_DISTANCE) {
+                    if (self.print_warnings_to_console) {
+                        Assert.warn_with_reason(false, @src(), "error correction mode `{s}` with error correction distance check mode `{s}` is not compatible with msdf_error_correction_scanline_pass == `.SCANLINE_PASS`, primary error checks disabled", .{ @tagName(self.msdf_error_correction_mode), @tagName(self.msdf_error_correction_distance_check_mode), @tagName(self.msdf_error_correction_mode) });
+                    }
+                    self.msdf_error_correction_mode = .DISABLED;
+                }
+                result.coloring_seed = if (self.edge_coloring_seed) |s| s else @bitCast(std.time.microTimestamp());
+                var seed = result.coloring_seed;
+                switch (KIND) {
+                    .TSDF => switch (self.overlap_support) {
+                        .DO_NOT_HANDLE_OVERLAPPING_CONTOURS => {
+                            self.generate_field_inner(SimpleContourCombiner(TrueDistanceSelector), result.bitmap, shape, transform);
+                        },
+                        .HANDLE_OVERLAPPING_CONTOURS => {
+                            self.generate_field_inner(OverlappingContourCombiner(TrueDistanceSelector), result.bitmap, shape, transform);
+                        },
+                    },
+                    .PSDF => switch (self.overlap_support) {
+                        .DO_NOT_HANDLE_OVERLAPPING_CONTOURS => {
+                            self.generate_field_inner(SimpleContourCombiner(PerpendicularDistanceSelector), result.bitmap, shape, transform);
+                        },
+                        .HANDLE_OVERLAPPING_CONTOURS => {
+                            self.generate_field_inner(OverlappingContourCombiner(PerpendicularDistanceSelector), result.bitmap, shape, transform);
+                        },
+                    },
+                    .MSDF => {
+                        switch (self.edge_coloring_mode) {
+                            .INKTRAP => {
+                                shape.edge_coloring_inktrap(settings.shape_allocator, &self.edge_coloring_corner_list_inktrap, self.edge_coloring_corner_list_allocator, settings.corner_angle_threshold, &seed);
+                            },
+                            .SIMPLE => {
+                                shape.edge_coloring_simple(settings.shape_allocator, &self.edge_coloring_corner_list_simple, self.edge_coloring_corner_list_allocator, settings.corner_angle_threshold, &seed);
+                            },
+                            .SKIP => {},
+                        }
+                        switch (self.overlap_support) {
+                            .DO_NOT_HANDLE_OVERLAPPING_CONTOURS => {
+                                self.generate_field_inner(SimpleContourCombiner(MultiDistanceSelector), result.bitmap, shape, transform);
+                                self.perform_error_correction(3, result.bitmap, shape, transform);
+                            },
+                            .HANDLE_OVERLAPPING_CONTOURS => {
+                                self.generate_field_inner(OverlappingContourCombiner(MultiDistanceSelector), result.bitmap, shape, transform);
+                                self.perform_error_correction(3, result.bitmap, shape, transform);
+                            },
+                        }
+                    },
+                    .MTSDF => {
+                        switch (self.edge_coloring_mode) {
+                            .INKTRAP => {
+                                shape.edge_coloring_inktrap(settings.shape_allocator, &self.edge_coloring_corner_list_inktrap, self.edge_coloring_corner_list_allocator, settings.corner_angle_threshold, &seed);
+                            },
+                            .SIMPLE => {
+                                shape.edge_coloring_simple(settings.shape_allocator, &self.edge_coloring_corner_list_simple, self.edge_coloring_corner_list_allocator, settings.corner_angle_threshold, &seed);
+                            },
+                            .SKIP => {},
+                        }
+                        switch (self.overlap_support) {
+                            .DO_NOT_HANDLE_OVERLAPPING_CONTOURS => {
+                                self.generate_field_inner(SimpleContourCombiner(MultiAndTrueDistanceSelector), result.bitmap, shape, transform);
+                                self.perform_error_correction(4, result.bitmap, shape, transform);
+                            },
+                            .HANDLE_OVERLAPPING_CONTOURS => {
+                                self.generate_field_inner(OverlappingContourCombiner(MultiAndTrueDistanceSelector), result.bitmap, shape, transform);
+                                self.perform_error_correction(4, result.bitmap, shape, transform);
+                            },
+                        }
+                    },
+                }
+                if (self.msdf_error_correction_scanline_pass == .PERFORM_SCANLINE_PASS) {
+                    self.msdf_error_correction_mode = error_check_mode_before_scanline_check;
+                    const dist_mode_before = self.msdf_error_correction_distance_check_mode;
+                    self.msdf_error_correction_distance_check_mode = .DO_NOT_CHECK_DISTANCE;
+                    const sdf_zero_value = if (range.low != range.high) (range.low / (range.low - range.high)) else 0.5;
+                    switch (KIND) {
+                        .TSDF, .PSDF => {
+                            Rasterize.correct_msdf_signs(.alpha_only, NUM_CHANNELS, result.bitmap, shape, transform.projection, sdf_zero_value, settings.fill_rule, &self.scanline, self.scanline_allocator, self.temp_allocator);
+                        },
+                        .MSDF => {
+                            Rasterize.correct_msdf_signs(.color_only, NUM_CHANNELS, result.bitmap, shape, transform.projection, sdf_zero_value, settings.fill_rule, &self.scanline, self.scanline_allocator, self.temp_allocator);
+                            self.perform_error_correction(NUM_CHANNELS, result.bitmap, shape, transform);
+                        },
+                        .MTSDF => {
+                            Rasterize.correct_msdf_signs(.alpha_and_color, NUM_CHANNELS, result.bitmap, shape, transform.projection, sdf_zero_value, settings.fill_rule, &self.scanline, self.scanline_allocator, self.temp_allocator);
+                            self.perform_error_correction(NUM_CHANNELS, result.bitmap, shape, transform);
+                        },
+                    }
+                    self.msdf_error_correction_distance_check_mode = dist_mode_before;
+                }
+                return result;
+            }
 
             fn generate_field_inner(self: *Generator, comptime CONTOUR_COMBINER_TYPE: type, output: FloatBitmap(CONTOUR_COMBINER_TYPE.NUM_CHANNELS), shape: *Shape, transform: Transformation) void {
                 const converter = DistancePixelConverter(CONTOUR_COMBINER_TYPE.DISTANCE_TYPE).new(transform.distance_mapping);
@@ -2566,188 +3188,9 @@ pub fn BezierMultiSignedDistanceFieldGenerator(comptime Float: type, comptime ES
                 }
             }
 
-            /// The output bitmap is assumed to be the correct size and the shape is assumed to have all preprocessing done
-            pub fn generate_signed_distance_field_into_existing_bitmap_comptime_kind(self: *Generator, comptime kind: GenerateType, output: BitmapTypeForGeneratorKind(kind), shape: *Shape, transform: Transformation) void {
-                switch (kind) {
-                    .TSDF => switch (self.overlap_support) {
-                        .DO_NOT_HANDLE_OVERLAPPING_CONTOURS => {
-                            self.generate_field_inner(SimpleContourCombiner(TrueDistanceSelector), output, shape, transform);
-                        },
-                        .HANDLE_OVERLAPPING_CONTOURS => {
-                            self.generate_field_inner(OverlappingContourCombiner(TrueDistanceSelector), output, shape, transform);
-                        },
-                    },
-                    .PSDF => switch (self.overlap_support) {
-                        .DO_NOT_HANDLE_OVERLAPPING_CONTOURS => {
-                            self.generate_field_inner(SimpleContourCombiner(PerpendicularDistanceSelector), output, shape, transform);
-                        },
-                        .HANDLE_OVERLAPPING_CONTOURS => {
-                            self.generate_field_inner(OverlappingContourCombiner(PerpendicularDistanceSelector), output, shape, transform);
-                        },
-                    },
-                    .MSDF => switch (self.overlap_support) {
-                        .DO_NOT_HANDLE_OVERLAPPING_CONTOURS => {
-                            self.generate_field_inner(SimpleContourCombiner(MultiDistanceSelector), output, shape, transform);
-                            self.perform_error_correction(3, output, shape, transform);
-                        },
-                        .HANDLE_OVERLAPPING_CONTOURS => {
-                            self.generate_field_inner(OverlappingContourCombiner(MultiDistanceSelector), output, shape, transform);
-                            self.perform_error_correction(3, output, shape, transform);
-                        },
-                    },
-                    .MTSDF => switch (self.overlap_support) {
-                        .DO_NOT_HANDLE_OVERLAPPING_CONTOURS => {
-                            self.generate_field_inner(SimpleContourCombiner(MultiAndTrueDistanceSelector), output, shape, transform);
-                            self.perform_error_correction(4, output, shape, transform);
-                        },
-                        .HANDLE_OVERLAPPING_CONTOURS => {
-                            self.generate_field_inner(OverlappingContourCombiner(MultiAndTrueDistanceSelector), output, shape, transform);
-                            self.perform_error_correction(4, output, shape, transform);
-                        },
-                    },
-                }
-            }
+            // /// The output bitmap is assumed to be the correct size and the shape is assumed to have all preprocessing done
+            // pub fn generate_signed_distance_field_into_existing_bitmap_comptime_kind(self: *Generator, comptime kind: GeneratedKind, output: BitmapTypeForGeneratedKind(kind), shape: *Shape, transform: Transformation) void {}
 
-            pub const PreProcessResult = struct {
-                aabb: ?AABB = null,
-                windings_were_oriented: bool = false,
-                shape_was_normalized: bool = false,
-                windings_were_reversed: bool = false,
-            };
-
-            pub const ShapeTransformMode = enum(u8) {
-                MANUAL,
-                AUTO,
-            };
-
-            pub const ShapeTransformAuto = struct {
-                units_per_pixel_x: Float = 1,
-                units_per_pixel_y: Float = 1,
-
-                pub fn new_same_xy(units_per_pixel: Float) ShapeTransformAuto {
-                    return ShapeTransformAuto{
-                        .units_per_pixel_x = units_per_pixel,
-                        .units_per_pixel_y = units_per_pixel,
-                    };
-                }
-                pub fn new(units_per_pixel_x: Float, units_per_pixel_y: Float) ShapeTransformAuto {
-                    return ShapeTransformAuto{
-                        .units_per_pixel_x = units_per_pixel_x,
-                        .units_per_pixel_y = units_per_pixel_y,
-                    };
-                }
-            };
-
-            pub const ShapeTransformSetting = union(ShapeTransformMode) {
-                MANUAL: Projection,
-                AUTO: ShapeTransformAuto,
-
-                pub fn manual(projection: Projection) ShapeTransformSetting {
-                    return ShapeTransformSetting{
-                        .MANUAL = projection,
-                    };
-                }
-
-                pub fn auto_same_xy(units_per_pixel: Float) ShapeTransformSetting {
-                    return ShapeTransformSetting{
-                        .AUTO = ShapeTransformAuto.new_same_xy(units_per_pixel),
-                    };
-                }
-
-                pub fn auto(units_per_pixel_x: Float, units_per_pixel_y: Float) ShapeTransformSetting {
-                    return ShapeTransformSetting{
-                        .AUTO = ShapeTransformAuto.new(units_per_pixel_x, units_per_pixel_y),
-                    };
-                }
-            };
-
-            /// Whather the shape range is given in native shape units or pixels
-            pub const ShapeRangeSettingMode = enum(u8) {
-                /// the distance range is given in terms of native units
-                NATIVE_UNITS,
-                /// the distance range is given in terms of rendered pixels
-                PIXELS,
-            };
-
-            pub const ShapeBitmapSettingsMode = enum(u8) {
-                EXISTING_BITMAP,
-                ALLOCATE_NEW_BITMAP,
-                FROM_BITMAP_PROVIDER,
-            };
-
-            pub const ShapeSettings = struct {
-                transform: ShapeTransformSetting = .auto_same_xy(1),
-                /// If specified > 0, the shape bounds will be calculated with this miter length limit (using `border_width` as well)
-                miter_limit: Float = 0,
-                /// If specified > 0, the shape bounds will be calculated with this border width (using `miter_limit` as well)
-                border_width: Float = 0,
-                /// The minimum angle between the end of one edge and the beginning of the next to be considered a corner
-                corner_angle_threshold: Angle = .new_radians(DEFAULT_ANGLE_THRESHOLD_RADIANS),
-                /// The fill rule to use when determining what part of the shape is filled
-                fill_rule: FillRule = .NONZERO,
-                /// Whether or not the shape comes pre-normalized
-                needs_to_be_normalized: bool = true,
-                /// Whather the `distance_range_width` is given in native shape units or pixels
-                range_mode: ShapeRangeSettingMode = .PIXELS,
-                /// The range width between the lowest signed distance and the highest signed distance
-                distance_range_width: Float = 2.0,
-                /// Shifts the signed distance lower and upper bounds down by this much
-                distance_shift: Float = 0.0,
-            };
-
-            pub fn ShapeData(comptime OUTPUT_KIND: GenerateType) type {
-                return struct {
-                    shape: Shape,
-                    aabb: AABB = .{},
-                    miter_limit: Float = 0,
-                    border_width: Float = 0,
-                    angle_threshold: Angle = .new_radians(DEFAULT_ANGLE_THRESHOLD_RADIANS),
-                    normalized: bool = false,
-                    windings_oriented: bool = false,
-                    windings_reversed: bool = false,
-                    aabb_calculated: bool = false,
-                    bitmap_generated: bool = false,
-                    msdf_region_x_offset_from_atlas_bot_left: u32 = 0,
-                    msdf_region_y_offset_from_atlas_bot_left: u32 = 0,
-                    shape_origin_offset_from_msdf_region_bot_left: Vector = .{},
-                    msdf_bitmap: BitmapTypeForGeneratorKind(OUTPUT_KIND) = .{},
-                };
-            }
-            pub const ShapeOrShapeDataKind = enum(u8) {
-                SHAPE_ONLY,
-                SHAPE_WITH_DATA,
-            };
-            pub fn ShapeOrShapeData(comptime OUTPUT_KIND: GenerateType) type {
-                return union(ShapeOrShapeDataKind) {
-                    const Self = @This();
-
-                    SHAPE_ONLY: Shape,
-                    SHAPE_WITH_DATA: ShapeData(OUTPUT_KIND),
-
-                    pub inline fn shape_only(shape: *Shape) Self {
-                        return Self{
-                            .SHAPE_ONLY = shape,
-                        };
-                    }
-                    pub inline fn shape_with_data(shape_data: *ShapeData(OUTPUT_KIND)) Self {
-                        return Self{
-                            .SHAPE_WITH_DATA = shape_data,
-                        };
-                    }
-                };
-            }
-            pub fn pre_process_shape(self: *Generator, comptime OUTPUT_KIND: GenerateType, shape_or_shape_with_data: ShapeOrShapeData(OUTPUT_KIND), preexisting_aabb: ?AABB) ShapeError!ShapeData(OUTPUT_KIND) {}
-
-            pub fn generate(
-                self: *Generator,
-                comptime KIND: GenerateType,
-                shape: *Shape,
-                shape_settings: ShapeSettings,
-            ) ShapeData(KIND) {}
-
-            // CHECKPOINT derive the framing/transformation code from the original MSDFGen/main.cpp cli code
-
-            // pub fn calculate_msdf_bounds(shape: )
             pub fn perform_error_correction(self: Generator, comptime NUM_CHANNELS: comptime_int, msdf_bitmap: FloatBitmap(NUM_CHANNELS), shape: *Shape, transform: Transformation) void {
                 if (self.msdf_error_correction_mode == .DISABLED) return;
                 self.error_stencil_buffer.discard_and_resize(msdf_bitmap.width, msdf_bitmap.height, ErrorStencilBitmap.Pixel{ .raw = .{ErrorFlags.from_flag(.NONE)} }, self.alloc);
@@ -2791,7 +3234,7 @@ pub fn BezierMultiSignedDistanceFieldGenerator(comptime Float: type, comptime ES
             }
         };
 
-        pub fn BitmapTypeForGeneratorKind(comptime kind: Generator.GenerateType) type {
+        pub fn BitmapTypeForGeneratedKind(comptime kind: Generator.GeneratedKind) type {
             return switch (kind) {
                 .TSDF, .PSDF => FloatBitmap(1),
                 .MSDF => FloatBitmap(3),
@@ -3198,9 +3641,9 @@ pub fn BezierMultiSignedDistanceFieldGenerator(comptime Float: type, comptime ES
                     return self.contour_combiner.distance(alloc);
                 }
 
-                pub fn distance_skip_cache(shape: *Shape, point: Point, alloc: Allocator) DISTANCE_TYPE {
-                    var contour_combiner = CONTOUR_COMBINER.init_from_shape(shape, alloc);
-                    defer contour_combiner.free(alloc);
+                pub fn distance_skip_cache(shape: *Shape, point: Point, temp_alloc: Allocator) DISTANCE_TYPE {
+                    var contour_combiner = CONTOUR_COMBINER.init_from_shape(shape, temp_alloc);
+                    defer contour_combiner.free(temp_alloc);
                     contour_combiner.reset(point);
                     for (shape.contours.slice(), 0..) |contour, c| {
                         if (!contour.edges.is_empty()) {
@@ -3215,7 +3658,7 @@ pub fn BezierMultiSignedDistanceFieldGenerator(comptime Float: type, comptime ES
                             }
                         }
                     }
-                    return contour_combiner.distance(alloc);
+                    return contour_combiner.distance(temp_alloc);
                 }
             };
         }
@@ -3241,15 +3684,15 @@ pub fn BezierMultiSignedDistanceFieldGenerator(comptime Float: type, comptime ES
                 alpha_and_color,
             };
 
-            pub fn correct_msdf_signs(mode: SignCorrectMode, comptime NUM_CHANNELS: comptime_int, msdf: FloatBitmap(NUM_CHANNELS), shape: *Shape, projection: Projection, signed_zero_value: f32, fill_rule: FillRule, scanline: *Shape.Scanline, alloc: Allocator) void {
+            pub fn correct_msdf_signs(mode: SignCorrectMode, comptime NUM_CHANNELS: comptime_int, msdf: FloatBitmap(NUM_CHANNELS), shape: *Shape, projection: Projection, signed_zero_value: f32, fill_rule: FillRule, scanline: *Shape.Scanline, scanline_allocator: Allocator, temp_allocator: Allocator) void {
                 var y: u32 = 0;
                 var x: u32 = undefined;
                 var m: usize = 0;
                 var is_filled: bool = undefined;
                 var ambiguous: bool = false;
                 const pixel_count = msdf.pixel_count();
-                var match_map: List(i8) = if (mode == .color_only or mode == .alpha_and_color) List(i8).init_capacity(@intCast(pixel_count), alloc) else List(i8).init_empty();
-                defer match_map.free(alloc);
+                var match_map: List(i8) = if (mode == .color_only or mode == .alpha_and_color) List(i8).init_capacity(@intCast(pixel_count), temp_allocator) else List(i8).init_empty();
+                defer match_map.free(temp_allocator);
                 if (mode == .color_only or mode == .alpha_and_color) {
                     match_map.len = pixel_count;
                     @memset(match_map.slice(), 0);
@@ -3257,7 +3700,7 @@ pub fn BezierMultiSignedDistanceFieldGenerator(comptime Float: type, comptime ES
                 const double_signed_zero = signed_zero_value + signed_zero_value;
                 while (y < msdf.height) : (y += 1) {
                     x = 0;
-                    shape.get_horizontal_scanline_intersections(projection.un_project_y(num_cast(y, f32) + 0.5), scanline, alloc);
+                    shape.get_horizontal_scanline_intersections(projection.un_project_y(num_cast(y, f32) + 0.5), scanline, scanline_allocator);
                     while (x < msdf.width) : (x += 1) {
                         is_filled = scanline.is_filled_at_x(projection.un_project_x(num_cast(x, f32) + 0.5), fill_rule);
                         const pixel = msdf.get_pixel_ptr_with_origin(.bot_left, x, y);
@@ -3478,10 +3921,7 @@ pub const ErrorFlags = Flags.Flags(enum(u8) {
     PROTECTED = 2,
 }, enum(u8) {});
 
-pub const ShapeError = error{
-    shape_is_invalid,
-};
-
 pub const GeneratorError = error{
     shape_is_invalid,
+    bitmap_provider_failed_to_provide_bitmap,
 };
