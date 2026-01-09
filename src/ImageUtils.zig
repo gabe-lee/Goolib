@@ -31,18 +31,20 @@ const num_cast = Root.Cast.num_cast;
 
 pub fn Reslution_DPM(comptime T: type) type {
     return struct {
+        const Self = @This();
+
         raw: T = 2835, // ~72 DPI,
 
         /// Dots(Pixels)-Per-Inch
-        pub fn new_dpi(dpi: anytype) Reslution_DPM {
-            return Reslution_DPM{
+        pub fn new_dpi(dpi: anytype) Self {
+            return Self{
                 .raw = MathX.upgrade_multiply_out(dpi, M.METERS_TO_YARDS * M.YARDS_TO_INCHES, T),
             };
         }
 
         /// Dots(Pixels)-Per-Meter
-        pub fn new_dpm(dpm: anytype) Reslution_DPM {
-            return Reslution_DPM{
+        pub fn new_dpm(dpm: anytype) Self {
+            return Self{
                 .raw = num_cast(dpm, T),
             };
         }
@@ -51,18 +53,20 @@ pub fn Reslution_DPM(comptime T: type) type {
 
 pub fn Reslution_DPI(comptime T: type) type {
     return struct {
+        const Self = @This();
+
         raw: T = 72,
 
         /// Dots(Pixels)-Per-Inch
-        pub fn new_dpi(dpi: anytype) Reslution_DPM {
-            return Reslution_DPM{
+        pub fn new_dpi(dpi: anytype) Self {
+            return Self{
                 .raw = num_cast(dpi, T),
             };
         }
 
         /// Dots(Pixels)-Per-Meter
-        pub fn new_dpm(dpm: anytype) Reslution_DPM {
-            return Reslution_DPM{
+        pub fn new_dpm(dpm: anytype) Self {
+            return Self{
                 .raw = MathX.upgrade_multiply_out(dpm, M.INCHES_TO_YARDS * M.YARDS_TO_METERS, T),
             };
         }

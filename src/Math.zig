@@ -84,20 +84,20 @@ pub fn lerp(a: anytype, b: @TypeOf(a), delta: @TypeOf(a)) @TypeOf(a) {
 }
 pub fn upgrade_lerp(a: anytype, b: anytype, delta: anytype) Upgraded3Numbers(@TypeOf(a), @TypeOf(b), @TypeOf(delta)).T {
     const nums = upgrade_3_numbers_for_math(a, b, delta);
-    const T = @FieldType(nums, "a");
+    const T = @FieldType(@TypeOf(nums), "a");
     if (Types.type_is_float(T)) {
-        return @mulAdd(T, delta, b, @mulAdd(T, -delta, a, a));
+        return @mulAdd(T, nums.c, nums.b, @mulAdd(T, -nums.c, nums.a, nums.a));
     } else {
-        return ((1 - delta) * a) + (delta * b);
+        return ((1 - nums.c) * nums.a) + (nums.c * nums.b);
     }
 }
 pub fn upgrade_lerp_out(a: anytype, b: anytype, delta: anytype, comptime OUT: type) OUT {
     const nums = upgrade_3_numbers_for_math(a, b, delta);
-    const T = @FieldType(nums, "a");
+    const T = @FieldType(@TypeOf(nums), "a");
     const out: T = if (Types.type_is_float(T))
-        (@mulAdd(T, delta, b, @mulAdd(T, -delta, a, a)))
+        (@mulAdd(T, nums.c, nums.b, @mulAdd(T, -nums.c, nums.a, nums.a)))
     else
-        (((1 - delta) * a) + (delta * b));
+        (((1 - nums.c) * nums.a) + (nums.c * nums.b));
     return convert_number(out, OUT);
 }
 
@@ -204,6 +204,14 @@ pub fn approx_equal(comptime T: type, a: T, b: T) bool {
     const a_max: T = a + math.floatEpsAt(T, a);
     const b_min: T = b - math.floatEpsAt(T, b);
     const b_max: T = b + math.floatEpsAt(T, b);
+    return a_max >= b_min and b_max >= a_min;
+}
+
+pub fn approx_equal_with_epsilon(comptime T: type, a: T, b: T, epsilon: T) bool {
+    const a_min: T = a - epsilon;
+    const a_max: T = a + epsilon;
+    const b_min: T = b - epsilon;
+    const b_max: T = b + epsilon;
     return a_max >= b_min and b_max >= a_min;
 }
 
@@ -442,7 +450,7 @@ pub fn upgrade_to_float(val: anytype, comptime UPGRADE_TYPE_IF_NEEDED: type) if 
 pub fn upgrade_add_out(a: anytype, b: anytype, comptime OUT: type) OUT {
     const nums = upgrade_2_numbers_for_math(a, b);
     const c = nums.a + nums.b;
-    convert_number(c, OUT);
+    return convert_number(c, OUT);
 }
 pub fn upgrade_add(a: anytype, b: anytype) Upgraded2Numbers(@TypeOf(a), @TypeOf(b)).T {
     const nums = upgrade_2_numbers_for_math(a, b);
@@ -451,7 +459,7 @@ pub fn upgrade_add(a: anytype, b: anytype) Upgraded2Numbers(@TypeOf(a), @TypeOf(
 pub fn upgrade_subtract_out(a: anytype, b: anytype, comptime OUT: type) OUT {
     const nums = upgrade_2_numbers_for_math(a, b);
     const c = nums.a - nums.b;
-    convert_number(c, OUT);
+    return convert_number(c, OUT);
 }
 pub fn upgrade_subtract(a: anytype, b: anytype) Upgraded2Numbers(@TypeOf(a), @TypeOf(b)).T {
     const nums = upgrade_2_numbers_for_math(a, b);
@@ -460,7 +468,7 @@ pub fn upgrade_subtract(a: anytype, b: anytype) Upgraded2Numbers(@TypeOf(a), @Ty
 pub fn upgrade_multiply_out(a: anytype, b: anytype, comptime OUT: type) OUT {
     const nums = upgrade_2_numbers_for_math(a, b);
     const c = nums.a * nums.b;
-    convert_number(c, OUT);
+    return convert_number(c, OUT);
 }
 pub fn upgrade_multiply(a: anytype, b: anytype) Upgraded2Numbers(@TypeOf(a), @TypeOf(b)).T {
     const nums = upgrade_2_numbers_for_math(a, b);
@@ -469,7 +477,7 @@ pub fn upgrade_multiply(a: anytype, b: anytype) Upgraded2Numbers(@TypeOf(a), @Ty
 pub fn upgrade_divide_out(a: anytype, b: anytype, comptime OUT: type) OUT {
     const nums = upgrade_2_numbers_for_math(a, b);
     const c = nums.a / nums.b;
-    convert_number(c, OUT);
+    return convert_number(c, OUT);
 }
 pub fn upgrade_divide(a: anytype, b: anytype) Upgraded2Numbers(@TypeOf(a), @TypeOf(b)).T {
     const nums = upgrade_2_numbers_for_math(a, b);
@@ -479,7 +487,7 @@ pub fn upgrade_power_out(a: anytype, b: anytype, comptime OUT: type) OUT {
     const nums = upgrade_2_numbers_for_math(a, b);
     const C = @FieldType(nums, "a");
     const c = math.pow(C, nums.a, nums.b);
-    convert_number(c, OUT);
+    return convert_number(c, OUT);
 }
 pub fn upgrade_power(a: anytype, b: anytype) Upgraded2Numbers(@TypeOf(a), @TypeOf(b)).T {
     const nums = upgrade_2_numbers_for_math(a, b);
@@ -489,7 +497,7 @@ pub fn upgrade_root_out(a: anytype, b: anytype, comptime OUT: type) OUT {
     const nums = upgrade_2_numbers_for_math(a, b);
     const C = @FieldType(nums, "a");
     const c = math.pow(C, nums.a, 1 / nums.b);
-    convert_number(c, OUT);
+    return convert_number(c, OUT);
 }
 pub fn upgrade_root(a: anytype, b: anytype) Upgraded2Numbers(@TypeOf(a), @TypeOf(b)).T {
     const nums = upgrade_2_numbers_for_math(a, b);
@@ -498,7 +506,7 @@ pub fn upgrade_root(a: anytype, b: anytype) Upgraded2Numbers(@TypeOf(a), @TypeOf
 pub fn upgrade_log_x_base_out(x: anytype, base: anytype, comptime OUT: type) OUT {
     const nums = upgrade_2_numbers_for_math(x, base);
     const c = log_x_base(nums.a, nums.b);
-    convert_number(c, OUT);
+    return convert_number(c, OUT);
 }
 pub fn upgrade_log_x_base(a: anytype, b: anytype) Upgraded2Numbers(@TypeOf(a), @TypeOf(b)).T {
     const nums = upgrade_2_numbers_for_math(a, b);
@@ -507,7 +515,7 @@ pub fn upgrade_log_x_base(a: anytype, b: anytype) Upgraded2Numbers(@TypeOf(a), @
 pub fn upgrade_modulo_out(a: anytype, b: anytype, comptime OUT: type) OUT {
     const nums = upgrade_2_numbers_for_math(a, b);
     const c = @mod(nums.a, nums.b);
-    convert_number(c, OUT);
+    return convert_number(c, OUT);
 }
 pub fn upgrade_modulo(a: anytype, b: anytype) Upgraded2Numbers(@TypeOf(a), @TypeOf(b)).T {
     const nums = upgrade_2_numbers_for_math(a, b);
@@ -516,7 +524,7 @@ pub fn upgrade_modulo(a: anytype, b: anytype) Upgraded2Numbers(@TypeOf(a), @Type
 pub fn upgrade_max_out(a: anytype, b: anytype, comptime OUT: type) OUT {
     const nums = upgrade_2_numbers_for_math(a, b);
     const c = @max(nums.a, nums.b);
-    convert_number(c, OUT);
+    return convert_number(c, OUT);
 }
 pub fn upgrade_max(a: anytype, b: anytype) Upgraded2Numbers(@TypeOf(a), @TypeOf(b)).T {
     const nums = upgrade_2_numbers_for_math(a, b);
@@ -525,11 +533,60 @@ pub fn upgrade_max(a: anytype, b: anytype) Upgraded2Numbers(@TypeOf(a), @TypeOf(
 pub fn upgrade_min_out(a: anytype, b: anytype, comptime OUT: type) OUT {
     const nums = upgrade_2_numbers_for_math(a, b);
     const c = @min(nums.a, nums.b);
-    convert_number(c, OUT);
+    return convert_number(c, OUT);
 }
 pub fn upgrade_min(a: anytype, b: anytype) Upgraded2Numbers(@TypeOf(a), @TypeOf(b)).T {
     const nums = upgrade_2_numbers_for_math(a, b);
     return @min(nums.a, nums.b);
+}
+
+pub fn upgrade_equal_to(a: anytype, b: anytype) bool {
+    const nums = upgrade_2_numbers_for_math(a, b);
+    return nums.a == nums.b;
+}
+pub fn upgrade_equal_to_out(a: anytype, b: anytype, comptime OUT: type) OUT {
+    const nums = upgrade_2_numbers_for_math(a, b);
+    return num_cast(nums.a == nums.b, OUT);
+}
+pub fn upgrade_not_equal_to(a: anytype, b: anytype) bool {
+    const nums = upgrade_2_numbers_for_math(a, b);
+    return nums.a != nums.b;
+}
+pub fn upgrade_not_equal_to_out(a: anytype, b: anytype, comptime OUT: type) OUT {
+    const nums = upgrade_2_numbers_for_math(a, b);
+    return num_cast(nums.a != nums.b, OUT);
+}
+pub fn upgrade_less_than(a: anytype, b: anytype) bool {
+    const nums = upgrade_2_numbers_for_math(a, b);
+    return nums.a < nums.b;
+}
+pub fn upgrade_less_than_out(a: anytype, b: anytype, comptime OUT: type) OUT {
+    const nums = upgrade_2_numbers_for_math(a, b);
+    return num_cast(nums.a < nums.b, OUT);
+}
+pub fn upgrade_less_than_or_equal(a: anytype, b: anytype) bool {
+    const nums = upgrade_2_numbers_for_math(a, b);
+    return nums.a <= nums.b;
+}
+pub fn upgrade_less_than_or_equal_out(a: anytype, b: anytype, comptime OUT: type) OUT {
+    const nums = upgrade_2_numbers_for_math(a, b);
+    return num_cast(nums.a <= nums.b, OUT);
+}
+pub fn upgrade_greater_than(a: anytype, b: anytype) bool {
+    const nums = upgrade_2_numbers_for_math(a, b);
+    return nums.a > nums.b;
+}
+pub fn upgrade_greater_than_out(a: anytype, b: anytype, comptime OUT: type) OUT {
+    const nums = upgrade_2_numbers_for_math(a, b);
+    return num_cast(nums.a > nums.b, OUT);
+}
+pub fn upgrade_greater_than_or_equal(a: anytype, b: anytype) bool {
+    const nums = upgrade_2_numbers_for_math(a, b);
+    return nums.a >= nums.b;
+}
+pub fn upgrade_greater_than_or_equal_out(a: anytype, b: anytype, comptime OUT: type) OUT {
+    const nums = upgrade_2_numbers_for_math(a, b);
+    return num_cast(nums.a >= nums.b, OUT);
 }
 
 pub fn change_per_unit_time_required_to_reach_val_at_time(comptime T: type, current: T, target: T, time: T) T {
@@ -549,17 +606,41 @@ pub const ScanlineSlopeMode = enum {
     sign,
 };
 
+pub fn ScanlineIntersectionPointType(comptime POINT_MODE: ScanlinePointMode, comptime AXIS_VALUE_TYPE: type) type {
+    return switch (POINT_MODE) {
+        .point => Vec2.define_vec2_type(AXIS_VALUE_TYPE),
+        .axis_only => AXIS_VALUE_TYPE,
+    };
+}
+pub fn ScanlineIntersectionSlopeType(comptime SLOPE_MODE: ScanlineSlopeMode, comptime AXIS_VALUE_TYPE: type, comptime SLOPE_TYPE: type) type {
+    return switch (SLOPE_MODE) {
+        .exact => AXIS_VALUE_TYPE,
+        .sign => SLOPE_TYPE,
+    };
+}
+pub fn ScanlineIntersection(comptime POINT_MODE: ScanlinePointMode, comptime SLOPE_MODE: ScanlineSlopeMode, comptime AXIS_VALUE_TYPE: type, comptime SLOPE_TYPE: type) type {
+    const Point = ScanlineIntersectionPointType(POINT_MODE, AXIS_VALUE_TYPE);
+    const Slope = ScanlineIntersectionSlopeType(SLOPE_MODE, AXIS_VALUE_TYPE, SLOPE_TYPE);
+    return struct {
+        const Self = @This();
+
+        point: Point = if (POINT_MODE == .point) .{} else 0,
+        slope: Slope = 0,
+
+        pub fn new(point_or_axis_val: Point, slope: Slope) Self {
+            return Self{
+                .point = point_or_axis_val,
+                .slope = slope,
+            };
+        }
+    };
+}
+
 pub fn ScanlineIntersections(comptime MAX: comptime_int, comptime AXIS_VALUE_TYPE: type, comptime POINT_MODE: ScanlinePointMode, comptime SLOPE_MODE: ScanlineSlopeMode, comptime SLOPE_TYPE: type) type {
     return struct {
         const Self = @This();
-        const Point = switch (POINT_MODE) {
-            .point => Vec2.define_vec2_type(AXIS_VALUE_TYPE),
-            .axis_only => AXIS_VALUE_TYPE,
-        };
-        const Slope = switch (SLOPE_MODE) {
-            .exact => AXIS_VALUE_TYPE,
-            .sign => SLOPE_TYPE,
-        };
+        const Point = ScanlineIntersectionPointType(POINT_MODE, AXIS_VALUE_TYPE);
+        const Slope = ScanlineIntersectionSlopeType(SLOPE_MODE, AXIS_VALUE_TYPE, SLOPE_TYPE);
 
         intersections: [MAX]Intersection = @splat(.{}),
         count: u32 = 0,
@@ -567,14 +648,11 @@ pub fn ScanlineIntersections(comptime MAX: comptime_int, comptime AXIS_VALUE_TYP
         pub fn change_max_intersections(self: Self, comptime NEW_MAX: comptime_int) ScanlineIntersections(NEW_MAX, AXIS_VALUE_TYPE, POINT_MODE, SLOPE_MODE, SLOPE_TYPE) {
             var new_scanlines = ScanlineIntersections(NEW_MAX, AXIS_VALUE_TYPE, POINT_MODE, SLOPE_MODE, SLOPE_TYPE){};
             new_scanlines.count = self.count;
-            @memcpy(new_scanlines.intersections[0..self.count], self.points[0..self.count]);
+            @memcpy(new_scanlines.intersections[0..self.count], self.intersections[0..self.count]);
             return new_scanlines;
         }
 
-        pub const Intersection = struct {
-            point: Point = if (POINT_MODE == .point) .{} else 0,
-            slope: Slope = 0,
-        };
+        pub const Intersection = ScanlineIntersection(POINT_MODE, SLOPE_MODE, AXIS_VALUE_TYPE, SLOPE_TYPE);
     };
 }
 
@@ -603,16 +681,16 @@ pub fn SignedDistance(comptime T: type) type {
             return @abs(a.distance) == @abs(b.distance);
         }
         pub inline fn less_than(a: Self, b: Self) bool {
-            return @abs(a.distance) < @abs(b.distance) or (@abs(a.distance) == @abs(b.distance) and a.dot < b.dot);
+            return @abs(a.distance) < @abs(b.distance) or (@abs(a.distance) == @abs(b.distance) and a.dot_product < b.dot_product);
         }
         pub inline fn less_than_or_equal(a: Self, b: Self) bool {
-            return @abs(a.distance) <= @abs(b.distance) or (@abs(a.distance) == @abs(b.distance) and a.dot <= b.dot);
+            return @abs(a.distance) <= @abs(b.distance) or (@abs(a.distance) == @abs(b.distance) and a.dot_product <= b.dot_product);
         }
         pub inline fn greater_than(a: Self, b: Self) bool {
-            return @abs(a.distance) > @abs(b.distance) or (@abs(a.distance) == @abs(b.distance) and a.dot > b.dot);
+            return @abs(a.distance) > @abs(b.distance) or (@abs(a.distance) == @abs(b.distance) and a.dot_product > b.dot_product);
         }
         pub inline fn greater_than_or_equal(a: Self, b: Self) bool {
-            return @abs(a.distance) >= @abs(b.distance) or (@abs(a.distance) == @abs(b.distance) and a.dot >= b.dot);
+            return @abs(a.distance) >= @abs(b.distance) or (@abs(a.distance) == @abs(b.distance) and a.dot_product >= b.dot_product);
         }
     };
 }
@@ -702,13 +780,13 @@ pub fn LinearEstimate(comptime T: type) type {
         const Self = @This();
 
         exact: void,
-        raito: T,
+        estimate: T,
 
         pub fn do_not_estimate_linear() Self {
             return Self{ .exact = void{} };
         }
         pub fn estimate_linear_when_linear_coeff_more_than_N_times_quadratic(N: T) Self {
-            return Self{ .raito = N };
+            return Self{ .estimate = N };
         }
     };
 }
@@ -718,13 +796,13 @@ pub fn QuadraticEstimate(comptime T: type) type {
         const Self = @This();
 
         exact: void,
-        raito: T,
+        estimate: T,
 
         pub fn do_not_estimate_quadratic() Self {
             return Self{ .exact = void{} };
         }
         pub fn estimate_quadratic_when_quadratic_coeff_more_than_N_times_cubic(N: T) Self {
-            return Self{ .raito = N };
+            return Self{ .estimate = N };
         }
     };
 }
@@ -734,20 +812,20 @@ pub fn DoubleRootEstimate(comptime T: type) type {
         const Self = @This();
 
         exact: void,
-        raito: T,
+        estimate: T,
 
         pub fn do_not_estimate_double_roots() Self {
             return Self{ .exact = void{} };
         }
         pub fn estimate_double_roots_when_u_minus_v_less_than_N_times_u_plus_v(N: T) Self {
-            return Self{ .raito = N };
+            return Self{ .estimate = N };
         }
     };
 }
 
 // polynomial form: a(x) + b
 pub fn solve_linear_polynomial_for_zero(a: anytype, b: @TypeOf(a)) LinearSolution(@TypeOf(a)) {
-    const result = LinearSolution(@TypeOf(a)){};
+    var result = LinearSolution(@TypeOf(a)){};
     if (a == 0) {
         if (b == 0) {
             // horizontal line with y == 0
@@ -758,7 +836,7 @@ pub fn solve_linear_polynomial_for_zero(a: anytype, b: @TypeOf(a)) LinearSolutio
         }
         return result;
     }
-    result.solution_deltas[0] = -(b / a);
+    result.vals[0] = -(b / a);
     result.count = 1;
     result.mode = .finite_solutions;
     return result;
@@ -780,7 +858,7 @@ pub fn solve_quadratic_polynomial_for_zeros_advanced(a: anytype, b: @TypeOf(a), 
     if (a == 0 or check_estimate: {
         switch (linear_estimate) {
             .exact => break :check_estimate false,
-            .raito => |ratio| {
+            .estimate => |ratio| {
                 break :check_estimate @abs(b) / @abs(a) > ratio;
             },
         }
@@ -792,32 +870,34 @@ pub fn solve_quadratic_polynomial_for_zeros_advanced(a: anytype, b: @TypeOf(a), 
     if (descriminant > 0) {
         const a2 = 2 * a;
         const sqrt_descriminant = @sqrt(descriminant);
-        result.solution_deltas[0] = (-b + sqrt_descriminant) / a2;
-        result.solution_deltas[1] = (-b - sqrt_descriminant) / a2;
+        result.vals[0] = (-b + sqrt_descriminant) / a2;
+        result.vals[1] = (-b - sqrt_descriminant) / a2;
         result.count = 2;
         result.mode = .finite_solutions;
+        return result;
     } else if (descriminant == 0) {
         const a2 = 2 * a;
         result.vals[0] = -(b / a2);
         result.count = 1;
         result.mode = .finite_solutions;
+        return result;
     } else {
         return result;
     }
 }
 
 // polynomial form: a(x^3) + b(x^2) + c(x) + d
-pub fn solve_cubic_polynomial_for_zeros(a: anytype, b: @TypeOf(a), c: @TypeOf(a), d: @TypeOf(a)) QuadraticSolution(@TypeOf(a)) {
+pub fn solve_cubic_polynomial_for_zeros(a: anytype, b: @TypeOf(a), c: @TypeOf(a), d: @TypeOf(a)) CubicSolution(@TypeOf(a)) {
     return solve_cubic_polynomial_for_zeros_advanced(a, b, c, d, .do_not_estimate_double_roots(), .do_not_estimate_quadratic(), .do_not_estimate_linear());
 }
 
 // polynomial form: a(x^3) + b(x^2) + c(x) + d
-pub fn solve_cubic_polynomial_for_zeros_estimate(a: anytype, b: @TypeOf(a), c: @TypeOf(a), d: @TypeOf(a)) QuadraticSolution(@TypeOf(a)) {
+pub fn solve_cubic_polynomial_for_zeros_estimate(a: anytype, b: @TypeOf(a), c: @TypeOf(a), d: @TypeOf(a)) CubicSolution(@TypeOf(a)) {
     return solve_cubic_polynomial_for_zeros_advanced(a, b, c, d, .estimate_double_roots_when_u_minus_v_less_than_N_times_u_plus_v(1e-12), .estimate_quadratic_when_quadratic_coeff_more_than_N_times_cubic(1e6), .estimate_linear_when_linear_coeff_more_than_N_times_quadratic(1e12));
 }
 
 // polynomial form: a(x^3) + b(x^2) + c(x) + d
-pub fn solve_cubic_polynomial_for_zeros_advanced(a: anytype, b: @TypeOf(a), c: @TypeOf(a), d: @TypeOf(a), comptime double_root_estimate: DoubleRootEstimate(@TypeOf(a)), comptime quadratic_estimate: QuadraticEstimate(@TypeOf(a)), comptime linear_estimate: LinearEstimate(@TypeOf(a))) QuadraticSolution(@TypeOf(a)) {
+pub fn solve_cubic_polynomial_for_zeros_advanced(a: anytype, b: @TypeOf(a), c: @TypeOf(a), d: @TypeOf(a), comptime double_root_estimate: DoubleRootEstimate(@TypeOf(a)), comptime quadratic_estimate: QuadraticEstimate(@TypeOf(a)), comptime linear_estimate: LinearEstimate(@TypeOf(a))) CubicSolution(@TypeOf(a)) {
     const T = @TypeOf(a);
     // if a == 0 (or b is greater than a by many orders of magnitude and quadratic estimates are enabled), its quadratic
     if (a == 0 or check_estimate: {
@@ -839,12 +919,12 @@ pub fn solve_cubic_polynomial_for_zeros_advanced(a: anytype, b: @TypeOf(a), c: @
     const third_a = a / 3;
     if (r_squared < q_cubed) {
         var t = r / @sqrt(q_cubed);
-        clamp(-1, t, 1);
+        t = clamp(-1, t, 1);
         t = math.acos(t);
         q = @sqrt(q) * -2;
         result.vals[0] = (q * @cos(t / 3)) - third_a;
         result.vals[1] = (q * @cos((t + TAU) / 3)) - third_a;
-        result.vals[3] = (q * @cos((t - TAU) / 3)) - third_a;
+        result.vals[2] = (q * @cos((t - TAU) / 3)) - third_a;
         result.count = 3;
         result.mode = .finite_solutions;
         return result;
@@ -939,8 +1019,8 @@ test range_trichotomy {
 }
 
 pub fn extract_partial_rand_from_rand(rand: anytype, val_less_than: anytype, comptime OUT: type) OUT {
-    assert_with_reason(Types.type_is_pointer_with_child_unsigned_int_type(rand), @src(), "type of `rand` must be a pointer to an unsigned integer type, got type `{s}", .{@typeName(@TypeOf(rand))});
-    assert_with_reason(Types.type_is_unsigned_int(val_less_than), @src(), "type of `max_val` must be an unsigned integer type, got type `{s}", .{@typeName(@TypeOf(rand))});
+    assert_with_reason(Types.type_is_pointer_with_child_unsigned_int_type(@TypeOf(rand)), @src(), "type of `rand` must be a pointer to an unsigned integer type, got type `{s}", .{@typeName(@TypeOf(rand))});
+    assert_with_reason(Types.type_is_comptime_or_unsigned_int(@TypeOf(val_less_than)), @src(), "type of `val_less_than` must be an unsigned integer type, got type `{s}", .{@typeName(@TypeOf(val_less_than))});
     const r = rand.* % val_less_than;
     rand.* = rand.* / val_less_than;
     return convert_number(r, OUT);

@@ -526,10 +526,10 @@ pub fn List(comptime T: type) type {
         pub fn is_sorted_implicit(self: *Self, range: P.PartialRangeIter) bool {
             return P.is_sorted_implicit(self, range, NO_ALLOC);
         }
-        pub fn insertion_sort(self: *Self, range: P.PartialRangeIter, greater_than: *const P.CompareFunc) bool {
+        pub fn insertion_sort(self: *Self, range: P.PartialRangeIter, greater_than: *const P.CompareFunc) void {
             return P.insertion_sort(self, range, greater_than, NO_ALLOC);
         }
-        pub fn insertion_sort_implicit(self: *Self, range: P.PartialRangeIter) bool {
+        pub fn insertion_sort_implicit(self: *Self, range: P.PartialRangeIter) void {
             return P.insertion_sort_implicit(self, range, NO_ALLOC);
         }
         pub fn quicksort(self: *Self, range: P.PartialRangeIter, greater_than: *const P.CompareFunc, less_than: *const P.CompareFunc, comptime PARTITION_IDX: type, partition_stack: IList(PARTITION_IDX)) ListError!void {

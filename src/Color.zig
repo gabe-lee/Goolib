@@ -65,13 +65,13 @@ pub const Channel = enum(u8) {
     }
 };
 
-pub fn define_arbitrary_color_type(comptime CHANNEL_TYPE: type, comptime CHANNELS_ENUM: type) type {
+pub fn define_arbitrary_color_type(comptime CHANNEL_TYPE: type, comptime CHANNELS_ENUM: type, comptime ZERO_VAL: CHANNEL_TYPE) type {
     assert_with_reason(Types.type_is_enum(CHANNELS_ENUM), @src(), "type `CHANNELS_ENUM` must be an enum type, got type `{s}`", .{@typeName(CHANNELS_ENUM)});
     assert_with_reason(Types.enum_is_exhaustive(CHANNELS_ENUM), @src(), "type `CHANNELS_ENUM` must be an exhaustive enum type", .{@typeName(CHANNELS_ENUM)});
     assert_with_reason(Types.all_enum_values_start_from_zero_with_no_gaps(CHANNELS_ENUM), @src(), "type `CHANNELS_ENUM` must be an enum type with all tags starting from value 0 to the max tag value, with no gaps", .{@typeName(CHANNELS_ENUM)});
     return struct {
         const Self = @This();
-        raw: [CHANNEL_COUNT]CHANNEL_TYPE = @splat(0),
+        raw: [CHANNEL_COUNT]CHANNEL_TYPE = @splat(ZERO_VAL),
 
         pub const TYPE = CHANNEL_TYPE;
 
@@ -107,10 +107,10 @@ pub fn define_arbitrary_color_type(comptime CHANNEL_TYPE: type, comptime CHANNEL
             return MAX_VALS;
         }
 
-        pub inline fn get(self: Self, comptime channel: CHANNELS_ENUM) CHANNEL_TYPE {
+        pub inline fn get(self: Self, channel: CHANNELS_ENUM) CHANNEL_TYPE {
             return self.raw[@intFromEnum(channel)];
         }
-        pub inline fn set(self: *Self, comptime channel: CHANNELS_ENUM, val: CHANNEL_TYPE) void {
+        pub inline fn set(self: *Self, channel: CHANNELS_ENUM, val: CHANNEL_TYPE) void {
             self.raw[@intFromEnum(channel)] = val;
         }
         pub inline fn set_all_channels(self: *Self, val: CHANNEL_TYPE) void {
@@ -118,21 +118,21 @@ pub fn define_arbitrary_color_type(comptime CHANNEL_TYPE: type, comptime CHANNEL
                 self.raw[c] = val;
             }
         }
-        pub inline fn with_set(self: Self, comptime channel: CHANNELS_ENUM, val: CHANNEL_TYPE) Self {
+        pub inline fn with_set(self: Self, channel: CHANNELS_ENUM, val: CHANNEL_TYPE) Self {
             var new_self = self;
             new_self.raw[@intFromEnum(channel)] = val;
             return new_self;
         }
 
-        pub fn cast_values_to(self: Self, comptime NEW_CHANNEL_TYPE: type) define_arbitrary_color_type(NEW_CHANNEL_TYPE, CHANNELS_ENUM) {
-            var out: define_arbitrary_color_type(NEW_CHANNEL_TYPE, CHANNELS_ENUM) = undefined;
+        pub fn cast_values_to(self: Self, comptime NEW_CHANNEL_TYPE: type, comptime NEW_ZERO_VAL: NEW_CHANNEL_TYPE) define_arbitrary_color_type(NEW_CHANNEL_TYPE, CHANNELS_ENUM, NEW_ZERO_VAL) {
+            var out: define_arbitrary_color_type(NEW_CHANNEL_TYPE, CHANNELS_ENUM, NEW_ZERO_VAL) = undefined;
             inline for (0..CHANNEL_COUNT) |c| {
                 out.raw[c] = num_cast(self.raw[c], NEW_CHANNEL_TYPE);
             }
             return out;
         }
-        pub fn reorder_channels_to(self: Self, comptime NEW_CHANNEL_ENUM: type) define_arbitrary_color_type(CHANNEL_TYPE, NEW_CHANNEL_ENUM) {
-            var out: define_arbitrary_color_type(CHANNEL_TYPE, NEW_CHANNEL_ENUM) = undefined;
+        pub fn reorder_channels_to(self: Self, comptime NEW_CHANNEL_ENUM: type) define_arbitrary_color_type(CHANNEL_TYPE, NEW_CHANNEL_ENUM, ZERO_VAL) {
+            var out: define_arbitrary_color_type(CHANNEL_TYPE, NEW_CHANNEL_ENUM, ZERO_VAL) = undefined;
             const NEW_TAG_INFO = @typeInfo(NEW_CHANNEL_ENUM).@"enum".fields;
             const OLD_TAG_INFO = @typeInfo(CHANNELS_ENUM).@"enum".fields;
             inline for (NEW_TAG_INFO) |new_tag| {
@@ -151,8 +151,8 @@ pub fn define_arbitrary_color_type(comptime CHANNEL_TYPE: type, comptime CHANNEL
             return out;
         }
 
-        pub fn cast_values_normalized_to(self: Self, comptime NEW_CHANNEL_TYPE: type) define_arbitrary_color_type(NEW_CHANNEL_TYPE, CHANNELS_ENUM) {
-            var out: define_arbitrary_color_type(NEW_CHANNEL_TYPE, CHANNELS_ENUM) = undefined;
+        pub fn cast_values_normalized_to(self: Self, comptime NEW_CHANNEL_TYPE: type, comptime NEW_ZERO_VAL: NEW_CHANNEL_TYPE) define_arbitrary_color_type(NEW_CHANNEL_TYPE, CHANNELS_ENUM, NEW_ZERO_VAL) {
+            var out: define_arbitrary_color_type(NEW_CHANNEL_TYPE, CHANNELS_ENUM, NEW_ZERO_VAL) = undefined;
             inline for (0..CHANNEL_COUNT) |c| {
                 if (Types.type_is_float(NEW_CHANNEL_TYPE) and Types.type_is_int(CHANNEL_TYPE)) {
                     out.raw[c] = MathX.int_to_normalized_float(self.raw[c], NEW_CHANNEL_TYPE);
@@ -366,8 +366,8 @@ pub fn define_arbitrary_color_type(comptime CHANNEL_TYPE: type, comptime CHANNEL
         }
         pub fn implicit_equals(self: Self, other: Self) bool {
             const INT = Types.UnsignedIntegerWithSameSize(Self);
-            const self_int: INT = @bitCast(self);
-            const other_int: INT = @bitCast(other);
+            const self_int: INT = @bitCast(self.raw);
+            const other_int: INT = @bitCast(other.raw);
             return self_int == other_int;
         }
         pub fn implicit_not_equals(self: Self, other: Self) bool {

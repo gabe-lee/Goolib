@@ -52,6 +52,8 @@ pub fn define_vec2_type(comptime T: type) type {
     return extern struct {
         const T_Vec2 = @This();
         const T_Rect2 = Root.Rect2.define_rect2_type(T);
+        const Mat3x3 = Root.Mat3x3.define_matrix_3x3_type(T);
+        const ONE: T = @as(T, 2);
         const IS_FLOAT = switch (T) {
             f16, f32, f64, f80, f128, c_longdouble => true,
             else => false,
@@ -93,6 +95,25 @@ pub fn define_vec2_type(comptime T: type) type {
 
         pub fn inverse(self: T_Vec2) T_Vec2 {
             return T_Vec2{ .x = 1 / self.x, .y = 1 / self.y };
+        }
+
+        pub fn as_1x3_matrix_column(self: T_Vec2) [3]T {
+            return [3]T{ self.x, self.y, ONE };
+        }
+        pub fn as_1x2_matrix_column(self: T_Vec2) [2]T {
+            return [2]T{ self.x, self.y };
+        }
+        pub fn from_1x2_matrix_column(column: [2]T) T_Vec2 {
+            return T_Vec2{
+                .x = column[0],
+                .y = column[1],
+            };
+        }
+        pub fn from_1x3_matrix_column(column: [3]T) T_Vec2 {
+            return T_Vec2{
+                .x = column[0],
+                .y = column[1],
+            };
         }
 
         pub fn ceil(self: T_Vec2) T_Vec2 {
@@ -395,7 +416,7 @@ pub fn define_vec2_type(comptime T: type) type {
         }
 
         pub fn lerp(self: T_Vec2, p2: T_Vec2, percent: anytype) T_Vec2 {
-            assert_is_float(@TypeOf(percent));
+            assert_is_float(@TypeOf(percent), @src());
             return T_Vec2{ .x = MathX.upgrade_lerp_out(self.x, p2.x, percent, T), .y = MathX.upgrade_lerp_out(self.y, p2.y, percent, T) };
         }
         pub inline fn linear_interp(p1: T_Vec2, p2: T_Vec2, percent: anytype) T_Vec2 {
@@ -480,6 +501,9 @@ pub fn define_vec2_type(comptime T: type) type {
 
         pub fn approx_equal(self: T_Vec2, other: T_Vec2) bool {
             return Root.Math.approx_equal(T, self.x, other.x) and Root.Math.approx_equal(T, self.y, other.y);
+        }
+        pub fn approx_equal_with_epsilon(self: T_Vec2, other: T_Vec2, epsilon: T) bool {
+            return Root.Math.approx_equal_with_epsilon(T, self.x, other.x, epsilon) and Root.Math.approx_equal_with_epsilon(T, self.y, other.y, epsilon);
         }
 
         pub fn is_zero(self: T_Vec2) bool {
@@ -636,5 +660,350 @@ pub fn define_vec2_type(comptime T: type) type {
             const dot_threshold = MathX.upgrade_multiply(self_len * other_len, max_cos_of_angle_between);
             return self.dot(other) <= dot_threshold;
         }
+
+        pub fn apply_complex_transform(self: T_Vec2, steps: []const TransformStep) T_Vec2 {
+            var out = self;
+            for (0..steps.len) |i| {
+                switch (steps[i]) {
+                    .TRANSLATE => |vec| {
+                        out = out.add(vec);
+                    },
+                    .TRANSLATE_X => |x| {
+                        out = T_Vec2{ .x = out.x + x, .y = out.y };
+                    },
+                    .TRANSLATE_Y => |y| {
+                        out = T_Vec2{ .x = out.x, .y = out.y + y };
+                    },
+                    .SCALE_FROM_ORIGIN => |vec| {
+                        out = out.multiply(vec);
+                    },
+                    .SCALE_FROM_ORIGIN_X => |x| {
+                        out = T_Vec2{ .x = out.x * x, .y = out.y };
+                    },
+                    .SCALE_FROM_ORIGIN_Y => |y| {
+                        out = T_Vec2{ .x = out.x, .y = out.y * y };
+                    },
+                    .SKEW_FROM_ORIGIN_X => |ratio| {
+                        out = T_Vec2{ .x = out.x + (ratio * out.y), .y = out.y };
+                    },
+                    .SKEW_FROM_ORIGIN_Y => |ratio| {
+                        out = T_Vec2{ .x = out.x, .y = out.y + (ratio * out.x) };
+                    },
+                    .ROTATE_AROUND_ORIGIN => |sincos| {
+                        out = out.rotate_sin_cos(sincos.sin, sincos.cos);
+                    },
+                }
+            }
+            return out;
+        }
+
+        pub fn apply_inverse_complex_transform(self: T_Vec2, steps: []const TransformStep) T_Vec2 {
+            var out = self;
+            const LAST_STEP = steps.len - 1;
+            for (0..steps.len) |i| {
+                const ii = LAST_STEP - i;
+                switch (steps[ii]) {
+                    .TRANSLATE => |vec| {
+                        out = out.subtract(vec);
+                    },
+                    .TRANSLATE_X => |x| {
+                        out = T_Vec2{ .x = out.x - x, .y = out.y };
+                    },
+                    .TRANSLATE_Y => |y| {
+                        out = T_Vec2{ .x = out.x, .y = out.y - y };
+                    },
+                    .SCALE_FROM_ORIGIN => |vec| {
+                        out = out.divide(vec);
+                    },
+                    .SCALE_FROM_ORIGIN_X => |x| {
+                        out = T_Vec2{ .x = out.x / x, .y = out.y };
+                    },
+                    .SCALE_FROM_ORIGIN_Y => |y| {
+                        out = T_Vec2{ .x = out.x, .y = out.y / y };
+                    },
+                    .SKEW_FROM_ORIGIN_X => |ratio| {
+                        out = T_Vec2{ .x = out.x + (-ratio * out.y), .y = out.y };
+                    },
+                    .SKEW_FROM_ORIGIN_Y => |ratio| {
+                        out = T_Vec2{ .x = out.x, .y = out.y + (-ratio * out.x) };
+                    },
+                    .ROTATE_AROUND_ORIGIN => |sincos| {
+                        out = out.rotate_sin_cos(-sincos.sin, sincos.cos);
+                    },
+                }
+            }
+            return out;
+        }
+
+        /// Ignores translations
+        pub fn apply_complex_transform_for_direction_vector(self: T_Vec2, steps: []const TransformStep) T_Vec2 {
+            var out = self;
+            for (0..steps.len) |i| {
+                switch (steps[i]) {
+                    .TRANSLATE, .TRANSLATE_X, .TRANSLATE_Y => {},
+                    .SCALE_FROM_ORIGIN => |vec| {
+                        out = out.multiply(vec);
+                    },
+                    .SCALE_FROM_ORIGIN_X => |x| {
+                        out = T_Vec2{ .x = out.x * x, .y = out.y };
+                    },
+                    .SCALE_FROM_ORIGIN_Y => |y| {
+                        out = T_Vec2{ .x = out.x, .y = out.y * y };
+                    },
+                    .SKEW_FROM_ORIGIN_X => |ratio| {
+                        out = T_Vec2{ .x = out.x + (ratio * out.y), .y = out.y };
+                    },
+                    .SKEW_FROM_ORIGIN_Y => |ratio| {
+                        out = T_Vec2{ .x = out.x, .y = out.y + (ratio * out.x) };
+                    },
+                    .ROTATE_AROUND_ORIGIN => |sincos| {
+                        out = out.rotate_sin_cos(sincos.sin, sincos.cos);
+                    },
+                }
+            }
+            return out;
+        }
+
+        /// Ignores translations
+        pub fn apply_inverse_complex_transform_for_direction_vector(self: T_Vec2, steps: []const TransformStep) T_Vec2 {
+            var out = self;
+            const LAST_STEP = steps.len - 1;
+            inline for (0..steps) |i| {
+                const ii = LAST_STEP - i;
+                switch (steps[ii]) {
+                    .TRANSLATE, .TRANSLATE_X, .TRANSLATE_Y => {},
+                    .SCALE_FROM_ORIGIN => |vec| {
+                        out = out.divide(vec);
+                    },
+                    .SCALE_FROM_ORIGIN_X => |x| {
+                        out = T_Vec2{ .x = out.x / x, .y = out.y };
+                    },
+                    .SCALE_FROM_ORIGIN_Y => |y| {
+                        out = T_Vec2{ .x = out.x, .y = out.y / y };
+                    },
+                    .SKEW_FROM_ORIGIN_X => |ratio| {
+                        out = T_Vec2{ .x = out.x + (-ratio * out.y), .y = out.y };
+                    },
+                    .SKEW_FROM_ORIGIN_Y => |ratio| {
+                        out = T_Vec2{ .x = out.x, .y = out.y + (-ratio * out.x) };
+                    },
+                    .ROTATE_AROUND_ORIGIN => |sincos| {
+                        out = out.rotate_sin_cos(-sincos.sin, sincos.cos);
+                    },
+                }
+            }
+            return out;
+        }
+
+        pub fn ComplexTransform(comptime NUM_STEPS: comptime_int) type {
+            return [NUM_STEPS]TransformStep;
+        }
+
+        pub fn complex_transform_steps_to_affine_matrix(steps: []const TransformStep) Mat3x3 {
+            const LAST_STEP: usize = steps.len - 1;
+            var matrix = Mat3x3.IDENTITY;
+            for (0..steps.len) |i| {
+                const ii = LAST_STEP - i;
+                matrix = matrix.multiply(steps[ii].to_affine_matrix());
+            }
+            return matrix;
+        }
+        pub fn complex_transform_steps_to_inverse_affine_matrix(steps: []const TransformStep) Mat3x3 {
+            var matrix = Mat3x3.IDENTITY;
+            for (0..steps.len) |i| {
+                matrix = matrix.multiply(steps[i].to_inverse_affine_matrix());
+            }
+            return matrix;
+        }
+
+        /// Ignores translations
+        pub fn complex_transform_steps_to_affine_matrix_for_direction_vector(steps: []const TransformStep) Mat3x3 {
+            const LAST_STEP: usize = steps.len - 1;
+            var matrix = Mat3x3.IDENTITY;
+            for (0..steps.len) |i| {
+                const ii = LAST_STEP - i;
+                var step_matrix = steps[ii].to_affine_matrix();
+                step_matrix.data[0][2] = 0;
+                step_matrix.data[1][2] = 0;
+                matrix = matrix.multiply(step_matrix);
+            }
+            return matrix;
+        }
+
+        /// Ignores translations
+        pub fn complex_transform_steps_to_inverse_affine_matrix_for_direction_vector(steps: []const TransformStep) Mat3x3 {
+            var matrix = Mat3x3.IDENTITY;
+            for (0..steps.len) |i| {
+                var step_matrix = steps[i].to_inverse_affine_matrix();
+                step_matrix.data[0][2] = 0;
+                step_matrix.data[1][2] = 0;
+                matrix = matrix.multiply(step_matrix);
+            }
+            return matrix;
+        }
+
+        pub fn apply_affine_matrix_transform(self: T_Vec2, matrix: Mat3x3) T_Vec2 {
+            const col = self.as_1x3_matrix_column();
+            const new_col = matrix.multiply_with_column(col);
+            return T_Vec2.from_1x3_matrix_column(new_col);
+        }
+
+        pub const TransformStep = union(TransformKind) {
+            TRANSLATE: T_Vec2,
+            TRANSLATE_X: T,
+            TRANSLATE_Y: T,
+            SCALE_FROM_ORIGIN: T_Vec2,
+            SCALE_FROM_ORIGIN_X: T,
+            SCALE_FROM_ORIGIN_Y: T,
+            SKEW_FROM_ORIGIN_X: T,
+            SKEW_FROM_ORIGIN_Y: T,
+            ROTATE_AROUND_ORIGIN: struct {
+                sin: F,
+                cos: F,
+            },
+
+            pub fn translate(vec: T_Vec2) TransformStep {
+                return TransformStep{ .TRANSLATE = vec };
+            }
+            pub fn translate_x(x: T) TransformStep {
+                return TransformStep{ .TRANSLATE_X = x };
+            }
+            pub fn translate_y(y: T) TransformStep {
+                return TransformStep{ .TRANSLATE_Y = y };
+            }
+            pub fn scale_from_origin(vec: T_Vec2) TransformStep {
+                return TransformStep{ .SCALE_FROM_ORIGIN = vec };
+            }
+            pub fn scale_from_origin_x(x: T) TransformStep {
+                return TransformStep{ .SCALE_FROM_ORIGIN_X = x };
+            }
+            pub fn scale_from_origin_y(y: T) TransformStep {
+                return TransformStep{ .SCALE_FROM_ORIGIN_Y = y };
+            }
+            pub fn skew_from_origin_x_ratio(x_ratio_or_tangent_of_angle_from_y_axis: T) TransformStep {
+                return TransformStep{ .SKEW_FROM_ORIGIN_X = x_ratio_or_tangent_of_angle_from_y_axis };
+            }
+            pub fn skew_from_origin_y_ratio(y_ratio_or_tangent_of_angle_from_x_axis: T) TransformStep {
+                return TransformStep{ .SKEW_FROM_ORIGIN_Y = y_ratio_or_tangent_of_angle_from_x_axis };
+            }
+            pub fn skew_from_origin_x_radians(radians_from_y_axis: T) TransformStep {
+                return TransformStep{ .SKEW_FROM_ORIGIN_X = @tan(radians_from_y_axis) };
+            }
+            pub fn skew_from_origin_y_radians(radians_from_x_axis: T) TransformStep {
+                return TransformStep{ .SKEW_FROM_ORIGIN_Y = @tan(radians_from_x_axis) };
+            }
+            pub fn skew_from_origin_x_degrees(degrees_from_y_axis: T) TransformStep {
+                return TransformStep{ .SKEW_FROM_ORIGIN_X = @tan(degrees_from_y_axis * MathX.DEG_TO_RAD) };
+            }
+            pub fn skew_from_origin_y_degrees(degrees_from_x_axis: T) TransformStep {
+                return TransformStep{ .SKEW_FROM_ORIGIN_Y = @tan(degrees_from_x_axis * MathX.DEG_TO_RAD) };
+            }
+            pub fn rotate_around_origin_radians(radians: F) TransformStep {
+                return TransformStep{ .ROTATE_AROUND_ORIGIN = .{ .sin = @sin(radians), .cos = @cos(radians) } };
+            }
+            pub fn rotate_around_origin_degrees(degrees: F) TransformStep {
+                return TransformStep{ .ROTATE_AROUND_ORIGIN = .{ .sin = @sin(degrees * MathX.DEG_TO_RAD), .cos = @cos(degrees * MathX.DEG_TO_RAD) } };
+            }
+            pub fn rotate_around_origin_sin_cos(sin: F, cos: F) TransformStep {
+                return TransformStep{ .ROTATE_AROUND_ORIGIN = .{ .sin = sin, .cos = cos } };
+            }
+            pub fn relect_across_origin() TransformStep {
+                return TransformStep{ .SCALE_FROM_ORIGIN = .new(-1, -1) };
+            }
+            pub fn relect_across_y_axis() TransformStep {
+                return TransformStep{ .SCALE_FROM_ORIGIN = .new(1, -1) };
+            }
+            pub fn relect_across_x_axis() TransformStep {
+                return TransformStep{ .SCALE_FROM_ORIGIN = .new(-1, 1) };
+            }
+
+            pub fn to_affine_matrix(self: TransformStep) Mat3x3 {
+                var m = Mat3x3.IDENTITY;
+                switch (self) {
+                    .TRANSLATE => |vec| {
+                        m.data[0][2] = vec.x;
+                        m.data[1][2] = vec.y;
+                    },
+                    .TRANSLATE_X => |x| {
+                        m.data[0][2] = x;
+                    },
+                    .TRANSLATE_Y => |y| {
+                        m.data[1][2] = y;
+                    },
+                    .SCALE_FROM_ORIGIN => |vec| {
+                        m.data[0][0] = vec.x;
+                        m.data[1][1] = vec.y;
+                    },
+                    .SCALE_FROM_ORIGIN_X => |x| {
+                        m.data[0][0] = x;
+                    },
+                    .SCALE_FROM_ORIGIN_Y => |y| {
+                        m.data[1][1] = y;
+                    },
+                    .SKEW_FROM_ORIGIN_X => |x| {
+                        m.data[0][1] = x;
+                    },
+                    .SKEW_FROM_ORIGIN_Y => |y| {
+                        m.data[1][0] = y;
+                    },
+                    .ROTATE_AROUND_ORIGIN => |sincos| {
+                        m.data[0][0] = sincos.cos;
+                        m.data[1][1] = sincos.cos;
+                        m.data[0][1] = -sincos.sin;
+                        m.data[1][0] = sincos.sin;
+                    },
+                }
+            }
+
+            pub fn to_inverse_affine_matrix(self: TransformStep) Mat3x3 {
+                var m = Mat3x3.IDENTITY;
+                switch (self) {
+                    .TRANSLATE => |vec| {
+                        m.data[0][2] = -vec.x;
+                        m.data[1][2] = -vec.y;
+                    },
+                    .TRANSLATE_X => |x| {
+                        m.data[0][2] = -x;
+                    },
+                    .TRANSLATE_Y => |y| {
+                        m.data[1][2] = -y;
+                    },
+                    .SCALE_FROM_ORIGIN => |vec| {
+                        m.data[0][0] = ONE / vec.x;
+                        m.data[1][1] = ONE / vec.y;
+                    },
+                    .SCALE_FROM_ORIGIN_X => |x| {
+                        m.data[0][0] = ONE / x;
+                    },
+                    .SCALE_FROM_ORIGIN_Y => |y| {
+                        m.data[1][1] = ONE / y;
+                    },
+                    .SKEW_FROM_ORIGIN_X => |x| {
+                        m.data[0][1] = -x;
+                    },
+                    .SKEW_FROM_ORIGIN_Y => |y| {
+                        m.data[1][0] = -y;
+                    },
+                    .ROTATE_AROUND_ORIGIN => |sincos| {
+                        m.data[0][0] = sincos.cos;
+                        m.data[1][1] = sincos.cos;
+                        m.data[0][1] = sincos.sin;
+                        m.data[1][0] = -sincos.sin;
+                    },
+                }
+            }
+        };
     };
 }
+
+pub const TransformKind = enum(u8) {
+    TRANSLATE,
+    TRANSLATE_X,
+    TRANSLATE_Y,
+    SCALE_FROM_ORIGIN,
+    SCALE_FROM_ORIGIN_X,
+    SCALE_FROM_ORIGIN_Y,
+    SKEW_FROM_ORIGIN_X,
+    SKEW_FROM_ORIGIN_Y,
+    ROTATE_AROUND_ORIGIN,
+};

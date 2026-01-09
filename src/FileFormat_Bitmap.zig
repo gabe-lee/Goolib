@@ -157,7 +157,6 @@ pub const BitmapSaveSettings = struct {
     vertical_resolution: Resulution = Resulution.new_dpi(72),
     colors_in_palette: u32 = 0,
     important_colors_in_palette: u32 = 0,
-    color_space_type: ColorSpace = .LINEAR,
     intent: ImageIntent = .GRAPHICS,
 };
 
@@ -170,19 +169,22 @@ const IndexPixelEnum = enum(u8) {
 
 const PAD_BYTES = [4]u8{ 0, 0, 0, 0 };
 
-pub fn save_bitmap_to_file(file: *File, comptime BITMAP_DEF: BitmapDef, bitmap: Bitmap(BITMAP_DEF), settings: BitmapSaveSettings, alloc: Allocator) u32 {
+pub fn save_bitmap_to_file(path_relative_to_cwd: [:0]const u8, comptime BITMAP_DEF: BitmapDef, bitmap: Bitmap(BITMAP_DEF), settings: BitmapSaveSettings, alloc: Allocator) anyerror!u32 {
     assert_with_reason(settings.color_planes == 1, @src(), "color planes other than `1` (non-interleaved color channels) not implemented/supported, got `{d}`", .{settings.color_planes});
     assert_with_reason(settings.compression == .NONE, @src(), "color compression mode `{s}` not implemented/supported", .{@tagName(settings.compression)});
     assert_with_reason(settings.color_space != .CALIBRATED_RGB, @src(), "color space modes `CALIBRATED_RGB` not implemented/supported", .{});
     assert_with_reason(settings.color_space != .PROFILE_LINKED and settings.color_space != .PROFILE_EMBEDDED, @src(), "color space modes `PROFILE_LINKED` and `PROFILE_EMBEDDED` not implemented/supported (ICC color profiles)", .{});
+    const file = try std.fs.cwd().createFile(path_relative_to_cwd, .{ .truncate = true });
+    defer file.close();
     const IDX_BMP_DEF = BitmapDef{
         .CHANNEL_TYPE = u8,
+        .CHANNEL_TYPE_ZERO_VAL = @ptrCast(&PAD_BYTES[0]),
         .CHANNELS_ENUM = IndexPixelEnum,
         .ROW_COLUMN_ORDER = .row_major,
         .X_ORDER = .left_to_right,
         .Y_ORDER = .bottom_to_top,
     };
-    const ColorPalettePixel = Root.Color.define_arbitrary_color_type(u8, BitmapModule.BGRA_Channels);
+    const ColorPalettePixel = Root.Color.define_arbitrary_color_type(u8, BitmapModule.BGRA_Channels, 0);
     const IDX_BMP = Bitmap(IDX_BMP_DEF);
     var color_palette: [256]ColorPalettePixel = undefined;
     var color_palette_list = List(ColorPalettePixel){
@@ -207,14 +209,14 @@ pub fn save_bitmap_to_file(file: *File, comptime BITMAP_DEF: BitmapDef, bitmap: 
         .BPP_24 => 1,
         .BPP_32 => 1,
     };
-    var pixel_row_byte_width = undefined;
+    var pixel_row_byte_width: u32 = undefined;
     var pixel_data_offset: u32 = undefined;
-    var gap_before_pixel_data: u32 = 0;
+    // var gap_before_pixel_data: u32 = 0;
     if (settings.bits_per_pixel.raw() <= 8) {
         const idx_width_naive = bitmap.width / pixels_per_advance;
-        const idx_width = idx_width_naive + (if ((idx_width_naive * pixels_per_advance) < bitmap.width) 1 else 0);
+        const idx_width = idx_width_naive + (if ((idx_width_naive * pixels_per_advance) < bitmap.width) @as(u32, 1) else @as(u32, 0));
         const idx_height = bitmap.height;
-        index_map = IDX_BMP.init(idx_width, idx_height, alloc);
+        index_map = IDX_BMP.init(idx_width, idx_height, null, alloc);
         var index_pixel_bit: u8 = 0;
         var curr_index_pixel: u8 = 0;
         var y: u32 = 0;
@@ -225,8 +227,9 @@ pub fn save_bitmap_to_file(file: *File, comptime BITMAP_DEF: BitmapDef, bitmap: 
             ix = 0;
             while (px < bitmap.width) : (px += 1) {
                 const original_pixel = bitmap.get_pixel_with_origin(.bot_left, px, y);
-                const transformed_pixel: ColorPalettePixel = original_pixel.reorder_channels_to(BitmapModule.BGRA_Channels).cast_values_normalized_to(u8);
-                const color_palette_index = color_palette_list.search(transformed_pixel, ColorPalettePixel.implicit_equals);
+                std.debug.print("original_pixel: {any}\n", .{original_pixel}); //DEBUG
+                const transformed_pixel: ColorPalettePixel = original_pixel.reorder_channels_to(BitmapModule.BGRA_Channels).cast_values_normalized_to(u8, 0);
+                var color_palette_index = color_palette_list.search(transformed_pixel, ColorPalettePixel.implicit_equals);
                 if (!color_palette_index.found) {
                     color_palette_index.idx = color_palette_list.len;
                     color_palette_list.len += 1;
@@ -246,90 +249,93 @@ pub fn save_bitmap_to_file(file: *File, comptime BITMAP_DEF: BitmapDef, bitmap: 
             }
         }
         size += color_palette_list.len * 4;
-        const last_size = size;
-        size = std.mem.alignForward(u32, size, 4);
-        gap_before_pixel_data = size - last_size;
         pixel_data_offset = size;
         pixel_row_byte_width = index_map.width;
     } else {
-        const last_size = size;
-        size = std.mem.alignForward(u32, size, 4);
-        gap_before_pixel_data = size - last_size;
         pixel_data_offset = size;
         const whole_advances_per_width = bitmap.width / pixels_per_advance;
-        const total_advances_per_width = whole_advances_per_width + (if ((whole_advances_per_width * pixels_per_advance) < bitmap.width) 1 else 0);
+        const total_advances_per_width = whole_advances_per_width + (if ((whole_advances_per_width * pixels_per_advance) < bitmap.width) @as(u32, 1) else @as(u32, 0));
         pixel_row_byte_width = total_advances_per_width * bytes_per_advance;
     }
     const row_stride_byte_width = std.mem.alignForward(u32, pixel_row_byte_width, 4);
     const gap_after_row = row_stride_byte_width - pixel_row_byte_width;
     const total_pixel_data_length = row_stride_byte_width * bitmap.height;
     size += total_pixel_data_length;
-    file.seekTo(0);
     var buf: [1024]u8 = undefined;
-    const writer_holder = file.writer(buf[0..]);
-    var writer = writer_holder.interface;
+    var writer_holder = file.writerStreaming(buf[0..]);
+    var writer = &writer_holder.interface;
     // Core header
-    writer.writeByte('B');
-    writer.writeByte('M');
-    writer.writeInt(u32, size, .little);
-    writer.writeByte('G'); // These 4 bytes are unused, might as well sign the library
-    writer.writeByte('O');
-    writer.writeByte('O');
-    writer.writeByte(' ');
-    writer.writeInt(u32, pixel_data_offset, .little);
+    try writer.writeByte('B'); //0x00
+    try writer.writeByte('M'); //0x01
+    try writer.writeInt(u32, size, .little); //0x02
+    try writer.writeByte('G'); //0x06 // These 4 bytes are unused, might as well sign the library
+    try writer.writeByte('O'); //0x07
+    try writer.writeByte('O'); //0x08
+    try writer.writeByte(' '); //0x09
+    try writer.writeInt(u32, pixel_data_offset, .little); //0x0A
     // DIB V5 header
-    writer.writeInt(u32, BMP_DIB_HEADER_V5_SIZE, .little);
-    writer.writeInt(u32, bitmap.width, .little);
-    writer.writeInt(u32, bitmap.height, .little);
-    writer.writeInt(u32, settings.color_planes, .little);
-    writer.writeInt(u32, settings.bits_per_pixel.raw(), .little);
-    writer.writeInt(u32, @intFromEnum(settings.compression), .little);
-    writer.writeInt(u32, total_pixel_data_length, .little);
-    writer.writeInt(u32, settings.horizontal_resolution.raw, .little);
-    writer.writeInt(u32, settings.vertical_resolution.raw, .little);
-    writer.writeInt(u32, color_palette_list.len, .little);
-    writer.writeInt(u32, 0, .little);
+    try writer.writeInt(u32, BMP_DIB_HEADER_V5_SIZE, .little); //0x0E
+    try writer.writeInt(u32, bitmap.width, .little); //0x12
+    try writer.writeInt(u32, bitmap.height, .little); //0x16
+    try writer.writeInt(u16, settings.color_planes, .little); //0x1A
+    try writer.writeInt(u16, settings.bits_per_pixel.raw(), .little); //0x1C
+    try writer.writeInt(u32, @intFromEnum(settings.compression), .little); //0x1E
+    try writer.writeInt(u32, total_pixel_data_length, .little); //0x22
+    try writer.writeInt(u32, settings.horizontal_resolution.raw, .little); //0x26
+    try writer.writeInt(u32, settings.vertical_resolution.raw, .little); //0x2A
+    try writer.writeInt(u32, color_palette_list.len, .little); //0x2E
+    try writer.writeInt(u32, 0, .little); //0x32
     switch (settings.compression) {
         .BIT_FIELDS => |fields| {
-            writer.writeInt(u32, fields.red_mask, .little);
-            writer.writeInt(u32, fields.green_mask, .little);
-            writer.writeInt(u32, fields.blue_mask, .little);
-            writer.writeInt(u32, fields.alpha_mask, .little);
+            try writer.writeInt(u32, fields.red_mask, .big); //0x36
+            try writer.writeInt(u32, fields.green_mask, .big); //0x3A
+            try writer.writeInt(u32, fields.blue_mask, .big); //0x3E
+            try writer.writeInt(u32, fields.alpha_mask, .big); //0x42
+        },
+        .NONE => {
+            try writer.writeInt(u32, 0x0000FF00, .big); //0x36
+            try writer.writeInt(u32, 0x00FF0000, .big); //0x3A
+            try writer.writeInt(u32, 0xFF000000, .big); //0x3E
+            if (settings.bits_per_pixel == .BPP_32) {
+                try writer.writeInt(u32, 0x000000FF, .big); //0x42
+            } else {
+                try writer.writeInt(u32, 0, .little); //0x42
+            }
         },
         else => {
-            writer.writeInt(u32, 0, .little);
-            writer.writeInt(u32, 0, .little);
-            writer.writeInt(u32, 0, .little);
-            writer.writeInt(u32, 0, .little);
+            try writer.writeInt(u32, 0, .little); //0x36
+            try writer.writeInt(u32, 0, .little); //0x3A
+            try writer.writeInt(u32, 0, .little); //0x3E
+            try writer.writeInt(u32, 0, .little); //0x42
         },
     }
-    writer.writeInt(u32, @intFromEnum(settings.color_space), .little);
-    inline for (0..9) |_| {
+    try writer.writeInt(u32, @intFromEnum(settings.color_space), .little); //0x44
+    inline for (0..9) |_| { // 0x46 ... 0x6A
         // Color space endpoints
         //TODO support these
-        writer.writeInt(u32, 0, .little);
+        try writer.writeInt(u32, 0, .little);
     }
-    writer.writeInt(u32, 0, .little); // gamma red
-    writer.writeInt(u32, 0, .little); // gamma rgreen
-    writer.writeInt(u32, 0, .little); // gamma blue
-    writer.writeInt(u32, @intFromEnum(settings.intent), .little);
-    writer.writeInt(u32, 0, .little); // icc profile data offset from V5 header
-    writer.writeInt(u32, 0, .little); // icc profile size
-    writer.writeInt(u32, 0, .little); // reserved
+    try writer.writeInt(u32, 0, .little); // 0x6A // gamma red
+    try writer.writeInt(u32, 0, .little); // 0x6E // gamma rgreen
+    try writer.writeInt(u32, 0, .little); // 0x72 // gamma blue
+    try writer.writeInt(u32, @intFromEnum(settings.intent), .little); // 0x76
+    try writer.writeInt(u32, 0, .little); // 0x7A // icc profile data offset from V5 header
+    try writer.writeInt(u32, 0, .little); // 0x7E // icc profile size
+    try writer.writeInt(u32, 0, .little); // 0x82 // reserved
     // Color Palette (if used)
-    for (color_palette_list.slice()) |color| {
+    for (color_palette_list.slice()) |color| { // 0x86
         const raw: u32 = @bitCast(color.raw);
-        writer.writeInt(u32, raw, .little);
+        try writer.writeInt(u32, raw, .little);
     }
-    writer.write(PAD_BYTES[0..gap_before_pixel_data]);
+    // _ = try writer.write(PAD_BYTES[0..gap_before_pixel_data]);
     // Pixel Data
     if (settings.bits_per_pixel.raw() <= 8) {
         var y: u32 = 0;
         while (y < index_map.height) : (y += 1) {
             const row = index_map.get_h_scanline_with_origin(.bot_left, 0, y, .left_to_right, index_map.width);
             const row_bytes = std.mem.sliceAsBytes(row);
-            writer.write(row_bytes);
-            writer.write(PAD_BYTES[0..gap_after_row]);
+            _ = try writer.write(row_bytes);
+            _ = try writer.write(PAD_BYTES[0..gap_after_row]);
         }
     } else {
         var y: u32 = 0;
@@ -337,22 +343,29 @@ pub fn save_bitmap_to_file(file: *File, comptime BITMAP_DEF: BitmapDef, bitmap: 
         while (y < bitmap.height) : (y += 1) {
             x = 0;
             while (x < bitmap.width) : (x += 1) {
-                const original_pixel = bitmap.get_pixel_with_origin(.bot_left, x, y);
+                var original_pixel = bitmap.get_pixel_with_origin(.bot_left, x, y);
                 switch (settings.bits_per_pixel) {
                     .BPP_32 => {
-                        const transformed_pixel = original_pixel.reorder_channels_to(BitmapModule.BGRA_Channels).cast_values_normalized_to(u8);
-                        writer.writeInt(u32, @bitCast(transformed_pixel.raw), .little);
+                        const transformed_pixel = original_pixel.reorder_channels_to(BitmapModule.BGRA_Channels).cast_values_normalized_to(u8, 0);
+                        try writer.writeInt(u32, @bitCast(transformed_pixel.raw), .little);
                     },
                     .BPP_24 => {
-                        const transformed_pixel = original_pixel.reorder_channels_to(BitmapModule.BGR_Channels).cast_values_normalized_to(u8);
-                        writer.writeByte(transformed_pixel.raw[0]);
-                        writer.writeByte(transformed_pixel.raw[1]);
-                        writer.writeByte(transformed_pixel.raw[2]);
+                        // std.debug.print("original_pixel: {any}\n", .{original_pixel.raw}); //DEBUG
+                        // original_pixel = original_pixel.subtract_scalar(256.0); //DEBUG
+                        // original_pixel = original_pixel.divide_scalar(256.0); //DEBUG
+                        // std.debug.print("original_pixel_sub_256: {any}", .{original_pixel.raw}); //DEBUG
+                        const transformed_pixel = original_pixel.reorder_channels_to(BitmapModule.BGR_Channels).cast_values_normalized_to(u8, 0);
+                        try writer.writeByte(transformed_pixel.raw[0]);
+                        try writer.writeByte(transformed_pixel.raw[1]);
+                        try writer.writeByte(transformed_pixel.raw[2]);
                     },
                     else => assert_unreachable(@src(), "invalid bits-per-pixel at this branch `{s}`", .{@tagName(settings.bits_per_pixel)}),
                 }
             }
-            writer.write(PAD_BYTES[0..gap_after_row]);
+            _ = try writer.write(PAD_BYTES[0..gap_after_row]);
         }
     }
+    try writer_holder.end();
+
+    return size;
 }

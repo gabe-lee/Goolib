@@ -178,10 +178,15 @@ pub const A_Channel = enum(u8) {
 
 pub const BitmapDefinition = struct {
     CHANNEL_TYPE: type = u8,
+    CHANNEL_TYPE_ZERO_VAL: *const anyopaque,
     CHANNELS_ENUM: type = RGB_Channels,
     ROW_COLUMN_ORDER: RowColumnOrder = .row_major,
     X_ORDER: XOrder = .left_to_right,
     Y_ORDER: YOrder = .top_to_bottom,
+
+    pub inline fn get_zero_val(comptime self: BitmapDefinition) self.CHANNEL_TYPE {
+        return @as(*const self.CHANNEL_TYPE, @ptrCast(@alignCast(self.CHANNEL_TYPE_ZERO_VAL))).*;
+    }
 };
 
 pub const BitmapOpaque = struct {
@@ -227,6 +232,7 @@ pub fn Bitmap(comptime DEFINITION: BitmapDefinition) type {
         pub const ROW_COLUMN_ORDER = DEFINITION.ROW_COLUMN_ORDER;
         pub const X_ORDER = DEFINITION.X_ORDER;
         pub const Y_ORDER = DEFINITION.Y_ORDER;
+        pub const DEF = DEFINITION;
         pub const TOTAL_ORDER: TotalOrder = switch (X_ORDER) {
             .left_to_right => switch (Y_ORDER) {
                 .top_to_bottom => switch (ROW_COLUMN_ORDER) {
@@ -249,7 +255,7 @@ pub fn Bitmap(comptime DEFINITION: BitmapDefinition) type {
                 },
             },
         };
-        pub const Pixel = Color_.define_arbitrary_color_type(CHANNEL_TYPE, CHANNELS);
+        pub const Pixel = Color_.define_arbitrary_color_type(CHANNEL_TYPE, CHANNELS, DEFINITION.get_zero_val());
         pub const NUM_CHANNELS = Pixel.CHANNEL_COUNT;
         pub const PIXEL_SIZE = Pixel.BYTE_SIZE;
 
@@ -268,10 +274,7 @@ pub fn Bitmap(comptime DEFINITION: BitmapDefinition) type {
             return self;
         }
         pub fn init_from_existing_pixel_buffer(width: u32, height: u32, fill_color: ?Pixel, buffer: List(Pixel), alloc: Allocator) Self {
-            const total = width * height * PIXEL_SIZE;
-            buffer.clear();
-            buffer.ensure_free_slots(total, alloc);
-            buffer.len = total;
+            const total = width * height * num_cast(PIXEL_SIZE, u32);
             var self = Self{
                 .pixels = buffer,
                 .width = width,
@@ -279,15 +282,19 @@ pub fn Bitmap(comptime DEFINITION: BitmapDefinition) type {
                 .major_stride = if (ROW_COLUMN_ORDER == .row_major) width else height,
                 .owns_memory = true,
             };
+            self.pixels.clear();
+            self.pixels.ensure_free_slots(@intCast(total), alloc);
+            self.pixels.len = total;
             if (fill_color) |fill| {
                 self.fill_all(fill);
             }
             return self;
         }
         pub fn free(self: *Self, alloc: Allocator) void {
-            assert_with_reason(self.owns_memory, @src(), "cannot free: this bitmap does not own its memory (it is a region-of or reference-to another bitmap, or is uninitialized)", .{});
-            const total = self.width * self.height * PIXEL_SIZE;
-            alloc.free(self.pixels.ptr[0..total]);
+            if (self.pixels.cap != 0) {
+                assert_with_reason(self.owns_memory, @src(), "cannot free: this bitmap does not own its memory (it is a region-of or reference-to another bitmap, or is uninitialized)", .{});
+                self.pixels.free(alloc);
+            }
             self.width = 0;
             self.height = 0;
             self.major_stride = 0;
@@ -305,7 +312,7 @@ pub fn Bitmap(comptime DEFINITION: BitmapDefinition) type {
         }
         pub fn clear(self: *Self) void {
             assert_with_reason(self.owns_memory, @src(), "cannot clear: this bitmap does not own its memory (it is a region-of or reference-to another bitmap, or is uninitialized)", .{});
-            self.pixels.ptr.clear();
+            self.pixels.clear();
             self.width = 0;
             self.height = 0;
             self.major_stride = 0;
@@ -381,7 +388,7 @@ pub fn Bitmap(comptime DEFINITION: BitmapDefinition) type {
 
         pub fn move_pixel_ptr_many_native(self: Self, x_delta: i32, y_delta: i32, ptr: [*]Pixel) [*]Pixel {
             const idx_delta = switch (ROW_COLUMN_ORDER) {
-                .row_major => return MathX.minor_major_coord_to_idx(x_delta, y_delta, num_cast(self.major_stride, i32)),
+                .row_major => MathX.minor_major_coord_to_idx(x_delta, y_delta, num_cast(self.major_stride, i32)),
                 .column_major => MathX.minor_major_coord_to_idx(y_delta, x_delta, num_cast(self.major_stride, i32)),
             };
             return switch (idx_delta < 1) {
@@ -390,7 +397,7 @@ pub fn Bitmap(comptime DEFINITION: BitmapDefinition) type {
             };
         }
         pub inline fn move_pixel_ptr_many_with_origin(self: Self, origin: Origin, x_delta: i32, y_delta: i32, ptr: [*]Pixel) [*]Pixel {
-            self.move_pixel_ptr_native(get_x_delta_with_origin(origin, x_delta), get_y_delta_with_origin(origin, y_delta), ptr);
+            return self.move_pixel_ptr_many_native(get_x_delta_with_origin(origin, x_delta), get_y_delta_with_origin(origin, y_delta), ptr);
         }
         pub fn move_pixel_ptr_native(self: Self, x_delta: i32, y_delta: i32, ptr: *Pixel) *Pixel {
             return @ptrCast(self.move_pixel_ptr_many_native(x_delta, y_delta, @ptrCast(ptr)));
@@ -418,6 +425,7 @@ pub fn Bitmap(comptime DEFINITION: BitmapDefinition) type {
             const start = self.get_idx_native(x, y);
             const end = start + length;
             assert_with_reason(end <= self.width * self.height, @src(), "scanline starting from ({d}, {d}) with length {d} (end index = {d}) is outside the bitmap length (len = {d})", .{ x, y, length, end, self.width * self.height });
+            return self.pixels.ptr[start..end];
         }
         pub fn get_h_scanline_native(self: Self, x: u32, y: u32, width: u32) []Pixel {
             Assert.assert_with_reason(ROW_COLUMN_ORDER == .row_major, @src(), "can only use `get_h_scanline` when `ROW_COLUMN_ORDER == .row_major`", .{});
@@ -521,11 +529,11 @@ pub fn Bitmap(comptime DEFINITION: BitmapDefinition) type {
             const top_i: i32 = bot_i + 1;
             const weight_left_right: F = xx - @as(F, @floatFromInt(left_i));
             const weight_top_bottom: F = yy - @as(F, @floatFromInt(bot_i));
-            const left: u32 = @intCast(MathX.clamp_0_to_max(i32, left_i, @intCast(self.width - 1)));
-            const right: u32 = @intCast(MathX.clamp_0_to_max(i32, right_i, @intCast(self.width - 1)));
-            const top: u32 = @intCast(MathX.clamp_0_to_max(i32, top_i, @intCast(self.height - 1)));
-            const bot: u32 = @intCast(MathX.clamp_0_to_max(i32, bot_i, @intCast(self.height - 1)));
-            const subpixel = Pixel{};
+            const left: u32 = @intCast(MathX.clamp_0_to_max(left_i, self.width - 1));
+            const right: u32 = @intCast(MathX.clamp_0_to_max(right_i, self.width - 1));
+            const top: u32 = @intCast(MathX.clamp_0_to_max(top_i, self.height - 1));
+            const bot: u32 = @intCast(MathX.clamp_0_to_max(bot_i, self.height - 1));
+            var subpixel = Pixel{};
             inline for (0..NUM_CHANNELS) |c| {
                 subpixel.raw[c] = MathX.lerp(
                     MathX.lerp(self.get_pixel_channel_idx_native(left, bot, c), self.get_pixel_channel_idx_native(right, bot, c), weight_left_right),
@@ -536,10 +544,14 @@ pub fn Bitmap(comptime DEFINITION: BitmapDefinition) type {
             return subpixel;
         }
         pub fn get_subpixel_mix_near_with_origin(self: Self, origin: Origin, comptime F: type, x: F, y: F) Pixel {
-            self.get_subpixel_mix_near_native(F, self.get_x_with_origin_float(origin, F, x), self.get_y_with_origin_float(origin, F, y));
+            return self.get_subpixel_mix_near_native(F, self.get_x_with_origin_float(origin, F, x), self.get_y_with_origin_float(origin, F, y));
         }
 
         pub fn discard_and_resize(self: *Self, new_width: u32, new_height: u32, fill_color: ?Pixel, alloc: Allocator) void {
+            if (self.width == 0 and self.height == 0 and self.pixels.cap == 0) {
+                self.* = init(new_width, new_height, fill_color, alloc);
+                return;
+            }
             assert_with_reason(self.owns_memory, @src(), "cannot resize: this bitmap does not own its memory (it is a region-of or reference-to another bitmap, or is uninitialized)", .{});
             if (self.width == 0 or self.height == 0) {
                 if (new_width == 0 or new_height == 0) return;
@@ -548,12 +560,12 @@ pub fn Bitmap(comptime DEFINITION: BitmapDefinition) type {
             }
             if (new_width == 0 or new_height == 0) {
                 if (self.width == 0 or self.height == 0) return;
-                self.clear(alloc);
+                self.clear();
                 return;
             }
             const new_len = new_width * new_height;
-            self.pixels.ptr.clear();
-            self.pixels.ptr.ensure_free_slots(@intCast(new_len), alloc);
+            self.pixels.clear();
+            self.pixels.ensure_free_slots(@intCast(new_len), alloc);
             self.width = new_width;
             self.height = new_height;
         }
@@ -680,7 +692,7 @@ pub fn Bitmap(comptime DEFINITION: BitmapDefinition) type {
                             @memset(fill_block, fill_color);
                         } else {
                             for (y1..y2) |y| {
-                                const fill_line = self.get_h_scanline_native(x1, y, width);
+                                const fill_line = self.get_h_scanline_native(x1, @intCast(y), width);
                                 @memset(fill_line, fill_color);
                             }
                         }
@@ -693,7 +705,7 @@ pub fn Bitmap(comptime DEFINITION: BitmapDefinition) type {
                             @memset(fill_block, fill_color);
                         } else {
                             for (x1..x2) |x| {
-                                const fill_line = self.get_v_scanline_native(x, y1, height);
+                                const fill_line = self.get_v_scanline_native(@intCast(x), y1, height);
                                 @memset(fill_line, fill_color);
                             }
                         }

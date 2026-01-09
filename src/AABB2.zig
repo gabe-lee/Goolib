@@ -35,8 +35,8 @@ pub fn define_aabb2_type(comptime T: type) type {
         const T_AABB2 = @This();
         const T_Vec2 = Root.Vec2.define_vec2_type(T);
         const T_Rect2 = Root.Rect2.define_rect2_type(T);
-        const INF = if (@typeInfo(T).int) math.maxInt(T) else math.inf(T);
-        const NEG_INF = if (@typeInfo(T).int) math.minInt(T) else -math.inf(T);
+        const INF = if (@typeInfo(T) == .int) math.maxInt(T) else math.inf(T);
+        const NEG_INF = if (@typeInfo(T) == .int) math.minInt(T) else -math.inf(T);
         const IS_FLOAT = switch (T) {
             f16, f32, f64, f80, f128, c_longdouble => true,
             else => false,
@@ -155,7 +155,7 @@ pub fn define_aabb2_type(comptime T: type) type {
                 .x_min = @min(self.x_min, other.x_min),
                 .y_min = @min(self.y_min, other.y_min),
                 .x_max = @max(self.x_max, other.x_max),
-                .y_max = @min(self.y_max, other.y_max),
+                .y_max = @max(self.y_max, other.y_max),
             };
         }
 
@@ -164,7 +164,7 @@ pub fn define_aabb2_type(comptime T: type) type {
                 .x_min = @min(self.x_min, point.x),
                 .y_min = @min(self.y_min, point.y),
                 .x_max = @max(self.x_max, point.x),
-                .y_max = @min(self.y_max, point.y),
+                .y_max = @max(self.y_max, point.y),
             };
         }
 
@@ -174,7 +174,7 @@ pub fn define_aabb2_type(comptime T: type) type {
                 result.x_min = @min(result.x_min, point.x);
                 result.y_min = @min(result.y_min, point.y);
                 result.x_max = @max(result.x_max, point.x);
-                result.y_max = @min(result.y_max, point.y);
+                result.y_max = @max(result.y_max, point.y);
             }
             return result;
         }
@@ -185,6 +185,14 @@ pub fn define_aabb2_type(comptime T: type) type {
                 .y_min = self.y_min - amount,
                 .x_max = self.x_max + amount,
                 .y_max = self.y_max + amount,
+            };
+        }
+        pub fn expand_by_xy(self: T_AABB2, amount: T_Vec2) T_AABB2 {
+            return T_AABB2{
+                .x_min = self.x_min - amount.x,
+                .y_min = self.y_min - amount.y,
+                .x_max = self.x_max + amount.x,
+                .y_max = self.y_max + amount.y,
             };
         }
 

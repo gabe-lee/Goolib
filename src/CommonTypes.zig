@@ -291,3 +291,23 @@ pub const AngleType = enum(u8) {
     RADIANS,
     DEGREES,
 };
+
+pub const FillRule = enum {
+    NONZERO,
+    EVEN,
+    ODD,
+    POSITIVE,
+    NEGATIVE,
+
+    pub fn should_be_filled(self: FillRule, sum_of_intersection_slopes: anytype) bool {
+        return switch (self) {
+            .NONZERO => sum_of_intersection_slopes != 0,
+            .EVEN => sum_of_intersection_slopes & 1 == 1,
+            .ODD => sum_of_intersection_slopes & 1 == 0,
+            .POSITIVE => sum_of_intersection_slopes > 0,
+            .NEGATIVE => sum_of_intersection_slopes < 0,
+        };
+    }
+};
+
+

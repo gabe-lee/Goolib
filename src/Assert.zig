@@ -82,11 +82,6 @@ pub inline fn warn_with_reason(condition: bool, comptime src_loc: ?SourceLocatio
             } else {
                 std.debug.print(warn_header(in_comptime, src_loc, reason_fmt), reason_args);
             }
-            unreachable;
-        }
-    } else {
-        if (!condition) {
-            unreachable;
         }
     }
 }

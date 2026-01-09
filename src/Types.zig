@@ -469,6 +469,12 @@ pub inline fn type_is_numeric(comptime T: type) bool {
 pub inline fn type_is_unsigned_int(comptime T: type) bool {
     return @typeInfo(T) == .int and @typeInfo(T).int.signedness == .unsigned;
 }
+pub inline fn type_is_comptime_or_unsigned_int(comptime T: type) bool {
+    return @typeInfo(T) == .comptime_int or (@typeInfo(T) == .int and @typeInfo(T).int.signedness == .unsigned);
+}
+pub inline fn type_is_comptime_or_signed_int(comptime T: type) bool {
+    return @typeInfo(T) == .comptime_int or (@typeInfo(T) == .int and @typeInfo(T).int.signedness == .signed);
+}
 pub inline fn type_is_unsigned_int_aligned(comptime T: type) bool {
     switch (T) {
         u8, u16, u32, u64, u128, usize => return true,

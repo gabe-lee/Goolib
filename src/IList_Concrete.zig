@@ -1795,6 +1795,7 @@ pub fn CreateConcretePrototype(comptime T: type, comptime LIST: type, comptime A
 
             pub fn to_iter(self: PartialRangeIter, list: LIST) RangeIter {
                 var iter = RangeIter{
+                    .curr = 0,
                     .list = list,
                     .alloc = self.alloc,
                     .range = self.to_range(list),
@@ -2786,7 +2787,7 @@ pub fn CreateConcretePrototype(comptime T: type, comptime LIST: type, comptime A
             var val: T = undefined;
             var idx: usize = first_idx(self);
             var ok = idx_valid(self, idx);
-            var result = LocateResult{};
+            var result = SearchResult{};
             while (ok) {
                 val = get(self, idx, alloc);
                 if (equal_func(val, find_val)) {
