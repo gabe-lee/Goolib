@@ -41,6 +41,7 @@ const MathX = Root.Math;
 const Bezier = Root.Bezier;
 const DataGridModule = Root.DataGrid;
 const DataGrid = Root.DataGrid.DataGrid;
+const BitmapFormat = Root.FileFormat.Bitmap;
 
 const SignedDistance = MathX.SignedDistance;
 const SignedDistanceWithPercent = MathX.SignedDistanceWithPercent;
@@ -147,6 +148,13 @@ pub fn Point(comptime T: type) type {
         }
         pub fn apply_affine_transform_matrix(self: Self, matrix: Matrix) Self {
             return .new(self.p[0].apply_affine_matrix_transform(matrix));
+        }
+        pub fn transformed(self: Self, transform: TransformNoAlter(T)) Self {
+            return switch (transform) {
+                .NONE => self,
+                .STEPS => |s| self.apply_complex_transform(s),
+                .MATRIX => |m| self.apply_affine_transform_matrix(m),
+            };
         }
 
         pub fn new(p: Vector) Self {
@@ -293,6 +301,13 @@ pub fn Line(comptime T: type) type {
                 self.p[0].apply_affine_matrix_transform(matrix),
                 self.p[1].apply_affine_matrix_transform(matrix),
             );
+        }
+        pub fn transformed(self: Self, transform: TransformNoAlter(T)) Self {
+            return switch (transform) {
+                .NONE => self,
+                .STEPS => |s| self.apply_complex_transform(s),
+                .MATRIX => |m| self.apply_affine_transform_matrix(m),
+            };
         }
 
         pub fn new(start: Vector, end: Vector) Self {
@@ -472,6 +487,13 @@ pub fn QuadraticBezier(comptime T: type) type {
                 self.p[2].apply_affine_matrix_transform(matrix),
             );
         }
+        pub fn transformed(self: Self, transform: TransformNoAlter(T)) Self {
+            return switch (transform) {
+                .NONE => self,
+                .STEPS => |s| self.apply_complex_transform(s),
+                .MATRIX => |m| self.apply_affine_transform_matrix(m),
+            };
+        }
 
         pub fn new(start: Vector, control: Vector, end: Vector) Self {
             return Self{ .p = .{ start, control, end } };
@@ -595,7 +617,7 @@ pub fn QuadraticBezier(comptime T: type) type {
             self.p[2] = self.p[0];
             self.p[0] = tmp;
         }
-        pub fn horizontal_intersections(self: Self, y_value: T, comptime POINT_MODE: MathX.ScanlinePointMode, comptime SLOPE_MODE: MathX.ScanlineSlopeMode, comptime SLOPE_TYPE: type, comptime linear_estimate: LinearEstimate(T)) ScanlineIntersections(2, T, POINT_MODE, SLOPE_MODE, SLOPE_TYPE) {
+        pub fn horizontal_intersections(self: Self, y_value: T, comptime POINT_MODE: MathX.ScanlinePointMode, comptime SLOPE_MODE: MathX.ScanlineSlopeMode, comptime SLOPE_TYPE: type, linear_estimate: LinearEstimate(T)) ScanlineIntersections(2, T, POINT_MODE, SLOPE_MODE, SLOPE_TYPE) {
             var result = ScanlineIntersections(2, T, POINT_MODE, SLOPE_MODE, SLOPE_TYPE){};
             var next_slope_sign: SLOPE_TYPE = if (y_value > self.p[0].y) 1 else -1;
             switch (POINT_MODE) {
@@ -849,6 +871,13 @@ pub fn CubicBezier(comptime T: type) type {
                 self.p[3].multiply(vec),
             );
         }
+        pub fn transformed(self: Self, transform: TransformNoAlter(T)) Self {
+            return switch (transform) {
+                .NONE => self,
+                .STEPS => |s| self.apply_complex_transform(s),
+                .MATRIX => |m| self.apply_affine_transform_matrix(m),
+            };
+        }
         pub fn apply_complex_transform(self: Self, steps: []const Vector.TransformStep) Self {
             return .new(
                 self.p[0].apply_complex_transform(steps),
@@ -997,7 +1026,7 @@ pub fn CubicBezier(comptime T: type) type {
             self.p[0] = tmp_1;
             self.p[1] = tmp_2;
         }
-        pub fn horizontal_intersections(self: Self, y_value: T, comptime POINT_MODE: MathX.ScanlinePointMode, comptime SLOPE_MODE: MathX.ScanlineSlopeMode, comptime SLOPE_TYPE: type, comptime double_root_estimate: DoubleRootEstimate(T), comptime quadratic_estimate: QuadraticEstimate(T), comptime linear_estimate: LinearEstimate(T)) ScanlineIntersections(3, T, POINT_MODE, SLOPE_MODE, SLOPE_TYPE) {
+        pub fn horizontal_intersections(self: Self, y_value: T, comptime POINT_MODE: MathX.ScanlinePointMode, comptime SLOPE_MODE: MathX.ScanlineSlopeMode, comptime SLOPE_TYPE: type, double_root_estimate: DoubleRootEstimate(T), quadratic_estimate: QuadraticEstimate(T), linear_estimate: LinearEstimate(T)) ScanlineIntersections(3, T, POINT_MODE, SLOPE_MODE, SLOPE_TYPE) {
             var result = ScanlineIntersections(3, T, POINT_MODE, SLOPE_MODE, SLOPE_TYPE){};
             var next_slope_sign: SLOPE_TYPE = if (y_value > self.p[0].y) 1 else -1;
             switch (POINT_MODE) {
@@ -1259,6 +1288,9 @@ pub fn EdgeWithUserdata(comptime T: type, comptime USERDATA: type, comptime USER
         pub fn apply_affine_transform_matrix(self: Self, matrix: Matrix) Self {
             return Self{ .edge = self.edge.apply_affine_transform_matrix(matrix), .userdata = self.userdata };
         }
+        pub fn transformed(self: Self, transform: TransformNoAlter(T)) Self {
+            return Self{ .edge = self.edge.transformed(transform), .userdata = self.userdata };
+        }
 
         pub fn tangent(self: Self, percent: anytype) Vector {
             return self.edge.tangent(percent);
@@ -1281,11 +1313,8 @@ pub fn EdgeWithUserdata(comptime T: type, comptime USERDATA: type, comptime USER
         pub fn reverse(self: *Self) void {
             return self.edge.reverse();
         }
-        pub fn horizontal_intersections(self: Self, y_value: T, comptime POINT_MODE: MathX.ScanlinePointMode, comptime SLOPE_MODE: MathX.ScanlineSlopeMode, comptime SLOPE_TYPE: type, comptime double_root_estimate: DoubleRootEstimate(T), comptime quadratic_estimate: QuadraticEstimate(T), comptime linear_estimate: LinearEstimate(T)) ScanlineIntersections(3, T, POINT_MODE, SLOPE_MODE, SLOPE_TYPE) {
-            return self.edge.horizontal_intersections(y_value, POINT_MODE, SLOPE_MODE, SLOPE_TYPE, double_root_estimate, quadratic_estimate, linear_estimate);
-        }
-        pub fn horizontal_intersections_default_estimates(self: Self, y_value: T, comptime POINT_MODE: MathX.ScanlinePointMode, comptime SLOPE_MODE: MathX.ScanlineSlopeMode, comptime SLOPE_TYPE: type) ScanlineIntersections(3, T, POINT_MODE, SLOPE_MODE, SLOPE_TYPE) {
-            return self.edge.horizontal_intersections_default_estimates(y_value, POINT_MODE, SLOPE_MODE, SLOPE_TYPE);
+        pub fn horizontal_intersections(self: Self, y_value: T, comptime POINT_MODE: MathX.ScanlinePointMode, comptime SLOPE_MODE: MathX.ScanlineSlopeMode, comptime SLOPE_TYPE: type, estimates: Estimates(T)) ScanlineIntersections(3, T, POINT_MODE, SLOPE_MODE, SLOPE_TYPE) {
+            return self.edge.horizontal_intersections(y_value, POINT_MODE, SLOPE_MODE, SLOPE_TYPE, estimates);
         }
         pub fn add_bounds_to_aabb(self: Self, aabb: *AABB, comptime linear_estimate: LinearEstimate(T)) void {
             self.edge.add_bounds_to_aabb(aabb, linear_estimate);
@@ -1473,6 +1502,14 @@ pub fn Edge(comptime T: type) type {
                 .CUBIC_BEZIER => Self{ .CUBIC_BEZIER = self.CUBIC_BEZIER.apply_affine_transform_matrix(matrix) },
             };
         }
+        pub fn transformed(self: Self, transform: TransformNoAlter(T)) Self {
+            return switch (self) {
+                .POINT => Self{ .POINT = self.POINT.transformed(transform) },
+                .LINE => Self{ .LINE = self.LINE.transformed(transform) },
+                .QUADRATIC_BEZIER => Self{ .QUADRATIC_BEZIER = self.QUADRATIC_BEZIER.transformed(transform) },
+                .CUBIC_BEZIER => Self{ .CUBIC_BEZIER = self.CUBIC_BEZIER.transformed(transform) },
+            };
+        }
 
         pub fn tangent(self: Self, percent: anytype) Vector {
             return switch (self) {
@@ -1525,20 +1562,12 @@ pub fn Edge(comptime T: type) type {
                 .CUBIC_BEZIER => self.CUBIC_BEZIER.reverse(),
             };
         }
-        pub fn horizontal_intersections(self: Self, y_value: T, comptime POINT_MODE: MathX.ScanlinePointMode, comptime SLOPE_MODE: MathX.ScanlineSlopeMode, comptime SLOPE_TYPE: type, comptime double_root_estimate: DoubleRootEstimate(T), comptime quadratic_estimate: QuadraticEstimate(T), comptime linear_estimate: LinearEstimate(T)) ScanlineIntersections(3, T, POINT_MODE, SLOPE_MODE, SLOPE_TYPE) {
+        pub fn horizontal_intersections(self: Self, y_value: T, comptime POINT_MODE: MathX.ScanlinePointMode, comptime SLOPE_MODE: MathX.ScanlineSlopeMode, comptime SLOPE_TYPE: type, estimates: Estimates(T)) ScanlineIntersections(3, T, POINT_MODE, SLOPE_MODE, SLOPE_TYPE) {
             return switch (self) {
                 .POINT => self.POINT.horizontal_intersections(y_value, POINT_MODE, SLOPE_MODE, SLOPE_TYPE).change_max_intersections(3),
                 .LINE => self.LINE.horizontal_intersections(y_value, POINT_MODE, SLOPE_MODE, SLOPE_TYPE).change_max_intersections(3),
-                .QUADRATIC_BEZIER => self.QUADRATIC_BEZIER.horizontal_intersections(y_value, POINT_MODE, SLOPE_MODE, SLOPE_TYPE, linear_estimate).change_max_intersections(3),
-                .CUBIC_BEZIER => self.CUBIC_BEZIER.horizontal_intersections(y_value, POINT_MODE, SLOPE_MODE, SLOPE_TYPE, double_root_estimate, quadratic_estimate, linear_estimate),
-            };
-        }
-        pub fn horizontal_intersections_default_estimates(self: Self, y_value: T, comptime POINT_MODE: MathX.ScanlinePointMode, comptime SLOPE_MODE: MathX.ScanlineSlopeMode, comptime SLOPE_TYPE: type) ScanlineIntersections(3, T, POINT_MODE, SLOPE_MODE, SLOPE_TYPE) {
-            return switch (self) {
-                .POINT => self.POINT.horizontal_intersections(y_value, POINT_MODE, SLOPE_MODE, SLOPE_TYPE).change_max_intersections(3),
-                .LINE => self.LINE.horizontal_intersections(y_value, POINT_MODE, SLOPE_MODE, SLOPE_TYPE).change_max_intersections(3),
-                .QUADRATIC_BEZIER => self.QUADRATIC_BEZIER.horizontal_intersections(y_value, POINT_MODE, SLOPE_MODE, SLOPE_TYPE, .estimate_linear_when_linear_coeff_more_than_N_times_quadratic(DEFAULT_LINEAR_ESTIMATE_RATIO)).change_max_intersections(3),
-                .CUBIC_BEZIER => self.CUBIC_BEZIER.horizontal_intersections(y_value, POINT_MODE, SLOPE_MODE, SLOPE_TYPE, .estimate_double_roots_when_u_minus_v_less_than_N_times_u_plus_v(DEFAULT_DOUBLE_ROOT_ESTIMATE_RATIO), .estimate_quadratic_when_quadratic_coeff_more_than_N_times_cubic(DEFAULT_QUADRATIC_ESTIMATE_RATIO), .estimate_linear_when_linear_coeff_more_than_N_times_quadratic(DEFAULT_LINEAR_ESTIMATE_RATIO)),
+                .QUADRATIC_BEZIER => self.QUADRATIC_BEZIER.horizontal_intersections(y_value, POINT_MODE, SLOPE_MODE, SLOPE_TYPE, estimates.linear).change_max_intersections(3),
+                .CUBIC_BEZIER => self.CUBIC_BEZIER.horizontal_intersections(y_value, POINT_MODE, SLOPE_MODE, SLOPE_TYPE, estimates.double_root, estimates.quadratic, estimates.linear),
             };
         }
         pub fn add_bounds_to_aabb(self: Self, aabb: *AABB, comptime linear_estimate: LinearEstimate(T)) void {
@@ -1798,11 +1827,11 @@ pub fn Edge(comptime T: type) type {
     };
 }
 
-pub fn ShapeNoUserdata(comptime T: type) type {
-    return Shape(T, void, void{});
+pub fn ContourNoUserdata(comptime T: type) type {
+    return Contour(T, void, void{});
 }
 
-pub fn Shape(comptime T: type, comptime EDGE_USERDATA: type, comptime EDGE_USERDATA_DEFAULT_VALUE: EDGE_USERDATA) type {
+pub fn Contour(comptime T: type, comptime EDGE_USERDATA: type, comptime EDGE_USERDATA_DEFAULT_VALUE: EDGE_USERDATA) type {
     return struct {
         const Self = @This();
         const Matrix = Mat3x3.define_matrix_3x3_type(T);
@@ -1991,37 +2020,29 @@ pub fn Shape(comptime T: type, comptime EDGE_USERDATA: type, comptime EDGE_USERD
             }
         }
 
-        pub fn get_new_horizontal_scanline_intersections(self: Self, y_value: T, alloc: Allocator, comptime SLOPE_MODE: MathX.ScanlineSlopeMode, comptime SLOPE_TYPE: type, comptime double_root_estimate: DoubleRootEstimate(T), comptime quadratic_estimate: QuadraticEstimate(T), comptime linear_estimate: LinearEstimate(T)) Scanline(T, SLOPE_MODE, SLOPE_TYPE) {
+        pub fn get_new_horizontal_scanline_intersections(self: Self, y_value: T, alloc: Allocator, comptime SLOPE_MODE: MathX.ScanlineSlopeMode, comptime SLOPE_TYPE: type, estimates: Estimates(T), transform: TransformNoAlter(T)) Scanline(T, SLOPE_MODE, SLOPE_TYPE) {
             var scanline = Scanline(T, SLOPE_MODE, SLOPE_TYPE).init_cap(8, alloc);
-            self.append_horizontal_scanline_intersections(y_value, SLOPE_MODE, SLOPE_TYPE, &scanline, alloc, double_root_estimate, quadratic_estimate, linear_estimate);
+            self.append_horizontal_scanline_intersections(y_value, SLOPE_MODE, SLOPE_TYPE, &scanline, alloc, estimates, transform);
             return scanline;
         }
 
-        pub fn append_horizontal_scanline_intersections(self: Self, y_value: T, comptime SLOPE_MODE: MathX.ScanlineSlopeMode, comptime SLOPE_TYPE: type, scanline: *Scanline(T, SLOPE_MODE, SLOPE_TYPE), scanline_allocator: Allocator, comptime double_root_estimate: DoubleRootEstimate(T), comptime quadratic_estimate: QuadraticEstimate(T), comptime linear_estimate: LinearEstimate(T)) void {
+        pub fn append_horizontal_scanline_intersections(self: Self, y_value: T, comptime SLOPE_MODE: MathX.ScanlineSlopeMode, comptime SLOPE_TYPE: type, scanline: *Scanline(T, SLOPE_MODE, SLOPE_TYPE), scanline_allocator: Allocator, estimates: Estimates(T), transform: TransformNoAlter(T)) void {
             for (self.edges.slice()) |edge| {
-                const edge_intersections = edge.horizontal_intersections(y_value, .axis_only, SLOPE_MODE, SLOPE_TYPE, double_root_estimate, quadratic_estimate, linear_estimate);
+                const edge_intersections = edge.transformed(transform).horizontal_intersections(y_value, .axis_only, SLOPE_MODE, SLOPE_TYPE, estimates);
                 for (0..edge_intersections.count) |i| {
                     const inter = edge_intersections.intersections[i];
                     _ = scanline.intersections.append(.{ .inter = inter }, scanline_allocator);
                 }
             }
         }
-
-        pub fn get_new_horizontal_scanline_intersections_default_estimates(self: Self, y_value: T, alloc: Allocator, comptime SLOPE_MODE: MathX.ScanlineSlopeMode, comptime SLOPE_TYPE: type) Scanline(T, SLOPE_MODE, SLOPE_TYPE) {
-            return self.get_new_horizontal_scanline_intersections(y_value, alloc, SLOPE_MODE, SLOPE_TYPE, .estimate_double_roots_when_u_minus_v_less_than_N_times_u_plus_v(DEFAULT_DOUBLE_ROOT_ESTIMATE_RATIO), .estimate_quadratic_when_quadratic_coeff_more_than_N_times_cubic(DEFAULT_QUADRATIC_ESTIMATE_RATIO), .estimate_linear_when_linear_coeff_more_than_N_times_quadratic(DEFAULT_LINEAR_ESTIMATE_RATIO));
-        }
-
-        pub fn append_horizontal_scanline_intersections_default_estimates(self: Self, y_value: T, comptime SLOPE_MODE: MathX.ScanlineSlopeMode, comptime SLOPE_TYPE: type, scanline: *Scanline(T, SLOPE_MODE, SLOPE_TYPE), scanline_allocator: Allocator) void {
-            self.append_horizontal_scanline_intersections(y_value, SLOPE_MODE, SLOPE_TYPE, scanline, scanline_allocator, .estimate_double_roots_when_u_minus_v_less_than_N_times_u_plus_v(DEFAULT_DOUBLE_ROOT_ESTIMATE_RATIO), .estimate_quadratic_when_quadratic_coeff_more_than_N_times_cubic(DEFAULT_QUADRATIC_ESTIMATE_RATIO), .estimate_linear_when_linear_coeff_more_than_N_times_quadratic(DEFAULT_LINEAR_ESTIMATE_RATIO));
-        }
     };
 }
 
-pub fn CompositeShapeNoUserdata(comptime T: type) type {
-    return CompositeShape(T, void, void{});
+pub fn ShapeNoUserdata(comptime T: type) type {
+    return Shape(T, void, void{});
 }
 
-pub fn CompositeShape(comptime T: type, comptime EDGE_USERDATA: type, comptime EDGE_USERDATA_DEFAULT_VALUE: EDGE_USERDATA) type {
+pub fn Shape(comptime T: type, comptime EDGE_USERDATA: type, comptime EDGE_USERDATA_DEFAULT_VALUE: EDGE_USERDATA) type {
     return struct {
         const Self = @This();
         const Matrix = Mat3x3.define_matrix_3x3_type(T);
@@ -2029,7 +2050,7 @@ pub fn CompositeShape(comptime T: type, comptime EDGE_USERDATA: type, comptime E
         const VectorF = Vec2.define_vec2_type(Vector.F);
         const AABB = AABB2.define_aabb2_type(T);
         const EDGE = EdgeWithUserdata(T, EDGE_USERDATA, EDGE_USERDATA_DEFAULT_VALUE);
-        const SHAPE = Shape(T, EDGE_USERDATA, EDGE_USERDATA_DEFAULT_VALUE);
+        const SHAPE = Contour(T, EDGE_USERDATA, EDGE_USERDATA_DEFAULT_VALUE);
 
         shapes: List(SHAPE) = .{},
 
@@ -2051,29 +2072,29 @@ pub fn CompositeShape(comptime T: type, comptime EDGE_USERDATA: type, comptime E
             self.shapes.free(alloc);
         }
 
-        pub fn all_shapes_are_closed(self: Self, epsilon: T) bool {
+        pub fn all_contours_are_closed(self: Self, epsilon: T) bool {
             for (self.shapes.slice()) |shape| {
                 if (!shape.is_closed(epsilon)) return false;
             }
             return true;
         }
 
-        pub fn append_shape(self: *Self, shape: SHAPE, alloc: Allocator) void {
+        pub fn append_contour(self: *Self, shape: SHAPE, alloc: Allocator) void {
             _ = self.shapes.append(shape, alloc);
         }
-        pub fn append_empty_shape(self: *Self, shape_edge_capacity: usize, alloc: Allocator) *SHAPE {
+        pub fn append_empty_contour(self: *Self, shape_edge_capacity: usize, alloc: Allocator) *SHAPE {
             const idx = self.shapes.append(.init_capacity(shape_edge_capacity, alloc), alloc);
             return self.shapes.get_ptr(idx);
         }
 
         /// This is not the same as vector normalization!
         ///
-        /// First, if any of the shape edges are degenerate (for example a bezier that approximately forms a line, or a line that is actualy a point),
+        /// First, if any of the contour edges are degenerate (for example a bezier that approximately forms a line, or a line that is actualy a point),
         /// it converts those edges to their simpler forms.
         ///
-        /// Then, if a shape has only one edge, it splits the edge into thirds and replaces the existing edge with the 3 thirds
+        /// Then, if a contour has only one edge, it splits the edge into thirds and replaces the existing edge with the 3 thirds
         ///
-        /// Otherwise, it de-converges adjacent shape edges when the dot product of the tangents of the two edges at the corner where they meet
+        /// Otherwise, it de-converges adjacent contour edges when the dot product of the tangents of the two edges at the corner where they meet
         /// is less than `corner_dot_epsilon - 1` using the `deconverge_factor`
         pub fn normalize(self: *Self, alloc: Allocator, degenerate_epsilon: T, corner_dot_epsilon: anytype, deconverge_factor: anytype) void {
             for (self.shapes.slice()) |*shape| {
@@ -2132,27 +2153,19 @@ pub fn CompositeShape(comptime T: type, comptime EDGE_USERDATA: type, comptime E
             return aabb;
         }
 
-        pub fn get_new_horizontal_scanline_intersections(self: Self, y_value: T, alloc: Allocator, comptime SLOPE_MODE: MathX.ScanlineSlopeMode, comptime SLOPE_TYPE: type, comptime double_root_estimate: DoubleRootEstimate(T), comptime quadratic_estimate: QuadraticEstimate(T), comptime linear_estimate: LinearEstimate(T)) Scanline(T, SLOPE_MODE, SLOPE_TYPE) {
+        pub fn get_new_horizontal_scanline_intersections(self: Self, y_value: T, alloc: Allocator, comptime SLOPE_MODE: MathX.ScanlineSlopeMode, comptime SLOPE_TYPE: type, estimates: Estimates(T), transform: TransformNoAlter(T)) Scanline(T, SLOPE_MODE, SLOPE_TYPE) {
             var scanline = Scanline(T, SLOPE_MODE, SLOPE_TYPE).init_cap(8, alloc);
             for (self.shapes.slice()) |shape| {
-                shape.append_horizontal_scanline_intersections(y_value, SLOPE_MODE, SLOPE_TYPE, &scanline, alloc, double_root_estimate, quadratic_estimate, linear_estimate);
+                shape.append_horizontal_scanline_intersections(y_value, SLOPE_MODE, SLOPE_TYPE, &scanline, alloc, estimates, transform);
             }
             return scanline;
         }
 
-        pub fn remake_horizontal_scanline_intersections(self: Self, y_value: T, comptime SLOPE_MODE: MathX.ScanlineSlopeMode, comptime SLOPE_TYPE: type, scanline: *Scanline(T, SLOPE_MODE, SLOPE_TYPE), scanline_allocator: Allocator, comptime double_root_estimate: DoubleRootEstimate(T), comptime quadratic_estimate: QuadraticEstimate(T), comptime linear_estimate: LinearEstimate(T)) void {
+        pub fn remake_horizontal_scanline_intersections(self: Self, y_value: T, comptime SLOPE_MODE: MathX.ScanlineSlopeMode, comptime SLOPE_TYPE: type, scanline: *Scanline(T, SLOPE_MODE, SLOPE_TYPE), scanline_allocator: Allocator, estimates: Estimates(T), transform: TransformNoAlter(T)) void {
             scanline.reset();
             for (self.shapes.slice()) |shape| {
-                shape.append_horizontal_scanline_intersections(y_value, SLOPE_MODE, SLOPE_TYPE, scanline, scanline_allocator, double_root_estimate, quadratic_estimate, linear_estimate);
+                shape.append_horizontal_scanline_intersections(y_value, SLOPE_MODE, SLOPE_TYPE, scanline, scanline_allocator, estimates, transform);
             }
-        }
-
-        pub fn get_new_horizontal_scanline_intersections_default_estimates(self: Self, y_value: T, alloc: Allocator, comptime SLOPE_MODE: MathX.ScanlineSlopeMode, comptime SLOPE_TYPE: type) Scanline(T, SLOPE_MODE, SLOPE_TYPE) {
-            return self.get_new_horizontal_scanline_intersections(y_value, alloc, SLOPE_MODE, SLOPE_TYPE, .estimate_double_roots_when_u_minus_v_less_than_N_times_u_plus_v(DEFAULT_DOUBLE_ROOT_ESTIMATE_RATIO), .estimate_quadratic_when_quadratic_coeff_more_than_N_times_cubic(DEFAULT_QUADRATIC_ESTIMATE_RATIO), .estimate_linear_when_linear_coeff_more_than_N_times_quadratic(DEFAULT_LINEAR_ESTIMATE_RATIO));
-        }
-
-        pub fn remake_horizontal_scanline_intersections_default_estimates(self: Self, y_value: T, comptime SLOPE_MODE: MathX.ScanlineSlopeMode, comptime SLOPE_TYPE: type, scanline: *Scanline(T, SLOPE_MODE, SLOPE_TYPE), scanline_allocator: Allocator) void {
-            self.remake_horizontal_scanline_intersections(y_value, SLOPE_MODE, SLOPE_TYPE, scanline, scanline_allocator, .estimate_double_roots_when_u_minus_v_less_than_N_times_u_plus_v(DEFAULT_DOUBLE_ROOT_ESTIMATE_RATIO), .estimate_quadratic_when_quadratic_coeff_more_than_N_times_cubic(DEFAULT_QUADRATIC_ESTIMATE_RATIO), .estimate_linear_when_linear_coeff_more_than_N_times_quadratic(DEFAULT_LINEAR_ESTIMATE_RATIO));
         }
 
         pub fn edge_count(self: Self) u32 {
@@ -3079,7 +3092,7 @@ pub fn SimpleShapeCombiner(comptime T: type, comptime DISTANCE_MODE: DistanceCal
 
         shape_edge_selector: EdgeSelector = .{},
 
-        pub fn init_from_shape(_: *Shape, _: Allocator) Self {
+        pub fn init_from_shape(_: *Contour, _: Allocator) Self {
             return Self{};
         }
 
@@ -3124,7 +3137,7 @@ pub fn OverlappingShapeCombiner(comptime T: type, comptime DISTANCE_MODE: Distan
         windings: List(Winding),
         selectors: List(EdgeSelector),
 
-        pub fn init_from_shape(shape: *Shape, alloc: Allocator) Self {
+        pub fn init_from_shape(shape: *Contour, alloc: Allocator) Self {
             var self = Self{
                 .windings = List(Winding).init_capacity(shape.contours.len, alloc),
                 .selectors = List(EdgeSelector).init_capacity(shape.contours.len, alloc),
@@ -3518,7 +3531,76 @@ pub const ErrorDataGrid = DataGrid(DATA_GRID_DEF.with_cell_type(ErrorFlags));
 //     };
 // }
 
+pub const EstimatesMode = enum(u8) {
+    NO_ESTIMATES,
+    WITH_ESTIMATES,
+    DEFAULT_ESTIMATES,
+};
+
+pub fn Estimates(comptime T: type) type {
+    return struct {
+        const Self = @This();
+
+        double_root: MathX.DoubleRootEstimate(T) = .do_not_estimate_double_roots(),
+        quadratic: MathX.QuadraticEstimate(T) = .do_not_estimate_quadratic(),
+        linear: MathX.LinearEstimate(T) = .do_not_estimate_linear(),
+
+        pub fn new_estimates(double_root: MathX.DoubleRootEstimate(T), quadratic: MathX.QuadraticEstimate(T), linear: MathX.LinearEstimate(T)) Self {
+            return Self{
+                .double_root = double_root,
+                .quadratic = quadratic,
+                .linear = linear,
+            };
+        }
+
+        pub fn default_estimates() Self {
+            return DEFAULT;
+        }
+
+        pub const DEFAULT = Self{
+            .double_root = .estimate_double_roots_when_u_minus_v_less_than_N_times_u_plus_v(DEFAULT_DOUBLE_ROOT_ESTIMATE_RATIO),
+            .quadratic = .estimate_quadratic_when_quadratic_coeff_more_than_N_times_cubic(DEFAULT_QUADRATIC_ESTIMATE_RATIO),
+            .linear = .estimate_linear_when_linear_coeff_more_than_N_times_quadratic(DEFAULT_LINEAR_ESTIMATE_RATIO),
+        };
+    };
+}
+pub fn EstimatesSetting(comptime T: type) type {
+    return union(EstimatesMode) {
+        const Self = @This();
+
+        NO_ESTIMATES: void,
+        WITH_ESTIMATES: Estimates(T),
+        DEFAULT_ESTIMATES: void,
+
+        pub fn no_estimates() Self {
+            return Self{ .NO_ESTIMATES = void{} };
+        }
+        pub fn with_estimates(estimates: Estimates(T)) Self {
+            return Self{ .WITH_ESTIMATES = estimates };
+        }
+        pub fn default_estimates() Self {
+            return Self{ .DEFAULT_ESTIMATES = void{} };
+        }
+
+        pub fn get_estimates(self: Self) Estimates(T) {
+            switch (self) {
+                .NO_ESTIMATES => Estimates(T){},
+                .WITH_ESTIMATES => |est| est,
+                .DEFAULT_ESTIMATES => Estimates(T).DEFAULT,
+            }
+        }
+    };
+}
+
 pub const TransformMode = enum(u8) {
+    NONE,
+    STEPS_ALTER_ORIGINAL,
+    STEPS_PRESERVE_ORIGINAL,
+    MATRIX_ALTER_ORIGINAL,
+    MATRIX_PRESERVE_ORIGINAL,
+};
+
+pub const TransformModeNoAlter = enum(u8) {
     NONE,
     STEPS,
     MATRIX,
@@ -3528,6 +3610,44 @@ pub fn Transform(comptime T: type) type {
     const VEC = Vec2.define_vec2_type(T);
     const MAT = Mat3x3.define_matrix_3x3_type(T);
     return union(TransformMode) {
+        const Self = @This();
+
+        NONE: void,
+        STEPS_ALTER_ORIGINAL: []const VEC.TransformStep,
+        STEPS_PRESERVE_ORIGINAL: []const VEC.TransformStep,
+        MATRIX_ALTER_ORIGINAL: MAT,
+        MATRIX_PRESERVE_ORIGINAL: MAT,
+
+        pub fn none() Self {
+            return Self{ .NONE = void{} };
+        }
+        pub fn steps_alter_original(s: []const VEC.TransformStep) Self {
+            return Self{ .STEPS_ALTER_ORIGINAL = s };
+        }
+        pub fn steps_preserve_original(s: []const VEC.TransformStep) Self {
+            return Self{ .STEPS_PRESERVE_ORIGINAL = s };
+        }
+        pub fn matrix_alter_original(m: MAT) Self {
+            return Self{ .MATRIX_ALTER_ORIGINAL = m };
+        }
+        pub fn matrix_preserve_original(m: MAT) Self {
+            return Self{ .MATRIX_PRESERVE_ORIGINAL = m };
+        }
+
+        pub fn to_no_alter(self: Self) TransformNoAlter(T) {
+            return switch (self) {
+                .NONE, .STEPS_ALTER_ORIGINAL, .MATRIX_ALTER_ORIGINAL => TransformNoAlter(T){ .NONE = void{} },
+                .STEPS_PRESERVE_ORIGINAL => |s| TransformNoAlter(T).steps(s),
+                .MATRIX_PRESERVE_ORIGINAL => |m| TransformNoAlter(T).matrix(m),
+            };
+        }
+    };
+}
+
+pub fn TransformNoAlter(comptime T: type) type {
+    const VEC = Vec2.define_vec2_type(T);
+    const MAT = Mat3x3.define_matrix_3x3_type(T);
+    return union(TransformModeNoAlter) {
         const Self = @This();
 
         NONE: void,
@@ -3548,15 +3668,16 @@ pub fn Transform(comptime T: type) type {
 
 pub const ScanlineAntiAliasMode = enum(u8) {
     NONE,
-    ROUGH_APPROX,
+    X_ONLY_LINEAR_FALLOFF,
+    X_ONLY_EXPONENTIAL_FALLOFF,
 };
 
 pub fn ScanlineRasterizer(comptime T: type, comptime EDGE_USERDATA: type, comptime EDGE_USERDATA_DEFAULT_VALUE: EDGE_USERDATA, comptime SLOPE_TYPE: type, comptime OUTPUT_DATA_GRID_DEF: DataGridModule.GridDefinition) type {
     return struct {
         const Self = @This();
         const Vector = Vec2.define_vec2_type(T);
-        const ShapeType = Shape(T, EDGE_USERDATA, EDGE_USERDATA_DEFAULT_VALUE);
-        const CompositeShapeType = CompositeShape(T, EDGE_USERDATA, EDGE_USERDATA_DEFAULT_VALUE);
+        const ShapeType = Contour(T, EDGE_USERDATA, EDGE_USERDATA_DEFAULT_VALUE);
+        const CompositeShapeType = Shape(T, EDGE_USERDATA, EDGE_USERDATA_DEFAULT_VALUE);
         const EdgeType = EdgeWithUserdata(T, EDGE_USERDATA, EDGE_USERDATA_DEFAULT_VALUE);
         const OutputGrid = DataGrid(OUTPUT_DATA_GRID_DEF);
         const ScanlineType = Scanline(T, .sign, SLOPE_TYPE);
@@ -3582,21 +3703,21 @@ pub fn ScanlineRasterizer(comptime T: type, comptime EDGE_USERDATA: type, compti
             self.scanline.free(alloc);
         }
 
-        /// This alters the original shape using the given transform
-        pub fn rasterize_to_existing_data_grid(self: *Self, shape: *CompositeShapeType, shape_transform: Transform(T), anti_alias: ScanlineAntiAliasMode, output_grid: OutputGrid, fill_val: OUTPUT_DATA_GRID_DEF.CELL_TYPE, unfill_val: OUTPUT_DATA_GRID_DEF.CELL_TYPE, scanline_allocator: Allocator) void {
+        pub fn rasterize_to_existing_data_grid(self: *Self, shape: *CompositeShapeType, shape_transform: Transform(T), anti_alias: ScanlineAntiAliasMode, output_grid: OutputGrid, fill_val: OUTPUT_DATA_GRID_DEF.CELL_TYPE, unfill_val: OUTPUT_DATA_GRID_DEF.CELL_TYPE, estimates: Estimates(T), scanline_allocator: Allocator) void {
             switch (shape_transform) {
-                .NONE => {},
-                .STEPS => |s| {
+                .STEPS_ALTER_ORIGINAL => |s| {
                     shape.apply_complex_transform(s);
                 },
-                .MATRIX => |m| {
+                .MATRIX_ALTER_ORIGINAL => |m| {
                     shape.apply_affine_transform_matrix(m);
                 },
+                else => {},
             }
+            const scanline_transform = shape_transform.to_no_alter();
             for (0..output_grid.height) |y_usize| {
                 const y: u32 = @intCast(y_usize);
                 const yy = num_cast(y, T) + 0.5;
-                shape.remake_horizontal_scanline_intersections_default_estimates(yy, .sign, SLOPE_TYPE, &self.scanline, scanline_allocator);
+                shape.remake_horizontal_scanline_intersections(yy, .sign, SLOPE_TYPE, &self.scanline, scanline_allocator, estimates, scanline_transform);
                 self.scanline.sort_and_sum();
                 // assert_with_reason(self.scanline.intersections.is_sorted(.entire_list(), ScanlineType.IntersectionType.x_greater_than), @src(), "scanline intersections not sorted", .{}); //DEBUG
                 var x: u32 = 0;
@@ -3611,7 +3732,7 @@ pub fn ScanlineRasterizer(comptime T: type, comptime EDGE_USERDATA: type, compti
                     if (point_whole_float < 0) continue;
                     const new_fill: u1 = @intFromBool(self.scanline.should_be_filled_at_idx(i, .NONZERO));
                     const point_whole_int: u32 = @intFromFloat(point_whole_float);
-                    const remainder_percent = intersection.inter.point - point_whole_float;
+                    var remainder_percent = intersection.inter.point - point_whole_float;
                     if (point_whole_int >= output_grid.width) {
                         const cells = output_grid.get_h_scanline(x, y, output_grid.width - x);
                         @memset(cells, fills[fill]);
@@ -3642,10 +3763,16 @@ pub fn ScanlineRasterizer(comptime T: type, comptime EDGE_USERDATA: type, compti
                                     output_grid.set_cell(x, y, fills[new_fill]);
                                 }
                             },
-                            .ROUGH_APPROX => {
+                            .X_ONLY_LINEAR_FALLOFF, .X_ONLY_EXPONENTIAL_FALLOFF => {
                                 if (new_fill != fill) {
                                     const start_fill = fills[fill];
                                     const end_fill = fills[new_fill];
+                                    switch (anti_alias) {
+                                        .X_ONLY_EXPONENTIAL_FALLOFF => {
+                                            remainder_percent = remainder_percent * remainder_percent;
+                                        },
+                                        else => {},
+                                    }
                                     const anti_alias_fill = MathX.upgrade_lerp_out(start_fill, end_fill, 1 - remainder_percent, OUTPUT_DATA_GRID_DEF.CELL_TYPE);
                                     output_grid.set_cell(x, y, anti_alias_fill);
                                 } else {
@@ -3667,11 +3794,11 @@ pub fn ScanlineRasterizer(comptime T: type, comptime EDGE_USERDATA: type, compti
     };
 }
 
-fn make_test_triangle(inner_edges: *[3]EdgeWithUserdata(f32, EdgeColor, .WHITE), outer_edges: *[3]EdgeWithUserdata(f32, EdgeColor, .WHITE), shapes: *[2]Shape(f32, EdgeColor, .WHITE)) CompositeShape(f32, EdgeColor, .WHITE) {
+fn make_test_triangle(inner_edges: *[3]EdgeWithUserdata(f32, EdgeColor, .WHITE), outer_edges: *[3]EdgeWithUserdata(f32, EdgeColor, .WHITE), shapes: *[2]Contour(f32, EdgeColor, .WHITE)) Shape(f32, EdgeColor, .WHITE) {
     const Vec = Vec2.define_vec2_type(f32);
     const EdgeType = EdgeWithUserdata(f32, EdgeColor, .WHITE);
-    const ShapeType = Shape(f32, EdgeColor, .WHITE);
-    const CompositeShapeType = CompositeShape(f32, EdgeColor, .WHITE);
+    const ShapeType = Contour(f32, EdgeColor, .WHITE);
+    const CompositeShapeType = Shape(f32, EdgeColor, .WHITE);
     const A = Vec.new(2, 2);
     const B = Vec.new(27, 52);
     const C = Vec.new(52, 2);
@@ -3720,31 +3847,25 @@ test "Shape_rasterize_triangle" {
         .X_ORDER = .LEFT_TO_RIGHT,
         .Y_ORDER = .TOP_TO_BOTTOM,
     };
+    const alloc = std.heap.page_allocator;
     const OUT_GRID = DataGrid(OUT_DEF);
     const Raster = ScanlineRasterizer(f32, EdgeColor, .WHITE, i8, OUT_DEF);
-    var raster = Raster.init_with_intersection_capacity(8, std.heap.page_allocator);
-    defer raster.free(std.heap.page_allocator);
-    var output_grid = OUT_GRID.init(54, 54, 0, std.heap.page_allocator);
-    defer output_grid.free(std.heap.page_allocator);
+    var raster = Raster.init_with_intersection_capacity(8, alloc);
+    defer raster.free(alloc);
+    var output_grid = OUT_GRID.init(54, 54, 0, alloc);
+    defer output_grid.free(alloc);
     var inner: [3]EdgeWithUserdata(f32, EdgeColor, .WHITE) = undefined;
     var outer: [3]EdgeWithUserdata(f32, EdgeColor, .WHITE) = undefined;
-    var shapes: [2]Shape(f32, EdgeColor, .WHITE) = undefined;
+    var shapes: [2]Contour(f32, EdgeColor, .WHITE) = undefined;
     var triangle = make_test_triangle(&inner, &outer, &shapes);
-    raster.rasterize_to_existing_data_grid(&triangle, .none(), .ROUGH_APPROX, output_grid, 255, 0, std.heap.page_allocator);
-    std.debug.print("\n", .{});
-    for (0..output_grid.height) |y| {
-        const row = output_grid.get_scanline(0, @intCast(y), output_grid.width);
-        for (0..output_grid.width) |x| {
-            const cell = row[x];
-            const char: u8 = switch (cell) {
-                0 => ' ',
-                1...100 => '.',
-                101...200 => ':',
-                201...254 => '*',
-                255 => '@',
-            };
-            std.debug.print("{c}", .{char});
-        }
-        std.debug.print("\n", .{});
-    }
+    // triangle.apply_complex_transform(&.{.skew_from_origin_x_degrees(20)});
+    try std.fs.cwd().makePath("test_out/shape");
+    raster.rasterize_to_existing_data_grid(&triangle, .none(), .NONE, output_grid, 255, 0, .default_estimates(), alloc);
+    _ = try BitmapFormat.save_bitmap_to_file("test_out/shape/triangle_hard_no_antialias.bmp", OUT_DEF, output_grid, .{ .bits_per_pixel = .BPP_8 }, .NO_CONVERSION_NEEDED_ALPHA_BECOMES_COLOR_CHANNELS, alloc);
+    output_grid.fill_all(0);
+    raster.rasterize_to_existing_data_grid(&triangle, .none(), .X_ONLY_LINEAR_FALLOFF, output_grid, 255, 0, .default_estimates(), alloc);
+    _ = try BitmapFormat.save_bitmap_to_file("test_out/shape/triangle_hard_antialias_x_linear.bmp", OUT_DEF, output_grid, .{ .bits_per_pixel = .BPP_8 }, .NO_CONVERSION_NEEDED_ALPHA_BECOMES_COLOR_CHANNELS, alloc);
+    output_grid.fill_all(0);
+    raster.rasterize_to_existing_data_grid(&triangle, .none(), .X_ONLY_EXPONENTIAL_FALLOFF, output_grid, 255, 0, .default_estimates(), alloc);
+    _ = try BitmapFormat.save_bitmap_to_file("test_out/shape/triangle_hard_antialias_x_exponential.bmp", OUT_DEF, output_grid, .{ .bits_per_pixel = .BPP_8 }, .NO_CONVERSION_NEEDED_ALPHA_BECOMES_COLOR_CHANNELS, alloc);
 }

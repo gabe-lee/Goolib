@@ -1,34 +1,110 @@
-//! This is Largely a direct translation of stb_truetype.h
+//! Provides the ability to read TrueTypeFont .ttf files and rasterize glyphs
 //!
-//! Many of the methods/fields have be `zigified`
+//! This is largely a direct translation of `https://codeberg.org/andrewrk/TrueTypeFont`,
+//! which is itself a translation of `https://github.com/nothings/stb/blob/master/stb_truetype.h`
+//! from C to Zig.
 //!
-//! Some features are not translated at all as they are deemed unneccessary,
-//! are part of the stb_truetype legacy api, or are fulfilled by other portions of Goolib
+//! Most of the code logic remains unchanged from `https://codeberg.org/andrewrk/TrueTypeFont`,
+//! except that the function signatures, enum tags, and a few return types are altered
+//! to more closely align with THIS library and integrate with Goolib's native vector
+//! and AABB types, etc.
 //!
-//! #### License: Zlib
-//! #### Adapted From https://github.com/nothings/stb/blob/master/stb_truetype.h
-//! #### License for original source from which this source was adapted: MIT or Public Domain (https://github.com/nothings/stb/blob/master/LICENSE)
+//! The chain of licenses from the original onward are listed below,
+//!
+//! If this portion of the Goolib library is usefull to you, PLEASE support the original
+//! projects. I'm standing on the shoulders of giants here.
+//!
+//! ### Original License (https://github.com/nothings/stb/blob/master/stb_truetype.h): MIT or Public Domain:
+//! This software is available under 2 licenses -- choose whichever you prefer.
+//!
+//! ------------------------------------------------------------------------------
+//!
+//! ALTERNATIVE A - MIT License
+//!
+//! Copyright (c) 2017 Sean Barrett
+//!
+//! Permission is hereby granted, free of charge, to any person obtaining a copy of
+//! this software and associated documentation files (the "Software"), to deal in
+//! the Software without restriction, including without limitation the rights to
+//! use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies
+//! of the Software, and to permit persons to whom the Software is furnished to do
+//! so, subject to the following conditions:
+//! The above copyright notice and this permission notice shall be included in all
+//! copies or substantial portions of the Software.
+//! THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+//! IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+//! FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+//! AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+//! LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+//! OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+//! SOFTWARE.
+//!
+//! ------------------------------------------------------------------------------
+//!
+//! ALTERNATIVE B - Public Domain (www.unlicense.org)
+//!
+//! This is free and unencumbered software released into the public domain.
+//! Anyone is free to copy, modify, publish, use, compile, sell, or distribute this
+//! software, either in source code form or as a compiled binary, for any purpose,
+//! commercial or non-commercial, and by any means.
+//! In jurisdictions that recognize copyright laws, the author or authors of this
+//! software dedicate any and all copyright interest in the software to the public
+//! domain. We make this dedication for the benefit of the public at large and to
+//! the detriment of our heirs and successors. We intend this dedication to be an
+//! overt act of relinquishment in perpetuity of all present and future rights to
+//! this software under copyright law.
+//! THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+//! IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+//! FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+//! AUTHORS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN
+//! ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
+//! WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+//! ### License (https://codeberg.org/andrewrk/TrueTypeFont): MIT
+//! The MIT License (Expat)
+//!
+//! Copyright (c) contributors
+//!
+//! Permission is hereby granted, free of charge, to any person obtaining a copy
+//! of this software and associated documentation files (the "Software"), to deal
+//! in the Software without restriction, including without limitation the rights
+//! to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+//! copies of the Software, and to permit persons to whom the Software is
+//! furnished to do so, subject to the following conditions:
+//!
+//! The above copyright notice and this permission notice shall be included in
+//! all copies or substantial portions of the Software.
+//!
+//! THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+//! IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+//! FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+//! AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+//! LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+//! OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+//! THE SOFTWARE.
+//!
+//! ### License (Goolib): ZLib
+//! zlib license
+//!
+//! Copyright (c) 2025, Gabriel Lee Anderson <gla.ander@gmail.com>
+//!
+//! This software is provided 'as-is', without any express or implied
+//! warranty. In no event will the authors be held liable for any damages
+//! arising from the use of this software.
+//!
+//! Permission is granted to anyone to use this software for any purpose,
+//! including commercial applications, and to alter it and redistribute it
+//! freely, subject to the following restrictions:
+//!
+//! 1. The origin of this software must not be misrepresented; you must not
+//!    claim that you wrote the original software. If you use this software
+//!    in a product, an acknowledgment in the product documentation would be
+//!    appreciated but is not required.
+//! 2. Altered source versions must be plainly marked as such, and must not be
+//!    misrepresented as being the original software.
+//! 3. This notice may not be removed or altered from any source distribution.
 
-// zlib license
-//
-// Copyright (c) 2025, Gabriel Lee Anderson <gla.ander@gmail.com>
-//
-// This software is provided 'as-is', without any express or implied
-// warranty. In no event will the authors be held liable for any damages
-// arising from the use of this software.
-//
-// Permission is granted to anyone to use this software for any purpose,
-// including commercial applications, and to alter it and redistribute it
-// freely, subject to the following restrictions:
-//
-// 1. The origin of this software must not be misrepresented; you must not
-//    claim that you wrote the original software. If you use this software
-//    in a product, an acknowledgment in the product documentation would be
-//    appreciated but is not required.
-// 2. Altered source versions must be plainly marked as such, and must not be
-//    misrepresented as being the original software.
-// 3. This notice may not be removed or altered from any source distribution.
 const std = @import("std");
+const build = @import("builtin");
 const math = std.math;
 const Root = @import("./_root.zig");
 const SliceAdapter = Root.IList_SliceAdapter;
@@ -47,955 +123,2376 @@ const AABB2 = Root.AABB2;
 const MathX = Root.Math;
 const Bezier = Root.Bezier;
 const Cast = Root.Cast;
+const ShapeModule = Root.Shape;
+const Contour = ShapeModule.Contour;
+const DataGridModule = Root.DataGrid;
+const BitmapFormat = Root.FileFormat.Bitmap;
 
-pub const VertexList = List(Vertex);
+const AABB_i32 = AABB2.define_aabb2_type(i32);
+const AABB_i16 = AABB2.define_aabb2_type(i16);
+const DATA_GRID_U8_DEF = DataGridModule.GridDefinition{
+    .CELL_TYPE = u8,
+};
+const DataGrid_u8 = DataGridModule.DataGrid(DATA_GRID_U8_DEF);
+
+const native_endian = build.cpu.arch.endian();
+
+// pub const VertexList = List(Vertex);
+
+/// Direct C bindings for stb_truetype.h
+pub const STB_TrueTypeFont = @import("./TrueTypeFont_STB.zig");
 
 const assert_with_reason = Assert.assert_with_reason;
 const assert_unreachable = Assert.assert_unreachable;
 const num_cast = Cast.num_cast;
+const read_int = std.mem.readInt;
 
-pub const FontData = struct {
-    data: []const u8,
+pub const GlyphIndex = enum(u16) {
+    NOT_DEFINED = 0,
+    _,
+};
 
-    pub fn read_u8(self: FontData, offset: u32) u8 {
-        return self.data[offset];
-    }
-    pub fn read_i8(self: FontData, offset: u32) i8 {
-        return @bitCast(self.read_u8(offset));
-    }
-    pub fn read_u16(self: FontData, offset: u32) u16 {
-        return (@as(u16, @intCast(self.data[offset])) << 8) + @as(u16, @intCast(self.data[offset + 1]));
-    }
-    pub fn read_i16(self: FontData, offset: u32) i16 {
-        return @bitCast(self.read_u16(offset));
-    }
-    pub fn read_u32(self: FontData, offset: u32) u32 {
-        return (@as(u32, @intCast(self.data[offset])) << 24) + (@as(u32, @intCast(self.data[offset + 1])) << 16) + (@as(u32, @intCast(self.data[offset + 2])) << 8) + @as(u32, @intCast(self.data[offset + 3]));
-    }
-    pub fn read_i32(self: FontData, offset: u32) i32 {
-        return @bitCast(self.read_u32(offset));
-    }
-    pub fn read_N(self: FontData, offset: u32, size: u8) u32 {
-        var i: u8 = 0;
-        var o = offset;
-        var v: u32 = 0;
-        while (i < size) {
-            v <<= 8;
-            v |= @as(u32, @intCast(self.data[offset]));
-            i += 1;
-            o += 1;
-        }
-        return v;
-    }
-    pub fn has_tag_str(self: FontData, offset: u32, comptime tag: []const u8) void {
-        return self.data[offset] == tag[0] and self.data[offset + 1] == tag[1] and self.data[offset + 2] == tag[2] and self.data[offset + 3] == tag[3];
-    }
-    pub fn has_tag_raw(self: FontData, offset: u32, comptime b0: u8, comptime b1: u8, comptime b2: u8, comptime b3: u8) bool {
-        return self.data[offset] == b0 and self.data[offset + 1] == b1 and self.data[offset + 2] == b2 and self.data[offset + 3] == b3;
-    }
+pub const TableId = enum {
+    cmap,
+    loca,
+    head,
+    glyf,
+    hhea,
+    hmtx,
+    kern,
+    GPOS,
+    maxp,
 
-    pub fn new_with_offset(self: FontData, offset: u32) FontData {
-        assert_with_reason(offset < self.data.len, @src(), "cannot create sub FontData at offset {d}, total FontData length is {d}", .{ offset, self.data.len });
-        return FontData{
-            .data = self.data[offset..],
-        };
-    }
-    pub fn new_with_offset_and_size(self: FontData, offset: u32, size: u32) FontData {
-        assert_with_reason(offset + size <= self.data.len, @src(), "cannot create sub FontData at offset {d} with size {d} (end location = {d}), total FontData length is {d}", .{ offset, size, offset + size, self.data.len });
-        return FontData{
-            .data = self.data[offset .. offset + size],
-        };
-    }
-    pub fn new_with_offset_and_end(self: FontData, offset: u32, end: u32) FontData {
-        assert_with_reason(end <= self.data.len, @src(), "cannot create sub FontData at offset {d} with end {d}, total FontData length is {d}", .{ offset, end, self.data.len });
-        return FontData{
-            .data = self.data[offset..end],
-        };
+    fn raw(id: TableId) u32 {
+        const array4: [4]u8 = @tagName(id).*;
+        return @bitCast(array4);
     }
 };
 
-pub const FontFile = struct {
-    data: FontData,
+const PlatformId = enum(u16) {
+    UNICODE = 0,
+    MAC = 1,
+    ISO = 2,
+    MICROSOFT = 3,
+};
 
-    const TTFC_VERSION_OFFSET = 4;
-    const TTFC_COUNT_OFFSET = 8;
-    const TTFC_FONT_OFFSETS_OFFSET = 12;
-    const TTFC_FONT_OFFSET_SIZE = 4;
+const MicrosoftEncodingId = enum(u16) {
+    SYMBOL = 0,
+    UNICODE_BMP = 1,
+    SHIFTJIS = 2,
+    UNICODE_FULL = 10,
+};
 
-    pub fn new(file_data: []const u8) FontFile {
-        return FontFile{
-            .data = FontData{ .data = file_data },
+pub const GlyphBitmapDimensions = struct {
+    width: u16,
+    height: u16,
+    /// Offset in pixel space from the glyph origin to the left of the bitmap.
+    off_x: i16,
+    /// Offset in pixel space from the glyph origin to the top of the bitmap.
+    off_y: i16,
+
+    pub const empty: GlyphBitmapDimensions = .{
+        .width = 0,
+        .height = 0,
+        .off_x = 0,
+        .off_y = 0,
+    };
+};
+
+pub const VerticalMetrics = struct {
+    /// The coordinate above the baseline the font extends.
+    ascent: i16,
+    /// The coordinate below the baseline the font extends (typically negative).
+    descent: i16,
+    /// The spacing between one row's descent and the next row's ascent.
+    line_gap: i16,
+};
+
+pub const HorizontalMetrics = struct {
+    /// The offset from the current horizontal position to the next horizontal
+    /// position in unscaled coordinates.
+    advance_width: i16,
+    /// The offset from the current horizontal position to the left edge of the
+    /// character in unscaled coordinates.
+    left_side_bearing: i16,
+};
+
+pub const GlyphBitmapError = error{
+    OutOfMemory,
+    GlyphNotFound,
+    Unimplemented,
+    RMoveToStack,
+    VMoveToStack,
+    HMoveToStack,
+    RLineToStack,
+    VLineToStack,
+    HLineToStack,
+    HCurveToStack,
+    RCurveToStack,
+    RCurveLineStack,
+    CurveLineStack,
+    RLineCurveStack,
+    CallGSubRStack,
+    RecursionLimit,
+    SubRNotFound,
+    ReturnOutsideSubR,
+    HFlexStack,
+    FlexStack,
+    HFlex1Stack,
+    Flex1Stack,
+    CurveToStack,
+    ReservedOperator,
+    PushStackOverflow,
+    NoEndChar,
+};
+
+pub const Vertex = struct {
+    x: i16,
+    y: i16,
+    cx: i16,
+    cy: i16,
+    cx1: i16,
+    cy1: i16,
+    type: Type,
+
+    pub const Type = enum(u8) {
+        MOVE_TO = 1,
+        LINE = 2,
+        QUADRATIC = 3,
+        CUBIC = 4,
+        _,
+    };
+
+    fn set(v: *Vertex, ty: Type, x: i32, y: i32, cx: i32, cy: i32) void {
+        v.type = ty;
+        v.x = @intCast(x);
+        v.y = @intCast(y);
+        v.cx = @intCast(cx);
+        v.cy = @intCast(cy);
+    }
+};
+
+pub const TrueTypeFont = struct {
+    table_offsets: [@typeInfo(TableId).@"enum".fields.len]u32,
+    ttf_bytes: []const u8,
+    index_map: u32,
+    index_to_loc_format: u16,
+    glyphs_len: u32,
+    cff_data: CffData,
+
+    pub fn load(bytes: []const u8) !TrueTypeFont {
+        // Find tables.
+        var table_offsets = [1]u32{0} ** @typeInfo(TableId).@"enum".fields.len;
+        const tables_len = read_int(u16, bytes[4..][0..2], .big);
+        var cff: u32 = 0;
+        for (0..tables_len) |i| {
+            const loc = 12 + 16 * i;
+            const id: TableId = switch (read_int(u32, bytes[loc..][0..4], native_endian)) {
+                TableId.cmap.raw() => .cmap,
+                TableId.loca.raw() => .loca,
+                TableId.head.raw() => .head,
+                TableId.glyf.raw() => .glyf,
+                TableId.hhea.raw() => .hhea,
+                TableId.hmtx.raw() => .hmtx,
+                TableId.kern.raw() => .kern,
+                TableId.GPOS.raw() => .GPOS,
+                TableId.maxp.raw() => .maxp,
+                read_int(u32, "CFF ", native_endian) => {
+                    cff = read_int(u32, bytes[loc + 8 ..][0..4], .big);
+                    continue;
+                },
+                else => continue,
+            };
+            table_offsets[@intFromEnum(id)] = read_int(u32, bytes[loc + 8 ..][0..4], .big);
+        }
+
+        if (table_offsets[@intFromEnum(TableId.cmap)] == 0) return error.missing_required_table;
+        if (table_offsets[@intFromEnum(TableId.head)] == 0) return error.missing_required_table;
+        if (table_offsets[@intFromEnum(TableId.hhea)] == 0) return error.missing_required_table;
+        if (table_offsets[@intFromEnum(TableId.hmtx)] == 0) return error.missing_required_table;
+
+        var cff_data: CffData = .empty;
+
+        if (table_offsets[@intFromEnum(TableId.glyf)] != 0) {
+            if (table_offsets[@intFromEnum(TableId.loca)] == 0) return error.missing_required_table;
+        } else {
+            if (cff == 0) return error.missing_required_table;
+            cff_data = try .init(cff, bytes.ptr);
+        }
+
+        const maxp = table_offsets[@intFromEnum(TableId.maxp)];
+        const glyphs_len = if (maxp == 0) 0xffff else read_int(u16, bytes[maxp + 4 ..][0..2], .big);
+
+        const cmap = table_offsets[@intFromEnum(TableId.cmap)];
+        const cmap_tables_len = read_int(u16, bytes[cmap + 2 ..][0..2], .big);
+        const index_map = find_index_map: {
+            var i = cmap_tables_len;
+            while (true) {
+                i -= 1;
+                if (i == 0) return error.index_map_missing;
+                const encoding_record = cmap + 4 + 8 * i;
+                const platform_id = read_int(u16, bytes[encoding_record..][0..2], .big);
+                switch (platform_id) {
+                    @intFromEnum(PlatformId.MICROSOFT) => switch (read_int(u16, bytes[encoding_record + 2 ..][0..2], .big)) {
+                        @intFromEnum(MicrosoftEncodingId.UNICODE_BMP),
+                        @intFromEnum(MicrosoftEncodingId.UNICODE_FULL),
+                        => {
+                            break :find_index_map cmap + read_int(u32, bytes[encoding_record + 4 ..][0..4], .big);
+                        },
+                        else => continue,
+                    },
+                    @intFromEnum(PlatformId.UNICODE) => {
+                        break :find_index_map cmap + read_int(u32, bytes[encoding_record + 4 ..][0..4], .big);
+                    },
+                    else => continue,
+                }
+            }
+        };
+
+        const head = table_offsets[@intFromEnum(TableId.head)];
+        const index_to_loc_format = read_int(u16, bytes[head + 50 ..][0..2], .big);
+
+        return .{
+            .table_offsets = table_offsets,
+            .ttf_bytes = bytes,
+            .index_map = index_map,
+            .index_to_loc_format = index_to_loc_format,
+            .glyphs_len = glyphs_len,
+            .cff_data = cff_data,
         };
     }
 
-    pub fn get_font_count(self: FontFile) u32 {
-        if (self.is_font()) {
-            return 1;
+    pub fn get_codepoint_glyph_index(self: *const TrueTypeFont, codepoint: u32) GlyphIndex {
+        const bytes = self.ttf_bytes;
+        const index_map = self.index_map;
+        const format = read_int(u16, bytes[index_map..][0..2], .big);
+        switch (format) {
+            0 => {
+                const n = read_int(u16, bytes[index_map + 2 ..][0..2], .big);
+                if (codepoint < n - 6)
+                    return @enumFromInt(bytes[index_map + 6 + codepoint]);
+
+                return .NOT_DEFINED;
+            },
+            2 => {
+                return .NOT_DEFINED;
+            },
+            4 => {
+                const seg_count = read_int(u16, bytes[index_map + 6 ..][0..2], .big) >> 1;
+                var search_range = read_int(u16, bytes[index_map + 8 ..][0..2], .big) >> 1;
+                var entry_selector = read_int(u16, bytes[index_map + 10 ..][0..2], .big);
+                const range_shift = read_int(u16, bytes[index_map + 12 ..][0..2], .big) >> 1;
+
+                // Do a binary search of the segments.
+                const end_count = index_map + 14;
+                var search = end_count;
+
+                if (codepoint > 0xffff)
+                    return .NOT_DEFINED;
+
+                // They lie from end_count .. end_count + seg_count but search_range
+                // is the nearest power of two.
+                if (codepoint >= read_int(u16, bytes[search + range_shift * 2 ..][0..2], .big))
+                    search += range_shift * 2;
+
+                // Now decrement to bias correctly to find smallest.
+                search -= 2;
+                while (entry_selector > 0) {
+                    search_range >>= 1;
+                    const end = read_int(u16, bytes[search + search_range * 2 ..][0..2], .big);
+                    if (codepoint > end)
+                        search += search_range * 2;
+                    entry_selector -= 1;
+                }
+                search += 2;
+
+                const item: u16 = @intCast((search - end_count) >> 1);
+
+                const start = read_int(u16, bytes[index_map + 14 + seg_count * 2 + 2 + 2 * item ..][0..2], .big);
+                const last = read_int(u16, bytes[end_count + 2 * item ..][0..2], .big);
+                if (codepoint < start or codepoint > last)
+                    return .NOT_DEFINED;
+
+                const offset = read_int(u16, bytes[index_map + 14 + seg_count * 6 + 2 + 2 * item ..][0..2], .big);
+                if (offset == 0) {
+                    const result = @as(i32, codepoint) + read_int(i16, bytes[index_map + 14 + seg_count * 4 + 2 + 2 * item ..][0..2], .big);
+                    // truncate to u16
+                    return @enumFromInt(@as(u16, @truncate(@as(u32, @bitCast(result)))));
+                }
+
+                return @enumFromInt(read_int(u16, bytes[offset + (codepoint - start) * 2 + index_map + 14 + seg_count * 6 + 2 + 2 * item ..][0..2], .big));
+            },
+            6 => {
+                const first = read_int(u16, bytes[index_map + 6 ..][0..2], .big);
+                const count = read_int(u16, bytes[index_map + 8 ..][0..2], .big);
+                if (codepoint >= first and codepoint < first + count)
+                    return @enumFromInt(read_int(u16, bytes[index_map + 10 + (codepoint - first) * 2 ..][0..2], .big));
+
+                return .NOT_DEFINED;
+            },
+            12, 13 => {
+                const ngroups = read_int(u32, bytes[index_map + 12 ..][0..4], .big);
+                var low: u32 = 0;
+                var high: u32 = ngroups;
+                // Binary search the right group.
+                while (low < high) {
+                    const mid = low + ((high - low) >> 1); // rounds down, so low <= mid < high
+                    const off = index_map + 16 + mid * 12;
+                    const start_char = read_int(u32, bytes[off..][0..4], .big);
+                    const end_char = read_int(u32, bytes[off + 4 ..][0..4], .big);
+                    if (codepoint < start_char) {
+                        high = mid;
+                    } else if (codepoint > end_char) {
+                        low = mid + 1;
+                    } else {
+                        const start_glyph = read_int(u32, bytes[off + 8 ..][0..4], .big);
+                        return @enumFromInt(start_glyph + if (format == 12) codepoint - start_char else 0);
+                    }
+                }
+                return .NOT_DEFINED;
+            },
+            else => {
+                //TODO implement glyphIndex for more formats
+                return .NOT_DEFINED;
+            },
         }
-        if (self.has_tag_str("ttcf")) {
-            const version: u32 = self.data.read_u32(TTFC_VERSION_OFFSET);
-            if (version == 0x00010000 or version == 0x00020000) {
-                const count: u32 = self.data.read_u32(TTFC_COUNT_OFFSET);
-                return count;
+    }
+
+    /// Caller owns returned memory.
+    pub fn rasterize_glyph_to_data_grid(tt: *const TrueTypeFont, alloc: Allocator, pixels: *DataGrid_u8, glyph: GlyphIndex, scale_x: f32, scale_y: f32) GlyphBitmapError!GlyphBitmapDimensions {
+        return rasterize_glyph_to_data_grid_with_subpixel_offset(tt, alloc, pixels, glyph, scale_x, scale_y, 0, 0);
+    }
+
+    /// Caller owns returned memory.
+    pub fn rasterize_glyph_to_data_grid_with_subpixel_offset(self: *const TrueTypeFont, alloc: Allocator, pixels: *DataGrid_u8, glyph: GlyphIndex, scale_x: f32, scale_y: f32, shift_x: f32, shift_y: f32) GlyphBitmapError!GlyphBitmapDimensions {
+        //CHECKPOINT
+        const vertices = try get_glyph_vertex_list(self, alloc, glyph);
+        defer alloc.free(vertices);
+
+        assert_with_reason(scale_x != 0, @src(), "`scale_x` cannot be zero", .{});
+        assert_with_reason(scale_y != 0, @src(), "`scale_y` cannot be zero", .{});
+
+        const box = get_glyph_bitmap_bounds_with_subpixel_offset(self, glyph, scale_x, scale_y, shift_x, shift_y);
+
+        const w: u32 = @intCast(box.x1 - box.x0);
+        const h: u32 = @intCast(box.y1 - box.y0);
+
+        if (w == 0 or h == 0) return .empty;
+
+        var gbm: Bitmap = .{
+            .w = w,
+            .h = h,
+            .stride = w,
+            .pixels = try pixels.addManyAsSlice(alloc, w * h),
+        };
+        errdefer pixels.shrinkRetainingCapacity(pixels.items.len - gbm.pixels.len);
+
+        try rasterize_to_data_grid(alloc, &gbm, 0.35, vertices, scale_x, scale_y, shift_x, shift_y, box.x0, box.y0, true);
+
+        return .{
+            .width = @intCast(gbm.w),
+            .height = @intCast(gbm.h),
+            .off_x = @intCast(box.x0),
+            .off_y = @intCast(box.y0),
+        };
+    }
+
+    pub fn get_scale_for_pixel_height(self: *const TrueTypeFont, height: f32) f32 {
+        const vm = self.get_font_vertical_metrics();
+        const fheight: f32 = @floatFromInt(vm.ascent - vm.descent);
+        return height / fheight;
+    }
+
+    /// A typical expression for advancing the vertical position is
+    /// `ascent - descent + line_gap`. These are expressed in unscaled coordinates,
+    /// which are typically then multiplied by the scale factor for a given font size.
+    pub fn get_font_vertical_metrics(self: *const TrueTypeFont) VerticalMetrics {
+        const bytes = self.ttf_bytes;
+        const hhea = self.table_offsets[@intFromEnum(TableId.hhea)];
+        return .{
+            .ascent = read_int(i16, bytes[hhea + 4 ..][0..2], .big),
+            .descent = read_int(i16, bytes[hhea + 6 ..][0..2], .big),
+            .line_gap = read_int(i16, bytes[hhea + 8 ..][0..2], .big),
+        };
+    }
+
+    pub fn get_glyph_horizontal_metrics(self: *const TrueTypeFont, glyph: GlyphIndex) HorizontalMetrics {
+        const glyph_index: usize = @intFromEnum(glyph);
+        const bytes = self.ttf_bytes;
+        const hhea = self.table_offsets[@intFromEnum(TableId.hhea)];
+        const hmtx = self.table_offsets[@intFromEnum(TableId.hmtx)];
+        const n_long_h_metrics = read_int(u16, bytes[hhea + 34 ..][0..2], .big);
+        if (glyph_index < n_long_h_metrics) return .{
+            .advance_width = read_int(i16, bytes[hmtx + 4 * glyph_index ..][0..2], .big),
+            .left_side_bearing = read_int(i16, bytes[hmtx + 4 * glyph_index + 2 ..][0..2], .big),
+        };
+        return .{
+            .advance_width = read_int(i16, bytes[hmtx + 4 * (n_long_h_metrics - 1) ..][0..2], .big),
+            .left_side_bearing = read_int(i16, bytes[hmtx + 4 * n_long_h_metrics + 2 * (glyph_index - n_long_h_metrics) ..][0..2], .big),
+        };
+    }
+
+    /// An additional amount to advance the horizontal coordinate between the two
+    /// provided glyphs.
+    pub fn get_kerning_between_two_glyphs(self: *const TrueTypeFont, left_glyph: GlyphIndex, right_glyph: GlyphIndex) i16 {
+        const gpos = self.table_offsets[@intFromEnum(TableId.GPOS)];
+        if (gpos > 0) return get_glyph_kern_using_gpos(self, left_glyph, right_glyph);
+        const kern = self.table_offsets[@intFromEnum(TableId.kern)];
+        if (kern > 0) return get_glyph_kern_using_kern(self, left_glyph, right_glyph);
+        return 0;
+    }
+
+    fn get_glyph_kern_using_gpos(self: *const TrueTypeFont, left: GlyphIndex, right: GlyphIndex) i16 {
+        const bytes = self.ttf_bytes;
+        const gpos = self.table_offsets[@intFromEnum(TableId.GPOS)];
+        assert_with_reason(gpos > 0, @src(), "`GPOS` table not provided by font", .{});
+
+        if (read_int(u16, bytes[gpos + 0 ..][0..2], .big) != 1) return 0; // Major version 1
+        if (read_int(u16, bytes[gpos + 2 ..][0..2], .big) != 0) return 0; // Minor version 0
+
+        const lookup_list_offset: u16 = read_int(u16, bytes[gpos + 8 ..][0..2], .big);
+        const lookup_list = gpos + lookup_list_offset;
+        const lookup_count: u16 = read_int(u16, bytes[lookup_list..][0..2], .big);
+
+        for (0..lookup_count) |i| {
+            const lookup_offset = read_int(u16, bytes[lookup_list + 2 + 2 * i ..][0..2], .big);
+            const lookup_table = lookup_list + lookup_offset;
+
+            const lookup_type = read_int(u16, bytes[lookup_table..][0..2], .big);
+            const sub_table_count = read_int(u16, bytes[lookup_table + 4 ..][0..2], .big);
+            const sub_table_offsets = lookup_table + 6;
+            if (lookup_type != 2) // Pair Adjustment Positioning Subtable
+                continue;
+
+            for (0..sub_table_count) |sti| {
+                const subtable_offset = read_int(u16, bytes[sub_table_offsets + 2 * sti ..][0..2], .big);
+                const table = lookup_table + subtable_offset;
+                const pos_format = read_int(u16, bytes[table..][0..2], .big);
+                const coverage_offset = read_int(u16, bytes[table + 2 ..][0..2], .big);
+                const _coverage_index = coverage_index(bytes, table + coverage_offset, left) orelse continue;
+
+                switch (pos_format) {
+                    1 => {
+                        const value_format_1 = read_int(u16, bytes[table + 4 ..][0..2], .big);
+                        const value_format_2 = read_int(u16, bytes[table + 6 ..][0..2], .big);
+                        if (value_format_1 == 4 and value_format_2 == 0) {
+                            const value_record_pair_size_in_bytes = 2;
+                            const pair_set_count = read_int(u16, bytes[table + 8 ..][0..2], .big);
+                            const pair_pos_offset = read_int(u16, bytes[table + 10 + 2 * _coverage_index ..][0..2], .big);
+                            const pair_value_table = table + pair_pos_offset;
+                            const pair_value_count = read_int(u16, bytes[pair_value_table..][0..2], .big);
+                            const pair_value_array = pair_value_table + 2;
+
+                            if (_coverage_index >= pair_set_count) return 0;
+
+                            const needle = @intFromEnum(right);
+                            var r: u32 = pair_value_count - 1;
+                            var l: u32 = 0;
+
+                            // Binary search.
+                            while (l <= r) {
+                                const m = (l + r) >> 1;
+                                const pair_value = pair_value_array + (2 + value_record_pair_size_in_bytes) * m;
+                                const second_glyph = read_int(u16, bytes[pair_value..][0..2], .big);
+                                const straw = second_glyph;
+                                if (needle < straw) {
+                                    if (m == 0) break;
+                                    r = m - 1;
+                                } else if (needle > straw) {
+                                    l = m + 1;
+                                } else {
+                                    return read_int(i16, bytes[pair_value + 2 ..][0..2], .big);
+                                }
+                            }
+                        } else {
+                            //TODO implement more glyphKernAdvanceGpos
+                            return 0;
+                        }
+                    },
+                    2 => {
+                        const value_format_1 = read_int(u16, bytes[table + 4 ..][0..2], .big);
+                        const value_format_2 = read_int(u16, bytes[table + 6 ..][0..2], .big);
+                        if (value_format_1 == 4 and value_format_2 == 0) {
+                            const class_def10_offset = read_int(u16, bytes[table + 8 ..][0..2], .big);
+                            const class_def20_offset = read_int(u16, bytes[table + 10 ..][0..2], .big);
+                            const glyph1class = glyphClass(bytes, table + class_def10_offset, left);
+                            const glyph2class = glyphClass(bytes, table + class_def20_offset, right);
+
+                            const class1_count = read_int(u16, bytes[table + 12 ..][0..2], .big);
+                            const class2_count = read_int(u16, bytes[table + 14 ..][0..2], .big);
+
+                            if (glyph1class >= class1_count) return 0; // malformed
+                            if (glyph2class >= class2_count) return 0; // malformed
+
+                            const class1_records = table + 16;
+                            const class2_records = class1_records + 2 * (glyph1class * class2_count);
+                            return read_int(i16, bytes[class2_records + 2 * glyph2class ..][0..2], .big);
+                        } else {
+                            //TODO implement more glyphKernAdvanceGpos
+                            return 0;
+                        }
+                    },
+                    else => {
+                        // TODO implement more glyphKernAdvanceGpos
+                        return 0;
+                    },
+                }
+            }
+        }
+
+        return 0;
+    }
+
+    fn get_glyph_kern_using_kern(self: *const TrueTypeFont, a: GlyphIndex, b: GlyphIndex) i16 {
+        const bytes = self.ttf_bytes;
+        const kern = self.table_offsets[@intFromEnum(TableId.kern)];
+        assert_with_reason(kern > 0, @src(), "`kern` table not provided by font", .{});
+        // we only look at the first table. it must be 'horizontal' and format 0.
+        if (read_int(u16, bytes[kern + 2 ..][0..2], .big) < 1) // number of tables, need at least 1
+            return 0;
+        if (read_int(u16, bytes[kern + 8 ..][0..2], .big) != 1) // horizontal flag must be set in format
+            return 0;
+
+        var l: u32 = 0;
+        var r: u32 = read_int(u16, bytes[kern + 10 ..][0..2], .big) - 1;
+        const needle: u32 = @as(u32, @intFromEnum(a)) << 16 | @as(u32, @intFromEnum(b));
+        while (l <= r) {
+            const m: u32 = (l + r) >> 1;
+            const straw: u32 = read_int(u32, bytes[kern + 18 + (m * 6) ..][0..4], .big); // note: unaligned read
+            if (needle < straw) {
+                r = m - 1;
+            } else if (needle > straw) {
+                l = m + 1;
+            } else {
+                return read_int(i16, bytes[kern + 22 + (m * 6) ..][0..2], .big);
             }
         }
         return 0;
     }
-    pub fn get_font_index_offset(self: FontFile, index: u32) u32 {
-        if (self.is_font()) {
-            assert_with_reason(index == 0, @src(), "single font files only have an index 0 font, requested index {d}", .{index});
-            return 0;
-        }
-        if (self.has_tag_str("ttcf")) {
-            const version: u32 = self.data.read_u32(TTFC_VERSION_OFFSET);
-            if (version == 0x00010000 or version == 0x00020000) {
-                const count: u32 = self.data.read_u32(TTFC_COUNT_OFFSET);
-                assert_with_reason(index < count, @src(), "this font collection only has {d} fonts, requested index {d}", .{ count, index });
-                const offset: u32 = self.data.read_u32(TTFC_FONT_OFFSETS_OFFSET + (index * TTFC_FONT_OFFSET_SIZE));
-                return offset;
-            }
-        }
-        @panic("font file was either not a font file/collection, or had some unsupported format");
-    }
-    pub fn init_font_info_by_index(self: FontFile, index: u32, allocator: Allocator) FontInfo {
-        const offset = self.get_font_index_offset(index);
-        const data = self.data.new_with_offset(offset);
-        return FontInfo.init(data, allocator);
+
+    fn get_glyph_vertex_list(self: *const TrueTypeFont, alloc: Allocator, glyph: GlyphIndex) GlyphBitmapError!List(Vertex) {
+        return if (self.cff_data.cff.size != 0)
+            self.get_glyph_vertex_list_ccf(alloc, glyph)
+        else
+            self.get_glyph_vertex_list_ttf(alloc, glyph);
     }
 
-    pub fn has_tag_str(self: FontFile, comptime tag: []const u8) void {
-        return self.data.has_tag_str(0, tag);
-    }
-    pub fn has_tag_raw(self: FontFile, comptime b0: u8, comptime b1: u8, comptime b2: u8, comptime b3: u8) bool {
-        return self.data.has_tag_raw(0, b0, b1, b2, b3);
-    }
+    fn get_glyph_vertex_list_ttf(self: *const TrueTypeFont, alloc: Allocator, glyph: GlyphIndex) GlyphBitmapError!List(Vertex) {
+        const bytes = self.ttf_bytes;
+        const g = try get_glyph_offset(self, glyph);
+        var vertices: List(Vertex) = .{};
+        const n_contours_signed = read_int(i16, bytes[g..][0..2], .big);
+        if (n_contours_signed > 0) {
+            const n_contours: u16 = @intCast(n_contours_signed);
+            const contours_end_pts: u32 = g + 10;
+            const ins: i32 = read_int(u16, bytes[g + 10 + n_contours * 2 ..][0..2], .big);
+            var points: u32 = @intCast(g + 10 + @as(i64, n_contours) * 2 + 2 + ins);
 
-    pub fn is_font(self: FontFile) bool {
-        if (self.has_tag_raw('1', 0, 0, 0)) return true; // TrueType 1
-        if (self.has_tag_str("typ1")) return true; // TrueType with type 1 font (unsupported)
-        if (self.has_tag_str("OTTO")) return true; // OpenType with CFF
-        if (self.has_tag_raw(0, 1, 0, 0)) return true; // OpenType 1.0
-        if (self.has_tag_str("true")) return true; // Apple specification for TrueType fonts
-        return false;
-    }
-};
+            const n: u32 = 1 + read_int(u16, bytes[contours_end_pts + n_contours * 2 - 2 ..][0..2], .big);
 
-fn assert_offset_size(off_size: anytype, src: ?std.builtin.SourceLocation) void {
-    assert_with_reason(off_size >= 1 and off_size <= 4, src, "offset size MUST be between 1 and 4, got {d}", .{off_size});
-}
+            // A loose bound on how many vertices we might need.
+            const m: u32 = n + 2 * n_contours;
+            try vertices.resize(alloc, m);
 
-const FontDataReader = struct {
-    data: FontData,
-    cursor: u32 = 0,
+            var next_move: i32 = 0;
+            var flagcount: u8 = 0;
 
-    pub fn len(self: FontDataReader) u32 {
-        return @intCast(self.data.data.len);
-    }
+            // in first pass, we load uninterpreted data into the allocated array
+            // above, shifted to the end of the array so we won't overwrite it when
+            // we create our final data starting from the front
 
-    pub fn new(base_data: FontData, offset: u32, size: u32) FontDataReader {
-        return FontDataReader{
-            .data = base_data.new_with_offset_and_size(offset, size),
-        };
-    }
-    pub fn new_unknown_size(base_data: FontData, offset: u32) FontDataReader {
-        return FontDataReader{
-            .data = base_data.new_with_offset(offset),
-        };
-    }
-    pub fn slice(self: FontDataReader, offset: u32, size: u32) FontDataReader {
-        return FontDataReader{
-            .data = self.data.new_with_offset_and_size(offset, size),
-        };
-    }
-    pub fn slice_with_end(self: FontDataReader, offset: u32, end: u32) FontDataReader {
-        return FontDataReader{
-            .data = self.data.new_with_offset_and_end(offset, end),
-        };
-    }
+            // Starting offset for uninterpreted data, regardless of how m ends up being calculated.
+            const off: u32 = m - n;
 
-    pub fn peek_u8(self: FontDataReader) u8 {
-        return self.data.read_u8(self.cursor);
-    }
-    pub fn peek_i8(self: FontDataReader) i8 {
-        return self.data.read_i8(self.cursor);
-    }
-    pub fn peek_u16(self: FontDataReader) u16 {
-        return self.data.read_u16(self.cursor);
-    }
-    pub fn peek_i16(self: FontDataReader) i16 {
-        return self.data.read_i16(self.cursor);
-    }
-    pub fn peek_u32(self: FontDataReader) u32 {
-        return self.data.read_u32(self.cursor);
-    }
-    pub fn peek_i32(self: FontDataReader) i32 {
-        return self.data.read_i32(self.cursor);
-    }
-    pub fn peek_N(self: FontDataReader, size: u8) u32 {
-        return self.data.read_N(self.cursor, size);
-    }
-    pub fn read_u8(self: *FontDataReader) u8 {
-        const val = self.data.read_u8(self.cursor);
-        self.cursor += 1;
-        return val;
-    }
-    pub fn read_i8(self: *FontDataReader) i8 {
-        const val = self.data.read_i8(self.cursor);
-        self.cursor += 1;
-        return val;
-    }
-    pub fn read_u16(self: *FontDataReader) u16 {
-        const val = self.data.read_u16(self.cursor);
-        self.cursor += 2;
-        return val;
-    }
-    pub fn read_i16(self: *FontDataReader) i16 {
-        const val = self.data.read_i16(self.cursor);
-        self.cursor += 2;
-        return val;
-    }
-    pub fn read_u32(self: *FontDataReader) u32 {
-        const val = self.data.read_u32(self.cursor);
-        self.cursor += 4;
-        return val;
-    }
-    pub fn read_i32(self: *FontDataReader) i32 {
-        const val = self.data.read_i32(self.cursor);
-        self.cursor += 4;
-        return val;
-    }
-    pub fn read_N(self: *FontDataReader, size: u8) u32 {
-        const val = self.data.read_N(self.cursor, size);
-        self.cursor += @intCast(size);
-        return val;
-    }
-
-    pub fn skip(self: *FontDataReader, n: u32) void {
-        self.cursor += n;
-    }
-    pub fn goto(self: *FontDataReader, offset: u32) void {
-        assert_with_reason(offset < self.data.data.len, @src(), "cannot goto (seek) to offset {d}, total FontData length is {d}", .{ offset, self.data.data.len });
-        self.cursor = offset;
-    }
-
-    pub fn get_cff_index_count(self: *FontDataReader) u32 {
-        self.goto(0);
-        return @intCast(self.read_u16());
-    }
-
-    pub fn get_cff_index(self: *FontDataReader) FontDataReader {
-        const start: u32 = self.cursor;
-        const count: u16 = self.read_u16();
-        if (count > 0) {
-            const off_size = self.read_u8();
-            assert_offset_size(off_size, @src());
-            self.skip(MathX.upgrade_multiply_out(off_size, count, u32));
-            const size = self.read_N(off_size);
-            self.skip(size - 1);
-        }
-        return self.slice(start, self.cursor - start);
-    }
-
-    pub fn cff_index_get_subindex(self: *FontDataReader, idx: u32) FontDataReader {
-        self.goto(0);
-        const count = self.read_u16();
-        const off_size = self.read_u8();
-        if (idx >= count) std.debug.panic("invalid cff_index subindex `{d}`, total count is `{d}`", .{ idx, count });
-        assert_offset_size(off_size, @src());
-        self.skip(idx * off_size);
-        const start = self.read_N(off_size);
-        const end = self.read_N(off_size);
-        return self.slice(2 + ((count + 1) * off_size) + start, end - start);
-    }
-
-    pub fn read_cff_integer(self: *FontDataReader) u32 {
-        const b0 = self.read_u8();
-        switch (b0) {
-            32...246 => return @intCast(b0 - 139),
-            247...250 => return (@as(u32, @intCast(b0 - 247)) << 8) + @as(u32, @intCast(self.read_u8())) + 108,
-            251...254 => return (0 -% (@as(u32, @intCast(b0 - 251)) << 8)) - @as(u32, @intCast(self.read_u8())) - 108,
-            28 => return @intCast(self.read_u16()),
-            29 => return @intCast(self.read_u32()),
-            else => @panic("invalid CFF integer format"),
-        }
-    }
-
-    pub fn skip_cff_operand(self: *FontDataReader) void {
-        var v: u8 = undefined;
-        const b0 = self.peek_u8();
-        if (b0 < 28) @panic("can only skip CFF operand when first byte is >= 28");
-        if (b0 == 30) {
-            self.skip(1);
-            while (self.cursor < self.data.data.len) {
-                v = self.read_u8();
-                if ((v & 0xF) == 0xF or (v >> 4) == 0xF) {
-                    break;
-                }
-            }
-        } else {
-            _ = self.read_cff_integer();
-        }
-    }
-
-    pub fn get_cff_dict_by_key(self: *FontDataReader, key: u8) FontDataReader {
-        self.goto(0);
-        while (self.cursor < self.data.data.len) {
-            const start = self.cursor;
-            while (self.peek_u8() >= 28) {
-                self.skip_cff_operand();
-            }
-            const end = self.cursor;
-            var op = self.read_u8();
-            if (op == 12) {
-                op = self.read_u8() | 0x100;
-            }
-            if (op == key) return self.slice_with_end(start, end);
-        }
-        return self.slice(0, 0);
-    }
-
-    pub fn read_cff_dict_ints_by_key(self: *FontDataReader, key: u8, out_data: []u32) void {
-        var operands = self.get_cff_dict_by_key(key);
-        var i: usize = 0;
-        while (i < out_data.len and operands.cursor < operands.data.data.len) {
-            out_data[i] = operands.read_cff_integer();
-            i += 1;
-        }
-    }
-
-    pub fn get_cff_subroutines(self: *FontDataReader, font_dict: *FontDataReader) FontDataReader {
-        var subroutine_off: u32 = 0;
-        var private_loc: [2]u32 = .{ 0, 0 };
-        var p_dict: FontDataReader = undefined;
-        font_dict.read_cff_dict_ints_by_key(18, private_loc[0..]);
-        if (private_loc[1] == 0 or private_loc[0] == 0) return self.slice(0, 0);
-        p_dict = self.slice(private_loc[1], private_loc[0]);
-        p_dict.read_cff_dict_ints_by_key(19, Utils.scalar_ptr_as_single_item_slice(&subroutine_off));
-        if (subroutine_off == 0) return self.slice(0, 0);
-        self.goto(private_loc[1] + subroutine_off);
-        return self.get_cff_index();
-    }
-};
-
-pub const FontInfoInitError = error{
-    failed_to_find_table_cmap,
-    failed_to_find_table_hhea,
-    failed_to_find_table_head,
-    failed_to_find_table_hmtx,
-    had_table_glyf_failed_to_find_table_loca,
-    cff_char_strings_type_isnt_2,
-    cff_char_strings_offset_missing,
-    had_fd_array_offset_but_missing_fd_select_offset,
-    unsuported_cmap_platform_id,
-    unsupported_cmap_micosoft_encoding,
-    index_map_was_zero,
-};
-
-pub const FindGlyphIndexError = error{
-    glyph_not_in_font,
-    unsupported_index_map_format,
-};
-
-pub const FindGlyphOffsetError = error{
-    glyph_index_out_of_bounds,
-    unsupported_index_to_location_format,
-    glyph_zero_length,
-};
-pub const FindGlyphShapeError = error{
-    glyph_index_out_of_bounds,
-    unsupported_index_to_location_format,
-    glyph_zero_length,
-    unsupported_compound_contours_mode,
-};
-
-const VertexKind = enum(u8) {
-    move_to,
-    linear,
-    quadratic,
-    cubic,
-};
-
-pub const VecI16 = Vec2.define_vec2_type(i16);
-pub const Vertex = struct {
-    point: VecI16 = .{},
-    control_1: VecI16 = .{},
-    control_2: VecI16 = .{},
-    flags: FLAGS = FLAGS.blank(),
-    kind: VertexKind = .move_to,
-
-    pub fn set(self: *Vertex, flags: FLAGS, kind: VertexKind, x: i32, y: i32, cx: i32, cy: i32) void {
-        self.flags = flags;
-        self.kind = kind;
-        self.point.x = @intCast(x);
-        self.point.y = @intCast(y);
-        self.control_1.x = @intCast(cx);
-        self.control_1.y = @intCast(cy);
-    }
-
-    pub const FLAGS = Flags.Flags(enum(u8) {
-        point_on_curve = 1 << 0,
-        dx_is_one_byte = 1 << 1,
-        dy_is_one_byte = 1 << 2,
-        flag_is_repeated = 1 << 3,
-        dx_one_byte_positive_or_dx_two_bytes_no_change = 1 << 4,
-        dy_one_byte_positive_or_dy_two_bytes_no_change = 1 << 5,
-        countours_might_overlap = 1 << 6,
-    }, enum(u8) {});
-};
-
-pub const FontInfo = struct {
-    data: FontData,
-    num_tables: u16 = 0,
-    num_glyphs: u16 = 0,
-    offset_HEAD: u32 = 0,
-    offset_HHEA: u32 = 0,
-    offset_HMTX: u32 = 0,
-    offset_GLYF: ?u32 = null,
-    offset_LOCA: ?u32 = null,
-    offset_KERN: ?u32 = null,
-    offset_GPOS: ?u32 = null,
-    offset_SVG_: ?u32 = null,
-    index_map_offset: u32 = 0,
-    index_map_format: u16 = 0,
-    index_to_location_format: u32 = 0,
-    cff_data: FontDataReader,
-    char_strings: FontDataReader,
-    global_subroutines: FontDataReader,
-    private_subroutines: FontDataReader,
-    font_dicts: FontDataReader,
-    fd_select: FontDataReader,
-
-    const NUM_TABLES_OFFSET = 4;
-    const TABLE_DIRECTORY_OFFSET = 12;
-    const TABLE_DIRECTORY_ENTRY_SIZE = 16;
-    const TABLE_DIRECTORY_ENTRY_TABLE_OFFSET = 8;
-
-    pub fn find_table_offset(self: FontInfo, comptime table_tag: []const u8) ?u32 {
-        var i: u32 = 0;
-        var table_entry_offset = TABLE_DIRECTORY_OFFSET;
-        while (i < self.num_tables) {
-            if (self.data.has_tag_str(table_entry_offset, table_tag)) {
-                return self.data.read_u32(table_entry_offset + TABLE_DIRECTORY_ENTRY_TABLE_OFFSET);
-            }
-            i += 1;
-            table_entry_offset += TABLE_DIRECTORY_ENTRY_SIZE;
-        }
-        return null;
-    }
-
-    pub fn init(font_data: FontData) FontInfoInitError!FontInfo {
-        var self = FontInfo{
-            .data = font_data,
-            .cff_data = FontDataReader.new(font_data, 0, 0),
-            .char_strings = FontDataReader.new(font_data, 0, 0),
-            .global_subroutines = FontDataReader.new(font_data, 0, 0),
-            .private_subroutines = FontDataReader.new(font_data, 0, 0),
-            .font_dicts = FontDataReader.new(font_data, 0, 0),
-            .fd_select = FontDataReader.new(font_data, 0, 0),
-        };
-        self.num_tables = self.data.read_u16(NUM_TABLES_OFFSET);
-        const cmap_offset = self.find_table_offset("cmap") orelse return FontInfoInitError.failed_to_find_table_cmap;
-        self.offset_HHEA = self.find_table_offset("hhea") orelse return FontInfoInitError.failed_to_find_table_hhea;
-        self.offset_HEAD = self.find_table_offset("head") orelse return FontInfoInitError.failed_to_find_table_head;
-        self.offset_HMTX = self.find_table_offset("hmtx") orelse return FontInfoInitError.failed_to_find_table_hmtx;
-        self.offset_LOCA = self.find_table_offset("loca");
-        self.offset_GLYF = self.find_table_offset("glyf");
-        self.offset_KERN = self.find_table_offset("kern");
-        self.offset_GPOS = self.find_table_offset("GPOS");
-
-        if (self.offset_GLYF != null) {
-            if (self.offset_LOCA == null) return FontInfoInitError.had_table_glyf_failed_to_find_table_loca;
-        } else {
-            var char_strings_type: u32 = 2;
-            var char_strings: u32 = 0;
-            var fd_array_offset: u32 = 0;
-            var fd_select_offset: u32 = 0;
-            const cff_offset: u32 = self.find_table_offset("CFF ") orelse assert_unreachable(@src(), "table `CFF ` is required for CFF/ Type2 fonts (OTF) but the font did not have it", .{});
-            self.cff_data = FontDataReader.new_unknown_size(self.data, cff_offset);
-            self.cff_data.skip(2);
-            const cff_header_size = self.cff_data.peek_u8();
-            self.cff_data.goto(cff_header_size);
-            _ = self.cff_data.get_cff_index(); // skip the NAME index
-            var top_dict_idx = self.cff_data.get_cff_index();
-            var top_dict = top_dict_idx.cff_index_get_subindex(0);
-            _ = self.cff_data.get_cff_index(); // skip the STRING index
-            self.global_subroutines = self.cff_data.get_cff_index();
-            top_dict.read_cff_dict_ints_by_key(17, Utils.scalar_ptr_as_single_item_slice(&char_strings));
-            top_dict.read_cff_dict_ints_by_key(0x100 | 6, Utils.scalar_ptr_as_single_item_slice(&char_strings_type));
-            top_dict.read_cff_dict_ints_by_key(0x100 | 36, Utils.scalar_ptr_as_single_item_slice(&fd_array_offset));
-            top_dict.read_cff_dict_ints_by_key(0x100 | 37, Utils.scalar_ptr_as_single_item_slice(&fd_select_offset));
-            self.private_subroutines = self.cff_data.get_cff_subroutines(&top_dict);
-            if (char_strings_type != 2) return FontInfoInitError.cff_char_strings_type_isnt_2;
-            if (char_strings == 0) return FontInfoInitError.cff_char_strings_offset_missing;
-            if (fd_array_offset != 0) {
-                if (fd_select_offset == 0) return FontInfoInitError.had_fd_array_offset_but_missing_fd_select_offset;
-                self.cff_data.goto(fd_array_offset);
-                self.font_dicts = self.cff_data.get_cff_index();
-                self.fd_select = self.cff_data.slice(fd_select_offset, self.cff_data.len() - fd_select_offset);
-            }
-            self.cff_data.goto(char_strings);
-            self.char_strings = self.cff_data.get_cff_index();
-            self.cff_data.goto(0);
-        }
-
-        const maxp_table_offset = self.find_table_offset("maxp");
-        if (maxp_table_offset) |off| {
-            self.num_glyphs = self.data.read_u16(off + 4);
-        } else {
-            self.num_glyphs = 0xFFFF;
-        }
-
-        const cmap_num_tables = self.data.read_u16(cmap_offset + 2);
-        var i: u32 = 0;
-        while (i < cmap_num_tables) {
-            const encoding_record_offset = cmap_offset + 4 + (8 * i);
-            const encoding_record = self.data.read_u16(encoding_record_offset);
-            switch (encoding_record) {
-                PLATOFRM_ID.MICROSOFT => {
-                    const encoding_id = self.data.read_u16(encoding_record_offset + 2);
-                    switch (encoding_id) {
-                        MICROSOFT_ENCODING_ID.UNICODE_BMP, MICROSOFT_ENCODING_ID.UNICODE_FULL => {
-                            self.index_map_offset = cmap_offset + self.data.read_u32(encoding_record_offset + 4);
-                        },
-                        else => return FontInfoInitError.unsupported_cmap_micosoft_encoding,
-                    }
-                },
-                PLATOFRM_ID.UNICODE => {
-                    self.index_map_offset = cmap_offset + self.data.read_u32(encoding_record_offset + 4);
-                },
-                else => return FontInfoInitError.unsuported_cmap_platform_id,
-            }
-            i += 1;
-        }
-        if (self.index_map_offset == 0) return FontInfoInitError.index_map_was_zero;
-        self.@"index_to_loc_format >= 2" = self.data.read_u16(self.offset_HEAD + 50);
-        self.index_map_format = self.data.read_u16(self.index_map_offset);
-        return self;
-    }
-
-    pub fn find_glyph_index(self: FontInfo, unicode_codepoint: u32) FindGlyphIndexError!u32 {
-        switch (self.index_map_format) {
-            0 => {
-                const bytes = self.data.read_u16(self.index_map_offset + 2);
-                if (unicode_codepoint < bytes - 6) {
-                    return @intCast(self.data.read_u8(self.index_map_offset + 6 + unicode_codepoint));
-                } else {
-                    return FindGlyphIndexError.glyph_not_in_font;
-                }
-            },
-            2 => {
-                return FindGlyphIndexError.unsupported_index_map_format;
-            },
-            4 => {
-                const segment_count = self.data.read_u16(self.index_map_offset + 6) >> 1;
-                const segment_count_2 = segment_count << 1;
-                const segment_count_4 = segment_count << 2;
-                const segment_count_6 = segment_count * 6;
-                const search_range = self.data.read_u16(self.index_map_offset + 8) >> 1;
-                const entry_selector = self.data.read_u16(self.index_map_offset + 10);
-                const range_shift = self.data.read_u16(self.index_map_offset + 12) >> 1;
-                const range_shift_2 = range_shift << 1;
-                const end_count_offset = self.index_map_offset + 14;
-                const search_offset = end_count_offset;
-                if (unicode_codepoint > 0xFFFF) return FindGlyphIndexError.glyph_not_in_font;
-                if (unicode_codepoint > self.data.read_u16(search_offset + (range_shift_2))) {
-                    search_offset += range_shift_2;
-                }
-                search_offset -= 2;
-                while (entry_selector != 0) {
-                    search_range >>= 1;
-                    const search_range_2 = search_range << 1;
-                    const end_codepoint = self.data.read_u16(search_offset + search_range_2);
-                    if (unicode_codepoint > end_codepoint) {
-                        search_offset += search_range_2;
-                    }
-                    entry_selector -= 1;
-                }
-                search_offset += 2;
-
-                const item_offset: u16 = ((search_offset - end_count_offset) >> 1);
-                const item_offset_2 = item_offset << 1;
-                const first_codepoint = self.data.read_u16(end_count_offset + segment_count_2 + 2 + item_offset_2);
-                const last_codepoint = self.data.read_u16(end_count_offset + segment_count_2 + 2 + item_offset_2);
-                if (unicode_codepoint < first_codepoint or unicode_codepoint > last_codepoint) {
-                    return FindGlyphIndexError.glyph_not_in_font;
-                }
-                const glyph_offset = self.data.read_u16(end_count_offset + segment_count_6 + 2 + item_offset_2);
-                if (glyph_offset == 0) {
-                    return @intCast(Types.intcast(unicode_codepoint, i16) + self.data.read_i16(end_count_offset + segment_count_4 + 2 + item_offset_2));
-                } else {
-                    return @intCast(self.data.read_u16(glyph_offset + ((unicode_codepoint - first_codepoint) << 1) + end_count_offset + segment_count_6 + 2 + item_offset_2));
-                }
-            },
-            6 => {
-                const first_codepoint = self.data.read_u16(self.index_map_offset + 6);
-                const count = self.data.read_u16(self.index_map_offset + 8);
-                const last_codepoint = first_codepoint + count - 1;
-                if (unicode_codepoint < first_codepoint or unicode_codepoint > last_codepoint) {
-                    return FindGlyphIndexError.glyph_not_in_font;
-                } else {
-                    return @intCast(self.data.read_u16(self.index_map_offset + 10 + ((unicode_codepoint - first_codepoint) << 1)));
-                }
-            },
-            12, 13 => {
-                const num_groups = self.data.read_u32(self.index_map_offset + 12);
-                var lo: u32 = 0;
-                var hi = num_groups;
-                const index_map_plus_16 = self.index_map_offset + 16;
-                const index_map_plus_20 = self.index_map_offset + 20;
-                const index_map_plus_24 = self.index_map_offset + 14;
-                while (lo < hi) {
-                    const mid = lo + ((hi - lo) >> 1);
-                    const mid_times_12 = mid * 12;
-                    const first_codepoint_in_group = self.data.read_u32(index_map_plus_16 + mid_times_12);
-                    const last_codepoint_in_group = self.data.read_u32(index_map_plus_20 + mid_times_12);
-                    if (unicode_codepoint < first_codepoint_in_group) {
-                        hi = mid;
-                    } else if (unicode_codepoint > last_codepoint_in_group) {
-                        lo = mid + 1;
-                    } else {
-                        const first_glyph_index = self.data.read_u32(index_map_plus_24 + mid_times_12);
-                        if (self.index_map_format == 12) {
-                            return first_glyph_index + (unicode_codepoint - first_codepoint_in_group);
-                        } else {
-                            return first_codepoint_in_group;
+            // first load flags
+            {
+                var flags: u8 = 0;
+                for (0..n) |i| {
+                    if (flagcount == 0) {
+                        flags = bytes[points];
+                        points += 1;
+                        if ((flags & 8) != 0) {
+                            flagcount = bytes[points];
+                            points += 1;
                         }
+                    } else {
+                        flagcount -= 1;
+                    }
+                    vertices.ptr[off + i].type = @enumFromInt(flags);
+                }
+            }
+
+            // now load x coordinates
+            var x: i32 = 0;
+            for (0..n) |i| {
+                const flags = @intFromEnum(vertices.ptr[off + i].type);
+                if ((flags & 2) != 0) {
+                    const dx: i16 = bytes[points];
+                    points += 1;
+                    x += if ((flags & 16) != 0) dx else -dx;
+                } else {
+                    if ((flags & 16) == 0) {
+                        x += read_int(i16, bytes[points..][0..2], .big);
+                        points += 2;
                     }
                 }
-                return FindGlyphIndexError.glyph_not_in_font;
-            },
-            else => return FindGlyphIndexError.unsupported_index_map_format,
-        }
-    }
+                vertices.ptr[off + i].x = @intCast(x);
+            }
 
-    pub fn get_glyph_offset(self: FontInfo, glyph_index: u32) FindGlyphOffsetError!u32 {
-        var glyph_offset_1: u32 = undefined;
-        var glyph_offset_2: u32 = undefined;
-        if (glyph_index >= self.num_glyphs) return FindGlyphOffsetError.glyph_index_out_of_bounds;
-        if (self.index_to_location_format >= 2) return FindGlyphOffsetError.unsupported_index_to_location_format;
-        switch (self.index_to_location_format) {
-            0 => {
-                const glyph_index_2 = glyph_index << 1;
-                glyph_offset_1 = self.offset_GLYF.? + (Types.intcast(self.data.read_u16(self.offset_LOCA.? + glyph_index_2), u32) << 1);
-                glyph_offset_2 = self.offset_GLYF.? + (Types.intcast(self.data.read_u16(self.offset_LOCA.? + glyph_index_2 + 2), u32) << 1);
-            },
-            1 => {
-                const glyph_index_4 = glyph_index << 2;
-                glyph_offset_1 = self.offset_GLYF.? + self.data.read_u32(self.offset_LOCA.? + glyph_index_4);
-                glyph_offset_2 = self.offset_GLYF.? + self.data.read_u32(self.offset_LOCA.? + glyph_index_4 + 4);
-            },
-            else => unreachable,
-        }
-        if (glyph_offset_1 == glyph_offset_2) return FindGlyphOffsetError.glyph_zero_length;
-        return glyph_offset_1;
-    }
-
-    pub fn get_glyph_shape_from_index(self: FontInfo, glyph_index: u32, allocator: Allocator) FindGlyphShapeError!VertexList {
-        if (self.cff_data.len() == 0) {
-            return self.get_glyph_shape_true_type(glyph_index, allocator);
-        } else {
-            return self.get_glyph_shape_type_2(glyph_index, allocator);
-        }
-    }
-
-    fn get_glyph_shape_true_type(self: *FontInfo, glyph_index: u32, allocator: Allocator) FindGlyphShapeError!VertexList {
-        var num_vertexes: u32 = 0;
-        var end_of_contours_offset: u32 = undefined;
-        const glyph_offset = try self.get_glyph_offset(glyph_index);
-        const num_contours = self.data.read_i16(glyph_offset);
-        const num_contours_2 = num_contours << 1;
-        var vertexes: VertexList = undefined;
-        if (num_contours > 0) {
-            var flags: Vertex.FLAGS = .{};
-            var flag_repeat_count: u8 = 0;
-            end_of_contours_offset = glyph_offset + 10;
-            var ins: u32 = undefined;
-            var i: u32 = undefined;
-            var j: u32 = 0;
-            var max_verts: u32 = undefined;
-            var num_verts: u32 = undefined;
-            var next_move: u32 = undefined;
-            var prev_was_off_curve: bool = false;
-            var first_pass_offset: u32 = undefined;
-            var first_point_off_curve: bool = false;
-            var x: i32 = 0;
+            // now load y coordinates
             var y: i32 = 0;
-            var cx: i32 = 0;
-            var cy: i32 = 0;
+            for (0..n) |i| {
+                const flags = @intFromEnum(vertices.ptr[off + i].type);
+                if ((flags & 4) != 0) {
+                    const dy: i16 = bytes[points];
+                    points += 1;
+                    y += if ((flags & 32) != 0) dy else -dy;
+                } else {
+                    if ((flags & 32) == 0) {
+                        y += read_int(i16, bytes[points..][0..2], .big);
+                        points += 2;
+                    }
+                }
+                vertices.ptr[off + i].y = @intCast(y);
+            }
+
+            // now convert them to our format
+            var num_vertices: u32 = 0;
             var sx: i32 = 0;
             var sy: i32 = 0;
+            var cx: i32 = 0;
+            var cy: i32 = 0;
             var scx: i32 = 0;
             var scy: i32 = 0;
-            var vertex_data_reader: FontDataReader = undefined;
-            const ins_offset = glyph_offset + 10 + num_contours_2;
-            ins = self.data.read_u16(ins_offset);
-            vertex_data_reader = FontDataReader.new_unknown_size(self.data, ins_offset + 2 + ins);
-            // points = self.data.data.ptr + ins_offset + 2 + ins;
-            num_verts = 1 + self.data.read_u16(end_of_contours_offset + num_contours_2 - 2);
-            max_verts = num_verts + num_contours_2;
-            vertexes = VertexList.init_capacity(@intCast(max_verts), allocator);
-            if (vertexes.cap == 0) {
-                unreachable; // this should be unreachable in this codebase, but existed in the original
-            }
+            var i: u32 = 0;
+            var j: u32 = 0;
+            var start_off: bool = false;
+            var was_off: bool = false;
+            while (i < n) : (i += 1) {
+                const flags = @intFromEnum(vertices.ptr[off + i].type);
+                x = @intCast(vertices.ptr[off + i].x);
+                y = @intCast(vertices.ptr[off + i].y);
 
-            next_move = 0;
-            flag_repeat_count = 0;
+                if (next_move == i) {
+                    if (i != 0)
+                        num_vertices = close_shape(vertices.slice(), num_vertices, was_off, start_off, sx, sy, scx, scy, cx, cy);
 
-            first_pass_offset = max_verts - num_verts;
-            vertexes.len = max_verts;
-
-            // Load all vertex types
-            i = 0;
-            while (i < num_verts) {
-                if (flag_repeat_count == 0) {
-                    flags = Vertex.FLAGS.from_raw(vertex_data_reader.read_u8());
-                    if (flags.has_flag(.flag_is_repeated)) {
-                        flag_repeat_count = vertex_data_reader.read_u8();
-                    }
-                } else {
-                    flag_repeat_count -= 1;
-                }
-                vertexes.ptr[first_pass_offset + i].flags = flags;
-                i += 1;
-            }
-
-            // Load all x coordinates
-            i = 0;
-            x = 0;
-            while (i < num_verts) {
-                flags = vertexes.ptr[first_pass_offset + i].flags;
-                if (flags.has_flag(.dx_is_one_byte)) {
-                    const dx: i32 = @intCast(vertex_data_reader.read_u8());
-                    x = if (flags.has_flag(.dx_one_byte_positive_or_dx_two_bytes_no_change)) x + dx else x - dx;
-                } else {
-                    if (flags.missing_flag(.dx_one_byte_positive_or_dx_two_bytes_no_change)) {
-                        x += Types.intcast(vertex_data_reader.read_i16(), i32);
-                    }
-                }
-                vertexes.ptr[first_pass_offset + i].point.x = @intCast(x);
-                i += 1;
-            }
-
-            // Load all y coordinates
-            i = 0;
-            y = 0;
-            while (i < num_verts) {
-                flags = vertexes.ptr[first_pass_offset + i].flags;
-                if (flags.has_flag(.dy_is_one_byte)) {
-                    const dy: i32 = @intCast(vertex_data_reader[0]);
-                    vertex_data_reader += 1;
-                    y = if (flags.has_flag(.dy_one_byte_positive_or_dy_two_bytes_no_change)) y + dy else y - dy;
-                } else {
-                    if (flags.missing_flag(.dy_one_byte_positive_or_dy_two_bytes_no_change)) {
-                        y += Types.intcast(vertex_data_reader.read_i16(), i32);
-                    }
-                }
-                vertexes.ptr[first_pass_offset + i].point.y = @intCast(y);
-                i += 1;
-            }
-
-            // Convert vertex format
-            i = 0;
-            while (i < num_verts) {
-                const ii = first_pass_offset + i;
-                const vert: *Vertex = &vertexes.ptr[ii];
-                flags = vert.flags;
-                x = vert.point.x;
-                y = vert.point.y;
-                if (next_move == i) { // This is a 'move to' instruction, close the current shape, if any
-                    if (i != 0) {
-                        num_vertexes = Internal.close_shape_and_increment_vertex_count(&vertexes, num_vertexes, prev_was_off_curve, first_point_off_curve, sx, sy, scx, scy, cx, cy, allocator);
-                    }
-                    first_point_off_curve = flags.missing_flag(.point_on_curve);
-                    if (first_point_off_curve) {
+                    // now start the new one
+                    start_off = (flags & 1) == 0;
+                    if (start_off) {
                         // if we start off with an off-curve point, then when we need to find a point on the curve
                         // where we can start, and we need to save some state for when we wraparound.
                         scx = x;
                         scy = y;
-                        const next_ii = ii + 1;
-                        if (vertexes.ptr[next_ii].flags.missing_flag(.point_on_curve)) {
-                            // next point is also an off-curve point, so interpolate an on-curve point
-                            // bewteen the two
-                            sx = x + Types.intcast(vertexes.ptr[next_ii].point.x >> 1, i32);
-                            sy = y + Types.intcast(vertexes.ptr[next_ii].point.y >> 1, i32);
+                        if ((@intFromEnum(vertices.ptr[off + i + 1].type) & 1) == 0) {
+                            // next point is also a curve point, so interpolate an on-point curve
+                            sx = (x + vertices.ptr[off + i + 1].x) >> 1;
+                            sy = (y + vertices.ptr[off + i + 1].y) >> 1;
                         } else {
                             // otherwise just use the next point as our start point
-                            sx = x + Types.intcast(vertexes.ptr[next_ii].point.x, i32);
-                            sy = y + Types.intcast(vertexes.ptr[next_ii].point.y, i32);
+                            sx = vertices.ptr[off + i + 1].x;
+                            sy = vertices.ptr[off + i + 1].y;
                             i += 1; // we're using point i+1 as the starting point, so skip it
                         }
                     } else {
                         sx = x;
                         sy = y;
                     }
-                    num_vertexes = Internal.set_vertex_and_increment_vertex_count(&vertexes, num_vertexes, .move_to, sx, sy, 0, 0);
-                    prev_was_off_curve = false;
-                    next_move = 1 + self.data.read_u16(end_of_contours_offset + (j << 1));
+                    vertices.ptr[num_vertices].set(.vmove, sx, sy, 0, 0);
+                    num_vertices += 1;
+                    was_off = false;
+                    next_move = 1 + read_int(u16, bytes[contours_end_pts + j * 2 ..][0..2], .big);
                     j += 1;
                 } else {
-                    if (flags.missing_flag(.point_on_curve)) {
-                        // Its a control point
-                        if (prev_was_off_curve) {
-                            // two off-curve control points in a row means interpolate an implicit on-curve
-                            // point directly between the two
-                            num_vertexes = Internal.set_vertex_and_increment_vertex_count(&vertexes, num_vertexes, .quadratic, (sx + x) >> 1, (cy + y) >> 1, cx, cy);
+                    if ((flags & 1) == 0) { // if it's a curve
+                        if (was_off) {
+                            // two off-curve control points in a row means interpolate an on-curve midpoint
+                            vertices.ptr[num_vertices].set(.vcurve, (cx + x) >> 1, (cy + y) >> 1, cx, cy);
+                            num_vertices += 1;
                         }
                         cx = x;
                         cy = y;
-                        prev_was_off_curve = true;
+                        was_off = true;
                     } else {
-                        if (prev_was_off_curve) {
-                            num_vertexes = Internal.set_vertex_and_increment_vertex_count(&vertexes, num_vertexes, .quadratic, x, y, cx, cy);
-                        } else {
-                            num_vertexes = Internal.set_vertex_and_increment_vertex_count(&vertexes, num_vertexes, .linear, x, y, 0, 0);
-                        }
-                        prev_was_off_curve = false;
+                        if (was_off)
+                            vertices.ptr[num_vertices].set(.vcurve, x, y, cx, cy)
+                        else
+                            vertices.ptr[num_vertices].set(.vline, x, y, 0, 0);
+                        num_vertices += 1;
+                        was_off = false;
                     }
                 }
-                i += 1;
             }
-            num_vertexes = Internal.close_shape_and_increment_vertex_count(&vertexes, num_vertexes, prev_was_off_curve, first_point_off_curve, sx, sy, scx, scy, cx, cy);
-        } else if (num_contours < 0) {
+            num_vertices = close_shape(vertices.slice(), num_vertices, was_off, start_off, sx, sy, scx, scy, cx, cy);
+            vertices.shrinkRetainingCapacity(num_vertices);
+        } else if (n_contours_signed < 0) {
             // Compound shapes.
-            var more: bool = true;
-            var compound_reader = FontDataReader.new_unknown_size(self.data, glyph_offset + 10);
+            var more = true;
+            var comp = g + 10;
             while (more) {
-                var flags: u16 = undefined;
-                var glyph_idx: u16 = undefined;
-                var matrix: [6]f32 = .{ 1, 0, 0, 1, 0, 0 };
-                var m: f32 = undefined;
-                var n: f32 = undefined;
-                flags = compound_reader.read_u16();
-                glyph_idx = compound_reader.read_u16();
-                if (flags & 2 == 2) {
-                    // XY values
-                    if (flags & 1 == 1) {
-                        // i16's
-                        matrix[4] = @floatFromInt(compound_reader.read_i16());
-                        matrix[5] = @floatFromInt(compound_reader.read_i16());
+                var mtx: [6]f32 = .{ 1, 0, 0, 1, 0, 0 };
+
+                const flags = read_cursor(u16, bytes, &comp);
+                const gidx: GlyphIndex = @enumFromInt(read_cursor(u16, bytes, &comp));
+
+                if ((flags & 2) != 0) { // XY values
+                    if ((flags & 1) != 0) { // shorts
+                        mtx[4] = @floatFromInt(read_cursor(i16, bytes, &comp));
+                        mtx[5] = @floatFromInt(read_cursor(i16, bytes, &comp));
                     } else {
-                        // i8's
-                        matrix[4] = @floatFromInt(compound_reader.read_i8());
-                        matrix[5] = @floatFromInt(compound_reader.read_i8());
+                        mtx[4] = @floatFromInt(read_cursor(i8, bytes, &comp));
+                        mtx[5] = @floatFromInt(read_cursor(i8, bytes, &comp));
                     }
                 } else {
-                    return FindGlyphShapeError.unsupported_compound_contours_mode;
+                    //TODO handle matching point
                 }
-                if (flags & 8 == 8) {
-                    // WE_HAVE_A_SCALE
-                    matrix[0] = num_cast(compound_reader.read_i16(), f32) / 16384.9;
-                    matrix[1] = 0;
-                    matrix[2] = 0;
-                    matrix[3] = matrix[0];
-                } else if (Flags & (1 << 6) == (1 << 6)) {
-                    // WE_HAVE_AN_X_AND_YSCALE
-                    matrix[0] = num_cast(compound_reader.read_i16(), f32) / 16384.9;
-                    matrix[1] = 0;
-                    matrix[2] = 0;
-                    matrix[3] = num_cast(compound_reader.read_i16(), f32) / 16384.9;
-                } else if (Flags & (1 << 7) == (1 << 7)) {
-                    // WE_HAVE_A_TWO_BY_TWO
-                    matrix[0] = num_cast(compound_reader.read_i16(), f32) / 16384.9;
-                    matrix[2] = num_cast(compound_reader.read_i16(), f32) / 16384.9;
-                    matrix[3] = num_cast(compound_reader.read_i16(), f32) / 16384.9;
-                    matrix[4] = num_cast(compound_reader.read_i16(), f32) / 16384.9;
+                if ((flags & (1 << 3)) != 0) { // WE_HAVE_A_SCALE
+                    mtx[0] = @as(f32, @floatFromInt(read_cursor(i16, bytes, &comp))) / 16384.0;
+                    mtx[1] = 0;
+                    mtx[2] = 0;
+                    mtx[3] = mtx[0];
+                } else if ((flags & (1 << 6)) != 0) { // WE_HAVE_AN_X_AND_YSCALE
+                    mtx[0] = @as(f32, @floatFromInt(read_cursor(i16, bytes, &comp))) / 16384.0;
+                    mtx[1] = 0;
+                    mtx[2] = 0;
+                    mtx[3] = @as(f32, @floatFromInt(read_cursor(i16, bytes, &comp))) / 16384.0;
+                } else if ((flags & (1 << 7)) != 0) { // WE_HAVE_A_TWO_BY_TWO
+                    mtx[0] = @as(f32, @floatFromInt(read_cursor(i16, bytes, &comp))) / 16384.0;
+                    mtx[1] = @as(f32, @floatFromInt(read_cursor(i16, bytes, &comp))) / 16384.0;
+                    mtx[2] = @as(f32, @floatFromInt(read_cursor(i16, bytes, &comp))) / 16384.0;
+                    mtx[3] = @as(f32, @floatFromInt(read_cursor(i16, bytes, &comp))) / 16384.0;
                 }
 
                 // Find transformation scales.
-                m = @sqrt((matrix[0] * matrix[0]) + (matrix[1] * matrix[1]));
-                n = @sqrt((matrix[2] * matrix[2]) + (matrix[3] * matrix[3]));
+                const m: f32 = @sqrt(mtx[0] * mtx[0] + mtx[1] * mtx[1]);
+                const n: f32 = @sqrt(mtx[2] * mtx[2] + mtx[3] * mtx[3]);
 
-                // Get indexed glyph
-                const compound_verts = try self.get_glyph_shape_from_index(glyph_idx, allocator);
-                var x: i16 = undefined;
-                var y: i16 = undefined;
-                if (compound_verts.len > 0) {
-                    for (compound_verts.slice()) |*vert| {
-                        x = vert.point.x;
-                        y = vert.point.y;
-                        vert.point.x = num_cast(m * (MathX.upgrade_multiply_out(matrix[0], x, f32) + MathX.upgrade_multiply_out(matrix[2], y, f32) + matrix[4]), i16);
-                        vert.point.y = num_cast(n * (MathX.upgrade_multiply_out(matrix[1], x, f32) + MathX.upgrade_multiply_out(matrix[3], y, f32) + matrix[5]), i16);
-                        x = vert.control_1.x;
-                        y = vert.control_1.y;
-                        vert.control_1.x = num_cast(m * (MathX.upgrade_multiply_out(matrix[0], x, f32) + MathX.upgrade_multiply_out(matrix[2], y, f32) + matrix[4]), i16);
-                        vert.control_1.y = num_cast(n * (MathX.upgrade_multiply_out(matrix[1], x, f32) + MathX.upgrade_multiply_out(matrix[3], y, f32) + matrix[5]), i16);
+                // Get indexed glyph.
+                const comp_verts = try get_glyph_vertex_list(self, alloc, gidx);
+                defer alloc.free(comp_verts);
+                if (comp_verts.len > 0) {
+                    // Transform vertices.
+                    for (comp_verts) |*v| {
+                        {
+                            const x: f32 = @floatFromInt(v.x);
+                            const y: f32 = @floatFromInt(v.y);
+                            v.x = @intFromFloat(m * (mtx[0] * x + mtx[2] * y + mtx[4]));
+                            v.y = @intFromFloat(n * (mtx[1] * x + mtx[3] * y + mtx[5]));
+                        }
+                        {
+                            const x: f32 = @floatFromInt(v.cx);
+                            const y: f32 = @floatFromInt(v.cy);
+                            v.cx = @intFromFloat(m * (mtx[0] * x + mtx[2] * y + mtx[4]));
+                            v.cy = @intFromFloat(n * (mtx[1] * x + mtx[3] * y + mtx[5]));
+                        }
                     }
-                    // Append vertices.
-                    const new_slot_range = vertexes.append_slots(compound_verts.len, allocator);
-                    const new_slots = vertexes.slice_range(new_slot_range);
-                    @memcpy(new_slots, compound_verts.slice());
-                    compound_verts.free(allocator);
-                    num_vertexes += compound_verts.len;
+                    try vertices.append_zig_slice(alloc, comp_verts.slice());
                 }
-                more = flags & (1 << 5) == (1 << 5);
+                more = (flags & (1 << 5)) != 0;
             }
-        } else {
-            // numberOfCounters == 0, do nothing
         }
-        vertexes.len = num_vertexes;
-        return vertexes;
-    }
-    fn get_glyph_shape_type_2(self: *FontInfo, glyph_index: u32, allocator: Allocator) FindGlyphShapeError![]Vertex {
-        _ = self;
-        _ = glyph_index;
-        _ = allocator;
-        assert_unreachable(@src(), "not implemented", .{});
+        return vertices;
     }
 
-    pub const Internal = struct {
-        pub fn set_vertex_and_increment_vertex_count(vertexes: *VertexList, curr_num_vertexes: u32, kind: VertexKind, x: i32, y: i32, cx: i32, cy: i32) u32 {
-            vertexes.ptr[curr_num_vertexes] = Vertex{
-                .point = .new_from_any(x, y),
-                .control_1 = .new_from_any(cx, cy),
-                .kind = kind,
-            };
-            return curr_num_vertexes + 1;
-        }
-        pub fn close_shape_and_increment_vertex_count(vertexes: *VertexList, curr_num_vertexes: u32, prev_was_off_curve: bool, first_point_off_curve: bool, sx: i32, sy: i32, scx: i32, scy: i32, cx: i32, cy: i32) u32 {
-            if (first_point_off_curve) {
-                if (prev_was_off_curve) {
-                    vertexes.ptr[curr_num_vertexes] = Vertex{
-                        .point = .new(@intCast((cx + scx) >> 1), @intCast((cy + scy) >> 1)),
-                        .control_1 = .new(@intCast(cx), @intCast(cy)),
-                        .kind = .quadratic,
-                    };
-                } else {
-                    vertexes.ptr[curr_num_vertexes] = Vertex{
-                        .point = .new(@intCast(sx), @intCast(sy)),
-                        .control_1 = .new(@intCast(scx), @intCast(scy)),
-                        .kind = .quadratic,
-                    };
-                }
-            } else {
-                if (prev_was_off_curve) {
-                    vertexes.ptr[curr_num_vertexes] = Vertex{
-                        .point = .new(@intCast(sx), @intCast(sy)),
-                        .control_1 = .new(@intCast(cx), @intCast(cy)),
-                        .kind = .quadratic,
-                    };
-                } else {
-                    vertexes.ptr[curr_num_vertexes] = Vertex{
-                        .point = .new(@intCast(sx), @intCast(sy)),
-                        .control_1 = .new(0, 0),
-                        .kind = .linear,
-                    };
-                }
+    fn get_glyph_offset(self: *const TrueTypeFont, glyph: GlyphIndex) error{glyph_not_found}!u32 {
+        const bytes = self.ttf_bytes;
+        const glyph_index: usize = @intFromEnum(glyph);
+
+        assert_with_reason(glyph_index < self.glyphs_len, @src(), "glyph index {d} is out of bounds for font `glyphs_len` ({d})", .{ glyph_index, self.glyphs_len });
+        assert_with_reason(self.index_to_loc_format < 2, @src(), "only `index_to_loc_format` 0 or 1 is supported, got {d}", .{self.index_to_loc_format});
+
+        const glyf = self.table_offsets[@intFromEnum(TableId.glyf)];
+        const loca = self.table_offsets[@intFromEnum(TableId.loca)];
+        const g1, const g2 = if (self.index_to_loc_format == 0) .{
+            glyf + @as(u32, read_int(u16, bytes[loca + glyph_index * 2 ..][0..2], .big)) * 2,
+            glyf + @as(u32, read_int(u16, bytes[loca + glyph_index * 2 + 2 ..][0..2], .big)) * 2,
+        } else .{
+            glyf + read_int(u32, bytes[loca + glyph_index * 4 ..][0..4], .big),
+            glyf + read_int(u32, bytes[loca + glyph_index * 4 + 4 ..][0..4], .big),
+        };
+        if (g1 == g2) return error.glyph_not_found;
+        return g1;
+    }
+
+    pub fn get_glyph_bitmap_bounds_with_subpixel_offset(self: *const TrueTypeFont, glyph: GlyphIndex, scale_x: f32, scale_y: f32, shift_x: f32, shift_y: f32) AABB_i32 {
+        const box = get_glyph_bounds(self, glyph) catch |err| switch (err) {
+            error.glyph_not_found => return .{ .x0 = 0, .y0 = 0, .x1 = 0, .y1 = 0 }, // e.g. space character
+        };
+        return .{
+            // move to integral bboxes (treating pixels as little squares, what pixels get touched)?
+            .x_min = @intFromFloat(@floor(@as(f32, @floatFromInt(box.x0)) * scale_x + shift_x)),
+            .y_min = @intFromFloat(@floor(@as(f32, @floatFromInt(-box.y1)) * scale_y + shift_y)),
+            .x_max = @intFromFloat(@ceil(@as(f32, @floatFromInt(box.x1)) * scale_x + shift_x)),
+            .y_max = @intFromFloat(@ceil(@as(f32, @floatFromInt(-box.y0)) * scale_y + shift_y)),
+        };
+    }
+
+    pub fn get_glyph_bitmap_bounds(self: *const TrueTypeFont, glyph: GlyphIndex, scale_x: f32, scale_y: f32) AABB_i32 {
+        return get_glyph_bitmap_bounds_with_subpixel_offset(self, glyph, scale_x, scale_y, 0, 0);
+    }
+
+    pub fn get_glyph_bounds(self: *const TrueTypeFont, glyph: GlyphIndex) error{glyph_not_found}!AABB_i32 {
+        return if (self.cff_data.cff.size != 0)
+            self.get_glyph_bounds_cff(glyph)
+        else
+            self.get_glyph_bounds_ttf(glyph);
+    }
+
+    fn get_glyph_bounds_ttf(self: *const TrueTypeFont, glyph: GlyphIndex) error{glyph_not_found}!AABB_i32 {
+        const bytes = self.ttf_bytes;
+        const off = try get_glyph_offset(self, glyph);
+        return .{
+            .x_min = read_int(i16, bytes[off + 2 ..][0..2], .big),
+            .y_min = read_int(i16, bytes[off + 4 ..][0..2], .big),
+            .x_max = read_int(i16, bytes[off + 6 ..][0..2], .big),
+            .y_max = read_int(i16, bytes[off + 8 ..][0..2], .big),
+        };
+    }
+
+    fn rasterize_to_data_grid(alloc: Allocator, result: *Bitmap, flatness_in_pixels: f32, vertices: []Vertex, scale_x: f32, scale_y: f32, shift_x: f32, shift_y: f32, off_x: i32, off_y: i32, invert: bool) Allocator.Error!void {
+        const scale = @min(scale_x, scale_y);
+        var windings = try flatten_curves(alloc, vertices, flatness_in_pixels / scale);
+        defer windings.deinit(alloc);
+        try rasterize_inner(alloc, result, windings.points, windings.contour_lengths, scale_x, scale_y, shift_x, shift_y, off_x, off_y, invert);
+    }
+
+    const Edge = struct {
+        x0: f32,
+        y0: f32,
+        x1: f32,
+        y1: f32,
+        invert: bool,
+
+        const Sort = struct {
+            fn lessThan(ctx: Sort, a: Edge, b: Edge) bool {
+                _ = ctx;
+                return a.y0 < b.y0;
             }
-            return curr_num_vertexes + 1;
+        };
+    };
+
+    fn rasterize_inner(
+        gpa: Allocator,
+        result: *Bitmap,
+        pts: []Point,
+        wcount: []u32,
+        scale_x: f32,
+        scale_y: f32,
+        shift_x: f32,
+        shift_y: f32,
+        off_x: i32,
+        off_y: i32,
+        invert: bool,
+    ) Allocator.Error!void {
+        const y_scale_inv: f32 = if (invert) -scale_y else scale_y;
+
+        // now we have to blow out the windings into explicit edge lists
+        const edge_alloc_n = n: {
+            var n: u32 = 1; // Add an extra one as a sentinel.
+            for (wcount) |elem| n += elem;
+            break :n n;
+        };
+
+        const e = try gpa.alloc(Edge, edge_alloc_n);
+        defer gpa.free(e);
+
+        var n: u32 = 0;
+        var m: u32 = 0;
+        for (wcount) |wcount_elem| {
+            const p: []Point = pts[m..];
+            m += wcount_elem;
+            var j: u32 = wcount_elem - 1;
+            var k: u32 = 0;
+            while (k < wcount_elem) : ({
+                j = k;
+                k += 1;
+            }) {
+                var a = k;
+                var b = j;
+                // skip the edge if horizontal
+                if (p[j].y == p[k].y)
+                    continue;
+                // add edge from j to k to the list
+                e[n].invert = false;
+                if (if (invert) p[j].y > p[k].y else p[j].y < p[k].y) {
+                    e[n].invert = true;
+                    a = j;
+                    b = k;
+                }
+                e[n].x0 = p[a].x * scale_x + shift_x;
+                e[n].y0 = (p[a].y * y_scale_inv + shift_y);
+                e[n].x1 = p[b].x * scale_x + shift_x;
+                e[n].y1 = (p[b].y * y_scale_inv + shift_y);
+                n += 1;
+            }
+        }
+        // now sort the edges by their highest point (should snap to integer, and then by x)
+        std.mem.sortUnstable(Edge, e[0..n], Edge.Sort{}, Edge.Sort.lessThan);
+
+        // now, traverse the scanlines and find the intersections on each scanline, use xor winding rule
+        try rasterizeSortedEdges(gpa, result, e[0 .. n + 1], off_x, off_y);
+    }
+
+    const Point = struct {
+        x: f32,
+        y: f32,
+    };
+
+    const FlattenedCurves = struct {
+        points: []Point,
+        contour_lengths: []u32,
+
+        const empty: FlattenedCurves = .{
+            .points = &.{},
+            .contour_lengths = &.{},
+        };
+
+        fn deinit(fc: *FlattenedCurves, gpa: Allocator) void {
+            gpa.free(fc.points);
+            gpa.free(fc.contour_lengths);
+            fc.* = undefined;
         }
     };
+
+    fn flatten_curves(
+        gpa: Allocator,
+        vertices: []const Vertex,
+        objspace_flatness: f32,
+    ) error{OutOfMemory}!FlattenedCurves {
+        var points: ArrayList(Point) = .empty;
+        defer points.deinit(gpa);
+        var contour_lengths: ArrayList(u32) = .empty;
+        defer contour_lengths.deinit(gpa);
+
+        const objspace_flatness_squared = objspace_flatness * objspace_flatness;
+
+        var start: u32 = 0;
+        var x: f32 = 0;
+        var y: f32 = 0;
+        for (vertices) |v| {
+            sw: switch (v.type) {
+                .MOVE_TO => {
+                    if (points.items.len > 0) {
+                        try contour_lengths.append(gpa, @intCast(points.items.len - start));
+                        start = @intCast(points.items.len);
+                    }
+
+                    continue :sw .LINE;
+                },
+                .LINE => {
+                    x = @floatFromInt(v.x);
+                    y = @floatFromInt(v.y);
+                    try points.append(gpa, .{ .x = x, .y = y });
+                },
+                .QUADRATIC => {
+                    try tesselateCurve(
+                        gpa,
+                        &points,
+                        x,
+                        y,
+                        @floatFromInt(v.cx),
+                        @floatFromInt(v.cy),
+                        @floatFromInt(v.x),
+                        @floatFromInt(v.y),
+                        objspace_flatness_squared,
+                        0,
+                    );
+                    x = @floatFromInt(v.x);
+                    y = @floatFromInt(v.y);
+                },
+                .CUBIC => {
+                    try tesselateCubic(
+                        gpa,
+                        &points,
+                        x,
+                        y,
+                        @floatFromInt(v.cx),
+                        @floatFromInt(v.cy),
+                        @floatFromInt(v.cx1),
+                        @floatFromInt(v.cy1),
+                        @floatFromInt(v.x),
+                        @floatFromInt(v.y),
+                        objspace_flatness_squared,
+                        0,
+                    );
+                    x = @floatFromInt(v.x);
+                    y = @floatFromInt(v.y);
+                },
+                _ => continue,
+            }
+        }
+        try contour_lengths.append(gpa, @intCast(points.items.len - start));
+
+        return .{
+            .points = try points.toOwnedSlice(gpa),
+            .contour_lengths = try contour_lengths.toOwnedSlice(gpa),
+        };
+    }
+
+    /// tessellate until threshold p is happy... @TODO warped to compensate for non-linear stretching
+    fn tesselateCurve(
+        gpa: Allocator,
+        points: *ArrayList(Point),
+        x0: f32,
+        y0: f32,
+        x1: f32,
+        y1: f32,
+        x2: f32,
+        y2: f32,
+        objspace_flatness_squared: f32,
+        n: u32,
+    ) Allocator.Error!void {
+        // midpoint
+        const mx: f32 = (x0 + 2 * x1 + x2) / 4;
+        const my: f32 = (y0 + 2 * y1 + y2) / 4;
+        // versus directly drawn line
+        const dx: f32 = (x0 + x2) / 2 - mx;
+        const dy: f32 = (y0 + y2) / 2 - my;
+        if (n > 16) // 65536 segments on one curve better be enough!
+            return;
+        if (dx * dx + dy * dy > objspace_flatness_squared) { // half-pixel error allowed... need to be smaller if AA
+            try tesselateCurve(gpa, points, x0, y0, (x0 + x1) / 2.0, (y0 + y1) / 2.0, mx, my, objspace_flatness_squared, n + 1);
+            try tesselateCurve(gpa, points, mx, my, (x1 + x2) / 2.0, (y1 + y2) / 2.0, x2, y2, objspace_flatness_squared, n + 1);
+        } else {
+            try points.append(gpa, .{ .x = x2, .y = y2 });
+        }
+    }
+
+    fn tesselateCubic(
+        gpa: Allocator,
+        points: *ArrayList(Point),
+        x0: f32,
+        y0: f32,
+        x1: f32,
+        y1: f32,
+        x2: f32,
+        y2: f32,
+        x3: f32,
+        y3: f32,
+        objspace_flatness_squared: f32,
+        n: u32,
+    ) Allocator.Error!void {
+        // According to Dougall Johnson, this "flatness" calculation is just
+        // made-up nonsense that seems to work well enough.
+        const dx0 = x1 - x0;
+        const dy0 = y1 - y0;
+        const dx1 = x2 - x1;
+        const dy1 = y2 - y1;
+        const dx2 = x3 - x2;
+        const dy2 = y3 - y2;
+        const dx = x3 - x0;
+        const dy = y3 - y0;
+        const longlen = @sqrt(dx0 * dx0 + dy0 * dy0) + @sqrt(dx1 * dx1 + dy1 * dy1) + @sqrt(dx2 * dx2 + dy2 * dy2);
+        const shortlen = @sqrt(dx * dx + dy * dy);
+        const flatness_squared = longlen * longlen - shortlen * shortlen;
+
+        if (n > 16) // 65536 segments on one curve better be enough!
+            return;
+
+        if (flatness_squared > objspace_flatness_squared) {
+            const x01 = (x0 + x1) / 2;
+            const y01 = (y0 + y1) / 2;
+            const x12 = (x1 + x2) / 2;
+            const y12 = (y1 + y2) / 2;
+            const x23 = (x2 + x3) / 2;
+            const y23 = (y2 + y3) / 2;
+
+            const xa = (x01 + x12) / 2;
+            const ya = (y01 + y12) / 2;
+            const xb = (x12 + x23) / 2;
+            const yb = (y12 + y23) / 2;
+
+            const mx = (xa + xb) / 2;
+            const my = (ya + yb) / 2;
+
+            try tesselateCubic(gpa, points, x0, y0, x01, y01, xa, ya, mx, my, objspace_flatness_squared, n + 1);
+            try tesselateCubic(gpa, points, mx, my, xb, yb, x23, y23, x3, y3, objspace_flatness_squared, n + 1);
+        } else {
+            try points.append(gpa, .{ .x = x3, .y = y3 });
+        }
+    }
+
+    fn sizedTrapezoidArea(height: f32, top_width: f32, bottom_width: f32) f32 {
+        assert(top_width >= 0);
+        assert(bottom_width >= 0);
+        return (top_width + bottom_width) / 2.0 * height;
+    }
+
+    fn positionTrapezoidArea(height: f32, tx0: f32, tx1: f32, bx0: f32, bx1: f32) f32 {
+        return sizedTrapezoidArea(height, tx1 - tx0, bx1 - bx0);
+    }
+
+    fn sizedTriangleArea(height: f32, width: f32) f32 {
+        return height * width / 2;
+    }
+
+    const ActiveEdge = struct {
+        next: ?*ActiveEdge,
+        fx: f32,
+        fdx: f32,
+        fdy: f32,
+        direction: f32,
+        sy: f32,
+        ey: f32,
+    };
+
+    /// Directly anti-alias rasterize edges without supersampling.
+    fn rasterizeSortedEdges(
+        gpa: Allocator,
+        result: *Bitmap,
+        edges: []Edge,
+        off_x: i32,
+        off_y: i32,
+    ) Allocator.Error!void {
+        var arena_allocator = std.heap.ArenaAllocator.init(gpa);
+        defer arena_allocator.deinit();
+        const arena = arena_allocator.allocator();
+
+        var active: ?*ActiveEdge = null;
+        var scanline_buffer: [350]f32 = undefined;
+
+        const needed_scanline_len = result.w * 2 + 1;
+        assert(scanline_buffer.len >= needed_scanline_len);
+
+        const scanline = scanline_buffer[0..result.w];
+        const scanline2 = scanline_buffer[result.w..][0 .. result.w + 1];
+
+        var y: i32 = off_y;
+        edges[edges.len - 1].y0 = @floatFromInt((off_y + @as(i32, @intCast(result.h))) + 1);
+
+        var j: u32 = 0;
+        var e: u32 = 0;
+        while (j < result.h) {
+            // find center of pixel for this scanline
+            const scan_y_top: f32 = @floatFromInt(y);
+            const scan_y_bottom: f32 = @floatFromInt(y + 1);
+            var step: *?*ActiveEdge = &active;
+
+            @memset(scanline, 0);
+            @memset(scanline2, 0);
+
+            // update all active edges;
+            // remove all active edges that terminate before the top of this scanline
+            while (step.*) |z| {
+                if (z.ey <= scan_y_top) {
+                    step.* = z.next; // delete from list
+                    assert(z.direction != 0);
+                    z.direction = 0;
+                    arena.destroy(z);
+                } else {
+                    step = &z.next; // advance through list
+                }
+            }
+
+            // insert all edges that start before the bottom of this scanline
+            while (edges[e].y0 <= scan_y_bottom) {
+                if (edges[e].y0 != edges[e].y1) {
+                    const z: *ActiveEdge = try newActive(arena, edges[e], off_x, scan_y_top);
+                    if (j == 0 and off_y != 0) {
+                        z.ey = @max(z.ey, scan_y_top);
+                    }
+                    // If we get really unlucky a tiny bit of an edge can be
+                    // out of bounds.
+                    assert(z.ey >= scan_y_top);
+
+                    // Insert at front.
+                    z.next = active;
+                    active = z;
+                }
+                e += 1;
+            }
+
+            if (active) |a| fillActiveEdges(scanline, scanline2, result.w, a, scan_y_top);
+
+            {
+                var sum: f32 = 0;
+                for (scanline, scanline2[0..result.w], result.pixels[j * result.stride ..][0..result.w]) |s, s2, *p| {
+                    sum += s2;
+                    p.* = @intFromFloat(@min(@abs(s + sum) * 255 + 0.5, 255));
+                }
+            }
+            // advance all the edges
+            step = &active;
+            while (step.*) |z| {
+                z.fx += z.fdx; // advance to position for current scanline
+                step = &z.next; // advance through list
+            }
+
+            y += 1;
+            j += 1;
+        }
+    }
+
+    fn close_shape(
+        vertices: []Vertex,
+        vertices_len_start: u32,
+        was_off: bool,
+        start_off: bool,
+        sx: i32,
+        sy: i32,
+        scx: i32,
+        scy: i32,
+        cx: i32,
+        cy: i32,
+    ) u32 {
+        var vertices_len = vertices_len_start;
+        if (start_off) {
+            if (was_off) {
+                vertices[vertices_len].set(.QUADRATIC, (cx + scx) >> 1, (cy + scy) >> 1, cx, cy);
+                vertices_len += 1;
+            }
+            vertices[vertices_len].set(.QUADRATIC, sx, sy, scx, scy);
+            vertices_len += 1;
+        } else {
+            if (was_off) {
+                vertices[vertices_len].set(.QUADRATIC, sx, sy, cx, cy);
+                vertices_len += 1;
+            } else {
+                vertices[vertices_len].set(.LINE, sx, sy, 0, 0);
+                vertices_len += 1;
+            }
+        }
+        return vertices_len;
+    }
+
+    fn read_cursor(comptime I: type, bytes: []const u8, cursor: *u32) I {
+        const start = cursor.*;
+        const result = read_int(I, bytes[start..][0..@sizeOf(I)], .big);
+        cursor.* = start + @sizeOf(I);
+        return result;
+    }
+
+    fn newActive(arena: Allocator, e: Edge, off_x: i32, start_point: f32) Allocator.Error!*ActiveEdge {
+        const z = try arena.create(ActiveEdge);
+        const dxdy: f32 = (e.x1 - e.x0) / (e.y1 - e.y0);
+        z.* = .{
+            .fdx = dxdy,
+            .fdy = if (dxdy != 0.0) (1.0 / dxdy) else 0.0,
+            .fx = (e.x0 + dxdy * (start_point - e.y0)) - @as(f32, @floatFromInt(off_x)),
+            .direction = if (e.invert) 1.0 else -1.0,
+            .sy = e.y0,
+            .ey = e.y1,
+            .next = null,
+        };
+        return z;
+    }
+
+    fn fillActiveEdges(scanline: []f32, scanline_fill: []f32, len: u32, start_edge: *ActiveEdge, y_top: f32) void {
+        const y_bottom: f32 = y_top + 1;
+        var opt_e: ?*ActiveEdge = start_edge;
+        while (opt_e) |e| : (opt_e = e.next) {
+            // brute force every pixel
+
+            // compute intersection points with top & bottom
+            assert(e.ey >= y_top);
+
+            if (e.fdx == 0) {
+                const x0 = e.fx;
+                if (x0 < @as(f32, @floatFromInt(len))) {
+                    if (x0 >= 0) {
+                        handleClippedEdge(scanline, @intFromFloat(x0), e, x0, y_top, x0, y_bottom);
+                        handleClippedEdge(scanline_fill, @intFromFloat(x0 + 1), e, x0, y_top, x0, y_bottom);
+                    } else {
+                        handleClippedEdge(scanline_fill, 0, e, x0, y_top, x0, y_bottom);
+                    }
+                }
+            } else {
+                var x0: f32 = e.fx;
+                var dx: f32 = e.fdx;
+                var xb: f32 = x0 + dx;
+                var dy: f32 = e.fdy;
+                assert(e.sy <= y_bottom);
+                assert(e.ey >= y_top);
+
+                // Compute endpoints of line segment clipped to this scanline (if the
+                // line segment starts on this scanline. x0 is the intersection of the
+                // line with y_top, but that may be off the line segment.
+                var x_top: f32, var sy0: f32 = if (e.sy > y_top) .{
+                    x0 + dx * (e.sy - y_top),
+                    e.sy,
+                } else .{
+                    x0,
+                    y_top,
+                };
+
+                var x_bottom: f32, var sy1: f32 = if (e.ey < y_bottom) .{
+                    x0 + dx * (e.ey - y_top),
+                    e.ey,
+                } else .{
+                    xb,
+                    y_bottom,
+                };
+
+                if (x_top >= 0 and x_bottom >= 0 and
+                    x_top < @as(f32, @floatFromInt(len)) and x_bottom < @as(f32, @floatFromInt(len)))
+                {
+                    // from here on, we don't have to range check x values
+
+                    if (@trunc(x_top) == @trunc(x_bottom)) {
+                        // simple case, only spans one pixel
+                        const x: u32 = @intFromFloat(x_top);
+                        const height: f32 = (sy1 - sy0) * e.direction;
+                        assert(x < len);
+                        scanline[x] += positionTrapezoidArea(height, x_top, @floatFromInt(x + 1), x_bottom, @floatFromInt(x + 1));
+                        scanline_fill[x + 1] += height; // everything right of this pixel is filled
+                    } else {
+                        // covers 2+ pixels
+                        if (x_top > x_bottom) {
+                            // flip scanline vertically; signed area is the same
+                            sy0 = y_bottom - (sy0 - y_top);
+                            sy1 = y_bottom - (sy1 - y_top);
+                            std.mem.swap(f32, &sy0, &sy1);
+                            std.mem.swap(f32, &x_bottom, &x_top);
+                            dx = -dx;
+                            dy = -dy;
+                            std.mem.swap(f32, &x0, &xb);
+                        }
+                        assert(dy >= 0);
+                        assert(dx >= 0);
+
+                        const x1: u32 = @intFromFloat(x_top);
+                        const x2: u32 = @intFromFloat(x_bottom);
+                        const x1p1f: f32 = @floatFromInt(x1 + 1);
+                        const x2f: f32 = @floatFromInt(x2);
+                        // compute intersection with y axis at x1+1
+                        var y_crossing: f32 = y_top + dy * (x1p1f - x0);
+
+                        // compute intersection with y axis at x2
+                        var y_final: f32 = y_top + dy * (x2f - x0);
+
+                        //           x1    x_top                            x2    x_bottom
+                        //     y_top  +------|-----+------------+------------+--------|---+------------+
+                        //            |            |            |            |            |            |
+                        //            |            |            |            |            |            |
+                        //       sy0  |      Txxxxx|............|............|............|............|
+                        // y_crossing |            *xxxxx.......|............|............|............|
+                        //            |            |     xxxxx..|............|............|............|
+                        //            |            |     /-   xx*xxxx........|............|............|
+                        //            |            | dy <       |    xxxxxx..|............|............|
+                        //   y_final  |            |     \-     |          xx*xxx.........|............|
+                        //       sy1  |            |            |            |   xxxxxB...|............|
+                        //            |            |            |            |            |            |
+                        //            |            |            |            |            |            |
+                        //  y_bottom  +------------+------------+------------+------------+------------+
+                        //
+                        // goal is to measure the area covered by '.' in each pixel
+
+                        // if x2 is right at the right edge of x1, y_crossing can blow up, github #1057
+                        // @TODO: maybe test against sy1 rather than y_bottom?
+                        if (y_crossing > y_bottom)
+                            y_crossing = y_bottom;
+
+                        const sign: f32 = e.direction;
+
+                        // area of the rectangle covered from sy0..y_crossing
+                        var area: f32 = sign * (y_crossing - sy0);
+
+                        // area of the triangle (x_top,sy0), (x1+1,sy0), (x1+1,y_crossing)
+                        scanline[x1] += sizedTriangleArea(area, x1p1f - x_top);
+
+                        // check if final y_crossing is blown up; no test case for this
+                        if (y_final > y_bottom) {
+                            y_final = y_bottom;
+                            dy = (y_final - y_crossing) / (x2f - x1p1f); // if denom=0, y_final = y_crossing, so y_final <= y_bottom
+                        }
+
+                        // in second pixel, area covered by line segment found in first pixel
+                        // is always a rectangle 1 wide * the height of that line segment; this
+                        // is exactly what the variable 'area' stores. it also gets a contribution
+                        // from the line segment within it. the THIRD pixel will get the first
+                        // pixel's rectangle contribution, the second pixel's rectangle contribution,
+                        // and its own contribution. the 'own contribution' is the same in every pixel except
+                        // the leftmost and rightmost, a trapezoid that slides down in each pixel.
+                        // the second pixel's contribution to the third pixel will be the
+                        // rectangle 1 wide times the height change in the second pixel, which is dy.
+
+                        const step: f32 = sign * dy * 1; // dy is dy/dx, change in y for every 1 change in x,
+                        // which multiplied by 1-pixel-width is how much pixel area changes for each step in x
+                        // so the area advances by 'step' every time
+
+                        for (scanline[x1 + 1 .. x2]) |*s| {
+                            s.* += area + step / 2; // area of trapezoid is 1*step/2
+                            area += step;
+                        }
+                        assert(@abs(area) <= 1.01); // accumulated error from area += step unless we round step down
+                        assert(sy1 > y_final - 0.01);
+
+                        // area covered in the last pixel is the rectangle from all the pixels to the left,
+                        // plus the trapezoid filled by the line segment in this pixel all the way to the right edge
+                        scanline[x2] += area + sign * positionTrapezoidArea(sy1 - y_final, x2f, x2f + 1.0, x_bottom, x2f + 1.0);
+
+                        // the rest of the line is filled based on the total height of the line segment in this pixel
+                        scanline_fill[x2 + 1] += sign * (sy1 - sy0);
+                    }
+                } else {
+                    // if edge goes outside of box we're drawing, we require
+                    // clipping logic. since this does not match the intended use
+                    // of this library, we use a different, very slow brute
+                    // force implementation
+                    // note though that this does happen some of the time because
+                    // x_top and x_bottom can be extrapolated at the top & bottom of
+                    // the shape and actually lie outside the bounding box
+                    for (0..len) |x_usize| {
+                        const x: u32 = @intCast(x_usize);
+                        // cases:
+                        //
+                        // there can be up to two intersections with the pixel. any intersection
+                        // with left or right edges can be handled by splitting into two (or three)
+                        // regions. intersections with top & bottom do not necessitate case-wise logic.
+                        //
+                        // the old way of doing this found the intersections with the left & right edges,
+                        // then used some simple logic to produce up to three segments in sorted order
+                        // from top-to-bottom. however, this had a problem: if an x edge was epsilon
+                        // across the x border, then the corresponding y position might not be distinct
+                        // from the other y segment, and it might ignored as an empty segment. to avoid
+                        // that, we need to explicitly produce segments based on x positions.
+
+                        // rename variables to clearly-defined pairs
+                        const y0: f32 = y_top;
+                        const x1: f32 = @floatFromInt(x);
+                        const x2: f32 = @floatFromInt(x + 1);
+                        const x3: f32 = xb;
+                        const y3: f32 = y_bottom;
+
+                        // x = e.x + e.dx * (y-y_top)
+                        // (y-y_top) = (x - e.x) / e.dx
+                        // y = (x - e.x) / e.dx + y_top
+                        const y1: f32 = (x1 - x0) / dx + y_top;
+                        const y2: f32 = (x1 + 1 - x0) / dx + y_top;
+
+                        if (x0 < x1 and x3 > x2) { // three segments descending down-right
+                            handleClippedEdge(scanline, x, e, x0, y0, x1, y1);
+                            handleClippedEdge(scanline, x, e, x1, y1, x2, y2);
+                            handleClippedEdge(scanline, x, e, x2, y2, x3, y3);
+                        } else if (x3 < x1 and x0 > x2) { // three segments descending down-left
+                            handleClippedEdge(scanline, x, e, x0, y0, x2, y2);
+                            handleClippedEdge(scanline, x, e, x2, y2, x1, y1);
+                            handleClippedEdge(scanline, x, e, x1, y1, x3, y3);
+                        } else if (x0 < x1 and x3 > x1) { // two segments across x, down-right
+                            handleClippedEdge(scanline, x, e, x0, y0, x1, y1);
+                            handleClippedEdge(scanline, x, e, x1, y1, x3, y3);
+                        } else if (x3 < x1 and x0 > x1) { // two segments across x, down-left
+                            handleClippedEdge(scanline, x, e, x0, y0, x1, y1);
+                            handleClippedEdge(scanline, x, e, x1, y1, x3, y3);
+                        } else if (x0 < x2 and x3 > x2) { // two segments across x+1, down-right
+                            handleClippedEdge(scanline, x, e, x0, y0, x2, y2);
+                            handleClippedEdge(scanline, x, e, x2, y2, x3, y3);
+                        } else if (x3 < x2 and x0 > x2) { // two segments across x+1, down-left
+                            handleClippedEdge(scanline, x, e, x0, y0, x2, y2);
+                            handleClippedEdge(scanline, x, e, x2, y2, x3, y3);
+                        } else { // one segment
+                            handleClippedEdge(scanline, x, e, x0, y0, x3, y3);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /// The edge passed in here does not cross the vertical line at x or the
+    /// vertical line at x+1 (i.e. it has already been clipped to those).
+    fn handleClippedEdge(
+        scanline: []f32,
+        x: u32,
+        e: *ActiveEdge,
+        x0_start: f32,
+        y0_start: f32,
+        x1_start: f32,
+        y1_start: f32,
+    ) void {
+        var x0 = x0_start;
+        var y0 = y0_start;
+        var x1 = x1_start;
+        var y1 = y1_start;
+        if (y0 == y1) return;
+        assert(y0 < y1);
+        assert(e.sy <= e.ey);
+        if (y0 > e.ey) return;
+        if (y1 < e.sy) return;
+        if (y0 < e.sy) {
+            x0 += (x1 - x0) * (e.sy - y0) / (y1 - y0);
+            y0 = e.sy;
+        }
+        if (y1 > e.ey) {
+            x1 += (x1 - x0) * (e.ey - y1) / (y1 - y0);
+            y1 = e.ey;
+        }
+
+        const xf: f32 = @floatFromInt(x);
+
+        if (x0 == xf)
+            assert(x1 <= xf + 1)
+        else if (x0 == xf + 1)
+            assert(x1 >= xf)
+        else if (x0 <= xf)
+            assert(x1 <= xf)
+        else if (x0 >= xf + 1)
+            assert(x1 >= xf + 1)
+        else {
+            assert(x1 >= xf);
+            assert(x1 <= xf + 1);
+        }
+
+        if (x0 <= xf and x1 <= xf) {
+            scanline[x] += e.direction * (y1 - y0);
+        } else if (x0 >= xf + 1 and x1 >= xf + 1) {
+            // Do nothing.
+        } else {
+            assert(x0 >= xf);
+            assert(x0 <= xf + 1);
+            assert(x1 >= xf);
+            assert(x1 <= xf + 1);
+            // coverage = 1 - average x position
+            scanline[x] += e.direction * (y1 - y0) * (1 - ((x0 - xf) + (x1 - xf)) / 2);
+        }
+    }
+
+    fn coverage_index(bytes: []const u8, coverage_table: u32, glyph: GlyphIndex) ?u32 {
+        const coverage_format = read_int(u16, bytes[coverage_table..][0..2], .big);
+        switch (coverage_format) {
+            1 => {
+                const glyph_count = read_int(u16, bytes[coverage_table + 2 ..][0..2], .big);
+
+                // Binary search.
+                var l: u32 = 0;
+                var r: u32 = glyph_count - 1;
+                const needle = @intFromEnum(glyph);
+                while (l <= r) {
+                    const glyph_array = coverage_table + 4;
+                    const m = (l + r) >> 1;
+                    const glyph_id = read_int(u16, bytes[glyph_array + 2 * m ..][0..2], .big);
+                    const straw = glyph_id;
+                    if (needle < straw) {
+                        if (m == 0) break;
+                        r = m - 1;
+                    } else if (needle > straw) {
+                        l = m + 1;
+                    } else {
+                        return m;
+                    }
+                }
+            },
+            2 => {
+                const range_count = read_int(u16, bytes[coverage_table + 2 ..][0..2], .big);
+                const range_array = coverage_table + 4;
+
+                // Binary search.
+                var l: u32 = 0;
+                var r: u32 = range_count - 1;
+                const needle = @intFromEnum(glyph);
+                while (l <= r) {
+                    const m = (l + r) >> 1;
+                    const range_record = range_array + 6 * m;
+                    const straw_start = read_int(u16, bytes[range_record..][0..2], .big);
+                    const straw_end = read_int(u16, bytes[range_record + 2 ..][0..2], .big);
+                    if (needle < straw_start) {
+                        if (m == 0) break;
+                        r = m - 1;
+                    } else if (needle > straw_end) {
+                        l = m + 1;
+                    } else {
+                        const start_coverage_index = read_int(u16, bytes[range_record + 4 ..][0..2], .big);
+                        return start_coverage_index + needle - straw_start;
+                    }
+                }
+            },
+            else => {},
+        }
+        return null;
+    }
+
+    fn glyphClass(bytes: []const u8, class_def_table: u32, glyph: GlyphIndex) u32 {
+        const glyph_int = @intFromEnum(glyph);
+        const class_def_format = read_int(u16, bytes[class_def_table..][0..2], .big);
+        switch (class_def_format) {
+            1 => {
+                const start_glyph_id = read_int(u16, bytes[class_def_table + 2 ..][0..2], .big);
+                const glyph_count = read_int(u16, bytes[class_def_table + 4 ..][0..2], .big);
+                const class_def1_value_array = class_def_table + 6;
+
+                if (glyph_int >= start_glyph_id and glyph_int < start_glyph_id + glyph_count)
+                    return read_int(u16, bytes[class_def1_value_array + 2 * (glyph_int - start_glyph_id) ..][0..2], .big);
+            },
+            2 => {
+                const class_range_count = read_int(u16, bytes[class_def_table + 2 ..][0..2], .big);
+                const class_range_records = class_def_table + 4;
+
+                // Binary search.
+                var l: u32 = 0;
+                var r: u32 = class_range_count - 1;
+                while (l <= r) {
+                    const m = (l + r) >> 1;
+                    const class_range_record = class_range_records + 6 * m;
+                    const straw_start = read_int(u16, bytes[class_range_record..][0..2], .big);
+                    const straw_end = read_int(u16, bytes[class_range_record + 2 ..][0..2], .big);
+                    if (glyph_int < straw_start) {
+                        if (m == 0) break;
+                        r = m - 1;
+                    } else if (glyph_int > straw_end) {
+                        l = m + 1;
+                    } else {
+                        return read_int(u16, bytes[class_range_record + 4 ..][0..2], .big);
+                    }
+                }
+            },
+            else => return std.math.maxInt(u32), // Unsupported definition type, return an error.
+        }
+
+        // "All glyphs not assigned to a class fall into class 0". (OpenType spec)
+        return 0;
+    }
+
+    // ---
+    // opentype specific code
+    // ---
+
+    const CffData = struct {
+        /// cff font data
+        cff: Buf,
+        /// the charstring index
+        charstrings: Buf,
+        /// global charstring subroutines index
+        gsubrs: Buf,
+        /// private charstring subroutines index
+        subrs: Buf,
+        /// array of font dicts
+        fontdicts: Buf,
+        /// map from glyph to fontdict
+        fdselect: Buf,
+
+        pub const empty: CffData = .{
+            .cff = .empty,
+            .charstrings = .empty,
+            .gsubrs = .empty,
+            .subrs = .empty,
+            .fontdicts = .empty,
+            .fdselect = .empty,
+        };
+
+        pub fn init(cff_offset: u32, bytes: [*]const u8) !CffData {
+            var result: CffData = .empty;
+            // TODO this should use size from table (not 512MB)
+            result.cff = .init(bytes + cff_offset, 512 * 1024 * 1024);
+            var b = result.cff;
+            // read the header
+            b.skip(2);
+            b.seek(b.get8());
+            // TODO the name INDEX could list multiple fonts, but we just use the first one.
+            _ = b.cffGetIndex(); // name INDEX
+            var topdictidx = b.cffGetIndex();
+            var topdict = topdictidx.cffIndexGet(@enumFromInt(0));
+            _ = b.cffGetIndex(); // string INDEX
+            result.gsubrs = b.cffGetIndex();
+
+            var cstype: u32 = 2;
+            var csoff: u32 = 0;
+            var fdarrayoff: u32 = 0;
+            var fdselectoff: u32 = 0;
+
+            topdict.dictGetInts(17, 1, @ptrCast(&csoff));
+            topdict.dictGetInts(0x100 | 6, 1, @ptrCast(&cstype));
+            topdict.dictGetInts(0x100 | 36, 1, @ptrCast(&fdarrayoff));
+            topdict.dictGetInts(0x100 | 37, 1, @ptrCast(&fdselectoff));
+            result.subrs = b.getSubrs(topdict);
+
+            // we only support Type 2 charstrings
+            if (cstype != 2) return error.UnsupportedCffData;
+            if (csoff == 0) return error.UnsupportedCffData;
+
+            if (fdarrayoff != 0) {
+                // looks like a CID font
+                if (fdselectoff == 0) return error.UnsupportedCffData;
+                b.seek(fdarrayoff);
+                result.fontdicts = b.cffGetIndex();
+                result.fdselect = b.range(fdselectoff, b.size - fdselectoff);
+            }
+
+            b.seek(csoff);
+            result.charstrings = b.cffGetIndex();
+            return result;
+        }
+    };
+
+    const Buf = struct {
+        data: [*]const u8,
+        cursor: u32,
+        size: u32,
+
+        pub const empty: Buf = .init(undefined, 0);
+
+        pub fn init(data: [*]const u8, size: u32) Buf {
+            return .{ .data = data, .size = size, .cursor = 0 };
+        }
+
+        pub fn skip(b: *Buf, o: u32) void {
+            b.seek(b.cursor + o);
+        }
+
+        pub fn seek(b: *Buf, o: u32) void {
+            assert(o <= b.size);
+            b.cursor = if (o > b.size) b.size else o;
+        }
+
+        pub fn peek8(b: *Buf) u8 {
+            if (b.cursor >= b.size)
+                return 0;
+            return b.data[b.cursor];
+        }
+
+        pub fn get8(b: *Buf) u8 {
+            if (b.cursor >= b.size) return 0;
+            defer b.cursor += 1;
+            return b.data[b.cursor];
+        }
+
+        pub fn get16(b: *Buf) u16 {
+            return @truncate(b.get(2));
+        }
+
+        pub fn get32(b: *Buf) u32 {
+            return b.get(4);
+        }
+
+        pub fn get(b: *Buf, n: u32) u32 {
+            var v: u32 = 0;
+            assert(n >= 1 and n <= 4);
+            for (0..n) |_|
+                v = (v << 8) | b.get8();
+            return v;
+        }
+
+        pub fn cffGetIndex(b: *Buf) Buf {
+            const start = b.cursor;
+            const count = b.get16();
+            if (count != 0) {
+                const offsize = b.get8();
+                assert(offsize >= 1 and offsize <= 4);
+                b.skip(offsize * count);
+
+                b.skip(b.get(offsize) - 1);
+            }
+            return b.range(start, b.cursor - start);
+        }
+
+        pub fn cffIndexGet(b_const: Buf, glyph: GlyphIndex) Buf {
+            var b = b_const;
+            b.seek(0);
+            const count = b.get16();
+            const offsize = b.get8();
+            const i: u32 = @intFromEnum(glyph);
+            assert(i < count);
+            assert(offsize >= 1 and offsize <= 4);
+            b.skip(i * offsize);
+
+            const start = b.get(offsize);
+            const end = b.get(offsize);
+            return b.range(2 + (count + 1) * offsize + start, end - start);
+        }
+
+        pub fn cffIndexCount(b: *Buf) u16 {
+            b.seek(0);
+            return b.get16();
+        }
+
+        pub fn range(b: *Buf, o: u32, s: u32) Buf {
+            var r = Buf.empty;
+            if (o < 0 or s < 0 or o > b.size or s > b.size - o) return r;
+            r.data = b.data + o;
+            r.size = s;
+            return r;
+        }
+
+        pub fn cffInt(b: *Buf) u32 {
+            const b0: i32 = b.get8();
+            const result: u32 = switch (b0) {
+                32...246 => @bitCast(b0 - 139),
+                247...250 => @bitCast((b0 - 247) * 256 + b.get8() + 108),
+                251...254 => @bitCast(-(b0 - 251) * 256 - b.get8() - 108),
+                28 => b.get16(),
+                29 => b.get32(),
+                else => @panic("invalid instruction"),
+            };
+            // std.log.debug("cffInt() b0 {} result {}", .{ b0, result });
+            return result;
+        }
+
+        pub fn dictGetInts(b: *Buf, key: u32, outcount: u32, out: [*]u32) void {
+            var operands = b.dictGet(key);
+            for (0..outcount) |i| {
+                if (operands.cursor >= operands.size) break;
+                out[i] = operands.cffInt();
+            }
+        }
+
+        pub fn dictGet(b: *Buf, key: u32) Buf {
+            b.seek(0);
+            while (b.cursor < b.size) {
+                const start = b.cursor;
+                while (b.peek8() >= 28) b.cffSkipOperand();
+                const end = b.cursor;
+                var op: i32 = b.get8();
+                if (op == 12) op = @as(i32, b.get8()) | 0x100;
+                if (op == key) return b.range(start, end - start);
+            }
+            return b.range(0, 0);
+        }
+
+        fn cffSkipOperand(b: *Buf) void {
+            const b0 = b.peek8();
+            assert(b0 >= 28);
+            if (b0 == 30) {
+                b.skip(1);
+                while (b.cursor < b.size) {
+                    const v = b.get8();
+                    if ((v & 0xF) == 0xF or (v >> 4) == 0xF)
+                        break;
+                }
+            } else {
+                _ = b.cffInt();
+            }
+        }
+
+        pub fn getSubrs(cff_const: Buf, fontdict_const: Buf) Buf {
+            var private_loc: [2]u32 = .{ 0, 0 };
+            var fontdict = fontdict_const;
+            fontdict.dictGetInts(18, 2, &private_loc);
+            if (private_loc[1] == 0 or private_loc[0] == 0) return .empty;
+            var cff = cff_const;
+            var pdict = cff.range(private_loc[1], private_loc[0]);
+            var subrsoff: u32 = 0;
+            pdict.dictGetInts(19, 1, @ptrCast(&subrsoff));
+            if (subrsoff == 0) return .empty;
+            cff.seek(private_loc[1] + subrsoff);
+            return cff.cffGetIndex();
+        }
+
+        fn getSubr(idx_const: Buf, n_const: u32) Buf {
+            var idx = idx_const;
+            var n = n_const;
+            const count = idx.cffIndexCount();
+            n +%= if (count >= 33900)
+                32768
+            else if (count >= 1240)
+                1131
+            else
+                107;
+            if (n >= count) return .empty;
+            return idx.cffIndexGet(@enumFromInt(n));
+        }
+    };
+
+    pub const CharstringCtx = struct {
+        first_x: f32,
+        first_y: f32,
+        x: f32,
+        y: f32,
+        min_x: i32,
+        min_y: i32,
+        max_x: i32,
+        max_y: i32,
+        num_vertices: u32,
+        vertices: [*]Vertex,
+        flags: Flags,
+
+        const Flags = packed struct(u8) {
+            started: bool = false,
+            mode: enum(u1) {
+                /// set min/max and num_vertices
+                bounds,
+                /// set vertices and num_vertices
+                verts,
+            },
+            _padding: u6 = undefined,
+        };
+
+        pub fn init(flags: Flags, vertices: [*]Vertex) CharstringCtx {
+            return .{
+                .flags = flags,
+                .vertices = vertices,
+                .first_x = 0,
+                .first_y = 0,
+                .x = 0,
+                .y = 0,
+                .min_x = 0,
+                .min_y = 0,
+                .max_x = 0,
+                .max_y = 0,
+                .num_vertices = 0,
+            };
+        }
+        pub fn deinit(ctx: *CharstringCtx, alloc: Allocator) void {
+            if (ctx.flags.mode == .verts)
+                alloc.free(ctx.allVertices());
+        }
+
+        fn trackVertex(ctx: *CharstringCtx, x: i32, y: i32) void {
+            if (x > ctx.max_x or !ctx.flags.started) ctx.max_x = x;
+            if (y > ctx.max_y or !ctx.flags.started) ctx.max_y = y;
+            if (x < ctx.min_x or !ctx.flags.started) ctx.min_x = x;
+            if (y < ctx.min_y or !ctx.flags.started) ctx.min_y = y;
+            ctx.flags.started = true;
+        }
+
+        fn v(ctx: *CharstringCtx, ty: Vertex.Type, x: i32, y: i32, cx: i32, cy: i32, cx1: i32, cy1: i32) !void {
+            if (ctx.flags.mode == .bounds) {
+                trackVertex(ctx, x, y);
+                if (ty == .CUBIC) {
+                    trackVertex(ctx, cx, cy);
+                    trackVertex(ctx, cx1, cy1);
+                }
+            } else {
+                ctx.vertices[ctx.num_vertices].set(ty, x, y, cx, cy);
+                ctx.vertices[ctx.num_vertices].cx1 = @truncate(cx1);
+                ctx.vertices[ctx.num_vertices].cy1 = @truncate(cy1);
+            }
+            ctx.num_vertices += 1;
+        }
+
+        fn closeShape(ctx: *CharstringCtx) !void {
+            if (ctx.first_x != ctx.x or ctx.first_y != ctx.y)
+                try ctx.v(.LINE, @intFromFloat(ctx.first_x), @intFromFloat(ctx.first_y), 0, 0, 0, 0);
+        }
+
+        fn rmoveTo(ctx: *CharstringCtx, dx: f32, dy: f32) !void {
+            try ctx.closeShape();
+            ctx.first_x = ctx.x + dx;
+            ctx.x = ctx.first_x;
+            ctx.first_y = ctx.y + dy;
+            ctx.y = ctx.first_y;
+            // std.log.debug("moveTo {d:.1},{d:.1}", .{ ctx.x, ctx.y });
+            try ctx.v(.MOVE_TO, @intFromFloat(ctx.x), @intFromFloat(ctx.y), 0, 0, 0, 0);
+        }
+
+        fn rlineTo(ctx: *CharstringCtx, dx: f32, dy: f32) !void {
+            ctx.x += dx;
+            ctx.y += dy;
+            // std.log.debug("lineTo {d:.1},{d:.1}", .{ ctx.x, ctx.y });
+            try ctx.v(.LINE, @intFromFloat(ctx.x), @intFromFloat(ctx.y), 0, 0, 0, 0);
+        }
+
+        fn rccurveTo(ctx: *CharstringCtx, dx1: f32, dy1: f32, dx2: f32, dy2: f32, dx3: f32, dy3: f32) !void {
+            const cx1 = ctx.x + dx1;
+            const cy1 = ctx.y + dy1;
+            const cx2 = cx1 + dx2;
+            const cy2 = cy1 + dy2;
+            ctx.x = cx2 + dx3;
+            ctx.y = cy2 + dy3;
+            // std.log.debug("curveTo {d:.1},{d:.1} {d:.1},{d:.1} {d:.1},{d:.1}", .{ ctx.x, ctx.y, cx1, cy1, cx2, cy2 });
+            try ctx.v(
+                .CUBIC,
+                @intFromFloat(ctx.x),
+                @intFromFloat(ctx.y),
+                @intFromFloat(cx1),
+                @intFromFloat(cy1),
+                @intFromFloat(cx2),
+                @intFromFloat(cy2),
+            );
+        }
+    };
+
+    fn get_glyph_bounds_cff(tt: *const TrueTypeFont, glyph: GlyphIndex) error{glyph_not_found}!BitmapBox {
+        var ctx = CharstringCtx.init(.{ .mode = .bounds }, undefined);
+        runCharstring(&tt.cff_data, glyph, &ctx) catch return .{ .x0 = 0, .y0 = 0, .x1 = 0, .y1 = 0 };
+
+        return .{
+            .x0 = ctx.min_x,
+            .y0 = ctx.min_y,
+            .x1 = ctx.max_x,
+            .y1 = ctx.max_y,
+        };
+    }
+
+    fn get_glyph_vertex_list_ccf(tt: *const TrueTypeFont, gpa: Allocator, glyph: GlyphIndex) GlyphBitmapError![]Vertex {
+        // mode=bounds to get bounds and num_vertices
+        var count_ctx = CharstringCtx.init(.{ .mode = .bounds }, undefined);
+        try runCharstring(&tt.cff_data, glyph, &count_ctx);
+        const vertices = try gpa.alloc(Vertex, count_ctx.num_vertices);
+        errdefer gpa.free(vertices);
+        // mode=verts to assign vertices
+        var out_ctx = CharstringCtx.init(.{ .mode = .verts }, vertices.ptr);
+        try runCharstring(&tt.cff_data, glyph, &out_ctx);
+        assert(out_ctx.num_vertices == count_ctx.num_vertices);
+        // std.log.debug(
+        //     "glyphShapeT2() first {d:.1},{d:.1} xy {d:.1},{d:.1} min {d:.1},{d:.1} max {d:.1},{d:.1} num_vertices {}",
+        //     .{ count_ctx.first_x, count_ctx.first_y, count_ctx.x, count_ctx.y, count_ctx.min_x, count_ctx.min_y, count_ctx.max_x, count_ctx.max_y, count_ctx.num_vertices },
+        // );
+
+        return out_ctx.vertices[0..out_ctx.num_vertices];
+    }
+
+    const Instruction = enum(u8) {
+        hintmask = 0x13,
+        cntrmask = 0x14,
+        hstem = 0x01,
+        vstem = 0x03,
+        hstemhm = 0x12,
+        vstemhm = 0x17,
+        rmoveto = 0x15,
+        vmoveto = 0x04,
+        hmoveto = 0x16,
+        rlineto = 0x05,
+        vlineto = 0x07,
+        hlineto = 0x06,
+        hvcurveto = 0x1F,
+        vhcurveto = 0x1E,
+        rrcurveto = 0x08,
+        rcurveline = 0x18,
+        rlinecurve = 0x19,
+        vvcurveto = 0x1A,
+        hhcurveto = 0x1B,
+        callsubr = 0x0A,
+        callgsubr = 0x1D,
+        /// return
+        ret = 0x0B,
+        endchar = 0x0E,
+        twoByteEscape = 0x0C,
+        hflex = 0x22,
+        flex = 0x23,
+        hflex1 = 0x24,
+        flex1 = 0x25,
+
+        pub fn asInt(i: Instruction) u16 {
+            return @intFromEnum(i);
+        }
+    };
+
+    fn runCharstring(cff_data: *const CffData, glyph: GlyphIndex, ctx: *CharstringCtx) !void {
+        var maskbits: u32 = 0;
+        var in_header = true;
+        var has_subrs = false;
+        var clear_stack = false;
+        var s = [1]f32{0} ** 48; // stack
+        var sp: u32 = 0; // stack pointer
+        var subr_buf: [10]Buf = undefined;
+        var subr_stack: std.ArrayList(Buf) = .initBuffer(&subr_buf);
+        var subrs = cff_data.subrs;
+        // this currently ignores the initial width value, which isn't needed if we have hmtx
+        var b = cff_data.charstrings.cffIndexGet(glyph);
+
+        while (b.cursor < b.size) {
+            var i: u32 = 0;
+            clear_stack = true;
+            const b0: u16 = b.get8();
+            // const tag_name = if (std.meta.intToEnum(Instruction, b0)) |t| @tagName(t) else |_| "other";
+            // std.log.debug("{}/{} b0 {s}/{}/0x{x} num_vertices {}", .{ b.cursor, b.size, tag_name, b0, b0, ctx.num_vertices });
+
+            sw: switch (b0) {
+                // @TODO implement hinting
+                Instruction.hintmask.asInt(), // 0x13
+                Instruction.cntrmask.asInt(), // 0x14
+                => {
+                    if (in_header) maskbits += (sp / 2); // implicit "vstem"
+                    in_header = false;
+                    b.skip((maskbits + 7) / 8);
+                },
+                Instruction.hstem.asInt(), // 0x01
+                Instruction.vstem.asInt(), // 0x03
+                Instruction.hstemhm.asInt(), // 0x12
+                Instruction.vstemhm.asInt(), // 0x17
+                => {
+                    maskbits += (sp / 2);
+                },
+                Instruction.rmoveto.asInt() => { // 0x15
+                    in_header = false;
+                    if (sp < 2) return error.RMoveToStack;
+                    try ctx.rmoveTo(s[sp - 2], s[sp - 1]);
+                },
+                Instruction.vmoveto.asInt() => { // 0x04
+                    in_header = false;
+                    if (sp < 1) return error.VMoveToStack;
+                    try ctx.rmoveTo(0, s[sp - 1]);
+                },
+                Instruction.hmoveto.asInt() => { // 0x16
+                    in_header = false;
+                    if (sp < 1) return error.HMoveToStack;
+                    try ctx.rmoveTo(s[sp - 1], 0);
+                },
+                Instruction.rlineto.asInt() => { // 0x05
+                    if (sp < 2) return error.RLineToStack;
+                    while (i + 1 < sp) : (i += 2)
+                        try ctx.rlineTo(s[i], s[i + 1]);
+                },
+                // hlineto/vlineto and vhcurveto/hvcurveto alternate horizontal and vertical
+                // starting from a different place.
+                Instruction.vlineto.asInt() => { // 0x07
+                    if (sp < 1) return error.VLineToStack;
+                    // std.log.debug("vlineto i {} sp {}", .{ i, sp });
+                    while (true) {
+                        if (i >= sp) break;
+                        try ctx.rlineTo(0, s[i]);
+                        i += 1;
+                        if (i >= sp) break;
+                        try ctx.rlineTo(s[i], 0);
+                        i += 1;
+                    }
+                },
+                Instruction.hlineto.asInt() => { // 0x06
+                    if (sp < 1) return error.HLineToStack;
+                    // std.log.debug("hlineto i {} sp {}", .{ i, sp });
+                    while (true) {
+                        if (i >= sp) break;
+                        try ctx.rlineTo(s[i], 0);
+                        i += 1;
+                        if (i >= sp) break;
+                        try ctx.rlineTo(0, s[i]);
+                        i += 1;
+                    }
+                },
+                Instruction.hvcurveto.asInt() => { // 0x1F
+                    if (sp < 4) return error.HCurveToStack;
+                    while (true) {
+                        // std.log.debug("hvcurveto i {} sp {}", .{ i, sp });
+                        if (i + 3 >= sp) break;
+                        try ctx.rccurveTo(s[i], 0, s[i + 1], s[i + 2], if (sp - i == 5) s[i + 4] else 0.0, s[i + 3]);
+                        i += 4;
+                        if (i + 3 >= sp) break;
+                        try ctx.rccurveTo(0, s[i], s[i + 1], s[i + 2], s[i + 3], if (sp - i == 5) s[i + 4] else 0.0);
+                        i += 4;
+                    }
+                },
+                Instruction.vhcurveto.asInt() => { // 0x1E
+                    if (sp < 4) return error.HCurveToStack;
+                    while (true) {
+                        // std.log.debug("vhcurveto i {} sp {}", .{ i, sp });
+                        if (i + 3 >= sp) break;
+                        try ctx.rccurveTo(0, s[i], s[i + 1], s[i + 2], s[i + 3], if (sp - i == 5) s[i + 4] else 0.0);
+                        i += 4;
+                        if (i + 3 >= sp) break;
+                        try ctx.rccurveTo(s[i], 0, s[i + 1], s[i + 2], if (sp - i == 5) s[i + 4] else 0.0, s[i + 3]);
+                        i += 4;
+                    }
+                },
+                Instruction.rrcurveto.asInt() => { // 0x08
+                    if (sp < 6) return error.RCurveToStack;
+                    while (i + 5 < sp) : (i += 6)
+                        try ctx.rccurveTo(s[i], s[i + 1], s[i + 2], s[i + 3], s[i + 4], s[i + 5]);
+                },
+                Instruction.rcurveline.asInt() => { // 0x18
+                    if (sp < 8) return error.RCurveLineStack;
+                    while (i + 5 < sp - 2) : (i += 6)
+                        try ctx.rccurveTo(s[i], s[i + 1], s[i + 2], s[i + 3], s[i + 4], s[i + 5]);
+                    if (i + 1 >= sp) return error.CurveLineStack;
+                    try ctx.rlineTo(s[i], s[i + 1]);
+                },
+                Instruction.rlinecurve.asInt() => { // 0x19
+                    if (sp < 8) return error.RLineCurveStack;
+                    while (i + 1 < sp - 6) : (i += 2)
+                        try ctx.rlineTo(s[i], s[i + 1]);
+                    if (i + 5 >= sp) return error.RLineCurveStack;
+                    try ctx.rccurveTo(s[i], s[i + 1], s[i + 2], s[i + 3], s[i + 4], s[i + 5]);
+                },
+                Instruction.vvcurveto.asInt(), // 0x1A
+                Instruction.hhcurveto.asInt(), // 0x1B
+                => {
+                    if (sp < 4) return error.CurveToStack;
+                    var f: f32 = 0.0;
+                    if (sp & 1 != 0) {
+                        f = s[i];
+                        i += 1;
+                    }
+                    while (i + 3 < sp) : (i += 4) {
+                        if (b0 == Instruction.hhcurveto.asInt()) //  0x1B
+                            try ctx.rccurveTo(s[i], f, s[i + 1], s[i + 2], s[i + 3], 0.0)
+                        else
+                            try ctx.rccurveTo(f, s[i], s[i + 1], s[i + 2], 0.0, s[i + 3]);
+                        f = 0.0;
+                    }
+                },
+                Instruction.callsubr.asInt() => { // 0x0A
+                    if (!has_subrs) {
+                        if (cff_data.fdselect.size != 0)
+                            subrs = getGlyphSubrs(cff_data, glyph);
+                        has_subrs = true;
+                    }
+                    continue :sw Instruction.callgsubr.asInt();
+                    // FALLTHROUGH
+                },
+                Instruction.callgsubr.asInt() => { // 0x1D
+                    sp = std.math.sub(u32, sp, 1) catch return error.CallGSubRStack;
+                    const v: i32 = @intFromFloat(@trunc(s[sp]));
+                    subr_stack.appendBounded(b) catch return error.RecursionLimit;
+                    b = (if (b0 == Instruction.callsubr.asInt()) // 0x0A
+                        subrs
+                    else
+                        cff_data.gsubrs).getSubr(@bitCast(v));
+                    if (b.size == 0) return error.SubRNotFound;
+                    b.cursor = 0;
+                    clear_stack = false;
+                },
+                Instruction.ret.asInt() => { // 0x0B
+                    b = subr_stack.pop() orelse return error.ReturnOutsideSubR;
+                    clear_stack = false;
+                },
+                Instruction.endchar.asInt() => { // 0x0E
+                    try ctx.closeShape();
+                    return;
+                },
+                Instruction.twoByteEscape.asInt() => { // 0x0C
+                    const b1 = b.get8();
+                    switch (b1) {
+                        // @TODO These "flex" implementations ignore the flex-depth and resolution,
+                        // and always draw beziers.
+                        Instruction.hflex.asInt() => { // 0x22
+                            if (sp < 7) return error.HFlexStack;
+                            const dx1 = s[0];
+                            const dx2 = s[1];
+                            const dy2 = s[2];
+                            const dx3 = s[3];
+                            const dx4 = s[4];
+                            const dx5 = s[5];
+                            const dx6 = s[6];
+                            try ctx.rccurveTo(dx1, 0, dx2, dy2, dx3, 0);
+                            try ctx.rccurveTo(dx4, 0, dx5, -dy2, dx6, 0);
+                        },
+                        Instruction.flex.asInt() => { // 0x23
+                            if (sp < 13) return error.FlexStack;
+                            const dx1 = s[0];
+                            const dy1 = s[1];
+                            const dx2 = s[2];
+                            const dy2 = s[3];
+                            const dx3 = s[4];
+                            const dy3 = s[5];
+                            const dx4 = s[6];
+                            const dy4 = s[7];
+                            const dx5 = s[8];
+                            const dy5 = s[9];
+                            const dx6 = s[10];
+                            const dy6 = s[11];
+                            //fd is s[12]
+                            try ctx.rccurveTo(dx1, dy1, dx2, dy2, dx3, dy3);
+                            try ctx.rccurveTo(dx4, dy4, dx5, dy5, dx6, dy6);
+                        },
+                        Instruction.hflex1.asInt() => { // 0x24
+                            if (sp < 9) return error.HFlex1Stack;
+                            const dx1 = s[0];
+                            const dy1 = s[1];
+                            const dx2 = s[2];
+                            const dy2 = s[3];
+                            const dx3 = s[4];
+                            const dx4 = s[5];
+                            const dx5 = s[6];
+                            const dy5 = s[7];
+                            const dx6 = s[8];
+                            try ctx.rccurveTo(dx1, dy1, dx2, dy2, dx3, 0);
+                            try ctx.rccurveTo(dx4, 0, dx5, dy5, dx6, -(dy1 + dy2 + dy5));
+                        },
+                        Instruction.flex1.asInt() => { // 0x25
+                            if (sp < 11) return error.Flex1Stack;
+                            const dx1 = s[0];
+                            const dy1 = s[1];
+                            const dx2 = s[2];
+                            const dy2 = s[3];
+                            const dx3 = s[4];
+                            const dy3 = s[5];
+                            const dx4 = s[6];
+                            const dy4 = s[7];
+                            const dx5 = s[8];
+                            const dy5 = s[9];
+                            var dx6 = s[10];
+                            var dy6 = s[10];
+                            const dx = dx1 + dx2 + dx3 + dx4 + dx5;
+                            const dy = dy1 + dy2 + dy3 + dy4 + dy5;
+                            if (@abs(dx) > @abs(dy))
+                                dy6 = -dy
+                            else
+                                dx6 = -dx;
+                            try ctx.rccurveTo(dx1, dy1, dx2, dy2, dx3, dy3);
+                            try ctx.rccurveTo(dx4, dy4, dx5, dy5, dx6, dy6);
+                        },
+
+                        else => return error.Unimplemented,
+                    }
+                },
+                else => {
+                    if (b0 != 255 and b0 != 28 and b0 < 32)
+                        return error.ReservedOperator;
+
+                    // push immediate
+                    const f: f32 = if (b0 == 255)
+                        @floatFromInt(@as(i32, @intCast(b.get32() / 0x10000)))
+                    else blk: {
+                        b.cursor -= 1;
+                        break :blk @floatFromInt(@as(i16, @truncate(@as(i32, @bitCast(b.cffInt())))));
+                    };
+                    // std.log.debug("f {d:.2}", .{f});
+                    if (sp >= 48) return error.PushStackOverflow;
+                    s[sp] = f;
+                    sp += 1;
+                    clear_stack = false;
+                },
+            }
+            if (clear_stack) sp = 0;
+        }
+        return error.NoEndChar;
+    }
+
+    fn getGlyphSubrs(cff_data: *const CffData, glyph: GlyphIndex) Buf {
+        var fdselector: u32 = std.math.maxInt(u32);
+        var fdselect = cff_data.fdselect;
+        // std.log.debug("getGlyphSubrs fdselect {}", .{fdselect});
+        fdselect.seek(0);
+
+        const fmt = fdselect.get8();
+        if (fmt == 0) {
+            // untested
+            fdselect.skip(@intFromEnum(glyph));
+            fdselector = fdselect.get8();
+        } else if (fmt == 3) {
+            const nranges = fdselect.get16();
+            var start = fdselect.get16();
+            for (0..nranges) |_| {
+                const v = fdselect.get8();
+                const end = fdselect.get16();
+                const glyph_int = @intFromEnum(glyph);
+                if (glyph_int >= start and glyph_int < end) {
+                    fdselector = v;
+                    break;
+                }
+                start = end;
+            }
+        }
+        // what was this line? it does nothing. why was it in the original c code?
+        // if (fdselector == -1) new_buf(NULL, 0);
+        return cff_data.cff.getSubrs(cff_data.fontdicts.cffIndexGet(@enumFromInt(fdselector)));
+    }
 };
 
-const PLATOFRM_ID = struct {
-    pub const UNICODE = 0;
-    pub const MAC = 1;
-    pub const ISO = 2;
-    pub const MICROSOFT = 3;
-};
-
-const MICROSOFT_ENCODING_ID = struct {
-    pub const SYMBOL = 0;
-    pub const UNICODE_BMP = 1;
-    pub const SHIFT_JIS = 2;
-    pub const UNICODE_FULL = 3;
-};
+test "TrueTypeFont_load_and_render_Lato_chars" {
+    const alloc = std.heap.page_allocator;
+    const OUT_DEF = DataGridModule.GridDefinition{
+        .CELL_TYPE = u8,
+        .ROW_COLUMN_ORDER = .ROW_MAJOR,
+        .X_ORDER = .LEFT_TO_RIGHT,
+        .Y_ORDER = .TOP_TO_BOTTOM,
+    };
+    const OUT_GRID = DataGridModule.DataGrid(OUT_DEF);
+    const RASTER = ShapeModule.ScanlineRasterizer(f32, ShapeModule.EdgeColor, ShapeModule.EdgeColor.WHITE, i32, OUT_DEF);
+    var raster = RASTER.init_with_intersection_capacity(16, alloc);
+    defer raster.free(alloc);
+    var output_grid = OUT_GRID.init(64, 64, 0, alloc);
+    defer output_grid.free(alloc);
+    const CHARS = [_]u32{'A'};
+    // const CHARS = [_]u32{ 'A', '&', '☠' };
+    const font_file = try std.fs.cwd().openFile("vendor/fonts/Lato/Lato-Regular.ttf", .{});
+    defer font_file.close();
+    const font_file_stat = try font_file.stat();
+    const font_file_len = font_file_stat.size;
+    var font_file_buf = List(u8).init_capacity(font_file_len, alloc);
+    defer font_file_buf.free(alloc);
+    font_file_buf.len = @intCast(font_file_len);
+    _ = try font_file.readAll(font_file_buf.slice());
+    const font_data = FontFile.new(font_file_buf.slice());
+    var font_info: FontInfo = try font_data.init_font_info_by_index(0);
+    try std.fs.cwd().makePath("test_out/true_type");
+    inline for (CHARS[0..]) |char| {
+        std.debug.print("CHAR = {d} ", .{char}); //DEBUG
+        const glyph_index = try font_info.find_glyph_index(char);
+        var vertex_list = try font_info.get_glyph_shape_from_index(glyph_index, alloc);
+        var shape = vertex_list_to_shape(vertex_list, f32, ShapeModule.EdgeColor, ShapeModule.EdgeColor.WHITE, alloc);
+        raster.rasterize_to_existing_data_grid(&shape, .none(), .X_ONLY_LINEAR_FALLOFF, output_grid, 255, 0, .default_estimates(), alloc);
+        _ = try BitmapFormat.save_bitmap_to_file("test_out/true_type/char_" ++ std.fmt.comptimePrint("{d}", .{char}) ++ ".bmp", OUT_DEF, output_grid, .{ .bits_per_pixel = .BPP_8 }, .NO_CONVERSION_NEEDED_ALPHA_BECOMES_COLOR_CHANNELS, alloc);
+        output_grid.fill_all(0);
+        shape.free(alloc);
+        vertex_list.free(alloc);
+    }
+}

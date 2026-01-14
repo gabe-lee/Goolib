@@ -42,6 +42,7 @@ const assert_with_reason = Assert.assert_with_reason;
 pub const _Fuzzer = @import("./Utils_Fuzz.zig");
 
 pub const Alloc = @import("./Utils_Allocator.zig");
+pub const File = @import("./Utils_File.zig");
 
 pub inline fn inline_swap(comptime T: type, a: *T, b: *T, temp: *T) void {
     temp.* = a.*;

@@ -66,11 +66,11 @@ pub fn Flags(comptime FLAGS_ENUM: type, comptime GROUPS_ENUM: type) type {
         pub const ALL = Self{ .raw = A };
         pub const FLOOD = Self{ .raw = math.maxInt(RawInt) };
         const FULL = F;
-        const NEEDS_VALID_ASSERT = ALL != FULL;
+        const NEEDS_VALID_ASSERT = A != FULL;
 
         inline fn assert_valid_bits(raw: RawInt) void {
             if (NEEDS_VALID_ASSERT) {
-                assert_with_reason(raw & ~ALL == 0, @src(), "invalid bits for flags type {s}:\nbits to set = {b:0>64}\nvalid range = {b:0>64}\ninvalid pos = {b:0>64}", .{ @typeName(Self), raw, ALL, raw & ~ALL });
+                assert_with_reason(raw & ~A == 0, @src(), "invalid bits for flags type {s}:\nbits to set = {b:0>64}\nvalid range = {b:0>64}\ninvalid pos = {b:0>64}", .{ @typeName(Self), raw, A, raw & ~A });
             }
         }
 

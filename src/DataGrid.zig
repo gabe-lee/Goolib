@@ -220,38 +220,38 @@ pub fn DataGrid(comptime DEFINITION: GridDefinition) type {
 
         pub inline fn get_x_with_origin(self: Self, origin: Origin, x: u32) u32 {
             return switch (origin) {
-                .bot_left, .top_left => if (X_ORDER == .left_to_right) x else (self.width - 1 - x),
-                .bot_right, .top_right => if (X_ORDER == .right_to_left) x else (self.width - 1 - x),
+                .BOT_LEFT, .TOP_LEFT => if (X_ORDER == .LEFT_TO_RIGHT) x else (self.width - 1 - x),
+                .BOT_RIGHT, .TOP_RIGHT => if (X_ORDER == .RIGHT_TO_LEFT) x else (self.width - 1 - x),
             };
         }
         pub inline fn get_y_with_origin(self: Self, origin: Origin, y: u32) u32 {
             return switch (origin) {
-                .top_left, .top_right => if (Y_ORDER == .top_to_bottom) y else (self.height - 1 - y),
-                .bot_left, .bot_right => if (Y_ORDER == .bottom_to_top) y else (self.height - 1 - y),
+                .TOP_LEFT, .TOP_RIGHT => if (Y_ORDER == .TOP_TO_BOTTOM) y else (self.height - 1 - y),
+                .BOT_LEFT, .BOT_RIGHT => if (Y_ORDER == .BOTTOM_TO_TOP) y else (self.height - 1 - y),
             };
         }
         pub inline fn get_x_delta_with_origin(origin: Origin, x_delta: i32) i32 {
             return switch (origin) {
-                .bot_left, .top_left => if (X_ORDER == .left_to_right) x_delta else -x_delta,
-                .bot_right, .top_right => if (X_ORDER == .right_to_left) x_delta else -x_delta,
+                .BOT_LEFT, .TOP_LEFT => if (X_ORDER == .LEFT_TO_RIGHT) x_delta else -x_delta,
+                .BOT_RIGHT, .TOP_RIGHT => if (X_ORDER == .RIGHT_TO_LEFT) x_delta else -x_delta,
             };
         }
         pub inline fn get_y_delta_with_origin(origin: Origin, y_delta: i32) i32 {
             return switch (origin) {
-                .top_left, .top_right => if (Y_ORDER == .top_to_bottom) y_delta else -y_delta,
-                .bot_left, .bot_right => if (Y_ORDER == .bottom_to_top) y_delta else -y_delta,
+                .TOP_LEFT, .TOP_RIGHT => if (Y_ORDER == .TOP_TO_BOTTOM) y_delta else -y_delta,
+                .BOT_LEFT, .BOT_RIGHT => if (Y_ORDER == .BOTTOM_TO_TOP) y_delta else -y_delta,
             };
         }
         pub inline fn get_x_with_origin_any(self: Self, origin: Origin, x: anytype) @TypeOf(x) {
             return switch (origin) {
-                .bot_left, .top_left => if (X_ORDER == .left_to_right) x else (num_cast(self.width, @TypeOf(x)) - 1 - x),
-                .bot_right, .top_right => if (X_ORDER == .right_to_left) x else (num_cast(self.width, @TypeOf(x)) - 1 - x),
+                .BOT_LEFT, .TOP_LEFT => if (X_ORDER == .LEFT_TO_RIGHT) x else (num_cast(self.width, @TypeOf(x)) - 1 - x),
+                .BOT_RIGHT, .TOP_RIGHT => if (X_ORDER == .RIGHT_TO_LEFT) x else (num_cast(self.width, @TypeOf(x)) - 1 - x),
             };
         }
         pub inline fn get_y_with_origin_any(self: Self, origin: Origin, y: anytype) @TypeOf(y) {
             return switch (origin) {
-                .top_left, .top_right => if (Y_ORDER == .top_to_bottom) y else (num_cast(self.height, @TypeOf(y)) - 1 - y),
-                .bot_left, .bot_right => if (Y_ORDER == .bottom_to_top) y else (num_cast(self.height, @TypeOf(y)) - 1 - y),
+                .TOP_LEFT, .TOP_RIGHT => if (Y_ORDER == .TOP_TO_BOTTOM) y else (num_cast(self.height, @TypeOf(y)) - 1 - y),
+                .BOT_LEFT, .BOT_RIGHT => if (Y_ORDER == .BOTTOM_TO_TOP) y else (num_cast(self.height, @TypeOf(y)) - 1 - y),
             };
         }
         pub inline fn get_x_with_origin_and_span_width(self: Self, origin: Origin, x: u32, width: u32, width_direction: XOrder) u32 {
@@ -332,32 +332,6 @@ pub fn DataGrid(comptime DEFINITION: GridDefinition) type {
             const idx = self.get_idx_with_origin(origin, x, y);
             return self.cells.ptr[idx];
         }
-        // pub fn get_pixel_channel_native(self: Self, x: u32, y: u32, chan: CHANNELS) CHANNEL_TYPE {
-        //     const idx = self.get_idx(x, y);
-        //     return self.cells.ptr[idx].raw[@intFromEnum(chan)];
-        // }
-        // pub fn get_pixel_channel_with_origin(self: Self, origin: Origin, x: u32, y: u32, chan: CHANNELS) CHANNEL_TYPE {
-        //     const idx = self.get_idx_with_origin(origin, x, y);
-        //     return self.cells.ptr[idx].raw[@intFromEnum(chan)];
-        // }
-        // pub fn get_pixel_channel_ptr_native(self: Self, x: u32, y: u32, chan: CHANNELS) *CHANNEL_TYPE {
-        //     const idx = self.get_idx(x, y);
-        //     return &self.cells.ptr[idx].raw[@intFromEnum(chan)];
-        // }
-        // pub fn get_pixel_channel_ptr_with_origin(self: Self, origin: Origin, x: u32, y: u32, chan: CHANNELS) *CHANNEL_TYPE {
-        //     const idx = self.get_idx_with_origin(origin, x, y);
-        //     return &self.cells.ptr[idx].raw[@intFromEnum(chan)];
-        // }
-        // pub fn get_pixel_channel_idx_native(self: Self, x: u32, y: u32, chan_idx: anytype) CHANNEL_TYPE {
-        //     assert_with_reason(chan_idx < Types.enum_max_field_count(CHANNELS), @src(), "channel index `{d}` is outside the bounds for the number of channels (max index = {d})", .{ chan_idx, Types.enum_max_field_count(CHANNELS) - 1 });
-        //     const idx = self.get_idx(x, y);
-        //     return self.cells.ptr[idx].raw[chan_idx];
-        // }
-        // pub fn get_pixel_channel_idx_with_origin(self: Self, origin: Origin, x: u32, y: u32, chan_idx: anytype) CHANNEL_TYPE {
-        //     assert_with_reason(chan_idx < Types.enum_max_field_count(CHANNELS), @src(), "channel index `{d}` is outside the bounds for the number of channels (max index = {d})", .{ chan_idx, Types.enum_max_field_count(CHANNELS) - 1 });
-        //     const idx = self.get_idx_with_origin(origin, x, y);
-        //     return self.cells.ptr[idx].raw[chan_idx];
-        // }
         pub fn get_cell_ptr(self: Self, x: u32, y: u32) *Cell {
             const idx = self.get_idx(x, y);
             return &self.cells.ptr[idx];
@@ -382,24 +356,6 @@ pub fn DataGrid(comptime DEFINITION: GridDefinition) type {
             const idx = self.get_idx_with_origin(origin, x, y);
             self.cells.ptr[idx] = val;
         }
-        // pub fn set_pixel_channel_native(self: Self, x: u32, y: u32, chan: CHANNELS, val: CHANNEL_TYPE) void {
-        //     const idx = self.get_idx(x, y);
-        //     self.cells.ptr[idx].raw[@intFromEnum(chan)] = val;
-        // }
-        // pub fn set_pixel_channel_with_origin(self: Self, origin: Origin, x: u32, y: u32, chan: CHANNELS, val: CHANNEL_TYPE) void {
-        //     const idx = self.get_idx_with_origin(origin, x, y);
-        //     self.cells.ptr[idx].raw[@intFromEnum(chan)] = val;
-        // }
-        // pub fn set_pixel_channel_idx_native(self: Self, x: u32, y: u32, chan_idx: anytype, val: CHANNEL_TYPE) void {
-        //     assert_with_reason(chan_idx < Types.enum_max_field_count(CHANNELS), @src(), "channel index `{d}` is outside the bounds for the number of channels (max index = {d})", .{ chan_idx, Types.enum_max_field_count(CHANNELS) - 1 });
-        //     const idx = self.get_idx(x, y);
-        //     self.cells.ptr[idx].raw[chan_idx] = val;
-        // }
-        // pub fn set_pixel_channel_idx_with_origin(self: Self, origin: Origin, x: u32, y: u32, chan_idx: anytype, val: CHANNEL_TYPE) void {
-        //     assert_with_reason(chan_idx < Types.enum_max_field_count(CHANNELS), @src(), "channel index `{d}` is outside the bounds for the number of channels (max index = {d})", .{ chan_idx, Types.enum_max_field_count(CHANNELS) - 1 });
-        //     const idx = self.get_idx_with_origin(origin, x, y);
-        //     self.cells.ptr[idx].raw[chan_idx] = val;
-        // }
         pub fn lerp_sub_cell(self: Self, x: f32, y: f32, lerp_fn: *const fn (cell_a: Cell, cell_b: Cell, percent: f32) Cell) Cell {
             var xx = MathX.clamp_0_to_max(x, @as(f32, @floatFromInt(self.width)));
             var yy = MathX.clamp_0_to_max(y, @as(f32, @floatFromInt(self.height)));
@@ -491,19 +447,19 @@ pub fn DataGrid(comptime DEFINITION: GridDefinition) type {
             var min_y_copy_new: u32 = undefined;
             var max_y_copy_new: u32 = undefined;
             switch (anchor) {
-                .top_left, .middle_left, .bottom_left => {
+                .TOP_LEFT, .MIDDLE_LEFT, .BOTTOM_LEFT => {
                     min_x_copy_old = 0;
                     max_x_copy_old = min_width;
                     min_x_copy_new = 0;
                     max_x_copy_new = min_width;
                 },
-                .top_center, .middle_center, .bottom_center => {
+                .TOP_CENTER, .MIDDLE_CENTER, .BOTTOM_CENTER => {
                     min_x_copy_old = half_old_width - half_min_width;
                     max_x_copy_old = min_x_copy_old + min_width;
                     min_x_copy_new = half_new_width - half_min_width;
                     max_x_copy_new = min_x_copy_new + min_width;
                 },
-                .top_right, .middle_right, .bottom_right => {
+                .TOP_RIGHT, .MIDDLE_RIGHT, .BOTTOM_RIGHT => {
                     min_x_copy_old = self.width - min_width;
                     max_x_copy_old = self.width;
                     min_x_copy_new = new_width - min_width;
@@ -511,19 +467,19 @@ pub fn DataGrid(comptime DEFINITION: GridDefinition) type {
                 },
             }
             switch (anchor) {
-                .top_left, .top_center, .top_right => {
+                .TOP_LEFT, .TOP_CENTER, .TOP_RIGHT => {
                     min_y_copy_old = 0;
                     max_y_copy_old = min_height;
                     min_y_copy_new = 0;
                     max_y_copy_new = min_height;
                 },
-                .middle_left, .middle_center, .middle_right => {
+                .MIDDLE_LEFT, .MIDDLE_CENTER, .MIDDLE_RIGHT => {
                     min_y_copy_old = half_old_height - half_min_height;
                     max_y_copy_old = min_y_copy_old + min_height;
                     min_y_copy_new = half_new_height - half_min_height;
                     max_y_copy_new = min_y_copy_new + min_height;
                 },
-                .bottom_left, .bottom_center, .bottom_right => {
+                .BOTTOM_LEFT, .BOTTOM_CENTER, .BOTTOM_RIGHT => {
                     min_y_copy_old = self.height - min_height;
                     max_y_copy_old = self.height;
                     min_y_copy_new = new_height - min_height;

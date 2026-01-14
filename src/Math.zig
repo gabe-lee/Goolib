@@ -853,7 +853,7 @@ pub fn solve_quadratic_polynomial_for_zeros_estimate(a: anytype, b: @TypeOf(a), 
 }
 
 // polynomial form: a(x^2) + b(x) + c
-pub fn solve_quadratic_polynomial_for_zeros_advanced(a: anytype, b: @TypeOf(a), c: @TypeOf(a), comptime linear_estimate: LinearEstimate(@TypeOf(a))) QuadraticSolution(@TypeOf(a)) {
+pub fn solve_quadratic_polynomial_for_zeros_advanced(a: anytype, b: @TypeOf(a), c: @TypeOf(a), linear_estimate: LinearEstimate(@TypeOf(a))) QuadraticSolution(@TypeOf(a)) {
     // if a == 0 (or b is greater than a by many orders of magnitude and linear estimates are enabled), its linear
     if (a == 0 or check_estimate: {
         switch (linear_estimate) {
@@ -897,7 +897,7 @@ pub fn solve_cubic_polynomial_for_zeros_estimate(a: anytype, b: @TypeOf(a), c: @
 }
 
 // polynomial form: a(x^3) + b(x^2) + c(x) + d
-pub fn solve_cubic_polynomial_for_zeros_advanced(a: anytype, b: @TypeOf(a), c: @TypeOf(a), d: @TypeOf(a), comptime double_root_estimate: DoubleRootEstimate(@TypeOf(a)), comptime quadratic_estimate: QuadraticEstimate(@TypeOf(a)), comptime linear_estimate: LinearEstimate(@TypeOf(a))) CubicSolution(@TypeOf(a)) {
+pub fn solve_cubic_polynomial_for_zeros_advanced(a: anytype, b: @TypeOf(a), c: @TypeOf(a), d: @TypeOf(a), double_root_estimate: DoubleRootEstimate(@TypeOf(a)), quadratic_estimate: QuadraticEstimate(@TypeOf(a)), linear_estimate: LinearEstimate(@TypeOf(a))) CubicSolution(@TypeOf(a)) {
     const T = @TypeOf(a);
     // if a == 0 (or b is greater than a by many orders of magnitude and quadratic estimates are enabled), its quadratic
     if (a == 0 or check_estimate: {

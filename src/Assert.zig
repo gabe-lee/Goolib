@@ -35,6 +35,7 @@ const ANSI = Root.ANSI;
 pub const SHOULD_ASSERT = build.mode == .Debug or build.mode == .ReleaseSafe;
 
 pub inline fn print_header(comptime BEFORE: []const u8, comptime tag: []const u8, comptime in_comptime: bool, comptime src_loc: ?SourceLocation, comptime log: []const u8, comptime AFTER: []const u8) []const u8 {
+    @setEvalBranchQuota(5000);
     const timing = if (in_comptime) "\n\x1b[1GCOMPTIME " else "\n\x1b[1GRUNTIME ";
     const newline = if (in_comptime) "\n" else "\n\t";
     const loc_prefix = if (src_loc) |s| "Zig → " ++ s.module ++ " → " else "";

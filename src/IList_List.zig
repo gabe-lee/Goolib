@@ -72,6 +72,16 @@ pub fn List(comptime T: type) type {
         pub fn slice(self: Self) []T {
             return self.ptr[0..self.len];
         }
+        pub fn sentinel_slice_assume_capacity(self: Self, comptime SENTINEL: T) [:SENTINEL]T {
+            assert_with_reason(self.len < self.cap, @src(), "cannot return a sentinel slice if no space exists to write the sentinel at (len = cap = {d})", .{self.len});
+            self.ptr[self.len] = SENTINEL;
+            const sptr: [*:SENTINEL]T = @ptrCast(self.ptr);
+            return sptr[0..self.len];
+        }
+        pub fn sentinel_slice(self: *Self, alloc: Allocator, comptime SENTINEL: T) [:SENTINEL]T {
+            self.ensure_free_slots(1, alloc);
+            return self.sentinel_slice_assume_capacity(SENTINEL);
+        }
         pub fn slice_range(self: Self, range: Range) []T {
             return self.ptr[range.first_idx .. range.last_idx + 1];
         }

@@ -37,10 +37,13 @@ const Range = Root.IList.Range;
 const Color_ = Root.Color;
 const MathX = Root.Math;
 const BitmapModule = Root.Bitmap;
-const Bitmap = BitmapModule.Bitmap;
-const BitmapDef = BitmapModule.BitmapDefinition;
+// const Bitmap = BitmapModule.Bitmap;
+// const BitmapDef = BitmapModule.BitmapDefinition;
 const File = std.fs.File;
 const Resulution = Root.ImageUtils.Reslution_DPM(u32);
+const DataGridModule = Root.DataGrid;
+const DataGridDef = DataGridModule.GridDefinition;
+const DataGrid = DataGridModule.DataGrid;
 
 const assert_with_reason = Assert.assert_with_reason;
 const assert_unreachable = Assert.assert_unreachable;
@@ -63,6 +66,17 @@ pub const BitsPerPixel = enum(u16) {
     }
     pub fn raw(self: BitsPerPixel) u16 {
         return @intFromEnum(self);
+    }
+
+    pub fn max_colors_in_palette(self: BitsPerPixel) u32 {
+        return switch (self) {
+            .BPP_1 => 1 << 1,
+            .BPP_4 => 1 << 4,
+            .BPP_8 => 1 << 8,
+            .BPP_16 => 0,
+            .BPP_24 => 0,
+            .BPP_32 => 0,
+        };
     }
 };
 
@@ -158,42 +172,97 @@ pub const BitmapSaveSettings = struct {
     colors_in_palette: u32 = 0,
     important_colors_in_palette: u32 = 0,
     intent: ImageIntent = .GRAPHICS,
+    print_warnings_to_console: bool = false,
 };
 
 const BMP_CORE_HEADER_SIZE = 14;
 const BMP_DIB_HEADER_V5_SIZE = 124;
 
-const IndexPixelEnum = enum(u8) {
-    index,
-};
-
 const PAD_BYTES = [4]u8{ 0, 0, 0, 0 };
 
-pub fn save_bitmap_to_file(path_relative_to_cwd: [:0]const u8, comptime BITMAP_DEF: BitmapDef, bitmap: Bitmap(BITMAP_DEF), settings: BitmapSaveSettings, alloc: Allocator) anyerror!u32 {
+pub const BitmapError = error{
+    too_many_colors_for_palette,
+};
+
+pub const DataConversionMode = enum(u8) {
+    NO_CONVERSION_NEEDED_ALPHA_BECOMES_COLOR_CHANNELS,
+    NO_CONVERSION_NEEDED_ALPHA_WITH_WHITE_CHANNELS,
+    NO_CONVERSION_NEEDED_BGR,
+    NO_CONVERSION_NEEDED_BGRA,
+    CONVERT_USING_FUNC,
+};
+
+pub fn DataConversion(comptime DATA_IN: type) type {
+    return union(DataConversionMode) {
+        const Self = @This();
+
+        /// Data is already 1 byte of Alpha (can be bitcast to `u8`)
+        ///
+        /// The alpha channel is coppied to each color channel (greyscale) with
+        /// an implicit alpha channel of 255 (100%)
+        NO_CONVERSION_NEEDED_ALPHA_BECOMES_COLOR_CHANNELS: void,
+        /// Data is already 1 byte of Alpha (can be bitcast to `u8`)
+        ///
+        /// The alpha channel is written to the output alpha, with an implicit
+        /// white value in the color channels (255, 255, 255)
+        NO_CONVERSION_NEEDED_ALPHA_WITH_WHITE_CHANNELS: void,
+        /// Data is already 3 bytes in BGR order (can be bitcast to `[3]u8{b, g, r}` )
+        NO_CONVERSION_NEEDED_BGR: void,
+        /// Data is already 4 bytes in BGRA order (can be bitcast to `[4]u8{b, g, r, a}`)
+        NO_CONVERSION_NEEDED_BGRA: void,
+        /// Convert data to 4 bytes in BGRA order using this func
+        ///
+        /// Channels not used by the output will be ignored
+        CONVERT_USING_FUNC: *const fn (data: DATA_IN) BGRA,
+
+        pub fn no_conversion_needed_alpha() Self {
+            return Self{ .NO_CONVERSION_NEEDED_ALPHA = void{} };
+        }
+        pub fn no_conversion_needed_bgr() Self {
+            return Self{ .NO_CONVERSION_NEEDED_BGR = void{} };
+        }
+        pub fn no_conversion_needed_bgra() Self {
+            return Self{ .NO_CONVERSION_NEEDED_BGRA = void{} };
+        }
+        pub fn convert_using_func(func: *const fn (data: DATA_IN) BGRA) Self {
+            return Self{ .CONVERT_USING_FUNC = func };
+        }
+    };
+}
+
+pub const BGRA = [4]u8;
+pub const BGR = [3]u8;
+
+fn bgra_equal(a: BGRA, b: BGRA) bool {
+    return @as(u32, @bitCast(a)) == @as(u32, @bitCast(b));
+}
+
+pub fn save_bitmap_to_file(path_relative_to_cwd: [:0]const u8, comptime GRID_DEF: DataGridDef, data_grid: DataGrid(GRID_DEF), settings: BitmapSaveSettings, data_conversion: DataConversion(GRID_DEF.CELL_TYPE), index_map_alloc: Allocator) anyerror!u32 {
+    const file = try std.fs.cwd().createFile(path_relative_to_cwd, .{ .truncate = true });
+    defer file.close();
+    var buf: [1024]u8 = undefined;
+    var writer_holder = file.writerStreaming(buf[0..]);
+    const writer: *std.Io.Writer = &writer_holder.interface;
+    const len = try write_bitmap_datagrid_to_writer(writer, GRID_DEF, data_grid, settings, data_conversion, index_map_alloc);
+    try writer_holder.end();
+    return len;
+}
+
+pub fn write_bitmap_datagrid_to_writer(writer: *std.Io.Writer, comptime GRID_DEF: DataGridDef, data_grid: DataGrid(GRID_DEF), settings: BitmapSaveSettings, data_conversion: DataConversion(GRID_DEF.CELL_TYPE), index_map_alloc: Allocator) anyerror!u32 {
     assert_with_reason(settings.color_planes == 1, @src(), "color planes other than `1` (non-interleaved color channels) not implemented/supported, got `{d}`", .{settings.color_planes});
     assert_with_reason(settings.compression == .NONE, @src(), "color compression mode `{s}` not implemented/supported", .{@tagName(settings.compression)});
     assert_with_reason(settings.color_space != .CALIBRATED_RGB, @src(), "color space modes `CALIBRATED_RGB` not implemented/supported", .{});
     assert_with_reason(settings.color_space != .PROFILE_LINKED and settings.color_space != .PROFILE_EMBEDDED, @src(), "color space modes `PROFILE_LINKED` and `PROFILE_EMBEDDED` not implemented/supported (ICC color profiles)", .{});
-    const file = try std.fs.cwd().createFile(path_relative_to_cwd, .{ .truncate = true });
-    defer file.close();
-    const IDX_BMP_DEF = BitmapDef{
-        .CHANNEL_TYPE = u8,
-        .CHANNEL_TYPE_ZERO_VAL = @ptrCast(&PAD_BYTES[0]),
-        .CHANNELS_ENUM = IndexPixelEnum,
-        .ROW_COLUMN_ORDER = .row_major,
-        .X_ORDER = .left_to_right,
-        .Y_ORDER = .bottom_to_top,
-    };
-    const ColorPalettePixel = Root.Color.define_arbitrary_color_type(u8, BitmapModule.BGRA_Channels, 0);
-    const IDX_BMP = Bitmap(IDX_BMP_DEF);
-    var color_palette: [256]ColorPalettePixel = undefined;
-    var color_palette_list = List(ColorPalettePixel){
+    const IDX_GRID_DEF = GRID_DEF.with_cell_type(u8);
+    const IDX_GRID = DataGrid(IDX_GRID_DEF);
+    var color_palette: [256]BGRA = undefined;
+    var color_palette_list = List(BGRA){
         .cap = 256,
         .len = 0,
         .ptr = color_palette[0..].ptr,
     };
-    var index_map: IDX_BMP = .{};
-    defer index_map.free(alloc);
+    var index_map: IDX_GRID = .{};
+    defer index_map.free(index_map_alloc);
     var size: u32 = BMP_CORE_HEADER_SIZE + BMP_DIB_HEADER_V5_SIZE;
     const bytes_per_advance: u32 = switch (settings.bits_per_pixel) {
         .BPP_1, .BPP_4, .BPP_8 => 1,
@@ -211,36 +280,56 @@ pub fn save_bitmap_to_file(path_relative_to_cwd: [:0]const u8, comptime BITMAP_D
     };
     var pixel_row_byte_width: u32 = undefined;
     var pixel_data_offset: u32 = undefined;
-    // var gap_before_pixel_data: u32 = 0;
     if (settings.bits_per_pixel.raw() <= 8) {
-        const idx_width_naive = bitmap.width / pixels_per_advance;
-        const idx_width = idx_width_naive + (if ((idx_width_naive * pixels_per_advance) < bitmap.width) @as(u32, 1) else @as(u32, 0));
-        const idx_height = bitmap.height;
-        index_map = IDX_BMP.init(idx_width, idx_height, null, alloc);
+        const idx_width_naive = data_grid.width / pixels_per_advance;
+        const idx_width = idx_width_naive + (if ((idx_width_naive * pixels_per_advance) < data_grid.width) @as(u32, 1) else @as(u32, 0));
+        const idx_height = data_grid.height;
+        index_map = IDX_GRID.init(idx_width, idx_height, null, index_map_alloc);
         var index_pixel_bit: u8 = 0;
         var curr_index_pixel: u8 = 0;
         var y: u32 = 0;
         var px: u32 = 0;
         var ix: u32 = 0;
-        while (y < bitmap.width) : (y += 1) {
+        while (y < data_grid.width) : (y += 1) {
             px = 0;
             ix = 0;
-            while (px < bitmap.width) : (px += 1) {
-                const original_pixel = bitmap.get_pixel_with_origin(.bot_left, px, y);
-                std.debug.print("original_pixel: {any}\n", .{original_pixel}); //DEBUG
-                const transformed_pixel: ColorPalettePixel = original_pixel.reorder_channels_to(BitmapModule.BGRA_Channels).cast_values_normalized_to(u8, 0);
-                var color_palette_index = color_palette_list.search(transformed_pixel, ColorPalettePixel.implicit_equals);
+            while (px < data_grid.width) : (px += 1) {
+                const cell = data_grid.get_cell_with_origin(.BOT_LEFT, px, y);
+                const bgra: BGRA = switch (data_conversion) {
+                    .NO_CONVERSION_NEEDED_ALPHA_BECOMES_COLOR_CHANNELS => make: {
+                        assert_with_reason(@sizeOf(GRID_DEF.CELL_TYPE) == 1, @src(), "cell data was not 1 byte in size , `@sizeOf(cell) == {d}`", .{@sizeOf(GRID_DEF.CELL_TYPE)});
+                        const cell_cast: u8 = @bitCast(cell);
+                        break :make BGRA{ cell_cast, cell_cast, cell_cast, 255 };
+                    },
+                    .NO_CONVERSION_NEEDED_ALPHA_WITH_WHITE_CHANNELS => make: {
+                        assert_with_reason(@sizeOf(GRID_DEF.CELL_TYPE) == 1, @src(), "cell data was not 1 byte in size , `@sizeOf(cell) == {d}`", .{@sizeOf(GRID_DEF.CELL_TYPE)});
+                        break :make BGRA{ 255, 255, 255, @bitCast(cell) };
+                    },
+                    .NO_CONVERSION_NEEDED_BGR => make: {
+                        assert_with_reason(@sizeOf(GRID_DEF.CELL_TYPE) == 3, @src(), "cell data was not 3 bytes in size , `@sizeOf(cell) == {d}`", .{@sizeOf(GRID_DEF.CELL_TYPE)});
+                        const bgr: BGR = @bitCast(cell);
+                        break :make BGRA{ bgr[0], bgr[1], bgr[2], 255 };
+                    },
+                    .NO_CONVERSION_NEEDED_BGRA => make: {
+                        assert_with_reason(@sizeOf(GRID_DEF.CELL_TYPE) == 4, @src(), "cell data was not 4 bytes in size , `@sizeOf(cell) == {d}`", .{@sizeOf(GRID_DEF.CELL_TYPE)});
+                        break :make @bitCast(cell);
+                    },
+                    .CONVERT_USING_FUNC => |func| func(cell),
+                };
+                // std.debug.print("original_pixel: {any}\n", .{original_pixel}); //DEBUG
+                // const transformed_pixel: ColorPalettePixel = original_pixel.reorder_channels_to(BitmapModule.BGRA_Channels).cast_values_normalized_to(u8, 0);
+                var color_palette_index = color_palette_list.search(bgra, bgra_equal);
                 if (!color_palette_index.found) {
                     color_palette_index.idx = color_palette_list.len;
                     color_palette_list.len += 1;
-                    color_palette_list.ptr[color_palette_index.idx] = transformed_pixel;
+                    color_palette_list.ptr[color_palette_index.idx] = bgra;
                 }
                 const color_index: u8 = @intCast(color_palette_index.idx);
                 const shifted_color_index = color_index << @intCast(index_pixel_bit);
                 curr_index_pixel |= shifted_color_index;
                 index_pixel_bit += @intCast(settings.bits_per_pixel.raw());
                 if (index_pixel_bit >= 8) {
-                    const index_pixel_ptr: *u8 = index_map.get_pixel_channel_ptr_with_origin(.bot_left, ix, y, .index);
+                    const index_pixel_ptr: *u8 = index_map.get_cell_ptr_with_origin(.BOT_LEFT, ix, y);
                     index_pixel_ptr.* = curr_index_pixel;
                     ix += 1;
                     index_pixel_bit = 0;
@@ -248,22 +337,25 @@ pub fn save_bitmap_to_file(path_relative_to_cwd: [:0]const u8, comptime BITMAP_D
                 }
             }
         }
+        if (color_palette_list.len > settings.bits_per_pixel.max_colors_in_palette()) {
+            if (settings.print_warnings_to_console) {
+                Assert.warn_with_reason(false, @src(), "output bits-per-pixel `{s}` can only support {d} unique colors, but found {d} unique colors in input data", .{ @tagName(settings.bits_per_pixel), settings.bits_per_pixel.max_colors_in_palette(), color_palette_list.len });
+            }
+            return BitmapError.too_many_colors_for_palette;
+        }
         size += color_palette_list.len * 4;
         pixel_data_offset = size;
         pixel_row_byte_width = index_map.width;
     } else {
         pixel_data_offset = size;
-        const whole_advances_per_width = bitmap.width / pixels_per_advance;
-        const total_advances_per_width = whole_advances_per_width + (if ((whole_advances_per_width * pixels_per_advance) < bitmap.width) @as(u32, 1) else @as(u32, 0));
+        const whole_advances_per_width = data_grid.width / pixels_per_advance;
+        const total_advances_per_width = whole_advances_per_width + (if ((whole_advances_per_width * pixels_per_advance) < data_grid.width) @as(u32, 1) else @as(u32, 0));
         pixel_row_byte_width = total_advances_per_width * bytes_per_advance;
     }
     const row_stride_byte_width = std.mem.alignForward(u32, pixel_row_byte_width, 4);
     const gap_after_row = row_stride_byte_width - pixel_row_byte_width;
-    const total_pixel_data_length = row_stride_byte_width * bitmap.height;
+    const total_pixel_data_length = row_stride_byte_width * data_grid.height;
     size += total_pixel_data_length;
-    var buf: [1024]u8 = undefined;
-    var writer_holder = file.writerStreaming(buf[0..]);
-    var writer = &writer_holder.interface;
     // Core header
     try writer.writeByte('B'); //0x00
     try writer.writeByte('M'); //0x01
@@ -275,8 +367,8 @@ pub fn save_bitmap_to_file(path_relative_to_cwd: [:0]const u8, comptime BITMAP_D
     try writer.writeInt(u32, pixel_data_offset, .little); //0x0A
     // DIB V5 header
     try writer.writeInt(u32, BMP_DIB_HEADER_V5_SIZE, .little); //0x0E
-    try writer.writeInt(u32, bitmap.width, .little); //0x12
-    try writer.writeInt(u32, bitmap.height, .little); //0x16
+    try writer.writeInt(u32, data_grid.width, .little); //0x12
+    try writer.writeInt(u32, data_grid.height, .little); //0x16
     try writer.writeInt(u16, settings.color_planes, .little); //0x1A
     try writer.writeInt(u16, settings.bits_per_pixel.raw(), .little); //0x1C
     try writer.writeInt(u32, @intFromEnum(settings.compression), .little); //0x1E
@@ -323,8 +415,8 @@ pub fn save_bitmap_to_file(path_relative_to_cwd: [:0]const u8, comptime BITMAP_D
     try writer.writeInt(u32, 0, .little); // 0x7E // icc profile size
     try writer.writeInt(u32, 0, .little); // 0x82 // reserved
     // Color Palette (if used)
-    for (color_palette_list.slice()) |color| { // 0x86
-        const raw: u32 = @bitCast(color.raw);
+    for (color_palette_list.slice()) |bgra| { // 0x86
+        const raw: u32 = @bitCast(bgra);
         try writer.writeInt(u32, raw, .little);
     }
     // _ = try writer.write(PAD_BYTES[0..gap_before_pixel_data]);
@@ -332,7 +424,7 @@ pub fn save_bitmap_to_file(path_relative_to_cwd: [:0]const u8, comptime BITMAP_D
     if (settings.bits_per_pixel.raw() <= 8) {
         var y: u32 = 0;
         while (y < index_map.height) : (y += 1) {
-            const row = index_map.get_h_scanline_with_origin(.bot_left, 0, y, .left_to_right, index_map.width);
+            const row = index_map.get_h_scanline_with_origin(.BOT_LEFT, 0, y, .LEFT_TO_RIGHT, index_map.width);
             const row_bytes = std.mem.sliceAsBytes(row);
             _ = try writer.write(row_bytes);
             _ = try writer.write(PAD_BYTES[0..gap_after_row]);
@@ -340,24 +432,65 @@ pub fn save_bitmap_to_file(path_relative_to_cwd: [:0]const u8, comptime BITMAP_D
     } else {
         var y: u32 = 0;
         var x: u32 = undefined;
-        while (y < bitmap.height) : (y += 1) {
+        while (y < data_grid.height) : (y += 1) {
             x = 0;
-            while (x < bitmap.width) : (x += 1) {
-                var original_pixel = bitmap.get_pixel_with_origin(.bot_left, x, y);
+            const row: []GRID_DEF.CELL_TYPE = if (GRID_DEF.ROW_COLUMN_ORDER == .ROW_MAJOR and GRID_DEF.X_ORDER == .LEFT_TO_RIGHT) data_grid.get_h_scanline_with_origin(.BOT_LEFT, 0, y, .LEFT_TO_RIGHT, data_grid.width) else undefined;
+            while (x < data_grid.width) : (x += 1) {
+                const cell = if (GRID_DEF.ROW_COLUMN_ORDER == .ROW_MAJOR and GRID_DEF.X_ORDER == .LEFT_TO_RIGHT) row[x] else data_grid.get_cell_with_origin(.BOT_LEFT, x, y);
                 switch (settings.bits_per_pixel) {
                     .BPP_32 => {
-                        const transformed_pixel = original_pixel.reorder_channels_to(BitmapModule.BGRA_Channels).cast_values_normalized_to(u8, 0);
-                        try writer.writeInt(u32, @bitCast(transformed_pixel.raw), .little);
+                        const bgra: BGRA = switch (data_conversion) {
+                            .NO_CONVERSION_NEEDED_ALPHA_WITH_WHITE_CHANNELS => make: {
+                                assert_with_reason(@sizeOf(GRID_DEF.CELL_TYPE) == 1, @src(), "cell data was not 1 byte in size , `@sizeOf(cell) == {d}`", .{@sizeOf(GRID_DEF.CELL_TYPE)});
+                                break :make BGRA{ 255, 255, 255, @bitCast(cell) };
+                            },
+                            .NO_CONVERSION_NEEDED_ALPHA_BECOMES_COLOR_CHANNELS => make: {
+                                assert_with_reason(@sizeOf(GRID_DEF.CELL_TYPE) == 1, @src(), "cell data was not 1 byte in size , `@sizeOf(cell) == {d}`", .{@sizeOf(GRID_DEF.CELL_TYPE)});
+                                const cell_cast: u8 = @bitCast(cell);
+                                break :make BGRA{ cell_cast, cell_cast, cell_cast, 255 };
+                            },
+                            .NO_CONVERSION_NEEDED_BGR => make: {
+                                assert_with_reason(@sizeOf(GRID_DEF.CELL_TYPE) == 3, @src(), "cell data was not 3 bytes in size , `@sizeOf(cell) == {d}`", .{@sizeOf(GRID_DEF.CELL_TYPE)});
+                                const bgr: BGR = @bitCast(cell);
+                                break :make BGRA{ bgr[0], bgr[1], bgr[2], 255 };
+                            },
+                            .NO_CONVERSION_NEEDED_BGRA => make: {
+                                assert_with_reason(@sizeOf(GRID_DEF.CELL_TYPE) == 4, @src(), "cell data was not 4 bytes in size , `@sizeOf(cell) == {d}`", .{@sizeOf(GRID_DEF.CELL_TYPE)});
+                                break :make @bitCast(cell);
+                            },
+                            .CONVERT_USING_FUNC => |func| func(cell),
+                        };
+                        _ = try writer.write(bgra[0..]);
+                        // try writer.writeInt(u32, @bitCast(bgra), .little);
                     },
                     .BPP_24 => {
-                        // std.debug.print("original_pixel: {any}\n", .{original_pixel.raw}); //DEBUG
-                        // original_pixel = original_pixel.subtract_scalar(256.0); //DEBUG
-                        // original_pixel = original_pixel.divide_scalar(256.0); //DEBUG
-                        // std.debug.print("original_pixel_sub_256: {any}", .{original_pixel.raw}); //DEBUG
-                        const transformed_pixel = original_pixel.reorder_channels_to(BitmapModule.BGR_Channels).cast_values_normalized_to(u8, 0);
-                        try writer.writeByte(transformed_pixel.raw[0]);
-                        try writer.writeByte(transformed_pixel.raw[1]);
-                        try writer.writeByte(transformed_pixel.raw[2]);
+                        const bgr: BGR = switch (data_conversion) {
+                            .NO_CONVERSION_NEEDED_ALPHA_WITH_WHITE_CHANNELS => make: {
+                                if (settings.print_warnings_to_console) {
+                                    Assert.warn_with_reason(false, @src(), "input settings `NO_CONVERSION_NEEDED_ALPHA_WITH_WHITE_CHANNELS` indicates data only has an alpha channel (and is not written to color channels), but output format `.BPP_24` does not write any alpha (RGB only), output will be fully white", .{});
+                                }
+                                break :make BGR{ 255, 255, 255 };
+                            },
+                            .NO_CONVERSION_NEEDED_ALPHA_BECOMES_COLOR_CHANNELS => make: {
+                                assert_with_reason(@sizeOf(GRID_DEF.CELL_TYPE) == 1, @src(), "cell data was not 1 byte in size , `@sizeOf(cell) == {d}`", .{@sizeOf(GRID_DEF.CELL_TYPE)});
+                                const cell_cast: u8 = @bitCast(cell);
+                                break :make BGR{ cell_cast, cell_cast, cell_cast };
+                            },
+                            .NO_CONVERSION_NEEDED_BGR => make: {
+                                assert_with_reason(@sizeOf(GRID_DEF.CELL_TYPE) == 3, @src(), "cell data was not 3 bytes in size , `@sizeOf(cell) == {d}`", .{@sizeOf(GRID_DEF.CELL_TYPE)});
+                                break :make @bitCast(cell);
+                            },
+                            .NO_CONVERSION_NEEDED_BGRA => make: {
+                                assert_with_reason(@sizeOf(GRID_DEF.CELL_TYPE) == 4, @src(), "cell data was not 4 bytes in size , `@sizeOf(cell) == {d}`", .{@sizeOf(GRID_DEF.CELL_TYPE)});
+                                const bgra: BGRA = @bitCast(cell);
+                                break :make BGR{ bgra[0], bgra[1], bgra[2] };
+                            },
+                            .CONVERT_USING_FUNC => |func| make: {
+                                const bgra: BGRA = func(cell);
+                                break :make BGR{ bgra[0], bgra[1], bgra[2] };
+                            },
+                        };
+                        _ = try writer.write(bgr[0..]);
                     },
                     else => assert_unreachable(@src(), "invalid bits-per-pixel at this branch `{s}`", .{@tagName(settings.bits_per_pixel)}),
                 }
@@ -365,7 +498,6 @@ pub fn save_bitmap_to_file(path_relative_to_cwd: [:0]const u8, comptime BITMAP_D
             _ = try writer.write(PAD_BYTES[0..gap_after_row]);
         }
     }
-    try writer_holder.end();
 
     return size;
 }

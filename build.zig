@@ -55,8 +55,8 @@ pub fn build(b: *std.Build) void {
     options.addOption(bool, "NO_SDL", no_sdl);
 
     //DEPENDENCIES
-    if (!no_sdl) {}
-    const sdl_dep = b.dependency("sdl", .{
+
+    const sdl_dep: *std.Build.Dependency = if (!no_sdl) b.dependency("sdl", .{
         .target = target,
         .optimize = optimize,
         .preferred_linkage = preferred_linkage,
@@ -65,8 +65,8 @@ pub fn build(b: *std.Build) void {
         .lto = link_time_optimize,
         .emscripten_pthreads = sdl_emscripten_pthreads,
         .install_build_config_h = sdl_install_build_config_h,
-    });
-    const sdl_lib = sdl_dep.artifact("SDL3");
+    }) else undefined;
+    const sdl_lib: *std.Build.Step.Compile = if (!no_sdl) sdl_dep.artifact("SDL3") else undefined;
 
     //MAIN LIBRARY
 
@@ -76,11 +76,14 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
         .pic = pos_independant_code,
         .strip = strip_debug,
+        .link_libc = true,
     });
     if (!no_sdl) {
         lib.linkLibrary(sdl_lib);
     }
-    
+    lib.addCSourceFile(.{ .file = b.path("./vendor/stb_truetype/stb_truetype_wrapper.c") });
+    lib.addIncludePath(b.path("./vendor/stb_truetype"));
+
     lib.addOptions("config", options);
 
     const lib_tests = b.addTest(.{

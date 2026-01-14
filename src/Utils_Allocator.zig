@@ -104,33 +104,58 @@ pub fn InitNew(comptime T: type) type {
     };
 }
 
-pub fn realloc_custom(alloc: Allocator, old_mem: anytype, new_n: usize, copy_mode: CopyMode, init_new_mode: InitNew(@typeInfo(@TypeOf(old_mem)).pointer.child), clear_old_mode: ClearOldMode) t: {
+pub const AlignMode = enum(u8) {
+    ALIGN_TO_TYPE,
+    CUSTOM_ALIGN,
+};
+
+pub const Align = union(AlignMode) {
+    ALIGN_TO_TYPE: void,
+    CUSTOM_ALIGN: usize,
+
+    pub fn align_to_type() Align {
+        return Align{ .ALIGN_TO_TYPE = void{} };
+    }
+    pub fn custom_align(alignment: usize) Align {
+        return Align{ .CUSTOM_ALIGN = alignment };
+    }
+
+    pub fn get_align(self: Align, type_align: usize) usize {
+        return switch (self) {
+            .ALIGN_TO_TYPE => type_align,
+            .CUSTOM_ALIGN => |a| a,
+        };
+    }
+};
+
+pub fn realloc_custom(alloc: Allocator, old_mem: anytype, new_n: usize, comptime align_mode: Align, copy_mode: CopyMode, init_new_mode: InitNew(@typeInfo(@TypeOf(old_mem)).pointer.child), clear_old_mode: ClearOldMode) t: {
     const Slice = @typeInfo(@TypeOf(old_mem)).pointer;
     break :t Allocator.Error![]align(Slice.alignment) Slice.child;
 } {
     //COPIED FROM Allocator.zig
     const Slice = @typeInfo(@TypeOf(old_mem)).pointer;
+    const ALIGN = comptime align_mode.get_align(Slice.alignment);
     const T = Slice.child;
     if (old_mem.len == 0) {
-        return alloc.allocAdvancedWithRetAddr(T, .fromByteUnits(Slice.alignment), new_n, @returnAddress());
+        return alloc.allocAdvancedWithRetAddr(T, .fromByteUnits(ALIGN), new_n, @returnAddress());
     }
     if (new_n == 0) {
         alloc.free(old_mem);
-        const ptr = comptime std.mem.alignBackward(usize, math.maxInt(usize), Slice.alignment);
-        return @as([*]align(Slice.alignment) T, @ptrFromInt(ptr))[0..0];
+        const ptr = comptime std.mem.alignBackward(usize, math.maxInt(usize), ALIGN);
+        return @as([*]align(ALIGN) T, @ptrFromInt(ptr))[0..0];
     }
 
     const old_byte_slice = mem.sliceAsBytes(old_mem);
     const byte_count = math.mul(usize, @sizeOf(T), new_n) catch return Allocator.Error.OutOfMemory;
     // Note: can't set shrunk memory to undefined as memory shouldn't be modified on realloc failure
-    if (alloc.rawRemap(old_byte_slice, .fromByteUnits(Slice.alignment), byte_count, @returnAddress())) |p| {
-        const new_bytes: []align(Slice.alignment) u8 = @alignCast(p[0..byte_count]);
+    if (alloc.rawRemap(old_byte_slice, .fromByteUnits(ALIGN), byte_count, @returnAddress())) |p| {
+        const new_bytes: []align(ALIGN) u8 = @alignCast(p[0..byte_count]);
         return mem.bytesAsSlice(T, new_bytes);
     }
 
-    const new_mem = alloc.rawAlloc(byte_count, .fromByteUnits(Slice.alignment), @returnAddress()) orelse
+    const new_mem = alloc.rawAlloc(byte_count, .fromByteUnits(ALIGN), @returnAddress()) orelse
         return error.OutOfMemory;
-    const new_bytes: []align(Slice.alignment) u8 = @alignCast(new_mem[0..byte_count]);
+    const new_bytes: []align(ALIGN) u8 = @alignCast(new_mem[0..byte_count]);
     const new_mem_types = mem.bytesAsSlice(T, new_bytes);
     const copy_len = @min(byte_count, old_byte_slice.len);
     switch (copy_mode) {
@@ -193,6 +218,6 @@ pub fn realloc_custom(alloc: Allocator, old_mem: anytype, new_n: usize, copy_mod
         },
         .dont_memset_new => {},
     }
-    alloc.rawFree(old_byte_slice, .fromByteUnits(Slice.alignment), @returnAddress());
+    alloc.rawFree(old_byte_slice, .fromByteUnits(ALIGN), @returnAddress());
     return new_mem_types;
 }
