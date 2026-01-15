@@ -76,6 +76,7 @@ pub const Mat3x3 = @import("./Mat3x3.zig");
 pub const Math = @import("./Math.zig");
 pub const Measurement = @import("./Measurement.zig");
 pub const ParamTable = @import("./ParamTable.zig");
+pub const Pool = @import("./Pool.zig");
 pub const Quicksort = @import("./Quicksort.zig");
 pub const QuickWriter = @import("./QuickWriter.zig");
 pub const Reader = @import("./Reader.zig");

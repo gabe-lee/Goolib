@@ -201,9 +201,6 @@ pub const VERTEX_KIND = struct {
     const CUBIC: u8 = @intCast(C.STBTT_vcubic);
 };
 
-pub const ShapeConvertError = error{
-    invalid_vertex_type,
-};
 
 pub fn convert_vertex_list_to_new_shape_with_userdata(vertex_list: []Vertex, comptime T: type, comptime EDGE_USERDATA: type, comptime EDGE_USERDATA_DEFAULT: EDGE_USERDATA, shape_allocator: Allocator) ShapeConvertError!Shape(T, EDGE_USERDATA, EDGE_USERDATA_DEFAULT) {
     var shape = Shape(T, EDGE_USERDATA, EDGE_USERDATA_DEFAULT).init_capacity(2, shape_allocator);
@@ -319,6 +316,10 @@ pub fn convert_vertex_list_to_shape_with_userdata(vertex_list: []Vertex, comptim
         }
     }
 }
+
+pub const ShapeConvertError = error{
+    invalid_vertex_type,
+};
 
 test "TyueType_STB__Lato-Regular.ttf" {
     const Test = Root.Testing;

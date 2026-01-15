@@ -868,6 +868,7 @@ pub fn CubicBezier(comptime T: type) type {
             return .new(
                 self.p[0].multiply(vec),
                 self.p[1].multiply(vec),
+                self.p[2].multiply(vec),
                 self.p[3].multiply(vec),
             );
         }
@@ -1150,7 +1151,7 @@ pub fn CubicBezier(comptime T: type) type {
             }
             return result;
         }
-        pub fn add_bounds_to_aabb(self: Self, aabb: *AABB, comptime linear_estimate: LinearEstimate(T)) void {
+        pub fn add_bounds_to_aabb(self: Self, aabb: *AABB, linear_estimate: LinearEstimate(T)) void {
             aabb.* = aabb.combine_with_point(self.p[0]);
             aabb.* = aabb.combine_with_point(self.p[3]);
             const seg_1 = self.p[1].subtract(self.p[0]);
@@ -1274,10 +1275,10 @@ pub fn EdgeWithUserdata(comptime T: type, comptime USERDATA: type, comptime USER
             return self.edge.lerp(percent);
         }
         pub fn translate(self: Self, vec: Vector) Self {
-            return self.edge.translate(vec);
+            return Self{ .edge = self.edge.translate(vec), .userdata = self.userdata };
         }
         pub fn scale(self: Self, vec: Vector) Self {
-            return self.edge.scale(vec);
+            return Self{ .edge = self.edge.scale(vec), .userdata = self.userdata };
         }
         pub fn apply_complex_transform(self: Self, steps: []const Vector.TransformStep) Self {
             return Self{ .edge = self.edge.apply_complex_transform(steps), .userdata = self.userdata };
@@ -1316,7 +1317,7 @@ pub fn EdgeWithUserdata(comptime T: type, comptime USERDATA: type, comptime USER
         pub fn horizontal_intersections(self: Self, y_value: T, comptime POINT_MODE: MathX.ScanlinePointMode, comptime SLOPE_MODE: MathX.ScanlineSlopeMode, comptime SLOPE_TYPE: type, estimates: Estimates(T)) ScanlineIntersections(3, T, POINT_MODE, SLOPE_MODE, SLOPE_TYPE) {
             return self.edge.horizontal_intersections(y_value, POINT_MODE, SLOPE_MODE, SLOPE_TYPE, estimates);
         }
-        pub fn add_bounds_to_aabb(self: Self, aabb: *AABB, comptime linear_estimate: LinearEstimate(T)) void {
+        pub fn add_bounds_to_aabb(self: Self, aabb: *AABB, linear_estimate: LinearEstimate(T)) void {
             self.edge.add_bounds_to_aabb(aabb, linear_estimate);
         }
         pub fn move_start_point(self: *Self, new_start: Vector) void {
@@ -1570,7 +1571,7 @@ pub fn Edge(comptime T: type) type {
                 .CUBIC_BEZIER => self.CUBIC_BEZIER.horizontal_intersections(y_value, POINT_MODE, SLOPE_MODE, SLOPE_TYPE, estimates.double_root, estimates.quadratic, estimates.linear),
             };
         }
-        pub fn add_bounds_to_aabb(self: Self, aabb: *AABB, comptime linear_estimate: LinearEstimate(T)) void {
+        pub fn add_bounds_to_aabb(self: Self, aabb: *AABB, linear_estimate: LinearEstimate(T)) void {
             return switch (self) {
                 .POINT => self.POINT.add_bounds_to_aabb(aabb),
                 .LINE => self.LINE.add_bounds_to_aabb(aabb),
@@ -1870,13 +1871,13 @@ pub fn Contour(comptime T: type, comptime EDGE_USERDATA: type, comptime EDGE_USE
             _ = self.edges.append(edge, alloc);
         }
 
-        pub fn add_bounds_to_aabb(self: Self, aabb: *AABB, linear_estimate: LinearEstimate(T)) void {
+        pub fn add_bounds_to_aabb(self: *Self, aabb: *AABB, linear_estimate: LinearEstimate(T)) void {
             for (self.edges.slice()) |edge| {
                 edge.add_bounds_to_aabb(aabb, linear_estimate);
             }
         }
 
-        pub fn add_mitered_bounds_to_aabb(self: Self, aabb: *AABB, border_size: T, miter_limit: T, polarity: T) void {
+        pub fn add_mitered_bounds_to_aabb(self: *Self, aabb: *AABB, border_size: T, miter_limit: T, polarity: T) void {
             if (self.edges.is_empty()) return;
             var prev_tangent = self.edges.get_last().tangent(1).normalize_may_be_zero(.norm_zero_is_zero);
             var this_tangent: Vector = undefined;
@@ -2050,41 +2051,41 @@ pub fn Shape(comptime T: type, comptime EDGE_USERDATA: type, comptime EDGE_USERD
         const VectorF = Vec2.define_vec2_type(Vector.F);
         const AABB = AABB2.define_aabb2_type(T);
         const EDGE = EdgeWithUserdata(T, EDGE_USERDATA, EDGE_USERDATA_DEFAULT_VALUE);
-        const SHAPE = Contour(T, EDGE_USERDATA, EDGE_USERDATA_DEFAULT_VALUE);
+        const CONTOUR = Contour(T, EDGE_USERDATA, EDGE_USERDATA_DEFAULT_VALUE);
 
-        shapes: List(SHAPE) = .{},
+        contours: List(CONTOUR) = .{},
 
         pub fn clear(self: *Self, alloc: Allocator) void {
-            for (self.shapes.slice()) |*shape| {
+            for (self.contours.slice()) |*shape| {
                 shape.free(alloc);
             }
-            self.shapes.clear();
+            self.contours.clear();
         }
         pub fn init_capacity(shape_cap: usize, alloc: Allocator) Self {
             return Self{
-                .shapes = List(SHAPE).init_capacity(shape_cap, alloc),
+                .contours = List(CONTOUR).init_capacity(shape_cap, alloc),
             };
         }
         pub fn free(self: *Self, alloc: Allocator) void {
-            for (self.shapes.slice()) |*shape| {
-                shape.free(alloc);
+            for (self.contours.slice()) |*contour| {
+                contour.free(alloc);
             }
-            self.shapes.free(alloc);
+            self.contours.free(alloc);
         }
 
         pub fn all_contours_are_closed(self: Self, epsilon: T) bool {
-            for (self.shapes.slice()) |shape| {
-                if (!shape.is_closed(epsilon)) return false;
+            for (self.contours.slice()) |contour| {
+                if (!contour.is_closed(epsilon)) return false;
             }
             return true;
         }
 
-        pub fn append_contour(self: *Self, shape: SHAPE, alloc: Allocator) void {
-            _ = self.shapes.append(shape, alloc);
+        pub fn append_contour(self: *Self, shape: CONTOUR, alloc: Allocator) void {
+            _ = self.contours.append(shape, alloc);
         }
-        pub fn append_empty_contour(self: *Self, shape_edge_capacity: usize, alloc: Allocator) *SHAPE {
-            const idx = self.shapes.append(.init_capacity(shape_edge_capacity, alloc), alloc);
-            return self.shapes.get_ptr(idx);
+        pub fn append_empty_contour(self: *Self, shape_edge_capacity: usize, alloc: Allocator) *CONTOUR {
+            const idx = self.contours.append(.init_capacity(shape_edge_capacity, alloc), alloc);
+            return self.contours.get_ptr(idx);
         }
 
         /// This is not the same as vector normalization!
@@ -2097,81 +2098,90 @@ pub fn Shape(comptime T: type, comptime EDGE_USERDATA: type, comptime EDGE_USERD
         /// Otherwise, it de-converges adjacent contour edges when the dot product of the tangents of the two edges at the corner where they meet
         /// is less than `corner_dot_epsilon - 1` using the `deconverge_factor`
         pub fn normalize(self: *Self, alloc: Allocator, degenerate_epsilon: T, corner_dot_epsilon: anytype, deconverge_factor: anytype) void {
-            for (self.shapes.slice()) |*shape| {
-                shape.normalize(alloc, degenerate_epsilon, corner_dot_epsilon, deconverge_factor);
+            for (self.contours.slice()) |*contour| {
+                contour.normalize(alloc, degenerate_epsilon, corner_dot_epsilon, deconverge_factor);
             }
         }
 
         pub fn translate(self: *Self, vec: Vector) void {
-            for (self.shapes.slice()) |*shape| {
-                shape.translate(vec);
+            for (self.contours.slice()) |*contour| {
+                contour.translate(vec);
             }
         }
 
         pub fn scale(self: *Self, vec: Vector) void {
-            for (self.shapes.slice()) |*shape| {
-                shape.scale(vec);
+            for (self.contours.slice()) |*contour| {
+                contour.scale(vec);
             }
         }
         pub fn apply_complex_transform(self: *Self, steps: []const Vector.TransformStep) void {
-            for (self.shapes.slice()) |*shape| {
-                shape.apply_complex_transform(steps);
+            for (self.contours.slice()) |*contour| {
+                contour.apply_complex_transform(steps);
             }
         }
         pub fn apply_inverse_complex_transform(self: *Self, steps: []const Vector.TransformStep) void {
-            for (self.shapes.slice()) |*shape| {
-                shape.apply_inverse_complex_transform(steps);
+            for (self.contours.slice()) |*contour| {
+                contour.apply_inverse_complex_transform(steps);
             }
         }
         pub fn apply_affine_transform_matrix(self: *Self, matrix: Matrix) void {
-            for (self.shapes.slice()) |*shape| {
-                shape.apply_affine_transform_matrix(matrix);
+            for (self.contours.slice()) |*contour| {
+                contour.apply_affine_transform_matrix(matrix);
             }
         }
 
-        pub fn add_bounds_to_aabb(self: Self, aabb: *AABB, linear_estimate: LinearEstimate(T)) void {
-            for (self.shapes.slice()) |shape| {
-                shape.add_bounds_to_aabb(aabb, linear_estimate);
+        pub fn add_bounds_to_aabb(self: *Self, aabb: *AABB, linear_estimate: LinearEstimate(T)) void {
+            for (self.contours.slice()) |*contour| {
+                contour.add_bounds_to_aabb(aabb, linear_estimate);
             }
         }
 
-        pub fn add_mitered_bounds_to_aabb(self: Self, aabb: *AABB, border_size: T, miter_limit: T, polarity: T) void {
-            for (self.shapes.slice()) |shape| {
-                shape.add_mitered_bounds_to_aabb(aabb, border_size, miter_limit, polarity);
+        pub fn add_mitered_bounds_to_aabb(self: *Self, aabb: *AABB, border_size: T, miter_limit: T, polarity: T) void {
+            for (self.contours.slice()) |*contour| {
+                contour.add_mitered_bounds_to_aabb(aabb, border_size, miter_limit, polarity);
             }
         }
 
-        pub fn get_bounds(self: Self, border_width: T, miter_limit: T, polarity: T) AABB {
+        pub fn get_bounds_with_miter(self: *Self, border_width: T, miter_limit: T, polarity: T, linear_estimate: MathX.LinearEstimate(T)) AABB {
             var aabb = AABB{};
-            self.add_bounds_to_aabb(&aabb);
+            self.add_bounds_to_aabb(&aabb, linear_estimate);
             if (border_width > 0) {
-                aabb.expand_by(border_width);
+                aabb = aabb.expand_by(border_width);
                 if (miter_limit > 0) {
                     self.add_mitered_bounds_to_aabb(&aabb, border_width, miter_limit, polarity);
                 }
             }
             return aabb;
         }
+        pub fn get_bounds_with_miter_default_estimate(self: *Self, border_width: T, miter_limit: T, polarity: T) AABB {
+            return self.get_bounds_with_miter(border_width, miter_limit, polarity, Estimates(T).DEFAULT.linear);
+        }
+        pub fn get_bounds(self: *Self, linear_estimate: MathX.LinearEstimate(T)) AABB {
+            return self.get_bounds_with_miter(0, 0, 0, linear_estimate);
+        }
+        pub fn get_bounds_default_estimate(self: *Self) AABB {
+            return self.get_bounds_with_miter(0, 0, 0, Estimates(T).DEFAULT.linear);
+        }
 
         pub fn get_new_horizontal_scanline_intersections(self: Self, y_value: T, alloc: Allocator, comptime SLOPE_MODE: MathX.ScanlineSlopeMode, comptime SLOPE_TYPE: type, estimates: Estimates(T), transform: TransformNoAlter(T)) Scanline(T, SLOPE_MODE, SLOPE_TYPE) {
             var scanline = Scanline(T, SLOPE_MODE, SLOPE_TYPE).init_cap(8, alloc);
-            for (self.shapes.slice()) |shape| {
-                shape.append_horizontal_scanline_intersections(y_value, SLOPE_MODE, SLOPE_TYPE, &scanline, alloc, estimates, transform);
+            for (self.contours.slice()) |contour| {
+                contour.append_horizontal_scanline_intersections(y_value, SLOPE_MODE, SLOPE_TYPE, &scanline, alloc, estimates, transform);
             }
             return scanline;
         }
 
         pub fn remake_horizontal_scanline_intersections(self: Self, y_value: T, comptime SLOPE_MODE: MathX.ScanlineSlopeMode, comptime SLOPE_TYPE: type, scanline: *Scanline(T, SLOPE_MODE, SLOPE_TYPE), scanline_allocator: Allocator, estimates: Estimates(T), transform: TransformNoAlter(T)) void {
             scanline.reset();
-            for (self.shapes.slice()) |shape| {
-                shape.append_horizontal_scanline_intersections(y_value, SLOPE_MODE, SLOPE_TYPE, scanline, scanline_allocator, estimates, transform);
+            for (self.contours.slice()) |contour| {
+                contour.append_horizontal_scanline_intersections(y_value, SLOPE_MODE, SLOPE_TYPE, scanline, scanline_allocator, estimates, transform);
             }
         }
 
         pub fn edge_count(self: Self) u32 {
             var total: u32 = 0;
-            for (self.shapes.slice()) |shape| {
-                total += shape.edges.len;
+            for (self.contours.slice()) |contour| {
+                total += contour.edges.len;
             }
             return total;
         }
@@ -2179,11 +2189,11 @@ pub fn Shape(comptime T: type, comptime EDGE_USERDATA: type, comptime EDGE_USERD
         /// reverses shapes that have a winding that does not agree
         pub fn reorient_shape_winding_directions(self: *Self, temp_alloc: Allocator, comptime POINT_MODE: MathX.ScanlinePointMode, comptime SLOPE_MODE: MathX.ScanlineSlopeMode, comptime SLOPE_TYPE: type, comptime double_root_estimate: DoubleRootEstimate(T), comptime quadratic_estimate: QuadraticEstimate(T), comptime linear_estimate: LinearEstimate(T)) void {
             const IntersectionWithIdx = IntersectionWithShapeIdx(T, SLOPE_MODE, SLOPE_TYPE);
-            var orientations = List(i32).init_capacity(@intCast(self.shapes.len), temp_alloc);
+            var orientations = List(i32).init_capacity(@intCast(self.contours.len), temp_alloc);
             defer orientations.free(temp_alloc);
-            var intersections = List(IntersectionWithIdx).init_capacity(@intCast(self.shapes.len), temp_alloc);
+            var intersections = List(IntersectionWithIdx).init_capacity(@intCast(self.contours.len), temp_alloc);
             defer intersections.free(temp_alloc);
-            for (self.shapes.slice(), 0..) |*shape, i| {
+            for (self.contours.slice(), 0..) |*shape, i| {
                 if (i >= orientations.len and !shape.edges.is_empty()) {
                     orientations.len = @intCast(i);
                     const y0 = shape.edges.get_first().get_start().y;
@@ -2198,7 +2208,7 @@ pub fn Shape(comptime T: type, comptime EDGE_USERDATA: type, comptime EDGE_USERD
                         y1 = edge.lerp(HALF_SQRT_5_MINUS_1).y;
                     }
                     const y = MathX.lerp(y0, y1, HALF_SQRT_5_MINUS_1);
-                    for (self.shapes.slice(), 0..) |shape_2, j| {
+                    for (self.contours.slice(), 0..) |shape_2, j| {
                         for (shape_2.edges.slice()) |edge| {
                             const edge_intersections = edge.horizontal_intersections(y, POINT_MODE, SLOPE_MODE, SLOPE_TYPE, double_root_estimate, quadratic_estimate, linear_estimate);
                             var k: u32 = 0;
@@ -2238,7 +2248,7 @@ pub fn Shape(comptime T: type, comptime EDGE_USERDATA: type, comptime EDGE_USERD
             }
 
             // Reverse shapes that have the opposite orientation
-            for (self.shapes.slice(), 0..) |*shape, i| {
+            for (self.contours.slice(), 0..) |*shape, i| {
                 if (orientations.ptr[i] < 0) {
                     shape.reverse();
                 }
@@ -3832,7 +3842,7 @@ fn make_test_triangle(inner_edges: *[3]EdgeWithUserdata(f32, EdgeColor, .WHITE),
         },
     };
     return CompositeShapeType{
-        .shapes = .{
+        .contours = .{
             .ptr = shapes[0..2],
             .len = 2,
             .cap = 2,

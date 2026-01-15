@@ -72,6 +72,9 @@ pub fn List(comptime T: type) type {
         pub fn slice(self: Self) []T {
             return self.ptr[0..self.len];
         }
+        pub fn slice_const(self: Self) []const T {
+            return self.slice();
+        }
         pub fn sentinel_slice_assume_capacity(self: Self, comptime SENTINEL: T) [:SENTINEL]T {
             assert_with_reason(self.len < self.cap, @src(), "cannot return a sentinel slice if no space exists to write the sentinel at (len = cap = {d})", .{self.len});
             self.ptr[self.len] = SENTINEL;
@@ -82,8 +85,18 @@ pub fn List(comptime T: type) type {
             self.ensure_free_slots(1, alloc);
             return self.sentinel_slice_assume_capacity(SENTINEL);
         }
+        pub fn sentinel_slice_const_assume_capacity(self: Self, comptime SENTINEL: T) [:SENTINEL]T {
+            return self.sentinel_slice_assume_capacity(SENTINEL);
+        }
+        pub fn sentinel_slice_const(self: *Self, alloc: Allocator, comptime SENTINEL: T) [:SENTINEL]T {
+            self.ensure_free_slots(1, alloc);
+            return self.sentinel_slice_const_assume_capacity(SENTINEL);
+        }
         pub fn slice_range(self: Self, range: Range) []T {
             return self.ptr[range.first_idx .. range.last_idx + 1];
+        }
+        pub fn slice_range_const(self: Self, range: Range) []const T {
+            return self.slice_range(range);
         }
 
         pub fn cast_to_byte_list(self: Self) List(u8) {
@@ -611,6 +624,9 @@ pub fn List(comptime T: type) type {
         }
         pub fn append(self: *Self, val: T, alloc: Allocator) usize {
             return P.append(self, val, alloc);
+        }
+        pub fn append_assume_capacity(self: *Self, val: T) usize {
+            return P.append_assume_capacity(self, val, NO_ALLOC);
         }
         pub fn try_append(self: *Self, val: T, alloc: Allocator) ListError!usize {
             return P.try_append(self, val, alloc);

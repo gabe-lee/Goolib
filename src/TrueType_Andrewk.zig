@@ -342,6 +342,7 @@ pub fn glyphBitmapSubpixel(
     shift_y: f32,
 ) GlyphBitmapError!GlyphBitmap {
     const vertices = try glyphShape(tt, gpa, glyph);
+    std.debug.print("\nvertices: len = {d} {any}\n", .{ vertices.len, vertices }); //DEBUG
     defer gpa.free(vertices);
 
     assert(scale_x != 0);
@@ -2413,14 +2414,53 @@ fn getGlyphSubrs(cff_data: *const CffData, glyph: GlyphIndex) Buf {
 // ---
 
 test "Andrewk's fork works" {
+    const alloc = std.heap.page_allocator;
     const Test = Root.Testing;
+    const OUT_DEF = Root.DataGrid.GridDefinition{
+        .CELL_TYPE = u8,
+        .ROW_COLUMN_ORDER = .ROW_MAJOR,
+        .X_ORDER = .LEFT_TO_RIGHT,
+        .Y_ORDER = .TOP_TO_BOTTOM,
+    };
+    const OUT_GRID = Root.DataGrid.DataGrid(OUT_DEF);
+    var output_cells_zig = try std.ArrayList(u8).initCapacity(alloc, 4096);
+    defer output_cells_zig.deinit(alloc);
+    // var output_cells = OUT_GRID.CellList.init_capacity(4096, std.heap.page_allocator);
+    // output_cells.len = 4096;
+    // const out_grid = OUT_GRID{
+    //     .cells = output_cells,
+    //     .width = 64,
+    //     .height = 64,
+    //     .major_stride = 64,
+    //     .owns_memory = false,
+    // };
     const data = try Utils.File.load_entire_file("./vendor/fonts/Lato/Lato-Regular.ttf", .{});
     defer data.free_all(std.heap.page_allocator);
     var font_info = try load(data.data);
-    const CHARS_TO_CHECK = "The quick brown fox jumped over the lazy brown dog. %&@";
-    for (CHARS_TO_CHECK[0..]) |char| {
+    const CHARS = [_]u32{'A'};
+    // const CHARS = [_]u32{ 'A', '&', '☠' };
+
+    try std.fs.cwd().makePath("test_out/true_type");
+    for (CHARS[0..]) |char| {
+        output_cells_zig.clearRetainingCapacity();
         const index = font_info.codepointGlyphIndex(@intCast(char));
         const metrics = font_info.glyphHMetrics(index);
-        try Test.expect_greater_than(metrics.advance_width, "metrics.advance_width", 0, "0", "all characters to check should have a positive 'advance width', but got 0 for char '{c}'", .{char});
+        const scale_54_px = font_info.scaleForPixelHeight(54);
+        try Test.expect_greater_than(metrics.advance_width, "metrics.advance_width", 0, "0", "all characters to check should have a positive 'advance width', but got 0 for char '{d}'", .{char});
+        const box = try font_info.glyphBitmap(alloc, &output_cells_zig, index, scale_54_px, scale_54_px);
+        // const out_start = MathX.upgrade_add_out(MathX.upgrade_multiply(box.off_y, box.width), box.off_x, usize);
+        // const out_len = box.width
+        const out_grid = OUT_GRID{
+            .cells = List(u8){
+                .ptr = output_cells_zig.items.ptr,
+                .len = @intCast(output_cells_zig.items.len),
+                .cap = @intCast(output_cells_zig.capacity),
+            },
+            .width = @intCast(box.width),
+            .height = @intCast(box.height),
+            .major_stride = @intCast(box.width),
+            .owns_memory = false,
+        };
+        _ = try Root.FileFormat.Bitmap.save_bitmap_to_file("test_out/true_type/andrewk_raster_char_?" ++ ".bmp", OUT_DEF, out_grid, .{ .bits_per_pixel = .BPP_8 }, .NO_CONVERSION_NEEDED_ALPHA_BECOMES_COLOR_CHANNELS, alloc);
     }
 }

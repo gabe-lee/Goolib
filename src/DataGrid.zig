@@ -36,10 +36,13 @@ const List = Root.IList_List.List;
 const Range = Root.IList.Range;
 const Color_ = Root.Color;
 const MathX = Root.Math;
+const Vec2 = Root.Vec2;
 
 const assert_with_reason = Assert.assert_with_reason;
 const assert_allocation_failure = Assert.assert_allocation_failure;
 const num_cast = Root.Cast.num_cast;
+
+const Vector = Vec2.define_vec2_type(u32);
 
 pub const YOrder = enum(u8) {
     TOP_TO_BOTTOM,
@@ -719,5 +722,74 @@ pub fn DataGrid(comptime DEFINITION: GridDefinition) type {
             const yyy1 = self.get_y_with_origin(origin, y1);
             return self.get_region(xxx1, yyy1, width, height);
         }
+
+        pub const SourceKind = enum(u8) {
+            EXISTING,
+            ALLOCATE_NEW,
+            REUSE_CELL_BUFFER,
+            PROVIDER_FUNC,
+        };
+
+        pub const DataGridWithParentOffset = struct {
+            data_grid: Self = .{},
+            parent_offset: Vector = .ZERO_ZERO,
+
+            pub fn new_no_parent(grid: Self) DataGridWithParentOffset {
+                return DataGridWithParentOffset{
+                    .data_grid = grid,
+                };
+            }
+            pub fn new_with_parent(grid: Self, parent_offset: Vector) DataGridWithParentOffset {
+                return DataGridWithParentOffset{
+                    .data_grid = grid,
+                    .parent_offset = parent_offset,
+                };
+            }
+        };
+
+        pub const Source = union(SourceKind) {
+            EXISTING: struct {
+                grid_with_offset: DataGridWithParentOffset,
+                fill: ?DEF.CELL_TYPE,
+            },
+            ALLOCATE_NEW: struct {
+                alloc: Allocator,
+                fill: ?DEF.CELL_TYPE,
+            },
+            REUSE_CELL_BUFFER: struct {
+                cells: CellList,
+                alloc: Allocator,
+                fill: ?DEF.CELL_TYPE,
+            },
+            PROVIDER_FUNC: struct {
+                func: *const fn (width: u32, height: u32, fill: ?DEF.CELL_TYPE) ?DataGridWithParentOffset,
+                fill: ?DEF.CELL_TYPE,
+            },
+
+            pub fn existing_data_grid(grid_with_offset: DataGridWithParentOffset, fill: ?DEF.CELL_TYPE) Source {
+                return Source{ .EXISTING = .{ .grid_with_offset = grid_with_offset, .fill = fill } };
+            }
+            pub fn allocate_new_data_grid(alloc: Allocator, fill: ?DEF.CELL_TYPE) Source {
+                return Source{ .ALLOCATE_NEW = .{ .alloc = alloc, .fill = fill } };
+            }
+            pub fn reuse_cell_buffer(cells: CellList, alloc: Allocator, fill: ?DEF.CELL_TYPE) Source {
+                return Source{ .REUSE_CELL_BUFFER = .{ .cells = cells, .alloc = alloc, .fill = fill } };
+            }
+            pub fn data_grid_provider(func: *const fn (width: u32, height: u32, fill: ?DEF.CELL_TYPE) ?DataGridWithParentOffset, fill: ?DEF.CELL_TYPE) Source {
+                return Source{ .PROVIDER_FUNC = .{ .func = func, .fill = fill } };
+            }
+
+            pub fn obtain_grid(self: Source, width: u32, height: u32) ?DataGridWithParentOffset {
+                return switch (self) {
+                    .EXISTING => |src| after_fill: {
+                        if (src.fill) |fill| src.grid_with_offset.data_grid.fill_all(fill);
+                        break :after_fill src.grid_with_offset;
+                    },
+                    .ALLOCATE_NEW => |src| DataGridWithParentOffset.new_no_parent(Self.init(width, height, src.fill, src.alloc)),
+                    .REUSE_CELL_BUFFER => |src| DataGridWithParentOffset.new_no_parent(Self.init_from_existing_cell_buffer(width, height, src.fill, src.cells, src.alloc)),
+                    .PROVIDER_FUNC => |src| src.func(width, height, src.fill),
+                };
+            }
+        };
     };
 }

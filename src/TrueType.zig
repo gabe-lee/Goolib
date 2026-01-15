@@ -1,13 +1,13 @@
-//! Provides the ability to read TrueTypeFont .ttf files and rasterize glyphs
+//! Provides the ability to read TrueType .ttf files and rasterize glyphs
 //!
-//! This is largely a direct translation of `https://codeberg.org/andrewrk/TrueTypeFont`,
+//! This is largely a conversion of `https://codeberg.org/andrewrk/TrueType`,
 //! which is itself a translation of `https://github.com/nothings/stb/blob/master/stb_truetype.h`
 //! from C to Zig.
 //!
-//! Most of the code logic remains unchanged from `https://codeberg.org/andrewrk/TrueTypeFont`,
-//! except that the function signatures, enum tags, and a few return types are altered
-//! to more closely align with THIS library and integrate with Goolib's native vector
-//! and AABB types, etc.
+//! Most (if not all) of the code __logic__ remains unchanged from `https://codeberg.org/andrewrk/TrueType`,
+//! except that many function signatures and return types, error tags, enum tags, struct types are altered
+//! to more closely align with Goolib's conventions and integrate with Goolib's native Vec2,
+//! AABB, DataGrid/Bitmap, Shape, List, etc. types
 //!
 //! The chain of licenses from the original onward are listed below,
 //!
@@ -59,7 +59,7 @@
 //! AUTHORS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN
 //! ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
 //! WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
-//! ### License (https://codeberg.org/andrewrk/TrueTypeFont): MIT
+//! ### License (https://codeberg.org/andrewrk/TrueType): MIT
 //! The MIT License (Expat)
 //!
 //! Copyright (c) contributors
@@ -114,7 +114,7 @@ const Utils = Root.Utils;
 const Allocator = std.mem.Allocator;
 const AllocInfal = Root.AllocatorInfallible;
 const DummyAllocator = Root.DummyAllocator;
-const Flags = Root.Flags;
+// const Flags = Root.Flags;
 const IList = Root.IList.IList;
 const List = Root.IList_List.List;
 const Range = Root.IList.Range;
@@ -127,20 +127,37 @@ const ShapeModule = Root.Shape;
 const Contour = ShapeModule.Contour;
 const DataGridModule = Root.DataGrid;
 const BitmapFormat = Root.FileFormat.Bitmap;
+const PoolModule = Root.Pool;
+const Shape = ShapeModule.Shape;
 
 const AABB_i32 = AABB2.define_aabb2_type(i32);
 const AABB_i16 = AABB2.define_aabb2_type(i16);
+const Vec_i16 = Vec2.define_vec2_type(i16);
+const Vec_i32 = Vec2.define_vec2_type(i32);
+const Vec_u32 = Vec2.define_vec2_type(u32);
+const Vec_f32 = Vec2.define_vec2_type(f32);
+
+pub fn ActiveEdgePool(comptime THREADING: Root.CommonTypes.ThreadingMode) type {
+    return PoolModule.Pool(ActiveEdge, .{}, u32, 64, THREADING);
+}
+pub fn VertexListPool(comptime THREADING: Root.CommonTypes.ThreadingMode) type {
+    return PoolModule.Pool(List(Vertex), .{}, u32, 8, THREADING);
+}
+pub fn ContourPool(comptime T: type, comptime EDGE_USERDATA: type, comptime EDGE_USERDATA_DEFAULT_VALUE: EDGE_USERDATA, comptime THREADING: Root.CommonTypes.ThreadingMode) type {
+    return PoolModule.Pool(Contour(T, EDGE_USERDATA, EDGE_USERDATA_DEFAULT_VALUE), .{}, u32, 8, THREADING);
+}
 const DATA_GRID_U8_DEF = DataGridModule.GridDefinition{
     .CELL_TYPE = u8,
 };
 const DataGrid_u8 = DataGridModule.DataGrid(DATA_GRID_U8_DEF);
 
 const native_endian = build.cpu.arch.endian();
+const SCANLINE_BUFFER_SIZE = 4096; //DEBUG this should be much smaller
 
 // pub const VertexList = List(Vertex);
 
 /// Direct C bindings for stb_truetype.h
-pub const STB_TrueTypeFont = @import("./TrueTypeFont_STB.zig");
+// pub const STB_TrueTypeFont = @import("./TrueTypeFont_STB.zig");
 
 const assert_with_reason = Assert.assert_with_reason;
 const assert_unreachable = Assert.assert_unreachable;
@@ -183,20 +200,34 @@ const MicrosoftEncodingId = enum(u16) {
     UNICODE_FULL = 10,
 };
 
-pub const GlyphBitmapDimensions = struct {
-    width: u16,
-    height: u16,
-    /// Offset in pixel space from the glyph origin to the left of the bitmap.
-    off_x: i16,
-    /// Offset in pixel space from the glyph origin to the top of the bitmap.
-    off_y: i16,
+pub const GlyphBitmapOutput = struct {
+    data_grid: DataGrid_u8,
+    size: Vec_i32,
+    local_offset: Vec_i32,
+    parent_offset: Vec_u32,
 
-    pub const empty: GlyphBitmapDimensions = .{
-        .width = 0,
-        .height = 0,
-        .off_x = 0,
-        .off_y = 0,
+    pub const empty: GlyphBitmapOutput = .{
+        .data_grid = .{},
+        .size = .ZERO_ZERO,
+        .local_offset = .ZERO_ZERO,
+        .parent_offset = .ZERO_ZERO,
     };
+
+    pub fn total_offset(self: GlyphBitmapOutput) Vec_u32 {
+        return self.parent_offset.add(self.local_offset);
+    }
+};
+
+pub const PixelFlatness = struct {
+    val: f32,
+
+    pub const DEFAULT = PixelFlatness{ .val = 0.35 };
+    pub fn default_pixel_flatness() PixelFlatness {
+        return DEFAULT;
+    }
+    pub fn with_pixel_flatness(val: f32) PixelFlatness {
+        return PixelFlatness{ .val = val };
+    }
 };
 
 pub const VerticalMetrics = struct {
@@ -218,32 +249,32 @@ pub const HorizontalMetrics = struct {
 };
 
 pub const GlyphBitmapError = error{
-    OutOfMemory,
-    GlyphNotFound,
-    Unimplemented,
-    RMoveToStack,
-    VMoveToStack,
-    HMoveToStack,
-    RLineToStack,
-    VLineToStack,
-    HLineToStack,
-    HCurveToStack,
-    RCurveToStack,
-    RCurveLineStack,
-    CurveLineStack,
-    RLineCurveStack,
-    CallGSubRStack,
-    RecursionLimit,
-    SubRNotFound,
-    ReturnOutsideSubR,
-    HFlexStack,
-    FlexStack,
-    HFlex1Stack,
-    Flex1Stack,
-    CurveToStack,
-    ReservedOperator,
-    PushStackOverflow,
-    NoEndChar,
+    could_not_obtain_bitmap_from_source,
+    glyph_not_found,
+    unimplemented,
+    r_move_to_stack,
+    v_move_to_stack,
+    h_move_to_stack,
+    r_line_to_stack,
+    v_line_to_stack,
+    h_line_to_stack,
+    h_curve_to_stack,
+    r_curve_to_stack,
+    r_curve_line_stack,
+    curve_line_stack,
+    r_line_curve_stack,
+    call_global_subroutines_stack,
+    recursion_limit,
+    subroutine_not_found,
+    return_outside_subroutine,
+    h_flex_stack,
+    flex_stack,
+    h_flex_1_stack,
+    flex_1_stack,
+    curve_to_stack,
+    reserved_operator,
+    push_stack_overflow,
+    no_end_char,
 };
 
 pub const Vertex = struct {
@@ -270,6 +301,114 @@ pub const Vertex = struct {
         v.cx = @intCast(cx);
         v.cy = @intCast(cy);
     }
+};
+
+pub const Point_f32 = Vec2.define_vec2_type(f32);
+
+pub const FlattenedCurvesBuffer = struct {
+    points: List(Point_f32) = .{},
+    contour_lengths: List(u32) = .{},
+    alloc: Allocator,
+
+    pub fn init_empty(alloc: Allocator) FlattenedCurvesBuffer {
+        return FlattenedCurvesBuffer{
+            .alloc = alloc,
+        };
+    }
+
+    pub fn init_capacity(cap: usize, alloc: Allocator) FlattenedCurvesBuffer {
+        return FlattenedCurvesBuffer{
+            .points = List(Point_f32).init_capacity(cap, alloc),
+            .contour_lengths = List(u32).init_capacity(cap, alloc),
+            .alloc = alloc,
+        };
+    }
+
+    pub fn clear(self: *FlattenedCurvesBuffer) void {
+        self.points.clear();
+        self.contour_lengths.clear();
+    }
+
+    pub fn free(self: *FlattenedCurvesBuffer) void {
+        self.points.free(self.alloc);
+        self.contour_lengths.free(self.alloc);
+        self.* = undefined;
+    }
+};
+
+const Edge = struct {
+    x0: f32,
+    y0: f32,
+    x1: f32,
+    y1: f32,
+    invert: bool,
+
+    pub fn y0_less_than(a: Edge, b: Edge) bool {
+        return a.y0 < b.y0;
+    }
+};
+
+pub const EdgesBuffer = struct {
+    edges: List(Edge) = .{},
+    alloc: Allocator,
+
+    pub fn init_empty(alloc: Allocator) EdgesBuffer {
+        return EdgesBuffer{
+            .alloc = alloc,
+        };
+    }
+
+    pub fn init_capacity(cap: usize, alloc: Allocator) EdgesBuffer {
+        return EdgesBuffer{
+            .edges = List(Edge).init_capacity(cap, alloc),
+            .alloc = alloc,
+        };
+    }
+
+    pub fn clear(self: *EdgesBuffer) void {
+        self.edges.clear();
+    }
+
+    pub fn free(self: *EdgesBuffer) void {
+        self.edges.free(self.alloc);
+        self.* = undefined;
+    }
+};
+
+const ActiveEdge = struct {
+    next: ?*ActiveEdge = null,
+    fx: f32 = 0,
+    fdx: f32 = 0,
+    fdy: f32 = 0,
+    direction: f32 = 0,
+    sy: f32 = 0,
+    ey: f32 = 0,
+
+    fn new_from_pool(comptime POOL_THREADING: Root.CommonTypes.ThreadingMode, pool: *ActiveEdgePool(POOL_THREADING), edge: Edge, off_x: i32, start_point: f32) *ActiveEdge {
+        const active_edge = pool.claim();
+        const dxdy: f32 = (edge.x1 - edge.x0) / (edge.y1 - edge.y0);
+        active_edge.* = .{
+            .fdx = dxdy,
+            .fdy = if (dxdy != 0.0) (1.0 / dxdy) else 0.0,
+            .fx = (edge.x0 + dxdy * (start_point - edge.y0)) - @as(f32, @floatFromInt(off_x)),
+            .direction = if (edge.invert) 1.0 else -1.0,
+            .sy = edge.y0,
+            .ey = edge.y1,
+            .next = null,
+        };
+        return active_edge;
+    }
+};
+
+const CharstringFlags = packed struct(u8) {
+    started: bool = false,
+    mode: enum(u1) {
+        /// set min/max and num_vertices
+        bounds,
+        /// set vertices and num_vertices
+        verts,
+    },
+    _padding: u6 = undefined,
 };
 
 pub const TrueTypeFont = struct {
@@ -415,7 +554,7 @@ pub const TrueTypeFont = struct {
 
                 const offset = read_int(u16, bytes[index_map + 14 + seg_count * 6 + 2 + 2 * item ..][0..2], .big);
                 if (offset == 0) {
-                    const result = @as(i32, codepoint) + read_int(i16, bytes[index_map + 14 + seg_count * 4 + 2 + 2 * item ..][0..2], .big);
+                    const result = num_cast(codepoint, i32) + read_int(i16, bytes[index_map + 14 + seg_count * 4 + 2 + 2 * item ..][0..2], .big);
                     // truncate to u16
                     return @enumFromInt(@as(u16, @truncate(@as(u32, @bitCast(result)))));
                 }
@@ -458,42 +597,62 @@ pub const TrueTypeFont = struct {
         }
     }
 
-    /// Caller owns returned memory.
-    pub fn rasterize_glyph_to_data_grid(tt: *const TrueTypeFont, alloc: Allocator, pixels: *DataGrid_u8, glyph: GlyphIndex, scale_x: f32, scale_y: f32) GlyphBitmapError!GlyphBitmapDimensions {
-        return rasterize_glyph_to_data_grid_with_subpixel_offset(tt, alloc, pixels, glyph, scale_x, scale_y, 0, 0);
+    pub fn rasterize_vertices_to_data_grid(
+        self: *const TrueTypeFont,
+        glyph: GlyphIndex,
+        vertices: *const List(Vertex),
+        known_aabb: ?AABB_i32,
+        data_grid: DataGrid_u8.Source,
+        flatness: PixelFlatness,
+        scale_x: f32,
+        scale_y: f32,
+        comptime THREADING: Root.CommonTypes.ThreadingMode,
+        temp_flat_curves_buffer: *FlattenedCurvesBuffer,
+        temp_edges_buffer: *EdgesBuffer,
+        temp_active_edge_pool: *ActiveEdgePool(THREADING),
+    ) GlyphBitmapError!GlyphBitmapOutput {
+        return self.rasterize_vertices_to_data_grid_with_subpixel_offset(glyph, vertices, known_aabb, data_grid, flatness, scale_x, scale_y, 0, 0, THREADING, temp_flat_curves_buffer, temp_edges_buffer, temp_active_edge_pool);
     }
 
-    /// Caller owns returned memory.
-    pub fn rasterize_glyph_to_data_grid_with_subpixel_offset(self: *const TrueTypeFont, alloc: Allocator, pixels: *DataGrid_u8, glyph: GlyphIndex, scale_x: f32, scale_y: f32, shift_x: f32, shift_y: f32) GlyphBitmapError!GlyphBitmapDimensions {
-        //CHECKPOINT
-        const vertices = try get_glyph_vertex_list(self, alloc, glyph);
-        defer alloc.free(vertices);
-
+    pub fn rasterize_vertices_to_data_grid_with_subpixel_offset(
+        self: *const TrueTypeFont,
+        glyph: GlyphIndex,
+        vertices: *const List(Vertex),
+        known_aabb: ?AABB_i32,
+        data_grid: DataGrid_u8.Source,
+        flatness: PixelFlatness,
+        scale_x: f32,
+        scale_y: f32,
+        shift_x: f32,
+        shift_y: f32,
+        comptime POOL_THREADING: Root.CommonTypes.ThreadingMode,
+        temp_flat_curves_buffer: *FlattenedCurvesBuffer,
+        temp_edges_buffer: *EdgesBuffer,
+        temp_active_edge_pool: *ActiveEdgePool(POOL_THREADING),
+    ) !GlyphBitmapOutput {
         assert_with_reason(scale_x != 0, @src(), "`scale_x` cannot be zero", .{});
         assert_with_reason(scale_y != 0, @src(), "`scale_y` cannot be zero", .{});
 
-        const box = get_glyph_bitmap_bounds_with_subpixel_offset(self, glyph, scale_x, scale_y, shift_x, shift_y);
+        const aabb = if (known_aabb) |kn_aabb| kn_aabb else try get_glyph_bitmap_bounds_with_subpixel_offset(self, glyph, scale_x, scale_y, shift_x, shift_y);
+        const aabb_size = aabb.get_size();
+        //FIXME something is really wrong with these hacks to shift/frame the glyph
+        const shift_to_origin = aabb.get_min_point().negate().to_new_type(f32);
+        const aabb_shifted = aabb.with_mins_shifted_to_zero();
+        const aabb_max = aabb_shifted.get_max_point().add(.ONE_ONE);
+        // std.debug.print("\naabb: {any}\nsize: {any}\nlocal_offset: {any}\naabb_shifted: {any}\n", .{ aabb, aabb_size, aabb.get_min_point(), aabb_shifted }); //DEBUG
+        // const aabb_max = aabb.get_max_point().add(.ONE_ONE);
 
-        const w: u32 = @intCast(box.x1 - box.x0);
-        const h: u32 = @intCast(box.y1 - box.y0);
+        if (aabb_size.x == 0 or aabb_size.y == 0) return .empty;
 
-        if (w == 0 or h == 0) return .empty;
+        var data_grid_and_offset = data_grid.obtain_grid(@intCast(aabb_max.x), @intCast(aabb_max.y)) orelse return GlyphBitmapError.could_not_obtain_bitmap_from_source;
+        //FIXME something is really wrong with these hacks to shift/frame the glyph
+        rasterize_vertices_to_data_grid_internal(vertices, &data_grid_and_offset.data_grid, flatness.val, scale_x, scale_y, shift_x + shift_to_origin.x, shift_y + shift_to_origin.y, aabb.x_min, aabb.y_min, true, POOL_THREADING, temp_flat_curves_buffer, temp_edges_buffer, temp_active_edge_pool);
 
-        var gbm: Bitmap = .{
-            .w = w,
-            .h = h,
-            .stride = w,
-            .pixels = try pixels.addManyAsSlice(alloc, w * h),
-        };
-        errdefer pixels.shrinkRetainingCapacity(pixels.items.len - gbm.pixels.len);
-
-        try rasterize_to_data_grid(alloc, &gbm, 0.35, vertices, scale_x, scale_y, shift_x, shift_y, box.x0, box.y0, true);
-
-        return .{
-            .width = @intCast(gbm.w),
-            .height = @intCast(gbm.h),
-            .off_x = @intCast(box.x0),
-            .off_y = @intCast(box.y0),
+        return GlyphBitmapOutput{
+            .data_grid = data_grid_and_offset.data_grid,
+            .size = aabb_size,
+            .local_offset = aabb.get_min_point(),
+            .parent_offset = data_grid_and_offset.parent_offset,
         };
     }
 
@@ -670,17 +829,17 @@ pub const TrueTypeFont = struct {
         return 0;
     }
 
-    fn get_glyph_vertex_list(self: *const TrueTypeFont, alloc: Allocator, glyph: GlyphIndex) GlyphBitmapError!List(Vertex) {
+    pub fn get_glyph_vertex_list(self: *const TrueTypeFont, glyph: GlyphIndex, vertices: *List(Vertex), vertex_alloc: Allocator, comptime POOL_THREADING: Root.CommonTypes.ThreadingMode, temp_compound_vertex_list_pool: *VertexListPool(POOL_THREADING), temp_compound_vertex_list_allocator: Allocator) GlyphBitmapError!void {
         return if (self.cff_data.cff.size != 0)
-            self.get_glyph_vertex_list_ccf(alloc, glyph)
+            self.get_glyph_vertex_list_cff(glyph, vertices, vertex_alloc)
         else
-            self.get_glyph_vertex_list_ttf(alloc, glyph);
+            self.get_glyph_vertex_list_ttf(glyph, vertices, vertex_alloc, POOL_THREADING, temp_compound_vertex_list_pool, temp_compound_vertex_list_allocator);
     }
 
-    fn get_glyph_vertex_list_ttf(self: *const TrueTypeFont, alloc: Allocator, glyph: GlyphIndex) GlyphBitmapError!List(Vertex) {
+    fn get_glyph_vertex_list_ttf(self: *const TrueTypeFont, glyph: GlyphIndex, vertices: *List(Vertex), vertex_alloc: Allocator, comptime POOL_THREADING: Root.CommonTypes.ThreadingMode, temp_compound_vertex_list_pool: *VertexListPool(POOL_THREADING), temp_compound_vertex_list_allocator: Allocator) GlyphBitmapError!void {
         const bytes = self.ttf_bytes;
         const g = try get_glyph_offset(self, glyph);
-        var vertices: List(Vertex) = .{};
+        vertices.clear();
         const n_contours_signed = read_int(i16, bytes[g..][0..2], .big);
         if (n_contours_signed > 0) {
             const n_contours: u16 = @intCast(n_contours_signed);
@@ -691,9 +850,9 @@ pub const TrueTypeFont = struct {
             const n: u32 = 1 + read_int(u16, bytes[contours_end_pts + n_contours * 2 - 2 ..][0..2], .big);
 
             // A loose bound on how many vertices we might need.
-            const m: u32 = n + 2 * n_contours;
-            try vertices.resize(alloc, m);
-
+            const max: u32 = n + 2 * n_contours;
+            vertices.ensure_free_slots(max, vertex_alloc);
+            vertices.len = max;
             var next_move: i32 = 0;
             var flagcount: u8 = 0;
 
@@ -702,7 +861,7 @@ pub const TrueTypeFont = struct {
             // we create our final data starting from the front
 
             // Starting offset for uninterpreted data, regardless of how m ends up being calculated.
-            const off: u32 = m - n;
+            const off: u32 = max - n;
 
             // first load flags
             {
@@ -774,8 +933,9 @@ pub const TrueTypeFont = struct {
                 y = @intCast(vertices.ptr[off + i].y);
 
                 if (next_move == i) {
-                    if (i != 0)
+                    if (i != 0) {
                         num_vertices = close_shape(vertices.slice(), num_vertices, was_off, start_off, sx, sy, scx, scy, cx, cy);
+                    }
 
                     // now start the new one
                     start_off = (flags & 1) == 0;
@@ -798,7 +958,7 @@ pub const TrueTypeFont = struct {
                         sx = x;
                         sy = y;
                     }
-                    vertices.ptr[num_vertices].set(.vmove, sx, sy, 0, 0);
+                    vertices.ptr[num_vertices].set(.MOVE_TO, sx, sy, 0, 0);
                     num_vertices += 1;
                     was_off = false;
                     next_move = 1 + read_int(u16, bytes[contours_end_pts + j * 2 ..][0..2], .big);
@@ -807,7 +967,7 @@ pub const TrueTypeFont = struct {
                     if ((flags & 1) == 0) { // if it's a curve
                         if (was_off) {
                             // two off-curve control points in a row means interpolate an on-curve midpoint
-                            vertices.ptr[num_vertices].set(.vcurve, (cx + x) >> 1, (cy + y) >> 1, cx, cy);
+                            vertices.ptr[num_vertices].set(.QUADRATIC, (cx + x) >> 1, (cy + y) >> 1, cx, cy);
                             num_vertices += 1;
                         }
                         cx = x;
@@ -815,16 +975,16 @@ pub const TrueTypeFont = struct {
                         was_off = true;
                     } else {
                         if (was_off)
-                            vertices.ptr[num_vertices].set(.vcurve, x, y, cx, cy)
+                            vertices.ptr[num_vertices].set(.QUADRATIC, x, y, cx, cy)
                         else
-                            vertices.ptr[num_vertices].set(.vline, x, y, 0, 0);
+                            vertices.ptr[num_vertices].set(.LINE, x, y, 0, 0);
                         num_vertices += 1;
                         was_off = false;
                     }
                 }
             }
             num_vertices = close_shape(vertices.slice(), num_vertices, was_off, start_off, sx, sy, scx, scy, cx, cy);
-            vertices.shrinkRetainingCapacity(num_vertices);
+            vertices.len = num_vertices;
         } else if (n_contours_signed < 0) {
             // Compound shapes.
             var more = true;
@@ -868,11 +1028,13 @@ pub const TrueTypeFont = struct {
                 const n: f32 = @sqrt(mtx[2] * mtx[2] + mtx[3] * mtx[3]);
 
                 // Get indexed glyph.
-                const comp_verts = try get_glyph_vertex_list(self, alloc, gidx);
-                defer alloc.free(comp_verts);
+                var comp_verts = temp_compound_vertex_list_pool.claim();
+                defer temp_compound_vertex_list_pool.release(comp_verts);
+                comp_verts.clear();
+                try get_glyph_vertex_list(self, gidx, comp_verts, temp_compound_vertex_list_allocator, POOL_THREADING, temp_compound_vertex_list_pool, temp_compound_vertex_list_allocator);
                 if (comp_verts.len > 0) {
                     // Transform vertices.
-                    for (comp_verts) |*v| {
+                    for (comp_verts.slice()) |*v| {
                         {
                             const x: f32 = @floatFromInt(v.x);
                             const y: f32 = @floatFromInt(v.y);
@@ -886,12 +1048,12 @@ pub const TrueTypeFont = struct {
                             v.cy = @intFromFloat(n * (mtx[1] * x + mtx[3] * y + mtx[5]));
                         }
                     }
-                    try vertices.append_zig_slice(alloc, comp_verts.slice());
+                    _ = vertices.append_zig_slice(vertex_alloc, comp_verts.slice());
                 }
                 more = (flags & (1 << 5)) != 0;
             }
         }
-        return vertices;
+        return;
     }
 
     fn get_glyph_offset(self: *const TrueTypeFont, glyph: GlyphIndex) error{glyph_not_found}!u32 {
@@ -914,16 +1076,14 @@ pub const TrueTypeFont = struct {
         return g1;
     }
 
-    pub fn get_glyph_bitmap_bounds_with_subpixel_offset(self: *const TrueTypeFont, glyph: GlyphIndex, scale_x: f32, scale_y: f32, shift_x: f32, shift_y: f32) AABB_i32 {
-        const box = get_glyph_bounds(self, glyph) catch |err| switch (err) {
-            error.glyph_not_found => return .{ .x0 = 0, .y0 = 0, .x1 = 0, .y1 = 0 }, // e.g. space character
-        };
+    pub fn get_glyph_bitmap_bounds_with_subpixel_offset(self: *const TrueTypeFont, glyph: GlyphIndex, scale_x: f32, scale_y: f32, shift_x: f32, shift_y: f32) !AABB_i32 {
+        const box = try get_glyph_bounds(self, glyph);
         return .{
             // move to integral bboxes (treating pixels as little squares, what pixels get touched)?
-            .x_min = @intFromFloat(@floor(@as(f32, @floatFromInt(box.x0)) * scale_x + shift_x)),
-            .y_min = @intFromFloat(@floor(@as(f32, @floatFromInt(-box.y1)) * scale_y + shift_y)),
-            .x_max = @intFromFloat(@ceil(@as(f32, @floatFromInt(box.x1)) * scale_x + shift_x)),
-            .y_max = @intFromFloat(@ceil(@as(f32, @floatFromInt(-box.y0)) * scale_y + shift_y)),
+            .x_min = @intFromFloat(@floor(@as(f32, @floatFromInt(box.x_min)) * scale_x + shift_x)),
+            .y_min = @intFromFloat(@floor(@as(f32, @floatFromInt(-box.y_max)) * scale_y + shift_y)),
+            .x_max = @intFromFloat(@ceil(@as(f32, @floatFromInt(box.x_max)) * scale_x + shift_x)),
+            .y_max = @intFromFloat(@ceil(@as(f32, @floatFromInt(-box.y_min)) * scale_y + shift_y)),
         };
     }
 
@@ -931,7 +1091,7 @@ pub const TrueTypeFont = struct {
         return get_glyph_bitmap_bounds_with_subpixel_offset(self, glyph, scale_x, scale_y, 0, 0);
     }
 
-    pub fn get_glyph_bounds(self: *const TrueTypeFont, glyph: GlyphIndex) error{glyph_not_found}!AABB_i32 {
+    pub fn get_glyph_bounds(self: *const TrueTypeFont, glyph: GlyphIndex) !AABB_i32 {
         return if (self.cff_data.cff.size != 0)
             self.get_glyph_bounds_cff(glyph)
         else
@@ -949,33 +1109,10 @@ pub const TrueTypeFont = struct {
         };
     }
 
-    fn rasterize_to_data_grid(alloc: Allocator, result: *Bitmap, flatness_in_pixels: f32, vertices: []Vertex, scale_x: f32, scale_y: f32, shift_x: f32, shift_y: f32, off_x: i32, off_y: i32, invert: bool) Allocator.Error!void {
-        const scale = @min(scale_x, scale_y);
-        var windings = try flatten_curves(alloc, vertices, flatness_in_pixels / scale);
-        defer windings.deinit(alloc);
-        try rasterize_inner(alloc, result, windings.points, windings.contour_lengths, scale_x, scale_y, shift_x, shift_y, off_x, off_y, invert);
-    }
-
-    const Edge = struct {
-        x0: f32,
-        y0: f32,
-        x1: f32,
-        y1: f32,
-        invert: bool,
-
-        const Sort = struct {
-            fn lessThan(ctx: Sort, a: Edge, b: Edge) bool {
-                _ = ctx;
-                return a.y0 < b.y0;
-            }
-        };
-    };
-
-    fn rasterize_inner(
-        gpa: Allocator,
-        result: *Bitmap,
-        pts: []Point,
-        wcount: []u32,
+    fn rasterize_vertices_to_data_grid_internal(
+        vertices: *const List(Vertex),
+        output: *DataGrid_u8,
+        flatness_in_pixels: f32,
         scale_x: f32,
         scale_y: f32,
         shift_x: f32,
@@ -983,27 +1120,53 @@ pub const TrueTypeFont = struct {
         off_x: i32,
         off_y: i32,
         invert: bool,
-    ) Allocator.Error!void {
+        comptime POOL_THREADING: Root.CommonTypes.ThreadingMode,
+        temp_flat_curves_buffer: *FlattenedCurvesBuffer,
+        temp_edges_buffer: *EdgesBuffer,
+        temp_active_edge_pool: *ActiveEdgePool(POOL_THREADING),
+    ) void {
+        const scale = @min(scale_x, scale_y);
+        flatten_curves(temp_flat_curves_buffer, vertices, flatness_in_pixels / scale);
+        rasterize_internal(output, scale_x, scale_y, shift_x, shift_y, off_x, off_y, invert, POOL_THREADING, temp_flat_curves_buffer, temp_edges_buffer, temp_active_edge_pool);
+    }
+
+    fn rasterize_internal(
+        output: *DataGrid_u8,
+        scale_x: f32,
+        scale_y: f32,
+        shift_x: f32,
+        shift_y: f32,
+        off_x: i32,
+        off_y: i32,
+        invert: bool,
+        comptime POOL_THREADING: Root.CommonTypes.ThreadingMode,
+        temp_flat_curves_buf: *FlattenedCurvesBuffer,
+        temp_edges_buf: *EdgesBuffer,
+        temp_active_edge_pool: *ActiveEdgePool(POOL_THREADING),
+    ) void {
         const y_scale_inv: f32 = if (invert) -scale_y else scale_y;
+        const edge_counts = temp_flat_curves_buf.contour_lengths.slice();
+        var points = temp_flat_curves_buf.points.slice();
 
         // now we have to blow out the windings into explicit edge lists
         const edge_alloc_n = n: {
             var n: u32 = 1; // Add an extra one as a sentinel.
-            for (wcount) |elem| n += elem;
+            for (edge_counts) |count| n += count;
             break :n n;
         };
-
-        const e = try gpa.alloc(Edge, edge_alloc_n);
-        defer gpa.free(e);
+        temp_edges_buf.clear();
+        temp_edges_buf.edges.ensure_free_slots(edge_alloc_n, temp_edges_buf.alloc);
+        temp_edges_buf.edges.len = edge_alloc_n;
+        var edges = temp_edges_buf.edges.slice();
 
         var n: u32 = 0;
         var m: u32 = 0;
-        for (wcount) |wcount_elem| {
-            const p: []Point = pts[m..];
-            m += wcount_elem;
-            var j: u32 = wcount_elem - 1;
+        for (edge_counts) |count| {
+            const p: []Point_f32 = points[m..];
+            m += count;
+            var j: u32 = count - 1;
             var k: u32 = 0;
-            while (k < wcount_elem) : ({
+            while (k < count) : ({
                 j = k;
                 k += 1;
             }) {
@@ -1013,68 +1176,39 @@ pub const TrueTypeFont = struct {
                 if (p[j].y == p[k].y)
                     continue;
                 // add edge from j to k to the list
-                e[n].invert = false;
+                edges[n].invert = false;
                 if (if (invert) p[j].y > p[k].y else p[j].y < p[k].y) {
-                    e[n].invert = true;
+                    edges[n].invert = true;
                     a = j;
                     b = k;
                 }
-                e[n].x0 = p[a].x * scale_x + shift_x;
-                e[n].y0 = (p[a].y * y_scale_inv + shift_y);
-                e[n].x1 = p[b].x * scale_x + shift_x;
-                e[n].y1 = (p[b].y * y_scale_inv + shift_y);
+                edges[n].x0 = p[a].x * scale_x + shift_x;
+                edges[n].y0 = (p[a].y * y_scale_inv + shift_y);
+                edges[n].x1 = p[b].x * scale_x + shift_x;
+                edges[n].y1 = (p[b].y * y_scale_inv + shift_y);
                 n += 1;
             }
         }
-        // now sort the edges by their highest point (should snap to integer, and then by x)
-        std.mem.sortUnstable(Edge, e[0..n], Edge.Sort{}, Edge.Sort.lessThan);
+        temp_edges_buf.edges.insertion_sort(.first_n_items(@intCast(n)), Edge.y0_less_than);
 
         // now, traverse the scanlines and find the intersections on each scanline, use xor winding rule
-        try rasterizeSortedEdges(gpa, result, e[0 .. n + 1], off_x, off_y);
+        rasterize_sorted_edges(output, edges[0 .. n + 1], off_x, off_y, POOL_THREADING, temp_active_edge_pool);
     }
 
-    const Point = struct {
-        x: f32,
-        y: f32,
-    };
-
-    const FlattenedCurves = struct {
-        points: []Point,
-        contour_lengths: []u32,
-
-        const empty: FlattenedCurves = .{
-            .points = &.{},
-            .contour_lengths = &.{},
-        };
-
-        fn deinit(fc: *FlattenedCurves, gpa: Allocator) void {
-            gpa.free(fc.points);
-            gpa.free(fc.contour_lengths);
-            fc.* = undefined;
-        }
-    };
-
-    fn flatten_curves(
-        gpa: Allocator,
-        vertices: []const Vertex,
-        objspace_flatness: f32,
-    ) error{OutOfMemory}!FlattenedCurves {
-        var points: ArrayList(Point) = .empty;
-        defer points.deinit(gpa);
-        var contour_lengths: ArrayList(u32) = .empty;
-        defer contour_lengths.deinit(gpa);
+    fn flatten_curves(temp_flat_curve_buf: *FlattenedCurvesBuffer, vertices: *const List(Vertex), objspace_flatness: f32) void {
+        temp_flat_curve_buf.clear();
 
         const objspace_flatness_squared = objspace_flatness * objspace_flatness;
 
         var start: u32 = 0;
         var x: f32 = 0;
         var y: f32 = 0;
-        for (vertices) |v| {
+        for (vertices.slice()) |v| {
             sw: switch (v.type) {
                 .MOVE_TO => {
-                    if (points.items.len > 0) {
-                        try contour_lengths.append(gpa, @intCast(points.items.len - start));
-                        start = @intCast(points.items.len);
+                    if (temp_flat_curve_buf.points.len > 0) {
+                        _ = temp_flat_curve_buf.contour_lengths.append(@intCast(temp_flat_curve_buf.points.len - start), temp_flat_curve_buf.alloc);
+                        start = @intCast(temp_flat_curve_buf.points.len);
                     }
 
                     continue :sw .LINE;
@@ -1082,12 +1216,12 @@ pub const TrueTypeFont = struct {
                 .LINE => {
                     x = @floatFromInt(v.x);
                     y = @floatFromInt(v.y);
-                    try points.append(gpa, .{ .x = x, .y = y });
+                    _ = temp_flat_curve_buf.points.append(.{ .x = x, .y = y }, temp_flat_curve_buf.alloc);
                 },
                 .QUADRATIC => {
-                    try tesselateCurve(
-                        gpa,
-                        &points,
+                    tesselate_quadratic(
+                        &temp_flat_curve_buf.points,
+                        temp_flat_curve_buf.alloc,
                         x,
                         y,
                         @floatFromInt(v.cx),
@@ -1101,9 +1235,9 @@ pub const TrueTypeFont = struct {
                     y = @floatFromInt(v.y);
                 },
                 .CUBIC => {
-                    try tesselateCubic(
-                        gpa,
-                        &points,
+                    tesselate_cubic(
+                        &temp_flat_curve_buf.points,
+                        temp_flat_curve_buf.alloc,
                         x,
                         y,
                         @floatFromInt(v.cx),
@@ -1121,18 +1255,15 @@ pub const TrueTypeFont = struct {
                 _ => continue,
             }
         }
-        try contour_lengths.append(gpa, @intCast(points.items.len - start));
+        _ = temp_flat_curve_buf.contour_lengths.append(@intCast(temp_flat_curve_buf.points.len - start), temp_flat_curve_buf.alloc);
 
-        return .{
-            .points = try points.toOwnedSlice(gpa),
-            .contour_lengths = try contour_lengths.toOwnedSlice(gpa),
-        };
+        return;
     }
 
-    /// tessellate until threshold p is happy... @TODO warped to compensate for non-linear stretching
-    fn tesselateCurve(
-        gpa: Allocator,
-        points: *ArrayList(Point),
+    /// tessellate until threshold p is happy... //TODO warped to compensate for non-linear stretching
+    fn tesselate_quadratic(
+        points: *List(Point_f32),
+        points_alloc: Allocator,
         x0: f32,
         y0: f32,
         x1: f32,
@@ -1141,7 +1272,7 @@ pub const TrueTypeFont = struct {
         y2: f32,
         objspace_flatness_squared: f32,
         n: u32,
-    ) Allocator.Error!void {
+    ) void {
         // midpoint
         const mx: f32 = (x0 + 2 * x1 + x2) / 4;
         const my: f32 = (y0 + 2 * y1 + y2) / 4;
@@ -1151,16 +1282,16 @@ pub const TrueTypeFont = struct {
         if (n > 16) // 65536 segments on one curve better be enough!
             return;
         if (dx * dx + dy * dy > objspace_flatness_squared) { // half-pixel error allowed... need to be smaller if AA
-            try tesselateCurve(gpa, points, x0, y0, (x0 + x1) / 2.0, (y0 + y1) / 2.0, mx, my, objspace_flatness_squared, n + 1);
-            try tesselateCurve(gpa, points, mx, my, (x1 + x2) / 2.0, (y1 + y2) / 2.0, x2, y2, objspace_flatness_squared, n + 1);
+            tesselate_quadratic(points, points_alloc, x0, y0, (x0 + x1) / 2.0, (y0 + y1) / 2.0, mx, my, objspace_flatness_squared, n + 1);
+            tesselate_quadratic(points, points_alloc, mx, my, (x1 + x2) / 2.0, (y1 + y2) / 2.0, x2, y2, objspace_flatness_squared, n + 1);
         } else {
-            try points.append(gpa, .{ .x = x2, .y = y2 });
+            _ = points.append(.{ .x = x2, .y = y2 }, points_alloc);
         }
     }
 
-    fn tesselateCubic(
-        gpa: Allocator,
-        points: *ArrayList(Point),
+    fn tesselate_cubic(
+        points: *List(Point_f32),
+        points_alloc: Allocator,
         x0: f32,
         y0: f32,
         x1: f32,
@@ -1171,7 +1302,7 @@ pub const TrueTypeFont = struct {
         y3: f32,
         objspace_flatness_squared: f32,
         n: u32,
-    ) Allocator.Error!void {
+    ) void {
         // According to Dougall Johnson, this "flatness" calculation is just
         // made-up nonsense that seems to work well enough.
         const dx0 = x1 - x0;
@@ -1205,64 +1336,51 @@ pub const TrueTypeFont = struct {
             const mx = (xa + xb) / 2;
             const my = (ya + yb) / 2;
 
-            try tesselateCubic(gpa, points, x0, y0, x01, y01, xa, ya, mx, my, objspace_flatness_squared, n + 1);
-            try tesselateCubic(gpa, points, mx, my, xb, yb, x23, y23, x3, y3, objspace_flatness_squared, n + 1);
+            tesselate_cubic(points, points_alloc, x0, y0, x01, y01, xa, ya, mx, my, objspace_flatness_squared, n + 1);
+            tesselate_cubic(points, points_alloc, mx, my, xb, yb, x23, y23, x3, y3, objspace_flatness_squared, n + 1);
         } else {
-            try points.append(gpa, .{ .x = x3, .y = y3 });
+            _ = points.append(.{ .x = x3, .y = y3 }, points_alloc);
         }
     }
 
-    fn sizedTrapezoidArea(height: f32, top_width: f32, bottom_width: f32) f32 {
-        assert(top_width >= 0);
-        assert(bottom_width >= 0);
+    fn sized_trapezoid_area(height: f32, top_width: f32, bottom_width: f32) f32 {
+        assert_with_reason(top_width >= 0, @src(), "`top_width` cannot be negative, got {d}", .{top_width});
+        assert_with_reason(bottom_width >= 0, @src(), "`bottom_width` cannot be negative, got {d}", .{bottom_width});
         return (top_width + bottom_width) / 2.0 * height;
     }
 
-    fn positionTrapezoidArea(height: f32, tx0: f32, tx1: f32, bx0: f32, bx1: f32) f32 {
-        return sizedTrapezoidArea(height, tx1 - tx0, bx1 - bx0);
+    fn position_trapezoid_area(height: f32, tx0: f32, tx1: f32, bx0: f32, bx1: f32) f32 {
+        return sized_trapezoid_area(height, tx1 - tx0, bx1 - bx0);
     }
 
-    fn sizedTriangleArea(height: f32, width: f32) f32 {
+    fn sized_triangle_area(height: f32, width: f32) f32 {
         return height * width / 2;
     }
 
-    const ActiveEdge = struct {
-        next: ?*ActiveEdge,
-        fx: f32,
-        fdx: f32,
-        fdy: f32,
-        direction: f32,
-        sy: f32,
-        ey: f32,
-    };
-
     /// Directly anti-alias rasterize edges without supersampling.
-    fn rasterizeSortedEdges(
-        gpa: Allocator,
-        result: *Bitmap,
+    fn rasterize_sorted_edges(
+        output: *DataGrid_u8,
         edges: []Edge,
         off_x: i32,
         off_y: i32,
-    ) Allocator.Error!void {
-        var arena_allocator = std.heap.ArenaAllocator.init(gpa);
-        defer arena_allocator.deinit();
-        const arena = arena_allocator.allocator();
-
+        comptime POOL_THREADING: Root.CommonTypes.ThreadingMode,
+        active_edge_pool: *ActiveEdgePool(POOL_THREADING),
+    ) void {
         var active: ?*ActiveEdge = null;
-        var scanline_buffer: [350]f32 = undefined;
+        var scanline_buffer: [SCANLINE_BUFFER_SIZE]f32 = undefined;
 
-        const needed_scanline_len = result.w * 2 + 1;
-        assert(scanline_buffer.len >= needed_scanline_len);
+        const needed_scanline_len = output.width * 2 + 1;
+        assert_with_reason(SCANLINE_BUFFER_SIZE >= needed_scanline_len, @src(), "`SCANLINE_BUFFER_SIZE < needed_scanline_len` ({d} < {d}), increase `SCANLINE_BUFFER_SIZE` constant in order to support an output size of {d} x {d}", .{ SCANLINE_BUFFER_SIZE, needed_scanline_len, output.width, output.height });
 
-        const scanline = scanline_buffer[0..result.w];
-        const scanline2 = scanline_buffer[result.w..][0 .. result.w + 1];
+        const scanline = scanline_buffer[0..output.width];
+        const scanline2 = scanline_buffer[output.width..][0 .. output.width + 1];
 
         var y: i32 = off_y;
-        edges[edges.len - 1].y0 = @floatFromInt((off_y + @as(i32, @intCast(result.h))) + 1);
+        edges[edges.len - 1].y0 = @floatFromInt((off_y + @as(i32, @intCast(output.height))) + 1);
 
         var j: u32 = 0;
         var e: u32 = 0;
-        while (j < result.h) {
+        while (j < output.height) {
             // find center of pixel for this scanline
             const scan_y_top: f32 = @floatFromInt(y);
             const scan_y_bottom: f32 = @floatFromInt(y + 1);
@@ -1273,49 +1391,49 @@ pub const TrueTypeFont = struct {
 
             // update all active edges;
             // remove all active edges that terminate before the top of this scanline
-            while (step.*) |z| {
-                if (z.ey <= scan_y_top) {
-                    step.* = z.next; // delete from list
-                    assert(z.direction != 0);
-                    z.direction = 0;
-                    arena.destroy(z);
+            while (step.*) |this_active_edge| {
+                if (this_active_edge.ey <= scan_y_top) {
+                    step.* = this_active_edge.next; // delete from list
+                    assert_with_reason(this_active_edge.direction != 0, @src(), "`this_active_edge.direction` cannot be 0", .{});
+                    this_active_edge.direction = 0;
+                    active_edge_pool.release(this_active_edge);
                 } else {
-                    step = &z.next; // advance through list
+                    step = &this_active_edge.next; // advance through list
                 }
             }
 
             // insert all edges that start before the bottom of this scanline
             while (edges[e].y0 <= scan_y_bottom) {
                 if (edges[e].y0 != edges[e].y1) {
-                    const z: *ActiveEdge = try newActive(arena, edges[e], off_x, scan_y_top);
+                    const this_active_edge: *ActiveEdge = ActiveEdge.new_from_pool(POOL_THREADING, active_edge_pool, edges[e], off_x, scan_y_top);
                     if (j == 0 and off_y != 0) {
-                        z.ey = @max(z.ey, scan_y_top);
+                        this_active_edge.ey = @max(this_active_edge.ey, scan_y_top);
                     }
                     // If we get really unlucky a tiny bit of an edge can be
                     // out of bounds.
-                    assert(z.ey >= scan_y_top);
+                    assert_with_reason(this_active_edge.ey >= scan_y_top, @src(), "a portion of the active edge was out of bounds: `this_active_edge.ey < scan_y_top` ({d} < {d})", .{ this_active_edge.ey, scan_y_top });
 
                     // Insert at front.
-                    z.next = active;
-                    active = z;
+                    this_active_edge.next = active;
+                    active = this_active_edge;
                 }
                 e += 1;
             }
 
-            if (active) |a| fillActiveEdges(scanline, scanline2, result.w, a, scan_y_top);
+            if (active) |a| fill_active_edges(scanline, scanline2, output.width, a, scan_y_top);
 
             {
                 var sum: f32 = 0;
-                for (scanline, scanline2[0..result.w], result.pixels[j * result.stride ..][0..result.w]) |s, s2, *p| {
+                for (scanline, scanline2[0..output.width], 0..output.width) |s, s2, x| {
                     sum += s2;
-                    p.* = @intFromFloat(@min(@abs(s + sum) * 255 + 0.5, 255));
+                    output.set_cell_with_origin(.TOP_LEFT, @intCast(x), j, @intFromFloat(@min(@abs(s + sum) * 255 + 0.5, 255)));
                 }
             }
             // advance all the edges
             step = &active;
-            while (step.*) |z| {
-                z.fx += z.fdx; // advance to position for current scanline
-                step = &z.next; // advance through list
+            while (step.*) |this_active_edge| {
+                this_active_edge.fx += this_active_edge.fdx; // advance to position for current scanline
+                step = &this_active_edge.next; // advance through list
             }
 
             y += 1;
@@ -1325,7 +1443,7 @@ pub const TrueTypeFont = struct {
 
     fn close_shape(
         vertices: []Vertex,
-        vertices_len_start: u32,
+        num_verts: u32,
         was_off: bool,
         start_off: bool,
         sx: i32,
@@ -1335,24 +1453,24 @@ pub const TrueTypeFont = struct {
         cx: i32,
         cy: i32,
     ) u32 {
-        var vertices_len = vertices_len_start;
+        var new_num_verts = num_verts;
         if (start_off) {
             if (was_off) {
-                vertices[vertices_len].set(.QUADRATIC, (cx + scx) >> 1, (cy + scy) >> 1, cx, cy);
-                vertices_len += 1;
+                vertices.ptr[new_num_verts].set(.QUADRATIC, (cx + scx) >> 1, (cy + scy) >> 1, cx, cy);
+                new_num_verts += 1;
             }
-            vertices[vertices_len].set(.QUADRATIC, sx, sy, scx, scy);
-            vertices_len += 1;
+            vertices.ptr[new_num_verts].set(.QUADRATIC, sx, sy, scx, scy);
+            new_num_verts += 1;
         } else {
             if (was_off) {
-                vertices[vertices_len].set(.QUADRATIC, sx, sy, cx, cy);
-                vertices_len += 1;
+                vertices.ptr[new_num_verts].set(.QUADRATIC, sx, sy, cx, cy);
+                new_num_verts += 1;
             } else {
-                vertices[vertices_len].set(.LINE, sx, sy, 0, 0);
-                vertices_len += 1;
+                vertices.ptr[new_num_verts].set(.LINE, sx, sy, 0, 0);
+                new_num_verts += 1;
             }
         }
-        return vertices_len;
+        return new_num_verts;
     }
 
     fn read_cursor(comptime I: type, bytes: []const u8, cursor: *u32) I {
@@ -1362,62 +1480,47 @@ pub const TrueTypeFont = struct {
         return result;
     }
 
-    fn newActive(arena: Allocator, e: Edge, off_x: i32, start_point: f32) Allocator.Error!*ActiveEdge {
-        const z = try arena.create(ActiveEdge);
-        const dxdy: f32 = (e.x1 - e.x0) / (e.y1 - e.y0);
-        z.* = .{
-            .fdx = dxdy,
-            .fdy = if (dxdy != 0.0) (1.0 / dxdy) else 0.0,
-            .fx = (e.x0 + dxdy * (start_point - e.y0)) - @as(f32, @floatFromInt(off_x)),
-            .direction = if (e.invert) 1.0 else -1.0,
-            .sy = e.y0,
-            .ey = e.y1,
-            .next = null,
-        };
-        return z;
-    }
-
-    fn fillActiveEdges(scanline: []f32, scanline_fill: []f32, len: u32, start_edge: *ActiveEdge, y_top: f32) void {
+    fn fill_active_edges(scanline: []f32, scanline_fill: []f32, len: u32, start_edge: *ActiveEdge, y_top: f32) void {
         const y_bottom: f32 = y_top + 1;
-        var opt_e: ?*ActiveEdge = start_edge;
-        while (opt_e) |e| : (opt_e = e.next) {
+        var next_edge: ?*ActiveEdge = start_edge;
+        while (next_edge) |edge| : (next_edge = edge.next) {
             // brute force every pixel
 
             // compute intersection points with top & bottom
-            assert(e.ey >= y_top);
+            assert_with_reason(edge.ey >= y_top, @src(), "a portion pf the edge was out of bounds: `edge.ey < y_top` ({d} < {d})", .{ edge.ey, y_top });
 
-            if (e.fdx == 0) {
-                const x0 = e.fx;
+            if (edge.fdx == 0) {
+                const x0 = edge.fx;
                 if (x0 < @as(f32, @floatFromInt(len))) {
                     if (x0 >= 0) {
-                        handleClippedEdge(scanline, @intFromFloat(x0), e, x0, y_top, x0, y_bottom);
-                        handleClippedEdge(scanline_fill, @intFromFloat(x0 + 1), e, x0, y_top, x0, y_bottom);
+                        handle_clipped_edge(scanline, @intFromFloat(x0), edge, x0, y_top, x0, y_bottom);
+                        handle_clipped_edge(scanline_fill, @intFromFloat(x0 + 1), edge, x0, y_top, x0, y_bottom);
                     } else {
-                        handleClippedEdge(scanline_fill, 0, e, x0, y_top, x0, y_bottom);
+                        handle_clipped_edge(scanline_fill, 0, edge, x0, y_top, x0, y_bottom);
                     }
                 }
             } else {
-                var x0: f32 = e.fx;
-                var dx: f32 = e.fdx;
+                var x0: f32 = edge.fx;
+                var dx: f32 = edge.fdx;
                 var xb: f32 = x0 + dx;
-                var dy: f32 = e.fdy;
-                assert(e.sy <= y_bottom);
-                assert(e.ey >= y_top);
+                var dy: f32 = edge.fdy;
+                assert_with_reason(edge.sy <= y_bottom, @src(), "a portion pf the edge was out of bounds: `edge.sy > y_bottom` ({d} > {d})", .{ edge.sy, y_bottom });
+                assert_with_reason(edge.ey >= y_top, @src(), "a portion pf the edge was out of bounds: `edge.ey < y_top` ({d} < {d})", .{ edge.ey, y_top });
 
                 // Compute endpoints of line segment clipped to this scanline (if the
                 // line segment starts on this scanline. x0 is the intersection of the
                 // line with y_top, but that may be off the line segment.
-                var x_top: f32, var sy0: f32 = if (e.sy > y_top) .{
-                    x0 + dx * (e.sy - y_top),
-                    e.sy,
+                var x_top: f32, var sy0: f32 = if (edge.sy > y_top) .{
+                    x0 + dx * (edge.sy - y_top),
+                    edge.sy,
                 } else .{
                     x0,
                     y_top,
                 };
 
-                var x_bottom: f32, var sy1: f32 = if (e.ey < y_bottom) .{
-                    x0 + dx * (e.ey - y_top),
-                    e.ey,
+                var x_bottom: f32, var sy1: f32 = if (edge.ey < y_bottom) .{
+                    x0 + dx * (edge.ey - y_top),
+                    edge.ey,
                 } else .{
                     xb,
                     y_bottom,
@@ -1431,9 +1534,9 @@ pub const TrueTypeFont = struct {
                     if (@trunc(x_top) == @trunc(x_bottom)) {
                         // simple case, only spans one pixel
                         const x: u32 = @intFromFloat(x_top);
-                        const height: f32 = (sy1 - sy0) * e.direction;
-                        assert(x < len);
-                        scanline[x] += positionTrapezoidArea(height, x_top, @floatFromInt(x + 1), x_bottom, @floatFromInt(x + 1));
+                        const height: f32 = (sy1 - sy0) * edge.direction;
+                        assert_with_reason(x < len, @src(), "x value out of range for scanline len ({d} >= {d})", .{ x, len });
+                        scanline[x] += position_trapezoid_area(height, x_top, @floatFromInt(x + 1), x_bottom, @floatFromInt(x + 1));
                         scanline_fill[x + 1] += height; // everything right of this pixel is filled
                     } else {
                         // covers 2+ pixels
@@ -1447,8 +1550,8 @@ pub const TrueTypeFont = struct {
                             dy = -dy;
                             std.mem.swap(f32, &x0, &xb);
                         }
-                        assert(dy >= 0);
-                        assert(dx >= 0);
+                        assert_with_reason(dy >= 0, @src(), "dy cannot be negative, got {d}", .{dy});
+                        assert_with_reason(dx >= 0, @src(), "dx cannot be negative, got {d}", .{dx});
 
                         const x1: u32 = @intFromFloat(x_top);
                         const x2: u32 = @intFromFloat(x_bottom);
@@ -1482,13 +1585,13 @@ pub const TrueTypeFont = struct {
                         if (y_crossing > y_bottom)
                             y_crossing = y_bottom;
 
-                        const sign: f32 = e.direction;
+                        const sign: f32 = edge.direction;
 
                         // area of the rectangle covered from sy0..y_crossing
                         var area: f32 = sign * (y_crossing - sy0);
 
                         // area of the triangle (x_top,sy0), (x1+1,sy0), (x1+1,y_crossing)
-                        scanline[x1] += sizedTriangleArea(area, x1p1f - x_top);
+                        scanline[x1] += sized_triangle_area(area, x1p1f - x_top);
 
                         // check if final y_crossing is blown up; no test case for this
                         if (y_final > y_bottom) {
@@ -1514,12 +1617,12 @@ pub const TrueTypeFont = struct {
                             s.* += area + step / 2; // area of trapezoid is 1*step/2
                             area += step;
                         }
-                        assert(@abs(area) <= 1.01); // accumulated error from area += step unless we round step down
-                        assert(sy1 > y_final - 0.01);
+                        assert_with_reason(@abs(area) <= 1.01, @src(), "`@abs(area) > 1.01` (area = {d}), accumulated error too high", .{area}); // accumulated error from area += step unless we round step down
+                        assert_with_reason(sy1 > y_final - 0.01, @src(), "`sy1 <= y_final - 0.01` ({d} <= {d}), accumulated error too high", .{ sy1, y_final - 0.01 });
 
                         // area covered in the last pixel is the rectangle from all the pixels to the left,
                         // plus the trapezoid filled by the line segment in this pixel all the way to the right edge
-                        scanline[x2] += area + sign * positionTrapezoidArea(sy1 - y_final, x2f, x2f + 1.0, x_bottom, x2f + 1.0);
+                        scanline[x2] += area + sign * position_trapezoid_area(sy1 - y_final, x2f, x2f + 1.0, x_bottom, x2f + 1.0);
 
                         // the rest of the line is filled based on the total height of the line segment in this pixel
                         scanline_fill[x2 + 1] += sign * (sy1 - sy0);
@@ -1561,27 +1664,27 @@ pub const TrueTypeFont = struct {
                         const y2: f32 = (x1 + 1 - x0) / dx + y_top;
 
                         if (x0 < x1 and x3 > x2) { // three segments descending down-right
-                            handleClippedEdge(scanline, x, e, x0, y0, x1, y1);
-                            handleClippedEdge(scanline, x, e, x1, y1, x2, y2);
-                            handleClippedEdge(scanline, x, e, x2, y2, x3, y3);
+                            handle_clipped_edge(scanline, x, edge, x0, y0, x1, y1);
+                            handle_clipped_edge(scanline, x, edge, x1, y1, x2, y2);
+                            handle_clipped_edge(scanline, x, edge, x2, y2, x3, y3);
                         } else if (x3 < x1 and x0 > x2) { // three segments descending down-left
-                            handleClippedEdge(scanline, x, e, x0, y0, x2, y2);
-                            handleClippedEdge(scanline, x, e, x2, y2, x1, y1);
-                            handleClippedEdge(scanline, x, e, x1, y1, x3, y3);
+                            handle_clipped_edge(scanline, x, edge, x0, y0, x2, y2);
+                            handle_clipped_edge(scanline, x, edge, x2, y2, x1, y1);
+                            handle_clipped_edge(scanline, x, edge, x1, y1, x3, y3);
                         } else if (x0 < x1 and x3 > x1) { // two segments across x, down-right
-                            handleClippedEdge(scanline, x, e, x0, y0, x1, y1);
-                            handleClippedEdge(scanline, x, e, x1, y1, x3, y3);
+                            handle_clipped_edge(scanline, x, edge, x0, y0, x1, y1);
+                            handle_clipped_edge(scanline, x, edge, x1, y1, x3, y3);
                         } else if (x3 < x1 and x0 > x1) { // two segments across x, down-left
-                            handleClippedEdge(scanline, x, e, x0, y0, x1, y1);
-                            handleClippedEdge(scanline, x, e, x1, y1, x3, y3);
+                            handle_clipped_edge(scanline, x, edge, x0, y0, x1, y1);
+                            handle_clipped_edge(scanline, x, edge, x1, y1, x3, y3);
                         } else if (x0 < x2 and x3 > x2) { // two segments across x+1, down-right
-                            handleClippedEdge(scanline, x, e, x0, y0, x2, y2);
-                            handleClippedEdge(scanline, x, e, x2, y2, x3, y3);
+                            handle_clipped_edge(scanline, x, edge, x0, y0, x2, y2);
+                            handle_clipped_edge(scanline, x, edge, x2, y2, x3, y3);
                         } else if (x3 < x2 and x0 > x2) { // two segments across x+1, down-left
-                            handleClippedEdge(scanline, x, e, x0, y0, x2, y2);
-                            handleClippedEdge(scanline, x, e, x2, y2, x3, y3);
+                            handle_clipped_edge(scanline, x, edge, x0, y0, x2, y2);
+                            handle_clipped_edge(scanline, x, edge, x2, y2, x3, y3);
                         } else { // one segment
-                            handleClippedEdge(scanline, x, e, x0, y0, x3, y3);
+                            handle_clipped_edge(scanline, x, edge, x0, y0, x3, y3);
                         }
                     }
                 }
@@ -1591,10 +1694,10 @@ pub const TrueTypeFont = struct {
 
     /// The edge passed in here does not cross the vertical line at x or the
     /// vertical line at x+1 (i.e. it has already been clipped to those).
-    fn handleClippedEdge(
+    fn handle_clipped_edge(
         scanline: []f32,
         x: u32,
-        e: *ActiveEdge,
+        active_edge: *ActiveEdge,
         x0_start: f32,
         y0_start: f32,
         x1_start: f32,
@@ -1605,45 +1708,45 @@ pub const TrueTypeFont = struct {
         var x1 = x1_start;
         var y1 = y1_start;
         if (y0 == y1) return;
-        assert(y0 < y1);
-        assert(e.sy <= e.ey);
-        if (y0 > e.ey) return;
-        if (y1 < e.sy) return;
-        if (y0 < e.sy) {
-            x0 += (x1 - x0) * (e.sy - y0) / (y1 - y0);
-            y0 = e.sy;
+        assert_with_reason(y0 < y1, @src(), "`y0 >= y1` ({d} >= {d}), invalid edge", .{ y0, y1 });
+        assert_with_reason(active_edge.sy <= active_edge.ey, @src(), "`active_edge.sy > active_edge.ey` ({d} > {d}), invalid edge", .{ active_edge.sy, active_edge.ey });
+        if (y0 > active_edge.ey) return;
+        if (y1 < active_edge.sy) return;
+        if (y0 < active_edge.sy) {
+            x0 += (x1 - x0) * (active_edge.sy - y0) / (y1 - y0);
+            y0 = active_edge.sy;
         }
-        if (y1 > e.ey) {
-            x1 += (x1 - x0) * (e.ey - y1) / (y1 - y0);
-            y1 = e.ey;
+        if (y1 > active_edge.ey) {
+            x1 += (x1 - x0) * (active_edge.ey - y1) / (y1 - y0);
+            y1 = active_edge.ey;
         }
 
         const xf: f32 = @floatFromInt(x);
 
         if (x0 == xf)
-            assert(x1 <= xf + 1)
+            assert_with_reason(x1 <= xf + 1, @src(), "`x1 > xf + 1`", .{})
         else if (x0 == xf + 1)
-            assert(x1 >= xf)
+            assert_with_reason(x1 >= xf, @src(), "`x1 < xf`", .{})
         else if (x0 <= xf)
-            assert(x1 <= xf)
+            assert_with_reason(x1 <= xf, @src(), "`x1 > xf`", .{})
         else if (x0 >= xf + 1)
-            assert(x1 >= xf + 1)
+            assert_with_reason(x1 >= xf + 1, @src(), "`x1 < xf + 1`", .{})
         else {
-            assert(x1 >= xf);
-            assert(x1 <= xf + 1);
+            assert_with_reason(x1 >= xf, @src(), "`x1 < xf`", .{});
+            assert_with_reason(x1 <= xf + 1, @src(), "`x1 > xf + 1`", .{});
         }
 
         if (x0 <= xf and x1 <= xf) {
-            scanline[x] += e.direction * (y1 - y0);
+            scanline[x] += active_edge.direction * (y1 - y0);
         } else if (x0 >= xf + 1 and x1 >= xf + 1) {
             // Do nothing.
         } else {
-            assert(x0 >= xf);
-            assert(x0 <= xf + 1);
-            assert(x1 >= xf);
-            assert(x1 <= xf + 1);
+            assert_with_reason(x0 >= xf, @src(), "`x0 < xf`", .{});
+            assert_with_reason(x0 <= xf + 1, @src(), "`x0 > xf + 1`", .{});
+            assert_with_reason(x1 >= xf, @src(), "`x1 < xf`", .{});
+            assert_with_reason(x1 <= xf + 1, @src(), "`x1 > xf + 1`", .{});
             // coverage = 1 - average x position
-            scanline[x] += e.direction * (y1 - y0) * (1 - ((x0 - xf) + (x1 - xf)) / 2);
+            scanline[x] += active_edge.direction * (y1 - y0) * (1 - ((x0 - xf) + (x1 - xf)) / 2);
         }
     }
 
@@ -1748,17 +1851,17 @@ pub const TrueTypeFont = struct {
 
     const CffData = struct {
         /// cff font data
-        cff: Buf,
+        cff: DataBuf,
         /// the charstring index
-        charstrings: Buf,
+        charstrings: DataBuf,
         /// global charstring subroutines index
-        gsubrs: Buf,
+        gsubrs: DataBuf,
         /// private charstring subroutines index
-        subrs: Buf,
+        subrs: DataBuf,
         /// array of font dicts
-        fontdicts: Buf,
+        fontdicts: DataBuf,
         /// map from glyph to fontdict
-        fdselect: Buf,
+        fdselect: DataBuf,
 
         pub const empty: CffData = .{
             .cff = .empty,
@@ -1778,22 +1881,22 @@ pub const TrueTypeFont = struct {
             b.skip(2);
             b.seek(b.get8());
             // TODO the name INDEX could list multiple fonts, but we just use the first one.
-            _ = b.cffGetIndex(); // name INDEX
-            var topdictidx = b.cffGetIndex();
-            var topdict = topdictidx.cffIndexGet(@enumFromInt(0));
-            _ = b.cffGetIndex(); // string INDEX
-            result.gsubrs = b.cffGetIndex();
+            _ = b.cff_get_index(); // name INDEX
+            var topdictidx = b.cff_get_index();
+            var topdict = topdictidx.cff_index_get(@enumFromInt(0));
+            _ = b.cff_get_index(); // string INDEX
+            result.gsubrs = b.cff_get_index();
 
             var cstype: u32 = 2;
             var csoff: u32 = 0;
             var fdarrayoff: u32 = 0;
             var fdselectoff: u32 = 0;
 
-            topdict.dictGetInts(17, 1, @ptrCast(&csoff));
-            topdict.dictGetInts(0x100 | 6, 1, @ptrCast(&cstype));
-            topdict.dictGetInts(0x100 | 36, 1, @ptrCast(&fdarrayoff));
-            topdict.dictGetInts(0x100 | 37, 1, @ptrCast(&fdselectoff));
-            result.subrs = b.getSubrs(topdict);
+            topdict.dict_get_ints(17, 1, @ptrCast(&csoff));
+            topdict.dict_get_ints(0x100 | 6, 1, @ptrCast(&cstype));
+            topdict.dict_get_ints(0x100 | 36, 1, @ptrCast(&fdarrayoff));
+            topdict.dict_get_ints(0x100 | 37, 1, @ptrCast(&fdselectoff));
+            result.subrs = b.get_subroutines(topdict);
 
             // we only support Type 2 charstrings
             if (cstype != 2) return error.UnsupportedCffData;
@@ -1803,85 +1906,85 @@ pub const TrueTypeFont = struct {
                 // looks like a CID font
                 if (fdselectoff == 0) return error.UnsupportedCffData;
                 b.seek(fdarrayoff);
-                result.fontdicts = b.cffGetIndex();
+                result.fontdicts = b.cff_get_index();
                 result.fdselect = b.range(fdselectoff, b.size - fdselectoff);
             }
 
             b.seek(csoff);
-            result.charstrings = b.cffGetIndex();
+            result.charstrings = b.cff_get_index();
             return result;
         }
     };
 
-    const Buf = struct {
+    const DataBuf = struct {
         data: [*]const u8,
         cursor: u32,
         size: u32,
 
-        pub const empty: Buf = .init(undefined, 0);
+        pub const empty: DataBuf = .init(undefined, 0);
 
-        pub fn init(data: [*]const u8, size: u32) Buf {
+        pub fn init(data: [*]const u8, size: u32) DataBuf {
             return .{ .data = data, .size = size, .cursor = 0 };
         }
 
-        pub fn skip(b: *Buf, o: u32) void {
-            b.seek(b.cursor + o);
+        pub fn skip(buf: *DataBuf, offset: u32) void {
+            buf.seek(buf.cursor + offset);
         }
 
-        pub fn seek(b: *Buf, o: u32) void {
-            assert(o <= b.size);
-            b.cursor = if (o > b.size) b.size else o;
+        pub fn seek(buf: *DataBuf, offset: u32) void {
+            assert_with_reason(offset <= buf.size, @src(), "offset > buffer.size ({d} > {d})", .{ offset, buf.size });
+            buf.cursor = if (offset > buf.size) buf.size else offset;
         }
 
-        pub fn peek8(b: *Buf) u8 {
-            if (b.cursor >= b.size)
+        pub fn peek8(buf: *DataBuf) u8 {
+            if (buf.cursor >= buf.size)
                 return 0;
-            return b.data[b.cursor];
+            return buf.data[buf.cursor];
         }
 
-        pub fn get8(b: *Buf) u8 {
-            if (b.cursor >= b.size) return 0;
-            defer b.cursor += 1;
-            return b.data[b.cursor];
+        pub fn get8(buf: *DataBuf) u8 {
+            if (buf.cursor >= buf.size) return 0;
+            defer buf.cursor += 1;
+            return buf.data[buf.cursor];
         }
 
-        pub fn get16(b: *Buf) u16 {
-            return @truncate(b.get(2));
+        pub fn get16(buf: *DataBuf) u16 {
+            return @truncate(buf.get(2));
         }
 
-        pub fn get32(b: *Buf) u32 {
-            return b.get(4);
+        pub fn get32(buf: *DataBuf) u32 {
+            return buf.get(4);
         }
 
-        pub fn get(b: *Buf, n: u32) u32 {
+        pub fn get(buf: *DataBuf, n: u32) u32 {
             var v: u32 = 0;
-            assert(n >= 1 and n <= 4);
+            assert_with_reason(n >= 1 and n <= 4, @src(), "`n` for offset size must be between 1 and 4 (inclusive), got {d}", .{n});
             for (0..n) |_|
-                v = (v << 8) | b.get8();
+                v = (v << 8) | buf.get8();
             return v;
         }
 
-        pub fn cffGetIndex(b: *Buf) Buf {
-            const start = b.cursor;
-            const count = b.get16();
+        pub fn cff_get_index(buf: *DataBuf) DataBuf {
+            const start = buf.cursor;
+            const count = buf.get16();
             if (count != 0) {
-                const offsize = b.get8();
-                assert(offsize >= 1 and offsize <= 4);
-                b.skip(offsize * count);
+                const offsize = buf.get8();
+                assert_with_reason(offsize >= 1 and offsize <= 4, @src(), "`offsize` for offset size must be between 1 and 4 (inclusive), got {d}", .{offsize});
+                buf.skip(offsize * count);
 
-                b.skip(b.get(offsize) - 1);
+                buf.skip(buf.get(offsize) - 1);
             }
-            return b.range(start, b.cursor - start);
+            return buf.range(start, buf.cursor - start);
         }
 
-        pub fn cffIndexGet(b_const: Buf, glyph: GlyphIndex) Buf {
-            var b = b_const;
+        pub fn cff_index_get(buf_const: DataBuf, glyph: GlyphIndex) DataBuf {
+            var b = buf_const;
             b.seek(0);
             const count = b.get16();
             const offsize = b.get8();
             const i: u32 = @intFromEnum(glyph);
-            assert(i < count);
-            assert(offsize >= 1 and offsize <= 4);
+            assert_with_reason(i < count, @src(), "glyph index out of bounds for cff index count ({d} >= {d})", .{ i, count });
+            assert_with_reason(offsize >= 1 and offsize <= 4, @src(), "`offsize` for offset size must be between 1 and 4 (inclusive), got {d}", .{offsize});
             b.skip(i * offsize);
 
             const start = b.get(offsize);
@@ -1889,57 +1992,57 @@ pub const TrueTypeFont = struct {
             return b.range(2 + (count + 1) * offsize + start, end - start);
         }
 
-        pub fn cffIndexCount(b: *Buf) u16 {
-            b.seek(0);
-            return b.get16();
+        pub fn cff_index_count(buf: *DataBuf) u16 {
+            buf.seek(0);
+            return buf.get16();
         }
 
-        pub fn range(b: *Buf, o: u32, s: u32) Buf {
-            var r = Buf.empty;
-            if (o < 0 or s < 0 or o > b.size or s > b.size - o) return r;
-            r.data = b.data + o;
-            r.size = s;
+        pub fn range(buf: *DataBuf, offset: u32, size: u32) DataBuf {
+            var r = DataBuf.empty;
+            if (offset < 0 or size < 0 or offset > buf.size or size > buf.size - offset) return r;
+            r.data = buf.data + offset;
+            r.size = size;
             return r;
         }
 
-        pub fn cffInt(b: *Buf) u32 {
-            const b0: i32 = b.get8();
+        pub fn cff_int(buf: *DataBuf) u32 {
+            const b0: i32 = buf.get8();
             const result: u32 = switch (b0) {
                 32...246 => @bitCast(b0 - 139),
-                247...250 => @bitCast((b0 - 247) * 256 + b.get8() + 108),
-                251...254 => @bitCast(-(b0 - 251) * 256 - b.get8() - 108),
-                28 => b.get16(),
-                29 => b.get32(),
+                247...250 => @bitCast((b0 - 247) * 256 + buf.get8() + 108),
+                251...254 => @bitCast(-(b0 - 251) * 256 - buf.get8() - 108),
+                28 => buf.get16(),
+                29 => buf.get32(),
                 else => @panic("invalid instruction"),
             };
             // std.log.debug("cffInt() b0 {} result {}", .{ b0, result });
             return result;
         }
 
-        pub fn dictGetInts(b: *Buf, key: u32, outcount: u32, out: [*]u32) void {
-            var operands = b.dictGet(key);
+        pub fn dict_get_ints(buf: *DataBuf, key: u32, outcount: u32, out: [*]u32) void {
+            var operands = buf.dict_get(key);
             for (0..outcount) |i| {
                 if (operands.cursor >= operands.size) break;
-                out[i] = operands.cffInt();
+                out[i] = operands.cff_int();
             }
         }
 
-        pub fn dictGet(b: *Buf, key: u32) Buf {
-            b.seek(0);
-            while (b.cursor < b.size) {
-                const start = b.cursor;
-                while (b.peek8() >= 28) b.cffSkipOperand();
-                const end = b.cursor;
-                var op: i32 = b.get8();
-                if (op == 12) op = @as(i32, b.get8()) | 0x100;
-                if (op == key) return b.range(start, end - start);
+        pub fn dict_get(buf: *DataBuf, key: u32) DataBuf {
+            buf.seek(0);
+            while (buf.cursor < buf.size) {
+                const start = buf.cursor;
+                while (buf.peek8() >= 28) buf.cff_skip_operand();
+                const end = buf.cursor;
+                var op: i32 = buf.get8();
+                if (op == 12) op = @as(i32, buf.get8()) | 0x100;
+                if (op == key) return buf.range(start, end - start);
             }
-            return b.range(0, 0);
+            return buf.range(0, 0);
         }
 
-        fn cffSkipOperand(b: *Buf) void {
+        fn cff_skip_operand(b: *DataBuf) void {
             const b0 = b.peek8();
-            assert(b0 >= 28);
+            assert_with_reason(b0 >= 28, @src(), "first byte in cff operand must be >= 28, got {d}, malformed", .{b0});
             if (b0 == 30) {
                 b.skip(1);
                 while (b.cursor < b.size) {
@@ -1948,28 +2051,28 @@ pub const TrueTypeFont = struct {
                         break;
                 }
             } else {
-                _ = b.cffInt();
+                _ = b.cff_int();
             }
         }
 
-        pub fn getSubrs(cff_const: Buf, fontdict_const: Buf) Buf {
+        pub fn get_subroutines(cff_const: DataBuf, fontdict_const: DataBuf) DataBuf {
             var private_loc: [2]u32 = .{ 0, 0 };
             var fontdict = fontdict_const;
-            fontdict.dictGetInts(18, 2, &private_loc);
+            fontdict.dict_get_ints(18, 2, &private_loc);
             if (private_loc[1] == 0 or private_loc[0] == 0) return .empty;
             var cff = cff_const;
             var pdict = cff.range(private_loc[1], private_loc[0]);
             var subrsoff: u32 = 0;
-            pdict.dictGetInts(19, 1, @ptrCast(&subrsoff));
+            pdict.dict_get_ints(19, 1, @ptrCast(&subrsoff));
             if (subrsoff == 0) return .empty;
             cff.seek(private_loc[1] + subrsoff);
-            return cff.cffGetIndex();
+            return cff.cff_get_index();
         }
 
-        fn getSubr(idx_const: Buf, n_const: u32) Buf {
+        fn get_subroutine(idx_const: DataBuf, n_const: u32) DataBuf {
             var idx = idx_const;
             var n = n_const;
-            const count = idx.cffIndexCount();
+            const count = idx.cff_index_count();
             n +%= if (count >= 33900)
                 32768
             else if (count >= 1240)
@@ -1977,7 +2080,7 @@ pub const TrueTypeFont = struct {
             else
                 107;
             if (n >= count) return .empty;
-            return idx.cffIndexGet(@enumFromInt(n));
+            return idx.cff_index_get(@enumFromInt(n));
         }
     };
 
@@ -1992,20 +2095,9 @@ pub const TrueTypeFont = struct {
         max_y: i32,
         num_vertices: u32,
         vertices: [*]Vertex,
-        flags: Flags,
+        flags: CharstringFlags,
 
-        const Flags = packed struct(u8) {
-            started: bool = false,
-            mode: enum(u1) {
-                /// set min/max and num_vertices
-                bounds,
-                /// set vertices and num_vertices
-                verts,
-            },
-            _padding: u6 = undefined,
-        };
-
-        pub fn init(flags: Flags, vertices: [*]Vertex) CharstringCtx {
+        pub fn init(flags: CharstringFlags, vertices: [*]Vertex) CharstringCtx {
             return .{
                 .flags = flags,
                 .vertices = vertices,
@@ -2048,13 +2140,13 @@ pub const TrueTypeFont = struct {
             ctx.num_vertices += 1;
         }
 
-        fn closeShape(ctx: *CharstringCtx) !void {
+        fn close_shape(ctx: *CharstringCtx) !void {
             if (ctx.first_x != ctx.x or ctx.first_y != ctx.y)
                 try ctx.v(.LINE, @intFromFloat(ctx.first_x), @intFromFloat(ctx.first_y), 0, 0, 0, 0);
         }
 
-        fn rmoveTo(ctx: *CharstringCtx, dx: f32, dy: f32) !void {
-            try ctx.closeShape();
+        fn r_move_to(ctx: *CharstringCtx, dx: f32, dy: f32) !void {
+            try ctx.close_shape();
             ctx.first_x = ctx.x + dx;
             ctx.x = ctx.first_x;
             ctx.first_y = ctx.y + dy;
@@ -2063,14 +2155,14 @@ pub const TrueTypeFont = struct {
             try ctx.v(.MOVE_TO, @intFromFloat(ctx.x), @intFromFloat(ctx.y), 0, 0, 0, 0);
         }
 
-        fn rlineTo(ctx: *CharstringCtx, dx: f32, dy: f32) !void {
+        fn r_line_to(ctx: *CharstringCtx, dx: f32, dy: f32) !void {
             ctx.x += dx;
             ctx.y += dy;
             // std.log.debug("lineTo {d:.1},{d:.1}", .{ ctx.x, ctx.y });
             try ctx.v(.LINE, @intFromFloat(ctx.x), @intFromFloat(ctx.y), 0, 0, 0, 0);
         }
 
-        fn rccurveTo(ctx: *CharstringCtx, dx1: f32, dy1: f32, dx2: f32, dy2: f32, dx3: f32, dy3: f32) !void {
+        fn rc_curve_to(ctx: *CharstringCtx, dx1: f32, dy1: f32, dx2: f32, dy2: f32, dx3: f32, dy3: f32) !void {
             const cx1 = ctx.x + dx1;
             const cy1 = ctx.y + dy1;
             const cx2 = cx1 + dx2;
@@ -2090,84 +2182,86 @@ pub const TrueTypeFont = struct {
         }
     };
 
-    fn get_glyph_bounds_cff(tt: *const TrueTypeFont, glyph: GlyphIndex) error{glyph_not_found}!BitmapBox {
+    fn get_glyph_bounds_cff(tt: *const TrueTypeFont, glyph: GlyphIndex) !AABB_i32 {
         var ctx = CharstringCtx.init(.{ .mode = .bounds }, undefined);
-        runCharstring(&tt.cff_data, glyph, &ctx) catch return .{ .x0 = 0, .y0 = 0, .x1 = 0, .y1 = 0 };
+        try run_charstring(&tt.cff_data, glyph, &ctx);
 
-        return .{
-            .x0 = ctx.min_x,
-            .y0 = ctx.min_y,
-            .x1 = ctx.max_x,
-            .y1 = ctx.max_y,
+        return AABB_i32{
+            .x_min = ctx.min_x,
+            .y_min = ctx.min_y,
+            .x_max = ctx.max_x,
+            .y_max = ctx.max_y,
         };
     }
 
-    fn get_glyph_vertex_list_ccf(tt: *const TrueTypeFont, gpa: Allocator, glyph: GlyphIndex) GlyphBitmapError![]Vertex {
+    fn get_glyph_vertex_list_cff(self: *const TrueTypeFont, glyph: GlyphIndex, vertices: *List(Vertex), vertices_alloc: Allocator) GlyphBitmapError!void {
+        _ = vertices_alloc;
         // mode=bounds to get bounds and num_vertices
         var count_ctx = CharstringCtx.init(.{ .mode = .bounds }, undefined);
-        try runCharstring(&tt.cff_data, glyph, &count_ctx);
-        const vertices = try gpa.alloc(Vertex, count_ctx.num_vertices);
-        errdefer gpa.free(vertices);
+        try run_charstring(&self.cff_data, glyph, &count_ctx);
+        vertices.clear();
         // mode=verts to assign vertices
         var out_ctx = CharstringCtx.init(.{ .mode = .verts }, vertices.ptr);
-        try runCharstring(&tt.cff_data, glyph, &out_ctx);
-        assert(out_ctx.num_vertices == count_ctx.num_vertices);
+        try run_charstring(&self.cff_data, glyph, &out_ctx);
+        assert_with_reason(out_ctx.num_vertices == count_ctx.num_vertices, @src(), "`out_ctx.num_vertices != count_ctx.num_vertices`", .{});
         // std.log.debug(
         //     "glyphShapeT2() first {d:.1},{d:.1} xy {d:.1},{d:.1} min {d:.1},{d:.1} max {d:.1},{d:.1} num_vertices {}",
         //     .{ count_ctx.first_x, count_ctx.first_y, count_ctx.x, count_ctx.y, count_ctx.min_x, count_ctx.min_y, count_ctx.max_x, count_ctx.max_y, count_ctx.num_vertices },
         // );
-
-        return out_ctx.vertices[0..out_ctx.num_vertices];
     }
 
     const Instruction = enum(u8) {
-        hintmask = 0x13,
-        cntrmask = 0x14,
-        hstem = 0x01,
-        vstem = 0x03,
-        hstemhm = 0x12,
-        vstemhm = 0x17,
-        rmoveto = 0x15,
-        vmoveto = 0x04,
-        hmoveto = 0x16,
-        rlineto = 0x05,
-        vlineto = 0x07,
-        hlineto = 0x06,
-        hvcurveto = 0x1F,
-        vhcurveto = 0x1E,
-        rrcurveto = 0x08,
-        rcurveline = 0x18,
-        rlinecurve = 0x19,
-        vvcurveto = 0x1A,
-        hhcurveto = 0x1B,
-        callsubr = 0x0A,
-        callgsubr = 0x1D,
+        HINT_MASK = 0x13,
+        CNTR_MASK = 0x14,
+        H_STEM = 0x01,
+        V_STEM = 0x03,
+        H_STEM_HM = 0x12,
+        V_STEM_HM = 0x17,
+        R_MOVE_TO = 0x15,
+        V_MOVE_TO = 0x04,
+        H_MOVE_TO = 0x16,
+        R_LINE_TO = 0x05,
+        V_LINE_TO = 0x07,
+        H_LINE_TO = 0x06,
+        HV_QUADRATIC_TO = 0x1F,
+        VH_QUADRATIC_TO = 0x1E,
+        RR_QUADRATIC_TO = 0x08,
+        R_CURVE_LINE = 0x18,
+        R_LINE_CURVE = 0x19,
+        VV_QUADRATIV_TO = 0x1A,
+        HH_QUADRATIC_TO = 0x1B,
+        CALL_SUBROUTINE = 0x0A,
+        CALL_GLOBAL_SUBROUTINE = 0x1D,
         /// return
-        ret = 0x0B,
-        endchar = 0x0E,
-        twoByteEscape = 0x0C,
-        hflex = 0x22,
-        flex = 0x23,
-        hflex1 = 0x24,
-        flex1 = 0x25,
+        RETURN = 0x0B,
+        END_CHAR = 0x0E,
+        TWO_BYTE_ESCAPE = 0x0C,
+        H_FLEX = 0x22,
+        FLEX = 0x23,
+        H_FLEX_1 = 0x24,
+        FLEX_1 = 0x25,
 
-        pub fn asInt(i: Instruction) u16 {
+        pub fn raw(i: Instruction) u16 {
             return @intFromEnum(i);
         }
     };
 
-    fn runCharstring(cff_data: *const CffData, glyph: GlyphIndex, ctx: *CharstringCtx) !void {
+    fn run_charstring(cff_data: *const CffData, glyph: GlyphIndex, ctx: *CharstringCtx) !void {
         var maskbits: u32 = 0;
         var in_header = true;
         var has_subrs = false;
         var clear_stack = false;
         var s = [1]f32{0} ** 48; // stack
         var sp: u32 = 0; // stack pointer
-        var subr_buf: [10]Buf = undefined;
-        var subr_stack: std.ArrayList(Buf) = .initBuffer(&subr_buf);
+        var subr_buf: [10]DataBuf = undefined;
+        var subr_stack: List(DataBuf) = List(DataBuf){
+            .ptr = subr_buf[0..10].ptr,
+            .len = 0,
+            .cap = 10,
+        };
         var subrs = cff_data.subrs;
         // this currently ignores the initial width value, which isn't needed if we have hmtx
-        var b = cff_data.charstrings.cffIndexGet(glyph);
+        var b = cff_data.charstrings.cff_index_get(glyph);
 
         while (b.cursor < b.size) {
             var i: u32 = 0;
@@ -2177,163 +2271,164 @@ pub const TrueTypeFont = struct {
             // std.log.debug("{}/{} b0 {s}/{}/0x{x} num_vertices {}", .{ b.cursor, b.size, tag_name, b0, b0, ctx.num_vertices });
 
             sw: switch (b0) {
-                // @TODO implement hinting
-                Instruction.hintmask.asInt(), // 0x13
-                Instruction.cntrmask.asInt(), // 0x14
+                //TODO implement hinting
+                Instruction.HINT_MASK.raw(), // 0x13
+                Instruction.CNTR_MASK.raw(), // 0x14
                 => {
                     if (in_header) maskbits += (sp / 2); // implicit "vstem"
                     in_header = false;
                     b.skip((maskbits + 7) / 8);
                 },
-                Instruction.hstem.asInt(), // 0x01
-                Instruction.vstem.asInt(), // 0x03
-                Instruction.hstemhm.asInt(), // 0x12
-                Instruction.vstemhm.asInt(), // 0x17
+                Instruction.H_STEM.raw(), // 0x01
+                Instruction.V_STEM.raw(), // 0x03
+                Instruction.H_STEM_HM.raw(), // 0x12
+                Instruction.V_STEM_HM.raw(), // 0x17
                 => {
                     maskbits += (sp / 2);
                 },
-                Instruction.rmoveto.asInt() => { // 0x15
+                Instruction.R_MOVE_TO.raw() => { // 0x15
                     in_header = false;
-                    if (sp < 2) return error.RMoveToStack;
-                    try ctx.rmoveTo(s[sp - 2], s[sp - 1]);
+                    if (sp < 2) return error.r_move_to_stack;
+                    try ctx.r_move_to(s[sp - 2], s[sp - 1]);
                 },
-                Instruction.vmoveto.asInt() => { // 0x04
+                Instruction.V_MOVE_TO.raw() => { // 0x04
                     in_header = false;
-                    if (sp < 1) return error.VMoveToStack;
-                    try ctx.rmoveTo(0, s[sp - 1]);
+                    if (sp < 1) return error.v_move_to_stack;
+                    try ctx.r_move_to(0, s[sp - 1]);
                 },
-                Instruction.hmoveto.asInt() => { // 0x16
+                Instruction.H_MOVE_TO.raw() => { // 0x16
                     in_header = false;
-                    if (sp < 1) return error.HMoveToStack;
-                    try ctx.rmoveTo(s[sp - 1], 0);
+                    if (sp < 1) return error.h_move_to_stack;
+                    try ctx.r_move_to(s[sp - 1], 0);
                 },
-                Instruction.rlineto.asInt() => { // 0x05
-                    if (sp < 2) return error.RLineToStack;
+                Instruction.R_LINE_TO.raw() => { // 0x05
+                    if (sp < 2) return error.r_line_to_stack;
                     while (i + 1 < sp) : (i += 2)
-                        try ctx.rlineTo(s[i], s[i + 1]);
+                        try ctx.r_line_to(s[i], s[i + 1]);
                 },
                 // hlineto/vlineto and vhcurveto/hvcurveto alternate horizontal and vertical
                 // starting from a different place.
-                Instruction.vlineto.asInt() => { // 0x07
-                    if (sp < 1) return error.VLineToStack;
+                Instruction.V_LINE_TO.raw() => { // 0x07
+                    if (sp < 1) return error.v_line_to_stack;
                     // std.log.debug("vlineto i {} sp {}", .{ i, sp });
                     while (true) {
                         if (i >= sp) break;
-                        try ctx.rlineTo(0, s[i]);
+                        try ctx.r_line_to(0, s[i]);
                         i += 1;
                         if (i >= sp) break;
-                        try ctx.rlineTo(s[i], 0);
+                        try ctx.r_line_to(s[i], 0);
                         i += 1;
                     }
                 },
-                Instruction.hlineto.asInt() => { // 0x06
-                    if (sp < 1) return error.HLineToStack;
+                Instruction.H_LINE_TO.raw() => { // 0x06
+                    if (sp < 1) return error.h_line_to_stack;
                     // std.log.debug("hlineto i {} sp {}", .{ i, sp });
                     while (true) {
                         if (i >= sp) break;
-                        try ctx.rlineTo(s[i], 0);
+                        try ctx.r_line_to(s[i], 0);
                         i += 1;
                         if (i >= sp) break;
-                        try ctx.rlineTo(0, s[i]);
+                        try ctx.r_line_to(0, s[i]);
                         i += 1;
                     }
                 },
-                Instruction.hvcurveto.asInt() => { // 0x1F
-                    if (sp < 4) return error.HCurveToStack;
+                Instruction.HV_QUADRATIC_TO.raw() => { // 0x1F
+                    if (sp < 4) return error.h_curve_to_stack;
                     while (true) {
                         // std.log.debug("hvcurveto i {} sp {}", .{ i, sp });
                         if (i + 3 >= sp) break;
-                        try ctx.rccurveTo(s[i], 0, s[i + 1], s[i + 2], if (sp - i == 5) s[i + 4] else 0.0, s[i + 3]);
+                        try ctx.rc_curve_to(s[i], 0, s[i + 1], s[i + 2], if (sp - i == 5) s[i + 4] else 0.0, s[i + 3]);
                         i += 4;
                         if (i + 3 >= sp) break;
-                        try ctx.rccurveTo(0, s[i], s[i + 1], s[i + 2], s[i + 3], if (sp - i == 5) s[i + 4] else 0.0);
+                        try ctx.rc_curve_to(0, s[i], s[i + 1], s[i + 2], s[i + 3], if (sp - i == 5) s[i + 4] else 0.0);
                         i += 4;
                     }
                 },
-                Instruction.vhcurveto.asInt() => { // 0x1E
-                    if (sp < 4) return error.HCurveToStack;
+                Instruction.VH_QUADRATIC_TO.raw() => { // 0x1E
+                    if (sp < 4) return error.h_curve_to_stack;
                     while (true) {
                         // std.log.debug("vhcurveto i {} sp {}", .{ i, sp });
                         if (i + 3 >= sp) break;
-                        try ctx.rccurveTo(0, s[i], s[i + 1], s[i + 2], s[i + 3], if (sp - i == 5) s[i + 4] else 0.0);
+                        try ctx.rc_curve_to(0, s[i], s[i + 1], s[i + 2], s[i + 3], if (sp - i == 5) s[i + 4] else 0.0);
                         i += 4;
                         if (i + 3 >= sp) break;
-                        try ctx.rccurveTo(s[i], 0, s[i + 1], s[i + 2], if (sp - i == 5) s[i + 4] else 0.0, s[i + 3]);
+                        try ctx.rc_curve_to(s[i], 0, s[i + 1], s[i + 2], if (sp - i == 5) s[i + 4] else 0.0, s[i + 3]);
                         i += 4;
                     }
                 },
-                Instruction.rrcurveto.asInt() => { // 0x08
-                    if (sp < 6) return error.RCurveToStack;
+                Instruction.RR_QUADRATIC_TO.raw() => { // 0x08
+                    if (sp < 6) return error.r_curve_to_stack;
                     while (i + 5 < sp) : (i += 6)
-                        try ctx.rccurveTo(s[i], s[i + 1], s[i + 2], s[i + 3], s[i + 4], s[i + 5]);
+                        try ctx.rc_curve_to(s[i], s[i + 1], s[i + 2], s[i + 3], s[i + 4], s[i + 5]);
                 },
-                Instruction.rcurveline.asInt() => { // 0x18
-                    if (sp < 8) return error.RCurveLineStack;
+                Instruction.R_CURVE_LINE.raw() => { // 0x18
+                    if (sp < 8) return error.r_curve_line_stack;
                     while (i + 5 < sp - 2) : (i += 6)
-                        try ctx.rccurveTo(s[i], s[i + 1], s[i + 2], s[i + 3], s[i + 4], s[i + 5]);
-                    if (i + 1 >= sp) return error.CurveLineStack;
-                    try ctx.rlineTo(s[i], s[i + 1]);
+                        try ctx.rc_curve_to(s[i], s[i + 1], s[i + 2], s[i + 3], s[i + 4], s[i + 5]);
+                    if (i + 1 >= sp) return error.curve_line_stack;
+                    try ctx.r_line_to(s[i], s[i + 1]);
                 },
-                Instruction.rlinecurve.asInt() => { // 0x19
-                    if (sp < 8) return error.RLineCurveStack;
+                Instruction.R_LINE_CURVE.raw() => { // 0x19
+                    if (sp < 8) return error.r_line_curve_stack;
                     while (i + 1 < sp - 6) : (i += 2)
-                        try ctx.rlineTo(s[i], s[i + 1]);
-                    if (i + 5 >= sp) return error.RLineCurveStack;
-                    try ctx.rccurveTo(s[i], s[i + 1], s[i + 2], s[i + 3], s[i + 4], s[i + 5]);
+                        try ctx.r_line_to(s[i], s[i + 1]);
+                    if (i + 5 >= sp) return error.r_line_curve_stack;
+                    try ctx.rc_curve_to(s[i], s[i + 1], s[i + 2], s[i + 3], s[i + 4], s[i + 5]);
                 },
-                Instruction.vvcurveto.asInt(), // 0x1A
-                Instruction.hhcurveto.asInt(), // 0x1B
+                Instruction.VV_QUADRATIV_TO.raw(), // 0x1A
+                Instruction.HH_QUADRATIC_TO.raw(), // 0x1B
                 => {
-                    if (sp < 4) return error.CurveToStack;
+                    if (sp < 4) return error.curve_to_stack;
                     var f: f32 = 0.0;
                     if (sp & 1 != 0) {
                         f = s[i];
                         i += 1;
                     }
                     while (i + 3 < sp) : (i += 4) {
-                        if (b0 == Instruction.hhcurveto.asInt()) //  0x1B
-                            try ctx.rccurveTo(s[i], f, s[i + 1], s[i + 2], s[i + 3], 0.0)
+                        if (b0 == Instruction.HH_QUADRATIC_TO.raw()) //  0x1B
+                            try ctx.rc_curve_to(s[i], f, s[i + 1], s[i + 2], s[i + 3], 0.0)
                         else
-                            try ctx.rccurveTo(f, s[i], s[i + 1], s[i + 2], 0.0, s[i + 3]);
+                            try ctx.rc_curve_to(f, s[i], s[i + 1], s[i + 2], 0.0, s[i + 3]);
                         f = 0.0;
                     }
                 },
-                Instruction.callsubr.asInt() => { // 0x0A
+                Instruction.CALL_SUBROUTINE.raw() => { // 0x0A
                     if (!has_subrs) {
                         if (cff_data.fdselect.size != 0)
-                            subrs = getGlyphSubrs(cff_data, glyph);
+                            subrs = get_glyph_subroutines(cff_data, glyph);
                         has_subrs = true;
                     }
-                    continue :sw Instruction.callgsubr.asInt();
+                    continue :sw Instruction.CALL_GLOBAL_SUBROUTINE.raw();
                     // FALLTHROUGH
                 },
-                Instruction.callgsubr.asInt() => { // 0x1D
-                    sp = std.math.sub(u32, sp, 1) catch return error.CallGSubRStack;
+                Instruction.CALL_GLOBAL_SUBROUTINE.raw() => { // 0x1D
+                    sp = std.math.sub(u32, sp, 1) catch return error.call_global_subroutines_stack;
                     const v: i32 = @intFromFloat(@trunc(s[sp]));
-                    subr_stack.appendBounded(b) catch return error.RecursionLimit;
-                    b = (if (b0 == Instruction.callsubr.asInt()) // 0x0A
+                    if (subr_stack.len == subr_stack.cap) return error.recursion_limit;
+                    _ = subr_stack.append_assume_capacity(b);
+                    b = (if (b0 == Instruction.CALL_SUBROUTINE.raw()) // 0x0A
                         subrs
                     else
-                        cff_data.gsubrs).getSubr(@bitCast(v));
-                    if (b.size == 0) return error.SubRNotFound;
+                        cff_data.gsubrs).get_subroutine(@bitCast(v));
+                    if (b.size == 0) return error.subroutine_not_found;
                     b.cursor = 0;
                     clear_stack = false;
                 },
-                Instruction.ret.asInt() => { // 0x0B
-                    b = subr_stack.pop() orelse return error.ReturnOutsideSubR;
+                Instruction.RETURN.raw() => { // 0x0B
+                    b = subr_stack.try_pop() catch return error.return_outside_subroutine;
                     clear_stack = false;
                 },
-                Instruction.endchar.asInt() => { // 0x0E
-                    try ctx.closeShape();
+                Instruction.END_CHAR.raw() => { // 0x0E
+                    try ctx.close_shape();
                     return;
                 },
-                Instruction.twoByteEscape.asInt() => { // 0x0C
+                Instruction.TWO_BYTE_ESCAPE.raw() => { // 0x0C
                     const b1 = b.get8();
                     switch (b1) {
-                        // @TODO These "flex" implementations ignore the flex-depth and resolution,
+                        //TODO These "flex" implementations ignore the flex-depth and resolution,
                         // and always draw beziers.
-                        Instruction.hflex.asInt() => { // 0x22
-                            if (sp < 7) return error.HFlexStack;
+                        Instruction.H_FLEX.raw() => { // 0x22
+                            if (sp < 7) return error.h_flex_stack;
                             const dx1 = s[0];
                             const dx2 = s[1];
                             const dy2 = s[2];
@@ -2341,11 +2436,11 @@ pub const TrueTypeFont = struct {
                             const dx4 = s[4];
                             const dx5 = s[5];
                             const dx6 = s[6];
-                            try ctx.rccurveTo(dx1, 0, dx2, dy2, dx3, 0);
-                            try ctx.rccurveTo(dx4, 0, dx5, -dy2, dx6, 0);
+                            try ctx.rc_curve_to(dx1, 0, dx2, dy2, dx3, 0);
+                            try ctx.rc_curve_to(dx4, 0, dx5, -dy2, dx6, 0);
                         },
-                        Instruction.flex.asInt() => { // 0x23
-                            if (sp < 13) return error.FlexStack;
+                        Instruction.FLEX.raw() => { // 0x23
+                            if (sp < 13) return error.flex_stack;
                             const dx1 = s[0];
                             const dy1 = s[1];
                             const dx2 = s[2];
@@ -2359,11 +2454,11 @@ pub const TrueTypeFont = struct {
                             const dx6 = s[10];
                             const dy6 = s[11];
                             //fd is s[12]
-                            try ctx.rccurveTo(dx1, dy1, dx2, dy2, dx3, dy3);
-                            try ctx.rccurveTo(dx4, dy4, dx5, dy5, dx6, dy6);
+                            try ctx.rc_curve_to(dx1, dy1, dx2, dy2, dx3, dy3);
+                            try ctx.rc_curve_to(dx4, dy4, dx5, dy5, dx6, dy6);
                         },
-                        Instruction.hflex1.asInt() => { // 0x24
-                            if (sp < 9) return error.HFlex1Stack;
+                        Instruction.H_FLEX_1.raw() => { // 0x24
+                            if (sp < 9) return error.h_flex_1_stack;
                             const dx1 = s[0];
                             const dy1 = s[1];
                             const dx2 = s[2];
@@ -2373,11 +2468,11 @@ pub const TrueTypeFont = struct {
                             const dx5 = s[6];
                             const dy5 = s[7];
                             const dx6 = s[8];
-                            try ctx.rccurveTo(dx1, dy1, dx2, dy2, dx3, 0);
-                            try ctx.rccurveTo(dx4, 0, dx5, dy5, dx6, -(dy1 + dy2 + dy5));
+                            try ctx.rc_curve_to(dx1, dy1, dx2, dy2, dx3, 0);
+                            try ctx.rc_curve_to(dx4, 0, dx5, dy5, dx6, -(dy1 + dy2 + dy5));
                         },
-                        Instruction.flex1.asInt() => { // 0x25
-                            if (sp < 11) return error.Flex1Stack;
+                        Instruction.FLEX_1.raw() => { // 0x25
+                            if (sp < 11) return error.flex_1_stack;
                             const dx1 = s[0];
                             const dy1 = s[1];
                             const dx2 = s[2];
@@ -2396,26 +2491,26 @@ pub const TrueTypeFont = struct {
                                 dy6 = -dy
                             else
                                 dx6 = -dx;
-                            try ctx.rccurveTo(dx1, dy1, dx2, dy2, dx3, dy3);
-                            try ctx.rccurveTo(dx4, dy4, dx5, dy5, dx6, dy6);
+                            try ctx.rc_curve_to(dx1, dy1, dx2, dy2, dx3, dy3);
+                            try ctx.rc_curve_to(dx4, dy4, dx5, dy5, dx6, dy6);
                         },
 
-                        else => return error.Unimplemented,
+                        else => return error.unimplemented,
                     }
                 },
                 else => {
                     if (b0 != 255 and b0 != 28 and b0 < 32)
-                        return error.ReservedOperator;
+                        return error.reserved_operator;
 
                     // push immediate
                     const f: f32 = if (b0 == 255)
                         @floatFromInt(@as(i32, @intCast(b.get32() / 0x10000)))
                     else blk: {
                         b.cursor -= 1;
-                        break :blk @floatFromInt(@as(i16, @truncate(@as(i32, @bitCast(b.cffInt())))));
+                        break :blk @floatFromInt(@as(i16, @truncate(@as(i32, @bitCast(b.cff_int())))));
                     };
                     // std.log.debug("f {d:.2}", .{f});
-                    if (sp >= 48) return error.PushStackOverflow;
+                    if (sp >= 48) return error.push_stack_overflow;
                     s[sp] = f;
                     sp += 1;
                     clear_stack = false;
@@ -2423,10 +2518,10 @@ pub const TrueTypeFont = struct {
             }
             if (clear_stack) sp = 0;
         }
-        return error.NoEndChar;
+        return error.no_end_char;
     }
 
-    fn getGlyphSubrs(cff_data: *const CffData, glyph: GlyphIndex) Buf {
+    fn get_glyph_subroutines(cff_data: *const CffData, glyph: GlyphIndex) DataBuf {
         var fdselector: u32 = std.math.maxInt(u32);
         var fdselect = cff_data.fdselect;
         // std.log.debug("getGlyphSubrs fdselect {}", .{fdselect});
@@ -2453,9 +2548,117 @@ pub const TrueTypeFont = struct {
         }
         // what was this line? it does nothing. why was it in the original c code?
         // if (fdselector == -1) new_buf(NULL, 0);
-        return cff_data.cff.getSubrs(cff_data.fontdicts.cffIndexGet(@enumFromInt(fdselector)));
+        return cff_data.cff.get_subroutines(cff_data.fontdicts.cff_index_get(@enumFromInt(fdselector)));
     }
 };
+
+pub fn translate_vertices(vertices: *List(Vertex), translate: Vec_i32) void {
+    for (vertices.slice()) |*vert| {
+        switch (vert.type) {
+            .MOVE_TO, .LINE => {
+                vert.x += num_cast(translate.x, i16);
+                vert.y += num_cast(translate.y, i16);
+            },
+            .QUADRATIC => {
+                vert.x += num_cast(translate.x, i16);
+                vert.y += num_cast(translate.y, i16);
+                vert.cx += num_cast(translate.x, i16);
+                vert.cy += num_cast(translate.y, i16);
+            },
+            .CUBIC => {
+                vert.x += num_cast(translate.x, i16);
+                vert.y += num_cast(translate.y, i16);
+                vert.cx += num_cast(translate.x, i16);
+                vert.cy += num_cast(translate.y, i16);
+                vert.cx1 += num_cast(translate.x, i16);
+                vert.cy1 += num_cast(translate.y, i16);
+            },
+            else => {},
+        }
+    }
+}
+
+pub const ShapeConvertError = error{
+    invalid_vertex_type,
+};
+
+pub fn convert_vertex_list_to_new_shape_with_userdata(vertex_list: *List(Vertex), comptime T: type, comptime EDGE_USERDATA: type, comptime EDGE_USERDATA_DEFAULT: EDGE_USERDATA, shape_allocator: Allocator) ShapeConvertError!Shape(T, EDGE_USERDATA, EDGE_USERDATA_DEFAULT) {
+    var shape = Shape(T, EDGE_USERDATA, EDGE_USERDATA_DEFAULT).init_capacity(2, shape_allocator);
+    try convert_vertex_list_to_shape(vertex_list, T, EDGE_USERDATA, EDGE_USERDATA_DEFAULT, &shape, shape_allocator);
+    return shape;
+}
+
+pub fn convert_vertex_list_to_new_shape(vertex_list: *List(Vertex), comptime T: type, shape_allocator: Allocator) ShapeConvertError!Shape(T, void, void{}) {
+    return convert_vertex_list_to_new_shape_with_userdata(vertex_list, T, void, void{}, shape_allocator);
+}
+
+pub fn convert_vertex_list_to_shape(vertex_list: *List(Vertex), comptime T: type, shape: *Shape(T, void, void{}), shape_allocator: Allocator) ShapeConvertError!void {
+    return convert_vertex_list_to_shape_with_userdata(vertex_list, T, void, void{}, shape, shape_allocator);
+}
+
+pub fn convert_vertex_list_to_shape_with_userdata(vertex_list: *List(Vertex), comptime T: type, comptime EDGE_USERDATA: type, comptime EDGE_USERDATA_DEFAULT: EDGE_USERDATA, shape: *Shape(T, EDGE_USERDATA, EDGE_USERDATA_DEFAULT), shape_allocator: Allocator) ShapeConvertError!void {
+    const VEC = Vec2.define_vec2_type(T);
+    const EDGE = ShapeModule.EdgeWithUserdata(T, EDGE_USERDATA, EDGE_USERDATA_DEFAULT);
+    const CONTOUR = Contour(T, EDGE_USERDATA, EDGE_USERDATA_DEFAULT);
+    var started_a_contour: bool = false;
+    var p1: VEC = .ZERO_ZERO;
+    var curr_contour: CONTOUR = .init_capacity(8, shape_allocator);
+    shape.clear(shape_allocator);
+    for (vertex_list.slice()) |vert| {
+        switch (vert.type) {
+            .MOVE_TO => {
+                if (started_a_contour) {
+                    started_a_contour = false;
+                    shape.append_contour(curr_contour, shape_allocator);
+                    curr_contour = .init_capacity(8, shape_allocator);
+                }
+                p1 = Vec_f32.new_from_any(vert.x, vert.y);
+            },
+            .LINE => {
+                started_a_contour = true;
+                const p2 = Vec_f32.new_from_any(vert.x, vert.y);
+                const edge = EDGE.new_line(p1, p2);
+                curr_contour.append_edge(edge, shape_allocator);
+                p1 = p2;
+            },
+            .QUADRATIC => {
+                started_a_contour = true;
+                const p2 = Vec_f32.new_from_any(vert.cx, vert.cy);
+                const p3 = Vec_f32.new_from_any(vert.x, vert.y);
+                const edge = EDGE.new_quadratic_bezier(p1, p2, p3);
+                curr_contour.append_edge(edge, shape_allocator);
+                p1 = p3;
+            },
+            .CUBIC => {
+                started_a_contour = true;
+                const p2 = Vec_f32.new_from_any(vert.cx, vert.cy);
+                const p3 = Vec_f32.new_from_any(vert.cx1, vert.cy1);
+                const p4 = Vec_f32.new_from_any(vert.x, vert.y);
+                const edge = EDGE.new_cubic_bezier(p1, p2, p3, p4);
+                curr_contour.append_edge(edge, shape_allocator);
+                p1 = p4;
+            },
+            else => return ShapeConvertError.invalid_vertex_type,
+        }
+    }
+    if (started_a_contour) {
+        started_a_contour = false;
+        shape.append_contour(curr_contour, shape_allocator);
+    }
+}
+
+// test "TrueType_works" {
+//     const Test = Root.Testing;
+//     const data = try Utils.File.load_entire_file("./vendor/fonts/Lato/Lato-Regular.ttf", .{});
+//     defer data.free_all(std.heap.page_allocator);
+//     var font = try TrueTypeFont.load(data.data);
+//     const CHARS_TO_CHECK = "The quick brown fox jumped over the lazy brown dog. %&@";
+//     for (CHARS_TO_CHECK[0..]) |char| {
+//         const index = font.get_codepoint_glyph_index(@intCast(char));
+//         const metrics = font.get_glyph_horizontal_metrics(index);
+//         try Test.expect_greater_than(metrics.advance_width, "metrics.advance_width", 0, "0", "all characters to check should have a positive 'advance width', but got 0 for char '{c}'", .{char});
+//     }
+// }
 
 test "TrueTypeFont_load_and_render_Lato_chars" {
     const alloc = std.heap.page_allocator;
@@ -2466,13 +2669,38 @@ test "TrueTypeFont_load_and_render_Lato_chars" {
         .Y_ORDER = .TOP_TO_BOTTOM,
     };
     const OUT_GRID = DataGridModule.DataGrid(OUT_DEF);
-    const RASTER = ShapeModule.ScanlineRasterizer(f32, ShapeModule.EdgeColor, ShapeModule.EdgeColor.WHITE, i32, OUT_DEF);
+    const RASTER = ShapeModule.ScanlineRasterizer(f32, void, void{}, i32, OUT_DEF);
     var raster = RASTER.init_with_intersection_capacity(16, alloc);
     defer raster.free(alloc);
-    var output_grid = OUT_GRID.init(64, 64, 0, alloc);
-    defer output_grid.free(alloc);
-    const CHARS = [_]u32{'A'};
-    // const CHARS = [_]u32{ 'A', '&', '☠' };
+    // var output_grid = OUT_GRID.init(64, 64, 0, alloc);
+    const output_cells = OUT_GRID.CellList.init_capacity(4096, alloc);
+    var vertex_list = List(Vertex).init_capacity(128, alloc);
+    const VertexListPoolST = VertexListPool(.SINGLE_THREADED);
+    var vertex_list_pool = VertexListPoolST.init_cap(8, alloc);
+    const PROTO = struct {
+        fn free_vert_list(vert_list: *List(Vertex), vert_alloc: Allocator) void {
+            vert_list.free(vert_alloc);
+        }
+        fn free_contour(contour: *Contour(f32, void, void{}), contour_alloc: Allocator) void {
+            contour.free(contour_alloc);
+        }
+    };
+    defer vertex_list_pool.free_items_then_free_pool(Allocator, PROTO.free_vert_list, alloc);
+    const ActiveEdgePoolST = ActiveEdgePool(.SINGLE_THREADED);
+    var active_edge_pool = ActiveEdgePoolST.init_cap(32, alloc);
+    defer active_edge_pool.free_pool();
+    const ContourPoolST = ContourPool(f32, void, void{}, .SINGLE_THREADED);
+    var contour_pool = ContourPoolST.init_cap(8, alloc);
+    defer contour_pool.free_pool();
+    var shape = Shape(f32, void, void{}).init_capacity(4, alloc);
+    defer shape.free(alloc);
+    var temp_flat_curve_buf = FlattenedCurvesBuffer.init_capacity(128, alloc);
+    defer temp_flat_curve_buf.free();
+    var temp_edge_buf = EdgesBuffer.init_capacity(64, alloc);
+    defer temp_edge_buf.free();
+    // defer output_grid.free(alloc);
+    // const CHARS = [_]u32{'A'};
+    const CHARS = [_]u32{ 'A', '&', 'ć', 'Ⓡ' };
     const font_file = try std.fs.cwd().openFile("vendor/fonts/Lato/Lato-Regular.ttf", .{});
     defer font_file.close();
     const font_file_stat = try font_file.stat();
@@ -2481,18 +2709,41 @@ test "TrueTypeFont_load_and_render_Lato_chars" {
     defer font_file_buf.free(alloc);
     font_file_buf.len = @intCast(font_file_len);
     _ = try font_file.readAll(font_file_buf.slice());
-    const font_data = FontFile.new(font_file_buf.slice());
-    var font_info: FontInfo = try font_data.init_font_info_by_index(0);
+    var font: TrueTypeFont = try TrueTypeFont.load(font_file_buf.slice());
     try std.fs.cwd().makePath("test_out/true_type");
+    const scale_54_px = font.get_scale_for_pixel_height(54.0);
     inline for (CHARS[0..]) |char| {
-        std.debug.print("CHAR = {d} ", .{char}); //DEBUG
-        const glyph_index = try font_info.find_glyph_index(char);
-        var vertex_list = try font_info.get_glyph_shape_from_index(glyph_index, alloc);
-        var shape = vertex_list_to_shape(vertex_list, f32, ShapeModule.EdgeColor, ShapeModule.EdgeColor.WHITE, alloc);
-        raster.rasterize_to_existing_data_grid(&shape, .none(), .X_ONLY_LINEAR_FALLOFF, output_grid, 255, 0, .default_estimates(), alloc);
-        _ = try BitmapFormat.save_bitmap_to_file("test_out/true_type/char_" ++ std.fmt.comptimePrint("{d}", .{char}) ++ ".bmp", OUT_DEF, output_grid, .{ .bits_per_pixel = .BPP_8 }, .NO_CONVERSION_NEEDED_ALPHA_BECOMES_COLOR_CHANNELS, alloc);
-        output_grid.fill_all(0);
-        shape.free(alloc);
-        vertex_list.free(alloc);
+        const glyph_index = font.get_codepoint_glyph_index(char);
+
+        // var aabb = try font.get_glyph_bounds(glyph_index);
+        // aabb = aabb.scale(scale_54_px);
+        // const shift_to_frame = aabb.get_min_point().negate().to_new_type(f32);
+        // std.debug.print("\naabb: {any}\n", .{aabb}); //DEBUG
+        // aabb = aabb.with_mins_shifted_to_zero();
+        // std.debug.print("aabb shifted: {any}\n", .{aabb}); //DEBUG
+        try font.get_glyph_vertex_list(glyph_index, &vertex_list, alloc, .SINGLE_THREADED, &vertex_list_pool, alloc);
+
+        // translate_vertices(&vertex_list, shift_to_frame);
+        const result = try font.rasterize_vertices_to_data_grid_with_subpixel_offset(glyph_index, &vertex_list, null, .reuse_cell_buffer(output_cells, alloc, 0), .default_pixel_flatness(), scale_54_px, scale_54_px, 0, 0, .SINGLE_THREADED, &temp_flat_curve_buf, &temp_edge_buf, &active_edge_pool);
+        _ = try BitmapFormat.save_bitmap_to_file("test_out/true_type/stb_raster_char_" ++ std.fmt.comptimePrint("{d}", .{char}) ++ ".bmp", OUT_DEF, result.data_grid, .{ .bits_per_pixel = .BPP_8 }, .NO_CONVERSION_NEEDED_ALPHA_BECOMES_COLOR_CHANNELS, alloc);
+        try convert_vertex_list_to_shape(&vertex_list, f32, &shape, alloc);
+        shape.scale(.new_same_xy(scale_54_px));
+        var aabb = shape.get_bounds_default_estimate();
+        std.debug.print("\nchar: {d}\n", .{char}); //DEBUG
+        std.debug.print("\nvertex_list: {any}\n", .{vertex_list}); //DEBUG
+        std.debug.print("\nshape: {any}\n", .{shape}); //DEBUG
+        std.debug.print("\naabb: {any}\n", .{aabb}); //DEBUG
+        aabb = aabb.expand_by(2);
+        const shift_to_frame = aabb.get_min_point().negate();
+        aabb = aabb.with_mins_shifted_to_zero();
+        const aabb_size = aabb.get_size();
+        std.debug.print("\naabb_size: {any}\n", .{aabb_size}); //DEBUG
+        const output_grid = OUT_GRID.init_from_existing_cell_buffer(@intFromFloat(aabb_size.x), @intFromFloat(aabb_size.y), 0, output_cells, alloc);
+        raster.rasterize_to_existing_data_grid(&shape, .steps_preserve_original(&.{Vec_f32.TransformStep.translate(shift_to_frame)}), .X_ONLY_LINEAR_FALLOFF, output_grid, 255, 0, .default_estimates(), alloc);
+        std.debug.print("\noutput_grid: {any}\n", .{result.data_grid}); //DEBUG
+        _ = try BitmapFormat.save_bitmap_to_file("test_out/true_type/shape_raster_char_" ++ std.fmt.comptimePrint("{d}", .{char}) ++ ".bmp", OUT_DEF, output_grid, .{ .bits_per_pixel = .BPP_8 }, .NO_CONVERSION_NEEDED_ALPHA_BECOMES_COLOR_CHANNELS, alloc);
+
+        // shape.free(alloc);
+        // vertex_list.free(alloc);
     }
 }

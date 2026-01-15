@@ -310,4 +310,7 @@ pub const FillRule = enum {
     }
 };
 
-
+pub const ThreadingMode = enum(u8) {
+    SINGLE_THREADED,
+    MULTI_THREAD_SAFE,
+};

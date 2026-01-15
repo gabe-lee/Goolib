@@ -34,6 +34,8 @@ const IteratorState = Root.IList_Iterator.IteratorState;
 const Utils = Root.Utils;
 const IList = Root.IList.IList;
 
+const NO_ALLOC = DummyAllocator.allocator_panic;
+
 pub fn ConcreteTableValueFuncs(comptime T: type, comptime LIST: type, comptime ALLOC: type) type {
     return struct {
         /// Return the value at the given index
@@ -2307,6 +2309,11 @@ pub fn CreateConcretePrototype(comptime T: type, comptime LIST: type, comptime A
             set(self, append_range.first_idx, val, alloc);
             return append_range.first_idx;
         }
+        pub fn append_assume_capacity(self: LIST, val: T, alloc: ALLOC) usize {
+            const append_range = append_slots_assume_capacity(self, 1, alloc);
+            set(self, append_range.first_idx, val, alloc);
+            return append_range.first_idx;
+        }
         pub fn try_append(self: LIST, val: T, alloc: ALLOC) ListError!usize {
             try try_ensure_free_slots(self, 1, alloc);
             const append_range = append_slots_assume_capacity(self, 1, alloc);
@@ -2478,13 +2485,13 @@ pub fn CreateConcretePrototype(comptime T: type, comptime LIST: type, comptime A
         pub fn pop(self: LIST, alloc: ALLOC) T {
             const last_idx_ = last_idx(self);
             const val = get(self, last_idx_, alloc);
-            trim_len(self, 1);
+            trim_len(self, 1, alloc);
             return val;
         }
         pub fn try_pop(self: LIST, alloc: ALLOC) ListError!T {
             const last_idx_ = try try_last_idx(self);
             const val = get(self, last_idx_, alloc);
-            trim_len(self, 1);
+            trim_len(self, 1, alloc);
             return val;
         }
 
