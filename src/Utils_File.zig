@@ -53,7 +53,7 @@ pub const LoadedFile = struct {
 
 pub const LoadError = std.mem.Allocator.Error || std.fs.File.OpenError || std.fs.File.StatError || std.fs.File.ReadError;
 
-pub fn load_entire_file_with_alloc(path_relative_cwd: []const u8, flags: std.fs.File.OpenFlags, allocator: Allocator) LoadError!LoadedFile {
+pub fn load_entire_file(path_relative_cwd: []const u8, flags: std.fs.File.OpenFlags, allocator: Allocator) LoadError!LoadedFile {
     const file = try std.fs.cwd().openFile(path_relative_cwd, flags);
     const stat = try file.stat();
     const data = try allocator.alloc(u8, @intCast(stat.size));
@@ -62,9 +62,4 @@ pub fn load_entire_file_with_alloc(path_relative_cwd: []const u8, flags: std.fs.
         .file = file,
         .data = data,
     };
-}
-
-/// uses `std.heap.page_allocator`
-pub fn load_entire_file(path_relative_cwd: []const u8, flags: std.fs.File.OpenFlags) LoadError!LoadedFile {
-    return load_entire_file_with_alloc(path_relative_cwd, flags, std.heap.page_allocator);
 }

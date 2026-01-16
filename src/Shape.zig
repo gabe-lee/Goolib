@@ -206,6 +206,9 @@ pub fn Point(comptime T: type) type {
         pub fn add_bounds_to_aabb(self: Self, aabb: *AABB) void {
             aabb.* = aabb.combine_with_point(self.p[0]);
         }
+        pub fn add_rough_bounds_to_aabb(self: Self, aabb: *AABB) void {
+            aabb.* = aabb.combine_with_point(self.p[0]);
+        }
         pub fn move_start_point(self: *Self, new_start: Vector) void {
             self.p[0] = new_start;
         }
@@ -386,6 +389,10 @@ pub fn Line(comptime T: type) type {
             return result;
         }
         pub fn add_bounds_to_aabb(self: Self, aabb: *AABB) void {
+            aabb.* = aabb.combine_with_point(self.p[0]);
+            aabb.* = aabb.combine_with_point(self.p[1]);
+        }
+        pub fn add_rough_bounds_to_aabb(self: Self, aabb: *AABB) void {
             aabb.* = aabb.combine_with_point(self.p[0]);
             aabb.* = aabb.combine_with_point(self.p[1]);
         }
@@ -763,6 +770,11 @@ pub fn QuadraticBezier(comptime T: type) type {
                     aabb.* = aabb.combine_with_point(self.lerp(percent));
                 }
             }
+        }
+        pub fn add_rough_bounds_to_aabb(self: Self, aabb: *AABB) void {
+            aabb.* = aabb.combine_with_point(self.p[0]);
+            aabb.* = aabb.combine_with_point(self.p[1]);
+            aabb.* = aabb.combine_with_point(self.p[2]);
         }
         pub fn move_start_point(self: *Self, new_start: Vector) void {
             const original_p0_minus_p1 = self.p[0].subtract(self.p[1]);
@@ -2021,15 +2033,15 @@ pub fn Contour(comptime T: type, comptime EDGE_USERDATA: type, comptime EDGE_USE
             }
         }
 
-        pub fn get_new_horizontal_scanline_intersections(self: Self, y_value: T, alloc: Allocator, comptime SLOPE_MODE: MathX.ScanlineSlopeMode, comptime SLOPE_TYPE: type, estimates: Estimates(T), transform: TransformNoAlter(T)) Scanline(T, SLOPE_MODE, SLOPE_TYPE) {
+        pub fn get_new_horizontal_scanline_intersections(self: Self, y_value: T, alloc: Allocator, comptime SLOPE_MODE: MathX.ScanlineSlopeMode, comptime SLOPE_TYPE: type, estimates: Estimates(T)) Scanline(T, SLOPE_MODE, SLOPE_TYPE) {
             var scanline = Scanline(T, SLOPE_MODE, SLOPE_TYPE).init_cap(8, alloc);
-            self.append_horizontal_scanline_intersections(y_value, SLOPE_MODE, SLOPE_TYPE, &scanline, alloc, estimates, transform);
+            self.append_horizontal_scanline_intersections(y_value, SLOPE_MODE, SLOPE_TYPE, &scanline, alloc, estimates);
             return scanline;
         }
 
-        pub fn append_horizontal_scanline_intersections(self: Self, y_value: T, comptime SLOPE_MODE: MathX.ScanlineSlopeMode, comptime SLOPE_TYPE: type, scanline: *Scanline(T, SLOPE_MODE, SLOPE_TYPE), scanline_allocator: Allocator, estimates: Estimates(T), transform: TransformNoAlter(T)) void {
+        pub fn append_horizontal_scanline_intersections(self: Self, y_value: T, comptime SLOPE_MODE: MathX.ScanlineSlopeMode, comptime SLOPE_TYPE: type, scanline: *Scanline(T, SLOPE_MODE, SLOPE_TYPE), scanline_allocator: Allocator, estimates: Estimates(T)) void {
             for (self.edges.slice()) |edge| {
-                const edge_intersections = edge.transformed(transform).horizontal_intersections(y_value, .axis_only, SLOPE_MODE, SLOPE_TYPE, estimates);
+                const edge_intersections = edge.horizontal_intersections(y_value, .axis_only, SLOPE_MODE, SLOPE_TYPE, estimates);
                 for (0..edge_intersections.count) |i| {
                     const inter = edge_intersections.intersections[i];
                     _ = scanline.intersections.append(.{ .inter = inter }, scanline_allocator);
@@ -2163,18 +2175,18 @@ pub fn Shape(comptime T: type, comptime EDGE_USERDATA: type, comptime EDGE_USERD
             return self.get_bounds_with_miter(0, 0, 0, Estimates(T).DEFAULT.linear);
         }
 
-        pub fn get_new_horizontal_scanline_intersections(self: Self, y_value: T, alloc: Allocator, comptime SLOPE_MODE: MathX.ScanlineSlopeMode, comptime SLOPE_TYPE: type, estimates: Estimates(T), transform: TransformNoAlter(T)) Scanline(T, SLOPE_MODE, SLOPE_TYPE) {
+        pub fn get_new_horizontal_scanline_intersections(self: Self, y_value: T, alloc: Allocator, comptime SLOPE_MODE: MathX.ScanlineSlopeMode, comptime SLOPE_TYPE: type, estimates: Estimates(T)) Scanline(T, SLOPE_MODE, SLOPE_TYPE) {
             var scanline = Scanline(T, SLOPE_MODE, SLOPE_TYPE).init_cap(8, alloc);
             for (self.contours.slice()) |contour| {
-                contour.append_horizontal_scanline_intersections(y_value, SLOPE_MODE, SLOPE_TYPE, &scanline, alloc, estimates, transform);
+                contour.append_horizontal_scanline_intersections(y_value, SLOPE_MODE, SLOPE_TYPE, &scanline, alloc, estimates);
             }
             return scanline;
         }
 
-        pub fn remake_horizontal_scanline_intersections(self: Self, y_value: T, comptime SLOPE_MODE: MathX.ScanlineSlopeMode, comptime SLOPE_TYPE: type, scanline: *Scanline(T, SLOPE_MODE, SLOPE_TYPE), scanline_allocator: Allocator, estimates: Estimates(T), transform: TransformNoAlter(T)) void {
+        pub fn remake_horizontal_scanline_intersections(self: Self, y_value: T, comptime SLOPE_MODE: MathX.ScanlineSlopeMode, comptime SLOPE_TYPE: type, scanline: *Scanline(T, SLOPE_MODE, SLOPE_TYPE), scanline_allocator: Allocator, estimates: Estimates(T)) void {
             scanline.reset();
             for (self.contours.slice()) |contour| {
-                contour.append_horizontal_scanline_intersections(y_value, SLOPE_MODE, SLOPE_TYPE, scanline, scanline_allocator, estimates, transform);
+                contour.append_horizontal_scanline_intersections(y_value, SLOPE_MODE, SLOPE_TYPE, scanline, scanline_allocator, estimates);
             }
         }
 
@@ -3701,103 +3713,188 @@ pub fn ScanlineRasterizer(comptime T: type, comptime EDGE_USERDATA: type, compti
             self.scanline.reset();
             return self;
         }
+
         pub fn init_with_intersection_capacity(capacity: u32, alloc: Allocator) Self {
             return Self{
                 .scanline = ScanlineType.init_cap(capacity, alloc),
             };
         }
+
         pub fn reset(self: *Self) void {
             self.scanline.reset();
         }
+
         pub fn free(self: *Self, alloc: Allocator) void {
             self.scanline.free(alloc);
         }
 
-        pub fn rasterize_to_existing_data_grid(self: *Self, shape: *CompositeShapeType, shape_transform: Transform(T), anti_alias: ScanlineAntiAliasMode, output_grid: OutputGrid, fill_val: OUTPUT_DATA_GRID_DEF.CELL_TYPE, unfill_val: OUTPUT_DATA_GRID_DEF.CELL_TYPE, estimates: Estimates(T), scanline_allocator: Allocator) void {
-            switch (shape_transform) {
-                .STEPS_ALTER_ORIGINAL => |s| {
-                    shape.apply_complex_transform(s);
-                },
-                .MATRIX_ALTER_ORIGINAL => |m| {
-                    shape.apply_affine_transform_matrix(m);
-                },
-                else => {},
+        pub fn intersection_fill_at_idx_nonzero(self: *Self, idx: u32) u1 {
+            return @intFromBool(self.scanline.intersections.ptr[idx].inter.slope != 0);
+        }
+
+        fn default_lerp(unfill: OUTPUT_DATA_GRID_DEF.CELL_TYPE, fill: OUTPUT_DATA_GRID_DEF.CELL_TYPE, percent: f32) OUTPUT_DATA_GRID_DEF.CELL_TYPE {
+            const unfill_float = num_cast(unfill, f32);
+            const fill_float = num_cast(fill, f32);
+            var lerp_float = MathX.lerp(unfill_float, fill_float, percent);
+            if (Types.type_is_int(OUTPUT_DATA_GRID_DEF.CELL_TYPE)) {
+                lerp_float = @round(lerp_float);
             }
-            const scanline_transform = shape_transform.to_no_alter();
+            var lerp_final = num_cast(lerp_float, OUTPUT_DATA_GRID_DEF.CELL_TYPE);
+            if (unfill < fill) {
+                lerp_final = MathX.clamp(unfill, lerp_final, fill);
+            } else {
+                lerp_final = MathX.clamp(fill, lerp_final, unfill);
+            }
+            return lerp_final;
+        }
+
+        pub fn debug_rasterize_intersections_only(self: *Self, shape: *CompositeShapeType, output_grid: OutputGrid, no_intersection_val: OUTPUT_DATA_GRID_DEF.CELL_TYPE, intersection_val: OUTPUT_DATA_GRID_DEF.CELL_TYPE, estimates: Estimates(T), scanline_allocator: Allocator) void {
+            output_grid.fill_all(no_intersection_val);
             for (0..output_grid.height) |y_usize| {
                 const y: u32 = @intCast(y_usize);
                 const yy = num_cast(y, T) + 0.5;
-                shape.remake_horizontal_scanline_intersections(yy, .sign, SLOPE_TYPE, &self.scanline, scanline_allocator, estimates, scanline_transform);
+                shape.remake_horizontal_scanline_intersections(yy, .sign, SLOPE_TYPE, &self.scanline, scanline_allocator, estimates);
                 self.scanline.sort_and_sum();
+                const output_row: []OUTPUT_DATA_GRID_DEF.CELL_TYPE = output_grid.get_h_scanline(0, y, output_grid.width);
+                for (self.scanline.intersections.slice()) |isect| {
+                    const isect_x = isect.inter.point;
+                    const isect_x_floor: u32 = @intFromFloat(@floor(isect_x));
+                    if (isect_x_floor >= 0 and isect_x_floor < output_row.len) {
+                        output_row.ptr[isect_x_floor] = intersection_val;
+                    }
+                }
+            }
+        }
+
+        pub fn debug_rasterize_contours(_: *Self, shape: *CompositeShapeType, output_grid: OutputGrid, empty_val: OUTPUT_DATA_GRID_DEF.CELL_TYPE, edge_val: OUTPUT_DATA_GRID_DEF.CELL_TYPE, steps_per_edge: u32, guaranteed_within_bitmap: bool) void {
+            output_grid.fill_all(empty_val);
+            const step: f32 = 1.0 / num_cast(steps_per_edge, f32);
+            const steps_per_edge_minus_one = steps_per_edge - 1;
+            var curr_percent: f32 = 0;
+            for (shape.contours.slice()) |*contour| {
+                for (contour.edges.slice()) |*edge| {
+                    curr_percent = 0.0;
+                    for (0..steps_per_edge_minus_one) |_| {
+                        const point = edge.lerp(curr_percent);
+                        const point_floor = point.floor();
+                        const point_floor_int = point_floor.to_new_type(u32);
+                        if (guaranteed_within_bitmap or (point_floor_int.x >= 0 and point_floor_int.x < output_grid.width and point_floor_int.y >= 0 and point_floor_int.y < output_grid.height)) {
+                            output_grid.set_cell(point_floor_int.x, point_floor_int.y, edge_val);
+                        }
+                        curr_percent += step;
+                    }
+                    const point = edge.lerp(1.0);
+                    const point_floor = point.floor();
+                    const point_floor_int = point_floor.to_new_type(u32);
+                    if (guaranteed_within_bitmap or (point_floor_int.x >= 0 and point_floor_int.x < output_grid.width and point_floor_int.y >= 0 and point_floor_int.y < output_grid.height)) {
+                        output_grid.set_cell(point_floor_int.x, point_floor_int.y, edge_val);
+                    }
+                }
+            }
+        }
+
+        pub fn rasterize_to_existing_data_grid_default_lerp(self: *Self, shape: *CompositeShapeType, anti_alias: ScanlineAntiAliasMode, output_grid: OutputGrid, unfill_val: OUTPUT_DATA_GRID_DEF.CELL_TYPE, fill_val: OUTPUT_DATA_GRID_DEF.CELL_TYPE, estimates: Estimates(T), scanline_allocator: Allocator) void {
+            return self.rasterize_to_existing_data_grid(shape, anti_alias, output_grid, unfill_val, fill_val, default_lerp, estimates, scanline_allocator);
+        }
+
+        pub fn rasterize_to_existing_data_grid(self: *Self, shape: *CompositeShapeType, anti_alias: ScanlineAntiAliasMode, output_grid: OutputGrid, unfill_val: OUTPUT_DATA_GRID_DEF.CELL_TYPE, fill_val: OUTPUT_DATA_GRID_DEF.CELL_TYPE, lerp_func: *const fn (unfill_val: OUTPUT_DATA_GRID_DEF.CELL_TYPE, fill_val: OUTPUT_DATA_GRID_DEF.CELL_TYPE, percent_filled: f32) OUTPUT_DATA_GRID_DEF.CELL_TYPE, estimates: Estimates(T), scanline_allocator: Allocator) void {
+            for (0..output_grid.height) |y_usize| {
+                // std.debug.print("\nscanline y = {d}", .{y_usize}); //DEBUG
+                const y: u32 = @intCast(y_usize);
+                const yy = num_cast(y, T) + 0.5;
+                shape.remake_horizontal_scanline_intersections(yy, .sign, SLOPE_TYPE, &self.scanline, scanline_allocator, estimates);
+                self.scanline.sort_and_sum();
+                const output_row: []OUTPUT_DATA_GRID_DEF.CELL_TYPE = output_grid.get_h_scanline(0, y, output_grid.width);
                 // assert_with_reason(self.scanline.intersections.is_sorted(.entire_list(), ScanlineType.IntersectionType.x_greater_than), @src(), "scanline intersections not sorted", .{}); //DEBUG
                 var x: u32 = 0;
-                var fill: u1 = 0;
+                var next_x: u32 = undefined;
+                var partial_fill_x: u32 = undefined;
+                var whole_fill_val: OUTPUT_DATA_GRID_DEF.CELL_TYPE = undefined;
+                var partial_fill_val: OUTPUT_DATA_GRID_DEF.CELL_TYPE = undefined;
+                var previous_fill: u1 = 0;
                 const fills: [2]OUTPUT_DATA_GRID_DEF.CELL_TYPE = .{ unfill_val, fill_val };
+                const start_percents: [2]f32 = .{ 0.0, 1.0 };
+                const delta_percents: [2]f32 = .{ -1.0, 1.0 };
+                var i: u32 = 0;
+                var next_i: u32 = undefined;
+                var intersection_x: f32 = undefined;
+                var next_intersection_x: f32 = undefined;
+                var next_intersection_x_floor_int: u32 = undefined;
+                var intersection_x_floor: f32 = undefined;
+                var next_fill: u1 = undefined;
+                var partial_percent: f32 = undefined;
+                var partial_delta: f32 = undefined;
+                var partial_remainder: f32 = undefined;
                 // if (!self.scanline.intersections.is_empty()) {
-                //     const second_fill: u1 = @intFromBool(self.scanline.should_be_filled_at_idx(0, .POSITIVE));
-                //     fill = second_fill ^ 1;
+                //     const second_fill: u1 = self.intersection_fill_at_idx_nonzero(0);
+                //     previous_fill = second_fill ^ 1;
                 // }
-                for (self.scanline.intersections.slice(), 0..) |intersection, i| {
-                    const point_whole_float = @floor(intersection.inter.point);
-                    if (point_whole_float < 0) continue;
-                    const new_fill: u1 = @intFromBool(self.scanline.should_be_filled_at_idx(i, .NONZERO));
-                    const point_whole_int: u32 = @intFromFloat(point_whole_float);
-                    var remainder_percent = intersection.inter.point - point_whole_float;
-                    if (point_whole_int >= output_grid.width) {
-                        const cells = output_grid.get_h_scanline(x, y, output_grid.width - x);
-                        @memset(cells, fills[fill]);
-                        x = output_grid.width;
-                        break;
+                while (i < self.scanline.intersections.len) : (i += 1) {
+                    intersection_x = self.scanline.intersections.ptr[i].inter.point;
+                    intersection_x_floor = @floor(intersection_x);
+                    if (intersection_x_floor >= 0) break;
+                }
+                while (i < self.scanline.intersections.len) {
+                    next_fill = self.intersection_fill_at_idx_nonzero(i);
+                    if (next_fill == previous_fill) {
+                        i += 1;
+                        continue;
                     }
-
-                    if (point_whole_int < x) continue;
-                    // std.debug.print("\npoint_whole_int = {d}\nx = {d}\n", .{ point_whole_int, x }); //DEBUG
-                    const scan_width_whole = point_whole_int - x;
-
-                    const cells = output_grid.get_h_scanline(x, y, scan_width_whole);
-                    @memset(cells, fills[fill]);
-                    x += scan_width_whole;
-                    if (x >= output_grid.width) break;
-                    if (remainder_percent > 0) {
-                        // if (i < self.scanline.intersections.len - 1) {
-                        //     const next_point_whole_float = @floor(self.scanline.intersections.ptr[i + 1].inter.point);
-                        //     const next_point_whole_int: u32 = @intFromFloat(point_whole_float);
-                        //     if (next_point_whole_int == point_whole_int);
-                        // }
-                        // CHECKPOINT find all consecutive intersections within same pixel and sum/lerp them
-                        switch (anti_alias) {
-                            .NONE => {
-                                if (remainder_percent >= 0.5) {
-                                    output_grid.set_cell(x, y, fills[fill]);
-                                } else {
-                                    output_grid.set_cell(x, y, fills[new_fill]);
-                                }
-                            },
-                            .X_ONLY_LINEAR_FALLOFF, .X_ONLY_EXPONENTIAL_FALLOFF => {
-                                if (new_fill != fill) {
-                                    const start_fill = fills[fill];
-                                    const end_fill = fills[new_fill];
-                                    switch (anti_alias) {
-                                        .X_ONLY_EXPONENTIAL_FALLOFF => {
-                                            remainder_percent = remainder_percent * remainder_percent;
-                                        },
-                                        else => {},
-                                    }
-                                    const anti_alias_fill = MathX.upgrade_lerp_out(start_fill, end_fill, 1 - remainder_percent, OUTPUT_DATA_GRID_DEF.CELL_TYPE);
-                                    output_grid.set_cell(x, y, anti_alias_fill);
-                                } else {
-                                    output_grid.set_cell(x, y, fills[new_fill]);
-                                }
-                            },
+                    intersection_x = self.scanline.intersections.ptr[i].inter.point;
+                    intersection_x_floor = @floor(intersection_x);
+                    partial_fill_x = @intFromFloat(intersection_x_floor);
+                    whole_fill_val = fills[previous_fill];
+                    const max_fill_x = @min(output_grid.width, partial_fill_x);
+                    @memset(output_row[x..max_fill_x], whole_fill_val);
+                    if (max_fill_x >= output_grid.width) break;
+                    partial_percent = start_percents[previous_fill];
+                    partial_remainder = (intersection_x - intersection_x_floor);
+                    partial_delta = delta_percents[next_fill] * partial_remainder;
+                    partial_percent += partial_delta;
+                    next_i = i + 1;
+                    next_x = partial_fill_x + 1;
+                    while (next_i < self.scanline.intersections.len) {
+                        next_intersection_x = self.scanline.intersections.ptr[next_i].inter.point;
+                        next_intersection_x_floor_int = @intFromFloat(@floor(next_intersection_x));
+                        if (next_intersection_x_floor_int >= next_x) break;
+                        const next_next_fill = self.intersection_fill_at_idx_nonzero(next_i);
+                        if (next_next_fill == next_fill) {
+                            next_i += 1;
+                            continue;
                         }
-                        x += 1;
-                        if (x >= output_grid.width) break;
+                        partial_remainder = (next_intersection_x - intersection_x);
+                        partial_delta = delta_percents[next_next_fill] * partial_remainder;
+                        partial_percent += partial_delta;
+                        i = next_i;
+                        next_i += 1;
+                        previous_fill = next_fill;
+                        next_fill = next_next_fill;
                     }
-                    fill = new_fill;
+                    partial_percent = MathX.clamp_0_to_1(partial_percent);
+
+                    switch (anti_alias) {
+                        .NONE => {
+                            if (partial_percent >= 0.5) {
+                                output_row.ptr[partial_fill_x] = fill_val;
+                            } else {
+                                output_row.ptr[partial_fill_x] = unfill_val;
+                            }
+                        },
+                        .X_ONLY_LINEAR_FALLOFF => {
+                            partial_fill_val = lerp_func(unfill_val, fill_val, 1 - partial_percent);
+                            output_row.ptr[partial_fill_x] = partial_fill_val;
+                        },
+                        .X_ONLY_EXPONENTIAL_FALLOFF => {
+                            partial_fill_val = lerp_func(unfill_val, fill_val, 1 - (partial_percent * partial_percent));
+                            output_row.ptr[partial_fill_x] = partial_fill_val;
+                        },
+                    }
+                    i = next_i;
+                    x = next_x;
+                    previous_fill = next_fill;
                 }
                 if (x < output_grid.width) {
-                    const cells = output_grid.get_h_scanline(x, y, output_grid.width - x);
-                    @memset(cells, fills[fill]);
+                    @memset(output_row[x..], fills[previous_fill]);
                 }
             }
         }
@@ -3870,12 +3967,12 @@ test "Shape_rasterize_triangle" {
     var triangle = make_test_triangle(&inner, &outer, &shapes);
     // triangle.apply_complex_transform(&.{.skew_from_origin_x_degrees(20)});
     try std.fs.cwd().makePath("test_out/shape");
-    raster.rasterize_to_existing_data_grid(&triangle, .none(), .NONE, output_grid, 255, 0, .default_estimates(), alloc);
+    raster.rasterize_to_existing_data_grid_default_lerp(&triangle, .NONE, output_grid, 0, 255, .default_estimates(), alloc);
     _ = try BitmapFormat.save_bitmap_to_file("test_out/shape/triangle_hard_no_antialias.bmp", OUT_DEF, output_grid, .{ .bits_per_pixel = .BPP_8 }, .NO_CONVERSION_NEEDED_ALPHA_BECOMES_COLOR_CHANNELS, alloc);
     output_grid.fill_all(0);
-    raster.rasterize_to_existing_data_grid(&triangle, .none(), .X_ONLY_LINEAR_FALLOFF, output_grid, 255, 0, .default_estimates(), alloc);
+    raster.rasterize_to_existing_data_grid_default_lerp(&triangle, .X_ONLY_LINEAR_FALLOFF, output_grid, 0, 255, .default_estimates(), alloc);
     _ = try BitmapFormat.save_bitmap_to_file("test_out/shape/triangle_hard_antialias_x_linear.bmp", OUT_DEF, output_grid, .{ .bits_per_pixel = .BPP_8 }, .NO_CONVERSION_NEEDED_ALPHA_BECOMES_COLOR_CHANNELS, alloc);
     output_grid.fill_all(0);
-    raster.rasterize_to_existing_data_grid(&triangle, .none(), .X_ONLY_EXPONENTIAL_FALLOFF, output_grid, 255, 0, .default_estimates(), alloc);
+    raster.rasterize_to_existing_data_grid_default_lerp(&triangle, .X_ONLY_EXPONENTIAL_FALLOFF, output_grid, 0, 255, .default_estimates(), alloc);
     _ = try BitmapFormat.save_bitmap_to_file("test_out/shape/triangle_hard_antialias_x_exponential.bmp", OUT_DEF, output_grid, .{ .bits_per_pixel = .BPP_8 }, .NO_CONVERSION_NEEDED_ALPHA_BECOMES_COLOR_CHANNELS, alloc);
 }

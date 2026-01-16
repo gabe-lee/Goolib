@@ -81,8 +81,6 @@ pub fn build(b: *std.Build) void {
     if (!no_sdl) {
         lib.linkLibrary(sdl_lib);
     }
-    lib.addCSourceFile(.{ .file = b.path("./vendor/stb_truetype/stb_truetype_wrapper.c") });
-    lib.addIncludePath(b.path("./vendor/stb_truetype"));
 
     lib.addOptions("config", options);
 

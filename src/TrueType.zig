@@ -152,7 +152,7 @@ const DATA_GRID_U8_DEF = DataGridModule.GridDefinition{
 const DataGrid_u8 = DataGridModule.DataGrid(DATA_GRID_U8_DEF);
 
 const native_endian = build.cpu.arch.endian();
-const SCANLINE_BUFFER_SIZE = 4096; //DEBUG this should be much smaller
+const SCANLINE_BUFFER_SIZE = 350;
 
 // pub const VertexList = List(Vertex);
 
@@ -277,13 +277,39 @@ pub const GlyphBitmapError = error{
     no_end_char,
 };
 
+// pub const Vertex = struct {
+//     x: i16,
+//     y: i16,
+//     cx: i16,
+//     cy: i16,
+//     cx1: i16,
+//     cy1: i16,
+//     type: Type,
+
+//     pub const Type = enum(u8) {
+//         MOVE_TO = 1,
+//         LINE = 2,
+//         QUADRATIC = 3,
+//         CUBIC = 4,
+//         _,
+//     };
+
+//     fn set(v: *Vertex, ty: Type, x: i32, y: i32, cx: i32, cy: i32) void {
+//         v.type = ty;
+//         v.x = @intCast(x);
+//         v.y = @intCast(y);
+//         v.cx = @intCast(cx);
+//         v.cy = @intCast(cy);
+//     }
+// };
+
 pub const Vertex = struct {
-    x: i16,
-    y: i16,
-    cx: i16,
-    cy: i16,
-    cx1: i16,
-    cy1: i16,
+    x: i32,
+    y: i32,
+    cx: i32,
+    cy: i32,
+    cx1: i32,
+    cy1: i32,
     type: Type,
 
     pub const Type = enum(u8) {
@@ -636,9 +662,9 @@ pub const TrueTypeFont = struct {
         const aabb = if (known_aabb) |kn_aabb| kn_aabb else try get_glyph_bitmap_bounds_with_subpixel_offset(self, glyph, scale_x, scale_y, shift_x, shift_y);
         const aabb_size = aabb.get_size();
         //FIXME something is really wrong with these hacks to shift/frame the glyph
-        const shift_to_origin = aabb.get_min_point().negate().to_new_type(f32);
-        const aabb_shifted = aabb.with_mins_shifted_to_zero();
-        const aabb_max = aabb_shifted.get_max_point().add(.ONE_ONE);
+        // const shift_to_origin = aabb.get_min_point().negate().to_new_type(f32);
+        // const aabb_shifted = aabb.with_mins_shifted_to_zero();
+        const aabb_max = aabb.get_max_point().add(.ONE_ONE);
         // std.debug.print("\naabb: {any}\nsize: {any}\nlocal_offset: {any}\naabb_shifted: {any}\n", .{ aabb, aabb_size, aabb.get_min_point(), aabb_shifted }); //DEBUG
         // const aabb_max = aabb.get_max_point().add(.ONE_ONE);
 
@@ -646,7 +672,7 @@ pub const TrueTypeFont = struct {
 
         var data_grid_and_offset = data_grid.obtain_grid(@intCast(aabb_max.x), @intCast(aabb_max.y)) orelse return GlyphBitmapError.could_not_obtain_bitmap_from_source;
         //FIXME something is really wrong with these hacks to shift/frame the glyph
-        rasterize_vertices_to_data_grid_internal(vertices, &data_grid_and_offset.data_grid, flatness.val, scale_x, scale_y, shift_x + shift_to_origin.x, shift_y + shift_to_origin.y, aabb.x_min, aabb.y_min, true, POOL_THREADING, temp_flat_curves_buffer, temp_edges_buffer, temp_active_edge_pool);
+        rasterize_vertices_to_data_grid_internal(vertices, &data_grid_and_offset.data_grid, flatness.val, scale_x, scale_y, shift_x, shift_y, aabb.x_min, aabb.y_min, true, POOL_THREADING, temp_flat_curves_buffer, temp_edges_buffer, temp_active_edge_pool);
 
         return GlyphBitmapOutput{
             .data_grid = data_grid_and_offset.data_grid,
@@ -1078,6 +1104,15 @@ pub const TrueTypeFont = struct {
 
     pub fn get_glyph_bitmap_bounds_with_subpixel_offset(self: *const TrueTypeFont, glyph: GlyphIndex, scale_x: f32, scale_y: f32, shift_x: f32, shift_y: f32) !AABB_i32 {
         const box = try get_glyph_bounds(self, glyph);
+        // THis would be what I expect to be the right way...
+        // return .{
+        //     // move to integral bboxes (treating pixels as little squares, what pixels get touched)?
+        //     .x_min = @intFromFloat(@floor(@as(f32, @floatFromInt(box.x_min)) * scale_x + shift_x)),
+        //     .y_min = @intFromFloat(@floor(@as(f32, @floatFromInt(box.y_min)) * scale_y + shift_y)),
+        //     .x_max = @intFromFloat(@ceil(@as(f32, @floatFromInt(box.x_max)) * scale_x + shift_x)),
+        //     .y_max = @intFromFloat(@ceil(@as(f32, @floatFromInt(box.x_max)) * scale_y + shift_y)),
+        // };
+        // This is the original bounds calc... this seems wrong...
         return .{
             // move to integral bboxes (treating pixels as little squares, what pixels get touched)?
             .x_min = @intFromFloat(@floor(@as(f32, @floatFromInt(box.x_min)) * scale_x + shift_x)),
@@ -2647,20 +2682,49 @@ pub fn convert_vertex_list_to_shape_with_userdata(vertex_list: *List(Vertex), co
     }
 }
 
-// test "TrueType_works" {
-//     const Test = Root.Testing;
-//     const data = try Utils.File.load_entire_file("./vendor/fonts/Lato/Lato-Regular.ttf", .{});
-//     defer data.free_all(std.heap.page_allocator);
-//     var font = try TrueTypeFont.load(data.data);
-//     const CHARS_TO_CHECK = "The quick brown fox jumped over the lazy brown dog. %&@";
-//     for (CHARS_TO_CHECK[0..]) |char| {
-//         const index = font.get_codepoint_glyph_index(@intCast(char));
-//         const metrics = font.get_glyph_horizontal_metrics(index);
-//         try Test.expect_greater_than(metrics.advance_width, "metrics.advance_width", 0, "0", "all characters to check should have a positive 'advance width', but got 0 for char '{c}'", .{char});
-//     }
-// }
+fn debug_set_cell_if_within_bounds(vert_x: i32, vert_y: i32, scale: f32, translate: Vec_f32, output_grid: DataGrid_u8, set_val: u8) void {
+    var p = Vec_f32.new_from_any(vert_x, vert_y);
+    p = p.scale(scale);
+    p = p.add(translate);
+    p = p.floor();
+    const width: f32 = @floatFromInt(output_grid.width);
+    const height: f32 = @floatFromInt(output_grid.height);
+    if (p.x >= 0 and p.x < width and p.y >= 0 and p.y < height) {
+        const p_int = p.to_new_type(u32);
+        output_grid.set_cell(p_int.x, p_int.y, set_val);
+    } else {
+        std.debug.print("\nvertex out of bounds: x = {d: <5}, y = {d: <5}", .{ p.x, p.y });
+    }
+}
+
+pub fn debug_rasterize_vertex_list_control_points_to_data_grid(vertices: *List(Vertex), output_grid: DataGrid_u8, scale: f32, translate: Vec_f32, empty_val: u8, point_val: u8) void {
+    std.debug.print("\nDEBUGGING VERTEX LIST\noutput bitmap size    w = {d: <5}, h = {d: <5}", .{ output_grid.width, output_grid.height });
+    output_grid.fill_all(empty_val);
+    for (vertices.slice()) |vert| {
+        switch (vert.type) {
+            .MOVE_TO => {
+                debug_set_cell_if_within_bounds(vert.x, vert.y, scale, translate, output_grid, point_val);
+            },
+            .LINE => {
+                debug_set_cell_if_within_bounds(vert.x, vert.y, scale, translate, output_grid, point_val);
+            },
+            .QUADRATIC => {
+                debug_set_cell_if_within_bounds(vert.cx, vert.cy, scale, translate, output_grid, point_val);
+                debug_set_cell_if_within_bounds(vert.x, vert.y, scale, translate, output_grid, point_val);
+            },
+            .CUBIC => {
+                debug_set_cell_if_within_bounds(vert.cx, vert.cy, scale, translate, output_grid, point_val);
+                debug_set_cell_if_within_bounds(vert.cx1, vert.cy1, scale, translate, output_grid, point_val);
+                debug_set_cell_if_within_bounds(vert.x, vert.y, scale, translate, output_grid, point_val);
+            },
+            else => {},
+        }
+    }
+    std.debug.print("\n", .{});
+}
 
 test "TrueTypeFont_load_and_render_Lato_chars" {
+    @setEvalBranchQuota(5000);
     const alloc = std.heap.page_allocator;
     const OUT_DEF = DataGridModule.GridDefinition{
         .CELL_TYPE = u8,
@@ -2672,9 +2736,9 @@ test "TrueTypeFont_load_and_render_Lato_chars" {
     const RASTER = ShapeModule.ScanlineRasterizer(f32, void, void{}, i32, OUT_DEF);
     var raster = RASTER.init_with_intersection_capacity(16, alloc);
     defer raster.free(alloc);
-    // var output_grid = OUT_GRID.init(64, 64, 0, alloc);
     const output_cells = OUT_GRID.CellList.init_capacity(4096, alloc);
     var vertex_list = List(Vertex).init_capacity(128, alloc);
+    defer vertex_list.free(alloc);
     const VertexListPoolST = VertexListPool(.SINGLE_THREADED);
     var vertex_list_pool = VertexListPoolST.init_cap(8, alloc);
     const PROTO = struct {
@@ -2689,18 +2753,16 @@ test "TrueTypeFont_load_and_render_Lato_chars" {
     const ActiveEdgePoolST = ActiveEdgePool(.SINGLE_THREADED);
     var active_edge_pool = ActiveEdgePoolST.init_cap(32, alloc);
     defer active_edge_pool.free_pool();
-    const ContourPoolST = ContourPool(f32, void, void{}, .SINGLE_THREADED);
-    var contour_pool = ContourPoolST.init_cap(8, alloc);
-    defer contour_pool.free_pool();
+    // const ContourPoolST = ContourPool(f32, void, void{}, .SINGLE_THREADED);
+    // var contour_pool = ContourPoolST.init_cap(8, alloc);
+    // defer contour_pool.free_pool();
     var shape = Shape(f32, void, void{}).init_capacity(4, alloc);
     defer shape.free(alloc);
     var temp_flat_curve_buf = FlattenedCurvesBuffer.init_capacity(128, alloc);
     defer temp_flat_curve_buf.free();
     var temp_edge_buf = EdgesBuffer.init_capacity(64, alloc);
     defer temp_edge_buf.free();
-    // defer output_grid.free(alloc);
-    // const CHARS = [_]u32{'A'};
-    const CHARS = [_]u32{ 'A', '&', 'ć', 'Ⓡ' };
+    const CHARS = [_]u32{ 'A', 'B', 'c', 'd', 'E', 'f', 'G', 'g', '&', 'ć' };
     const font_file = try std.fs.cwd().openFile("vendor/fonts/Lato/Lato-Regular.ttf", .{});
     defer font_file.close();
     const font_file_stat = try font_file.stat();
@@ -2714,36 +2776,22 @@ test "TrueTypeFont_load_and_render_Lato_chars" {
     const scale_54_px = font.get_scale_for_pixel_height(54.0);
     inline for (CHARS[0..]) |char| {
         const glyph_index = font.get_codepoint_glyph_index(char);
-
-        // var aabb = try font.get_glyph_bounds(glyph_index);
-        // aabb = aabb.scale(scale_54_px);
-        // const shift_to_frame = aabb.get_min_point().negate().to_new_type(f32);
-        // std.debug.print("\naabb: {any}\n", .{aabb}); //DEBUG
-        // aabb = aabb.with_mins_shifted_to_zero();
-        // std.debug.print("aabb shifted: {any}\n", .{aabb}); //DEBUG
         try font.get_glyph_vertex_list(glyph_index, &vertex_list, alloc, .SINGLE_THREADED, &vertex_list_pool, alloc);
-
-        // translate_vertices(&vertex_list, shift_to_frame);
-        const result = try font.rasterize_vertices_to_data_grid_with_subpixel_offset(glyph_index, &vertex_list, null, .reuse_cell_buffer(output_cells, alloc, 0), .default_pixel_flatness(), scale_54_px, scale_54_px, 0, 0, .SINGLE_THREADED, &temp_flat_curve_buf, &temp_edge_buf, &active_edge_pool);
-        _ = try BitmapFormat.save_bitmap_to_file("test_out/true_type/stb_raster_char_" ++ std.fmt.comptimePrint("{d}", .{char}) ++ ".bmp", OUT_DEF, result.data_grid, .{ .bits_per_pixel = .BPP_8 }, .NO_CONVERSION_NEEDED_ALPHA_BECOMES_COLOR_CHANNELS, alloc);
+        // Shape.zig rasterizer
         try convert_vertex_list_to_shape(&vertex_list, f32, &shape, alloc);
         shape.scale(.new_same_xy(scale_54_px));
-        var aabb = shape.get_bounds_default_estimate();
-        std.debug.print("\nchar: {d}\n", .{char}); //DEBUG
-        std.debug.print("\nvertex_list: {any}\n", .{vertex_list}); //DEBUG
-        std.debug.print("\nshape: {any}\n", .{shape}); //DEBUG
-        std.debug.print("\naabb: {any}\n", .{aabb}); //DEBUG
-        aabb = aabb.expand_by(2);
-        const shift_to_frame = aabb.get_min_point().negate();
-        aabb = aabb.with_mins_shifted_to_zero();
-        const aabb_size = aabb.get_size();
-        std.debug.print("\naabb_size: {any}\n", .{aabb_size}); //DEBUG
-        const output_grid = OUT_GRID.init_from_existing_cell_buffer(@intFromFloat(aabb_size.x), @intFromFloat(aabb_size.y), 0, output_cells, alloc);
-        raster.rasterize_to_existing_data_grid(&shape, .steps_preserve_original(&.{Vec_f32.TransformStep.translate(shift_to_frame)}), .X_ONLY_LINEAR_FALLOFF, output_grid, 255, 0, .default_estimates(), alloc);
-        std.debug.print("\noutput_grid: {any}\n", .{result.data_grid}); //DEBUG
+        var shape_aabb = shape.get_bounds_default_estimate();
+        shape_aabb = shape_aabb.expand_by(2);
+        const shape_shift_to_frame = shape_aabb.get_min_point().negate();
+        shape.translate(shape_shift_to_frame);
+        shape_aabb = shape_aabb.with_mins_shifted_to_zero();
+        const shape_aabb_max = shape_aabb.get_max_point();
+        const output_grid = OUT_GRID.init_from_existing_cell_buffer(@intFromFloat(shape_aabb_max.x + 2), @intFromFloat(shape_aabb_max.y + 2), 0, output_cells, alloc);
+        raster.rasterize_to_existing_data_grid_default_lerp(&shape, .X_ONLY_EXPONENTIAL_FALLOFF, output_grid, 0, 255, .default_estimates(), alloc);
         _ = try BitmapFormat.save_bitmap_to_file("test_out/true_type/shape_raster_char_" ++ std.fmt.comptimePrint("{d}", .{char}) ++ ".bmp", OUT_DEF, output_grid, .{ .bits_per_pixel = .BPP_8 }, .NO_CONVERSION_NEEDED_ALPHA_BECOMES_COLOR_CHANNELS, alloc);
-
-        // shape.free(alloc);
-        // vertex_list.free(alloc);
+        // STB Rasterizer
+        //FIXME
+        // _ = try font.rasterize_vertices_to_data_grid_with_subpixel_offset(glyph_index, &vertex_list, null, .existing_data_grid(.new_no_parent(output_grid), 0), .default_pixel_flatness(), scale_54_px, scale_54_px, 0, 0, .SINGLE_THREADED, &temp_flat_curve_buf, &temp_edge_buf, &active_edge_pool);
+        // _ = try BitmapFormat.save_bitmap_to_file("test_out/true_type/stb_raster_char_" ++ std.fmt.comptimePrint("{d}", .{char}) ++ ".bmp", OUT_DEF, output_grid, .{ .bits_per_pixel = .BPP_8 }, .NO_CONVERSION_NEEDED_ALPHA_BECOMES_COLOR_CHANNELS, alloc);
     }
 }

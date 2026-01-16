@@ -290,7 +290,7 @@ pub fn write_bitmap_datagrid_to_writer(writer: *std.Io.Writer, comptime GRID_DEF
         var y: u32 = 0;
         var px: u32 = 0;
         var ix: u32 = 0;
-        while (y < data_grid.width) : (y += 1) {
+        while (y < data_grid.height) : (y += 1) {
             px = 0;
             ix = 0;
             while (px < data_grid.width) : (px += 1) {
