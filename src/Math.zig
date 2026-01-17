@@ -1073,3 +1073,21 @@ pub fn normalized_num_cast(from: anytype, comptime TO: type) TO {
     const to_float_rounded = if (TO_INT) @round(to_float) else to_float;
     return if (TO_INT) (if (TO == bool) @bitCast(@as(u1, @intFromFloat(to_float_rounded))) else @intFromFloat(to_float_rounded)) else @floatCast(to_float);
 }
+
+pub fn max_value(comptime T: type) T {
+    assert_with_reason(Types.type_is_numeric_not_comptime(T), @src(), "`max_value` cannot be called with non-numeric (or comptime numeric) type `{s}`", .{@typeName(T)});
+    if (Types.type_is_int(T)) {
+        return math.maxInt(T);
+    } else {
+        return math.floatMax(T);
+    }
+}
+
+pub fn min_value(comptime T: type) T {
+    assert_with_reason(Types.type_is_numeric_not_comptime(T), @src(), "`min_value` cannot be called with non-numeric (or comptime numeric) type `{s}`", .{@typeName(T)});
+    if (Types.type_is_int(T)) {
+        return math.minInt(T);
+    } else {
+        return -math.floatMax(T);
+    }
+}

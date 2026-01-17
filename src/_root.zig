@@ -81,6 +81,7 @@ pub const Quicksort = @import("./Quicksort.zig");
 pub const QuickWriter = @import("./QuickWriter.zig");
 pub const Reader = @import("./Reader.zig");
 pub const Rect2 = @import("./Rect2.zig");
+pub const RectPacker = @import("./RectPacker.zig");
 pub const Result = @import("./Result.zig");
 pub const SDL3 = if (!config.NO_SDL) @import("./SDL3.zig") else struct {};
 pub const Shape = @import("./Shape.zig");

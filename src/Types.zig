@@ -466,6 +466,9 @@ pub inline fn type_is_int(comptime T: type) bool {
 pub inline fn type_is_numeric(comptime T: type) bool {
     return @typeInfo(T) == .int or @typeInfo(T) == .comptime_int or @typeInfo(T) == .float or @typeInfo(T) == .comptime_float;
 }
+pub inline fn type_is_numeric_not_comptime(comptime T: type) bool {
+    return @typeInfo(T) == .int or @typeInfo(T) == .float;
+}
 pub inline fn type_is_unsigned_int(comptime T: type) bool {
     return @typeInfo(T) == .int and @typeInfo(T).int.signedness == .unsigned;
 }
