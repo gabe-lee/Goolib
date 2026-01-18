@@ -116,8 +116,8 @@ const RingList = Root.IList.RingList;
 // const UpdateList = RingList(Meta.ParamId);
 const UpdateList = List(Meta.ParamId);
 
-const ParamId = Meta.ParamId;
-const ParamType = Meta.ParamType;
+pub const ParamId = Meta.ParamId;
+pub const ParamType = Meta.ParamType;
 const Metadata = Meta.Metadata;
 
 const intcast = Types.intcast;

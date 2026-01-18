@@ -36,7 +36,7 @@ const Iterator = Root.Iterator;
 const IterCaps = Iterator.IteratorCapabilities;
 // const greater_than = Compare.greater_than;
 
-pub fn insertion_sort(comptime T: type, buffer: []T) void {
+pub fn insertion_sort_implicit(comptime T: type, buffer: []T) void {
     assert_with_reason(Utils.can_infer_type_order(T), @src(), "cannot inherently order type " ++ @typeName(T), .{});
     var i: usize = 1;
     var j: usize = undefined;
@@ -47,7 +47,52 @@ pub fn insertion_sort(comptime T: type, buffer: []T) void {
         j = i;
         inner: while (j > 0) {
             jj = j - 1;
-            if (infered_greater_than(buffer[jj], x)) {
+            if (buffer[jj] > x) {
+                buffer[j] = buffer[jj];
+                j -= 1;
+            } else {
+                break :inner;
+            }
+        }
+        buffer[j] = x;
+        i += 1;
+    }
+}
+
+pub fn insertion_sort_with_func(comptime T: type, buffer: []T, greater_than: *const fn (a: T, b: T) bool) void {
+    assert_with_reason(Utils.can_infer_type_order(T), @src(), "cannot inherently order type " ++ @typeName(T), .{});
+    var i: usize = 1;
+    var j: usize = undefined;
+    var jj: usize = undefined;
+    var x: T = undefined;
+    while (i < buffer.len) {
+        x = buffer[i];
+        j = i;
+        inner: while (j > 0) {
+            jj = j - 1;
+            if (greater_than(buffer[jj], x)) {
+                buffer[j] = buffer[jj];
+                j -= 1;
+            } else {
+                break :inner;
+            }
+        }
+        buffer[j] = x;
+        i += 1;
+    }
+}
+pub fn insertion_sort_with_func_and_userdata(comptime T: type, buffer: []T, userdata: anytype, greater_than: *const fn (a: T, b: T, userdata: @TypeOf(userdata)) bool) void {
+    assert_with_reason(Utils.can_infer_type_order(T), @src(), "cannot inherently order type " ++ @typeName(T), .{});
+    var i: usize = 1;
+    var j: usize = undefined;
+    var jj: usize = undefined;
+    var x: T = undefined;
+    while (i < buffer.len) {
+        x = buffer[i];
+        j = i;
+        inner: while (j > 0) {
+            jj = j - 1;
+            if (greater_than(buffer[jj], x, userdata)) {
                 buffer[j] = buffer[jj];
                 j -= 1;
             } else {
@@ -116,7 +161,7 @@ pub inline fn insertion_sort_with_transform(comptime T: type, buffer: []T, compt
 pub fn insertion_sort_iterator(comptime T: type, iter: Iterator.Iterator(T), move_data_fn: *const fn (from_item: *const T, to_item: *T, userdata: ?*anyopaque) void, greater_than_fn: *const fn (a: *const T, b: *const T, userdata: ?*anyopaque) bool, userdata: ?*anyopaque) void {
     const caps = iter.capabilities();
     assert_with_reason(caps.has_entire_group_set(IterCaps.Group.DIRECTION), @src(), "iterator must support `FORWARD` and `BACKWARD` capabilities", .{});
-    assert_with_reason(caps.isolate_group_as_int_aligned_to_bit_0(IterCaps.Group.SAVE_LOAD) >= 1,  @src(), "iterator must support at least 1 save/load slot (`SAVE_LOAD_1_SLOT`)", .{});
+    assert_with_reason(caps.isolate_group_as_int_aligned_to_bit_0(IterCaps.Group.SAVE_LOAD) >= 1, @src(), "iterator must support at least 1 save/load slot (`SAVE_LOAD_1_SLOT`)", .{});
     _ = iter.reset();
     var x: T = undefined;
     var prev_item: ?*T = null;
@@ -205,7 +250,7 @@ test "InsertionSort.zig" {
 
     for (cases) |case| {
         var output: [10]u8 = case.input;
-        insertion_sort(u8, output[0..case.len]);
+        insertion_sort_implicit(u8, output[0..case.len]);
         try t.expectEqualSlices(u8, case.expected_output[0..case.len], output[0..case.len]);
         output = case.input;
         insertion_sort_with_transform(u8, output[0..case.len], u16, proto.xfrm);
