@@ -3,7 +3,7 @@
 
 // zlib license
 //
-// Copyright (c) 2025, Gabriel Lee Anderson <gla.ander@gmail.com>
+// Copyright (c) 2025-2026, Gabriel Lee Anderson <gla.ander@gmail.com>
 //
 // This software is provided 'as-is', without any express or implied
 // warranty. In no event will the authors be held liable for any damages
@@ -25,7 +25,7 @@ const std = @import("std");
 const build = @import("builtin");
 const config = @import("config");
 
-pub const VERSION = "0.3.0";
+pub const VERSION = "0.4.0";
 pub const NAME = "Goolib";
 
 pub const AABB2 = @import("./AABB2.zig");
@@ -33,7 +33,7 @@ pub const AllocatorInfallible = @import("./AllocatorInfallible.zig");
 pub const ANSI = @import("./ANSI.zig");
 pub const Assert = @import("./Assert.zig");
 // pub const Bezier = @import("./Bezier.zig");
-pub const BezierMSDFGenerator = @import("./BezierMSDFGenerator.zig");
+// pub const BezierMSDFGenerator = @import("./BezierMSDFGenerator.zig");
 pub const BinarySearch = @import("./BinarySearch.zig");
 // pub const Bitmap = @import("./Bitmap.zig");
 pub const BucketAllocator = @import("./BucketAllocator.zig");

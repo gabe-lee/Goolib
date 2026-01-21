@@ -1,13 +1,13 @@
 //! TODO Documentation
-//! #### License: Zlib
-//! #### Dependency Licenses:
+//! ### License: Zlib
+//! ### Dependency Licenses:
 //! - SDL3: (Zlib) https://github.com/libsdl-org/SDL/blob/main/LICENSE.txt
 //! - SDL3 Zig Bindings: (Multi/Zlib) https://github.com/castholm/SDL/blob/main/LICENSE.txt
 
 // THE FOLLOWING LICENSE APPLIES TO _THIS_ SOURCE FILE ONLY
 // zlib license
 //
-// Copyright (c) 2025, Gabriel Lee Anderson <gla.ander@gmail.com>
+// Copyright (c) 2025-2026, Gabriel Lee Anderson <gla.ander@gmail.com>
 //
 // This software is provided 'as-is', without any express or implied
 // warranty. In no event will the authors be held liable for any damages
@@ -40,7 +40,9 @@ const Utils = Root.Utils;
 const Assert = Root.Assert;
 const assert_with_reason = Assert.assert_with_reason;
 
-/// #### SDL LICENSE: https://github.com/libsdl-org/SDL/blob/main/LICENSE.txt
+pub const GraphicsController = @import("./SDL3_GraphicsController.zig");
+
+/// ### SDL LICENSE: https://github.com/libsdl-org/SDL/blob/main/LICENSE.txt
 ///
 /// Copyright (C) 1997-2025 Sam Lantinga <slouken@libsdl.org>
 ///
@@ -60,7 +62,7 @@ const assert_with_reason = Assert.assert_with_reason;
 ///    misrepresented as being the original software.
 /// 3. This notice may not be removed or altered from any source distribution.
 ///
-/// #### SDL3 Zig Bindings license: https://github.com/castholm/SDL/blob/main/LICENSE.txt
+/// ### SDL3 Zig Bindings license: https://github.com/castholm/SDL/blob/main/LICENSE.txt
 pub const C = @cImport({
     @cDefine("SDL_DISABLE_OLD_NAMES", {});
     @cInclude("SDL3/SDL.h");
@@ -6825,6 +6827,12 @@ pub const Meta = struct {
     pub const SDL_REVISION = C.SDL_REVISION[0 .. C.SDL_REVISION.len - 1] ++ "https://github.com/gabe-lee/Goolib " ++ VERSION ++ ")";
 };
 
+pub const GPU_CreateOptions = struct {
+    shader_formats: GPU_ShaderFormatFlags,
+    debug_mode: bool = false,
+    driver_name: ?[*:0]const u8 = null,
+};
+
 pub const GPU_Device = opaque {
     pub const to_c_ptr = c_opaque_conversions(GPU_Device, C.SDL_GPUDevice).to_c_ptr;
     pub const from_c_ptr = c_opaque_conversions(GPU_Device, C.SDL_GPUDevice).from_c_ptr;
@@ -6841,8 +6849,8 @@ pub const GPU_Device = opaque {
     pub fn device_supports_properties(props: PropertiesID) bool {
         return C.SDL_GPUSupportsProperties(props.id);
     }
-    pub fn create(shader_formats: GPU_ShaderFormatFlags, debug_mode: bool, driver_name: ?[*:0]const u8) Error!*GPU_Device {
-        return ptr_cast_or_fail_err(*GPU_Device, C.SDL_CreateGPUDevice(shader_formats.raw, debug_mode, driver_name));
+    pub fn create(opts: GPU_CreateOptions) Error!*GPU_Device {
+        return ptr_cast_or_fail_err(*GPU_Device, C.SDL_CreateGPUDevice(opts.shader_formats.raw, opts.debug_mode, opts.driver_name));
     }
     pub fn create_from_properties(props: PropertiesID) Error!*GPU_Device {
         return ptr_cast_or_fail_err(*GPU_Device, C.SDL_CreateGPUDeviceWithProperties(props.id));
@@ -6865,6 +6873,10 @@ pub const GPU_Device = opaque {
     pub fn create_texture_sampler(self: *GPU_Device, sampler_info: *GPU_SamplerCreateInfo) Error!*GPU_TextureSampler {
         return ptr_cast_or_null_err(*GPU_TextureSampler, C.SDL_CreateGPUSampler(self.to_c_ptr(), sampler_info.to_c_ptr()));
     }
+    pub fn create_texture(self: *GPU_Device, texture_info: *GPU_TextureCreateInfo) Error!*GPU_Texture {
+        return ptr_cast_or_null_err(*GPU_Texture, C.SDL_CreateGPUTexture(self.to_c_ptr(), texture_info.to_c_ptr()));
+    }
+
     pub fn create_shader(self: *GPU_Device, shader_info: *GPU_ShaderCreateInfo) Error!*GPU_Shader {
         return ptr_cast_or_null_err(*GPU_Shader, C.SDL_CreateGPUShader(self.to_c_ptr(), shader_info.to_c_ptr()));
     }
@@ -6901,7 +6913,7 @@ pub const GPU_Device = opaque {
     pub fn release_graphics_pipeline(self: *GPU_Device, pipeline: *GPU_GraphicsPipeline) void {
         C.SDL_ReleaseGPUGraphicsPipeline(self.to_c_ptr(), pipeline.to_c_ptr());
     }
-    pub fn aquire_command_buffer(self: *GPU_Device) Error!*GPU_CommandBuffer {
+    pub fn acquire_command_buffer(self: *GPU_Device) Error!*GPU_CommandBuffer {
         return ptr_cast_or_fail_err(*GPU_CommandBuffer, C.SDL_AcquireGPUCommandBuffer(self.to_c()));
     }
     pub fn map_transfer_buffer(self: *GPU_Device, buffer: *GPU_TransferBuffer, cycle: bool) Error![*]u8 {
@@ -6968,7 +6980,7 @@ pub const GPU_Device = opaque {
 };
 
 pub const GPU_TransferBufferCreateInfo = extern struct {
-    usage: GPU_TransferBufferUsage = .DOWNLOAD,
+    usage: GPU_TransferBufferUsage = .UPLOAD,
     size: u32 = 0,
     props: PropertiesID = .NULL,
 
@@ -7003,8 +7015,8 @@ pub const GPU_TextureCreateInfo = extern struct {
     usage: GPU_TextureUsageFlags = .blank(),
     width: u32 = 0,
     height: u32 = 0,
-    layer_count_or_depth: u32 = 0,
-    num_levels: u32 = 0,
+    layer_count_or_depth: u32 = 1,
+    num_mip_levels: u32 = 0,
     sample_count: GPU_SampleCount = ._1,
     props: PropertiesID = .NULL,
 

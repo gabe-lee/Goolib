@@ -3,7 +3,7 @@
 
 // // zlib license
 // //
-// // Copyright (c) 2025, Gabriel Lee Anderson <gla.ander@gmail.com>
+// // Copyright (c) 2025-2026, Gabriel Lee Anderson <gla.ander@gmail.com>
 // //
 // // This software is provided 'as-is', without any express or implied
 // // warranty. In no event will the authors be held liable for any damages
