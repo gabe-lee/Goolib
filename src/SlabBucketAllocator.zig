@@ -309,7 +309,7 @@ pub fn SimpleBucketAllocator(comptime _DEFINITION: SBA_Definition) type {
                 if (self.blocklist.cap == self.blocklist.len) {
                     const page_size = std.heap.pageSize();
                     const new_meta_cap = std.mem.alignForward(usize, Types.intcast(self.blocklist.cap, usize) + 1, page_size);
-                    const new_meta: []Block = Utils.Alloc.realloc_no_memset(self.meta_alloc, self.blocklist.ptr[0..self.blocklist.cap], new_meta_cap) catch |err| assert_allocation_failure(@src(), Block, new_meta_cap, err);
+                    const new_meta: []Block = Utils.Alloc.realloc_custom(self.meta_alloc, self.blocklist.ptr[0..self.blocklist.cap], new_meta_cap, .align_to_type(), .copy_existing_data, .dont_memset_new(), .dont_memset_old()) catch |err| assert_allocation_failure(@src(), Block, new_meta_cap, err);
                     self.blocklist.ptr = new_meta.ptr;
                     self.blocklist.cap = @intCast(new_meta.len);
                 }
@@ -391,7 +391,7 @@ pub fn SimpleBucketAllocator(comptime _DEFINITION: SBA_Definition) type {
                     } else {
                         const new_slab_size = std.mem.alignForward(usize, size + alignment, page_size);
                         var new_slab = Slab{};
-                        new_slab.mem = Utils.Alloc.realloc_no_memset(std.heap.page_allocator, slab.mem, new_slab_size) catch |err| assert_allocation_failure(@src(), u8, new_slab_size, err);
+                        new_slab.mem = Utils.Alloc.realloc_custom(std.heap.page_allocator, slab.mem, new_slab_size, .align_to_type(), .copy_existing_data, .dont_memset_new(), .dont_memset_old()) catch |err| assert_allocation_failure(@src(), u8, new_slab_size, err);
                         const new_slab_idx = self.slabs.sorted_set_and_resort(slab_idx, new_slab, slab_addr_greater);
                         slab = &self.slabs.ptr[new_slab_idx];
                         block = slab.entire_block();
@@ -794,7 +794,7 @@ pub fn SimpleBucketAllocator(comptime _DEFINITION: SBA_Definition) type {
                         const old_mem = state.test_list_8.items.ptr[0..state.test_list_8.capacity];
                         // const dropped_portion = old_mem[n_to_force_realloc..];
                         // Utils.secure_memset(u8, dropped_portion, 0xAA);
-                        const new_mem = Utils.Alloc.realloc_no_memset(state.this_alloc, old_mem, n_to_force_realloc) catch unreachable;
+                        const new_mem = Utils.Alloc.realloc_custom(state.this_alloc, old_mem, n_to_force_realloc, .align_to_type(), .copy_existing_data, .dont_memset_new(), .dont_memset_old()) catch unreachable;
                         state.test_list_8.items.ptr = new_mem.ptr;
                         state.test_list_8.items.len = n_to_force_realloc;
                         state.test_list_8.capacity = new_mem.len;
@@ -809,7 +809,7 @@ pub fn SimpleBucketAllocator(comptime _DEFINITION: SBA_Definition) type {
                         // const dropped_portion = old_mem[n_to_force_realloc..];
                         // const dropped_portion_as_bytes: []u8 = @as([*]u8, @ptrCast(@alignCast(dropped_portion.ptr)))[0 .. dropped_portion.len * 4];
                         // Utils.secure_memset(u8, dropped_portion_as_bytes, 0xAA);
-                        const new_mem = Utils.Alloc.realloc_no_memset(state.this_alloc, old_mem, n_to_force_realloc) catch unreachable;
+                        const new_mem = Utils.Alloc.realloc_custom(state.this_alloc, old_mem, n_to_force_realloc, .align_to_type(), .copy_existing_data, .dont_memset_new(), .dont_memset_old()) catch unreachable;
                         state.test_list_32.items.ptr = new_mem.ptr;
                         state.test_list_32.items.len = n_to_force_realloc;
                         state.test_list_32.capacity = new_mem.len;

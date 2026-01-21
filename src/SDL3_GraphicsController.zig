@@ -117,7 +117,16 @@ pub const GpuBufferInitError = SDL3.Error || error{
     gpu_buffer_already_initialized,
 };
 
-pub fn GraphicsController(comptime WINDOW_NAMES_ENUM: type, comptime VERTEX_SHADER_NAMES_ENUM: type, comptime FRAGMENT_SHADER_NAMES_ENUM: type, comptime RENDER_PIPELINE_NAMES_ENUM: type, comptime TEXTURE_NAMES_ENUM: type, comptime SAMPLER_NAMES_ENUM: type, comptime GPU_BUFFER_NAMES_ENUM: type, comptime TRANSFER_BUFFER_NAMES_ENUM: type) type {
+pub fn GraphicsController(
+    comptime WINDOW_NAMES_ENUM: type,
+    comptime VERTEX_SHADER_NAMES_ENUM: type,
+    comptime FRAGMENT_SHADER_NAMES_ENUM: type,
+    comptime RENDER_PIPELINE_NAMES_ENUM: type,
+    comptime TEXTURE_NAMES_ENUM: type,
+    comptime SAMPLER_NAMES_ENUM: type,
+    comptime GPU_BUFFER_NAMES_ENUM: type,
+    comptime TRANSFER_BUFFER_NAMES_ENUM: type,
+) type {
     assert_with_reason(Types.type_is_enum(WINDOW_NAMES_ENUM) and Types.all_enum_values_start_from_zero_with_no_gaps(WINDOW_NAMES_ENUM), @src(), "type `WINDOW_NAMES_ENUM` MUST be an enum type with tag values starting at zero and no gaps between 0 and the max tag value, got type `{s}`", .{@typeName(WINDOW_NAMES_ENUM)});
     assert_with_reason(Types.type_is_enum(VERTEX_SHADER_NAMES_ENUM) and Types.all_enum_values_start_from_zero_with_no_gaps(VERTEX_SHADER_NAMES_ENUM), @src(), "type `VERTEX_SHADER_NAMES_ENUM` MUST be an enum type with tag values starting at zero and no gaps between 0 and the max tag value, got type `{s}`", .{@typeName(VERTEX_SHADER_NAMES_ENUM)});
     assert_with_reason(Types.type_is_enum(FRAGMENT_SHADER_NAMES_ENUM) and Types.all_enum_values_start_from_zero_with_no_gaps(FRAGMENT_SHADER_NAMES_ENUM), @src(), "type `FRAGMENT_SHADER_NAMES_ENUM` MUST be an enum type with tag values starting at zero and no gaps between 0 and the max tag value, got type `{s}`", .{@typeName(FRAGMENT_SHADER_NAMES_ENUM)});

@@ -42,36 +42,74 @@ const Utils = Root.Utils;
 const assert_with_reason = Assert.assert_with_reason;
 
 pub const ClearOldMode = enum(u8) {
-    dont_memset_old,
-    memset_old_undefined,
-    force_memset_old_undefined,
-    memset_old_zero,
-    force_memset_old_zero,
+    DONT_MEMSET_OLD,
+    MEMSET_OLD_UNDEFINED,
+    FORCE_MEMSET_OLD_UNDEFINED,
+    MEMSET_OLD_ZERO,
+    FORCE_MEMSET_OLD_ZERO,
+
+    pub inline fn dont_memset_old() ClearOldMode {
+        return ClearOldMode.DONT_MEMSET_OLD;
+    }
+    pub inline fn memset_new_undefined() ClearOldMode {
+        return ClearOldMode.MEMSET_OLD_UNDEFINED;
+    }
+    pub inline fn force_memset_new_undefined() ClearOldMode {
+        return ClearOldMode.FORCE_MEMSET_OLD_UNDEFINED;
+    }
+    pub inline fn memset_new_zero() ClearOldMode {
+        return ClearOldMode.MEMSET_OLD_ZERO;
+    }
+    pub inline fn force_memset_new_zero() ClearOldMode {
+        return ClearOldMode.FORCE_MEMSET_OLD_ZERO;
+    }
 };
 pub const InitNewMode = enum(u8) {
-    dont_memset_new,
-    memset_new_undefined,
-    force_memset_new_undefined,
-    memset_new_zero,
-    force_memset_new_zero,
-    memset_new_custom,
-    force_memset_new_custom,
+    DONT_MEMSET_NEW,
+    MEMSET_NEW_UNDEFINED,
+    FORCE_MEMSET_NEW_UNDEFINED,
+    MEMSET_NEW_ZERO,
+    FORCE_MEMSET_NEW_ZERO,
+    MEMSET_NEW_CUSTOM,
+    FORCE_MEMSET_NEW_CUSTOM,
 };
 pub const CopyMode = enum(u8) {
-    dont_copy_data,
-    copy_data,
+    dont_copy_existing_data,
+    copy_existing_data,
 };
 pub fn InitNew(comptime T: type) type {
     return union(InitNewMode) {
         const Self = @This();
 
-        dont_memset_new: void,
-        memset_new_undefined: void,
-        force_memset_new_undefined: void,
-        memset_new_zero: void,
-        force_memset_new_zero: void,
-        memset_new_custom: T,
-        force_memset_new_custom: T,
+        DONT_MEMSET_NEW: void,
+        MEMSET_NEW_UNDEFINED: void,
+        FORCE_MEMSET_NEW_UNDEFINED: void,
+        MEMSET_NEW_ZERO: void,
+        FORCE_MEMSET_NEW_ZERO: void,
+        MEMSET_NEW_CUSTOM: T,
+        FORCE_MEMSET_NEW_CUSTOM: T,
+
+        pub inline fn dont_memset_new() Self {
+            return Self{ .DONT_MEMSET_NEW = void{} };
+        }
+        pub inline fn memset_new_undefined() Self {
+            return Self{ .MEMSET_NEW_UNDEFINED = void{} };
+        }
+        pub inline fn force_memset_new_undefined() Self {
+            return Self{ .FORCE_MEMSET_NEW_UNDEFINED = void{} };
+        }
+        pub inline fn memset_new_zero() Self {
+            return Self{ .MEMSET_NEW_ZERO = void{} };
+        }
+        pub inline fn force_memset_new_zero() Self {
+            return Self{ .FORCE_MEMSET_NEW_ZERO = void{} };
+        }
+        pub inline fn memset_new_custom(val: T) Self {
+            return Self{ .MEMSET_NEW_CUSTOM = val };
+        }
+        pub inline fn force_memset_new_custom(val: T) Self {
+            return Self{ .FORCE_MEMSET_NEW_CUSTOM = val };
+        }
 
         pub fn init_new_custom_orelse_undefined(val: anytype) Self {
             const V = @TypeOf(val);
@@ -159,64 +197,64 @@ pub fn realloc_custom(alloc: Allocator, old_mem: anytype, new_n: usize, comptime
     const new_mem_types = mem.bytesAsSlice(T, new_bytes);
     const copy_len = @min(byte_count, old_byte_slice.len);
     switch (copy_mode) {
-        .copy_data => {
+        .copy_existing_data => {
             @memcpy(new_mem[0..copy_len], old_byte_slice[0..copy_len]);
         },
-        .dont_copy_data => {},
+        .dont_copy_existing_data => {},
     }
     switch (clear_old_mode) {
-        .memset_old_undefined => {
+        .MEMSET_OLD_UNDEFINED => {
             @memset(old_byte_slice, undefined);
         },
-        .force_memset_old_undefined => {
+        .FORCE_MEMSET_OLD_UNDEFINED => {
             Utils.secure_memset_undefined(u8, old_byte_slice);
         },
-        .memset_old_zero => {
+        .MEMSET_OLD_ZERO => {
             @memset(old_byte_slice, 0);
         },
-        .force_memset_old_zero => {
+        .FORCE_MEMSET_OLD_ZERO => {
             Utils.secure_zero(u8, old_byte_slice);
         },
-        .dont_memset_old => {},
+        .DONT_MEMSET_OLD => {},
     }
     switch (init_new_mode) {
-        .memset_new_undefined => {
+        .MEMSET_NEW_UNDEFINED => {
             switch (copy_mode) {
-                .copy_data => @memset(new_mem[copy_len..byte_count], undefined),
-                .dont_copy_data => @memset(new_mem[0..byte_count], undefined),
+                .copy_existing_data => @memset(new_mem[copy_len..byte_count], undefined),
+                .dont_copy_existing_data => @memset(new_mem[0..byte_count], undefined),
             }
         },
-        .force_memset_new_undefined => {
+        .FORCE_MEMSET_NEW_UNDEFINED => {
             switch (copy_mode) {
-                .copy_data => Utils.secure_memset_undefined(u8, new_mem[copy_len..byte_count]),
-                .dont_copy_data => Utils.secure_memset_undefined(u8, new_mem[0..byte_count]),
+                .copy_existing_data => Utils.secure_memset_undefined(u8, new_mem[copy_len..byte_count]),
+                .dont_copy_existing_data => Utils.secure_memset_undefined(u8, new_mem[0..byte_count]),
             }
         },
-        .memset_new_zero => {
+        .MEMSET_NEW_ZERO => {
             switch (copy_mode) {
-                .copy_data => @memset(new_mem[copy_len..byte_count], 0),
-                .dont_copy_data => @memset(new_mem[0..byte_count], 0),
+                .copy_existing_data => @memset(new_mem[copy_len..byte_count], 0),
+                .dont_copy_existing_data => @memset(new_mem[0..byte_count], 0),
             }
         },
-        .force_memset_new_zero => {
+        .FORCE_MEMSET_NEW_ZERO => {
             switch (copy_mode) {
-                .copy_data => Utils.secure_zero(u8, new_mem[copy_len..byte_count]),
-                .dont_copy_data => Utils.secure_zero(u8, new_mem[0..byte_count]),
+                .copy_existing_data => Utils.secure_zero(u8, new_mem[copy_len..byte_count]),
+                .dont_copy_existing_data => Utils.secure_zero(u8, new_mem[0..byte_count]),
             }
         },
-        .memset_new_custom => |init_val| {
+        .MEMSET_NEW_CUSTOM => |init_val| {
             switch (copy_mode) {
-                .copy_data => @memset(new_mem_types[@divExact(copy_len, @sizeOf(T))..@divExact(byte_count, @sizeOf(T))], init_val),
-                .dont_copy_data => @memset(new_mem[0..@divExact(byte_count, @sizeOf(T))], init_val),
+                .copy_existing_data => @memset(new_mem_types[@divExact(copy_len, @sizeOf(T))..@divExact(byte_count, @sizeOf(T))], init_val),
+                .dont_copy_existing_data => @memset(new_mem_types[0..@divExact(byte_count, @sizeOf(T))], init_val),
             }
         },
-        .force_memset_new_custom => |init_val| {
+        .FORCE_MEMSET_NEW_CUSTOM => |init_val| {
             switch (copy_mode) {
-                .copy_data => Utils.secure_memset(T, new_mem_types[@divExact(copy_len, @sizeOf(T))..@divExact(byte_count, @sizeOf(T))], init_val),
-                .dont_copy_data => Utils.secure_memset(T, new_mem_types[0..@divExact(byte_count, @sizeOf(T))], init_val),
+                .copy_existing_data => Utils.secure_memset(T, new_mem_types[@divExact(copy_len, @sizeOf(T))..@divExact(byte_count, @sizeOf(T))], init_val),
+                .dont_copy_existing_data => Utils.secure_memset(T, new_mem_types[0..@divExact(byte_count, @sizeOf(T))], init_val),
             }
         },
-        .dont_memset_new => {},
+        .DONT_MEMSET_NEW => {},
     }
     alloc.rawFree(old_byte_slice, .fromByteUnits(ALIGN), @returnAddress());
     return new_mem_types;
