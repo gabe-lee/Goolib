@@ -1928,24 +1928,24 @@ pub fn Contour(comptime T: type, comptime EDGE_USERDATA: type, comptime EDGE_USE
                 const a = self.edges.ptr[0].get_start();
                 const b = self.edges.ptr[0].lerp(1.0 / 3.0);
                 const c = self.edges.ptr[0].lerp(2.0 / 3.0);
-                total += a.shoelace(b);
-                total += b.shoelace(c);
-                total += c.shoelace(a);
+                total += a.shoelace_area_step(b);
+                total += b.shoelace_area_step(c);
+                total += c.shoelace_area_step(a);
             } else if (self.edges.len == 2) {
                 const a = self.edges.ptr[0].get_start();
                 const b = self.edges.ptr[0].lerp(0.5);
                 const c = self.edges.ptr[1].get_start();
                 const d = self.edges.ptr[1].lerp(0.5);
-                total += a.shoelace(b);
-                total += b.shoelace(c);
-                total += c.shoelace(d);
-                total += d.shoelace(a);
+                total += a.shoelace_area_step(b);
+                total += b.shoelace_area_step(c);
+                total += c.shoelace_area_step(d);
+                total += d.shoelace_area_step(a);
             } else {
                 var prev: Vector = self.edges.get_last().get_start();
                 var curr: Vector = undefined;
                 for (self.edges.slice()) |edge| {
                     curr = edge.get_start();
-                    total += prev.shoelace(curr);
+                    total += prev.shoelace_area_step(curr);
                     prev = curr;
                 }
             }

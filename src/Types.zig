@@ -436,6 +436,12 @@ pub inline fn pointer_is_single_many_or_c(comptime T: type) bool {
 pub inline fn type_is_array_or_vector(comptime T: type) bool {
     return @typeInfo(T) == .array or @typeInfo(T) == .vector;
 }
+pub inline fn type_is_vector(comptime T: type) bool {
+    return @typeInfo(T) == .vector;
+}
+pub inline fn type_is_array(comptime T: type) bool {
+    return @typeInfo(T) == .array;
+}
 pub inline fn array_or_vector_child_type(comptime T: type) type {
     if (@typeInfo(T) == .array) return @typeInfo(T).array.child;
     return @typeInfo(T).vector.child;

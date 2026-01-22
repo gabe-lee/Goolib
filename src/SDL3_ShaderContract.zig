@@ -1,0 +1,42 @@
+//! //TODO Documentation
+//! #### License: Zlib
+
+// zlib license
+//
+// Copyright (c) 2025-2026, Gabriel Lee Anderson <gla.ander@gmail.com>
+//
+// This software is provided 'as-is', without any express or implied
+// warranty. In no event will the authors be held liable for any damages
+// arising from the use of this software.
+//
+// Permission is granted to anyone to use this software for any purpose,
+// including commercial applications, and to alter it and redistribute it
+// freely, subject to the following restrictions:
+//
+// 1. The origin of this software must not be misrepresented; you must not
+//    claim that you wrote the original software. If you use this software
+//    in a product, an acknowledgment in the product documentation would be
+//    appreciated but is not required.
+// 2. Altered source versions must be plainly marked as such, and must not be
+//    misrepresented as being the original software.
+// 3. This notice may not be removed or altered from any source distribution.
+
+const std = @import("std");
+const math = std.math;
+const build = @import("builtin");
+const config = @import("config");
+const init_zero = std.mem.zeroes;
+const assert = std.debug.assert;
+
+const Root = @import("./_root.zig");
+const Types = Root.Types;
+const Cast = Root.Cast;
+const Flags = Root.Flags.Flags;
+const Utils = Root.Utils;
+const Assert = Root.Assert;
+const Vec2 = Root.Vec2;
+
+pub const F32x1 = f32;
+pub const F32x2 = Vec2.define_vec2_type(f32);
+pub const F32x3 = [3]f32;
+pub const F32x4 = [4]f32;

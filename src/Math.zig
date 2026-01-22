@@ -98,7 +98,7 @@ pub fn upgrade_lerp_out(a: anytype, b: anytype, delta: anytype, comptime OUT: ty
         (@mulAdd(T, nums.c, nums.b, @mulAdd(T, -nums.c, nums.a, nums.a)))
     else
         (((1 - nums.c) * nums.a) + (nums.c * nums.b));
-    return convert_number(out, OUT);
+    return num_cast(out, OUT);
 }
 
 pub fn log_x_base(x: anytype, base: anytype) @TypeOf(x) {
@@ -144,7 +144,7 @@ pub fn sign(val: anytype) @TypeOf(val) {
 ///   - 1 if val > 0
 pub fn sign_convert(val: anytype, comptime OUT: type) OUT {
     const raw = @as(i8, @intCast(@intFromBool(0 < val))) - @as(i8, @intCast(@intFromBool(val < 0)));
-    return convert_number(raw, OUT);
+    return num_cast(raw, OUT);
 }
 
 /// returns:
@@ -164,7 +164,7 @@ pub fn sign_nonzero(val: anytype) @TypeOf(val) {
 ///   - 1 if val >= 0
 pub fn sign_nonzero_convert(val: anytype, comptime OUT: type) OUT {
     const raw = (2 * @as(i8, @intCast(@intFromBool(val > 0)))) - 1;
-    return convert_number(raw, OUT);
+    return num_cast(raw, OUT);
 }
 
 pub fn add_scale(comptime T: type, a: T, diff_ba: T, delta: T) T {
@@ -206,6 +206,13 @@ pub fn approx_equal(comptime T: type, a: T, b: T) bool {
     const b_max: T = b + math.floatEpsAt(T, b);
     return a_max >= b_min and b_max >= a_min;
 }
+pub fn approx_equal_vec(comptime T: type, a: T, b: T) @Vector(@typeInfo(T).vector.len, bool) {
+    const I = @typeInfo(T).vector;
+    const CHILD = I.child;
+    if (Types.type_is_int(CHILD)) return a == b;
+    const eps: @Vector(I.len, CHILD) = @splat(math.floatEps(CHILD));
+    return approx_equal_with_epsilon_vec(T, a, b, eps);
+}
 
 pub fn approx_equal_with_epsilon(comptime T: type, a: T, b: T, epsilon: T) bool {
     const a_min: T = a - epsilon;
@@ -213,6 +220,20 @@ pub fn approx_equal_with_epsilon(comptime T: type, a: T, b: T, epsilon: T) bool 
     const b_min: T = b - epsilon;
     const b_max: T = b + epsilon;
     return a_max >= b_min and b_max >= a_min;
+}
+
+pub fn approx_equal_with_epsilon_vec(comptime T: type, a: T, b: T, epsilon: T) @Vector(@typeInfo(T).vector.len, bool) {
+    const I = @typeInfo(T).vector;
+    const a_min: T = a - epsilon;
+    const a_max: T = a + epsilon;
+    const b_min: T = b - epsilon;
+    const b_max: T = b + epsilon;
+    const cond_1 = a_max >= b_min;
+    const cond_2 = b_max >= a_min;
+    const cond_1_cast: @Vector(I.len, u8) = @bitCast(cond_1);
+    const cond_2_cast: @Vector(I.len, u8) = @bitCast(cond_2);
+    const final_cond_cast = cond_1_cast & cond_2_cast;
+    return @bitCast(final_cond_cast);
 }
 
 pub const NumberConversionMode = enum(u2) {
@@ -259,6 +280,17 @@ pub fn larger_signed_int_type(comptime A: type, comptime B: type) type {
         return B;
     }
 }
+pub fn largest_int_type_for_math_vector(comptime A: type, comptime B: type, comptime ABSOLUTE_MAX_BITS: u16) type {
+    assert_with_reason(Types.type_is_vector(A) and Types.type_is_int(@typeInfo(A).vector.child), @src(), "type `A` must be an integer vector type, got type `{s}`", .{@typeName(A)});
+    assert_with_reason(Types.type_is_vector(B) and Types.type_is_int(@typeInfo(B).vector.child), @src(), "type `B` must be an integer vector type, got type `{s}`", .{@typeName(B)});
+    const A_INFO = @typeInfo(A).vector;
+    const B_INFO = @typeInfo(B).vector;
+    assert_with_reason(A_INFO.len == B_INFO.len, @src(), "type `A` and `B` must be vector types with the same length, got {d} (A) != {d} (B)", .{ A_INFO.len, B_INFO.len });
+    const A_CHILD = A_INFO.child;
+    const B_CHILD = B_INFO.child;
+    const LARGEST_CHILD = largest_int_type_for_math(A_CHILD, B_CHILD, ABSOLUTE_MAX_BITS);
+    return @Vector(A_INFO.len, LARGEST_CHILD);
+}
 pub fn largest_int_type_for_math(comptime A: type, comptime B: type, comptime ABSOLUTE_MAX_BITS: u16) type {
     assert_with_reason(Types.type_is_int(A), @src(), "type `A` must be an integer type, got type `{s}`", .{@typeName(A)});
     assert_with_reason(Types.type_is_int(B), @src(), "type `B` must be an integer type, got type `{s}`", .{@typeName(B)});
@@ -280,6 +312,22 @@ pub const NumberUpgradeModeAndType = struct {
     type_A: type,
     type_B: type,
 };
+
+pub fn upgrade_mode_and_types_vector(comptime A: type, comptime B: type) NumberUpgradeModeAndType {
+    assert_with_reason(Types.type_is_vector(A), @src(), "type `A` must be a vector of a numeric type, got type `{s}`", .{@typeName(A)});
+    assert_with_reason(Types.type_is_vector(B), @src(), "type `B` must be a vector of a numeric type, got type `{s}`", .{@typeName(B)});
+    const A_INFO = @typeInfo(A).vector;
+    const B_INFO = @typeInfo(B).vector;
+    assert_with_reason(A_INFO.len == B_INFO.len, @src(), "type `A` and `B` must be vector types with the same length, got {d} (A) != {d} (B)", .{ A_INFO.len, B_INFO.len });
+    const A_CHILD = A_INFO.child;
+    const B_CHILD = B_INFO.child;
+    const UP_CHILD = upgrade_mode_and_types(A_CHILD, B_CHILD);
+    return NumberUpgradeModeAndType{
+        .mode = UP_CHILD.mode,
+        .type_A = @Vector(A_INFO.len, UP_CHILD.type_A),
+        .type_B = @Vector(B_INFO.len, UP_CHILD.type_B),
+    };
+}
 
 pub fn upgrade_mode_and_types(comptime A: type, comptime B: type) NumberUpgradeModeAndType {
     assert_with_reason(Types.type_is_numeric(A), @src(), "type `A` must be a numeric type, got type `{s}`", .{@typeName(A)});
@@ -342,14 +390,18 @@ pub fn upgrade_mode_and_types(comptime A: type, comptime B: type) NumberUpgradeM
 }
 
 pub fn Upgraded2Numbers(comptime A: type, comptime B: type) type {
-    const mode_and_types = upgrade_mode_and_types(A, B);
+    const A_INFO = @typeInfo(A);
+    const B_INFO = @typeInfo(B);
+    const VECTOR = A_INFO == .vector or B_INFO == .vector;
+    const mode_and_types = if (VECTOR) upgrade_mode_and_types_vector(A, B) else upgrade_mode_and_types(A, B);
     const T_: type = switch (mode_and_types.mode) {
         .same_class_ints_B_large, .both_float_B_large, .upgrade_A_to_float => mode_and_types.type_B,
         .same_class_ints_A_large, .both_float_A_large, .upgrade_B_to_float => mode_and_types.type_A,
-        .mixed_class_ints => largest_int_type_for_math(mode_and_types.type_A, mode_and_types.type_B, 64),
+        .mixed_class_ints => if (VECTOR) largest_int_type_for_math_vector(A, B, 64) else largest_int_type_for_math(mode_and_types.type_A, mode_and_types.type_B, 64),
     };
     return struct {
         pub const T = T_;
+        pub const IS_VECTOR = VECTOR;
         a: T = 0,
         b: T = 0,
     };
@@ -358,39 +410,14 @@ pub fn Upgraded2Numbers(comptime A: type, comptime B: type) type {
 pub fn upgrade_2_numbers_for_math(a: anytype, b: anytype) Upgraded2Numbers(@TypeOf(a), @TypeOf(b)) {
     const A = @TypeOf(a);
     const B = @TypeOf(b);
-    const UPGRADE = upgrade_mode_and_types(A, B);
-    var result = Upgraded2Numbers(UPGRADE.type_A, UPGRADE.type_B){};
-    switch (UPGRADE.mode) {
-        .both_float_A_large => {
-            result.a = a;
-            result.b = @floatCast(b);
-        },
-        .both_float_B_large => {
-            result.a = @floatCast(a);
-            result.b = b;
-        },
-        .same_class_ints_A_large => {
-            result.a = a;
-            result.b = @intCast(b);
-        },
-        .same_class_ints_B_large => {
-            result.a = @intCast(a);
-            result.b = b;
-        },
-        .mixed_class_ints => {
-            result.a = @intCast(a);
-            result.b = @intCast(b);
-        },
-        .upgrade_A_to_float => {
-            result.a = @floatFromInt(a);
-            result.b = b;
-        },
-        .upgrade_B_to_float => {
-            result.a = a;
-            result.b = @floatFromInt(b);
-        },
-    }
-    return result;
+    const A_INFO = @typeInfo(A);
+    const B_INFO = @typeInfo(B);
+    const UPGRADE = if (A_INFO == .vector or B_INFO == .vector) upgrade_mode_and_types_vector(A, B) else upgrade_mode_and_types(A, B);
+    const RESULT = Upgraded2Numbers(UPGRADE.type_A, UPGRADE.type_B);
+    return RESULT{
+        .a = num_cast(a, RESULT.T),
+        .b = num_cast(b, RESULT.T),
+    };
 }
 
 pub fn Upgraded3Numbers(comptime A: type, comptime B: type, comptime C: type) type {
@@ -398,6 +425,7 @@ pub fn Upgraded3Numbers(comptime A: type, comptime B: type, comptime C: type) ty
     const ABC = Upgraded2Numbers(AB.T, C);
     return struct {
         pub const T: type = ABC.T;
+        pub const IS_VECTOR = ABC.IS_VECTOR;
         a: T = 0,
         b: T = 0,
         c: T = 0,
@@ -409,48 +437,25 @@ pub fn upgrade_3_numbers_for_math(a: anytype, b: anytype, c: anytype) Upgraded3N
     const B = @TypeOf(b);
     const C = @TypeOf(c);
     const RESULT = Upgraded3Numbers(A, B, C);
-    var result = RESULT{};
-    result.a = convert_number(a, RESULT.T);
-    result.b = convert_number(b, RESULT.T);
-    result.c = convert_number(c, RESULT.T);
-    return result;
-}
-
-pub fn conversion_mode(comptime IN: type, comptime OUT: type) NumberConversionMode {
-    assert_with_reason(Types.type_is_numeric(IN), @src(), "type `IN` must be a numeric type, got type `{s}`", .{@typeName(IN)});
-    assert_with_reason(Types.type_is_numeric(OUT), @src(), "type `OUT` must be a numeric type, got type `{s}`", .{@typeName(OUT)});
-    if (Types.type_is_int(IN) and Types.type_is_int(OUT)) {
-        return .int_to_int;
-    } else if (Types.type_is_int(IN) and Types.type_is_float(OUT)) {
-        return .int_to_float;
-    } else if (Types.type_is_float(IN) and Types.type_is_float(OUT)) {
-        return .float_to_float;
-    } else {
-        return .float_to_int;
-    }
-}
-
-pub fn convert_number(in: anytype, comptime OUT: type) OUT {
-    switch (comptime conversion_mode(@TypeOf(in), OUT)) {
-        .int_to_int => return @intCast(in),
-        .float_to_float => return @floatCast(in),
-        .int_to_float => return @floatFromInt(in),
-        .float_to_int => return @intFromFloat(in),
-    }
+    return RESULT{
+        .a = num_cast(a, RESULT.T),
+        .b = num_cast(b, RESULT.T),
+        .c = num_cast(c, RESULT.T),
+    };
 }
 
 pub fn upgrade_to_float(val: anytype, comptime UPGRADE_TYPE_IF_NEEDED: type) if (Types.type_is_float(@TypeOf(val))) @TypeOf(val) else UPGRADE_TYPE_IF_NEEDED {
     if (Types.type_is_float(@TypeOf(val))) {
         return val;
     } else {
-        return convert_number(val, UPGRADE_TYPE_IF_NEEDED);
+        return num_cast(val, UPGRADE_TYPE_IF_NEEDED);
     }
 }
 
 pub fn upgrade_add_out(a: anytype, b: anytype, comptime OUT: type) OUT {
     const nums = upgrade_2_numbers_for_math(a, b);
     const c = nums.a + nums.b;
-    return convert_number(c, OUT);
+    return num_cast(c, OUT);
 }
 pub fn upgrade_add(a: anytype, b: anytype) Upgraded2Numbers(@TypeOf(a), @TypeOf(b)).T {
     const nums = upgrade_2_numbers_for_math(a, b);
@@ -459,7 +464,7 @@ pub fn upgrade_add(a: anytype, b: anytype) Upgraded2Numbers(@TypeOf(a), @TypeOf(
 pub fn upgrade_subtract_out(a: anytype, b: anytype, comptime OUT: type) OUT {
     const nums = upgrade_2_numbers_for_math(a, b);
     const c = nums.a - nums.b;
-    return convert_number(c, OUT);
+    return num_cast(c, OUT);
 }
 pub fn upgrade_subtract(a: anytype, b: anytype) Upgraded2Numbers(@TypeOf(a), @TypeOf(b)).T {
     const nums = upgrade_2_numbers_for_math(a, b);
@@ -468,7 +473,7 @@ pub fn upgrade_subtract(a: anytype, b: anytype) Upgraded2Numbers(@TypeOf(a), @Ty
 pub fn upgrade_multiply_out(a: anytype, b: anytype, comptime OUT: type) OUT {
     const nums = upgrade_2_numbers_for_math(a, b);
     const c = nums.a * nums.b;
-    return convert_number(c, OUT);
+    return num_cast(c, OUT);
 }
 pub fn upgrade_multiply(a: anytype, b: anytype) Upgraded2Numbers(@TypeOf(a), @TypeOf(b)).T {
     const nums = upgrade_2_numbers_for_math(a, b);
@@ -477,7 +482,7 @@ pub fn upgrade_multiply(a: anytype, b: anytype) Upgraded2Numbers(@TypeOf(a), @Ty
 pub fn upgrade_divide_out(a: anytype, b: anytype, comptime OUT: type) OUT {
     const nums = upgrade_2_numbers_for_math(a, b);
     const c = nums.a / nums.b;
-    return convert_number(c, OUT);
+    return num_cast(c, OUT);
 }
 pub fn upgrade_divide(a: anytype, b: anytype) Upgraded2Numbers(@TypeOf(a), @TypeOf(b)).T {
     const nums = upgrade_2_numbers_for_math(a, b);
@@ -487,7 +492,7 @@ pub fn upgrade_power_out(a: anytype, b: anytype, comptime OUT: type) OUT {
     const nums = upgrade_2_numbers_for_math(a, b);
     const C = @FieldType(nums, "a");
     const c = math.pow(C, nums.a, nums.b);
-    return convert_number(c, OUT);
+    return num_cast(c, OUT);
 }
 pub fn upgrade_power(a: anytype, b: anytype) Upgraded2Numbers(@TypeOf(a), @TypeOf(b)).T {
     const nums = upgrade_2_numbers_for_math(a, b);
@@ -497,7 +502,7 @@ pub fn upgrade_root_out(a: anytype, b: anytype, comptime OUT: type) OUT {
     const nums = upgrade_2_numbers_for_math(a, b);
     const C = @FieldType(nums, "a");
     const c = math.pow(C, nums.a, 1 / nums.b);
-    return convert_number(c, OUT);
+    return num_cast(c, OUT);
 }
 pub fn upgrade_root(a: anytype, b: anytype) Upgraded2Numbers(@TypeOf(a), @TypeOf(b)).T {
     const nums = upgrade_2_numbers_for_math(a, b);
@@ -506,7 +511,7 @@ pub fn upgrade_root(a: anytype, b: anytype) Upgraded2Numbers(@TypeOf(a), @TypeOf
 pub fn upgrade_log_x_base_out(x: anytype, base: anytype, comptime OUT: type) OUT {
     const nums = upgrade_2_numbers_for_math(x, base);
     const c = log_x_base(nums.a, nums.b);
-    return convert_number(c, OUT);
+    return num_cast(c, OUT);
 }
 pub fn upgrade_log_x_base(a: anytype, b: anytype) Upgraded2Numbers(@TypeOf(a), @TypeOf(b)).T {
     const nums = upgrade_2_numbers_for_math(a, b);
@@ -515,7 +520,7 @@ pub fn upgrade_log_x_base(a: anytype, b: anytype) Upgraded2Numbers(@TypeOf(a), @
 pub fn upgrade_modulo_out(a: anytype, b: anytype, comptime OUT: type) OUT {
     const nums = upgrade_2_numbers_for_math(a, b);
     const c = @mod(nums.a, nums.b);
-    return convert_number(c, OUT);
+    return num_cast(c, OUT);
 }
 pub fn upgrade_modulo(a: anytype, b: anytype) Upgraded2Numbers(@TypeOf(a), @TypeOf(b)).T {
     const nums = upgrade_2_numbers_for_math(a, b);
@@ -524,7 +529,7 @@ pub fn upgrade_modulo(a: anytype, b: anytype) Upgraded2Numbers(@TypeOf(a), @Type
 pub fn upgrade_max_out(a: anytype, b: anytype, comptime OUT: type) OUT {
     const nums = upgrade_2_numbers_for_math(a, b);
     const c = @max(nums.a, nums.b);
-    return convert_number(c, OUT);
+    return num_cast(c, OUT);
 }
 pub fn upgrade_max(a: anytype, b: anytype) Upgraded2Numbers(@TypeOf(a), @TypeOf(b)).T {
     const nums = upgrade_2_numbers_for_math(a, b);
@@ -533,14 +538,14 @@ pub fn upgrade_max(a: anytype, b: anytype) Upgraded2Numbers(@TypeOf(a), @TypeOf(
 pub fn upgrade_min_out(a: anytype, b: anytype, comptime OUT: type) OUT {
     const nums = upgrade_2_numbers_for_math(a, b);
     const c = @min(nums.a, nums.b);
-    return convert_number(c, OUT);
+    return num_cast(c, OUT);
 }
 pub fn upgrade_min(a: anytype, b: anytype) Upgraded2Numbers(@TypeOf(a), @TypeOf(b)).T {
     const nums = upgrade_2_numbers_for_math(a, b);
     return @min(nums.a, nums.b);
 }
 
-pub fn upgrade_equal_to(a: anytype, b: anytype) bool {
+pub fn upgrade_equal_to(a: anytype, b: anytype) BoolOrVectorOfBools(@TypeOf(a)) {
     const nums = upgrade_2_numbers_for_math(a, b);
     return nums.a == nums.b;
 }
@@ -548,7 +553,7 @@ pub fn upgrade_equal_to_out(a: anytype, b: anytype, comptime OUT: type) OUT {
     const nums = upgrade_2_numbers_for_math(a, b);
     return num_cast(nums.a == nums.b, OUT);
 }
-pub fn upgrade_not_equal_to(a: anytype, b: anytype) bool {
+pub fn upgrade_not_equal_to(a: anytype, b: anytype) BoolOrVectorOfBools(@TypeOf(a)) {
     const nums = upgrade_2_numbers_for_math(a, b);
     return nums.a != nums.b;
 }
@@ -556,7 +561,7 @@ pub fn upgrade_not_equal_to_out(a: anytype, b: anytype, comptime OUT: type) OUT 
     const nums = upgrade_2_numbers_for_math(a, b);
     return num_cast(nums.a != nums.b, OUT);
 }
-pub fn upgrade_less_than(a: anytype, b: anytype) bool {
+pub fn upgrade_less_than(a: anytype, b: anytype) BoolOrVectorOfBools(@TypeOf(a)) {
     const nums = upgrade_2_numbers_for_math(a, b);
     return nums.a < nums.b;
 }
@@ -564,7 +569,7 @@ pub fn upgrade_less_than_out(a: anytype, b: anytype, comptime OUT: type) OUT {
     const nums = upgrade_2_numbers_for_math(a, b);
     return num_cast(nums.a < nums.b, OUT);
 }
-pub fn upgrade_less_than_or_equal(a: anytype, b: anytype) bool {
+pub fn upgrade_less_than_or_equal(a: anytype, b: anytype) BoolOrVectorOfBools(@TypeOf(a)) {
     const nums = upgrade_2_numbers_for_math(a, b);
     return nums.a <= nums.b;
 }
@@ -572,7 +577,7 @@ pub fn upgrade_less_than_or_equal_out(a: anytype, b: anytype, comptime OUT: type
     const nums = upgrade_2_numbers_for_math(a, b);
     return num_cast(nums.a <= nums.b, OUT);
 }
-pub fn upgrade_greater_than(a: anytype, b: anytype) bool {
+pub fn upgrade_greater_than(a: anytype, b: anytype) BoolOrVectorOfBools(@TypeOf(a)) {
     const nums = upgrade_2_numbers_for_math(a, b);
     return nums.a > nums.b;
 }
@@ -580,7 +585,7 @@ pub fn upgrade_greater_than_out(a: anytype, b: anytype, comptime OUT: type) OUT 
     const nums = upgrade_2_numbers_for_math(a, b);
     return num_cast(nums.a > nums.b, OUT);
 }
-pub fn upgrade_greater_than_or_equal(a: anytype, b: anytype) bool {
+pub fn upgrade_greater_than_or_equal(a: anytype, b: anytype) BoolOrVectorOfBools(@TypeOf(a)) {
     const nums = upgrade_2_numbers_for_math(a, b);
     return nums.a >= nums.b;
 }
@@ -591,6 +596,9 @@ pub fn upgrade_greater_than_or_equal_out(a: anytype, b: anytype, comptime OUT: t
 
 pub fn change_per_unit_time_required_to_reach_val_at_time(comptime T: type, current: T, target: T, time: T) T {
     return (target - current) * (1.0 / time);
+}
+pub fn BoolOrVectorOfBools(comptime T: type) type {
+    return if (Types.type_is_vector(T)) @Vector(@typeInfo(T).vector.len, bool) else bool;
 }
 
 pub fn change_per_unit_time_required_to_reach_val_at_inverse_time(comptime T: type, current: T, target: T, inverse_time: T) T {
@@ -965,7 +973,7 @@ pub fn range_trichotomy(low: anytype, value: anytype, high: anytype, comptime OU
     const ratio = upgrade_divide(val, hi_minus_1);
     const scaled_ratio = upgrade_multiply(@as(f32, 2.875), ratio);
     const result_unadjusted = @floor(3 + scaled_ratio - 1.4375 + 0.5);
-    return convert_number(result_unadjusted, OUT) - 3;
+    return num_cast(result_unadjusted, OUT) - 3;
 }
 
 test range_trichotomy {
@@ -1023,7 +1031,7 @@ pub fn extract_partial_rand_from_rand(rand: anytype, val_less_than: anytype, com
     assert_with_reason(Types.type_is_comptime_or_unsigned_int(@TypeOf(val_less_than)), @src(), "type of `val_less_than` must be an unsigned integer type, got type `{s}", .{@typeName(@TypeOf(val_less_than))});
     const r = rand.* % val_less_than;
     rand.* = rand.* / val_less_than;
-    return convert_number(r, OUT);
+    return num_cast(r, OUT);
 }
 
 pub fn normalized_float_to_int(float: anytype, comptime INT: type) INT {

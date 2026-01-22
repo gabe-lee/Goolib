@@ -117,6 +117,15 @@ pub const GpuBufferInitError = SDL3.Error || error{
     gpu_buffer_already_initialized,
 };
 
+pub const RegisterKind = enum(u8) {
+    TEXTURE, // HLSL 't0'
+    SAMPLER, // HLSL 's0'
+    UNORDERED, // HLSL 'u0'
+    BUFFER, // HLSL 'b0'
+};
+
+pub const RegisterLocation = struct {};
+
 pub fn GraphicsController(
     comptime WINDOW_NAMES_ENUM: type,
     comptime VERTEX_SHADER_NAMES_ENUM: type,
@@ -693,9 +702,97 @@ pub fn GraphicsController(
             self.destroy_window(window_name);
         }
 
-        //CHECKPOINT finish create/destroy funcs
-        pub fn begin_commands(self: *Self) !*GPU_CommandBuffer {
-            try self.gpu.acquire_command_buffer();
+        pub fn create_render_pipeline(self: *Self, pipeline_name: RenderPipelineName, vertex_shader_info: *GPU_ShaderCreateInfo, fragment_shader_info: *GPU_ShaderCreateInfo, pipeline_info: *GPU_GraphicsPipelineCreateInfo) RenderPipelineInitError!void {
+            const idx = @intFromEnum(pipeline_name);
+            if (self.render_pipelines_init[idx]) return RenderPipelineInitError.render_pipeline_already_initialized;
+            const vert_shader = try self.gpu.create_shader(vertex_shader_info);
+            defer self.gpu.release_shader(vert_shader);
+            const frag_shader = try self.gpu.create_shader(fragment_shader_info);
+            defer self.gpu.release_shader(frag_shader);
+            self.render_pipelines[idx] = try self.gpu.create_graphics_pipeline(pipeline_info);
+            self.render_pipelines_init[idx] = true;
         }
+        pub fn destroy_render_pipeline(self: *Self, pipeline_name: RenderPipelineName) void {
+            const idx = @intFromEnum(pipeline_name);
+            if (!self.render_pipelines_init[idx]) return;
+            self.gpu.release_graphics_pipeline(self.render_pipelines[idx]);
+            self.render_pipelines_init[idx] = false;
+        }
+
+        pub fn create_texture_sampler(self: *Self, sampler_name: SamplerName, sampler_info: *GPU_SamplerCreateInfo) SamplerInitError!void {
+            const idx = @intFromEnum(sampler_name);
+            if (self.samplers_init[idx]) return SamplerInitError.sampler_already_initialized;
+            self.samplers[idx] = try self.gpu.create_texture_sampler(sampler_info);
+            self.samplers_init[idx] = true;
+        }
+        pub fn destroy_texture_sampler(self: *Self, sampler_name: SamplerName) void {
+            const idx = @intFromEnum(sampler_name);
+            if (!self.samplers_init[idx]) return;
+            self.gpu.release_texture_sampler(self.samplers[idx]);
+            self.samplers_init[idx] = false;
+        }
+
+        pub fn create_texture(self: *Self, texture_name: TextureName, texture_info: *GPU_TextureCreateInfo) TextureInitError!void {
+            const idx = @intFromEnum(texture_name);
+            if (self.textures_init[idx]) return TextureInitError.texture_already_initialized;
+            self.textures[idx] = try self.gpu.create_texture(texture_info);
+            self.textures_init[idx] = true;
+        }
+        pub fn destroy_texture(self: *Self, texture_name: TextureName) void {
+            const idx = @intFromEnum(texture_name);
+            if (!self.textures_init[idx]) return;
+            self.gpu.release_texture(self.textures[idx]);
+            self.textures_init[idx] = false;
+        }
+
+        pub fn create_transfer_buffer(self: *Self, transfer_buffer_name: TransferBufferName, buffer_info: *GPU_TransferBufferCreateInfo) TransferBufferInitError!void {
+            const idx = @intFromEnum(transfer_buffer_name);
+            if (self.transfer_buffers_init[idx]) return TransferBufferInitError.transfer_buffer_already_initialized;
+            self.transfer_buffers[idx] = try self.gpu.create_transfer_buffer(buffer_info);
+            self.transfer_buffers_init[idx] = true;
+        }
+        pub fn destroy_transfer_buffer(self: *Self, transfer_buffer_name: TransferBufferName) void {
+            const idx = @intFromEnum(transfer_buffer_name);
+            if (!self.transfer_buffers_init[idx]) return;
+            self.gpu.release_transfer_buffer(self.transfer_buffers[idx]);
+            self.transfer_buffers_init[idx] = false;
+        }
+
+        pub fn create_gpu_buffer(self: *Self, gpu_buffer_name: GpuBufferName, buffer_info: *GPU_BufferCreateInfo) GpuBufferInitError!void {
+            const idx = @intFromEnum(gpu_buffer_name);
+            if (self.gpu_buffers_init[idx]) return GpuBufferInitError.gpu_buffer_already_initialized;
+            self.gpu_buffers[idx] = try self.gpu.create_buffer(buffer_info);
+            self.gpu_buffers_init[idx] = true;
+        }
+        pub fn destroy_gpu_buffer(self: *Self, gpu_buffer_name: GpuBufferName) void {
+            const idx = @intFromEnum(gpu_buffer_name);
+            if (!self.gpu_buffers_init[idx]) return;
+            self.gpu.release_buffer(self.gpu_buffers[idx]);
+            self.gpu_buffers_init[idx] = false;
+        }
+
+        pub fn begin_commands(self: *Self) !CommandBuffer {
+            return CommandBuffer{
+                .controller = self,
+                .sdl = try self.gpu.acquire_command_buffer(),
+            };
+        }
+
+        pub const CommandBuffer = struct {
+            controller: *Self,
+            sdl: *GPU_CommandBuffer,
+
+            pub fn insert_debug_label(self: CommandBuffer, label: [*:0]const u8) void {
+                self.sdl.insert_debug_label(label);
+            }
+
+            pub fn push_debug_group(self: CommandBuffer, name: [*:0]const u8) void {
+                self.sdl.push_debug_group(name);
+            }
+
+            pub fn pop_debug_group(self: CommandBuffer) void {
+                self.sdl.pop_debug_group();
+            }
+        };
     };
 }

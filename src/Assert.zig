@@ -34,6 +34,13 @@ const ANSI = Root.ANSI;
 
 pub const SHOULD_ASSERT = build.mode == .Debug or build.mode == .ReleaseSafe;
 
+pub fn should_assert() bool {
+    return @inComptime() or SHOULD_ASSERT;
+}
+pub fn should_assert_with_force(comptime FORCE: bool) bool {
+    return FORCE or @inComptime() or SHOULD_ASSERT;
+}
+
 pub inline fn print_header(comptime BEFORE: []const u8, comptime tag: []const u8, comptime in_comptime: bool, comptime src_loc: ?SourceLocation, comptime log: []const u8, comptime AFTER: []const u8) []const u8 {
     @setEvalBranchQuota(5000);
     const timing = if (in_comptime) "\n\x1b[1GCOMPTIME " else "\n\x1b[1GRUNTIME ";

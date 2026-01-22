@@ -32,26 +32,69 @@ const Types = Root.Types;
 const assert_with_reason = Assert.assert_with_reason;
 const assert_unreachable = Assert.assert_unreachable;
 
+pub inline fn bit_cast(from: anytype, comptime TO: type) TO {
+    return @as(TO, @bitCast(from));
+}
+
 pub fn num_cast(from: anytype, comptime TO: type) TO {
     const FROM = @TypeOf(from);
     const FI = @typeInfo(FROM);
     const TI = @typeInfo(TO);
-    const FROM_INT: comptime_int = 0b0000;
-    const FROM_FLOAT: comptime_int = 0b0001;
-    const TO_INT: comptime_int = 0b0000;
-    const TO_FLOAT: comptime_int = 0b0010;
-    const TO_ENUM: comptime_int = 0b0100;
-    const TO_BOOL: comptime_int = 0b0110;
-    const TO_PTR: comptime_int = 0b1000;
-    const from_kind: comptime_int = switch (FI) {
+    // zig fmt: off
+    const FROM_INT: comptime_int       = 0b0000_00;
+    const FROM_FLOAT: comptime_int     = 0b0000_01;
+    const FROM_INT_VEC: comptime_int   = 0b0000_10;
+    const FROM_FLOAT_VEC: comptime_int = 0b0000_11;
+    const TO_INT: comptime_int         = 0b0000_00;
+    const TO_FLOAT: comptime_int       = 0b0001_00;
+    const TO_ENUM: comptime_int        = 0b0010_00;
+    const TO_BOOL: comptime_int        = 0b0011_00;
+    const TO_PTR: comptime_int         = 0b0100_00;
+    const TO_INT_VEC: comptime_int     = 0b0101_00;
+    const TO_FLOAT_VEC: comptime_int   = 0b0110_00;
+    const TO_ENUM_VEC: comptime_int    = 0b0111_00;
+    const TO_BOOL_VEC: comptime_int    = 0b1000_00;
+    const TO_PTR_VEC: comptime_int     = 0b1001_00;
+    // zig fmt: on
+    comptime var LEN_IN: comptime_int = 1;
+    comptime var LEN_OUT: comptime_int = 1;
+    const from_kind: comptime_int = comptime switch (FI) {
         .int, .comptime_int, .@"enum", .bool, .pointer => FROM_INT,
         .float, .comptime_float => FROM_FLOAT,
-        else => assert_unreachable(@src(), "`from` type must be an integer, float, enum, bool, *T, or [*]T, got type `{s}`", .{@typeName(FROM)}),
+        .vector => |VI| get: {
+            LEN_IN = VI.len;
+            break :get switch (@typeInfo(VI.child)) {
+                .int, .comptime_int, .@"enum", .bool, .pointer => FROM_INT_VEC,
+                .float, .comptime_float => FROM_FLOAT_VEC,
+                else => assert_unreachable(@src(), "`from` type must be an integer, float, enum, bool, *T, or [*]T, or a @Vector(T, N) of any of the previous, got type `{s}`", .{@typeName(FROM)}),
+            };
+        },
+        else => assert_unreachable(@src(), "`from` type must be an integer, float, enum, bool, *T, or [*]T, or a @Vector(T, N) of any of the previous, got type `{s}`", .{@typeName(FROM)}),
     };
     const cast_from = switch (FI) {
         .int, .comptime_int, .float, .comptime_float => from,
         .@"enum" => @intFromEnum(from),
         .bool => @intFromBool(from),
+        .vector => |VI| get: {
+            break :get switch (@typeInfo(VI.child)) {
+                .int, .comptime_int, .float, .comptime_float => from,
+                .@"enum" => |EI| @as(@Vector(VI.len, EI.tag_type), @bitCast(from)),
+                .bool => @as(@Vector(VI.len, u1), @bitCast(from)),
+                .pointer => |PI| get_addr: {
+                    switch (PI.size) {
+                        .c, .one, .many => break :get_addr @as(@Vector(VI.len, usize), @bitCast(from)),
+                        .slice => {
+                            var out: @Vector(VI.len, usize) = undefined;
+                            inline for (0..VI.len) |i| {
+                                out[i] = from[i].ptr;
+                            }
+                            break :get_addr out;
+                        },
+                    }
+                },
+                else => assert_unreachable(@src(), "`from` type must be an integer, float, enum, bool, *T, or [*]T, or a @Vector(T, N) of any of the previous, got type `{s}`", .{@typeName(FROM)}),
+            };
+        },
         .pointer => get_addr: {
             switch (FI.pointer.size) {
                 .c, .one, .many => break :get_addr @intFromPtr(from),
@@ -60,40 +103,120 @@ pub fn num_cast(from: anytype, comptime TO: type) TO {
         },
         else => unreachable,
     };
+    const CAST_FROM = @TypeOf(cast_from);
     const to_kind: comptime_int = switch (TI) {
         .int, .comptime_int => TO_INT,
         .float, .comptime_float => TO_FLOAT,
         .@"enum" => TO_ENUM,
         .bool => TO_BOOL,
         .pointer => check: {
-            assert_with_reason(Types.pointer_is_single_many_or_c(TO), @src(), "`TO` type must be an integer, float, enum, bool, *T, or [*]T, got type `{s}`", .{@typeName(TO)});
+            assert_with_reason(Types.pointer_is_single_many_or_c(TO), @src(), "`TO` type must be an integer, float, enum, bool, *T, [*]T, [*c]T, or a @Vector(N, T) of any of the previous, got type `{s}`", .{@typeName(TO)});
             break :check TO_PTR;
         },
-        else => assert_unreachable(@src(), "`TO` type must be an integer, float, enum, bool, *T, or [*]T, got type `{s}`", .{@typeName(TO)}),
+        .vector => |VI| get: {
+            LEN_OUT = VI.len;
+            break :get switch (@typeInfo(VI.child)) {
+                .int, .comptime_int => TO_INT_VEC,
+                .float, .comptime_float => TO_FLOAT_VEC,
+                .@"enum" => TO_ENUM_VEC,
+                .bool => TO_BOOL_VEC,
+                .pointer => |PI| check: {
+                    assert_with_reason(Types.pointer_is_single_many_or_c(PI.child), @src(), "`TO` type must be an integer, float, enum, bool, *T, [*]T, [*c]T, or a @Vector(N, T) of any of the previous, got type `{s}`", .{@typeName(TO)});
+                    break :check TO_PTR_VEC;
+                },
+            };
+        },
+        else => assert_unreachable(@src(), "`TO` type must be an integer, float, enum, bool, *T, [*]T, [*c]T, or a @Vector(N, T) of any of the previous, got type `{s}`", .{@typeName(TO)}),
     };
-    const FROM_INT_TO_INT = FROM_INT | TO_INT;
-    const FROM_INT_TO_FLOAT = FROM_INT | TO_FLOAT;
-    const FROM_INT_TO_BOOL = FROM_INT | TO_BOOL;
-    const FROM_INT_TO_ENUM = FROM_INT | TO_ENUM;
-    const FROM_INT_TO_PTR = FROM_INT | TO_PTR;
-    const FROM_FLOAT_TO_INT = FROM_FLOAT | TO_INT;
-    const FROM_FLOAT_TO_FLOAT = FROM_FLOAT | TO_FLOAT;
-    const FROM_FLOAT_TO_BOOL = FROM_FLOAT | TO_BOOL;
-    const FROM_FLOAT_TO_ENUM = FROM_FLOAT | TO_ENUM;
-    const FROM_FLOAT_TO_PTR = FROM_FLOAT | TO_PTR;
+    assert_with_reason(LEN_IN == 1 or LEN_IN == LEN_OUT, @src(), "cannot convert from a vector to a scalar, or between two vectors of different lengths, got `{s}` => `{s}`", .{ @typeName(FROM), @typeName(TO) });
     const branch = comptime calc: {
         break :calc from_kind | to_kind;
     };
+    // 40 total cases (4 input (after cast) x 10 output)
+    // 10 invalid cases (vector to vector of different len, or vector to scalar)
     return switch (branch) {
-        FROM_INT_TO_INT => @intCast(cast_from),
-        FROM_INT_TO_FLOAT => @floatFromInt(cast_from),
-        FROM_INT_TO_BOOL, FROM_FLOAT_TO_BOOL => cast_from != 0,
-        FROM_INT_TO_ENUM => @enumFromInt(@as(TI.@"enum".tag_type, @intCast(cast_from))),
-        FROM_INT_TO_PTR => @ptrFromInt(@as(usize, @intCast(cast_from))),
-        FROM_FLOAT_TO_INT => @intFromFloat(cast_from),
-        FROM_FLOAT_TO_FLOAT => @floatCast(cast_from),
-        FROM_FLOAT_TO_ENUM => @enumFromInt(@as(TI.@"enum".tag_type, @intFromFloat(cast_from))),
-        FROM_FLOAT_TO_PTR => @ptrFromInt(@as(usize, @intFromFloat(cast_from))),
+        // TO_BOOL cases (8 total, 6 valid, 2 invalid, 32 remaining)
+        FROM_INT | TO_BOOL, FROM_FLOAT | TO_BOOL => cast_from != 0,
+        FROM_INT | TO_BOOL_VEC, FROM_FLOAT | TO_BOOL_VEC => @splat(cast_from != 0),
+        FROM_INT_VEC | TO_BOOL_VEC, FROM_FLOAT_VEC | TO_BOOL_VEC => cast_from != @as(@Vector(CAST_FROM.len, CAST_FROM), @splat(@as(CAST_FROM, 0))),
+        // FROM_INT cases (16 total, 12 valid, 4 invalid, 16 remainig)
+        FROM_INT | TO_INT, FROM_INT_VEC | TO_INT_VEC => @intCast(cast_from),
+        FROM_INT | TO_INT_VEC => @splat(@intCast(cast_from)),
+        FROM_INT | TO_FLOAT, FROM_INT_VEC | TO_FLOAT_VEC => @floatFromInt(cast_from),
+        FROM_INT | TO_FLOAT_VEC => @splat(@floatFromInt(cast_from)),
+        FROM_INT | TO_ENUM => @enumFromInt(cast_from),
+        FROM_INT_VEC | TO_ENUM_VEC => check: {
+            if (Assert.should_assert()) {
+                var out: TO = undefined;
+                inline for (0..cast_from.len) |i| {
+                    out[i] = @enumFromInt(cast_from[i]);
+                }
+                break :check out;
+            } else {
+                const INT_TYPE = @typeInfo(@typeInfo(TO).vector.child).@"enum".tag_type;
+                const INTERMEDIATE = @Vector(TO.len, INT_TYPE);
+                const intermediate: INTERMEDIATE = @intCast(cast_from);
+                break :check @as(TO, @bitCast(intermediate));
+            }
+        },
+        FROM_INT | TO_ENUM_VEC => @splat(@enumFromInt(cast_from)),
+        FROM_INT | TO_PTR => @ptrFromInt(cast_from),
+        FROM_INT_VEC | TO_PTR_VEC => make: {
+            if (Assert.should_assert()) {
+                var out: TO = undefined;
+                inline for (0..cast_from.len) |i| {
+                    out[i] = @ptrFromInt(cast_from[i]);
+                }
+                break :make out;
+            } else {
+                const INTERMEDIATE = @Vector(TO.len, usize);
+                const intermediate: INTERMEDIATE = @intCast(cast_from);
+                break :make @as(TO, @bitCast(intermediate));
+            }
+        },
+        FROM_INT | TO_PTR_VEC => @splat(@ptrFromInt(cast_from)),
+        // FROM_FLOAT cases (16 total, 12 valid, 4 invalid, 0 remainig)
+        FROM_FLOAT | TO_INT, FROM_FLOAT_VEC | TO_INT_VEC => @intFromFloat(cast_from),
+        FROM_FLOAT | TO_INT_VEC => @splat(@intFromFloat(cast_from)),
+        FROM_FLOAT | TO_FLOAT, FROM_FLOAT_VEC | TO_FLOAT_VEC => @floatCast(cast_from),
+        FROM_FLOAT | TO_FLOAT_VEC => @splat(@floatCast(cast_from)),
+        FROM_FLOAT | TO_ENUM => make: {
+            const INT_TYPE = @typeInfo(TO).@"enum".tag_type;
+            break :make @enumFromInt(@as(INT_TYPE, @intFromFloat(cast_from)));
+        },
+        FROM_FLOAT_VEC | TO_ENUM_VEC => make: {
+            const INT_TYPE = @typeInfo(@typeInfo(TO).vector.child).@"enum".tag_type;
+            if (Assert.should_assert()) {
+                var out: TO = undefined;
+                inline for (0..cast_from.len) |i| {
+                    out[i] = @enumFromInt(@as(INT_TYPE, @intFromFloat(cast_from[i])));
+                }
+                break :make out;
+            } else {
+                const INTERMEDIATE = @Vector(TO.len, INT_TYPE);
+                const intermediate: INTERMEDIATE = @intFromFloat(cast_from);
+                break :make @as(TO, @bitCast(intermediate));
+            }
+        },
+        FROM_FLOAT | TO_ENUM_VEC => make: {
+            const INT_TYPE = @typeInfo(@typeInfo(TO).vector.child).@"enum".tag_type;
+            break :make @splat(@enumFromInt(@as(INT_TYPE, @intFromFloat(cast_from))));
+        },
+        FROM_FLOAT | TO_PTR => @ptrFromInt(@as(usize, @intFromFloat(cast_from))),
+        FROM_FLOAT_VEC | TO_PTR_VEC => make: {
+            if (Assert.should_assert()) {
+                var out: TO = undefined;
+                inline for (0..cast_from.len) |i| {
+                    out[i] = @ptrFromInt(@as(usize, @intFromFloat(cast_from[i])));
+                }
+                break :make out;
+            } else {
+                const INTERMEDIATE = @Vector(TO.len, usize);
+                const intermediate: INTERMEDIATE = @intFromFloat(cast_from);
+                break :make @as(TO, @bitCast(intermediate));
+            }
+        },
+        FROM_FLOAT | TO_PTR_VEC => @splat(@ptrFromInt(@as(usize, @intFromFloat(cast_from)))),
         else => unreachable,
     };
 }

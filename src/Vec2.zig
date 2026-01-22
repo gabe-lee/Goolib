@@ -157,7 +157,7 @@ pub fn define_vec2_type(comptime T: type) type {
             return self.cross_product(other);
         }
 
-        pub inline fn shoelace(self: T_Vec2, next: T_Vec2) T {
+        pub inline fn shoelace_area_step(self: T_Vec2, next: T_Vec2) T {
             return (next.x - self.x) * (self.y + next.y);
         }
 
