@@ -314,3 +314,22 @@ pub const ThreadingMode = enum(u8) {
     SINGLE_THREADED,
     MULTI_THREAD_SAFE,
 };
+
+pub const PerpendicularZero = enum(u8) {
+    PERP_ZERO_IS_ZERO,
+    PERP_ZERO_IS_LAST_COMPONENT_1,
+};
+pub const NormalizeZero = enum(u8) {
+    NORM_ZERO_IS_ZERO,
+    NORM_ZERO_IS_LAST_COMPONENT_1,
+};
+pub const Plane3D = enum(u8) {
+    XY,
+    YZ,
+    XZ,
+};
+
+pub const PadForGpu = enum(u8) {
+    NO_PADDING,
+    PAD_FOR_GPU,
+};

@@ -1099,3 +1099,297 @@ pub fn min_value(comptime T: type) T {
         return -math.floatMax(T);
     }
 }
+
+pub fn multiply_arbitrary_matrices(comptime T_A: type, comptime A_ROWS: comptime_int, comptime A_COLS: comptime_int, a: [A_ROWS][A_COLS]T_A, comptime T_B: type, comptime B_ROWS: comptime_int, comptime B_COLS: comptime_int, b: [B_ROWS][B_COLS]T_B, comptime T_OUT: type) [A_ROWS][B_COLS]T_OUT {
+    assert_with_reason(A_COLS == B_ROWS, @src(), "matrix mutiplication is only possible when A_COLS == B_ROWS, got {d} != {d}", .{ A_COLS, B_ROWS });
+    const UPGRADE = Upgraded2Numbers(T_A, T_B);
+    var out: [A_ROWS][B_COLS]T_OUT = undefined;
+    inline for (0..A_ROWS) |y| {
+        inline for (0..B_COLS) |x| {
+            var sum: UPGRADE.T = if (UPGRADE.IS_VECTOR) @splat(0) else 0;
+            inline for (0..A_COLS) |i| {
+                sum += upgrade_multiply(a[y][i], b[i][x]);
+            }
+            out[y][x] = num_cast(sum, T_OUT);
+        }
+    }
+    return out;
+}
+pub fn add_arbitrary_matrices(comptime T_A: type, comptime A_ROWS: comptime_int, comptime A_COLS: comptime_int, a: [A_ROWS][A_COLS]T_A, comptime T_B: type, comptime B_ROWS: comptime_int, comptime B_COLS: comptime_int, b: [B_ROWS][B_COLS]T_B, comptime T_OUT: type) [A_ROWS][B_COLS]T_OUT {
+    assert_with_reason(A_COLS == B_COLS, @src(), "matrix addition is only possible when A_COLS == B_COLS, got {d} != {d}", .{ A_COLS, B_COLS });
+    assert_with_reason(A_ROWS == B_ROWS, @src(), "matrix addition is only possible when A_ROWS == B_ROWS, got {d} != {d}", .{ A_ROWS, B_ROWS });
+    const TOTAL = A_ROWS * A_COLS;
+    const VEC_A = @Vector(TOTAL, T_A);
+    const VEC_B = @Vector(TOTAL, T_B);
+    const VEC_OUT = @Vector(TOTAL, T_OUT);
+    const vec_a: VEC_A = @bitCast(a);
+    const vec_b: VEC_B = @bitCast(b);
+    const vec_out: VEC_OUT = upgrade_add_out(vec_a, vec_b, VEC_OUT);
+    return @bitCast(vec_out);
+}
+pub fn subtract_arbitrary_matrices(comptime T_A: type, comptime A_ROWS: comptime_int, comptime A_COLS: comptime_int, a: [A_ROWS][A_COLS]T_A, comptime T_B: type, comptime B_ROWS: comptime_int, comptime B_COLS: comptime_int, b: [B_ROWS][B_COLS]T_B, comptime T_OUT: type) [A_ROWS][B_COLS]T_OUT {
+    assert_with_reason(A_COLS == B_COLS, @src(), "matrix subtraction is only possible when A_COLS == B_COLS, got {d} != {d}", .{ A_COLS, B_COLS });
+    assert_with_reason(A_ROWS == B_ROWS, @src(), "matrix subtraction is only possible when A_ROWS == B_ROWS, got {d} != {d}", .{ A_ROWS, B_ROWS });
+    const TOTAL = A_ROWS * A_COLS;
+    const VEC_A = @Vector(TOTAL, T_A);
+    const VEC_B = @Vector(TOTAL, T_B);
+    const VEC_OUT = @Vector(TOTAL, T_OUT);
+    const vec_a: VEC_A = @bitCast(a);
+    const vec_b: VEC_B = @bitCast(b);
+    const vec_out: VEC_OUT = upgrade_subtract_out(vec_a, vec_b, VEC_OUT);
+    return @bitCast(vec_out);
+}
+pub fn transpose_arbitrary_matrix(comptime T: type, comptime ROWS: comptime_int, comptime COLS: comptime_int, mat: [ROWS][COLS]T) [COLS][ROWS]T {
+    var out: [COLS][ROWS]T = undefined;
+    inline for (0..ROWS) |y| {
+        inline for (0..COLS) |x| {
+            out[x][y] = mat[y][x];
+        }
+    }
+}
+
+pub fn determinant_of_arbitrary_matrix(comptime T: type, comptime ROWS: comptime_int, comptime COLS: comptime_int, mat: [ROWS][COLS]T) T {
+    assert_with_reason(ROWS == COLS, @src(), "matrix determinants only exist for square matrices, `ROWS` {d} != {d} `COLS`", .{ ROWS, COLS });
+    if (ROWS == 2) {
+        return (mat[0][0] * mat[1][1]) - (mat[0][1] * mat[1][0]);
+    }
+    if (ROWS == 3) {
+        return (mat[0][0] * ((mat[1][1] * mat[2][2]) - (mat[1][2] * mat[2][1]))) -
+            (mat[0][1] * ((mat[1][0] * mat[2][2]) - (mat[1][2] * mat[2][0]))) +
+            (mat[0][2] * ((mat[1][0] * mat[2][1]) - (mat[1][1] * mat[2][0])));
+    }
+    const row_echelon_result = row_echelon_form_of_arbitrary_matrix(T, .LEADING_VAL_IN_ROW_MUST_BE_1, ROWS, COLS, mat);
+    if (row_echelon_result.rank != ROWS) return 0;
+    return row_echelon_result.determinant_factor;
+}
+
+pub fn RowEchelonResult(comptime T: type, comptime ROWS: comptime_int, comptime COLS: comptime_int) type {
+    return struct {
+        const Self = @This();
+
+        rank: usize = 0,
+        determinant_factor: T = 1,
+        mat: [ROWS][COLS]T,
+    };
+}
+
+pub const RowEchelonLeadingMode = enum(u8) {
+    LEADING_VAL_IN_ROW_MUST_BE_NON_ZERO,
+    LEADING_VAL_IN_ROW_MUST_BE_1,
+};
+
+/// Does not handle Vector element types (since each element of the vector type could require a different row operation)
+pub fn row_echelon_form_of_arbitrary_matrix(comptime T: type, leading_mode: RowEchelonLeadingMode, comptime ROWS: comptime_int, comptime COLS: comptime_int, mat: [ROWS][COLS]T) RowEchelonResult(T, ROWS, COLS) {
+    var out: RowEchelonResult(T, ROWS, COLS) = .{ .mat = mat };
+    var pivot_y: usize = 0;
+    var pivot_x: usize = 0;
+    var tmp_row: [COLS]T = undefined;
+    var largest_pivot_y: usize = undefined;
+    var largest_pivot: T = undefined;
+    var factor: T = undefined;
+    while (pivot_y < ROWS and pivot_x < COLS) {
+        largest_pivot_y = pivot_y;
+        largest_pivot = 0;
+        for (pivot_y..ROWS) |test_y| {
+            if (@abs(out.mat[test_y][pivot_x]) > largest_pivot) {
+                largest_pivot_y = test_y;
+            }
+        }
+        if (out.mat[largest_pivot_y][pivot_x] == 0) {
+            pivot_x += 1;
+        } else {
+            if (largest_pivot_y != pivot_y) {
+                // SWAP
+                tmp_row = out.mat[pivot_y];
+                out.mat[pivot_y] = out.mat[largest_pivot_y];
+                out.mat[largest_pivot_y] = tmp_row;
+                out.determinant_factor = -out.determinant_factor;
+                // END SWAP
+            }
+            if (leading_mode == .LEADING_VAL_IN_ROW_MUST_BE_1) {
+                // SCALE
+                factor = out.mat[pivot_y][pivot_x];
+                out.mat[pivot_y][pivot_x] = 1;
+                for ((pivot_x + 1)..COLS) |col_after_pivot_x| {
+                    out.mat[pivot_y][col_after_pivot_x] /= factor;
+                }
+                out.determinant_factor *= factor;
+                // END SCALE
+            }
+            for ((pivot_y + 1)..ROWS) |row_below_pivot_y| {
+                factor = out[row_below_pivot_y][pivot_x] / out[pivot_y][pivot_x];
+                // REPLACE
+                out[row_below_pivot_y][pivot_x] = 0; // this is the same as `out[row_below_pivot_y][pivot_x] -= out[pivot_y][pivot_x] * factor`;
+                for ((pivot_x + 1)..COLS) |col_after_pivot_x| {
+                    out[row_below_pivot_y][col_after_pivot_x] -= out[pivot_y][col_after_pivot_x] * factor;
+                }
+                // END REPLACE
+            }
+            pivot_y += 1;
+            pivot_x += 1;
+            out.rank += 1;
+        }
+    }
+}
+
+pub fn minor_sub_matrix_of_arbitrary_matrix_position(comptime T: type, comptime ROWS: comptime_int, comptime COLS: comptime_int, mat: [ROWS][COLS]T, pos_row: usize, pos_col: usize) [ROWS - 1][COLS - 1]T {
+    assert_with_reason(ROWS > 1 and COLS > 1, @src(), "cannot form a minor sub-matrix from a matrix with either `COLS` or `ROWS` being 1, got a {d}x{d} matrix", .{ ROWS, COLS });
+    var out: [ROWS - 1][COLS - 1]T = undefined;
+    var out_row: usize = 0;
+    var out_col: usize = 0;
+    inline for (0..ROWS) |in_row| {
+        if (pos_row == in_row) continue;
+        out_col = 0;
+        inline for (0..COLS) |in_col| {
+            if (pos_col == in_col) continue;
+            out.data[out_row][out_col] = mat[in_row][in_col];
+            out_col += 1;
+        }
+        out_row += 1;
+    }
+    return out;
+}
+
+pub fn minor_sub_matrices_of_arbitrary_matrix(comptime T: type, comptime ROWS: comptime_int, comptime COLS: comptime_int, mat: [ROWS][COLS]T) [ROWS][COLS][ROWS - 1][COLS - 1]T {
+    var out: [ROWS][COLS][ROWS - 1][COLS - 1]T = undefined;
+    inline for (0..ROWS) |pos_row| {
+        inline for (0..COLS) |pos_col| {
+            out[pos_row][pos_col] = minor_sub_matrix_of_arbitrary_matrix_position(T, ROWS, COLS, mat, pos_row, pos_col);
+        }
+    }
+    return out;
+}
+
+pub fn minor_matrix_determinants_of_arbitrary_matrix(comptime T: type, comptime ROWS: comptime_int, comptime COLS: comptime_int, mat: [ROWS][COLS]T) [ROWS][COLS]T {
+    assert_with_reason(ROWS == COLS, @src(), "matrix determinants only exist for square matrices, `ROWS` {d} != {d} `COLS`", .{ ROWS, COLS });
+    var out: [ROWS][COLS]T = undefined;
+    inline for (0..ROWS) |pos_row| {
+        inline for (0..COLS) |pos_col| {
+            const minor = minor_sub_matrix_of_arbitrary_matrix_position(T, ROWS, COLS, mat, pos_row, pos_col);
+            out[pos_row][pos_col] = determinant_of_arbitrary_matrix(T, ROWS - 1, COLS - 1, minor);
+        }
+    }
+    return out;
+}
+
+pub fn cofactors_of_arbitrary_matrix_minors(comptime T: type, comptime ROWS: comptime_int, comptime COLS: comptime_int, mat_minors: [ROWS][COLS]T) [ROWS][COLS]T {
+    var out: [ROWS][COLS]T = undefined;
+    var neg_pos: [2]T = undefined;
+    inline for (0..ROWS) |row| {
+        inline for (0..COLS) |col| {
+            const sum = row + col;
+            const idx = sum & 1;
+            neg_pos[0] = -mat_minors[row][col];
+            neg_pos[1] = mat_minors[row][col];
+            out[row][col] = neg_pos[idx];
+        }
+    }
+    return out;
+}
+
+pub fn cofactors_of_arbitrary_matrix(comptime T: type, comptime ROWS: comptime_int, comptime COLS: comptime_int, mat: [ROWS][COLS]T) [ROWS][COLS]T {
+    const mat_minors = minor_matrix_determinants_of_arbitrary_matrix(T, ROWS, COLS, mat);
+    return cofactors_of_arbitrary_matrix_minors(T, ROWS, COLS, mat_minors);
+}
+
+pub fn adjugate_of_arbitrary_matrix_cofactors(comptime T: type, comptime ROWS: comptime_int, comptime COLS: comptime_int, mat_cofactors: [ROWS][COLS]T) [ROWS][COLS]T {
+    return transpose_arbitrary_matrix(T, ROWS, COLS, mat_cofactors);
+}
+pub fn adjugate_of_arbitrary_matrix(comptime T: type, comptime ROWS: comptime_int, comptime COLS: comptime_int, mat: [ROWS][COLS]T) [ROWS][COLS]T {
+    const mat_cofactors = cofactors_of_arbitrary_matrix(T, ROWS, COLS, mat);
+    return transpose_arbitrary_matrix(T, ROWS, COLS, mat_cofactors);
+}
+
+pub fn inverse_of_arbitrary_matrix_using_adjugate_and_determinant(comptime T: type, comptime ROWS: comptime_int, comptime COLS: comptime_int, mat_adjugate: [ROWS][COLS]T, mat_determinant: T) [ROWS][COLS]T {
+    return divide_arbitrary_matrix_by_scalar(T, ROWS, COLS, mat_adjugate, mat_determinant);
+}
+pub fn inverse_of_arbitrary_matrix(comptime T: type, comptime ROWS: comptime_int, comptime COLS: comptime_int, mat: [ROWS][COLS]T) [ROWS][COLS]T {
+    const mat_determinant = determinant_of_arbitrary_matrix(T, ROWS, COLS, mat);
+    const mat_adjugate = adjugate_of_arbitrary_matrix(T, ROWS, COLS, mat);
+    return divide_arbitrary_matrix_by_scalar(T, ROWS, COLS, mat_adjugate, mat_determinant);
+}
+
+/// Mat * Scalar = NewMat
+pub fn multiply_arbitrary_matrix_by_scalar(comptime T: type, comptime ROWS: comptime_int, comptime COLS: comptime_int, mat: [ROWS][COLS]T, scalar: anytype) [ROWS][COLS]T {
+    const S = @TypeOf(scalar);
+    const TOTAL = ROWS * COLS;
+    const FLAT_MAT = @Vector(TOTAL, T);
+    const FLAT_SCALAR = @Vector(TOTAL, S);
+    const flat_scalar: FLAT_SCALAR = @splat(scalar);
+    var flat_mat: FLAT_MAT = @bitCast(mat);
+    flat_mat = upgrade_multiply_out(flat_mat, flat_scalar, FLAT_MAT);
+    return @bitCast(flat_mat);
+}
+/// Mat / Scalar = NewMat
+pub fn divide_arbitrary_matrix_by_scalar(comptime T: type, comptime ROWS: comptime_int, comptime COLS: comptime_int, mat: [ROWS][COLS]T, scalar: anytype) [ROWS][COLS]T {
+    const S = @TypeOf(scalar);
+    const TOTAL = ROWS * COLS;
+    const FLAT_MAT = @Vector(TOTAL, T);
+    const FLAT_SCALAR = @Vector(TOTAL, S);
+    const flat_scalar: FLAT_SCALAR = @splat(scalar);
+    var flat_mat: FLAT_MAT = @bitCast(mat);
+    flat_mat = upgrade_divide_out(flat_mat, flat_scalar, FLAT_MAT);
+    return @bitCast(flat_mat);
+}
+/// Scalar / Mat = NewMat
+pub fn divide_scalar_by_arbitrary_matrix(comptime T: type, comptime ROWS: comptime_int, comptime COLS: comptime_int, mat: [ROWS][COLS]T, scalar: anytype) [ROWS][COLS]T {
+    const S = @TypeOf(scalar);
+    const TOTAL = ROWS * COLS;
+    const FLAT_MAT = @Vector(TOTAL, T);
+    const FLAT_SCALAR = @Vector(TOTAL, S);
+    const flat_scalar: FLAT_SCALAR = @splat(scalar);
+    var flat_mat: FLAT_MAT = @bitCast(mat);
+    flat_mat = upgrade_divide_out(flat_scalar, flat_mat, FLAT_MAT);
+    return @bitCast(flat_mat);
+}
+/// Mat + Scalar = NewMat
+pub fn add_scalar_to_arbitrary_matrix(comptime T: type, comptime ROWS: comptime_int, comptime COLS: comptime_int, mat: [ROWS][COLS]T, scalar: anytype) [ROWS][COLS]T {
+    const S = @TypeOf(scalar);
+    const TOTAL = ROWS * COLS;
+    const FLAT_MAT = @Vector(TOTAL, T);
+    const FLAT_SCALAR = @Vector(TOTAL, S);
+    const flat_scalar: FLAT_SCALAR = @splat(scalar);
+    var flat_mat: FLAT_MAT = @bitCast(mat);
+    flat_mat = upgrade_add_out(flat_mat, flat_scalar, FLAT_MAT);
+    return @bitCast(flat_mat);
+}
+/// Mat - Scalar = NewMat
+pub fn subtract_scalar_from_arbitrary_matrix(comptime T: type, comptime ROWS: comptime_int, comptime COLS: comptime_int, mat: [ROWS][COLS]T, scalar: anytype) [ROWS][COLS]T {
+    const S = @TypeOf(scalar);
+    const TOTAL = ROWS * COLS;
+    const FLAT_MAT = @Vector(TOTAL, T);
+    const FLAT_SCALAR = @Vector(TOTAL, S);
+    const flat_scalar: FLAT_SCALAR = @splat(scalar);
+    var flat_mat: FLAT_MAT = @bitCast(mat);
+    flat_mat = upgrade_subtract_out(flat_mat, flat_scalar, FLAT_MAT);
+    return @bitCast(flat_mat);
+}
+/// Scalar - Mat = NewMat
+pub fn subtract_arbitrary_matrix_from_scalar(comptime T: type, comptime ROWS: comptime_int, comptime COLS: comptime_int, mat: [ROWS][COLS]T, scalar: anytype) [ROWS][COLS]T {
+    const S = @TypeOf(scalar);
+    const TOTAL = ROWS * COLS;
+    const FLAT_MAT = @Vector(TOTAL, T);
+    const FLAT_SCALAR = @Vector(TOTAL, S);
+    const flat_scalar: FLAT_SCALAR = @splat(scalar);
+    var flat_mat: FLAT_MAT = @bitCast(mat);
+    flat_mat = upgrade_subtract_out(flat_scalar, flat_mat, FLAT_MAT);
+    return @bitCast(flat_mat);
+}
+pub fn negate_arbitrary_matrix(comptime T: type, comptime ROWS: comptime_int, comptime COLS: comptime_int, mat: [ROWS][COLS]T) [ROWS][COLS]T {
+    const TOTAL = ROWS * COLS;
+    const FLAT_MAT = @Vector(TOTAL, T);
+    var flat_mat: FLAT_MAT = @bitCast(mat);
+    flat_mat = -flat_mat;
+    return @bitCast(flat_mat);
+}
+
+pub fn divide_arbitrary_matrices_using_inverse_of_denominator_matrix(comptime T_A: type, comptime A_ROWS: comptime_int, comptime A_COLS: comptime_int, mat_numerator: [A_ROWS][A_COLS]T_A, comptime T_B: type, comptime B_ROWS: comptime_int, comptime B_COLS: comptime_int, mat_denominator_inverse: [B_ROWS][B_COLS]T_B, comptime T_OUT: type) [A_ROWS][B_COLS]T_OUT {
+    assert_with_reason(A_COLS == B_ROWS, @src(), "matrix division (multiplication by inverse matrix) is only possible when A_COLS == B_ROWS, got {d} != {d}", .{ A_COLS, B_ROWS });
+    return multiply_arbitrary_matrices(T_A, A_ROWS, A_COLS, mat_numerator, T_B, B_ROWS, B_COLS, mat_denominator_inverse, T_OUT);
+}
+
+pub fn divide_arbitrary_matrices(comptime T_A: type, comptime A_ROWS: comptime_int, comptime A_COLS: comptime_int, mat_a_numerator: [A_ROWS][A_COLS]T_A, comptime T_B: type, comptime B_ROWS: comptime_int, comptime B_COLS: comptime_int, mat_b_denominator: [B_ROWS][B_COLS]T_B, comptime T_OUT: type) [A_ROWS][B_COLS]T_OUT {
+    assert_with_reason(A_COLS == B_ROWS, @src(), "matrix division (multiplication by inverse matrix) is only possible when A_COLS == B_ROWS, got {d} != {d}", .{ A_COLS, B_ROWS });
+    const inverse_denom = inverse_of_arbitrary_matrix(T_B, B_ROWS, B_COLS, mat_b_denominator);
+    return multiply_arbitrary_matrices(T_A, A_ROWS, A_COLS, mat_a_numerator, T_B, B_ROWS, B_COLS, inverse_denom, T_OUT);
+}

@@ -1010,22 +1010,22 @@ pub fn define_vec_type(comptime T: type, comptime N: comptime_int) type {
                     .TRANSLATE_Y => |y| {
                         out = Vec{ .x = out.x, .y = out.y + y };
                     },
-                    .SCALE_FROM_ORIGIN => |vec| {
+                    .SCALE => |vec| {
                         out = out.multiply(vec);
                     },
-                    .SCALE_FROM_ORIGIN_X => |x| {
+                    .SCALE_X => |x| {
                         out = Vec{ .x = out.x * x, .y = out.y };
                     },
-                    .SCALE_FROM_ORIGIN_Y => |y| {
+                    .SCALE_Y => |y| {
                         out = Vec{ .x = out.x, .y = out.y * y };
                     },
-                    .SKEW_FROM_ORIGIN_X => |ratio| {
+                    .SKEW_X => |ratio| {
                         out = Vec{ .x = out.x + (ratio * out.y), .y = out.y };
                     },
-                    .SKEW_FROM_ORIGIN_Y => |ratio| {
+                    .SKEW_Y => |ratio| {
                         out = Vec{ .x = out.x, .y = out.y + (ratio * out.x) };
                     },
-                    .ROTATE_AROUND_ORIGIN => |sincos| {
+                    .ROTATE => |sincos| {
                         out = out.rotate_sin_cos_2D(sincos.sin, sincos.cos);
                     },
                 }
@@ -1048,22 +1048,22 @@ pub fn define_vec_type(comptime T: type, comptime N: comptime_int) type {
                     .TRANSLATE_Y => |y| {
                         out = Vec{ .x = out.x, .y = out.y - y };
                     },
-                    .SCALE_FROM_ORIGIN => |vec| {
+                    .SCALE => |vec| {
                         out = out.divide(vec);
                     },
-                    .SCALE_FROM_ORIGIN_X => |x| {
+                    .SCALE_X => |x| {
                         out = Vec{ .x = out.x / x, .y = out.y };
                     },
-                    .SCALE_FROM_ORIGIN_Y => |y| {
+                    .SCALE_Y => |y| {
                         out = Vec{ .x = out.x, .y = out.y / y };
                     },
-                    .SKEW_FROM_ORIGIN_X => |ratio| {
+                    .SKEW_X => |ratio| {
                         out = Vec{ .x = out.x + (-ratio * out.y), .y = out.y };
                     },
-                    .SKEW_FROM_ORIGIN_Y => |ratio| {
+                    .SKEW_Y => |ratio| {
                         out = Vec{ .x = out.x, .y = out.y + (-ratio * out.x) };
                     },
-                    .ROTATE_AROUND_ORIGIN => |sincos| {
+                    .ROTATE => |sincos| {
                         out = out.rotate_sin_cos_2D(-sincos.sin, sincos.cos);
                     },
                 }
@@ -1077,22 +1077,22 @@ pub fn define_vec_type(comptime T: type, comptime N: comptime_int) type {
             for (0..steps.len) |i| {
                 switch (steps[i]) {
                     .TRANSLATE, .TRANSLATE_X, .TRANSLATE_Y => {},
-                    .SCALE_FROM_ORIGIN => |vec| {
+                    .SCALE => |vec| {
                         out = out.multiply(vec);
                     },
-                    .SCALE_FROM_ORIGIN_X => |x| {
+                    .SCALE_X => |x| {
                         out = Vec{ .x = out.x * x, .y = out.y };
                     },
-                    .SCALE_FROM_ORIGIN_Y => |y| {
+                    .SCALE_Y => |y| {
                         out = Vec{ .x = out.x, .y = out.y * y };
                     },
-                    .SKEW_FROM_ORIGIN_X => |ratio| {
+                    .SKEW_X => |ratio| {
                         out = Vec{ .x = out.x + (ratio * out.y), .y = out.y };
                     },
-                    .SKEW_FROM_ORIGIN_Y => |ratio| {
+                    .SKEW_Y => |ratio| {
                         out = Vec{ .x = out.x, .y = out.y + (ratio * out.x) };
                     },
-                    .ROTATE_AROUND_ORIGIN => |sincos| {
+                    .ROTATE => |sincos| {
                         out = out.rotate_sin_cos_2D(sincos.sin, sincos.cos);
                     },
                 }
@@ -1108,22 +1108,22 @@ pub fn define_vec_type(comptime T: type, comptime N: comptime_int) type {
                 const ii = LAST_STEP - i;
                 switch (steps[ii]) {
                     .TRANSLATE, .TRANSLATE_X, .TRANSLATE_Y => {},
-                    .SCALE_FROM_ORIGIN => |vec| {
+                    .SCALE => |vec| {
                         out = out.divide(vec);
                     },
-                    .SCALE_FROM_ORIGIN_X => |x| {
+                    .SCALE_X => |x| {
                         out = Vec{ .x = out.x / x, .y = out.y };
                     },
-                    .SCALE_FROM_ORIGIN_Y => |y| {
+                    .SCALE_Y => |y| {
                         out = Vec{ .x = out.x, .y = out.y / y };
                     },
-                    .SKEW_FROM_ORIGIN_X => |ratio| {
+                    .SKEW_X => |ratio| {
                         out = Vec{ .x = out.x + (-ratio * out.y), .y = out.y };
                     },
-                    .SKEW_FROM_ORIGIN_Y => |ratio| {
+                    .SKEW_Y => |ratio| {
                         out = Vec{ .x = out.x, .y = out.y + (-ratio * out.x) };
                     },
-                    .ROTATE_AROUND_ORIGIN => |sincos| {
+                    .ROTATE => |sincos| {
                         out = out.rotate_sin_cos_2D(-sincos.sin, sincos.cos);
                     },
                 }
@@ -1184,162 +1184,463 @@ pub fn define_vec_type(comptime T: type, comptime N: comptime_int) type {
             return Vec.from_1x3_matrix_column(new_col);
         }
 
-        pub const TransformStep = union(TransformKind) {
-            TRANSLATE: Vec,
-            TRANSLATE_X: T,
-            TRANSLATE_Y: T,
-            SCALE_FROM_ORIGIN: Vec,
-            SCALE_FROM_ORIGIN_X: T,
-            SCALE_FROM_ORIGIN_Y: T,
-            SKEW_FROM_ORIGIN_X: T,
-            SKEW_FROM_ORIGIN_Y: T,
-            ROTATE_AROUND_ORIGIN: struct {
-                sin: F,
-                cos: F,
+        pub const TransformMatrix = switch (N) {
+            2 => 
+        };
+
+        pub const TransformStep = switch (N) {
+            2 => union(TransformKind2D) {
+                TRANSLATE: Vec,
+                TRANSLATE_X: T,
+                TRANSLATE_Y: T,
+                SCALE: Vec,
+                SCALE_X: T,
+                SCALE_Y: T,
+                SKEW_X: T,
+                SKEW_Y: T,
+                ROTATE: struct {
+                    sin: F,
+                    cos: F,
+                },
+
+                pub fn translate(vec: Vec) TransformStep {
+                    return TransformStep{ .TRANSLATE = vec };
+                }
+                pub fn translate_x(x: T) TransformStep {
+                    return TransformStep{ .TRANSLATE_X = x };
+                }
+                pub fn translate_y(y: T) TransformStep {
+                    return TransformStep{ .TRANSLATE_Y = y };
+                }
+
+                pub fn scale(vec: Vec) TransformStep {
+                    return TransformStep{ .SCALE = vec };
+                }
+                pub fn scale_x(x: T) TransformStep {
+                    return TransformStep{ .SCALE_X = x };
+                }
+                pub fn scale_y(y: T) TransformStep {
+                    return TransformStep{ .SCALE_Y = y };
+                }
+
+                pub fn skew_x_ratio(x_ratio_or_tangent_of_angle_from_y_axis: T) TransformStep {
+                    return TransformStep{ .SKEW_X = x_ratio_or_tangent_of_angle_from_y_axis };
+                }
+                pub fn skew_x_radians(radians_from_y_axis: T) TransformStep {
+                    return TransformStep{ .SKEW_X = @tan(radians_from_y_axis) };
+                }
+                pub fn skew_x_degrees(degrees_from_y_axis: T) TransformStep {
+                    return TransformStep{ .SKEW_X = @tan(degrees_from_y_axis * MathX.DEG_TO_RAD) };
+                }
+
+                pub fn skew_y_ratio(y_ratio_or_tangent_of_angle_from_x_axis: T) TransformStep {
+                    return TransformStep{ .SKEW_Y = y_ratio_or_tangent_of_angle_from_x_axis };
+                }
+                pub fn skew_y_radians(radians_from_x_axis: T) TransformStep {
+                    return TransformStep{ .SKEW_Y = @tan(radians_from_x_axis) };
+                }
+                pub fn skew_y_degrees(degrees_from_x_axis: T) TransformStep {
+                    return TransformStep{ .SKEW_Y = @tan(degrees_from_x_axis * MathX.DEG_TO_RAD) };
+                }
+
+                pub fn rotate_radians(radians: F) TransformStep {
+                    return TransformStep{ .ROTATE = .{ .sin = @sin(radians), .cos = @cos(radians) } };
+                }
+                pub fn rotate_degrees(degrees: F) TransformStep {
+                    return TransformStep{ .ROTATE = .{ .sin = @sin(degrees * MathX.DEG_TO_RAD), .cos = @cos(degrees * MathX.DEG_TO_RAD) } };
+                }
+                pub fn rotate_sin_cos(sin: F, cos: F) TransformStep {
+                    return TransformStep{ .ROTATE = .{ .sin = sin, .cos = cos } };
+                }
+
+                pub fn relect_across_origin() TransformStep {
+                    return TransformStep{ .SCALE = .new(-1, -1) };
+                }
+                pub fn relect_across_y_axis() TransformStep {
+                    return TransformStep{ .SCALE_X = -1 };
+                }
+                pub fn relect_across_x_axis() TransformStep {
+                    return TransformStep{ .SCALE_Y = -1 };
+                }
+
+                pub fn to_affine_matrix(self: TransformStep) Mat3x3 {
+                    var m = Mat3x3.IDENTITY;
+                    switch (self) {
+                        .TRANSLATE => |vec| {
+                            m.data[0][2] = vec.x;
+                            m.data[1][2] = vec.y;
+                        },
+                        .TRANSLATE_X => |x| {
+                            m.data[0][2] = x;
+                        },
+                        .TRANSLATE_Y => |y| {
+                            m.data[1][2] = y;
+                        },
+                        .SCALE => |vec| {
+                            m.data[0][0] = vec.x;
+                            m.data[1][1] = vec.y;
+                        },
+                        .SCALE_X => |x| {
+                            m.data[0][0] = x;
+                        },
+                        .SCALE_Y => |y| {
+                            m.data[1][1] = y;
+                        },
+                        .SKEW_X => |x| {
+                            m.data[0][1] = x;
+                        },
+                        .SKEW_Y => |y| {
+                            m.data[1][0] = y;
+                        },
+                        .ROTATE => |sincos| {
+                            m.data[0][0] = sincos.cos;
+                            m.data[1][1] = sincos.cos;
+                            m.data[0][1] = -sincos.sin;
+                            m.data[1][0] = sincos.sin;
+                        },
+                    }
+                }
+
+                pub fn to_inverse_affine_matrix(self: TransformStep) Mat3x3 {
+                    var m = Mat3x3.IDENTITY;
+                    switch (self) {
+                        .TRANSLATE => |vec| {
+                            m.data[0][2] = -vec.x;
+                            m.data[1][2] = -vec.y;
+                        },
+                        .TRANSLATE_X => |x| {
+                            m.data[0][2] = -x;
+                        },
+                        .TRANSLATE_Y => |y| {
+                            m.data[1][2] = -y;
+                        },
+                        .SCALE => |vec| {
+                            m.data[0][0] = ONE / vec.x;
+                            m.data[1][1] = ONE / vec.y;
+                        },
+                        .SCALE_X => |x| {
+                            m.data[0][0] = ONE / x;
+                        },
+                        .SCALE_Y => |y| {
+                            m.data[1][1] = ONE / y;
+                        },
+                        .SKEW_X => |x| {
+                            m.data[0][1] = -x;
+                        },
+                        .SKEW_Y => |y| {
+                            m.data[1][0] = -y;
+                        },
+                        .ROTATE => |sincos| {
+                            m.data[0][0] = sincos.cos;
+                            m.data[1][1] = sincos.cos;
+                            m.data[0][1] = sincos.sin;
+                            m.data[1][0] = -sincos.sin;
+                        },
+                    }
+                }
             },
+            3 => union(TransformKind3D) {
+                TRANSLATE: Vec,
+                TRANSLATE_X: T,
+                TRANSLATE_Y: T,
+                TRANSLATE_Z: T,
+                TRANSLATE_XY: [2]T,
+                TRANSLATE_YZ: [2]T,
+                TRANSLATE_XZ: [2]T,
+                SCALE: Vec,
+                SCALE_X: T,
+                SCALE_Y: T,
+                SCALE_Z: T,
+                SCALE_XY: [2]T,
+                SCALE_YZ: [2]T,
+                SCALE_XZ: [2]T,
+                SKEW_X_AWAY_FROM_Y: T,
+                SKEW_X_AWAY_FROM_Z: T,
+                SKEW_Y_AWAY_FROM_X: T,
+                SKEW_Y_AWAY_FROM_Z: T,
+                SKEW_Z_AWAY_FROM_X: T,
+                SKEW_Z_AWAY_FROM_Y: T,
+                ROTATE_AROUND_X_AXIS: struct {
+                    sin: F,
+                    cos: F,
+                },
+                ROTATE_AROUND_Y_AXIS: struct {
+                    sin: F,
+                    cos: F,
+                },
+                ROTATE_AROUND_Z_AXIS: struct {
+                    sin: F,
+                    cos: F,
+                },
 
-            pub fn translate(vec: Vec) TransformStep {
-                return TransformStep{ .TRANSLATE = vec };
-            }
-            pub fn translate_x(x: T) TransformStep {
-                return TransformStep{ .TRANSLATE_X = x };
-            }
-            pub fn translate_y(y: T) TransformStep {
-                return TransformStep{ .TRANSLATE_Y = y };
-            }
-            pub fn scale_from_origin(vec: Vec) TransformStep {
-                return TransformStep{ .SCALE_FROM_ORIGIN = vec };
-            }
-            pub fn scale_from_origin_x(x: T) TransformStep {
-                return TransformStep{ .SCALE_FROM_ORIGIN_X = x };
-            }
-            pub fn scale_from_origin_y(y: T) TransformStep {
-                return TransformStep{ .SCALE_FROM_ORIGIN_Y = y };
-            }
-            pub fn skew_from_origin_x_ratio(x_ratio_or_tangent_of_angle_from_y_axis: T) TransformStep {
-                return TransformStep{ .SKEW_FROM_ORIGIN_X = x_ratio_or_tangent_of_angle_from_y_axis };
-            }
-            pub fn skew_from_origin_y_ratio(y_ratio_or_tangent_of_angle_from_x_axis: T) TransformStep {
-                return TransformStep{ .SKEW_FROM_ORIGIN_Y = y_ratio_or_tangent_of_angle_from_x_axis };
-            }
-            pub fn skew_from_origin_x_radians(radians_from_y_axis: T) TransformStep {
-                return TransformStep{ .SKEW_FROM_ORIGIN_X = @tan(radians_from_y_axis) };
-            }
-            pub fn skew_from_origin_y_radians(radians_from_x_axis: T) TransformStep {
-                return TransformStep{ .SKEW_FROM_ORIGIN_Y = @tan(radians_from_x_axis) };
-            }
-            pub fn skew_from_origin_x_degrees(degrees_from_y_axis: T) TransformStep {
-                return TransformStep{ .SKEW_FROM_ORIGIN_X = @tan(degrees_from_y_axis * MathX.DEG_TO_RAD) };
-            }
-            pub fn skew_from_origin_y_degrees(degrees_from_x_axis: T) TransformStep {
-                return TransformStep{ .SKEW_FROM_ORIGIN_Y = @tan(degrees_from_x_axis * MathX.DEG_TO_RAD) };
-            }
-            pub fn rotate_around_origin_radians(radians: F) TransformStep {
-                return TransformStep{ .ROTATE_AROUND_ORIGIN = .{ .sin = @sin(radians), .cos = @cos(radians) } };
-            }
-            pub fn rotate_around_origin_degrees(degrees: F) TransformStep {
-                return TransformStep{ .ROTATE_AROUND_ORIGIN = .{ .sin = @sin(degrees * MathX.DEG_TO_RAD), .cos = @cos(degrees * MathX.DEG_TO_RAD) } };
-            }
-            pub fn rotate_around_origin_sin_cos(sin: F, cos: F) TransformStep {
-                return TransformStep{ .ROTATE_AROUND_ORIGIN = .{ .sin = sin, .cos = cos } };
-            }
-            pub fn relect_across_origin() TransformStep {
-                return TransformStep{ .SCALE_FROM_ORIGIN = .new(-1, -1) };
-            }
-            pub fn relect_across_y_axis() TransformStep {
-                return TransformStep{ .SCALE_FROM_ORIGIN = .new(1, -1) };
-            }
-            pub fn relect_across_x_axis() TransformStep {
-                return TransformStep{ .SCALE_FROM_ORIGIN = .new(-1, 1) };
-            }
-
-            pub fn to_affine_matrix(self: TransformStep) Mat3x3 {
-                var m = Mat3x3.IDENTITY;
-                switch (self) {
-                    .TRANSLATE => |vec| {
-                        m.data[0][2] = vec.x;
-                        m.data[1][2] = vec.y;
-                    },
-                    .TRANSLATE_X => |x| {
-                        m.data[0][2] = x;
-                    },
-                    .TRANSLATE_Y => |y| {
-                        m.data[1][2] = y;
-                    },
-                    .SCALE_FROM_ORIGIN => |vec| {
-                        m.data[0][0] = vec.x;
-                        m.data[1][1] = vec.y;
-                    },
-                    .SCALE_FROM_ORIGIN_X => |x| {
-                        m.data[0][0] = x;
-                    },
-                    .SCALE_FROM_ORIGIN_Y => |y| {
-                        m.data[1][1] = y;
-                    },
-                    .SKEW_FROM_ORIGIN_X => |x| {
-                        m.data[0][1] = x;
-                    },
-                    .SKEW_FROM_ORIGIN_Y => |y| {
-                        m.data[1][0] = y;
-                    },
-                    .ROTATE_AROUND_ORIGIN => |sincos| {
-                        m.data[0][0] = sincos.cos;
-                        m.data[1][1] = sincos.cos;
-                        m.data[0][1] = -sincos.sin;
-                        m.data[1][0] = sincos.sin;
-                    },
+                pub fn translate(vec: Vec) TransformStep {
+                    return TransformStep{ .TRANSLATE = vec };
                 }
-            }
-
-            pub fn to_inverse_affine_matrix(self: TransformStep) Mat3x3 {
-                var m = Mat3x3.IDENTITY;
-                switch (self) {
-                    .TRANSLATE => |vec| {
-                        m.data[0][2] = -vec.x;
-                        m.data[1][2] = -vec.y;
-                    },
-                    .TRANSLATE_X => |x| {
-                        m.data[0][2] = -x;
-                    },
-                    .TRANSLATE_Y => |y| {
-                        m.data[1][2] = -y;
-                    },
-                    .SCALE_FROM_ORIGIN => |vec| {
-                        m.data[0][0] = ONE / vec.x;
-                        m.data[1][1] = ONE / vec.y;
-                    },
-                    .SCALE_FROM_ORIGIN_X => |x| {
-                        m.data[0][0] = ONE / x;
-                    },
-                    .SCALE_FROM_ORIGIN_Y => |y| {
-                        m.data[1][1] = ONE / y;
-                    },
-                    .SKEW_FROM_ORIGIN_X => |x| {
-                        m.data[0][1] = -x;
-                    },
-                    .SKEW_FROM_ORIGIN_Y => |y| {
-                        m.data[1][0] = -y;
-                    },
-                    .ROTATE_AROUND_ORIGIN => |sincos| {
-                        m.data[0][0] = sincos.cos;
-                        m.data[1][1] = sincos.cos;
-                        m.data[0][1] = sincos.sin;
-                        m.data[1][0] = -sincos.sin;
-                    },
+                pub fn translate_x(x: T) TransformStep {
+                    return TransformStep{ .TRANSLATE_X = x };
                 }
-            }
+                pub fn translate_y(y: T) TransformStep {
+                    return TransformStep{ .TRANSLATE_Y = y };
+                }
+                pub fn translate_z(z: T) TransformStep {
+                    return TransformStep{ .TRANSLATE_Z = z };
+                }
+                pub fn translate_xy(x: T, y: T) TransformStep {
+                    return TransformStep{ .TRANSLATE_XY = .{ x, y } };
+                }
+                pub fn translate_yz(y: T, z: T) TransformStep {
+                    return TransformStep{ .TRANSLATE_YZ = .{ y, z } };
+                }
+                pub fn translate_xz(x: T, z: T) TransformStep {
+                    return TransformStep{ .TRANSLATE_XZ = .{ x, z } };
+                }
+
+                pub fn scale(vec: Vec) TransformStep {
+                    return TransformStep{ .SCALE = vec };
+                }
+                pub fn scale_x(x: T) TransformStep {
+                    return TransformStep{ .SCALE_X = x };
+                }
+                pub fn scale_y(y: T) TransformStep {
+                    return TransformStep{ .SCALE_Y = y };
+                }
+                pub fn scale_z(z: T) TransformStep {
+                    return TransformStep{ .SCALE_Z = z };
+                }
+                pub fn scale_xy(x: T, y: T) TransformStep {
+                    return TransformStep{ .SCALE_XY = .{ x, y } };
+                }
+                pub fn scale_yz(y: T, z: T) TransformStep {
+                    return TransformStep{ .SCALE_YZ = .{ y, z } };
+                }
+                pub fn scale_xz(x: T, z: T) TransformStep {
+                    return TransformStep{ .SCALE_XZ = .{ x, z } };
+                }
+
+                pub fn skew_x_away_from_y_ratio(x_ratio_or_tangent_of_angle_from_y_axis: T) TransformStep {
+                    return TransformStep{ .SKEW_X_AWAY_FROM_Y = x_ratio_or_tangent_of_angle_from_y_axis };
+                }
+                pub fn skew_x_away_from_y_radians(radians_from_y_axis: T) TransformStep {
+                    return TransformStep{ .SKEW_X_AWAY_FROM_Y = @tan(radians_from_y_axis) };
+                }
+                pub fn skew_x_away_from_y_degrees(degrees_from_y_axis: T) TransformStep {
+                    return TransformStep{ .SKEW_X_AWAY_FROM_Y = @tan(degrees_from_y_axis * MathX.DEG_TO_RAD) };
+                }
+                pub fn skew_x_away_from_z_ratio(x_ratio_or_tangent_of_angle_from_z_axis: T) TransformStep {
+                    return TransformStep{ .SKEW_X_AWAY_FROM_Z = x_ratio_or_tangent_of_angle_from_z_axis };
+                }
+                pub fn skew_x_away_from_z_radians(radians_from_z_axis: T) TransformStep {
+                    return TransformStep{ .SKEW_X_AWAY_FROM_Z = @tan(radians_from_z_axis) };
+                }
+                pub fn skew_x_away_from_z_degrees(degrees_from_z_axis: T) TransformStep {
+                    return TransformStep{ .SKEW_X_AWAY_FROM_Z = @tan(degrees_from_z_axis * MathX.DEG_TO_RAD) };
+                }
+
+                pub fn skew_y_away_from_x_ratio(y_ratio_or_tangent_of_angle_from_x_axis: T) TransformStep {
+                    return TransformStep{ .SKEW_Y_AWAY_FROM_X = y_ratio_or_tangent_of_angle_from_x_axis };
+                }
+                pub fn skew_y_away_from_x_radians(radians_from_x_axis: T) TransformStep {
+                    return TransformStep{ .SKEW_Y_AWAY_FROM_X = @tan(radians_from_x_axis) };
+                }
+                pub fn skew_y_away_from_x_degrees(degrees_from_x_axis: T) TransformStep {
+                    return TransformStep{ .SKEW_Y_AWAY_FROM_X = @tan(degrees_from_x_axis * MathX.DEG_TO_RAD) };
+                }
+                pub fn skew_y_away_from_z_ratio(y_ratio_or_tangent_of_angle_from_z_axis: T) TransformStep {
+                    return TransformStep{ .SKEW_Y_AWAY_FROM_Z = y_ratio_or_tangent_of_angle_from_z_axis };
+                }
+                pub fn skew_y_away_from_z_radians(radians_from_z_axis: T) TransformStep {
+                    return TransformStep{ .SKEW_Y_AWAY_FROM_Z = @tan(radians_from_z_axis) };
+                }
+                pub fn skew_y_away_from_z_degrees(degrees_from_z_axis: T) TransformStep {
+                    return TransformStep{ .SKEW_Y_AWAY_FROM_Z = @tan(degrees_from_z_axis * MathX.DEG_TO_RAD) };
+                }
+
+                pub fn skew_z_away_from_x_ratio(z_ratio_or_tangent_of_angle_from_x_axis: T) TransformStep {
+                    return TransformStep{ .SKEW_Z_AWAY_FROM_X = z_ratio_or_tangent_of_angle_from_x_axis };
+                }
+                pub fn skew_z_away_from_x_radians(radians_from_x_axis: T) TransformStep {
+                    return TransformStep{ .SKEW_Z_AWAY_FROM_X = @tan(radians_from_x_axis) };
+                }
+                pub fn skew_z_away_from_x_degrees(degrees_from_x_axis: T) TransformStep {
+                    return TransformStep{ .SKEW_Z_AWAY_FROM_X = @tan(degrees_from_x_axis * MathX.DEG_TO_RAD) };
+                }
+                pub fn skew_z_away_from_y_ratio(z_ratio_or_tangent_of_angle_from_y_axis: T) TransformStep {
+                    return TransformStep{ .SKEW_Z_AWAY_FROM_Y = z_ratio_or_tangent_of_angle_from_y_axis };
+                }
+                pub fn skew_z_away_from_y_radians(radians_from_y_axis: T) TransformStep {
+                    return TransformStep{ .SKEW_Z_AWAY_FROM_Y = @tan(radians_from_y_axis) };
+                }
+                pub fn skew_z_away_from_y_degrees(degrees_from_y_axis: T) TransformStep {
+                    return TransformStep{ .SKEW_Z_AWAY_FROM_Y = @tan(degrees_from_y_axis * MathX.DEG_TO_RAD) };
+                }
+
+                pub fn rotate_around_x_axis_radians(radians: F) TransformStep {
+                    return TransformStep{ .ROTATE_AROUND_X_AXIS = .{ .sin = @sin(radians), .cos = @cos(radians) } };
+                }
+                pub fn rotate_around_x_axis_degrees(degrees: F) TransformStep {
+                    return TransformStep{ .ROTATE_AROUND_X_AXIS = .{ .sin = @sin(degrees * MathX.DEG_TO_RAD), .cos = @cos(degrees * MathX.DEG_TO_RAD) } };
+                }
+                pub fn rotate_around_x_axis_sin_cos(sin: F, cos: F) TransformStep {
+                    return TransformStep{ .ROTATE_AROUND_X_AXIS = .{ .sin = sin, .cos = cos } };
+                }
+
+                pub fn rotate_around_y_axis_radians(radians: F) TransformStep {
+                    return TransformStep{ .ROTATE_AROUND_Y_AXIS = .{ .sin = @sin(radians), .cos = @cos(radians) } };
+                }
+                pub fn rotate_around_y_axis_degrees(degrees: F) TransformStep {
+                    return TransformStep{ .ROTATE_AROUND_Y_AXIS = .{ .sin = @sin(degrees * MathX.DEG_TO_RAD), .cos = @cos(degrees * MathX.DEG_TO_RAD) } };
+                }
+                pub fn rotate_around_y_axis_sin_cos(sin: F, cos: F) TransformStep {
+                    return TransformStep{ .ROTATE_AROUND_Y_AXIS = .{ .sin = sin, .cos = cos } };
+                }
+
+                pub fn rotate_around_z_axis_radians(radians: F) TransformStep {
+                    return TransformStep{ .ROTATE_AROUND_Z_AXIS = .{ .sin = @sin(radians), .cos = @cos(radians) } };
+                }
+                pub fn rotate_around_z_axis_degrees(degrees: F) TransformStep {
+                    return TransformStep{ .ROTATE_AROUND_Z_AXIS = .{ .sin = @sin(degrees * MathX.DEG_TO_RAD), .cos = @cos(degrees * MathX.DEG_TO_RAD) } };
+                }
+                pub fn rotate_around_z_axis_sin_cos(sin: F, cos: F) TransformStep {
+                    return TransformStep{ .ROTATE_AROUND_Z_AXIS = .{ .sin = sin, .cos = cos } };
+                }
+
+                pub fn relect_across_origin() TransformStep {
+                    return TransformStep{ .SCALE = .new(-1, -1, -1) };
+                }
+                pub fn relect_across_yz_plane() TransformStep {
+                    return TransformStep{ .SCALE_X = -1 };
+                }
+                pub fn relect_across_xz_plane() TransformStep {
+                    return TransformStep{ .SCALE_Y = -1 };
+                }
+                pub fn relect_across_xy_plane() TransformStep {
+                    return TransformStep{ .SCALE_Z = -1 };
+                }
+                pub fn relect_across_x_axis() TransformStep {
+                    return TransformStep{ .SCALE_YZ = .{ -1, -1 } };
+                }
+                pub fn relect_across_y_axis() TransformStep {
+                    return TransformStep{ .SCALE_XZ = .{ -1, -1 } };
+                }
+                pub fn relect_across_z_axis() TransformStep {
+                    return TransformStep{ .SCALE_XY = .{ -1, -1 } };
+                }
+
+                pub fn to_affine_matrix(self: TransformStep) Mat3x3 {
+                    var m = Mat3x3.IDENTITY;
+                    switch (self) {
+                        .TRANSLATE => |vec| {
+                            m.data[0][2] = vec.x;
+                            m.data[1][2] = vec.y;
+                        },
+                        .TRANSLATE_X => |x| {
+                            m.data[0][2] = x;
+                        },
+                        .TRANSLATE_Y => |y| {
+                            m.data[1][2] = y;
+                        },
+                        .SCALE => |vec| {
+                            m.data[0][0] = vec.x;
+                            m.data[1][1] = vec.y;
+                        },
+                        .SCALE_X => |x| {
+                            m.data[0][0] = x;
+                        },
+                        .SCALE_Y => |y| {
+                            m.data[1][1] = y;
+                        },
+                        .SKEW_X => |x| {
+                            m.data[0][1] = x;
+                        },
+                        .SKEW_Y => |y| {
+                            m.data[1][0] = y;
+                        },
+                        .ROTATE => |sincos| {
+                            m.data[0][0] = sincos.cos;
+                            m.data[1][1] = sincos.cos;
+                            m.data[0][1] = -sincos.sin;
+                            m.data[1][0] = sincos.sin;
+                        },
+                    }
+                }
+
+                pub fn to_inverse_affine_matrix(self: TransformStep) Mat3x3 {
+                    var m = Mat3x3.IDENTITY;
+                    switch (self) {
+                        .TRANSLATE => |vec| {
+                            m.data[0][2] = -vec.x;
+                            m.data[1][2] = -vec.y;
+                        },
+                        .TRANSLATE_X => |x| {
+                            m.data[0][2] = -x;
+                        },
+                        .TRANSLATE_Y => |y| {
+                            m.data[1][2] = -y;
+                        },
+                        .SCALE => |vec| {
+                            m.data[0][0] = ONE / vec.x;
+                            m.data[1][1] = ONE / vec.y;
+                        },
+                        .SCALE_X => |x| {
+                            m.data[0][0] = ONE / x;
+                        },
+                        .SCALE_Y => |y| {
+                            m.data[1][1] = ONE / y;
+                        },
+                        .SKEW_X => |x| {
+                            m.data[0][1] = -x;
+                        },
+                        .SKEW_Y => |y| {
+                            m.data[1][0] = -y;
+                        },
+                        .ROTATE => |sincos| {
+                            m.data[0][0] = sincos.cos;
+                            m.data[1][1] = sincos.cos;
+                            m.data[0][1] = sincos.sin;
+                            m.data[1][0] = -sincos.sin;
+                        },
+                    }
+                }
+            },
+            else => void,
         };
     };
 }
 
-pub const TransformKind = enum(u8) {
+pub const TransformKind2D = enum(u8) {
     TRANSLATE,
     TRANSLATE_X,
     TRANSLATE_Y,
-    SCALE_FROM_ORIGIN,
-    SCALE_FROM_ORIGIN_X,
-    SCALE_FROM_ORIGIN_Y,
-    SKEW_FROM_ORIGIN_X,
-    SKEW_FROM_ORIGIN_Y,
-    ROTATE_AROUND_ORIGIN,
+    SCALE,
+    SCALE_X,
+    SCALE_Y,
+    SKEW_X,
+    SKEW_Y,
+    ROTATE,
+};
+
+pub const TransformKind3D = enum(u8) {
+    TRANSLATE,
+    TRANSLATE_X,
+    TRANSLATE_Y,
+    TRANSLATE_Z,
+    TRANSLATE_XY,
+    TRANSLATE_YZ,
+    TRANSLATE_XZ,
+    SCALE,
+    SCALE_X,
+    SCALE_Y,
+    SCALE_Z,
+    SCALE_XY,
+    SCALE_YZ,
+    SCALE_XZ,
+    SKEW_X_AWAY_FROM_Y,
+    SKEW_X_AWAY_FROM_Z,
+    SKEW_Y_AWAY_FROM_X,
+    SKEW_Y_AWAY_FROM_Z,
+    SKEW_Z_AWAY_FROM_X,
+    SKEW_Z_AWAY_FROM_Y,
+    ROTATE_AROUND_X_AXIS,
+    ROTATE_AROUND_Y_AXIS,
+    ROTATE_AROUND_Z_AXIS,
 };

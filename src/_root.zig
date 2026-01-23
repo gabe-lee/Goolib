@@ -71,9 +71,8 @@ pub const Layout = @import("./Layout.zig");
 pub const LinkedHeirarchy = @import("./LinkedHeirarchy.zig");
 pub const List = @import("./List.zig");
 pub const ListSegmentAllocator = @import("./ListSegmentAllocator.zig");
-pub const Mat2x2 = @import("./Mat2x2.zig");
-pub const Mat3x3 = @import("./Mat3x3.zig");
 pub const Math = @import("./Math.zig");
+pub const Matrix = @import("./Matrix.zig");
 pub const Measurement = @import("./Measurement.zig");
 pub const ParamTable = @import("./ParamTable.zig");
 pub const Pool = @import("./Pool.zig");
@@ -97,6 +96,7 @@ pub const TrueType = @import("./TrueType.zig");
 pub const Types = @import("./Types.zig");
 pub const Utils = @import("./Utils.zig");
 pub const Vec2 = @import("./Vec2.zig");
+pub const Vec3 = @import("./Vec3.zig");
 
 // pub const Graphics = @import("./Graphics.zig");
 
