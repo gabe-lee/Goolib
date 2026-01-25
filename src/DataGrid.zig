@@ -72,10 +72,7 @@ pub const Origin = enum(u8) {
     BOT_RIGHT,
 };
 
-pub const RowColumnOrder = enum(u8) {
-    ROW_MAJOR,
-    COLUMN_MAJOR,
-};
+pub const RowColumnOrder = Root.CommonTypes.RowColumnOrder;
 
 pub const GridDefinition = struct {
     CELL_TYPE: type = u8,

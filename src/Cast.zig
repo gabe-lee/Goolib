@@ -124,6 +124,7 @@ pub fn num_cast(from: anytype, comptime TO: type) TO {
                     assert_with_reason(Types.pointer_is_single_many_or_c(PI.child), @src(), "`TO` type must be an integer, float, enum, bool, *T, [*]T, [*c]T, or a @Vector(N, T) of any of the previous, got type `{s}`", .{@typeName(TO)});
                     break :check TO_PTR_VEC;
                 },
+                else => assert_unreachable(@src(), "`TO` type must be an integer, float, enum, bool, *T, [*]T, [*c]T, or a @Vector(N, T) of any of the previous, got type `{s}`", .{@typeName(TO)}),
             };
         },
         else => assert_unreachable(@src(), "`TO` type must be an integer, float, enum, bool, *T, [*]T, [*c]T, or a @Vector(N, T) of any of the previous, got type `{s}`", .{@typeName(TO)}),

@@ -27,6 +27,7 @@ const testing = std.testing;
 
 const Root = @import("./_root.zig");
 const Utils = Root.Utils;
+const MathX = Root.Math;
 
 pub fn print(comptime fmt: []const u8, args: anytype) void {
     if (@inComptime()) {
@@ -90,6 +91,14 @@ pub fn expect_not_equal_struct(val_a: anytype, str_a: []const u8, val_b: anytype
         print("\nFAILURE: " ++ fail_description, fail_args);
         print("\n\tEXPECT: {s} != {s}\n\tEXPECT: {any} != {any}\n\tACTUAL: {any} == {any}\n", .{ str_a, str_b, val_a, val_b, val_a, val_b });
         return TestError.test_expected_not_equal;
+    }
+}
+
+pub fn expect_approx_equal(val_a: anytype, str_a: []const u8, epsilon: anytype, eps_str: []const u8, val_b: anytype, str_b: []const u8, comptime fail_description: []const u8, fail_args: anytype) !void {
+    if ((std.meta.hasMethod(@TypeOf(val_a), "approx_equals") and !val_a.approx_equals(val_b)) or !MathX.approx_equal_with_epsilon(@TypeOf(val_a), val_a, val_b, epsilon)) {
+        print("\nFAILURE: " ++ fail_description, fail_args);
+        print("\n\tEXPECT: {s} == {s} ± {s}\n\tEXPECT: {any} == {any} ± {any}\n\tACTUAL: {any} != {any}\n", .{ str_a, str_b, eps_str, val_a, val_b, epsilon, val_a, val_b });
+        return TestError.test_expected_equal;
     }
 }
 

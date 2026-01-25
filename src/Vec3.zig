@@ -1003,54 +1003,54 @@ pub fn define_vec3_type(comptime T: type) type {
         // 0 -S  C  0      S  0  C  0      0  0  1  0
         // 0  0  0  1      0  0  0  1      0  0  0  1
 
-        pub fn complex_transform_steps_to_affine_matrix(steps: []const TransformStep) Mat4x4 {
-            const LAST_STEP: usize = steps.len - 1;
-            var matrix = Mat4x4.IDENTITY;
-            for (0..steps.len) |i| {
-                const ii = LAST_STEP - i;
-                matrix = matrix.multiply(steps[ii].to_affine_matrix());
-            }
-            return matrix;
-        }
-        pub fn complex_transform_steps_to_inverse_affine_matrix(steps: []const TransformStep) Mat4x4 {
-            var matrix = Mat3x3.IDENTITY;
-            for (0..steps.len) |i| {
-                matrix = matrix.multiply(steps[i].to_inverse_affine_matrix());
-            }
-            return matrix;
-        }
+        // pub fn complex_transform_steps_to_affine_matrix(steps: []const TransformStep) Mat4x4 {
+        //     const LAST_STEP: usize = steps.len - 1;
+        //     var matrix = Mat4x4.IDENTITY;
+        //     for (0..steps.len) |i| {
+        //         const ii = LAST_STEP - i;
+        //         matrix = matrix.multiply(steps[ii].to_affine_matrix());
+        //     }
+        //     return matrix;
+        // }
+        // pub fn complex_transform_steps_to_inverse_affine_matrix(steps: []const TransformStep) Mat4x4 {
+        //     var matrix = Mat3x3.IDENTITY;
+        //     for (0..steps.len) |i| {
+        //         matrix = matrix.multiply(steps[i].to_inverse_affine_matrix());
+        //     }
+        //     return matrix;
+        // }
 
-        /// Ignores translations
-        pub fn complex_transform_steps_to_affine_matrix_for_direction_vector(steps: []const TransformStep) Mat3x3 {
-            const LAST_STEP: usize = steps.len - 1;
-            var matrix = Mat3x3.IDENTITY;
-            for (0..steps.len) |i| {
-                const ii = LAST_STEP - i;
-                var step_matrix = steps[ii].to_affine_matrix();
-                step_matrix.data[0][2] = 0;
-                step_matrix.data[1][2] = 0;
-                matrix = matrix.multiply(step_matrix);
-            }
-            return matrix;
-        }
+        // /// Ignores translations
+        // pub fn complex_transform_steps_to_affine_matrix_for_direction_vector(steps: []const TransformStep) Mat3x3 {
+        //     const LAST_STEP: usize = steps.len - 1;
+        //     var matrix = Mat3x3.IDENTITY;
+        //     for (0..steps.len) |i| {
+        //         const ii = LAST_STEP - i;
+        //         var step_matrix = steps[ii].to_affine_matrix();
+        //         step_matrix.data[0][2] = 0;
+        //         step_matrix.data[1][2] = 0;
+        //         matrix = matrix.multiply(step_matrix);
+        //     }
+        //     return matrix;
+        // }
 
-        /// Ignores translations
-        pub fn complex_transform_steps_to_inverse_affine_matrix_for_direction_vector(steps: []const TransformStep) Mat3x3 {
-            var matrix = Mat3x3.IDENTITY;
-            for (0..steps.len) |i| {
-                var step_matrix = steps[i].to_inverse_affine_matrix();
-                step_matrix.data[0][2] = 0;
-                step_matrix.data[1][2] = 0;
-                matrix = matrix.multiply(step_matrix);
-            }
-            return matrix;
-        }
+        // /// Ignores translations
+        // pub fn complex_transform_steps_to_inverse_affine_matrix_for_direction_vector(steps: []const TransformStep) Mat3x3 {
+        //     var matrix = Mat3x3.IDENTITY;
+        //     for (0..steps.len) |i| {
+        //         var step_matrix = steps[i].to_inverse_affine_matrix();
+        //         step_matrix.data[0][2] = 0;
+        //         step_matrix.data[1][2] = 0;
+        //         matrix = matrix.multiply(step_matrix);
+        //     }
+        //     return matrix;
+        // }
 
-        pub fn apply_affine_matrix_transform(self: Vec3, matrix: Mat3x3) Vec3 {
-            const col = self.as_1x3_matrix_column();
-            const new_col = matrix.multiply_with_column(col);
-            return Vec3.from_1x3_matrix_column(new_col);
-        }
+        // pub fn apply_affine_matrix_transform(self: Vec3, matrix: Mat3x3) Vec3 {
+        //     const col = self.as_1x3_matrix_column();
+        //     const new_col = matrix.multiply_with_column(col);
+        //     return Vec3.from_1x3_matrix_column(new_col);
+        // }
 
         pub const TransformStep = union(TransformKind) {
             TRANSLATE: Vec3,
@@ -1239,81 +1239,81 @@ pub fn define_vec3_type(comptime T: type) type {
                 return TransformStep{ .SCALE_XY = .{ -1, -1 } };
             }
 
-            pub fn to_affine_matrix(self: TransformStep) Mat3x3 {
-                var m = Mat3x3.IDENTITY;
-                switch (self) {
-                    .TRANSLATE => |vec| {
-                        m.data[0][2] = vec.x;
-                        m.data[1][2] = vec.y;
-                    },
-                    .TRANSLATE_X => |x| {
-                        m.data[0][2] = x;
-                    },
-                    .TRANSLATE_Y => |y| {
-                        m.data[1][2] = y;
-                    },
-                    .SCALE => |vec| {
-                        m.data[0][0] = vec.x;
-                        m.data[1][1] = vec.y;
-                    },
-                    .SCALE_X => |x| {
-                        m.data[0][0] = x;
-                    },
-                    .SCALE_Y => |y| {
-                        m.data[1][1] = y;
-                    },
-                    .SKEW_X => |x| {
-                        m.data[0][1] = x;
-                    },
-                    .SKEW_Y => |y| {
-                        m.data[1][0] = y;
-                    },
-                    .ROTATE => |sincos| {
-                        m.data[0][0] = sincos.cos;
-                        m.data[1][1] = sincos.cos;
-                        m.data[0][1] = -sincos.sin;
-                        m.data[1][0] = sincos.sin;
-                    },
-                }
-            }
+            // pub fn to_affine_matrix(self: TransformStep) Mat3x3 {
+            //     var m = Mat3x3.IDENTITY;
+            //     switch (self) {
+            //         .TRANSLATE => |vec| {
+            //             m.data[0][2] = vec.x;
+            //             m.data[1][2] = vec.y;
+            //         },
+            //         .TRANSLATE_X => |x| {
+            //             m.data[0][2] = x;
+            //         },
+            //         .TRANSLATE_Y => |y| {
+            //             m.data[1][2] = y;
+            //         },
+            //         .SCALE => |vec| {
+            //             m.data[0][0] = vec.x;
+            //             m.data[1][1] = vec.y;
+            //         },
+            //         .SCALE_X => |x| {
+            //             m.data[0][0] = x;
+            //         },
+            //         .SCALE_Y => |y| {
+            //             m.data[1][1] = y;
+            //         },
+            //         .SKEW_X => |x| {
+            //             m.data[0][1] = x;
+            //         },
+            //         .SKEW_Y => |y| {
+            //             m.data[1][0] = y;
+            //         },
+            //         .ROTATE => |sincos| {
+            //             m.data[0][0] = sincos.cos;
+            //             m.data[1][1] = sincos.cos;
+            //             m.data[0][1] = -sincos.sin;
+            //             m.data[1][0] = sincos.sin;
+            //         },
+            //     }
+            // }
 
-            pub fn to_inverse_affine_matrix(self: TransformStep) Mat3x3 {
-                var m = Mat3x3.IDENTITY;
-                switch (self) {
-                    .TRANSLATE => |vec| {
-                        m.data[0][2] = -vec.x;
-                        m.data[1][2] = -vec.y;
-                    },
-                    .TRANSLATE_X => |x| {
-                        m.data[0][2] = -x;
-                    },
-                    .TRANSLATE_Y => |y| {
-                        m.data[1][2] = -y;
-                    },
-                    .SCALE => |vec| {
-                        m.data[0][0] = ONE / vec.x;
-                        m.data[1][1] = ONE / vec.y;
-                    },
-                    .SCALE_X => |x| {
-                        m.data[0][0] = ONE / x;
-                    },
-                    .SCALE_Y => |y| {
-                        m.data[1][1] = ONE / y;
-                    },
-                    .SKEW_X => |x| {
-                        m.data[0][1] = -x;
-                    },
-                    .SKEW_Y => |y| {
-                        m.data[1][0] = -y;
-                    },
-                    .ROTATE => |sincos| {
-                        m.data[0][0] = sincos.cos;
-                        m.data[1][1] = sincos.cos;
-                        m.data[0][1] = sincos.sin;
-                        m.data[1][0] = -sincos.sin;
-                    },
-                }
-            }
+            // pub fn to_inverse_affine_matrix(self: TransformStep) Mat3x3 {
+            //     var m = Mat3x3.IDENTITY;
+            //     switch (self) {
+            //         .TRANSLATE => |vec| {
+            //             m.data[0][2] = -vec.x;
+            //             m.data[1][2] = -vec.y;
+            //         },
+            //         .TRANSLATE_X => |x| {
+            //             m.data[0][2] = -x;
+            //         },
+            //         .TRANSLATE_Y => |y| {
+            //             m.data[1][2] = -y;
+            //         },
+            //         .SCALE => |vec| {
+            //             m.data[0][0] = ONE / vec.x;
+            //             m.data[1][1] = ONE / vec.y;
+            //         },
+            //         .SCALE_X => |x| {
+            //             m.data[0][0] = ONE / x;
+            //         },
+            //         .SCALE_Y => |y| {
+            //             m.data[1][1] = ONE / y;
+            //         },
+            //         .SKEW_X => |x| {
+            //             m.data[0][1] = -x;
+            //         },
+            //         .SKEW_Y => |y| {
+            //             m.data[1][0] = -y;
+            //         },
+            //         .ROTATE => |sincos| {
+            //             m.data[0][0] = sincos.cos;
+            //             m.data[1][1] = sincos.cos;
+            //             m.data[0][1] = sincos.sin;
+            //             m.data[1][0] = -sincos.sin;
+            //         },
+            //     }
+            // }
         };
     };
 }

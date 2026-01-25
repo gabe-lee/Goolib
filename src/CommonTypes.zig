@@ -333,3 +333,14 @@ pub const PadForGpu = enum(u8) {
     NO_PADDING,
     PAD_FOR_GPU,
 };
+
+pub const RowColumnOrder = enum(u8) {
+    ROW_MAJOR,
+    COLUMN_MAJOR,
+};
+
+pub const ParamRefType = enum(u8) {
+    VALUE,
+    POINTER,
+    CONST_POINTER,
+};
