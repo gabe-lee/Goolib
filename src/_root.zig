@@ -97,6 +97,7 @@ pub const Types = @import("./Types.zig");
 pub const Utils = @import("./Utils.zig");
 pub const Vec2 = @import("./Vec2.zig");
 pub const Vec3 = @import("./Vec3.zig");
+pub const Vec4 = @import("./Vec4.zig");
 
 // pub const Graphics = @import("./Graphics.zig");
 

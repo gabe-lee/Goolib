@@ -349,3 +349,8 @@ pub const ShouldTranslate = enum(u8) {
     IGNORE_TRANSLATIONS,
     PREFORM_TRANSLATIONS,
 };
+
+pub const Bool32 = enum(u32) {
+    FALSE = 0,
+    TRUE = 1,
+};
