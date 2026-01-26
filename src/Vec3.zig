@@ -44,15 +44,18 @@ pub const PadForGpu = Common.PadForGpu;
 pub const PerpendicularZero = Common.PerpendicularZero;
 pub const NormalizeZero = Common.NormalizeZero;
 pub const Plane3D = Common.Plane3D;
+pub const ShouldTranslate = Common.ShouldTranslate;
+
+pub const Component = enum(u8) {
+    X = 0,
+    Y = 1,
+    Z = 2,
+};
 
 pub fn define_vec3_type(comptime T: type) type {
     return extern struct {
         const Vec3 = @This();
-        const Vec2 = Vec2Module.define_vec2_type(T, 2);
-        // const Rect = Root.Rect2.define_rect2_type(T);
-        // const Mat2x2 = Mat2x2Module.define_matrix_2x2_type(T);
-        // const Mat3x3 = Mat3x3Module.define_matrix_3x3_type(T);
-        const Mat4x4 = Matrix.Mat4x4(T);
+        const Vec2 = Vec2Module.define_vec2_type(T);
         const IS_FLOAT = switch (T) {
             f16, f32, f64, f80, f128, c_longdouble => true,
             else => false,
@@ -92,10 +95,9 @@ pub fn define_vec3_type(comptime T: type) type {
             return Vec3{ .vec = num_cast(val, T) };
         }
 
-        pub fn inverse(self: Vec3) Vec3 {
-            return Vec3{ .vec = ONE.vec / self.vec };
+        pub inline fn get(self: Vec3, component: Component) T {
+            return self.vec[@intFromEnum(component)];
         }
-
         pub inline fn get_x(self: Vec3) T {
             return self.vec[0];
         }
@@ -105,6 +107,9 @@ pub fn define_vec3_type(comptime T: type) type {
         pub inline fn get_z(self: Vec3) T {
             return self.vec[2];
         }
+        pub inline fn set(self: *Vec3, component: Component, val: T) void {
+            self.vec[@intFromEnum(component)] = val;
+        }
         pub inline fn set_x(self: *Vec3, x: T) void {
             self.vec[0] = x;
         }
@@ -113,6 +118,9 @@ pub fn define_vec3_type(comptime T: type) type {
         }
         pub inline fn set_z(self: *Vec3, z: T) void {
             self.vec[2] = z;
+        }
+        pub inline fn ptr(self: *Vec3, component: Component) *T {
+            return &self.vec[@intFromEnum(component)];
         }
         pub inline fn x_ptr(self: *Vec3) *T {
             return &self.vec[0];
@@ -125,27 +133,16 @@ pub fn define_vec3_type(comptime T: type) type {
         }
 
         // pub fn downgrade_to_vec2_xy(self: Vec3) Vec2 {
-        //     return Vec2
+        //     return Vec2{.}
         // }
 
-        // pub fn change_size_fill_1(self: Vec3, comptime NN: comptime_int) define_vec_type(T, NN) {
-        //     const VV = define_vec_type(T, NN);
-        //     var out: VV = .ONE;
-        //     const M = comptime @min(N, 3);
-        //     inline for (0..M) |i| {
-        //         out.vec[i] = self.vec[i];
-        //     }
-        //     return out;
-        // }
-        // pub fn change_size_fill_0(self: Vec3, comptime NN: comptime_int) define_vec_type(T, NN) {
-        //     const VV = define_vec_type(T, NN);
-        //     var out: VV = .ZERO;
-        //     const M = comptime @min(N, 3);
-        //     inline for (0..M) |i| {
-        //         out.vec[i] = self.vec[i];
-        //     }
-        //     return out;
-        // }
+        pub fn swizzle(self: Vec3, new_x: Component, new_y: Component, new_z: Component) Vec3 {
+            return Vec3{ .vec = .{ self.vec[@intFromEnum(new_x)], self.vec[@intFromEnum(new_y)], self.vec[@intFromEnum(new_z)] } };
+        }
+
+        pub fn inverse(self: Vec3) Vec3 {
+            return Vec3{ .vec = ONE.vec / self.vec };
+        }
 
         pub fn ceil(self: Vec3) Vec3 {
             if (IS_INT) return self;
@@ -230,7 +227,7 @@ pub fn define_vec3_type(comptime T: type) type {
 
         pub fn scale(self: Vec3, val: anytype) Vec3 {
             const val_vec: @Vector(3, @TypeOf(val)) = @splat(val);
-            return Vec3{ .raw = MathX.upgrade_multiply_out(self.raw, val_vec, VEC) };
+            return Vec3{ .vec = MathX.upgrade_multiply_out(self.vec, val_vec, VEC) };
         }
         pub fn inverse_scale(self: Vec3, val: anytype) Vec3 {
             if (@TypeOf(val) == bool) {
@@ -239,7 +236,7 @@ pub fn define_vec3_type(comptime T: type) type {
                 assert_with_reason(val != 0, @src(), "cannot `inverse_scale()` when the scale value is 0, (divide by zero)", .{});
             }
             const val_vec: @Vector(3, @TypeOf(val)) = @splat(val);
-            return Vec3{ .raw = MathX.upgrade_divide_out(self.raw, val_vec, VEC) };
+            return Vec3{ .vec = MathX.upgrade_divide_out(self.vec, val_vec, VEC) };
         }
 
         pub fn add_scale(self: Vec3, add_vec: Vec3, scale_add_vec_by: anytype) Vec3 {
@@ -385,114 +382,6 @@ pub fn define_vec3_type(comptime T: type) type {
             const dot_prod = self_norm.dot_product(other_norm);
             return num_cast(math.acos(MathX.upgrade_to_float(dot_prod, F)), OUT);
         }
-
-        // pub const MiterNormsAndOffset = struct {
-        //     corner_to_prev_norm: Vec3 = .ZERO,
-        //     corner_to_next_norm: Vec3 = .ZERO,
-        //     inner_miter_offset_norm: Vec3 = .ZERO,
-        // };
-
-        // pub const MiterResult = struct {
-        //     corner_to_prev_norm: Vec3 = .ZERO,
-        //     corner_to_next_norm: Vec3 = .ZERO,
-        //     inner_miter_offset_norm: Vec3 = .ZERO,
-        //     inner_offset: Vec3 = .ZERO,
-        //     inner_point: Vec3 = .ZERO,
-        //     outer_point: Vec3 = .ZERO,
-        //     infinite: bool = false,
-
-        //     pub fn new_infinite(norms: MiterNormsAndOffset) MiterResult {
-        //         return MiterResult{
-        //             .corner_to_next_norm = norms.corner_to_next_norm,
-        //             .corner_to_prev_norm = norms.corner_to_prev_norm,
-        //             .inner_miter_offset_norm = norms.inner_miter_offset_norm,
-        //             .infinite = true,
-        //         };
-        //     }
-        //     pub fn new_infinite_seg_norms_only(corner_to_prev_norm: Vec3, corner_to_next_norm: Vec3) MiterResult {
-        //         return MiterResult{
-        //             .corner_to_next_norm = corner_to_next_norm,
-        //             .corner_to_prev_norm = corner_to_prev_norm,
-        //             .inner_miter_offset_norm = corner_to_next_norm,
-        //             .infinite = true,
-        //         };
-        //     }
-        // };
-
-        // pub fn miter_points_same_line_width(corner: Vec3, prev_point: Vec3, next_point: Vec3, width: anytype) MiterResult {
-        //     const norms = corner.inner_miter_offset_normal_same_line_width(prev_point, next_point);
-        //     return corner.miter_points_same_line_width_using_norms(norms, width);
-        // }
-        // pub fn miter_points_same_line_width_using_norms(corner: Vec3, norms: MiterNormsAndOffset, width: anytype) MiterResult {
-        //     const angle_between_segs = norms.corner_to_prev_norm.angle_between_using_norms(norms.corner_to_next_norm, f32);
-        //     if (angle_between_segs == 0) return MiterResult.new_infinite(norms);
-        //     const miter_length = MathX.upgrade_divide(MathX.upgrade_divide(width, 2.0), @sin(MathX.upgrade_divide(angle_between_segs, 2.0)));
-        //     const miter_offset_inner = norms.inner_miter_offset_norm.scale(miter_length);
-        //     const miter_inner = corner.add(miter_offset_inner);
-        //     const miter_outer = corner.subtract(miter_offset_inner);
-        //     return MiterResult{
-        //         .inner_point = miter_inner,
-        //         .outer_point = miter_outer,
-        //         .inner_offset = miter_offset_inner,
-        //         .inner_offset_norm = norms.inner_miter_offset_norm,
-        //         .corner_to_next_norm = norms.corner_to_next_norm,
-        //         .corner_to_prev_norm = norms.corner_to_prev_norm,
-        //     };
-        // }
-        // pub fn miter_outer_points_same_line_width(corner: Vec3, prev_point: Vec3, next_point: Vec3, width: anytype) MiterResult {
-        //     const norms = corner.inner_miter_offset_normal_same_line_width(prev_point, next_point);
-        //     return corner.miter_outer_point_same_line_width_using_norms(norms, width);
-        // }
-        // pub fn miter_outer_point_same_line_width_using_norms(corner: Vec3, norms: MiterNormsAndOffset, width: anytype) MiterResult {
-        //     const angle_between_segs = norms.corner_to_prev_norm.angle_between_using_norms(norms.corner_to_next_norm, f32);
-        //     if (angle_between_segs == 0) return MiterResult.new_infinite(norms);
-        //     const miter_length = MathX.upgrade_divide(MathX.upgrade_divide(width, 2.0), @sin(MathX.upgrade_divide(angle_between_segs, 2.0)));
-        //     const miter_offset_inner = norms.inner_miter_offset_norm.scale(miter_length);
-        //     const miter_outer = corner.subtract(miter_offset_inner);
-        //     return MiterResult{
-        //         .inner_point = .ZERO_ZERO,
-        //         .outer_point = miter_outer,
-        //         .inner_offset = miter_offset_inner,
-        //         .inner_offset_norm = norms.inner_miter_offset_norm,
-        //         .corner_to_next_norm = norms.corner_to_next_norm,
-        //         .corner_to_prev_norm = norms.corner_to_prev_norm,
-        //     };
-        // }
-        // pub fn inner_miter_offset_normal_same_line_width(corner: Vec3, prev_point: Vec3, next_point: Vec3) MiterNormsAndOffset {
-        //     const delta_prev_norm = prev_point.subtract(corner).normalize_may_be_zero(.NORM_ZERO_IS_ZERO);
-        //     const delta_next_norm = next_point.subtract(corner).normalize_may_be_zero(.NORM_ZERO_IS_ZERO);
-        //     const miter_offset_norm_inner = delta_prev_norm.lerp(delta_next_norm, 0.5).normalize_may_be_zero(.NORM_ZERO_IS_ZERO);
-        //     return MiterNormsAndOffset{
-        //         .corner_to_prev_norm = delta_prev_norm,
-        //         .corner_to_next_norm = delta_next_norm,
-        //         .inner_miter_offset_norm = miter_offset_norm_inner,
-        //     };
-        // }
-        // pub fn miter_different_widths_no_inner_normal(corner: Vec3, prev_point: Vec3, prev_segment_width: anytype, next_point: Vec3, next_segment_width: anytype) MiterResult {
-        //     const delta_prev_norm = prev_point.subtract(corner).normalize_may_be_zero(.NORM_ZERO_IS_ZERO);
-        //     const delta_next_norm = next_point.subtract(corner).normalize_may_be_zero(.NORM_ZERO_IS_ZERO);
-        //     const angle_between_segs = delta_prev_norm.angle_between_using_norms(delta_next_norm, f32);
-        //     const sin_angle_between = @sin(angle_between_segs);
-        //     if (angle_between_segs == 0) return MiterResult.new_infinite_seg_norms_only(delta_prev_norm, delta_next_norm);
-        //     const len_prev_seg = next_segment_width / sin_angle_between;
-        //     const len_next_seg = prev_segment_width / sin_angle_between;
-        //     const delta_1 = delta_prev_norm.scale(len_prev_seg);
-        //     const delta_2 = delta_next_norm.scale(len_next_seg);
-        //     const inner_offset = delta_1 + delta_2;
-        //     const inner_point = corner.add(inner_offset);
-        //     const outer_point = corner.subtract(inner_offset);
-        //     return MiterResult{
-        //         .corner_to_prev_norm = delta_prev_norm,
-        //         .corner_to_next_norm = delta_next_norm,
-        //         .inner_offset = inner_offset,
-        //         .inner_point = inner_point,
-        //         .outer_point = outer_point,
-        //     };
-        // }
-        // pub fn miter_different_widths_with_inner_normal(corner: Vec3, prev_point: Vec3, prev_segment_width: anytype, next_point: Vec3, next_segment_width: anytype) MiterResult {
-        //     var result = corner.miter_different_widths_no_inner_normal(prev_point, prev_segment_width, next_point, next_segment_width);
-        //     result.inner_miter_offset_norm = result.inner_offset.normalize_may_be_zero(.NORM_ZERO_IS_ZERO);
-        // }
 
         /// Assuming `a` and `b` are vectors from the origin
         /// AND are colinear, return the ratio of the length
@@ -717,6 +606,13 @@ pub fn define_vec3_type(comptime T: type) type {
             const eps: VEC = @splat(math.floatEps(T));
             return @reduce(.And, x <= eps);
         }
+        pub fn approx_colinear_with_epsilon(a: Vec3, b: Vec3, c: Vec3, epsilon: T) bool {
+            const ab = b.subtract(a);
+            const bc = c.subtract(b);
+            const x = ab.cross(bc);
+            const eps: VEC = @splat(epsilon);
+            return @reduce(.And, x <= eps);
+        }
 
         pub fn colinear(a: Vec3, b: Vec3, c: Vec3) bool {
             const ab = b.subtract(a);
@@ -725,7 +621,7 @@ pub fn define_vec3_type(comptime T: type) type {
         }
 
         pub fn rate_required_to_reach_point_at_time(self: Vec3, point: Vec3, time: anytype) Vec3 {
-            return point.subtract(self).scale(1.0 / time);
+            return point.subtract(self).scale(1 / time);
         }
 
         pub fn rate_required_to_reach_point_inverse_time(self: Vec3, point: Vec3, inverse_time: anytype) Vec3 {
@@ -830,14 +726,20 @@ pub fn define_vec3_type(comptime T: type) type {
         }
 
         pub fn apply_transform(self: Vec3, transform: TransformStep) Vec3 {
+            return self.apply_transform_advanced(transform, .PREFORM_TRANSLATIONS);
+        }
+        pub fn apply_transform_ignore_translate(self: Vec3, transform: TransformStep) Vec3 {
+            return self.apply_transform_advanced(transform, .IGNORE_TRANSLATIONS);
+        }
+        fn apply_transform_advanced(self: Vec3, transform: TransformStep, should_translate: ShouldTranslate) Vec3 {
             return switch (transform) {
-                .TRANSLATE => |vec| self.add(vec),
-                .TRANSLATE_X => |x| Vec3{ .vec = .{ self.get_x() + x, self.get_y(), self.get_z() } },
-                .TRANSLATE_Y => |y| Vec3{ .vec = .{ self.get_x(), self.get_y() + y, self.get_z() } },
-                .TRANSLATE_Z => |z| Vec3{ .vec = .{ self.get_x(), self.get_y(), self.get_z() + z } },
-                .TRANSLATE_XY => |xy| Vec3{ .vec = .{ self.get_x() + xy[0], self.get_y() + xy[1], self.get_z() } },
-                .TRANSLATE_YZ => |yz| Vec3{ .vec = .{ self.get_x(), self.get_y() + yz[0], self.get_z() + yz[1] } },
-                .TRANSLATE_XZ => |xz| Vec3{ .vec = .{ self.get_x() + xz[0], self.get_y(), self.get_z() + xz[1] } },
+                .TRANSLATE => |vec| if (should_translate == .PREFORM_TRANSLATIONS) self.add(vec) else self,
+                .TRANSLATE_X => |x| if (should_translate == .PREFORM_TRANSLATIONS) Vec3{ .vec = .{ self.get_x() + x, self.get_y(), self.get_z() } } else self,
+                .TRANSLATE_Y => |y| if (should_translate == .PREFORM_TRANSLATIONS) Vec3{ .vec = .{ self.get_x(), self.get_y() + y, self.get_z() } } else self,
+                .TRANSLATE_Z => |z| if (should_translate == .PREFORM_TRANSLATIONS) Vec3{ .vec = .{ self.get_x(), self.get_y(), self.get_z() + z } } else self,
+                .TRANSLATE_XY => |xy| if (should_translate == .PREFORM_TRANSLATIONS) Vec3{ .vec = .{ self.get_x() + xy[0], self.get_y() + xy[1], self.get_z() } } else self,
+                .TRANSLATE_YZ => |yz| if (should_translate == .PREFORM_TRANSLATIONS) Vec3{ .vec = .{ self.get_x(), self.get_y() + yz[0], self.get_z() + yz[1] } } else self,
+                .TRANSLATE_XZ => |xz| if (should_translate == .PREFORM_TRANSLATIONS) Vec3{ .vec = .{ self.get_x() + xz[0], self.get_y(), self.get_z() + xz[1] } } else self,
                 .SCALE => |vec| self.multiply(vec),
                 .SCALE_X => |x| Vec3{ .vec = .{ self.get_x() * x, self.get_y(), self.get_z() } },
                 .SCALE_Y => |y| Vec3{ .vec = .{ self.get_x(), self.get_y() * y, self.get_z() } },
@@ -857,56 +759,20 @@ pub fn define_vec3_type(comptime T: type) type {
             };
         }
         pub fn apply_inverse_transform(self: Vec3, transform: TransformStep) Vec3 {
-            return switch (transform) {
-                .TRANSLATE => |vec| self.add(vec),
-                .TRANSLATE_X => |x| Vec3{ .vec = .{ self.get_x() - x, self.get_y(), self.get_z() } },
-                .TRANSLATE_Y => |y| Vec3{ .vec = .{ self.get_x(), self.get_y() - y, self.get_z() } },
-                .TRANSLATE_Z => |z| Vec3{ .vec = .{ self.get_x(), self.get_y(), self.get_z() - z } },
-                .TRANSLATE_XY => |xy| Vec3{ .vec = .{ self.get_x() - xy[0], self.get_y() - xy[1], self.get_z() } },
-                .TRANSLATE_YZ => |yz| Vec3{ .vec = .{ self.get_x(), self.get_y() - yz[0], self.get_z() - yz[1] } },
-                .TRANSLATE_XZ => |xz| Vec3{ .vec = .{ self.get_x() - xz[0], self.get_y(), self.get_z() - xz[1] } },
-                .SCALE => |vec| self.multiply(vec),
-                .SCALE_X => |x| Vec3{ .vec = .{ self.get_x() / x, self.get_y(), self.get_z() } },
-                .SCALE_Y => |y| Vec3{ .vec = .{ self.get_x(), self.get_y() / y, self.get_z() } },
-                .SCALE_Z => |z| Vec3{ .vec = .{ self.get_x(), self.get_y(), self.get_z() / z } },
-                .SCALE_XY => |xy| Vec3{ .vec = .{ self.get_x() / xy[0], self.get_y() / xy[1], self.get_z() } },
-                .SCALE_YZ => |yz| Vec3{ .vec = .{ self.get_x(), self.get_y() / yz[0], self.get_z() / yz[1] } },
-                .SCALE_XZ => |xz| Vec3{ .vec = .{ self.get_x() / xz[0], self.get_y(), self.get_z() / xz[1] } },
-                .SKEW_X_AWAY_FROM_Y => |ratio| Vec3{ .vec = .{ self.get_x() + (-ratio * self.get_y()), self.get_y(), self.get_z() } },
-                .SKEW_X_AWAY_FROM_Z => |ratio| Vec3{ .vec = .{ self.get_x() + (-ratio * self.get_z()), self.get_y(), self.get_z() } },
-                .SKEW_Y_AWAY_FROM_X => |ratio| Vec3{ .vec = .{ self.get_x(), self.get_y() + (-ratio * self.get_x()), self.get_z() } },
-                .SKEW_Y_AWAY_FROM_Z => |ratio| Vec3{ .vec = .{ self.get_x(), self.get_y() + (-ratio * self.get_z()), self.get_z() } },
-                .SKEW_Z_AWAY_FROM_X => |ratio| Vec3{ .vec = .{ self.get_x(), self.get_y(), self.get_z() + (-ratio * self.get_x()) } },
-                .SKEW_Z_AWAY_FROM_Y => |ratio| Vec3{ .vec = .{ self.get_x(), self.get_y(), self.get_z() + (-ratio * self.get_y()) } },
-                .ROTATE_AROUND_X_AXIS => |sincos| self.rotate_around_x_axis_sin_cos(-sincos.sin, sincos.cos),
-                .ROTATE_AROUND_Y_AXIS => |sincos| self.rotate_around_y_axis_sin_cos(-sincos.sin, sincos.cos),
-                .ROTATE_AROUND_Z_AXIS => |sincos| self.rotate_around_y_axis_sin_cos(-sincos.sin, sincos.cos),
-            };
-        }
-        pub fn apply_transform_ignore_translate(self: Vec3, transform: TransformStep) Vec3 {
-            return switch (transform) {
-                .TRANSLATE, .TRANSLATE_X, .TRANSLATE_Y, .TRANSLATE_Z, .TRANSLATE_XY, .TRANSLATE_YZ, .TRANSLATE_XZ => self,
-                .SCALE => |vec| self.multiply(vec),
-                .SCALE_X => |x| Vec3{ .vec = .{ self.get_x() * x, self.get_y(), self.get_z() } },
-                .SCALE_Y => |y| Vec3{ .vec = .{ self.get_x(), self.get_y() * y, self.get_z() } },
-                .SCALE_Z => |z| Vec3{ .vec = .{ self.get_x(), self.get_y(), self.get_z() * z } },
-                .SCALE_XY => |xy| Vec3{ .vec = .{ self.get_x() * xy[0], self.get_y() * xy[1], self.get_z() } },
-                .SCALE_YZ => |yz| Vec3{ .vec = .{ self.get_x(), self.get_y() * yz[0], self.get_z() * yz[1] } },
-                .SCALE_XZ => |xz| Vec3{ .vec = .{ self.get_x() * xz[0], self.get_y(), self.get_z() * xz[1] } },
-                .SKEW_X_AWAY_FROM_Y => |ratio| Vec3{ .vec = .{ self.get_x() + (ratio * self.get_y()), self.get_y(), self.get_z() } },
-                .SKEW_X_AWAY_FROM_Z => |ratio| Vec3{ .vec = .{ self.get_x() + (ratio * self.get_z()), self.get_y(), self.get_z() } },
-                .SKEW_Y_AWAY_FROM_X => |ratio| Vec3{ .vec = .{ self.get_x(), self.get_y() + (ratio * self.get_x()), self.get_z() } },
-                .SKEW_Y_AWAY_FROM_Z => |ratio| Vec3{ .vec = .{ self.get_x(), self.get_y() + (ratio * self.get_z()), self.get_z() } },
-                .SKEW_Z_AWAY_FROM_X => |ratio| Vec3{ .vec = .{ self.get_x(), self.get_y(), self.get_z() + (ratio * self.get_x()) } },
-                .SKEW_Z_AWAY_FROM_Y => |ratio| Vec3{ .vec = .{ self.get_x(), self.get_y(), self.get_z() + (ratio * self.get_y()) } },
-                .ROTATE_AROUND_X_AXIS => |sincos| self.rotate_around_x_axis_sin_cos(sincos.sin, sincos.cos),
-                .ROTATE_AROUND_Y_AXIS => |sincos| self.rotate_around_y_axis_sin_cos(sincos.sin, sincos.cos),
-                .ROTATE_AROUND_Z_AXIS => |sincos| self.rotate_around_y_axis_sin_cos(sincos.sin, sincos.cos),
-            };
+            return self.apply_inverse_transform_advanced(transform, .PREFORM_TRANSLATIONS);
         }
         pub fn apply_inverse_transform_ignore_translate(self: Vec3, transform: TransformStep) Vec3 {
+            return self.apply_inverse_transform_advanced(transform, .IGNORE_TRANSLATIONS);
+        }
+        fn apply_inverse_transform_advanced(self: Vec3, transform: TransformStep, should_translate: ShouldTranslate) Vec3 {
             return switch (transform) {
-                .TRANSLATE, .TRANSLATE_X, .TRANSLATE_Y, .TRANSLATE_Z, .TRANSLATE_XY, .TRANSLATE_YZ, .TRANSLATE_XZ => self,
+                .TRANSLATE => |vec| if (should_translate == .PREFORM_TRANSLATIONS) self.add(vec) else self,
+                .TRANSLATE_X => |x| if (should_translate == .PREFORM_TRANSLATIONS) Vec3{ .vec = .{ self.get_x() - x, self.get_y(), self.get_z() } } else self,
+                .TRANSLATE_Y => |y| if (should_translate == .PREFORM_TRANSLATIONS) Vec3{ .vec = .{ self.get_x(), self.get_y() - y, self.get_z() } } else self,
+                .TRANSLATE_Z => |z| if (should_translate == .PREFORM_TRANSLATIONS) Vec3{ .vec = .{ self.get_x(), self.get_y(), self.get_z() - z } } else self,
+                .TRANSLATE_XY => |xy| if (should_translate == .PREFORM_TRANSLATIONS) Vec3{ .vec = .{ self.get_x() - xy[0], self.get_y() - xy[1], self.get_z() } } else self,
+                .TRANSLATE_YZ => |yz| if (should_translate == .PREFORM_TRANSLATIONS) Vec3{ .vec = .{ self.get_x(), self.get_y() - yz[0], self.get_z() - yz[1] } } else self,
+                .TRANSLATE_XZ => |xz| if (should_translate == .PREFORM_TRANSLATIONS) Vec3{ .vec = .{ self.get_x() - xz[0], self.get_y(), self.get_z() - xz[1] } } else self,
                 .SCALE => |vec| self.multiply(vec),
                 .SCALE_X => |x| Vec3{ .vec = .{ self.get_x() / x, self.get_y(), self.get_z() } },
                 .SCALE_Y => |y| Vec3{ .vec = .{ self.get_x(), self.get_y() / y, self.get_z() } },
@@ -926,131 +792,103 @@ pub fn define_vec3_type(comptime T: type) type {
             };
         }
 
-        pub fn apply_complex_transform(self: Vec3, steps: []const TransformStep) Vec3 {
+        fn apply_complex_transform(self: Vec3, steps: []const TransformStep) Vec3 {
+            return self.apply_complex_transform_advanced(steps, .PREFORM_TRANSLATIONS);
+        }
+        fn apply_complex_transform_ignore_translate(self: Vec3, steps: []const TransformStep) Vec3 {
+            return self.apply_complex_transform_advanced(steps, .IGNORE_TRANSLATIONS);
+        }
+        fn apply_complex_transform_advanced(self: Vec3, steps: []const TransformStep, should_translate: ShouldTranslate) Vec3 {
             var out = self;
             for (0..steps.len) |i| {
-                out = out.apply_transform(steps[i]);
+                out = out.apply_transform_advanced(steps[i], should_translate);
             }
             return out;
         }
-
-        pub fn apply_inverse_complex_transform(self: Vec3, steps: []const TransformStep) Vec3 {
+        fn apply_inverse_complex_transform(self: Vec3, steps: []const TransformStep) Vec3 {
+            return self.apply_inverse_complex_transform_advanced(steps, .PREFORM_TRANSLATIONS);
+        }
+        fn apply_inverse_complex_transform_ignore_translate(self: Vec3, steps: []const TransformStep) Vec3 {
+            return self.apply_inverse_complex_transform_advanced(steps, .IGNORE_TRANSLATIONS);
+        }
+        fn apply_inverse_complex_transform_advanced(self: Vec3, steps: []const TransformStep, should_translate: ShouldTranslate) Vec3 {
             var out = self;
             const LAST_STEP = steps.len - 1;
             for (0..steps.len) |i| {
                 const ii = LAST_STEP - i;
-                out = out.apply_inverse_transform(steps[ii]);
+                out = out.apply_inverse_transform_advanced(steps[ii], should_translate);
             }
             return out;
         }
 
-        pub fn apply_complex_transform_ignore_translate(self: Vec3, steps: []const TransformStep) Vec3 {
-            var out = self;
+        pub fn complex_transform_to_affine_matrix(steps: []const TransformStep) Matrix.define_square_NxN_matrix_type(T, 4, .ROW_MAJOR, 0) {
+            return complex_transform_to_affine_matrix_advanced(steps, .PREFORM_TRANSLATIONS, T, .ROW_MAJOR, 0);
+        }
+        pub fn complex_transform_to_affine_matrix_ignore_translations(steps: []const TransformStep) Matrix.define_square_NxN_matrix_type(T, 4, .ROW_MAJOR, 0) {
+            return complex_transform_to_affine_matrix_advanced(steps, .IGNORE_TRANSLATIONS, T, .ROW_MAJOR, 0);
+        }
+
+        pub fn complex_transform_to_affine_matrix_advanced(steps: []const TransformStep, should_translate: ShouldTranslate, comptime MAT_T: type, comptime MAT_ORDER: Matrix.RowColumnOrder, comptime MAJOR_PAD: comptime_int) Matrix.define_square_NxN_matrix_type(MAT_T, 4, MAT_ORDER, MAJOR_PAD) {
+            const MAT = Matrix.define_square_NxN_matrix_type(MAT_T, 4, MAT_ORDER, MAJOR_PAD);
+            const LAST_STEP: usize = steps.len - 1;
+            var matrix = MAT.IDENTITY;
             for (0..steps.len) |i| {
-                out = out.apply_complex_transform_ignore_translate(steps[i]);
-            }
-            return out;
-        }
-
-        pub fn apply_inverse_complex_transform_ignore_translate(self: Vec3, steps: []const TransformStep) Vec3 {
-            var out = self;
-            const LAST_STEP = steps.len - 1;
-            inline for (0..steps) |i| {
                 const ii = LAST_STEP - i;
-                out = out.apply_inverse_transform_ignore_translate(steps[ii]);
+                if (should_translate == .IGNORE_TRANSLATIONS and steps[ii].is_translate()) continue;
+                matrix = matrix.multiply(steps[ii].to_affine_matrix_advanced(MAT_T, MAT_ORDER, MAJOR_PAD));
             }
-            return out;
+            return matrix;
         }
 
-        pub fn ComplexTransform(comptime NUM_STEPS: comptime_int) type {
-            return [NUM_STEPS]TransformStep;
+        pub fn complex_transform_to_inverse_affine_matrix(steps: []const TransformStep) Matrix.define_square_NxN_matrix_type(T, 4, .ROW_MAJOR, 0) {
+            return complex_transform_to_inverse_affine_matrix_advanced(steps, .PREFORM_TRANSLATIONS, T, .ROW_MAJOR, 0);
+        }
+        pub fn complex_transform_to_inverse_affine_matrix_ignore_translations(steps: []const TransformStep) Matrix.define_square_NxN_matrix_type(T, 4, .ROW_MAJOR, 0) {
+            return complex_transform_to_inverse_affine_matrix_advanced(steps, .IGNORE_TRANSLATIONS, T, .ROW_MAJOR, 0);
         }
 
-        // IDENTITY
-        //
-        // 1 0 0 0
-        // 0 1 0 0
-        // 0 0 1 0
-        // 0 0 0 1
-        //
-        // SHEARS
-        // Z away X   Z away Y   X away Y   X away Z   Y away X   Y away Z
-        //
-        // 1 0 0 0    1 0 0 0    1 s 0 0    1 0 s 0    1 0 0 0    1 0 0 0
-        // 0 1 0 0    0 1 0 0    0 1 0 0    0 1 0 0    s 1 0 0    0 1 s 0
-        // s 0 1 0    0 s 1 0    0 0 1 0    0 0 1 0    0 0 1 0    0 0 1 0
-        // 0 0 0 1    0 0 0 1    0 0 0 1    0 0 0 1    0 0 0 1    0 0 0 1
-        //
-        // TRANSLATIONS
-        //
-        // 1 0 0 x
-        // 0 1 0 y
-        // 0 0 1 z
-        // 0 0 0 1
-        //
-        // SCALES
-        //
-        // x 0 0 0
-        // 0 y 0 0
-        // 0 0 z 0
-        // 0 0 0 1
-        //
-        // ROTATIONS
-        //   X axis          Y axis          Z axis
-        //
-        // 1  0  0  0      C  0 -S  0      C -S  0  0
-        // 0  C  S  0      0  1  0  0      S  C  0  0
-        // 0 -S  C  0      S  0  C  0      0  0  1  0
-        // 0  0  0  1      0  0  0  1      0  0  0  1
+        pub fn complex_transform_to_inverse_affine_matrix_advanced(steps: []const TransformStep, should_translate: ShouldTranslate, comptime MAT_T: type, comptime MAT_ORDER: Matrix.RowColumnOrder, comptime MAJOR_PAD: comptime_int) Matrix.define_square_NxN_matrix_type(MAT_T, 4, MAT_ORDER, MAJOR_PAD) {
+            const MAT = Matrix.define_square_NxN_matrix_type(MAT_T, 4, MAT_ORDER, MAJOR_PAD);
+            var matrix = MAT.IDENTITY;
+            for (0..steps.len) |i| {
+                if (should_translate == .IGNORE_TRANSLATIONS and steps[i].is_translate()) continue;
+                matrix = matrix.multiply(steps[i].to_affine_matrix_advanced(MAT_T, MAT_ORDER, MAJOR_PAD));
+            }
+            return matrix;
+        }
 
-        // pub fn complex_transform_steps_to_affine_matrix(steps: []const TransformStep) Mat4x4 {
-        //     const LAST_STEP: usize = steps.len - 1;
-        //     var matrix = Mat4x4.IDENTITY;
-        //     for (0..steps.len) |i| {
-        //         const ii = LAST_STEP - i;
-        //         matrix = matrix.multiply(steps[ii].to_affine_matrix());
-        //     }
-        //     return matrix;
-        // }
-        // pub fn complex_transform_steps_to_inverse_affine_matrix(steps: []const TransformStep) Mat4x4 {
-        //     var matrix = Mat3x3.IDENTITY;
-        //     for (0..steps.len) |i| {
-        //         matrix = matrix.multiply(steps[i].to_inverse_affine_matrix());
-        //     }
-        //     return matrix;
-        // }
+        pub fn as_4x1_matrix_column_fill_1(self: Vec3) Matrix.define_rectangular_RxC_matrix_type(T, 4, 1, .COLUMN_MAJOR, 0) {
+            const raw: [4]T = .{ self.vec[0], self.vec[1], self.vec[2], 1 };
+            return @bitCast(raw);
+        }
+        pub fn as_1x4_matrix_row_fill_1(self: Vec3) Matrix.define_rectangular_RxC_matrix_type(T, 1, 4, .ROW_MAJOR, 0) {
+            const raw: [4]T = .{ self.vec[0], self.vec[1], self.vec[2], 1 };
+            return @bitCast(raw);
+        }
+        pub fn as_4x1_matrix_column_fill_0(self: Vec3) Matrix.define_rectangular_RxC_matrix_type(T, 4, 1, .COLUMN_MAJOR, 0) {
+            const raw: [4]T = .{ self.vec[0], self.vec[1], self.vec[2], 0 };
+            return @bitCast(raw);
+        }
+        pub fn as_1x4_matrix_row_fill_0(self: Vec3) Matrix.define_rectangular_RxC_matrix_type(T, 1, 4, .ROW_MAJOR, 0) {
+            const raw: [4]T = .{ self.vec[0], self.vec[1], self.vec[2], 0 };
+            return @bitCast(raw);
+        }
 
-        // /// Ignores translations
-        // pub fn complex_transform_steps_to_affine_matrix_for_direction_vector(steps: []const TransformStep) Mat3x3 {
-        //     const LAST_STEP: usize = steps.len - 1;
-        //     var matrix = Mat3x3.IDENTITY;
-        //     for (0..steps.len) |i| {
-        //         const ii = LAST_STEP - i;
-        //         var step_matrix = steps[ii].to_affine_matrix();
-        //         step_matrix.data[0][2] = 0;
-        //         step_matrix.data[1][2] = 0;
-        //         matrix = matrix.multiply(step_matrix);
-        //     }
-        //     return matrix;
-        // }
+        pub fn apply_affine_matrix_transform(self: Vec3, matrix: anytype) Vec3 {
+            return self.apply_affine_matrix_transform_advanced(matrix, .PREFORM_TRANSLATIONS);
+        }
+        pub fn apply_affine_matrix_transform_ignore_translations(self: Vec3, matrix: anytype) Vec3 {
+            return self.apply_affine_matrix_transform_advanced(matrix, .IGNORE_TRANSLATIONS);
+        }
 
-        // /// Ignores translations
-        // pub fn complex_transform_steps_to_inverse_affine_matrix_for_direction_vector(steps: []const TransformStep) Mat3x3 {
-        //     var matrix = Mat3x3.IDENTITY;
-        //     for (0..steps.len) |i| {
-        //         var step_matrix = steps[i].to_inverse_affine_matrix();
-        //         step_matrix.data[0][2] = 0;
-        //         step_matrix.data[1][2] = 0;
-        //         matrix = matrix.multiply(step_matrix);
-        //     }
-        //     return matrix;
-        // }
-
-        // pub fn apply_affine_matrix_transform(self: Vec3, matrix: Mat3x3) Vec3 {
-        //     const col = self.as_1x3_matrix_column();
-        //     const new_col = matrix.multiply_with_column(col);
-        //     return Vec3.from_1x3_matrix_column(new_col);
-        // }
+        fn apply_affine_matrix_transform_advanced(self: Vec3, matrix: anytype, should_translate: ShouldTranslate) Vec3 {
+            const SEFL_DEF = Matrix.define_rectangular_RxC_matrix_type(T, 4, 1, .COLUMN_MAJOR, 0).DEF;
+            const self_as_mat = if (should_translate == .PREFORM_TRANSLATIONS) self.as_4x1_matrix_column_fill_1() else self.as_4x1_matrix_column_fill_0();
+            const DEF = Matrix.assert_anytype_is_matrix_and_get_def(matrix, @src());
+            assert_with_reason(DEF.COLS == 4 and DEF.ROWS == 4, @src(), "affine matrix to apply MUST be a 4x4 matrix, got {d}x{d}", .{ DEF.ROWS, DEF.COLS });
+            const result = Matrix.Advanced.multiply_matrices(DEF, matrix, SEFL_DEF, self_as_mat, T, .COLUMN_MAJOR, 0);
+            return Vec3{ .vec = .{ result[0][0], result[0][1], result[0][2] } };
+        }
 
         pub const TransformStep = union(TransformKind) {
             TRANSLATE: Vec3,
@@ -1085,6 +923,13 @@ pub fn define_vec3_type(comptime T: type) type {
                 sin: F,
                 cos: F,
             },
+
+            pub fn is_translate(self: TransformStep) bool {
+                return switch (self) {
+                    .TRANSLATE, .TRANSLATE_X, .TRANSLATE_Y, .TRANSLATE_Z, .TRANSLATE_XY, .TRANSLATE_YZ, .TRANSLATE_XZ => true,
+                    else => false,
+                };
+            }
 
             pub fn translate(vec: Vec3) TransformStep {
                 return TransformStep{ .TRANSLATE = vec };
@@ -1239,81 +1084,293 @@ pub fn define_vec3_type(comptime T: type) type {
                 return TransformStep{ .SCALE_XY = .{ -1, -1 } };
             }
 
-            // pub fn to_affine_matrix(self: TransformStep) Mat3x3 {
-            //     var m = Mat3x3.IDENTITY;
-            //     switch (self) {
-            //         .TRANSLATE => |vec| {
-            //             m.data[0][2] = vec.x;
-            //             m.data[1][2] = vec.y;
-            //         },
-            //         .TRANSLATE_X => |x| {
-            //             m.data[0][2] = x;
-            //         },
-            //         .TRANSLATE_Y => |y| {
-            //             m.data[1][2] = y;
-            //         },
-            //         .SCALE => |vec| {
-            //             m.data[0][0] = vec.x;
-            //             m.data[1][1] = vec.y;
-            //         },
-            //         .SCALE_X => |x| {
-            //             m.data[0][0] = x;
-            //         },
-            //         .SCALE_Y => |y| {
-            //             m.data[1][1] = y;
-            //         },
-            //         .SKEW_X => |x| {
-            //             m.data[0][1] = x;
-            //         },
-            //         .SKEW_Y => |y| {
-            //             m.data[1][0] = y;
-            //         },
-            //         .ROTATE => |sincos| {
-            //             m.data[0][0] = sincos.cos;
-            //             m.data[1][1] = sincos.cos;
-            //             m.data[0][1] = -sincos.sin;
-            //             m.data[1][0] = sincos.sin;
-            //         },
-            //     }
-            // }
+            pub fn to_affine_matrix(self: TransformStep) Matrix.define_square_NxN_matrix_type(T, 4, .ROW_MAJOR, 0) {
+                return self.to_affine_matrix_advanced(T, .PREFORM_TRANSLATIONS, .ROW_MAJOR, 0);
+            }
+            pub fn to_affine_matrix_ignore_translations(self: TransformStep) Matrix.define_square_NxN_matrix_type(T, 4, .ROW_MAJOR, 0) {
+                return self.to_affine_matrix_advanced(T, .IGNORE_TRANSLATIONS, .ROW_MAJOR, 0);
+            }
 
-            // pub fn to_inverse_affine_matrix(self: TransformStep) Mat3x3 {
-            //     var m = Mat3x3.IDENTITY;
-            //     switch (self) {
-            //         .TRANSLATE => |vec| {
-            //             m.data[0][2] = -vec.x;
-            //             m.data[1][2] = -vec.y;
-            //         },
-            //         .TRANSLATE_X => |x| {
-            //             m.data[0][2] = -x;
-            //         },
-            //         .TRANSLATE_Y => |y| {
-            //             m.data[1][2] = -y;
-            //         },
-            //         .SCALE => |vec| {
-            //             m.data[0][0] = ONE / vec.x;
-            //             m.data[1][1] = ONE / vec.y;
-            //         },
-            //         .SCALE_X => |x| {
-            //             m.data[0][0] = ONE / x;
-            //         },
-            //         .SCALE_Y => |y| {
-            //             m.data[1][1] = ONE / y;
-            //         },
-            //         .SKEW_X => |x| {
-            //             m.data[0][1] = -x;
-            //         },
-            //         .SKEW_Y => |y| {
-            //             m.data[1][0] = -y;
-            //         },
-            //         .ROTATE => |sincos| {
-            //             m.data[0][0] = sincos.cos;
-            //             m.data[1][1] = sincos.cos;
-            //             m.data[0][1] = sincos.sin;
-            //             m.data[1][0] = -sincos.sin;
-            //         },
-            //     }
-            // }
+            pub fn to_affine_matrix_advanced(self: TransformStep, comptime MAT_T: type, should_translate: ShouldTranslate, comptime MAT_ORDER: Matrix.RowColumnOrder, comptime MAJOR_PAD: comptime_int) Matrix.define_square_NxN_matrix_type(MAT_T, 4, MAT_ORDER, MAJOR_PAD) {
+                const MAT = Matrix.define_square_NxN_matrix_type(MAT_T, 4, MAT_ORDER, MAJOR_PAD);
+                const DEF = MAT.DEF;
+                var m = MAT.IDENTITY;
+                switch (self) {
+                    // TRANSLATIONS
+                    //
+                    // 1 0 0 x
+                    // 0 1 0 y
+                    // 0 0 1 z
+                    // 0 0 0 1
+                    .TRANSLATE => |v| {
+                        if (should_translate == .PREFORM_TRANSLATIONS) {
+                            DEF.set_cell(&m.mat, 0, 3, num_cast(v.get_x(), MAT_T));
+                            DEF.set_cell(&m.mat, 1, 3, num_cast(v.get_y(), MAT_T));
+                            DEF.set_cell(&m.mat, 2, 3, num_cast(v.get_z(), MAT_T));
+                        }
+                    },
+                    .TRANSLATE_X => |v| {
+                        if (should_translate == .PREFORM_TRANSLATIONS) {
+                            DEF.set_cell(&m.mat, 0, 3, num_cast(v, MAT_T));
+                        }
+                    },
+                    .TRANSLATE_Y => |v| {
+                        if (should_translate == .PREFORM_TRANSLATIONS) {
+                            DEF.set_cell(&m.mat, 1, 3, num_cast(v, MAT_T));
+                        }
+                    },
+                    .TRANSLATE_Z => |v| {
+                        if (should_translate == .PREFORM_TRANSLATIONS) {
+                            DEF.set_cell(&m.mat, 2, 3, num_cast(v, MAT_T));
+                        }
+                    },
+                    .TRANSLATE_XY => |v| {
+                        if (should_translate == .PREFORM_TRANSLATIONS) {
+                            DEF.set_cell(&m.mat, 0, 3, num_cast(v[0], MAT_T));
+                            DEF.set_cell(&m.mat, 1, 3, num_cast(v[1], MAT_T));
+                        }
+                    },
+                    .TRANSLATE_YZ => |v| {
+                        if (should_translate == .PREFORM_TRANSLATIONS) {
+                            DEF.set_cell(&m.mat, 1, 3, num_cast(v[0], MAT_T));
+                            DEF.set_cell(&m.mat, 2, 3, num_cast(v[1], MAT_T));
+                        }
+                    },
+                    .TRANSLATE_XZ => |v| {
+                        if (should_translate == .PREFORM_TRANSLATIONS) {
+                            DEF.set_cell(&m.mat, 0, 3, num_cast(v[0], MAT_T));
+                            DEF.set_cell(&m.mat, 2, 3, num_cast(v[1], MAT_T));
+                        }
+                    },
+                    // SCALES
+                    //
+                    // x 0 0 0
+                    // 0 y 0 0
+                    // 0 0 z 0
+                    // 0 0 0 1
+                    .SCALE => |v| {
+                        DEF.set_cell(&m.mat, 0, 0, num_cast(v.get_x(), MAT_T));
+                        DEF.set_cell(&m.mat, 1, 1, num_cast(v.get_y(), MAT_T));
+                        DEF.set_cell(&m.mat, 2, 2, num_cast(v.get_z(), MAT_T));
+                    },
+                    .SCALE_X => |v| {
+                        DEF.set_cell(&m.mat, 0, 0, num_cast(v, MAT_T));
+                    },
+                    .SCALE_Y => |v| {
+                        DEF.set_cell(&m.mat, 1, 1, num_cast(v, MAT_T));
+                    },
+                    .SCALE_Z => |v| {
+                        DEF.set_cell(&m.mat, 2, 2, num_cast(v, MAT_T));
+                    },
+                    .SCALE_XY => |v| {
+                        DEF.set_cell(&m.mat, 0, 0, num_cast(v[0], MAT_T));
+                        DEF.set_cell(&m.mat, 1, 1, num_cast(v[1], MAT_T));
+                    },
+                    .SCALE_YZ => |v| {
+                        DEF.set_cell(&m.mat, 1, 1, num_cast(v[0], MAT_T));
+                        DEF.set_cell(&m.mat, 2, 2, num_cast(v[1], MAT_T));
+                    },
+                    .SCALE_XZ => |v| {
+                        DEF.set_cell(&m.mat, 0, 0, num_cast(v[0], MAT_T));
+                        DEF.set_cell(&m.mat, 2, 2, num_cast(v[1], MAT_T));
+                    },
+                    // SHEARS
+                    //  X away Y   X away Z   Y away X   Y away Z  Z away X   Z away Y
+                    //
+                    //  1 * 0 0    1 0 * 0    1 0 0 0    1 0 0 0   1 0 0 0    1 0 0 0
+                    //  0 1 0 0    0 1 0 0    * 1 0 0    0 1 * 0   0 1 0 0    0 1 0 0
+                    //  0 0 1 0    0 0 1 0    0 0 1 0    0 0 1 0   * 0 1 0    0 * 1 0
+                    //  0 0 0 1    0 0 0 1    0 0 0 1    0 0 0 1   0 0 0 1    0 0 0 1
+                    .SKEW_X_AWAY_FROM_Y => |v| {
+                        DEF.set_cell(&m.mat, 0, 1, num_cast(v, MAT_T));
+                    },
+                    .SKEW_X_AWAY_FROM_Z => |v| {
+                        DEF.set_cell(&m.mat, 0, 2, num_cast(v, MAT_T));
+                    },
+                    .SKEW_Y_AWAY_FROM_X => |v| {
+                        DEF.set_cell(&m.mat, 1, 0, num_cast(v, MAT_T));
+                    },
+                    .SKEW_Y_AWAY_FROM_Z => |v| {
+                        DEF.set_cell(&m.mat, 1, 2, num_cast(v, MAT_T));
+                    },
+                    .SKEW_Z_AWAY_FROM_X => |v| {
+                        DEF.set_cell(&m.mat, 2, 0, num_cast(v, MAT_T));
+                    },
+                    .SKEW_Z_AWAY_FROM_Y => |v| {
+                        DEF.set_cell(&m.mat, 2, 1, num_cast(v, MAT_T));
+                    },
+                    // ROTATIONS
+                    //   X axis          Y axis          Z axis
+                    //
+                    // 1  0  0  0      C  0 -S  0      C -S  0  0
+                    // 0  C  S  0      0  1  0  0      S  C  0  0
+                    // 0 -S  C  0      S  0  C  0      0  0  1  0
+                    // 0  0  0  1      0  0  0  1      0  0  0  1
+                    .ROTATE_AROUND_X_AXIS => |v| {
+                        DEF.set_cell(&m.mat, 1, 1, num_cast(v.cos, MAT_T));
+                        DEF.set_cell(&m.mat, 2, 2, num_cast(v.cos, MAT_T));
+                        DEF.set_cell(&m.mat, 1, 2, num_cast(v.sin, MAT_T));
+                        DEF.set_cell(&m.mat, 2, 1, num_cast(-v.sin, MAT_T));
+                    },
+                    .ROTATE_AROUND_Y_AXIS => |v| {
+                        DEF.set_cell(&m.mat, 0, 0, num_cast(v.cos, MAT_T));
+                        DEF.set_cell(&m.mat, 2, 2, num_cast(v.cos, MAT_T));
+                        DEF.set_cell(&m.mat, 0, 2, num_cast(-v.sin, MAT_T));
+                        DEF.set_cell(&m.mat, 2, 0, num_cast(v.sin, MAT_T));
+                    },
+                    .ROTATE_AROUND_Z_AXIS => |v| {
+                        DEF.set_cell(&m.mat, 0, 0, num_cast(v.cos, MAT_T));
+                        DEF.set_cell(&m.mat, 1, 1, num_cast(v.cos, MAT_T));
+                        DEF.set_cell(&m.mat, 0, 1, num_cast(-v.sin, MAT_T));
+                        DEF.set_cell(&m.mat, 1, 0, num_cast(v.sin, MAT_T));
+                    },
+                }
+                return m;
+            }
+
+            pub fn to_inverse_affine_matrix(self: TransformStep) Matrix.define_square_NxN_matrix_type(T, 4, .ROW_MAJOR, 0) {
+                return self.to_inverse_affine_matrix_advanced(T, .PREFORM_TRANSLATIONS, .ROW_MAJOR, 0);
+            }
+            pub fn to_inverse_affine_matrix_ignore_translations(self: TransformStep) Matrix.define_square_NxN_matrix_type(T, 4, .ROW_MAJOR, 0) {
+                return self.to_inverse_affine_matrix_advanced(T, .IGNORE_TRANSLATIONS, .ROW_MAJOR, 0);
+            }
+
+            pub fn to_inverse_affine_matrix_advanced(self: TransformStep, comptime MAT_T: type, should_translate: ShouldTranslate, comptime MAT_ORDER: Matrix.RowColumnOrder, comptime MAJOR_PAD: comptime_int) Matrix.define_square_NxN_matrix_type(MAT_T, 4, MAT_ORDER, MAJOR_PAD) {
+                const MAT = Matrix.define_square_NxN_matrix_type(MAT_T, 4, MAT_ORDER, MAJOR_PAD);
+                const DEF = MAT.DEF;
+                var m = MAT.IDENTITY;
+                switch (self) {
+                    // TRANSLATIONS
+                    //
+                    // 1 0 0 x
+                    // 0 1 0 y
+                    // 0 0 1 z
+                    // 0 0 0 1
+                    .TRANSLATE => |v| {
+                        if (should_translate == .PREFORM_TRANSLATIONS) {
+                            DEF.set_cell(&m.mat, 0, 3, num_cast(-v.get_x(), MAT_T));
+                            DEF.set_cell(&m.mat, 1, 3, num_cast(-v.get_y(), MAT_T));
+                            DEF.set_cell(&m.mat, 2, 3, num_cast(-v.get_z(), MAT_T));
+                        }
+                    },
+                    .TRANSLATE_X => |v| {
+                        if (should_translate == .PREFORM_TRANSLATIONS) {
+                            DEF.set_cell(&m.mat, 0, 3, num_cast(-v, MAT_T));
+                        }
+                    },
+                    .TRANSLATE_Y => |v| {
+                        if (should_translate == .PREFORM_TRANSLATIONS) {
+                            DEF.set_cell(&m.mat, 1, 3, num_cast(-v, MAT_T));
+                        }
+                    },
+                    .TRANSLATE_Z => |v| {
+                        if (should_translate == .PREFORM_TRANSLATIONS) {
+                            DEF.set_cell(&m.mat, 2, 3, num_cast(-v, MAT_T));
+                        }
+                    },
+                    .TRANSLATE_XY => |v| {
+                        if (should_translate == .PREFORM_TRANSLATIONS) {
+                            DEF.set_cell(&m.mat, 0, 3, num_cast(-v[0], MAT_T));
+                            DEF.set_cell(&m.mat, 1, 3, num_cast(-v[1], MAT_T));
+                        }
+                    },
+                    .TRANSLATE_YZ => |v| {
+                        if (should_translate == .PREFORM_TRANSLATIONS) {
+                            DEF.set_cell(&m.mat, 1, 3, num_cast(-v[0], MAT_T));
+                            DEF.set_cell(&m.mat, 2, 3, num_cast(-v[1], MAT_T));
+                        }
+                    },
+                    .TRANSLATE_XZ => |v| {
+                        if (should_translate == .PREFORM_TRANSLATIONS) {
+                            DEF.set_cell(&m.mat, 0, 3, num_cast(-v[0], MAT_T));
+                            DEF.set_cell(&m.mat, 2, 3, num_cast(-v[1], MAT_T));
+                        }
+                    },
+                    // SCALES
+                    //
+                    // x 0 0 0
+                    // 0 y 0 0
+                    // 0 0 z 0
+                    // 0 0 0 1
+                    .SCALE => |v| {
+                        DEF.set_cell(&m.mat, 0, 0, num_cast(1 / v.get_x(), MAT_T));
+                        DEF.set_cell(&m.mat, 1, 1, num_cast(1 / v.get_y(), MAT_T));
+                        DEF.set_cell(&m.mat, 2, 2, num_cast(1 / v.get_z(), MAT_T));
+                    },
+                    .SCALE_X => |v| {
+                        DEF.set_cell(&m.mat, 0, 0, num_cast(1 / v, MAT_T));
+                    },
+                    .SCALE_Y => |v| {
+                        DEF.set_cell(&m.mat, 1, 1, num_cast(1 / v, MAT_T));
+                    },
+                    .SCALE_Z => |v| {
+                        DEF.set_cell(&m.mat, 2, 2, num_cast(1 / v, MAT_T));
+                    },
+                    .SCALE_XY => |v| {
+                        DEF.set_cell(&m.mat, 0, 0, num_cast(1 / v[0], MAT_T));
+                        DEF.set_cell(&m.mat, 1, 1, num_cast(1 / v[1], MAT_T));
+                    },
+                    .SCALE_YZ => |v| {
+                        DEF.set_cell(&m.mat, 1, 1, num_cast(1 / v[0], MAT_T));
+                        DEF.set_cell(&m.mat, 2, 2, num_cast(1 / v[1], MAT_T));
+                    },
+                    .SCALE_XZ => |v| {
+                        DEF.set_cell(&m.mat, 0, 0, num_cast(1 / v[0], MAT_T));
+                        DEF.set_cell(&m.mat, 2, 2, num_cast(1 / v[1], MAT_T));
+                    },
+                    // SHEARS
+                    //  X away Y   X away Z   Y away X   Y away Z  Z away X   Z away Y
+                    //
+                    //  1 * 0 0    1 0 * 0    1 0 0 0    1 0 0 0   1 0 0 0    1 0 0 0
+                    //  0 1 0 0    0 1 0 0    * 1 0 0    0 1 * 0   0 1 0 0    0 1 0 0
+                    //  0 0 1 0    0 0 1 0    0 0 1 0    0 0 1 0   * 0 1 0    0 * 1 0
+                    //  0 0 0 1    0 0 0 1    0 0 0 1    0 0 0 1   0 0 0 1    0 0 0 1
+                    .SKEW_X_AWAY_FROM_Y => |v| {
+                        DEF.set_cell(&m.mat, 0, 1, num_cast(-v, MAT_T));
+                    },
+                    .SKEW_X_AWAY_FROM_Z => |v| {
+                        DEF.set_cell(&m.mat, 0, 2, num_cast(-v, MAT_T));
+                    },
+                    .SKEW_Y_AWAY_FROM_X => |v| {
+                        DEF.set_cell(&m.mat, 1, 0, num_cast(-v, MAT_T));
+                    },
+                    .SKEW_Y_AWAY_FROM_Z => |v| {
+                        DEF.set_cell(&m.mat, 1, 2, num_cast(-v, MAT_T));
+                    },
+                    .SKEW_Z_AWAY_FROM_X => |v| {
+                        DEF.set_cell(&m.mat, 2, 0, num_cast(-v, MAT_T));
+                    },
+                    .SKEW_Z_AWAY_FROM_Y => |v| {
+                        DEF.set_cell(&m.mat, 2, 1, num_cast(-v, MAT_T));
+                    },
+                    // ROTATIONS
+                    //   X axis          Y axis          Z axis
+                    //
+                    // 1  0  0  0      C  0 -S  0      C -S  0  0
+                    // 0  C  S  0      0  1  0  0      S  C  0  0
+                    // 0 -S  C  0      S  0  C  0      0  0  1  0
+                    // 0  0  0  1      0  0  0  1      0  0  0  1
+                    .ROTATE_AROUND_X_AXIS => |v| {
+                        DEF.set_cell(&m.mat, 1, 1, num_cast(v.cos, MAT_T));
+                        DEF.set_cell(&m.mat, 2, 2, num_cast(v.cos, MAT_T));
+                        DEF.set_cell(&m.mat, 1, 2, num_cast(-v.sin, MAT_T));
+                        DEF.set_cell(&m.mat, 2, 1, num_cast(v.sin, MAT_T));
+                    },
+                    .ROTATE_AROUND_Y_AXIS => |v| {
+                        DEF.set_cell(&m.mat, 0, 0, num_cast(v.cos, MAT_T));
+                        DEF.set_cell(&m.mat, 2, 2, num_cast(v.cos, MAT_T));
+                        DEF.set_cell(&m.mat, 0, 2, num_cast(v.sin, MAT_T));
+                        DEF.set_cell(&m.mat, 2, 0, num_cast(-v.sin, MAT_T));
+                    },
+                    .ROTATE_AROUND_Z_AXIS => |v| {
+                        DEF.set_cell(&m.mat, 0, 0, num_cast(v.cos, MAT_T));
+                        DEF.set_cell(&m.mat, 1, 1, num_cast(v.cos, MAT_T));
+                        DEF.set_cell(&m.mat, 0, 1, num_cast(v.sin, MAT_T));
+                        DEF.set_cell(&m.mat, 1, 0, num_cast(-v.sin, MAT_T));
+                    },
+                }
+                return m;
+            }
         };
     };
 }

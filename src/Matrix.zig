@@ -1,6 +1,8 @@
-//! Defines arbitrary matrix types with convenient algebra methods
+//! This module provides matrix structures with aritrary types, sizes, row-column-major-order,
+//! and possible padding on the end of each major (on the end of each row for row-major, on end of each col for col-major)
 //!
-//! All methods are simply convenient wrappers around the `Math.zig` module's 'arbitrary matrix' functions
+//! All methods are simply convenient wrappers around the `Matrix_Advanced.zig` (exposed as `Advanced` here) module's functions,
+//! which provide more flexibility at the cost of a lot more verbosity.
 //!
 //! //TODO Documentation
 //! #### License: Zlib
@@ -27,7 +29,6 @@
 
 const std = @import("std");
 const math = std.math;
-const assert = std.debug.assert;
 
 const Root = @import("./_root.zig");
 const ShapeWinding = Root.CommonTypes.ShapeWinding;
@@ -40,63 +41,109 @@ const assert_is_float = Assert.assert_is_float;
 const assert_with_reason = Assert.assert_with_reason;
 const num_cast = Root.Cast.num_cast;
 
+pub fn assert_anytype_is_matrix_and_get_def(val: anytype, src: ?std.builtin.SourceLocation) MatrixDef {
+    assert_with_reason(Types.type_has_decl_with_type(@TypeOf(val), "DEF", MatrixDef), src, "type is not a matrix (missing `DEF` declaration with type `MatrixDef`), got type `{s}`", .{@typeName(@TypeOf(val))});
+    const MAT = @field(val, "DEF").Matrix();
+    assert_with_reason(Types.type_has_field_with_type(@TypeOf(val), "mat", MAT), src, "type is not a matrix (missing `mat` field with type `{s}`), got type `{s}`", .{ @typeName(MAT), @typeName(@TypeOf(val)) });
+    return @field(val, "DEF");
+}
+
 pub const RowColumnOrder = Root.CommonTypes.RowColumnOrder;
 pub const Advanced = @import("./Matrix_Advanced.zig");
+pub const MatrixDef = Advanced.MatrixDef;
 
+/// Row-major, 0 padding
 pub fn Mat2x2(comptime T: type) type {
-    return define_square_NxN_matrix_type(T, 2);
+    return define_square_NxN_matrix_type(T, 2, .ROW_MAJOR, 0);
 }
-
+/// Row-major, 0 padding
 pub fn Mat3x3(comptime T: type) type {
-    return define_square_NxN_matrix_type(T, 3);
+    return define_square_NxN_matrix_type(T, 3, .ROW_MAJOR, 0);
 }
-
+/// Row-major, 0 padding
 pub fn Mat4x4(comptime T: type) type {
-    return define_square_NxN_matrix_type(T, 4);
+    return define_square_NxN_matrix_type(T, 4, .ROW_MAJOR, 0);
 }
 
+/// Row-major, 0 padding
 pub fn Mat2x3(comptime T: type) type {
-    return define_rectangular_RxC_matrix_type(T, 2, 3);
+    return define_rectangular_RxC_matrix_type(T, 2, 3, .ROW_MAJOR, 0);
 }
+/// Row-major, 0 padding
 pub fn Mat2x4(comptime T: type) type {
-    return define_rectangular_RxC_matrix_type(T, 2, 4);
+    return define_rectangular_RxC_matrix_type(T, 2, 4, .ROW_MAJOR, 0);
 }
+/// Row-major, 0 padding
 pub fn Mat3x2(comptime T: type) type {
-    return define_rectangular_RxC_matrix_type(T, 3, 2);
+    return define_rectangular_RxC_matrix_type(T, 3, 2, .ROW_MAJOR, 0);
 }
+/// Row-major, 0 padding
 pub fn Mat4x2(comptime T: type) type {
-    return define_rectangular_RxC_matrix_type(T, 4, 2);
+    return define_rectangular_RxC_matrix_type(T, 4, 2, .ROW_MAJOR, 0);
 }
 
+/// Row-major, 0 padding
 pub fn Mat3x4(comptime T: type) type {
-    return define_rectangular_RxC_matrix_type(T, 3, 4);
+    return define_rectangular_RxC_matrix_type(T, 3, 4, .ROW_MAJOR, 0);
 }
+/// Row-major, 0 padding
 pub fn Mat4x3(comptime T: type) type {
-    return define_rectangular_RxC_matrix_type(T, 4, 3);
+    return define_rectangular_RxC_matrix_type(T, 4, 3, .ROW_MAJOR, 0);
 }
 
-//comptime ORDER: RowColumnOrder
+pub fn define_square_NxN_matrix_type_from_def(comptime DEF: Advanced.MatrixDef) type {
+    assert_with_reason(DEF.ROWS == DEF.COLS, @src(), "cannot define a square matrix type from a non-square matrix def, got {d}x{d}", .{ DEF.ROWS, DEF.COLS });
+    return define_square_NxN_matrix_type(DEF.T, DEF.ROWS, DEF.ORDER, DEF.MAJOR_PAD);
+}
+
 pub fn define_square_NxN_matrix_type(
     comptime T: type,
-    comptime N: type,
+    comptime N: comptime_int,
+    comptime ORDER: Root.CommonTypes.RowColumnOrder,
+    comptime MAJOR_PAD: comptime_int,
+) type {
+    return define_rectangular_RxC_matrix_type(T, N, N, ORDER, MAJOR_PAD);
+}
+
+pub fn define_rectangular_RxC_matrix_type_from_def(comptime DEF: Advanced.MatrixDef) type {
+    return define_rectangular_RxC_matrix_type(DEF.T, DEF.ROWS, DEF.COLS, DEF.ORDER, DEF.MAJOR_PAD);
+}
+
+pub fn define_rectangular_RxC_matrix_type(
+    comptime T: type,
+    comptime ROWS: comptime_int,
+    comptime COLS: comptime_int,
+    comptime ORDER: Root.CommonTypes.RowColumnOrder,
+    comptime MAJOR_PAD: comptime_int,
 ) type {
     return extern struct {
         const Self = @This();
 
-        mat: [N][N]T = @splat(EMPTY_ROW),
+        mat: DEF.Matrix() = @splat(EMPTY_MAJOR),
 
-        const EMPTY_ROW: [N]T = @splat(ZERO);
+        const EMPTY_MAJOR: [DEF.major_len()]T = @splat(ZERO);
         const ONE: T = if (Types.type_is_vector(T)) @splat(1) else @as(T, 1);
         const ZERO: T = if (Types.type_is_vector(T)) @splat(0) else @as(T, 0);
-        const SMALLER_MAT = define_square_NxN_matrix_type(T, N - 1);
+        const SMALLER_MAT = define_rectangular_RxC_matrix_type(T, ROWS - 1, COLS - 1, ORDER, 0);
+        const IS_SQUARE = ROWS == COLS;
+        pub const DEF = Advanced.MatrixDef{
+            .T = T,
+            .COLS = COLS,
+            .ROWS = ROWS,
+            .MAJOR_PAD = MAJOR_PAD,
+            .ORDER = ORDER,
+        };
 
         pub const EMPTY = Self{};
 
         pub const IDENTITY = make: {
             var out = Self{};
-            for (0..N) |i| {
-                out[i][i] = ONE;
+            if (IS_SQUARE) {
+                for (0..ROWS) |i| {
+                    out[i][i] = ONE;
+                }
             }
+
             break :make out;
         };
 
@@ -104,217 +151,232 @@ pub fn define_square_NxN_matrix_type(
             return EMPTY;
         }
 
+        /// For square matrices this is a matrix filled with all 0's
+        /// except on the main diagonal which is all 1's
+        ///
+        /// for non-square matrices this is filled with all zeroes
         pub fn identity() Self {
             return IDENTITY;
         }
 
-        pub fn new(data: [N][N]T) Self {
+        pub fn new(data: DEF.Matrix()) Self {
             return Self{ .mat = data };
         }
 
+        /// Only valid for square matrices with non-zero determinants
         pub fn inverse(self: Self) Self {
-            return @bitCast(MathX.inverse_of_arbitrary_matrix(T, N, N, @bitCast(self)));
+            return @bitCast(Advanced.inverse_of_matrix(DEF, self.mat, T));
+        }
+        /// Only valid for square matrices with non-zero determinants
+        pub fn inverse_with_new_type(self: Self, comptime NEW_T: type) define_rectangular_RxC_matrix_type(NEW_T, ROWS, COLS, ORDER, MAJOR_PAD) {
+            return @bitCast(Advanced.inverse_of_matrix(DEF, self.mat, NEW_T));
         }
 
-        pub fn inverse_using_adjugate_and_determinant(self_adjugate: Self, self_determinant: T) Self {
-            return @bitCast(MathX.inverse_of_arbitrary_matrix_using_adjugate_and_determinant(T, N, N, @bitCast(self_adjugate), self_determinant));
+        /// Only valid for square matrices with non-zero determinants
+        pub fn inverse_using_adjugate_and_determinant(self_adjugate: Self, self_determinant: anytype) Self {
+            return @bitCast(Advanced.inverse_of_matrix_using_adjugate_and_determinant(DEF, self_adjugate.mat, self_determinant, T));
+        }
+        /// Only valid for square matrices with non-zero determinants
+        pub fn inverse_using_adjugate_and_determinant_with_new_type(self_adjugate: Self, self_determinant: anytype, comptime NEW_T: type) define_rectangular_RxC_matrix_type(NEW_T, ROWS, COLS, ORDER, MAJOR_PAD) {
+            return @bitCast(Advanced.inverse_of_matrix_using_adjugate_and_determinant(DEF, self_adjugate.mat, self_determinant, NEW_T));
         }
 
         pub fn negate(self: Self) Self {
-            return @bitCast(MathX.negate_arbitrary_matrix(T, N, N, @bitCast(self)));
+            return @bitCast(Advanced.negate_matrix_elements(DEF, self.mat, T));
+        }
+        pub fn negate_with_new_type(self: Self, comptime NEW_T: type) define_rectangular_RxC_matrix_type(NEW_T, ROWS, COLS, ORDER, MAJOR_PAD) {
+            return @bitCast(Advanced.negate_matrix_elements(DEF, self.mat, NEW_T));
         }
 
-        pub fn element_minor_matrix(self: Self, row: usize, col: usize) SMALLER_MAT {
-            return @bitCast(MathX.minor_sub_matrix_of_arbitrary_matrix_position(T, N, N, @bitCast(self), row, col));
-        }
-
-        pub fn minor_matrix_determinants(self: Self) Self {
-            return @bitCast(MathX.minor_matrix_determinants_of_arbitrary_matrix(T, N, N, @bitCast(self)));
-        }
-
-        pub fn cofactors_using_minors(self_minors: Self) Self {
-            return @bitCast(MathX.cofactors_of_arbitrary_matrix_minors(T, N, N, @bitCast(self_minors)));
+        pub fn sub_matrix_excluding_row_and_column(self: Self, row: usize, col: usize) SMALLER_MAT {
+            return @bitCast(Advanced.sub_matrix_excluding_row_and_column(DEF, self.mat, row, col));
         }
 
         pub fn cofactors(self: Self) Self {
-            return @bitCast(MathX.cofactors_of_arbitrary_matrix(T, N, N, @bitCast(self)));
+            return @bitCast(Advanced.cofactors_of_matrix(DEF, self.mat, T));
+        }
+        pub fn cofactors_with_new_type(self: Self, comptime NEW_T: type) define_rectangular_RxC_matrix_type(NEW_T, ROWS, COLS, ORDER, MAJOR_PAD) {
+            return @bitCast(Advanced.cofactors_of_matrix(DEF, self.mat, NEW_T));
         }
 
         pub fn transpose(self: Self) Self {
-            return @bitCast(MathX.transpose_arbitrary_matrix(T, N, N, @bitCast(self)));
+            return @bitCast(Advanced.transpose_matrix(DEF, self.mat));
         }
 
         pub fn adjugate(self: Self) Self {
-            return @bitCast(MathX.adjugate_of_arbitrary_matrix(T, N, N, @bitCast(self)));
+            return @bitCast(Advanced.adjugate_of_matrix(DEF, self.mat, T));
+        }
+        pub fn adjugate_with_new_type(self: Self, comptime NEW_T: type) define_rectangular_RxC_matrix_type(NEW_T, ROWS, COLS, ORDER, MAJOR_PAD) {
+            return @bitCast(Advanced.adjugate_of_matrix(DEF, self.mat, NEW_T));
         }
 
         pub fn adjugate_using_cofactors(self_cofactors: Self) Self {
-            return @bitCast(MathX.adjugate_of_arbitrary_matrix_cofactors(T, N, N, @bitCast(self_cofactors)));
+            return @bitCast(Advanced.adjugate_of_matrix_using_cofactors(DEF, self_cofactors.mat));
         }
 
+        /// Only valid for square matrices
         pub fn determinant(self: Self) T {
-            return @bitCast(MathX.determinant_of_arbitrary_matrix(T, N, N, @bitCast(self)));
+            return @bitCast(Advanced.determinant_of_matrix(DEF, self.mat, T));
+        }
+        /// Only valid for square matrices
+        pub fn determinant_with_type(self: Self, comptime DETERMINANT_T: type) DETERMINANT_T {
+            return @bitCast(Advanced.determinant_of_matrix(DEF, self.mat, DETERMINANT_T));
         }
 
-        pub fn multiply(self: Self, other: Self) Self {
-            return @bitCast(MathX.multiply_arbitrary_matrices(T, N, N, @bitCast(self), T, N, N, @bitCast(other), T));
+        /// Only valid for square matrices
+        pub fn determinant_using_precomputed_cofactors(self: Self, known_cofactors: anytype) T {
+            const CO_DEF = assert_anytype_is_matrix_and_get_def(known_cofactors, @src());
+            return @bitCast(Advanced.determinant_of_matrix_precomputed_cofactors(DEF, self.mat, CO_DEF, known_cofactors.mat, T));
+        }
+        /// Only valid for square matrices
+        pub fn determinant_using_precomputed_cofactors_with_type(self: Self, known_cofactors: anytype, comptime DETERMINANT_T: type) DETERMINANT_T {
+            const CO_DEF = assert_anytype_is_matrix_and_get_def(known_cofactors, @src());
+            return @bitCast(Advanced.determinant_of_matrix_precomputed_cofactors(DEF, self.mat, CO_DEF, known_cofactors.mat, DETERMINANT_T));
         }
 
-        /// Returns a new 'column' or 'vector'
-        pub fn multiply_with_column(self: Self, column: [N]T) [N]T {
-            return @bitCast(MathX.multiply_arbitrary_matrices(T, N, N, @bitCast(self), T, N, 1, @bitCast(column), T));
+        /// Only valid when self columns == other rows
+        pub fn multiply(self: Self, other: anytype) Self {
+            const OTHER_DEF = assert_anytype_is_matrix_and_get_def(other, @src());
+            return @bitCast(Advanced.multiply_matrices(DEF, self.mat, OTHER_DEF, other.mat, T, ORDER, MAJOR_PAD));
+        }
+        /// Only valid when self columns == other rows
+        pub fn multiply_with_new_layout(self: Self, other: anytype, comptime NEW_TYPE: type, comptime NEW_ORDER: type, comptime NEW_PADDING: comptime_int) define_rectangular_RxC_matrix_type_from_def(DEF.Multiplied(DEF, NEW_TYPE, NEW_ORDER, NEW_PADDING)) {
+            const OTHER_DEF = assert_anytype_is_matrix_and_get_def(other, @src());
+            return @bitCast(Advanced.multiply_matrices(DEF, self.mat, OTHER_DEF, other.mat, NEW_TYPE, NEW_ORDER, NEW_PADDING));
         }
 
-        pub fn divide(self: Self, denominator: Self) Self {
-            return @bitCast(MathX.divide_arbitrary_matrices(T, N, N, @bitCast(self), T, N, N, @bitCast(denominator), T));
+        /// Only valid for square matrices with non-zero determinants
+        pub fn divide(self: Self, denominator: anytype) Self {
+            const DENOM_DEF = assert_anytype_is_matrix_and_get_def(denominator, @src());
+            return @bitCast(Advanced.divide_matrices(DEF, self.mat, DENOM_DEF, denominator.mat, T, ORDER, MAJOR_PAD));
         }
-        pub fn divide_using_inverse_of_denominator(self: Self, denominator_inverse: Self) Self {
-            return @bitCast(MathX.divide_arbitrary_matrices_using_inverse_of_denominator_matrix(T, N, N, @bitCast(self), T, N, N, @bitCast(denominator_inverse), T));
+        /// Only valid for square matrices with non-zero determinants
+        pub fn divide_with_new_layout(self: Self, denominator: anytype, comptime NEW_TYPE: type, comptime NEW_ORDER: type, comptime NEW_PADDING: comptime_int) define_rectangular_RxC_matrix_type_from_def(DEF.Multiplied(DEF, NEW_TYPE, NEW_ORDER, NEW_PADDING)) {
+            const DENOM_DEF = assert_anytype_is_matrix_and_get_def(denominator, @src());
+            return @bitCast(Advanced.divide_matrices(DEF, self.mat, DENOM_DEF, denominator.mat, NEW_TYPE, NEW_ORDER, NEW_PADDING));
+        }
+        /// Only valid for square matrices with non-zero determinants
+        pub fn divide_using_inverse_of_denominator(self: Self, denominator_inverse: anytype) Self {
+            const INV_DENOM_DEF = assert_anytype_is_matrix_and_get_def(denominator_inverse, @src());
+            return @bitCast(Advanced.divide_matrices_using_inverse_of_denominator_matrix(DEF, self.mat, INV_DENOM_DEF, denominator_inverse.mat, T, ORDER, MAJOR_PAD));
+        }
+        /// Only valid for square matrices with non-zero determinants
+        pub fn divide_using_inverse_of_denominator_with_new_layout(self: Self, denominator_inverse: anytype, comptime NEW_TYPE: type, comptime NEW_ORDER: type, comptime NEW_PADDING: comptime_int) define_rectangular_RxC_matrix_type_from_def(DEF.Multiplied(DEF, NEW_TYPE, NEW_ORDER, NEW_PADDING)) {
+            const INV_DENOM_DEF = assert_anytype_is_matrix_and_get_def(denominator_inverse, @src());
+            return @bitCast(Advanced.divide_matrices_using_inverse_of_denominator_matrix(DEF, self.mat, INV_DENOM_DEF, denominator_inverse.mat, NEW_TYPE, NEW_ORDER, NEW_PADDING));
         }
 
-        pub fn add(self: Self, other: Self) Self {
-            return @bitCast(MathX.add_arbitrary_matrices(T, N, N, @bitCast(self), T, N, N, @bitCast(other), T));
+        /// This simply multiplies each cell in `self` with the matching cell in `other`
+        ///
+        /// This is NOT the same as a true matrix multiplication
+        pub fn non_algebraic_multiply(self: Self, other: anytype) Self {
+            const OTHER_DEF = assert_anytype_is_matrix_and_get_def(other, @src());
+            return @bitCast(Advanced.non_algebraic_multiply_matrices(DEF, self.mat, OTHER_DEF, other.mat, T, ORDER, MAJOR_PAD));
+        }
+        /// This simply multiplies each cell in `self` with the matching cell in `other`
+        ///
+        /// This is NOT the same as a true matrix multiplication
+        pub fn non_algebraic_multiply_with_new_layout(self: Self, other: anytype, comptime NEW_TYPE: type, comptime NEW_ORDER: type, comptime NEW_PADDING: comptime_int) define_rectangular_RxC_matrix_type_from_def(DEF.with_new_type_order_padding(NEW_TYPE, NEW_ORDER, NEW_PADDING)) {
+            const OTHER_DEF = assert_anytype_is_matrix_and_get_def(other, @src());
+            return @bitCast(Advanced.non_algebraic_multiply_matrices(DEF, self.mat, OTHER_DEF, other.mat, NEW_TYPE, NEW_ORDER, NEW_PADDING));
         }
 
-        pub fn subtract(self: Self, other: Self) Self {
-            return @bitCast(MathX.subtract_arbitrary_matrices(T, N, N, @bitCast(self), T, N, N, @bitCast(other), T));
+        /// This simply divides each cell in `self` by the matching cell in `other`
+        ///
+        /// This is NOT the same as a true matrix division (multiplication by inverse)
+        pub fn non_algebraic_divide(self: Self, other: anytype) Self {
+            const OTHER_DEF = assert_anytype_is_matrix_and_get_def(other, @src());
+            return @bitCast(Advanced.non_algebraic_divide_matrices(DEF, self.mat, OTHER_DEF, other.mat, T, ORDER, MAJOR_PAD));
+        }
+        /// This simply divides each cell in `self` by the matching cell in `other`
+        ///
+        /// This is NOT the same as a true matrix division (multiplication by inverse)
+        pub fn non_algebraic_divide_with_new_layout(self: Self, other: anytype, comptime NEW_TYPE: type, comptime NEW_ORDER: type, comptime NEW_PADDING: comptime_int) define_rectangular_RxC_matrix_type_from_def(DEF.with_new_type_order_padding(NEW_TYPE, NEW_ORDER, NEW_PADDING)) {
+            const OTHER_DEF = assert_anytype_is_matrix_and_get_def(other, @src());
+            return @bitCast(Advanced.non_algebraic_divide_matrices(DEF, self.mat, OTHER_DEF, other.mat, NEW_TYPE, NEW_ORDER, NEW_PADDING));
+        }
+
+        pub fn add(self: Self, other: anytype) Self {
+            const OTHER_DEF = assert_anytype_is_matrix_and_get_def(other, @src());
+            return @bitCast(Advanced.add_matrices(DEF, self.mat, OTHER_DEF, other.mat, T, ORDER, MAJOR_PAD));
+        }
+        pub fn add_with_new_layout(self: Self, other: anytype, comptime NEW_TYPE: type, comptime NEW_ORDER: type, comptime NEW_PADDING: comptime_int) define_rectangular_RxC_matrix_type_from_def(DEF.with_new_type_order_padding(NEW_TYPE, NEW_ORDER, NEW_PADDING)) {
+            const OTHER_DEF = assert_anytype_is_matrix_and_get_def(other, @src());
+            return @bitCast(Advanced.add_matrices(DEF, self.mat, OTHER_DEF, other.mat, NEW_TYPE, NEW_ORDER, NEW_PADDING));
+        }
+
+        pub fn subtract(self: Self, other: anytype) Self {
+            const OTHER_DEF = assert_anytype_is_matrix_and_get_def(other, @src());
+            return @bitCast(Advanced.subtract_matrices(DEF, self.mat, OTHER_DEF, other.mat, T, ORDER, MAJOR_PAD));
+        }
+        pub fn subtract_with_new_layout(self: Self, other: anytype, comptime NEW_TYPE: type, comptime NEW_ORDER: type, comptime NEW_PADDING: comptime_int) define_rectangular_RxC_matrix_type_from_def(DEF.with_new_type_order_padding(NEW_TYPE, NEW_ORDER, NEW_PADDING)) {
+            const OTHER_DEF = assert_anytype_is_matrix_and_get_def(other, @src());
+            return @bitCast(Advanced.subtract_matrices(DEF, self.mat, OTHER_DEF, other.mat, NEW_TYPE, NEW_ORDER, NEW_PADDING));
         }
 
         pub fn add_scalar(self: Self, val: anytype) Self {
-            return @bitCast(MathX.add_scalar_to_arbitrary_matrix(T, N, N, @bitCast(self), val));
+            return @bitCast(Advanced.add_scalar_to_matrix(DEF, self.mat, val, T));
         }
-        pub fn subtract_scalar_from_self(self: Self, val: T) Self {
-            return @bitCast(MathX.subtract_scalar_from_arbitrary_matrix(T, N, N, @bitCast(self), val));
+        pub fn add_scalar_with_new_type(self: Self, val: anytype, comptime NEW_TYPE: type) define_rectangular_RxC_matrix_type_from_def(DEF.with_new_type(NEW_TYPE)) {
+            return @bitCast(Advanced.add_scalar_to_matrix(DEF, self.mat, val, NEW_TYPE));
         }
-        pub fn subtract_self_from_scalar(self: Self, val: T) Self {
-            return @bitCast(MathX.subtract_arbitrary_matrix_from_scalar(T, N, N, @bitCast(self), val));
+        pub fn subtract_scalar(self: Self, val: anytype) Self {
+            return @bitCast(Advanced.subtract_scalar_from_matrix(DEF, self.mat, val, T));
         }
-        pub fn multiply_scalar(self: Self, val: T) Self {
-            return @bitCast(MathX.multiply_arbitrary_matrix_by_scalar(T, N, N, @bitCast(self), val));
+        pub fn subtract_scalar_with_new_type(self: Self, val: anytype, comptime NEW_TYPE: type) define_rectangular_RxC_matrix_type_from_def(DEF.with_new_type(NEW_TYPE)) {
+            return @bitCast(Advanced.subtract_scalar_from_matrix(DEF, self.mat, val, NEW_TYPE));
         }
-        pub fn divide_self_by_scalar(self: Self, val: T) Self {
-            return @bitCast(MathX.multiply_arbitrary_matrix_by_scalar(T, N, N, @bitCast(self), val));
+        pub fn subtract_self_from_scalar(self: Self, val: anytype) Self {
+            return @bitCast(Advanced.subtract_matrix_from_scalar(DEF, self.mat, val, T));
         }
-        pub fn divide_scalar_by_self(self: Self, val: T) Self {
-            return @bitCast(MathX.multiply_arbitrary_matrix_by_scalar(T, N, N, @bitCast(self), val));
+        pub fn subtract_self_from_scalar_with_new_type(self: Self, val: anytype, comptime NEW_TYPE: type) define_rectangular_RxC_matrix_type_from_def(DEF.with_new_type(NEW_TYPE)) {
+            return @bitCast(Advanced.subtract_matrix_from_scalar(DEF, self.mat, val, NEW_TYPE));
+        }
+        pub fn multiply_by_scalar(self: Self, val: anytype) Self {
+            return @bitCast(Advanced.multiply_matrix_by_scalar(DEF, self.mat, val, T));
+        }
+        pub fn multiply_by_scalar_with_new_type(self: Self, val: anytype, comptime NEW_TYPE: type) define_rectangular_RxC_matrix_type_from_def(DEF.with_new_type(NEW_TYPE)) {
+            return @bitCast(Advanced.multiply_matrix_by_scalar(DEF, self.mat, val, NEW_TYPE));
+        }
+        pub fn divide_by_scalar(self: Self, val: anytype) Self {
+            return @bitCast(Advanced.divide_matrix_by_scalar(DEF, self.mat, val, T));
+        }
+        pub fn divide_by_scalar_with_new_type(self: Self, val: anytype, comptime NEW_TYPE: type) define_rectangular_RxC_matrix_type_from_def(DEF.with_new_type(NEW_TYPE)) {
+            return @bitCast(Advanced.divide_matrix_by_scalar(DEF, self.mat, val, NEW_TYPE));
+        }
+        pub fn divide_scalar_by_self(self: Self, val: anytype) Self {
+            return @bitCast(Advanced.divide_scalar_by_matrix(DEF, self.mat, val, T));
+        }
+        pub fn divide_scalar_by_self_with_new_type(self: Self, val: anytype, comptime NEW_TYPE: type) define_rectangular_RxC_matrix_type_from_def(DEF.with_new_type(NEW_TYPE)) {
+            return @bitCast(Advanced.divide_scalar_by_matrix(DEF, self.mat, val, NEW_TYPE));
         }
 
-        pub fn row_echelon_form(self: Self, leading_mode: MathX.RowEchelonLeadingMode) MathX.RowEchelonResult(T, N, N) {
-            return MathX.row_echelon_form_of_arbitrary_matrix(T, leading_mode, N, N, @bitCast(self));
+        pub fn row_echelon_form(self: Self, mode: Advanced.RowEchelonMode, short_circuit: Advanced.RowEchelonShortCircuitMode, comptime PIVOT_MODE: Advanced.RowEchelonPivotCache) RowEchelonForm(DEF.with_new_type(T), T, T, PIVOT_MODE) {
+            return @bitCast(Advanced.row_echelon_form_of_matrix(DEF, self.mat, mode, short_circuit, T, T, PIVOT_MODE));
+        }
+        pub fn row_echelon_form_with_new_type(self: Self, mode: Advanced.RowEchelonMode, short_circuit: Advanced.RowEchelonShortCircuitMode, comptime CELL_TYPE: type, comptime DETERMINANT_TYPE: type, comptime PIVOT_MODE: Advanced.RowEchelonPivotCache) RowEchelonForm(DEF.with_new_type(CELL_TYPE), CELL_TYPE, DETERMINANT_TYPE, PIVOT_MODE) {
+            return @bitCast(Advanced.row_echelon_form_of_matrix(DEF, self.mat, mode, short_circuit, CELL_TYPE, DETERMINANT_TYPE, PIVOT_MODE));
         }
     };
 }
 
-pub fn define_rectangular_RxC_matrix_type(comptime T: type, comptime ROWS: type, comptime COLS: type) type {
+/// This layout exactly matches the equivalent in `Matrix_Advanced.zig`, but with the `mat` field as a matrix wrapper instead
+pub fn RowEchelonForm(comptime _DEF: MatrixDef, comptime CELL_TYPE: type, comptime DETERMINANT_TYPE: type, comptime PIVOT_MODE: Advanced.RowEchelonPivotCache) type {
     return extern struct {
         const Self = @This();
+        pub const DEF = _DEF.with_new_type(CELL_TYPE);
 
-        mat: [ROWS][COLS]T = @splat(EMPTY_ROW),
-
-        const EMPTY_ROW: [COLS]T = @splat(ZERO);
-        const ONE: T = if (Types.type_is_vector(T)) @splat(1) else @as(T, 1);
-        const ZERO: T = if (Types.type_is_vector(T)) @splat(0) else @as(T, 0);
-        const SMALLER_MAT = define_rectangular_RxC_matrix_type(T, ROWS - 1, COLS - 1);
-
-        pub const EMPTY = Self{};
-
-        pub fn empty() Self {
-            return EMPTY;
-        }
-
-        pub fn new(data: [ROWS][COLS]T) Self {
-            return Self{ .mat = data };
-        }
-
-        // pub fn inverse(self: Self) Self {
-        //     return @bitCast(MathX.inverse_of_arbitrary_matrix(T, ROWS, COLS, @bitCast(self)));
-        // }
-
-        // pub fn inverse_using_adjugate_and_determinant(self_adjugate: Self, self_determinant: T) Self {
-        //     return @bitCast(MathX.inverse_of_arbitrary_matrix_using_adjugate_and_determinant(T, ROWS, COLS, @bitCast(self_adjugate), self_determinant));
-        // }
-
-        pub fn negate(self: Self) Self {
-            return @bitCast(MathX.negate_arbitrary_matrix(T, ROWS, COLS, @bitCast(self)));
-        }
-
-        pub fn element_minor_matrix(self: Self, row: usize, col: usize) SMALLER_MAT {
-            return @bitCast(MathX.minor_sub_matrix_of_arbitrary_matrix_position(T, ROWS, COLS, @bitCast(self), row, col));
-        }
-
-        pub fn minor_matrix_determinants(self: Self) Self {
-            return @bitCast(MathX.minor_matrix_determinants_of_arbitrary_matrix(T, ROWS, COLS, @bitCast(self)));
-        }
-
-        pub fn cofactors_using_minors(self_minors: Self) Self {
-            return @bitCast(MathX.cofactors_of_arbitrary_matrix_minors(T, ROWS, COLS, @bitCast(self_minors)));
-        }
-
-        pub fn cofactors(self: Self) Self {
-            return @bitCast(MathX.cofactors_of_arbitrary_matrix(T, ROWS, COLS, @bitCast(self)));
-        }
-
-        pub fn transpose(self: Self) Self {
-            return @bitCast(MathX.transpose_arbitrary_matrix(T, ROWS, COLS, @bitCast(self)));
-        }
-
-        pub fn adjugate(self: Self) Self {
-            return @bitCast(MathX.adjugate_of_arbitrary_matrix(T, ROWS, COLS, @bitCast(self)));
-        }
-
-        pub fn adjugate_using_cofactors(self_cofactors: Self) Self {
-            return @bitCast(MathX.adjugate_of_arbitrary_matrix_cofactors(T, ROWS, COLS, @bitCast(self_cofactors)));
-        }
-
-        // pub fn determinant(self: Self) T {
-        //     return @bitCast(MathX.determinant_of_arbitrary_matrix(T, ROWS, COLS, @bitCast(self)));
-        // }
-
-        pub fn multiply(self: Self, other: Self) Self {
-            return @bitCast(MathX.multiply_arbitrary_matrices(T, ROWS, COLS, @bitCast(self), T, ROWS, COLS, @bitCast(other), T));
-        }
-
-        /// Returns a new 'column' or 'vector'
-        pub fn multiply_with_column(self: Self, column: [COLS]T) [COLS]T {
-            return @bitCast(MathX.multiply_arbitrary_matrices(T, ROWS, COLS, @bitCast(self), T, COLS, 1, @bitCast(column), T));
-        }
-
-        pub fn divide(self: Self, denominator: Self) Self {
-            return @bitCast(MathX.divide_arbitrary_matrices(T, ROWS, COLS, @bitCast(self), T, ROWS, COLS, @bitCast(denominator), T));
-        }
-        pub fn divide_using_inverse_of_denominator(self: Self, denominator_inverse: Self) Self {
-            return @bitCast(MathX.divide_arbitrary_matrices_using_inverse_of_denominator_matrix(T, ROWS, COLS, @bitCast(self), T, ROWS, COLS, @bitCast(denominator_inverse), T));
-        }
-
-        pub fn add(self: Self, other: Self) Self {
-            return @bitCast(MathX.add_arbitrary_matrices(T, ROWS, COLS, @bitCast(self), T, ROWS, COLS, @bitCast(other), T));
-        }
-
-        pub fn subtract(self: Self, other: Self) Self {
-            return @bitCast(MathX.subtract_arbitrary_matrices(T, ROWS, COLS, @bitCast(self), T, ROWS, COLS, @bitCast(other), T));
-        }
-
-        pub fn add_scalar(self: Self, val: anytype) Self {
-            return @bitCast(MathX.add_scalar_to_arbitrary_matrix(T, ROWS, COLS, @bitCast(self), val));
-        }
-        pub fn subtract_scalar_from_self(self: Self, val: T) Self {
-            return @bitCast(MathX.subtract_scalar_from_arbitrary_matrix(T, ROWS, COLS, @bitCast(self), val));
-        }
-        pub fn subtract_self_from_scalar(self: Self, val: T) Self {
-            return @bitCast(MathX.subtract_arbitrary_matrix_from_scalar(T, ROWS, COLS, @bitCast(self), val));
-        }
-        pub fn multiply_scalar(self: Self, val: T) Self {
-            return @bitCast(MathX.multiply_arbitrary_matrix_by_scalar(T, ROWS, COLS, @bitCast(self), val));
-        }
-        pub fn divide_self_by_scalar(self: Self, val: T) Self {
-            return @bitCast(MathX.multiply_arbitrary_matrix_by_scalar(T, ROWS, COLS, @bitCast(self), val));
-        }
-        pub fn divide_scalar_by_self(self: Self, val: T) Self {
-            return @bitCast(MathX.multiply_arbitrary_matrix_by_scalar(T, ROWS, COLS, @bitCast(self), val));
-        }
-
-        pub fn row_echelon_form(self: Self, leading_mode: MathX.RowEchelonLeadingMode) MathX.RowEchelonResult(T, ROWS, COLS) {
-            return MathX.row_echelon_form_of_arbitrary_matrix(T, leading_mode, ROWS, COLS, @bitCast(self));
-        }
+        rank: usize = 0,
+        determinant_factor: DETERMINANT_TYPE = 1,
+        pivots: switch (PIVOT_MODE) {
+            .DO_NOT_CACHE_PIVOTS => void,
+            .CACHE_PIVOT_X_INDEXES => [DEF.ROWS]usize,
+            .CACHE_PIVOT_VALUES => [DEF.ROWS]DEF.T,
+        } = switch (PIVOT_MODE) {
+            .DO_NOT_CACHE_PIVOTS => void{},
+            .CACHE_PIVOT_X_INDEXES => @as([DEF.ROWS]usize, @splat(0)),
+            .CACHE_PIVOT_VALUES => @as([DEF.ROWS]CELL_TYPE, @splat(0)),
+        },
+        mat: define_rectangular_RxC_matrix_type_from_def(DEF),
     };
 }

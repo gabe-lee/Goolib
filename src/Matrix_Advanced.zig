@@ -162,6 +162,16 @@ pub const MatrixDef = struct {
         };
     }
 
+    pub inline fn Multiplied(comptime DEF: MatrixDef, comptime OTHER_DEF: MatrixDef, comptime NEW_TYPE: type, comptime NEW_ORDER: RowColOrder, comptime NEW_PADDING: comptime_int) MatrixDef {
+        return MatrixDef{
+            .T = NEW_TYPE,
+            .ROWS = DEF.ROWS,
+            .COLS = OTHER_DEF.COLS,
+            .ORDER = NEW_ORDER,
+            .MAJOR_PAD = NEW_PADDING,
+        };
+    }
+
     pub inline fn TransposedWithPad(comptime DEF: MatrixDef, comptime NEW_MAJOR_PAD: comptime_int) MatrixDef {
         return MatrixDef{
             .T = DEF.T,
@@ -325,6 +335,15 @@ pub const MatrixDef = struct {
             .COLS = NEW_COLS,
             .ORDER = NEW_ORDER,
             .MAJOR_PAD = DEF.MAJOR_PAD,
+        };
+    }
+    pub inline fn with_new_type_order_padding(comptime DEF: MatrixDef, comptime NEW_T: type, comptime NEW_ORDER: RowColOrder, comptime NEW_MAJOR_PAD: comptime_int) MatrixDef {
+        return MatrixDef{
+            .T = NEW_T,
+            .ROWS = DEF.ROWS,
+            .COLS = DEF.COLS,
+            .ORDER = NEW_ORDER,
+            .MAJOR_PAD = NEW_MAJOR_PAD,
         };
     }
     pub inline fn with_size_minus_one(comptime DEF: MatrixDef) MatrixDef {
@@ -521,11 +540,12 @@ pub const MatrixDef = struct {
     }
 
     pub fn RowEchelonResult(comptime _DEF: MatrixDef, comptime CELL_TYPE: type, comptime DETERMINANT_TYPE: type, comptime PIVOT_MODE: RowEchelonPivotCache) type {
-        return struct {
+        return extern struct {
             const Self = @This();
             pub const DEF = _DEF.with_new_type(CELL_TYPE);
 
             rank: usize = 0,
+            determinant_factor: DETERMINANT_TYPE = 1,
             pivots: switch (PIVOT_MODE) {
                 .DO_NOT_CACHE_PIVOTS => void,
                 .CACHE_PIVOT_X_INDEXES => [DEF.ROWS]usize,
@@ -535,7 +555,6 @@ pub const MatrixDef = struct {
                 .CACHE_PIVOT_X_INDEXES => @as([DEF.ROWS]usize, @splat(0)),
                 .CACHE_PIVOT_VALUES => @as([DEF.ROWS]CELL_TYPE, @splat(0)),
             },
-            determinant_factor: DETERMINANT_TYPE = 1,
             mat: DEF.Matrix(),
         };
     }
@@ -595,12 +614,12 @@ pub fn multiply_matrices(
     comptime T_OUT: type,
     comptime OUT_ORDER: RowColOrder,
     comptime OUT_PADDING: comptime_int,
-) MatrixDef.def(T_OUT, DEF_A.ROWS, DEF_B.COLS, OUT_ORDER, OUT_PADDING).Matrix() {
+) MatrixDef.Multiplied(DEF_A, DEF_B, T_OUT, OUT_ORDER, OUT_PADDING).Matrix() {
     DEF_A.assert_is_matrix(@src(), mat_a);
     DEF_B.assert_is_matrix(@src(), mat_b);
     DEF_A.assert_can_multiply_or_divide(DEF_B, @src());
     const UPGRADE = MathX.Upgraded2Numbers(DEF_A.T, DEF_B.T);
-    const OUT = MatrixDef.def(T_OUT, DEF_A.ROWS, DEF_B.COLS, OUT_ORDER, OUT_PADDING);
+    const OUT = MatrixDef.Multiplied(DEF_A, DEF_B, T_OUT, OUT_ORDER, OUT_PADDING);
     var out: OUT.Matrix() = undefined;
     for (0..OUT.major_len()) |major| {
         for (0..OUT.minor_len()) |minor| {
@@ -652,6 +671,8 @@ test "multiply_matrices" {
     try Root.Testing.expect_slices_equal(real_out_slice, "real_out_slice", expected_out_slice, "expected_out_slice", "wrong result", .{});
 }
 
+/// Exactly the same as just using `multiply_matrices(DEF_NUMER, mat_numer, DEF_DENOM_INV, mat_denom_inverse, ...)`,
+/// but this signature clearly describes what is being done
 pub fn divide_matrices_using_inverse_of_denominator_matrix(comptime DEF_NUMER: MatrixDef, mat_numer: anytype, comptime DEF_DENOM_INV: MatrixDef, mat_denom_inverse: anytype, comptime T_OUT: type, comptime OUT_ORDER: RowColOrder, comptime OUT_PADDING: comptime_int) MatrixDef.def(T_OUT, DEF_NUMER.ROWS, DEF_DENOM_INV.COLS, OUT_ORDER, OUT_PADDING).Matrix() {
     return multiply_matrices(DEF_NUMER, mat_numer, DEF_DENOM_INV, mat_denom_inverse, T_OUT, OUT_ORDER, OUT_PADDING);
 }
@@ -780,7 +801,7 @@ pub fn non_algebraic_multiply_matrices(
         const vec_a: DEF_A.FlatVec() = DEF_A.get_flat_vec(mat_a);
         const vec_b: DEF_B.FlatVec() = DEF_B.get_flat_vec(mat_b);
         const vec_out: DEF_OUT.FlatVec() = MathX.upgrade_multiply_out(vec_a, vec_b, DEF_OUT.FlatVec());
-        return change_matrix_major_order(DEF_OUT, @as(DEF_OUT.Matrix(), @bitCast(vec_out)), OUT_ORDER);
+        return @bitCast(vec_out);
     } else {
         var out: DEF_OUT.Matrix() = undefined;
         for (0..DEF_OUT.major_len()) |major| {
@@ -815,7 +836,7 @@ pub fn non_algebraic_divide_matrices(
         const vec_a: DEF_A.FlatVec() = DEF_A.get_flat_vec(mat_a);
         const vec_b: DEF_B.FlatVec() = DEF_B.get_flat_vec(mat_b);
         const vec_out: DEF_OUT.FlatVec() = MathX.upgrade_multiply_out(vec_a, vec_b, DEF_OUT.FlatVec());
-        return change_matrix_major_order(DEF_OUT, @as(DEF_OUT.Matrix(), @bitCast(vec_out)), OUT_ORDER);
+        return @bitCast(vec_out);
     } else {
         var out: DEF_OUT.Matrix() = undefined;
         for (0..DEF_OUT.major_len()) |major| {
@@ -1428,7 +1449,8 @@ pub fn cofactors_of_matrix(comptime DEF: MatrixDef, mat: anytype, comptime NEW_C
     return out;
 }
 
-/// Exactly the same as just using `transpose_matrix(DEF, mat_cofactors)`,
+/// Exactly the same as just using `transpose_matrix(CO_DEF, mat_cofactors)`,
+/// but this signature clearly describes what is being done
 pub fn adjugate_of_matrix_using_cofactors(comptime CO_DEF: MatrixDef, mat_cofactors: anytype) CO_DEF.Transposed().Matrix() {
     return transpose_matrix(CO_DEF, mat_cofactors);
 }

@@ -344,3 +344,8 @@ pub const ParamRefType = enum(u8) {
     POINTER,
     CONST_POINTER,
 };
+
+pub const ShouldTranslate = enum(u8) {
+    IGNORE_TRANSLATIONS,
+    PREFORM_TRANSLATIONS,
+};
