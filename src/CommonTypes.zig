@@ -359,3 +359,10 @@ pub const IncludeOffests = enum(u8) {
     DO_NOT_INCLUDE_OFFSETS,
     INCLUDE_OFFSETS,
 };
+
+pub const ArchSize = enum(u8) {
+    _32,
+    _64,
+
+    pub const THIS_SIZE: ArchSize = if (@sizeOf(usize) == 4) ._32 else ._64;
+};

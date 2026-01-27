@@ -133,6 +133,12 @@ pub const MatrixDef = struct {
             .COLUMN_MAJOR => DEF.COLS,
         };
     }
+    pub inline fn major_stride(comptime DEF: MatrixDef) comptime_int {
+        return switch (DEF.ORDER) {
+            .ROW_MAJOR => DEF.COLS + DEF.MAJOR_PAD,
+            .COLUMN_MAJOR => DEF.ROWS + DEF.MAJOR_PAD,
+        };
+    }
     pub inline fn minor_len(comptime DEF: MatrixDef) comptime_int {
         return switch (DEF.ORDER) {
             .ROW_MAJOR => DEF.COLS,
@@ -232,6 +238,12 @@ pub const MatrixDef = struct {
         return switch (DEF.ORDER) {
             .ROW_MAJOR => (DEF.ROWS) * (DEF.COLS + DEF.MAJOR_PAD),
             .COLUMN_MAJOR => (DEF.COLS) * (DEF.ROWS + DEF.MAJOR_PAD),
+        };
+    }
+    pub inline fn total_cells_minus_last_pad(comptime DEF: MatrixDef) comptime_int {
+        return switch (DEF.ORDER) {
+            .ROW_MAJOR => ((DEF.ROWS - 1) * (DEF.COLS + DEF.MAJOR_PAD)) + (DEF.COLS),
+            .COLUMN_MAJOR => ((DEF.COLS - 1) * (DEF.ROWS + DEF.MAJOR_PAD)) + (DEF.ROWS),
         };
     }
     pub inline fn total_size(comptime DEF: MatrixDef) comptime_int {
@@ -569,6 +581,50 @@ pub const MatrixDef = struct {
     }
 };
 
+/// This method copies the data to the destination without touching the
+/// padding bytes. Use this method if other values may be packed into the
+/// memory regions of the padding areas in the destination
+///
+/// One use case is for writing a matrix into a GPU UniformBuffer,
+/// where fields are allowed to be packed into the last padding
+/// area of the matrix
+///
+/// If there is no padding this function compiles to `dest.* = src.*;`
+pub fn safe_copy_skip_all_pad(comptime DEF: MatrixDef, src: *const DEF.Matrix(), dest: *DEF.Matrix()) void {
+    if (DEF.MAJOR_PAD == 0) {
+        dest.* = src.*;
+        return;
+    }
+    const src_ptr: [*]const DEF.T = @ptrCast(src);
+    const dest_ptr: [*]DEF.T = @ptrCast(dest);
+    const LEN = comptime DEF.minor_len();
+    const STRIDE = comptime DEF.major_stride();
+    for (0..DEF.major_len()) |major| {
+        const src_major_ptr = src_ptr + (STRIDE * major);
+        const dest_major_ptr = dest_ptr + (STRIDE * major);
+        @memcpy(dest_major_ptr[0..LEN], src_major_ptr[0..LEN]);
+    }
+}
+/// This method copies the data to the destination without touching the
+/// *last* padding bytes. Use this method if other values may be packed into the
+/// memory regions of the last padding area in the destination
+///
+/// One use case is for writing a matrix into a GPU UniformBuffer,
+/// where fields are allowed to be packed into the last padding
+/// area of the matrix
+///
+/// If there is no padding this function compiles to `dest.* = src.*;`
+pub fn safe_copy_skip_last_pad(comptime DEF: MatrixDef, src: *const DEF.Matrix(), dest: *DEF.Matrix()) void {
+    if (DEF.MAJOR_PAD == 0) {
+        dest.* = src.*;
+        return;
+    }
+    const src_ptr: [*]const DEF.T = @ptrCast(src);
+    const dest_ptr: [*]DEF.T = @ptrCast(dest);
+    const LEN = comptime DEF.total_cells_minus_last_pad();
+    @memcpy(dest_ptr[0..LEN], src_ptr[0..LEN]);
+}
+
 pub const RowEchelonPivotCache = enum(u8) {
     DO_NOT_CACHE_PIVOTS,
     CACHE_PIVOT_X_INDEXES,
@@ -877,11 +933,11 @@ test "transpose_matrix" {
         .{ 3, 7, 11 },
         .{ 4, 8, 12 },
     };
-    const expected_out_flat: *const [12]i32 = @ptrCast(&expected_mat_out);
-    const expected_out_slice: []const i32 = expected_out_flat[0..12];
-    const real_out: [3][4]i32 = transpose_matrix(DEF_A, mat_a);
-    const real_out_flat: *const [12]i32 = @ptrCast(&real_out);
-    const real_out_slice: []const i32 = real_out_flat[0..12];
+    const expected_out_flat: *const [12]u8 = @ptrCast(&expected_mat_out);
+    const expected_out_slice: []const u8 = expected_out_flat[0..12];
+    const real_out: DEF_A.Transposed().Matrix() = transpose_matrix(DEF_A, mat_a);
+    const real_out_flat: *const [12]u8 = @ptrCast(&real_out);
+    const real_out_slice: []const u8 = real_out_flat[0..12];
     try Root.Testing.expect_slices_equal(real_out_slice, "real_out_slice", expected_out_slice, "expected_out_slice", "wrong result", .{});
 }
 
@@ -1376,7 +1432,7 @@ test "row_echelon_form_of_matrix" {
     };
     // const expected_out_flat: *const [16]f32 = @ptrCast(&expected_mat_out);
     // const expected_out_slice: []const f32 = expected_out_flat[0..16];
-    var result = row_echelon_form_of_matrix(DEF_A, mat_a, .ROW_ECHELON_LEADING_1, .STOP_IF_NOT_FULL_RANK, f32, f32);
+    var result = row_echelon_form_of_matrix(DEF_A, mat_a, .ROW_ECHELON_LEADING_1, .STOP_IF_NOT_FULL_RANK, f32, f32, .CACHE_PIVOT_X_INDEXES);
     // const real_out_flat: *const [16]f32 = @ptrCast(&result.mat);
     // const real_out_slice: []const f32 = real_out_flat[0..16];
     // try Root.Testing.expect_slices_equal(real_out_slice, "real_out_slice", expected_out_slice, "expected_out_slice", "wrong result", .{});
@@ -1390,7 +1446,7 @@ test "row_echelon_form_of_matrix" {
         .{ 5.19, 1.63, 4.37, 5.93 },
     };
     // determinant should be 874.39659797
-    result = row_echelon_form_of_matrix(DEF_A, mat_a, .ROW_ECHELON_LEADING_1, .STOP_IF_NOT_FULL_RANK, f32, f32);
+    result = row_echelon_form_of_matrix(DEF_A, mat_a, .ROW_ECHELON_LEADING_1, .STOP_IF_NOT_FULL_RANK, f32, f32, .CACHE_PIVOT_X_INDEXES);
     try Root.Testing.expect_approx_equal(result.determinant_factor, "result.determinant_factor", 0.0001, "0.0001", 874.39659797, "874.39659797", "wrong result", .{});
     try Root.Testing.expect_equal(result.rank, "result.rank", 4, "4", "wrong result", .{});
     // {{ 7.57, 0, 6.49, 7.11 },{ 3.60, 0, 6.85, 0.27 },{ 7.63, 0, 0.69, 2.98 },{ 5.19, 0, 4.37, 5.93 }}
@@ -1401,7 +1457,7 @@ test "row_echelon_form_of_matrix" {
         .{ 5.19, 0, 4.37, 5.93 },
     };
     // determinant should be 0
-    result = row_echelon_form_of_matrix(DEF_A, mat_a, .ROW_ECHELON_LEADING_1, .DO_NOT_STOP_IF_NOT_FULL_RANK, f32, f32);
+    result = row_echelon_form_of_matrix(DEF_A, mat_a, .ROW_ECHELON_LEADING_1, .DO_NOT_STOP_IF_NOT_FULL_RANK, f32, f32, .CACHE_PIVOT_X_INDEXES);
     try Root.Testing.expect_approx_equal(result.determinant_factor, "result.determinant_factor", 0.0001, "0.0001", 0, "0", "wrong result", .{});
     try Root.Testing.expect_equal(result.rank, "result.rank", 3, "3", "wrong result", .{});
 }

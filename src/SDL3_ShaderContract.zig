@@ -5,7 +5,7 @@
 //! for maximum simplicity and portability, and will automatically find the 'best'
 //! way to pack a given set of fields for minimal waste.
 //!
-//! For compatibility reasons, types that are not 32 bits are only supported with 'packed' types and must be
+//! For compatibility reasons, types that are not 32 bits wide are only supported with 'packed' types and must be
 //! unpacked on the GPU side either using a provided function or manually.
 //!
 //! The `GPU_bool` type takes a `Bool32` enum with `.TRUE` and `.FALSE`
@@ -110,6 +110,7 @@ const SEMICOL = ';';
 const SPACE = ' ';
 const COLON = ':';
 const COLON_SPACE = ": ";
+const SPACE_COLON_SPACE = " : ";
 const SPACE_COLON_SPACE_REGISTER = " : register(";
 const HLSL_UNIFORM_REGISTER = 'b';
 const HLSL_TESTURE_REGISTER = 't';
@@ -120,6 +121,7 @@ const OPEN_PAREN = '(';
 const CLOSE_PAREN = ')';
 const CLOSE_PAREN_NEWLINE = ")\n";
 const OPEN_BRACKET = '{';
+const SPACE_OPEN_BRACKET_NEWLINE = " {\n";
 const CLOSE_BRACKET = '}';
 const NEWLINE_CLOSE_BRACKET_SEMICOL_NEWLINE = "\n};\n";
 const CLOSE_PAREN_SPACE_OPEN_BRACKET_NEWLINE = ") {\n";
@@ -129,6 +131,7 @@ const NEWLINE_4_SPACE = "\n    ";
 const SEMICOL_SPACE_COMMENT_OFF = "; // off ";
 const SEMICOL_SPACE = "; ";
 const COMMENT_OFF_SPACE = "// off ";
+const COMMENT_SPACE_ENUM_SPACE = "// enum ";
 const COMMENT_TOTAL_SIZE = "    // TOTAL = ";
 const USED_SIZE = "   USED = ";
 const WASTE_SIZE = "   WASTE = ";
@@ -137,6 +140,11 @@ const SPACE_SIZE_SPACE = "  size ";
 const SPACE_PAD_PREFIX = " __pad__";
 const HLSL_CBUFFER_SPACE = "cbuffer ";
 const INVALID = "INVALID";
+const STRUCT_SPACE = "struct ";
+const NEWLINE = '\n';
+const DEFINE_SPACE = "#define ";
+const UNDERSCORE = '_';
+const DOUBLE_UNDERSCORE = "__";
 
 const HLSL_PAD_TYPES = [5][]const u8{
     INVALID, // no 1 byte types supported
@@ -148,15 +156,36 @@ const HLSL_PAD_TYPES = [5][]const u8{
 const LONGEST_GPU_NAME = 15;
 const HLSL_STRUCT_LINE_EXTRA = 8;
 const LAYOUT_LINE_EXTRA = 22;
+const LONGEST_PADDING_NAME_PLUS_TYPE = 17;
+const SHORTEST_PADDING_NAME_PLUS_TYPE = 12;
 
 const GPU_CACHE_LINE = 128;
 const GPU_UNIFORM_BOUNDARY_ALIGN = 16;
+const MAX_SHADER_STAGE_IN_OUT_SIZE = 16 * GPU_f32_4.stream_size;
 
 pub const IncludeLayoutInStub = enum(u8) {
     NO_LAYOUT_COMMENTS_IN_SHADER_STUB,
     INCLUDE_LAYOUT_COMMENTS_IN_SHADER_STUB,
 };
 
+/// A struct field within a `UniformStruct(FIELDS)`
+pub fn UniformStructField(comptime FIELDS: type) type {
+    return struct {
+        const Self = @This();
+
+        field: FIELDS,
+        gpu_type: GPUType,
+        // /// Provides a *hint* for whether it would be better to place
+        // /// the member closer to the beginning or the end of the struct
+        // cache_locality_hint: usize = 0,
+
+        pub fn new(comptime field: FIELDS, comptime gpu_type: GPUType) Self {
+            return Self{ .field = field, .gpu_type = gpu_type };
+        }
+    };
+}
+
+/// A struct that is written to a uniform/constant buffer
 pub fn UniformStruct(comptime FIELDS: type, comptime INCLUDE_LAYOUT: IncludeLayoutInStub, comptime fields: []const UniformStructField(FIELDS)) type {
     assert_with_reason(Types.type_is_enum(FIELDS) and Types.all_enum_values_start_from_zero_with_no_gaps(FIELDS), @src(), "type `FIELDS` must be an enum type, and all enum tags in `FIELDS` must start at zero and have no gaps up to the max tag value, got type `{s}`", .{@typeName(FIELDS)});
     const _NUM_FIELDS = Types.enum_defined_field_count(FIELDS);
@@ -183,6 +212,7 @@ pub fn UniformStruct(comptime FIELDS: type, comptime INCLUDE_LAYOUT: IncludeLayo
         }
     };
     Sort.insertion_sort_with_func(_Field, _fields[0.._NUM_FIELDS], SORT.align_lesser_then_size_lesser);
+    // PACKING ALGORITHM
     for (_fields) |field| {
         const fidx = @intFromEnum(field.field);
         assert_with_reason(field_init[fidx] == false, @src(), "field `{s}` was defined more than once", .{@tagName(field.field)});
@@ -274,8 +304,8 @@ pub fn UniformStruct(comptime FIELDS: type, comptime INCLUDE_LAYOUT: IncludeLayo
         field_hlsl_names[fidx] = field.gpu_type.hlsl_name;
         field_sizes[fidx] = field.gpu_type.uniform_size;
     }
+    // END PACKING ALGORITHM
     const _BYTES: usize = std.mem.alignForward(usize, current_max_offset, GPU_UNIFORM_BOUNDARY_ALIGN);
-
     if (_BYTES > current_max_offset) {
         empty_spots[empty_spots_len] = BufferSpan{
             .len = _BYTES - current_max_offset,
@@ -485,18 +515,365 @@ pub fn UniformStruct(comptime FIELDS: type, comptime INCLUDE_LAYOUT: IncludeLayo
     };
 }
 
-pub fn UniformStructField(comptime FIELDS: type) type {
+/// A field inside a `StreamStruct(FIELDS)`
+pub fn StreamStructField(comptime FIELDS: type) type {
     return struct {
         const Self = @This();
 
         field: FIELDS,
         gpu_type: GPUType,
-        // /// Provides a *hint* for whether it would be better to place
-        // /// the member closer to the beginning or the end of the struct
-        // cache_locality_hint: usize = 0,
+        semantic: HLSL_Semantic,
+        interp: HLSL_INTERP_KIND,
 
-        pub fn new(comptime field: FIELDS, comptime gpu_type: GPUType) Self {
-            return Self{ .field = field, .gpu_type = gpu_type };
+        pub fn new(comptime field: FIELDS, comptime gpu_type: GPUType, semantic: HLSL_Semantic) Self {
+            return Self{ .field = field, .gpu_type = gpu_type, .semantic = semantic, .interp = HLSL_INTERP_KIND.DEFAULT };
+        }
+        pub fn new_with_interp_mode(comptime field: FIELDS, comptime gpu_type: GPUType, semantic: HLSL_Semantic, interp: HLSL_INTERP_KIND) Self {
+            return Self{ .field = field, .gpu_type = gpu_type, .semantic = semantic, .interp = interp };
+        }
+
+        pub fn assert_has_allowed_type(self: Self, comptime src: ?std.builtin.SourceLocation) void {
+            self.semantic.assert_has_allowed_type(self.gpu_type, self.interp, @tagName(self.field), src);
+        }
+    };
+}
+
+/// A struct that is used as an input/output of
+/// a vertex/fragment/geometry/compute shader
+pub fn StreamStruct(comptime FIELDS: type, comptime INCLUDE_LAYOUT: IncludeLayoutInStub, comptime fields: []const StreamStructField(FIELDS)) type {
+    assert_with_reason(Types.type_is_enum(FIELDS) and Types.all_enum_values_start_from_zero_with_no_gaps(FIELDS), @src(), "type `FIELDS` must be an enum type, and all enum tags in `FIELDS` must start at zero and have no gaps up to the max tag value, got type `{s}`", .{@typeName(FIELDS)});
+    const _NUM_FIELDS = Types.enum_defined_field_count(FIELDS);
+    assert_with_reason(fields.len == _NUM_FIELDS, @src(), "the number of field names in `FIELDS` must equal the length of field definitions `fields`, got names {d} != {d} len", .{ _NUM_FIELDS, fields.len });
+    const _Field = StreamStructField(FIELDS);
+    const _LAYOUT = INCLUDE_LAYOUT == .INCLUDE_LAYOUT_COMMENTS_IN_SHADER_STUB;
+    comptime var _fields: [_NUM_FIELDS]_Field = undefined;
+    @memcpy(_fields[0.._NUM_FIELDS], fields);
+    comptime var field_init: [_NUM_FIELDS]bool = @splat(false);
+    comptime var field_locations: [_NUM_FIELDS]usize = undefined;
+    comptime var field_types: [_NUM_FIELDS]type = undefined;
+    comptime var field_sizes: [_NUM_FIELDS]usize = undefined;
+    comptime var field_semantics: [_NUM_FIELDS]HLSL_Semantic = undefined;
+    comptime var field_interps: [_NUM_FIELDS]HLSL_INTERP_KIND = undefined;
+    comptime var field_hlsl_names: [_NUM_FIELDS][]const u8 = undefined;
+    comptime var empty_spots: [_NUM_FIELDS * 2]BufferSpan = undefined;
+    comptime var empty_spots_len: usize = 0;
+    comptime var current_max_offset: usize = 0;
+    const SORT = struct {
+        fn align_lesser_then_size_lesser(a: _Field, b: _Field) bool {
+            if (a.gpu_type.stream_alignment < b.gpu_type.stream_alignment) return true;
+            return a.gpu_type.stream_size < a.gpu_type.stream_size;
+        }
+        fn offset_larger(a: BufferSpan, b: BufferSpan) bool {
+            return a.offset > b.offset;
+        }
+    };
+    Sort.insertion_sort_with_func(_Field, _fields[0.._NUM_FIELDS], SORT.align_lesser_then_size_lesser);
+    // PACKING ALGORITHM
+    for (_fields) |field| {
+        const fidx = @intFromEnum(field.field);
+        assert_with_reason(field_init[fidx] == false, @src(), "field `{s}` was defined more than once", .{@tagName(field.field)});
+        field_init[fidx] = true;
+        field.assert_has_allowed_type(@src());
+        comptime var found_empty_space: bool = false;
+        comptime var empty_spot_that_fits: usize = 0;
+        comptime var empty_spot_offset: usize = math.maxInt(isize);
+        comptime var empty_spot_space_after: usize = math.maxInt(isize);
+        for (empty_spots[0..empty_spots_len], 0..) |empty, e| {
+            if (empty.len >= field.gpu_type.stream_size) {
+                const next_aligned_within_empty = Utils.align_forward_without_breaking_align_boundary_unless_offset_boundary_aligned(empty.offset, field.gpu_type.stream_size, field.gpu_type.stream_alignment, GPU_UNIFORM_BOUNDARY_ALIGN);
+                const len_lost = next_aligned_within_empty - empty.offset;
+                if (len_lost >= empty.len) continue;
+                const aligned_len = empty.len - len_lost;
+                if (aligned_len >= field.gpu_type.stream_size) {
+                    const space_after = empty.len - len_lost - field.gpu_type.stream_size;
+                    comptime var potential_space_savings: isize = 0;
+                    if (found_empty_space) {
+                        @branchHint(.likely);
+                        potential_space_savings += num_cast(empty_spot_offset, isize) - num_cast(len_lost, isize);
+                        potential_space_savings += num_cast(empty_spot_space_after, isize) - num_cast(space_after, isize);
+                    } else {
+                        potential_space_savings = 1;
+                    }
+                    if (potential_space_savings > 0) {
+                        empty_spot_that_fits = e;
+                        empty_spot_offset = len_lost;
+                        empty_spot_space_after = space_after;
+                        found_empty_space = true;
+                    }
+                }
+            }
+        }
+        comptime var field_loc: usize = undefined;
+        if (found_empty_space) {
+            const old_empty = empty_spots[empty_spot_that_fits];
+            comptime var overwrite_old_empty = true;
+            if (empty_spot_offset > 0) {
+                const new_empty_before = BufferSpan{
+                    .offset = old_empty.offset,
+                    .len = empty_spot_offset,
+                };
+                empty_spots[empty_spot_that_fits] = new_empty_before;
+                overwrite_old_empty = false;
+            }
+            if (empty_spot_space_after > 0) {
+                const new_empty_after = BufferSpan{
+                    .offset = empty_spot_offset + field.gpu_type.stream_size,
+                    .len = empty_spot_space_after,
+                };
+                if (overwrite_old_empty) {
+                    empty_spots[empty_spot_that_fits] = new_empty_after;
+                    overwrite_old_empty = false;
+                } else {
+                    empty_spots[empty_spots_len] = new_empty_after;
+                    empty_spots_len += 1;
+                }
+            }
+            if (overwrite_old_empty) {
+                Utils.mem_remove(empty_spots[0..empty_spots_len].ptr, &empty_spots_len, empty_spot_that_fits, 1);
+            }
+            field_loc = old_empty.offset + empty_spot_offset;
+        } else {
+            const next_aligned_offset = Utils.align_forward_without_breaking_align_boundary_unless_offset_boundary_aligned(current_max_offset, field.gpu_type.stream_size, field.gpu_type.stream_alignment, GPU_UNIFORM_BOUNDARY_ALIGN);
+            const new_empty_len = next_aligned_offset - current_max_offset;
+            if (new_empty_len > 0) {
+                comptime var combined_with_another_empty: bool = false;
+                for (empty_spots[0..empty_spots_len], 0..) |empty, e| {
+                    if (empty.offset + empty.len == current_max_offset) {
+                        empty_spots[e].len += new_empty_len;
+                        combined_with_another_empty = true;
+                        break;
+                    }
+                }
+                if (combined_with_another_empty == false) {
+                    const new_empty = BufferSpan{
+                        .offset = current_max_offset,
+                        .len = new_empty_len,
+                    };
+                    empty_spots[empty_spots_len] = new_empty;
+                    empty_spots_len += 1;
+                }
+            }
+            field_loc = next_aligned_offset;
+            current_max_offset = next_aligned_offset + field.gpu_type.stream_size;
+        }
+        field_locations[fidx] = field_loc;
+        field_types[fidx] = field.gpu_type.cpu_type;
+        field_hlsl_names[fidx] = field.gpu_type.hlsl_name;
+        field_sizes[fidx] = field.gpu_type.stream_size;
+        field_semantics[fidx] = field.semantic;
+        field_interps[fidx] = field.interp;
+    }
+    // END PACKING ALGORITHM
+    const _BYTES: usize = std.mem.alignForward(usize, current_max_offset, GPU_UNIFORM_BOUNDARY_ALIGN);
+    assert_with_reason(_BYTES <= MAX_SHADER_STAGE_IN_OUT_SIZE, @src(), "a shader stage can only take a maximum of 16 x (32bit x 4) vectors as an input or output ({d} bytes), got {d} bytes", .{ MAX_SHADER_STAGE_IN_OUT_SIZE, _BYTES });
+    if (_BYTES > current_max_offset) {
+        empty_spots[empty_spots_len] = BufferSpan{
+            .len = _BYTES - current_max_offset,
+            .offset = current_max_offset,
+        };
+        empty_spots_len += 1;
+    }
+    comptime var wasted_bytes: usize = 0;
+    const SLOT_COUNT = _NUM_FIELDS + empty_spots_len;
+    comptime var all_slots: [SLOT_COUNT]FieldOrPad = undefined;
+    comptime var slot_idx: usize = 0;
+    for (0.._NUM_FIELDS) |fidx| {
+        all_slots[slot_idx] = FieldOrPad{ .FIELD = fidx };
+        slot_idx += 1;
+    }
+    for (empty_spots[0..empty_spots_len]) |empty| {
+        all_slots[slot_idx] = FieldOrPad{ .PAD = empty };
+        slot_idx += 1;
+    }
+    const field_locs_slice: []const usize = field_locations[0.._NUM_FIELDS];
+    Sort.insertion_sort_with_func_and_userdata(FieldOrPad, all_slots[0..SLOT_COUNT], field_locs_slice, FieldOrPad.field_or_pad_offset_larger);
+    comptime var total_len_of_field_names: usize = 0;
+    comptime var longest_field_name_plus_type: usize = LONGEST_PADDING_NAME_PLUS_TYPE + HLSL_SEMANTIC_KIND._LONGEST_SEMANTIC_NAME_LEN;
+    comptime var shortest_field_name_plus_type: usize = SHORTEST_PADDING_NAME_PLUS_TYPE + HLSL_SEMANTIC_KIND._SHORTEST_SEMANTIC_NAME_LEN;
+    for (0.._NUM_FIELDS) |fidx| {
+        const F: FIELDS = @enumFromInt(fidx);
+        const name_plus_type = field_interps[fidx].print_len() + @tagName(F).len + field_hlsl_names[fidx].len + field_semantics[fidx].print_len();
+        total_len_of_field_names += name_plus_type;
+        if (name_plus_type > longest_field_name_plus_type) {
+            longest_field_name_plus_type = name_plus_type;
+        }
+        if (name_plus_type < shortest_field_name_plus_type) {
+            shortest_field_name_plus_type = name_plus_type;
+        }
+    }
+    const SPACE_BEWTEEN_SHORTEST_AND_LONGEST = longest_field_name_plus_type - shortest_field_name_plus_type;
+    const HLSL_STUB_INNER_MAX_LEN = (_NUM_FIELDS + (empty_spots_len * 4)) * (LONGEST_GPU_NAME + HLSL_STRUCT_LINE_EXTRA + if (_LAYOUT) (LAYOUT_LINE_EXTRA + SPACE_BEWTEEN_SHORTEST_AND_LONGEST) else 0);
+    comptime var hlsl_stub_inner: [HLSL_STUB_INNER_MAX_LEN]u8 = undefined;
+    comptime var pad_idx: usize = 0;
+    comptime var comptime_writer = QuickWriter.writer(hlsl_stub_inner[0..]);
+    _ = comptime_writer.write(SPACE_4) catch |err| assert_comptime_write_failure(@src(), err);
+    @setEvalBranchQuota(2000);
+    for (all_slots[0..]) |slot| {
+        switch (slot) {
+            .FIELD => |fidx| {
+                const fenum: FIELDS = @enumFromInt(fidx);
+                const n0 = comptime_writer.write(HLSL_INTERP_KIND.NAMES[@intFromEnum(field_interps[fidx])]) catch |err| assert_comptime_write_failure(@src(), err);
+                const n1 = comptime_writer.write(field_hlsl_names[fidx]) catch |err| assert_comptime_write_failure(@src(), err);
+                comptime_writer.writeByte(SPACE) catch |err| assert_comptime_write_failure(@src(), err);
+                const n2 = comptime_writer.write(@tagName(fenum)) catch |err| assert_comptime_write_failure(@src(), err);
+                _ = comptime_writer.write(SPACE_COLON_SPACE) catch |err| assert_comptime_write_failure(@src(), err);
+                const n3 = field_semantics[fidx].print(&comptime_writer) catch |err| assert_comptime_write_failure(@src(), err);
+                if (_LAYOUT) {
+                    const comment_space = longest_field_name_plus_type - (n0 + n1 + n2 + n3 + 4);
+                    _ = comptime_writer.write(SEMICOL_SPACE) catch |err| assert_comptime_write_failure(@src(), err);
+                    for (0..comment_space) |_| {
+                        comptime_writer.writeByte(' ') catch |err| assert_comptime_write_failure(@src(), err);
+                    }
+                    _ = comptime_writer.write(COMMENT_OFF_SPACE) catch |err| assert_comptime_write_failure(@src(), err);
+                    comptime_writer.printInt(field_locations[fidx], 10, .lower, .{ .alignment = .right, .width = 4 }) catch |err| assert_comptime_write_failure(@src(), err);
+                    _ = comptime_writer.write(SPACE_SIZE_SPACE) catch |err| assert_comptime_write_failure(@src(), err);
+                    comptime_writer.printInt(field_sizes[fidx], 10, .lower, .{ .alignment = .right, .width = 4 }) catch |err| assert_comptime_write_failure(@src(), err);
+                    _ = comptime_writer.write(NEWLINE_4_SPACE) catch |err| assert_comptime_write_failure(@src(), err);
+                } else {
+                    _ = comptime_writer.write(SEMICOL_NEWLINE_4_SPACE) catch |err| assert_comptime_write_failure(@src(), err);
+                }
+            },
+            .PAD => |span| {
+                assert_with_reason(span.offset > 0, @src(), "somehow the first field in a uniform struct is padding (this should be impossible)", .{});
+                wasted_bytes += span.len;
+                comptime var span_remaining = span.len;
+                comptime var curr_offset = span.offset;
+                while (span_remaining > 0) {
+                    const next_boundary = std.mem.alignForward(usize, curr_offset + 1, GPU_UNIFORM_BOUNDARY_ALIGN);
+                    const len_to_next_boundary = next_boundary - curr_offset;
+                    comptime var this_pad_rem: usize = @min(span_remaining, len_to_next_boundary);
+                    span_remaining -= this_pad_rem;
+                    while (this_pad_rem > 0) {
+                        const this_size_align: math.Log2Int(usize) = @intCast(@ctz(curr_offset));
+                        const this_size_span: math.Log2Int(usize) = @intCast(63 - @clz(this_pad_rem));
+                        const this_size: math.Log2Int(usize) = @min(this_size_align, this_size_span);
+                        assert_with_reason(this_size < PadSize.COUNT, @src(), "somehow `this_size` ({d}) is >= {d} (should not be possible)", .{ this_size, PadSize.COUNT });
+                        const this_bytes = @as(usize, 1) << this_size;
+                        const n0 = comptime_writer.write(HLSL_INTERP_KIND.NAMES[@intFromEnum(HLSL_INTERP_KIND.NO_INTERP)]) catch |err| assert_comptime_write_failure(@src(), err);
+                        const n1 = comptime_writer.write(HLSL_PAD_TYPES[this_size]) catch |err| assert_comptime_write_failure(@src(), err);
+                        const n2 = comptime_writer.write(SPACE_PAD_PREFIX) catch |err| assert_comptime_write_failure(@src(), err);
+                        const n3 = Utils.print_len_of_uint(pad_idx);
+                        comptime_writer.printInt(pad_idx, 10, .lower, .{}) catch |err| assert_comptime_write_failure(@src(), err);
+                        _ = comptime_writer.write(SPACE_COLON_SPACE) catch |err| assert_comptime_write_failure(@src(), err);
+                        const n4 = HLSL_Semantic.padding(pad_idx).print(&comptime_writer) catch |err| assert_comptime_write_failure(@src(), err);
+                        if (_LAYOUT) {
+                            const comment_space = longest_field_name_plus_type - (n0 + n1 + n2 + n3 + n4 + 3);
+                            _ = comptime_writer.write(SEMICOL_SPACE) catch |err| assert_comptime_write_failure(@src(), err);
+                            for (0..comment_space) |_| {
+                                comptime_writer.writeByte(' ') catch |err| assert_comptime_write_failure(@src(), err);
+                            }
+                            _ = comptime_writer.write(COMMENT_OFF_SPACE) catch |err| assert_comptime_write_failure(@src(), err);
+                            comptime_writer.printInt(curr_offset, 10, .lower, .{ .alignment = .right, .width = 4 }) catch |err| assert_comptime_write_failure(@src(), err);
+                            _ = comptime_writer.write(SPACE_SIZE_SPACE) catch |err| assert_comptime_write_failure(@src(), err);
+                            comptime_writer.printInt(this_bytes, 10, .lower, .{ .alignment = .right, .width = 4 }) catch |err| assert_comptime_write_failure(@src(), err);
+                            _ = comptime_writer.write(NEWLINE_4_SPACE) catch |err| assert_comptime_write_failure(@src(), err);
+                        } else {
+                            _ = comptime_writer.write(SEMICOL_NEWLINE_4_SPACE) catch |err| assert_comptime_write_failure(@src(), err);
+                        }
+                        curr_offset += this_bytes;
+                        this_pad_rem -= this_bytes;
+                        pad_idx += 1;
+                    }
+                }
+            },
+        }
+    }
+    const hlsl_stub_final_len = comptime_writer.end - 5;
+    const hlsl_stub_inner_const: [hlsl_stub_final_len]u8 = make_const: {
+        var out: [hlsl_stub_final_len]u8 = undefined;
+        @memcpy(out[0..hlsl_stub_final_len], hlsl_stub_inner[0..hlsl_stub_final_len]);
+        break :make_const out;
+    };
+    const field_locations_const: [_NUM_FIELDS]usize = field_locations;
+    const field_types_const: [_NUM_FIELDS]type = field_types;
+    const field_hlsl_names_const: [_NUM_FIELDS][]const u8 = field_hlsl_names;
+    const field_semanitcs_const: [_NUM_FIELDS]HLSL_Semantic = field_semantics;
+    const field_interps_const: [_NUM_FIELDS]HLSL_INTERP_KIND = field_interps;
+    const waste_bytes_const = wasted_bytes;
+    return extern struct {
+        const Self = @This();
+
+        element: [BYTES]u8 align(GPU_UNIFORM_BOUNDARY_ALIGN) = @splat(0),
+
+        pub const BYTES: usize = _BYTES;
+        pub const WASTE_BYTES: usize = waste_bytes_const;
+        pub const USED_BYTES: usize = BYTES - WASTE_BYTES;
+        pub const WASTE_PERCENT: f32 = calc: {
+            const total_f32 = num_cast(BYTES, f32);
+            const waste_f32 = num_cast(WASTE_BYTES, f32);
+            break :calc (waste_f32 / total_f32) * 100.0;
+        };
+        pub const NUM_FIELDS = _NUM_FIELDS;
+        pub const TYPES: [NUM_FIELDS]type = field_types_const;
+        pub const OFFSETS: [NUM_FIELDS]usize = field_locations_const;
+        pub const SEMANTICS: [NUM_FIELDS]HLSL_Semantic = field_semanitcs_const;
+        pub const INTERPOLATIONS: [NUM_FIELDS]HLSL_INTERP_KIND = field_interps_const;
+        pub const FIELD = FIELDS;
+        pub const HLSL_NAMES: [NUM_FIELDS][]const u8 = field_hlsl_names_const;
+        pub const HLSL_STUB_INNER = hlsl_stub_inner_const;
+
+        pub fn bytes(self: *Self) *[BYTES]u8 {
+            return &self.element;
+        }
+        pub fn bytes_const(self: *const Self) *const [BYTES]u8 {
+            return &self.element;
+        }
+        pub fn bytes_unbound(self: *Self) [*]u8 {
+            return @ptrCast(@alignCast(&self.element));
+        }
+        pub fn bytes_unbound_const(self: *const Self) [*]const u8 {
+            return @ptrCast(@alignCast(&self.element));
+        }
+        pub fn bytes_slice(self: *Self) []u8 {
+            return self.element[0..BYTES];
+        }
+        pub fn bytes_slice_const(self: *const Self) []const u8 {
+            return self.element[0..BYTES];
+        }
+
+        pub fn type_for_field_name(comptime field: FIELD) type {
+            return TYPES[@intFromEnum(field)];
+        }
+
+        pub fn get(self: *const Self, comptime field: FIELD) type_for_field_name(field) {
+            const T = type_for_field_name(field);
+            const offset = OFFSETS[@intFromEnum(field)];
+            const ptr = self.bytes_unbound_const() + offset;
+            const t_ptr: *T = @ptrCast(@alignCast(ptr));
+            return t_ptr.*;
+        }
+        pub fn get_ptr(self: *Self, comptime field: FIELD) *type_for_field_name(field) {
+            const T = type_for_field_name(field);
+            const offset = OFFSETS[@intFromEnum(field)];
+            const ptr = self.bytes_unbound() + offset;
+            const t_ptr: *T = @ptrCast(@alignCast(ptr));
+            return t_ptr.*;
+        }
+        pub fn set(self: *Self, comptime field: FIELD, val: type_for_field_name(field)) void {
+            const T = type_for_field_name(field);
+            const offset = OFFSETS[@intFromEnum(field)];
+            const ptr = self.bytes_unbound() + offset;
+            const t_ptr: *T = @ptrCast(@alignCast(ptr));
+            t_ptr.* = val;
+        }
+
+        pub fn write_hlsl_struct_stub(struct_name: []const u8, writer: *std.Io.Writer) std.Io.Writer.Error!void {
+            _ = try writer.write(STRUCT_SPACE);
+            _ = try writer.write(struct_name);
+            _ = try writer.write(SPACE_OPEN_BRACKET_NEWLINE);
+            if (_LAYOUT) {
+                _ = try writer.write(COMMENT_TOTAL_SIZE);
+                try writer.printInt(BYTES, 10, .lower, .{});
+                _ = try writer.write(USED_SIZE);
+                try writer.printInt(USED_BYTES, 10, .lower, .{});
+                _ = try writer.write(WASTE_SIZE);
+                try writer.printInt(WASTE_BYTES, 10, .lower, .{});
+                _ = try writer.write(PAREN_PERCENT);
+                try writer.printFloat(WASTE_PERCENT, .{ .precision = 2, .width = 5 });
+                _ = try writer.write(CLOSE_PAREN_NEWLINE);
+            }
+            _ = try writer.write(HLSL_STUB_INNER[0..]);
+            _ = try writer.write(NEWLINE_CLOSE_BRACKET_SEMICOL_NEWLINE);
         }
     };
 }
@@ -518,6 +895,27 @@ pub const GPUType = struct {
             .stream_alignment = self.stream_alignment,
             .hlsl_name = self.hlsl_name,
         };
+    }
+
+    pub inline fn equals(self: GPUType, other: GPUType) bool {
+        return self.cpu_type == other.cpu_type and
+            std.mem.eql(u8, self.hlsl_name, other.hlsl_name);
+    }
+    pub inline fn equals_gpu_only(self: GPUType, other: GPUType) bool {
+        return std.mem.eql(u8, self.hlsl_name, other.hlsl_name);
+    }
+
+    pub inline fn equals_any(self: GPUType, others: []const GPUType) bool {
+        for (others) |other| {
+            if (self.equals(other)) return true;
+        }
+        return false;
+    }
+    pub inline fn equals_any_gpu_only(self: GPUType, others: []const GPUType) bool {
+        for (others) |other| {
+            if (self.equals_gpu_only(other)) return true;
+        }
+        return false;
     }
 };
 
@@ -626,7 +1024,7 @@ pub const GPU_f32_4 = GPUType{
     .uniform_size = 16,
     .uniform_alignment = 16,
     .stream_size = 16,
-    .stream_alignment = 4,
+    .stream_alignment = 16,
     .hlsl_name = HLSL_f32_4,
 };
 pub const GPU_u32_4 = GPUType{
@@ -634,7 +1032,7 @@ pub const GPU_u32_4 = GPUType{
     .uniform_size = 16,
     .uniform_alignment = 16,
     .stream_size = 16,
-    .stream_alignment = 4,
+    .stream_alignment = 16,
     .hlsl_name = HLSL_u32_4,
 };
 pub const GPU_i32_4 = GPUType{
@@ -642,7 +1040,7 @@ pub const GPU_i32_4 = GPUType{
     .uniform_size = 16,
     .uniform_alignment = 16,
     .stream_size = 16,
-    .stream_alignment = 4,
+    .stream_alignment = 16,
     .hlsl_name = HLSL_i32_4,
 };
 
@@ -1140,6 +1538,526 @@ pub fn GPU_enum(comptime ENUM_TYPE: type) GPUType {
     return GPU_u32.with_cpu_type(ENUM_TYPE);
 }
 
+pub fn write_hlsl_enum_stub(comptime ENUM_TYPE: type, writer: *std.Io.Writer) std.Io.Writer.Error!void {
+    assert_with_reason(Types.type_is_enum(ENUM_TYPE) and Types.enum_tag_type(ENUM_TYPE) == u32, @src(), "type `ENUM_TYPE` must be an enum type with tag type of u32, got type `{s}`", .{@typeName(ENUM_TYPE)});
+    const LOCAL = comptime Utils.local_type_name(ENUM_TYPE);
+    _ = try writer.write(COMMENT_SPACE_ENUM_SPACE);
+    _ = try writer.write(LOCAL);
+    try writer.writeByte(NEWLINE);
+    const INFO = @typeInfo(ENUM_TYPE).@"enum";
+    inline for (INFO.fields) |field| {
+        _ = try writer.write(DEFINE_SPACE);
+        _ = try writer.write(LOCAL);
+        _ = try writer.write(DOUBLE_UNDERSCORE);
+        _ = try writer.write(field.name);
+        try writer.writeByte(SPACE);
+        try writer.printInt(field.value, 10, .lower, .{});
+        try writer.writeByte(NEWLINE);
+    }
+}
+
+test "hlsl_enum_stub" {
+    const RENDER_MODE = enum(u32) {
+        TEXT_NORMAL,
+        TEXT_OUTLINE,
+        SPRITE,
+        SPRITE_PALETTED,
+    };
+    try std.fs.cwd().makePath("test_out/SDL3_ShaderContract");
+    const file = try std.fs.cwd().createFile("test_out/SDL3_ShaderContract/enum_stub_1.hlsl", .{});
+    defer file.close();
+    var file_write_buf: [512]u8 = undefined;
+    var file_writer_holder = file.writer(file_write_buf[0..]);
+    var writer = &file_writer_holder.interface;
+    try write_hlsl_enum_stub(RENDER_MODE, writer);
+    try writer.flush();
+}
+
+pub const HLSL_INTERP_KIND = enum(u8) {
+    DEFAULT = 0,
+    NO_INTERP = 1,
+    CONSTANT = 2,
+    LINEAR = 3,
+    LINEAR_CENTROID = 4,
+    NO_PERSPECTIVE = 5,
+    NO_PERSPECTIVE_CENTROID = 6,
+    LINEAR_NO_PERSPECTIVE = 7,
+    LINEAR_NO_PERSPECTIVE_CENTROID = 8,
+    SAMPLE = 9,
+
+    const _COUNT = 10;
+
+    const NAMES = [_COUNT][]const u8{
+        "",
+        "nointerpolation ",
+        "constant ",
+        "linear ",
+        "linear centroid ",
+        "noperspective ",
+        "noperspective centroid ",
+        "linear_no_perspective ",
+        "linear_no_perspective centroid ",
+        "sample ",
+    };
+
+    pub fn print_len(self: HLSL_INTERP_KIND) usize {
+        return NAMES[@intFromEnum(self)].len;
+    }
+};
+
+pub const HLSL_SEMANTIC_KIND = enum(u8) {
+    // SYSTEM VALUE
+    SV_ClipDistance = 0,
+    SV_CullDistance = 1,
+    SV_Coverage = 2,
+    SV_Depth = 3,
+    SV_DepthGreaterEqual = 4,
+    SV_DepthLessEqual = 5,
+    SV_DispatchThreadID = 6,
+    SV_DomainLocation = 7,
+    SV_GroupID = 8,
+    SV_GroupIndex = 9,
+    SV_GroupThreadID = 10,
+    SV_GSInstanceID = 11,
+    SV_InnerCoverage = 12,
+    SV_InsideTessFactor = 13,
+    SV_InstanceID = 14,
+    SV_IsFrontFace = 15,
+    SV_OutputControlPointID = 16,
+    SV_Position = 17,
+    SV_PrimitiveID = 18,
+    SV_RenderTargetArrayIndex = 19,
+    SV_SampleIndex = 20,
+    SV_StencilRef = 21,
+    SV_Target = 22,
+    SV_TessFactor = 23,
+    SV_VertexID = 24,
+    SV_ViewportArrayIndex = 25,
+    SV_ShadingRate = 26,
+    // SEMI_ARBITRARY
+    BINORMAL = 27,
+    BLENDINDICES = 28,
+    BLENDWEIGHT = 29,
+    COLOR = 30,
+    NORMAL = 31,
+    POSITION = 32,
+    POSITIONT = 33,
+    PSIZE = 34,
+    TANGENT = 35,
+    TEXCOORD = 36,
+    FOG = 37,
+    TESSFACTOR = 38,
+    VFACE = 39,
+    VPOS = 40,
+    DEPTH = 41,
+    // USER
+    USER = 42,
+    _PADDING = 43,
+
+    pub const _COUNT = 44;
+    pub const _LONGEST_SEMANTIC_NAME_LEN = 26;
+    pub const _SHORTEST_SEMANTIC_NAME_LEN = 4;
+};
+
+const UserSemantic = struct {
+    kind: []const u8,
+    n: usize,
+
+    pub fn new(kind: []const u8, n: usize) UserSemantic {
+        return UserSemantic{ .kind = kind, .n = n };
+    }
+};
+
+pub const HLSL_Semantic = union(HLSL_SEMANTIC_KIND) {
+    // SYSTEM VALUE
+    SV_ClipDistance: usize,
+    SV_CullDistance: usize,
+    SV_Coverage,
+    SV_Depth,
+    SV_DepthGreaterEqual,
+    SV_DepthLessEqual,
+    SV_DispatchThreadID,
+    SV_DomainLocation,
+    SV_GroupID,
+    SV_GroupIndex,
+    SV_GroupThreadID,
+    SV_GSInstanceID,
+    SV_InnerCoverage,
+    SV_InsideTessFactor,
+    SV_InstanceID,
+    SV_IsFrontFace,
+    SV_OutputControlPointID,
+    SV_Position,
+    SV_PrimitiveID,
+    SV_RenderTargetArrayIndex,
+    SV_SampleIndex,
+    SV_StencilRef,
+    SV_Target: u3,
+    SV_TessFactor,
+    SV_VertexID,
+    SV_ViewportArrayIndex,
+    SV_ShadingRate,
+    // SEMI_ARBITRARY
+    BINORMAL: usize,
+    BLENDINDICES: usize,
+    BLENDWEIGHT: usize,
+    COLOR: usize,
+    NORMAL: usize,
+    POSITION: usize,
+    POSITIONT,
+    PSIZE: usize,
+    TANGENT: usize,
+    TEXCOORD: usize,
+    FOG,
+    TESSFACTOR: usize,
+    VFACE,
+    VPOS,
+    DEPTH: usize,
+    // USER
+    USER: UserSemantic,
+    _PADDING: usize,
+
+    pub fn sv_clip_distance(n: usize) HLSL_Semantic {
+        return HLSL_Semantic{ .SV_ClipDistance = n };
+    }
+    pub fn sv_cull_distance(n: usize) HLSL_Semantic {
+        return HLSL_Semantic{ .SV_CullDistance = n };
+    }
+    pub fn sv_coverage() HLSL_Semantic {
+        return HLSL_Semantic{ .SV_Coverage = void{} };
+    }
+    pub fn sv_depth() HLSL_Semantic {
+        return HLSL_Semantic{ .SV_Depth = void{} };
+    }
+    pub fn sv_depth_greater_or_equal() HLSL_Semantic {
+        return HLSL_Semantic{ .SV_DepthGreaterEqual = void{} };
+    }
+    pub fn sv_depth_lesser_or_equal() HLSL_Semantic {
+        return HLSL_Semantic{ .SV_DepthLessEqual = void{} };
+    }
+    pub fn sv_dispatch_thread_id() HLSL_Semantic {
+        return HLSL_Semantic{ .SV_DispatchThreadID = void{} };
+    }
+    pub fn sv_domain_location() HLSL_Semantic {
+        return HLSL_Semantic{ .SV_DomainLocation = void{} };
+    }
+    pub fn sv_group_id() HLSL_Semantic {
+        return HLSL_Semantic{ .SV_GroupID = void{} };
+    }
+    pub fn sv_group_index() HLSL_Semantic {
+        return HLSL_Semantic{ .SV_GroupIndex = void{} };
+    }
+    pub fn sv_group_thread_id() HLSL_Semantic {
+        return HLSL_Semantic{ .SV_GroupThreadID = void{} };
+    }
+    pub fn sv_gs_instance_id() HLSL_Semantic {
+        return HLSL_Semantic{ .SV_GSInstanceID = void{} };
+    }
+    pub fn sv_inner_coverage() HLSL_Semantic {
+        return HLSL_Semantic{ .SV_InnerCoverage = void{} };
+    }
+    pub fn sv_inside_tess_factor() HLSL_Semantic {
+        return HLSL_Semantic{ .SV_InsideTessFactor = void{} };
+    }
+    pub fn sv_instance_id() HLSL_Semantic {
+        return HLSL_Semantic{ .SV_InstanceID = void{} };
+    }
+    pub fn sv_is_front_face() HLSL_Semantic {
+        return HLSL_Semantic{ .SV_IsFrontFace = void{} };
+    }
+    pub fn sv_output_control_point_id() HLSL_Semantic {
+        return HLSL_Semantic{ .SV_OutputControlPointID = void{} };
+    }
+    pub fn sv_position() HLSL_Semantic {
+        return HLSL_Semantic{ .SV_Position = void{} };
+    }
+    pub fn sv_primitive_id() HLSL_Semantic {
+        return HLSL_Semantic{ .SV_PrimitiveID = void{} };
+    }
+    pub fn sv_render_target_array_index() HLSL_Semantic {
+        return HLSL_Semantic{ .SV_RenderTargetArrayIndex = void{} };
+    }
+    pub fn sv_sample_index() HLSL_Semantic {
+        return HLSL_Semantic{ .SV_SampleIndex = void{} };
+    }
+    pub fn sv_stencil_ref() HLSL_Semantic {
+        return HLSL_Semantic{ .SV_StencilRef = void{} };
+    }
+    pub fn sv_target(n: u3) HLSL_Semantic {
+        return HLSL_Semantic{ .SV_Target = n };
+    }
+    pub fn sv_tess_factor() HLSL_Semantic {
+        return HLSL_Semantic{ .SV_TessFactor = void{} };
+    }
+    pub fn sv_vertex_id() HLSL_Semantic {
+        return HLSL_Semantic{ .SV_VertexID = void{} };
+    }
+    pub fn sv_viewport_array_index() HLSL_Semantic {
+        return HLSL_Semantic{ .SV_ViewportArrayIndex = void{} };
+    }
+    pub fn sv_shading_rate() HLSL_Semantic {
+        return HLSL_Semantic{ .SV_ShadingRate = void{} };
+    }
+    pub fn binormal(n: usize) HLSL_Semantic {
+        return HLSL_Semantic{ .BINORMAL = n };
+    }
+    pub fn blend_indices(n: usize) HLSL_Semantic {
+        return HLSL_Semantic{ .BLENDINDICES = n };
+    }
+    pub fn blend_weight(n: usize) HLSL_Semantic {
+        return HLSL_Semantic{ .BLENDWEIGHT = n };
+    }
+    pub fn color(n: usize) HLSL_Semantic {
+        return HLSL_Semantic{ .COLOR = n };
+    }
+    pub fn normal(n: usize) HLSL_Semantic {
+        return HLSL_Semantic{ .NORMAL = n };
+    }
+    pub fn position(n: usize) HLSL_Semantic {
+        return HLSL_Semantic{ .POSITION = n };
+    }
+    pub fn position_transformed() HLSL_Semantic {
+        return HLSL_Semantic{ .POSITION = void{} };
+    }
+    pub fn point_size(n: usize) HLSL_Semantic {
+        return HLSL_Semantic{ .PSIZE = n };
+    }
+    pub fn tangent(n: usize) HLSL_Semantic {
+        return HLSL_Semantic{ .TANGENT = n };
+    }
+    pub fn tex_coord(n: usize) HLSL_Semantic {
+        return HLSL_Semantic{ .TEXCOORD = n };
+    }
+    pub fn fog() HLSL_Semantic {
+        return HLSL_Semantic{ .FOG = void{} };
+    }
+    pub fn tess_factor(n: usize) HLSL_Semantic {
+        return HLSL_Semantic{ .TESSFACTOR = n };
+    }
+    pub fn vert_face() HLSL_Semantic {
+        return HLSL_Semantic{ .VFACE = void{} };
+    }
+    pub fn vert_pos() HLSL_Semantic {
+        return HLSL_Semantic{ .VPOS = void{} };
+    }
+    pub fn depth(n: usize) HLSL_Semantic {
+        return HLSL_Semantic{ .DEPTH = n };
+    }
+    pub fn user(kind: []const u8, n: usize) HLSL_Semantic {
+        return HLSL_Semantic{ .USER = UserSemantic.new(kind, n) };
+    }
+    pub fn padding(n: usize) HLSL_Semantic {
+        return HLSL_Semantic{ ._PADDING = n };
+    }
+
+    pub fn print(self: HLSL_Semantic, writer: *std.Io.Writer) std.Io.Writer.Error!usize {
+        var n: usize = 0;
+        switch (self) {
+            .USER => |sem| {
+                n += try writer.write(sem.kind);
+                try writer.printInt(sem.n, 10, .lower, .{});
+                n += Utils.print_len_of_uint(sem.n);
+            },
+            else => {
+                n += try writer.write(@tagName(self));
+                switch (self) {
+                    .SV_ClipDistance,
+                    .SV_CullDistance,
+                    .BINORMAL,
+                    .BLENDINDICES,
+                    .BLENDWEIGHT,
+                    .COLOR,
+                    .NORMAL,
+                    .POSITION,
+                    .PSIZE,
+                    .TANGENT,
+                    .TEXCOORD,
+                    .TESSFACTOR,
+                    .DEPTH,
+                    ._PADDING,
+                    => |nn| {
+                        try writer.printInt(nn, 10, .lower, .{});
+                        n += Utils.print_len_of_uint(nn);
+                    },
+                    .SV_Target => |nn| {
+                        try writer.printInt(num_cast(nn, u8), 10, .lower, .{});
+                        n += Utils.print_len_of_uint(nn);
+                    },
+                    else => {},
+                }
+            },
+        }
+        return n;
+    }
+
+    pub fn print_len(self: HLSL_Semantic) usize {
+        var n: usize = 3;
+        switch (self) {
+            .USER => |sem| {
+                n += sem.kind.len;
+                n += Utils.print_len_of_uint(sem.n);
+            },
+            else => {
+                n += @tagName(self).len;
+                switch (self) {
+                    .SV_ClipDistance,
+                    .SV_CullDistance,
+                    .BINORMAL,
+                    .BLENDINDICES,
+                    .BLENDWEIGHT,
+                    .COLOR,
+                    .NORMAL,
+                    .POSITION,
+                    .PSIZE,
+                    .TANGENT,
+                    .TEXCOORD,
+                    .TESSFACTOR,
+                    .DEPTH,
+                    => |nn| {
+                        n += Utils.print_len_of_uint(nn);
+                    },
+                    .SV_Target => |nn| {
+                        n += Utils.print_len_of_uint(nn);
+                    },
+                    else => {},
+                }
+            },
+        }
+        return n;
+    }
+
+    pub fn assert_has_allowed_type(self: HLSL_Semantic, gpu_type: GPUType, interp: HLSL_INTERP_KIND, comptime field_name: []const u8, comptime src: ?std.builtin.SourceLocation) void {
+        if (Assert.should_assert()) {
+            const allowed = ALLOWED_TYPES[@intFromEnum(self)];
+            if (allowed.len == 0) {
+                const found_valid_type = !gpu_type.equals_any_gpu_only(&.{
+                    GPU_f32_1x1,
+                    GPU_u32_1x1,
+                    GPU_i32_1x1,
+                    GPU_f32_1x2,
+                    GPU_u32_1x2,
+                    GPU_i32_1x2,
+                    GPU_f32_1x3,
+                    GPU_u32_1x3,
+                    GPU_i32_1x3,
+                    GPU_f32_1x4,
+                    GPU_u32_1x4,
+                    GPU_i32_1x4,
+                    GPU_f32_2x1,
+                    GPU_u32_2x1,
+                    GPU_i32_2x1,
+                    GPU_f32_2x2,
+                    GPU_u32_2x2,
+                    GPU_i32_2x2,
+                    GPU_f32_2x3,
+                    GPU_u32_2x3,
+                    GPU_i32_2x3,
+                    GPU_f32_2x4,
+                    GPU_u32_2x4,
+                    GPU_i32_2x4,
+                    GPU_f32_3x1,
+                    GPU_u32_3x1,
+                    GPU_i32_3x1,
+                    GPU_f32_3x2,
+                    GPU_u32_3x2,
+                    GPU_i32_3x2,
+                    GPU_f32_3x3,
+                    GPU_u32_3x3,
+                    GPU_i32_3x3,
+                    GPU_f32_3x4,
+                    GPU_u32_3x4,
+                    GPU_i32_3x4,
+                    GPU_f32_4x1,
+                    GPU_u32_4x1,
+                    GPU_i32_4x1,
+                    GPU_f32_4x2,
+                    GPU_u32_4x2,
+                    GPU_i32_4x2,
+                    GPU_f32_4x3,
+                    GPU_u32_4x3,
+                    GPU_i32_4x3,
+                    GPU_f32_4x4,
+                    GPU_u32_4x4,
+                    GPU_i32_4x4,
+                });
+                assert_with_reason(found_valid_type, src, "types field `{s}` with user semantic `{s}` cannot be a matrix type, got `{s}`", .{ field_name, @tagName(self), gpu_type });
+            } else {
+                var found_valid_type = false;
+                for (allowed) |gpu_t| {
+                    if (gpu_type.equals_gpu_only(gpu_t)) {
+                        found_valid_type = true;
+                        break;
+                    }
+                }
+                assert_with_reason(found_valid_type, src, "field `{s}` with semantic `{s}` must have one of the types `{any}`, but got type `{any}`", .{ field_name, @tagName(self), allowed, gpu_type });
+            }
+        }
+        switch (interp) {
+            .DEFAULT, .NO_INTERP => {},
+            else => {
+                const found_valid_interp = !gpu_type.equals_any_gpu_only(&.{
+                    GPU_u32,
+                    GPU_u32_2,
+                    GPU_u32_3,
+                    GPU_u32_4,
+                    GPU_i32,
+                    GPU_i32_2,
+                    GPU_i32_3,
+                    GPU_i32_4,
+                });
+                assert_with_reason(found_valid_interp, src, "field `{s}` with type `{s}` cannot have interpolation mode `{s}`", .{ field_name, gpu_type, HLSL_INTERP_KIND.NAMES[@intFromEnum(interp)] });
+            },
+        }
+    }
+
+    pub const ALLOWED_TYPES = [HLSL_SEMANTIC_KIND._COUNT][]const GPUType{
+        &.{GPU_f32}, // SV_ClipDistance = 0,
+        &.{GPU_f32}, // SV_CullDistance = 1,
+        &.{GPU_u32}, // SV_Coverage = 2,
+        &.{GPU_f32}, // SV_Depth = 3,
+        &.{GPU_f32}, // SV_DepthGreaterEqual = 4,
+        &.{GPU_f32}, // SV_DepthLessEqual = 5,
+        &.{GPU_u32_3}, // SV_DispatchThreadID = 6,
+        &.{ GPU_f32_2, GPU_f32_3 }, // SV_DomainLocation = 7,
+        &.{GPU_u32_3}, // SV_GroupID = 8,
+        &.{GPU_u32}, // SV_GroupIndex = 9,
+        &.{GPU_u32_3}, // SV_GroupThreadID = 10,
+        &.{GPU_u32}, // SV_GSInstanceID = 11,
+        &.{GPU_u32}, // SV_InnerCoverage = 12,
+        &.{ GPU_f32, GPU_f32_2 }, // SV_InsideTessFactor = 13,
+        &.{GPU_u32}, // SV_InstanceID = 14,
+        &.{GPU_bool}, // SV_IsFrontFace = 15,
+        &.{GPU_u32}, // SV_OutputControlPointID = 16,
+        &.{GPU_f32_4}, // SV_Position = 17,
+        &.{GPU_u32}, // SV_PrimitiveID = 18,
+        &.{GPU_u32}, // SV_RenderTargetArrayIndex = 19,
+        &.{GPU_u32}, // SV_SampleIndex = 20,
+        &.{GPU_u32}, // SV_StencilRef = 21,
+        &.{ GPU_f32_2, GPU_f32_3, GPU_f32_4 }, // SV_Target = 22,
+        &.{ GPU_f32_2, GPU_f32_3, GPU_f32_4 }, // SV_TessFactor = 23,
+        &.{GPU_u32}, // SV_VertexID = 24,
+        &.{GPU_u32}, // SV_ViewportArrayIndex = 25,
+        &.{GPU_u32}, // SV_ShadingRate = 26,
+        &.{GPU_f32_4}, // BINORMAL = 27,
+        &.{GPU_u32}, // BLENDINDICES = 28,
+        &.{GPU_f32}, // BLENDWEIGHT = 29,
+        &.{GPU_f32_4}, // COLOR = 30,
+        &.{GPU_f32_4}, // NORMAL = 31,
+        &.{GPU_f32_4}, // POSITION = 32,
+        &.{GPU_f32_4}, // POSITIONT = 33,
+        &.{GPU_f32}, // PSIZE = 34,
+        &.{GPU_f32_4}, // TANGENT = 35,
+        &.{GPU_f32_4}, // TEXCOORD = 36,
+        &.{GPU_f32}, // FOG = 37,
+        &.{GPU_f32}, // TESSFACTOR = 38,
+        &.{GPU_f32}, // VFACE = 39,
+        &.{GPU_f32_2}, // VPOS = 40,
+        &.{GPU_f32}, // DEPTH = 41,
+        &.{}, // USER = 42,
+        &.{}, // _PADDING = 44,
+    };
+};
+
 test "hlsl_uniform_stub" {
     const F = enum(u8) {
         world_pos,
@@ -1165,7 +2083,7 @@ test "hlsl_uniform_stub" {
     assert_with_reason(@sizeOf(MyUniform) == 96, @src(), "layout failed", .{});
     assert_with_reason(@alignOf(MyUniform) == 16, @src(), "layout failed", .{});
     try std.fs.cwd().makePath("test_out/SDL3_ShaderContract");
-    const file = try std.fs.cwd().createFile("test_out/SDL3_ShaderContract/test_stub_1.hlsl", .{});
+    const file = try std.fs.cwd().createFile("test_out/SDL3_ShaderContract/uniform_stub_1.hlsl", .{});
     defer file.close();
     var file_write_buf: [512]u8 = undefined;
     var file_writer_holder = file.writer(file_write_buf[0..]);
@@ -1197,7 +2115,7 @@ test "hlsl_uniform_stub" {
     });
     assert_with_reason(@sizeOf(MyUniform2) == 128, @src(), "layout failed", .{});
     assert_with_reason(@alignOf(MyUniform2) == 16, @src(), "layout failed", .{});
-    const file2 = try std.fs.cwd().createFile("test_out/SDL3_ShaderContract/test_stub_2.hlsl", .{});
+    const file2 = try std.fs.cwd().createFile("test_out/SDL3_ShaderContract/uniform_stub_2.hlsl", .{});
     defer file2.close();
     file_writer_holder = file2.writer(file_write_buf[0..]);
     writer = &file_writer_holder.interface;
@@ -1205,4 +2123,37 @@ test "hlsl_uniform_stub" {
     try writer.flush();
     // testing for correctness using the following link for matching field offsets
     // https://maraneshi.github.io/HLSL-ConstantBufferLayoutVisualizer/?visualizer=MYIwrgZhCmBOAEBZAngVQHYEsIHtYFsAmeALnlmgHNMBnAFzgAoQAGAGnhoAcBDYaAIwBKeAG8AUPCnwA9DPgAVAPIKAggBl4AXngDCADmmoAygFEAItt0HpAdVXGFpqy3iMApPBYA6FiyGS0hAANjg8dADMAB4ALPD44QD6AgDc0rLyOFDprpyYAF7Q0gBsLIFSIWF0nMA8wTywyWnScvBZECW5NAVF0jHl8JXhETV1DYkxzRlt2VLFcXmF0noDQ9U0tfWNhFPT7dIA7MVS3Ut9q6HhcRtjjQCsU637UvpdPcvFA5jodAJRxAk6IkdukpE9ZvAAJzHRa9eCEMrpNajLaJYq7cEdXQCGGnOHwfpIy50Yg3VERR6ZWZ6N5nF7iAC+KSAA
+}
+
+test "hlsl_struct_stub" {
+    const F = enum(u8) {
+        world_pos,
+        color,
+        face_normal,
+        vert_normal,
+        blend_mode,
+    };
+    const S = StreamStructField(F);
+    const BlendMode = enum(u32) {
+        NONE,
+        SURFACE,
+        FACE_ONLY,
+    };
+    const MyVertex = StreamStruct(F, .INCLUDE_LAYOUT_COMMENTS_IN_SHADER_STUB, &.{
+        S.new_with_interp_mode(.world_pos, GPU_f32_4, .sv_position(), .LINEAR),
+        S.new(.color, GPU_f32_4, .color(0)),
+        S.new(.face_normal, GPU_f32_4, .normal(0)),
+        S.new(.vert_normal, GPU_f32_4, .normal(1)),
+        S.new(.blend_mode, GPU_enum(BlendMode), .user("BLENDMODE", 0)),
+    });
+    // assert_with_reason(@sizeOf(MyUniform) == 96, @src(), "layout failed", .{});
+    // assert_with_reason(@alignOf(MyUniform) == 16, @src(), "layout failed", .{});
+    try std.fs.cwd().makePath("test_out/SDL3_ShaderContract");
+    const file = try std.fs.cwd().createFile("test_out/SDL3_ShaderContract/struct_stub_1.hlsl", .{});
+    defer file.close();
+    var file_write_buf: [512]u8 = undefined;
+    var file_writer_holder = file.writer(file_write_buf[0..]);
+    var writer = &file_writer_holder.interface;
+    try MyVertex.write_hlsl_struct_stub("MyStruct", writer);
+    try writer.flush();
 }

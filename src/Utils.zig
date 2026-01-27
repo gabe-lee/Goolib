@@ -38,6 +38,7 @@ const Assert = Root.Assert;
 const Types = Root.Types;
 const Test = Root.Testing;
 const assert_with_reason = Assert.assert_with_reason;
+const assert_unreachable = Assert.assert_unreachable;
 
 pub const _Fuzzer = @import("./Utils_Fuzz.zig");
 
@@ -1364,4 +1365,101 @@ pub fn scalar_ptr_as_single_item_slice(ptr: anytype) []@typeInfo(@TypeOf(ptr)).p
 }
 pub fn scalar_ptr_as_byte_slice(ptr: anytype) []u8 {
     return std.mem.sliceAsBytes(scalar_ptr_as_single_item_slice(ptr));
+}
+
+pub fn real_int_type(comptime T: type) type {
+    const I = @typeInfo(T);
+    switch (I) {
+        .int => |info| {
+            comptime var bits = info.bits;
+            const sign = info.signedness;
+            bits -= 1;
+            bits |= bits >> 1;
+            bits |= bits >> 2;
+            bits |= bits >> 4;
+            bits |= bits >> 8;
+            bits += 1;
+            return std.meta.Int(sign, bits);
+        },
+        .comptime_int => return u64,
+        else => assert_unreachable(@src(), "type `{s}` cannot be converted to a real int type", .{@typeName(T)}),
+    }
+}
+
+pub fn print_len_of_uint(val: anytype) usize {
+    const V = @TypeOf(val);
+    const VV = real_int_type(V);
+    switch (VV) {
+        u8 => {
+            return switch (val) {
+                0...9 => 1,
+                10...99 => 2,
+                100...255 => 3,
+                1000...9999 => 4,
+                10000...99999 => 5,
+            };
+        },
+        u16 => {
+            return switch (val) {
+                0...9 => 1,
+                10...99 => 2,
+                100...999 => 3,
+                1000...9999 => 4,
+                10000...65535 => 5,
+            };
+        },
+        u32 => {
+            return switch (val) {
+                0...9 => 1,
+                10...99 => 2,
+                100...999 => 3,
+                1000...9999 => 4,
+                10000...99999 => 5,
+                100000...999999 => 6,
+                1000000...9999999 => 7,
+                10000000...99999999 => 8,
+                100000000...999999999 => 9,
+                1000000000...4294967295 => 10,
+            };
+        },
+        u64 => {
+            return switch (val) {
+                0...9 => 1,
+                10...99 => 2,
+                100...999 => 3,
+                1000...9999 => 4,
+                10000...99999 => 5,
+                100000...999999 => 6,
+                1000000...9999999 => 7,
+                10000000...99999999 => 8,
+                100000000...999999999 => 9,
+                1000000000...9999999999 => 10,
+                10000000000...99999999999 => 11,
+                100000000000...999999999999 => 12,
+                1000000000000...9999999999999 => 13,
+                10000000000000...99999999999999 => 14,
+                100000000000000...999999999999999 => 15,
+                1000000000000000...9999999999999999 => 16,
+                10000000000000000...99999999999999999 => 17,
+                100000000000000000...999999999999999999 => 18,
+                1000000000000000000...9999999999999999999 => 19,
+                10000000000000000000...18446744073709551615 => 20,
+            };
+        },
+        else => assert_unreachable(@src(), "type `{s}` is not supported for `print_len_of_uint()`", .{@typeName(V)}),
+    }
+}
+
+pub fn local_type_name(comptime T: type) []const u8 {
+    comptime {
+        const FULL = @typeName(T);
+        var idx = FULL.len;
+        while (idx > 0) {
+            idx -= 1;
+            if (FULL[idx] == '.') {
+                return FULL[idx + 1 .. FULL.len];
+            }
+        }
+        return FULL;
+    }
 }
