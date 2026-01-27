@@ -1,3 +1,7 @@
+//! This module provides a quick implementation of `std.Io.Writer`
+//! that has NO flush location. It simply writes to the provided
+//! buffer, and returns an error if a write would overfill the buffer
+//! (cause a flush/drain)
 //! //TODO Documentation
 //! #### License: Zlib
 
@@ -41,9 +45,9 @@ fn impl_drain(w: *Writer, data: []const []const u8, splat: usize) Writer.Error!u
     _ = w;
     _ = data;
     _ = splat;
-    return 0;
+    return Writer.Error.WriteFailed;
 }
 fn impl_flush(w: *Writer) Writer.Error!void {
     _ = w;
-    return;
+    return Writer.Error.WriteFailed;
 }

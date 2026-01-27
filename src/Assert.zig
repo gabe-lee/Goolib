@@ -129,6 +129,10 @@ pub fn assert_allocation_failure(comptime src: ?SourceLocation, comptime T: type
     assert_with_reason(false, src, "failed to allocate memory for {d} items of type {s} (size needed = {d} bytes), error = {s}", .{ count, @typeName(T), count * @sizeOf(T), @errorName(err) });
     unreachable;
 }
+pub fn assert_comptime_write_failure(comptime src: ?SourceLocation, err: anyerror) noreturn {
+    assert_with_reason(false, src, "a comptime write operation faied, error = {s}", .{@errorName(err)});
+    unreachable;
+}
 
 pub fn assert_field_is_type(comptime field: std.builtin.Type.StructField, comptime T: type) void {
     assert_with_reason(field.type == T, @src(), "field `{s}` was type `{s}`, but needed to be type `{s}`", .{ field.name, @typeName(field.type), @typeName(T) });

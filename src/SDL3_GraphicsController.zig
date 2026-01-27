@@ -26,7 +26,6 @@ const math = std.math;
 const build = @import("builtin");
 const config = @import("config");
 const init_zero = std.mem.zeroes;
-const assert = std.debug.assert;
 
 const Root = @import("./_root.zig");
 const Types = Root.Types;

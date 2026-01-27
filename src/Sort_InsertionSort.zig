@@ -60,7 +60,6 @@ pub fn insertion_sort_implicit(comptime T: type, buffer: []T) void {
 }
 
 pub fn insertion_sort_with_func(comptime T: type, buffer: []T, greater_than: *const fn (a: T, b: T) bool) void {
-    assert_with_reason(Utils.can_infer_type_order(T), @src(), "cannot inherently order type " ++ @typeName(T), .{});
     var i: usize = 1;
     var j: usize = undefined;
     var jj: usize = undefined;
@@ -82,7 +81,6 @@ pub fn insertion_sort_with_func(comptime T: type, buffer: []T, greater_than: *co
     }
 }
 pub fn insertion_sort_with_func_and_userdata(comptime T: type, buffer: []T, userdata: anytype, greater_than: *const fn (a: T, b: T, userdata: @TypeOf(userdata)) bool) void {
-    assert_with_reason(Utils.can_infer_type_order(T), @src(), "cannot inherently order type " ++ @typeName(T), .{});
     var i: usize = 1;
     var j: usize = undefined;
     var jj: usize = undefined;

@@ -873,6 +873,22 @@ pub fn alloc_fail_str(alloc: Allocator, comptime src: builtin.SourceLocation, co
     return fmt.allocPrint(alloc, "{f} -> " ++ str, fullargs) catch return str;
 }
 
+/// This function aligns an address forward, with the additional condition that the object
+/// memory span cannot cross some *larger* boundary alignment, *UNLESS* the original offset
+/// was also already aligned to the larger boundary offset. If the aligned address would cause
+/// the object to cross the boundary alignment *AND* it was not already aligned to the boundary
+/// alignment, it instead returns an address aligned to the larger boundary alignment.
+pub fn align_forward_without_breaking_align_boundary_unless_offset_boundary_aligned(offset: usize, len: usize, object_align: usize, boundary_align: usize) usize {
+    assert_with_reason(object_align <= boundary_align, @src(), "object_align must be <= boundary_align to use this function, got {d} > {d}", .{ object_align, boundary_align });
+    const initial_align = std.mem.alignForward(usize, offset, object_align);
+    const initial_delta = initial_align - offset;
+    if (initial_delta == 0 or object_align == boundary_align) return initial_align;
+    const start_boundary_align = std.mem.alignBackward(usize, initial_align, boundary_align);
+    const end_minus_one_boundary_align = std.mem.alignBackward(usize, initial_align + len - 1, boundary_align);
+    if (start_boundary_align == end_minus_one_boundary_align) return initial_align;
+    return std.mem.alignForward(usize, offset, boundary_align);
+}
+
 /// Sorts a portion of a memory region using the provided `greater_than` function
 /// and the `insertion sort` algorithm
 ///

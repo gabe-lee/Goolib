@@ -119,9 +119,9 @@ pub fn define_rectangular_RxC_matrix_type(
     return extern struct {
         const Self = @This();
 
-        mat: DEF.Matrix() = @splat(EMPTY_MAJOR),
+        mat: DEF.Matrix() = @splat(@splat(ZERO)),
 
-        const EMPTY_MAJOR: [DEF.major_len()]T = @splat(ZERO);
+        // const EMPTY_MAJOR: [DEF.minor_len()]T = @splat(ZERO);
         const ONE: T = if (Types.type_is_vector(T)) @splat(1) else @as(T, 1);
         const ZERO: T = if (Types.type_is_vector(T)) @splat(0) else @as(T, 0);
         const SMALLER_MAT = define_rectangular_RxC_matrix_type(T, ROWS - 1, COLS - 1, ORDER, 0);
