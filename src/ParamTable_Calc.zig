@@ -303,7 +303,7 @@ pub const CalcInterface = struct {
         assert_with_reason(Types.type_is_struct(OUTPUT_OBJECT_TYPE), @src(), "type `OUTPUT_OBJECT_TYPE` must be a struct type, got `{s}`", .{@typeName(OUTPUT_OBJECT_TYPE)});
         const STRUCT = INFO.@"struct";
         assert_with_reason(STRUCT.fields.len == self.outputs.len, @src(), "type `OUTPUT_OBJECT_TYPE` must have exactly the same number of fields as `self.outputs.len`, got fields = {d}, inputs = {d}", .{ STRUCT.fields.len, self.inputs.len });
-        return self.get_uninit_param_object(self.outputs, OUTPUT_OBJECT_TYPE, STRUCT);
+        return self.get_outputs_uninit(self.outputs, OUTPUT_OBJECT_TYPE, STRUCT);
     }
     pub fn get_one_output_current_value(self: CalcInterface, comptime OUTPUT_OBJECT_TYPE: type, comptime FIELD: [:0]const u8) @FieldType(OUTPUT_OBJECT_TYPE, FIELD) {
         const INFO = @typeInfo(OUTPUT_OBJECT_TYPE);

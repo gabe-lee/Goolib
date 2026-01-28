@@ -162,23 +162,23 @@ pub fn Point(comptime T: type) type {
         }
 
         pub fn delta(_: Self) Vector {
-            return .ZERO_ZERO;
+            return .ZERO;
         }
 
         pub fn tangent(_: Self, percent: anytype) Vector {
             _ = percent;
-            return .ZERO_ZERO;
+            return .ZERO;
         }
 
         pub fn tangent_change(self: Self, percent: anytype) Vector {
             _ = percent;
             _ = self;
-            return .ZERO_ZERO;
+            return .ZERO;
         }
 
         pub fn length(self: Self) T {
             _ = self;
-            return .ZERO_ZERO;
+            return .ZERO;
         }
 
         pub fn minimum_signed_distance_from_point(self: Self, point: Vector) SignedDistanceWithPercent(T) {
@@ -329,7 +329,7 @@ pub fn Line(comptime T: type) type {
         pub fn tangent_change(self: Self, percent: T) Vector {
             _ = percent;
             _ = self;
-            return Vector.ZERO_ZERO;
+            return Vector.ZERO;
         }
 
         pub fn length(self: Self) T {
@@ -1237,7 +1237,7 @@ pub fn EdgeWithUserdata(comptime T: type, comptime USERDATA: type, comptime USER
         const AABB = AABB2.define_aabb2_type(T);
         const EDGE = Edge(T);
 
-        edge: EDGE = .new_point(.ZERO_ZERO),
+        edge: EDGE = .new_point(.ZERO),
         userdata: USERDATA = USERDATA_DEFAULT_ZERO,
 
         pub inline fn new_point(p: Vector) Self {
@@ -1891,21 +1891,21 @@ pub fn Contour(comptime T: type, comptime EDGE_USERDATA: type, comptime EDGE_USE
 
         pub fn add_mitered_bounds_to_aabb(self: *Self, aabb: *AABB, border_size: T, miter_limit: T, polarity: T) void {
             if (self.edges.is_empty()) return;
-            var prev_tangent = self.edges.get_last().tangent(1).normalize_may_be_zero(.norm_zero_is_zero);
+            var prev_tangent = self.edges.get_last().tangent(1).normalize_may_be_zero(.NORM_ZERO_IS_ZERO);
             var this_tangent: Vector = undefined;
             for (self.edges.slice()) |edge| {
-                this_tangent = edge.tangent(0).normalize_may_be_zero(.norm_zero_is_zero).negate();
+                this_tangent = edge.tangent(0).normalize_may_be_zero(.NORM_ZERO_IS_ZERO).negate();
                 if (polarity * prev_tangent.cross(this_tangent) >= 0) {
                     var miter_factor = miter_limit;
                     const q = 0.5 * (1 - prev_tangent.dot(this_tangent));
                     if (q > 0) {
                         miter_factor = @min(1 / @sqrt(q), miter_limit);
                     }
-                    const miter_offest = prev_tangent.add(this_tangent).normalize_may_be_zero(.norm_zero_is_zero).scale(border_size * miter_factor);
+                    const miter_offest = prev_tangent.add(this_tangent).normalize_may_be_zero(.NORM_ZERO_IS_ZERO).scale(border_size * miter_factor);
                     const miter_point = edge.get_start().add(miter_offest);
                     aabb.* = aabb.combine_with_point(miter_point);
                 }
-                prev_tangent = edge.tangent(1).normalize_may_be_zero(.norm_zero_is_zero);
+                prev_tangent = edge.tangent(1).normalize_may_be_zero(.NORM_ZERO_IS_ZERO);
             }
         }
 
@@ -2763,12 +2763,12 @@ pub fn PerpendicularDistanceSelector(comptime T: type, comptime CONST: EdgeSelec
                 cache.abs_distance = @abs(signed_distance.distance());
                 const point_to_a_delta = self.point.subtract(this_edge.start_point());
                 const point_to_b_delta = self.point.subtract(this_edge.end_point());
-                const a_tangent = this_edge.tangent(0).normalize_may_be_zero(.norm_zero_is_zero);
-                const b_tangent = this_edge.tangent(1).normalize_may_be_zero(.norm_zero_is_zero);
-                const prev_tangent = prev_edge.tangent(1).normalize_may_be_zero(.norm_zero_is_zero);
-                const next_tangent = next_edge.tangent(0).normalize_may_be_zero(.norm_zero_is_zero);
-                const prev_tan_plus_a_tan_norm = prev_tangent.add(a_tangent).normalize_may_be_zero(.norm_zero_is_zero);
-                const next_tan_plus_b_tan_norm = next_tangent.add(b_tangent).normalize_may_be_zero(.norm_zero_is_zero);
+                const a_tangent = this_edge.tangent(0).normalize_may_be_zero(.NORM_ZERO_IS_ZERO);
+                const b_tangent = this_edge.tangent(1).normalize_may_be_zero(.NORM_ZERO_IS_ZERO);
+                const prev_tangent = prev_edge.tangent(1).normalize_may_be_zero(.NORM_ZERO_IS_ZERO);
+                const next_tangent = next_edge.tangent(0).normalize_may_be_zero(.NORM_ZERO_IS_ZERO);
+                const prev_tan_plus_a_tan_norm = prev_tangent.add(a_tangent).normalize_may_be_zero(.NORM_ZERO_IS_ZERO);
+                const next_tan_plus_b_tan_norm = next_tangent.add(b_tangent).normalize_may_be_zero(.NORM_ZERO_IS_ZERO);
                 const a_domain_distance = point_to_a_delta.dot(prev_tan_plus_a_tan_norm);
                 const b_domain_distance = -point_to_b_delta.dot(next_tan_plus_b_tan_norm);
                 if (a_domain_distance > 0) {
@@ -2931,12 +2931,12 @@ pub fn MultiDistanceSelector(comptime T: type, comptime CONST: EdgeSelectorConta
 
                 const point_to_a_delta = self.point.subtract(this_edge.get_start_point());
                 const point_to_b_delta = self.point.subtract(this_edge.get_end_point());
-                const a_tangent = this_edge.tangent(0).normalize_may_be_zero(.norm_zero_is_zero);
-                const b_tangent = this_edge.tangent(1).normalize_may_be_zero(.norm_zero_is_zero);
-                const prev_tangent = prev_edge.tangent(1).normalize_may_be_zero(.norm_zero_is_zero);
-                const next_tangent = next_edge.tangent(0).normalize_may_be_zero(.norm_zero_is_zero);
-                const prev_tan_plus_a_tan_norm = prev_tangent.add(a_tangent).normalize_may_be_zero(.norm_zero_is_zero);
-                const next_tan_plus_b_tan_norm = next_tangent.add(b_tangent).normalize_may_be_zero(.norm_zero_is_zero);
+                const a_tangent = this_edge.tangent(0).normalize_may_be_zero(.NORM_ZERO_IS_ZERO);
+                const b_tangent = this_edge.tangent(1).normalize_may_be_zero(.NORM_ZERO_IS_ZERO);
+                const prev_tangent = prev_edge.tangent(1).normalize_may_be_zero(.NORM_ZERO_IS_ZERO);
+                const next_tangent = next_edge.tangent(0).normalize_may_be_zero(.NORM_ZERO_IS_ZERO);
+                const prev_tan_plus_a_tan_norm = prev_tangent.add(a_tangent).normalize_may_be_zero(.NORM_ZERO_IS_ZERO);
+                const next_tan_plus_b_tan_norm = next_tangent.add(b_tangent).normalize_may_be_zero(.NORM_ZERO_IS_ZERO);
                 const a_domain_distance = point_to_a_delta.dot(prev_tan_plus_a_tan_norm);
                 const b_domain_distance = -point_to_b_delta.dot(next_tan_plus_b_tan_norm);
                 if (a_domain_distance > 0) {

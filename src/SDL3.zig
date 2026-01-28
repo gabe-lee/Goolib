@@ -27,7 +27,7 @@
 
 const std = @import("std");
 const build = @import("builtin");
-const config = @import("config");
+const config = @import("./_config.zig").CONFIG;
 const init_zero = std.mem.zeroes;
 const assert = std.debug.assert;
 

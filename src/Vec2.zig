@@ -35,10 +35,12 @@ const Types = Root.Types;
 const AABB2 = Root.AABB2;
 const Matrix = Root.Matrix;
 const Vec3Module = Root.Vec3;
+const Utils = Root.Utils;
 
 const assert_is_float = Assert.assert_is_float;
 const assert_with_reason = Assert.assert_with_reason;
 const num_cast = Root.Cast.num_cast;
+const real_cast = Root.Cast.real_cast;
 
 pub const PerpendicularZero = Common.PerpendicularZero;
 pub const NormalizeZero = Common.NormalizeZero;
@@ -68,74 +70,53 @@ pub fn define_vec2_type(comptime T: type) type {
         };
         pub const F = if (IS_FLOAT) T else if (IS_LARGE_INT) f64 else f32;
 
-        vec: VEC = @splat(0),
+        x: T = 0,
+        y: T = 0,
 
-        pub const VEC: type = @Vector(2, T);
-        pub const ZERO = Vec2{ .vec = @splat(0) };
-        pub const ONE = Vec2{ .vec = @splat(1) };
-        pub const MIN = Vec2{ .vec = @splat(MIN_T) };
-        pub const MAX = Vec2{ .vec = @splat(MAX_T) };
-        pub const FILLED_WITH_2 = Vec2{ .vec = @splat(2) };
+        pub const VEC: type = @Vector(LEN, T);
+        pub const LEN = 2;
+        pub const ZERO = Vec2{ .x = 0, .y = 0 };
+        pub const ONE = Vec2{ .x = 1, .y = 1 };
+        pub const MIN = Vec2{ .x = MIN_T, .y = MIN_T };
+        pub const MAX = Vec2{ .x = MAX_T, .y = MAX_T };
+        pub const FILLED_WITH_2 = Vec2{ .x = 2, .y = 2 };
         pub const MIN_T = if (IS_FLOAT) -math.inf(T) else math.minInt(T);
         pub const MAX_T = if (IS_FLOAT) math.inf(T) else math.maxInt(T);
-        pub const LAST_COMPONENT_IDX = 2;
 
         pub fn new(x: T, y: T) Vec2 {
-            return Vec2{ .vec = .{ x, y } };
+            return Vec2{ .x = x, .y = y };
         }
         pub fn new_splat(val: T) Vec2 {
-            return Vec2{ .vec = @splat(val) };
+            return Vec2{ .x = val, .y = val };
         }
         pub fn new_any(x: anytype, y: anytype) Vec2 {
-            return Vec2{ .vec = .{ num_cast(x, T), num_cast(y, T) } };
+            return Vec2{ .x = num_cast(x, T), .y = num_cast(y, T) };
         }
         pub fn new_splat_any(val: anytype) Vec2 {
             return Vec2{ .vec = num_cast(val, T) };
         }
 
-        pub fn change_component_type(self: Vec2, comptime NEW_T: type) define_vec2_type(NEW_T) {
-            const V = define_vec2_type(NEW_T);
-            return V{ .vec = num_cast(self.vec, V.VEC) };
+        pub fn flat(self: Vec2) VEC {
+            return @bitCast(self);
         }
 
-        pub inline fn get(self: Vec2, component: Component) T {
-            return self.vec[@intFromEnum(component)];
-        }
-        pub inline fn get_x(self: Vec2) T {
-            return self.vec[0];
-        }
-        pub inline fn get_y(self: Vec2) T {
-            return self.vec[1];
-        }
-        pub inline fn set(self: *Vec2, component: Component, val: T) void {
-            self.vec[@intFromEnum(component)] = val;
-        }
-        pub inline fn set_x(self: *Vec2, x: T) void {
-            self.vec[0] = x;
-        }
-        pub inline fn set_y(self: *Vec2, y: T) void {
-            self.vec[1] = y;
-        }
-        pub inline fn ptr(self: *Vec2, component: Component) *T {
-            return &self.vec[@intFromEnum(component)];
-        }
-        pub inline fn x_ptr(self: *Vec2) *T {
-            return &self.vec[0];
-        }
-        pub inline fn y_ptr(self: *Vec2) *T {
-            return &self.vec[1];
+        pub fn change_component_type(self: Vec2, comptime NEW_T: type) define_vec2_type(NEW_T) {
+            const V = define_vec2_type(NEW_T);
+            return V{ .x = num_cast(self.x, NEW_T), .y = num_cast(self.y, NEW_T) };
         }
 
         pub fn upgrade_to_vec3_fill_1(self: Vec2) Vec3 {
-            return Vec3{ .vec = .{ self.vec[0], self.vec[1], 1 } };
+            return Vec3{ .x = self.x, .y = self.y, .z = 1 };
         }
         pub fn upgrade_to_vec3_fill_0(self: Vec2) Vec3 {
-            return Vec3{ .vec = .{ self.vec[0], self.vec[1], 0 } };
+            return Vec3{ .x = self.x, .y = self.y, .z = 0 };
         }
 
         pub fn swizzle(self: Vec2, new_x: Component, new_y: Component) Vec2 {
-            return Vec2{ .vec = .{ self.vec[@intFromEnum(new_x)], self.vec[@intFromEnum(new_y)] } };
+            const vec = self.flat();
+            return Vec2{ .x = vec[@intFromEnum(new_x)], .y = vec[@intFromEnum(new_y)] };
         }
+        // CHECKPOINT RE-refactor back to x,y,z,w components, but flatten internally for math where possible
 
         pub fn inverse(self: Vec2) Vec2 {
             return Vec2{ .vec = ONE.vec / self.vec };
@@ -157,7 +138,7 @@ pub fn define_vec2_type(comptime T: type) type {
         }
 
         pub fn dot_product(self: Vec2, other: Vec2) T {
-            const products = self.vec * other.vec;
+            const products = self.flat() * other.flat();
             return @reduce(.Add, products);
         }
         pub inline fn dot(self: Vec2, other: Vec2) T {
@@ -199,7 +180,8 @@ pub fn define_vec2_type(comptime T: type) type {
         }
 
         pub fn scale(self: Vec2, val: anytype) Vec2 {
-            const val_vec: @Vector(3, @TypeOf(val)) = @splat(val);
+            const v = real_cast(val);
+            const val_vec: @Vector(3, @TypeOf(v)) = @splat(val);
             return Vec2{ .vec = MathX.upgrade_multiply_out(self.vec, val_vec, VEC) };
         }
         pub fn inverse_scale(self: Vec2, val: anytype) Vec2 {
@@ -369,7 +351,8 @@ pub fn define_vec2_type(comptime T: type) type {
                 break :get percent;
             } else get: {
                 assert_is_float(@TypeOf(percent), @src());
-                break :get @as(@Vector(VEC.len, @TypeOf(percent)), @splat(percent));
+                const per = real_cast(percent);
+                break :get @as(@Vector(LEN, @TypeOf(per)), @splat(per));
             };
             const nums = MathX.upgrade_3_numbers_for_math(p1.vec, p2.vec, delta);
             const TU = @FieldType(@TypeOf(nums), "a");

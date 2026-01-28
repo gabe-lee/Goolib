@@ -2636,7 +2636,7 @@ pub fn convert_vertex_list_to_shape_with_userdata(vertex_list: *List(Vertex), co
     const EDGE = ShapeModule.EdgeWithUserdata(T, EDGE_USERDATA, EDGE_USERDATA_DEFAULT);
     const CONTOUR = Contour(T, EDGE_USERDATA, EDGE_USERDATA_DEFAULT);
     var started_a_contour: bool = false;
-    var p1: VEC = .ZERO_ZERO;
+    var p1: VEC = .ZERO;
     var curr_contour: CONTOUR = .init_capacity(8, shape_allocator);
     shape.clear(shape_allocator);
     for (vertex_list.slice()) |vert| {
@@ -2647,7 +2647,7 @@ pub fn convert_vertex_list_to_shape_with_userdata(vertex_list: *List(Vertex), co
                     shape.append_contour(curr_contour, shape_allocator);
                     curr_contour = .init_capacity(8, shape_allocator);
                 }
-                p1 = Vec_f32.new_from_any(vert.x, vert.y);
+                p1 = Vec_f32.new_any(vert.x, vert.y);
             },
             .LINE => {
                 started_a_contour = true;
@@ -2779,14 +2779,14 @@ test "TrueTypeFont_load_and_render_Lato_chars" {
         try font.get_glyph_vertex_list(glyph_index, &vertex_list, alloc, .SINGLE_THREADED, &vertex_list_pool, alloc);
         // Shape.zig rasterizer
         try convert_vertex_list_to_shape(&vertex_list, f32, &shape, alloc);
-        shape.scale(.new_same_xy(scale_54_px));
+        shape.scale(.new_splat(scale_54_px));
         var shape_aabb = shape.get_bounds_default_estimate();
         shape_aabb = shape_aabb.expand_by(2);
         const shape_shift_to_frame = shape_aabb.get_min_point().negate();
         shape.translate(shape_shift_to_frame);
         shape_aabb = shape_aabb.with_mins_shifted_to_zero();
         const shape_aabb_max = shape_aabb.get_max_point();
-        const output_grid = OUT_GRID.init_from_existing_cell_buffer(@intFromFloat(shape_aabb_max.x + 2), @intFromFloat(shape_aabb_max.y + 2), 0, output_cells, alloc);
+        const output_grid = OUT_GRID.init_from_existing_cell_buffer(@intFromFloat(shape_aabb_max.get_x() + 2), @intFromFloat(shape_aabb_max.get_y() + 2), 0, output_cells, alloc);
         raster.rasterize_to_existing_data_grid_default_lerp(&shape, .X_ONLY_EXPONENTIAL_FALLOFF, output_grid, 0, 255, .default_estimates(), alloc);
         _ = try BitmapFormat.save_bitmap_to_file("test_out/true_type/shape_raster_char_" ++ std.fmt.comptimePrint("{d}", .{char}) ++ ".bmp", OUT_DEF, output_grid, .{ .bits_per_pixel = .BPP_8 }, .NO_CONVERSION_NEEDED_ALPHA_BECOMES_COLOR_CHANNELS, alloc);
         // STB Rasterizer

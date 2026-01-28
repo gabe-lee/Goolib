@@ -362,6 +362,39 @@ pub inline fn pointer_is_zero(ptr: anytype) bool {
 pub inline fn type_has_field_with_type(comptime T: type, comptime field: []const u8, comptime T_FIELD: type) bool {
     return @hasField(T, field) and @FieldType(T, field) == T_FIELD;
 }
+pub inline fn type_has_any_field_with_type(comptime T: type, comptime T_FIELD: type) bool {
+    const INFO = @typeInfo(T).@"struct";
+    inline for (INFO.fields) |field| {
+        if (field.type == T_FIELD) return true;
+    }
+    return false;
+}
+pub inline fn type_has_exactly_all_field_types(comptime T: type, comptime T_FIELDS: []const type) bool {
+    const found_idx: [T_FIELDS.len]usize = undefined;
+    const INFO = @typeInfo(T).@"struct";
+    if (INFO.fields.len != T_FIELDS.len) return false;
+    inline for (T_FIELDS, 0..) |find_type, i| {
+        comptime var found_match = false;
+        inline for (INFO.fields, 0..) |field, f| {
+            if (field.type == find_type) {
+                comptime var unique: bool = true;
+                inline for (found_idx[0..i]) |prev_found_f| {
+                    if (prev_found_f == f) {
+                        unique = false;
+                        break;
+                    }
+                }
+                if (unique) {
+                    found_idx[i] = f;
+                    found_match = true;
+                    break;
+                }
+            }
+        }
+        if (!found_match) return false;
+    }
+    return true;
+}
 pub inline fn type_has_field_with_any_pointer_type(comptime T: type, comptime field: []const u8) bool {
     return @hasField(T, field) and @typeInfo(@FieldType(T, field)) == .pointer;
 }

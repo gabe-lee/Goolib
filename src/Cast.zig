@@ -29,11 +29,16 @@ const mem = std.mem;
 const Root = @import("./_root.zig");
 const Assert = Root.Assert;
 const Types = Root.Types;
+const Utils = Root.Utils;
 const assert_with_reason = Assert.assert_with_reason;
 const assert_unreachable = Assert.assert_unreachable;
 
 pub inline fn bit_cast(from: anytype, comptime TO: type) TO {
     return @as(TO, @bitCast(from));
+}
+
+pub fn real_cast(val: anytype) Utils.real_type(@TypeOf(val)) {
+    return num_cast(val, Utils.real_type(@TypeOf(val)));
 }
 
 pub fn num_cast(from: anytype, comptime TO: type) TO {

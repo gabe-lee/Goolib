@@ -6,7 +6,8 @@
 //! way to pack a given set of fields for minimal waste.
 //!
 //! For compatibility reasons, types that are not 32 bits wide are only supported with 'packed' types and must be
-//! unpacked on the GPU side either using a provided function or manually.
+//! unpacked on the GPU side either using a provided function or manually. Some platforms allow native 'double' and 'half',
+//! types, but those are nut supported by this API.
 //!
 //! The `GPU_bool` type takes a `Bool32` enum with `.TRUE` and `.FALSE`
 //! tags to guarantee compatibility with the expected 32-bit gpu bool
@@ -58,6 +59,8 @@ const Bool32 = Common.Bool32;
 const Sort = Root.Sort.InsertionSort;
 const QuickWriter = Root.QuickWriter;
 const IncludeOffests = Common.IncludeOffests;
+const SDL3 = Root.SDL3;
+const GPU_VertexElementFormat = SDL3.GPU_VertexElementFormat;
 
 const assert_with_reason = Assert.assert_with_reason;
 const assert_comptime_write_failure = Assert.assert_comptime_write_failure;
@@ -148,7 +151,7 @@ const DOUBLE_UNDERSCORE = "__";
 
 const HLSL_PAD_TYPES = [5][]const u8{
     INVALID, // no 1 byte types supported
-    HLSL_u32, // FIXME 2 byte types *could* be supported
+    INVALID, // no 2 byte types directly supported
     HLSL_u32,
     HLSL_u32_2,
     HLSL_u32_4,
@@ -221,9 +224,10 @@ pub fn UniformStruct(comptime FIELDS: type, comptime INCLUDE_LAYOUT: IncludeLayo
         comptime var empty_spot_that_fits: usize = 0;
         comptime var empty_spot_offset: usize = math.maxInt(isize);
         comptime var empty_spot_space_after: usize = math.maxInt(isize);
+        const needed_align = @max(field.gpu_type.uniform_alignment, field.gpu_type.cpu_align);
         for (empty_spots[0..empty_spots_len], 0..) |empty, e| {
             if (empty.len >= field.gpu_type.uniform_size) {
-                const next_aligned_within_empty = Utils.align_forward_without_breaking_align_boundary_unless_offset_boundary_aligned(empty.offset, field.gpu_type.uniform_size, field.gpu_type.uniform_alignment, GPU_UNIFORM_BOUNDARY_ALIGN);
+                const next_aligned_within_empty = Utils.align_forward_without_breaking_align_boundary_unless_offset_boundary_aligned(empty.offset, field.gpu_type.uniform_size, needed_align, GPU_UNIFORM_BOUNDARY_ALIGN);
                 const len_lost = next_aligned_within_empty - empty.offset;
                 if (len_lost >= empty.len) continue;
                 const aligned_len = empty.len - len_lost;
@@ -276,7 +280,7 @@ pub fn UniformStruct(comptime FIELDS: type, comptime INCLUDE_LAYOUT: IncludeLayo
             }
             field_loc = old_empty.offset + empty_spot_offset;
         } else {
-            const next_aligned_offset = Utils.align_forward_without_breaking_align_boundary_unless_offset_boundary_aligned(current_max_offset, field.gpu_type.uniform_size, field.gpu_type.uniform_alignment, GPU_UNIFORM_BOUNDARY_ALIGN);
+            const next_aligned_offset = Utils.align_forward_without_breaking_align_boundary_unless_offset_boundary_aligned(current_max_offset, field.gpu_type.uniform_size, needed_align, GPU_UNIFORM_BOUNDARY_ALIGN);
             const new_empty_len = next_aligned_offset - current_max_offset;
             if (new_empty_len > 0) {
                 comptime var combined_with_another_empty: bool = false;
@@ -578,9 +582,10 @@ pub fn StreamStruct(comptime FIELDS: type, comptime INCLUDE_LAYOUT: IncludeLayou
         comptime var empty_spot_that_fits: usize = 0;
         comptime var empty_spot_offset: usize = math.maxInt(isize);
         comptime var empty_spot_space_after: usize = math.maxInt(isize);
+        const needed_align = @max(field.gpu_type.stream_alignment, field.gpu_type.cpu_align);
         for (empty_spots[0..empty_spots_len], 0..) |empty, e| {
             if (empty.len >= field.gpu_type.stream_size) {
-                const next_aligned_within_empty = Utils.align_forward_without_breaking_align_boundary_unless_offset_boundary_aligned(empty.offset, field.gpu_type.stream_size, field.gpu_type.stream_alignment, GPU_UNIFORM_BOUNDARY_ALIGN);
+                const next_aligned_within_empty = Utils.align_forward_without_breaking_align_boundary_unless_offset_boundary_aligned(empty.offset, field.gpu_type.stream_size, needed_align, GPU_UNIFORM_BOUNDARY_ALIGN);
                 const len_lost = next_aligned_within_empty - empty.offset;
                 if (len_lost >= empty.len) continue;
                 const aligned_len = empty.len - len_lost;
@@ -633,7 +638,7 @@ pub fn StreamStruct(comptime FIELDS: type, comptime INCLUDE_LAYOUT: IncludeLayou
             }
             field_loc = old_empty.offset + empty_spot_offset;
         } else {
-            const next_aligned_offset = Utils.align_forward_without_breaking_align_boundary_unless_offset_boundary_aligned(current_max_offset, field.gpu_type.stream_size, field.gpu_type.stream_alignment, GPU_UNIFORM_BOUNDARY_ALIGN);
+            const next_aligned_offset = Utils.align_forward_without_breaking_align_boundary_unless_offset_boundary_aligned(current_max_offset, field.gpu_type.stream_size, needed_align, GPU_UNIFORM_BOUNDARY_ALIGN);
             const new_empty_len = next_aligned_offset - current_max_offset;
             if (new_empty_len > 0) {
                 comptime var combined_with_another_empty: bool = false;
@@ -880,15 +885,55 @@ pub fn StreamStruct(comptime FIELDS: type, comptime INCLUDE_LAYOUT: IncludeLayou
 
 pub const GPUType = struct {
     cpu_type: type,
+    cpu_align: comptime_int,
     uniform_size: comptime_int,
     uniform_alignment: comptime_int,
     stream_size: comptime_int = -1,
     stream_alignment: comptime_int = -1,
+    sdl_vert_format: GPU_VertexElementFormat = .INVALID,
     hlsl_name: []const u8,
 
-    pub fn with_cpu_type(comptime self: GPUType, new_cpu_type: type) GPUType {
+    pub fn with_cpu_type(comptime self: GPUType, comptime new_cpu_type: type) GPUType {
         return GPUType{
             .cpu_type = new_cpu_type,
+            .cpu_align = self.cpu_align,
+            .sdl_vert_format = self.sdl_vert_format,
+            .uniform_size = self.uniform_size,
+            .uniform_alignment = self.uniform_alignment,
+            .stream_size = self.stream_size,
+            .stream_alignment = self.stream_alignment,
+            .hlsl_name = self.hlsl_name,
+        };
+    }
+    pub fn with_cpu_type_and_align(comptime self: GPUType, comptime new_cpu_type: type, comptime new_cpu_align: comptime_int) GPUType {
+        return GPUType{
+            .cpu_type = new_cpu_type,
+            .cpu_align = new_cpu_align,
+            .sdl_vert_format = self.sdl_vert_format,
+            .uniform_size = self.uniform_size,
+            .uniform_alignment = self.uniform_alignment,
+            .stream_size = self.stream_size,
+            .stream_alignment = self.stream_alignment,
+            .hlsl_name = self.hlsl_name,
+        };
+    }
+    pub fn with_cpu_and_sdl_type(comptime self: GPUType, new_cpu_type: type, comptime new_sdl_vert_type: GPU_VertexElementFormat) GPUType {
+        return GPUType{
+            .cpu_type = new_cpu_type,
+            .cpu_align = self.cpu_align,
+            .sdl_vert_format = new_sdl_vert_type,
+            .uniform_size = self.uniform_size,
+            .uniform_alignment = self.uniform_alignment,
+            .stream_size = self.stream_size,
+            .stream_alignment = self.stream_alignment,
+            .hlsl_name = self.hlsl_name,
+        };
+    }
+    pub fn with_cpu_and_sdl_type_and_align(comptime self: GPUType, new_cpu_type: type, comptime new_sdl_vert_type: GPU_VertexElementFormat, comptime new_cpu_align: comptime_int) GPUType {
+        return GPUType{
+            .cpu_type = new_cpu_type,
+            .cpu_align = new_cpu_align,
+            .sdl_vert_format = new_sdl_vert_type,
             .uniform_size = self.uniform_size,
             .uniform_alignment = self.uniform_alignment,
             .stream_size = self.stream_size,
@@ -926,6 +971,8 @@ const HLSL_i32 = "int";
 const HLSL_bool = "bool";
 pub const GPU_bool = GPUType{
     .cpu_type = Bool32,
+    .cpu_align = 4,
+    .sdl_vert_format = .U32_x1,
     .uniform_size = 4,
     .uniform_alignment = 4,
     .stream_size = 4,
@@ -934,6 +981,8 @@ pub const GPU_bool = GPUType{
 };
 pub const GPU_f32 = GPUType{
     .cpu_type = f32,
+    .cpu_align = 4,
+    .sdl_vert_format = .F32_x1,
     .uniform_size = 4,
     .uniform_alignment = 4,
     .stream_size = 4,
@@ -942,6 +991,8 @@ pub const GPU_f32 = GPUType{
 };
 pub const GPU_u32 = GPUType{
     .cpu_type = u32,
+    .cpu_align = 4,
+    .sdl_vert_format = .U32_x1,
     .uniform_size = 4,
     .uniform_alignment = 4,
     .stream_size = 4,
@@ -950,6 +1001,8 @@ pub const GPU_u32 = GPUType{
 };
 pub const GPU_i32 = GPUType{
     .cpu_type = i32,
+    .cpu_align = 4,
+    .sdl_vert_format = .I32_x1,
     .uniform_size = 4,
     .uniform_alignment = 4,
     .stream_size = 4,
@@ -963,6 +1016,8 @@ const HLSL_u32_2 = "uint2";
 const HLSL_i32_2 = "int2";
 pub const GPU_f32_2 = GPUType{
     .cpu_type = define_vec2_type(f32),
+    .cpu_align = 4,
+    .sdl_vert_format = .F32_x2,
     .uniform_size = 8,
     .uniform_alignment = 8,
     .stream_size = 8,
@@ -971,6 +1026,8 @@ pub const GPU_f32_2 = GPUType{
 };
 pub const GPU_u32_2 = GPUType{
     .cpu_type = define_vec2_type(u32),
+    .cpu_align = 4,
+    .sdl_vert_format = .u32_x2,
     .uniform_size = 8,
     .uniform_alignment = 8,
     .stream_size = 8,
@@ -979,6 +1036,8 @@ pub const GPU_u32_2 = GPUType{
 };
 pub const GPU_i32_2 = GPUType{
     .cpu_type = define_vec2_type(i32),
+    .cpu_align = 4,
+    .sdl_vert_format = .I32_x2,
     .uniform_size = 8,
     .uniform_alignment = 8,
     .stream_size = 8,
@@ -992,6 +1051,8 @@ const HLSL_u32_3 = "uint3";
 const HLSL_i32_3 = "int3";
 pub const GPU_f32_3 = GPUType{
     .cpu_type = define_vec3_type(f32),
+    .cpu_align = 4,
+    .sdl_vert_format = .F32_x3,
     .uniform_size = 12,
     .uniform_alignment = 16,
     .stream_size = 12,
@@ -1000,6 +1061,8 @@ pub const GPU_f32_3 = GPUType{
 };
 pub const GPU_u32_3 = GPUType{
     .cpu_type = define_vec3_type(u32),
+    .cpu_align = 4,
+    .sdl_vert_format = .U32_x3,
     .uniform_size = 12,
     .uniform_alignment = 16,
     .stream_size = 12,
@@ -1008,6 +1071,8 @@ pub const GPU_u32_3 = GPUType{
 };
 pub const GPU_i32_3 = GPUType{
     .cpu_type = define_vec3_type(i32),
+    .cpu_align = 4,
+    .sdl_vert_format = .I32_x3,
     .uniform_size = 12,
     .uniform_alignment = 16,
     .stream_size = 12,
@@ -1021,6 +1086,8 @@ const HLSL_u32_4 = "uint4";
 const HLSL_i32_4 = "int4";
 pub const GPU_f32_4 = GPUType{
     .cpu_type = define_vec4_type(f32),
+    .cpu_align = 4,
+    .sdl_vert_format = .F32_x4,
     .uniform_size = 16,
     .uniform_alignment = 16,
     .stream_size = 16,
@@ -1029,6 +1096,8 @@ pub const GPU_f32_4 = GPUType{
 };
 pub const GPU_u32_4 = GPUType{
     .cpu_type = define_vec4_type(u32),
+    .cpu_align = 4,
+    .sdl_vert_format = .U32_x4,
     .uniform_size = 16,
     .uniform_alignment = 16,
     .stream_size = 16,
@@ -1037,6 +1106,8 @@ pub const GPU_u32_4 = GPUType{
 };
 pub const GPU_i32_4 = GPUType{
     .cpu_type = define_vec4_type(i32),
+    .cpu_align = 4,
+    .sdl_vert_format = .I32_x4,
     .uniform_size = 16,
     .uniform_alignment = 16,
     .stream_size = 16,
@@ -1051,18 +1122,21 @@ const HLSL_u32_1x1 = "uint1x1";
 const HLSL_i32_1x1 = "int1x1";
 pub const GPU_f32_1x1 = GPUType{
     .cpu_type = define_matx_type(f32, 1, 1, .COLUMN_MAJOR, 0),
+    .cpu_align = 4,
     .uniform_size = 4,
     .uniform_alignment = 4,
     .hlsl_name = HLSL_f32_1x1,
 };
 pub const GPU_u32_1x1 = GPUType{
     .cpu_type = define_matx_type(u32, 1, 1, .COLUMN_MAJOR, 0),
+    .cpu_align = 4,
     .uniform_size = 4,
     .uniform_alignment = 4,
     .hlsl_name = HLSL_u32_1x1,
 };
 pub const GPU_i32_1x1 = GPUType{
     .cpu_type = define_matx_type(i32, 1, 1, .COLUMN_MAJOR, 0),
+    .cpu_align = 4,
     .uniform_size = 4,
     .uniform_alignment = 4,
     .hlsl_name = HLSL_i32_1x1,
@@ -1073,18 +1147,21 @@ const HLSL_u32_2x1 = "uint2x1";
 const HLSL_i32_2x1 = "int2x1";
 pub const GPU_f32_2x1 = GPUType{
     .cpu_type = define_matx_type(f32, 2, 1, .COLUMN_MAJOR, 0),
+    .cpu_align = 4,
     .uniform_size = 8,
     .uniform_alignment = 16,
     .hlsl_name = HLSL_f32_2x1,
 };
 pub const GPU_u32_2x1 = GPUType{
     .cpu_type = define_matx_type(u32, 2, 1, .COLUMN_MAJOR, 0),
+    .cpu_align = 4,
     .uniform_size = 8,
     .uniform_alignment = 16,
     .hlsl_name = HLSL_u32_2x1,
 };
 pub const GPU_i32_2x1 = GPUType{
     .cpu_type = define_matx_type(i32, 2, 1, .COLUMN_MAJOR, 0),
+    .cpu_align = 4,
     .uniform_size = 8,
     .uniform_alignment = 16,
     .hlsl_name = HLSL_i32_2x1,
@@ -1095,18 +1172,21 @@ const HLSL_u32_3x1 = "uint3x1";
 const HLSL_i32_3x1 = "int3x1";
 pub const GPU_f32_3x1 = GPUType{
     .cpu_type = define_matx_type(f32, 3, 1, .COLUMN_MAJOR, 0),
+    .cpu_align = 4,
     .uniform_size = 12,
     .uniform_alignment = 16,
     .hlsl_name = HLSL_f32_3x1,
 };
 pub const GPU_u32_3x1 = GPUType{
     .cpu_type = define_matx_type(u32, 3, 1, .COLUMN_MAJOR, 0),
+    .cpu_align = 4,
     .uniform_size = 12,
     .uniform_alignment = 16,
     .hlsl_name = HLSL_u32_3x1,
 };
 pub const GPU_i32_3x1 = GPUType{
     .cpu_type = define_matx_type(i32, 3, 1, .COLUMN_MAJOR, 0),
+    .cpu_align = 4,
     .uniform_size = 12,
     .uniform_alignment = 16,
     .hlsl_name = HLSL_i32_3x1,
@@ -1117,18 +1197,21 @@ const HLSL_u32_4x1 = "uint4x1";
 const HLSL_i32_4x1 = "int4x1";
 pub const GPU_f32_4x1 = GPUType{
     .cpu_type = define_matx_type(f32, 4, 1, .COLUMN_MAJOR, 0),
+    .cpu_align = 4,
     .uniform_size = 16,
     .uniform_alignment = 16,
     .hlsl_name = HLSL_f32_4x1,
 };
 pub const GPU_u32_4x1 = GPUType{
     .cpu_type = define_matx_type(u32, 4, 1, .COLUMN_MAJOR, 0),
+    .cpu_align = 4,
     .uniform_size = 16,
     .uniform_alignment = 16,
     .hlsl_name = HLSL_u32_4x1,
 };
 pub const GPU_i32_4x1 = GPUType{
     .cpu_type = define_matx_type(i32, 4, 1, .COLUMN_MAJOR, 0),
+    .cpu_align = 4,
     .uniform_size = 16,
     .uniform_alignment = 16,
     .hlsl_name = HLSL_i32_4x1,
@@ -1139,18 +1222,21 @@ const HLSL_u32_1x2 = "uint1x2";
 const HLSL_i32_1x2 = "int1x2";
 pub const GPU_f32_1x2 = GPUType{
     .cpu_type = define_matx_type(f32, 1, 2, .COLUMN_MAJOR, 3),
+    .cpu_align = 4,
     .uniform_size = 20,
     .uniform_alignment = 16,
     .hlsl_name = HLSL_f32_1x2,
 };
 pub const GPU_u32_1x2 = GPUType{
     .cpu_type = define_matx_type(u32, 1, 2, .COLUMN_MAJOR, 3),
+    .cpu_align = 4,
     .uniform_size = 20,
     .uniform_alignment = 16,
     .hlsl_name = HLSL_u32_1x2,
 };
 pub const GPU_i32_1x2 = GPUType{
     .cpu_type = define_matx_type(i32, 1, 2, .COLUMN_MAJOR, 3),
+    .cpu_align = 4,
     .uniform_size = 20,
     .uniform_alignment = 16,
     .hlsl_name = HLSL_i32_1x2,
@@ -1161,18 +1247,21 @@ const HLSL_u32_2x2 = "uint2x2";
 const HLSL_i32_2x2 = "int2x2";
 pub const GPU_f32_2x2 = GPUType{
     .cpu_type = define_matx_type(f32, 2, 2, .COLUMN_MAJOR, 2),
+    .cpu_align = 4,
     .uniform_size = 24,
     .uniform_alignment = 16,
     .hlsl_name = HLSL_f32_2x2,
 };
 pub const GPU_u32_2x2 = GPUType{
     .cpu_type = define_matx_type(u32, 2, 2, .COLUMN_MAJOR, 2),
+    .cpu_align = 4,
     .uniform_size = 24,
     .uniform_alignment = 16,
     .hlsl_name = HLSL_u32_2x2,
 };
 pub const GPU_i32_2x2 = GPUType{
     .cpu_type = define_matx_type(i32, 2, 2, .COLUMN_MAJOR, 2),
+    .cpu_align = 4,
     .uniform_size = 24,
     .uniform_alignment = 16,
     .hlsl_name = HLSL_i32_2x2,
@@ -1183,18 +1272,21 @@ const HLSL_u32_3x2 = "uint3x2";
 const HLSL_i32_3x2 = "int3x2";
 pub const GPU_f32_3x2 = GPUType{
     .cpu_type = define_matx_type(f32, 3, 2, .COLUMN_MAJOR, 1),
+    .cpu_align = 4,
     .uniform_size = 28,
     .uniform_alignment = 16,
     .hlsl_name = HLSL_f32_3x2,
 };
 pub const GPU_u32_3x2 = GPUType{
     .cpu_type = define_matx_type(u32, 3, 2, .COLUMN_MAJOR, 1),
+    .cpu_align = 4,
     .uniform_size = 28,
     .uniform_alignment = 16,
     .hlsl_name = HLSL_u32_3x2,
 };
 pub const GPU_i32_3x2 = GPUType{
     .cpu_type = define_matx_type(i32, 3, 2, .COLUMN_MAJOR, 1),
+    .cpu_align = 4,
     .uniform_size = 28,
     .uniform_alignment = 16,
     .hlsl_name = HLSL_i32_3x2,
@@ -1205,18 +1297,21 @@ const HLSL_u32_4x2 = "uint4x2";
 const HLSL_i32_4x2 = "int4x2";
 pub const GPU_f32_4x2 = GPUType{
     .cpu_type = define_matx_type(f32, 4, 2, .COLUMN_MAJOR, 0),
+    .cpu_align = 4,
     .uniform_size = 32,
     .uniform_alignment = 16,
     .hlsl_name = HLSL_f32_4x2,
 };
 pub const GPU_u32_4x2 = GPUType{
     .cpu_type = define_matx_type(u32, 4, 2, .COLUMN_MAJOR, 0),
+    .cpu_align = 4,
     .uniform_size = 32,
     .uniform_alignment = 16,
     .hlsl_name = HLSL_u32_4x2,
 };
 pub const GPU_i32_4x2 = GPUType{
     .cpu_type = define_matx_type(i32, 4, 2, .COLUMN_MAJOR, 0),
+    .cpu_align = 4,
     .uniform_size = 32,
     .uniform_alignment = 16,
     .hlsl_name = HLSL_i32_4x2,
@@ -1227,18 +1322,21 @@ const HLSL_u32_1x3 = "uint1x3";
 const HLSL_i32_1x3 = "int1x3";
 pub const GPU_f32_1x3 = GPUType{
     .cpu_type = define_matx_type(f32, 1, 3, .COLUMN_MAJOR, 3),
+    .cpu_align = 4,
     .uniform_size = 36,
     .uniform_alignment = 16,
     .hlsl_name = HLSL_f32_1x3,
 };
 pub const GPU_u32_1x3 = GPUType{
     .cpu_type = define_matx_type(u32, 1, 3, .COLUMN_MAJOR, 3),
+    .cpu_align = 4,
     .uniform_size = 36,
     .uniform_alignment = 16,
     .hlsl_name = HLSL_u32_1x3,
 };
 pub const GPU_i32_1x3 = GPUType{
     .cpu_type = define_matx_type(i32, 1, 3, .COLUMN_MAJOR, 3),
+    .cpu_align = 4,
     .uniform_size = 36,
     .uniform_alignment = 16,
     .hlsl_name = HLSL_i32_1x3,
@@ -1249,18 +1347,21 @@ const HLSL_u32_2x3 = "uint2x3";
 const HLSL_i32_2x3 = "int2x3";
 pub const GPU_f32_2x3 = GPUType{
     .cpu_type = define_matx_type(f32, 2, 3, .COLUMN_MAJOR, 2),
+    .cpu_align = 4,
     .uniform_size = 40,
     .uniform_alignment = 16,
     .hlsl_name = HLSL_f32_2x3,
 };
 pub const GPU_u32_2x3 = GPUType{
     .cpu_type = define_matx_type(u32, 2, 3, .COLUMN_MAJOR, 2),
+    .cpu_align = 4,
     .uniform_size = 40,
     .uniform_alignment = 16,
     .hlsl_name = HLSL_u32_2x3,
 };
 pub const GPU_i32_2x3 = GPUType{
     .cpu_type = define_matx_type(i32, 2, 3, .COLUMN_MAJOR, 2),
+    .cpu_align = 4,
     .uniform_size = 40,
     .uniform_alignment = 16,
     .hlsl_name = HLSL_i32_2x3,
@@ -1271,18 +1372,21 @@ const HLSL_u32_3x3 = "uint3x3";
 const HLSL_i32_3x3 = "int3x3";
 pub const GPU_f32_3x3 = GPUType{
     .cpu_type = define_matx_type(f32, 3, 3, .COLUMN_MAJOR, 1),
+    .cpu_align = 4,
     .uniform_size = 44,
     .uniform_alignment = 16,
     .hlsl_name = HLSL_f32_3x3,
 };
 pub const GPU_u32_3x3 = GPUType{
     .cpu_type = define_matx_type(u32, 3, 3, .COLUMN_MAJOR, 1),
+    .cpu_align = 4,
     .uniform_size = 44,
     .uniform_alignment = 16,
     .hlsl_name = HLSL_u32_3x3,
 };
 pub const GPU_i32_3x3 = GPUType{
     .cpu_type = define_matx_type(i32, 3, 3, .COLUMN_MAJOR, 1),
+    .cpu_align = 4,
     .uniform_size = 44,
     .uniform_alignment = 16,
     .hlsl_name = HLSL_i32_3x3,
@@ -1293,18 +1397,21 @@ const HLSL_u32_4x3 = "uint4x3";
 const HLSL_i32_4x3 = "int4x3";
 pub const GPU_f32_4x3 = GPUType{
     .cpu_type = define_matx_type(f32, 4, 3, .COLUMN_MAJOR, 0),
+    .cpu_align = 4,
     .uniform_size = 48,
     .uniform_alignment = 16,
     .hlsl_name = HLSL_f32_4x3,
 };
 pub const GPU_u32_4x3 = GPUType{
     .cpu_type = define_matx_type(u32, 4, 3, .COLUMN_MAJOR, 0),
+    .cpu_align = 4,
     .uniform_size = 48,
     .uniform_alignment = 16,
     .hlsl_name = HLSL_u32_4x3,
 };
 pub const GPU_i32_4x3 = GPUType{
     .cpu_type = define_matx_type(i32, 4, 3, .COLUMN_MAJOR, 0),
+    .cpu_align = 4,
     .uniform_size = 48,
     .uniform_alignment = 16,
     .hlsl_name = HLSL_i32_4x3,
@@ -1315,18 +1422,21 @@ const HLSL_u32_1x4 = "uint1x4";
 const HLSL_i32_1x4 = "int1x4";
 pub const GPU_f32_1x4 = GPUType{
     .cpu_type = define_matx_type(f32, 1, 4, .COLUMN_MAJOR, 3),
+    .cpu_align = 4,
     .uniform_size = 52,
     .uniform_alignment = 16,
     .hlsl_name = HLSL_f32_1x4,
 };
 pub const GPU_u32_1x4 = GPUType{
     .cpu_type = define_matx_type(u32, 1, 4, .COLUMN_MAJOR, 3),
+    .cpu_align = 4,
     .uniform_size = 52,
     .uniform_alignment = 16,
     .hlsl_name = HLSL_u32_1x4,
 };
 pub const GPU_i32_1x4 = GPUType{
     .cpu_type = define_matx_type(i32, 1, 4, .COLUMN_MAJOR, 3),
+    .cpu_align = 4,
     .uniform_size = 52,
     .uniform_alignment = 16,
     .hlsl_name = HLSL_i32_1x4,
@@ -1337,18 +1447,21 @@ const HLSL_u32_2x4 = "uint2x4";
 const HLSL_i32_2x4 = "int2x4";
 pub const GPU_f32_2x4 = GPUType{
     .cpu_type = define_matx_type(f32, 2, 4, .COLUMN_MAJOR, 2),
+    .cpu_align = 4,
     .uniform_size = 56,
     .uniform_alignment = 16,
     .hlsl_name = HLSL_f32_2x4,
 };
 pub const GPU_u32_2x4 = GPUType{
     .cpu_type = define_matx_type(u32, 2, 4, .COLUMN_MAJOR, 2),
+    .cpu_align = 4,
     .uniform_size = 56,
     .uniform_alignment = 16,
     .hlsl_name = HLSL_u32_2x4,
 };
 pub const GPU_i32_2x4 = GPUType{
     .cpu_type = define_matx_type(i32, 2, 4, .COLUMN_MAJOR, 2),
+    .cpu_align = 4,
     .uniform_size = 56,
     .uniform_alignment = 16,
     .hlsl_name = HLSL_i32_2x4,
@@ -1359,18 +1472,21 @@ const HLSL_u32_3x4 = "uint3x4";
 const HLSL_i32_3x4 = "int3x4";
 pub const GPU_f32_3x4 = GPUType{
     .cpu_type = define_matx_type(f32, 3, 4, .COLUMN_MAJOR, 1),
+    .cpu_align = 4,
     .uniform_size = 60,
     .uniform_alignment = 16,
     .hlsl_name = HLSL_f32_3x4,
 };
 pub const GPU_u32_3x4 = GPUType{
     .cpu_type = define_matx_type(u32, 3, 4, .COLUMN_MAJOR, 1),
+    .cpu_align = 4,
     .uniform_size = 60,
     .uniform_alignment = 16,
     .hlsl_name = HLSL_u32_3x4,
 };
 pub const GPU_i32_3x4 = GPUType{
     .cpu_type = define_matx_type(i32, 3, 4, .COLUMN_MAJOR, 1),
+    .cpu_align = 4,
     .uniform_size = 60,
     .uniform_alignment = 16,
     .hlsl_name = HLSL_i32_3x4,
@@ -1381,18 +1497,21 @@ const HLSL_u32_4x4 = "uint4x4";
 const HLSL_i32_4x4 = "int4x4";
 pub const GPU_f32_4x4 = GPUType{
     .cpu_type = define_matx_type(f32, 4, 4, .COLUMN_MAJOR, 0),
+    .cpu_align = 4,
     .uniform_size = 64,
     .uniform_alignment = 16,
     .hlsl_name = HLSL_f32_4x4,
 };
 pub const GPU_u32_4x4 = GPUType{
     .cpu_type = define_matx_type(u32, 4, 4, .COLUMN_MAJOR, 0),
+    .cpu_align = 4,
     .uniform_size = 64,
     .uniform_alignment = 16,
     .hlsl_name = HLSL_u32_4x4,
 };
 pub const GPU_i32_4x4 = GPUType{
     .cpu_type = define_matx_type(i32, 4, 4, .COLUMN_MAJOR, 0),
+    .cpu_align = 4,
     .uniform_size = 64,
     .uniform_alignment = 16,
     .hlsl_name = HLSL_i32_4x4,
@@ -1400,142 +1519,53 @@ pub const GPU_i32_4x4 = GPUType{
 
 // PACKED
 // -- 4 bytes
-pub const GPU_u8_4 = GPUType{
-    .cpu_type = define_vec4_type(u8),
-    .uniform_size = 4,
-    .uniform_alignment = 4,
-    .hlsl_name = HLSL_u32,
-};
-pub const GPU_i8_4 = GPUType{
-    .cpu_type = define_vec4_type(i8),
-    .uniform_size = 4,
-    .uniform_alignment = 4,
-    .hlsl_name = HLSL_u32,
-};
-pub const GPU_bool_4 = GPUType{
-    .cpu_type = define_vec4_type(bool),
-    .uniform_size = 4,
-    .uniform_alignment = 4,
-    .hlsl_name = HLSL_u32,
-};
-pub const GPU_f16_2 = GPUType{
-    .cpu_type = define_vec2_type(f16),
-    .uniform_size = 4,
-    .uniform_alignment = 4,
-    .hlsl_name = HLSL_u32,
-};
-pub const GPU_u16_2 = GPUType{
-    .cpu_type = define_vec2_type(u16),
-    .uniform_size = 4,
-    .uniform_alignment = 4,
-    .hlsl_name = HLSL_u32,
-};
-pub const GPU_i16_2 = GPUType{
-    .cpu_type = define_vec2_type(i16),
-    .uniform_size = 4,
-    .uniform_alignment = 4,
-    .hlsl_name = HLSL_u32,
-};
+pub const GPU_u8_4 = GPU_u32.with_cpu_and_sdl_type(define_vec4_type(u8), .U8_x4);
+pub const GPU_i8_4 = GPU_u32.with_cpu_and_sdl_type(define_vec4_type(i8), .I8_x4);
+pub const GPU_bool_4 = GPU_u32.with_cpu_and_sdl_type(define_vec4_type(bool), .U8_x4);
+pub const GPU_f16_2 = GPU_u32.with_cpu_and_sdl_type(define_vec2_type(f16), .F16_x2);
+pub const GPU_u16_2 = GPU_u32.with_cpu_and_sdl_type(define_vec2_type(u16), .U16_x2);
+pub const GPU_i16_2 = GPU_u32.with_cpu_and_sdl_type(define_vec2_type(i16), .I16_x2);
 // -- 8 bytes
-pub const GPU_u8_8 = GPUType{
-    .cpu_type = define_vec4_type(u8),
-    .uniform_size = 8,
-    .uniform_alignment = 8,
-    .hlsl_name = HLSL_u32_2,
-};
-pub const GPU_i8_8 = GPUType{
-    .cpu_type = define_vec4_type(i8),
-    .uniform_size = 4,
-    .uniform_alignment = 4,
-    .hlsl_name = HLSL_u32_2,
-};
-pub const GPU_bool_8 = GPUType{
-    .cpu_type = define_vec4_type(bool),
-    .uniform_size = 8,
-    .uniform_alignment = 8,
-    .hlsl_name = HLSL_u32_2,
-};
-pub const GPU_f16_4 = GPUType{
-    .cpu_type = define_vec2_type(f16),
-    .uniform_size = 8,
-    .uniform_alignment = 8,
-    .hlsl_name = HLSL_u32_2,
-};
-pub const GPU_u16_4 = GPUType{
-    .cpu_type = define_vec2_type(u16),
-    .uniform_size = 8,
-    .uniform_alignment = 8,
-    .hlsl_name = HLSL_u32_2,
-};
-pub const GPU_i16_4 = GPUType{
-    .cpu_type = define_vec2_type(i16),
-    .uniform_size = 8,
-    .uniform_alignment = 8,
-    .hlsl_name = HLSL_u32_2,
-};
-pub const GPU_f64 = GPUType{
-    .cpu_type = f64,
-    .uniform_size = 8,
-    .uniform_alignment = 8,
-    .hlsl_name = HLSL_u32_2,
-};
-pub const GPU_u64 = GPUType{
-    .cpu_type = u64,
-    .uniform_size = 8,
-    .uniform_alignment = 8,
-    .hlsl_name = HLSL_u32_2,
-};
-pub const GPU_i64 = GPUType{
-    .cpu_type = i64,
-    .uniform_size = 8,
-    .uniform_alignment = 8,
-    .hlsl_name = HLSL_u32_2,
-};
+pub const GPU_u8_8 = GPU_u32_2.with_cpu_and_sdl_type([8]u8, .U32_x2);
+pub const GPU_i8_8 = GPU_u32_2.with_cpu_and_sdl_type([8]i8, .U32_x2);
+pub const GPU_bool_8 = GPU_u32_2.with_cpu_and_sdl_type([8]bool, .U32_x2);
+pub const GPU_f16_4 = GPU_u32_2.with_cpu_and_sdl_type(define_vec4_type(f16), .F16_x4);
+pub const GPU_u16_4 = GPU_u32_2.with_cpu_and_sdl_type(define_vec4_type(u16), .U16_x4);
+pub const GPU_i16_4 = GPU_u32_2.with_cpu_and_sdl_type(define_vec4_type(i16), .I16_x4);
+pub const GPU_f64 = GPU_u32_2.with_cpu_and_sdl_type_and_align(f64, .U32_x2, 8);
+pub const GPU_u64 = GPU_u32_2.with_cpu_and_sdl_type_and_align(u64, .U32_x2, 8);
+pub const GPU_i64 = GPU_u32_2.with_cpu_and_sdl_type_and_align(i64, .U32_x2, 8);
 // -- 16 bytes
-pub const GPU_u8_16 = GPUType{
-    .cpu_type = @Vector(16, u8),
-    .uniform_size = 16,
-    .uniform_alignment = 16,
-    .hlsl_name = HLSL_u32_4,
-};
-pub const GPU_i8_16 = GPUType{
-    .cpu_type = @Vector(16, i8),
-    .uniform_size = 16,
-    .uniform_alignment = 16,
-    .hlsl_name = HLSL_u32_4,
-};
-pub const GPU_bool_16 = GPUType{
-    .cpu_type = @Vector(16, bool),
-    .uniform_size = 16,
-    .uniform_alignment = 16,
-    .hlsl_name = HLSL_u32_4,
-};
-pub const GPU_f16_8 = GPUType{
-    .cpu_type = @Vector(8, f16),
-    .uniform_size = 16,
-    .uniform_alignment = 16,
-    .hlsl_name = HLSL_u32_4,
-};
-pub const GPU_u16_8 = GPUType{
-    .cpu_type = @Vector(8, u16),
-    .uniform_size = 16,
-    .uniform_alignment = 16,
-    .hlsl_name = HLSL_u32_4,
-};
-pub const GPU_i16_8 = GPUType{
-    .cpu_type = @Vector(8, i16),
-    .uniform_size = 16,
-    .uniform_alignment = 16,
-    .hlsl_name = HLSL_u32_4,
-};
-pub const GPU_f64_2 = GPU_u32_4.with_cpu_type(define_vec2_type(f64));
-pub const GPU_u64_2 = GPU_u32_4.with_cpu_type(define_vec2_type(u64));
-pub const GPU_i64_2 = GPU_u32_4.with_cpu_type(define_vec2_type(i64));
+pub const GPU_u8_16 = GPU_u32_2.with_cpu_and_sdl_type([16]u8, .U32_x4);
+pub const GPU_i8_16 = GPU_u32_2.with_cpu_and_sdl_type([16]i8, .U32_x4);
+pub const GPU_bool_16 = GPU_u32_2.with_cpu_and_sdl_type([16]bool, .U32_x4);
+pub const GPU_f16_8 = GPU_u32_2.with_cpu_and_sdl_type([8]f16, .U32_x4);
+pub const GPU_u16_8 = GPU_u32_2.with_cpu_and_sdl_type([8]u16, .U32_x4);
+pub const GPU_i16_8 = GPU_u32_2.with_cpu_and_sdl_type([8]i16, .U32_x4);
+pub const GPU_f64_2 = GPU_u32_4.with_cpu_and_sdl_type_and_align(define_vec2_type(f64), .U32_x4, 8);
+pub const GPU_u64_2 = GPU_u32_4.with_cpu_and_sdl_type_and_align(define_vec2_type(u64), .U32_x4, 8);
+pub const GPU_i64_2 = GPU_u32_4.with_cpu_and_sdl_type_and_align(define_vec2_type(i64), .U32_x4, 8);
 
 // SPECIAL
-pub fn GPU_enum(comptime ENUM_TYPE: type) GPUType {
+pub fn GPU_enum32(comptime ENUM_TYPE: type) GPUType {
     assert_with_reason(Types.type_is_enum(ENUM_TYPE) and Types.enum_tag_type(ENUM_TYPE) == u32, @src(), "type `ENUM_TYPE` must be an enum type with tag type of u32, got type `{s}`", .{@typeName(ENUM_TYPE)});
     return GPU_u32.with_cpu_type(ENUM_TYPE);
+}
+pub fn GPU_enum16_2(comptime ENUM_TYPE_1: type, comptime ENUM_TYPE_2: type, comptime STRUCT: type) GPUType {
+    assert_with_reason(Types.type_is_enum(ENUM_TYPE_1) and Types.enum_tag_type(ENUM_TYPE_1) == u16, @src(), "type `ENUM_TYPE_1` must be an enum type with tag type of u16, got type `{s}`", .{@typeName(ENUM_TYPE_1)});
+    assert_with_reason(Types.type_is_enum(ENUM_TYPE_2) and Types.enum_tag_type(ENUM_TYPE_2) == u16, @src(), "type `ENUM_TYPE_2` must be an enum type with tag type of u16, got type `{s}`", .{@typeName(ENUM_TYPE_2)});
+    assert_with_reason(Types.type_has_exactly_all_field_types(STRUCT, &.{ ENUM_TYPE_1, ENUM_TYPE_2 }), @src(), "type `STRUCT` must have exactly 1 field with type `ENUM_TYPE_1` (`{s}`) and exactly 1 field with type `ENUM_TYPE_2` (`{s}`), got type `{s}`", .{ @typeName(ENUM_TYPE_1), @typeName(ENUM_TYPE_2), @typeName(STRUCT) });
+    assert_with_reason(@sizeOf(STRUCT) == 4 and @alignOf(STRUCT) == 2, @src(), "type `STRUCT` must have size = 4 and align = 2, got type `{s}` (size = {d}, align = {d})", .{ @typeName(STRUCT), @sizeOf(STRUCT), @alignOf(STRUCT) });
+    return GPU_u16_2.with_cpu_type(STRUCT);
+}
+pub fn GPU_enum8_4(comptime ENUM_TYPE_1: type, comptime ENUM_TYPE_2: type, comptime ENUM_TYPE_3: type, comptime ENUM_TYPE_4: type, comptime STRUCT: type) GPUType {
+    assert_with_reason(Types.type_is_enum(ENUM_TYPE_1) and Types.enum_tag_type(ENUM_TYPE_1) == u8, @src(), "type `ENUM_TYPE_1` must be an enum type with tag type of u8, got type `{s}`", .{@typeName(ENUM_TYPE_1)});
+    assert_with_reason(Types.type_is_enum(ENUM_TYPE_2) and Types.enum_tag_type(ENUM_TYPE_2) == u8, @src(), "type `ENUM_TYPE_2` must be an enum type with tag type of u8, got type `{s}`", .{@typeName(ENUM_TYPE_2)});
+    assert_with_reason(Types.type_is_enum(ENUM_TYPE_3) and Types.enum_tag_type(ENUM_TYPE_3) == u8, @src(), "type `ENUM_TYPE_3` must be an enum type with tag type of u8, got type `{s}`", .{@typeName(ENUM_TYPE_3)});
+    assert_with_reason(Types.type_is_enum(ENUM_TYPE_4) and Types.enum_tag_type(ENUM_TYPE_4) == u8, @src(), "type `ENUM_TYPE_4` must be an enum type with tag type of u8, got type `{s}`", .{@typeName(ENUM_TYPE_4)});
+    assert_with_reason(Types.type_has_exactly_all_field_types(STRUCT, &.{ ENUM_TYPE_1, ENUM_TYPE_2, ENUM_TYPE_3, ENUM_TYPE_4 }), @src(), "type `STRUCT` must have exactly 1 field with each type `ENUM_TYPE_1` (`{s}`), `ENUM_TYPE_2` (`{s}`), `ENUM_TYPE_3` (`{s}`), and `ENUM_TYPE_4` (`{s}`), got type `{s}`", .{ @typeName(ENUM_TYPE_1), @typeName(ENUM_TYPE_2), @typeName(ENUM_TYPE_3), @typeName(ENUM_TYPE_4), @typeName(STRUCT) });
+    assert_with_reason(@sizeOf(STRUCT) == 4 and @alignOf(STRUCT) == 1, @src(), "type `STRUCT` must have size = 4 and align = 1, got type `{s}` (size = {d}, align = {d})", .{ @typeName(STRUCT), @sizeOf(STRUCT), @alignOf(STRUCT) });
+    return GPU_u8_4.with_cpu_type(STRUCT);
 }
 
 pub fn write_hlsl_enum_stub(comptime ENUM_TYPE: type, writer: *std.Io.Writer) std.Io.Writer.Error!void {
@@ -2076,7 +2106,7 @@ test "hlsl_uniform_stub" {
         U.new(.world_pos, GPU_f32_3),
         U.new(.main_color, GPU_u32),
         U.new(.secondary_color, GPU_u32),
-        U.new(.shader_mode, GPU_enum(ShaderMode)),
+        U.new(.shader_mode, GPU_enum32(ShaderMode)),
         U.new(.projection_matrix, GPU_f32_4x4),
         U.new(.hamburgers_good, GPU_bool),
     });
@@ -2144,7 +2174,7 @@ test "hlsl_struct_stub" {
         S.new(.color, GPU_f32_4, .color(0)),
         S.new(.face_normal, GPU_f32_4, .normal(0)),
         S.new(.vert_normal, GPU_f32_4, .normal(1)),
-        S.new(.blend_mode, GPU_enum(BlendMode), .user("BLENDMODE", 0)),
+        S.new(.blend_mode, GPU_enum32(BlendMode), .user("BLENDMODE", 0)),
     });
     // assert_with_reason(@sizeOf(MyUniform) == 96, @src(), "layout failed", .{});
     // assert_with_reason(@alignOf(MyUniform) == 16, @src(), "layout failed", .{});

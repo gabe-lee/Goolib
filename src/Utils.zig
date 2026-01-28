@@ -1385,6 +1385,34 @@ pub fn real_int_type(comptime T: type) type {
         else => assert_unreachable(@src(), "type `{s}` cannot be converted to a real int type", .{@typeName(T)}),
     }
 }
+pub fn real_float_type(comptime T: type) type {
+    const I = @typeInfo(T);
+    switch (I) {
+        .float => return T,
+        .comptime_float => return f64,
+        else => assert_unreachable(@src(), "type `{s}` cannot be converted to a real float type", .{@typeName(T)}),
+    }
+}
+pub fn real_type(comptime T: type) type {
+    const I = @typeInfo(T);
+    switch (I) {
+        .float => return T,
+        .comptime_float => return f64,
+        .int => |info| {
+            comptime var bits = info.bits;
+            const sign = info.signedness;
+            bits -= 1;
+            bits |= bits >> 1;
+            bits |= bits >> 2;
+            bits |= bits >> 4;
+            bits |= bits >> 8;
+            bits += 1;
+            return std.meta.Int(sign, bits);
+        },
+        .comptime_int => return u64,
+        else => assert_unreachable(@src(), "type `{s}` cannot be converted to a real float type", .{@typeName(T)}),
+    }
+}
 
 pub fn print_len_of_uint(val: anytype) usize {
     const V = @TypeOf(val);
