@@ -63,8 +63,10 @@ const SDL3 = Root.SDL3;
 const GPU_VertexElementFormat = SDL3.GPU_VertexElementFormat;
 
 const assert_with_reason = Assert.assert_with_reason;
+const assert_unreachable = Assert.assert_unreachable;
 const assert_comptime_write_failure = Assert.assert_comptime_write_failure;
 const num_cast = Cast.num_cast;
+const bit_cast = Cast.bit_cast;
 
 const define_vec2_type = Vec2.define_vec2_type;
 const define_vec3_type = Vec3.define_vec3_type;
@@ -116,13 +118,14 @@ const COLON_SPACE = ": ";
 const SPACE_COLON_SPACE = " : ";
 const SPACE_COLON_SPACE_REGISTER = " : register(";
 const HLSL_UNIFORM_REGISTER = 'b';
-const HLSL_TESTURE_REGISTER = 't';
+const HLSL_TEXTURE_REGISTER = 't';
 const HLSL_SAMPLER_REGISTER = 's';
 const HLSL_UNORDERED_REGISTER = 'u';
 const COMMA_SPACE_HLSL_LAYER = ", space";
 const OPEN_PAREN = '(';
 const CLOSE_PAREN = ')';
 const CLOSE_PAREN_NEWLINE = ")\n";
+const CLOSE_PAREN_SEMICOL_NEWLINE = ");\n";
 const OPEN_BRACKET = '{';
 const SPACE_OPEN_BRACKET_NEWLINE = " {\n";
 const CLOSE_BRACKET = '}';
@@ -142,6 +145,8 @@ const PAREN_PERCENT = " (%";
 const SPACE_SIZE_SPACE = "  size ";
 const SPACE_PAD_PREFIX = " __pad__";
 const HLSL_CBUFFER_SPACE = "cbuffer ";
+const HLSL_STRUCTURED_BUFFER = "StructuredBuffer<";
+const CLOSE_ANGLE_BRACKET_SPACE = "> ";
 const INVALID = "INVALID";
 const STRUCT_SPACE = "struct ";
 const NEWLINE = '\n';
@@ -171,8 +176,32 @@ pub const IncludeLayoutInStub = enum(u8) {
     INCLUDE_LAYOUT_COMMENTS_IN_SHADER_STUB,
 };
 
-/// A struct field within a `UniformStruct(FIELDS)`
-pub fn UniformStructField(comptime FIELDS: type) type {
+pub const HLSL_RelaxedSemantics = enum(u8) {
+    NO_HLSL_SEMANTIC_REQUIREMENTS_FOR_NON_SYSTEM_VALUES,
+    ENFORCE_STRICT_HLSL_TYPE_SEMANTICS,
+};
+
+pub const HLSL_NonSVSemantics = enum(u8) {
+    ENFORCE_SINGLE_NON_SYSTEM_VALUE_SEMANTIC,
+    ALLOW_ALL_NON_SYSTEM_VALUE_SEMANTICS,
+};
+
+pub const NonSystemSemantics = union(HLSL_NonSVSemantics) {
+    ENFORCE_SINGLE_NON_SYSTEM_VALUE_SEMANTIC: HLSL_SEMANTIC_KIND,
+    ALLOW_ALL_NON_SYSTEM_VALUE_SEMANTICS,
+
+    pub fn allow_all_non_system_value_semantics() NonSystemSemantics {
+        return NonSystemSemantics{ .ALLOW_ALL_NON_SYSTEM_VALUE_SEMANTICS = void{} };
+    }
+    pub fn enforce_single_non_system_semantic(semantic: HLSL_SEMANTIC_KIND) NonSystemSemantics {
+        return NonSystemSemantics{ .ENFORCE_SINGLE_NON_SYSTEM_VALUE_SEMANTIC = semantic };
+    }
+};
+
+/// A struct field within a `StorageStruct(FIELDS)`
+///
+/// Follows `std140` packing rules
+pub fn StorageStructField(comptime FIELDS: type) type {
     return struct {
         const Self = @This();
 
@@ -188,12 +217,14 @@ pub fn UniformStructField(comptime FIELDS: type) type {
     };
 }
 
-/// A struct that is written to a uniform/constant buffer
-pub fn UniformStruct(comptime FIELDS: type, comptime INCLUDE_LAYOUT: IncludeLayoutInStub, comptime fields: []const UniformStructField(FIELDS)) type {
+/// A struct that is written to a uniform/constant/storage buffer
+///
+/// Follows `std140` packing rules
+pub fn StorageStruct(comptime FIELDS: type, comptime INCLUDE_LAYOUT: IncludeLayoutInStub, comptime fields: []const StorageStructField(FIELDS)) type {
     assert_with_reason(Types.type_is_enum(FIELDS) and Types.all_enum_values_start_from_zero_with_no_gaps(FIELDS), @src(), "type `FIELDS` must be an enum type, and all enum tags in `FIELDS` must start at zero and have no gaps up to the max tag value, got type `{s}`", .{@typeName(FIELDS)});
     const _NUM_FIELDS = Types.enum_defined_field_count(FIELDS);
     assert_with_reason(fields.len == _NUM_FIELDS, @src(), "the number of field names in `FIELDS` must equal the length of field definitions `fields`, got names {d} != {d} len", .{ _NUM_FIELDS, fields.len });
-    const _Field = UniformStructField(FIELDS);
+    const _Field = StorageStructField(FIELDS);
     const _LAYOUT = INCLUDE_LAYOUT == .INCLUDE_LAYOUT_COMMENTS_IN_SHADER_STUB;
     comptime var _fields: [_NUM_FIELDS]_Field = undefined;
     @memcpy(_fields[0.._NUM_FIELDS], fields);
@@ -483,7 +514,14 @@ pub fn UniformStruct(comptime FIELDS: type, comptime INCLUDE_LAYOUT: IncludeLayo
             const offset = OFFSETS[@intFromEnum(field)];
             const ptr = self.bytes_unbound() + offset;
             const t_ptr: *T = @ptrCast(@alignCast(ptr));
-            return t_ptr.*;
+            return t_ptr;
+        }
+        pub fn get_ptr_const(self: *Self, comptime field: FIELD) *const type_for_field_name(field) {
+            const T = type_for_field_name(field);
+            const offset = OFFSETS[@intFromEnum(field)];
+            const ptr = self.bytes_unbound_const() + offset;
+            const t_ptr: *const T = @ptrCast(@alignCast(ptr));
+            return t_ptr;
         }
         pub fn set(self: *Self, comptime field: FIELD, val: type_for_field_name(field)) void {
             const T = type_for_field_name(field);
@@ -492,8 +530,12 @@ pub fn UniformStruct(comptime FIELDS: type, comptime INCLUDE_LAYOUT: IncludeLayo
             const t_ptr: *T = @ptrCast(@alignCast(ptr));
             t_ptr.* = val;
         }
+        pub fn get_from_buffer(buffer: [*]u8, index: usize) *Self {
+            const OFFSET = Self.BYTES * index;
+            return @ptrCast(@alignCast(buffer + OFFSET));
+        }
 
-        pub fn write_hlsl_cbuffer_stub(struct_name: []const u8, resgister_num: usize, space_num: usize, writer: *std.Io.Writer) std.Io.Writer.Error!void {
+        pub fn write_hlsl_uniform_stub(struct_name: []const u8, resgister_num: usize, space_num: usize, writer: *std.Io.Writer) std.Io.Writer.Error!void {
             _ = try writer.write(HLSL_CBUFFER_SPACE);
             _ = try writer.write(struct_name);
             _ = try writer.write(SPACE_COLON_SPACE_REGISTER);
@@ -516,6 +558,35 @@ pub fn UniformStruct(comptime FIELDS: type, comptime INCLUDE_LAYOUT: IncludeLayo
             _ = try writer.write(HLSL_STUB_INNER[0..]);
             _ = try writer.write(NEWLINE_CLOSE_BRACKET_SEMICOL_NEWLINE);
         }
+
+        pub fn write_hlsl_storage_buffer_stub(struct_name: []const u8, buffer_name: []const u8, resgister_num: usize, space_num: usize, writer: *std.Io.Writer) std.Io.Writer.Error!void {
+            _ = try writer.write(STRUCT_SPACE);
+            _ = try writer.write(struct_name);
+            _ = try writer.write(SPACE_OPEN_BRACKET_NEWLINE);
+            if (_LAYOUT) {
+                _ = try writer.write(COMMENT_TOTAL_SIZE);
+                try writer.printInt(BYTES, 10, .lower, .{});
+                _ = try writer.write(USED_SIZE);
+                try writer.printInt(USED_BYTES, 10, .lower, .{});
+                _ = try writer.write(WASTE_SIZE);
+                try writer.printInt(WASTE_BYTES, 10, .lower, .{});
+                _ = try writer.write(PAREN_PERCENT);
+                try writer.printFloat(WASTE_PERCENT, .{ .precision = 2, .width = 5 });
+                _ = try writer.write(CLOSE_PAREN_NEWLINE);
+            }
+            _ = try writer.write(HLSL_STUB_INNER[0..]);
+            _ = try writer.write(NEWLINE_CLOSE_BRACKET_SEMICOL_NEWLINE);
+            _ = try writer.write(HLSL_STRUCTURED_BUFFER);
+            _ = try writer.write(struct_name);
+            _ = try writer.write(CLOSE_ANGLE_BRACKET_SPACE);
+            _ = try writer.write(buffer_name);
+            _ = try writer.write(SPACE_COLON_SPACE_REGISTER);
+            try writer.writeByte(HLSL_TEXTURE_REGISTER);
+            try writer.printInt(resgister_num, 10, .lower, .{});
+            _ = try writer.write(COMMA_SPACE_HLSL_LAYER);
+            try writer.printInt(space_num, 10, .lower, .{});
+            _ = try writer.write(CLOSE_PAREN_SEMICOL_NEWLINE);
+        }
     };
 }
 
@@ -536,15 +607,15 @@ pub fn StreamStructField(comptime FIELDS: type) type {
             return Self{ .field = field, .gpu_type = gpu_type, .semantic = semantic, .interp = interp };
         }
 
-        pub fn assert_has_allowed_type(self: Self, comptime src: ?std.builtin.SourceLocation) void {
-            self.semantic.assert_has_allowed_type(self.gpu_type, self.interp, @tagName(self.field), src);
+        pub fn assert_has_allowed_type(self: Self, comptime relaxed: HLSL_RelaxedSemantics, comptime src: ?std.builtin.SourceLocation) void {
+            self.semantic.assert_has_allowed_type(self.gpu_type, self.interp, relaxed, @tagName(self.field), src);
         }
     };
 }
 
 /// A struct that is used as an input/output of
 /// a vertex/fragment/geometry/compute shader
-pub fn StreamStruct(comptime FIELDS: type, comptime INCLUDE_LAYOUT: IncludeLayoutInStub, comptime fields: []const StreamStructField(FIELDS)) type {
+pub fn StreamStruct(comptime FIELDS: type, comptime INCLUDE_LAYOUT: IncludeLayoutInStub, comptime RELAXED: HLSL_RelaxedSemantics, comptime NON_SYSTEM_SEMANTICS: NonSystemSemantics, comptime fields: []const StreamStructField(FIELDS)) type {
     assert_with_reason(Types.type_is_enum(FIELDS) and Types.all_enum_values_start_from_zero_with_no_gaps(FIELDS), @src(), "type `FIELDS` must be an enum type, and all enum tags in `FIELDS` must start at zero and have no gaps up to the max tag value, got type `{s}`", .{@typeName(FIELDS)});
     const _NUM_FIELDS = Types.enum_defined_field_count(FIELDS);
     assert_with_reason(fields.len == _NUM_FIELDS, @src(), "the number of field names in `FIELDS` must equal the length of field definitions `fields`, got names {d} != {d} len", .{ _NUM_FIELDS, fields.len });
@@ -559,6 +630,7 @@ pub fn StreamStruct(comptime FIELDS: type, comptime INCLUDE_LAYOUT: IncludeLayou
     comptime var field_semantics: [_NUM_FIELDS]HLSL_Semantic = undefined;
     comptime var field_interps: [_NUM_FIELDS]HLSL_INTERP_KIND = undefined;
     comptime var field_hlsl_names: [_NUM_FIELDS][]const u8 = undefined;
+    comptime var single_non_system_semantics_num: [_NUM_FIELDS]?u32 = @splat(null);
     comptime var empty_spots: [_NUM_FIELDS * 2]BufferSpan = undefined;
     comptime var empty_spots_len: usize = 0;
     comptime var current_max_offset: usize = 0;
@@ -572,12 +644,37 @@ pub fn StreamStruct(comptime FIELDS: type, comptime INCLUDE_LAYOUT: IncludeLayou
         }
     };
     Sort.insertion_sort_with_func(_Field, _fields[0.._NUM_FIELDS], SORT.align_lesser_then_size_lesser);
+    comptime var used_semantics: [128]u64 = undefined;
+    comptime var used_semantic_len: usize = 0;
+    comptime var issued_too_many_semantic_warning: bool = false;
     // PACKING ALGORITHM
-    for (_fields) |field| {
+    for (_fields) |*field| {
         const fidx = @intFromEnum(field.field);
         assert_with_reason(field_init[fidx] == false, @src(), "field `{s}` was defined more than once", .{@tagName(field.field)});
         field_init[fidx] = true;
-        field.assert_has_allowed_type(@src());
+        switch (NON_SYSTEM_SEMANTICS) {
+            .ALLOW_ALL_NON_SYSTEM_VALUE_SEMANTICS => {},
+            .ENFORCE_SINGLE_NON_SYSTEM_VALUE_SEMANTIC => |match| {
+                assert_with_reason(field.semantic == match, @src(), "semantic for field `{s}` must match `{s}`, got `{s}`", .{ @tagName(field.field), @tagName(match), @tagName(field.semantic) });
+            },
+        }
+        if (!issued_too_many_semantic_warning) {
+            if (used_semantic_len >= 128) {
+                issued_too_many_semantic_warning = true;
+                Assert.warn_with_reason(false, @src(), "StreamStruct({s}) had too many semantics (> 128) to fully check for duplicates", .{@typeName(FIELDS)});
+            } else {
+                const hash_or_null = field.semantic.get_simple_hash_if_needed();
+                if (hash_or_null) |hash| {
+                    for (used_semantics[0..used_semantic_len]) |used| {
+                        assert_with_reason(hash != used, @src(), "StreamStruct({s}) has duplicate numbered semantic: {any}", .{ @typeName(FIELDS), field.semantic });
+                    }
+                    used_semantics[used_semantic_len] = hash;
+                    used_semantic_len += 1;
+                }
+            }
+        }
+        single_non_system_semantics_num[fidx] = field.semantic.get_num();
+        field.assert_has_allowed_type(@src(), RELAXED);
         comptime var found_empty_space: bool = false;
         comptime var empty_spot_that_fits: usize = 0;
         comptime var empty_spot_offset: usize = math.maxInt(isize);
@@ -794,6 +891,7 @@ pub fn StreamStruct(comptime FIELDS: type, comptime INCLUDE_LAYOUT: IncludeLayou
     const field_hlsl_names_const: [_NUM_FIELDS][]const u8 = field_hlsl_names;
     const field_semanitcs_const: [_NUM_FIELDS]HLSL_Semantic = field_semantics;
     const field_interps_const: [_NUM_FIELDS]HLSL_INTERP_KIND = field_interps;
+    const single_non_system_semantics_num_const: [_NUM_FIELDS]?u32 = single_non_system_semantics_num;
     const waste_bytes_const = wasted_bytes;
     return extern struct {
         const Self = @This();
@@ -816,6 +914,7 @@ pub fn StreamStruct(comptime FIELDS: type, comptime INCLUDE_LAYOUT: IncludeLayou
         pub const FIELD = FIELDS;
         pub const HLSL_NAMES: [NUM_FIELDS][]const u8 = field_hlsl_names_const;
         pub const HLSL_STUB_INNER = hlsl_stub_inner_const;
+        pub const SINGLE_NON_SYSTEM_SEMANTIC_LOCATIONS = single_non_system_semantics_num_const;
 
         pub fn bytes(self: *Self) *[BYTES]u8 {
             return &self.element;
@@ -840,6 +939,15 @@ pub fn StreamStruct(comptime FIELDS: type, comptime INCLUDE_LAYOUT: IncludeLayou
             return TYPES[@intFromEnum(field)];
         }
 
+        pub fn get_location(comptime field: FIELD) ?u32 {
+            return SINGLE_NON_SYSTEM_SEMANTIC_LOCATIONS[@intFromEnum(field)];
+        }
+        pub fn get_offset(comptime field: FIELD) usize {
+            return OFFSETS[@intFromEnum(field)];
+        }
+        pub fn get_size(comptime field: FIELD) usize {
+            return @sizeOf(TYPES[@intFromEnum(field)]);
+        }
         pub fn get(self: *const Self, comptime field: FIELD) type_for_field_name(field) {
             const T = type_for_field_name(field);
             const offset = OFFSETS[@intFromEnum(field)];
@@ -860,6 +968,10 @@ pub fn StreamStruct(comptime FIELDS: type, comptime INCLUDE_LAYOUT: IncludeLayou
             const ptr = self.bytes_unbound() + offset;
             const t_ptr: *T = @ptrCast(@alignCast(ptr));
             t_ptr.* = val;
+        }
+        pub fn get_from_buffer(buffer: [*]u8, index: usize) *Self {
+            const OFFSET = Self.BYTES * index;
+            return @ptrCast(@alignCast(buffer + OFFSET));
         }
 
         pub fn write_hlsl_struct_stub(struct_name: []const u8, writer: *std.Io.Writer) std.Io.Writer.Error!void {
@@ -964,6 +1076,73 @@ pub const GPUType = struct {
     }
 };
 
+pub const HLSL_NAME = enum {
+    bool,
+    // float
+    float,
+    float2,
+    float3,
+    float4,
+    float1x1,
+    float1x2,
+    float1x3,
+    float1x4,
+    float2x1,
+    float2x2,
+    float2x3,
+    float2x4,
+    float3x1,
+    float3x2,
+    float3x3,
+    float3x4,
+    float4x1,
+    float4x2,
+    float4x3,
+    float4x4,
+    // uint
+    uint,
+    uint2,
+    uint3,
+    uint4,
+    uint1x1,
+    uint1x2,
+    uint1x3,
+    uint1x4,
+    uint2x1,
+    uint2x2,
+    uint2x3,
+    uint2x4,
+    uint3x1,
+    uint3x2,
+    uint3x3,
+    uint3x4,
+    uint4x1,
+    uint4x2,
+    uint4x3,
+    uint4x4,
+    // int
+    int,
+    int2,
+    int3,
+    int4,
+    int1x1,
+    int1x2,
+    int1x3,
+    int1x4,
+    int2x1,
+    int2x2,
+    int2x3,
+    int2x4,
+    int3x1,
+    int3x2,
+    int3x3,
+    int3x4,
+    int4x1,
+    int4x2,
+    int4x3,
+    int4x4,
+};
+
 // SCALARS
 const HLSL_f32 = "float";
 const HLSL_u32 = "uint";
@@ -1027,7 +1206,7 @@ pub const GPU_f32_2 = GPUType{
 pub const GPU_u32_2 = GPUType{
     .cpu_type = define_vec2_type(u32),
     .cpu_align = 4,
-    .sdl_vert_format = .u32_x2,
+    .sdl_vert_format = .U32_x2,
     .uniform_size = 8,
     .uniform_alignment = 8,
     .stream_size = 8,
@@ -1687,21 +1866,22 @@ pub const HLSL_SEMANTIC_KIND = enum(u8) {
     pub const _COUNT = 44;
     pub const _LONGEST_SEMANTIC_NAME_LEN = 26;
     pub const _SHORTEST_SEMANTIC_NAME_LEN = 4;
+    pub const _LAST_SV_SEMANTIC = 26;
 };
 
 const UserSemantic = struct {
     kind: []const u8,
-    n: usize,
+    n: u32,
 
-    pub fn new(kind: []const u8, n: usize) UserSemantic {
+    pub fn new(kind: []const u8, n: u32) UserSemantic {
         return UserSemantic{ .kind = kind, .n = n };
     }
 };
 
 pub const HLSL_Semantic = union(HLSL_SEMANTIC_KIND) {
     // SYSTEM VALUE
-    SV_ClipDistance: usize,
-    SV_CullDistance: usize,
+    SV_ClipDistance: u32,
+    SV_CullDistance: u32,
     SV_Coverage,
     SV_Depth,
     SV_DepthGreaterEqual,
@@ -1728,29 +1908,88 @@ pub const HLSL_Semantic = union(HLSL_SEMANTIC_KIND) {
     SV_ViewportArrayIndex,
     SV_ShadingRate,
     // SEMI_ARBITRARY
-    BINORMAL: usize,
-    BLENDINDICES: usize,
-    BLENDWEIGHT: usize,
-    COLOR: usize,
-    NORMAL: usize,
-    POSITION: usize,
+    BINORMAL: u32,
+    BLENDINDICES: u32,
+    BLENDWEIGHT: u32,
+    COLOR: u32,
+    NORMAL: u32,
+    POSITION: u32,
     POSITIONT,
-    PSIZE: usize,
-    TANGENT: usize,
-    TEXCOORD: usize,
+    PSIZE: u32,
+    TANGENT: u32,
+    TEXCOORD: u32,
     FOG,
-    TESSFACTOR: usize,
+    TESSFACTOR: u32,
     VFACE,
     VPOS,
-    DEPTH: usize,
+    DEPTH: u32,
     // USER
     USER: UserSemantic,
-    _PADDING: usize,
+    _PADDING: u32,
 
-    pub fn sv_clip_distance(n: usize) HLSL_Semantic {
+    pub fn get_num(self: HLSL_Semantic) ?u32 {
+        switch (self) {
+            .BINORMAL,
+            .BLENDINDICES,
+            .BLENDWEIGHT,
+            .COLOR,
+            .NORMAL,
+            .POSITION,
+            .POSITIONT,
+            .PSIZE,
+            .TANGENT,
+            .TEXCOORD,
+            .SV_ClipDistance,
+            .SV_CullDistance,
+            .TESSFACTOR,
+            ._PADDING,
+            .DEPTH,
+            => |nn| return nn,
+            .SV_Target => |nn| return @intCast(nn),
+            .USER => |sem| return sem.n,
+            else => return null,
+        }
+    }
+
+    pub fn get_simple_hash_if_needed(self: HLSL_Semantic) ?u64 {
+        const n: u64 = switch (self) {
+            .BINORMAL,
+            .BLENDINDICES,
+            .BLENDWEIGHT,
+            .COLOR,
+            .NORMAL,
+            .POSITION,
+            .POSITIONT,
+            .PSIZE,
+            .TANGENT,
+            .TEXCOORD,
+            .SV_ClipDistance,
+            .SV_CullDistance,
+            .TESSFACTOR,
+            ._PADDING,
+            .DEPTH,
+            => |nn| @intCast(nn),
+            .SV_Target => |nn| @intCast(nn),
+            .USER => |sem| make: {
+                const nn: u64 = @bitCast(sem.n);
+                var aa: [8]u8 = @splat(0);
+                var bb: [8]u8 = @splat(0);
+                for (0..@min(sem.kind.len, 5)) |i| {
+                    aa[i] = sem.kind[i];
+                    bb[i] = sem.kind[sem.kind.len - i - 1];
+                }
+                break :make nn ^ bit_cast(aa, u64) ^ bit_cast(bb, u64);
+            },
+            else => return null,
+        };
+        const t: u64 = @intCast(@intFromEnum(self));
+        return (t << 55) | n;
+    }
+
+    pub fn sv_clip_distance(n: u32) HLSL_Semantic {
         return HLSL_Semantic{ .SV_ClipDistance = n };
     }
-    pub fn sv_cull_distance(n: usize) HLSL_Semantic {
+    pub fn sv_cull_distance(n: u32) HLSL_Semantic {
         return HLSL_Semantic{ .SV_CullDistance = n };
     }
     pub fn sv_coverage() HLSL_Semantic {
@@ -1828,40 +2067,40 @@ pub const HLSL_Semantic = union(HLSL_SEMANTIC_KIND) {
     pub fn sv_shading_rate() HLSL_Semantic {
         return HLSL_Semantic{ .SV_ShadingRate = void{} };
     }
-    pub fn binormal(n: usize) HLSL_Semantic {
+    pub fn binormal(n: u32) HLSL_Semantic {
         return HLSL_Semantic{ .BINORMAL = n };
     }
-    pub fn blend_indices(n: usize) HLSL_Semantic {
+    pub fn blend_indices(n: u32) HLSL_Semantic {
         return HLSL_Semantic{ .BLENDINDICES = n };
     }
-    pub fn blend_weight(n: usize) HLSL_Semantic {
+    pub fn blend_weight(n: u32) HLSL_Semantic {
         return HLSL_Semantic{ .BLENDWEIGHT = n };
     }
-    pub fn color(n: usize) HLSL_Semantic {
+    pub fn color(n: u32) HLSL_Semantic {
         return HLSL_Semantic{ .COLOR = n };
     }
-    pub fn normal(n: usize) HLSL_Semantic {
+    pub fn normal(n: u32) HLSL_Semantic {
         return HLSL_Semantic{ .NORMAL = n };
     }
-    pub fn position(n: usize) HLSL_Semantic {
+    pub fn position(n: u32) HLSL_Semantic {
         return HLSL_Semantic{ .POSITION = n };
     }
     pub fn position_transformed() HLSL_Semantic {
         return HLSL_Semantic{ .POSITION = void{} };
     }
-    pub fn point_size(n: usize) HLSL_Semantic {
+    pub fn point_size(n: u32) HLSL_Semantic {
         return HLSL_Semantic{ .PSIZE = n };
     }
-    pub fn tangent(n: usize) HLSL_Semantic {
+    pub fn tangent(n: u32) HLSL_Semantic {
         return HLSL_Semantic{ .TANGENT = n };
     }
-    pub fn tex_coord(n: usize) HLSL_Semantic {
+    pub fn tex_coord(n: u32) HLSL_Semantic {
         return HLSL_Semantic{ .TEXCOORD = n };
     }
     pub fn fog() HLSL_Semantic {
         return HLSL_Semantic{ .FOG = void{} };
     }
-    pub fn tess_factor(n: usize) HLSL_Semantic {
+    pub fn tess_factor(n: u32) HLSL_Semantic {
         return HLSL_Semantic{ .TESSFACTOR = n };
     }
     pub fn vert_face() HLSL_Semantic {
@@ -1870,13 +2109,13 @@ pub const HLSL_Semantic = union(HLSL_SEMANTIC_KIND) {
     pub fn vert_pos() HLSL_Semantic {
         return HLSL_Semantic{ .VPOS = void{} };
     }
-    pub fn depth(n: usize) HLSL_Semantic {
+    pub fn depth(n: u32) HLSL_Semantic {
         return HLSL_Semantic{ .DEPTH = n };
     }
-    pub fn user(kind: []const u8, n: usize) HLSL_Semantic {
+    pub fn user(kind: []const u8, n: u32) HLSL_Semantic {
         return HLSL_Semantic{ .USER = UserSemantic.new(kind, n) };
     }
-    pub fn padding(n: usize) HLSL_Semantic {
+    pub fn padding(n: u32) HLSL_Semantic {
         return HLSL_Semantic{ ._PADDING = n };
     }
 
@@ -1956,10 +2195,11 @@ pub const HLSL_Semantic = union(HLSL_SEMANTIC_KIND) {
         return n;
     }
 
-    pub fn assert_has_allowed_type(self: HLSL_Semantic, gpu_type: GPUType, interp: HLSL_INTERP_KIND, comptime field_name: []const u8, comptime src: ?std.builtin.SourceLocation) void {
+    pub fn assert_has_allowed_type(self: HLSL_Semantic, gpu_type: GPUType, interp: HLSL_INTERP_KIND, comptime relaxed: HLSL_RelaxedSemantics, comptime field_name: []const u8, comptime src: ?std.builtin.SourceLocation) void {
         if (Assert.should_assert()) {
+            const sem_idx = @intFromEnum(self);
             const allowed = ALLOWED_TYPES[@intFromEnum(self)];
-            if (allowed.len == 0) {
+            if (allowed.len == 0 or (relaxed == .NO_HLSL_SEMANTIC_REQUIREMENTS_FOR_NON_SYSTEM_VALUES and sem_idx > HLSL_SEMANTIC_KIND._LAST_SV_SEMANTIC)) {
                 const found_valid_type = !gpu_type.equals_any_gpu_only(&.{
                     GPU_f32_1x1,
                     GPU_u32_1x1,
@@ -2010,7 +2250,7 @@ pub const HLSL_Semantic = union(HLSL_SEMANTIC_KIND) {
                     GPU_u32_4x4,
                     GPU_i32_4x4,
                 });
-                assert_with_reason(found_valid_type, src, "types field `{s}` with user semantic `{s}` cannot be a matrix type, got `{s}`", .{ field_name, @tagName(self), gpu_type });
+                assert_with_reason(found_valid_type, src, "types field `{s}` with semantic `{s}` cannot be a matrix type, got `{s}`", .{ field_name, @tagName(self), gpu_type });
             } else {
                 var found_valid_type = false;
                 for (allowed) |gpu_t| {
@@ -2097,12 +2337,12 @@ test "hlsl_uniform_stub" {
         shader_mode,
         hamburgers_good,
     };
-    const U = UniformStructField(F);
+    const U = StorageStructField(F);
     const ShaderMode = enum(u32) {
         SPRITE,
         TEXT,
     };
-    const MyUniform = UniformStruct(F, .INCLUDE_LAYOUT_COMMENTS_IN_SHADER_STUB, &.{
+    const MyUniform = StorageStruct(F, .INCLUDE_LAYOUT_COMMENTS_IN_SHADER_STUB, &.{
         U.new(.world_pos, GPU_f32_3),
         U.new(.main_color, GPU_u32),
         U.new(.secondary_color, GPU_u32),
@@ -2118,7 +2358,7 @@ test "hlsl_uniform_stub" {
     var file_write_buf: [512]u8 = undefined;
     var file_writer_holder = file.writer(file_write_buf[0..]);
     var writer = &file_writer_holder.interface;
-    try MyUniform.write_hlsl_cbuffer_stub("MyUniform", 0, 1, writer);
+    try MyUniform.write_hlsl_uniform_stub("MyUniform", 0, 1, writer);
     try writer.flush();
     // testing for correctness using the following link for matching field offsets
     // https://maraneshi.github.io/HLSL-ConstantBufferLayoutVisualizer/?visualizer=MYIwrgZhCmBOAEBZAngVQHYEsIHtYFt4AueWaAc0wGcAXOAChAAYAaeKgBwENhoBGAJTwA3gCh4E+AHop8ACoB5OQEEAMvAC88AJwA2SagDKAUQAimnQCZJAdWWG5xiwBZ49AKTxnAOj4B2AXFJCAAbHC4aAGZ4AHc8EIATAH0OHCoAbkksrJl4HCgspgkqTAAvaEk+SyCJMEx0Gnh8Lnqk4Bww2Ezsntz8iErrdjKKyWca+FDwmmcAD1cOWBwAK2hgGkwcdCTmmlhMWcy+gok+fWHyyV1xrLqG9jWthK5YZDaOvG7s44GJAA4ihdRhIbpI7o0qAALLgJOA7HCwr49CQ-SR-VxArKgiQgHAdeDQ-DgWDkOBUJLkPEJJGSVH-P7FEZYibg+BJFIw9lMGnIlGyfqSbRDEqXMaiAC+6SAA
@@ -2132,8 +2372,8 @@ test "hlsl_uniform_stub" {
         mat_2,
         scalar_6,
     };
-    const U2 = UniformStructField(F2);
-    const MyUniform2 = UniformStruct(F2, .INCLUDE_LAYOUT_COMMENTS_IN_SHADER_STUB, &.{
+    const U2 = StorageStructField(F2);
+    const MyUniform2 = StorageStruct(F2, .INCLUDE_LAYOUT_COMMENTS_IN_SHADER_STUB, &.{
         U2.new(.scalar_1, GPU_f32),
         U2.new(.scalar_2, GPU_f32),
         U2.new(.scalar_3, GPU_f32_2),
@@ -2149,10 +2389,73 @@ test "hlsl_uniform_stub" {
     defer file2.close();
     file_writer_holder = file2.writer(file_write_buf[0..]);
     writer = &file_writer_holder.interface;
-    try MyUniform2.write_hlsl_cbuffer_stub("MyUniform2", 0, 1, writer);
+    try MyUniform2.write_hlsl_uniform_stub("MyUniform2", 0, 1, writer);
     try writer.flush();
     // testing for correctness using the following link for matching field offsets
     // https://maraneshi.github.io/HLSL-ConstantBufferLayoutVisualizer/?visualizer=MYIwrgZhCmBOAEBZAngVQHYEsIHtYFsAmeALnlmgHNMBnAFzgAoQAGAGnhoAcBDYaAIwBKeAG8AUPCnwA9DPgAVAPIKAggBl4AXngDCADmmoAygFEAItt0HpAdVXGFpqy3iMApPBYA6FiyGS0hAANjg8dADMAB4ALPD44QD6AgDc0rLyOFDprpyYAF7Q0gBsLIFSIWF0nMA8wTywyWnScvBZECW5NAVF0jHl8JXhETV1DYkxzRlt2VLFcXmF0noDQ9U0tfWNhFPT7dIA7MVS3Ut9q6HhcRtjjQCsU637UvpdPcvFA5jodAJRxAk6IkdukpE9ZvAAJzHRa9eCEMrpNajLaJYq7cEdXQCGGnOHwfpIy50Yg3VERR6ZWZ6N5nF7iAC+KSAA
+}
+
+test "hlsl_storage_buffer_stub" {
+    const F = enum(u8) {
+        world_pos,
+        main_color,
+        projection_matrix,
+        secondary_color,
+        shader_mode,
+        hamburgers_good,
+    };
+    const U = StorageStructField(F);
+    const ShaderMode = enum(u32) {
+        SPRITE,
+        TEXT,
+    };
+    const MyStruct = StorageStruct(F, .INCLUDE_LAYOUT_COMMENTS_IN_SHADER_STUB, &.{
+        U.new(.world_pos, GPU_f32_3),
+        U.new(.main_color, GPU_u32),
+        U.new(.secondary_color, GPU_u32),
+        U.new(.shader_mode, GPU_enum32(ShaderMode)),
+        U.new(.projection_matrix, GPU_f32_4x4),
+        U.new(.hamburgers_good, GPU_bool),
+    });
+    assert_with_reason(@sizeOf(MyStruct) == 96, @src(), "layout failed", .{});
+    assert_with_reason(@alignOf(MyStruct) == 16, @src(), "layout failed", .{});
+    try std.fs.cwd().makePath("test_out/SDL3_ShaderContract");
+    const file = try std.fs.cwd().createFile("test_out/SDL3_ShaderContract/storage_stub_1.hlsl", .{});
+    defer file.close();
+    var file_write_buf: [512]u8 = undefined;
+    var file_writer_holder = file.writer(file_write_buf[0..]);
+    var writer = &file_writer_holder.interface;
+    try MyStruct.write_hlsl_storage_buffer_stub("MyStruct", "MyStorageBuffer", 0, 1, writer);
+    try writer.flush();
+    const F2 = enum(u8) {
+        scalar_1,
+        scalar_2,
+        scalar_3,
+        mat_1,
+        scalar_4,
+        scalar_5,
+        mat_2,
+        scalar_6,
+    };
+    const U2 = StorageStructField(F2);
+    const MyStruct2 = StorageStruct(F2, .INCLUDE_LAYOUT_COMMENTS_IN_SHADER_STUB, &.{
+        U2.new(.scalar_1, GPU_f32),
+        U2.new(.scalar_2, GPU_f32),
+        U2.new(.scalar_3, GPU_f32_2),
+        U2.new(.mat_1, GPU_f32_3x4),
+        U2.new(.scalar_4, GPU_f32_3),
+        U2.new(.scalar_5, GPU_f32_4),
+        U2.new(.mat_2, GPU_i32_1x2),
+        U2.new(.scalar_6, GPU_f32),
+    });
+    assert_with_reason(@sizeOf(MyStruct2) == 128, @src(), "layout failed", .{});
+    assert_with_reason(@alignOf(MyStruct2) == 16, @src(), "layout failed", .{});
+    const file2 = try std.fs.cwd().createFile("test_out/SDL3_ShaderContract/uniform_stub_2.hlsl", .{});
+    defer file2.close();
+    file_writer_holder = file2.writer(file_write_buf[0..]);
+    writer = &file_writer_holder.interface;
+    try MyStruct2.write_hlsl_storage_buffer_stub("MyStruct2", "MyStorageBuffer2", 0, 1, writer);
+    try writer.flush();
 }
 
 test "hlsl_struct_stub" {

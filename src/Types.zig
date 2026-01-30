@@ -34,6 +34,7 @@ const ANSI = Root.ANSI;
 const BinarySearch = Root.BinarySearch;
 const Assert = Root.Assert;
 const MathX = Root.Math;
+const Utils = Root.Utils;
 const assert_with_reason = Assert.assert_with_reason;
 const assert_unreachable = Assert.assert_unreachable;
 
@@ -216,6 +217,7 @@ pub fn raw_slice_cast(slice_or_many_with_sentinel: anytype) []u8 {
 }
 
 pub fn all_enum_values_start_from_zero_with_no_gaps(comptime ENUM: type) bool {
+    if (@typeInfo(ENUM).@"enum".fields.len == 0) return true;
     const min = enum_min_value(ENUM);
     if (min != 0) return false;
     const max = enum_max_value(ENUM);
@@ -508,6 +510,10 @@ pub inline fn type_is_numeric(comptime T: type) bool {
 pub inline fn type_is_numeric_not_comptime(comptime T: type) bool {
     return @typeInfo(T) == .int or @typeInfo(T) == .float;
 }
+pub inline fn type_is_equatable(comptime T: type) bool {
+    const I = @typeInfo(T);
+    return I == .int or I == .comptime_int or I == .float or I == .comptime_float or I == .@"enum" or I == .bool;
+}
 pub inline fn type_is_unsigned_int(comptime T: type) bool {
     return @typeInfo(T) == .int and @typeInfo(T).int.signedness == .unsigned;
 }
@@ -607,6 +613,69 @@ pub inline fn type_is_union_with_all_fields_same_type(comptime T: type, comptime
     const UNION = INFO.@"union";
     for (UNION.fields) |field| {
         if (field.type != F) return false;
+    }
+    return true;
+}
+pub inline fn type_class(comptime T: type) std.builtin.TypeId {
+    return comptime std.meta.activeTag(@typeInfo(T));
+}
+pub inline fn type_is_struct_with_all_fields_same_type_class(comptime T: type, comptime TYPE_ID: std.builtin.TypeId) bool {
+    const INFO = @typeInfo(T);
+    switch (INFO) {
+        .@"struct" => {},
+        else => return false,
+    }
+    const STRUCT = INFO.@"struct";
+    for (STRUCT.fields) |field| {
+        if (type_class(field.type) != TYPE_ID) return false;
+    }
+    return true;
+}
+pub inline fn type_is_union_with_all_fields_same_type_class(comptime T: type, comptime TYPE_ID: std.builtin.TypeId) bool {
+    const INFO = @typeInfo(T);
+    switch (INFO) {
+        .@"union" => {},
+        else => return false,
+    }
+    const UNION = INFO.@"union";
+    for (UNION.fields) |field| {
+        if (type_class(field.type) != TYPE_ID) return false;
+    }
+    return true;
+}
+pub inline fn type_is_union_with_all_fields_an_enum_type_with_all_tag_values_from_0_to_max_with_no_gaps(comptime T: type) bool {
+    const INFO = @typeInfo(T);
+    switch (INFO) {
+        .@"union" => {},
+        else => return false,
+    }
+    const UNION = INFO.@"union";
+    for (UNION.fields) |field| {
+        const FINFO = @typeInfo(field.type);
+        switch (FINFO) {
+            .@"enum" => {
+                if (!all_enum_values_start_from_zero_with_no_gaps(FINFO.type)) return false;
+            },
+            else => return false,
+        }
+    }
+    return true;
+}
+pub inline fn type_is_struct_with_all_fields_an_enum_type_with_all_tag_values_from_0_to_max_with_no_gaps(comptime T: type) bool {
+    const INFO = @typeInfo(T);
+    switch (INFO) {
+        .@"struct" => {},
+        else => return false,
+    }
+    const STRUCT = INFO.@"struct";
+    for (STRUCT.fields) |field| {
+        const FINFO = @typeInfo(field.type);
+        switch (FINFO) {
+            .@"enum" => {
+                if (!all_enum_values_start_from_zero_with_no_gaps(FINFO.type)) return false;
+            },
+            else => return false,
+        }
     }
     return true;
 }
@@ -902,4 +971,287 @@ pub fn type_equals_mode(comptime T: type) EqualsMode {
         },
         else => return .none,
     }
+}
+
+pub const InterfaceSignature = struct {
+    const_decls: []const ConstDeclDefinition = &.{},
+    struct_fields: []const StructFieldDefinition = &.{},
+    methods: []const NamedFuncDefinition = &.{},
+
+    pub fn assert_type_fulfills(comptime self: InterfaceSignature, comptime T: type, comptime src_loc: ?SourceLocation) void {
+        inline for (self.methods) |meth| {
+            assert_with_reason(@hasDecl(T, meth.name), src_loc, "type `{s}` is missing method `{s}`", .{ @typeName(T), meth.name });
+            assert_with_reason(@typeInfo(@TypeOf(@field(T, meth.name))) == .@"fn", src_loc, "type `{s}` field `{s}` is not a function, got `{s}`", .{ @typeName(T), meth.name, @typeInfo(@TypeOf(@field(T, meth.name))) });
+            const got_sig: FuncDefinition = @bitCast(@typeInfo(@TypeOf(@field(T, meth.name))).@"fn");
+            assert_with_reason(got_sig.equals(meth.def), src_loc, "type `{s}` method `{s}` does not match the needed signature `{any}`, got `{any}`", .{ @typeName(T), meth.name, meth.def.f, got_sig.f });
+        }
+        inline for (self.const_decls) |const_decl| {
+            assert_with_reason(@hasDecl(T, const_decl.name), src_loc, "type `{s}` is missing constant declaration `{s}`", .{ @typeName(T), const_decl.name });
+            assert_with_reason(@TypeOf(@field(T, const_decl.name)) == const_decl.type, src_loc, "type `{s}` constant declaration `{s}` is not a the needed type `{s}`, got `{s}`", .{ @typeName(T), const_decl.name, @typeName(const_decl.type), @typeName(@TypeOf(@field(T, const_decl.name))) });
+            if (const_decl.val) |need_val| {
+                const real_need_val: *const const_decl.type = @ptrCast(@alignCast(need_val));
+                assert_with_reason(Utils.equals_implicit(@field(T, const_decl.name), real_need_val.*), src_loc, "type `{s}` constant declaration `{s}` does not have the required value `{any}`, got `{any}`", .{ @typeName(T), const_decl.name, real_need_val.*, @field(T, const_decl.name) });
+            }
+        }
+    }
+};
+
+pub const ConstDeclDefinition = struct {
+    name: [:0]const u8,
+    type: type,
+    val: ?*const anyopaque = null,
+
+    pub fn equals(comptime self: ConstDeclDefinition, comptime other: ConstDeclDefinition) bool {
+        if (self.type != other.type) return false;
+        if (self.name.len != other.name.len) return false;
+        if (self.val == null) {
+            if (other.val != null) return false;
+        } else {
+            if (other.val == null) {
+                return false;
+            } else {
+                const self_default: *const self.type = @ptrCast(self.val.?);
+                const other_default: *const other.type = @ptrCast(other.val.?);
+                if (comptime !Utils.equals_implicit(self_default.*, other_default.*)) return false;
+            }
+        }
+        if (comptime !std.mem.eql(u8, self.name, other.name)) return false;
+    }
+
+    pub fn define_const_decl(comptime name: [:0]const u8, comptime T: type) ConstDeclDefinition {
+        return ConstDeclDefinition{
+            .name = name,
+            .type = T,
+            .val = null,
+        };
+    }
+    pub fn define_const_decl_with_val(comptime name: [:0]const u8, comptime T: type, comptime val: *const T) ConstDeclDefinition {
+        return ConstDeclDefinition{
+            .name = name,
+            .type = T,
+            .val = @ptrCast(val),
+        };
+    }
+};
+
+pub const Comptime = enum(u8) {
+    RUNTIME = 0,
+    COMPTIME = 1,
+};
+
+pub const StructFieldDefinition = struct {
+    f: std.builtin.Type.StructField = .{
+        .alignment = 1,
+        .default_value_ptr = null,
+        .is_comptime = false,
+        .type = void,
+        .name = "",
+    },
+
+    pub fn real_type(self: StructFieldDefinition) type {
+        return self.f.type;
+    }
+
+    pub fn define_field(comptime name: [:0]const u8, comptime T: type) StructFieldDefinition {
+        return StructFieldDefinition{
+            .f = .{
+                .alignment = @alignOf(T),
+                .default_value_ptr = null,
+                .is_comptime = false,
+                .type = T,
+                .name = name,
+            },
+        };
+    }
+    pub fn define_field_with_default(comptime name: [:0]const u8, comptime T: type, default: *T) StructFieldDefinition {
+        return StructFieldDefinition{
+            .f = .{
+                .alignment = @alignOf(T),
+                .default_value_ptr = @ptrCast(default),
+                .is_comptime = false,
+                .type = T,
+                .name = name,
+            },
+        };
+    }
+    pub fn define_comptime_field(comptime name: [:0]const u8, comptime T: type) StructFieldDefinition {
+        return StructFieldDefinition{
+            .f = .{
+                .alignment = @alignOf(T),
+                .default_value_ptr = null,
+                .is_comptime = true,
+                .type = T,
+                .name = name,
+            },
+        };
+    }
+    pub fn define_comptime_field_with_default(comptime name: [:0]const u8, comptime T: type, default: *T) StructFieldDefinition {
+        return StructFieldDefinition{
+            .f = .{
+                .alignment = @alignOf(T),
+                .default_value_ptr = @ptrCast(default),
+                .is_comptime = true,
+                .type = T,
+                .name = name,
+            },
+        };
+    }
+    pub fn define_field_advanced(comptime name: [:0]const u8, comptime T: type, default: ?*T, comptime is_comptime: Comptime, comptime alignment: comptime_int) StructFieldDefinition {
+        return StructFieldDefinition{
+            .f = .{
+                .alignment = alignment,
+                .default_value_ptr = @ptrCast(default),
+                .is_comptime = @bitCast(is_comptime),
+                .type = T,
+                .name = name,
+            },
+        };
+    }
+};
+
+pub const Generic = enum(u8) {
+    CONCRETE = 0,
+    GENERIC = 1,
+};
+
+pub const VarArgs = enum(u8) {
+    NOT_VAR_ARGS = 0,
+    IS_VAR_ARGS = 1,
+};
+
+pub const NamedFuncDefinition = struct {
+    name: [:0]const u8,
+    def: FuncDefinition = .{},
+};
+
+pub const FuncDefinition = struct {
+    f: std.builtin.Type.Fn = .{
+        .calling_convention = .auto,
+        .is_generic = false,
+        .is_var_args = false,
+        .return_type = null,
+        .params = &.{},
+    },
+
+    pub fn equals(self: FuncDefinition, other: FuncDefinition) bool {
+        if (self.f.params.len != other.f.params.len) return false;
+        for (self.f.params, other.f.params) |s, o| {
+            const self_param: ParamDefinition = @bitCast(s);
+            const other_param: ParamDefinition = @bitCast(o);
+            if (!self_param.equals(other_param)) return false;
+        }
+        return self.f.calling_convention == other.f.calling_convention and self.f.is_generic == other.f.is_generic and self.f.is_var_args == other.f.is_var_args and self.f.return_type == other.f.return_type;
+    }
+
+    pub fn real_type(self: FuncDefinition) type {
+        return @Type(std.builtin.Type{ .@"fn" = self.f });
+    }
+
+    pub fn define_func(comptime params: []const ParamDefinition, comptime return_type: type) FuncDefinition {
+        return FuncDefinition{
+            .f = .{
+                .calling_convention = .auto,
+                .is_generic = false,
+                .is_var_args = false,
+                .return_type = return_type,
+                .params = @as([*]std.builtin.Type.Fn.Param, @ptrCast(@alignCast(params.ptr)))[0..params.len],
+            },
+        };
+    }
+    pub fn define_func_adv(comptime genric: Generic, comptime var_args: VarArgs, comptime params: []const ParamDefinition, comptime return_type: type, comptime call_conv: std.builtin.CallingConvention) FuncDefinition {
+        return FuncDefinition{
+            .f = .{
+                .calling_convention = call_conv,
+                .is_generic = @bitCast(genric),
+                .is_var_args = @bitCast(var_args),
+                .return_type = return_type,
+                .params = @as([*]std.builtin.Type.Fn.Param, @ptrCast(@alignCast(params.ptr)))[0..params.len],
+            },
+        };
+    }
+};
+
+pub const NoAlias = enum(u8) {
+    CAN_ALIAS = 0,
+    NO_ALIAS = 1,
+};
+
+pub const ParamDefinition = struct {
+    p: std.builtin.Type.Fn.Param = .{
+        .is_generic = false,
+        .is_noalias = false,
+        .type = null,
+    },
+
+    pub fn equals(self: ParamDefinition, other: ParamDefinition) bool {
+        return self.p.is_generic == other.p.is_generic and self.p.is_noalias == other.p.is_noalias and self.p.type == other.p.type;
+    }
+
+    pub fn define_param(comptime t: type) ParamDefinition {
+        return ParamDefinition{ .p = .{ .type = t } };
+    }
+    pub fn define_param_adv(comptime t: type, comptime generic: Generic, comptime no_alias: NoAlias) ParamDefinition {
+        return ParamDefinition{ .p = .{ .type = t, .is_generic = @bitCast(generic), .is_noalias = @bitCast(no_alias) } };
+    }
+};
+
+pub fn all_enum_names_match_all_object_field_names(comptime ENUM: type, comptime STRUCT_OR_UNION_OR_ENUM: type) bool {
+    const E_INFO = @typeInfo(ENUM).@"enum";
+    const len = switch (@typeInfo(STRUCT_OR_UNION_OR_ENUM)) {
+        .@"struct" => |info| info.fields.len,
+        .@"union" => |info| info.fields.len,
+        .@"enum" => |info| info.fields.len,
+        else => unreachable,
+    };
+    if (E_INFO.fields.len != len) return false;
+    for (E_INFO.fields) |e_field| {
+        if (!@hasField(STRUCT_OR_UNION_OR_ENUM, e_field.name)) return false;
+    }
+    return true;
+}
+
+pub fn all_enum_names_match_an_object_field_name(comptime ENUM: type, comptime STRUCT_OR_UNION_OR_ENUM: type) bool {
+    const E_INFO = @typeInfo(ENUM).@"enum";
+    for (E_INFO.fields) |e_field| {
+        if (!@hasField(STRUCT_OR_UNION_OR_ENUM, e_field.name)) return false;
+    }
+    return true;
+}
+
+pub const Combined2EnumIntInfo = struct {
+    combined_type: type,
+    width_1: u16,
+    mask_1: u64,
+};
+
+/// Returns an integer type that can hold all bitwise values from both enums side-by-side,
+/// and the number of bits the second enum needs to be shifted to combine
+pub fn Combined2EnumInt(comptime E1: type, comptime E2: type) Combined2EnumIntInfo {
+    const largest_1: u64 = enum_max_value(E1);
+    const largest_2: u64 = enum_max_value(E2);
+    const bit_width_1: u16 = @intCast(64 - @clz(largest_1));
+    var mask_1: u64 = @as(u64, 1) << @intCast(bit_width_1 - 1);
+    mask_1 |= mask_1 >> 1;
+    mask_1 |= mask_1 >> 2;
+    mask_1 |= mask_1 >> 4;
+    mask_1 |= mask_1 >> 8;
+    mask_1 |= mask_1 >> 16;
+    mask_1 |= mask_1 >> 32;
+    const bit_width_2: u16 = @intCast(64 - @clz(largest_2));
+    const total = bit_width_1 + bit_width_2;
+    const INT = std.meta.Int(.unsigned, total);
+    return Combined2EnumIntInfo{ .combined_type = INT, .width_1 = bit_width_1, .mask_1 = mask_1 };
+}
+
+pub fn combine_2_enums(enum_1: anytype, enum_2: anytype) Combined2EnumInt(@TypeOf(enum_1), @TypeOf(enum_1)).combined_type {
+    const INFO = Combined2EnumInt(@TypeOf(enum_1), @TypeOf(enum_1));
+    const a: INFO.combined_type = @intCast(@intFromEnum(enum_1));
+    const b: INFO.combined_type = @intCast(@intFromEnum(enum_2));
+    return a | (b << @intCast(INFO.width_1));
+}
+pub fn decombine_2_enums(combined: anytype, comptime ENUM_1: type, comptime ENUM_2: type) .{ ENUM_1, ENUM_2 } {
+    const INFO = Combined2EnumInt(ENUM_1, ENUM_2);
+    const a: enum_tag_type(ENUM_1) = @intCast(combined & @as(@TypeOf(combined), @intCast(INFO.mask_1)));
+    const b: enum_tag_type(ENUM_2) = @intCast(combined >> @intCast(INFO.width_1));
+    return .{ @enumFromInt(a), @enumFromInt(b) };
 }

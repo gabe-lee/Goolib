@@ -2651,24 +2651,24 @@ pub fn convert_vertex_list_to_shape_with_userdata(vertex_list: *List(Vertex), co
             },
             .LINE => {
                 started_a_contour = true;
-                const p2 = Vec_f32.new_from_any(vert.x, vert.y);
+                const p2 = Vec_f32.new_any(vert.x, vert.y);
                 const edge = EDGE.new_line(p1, p2);
                 curr_contour.append_edge(edge, shape_allocator);
                 p1 = p2;
             },
             .QUADRATIC => {
                 started_a_contour = true;
-                const p2 = Vec_f32.new_from_any(vert.cx, vert.cy);
-                const p3 = Vec_f32.new_from_any(vert.x, vert.y);
+                const p2 = Vec_f32.new_any(vert.cx, vert.cy);
+                const p3 = Vec_f32.new_any(vert.x, vert.y);
                 const edge = EDGE.new_quadratic_bezier(p1, p2, p3);
                 curr_contour.append_edge(edge, shape_allocator);
                 p1 = p3;
             },
             .CUBIC => {
                 started_a_contour = true;
-                const p2 = Vec_f32.new_from_any(vert.cx, vert.cy);
-                const p3 = Vec_f32.new_from_any(vert.cx1, vert.cy1);
-                const p4 = Vec_f32.new_from_any(vert.x, vert.y);
+                const p2 = Vec_f32.new_any(vert.cx, vert.cy);
+                const p3 = Vec_f32.new_any(vert.cx1, vert.cy1);
+                const p4 = Vec_f32.new_any(vert.x, vert.y);
                 const edge = EDGE.new_cubic_bezier(p1, p2, p3, p4);
                 curr_contour.append_edge(edge, shape_allocator);
                 p1 = p4;
@@ -2683,7 +2683,7 @@ pub fn convert_vertex_list_to_shape_with_userdata(vertex_list: *List(Vertex), co
 }
 
 fn debug_set_cell_if_within_bounds(vert_x: i32, vert_y: i32, scale: f32, translate: Vec_f32, output_grid: DataGrid_u8, set_val: u8) void {
-    var p = Vec_f32.new_from_any(vert_x, vert_y);
+    var p = Vec_f32.new_any(vert_x, vert_y);
     p = p.scale(scale);
     p = p.add(translate);
     p = p.floor();
@@ -2786,7 +2786,7 @@ test "TrueTypeFont_load_and_render_Lato_chars" {
         shape.translate(shape_shift_to_frame);
         shape_aabb = shape_aabb.with_mins_shifted_to_zero();
         const shape_aabb_max = shape_aabb.get_max_point();
-        const output_grid = OUT_GRID.init_from_existing_cell_buffer(@intFromFloat(shape_aabb_max.get_x() + 2), @intFromFloat(shape_aabb_max.get_y() + 2), 0, output_cells, alloc);
+        const output_grid = OUT_GRID.init_from_existing_cell_buffer(@intFromFloat(shape_aabb_max.x + 2), @intFromFloat(shape_aabb_max.y + 2), 0, output_cells, alloc);
         raster.rasterize_to_existing_data_grid_default_lerp(&shape, .X_ONLY_EXPONENTIAL_FALLOFF, output_grid, 0, 255, .default_estimates(), alloc);
         _ = try BitmapFormat.save_bitmap_to_file("test_out/true_type/shape_raster_char_" ++ std.fmt.comptimePrint("{d}", .{char}) ++ ".bmp", OUT_DEF, output_grid, .{ .bits_per_pixel = .BPP_8 }, .NO_CONVERSION_NEEDED_ALPHA_BECOMES_COLOR_CHANNELS, alloc);
         // STB Rasterizer

@@ -23,7 +23,7 @@
 
 const std = @import("std");
 const build = @import("builtin");
-const config = @import("./_config.zig").CONFIG;
+const config = @import("config");
 
 pub const VERSION = "0.4.0";
 pub const NAME = "Goolib";
@@ -66,8 +66,6 @@ pub const ImageUtils = @import("./ImageUtils.zig");
 // pub const InsertionSort = @import("./InsertionSort.zig");
 pub const Iterator = @import("./Iterator.zig");
 pub const Layout = @import("./Layout.zig");
-pub const LinkedHeirarchy = @import("./LinkedHeirarchy.zig");
-pub const List = @import("./List.zig");
 pub const ListSegmentAllocator = @import("./ListSegmentAllocator.zig");
 pub const Math = @import("./Math.zig");
 pub const Matrix = @import("./Matrix.zig");
@@ -135,8 +133,6 @@ comptime {
         // _ = @import("./InsertionSort.zig");
         _ = @import("./Iterator.zig");
         _ = @import("./Layout.zig");
-        _ = @import("./LinkedHeirarchy.zig");
-        _ = @import("./List.zig");
         _ = @import("./ListSegmentAllocator.zig");
         _ = @import("./Math.zig");
         _ = @import("./Matrix.zig");
@@ -150,6 +146,8 @@ comptime {
         _ = @import("./RectPacker.zig");
         // _ = @import("./Result.zig");
         _ = if (build.is_test or !config.NO_SDL) @import("./SDL3.zig") else struct {};
+        _ = if (build.is_test or !config.NO_SDL) @import("./SDL3_ShaderContract.zig") else struct {};
+        _ = if (build.is_test or !config.NO_SDL) @import("./SDL3_GraphicsController.zig") else struct {};
         _ = @import("./Shape.zig");
         _ = @import("./SlabBucketAllocator.zig");
         _ = @import("./Sort.zig");

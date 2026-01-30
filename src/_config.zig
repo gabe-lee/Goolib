@@ -1,6 +1,12 @@
 const build = @import("builtin");
-pub const CONFIG = if (!build.is_test) @import("config") else struct { SDL_USER_MAIN: bool, SDL_USER_CALLBACKS: bool, NO_SDL: bool }{
+pub const CONFIG = if (!build.is_test) @import("config") else struct {
+    SDL_USER_MAIN: bool,
+    SDL_USER_CALLBACKS: bool,
+    NO_SDL: bool,
+    TEST_FILE: []const u8,
+}{
     .SDL_USER_MAIN = true,
     .SDL_USER_CALLBACKS = true,
     .NO_SDL = false,
+    .TEST_FILE = "",
 };

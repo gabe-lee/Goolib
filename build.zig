@@ -48,11 +48,17 @@ pub fn build(b: *std.Build) void {
         "sdl_user_provides_callbacks",
         "define `SDL_MAIN_USE_CALLBACKS` when importing SDL (default: false)",
     ) orelse false;
+    const sdl_gfx_controller_max_storage_registers = b.option(
+        u32,
+        "sdl_gfx_controller_max_storage_registers",
+        "max number of storage registers that can exist in one shader (default: 64)\n\t(# sampled textures + # storage textures + # storage buffers)",
+    ) orelse 64;
 
     const options = b.addOptions();
     options.addOption(bool, "SDL_USER_MAIN", sdl_user_handles_main);
     options.addOption(bool, "SDL_USER_CALLBACKS", sdl_user_provides_callbacks);
     options.addOption(bool, "NO_SDL", no_sdl);
+    options.addOption(u32, "SDL_GFX_CONTROLLER_MAX_STORAGE_REGISTERS", sdl_gfx_controller_max_storage_registers);
 
     //DEPENDENCIES
 

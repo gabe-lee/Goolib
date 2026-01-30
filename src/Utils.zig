@@ -890,6 +890,40 @@ pub fn align_forward_without_breaking_align_boundary_unless_offset_boundary_alig
     return std.mem.alignForward(usize, offset, boundary_align);
 }
 
+/// Searches a memory slice for a matching item using the native `==` operator
+///
+/// returns the index found, else `null` if  not found
+pub fn mem_search_implicit(data_ptr: anytype, start: usize, end_exclusive: usize, find_val: anytype) ?usize {
+    const PTR = @TypeOf(data_ptr);
+    assert_with_reason(Types.type_is_many_item_pointer(PTR), @src(), "type of `data_ptr` must be a many-item-pointer, got type {s}", .{@typeName(PTR)});
+    for (data_ptr[start..end_exclusive], 0..) |item, i| {
+        if (item == find_val) return i;
+    }
+    return null;
+}
+/// Searches a memory slice for a matching item using an equality function
+///
+/// returns the index found, else `null` if  not found
+pub fn mem_search_with_func(data_ptr: anytype, start: usize, end_exclusive: usize, find_val: anytype, equals: *const fn (a: @typeInfo(@TypeOf(data_ptr)).pointer.child, b: @TypeOf(find_val)) bool) ?usize {
+    const PTR = @TypeOf(data_ptr);
+    assert_with_reason(Types.type_is_many_item_pointer(PTR), @src(), "type of `data_ptr` must be a many-item-pointer, got type {s}", .{@typeName(PTR)});
+    for (data_ptr[start..end_exclusive], 0..) |item, i| {
+        if (equals(item, find_val)) return i;
+    }
+    return null;
+}
+/// Searches a memory slice for a matching item using an equality function with userdata
+///
+/// returns the index found, else `null` if  not found
+pub fn mem_search_with_func_and_userdata(data_ptr: anytype, start: usize, end_exclusive: usize, find_val: anytype, userdata: anytype, equals: *const fn (a: @typeInfo(@TypeOf(data_ptr)).pointer.child, b: @TypeOf(find_val), userdata: @TypeOf(userdata)) bool) ?usize {
+    const PTR = @TypeOf(data_ptr);
+    assert_with_reason(Types.type_is_many_item_pointer(PTR), @src(), "type of `data_ptr` must be a many-item-pointer, got type {s}", .{@typeName(PTR)});
+    for (data_ptr[start..end_exclusive], 0..) |item, i| {
+        if (equals(item, find_val, userdata)) return i;
+    }
+    return null;
+}
+
 /// Sorts a portion of a memory region using the provided `greater_than` function
 /// and the `insertion sort` algorithm
 ///
@@ -918,6 +952,7 @@ pub fn mem_sort(data_ptr: anytype, start: usize, end_exclusive: usize, userdata:
         i += 1;
     }
 }
+
 /// Sorts a portion of a memory region using the `>` operator
 /// and the `insertion sort` algorithm
 ///
@@ -945,6 +980,43 @@ pub fn mem_sort_implicit(data_ptr: anytype, start: usize, end_exclusive: usize) 
         data_ptr[jj] = move_val;
         i += 1;
     }
+}
+
+pub fn mem_is_sorted_implicit(data_ptr: anytype, start: usize, end_exclusive: usize) bool {
+    const PTR = @TypeOf(data_ptr);
+    assert_with_reason(Types.type_is_many_item_pointer(PTR), @src(), "type of `data_ptr` must be a many-item-pointer, got type {s}", .{@typeName(PTR)});
+    var i = start;
+    var ii = start + 1;
+    while (ii < end_exclusive) {
+        if (data_ptr[i] > data_ptr[ii]) return false;
+        i = ii;
+        ii += 1;
+    }
+    return true;
+}
+pub fn mem_is_sorted_with_func(data_ptr: anytype, start: usize, end_exclusive: usize, greater_than: *const fn (a: @typeInfo(@TypeOf(data_ptr)).pointer.child, b: @typeInfo(@TypeOf(data_ptr)).pointer.child) bool) bool {
+    const PTR = @TypeOf(data_ptr);
+    assert_with_reason(Types.type_is_many_item_pointer(PTR), @src(), "type of `data_ptr` must be a many-item-pointer, got type {s}", .{@typeName(PTR)});
+    var i = start;
+    var ii = start + 1;
+    while (ii < end_exclusive) {
+        if (greater_than(data_ptr[i], data_ptr[ii])) return false;
+        i = ii;
+        ii += 1;
+    }
+    return true;
+}
+pub fn mem_is_sorted_with_func_and_userdata(data_ptr: anytype, start: usize, end_exclusive: usize, userdata: anytype, greater_than: *const fn (a: @typeInfo(@TypeOf(data_ptr)).pointer.child, b: @typeInfo(@TypeOf(data_ptr)).pointer.child, userdata: @TypeOf(userdata)) bool) bool {
+    const PTR = @TypeOf(data_ptr);
+    assert_with_reason(Types.type_is_many_item_pointer(PTR), @src(), "type of `data_ptr` must be a many-item-pointer, got type {s}", .{@typeName(PTR)});
+    var i = start;
+    var ii = start + 1;
+    while (ii < end_exclusive) {
+        if (greater_than(data_ptr[i], data_ptr[ii], userdata)) return false;
+        i = ii;
+        ii += 1;
+    }
+    return true;
 }
 
 /// This method moves all items at `data_ptr[start..]` up `n` places,
@@ -1489,5 +1561,16 @@ pub fn local_type_name(comptime T: type) []const u8 {
             }
         }
         return FULL;
+    }
+}
+
+pub inline fn update_max(val: anytype, current_max: *@TypeOf(val)) void {
+    if (val > current_max.*) {
+        current_max = val;
+    }
+}
+pub inline fn update_min(val: anytype, current_min: *@TypeOf(val)) void {
+    if (val < current_min.*) {
+        current_min = val;
     }
 }
