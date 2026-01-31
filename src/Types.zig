@@ -974,24 +974,40 @@ pub fn type_equals_mode(comptime T: type) EqualsMode {
 }
 
 pub const InterfaceSignature = struct {
+    interface_name: []const u8,
     const_decls: []const ConstDeclDefinition = &.{},
     struct_fields: []const StructFieldDefinition = &.{},
-    methods: []const NamedFuncDefinition = &.{},
+    functions: []const NamedFuncDefinition = &.{},
 
     pub fn assert_type_fulfills(comptime self: InterfaceSignature, comptime T: type, comptime src_loc: ?SourceLocation) void {
-        inline for (self.methods) |meth| {
-            assert_with_reason(@hasDecl(T, meth.name), src_loc, "type `{s}` is missing method `{s}`", .{ @typeName(T), meth.name });
-            assert_with_reason(@typeInfo(@TypeOf(@field(T, meth.name))) == .@"fn", src_loc, "type `{s}` field `{s}` is not a function, got `{s}`", .{ @typeName(T), meth.name, @typeInfo(@TypeOf(@field(T, meth.name))) });
-            const got_sig: FuncDefinition = @bitCast(@typeInfo(@TypeOf(@field(T, meth.name))).@"fn");
-            assert_with_reason(got_sig.equals(meth.def), src_loc, "type `{s}` method `{s}` does not match the needed signature `{any}`, got `{any}`", .{ @typeName(T), meth.name, meth.def.f, got_sig.f });
+        inline for (self.functions) |func| {
+            assert_with_reason(@hasDecl(T, func.name), src_loc, "(assert interface `{s}`) type `{s}` is missing method `{s}`", .{ self.interface_name, @typeName(T), func.name });
+            assert_with_reason(@typeInfo(@TypeOf(@field(T, func.name))) == .@"fn", src_loc, "(assert interface `{s}`) type `{s}` field `{s}` is not a function, got `{s}`", .{ self.interface_name, @typeName(T), func.name, @typeInfo(@TypeOf(@field(T, func.name))) });
+            const got_sig = @typeInfo(@TypeOf(@field(T, func.name))).@"fn";
+            var got_func = NamedFuncDefinition{
+                .name = func.name,
+                .f = got_sig,
+            };
+            if (comptime got_func.has_params()) {
+                if (comptime got_func.first_param_type()) |t| {
+                    if (t == T or t == *T or t == *const T) {
+                        got_func.first_param_is_self = true;
+                    }
+                }
+            }
+            assert_with_reason(func.equals(got_func), src_loc, "(assert interface `{s}`) type `{s}` method `{s}` does not match the needed signature `{any}`, got `{any}`", .{ self.interface_name, @typeName(T), func.name, func.def.f, got_sig.f });
         }
         inline for (self.const_decls) |const_decl| {
-            assert_with_reason(@hasDecl(T, const_decl.name), src_loc, "type `{s}` is missing constant declaration `{s}`", .{ @typeName(T), const_decl.name });
-            assert_with_reason(@TypeOf(@field(T, const_decl.name)) == const_decl.type, src_loc, "type `{s}` constant declaration `{s}` is not a the needed type `{s}`, got `{s}`", .{ @typeName(T), const_decl.name, @typeName(const_decl.type), @typeName(@TypeOf(@field(T, const_decl.name))) });
+            assert_with_reason(@hasDecl(T, const_decl.name), src_loc, "(assert interface `{s}`) type `{s}` is missing constant declaration `{s}`", .{ self.interface_name, @typeName(T), const_decl.name });
+            assert_with_reason(@TypeOf(@field(T, const_decl.name)) == const_decl.type, src_loc, "(assert interface `{s}`) type `{s}` constant declaration `{s}` is not the needed type `{s}`, got `{s}`", .{ self.interface_name, @typeName(T), const_decl.name, @typeName(const_decl.type), @typeName(@TypeOf(@field(T, const_decl.name))) });
             if (const_decl.val) |need_val| {
                 const real_need_val: *const const_decl.type = @ptrCast(@alignCast(need_val));
-                assert_with_reason(Utils.equals_implicit(@field(T, const_decl.name), real_need_val.*), src_loc, "type `{s}` constant declaration `{s}` does not have the required value `{any}`, got `{any}`", .{ @typeName(T), const_decl.name, real_need_val.*, @field(T, const_decl.name) });
+                assert_with_reason(Utils.equals_implicit(@field(T, const_decl.name), real_need_val.*), src_loc, "(assert interface `{s}`) type `{s}` constant declaration `{s}` does not have the required value `{any}`, got `{any}`", .{ self.interface_name, @typeName(T), const_decl.name, real_need_val.*, @field(T, const_decl.name) });
             }
+        }
+        inline for (self.struct_fields) |field| {
+            assert_with_reason(@hasField(T, field.f.name), src_loc, "(assert interface `{s}`) type `{s}` is missing field `{s}`", .{ self.interface_name, @typeName(T), field.f.name });
+            assert_with_reason(@FieldType(T, field.f.name) == field.f.type, src_loc, "(assert interface `{s}`) type `{s}` field `{s}` is not the correct type `{s}`, got type `{s}`", .{ self.interface_name, @typeName(T), field.f.name, @typeName(field.f.type), @typeName(@FieldType(T, field.f.name)) });
         }
     }
 };
@@ -1121,7 +1137,90 @@ pub const VarArgs = enum(u8) {
 
 pub const NamedFuncDefinition = struct {
     name: [:0]const u8,
-    def: FuncDefinition = .{},
+    first_param_is_self: bool = false,
+    f: std.builtin.Type.Fn = .{
+        .calling_convention = .auto,
+        .is_generic = false,
+        .is_var_args = false,
+        .return_type = null,
+        .params = &.{},
+    },
+
+    pub fn real_type(comptime self: NamedFuncDefinition) type {
+        return @Type(std.builtin.Type{ .@"fn" = self.f });
+    }
+
+    pub fn has_params(comptime self: NamedFuncDefinition) bool {
+        return self.f.params.len > 0;
+    }
+
+    pub fn first_param_type(comptime self: NamedFuncDefinition) ?type {
+        return self.f.params[0].type;
+    }
+
+    pub fn equals(comptime self: NamedFuncDefinition, comptime other: NamedFuncDefinition) bool {
+        if (comptime !std.mem.eql(u8, self.name, other.name)) return false;
+        if (self.first_param_is_self != other.first_param_is_self) return false;
+        if (self.f.params.len != other.f.params.len) return false;
+        for (self.f.params, other.f.params, 0..) |s, o, i| {
+            if (self.first_param_is_self and i == 0) continue;
+            const self_param: ParamDefinition = @bitCast(s);
+            const other_param: ParamDefinition = @bitCast(o);
+            if (!self_param.equals(other_param)) return false;
+        }
+        return self.f.calling_convention == other.f.calling_convention and self.f.is_generic == other.f.is_generic and self.f.is_var_args == other.f.is_var_args and self.f.return_type == other.f.return_type;
+    }
+
+    pub fn define_func(comptime name: []const u8, comptime params: []const ParamDefinition, comptime return_type: type) NamedFuncDefinition {
+        return NamedFuncDefinition{
+            .name = name,
+            .f = .{
+                .calling_convention = .auto,
+                .is_generic = false,
+                .is_var_args = false,
+                .return_type = return_type,
+                .params = @as([*]std.builtin.Type.Fn.Param, @ptrCast(@alignCast(params.ptr)))[0..params.len],
+            },
+        };
+    }
+    pub fn define_method_on_type(comptime name: []const u8, comptime params: []const ParamDefinition, comptime return_type: type) NamedFuncDefinition {
+        return NamedFuncDefinition{
+            .name = name,
+            .first_param_is_self = true,
+            .f = .{
+                .calling_convention = .auto,
+                .is_generic = false,
+                .is_var_args = false,
+                .return_type = return_type,
+                .params = @as([*]std.builtin.Type.Fn.Param, @ptrCast(@alignCast(params.ptr)))[0..params.len],
+            },
+        };
+    }
+    pub fn define_func_adv(comptime name: []const u8, comptime generic: Generic, comptime var_args: VarArgs, comptime params: []const ParamDefinition, comptime return_type: type, comptime call_conv: std.builtin.CallingConvention) NamedFuncDefinition {
+        return NamedFuncDefinition{
+            .name = name,
+            .f = .{
+                .calling_convention = call_conv,
+                .is_generic = @bitCast(generic),
+                .is_var_args = @bitCast(var_args),
+                .return_type = return_type,
+                .params = @as([*]std.builtin.Type.Fn.Param, @ptrCast(@alignCast(params.ptr)))[0..params.len],
+            },
+        };
+    }
+    pub fn define_method_adv(comptime name: []const u8, comptime generic: Generic, comptime var_args: VarArgs, comptime params: []const ParamDefinition, comptime return_type: type, comptime call_conv: std.builtin.CallingConvention) NamedFuncDefinition {
+        return NamedFuncDefinition{
+            .name = name,
+            .first_param_is_self = true,
+            .f = .{
+                .calling_convention = call_conv,
+                .is_generic = @bitCast(generic),
+                .is_var_args = @bitCast(var_args),
+                .return_type = return_type,
+                .params = @as([*]std.builtin.Type.Fn.Param, @ptrCast(@alignCast(params.ptr)))[0..params.len],
+            },
+        };
+    }
 };
 
 pub const FuncDefinition = struct {
@@ -1132,16 +1231,6 @@ pub const FuncDefinition = struct {
         .return_type = null,
         .params = &.{},
     },
-
-    pub fn equals(self: FuncDefinition, other: FuncDefinition) bool {
-        if (self.f.params.len != other.f.params.len) return false;
-        for (self.f.params, other.f.params) |s, o| {
-            const self_param: ParamDefinition = @bitCast(s);
-            const other_param: ParamDefinition = @bitCast(o);
-            if (!self_param.equals(other_param)) return false;
-        }
-        return self.f.calling_convention == other.f.calling_convention and self.f.is_generic == other.f.is_generic and self.f.is_var_args == other.f.is_var_args and self.f.return_type == other.f.return_type;
-    }
 
     pub fn real_type(self: FuncDefinition) type {
         return @Type(std.builtin.Type{ .@"fn" = self.f });
@@ -1187,6 +1276,9 @@ pub const ParamDefinition = struct {
         return self.p.is_generic == other.p.is_generic and self.p.is_noalias == other.p.is_noalias and self.p.type == other.p.type;
     }
 
+    pub fn first_param_is_self() ParamDefinition {
+        return ParamDefinition{ .p = .{ .type = null, .is_generic = true } };
+    }
     pub fn define_param(comptime t: type) ParamDefinition {
         return ParamDefinition{ .p = .{ .type = t } };
     }
