@@ -33,6 +33,7 @@ const Types = Root.Types;
 const Vec2 = Root.Vec2;
 const Utils = Root.Utils;
 const assert_with_reason = Assert.assert_with_reason;
+const assert_unreachable = Assert.assert_unreachable;
 const num_cast = Root.Cast.num_cast;
 
 const Math = @This();
@@ -1099,4 +1100,396 @@ pub fn min_value(comptime T: type) T {
     } else {
         return -math.floatMax(T);
     }
+}
+
+const BezierSineCos = struct {
+    const A = 1.00005507808;
+    const B = 0.55342925736;
+    const C = 0.99873327689;
+    const F32 = struct {
+        const X = [4][4]f32{ .{ A, C, B, 0 }, .{ 0, -B, -C, -A }, .{ -A, -C, -B, 0 }, .{ 0, B, C, A } };
+        const Y = [4][4]f32{ .{ 0, B, C, A }, .{ A, C, B, 0 }, .{ 0, -B, -C, -A }, .{ -A, -C, -B, 0 } };
+    };
+    const F64 = struct {
+        const X = [4][4]f64{ .{ A, C, B, 0 }, .{ 0, -B, -C, -A }, .{ -A, -C, -B, 0 }, .{ 0, B, C, A } };
+        const Y = [4][4]f64{ .{ 0, B, C, A }, .{ A, C, B, 0 }, .{ 0, -B, -C, -A }, .{ -A, -C, -B, 0 } };
+    };
+};
+
+pub fn sin_bezier_rad(radians: anytype) @TypeOf(radians) {
+    const T = @TypeOf(radians);
+    switch (T) {
+        f32 => {
+            const sector_f: f32 = @floor(radians / HALF_PI);
+            const sector_i: u32 = @intFromFloat(sector_f);
+            const sector: u32 = sector_i & 0b11;
+            const rem: f32 = radians - (sector_f * HALF_PI);
+            const percent: f32 = rem / HALF_PI;
+            const y: [4]f32 = BezierSineCos.F32.Y[sector];
+            const y01 = lerp(y[0], y[1], percent);
+            const y12 = lerp(y[1], y[2], percent);
+            const y23 = lerp(y[2], y[3], percent);
+            const y01_12 = lerp(y01, y12, percent);
+            const y12_23 = lerp(y12, y23, percent);
+            return lerp(y01_12, y12_23, percent);
+        },
+        f64 => {
+            const sector_f: f64 = @floor(radians / HALF_PI);
+            const sector_i: u64 = @intFromFloat(sector_f);
+            const sector: u64 = sector_i & 0b11;
+            const rem: f64 = radians - (sector_f * HALF_PI);
+            const percent: f64 = rem / HALF_PI;
+            const y: [4]f64 = BezierSineCos.F64.Y[sector];
+            const y01 = lerp(y[0], y[1], percent);
+            const y12 = lerp(y[1], y[2], percent);
+            const y23 = lerp(y[2], y[3], percent);
+            const y01_12 = lerp(y01, y12, percent);
+            const y12_23 = lerp(y12, y23, percent);
+            return lerp(y01_12, y12_23, percent);
+        },
+        else => {
+            const radians_f = num_cast(radians, f64);
+            const sector_f: f64 = @floor(radians_f / HALF_PI);
+            const sector_i: u64 = @intFromFloat(sector_f);
+            const sector: u64 = sector_i & 0b11;
+            const rem: f64 = radians_f - (sector_f * HALF_PI);
+            const percent: f64 = rem / HALF_PI;
+            const y: [4]f64 = BezierSineCos.F64.Y[sector];
+            const y01 = lerp(y[0], y[1], percent);
+            const y12 = lerp(y[1], y[2], percent);
+            const y23 = lerp(y[2], y[3], percent);
+            const y01_12 = lerp(y01, y12, percent);
+            const y12_23 = lerp(y12, y23, percent);
+            return num_cast(lerp(y01_12, y12_23, percent), T);
+        },
+    }
+}
+
+pub fn cos_bezier_rad(radians: anytype) @TypeOf(radians) {
+    const T = @TypeOf(radians);
+    switch (T) {
+        f32 => {
+            const sector_f: f32 = @floor(radians / HALF_PI);
+            const sector_i: u32 = @intFromFloat(sector_f);
+            const sector: u32 = sector_i & 0b11;
+            const rem: f32 = radians - (sector_f * HALF_PI);
+            const percent: f32 = rem / HALF_PI;
+            const x: [4]f32 = BezierSineCos.F32.X[sector];
+            const x01 = lerp(x[0], x[1], percent);
+            const x12 = lerp(x[1], x[2], percent);
+            const x23 = lerp(x[2], x[3], percent);
+            const x01_12 = lerp(x01, x12, percent);
+            const x12_23 = lerp(x12, x23, percent);
+            return lerp(x01_12, x12_23, percent);
+        },
+        f64 => {
+            const sector_f: f64 = @floor(radians / HALF_PI);
+            const sector_i: u64 = @intFromFloat(sector_f);
+            const sector: u64 = sector_i & 0b11;
+            const rem: f64 = radians - (sector_f * HALF_PI);
+            const percent: f64 = rem / HALF_PI;
+            const x: [4]f64 = BezierSineCos.F64.X[sector];
+            const x01 = lerp(x[0], x[1], percent);
+            const x12 = lerp(x[1], x[2], percent);
+            const x23 = lerp(x[2], x[3], percent);
+            const x01_12 = lerp(x01, x12, percent);
+            const x12_23 = lerp(x12, x23, percent);
+            return lerp(x01_12, x12_23, percent);
+        },
+        else => {
+            const radians_f = num_cast(radians, f64);
+            const sector_f: f64 = @floor(radians_f / HALF_PI);
+            const sector_i: u64 = @intFromFloat(sector_f);
+            const sector: u64 = sector_i & 0b11;
+            const rem: f64 = radians_f - (sector_f * HALF_PI);
+            const percent: f64 = rem / HALF_PI;
+            const x: [4]f64 = BezierSineCos.F64.X[sector];
+            const x01 = lerp(x[0], x[1], percent);
+            const x12 = lerp(x[1], x[2], percent);
+            const x23 = lerp(x[2], x[3], percent);
+            const x01_12 = lerp(x01, x12, percent);
+            const x12_23 = lerp(x12, x23, percent);
+            return num_cast(lerp(x01_12, x12_23, percent), T);
+        },
+    }
+}
+
+pub fn sin_cos_bezier_rad(radians: anytype) .{ @TypeOf(radians), @TypeOf(radians) } {
+    const T = @TypeOf(radians);
+    switch (T) {
+        f32 => {
+            const sector_f: f32 = @floor(radians / HALF_PI);
+            const sector_i: u32 = @intFromFloat(sector_f);
+            const sector: u32 = sector_i & 0b11;
+            const rem: f32 = radians - (sector_f * HALF_PI);
+            const percent: f32 = rem / HALF_PI;
+            const y: [4]f32 = BezierSineCos.F32.Y[sector];
+            const x: [4]f32 = BezierSineCos.F32.X[sector];
+            const y01 = lerp(y[0], y[1], percent);
+            const y12 = lerp(y[1], y[2], percent);
+            const y23 = lerp(y[2], y[3], percent);
+            const x01 = lerp(x[0], x[1], percent);
+            const x12 = lerp(x[1], x[2], percent);
+            const x23 = lerp(x[2], x[3], percent);
+            const y01_12 = lerp(y01, y12, percent);
+            const y12_23 = lerp(y12, y23, percent);
+            const x01_12 = lerp(x01, x12, percent);
+            const x12_23 = lerp(x12, x23, percent);
+            const y_final = lerp(y01_12, y12_23, percent);
+            const x_final = lerp(x01_12, x12_23, percent);
+            return .{ y_final, x_final };
+        },
+        f64 => {
+            const sector_f: f64 = @floor(radians / HALF_PI);
+            const sector_i: u64 = @intFromFloat(sector_f);
+            const sector: u64 = sector_i & 0b11;
+            const rem: f64 = radians - (sector_f * HALF_PI);
+            const percent: f64 = rem / HALF_PI;
+            const y: [4]f64 = BezierSineCos.F64.Y[sector];
+            const x: [4]f64 = BezierSineCos.F64.X[sector];
+            const y01 = lerp(y[0], y[1], percent);
+            const y12 = lerp(y[1], y[2], percent);
+            const y23 = lerp(y[2], y[3], percent);
+            const x01 = lerp(x[0], x[1], percent);
+            const x12 = lerp(x[1], x[2], percent);
+            const x23 = lerp(x[2], x[3], percent);
+            const y01_12 = lerp(y01, y12, percent);
+            const y12_23 = lerp(y12, y23, percent);
+            const x01_12 = lerp(x01, x12, percent);
+            const x12_23 = lerp(x12, x23, percent);
+            const y_final = lerp(y01_12, y12_23, percent);
+            const x_final = lerp(x01_12, x12_23, percent);
+            return .{ y_final, x_final };
+        },
+        else => {
+            const radians_f = num_cast(radians, f64);
+            const sector_f: f64 = @floor(radians_f / HALF_PI);
+            const sector_i: u64 = @intFromFloat(sector_f);
+            const sector: u64 = sector_i & 0b11;
+            const rem: f64 = radians_f - (sector_f * HALF_PI);
+            const percent: f64 = rem / HALF_PI;
+            const y: [4]f64 = BezierSineCos.F64.Y[sector];
+            const x: [4]f64 = BezierSineCos.F64.X[sector];
+            const y01 = lerp(y[0], y[1], percent);
+            const y12 = lerp(y[1], y[2], percent);
+            const y23 = lerp(y[2], y[3], percent);
+            const x01 = lerp(x[0], x[1], percent);
+            const x12 = lerp(x[1], x[2], percent);
+            const x23 = lerp(x[2], x[3], percent);
+            const y01_12 = lerp(y01, y12, percent);
+            const y12_23 = lerp(y12, y23, percent);
+            const x01_12 = lerp(x01, x12, percent);
+            const x12_23 = lerp(x12, x23, percent);
+            const y_final = lerp(y01_12, y12_23, percent);
+            const x_final = lerp(x01_12, x12_23, percent);
+            return .{ num_cast(y_final, T), num_cast(x_final, T) };
+        },
+    }
+}
+
+pub fn sin_bezier_deg(degrees: anytype) @TypeOf(degrees) {
+    const T = @TypeOf(degrees);
+    switch (T) {
+        f32 => {
+            const sector_f: f32 = @floor(degrees / 90);
+            const sector_i: u32 = @intFromFloat(sector_f);
+            const sector: u32 = sector_i & 0b11;
+            const rem: f32 = degrees - (sector_f * 90);
+            const percent: f32 = rem / 90;
+            const y: [4]f32 = BezierSineCos.F32.Y[sector];
+            const y01 = lerp(y[0], y[1], percent);
+            const y12 = lerp(y[1], y[2], percent);
+            const y23 = lerp(y[2], y[3], percent);
+            const y01_12 = lerp(y01, y12, percent);
+            const y12_23 = lerp(y12, y23, percent);
+            return lerp(y01_12, y12_23, percent);
+        },
+        f64 => {
+            const sector_f: f64 = @floor(degrees / 90);
+            const sector_i: u64 = @intFromFloat(sector_f);
+            const sector: u64 = sector_i & 0b11;
+            const rem: f64 = degrees - (sector_f * 90);
+            const percent: f64 = rem / 90;
+            const y: [4]f64 = BezierSineCos.F64.Y[sector];
+            const y01 = lerp(y[0], y[1], percent);
+            const y12 = lerp(y[1], y[2], percent);
+            const y23 = lerp(y[2], y[3], percent);
+            const y01_12 = lerp(y01, y12, percent);
+            const y12_23 = lerp(y12, y23, percent);
+            return lerp(y01_12, y12_23, percent);
+        },
+        else => {
+            const radians_f = num_cast(degrees, f64);
+            const sector_f: f64 = @floor(radians_f / 90);
+            const sector_i: u64 = @intFromFloat(sector_f);
+            const sector: u64 = sector_i & 0b11;
+            const rem: f64 = radians_f - (sector_f * 90);
+            const percent: f64 = rem / 90;
+            const y: [4]f64 = BezierSineCos.F64.Y[sector];
+            const y01 = lerp(y[0], y[1], percent);
+            const y12 = lerp(y[1], y[2], percent);
+            const y23 = lerp(y[2], y[3], percent);
+            const y01_12 = lerp(y01, y12, percent);
+            const y12_23 = lerp(y12, y23, percent);
+            return num_cast(lerp(y01_12, y12_23, percent), T);
+        },
+    }
+}
+
+pub fn cos_bezier_deg(degrees: anytype) @TypeOf(degrees) {
+    const T = @TypeOf(degrees);
+    switch (T) {
+        f32 => {
+            const sector_f: f32 = @floor(degrees / 90);
+            const sector_i: u32 = @intFromFloat(sector_f);
+            const sector: u32 = sector_i & 0b11;
+            const rem: f32 = degrees - (sector_f * 90);
+            const percent: f32 = rem / 90;
+            const x: [4]f32 = BezierSineCos.F32.X[sector];
+            const x01 = lerp(x[0], x[1], percent);
+            const x12 = lerp(x[1], x[2], percent);
+            const x23 = lerp(x[2], x[3], percent);
+            const x01_12 = lerp(x01, x12, percent);
+            const x12_23 = lerp(x12, x23, percent);
+            return lerp(x01_12, x12_23, percent);
+        },
+        f64 => {
+            const sector_f: f64 = @floor(degrees / 90);
+            const sector_i: u64 = @intFromFloat(sector_f);
+            const sector: u64 = sector_i & 0b11;
+            const rem: f64 = degrees - (sector_f * 90);
+            const percent: f64 = rem / 90;
+            const x: [4]f64 = BezierSineCos.F64.X[sector];
+            const x01 = lerp(x[0], x[1], percent);
+            const x12 = lerp(x[1], x[2], percent);
+            const x23 = lerp(x[2], x[3], percent);
+            const x01_12 = lerp(x01, x12, percent);
+            const x12_23 = lerp(x12, x23, percent);
+            return lerp(x01_12, x12_23, percent);
+        },
+        else => {
+            const radians_f = num_cast(degrees, f64);
+            const sector_f: f64 = @floor(radians_f / 90);
+            const sector_i: u64 = @intFromFloat(sector_f);
+            const sector: u64 = sector_i & 0b11;
+            const rem: f64 = radians_f - (sector_f * 90);
+            const percent: f64 = rem / 90;
+            const x: [4]f64 = BezierSineCos.F64.X[sector];
+            const x01 = lerp(x[0], x[1], percent);
+            const x12 = lerp(x[1], x[2], percent);
+            const x23 = lerp(x[2], x[3], percent);
+            const x01_12 = lerp(x01, x12, percent);
+            const x12_23 = lerp(x12, x23, percent);
+            return num_cast(lerp(x01_12, x12_23, percent), T);
+        },
+    }
+}
+
+pub fn sin_cos_bezier_deg(degrees: anytype) .{ @TypeOf(degrees), @TypeOf(degrees) } {
+    const T = @TypeOf(degrees);
+    switch (T) {
+        f32 => {
+            const sector_f: f32 = @floor(degrees / 90);
+            const sector_i: u32 = @intFromFloat(sector_f);
+            const sector: u32 = sector_i & 0b11;
+            const rem: f32 = degrees - (sector_f * 90);
+            const percent: f32 = rem / 90;
+            const y: [4]f32 = BezierSineCos.F32.Y[sector];
+            const x: [4]f32 = BezierSineCos.F32.X[sector];
+            const y01 = lerp(y[0], y[1], percent);
+            const y12 = lerp(y[1], y[2], percent);
+            const y23 = lerp(y[2], y[3], percent);
+            const x01 = lerp(x[0], x[1], percent);
+            const x12 = lerp(x[1], x[2], percent);
+            const x23 = lerp(x[2], x[3], percent);
+            const y01_12 = lerp(y01, y12, percent);
+            const y12_23 = lerp(y12, y23, percent);
+            const x01_12 = lerp(x01, x12, percent);
+            const x12_23 = lerp(x12, x23, percent);
+            const sin = lerp(y01_12, y12_23, percent);
+            const cos = lerp(x01_12, x12_23, percent);
+            return .{ sin, cos };
+        },
+        f64 => {
+            const sector_f: f64 = @floor(degrees / 90);
+            const sector_i: u64 = @intFromFloat(sector_f);
+            const sector: u64 = sector_i & 0b11;
+            const rem: f64 = degrees - (sector_f * 90);
+            const percent: f64 = rem / 90;
+            const y: [4]f64 = BezierSineCos.F64.Y[sector];
+            const x: [4]f64 = BezierSineCos.F64.X[sector];
+            const y01 = lerp(y[0], y[1], percent);
+            const y12 = lerp(y[1], y[2], percent);
+            const y23 = lerp(y[2], y[3], percent);
+            const x01 = lerp(x[0], x[1], percent);
+            const x12 = lerp(x[1], x[2], percent);
+            const x23 = lerp(x[2], x[3], percent);
+            const y01_12 = lerp(y01, y12, percent);
+            const y12_23 = lerp(y12, y23, percent);
+            const x01_12 = lerp(x01, x12, percent);
+            const x12_23 = lerp(x12, x23, percent);
+            const sin = lerp(y01_12, y12_23, percent);
+            const cos = lerp(x01_12, x12_23, percent);
+            return .{ sin, cos };
+        },
+        else => {
+            const degrees_f = num_cast(degrees, f64);
+            const sector_f: f64 = @floor(degrees_f / 90);
+            const sector_i: u64 = @intFromFloat(sector_f);
+            const sector: u64 = sector_i & 0b11;
+            const rem: f64 = degrees_f - (sector_f * 90);
+            const percent: f64 = rem / 90;
+            const y: [4]f64 = BezierSineCos.F64.Y[sector];
+            const x: [4]f64 = BezierSineCos.F64.X[sector];
+            const y01 = lerp(y[0], y[1], percent);
+            const y12 = lerp(y[1], y[2], percent);
+            const y23 = lerp(y[2], y[3], percent);
+            const x01 = lerp(x[0], x[1], percent);
+            const x12 = lerp(x[1], x[2], percent);
+            const x23 = lerp(x[2], x[3], percent);
+            const y01_12 = lerp(y01, y12, percent);
+            const y12_23 = lerp(y12, y23, percent);
+            const x01_12 = lerp(x01, x12, percent);
+            const x12_23 = lerp(x12, x23, percent);
+            const sin = lerp(y01_12, y12_23, percent);
+            const cos = lerp(x01_12, x12_23, percent);
+            return .{ num_cast(sin, T), num_cast(cos, T) };
+        },
+    }
+}
+
+/// In the case of `cos == 0`, if the type of `sin` is a float type, returns infinity,
+/// if `sin` is an integer type, returns the maximum value of that int, which may
+/// not be a good mathematical representation of `tan`, but is better than throwing
+/// an error or panicing
+pub fn tan_from_sin_cos(sin: anytype, cos: anytype) @TypeOf(sin) {
+    if (cos == 0) {
+        switch (@typeInfo(@TypeOf(sin))) {
+            .float => return math.inf(@TypeOf(sin)),
+            .comptime_float => return @floatCast(math.inf(f64)),
+            .int => return math.maxInt(@TypeOf(sin)),
+            .comptime_int => return @intCast(math.maxInt(u64)),
+            else => assert_unreachable(@src(), "type of `sin` was not a numeric type, got type `{s}`", .{@typeName(@TypeOf(sin))}),
+        }
+    }
+    const sin_f = upgrade_to_float(sin, f64);
+    const cos_f = upgrade_to_float(cos, f64);
+    return upgrade_divide_out(sin_f, cos_f, @TypeOf(sin));
+}
+
+/// In the case of `cos(radians) == 0`, if the type of `radians` is a float type, returns infinity,
+/// if `sin` is an integer type, returns the maximum value of that int, which may
+/// not be a good mathematical representation of `tan`, but is better than throwing
+/// an error or panicing
+pub fn tan_bezier_rad(radians: anytype) @TypeOf(radians) {
+    const sin, const cos = sin_cos_bezier_rad(radians);
+    return tan_from_sin_cos(sin, cos);
+}
+/// In the case of `cos(degrees) == 0`, if the type of `degrees` is a float type, returns infinity,
+/// if `sin` is an integer type, returns the maximum value of that int, which may
+/// not be a good mathematical representation of `tan`, but is better than throwing
+/// an error or panicing
+pub fn tan_bezier_deg(degrees: anytype) @TypeOf(degrees) {
+    const sin, const cos = sin_cos_bezier_deg(degrees);
+    return tan_from_sin_cos(sin, cos);
 }

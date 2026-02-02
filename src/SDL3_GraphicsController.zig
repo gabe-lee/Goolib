@@ -83,6 +83,7 @@ pub const GPU_VertexAttribute = SDL3.GPU_VertexAttribute;
 const ShaderContract = SDL3.ShaderContract;
 const StorageStructField = ShaderContract.StorageStructField;
 const StorageStruct = ShaderContract.StorageStruct;
+const GPUType = ShaderContract.GPUType;
 
 const assert_with_reason = Assert.assert_with_reason;
 const update_max = Utils.update_max;
@@ -467,27 +468,25 @@ pub const StorageRegisterKind = enum(u32) {
 //     },
 // };
 
-pub fn RenderLinkageRegister(comptime UNIFORM_NAMES_ENUM: type, comptime STORAGE_BUFFER_NAMES_ENUM: type, comptime TEXTURE_NAMES_ENUM: type, comptime SAMPLER_NAMES_ENUM: type, comptime GPU_VERTEX_BUFFER_NAMES_ENUM: type) type {
+pub fn RenderLinkageRegister(comptime UNIFORM_NAMES_ENUM: type, comptime STORAGE_BUFFER_NAMES_ENUM: type, comptime TEXTURE_NAMES_ENUM: type, comptime SAMPLER_NAMES_ENUM: type) type {
     return union(RenderLinkageRegisterKind) {
         SAMPLED_TEXTURE: ReadOnlySampledTextureRegister(TEXTURE_NAMES_ENUM, SAMPLER_NAMES_ENUM),
         STORAGE_TEXTURE: ReadOnlyStorageTextureRegister(TEXTURE_NAMES_ENUM),
         STORAGE_BUFFER: StorageBufferRegister(STORAGE_BUFFER_NAMES_ENUM),
         UNIFORM_BUFFER: UniformRegister(UNIFORM_NAMES_ENUM),
-        VERTEX_BUFFER: VertexBufferRegister(GPU_VERTEX_BUFFER_NAMES_ENUM),
     };
 }
 
-pub fn ShaderLinkageRegister(comptime UNIFORM_NAMES_ENUM: type, comptime STORAGE_BUFFER_NAMES_ENUM: type, comptime TEXTURE_NAMES_ENUM: type, comptime SAMPLER_NAMES_ENUM: type, comptime GPU_VERTEX_BUFFER_NAMES_ENUM: type) type {
+pub fn ShaderRegister(comptime UNIFORM_NAMES_ENUM: type, comptime STORAGE_BUFFER_NAMES_ENUM: type, comptime TEXTURE_NAMES_ENUM: type, comptime SAMPLER_NAMES_ENUM: type) type {
     return union(RenderLinkageRegisterKind) {
         SAMPLED_TEXTURE: ReadOnlySampledTextureRegister(TEXTURE_NAMES_ENUM, SAMPLER_NAMES_ENUM),
         STORAGE_TEXTURE: ReadOnlyStorageTextureRegister(TEXTURE_NAMES_ENUM),
         STORAGE_BUFFER: StorageBufferRegister(STORAGE_BUFFER_NAMES_ENUM),
         UNIFORM_BUFFER: UniformRegister(UNIFORM_NAMES_ENUM),
-        VERTEX_BUFFER: VertexBufferRegister(GPU_VERTEX_BUFFER_NAMES_ENUM),
     };
 }
 
-pub fn VertexShaderLinkages(comptime VERTEX_SHADER_NAMES_ENUM: type, comptime UNIFORM_NAMES_ENUM: type, comptime STORAGE_BUFFER_NAMES_ENUM: type, comptime TEXTURE_NAMES_ENUM: type, comptime SAMPLER_NAMES_ENUM: type, comptime GPU_VERTEX_BUFFER_NAMES_ENUM: type) type {
+pub fn VertexShaderDefinition(comptime VERTEX_SHADER_NAMES_ENUM: type, comptime UNIFORM_NAMES_ENUM: type, comptime STORAGE_BUFFER_NAMES_ENUM: type, comptime TEXTURE_NAMES_ENUM: type, comptime SAMPLER_NAMES_ENUM: type, comptime GPU_VERTEX_BUFFER_NAMES_ENUM: type) type {
     return struct {
         vertex_shader: VERTEX_SHADER_NAMES_ENUM,
         /// The input struct type for the shader
@@ -521,7 +520,7 @@ pub fn VertexShaderLinkages(comptime VERTEX_SHADER_NAMES_ENUM: type, comptime UN
     };
 }
 
-pub fn FragmentShaderLinkages(comptime FRAGMENT_SHADER_NAMES_ENUM: type, comptime UNIFORM_NAMES_ENUM: type, comptime STORAGE_BUFFER_NAMES_ENUM: type, comptime TEXTURE_NAMES_ENUM: type, comptime SAMPLER_NAMES_ENUM: type, comptime GPU_VERTEX_BUFFER_NAMES_ENUM: type) type {
+pub fn FragmentShaderDefinition(comptime FRAGMENT_SHADER_NAMES_ENUM: type, comptime UNIFORM_NAMES_ENUM: type, comptime STORAGE_BUFFER_NAMES_ENUM: type, comptime TEXTURE_NAMES_ENUM: type, comptime SAMPLER_NAMES_ENUM: type, comptime GPU_VERTEX_BUFFER_NAMES_ENUM: type) type {
     return struct {
         fragment_shader: FRAGMENT_SHADER_NAMES_ENUM,
         /// The input struct type for the shader
@@ -571,7 +570,7 @@ pub const ShaderStage = enum(u8) {
     }
 };
 
-pub fn RenderPipelineShadersInput(comptime PIPLEINE_NAMES: type, comptime VERTEX_SHADER_NAMES: type, comptime FRAGMENT_SHADER_NAMES: type) type {
+pub fn RenderPipelineDefinition(comptime PIPLEINE_NAMES: type, comptime VERTEX_SHADER_NAMES: type, comptime FRAGMENT_SHADER_NAMES: type) type {
     return struct {
         pipeline: PIPLEINE_NAMES,
         vertex: VERTEX_SHADER_NAMES,
@@ -588,6 +587,23 @@ pub fn RenderPipelineShaders(comptime VERTEX_SHADER_NAMES: type, comptime FRAGME
         fragment: FRAGMENT_SHADER_NAMES,
     };
 }
+
+pub const TypeAndFields = struct {
+    type: type,
+    fields: type,
+};
+
+pub const VertexShaderUserInput = struct {
+    /// This is the type that is being sent from the
+    /// application to the GPU, regardless of what
+    /// the GPU will interpret it as
+    cpu_type: type,
+    /// The vertex location this type will be sent to.
+    ///
+    /// This should/must be a user provided location, eg
+    /// `layout(location = #)` (GLSL) or `TEXCOORD#` (HLSL)
+    location: u32,
+};
 
 /// This object defines a comptime type with an API to instantiate and control
 /// the entire graphics system with more convenient and carefully controlled
@@ -619,98 +635,109 @@ pub fn GraphicsController(
     /// An enum with tag names for each unique texture *sampler* used in application
     comptime SAMPLER_NAMES_ENUM: type,
     /// An enum with tag names for each unique transfer buffer used in application
+    ///
+    /// Transfer buffers are used to move data from the Application to the GPU
     comptime TRANSFER_BUFFER_NAMES_ENUM: type,
     /// An enum with tag names for each unique vertex buffer used in application
     ///
-    /// These are the data buffers holding one or more vertex attributes
-    ///
-    /// This is not the same as `GPU_VERTEX_STRUCT_NAMES_ENUM`, since a vertex
-    /// struct (the object/slice actually passed to the vertex shader) can
-    /// be mapped/built from *multiple* vertex buffers via the `buffer_slot` field on
-    /// `GPU_VertexAttribute`
+    /// These are the data buffers holding one or more vertex attributes, and more than
+    /// one vertex buffer can feed a single vertex shader struct/input, if desired
     comptime GPU_VERTEX_BUFFER_NAMES_ENUM: type,
-    /// An enum with tag names for each unique vertex struct used in application
+    /// An enum with tag names for each unique shader struct used in the application
     ///
-    /// These are the actual object models passed to the vertex shaders as input parameters
+    /// These are the actual object models passed to the shaders as input/output parameters,
+    /// and in the case of vertex structs, they can be fed data from more than one vertex buffer, if
+    /// desired
     ///
-    /// Each tag name must exactly match a field name in `STRUCT_OF_VERTEX_STRUCT_TYPES`
-    ///
-    /// This is not the same as `GPU_VERTEX_BUFFER_NAMES_ENUM`, since a vertex
-    /// struct (the object/bytes actually passed to the vertex shader) can
-    /// be mapped/built from *multiple* vertex buffers via the `buffer_slot` field on
-    /// `GPU_VertexAttribute`
-    ///
-    ///  ### Example
-    /// ```zig
-    /// pub const VertA = struct { color: u32 };
-    /// pub const VertB = struct { color: u32 };
-    /// pub const VertNames = enum { // <----- THIS
-    ///     VertA,
-    ///     VertB,
-    /// };
-    /// pub const VertStructs = struct {
-    ///     VertA: VertA,
-    ///     VertB: VertB,
-    /// };
-    /// ```
-    comptime GPU_VERTEX_STRUCT_NAMES_ENUM: type,
-    /// This should have each unique `SDL3_ShaderContract.StreamStruct(...)` vertex *TYPE* type as an individial field
-    /// (not an instance of the type, as instances will be read/written from a stream)
-    ///
-    /// Each field name must exactly match a tag name in `GPU_VERTEX_STRUCT_NAMES_ENUM`
+    /// Each tag name must exactly match a field name in `STRUCT_OF_SHADER_STRUCT_TYPES`
     ///
     /// ### Example
     /// ```zig
-    /// pub const VertA = struct { color: u32 };
-    /// pub const VertB = struct { color: u32 };
-    /// pub const VertNames = enum {
-    ///     VertA,
-    ///     VertB,
+    /// pub const VertexIn = struct { pos: Vec3(f32), color: u32 };
+    /// pub const VertexOutFragIn = struct { pos: Vec3(f32), color: u32 };
+    /// pub const FragOut = struct { color: Vec4(f32) };
+    /// pub const ShaderStructNames = enum { // <----- THIS
+    ///     VertexIn,
+    ///     VertexOutFragIn,
+    ///     FragOut
     /// };
-    /// pub const VertStructs = struct { // <----- THIS
-    ///     VertA: VertA,
-    ///     VertB: VertB,
+    /// pub const ShaderStructs = struct {
+    ///     VertexIn: type = VertexIn,
+    ///     VertexOutFragIn: type = VertexOutFragIn,
+    ///     FragOut: type = FragOut,
     /// };
     /// ```
-    comptime STRUCT_OF_VERTEX_STRUCT_TYPES: type,
+    comptime GPU_SHADER_STRUCT_NAMES_ENUM: type,
+    /// This should have each unique shader struct *TYPE* as an individial field
+    /// (not an instance of the type, as instances will be read/written from a stream)
+    ///
+    /// Each field name must exactly match a tag name in `GPU_SHADER_STRUCT_NAMES_ENUM`
+    ///
+    /// ### Example
+    /// ```zig
+    /// pub const VertexIn = struct { pos: Vec3(f32), color: u32 };
+    /// pub const VertexOutFragIn = struct { pos: Vec3(f32), color: u32 };
+    /// pub const FragOut = struct { color: Vec4(f32) };
+    /// pub const ShaderStructNames = enum {
+    ///     VertexIn,
+    ///     VertexOutFragIn,
+    ///     FragOut
+    /// };
+    /// pub const ShaderStructs = struct { // <----- THIS
+    ///     VertexIn: type = VertexIn,
+    ///     VertexOutFragIn: type = VertexOutFragIn,
+    ///     FragOut: type = FragOut,
+    /// };
+    /// ```
+    comptime STRUCT_OF_SHADER_STRUCT_TYPES: type,
     /// This MUST be a struct type where each field name exactly matches an enum tag
-    /// in `GPU_VERTEX_STRUCT_NAMES_ENUM`, and the value of that field is
+    /// in `GPU_SHADER_STRUCT_NAMES_ENUM`, and the value of that field is
     /// an enum TYPE where each enum tag name is the name of a *user supplied* field
-    /// to the matching vertex struct (eg. not an HLSL system value semantic, or GLSL builtin location, etc.)
+    /// to the matching shader struct (eg. not an HLSL system value semantic, or GLSL builtin location, etc.)
     ///
     /// These are mapped directly to `GPU_VertexAttribute` inputs during initialization
     ///
     /// ### Example
     /// ```zig
-    /// const VertA = const {
-    ///     color: Vec4, // `layout(location = 1)` or `TEXCOORD1`
-    ///     pos: Vec3, // `layout(location = 0)` or `TEXCOORD0`
-    ///     normal: Vec3, // `layout(location = 2)` or `TEXCOORD2`
+    /// const VertexInA = const {
+    ///     color: u32, // `layout(location = 1)` or `TEXCOORD1`
+    ///     pos: Vec3(f32), // `layout(location = 0)` or `TEXCOORD0`
+    ///     normal: Vec3(f32), // `layout(location = 2)` or `TEXCOORD2`
     /// };
-    /// const VertUserFieldsA = enum {
+    /// const VertexInFieldsA = enum {
     ///     pos = 0, // `layout(location = 0)` or `TEXCOORD0`
     ///     color = 1, // `layout(location = 1)` or `TEXCOORD1`
     ///     normal = 2, // `layout(location = 2)` or `TEXCOORD2`
     /// };
-    /// const VertB = const {
-    ///     color: Vec4, // `layout(location = 1)` or `TEXCOORD1`
-    ///     pos: Vec3, // `layout(location = 0)` or `TEXCOORD0`
+    /// const VertexInB = const {
+    ///     color: Vec4(f32), // `layout(location = 1)` or `TEXCOORD1`
+    ///     pos: Vec3(f32), // `layout(location = 0)` or `TEXCOORD0`
     ///     instance_id: u32, // system/builtin supplied
     /// };
-    /// const VertUserFieldsB = enum {
+    /// const VertexInB_Fiedls = enum {
     ///     pos = 0, // `layout(location = 0)` or `TEXCOORD0`
     ///     color = 1, // `layout(location = 1)` or `TEXCOORD1`
     /// };
-    /// const VertNames = enum {
-    ///     VertA,
-    ///     VertB,
+    /// // ... more types and field enums
+    /// const ShaderStructNames = enum {
+    ///     VertexInA,
+    ///     VertexInB,
+    ///     // ... more struct names
     /// };
-    /// const VertStructFieldNames = struct { // <----- THIS
-    ///     VertA: type = VertUserFieldsA,
-    ///     VertB: type = VertUserFieldsB,
+    /// const VertStructFieldMaps = struct { // <----- THIS
+    ///     pub const VertexInA = TypeAndFields{
+    ///         .type = VertexInA,
+    ///         .fields = VertexInA_Fields,
+    ///     };
+    ///     pub const VertexInB = TypeAndFields{
+    ///         .type = VertexInB,
+    ///         .fields = VertexInB_Fields,
+    ///     };
+    ///     // ... more TypeAndFields{} field maps
     /// };
     /// ```
-    comptime STRUCT_OF_VERTEX_STRUCT_NAMES_WITH_USER_SUPPLIED_VERTEX_FIELD_NAMES_AND_LOCATIONS_ENUMS: type,
+    // CHECKPOINT make this the single source of truth for shader struct data
+    comptime STRUCT_OF_CONST_SHADER_STRUCT_TYPES_AND_FIELDS: type,
     /// An enum with tag names for each unique uniform struct used in application
     comptime GPU_UNIFORM_NAMES_ENUM: type,
     /// This should have each unique `SDL3_ShaderContract.StorageStruct(...)` uniform type as an individial field
@@ -726,12 +753,12 @@ pub fn GraphicsController(
     ///
     /// Each field name must exactly match a tag name in `GPU_STORAGE_BUFFER_NAMES`
     comptime STRUCT_OF_STORAGE_BUFFER_STRUCT_TYPES: type,
-    /// A list of all render pipelines and their associated vertex/fragment shaders
-    comptime RENDER_PIPELINE_SHADERS: [Types.enum_defined_field_count(RENDER_PIPELINE_NAMES_ENUM)]RenderPipelineShadersInput(RENDER_PIPELINE_NAMES_ENUM, VERTEX_SHADER_NAMES_ENUM, FRAGMENT_SHADER_NAMES_ENUM),
     /// A list of all the resource bindings for each vertex shader in the application
-    comptime VERTEX_SHADER_LINKAGES: [Types.enum_defined_field_count(VERTEX_SHADER_NAMES_ENUM)]VertexShaderLinkages(VERTEX_SHADER_NAMES_ENUM, GPU_UNIFORM_NAMES_ENUM, GPU_STORAGE_BUFFER_NAMES_ENUM, TEXTURE_NAMES_ENUM, SAMPLER_NAMES_ENUM, GPU_VERTEX_BUFFER_NAMES_ENUM),
+    comptime VERTEX_SHADER_DEFINITIONS: [Types.enum_defined_field_count(VERTEX_SHADER_NAMES_ENUM)]VertexShaderDefinition(VERTEX_SHADER_NAMES_ENUM, GPU_UNIFORM_NAMES_ENUM, GPU_STORAGE_BUFFER_NAMES_ENUM, TEXTURE_NAMES_ENUM, SAMPLER_NAMES_ENUM, GPU_VERTEX_BUFFER_NAMES_ENUM),
     /// A list of all the resource bindings for each fragment shader in the application
-    comptime FRAGMENT_SHADER_LINKAGES: [Types.enum_defined_field_count(FRAGMENT_SHADER_NAMES_ENUM)]FragmentShaderLinkages(FRAGMENT_SHADER_NAMES_ENUM, GPU_UNIFORM_NAMES_ENUM, GPU_STORAGE_BUFFER_NAMES_ENUM, TEXTURE_NAMES_ENUM, SAMPLER_NAMES_ENUM, GPU_VERTEX_BUFFER_NAMES_ENUM),
+    comptime FRAGMENT_SHADER_DEFINITIONS: [Types.enum_defined_field_count(FRAGMENT_SHADER_NAMES_ENUM)]FragmentShaderDefinition(FRAGMENT_SHADER_NAMES_ENUM, GPU_UNIFORM_NAMES_ENUM, GPU_STORAGE_BUFFER_NAMES_ENUM, TEXTURE_NAMES_ENUM, SAMPLER_NAMES_ENUM, GPU_VERTEX_BUFFER_NAMES_ENUM),
+    /// A list of all render pipelines and their associated vertex/fragment shaders
+    comptime RENDER_PIPELINE_DEFINITIONS: [Types.enum_defined_field_count(RENDER_PIPELINE_NAMES_ENUM)]RenderPipelineDefinition(RENDER_PIPELINE_NAMES_ENUM, VERTEX_SHADER_NAMES_ENUM, FRAGMENT_SHADER_NAMES_ENUM),
 ) type {
     assert_with_reason(Types.type_is_enum(WINDOW_NAMES_ENUM) and Types.all_enum_values_start_from_zero_with_no_gaps(WINDOW_NAMES_ENUM), @src(), "type `WINDOW_NAMES_ENUM` MUST be an enum type with tag values starting at zero and no gaps between 0 and the max tag value, got type `{s}`", .{@typeName(WINDOW_NAMES_ENUM)});
     assert_with_reason(Types.type_is_enum(VERTEX_SHADER_NAMES_ENUM) and Types.all_enum_values_start_from_zero_with_no_gaps(VERTEX_SHADER_NAMES_ENUM), @src(), "type `VERTEX_SHADER_NAMES_ENUM` MUST be an enum type with tag values starting at zero and no gaps between 0 and the max tag value, got type `{s}`", .{@typeName(VERTEX_SHADER_NAMES_ENUM)});
@@ -741,20 +768,20 @@ pub fn GraphicsController(
     assert_with_reason(Types.type_is_enum(SAMPLER_NAMES_ENUM) and Types.all_enum_values_start_from_zero_with_no_gaps(SAMPLER_NAMES_ENUM), @src(), "type `SAMPLER_NAMES_ENUM` MUST be an enum type with tag values starting at zero and no gaps between 0 and the max tag value, got type `{s}`", .{@typeName(SAMPLER_NAMES_ENUM)});
     assert_with_reason(Types.type_is_enum(TRANSFER_BUFFER_NAMES_ENUM) and Types.all_enum_values_start_from_zero_with_no_gaps(TRANSFER_BUFFER_NAMES_ENUM), @src(), "type `TRANSFER_BUFFER_NAMES_ENUM` MUST be an enum type with tag values starting at zero and no gaps between 0 and the max tag value, got type `{s}`", .{@typeName(TRANSFER_BUFFER_NAMES_ENUM)});
     assert_with_reason(Types.type_is_enum(GPU_VERTEX_BUFFER_NAMES_ENUM) and Types.all_enum_values_start_from_zero_with_no_gaps(GPU_VERTEX_BUFFER_NAMES_ENUM), @src(), "type `GPU_VERTEX_BUFFER_NAMES_ENUM` MUST be an enum type with tag values starting at zero and no gaps between 0 and the max tag value, got type `{s}`", .{@typeName(GPU_VERTEX_BUFFER_NAMES_ENUM)});
-    assert_with_reason(Types.type_is_enum(GPU_VERTEX_STRUCT_NAMES_ENUM) and Types.all_enum_values_start_from_zero_with_no_gaps(GPU_VERTEX_STRUCT_NAMES_ENUM), @src(), "type `GPU_VERTEX_STRUCT_NAMES_ENUM` MUST be an enum type with tag values starting at zero and no gaps between 0 and the max tag value, got type `{s}`", .{@typeName(GPU_VERTEX_STRUCT_NAMES_ENUM)});
-    assert_with_reason(Types.type_is_struct_with_all_fields_same_type(STRUCT_OF_VERTEX_STRUCT_TYPES, type), @src(), "type `STRUCT_OF_VERTEX_STRUCT_TYPES` must be a struct type that holds all concrete types of the storage buffer structs as fields, got type `{s}`", .{@typeName(STRUCT_OF_VERTEX_STRUCT_TYPES)});
-    assert_with_reason(Types.all_enum_names_match_all_object_field_names(GPU_VERTEX_STRUCT_NAMES_ENUM, STRUCT_OF_VERTEX_STRUCT_TYPES), @src(), "`GPU_VERTEX_STRUCT_NAMES_ENUM` must have the same number of tags as the number of fields in `STRUCT_OF_VERTEX_STRUCT_TYPES`, and each enum tag NAME in `GPU_VERTEX_STRUCT_NAMES_ENUM` must EXACTLY match a field in `STRUCT_OF_VERTEX_STRUCT_TYPES`", .{});
+    assert_with_reason(Types.type_is_enum(GPU_SHADER_STRUCT_NAMES_ENUM) and Types.all_enum_values_start_from_zero_with_no_gaps(GPU_SHADER_STRUCT_NAMES_ENUM), @src(), "type `GPU_SHADER_STRUCT_NAMES_ENUM` MUST be an enum type with tag values starting at zero and no gaps between 0 and the max tag value, got type `{s}`", .{@typeName(GPU_SHADER_STRUCT_NAMES_ENUM)});
+    assert_with_reason(Types.type_is_struct_with_all_fields_same_type(STRUCT_OF_SHADER_STRUCT_TYPES, type), @src(), "type `STRUCT_OF_SHADER_STRUCT_TYPES` must be a struct type that holds all concrete types of the storage buffer structs as fields, got type `{s}`", .{@typeName(STRUCT_OF_SHADER_STRUCT_TYPES)});
+    assert_with_reason(Types.all_enum_names_match_all_object_field_names(GPU_SHADER_STRUCT_NAMES_ENUM, STRUCT_OF_SHADER_STRUCT_TYPES), @src(), "`GPU_SHADER_STRUCT_NAMES_ENUM` must have the same number of tags as the number of fields in `STRUCT_OF_SHADER_STRUCT_TYPES`, and each enum tag NAME in `GPU_SHADER_STRUCT_NAMES_ENUM` must EXACTLY match a field in `STRUCT_OF_SHADER_STRUCT_TYPES`", .{});
     assert_with_reason(Types.type_is_enum(GPU_UNIFORM_NAMES_ENUM) and Types.all_enum_values_start_from_zero_with_no_gaps(GPU_UNIFORM_NAMES_ENUM), @src(), "type `UNIFORM_NAMES_ENUM` MUST be an enum type with tag values starting at zero and no gaps between 0 and the max tag value, got type `{s}`", .{@typeName(GPU_UNIFORM_NAMES_ENUM)});
     assert_with_reason(Types.type_is_struct(STRUCT_OF_UNIFORM_STRUCTS), @src(), "type `STRUCT_OF_UNIFORM_STRUCTS` must be a struct type that holds all unique instances of the needed uniform structs as fields, got type `{s}`", .{@typeName(STRUCT_OF_UNIFORM_STRUCTS)});
     assert_with_reason(Types.all_enum_names_match_all_object_field_names(GPU_UNIFORM_NAMES_ENUM, STRUCT_OF_UNIFORM_STRUCTS), @src(), "`UNIFORM_NAMES_ENUM` must have the same number of tags as the number of fields in `STRUCT_OF_UNIFORM_STRUCTS`, and each enum tag NAME in `UNIFORM_NAMES_ENUM` must EXACTLY match a field in `STRUCT_OF_UNIFORM_STRUCTS`", .{});
     assert_with_reason(Types.type_is_enum(GPU_STORAGE_BUFFER_NAMES_ENUM) and Types.all_enum_values_start_from_zero_with_no_gaps(GPU_STORAGE_BUFFER_NAMES_ENUM), @src(), "type `GPU_STORAGE_BUFFER_NAMES_ENUM` MUST be an enum type with tag values starting at zero and no gaps between 0 and the max tag value, got type `{s}`", .{@typeName(GPU_STORAGE_BUFFER_NAMES_ENUM)});
     assert_with_reason(Types.type_is_struct_with_all_fields_same_type(STRUCT_OF_STORAGE_BUFFER_STRUCT_TYPES, type), @src(), "type `STRUCT_OF_STORAGE_BUFFER_STRUCT_TYPES` must be a struct type that holds all concrete types of the storage buffer structs as fields, got type `{s}`", .{@typeName(STRUCT_OF_STORAGE_BUFFER_STRUCT_TYPES)});
     assert_with_reason(Types.all_enum_names_match_all_object_field_names(GPU_STORAGE_BUFFER_NAMES_ENUM, STRUCT_OF_STORAGE_BUFFER_STRUCT_TYPES), @src(), "`GPU_STORAGE_BUFFER_NAMES_ENUM` must have the same number of tags as the number of fields in `STRUCT_OF_STORAGE_BUFFER_STRUCT_TYPES`, and each enum tag NAME in `GPU_STORAGE_BUFFER_NAMES_ENUM` must EXACTLY match a field in `STRUCT_OF_STORAGE_BUFFER_STRUCT_TYPES`", .{});
-    assert_with_reason( //
-        Types.type_is_union(STRUCT_OF_VERTEX_STRUCT_NAMES_WITH_USER_SUPPLIED_VERTEX_FIELD_NAMES_AND_LOCATIONS_ENUMS) and
-            Types.all_enum_names_match_all_object_field_names(GPU_VERTEX_STRUCT_NAMES_ENUM, STRUCT_OF_VERTEX_STRUCT_NAMES_WITH_USER_SUPPLIED_VERTEX_FIELD_NAMES_AND_LOCATIONS_ENUMS) and
-            Types.type_is_union_with_all_fields_an_enum_type_with_all_tag_values_from_0_to_max_with_no_gaps(STRUCT_OF_VERTEX_STRUCT_NAMES_WITH_USER_SUPPLIED_VERTEX_FIELD_NAMES_AND_LOCATIONS_ENUMS), //
-        @src(), "`UNION_OF_VERTEX_BUFFER_NAMES_WITH_USER_SUPPLIED_VERTEX_FIELD_NAMES_ENUM` must be a union type with enum tag type `GPU_VERTEX_STRUCT_NAMES_ENUM` and where each field has an enum type that represents the names of all user-provided fields in that struct and all tag values ranging from 0 to the max value with no gaps, got type `{s}`", .{@typeName(STRUCT_OF_VERTEX_STRUCT_NAMES_WITH_USER_SUPPLIED_VERTEX_FIELD_NAMES_AND_LOCATIONS_ENUMS)});
+    // assert_with_reason( //
+    //     Types.type_is_union(STRUCT_OF_VERTEX_STRUCT_NAMES_WITH_USER_SUPPLIED_VERTEX_FIELD_NAMES_AND_LOCATIONS_ENUMS) and
+    //         Types.all_enum_names_match_all_object_field_names(GPU_SHADER_STRUCT_NAMES_ENUM, STRUCT_OF_VERTEX_STRUCT_NAMES_WITH_USER_SUPPLIED_VERTEX_FIELD_NAMES_AND_LOCATIONS_ENUMS) and
+    //         Types.type_is_union_with_all_fields_an_enum_type_with_all_tag_values_from_0_to_max_with_no_gaps(STRUCT_OF_VERTEX_STRUCT_NAMES_WITH_USER_SUPPLIED_VERTEX_FIELD_NAMES_AND_LOCATIONS_ENUMS), //
+    // @src(), "`UNION_OF_VERTEX_BUFFER_NAMES_WITH_USER_SUPPLIED_VERTEX_FIELD_NAMES_ENUM` must be a union type with enum tag type `GPU_SHADER_STRUCT_NAMES_ENUM` and where each field has an enum type that represents the names of all user-provided fields in that struct and all tag values ranging from 0 to the max value with no gaps, got type `{s}`", .{@typeName(STRUCT_OF_VERTEX_STRUCT_NAMES_WITH_USER_SUPPLIED_VERTEX_FIELD_NAMES_AND_LOCATIONS_ENUMS)});
     const NUM_VERTEX_SHADERS = Types.enum_defined_field_count(VERTEX_SHADER_NAMES_ENUM);
     const NUM_FRAGMENT_SHADERS = Types.enum_defined_field_count(FRAGMENT_SHADER_NAMES_ENUM);
     const _NUM_RENDER_PIPELINES = Types.enum_defined_field_count(RENDER_PIPELINE_NAMES_ENUM);
@@ -765,7 +792,7 @@ pub fn GraphicsController(
     // ORGANISE PIPELINE TO SHADERS MAP
     comptime var pipeline_shaders: [_NUM_RENDER_PIPELINES]RenderPipelineShaders(VERTEX_SHADER_NAMES_ENUM, FRAGMENT_SHADER_NAMES_ENUM) = undefined;
     comptime var pipeline_shaders_mapped: [_NUM_RENDER_PIPELINES]bool = @splat(false);
-    inline for (RENDER_PIPELINE_SHADERS) |shader_map| {
+    inline for (RENDER_PIPELINE_DEFINITIONS) |shader_map| {
         const pipe_idx = @intFromEnum(shader_map.pipeline);
         assert_with_reason(pipeline_shaders_mapped[pipe_idx] == false, @src(), "render pipeline `{s}` was already mapped to its shaders once, attmepted a second time", .{@tagName(shader_map.pipeline)});
         pipeline_shaders_mapped[pipe_idx] = true;
@@ -781,8 +808,8 @@ pub fn GraphicsController(
         uniforms_allowed_in_vertex_shaders_len: [NUM_VERTEX_SHADERS]u32 = 0,
         uniforms_allowed_in_fragment_shaders: [NUM_FRAGMENT_SHADERS][_NUM_UNIFORM_STRUCTS]AllowedResource = @splat(@splat(AllowedResource{})),
         uniforms_allowed_in_fragment_shaders_len: [NUM_FRAGMENT_SHADERS]u32 = 0,
-        vert_buffers_allowed_in_vertex_shaders: [NUM_VERTEX_SHADERS][_NUM_VERT_BUFFERS]AllowedResource = @splat(@splat(AllowedResource{})),
-        vert_buffers_allowed_in_vertex_shaders_len: [NUM_VERTEX_SHADERS]u32 = 0,
+        // vert_buffers_allowed_in_vertex_shaders: [NUM_VERTEX_SHADERS][_NUM_VERT_BUFFERS]AllowedResource = @splat(@splat(AllowedResource{})),
+        // vert_buffers_allowed_in_vertex_shaders_len: [NUM_VERTEX_SHADERS]u32 = 0,
         storage_buffers_allowed_in_vertex_shaders: [NUM_VERTEX_SHADERS][_NUM_STORAGE_BUFFERS]AllowedResource = @splat(@splat(AllowedResource{})),
         storage_buffers_allowed_in_vertex_shaders_len: [NUM_VERTEX_SHADERS]u32 = 0,
         storage_buffers_allowed_in_fragment_shaders: [NUM_FRAGMENT_SHADERS][_NUM_STORAGE_BUFFERS]AllowedResource = @splat(@splat(AllowedResource{})),
@@ -807,12 +834,12 @@ pub fn GraphicsController(
         storage_registers_used_this_shader_auto_count: u32 = 0,
         storage_registers_used_this_shader_manual_count: u32 = 0,
         next_storage_register_to_check: u32 = 0,
-        vertex_registers_used_this_pipeline: [_NUM_VERT_BUFFERS]RegisterWithSource = undefined,
-        vertex_registers_used_this_pipeline_len: u32 = 0,
-        vertex_registers_used_this_pipeline_max: u32 = 0,
-        vertex_registers_used_this_pipeline_auto_count: u32 = 0,
-        vertex_registers_used_this_pipeline_manual_count: u32 = 0,
-        next_vertex_register_to_check: u32 = 0,
+        // vertex_registers_used_this_pipeline: [_NUM_VERT_BUFFERS]RegisterWithSource = undefined,
+        // vertex_registers_used_this_pipeline_len: u32 = 0,
+        // vertex_registers_used_this_pipeline_max: u32 = 0,
+        // vertex_registers_used_this_pipeline_auto_count: u32 = 0,
+        // vertex_registers_used_this_pipeline_manual_count: u32 = 0,
+        // next_vertex_register_to_check: u32 = 0,
 
         fn reset_for_next_linkage(self: *SELF_VARS) void {
             self.uniform_registers_used_this_shader_len = 0;
@@ -825,18 +852,25 @@ pub fn GraphicsController(
             self.storage_registers_used_this_shader_auto_count = 0;
             self.storage_registers_used_this_shader_manual_count = 0;
             self.next_storage_register_to_check = 0;
-            self.vertex_registers_used_this_pipeline_len = 0;
-            self.vertex_registers_used_this_pipeline_max = 0;
-            self.vertex_registers_used_this_pipeline_auto_count = 0;
-            self.vertex_registers_used_this_pipeline_manual_count = 0;
-            self.next_vertex_register_to_check = 0;
+            // self.vertex_registers_used_this_pipeline_len = 0;
+            // self.vertex_registers_used_this_pipeline_max = 0;
+            // self.vertex_registers_used_this_pipeline_auto_count = 0;
+            // self.vertex_registers_used_this_pipeline_manual_count = 0;
+            // self.next_vertex_register_to_check = 0;
         }
     };
     comptime var vars = VARS{};
     // COMPTIME SUB-ROUTINES ONLY NEEDED FOR THIS BLOCK
     const SUB_ROUTINE = struct {
         const SELF_SUB_ROUTINE = @This();
-        fn process_uniform_linkage(comptime v: *VARS, comptime shader_idx: u32, comptime shader_name: []const u8, comptime link: UniformRegister(GPU_UNIFORM_NAMES_ENUM), ridx: u32, stage: ShaderStage) void {
+        fn process_uniform_linkage(
+            comptime v: *VARS,
+            comptime shader_idx: u32,
+            comptime shader_name: []const u8,
+            comptime link: UniformRegister(GPU_UNIFORM_NAMES_ENUM),
+            comptime ridx: u32,
+            comptime stage: ShaderStage,
+        ) void {
             const uni_idx = @intFromEnum(link.uniform);
             switch (stage) {
                 .VERTEX => {
@@ -872,7 +906,17 @@ pub fn GraphicsController(
             v.uniform_registers_used_this_shader[v.uniform_registers_used_this_shader_len] = reg_source;
             v.uniform_registers_used_this_shader_len += 1;
         }
-        fn process_storage_register(comptime v: *VARS, comptime shader_idx: u32, comptime shader_name: []const u8, comptime reg: StorageRegisterWithSourceAndKind, comptime tag_name: []const u8, comptime tag_idx: ?u32, comptime stage: ShaderStage, comptime tex: ?TEXTURE_NAMES_ENUM, comptime samp: ?SAMPLER_NAMES_ENUM) void {
+        fn process_storage_register(
+            comptime v: *VARS,
+            comptime shader_idx: u32,
+            comptime shader_name: []const u8,
+            comptime reg: StorageRegisterWithSourceAndKind,
+            comptime tag_name: []const u8,
+            comptime tag_idx: ?u32,
+            comptime stage: ShaderStage,
+            comptime tex: ?TEXTURE_NAMES_ENUM,
+            comptime samp: ?SAMPLER_NAMES_ENUM,
+        ) void {
             switch (reg.register) {
                 .MANUAL => |reg_num| {
                     for (v.storage_registers_used_this_shader[0..v.storage_registers_used_this_shader_len]) |used_register| {
@@ -942,58 +986,66 @@ pub fn GraphicsController(
             v.storage_registers_used_this_shader[v.storage_registers_used_this_shader_len] = reg;
             v.storage_registers_used_this_shader_len += 1;
         }
-        fn process_storage_buffer_linkage(comptime v: *VARS, comptime pipe: RENDER_PIPELINE_NAMES_ENUM, comptime pipe_idx: Types.enum_tag_type(RENDER_PIPELINE_NAMES_ENUM), comptime link: StorageBufferRegister(GPU_STORAGE_BUFFER_NAMES_ENUM), comptime ridx: u32, comptime stage: ShaderStage) void {
+        fn process_storage_buffer_linkage(
+            comptime v: *VARS,
+            comptime shader_idx: u32,
+            comptime shader_name: []const u8,
+            comptime link: StorageBufferRegister(GPU_STORAGE_BUFFER_NAMES_ENUM),
+            comptime ridx: u32,
+            comptime stage: ShaderStage,
+        ) void {
             const buf_idx = @intFromEnum(link.buffer);
             if (stage == .VERTEX) {
-                assert_with_reason(v.storage_buffers_allowed_in_this_pipeline[pipe_idx][buf_idx].bind_in_vertex == false, @src(), "storage buffer `{s}` was registered more than once for pipeline `{s}` vertex stage", .{ @tagName(link.buffer), @tagName(pipe) });
-                v.storage_buffers_allowed_in_this_pipeline[pipe_idx][buf_idx].bind_in_vertex = true;
-                if (v.storage_buffers_allowed_in_this_pipeline[pipe_idx][buf_idx].bind_in_fragment == false) {
-                    v.storage_buffers_allowed_in_this_pipeline_len[pipe_idx] += 1;
-                }
+                assert_with_reason(v.storage_buffers_allowed_in_vertex_shaders[shader_idx][buf_idx].allowed == false, @src(), "storage buffer `{s}` was registered more than once for vertex shader `{s}`", .{ @tagName(link.buffer), shader_name });
+                v.storage_buffers_allowed_in_vertex_shaders[shader_idx][buf_idx].allowed = true;
             } else {
-                assert_with_reason(v.storage_buffers_allowed_in_this_pipeline[pipe_idx][buf_idx].bind_in_fragment == false, @src(), "storage buffer `{s}` was registered more than once for pipeline `{s}` fragment stage", .{ @tagName(link.buffer), @tagName(pipe) });
-                v.storage_buffers_allowed_in_this_pipeline[pipe_idx][buf_idx].bind_in_fragment = true;
-                if (v.storage_buffers_allowed_in_this_pipeline[pipe_idx][buf_idx].bind_in_vertex == false) {
-                    v.storage_buffers_allowed_in_this_pipeline_len[pipe_idx] += 1;
-                }
+                assert_with_reason(v.storage_buffers_allowed_in_fragment_shaders[shader_idx][buf_idx].allowed == false, @src(), "storage buffer `{s}` was registered more than once for fragment shader `{s}`", .{ @tagName(link.buffer), shader_name });
+                v.storage_buffers_allowed_in_fragment_shaders[shader_idx][buf_idx].allowed = true;
             }
-            const reg: Register = switch (stage) {
-                .VERTEX => link.vertex_register.register,
-                .FRAGMENT => link.fragment_register.register,
-            };
-            const reg_source = StorageRegisterWithSourceAndKind{ .register = reg, .source = @intCast(ridx), .kind = .STORAGE_BUFFER };
-            SELF_SUB_ROUTINE.process_storage_register(v, pipe, pipe_idx, reg_source, @tagName(link.buffer), @intCast(@intFromEnum(link.buffer)), ridx, stage, null, null);
+            const reg_source = StorageRegisterWithSourceAndKind{ .register = link.register, .source = @intCast(ridx), .kind = .STORAGE_BUFFER };
+            SELF_SUB_ROUTINE.process_storage_register(v, shader_idx, shader_name, reg_source, @tagName(link.buffer), @intCast(@intFromEnum(link.buffer)), ridx, stage, null, null);
         }
-        fn process_storage_texture_linkage(comptime v: *VARS, comptime pipe: RENDER_PIPELINE_NAMES_ENUM, comptime pipe_idx: Types.enum_tag_type(RENDER_PIPELINE_NAMES_ENUM), comptime link: ReadOnlyStorageTextureRegister(TEXTURE_NAMES_ENUM), comptime ridx: u32, comptime stage: ShaderStage) void {
+        fn process_storage_texture_linkage(
+            comptime v: *VARS,
+            comptime shader_idx: u32,
+            comptime shader_name: []const u8,
+            comptime link: ReadOnlyStorageTextureRegister(TEXTURE_NAMES_ENUM),
+            comptime ridx: u32,
+            comptime stage: ShaderStage,
+        ) void {
             const tex_idx = @intFromEnum(link.texture);
             if (stage == .VERTEX) {
-                assert_with_reason(v.storage_textures_allowed_in_fragment_shaders[pipe_idx][tex_idx].bind_in_vertex == false, @src(), "texture `{s}` was registered for read-only storage more than once for pipeline `{s}` vertex stage", .{ @tagName(link.texture), @tagName(pipe) });
-                v.storage_textures_allowed_in_fragment_shaders[pipe_idx][tex_idx].bind_in_vertex = true;
-                if (v.storage_textures_allowed_in_fragment_shaders[pipe_idx][tex_idx].bind_in_fragment == false) {
-                    v.storage_textures_allowed_in_this_pipeline_len[pipe_idx] += 1;
-                }
+                assert_with_reason(v.storage_textures_allowed_in_vertex_shaders[shader_idx][tex_idx].allowed == false, @src(), "storage texture `{s}` was registered more than once for vertex shader `{s}`", .{ @tagName(link.texture), shader_name });
+                v.storage_textures_allowed_in_vertex_shaders[shader_idx][tex_idx].allowed = true;
             } else {
-                assert_with_reason(v.storage_textures_allowed_in_fragment_shaders[pipe_idx][tex_idx].bind_in_fragment == false, @src(), "texture `{s}` was registered for read-only storage more than once for pipeline `{s}` fragment stage", .{ @tagName(link.texture), @tagName(pipe) });
-                v.storage_textures_allowed_in_fragment_shaders[pipe_idx][tex_idx].bind_in_fragment = true;
-                if (v.storage_textures_allowed_in_fragment_shaders[pipe_idx][tex_idx].bind_in_vertex == false) {
-                    v.storage_textures_allowed_in_this_pipeline_len[pipe_idx] += 1;
-                }
+                assert_with_reason(v.storage_textures_allowed_in_fragment_shaders[shader_idx][tex_idx].allowed == false, @src(), "storage texture `{s}` was registered more than once for fragment shader `{s}`", .{ @tagName(link.texture), shader_name });
+                v.storage_textures_allowed_in_fragment_shaders[shader_idx][tex_idx].allowed = true;
             }
-            const reg: Register = switch (stage) {
-                .VERTEX => link.vertex_register.register,
-                .FRAGMENT => link.fragment_register.register,
-            };
-            const reg_source = StorageRegisterWithSourceAndKind{ .register = reg, .source = @intCast(ridx), .kind = .STORAGE_TEXTURE };
-            SELF_SUB_ROUTINE.process_storage_register(v, pipe, pipe_idx, reg_source, @tagName(link.buffer), @intCast(@intFromEnum(link.buffer)), ridx, stage, null, null);
+            const reg_source = StorageRegisterWithSourceAndKind{ .register = link.register, .source = @intCast(ridx), .kind = .STORAGE_BUFFER };
+            SELF_SUB_ROUTINE.process_storage_register(v, shader_idx, shader_name, reg_source, @tagName(link.buffer), @intCast(@intFromEnum(link.buffer)), ridx, stage, null, null);
         }
-        fn process_sample_pair_linkage(comptime v: *VARS, comptime shader_idx: u32, comptime shader_name: []const u8, comptime link: ReadOnlySampledTextureRegister(TEXTURE_NAMES_ENUM, SAMPLER_NAMES_ENUM), ridx: u32, stage: ShaderStage) void {
+        fn process_sample_pair_linkage(
+            comptime v: *VARS,
+            comptime shader_idx: u32,
+            comptime shader_name: []const u8,
+            comptime link: ReadOnlySampledTextureRegister(TEXTURE_NAMES_ENUM, SAMPLER_NAMES_ENUM),
+            comptime ridx: u32,
+            comptime stage: ShaderStage,
+        ) void {
             const reg_source = StorageRegisterWithSourceAndKind{ .register = link.register, .source = @intCast(ridx), .kind = .SAMPLED_PAIR };
             SELF_SUB_ROUTINE.process_storage_register(v, shader_idx, shader_name, reg_source, @tagName(link.sampler) ++ "__" ++ @tagName(link.texture), null, ridx, stage, link.texture, link.sampler);
         }
-        fn provision_auto_uniform_slots(comptime v: *VARS, comptime pipe: RENDER_PIPELINE_NAMES_ENUM, comptime pipe_idx: Types.enum_tag_type(RENDER_PIPELINE_NAMES_ENUM), comptime all_linkages: []const RenderPipelineLinkages(RENDER_PIPELINE_NAMES_ENUM, GPU_UNIFORM_NAMES_ENUM, GPU_STORAGE_BUFFER_NAMES_ENUM, TEXTURE_NAMES_ENUM), comptime register: RegisterWithSource, stage: ShaderStage) void {
-            var current_slot_to_check: u32 = v.next_uniform_register_to_check[stage.idx()];
+        fn provision_auto_uniform_slots(
+            comptime v: *VARS,
+            comptime shader_idx: u32,
+            comptime vert_linkages: []const VertexShaderDefinition(VERTEX_SHADER_NAMES_ENUM, GPU_UNIFORM_NAMES_ENUM, GPU_STORAGE_BUFFER_NAMES_ENUM, TEXTURE_NAMES_ENUM, SAMPLER_NAMES_ENUM, GPU_VERTEX_BUFFER_NAMES_ENUM),
+            comptime frag_linkages: []const FragmentShaderDefinition(FRAGMENT_SHADER_NAMES_ENUM, GPU_UNIFORM_NAMES_ENUM, GPU_STORAGE_BUFFER_NAMES_ENUM, TEXTURE_NAMES_ENUM, SAMPLER_NAMES_ENUM, GPU_VERTEX_BUFFER_NAMES_ENUM),
+            comptime register: RegisterWithSource,
+            comptime stage: ShaderStage,
+        ) void {
+            var current_slot_to_check: u32 = v.next_uniform_register_to_check;
             try_next_num: while (true) : (current_slot_to_check += 1) {
-                for (v.uniform_registers_used_this_shader[stage.idx()][0..v.uniform_registers_used_this_shader_len[stage.idx()]]) |existing_register| {
+                for (v.uniform_registers_used_this_shader[0..v.uniform_registers_used_this_shader_len]) |existing_register| {
                     switch (existing_register.register) {
                         .MANUAL => |used_slot| {
                             if (used_slot == current_slot_to_check) continue :try_next_num;
@@ -1003,25 +1055,46 @@ pub fn GraphicsController(
                 }
                 break :try_next_num;
             }
-            const source_linkage: UniformRegister(GPU_UNIFORM_NAMES_ENUM) = find: {
-                for (all_linkages) |linkage| {
-                    if (linkage.render_pipeline == pipe) {
-                        break :find linkage.resources_to_link[register.source].UNIFORM_BUFFER;
-                    }
-                }
-                unreachable;
-            };
             switch (stage) {
-                .VERTEX => v.uniforms_allowed_in_vertex_shaders[pipe_idx][@intFromEnum(source_linkage.uniform)].vertex_register = current_slot_to_check,
-                .FRAGMENT => v.uniforms_allowed_in_vertex_shaders[pipe_idx][@intFromEnum(source_linkage.uniform)].fragment_register = current_slot_to_check,
+                .VERTEX => {
+                    const source_linkage: UniformRegister(GPU_UNIFORM_NAMES_ENUM) = find: {
+                        for (vert_linkages) |linkage| {
+                            if (@intFromEnum(linkage.vertex_shader) == shader_idx) {
+                                break :find linkage.resources_to_link[register.source].UNIFORM_BUFFER;
+                            }
+                        }
+                        unreachable;
+                    };
+                    v.uniforms_allowed_in_vertex_shaders[shader_idx][@intFromEnum(source_linkage.uniform)].register = current_slot_to_check;
+                    update_max(current_slot_to_check, &v.uniform_registers_used_this_shader_max);
+                    v.next_uniform_register_to_check = current_slot_to_check + 1;
+                },
+                .FRAGMENT => {
+                    const source_linkage: UniformRegister(GPU_UNIFORM_NAMES_ENUM) = find: {
+                        for (frag_linkages) |linkage| {
+                            if (@intFromEnum(linkage.fragment_shader) == shader_idx) {
+                                break :find linkage.resources_to_link[register.source].UNIFORM_BUFFER;
+                            }
+                        }
+                        unreachable;
+                    };
+                    v.uniforms_allowed_in_fragment_shaders[shader_idx][@intFromEnum(source_linkage.uniform)].register = current_slot_to_check;
+                    update_max(current_slot_to_check, &v.uniform_registers_used_this_shader_max);
+                    v.next_uniform_register_to_check = current_slot_to_check + 1;
+                },
             }
-            update_max(current_slot_to_check, &v.uniform_registers_used_this_shader_max[stage.idx()]);
-            v.next_uniform_register_to_check[stage.idx()] = current_slot_to_check + 1;
         }
-        fn provision_auto_storage_slots(comptime v: *VARS, comptime pipe: RENDER_PIPELINE_NAMES_ENUM, comptime pipe_idx: Types.enum_tag_type(RENDER_PIPELINE_NAMES_ENUM), comptime all_linkages: []const RenderPipelineLinkages(RENDER_PIPELINE_NAMES_ENUM, GPU_UNIFORM_NAMES_ENUM, GPU_STORAGE_BUFFER_NAMES_ENUM, TEXTURE_NAMES_ENUM), comptime register: *StorageRegisterWithSourceAndKind, stage: ShaderStage) void {
-            var current_slot_to_check: u32 = v.next_storage_register_to_check[stage.idx()];
+        fn provision_auto_storage_slots(
+            comptime v: *VARS,
+            comptime shader_idx: u32,
+            comptime vert_linkages: []const VertexShaderDefinition(VERTEX_SHADER_NAMES_ENUM, GPU_UNIFORM_NAMES_ENUM, GPU_STORAGE_BUFFER_NAMES_ENUM, TEXTURE_NAMES_ENUM, SAMPLER_NAMES_ENUM, GPU_VERTEX_BUFFER_NAMES_ENUM),
+            comptime frag_linkages: []const FragmentShaderDefinition(FRAGMENT_SHADER_NAMES_ENUM, GPU_UNIFORM_NAMES_ENUM, GPU_STORAGE_BUFFER_NAMES_ENUM, TEXTURE_NAMES_ENUM, SAMPLER_NAMES_ENUM, GPU_VERTEX_BUFFER_NAMES_ENUM),
+            comptime register: *StorageRegisterWithSourceAndKind,
+            comptime stage: ShaderStage,
+        ) void {
+            var current_slot_to_check: u32 = v.next_storage_register_to_check;
             try_next_num: while (true) : (current_slot_to_check += 1) {
-                for (v.storage_registers_used_this_shader[stage.idx()][0..v.storage_registers_used_this_shader_len[stage.idx()]]) |existing_register| {
+                for (v.storage_registers_used_this_shader[0..v.storage_registers_used_this_shader_len]) |existing_register| {
                     switch (existing_register.register) {
                         .MANUAL => |used_slot| {
                             if (used_slot == current_slot_to_check) continue :try_next_num;
@@ -1032,135 +1105,163 @@ pub fn GraphicsController(
                 break :try_next_num;
             }
             register.register = .register_num(current_slot_to_check);
-            const source_linkage = find: {
-                for (all_linkages) |linkage| {
-                    if (linkage.render_pipeline == pipe) {
-                        break :find linkage.resources_to_link[register.source];
-                    }
-                }
-                unreachable;
-            };
-            switch (source_linkage) {
-                .STORAGE_TEXTURE => |link| switch (stage) {
-                    .VERTEX => v.storage_textures_allowed_in_fragment_shaders[pipe_idx][@intFromEnum(link.texture)].vertex_register = current_slot_to_check,
-                    .FRAGMENT => v.storage_textures_allowed_in_fragment_shaders[pipe_idx][@intFromEnum(link.texture)].fragment_register = current_slot_to_check,
-                },
-                .STORAGE_BUFFER => |link| switch (stage) {
-                    .VERTEX => v.storage_buffers_allowed_in_this_pipeline[pipe_idx][@intFromEnum(link.buffer)].vertex_register = current_slot_to_check,
-                    .FRAGMENT => v.storage_buffers_allowed_in_this_pipeline[pipe_idx][@intFromEnum(link.buffer)].fragment_register = current_slot_to_check,
-                },
-                .SAMPLED_TEXTURE => |link| {
-                    const proto_pair = PipelineAllowedSamplePair(TEXTURE_NAMES_ENUM, SAMPLER_NAMES_ENUM){
-                        .combined_id = Types.combine_2_enums(link.sampler, link.texture),
-                    };
-                    const found_source = Utils.mem_search_with_func(v.sample_pairs_allowed_in_this_pipeline[pipe_idx][0..v.sample_pairs_allowed_in_this_pipeline_len[pipe_idx]].ptr, 0, v.sample_pairs_allowed_in_this_pipeline_len[pipe_idx], proto_pair, PipelineAllowedSamplePair(TEXTURE_NAMES_ENUM, SAMPLER_NAMES_ENUM).equals_id);
-                    if (found_source) |source_idx| {
-                        switch (stage) {
-                            .VERTEX => v.sample_pairs_allowed_in_this_pipeline[pipe_idx][source_idx].vertex_register = current_slot_to_check,
-                            .FRAGMENT => v.sample_pairs_allowed_in_this_pipeline[pipe_idx][source_idx].fragment_register = current_slot_to_check,
+            switch (stage) {
+                .VERTEX => {
+                    const source_linkage = find: {
+                        for (vert_linkages) |linkage| {
+                            if (@intFromEnum(linkage.vertex_shader) == shader_idx) {
+                                break :find linkage.resources_to_link[register.source];
+                            }
                         }
-                    } else {
                         unreachable;
-                    }
-                },
-                else => unreachable,
-            }
-            update_max(current_slot_to_check, &v.storage_registers_used_this_shader_max[stage.idx()]);
-            v.next_storage_register_to_check[stage.idx()] = current_slot_to_check + 1;
-        }
-        inline fn provision_auto_vertex_slots(comptime v: *VARS, comptime pipe: RENDER_PIPELINE_NAMES_ENUM, comptime pipe_idx: Types.enum_tag_type(RENDER_PIPELINE_NAMES_ENUM), comptime all_linkages: []const RenderPipelineLinkages(RENDER_PIPELINE_NAMES_ENUM, GPU_UNIFORM_NAMES_ENUM, GPU_STORAGE_BUFFER_NAMES_ENUM, TEXTURE_NAMES_ENUM), comptime register: RegisterWithSource) void {
-            var current_slot_to_check: u32 = v.next_vertex_register_to_check;
-            try_next_num: while (true) : (current_slot_to_check += 1) {
-                for (v.vertex_registers_used_this_pipeline[0..v.vertex_registers_used_this_pipeline_len]) |existing_register| {
-                    switch (existing_register.register) {
-                        .MANUAL => |used_slot| {
-                            if (used_slot == current_slot_to_check) continue :try_next_num;
+                    };
+                    switch (source_linkage) {
+                        .STORAGE_TEXTURE => |link| v.storage_textures_allowed_in_vertex_shaders[shader_idx][@intFromEnum(link.texture)].register = current_slot_to_check,
+                        .STORAGE_BUFFER => |link| v.storage_buffers_allowed_in_vertex_shaders[shader_idx][@intFromEnum(link.buffer)].register = current_slot_to_check,
+                        .SAMPLED_TEXTURE => |link| {
+                            const proto_pair = PipelineAllowedSamplePair(TEXTURE_NAMES_ENUM, SAMPLER_NAMES_ENUM){
+                                .combined_id = Types.combine_2_enums(link.sampler, link.texture),
+                            };
+                            const found_source = Utils.mem_search_with_func(@ptrCast(&v.sample_pairs_allowed_in_vertex_shaders[shader_idx]), 0, v.sample_pairs_allowed_in_vertex_shaders_len[shader_idx], proto_pair, PipelineAllowedSamplePair(TEXTURE_NAMES_ENUM, SAMPLER_NAMES_ENUM).equals_id);
+                            if (found_source) |source_idx| {
+                                v.sample_pairs_allowed_in_vertex_shaders[shader_idx][source_idx].register = current_slot_to_check;
+                            } else {
+                                unreachable;
+                            }
                         },
-                        else => {},
+                        else => unreachable,
                     }
-                }
-                break :try_next_num;
+                    update_max(current_slot_to_check, &v.storage_registers_used_this_shader_max);
+                    v.next_storage_register_to_check = current_slot_to_check + 1;
+                },
+                .FRAGMENT => {
+                    const source_linkage = find: {
+                        for (frag_linkages) |linkage| {
+                            if (@intFromEnum(linkage.fragment_shader) == shader_idx) {
+                                break :find linkage.resources_to_link[register.source];
+                            }
+                        }
+                        unreachable;
+                    };
+                    switch (source_linkage) {
+                        .STORAGE_TEXTURE => |link| v.storage_textures_allowed_in_fragment_shaders[shader_idx][@intFromEnum(link.texture)].register = current_slot_to_check,
+                        .STORAGE_BUFFER => |link| v.storage_buffers_allowed_in_fragment_shaders[shader_idx][@intFromEnum(link.buffer)].register = current_slot_to_check,
+                        .SAMPLED_TEXTURE => |link| {
+                            const proto_pair = PipelineAllowedSamplePair(TEXTURE_NAMES_ENUM, SAMPLER_NAMES_ENUM){
+                                .combined_id = Types.combine_2_enums(link.sampler, link.texture),
+                            };
+                            const found_source = Utils.mem_search_with_func(@ptrCast(&v.sample_pairs_allowed_in_fragment_shaders[shader_idx]), 0, v.sample_pairs_allowed_in_fragment_shaders_len[shader_idx], proto_pair, PipelineAllowedSamplePair(TEXTURE_NAMES_ENUM, SAMPLER_NAMES_ENUM).equals_id);
+                            if (found_source) |source_idx| {
+                                v.sample_pairs_allowed_in_fragment_shaders[shader_idx][source_idx].register = current_slot_to_check;
+                            } else {
+                                unreachable;
+                            }
+                        },
+                        else => unreachable,
+                    }
+                    update_max(current_slot_to_check, &v.storage_registers_used_this_shader_max);
+                    v.next_storage_register_to_check = current_slot_to_check + 1;
+                },
             }
-            const source_linkage: VertexBufferRegister(GPU_VERTEX_BUFFER_NAMES_ENUM) = find: {
-                for (all_linkages) |linkage| {
-                    if (linkage.render_pipeline == pipe) {
-                        break :find linkage.resources_to_link[register.source].VERTEX_BUFFER;
-                    }
-                }
-                unreachable;
-            };
-            v.vert_buffers_allowed_in_vertex_shaders[pipe_idx][@intFromEnum(source_linkage.buffer)].register = current_slot_to_check;
-            update_max(current_slot_to_check, &v.vertex_registers_used_this_pipeline_max);
-            v.next_vertex_register_to_check = current_slot_to_check + 1;
         }
+        // inline fn provision_auto_vertex_buffer_slots(
+        //     comptime v: *VARS,
+        //     comptime shader_idx: u32,
+        //     comptime vert_linkages: []const VertexShaderLinkages(VERTEX_SHADER_NAMES_ENUM, GPU_UNIFORM_NAMES_ENUM, GPU_STORAGE_BUFFER_NAMES_ENUM, TEXTURE_NAMES_ENUM, SAMPLER_NAMES_ENUM, GPU_VERTEX_BUFFER_NAMES_ENUM),
+        //     comptime register: RegisterWithSource,
+        // ) void {
+        //     var current_slot_to_check: u32 = v.next_vertex_register_to_check;
+        //     try_next_num: while (true) : (current_slot_to_check += 1) {
+        //         for (v.vertex_registers_used_this_pipeline[0..v.vertex_registers_used_this_pipeline_len]) |existing_register| {
+        //             switch (existing_register.register) {
+        //                 .MANUAL => |used_slot| {
+        //                     if (used_slot == current_slot_to_check) continue :try_next_num;
+        //                 },
+        //                 else => {},
+        //             }
+        //         }
+        //         break :try_next_num;
+        //     }
+        //     const source_linkage: VertexBufferRegister(GPU_VERTEX_BUFFER_NAMES_ENUM) = find: {
+        //         for (all_linkages) |linkage| {
+        //             if (linkage.render_pipeline == pipe) {
+        //                 break :find linkage.resources_to_link[register.source].VERTEX_BUFFER;
+        //             }
+        //         }
+        //         unreachable;
+        //     };
+        //     v.vert_buffers_allowed_in_vertex_shaders[pipe_idx][@intFromEnum(source_linkage.buffer)].register = current_slot_to_check;
+        //     update_max(current_slot_to_check, &v.vertex_registers_used_this_pipeline_max);
+        //     v.next_vertex_register_to_check = current_slot_to_check + 1;
+        // }
     };
     // COMPTIME VALIDATION / ORGANIZATION OF RESOURCE BINDINGS
     comptime var vertex_linkages_defined: [NUM_VERTEX_SHADERS]bool = @splat(false);
-    inline for (VERTEX_SHADER_LINKAGES[0..]) |linkage| {
+    inline for (VERTEX_SHADER_DEFINITIONS[0..]) |linkage| {
         const vert_idx = @intFromEnum(linkage.vertex_shader);
         assert_with_reason(vertex_linkages_defined[vert_idx] == false, @src(), "linkage for vertex shader `{s}` was defined twice", .{@tagName(linkage.vertex_shader)});
         vars.reset_for_next_linkage();
-        for (linkage.resources_to_link, 0..) |resource, ridx| {
-            switch (resource) {
-                .UNIFORM_BUFFER => |link| {
-                    SUB_ROUTINE.process_uniform_linkage(&vars, @intCast(vert_idx), @tagName(linkage.vertex_shader), link, @intCast(ridx), .VERTEX);
-                },
-                .SAMPLED_TEXTURE => |link| {
-                    if (link.vertex_register.allow) {
-                        SUB_ROUTINE.process_sample_pair_linkage(&vars, linkage.render_pipeline, pipe_idx, link, @intCast(ridx), .VERTEX);
-                    }
-                    if (link.fragment_register.allow) {
-                        SUB_ROUTINE.process_sample_pair_linkage(&vars, linkage.render_pipeline, pipe_idx, link, @intCast(ridx), .FRAGMENT);
-                    }
-                },
-                .STORAGE_TEXTURE => |link| {
-                    if (link.vertex_register.allow) {
-                        SUB_ROUTINE.process_storage_texture_linkage(&vars, linkage.render_pipeline, pipe_idx, link, @intCast(ridx), .VERTEX);
-                    }
-                    if (link.fragment_register.allow) {
-                        SUB_ROUTINE.process_storage_texture_linkage(&vars, linkage.render_pipeline, pipe_idx, link, @intCast(ridx), .FRAGMENT);
-                    }
-                },
-                .STORAGE_BUFFER => |link| {
-                    if (link.vertex_register.allow) {
-                        SUB_ROUTINE.process_storage_buffer_linkage(&vars, linkage.render_pipeline, pipe_idx, link, @intCast(ridx), .VERTEX);
-                    }
-                    if (link.fragment_register.allow) {
-                        SUB_ROUTINE.process_storage_buffer_linkage(&vars, linkage.render_pipeline, pipe_idx, link, @intCast(ridx), .FRAGMENT);
-                    }
-                },
-                .VERTEX_BUFFER => |link| {
-                    const vert_idx = @intFromEnum(link.buffer);
-                    assert_with_reason(vars.vert_buffers_allowed_in_vertex_shaders[pipe_idx][vert_idx].allowed == false, @src(), "vertex buffer `{s}` was registered more than once for pipeline `{s}`", .{ @tagName(link.buffer), @tagName(linkage.render_pipeline) });
-                    vars.vert_buffers_allowed_in_vertex_shaders[pipe_idx][vert_idx].allowed = true;
-                    const reg = link.register;
-                    const reg_source = RegisterWithSource{ .register = reg, .source = @intCast(ridx) };
-                    switch (reg) {
-                        .MANUAL => |reg_num| {
-                            for (vars.vertex_registers_used_this_pipeline[0..vars.vertex_registers_used_this_pipeline_len]) |used_register| {
-                                switch (used_register.register) {
-                                    .MANUAL => |used_num| {
-                                        assert_with_reason(used_num != reg_num, @src(), "in pipeline `{s}` vertex buffer `{s}` tried to bind to an already bound register {d}", .{ @tagName(linkage.render_pipeline), @tagName(link.buffer), reg_num });
-                                    },
-                                    else => {},
-                                }
-                            }
-                            vars.vertex_registers_used_this_pipeline_manual_count += 1;
-                            update_max(reg_num, &vars.vertex_registers_used_this_pipeline_max);
-                            if (reg_num == vars.next_vertex_register_to_check) {
-                                vars.next_vertex_register_to_check += 1;
-                            }
-                            vars.vert_buffers_allowed_in_vertex_shaders[pipe_idx][vert_idx].register = reg_num;
-                        },
-                        .AUTO => {
-                            vars.vertex_registers_used_this_pipeline_auto_count += 1;
-                        },
-                    }
-                    vars.vertex_registers_used_this_pipeline[vars.vertex_registers_used_this_pipeline_len] = reg_source;
-                    vars.vertex_registers_used_this_pipeline_len += 1;
-                },
-            }
-        }
+        // for (linkage.resources_to_link, 0..) |resource, ridx| {
+        //     switch (resource) {
+        //         .UNIFORM_BUFFER => |link| {
+        //             SUB_ROUTINE.process_uniform_linkage(&vars, @intCast(vert_idx), @tagName(linkage.vertex_shader), link, @intCast(ridx), .VERTEX);
+        //         },
+        //         .SAMPLED_TEXTURE => |link| {
+        //             if (link.vertex_register.allow) {
+        //                 SUB_ROUTINE.process_sample_pair_linkage(&vars, linkage.render_pipeline, pipe_idx, link, @intCast(ridx), .VERTEX);
+        //             }
+        //             if (link.fragment_register.allow) {
+        //                 SUB_ROUTINE.process_sample_pair_linkage(&vars, linkage.render_pipeline, pipe_idx, link, @intCast(ridx), .FRAGMENT);
+        //             }
+        //         },
+        //         .STORAGE_TEXTURE => |link| {
+        //             if (link.vertex_register.allow) {
+        //                 SUB_ROUTINE.process_storage_texture_linkage(&vars, linkage.render_pipeline, pipe_idx, link, @intCast(ridx), .VERTEX);
+        //             }
+        //             if (link.fragment_register.allow) {
+        //                 SUB_ROUTINE.process_storage_texture_linkage(&vars, linkage.render_pipeline, pipe_idx, link, @intCast(ridx), .FRAGMENT);
+        //             }
+        //         },
+        //         .STORAGE_BUFFER => |link| {
+        //             if (link.vertex_register.allow) {
+        //                 SUB_ROUTINE.process_storage_buffer_linkage(&vars, linkage.render_pipeline, pipe_idx, link, @intCast(ridx), .VERTEX);
+        //             }
+        //             if (link.fragment_register.allow) {
+        //                 SUB_ROUTINE.process_storage_buffer_linkage(&vars, linkage.render_pipeline, pipe_idx, link, @intCast(ridx), .FRAGMENT);
+        //             }
+        //         },
+        //         .VERTEX_BUFFER => |link| {
+        //             const vert_idx = @intFromEnum(link.buffer);
+        //             assert_with_reason(vars.vert_buffers_allowed_in_vertex_shaders[pipe_idx][vert_idx].allowed == false, @src(), "vertex buffer `{s}` was registered more than once for pipeline `{s}`", .{ @tagName(link.buffer), @tagName(linkage.render_pipeline) });
+        //             vars.vert_buffers_allowed_in_vertex_shaders[pipe_idx][vert_idx].allowed = true;
+        //             const reg = link.register;
+        //             const reg_source = RegisterWithSource{ .register = reg, .source = @intCast(ridx) };
+        //             switch (reg) {
+        //                 .MANUAL => |reg_num| {
+        //                     for (vars.vertex_registers_used_this_pipeline[0..vars.vertex_registers_used_this_pipeline_len]) |used_register| {
+        //                         switch (used_register.register) {
+        //                             .MANUAL => |used_num| {
+        //                                 assert_with_reason(used_num != reg_num, @src(), "in pipeline `{s}` vertex buffer `{s}` tried to bind to an already bound register {d}", .{ @tagName(linkage.render_pipeline), @tagName(link.buffer), reg_num });
+        //                             },
+        //                             else => {},
+        //                         }
+        //                     }
+        //                     vars.vertex_registers_used_this_pipeline_manual_count += 1;
+        //                     update_max(reg_num, &vars.vertex_registers_used_this_pipeline_max);
+        //                     if (reg_num == vars.next_vertex_register_to_check) {
+        //                         vars.next_vertex_register_to_check += 1;
+        //                     }
+        //                     vars.vert_buffers_allowed_in_vertex_shaders[pipe_idx][vert_idx].register = reg_num;
+        //                 },
+        //                 .AUTO => {
+        //                     vars.vertex_registers_used_this_pipeline_auto_count += 1;
+        //                 },
+        //             }
+        //             vars.vertex_registers_used_this_pipeline[vars.vertex_registers_used_this_pipeline_len] = reg_source;
+        //             vars.vertex_registers_used_this_pipeline_len += 1;
+        //         },
+        //     }
+        // }
         // CHECK IF IT IS DEFINITELY IMPOSSIBLE TO COMPILE (MAX REGISTER FOR A GROUP IS >= TOTAL NUM REGISTERS FOR THAT GROUP = AN EMPTY REGISTER IS INEVITABLE)
         assert_with_reason(vars.uniform_registers_used_this_shader_len[0] > vars.uniform_registers_used_this_shader_max[0], @src(), "uniform registers for render pipeline `{s}` vertex stage total to {d}, but the largest register is {d}: there will be an empty register somewhere which is disallowed (all registers must start at 0 and continue to the max register num with no gaps)", .{ @tagName(linkage.render_pipeline), vars.uniform_registers_used_this_shader_len[0], vars.uniform_registers_used_this_shader_max[0] });
         assert_with_reason(vars.uniform_registers_used_this_shader_len[1] > vars.uniform_registers_used_this_shader_max[1], @src(), "uniform registers for render pipeline `{s}` fragment stage total to {d}, but the largest register is {d}: there will be an empty register somewhere which is disallowed (all registers must start at 0 and continue to the max register num with no gaps)", .{ @tagName(linkage.render_pipeline), vars.uniform_registers_used_this_shader_len[1], vars.uniform_registers_used_this_shader_max[1] });
@@ -1199,7 +1300,7 @@ pub fn GraphicsController(
         assert_with_reason(Utils.mem_is_sorted_with_func(vars.storage_registers_used_this_shader[1][0..vars.storage_registers_used_this_shader_len[1]].ptr, 0, vars.storage_registers_used_this_shader_len[1], StorageRegisterWithSourceAndKind.greater_than_only_kind), @src(), "not all storage registers in pipeline `{s}` fragment stage are in correct order (all sampled textures must come first, then all storage textures, then all storage buffers with increasing registers), got: {any}", .{ @tagName(linkage.render_pipeline), vars.storage_registers_used_this_shader[1][0..vars.storage_registers_used_this_shader_len[1]] });
         for (vars.vertex_registers_used_this_pipeline[0..vars.vertex_registers_used_this_pipeline_len]) |vertex_register| {
             if (vertex_register.register == .MANUAL) continue;
-            SUB_ROUTINE.provision_auto_vertex_slots(&vars, linkage.render_pipeline, pipe_idx, all_linkages, vertex_register);
+            SUB_ROUTINE.provision_auto_vertex_buffer_slots(&vars, linkage.render_pipeline, pipe_idx, all_linkages, vertex_register);
         }
         assert_with_reason(vars.vertex_registers_used_this_pipeline_len == vars.vertex_registers_used_this_pipeline_max + 1, @src(), "vertex buffer registers for render pipeline `{s}` total to {d}, but the largest register is {d}: there is an empty register somewhere which is disallowed (all registers must start at 0 and continue to the max register num with no gaps)", .{ @tagName(linkage.render_pipeline), vars.vertex_registers_used_this_pipeline_len, vars.vertex_registers_used_this_pipeline_max });
     }
@@ -1314,7 +1415,7 @@ pub fn GraphicsController(
         assert_with_reason(Utils.mem_is_sorted_with_func(vars.storage_registers_used_this_shader[1][0..vars.storage_registers_used_this_shader_len[1]].ptr, 0, vars.storage_registers_used_this_shader_len[1], StorageRegisterWithSourceAndKind.greater_than_only_kind), @src(), "not all storage registers in pipeline `{s}` fragment stage are in correct order (all sampled textures must come first, then all storage textures, then all storage buffers with increasing registers), got: {any}", .{ @tagName(linkage.render_pipeline), vars.storage_registers_used_this_shader[1][0..vars.storage_registers_used_this_shader_len[1]] });
         for (vars.vertex_registers_used_this_pipeline[0..vars.vertex_registers_used_this_pipeline_len]) |vertex_register| {
             if (vertex_register.register == .MANUAL) continue;
-            SUB_ROUTINE.provision_auto_vertex_slots(&vars, linkage.render_pipeline, pipe_idx, all_linkages, vertex_register);
+            SUB_ROUTINE.provision_auto_vertex_buffer_slots(&vars, linkage.render_pipeline, pipe_idx, all_linkages, vertex_register);
         }
         assert_with_reason(vars.vertex_registers_used_this_pipeline_len == vars.vertex_registers_used_this_pipeline_max + 1, @src(), "vertex buffer registers for render pipeline `{s}` total to {d}, but the largest register is {d}: there is an empty register somewhere which is disallowed (all registers must start at 0 and continue to the max register num with no gaps)", .{ @tagName(linkage.render_pipeline), vars.vertex_registers_used_this_pipeline_len, vars.vertex_registers_used_this_pipeline_max });
     }
@@ -1459,7 +1560,7 @@ pub fn GraphicsController(
             pub const NUM_TRANSFER_BUFFERS = Types.enum_defined_field_count(TRANSFER_BUFFER_NAMES_ENUM);
             pub const NUM_VERTEX_BUFFERS = Types.enum_defined_field_count(GPU_VERTEX_BUFFER_NAMES_ENUM);
             pub const NUM_SAMPLERS = Types.enum_defined_field_count(SAMPLER_NAMES_ENUM);
-            pub const NUM_VERTEX_STRUCTS = Types.enum_defined_field_count(GPU_VERTEX_STRUCT_NAMES_ENUM);
+            pub const NUM_VERTEX_STRUCTS = Types.enum_defined_field_count(GPU_SHADER_STRUCT_NAMES_ENUM);
             pub const NUM_STORAGE_BUFFERS = Types.enum_defined_field_count(GPU_STORAGE_BUFFER_NAMES_ENUM);
             pub const ALLOWED_UNIFORMS_FLAT = all_allowed_uniforms_flat_const;
             pub const ALLOWED_UNIFORMS_STARTS = allowed_uniform_starts_const;
@@ -1533,7 +1634,7 @@ pub fn GraphicsController(
                 if (comptime map_idx >= ALLOWED_VERTEX_BUFFERS_FLAT.len) return null;
                 return ALLOWED_VERTEX_BUFFERS_FLAT[map_idx];
             }
-            pub const VERTEX_STRUCT_TYPES = STRUCT_OF_VERTEX_STRUCT_TYPES;
+            pub const VERTEX_STRUCT_TYPES = STRUCT_OF_SHADER_STRUCT_TYPES;
             pub const STORAGE_STRUCT_TYPES = STRUCT_OF_STORAGE_BUFFER_STRUCT_TYPES;
             pub const VERTEX_STRUCT_USER_FIELDS = STRUCT_OF_VERTEX_STRUCT_NAMES_WITH_USER_SUPPLIED_VERTEX_FIELD_NAMES_AND_LOCATIONS_ENUMS;
         };
@@ -1544,7 +1645,7 @@ pub fn GraphicsController(
         pub const TransferBufferName = TRANSFER_BUFFER_NAMES_ENUM;
         pub const SamplerName = SAMPLER_NAMES_ENUM;
         pub const VertexBufferName = GPU_VERTEX_BUFFER_NAMES_ENUM;
-        pub const VertexStructName = GPU_VERTEX_STRUCT_NAMES_ENUM;
+        pub const VertexStructName = GPU_SHADER_STRUCT_NAMES_ENUM;
         pub const StorageBufferName = GPU_STORAGE_BUFFER_NAMES_ENUM;
         pub const UniformName = GPU_UNIFORM_NAMES_ENUM;
         pub const VertexShaderName = VERTEX_SHADER_NAMES_ENUM;

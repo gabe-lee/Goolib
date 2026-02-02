@@ -973,319 +973,156 @@ pub fn type_equals_mode(comptime T: type) EqualsMode {
     }
 }
 
+pub const InterfaceSignatureError = error{
+    missing_function,
+    function_has_wrong_signature,
+    missing_field,
+    field_has_wrong_type,
+    missing_const_declaration,
+    const_declaration_wrong_type,
+    const_declaration_wrong_val,
+};
+
 pub const InterfaceSignature = struct {
     interface_name: []const u8,
     const_decls: []const ConstDeclDefinition = &.{},
     struct_fields: []const StructFieldDefinition = &.{},
     functions: []const NamedFuncDefinition = &.{},
 
-    pub fn assert_type_fulfills(comptime self: InterfaceSignature, comptime T: type, comptime src_loc: ?SourceLocation) void {
+    pub fn type_fulfills(comptime self: InterfaceSignature, comptime T: type) bool {
         inline for (self.functions) |func| {
-            assert_with_reason(@hasDecl(T, func.name), src_loc, "(assert interface `{s}`) type `{s}` is missing method `{s}`", .{ self.interface_name, @typeName(T), func.name });
-            assert_with_reason(@typeInfo(@TypeOf(@field(T, func.name))) == .@"fn", src_loc, "(assert interface `{s}`) type `{s}` field `{s}` is not a function, got `{s}`", .{ self.interface_name, @typeName(T), func.name, @typeInfo(@TypeOf(@field(T, func.name))) });
-            const got_sig = @typeInfo(@TypeOf(@field(T, func.name))).@"fn";
-            var got_func = NamedFuncDefinition{
-                .name = func.name,
-                .f = got_sig,
-            };
-            if (comptime got_func.has_params()) {
-                if (comptime got_func.first_param_type()) |t| {
-                    if (t == T or t == *T or t == *const T) {
-                        got_func.first_param_is_self = true;
-                    }
-                }
-            }
-            assert_with_reason(func.equals(got_func), src_loc, "(assert interface `{s}`) type `{s}` method `{s}` does not match the needed signature `{any}`, got `{any}`", .{ self.interface_name, @typeName(T), func.name, func.def.f, got_sig.f });
+            if (func.has_func_error(T) != null) return false;
         }
         inline for (self.const_decls) |const_decl| {
-            assert_with_reason(@hasDecl(T, const_decl.name), src_loc, "(assert interface `{s}`) type `{s}` is missing constant declaration `{s}`", .{ self.interface_name, @typeName(T), const_decl.name });
-            assert_with_reason(@TypeOf(@field(T, const_decl.name)) == const_decl.type, src_loc, "(assert interface `{s}`) type `{s}` constant declaration `{s}` is not the needed type `{s}`, got `{s}`", .{ self.interface_name, @typeName(T), const_decl.name, @typeName(const_decl.type), @typeName(@TypeOf(@field(T, const_decl.name))) });
-            if (const_decl.val) |need_val| {
-                const real_need_val: *const const_decl.type = @ptrCast(@alignCast(need_val));
-                assert_with_reason(Utils.equals_implicit(@field(T, const_decl.name), real_need_val.*), src_loc, "(assert interface `{s}`) type `{s}` constant declaration `{s}` does not have the required value `{any}`, got `{any}`", .{ self.interface_name, @typeName(T), const_decl.name, real_need_val.*, @field(T, const_decl.name) });
-            }
+            if (const_decl.has_decl_error(T) != null) return false;
         }
         inline for (self.struct_fields) |field| {
-            assert_with_reason(@hasField(T, field.f.name), src_loc, "(assert interface `{s}`) type `{s}` is missing field `{s}`", .{ self.interface_name, @typeName(T), field.f.name });
-            assert_with_reason(@FieldType(T, field.f.name) == field.f.type, src_loc, "(assert interface `{s}`) type `{s}` field `{s}` is not the correct type `{s}`, got type `{s}`", .{ self.interface_name, @typeName(T), field.f.name, @typeName(field.f.type), @typeName(@FieldType(T, field.f.name)) });
+            if (field.has_field_error(T) != null) return false;
+        }
+        return true;
+    }
+
+    pub fn assert_type_fulfills(comptime self: InterfaceSignature, comptime T: type, comptime src_loc: ?SourceLocation) void {
+        inline for (self.functions) |func| {
+            if (func.has_func_error(T)) |err| switch (err) {
+                InterfaceSignatureError.missing_function => assert_unreachable(src_loc, "(assert interface `{s}`) type `{s}` is missing function `{s}`", .{ self.interface_name, @typeName(T), func.name }),
+                InterfaceSignatureError.function_has_wrong_signature => assert_unreachable(src_loc, "(assert interface `{s}`) type `{s}` function `{s}` does not match the needed signature `{s}`, got `{s}`", .{ self.interface_name, @typeName(T), func.name, @typeName(func.signature_builder(T)), @typeName(@TypeOf(@field(T, func.name))) }),
+                else => unreachable,
+            };
+        }
+        inline for (self.const_decls) |const_decl| {
+            if (const_decl.has_decl_error(T)) |err| switch (err) {
+                InterfaceSignatureError.missing_const_declaration => assert_unreachable(src_loc, "(assert interface `{s}`) type `{s}` is missing constant declaration `{s}`", .{ self.interface_name, @typeName(T), const_decl.name }),
+                InterfaceSignatureError.const_declaration_wrong_type => assert_unreachable(src_loc, "(assert interface `{s}`) type `{s}` constant declaration `{s}` is not the needed type `{s}`, got `{s}`", .{ self.interface_name, @typeName(T), const_decl.name, @typeName(const_decl.T), @typeName(@TypeOf(@field(T, const_decl.name))) }),
+                InterfaceSignatureError.const_declaration_wrong_val => assert_unreachable(src_loc, "(assert interface `{s}`) type `{s}` constant declaration `{s}` does not have the required value `{any}`, got `{any}`", .{ self.interface_name, @typeName(T), const_decl.name, @as(*const const_decl.T, @ptrCast(@alignCast(const_decl.needed_val.?))).*, @field(T, const_decl.name) }),
+                else => unreachable,
+            };
+        }
+        inline for (self.struct_fields) |field| {
+            if (field.has_field_error(T)) |err| switch (err) {
+                InterfaceSignatureError.missing_field => assert_unreachable(src_loc, "(assert interface `{s}`) type `{s}` is missing field `{s}`", .{ self.interface_name, @typeName(T), field.name }),
+                InterfaceSignatureError.field_has_wrong_type => assert_unreachable(src_loc, "(assert interface `{s}`) type `{s}` field `{s}` is not the correct type `{s}`, got type `{s}`", .{ self.interface_name, @typeName(T), field.name, @typeName(field.T), @typeName(@FieldType(T, field.name)) }),
+                else => unreachable,
+            };
         }
     }
 };
 
 pub const ConstDeclDefinition = struct {
     name: [:0]const u8,
-    type: type,
-    val: ?*const anyopaque = null,
+    T: type,
+    needed_val: ?*const anyopaque = null,
 
-    pub fn equals(comptime self: ConstDeclDefinition, comptime other: ConstDeclDefinition) bool {
-        if (self.type != other.type) return false;
-        if (self.name.len != other.name.len) return false;
-        if (self.val == null) {
-            if (other.val != null) return false;
-        } else {
-            if (other.val == null) {
-                return false;
-            } else {
-                const self_default: *const self.type = @ptrCast(self.val.?);
-                const other_default: *const other.type = @ptrCast(other.val.?);
-                if (comptime !Utils.equals_implicit(self_default.*, other_default.*)) return false;
-            }
+    pub fn has_decl_error(comptime self: ConstDeclDefinition, comptime T: type) ?InterfaceSignatureError {
+        if (!@hasDecl(T, self.name)) return InterfaceSignatureError.missing_const_declaration;
+        if (@FieldType(T, self.name) != self.T) return InterfaceSignatureError.const_declaration_wrong_type;
+        if (self.needed_val) |need_val_opaque| {
+            const need_val: *const self.T = @ptrCast(@alignCast(need_val_opaque));
+            if (@field(T, self.name) != need_val) return InterfaceSignatureError.const_declaration_wrong_type;
         }
-        if (comptime !std.mem.eql(u8, self.name, other.name)) return false;
+        return null;
     }
 
     pub fn define_const_decl(comptime name: [:0]const u8, comptime T: type) ConstDeclDefinition {
         return ConstDeclDefinition{
             .name = name,
-            .type = T,
-            .val = null,
+            .T = T,
+            .needed_val = null,
         };
     }
     pub fn define_const_decl_with_val(comptime name: [:0]const u8, comptime T: type, comptime val: *const T) ConstDeclDefinition {
         return ConstDeclDefinition{
             .name = name,
-            .type = T,
-            .val = @ptrCast(val),
+            .T = T,
+            .needed_val = @ptrCast(val),
         };
     }
 };
 
-pub const Comptime = enum(u8) {
-    RUNTIME = 0,
-    COMPTIME = 1,
-};
-
 pub const StructFieldDefinition = struct {
-    f: std.builtin.Type.StructField = .{
-        .alignment = 1,
-        .default_value_ptr = null,
-        .is_comptime = false,
-        .type = void,
-        .name = "",
-    },
+    name: [:0]const u8,
+    T: type,
 
-    pub fn real_type(self: StructFieldDefinition) type {
-        return self.f.type;
+    pub fn has_field_error(comptime self: StructFieldDefinition, comptime T: type) ?InterfaceSignatureError {
+        if (!@hasField(T, self.name)) return InterfaceSignatureError.missing_field;
+        if (@FieldType(T, self.name) != self.T) return InterfaceSignatureError.field_has_wrong_type;
+        return null;
     }
 
     pub fn define_field(comptime name: [:0]const u8, comptime T: type) StructFieldDefinition {
         return StructFieldDefinition{
-            .f = .{
-                .alignment = @alignOf(T),
-                .default_value_ptr = null,
-                .is_comptime = false,
-                .type = T,
-                .name = name,
-            },
+            .name = name,
+            .T = T,
         };
     }
-    pub fn define_field_with_default(comptime name: [:0]const u8, comptime T: type, default: *T) StructFieldDefinition {
-        return StructFieldDefinition{
-            .f = .{
-                .alignment = @alignOf(T),
-                .default_value_ptr = @ptrCast(default),
-                .is_comptime = false,
-                .type = T,
-                .name = name,
-            },
-        };
-    }
-    pub fn define_comptime_field(comptime name: [:0]const u8, comptime T: type) StructFieldDefinition {
-        return StructFieldDefinition{
-            .f = .{
-                .alignment = @alignOf(T),
-                .default_value_ptr = null,
-                .is_comptime = true,
-                .type = T,
-                .name = name,
-            },
-        };
-    }
-    pub fn define_comptime_field_with_default(comptime name: [:0]const u8, comptime T: type, default: *T) StructFieldDefinition {
-        return StructFieldDefinition{
-            .f = .{
-                .alignment = @alignOf(T),
-                .default_value_ptr = @ptrCast(default),
-                .is_comptime = true,
-                .type = T,
-                .name = name,
-            },
-        };
-    }
-    pub fn define_field_advanced(comptime name: [:0]const u8, comptime T: type, default: ?*T, comptime is_comptime: Comptime, comptime alignment: comptime_int) StructFieldDefinition {
-        return StructFieldDefinition{
-            .f = .{
-                .alignment = alignment,
-                .default_value_ptr = @ptrCast(default),
-                .is_comptime = @bitCast(is_comptime),
-                .type = T,
-                .name = name,
-            },
-        };
-    }
-};
-
-pub const Generic = enum(u8) {
-    CONCRETE = 0,
-    GENERIC = 1,
-};
-
-pub const VarArgs = enum(u8) {
-    NOT_VAR_ARGS = 0,
-    IS_VAR_ARGS = 1,
 };
 
 pub const NamedFuncDefinition = struct {
     name: [:0]const u8,
-    first_param_is_self: bool = false,
-    f: std.builtin.Type.Fn = .{
-        .calling_convention = .auto,
-        .is_generic = false,
-        .is_var_args = false,
-        .return_type = null,
-        .params = &.{},
-    },
+    signature_builder: fn (comptime CONCRETE_TYPE: type) type,
 
-    pub fn real_type(comptime self: NamedFuncDefinition) type {
-        return @Type(std.builtin.Type{ .@"fn" = self.f });
+    pub fn has_func_error(comptime self: NamedFuncDefinition, comptime T: type) ?InterfaceSignatureError {
+        if (!@hasDecl(T, self.name)) return InterfaceSignatureError.missing_function;
+        const needed_signature = self.signature_builder(T);
+        if (@TypeOf(@field(T, self.name)) != needed_signature) return InterfaceSignatureError.function_has_wrong_signature;
+        return null;
     }
 
-    pub fn has_params(comptime self: NamedFuncDefinition) bool {
-        return self.f.params.len > 0;
-    }
-
-    pub fn first_param_type(comptime self: NamedFuncDefinition) ?type {
-        return self.f.params[0].type;
-    }
-
-    pub fn equals(comptime self: NamedFuncDefinition, comptime other: NamedFuncDefinition) bool {
-        if (comptime !std.mem.eql(u8, self.name, other.name)) return false;
-        if (self.first_param_is_self != other.first_param_is_self) return false;
-        if (self.f.params.len != other.f.params.len) return false;
-        for (self.f.params, other.f.params, 0..) |s, o, i| {
-            if (self.first_param_is_self and i == 0) continue;
-            const self_param: ParamDefinition = @bitCast(s);
-            const other_param: ParamDefinition = @bitCast(o);
-            if (!self_param.equals(other_param)) return false;
-        }
-        return self.f.calling_convention == other.f.calling_convention and self.f.is_generic == other.f.is_generic and self.f.is_var_args == other.f.is_var_args and self.f.return_type == other.f.return_type;
-    }
-
-    pub fn define_func(comptime name: []const u8, comptime params: []const ParamDefinition, comptime return_type: type) NamedFuncDefinition {
+    pub fn define_func_with_builder(comptime name: [:0]const u8, comptime signature_builder: fn (comptime SELF_T: type) type) NamedFuncDefinition {
         return NamedFuncDefinition{
             .name = name,
-            .f = .{
-                .calling_convention = .auto,
-                .is_generic = false,
-                .is_var_args = false,
-                .return_type = return_type,
-                .params = @as([*]std.builtin.Type.Fn.Param, @ptrCast(@alignCast(params.ptr)))[0..params.len],
-            },
-        };
-    }
-    pub fn define_method_on_type(comptime name: []const u8, comptime params: []const ParamDefinition, comptime return_type: type) NamedFuncDefinition {
-        return NamedFuncDefinition{
-            .name = name,
-            .first_param_is_self = true,
-            .f = .{
-                .calling_convention = .auto,
-                .is_generic = false,
-                .is_var_args = false,
-                .return_type = return_type,
-                .params = @as([*]std.builtin.Type.Fn.Param, @ptrCast(@alignCast(params.ptr)))[0..params.len],
-            },
-        };
-    }
-    pub fn define_func_adv(comptime name: []const u8, comptime generic: Generic, comptime var_args: VarArgs, comptime params: []const ParamDefinition, comptime return_type: type, comptime call_conv: std.builtin.CallingConvention) NamedFuncDefinition {
-        return NamedFuncDefinition{
-            .name = name,
-            .f = .{
-                .calling_convention = call_conv,
-                .is_generic = @bitCast(generic),
-                .is_var_args = @bitCast(var_args),
-                .return_type = return_type,
-                .params = @as([*]std.builtin.Type.Fn.Param, @ptrCast(@alignCast(params.ptr)))[0..params.len],
-            },
-        };
-    }
-    pub fn define_method_adv(comptime name: []const u8, comptime generic: Generic, comptime var_args: VarArgs, comptime params: []const ParamDefinition, comptime return_type: type, comptime call_conv: std.builtin.CallingConvention) NamedFuncDefinition {
-        return NamedFuncDefinition{
-            .name = name,
-            .first_param_is_self = true,
-            .f = .{
-                .calling_convention = call_conv,
-                .is_generic = @bitCast(generic),
-                .is_var_args = @bitCast(var_args),
-                .return_type = return_type,
-                .params = @as([*]std.builtin.Type.Fn.Param, @ptrCast(@alignCast(params.ptr)))[0..params.len],
-            },
+            .signature_builder = signature_builder,
         };
     }
 };
 
-pub const FuncDefinition = struct {
-    f: std.builtin.Type.Fn = .{
-        .calling_convention = .auto,
-        .is_generic = false,
-        .is_var_args = false,
-        .return_type = null,
-        .params = &.{},
-    },
+// pub const ParamDefinition = struct {
+//     is_generic:  bool = false,
+//     is_noalias: bool = false,
+//     type: ?type = null,
 
-    pub fn real_type(self: FuncDefinition) type {
-        return @Type(std.builtin.Type{ .@"fn" = self.f });
-    }
+//     pub fn from_type_info(comptime info: std.builtin.Type.Fn.Param) ParamDefinition {
+//         return ParamDefinition{
+//             .is_generic = info.is_generic,
+//             .is_noalias = info.is_noalias,
+//             .type = info.type,
+//         }
+//     }
 
-    pub fn define_func(comptime params: []const ParamDefinition, comptime return_type: type) FuncDefinition {
-        return FuncDefinition{
-            .f = .{
-                .calling_convention = .auto,
-                .is_generic = false,
-                .is_var_args = false,
-                .return_type = return_type,
-                .params = @as([*]std.builtin.Type.Fn.Param, @ptrCast(@alignCast(params.ptr)))[0..params.len],
-            },
-        };
-    }
-    pub fn define_func_adv(comptime genric: Generic, comptime var_args: VarArgs, comptime params: []const ParamDefinition, comptime return_type: type, comptime call_conv: std.builtin.CallingConvention) FuncDefinition {
-        return FuncDefinition{
-            .f = .{
-                .calling_convention = call_conv,
-                .is_generic = @bitCast(genric),
-                .is_var_args = @bitCast(var_args),
-                .return_type = return_type,
-                .params = @as([*]std.builtin.Type.Fn.Param, @ptrCast(@alignCast(params.ptr)))[0..params.len],
-            },
-        };
-    }
-};
+//     pub fn equals(self: ParamDefinition, other: ParamDefinition) bool {
+//         return self.is_generic == other.is_generic and self.is_noalias == other.is_noalias and self.type == other.type;
+//     }
 
-pub const NoAlias = enum(u8) {
-    CAN_ALIAS = 0,
-    NO_ALIAS = 1,
-};
-
-pub const ParamDefinition = struct {
-    p: std.builtin.Type.Fn.Param = .{
-        .is_generic = false,
-        .is_noalias = false,
-        .type = null,
-    },
-
-    pub fn equals(self: ParamDefinition, other: ParamDefinition) bool {
-        return self.p.is_generic == other.p.is_generic and self.p.is_noalias == other.p.is_noalias and self.p.type == other.p.type;
-    }
-
-    pub fn first_param_is_self() ParamDefinition {
-        return ParamDefinition{ .p = .{ .type = null, .is_generic = true } };
-    }
-    pub fn define_param(comptime t: type) ParamDefinition {
-        return ParamDefinition{ .p = .{ .type = t } };
-    }
-    pub fn define_param_adv(comptime t: type, comptime generic: Generic, comptime no_alias: NoAlias) ParamDefinition {
-        return ParamDefinition{ .p = .{ .type = t, .is_generic = @bitCast(generic), .is_noalias = @bitCast(no_alias) } };
-    }
-};
+//     pub fn first_param_is_self() ParamDefinition {
+//         return ParamDefinition{ .p = .{ .type = null, .is_generic = true, .is_noalias = false } };
+//     }
+//     pub fn define_param(comptime t: type) ParamDefinition {
+//         return ParamDefinition{ .p = .{ .type = t, .is_generic = false, .is_noalias = false } };
+//     }
+//     pub fn define_param_adv(comptime t: type, comptime generic: Generic, comptime no_alias: NoAlias) ParamDefinition {
+//         return ParamDefinition{ .p = .{ .type = t, .is_generic = @bitCast(generic), .is_noalias = @bitCast(no_alias) } };
+//     }
+// };
 
 pub fn all_enum_names_match_all_object_field_names(comptime ENUM: type, comptime STRUCT_OR_UNION_OR_ENUM: type) bool {
     const E_INFO = @typeInfo(ENUM).@"enum";
