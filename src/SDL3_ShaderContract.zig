@@ -593,6 +593,47 @@ pub fn StorageStruct(comptime FIELDS: type, comptime INCLUDE_LAYOUT: IncludeLayo
     };
 }
 
+/// INTERFACE:
+///   - `pub fn write_uniform_struct(struct_name: []const u8, format: WriteFormat, writer: *std.Io.Writer) std.Io.Writer.Error!void`
+///   - `pub fn write_storage_buffer_and_struct(struct_name: []const u8, format: WriteFormat, read_mode: StorageMode, writer: *std.Io.Writer) std.Io.Writer.Error!void`
+pub const StorageStructWriterInterface = struct {
+    fn UniformFuncBuilder(comptime T: type) type {
+        _ = T;
+        return fn ([]const u8, WriteFormat, *std.Io.Writer) std.Io.Writer.Error!void;
+    }
+    fn BufferFuncBuilder(comptime T: type) type {
+        _ = T;
+        return fn ([]const u8, WriteFormat, StorageMode, *std.Io.Writer) std.Io.Writer.Error!void;
+    }
+
+    const Signature = InterfaceSignature{
+        .interface_name = "StorageStructWriter",
+        .functions = &.{
+            NamedFuncDefinition.define_func_with_builder(
+                "write_uniform_struct",
+                UniformFuncBuilder,
+            ),
+            NamedFuncDefinition.define_func_with_builder(
+                "write_storage_buffer_and_struct",
+                BufferFuncBuilder,
+            ),
+        },
+    };
+    pub fn assert_interface(comptime T: type, comptime src: ?std.builtin.SourceLocation) void {
+        Signature.assert_type_fulfills(T, src);
+    }
+
+    pub fn write_stream_struct(comptime T: type, struct_name: []const u8, format: WriteFormat, writer: *std.Io.Writer) std.Io.Writer.Error!void {
+        const method = @field(T, "write_stream_struct");
+        return method(struct_name, format, writer);
+    }
+
+    pub fn write_storage_buffer_and_struct(comptime T: type, struct_name: []const u8, format: WriteFormat, read_mode: StorageMode, writer: *std.Io.Writer) std.Io.Writer.Error!void {
+        const method = @field(T, "write_storage_buffer_and_struct");
+        return method(struct_name, format, read_mode, writer);
+    }
+};
+
 /// A field inside a `StreamStruct(FIELDS)`
 pub fn StreamStructField(comptime FIELDS: type) type {
     return struct {
@@ -977,7 +1018,7 @@ pub fn StreamStruct(comptime FIELDS: type, comptime INCLUDE_LAYOUT: IncludeLayou
             return @ptrCast(@alignCast(buffer + OFFSET));
         }
 
-        pub fn write_stream_struct(format: WriteFormat, struct_name: []const u8, writer: *std.Io.Writer) std.Io.Writer.Error!void {
+        pub fn write_stream_struct(struct_name: []const u8, format: WriteFormat, writer: *std.Io.Writer) std.Io.Writer.Error!void {
             switch (format) {
                 .HLSL => {
                     _ = try writer.write(STRUCT_SPACE);
@@ -1002,94 +1043,118 @@ pub fn StreamStruct(comptime FIELDS: type, comptime INCLUDE_LAYOUT: IncludeLayou
     };
 }
 
-fn StreamStructWriter_FuncSignatureBuilder(comptime T: type) type {
-    _ = T;
-    return fn (WriteFormat, []const u8, *std.Io.Writer) std.Io.Writer.Error!void;
-}
-
-const StreamStructWriter_InterfaceSignature = InterfaceSignature{
-    .interface_name = "StreamStructWriter",
-    .functions = &.{
-        NamedFuncDefinition.define_func_with_builder(
-            "write_stream_struct",
-            StreamStructWriter_FuncSignatureBuilder,
-        ),
-    },
-};
-
 /// INTERFACE:
-///   - `pub fn write_stream_struct(format: WriteFormat, struct_name: []const u8, writer: *std.Io.Writer) std.Io.Writer.Error!void`
+///   - `pub fn write_stream_struct(struct_name: []const u8, format: WriteFormat, writer: *std.Io.Writer) std.Io.Writer.Error!void`
 pub const StreamStructWriterInterface = struct {
+    fn FuncSignatureBuilder(comptime T: type) type {
+        _ = T;
+        return fn ([]const u8, WriteFormat, *std.Io.Writer) std.Io.Writer.Error!void;
+    }
+
+    const Signature = InterfaceSignature{
+        .interface_name = "StreamStructWriter",
+        .functions = &.{
+            NamedFuncDefinition.define_func_with_builder(
+                "write_stream_struct",
+                FuncSignatureBuilder,
+            ),
+        },
+    };
+
     pub fn assert_interface(comptime T: type, comptime src: ?std.builtin.SourceLocation) void {
-        StreamStructWriter_InterfaceSignature.assert_type_fulfills(T, src);
+        Signature.assert_type_fulfills(T, src);
     }
 
-    pub fn write_stream_struct(comptime T: type, format: WriteFormat, struct_name: []const u8, writer: *std.Io.Writer) std.Io.Writer.Error!void {
+    pub fn write_stream_struct(comptime T: type, struct_name: []const u8, format: WriteFormat, writer: *std.Io.Writer) std.Io.Writer.Error!void {
         const method = @field(T, "write_stream_struct");
-        return method(format, struct_name, writer);
+        return method(struct_name, format, writer);
     }
-};
-
-fn StreamStructDefinition_LocationBuilder(comptime T: type) type {
-    _ = T;
-    return fn (comptime []const u8) u32;
-}
-fn StreamStructDefinition_CPUTypeBuilder(comptime T: type) type {
-    _ = T;
-    return fn (comptime []const u8) type;
-}
-fn StreamStructDefinition_UserFieldsBuilder(comptime T: type) type {
-    _ = T;
-    return fn () type;
-}
-
-const StreamStructDefinition_InterfaceSignature = InterfaceSignature{
-    .interface_name = "StreamStructDefinition",
-    .functions = &.{
-        NamedFuncDefinition.define_func_with_builder(
-            "get_field_location",
-            StreamStructDefinition_LocationBuilder,
-        ),
-        NamedFuncDefinition.define_func_with_builder(
-            "get_field_cpu_type",
-            StreamStructDefinition_CPUTypeBuilder,
-        ),
-        NamedFuncDefinition.define_func_with_builder(
-            "get_user_supplied_fields",
-            StreamStructDefinition_UserFieldsBuilder,
-        ),
-    },
 };
 
 /// INTERFACE:
-///   - `pub fn get_field_location(comptime field_name: []const u8) u32`
-///   - `pub fn get_field_cpu_type(comptime field_name: []const u8) type`
-///   - `pub fn get_user_supplied_fields() type`
-///     - where return value is an `enum` type
-///     - each enum tag name is a valid input for the other two required funcs
-pub const StreamStructDefinitionInterface = struct {
+///   - `pub fn get_field_gpu_location(comptime field_name: []const u8) u32`
+///   - `pub fn get_field_gpu_format(comptime field_name: []const u8) SDL3.GPU_VertexElementFormat`
+pub const StreamStructGPUDefinitionInterface = struct {
+    fn LocationBuilder(comptime T: type) type {
+        _ = T;
+        return fn (comptime []const u8) u32;
+    }
+    fn FormatBuilder(comptime T: type) type {
+        _ = T;
+        return fn (comptime []const u8) SDL3.GPU_VertexElementFormat;
+    }
+    const Signature = InterfaceSignature{
+        .interface_name = "StreamStructGPUDefinition",
+        .functions = &.{
+            NamedFuncDefinition.define_func_with_builder(
+                "get_field_gpu_location",
+                LocationBuilder,
+            ),
+            NamedFuncDefinition.define_func_with_builder(
+                "get_field_gpu_format",
+                FormatBuilder,
+            ),
+        },
+    };
     pub fn assert_interface(comptime T: type, comptime src: ?std.builtin.SourceLocation) void {
-        StreamStructDefinition_InterfaceSignature.assert_type_fulfills(T, src);
+        Signature.assert_type_fulfills(T, src);
     }
 
-    pub fn get_field_location(comptime T: type, comptime field_name: []const u8) u32 {
-        const method = @field(T, "get_field_location");
+    pub fn get_field_gpu_location(comptime T: type, comptime field_name: []const u8) u32 {
+        const method = @field(T, "get_field_gpu_location");
         return method(field_name);
     }
+    pub fn get_field_gpu_format(comptime T: type, comptime field_name: []const u8) SDL3.GPU_VertexElementFormat {
+        const method = @field(T, "get_field_gpu_format");
+        return method(field_name);
+    }
+};
 
+/// INTERFACE:
+///   - `pub fn get_field_cpu_type(comptime field_name: []const u8) type`
+///   - `pub fn get_field_cpu_offset(comptime field_name: []const u8) u32`
+pub const StreamStructCPUDefinitionInterface = struct {
+    fn OffsetBuilder(comptime T: type) type {
+        _ = T;
+        return fn (comptime []const u8) u32;
+    }
+    fn TypeBuilder(comptime T: type) type {
+        _ = T;
+        return fn (comptime []const u8) type;
+    }
+    const Signature = InterfaceSignature{
+        .interface_name = "StreamStructCPUDefinition",
+        .functions = &.{
+            NamedFuncDefinition.define_func_with_builder(
+                "get_field_cpu_offset",
+                OffsetBuilder,
+            ),
+            NamedFuncDefinition.define_func_with_builder(
+                "get_field_cpu_type",
+                TypeBuilder,
+            ),
+        },
+    };
+    pub fn assert_interface(comptime T: type, comptime src: ?std.builtin.SourceLocation) void {
+        Signature.assert_type_fulfills(T, src);
+    }
     pub fn get_field_cpu_type(comptime T: type, comptime field_name: []const u8) type {
         const method = @field(T, "get_field_cpu_type");
         return method(field_name);
     }
-
-    pub fn get_user_supplied_fields(comptime T: type) type {
-        const method = @field(T, "get_user_supplied_fields");
-        return method();
+    pub fn get_field_cpu_offset(comptime T: type, comptime field_name: []const u8) u32 {
+        const method = @field(T, "get_field_cpu_offset");
+        return method(field_name);
     }
 };
 
 pub const WriteFormat = enum(u8) {
     HLSL,
+};
+
+pub const StorageMode = enum(u8) {
+    READ_ONLY,
+    READ_WRITE,
 };
 
 pub const GPUType = struct {
@@ -2522,6 +2587,6 @@ test "build and write stream struct" {
     var file_write_buf: [512]u8 = undefined;
     var file_writer_holder = file.writer(file_write_buf[0..]);
     var writer = &file_writer_holder.interface;
-    try StreamStructWriterInterface.write_stream_struct(MyVertex, .HLSL, "MyStruct", writer);
+    try StreamStructWriterInterface.write_stream_struct(MyVertex, "MyStruct", .HLSL, writer);
     try writer.flush();
 }

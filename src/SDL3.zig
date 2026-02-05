@@ -7203,6 +7203,10 @@ pub const GPU_StencilOpState = extern struct {
     pub const from_c_ptr = c_non_opaque_conversions(GPU_StencilOpState, C.SDL_GPUStencilOpState).from_c_ptr;
     pub const to_c = c_non_opaque_conversions(GPU_StencilOpState, C.SDL_GPUStencilOpState).to_c;
     pub const from_c = c_non_opaque_conversions(GPU_StencilOpState, C.SDL_GPUStencilOpState).from_c;
+
+    pub fn none_invalid(self: GPU_StencilOpState) bool {
+        return self.fail_op != .INVALID and self.pass_op != .INVALID and self.compare_op != .INVALID and self.depth_fail_op != .INVALID;
+    }
 };
 
 pub const GPU_GraphicsPipelineTargetInfo = extern struct {
@@ -7247,6 +7251,14 @@ pub const GPU_ColorTargetBlendState = extern struct {
     pub const from_c_ptr = c_non_opaque_conversions(GPU_ColorTargetBlendState, C.SDL_GPUColorTargetBlendState).from_c_ptr;
     pub const to_c = c_non_opaque_conversions(GPU_ColorTargetBlendState, C.SDL_GPUColorTargetBlendState).to_c;
     pub const from_c = c_non_opaque_conversions(GPU_ColorTargetBlendState, C.SDL_GPUColorTargetBlendState).from_c;
+
+    pub fn none_invalid_if_option_enabled(self: GPU_ColorTargetBlendState) bool {
+        if (self.enable_blend) {
+            if (self.alpha_blend_op == .INVALID or self.color_blend_op == .INVALID or self.dst_alpha_blendfactor == .INVALID or self.dst_color_blendfactor == .INVALID or self.src_alpha_blendfactor == .INVALID or self.src_color_blendfactor == .INVALID) return false;
+        }
+        if (self.enable_color_write_mask and self.color_write_mask.raw == 0) return false;
+        return true;
+    }
 };
 
 pub const GPU_IndirectDispatchCommand = extern struct {
@@ -7722,6 +7734,226 @@ pub const GPU_VertexElementFormat = enum(c_uint) {
 
     pub const to_c = c_enum_conversions(GPU_VertexElementFormat, c_uint).to_c;
     pub const from_c = c_enum_conversions(GPU_VertexElementFormat, c_uint).from_c;
+
+    pub fn size(self: GPU_VertexElementFormat) usize {
+        return switch (self) {
+            .INVALID => 0,
+            .I32_x1,
+            .U32_x1,
+            .F32_x1,
+            .I16_x2,
+            .U16_x2,
+            .I16_x2_normalized,
+            .U16_x2_normalized,
+            .F16_x2,
+            .I8_x4,
+            .U8_x4,
+            .I8_x4_normalized,
+            .U8_x4_normalized,
+            => 4,
+            .I32_x2,
+            .U32_x2,
+            .F32_x2,
+            .I16_x4,
+            .U16_x4,
+            .I16_x4_normalized,
+            .U16_x4_normalized,
+            .F16_x4,
+            => 8,
+            .I32_x3, .U32_x3, .F32_x3 => 12,
+            .I32_x4, .U32_x4, .F32_x4 => 16,
+        };
+    }
+
+    const CH_KIND = enum(u8) {
+        F,
+        U,
+        I,
+        X,
+    };
+
+    /// This does not guarantee the best fit type will necessarily be valid, it
+    /// just returns the `GPU_VertexElementFormat` that has the closest size and
+    /// type semantics. It cannot infer any `XXX_xN_normalized` types.
+    pub fn best_fit_from_zig_type(comptime zig_type: type) GPU_VertexElementFormat {
+        const INFO = @typeInfo(zig_type);
+        if (INFO == .int or INFO == .@"enum") {
+            const INT = if (INFO == .int) INFO.int else @typeInfo(INFO.@"enum".tag_type).int;
+            switch (INT.signedness) {
+                .unsigned => switch (INT.bits) {
+                    1...8 => return GPU_VertexElementFormat.U8_x4, // FIRST ELEMENT ONLY
+                    9...16 => return GPU_VertexElementFormat.U16_x2, // FIRST ELEMENT ONLY
+                    17...32 => return GPU_VertexElementFormat.U32_x1,
+                    33...64 => return GPU_VertexElementFormat.U32_x2, // PACKED
+                    65...128 => return GPU_VertexElementFormat.U32_x4, // PACKED
+                    else => return GPU_VertexElementFormat.INVALID,
+                },
+                .signed => switch (INT.bits) {
+                    1...8 => return GPU_VertexElementFormat.I8_x4, // FIRST ELEMENT ONLY
+                    9...16 => return GPU_VertexElementFormat.I16_x2, // FIRST ELEMENT ONLY
+                    17...32 => return GPU_VertexElementFormat.I32_x1,
+                    33...64 => return GPU_VertexElementFormat.U32_x2, // PACKED
+                    65...128 => return GPU_VertexElementFormat.U32_x4, // PACKED
+                    else => return GPU_VertexElementFormat.INVALID,
+                },
+            }
+        }
+        if (INFO == .float) {
+            const FLOAT = INFO.float;
+            switch (FLOAT.bits) {
+                1...16 => return GPU_VertexElementFormat.F16_x2, // FIRST ELEMENT ONLY
+                17...32 => return GPU_VertexElementFormat.F32_x1,
+                33...64 => return GPU_VertexElementFormat.U32_x2, // PACKED
+                65...128 => return GPU_VertexElementFormat.U32_x4, // PACKED
+                else => return GPU_VertexElementFormat.INVALID,
+            }
+        }
+        if (INFO == .array or INFO == .vector) {
+            const LEN = if (INFO == .array) INFO.array.len else INFO.vector.len;
+            if (LEN <= 0 or LEN > 16) return GPU_VertexElementFormat.INVALID;
+            const CHILD = if (INFO == .array) INFO.array.child else INFO.vector.child;
+            const CHILD_INFO = @typeInfo(CHILD);
+            const CHILD_LEN = switch (CHILD_INFO) {
+                .int => |CHILD_INT| switch (CHILD_INT.bits) {
+                    1...8 => 1,
+                    9...16 => 2,
+                    17...32 => 4,
+                    33...64 => 8,
+                    65...128 => 16,
+                    else => return GPU_VertexElementFormat.INVALID,
+                },
+                .float => |CHILD_FLOAT| switch (CHILD_FLOAT.bits) {
+                    1...8 => 1,
+                    9...16 => 2,
+                    17...32 => 4,
+                    33...64 => 8,
+                    65...128 => 16,
+                    else => return GPU_VertexElementFormat.INVALID,
+                },
+                else => switch (@sizeOf(CHILD)) {
+                    1...16 => @sizeOf(CHILD),
+                    else => return GPU_VertexElementFormat.INVALID,
+                },
+            };
+            const CHILD_KIND: CH_KIND = recheck: switch (CHILD_INFO) {
+                .int => |CHILD_INT| switch (CHILD_INT.signedness) {
+                    .unsigned => CH_KIND.U,
+                    .signed => CH_KIND.I,
+                },
+                .@"enum" => |CHILD_ENUM| {
+                    continue :recheck @typeInfo(CHILD_ENUM.tag_type);
+                },
+                .float => CH_KIND.F,
+                else => CH_KIND.X,
+            };
+            const TOTAL_LEN = LEN * CHILD_LEN;
+            if (TOTAL_LEN <= 0 or TOTAL_LEN > 16) return GPU_VertexElementFormat.INVALID;
+            switch (CHILD_KIND) {
+                .U, .X => switch (TOTAL_LEN) {
+                    1 => GPU_VertexElementFormat.U8_x4,
+                    2 => switch (CHILD_LEN) {
+                        1 => GPU_VertexElementFormat.U8_x4,
+                        2 => GPU_VertexElementFormat.U16_x2,
+                        else => unreachable,
+                    },
+                    3 => GPU_VertexElementFormat.U32_x1,
+                    4 => switch (CHILD_LEN) {
+                        1 => GPU_VertexElementFormat.U8_x4,
+                        2 => GPU_VertexElementFormat.U16_x2,
+                        4 => GPU_VertexElementFormat.U32_x1,
+                        else => unreachable,
+                    },
+                    5...7 => GPU_VertexElementFormat.U32_x2,
+                    8 => switch (CHILD_LEN) {
+                        1 => GPU_VertexElementFormat.U32_x2,
+                        2 => GPU_VertexElementFormat.U16_x4,
+                        4, 8 => GPU_VertexElementFormat.U32_x2,
+                        else => unreachable,
+                    },
+                    9...12 => GPU_VertexElementFormat.U32_x3,
+                    13...16 => GPU_VertexElementFormat.U32_x4,
+                    else => unreachable,
+                },
+                .I => switch (TOTAL_LEN) {
+                    1 => GPU_VertexElementFormat.I8_x4,
+                    2 => switch (CHILD_LEN) {
+                        1 => GPU_VertexElementFormat.I8_x4,
+                        2 => GPU_VertexElementFormat.I16_x2,
+                        else => unreachable,
+                    },
+                    3 => GPU_VertexElementFormat.U32_x1,
+                    4 => switch (CHILD_LEN) {
+                        1 => GPU_VertexElementFormat.I8_x4,
+                        2 => GPU_VertexElementFormat.I16_x2,
+                        4 => GPU_VertexElementFormat.I32_x1,
+                        else => unreachable,
+                    },
+                    5...7 => GPU_VertexElementFormat.U32_x2,
+                    8 => switch (CHILD_LEN) {
+                        1 => GPU_VertexElementFormat.U32_x2,
+                        2 => GPU_VertexElementFormat.I16_x4,
+                        4 => GPU_VertexElementFormat.I32_x2,
+                        8 => GPU_VertexElementFormat.U32_x2,
+                        else => unreachable,
+                    },
+                    9...11 => GPU_VertexElementFormat.U32_x3,
+                    12 => GPU_VertexElementFormat.I32_x3,
+                    13...15 => GPU_VertexElementFormat.U32_x4,
+                    16 => GPU_VertexElementFormat.I32_x4,
+                    else => unreachable,
+                },
+                .F => switch (TOTAL_LEN) {
+                    1 => GPU_VertexElementFormat.U32_x1,
+                    2 => switch (CHILD_LEN) {
+                        1 => GPU_VertexElementFormat.U32_x1,
+                        2 => GPU_VertexElementFormat.F16_x2,
+                        else => unreachable,
+                    },
+                    3 => GPU_VertexElementFormat.U32_x1,
+                    4 => switch (CHILD_LEN) {
+                        1 => GPU_VertexElementFormat.U32_x1,
+                        2 => GPU_VertexElementFormat.F16_x2,
+                        4 => GPU_VertexElementFormat.F32_x1,
+                        else => unreachable,
+                    },
+                    5...7 => GPU_VertexElementFormat.U32_x2,
+                    8 => switch (CHILD_LEN) {
+                        1 => GPU_VertexElementFormat.U32_x2,
+                        2 => GPU_VertexElementFormat.F16_x4,
+                        4 => GPU_VertexElementFormat.F32_x2,
+                        8 => GPU_VertexElementFormat.U32_x2,
+                        else => unreachable,
+                    },
+                    9...11 => GPU_VertexElementFormat.U32_x3,
+                    12 => GPU_VertexElementFormat.F32_x3,
+                    13...15 => GPU_VertexElementFormat.U32_x4,
+                    16 => GPU_VertexElementFormat.F32_x4,
+                    else => unreachable,
+                },
+            }
+        }
+        if (Types.type_is_struct(zig_type)) {
+            if (Types.type_is_struct_with_all_fields_same_type_any(zig_type)) {
+                const ARRAY_LEN = INFO.@"struct".fields.len;
+                const ARRAY_CHILD = INFO.@"struct".fields[0].type;
+                const ARRAY = @Type(std.builtin.Type.Array{ .child = ARRAY_CHILD, .len = ARRAY_LEN, .sentinel_ptr = null });
+                return best_fit_from_zig_type(ARRAY);
+            }
+        }
+        return switch (@sizeOf(zig_type)) {
+            1...4 => GPU_VertexElementFormat.U32_x1,
+            5...8 => GPU_VertexElementFormat.U32_x2,
+            9...12 => GPU_VertexElementFormat.U32_x3,
+            13...16 => GPU_VertexElementFormat.U32_x4,
+            else => GPU_VertexElementFormat.INVALID,
+        };
+    }
+
+    // pub fn compatible_with_texture_format(self: GPU_VertexElementFormat, format: GPU_TextureFormat) bool {
+    //     switch (self) {
+    //         .F32_x4 => return,
+    //     }
+    // }
 };
 
 pub const GPU_Buffer = opaque {
@@ -7962,111 +8194,121 @@ pub const GPU_IndexTypeSize = enum(c_uint) {
 };
 
 pub const GPU_TextureFormat = enum(C.SDL_GPUTextureFormat) {
-    INVALID = C.SDL_TEXTUREFORMAT_INVALID,
-    A8_UNORM = C.SDL_TEXTUREFORMAT_A8_UNORM,
-    R8_UNORM = C.SDL_TEXTUREFORMAT_R8_UNORM,
-    R8G8_UNORM = C.SDL_TEXTUREFORMAT_R8G8_UNORM,
-    R8G8B8A8_UNORM = C.SDL_TEXTUREFORMAT_R8G8B8A8_UNORM,
-    R16_UNORM = C.SDL_TEXTUREFORMAT_R16_UNORM,
-    R16G16_UNORM = C.SDL_TEXTUREFORMAT_R16G16_UNORM,
-    R16G16B16A16_UNORM = C.SDL_TEXTUREFORMAT_R16G16B16A16_UNORM,
-    R10G10B10A2_UNORM = C.SDL_TEXTUREFORMAT_R10G10B10A2_UNORM,
-    B5G6R5_UNORM = C.SDL_TEXTUREFORMAT_B5G6R5_UNORM,
-    B5G5R5A1_UNORM = C.SDL_TEXTUREFORMAT_B5G5R5A1_UNORM,
-    B4G4R4A4_UNORM = C.SDL_TEXTUREFORMAT_B4G4R4A4_UNORM,
-    B8G8R8A8_UNORM = C.SDL_TEXTUREFORMAT_B8G8R8A8_UNORM,
-    BC1_RGBA_UNORM = C.SDL_TEXTUREFORMAT_BC1_RGBA_UNORM,
-    BC2_RGBA_UNORM = C.SDL_TEXTUREFORMAT_BC2_RGBA_UNORM,
-    BC3_RGBA_UNORM = C.SDL_TEXTUREFORMAT_BC3_RGBA_UNORM,
-    BC4_R_UNORM = C.SDL_TEXTUREFORMAT_BC4_R_UNORM,
-    BC5_RG_UNORM = C.SDL_TEXTUREFORMAT_BC5_RG_UNORM,
-    BC7_RGBA_UNORM = C.SDL_TEXTUREFORMAT_BC7_RGBA_UNORM,
-    BC6H_RGB_FLOAT = C.SDL_TEXTUREFORMAT_BC6H_RGB_FLOAT,
-    BC6H_RGB_UFLOAT = C.SDL_TEXTUREFORMAT_BC6H_RGB_UFLOAT,
-    R8_SNORM = C.SDL_TEXTUREFORMAT_R8_SNORM,
-    R8G8_SNORM = C.SDL_TEXTUREFORMAT_R8G8_SNORM,
-    R8G8B8A8_SNORM = C.SDL_TEXTUREFORMAT_R8G8B8A8_SNORM,
-    R16_SNORM = C.SDL_TEXTUREFORMAT_R16_SNORM,
-    R16G16_SNORM = C.SDL_TEXTUREFORMAT_R16G16_SNORM,
-    R16G16B16A16_SNORM = C.SDL_TEXTUREFORMAT_R16G16B16A16_SNORM,
-    R16_FLOAT = C.SDL_TEXTUREFORMAT_R16_FLOAT,
-    R16G16_FLOAT = C.SDL_TEXTUREFORMAT_R16G16_FLOAT,
-    R16G16B16A16_FLOAT = C.SDL_TEXTUREFORMAT_R16G16B16A16_FLOAT,
-    R32_FLOAT = C.SDL_TEXTUREFORMAT_R32_FLOAT,
-    R32G32_FLOAT = C.SDL_TEXTUREFORMAT_R32G32_FLOAT,
-    R32G32B32A32_FLOAT = C.SDL_TEXTUREFORMAT_R32G32B32A32_FLOAT,
-    R11G11B10_UFLOAT = C.SDL_TEXTUREFORMAT_R11G11B10_UFLOAT,
-    R8_UINT = C.SDL_TEXTUREFORMAT_R8_UINT,
-    R8G8_UINT = C.SDL_TEXTUREFORMAT_R8G8_UINT,
-    R8G8B8A8_UINT = C.SDL_TEXTUREFORMAT_R8G8B8A8_UINT,
-    R16_UINT = C.SDL_TEXTUREFORMAT_R16_UINT,
-    R16G16_UINT = C.SDL_TEXTUREFORMAT_R16G16_UINT,
-    R16G16B16A16_UINT = C.SDL_TEXTUREFORMAT_R16G16B16A16_UINT,
-    R32_UINT = C.SDL_TEXTUREFORMAT_R32_UINT,
-    R32G32_UINT = C.SDL_TEXTUREFORMAT_R32G32_UINT,
-    R32G32B32A32_UINT = C.SDL_TEXTUREFORMAT_R32G32B32A32_UINT,
-    R8_INT = C.SDL_TEXTUREFORMAT_R8_INT,
-    R8G8_INT = C.SDL_TEXTUREFORMAT_R8G8_INT,
-    R8G8B8A8_INT = C.SDL_TEXTUREFORMAT_R8G8B8A8_INT,
-    R16_INT = C.SDL_TEXTUREFORMAT_R16_INT,
-    R16G16_INT = C.SDL_TEXTUREFORMAT_R16G16_INT,
-    R16G16B16A16_INT = C.SDL_TEXTUREFORMAT_R16G16B16A16_INT,
-    R32_INT = C.SDL_TEXTUREFORMAT_R32_INT,
-    R32G32_INT = C.SDL_TEXTUREFORMAT_R32G32_INT,
-    R32G32B32A32_INT = C.SDL_TEXTUREFORMAT_R32G32B32A32_INT,
-    R8G8B8A8_UNORM_SRGB = C.SDL_TEXTUREFORMAT_R8G8B8A8_UNORM_SRGB,
-    B8G8R8A8_UNORM_SRGB = C.SDL_TEXTUREFORMAT_B8G8R8A8_UNORM_SRGB,
-    BC1_RGBA_UNORM_SRGB = C.SDL_TEXTUREFORMAT_BC1_RGBA_UNORM_SRGB,
-    BC2_RGBA_UNORM_SRGB = C.SDL_TEXTUREFORMAT_BC2_RGBA_UNORM_SRGB,
-    BC3_RGBA_UNORM_SRGB = C.SDL_TEXTUREFORMAT_BC3_RGBA_UNORM_SRGB,
-    BC7_RGBA_UNORM_SRGB = C.SDL_TEXTUREFORMAT_BC7_RGBA_UNORM_SRGB,
-    D16_UNORM = C.SDL_TEXTUREFORMAT_D16_UNORM,
-    D24_UNORM = C.SDL_TEXTUREFORMAT_D24_UNORM,
-    D32_FLOAT = C.SDL_TEXTUREFORMAT_D32_FLOAT,
-    D24_UNORM_S8_UINT = C.SDL_TEXTUREFORMAT_D24_UNORM_S8_UINT,
-    D32_FLOAT_S8_UINT = C.SDL_TEXTUREFORMAT_D32_FLOAT_S8_UINT,
-    ASTC_4x4_UNORM = C.SDL_TEXTUREFORMAT_ASTC_4x4_UNORM,
-    ASTC_5x4_UNORM = C.SDL_TEXTUREFORMAT_ASTC_5x4_UNORM,
-    ASTC_5x5_UNORM = C.SDL_TEXTUREFORMAT_ASTC_5x5_UNORM,
-    ASTC_6x5_UNORM = C.SDL_TEXTUREFORMAT_ASTC_6x5_UNORM,
-    ASTC_6x6_UNORM = C.SDL_TEXTUREFORMAT_ASTC_6x6_UNORM,
-    ASTC_8x5_UNORM = C.SDL_TEXTUREFORMAT_ASTC_8x5_UNORM,
-    ASTC_8x6_UNORM = C.SDL_TEXTUREFORMAT_ASTC_8x6_UNORM,
-    ASTC_8x8_UNORM = C.SDL_TEXTUREFORMAT_ASTC_8x8_UNORM,
-    ASTC_10x5_UNORM = C.SDL_TEXTUREFORMAT_ASTC_10x5_UNORM,
-    ASTC_10x6_UNORM = C.SDL_TEXTUREFORMAT_ASTC_10x6_UNORM,
-    ASTC_10x8_UNORM = C.SDL_TEXTUREFORMAT_ASTC_10x8_UNORM,
-    ASTC_10x10_UNORM = C.SDL_TEXTUREFORMAT_ASTC_10x10_UNORM,
-    ASTC_12x10_UNORM = C.SDL_TEXTUREFORMAT_ASTC_12x10_UNORM,
-    ASTC_12x12_UNORM = C.SDL_TEXTUREFORMAT_ASTC_12x12_UNORM,
-    ASTC_4x4_UNORM_SRGB = C.SDL_TEXTUREFORMAT_ASTC_4x4_UNORM_SRGB,
-    ASTC_5x4_UNORM_SRGB = C.SDL_TEXTUREFORMAT_ASTC_5x4_UNORM_SRGB,
-    ASTC_5x5_UNORM_SRGB = C.SDL_TEXTUREFORMAT_ASTC_5x5_UNORM_SRGB,
-    ASTC_6x5_UNORM_SRGB = C.SDL_TEXTUREFORMAT_ASTC_6x5_UNORM_SRGB,
-    ASTC_6x6_UNORM_SRGB = C.SDL_TEXTUREFORMAT_ASTC_6x6_UNORM_SRGB,
-    ASTC_8x5_UNORM_SRGB = C.SDL_TEXTUREFORMAT_ASTC_8x5_UNORM_SRGB,
-    ASTC_8x6_UNORM_SRGB = C.SDL_TEXTUREFORMAT_ASTC_8x6_UNORM_SRGB,
-    ASTC_8x8_UNORM_SRGB = C.SDL_TEXTUREFORMAT_ASTC_8x8_UNORM_SRGB,
-    ASTC_10x5_UNORM_SRGB = C.SDL_TEXTUREFORMAT_ASTC_10x5_UNORM_SRGB,
-    ASTC_10x6_UNORM_SRGB = C.SDL_TEXTUREFORMAT_ASTC_10x6_UNORM_SRGB,
-    ASTC_10x8_UNORM_SRGB = C.SDL_TEXTUREFORMAT_ASTC_10x8_UNORM_SRGB,
-    ASTC_10x10_UNORM_SRGB = C.SDL_TEXTUREFORMAT_ASTC_10x10_UNORM_SRGB,
-    ASTC_12x10_UNORM_SRGB = C.SDL_TEXTUREFORMAT_ASTC_12x10_UNORM_SRGB,
-    ASTC_12x12_UNORM_SRGB = C.SDL_TEXTUREFORMAT_ASTC_12x12_UNORM_SRGB,
-    ASTC_4x4_FLOAT = C.SDL_TEXTUREFORMAT_ASTC_4x4_FLOAT,
-    ASTC_5x4_FLOAT = C.SDL_TEXTUREFORMAT_ASTC_5x4_FLOAT,
-    ASTC_5x5_FLOAT = C.SDL_TEXTUREFORMAT_ASTC_5x5_FLOAT,
-    ASTC_6x5_FLOAT = C.SDL_TEXTUREFORMAT_ASTC_6x5_FLOAT,
-    ASTC_6x6_FLOAT = C.SDL_TEXTUREFORMAT_ASTC_6x6_FLOAT,
-    ASTC_8x5_FLOAT = C.SDL_TEXTUREFORMAT_ASTC_8x5_FLOAT,
-    ASTC_8x6_FLOAT = C.SDL_TEXTUREFORMAT_ASTC_8x6_FLOAT,
-    ASTC_8x8_FLOAT = C.SDL_TEXTUREFORMAT_ASTC_8x8_FLOAT,
-    ASTC_10x5_FLOAT = C.SDL_TEXTUREFORMAT_ASTC_10x5_FLOAT,
-    ASTC_10x6_FLOAT = C.SDL_TEXTUREFORMAT_ASTC_10x6_FLOAT,
-    ASTC_10x8_FLOAT = C.SDL_TEXTUREFORMAT_ASTC_10x8_FLOAT,
-    ASTC_10x10_FLOAT = C.SDL_TEXTUREFORMAT_ASTC_10x10_FLOAT,
-    ASTC_12x10_FLOAT = C.SDL_TEXTUREFORMAT_ASTC_12x10_FLOAT,
-    ASTC_12x12_FLOAT = C.SDL_TEXTUREFORMAT_ASTC_12x12_FLOAT,
+    INVALID = C.SDL_GPU_TEXTUREFORMAT_INVALID,
+    // UNSIGNED NORMALIZED FLOAT TYPES
+    A8_UNORM = C.SDL_GPU_TEXTUREFORMAT_A8_UNORM,
+    R8_UNORM = C.SDL_GPU_TEXTUREFORMAT_R8_UNORM,
+    R8G8_UNORM = C.SDL_GPU_TEXTUREFORMAT_R8G8_UNORM,
+    R8G8B8A8_UNORM = C.SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM,
+    R16_UNORM = C.SDL_GPU_TEXTUREFORMAT_R16_UNORM,
+    R16G16_UNORM = C.SDL_GPU_TEXTUREFORMAT_R16G16_UNORM,
+    R16G16B16A16_UNORM = C.SDL_GPU_TEXTUREFORMAT_R16G16B16A16_UNORM,
+    R10G10B10A2_UNORM = C.SDL_GPU_TEXTUREFORMAT_R10G10B10A2_UNORM,
+    B5G6R5_UNORM = C.SDL_GPU_TEXTUREFORMAT_B5G6R5_UNORM,
+    B5G5R5A1_UNORM = C.SDL_GPU_TEXTUREFORMAT_B5G5R5A1_UNORM,
+    B4G4R4A4_UNORM = C.SDL_GPU_TEXTUREFORMAT_B4G4R4A4_UNORM,
+    B8G8R8A8_UNORM = C.SDL_GPU_TEXTUREFORMAT_B8G8R8A8_UNORM,
+    // COMPRESSED UNSIGNED NORMALIZED FLOAT TYPES
+    BC1_RGBA_UNORM = C.SDL_GPU_TEXTUREFORMAT_BC1_RGBA_UNORM,
+    BC2_RGBA_UNORM = C.SDL_GPU_TEXTUREFORMAT_BC2_RGBA_UNORM,
+    BC3_RGBA_UNORM = C.SDL_GPU_TEXTUREFORMAT_BC3_RGBA_UNORM,
+    BC4_R_UNORM = C.SDL_GPU_TEXTUREFORMAT_BC4_R_UNORM,
+    BC5_RG_UNORM = C.SDL_GPU_TEXTUREFORMAT_BC5_RG_UNORM,
+    BC7_RGBA_UNORM = C.SDL_GPU_TEXTUREFORMAT_BC7_RGBA_UNORM,
+    BC6H_RGB_FLOAT = C.SDL_GPU_TEXTUREFORMAT_BC6H_RGB_FLOAT,
+    BC6H_RGB_UFLOAT = C.SDL_GPU_TEXTUREFORMAT_BC6H_RGB_UFLOAT,
+    // SIGNED NORMALIZED FLOAT TYPES
+    R8_SNORM = C.SDL_GPU_TEXTUREFORMAT_R8_SNORM,
+    R8G8_SNORM = C.SDL_GPU_TEXTUREFORMAT_R8G8_SNORM,
+    R8G8B8A8_SNORM = C.SDL_GPU_TEXTUREFORMAT_R8G8B8A8_SNORM,
+    R16_SNORM = C.SDL_GPU_TEXTUREFORMAT_R16_SNORM,
+    R16G16_SNORM = C.SDL_GPU_TEXTUREFORMAT_R16G16_SNORM,
+    R16G16B16A16_SNORM = C.SDL_GPU_TEXTUREFORMAT_R16G16B16A16_SNORM,
+    // HIGH-PRECISION TYPES
+    R16_FLOAT = C.SDL_GPU_TEXTUREFORMAT_R16_FLOAT,
+    R16G16_FLOAT = C.SDL_GPU_TEXTUREFORMAT_R16G16_FLOAT,
+    R16G16B16A16_FLOAT = C.SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT,
+    R32_FLOAT = C.SDL_GPU_TEXTUREFORMAT_R32_FLOAT,
+    R32G32_FLOAT = C.SDL_GPU_TEXTUREFORMAT_R32G32_FLOAT,
+    R32G32B32A32_FLOAT = C.SDL_GPU_TEXTUREFORMAT_R32G32B32A32_FLOAT,
+    R11G11B10_UFLOAT = C.SDL_GPU_TEXTUREFORMAT_R11G11B10_UFLOAT,
+    // UINT TYPES
+    R8_UINT = C.SDL_GPU_TEXTUREFORMAT_R8_UINT,
+    R8G8_UINT = C.SDL_GPU_TEXTUREFORMAT_R8G8_UINT,
+    R8G8B8A8_UINT = C.SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UINT,
+    R16_UINT = C.SDL_GPU_TEXTUREFORMAT_R16_UINT,
+    R16G16_UINT = C.SDL_GPU_TEXTUREFORMAT_R16G16_UINT,
+    R16G16B16A16_UINT = C.SDL_GPU_TEXTUREFORMAT_R16G16B16A16_UINT,
+    R32_UINT = C.SDL_GPU_TEXTUREFORMAT_R32_UINT,
+    R32G32_UINT = C.SDL_GPU_TEXTUREFORMAT_R32G32_UINT,
+    R32G32B32A32_UINT = C.SDL_GPU_TEXTUREFORMAT_R32G32B32A32_UINT,
+    // INT TYPES
+    R8_INT = C.SDL_GPU_TEXTUREFORMAT_R8_INT,
+    R8G8_INT = C.SDL_GPU_TEXTUREFORMAT_R8G8_INT,
+    R8G8B8A8_INT = C.SDL_GPU_TEXTUREFORMAT_R8G8B8A8_INT,
+    R16_INT = C.SDL_GPU_TEXTUREFORMAT_R16_INT,
+    R16G16_INT = C.SDL_GPU_TEXTUREFORMAT_R16G16_INT,
+    R16G16B16A16_INT = C.SDL_GPU_TEXTUREFORMAT_R16G16B16A16_INT,
+    R32_INT = C.SDL_GPU_TEXTUREFORMAT_R32_INT,
+    R32G32_INT = C.SDL_GPU_TEXTUREFORMAT_R32G32_INT,
+    R32G32B32A32_INT = C.SDL_GPU_TEXTUREFORMAT_R32G32B32A32_INT,
+    //SRGB UNSIGNED NORMALIZED FLOAT TYPES
+    R8G8B8A8_UNORM_SRGB = C.SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM_SRGB,
+    B8G8R8A8_UNORM_SRGB = C.SDL_GPU_TEXTUREFORMAT_B8G8R8A8_UNORM_SRGB,
+    // SRGB COMPRESSED UNSIGNED NORMALIZED FLOAT TYPES
+    BC1_RGBA_UNORM_SRGB = C.SDL_GPU_TEXTUREFORMAT_BC1_RGBA_UNORM_SRGB,
+    BC2_RGBA_UNORM_SRGB = C.SDL_GPU_TEXTUREFORMAT_BC2_RGBA_UNORM_SRGB,
+    BC3_RGBA_UNORM_SRGB = C.SDL_GPU_TEXTUREFORMAT_BC3_RGBA_UNORM_SRGB,
+    BC7_RGBA_UNORM_SRGB = C.SDL_GPU_TEXTUREFORMAT_BC7_RGBA_UNORM_SRGB,
+    // DEPTH MODES
+    D16_UNORM = C.SDL_GPU_TEXTUREFORMAT_D16_UNORM,
+    D24_UNORM = C.SDL_GPU_TEXTUREFORMAT_D24_UNORM,
+    D32_FLOAT = C.SDL_GPU_TEXTUREFORMAT_D32_FLOAT,
+    D24_UNORM_S8_UINT = C.SDL_GPU_TEXTUREFORMAT_D24_UNORM_S8_UINT,
+    D32_FLOAT_S8_UINT = C.SDL_GPU_TEXTUREFORMAT_D32_FLOAT_S8_UINT,
+    // SPECIAL COMPRESSED MODES
+    ASTC_4x4_UNORM = C.SDL_GPU_TEXTUREFORMAT_ASTC_4x4_UNORM,
+    ASTC_5x4_UNORM = C.SDL_GPU_TEXTUREFORMAT_ASTC_5x4_UNORM,
+    ASTC_5x5_UNORM = C.SDL_GPU_TEXTUREFORMAT_ASTC_5x5_UNORM,
+    ASTC_6x5_UNORM = C.SDL_GPU_TEXTUREFORMAT_ASTC_6x5_UNORM,
+    ASTC_6x6_UNORM = C.SDL_GPU_TEXTUREFORMAT_ASTC_6x6_UNORM,
+    ASTC_8x5_UNORM = C.SDL_GPU_TEXTUREFORMAT_ASTC_8x5_UNORM,
+    ASTC_8x6_UNORM = C.SDL_GPU_TEXTUREFORMAT_ASTC_8x6_UNORM,
+    ASTC_8x8_UNORM = C.SDL_GPU_TEXTUREFORMAT_ASTC_8x8_UNORM,
+    ASTC_10x5_UNORM = C.SDL_GPU_TEXTUREFORMAT_ASTC_10x5_UNORM,
+    ASTC_10x6_UNORM = C.SDL_GPU_TEXTUREFORMAT_ASTC_10x6_UNORM,
+    ASTC_10x8_UNORM = C.SDL_GPU_TEXTUREFORMAT_ASTC_10x8_UNORM,
+    ASTC_10x10_UNORM = C.SDL_GPU_TEXTUREFORMAT_ASTC_10x10_UNORM,
+    ASTC_12x10_UNORM = C.SDL_GPU_TEXTUREFORMAT_ASTC_12x10_UNORM,
+    ASTC_12x12_UNORM = C.SDL_GPU_TEXTUREFORMAT_ASTC_12x12_UNORM,
+    ASTC_4x4_UNORM_SRGB = C.SDL_GPU_TEXTUREFORMAT_ASTC_4x4_UNORM_SRGB,
+    ASTC_5x4_UNORM_SRGB = C.SDL_GPU_TEXTUREFORMAT_ASTC_5x4_UNORM_SRGB,
+    ASTC_5x5_UNORM_SRGB = C.SDL_GPU_TEXTUREFORMAT_ASTC_5x5_UNORM_SRGB,
+    ASTC_6x5_UNORM_SRGB = C.SDL_GPU_TEXTUREFORMAT_ASTC_6x5_UNORM_SRGB,
+    ASTC_6x6_UNORM_SRGB = C.SDL_GPU_TEXTUREFORMAT_ASTC_6x6_UNORM_SRGB,
+    ASTC_8x5_UNORM_SRGB = C.SDL_GPU_TEXTUREFORMAT_ASTC_8x5_UNORM_SRGB,
+    ASTC_8x6_UNORM_SRGB = C.SDL_GPU_TEXTUREFORMAT_ASTC_8x6_UNORM_SRGB,
+    ASTC_8x8_UNORM_SRGB = C.SDL_GPU_TEXTUREFORMAT_ASTC_8x8_UNORM_SRGB,
+    ASTC_10x5_UNORM_SRGB = C.SDL_GPU_TEXTUREFORMAT_ASTC_10x5_UNORM_SRGB,
+    ASTC_10x6_UNORM_SRGB = C.SDL_GPU_TEXTUREFORMAT_ASTC_10x6_UNORM_SRGB,
+    ASTC_10x8_UNORM_SRGB = C.SDL_GPU_TEXTUREFORMAT_ASTC_10x8_UNORM_SRGB,
+    ASTC_10x10_UNORM_SRGB = C.SDL_GPU_TEXTUREFORMAT_ASTC_10x10_UNORM_SRGB,
+    ASTC_12x10_UNORM_SRGB = C.SDL_GPU_TEXTUREFORMAT_ASTC_12x10_UNORM_SRGB,
+    ASTC_12x12_UNORM_SRGB = C.SDL_GPU_TEXTUREFORMAT_ASTC_12x12_UNORM_SRGB,
+    ASTC_4x4_FLOAT = C.SDL_GPU_TEXTUREFORMAT_ASTC_4x4_FLOAT,
+    ASTC_5x4_FLOAT = C.SDL_GPU_TEXTUREFORMAT_ASTC_5x4_FLOAT,
+    ASTC_5x5_FLOAT = C.SDL_GPU_TEXTUREFORMAT_ASTC_5x5_FLOAT,
+    ASTC_6x5_FLOAT = C.SDL_GPU_TEXTUREFORMAT_ASTC_6x5_FLOAT,
+    ASTC_6x6_FLOAT = C.SDL_GPU_TEXTUREFORMAT_ASTC_6x6_FLOAT,
+    ASTC_8x5_FLOAT = C.SDL_GPU_TEXTUREFORMAT_ASTC_8x5_FLOAT,
+    ASTC_8x6_FLOAT = C.SDL_GPU_TEXTUREFORMAT_ASTC_8x6_FLOAT,
+    ASTC_8x8_FLOAT = C.SDL_GPU_TEXTUREFORMAT_ASTC_8x8_FLOAT,
+    ASTC_10x5_FLOAT = C.SDL_GPU_TEXTUREFORMAT_ASTC_10x5_FLOAT,
+    ASTC_10x6_FLOAT = C.SDL_GPU_TEXTUREFORMAT_ASTC_10x6_FLOAT,
+    ASTC_10x8_FLOAT = C.SDL_GPU_TEXTUREFORMAT_ASTC_10x8_FLOAT,
+    ASTC_10x10_FLOAT = C.SDL_GPU_TEXTUREFORMAT_ASTC_10x10_FLOAT,
+    ASTC_12x10_FLOAT = C.SDL_GPU_TEXTUREFORMAT_ASTC_12x10_FLOAT,
+    ASTC_12x12_FLOAT = C.SDL_GPU_TEXTUREFORMAT_ASTC_12x12_FLOAT,
 
     pub const to_c = c_enum_conversions(GPU_TextureFormat, C.SDL_GPUTextureFormat).to_c;
     pub const from_c = c_enum_conversions(GPU_TextureFormat, C.SDL_GPUTextureFormat).from_c;
@@ -8076,6 +8318,26 @@ pub const GPU_TextureFormat = enum(C.SDL_GPUTextureFormat) {
     }
     pub fn calculate_texture_size(self: GPU_TextureFormat, size: Vec_c_uint, depth_or_layer_count: u32) u32 {
         return C.SDL_CalculateGPUTextureFormatSize(self.to_c(), size.x, size.y, depth_or_layer_count);
+    }
+
+    pub fn is_depth_format(self: GPU_TextureFormat) bool {
+        return switch (self) {
+            .D16_UNORM,
+            .D24_UNORM,
+            .D32_FLOAT,
+            .D24_UNORM_S8_UINT,
+            .D32_FLOAT_S8_UINT,
+            => true,
+            else => false,
+        };
+    }
+    pub fn has_depth_stencil(self: GPU_TextureFormat) bool {
+        return switch (self) {
+            .D24_UNORM_S8_UINT,
+            .D32_FLOAT_S8_UINT,
+            => true,
+            else => false,
+        };
     }
 };
 

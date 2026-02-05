@@ -30,88 +30,162 @@ const Log2IntCeil = math.Log2IntCeil;
 
 const Root = @import("./_root.zig");
 const Utils = Root.Utils;
-const comptime_assert_with_reason = Utils.comptime_assert_with_reason;
+const Assert = Root.Assert;
+const Types = Root.Types;
+const num_cast = Root.Cast.num_cast;
+const assert_with_reason = Assert.assert_with_reason;
+const assert_unreachable = Assert.assert_unreachable;
 
-pub fn EnumMap(comptime T: type, comptime Enum: type, comptime MAPPING: []const MapPair(T, Enum)) type {
-    const EI = @typeInfo(Enum);
-    comptime_assert_with_reason(EI == .@"enum", @src(), "parameter `ENUM` must be an enum type");
-    const E_INFO = EI.@"enum";
-    comptime_assert_with_reason(@typeInfo(E_INFO.tag_type).int.signedness == .unsigned, @src(), "parameter `ENUM` tag type must be an unsigned integer type");
-    comptime_assert_with_reason(E_INFO.fields.len == MAPPING.len, @src(), "`MAPPING.len` must equal the number of tags in `ENUM`");
-    comptime_assert_with_reason(Utils.all_enum_values_start_from_zero_with_no_gaps(Enum), @src(), "tags in `ENUM` must cover all values from 0 to the largest tag value with no gaps");
-    const M = create: {
-        var m: [E_INFO.fields.len]T = undefined;
-        var count: [E_INFO.fields.len]usize = undefined;
-        for (MAPPING) |map_pair| {
-            m[@intCast(@intFromEnum(map_pair.tag))] = map_pair.val;
-            count[@intCast(@intFromEnum(map_pair.tag))] += 1;
-        }
-        for (count) |cnt| {
-            comptime_assert_with_reason(cnt == 1, @src(), "Every mapping pair in `MAPPING` must connect every tag in `ENUM` to exactly one value");
-        }
-        break :create m;
-    };
-    return extern struct {
-        pub const MAP = M;
-
-        pub inline fn val(tag: Enum) T {
-            return MAP[@intCast(@intFromEnum(tag))];
-        }
-    };
-}
-
-pub fn AdHocEnumMap(comptime T: type, comptime MAPPING: []const AdHocMapPair(T)) type {
-    const AD_MAP = comptime create: {
-        var vals: [MAPPING.len]T = undefined;
-        var e_fields: [MAPPING.len]Type.EnumField = undefined;
-        var i: comptime_int = 0;
-        while (i < MAPPING.len) : (i += 1) {
-            vals[i] = MAPPING[i].val;
-            const str = MAPPING[i].tag;
-            var j: usize = 0;
-            while (j < i) : (j += 1) {
-                comptime_assert_with_reason(!std.mem.eql(u8, e_fields[j].name, str), @src(), "duplicate tag names are not allowed");
-            }
-            e_fields[i] = Type.EnumField{ .name = str, .value = i };
-        }
-        break :create AdHocMapComponents(T, MAPPING.len){
-            .e_fields = e_fields,
-            .vals = vals,
-        };
-    };
-    const tag_type = math.IntFittingRange(0, MAPPING.len - 1);
-    const E_TYPE = Type{ .@"enum" = Type.Enum{
-        .is_exhaustive = true,
-        .tag_type = tag_type,
-        .decls = &.{},
-        .fields = &AD_MAP.e_fields,
-    } };
-    return extern struct {
-        pub const MAP = AD_MAP.vals;
-        pub const Enum = @Type(E_TYPE);
-
-        pub inline fn val(tag: Enum) T {
-            return MAP[@intCast(@intFromEnum(tag))];
-        }
-    };
-}
-
-pub fn MapPair(comptime T: type, comptime ENUM: type) type {
+pub fn EnumMap(comptime ENUM: type, comptime T: type) type {
+    assert_with_reason(Types.type_is_enum(ENUM) and Types.all_enum_values_start_from_zero_with_no_gaps(ENUM), @src(), "type `ENUM` must be an enum type with tag values from 0 to max value with no gaps, got type `{s}`", .{@typeName(ENUM)});
     return struct {
-        tag: ENUM,
-        val: T,
+        const Self = @This();
+
+        map: [Types.enum_defined_field_count(ENUM)]T = undefined,
+
+        pub fn get(self: Self, tag: ENUM) T {
+            return self.map[@intFromEnum(tag)];
+        }
+        pub fn get_indirect(self: *const Self, tag: ENUM) T {
+            return self.map[@intFromEnum(tag)];
+        }
+        pub fn get_ptr(self: *Self, tag: ENUM) *T {
+            return &self.map[@intFromEnum(tag)];
+        }
+        pub fn get_ptr_const(self: *const Self, tag: ENUM) *const T {
+            return &self.map[@intFromEnum(tag)];
+        }
+        pub fn set(self: *Self, tag: ENUM, val: T) void {
+            self.map[@intFromEnum(tag)] = val;
+        }
     };
 }
 
-pub fn AdHocMapPair(comptime T: type) type {
+pub fn EnumMapOfMaps(comptime ENUM_PRIMARY: type, comptime ENUM_SECONDARY: [Types.enum_defined_field_count(ENUM_PRIMARY)]type, comptime T: type) type {
+    assert_with_reason(Types.type_is_enum(ENUM_PRIMARY) and Types.all_enum_values_start_from_zero_with_no_gaps(ENUM_PRIMARY), @src(), "type `ENUM` must be an enum type with tag values from 0 to max value with no gaps, got type `{s}`", .{@typeName(ENUM_PRIMARY)});
+    const num_primary = Types.enum_defined_field_count(ENUM_PRIMARY);
+    comptime var total_enums: usize = 0;
+    comptime var secondary_offsets: [num_primary]usize = @splat(0);
+    inline for (0..num_primary) |S| {
+        assert_with_reason(Types.type_is_enum(ENUM_SECONDARY[S]) and Types.all_enum_values_start_from_zero_with_no_gaps(ENUM_SECONDARY[S]), @src(), "type `ENUM_SECONDARY[{d}]` must be an enum type with tag values from 0 to max value with no gaps, got type `{s}`", .{ S, @typeName(ENUM_SECONDARY[S]) });
+        secondary_offsets[S] = total_enums;
+        total_enums += Types.enum_defined_field_count(ENUM_SECONDARY[S]);
+    }
+    const total_enums_const = total_enums;
+    const secondary_offsets_const = secondary_offsets;
     return struct {
-        tag: [:0]const u8,
-        val: T,
+        const Self = @This();
+
+        map: [TOTAL_ENUMS]T = undefined,
+
+        const TOTAL_ENUMS = total_enums_const;
+        const SECONDARY_OFFSETS = secondary_offsets_const;
+        const NUM_PRIMARY = num_primary;
+        const SECONDARY_TAGS = ENUM_SECONDARY;
+
+        pub fn sub_map(self: *Self, comptime primary: ENUM_PRIMARY) SubMap(SECONDARY_TAGS[@intFromEnum(primary)]) {
+            return SubMap(SECONDARY_TAGS[@intFromEnum(primary)]){
+                .map = @ptrCast(&self.map[SECONDARY_OFFSETS[@intFromEnum(primary)]]),
+            };
+        }
+
+        pub fn get(self: Self, comptime primary: ENUM_PRIMARY, secondary: SECONDARY_TAGS[@intFromEnum(primary)]) T {
+            const idx = SECONDARY_OFFSETS[@intFromEnum(primary)] + num_cast(@intFromEnum(secondary), usize);
+            return self.map[idx];
+        }
+        pub fn get_indirect(self: *const Self, comptime primary: ENUM_PRIMARY, secondary: SECONDARY_TAGS[@intFromEnum(primary)]) T {
+            const idx = SECONDARY_OFFSETS[@intFromEnum(primary)] + num_cast(@intFromEnum(secondary), usize);
+            return self.map[idx];
+        }
+        pub fn get_ptr(self: *Self, comptime primary: ENUM_PRIMARY, secondary: SECONDARY_TAGS[@intFromEnum(primary)]) *T {
+            const idx = SECONDARY_OFFSETS[@intFromEnum(primary)] + num_cast(@intFromEnum(secondary), usize);
+            return &self.map[idx];
+        }
+        pub fn get_ptr_const(self: *const Self, comptime primary: ENUM_PRIMARY, secondary: SECONDARY_TAGS[@intFromEnum(primary)]) *const T {
+            const idx = SECONDARY_OFFSETS[@intFromEnum(primary)] + num_cast(@intFromEnum(secondary), usize);
+            return &self.map[idx];
+        }
+        pub fn set(self: *Self, comptime primary: ENUM_PRIMARY, secondary: SECONDARY_TAGS[@intFromEnum(primary)], val: T) void {
+            const idx = SECONDARY_OFFSETS[@intFromEnum(primary)] + num_cast(@intFromEnum(secondary), usize);
+            self.map[idx] = val;
+        }
+
+        pub fn SubMap(comptime ENUM: type) type {
+            assert_with_reason(Types.type_is_enum(ENUM) and Types.all_enum_values_start_from_zero_with_no_gaps(ENUM), @src(), "type `ENUM` must be an enum type with tag values from 0 to max value with no gaps, got type `{s}`", .{@typeName(ENUM)});
+            return struct {
+                const Self2 = @This();
+
+                map: [*]T = undefined,
+
+                pub fn get(self: Self2, tag: ENUM) T {
+                    return self.map[@intFromEnum(tag)];
+                }
+                pub fn get_indirect(self: *const Self2, tag: ENUM) T {
+                    return self.map[@intFromEnum(tag)];
+                }
+                pub fn get_ptr(self: *Self2, tag: ENUM) *T {
+                    return &self.map[@intFromEnum(tag)];
+                }
+                pub fn get_ptr_const(self: *const Self2, tag: ENUM) *const T {
+                    return &self.map[@intFromEnum(tag)];
+                }
+                pub fn set(self: *Self2, tag: ENUM, val: T) void {
+                    self.map[@intFromEnum(tag)] = val;
+                }
+            };
+        }
     };
 }
-fn AdHocMapComponents(comptime T: type, comptime LEN: usize) type {
-    return struct {
-        e_fields: [LEN]Type.EnumField,
-        vals: [LEN]T,
-    };
+
+test "enum map" {
+    const Test = Root.Testing;
+    const People = EnumMap(enum {
+        DOUG,
+        GREG,
+        STEVE,
+    }, struct {
+        age: u32,
+        height: f32,
+    });
+    var people = People{};
+    people.set(.STEVE, .{ .age = 27, .height = 108 });
+    people.set(.GREG, .{ .age = 55, .height = 123 });
+    people.set(.DOUG, .{ .age = 84, .height = 91 });
+    try Test.expect_equal(people.get(.DOUG).height, "people.get(.DOUG).height", 91, "91", "wrong val", .{});
+}
+
+test "enum map of maps type 1" {
+    const Test = Root.Testing;
+    const Children = EnumMapOfMaps(enum {
+        DOUG,
+        GREG,
+        STEVE,
+    }, .{
+        enum {
+            MAUD,
+            PRISCILLA,
+        },
+        enum {
+            KATHY,
+            RICHARD,
+        },
+        enum {
+            DAVE,
+            TYSON,
+            MIKE,
+        },
+    }, struct {
+        age: u32,
+        height: f32,
+    });
+    var children = Children{};
+    children.set(.DOUG, .MAUD, .{
+        .age = 99,
+        .height = 88,
+    });
+
+    try Test.expect_equal(children.get(.DOUG, .MAUD).age, "children.get(.DOUG, .MAUD).age", 99, "99", "wrong val", .{});
+    var mike = children.sub_map(.STEVE);
+    mike.set(.MIKE, .{ .age = 4, .height = 32 });
+    try Test.expect_equal(children.get(.STEVE, .MIKE).height, "children.get(.STEVE, .MIKE).height", 32, "32", "wrong val", .{});
 }

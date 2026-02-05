@@ -366,3 +366,9 @@ pub const ArchSize = enum(u8) {
 
     pub const THIS_SIZE: ArchSize = if (@sizeOf(usize) == 4) ._32 else ._64;
 };
+
+pub const WarningMode = enum(u8) {
+    IGNORE,
+    WARN,
+    PANIC,
+};

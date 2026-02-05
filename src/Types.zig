@@ -604,6 +604,31 @@ pub inline fn type_is_struct_with_all_fields_same_type(comptime T: type, comptim
     }
     return true;
 }
+pub inline fn type_is_struct_with_all_decls_same_type(comptime T: type, comptime D: type) bool {
+    const INFO = @typeInfo(T);
+    switch (INFO) {
+        .@"struct" => {},
+        else => return false,
+    }
+    const STRUCT = INFO.@"struct";
+    for (STRUCT.decls) |decl| {
+        if (@TypeOf(@field(T, decl.name)) != D) return false;
+    }
+    return true;
+}
+pub inline fn type_is_struct_with_all_fields_same_type_any(comptime T: type) bool {
+    const INFO = @typeInfo(T);
+    switch (INFO) {
+        .@"struct" => {},
+        else => return false,
+    }
+    const STRUCT = INFO.@"struct";
+    const FIELD_TYPE = STRUCT.fields[0].type;
+    for (STRUCT.fields[1..]) |field| {
+        if (field.type != FIELD_TYPE) return false;
+    }
+    return true;
+}
 pub inline fn type_is_union_with_all_fields_same_type(comptime T: type, comptime F: type) bool {
     const INFO = @typeInfo(T);
     switch (INFO) {
@@ -1143,6 +1168,31 @@ pub fn all_enum_names_match_an_object_field_name(comptime ENUM: type, comptime S
     const E_INFO = @typeInfo(ENUM).@"enum";
     for (E_INFO.fields) |e_field| {
         if (!@hasField(STRUCT_OR_UNION_OR_ENUM, e_field.name)) return false;
+    }
+    return true;
+}
+pub fn all_enum_names_match_an_object_field_name_with_same_type(comptime ENUM: type, comptime STRUCT_OR_UNION_OR_ENUM: type, comptime FIELD_TYPE: type) bool {
+    const E_INFO = @typeInfo(ENUM).@"enum";
+    for (E_INFO.fields) |e_field| {
+        if (!@hasField(STRUCT_OR_UNION_OR_ENUM, e_field.name)) return false;
+        if (@FieldType(STRUCT_OR_UNION_OR_ENUM, e_field.name) != FIELD_TYPE) return false;
+    }
+    return true;
+}
+
+pub fn all_enum_names_match_an_object_decl_name(comptime ENUM: type, comptime STRUCT_OR_UNION_OR_ENUM: type) bool {
+    const E_INFO = @typeInfo(ENUM).@"enum";
+    for (E_INFO.fields) |e_field| {
+        if (!@hasDecl(STRUCT_OR_UNION_OR_ENUM, e_field.name)) return false;
+    }
+    return true;
+}
+
+pub fn all_enum_names_match_an_object_decl_name_with_same_type(comptime ENUM: type, comptime STRUCT_OR_UNION_OR_ENUM: type, comptime DECL_TYPE: type) bool {
+    const E_INFO = @typeInfo(ENUM).@"enum";
+    for (E_INFO.fields) |e_field| {
+        if (!@hasDecl(STRUCT_OR_UNION_OR_ENUM, e_field.name)) return false;
+        if (@TypeOf(@field(STRUCT_OR_UNION_OR_ENUM, e_field.name)) != DECL_TYPE) return false;
     }
     return true;
 }
