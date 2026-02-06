@@ -35,6 +35,9 @@ const Utils = Root.Utils;
 const Assert = Root.Assert;
 const Sort = Root.Sort.InsertionSort;
 const Common = Root.CommonTypes;
+const Vec4 = Root.Vec4.define_vec4_type;
+const Vec3 = Root.Vec3.define_vec3_type;
+const Vec2 = Root.Vec2.define_vec2_type;
 
 const ValidateMode = Common.WarningMode;
 pub const SDL3 = Root.SDL3;
@@ -88,6 +91,8 @@ const StorageStruct = ShaderContract.StorageStruct;
 const GPUType = ShaderContract.GPUType;
 
 const assert_with_reason = Assert.assert_with_reason;
+const assert_unreachable = Assert.assert_unreachable;
+const assert_unreachable_err = Assert.assert_unreachable_err;
 const update_max = Utils.update_max;
 const update_min = Utils.update_min;
 
@@ -160,8 +165,8 @@ pub fn PipelineAllowedUniform(comptime UNIFORM_NAMES_ENUM: type) type {
         uniform: UNIFORM_NAMES_ENUM,
         vertex_register: u32,
         fragmant_register: u32,
-        allowed_in_vertex:bool,
-        allowed_in_fragment:bool,
+        allowed_in_vertex: bool,
+        allowed_in_fragment: bool,
     };
 }
 pub fn ShaderAllowedUniform(comptime UNIFORM_NAMES_ENUM: type) type {
@@ -175,8 +180,8 @@ pub fn PipelineAllowedStorageBuffer(comptime STORAGE_BUFFER_NAMES_ENUM: type) ty
         buffer: STORAGE_BUFFER_NAMES_ENUM,
         vertex_register: u32,
         fragmant_register: u32,
-        allowed_in_vertex:bool,
-        allowed_in_fragment:bool,
+        allowed_in_vertex: bool,
+        allowed_in_fragment: bool,
     };
 }
 pub fn ShaderAllowedStorageBuffer(comptime STORAGE_BUFFER_NAMES_ENUM: type) type {
@@ -190,8 +195,8 @@ pub fn PipelineAllowedStorageTexture(comptime STORAGE_TEXTURE_NAMES_ENUM: type) 
         texture: STORAGE_TEXTURE_NAMES_ENUM,
         vertex_register: u32,
         fragmant_register: u32,
-        allowed_in_vertex:bool,
-        allowed_in_fragment:bool,
+        allowed_in_vertex: bool,
+        allowed_in_fragment: bool,
     };
 }
 pub fn ShaderAllowedStorageTexture(comptime STORAGE_TEXTURE_NAMES_ENUM: type) type {
@@ -826,6 +831,7 @@ pub const ValidationSettings = struct {
     depth_texture_non_stencil_format: ValidateMode = .PANIC,
     color_texture_non_color_format: ValidateMode = .PANIC,
     color_targets_missing: ValidateMode = .PANIC,
+    push_unallowed_uniform: ValidateMode = .PANIC,
 };
 
 /// This object defines a comptime type with an API to instantiate and control
@@ -1856,7 +1862,6 @@ pub fn GraphicsController(
                 assert_with_reason(pipe_def.depth_stencil_options.compare_mask != 0 and pipe_def.depth_stencil_options.write_mask != 0, @src(), "for render pipeline `{s}` the depth buffer is enabled as a render target, but options `depth_stencil_options.enable_stencil_test == true` while `depth_stencil_options.write_mask` or `depth_stencil_options.compare_mask` equal zero (in effect no depth stencil will be compared or written)", .{@tagName(pipe_name)});
             }
         }
-        total_num_vert_sampler_pairs = vars.
         vertex_buffers_to_bind_start_locs[pipe_idx] = total_num_vertex_buffers_to_bind;
         vertex_mapping_start_locs[pipe_idx] = total_num_field_mappings;
         inline for (pipe_def.vertex_field_maps) |field_map| {
@@ -1989,9 +1994,8 @@ pub fn GraphicsController(
                 .offset = vert_buf_out_field_info.offset,
             };
         }
-        //CHECKPOINT
     }
-    
+
     return struct {
         const Self = @This();
         gpu: *GPU_Device = @ptrCast(INVALID_ADDR),
@@ -2014,7 +2018,266 @@ pub fn GraphicsController(
         storage_buffers_bound: [INTERNAL.NUM_STORAGE_BUFFERS]bool = @splat(false),
         samplers: [INTERNAL.NUM_SAMPLERS]*GPU_TextureSampler = @splat(@as(*GPU_TextureSampler, @ptrCast(INVALID_ADDR))),
         samplers_init: [INTERNAL.NUM_SAMPLERS]bool = @splat(false),
-        uniforms: STRUCT_OF_UNIFORM_STRUCTS = undefined,
+        uniforms: UniformCollection = undefined,
+        current_render_pass_color_targets: [8]SDL3.GPU_ColorTargetInfo = undefined,
+        current_render_pass_color_targets_len: u8 = 0,
+        current_render_pass_depth_target: SDL3.GPU_DepthStencilTargetInfo = undefined,
+
+        pub inline fn get_texture(self: *const Self, name: TextureName) *GPU_Texture {
+            assert_with_reason(self.textures_init[@intFromEnum(name)], @src(), "texture `{s}` not initialized", .{@tagName(name)});
+            return self.textures[@intFromEnum(name)];
+        }
+        pub inline fn get_window(self: *const Self, name: WindowName) *Window {
+            assert_with_reason(self.windows_init[@intFromEnum(name)], @src(), "window `{s}` not initialized", .{@tagName(name)});
+            return self.windows[@intFromEnum(name)];
+        }
+        pub inline fn get_claimed_window(self: *const Self, name: WindowName) *Window {
+            assert_with_reason(self.windows_init[@intFromEnum(name)], @src(), "window `{s}` not initialized", .{@tagName(name)});
+            assert_with_reason(self.windows_claimed[@intFromEnum(name)], @src(), "window `{s}` not claimed (no swapchain texture)", .{@tagName(name)});
+            return self.windows[@intFromEnum(name)];
+        }
+        pub inline fn get_render_pipeline(self: *const Self, name: RenderPipelineName) *GPU_GraphicsPipeline {
+            assert_with_reason(self.render_pipelines_init[@intFromEnum(name)], @src(), "render pipeline `{s}` not initialized", .{@tagName(name)});
+            return self.render_pipelines[@intFromEnum(name)];
+        }
+        pub inline fn get_transfer_buffer(self: *const Self, name: TransferBufferName) *GPU_TransferBuffer {
+            assert_with_reason(self.transfer_buffers_init[@intFromEnum(name)], @src(), "transfer buffer `{s}` not initialized", .{@tagName(name)});
+            return self.transfer_buffers[@intFromEnum(name)];
+        }
+        pub inline fn get_storage_buffer(self: *const Self, name: StorageBufferName) *GPU_Buffer {
+            assert_with_reason(self.storage_buffers_init[@intFromEnum(name)], @src(), "storage buffer `{s}` not initialized", .{@tagName(name)});
+            return self.storage_buffers[@intFromEnum(name)];
+        }
+        pub inline fn get_vertex_buffer(self: *const Self, name: VertexBufferName) *GPU_Buffer {
+            assert_with_reason(self.vertex_buffers_init[@intFromEnum(name)], @src(), "vertex buffer `{s}` not initialized", .{@tagName(name)});
+            return self.vertex_buffers[@intFromEnum(name)];
+        }
+        pub inline fn get_sampler(self: *const Self, name: SamplerName) *GPU_TextureSampler {
+            assert_with_reason(self.samplers_init[@intFromEnum(name)], @src(), "sampler `{s}` not initialized", .{@tagName(name)});
+            return self.samplers[@intFromEnum(name)];
+        }
+
+        pub const Target = union(TargetKind) {
+            WINDOW: WindowName,
+            TEXTURE: TextureName,
+
+            pub fn window(win: WindowName) Target {
+                return Target{ .WINDOW = win };
+            }
+            pub fn texture(tex: TextureName) Target {
+                return Target{ .TEXTURE = tex };
+            }
+        };
+
+        pub const ColorTarget = struct {
+            target: Target,
+            mip_level: u32 = 0,
+            layer_or_depth_plane: u32 = 0,
+            clear_color: Vec4(f32) = .new_rgba(0, 0, 0, 1),
+            load_op: SDL3.GPU_LoadOp = .LOAD,
+            store_op: SDL3.GPU_StoreOp = .STORE,
+            resolve_target: ?Target = null,
+            resolve_mip_level: u32 = 0,
+            resolve_layer: u32 = 0,
+            cycle: bool = false,
+            cycle_resolve_texture: bool = false,
+
+            pub fn to_sdl(self: ColorTarget, command_buf: CommandBuffer) SDL3.GPU_ColorTargetInfo {
+                return SDL3.GPU_ColorTargetInfo{
+                    .texture = switch (self.target) {
+                        .TEXTURE => |t| command_buf.controller.get_texture(t),
+                        .WINDOW => |w| command_buf.wait_and_get_swapchain_texture_for_window(w),
+                    },
+                    .mip_level = self.mip_level,
+                    .clear_color = @bitCast(self.clear_color),
+                    .load_op = self.load_op,
+                    .store_op = self.store_op,
+                    .resolve_texture = if (self.resolve_target) |res_target| switch (res_target) {
+                        .TEXTURE => |t| command_buf.controller.get_texture(t),
+                        .WINDOW => |w| command_buf.wait_and_get_swapchain_texture_for_window(w),
+                    } else null,
+                    .layer_or_depth_plane = self.layer_or_depth_plane,
+                    .resolve_layer = self.resolve_layer,
+                    .resolve_mip_level = self.resolve_mip_level,
+                    .cycle = self.cycle,
+                    .cycle_resolve_texture = self.cycle_resolve_texture,
+                };
+            }
+        };
+
+        pub const DepthTarget = struct {
+            texture: ?TextureName = null,
+            clear_depth: f32 = 0,
+            load_op: GPU_LoadOp = .LOAD,
+            store_op: GPU_StoreOp = .STORE,
+            stencil_load_op: GPU_LoadOp = .LOAD,
+            stencil_store_op: GPU_StoreOp = .STORE,
+            cycle: bool = false,
+            clear_stencil: u8 = 0,
+
+            pub fn no_depth_target() DepthTarget {
+                return DepthTarget{};
+            }
+
+            pub fn to_sdl(self: DepthTarget, command_buf: CommandBuffer) SDL3.GPU_DepthStencilTargetInfo {
+                return SDL3.GPU_DepthStencilTargetInfo{
+                    .texture = if (self.texture) |t| command_buf.controller.get_texture(t) else null,
+                    .clear_depth = self.clear_depth,
+                    .load_op = self.load_op,
+                    .store_op = self.store_op,
+                    .stencil_load_op = self.stencil_load_op,
+                    .stencil_store_op = self.stencil_store_op,
+                    .clear_stencil = self.clear_stencil,
+                    .cycle = self.cycle,
+                };
+            }
+        };
+
+        pub const BlitRegion = struct {
+            Target: Target,
+            mip_level: u32 = 0,
+            layer_or_depth_plane: u32 = 0,
+            x: u32 = 0,
+            y: u32 = 0,
+            w: u32 = 0,
+            h: u32 = 0,
+
+            pub fn to_sdl(self: BlitRegion, command_buffer: CommandBuffer) SDL3.GPU_BlitRegion {
+                return SDL3.GPU_BlitRegion{
+                    .texture = switch (self.Target) {
+                        .TEXTURE => |t| command_buffer.controller.get_texture(t),
+                        .WINDOW => |w| command_buffer.wait_and_get_swapchain_texture_for_window(w),
+                    },
+                    .mip_level = self.mip_level,
+                    .layer_or_depth_plane = self.layer_or_depth_plane,
+                    .w = self.w,
+                    .h = self.h,
+                    .x = self.x,
+                    .y = self.y,
+                };
+            }
+        };
+
+        pub const BlitInfo = struct {
+            source: BlitRegion,
+            destination: BlitRegion,
+            load_op: SDL3.GPU_LoadOp = .LOAD,
+            clear_color: Vec4(f32) = .new_any_rgba(0, 0, 0, 1),
+            flip_mode: SDL3.FlipMode = .NONE,
+            filter: GPU_FilterMode = .LINEAR,
+            cycle: bool = false,
+
+            pub fn to_sdl(self: BlitInfo, command_buffer: CommandBuffer) SDL3.GPU_BlitInfo {
+                return SDL3.GPU_BlitInfo{
+                    .source = self.source.to_sdl(command_buffer),
+                    .destination = self.destination.to_sdl(command_buffer),
+                    .clear_color = self.clear_color,
+                    .load_op = self.load_op,
+                    .filter = self.filter,
+                    .flip_mode = self.flip_mode,
+                    .cycle = self.cycle,
+                };
+            }
+        };
+
+        pub const CommandBuffer = struct {
+            controller: *Self,
+            command: *SDL3.GPU_CommandBuffer,
+
+            pub fn insert_debug_label(self: CommandBuffer, label: [*:0]const u8) void {
+                self.command.insert_debug_label(label);
+            }
+
+            pub fn push_debug_group(self: CommandBuffer, name: [*:0]const u8) void {
+                self.command.push_debug_group(name);
+            }
+
+            pub fn pop_debug_group(self: CommandBuffer) void {
+                self.command.pop_debug_group();
+            }
+
+            pub fn push_vertex_uniform_data(self: CommandBuffer, unform_name: UniformName) void {
+                assert_with_reason(self.controller.render_pipeline_active, @src(), "cannot push vertex uniform data when no render pipeline is active/bound", .{});
+                var register: u32 = undefined;
+                const register = INTERNAL.uniform_is_allowed_in_render_pipeline_stage(self.controller.current_render_pipeline, unform_name, .VERTEX) orelse assert_unreachable(@src(), "uniform `{s}` is disallowed/unrelated to current render pipeline `{s}` vertex shader, cannot push data", .{ @tagName(unform_name), @tagName(self.controller.current_render_pipeline) });
+                const ptr: *const anyopaque = @ptrCast(&@field(self.controller.uniforms, @tagName(unform_name)));
+                const len: u32 = @sizeOf(@FieldType(UniformCollection, @tagName(unform_name)));
+                self.command.push_vertex_uniform_data(register, ptr, len);
+            }
+            pub fn push_fragment_uniform_data(self: CommandBuffer, unform_name: UniformName) void {
+                assert_with_reason(self.controller.render_pipeline_active, @src(), "cannot push fragment uniform data when no render pipeline is active/bound", .{});
+                var register: u32 = undefined;
+                const register = INTERNAL.uniform_is_allowed_in_render_pipeline_stage(self.controller.current_render_pipeline, unform_name, .FRAGMENT) orelse assert_unreachable(@src(), "uniform `{s}` is disallowed/unrelated to current render pipeline `{s}` fragment shader, cannot push data", .{ @tagName(unform_name), @tagName(self.controller.current_render_pipeline) });
+                const ptr: *const anyopaque = @ptrCast(&@field(self.controller.uniforms, @tagName(unform_name)));
+                const len: u32 = @sizeOf(@FieldType(UniformCollection, @tagName(unform_name)));
+                self.command.push_fragment_uniform_data(register, ptr, len);
+            }
+
+            // pub fn push_compute_uniform_data(self: *GPU_CommandBuffer, slot_index: u32, data_ptr: anytype) void {
+            //     const data_raw = Utils.raw_slice_cast_const(data_ptr);
+            //     C.SDL_PushGPUComputeUniformData(self.to_c_ptr(), slot_index, data_raw.ptr, @intCast(data_raw.len));
+            // }
+
+            pub fn get_swapchain_texture_for_window(self: CommandBuffer, window_name: WindowName) *GPU_Texture {
+                const win = self.controller.get_claimed_window(window_name);
+                const swap = self.command.aquire_swapchain_texture(win) catch |err| assert_unreachable_err(@src(), err);
+                return swap.texture;
+            }
+            pub fn wait_and_get_swapchain_texture_for_window(self: CommandBuffer, window_name: WindowName) *GPU_Texture {
+                const win = self.controller.get_claimed_window(window_name);
+                const swap = self.command.wait_and_aquire_swapchain_texture(win) catch |err| assert_unreachable_err(@src(), err);
+                return swap.texture;
+            }
+
+            pub fn begin_render_pass(self: CommandBuffer, color_targets: []const ColorTarget, depth_target: DepthTarget) RenderPass {
+                assert_with_reason(color_targets.len <= 8, @src(), "GraphicsController only supports up to 8 color targets, got {d}", .{color_targets.len});
+                for (color_targets, 0..) |target, t| {
+                    self.controller.current_render_pass_color_targets[t] = target.to_sdl(self);
+                }
+                self.controller.current_render_pass_color_targets_len = @intCast(color_targets.len);
+                self.controller.current_render_pass_depth_target = depth_target.to_sdl(self);
+                return RenderPass{
+                    .controller = self.controller,
+                    .command = self.command,
+                    .pass = self.command.begin_render_pass(self.controller.current_render_pass_color_targets[0..color_targets.len], &self.controller.current_render_pass_depth_target),
+                };
+            }
+
+            pub fn generate_mipmaps_for_texture(self: CommandBuffer, texture_name: TextureName) void {
+                self.command.generate_mipmaps_for_texture(self.controller.get_texture(texture_name));
+            }
+
+            pub fn blit_texture(self: CommandBuffer, blit_info: BlitInfo) void {
+                var blit_sdl = blit_info.to_sdl(self);
+                self.command.blit_texture(&blit_sdl);
+            }
+            pub fn submit_commands(self: CommandBuffer) void {
+                self.command.submit_commands() catch |err| assert_unreachable_err(@src(), err);
+            }
+            pub fn submit_commands_and_aquire_fence(self: CommandBuffer) *SDL3.GPU_Fence {
+                return self.command.submit_commands_and_aquire_fence() catch |err| assert_unreachable_err(@src(), err);
+            }
+            pub fn cancel_commands(self: CommandBuffer) void {
+                self.command.cancel_commands() catch |err| assert_unreachable_err(@src(), err);
+            }
+        };
+
+        pub const RenderPass = struct {
+            controller: *Self,
+            command: *SDL3.GPU_CommandBuffer,
+            pass: *SDL3.GPU_RenderPass,
+
+            pub fn push_vertex_uniform_data(self: RenderPass, unform_name: UniformName) void {
+                const cmd = CommandBuffer{ .command = self.command, .controller = self.controller };
+                cmd.push_vertex_uniform_data(unform_name);
+            }
+            pub fn push_fragment_uniform_data(self: RenderPass, unform_name: UniformName) void {
+                const cmd = CommandBuffer{ .command = self.command, .controller = self.controller };
+                cmd.push_fragment_uniform_data(unform_name);
+            }
+
+            //CHECKPOINT 
+        };
 
         pub const INTERNAL = struct {
             pub const NUM_WINDOWS = Types.enum_defined_field_count(WINDOW_NAMES_ENUM);
@@ -2025,20 +2288,47 @@ pub fn GraphicsController(
             pub const NUM_SAMPLERS = Types.enum_defined_field_count(SAMPLER_NAMES_ENUM);
             pub const NUM_VERTEX_STRUCTS = Types.enum_defined_field_count(GPU_SHADER_STRUCT_NAMES_ENUM);
             pub const NUM_STORAGE_BUFFERS = Types.enum_defined_field_count(GPU_STORAGE_BUFFER_NAMES_ENUM);
-            pub const ALLOWED_UNIFORMS_FLAT = all_allowed_uniforms_flat_const;
-            pub const ALLOWED_UNIFORMS_STARTS = allowed_uniform_starts_const;
-            pub const ALLOWED_UNIFORMS_PER_PIPELINE = allowed_uniforms_per_pipeline_indices_const;
-            pub inline fn allowed_uniforms(comptime PIPELINE: RenderPipelineName) []const PipelineAllowedResource {
-                const idx = @intFromEnum(PIPELINE);
-                return ALLOWED_UNIFORMS_FLAT[ALLOWED_UNIFORMS_STARTS[idx]..ALLOWED_UNIFORMS_STARTS[idx + 1]];
+
+            pub const PIPELINE_DEFS = ordered_pipeline_definitions_const;
+            pub inline fn get_render_pipeline_info(pipeline: RenderPipelineName) _RenderPipelineDefinition {
+                return PIPELINE_DEFS[@intFromEnum(pipeline)];
             }
-            pub inline fn uniform_allowed_info(comptime PIPELINE: RenderPipelineName, comptime UNIFORM: UniformName) ?PipelineAllowedResource {
-                const pipe_idx = @intFromEnum(PIPELINE);
-                const uni_idx = @intFromEnum(UNIFORM);
-                const map_idx = ALLOWED_UNIFORMS_PER_PIPELINE[pipe_idx][uni_idx];
-                if (comptime map_idx >= ALLOWED_UNIFORMS_FLAT.len) return null;
-                return ALLOWED_UNIFORMS_FLAT[map_idx];
+            // pub inline fn bind_all_render_pipeline_resources(self: *Self, pipeline: RenderPipelineName) !void {
+            //     const buf = try self.gpu.acquire_command_buffer();
+            //     buf.aquire_swapchain_texture(window: *Window)
+            //     buf.begin_render_pass(color_targets: []const GPU_ColorTargetInfo, depth_stencil_target: *GPU_DepthStencilTargetInfo);
+            // }
+            pub const ALLOWED_UNIFORMS_FLAT_FRAG = all_allowed_uniforms_flat_frag_const;
+            pub const ALLOWED_UNIFORMS_FLAT_VERT = all_allowed_uniforms_flat_vert_const;
+            pub const ALLOWED_UNIFORMS_STARTS_FRAG = uniform_starts_frag_const;
+            pub const ALLOWED_UNIFORMS_STARTS_VERT = uniform_starts_vert_const;
+            pub inline fn allowed_uniforms_for_frag_shader(frag_shader: FragmentShaderName) []const _ShaderAllowedUniform {
+                const idx = @intFromEnum(frag_shader);
+                return ALLOWED_UNIFORMS_FLAT_FRAG[ALLOWED_UNIFORMS_STARTS_FRAG[idx]..ALLOWED_UNIFORMS_STARTS_FRAG[idx + 1]];
             }
+            pub inline fn allowed_uniforms_for_vert_shader(vert_shader: VertexShaderName) []const _ShaderAllowedUniform {
+                const idx = @intFromEnum(vert_shader);
+                return ALLOWED_UNIFORMS_FLAT_VERT[ALLOWED_UNIFORMS_STARTS_VERT[idx]..ALLOWED_UNIFORMS_STARTS_VERT[idx + 1]];
+            }
+            pub fn uniform_is_allowed_in_render_pipeline_stage(pipeline: RenderPipelineName, uniform: UniformName, comptime stage: ShaderStage) ?u32 {
+                const info = get_render_pipeline_info(pipeline);
+                switch (stage) {
+                    .VERTEX => {
+                        const allowed_for_vert = allowed_uniforms_for_vert_shader(info.vertex);
+                        for (allowed_for_vert) |allowed| {
+                            if (allowed.uniform == uniform) return allowed.register;
+                        }
+                    },
+                    .FRAGMENT => {
+                        const allowed_for_frag = allowed_uniforms_for_frag_shader(info.fragment);
+                        for (allowed_for_frag) |allowed| {
+                            if (allowed.uniform == uniform) return allowed.register;
+                        }
+                    },
+                }
+                return null;
+            }
+
             pub const ALLOWED_STORAGE_BUFFERS_FLAT = all_allowed_storage_buffers_flat_const;
             pub const ALLOWED_STORAGE_BUFFERS_STARTS = allowed_storage_buffer_starts_const;
             pub const ALLOWED_STORAGE_BUFFERS_PER_PIPELINE = allowed_storage_buffers_per_pipeline_indices_const;
@@ -2113,6 +2403,7 @@ pub fn GraphicsController(
         pub const UniformName = GPU_UNIFORM_NAMES_ENUM;
         pub const VertexShaderName = VERTEX_SHADER_NAMES_ENUM;
         pub const FragmentShaderName = FRAGMENT_SHADER_NAMES_ENUM;
+        pub const UniformCollection = STRUCT_OF_UNIFORM_STRUCTS;
 
         pub const WindowInit = struct {
             name: WindowName,
@@ -2708,22 +2999,5 @@ pub fn GraphicsController(
                 .sdl = try self.gpu.acquire_command_buffer(),
             };
         }
-
-        pub const CommandBuffer = struct {
-            controller: *Self,
-            sdl: *GPU_CommandBuffer,
-
-            pub fn insert_debug_label(self: CommandBuffer, label: [*:0]const u8) void {
-                self.sdl.insert_debug_label(label);
-            }
-
-            pub fn push_debug_group(self: CommandBuffer, name: [*:0]const u8) void {
-                self.sdl.push_debug_group(name);
-            }
-
-            pub fn pop_debug_group(self: CommandBuffer) void {
-                self.sdl.pop_debug_group();
-            }
-        };
     };
 }

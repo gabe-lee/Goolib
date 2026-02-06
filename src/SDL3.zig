@@ -208,10 +208,10 @@ pub const Vec_c_int = Root.Vec2.define_vec2_type(c_int);
 pub const Vec_c_uint = Root.Vec2.define_vec2_type(c_uint);
 pub const Vec_i16 = Root.Vec2.define_vec2_type(i16);
 pub const Vec_f32 = Root.Vec2.define_vec2_type(f32);
-pub const Color_RGBA_u8 = Root.Color.define_color_rgba_type(u8);
-pub const Color_RGBA_f32 = Root.Color.define_color_rgba_type(f32);
-pub const Color_RGB_u8 = Root.Color.define_color_rgb_type(u8);
-pub const Color_RGB_f32 = Root.Color.define_color_rgb_type(f32);
+pub const Color_RGBA_u8 = Root.Vec4.define_vec4_type(u8);
+pub const Color_RGBA_f32 = Root.Vec4.define_vec4_type(f32);
+pub const Color_RGB_u8 = Root.Vec3.define_vec3_type(u8);
+pub const Color_RGB_f32 = Root.Vec3.define_vec3_type(f32);
 pub const Color_raw_u32 = extern struct {
     raw: u32,
 };
@@ -8004,17 +8004,14 @@ pub const GPU_CommandBuffer = opaque {
     pub fn pop_debug_group(self: *GPU_CommandBuffer) void {
         C.SDL_PopGPUDebugGroup(self.to_c_ptr());
     }
-    pub fn push_vertex_uniform_data(self: *GPU_CommandBuffer, slot_index: u32, data_ptr: anytype) void {
-        const data_raw = Utils.raw_slice_cast_const(data_ptr);
-        C.SDL_PushGPUVertexUniformData(self.to_c_ptr(), slot_index, data_raw.ptr, @intCast(data_raw.len));
+    pub fn push_vertex_uniform_data(self: *GPU_CommandBuffer, slot_index: u32, data_ptr: *const anyopaque, data_len: u32) void {
+        C.SDL_PushGPUVertexUniformData(self.to_c_ptr(), slot_index, data_ptr, @intCast(data_len));
     }
-    pub fn push_fragment_uniform_data(self: *GPU_CommandBuffer, slot_index: u32, data_ptr: anytype) void {
-        const data_raw = Utils.raw_slice_cast_const(data_ptr);
-        C.SDL_PushGPUFragmentUniformData(self.to_c_ptr(), slot_index, data_raw.ptr, @intCast(data_raw.len));
+    pub fn push_fragment_uniform_data(self: *GPU_CommandBuffer, slot_index: u32, data_ptr: *const anyopaque, data_len: u32) void {
+        C.SDL_PushGPUFragmentUniformData(self.to_c_ptr(), slot_index, data_ptr, @intCast(data_len));
     }
-    pub fn push_compute_uniform_data(self: *GPU_CommandBuffer, slot_index: u32, data_ptr: anytype) void {
-        const data_raw = Utils.raw_slice_cast_const(data_ptr);
-        C.SDL_PushGPUComputeUniformData(self.to_c_ptr(), slot_index, data_raw.ptr, @intCast(data_raw.len));
+    pub fn push_compute_uniform_data(self: *GPU_CommandBuffer, slot_index: u32, data_ptr: *const anyopaque, data_len: u32) void {
+        C.SDL_PushGPUComputeUniformData(self.to_c_ptr(), slot_index, data_ptr, @intCast(data_len));
     }
     pub fn begin_render_pass(self: *GPU_CommandBuffer, color_targets: []const GPU_ColorTargetInfo, depth_stencil_target: *GPU_DepthStencilTargetInfo) Error!*GPU_RenderPass {
         return ptr_cast_or_fail_err(*GPU_RenderPass, C.SDL_BeginGPURenderPass(self.to_c_ptr(), @ptrCast(@alignCast(color_targets.ptr)), @intCast(color_targets.len), depth_stencil_target.to_c()));
@@ -8029,7 +8026,7 @@ pub const GPU_CommandBuffer = opaque {
         C.SDL_GenerateMipmapsForGPUTexture(self.to_c_ptr(), texture.to_c_ptr());
     }
     pub fn blit_texture(self: *GPU_CommandBuffer, blit_info: *GPU_BlitInfo) void {
-        C.SDL_GenerateMipmapsForGPUTexture(self.to_c_ptr(), blit_info.to_c_ptr());
+        C.SDL_BlitGPUTexture(self.to_c_ptr(), blit_info.to_c_ptr());
     }
     pub fn aquire_swapchain_texture(self: *GPU_CommandBuffer, window: *Window) Error!GPU_SwapchainTexture {
         var tex: GPU_SwapchainTexture = undefined;
@@ -8044,7 +8041,7 @@ pub const GPU_CommandBuffer = opaque {
     pub fn submit_commands(self: *GPU_CommandBuffer) Error!void {
         return ok_or_fail_err(C.SDL_SubmitGPUCommandBuffer(self.to_c_ptr()));
     }
-    pub fn submit_commands_and_aquire_fence(self: *GPU_CommandBuffer) Error!GPU_Fence {
+    pub fn submit_commands_and_aquire_fence(self: *GPU_CommandBuffer) Error!*GPU_Fence {
         return ptr_cast_or_fail_err(*GPU_Fence, C.SDL_SubmitGPUCommandBufferAndAcquireFence(self.to_c_ptr()));
     }
     pub fn cancel_commands(self: *GPU_CommandBuffer) Error!void {

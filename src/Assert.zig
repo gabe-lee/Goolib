@@ -99,6 +99,11 @@ pub inline fn assert_unreachable(comptime src_loc: ?SourceLocation, reason_fmt: 
     unreachable;
 }
 
+pub inline fn assert_unreachable_err(comptime src_loc: ?SourceLocation, err: anyerror) noreturn {
+    assert_with_reason(false, src_loc, "errors are expected to be unreachable here, got err: {s}", .{@errorName(err)});
+    unreachable;
+}
+
 pub fn assert_pointer_resides_in_slice(comptime T: type, slice: []const T, pointer: *const T, comptime src_loc: ?SourceLocation) void {
     const start_addr = @intFromPtr(slice.ptr);
     const end_addr = @intFromPtr(slice.ptr + slice.len - 1);
