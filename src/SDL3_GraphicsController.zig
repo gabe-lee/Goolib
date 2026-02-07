@@ -95,6 +95,7 @@ const assert_unreachable = Assert.assert_unreachable;
 const assert_unreachable_err = Assert.assert_unreachable_err;
 const update_max = Utils.update_max;
 const update_min = Utils.update_min;
+const num_cast = Cast.num_cast;
 
 const INVALID_ADDR = math.maxInt(usize);
 
@@ -149,88 +150,56 @@ pub const UniformLayer = enum(u32) {
     FRAGMENT = 3,
 };
 
-pub const PipelineAllowedResource = struct {
-    vertex_register: u32 = 0,
-    fragment_register: u32 = 0,
-    allowed_in_vertex: bool = false,
-    allowed_in_fragment: bool = false,
-};
 pub const AllowedResource = struct {
     register: u32 = 0,
     allowed: bool = false,
 };
 
-pub fn PipelineAllowedUniform(comptime UNIFORM_NAMES_ENUM: type) type {
-    return struct {
-        uniform: UNIFORM_NAMES_ENUM,
-        vertex_register: u32,
-        fragmant_register: u32,
-        allowed_in_vertex: bool,
-        allowed_in_fragment: bool,
-    };
-}
 pub fn ShaderAllowedUniform(comptime UNIFORM_NAMES_ENUM: type) type {
     return struct {
+        const Self = @This();
         uniform: UNIFORM_NAMES_ENUM,
         register: u32,
-    };
-}
-pub fn PipelineAllowedStorageBuffer(comptime STORAGE_BUFFER_NAMES_ENUM: type) type {
-    return struct {
-        buffer: STORAGE_BUFFER_NAMES_ENUM,
-        vertex_register: u32,
-        fragmant_register: u32,
-        allowed_in_vertex: bool,
-        allowed_in_fragment: bool,
+
+        pub fn equals_register(a: Self, b: Self) bool {
+            return a.register == b.register;
+        }
+        pub fn register_greater(a: Self, b: Self) bool {
+            return a.register > b.register;
+        }
     };
 }
 pub fn ShaderAllowedStorageBuffer(comptime STORAGE_BUFFER_NAMES_ENUM: type) type {
     return struct {
+        const Self = @This();
+
         buffer: STORAGE_BUFFER_NAMES_ENUM,
         register: u32,
-    };
-}
-pub fn PipelineAllowedStorageTexture(comptime STORAGE_TEXTURE_NAMES_ENUM: type) type {
-    return struct {
-        texture: STORAGE_TEXTURE_NAMES_ENUM,
-        vertex_register: u32,
-        fragmant_register: u32,
-        allowed_in_vertex: bool,
-        allowed_in_fragment: bool,
+
+        pub fn equals_register(a: Self, b: Self) bool {
+            return a.register == b.register;
+        }
+        pub fn register_greater(a: Self, b: Self) bool {
+            return a.register > b.register;
+        }
     };
 }
 pub fn ShaderAllowedStorageTexture(comptime STORAGE_TEXTURE_NAMES_ENUM: type) type {
     return struct {
-        texture: STORAGE_TEXTURE_NAMES_ENUM,
-        register: u32,
-    };
-}
-
-pub fn PipelineAllowedSamplePair(comptime TEXTURE_NAMES_ENUM: type, comptime SAMPLER_NAMES_ENUM: type) type {
-    return struct {
         const Self = @This();
 
-        combined_id: Types.Combined2EnumInt(SAMPLER_NAMES_ENUM, TEXTURE_NAMES_ENUM).combined_type = 0,
-        sampler: SAMPLER_NAMES_ENUM = undefined,
-        texture: TEXTURE_NAMES_ENUM = undefined,
-        /// `register(t#, ...)` in HLSL
-        vertex_register: u32 = 0,
-        /// `register(t#, ...)` in HLSL
-        fragment_register: u32 = 0,
-        /// for asserting correct uniform pushes
-        ///
-        /// `register(t#, space0)` in HLSL
-        bind_in_vertex: bool = false,
-        /// for asserting correct uniform pushes
-        ///
-        /// `register(t#, space2)` in HLSL
-        bind_in_fragment: bool = false,
+        texture: STORAGE_TEXTURE_NAMES_ENUM,
+        register: u32,
 
-        pub fn equals_id(a: Self, b: Self) bool {
-            return a.combined_id == b.combined_id;
+        pub fn equals_register(a: Self, b: Self) bool {
+            return a.register == b.register;
+        }
+        pub fn register_greater(a: Self, b: Self) bool {
+            return a.register > b.register;
         }
     };
 }
+
 pub fn ShaderAllowedSamplePair(comptime TEXTURE_NAMES_ENUM: type, comptime SAMPLER_NAMES_ENUM: type) type {
     return struct {
         const Self = @This();
@@ -242,6 +211,12 @@ pub fn ShaderAllowedSamplePair(comptime TEXTURE_NAMES_ENUM: type, comptime SAMPL
 
         pub fn equals_id(a: Self, b: Self) bool {
             return a.combined_id == b.combined_id;
+        }
+        pub fn equals_register(a: Self, b: Self) bool {
+            return a.register == b.register;
+        }
+        pub fn register_greater(a: Self, b: Self) bool {
+            return a.register > b.register;
         }
     };
 }
@@ -551,7 +526,7 @@ pub fn RenderPipelineDefinition(comptime PIPLEINE_NAMES: type, comptime VERTEX_S
     };
 }
 
-pub fn RenderPipelineVertexFieldMap(comptime VERTEX_BUFFER_NAMES: type, comptime SHADER_STRUCT_NAMES: type) type {
+pub fn RenderPipelineVertexFieldMap(comptime VERTEX_BUFFER_NAMES: type) type {
     return struct {
         const Self = @This();
         /// The vertex buffer to take data from
@@ -807,15 +782,6 @@ pub fn TextureDefinition(comptime TEXTURE_NAMES_ENUM: type) type {
     };
 }
 
-pub fn VertexBufferBinding(comptime VERTEX_BUFFER_NAMES_ENUM: type) type {
-    return struct {
-        const Self = @This();
-
-        buffer: VERTEX_BUFFER_NAMES_ENUM,
-        binding: SDL3.GPU_VertexBufferDescription,
-    };
-}
-
 pub const FieldLocationKind = enum(u8) {
     USER_INPUT_OUTPUT,
     COLOR_TARGET,
@@ -865,6 +831,9 @@ pub fn GraphicsController(
     comptime TEXTURE_NAMES_ENUM: type,
     /// An enum with tag names for each unique texture *sampler* used in application
     comptime SAMPLER_NAMES_ENUM: type,
+    /// An enum for named gpu fences. When a fence is requested, it must be sent
+    /// to a named fence slot, and waited on by name.
+    comptime FENCE_NAMES_ENUM: type,
     /// An enum with tag names for each unique transfer buffer used in application
     ///
     /// Transfer buffers are used to move data from the Application to the GPU
@@ -1081,11 +1050,10 @@ pub fn GraphicsController(
     const _FragmentShaderDefinition = FragmentShaderDefinition(FRAGMENT_SHADER_NAMES_ENUM, GPU_SHADER_STRUCT_NAMES_ENUM, GPU_UNIFORM_NAMES_ENUM, GPU_STORAGE_BUFFER_NAMES_ENUM, TEXTURE_NAMES_ENUM, SAMPLER_NAMES_ENUM, GPU_VERTEX_BUFFER_NAMES_ENUM);
     const _RenderPipelineDefinition = RenderPipelineDefinition(RENDER_PIPELINE_NAMES_ENUM, VERTEX_SHADER_NAMES_ENUM, FRAGMENT_SHADER_NAMES_ENUM, GPU_VERTEX_BUFFER_NAMES_ENUM, GPU_SHADER_STRUCT_NAMES_ENUM);
     const _TextureDefinition = TextureDefinition(TEXTURE_NAMES_ENUM);
-    const _VertexBufferBinding = VertexBufferBinding(GPU_VERTEX_BUFFER_NAMES_ENUM);
-    const _PipelineAllowedUniform = PipelineAllowedUniform(GPU_UNIFORM_NAMES_ENUM);
-    const _PipelineAllowedSamplePair = PipelineAllowedSamplePair(TEXTURE_NAMES_ENUM, SAMPLER_NAMES_ENUM);
-    const _PipelineAllowedStorageBuffer = PipelineAllowedStorageBuffer(GPU_STORAGE_BUFFER_NAMES_ENUM);
-    const _PipelineAllowedStorageTexture = PipelineAllowedStorageTexture(TEXTURE_NAMES_ENUM);
+    // const _PipelineAllowedUniform = PipelineAllowedUniform(GPU_UNIFORM_NAMES_ENUM);
+    // const _PipelineAllowedSamplePair = PipelineAllowedSamplePair(TEXTURE_NAMES_ENUM, SAMPLER_NAMES_ENUM);
+    // const _PipelineAllowedStorageBuffer = PipelineAllowedStorageBuffer(GPU_STORAGE_BUFFER_NAMES_ENUM);
+    // const _PipelineAllowedStorageTexture = PipelineAllowedStorageTexture(TEXTURE_NAMES_ENUM);
     const _ShaderAllowedUniform = ShaderAllowedUniform(GPU_UNIFORM_NAMES_ENUM);
     const _ShaderAllowedSamplePair = ShaderAllowedSamplePair(TEXTURE_NAMES_ENUM, SAMPLER_NAMES_ENUM);
     const _ShaderAllowedStorageBuffer = ShaderAllowedStorageBuffer(GPU_STORAGE_BUFFER_NAMES_ENUM);
@@ -1099,6 +1067,7 @@ pub fn GraphicsController(
     assert_with_reason(Types.type_is_enum(RENDER_PIPELINE_NAMES_ENUM) and Types.all_enum_values_start_from_zero_with_no_gaps(RENDER_PIPELINE_NAMES_ENUM), @src(), "type `RENDER_PIPELINE_NAMES_ENUM` MUST be an enum type with tag values starting at zero and no gaps between 0 and the max tag value, got type `{s}`", .{@typeName(RENDER_PIPELINE_NAMES_ENUM)});
     assert_with_reason(Types.type_is_enum(SAMPLER_NAMES_ENUM) and Types.all_enum_values_start_from_zero_with_no_gaps(SAMPLER_NAMES_ENUM), @src(), "type `SAMPLER_NAMES_ENUM` MUST be an enum type with tag values starting at zero and no gaps between 0 and the max tag value, got type `{s}`", .{@typeName(SAMPLER_NAMES_ENUM)});
     assert_with_reason(Types.type_is_enum(TRANSFER_BUFFER_NAMES_ENUM) and Types.all_enum_values_start_from_zero_with_no_gaps(TRANSFER_BUFFER_NAMES_ENUM), @src(), "type `TRANSFER_BUFFER_NAMES_ENUM` MUST be an enum type with tag values starting at zero and no gaps between 0 and the max tag value, got type `{s}`", .{@typeName(TRANSFER_BUFFER_NAMES_ENUM)});
+    assert_with_reason(Types.type_is_enum(FENCE_NAMES_ENUM) and Types.all_enum_values_start_from_zero_with_no_gaps(FENCE_NAMES_ENUM), @src(), "type `FENCE_NAMES_ENUM` MUST be an enum type with tag values starting at zero and no gaps between 0 and the max tag value, got type `{s}`", .{@typeName(FENCE_NAMES_ENUM)});
     // const _NUM_WINDOWS = Types.enum_defined_field_count(WINDOW_NAMES_ENUM);
     const _NUM_VERTEX_SHADERS = Types.enum_defined_field_count(VERTEX_SHADER_NAMES_ENUM);
     const _NUM_FRAGMENT_SHADERS = Types.enum_defined_field_count(FRAGMENT_SHADER_NAMES_ENUM);
@@ -1484,10 +1453,10 @@ pub fn GraphicsController(
                         .STORAGE_TEXTURE => |link| v.storage_textures_allowed_in_vertex_shaders[shader_idx][@intFromEnum(link.texture)].register = current_slot_to_check,
                         .STORAGE_BUFFER => |link| v.storage_buffers_allowed_in_vertex_shaders[shader_idx][@intFromEnum(link.buffer)].register = current_slot_to_check,
                         .SAMPLED_TEXTURE => |link| {
-                            const proto_pair = PipelineAllowedSamplePair(TEXTURE_NAMES_ENUM, SAMPLER_NAMES_ENUM){
+                            const proto_pair = ShaderAllowedSamplePair(TEXTURE_NAMES_ENUM, SAMPLER_NAMES_ENUM){
                                 .combined_id = Types.combine_2_enums(link.sampler, link.texture),
                             };
-                            const found_source = Utils.mem_search_with_func(@ptrCast(&v.sample_pairs_allowed_in_vertex_shaders[shader_idx]), 0, v.sample_pairs_allowed_in_vertex_shaders_len[shader_idx], proto_pair, PipelineAllowedSamplePair(TEXTURE_NAMES_ENUM, SAMPLER_NAMES_ENUM).equals_id);
+                            const found_source = Utils.mem_search_with_func(@ptrCast(&v.sample_pairs_allowed_in_vertex_shaders[shader_idx]), 0, v.sample_pairs_allowed_in_vertex_shaders_len[shader_idx], proto_pair, ShaderAllowedSamplePair(TEXTURE_NAMES_ENUM, SAMPLER_NAMES_ENUM).equals_id);
                             if (found_source) |source_idx| {
                                 v.sample_pairs_allowed_in_vertex_shaders[shader_idx][source_idx].register = current_slot_to_check;
                             } else {
@@ -1512,10 +1481,10 @@ pub fn GraphicsController(
                         .STORAGE_TEXTURE => |link| v.storage_textures_allowed_in_fragment_shaders[shader_idx][@intFromEnum(link.texture)].register = current_slot_to_check,
                         .STORAGE_BUFFER => |link| v.storage_buffers_allowed_in_fragment_shaders[shader_idx][@intFromEnum(link.buffer)].register = current_slot_to_check,
                         .SAMPLED_TEXTURE => |link| {
-                            const proto_pair = PipelineAllowedSamplePair(TEXTURE_NAMES_ENUM, SAMPLER_NAMES_ENUM){
+                            const proto_pair = ShaderAllowedSamplePair(TEXTURE_NAMES_ENUM, SAMPLER_NAMES_ENUM){
                                 .combined_id = Types.combine_2_enums(link.sampler, link.texture),
                             };
-                            const found_source = Utils.mem_search_with_func(@ptrCast(&v.sample_pairs_allowed_in_fragment_shaders[shader_idx]), 0, v.sample_pairs_allowed_in_fragment_shaders_len[shader_idx], proto_pair, PipelineAllowedSamplePair(TEXTURE_NAMES_ENUM, SAMPLER_NAMES_ENUM).equals_id);
+                            const found_source = Utils.mem_search_with_func(@ptrCast(&v.sample_pairs_allowed_in_fragment_shaders[shader_idx]), 0, v.sample_pairs_allowed_in_fragment_shaders_len[shader_idx], proto_pair, ShaderAllowedSamplePair(TEXTURE_NAMES_ENUM, SAMPLER_NAMES_ENUM).equals_id);
                             if (found_source) |source_idx| {
                                 v.sample_pairs_allowed_in_fragment_shaders[shader_idx][source_idx].register = current_slot_to_check;
                             } else {
@@ -1652,28 +1621,32 @@ pub fn GraphicsController(
     comptime var vi: u32 = 0;
     comptime var fi: u32 = 0;
     inline for (0.._NUM_VERTEX_SHADERS) |v| {
+        const start = vi;
         inline for (0.._NUM_UNIFORM_STRUCTS) |u| {
             if (vars.uniforms_allowed_in_vertex_shaders[v][u].allowed) {
                 const allowed = _ShaderAllowedUniform{
-                    .buffer = @enumFromInt(@intCast(u)),
+                    .uniform = @enumFromInt(@as(Types.enum_tag_type(GPU_UNIFORM_NAMES_ENUM), @intCast(u))),
                     .register = vars.uniforms_allowed_in_vertex_shaders[v][u].register,
                 };
                 all_allowed_uniforms_flat_vert[vi] = allowed;
                 vi += 1;
             }
         }
+        Sort.insertion_sort_with_func(_ShaderAllowedUniform, all_allowed_uniforms_flat_vert[start..vi], _ShaderAllowedUniform.register_greater);
     }
     inline for (0.._NUM_FRAGMENT_SHADERS) |f| {
+        const start = fi;
         inline for (0.._NUM_UNIFORM_STRUCTS) |u| {
             if (vars.uniforms_allowed_in_fragment_shaders[f][u].allowed) {
                 const allowed = _ShaderAllowedUniform{
-                    .buffer = @enumFromInt(@intCast(u)),
-                    .register = vars.uniforms_allowed_in_fragment_shaders[v][u].register,
+                    .uniform = @enumFromInt(@as(Types.enum_tag_type(GPU_UNIFORM_NAMES_ENUM), @intCast(u))),
+                    .register = vars.uniforms_allowed_in_fragment_shaders[f][u].register,
                 };
                 all_allowed_uniforms_flat_frag[fi] = allowed;
                 fi += 1;
             }
         }
+        Sort.insertion_sort_with_func(_ShaderAllowedUniform, all_allowed_uniforms_flat_frag[start..fi], _ShaderAllowedUniform.register_greater);
     }
     const uniform_starts_vert_const = uniform_starts_vert;
     const uniform_starts_frag_const = uniform_starts_frag;
@@ -1682,23 +1655,31 @@ pub fn GraphicsController(
     // COMPILE A CONDENSED LIST OF ALLOWED STORAGE BUFFERS
     comptime var total_num_allowed_storage_buffers_vert: u32 = 0;
     comptime var total_num_allowed_storage_buffers_frag: u32 = 0;
+    comptime var longest_storage_buffer_set_vert: u32 = 0;
+    comptime var longest_storage_buffer_set_frag: u32 = 0;
     comptime var storage_buffer_starts_vert: [_NUM_VERTEX_SHADERS + 1]u32 = undefined;
     comptime var storage_buffer_starts_frag: [_NUM_FRAGMENT_SHADERS + 1]u32 = undefined;
     inline for (0.._NUM_VERTEX_SHADERS) |v| {
         storage_buffer_starts_vert[v] = total_num_allowed_storage_buffers_vert;
+        comptime var num_allowed_this_shader: u32 = 0;
         inline for (0.._NUM_STORAGE_BUFFERS) |sb| {
             if (vars.storage_buffers_allowed_in_vertex_shaders[v][sb].allowed) {
-                total_num_allowed_storage_buffers_vert += 1;
+                num_allowed_this_shader += 1;
             }
         }
+        longest_storage_buffer_set_vert = @max(longest_storage_buffer_set_vert, num_allowed_this_shader);
+        total_num_allowed_storage_buffers_vert += num_allowed_this_shader;
     }
     inline for (0.._NUM_FRAGMENT_SHADERS) |f| {
         storage_buffer_starts_frag[f] = total_num_allowed_storage_buffers_frag;
+        comptime var num_allowed_this_shader: u32 = 0;
         inline for (0.._NUM_STORAGE_BUFFERS) |sb| {
             if (vars.storage_buffers_allowed_in_fragment_shaders[f][sb].allowed) {
-                total_num_allowed_storage_buffers_frag += 1;
+                num_allowed_this_shader += 1;
             }
         }
+        longest_storage_buffer_set_frag = @max(longest_storage_buffer_set_frag, num_allowed_this_shader);
+        total_num_allowed_storage_buffers_frag += num_allowed_this_shader;
     }
     storage_buffer_starts_vert[_NUM_VERTEX_SHADERS] = total_num_allowed_storage_buffers_vert;
     storage_buffer_starts_frag[_NUM_FRAGMENT_SHADERS] = total_num_allowed_storage_buffers_frag;
@@ -1707,29 +1688,35 @@ pub fn GraphicsController(
     vi = 0;
     fi = 0;
     inline for (0.._NUM_VERTEX_SHADERS) |v| {
+        const start = vi;
         inline for (0.._NUM_STORAGE_BUFFERS) |sb| {
             if (vars.storage_buffers_allowed_in_vertex_shaders[v][sb].allowed) {
                 const allowed = _ShaderAllowedStorageBuffer{
-                    .buffer = @enumFromInt(@intCast(sb)),
+                    .buffer = @enumFromInt(@as(Types.enum_tag_type(GPU_STORAGE_BUFFER_NAMES_ENUM), @intCast(sb))),
                     .register = vars.storage_buffers_allowed_in_vertex_shaders[v][sb].register,
                 };
                 all_allowed_storage_buffers_flat_vert[vi] = allowed;
                 vi += 1;
             }
         }
+        Sort.insertion_sort_with_func(_ShaderAllowedStorageBuffer, all_allowed_storage_buffers_flat_vert[start..vi], _ShaderAllowedStorageBuffer.register_greater);
     }
     inline for (0.._NUM_FRAGMENT_SHADERS) |f| {
+        const start = fi;
         inline for (0.._NUM_STORAGE_BUFFERS) |sb| {
             if (vars.storage_buffers_allowed_in_fragment_shaders[f][sb].allowed) {
                 const allowed = _ShaderAllowedStorageBuffer{
-                    .buffer = @enumFromInt(@intCast(sb)),
-                    .register = vars.storage_buffers_allowed_in_fragment_shaders[v][sb].register,
+                    .buffer = @enumFromInt(@as(Types.enum_tag_type(GPU_STORAGE_BUFFER_NAMES_ENUM), @intCast(sb))),
+                    .register = vars.storage_buffers_allowed_in_fragment_shaders[f][sb].register,
                 };
                 all_allowed_storage_buffers_flat_frag[fi] = allowed;
                 fi += 1;
             }
         }
+        Sort.insertion_sort_with_func(_ShaderAllowedStorageBuffer, all_allowed_storage_buffers_flat_frag[start..vi], _ShaderAllowedStorageBuffer.register_greater);
     }
+    const longest_storage_buffer_set_frag_const = longest_storage_buffer_set_frag;
+    const longest_storage_buffer_set_vert_const = longest_storage_buffer_set_vert;
     const storage_buffer_starts_vert_const = storage_buffer_starts_vert;
     const storage_buffer_starts_frag_const = storage_buffer_starts_frag;
     const all_allowed_storage_buffers_flat_vert_const = all_allowed_storage_buffers_flat_vert;
@@ -1737,23 +1724,31 @@ pub fn GraphicsController(
     // COMPILE A CONDENSED LIST OF ALLOWED STORAGE TEXTURES
     comptime var total_num_allowed_storage_textures_vert: u32 = 0;
     comptime var total_num_allowed_storage_textures_frag: u32 = 0;
+    comptime var longest_storage_texture_set_vert: u32 = 0;
+    comptime var longest_storage_texture_set_frag: u32 = 0;
     comptime var storage_texture_starts_vert: [_NUM_VERTEX_SHADERS + 1]u32 = undefined;
     comptime var storage_texture_starts_frag: [_NUM_FRAGMENT_SHADERS + 1]u32 = undefined;
     inline for (0.._NUM_VERTEX_SHADERS) |v| {
         storage_texture_starts_vert[v] = total_num_allowed_storage_textures_vert;
+        comptime var num_allowed_this_shader: u32 = 0;
         inline for (0.._NUM_TEXTURES) |t| {
             if (vars.storage_textures_allowed_in_vertex_shaders[v][t].allowed) {
-                total_num_allowed_storage_textures_vert += 1;
+                num_allowed_this_shader += 1;
             }
         }
+        longest_storage_texture_set_vert = @max(longest_storage_texture_set_vert, num_allowed_this_shader);
+        total_num_allowed_storage_textures_vert += num_allowed_this_shader;
     }
     inline for (0.._NUM_FRAGMENT_SHADERS) |f| {
         storage_texture_starts_frag[f] = total_num_allowed_storage_textures_frag;
+        comptime var num_allowed_this_shader: u32 = 0;
         inline for (0.._NUM_TEXTURES) |t| {
             if (vars.storage_textures_allowed_in_fragment_shaders[f][t].allowed) {
-                total_num_allowed_storage_textures_frag += 1;
+                num_allowed_this_shader += 1;
             }
         }
+        longest_storage_texture_set_frag = @max(longest_storage_texture_set_frag, num_allowed_this_shader);
+        total_num_allowed_storage_textures_frag += num_allowed_this_shader;
     }
     storage_texture_starts_vert[_NUM_VERTEX_SHADERS] = total_num_allowed_storage_textures_vert;
     storage_texture_starts_frag[_NUM_FRAGMENT_SHADERS] = total_num_allowed_storage_textures_frag;
@@ -1762,29 +1757,35 @@ pub fn GraphicsController(
     vi = 0;
     fi = 0;
     inline for (0.._NUM_VERTEX_SHADERS) |v| {
+        const start = vi;
         inline for (0.._NUM_TEXTURES) |t| {
             if (vars.storage_textures_allowed_in_vertex_shaders[v][t].allowed) {
                 const allowed = _ShaderAllowedStorageTexture{
-                    .buffer = @enumFromInt(@intCast(t)),
+                    .texture = @enumFromInt(@as(Types.enum_tag_type(TEXTURE_NAMES_ENUM), @intCast(t))),
                     .register = vars.storage_textures_allowed_in_vertex_shaders[v][t].register,
                 };
                 all_allowed_storage_textures_flat_vert[vi] = allowed;
                 vi += 1;
             }
         }
+        Sort.insertion_sort_with_func(_ShaderAllowedStorageTexture, all_allowed_storage_textures_flat_vert[start..vi], _ShaderAllowedStorageTexture.register_greater);
     }
     inline for (0.._NUM_FRAGMENT_SHADERS) |f| {
+        const start = fi;
         inline for (0.._NUM_TEXTURES) |t| {
             if (vars.storage_textures_allowed_in_fragment_shaders[f][t].allowed) {
                 const allowed = _ShaderAllowedStorageTexture{
-                    .buffer = @enumFromInt(@intCast(t)),
-                    .register = vars.storage_textures_allowed_in_fragment_shaders[v][t].register,
+                    .texture = @enumFromInt(@as(Types.enum_tag_type(TEXTURE_NAMES_ENUM), @intCast(t))),
+                    .register = vars.storage_textures_allowed_in_fragment_shaders[f][t].register,
                 };
                 all_allowed_storage_textures_flat_frag[fi] = allowed;
                 fi += 1;
             }
         }
+        Sort.insertion_sort_with_func(_ShaderAllowedStorageTexture, all_allowed_storage_textures_flat_frag[start..fi], _ShaderAllowedStorageTexture.register_greater);
     }
+    const longest_storage_texture_set_frag_const = longest_storage_texture_set_frag;
+    const longest_storage_texture_set_vert_const = longest_storage_texture_set_vert;
     const storage_texture_starts_vert_const = storage_texture_starts_vert;
     const storage_texture_starts_frag_const = storage_texture_starts_frag;
     const all_allowed_storage_textures_flat_vert_const = all_allowed_storage_textures_flat_vert;
@@ -1804,22 +1805,30 @@ pub fn GraphicsController(
     }
     sample_pair_starts_vert[_NUM_VERTEX_SHADERS] = total_num_allowed_sample_pairs_vert;
     sample_pair_starts_frag[_NUM_FRAGMENT_SHADERS] = total_num_allowed_sample_pairs_frag;
+    comptime var longest_sample_pair_set_vert: u32 = 0;
+    comptime var longest_sample_pair_set_frag: u32 = 0;
     comptime var all_allowed_sample_pairs_flat_vert: [total_num_allowed_sample_pairs_vert]_ShaderAllowedSamplePair = undefined;
     comptime var all_allowed_sample_pairs_flat_frag: [total_num_allowed_sample_pairs_frag]_ShaderAllowedSamplePair = undefined;
     vi = 0;
     fi = 0;
     inline for (0.._NUM_VERTEX_SHADERS) |v| {
+        longest_sample_pair_set_vert = @max(longest_sample_pair_set_vert, vars.sample_pairs_allowed_in_vertex_shaders_len[v]);
+        Sort.insertion_sort_with_func(_ShaderAllowedSamplePair, vars.sample_pairs_allowed_in_vertex_shaders[v][0..vars.sample_pairs_allowed_in_vertex_shaders_len[v]], _ShaderAllowedSamplePair.register_greater);
         inline for (vars.sample_pairs_allowed_in_vertex_shaders[v][0..vars.sample_pairs_allowed_in_vertex_shaders_len[v]]) |samp| {
             all_allowed_sample_pairs_flat_vert[vi] = samp;
             vi += 1;
         }
     }
     inline for (0.._NUM_FRAGMENT_SHADERS) |f| {
+        longest_sample_pair_set_frag = @max(longest_sample_pair_set_frag, vars.sample_pairs_allowed_in_fragment_shaders_len[f]);
+        Sort.insertion_sort_with_func(_ShaderAllowedSamplePair, vars.sample_pairs_allowed_in_fragment_shaders[f][0..vars.sample_pairs_allowed_in_fragment_shaders_len[f]], _ShaderAllowedSamplePair.register_greater);
         inline for (vars.sample_pairs_allowed_in_fragment_shaders[f][0..vars.sample_pairs_allowed_in_fragment_shaders_len[f]]) |samp| {
             all_allowed_sample_pairs_flat_frag[fi] = samp;
             fi += 1;
         }
     }
+    const longest_sample_pair_set_vert_const = longest_sample_pair_set_vert;
+    const longest_sample_pair_set_frag_const = longest_sample_pair_set_frag;
     const sample_pair_starts_vert_const = sample_pair_starts_vert;
     const sample_pair_starts_frag_const = sample_pair_starts_frag;
     const all_allowed_sample_pairs_flat_vert_const = all_allowed_sample_pairs_flat_vert;
@@ -1828,9 +1837,11 @@ pub fn GraphicsController(
     comptime var total_num_vertex_buffers_to_bind: u32 = 0;
     comptime var total_num_field_mappings: u32 = 0;
     comptime var vertex_buffers_to_bind_start_locs: [_NUM_RENDER_PIPELINES + 1]u32 = undefined;
-    comptime var vertex_mapping_start_locs: [_NUM_RENDER_PIPELINES + 1]u32 = undefined;
+    comptime var vertex_attribute_start_locs: [_NUM_RENDER_PIPELINES + 1]u32 = undefined;
+    comptime var longest_set_of_vertex_buffers: u32 = 0;
     // FIRST PASS ROUGH VALIDATION AND COUNTS
     inline for (0.._NUM_RENDER_PIPELINES) |pipe_idx| {
+        comptime var vertex_buffer_count_this_pipeline: u32 = 0;
         comptime var vertex_buffers_for_this_pipeline: [_NUM_VERT_BUFFERS]bool = @splat(false);
         const pipe_name: RENDER_PIPELINE_NAMES_ENUM = @enumFromInt(@as(Types.enum_tag_type(RENDER_PIPELINE_NAMES_ENUM), @intCast(pipe_idx)));
         const pipe_def = ordered_pipeline_definitions_const[pipe_idx];
@@ -1863,18 +1874,20 @@ pub fn GraphicsController(
             }
         }
         vertex_buffers_to_bind_start_locs[pipe_idx] = total_num_vertex_buffers_to_bind;
-        vertex_mapping_start_locs[pipe_idx] = total_num_field_mappings;
+        vertex_attribute_start_locs[pipe_idx] = total_num_field_mappings;
         inline for (pipe_def.vertex_field_maps) |field_map| {
             const vert_buf_idx = @intFromEnum(field_map.vertex_buffer);
             if (vertex_buffers_for_this_pipeline[vert_buf_idx] == false) {
-                total_num_vertex_buffers_to_bind += 1;
+                vertex_buffer_count_this_pipeline += 1;
                 vertex_buffers_for_this_pipeline[vert_buf_idx] = true;
             }
             total_num_field_mappings += 1;
         }
+        longest_set_of_vertex_buffers = @max(longest_set_of_vertex_buffers, vertex_buffer_count_this_pipeline);
+        total_num_vertex_buffers_to_bind += vertex_buffer_count_this_pipeline;
     }
     vertex_buffers_to_bind_start_locs[_NUM_RENDER_PIPELINES] = total_num_vertex_buffers_to_bind;
-    vertex_mapping_start_locs[_NUM_RENDER_PIPELINES] = total_num_field_mappings;
+    vertex_attribute_start_locs[_NUM_RENDER_PIPELINES] = total_num_field_mappings;
     comptime var vertex_buffer_names_to_bind_per_render_pipeline: [total_num_vertex_buffers_to_bind]GPU_VERTEX_BUFFER_NAMES_ENUM = undefined;
     comptime var vertex_buffers_to_bind_per_render_pipeline: [total_num_vertex_buffers_to_bind]SDL3.GPU_VertexBufferDescription = undefined;
     comptime var vertex_attributes_to_bind_per_render_pipeline: [total_num_field_mappings]SDL3.GPU_VertexAttribute = undefined;
@@ -1977,8 +1990,25 @@ pub fn GraphicsController(
                 .slot = slots_used[s],
                 .stride = @sizeOf(ordered_vertex_buffer_descriptions_const[buffer_idx].element_type),
             };
-            vertex_buffer_names_to_bind_per_render_pipeline[vertex_buffers_to_bind_start_locs[buffer_idx] + ss] = buffer_name;
-            vertex_buffers_to_bind_per_render_pipeline[vertex_buffers_to_bind_start_locs[buffer_idx] + ss] = bind;
+            vertex_buffer_names_to_bind_per_render_pipeline[vertex_buffers_to_bind_start_locs[pipe_idx] + ss] = buffer_name;
+            vertex_buffers_to_bind_per_render_pipeline[vertex_buffers_to_bind_start_locs[pipe_idx] + ss] = bind;
+        }
+        Sort.insertion_sort_with_func_and_matching_buffers(
+            SDL3.GPU_VertexBufferDescription,
+            vertex_buffers_to_bind_per_render_pipeline[vertex_buffers_to_bind_start_locs[pipe_idx]..vertex_buffers_to_bind_start_locs[pipe_idx + 1]],
+            vert_def_slot_greater,
+            .{vertex_buffer_names_to_bind_per_render_pipeline[vertex_buffers_to_bind_start_locs[pipe_idx]..vertex_buffers_to_bind_start_locs[pipe_idx + 1]]},
+        );
+        switch (VALIDATION.vertex_buffer_slot_gaps) {
+            .IGNORE => {},
+            .PANIC => for (0..slots_used_len) |s| {
+                const ss: u32 = @intCast(s);
+                assert_with_reason(vertex_buffers_to_bind_per_render_pipeline[vertex_buffers_to_bind_start_locs[pipe_idx] + ss].slot == ss, @src(), "for render pipleine `{s}`, vertex buffer slots are not in order: index {d} = slot {d}", .{ @tagName(pipe_name), ss, vertex_buffers_to_bind_per_render_pipeline[vertex_buffers_to_bind_start_locs[pipe_idx] + ss].slot });
+            },
+            .WARN => for (0..slots_used_len) |s| {
+                const ss: u32 = @intCast(s);
+                Assert.warn_with_reason(vertex_buffers_to_bind_per_render_pipeline[vertex_buffers_to_bind_start_locs[pipe_idx] + ss].slot == ss, @src(), "for render pipleine `{s}`, vertex buffer slots are not in order: index {d} = slot {d}", .{ @tagName(pipe_name), ss, vertex_buffers_to_bind_per_render_pipeline[vertex_buffers_to_bind_start_locs[pipe_idx] + ss].slot });
+            },
         }
         // COMPILE VERTEX ATTRIBUTE BINDINGS TO FINAL ARRAY
         inline for (pipe_def.vertex_field_maps, 0..) |field_map, f| {
@@ -1987,7 +2017,7 @@ pub fn GraphicsController(
             const vert_buf_info: VertexBufferDescription = @field(STRUCT_OF_GPU_VERTEX_BUFFER_DEFINITIONS, @tagName(field_map.vertex_buffer));
             const vert_struct_in_field_info: ShaderStructFieldInfo = @field(vert_struct_in.fields_info, field_map.shader_struct_field_name);
             const vert_buf_out_field_info: VertexBufferFieldInfo = @field(vert_buf_info.fields_info, field_map.vertex_buffer_field_name);
-            vertex_attributes_to_bind_per_render_pipeline[vertex_mapping_start_locs[pipe_idx] + ff] = SDL3.GPU_VertexAttribute{
+            vertex_attributes_to_bind_per_render_pipeline[vertex_attribute_start_locs[pipe_idx] + ff] = SDL3.GPU_VertexAttribute{
                 .buffer_slot = vertex_buffer_slots_for_this_pipeline[vert_buf_idx].MANUAL,
                 .format = vert_buf_out_field_info.gpu_format,
                 .location = vert_struct_in_field_info.location,
@@ -1995,7 +2025,12 @@ pub fn GraphicsController(
             };
         }
     }
-
+    const vertex_buffer_names_to_bind_per_render_pipeline_const = vertex_buffer_names_to_bind_per_render_pipeline;
+    const vertex_buffers_to_bind_per_render_pipeline_const = vertex_buffers_to_bind_per_render_pipeline;
+    const vertex_attributes_to_bind_per_render_pipeline_const = vertex_attributes_to_bind_per_render_pipeline;
+    const vertex_buffers_to_bind_start_locs_const = vertex_buffers_to_bind_start_locs;
+    const vertex_attribute_start_locs_const = vertex_attribute_start_locs;
+    const longest_set_of_vertex_buffers_const = longest_set_of_vertex_buffers;
     return struct {
         const Self = @This();
         gpu: *GPU_Device = @ptrCast(INVALID_ADDR),
@@ -2005,28 +2040,45 @@ pub fn GraphicsController(
         render_pipelines: [INTERNAL.NUM_RENDER_PIPELINES]*GPU_GraphicsPipeline = @splat(@as(*GPU_GraphicsPipeline, @ptrCast(INVALID_ADDR))),
         render_pipelines_init: [INTERNAL.NUM_RENDER_PIPELINES]bool = @splat(false),
         current_render_pipeline: RenderPipelineName = undefined,
-        render_pipeline_active: bool = false,
         textures: [INTERNAL.NUM_TEXTURES]*GPU_Texture = @splat(@as(*GPU_GraphicsPipeline, @ptrCast(INVALID_ADDR))),
         textures_init: [INTERNAL.NUM_TEXTURES]bool = @splat(false),
+        textures_own_memory: [INTERNAL.NUM_TEXTURES]bool = @splat(false),
         transfer_buffers: [INTERNAL.NUM_TRANSFER_BUFFERS]*GPU_TransferBuffer = @splat(@as(*GPU_TransferBuffer, @ptrCast(INVALID_ADDR))),
         transfer_buffers_init: [INTERNAL.NUM_TRANSFER_BUFFERS]bool = @splat(false),
+        transfer_buffers_own_memory: [INTERNAL.NUM_TRANSFER_BUFFERS]bool = @splat(false),
         vertex_buffers: [INTERNAL.NUM_VERTEX_BUFFERS]*GPU_Buffer = @splat(@as(*GPU_Buffer, @ptrCast(INVALID_ADDR))),
         vertex_buffers_init: [INTERNAL.NUM_VERTEX_BUFFERS]bool = @splat(false),
-        vertex_buffers_bound: [INTERNAL.NUM_VERTEX_BUFFERS]bool = @splat(false),
+        vertex_buffers_own_memory: [INTERNAL.NUM_VERTEX_BUFFERS]bool = @splat(false),
         storage_buffers: [INTERNAL.NUM_STORAGE_BUFFERS]*GPU_Buffer = @splat(@as(*GPU_Buffer, @ptrCast(INVALID_ADDR))),
         storage_buffers_init: [INTERNAL.NUM_STORAGE_BUFFERS]bool = @splat(false),
-        storage_buffers_bound: [INTERNAL.NUM_STORAGE_BUFFERS]bool = @splat(false),
+        storage_buffers_own_memory: [INTERNAL.NUM_STORAGE_BUFFERS]bool = @splat(false),
         samplers: [INTERNAL.NUM_SAMPLERS]*GPU_TextureSampler = @splat(@as(*GPU_TextureSampler, @ptrCast(INVALID_ADDR))),
         samplers_init: [INTERNAL.NUM_SAMPLERS]bool = @splat(false),
+        samplers_own_memory: [INTERNAL.NUM_SAMPLERS]bool = @splat(false),
+        fences: [INTERNAL.NUM_FENCES]*SDL3.GPU_Fence = undefined,
+        fences_init: [INTERNAL.NUM_FENCES]bool = @splat(false),
         uniforms: UniformCollection = undefined,
-        current_render_pass_color_targets: [8]SDL3.GPU_ColorTargetInfo = undefined,
-        current_render_pass_color_targets_len: u8 = 0,
-        current_render_pass_depth_target: SDL3.GPU_DepthStencilTargetInfo = undefined,
+        render_pass_active: bool = false,
+        render_pass_with_pipeline_active: bool = false,
+        // // VERIFY these may not need to be cached?
+        // current_render_pass_color_targets: [8]SDL3.GPU_ColorTargetInfo = undefined,
+        // current_render_pass_color_targets_len: u8 = 0,
+        // current_render_pass_depth_target: SDL3.GPU_DepthStencilTargetInfo = undefined,
 
-        pub inline fn get_texture(self: *const Self, name: TextureName) *GPU_Texture {
-            assert_with_reason(self.textures_init[@intFromEnum(name)], @src(), "texture `{s}` not initialized", .{@tagName(name)});
-            return self.textures[@intFromEnum(name)];
-        }
+        // // VERIFY these may not need to be cached?
+        // current_sample_pair_bindings_vert: [INTERNAL.LONGEST_SAMPLE_PAIR_SET_VERT]SDL3.GPU_TextureSamplerBinding = undefined,
+        // current_sample_pair_bindings_vert_len: u32 = 0,
+        // current_sample_pair_bindings_frag: [INTERNAL.LONGEST_SAMPLE_PAIR_SET_FRAG]SDL3.GPU_TextureSamplerBinding = undefined,
+        // current_sample_pair_bindings_frag_len: u32 = 0,
+        // current_storage_buffer_bindings_vert: [INTERNAL.LONGEST_STORAGE_BUFFER_SET_VERT]SDL3.GPU_BufferBinding = undefined,
+        // current_storage_buffer_bindings_vert_len: u32 = 0,
+        // current_storage_buffer_bindings_frag: [INTERNAL.LONGEST_STORAGE_BUFFER_SET_FRAG]SDL3.GPU_BufferBinding = undefined,
+        // current_storage_buffer_bindings_frag_len: u32 = 0,
+        // current_storage_texture_bindings_vert: [INTERNAL.LONGEST_STORAGE_TEXTURE_SET_VERT]*SDL3.GPU_Texture = undefined,
+        // current_storage_texture_bindings_vert_len: u32 = 0,
+        // current_storage_texture_bindings_frag: [INTERNAL.LONGEST_STORAGE_TEXTURE_SET_FRAG]*SDL3.GPU_Texture = undefined,
+        // current_storage_texture_bindings_frag_len: u32 = 0,
+
         pub inline fn get_window(self: *const Self, name: WindowName) *Window {
             assert_with_reason(self.windows_init[@intFromEnum(name)], @src(), "window `{s}` not initialized", .{@tagName(name)});
             return self.windows[@intFromEnum(name)];
@@ -2039,6 +2091,10 @@ pub fn GraphicsController(
         pub inline fn get_render_pipeline(self: *const Self, name: RenderPipelineName) *GPU_GraphicsPipeline {
             assert_with_reason(self.render_pipelines_init[@intFromEnum(name)], @src(), "render pipeline `{s}` not initialized", .{@tagName(name)});
             return self.render_pipelines[@intFromEnum(name)];
+        }
+        pub inline fn get_texture(self: *const Self, name: TextureName) *GPU_Texture {
+            assert_with_reason(self.textures_init[@intFromEnum(name)], @src(), "texture `{s}` not initialized", .{@tagName(name)});
+            return self.textures[@intFromEnum(name)];
         }
         pub inline fn get_transfer_buffer(self: *const Self, name: TransferBufferName) *GPU_TransferBuffer {
             assert_with_reason(self.transfer_buffers_init[@intFromEnum(name)], @src(), "transfer buffer `{s}` not initialized", .{@tagName(name)});
@@ -2055,6 +2111,48 @@ pub fn GraphicsController(
         pub inline fn get_sampler(self: *const Self, name: SamplerName) *GPU_TextureSampler {
             assert_with_reason(self.samplers_init[@intFromEnum(name)], @src(), "sampler `{s}` not initialized", .{@tagName(name)});
             return self.samplers[@intFromEnum(name)];
+        }
+        pub inline fn get_uniform_ptr(self: *Self, name: UniformName) *@FieldType(UniformCollection, @tagName(name)) {
+            return &@field(self.uniforms, @tagName(name));
+        }
+        pub inline fn get_uniform_ptr_const(self: *const Self, name: UniformName) *const @FieldType(UniformCollection, @tagName(name)) {
+            return &@field(self.uniforms, @tagName(name));
+        }
+
+        pub fn copy_named_texture_pointer_to(self: *Self, from: TextureName, to: TextureName) void {
+            const from_idx = @intFromEnum(from);
+            const to_idx = @intFromEnum(to);
+            assert_with_reason(self.textures_own_memory[to_idx] == false, @src(), "cannot copy a texture pointer (`{s}`) to a texture name that owns its memory (`{s}`): will cause memory leak", .{ @tagName(from), @tagName(to) });
+            self.textures[to_idx] = self.textures[from_idx];
+            self.textures_init[to_idx] = self.textures_init[from_idx];
+        }
+        pub fn copy_named_transfer_buffer_pointer_to(self: *Self, from: TransferBufferName, to: TransferBufferName) void {
+            const from_idx = @intFromEnum(from);
+            const to_idx = @intFromEnum(to);
+            assert_with_reason(self.transfer_buffers_own_memory[to_idx] == false, @src(), "cannot copy a transfer buffer pointer (`{s}`) to a transfer buffer name that owns its memory (`{s}`): will cause memory leak", .{ @tagName(from), @tagName(to) });
+            self.transfer_buffers[to_idx] = self.transfer_buffers[from_idx];
+            self.transfer_buffers_init[to_idx] = self.transfer_buffers_init[from_idx];
+        }
+        pub fn copy_named_storage_buffer_pointer_to(self: *Self, from: StorageBufferName, to: StorageBufferName) void {
+            const from_idx = @intFromEnum(from);
+            const to_idx = @intFromEnum(to);
+            assert_with_reason(self.storage_buffers_own_memory[to_idx] == false, @src(), "cannot copy a storage buffer pointer (`{s}`) to a storage buffer name that owns its memory (`{s}`): will cause memory leak", .{ @tagName(from), @tagName(to) });
+            self.storage_buffers[to_idx] = self.storage_buffers[from_idx];
+            self.storage_buffers_init[to_idx] = self.storage_buffers_init[from_idx];
+        }
+        pub fn copy_named_vertex_buffer_pointer_to(self: *Self, from: VertexBufferName, to: VertexBufferName) void {
+            const from_idx = @intFromEnum(from);
+            const to_idx = @intFromEnum(to);
+            assert_with_reason(self.vertex_buffers_own_memory[to_idx] == false, @src(), "cannot copy a vertex buffer pointer (`{s}`) to a vertex buffer name that owns its memory (`{s}`): will cause memory leak", .{ @tagName(from), @tagName(to) });
+            self.vertex_buffers[to_idx] = self.vertex_buffers[from_idx];
+            self.vertex_buffers_init[to_idx] = self.vertex_buffers_init[from_idx];
+        }
+        pub fn copy_named_sampler_pointer_to(self: *Self, from: SamplerName, to: SamplerName) void {
+            const from_idx = @intFromEnum(from);
+            const to_idx = @intFromEnum(to);
+            assert_with_reason(self.samplers_own_memory[to_idx] == false, @src(), "cannot copy a sampler pointer (`{s}`) to a sampler name that owns its memory (`{s}`): will cause memory leak", .{ @tagName(from), @tagName(to) });
+            self.samplers[to_idx] = self.samplers[from_idx];
+            self.samplers_init[to_idx] = self.samplers_init[from_idx];
         }
 
         pub const Target = union(TargetKind) {
@@ -2108,10 +2206,10 @@ pub fn GraphicsController(
         pub const DepthTarget = struct {
             texture: ?TextureName = null,
             clear_depth: f32 = 0,
-            load_op: GPU_LoadOp = .LOAD,
-            store_op: GPU_StoreOp = .STORE,
-            stencil_load_op: GPU_LoadOp = .LOAD,
-            stencil_store_op: GPU_StoreOp = .STORE,
+            load_op: SDL3.GPU_LoadOp = .LOAD,
+            store_op: SDL3.GPU_StoreOp = .STORE,
+            stencil_load_op: SDL3.GPU_LoadOp = .LOAD,
+            stencil_store_op: SDL3.GPU_StoreOp = .STORE,
             cycle: bool = false,
             clear_stencil: u8 = 0,
 
@@ -2196,23 +2294,6 @@ pub fn GraphicsController(
                 self.command.pop_debug_group();
             }
 
-            pub fn push_vertex_uniform_data(self: CommandBuffer, unform_name: UniformName) void {
-                assert_with_reason(self.controller.render_pipeline_active, @src(), "cannot push vertex uniform data when no render pipeline is active/bound", .{});
-                var register: u32 = undefined;
-                const register = INTERNAL.uniform_is_allowed_in_render_pipeline_stage(self.controller.current_render_pipeline, unform_name, .VERTEX) orelse assert_unreachable(@src(), "uniform `{s}` is disallowed/unrelated to current render pipeline `{s}` vertex shader, cannot push data", .{ @tagName(unform_name), @tagName(self.controller.current_render_pipeline) });
-                const ptr: *const anyopaque = @ptrCast(&@field(self.controller.uniforms, @tagName(unform_name)));
-                const len: u32 = @sizeOf(@FieldType(UniformCollection, @tagName(unform_name)));
-                self.command.push_vertex_uniform_data(register, ptr, len);
-            }
-            pub fn push_fragment_uniform_data(self: CommandBuffer, unform_name: UniformName) void {
-                assert_with_reason(self.controller.render_pipeline_active, @src(), "cannot push fragment uniform data when no render pipeline is active/bound", .{});
-                var register: u32 = undefined;
-                const register = INTERNAL.uniform_is_allowed_in_render_pipeline_stage(self.controller.current_render_pipeline, unform_name, .FRAGMENT) orelse assert_unreachable(@src(), "uniform `{s}` is disallowed/unrelated to current render pipeline `{s}` fragment shader, cannot push data", .{ @tagName(unform_name), @tagName(self.controller.current_render_pipeline) });
-                const ptr: *const anyopaque = @ptrCast(&@field(self.controller.uniforms, @tagName(unform_name)));
-                const len: u32 = @sizeOf(@FieldType(UniformCollection, @tagName(unform_name)));
-                self.command.push_fragment_uniform_data(register, ptr, len);
-            }
-
             // pub fn push_compute_uniform_data(self: *GPU_CommandBuffer, slot_index: u32, data_ptr: anytype) void {
             //     const data_raw = Utils.raw_slice_cast_const(data_ptr);
             //     C.SDL_PushGPUComputeUniformData(self.to_c_ptr(), slot_index, data_raw.ptr, @intCast(data_raw.len));
@@ -2230,12 +2311,14 @@ pub fn GraphicsController(
             }
 
             pub fn begin_render_pass(self: CommandBuffer, color_targets: []const ColorTarget, depth_target: DepthTarget) RenderPass {
+                assert_with_reason(self.controller.render_pass_active == false, @src(), "cannot begin a render pass when another render pass is already in progress", .{});
                 assert_with_reason(color_targets.len <= 8, @src(), "GraphicsController only supports up to 8 color targets, got {d}", .{color_targets.len});
                 for (color_targets, 0..) |target, t| {
                     self.controller.current_render_pass_color_targets[t] = target.to_sdl(self);
                 }
                 self.controller.current_render_pass_color_targets_len = @intCast(color_targets.len);
                 self.controller.current_render_pass_depth_target = depth_target.to_sdl(self);
+                self.controller.render_pass_active = true;
                 return RenderPass{
                     .controller = self.controller,
                     .command = self.command,
@@ -2251,15 +2334,26 @@ pub fn GraphicsController(
                 var blit_sdl = blit_info.to_sdl(self);
                 self.command.blit_texture(&blit_sdl);
             }
-            pub fn submit_commands(self: CommandBuffer) void {
+            pub fn submit_commands(self: *CommandBuffer) void {
                 self.command.submit_commands() catch |err| assert_unreachable_err(@src(), err);
+                self.* = undefined;
             }
-            pub fn submit_commands_and_aquire_fence(self: CommandBuffer) *SDL3.GPU_Fence {
-                return self.command.submit_commands_and_aquire_fence() catch |err| assert_unreachable_err(@src(), err);
+            pub fn submit_commands_and_aquire_fence(self: *CommandBuffer, fence_name: FenceName) void {
+                const fence_idx = @intFromEnum(fence_name);
+                assert_with_reason(self.controller.fences_init[fence_idx] == false, @src(), "fence `{s}` is already initialized and waiting to be released", .{@tagName(fence_name)});
+                self.controller.fences[fence_idx] = self.command.submit_commands_and_aquire_fence() catch |err| assert_unreachable_err(@src(), err);
+                self.controller.fences_init[fence_idx] = true;
+                self.* = undefined;
             }
-            pub fn cancel_commands(self: CommandBuffer) void {
+            pub fn cancel_commands(self: *CommandBuffer) void {
                 self.command.cancel_commands() catch |err| assert_unreachable_err(@src(), err);
+                self.* = undefined;
             }
+        };
+
+        pub const VertexBufferBinding = struct {
+            buffer: VertexBufferName,
+            data_offset: u32,
         };
 
         pub const RenderPass = struct {
@@ -2267,16 +2361,299 @@ pub fn GraphicsController(
             command: *SDL3.GPU_CommandBuffer,
             pass: *SDL3.GPU_RenderPass,
 
-            pub fn push_vertex_uniform_data(self: RenderPass, unform_name: UniformName) void {
-                const cmd = CommandBuffer{ .command = self.command, .controller = self.controller };
-                cmd.push_vertex_uniform_data(unform_name);
-            }
-            pub fn push_fragment_uniform_data(self: RenderPass, unform_name: UniformName) void {
-                const cmd = CommandBuffer{ .command = self.command, .controller = self.controller };
-                cmd.push_fragment_uniform_data(unform_name);
+            pub fn begin_render_pipeline_pass(self: RenderPass, pipeline: RenderPipelineName) RenderPassWithPipeline {
+                assert_with_reason(self.controller.render_pass_active, @src(), "no render pass is active, cannot start pipeline pass `{s}`", .{@tagName(pipeline)});
+                assert_with_reason(!self.controller.render_pass_with_pipeline_active, @src(), "a pipeline pass (`{s}`) is already active, cannot start 2 pipleine passes simultaneously (`{s}`)", .{ @tagName(self.controller.current_render_pipeline), @tagName(pipeline) });
+                self.pass.bind_graphics_pipeline(self.controller.get_render_pipeline(pipeline));
+                self.controller.render_pass_with_pipeline_active = true;
+                self.controller.current_render_pipeline = pipeline;
+                return RenderPassWithPipeline{
+                    .controller = self.controller,
+                    .command = self.command,
+                    .pass = self.pass,
+                    .pipeline = pipeline,
+                };
             }
 
-            //CHECKPOINT 
+            pub fn set_viewport(self: RenderPass, viewport: SDL3.GPU_Viewport) void {
+                self.pass.set_viewport(viewport);
+            }
+            pub fn clear_viewport(self: RenderPass) void {
+                self.pass.clear_viewport();
+            }
+            pub fn set_scissor(self: RenderPass, scissor_rect: SDL3.Rect_c_int) void {
+                self.pass.set_scissor(scissor_rect);
+            }
+            pub fn clear_scissor(self: RenderPass) void {
+                self.pass.clear_scissor();
+            }
+            pub fn set_blend_constants(self: RenderPass, blend_constants: SDL3.Color_RGBA_f32) void {
+                self.pass.set_blend_constants(blend_constants);
+            }
+            pub fn set_stencil_reference_val(self: RenderPass, ref_val: u8) void {
+                self.pass.set_stencil_reference_val(ref_val);
+            }
+            //CHECKPOINT
+            // pub fn bind_index_buffer(self: *GPU_RenderPass, buffer_binding: *GPU_BufferBinding, index_type_size: GPU_IndexTypeSize) void {
+            //     C.SDL_BindGPUIndexBuffer(self.to_c_ptr(), buffer_binding.to_c_ptr(), index_type_size.to_c());
+            // }
+            // pub fn draw_primitives(self: *GPU_RenderPass, first_vertex: u32, num_vertexes: u32, first_instance_id: u32, num_instances: u32) void {
+            //     C.SDL_DrawGPUPrimitives(self.to_c_ptr(), num_vertexes, num_instances, first_vertex, first_instance_id);
+            // }
+            // pub fn draw_indexed_primitives(self: *GPU_RenderPass, vertex_offset_per_index: i32, first_index: u32, num_indexes: u32, first_instance_id: u32, num_instances: u32) void {
+            //     C.SDL_DrawGPUIndexedPrimitives(self.to_c_ptr(), num_indexes, num_instances, first_index, vertex_offset_per_index, first_instance_id);
+            // }
+            // pub fn draw_primitives_indirect(self: *GPU_RenderPass, buffer: *GPU_Buffer, offset: u32, draw_count: u32) void {
+            //     C.SDL_DrawGPUPrimitivesIndirect(self.to_c_ptr(), buffer.to_c_ptr(), offset, draw_count);
+            // }
+            // pub fn draw_indexed_primitives_indirect(self: *GPU_RenderPass, buffer: *GPU_Buffer, offset: u32, draw_count: u32) void {
+            //     C.SDL_DrawGPUIndexedPrimitivesIndirect(self.to_c_ptr(), buffer.to_c_ptr(), offset, draw_count);
+            // }
+            pub fn end_render_pass(self: *RenderPass) void {
+                assert_with_reason(self.controller.render_pass_with_pipeline_active == false, @src(), "you must end the current `RenderPassWithPipeline` before you end the current `RenderPass`", .{});
+                self.pass.end_render_pass();
+                self.controller.render_pass_active = false;
+                self.* = undefined;
+            }
+        };
+
+        pub const RenderPassWithPipeline = struct {
+            controller: *Self,
+            command: *SDL3.GPU_CommandBuffer,
+            pass: *SDL3.GPU_RenderPass,
+            pipeline: RenderPipelineName,
+
+            pub fn bind_all_resources_and_push_all_uniforms(self: RenderPassWithPipeline, default_vertex_buffer_offset: u32, specific_vertex_buffer_offsets: []const VertexBufferBinding) void {
+                self.push_all_uniform_data();
+                self.bind_all_vertex_buffers(default_vertex_buffer_offset, specific_vertex_buffer_offsets);
+                self.bind_all_sampler_pairs();
+                self.bind_all_storage_textures();
+                self.bind_all_storage_buffers();
+            }
+
+            pub fn push_all_uniform_data(self: RenderPassWithPipeline) void {
+                const info = INTERNAL.get_render_pipeline_info(self.pipeline);
+                const allowed_vert = INTERNAL.allowed_uniforms_for_vert_shader(info.vertex);
+                const allowed_frag = INTERNAL.allowed_uniforms_for_vert_shader(info.fragment);
+                for (allowed_vert) |vert| {
+                    const ptr: *const anyopaque = @ptrCast(&@field(self.controller.uniforms, @tagName(vert.uniform)));
+                    const len: u32 = @sizeOf(@FieldType(UniformCollection, @tagName(vert.uniform)));
+                    self.command.push_vertex_uniform_data(vert.register, ptr, len);
+                }
+                for (allowed_frag) |frag| {
+                    const ptr: *const anyopaque = @ptrCast(&@field(self.controller.uniforms, @tagName(frag.uniform)));
+                    const len: u32 = @sizeOf(@FieldType(UniformCollection, @tagName(frag.uniform)));
+                    self.command.push_fragment_uniform_data(frag.register, ptr, len);
+                }
+            }
+
+            pub fn push_single_vertex_uniform_data(self: RenderPassWithPipeline, unform_name: UniformName) void {
+                const register = INTERNAL.uniform_register_for_pipeline_stage(self.pipeline, unform_name, .VERTEX) orelse assert_unreachable(@src(), "uniform `{s}` is disallowed/unrelated to current render pipeline `{s}` vertex shader, cannot push data", .{ @tagName(unform_name), @tagName(self.pipeline) });
+                const ptr: *const anyopaque = @ptrCast(&@field(self.controller.uniforms, @tagName(unform_name)));
+                const len: u32 = @sizeOf(@FieldType(UniformCollection, @tagName(unform_name)));
+                self.command.push_vertex_uniform_data(register, ptr, len);
+            }
+            pub fn push_single_fragment_uniform_data(self: RenderPassWithPipeline, unform_name: UniformName) void {
+                const register = INTERNAL.uniform_register_for_pipeline_stage(self.pipeline, unform_name, .FRAGMENT) orelse assert_unreachable(@src(), "uniform `{s}` is disallowed/unrelated to current render pipeline `{s}` fragment shader, cannot push data", .{ @tagName(unform_name), @tagName(self.pipeline) });
+                const ptr: *const anyopaque = @ptrCast(&@field(self.controller.uniforms, @tagName(unform_name)));
+                const len: u32 = @sizeOf(@FieldType(UniformCollection, @tagName(unform_name)));
+                self.command.push_fragment_uniform_data(register, ptr, len);
+            }
+
+            pub fn bind_all_vertex_buffers(self: RenderPassWithPipeline, default_offset: u32, specific_offsets: []const VertexBufferBinding) void {
+                assert_with_reason(num_cast(specific_offsets.len, u32) <= INTERNAL.LONGEST_VERTEX_BUFFER_SET, @src(), "length of `specific_offsets` ({d}) is longer than the longest recorded set of allowed vertex buffers ({d})", .{ specific_offsets.len, INTERNAL.LONGEST_VERTEX_BUFFER_SET });
+                const all_vert_buffer_names = INTERNAL.allowed_vertex_buffer_names_for_pipeline(self.pipeline);
+                const all_vert_buffer_defs = INTERNAL.allowed_vertex_buffer_defs_for_pipeline(self.pipeline);
+                const len: u32 = @intCast(all_vert_buffer_defs.len);
+                self.controller.current_vertex_buffers_bound_len = len;
+                var vertex_buffer_bindings: [INTERNAL.LONGEST_VERTEX_BUFFER_SET]SDL3.GPU_BufferBinding = undefined;
+                for (all_vert_buffer_names, 0..) |name, i| {
+                    vertex_buffer_bindings[i].buffer = self.controller.get_vertex_buffer(name);
+                    vertex_buffer_bindings[i].offset = default_offset;
+                }
+                for (specific_offsets) |offset| {
+                    const idx = INTERNAL.vertex_buffer_local_index_for_pipeline(self.pipeline, offset.buffer) orelse assert_unreachable(@src(), "vertex buffer `{s}` is not allowed in render pipeline `{s}`", .{ @tagName(offset.buffer), @tagName(self.pipeline) });
+                    vertex_buffer_bindings[idx].offset = offset.data_offset;
+                }
+                if (VALIDATION.vertex_buffer_slot_gaps == .PANIC) {
+                    self.pass.bind_vertex_buffers_to_consecutive_slots(0, vertex_buffer_bindings[0..len]);
+                } else {
+                    var i: u32 = 0;
+                    var ii: u32 = 1;
+                    var first_slot: u32 = undefined;
+                    var prev_slot: u32 = undefined;
+                    while (i < len) {
+                        first_slot = all_vert_buffer_defs[i].slot;
+                        prev_slot = prev_slot;
+                        while (ii < len) {
+                            const next_slot = all_vert_buffer_defs[ii].slot;
+                            if (next_slot == prev_slot + 1) {
+                                prev_slot = next_slot;
+                                ii += 1;
+                            } else {
+                                break;
+                            }
+                        }
+                        self.pass.bind_vertex_buffers_to_consecutive_slots(first_slot, vertex_buffer_bindings[i..ii]);
+                        i = ii;
+                        ii += 1;
+                    }
+                }
+            }
+
+            pub fn bind_specific_vertex_buffers(self: RenderPassWithPipeline, bindings: []const VertexBufferBinding) void {
+                const all_vert_defs = INTERNAL.allowed_vertex_buffer_defs_for_pipeline(self.pipeline);
+                var sdl_bindings: [INTERNAL.LONGEST_VERTEX_BUFFER_SET]SDL3.GPU_BufferBinding = undefined;
+                const len: u32 = @intCast(bindings.len);
+                for (bindings, 0..) |bind, i| {
+                    sdl_bindings[i] = SDL3.GPU_BufferBinding{
+                        .buffer = self.controller.get_vertex_buffer(bind.buffer),
+                        .offset = bind.data_offset,
+                    };
+                }
+                var local_i: u32 = 0;
+                var local_ii: u32 = 1;
+                var first_slot: u32 = undefined;
+                var prev_slot: u32 = undefined;
+                while (local_i < len) {
+                    const i = INTERNAL.vertex_buffer_local_index_for_pipeline(self.pipeline, bindings[local_i].buffer) orelse assert_unreachable(@src(), "vertex buffer `{s}` is not allowed in render pipeline `{s}`", .{ @tagName(bindings[local_i].buffer), @tagName(self.pipeline) });
+                    first_slot = all_vert_defs[i].slot;
+                    prev_slot = first_slot;
+                    while (local_ii < len) {
+                        const ii = INTERNAL.vertex_buffer_local_index_for_pipeline(self.pipeline, bindings[local_ii].buffer) orelse assert_unreachable(@src(), "vertex buffer `{s}` is not allowed in render pipeline `{s}`", .{ @tagName(bindings[local_ii].buffer), @tagName(self.pipeline) });
+                        const next_slot = all_vert_defs[ii].slot;
+                        if (next_slot == prev_slot + 1) {
+                            prev_slot = next_slot;
+                            local_ii += 1;
+                        } else {
+                            break;
+                        }
+                    }
+                    self.pass.bind_vertex_buffers_to_consecutive_slots(first_slot, sdl_bindings[local_i..local_ii]);
+                    local_i = local_ii;
+                    local_ii += 1;
+                }
+            }
+
+            pub fn bind_all_sampler_pairs(self: RenderPassWithPipeline) void {
+                const info = INTERNAL.get_render_pipeline_info(self.pipeline);
+                const allowed_vert = INTERNAL.allowed_sample_pairs_for_vert_shaders(info.vertex);
+                if (allowed_vert.len > 0) {
+                    var vert_bindings: [INTERNAL.LONGEST_SAMPLE_PAIR_SET_VERT]SDL3.GPU_TextureSamplerBinding = undefined;
+                    for (allowed_vert, 0..) |vert, v| {
+                        vert_bindings[v] = SDL3.GPU_TextureSamplerBinding{
+                            .sampler = self.controller.get_sampler(vert.sampler),
+                            .texture = self.controller.get_texture(vert.texture),
+                        };
+                    }
+                    const first_slot_vert = allowed_vert[0].register;
+                    self.pass.bind_vertex_samplers_to_consecutive_slots(first_slot_vert, vert_bindings[0..allowed_vert.len]);
+                }
+                const allowed_frag = INTERNAL.allowed_sample_pairs_for_frag_shaders(info.fragment);
+                if (allowed_frag.len > 0) {
+                    var frag_bindings: [INTERNAL.LONGEST_SAMPLE_PAIR_SET_FRAG]SDL3.GPU_TextureSamplerBinding = undefined;
+                    for (allowed_frag, 0..) |frag, f| {
+                        frag_bindings[f] = SDL3.GPU_TextureSamplerBinding{
+                            .sampler = self.controller.get_sampler(frag.sampler),
+                            .texture = self.controller.get_texture(frag.texture),
+                        };
+                    }
+                    const first_slot_frag = allowed_frag[0].register;
+                    self.pass.bind_fragment_samplers_to_consecutive_slots(first_slot_frag, frag_bindings[0..allowed_frag.len]);
+                }
+            }
+
+            pub fn bind_one_sampler_pair(self: RenderPassWithPipeline, comptime stage: ShaderStage, sampler: SamplerName, texture: TextureName) void {
+                const register = INTERNAL.sample_pair_register_for_render_pipeline_stage(self.pipeline, sampler, texture, stage) orelse assert_unreachable(@src(), "sample pair `{s}` + `{s}` is not allowed for render pipeline `{s}` {s} stage", .{ @tagName(sampler), @tagName(texture), @tagName(self.pipeline), @tagName(stage) });
+                const bind = [1]SDL3.GPU_TextureSamplerBinding{SDL3.GPU_TextureSamplerBinding{
+                    .sampler = self.controller.get_sampler(sampler),
+                    .texture = self.controller.get_texture(texture),
+                }};
+                switch (stage) {
+                    .VERTEX => {
+                        self.pass.bind_vertex_samplers_to_consecutive_slots(register, bind[0..1]);
+                    },
+                    .FRAGMENT => {
+                        self.pass.bind_fragment_samplers_to_consecutive_slots(register, bind[0..1]);
+                    },
+                }
+            }
+
+            pub fn bind_all_storage_textures(self: RenderPassWithPipeline) void {
+                const info = INTERNAL.get_render_pipeline_info(self.pipeline);
+                const allowed_vert = INTERNAL.allowed_storage_textures_for_vert_shaders(info.vertex);
+                if (allowed_vert.len > 0) {
+                    var vert_bindings: [INTERNAL.LONGEST_STORAGE_TEXTURE_SET_VERT]*SDL3.GPU_Texture = undefined;
+                    for (allowed_vert, 0..) |vert, v| {
+                        vert_bindings[v] = self.controller.get_texture(vert.texture);
+                    }
+                    const first_slot_vert = allowed_vert[0].register;
+                    self.pass.bind_vertex_storage_textures_to_consecutive_slots(first_slot_vert, vert_bindings[0..allowed_vert.len]);
+                }
+                const allowed_frag = INTERNAL.allowed_storage_textures_for_frag_shaders(info.fragment);
+                if (allowed_frag.len > 0) {
+                    var frag_bindings: [INTERNAL.LONGEST_STORAGE_TEXTURE_SET_FRAG]*SDL3.GPU_Texture = undefined;
+                    for (allowed_frag, 0..) |frag, f| {
+                        frag_bindings[f] = self.controller.get_texture(frag.texture);
+                    }
+                    const first_slot_frag = allowed_frag[0].register;
+                    self.pass.bind_fragment_storage_textures_to_consecutive_slots(first_slot_frag, frag_bindings[0..allowed_frag.len]);
+                }
+            }
+
+            pub fn bind_one_storage_texture(self: RenderPassWithPipeline, comptime stage: ShaderStage, texture: TextureName) void {
+                const register = INTERNAL.storage_texture_register_for_render_pipeline_stage(self.pipeline, texture, stage) orelse assert_unreachable(@src(), "storage texture `{s}` is not allowed for render pipeline `{s}` {s} stage", .{ @tagName(texture), @tagName(self.pipeline), @tagName(stage) });
+                const bind = [1]*SDL3.GPU_Texture{self.controller.get_texture(texture)};
+                switch (stage) {
+                    .VERTEX => {
+                        self.pass.bind_vertex_storage_textures_to_consecutive_slots(register, bind[0..1]);
+                    },
+                    .FRAGMENT => {
+                        self.pass.bind_fragment_storage_textures_to_consecutive_slots(register, bind[0..1]);
+                    },
+                }
+            }
+
+            pub fn bind_all_storage_buffers(self: RenderPassWithPipeline) void {
+                const info = INTERNAL.get_render_pipeline_info(self.pipeline);
+                const allowed_vert = INTERNAL.allowed_storage_buffers_for_vert_shaders(info.vertex);
+                if (allowed_vert.len > 0) {
+                    var vert_bindings: [INTERNAL.LONGEST_STORAGE_BUFFER_SET_VERT]*SDL3.GPU_Buffer = undefined;
+                    for (allowed_vert, 0..) |vert, v| {
+                        vert_bindings[v] = self.controller.get_storage_buffer(vert.buffer);
+                    }
+                    const first_slot_vert = allowed_vert[0].register;
+                    self.pass.bind_vertex_storage_buffers_to_consecutive_slots(first_slot_vert, vert_bindings[0..allowed_vert.len]);
+                }
+                const allowed_frag = INTERNAL.allowed_storage_buffers_for_frag_shaders(info.fragment);
+                if (allowed_frag.len > 0) {
+                    var frag_bindings: [INTERNAL.LONGEST_STORAGE_BUFFER_SET_FRAG]*SDL3.GPU_Buffer = undefined;
+                    for (allowed_frag, 0..) |frag, f| {
+                        frag_bindings[f] = self.controller.get_storage_buffer(frag.buffer);
+                    }
+                    const first_slot_frag = allowed_frag[0].register;
+                    self.pass.bind_fragment_storage_buffers_to_consecutive_slots(first_slot_frag, frag_bindings[0..allowed_frag.len]);
+                }
+            }
+
+            pub fn bind_one_storage_buffer(self: RenderPassWithPipeline, comptime stage: ShaderStage, buffer: StorageBufferName) void {
+                const register = INTERNAL.storage_buffer_register_for_render_pipeline_stage(self.pipeline, buffer, stage) orelse assert_unreachable(@src(), "storage buffer `{s}` is not allowed for render pipeline `{s}` {s} stage", .{ @tagName(buffer), @tagName(self.pipeline), @tagName(stage) });
+                const bind = [1]*SDL3.GPU_Buffer{self.controller.get_storage_buffer(buffer)};
+                switch (stage) {
+                    .VERTEX => {
+                        self.pass.bind_vertex_storage_buffers_to_consecutive_slots(register, bind[0..1]);
+                    },
+                    .FRAGMENT => {
+                        self.pass.bind_fragment_storage_buffers_to_consecutive_slots(register, bind[0..1]);
+                    },
+                }
+            }
+
+            pub fn end_pipeline_pass(self: *RenderPassWithPipeline) void {
+                self.controller.render_pass_with_pipeline_active = false;
+                self.* = undefined;
+                return;
+            }
         };
 
         pub const INTERNAL = struct {
@@ -2288,16 +2665,23 @@ pub fn GraphicsController(
             pub const NUM_SAMPLERS = Types.enum_defined_field_count(SAMPLER_NAMES_ENUM);
             pub const NUM_VERTEX_STRUCTS = Types.enum_defined_field_count(GPU_SHADER_STRUCT_NAMES_ENUM);
             pub const NUM_STORAGE_BUFFERS = Types.enum_defined_field_count(GPU_STORAGE_BUFFER_NAMES_ENUM);
+            pub const NUM_FENCES = Types.enum_defined_field_count(FENCE_NAMES_ENUM);
+
+            pub const TEXTURE_DEFS = ordered_texture_definitions_const;
+
+            pub const LONGEST_VERTEX_BUFFER_SET = longest_set_of_vertex_buffers_const;
+            pub const LONGEST_STORAGE_BUFFER_SET_VERT = longest_storage_buffer_set_vert_const;
+            pub const LONGEST_STORAGE_BUFFER_SET_FRAG = longest_storage_buffer_set_frag_const;
+            pub const LONGEST_STORAGE_TEXTURE_SET_VERT = longest_storage_texture_set_vert_const;
+            pub const LONGEST_STORAGE_TEXTURE_SET_FRAG = longest_storage_texture_set_frag_const;
+            pub const LONGEST_SAMPLE_PAIR_SET_VERT = longest_sample_pair_set_vert_const;
+            pub const LONGEST_SAMPLE_PAIR_SET_FRAG = longest_sample_pair_set_frag_const;
 
             pub const PIPELINE_DEFS = ordered_pipeline_definitions_const;
             pub inline fn get_render_pipeline_info(pipeline: RenderPipelineName) _RenderPipelineDefinition {
                 return PIPELINE_DEFS[@intFromEnum(pipeline)];
             }
-            // pub inline fn bind_all_render_pipeline_resources(self: *Self, pipeline: RenderPipelineName) !void {
-            //     const buf = try self.gpu.acquire_command_buffer();
-            //     buf.aquire_swapchain_texture(window: *Window)
-            //     buf.begin_render_pass(color_targets: []const GPU_ColorTargetInfo, depth_stencil_target: *GPU_DepthStencilTargetInfo);
-            // }
+
             pub const ALLOWED_UNIFORMS_FLAT_FRAG = all_allowed_uniforms_flat_frag_const;
             pub const ALLOWED_UNIFORMS_FLAT_VERT = all_allowed_uniforms_flat_vert_const;
             pub const ALLOWED_UNIFORMS_STARTS_FRAG = uniform_starts_frag_const;
@@ -2310,7 +2694,7 @@ pub fn GraphicsController(
                 const idx = @intFromEnum(vert_shader);
                 return ALLOWED_UNIFORMS_FLAT_VERT[ALLOWED_UNIFORMS_STARTS_VERT[idx]..ALLOWED_UNIFORMS_STARTS_VERT[idx + 1]];
             }
-            pub fn uniform_is_allowed_in_render_pipeline_stage(pipeline: RenderPipelineName, uniform: UniformName, comptime stage: ShaderStage) ?u32 {
+            pub fn uniform_register_for_pipeline_stage(pipeline: RenderPipelineName, uniform: UniformName, comptime stage: ShaderStage) ?u32 {
                 const info = get_render_pipeline_info(pipeline);
                 switch (stage) {
                     .VERTEX => {
@@ -2329,67 +2713,134 @@ pub fn GraphicsController(
                 return null;
             }
 
-            pub const ALLOWED_STORAGE_BUFFERS_FLAT = all_allowed_storage_buffers_flat_const;
-            pub const ALLOWED_STORAGE_BUFFERS_STARTS = allowed_storage_buffer_starts_const;
-            pub const ALLOWED_STORAGE_BUFFERS_PER_PIPELINE = allowed_storage_buffers_per_pipeline_indices_const;
-            pub inline fn allowed_storage_buffers(comptime PIPELINE: RenderPipelineName) []const PipelineAllowedResource {
-                const idx = @intFromEnum(PIPELINE);
-                return ALLOWED_STORAGE_BUFFERS_FLAT[ALLOWED_STORAGE_BUFFERS_STARTS[idx]..ALLOWED_STORAGE_BUFFERS_STARTS[idx + 1]];
+            pub const ALLOWED_STORAGE_BUFFERS_FLAT_FRAG = all_allowed_storage_buffers_flat_frag_const;
+            pub const ALLOWED_STORAGE_BUFFERS_FLAT_VERT = all_allowed_storage_buffers_flat_vert_const;
+            pub const ALLOWED_STORAGE_BUFFERS_STARTS_FRAG = storage_buffer_starts_frag_const;
+            pub const ALLOWED_STORAGE_BUFFERS_STARTS_VERT = storage_buffer_starts_vert_const;
+            pub inline fn allowed_storage_buffers_for_frag_shaders(frag_shader: FragmentShaderName) []const _ShaderAllowedStorageBuffer {
+                const idx = @intFromEnum(frag_shader);
+                return ALLOWED_STORAGE_BUFFERS_FLAT_FRAG[ALLOWED_STORAGE_BUFFERS_STARTS_FRAG[idx]..ALLOWED_STORAGE_BUFFERS_STARTS_FRAG[idx + 1]];
             }
-            pub inline fn storage_buffer_allowed_info(comptime PIPELINE: RenderPipelineName, comptime BUFFER: StorageBufferName) ?PipelineAllowedResource {
-                const pipe_idx = @intFromEnum(PIPELINE);
-                const buf_idx = @intFromEnum(BUFFER);
-                const map_idx = ALLOWED_STORAGE_BUFFERS_PER_PIPELINE[pipe_idx][buf_idx];
-                if (comptime map_idx >= ALLOWED_STORAGE_BUFFERS_FLAT.len) return null;
-                return ALLOWED_STORAGE_BUFFERS_FLAT[map_idx];
+            pub inline fn allowed_storage_buffers_for_vert_shaders(vert_shader: VertexShaderName) []const _ShaderAllowedStorageBuffer {
+                const idx = @intFromEnum(vert_shader);
+                return ALLOWED_STORAGE_BUFFERS_FLAT_VERT[ALLOWED_STORAGE_BUFFERS_STARTS_VERT[idx]..ALLOWED_STORAGE_BUFFERS_STARTS_VERT[idx + 1]];
             }
-            pub const ALLOWED_STORAGE_TEXTURES_FLAT = all_allowed_storage_textures_flat_const;
-            pub const ALLOWED_STORAGE_TEXTURES_STARTS = allowed_storage_texture_starts_const;
-            pub const ALLOWED_STORAGE_TEXTURES_PER_PIPELINE = allowed_storage_textures_per_pipeline_indices_const;
-            pub inline fn allowed_storage_textures(comptime PIPELINE: RenderPipelineName) []const PipelineAllowedResource {
-                const idx = @intFromEnum(PIPELINE);
-                return ALLOWED_STORAGE_TEXTURES_FLAT[ALLOWED_STORAGE_TEXTURES_STARTS[idx]..ALLOWED_STORAGE_TEXTURES_STARTS[idx + 1]];
+            pub fn storage_buffer_register_for_render_pipeline_stage(pipeline: RenderPipelineName, buffer: StorageBufferName, comptime stage: ShaderStage) ?u32 {
+                const info = get_render_pipeline_info(pipeline);
+                switch (stage) {
+                    .VERTEX => {
+                        const allowed_for_vert = allowed_storage_buffers_for_vert_shaders(info.vertex);
+                        for (allowed_for_vert) |allowed| {
+                            if (allowed.buffer == buffer) return allowed.register;
+                        }
+                    },
+                    .FRAGMENT => {
+                        const allowed_for_frag = allowed_storage_buffers_for_frag_shaders(info.fragment);
+                        for (allowed_for_frag) |allowed| {
+                            if (allowed.buffer == buffer) return allowed.register;
+                        }
+                    },
+                }
+                return null;
             }
-            pub inline fn storage_texture_allowed_info(comptime PIPELINE: RenderPipelineName, comptime TEXTURE: TextureName) ?PipelineAllowedResource {
-                const pipe_idx = @intFromEnum(PIPELINE);
-                const tex_idx = @intFromEnum(TEXTURE);
-                const map_idx = ALLOWED_STORAGE_TEXTURES_PER_PIPELINE[pipe_idx][tex_idx];
-                if (comptime map_idx >= ALLOWED_STORAGE_TEXTURES_FLAT.len) return null;
-                return ALLOWED_STORAGE_TEXTURES_FLAT[map_idx];
+
+            pub const ALLOWED_STORAGE_TEXTURES_FLAT_FRAG = all_allowed_storage_textures_flat_frag_const;
+            pub const ALLOWED_STORAGE_TEXTURES_FLAT_VERT = all_allowed_storage_textures_flat_vert_const;
+            pub const STORAGE_TEXTURES_STARTS_FRAG = storage_texture_starts_frag_const;
+            pub const STORAGE_TEXTURES_STARTS_VERT = storage_texture_starts_vert_const;
+            pub inline fn allowed_storage_textures_for_frag_shaders(frag_shader: FragmentShaderName) []const _ShaderAllowedStorageTexture {
+                const idx = @intFromEnum(frag_shader);
+                return ALLOWED_STORAGE_TEXTURES_FLAT_FRAG[STORAGE_TEXTURES_STARTS_FRAG[idx]..STORAGE_TEXTURES_STARTS_FRAG[idx + 1]];
             }
-            pub const ALLOWED_SAMPLERS_FLAT = all_allowed_sampler_pair_flat_const;
-            pub const ALLOWED_SAMPLERS_STARTS = allowed_sampler_pair_starts_const;
-            pub inline fn allowed_sample_pairs(comptime PIPELINE: RenderPipelineName) []const PipelineAllowedSamplePair(TextureName, SamplerName) {
-                const idx = @intFromEnum(PIPELINE);
-                return ALLOWED_SAMPLERS_FLAT[ALLOWED_SAMPLERS_STARTS[idx]..ALLOWED_SAMPLERS_STARTS[idx + 1]];
+            pub inline fn allowed_storage_textures_for_vert_shaders(vert_shader: VertexShaderName) []const _ShaderAllowedStorageTexture {
+                const idx = @intFromEnum(vert_shader);
+                return ALLOWED_STORAGE_TEXTURES_FLAT_VERT[STORAGE_TEXTURES_STARTS_VERT[idx]..STORAGE_TEXTURES_STARTS_VERT[idx + 1]];
             }
-            pub inline fn sample_pair_allowed_info(comptime PIPELINE: RenderPipelineName, comptime SAMPLER: SamplerName, comptime TEXTURE: TextureName) ?PipelineAllowedSamplePair(TextureName, SamplerName) {
-                const combined = Types.combine_2_enums(SAMPLER, TEXTURE);
-                const allowed_in_pipe = allowed_sample_pairs(PIPELINE);
-                for (allowed_in_pipe) |allowed_info| {
-                    if (allowed_info.combined_id == combined) {
-                        return allowed_info;
+            pub fn storage_texture_register_for_render_pipeline_stage(pipeline: RenderPipelineName, texture: TextureName, comptime stage: ShaderStage) ?u32 {
+                const info = get_render_pipeline_info(pipeline);
+                switch (stage) {
+                    .VERTEX => {
+                        const allowed_for_vert = allowed_storage_textures_for_vert_shaders(info.vertex);
+                        for (allowed_for_vert) |allowed| {
+                            if (allowed.texture == texture) return allowed.register;
+                        }
+                    },
+                    .FRAGMENT => {
+                        const allowed_for_frag = allowed_storage_textures_for_frag_shaders(info.fragment);
+                        for (allowed_for_frag) |allowed| {
+                            if (allowed.texture == texture) return allowed.register;
+                        }
+                    },
+                }
+                return null;
+            }
+
+            pub const ALLOWED_SAMPLERS_FLAT_FRAG = all_allowed_sample_pairs_flat_frag_const;
+            pub const ALLOWED_SAMPLERS_FLAT_VERT = all_allowed_sample_pairs_flat_vert_const;
+            pub const SAMPLERS_STARTS_FRAG = sample_pair_starts_frag_const;
+            pub const SAMPLERS_STARTS_VERT = sample_pair_starts_vert_const;
+            pub inline fn allowed_sample_pairs_for_frag_shaders(frag_shader: FragmentShaderName) []const _ShaderAllowedSamplePair {
+                const idx = @intFromEnum(frag_shader);
+                return ALLOWED_SAMPLERS_FLAT_FRAG[SAMPLERS_STARTS_FRAG[idx]..SAMPLERS_STARTS_FRAG[idx + 1]];
+            }
+            pub inline fn allowed_sample_pairs_for_vert_shaders(vert_shader: VertexShaderName) []const _ShaderAllowedSamplePair {
+                const idx = @intFromEnum(vert_shader);
+                return ALLOWED_SAMPLERS_FLAT_VERT[SAMPLERS_STARTS_VERT[idx]..SAMPLERS_STARTS_VERT[idx + 1]];
+            }
+            pub fn sample_pair_register_for_render_pipeline_stage(pipeline: RenderPipelineName, sampler: SamplerName, texture: TextureName, comptime stage: ShaderStage) ?u32 {
+                const info = get_render_pipeline_info(pipeline);
+                const combined = Types.combine_2_enums(sampler, texture);
+                switch (stage) {
+                    .VERTEX => {
+                        const allowed_for_vert = allowed_sample_pairs_for_vert_shaders(info.vertex);
+                        for (allowed_for_vert) |allowed| {
+                            if (allowed.combined_id == combined) return allowed.register;
+                        }
+                    },
+                    .FRAGMENT => {
+                        const allowed_for_frag = allowed_sample_pairs_for_frag_shaders(info.fragment);
+                        for (allowed_for_frag) |allowed| {
+                            if (allowed.combined_id == combined) return allowed.register;
+                        }
+                    },
+                }
+                return null;
+            }
+
+            pub const ALLOWED_VERTEX_BUFFER_NAMES_FOR_PIPELINE_FLAT = vertex_buffer_names_to_bind_per_render_pipeline_const;
+            pub const ALLOWED_VERTEX_BUFFER_DEFS_FOR_PIPELINE_FLAT = vertex_buffers_to_bind_per_render_pipeline_const;
+            pub const VERTEX_BUFFER_NAMES_DEFS_STRAT_LOCS = vertex_buffers_to_bind_start_locs_const;
+            pub const ALLOWED_VERTEX_ATTRIBUTES_FOR_PIPELINE_FLAT = vertex_attributes_to_bind_per_render_pipeline_const;
+            pub const VERTEX_ATTRIBUTE_START_LOCS = vertex_attribute_start_locs_const;
+            pub inline fn allowed_vertex_buffer_names_for_pipeline(pipeline: RenderPipelineName) []const VertexBufferName {
+                const idx = @intFromEnum(pipeline);
+                return ALLOWED_VERTEX_BUFFER_NAMES_FOR_PIPELINE_FLAT[VERTEX_BUFFER_NAMES_DEFS_STRAT_LOCS[idx]..VERTEX_BUFFER_NAMES_DEFS_STRAT_LOCS[idx + 1]];
+            }
+            pub inline fn allowed_vertex_buffer_defs_for_pipeline(pipeline: RenderPipelineName) []const SDL3.GPU_VertexBufferDescription {
+                const idx = @intFromEnum(pipeline);
+                return ALLOWED_VERTEX_BUFFER_DEFS_FOR_PIPELINE_FLAT[VERTEX_BUFFER_NAMES_DEFS_STRAT_LOCS[idx]..VERTEX_BUFFER_NAMES_DEFS_STRAT_LOCS[idx + 1]];
+            }
+            pub inline fn allowed_vertex_buffer_attributes_for_pipeline(pipeline: RenderPipelineName) []const SDL3.GPU_VertexAttribute {
+                const idx = @intFromEnum(pipeline);
+                return ALLOWED_VERTEX_ATTRIBUTES_FOR_PIPELINE_FLAT[VERTEX_ATTRIBUTE_START_LOCS[idx]..VERTEX_ATTRIBUTE_START_LOCS[idx + 1]];
+            }
+            pub fn vertex_buffer_def_for_buffer_name_for_pipeline(pipeline: RenderPipelineName, name: VertexBufferName) ?SDL3.GPU_VertexBufferDescription {
+                if (vertex_buffer_local_index_for_pipeline(pipeline, name)) |idx| {
+                    const allowed = allowed_vertex_buffer_defs_for_pipeline(pipeline);
+                    return allowed[idx];
+                }
+                return null;
+            }
+            pub fn vertex_buffer_local_index_for_pipeline(pipeline: RenderPipelineName, name: VertexBufferName) ?u32 {
+                const allowed = allowed_vertex_buffer_names_for_pipeline(pipeline);
+                //TODO cache a map of vert buffer names to their indices in the allowed set to skip searching for them in this loop
+                for (allowed, 0..) |allowed_name, a| {
+                    if (allowed_name == name) {
+                        return @intCast(a);
                     }
                 }
                 return null;
             }
-            pub const ALLOWED_VERTEX_BUFFERS_FLAT = all_allowed_vertex_buffers_flat_const;
-            pub const ALLOWED_VERTEX_BUFFERS_STARTS = allowed_vertex_buffer_starts_const;
-            pub const ALLOWED_VERTEX_BUFFERS_PER_PIPELINE = allowed_vertex_buffers_per_pipeline_indices_const;
-            pub inline fn allowed_vertex_buffers(comptime PIPELINE: RenderPipelineName) []const AllowedResuorce {
-                const idx = @intFromEnum(PIPELINE);
-                return ALLOWED_VERTEX_BUFFERS_FLAT[ALLOWED_VERTEX_BUFFERS_STARTS[idx]..ALLOWED_VERTEX_BUFFERS_STARTS[idx + 1]];
-            }
-            pub inline fn vertex_buffer_is_allowed(comptime PIPELINE: RenderPipelineName, comptime BUFFER: VertexBufferName) ?AllowedResuorce {
-                const pipe_idx = @intFromEnum(PIPELINE);
-                const buf_idx = @intFromEnum(BUFFER);
-                const map_idx = ALLOWED_VERTEX_BUFFERS_PER_PIPELINE[pipe_idx][buf_idx];
-                if (comptime map_idx >= ALLOWED_VERTEX_BUFFERS_FLAT.len) return null;
-                return ALLOWED_VERTEX_BUFFERS_FLAT[map_idx];
-            }
-            pub const VERTEX_STRUCT_TYPES = STRUCT_OF_SHADER_STRUCT_TYPES;
-            pub const STORAGE_STRUCT_TYPES = STRUCT_OF_STORAGE_BUFFER_STRUCT_TYPES;
-            pub const VERTEX_STRUCT_USER_FIELDS = STRUCT_OF_VERTEX_STRUCT_NAMES_WITH_USER_SUPPLIED_VERTEX_FIELD_NAMES_AND_LOCATIONS_ENUMS;
         };
 
         pub const WindowName = WINDOW_NAMES_ENUM;
@@ -2404,6 +2855,7 @@ pub fn GraphicsController(
         pub const VertexShaderName = VERTEX_SHADER_NAMES_ENUM;
         pub const FragmentShaderName = FRAGMENT_SHADER_NAMES_ENUM;
         pub const UniformCollection = STRUCT_OF_UNIFORM_STRUCTS;
+        pub const FenceName = FENCE_NAMES_ENUM;
 
         pub const WindowInit = struct {
             name: WindowName,
@@ -2898,11 +3350,6 @@ pub fn GraphicsController(
                 self.windows_init[idx] = false;
             }
         }
-        pub fn get_window(self: *Self, window_name: WindowName) WindowGetError!*Window {
-            const idx = @intFromEnum(window_name);
-            if (!self.windows_init[idx]) return WindowGetError.window_is_not_initialized;
-            return self.windows[idx];
-        }
         pub fn claim_window(self: *Self, window_name: WindowName) WindowInitError!void {
             const idx = @intFromEnum(window_name);
             if (!self.windows_init[idx]) return WindowInitError.window_cannot_be_claimed_when_uninitialized;
@@ -3000,4 +3447,8 @@ pub fn GraphicsController(
             };
         }
     };
+}
+
+fn vert_def_slot_greater(a: SDL3.GPU_VertexBufferDescription, b: SDL3.GPU_VertexBufferDescription) bool {
+    return a.slot > b.slot;
 }

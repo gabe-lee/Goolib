@@ -1234,3 +1234,60 @@ pub fn decombine_2_enums(combined: anytype, comptime ENUM_1: type, comptime ENUM
     const b: enum_tag_type(ENUM_2) = @intCast(combined >> @intCast(INFO.width_1));
     return .{ @enumFromInt(a), @enumFromInt(b) };
 }
+
+/// Returns a struct type with matching fields that holds *CONCRETE SCALAR* types of the matching fields in the given type
+///
+/// Scalar concrete fields in the source struct becomse scalar concrete fields in the new struct (eg. `value: u32` => `value: u32`)
+///
+/// Pointer, array, and vector fields in the source struct become scalar concrete fields in the new struct (eg. `values: []u32` => `values: u32`)
+pub fn make_temp_value_struct_from_struct_type(comptime STRUCT_TYPE: type) type {
+    const INFO = @typeInfo(STRUCT_TYPE);
+    switch (INFO) {
+        .@"struct" => |STRUCT| {
+            comptime var new_fields: [STRUCT.fields.len]std.builtin.Type.StructField = undefined;
+            inline for (STRUCT.fields, new_fields) |field, *new_field| {
+                switch (@typeInfo(new_field.type)) {
+                    .pointer => |P| {
+                        new_field.* = std.builtin.Type.StructField{
+                            .alignment = field.alignment,
+                            .default_value_ptr = null,
+                            .is_comptime = field.is_comptime,
+                            .name = field.name,
+                            .type = P.child,
+                        };
+                    },
+                    .array => |A| {
+                        new_field.* = std.builtin.Type.StructField{
+                            .alignment = field.alignment,
+                            .default_value_ptr = null,
+                            .is_comptime = field.is_comptime,
+                            .name = field.name,
+                            .type = A.child,
+                        };
+                    },
+                    .vector => |V| {
+                        new_field.* = std.builtin.Type.StructField{
+                            .alignment = field.alignment,
+                            .default_value_ptr = null,
+                            .is_comptime = field.is_comptime,
+                            .name = field.name,
+                            .type = V.child,
+                        };
+                    },
+                    else => {
+                        new_field.* = field;
+                    },
+                }
+            }
+            const new_type = std.builtin.Type{ .@"struct" = .{
+                .backing_integer = STRUCT.backing_integer,
+                .decls = &.{},
+                .fields = new_fields[0..],
+                .is_tuple = STRUCT.is_tuple,
+                .layout = STRUCT.layout,
+            } };
+            return @Type(new_type);
+        },
+        else => assert_unreachable(@src(), "type `STRUCT_TYPE` must be a struct type, got type `{s}`", .{@typeName(STRUCT_TYPE)}),
+    }
+}

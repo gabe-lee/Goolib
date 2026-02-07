@@ -8089,19 +8089,19 @@ pub const GPU_RenderPass = opaque {
     pub fn bind_vertex_samplers_to_consecutive_slots(self: *GPU_RenderPass, first_slot: u32, sampler_bindings: []const GPU_TextureSamplerBinding) void {
         C.SDL_BindGPUVertexSamplers(self.to_c_ptr(), first_slot, @ptrCast(@alignCast(sampler_bindings.ptr)), @intCast(sampler_bindings.len));
     }
-    pub fn bind_vertex_storage_textures_to_consecutive_slots(self: *GPU_RenderPass, first_slot: u32, storage_textures: []const GPU_Texture) void {
+    pub fn bind_vertex_storage_textures_to_consecutive_slots(self: *GPU_RenderPass, first_slot: u32, storage_textures: []const *GPU_Texture) void {
         C.SDL_BindGPUVertexStorageTextures(self.to_c_ptr(), first_slot, @ptrCast(@alignCast(storage_textures.ptr)), @intCast(storage_textures.len));
     }
-    pub fn bind_vertex_storage_buffers_to_consecutive_slots(self: *GPU_RenderPass, first_slot: u32, storage_buffers: []const GPU_Buffer) void {
+    pub fn bind_vertex_storage_buffers_to_consecutive_slots(self: *GPU_RenderPass, first_slot: u32, storage_buffers: []const *GPU_Buffer) void {
         C.SDL_BindGPUVertexStorageBuffers(self.to_c_ptr(), first_slot, @ptrCast(@alignCast(storage_buffers.ptr)), @intCast(storage_buffers.len));
     }
     pub fn bind_fragment_samplers_to_consecutive_slots(self: *GPU_RenderPass, first_slot: u32, sampler_bindings: []const GPU_TextureSamplerBinding) void {
         C.SDL_BindGPUFragmentSamplers(self.to_c_ptr(), first_slot, @ptrCast(@alignCast(sampler_bindings.ptr)), @intCast(sampler_bindings.len));
     }
-    pub fn bind_fragment_storage_textures_to_consecutive_slots(self: *GPU_RenderPass, first_slot: u32, storage_textures: []const GPU_Texture) void {
+    pub fn bind_fragment_storage_textures_to_consecutive_slots(self: *GPU_RenderPass, first_slot: u32, storage_textures: []const *GPU_Texture) void {
         C.SDL_BindGPUFragmentStorageTextures(self.to_c_ptr(), first_slot, @ptrCast(@alignCast(storage_textures.ptr)), @intCast(storage_textures.len));
     }
-    pub fn bind_fragment_storage_buffers_to_consecutive_slots(self: *GPU_RenderPass, first_slot: u32, storage_buffers: []const GPU_Buffer) void {
+    pub fn bind_fragment_storage_buffers_to_consecutive_slots(self: *GPU_RenderPass, first_slot: u32, storage_buffers: []const *GPU_Buffer) void {
         C.SDL_BindGPUFragmentStorageBuffers(self.to_c_ptr(), first_slot, @ptrCast(@alignCast(storage_buffers.ptr)), @intCast(storage_buffers.len));
     }
     pub fn draw_primitives(self: *GPU_RenderPass, first_vertex: u32, num_vertexes: u32, first_instance_id: u32, num_instances: u32) void {

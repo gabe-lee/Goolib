@@ -26,6 +26,7 @@ const assert = std.debug.assert;
 const build = @import("builtin");
 
 const Root = @import("./_root.zig");
+const Types = Root.Types;
 const Utils = Root.Utils;
 const Assert = Root.Assert;
 const assert_with_reason = Assert.assert_with_reason;
@@ -59,6 +60,43 @@ pub fn insertion_sort_implicit(comptime T: type, buffer: []T) void {
     }
 }
 
+/// Sorts using the primary buffer and matches element movement operations on all matching buffers
+///
+/// `matching_buffers` MUST be a tuple struct type with every field type either a slice, many-item-pointer, array, or vector type
+pub fn insertion_sort_implicit_with_matching_buffers(comptime T: type, buffer: []T, matching_buffers: anytype) void {
+    assert_with_reason(Utils.can_infer_type_order(T), @src(), "cannot inherently order type " ++ @typeName(T), .{});
+    var i: usize = 1;
+    var j: usize = undefined;
+    var jj: usize = undefined;
+    var temp: T = undefined;
+    const MATCHING = @TypeOf(matching_buffers);
+    const matching_temps: Types.make_temp_value_struct_from_struct_type(MATCHING) = undefined;
+    while (i < buffer.len) {
+        temp = buffer[i];
+        inline for (matching_buffers, matching_temps) |buf, *matching_temp| {
+            matching_temp.* = buf[i];
+        }
+        j = i;
+        inner: while (j > 0) {
+            jj = j - 1;
+            if (buffer[jj] > temp) {
+                buffer[j] = buffer[jj];
+                inline for (matching_buffers) |buf| {
+                    buf[j] = buf[jj];
+                }
+                j -= 1;
+            } else {
+                break :inner;
+            }
+        }
+        buffer[j] = temp;
+        inline for (matching_buffers, matching_temps) |buf, matching_temp| {
+            buf[i] = matching_temp;
+        }
+        i += 1;
+    }
+}
+
 pub fn insertion_sort_with_func(comptime T: type, buffer: []T, greater_than: *const fn (a: T, b: T) bool) void {
     var i: usize = 1;
     var j: usize = undefined;
@@ -77,6 +115,39 @@ pub fn insertion_sort_with_func(comptime T: type, buffer: []T, greater_than: *co
             }
         }
         buffer[j] = x;
+        i += 1;
+    }
+}
+
+pub fn insertion_sort_with_func_and_matching_buffers(comptime T: type, buffer: []T, greater_than: *const fn (a: T, b: T) bool, matching_buffers: anytype) void {
+    var i: usize = 1;
+    var j: usize = undefined;
+    var jj: usize = undefined;
+    var temp: T = undefined;
+    const MATCHING = @TypeOf(matching_buffers);
+    const matching_temps: Types.make_temp_value_struct_from_struct_type(MATCHING) = undefined;
+    while (i < buffer.len) {
+        temp = buffer[i];
+        inline for (matching_buffers, matching_temps) |buf, *matching_temp| {
+            matching_temp.* = buf[i];
+        }
+        j = i;
+        inner: while (j > 0) {
+            jj = j - 1;
+            if (greater_than(buffer[jj], temp)) {
+                buffer[j] = buffer[jj];
+                inline for (matching_buffers) |buf| {
+                    buf[j] = buf[jj];
+                }
+                j -= 1;
+            } else {
+                break :inner;
+            }
+        }
+        buffer[j] = temp;
+        inline for (matching_buffers, matching_temps) |buf, matching_temp| {
+            buf[i] = matching_temp;
+        }
         i += 1;
     }
 }
