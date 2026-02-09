@@ -70,17 +70,17 @@ pub fn define_vec3_type(comptime T: type) type {
         };
         pub const F = if (IS_FLOAT) T else if (IS_LARGE_INT) f64 else f32;
 
-        vec: VEC = @splat(0),
+        x: T = 0,
+        y: T = 0,
+        z: T = 0,
 
         pub const VEC: type = @Vector(3, T);
-        pub const ZERO = Vec3{ .vec = @splat(0) };
-        pub const ONE = Vec3{ .vec = @splat(1) };
-        pub const MIN = Vec3{ .vec = @splat(MIN_T) };
-        pub const MAX = Vec3{ .vec = @splat(MAX_T) };
-        pub const FILLED_WITH_3 = Vec3{ .vec = @splat(3) };
+        pub const ZERO = Vec3{ .x = 0, .y = 0, .z = 0 };
+        pub const ONE = Vec3{ .x = 1, .y = 1, .z = 1 };
+        pub const MIN = Vec3{ .x = MIN_T, .y = MIN_T, .z = MIN_T };
+        pub const MAX = Vec3{ .x = MAX_T, .y = MAX_T, .z = MAX_T };
         pub const MIN_T = if (IS_FLOAT) -math.inf(T) else math.minInt(T);
         pub const MAX_T = if (IS_FLOAT) math.inf(T) else math.maxInt(T);
-        pub const LAST_COMPONENT_IDX = 2;
 
         pub fn new(x: T, y: T, z: T) Vec3 {
             return Vec3{ .vec = .{ x, y, z } };
@@ -95,41 +95,8 @@ pub fn define_vec3_type(comptime T: type) type {
             return Vec3{ .vec = num_cast(val, T) };
         }
 
-        pub inline fn get(self: Vec3, component: Component) T {
-            return self.vec[@intFromEnum(component)];
-        }
-        pub inline fn get_x(self: Vec3) T {
-            return self.vec[0];
-        }
-        pub inline fn get_y(self: Vec3) T {
-            return self.vec[1];
-        }
-        pub inline fn get_z(self: Vec3) T {
-            return self.vec[2];
-        }
-        pub inline fn set(self: *Vec3, component: Component, val: T) void {
-            self.vec[@intFromEnum(component)] = val;
-        }
-        pub inline fn set_x(self: *Vec3, x: T) void {
-            self.vec[0] = x;
-        }
-        pub inline fn set_y(self: *Vec3, y: T) void {
-            self.vec[1] = y;
-        }
-        pub inline fn set_z(self: *Vec3, z: T) void {
-            self.vec[2] = z;
-        }
-        pub inline fn ptr(self: *Vec3, component: Component) *T {
-            return &self.vec[@intFromEnum(component)];
-        }
-        pub inline fn x_ptr(self: *Vec3) *T {
-            return &self.vec[0];
-        }
-        pub inline fn y_ptr(self: *Vec3) *T {
-            return &self.vec[1];
-        }
-        pub inline fn z_ptr(self: *Vec3) *T {
-            return &self.vec[2];
+        pub fn flat(self: Vec2) VEC {
+            return @bitCast(self);
         }
 
         // pub fn downgrade_to_vec2_xy(self: Vec3) Vec2 {
@@ -137,7 +104,7 @@ pub fn define_vec3_type(comptime T: type) type {
         // }
 
         pub fn swizzle(self: Vec3, new_x: Component, new_y: Component, new_z: Component) Vec3 {
-            return Vec3{ .vec = .{ self.vec[@intFromEnum(new_x)], self.vec[@intFromEnum(new_y)], self.vec[@intFromEnum(new_z)] } };
+            return Vec3{ .x = self.flat[@intFromEnum(new_x)], .y = self.flat[@intFromEnum(new_y)], .z = self.flat[@intFromEnum(new_z)] };
         }
 
         pub fn inverse(self: Vec3) Vec3 {
@@ -175,9 +142,9 @@ pub fn define_vec3_type(comptime T: type) type {
 
         pub fn cross_product(self: Vec3, other: Vec3) Vec3 {
             var out: Vec3 = undefined;
-            out.vec[0] = (self.vec[1] * other.vec[2]) - (self.vec[2] * other.vec[1]);
-            out.vec[1] = (self.vec[2] * other.vec[0]) - (self.vec[0] * other.vec[2]);
-            out.vec[2] = (self.vec[0] * other.vec[1]) - (self.vec[1] * other.vec[0]);
+            out.x = (self.y * other.z) - (self.z * other.y);
+            out.y = (self.z * other.x) - (self.x * other.z);
+            out.z = (self.x * other.y) - (self.y * other.x);
             return out;
         }
         pub inline fn cross(self: Vec3, other: Vec3) Vec3 {
@@ -397,9 +364,9 @@ pub fn define_vec3_type(comptime T: type) type {
 
         pub fn perp_any(self: Vec3) Vec3 {
             return Vec3{ .vec = .{
-                math.copysign(self.vec[2], self.vec[0]),
-                math.copysign(self.vec[2], self.vec[1]),
-                -math.copysign(self.vec[0], self.vec[2]) - math.copysign(self.vec[1], self.vec[2]),
+                math.copysign(self.z, self.x),
+                math.copysign(self.z, self.y),
+                -math.copysign(self.x, self.z) - math.copysign(self.y, self.z),
             } };
         }
         pub fn perp_with_righthand(self: Vec3, other: Vec3) Vec3 {
@@ -562,16 +529,16 @@ pub fn define_vec3_type(comptime T: type) type {
             var rise: T = undefined;
             switch (reference_plane) {
                 .XY => {
-                    run = Vec2{ .vec = .{ self.vec[0], self.vec[1] } };
-                    rise = self.vec[2];
+                    run = Vec2{ .vec = .{ self.x, self.y } };
+                    rise = self.z;
                 },
                 .YZ => {
-                    run = Vec2{ .vec = .{ self.vec[1], self.vec[2] } };
-                    rise = self.vec[0];
+                    run = Vec2{ .vec = .{ self.y, self.z } };
+                    rise = self.x;
                 },
                 .XZ => {
-                    run = Vec2{ .vec = .{ self.vec[0], self.vec[2] } };
-                    rise = self.vec[1];
+                    run = Vec2{ .vec = .{ self.x, self.z } };
+                    rise = self.y;
                 },
             }
             const run_len = run.length();
@@ -583,16 +550,16 @@ pub fn define_vec3_type(comptime T: type) type {
             var rise: T = undefined;
             switch (reference_plane) {
                 .XY => {
-                    run = Vec2{ .vec = .{ self.vec[0], self.vec[1] } };
-                    rise = self.vec[2];
+                    run = Vec2{ .vec = .{ self.x, self.y } };
+                    rise = self.z;
                 },
                 .YZ => {
-                    run = Vec2{ .vec = .{ self.vec[1], self.vec[2] } };
-                    rise = self.vec[0];
+                    run = Vec2{ .vec = .{ self.y, self.z } };
+                    rise = self.x;
                 },
                 .XZ => {
-                    run = Vec2{ .vec = .{ self.vec[0], self.vec[2] } };
-                    rise = self.vec[1];
+                    run = Vec2{ .vec = .{ self.x, self.z } };
+                    rise = self.y;
                 },
             }
             const run_len = run.length();
@@ -858,19 +825,19 @@ pub fn define_vec3_type(comptime T: type) type {
         }
 
         pub fn as_4x1_matrix_column_fill_1(self: Vec3) Matrix.define_rectangular_RxC_matrix_type(T, 4, 1, .COLUMN_MAJOR, 0) {
-            const raw: [4]T = .{ self.vec[0], self.vec[1], self.vec[2], 1 };
+            const raw: [4]T = .{ self.x, self.y, self.z, 1 };
             return @bitCast(raw);
         }
         pub fn as_1x4_matrix_row_fill_1(self: Vec3) Matrix.define_rectangular_RxC_matrix_type(T, 1, 4, .ROW_MAJOR, 0) {
-            const raw: [4]T = .{ self.vec[0], self.vec[1], self.vec[2], 1 };
+            const raw: [4]T = .{ self.x, self.y, self.z, 1 };
             return @bitCast(raw);
         }
         pub fn as_4x1_matrix_column_fill_0(self: Vec3) Matrix.define_rectangular_RxC_matrix_type(T, 4, 1, .COLUMN_MAJOR, 0) {
-            const raw: [4]T = .{ self.vec[0], self.vec[1], self.vec[2], 0 };
+            const raw: [4]T = .{ self.x, self.y, self.z, 0 };
             return @bitCast(raw);
         }
         pub fn as_1x4_matrix_row_fill_0(self: Vec3) Matrix.define_rectangular_RxC_matrix_type(T, 1, 4, .ROW_MAJOR, 0) {
-            const raw: [4]T = .{ self.vec[0], self.vec[1], self.vec[2], 0 };
+            const raw: [4]T = .{ self.x, self.y, self.z, 0 };
             return @bitCast(raw);
         }
 

@@ -81,10 +81,16 @@ fn c_non_opaque_conversions(comptime ZIG_TYPE: type, comptime C_TYPE: type) type
         pub fn to_c_ptr(self: *ZIG_TYPE) *C_TYPE {
             return @ptrCast(@alignCast(self));
         }
+        pub fn to_c_ptr_const(self: *const ZIG_TYPE) *const C_TYPE {
+            return @ptrCast(@alignCast(self));
+        }
         pub fn from_c(c_struct: C_TYPE) ZIG_TYPE {
             return @bitCast(c_struct);
         }
         pub fn from_c_ptr(c_ptr: *C_TYPE) *ZIG_TYPE {
+            return @ptrCast(@alignCast(c_ptr));
+        }
+        pub fn from_c_ptr_const(c_ptr: *const C_TYPE) *const ZIG_TYPE {
             return @ptrCast(@alignCast(c_ptr));
         }
     };
@@ -96,6 +102,12 @@ fn c_opaque_conversions(comptime ZIG_TYPE: type, comptime C_TYPE: type) type {
             return @ptrCast(@alignCast(self));
         }
         pub fn from_c_ptr(c_ptr: *C_TYPE) *ZIG_TYPE {
+            return @ptrCast(@alignCast(c_ptr));
+        }
+        pub fn to_c_ptr_const(self: *const ZIG_TYPE) *const C_TYPE {
+            return @ptrCast(@alignCast(self));
+        }
+        pub fn from_c_ptr_const(c_ptr: *const C_TYPE) *const ZIG_TYPE {
             return @ptrCast(@alignCast(c_ptr));
         }
     };
@@ -208,6 +220,7 @@ pub const Vec_c_int = Root.Vec2.define_vec2_type(c_int);
 pub const Vec_c_uint = Root.Vec2.define_vec2_type(c_uint);
 pub const Vec_i16 = Root.Vec2.define_vec2_type(i16);
 pub const Vec_f32 = Root.Vec2.define_vec2_type(f32);
+pub const Vec3_u32 = Root.Vec3.define_vec3_type(u32);
 pub const Color_RGBA_u8 = Root.Vec4.define_vec4_type(u8);
 pub const Color_RGBA_f32 = Root.Vec4.define_vec4_type(f32);
 pub const Color_RGB_u8 = Root.Vec3.define_vec3_type(u8);
@@ -7304,16 +7317,20 @@ pub const GPU_BufferRegion = extern struct {
 
     pub const to_c_ptr = c_non_opaque_conversions(GPU_BufferRegion, C.SDL_GPUBufferRegion).to_c_ptr;
     pub const from_c_ptr = c_non_opaque_conversions(GPU_BufferRegion, C.SDL_GPUBufferRegion).from_c_ptr;
+    pub const to_c_ptr_const = c_non_opaque_conversions(GPU_BufferRegion, C.SDL_GPUBufferRegion).to_c_ptr_const;
+    pub const from_c_ptr_const = c_non_opaque_conversions(GPU_BufferRegion, C.SDL_GPUBufferRegion).from_c_ptr_const;
     pub const to_c = c_non_opaque_conversions(GPU_BufferRegion, C.SDL_GPUBufferRegion).to_c;
     pub const from_c = c_non_opaque_conversions(GPU_BufferRegion, C.SDL_GPUBufferRegion).from_c;
 };
 
 pub const GPU_BufferLocation = extern struct {
     buffer: ?*GPU_Buffer = null,
-    offset: u32 = u32,
+    offset: u32 = 0,
 
     pub const to_c_ptr = c_non_opaque_conversions(GPU_BufferLocation, C.SDL_GPUBufferLocation).to_c_ptr;
     pub const from_c_ptr = c_non_opaque_conversions(GPU_BufferLocation, C.SDL_GPUBufferLocation).from_c_ptr;
+    pub const to_c_ptr_const = c_non_opaque_conversions(GPU_BufferLocation, C.SDL_GPUBufferLocation).to_c_ptr_const;
+    pub const from_c_ptr_const = c_non_opaque_conversions(GPU_BufferLocation, C.SDL_GPUBufferLocation).from_c_ptr_const;
     pub const to_c = c_non_opaque_conversions(GPU_BufferLocation, C.SDL_GPUBufferLocation).to_c;
     pub const from_c = c_non_opaque_conversions(GPU_BufferLocation, C.SDL_GPUBufferLocation).from_c;
 };
@@ -7346,6 +7363,8 @@ pub const GPU_TextureRegion = extern struct {
 
     pub const to_c_ptr = c_non_opaque_conversions(GPU_TextureRegion, C.SDL_GPUTextureRegion).to_c_ptr;
     pub const from_c_ptr = c_non_opaque_conversions(GPU_TextureRegion, C.SDL_GPUTextureRegion).from_c_ptr;
+    pub const to_c_ptr_const = c_non_opaque_conversions(GPU_TextureRegion, C.SDL_GPUTextureRegion).to_c_ptr_const;
+    pub const from_c_ptr_const = c_non_opaque_conversions(GPU_TextureRegion, C.SDL_GPUTextureRegion).from_c_ptr_const;
     pub const to_c = c_non_opaque_conversions(GPU_TextureRegion, C.SDL_GPUTextureRegion).to_c;
     pub const from_c = c_non_opaque_conversions(GPU_TextureRegion, C.SDL_GPUTextureRegion).from_c;
 };
@@ -7360,6 +7379,8 @@ pub const GPU_TextureLocation = extern struct {
 
     pub const to_c_ptr = c_non_opaque_conversions(GPU_TextureLocation, C.SDL_GPUTextureLocation).to_c_ptr;
     pub const from_c_ptr = c_non_opaque_conversions(GPU_TextureLocation, C.SDL_GPUTextureLocation).from_c_ptr;
+    pub const to_c_ptr_const = c_non_opaque_conversions(GPU_TextureLocation, C.SDL_GPUTextureLocation).to_c_ptr_const;
+    pub const from_c_ptr_const = c_non_opaque_conversions(GPU_TextureLocation, C.SDL_GPUTextureLocation).from_c_ptr_const;
     pub const to_c = c_non_opaque_conversions(GPU_TextureLocation, C.SDL_GPUTextureLocation).to_c;
     pub const from_c = c_non_opaque_conversions(GPU_TextureLocation, C.SDL_GPUTextureLocation).from_c;
 };
@@ -7370,6 +7391,8 @@ pub const GPU_TransferBufferLocation = extern struct {
 
     pub const to_c_ptr = c_non_opaque_conversions(GPU_TransferBufferLocation, C.SDL_GPUTransferBufferLocation).to_c_ptr;
     pub const from_c_ptr = c_non_opaque_conversions(GPU_TransferBufferLocation, C.SDL_GPUTransferBufferLocation).from_c_ptr;
+    pub const to_c_ptr_const = c_non_opaque_conversions(GPU_TransferBufferLocation, C.SDL_GPUTransferBufferLocation).to_c_ptr_const;
+    pub const from_c_ptr_const = c_non_opaque_conversions(GPU_TransferBufferLocation, C.SDL_GPUTransferBufferLocation).from_c_ptr_const;
     pub const to_c = c_non_opaque_conversions(GPU_TransferBufferLocation, C.SDL_GPUTransferBufferLocation).to_c;
     pub const from_c = c_non_opaque_conversions(GPU_TransferBufferLocation, C.SDL_GPUTransferBufferLocation).from_c;
 };
@@ -7382,6 +7405,8 @@ pub const GPU_TextureTransferInfo = extern struct {
 
     pub const to_c_ptr = c_non_opaque_conversions(GPU_TextureTransferInfo, C.SDL_GPUTextureTransferInfo).to_c_ptr;
     pub const from_c_ptr = c_non_opaque_conversions(GPU_TextureTransferInfo, C.SDL_GPUTextureTransferInfo).from_c_ptr;
+    pub const to_c_ptr_const = c_non_opaque_conversions(GPU_TextureTransferInfo, C.SDL_GPUTextureTransferInfo).to_c_ptr_const;
+    pub const from_c_ptr_const = c_non_opaque_conversions(GPU_TextureTransferInfo, C.SDL_GPUTextureTransferInfo).from_c_ptr_const;
     pub const to_c = c_non_opaque_conversions(GPU_TextureTransferInfo, C.SDL_GPUTextureTransferInfo).to_c;
     pub const from_c = c_non_opaque_conversions(GPU_TextureTransferInfo, C.SDL_GPUTextureTransferInfo).from_c;
 };
@@ -8137,14 +8162,28 @@ pub const GPU_ComputePass = opaque {
 pub const GPU_CopyPass = opaque {
     pub const to_c_ptr = c_opaque_conversions(GPU_CopyPass, C.SDL_GPUCopyPass).to_c_ptr;
     pub const from_c_ptr = c_opaque_conversions(GPU_CopyPass, C.SDL_GPUCopyPass).from_c_ptr;
-    //TODO
-    // pub extern fn SDL_UploadToGPUTexture(copy_pass: ?*SDL_GPUCopyPass, source: [*c]const SDL_GPUTextureTransferInfo, destination: [*c]const SDL_GPUTextureRegion, cycle: bool) void;
-    // pub extern fn SDL_UploadToGPUBuffer(copy_pass: ?*SDL_GPUCopyPass, source: [*c]const SDL_GPUTransferBufferLocation, destination: [*c]const SDL_GPUBufferRegion, cycle: bool) void;
-    // pub extern fn SDL_CopyGPUTextureToTexture(copy_pass: ?*SDL_GPUCopyPass, source: [*c]const SDL_GPUTextureLocation, destination: [*c]const SDL_GPUTextureLocation, w: Uint32, h: Uint32, d: Uint32, cycle: bool) void;
-    // pub extern fn SDL_CopyGPUBufferToBuffer(copy_pass: ?*SDL_GPUCopyPass, source: [*c]const SDL_GPUBufferLocation, destination: [*c]const SDL_GPUBufferLocation, size: Uint32, cycle: bool) void;
-    // pub extern fn SDL_DownloadFromGPUTexture(copy_pass: ?*SDL_GPUCopyPass, source: [*c]const SDL_GPUTextureRegion, destination: [*c]const SDL_GPUTextureTransferInfo) void;
-    // pub extern fn SDL_DownloadFromGPUBuffer(copy_pass: ?*SDL_GPUCopyPass, source: [*c]const SDL_GPUBufferRegion, destination: [*c]const SDL_GPUTransferBufferLocation) void;
-    // pub extern fn SDL_EndGPUCopyPass(copy_pass: ?*SDL_GPUCopyPass) void;
+
+    pub fn upload_from_transfer_buffer_to_gpu_texture(self: *GPU_CopyPass, source: GPU_TextureTransferInfo, dest: GPU_TextureRegion, cycle: bool) void {
+        return C.SDL_UploadToGPUTexture(self.to_c_ptr(), source.to_c_ptr_const(), dest.to_c_ptr_const(), cycle);
+    }
+    pub fn upload_from_transfer_buffer_to_gpu_buffer(self: *GPU_CopyPass, source: GPU_TransferBufferLocation, dest: GPU_BufferRegion, cycle: bool) void {
+        return C.SDL_UploadToGPUBuffer(self.to_c_ptr(), source.to_c_ptr_const(), dest.to_c_ptr_const(), cycle);
+    }
+    pub fn copy_from_gpu_texture_to_gpu_texture(self: *GPU_CopyPass, source: GPU_TextureLocation, dest: GPU_TextureLocation, size: Vec3_u32, cycle: bool) void {
+        return C.SDL_CopyGPUTextureToTexture(self.to_c_ptr(), source.to_c_ptr_const(), dest.to_c_ptr_const(), size.x, size.y, size.z, cycle);
+    }
+    pub fn copy_from_gpu_buffer_to_gpu_buffer(self: *GPU_CopyPass, source: GPU_BufferLocation, dest: GPU_BufferLocation, copy_len: u32, cycle: bool) void {
+        return C.SDL_CopyGPUBufferToBuffer(self.to_c_ptr(), source.to_c_ptr_const(), dest.to_c_ptr_const(), copy_len, cycle);
+    }
+    pub fn download_from_gpu_texture_to_transfer_buffer(self: *GPU_CopyPass, source: GPU_TextureRegion, dest: GPU_TextureTransferInfo) void {
+        return C.SDL_DownloadFromGPUTexture(self.to_c_ptr(), source.to_c_ptr_const(), dest.to_c_ptr_const());
+    }
+    pub fn download_from_gpu_buffer_to_transfer_buffer(self: *GPU_CopyPass, source: GPU_BufferRegion, dest: GPU_TransferBufferLocation) void {
+        return C.SDL_DownloadFromGPUBuffer(self.to_c_ptr(), source.to_c_ptr_const(), dest.to_c_ptr_const());
+    }
+    pub fn end_copy_pass(self: *GPU_CopyPass) void {
+        return C.SDL_EndGPUCopyPass(self.to_c_ptr());
+    }
 };
 
 pub const GPU_Fence = opaque {
