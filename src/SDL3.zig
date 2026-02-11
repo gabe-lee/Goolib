@@ -6894,8 +6894,8 @@ pub const GPU_Device = opaque {
     pub fn create_shader(self: *GPU_Device, shader_info: *GPU_ShaderCreateInfo) Error!*GPU_Shader {
         return ptr_cast_or_null_err(*GPU_Shader, C.SDL_CreateGPUShader(self.to_c_ptr(), shader_info.to_c_ptr()));
     }
-    pub fn create_buffer(self: *GPU_Device, buffer_info: *GPU_BufferCreateInfo) Error!*GPU_Buffer {
-        return ptr_cast_or_null_err(*GPU_Buffer, C.SDL_CreateGPUBuffer(self.to_c_ptr(), buffer_info.to_c_ptr()));
+    pub fn create_buffer(self: *GPU_Device, buffer_info: GPU_BufferCreateInfo) Error!*GPU_Buffer {
+        return ptr_cast_or_null_err(*GPU_Buffer, C.SDL_CreateGPUBuffer(self.to_c_ptr(), buffer_info.to_c_ptr_const()));
     }
     pub fn create_transfer_buffer(self: *GPU_Device, buffer_info: *GPU_TransferBufferCreateInfo) Error!*GPU_TransferBuffer {
         return ptr_cast_or_null_err(*GPU_TransferBuffer, C.SDL_CreateGPUTransferBuffer(self.to_c_ptr(), buffer_info.to_c_ptr()));
@@ -7015,6 +7015,8 @@ pub const GPU_BufferCreateInfo = extern struct {
 
     pub const to_c_ptr = c_non_opaque_conversions(GPU_BufferCreateInfo, C.SDL_GPUBufferCreateInfo).to_c_ptr;
     pub const from_c_ptr = c_non_opaque_conversions(GPU_BufferCreateInfo, C.SDL_GPUBufferCreateInfo).from_c_ptr;
+    pub const to_c_ptr_const = c_non_opaque_conversions(GPU_BufferCreateInfo, C.SDL_GPUBufferCreateInfo).to_c_ptr_const;
+    pub const from_c_ptr_const = c_non_opaque_conversions(GPU_BufferCreateInfo, C.SDL_GPUBufferCreateInfo).from_c_ptr_const;
     pub const to_c = c_non_opaque_conversions(GPU_BufferCreateInfo, C.SDL_GPUBufferCreateInfo).to_c;
     pub const from_c = c_non_opaque_conversions(GPU_BufferCreateInfo, C.SDL_GPUBufferCreateInfo).from_c;
 

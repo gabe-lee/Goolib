@@ -27,6 +27,7 @@ const math = std.math;
 
 const Root = @import("./_root.zig");
 const FlexSlice = Root.FlexSlice.FlexSlice;
+const Assert = Root.Assert;
 
 /// A placeholder type intended for use in methods that take an `anytype` parameter
 ///
@@ -50,17 +51,72 @@ pub const Side = enum {
     RIGHT,
 };
 
-/// TODO documentation
+/// A type describing a user-defined option for whether a function (or all/some
+/// of a type's methods) should return errors when they occur,
+/// or whether they should panic or be 'unreachable'
 pub const ErrorBehavior = enum {
-    /// TODO documentation
+    /// Errors are returned
     RETURN_ERRORS,
-    /// TODO documentation
+    /// Errors are returned, but when they occur a warning is also written to STDERR
     RETURN_ERRORS_AND_WARN,
-    /// TODO documentation
+    /// Errors *ALWAYS* panic
     ERRORS_PANIC,
-    /// TODO documentation
+    /// Errors only panic in 'safe' modes, otherwise they are 'unreachable'
     ERRORS_ARE_UNREACHABLE,
+
+    pub inline fn handle(comptime self: ErrorBehavior, comptime src: ?std.builtin.SourceLocation, err: anyerror) if (self.does_error()) @TypeOf(err) else noreturn {
+        return switch (self) {
+            .RETURN_ERRORS => err,
+            .RETURN_ERRORS_AND_WARN => warn: {
+                Assert.warn_with_reason(false, src, "an error was returned from this function: {s}", .{@errorName(err)});
+                break :warn err;
+            },
+            .ERRORS_PANIC => {
+                Assert.assert_unreachable_always_panic(src, "an error was returned from this function: {s}", .{@errorName(err)});
+                unreachable;
+            },
+            .ERRORS_ARE_UNREACHABLE => {
+                Assert.assert_unreachable(src, "an error was returned from this function: {s}", .{@errorName(err)});
+                unreachable;
+            },
+        };
+    }
+
+    pub inline fn panic(comptime self: ErrorBehavior, comptime src: ?std.builtin.SourceLocation, err: anyerror) noreturn {
+        return switch (self) {
+            .ERRORS_PANIC => {
+                Assert.assert_unreachable_always_panic(src, "an error was returned from this function: {s}", .{@errorName(err)});
+                unreachable;
+            },
+            .RETURN_ERRORS, .RETURN_ERRORS_AND_WARN, .ERRORS_ARE_UNREACHABLE => {
+                Assert.assert_unreachable(src, "an error was returned from this function: {s}", .{@errorName(err)});
+                unreachable;
+            },
+        };
+    }
+
+    pub inline fn does_error(comptime self: ErrorBehavior) bool {
+        return switch (self) {
+            .RETURN_ERRORS, .RETURN_ERRORS_AND_WARN => true,
+            .ERRORS_PANIC, .ERRORS_ARE_UNREACHABLE => false,
+        };
+    }
 };
+
+pub fn PossibleErrorBuilder(comptime ERRORS: bool) type {
+    const PROTO = struct {
+        inline fn PossibleError_E(comptime T: type) type {
+            return anyerror!T;
+        }
+        inline fn PossibleError_N(comptime T: type) type {
+            return T;
+        }
+    };
+    return if (ERRORS) PROTO.PossibleError_E else PROTO.PossibleError_N;
+}
+pub fn PossibleErrorBuilderFromMode(comptime ERRORS_MODE: ErrorBehavior) type {
+    return PossibleErrorBuilder(comptime ERRORS_MODE.does_error());
+}
 
 /// TODO documentation
 pub const AssertBehavior = enum {
