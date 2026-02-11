@@ -55,9 +55,23 @@ pub const ErrorBehavior = enum {
     /// TODO documentation
     RETURN_ERRORS,
     /// TODO documentation
+    RETURN_ERRORS_AND_WARN,
+    /// TODO documentation
     ERRORS_PANIC,
     /// TODO documentation
     ERRORS_ARE_UNREACHABLE,
+};
+
+/// TODO documentation
+pub const AssertBehavior = enum {
+    /// TODO documentation
+    IGNORE,
+    /// TODO documentation
+    WARN,
+    /// TODO documentation
+    PANIC,
+    /// TODO documentation
+    UNREACHABLE,
 };
 
 /// TODO documentation

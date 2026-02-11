@@ -31,6 +31,7 @@ const Root = @import("./_root.zig");
 const Utils = Root.Utils;
 const Types = Root.Types;
 const ANSI = Root.ANSI;
+const Common = Root.CommonTypes;
 
 pub const SHOULD_ASSERT = build.mode == .Debug or build.mode == .ReleaseSafe;
 
@@ -80,6 +81,16 @@ pub inline fn assert_with_reason(condition: bool, comptime src_loc: ?SourceLocat
         }
     }
 }
+pub inline fn assert_with_reason_always_panic(condition: bool, comptime src_loc: ?SourceLocation, reason_fmt: []const u8, reason_args: anytype) void {
+    if (!condition) {
+        if (@inComptime()) {
+            @compileError(std.fmt.comptimePrint(err_header(true, src_loc, reason_fmt), reason_args));
+        } else {
+            std.debug.panic(err_header(false, src_loc, reason_fmt), reason_args);
+        }
+        unreachable;
+    }
+}
 
 pub inline fn warn_with_reason(condition: bool, comptime src_loc: ?SourceLocation, reason_fmt: []const u8, reason_args: anytype) void {
     const in_comptime = @inComptime();
@@ -94,13 +105,30 @@ pub inline fn warn_with_reason(condition: bool, comptime src_loc: ?SourceLocatio
     }
 }
 
+pub inline fn warn_unconditional(comptime src_loc: ?SourceLocation, reason_fmt: []const u8, reason_args: anytype) void {
+    if (@inComptime()) {
+        std.debug.print(std.fmt.comptimePrint(warn_header(@inComptime(), src_loc, reason_fmt), reason_args));
+    } else {
+        std.debug.print(warn_header(@inComptime(), src_loc, reason_fmt), reason_args);
+    }
+}
+
 pub inline fn assert_unreachable(comptime src_loc: ?SourceLocation, reason_fmt: []const u8, reason_args: anytype) noreturn {
     assert_with_reason(false, src_loc, reason_fmt, reason_args);
+    unreachable;
+}
+pub inline fn assert_unreachable_always_panic(comptime src_loc: ?SourceLocation, reason_fmt: []const u8, reason_args: anytype) noreturn {
+    assert_with_reason_always_panic(false, src_loc, reason_fmt, reason_args);
     unreachable;
 }
 
 pub inline fn assert_unreachable_err(comptime src_loc: ?SourceLocation, err: anyerror) noreturn {
     assert_with_reason(false, src_loc, "errors are expected to be unreachable here, got err: {s}", .{@errorName(err)});
+    unreachable;
+}
+
+pub inline fn assert_unreachable_err_always_panic(comptime src_loc: ?SourceLocation, err: anyerror) noreturn {
+    assert_with_reason_always_panic(false, src_loc, "errors are expected to be unreachable here, got err: {s}", .{@errorName(err)});
     unreachable;
 }
 
@@ -130,8 +158,12 @@ pub fn assert_idx_and_pointer_reside_in_slice_and_match(comptime T: type, slice:
     assert_with_reason(idx_addr == ptr_addr, "pointer to `{s}` ({X}) does not match pointer to slice[{d}] ({d})", .{ @typeName(T), ptr_addr, idx, idx_addr });
 }
 
-pub fn assert_allocation_failure(comptime src: ?SourceLocation, comptime T: type, count: usize, err: anyerror) noreturn {
+pub inline fn assert_allocation_failure(comptime src: ?SourceLocation, comptime T: type, count: usize, err: anyerror) noreturn {
     assert_with_reason(false, src, "failed to allocate memory for {d} items of type {s} (size needed = {d} bytes), error = {s}", .{ count, @typeName(T), count * @sizeOf(T), @errorName(err) });
+    unreachable;
+}
+pub inline fn assert_allocation_failure_always_panic(comptime src: ?SourceLocation, comptime T: type, count: usize, err: anyerror) noreturn {
+    assert_with_reason_always_panic(false, src, "failed to allocate memory for {d} items of type {s} (size needed = {d} bytes), error = {s}", .{ count, @typeName(T), count * @sizeOf(T), @errorName(err) });
     unreachable;
 }
 pub fn assert_comptime_write_failure(comptime src: ?SourceLocation, err: anyerror) noreturn {
@@ -168,4 +200,115 @@ pub fn warn_untested(comptime src: SourceLocation, comptime msg: [:0]const u8, a
 }
 pub fn warn_has_bug_somewhere(comptime src: SourceLocation, comptime msg: [:0]const u8, args: anytype) void {
     warn_with_reason(SHOULD_ASSERT, src, "FEATURE HAS UNLOCATED BUG: " ++ msg, args);
+}
+
+pub fn AssertHandler(comptime MODE: Common.AssertBehavior) type {
+    return switch (MODE) {
+        .IGNORE => struct {
+            const Self = @This();
+
+            pub inline fn _with_reason(_: bool, comptime _: ?SourceLocation, _: []const u8, _: anytype) void {
+                return;
+            }
+            pub inline fn _unreachable(comptime _: ?SourceLocation, _: []const u8, _: anytype) noreturn {
+                unreachable;
+            }
+            pub inline fn _unreachable_err(comptime _: ?SourceLocation, _: anyerror) noreturn {
+                unreachable;
+            }
+            pub inline fn _allocation_failure(comptime _: ?SourceLocation, comptime _: type, _: usize, _: anyerror) noreturn {
+                unreachable;
+            }
+        },
+        .WARN => struct {
+            const Self = @This();
+
+            pub inline fn _with_reason(cond: bool, comptime src: ?SourceLocation, reason_fmt: []const u8, args: anytype) void {
+                warn_with_reason(cond, src, reason_fmt, args);
+            }
+            pub inline fn _unreachable(comptime src: ?SourceLocation, reason_fmt: []const u8, args: anytype) noreturn {
+                assert_unreachable_always_panic(src, reason_fmt, args);
+            }
+            pub inline fn _unreachable_err(comptime src: ?SourceLocation, err: anyerror) noreturn {
+                assert_unreachable_err_always_panic(src, err);
+            }
+            pub inline fn _allocation_failure(comptime src: ?SourceLocation, comptime T: type, count: usize, err: anyerror) noreturn {
+                assert_allocation_failure_always_panic(src, T, count, err);
+            }
+        },
+        .PANIC => struct {
+            const Self = @This();
+
+            pub inline fn _with_reason(cond: bool, comptime src: ?SourceLocation, reason_fmt: []const u8, args: anytype) void {
+                assert_with_reason_always_panic(cond, src, reason_fmt, args);
+            }
+            pub inline fn _unreachable(comptime src: ?SourceLocation, reason_fmt: []const u8, args: anytype) noreturn {
+                assert_unreachable_always_panic(src, reason_fmt, args);
+            }
+            pub inline fn _unreachable_err(comptime src: ?SourceLocation, err: anyerror) noreturn {
+                assert_unreachable_err_always_panic(src, err);
+            }
+            pub inline fn _allocation_failure(comptime src: ?SourceLocation, comptime T: type, count: usize, err: anyerror) noreturn {
+                assert_allocation_failure_always_panic(src, T, count, err);
+            }
+        },
+        .UNREACHABLE => struct {
+            const Self = @This();
+
+            pub inline fn _with_reason(cond: bool, comptime src: ?SourceLocation, reason_fmt: []const u8, args: anytype) void {
+                assert_with_reason(cond, src, reason_fmt, args);
+            }
+            pub inline fn _unreachable(comptime src: ?SourceLocation, reason_fmt: []const u8, args: anytype) noreturn {
+                assert_unreachable(src, reason_fmt, args);
+            }
+            pub inline fn _unreachable_err(comptime src: ?SourceLocation, err: anyerror) noreturn {
+                assert_unreachable_err(src, err);
+            }
+            pub inline fn _allocation_failure(comptime src: ?SourceLocation, comptime T: type, count: usize, err: anyerror) noreturn {
+                assert_allocation_failure(src, T, count, err);
+            }
+        },
+    };
+}
+
+pub fn ErrorHandler(comptime MODE: Common.ErrorBehavior) type {
+    return switch (MODE) {
+        .RETURN_ERRORS => struct {
+            pub inline fn PossibleError(comptime T: type) type {
+                return anyerror!T;
+            }
+
+            pub inline fn handle_err(comptime _: ?std.builtin.SourceLocation, err: anyerror) @TypeOf(err) {
+                return err;
+            }
+        },
+        .RETURN_ERRORS_AND_WARN => struct {
+            pub inline fn PossibleError(comptime T: type) type {
+                return anyerror!T;
+            }
+
+            pub inline fn handle_err(comptime src: ?std.builtin.SourceLocation, err: anyerror) @TypeOf(err) {
+                warn_unconditional(src, "error occured: {s}", .{@errorName(err)});
+                return err;
+            }
+        },
+        .ERRORS_PANIC => struct {
+            pub inline fn PossibleError(comptime T: type) type {
+                return T;
+            }
+
+            pub inline fn handle_err(comptime src: ?std.builtin.SourceLocation, err: anyerror) noreturn {
+                assert_unreachable_err_always_panic(src, err);
+            }
+        },
+        .ERRORS_ARE_UNREACHABLE => struct {
+            pub inline fn PossibleError(comptime T: type) type {
+                return T;
+            }
+
+            pub inline fn handle_err(comptime src: ?std.builtin.SourceLocation, err: anyerror) noreturn {
+                assert_unreachable_err(src, err);
+            }
+        },
+    };
 }

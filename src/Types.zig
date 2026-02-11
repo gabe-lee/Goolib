@@ -1291,3 +1291,26 @@ pub fn make_temp_value_struct_from_struct_type(comptime STRUCT_TYPE: type) type 
         else => assert_unreachable(@src(), "type `STRUCT_TYPE` must be a struct type, got type `{s}`", .{@typeName(STRUCT_TYPE)}),
     }
 }
+
+pub fn error_union_payload(comptime T: type) type {
+    const INFO = @typeInfo(T);
+    switch (INFO) {
+        .error_union => |ERR| {
+            return ERR.payload;
+        },
+        else => {
+            return T;
+        },
+    }
+}
+pub fn error_union_error(comptime T: type) type {
+    const INFO = @typeInfo(T);
+    switch (INFO) {
+        .error_union => |ERR| {
+            return ERR.error_set;
+        },
+        else => {
+            return void;
+        },
+    }
+}

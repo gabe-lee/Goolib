@@ -25,11 +25,13 @@ const std = @import("std");
 const build = @import("builtin");
 const log = std.log;
 const mem = std.mem;
+const Allocator = std.mem.Allocator;
 
 const Root = @import("./_root.zig");
 const Assert = Root.Assert;
 const Types = Root.Types;
 const Utils = Root.Utils;
+const List = Root.IList.List;
 const assert_with_reason = Assert.assert_with_reason;
 const assert_unreachable = Assert.assert_unreachable;
 
@@ -309,4 +311,127 @@ pub inline fn ptr_cast(from: anytype, comptime TO: type) TO {
         else => assert_with_reason(false, @src(), "cannot convert into type {s}", .{@typeName(TO)}),
     }
     unreachable;
+}
+
+pub fn SameTypeSliceSameProps(comptime POINTER_OR_SLICE: type) type {
+    const INFO = @typeInfo(POINTER_OR_SLICE);
+    assert_with_reason(INFO == .pointer, @src(), "type of `POINTER_OR_SLICE` must be a pointer type, got type `{s}`", .{@typeName(POINTER_OR_SLICE)});
+    const PTR = INFO.pointer;
+    return @Type(.{
+        .pointer = .{
+            .size = .slice,
+            .is_const = PTR.is_const,
+            .is_volatile = PTR.is_volatile,
+            .is_allowzero = PTR.is_allowzero,
+            .alignment = PTR.alignment,
+            .address_space = PTR.address_space,
+            .child = PTR.child,
+            .sentinel_ptr = PTR.sentinel_ptr,
+        },
+    });
+}
+
+pub fn TypeSliceSameProps(comptime POINTER_OR_SLICE: type, comptime NEW_TYPE: type) type {
+    const INFO = @typeInfo(POINTER_OR_SLICE);
+    assert_with_reason(INFO == .pointer, @src(), "type of `POINTER_OR_SLICE` must be a pointer type, got type `{s}`", .{@typeName(POINTER_OR_SLICE)});
+    const PTR = INFO.pointer;
+    return @Type(.{
+        .pointer = .{
+            .size = .slice,
+            .is_const = PTR.is_const,
+            .is_volatile = PTR.is_volatile,
+            .is_allowzero = PTR.is_allowzero,
+            .alignment = PTR.alignment,
+            .address_space = PTR.address_space,
+            .child = NEW_TYPE,
+            .sentinel_ptr = if (PTR.child == NEW_TYPE) PTR.sentinel_ptr else null,
+        },
+    });
+}
+
+pub fn many_item_with_sentinel_to_slice(many_item_ptr_with_sentinel: anytype) SameTypeSliceSameProps(@TypeOf(many_item_ptr_with_sentinel)) {
+    const MANY_ITEM_WITH_SENT = @TypeOf(many_item_ptr_with_sentinel);
+    const INFO = @typeInfo(MANY_ITEM_WITH_SENT);
+    assert_with_reason(INFO == .pointer and INFO.pointer.size == .many and INFO.pointer.sentinel_ptr != null, @src(), "type of `many_item_ptr_with_sentinel` must be a many-item pointer type with a sentinel, got type `{s}`", .{@typeName(MANY_ITEM_WITH_SENT)});
+    const PTR = INFO.pointer;
+    const SENTINEL = PTR.sentinel();
+    var i: usize = 0;
+    while (true) {
+        if (many_item_ptr_with_sentinel[i] == SENTINEL) break;
+        i += 1;
+    }
+    return @ptrCast(many_item_ptr_with_sentinel[0..i]);
+}
+
+pub fn ByteSliceSameProps(comptime POINTER_OR_SLICE: type) type {
+    const INFO = @typeInfo(POINTER_OR_SLICE);
+    assert_with_reason(INFO == .pointer, @src(), "type of `POINTER_OR_SLICE` must be a pointer type, got type `{s}`", .{@typeName(POINTER_OR_SLICE)});
+    const PTR = INFO.pointer;
+    return @Type(.{
+        .pointer = .{
+            .size = .slice,
+            .is_const = PTR.is_const,
+            .is_volatile = PTR.is_volatile,
+            .is_allowzero = PTR.is_allowzero,
+            .alignment = PTR.alignment,
+            .address_space = PTR.address_space,
+            .child = u8,
+            .sentinel_ptr = if (PTR.child == u8) PTR.sentinel_ptr else null,
+        },
+    });
+}
+pub fn ByteSliceSamePropsAlign1(comptime POINTER_OR_SLICE: type) type {
+    const INFO = @typeInfo(POINTER_OR_SLICE);
+    assert_with_reason(INFO == .pointer, @src(), "type of `POINTER_OR_SLICE` must be a pointer type, got type `{s}`", .{@typeName(POINTER_OR_SLICE)});
+    const PTR = INFO.pointer;
+    return @Type(.{
+        .pointer = .{
+            .size = .slice,
+            .is_const = PTR.is_const,
+            .is_volatile = PTR.is_volatile,
+            .is_allowzero = PTR.is_allowzero,
+            .alignment = 1,
+            .address_space = PTR.address_space,
+            .child = u8,
+            .sentinel_ptr = if (PTR.child == u8) PTR.sentinel_ptr else null,
+        },
+    });
+}
+
+pub fn bytes_cast(pointer_or_slice: anytype) ByteSliceSameProps(@TypeOf(pointer_or_slice)) {
+    const POINTER_OR_SLICE = @TypeOf(pointer_or_slice);
+    const INFO = @typeInfo(POINTER_OR_SLICE);
+    assert_with_reason(INFO == .pointer, @src(), "type of `pointer_or_slice` must be a pointer type, got type `{s}`", .{@typeName(POINTER_OR_SLICE)});
+    const PTR = INFO.pointer;
+
+    // a slice of zero-bit values always occupies zero bytes
+    if (@sizeOf(PTR.child) == 0) return &[0]u8{};
+
+    const BYTE_SLICE = ByteSliceSameProps(@TypeOf(pointer_or_slice));
+    const CHILD = PTR.child;
+    var len: usize = if (PTR.size == .slice) pointer_or_slice.len else 1;
+    switch (PTR.size) {
+        .slice => {
+            if (@intFromPtr(pointer_or_slice.ptr) == 0 or (pointer_or_slice.len == 0 and PTR.sentinel_ptr == null)) return &[0]u8{};
+        },
+        .many => {
+            if (@intFromPtr(pointer_or_slice) == 0) return &[0]u8{};
+            assert_with_reason(PTR.sentinel_ptr != null, @src(), "cannot convert an unbound many-item pointer with no sentinel value to a byte slice, got type `{s}`", .{@typeName(POINTER_OR_SLICE)});
+            const as_slice = many_item_with_sentinel_to_slice(pointer_or_slice);
+            len = as_slice.len;
+        },
+        else => {
+            if (@intFromPtr(pointer_or_slice) == 0) return &[0]u8{};
+        },
+    }
+    const total_len = len * @sizeOf(CHILD);
+
+    return @as(BYTE_SLICE, @ptrCast(pointer_or_slice))[0..total_len];
+}
+
+pub fn bytes_cast_element_type(comptime POINTER_OR_SLICE: type) type {
+    const INFO = @typeInfo(POINTER_OR_SLICE);
+    assert_with_reason(INFO == .pointer, @src(), "type of `POINTER_OR_SLICE` must be a pointer type, got type `{s}`", .{@typeName(POINTER_OR_SLICE)});
+    const PTR = INFO.pointer;
+    return PTR.child;
 }
