@@ -6963,7 +6963,7 @@ pub const GPU_Device = opaque {
     pub fn wait_for_gpu_idle(self: *GPU_Device) Error!void {
         return ok_or_fail_err(C.SDL_WaitForGPUIdle(self.to_c_ptr()));
     }
-    pub fn wait_for_gpu_fences(self: *GPU_Device, wait_for_all: bool, fences: []const GPU_Fence) Error!void {
+    pub fn wait_for_gpu_fences(self: *GPU_Device, wait_for_all: bool, fences: []const *GPU_Fence) Error!void {
         return ok_or_fail_err(C.SDL_WaitForGPUFences(self.to_c_ptr(), wait_for_all, @ptrCast(@alignCast(fences.ptr)), @intCast(fences.len)));
     }
     pub fn is_fence_signaled(self: *GPU_Device, fence: *GPU_Fence) bool {
