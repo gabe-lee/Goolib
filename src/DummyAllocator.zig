@@ -95,15 +95,26 @@ pub fn panic_free(_: *anyopaque, _: []u8, _: mem.Alignment, _: usize) void {
     Assert.assert_unreachable(@src(), "dummy allocator `free()` was called!", .{});
 }
 
+pub const allocator_panic_free_noop = Allocator{
+    .ptr = undefined,
+    .vtable = &DUMMY_VTABLE_PANIC_FREE_NOOP,
+};
+pub const DUMMY_VTABLE_PANIC_FREE_NOOP = Allocator.VTable{
+    .alloc = panic_alloc,
+    .resize = panic_resize,
+    .remap = panic_remap,
+    .free = dummy_free,
+};
+
 pub const allocator_shrink_only_panic = Allocator{
     .ptr = undefined,
     .vtable = &DUMMY_VTABLE_SHRINK_ONLY_PANIC,
 };
 pub const DUMMY_VTABLE_SHRINK_ONLY_PANIC = Allocator.VTable{
-    .alloc = panic_alloc,
-    .resize = panic_resize,
-    .remap = panic_remap,
-    .free = panic_free,
+    .alloc = shink_only_panic_alloc,
+    .resize = shink_only_panic_resize,
+    .remap = shink_only_panic_remap,
+    .free = shink_only_panic_free,
 };
 
 pub fn shink_only_panic_alloc(_: *anyopaque, _: usize, _: mem.Alignment, _: usize) ?[*]u8 {

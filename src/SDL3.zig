@@ -6878,27 +6878,26 @@ pub const GPU_Device = opaque {
     pub fn get_shader_formats(self: *GPU_Device) GPU_ShaderFormatFlags {
         return GPU_ShaderFormatFlags{ .raw = C.SDL_GetGPUShaderFormats(self.to_c_ptr()) };
     }
-    pub fn create_compute_pipeline(self: *GPU_Device, pipeline_info: *GPU_ComputePipelineCreateInfo) Error!*GPU_ComputePipeline {
-        return ptr_cast_or_null_err(*GPU_ComputePipeline, C.SDL_CreateGPUComputePipeline(self.to_c_ptr(), pipeline_info.to_c_ptr()));
+    pub fn create_compute_pipeline(self: *GPU_Device, pipeline_info: GPU_ComputePipelineCreateInfo) Error!*GPU_ComputePipeline {
+        return ptr_cast_or_null_err(*GPU_ComputePipeline, C.SDL_CreateGPUComputePipeline(self.to_c_ptr(), pipeline_info.to_c_ptr_const()));
     }
-    pub fn create_graphics_pipeline(self: *GPU_Device, pipeline_info: *GPU_GraphicsPipelineCreateInfo) Error!*GPU_GraphicsPipeline {
-        return ptr_cast_or_null_err(*GPU_GraphicsPipeline, C.SDL_CreateGPUGraphicsPipeline(self.to_c_ptr(), pipeline_info.to_c_ptr()));
+    pub fn create_graphics_pipeline(self: *GPU_Device, pipeline_info: GPU_GraphicsPipelineCreateInfo) Error!*GPU_GraphicsPipeline {
+        return ptr_cast_or_null_err(*GPU_GraphicsPipeline, C.SDL_CreateGPUGraphicsPipeline(self.to_c_ptr(), pipeline_info.to_c_ptr_const()));
     }
-    pub fn create_texture_sampler(self: *GPU_Device, sampler_info: *GPU_SamplerCreateInfo) Error!*GPU_TextureSampler {
-        return ptr_cast_or_null_err(*GPU_TextureSampler, C.SDL_CreateGPUSampler(self.to_c_ptr(), sampler_info.to_c_ptr()));
+    pub fn create_texture_sampler(self: *GPU_Device, sampler_info: GPU_SamplerCreateInfo) Error!*GPU_TextureSampler {
+        return ptr_cast_or_null_err(*GPU_TextureSampler, C.SDL_CreateGPUSampler(self.to_c_ptr(), sampler_info.to_c_ptr_const()));
     }
-    pub fn create_texture(self: *GPU_Device, texture_info: *GPU_TextureCreateInfo) Error!*GPU_Texture {
-        return ptr_cast_or_null_err(*GPU_Texture, C.SDL_CreateGPUTexture(self.to_c_ptr(), texture_info.to_c_ptr()));
+    pub fn create_texture(self: *GPU_Device, texture_info: GPU_TextureCreateInfo) Error!*GPU_Texture {
+        return ptr_cast_or_null_err(*GPU_Texture, C.SDL_CreateGPUTexture(self.to_c_ptr(), texture_info.to_c_ptr_const()));
     }
-
-    pub fn create_shader(self: *GPU_Device, shader_info: *GPU_ShaderCreateInfo) Error!*GPU_Shader {
-        return ptr_cast_or_null_err(*GPU_Shader, C.SDL_CreateGPUShader(self.to_c_ptr(), shader_info.to_c_ptr()));
+    pub fn create_shader(self: *GPU_Device, shader_info: GPU_ShaderCreateInfo) Error!*GPU_Shader {
+        return ptr_cast_or_null_err(*GPU_Shader, C.SDL_CreateGPUShader(self.to_c_ptr(), shader_info.to_c_ptr_const()));
     }
     pub fn create_buffer(self: *GPU_Device, buffer_info: GPU_BufferCreateInfo) Error!*GPU_Buffer {
         return ptr_cast_or_null_err(*GPU_Buffer, C.SDL_CreateGPUBuffer(self.to_c_ptr(), buffer_info.to_c_ptr_const()));
     }
-    pub fn create_transfer_buffer(self: *GPU_Device, buffer_info: *GPU_TransferBufferCreateInfo) Error!*GPU_TransferBuffer {
-        return ptr_cast_or_null_err(*GPU_TransferBuffer, C.SDL_CreateGPUTransferBuffer(self.to_c_ptr(), buffer_info.to_c_ptr()));
+    pub fn create_transfer_buffer(self: *GPU_Device, buffer_info: GPU_TransferBufferCreateInfo) Error!*GPU_TransferBuffer {
+        return ptr_cast_or_null_err(*GPU_TransferBuffer, C.SDL_CreateGPUTransferBuffer(self.to_c_ptr(), buffer_info.to_c_ptr_const()));
     }
     pub fn set_buffer_name(self: *GPU_Device, buffer: *GPU_Buffer, name: [*:0]const u8) void {
         C.SDL_SetGPUBufferName(self.to_c_ptr(), buffer.to_c_ptr(), name);
@@ -6945,7 +6944,7 @@ pub const GPU_Device = opaque {
     pub fn claim_window(self: *GPU_Device, window: *Window) Error!void {
         return ok_or_fail_err(C.SDL_ClaimWindowForGPUDevice(self.to_c_ptr(), window.to_c_ptr()));
     }
-    pub fn release_window(self: *GPU_Device, window: *Window) void {
+    pub fn unclaim_window(self: *GPU_Device, window: *Window) void {
         C.SDL_ReleaseWindowFromGPUDevice(self.to_c_ptr(), window.to_c_ptr());
     }
     pub fn set_swapchain_parameters(self: *GPU_Device, window: *Window, composition: GPU_SwapchainComposition, present_mode: GPU_PresentMode) Error!void {
@@ -7000,6 +6999,8 @@ pub const GPU_TransferBufferCreateInfo = extern struct {
 
     pub const to_c_ptr = c_non_opaque_conversions(GPU_TransferBufferCreateInfo, C.SDL_GPUTransferBufferCreateInfo).to_c_ptr;
     pub const from_c_ptr = c_non_opaque_conversions(GPU_TransferBufferCreateInfo, C.SDL_GPUTransferBufferCreateInfo).from_c_ptr;
+    pub const to_c_ptr_const = c_non_opaque_conversions(GPU_TransferBufferCreateInfo, C.SDL_GPUTransferBufferCreateInfo).to_c_ptr_const;
+    pub const from_c_ptr_const = c_non_opaque_conversions(GPU_TransferBufferCreateInfo, C.SDL_GPUTransferBufferCreateInfo).from_c_ptr_const;
     pub const to_c = c_non_opaque_conversions(GPU_TransferBufferCreateInfo, C.SDL_GPUTransferBufferCreateInfo).to_c;
     pub const from_c = c_non_opaque_conversions(GPU_TransferBufferCreateInfo, C.SDL_GPUTransferBufferCreateInfo).from_c;
 
@@ -7038,6 +7039,8 @@ pub const GPU_TextureCreateInfo = extern struct {
 
     pub const to_c_ptr = c_non_opaque_conversions(GPU_TextureCreateInfo, C.SDL_GPUTextureCreateInfo).to_c_ptr;
     pub const from_c_ptr = c_non_opaque_conversions(GPU_TextureCreateInfo, C.SDL_GPUTextureCreateInfo).from_c_ptr;
+    pub const to_c_ptr_const = c_non_opaque_conversions(GPU_TextureCreateInfo, C.SDL_GPUTextureCreateInfo).to_c_ptr_const;
+    pub const from_c_ptr_const = c_non_opaque_conversions(GPU_TextureCreateInfo, C.SDL_GPUTextureCreateInfo).from_c_ptr_const;
     pub const to_c = c_non_opaque_conversions(GPU_TextureCreateInfo, C.SDL_GPUTextureCreateInfo).to_c;
     pub const from_c = c_non_opaque_conversions(GPU_TextureCreateInfo, C.SDL_GPUTextureCreateInfo).from_c;
 
@@ -7056,7 +7059,7 @@ pub const GPU_ShaderCreateInfo = extern struct {
     code_size: usize = 0,
     code: ?[*]const u8 = null,
     entrypoint_func: [*:0]const u8 = "",
-    format: GPU_ShaderFormatFlags = GPU_ShaderFormatFlags.new_single(.INVALID),
+    format: GPU_ShaderFormatFlags.Flag = .INVALID,
     stage: GPU_ShaderStage = .VERTEX,
     num_samplers: u32 = 0,
     num_storage_textures: u32 = 0,
@@ -7066,6 +7069,8 @@ pub const GPU_ShaderCreateInfo = extern struct {
 
     pub const to_c_ptr = c_non_opaque_conversions(GPU_ShaderCreateInfo, C.SDL_GPUShaderCreateInfo).to_c_ptr;
     pub const from_c_ptr = c_non_opaque_conversions(GPU_ShaderCreateInfo, C.SDL_GPUShaderCreateInfo).from_c_ptr;
+    pub const to_c_ptr_const = c_non_opaque_conversions(GPU_ShaderCreateInfo, C.SDL_GPUShaderCreateInfo).to_c_ptr_const;
+    pub const from_c_ptr_const = c_non_opaque_conversions(GPU_ShaderCreateInfo, C.SDL_GPUShaderCreateInfo).from_c_ptr_const;
     pub const to_c = c_non_opaque_conversions(GPU_ShaderCreateInfo, C.SDL_GPUShaderCreateInfo).to_c;
     pub const from_c = c_non_opaque_conversions(GPU_ShaderCreateInfo, C.SDL_GPUShaderCreateInfo).from_c;
 
@@ -7092,6 +7097,8 @@ pub const GPU_ComputePipelineCreateInfo = extern struct {
 
     pub const to_c_ptr = c_non_opaque_conversions(GPU_ComputePipelineCreateInfo, C.SDL_GPUComputePipelineCreateInfo).to_c_ptr;
     pub const from_c_ptr = c_non_opaque_conversions(GPU_ComputePipelineCreateInfo, C.SDL_GPUComputePipelineCreateInfo).from_c_ptr;
+    pub const to_c_ptr_const = c_non_opaque_conversions(GPU_ComputePipelineCreateInfo, C.SDL_GPUComputePipelineCreateInfo).to_c_ptr_const;
+    pub const from_c_ptr_const = c_non_opaque_conversions(GPU_ComputePipelineCreateInfo, C.SDL_GPUComputePipelineCreateInfo).from_c_ptr_const;
     pub const to_c = c_non_opaque_conversions(GPU_ComputePipelineCreateInfo, C.SDL_GPUComputePipelineCreateInfo).to_c;
     pub const from_c = c_non_opaque_conversions(GPU_ComputePipelineCreateInfo, C.SDL_GPUComputePipelineCreateInfo).from_c;
 
@@ -7113,6 +7120,8 @@ pub const GPU_GraphicsPipelineCreateInfo = extern struct {
 
     pub const to_c_ptr = c_non_opaque_conversions(GPU_GraphicsPipelineCreateInfo, C.SDL_GPUGraphicsPipelineCreateInfo).to_c_ptr;
     pub const from_c_ptr = c_non_opaque_conversions(GPU_GraphicsPipelineCreateInfo, C.SDL_GPUGraphicsPipelineCreateInfo).from_c_ptr;
+    pub const to_c_ptr_const = c_non_opaque_conversions(GPU_GraphicsPipelineCreateInfo, C.SDL_GPUGraphicsPipelineCreateInfo).to_c_ptr_const;
+    pub const from_c_ptr_const = c_non_opaque_conversions(GPU_GraphicsPipelineCreateInfo, C.SDL_GPUGraphicsPipelineCreateInfo).from_c_ptr_const;
     pub const to_c = c_non_opaque_conversions(GPU_GraphicsPipelineCreateInfo, C.SDL_GPUGraphicsPipelineCreateInfo).to_c;
     pub const from_c = c_non_opaque_conversions(GPU_GraphicsPipelineCreateInfo, C.SDL_GPUGraphicsPipelineCreateInfo).from_c;
 
@@ -7417,14 +7426,14 @@ pub const GPU_SamplerCreateInfo = extern struct {
     min_filter: GPU_FilterMode = .LINEAR,
     mag_filter: GPU_FilterMode = .LINEAR,
     mipmap_mode: GPU_SamplerMipmapMode = .LINEAR,
-    address_mode_u: GPU_SamplerAddressMode = .CLAMP_TO_EDGE,
-    address_mode_v: GPU_SamplerAddressMode = .CLAMP_TO_EDGE,
-    address_mode_w: GPU_SamplerAddressMode = .CLAMP_TO_EDGE,
+    address_mode_x: GPU_SamplerAddressMode = .CLAMP_TO_EDGE,
+    address_mode_y: GPU_SamplerAddressMode = .CLAMP_TO_EDGE,
+    address_mode_z: GPU_SamplerAddressMode = .CLAMP_TO_EDGE,
     mip_lod_bias: f32 = 0,
     max_anisotropy: f32 = 0,
     compare_op: GPU_CompareOp = .INVALID,
-    min_lod: f32 = @import("std").mem.zeroes(f32),
-    max_lod: f32 = @import("std").mem.zeroes(f32),
+    min_lod: f32 = 0,
+    max_lod: f32 = 0,
     enable_anisotropy: bool = false,
     enable_compare: bool = false,
     _padding1: u8 = 0,
@@ -7433,6 +7442,8 @@ pub const GPU_SamplerCreateInfo = extern struct {
 
     pub const to_c_ptr = c_non_opaque_conversions(GPU_SamplerCreateInfo, C.SDL_GPUSamplerCreateInfo).to_c_ptr;
     pub const from_c_ptr = c_non_opaque_conversions(GPU_SamplerCreateInfo, C.SDL_GPUSamplerCreateInfo).from_c_ptr;
+    pub const to_c_ptr_const = c_non_opaque_conversions(GPU_SamplerCreateInfo, C.SDL_GPUSamplerCreateInfo).to_c_ptr_const;
+    pub const from_c_ptr_const = c_non_opaque_conversions(GPU_SamplerCreateInfo, C.SDL_GPUSamplerCreateInfo).from_c_ptr_const;
     pub const to_c = c_non_opaque_conversions(GPU_SamplerCreateInfo, C.SDL_GPUSamplerCreateInfo).to_c;
     pub const from_c = c_non_opaque_conversions(GPU_SamplerCreateInfo, C.SDL_GPUSamplerCreateInfo).from_c;
 
@@ -8382,7 +8393,7 @@ pub const GPU_TextureFormat = enum(C.SDL_GPUTextureFormat) {
 };
 
 pub const GPU_TextureUsageFlags = Flags(enum(u32) {
-    SAMPLER = C.SDL_GPU_TEXTUREUSAGE_SAMPLER,
+    SAMPLE = C.SDL_GPU_TEXTUREUSAGE_SAMPLER,
     COLOR_TARGET = C.SDL_GPU_TEXTUREUSAGE_COLOR_TARGET,
     DEPTH_STENCIL_TARGET = C.SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET,
     GRAPHICS_STORAGE_READ = C.SDL_GPU_TEXTUREUSAGE_GRAPHICS_STORAGE_READ,

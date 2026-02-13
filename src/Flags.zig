@@ -100,6 +100,12 @@ pub fn Flags(comptime FLAGS_ENUM: type, comptime GROUPS_ENUM: type) type {
             return FLOOD;
         }
 
+        /// current flags must EXACTLY match one of the tags in the enum set
+        pub fn flag_name(self: Self) []const u8 {
+            const tag: Flag = @enumFromInt(self.raw);
+            return @tagName(tag);
+        }
+
         pub fn from_flag(flag: Flag) Self {
             return Self{ .raw = @intFromEnum(flag) };
         }

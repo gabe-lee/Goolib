@@ -1623,3 +1623,21 @@ pub fn invalid_ptr(comptime T: type) *T {
     const addr = std.mem.alignBackward(usize, std.math.maxInt(usize), @alignOf(T));
     return @ptrFromInt(addr);
 }
+pub fn invalid_ptr_const(comptime T: type) *const T {
+    const addr = std.mem.alignBackward(usize, std.math.maxInt(usize), @alignOf(T));
+    return @ptrFromInt(addr);
+}
+pub fn invalid_ptr_many(comptime T: type) [*]T {
+    const addr = std.mem.alignBackward(usize, std.math.maxInt(usize), @alignOf(T));
+    return @ptrFromInt(addr);
+}
+pub fn invalid_ptr_many_const(comptime T: type) [*]const T {
+    const addr = std.mem.alignBackward(usize, std.math.maxInt(usize), @alignOf(T));
+    return @ptrFromInt(addr);
+}
+pub fn invalid_slice(comptime T: type) []T {
+    return invalid_ptr_many(T)[0..0];
+}
+pub fn invalid_slice_const(comptime T: type) []const T {
+    return invalid_ptr_many(T)[0..0];
+}
