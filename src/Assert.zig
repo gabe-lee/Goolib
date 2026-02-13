@@ -32,6 +32,7 @@ const Utils = Root.Utils;
 const Types = Root.Types;
 const ANSI = Root.ANSI;
 const Common = Root.CommonTypes;
+const MathX = Root.Math;
 
 pub const SHOULD_ASSERT = build.mode == .Debug or build.mode == .ReleaseSafe;
 
@@ -66,7 +67,7 @@ pub inline fn info_header(comptime in_comptime: bool, comptime src_loc: ?SourceL
 
 pub inline fn assert_with_reason(condition: bool, comptime src_loc: ?SourceLocation, reason_fmt: []const u8, reason_args: anytype) void {
     const in_comptime = @inComptime();
-    if (in_comptime or build.mode == .Debug) {
+    if (in_comptime or build.mode == .Debug or build.mode == .ReleaseSafe) {
         if (!condition) {
             if (in_comptime) {
                 @compileError(std.fmt.comptimePrint(err_header(in_comptime, src_loc, reason_fmt), reason_args));
@@ -94,7 +95,7 @@ pub inline fn assert_with_reason_always_panic(condition: bool, comptime src_loc:
 
 pub inline fn warn_with_reason(condition: bool, comptime src_loc: ?SourceLocation, reason_fmt: []const u8, reason_args: anytype) void {
     const in_comptime = @inComptime();
-    if (in_comptime or build.mode == .Debug) {
+    if (in_comptime or build.mode == .Debug or build.mode == .ReleaseSafe) {
         if (!condition) {
             if (in_comptime) {
                 std.debug.print(std.fmt.comptimePrint(warn_header(in_comptime, src_loc, reason_fmt), reason_args));
@@ -104,12 +105,31 @@ pub inline fn warn_with_reason(condition: bool, comptime src_loc: ?SourceLocatio
         }
     }
 }
+pub inline fn warn_with_reason_always(condition: bool, comptime src_loc: ?SourceLocation, reason_fmt: []const u8, reason_args: anytype) void {
+    if (!condition) {
+        if (@inComptime()) {
+            std.debug.print(std.fmt.comptimePrint(warn_header(true, src_loc, reason_fmt), reason_args));
+        } else {
+            std.debug.print(warn_header(false, src_loc, reason_fmt), reason_args);
+        }
+    }
+}
 
 pub inline fn warn_unconditional(comptime src_loc: ?SourceLocation, reason_fmt: []const u8, reason_args: anytype) void {
+    if (@inComptime() or build.mode == .Debug or build.mode == .ReleaseSafe) {
+        if (@inComptime()) {
+            std.debug.print(std.fmt.comptimePrint(warn_header(true, src_loc, reason_fmt), reason_args));
+        } else {
+            std.debug.print(warn_header(false, src_loc, reason_fmt), reason_args);
+        }
+    }
+}
+
+pub inline fn warn_unconditional_always(comptime src_loc: ?SourceLocation, reason_fmt: []const u8, reason_args: anytype) void {
     if (@inComptime()) {
-        std.debug.print(std.fmt.comptimePrint(warn_header(@inComptime(), src_loc, reason_fmt), reason_args));
+        std.debug.print(std.fmt.comptimePrint(warn_header(true, src_loc, reason_fmt), reason_args));
     } else {
-        std.debug.print(warn_header(@inComptime(), src_loc, reason_fmt), reason_args);
+        std.debug.print(warn_header(false, src_loc, reason_fmt), reason_args);
     }
 }
 
@@ -207,6 +227,10 @@ pub fn AssertHandler(comptime MODE: Common.AssertBehavior) type {
         .IGNORE => struct {
             const Self = @This();
 
+            pub inline fn _should_assert() bool {
+                return false;
+            }
+
             pub inline fn _with_reason(_: bool, comptime _: ?SourceLocation, _: []const u8, _: anytype) void {
                 return;
             }
@@ -219,25 +243,46 @@ pub fn AssertHandler(comptime MODE: Common.AssertBehavior) type {
             pub inline fn _allocation_failure(comptime _: ?SourceLocation, comptime _: type, _: usize, _: anyerror) noreturn {
                 unreachable;
             }
+
+            pub inline fn _start_before_end(comptime _: ?SourceLocation, _: anytype, _: anytype) void {
+                return;
+            }
+            pub inline fn _index_in_range(comptime _: ?SourceLocation, _: anytype, _: anytype) void {
+                return;
+            }
         },
-        .WARN => struct {
+        .PANIC_IN_SAFE_MODES => struct {
             const Self = @This();
 
+            pub inline fn _should_assert() bool {
+                return @inComptime() or build.mode == .Debug or build.mode == .ReleaseSafe;
+            }
+
             pub inline fn _with_reason(cond: bool, comptime src: ?SourceLocation, reason_fmt: []const u8, args: anytype) void {
-                warn_with_reason(cond, src, reason_fmt, args);
+                assert_with_reason(cond, src, reason_fmt, args);
             }
             pub inline fn _unreachable(comptime src: ?SourceLocation, reason_fmt: []const u8, args: anytype) noreturn {
-                assert_unreachable_always_panic(src, reason_fmt, args);
+                assert_unreachable(src, reason_fmt, args);
             }
             pub inline fn _unreachable_err(comptime src: ?SourceLocation, err: anyerror) noreturn {
-                assert_unreachable_err_always_panic(src, err);
+                assert_unreachable_err(src, err);
             }
             pub inline fn _allocation_failure(comptime src: ?SourceLocation, comptime T: type, count: usize, err: anyerror) noreturn {
-                assert_allocation_failure_always_panic(src, T, count, err);
+                assert_allocation_failure(src, T, count, err);
+            }
+            pub inline fn _start_before_end(comptime src: ?SourceLocation, start: anytype, end: anytype) void {
+                assert_with_reason_always_panic(MathX.upgrade_less_than_or_equal(start, end), src, "start location ({d}) MUST come before or be equal to end location ({d})", .{ start, end });
+            }
+            pub inline fn _index_in_range(comptime src: ?SourceLocation, idx: anytype, len: anytype) void {
+                assert_with_reason_always_panic(MathX.upgrade_less_than(idx, len), src, "index ({d}) MUST be less than len ({d})", .{ idx, len });
             }
         },
-        .PANIC => struct {
+        .ALWAYS_PANIC => struct {
             const Self = @This();
+
+            pub inline fn _should_assert() bool {
+                return true;
+            }
 
             pub inline fn _with_reason(cond: bool, comptime src: ?SourceLocation, reason_fmt: []const u8, args: anytype) void {
                 assert_with_reason_always_panic(cond, src, reason_fmt, args);
@@ -251,21 +296,90 @@ pub fn AssertHandler(comptime MODE: Common.AssertBehavior) type {
             pub inline fn _allocation_failure(comptime src: ?SourceLocation, comptime T: type, count: usize, err: anyerror) noreturn {
                 assert_allocation_failure_always_panic(src, T, count, err);
             }
+            pub inline fn _start_before_end(comptime src: ?SourceLocation, start: anytype, end: anytype) void {
+                assert_with_reason(MathX.upgrade_less_than_or_equal(start, end), src, "start location ({d}) MUST come before or be equal to end location ({d})", .{});
+            }
+            pub inline fn _index_in_range(comptime src: ?SourceLocation, idx: anytype, len: anytype) void {
+                assert_with_reason(MathX.upgrade_less_than(idx, len), src, "index ({d}) MUST be less than len ({d})", .{ idx, len });
+            }
         },
-        .UNREACHABLE => struct {
+    };
+}
+
+pub fn WarnHandler(comptime MODE: Common.WarnBehavior) type {
+    return switch (MODE) {
+        .IGNORE => struct {
             const Self = @This();
 
-            pub inline fn _with_reason(cond: bool, comptime src: ?SourceLocation, reason_fmt: []const u8, args: anytype) void {
-                assert_with_reason(cond, src, reason_fmt, args);
+            pub inline fn _should_warn() bool {
+                return false;
             }
-            pub inline fn _unreachable(comptime src: ?SourceLocation, reason_fmt: []const u8, args: anytype) noreturn {
-                assert_unreachable(src, reason_fmt, args);
+
+            pub inline fn _with_reason(_: bool, comptime _: ?SourceLocation, _: []const u8, _: anytype) void {
+                return;
             }
-            pub inline fn _unreachable_err(comptime src: ?SourceLocation, err: anyerror) noreturn {
-                assert_unreachable_err(src, err);
+            pub inline fn _unconditional(comptime _: ?SourceLocation, _: []const u8, _: anytype) void {
+                return;
             }
-            pub inline fn _allocation_failure(comptime src: ?SourceLocation, comptime T: type, count: usize, err: anyerror) noreturn {
-                assert_allocation_failure(src, T, count, err);
+            pub inline fn _exact_size_mismatch(_: anytype, _: anytype, comptime _: ?SourceLocation, _: []const u8, _: anytype) void {
+                return;
+            }
+        },
+        .WARN_IN_DEBUG => struct {
+            const Self = @This();
+
+            pub inline fn _should_warn() bool {
+                return @inComptime() or build.mode == .Debug;
+            }
+
+            pub inline fn _with_reason(condition: bool, comptime src_loc: ?SourceLocation, reason_fmt: []const u8, reason_args: anytype) void {
+                if (@inComptime() or build.mode == .Debug) {
+                    warn_with_reason(condition, src_loc, reason_fmt, reason_args);
+                }
+            }
+            pub inline fn _unconditional(comptime src_loc: ?SourceLocation, reason_fmt: []const u8, reason_args: anytype) void {
+                if (@inComptime() or build.mode == .Debug) {
+                    warn_unconditional(src_loc, reason_fmt, reason_args);
+                }
+            }
+            pub inline fn _exact_size_mismatch(a: anytype, b: anytype, comptime src_loc: ?SourceLocation) void {
+                if (@inComptime() or build.mode == .Debug) {
+                    warn_with_reason(MathX.upgrade_equal_to(a, b), src_loc, "left input 'a' ({d}) does not match right input 'b' ({d})", .{ a, b });
+                }
+            }
+        },
+        .WARN_IN_SAFE_MODES => struct {
+            const Self = @This();
+
+            pub inline fn _should_warn() bool {
+                return @inComptime() or build.mode == .Debug or build.mode == .ReleaseSafe;
+            }
+
+            pub inline fn _with_reason(condition: bool, comptime src_loc: ?SourceLocation, reason_fmt: []const u8, reason_args: anytype) void {
+                warn_with_reason(condition, src_loc, reason_fmt, reason_args);
+            }
+            pub inline fn _unconditional(comptime src_loc: ?SourceLocation, reason_fmt: []const u8, reason_args: anytype) void {
+                warn_unconditional(src_loc, reason_fmt, reason_args);
+            }
+            pub inline fn _exact_size_mismatch(a: anytype, b: anytype, comptime src_loc: ?SourceLocation) void {
+                warn_with_reason(MathX.upgrade_equal_to(a, b), src_loc, "left input 'a' ({d}) does not match right input 'b' ({d})", .{ a, b });
+            }
+        },
+        .ALWAYS_WARN => struct {
+            const Self = @This();
+
+            pub inline fn _should_warn() bool {
+                return true;
+            }
+
+            pub inline fn _with_reason(condition: bool, comptime src_loc: ?SourceLocation, reason_fmt: []const u8, reason_args: anytype) void {
+                warn_with_reason_always(condition, src_loc, reason_fmt, reason_args);
+            }
+            pub inline fn _unconditional(comptime src_loc: ?SourceLocation, reason_fmt: []const u8, reason_args: anytype) void {
+                warn_unconditional_always(src_loc, reason_fmt, reason_args);
+            }
+            pub inline fn _exact_size_mismatch(a: anytype, b: anytype, comptime src_loc: ?SourceLocation) void {
+                warn_with_reason_always(MathX.upgrade_equal_to(a, b), src_loc, "left input 'a' ({d}) does not match right input 'b' ({d})", .{ a, b });
             }
         },
     };

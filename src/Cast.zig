@@ -429,7 +429,7 @@ pub fn bytes_cast(pointer_or_slice: anytype) ByteSliceSameProps(@TypeOf(pointer_
     return @as(BYTE_SLICE, @ptrCast(pointer_or_slice))[0..total_len];
 }
 
-pub fn bytes_cast_element_type(comptime POINTER_OR_SLICE: type) type {
+pub fn element_type(comptime POINTER_OR_SLICE: type) type {
     const INFO = @typeInfo(POINTER_OR_SLICE);
     assert_with_reason(INFO == .pointer, @src(), "type of `POINTER_OR_SLICE` must be a pointer type, got type `{s}`", .{@typeName(POINTER_OR_SLICE)});
     const PTR = INFO.pointer;

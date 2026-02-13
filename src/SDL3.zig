@@ -7476,6 +7476,8 @@ pub const GPU_DepthStencilTargetInfo = extern struct {
 
     pub const to_c_ptr = c_non_opaque_conversions(GPU_DepthStencilTargetInfo, C.SDL_GPUDepthStencilTargetInfo).to_c_ptr;
     pub const from_c_ptr = c_non_opaque_conversions(GPU_DepthStencilTargetInfo, C.SDL_GPUDepthStencilTargetInfo).from_c_ptr;
+    pub const to_c_ptr_const = c_non_opaque_conversions(GPU_DepthStencilTargetInfo, C.SDL_GPUDepthStencilTargetInfo).to_c_ptr_const;
+    pub const from_c_ptr_const = c_non_opaque_conversions(GPU_DepthStencilTargetInfo, C.SDL_GPUDepthStencilTargetInfo).from_c_ptr_const;
     pub const to_c = c_non_opaque_conversions(GPU_DepthStencilTargetInfo, C.SDL_GPUDepthStencilTargetInfo).to_c;
     pub const from_c = c_non_opaque_conversions(GPU_DepthStencilTargetInfo, C.SDL_GPUDepthStencilTargetInfo).from_c;
 };
@@ -8040,8 +8042,8 @@ pub const GPU_CommandBuffer = opaque {
     pub fn push_compute_uniform_data(self: *GPU_CommandBuffer, slot_index: u32, data_ptr: *const anyopaque, data_len: u32) void {
         C.SDL_PushGPUComputeUniformData(self.to_c_ptr(), slot_index, data_ptr, @intCast(data_len));
     }
-    pub fn begin_render_pass(self: *GPU_CommandBuffer, color_targets: []const GPU_ColorTargetInfo, depth_stencil_target: *GPU_DepthStencilTargetInfo) Error!*GPU_RenderPass {
-        return ptr_cast_or_fail_err(*GPU_RenderPass, C.SDL_BeginGPURenderPass(self.to_c_ptr(), @ptrCast(@alignCast(color_targets.ptr)), @intCast(color_targets.len), depth_stencil_target.to_c()));
+    pub fn begin_render_pass(self: *GPU_CommandBuffer, color_targets: []const GPU_ColorTargetInfo, depth_stencil_target: GPU_DepthStencilTargetInfo) Error!*GPU_RenderPass {
+        return ptr_cast_or_fail_err(*GPU_RenderPass, C.SDL_BeginGPURenderPass(self.to_c_ptr(), @ptrCast(@alignCast(color_targets.ptr)), @intCast(color_targets.len), depth_stencil_target.to_c_ptr_const()));
     }
     pub fn begin_compute_pass(self: *GPU_CommandBuffer, storage_texture_bindings: []const GPU_StorageTextureReadWriteBinding, storage_buffer_bindings: []const GPU_StorageBufferReadWriteBinding) Error!*GPU_ComputePass {
         return ptr_cast_or_fail_err(*GPU_ComputePass, C.SDL_BeginGPUComputePass(self.to_c_ptr(), @ptrCast(@alignCast(storage_texture_bindings.ptr)), @intCast(storage_texture_bindings.len), @ptrCast(@alignCast(storage_buffer_bindings.ptr)), @intCast(storage_buffer_bindings.len)));

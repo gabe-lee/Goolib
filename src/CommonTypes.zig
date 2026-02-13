@@ -123,11 +123,21 @@ pub const AssertBehavior = enum {
     /// TODO documentation
     IGNORE,
     /// TODO documentation
-    WARN,
+    PANIC_IN_SAFE_MODES,
     /// TODO documentation
-    PANIC,
+    ALWAYS_PANIC,
+};
+
+/// TODO documentation
+pub const WarnBehavior = enum {
     /// TODO documentation
-    UNREACHABLE,
+    IGNORE,
+    /// TODO documentation
+    WARN_IN_DEBUG,
+    /// TODO documentation
+    WARN_IN_SAFE_MODES,
+    /// TODO documentation
+    ALWAYS_WARN,
 };
 
 /// TODO documentation

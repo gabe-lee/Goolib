@@ -175,6 +175,19 @@ pub fn define_vec3_type(comptime T: type) type {
             return sum.inverse_scale(2);
         }
 
+        pub fn all_components_less_than(self: Vec3, other: Vec3) bool {
+            return self.x < other.x and self.y < other.y and self.z < other.z;
+        }
+        pub fn all_components_less_than_or_equal(self: Vec3, other: Vec3) bool {
+            return self.x <= other.x and self.y <= other.y and self.z <= other.z;
+        }
+        pub fn all_components_greater_than(self: Vec3, other: Vec3) bool {
+            return self.x > other.x and self.y > other.y and self.z > other.z;
+        }
+        pub fn all_components_greater_than_or_equal(self: Vec3, other: Vec3) bool {
+            return self.x >= other.x and self.y >= other.y and self.z >= other.z;
+        }
+
         pub fn add(self: Vec3, other: Vec3) Vec3 {
             return Vec3{ .vec = self.vec + other.vec };
         }

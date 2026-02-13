@@ -1618,3 +1618,8 @@ test "first_n_bytes_set" {
     try Test.expect_equal(comptime first_n_bytes_set_inline(u64, 5), "first_n_bytes_set_inline(u64, 5)", 31, "31", "fail", .{});
     try Test.expect_equal(comptime first_n_bytes_set_inline(u64, 11), "first_n_bytes_set_inline(u64, 1)", 2047, "2047", "fail", .{});
 }
+
+pub fn invalid_ptr(comptime T: type) *T {
+    const addr = std.mem.alignBackward(usize, std.math.maxInt(usize), @alignOf(T));
+    return @ptrFromInt(addr);
+}

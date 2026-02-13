@@ -99,6 +99,9 @@ pub const GPU_TextureTransferInfo = SDL3.GPU_TextureTransferInfo;
 pub const GPU_BufferRegion = SDL3.GPU_BufferRegion;
 pub const GPU_TextureLocation = SDL3.GPU_TextureLocation;
 pub const GPU_CreateOptions = SDL3.GPU_CreateOptions;
+pub const GPU_SwapchainTexture = SDL3.GPU_SwapchainTexture;
+pub const GPU_CopyPass = SDL3.GPU_CopyPass;
+pub const GPU_ColorTargetInfo = SDL3.GPU_ColorTargetInfo;
 
 const ShaderContract = SDL3.ShaderContract;
 const StorageStructField = ShaderContract.StorageStructField;
@@ -113,7 +116,7 @@ const update_max = Utils.update_max;
 const update_min = Utils.update_min;
 const num_cast = Cast.num_cast;
 const bytes_cast = Cast.bytes_cast;
-const bytes_cast_element_type = Cast.bytes_cast_element_type;
+const element_type = Cast.element_type;
 
 const INVALID_ADDR = math.maxInt(usize);
 
@@ -122,9 +125,19 @@ pub const TargetKind = enum(u8) {
     TEXTURE,
 };
 
+pub const FenceKind = enum(u8) {
+    NAMED,
+    DIRECT,
+};
+
 pub const VertexDrawMode = enum(u8) {
     VERTEX,
     INDEX,
+};
+
+pub const CopyKind = enum(u8) {
+    BUFFER,
+    TEXTURE,
 };
 
 pub const GPUBufferKind = enum(u8) {
@@ -889,7 +902,8 @@ pub const FieldLocationKind = enum(u8) {
 
 pub const ValidationSettings = struct {
     master_error_mode: Common.ErrorBehavior = .RETURN_ERRORS,
-    master_assert_mode: Common.AssertBehavior = .UNREACHABLE,
+    master_assert_mode: Common.AssertBehavior = .PANIC_IN_SAFE_MODES,
+    master_warn_mode: Common.WarnBehavior = .WARN_IN_DEBUG,
     mismatched_cpu_types: ValidateMode = .PANIC,
     mismatched_gpu_formats: ValidateMode = .PANIC,
     vertex_buffer_slot_gaps: ValidateMode = .PANIC,
@@ -899,6 +913,8 @@ pub const ValidationSettings = struct {
     color_texture_non_color_format: ValidateMode = .PANIC,
     color_targets_missing: ValidateMode = .PANIC,
     push_unallowed_uniform: ValidateMode = .PANIC,
+    transfer_data_type_mismatch: ValidateMode = .PANIC,
+    transfer_data_exact_size_match: ValidateMode = .WARN,
 };
 
 pub fn IndexBufferDef(comptime INDEX_BUFFER_NAMES_ENUM: type) type {
@@ -2146,61 +2162,149 @@ pub fn GraphicsController(
     return struct {
         const Controller = @This();
 
+        /// USER ACCESS ALLOWED
         gpu: *GPU_Device = @ptrCast(INVALID_ADDR),
+        /// USER ACCESS NOT RECOMMENDED
         windows: [INTERNAL.NUM_WINDOWS]*Window = @splat(@as(*Window, @ptrFromInt(INVALID_ADDR))),
+        /// USER ACCESS NOT RECOMMENDED
         windows_init: [INTERNAL.NUM_WINDOWS]bool = @splat(false),
+        /// USER ACCESS NOT RECOMMENDED
         windows_claimed: [INTERNAL.NUM_WINDOWS]bool = @splat(false),
+        /// USER ACCESS NOT RECOMMENDED
         render_pipelines: [INTERNAL.NUM_RENDER_PIPELINES]*GPU_GraphicsPipeline = @splat(@as(*GPU_GraphicsPipeline, @ptrFromInt(INVALID_ADDR))),
+        /// USER ACCESS NOT RECOMMENDED
         render_pipelines_init: [INTERNAL.NUM_RENDER_PIPELINES]bool = @splat(false),
+        /// USER ACCESS NOT RECOMMENDED
         current_render_pipeline: RenderPipelineName = undefined,
+        /// USER ACCESS NOT RECOMMENDED
         textures: [INTERNAL.NUM_TEXTURES]*GPU_Texture = @splat(@as(*GPU_GraphicsPipeline, @ptrFromInt(INVALID_ADDR))),
+        /// USER ACCESS NOT RECOMMENDED
         textures_init: [INTERNAL.NUM_TEXTURES]bool = @splat(false),
+        /// USER ACCESS NOT RECOMMENDED
         textures_own_memory: [INTERNAL.NUM_TEXTURES]bool = @splat(false),
+        /// USER ACCESS NOT RECOMMENDED
         textures_sizes: [INTERNAL.NUM_TEXTURES]Vec3(u32) = @splat(Vec3(u32).ZERO),
+        /// USER ACCESS NOT RECOMMENDED
         upload_transfer_buffers: [INTERNAL.NUM_UPLOAD_TRANSFER_BUFFERS]*GPU_TransferBuffer = @splat(@as(*GPU_TransferBuffer, @ptrFromInt(INVALID_ADDR))),
+        /// USER ACCESS NOT RECOMMENDED
         upload_transfer_buffers_init: [INTERNAL.NUM_UPLOAD_TRANSFER_BUFFERS]bool = @splat(false),
+        /// USER ACCESS NOT RECOMMENDED
         upload_transfer_buffers_own_memory: [INTERNAL.NUM_UPLOAD_TRANSFER_BUFFERS]bool = @splat(false),
+        /// USER ACCESS NOT RECOMMENDED
         upload_transfer_buffer_lens: [INTERNAL.NUM_UPLOAD_TRANSFER_BUFFERS]u32 = @splat(0),
+        /// USER ACCESS ALLOWED
+        upload_buffer_grow_mode: BufferGrowMode = .GROW_BY_ONE_AND_A_QUARTER,
+        /// USER ACCESS NOT RECOMMENDED
         download_transfer_buffers: [INTERNAL.NUM_UPLOAD_TRANSFER_BUFFERS]*GPU_TransferBuffer = @splat(@as(*GPU_TransferBuffer, @ptrFromInt(INVALID_ADDR))),
+        /// USER ACCESS NOT RECOMMENDED
         download_transfer_buffers_init: [INTERNAL.NUM_UPLOAD_TRANSFER_BUFFERS]bool = @splat(false),
+        /// USER ACCESS NOT RECOMMENDED
         download_transfer_buffers_own_memory: [INTERNAL.NUM_UPLOAD_TRANSFER_BUFFERS]bool = @splat(false),
+        /// USER ACCESS NOT RECOMMENDED
         download_transfer_buffer_lens: [INTERNAL.NUM_UPLOAD_TRANSFER_BUFFERS]u32 = @splat(0),
+        /// USER ACCESS ALLOWED
+        download_buffer_grow_mode: BufferGrowMode = .GROW_BY_ONE_AND_A_QUARTER,
+        /// USER ACCESS NOT RECOMMENDED
         vertex_buffers: [INTERNAL.NUM_VERTEX_BUFFERS]*GPU_Buffer = @splat(@as(*GPU_Buffer, @ptrFromInt(INVALID_ADDR))),
+        /// USER ACCESS NOT RECOMMENDED
         vertex_buffers_init: [INTERNAL.NUM_VERTEX_BUFFERS]bool = @splat(false),
+        /// USER ACCESS NOT RECOMMENDED
         vertex_buffers_own_memory: [INTERNAL.NUM_VERTEX_BUFFERS]bool = @splat(false),
+        /// USER ACCESS NOT RECOMMENDED
         vertex_buffer_lens: [INTERNAL.NUM_VERTEX_BUFFERS]u32 = @splat(0),
+        /// USER ACCESS ALLOWED
+        vertex_buffer_grow_mode: BufferGrowMode = .GROW_BY_ONE_AND_A_QUARTER,
+        /// USER ACCESS NOT RECOMMENDED
         storage_buffers: [INTERNAL.NUM_STORAGE_BUFFERS]*GPU_Buffer = @splat(@as(*GPU_Buffer, @ptrFromInt(INVALID_ADDR))),
+        /// USER ACCESS NOT RECOMMENDED
         storage_buffers_init: [INTERNAL.NUM_STORAGE_BUFFERS]bool = @splat(false),
+        /// USER ACCESS NOT RECOMMENDED
         storage_buffers_own_memory: [INTERNAL.NUM_STORAGE_BUFFERS]bool = @splat(false),
+        /// USER ACCESS NOT RECOMMENDED
         storage_buffers_usage: [INTERNAL.NUM_STORAGE_BUFFERS]GPU_BufferUsageFlags = @splat(GPU_BufferUsageFlags.from_flag(.VERTEX)),
+        /// USER ACCESS NOT RECOMMENDED
         storage_buffer_lens: [INTERNAL.NUM_STORAGE_BUFFERS]u32 = @splat(0),
+        /// USER ACCESS ALLOWED
+        storage_buffer_grow_mode: BufferGrowMode = .GROW_BY_ONE_AND_A_QUARTER,
+        /// USER ACCESS NOT RECOMMENDED
         samplers: [INTERNAL.NUM_SAMPLERS]*GPU_TextureSampler = @splat(@as(*GPU_TextureSampler, @ptrFromInt(INVALID_ADDR))),
+        /// USER ACCESS NOT RECOMMENDED
         samplers_init: [INTERNAL.NUM_SAMPLERS]bool = @splat(false),
+        /// USER ACCESS NOT RECOMMENDED
         samplers_own_memory: [INTERNAL.NUM_SAMPLERS]bool = @splat(false),
+        /// USER ACCESS NOT RECOMMENDED
         fences: [INTERNAL.NUM_FENCES]*GPU_Fence = @splat(@as(*GPU_Fence, @ptrFromInt(INVALID_ADDR))),
+        /// USER ACCESS NOT RECOMMENDED
         fences_init: [INTERNAL.NUM_FENCES]bool = @splat(false),
+        /// USER ACCESS NOT RECOMMENDED
         index_buffers: [INTERNAL.NUM_INDEX_BUFFERS]*GPU_Buffer = @splat(@as(*GPU_Buffer, @ptrFromInt(INVALID_ADDR))),
+        /// USER ACCESS NOT RECOMMENDED
         index_buffers_init: [INTERNAL.NUM_INDEX_BUFFERS]bool = @splat(false),
+        /// USER ACCESS NOT RECOMMENDED
         index_buffers_own_memory: [INTERNAL.NUM_INDEX_BUFFERS]bool = @splat(false),
+        /// USER ACCESS NOT RECOMMENDED
         index_buffer_lens: [INTERNAL.NUM_INDEX_BUFFERS]u32 = @splat(0),
+        /// USER ACCESS NOT RECOMMENDED
         index_buffer_types: [INTERNAL.NUM_INDEX_BUFFERS]GPU_IndexTypeSize = @splat(GPU_IndexTypeSize.U32),
+        /// USER ACCESS ALLOWED
+        index_buffer_grow_mode: BufferGrowMode = .GROW_BY_ONE_AND_A_QUARTER,
+        /// USER ACCESS NOT RECOMMENDED
         indirect_draw_buffers: [INTERNAL.NUM_INDIRECT_BUFFERS]*GPU_Buffer = @splat(@as(*GPU_Buffer, @ptrFromInt(INVALID_ADDR))),
+        /// USER ACCESS NOT RECOMMENDED
         indirect_draw_buffers_init: [INTERNAL.NUM_INDIRECT_BUFFERS]bool = @splat(false),
+        /// USER ACCESS NOT RECOMMENDED
         indirect_draw_buffers_own_memory: [INTERNAL.NUM_INDIRECT_BUFFERS]bool = @splat(false),
+        /// USER ACCESS NOT RECOMMENDED
         indirect_draw_buffer_lens: [INTERNAL.NUM_INDIRECT_BUFFERS]u32 = @splat(0),
+        /// USER ACCESS NOT RECOMMENDED
         indirect_draw_buffer_modes: [INTERNAL.NUM_INDIRECT_BUFFERS]VertexDrawMode = @splat(VertexDrawMode.VERTEX),
+        /// USER ACCESS ALLOWED
+        indirect_draw_buffer_grow_mode: BufferGrowMode = .GROW_BY_ONE_AND_A_QUARTER,
+        /// USER ACCESS NOT RECOMMENDED
+        mapped_upload_buffers: [INTERNAL.NUM_UPLOAD_TRANSFER_BUFFERS]bool = @splat(false),
+        /// USER ACCESS NOT RECOMMENDED
+        upload_slices: [INTERNAL.NUM_UPLOAD_TRANSFER_BUFFERS][]u8 = @splat(@as([*]u8, @ptrFromInt(INVALID_ADDR))[0..0]),
+        /// USER ACCESS NOT RECOMMENDED
+        upload_bytes_written: [INTERNAL.NUM_UPLOAD_TRANSFER_BUFFERS]u32 = @splat(0),
+        /// USER ACCESS NOT RECOMMENDED
+        mapped_download_buffers: [INTERNAL.NUM_DOWNLOAD_TRANSFER_BUFFERS]bool = @splat(false),
+        /// USER ACCESS NOT RECOMMENDED
+        download_slices: [INTERNAL.NUM_DOWNLOAD_TRANSFER_BUFFERS][]const u8 = @splat(@as([*]const u8, @ptrFromInt(INVALID_ADDR))[0..0]),
+        /// USER ACCESS NOT RECOMMENDED
+        download_bytes_read: [INTERNAL.NUM_DOWNLOAD_TRANSFER_BUFFERS]u32 = @splat(0),
+        /// USER ACCESS ALLOWED
+        cycle_unmapped_transfer_buffers: bool = true,
+        /// USER ACCESS ALLOWED
         uniforms: UniformCollection = undefined,
+        /// USER ACCESS NOT RECOMMENDED
         command_buffer_active: bool = false,
+        /// USER ACCESS NOT RECOMMENDED
         download_pass_active: bool = false,
+        /// USER ACCESS NOT RECOMMENDED
+        post_command_download_pass_active: bool = false,
+        /// USER ACCESS NOT RECOMMENDED
+        final_download_pending: bool = false,
+        /// USER ACCESS NOT RECOMMENDED
         upload_pass_active: bool = false,
+        /// USER ACCESS NOT RECOMMENDED
         copy_pass_active: bool = false,
+        /// USER ACCESS NOT RECOMMENDED
         render_pass_active: bool = false,
+        /// USER ACCESS NOT RECOMMENDED
         render_pass_with_pipeline_active: bool = false,
+        /// USER ACCESS NOT RECOMMENDED
         compute_pass_active: bool = false,
+        /// USER ACCESS NOT RECOMMENDED (except to initialize)
         list_alloc: Allocator = DummyAlloc.allocator_panic,
+        /// USER ACCESS NOT RECOMMENDED (except to initialize)
         upload_list: List(CopyUploadDetails) = .{},
+        /// USER ACCESS NOT RECOMMENDED (except to initialize)
         download_list: List(CopyDownloadDetails) = .{},
-        grow_copy_delete_list: List(GrowCopyDeleteDetails) = .{},
+        /// USER ACCESS NOT RECOMMENDEDm(except to initialize)
+        grow_and_copy_gpu_bufferlist: List(GrowAndCopyGPUBufferDetails) = .{},
+        /// USER ACCESS NOT RECOMMENDEDm(except to initialize)
+        grow_and_copy_download_transfer_list: List(GrowAndCopyDownloadTransferDetails) = .{},
+        /// USER ACCESS NOT RECOMMENDED (except to initialize)
         delete_buffers_list: List(DeleteBufferDetails) = .{},
 
         const _ASSERT = Assert.AssertHandler(VALIDATION.master_assert_mode);
@@ -2208,6 +2312,11 @@ pub fn GraphicsController(
         const assert_unreachable = _ASSERT._unreachable;
         const assert_unreachable_err = _ASSERT._unreachable_err;
         const assert_allocation_failure = _ASSERT._allocation_failure;
+
+        const _WARN = Assert.WarnHandler(VALIDATION.master_warn_mode);
+        const warn_with_reason = _WARN._with_reason;
+        const warn_unconditional = _WARN._unconditional;
+        const warn_exact_size_mismatch = _WARN._exact_size_mismatch;
 
         const ERROR_MODE = VALIDATION.master_error_mode;
         const ERRORS = ERROR_MODE.does_error();
@@ -2335,11 +2444,72 @@ pub fn GraphicsController(
             self.indirect_draw_buffer_modes[to_idx] = self.indirect_draw_buffer_modes[from_idx];
         }
 
-        fn point_is_within_texture(self: *Controller, tex: TextureName, point: Vec3(u32)) bool {
+        fn point_is_within_target(self: *Controller, tex: TextureName, point: Vec3(u32)) bool {
             const tex_idx = @intFromEnum(tex);
             const size = self.textures_sizes[tex_idx];
             return point.x < size.x and point.y < size.y and point.z < size.z;
         }
+
+        pub fn get_window_texture_format(self: *Controller, window: WindowName) GPU_TextureFormat {
+            return self.gpu.get_swapchain_texture_format(self.get_claimed_window(window));
+        }
+
+        pub const Fence = union(FenceKind) {
+            NAMED: FenceName,
+            DIRECT: *GPU_Fence,
+
+            pub fn named_fance(name: FenceName) Fence {
+                return Fence{ .NAMED = name };
+            }
+            pub fn direct_fence(fence: *GPU_Fence) Fence {
+                return Fence{ .DIRECT = fence };
+            }
+
+            pub fn wait(self: Fence, controller: *Controller) PossibleError(void) {
+                const fence: [1]*GPU_Fence = .{switch (self) {
+                    .NAMED => |n| controller.get_fence(n),
+                    .DIRECT => |f| f,
+                }};
+                controller.gpu.wait_for_gpu_fences(true, fence[0..1]) catch |err| return ERROR_MODE.handle(@src(), err);
+            }
+            pub fn wait_and_release(self: Fence, controller: *Controller) PossibleError(void) {
+                const fence: [1]*GPU_Fence = .{switch (self) {
+                    .NAMED => |n| controller.get_fence(n),
+                    .DIRECT => |f| f,
+                }};
+                controller.gpu.wait_for_gpu_fences(true, fence[0..1]) catch |err| return ERROR_MODE.handle(@src(), err);
+                controller.gpu.release_fence(fence[0]);
+                switch (self) {
+                    .NAMED => |n| controller.fences_init[@intFromEnum(n)] = false,
+                    .DIRECT => {},
+                }
+            }
+            pub fn wait_and_optional_release(self: Fence, controller: *Controller, should_release: bool) PossibleError(void) {
+                const fence: [1]*GPU_Fence = .{switch (self) {
+                    .NAMED => |n| controller.get_fence(n),
+                    .DIRECT => |f| f,
+                }};
+                controller.gpu.wait_for_gpu_fences(true, fence[0..1]) catch |err| return ERROR_MODE.handle(@src(), err);
+                if (should_release) {
+                    controller.gpu.release_fence(fence[0]);
+                    switch (self) {
+                        .NAMED => |n| controller.fences_init[@intFromEnum(n)] = false,
+                        .DIRECT => {},
+                    }
+                }
+            }
+            pub fn release(self: Fence, controller: *Controller) void {
+                const fence: [1]*GPU_Fence = .{switch (self) {
+                    .NAMED => |n| controller.get_fence(n),
+                    .DIRECT => |f| f,
+                }};
+                controller.gpu.release_fence(fence[0]);
+                switch (self) {
+                    .NAMED => |n| controller.fences_init[@intFromEnum(n)] = false,
+                    .DIRECT => {},
+                }
+            }
+        };
 
         pub const Target = union(TargetKind) {
             WINDOW: WindowName,
@@ -2350,6 +2520,13 @@ pub fn GraphicsController(
             }
             pub fn texture(tex: TextureName) Target {
                 return Target{ .TEXTURE = tex };
+            }
+
+            pub fn tag_name(self: Target) []const u8 {
+                return switch (self) {
+                    .TEXTURE => |t| @tagName(t),
+                    .WINDOW => |w| @tagName(w),
+                };
             }
 
             pub fn get_texture(self: Target, cmd: CommandBuffer) *GPU_Texture {
@@ -2548,8 +2725,20 @@ pub fn GraphicsController(
             transfer_buf_len: u32,
         };
 
+        pub const QueuedDownloadCopy = union(CopyKind) {
+            BUFFER: struct {
+                from: BufferRegion,
+                to: DownloadTransferBufferLocation,
+            },
+            TEXTURE: struct {
+                from: TextureRegion,
+                to: TextureDownloadInfo,
+            },
+        };
+
         pub const CopyDownloadDetails = struct {
             dest: []u8,
+            queued_copy: QueuedDownloadCopy,
             transfer_buf: DownloadTransferBufferName,
             transfer_buf_offset: u32,
             transfer_buf_len: u32,
@@ -2639,25 +2828,7 @@ pub fn GraphicsController(
                     .size = size,
                 } };
             }
-            pub fn storage_buffer_match_slice(name: StorageBufferName, offset: u32, match_slice: anytype) GPUAssetRegion {
-                const size: u32 = @intCast(bytes_cast(match_slice).len);
-                // TODO assert type matches `match_slice`
-                return GPUAssetRegion{ .STORAGE_BUF = .{
-                    .name = name,
-                    .offset = offset,
-                    .size = size,
-                } };
-            }
             pub fn vertex_buffer(name: VertexBufferName, offset: u32, size: u32) GPUAssetRegion {
-                return GPUAssetRegion{ .VERTEX_BUF = .{
-                    .name = name,
-                    .offset = offset,
-                    .size = size,
-                } };
-            }
-            pub fn vertex_buffer_match_slice(name: VertexBufferName, offset: u32, match_slice: anytype) GPUAssetRegion {
-                const size: u32 = @intCast(bytes_cast(match_slice).len);
-                // TODO assert type matches `match_slice`
                 return GPUAssetRegion{ .VERTEX_BUF = .{
                     .name = name,
                     .offset = offset,
@@ -2671,25 +2842,7 @@ pub fn GraphicsController(
                     .size = size,
                 } };
             }
-            pub fn index_buffer_match_slice(name: IndexBufferName, offset: u32, match_slice: anytype) GPUAssetRegion {
-                const size: u32 = @intCast(bytes_cast(match_slice).len);
-                // TODO assert type matches `match_slice`
-                return GPUAssetRegion{ .INDEX_BUF = .{
-                    .name = name,
-                    .offset = offset,
-                    .size = size,
-                } };
-            }
             pub fn indirect_draw_buffer(name: IndirectDrawBufferName, offset: u32, size: u32) GPUAssetRegion {
-                return GPUAssetRegion{ .INDIRECT_BUF = .{
-                    .name = name,
-                    .offset = offset,
-                    .size = size,
-                } };
-            }
-            pub fn indirect_draw_buffer_match_slice(name: IndirectDrawBufferName, offset: u32, match_slice: anytype) GPUAssetRegion {
-                const size: u32 = @intCast(bytes_cast(match_slice).len);
-                // TODO assert type matches `match_slice`
                 return GPUAssetRegion{ .INDIRECT_BUF = .{
                     .name = name,
                     .offset = offset,
@@ -2816,309 +2969,249 @@ pub fn GraphicsController(
             }
         };
 
-        pub fn begin_upload_pass(self: *Controller, cycle_transfer_buffers: bool, grow_mode: BufferGrowMode) UploadPass {
-            assert_with_reason(!self.upload_pass_active and !self.command_buffer_active, @src(), "cannot begin an UploadPass when another UploadPass or CommandBuffer is active", .{});
-            self.upload_pass_active = true;
-            return UploadPass{
-                .controller = self,
-                .should_cycle_first = cycle_transfer_buffers,
-                .grow_mode = grow_mode,
-            };
+        fn assert_upload_pass_active(self: *Controller, comptime src: ?std.builtin.SourceLocation) void {
+            assert_with_reason(self.upload_pass_active, src, "an upload pass must be active when calling this function", .{});
+        }
+        fn assert_upload_pass_NOT_active(self: *Controller, comptime src: ?std.builtin.SourceLocation) void {
+            assert_with_reason(!self.upload_pass_active, src, "an upload pass must NOT be active when calling this function", .{});
+        }
+        fn assert_download_pass_active(self: *Controller, comptime src: ?std.builtin.SourceLocation) void {
+            assert_with_reason(self.download_pass_active, src, "a download pass must be active when calling this function", .{});
+        }
+        fn assert_download_pass_NOT_active(self: *Controller, comptime src: ?std.builtin.SourceLocation) void {
+            assert_with_reason(!self.download_pass_active, src, "a download pass must NOT be active when calling this function", .{});
+        }
+        fn assert_download_or_upload_pass_active(self: *Controller, comptime src: ?std.builtin.SourceLocation) void {
+            assert_with_reason(self.download_pass_active or self.upload_pass_active, src, "a download or upload pass must be active when calling this function", .{});
+        }
+        fn assert_command_buffer_active(self: *Controller, comptime src: ?std.builtin.SourceLocation) void {
+            assert_with_reason(self.command_buffer_active, src, "a command buffer must be active when calling this function", .{});
+        }
+        fn assert_command_buffer_NOT_active(self: *Controller, comptime src: ?std.builtin.SourceLocation) void {
+            assert_with_reason(!self.command_buffer_active, src, "a command buffer must NOT be active when calling this function", .{});
+        }
+        fn assert_copy_pass_active(self: *Controller, comptime src: ?std.builtin.SourceLocation) void {
+            assert_with_reason(self.copy_pass_active, src, "a copy pass must be active when calling this function", .{});
+        }
+        fn assert_copy_pass_NOT_active(self: *Controller, comptime src: ?std.builtin.SourceLocation) void {
+            assert_with_reason(!self.copy_pass_active, src, "a copy pass must NOT be active when calling this function", .{});
+        }
+        fn assert_render_pass_active(self: *Controller, comptime src: ?std.builtin.SourceLocation) void {
+            assert_with_reason(self.render_pass_active, src, "a render pass must be active when calling this function", .{});
+        }
+        fn assert_render_pass_NOT_active(self: *Controller, comptime src: ?std.builtin.SourceLocation) void {
+            assert_with_reason(!self.render_pass_active, src, "a render pass must NOT be active when calling this function", .{});
+        }
+        fn assert_render_pipeline_pass_active(self: *Controller, comptime src: ?std.builtin.SourceLocation) void {
+            assert_with_reason(self.render_pass_with_pipeline_active, src, "a render pipeline pass must be active when calling this function", .{});
+        }
+        fn assert_render_pipeline_pass_NOT_active(self: *Controller, comptime src: ?std.builtin.SourceLocation) void {
+            assert_with_reason(!self.render_pass_with_pipeline_active, src, "a render pipeline pass must NOT be active when calling this function", .{});
+        }
+        fn assert_compute_pass_active(self: *Controller, comptime src: ?std.builtin.SourceLocation) void {
+            assert_with_reason(self.compute_pass_active, src, "a compute pass must be active when calling this function", .{});
+        }
+        fn assert_compute_pass_NOT_active(self: *Controller, comptime src: ?std.builtin.SourceLocation) void {
+            assert_with_reason(!self.compute_pass_active, src, "a compute pass must NOT be active when calling this function", .{});
+        }
+        fn assert_final_download_pending(self: *Controller, comptime src: ?std.builtin.SourceLocation) void {
+            assert_with_reason(self.final_download_pending, src, "a final download (from transfer buffers to application memory) must be pending when calling this function", .{});
+        }
+        fn assert_final_download_NOT_pending(self: *Controller, comptime src: ?std.builtin.SourceLocation) void {
+            assert_with_reason(!self.final_download_pending, src, "a final download (from transfer buffers to application memory) must NOT be pending when calling this function", .{});
         }
 
-        pub const UploadPass = struct {
-            controller: *Controller,
-            mapped: [INTERNAL.NUM_UPLOAD_TRANSFER_BUFFERS]bool = @splat(false),
-            slices: [INTERNAL.NUM_UPLOAD_TRANSFER_BUFFERS][]u8 = @splat(@as([*]u8, @ptrFromInt(INVALID_ADDR))[0..0]),
-            bytes_written: [INTERNAL.NUM_UPLOAD_TRANSFER_BUFFERS]u32 = @splat(0),
-            should_cycle_first: bool = true,
-
-            /// Sets or overrides the number of 'written' bytes in the transfer buffer (for *this* transfer pass), from the beginning
-            pub fn set_written_bytes(self: *UploadPass, buffer: UploadTransferBufferName, written_bytes: u32) void {
-                const idx = @intFromEnum(buffer);
-                self.bytes_written[idx] = written_bytes;
-            }
-            /// Adds to the number of 'written' bytes in the transfer buffer (for *this* transfer pass), from the beginning
-            pub fn add_written_bytes(self: *UploadPass, buffer: UploadTransferBufferName, written_bytes: u32) void {
-                const idx = @intFromEnum(buffer);
-                self.bytes_written[idx] += written_bytes;
-            }
-            pub fn get_written_bytes(self: *const UploadPass, buffer: UploadTransferBufferName) u32 {
-                const idx = @intFromEnum(buffer);
-                return self.bytes_written[idx];
-            }
-
-            pub fn get_upload_slice(self: *UploadPass, buffer: UploadTransferBufferName, start: u32, end_excluded: u32) PossibleError([]u8) {
-                const idx = @intFromEnum(buffer);
-                const buf = self.controller.get_upload_transfer_buffer(buffer);
-                if (self.mapped[idx] == false) {
-                    const ptr = self.controller.gpu.map_transfer_buffer(buf, self.should_cycle_first) catch |err| return ERROR_MODE.handle(@src(), err);
-                    self.slices[idx] = ptr[0..self.controller.upload_transfer_buffer_lens[idx]];
-                    self.mapped[idx] == true;
-                }
-                return self.slices[idx][start..end_excluded];
-            }
-            /// returns the slice and the byte offset it started from (for use in a CopyPass)
-            pub fn get_upload_slice_after_last_written_slice(self: *UploadPass, buffer: UploadTransferBufferName, num_bytes: u32) PossibleError(.{ []u8, u32 }) {
-                const idx = @intFromEnum(buffer);
-                const start = self.bytes_written[idx];
-                self.bytes_written[idx] = start + num_bytes;
-                const slice = if (ERRORS) ( //
-                    try self.get_upload_slice(buffer, start, start + num_bytes)) //
-                    else self.get_upload_slice(buffer, start, start + num_bytes) catch |err| ERROR_MODE.panic(@src(), err);
-                return .{ slice, start };
-            }
-            pub fn get_typed_upload_slice(self: *UploadPass, buffer: UploadTransferBufferName, comptime T: type, start_offset: u32, num_elements: u32) PossibleError([]T) {
-                const num_bytes = @sizeOf(T) * num_elements;
-                const slice_raw = self.get_upload_slice(buffer, start_offset, start_offset + num_bytes) catch |err| return ERROR_MODE.handle(@src(), err);
-                return std.mem.bytesAsSlice(T, slice_raw);
-            }
-            /// returns the slice and the byte offset it started from (for use in a CopyPass)
-            pub fn get_typed_upload_slice_after_last_written_slice(self: *UploadPass, buffer: UploadTransferBufferName, comptime T: type, num_elements: u32) PossibleError(.{ []T, u32 }) {
-                const idx = @intFromEnum(buffer);
-                const start = self.bytes_written[idx];
-                const start_aligned = std.mem.alignForward(u32, start, @alignOf(T));
-                const num_bytes = (@sizeOf(T) * num_elements) + (start_aligned - start);
-                self.bytes_written[idx] = start + num_bytes;
-                const slice = self.get_typed_upload_slice(buffer, T, start_aligned, num_elements) catch |err| return ERROR_MODE.handle(@src(), err);
-                return .{ slice, start_aligned };
-            }
-
-            pub fn end_upload_pass(self: *UploadPass) void {
-                for (self.mapped[0..], 0..) |is_mapped, i| {
-                    if (is_mapped) {
-                        const buffer: UploadTransferBufferName = num_cast(i, UploadTransferBufferName);
-                        const buf = self.controller.get_upload_transfer_buffer(buffer);
-                        self.controller.gpu.unmap_transfer_buffer(buf);
-                    }
-                }
-                self.controller.upload_pass_active = false;
-                self.* = undefined;
-            }
-        };
-
-        pub fn begin_download_pass(self: *Controller, cycle_transfer_buffers: bool) DownloadPass {
-            assert_with_reason(!self.download_pass_active and !self.command_buffer_active, @src(), "cannot begin a DownloadPass when another DownloadPass or CommandBuffer is active", .{});
-            self.download_pass_active = true;
-            return DownloadPass{
-                .controller = self,
-                .should_cycle_first = cycle_transfer_buffers,
-            };
-        }
-
-        pub const DownloadPass = struct {
-            cmd: CommandBuffer,
-            mapped: [INTERNAL.NUM_DOWNLOAD_TRANSFER_BUFFERS]bool = @splat(false),
-            slices: [INTERNAL.NUM_DOWNLOAD_TRANSFER_BUFFERS][]u8 = @splat(@as([*]u8, @ptrFromInt(INVALID_ADDR))[0..0]),
-            bytes_read: [INTERNAL.NUM_DOWNLOAD_TRANSFER_BUFFERS]u32 = @splat(0),
-            should_cycle_first: bool = true,
-
-            /// Sets or overrides the number of 'read' bytes in the transfer buffer (for *this* transfer pass), from the beginning
-            pub fn set_read_bytes(self: *DownloadPass, buffer: DownloadTransferBufferName, read_bytes: u32) void {
-                const idx = @intFromEnum(buffer);
-                self.bytes_read[idx] = read_bytes;
-            }
-            /// Adds to the number of 'read' bytes in the transfer buffer (for *this* transfer pass), from the beginning
-            pub fn add_read_bytes(self: *DownloadPass, buffer: DownloadTransferBufferName, written_bytes: u32) void {
-                const idx = @intFromEnum(buffer);
-                self.bytes_read[idx] += written_bytes;
-            }
-            pub fn get_read_bytes(self: *const DownloadPass, buffer: DownloadTransferBufferName) u32 {
-                const idx = @intFromEnum(buffer);
-                return self.bytes_read[idx];
-            }
-
-            pub fn get_download_slice(self: *DownloadPass, buffer: DownloadTransferBufferName, start: u32, end_excluded: u32) []u8 {
-                const idx = @intFromEnum(buffer);
-                const buf = self.cmd.controller.get_download_transfer_buffer(buffer);
-                if (self.mapped[idx] == false) {
-                    const ptr = self.cmd.controller.gpu.map_transfer_buffer(buf, self.should_cycle_first) catch |err| ct_assert_unreachable_err(@src(), err);
-                    self.slices[idx] = ptr[0..self.cmd.controller.upload_transfer_buffer_lens[idx]];
-                    self.mapped[idx] == true;
-                }
-                return self.slices[idx][start..end_excluded];
-            }
-            /// returns the slice and the byte offset it started from
-            pub fn get_download_slice_after_last_read_slice(self: *DownloadPass, buffer: DownloadTransferBufferName, num_bytes: u32) .{ []u8, u32 } {
-                const idx = @intFromEnum(buffer);
-                const start = self.bytes_read[idx];
-                self.bytes_read[idx] = start + num_bytes;
-                return .{ self.get_download_slice(buffer, start, start + num_bytes), start };
-            }
-            pub fn get_typed_download_slice(self: *DownloadPass, buffer: DownloadTransferBufferName, comptime T: type, start_offset: u32, num_elements: u32) []T {
-                const num_bytes = @sizeOf(T) * num_elements;
-                const slice_raw = self.get_download_slice(buffer, start_offset, start_offset + num_bytes);
-                return std.mem.bytesAsSlice(T, slice_raw);
-            }
-            /// returns the slice and the byte offset it started from
-            pub fn get_typed_download_slice_after_last_read_slice(self: *DownloadPass, buffer: DownloadTransferBufferName, comptime T: type, num_elements: u32) .{ []T, u32 } {
-                const idx = @intFromEnum(buffer);
-                const start = self.bytes_read[idx];
-                const start_aligned = std.mem.alignForward(u32, start, @alignOf(T));
-                const num_bytes = (@sizeOf(T) * num_elements) + (start_aligned - start);
-                self.bytes_read[idx] = start + num_bytes;
-                return .{ self.get_typed_download_slice(buffer, T, start_aligned, num_elements), start_aligned };
-            }
-
-            pub fn end_download_pass(self: *DownloadPass) void {
-                for (self.mapped[0..], 0..) |is_mapped, i| {
-                    if (is_mapped) {
-                        const buffer: DownloadTransferBufferName = num_cast(i, DownloadTransferBufferName);
-                        const buf = self.cmd.controller.get_download_transfer_buffer(buffer);
-                        self.cmd.controller.gpu.unmap_transfer_buffer(buf);
-                    }
-                }
-                self.cmd.controller.download_pass_active = false;
-                self.* = undefined;
-            }
-        };
-
-        pub const GrowCopyDeleteDetails = struct {
+        pub const GrowAndCopyGPUBufferDetails = struct {
             idx: u32,
             kind: GPUBufferKind,
             copy_len: u32,
             new_len: u32,
         };
 
-        pub fn begin_pre_command_upload_pass(self: *Controller, cycle_transfer_buffers: bool, grow_settings: UploadGrowSettings) PreCommandUploadPass {
-            assert_with_reason(!self.command_buffer_active and !self.upload_pass_active, @src(), "cannot begin a PreCommandUploadPass when a CommandPass or UploadPass is active", .{});
-            self.upload_list.clear();
-            self.grow_copy_delete_list.clear();
-            return PreCommandUploadPass{
-                .controller = self,
-                .upload = self.begin_upload_pass(cycle_transfer_buffers),
-                .grow_settings = grow_settings,
-            };
+        pub const GrowAndCopyDownloadTransferDetails = struct {
+            idx: u32,
+            copy_len: u32,
+            new_len: u32,
+        };
+
+        pub fn begin_upload_pass(self: *Controller) UploadPass {
+            self.assert_upload_pass_NOT_active(@src());
+            self.upload_pass_active = true;
+            return UploadPass{ .controller = self, .valid = true };
         }
 
-        /// Wraps an `UploadPass` that prepares uploads for immediate copy via a new `CommandBuffer` and `CopyPass` after this pass is submitted
-        ///
-        /// Provides additional assertions about data transfer types and sizes, and can automatically grow both transfer and gpu buffers if needed
-        ///
-        /// This is the recommended way to upload data to the GPU and then begin a `CommandBuffer`
-        pub const PreCommandUploadPass = struct {
+        pub const UploadPass = struct {
             controller: *Controller,
-            upload: UploadPass,
-            grow_settings: UploadGrowSettings = .{},
+            /// USER ACCESS NOT RECOMMENDED
+            valid: bool = false,
 
-            pub fn handle_possible_transfer_buffer_grow(self: *PreCommandUploadPass, buf: UploadTransferBufferName, offset: u32, len: u32, curr_size: u32, need_size: u32) PossibleError(void) {
-                var transfer_grow: u32 = 0;
-                switch (self.grow_settings.grow_transfer_buffers) {
-                    .NO_GROW => {
-                        assert_with_reason(need_size <= curr_size, @src(), "copying {d} bytes to upload transfer buffer `{s}` at offset {d} exceeds the total length of the transfer buffer ({d}). Either manually grow the transfer buffer, or use an automatic grow setting", .{ len, @tagName(buf), offset, curr_size });
-                    },
-                    .GROW_EXACT => if (need_size > curr_size) {
-                        transfer_grow = need_size;
-                    },
-                    .GROW_BY_ONE_AND_A_QUARTER => if (need_size > curr_size) {
-                        transfer_grow = need_size + (need_size >> 2);
-                    },
-                    .GROW_BY_ONE_AND_A_HALF => if (need_size > curr_size) {
-                        transfer_grow = need_size + (need_size >> 1);
-                    },
-                    .GROW_BY_DOUBLE => if (need_size > curr_size) {
-                        transfer_grow = need_size << 1;
-                    },
+            pub const _INTERNAL = struct {
+                pub inline fn assert_valid(self: UploadPass, comptime src: ?std.builtin.SourceLocation) void {
+                    self.controller.assert_upload_pass_active(src);
+                    self.controller.assert_download_pass_NOT_active(src);
+                    self.controller.assert_command_buffer_NOT_active(src);
+                    self.controller.assert_render_pass_NOT_active(src);
+                    self.controller.assert_copy_pass_NOT_active(src);
+                    self.controller.assert_compute_pass_NOT_active(src);
+                    assert_with_reason(self.valid, @src(), "this UploadPass was incorrectly created, or has already been ended", .{});
                 }
-                if (transfer_grow > 0) {
+
+                pub fn get_upload_slice(self: UploadPass, buffer: UploadTransferBufferName, start: u32, end_excluded: u32, num_bytes: u32, override_cycle: ?bool) PossibleError([]u8) {
+                    _INTERNAL.assert_valid(self, @src());
+                    const idx = @intFromEnum(buffer);
+                    _ASSERT._start_before_end(@src(), start, end_excluded);
+                    if (!self.controller.mapped_upload_buffers[idx]) {
+                        const ptr = self.controller.gpu.map_transfer_buffer(self.controller.get_upload_transfer_buffer(buffer), if (override_cycle) |cycle| cycle else self.controller.cycle_unmapped_transfer_buffers) catch |err| return ERROR_MODE.handle(@src(), err);
+                        self.controller.upload_slices[idx] = ptr[0..self.controller.upload_transfer_buffer_lens[idx]];
+                        self.controller.mapped_upload_buffers[idx] = true;
+                    }
                     if (ERRORS) ( //
-                        try self.grow_transfer_buffer(buf, curr_size, transfer_grow)) //
-                    else self.grow_transfer_buffer(buf, curr_size, transfer_grow) catch |err| ERROR_MODE.panic(@src(), err);
+                        try handle_possible_transfer_buffer_grow(self, buffer, start, num_bytes, end_excluded)) //
+                    else handle_possible_transfer_buffer_grow(self, buffer, start, num_bytes, end_excluded) catch |err| ERROR_MODE.panic(@src(), err);
+                    return self.controller.upload_slices[idx][start..end_excluded];
                 }
-            }
-
-            pub fn grow_transfer_buffer(self: *PreCommandUploadPass, buf: UploadTransferBufferName, curr_size: u32, new_size: u32) PossibleError(void) {
-                const buf_idx = @intFromEnum(buf);
-                assert_with_reason(self.controller.upload_transfer_buffers_own_memory[buf_idx], @src(), "cannot grow a transfer buffer name (`{s}`) that does not own its own memory", .{@tagName(buf)});
-                const new_transfer = self.controller.gpu.create_transfer_buffer(GPU_TransferBufferCreateInfo{
-                    .usage = .UPLOAD,
-                    .size = new_size,
-                    .props = .{},
-                }) catch |err| return ERROR_MODE.handle(@src(), err);
-                const new_ptr = self.controller.gpu.map_transfer_buffer(new_transfer, false) catch |err| return ERROR_MODE.handle(@src(), err);
-                const old_slice = if (ERRORS) ( //
-                    try self.upload.get_upload_slice(buf, 0, curr_size)) //
-                    else self.upload.get_upload_slice(buf, 0, curr_size) catch |err| ERROR_MODE.panic(@src(), err);
-                @memcpy(new_ptr[0..old_slice.len], old_slice);
-                self.controller.gpu.unmap_transfer_buffer(self.controller.upload_transfer_buffers[buf_idx]);
-                self.controller.gpu.release_transfer_buffer(self.controller.upload_transfer_buffers[buf_idx]);
-                self.controller.upload_transfer_buffers[buf_idx] = new_transfer;
-                self.controller.upload_transfer_buffer_lens[buf_idx] = new_size;
-                self.upload.slices[buf_idx] = new_ptr[0..new_size];
-            }
-
-            pub fn handle_possible_gpu_buffer_grow(self: *PreCommandUploadPass, comptime kind: GPUBufferKind, buf_name: []const u8, buf_idx: u32, offset: u32, len: u32, curr_size: u32, need_size: u32) PossibleError(void) {
-                var gpu_grow: u32 = 0;
-                switch (switch (kind) {
-                    .STORAGE => self.grow_settings.grow_storage_buffers,
-                    .VERTEX => self.grow_settings.grow_vertex_buffers,
-                    .INDEX => self.grow_settings.grow_index_buffers,
-                    .INDIRECT => self.grow_settings.grow_indirect_draw_call_buffers,
-                }) {
-                    .NO_GROW => {
-                        assert_with_reason(need_size <= curr_size, @src(), "copying {d} bytes to {s} buffer `{s}` at offset {d} exceeds the total length of the transfer buffer ({d}). Either manually grow the gpu buffer, or use an automatic grow setting", .{ len, @tagName(kind), buf_name, offset, curr_size });
-                    },
-                    .GROW_EXACT => if (need_size > curr_size) {
-                        gpu_grow = need_size;
-                    },
-                    .GROW_BY_ONE_AND_A_QUARTER => if (need_size > curr_size) {
-                        gpu_grow = need_size + (need_size >> 2);
-                    },
-                    .GROW_BY_ONE_AND_A_HALF => if (need_size > curr_size) {
-                        gpu_grow = need_size + (need_size >> 1);
-                    },
-                    .GROW_BY_DOUBLE => if (need_size > curr_size) {
-                        gpu_grow = need_size << 1;
-                    },
+                /// returns the slice and the byte offset it started from (for use in a CopyPass)
+                pub fn get_next_unused_upload_slice(self: UploadPass, buffer: UploadTransferBufferName, num_bytes: u32) PossibleError(.{ []u8, u32 }) {
+                    _INTERNAL.assert_valid(self, @src());
+                    const idx = @intFromEnum(buffer);
+                    const start = self.controller.upload_bytes_written[idx];
+                    const end = start + num_bytes;
+                    const slice = if (ERRORS) ( //
+                        try get_upload_slice(self, buffer, start, end, num_bytes, null)) //
+                        else get_upload_slice(self, buffer, start, end, num_bytes, null) catch |err| ERROR_MODE.panic(@src(), err);
+                    self.controller.upload_bytes_written[idx] = end;
+                    return .{ slice, start };
                 }
-                if (gpu_grow > 0) {
-                    if (ERRORS) ( //
-                        try self.grow_gpu_buffer(kind, buf_name, buf_idx, curr_size, gpu_grow)) //
-                    else self.grow_gpu_buffer(kind, buf_name, buf_idx, curr_size, gpu_grow) catch |err| ERROR_MODE.panic(@src(), err);
-                }
-            }
 
-            pub fn grow_gpu_buffer(self: *PreCommandUploadPass, comptime kind: GPUBufferKind, buf_name: []const u8, buf_idx: u32, curr_size: u32, new_size: u32) PossibleError(void) {
-                assert_with_reason(switch (kind) {
-                    .STORAGE => self.controller.storage_buffers_own_memory[buf_idx],
-                    .VERTEX => self.controller.vertex_buffers_own_memory[buf_idx],
-                    .INDEX => self.controller.index_buffers_own_memory[buf_idx],
-                    .INDIRECT => self.controller.indirect_draw_buffers_own_memory[buf_idx],
-                }, @src(), "cannot grow a gpu buffer name (`{s}`) that does not own its own memory", .{buf_name});
-                for (self.controller.grow_copy_delete_list.slice()) |*prev_grow| {
-                    if (prev_grow.idx == buf_idx and prev_grow.kind == kind) {
-                        prev_grow.new_len = @max(prev_grow.new_len, new_size);
-                        return;
+                pub fn grow_gpu_buffer(self: UploadPass, comptime kind: GPUBufferKind, buf_name: []const u8, buf_idx: u32, curr_size: u32, new_size: u32) PossibleError(void) {
+                    _INTERNAL.assert_valid(self, @src());
+                    assert_with_reason(switch (kind) {
+                        .STORAGE => self.controller.storage_buffers_own_memory[buf_idx],
+                        .VERTEX => self.controller.vertex_buffers_own_memory[buf_idx],
+                        .INDEX => self.controller.index_buffers_own_memory[buf_idx],
+                        .INDIRECT => self.controller.indirect_draw_buffers_own_memory[buf_idx],
+                    }, @src(), "cannot grow a gpu buffer name (`{s}`) that does not own its own memory", .{buf_name});
+                    for (self.controller.grow_and_copy_gpu_bufferlist.slice()) |*prev_grow| {
+                        if (prev_grow.idx == buf_idx and prev_grow.kind == kind) {
+                            prev_grow.new_len = @max(prev_grow.new_len, new_size);
+                            return;
+                        }
+                    }
+                    const details = GrowAndCopyGPUBufferDetails{
+                        .kind = kind,
+                        .idx = buf_idx,
+                        .copy_len = curr_size,
+                        .new_len = new_size,
+                    };
+                    _ = self.controller.grow_and_copy_gpu_bufferlist.append(details, self.controller.list_alloc);
+                }
+
+                pub fn handle_possible_transfer_buffer_grow(self: UploadPass, buf: UploadTransferBufferName, offset: u32, len: u32, need_size: u32) PossibleError(void) {
+                    _INTERNAL.assert_valid(self, @src());
+                    var transfer_grow: u32 = 0;
+                    const idx = @intFromEnum(buf);
+                    const curr_size = self.controller.upload_transfer_buffer_lens[idx];
+                    switch (self.grow_settings.grow_transfer_buffers) {
+                        .NO_GROW => {
+                            assert_with_reason(need_size <= curr_size, @src(), "copying {d} bytes to upload transfer buffer `{s}` at offset {d} exceeds the total length of the transfer buffer ({d}). Either manually grow the transfer buffer, or use an automatic grow setting", .{ len, @tagName(buf), offset, curr_size });
+                        },
+                        .GROW_EXACT => if (need_size > curr_size) {
+                            transfer_grow = need_size;
+                        },
+                        .GROW_BY_ONE_AND_A_QUARTER => if (need_size > curr_size) {
+                            transfer_grow = need_size + (need_size >> 2);
+                        },
+                        .GROW_BY_ONE_AND_A_HALF => if (need_size > curr_size) {
+                            transfer_grow = need_size + (need_size >> 1);
+                        },
+                        .GROW_BY_DOUBLE => if (need_size > curr_size) {
+                            transfer_grow = need_size << 1;
+                        },
+                    }
+                    if (transfer_grow > 0) {
+                        if (ERRORS) ( //
+                            try grow_transfer_buffer(self, buf, curr_size, transfer_grow)) //
+                        else grow_transfer_buffer(self, buf, curr_size, transfer_grow) catch |err| ERROR_MODE.panic(@src(), err);
                     }
                 }
-                const details = GrowCopyDeleteDetails{
-                    .kind = kind,
-                    .idx = buf_idx,
-                    .copy_len = curr_size,
-                    .new_len = new_size,
-                };
-                _ = self.controller.grow_copy_delete_list.append(details, self.controller.list_alloc);
-            }
 
-            pub fn upload_to_vertex_buffer(self: *PreCommandUploadPass, source: anytype, dest: VertexBufferName, dest_index_of_first_vertex: u32, transfer_buf: UploadTransferBufferName) PossibleError(void) {
+                pub fn grow_transfer_buffer(self: UploadPass, buf: UploadTransferBufferName, curr_size: u32, new_size: u32) PossibleError(void) {
+                    _INTERNAL.assert_valid(self, @src());
+                    const buf_idx = @intFromEnum(buf);
+                    assert_with_reason(self.controller.upload_transfer_buffers_own_memory[buf_idx], @src(), "cannot grow a transfer buffer name (`{s}`) that does not own its own memory", .{@tagName(buf)});
+                    const new_transfer = self.controller.gpu.create_transfer_buffer(GPU_TransferBufferCreateInfo{
+                        .usage = .UPLOAD,
+                        .size = new_size,
+                        .props = .{},
+                    }) catch |err| return ERROR_MODE.handle(@src(), err);
+                    const new_ptr = self.controller.gpu.map_transfer_buffer(new_transfer, false) catch |err| return ERROR_MODE.handle(@src(), err);
+                    const old_slice = if (ERRORS) ( //
+                        try get_upload_slice(self, buf, 0, curr_size, curr_size, false)) //
+                        else get_upload_slice(self, buf, 0, curr_size, curr_size, false) catch |err| ERROR_MODE.panic(@src(), err);
+                    @memcpy(new_ptr[0..old_slice.len], old_slice);
+                    self.controller.gpu.unmap_transfer_buffer(self.controller.upload_transfer_buffers[buf_idx]);
+                    self.controller.gpu.release_transfer_buffer(self.controller.upload_transfer_buffers[buf_idx]);
+                    self.controller.upload_transfer_buffers[buf_idx] = new_transfer;
+                    self.controller.upload_transfer_buffer_lens[buf_idx] = new_size;
+                    self.upload.slices[buf_idx] = new_ptr[0..new_size];
+                }
+
+                pub fn handle_possible_gpu_buffer_grow(self: *UploadPass, comptime kind: GPUBufferKind, buf_name: []const u8, buf_idx: u32, offset: u32, len: u32, need_size: u32) PossibleError(void) {
+                    _INTERNAL.assert_valid(self, @src());
+                    var gpu_grow: u32 = 0;
+                    const curr_size = switch (kind) {
+                        .STORAGE => self.controller.storage_buffer_lens[buf_idx],
+                        .VERTEX => self.controller.vertex_buffer_lens[buf_idx],
+                        .INDEX => self.controller.index_buffer_lens[buf_idx],
+                        .INDIRECT => self.controller.indirect_draw_buffer_lens[buf_idx],
+                    };
+                    switch (switch (kind) {
+                        .STORAGE => self.controller.storage_buffer_grow_mode,
+                        .VERTEX => self.controller.vertex_buffer_grow_mode,
+                        .INDEX => self.controller.index_buffer_grow_mode,
+                        .INDIRECT => self.controller.indirect_draw_buffer_grow_mode,
+                    }) {
+                        .NO_GROW => {
+                            assert_with_reason(need_size <= curr_size, @src(), "copying {d} bytes to {s} buffer `{s}` at offset {d} exceeds the total length of the transfer buffer ({d}). Either manually grow the gpu buffer, or use an automatic grow setting", .{ len, @tagName(kind), buf_name, offset, curr_size });
+                        },
+                        .GROW_EXACT => if (need_size > curr_size) {
+                            gpu_grow = need_size;
+                        },
+                        .GROW_BY_ONE_AND_A_QUARTER => if (need_size > curr_size) {
+                            gpu_grow = need_size + (need_size >> 2);
+                        },
+                        .GROW_BY_ONE_AND_A_HALF => if (need_size > curr_size) {
+                            gpu_grow = need_size + (need_size >> 1);
+                        },
+                        .GROW_BY_DOUBLE => if (need_size > curr_size) {
+                            gpu_grow = need_size << 1;
+                        },
+                    }
+                    if (gpu_grow > 0) {
+                        if (ERRORS) ( //
+                            try grow_gpu_buffer(self, kind, buf_name, buf_idx, curr_size, gpu_grow)) //
+                        else grow_gpu_buffer(self, kind, buf_name, buf_idx, curr_size, gpu_grow) catch |err| ERROR_MODE.panic(@src(), err);
+                    }
+                }
+            };
+
+            pub fn upload_to_vertex_buffer(self: UploadPass, source: anytype, dest: VertexBufferName, dest_index_of_first_vertex: u32, transfer_buf: UploadTransferBufferName) PossibleError(void) {
+                _INTERNAL.assert_valid(self, @src());
                 const source_bytes: []const u8 = bytes_cast(source);
-                const source_element_type = bytes_cast_element_type(@TypeOf(source));
+                const source_element_type = element_type(@TypeOf(source));
                 const dest_idx = @intFromEnum(dest);
-                const transfer_idx = @intFromEnum(transfer_buf);
                 const dest_type = INTERNAL.VERTEX_BUFFER_DEFS[dest_idx].element_type;
                 assert_with_reason(source_element_type == dest_type, @src(), "source element type must be the same as the dest vertex buffer element type, but `{s}` != `{s}`", .{ @typeName(source_element_type), @typeName(dest_type) });
                 const dest_offset = @sizeOf(dest_type) * dest_index_of_first_vertex;
-                const transfer_offset = self.upload.get_written_bytes(transfer_buf);
                 const transfer_len: u32 = @intCast(source_bytes.len);
                 const buffer_end = dest_offset + transfer_len;
-                const transfer_end = transfer_offset + transfer_len;
                 if (ERRORS) ( //
-                    try self.handle_possible_transfer_buffer_grow(transfer_buf, transfer_offset, transfer_len, self.controller.upload_transfer_buffer_lens[transfer_idx], transfer_end)) //
-                else self.handle_possible_transfer_buffer_grow(transfer_buf, transfer_offset, transfer_len, self.controller.upload_transfer_buffer_lens[transfer_idx], transfer_end) catch |err| ERROR_MODE.panic(@src(), err);
-                if (ERRORS) ( //
-                    try self.handle_possible_gpu_buffer_grow(.VERTEX, @tagName(dest), dest_idx, dest_offset, transfer_len, self.controller.vertex_buffer_lens[dest_idx], buffer_end)) //
-                else self.handle_possible_gpu_buffer_grow(.VERTEX, @tagName(dest), dest_idx, dest_offset, transfer_len, self.controller.vertex_buffer_lens[dest_idx], buffer_end) catch |err| ERROR_MODE.panic(@src(), err);
-                self.upload.add_written_bytes(transfer_buf, transfer_len);
+                    try _INTERNAL.handle_possible_gpu_buffer_grow(self, .VERTEX, @tagName(dest), dest_idx, dest_offset, transfer_len, buffer_end)) //
+                else _INTERNAL.handle_possible_gpu_buffer_grow(self, .VERTEX, @tagName(dest), dest_idx, dest_offset, transfer_len, buffer_end) catch |err| ERROR_MODE.panic(@src(), err);
+                const transfer_slice, const transfer_offset = if (ERRORS) ( //
+                    try _INTERNAL.get_next_unused_upload_slice(self, transfer_buf, transfer_len)) //
+                    else _INTERNAL.get_next_unused_upload_slice(self, transfer_buf, transfer_len) catch |err| ERROR_MODE.panic(@src(), err);
+                @memcpy(transfer_slice, source_bytes);
                 const details = CopyUploadDetails{
                     .dest = .vertex_buffer(dest, dest_offset, transfer_len),
                     .transfer_buf = transfer_buf,
@@ -3126,120 +3219,104 @@ pub fn GraphicsController(
                     .transfer_buf_len = transfer_len,
                 };
                 _ = self.controller.upload_list.append(details, self.controller.list_alloc);
-                const transfer_slice = self.upload.get_upload_slice(transfer_buf, transfer_offset, transfer_offset + transfer_len);
-                @memcpy(transfer_slice, source_bytes);
             }
-            pub fn upload_to_index_buffer(self: *PreCommandUploadPass, source: anytype, dest: IndexBufferName, dest_index_of_first_index: u32, transfer_buf: UploadTransferBufferName) PossibleError(void) {
+            pub fn upload_to_index_buffer(self: UploadPass, source: anytype, dest: IndexBufferName, dest_index_of_first_index: u32, transfer_buf: UploadTransferBufferName) PossibleError(void) {
+                _INTERNAL.assert_valid(self, @src());
                 const source_bytes: []const u8 = bytes_cast(source);
-                const source_element_type = bytes_cast_element_type(@TypeOf(source));
+                const source_element_type = element_type(@TypeOf(source));
                 const dest_idx = @intFromEnum(dest);
-                const transfer_idx = @intFromEnum(transfer_buf);
                 const dest_type = switch (self.cmd.controller.index_buffer_types[dest_idx]) {
                     GPU_IndexTypeSize.U16 => u16,
                     GPU_IndexTypeSize.U32 => u32,
                 };
                 assert_with_reason(source_element_type == dest_type, @src(), "source element type must be the same as the dest index buffer element type, but `{s}` != `{s}`", .{ @typeName(source_element_type), @typeName(dest_type) });
                 const dest_offset = @sizeOf(dest_type) * dest_index_of_first_index;
-                const transfer_offset = self.upload.get_written_bytes(transfer_buf);
                 const transfer_len: u32 = @intCast(source_bytes.len);
                 const buffer_end = dest_offset + transfer_len;
-                const transfer_end = transfer_offset + transfer_len;
                 if (ERRORS) ( //
-                    try self.handle_possible_transfer_buffer_grow(transfer_buf, transfer_offset, transfer_len, self.controller.upload_transfer_buffer_lens[transfer_idx], transfer_end)) //
-                else self.handle_possible_transfer_buffer_grow(transfer_buf, transfer_offset, transfer_len, self.controller.upload_transfer_buffer_lens[transfer_idx], transfer_end) catch |err| ERROR_MODE.panic(@src(), err);
-                if (ERRORS) ( //
-                    try self.handle_possible_gpu_buffer_grow(.INDEX, @tagName(dest), dest_idx, dest_offset, transfer_len, self.controller.index_buffer_lens[dest_idx], buffer_end)) //
-                else self.handle_possible_gpu_buffer_grow(.INDEX, @tagName(dest), dest_idx, dest_offset, transfer_len, self.controller.index_buffer_lens[dest_idx], buffer_end) catch |err| ERROR_MODE.panic(@src(), err);
-                self.upload.add_written_bytes(transfer_buf, transfer_len);
+                    try _INTERNAL.handle_possible_gpu_buffer_grow(self, .INDEX, @tagName(dest), dest_idx, dest_offset, transfer_len, buffer_end)) //
+                else _INTERNAL.handle_possible_gpu_buffer_grow(self, .INDEX, @tagName(dest), dest_idx, dest_offset, transfer_len, buffer_end) catch |err| ERROR_MODE.panic(@src(), err);
+                const transfer_slice, const transfer_offset = if (ERRORS) ( //
+                    try _INTERNAL.get_next_unused_upload_slice(self, transfer_buf, transfer_len)) //
+                    else _INTERNAL.get_next_unused_upload_slice(self, transfer_buf, transfer_len) catch |err| ERROR_MODE.panic(@src(), err);
+                @memcpy(transfer_slice, source_bytes);
                 const details = CopyUploadDetails{
-                    .dest = .index_buffer(dest, dest_offset, transfer_len),
+                    .dest = .vertex_buffer(dest, dest_offset, transfer_len),
                     .transfer_buf = transfer_buf,
                     .transfer_buf_offset = transfer_offset,
                     .transfer_buf_len = transfer_len,
                 };
                 _ = self.controller.upload_list.append(details, self.controller.list_alloc);
-                const transfer_slice = self.upload.get_upload_slice(transfer_buf, transfer_offset, transfer_offset + transfer_len);
-                @memcpy(transfer_slice, source_bytes);
             }
-            pub fn upload_to_indirect_draw_call_buffer(self: *PreCommandUploadPass, source: anytype, dest: IndirectDrawBufferName, dest_index_of_first_draw_call: u32, transfer_buf: UploadTransferBufferName) PossibleError(void) {
+            pub fn upload_to_indirect_draw_call_buffer(self: *UploadPass, source: anytype, dest: IndirectDrawBufferName, dest_index_of_first_draw_call: u32, transfer_buf: UploadTransferBufferName) PossibleError(void) {
+                _INTERNAL.assert_valid(self, @src());
                 const source_bytes: []const u8 = bytes_cast(source);
-                const source_element_type = bytes_cast_element_type(@TypeOf(source));
+                const source_element_type = element_type(@TypeOf(source));
                 const dest_idx = @intFromEnum(dest);
-                const transfer_idx = @intFromEnum(transfer_buf);
                 const dest_type = switch (self.cmd.controller.indirect_draw_buffer_modes[dest_idx]) {
                     VertexDrawMode.INDEX => GPU_IndexedIndirectDrawCommand,
                     VertexDrawMode.VERTEX => GPU_IndirectDrawCommand,
                 };
                 assert_with_reason(source_element_type == dest_type, @src(), "source element type must be the same as the dest indirect draw call buffer element type, but `{s}` != `{s}`", .{ @typeName(source_element_type), @typeName(dest_type) });
                 const dest_offset = @sizeOf(dest_type) * dest_index_of_first_draw_call;
-                const transfer_offset = self.upload.get_written_bytes(transfer_buf);
                 const transfer_len: u32 = @intCast(source_bytes.len);
                 const buffer_end = dest_offset + transfer_len;
-                const transfer_end = transfer_offset + transfer_len;
                 if (ERRORS) ( //
-                    try self.handle_possible_transfer_buffer_grow(transfer_buf, transfer_offset, transfer_len, self.controller.upload_transfer_buffer_lens[transfer_idx], transfer_end)) //
-                else self.handle_possible_transfer_buffer_grow(transfer_buf, transfer_offset, transfer_len, self.controller.upload_transfer_buffer_lens[transfer_idx], transfer_end) catch |err| ERROR_MODE.panic(@src(), err);
-                if (ERRORS) ( //
-                    try self.handle_possible_gpu_buffer_grow(.INDIRECT, @tagName(dest), dest_idx, dest_offset, transfer_len, self.controller.indirect_draw_buffer_lens[dest_idx], buffer_end)) //
-                else self.handle_possible_gpu_buffer_grow(.INDIRECT, @tagName(dest), dest_idx, dest_offset, transfer_len, self.controller.indirect_draw_buffer_lens[dest_idx], buffer_end) catch |err| ERROR_MODE.panic(@src(), err);
-                self.upload.add_written_bytes(transfer_buf, transfer_len);
+                    try _INTERNAL.handle_possible_gpu_buffer_grow(self, .INDIRECT, @tagName(dest), dest_idx, dest_offset, transfer_len, buffer_end)) //
+                else _INTERNAL.handle_possible_gpu_buffer_grow(self, .INDIRECT, @tagName(dest), dest_idx, dest_offset, transfer_len, buffer_end) catch |err| ERROR_MODE.panic(@src(), err);
+                const transfer_slice, const transfer_offset = if (ERRORS) ( //
+                    try _INTERNAL.get_next_unused_upload_slice(self, transfer_buf, transfer_len)) //
+                    else _INTERNAL.get_next_unused_upload_slice(self, transfer_buf, transfer_len) catch |err| ERROR_MODE.panic(@src(), err);
+                @memcpy(transfer_slice, source_bytes);
                 const details = CopyUploadDetails{
-                    .dest = .indirect_draw_buffer(dest, dest_offset, transfer_len),
+                    .dest = .vertex_buffer(dest, dest_offset, transfer_len),
                     .transfer_buf = transfer_buf,
                     .transfer_buf_offset = transfer_offset,
                     .transfer_buf_len = transfer_len,
                 };
                 _ = self.controller.upload_list.append(details, self.controller.list_alloc);
-                const transfer_slice = self.upload.get_upload_slice(transfer_buf, transfer_offset, transfer_offset + transfer_len);
-                @memcpy(transfer_slice, source_bytes);
             }
-            pub fn upload_to_storage_buffer(self: *PreCommandUploadPass, source: anytype, dest: StorageBufferName, dest_index_of_first_element: u32, transfer_buf: UploadTransferBufferName) PossibleError(void) {
+            pub fn upload_to_storage_buffer(self: *UploadPass, source: anytype, dest: StorageBufferName, dest_index_of_first_element: u32, transfer_buf: UploadTransferBufferName) PossibleError(void) {
+                _INTERNAL.assert_valid(self, @src());
                 const source_bytes: []const u8 = bytes_cast(source);
-                const source_element_type = bytes_cast_element_type(@TypeOf(source));
+                const source_element_type = element_type(@TypeOf(source));
                 const dest_idx = @intFromEnum(dest);
-                const transfer_idx = @intFromEnum(transfer_buf);
                 const dest_type = INTERNAL.STORAGE_BUFFER_TYPES[dest_idx];
                 assert_with_reason(source_element_type == dest_type, @src(), "source element type must be the same as the dest storage buffer element type, but `{s}` != `{s}`", .{ @typeName(source_element_type), @typeName(dest_type) });
                 const dest_offset = @sizeOf(dest_type) * dest_index_of_first_element;
-                const transfer_offset = self.upload.get_written_bytes(transfer_buf);
                 const transfer_len: u32 = @intCast(source_bytes.len);
                 const buffer_end = dest_offset + transfer_len;
-                const transfer_end = transfer_offset + transfer_len;
                 if (ERRORS) ( //
-                    try self.handle_possible_transfer_buffer_grow(transfer_buf, transfer_offset, transfer_len, self.controller.upload_transfer_buffer_lens[transfer_idx], transfer_end)) //
-                else self.handle_possible_transfer_buffer_grow(transfer_buf, transfer_offset, transfer_len, self.controller.upload_transfer_buffer_lens[transfer_idx], transfer_end) catch |err| ERROR_MODE.panic(@src(), err);
-                if (ERRORS) ( //
-                    try self.handle_possible_gpu_buffer_grow(.STORAGE, @tagName(dest), dest_idx, dest_offset, transfer_len, self.controller.storage_buffer_lens[dest_idx], buffer_end)) //
-                else self.handle_possible_gpu_buffer_grow(.STORAGE, @tagName(dest), dest_idx, dest_offset, transfer_len, self.controller.storage_buffer_lens[dest_idx], buffer_end) catch |err| ERROR_MODE.panic(@src(), err);
-                self.upload.add_written_bytes(transfer_buf, transfer_len);
+                    try _INTERNAL.handle_possible_gpu_buffer_grow(self, .STORAGE, @tagName(dest), dest_idx, dest_offset, transfer_len, buffer_end)) //
+                else _INTERNAL.handle_possible_gpu_buffer_grow(self, .STORAGE, @tagName(dest), dest_idx, dest_offset, transfer_len, buffer_end) catch |err| ERROR_MODE.panic(@src(), err);
+                const transfer_slice, const transfer_offset = if (ERRORS) ( //
+                    try _INTERNAL.get_next_unused_upload_slice(self, transfer_buf, transfer_len)) //
+                    else _INTERNAL.get_next_unused_upload_slice(self, transfer_buf, transfer_len) catch |err| ERROR_MODE.panic(@src(), err);
+                @memcpy(transfer_slice, source_bytes);
                 const details = CopyUploadDetails{
-                    .dest = .storage_buffer(dest, dest_offset, transfer_len),
+                    .dest = .vertex_buffer(dest, dest_offset, transfer_len),
                     .transfer_buf = transfer_buf,
                     .transfer_buf_offset = transfer_offset,
                     .transfer_buf_len = transfer_len,
                 };
                 _ = self.controller.upload_list.append(details, self.controller.list_alloc);
-                const transfer_slice = self.upload.get_upload_slice(transfer_buf, transfer_offset, transfer_offset + transfer_len);
-                @memcpy(transfer_slice, source_bytes);
             }
-            pub fn upload_to_texture(self: *PreCommandUploadPass, source: anytype, dest: TextureName, dest_pos: Vec3(u32), dest_size: Vec3(u32), dest_mip_level: u32, dest_layer: u32, transfer_buf: UploadTransferBufferName) PossibleError(void) {
+            pub fn upload_to_texture(self: *UploadPass, source: anytype, dest: TextureName, dest_pos: Vec3(u32), dest_size: Vec3(u32), dest_mip_level: u32, dest_layer: u32, transfer_buf: UploadTransferBufferName) PossibleError(void) {
+                _INTERNAL.assert_valid(self, @src());
                 const source_bytes: []const u8 = bytes_cast(source);
                 const transfer_len: u32 = @intCast(source_bytes.len);
-                const transfer_idx = @intFromEnum(transfer_buf);
-                const source_element_type = bytes_cast_element_type(@TypeOf(source));
+                const source_element_type = element_type(@TypeOf(source));
                 const dest_idx = @intFromEnum(dest);
                 const dest_texel_size = INTERNAL.TEXTURE_DEFS[dest_idx].pixel_format.texel_block_size();
                 const dest_copy_size = dest_size.x * dest_size.y * dest_size.z * dest_texel_size;
                 assert_with_reason(@sizeOf(source_element_type) == dest_texel_size, @src(), "source element type must be the same SIZE as the dest texture texel block size, but `{d}` != `{d}`", .{ @sizeOf(source_element_type), dest_texel_size });
                 assert_with_reason(transfer_len <= dest_copy_size, @src(), "source byte len {d} is larger than texture destination size {d} ({d} * {any}) (cannot automatically resize textures)", .{ transfer_len, dest_copy_size, dest_texel_size, dest_size });
-                const transfer_offset = self.upload.get_written_bytes(transfer_buf);
-                const transfer_end = transfer_offset + transfer_len;
                 const texture_extent = dest_pos.add(dest_size);
-                assert_with_reason(self.controller.point_is_within_texture(dest, texture_extent), @src(), "uplod max extent {any} is outside the max size of texture `{s}` ({any})", .{ texture_extent, @tagName(dest), self.controller.textures_sizes[dest_idx] });
-                if (ERRORS) ( //
-                    try self.handle_possible_transfer_buffer_grow(transfer_buf, transfer_offset, transfer_len, self.controller.upload_transfer_buffer_lens[transfer_idx], transfer_end)) //
-                else self.handle_possible_transfer_buffer_grow(transfer_buf, transfer_offset, transfer_len, self.controller.upload_transfer_buffer_lens[transfer_idx], transfer_end) catch |err| ERROR_MODE.panic(@src(), err);
-                self.upload.add_written_bytes(transfer_buf, transfer_len);
+                assert_with_reason(texture_extent.all_components_less_than_or_equal(self.controller.textures_sizes[dest_idx]), @src(), "max extent of destination texture {any} is out of bounds for texture size {any}", .{ texture_extent, self.controller.textures_sizes[dest_idx] });
+                const transfer_slice, const transfer_offset = if (ERRORS) ( //
+                    try _INTERNAL.get_next_unused_upload_slice(self, transfer_buf, transfer_len)) //
+                    else _INTERNAL.get_next_unused_upload_slice(self, transfer_buf, transfer_len) catch |err| ERROR_MODE.panic(@src(), err);
+                @memcpy(transfer_slice, source_bytes);
                 const details = CopyUploadDetails{
                     .dest = .texture(dest, dest_pos, dest_size, dest_mip_level, dest_layer),
                     .transfer_buf = transfer_buf,
@@ -3247,26 +3324,35 @@ pub fn GraphicsController(
                     .transfer_buf_len = transfer_len,
                 };
                 _ = self.controller.upload_list.append(details, self.controller.list_alloc);
-                const transfer_slice = self.upload.get_upload_slice(transfer_buf, transfer_offset, transfer_offset + transfer_len);
-                @memcpy(transfer_slice, source_bytes);
             }
 
-            pub fn end_upload_pass_and_start_command_buffer(self: *PreCommandUploadPass, cycle_gpu_buffers: bool) PossibleError(CommandBuffer) {
-                const cmd: CommandBuffer, const copy: CopyPass = if (ERRORS) ( //
+            pub fn end_upload_pass_and_start_command_buffer(self: *UploadPass, cycle_gpu_buffers: bool) PossibleError(CommandBuffer) {
+                const cmd: CommandBuffer, const copy: CopyPassGPUOnly = if (ERRORS) ( //
                     try self.end_upload_pass_and_start_command_buffer_with_active_copy_pass(cycle_gpu_buffers)) //
                     else self.end_upload_pass_and_start_command_buffer_with_active_copy_pass(cycle_gpu_buffers) catch |err| ERROR_MODE.panic(@src(), err);
                 copy.end_copy_pass();
                 return cmd;
             }
-            pub fn end_upload_pass_and_start_command_buffer_with_active_copy_pass(self: *PreCommandUploadPass, cycle_gpu_buffers: bool) PossibleError(.{ CommandBuffer, CopyPass }) {
-                self.upload.end_upload_pass();
-                var cmd: CommandBuffer = if (ERRORS) ( //
+            pub fn end_upload_pass_and_start_command_buffer_with_active_copy_pass(self: *UploadPass, cycle_gpu_buffers: bool) PossibleError(.{ CommandBuffer, CopyPassGPUOnly }) {
+                _INTERNAL.assert_valid(self, @src());
+                self.valid = false;
+                for (self.controller.mapped_upload_buffers[0..], 0..) |is_mapped, i| {
+                    if (is_mapped) {
+                        self.controller.gpu.unmap_transfer_buffer(self.controller.upload_transfer_buffers[i]);
+                        self.controller.mapped_upload_buffers[i] = false;
+                        self.controller.upload_slices[i] = &.{};
+                        self.controller.upload_bytes_written[i] = 0;
+                    }
+                }
+                self.controller.upload_pass_active = false;
+                const cmd: CommandBuffer = if (ERRORS) ( //
                     try self.controller.begin_command_buffer()) //
                     else self.controller.begin_command_buffer() catch |err| ERROR_MODE.panic(@src(), err);
-                const copy: CopyPass = if (ERRORS) ( //
-                    try cmd.begin_copy_pass()) //
-                    else cmd.begin_copy_pass() catch |err| ERROR_MODE.panic(@src(), err);
-                for (self.controller.grow_copy_delete_list.slice()) |grow| {
+                const copy: CopyPassTransferOnly = if (ERRORS) ( //
+                    try CommandBuffer._INTERNAL.begin_transfer_copy_pass(cmd)) //
+                    else CommandBuffer._INTERNAL.begin_transfer_copy_pass(cmd) catch |err| ERROR_MODE.panic(@src(), err);
+                self.controller.upload_pass_active = true;
+                for (self.controller.grow_and_copy_gpu_bufferlist.slice()) |grow| {
                     const old_buf = switch (grow.kind) {
                         .STORAGE => self.controller.storage_buffers[grow.idx],
                         .VERTEX => self.controller.vertex_buffers[grow.idx],
@@ -3323,17 +3409,500 @@ pub fn GraphicsController(
                         },
                     }
                 }
-                return .{ cmd, copy };
+                self.controller.upload_pass_active = false;
+                const gpu_copy = CopyPassGPUOnly{
+                    .cmd = cmd,
+                    .pass = copy.pass,
+                    .valid = true,
+                };
+                self.controller.upload_list.clear();
+                return .{ cmd, gpu_copy };
+            }
+
+            pub fn end_upload_pass_then_create_and_submit_new_command_buffer(self: *UploadPass, cycle_gpu_buffers: bool) PossibleError(void) {
+                const cmd: CommandBuffer = if (ERRORS) ( //
+                    try self.end_upload_pass_and_start_command_buffer(cycle_gpu_buffers)) //
+                    else self.end_upload_pass_and_start_command_buffer(cycle_gpu_buffers) catch |err| ERROR_MODE.panic(@src(), err);
+                if (ERRORS) ( //
+                    try cmd.submit_commands()) //
+                else cmd.submit_commands() catch |err| ERROR_MODE.panic(@src(), err);
+            }
+            pub fn end_upload_pass_then_create_and_submit_new_command_buffer_with_fence(self: *UploadPass, cycle_gpu_buffers: bool, fence_name: FenceName) PossibleError(void) {
+                const cmd: CommandBuffer = if (ERRORS) ( //
+                    try self.end_upload_pass_and_start_command_buffer(cycle_gpu_buffers)) //
+                    else self.end_upload_pass_and_start_command_buffer(cycle_gpu_buffers) catch |err| ERROR_MODE.panic(@src(), err);
+                if (ERRORS) ( //
+                    try cmd.submit_commands_and_aquire_fence(fence_name)) //
+                else cmd.submit_commands_and_aquire_fence(fence_name) catch |err| ERROR_MODE.panic(@src(), err);
+            }
+            pub fn end_upload_pass_then_create_and_submit_new_command_buffer_and_immediately_wait_on_fence(self: *UploadPass, cycle_gpu_buffers: bool) PossibleError(void) {
+                const cmd: CommandBuffer = if (ERRORS) ( //
+                    try self.end_upload_pass_and_start_command_buffer(cycle_gpu_buffers)) //
+                    else self.end_upload_pass_and_start_command_buffer(cycle_gpu_buffers) catch |err| ERROR_MODE.panic(@src(), err);
+                if (ERRORS) ( //
+                    try cmd.submit_commands_and_immediately_wait_on_fence()) //
+                else cmd.submit_commands_and_immediately_wait_on_fence() catch |err| ERROR_MODE.panic(@src(), err);
+            }
+            pub fn end_upload_pass_then_create_and_new_command_buffer_and_begin_download_pass(self: *UploadPass, cycle_gpu_buffers: bool) PossibleError(DownloadPass) {
+                _, const copy: CopyPassGPUOnly = if (ERRORS) ( //
+                    try self.end_upload_pass_and_start_command_buffer_with_active_copy_pass(cycle_gpu_buffers)) //
+                    else self.end_upload_pass_and_start_command_buffer_with_active_copy_pass(cycle_gpu_buffers) catch |err| ERROR_MODE.panic(@src(), err);
+                const pass: DownloadPass = if (ERRORS) ( //
+                    try copy.lock_copy_pass_and_command_buffer_and_begin_download_pass()) //
+                    else copy.lock_copy_pass_and_command_buffer_and_begin_download_pass() catch |err| ERROR_MODE.panic(@src(), err);
+                return pass;
+            }
+        };
+
+        /// Creates a CommandBuffer and CopyPass to move data from the gpu to the application
+        ///
+        /// Ending the DownloadPass will submit the CommandBuffer and provide a PendingFinalDownloadHandle
+        /// that can be used to move the data from the transfer buffers to the staged application memory slices
+        /// when the GPU is done processing the commands (possibly by using an optional fence)
+        ///
+        /// If you want to download data after a CommandBuffer that does some other work, use the associated method on the CommandBuffer
+        /// to start the DownloadPass instead.
+        pub fn begin_standalone_download_pass(self: *Controller) DownloadPass {
+            self.assert_command_buffer_NOT_active(@src());
+            self.assert_copy_pass_NOT_active(@src());
+            self.assert_download_pass_NOT_active(@src());
+            const cmd: CommandBuffer = if (ERRORS) ( //
+                try self.begin_command_buffer()) //
+                else self.begin_command_buffer() catch |err| ERROR_MODE.panic(@src(), err);
+            const copy: CopyPassTransferOnly = if (ERRORS) ( //
+                try CommandBuffer._INTERNAL.begin_transfer_copy_pass(cmd)) //
+                else CommandBuffer._INTERNAL.begin_transfer_copy_pass(cmd) catch |err| ERROR_MODE.panic(@src(), err);
+            self.download_pass_active = true;
+            self.grow_and_copy_download_transfer_list.clear();
+            self.download_list.clear();
+            return DownloadPass{
+                .controller = self,
+                .cmd = cmd,
+                .copy = copy,
+                .valid = true,
+            };
+        }
+
+        pub const DownloadPass = struct {
+            controller: *Controller,
+            /// USER ACCESS NOT RECOMMENDED
+            cmd: CommandBuffer,
+            /// USER ACCESS NOT RECOMMENDED
+            copy: CopyPassTransferOnly,
+            /// USER ACCESS NOT RECOMMENDED
+            valid: bool = false,
+
+            pub const _INTERNAL = struct {
+                pub inline fn assert_valid(self: DownloadPass, comptime src: ?std.builtin.SourceLocation) void {
+                    self.controller.assert_download_pass_active(src);
+                    self.controller.assert_command_buffer_active(src);
+                    self.controller.assert_copy_pass_active(src);
+                    assert_with_reason(self.valid, @src(), "this DownloadPass was incorrectly created, or has already been ended", .{});
+                }
+
+                pub fn get_download_slice(self: DownloadPass, buffer: DownloadTransferBufferName, start: u32, end_excluded: u32, override_cycle: ?bool) PossibleError([]const u8) {
+                    _INTERNAL.assert_valid(self, @src());
+                    const idx = @intFromEnum(buffer);
+                    _ASSERT._start_before_end(@src(), start, end_excluded);
+                    if (!self.controller.mapped_download_buffers[idx]) {
+                        const ptr = self.controller.gpu.map_transfer_buffer(self.controller.get_download_transfer_buffer(buffer), if (override_cycle) |cycle| cycle else self.controller.cycle_unmapped_transfer_buffers) catch |err| return ERROR_MODE.handle(@src(), err);
+                        self.controller.download_slices[idx] = ptr[0..self.controller.download_transfer_buffer_lens[idx]];
+                        self.controller.mapped_download_buffers[idx] = true;
+                    }
+                    return self.controller.download_slices[idx][start..end_excluded];
+                }
+                /// returns the byte offset the slice will start from (for use in a CopyPass)
+                pub fn get_next_unused_download_slice_offset(self: DownloadPass, buffer: DownloadTransferBufferName, num_bytes: u32) PossibleError(u32) {
+                    _INTERNAL.assert_valid(self, @src());
+                    const idx = @intFromEnum(buffer);
+                    const start = self.controller.download_bytes_read[idx];
+                    const end = start + num_bytes;
+                    if (ERRORS) ( //
+                        try handle_possible_transfer_buffer_grow(self, buffer, start, num_bytes, end)) //
+                    else handle_possible_transfer_buffer_grow(self, buffer, start, num_bytes, end) catch |err| ERROR_MODE.panic(@src(), err);
+                    self.controller.download_bytes_read[idx] = end;
+                    return start;
+                }
+
+                pub fn handle_possible_transfer_buffer_grow(self: DownloadPass, buf: DownloadTransferBufferName, offset: u32, len: u32, need_size: u32) PossibleError(void) {
+                    _INTERNAL.assert_valid(self, @src());
+                    var transfer_grow: u32 = 0;
+                    const idx = @intFromEnum(buf);
+                    const curr_size = self.controller.download_transfer_buffer_lens[idx];
+                    switch (self.controller.download_buffer_grow_mode) {
+                        .NO_GROW => {
+                            assert_with_reason(need_size <= curr_size, @src(), "copying {d} bytes to download transfer buffer `{s}` at offset {d} exceeds the total length of the transfer buffer ({d}). Either manually grow the transfer buffer, or use an automatic grow setting", .{ len, @tagName(buf), offset, curr_size });
+                        },
+                        .GROW_EXACT => if (need_size > curr_size) {
+                            transfer_grow = need_size;
+                        },
+                        .GROW_BY_ONE_AND_A_QUARTER => if (need_size > curr_size) {
+                            transfer_grow = need_size + (need_size >> 2);
+                        },
+                        .GROW_BY_ONE_AND_A_HALF => if (need_size > curr_size) {
+                            transfer_grow = need_size + (need_size >> 1);
+                        },
+                        .GROW_BY_DOUBLE => if (need_size > curr_size) {
+                            transfer_grow = need_size << 1;
+                        },
+                    }
+                    if (transfer_grow > 0) {
+                        if (ERRORS) ( //
+                            try queue_grow_transfer_buffer(self, buf, curr_size, transfer_grow)) //
+                        else queue_grow_transfer_buffer(self, buf, curr_size, transfer_grow) catch |err| ERROR_MODE.panic(@src(), err);
+                    }
+                }
+
+                pub fn queue_grow_transfer_buffer(self: DownloadPass, buf: DownloadTransferBufferName, curr_size: u32, new_size: u32) PossibleError(void) {
+                    _INTERNAL.assert_valid(self, @src());
+                    const buf_idx = @intFromEnum(buf);
+                    assert_with_reason(self.controller.download_transfer_buffers_own_memory[buf_idx], @src(), "cannot grow a download transfer buffer (`{s}`) that does not own its own memory", .{@tagName(buf)});
+                    for (self.controller.grow_and_copy_download_transfer_list.slice()) |*prev_grow| {
+                        if (prev_grow.idx == buf_idx) {
+                            prev_grow.new_len = @max(prev_grow.new_len, new_size);
+                            return;
+                        }
+                    }
+                    const details = GrowAndCopyDownloadTransferDetails{
+                        .idx = buf_idx,
+                        .copy_len = curr_size,
+                        .new_len = new_size,
+                    };
+                    _ = self.controller.grow_and_copy_download_transfer_list.append(details, self.controller.list_alloc);
+                }
+
+                pub fn handle_queued_actions(self: DownloadPass) PossibleError(void) {
+                    _INTERNAL.assert_valid(self, @src());
+                    for (self.controller.grow_and_copy_download_transfer_list.slice()) |grow| {
+                        const old_slice: []const u8 = if (!self.controller.mapped_download_buffers[grow.idx]) map_and_get: {
+                            const old_ptr = self.controller.gpu.map_transfer_buffer(self.controller.download_transfer_buffers[grow.idx], self.controller.cycle_unmapped_transfer_buffers) catch |err| return ERROR_MODE.handle(@src(), err);
+                            self.controller.mapped_download_buffers[grow.idx] = true;
+                            break :map_and_get old_ptr[0..grow.copy_len];
+                        } else self.controller.download_slices[grow.idx];
+                        const new_download = self.controller.gpu.create_transfer_buffer(GPU_TransferBufferCreateInfo{
+                            .size = grow.new_len,
+                            .usage = .DOWNLOAD,
+                            .props = .{},
+                        }) catch |err| return ERROR_MODE.handle(@src(), err);
+                        const new_ptr = self.controller.gpu.map_transfer_buffer(new_download, false) catch |err| return ERROR_MODE.handle(@src(), err);
+                        @memcpy(new_ptr[0..old_slice.len], old_slice);
+                        self.controller.gpu.unmap_transfer_buffer(self.controller.download_transfer_buffers[grow.idx]);
+                        self.controller.gpu.release_transfer_buffer(self.controller.download_transfer_buffers[grow.idx]);
+                        self.controller.download_transfer_buffer_lens[grow.idx] = grow.new_len;
+                        self.controller.download_transfer_buffers[grow.idx] = new_download;
+                    }
+                    self.controller.grow_and_copy_download_transfer_list.clear();
+                    for (self.controller.mapped_download_buffers[0..], 0..) |mapped, i| {
+                        if (mapped) {
+                            self.controller.gpu.unmap_transfer_buffer(self.controller.download_transfer_buffers[i]);
+                            self.controller.mapped_download_buffers[i] = false;
+                            self.controller.download_slices[i] = &.{};
+                        }
+                    }
+                    for (self.controller.download_list.slice()) |dl| {
+                        switch (dl.queued_copy) {
+                            .BUFFER => |details| {
+                                self.copy.copy_from_gpu_buffer_to_download_buffer(details.from, details.to);
+                            },
+                            .TEXTURE => |details| {
+                                self.copy.copy_from_gpu_texture_to_download_buffer(details.from, details.to);
+                            },
+                        }
+                    }
+                }
+            };
+
+            /// Returns the actual slice of `dest` that WILL BE written to when the pass is ended and submitted (in case it is smaller than the provided slice)
+            ///
+            /// dest slice will not contain the expected data until the PendingFinalDownloadHandle is submitted
+            pub fn download_from_vertex_buffer(self: DownloadPass, source: VertexBufferName, source_index_of_first_element: u32, source_element_count: u32, dest: anytype, transfer_buf: DownloadTransferBufferName) PossibleError([]element_type(@TypeOf(dest))) {
+                _INTERNAL.assert_valid(self, @src());
+                const dest_bytes: []u8 = bytes_cast(dest);
+                const dest_element_type = element_type(@TypeOf(dest));
+                const source_idx = @intFromEnum(source);
+                const source_element_type = INTERNAL.VERTEX_BUFFER_DEFS[source_idx].element_type;
+                switch (VALIDATION.transfer_data_type_mismatch) {
+                    .IGNORE => {},
+                    .WARN => warn_with_reason(source_element_type == dest_element_type, @src(), "source vertex buffer element type should be the same as the dest element type, but `{s}` != `{s}`", .{ @typeName(source_element_type), @typeName(dest_element_type) }),
+                    .PANIC => assert_with_reason(source_element_type == dest_element_type, @src(), "source vertex buffer element type must be the same as the dest element type, but `{s}` != `{s}`", .{ @typeName(source_element_type), @typeName(dest_element_type) }),
+                }
+                const source_offset = @sizeOf(source_element_type) * source_index_of_first_element;
+                const transfer_len: u32 = @sizeOf(source_element_type) * source_element_count;
+                const buffer_end = source_offset + transfer_len;
+                assert_with_reason(self.controller.vertex_buffer_lens[source_idx] >= buffer_end, @src(), "source vertex buffer `{s}` does not hold {d} items of type {s} at offset {d} (endpoint byte {d}), length is {d} bytes", .{ @tagName(source), source_element_count, @typeName(source_element_type), source_offset, buffer_end, self.controller.vertex_buffer_lens[source_idx] });
+                switch (VALIDATION.transfer_data_exact_size_match) {
+                    .IGNORE => assert_with_reason(num_cast(dest_bytes.len, u32) >= transfer_len, @src(), "destination slice cannot hold {d} items of type {s} ({d} bytes), len is {d} bytes", .{ source_element_count, @typeName(source_element_type), transfer_len, dest_bytes.len }),
+                    .PANIC => assert_with_reason(num_cast(dest_bytes.len, u32) == transfer_len, @src(), "destination slice must exactly hold {d} items of type {s} ({d} bytes), len is {d} bytes", .{ source_element_count, @typeName(source_element_type), transfer_len, dest_bytes.len }),
+                    .WARN => warn_with_reason(num_cast(dest_bytes.len, u32) == transfer_len, @src(), "destination slice *should* exactly hold {d} items of type {s} ({d} bytes), len is {d} bytes", .{ source_element_count, @typeName(source_element_type), transfer_len, dest_bytes.len }),
+                }
+                const transfer_offset: u32 = if (ERRORS) ( //
+                    try _INTERNAL.get_next_unused_download_slice_offset(self, transfer_buf, transfer_len)) //
+                    else _INTERNAL.get_next_unused_download_slice_offset(self, transfer_buf, transfer_len) catch |err| ERROR_MODE.panic(@src(), err);
+                const details = CopyDownloadDetails{
+                    .dest = dest_bytes,
+                    .queued_copy = .{ .BUFFER = .{
+                        .from = .buffer_region(.vertex_buffer(source), source_offset, transfer_len),
+                        .to = .download_buffer_loc(transfer_buf, transfer_offset),
+                    } },
+                    .transfer_buf = transfer_buf,
+                    .transfer_buf_offset = transfer_offset,
+                    .transfer_buf_len = transfer_len,
+                };
+                _ = self.controller.download_list.append(details, self.controller.list_alloc);
+                return std.mem.bytesAsSlice(dest_element_type, dest_bytes[0..transfer_len]);
+            }
+            /// Returns the actual slice of `dest` that WILL BE written to when the pass is ended and submitted (in case it is smaller than the provided slice)
+            ///
+            /// dest slice will not contain the expected data until the PendingFinalDownloadHandle is submitted
+            pub fn download_from_index_buffer(self: DownloadPass, source: IndexBufferName, source_index_of_first_index: u32, source_index_count: u32, dest: anytype, transfer_buf: DownloadTransferBufferName) PossibleError([]element_type(@TypeOf(dest))) {
+                _INTERNAL.assert_valid(self, @src());
+                const dest_bytes: []u8 = bytes_cast(dest);
+                const dest_element_type = element_type(@TypeOf(dest));
+                const source_idx = @intFromEnum(source);
+                const source_element_type = switch (self.controller.index_buffer_types[source_idx]) {
+                    .U16 => u16,
+                    .U32 => u32,
+                };
+                switch (VALIDATION.transfer_data_type_mismatch) {
+                    .IGNORE => {},
+                    .WARN => warn_with_reason(source_element_type == dest_element_type, @src(), "source index buffer element type should be the same as the dest element type, but `{s}` != `{s}`", .{ @typeName(source_element_type), @typeName(dest_element_type) }),
+                    .PANIC => assert_with_reason(source_element_type == dest_element_type, @src(), "source index buffer element type must be the same as the dest element type, but `{s}` != `{s}`", .{ @typeName(source_element_type), @typeName(dest_element_type) }),
+                }
+                const source_offset = @sizeOf(source_element_type) * source_index_of_first_index;
+                const transfer_len: u32 = @sizeOf(source_element_type) * source_index_count;
+                const buffer_end = source_offset + transfer_len;
+                assert_with_reason(self.controller.index_buffer_lens[source_idx] >= buffer_end, @src(), "source index buffer `{s}` does not hold {d} items of type {s} at offset {d} (endpoint byte {d}), length is {d} bytes", .{ @tagName(source), source_index_count, @typeName(source_element_type), source_offset, buffer_end, self.controller.index_buffer_lens[source_idx] });
+                switch (VALIDATION.transfer_data_exact_size_match) {
+                    .IGNORE => assert_with_reason(num_cast(dest_bytes.len, u32) >= transfer_len, @src(), "destination slice cannot hold {d} items of type {s} ({d} bytes), len is {d} bytes", .{ source_index_count, @typeName(source_element_type), transfer_len, dest_bytes.len }),
+                    .PANIC => assert_with_reason(num_cast(dest_bytes.len, u32) == transfer_len, @src(), "destination slice must exactly hold {d} items of type {s} ({d} bytes), len is {d} bytes", .{ source_index_count, @typeName(source_element_type), transfer_len, dest_bytes.len }),
+                    .WARN => warn_with_reason(num_cast(dest_bytes.len, u32) == transfer_len, @src(), "destination slice *should* exactly hold {d} items of type {s} ({d} bytes), len is {d} bytes", .{ source_index_count, @typeName(source_element_type), transfer_len, dest_bytes.len }),
+                }
+                const transfer_offset: u32 = if (ERRORS) ( //
+                    try _INTERNAL.get_next_unused_download_slice_offset(self, transfer_buf, transfer_len)) //
+                    else _INTERNAL.get_next_unused_download_slice_offset(self, transfer_buf, transfer_len) catch |err| ERROR_MODE.panic(@src(), err);
+                const details = CopyDownloadDetails{
+                    .dest = dest_bytes,
+                    .queued_copy = .{ .BUFFER = .{
+                        .from = .buffer_region(.index_buffer(source), source_offset, transfer_len),
+                        .to = .download_buffer_loc(transfer_buf, transfer_offset),
+                    } },
+                    .transfer_buf = transfer_buf,
+                    .transfer_buf_offset = transfer_offset,
+                    .transfer_buf_len = transfer_len,
+                };
+                _ = self.controller.download_list.append(details, self.controller.list_alloc);
+                return std.mem.bytesAsSlice(dest_element_type, dest_bytes[0..transfer_len]);
+            }
+            /// Returns the actual slice of `dest` that WILL BE written to when the pass is ended and submitted (in case it is smaller than the provided slice)
+            ///
+            /// dest slice will not contain the expected data until the PendingFinalDownloadHandle is submitted
+            pub fn download_from_indirect_draw_call_buffer(self: DownloadPass, source: IndirectDrawBufferName, source_index_of_first_draw_call: u32, source_draw_call_count: u32, dest: anytype, transfer_buf: DownloadTransferBufferName) PossibleError([]element_type(@TypeOf(dest))) {
+                _INTERNAL.assert_valid(self, @src());
+                const dest_bytes: []u8 = bytes_cast(dest);
+                const dest_element_type = element_type(@TypeOf(dest));
+                const source_idx = @intFromEnum(source);
+                const source_element_type = switch (self.controller.indirect_draw_buffer_modes[source_idx]) {
+                    .INDEX => GPU_IndexedIndirectDrawCommand,
+                    .VERTEX => GPU_IndirectDrawCommand,
+                };
+                switch (VALIDATION.transfer_data_type_mismatch) {
+                    .IGNORE => {},
+                    .WARN => warn_with_reason(source_element_type == dest_element_type, @src(), "source indirect draw call buffer element type should be the same as the dest element type, but `{s}` != `{s}`", .{ @typeName(source_element_type), @typeName(dest_element_type) }),
+                    .PANIC => assert_with_reason(source_element_type == dest_element_type, @src(), "source indirect draw call buffer element type must be the same as the dest element type, but `{s}` != `{s}`", .{ @typeName(source_element_type), @typeName(dest_element_type) }),
+                }
+                const source_offset = @sizeOf(source_element_type) * source_index_of_first_draw_call;
+                const transfer_len: u32 = @sizeOf(source_element_type) * source_draw_call_count;
+                const buffer_end = source_offset + transfer_len;
+                assert_with_reason(self.controller.indirect_draw_buffer_lens[source_idx] >= buffer_end, @src(), "source index buffer `{s}` does not hold {d} items of type {s} at offset {d} (endpoint byte {d}), length is {d} bytes", .{ @tagName(source), source_draw_call_count, @typeName(source_element_type), source_offset, buffer_end, self.controller.indirect_draw_buffer_lens[source_idx] });
+                switch (VALIDATION.transfer_data_exact_size_match) {
+                    .IGNORE => assert_with_reason(num_cast(dest_bytes.len, u32) >= transfer_len, @src(), "destination slice cannot hold {d} items of type {s} ({d} bytes), len is {d} bytes", .{ source_draw_call_count, @typeName(source_element_type), transfer_len, dest_bytes.len }),
+                    .PANIC => assert_with_reason(num_cast(dest_bytes.len, u32) == transfer_len, @src(), "destination slice must exactly hold {d} items of type {s} ({d} bytes), len is {d} bytes", .{ source_draw_call_count, @typeName(source_element_type), transfer_len, dest_bytes.len }),
+                    .WARN => warn_with_reason(num_cast(dest_bytes.len, u32) == transfer_len, @src(), "destination slice *should* exactly hold {d} items of type {s} ({d} bytes), len is {d} bytes", .{ source_draw_call_count, @typeName(source_element_type), transfer_len, dest_bytes.len }),
+                }
+                const transfer_offset: u32 = if (ERRORS) ( //
+                    try _INTERNAL.get_next_unused_download_slice_offset(self, transfer_buf, transfer_len)) //
+                    else _INTERNAL.get_next_unused_download_slice_offset(self, transfer_buf, transfer_len) catch |err| ERROR_MODE.panic(@src(), err);
+                const details = CopyDownloadDetails{
+                    .dest = dest_bytes,
+                    .queued_copy = .{ .BUFFER = .{
+                        .from = .buffer_region(.indirect_draw_buffer(source), source_offset, transfer_len),
+                        .to = .download_buffer_loc(transfer_buf, transfer_offset),
+                    } },
+                    .transfer_buf = transfer_buf,
+                    .transfer_buf_offset = transfer_offset,
+                    .transfer_buf_len = transfer_len,
+                };
+                _ = self.controller.download_list.append(details, self.controller.list_alloc);
+                return std.mem.bytesAsSlice(dest_element_type, dest_bytes[0..transfer_len]);
+            }
+            /// Returns the actual slice of `dest` that WILL BE written to when the pass is ended and submitted (in case it is smaller than the provided slice)
+            ///
+            /// dest slice will not contain the expected data until the PendingFinalDownloadHandle is submitted
+            pub fn download_from_storage_buffer(self: DownloadPass, source: StorageBufferName, source_index_of_first_element: u32, source_element_count: u32, dest: anytype, transfer_buf: DownloadTransferBufferName) PossibleError([]element_type(@TypeOf(dest))) {
+                _INTERNAL.assert_valid(self, @src());
+                const dest_bytes: []u8 = bytes_cast(dest);
+                const dest_element_type = element_type(@TypeOf(dest));
+                const source_idx = @intFromEnum(source);
+                const source_element_type = INTERNAL.STORAGE_BUFFER_TYPES[source_idx];
+                switch (VALIDATION.transfer_data_type_mismatch) {
+                    .IGNORE => {},
+                    .WARN => warn_with_reason(source_element_type == dest_element_type, @src(), "source storage buffer element type should be the same as the dest element type, but `{s}` != `{s}`", .{ @typeName(source_element_type), @typeName(dest_element_type) }),
+                    .PANIC => assert_with_reason(source_element_type == dest_element_type, @src(), "source storage buffer element type must be the same as the dest element type, but `{s}` != `{s}`", .{ @typeName(source_element_type), @typeName(dest_element_type) }),
+                }
+                const source_offset = @sizeOf(source_element_type) * source_index_of_first_element;
+                const transfer_len: u32 = @sizeOf(source_element_type) * source_element_count;
+                const buffer_end = source_offset + transfer_len;
+                assert_with_reason(self.controller.storage_buffer_lens[source_idx] >= buffer_end, @src(), "source stroage buffer `{s}` does not hold {d} items of type {s} at offset {d} (endpoint byte {d}), length is {d} bytes", .{ @tagName(source), source_element_count, @typeName(source_element_type), source_offset, buffer_end, self.controller.storage_buffer_lens[source_idx] });
+                switch (VALIDATION.transfer_data_exact_size_match) {
+                    .IGNORE => assert_with_reason(num_cast(dest_bytes.len, u32) >= transfer_len, @src(), "destination slice cannot hold {d} items of type {s} ({d} bytes), len is {d} bytes", .{ source_element_count, @typeName(source_element_type), transfer_len, dest_bytes.len }),
+                    .PANIC => assert_with_reason(num_cast(dest_bytes.len, u32) == transfer_len, @src(), "destination slice must exactly hold {d} items of type {s} ({d} bytes), len is {d} bytes", .{ source_element_count, @typeName(source_element_type), transfer_len, dest_bytes.len }),
+                    .WARN => warn_with_reason(num_cast(dest_bytes.len, u32) == transfer_len, @src(), "destination slice *should* exactly hold {d} items of type {s} ({d} bytes), len is {d} bytes", .{ source_element_count, @typeName(source_element_type), transfer_len, dest_bytes.len }),
+                }
+                const transfer_offset: u32 = if (ERRORS) ( //
+                    try _INTERNAL.get_next_unused_download_slice_offset(self, transfer_buf, transfer_len)) //
+                    else _INTERNAL.get_next_unused_download_slice_offset(self, transfer_buf, transfer_len) catch |err| ERROR_MODE.panic(@src(), err);
+                const details = CopyDownloadDetails{
+                    .dest = dest_bytes,
+                    .queued_copy = .{ .BUFFER = .{
+                        .from = .buffer_region(.storage_buffer(source), source_offset, transfer_len),
+                        .to = .download_buffer_loc(transfer_buf, transfer_offset),
+                    } },
+                    .transfer_buf = transfer_buf,
+                    .transfer_buf_offset = transfer_offset,
+                    .transfer_buf_len = transfer_len,
+                };
+                _ = self.controller.download_list.append(details, self.controller.list_alloc);
+                return std.mem.bytesAsSlice(dest_element_type, dest_bytes[0..transfer_len]);
+            }
+            /// Returns the actual slice of `dest` that WILL BE written to when the pass is ended and submitted (in case it is smaller than the provided slice)
+            ///
+            /// dest slice will not contain the expected data until the PendingFinalDownloadHandle is submitted
+            pub fn download_from_texture(self: DownloadPass, source: Target, source_pos: Vec3(u32), source_size: Vec3(u32), source_mip_level: u32, source_layer: u32, dest: anytype, transfer_buf: DownloadTransferBufferName) PossibleError([]element_type(@TypeOf(dest))) {
+                _INTERNAL.assert_valid(self, @src());
+                const dest_bytes: []u8 = bytes_cast(dest);
+                const dest_element_type = element_type(@TypeOf(dest));
+                var source_format: GPU_TextureFormat = undefined;
+                var source_full_size: Vec3(u32) = undefined;
+                switch (source) {
+                    .TEXTURE => |t| {
+                        const tex_idx = @intFromEnum(t);
+                        const def = INTERNAL.TEXTURE_DEFS[tex_idx];
+                        source_format = def.pixel_format;
+                        source_full_size = self.controller.textures_sizes[tex_idx];
+                    },
+                    .WINDOW => |w| {
+                        const swap = self.command.wait_and_get_swapchain_texture_and_size_for_window(w);
+                        source_full_size = Vec3(u32){ .x = swap.w, .y = swap.h, .z = 1 };
+                        source_format = self.controller.get_window_texture_format(w);
+                    },
+                }
+                const source_texel_size = source_format.texel_block_size();
+                const transfer_texels = source_size.x * source_size.y * source_size.z;
+                const transfer_len = transfer_texels * source_texel_size;
+                assert_with_reason(@sizeOf(dest_element_type) == source_texel_size, @src(), "source texture texel block SIZE must be the same size as the dest slice element size, but `{d}` != `{d}`", .{ source_texel_size, @sizeOf(dest_element_type) });
+                const source_max_extent = source_pos.add(source_size);
+                assert_with_reason(source_max_extent.all_components_less_than_or_equal(source_full_size), @src(), "source texture/window `{s}` has a full size of {any}, but the furthest extent of the source region requested is {any} (outside full size)", .{ source.tag_name(), source_full_size, source_max_extent });
+                assert_with_reason(num_cast(dest_bytes.len, u32) >= transfer_len, @src(), "destination slice cannot hold {d} items of texel size {d} ({d} bytes), len is {d} bytes", .{ transfer_texels, source_texel_size, transfer_len, dest_bytes.len });
+                switch (VALIDATION.transfer_data_exact_size_match) {
+                    .IGNORE => assert_with_reason(num_cast(dest_bytes.len, u32) >= transfer_len, @src(), "destination slice cannot hold {d} items of texel size {d} ({d} bytes), len is {d} bytes", .{ transfer_texels, source_texel_size, transfer_len, dest_bytes.len }),
+                    .PANIC => assert_with_reason(num_cast(dest_bytes.len, u32) == transfer_len, @src(), "destination slice MUST hold exactly {d} items of texel size {d} ({d} bytes), len is {d} bytes", .{ transfer_texels, source_texel_size, transfer_len, dest_bytes.len }),
+                    .WARN => warn_with_reason(num_cast(dest_bytes.len, u32) == transfer_len, @src(), "destination slice *should* hold exactly {d} items of texel size {d} ({d} bytes), len is {d} bytes", .{ transfer_texels, source_texel_size, transfer_len, dest_bytes.len }),
+                }
+                const transfer_offset: u32 = if (ERRORS) ( //
+                    try _INTERNAL.get_next_unused_download_slice_offset(self, transfer_buf, transfer_len)) //
+                    else _INTERNAL.get_next_unused_download_slice_offset(self, transfer_buf, transfer_len) catch |err| ERROR_MODE.panic(@src(), err);
+                const details = CopyDownloadDetails{
+                    .dest = dest_bytes,
+                    .queued_copy = .{ .TEXTURE = .{
+                        .from = .texture_region(source, source_mip_level, source_layer, source_pos, source_size),
+                        .to = .texture_download_info(transfer_buf, transfer_offset, source_size.x, source_size.y),
+                    } },
+                    .transfer_buf = transfer_buf,
+                    .transfer_buf_offset = transfer_offset,
+                    .transfer_buf_len = transfer_len,
+                };
+                _ = self.controller.download_list.append(details, self.controller.list_alloc);
+                return std.mem.bytesAsSlice(dest_element_type, dest_bytes[0..transfer_len]);
+            }
+
+            pub fn end_download_pass_and_submit_command_buffer(self: *DownloadPass) PossibleError(PendingFinalDownloadHandle) {
+                _INTERNAL.assert_valid(self.*, @src());
+                self.controller.assert_final_download_NOT_pending(@src());
+                self.controller.download_pass_active = false;
+                _INTERNAL.handle_queued_actions(self.*);
+                self.copy.end_copy_pass();
+                if (ERRORS) ( //
+                    try self.cmd.submit_commands()) //
+                else self.cmd.submit_commands() catch |err| ERROR_MODE.panic(@src(), err);
+                const pass = PendingFinalDownloadHandle{
+                    .fence = null,
+                    .download = self.download,
+                    .controller = self.controller,
+                };
+                self.controller.final_download_pending = true;
+                self.valid = false;
+                return pass;
+            }
+            pub fn end_download_pass_submit_command_buffer_and_aquire_named_fence(self: *DownloadPass, fence_name: FenceName) PossibleError(PendingFinalDownloadHandle) {
+                _INTERNAL.assert_valid(self.*, @src());
+                self.controller.assert_final_download_NOT_pending(@src());
+                self.controller.download_pass_active = false;
+                _INTERNAL.handle_queued_actions(self.*);
+                self.copy.end_copy_pass();
+                if (ERRORS) ( //
+                    try self.cmd.submit_commands_and_aquire_fence(fence_name)) //
+                else self.cmd.submit_commands_and_aquire_fence(fence_name) catch |err| ERROR_MODE.panic(@src(), err);
+                const pass = PendingFinalDownloadHandle{
+                    .fence = .named_fance(fence_name),
+                    .download = self.download,
+                    .controller = self.controller,
+                };
+                self.controller.final_download_pending = true;
+                self.valid = false;
+                return pass;
+            }
+            pub fn end_download_pass_submit_command_buffer_and_aquire_transient_fence(self: *DownloadPass) PossibleError(PendingFinalDownloadHandle) {
+                _INTERNAL.assert_valid(self.*, @src());
+                self.controller.assert_final_download_NOT_pending(@src());
+                self.controller.download_pass_active = false;
+                _INTERNAL.handle_queued_actions(self.*);
+                self.copy.end_copy_pass();
+                const trans_fence = self.cmd.command.submit_commands_and_aquire_fence() catch |err| return ERROR_MODE.handle(@src(), err);
+                const pass = PendingFinalDownloadHandle{
+                    .fence = .direct_fence(trans_fence),
+                    .controller = self.controller,
+                };
+                self.controller.final_download_pending = true;
+                self.valid = false;
+                return pass;
+            }
+            pub fn end_download_pass_submit_command_buffer_and_immedieately_wait_on_fence_to_complete_downloads(self: *DownloadPass) PossibleError(void) {
+                const final_download: PendingFinalDownloadHandle = if (ERRORS) ( //
+                    try self.end_download_pass_submit_command_buffer_and_aquire_transient_fence()) //
+                    else self.end_download_pass_submit_command_buffer_and_aquire_transient_fence() catch |err| ERROR_MODE.panic(@src(), err);
+                if (ERRORS) ( //
+                    try final_download.complete_transfer_to_application_memory(true)) //
+                else final_download.complete_transfer_to_application_memory(true) catch |err| ERROR_MODE.panic(@src(), err);
+            }
+            pub fn cancel_download_pass_and_cancel_commands(self: *DownloadPass) PossibleError(void) {
+                _INTERNAL.assert_valid(self.*, @src());
+                self.controller.download_pass_active = false;
+                self.copy.end_copy_pass();
+                if (ERRORS) ( //
+                    try self.cmd.cancel_commands()) //
+                else self.cmd.cancel_commands() catch |err| ERROR_MODE.panic(@src(), err);
+                self.valid = false;
             }
         };
 
         pub fn begin_command_buffer(self: *Controller) PossibleError(CommandBuffer) {
-            assert_with_reason(!self.upload_pass_active and !self.download_pass_active and !self.command_buffer_active, @src(), "cannot begin a CommandBuffer while another CommandBuffer, UploadPass, or DownloadPass is active", .{});
+            self.assert_command_buffer_NOT_active(@src());
+            self.assert_upload_pass_NOT_active(@src());
+            self.assert_download_pass_NOT_active(@src());
             const cmd = CommandBuffer{
                 .command = self.gpu.acquire_command_buffer() catch |err| return ERROR_MODE.handle(@src(), err),
                 .controller = self,
             };
-            self.delete_buffers_list.clear();
             self.command_buffer_active = true;
             return cmd;
         }
@@ -3345,19 +3914,46 @@ pub fn GraphicsController(
         pub const CommandBuffer = struct {
             controller: *Controller,
             command: *SDL3.GPU_CommandBuffer,
-            delete_buffers_list: List(DeleteBufferDetails),
-            delete_buffers_alloc: Allocator = DummyAlloc.allocator_panic,
-            owns_delete_list: bool = false,
+            valid: bool = false,
+
+            pub const _INTERNAL = struct {
+                pub inline fn assert_valid(self: CommandBuffer, comptime src: ?std.builtin.SourceLocation) void {
+                    self.controller.assert_command_buffer_active(src);
+                    assert_with_reason(self.valid, src, "this CommandBuffer was either created incorrectly or was already ended", .{});
+                }
+                pub inline fn assert_valid_no_sub(self: CommandBuffer, comptime src: ?std.builtin.SourceLocation) void {
+                    self.controller.assert_command_buffer_active(src);
+                    self.controller.assert_copy_pass_NOT_active(src);
+                    self.controller.assert_compute_pass_NOT_active(src);
+                    self.controller.assert_render_pass_NOT_active(src);
+                    self.controller.assert_upload_pass_NOT_active(src);
+                    self.controller.assert_download_pass_NOT_active(src);
+                    assert_with_reason(self.valid, src, "this CommandBuffer was either created incorrectly or was already ended", .{});
+                }
+                pub fn begin_transfer_copy_pass(self: CommandBuffer) PossibleError(CopyPassTransferOnly) {
+                    _INTERNAL.assert_valid_no_sub(self, @src());
+                    const pass = self.command.begin_copy_pass() catch |err| return ERROR_MODE.handle(@src(), err);
+                    self.controller.copy_pass_active = true;
+                    return CopyPassTransferOnly{
+                        .cmd = self,
+                        .pass = pass,
+                        .valid = true,
+                    };
+                }
+            };
 
             pub fn insert_debug_label(self: CommandBuffer, label: [*:0]const u8) void {
+                _INTERNAL.assert_valid(self, @src());
                 self.command.insert_debug_label(label);
             }
 
             pub fn push_debug_group(self: CommandBuffer, name: [*:0]const u8) void {
+                _INTERNAL.assert_valid(self, @src());
                 self.command.push_debug_group(name);
             }
 
             pub fn pop_debug_group(self: CommandBuffer) void {
+                _INTERNAL.assert_valid(self, @src());
                 self.command.pop_debug_group();
             }
 
@@ -3368,366 +3964,269 @@ pub fn GraphicsController(
             // }
 
             pub fn get_swapchain_texture_for_window(self: CommandBuffer, window_name: WindowName) PossibleError(*GPU_Texture) {
+                _INTERNAL.assert_valid(self, @src());
                 const win = self.controller.get_claimed_window(window_name);
                 const swap = self.command.aquire_swapchain_texture(win) catch |err| return ERROR_MODE.handle(@src(), err);
                 return swap.texture;
             }
+            pub fn get_swapchain_texture_and_size_for_window(self: CommandBuffer, window_name: WindowName) PossibleError(GPU_SwapchainTexture) {
+                _INTERNAL.assert_valid(self, @src());
+                const win = self.controller.get_claimed_window(window_name);
+                const swap = self.command.aquire_swapchain_texture(win) catch |err| return ERROR_MODE.handle(@src(), err);
+                return swap;
+            }
             pub fn wait_and_get_swapchain_texture_for_window(self: CommandBuffer, window_name: WindowName) PossibleError(*GPU_Texture) {
+                _INTERNAL.assert_valid(self, @src());
                 const win = self.controller.get_claimed_window(window_name);
                 const swap = self.command.wait_and_aquire_swapchain_texture(win) catch |err| return ERROR_MODE.handle(@src(), err);
                 return swap.texture;
             }
-
-            pub fn begin_copy_pass(self: CommandBuffer) PossibleError(CopyPass) {
-                assert_with_reason(self.controller.command_buffer_active and !self.controller.render_pass_active and !self.controller.copy_pass_active and !self.controller.upload_pass_active and !self.controller.download_pass_active, @src(), "cannot begin a copy pass when another pass is already in progress", .{});
-                const pass = self.command.begin_copy_pass() catch |err| return ERROR_MODE.handle(@src(), err);
-                self.controller.copy_pass_active = true;
-                return CopyPass{
-                    .cmd = self,
-                    .pass = pass,
-                };
+            pub fn wait_and_get_swapchain_texture_and_size_for_window(self: CommandBuffer, window_name: WindowName) PossibleError(GPU_SwapchainTexture) {
+                _INTERNAL.assert_valid(self, @src());
+                const win = self.controller.get_claimed_window(window_name);
+                const swap = self.command.wait_and_aquire_swapchain_texture(win) catch |err| return ERROR_MODE.handle(@src(), err);
+                return swap;
             }
 
-            pub fn begin_copy_pass_gpu_only(self: CommandBuffer) PossibleError(CopyPassGPUOnly) {
-                assert_with_reason(self.controller.render_pass_active == false and self.controller.copy_pass_active == false and self.controller.upload_pass_active == false and self.controller.download_pass_active == false, @src(), "cannot begin a copy pass when another pass is already in progress", .{});
+            pub fn begin_gpu_copy_pass(self: CommandBuffer) PossibleError(CopyPassGPUOnly) {
+                _INTERNAL.assert_valid_no_sub(self, @src());
                 const pass = self.command.begin_copy_pass() catch |err| return ERROR_MODE.handle(@src(), err);
                 self.controller.copy_pass_active = true;
                 return CopyPassGPUOnly{
                     .cmd = self,
                     .pass = pass,
+                    .valid = true,
                 };
             }
 
             pub fn begin_render_pass(self: CommandBuffer, color_targets: []const ColorTarget, depth_target: DepthTarget) PossibleError(RenderPass) {
-                assert_with_reason(self.controller.render_pass_active == false and self.controller.copy_pass_active == false and self.controller.upload_pass_active == false, @src(), "cannot begin a render pass when another pass is already in progress", .{});
+                _INTERNAL.assert_valid_no_sub(self, @src());
                 assert_with_reason(color_targets.len <= 8, @src(), "GraphicsController only supports up to 8 color targets, got {d}", .{color_targets.len});
+                var targets: [8]GPU_ColorTargetInfo = undefined;
                 for (color_targets, 0..) |target, t| {
-                    self.controller.current_render_pass_color_targets[t] = target.to_sdl(self);
+                    targets[t] = target.to_sdl(self);
                 }
-                self.controller.current_render_pass_color_targets_len = @intCast(color_targets.len);
-                self.controller.current_render_pass_depth_target = depth_target.to_sdl(self);
+                const depth = depth_target.to_sdl(self);
                 self.controller.render_pass_active = true;
-                const pass = self.command.begin_render_pass(self.controller.current_render_pass_color_targets[0..color_targets.len], &self.controller.current_render_pass_depth_target) catch |err| return ERROR_MODE.handle(@src(), err);
+                const pass = self.command.begin_render_pass(targets[0..color_targets.len], depth) catch |err| return ERROR_MODE.handle(@src(), err);
                 return RenderPass{
                     .controller = self.controller,
                     .command = self.command,
                     .pass = pass,
+                    .valid = true,
                 };
             }
 
             pub fn generate_mipmaps_for_texture(self: CommandBuffer, texture_name: TextureName) void {
+                _INTERNAL.assert_valid(self, @src());
                 self.command.generate_mipmaps_for_texture(self.controller.get_texture(texture_name));
             }
 
             pub fn blit_texture(self: CommandBuffer, blit_info: BlitInfo) void {
+                _INTERNAL.assert_valid(self, @src());
                 var blit_sdl = blit_info.to_sdl(self);
                 self.command.blit_texture(&blit_sdl);
             }
             pub fn submit_commands(self: *CommandBuffer) PossibleError(void) {
-                assert_with_reason(self.controller.command_buffer_active and !self.controller.render_pass_active and !self.controller.copy_pass_active and !self.controller.compute_pass_active, @src(), "cannot submit a command buffer when either no command buffer is active, or a render, copy, or compute pass is still active", .{});
+                _INTERNAL.assert_valid_no_sub(self, @src());
                 self.command.submit_commands() catch |err| return ERROR_MODE.handle(@src(), err);
-                for (self.delete_buffers_list.slice()) |to_delete| {
+                for (self.controller.delete_buffers_list.slice()) |to_delete| {
                     self.controller.gpu.release_buffer(to_delete);
-                }
-                if (self.owns_delete_list) {
-                    self.delete_buffers_list.free(self.delete_buffers_alloc);
                 }
                 self.controller.command_buffer_active = false;
                 self.* = undefined;
             }
             pub fn submit_commands_and_aquire_fence(self: *CommandBuffer, fence_name: FenceName) PossibleError(void) {
-                assert_with_reason(self.controller.command_buffer_active and !self.controller.render_pass_active and !self.controller.copy_pass_active and !self.controller.compute_pass_active, @src(), "cannot submit a command buffer when either no command buffer is active, or a render, copy, or compute pass is still active", .{});
+                _INTERNAL.assert_valid_no_sub(self, @src());
                 const fence_idx = @intFromEnum(fence_name);
                 assert_with_reason(self.controller.fences_init[fence_idx] == false, @src(), "fence `{s}` is already initialized and waiting to be released", .{@tagName(fence_name)});
                 self.controller.fences[fence_idx] = self.command.submit_commands_and_aquire_fence() catch |err| return ERROR_MODE.handle(@src(), err);
                 self.controller.fences_init[fence_idx] = true;
-                for (self.delete_buffers_list.slice()) |to_delete| {
+                for (self.controller.delete_buffers_list.slice()) |to_delete| {
                     self.controller.gpu.release_buffer(to_delete);
-                }
-                if (self.owns_delete_list) {
-                    self.delete_buffers_list.free(self.delete_buffers_alloc);
                 }
                 self.controller.command_buffer_active = false;
                 self.* = undefined;
             }
-            pub fn submit_commands_and_aquire_fenced_post_command_download_pass(self: *CommandBuffer, cycle_transfer_buffers: bool, transfer_buffer_grow_mode: BufferGrowMode) PossibleError(FencedPostCommandDownloadPass) {
-                assert_with_reason(self.controller.command_buffer_active and !self.controller.render_pass_active and !self.controller.copy_pass_active and !self.controller.compute_pass_active, @src(), "cannot submit a command buffer when either no command buffer is active, or a render, copy, or compute pass is still active", .{});
-                const fenced_pass = FencedPostCommandDownloadPass{
-                    .controller = self.controller,
-                    .cycle_transfer_buffers = cycle_transfer_buffers,
-                    .transfer_grow_mode = transfer_buffer_grow_mode,
-                    .fence = self.command.submit_commands_and_aquire_fence() catch |err| return ERROR_MODE.handle(@src(), err),
-                };
-                for (self.delete_buffers_list.slice()) |to_delete| {
+            pub fn submit_commands_and_immediately_wait_on_fence(self: *CommandBuffer) PossibleError(void) {
+                _INTERNAL.assert_valid_no_sub(self, @src());
+                const fence = self.command.submit_commands_and_aquire_fence() catch |err| return ERROR_MODE.handle(@src(), err);
+                const fence_arr: [1]*GPU_Fence = .{fence};
+                for (self.controller.delete_buffers_list.slice()) |to_delete| {
                     self.controller.gpu.release_buffer(to_delete);
                 }
-                if (self.owns_delete_list) {
-                    self.delete_buffers_list.free(self.delete_buffers_alloc);
-                }
                 self.controller.command_buffer_active = false;
-                self.* = undefined;
-                return fenced_pass;
+                self.controller.gpu.wait_for_gpu_fences(true, fence_arr[0..1]) catch |err| return ERROR_MODE.handle(@src(), err);
+                self.controller.gpu.release_fence(fence);
+                self.valid = false;
             }
-            pub fn submit_commands_and_immediately_wait_to_begin_post_command_download_pass(self: *CommandBuffer, cycle_transfer_buffers: bool, transfer_buffer_grow_mode: BufferGrowMode) PossibleError(PostCommandDownloadPass) {
-                assert_with_reason(self.controller.command_buffer_active and !self.controller.render_pass_active and !self.controller.copy_pass_active and !self.controller.compute_pass_active, @src(), "cannot submit a command buffer when either no command buffer is active, or a render, copy, or compute pass is still active", .{});
-                var fenced_pass = FencedPostCommandDownloadPass{
+            pub fn lock_command_buffer_and_begin_download_pass(self: CommandBuffer) PossibleError(DownloadPass) {
+                _INTERNAL.assert_valid_no_sub(self, @src());
+                const copy: CopyPassTransferOnly = if (ERRORS) ( //
+                    try _INTERNAL.begin_transfer_copy_pass(self)) //
+                    else _INTERNAL.begin_transfer_copy_pass(self) catch |err| ERROR_MODE.panic(@src(), err);
+                self.controller.download_pass_active = true;
+                self.controller.grow_and_copy_download_transfer_list.clear();
+                self.controller.download_list.clear();
+                const pass = DownloadPass{
                     .controller = self.controller,
-                    .cycle_transfer_buffers = cycle_transfer_buffers,
-                    .transfer_grow_mode = transfer_buffer_grow_mode,
-                    .fence = self.command.submit_commands_and_aquire_fence() catch |err| return ERROR_MODE.handle(@src(), err),
+                    .cmd = self,
+                    .copy = copy,
+                    .valid = true,
                 };
-                for (self.delete_buffers_list.slice()) |to_delete| {
-                    self.controller.gpu.release_buffer(to_delete);
-                }
-                if (self.owns_delete_list) {
-                    self.delete_buffers_list.free(self.delete_buffers_alloc);
-                }
-                self.controller.command_buffer_active = false;
-                self.* = undefined;
-                const down_pass: PostCommandDownloadPass = if (ERRORS) ( //
-                    try fenced_pass.wait_for_fence_and_begin_post_command_download_pass()) //
-                    else fenced_pass.wait_for_fence_and_begin_post_command_download_pass() catch |err| ERROR_MODE.panic(@src(), err);
-                return down_pass;
+                self.valid = false;
+                return pass;
             }
             pub fn cancel_commands(self: *CommandBuffer) PossibleError(void) {
+                _INTERNAL.assert_valid_no_sub(self, @src());
                 self.command.cancel_commands() catch |err| return ERROR_MODE.handle(@src(), err);
-                self.* = undefined;
+                self.controller.command_buffer_active = false;
+                self.valid = false;
             }
         };
 
-        pub const FencedPostCommandDownloadPass = struct {
+        pub const PendingFinalDownloadHandle = struct {
+            fence: ?Fence,
             controller: *Controller,
-            fence: *GPU_Fence,
-            cycle_transfer_buffers: bool = true,
-            transfer_grow_mode: BufferGrowMode = .GROW_BY_ONE_AND_A_QUARTER,
+            valid: bool = false,
 
-            pub fn wait_for_fence_and_begin_post_command_download_pass(self: *FencedPostCommandDownloadPass) PossibleError(PostCommandDownloadPass) {
-                const fence = [1]*GPU_Fence{self.fence};
-                self.controller.gpu.wait_for_gpu_fences(true, fence[0..1]) catch |err| return ERROR_MODE.handle(@src(), err);
-                self.controller.gpu.release_fence(self.fence);
-                const post_pass = PostCommandDownloadPass{
-                    .controller = self.controller,
-                    .download = self.controller.begin_download_pass(self.cycle_transfer_buffers),
-                };
-                self.* = undefined;
-                return post_pass;
-            }
-        };
-
-        pub const PostCommandDownloadPass = struct {
-            controller: *Controller,
-            command_buffer: CommandBuffer,
-            copy_pass: CopyPass,
-            download: DownloadPass,
-            cycle_transfer_buffers: bool = true,
-            transfer_grow_mode: BufferGrowMode = .GROW_BY_ONE_AND_A_QUARTER,
-
-            pub fn handle_possible_transfer_buffer_grow(self: *PostCommandDownloadPass, buf: DownloadTransferBufferName, offset: u32, len: u32, curr_size: u32, need_size: u32) PossibleError(void) {
-                var transfer_grow: u32 = 0;
-                switch (self.transfer_grow_mode) {
-                    .NO_GROW => {
-                        assert_with_reason(need_size <= curr_size, @src(), "copying {d} bytes to download transfer buffer `{s}` at offset {d} exceeds the total length of the transfer buffer ({d}). Either manually grow the transfer buffer, or use an automatic grow setting", .{ len, @tagName(buf), offset, curr_size });
-                    },
-                    .GROW_EXACT => if (need_size > curr_size) {
-                        transfer_grow = need_size;
-                    },
-                    .GROW_BY_ONE_AND_A_QUARTER => if (need_size > curr_size) {
-                        transfer_grow = need_size + (need_size >> 2);
-                    },
-                    .GROW_BY_ONE_AND_A_HALF => if (need_size > curr_size) {
-                        transfer_grow = need_size + (need_size >> 1);
-                    },
-                    .GROW_BY_DOUBLE => if (need_size > curr_size) {
-                        transfer_grow = need_size << 1;
-                    },
+            pub const _INTERNAL = struct {
+                pub inline fn assert_valid(self: PendingFinalDownloadHandle, comptime src: ?std.builtin.SourceLocation) void {
+                    self.controller.assert_final_download_pending(src);
+                    assert_with_reason(self.valid, @src(), "this PendingFinalDownloadHandle was incorrectly created, or has already been ended", .{});
                 }
-                if (transfer_grow > 0) {
+
+                pub fn get_download_slice(self: PendingFinalDownloadHandle, buffer: DownloadTransferBufferName, start: u32, end_excluded: u32, override_cycle: ?bool) PossibleError([]const u8) {
+                    _INTERNAL.assert_valid(self, @src());
+                    const idx = @intFromEnum(buffer);
+                    _ASSERT._start_before_end(@src(), start, end_excluded);
+                    if (!self.controller.mapped_download_buffers[idx]) {
+                        const ptr = self.controller.gpu.map_transfer_buffer(self.controller.get_download_transfer_buffer(buffer), if (override_cycle) |cycle| cycle else self.controller.cycle_unmapped_transfer_buffers) catch |err| return ERROR_MODE.handle(@src(), err);
+                        self.controller.download_slices[idx] = ptr[0..self.controller.download_transfer_buffer_lens[idx]];
+                        self.controller.mapped_download_buffers[idx] = true;
+                    }
+                    return self.controller.download_slices[idx][start..end_excluded];
+                }
+            };
+
+            pub fn complete_transfer_to_application_memory(self: *PendingFinalDownloadHandle, release_fence_if_any: bool) PossibleError(void) {
+                _INTERNAL.assert_valid(self, @src());
+                if (self.fence) |f| {
                     if (ERRORS) ( //
-                        try self.grow_transfer_buffer(buf, curr_size, transfer_grow)) //
-                    else self.grow_transfer_buffer(buf, curr_size, transfer_grow) catch |err| ERROR_MODE.panic(@src(), err);
+                        try f.wait_and_optional_release(self.controller, release_fence_if_any)) //
+                    else f.wait_and_optional_release(self.controller, release_fence_if_any) catch |err| ERROR_MODE.panic(@src(), err);
                 }
-            }
-
-            pub fn grow_transfer_buffer(self: *PostCommandDownloadPass, buf: DownloadTransferBufferName, curr_size: u32, new_size: u32) PossibleError(void) {
-                const buf_idx = @intFromEnum(buf);
-                assert_with_reason(self.controller.upload_transfer_buffers_own_memory[buf_idx], @src(), "cannot grow a download transfer buffer name (`{s}`) that does not own its own memory", .{@tagName(buf)});
-                const new_transfer = self.controller.gpu.create_transfer_buffer(GPU_TransferBufferCreateInfo{
-                    .usage = .DOWNLOAD,
-                    .size = new_size,
-                    .props = .{},
-                }) catch |err| return ERROR_MODE.handle(@src(), err);
-                const new_ptr = self.controller.gpu.map_transfer_buffer(new_transfer, false) catch |err| return ERROR_MODE.handle(@src(), err);
-                const old_slice = if (ERRORS) ( //
-                    try self.download.get_download_slice(buf, 0, curr_size)) //
-                    else self.download.get_download_slice(buf, 0, curr_size) catch |err| ERROR_MODE.panic(@src(), err);
-                @memcpy(new_ptr[0..old_slice.len], old_slice);
-                self.controller.gpu.unmap_transfer_buffer(self.controller.download_transfer_buffers[buf_idx]);
-                self.controller.gpu.release_transfer_buffer(self.controller.download_transfer_buffers[buf_idx]);
-                self.controller.download_transfer_buffers[buf_idx] = new_transfer;
-                self.controller.download_transfer_buffer_lens[buf_idx] = new_size;
-                self.download.slices[buf_idx] = new_ptr[0..new_size];
-            }
-
-            pub fn download_from_vertex_buffer(self: *PostCommandDownloadPass, source: VertexBufferName, source_index_of_first_element: u32, source_element_count: u32, dest: anytype, transfer_buf: DownloadTransferBufferName) PossibleError(void) {
-                const dest_bytes: []u8 = bytes_cast(dest);
-                const dest_element_type = bytes_cast_element_type(@TypeOf(dest));
-                const source_idx = @intFromEnum(source);
-                const transfer_idx = @intFromEnum(transfer_buf);
-                const source_element_type = INTERNAL.VERTEX_BUFFER_DEFS[source_idx].element_type;
-                assert_with_reason(source_element_type == dest_element_type, @src(), "source vertex buffer element type must be the same as the dest element type, but `{s}` != `{s}`", .{ @typeName(source_element_type), @typeName(dest_element_type) });
-                const source_offset = @sizeOf(source_element_type) * source_index_of_first_element;
-                const transfer_offset = self.download.get_read_bytes(transfer_buf);
-                const transfer_len: u32 = @sizeOf(source_element_type) * source_element_count;
-                const buffer_end = source_offset + transfer_len;
-                const transfer_end = transfer_offset + transfer_len;
-                assert_with_reason(self.controller.vertex_buffer_lens[source_idx] >= buffer_end, @src(), "source vertex buffer `{s}` does not hold {d} items of type {s} at offset {d} (endpoint byte {d}), length is {d} bytes", .{ @tagName(source), source_element_count, @typeName(source_element_type), source_offset, buffer_end, self.controller.vertex_buffer_lens[source_idx] });
-                assert_with_reason(num_cast(dest_bytes.len, u32) >= transfer_len, @src(), "destination slice cannot hold {d} items of type {s} ({d} bytes), len is {d} bytes", .{ source_element_count, @typeName(source_element_type), transfer_len, dest_bytes.len });
-                if (ERRORS) ( //
-                    try self.handle_possible_transfer_buffer_grow(transfer_buf, transfer_offset, transfer_len, self.controller.download_transfer_buffer_lens[transfer_idx], transfer_end)) //
-                else self.handle_possible_transfer_buffer_grow(transfer_buf, transfer_offset, transfer_len, self.controller.download_transfer_buffer_lens[transfer_idx], transfer_end) catch |err| ERROR_MODE.panic(@src(), err);
-                self.download.add_read_bytes(transfer_buf, transfer_len);
-                const details = CopyDownloadDetails{
-                    .dest = dest_bytes,
-                    .transfer_buf = transfer_buf,
-                    .transfer_buf_offset = transfer_offset,
-                    .transfer_buf_len = transfer_len,
-                };
-                _ = self.controller.download_list.append(details, self.controller.list_alloc);
-                self.copy_pass.copy_from_gpu_buffer_to_download_buffer(.buffer_region(.vertex_buffer(source), source_offset, transfer_len), .download_buffer_loc(transfer_buf, transfer_offset));
-            }
-            pub fn download_from_index_buffer(self: *PostCommandDownloadPass, source: IndexBufferName, source_index_of_first_index: u32, source_index_count: u32, dest: anytype, transfer_buf: DownloadTransferBufferName) PossibleError(void) {
-                const dest_bytes: []u8 = bytes_cast(dest);
-                const dest_element_type = bytes_cast_element_type(@TypeOf(dest));
-                const source_idx = @intFromEnum(source);
-                const transfer_idx = @intFromEnum(transfer_buf);
-                const source_element_type = switch (self.controller.index_buffer_types[source_idx]) {
-                    .U16 => u16,
-                    .U32 => u32,
-                };
-                assert_with_reason(source_element_type == dest_element_type, @src(), "source index buffer element type must be the same as the dest element type, but `{s}` != `{s}`", .{ @typeName(source_element_type), @typeName(dest_element_type) });
-                const source_offset = @sizeOf(source_element_type) * source_index_of_first_index;
-                const transfer_offset = self.download.get_read_bytes(transfer_buf);
-                const transfer_len: u32 = @sizeOf(source_element_type) * source_index_count;
-                const buffer_end = source_offset + transfer_len;
-                const transfer_end = transfer_offset + transfer_len;
-                assert_with_reason(self.controller.index_buffer_lens[source_idx] >= buffer_end, @src(), "source index buffer `{s}` does not hold {d} items of type {s} at offset {d} (endpoint byte {d}), length is {d} bytes", .{ @tagName(source), source_index_count, @typeName(source_element_type), source_offset, buffer_end, self.controller.index_buffer_lens[source_idx] });
-                assert_with_reason(num_cast(dest_bytes.len, u32) >= transfer_len, @src(), "destination slice cannot hold {d} items of type {s} ({d} bytes), len is {d} bytes", .{ source_index_count, @typeName(source_element_type), transfer_len, dest_bytes.len });
-                if (ERRORS) ( //
-                    try self.handle_possible_transfer_buffer_grow(transfer_buf, transfer_offset, transfer_len, self.controller.download_transfer_buffer_lens[transfer_idx], transfer_end)) //
-                else self.handle_possible_transfer_buffer_grow(transfer_buf, transfer_offset, transfer_len, self.controller.download_transfer_buffer_lens[transfer_idx], transfer_end) catch |err| ERROR_MODE.panic(@src(), err);
-                self.download.add_read_bytes(transfer_buf, transfer_len);
-                const details = CopyDownloadDetails{
-                    .dest = dest_bytes,
-                    .transfer_buf = transfer_buf,
-                    .transfer_buf_offset = transfer_offset,
-                    .transfer_buf_len = transfer_len,
-                };
-                _ = self.controller.download_list.append(details, self.controller.list_alloc);
-                self.copy_pass.copy_from_gpu_buffer_to_download_buffer(.buffer_region(.index_buffer(source), source_offset, transfer_len), .download_buffer_loc(transfer_buf, transfer_offset));
-            }
-            pub fn download_from_indirect_draw_call_buffer(self: *PostCommandDownloadPass, source: IndirectDrawBufferName, source_index_of_first_draw_call: u32, source_draw_call_count: u32, dest: anytype, transfer_buf: DownloadTransferBufferName) PossibleError(void) {
-                const dest_bytes: []u8 = bytes_cast(dest);
-                const dest_element_type = bytes_cast_element_type(@TypeOf(dest));
-                const source_idx = @intFromEnum(source);
-                const transfer_idx = @intFromEnum(transfer_buf);
-                const source_element_type = switch (self.controller.indirect_draw_buffer_modes[source_idx]) {
-                    .INDEX => GPU_IndexedIndirectDrawCommand,
-                    .VERTEX => GPU_IndirectDrawCommand,
-                };
-                assert_with_reason(source_element_type == dest_element_type, @src(), "source index buffer element type must be the same as the dest element type, but `{s}` != `{s}`", .{ @typeName(source_element_type), @typeName(dest_element_type) });
-                const source_offset = @sizeOf(source_element_type) * source_index_of_first_draw_call;
-                const transfer_offset = self.download.get_read_bytes(transfer_buf);
-                const transfer_len: u32 = @sizeOf(source_element_type) * source_draw_call_count;
-                const buffer_end = source_offset + transfer_len;
-                const transfer_end = transfer_offset + transfer_len;
-                assert_with_reason(self.controller.indirect_draw_buffer_lens[source_idx] >= buffer_end, @src(), "source index buffer `{s}` does not hold {d} items of type {s} at offset {d} (endpoint byte {d}), length is {d} bytes", .{ @tagName(source), source_draw_call_count, @typeName(source_element_type), source_offset, buffer_end, self.controller.indirect_draw_buffer_lens[source_idx] });
-                assert_with_reason(num_cast(dest_bytes.len, u32) >= transfer_len, @src(), "destination slice cannot hold {d} items of type {s} ({d} bytes), len is {d} bytes", .{ source_draw_call_count, @typeName(source_element_type), transfer_len, dest_bytes.len });
-                if (ERRORS) ( //
-                    try self.handle_possible_transfer_buffer_grow(transfer_buf, transfer_offset, transfer_len, self.controller.download_transfer_buffer_lens[transfer_idx], transfer_end)) //
-                else self.handle_possible_transfer_buffer_grow(transfer_buf, transfer_offset, transfer_len, self.controller.download_transfer_buffer_lens[transfer_idx], transfer_end) catch |err| ERROR_MODE.panic(@src(), err);
-                self.download.add_read_bytes(transfer_buf, transfer_len);
-                const details = CopyDownloadDetails{
-                    .dest = dest_bytes,
-                    .transfer_buf = transfer_buf,
-                    .transfer_buf_offset = transfer_offset,
-                    .transfer_buf_len = transfer_len,
-                };
-                _ = self.controller.download_list.append(details, self.controller.list_alloc);
-                self.copy_pass.copy_from_gpu_buffer_to_download_buffer(.buffer_region(.indirect_draw_buffer(source), source_offset, transfer_len), .download_buffer_loc(transfer_buf, transfer_offset));
-            }
-            pub fn download_from_storage_buffer(self: *PostCommandDownloadPass, source: StorageBufferName, source_index_of_first_element: u32, source_element_count: u32, dest: anytype, transfer_buf: DownloadTransferBufferName) PossibleError(void) {
-                const dest_bytes: []u8 = bytes_cast(dest);
-                const dest_element_type = bytes_cast_element_type(@TypeOf(dest));
-                const source_idx = @intFromEnum(source);
-                const transfer_idx = @intFromEnum(transfer_buf);
-                const source_element_type = INTERNAL.STORAGE_BUFFER_TYPES[source_idx];
-                assert_with_reason(source_element_type == dest_element_type, @src(), "source storage buffer element type must be the same as the dest element type, but `{s}` != `{s}`", .{ @typeName(source_element_type), @typeName(dest_element_type) });
-                const source_offset = @sizeOf(source_element_type) * source_index_of_first_element;
-                const transfer_offset = self.download.get_read_bytes(transfer_buf);
-                const transfer_len: u32 = @sizeOf(source_element_type) * source_element_count;
-                const buffer_end = source_offset + transfer_len;
-                const transfer_end = transfer_offset + transfer_len;
-                assert_with_reason(self.controller.storage_buffer_lens[source_idx] >= buffer_end, @src(), "source stroage buffer `{s}` does not hold {d} items of type {s} at offset {d} (endpoint byte {d}), length is {d} bytes", .{ @tagName(source), source_element_count, @typeName(source_element_type), source_offset, buffer_end, self.controller.storage_buffer_lens[source_idx] });
-                assert_with_reason(num_cast(dest_bytes.len, u32) >= transfer_len, @src(), "destination slice cannot hold {d} items of type {s} ({d} bytes), len is {d} bytes", .{ source_element_count, @typeName(source_element_type), transfer_len, dest_bytes.len });
-                if (ERRORS) ( //
-                    try self.handle_possible_transfer_buffer_grow(transfer_buf, transfer_offset, transfer_len, self.controller.download_transfer_buffer_lens[transfer_idx], transfer_end)) //
-                else self.handle_possible_transfer_buffer_grow(transfer_buf, transfer_offset, transfer_len, self.controller.download_transfer_buffer_lens[transfer_idx], transfer_end) catch |err| ERROR_MODE.panic(@src(), err);
-                self.download.add_read_bytes(transfer_buf, transfer_len);
-                const details = CopyDownloadDetails{
-                    .dest = dest_bytes,
-                    .transfer_buf = transfer_buf,
-                    .transfer_buf_offset = transfer_offset,
-                    .transfer_buf_len = transfer_len,
-                };
-                _ = self.controller.download_list.append(details, self.controller.list_alloc);
-                self.copy_pass.copy_from_gpu_buffer_to_download_buffer(.buffer_region(.storage_buffer(source), source_offset, transfer_len), .download_buffer_loc(transfer_buf, transfer_offset));
-            }
-            pub fn download_from_texture(self: *PostCommandDownloadPass, source: TextureName, source_index_of_first_element: u32, source_element_count: u32, dest: anytype, transfer_buf: DownloadTransferBufferName) PossibleError(void) {
-                //CHECKPOINT
+                for (self.controller.download_list.slice()) |dl| {
+                    const dest_slice = dl.dest;
+                    const source_slice: []const u8 = if (ERRORS) ( //
+                        try _INTERNAL.get_download_slice(self, dl.transfer_buf, dl.transfer_buf_offset, false)) //
+                        else _INTERNAL.get_download_slice(self, dl.transfer_buf, dl.transfer_buf_offset, false) catch |err| ERROR_MODE.panic(@src(), err);
+                    @memcpy(dest_slice[0..source_slice.len], source_slice);
+                }
+                self.controller.download_list.clear();
+                for (self.controller.mapped_download_buffers[0..], 0..) |mapped, i| {
+                    if (mapped) {
+                        self.controller.gpu.unmap_transfer_buffer(self.controller.download_transfer_buffers[i]);
+                        self.controller.mapped_download_buffers[i] = false;
+                        self.controller.download_slices[i] = &.{};
+                    }
+                }
+                self.controller.final_download_pending = false;
+                self.valid = false;
+                self.fence = null;
             }
         };
 
-        pub const CopyPass = struct {
+        pub const CopyPassTransferOnly = struct {
             cmd: CommandBuffer,
-            pass: *SDL3.GPU_CopyPass,
+            pass: *GPU_CopyPass,
+            valid: bool = false,
 
-            pub fn copy_from_upload_buffer_to_gpu_texture(self: CopyPass, source: TextureUploadInfo, dest: TextureRegion, cycle: bool) void {
+            pub const _INTERNAL = struct {
+                pub fn assert_valid(self: CopyPassTransferOnly, comptime src: ?std.builtin.SourceLocation) void {
+                    self.cmd.controller.assert_copy_pass_active(src);
+                    self.cmd.controller.assert_command_buffer_active(src);
+                    self.cmd.controller.assert_render_pass_NOT_active(src);
+                    self.cmd.controller.assert_compute_pass_NOT_active(src);
+                    self.cmd.controller.assert_download_or_upload_pass_active(src);
+                    assert_with_reason(self.valid, @src(), "this CopyPassTransferOnly was created incorrectly or was already ended", .{});
+                }
+            };
+
+            pub fn copy_from_upload_buffer_to_gpu_texture(self: CopyPassTransferOnly, source: TextureUploadInfo, dest: TextureRegion, cycle: bool) void {
+                _INTERNAL.assert_valid(self, @src());
                 self.pass.upload_from_transfer_buffer_to_gpu_texture(source.to_sdl(self.cmd), dest.to_sdl(self.cmd), cycle);
             }
-            pub fn copy_from_upload_buffer_to_gpu_buffer(self: CopyPass, source: UploadTransferBufferLocation, dest: BufferRegion, cycle: bool) void {
+            pub fn copy_from_upload_buffer_to_gpu_buffer(self: CopyPassTransferOnly, source: UploadTransferBufferLocation, dest: BufferRegion, cycle: bool) void {
+                _INTERNAL.assert_valid(self, @src());
                 self.pass.upload_from_transfer_buffer_to_gpu_buffer(source.to_sdl(self.cmd), dest.to_sdl(self.cmd), cycle);
             }
-            pub fn copy_from_gpu_texture_to_gpu_texture(self: CopyPass, source: TextureLocation, dest: TextureLocation, size: Vec3(u32), cycle: bool) void {
-                self.pass.copy_from_gpu_texture_to_gpu_texture(source.to_sdl(self.cmd), dest.to_sdl(self.cmd), size, cycle);
-            }
-            pub fn copy_from_gpu_buffer_to_gpu_buffer(self: CopyPass, source: BufferLocation, dest: BufferLocation, copy_len: u32, cycle: bool) void {
-                return self.pass.copy_from_gpu_buffer_to_gpu_buffer(source.to_sdl(self.cmd.controller), dest.to_sdl(self.cmd.controller), copy_len, cycle);
-            }
-            pub fn copy_from_gpu_texture_to_download_buffer(self: CopyPass, source: TextureRegion, dest: TextureDownloadInfo) void {
+            pub fn copy_from_gpu_texture_to_download_buffer(self: CopyPassTransferOnly, source: TextureRegion, dest: TextureDownloadInfo) void {
+                _INTERNAL.assert_valid(self, @src());
                 self.pass.download_from_gpu_texture_to_transfer_buffer(source.to_sdl(self.cmd), dest.to_sdl(self.cmd));
             }
-            pub fn copy_from_gpu_buffer_to_download_buffer(self: CopyPass, source: BufferRegion, dest: DownloadTransferBufferLocation) void {
+            pub fn copy_from_gpu_buffer_to_download_buffer(self: CopyPassTransferOnly, source: BufferRegion, dest: DownloadTransferBufferLocation) void {
+                _INTERNAL.assert_valid(self, @src());
                 self.pass.download_from_gpu_buffer_to_transfer_buffer(source.to_sdl(self.cmd), dest.to_sdl(self.cmd));
             }
-            pub fn end_copy_pass(self: CopyPass) void {
-                self.cmd.controller.copy_pass_active = false;
+            pub fn end_copy_pass(self: *CopyPassTransferOnly) void {
+                _INTERNAL.assert_valid(self, @src());
                 self.pass.end_copy_pass();
+                self.cmd.controller.copy_pass_active = false;
+                self.valid = false;
             }
         };
 
         pub const CopyPassGPUOnly = struct {
             cmd: CommandBuffer,
             pass: *SDL3.GPU_CopyPass,
+            valid: bool = false,
 
-            pub fn copy_from_gpu_texture_to_gpu_texture(self: CopyPass, source: TextureLocation, dest: TextureLocation, size: Vec3(u32), cycle: bool) void {
+            pub const _INTERNAL = struct {
+                pub fn assert_valid(self: CopyPassGPUOnly, comptime src: ?std.builtin.SourceLocation) void {
+                    self.cmd.controller.assert_copy_pass_active(src);
+                    self.cmd.controller.assert_command_buffer_active(src);
+                    self.cmd.controller.assert_download_pass_NOT_active(src);
+                    self.cmd.controller.assert_upload_pass_NOT_active(src);
+                    self.cmd.controller.assert_render_pass_NOT_active(src);
+                    self.cmd.controller.assert_compute_pass_NOT_active(src);
+                    assert_with_reason(self.valid, @src(), "this CopyPassGPUOnly was created incorrectly or was already ended", .{});
+                }
+            };
+
+            pub fn copy_from_gpu_texture_to_gpu_texture(self: CopyPassGPUOnly, source: TextureLocation, dest: TextureLocation, size: Vec3(u32), cycle: bool) void {
+                _INTERNAL.assert_valid(self, @src());
                 self.pass.copy_from_gpu_texture_to_gpu_texture(source.to_sdl(self.cmd), dest.to_sdl(self.cmd), size, cycle);
             }
-            pub fn copy_from_gpu_buffer_to_gpu_buffer(self: CopyPass, source: BufferLocation, dest: BufferLocation, copy_len: u32, cycle: bool) void {
+            pub fn copy_from_gpu_buffer_to_gpu_buffer(self: CopyPassGPUOnly, source: BufferLocation, dest: BufferLocation, copy_len: u32, cycle: bool) void {
+                _INTERNAL.assert_valid(self, @src());
                 return self.pass.copy_from_gpu_buffer_to_gpu_buffer(source.to_sdl(self.cmd.controller), dest.to_sdl(self.cmd.controller), copy_len, cycle);
             }
-            pub fn end_copy_pass(self: CopyPass) void {
-                self.cmd.controller.copy_pass_active = false;
+            pub fn end_copy_pass(self: *CopyPassGPUOnly) void {
+                _INTERNAL.assert_valid(self, @src());
                 self.pass.end_copy_pass();
+                self.cmd.controller.copy_pass_active = false;
+                self.valid = false;
+            }
+
+            pub fn lock_copy_pass_and_command_buffer_and_begin_download_pass(self: CopyPassGPUOnly) PossibleError(DownloadPass) {
+                _INTERNAL.assert_valid(self, @src());
+                const copy = CopyPassTransferOnly{
+                    .cmd = self.cmd,
+                    .pass = self.pass,
+                    .valid = true,
+                };
+                self.cmd.controller.download_pass_active = true;
+                self.cmd.controller.grow_and_copy_download_transfer_list.clear();
+                self.cmd.controller.download_list.clear();
+                const pass = DownloadPass{
+                    .controller = self.controller,
+                    .cmd = self,
+                    .copy = copy,
+                    .valid = true,
+                };
+                self.valid = false;
+                return pass;
             }
         };
 
@@ -3770,7 +4269,8 @@ pub fn GraphicsController(
             }
 
             pub fn end_render_pass(self: *RenderPass) void {
-                assert_with_reason(self.controller.render_pass_with_pipeline_active == false, @src(), "you must end the current `RenderPassWithPipeline` before you end the current `RenderPass`", .{});
+                assert_with_reason(!self.controller.render_pass_with_pipeline_active, @src(), "you must end the current `RenderPassWithPipeline` before you end the current `RenderPass`", .{});
+                assert_with_reason(self.controller.render_pass_active, @src(), "cannot end a RenderPass when none is active", .{});
                 self.pass.end_render_pass();
                 self.controller.render_pass_active = false;
                 self.* = undefined;
@@ -4044,6 +4544,7 @@ pub fn GraphicsController(
             }
 
             pub fn end_pipeline_pass(self: *RenderPassWithPipeline) void {
+                assert_with_reason(self.controller.render_pass_with_pipeline_active, @src(), "cannot end a RenderPassWithPipeline when none is active", .{});
                 self.controller.render_pass_with_pipeline_active = false;
                 self.* = undefined;
                 return;
