@@ -29,6 +29,8 @@ const Root = @import("./_root.zig");
 const FlexSlice = Root.FlexSlice.FlexSlice;
 const Assert = Root.Assert;
 
+const assert_unreachable = Assert.assert_unreachable;
+
 /// A placeholder type intended for use in methods that take an `anytype` parameter
 ///
 /// This signals to the function that either:
@@ -359,6 +361,8 @@ pub const Alignment = enum(u64) {
         return std.mem.alignBackward(T, addr, alignment);
     }
 };
+
+
 
 pub const Endian = enum(u8) {
     LITTLE = 0,

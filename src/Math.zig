@@ -1493,3 +1493,212 @@ pub fn tan_bezier_deg(degrees: anytype) @TypeOf(degrees) {
     const sin, const cos = sin_cos_bezier_deg(degrees);
     return tan_from_sin_cos(sin, cos);
 }
+
+pub const PowerOf2 = enum(u8) {
+    _1 = 0,
+    _2 = 1,
+    _4 = 2,
+    _8 = 3,
+    _16 = 4,
+    _32 = 5,
+    _64 = 6,
+    _128 = 7,
+    _256 = 8,
+    _512 = 9,
+    _1_024 = 10,
+    _2_048 = 11,
+    _4_096 = 12,
+    _8_192 = 13,
+    _16_384 = 14,
+    _32_768 = 15,
+    _65_536 = 16,
+    _131_072 = 17,
+    _262_144 = 18,
+    _524_288 = 19,
+    _1_048_576 = 20,
+    _2_097_152 = 21,
+    _4_194_304 = 22,
+    _8_388_608 = 23,
+    _16_777_216 = 24,
+    _33_554_432 = 25,
+    _67_108_864 = 26,
+    _134_217_728 = 27,
+    _268_435_456 = 28,
+    _536_870_912 = 29,
+    _1_073_741_824 = 30,
+    _2_147_483_648 = 31,
+    _4_294_967_296 = 32,
+    _8_589_934_592 = 33,
+    _17_179_869_184 = 34,
+    _34_359_738_368 = 35,
+    _68_719_476_736 = 36,
+    _137_438_953_472 = 37,
+    _274_877_906_944 = 38,
+    _549_755_813_888 = 39,
+    _1_099_511_627_776 = 40,
+    _2_199_023_255_552 = 41,
+    _4_398_046_511_104 = 42,
+    _8_796_093_022_208 = 43,
+    _17_592_186_044_416 = 44,
+    _35_184_372_088_832 = 45,
+    _70_368_744_177_664 = 46,
+    _140_737_488_355_328 = 47,
+    _281_474_976_710_656 = 48,
+    _562_949_953_421_312 = 49,
+    _1_125_899_906_842_624 = 50,
+    _2_251_799_813_685_248 = 51,
+    _4_503_599_627_370_496 = 52,
+    _9_007_199_254_740_992 = 53,
+    _18_014_398_509_481_984 = 54,
+    _36_028_797_018_963_968 = 55,
+    _72_057_594_037_927_936 = 56,
+    _144_115_188_075_855_872 = 57,
+    _288_230_376_151_711_744 = 58,
+    _576_460_752_303_423_488 = 59,
+    _1_152_921_504_606_846_976 = 60,
+    _2_305_843_009_213_693_952 = 61,
+    _4_611_686_018_427_387_904 = 62,
+    _9_223_372_036_854_775_808 = 63,
+    _18_446_744_073_709_551_616 = 64,
+    _,
+
+    pub fn num_bits(power: PowerOf2) u8 {
+        return @intFromEnum(power) + 1;
+    }
+
+    pub fn bit_shift(power: PowerOf2) u8 {
+        return @intFromEnum(power);
+    }
+
+    pub fn unsigned_integer_type_that_holds_all_values_less_than(comptime limit: PowerOf2) type {
+        return std.meta.Int(.unsigned, @intCast(@intFromEnum(limit)));
+    }
+    pub fn unsigned_integer_type_that_holds_all_values_up_to_and_including(comptime power: PowerOf2) type {
+        return std.meta.Int(.unsigned, @intCast(@intFromEnum(power) + 1));
+    }
+    pub fn signed_integer_type_that_holds_all_values_less_than(comptime limit: PowerOf2) type {
+        return std.meta.Int(.signed, @intCast(@intFromEnum(limit) + 1));
+    }
+    pub fn signed_integer_type_that_holds_all_values_up_to_and_including(comptime power: PowerOf2) type {
+        return std.meta.Int(.signed, @intCast(@intFromEnum(power) + 2));
+    }
+    pub fn composite_unsigned_integer_type_that_holds_unsigned_integer_types_with_values_less_than(comptime limits: []const PowerOf2) type {
+        comptime var total_limit: u16 = 0;
+        inline for (limits) |lim| {
+            total_limit += @as(u16, @intCast(@intFromEnum(lim)));
+        }
+        return std.meta.Int(.unsigned, total_limit);
+    }
+
+    pub fn alignment(int_or_ptr: anytype) PowerOf2 {
+        const T = @TypeOf(int_or_ptr);
+        const INFO = @typeInfo(T);
+        switch (INFO) {
+            .int => {
+                const i = @abs(int_or_ptr);
+                const tz = @ctz(i);
+                return @enumFromInt(tz);
+            },
+            .@"enum" => {
+                const i = @abs(@intFromEnum(int_or_ptr));
+                const tz = @ctz(i);
+                return @enumFromInt(tz);
+            },
+            .pointer => {
+                const i = @intFromPtr(int_or_ptr);
+                const tz = @ctz(i);
+                return @enumFromInt(tz);
+            },
+            else => assert_unreachable(@src(), "type `{s}` not a valid input type", .{@typeName(T)}),
+        }
+    }
+    pub inline fn at_least_aligned_to(int_or_ptr: anytype, min_align: PowerOf2) bool {
+        return min_align.value_is_aligned_at_least(int_or_ptr);
+    }
+    pub fn value_is_aligned_at_least(self: PowerOf2, int_or_ptr: anytype) bool {
+        const val_align = alignment(int_or_ptr);
+        return @intFromEnum(val_align) >= @intFromEnum(self);
+    }
+    pub inline fn exactly_aligned_to(int_or_ptr: anytype, min_align: PowerOf2) bool {
+        return min_align.value_is_aligned_exactly(int_or_ptr);
+    }
+    pub fn value_is_aligned_exactly(self: PowerOf2, int_or_ptr: anytype) bool {
+        const val_align = alignment(int_or_ptr);
+        return @intFromEnum(val_align) == @intFromEnum(self);
+    }
+    pub fn power_of_2(n: anytype) PowerOf2 {
+        const T = @TypeOf(n);
+        const INFO = @typeInfo(T);
+        const i: u8 = switch (INFO) {
+            .int => @intCast(@abs(n)),
+            .@"enum" => @intCast(@abs(@intFromEnum(n))),
+            else => assert_unreachable(@src(), "type `{s}` not a valid input type", .{@typeName(T)}),
+        };
+        return @enumFromInt(i);
+    }
+    pub fn value(self: PowerOf2) u64 {
+        @as(u64, 1) << @intCast(@intFromEnum(self));
+    }
+    pub fn value_as_type(self: PowerOf2, comptime INT: type) INT {
+        @as(INT, 1) << @intCast(@intFromEnum(self));
+    }
+    pub fn value_large(comptime self: PowerOf2) ValueLarge(self) {
+        const INT = ValueLarge(self);
+        return @as(INT, 1) << @intCast(@intFromEnum(self));
+    }
+    pub fn ValueLarge(comptime self: PowerOf2) type {
+        const bits: u16 = @as(u16, @intCast(@intFromEnum(self))) + 1;
+        return std.meta.Int(.unsigned, bits);
+    }
+    pub fn round_up_to_power_of_2(int_or_ptr: anytype) PowerOf2 {
+        const T = @TypeOf(int_or_ptr);
+        const INFO = @typeInfo(T);
+        var i = switch (INFO) {
+            .int => @abs(int_or_ptr),
+            .@"enum" => @abs(@intFromEnum(int_or_ptr)),
+            .pointer => @intFromPtr(int_or_ptr),
+            else => assert_unreachable(@src(), "type `{s}` not a valid input type", .{@typeName(T)}),
+        };
+        const BITS = @typeInfo(@TypeOf(i)).int.bits;
+        i = i -% 1;
+        if (comptime BITS > 1) i |= i >> 1;
+        if (comptime BITS > 2) i |= i >> 2;
+        if (comptime BITS > 4) i |= i >> 4;
+        if (comptime BITS > 8) i |= i >> 8;
+        if (comptime BITS > 16) i |= i >> 16;
+        if (comptime BITS > 32) i |= i >> 32;
+        if (comptime BITS > 64) i |= i >> 64;
+        if (comptime BITS > 128) i |= i >> 128;
+        if (comptime BITS > 256) assert_unreachable(@src(), "integers with bit lengths greater than 256 are not supported, got bit width {d}", .{BITS});
+        i = i +% 1;
+        return @enumFromInt(@ctz(i));
+    }
+
+    pub fn round_up_to_power_of_2_value_type(int_or_ptr: anytype) @TypeOf(int_or_ptr) {
+        const T = @TypeOf(int_or_ptr);
+        const INFO = @typeInfo(T);
+        const pow = round_up_to_power_of_2(int_or_ptr);
+        switch (INFO) {
+            .int => return @as(T, 1) << @intCast(@intFromEnum(pow)),
+            .@"enum" => return @enumFromInt(@as(Types.enum_tag_type(T), 1) << @intCast(@intFromEnum(pow))),
+            .pointer => return @ptrFromInt(@as(usize, 1) << @intCast(@intFromEnum(pow))),
+        }
+    }
+
+    pub fn round_down_to_power_of_2(int_or_ptr: anytype) PowerOf2 {
+        const pow = round_up_to_power_of_2(int_or_ptr);
+        const lower = @intFromEnum(pow) - 1;
+        return @intFromEnum(lower);
+    }
+
+    pub fn round_down_to_power_of_2_value_type(int_or_ptr: anytype) @TypeOf(int_or_ptr) {
+        const T = @TypeOf(int_or_ptr);
+        const INFO = @typeInfo(T);
+        const pow = round_down_to_power_of_2(int_or_ptr);
+        switch (INFO) {
+            .int => return @as(T, 1) << @intCast(@intFromEnum(pow)),
+            .@"enum" => return @enumFromInt(@as(Types.enum_tag_type(T), 1) << @intCast(@intFromEnum(pow))),
+            .pointer => return @ptrFromInt(@as(usize, 1) << @intCast(@intFromEnum(pow))),
+        }
+    }
+};

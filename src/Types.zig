@@ -1314,3 +1314,5 @@ pub fn error_union_error(comptime T: type) type {
         },
     }
 }
+
+// pub fn array_has_element_with_every_enum_reperesented_once_in_field(comptime ENUM: type, comptime FIELD: []const u8, )
