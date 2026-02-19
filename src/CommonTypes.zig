@@ -362,13 +362,17 @@ pub const Alignment = enum(u64) {
     }
 };
 
-
-
 pub const Endian = enum(u8) {
     LITTLE = 0,
     BIG = 1,
 
     pub const NATIVE = if (build.cpu.arch.endian() == .little) Endian.LITTLE else Endian.BIG;
+    pub fn to_zig(self: Endian) std.builtin.Endian {
+        return switch (self) {
+            .LITTLE => std.builtin.Endian.little,
+            .BIG => std.builtin.Endian.big,
+        };
+    }
 };
 
 pub const AngleType = enum(u8) {

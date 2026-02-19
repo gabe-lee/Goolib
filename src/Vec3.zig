@@ -285,7 +285,7 @@ pub fn define_vec3_type(comptime T: type) type {
                 @branchHint(.unlikely);
                 var out = ZERO;
                 if (zero_behavior == .NORM_ZERO_IS_LAST_COMPONENT_1) {
-                    out.vec[LAST_COMPONENT_IDX] = 1;
+                    out.z = 1;
                 }
                 return out;
             }
@@ -296,7 +296,7 @@ pub fn define_vec3_type(comptime T: type) type {
                 @branchHint(.unlikely);
                 var out = ZERO;
                 if (zero_behavior == .NORM_ZERO_IS_LAST_COMPONENT_1) {
-                    out.vec[LAST_COMPONENT_IDX] = 1;
+                    out.z = 1;
                 }
                 return out;
             }
@@ -308,7 +308,7 @@ pub fn define_vec3_type(comptime T: type) type {
                 @branchHint(.unlikely);
                 var out = ZERO;
                 if (zero_behavior == .PERP_ZERO_IS_LAST_COMPONENT_1) {
-                    out.vec[LAST_COMPONENT_IDX] = 1;
+                    out.z = 1;
                 }
                 return out;
             }
@@ -320,7 +320,7 @@ pub fn define_vec3_type(comptime T: type) type {
                 @branchHint(.unlikely);
                 var out = ZERO;
                 if (zero_behavior == .PERP_ZERO_IS_LAST_COMPONENT_1) {
-                    out.vec[LAST_COMPONENT_IDX] = 1;
+                    out.z = 1;
                 }
                 return out;
             }
@@ -332,7 +332,7 @@ pub fn define_vec3_type(comptime T: type) type {
                 @branchHint(.unlikely);
                 var out = ZERO;
                 if (zero_behavior == .PERP_ZERO_IS_LAST_COMPONENT_1) {
-                    out.vec[LAST_COMPONENT_IDX] = 1;
+                    out.z = 1;
                 }
                 return out;
             }

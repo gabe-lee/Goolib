@@ -74,8 +74,8 @@ pub const InitNewMode = enum(u8) {
     FORCE_MEMSET_NEW_CUSTOM,
 };
 pub const CopyMode = enum(u8) {
-    dont_copy_existing_data,
-    copy_existing_data,
+    DONT_COPY_EXISTING_DATA,
+    COPY_EXISTING_DATA,
 };
 pub fn InitNew(comptime T: type) type {
     return union(InitNewMode) {
@@ -197,10 +197,10 @@ pub fn realloc_custom(alloc: Allocator, old_mem: anytype, new_n: usize, comptime
     const new_mem_types = mem.bytesAsSlice(T, new_bytes);
     const copy_len = @min(byte_count, old_byte_slice.len);
     switch (copy_mode) {
-        .copy_existing_data => {
+        .COPY_EXISTING_DATA => {
             @memcpy(new_mem[0..copy_len], old_byte_slice[0..copy_len]);
         },
-        .dont_copy_existing_data => {},
+        .DONT_COPY_EXISTING_DATA => {},
     }
     switch (clear_old_mode) {
         .MEMSET_OLD_UNDEFINED => {
@@ -220,38 +220,38 @@ pub fn realloc_custom(alloc: Allocator, old_mem: anytype, new_n: usize, comptime
     switch (init_new_mode) {
         .MEMSET_NEW_UNDEFINED => {
             switch (copy_mode) {
-                .copy_existing_data => @memset(new_mem[copy_len..byte_count], undefined),
-                .dont_copy_existing_data => @memset(new_mem[0..byte_count], undefined),
+                .COPY_EXISTING_DATA => @memset(new_mem[copy_len..byte_count], undefined),
+                .DONT_COPY_EXISTING_DATA => @memset(new_mem[0..byte_count], undefined),
             }
         },
         .FORCE_MEMSET_NEW_UNDEFINED => {
             switch (copy_mode) {
-                .copy_existing_data => Utils.secure_memset_undefined(u8, new_mem[copy_len..byte_count]),
-                .dont_copy_existing_data => Utils.secure_memset_undefined(u8, new_mem[0..byte_count]),
+                .COPY_EXISTING_DATA => Utils.secure_memset_undefined(u8, new_mem[copy_len..byte_count]),
+                .DONT_COPY_EXISTING_DATA => Utils.secure_memset_undefined(u8, new_mem[0..byte_count]),
             }
         },
         .MEMSET_NEW_ZERO => {
             switch (copy_mode) {
-                .copy_existing_data => @memset(new_mem[copy_len..byte_count], 0),
-                .dont_copy_existing_data => @memset(new_mem[0..byte_count], 0),
+                .COPY_EXISTING_DATA => @memset(new_mem[copy_len..byte_count], 0),
+                .DONT_COPY_EXISTING_DATA => @memset(new_mem[0..byte_count], 0),
             }
         },
         .FORCE_MEMSET_NEW_ZERO => {
             switch (copy_mode) {
-                .copy_existing_data => Utils.secure_zero(u8, new_mem[copy_len..byte_count]),
-                .dont_copy_existing_data => Utils.secure_zero(u8, new_mem[0..byte_count]),
+                .COPY_EXISTING_DATA => Utils.secure_zero(u8, new_mem[copy_len..byte_count]),
+                .DONT_COPY_EXISTING_DATA => Utils.secure_zero(u8, new_mem[0..byte_count]),
             }
         },
         .MEMSET_NEW_CUSTOM => |init_val| {
             switch (copy_mode) {
-                .copy_existing_data => @memset(new_mem_types[@divExact(copy_len, @sizeOf(T))..@divExact(byte_count, @sizeOf(T))], init_val),
-                .dont_copy_existing_data => @memset(new_mem_types[0..@divExact(byte_count, @sizeOf(T))], init_val),
+                .COPY_EXISTING_DATA => @memset(new_mem_types[@divExact(copy_len, @sizeOf(T))..@divExact(byte_count, @sizeOf(T))], init_val),
+                .DONT_COPY_EXISTING_DATA => @memset(new_mem_types[0..@divExact(byte_count, @sizeOf(T))], init_val),
             }
         },
         .FORCE_MEMSET_NEW_CUSTOM => |init_val| {
             switch (copy_mode) {
-                .copy_existing_data => Utils.secure_memset(T, new_mem_types[@divExact(copy_len, @sizeOf(T))..@divExact(byte_count, @sizeOf(T))], init_val),
-                .dont_copy_existing_data => Utils.secure_memset(T, new_mem_types[0..@divExact(byte_count, @sizeOf(T))], init_val),
+                .COPY_EXISTING_DATA => Utils.secure_memset(T, new_mem_types[@divExact(copy_len, @sizeOf(T))..@divExact(byte_count, @sizeOf(T))], init_val),
+                .DONT_COPY_EXISTING_DATA => Utils.secure_memset(T, new_mem_types[0..@divExact(byte_count, @sizeOf(T))], init_val),
             }
         },
         .DONT_MEMSET_NEW => {},

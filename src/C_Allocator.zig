@@ -172,7 +172,7 @@ pub const ZigToC99AllocatorWrapper = struct {
         }
         const old_alloc = old_alloc_or_null.?;
         const old_mem = old_alloc.allocation.to_slice();
-        const new_mem: []u8 = Utils.Alloc.realloc_custom(self.alloc, old_mem, new_bytes, .custom_align(MAX_ALIGN_C), .copy_existing_data, .dont_memset_new, .DONT_MEMSET_OLD) catch return null;
+        const new_mem: []u8 = Utils.Alloc.realloc_custom(self.alloc, old_mem, new_bytes, .custom_align(MAX_ALIGN_C), .COPY_EXISTING_DATA, .dont_memset_new, .DONT_MEMSET_OLD) catch return null;
         const new_alloc = Allocation.from_slice(new_mem);
         _ = self.allocations_list.sorted_set_and_resort(old_alloc.idx, new_alloc, Allocation.addr_greater);
         return @ptrCast(new_mem.ptr);
