@@ -1562,6 +1562,13 @@ pub const PowerOf2 = enum(u8) {
     _18_446_744_073_709_551_616 = 64,
     _,
 
+    pub const USIZE_POWER = if (@sizeOf(usize) == 4) PowerOf2._32 else PowerOf2._64;
+    pub const USIZE_BITS_SHIFT = if (@sizeOf(usize) == 4) 5 else 6;
+
+    pub fn align_of_type(comptime T: type) PowerOf2 {
+        return @enumFromInt(@as(u8, @alignOf(T)));
+    }
+
     pub fn num_bits(power: PowerOf2) u8 {
         return @intFromEnum(power) + 1;
     }
@@ -1650,11 +1657,41 @@ pub const PowerOf2 = enum(u8) {
         const bits: u16 = @as(u16, @intCast(@intFromEnum(self))) + 1;
         return std.meta.Int(.unsigned, bits);
     }
+
+    pub fn align_value_forward(self: PowerOf2, int_or_ptr: anytype) @TypeOf(int_or_ptr) {
+        const T = @TypeOf(int_or_ptr);
+        const INFO = @typeInfo(T);
+        const i = switch (INFO) {
+            .int => int_or_ptr,
+            .comptime_int => if (comptime int_or_ptr < 0) @as(i64, int_or_ptr) else @as(u64, int_or_ptr),
+            .@"enum" => @intFromEnum(int_or_ptr),
+            .pointer => @intFromPtr(int_or_ptr),
+            else => assert_unreachable(@src(), "type `{s}` not a valid input type", .{@typeName(T)}),
+        };
+        const I = @TypeOf(i);
+        const alignement: I = @intCast(self.value());
+        return num_cast(std.mem.alignForward(I, i, alignement), T);
+    }
+    pub fn align_value_backward(self: PowerOf2, int_or_ptr: anytype) @TypeOf(int_or_ptr) {
+        const T = @TypeOf(int_or_ptr);
+        const INFO = @typeInfo(T);
+        const i = switch (INFO) {
+            .int => int_or_ptr,
+            .comptime_int => if (comptime int_or_ptr < 0) @as(i64, int_or_ptr) else @as(u64, int_or_ptr),
+            .@"enum" => @intFromEnum(int_or_ptr),
+            .pointer => @intFromPtr(int_or_ptr),
+            else => assert_unreachable(@src(), "type `{s}` not a valid input type", .{@typeName(T)}),
+        };
+        const I = @TypeOf(i);
+        const alignement: I = @intCast(self.value());
+        return num_cast(std.mem.alignBackward(I, i, alignement), T);
+    }
     pub fn round_up_to_power_of_2(int_or_ptr: anytype) PowerOf2 {
         const T = @TypeOf(int_or_ptr);
         const INFO = @typeInfo(T);
         var i = switch (INFO) {
             .int => @abs(int_or_ptr),
+            .comptime_int => if (comptime int_or_ptr < 0) @abs(@as(i64, int_or_ptr)) else @as(u64, int_or_ptr),
             .@"enum" => @abs(@intFromEnum(int_or_ptr)),
             .pointer => @intFromPtr(int_or_ptr),
             else => assert_unreachable(@src(), "type `{s}` not a valid input type", .{@typeName(T)}),

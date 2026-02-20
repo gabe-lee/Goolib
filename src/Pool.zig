@@ -36,6 +36,7 @@ const assert_allocation_failure = Assert.assert_allocation_failure;
 const num_cast = Root.Cast.num_cast;
 
 const List = Root.IList_List.List;
+pub const Simple = @import("./Pool_Simple.zig");
 
 pub fn Pool(comptime T: type, comptime T_DEFAULT: T, comptime IDX_TYPE: type, comptime BLOCK_SIZE: comptime_int, comptime THREADING: Root.CommonTypes.ThreadingMode) type {
     assert_with_reason(Types.type_is_unsigned_int(IDX_TYPE), @src(), "type `IDX_TYPE` must be an unsigned integer type, got type `{s}`", .{@typeName(IDX_TYPE)});

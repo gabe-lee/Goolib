@@ -1575,7 +1575,7 @@ pub inline fn update_min(val: anytype, current_min: *@TypeOf(val)) void {
     }
 }
 
-pub fn first_n_bytes_set(comptime T: type, n: std.math.Log2IntCeil(T)) T {
+pub fn first_n_bits_set(comptime T: type, n: std.math.Log2IntCeil(T)) T {
     if (n == 0) return 0;
     var left: std.math.Log2IntCeil(T) = n - 1;
     var out: T = 1;
@@ -1590,7 +1590,7 @@ pub fn first_n_bytes_set(comptime T: type, n: std.math.Log2IntCeil(T)) T {
     }
     return out;
 }
-pub fn first_n_bytes_set_inline(comptime T: type, comptime n: std.math.Log2IntCeil(T)) T {
+pub fn first_n_bits_set_inline(comptime T: type, comptime n: std.math.Log2IntCeil(T)) T {
     if (n == 0) return 0;
     comptime var left: std.math.Log2IntCeil(T) = n - 1;
     comptime var out: T = 1;
@@ -1606,17 +1606,17 @@ pub fn first_n_bytes_set_inline(comptime T: type, comptime n: std.math.Log2IntCe
     return out;
 }
 
-test "first_n_bytes_set" {
-    try Test.expect_equal(first_n_bytes_set(u64, 0), "first_n_bytes_set(u64, 0)", 0, "0", "fail", .{});
-    try Test.expect_equal(first_n_bytes_set(u64, 1), "first_n_bytes_set(u64, 1)", 1, "1", "fail", .{});
-    try Test.expect_equal(first_n_bytes_set(u64, 4), "first_n_bytes_set(u64, 4)", 15, "15", "fail", .{});
-    try Test.expect_equal(first_n_bytes_set(u64, 5), "first_n_bytes_set(u64, 5)", 31, "31", "fail", .{});
-    try Test.expect_equal(first_n_bytes_set(u64, 11), "first_n_bytes_set(u64, 1)", 2047, "2047", "fail", .{});
-    try Test.expect_equal(comptime first_n_bytes_set_inline(u64, 0), "first_n_bytes_set_inline(u64, 0)", 0, "0", "fail", .{});
-    try Test.expect_equal(comptime first_n_bytes_set_inline(u64, 1), "first_n_bytes_set_inline(u64, 1)", 1, "1", "fail", .{});
-    try Test.expect_equal(comptime first_n_bytes_set_inline(u64, 4), "first_n_bytes_set_inline(u64, 4)", 15, "15", "fail", .{});
-    try Test.expect_equal(comptime first_n_bytes_set_inline(u64, 5), "first_n_bytes_set_inline(u64, 5)", 31, "31", "fail", .{});
-    try Test.expect_equal(comptime first_n_bytes_set_inline(u64, 11), "first_n_bytes_set_inline(u64, 1)", 2047, "2047", "fail", .{});
+test "first_n_bits_set" {
+    try Test.expect_equal(first_n_bits_set(u64, 0), "first_n_bits_set(u64, 0)", 0, "0", "fail", .{});
+    try Test.expect_equal(first_n_bits_set(u64, 1), "first_n_bits_set(u64, 1)", 1, "1", "fail", .{});
+    try Test.expect_equal(first_n_bits_set(u64, 4), "first_n_bits_set(u64, 4)", 15, "15", "fail", .{});
+    try Test.expect_equal(first_n_bits_set(u64, 5), "first_n_bits_set(u64, 5)", 31, "31", "fail", .{});
+    try Test.expect_equal(first_n_bits_set(u64, 11), "first_n_bits_set(u64, 1)", 2047, "2047", "fail", .{});
+    try Test.expect_equal(comptime first_n_bits_set_inline(u64, 0), "first_n_bits_set_inline(u64, 0)", 0, "0", "fail", .{});
+    try Test.expect_equal(comptime first_n_bits_set_inline(u64, 1), "first_n_bits_set_inline(u64, 1)", 1, "1", "fail", .{});
+    try Test.expect_equal(comptime first_n_bits_set_inline(u64, 4), "first_n_bits_set_inline(u64, 4)", 15, "15", "fail", .{});
+    try Test.expect_equal(comptime first_n_bits_set_inline(u64, 5), "first_n_bits_set_inline(u64, 5)", 31, "31", "fail", .{});
+    try Test.expect_equal(comptime first_n_bits_set_inline(u64, 11), "first_n_bits_set_inline(u64, 1)", 2047, "2047", "fail", .{});
 }
 
 pub fn invalid_ptr(comptime T: type) *T {
