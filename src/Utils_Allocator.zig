@@ -47,22 +47,6 @@ pub const ClearOldMode = enum(u8) {
     FORCE_MEMSET_OLD_UNDEFINED,
     MEMSET_OLD_ZERO,
     FORCE_MEMSET_OLD_ZERO,
-
-    pub inline fn dont_memset_old() ClearOldMode {
-        return ClearOldMode.DONT_MEMSET_OLD;
-    }
-    pub inline fn memset_new_undefined() ClearOldMode {
-        return ClearOldMode.MEMSET_OLD_UNDEFINED;
-    }
-    pub inline fn force_memset_new_undefined() ClearOldMode {
-        return ClearOldMode.FORCE_MEMSET_OLD_UNDEFINED;
-    }
-    pub inline fn memset_new_zero() ClearOldMode {
-        return ClearOldMode.MEMSET_OLD_ZERO;
-    }
-    pub inline fn force_memset_new_zero() ClearOldMode {
-        return ClearOldMode.FORCE_MEMSET_OLD_ZERO;
-    }
 };
 pub const InitNewMode = enum(u8) {
     DONT_MEMSET_NEW,
@@ -258,4 +242,12 @@ pub fn realloc_custom(alloc: Allocator, old_mem: anytype, new_n: usize, comptime
     }
     alloc.rawFree(old_byte_slice, .fromByteUnits(ALIGN), @returnAddress());
     return new_mem_types;
+}
+
+pub fn realloc_custom_with_ptr_ptrs(alloc: Allocator, old_mem_ptr_ptr: anytype, old_mem_cap_ptr: anytype, new_n: usize, comptime align_mode: Align, copy_mode: CopyMode, init_new_mode: InitNew(@typeInfo(@typeInfo(@TypeOf(old_mem_ptr_ptr)).pointer.child).pointer.child), clear_old_mode: ClearOldMode) Allocator.Error!void {
+    const old_mem = old_mem_ptr_ptr.*[0..old_mem_cap_ptr.*];
+    const new_mem = try realloc_custom(alloc, old_mem, new_n, align_mode, copy_mode, init_new_mode, clear_old_mode);
+    old_mem_ptr_ptr.* = new_mem.ptr;
+    old_mem_cap_ptr.* = @intCast(new_mem.len);
+    return;
 }

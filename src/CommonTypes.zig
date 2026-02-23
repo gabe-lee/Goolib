@@ -460,3 +460,12 @@ pub const WarningMode = enum(u8) {
     WARN,
     PANIC,
 };
+pub const ContinueMode = enum(u8) {
+    CONTINUE,
+    STOP,
+};
+pub const ContinueModeWithUnreachable = enum(u8) {
+    CONTINUE,
+    STOP,
+    UNREACHABLE,
+};
