@@ -36,6 +36,8 @@ const PowerOf2 = Root.Math.PowerOf2;
 const assert_with_reason = Assert.assert_with_reason;
 const assert_allocation_failure = Assert.assert_allocation_failure;
 const assert_unreachable = Assert.assert_unreachable;
+const assert_idx_less_than_len = Assert.assert_idx_less_than_len;
+const assert_idx_with_count_in_bounds = Assert.assert_idx_with_count_in_bounds;
 const num_cast = Root.Cast.num_cast;
 
 pub const SecondaryListSettings = struct {
@@ -186,6 +188,7 @@ pub fn SimplePool(comptime T: type, comptime IDX: type, comptime BUILTIN_ALLOC: 
             self.release_one(self.find_index_for_ptr(ptr));
         }
         pub fn release_one(self: *Pool, idx: IDX) void {
+            assert_idx_less_than_len(idx, self.len, @src());
             self.free_list.set_free(idx);
             if (CLEAR_RELEASED) |val| {
                 self.ptr[idx] = val;
@@ -200,6 +203,7 @@ pub fn SimplePool(comptime T: type, comptime IDX: type, comptime BUILTIN_ALLOC: 
             self.release_range(range.start, range.count);
         }
         pub fn release_range(self: *Pool, idx: IDX, count: IDX) void {
+            assert_idx_with_count_in_bounds(idx, count, self.len, @src());
             self.free_list.set_range_free(@intCast(idx), @intCast(count));
             if (CLEAR_RELEASED) |val| {
                 @memset(self.ptr[idx .. idx + count], val);
@@ -216,6 +220,7 @@ pub fn SimplePool(comptime T: type, comptime IDX: type, comptime BUILTIN_ALLOC: 
             return self.resize_range(range.start, range.count, new_count, alloc);
         }
         pub fn resize_range(self: *Pool, idx: IDX, old_count: IDX, new_count: IDX, alloc: Allocator) ClaimedRange {
+            assert_idx_with_count_in_bounds(idx, old_count, self.len, @src());
             if (new_count == old_count) return;
             const old_end = idx + old_count;
             if (new_count < old_count) {
@@ -284,18 +289,42 @@ pub fn SimplePool(comptime T: type, comptime IDX: type, comptime BUILTIN_ALLOC: 
     };
 }
 
-pub fn SimplePoolOpaque(comptime IDX: type, comptime BUILTIN_ALLOC: bool, comptime SECONDARY_LIST: ?SecondaryListSettings) type {
+pub fn SimplePoolOpaque(comptime IDX: type, comptime BUILTIN_ALLOC: bool, comptime _: ?[]const u8, comptime CLEAR_RELEASED: ?[]const u8, comptime SECONDARY_LIST: ?SecondaryListSettings) type {
     assert_with_reason(Types.type_is_unsigned_int(IDX), @src(), "type `IDX` must be an unsigned int type, got type `{s}`", .{@typeName(IDX)});
     const HAS_SECONDARY = SECONDARY_LIST != null;
     return extern struct {
         const Pool = @This();
 
-        ptr: [*]anyopaque = @ptrCast(Utils.invalid_ptr_many(u8)),
+        ptr: [*]u8 = @ptrCast(Utils.invalid_ptr_many(u8)),
         ptr_2: if (HAS_SECONDARY) [*]SECONDARY_LIST.?.elem_type else void = if (HAS_SECONDARY) @ptrCast(Utils.invalid_ptr_many(SECONDARY_LIST.?.elem_type)) else void{},
         alloc: if (BUILTIN_ALLOC) Allocator else void = if (BUILTIN_ALLOC) DummyAlloc.allocator_panic_free_noop else void{},
         free_list: FreeList = .{},
         len: IDX = 0,
         cap: IDX = 0,
+
+        pub fn opaque_elem_ptr(self: Pool, index: usize, elem_size: usize) [*]u8 {
+            assert_idx_less_than_len(index, self.len, @src());
+            const byte_index = index * elem_size;
+            return self.ptr + byte_index;
+        }
+        pub fn opaque_elem_bytes(self: Pool, index: usize, elem_size: usize) []u8 {
+            assert_idx_less_than_len(index, self.len, @src());
+            const byte_index = index * elem_size;
+            return (self.ptr + byte_index)[0..elem_size];
+        }
+        pub fn release_opaque(self: *Pool, index: usize, elem_size: usize) void {
+            const byte_index = index * elem_size;
+            assert_idx_less_than_len(index, self.len, @src());
+            self.free_list.set_free(index);
+            if (CLEAR_RELEASED) |val| {
+                const elem_bytes = (self.ptr + byte_index)[0..elem_size];
+                @memset(elem_bytes, val[0..elem_size]);
+            }
+            if (HAS_SECONDARY and SECONDARY_LIST.?.clear_released != null) {
+                const t_ptr: *const SECONDARY_LIST.?.elem_type = @ptrCast(@alignCast(SECONDARY_LIST.?.clear_released));
+                self.ptr_2[index] = t_ptr.*;
+            }
+        }
 
         pub fn to_typed(self: Pool, comptime T: type) SimplePool(T, IDX, BUILTIN_ALLOC, null, null, SECONDARY_LIST) {
             return @bitCast(self);

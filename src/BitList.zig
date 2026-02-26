@@ -29,25 +29,39 @@ const Allocator = std.mem.Allocator;
 const AllocInfal = Root.AllocatorInfallible;
 const DummyAllocator = Root.DummyAllocator;
 const Utils = Root.Utils;
+const EnumeratedDefinitions = Utils.EnumeratedDefs.EnumeratedDefinitions;
 
 const num_cast = Root.Cast.num_cast;
 
 const List = Root.IList.List;
+
+const SetOneZeroMode = enum(u8) {
+    SET_1,
+    SET_0,
+};
+
+const SetMode = enum(u8) {
+    CLEAR_AND_BIT_OR,
+    BIT_OR_ONLY,
+    CLEAR_ONLY,
+};
 
 const TrueIndex = struct {
     block_index: usize = 0,
     bit_offset: math.Log2Int(usize) = 0,
 };
 
-pub fn BitList(comptime BITS_PER_INDEX: comptime_int) type {
+pub fn BitList(comptime BITS_PER_INDEX: comptime_int, comptime ELEM_TYPE: type) type {
     Assert.assert_with_reason(BITS_PER_INDEX <= @bitSizeOf(usize), @src(), "`BITS_PER_INDEX` must be less than or equal to the number of bits in a `usize`, got {d} > {d}", .{ BITS_PER_INDEX, @bitSizeOf(usize) });
-    return struct {
+    Assert.assert_with_reason(@bitSizeOf(ELEM_TYPE) == BITS_PER_INDEX, @src(), "the bit size of `ELEM_TYPE` ({d}) must equal the `BITS_PER_INDEX` ({d})", .{ @bitSizeOf(ELEM_TYPE), BITS_PER_INDEX });
+    return extern struct {
         const Self = @This();
 
         list: List(usize) = .{},
         index_len: usize = 0,
 
         pub const BITS = std.meta.Int(.unsigned, BITS_PER_INDEX);
+        pub const TYPE = ELEM_TYPE;
         const USIZEBITS = @bitSizeOf(usize);
         const EVENLY_DIVISIBLE = USIZEBITS % BITS_PER_INDEX == 0;
         const OFFSHIFT = if (USIZEBITS == 32) 5 else 6;
@@ -71,7 +85,7 @@ pub fn BitList(comptime BITS_PER_INDEX: comptime_int) type {
             return out;
         }
 
-        pub fn get(self: Self, idx: usize) BITS {
+        pub fn get_raw(self: Self, idx: usize) BITS {
             Assert.assert_idx_less_than_len(idx, self.index_len, @src());
             const index = block_offset(idx);
             if (EVENLY_DIVISIBLE) {
@@ -92,11 +106,9 @@ pub fn BitList(comptime BITS_PER_INDEX: comptime_int) type {
             }
         }
 
-        const SetMode = enum(u8) {
-            CLEAR_AND_BIT_OR,
-            BIT_OR_ONLY,
-            CLEAR_ONLY,
-        };
+        pub fn get(self: Self, idx: usize) TYPE {
+            return @bitCast(self.get_raw(idx));
+        }
 
         fn set_internal(self: Self, idx: usize, val: BITS, comptime mode: SetMode) void {
             Assert.assert_idx_less_than_len(idx, self.index_len, @src());
@@ -142,11 +154,19 @@ pub fn BitList(comptime BITS_PER_INDEX: comptime_int) type {
             }
         }
 
-        pub fn set(self: Self, idx: usize, val: BITS) void {
-            self.set_internal(idx, val, .CLEAR_AND_BIT_OR);
+        pub fn set(self: Self, idx: usize, val: TYPE) void {
+            const bits: BITS = @bitCast(val);
+            self.set_internal(idx, bits, .CLEAR_AND_BIT_OR);
         }
-        pub fn set_no_clear(self: Self, idx: usize, val: BITS) void {
-            self.set_internal(idx, val, .BIT_OR_ONLY);
+        pub fn set_no_clear(self: Self, idx: usize, val: TYPE) void {
+            const bits: BITS = @bitCast(val);
+            self.set_internal(idx, bits, .BIT_OR_ONLY);
+        }
+        pub fn set_raw(self: Self, idx: usize, bits: BITS) void {
+            self.set_internal(idx, bits, .CLEAR_AND_BIT_OR);
+        }
+        pub fn set_raw_no_clear(self: Self, idx: usize, bits: BITS) void {
+            self.set_internal(idx, bits, .BIT_OR_ONLY);
         }
         pub fn clear(self: Self, idx: usize) void {
             self.set_internal(idx, 0, .CLEAR_ONLY);
@@ -380,10 +400,7 @@ pub fn BitList(comptime BITS_PER_INDEX: comptime_int) type {
             }
             return null;
         }
-        const SetOneZeroMode = enum(u8) {
-            SET_1,
-            SET_0,
-        };
+
         pub fn set_range_bits(self: Self, start: usize, count: usize, comptime mode: SetOneZeroMode) void {
             Assert.assert_with_reason(BITS_PER_INDEX == 1, @src(), "this function can only be used when `BITS_PER_INDEX == 1,`", .{});
             const end = start + count;
@@ -415,12 +432,18 @@ pub fn BitList(comptime BITS_PER_INDEX: comptime_int) type {
                 }
             }
         }
+
+        pub fn invert(self: Self, idx: usize) void {
+            var raw = self.get_raw(idx);
+            raw = ~raw;
+            self.set_raw(idx, raw);
+        }
     };
 }
 
 test "BitList" {
     const Test = Root.Testing;
-    const BList = BitList(1);
+    const BList = BitList(1, u1);
     var data = [_]usize{
         //        55        45  41       32      24       15     8      1
         0b1111111110000011111111101111111101111111000111111001111100011110,
@@ -465,8 +488,257 @@ test "BitList" {
     try Test.expect_equal(list.idx_has_n_consecutive_unset_bits(45, 6), "list.idx_has_n_consecutive_unset_bits(45, 6)", false, "false", "wrong result", .{});
 }
 
+pub fn BitListDef(comptime ENUM: type) type {
+    return struct {
+        const Self = @This();
+
+        name: ENUM,
+        bits: comptime_int,
+        elem_type: type,
+
+        pub fn valid(comptime self: Self, _: void) void {
+            Assert.assert_with_reason(self.bits <= @bitSizeOf(usize), @src(), "`bits` must be less than or equal to the number of bits in a `usize`, got {d} > {d}", .{ self.bits, @bitSizeOf(usize) });
+            Assert.assert_with_reason(@bitSizeOf(self.elem_type) == self.bits, @src(), "the bit size of `elem_type` ({d}) must equal the `bits` ({d})", .{ @bitSizeOf(self.elem_type), self.bits });
+        }
+    };
+}
+pub const BitListDefUnnamed = struct {
+    bits: comptime_int,
+    elem_type: type,
+};
+pub fn MultiBitList(comptime LIST_NAMES: type, comptime LIST_DEFS: EnumeratedDefinitions(LIST_NAMES, BitListDef(LIST_NAMES), "name", BitListDefUnnamed).ENUMERATED_LIST) type {
+    const bit_list_defs = EnumeratedDefinitions(LIST_NAMES, BitListDef(LIST_NAMES), "name", BitListDefUnnamed).build_ordered(LIST_DEFS, void{}, BitListDef(LIST_NAMES).valid);
+    return struct {
+        const MultiList = @This();
+        pub const DEFS = bit_list_defs;
+        pub const DEF_BUILDER = EnumeratedDefinitions(LIST_NAMES, BitListDef(LIST_NAMES), "name", BitListDefUnnamed);
+
+        lists: [DEF_BUILDER.NUM_DEFS]List(usize) = @splat(.{}),
+        len: usize = 0,
+
+        pub fn list_type(comptime LIST: LIST_NAMES) type {
+            return DEFS[@intFromEnum(LIST)].elem_type;
+        }
+        pub fn list_raw(comptime LIST: LIST_NAMES) type {
+            return std.meta.Int(.unsigned, DEFS[@intFromEnum(LIST)].bits);
+        }
+        fn _list_type(comptime LIST_IDX: Types.enum_tag_type(LIST_NAMES)) type {
+            return DEFS[LIST_IDX].elem_type;
+        }
+
+        pub fn init_capacity(cap: usize, alloc: Allocator) MultiList {
+            var out = MultiList{};
+            inline for (0..DEF_BUILDER.NUM_DEFS) |def_idx| {
+                const BList = BitList(DEFS[def_idx].bits, DEFS[def_idx].elem_type);
+                const list = BList.init_capacity(cap, alloc);
+                out.lists[def_idx] = list.list;
+            }
+            return out;
+        }
+
+        pub fn get(self: MultiList, comptime LIST: LIST_NAMES, idx: usize) list_type(LIST) {
+            const lidx = @intFromEnum(LIST);
+            const tlist = BitList(DEFS[lidx].bits, DEFS[lidx].elem_type){
+                .list = self.lists[lidx],
+                .index_len = self.len,
+            };
+            return tlist.get(idx);
+        }
+        pub fn get_raw(self: MultiList, comptime LIST: LIST_NAMES, idx: usize) list_raw(LIST) {
+            const lidx = @intFromEnum(LIST);
+            const tlist = BitList(DEFS[lidx].bits, DEFS[lidx].elem_type){
+                .list = self.lists[lidx],
+                .index_len = self.len,
+            };
+            return tlist.get_raw(idx);
+        }
+
+        pub fn set(self: MultiList, comptime LIST: LIST_NAMES, idx: usize, val: list_type(LIST)) void {
+            const lidx = @intFromEnum(LIST);
+            const tlist = BitList(DEFS[lidx].bits, DEFS[lidx].elem_type){
+                .list = self.lists[lidx],
+                .index_len = self.len,
+            };
+            tlist.set(idx, val);
+        }
+        pub fn set_no_clear(self: MultiList, comptime LIST: LIST_NAMES, idx: usize, val: list_type(LIST)) void {
+            const lidx = @intFromEnum(LIST);
+            const tlist = BitList(DEFS[lidx].bits, DEFS[lidx].elem_type){
+                .list = self.lists[lidx],
+                .index_len = self.len,
+            };
+            tlist.set_no_clear(idx, val);
+        }
+        pub fn set_raw(self: MultiList, comptime LIST: LIST_NAMES, idx: usize, val: list_raw(LIST)) void {
+            const lidx = @intFromEnum(LIST);
+            const tlist = BitList(DEFS[lidx].bits, DEFS[lidx].elem_type){
+                .list = self.lists[lidx],
+                .index_len = self.len,
+            };
+            tlist.set(idx, val);
+        }
+        pub fn set_raw_no_clear(self: MultiList, comptime LIST: LIST_NAMES, idx: usize, val: list_raw(LIST)) void {
+            const lidx = @intFromEnum(LIST);
+            const tlist = BitList(DEFS[lidx].bits, DEFS[lidx].elem_type){
+                .list = self.lists[lidx],
+                .index_len = self.len,
+            };
+            tlist.set_no_clear(idx, val);
+        }
+        pub fn clear(self: MultiList, comptime LIST: LIST_NAMES, idx: usize) void {
+            const lidx = @intFromEnum(LIST);
+            const tlist = BitList(DEFS[lidx].bits, DEFS[lidx].elem_type){
+                .list = self.lists[lidx],
+                .index_len = self.len,
+            };
+            tlist.clear(idx);
+        }
+
+        pub fn ensure_capacity_and_zero_new(self: *MultiList, cap: usize, alloc: Allocator) void {
+            inline for (0..DEF_BUILDER.NUM_DEFS) |def_idx| {
+                var tlist = BitList(DEFS[def_idx].bits, DEFS[def_idx].elem_type){
+                    .list = self.lists[def_idx],
+                    .index_len = self.len,
+                };
+                tlist.ensure_capacity_and_zero_new(cap, alloc);
+                self.lists[def_idx] = tlist.list;
+            }
+        }
+        pub fn set_len(self: *MultiList, len: usize, alloc: Allocator) void {
+            self.ensure_capacity_and_zero_new(len, alloc);
+            self.index_len = len;
+        }
+
+        pub fn find_first_n_consecutive_set_bits(self: MultiList, comptime LIST: LIST_NAMES, n: usize) ?usize {
+            const lidx = @intFromEnum(LIST);
+            const tlist = BitList(DEFS[lidx].bits, DEFS[lidx].elem_type){
+                .list = self.lists[lidx],
+                .index_len = self.len,
+            };
+            return tlist.find_first_n_consecutive_set_bits(n);
+        }
+        pub fn find_first_n_consecutive_set_bits_starting_at(self: MultiList, comptime LIST: LIST_NAMES, idx: usize, n: usize) ?usize {
+            const lidx = @intFromEnum(LIST);
+            const tlist = BitList(DEFS[lidx].bits, DEFS[lidx].elem_type){
+                .list = self.lists[lidx],
+                .index_len = self.len,
+            };
+            return tlist.find_first_n_consecutive_set_bits_starting_at(idx, n);
+        }
+        pub fn idx_has_n_consecutive_set_bits(self: MultiList, comptime LIST: LIST_NAMES, idx: usize, n: usize) bool {
+            const lidx = @intFromEnum(LIST);
+            const tlist = BitList(DEFS[lidx].bits, DEFS[lidx].elem_type){
+                .list = self.lists[lidx],
+                .index_len = self.len,
+            };
+            return tlist.idx_has_n_consecutive_set_bits(idx, n);
+        }
+
+        pub fn find_first_n_consecutive_unset_bits(self: MultiList, comptime LIST: LIST_NAMES, n: usize) ?usize {
+            const lidx = @intFromEnum(LIST);
+            const tlist = BitList(DEFS[lidx].bits, DEFS[lidx].elem_type){
+                .list = self.lists[lidx],
+                .index_len = self.len,
+            };
+            return tlist.find_first_n_consecutive_unset_bits(n);
+        }
+        pub fn find_first_n_consecutive_unset_bits_starting_at(self: MultiList, comptime LIST: LIST_NAMES, idx: usize, n: usize) ?usize {
+            const lidx = @intFromEnum(LIST);
+            const tlist = BitList(DEFS[lidx].bits, DEFS[lidx].elem_type){
+                .list = self.lists[lidx],
+                .index_len = self.len,
+            };
+            return tlist.find_first_n_consecutive_unset_bits_starting_at(idx, n);
+        }
+        pub fn idx_has_n_consecutive_unset_bits(self: MultiList, comptime LIST: LIST_NAMES, idx: usize, n: usize) bool {
+            const lidx = @intFromEnum(LIST);
+            const tlist = BitList(DEFS[lidx].bits, DEFS[lidx].elem_type){
+                .list = self.lists[lidx],
+                .index_len = self.len,
+            };
+            return tlist.idx_has_n_consecutive_unset_bits(idx, n);
+        }
+
+        pub fn find_first_bit_set(self: MultiList, comptime LIST: LIST_NAMES) ?usize {
+            const lidx = @intFromEnum(LIST);
+            const tlist = BitList(DEFS[lidx].bits, DEFS[lidx].elem_type){
+                .list = self.lists[lidx],
+                .index_len = self.len,
+            };
+            return tlist.find_first_bit_set();
+        }
+        pub fn find_first_bit_set_starting_at(self: MultiList, comptime LIST: LIST_NAMES, idx: usize) ?usize {
+            const lidx = @intFromEnum(LIST);
+            const tlist = BitList(DEFS[lidx].bits, DEFS[lidx].elem_type){
+                .list = self.lists[lidx],
+                .index_len = self.len,
+            };
+            return tlist.find_first_bit_set_starting_at(idx);
+        }
+        pub fn find_first_bit_unset(self: MultiList, comptime LIST: LIST_NAMES) ?usize {
+            const lidx = @intFromEnum(LIST);
+            const tlist = BitList(DEFS[lidx].bits, DEFS[lidx].elem_type){
+                .list = self.lists[lidx],
+                .index_len = self.len,
+            };
+            return tlist.find_first_bit_unset();
+        }
+        pub fn find_first_bit_unset_starting_at(self: MultiList, comptime LIST: LIST_NAMES, idx: usize) ?usize {
+            const lidx = @intFromEnum(LIST);
+            const tlist = BitList(DEFS[lidx].bits, DEFS[lidx].elem_type){
+                .list = self.lists[lidx],
+                .index_len = self.len,
+            };
+            return tlist.find_first_bit_unset_starting_at(idx);
+        }
+        pub fn set_range_bits(self: MultiList, comptime LIST: LIST_NAMES, start: usize, count: usize, comptime mode: SetOneZeroMode) void {
+            const lidx = @intFromEnum(LIST);
+            const tlist = BitList(DEFS[lidx].bits, DEFS[lidx].elem_type){
+                .list = self.lists[lidx],
+                .index_len = self.len,
+            };
+            return tlist.set_range_bits(start, count, mode);
+        }
+        pub fn find_first_bit_set_and_unset_it(self: MultiList, comptime LIST: LIST_NAMES) ?usize {
+            const lidx = @intFromEnum(LIST);
+            const tlist = BitList(DEFS[lidx].bits, DEFS[lidx].elem_type){
+                .list = self.lists[lidx],
+                .index_len = self.len,
+            };
+            const idx = tlist.find_first_bit_set();
+            if (idx) |i| {
+                tlist.clear(i);
+            }
+            return idx;
+        }
+        pub fn find_first_bit_unset_and_set_it(self: MultiList, comptime LIST: LIST_NAMES) ?usize {
+            const lidx = @intFromEnum(LIST);
+            const tlist = BitList(DEFS[lidx].bits, DEFS[lidx].elem_type){
+                .list = self.lists[lidx],
+                .index_len = self.len,
+            };
+            const idx = tlist.find_first_bit_unset();
+            if (idx) |i| {
+                tlist.set_no_clear(i, @bitCast(0b1));
+            }
+            return idx;
+        }
+
+        pub fn invert(self: MultiList, comptime LIST: LIST_NAMES, idx: usize) void {
+            const lidx = @intFromEnum(LIST);
+            const tlist = BitList(DEFS[lidx].bits, DEFS[lidx].elem_type){
+                .list = self.lists[lidx],
+                .index_len = self.len,
+            };
+            tlist.invert(idx);
+        }
+    };
+}
+
+pub const BoolList = BitList(1, bool);
+
 pub const FreeBitList = struct {
-    free_bits: BitList(1) = .{},
+    free_bits: BitList(1, bool) = .{},
     free_count: usize = 0,
 
     pub fn init_capacity(cap: usize, alloc: Allocator) FreeBitList {
@@ -510,5 +782,11 @@ pub const FreeBitList = struct {
     pub fn set_range_used(self: FreeBitList, idx: usize, count: usize) void {
         self.free_bits.set_range_bits(idx, count, .SET_0);
         self.free_count -= count;
+    }
+    pub fn idx_is_free(self: FreeBitList, idx: usize) bool {
+        return self.free_bits.get(idx);
+    }
+    pub fn idx_is_used(self: FreeBitList, idx: usize) bool {
+        return !self.free_bits.get(idx);
     }
 };

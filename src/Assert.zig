@@ -170,6 +170,10 @@ pub fn assert_slice_resides_in_slice(comptime T: type, slice: []const T, sub_sli
 pub fn assert_idx_less_than_len(idx: anytype, len: anytype, comptime src_loc: ?SourceLocation) void {
     assert_with_reason(idx < len, src_loc, "index ({d}) out of bounds for slice/list len ({d})", .{ idx, len });
 }
+pub fn assert_idx_with_count_in_bounds(idx: anytype, count: anytype, len: anytype, comptime src_loc: ?SourceLocation) void {
+    const end = MathX.upgrade_add(idx, count);
+    assert_with_reason(MathX.upgrade_less_than_or_equal(end, len), src_loc, "index ({d}) + count ({d}) = ({d}) out of bounds for slice/list len ({d})", .{ idx, count, end, len });
+}
 
 pub fn assert_idx_and_pointer_reside_in_slice_and_match(comptime T: type, slice: []const T, idx: usize, pointer: *const T, comptime src_loc: ?SourceLocation) void {
     assert_with_reason(idx < slice.len, src_loc, "index ({d}) out of bounds for slice/list len ({d})", .{ idx, slice.len });
