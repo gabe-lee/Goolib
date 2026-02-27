@@ -49,7 +49,7 @@ pub const Range = Concrete.Range;
 const NO_ALLOC = DummyAlloc.allocator_panic;
 
 pub fn List(comptime T: type) type {
-    return struct {
+    return extern struct {
         const Self = @This();
 
         ptr: [*]T = undefined,

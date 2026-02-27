@@ -72,7 +72,8 @@ pub const ListSegmentAllocator = @import("./ListSegmentAllocator.zig");
 pub const Math = @import("./Math.zig");
 pub const Matrix = @import("./Matrix.zig");
 pub const Measurement = @import("./Measurement.zig");
-pub const ParamTable = @import("./ParamTable.zig");
+pub const ParametricStateSystem = @import("./ParametricStateSystem.zig");
+// pub const ParamTable = @import("./ParamTable.zig");
 pub const Pool = @import("./Pool.zig");
 // pub const Quicksort = @import("./Quicksort.zig");
 pub const QuickWriter = @import("./QuickWriter.zig");
@@ -141,6 +142,7 @@ comptime {
         _ = @import("./Math.zig");
         _ = @import("./Matrix.zig");
         _ = @import("./Measurement.zig");
+        _ = @import("./ParametricStateSystem.zig");
         // _ = @import("./ParamTable.zig");
         _ = @import("./Pool.zig");
         // _ = @import("./Quicksort.zig");

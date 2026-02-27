@@ -1644,10 +1644,10 @@ pub const PowerOf2 = enum(u8) {
         return @enumFromInt(i);
     }
     pub fn value(self: PowerOf2) u64 {
-        @as(u64, 1) << @intCast(@intFromEnum(self));
+        return @as(u64, 1) << @intCast(@intFromEnum(self));
     }
     pub fn value_as_type(self: PowerOf2, comptime INT: type) INT {
-        @as(INT, 1) << @intCast(@intFromEnum(self));
+        return @as(INT, 1) << @intCast(@intFromEnum(self));
     }
     pub fn value_large(comptime self: PowerOf2) ValueLarge(self) {
         const INT = ValueLarge(self);

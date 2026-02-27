@@ -435,3 +435,15 @@ pub fn element_type(comptime POINTER_OR_SLICE: type) type {
     const PTR = INFO.pointer;
     return PTR.child;
 }
+
+pub fn any_ptr_to_many_item_ptr(ptr_or_slice: anytype) [*]@typeInfo(@TypeOf(ptr_or_slice)).pointer.child {
+    const T = @TypeOf(ptr_or_slice);
+    const ptr = switch (@typeInfo(T)) {
+        .pointer => |PTR| switch (PTR.size) {
+            .one, .c, .many => ptr_or_slice,
+            .slice => ptr_or_slice.ptr,
+        },
+        else => assert_unreachable(@src(), "`ptr_or_slice` must be a pointer or slice type, got type `{s}`", .{@typeName(T)}),
+    };
+    return @ptrCast(ptr);
+}

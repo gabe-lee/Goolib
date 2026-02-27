@@ -29,6 +29,7 @@ const assert = std.debug.assert;
 const build = @import("builtin");
 const Allocator = std.mem.Allocator;
 const Writer = std.Io.Writer;
+const Utils = Root.Utils;
 const fmt = std.fmt;
 
 const Root = @import("./_root.zig");
@@ -929,10 +930,11 @@ pub fn mem_search_with_func_and_userdata(data_ptr: anytype, start: usize, end_ex
 /// and the `insertion sort` algorithm
 ///
 /// Assumes `data_ptr[0..end_exclusive]` is a valid slice (sufficient memory is allocated)
-pub fn mem_sort(data_ptr: anytype, start: usize, end_exclusive: usize, userdata: anytype, greater_than: *const fn (a: @typeInfo(@TypeOf(data_ptr)).pointer.child, b: @typeInfo(@TypeOf(data_ptr)).pointer.child, userdata: @TypeOf(userdata)) bool) void {
-    const PTR = @TypeOf(data_ptr);
-    assert_with_reason(Types.type_is_many_item_pointer(PTR), @src(), "type of `data_ptr` must be a many-item-pointer, got type {s}", .{@typeName(PTR)});
-    const T = @typeInfo(@TypeOf(data_ptr)).pointer.child;
+pub fn mem_sort(_data_ptr: anytype, start: usize, end_exclusive: usize, userdata: anytype, greater_than: *const fn (a: @typeInfo(@TypeOf(_data_ptr)).pointer.child, b: @typeInfo(@TypeOf(_data_ptr)).pointer.child, userdata: @TypeOf(userdata)) bool) void {
+    const PTR = @TypeOf(_data_ptr);
+    assert_with_reason(Types.type_is_pointer_or_slice(PTR), @src(), "type of `data_ptr` must be a pointer or slice, got type {s}", .{@typeName(PTR)});
+    const T = @typeInfo(@TypeOf(_data_ptr)).pointer.child;
+    var data_ptr = Root.Cast.any_ptr_to_many_item_ptr(_data_ptr);
     var i: usize = start + 1;
     var j: usize = undefined;
     var jj: usize = undefined;
@@ -1641,4 +1643,8 @@ pub fn invalid_slice(comptime T: type) []T {
 }
 pub fn invalid_slice_const(comptime T: type) []const T {
     return invalid_ptr_many(T)[0..0];
+}
+
+pub fn comptime_debug_print(comptime _fmt: []const u8, args: anytype) void {
+    std.debug.print("{s}", .{std.fmt.comptimePrint(_fmt, args)});
 }

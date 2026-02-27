@@ -210,6 +210,9 @@ pub fn define_vec2_type(comptime T: type) type {
         pub fn component_sum(self: Vec2) T {
             return @reduce(.Add, self.flat());
         }
+        pub fn component_mult(self: Vec2) T {
+            return @reduce(.Mul, self.flat());
+        }
 
         pub fn distance_to(self: Vec2, other: Vec2) T {
             const sum_squares = self.distance_to_squared(other);
