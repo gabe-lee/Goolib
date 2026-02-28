@@ -95,7 +95,7 @@ pub fn KeyedMutex(comptime ENABLE: bool) type {
 
             /// Returns the new key (or same if key already has the same mutex pointer), and a bool
             /// descibing whether the lock was needed
-            pub fn lock_if_needed(self: Key, mutex: *SelfMutex) .{ Key, bool } {
+            pub fn lock_if_needed(self: Key, mutex: *SelfMutex) struct { Key, bool } {
                 if (ENABLE) {
                     if (self.ptr) |p| {
                         if (SHOULD_ASSERT) {
@@ -134,7 +134,7 @@ pub fn KeyedMutex(comptime ENABLE: bool) type {
                 }
             }
 
-            pub fn unlock_if_needed(self: Key, needed: bool) void {
+            pub fn unlock_if_needed(self: *Key, needed: bool) void {
                 if (ENABLE) {
                     if (needed) {
                         self.unlock();

@@ -1658,6 +1658,10 @@ pub const PowerOf2 = enum(u8) {
         return std.meta.Int(.unsigned, bits);
     }
 
+    pub fn usize_blocks_needed(count: anytype, bit_size: anytype) usize {
+        return PowerOf2.align_value_forward(PowerOf2.USIZE_POWER, Math.upgrade_multiply_out(count, bit_size, usize)) >> PowerOf2.USIZE_BITS_SHIFT;
+    }
+
     pub fn align_value_forward(self: PowerOf2, int_or_ptr: anytype) @TypeOf(int_or_ptr) {
         const T = @TypeOf(int_or_ptr);
         const INFO = @typeInfo(T);

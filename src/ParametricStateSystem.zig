@@ -76,19 +76,126 @@ pub const ParentDeleteMode = enum(u8) {
     DEFAULT_VALUE_WHEN_PARENT_IS_DELETED,
 };
 
-// pub const ParamFlags = Flags.Flags(enum(u2) {
-//     ALWAYS_UPDATE = 1 << 0,
-//     DEFAULT_WHEN_PARENT_DELETE = 1 << 1,
-// }, enum(u2) {});
+pub const InitializeMode = enum(u8) {
+    ALLOCATED,
+    STATIC_MEMORY,
+};
+pub fn StaticMemWithFree(comptime T: type) type {
+    return struct {
+        main_mem: []T,
+        free_list_mem: []usize,
+    };
+}
+pub fn StaticMemWithSecondaryAndFree(comptime MAIN_T: type, comptime SECONDARY_T: type) type {
+    return struct {
+        main_mem: []MAIN_T,
+        secondary_mem: []SECONDARY_T,
+        free_list_mem: []usize,
+    };
+}
+pub fn StaticMemWithSecondaryAndFreeAndMeta(comptime MAIN_T: type, comptime SECONDARY_T: type) type {
+    return struct {
+        main_mem: []MAIN_T,
+        secondary_mem: []SECONDARY_T,
+        free_list_mem: []usize,
+        meta_list_mem: []usize,
+    };
+}
+pub fn StaticMemWithSecondary(comptime MAIN_T: type, comptime SECONDARY_T: type) type {
+    return struct {
+        main_mem: []MAIN_T,
+        secondary_mem: []SECONDARY_T,
+    };
+}
+pub fn InitializeMem(comptime T: type) type {
+    return union(InitializeMode) {
+        const _Self = @This();
 
-// pub const ParamFlagsList = BitListModule.BitList(2, ParamFlags);
+        ALLOCATED: AllocInit,
+        STATIC_MEMORY: []T,
+
+        pub fn allocated(init: AllocInit) _Self {
+            return _Self{ .ALLOCATED = init };
+        }
+        pub fn static_memory(init: []T) _Self {
+            return _Self{ .STATIC_MEMORY = init };
+        }
+    };
+}
+pub fn InitializeMemWithFree(comptime T: type) type {
+    return union(InitializeMode) {
+        const _Self = @This();
+
+        ALLOCATED: AllocInit,
+        STATIC_MEMORY: StaticMemWithFree(T),
+
+        pub fn allocated(init: AllocInit) _Self {
+            return _Self{ .ALLOCATED = init };
+        }
+        pub fn static_memory(init: StaticMemWithFree(T)) _Self {
+            return _Self{ .STATIC_MEMORY = init };
+        }
+    };
+}
+pub fn InitializeMemWithSecondaryAndFree(comptime MAIN_T: type, comptime SECONDARY_T: type) type {
+    return union(InitializeMode) {
+        const _Self = @This();
+
+        ALLOCATED: AllocInit,
+        STATIC_MEMORY: StaticMemWithSecondaryAndFree(MAIN_T, SECONDARY_T),
+
+        pub fn allocated(init: AllocInit) _Self {
+            return _Self{ .ALLOCATED = init };
+        }
+        pub fn static_memory(init: StaticMemWithSecondaryAndFree(MAIN_T, SECONDARY_T)) _Self {
+            return _Self{ .STATIC_MEMORY = init };
+        }
+    };
+}
+pub fn InitializeMemWithSecondaryAndFreeAndMeta(comptime MAIN_T: type, comptime SECONDARY_T: type) type {
+    return union(InitializeMode) {
+        const _Self = @This();
+
+        ALLOCATED: AllocInit,
+        STATIC_MEMORY: StaticMemWithSecondaryAndFreeAndMeta(MAIN_T, SECONDARY_T),
+
+        pub fn allocated(init: AllocInit) _Self {
+            return _Self{ .ALLOCATED = init };
+        }
+        pub fn static_memory(init: StaticMemWithSecondaryAndFreeAndMeta(MAIN_T, SECONDARY_T)) _Self {
+            return _Self{ .STATIC_MEMORY = init };
+        }
+    };
+}
+pub fn InitializeMemWithSecondary(comptime MAIN_T: type, comptime SECONDARY_T: type) type {
+    return union(InitializeMode) {
+        const _Self = @This();
+
+        ALLOCATED: AllocInitWithSecondary,
+        STATIC_MEMORY: StaticMemWithSecondary(MAIN_T, SECONDARY_T),
+
+        pub fn allocated(init: AllocInitWithSecondary) _Self {
+            return _Self{ .ALLOCATED = init };
+        }
+        pub fn static_memory(init: StaticMemWithSecondary(MAIN_T, SECONDARY_T)) _Self {
+            return _Self{ .STATIC_MEMORY = init };
+        }
+    };
+}
+pub const AllocInit = struct {
+    init_capacity: usize,
+    alloc: Allocator,
+};
+pub const AllocInitWithSecondary = struct {
+    init_capacity_main: usize,
+    init_capacity_secondary: usize,
+    alloc: Allocator,
+};
 
 pub fn CategoryTypeDef(comptime CATEGORIES: type) type {
     return struct {
         category: CATEGORIES,
         param_type: type,
-        expected_maximum_num_params: usize,
-        maximum_is_guaranteed: bool = false,
         allow_free_slots: bool = true,
         default_value_for_type: ?*const anyopaque,
         /// MUST be a function pointer in the form `fn(a: param_type, b: param_type) bool`
@@ -98,8 +205,6 @@ pub fn CategoryTypeDef(comptime CATEGORIES: type) type {
 }
 pub const CategoryTypeDefUnnamed = struct {
     param_type: type,
-    expected_maximum_num_params: usize = 0,
-    maximum_is_guaranteed: bool = false,
     allow_free_slots: bool = true,
     default_value_for_type: ?*const anyopaque,
     /// MUST be a function pointer in the form `fn(a: param_type, b: param_type) bool`
@@ -119,6 +224,29 @@ pub const GenerationMode = enum(u8) {
 pub const GenerationSetting = union(GenerationMode) {
     NO_INDEX_GENERATIONS,
     PER_PARAMETER_INDEX_GENERATION_INT_POWER: PowerOf2,
+
+    pub inline fn no_index_generations() GenerationSetting {
+        return GenerationSetting{ .NO_INDEX_GENERATIONS = void{} };
+    }
+    pub inline fn per_parameter_index_generation_int_power(power: PowerOf2) GenerationSetting {
+        return GenerationSetting{ .PER_PARAMETER_INDEX_GENERATION_INT_POWER = power };
+    }
+};
+
+pub const MetaChangeMode = enum(u8) {
+    /// Do not include a meta-category
+    NO_META_CATEGORY,
+    /// Largest category tag-value is a category that tracks
+    /// the length of the other categories in each index
+    /// (matching the category index) and triggers updates
+    /// for derived parameters when a category length changes
+    META_CATEGORY_LENGTH_CHANGE_ONLY,
+    /// Largest category tag-value is a category that tracks
+    /// the length of the other categories in each index
+    /// (matching the category index) and triggers updates
+    /// for derived parameters when a category length changes
+    /// OR when ANY value in the category changes
+    META_CATEGORY_LENGTH_AND_VALUE_CHANGE,
 };
 
 pub const Settings = struct {
@@ -175,24 +303,12 @@ pub const Settings = struct {
     INDEX_GENERATION_MODE: GenerationSetting = .NO_INDEX_GENERATIONS,
     /// The maximum number of values any one category can have
     MAX_NUM_VALUES_IN_ANY_CATEGORY: comptime_int = 65536,
-    /// If true, the largest category index is enforced to be a meta category where each parameter index
-    /// holds the *length* of the parameter list for the matching category index. These parameter values will autoamtically be updated
-    /// by the ParametricStateSystem when the category parameter list grows or shrinks in size, and they can be used/reference
-    /// by other parameters for use in their calulations.
-    ///
-    /// Using this feature enforces the following conditions:
-    ///   - `MAX_NUM_VALUES_IN_ANY_CATEGORY` must be >= `MAX_NUM_CATEGORIES`
-    ///   - The category definition for the largest-valued category enum tag MUST be:
-    /// ```zig
-    /// .{
-    ///     .category: <ENUM TAG WITH LARGEST VALUE>,
-    ///     .param_type = MAX_NUM_VALUES_IN_ANY_CATEGORY.unsigned_integer_type_that_holds_all_values_up_to_and_including(),
-    ///     .expected_maximum_num_params = Types.enum_defined_field_count(PARAM_CATEGORIES) - 1,
-    ///     .maximum_is_guaranteed = true,
-    ///     .allow_free_slots = false,
-    /// }
-    /// ```
-    CATEGORY_WITH_LARGEST_INDEX_IS_META_CATEGORY_DESCRIBING_THE_PARAMETER_LENGTHS_OF_OTHER_CATEGORIES: bool = false,
+    /// If true, an additional read-only category is included that describes the state of the other
+    /// categories and can be used as a dependancy for other parameters:
+    ///   - `NO_META_CATEGORY`: feature not enabled
+    ///   - `META_CATEGORY_LENGTH_CHANGE_ONLY`: when a category length changes, the ParametricStateSystem automatically sets the meta category parameter with the new category length, and any parameter using this value will be triggered for update
+    ///   - `META_CATEGORY_LENGTH_AND_VALUE_CHANGE`: when a category length changes, OR when ANY value in the category changes (including being created or freed), the ParametricStateSystem automatically sets the meta category parameter with the new category length (and forces an update if a value changed but length was the same), and any parameter using this value will be triggered for update
+    INCLUDE_META_CATEGORY: MetaChangeMode = .NO_META_CATEGORY,
     /// The maximum number of unique function payloads (input+output sets)
     /// across all functions.
     ///
@@ -200,23 +316,12 @@ pub const Settings = struct {
     /// expect to have in the entire table (one unique payload per derivative param),
     /// but it may be much lower if many of your functions have more than one output.
     MAX_NUM_UNIQUE_FUNCTION_PAYLOADS: comptime_int = 65536,
-    /// If set to `true`, the payload location list will use a static memory block attatched to the
-    /// `ParametricStateSystem` type. The size of this list will be `(<size of integer that holds function index, payload offset, input len, and output len>) * MAX_NUM_UNIQUE_FUNCTION_PAYLOADS`
-    PAYLOAD_LOCATION_LIST_USES_STATIC_MEMORY: bool = false,
     /// The maximum number of functions that a parameter can trigger to update other params when it changes
     ///
     /// This also affects the number of derivative parameters a single parameter can have,
     /// but a single triggered function can update more than one derivative parameter at a time
     /// so the number may be larger than this
     MAX_NUM_TRIGGERED_UPDATES_ON_PARAM_CHANGE: comptime_int = 256,
-    /// If non-null, the update queue (a list of all param updates that have been queued in response to user input)
-    /// will use static memory of this length. The static byte size will be
-    /// `(<size of integer that holds function index, payload offset, input len, and output len>) * UPDATE_QUEUE_STATIC_LENGTH`
-    UPDATE_QUEUE_STATIC_LENGTH: ?comptime_int = null,
-    /// If non-null, the unique update queue (a list of all params previously updated)
-    /// will use static memory of this length. The static byte size will be
-    /// `(<size of integer that holds function index, payload offset, input len, output len, and recursion count>) * UNIQUE_UPDATE_QUEUE_STATIC_LENGTH`
-    UNIQUE_UPDATE_QUEUE_STATIC_LENGTH: ?comptime_int = null,
     /// If non-zero, an update function is allowed to be called as a result of a single parameter change a maximum of this many times.
     ///
     /// Each unique update payload will track its own number of times its been called, and stop when calling it again would exceed the
@@ -225,7 +330,7 @@ pub const Settings = struct {
     /// This setting can cause strange/unexpected effects when relying on recursive updates, and is NOT RECOMMENDED but provided regardless.
     /// For example, if one parameter update starts 2 separate update paths that lead back to a parent parameter update,
     /// it is not clearly defined how many times nor in what order each separate path will re-trigger the original param,
-    /// nor that each of the paths will update in a balanced way compared to the other
+    /// nor that each of the paths will update the same number of times compared to the other
     ALLOWED_RECURSIVE_UPDATES: comptime_int = 0,
     /// The maximum number of inputs a function can have
     MAX_NUM_FUNCTION_INPUTS: comptime_int = 16,
@@ -236,9 +341,6 @@ pub const Settings = struct {
     /// PowerOf2.round_up_to_power_of_2(MAX_NUM_UNIQUE_FUNCTION_PAYLOADS * (MAX_NUM_FUNCTION_INPUTS + MAX_NUM_FUNCTION_OUTPUTS)).value()
     /// ```
     MAX_PAYLOAD_LIST_LIMIT: comptime_int = 2097152,
-    /// If set to `true`, the payload data list will use a static memory block attatched to the
-    /// `ParametricStateSystem` type. The size of this list will be `(<size of integer that holds both category and param index>) * MAX_PAYLOAD_LIST_LIMIT`
-    PAYLOAD_LIST_USES_STATIC_MEMORY: bool = false,
 };
 
 pub fn ParametricStateSystem(
@@ -259,16 +361,13 @@ pub fn ParametricStateSystem(
 ) type {
     ct_assert_with_reason(Types.type_is_enum(PARAM_CATEGORIES) and Types.all_enum_values_start_from_zero_with_no_gaps(PARAM_CATEGORIES), @src(), "type `PARAM_CATEGORIES` must be an enum type with tag values from 0 to max with no gaps, got type `{s}`", .{@typeName(PARAM_CATEGORIES)});
     ct_assert_with_reason(Types.type_is_enum(FUNCTION_NAMES) and Types.all_enum_values_start_from_zero_with_no_gaps(FUNCTION_NAMES), @src(), "type `FUNCTION_NAMES` must be an enum type with tag values from 0 to max with no gaps, got type `{s}`", .{@typeName(FUNCTION_NAMES)});
-    // ct_assert_with_reason(Types.type_is_enum(FUNCTION_NAMES) and Types.all_enum_values_start_from_zero_with_no_gaps(FUNCTION_NAMES), @src(), "type `FUNCTION_NAMES` must be an enum type with tag values from 0 to max with no gaps, got type `{s}`", .{@typeName(FUNCTION_NAMES)});
-    const _NUM_CATEGORIES = Types.enum_defined_field_count(PARAM_CATEGORIES);
+    const _NUM_CATEGORIES = Types.enum_defined_field_count(PARAM_CATEGORIES) + if (SETTINGS.INCLUDE_META_CATEGORY != .NO_META_CATEGORY) 1 else 0;
     const _NUM_FUNCTIONS = Types.enum_defined_field_count(FUNCTION_NAMES);
-    const _MAX_FUNCTIONS_IDX = PowerOf2.round_up_to_power_of_2(@as(usize, _NUM_FUNCTIONS));
-    // const __NUM_FUNCTIONS = Types.enum_defined_field_count(FUNCTION_NAMES);
-    const _MAX_CATEGORIES_IDX = PowerOf2.round_up_to_power_of_2(@as(usize, _NUM_CATEGORIES));
-    // const _MAX_FUNCTIONS_IDX = PowerOf2.round_up_to_power_of_2(@as(usize, __NUM_FUNCTIONS));
+    const _MAX_FUNCTIONS_POWER = PowerOf2.round_up_to_power_of_2(@as(usize, _NUM_FUNCTIONS));
+    const _MAX_CATEGORIES_POWER = PowerOf2.round_up_to_power_of_2(@as(usize, _NUM_CATEGORIES));
     const idx_int = PowerOf2.round_up_to_power_of_2(SETTINGS.MAX_NUM_VALUES_IN_ANY_CATEGORY).unsigned_integer_type_that_holds_all_values_less_than();
-    const cat_int = _MAX_CATEGORIES_IDX.unsigned_integer_type_that_holds_all_values_less_than();
-    const func_idx = _MAX_FUNCTIONS_IDX.unsigned_integer_type_that_holds_all_values_less_than();
+    const cat_int = _MAX_CATEGORIES_POWER.unsigned_integer_type_that_holds_all_values_less_than();
+    const func_idx = _MAX_FUNCTIONS_POWER.unsigned_integer_type_that_holds_all_values_less_than();
     const gen_int = switch (SETTINGS.INDEX_GENERATION_MODE) {
         .NO_INDEX_GENERATIONS => u0,
         .PER_PARAMETER_INDEX_GENERATION_INT_POWER => |power| power.unsigned_integer_type_that_holds_all_values_less_than(),
@@ -279,22 +378,13 @@ pub fn ParametricStateSystem(
     const func_payload_offset_int = PowerOf2.round_up_to_power_of_2(SETTINGS.MAX_PAYLOAD_LIST_LIMIT).unsigned_integer_type_that_holds_all_values_less_than();
     const update_length_int = PowerOf2.round_up_to_power_of_2(SETTINGS.MAX_NUM_TRIGGERED_UPDATES_ON_PARAM_CHANGE).unsigned_integer_type_that_holds_all_values_less_than();
     const update_count_int = if (SETTINGS.ALLOWED_RECURSIVE_UPDATES > 0) PowerOf2.round_up_to_power_of_2(SETTINGS.ALLOWED_RECURSIVE_UPDATES).unsigned_integer_type_that_holds_all_values_less_than() else u0;
-    const SUBROUTINE = struct {
-        fn param_cat_align_lesser(a: PARAM_CATEGORIES, b: PARAM_CATEGORIES, userdata: [_NUM_CATEGORIES]CategoryTypeDefUnnamed) bool {
-            // std.debug.print("a: {s}, b: {s}", .{ @tagName(a), @tagName(b) }); //DEBUG
-            return @alignOf(userdata[@intFromEnum(a)].param_type) < @alignOf(userdata[@intFromEnum(b)].param_type);
-        }
-    };
     comptime var categories_defined: [_NUM_CATEGORIES]bool = @splat(false);
     comptime var ordered_category_defs: [_NUM_CATEGORIES]CategoryTypeDefUnnamed = undefined;
-    comptime var ordered_category_type_sizes: [_NUM_CATEGORIES]comptime_int = undefined;
+    comptime var ordered_category_default_value_ptrs: [_NUM_CATEGORIES]?*const anyopaque = undefined;
+    comptime var ordered_category_equality_funcs: [_NUM_CATEGORIES]?*const anyopaque = undefined;
+    comptime var ordered_category_type_sizes: [_NUM_CATEGORIES]usize = undefined;
+    comptime var ordered_category_type_aligns: [_NUM_CATEGORIES]usize = undefined;
     comptime var largest_category_type_size: usize = 0;
-    comptime var total_static_mem_bytes: usize = 0;
-    comptime var total_static_free_bit_blocks: usize = 0;
-    comptime var total_static_update_slots: usize = 0;
-    comptime var static_mem_largest_align: usize = 1;
-    comptime var static_categories_ordered_by_param_align: [_NUM_CATEGORIES]PARAM_CATEGORIES = undefined;
-    comptime var static_categories_ordered_by_param_align_len: usize = 0;
     comptime var unique_types: [_NUM_CATEGORIES]type = undefined;
     comptime var unique_type_ids: [_NUM_CATEGORIES]cat_int = undefined;
     comptime var category_type_ids: [_NUM_CATEGORIES]cat_int = undefined;
@@ -318,37 +408,56 @@ pub fn ParametricStateSystem(
             total_unique_types += 1;
         }
         largest_category_type_size = @max(largest_category_type_size, @sizeOf(def.param_type));
-        ct_assert_with_reason(def.expected_maximum_num_params <= SETTINGS.MAX_NUM_VALUES_IN_ANY_CATEGORY, @src(), "category `{s}` has a `.expected_maximum_num_params` ({d}) greater than the maximum possible number in any category ({d})", .{ def.expected_maximum_num_params, SETTINGS.MAX_NUM_VALUES_IN_ANY_CATEGORY });
         ordered_category_defs[cat_idx] = CategoryTypeDefUnnamed{
             .param_type = def.param_type,
-            .expected_maximum_num_params = def.expected_maximum_num_params,
-            .maximum_is_guaranteed = def.maximum_is_guaranteed,
             .allow_free_slots = def.allow_free_slots,
             .default_value_for_type = def.default_value_for_type,
             .type_equality_func = def.type_equality_func,
         };
+        ordered_category_default_value_ptrs[cat_idx] = def.default_value_for_type;
+        ordered_category_equality_funcs[cat_idx] = def.type_equality_func;
         ordered_category_type_sizes[cat_idx] = @sizeOf(def.param_type);
-        if (def.maximum_is_guaranteed) {
-            total_static_mem_bytes += def.expected_maximum_num_params * @sizeOf(def.param_type);
-            total_static_free_bit_blocks += PowerOf2.USIZE_POWER.align_value_forward(def.expected_maximum_num_params) >> PowerOf2.USIZE_BITS_SHIFT;
-            total_static_update_slots += def.expected_maximum_num_params;
-            static_mem_largest_align = @max(static_mem_largest_align, @alignOf(def.param_type));
-            static_categories_ordered_by_param_align[static_categories_ordered_by_param_align_len] = def.category;
-            static_categories_ordered_by_param_align_len += 1;
+        ordered_category_type_aligns[cat_idx] = @alignOf(def.param_type);
+    }
+    const META_PROTO = struct {
+        fn equals(a: idx_int, b: idx_int) bool {
+            return a == b;
         }
+        const ZERO: idx_int = 0;
+    };
+    if (SETTINGS.INCLUDE_META_CATEGORY != .NO_META_CATEGORY) {
+        comptime var found_unique_match: bool = false;
+        inline for (unique_types[0..total_unique_types], 0..) |unique_type, i| {
+            if (unique_type == idx_int) {
+                category_type_ids[_NUM_CATEGORIES - 1] = unique_type_ids[i];
+                found_unique_match = true;
+                break;
+            }
+        }
+        if (!found_unique_match) {
+            unique_types[total_unique_types] = idx_int;
+            unique_type_ids[total_unique_types] = total_unique_types;
+            category_type_ids[_NUM_CATEGORIES - 1] = total_unique_types;
+            total_unique_types += 1;
+        }
+        largest_category_type_size = @max(largest_category_type_size, @sizeOf(idx_int));
+        ordered_category_defs[_NUM_CATEGORIES - 1] = CategoryTypeDefUnnamed{
+            .param_type = idx_int,
+            .allow_free_slots = false,
+            .default_value_for_type = @ptrCast(&META_PROTO.ZERO),
+            .type_equality_func = @ptrCast(&META_PROTO.equals),
+        };
+        ordered_category_default_value_ptrs[_NUM_CATEGORIES - 1] = @ptrCast(&META_PROTO.ZERO);
+        ordered_category_equality_funcs[_NUM_CATEGORIES - 1] = @ptrCast(&META_PROTO.equals);
+        ordered_category_type_sizes[_NUM_CATEGORIES - 1] = @sizeOf(idx_int);
+        ordered_category_type_aligns[_NUM_CATEGORIES - 1] = @alignOf(idx_int);
     }
     const ordered_category_defs_const = ordered_category_defs;
     const ordered_category_type_sizes_const = ordered_category_type_sizes;
+    const ordered_category_type_aligns_const = ordered_category_type_aligns;
     const largest_category_type_size_const = largest_category_type_size;
-    const static_mem_largest_align_const = static_mem_largest_align;
-    const static_categories_ordered_by_param_align_len_const = static_categories_ordered_by_param_align_len;
-    if (static_categories_ordered_by_param_align_len_const > 0) {
-        //CHECKPOINT //FIXME why are these vals undefined?
-        @compileLog(static_categories_ordered_by_param_align_len_const); //DEBUG
-        @compileLog(static_categories_ordered_by_param_align[0..static_categories_ordered_by_param_align_len_const]); //DEBUG
-        // std.debug.print("static_categories_ordered_by_param_align: {any}", .{static_categories_ordered_by_param_align[0..static_categories_ordered_by_param_align_len_const]});
-        Utils.mem_sort(&static_categories_ordered_by_param_align[0], 0, static_categories_ordered_by_param_align_len_const, ordered_category_defs_const, SUBROUTINE.param_cat_align_lesser);
-    }
+    const ordered_category_default_value_ptrs_const = ordered_category_default_value_ptrs;
+    const ordered_category_equality_funcs_const = ordered_category_equality_funcs;
     const category_type_ids_const = category_type_ids;
     const unique_types_const: [total_unique_types]type = make: {
         comptime var out: [total_unique_types]type = undefined;
@@ -360,50 +469,6 @@ pub fn ParametricStateSystem(
         @memcpy(out[0..], unique_type_ids[0..total_unique_types]);
         break :make out;
     };
-
-    if (SETTINGS.CATEGORY_WITH_LARGEST_INDEX_IS_META_CATEGORY_DESCRIBING_THE_PARAMETER_LENGTHS_OF_OTHER_CATEGORIES) {
-        ct_assert_with_reason(SETTINGS.MAX_NUM_VALUES_IN_ANY_CATEGORY.value() >= _NUM_CATEGORIES, @src(), "when `CATEGORY_WITH_LARGEST_INDEX_IS_META_CATEGORY_DESCRIBING_THE_PARAMETER_LENGTHS_OF_OTHER_CATEGORIES` is true, `SETTINGS.MAX_NUM_VALUES_IN_ANY_CATEGORY.value() >= _NUM_CATEGORIES` must ALSO be true, but got {d} < {d}", .{ SETTINGS.MAX_NUM_VALUES_IN_ANY_CATEGORY.value(), _NUM_CATEGORIES });
-        const last_def_idx = _NUM_CATEGORIES - 1;
-        const last_def_name: PARAM_CATEGORIES = @enumFromInt(last_def_idx);
-        const last_def = ordered_category_defs_const[last_def_idx];
-        ct_assert_with_reason(last_def.param_type == SETTINGS.MAX_NUM_VALUES_IN_ANY_CATEGORY.unsigned_integer_type_that_holds_all_values_up_to_and_including(), @src(), "when `CATEGORY_WITH_LARGEST_INDEX_IS_META_CATEGORY_DESCRIBING_THE_PARAMETER_LENGTHS_OF_OTHER_CATEGORIES` is true, the largest category tag (`{s}` index {d}) must have `.param_type == SETTINGS.MAX_NUM_VALUES_IN_ANY_CATEGORY.unsigned_integer_type_that_holds_all_values_up_to_and_including()`", .{ @tagName(last_def_name), last_def_idx });
-        ct_assert_with_reason(last_def.expected_maximum_num_params == last_def_idx, @src(), "when `CATEGORY_WITH_LARGEST_INDEX_IS_META_CATEGORY_DESCRIBING_THE_PARAMETER_LENGTHS_OF_OTHER_CATEGORIES` is true, the largest category tag (`{s}` index {d}) must have `.expected_maximum_num_params == Types.enum_defined_field_count(PARAM_CATEGORIES) - 1` ({d})", .{ @tagName(last_def_name), last_def_idx, last_def_idx });
-        ct_assert_with_reason(last_def.maximum_is_guaranteed == true, @src(), "when `CATEGORY_WITH_LARGEST_INDEX_IS_META_CATEGORY_DESCRIBING_THE_PARAMETER_LENGTHS_OF_OTHER_CATEGORIES` is true, the largest category tag (`{s}` index {d}) must have `.maximum_is_guaranteed == true`", .{@tagName(last_def_name)});
-        ct_assert_with_reason(last_def.allow_free_slots == false, @src(), "when `CATEGORY_WITH_LARGEST_INDEX_IS_META_CATEGORY_DESCRIBING_THE_PARAMETER_LENGTHS_OF_OTHER_CATEGORIES` is true, the largest category tag (`{s}` index {d}) must have `.allow_free_slots == false`", .{@tagName(last_def_name)});
-    }
-    const static_categories_ordered_by_param_align_const: [static_categories_ordered_by_param_align_len_const]PARAM_CATEGORIES = make: {
-        var out: [static_categories_ordered_by_param_align_len_const]PARAM_CATEGORIES = undefined;
-        @memcpy(out[0..static_categories_ordered_by_param_align_len_const], static_categories_ordered_by_param_align[0..static_categories_ordered_by_param_align_len_const]);
-        break :make out;
-    };
-    comptime var static_category_mem_starts: [static_categories_ordered_by_param_align_len_const + 1]usize = undefined;
-    comptime var static_category_free_bit_block_starts: [static_categories_ordered_by_param_align_len_const + 1]usize = undefined;
-    comptime var static_category_update_slot_starts: [static_categories_ordered_by_param_align_len_const + 1]usize = undefined;
-    comptime var static_category_mem_starts_current_start: usize = 0;
-    comptime var static_category_free_bit_block_starts_current_start: usize = 0;
-    comptime var static_category_update_slot_current_start: usize = 0;
-    if (static_categories_ordered_by_param_align_len > 0) {
-        inline for (static_categories_ordered_by_param_align_const[0..], 0..) |cat, i| {
-            const cat_idx = @intFromEnum(cat);
-            const mem_size = @sizeOf(ordered_category_defs_const[cat_idx].param_type) * ordered_category_defs_const[cat_idx].expected_maximum_num_params;
-            static_category_mem_starts[i] = static_category_mem_starts_current_start;
-            static_category_free_bit_block_starts[i] = static_category_free_bit_block_starts_current_start;
-            static_category_update_slot_starts[i] = static_category_update_slot_current_start;
-            static_category_mem_starts_current_start += mem_size;
-            static_category_free_bit_block_starts_current_start += PowerOf2.USIZE_POWER.align_value_forward(ordered_category_defs_const[cat_idx].expected_maximum_num_params) >> PowerOf2.USIZE_BITS_SHIFT;
-            static_category_update_slot_current_start += ordered_category_defs_const[cat_idx].expected_maximum_num_params;
-        }
-        static_category_mem_starts[static_categories_ordered_by_param_align_len_const] = static_category_mem_starts_current_start;
-    }
-    static_category_mem_starts[static_categories_ordered_by_param_align_len_const] = static_category_mem_starts_current_start;
-    static_category_free_bit_block_starts[static_categories_ordered_by_param_align_len_const] = static_category_free_bit_block_starts_current_start;
-    static_category_update_slot_starts[static_categories_ordered_by_param_align_len_const] = static_category_update_slot_current_start;
-    const static_category_mem_starts_const = static_category_mem_starts;
-    const static_category_free_bit_block_starts_const = static_category_free_bit_block_starts;
-    const static_category_update_slot_starts_const = static_category_update_slot_starts;
-    const total_static_mem_bytes_const = total_static_mem_bytes;
-    const total_static_free_bit_blocks_const = total_static_free_bit_blocks;
-    const total_static_update_slots_const = total_static_update_slots;
     return struct {
         const System = @This();
         /// IT IS DISCOURAGED TO DIRECTLY ALTER THESE VARIABLES, BUT THEY ARE PROVIDED PUBLICLY IN THIS NAMESPACE IF NEEDED
@@ -411,17 +476,34 @@ pub fn ParametricStateSystem(
             pub const MULTITHREADED = SETTINGS.ENABLE_THREAD_SAFETY;
             pub var access_lock: KeyedMutex(MULTITHREADED) = .{};
 
+            pub fn IDForType(comptime T: type) CategoryId {
+                inline for (UNIQUE_TYPES[0..], 0..) |unique, i| {
+                    if (unique == T) {
+                        return UNIQUE_TYPE_IDS[i];
+                    }
+                }
+                assert_unreachable(@src(), "type `{s}` is not valid for ANY parameter category", .{@typeName(T)});
+            }
+
             // CATEGORIES
-            pub const USE_GENERATIONS = SETTINGS.INDEX_GENERATION_MODE.PER_PARAMETER_INDEX_GENERATION_INT_POWER;
+            pub const USE_GENERATIONS = SETTINGS.INDEX_GENERATION_MODE == .PER_PARAMETER_INDEX_GENERATION_INT_POWER;
+            pub const INCLUDE_META = SETTINGS.INCLUDE_META_CATEGORY != .NO_META_CATEGORY;
+            pub const META_CAT_IDX = NUM_CATEGORIES_NO_META;
+            pub const META_ALWAYS_UPDATE = SETTINGS.INCLUDE_META_CATEGORY == .META_CATEGORY_LENGTH_AND_VALUE_CHANGE;
             pub const CATEGORY_DEFS = ordered_category_defs_const;
             pub const CATEGORY_TYPE_SIZES = ordered_category_type_sizes_const;
+            pub const CATEGORY_TYPE_ALIGNS = ordered_category_type_aligns_const;
             pub const CATEGORY_TYPE_IDS = category_type_ids_const;
+            pub const CATEGORY_DEFAULT_VALUES = ordered_category_default_value_ptrs_const;
+            pub const CATEGORY_EQUALITY_FUNCS = ordered_category_equality_funcs_const;
             pub const UNIQUE_TYPES = unique_types_const;
             pub const UNIQUE_TYPE_IDS = unique_type_ids_const;
             pub const MAX_NUM_TRIGGERED_UPDATES_ON_PARAM_CHANGE = SETTINGS.MAX_NUM_TRIGGERED_UPDATES_ON_PARAM_CHANGE;
             pub const NUM_CATEGORIES = _NUM_CATEGORIES;
+            pub const NUM_CATEGORIES_NO_META = _NUM_CATEGORIES - if (INCLUDE_META) 1 else 0;
             pub const GenId = gen_int;
-            pub const CategoryPool = SimplePoolOpaque(Index, false, .{
+
+            pub const CategoryPool = SimplePoolOpaque(Index, null, null, .{
                 .elem_type = UpdateSlice,
             });
             pub const MetaData = packed struct {
@@ -451,63 +533,33 @@ pub fn ParametricStateSystem(
             pub const CategoryId: type = cat_int;
             pub const UpdateTriggerLength: type = update_length_int;
             pub const PayloadId: type = func_payload_int;
-            pub const STATIC_MEM_LEN = total_static_mem_bytes_const;
-            pub const STATIC_FREE_BIT_BLOCK_LEN = total_static_free_bit_blocks_const;
-            pub const STATIC_UPDATE_SLOT_LEN = total_static_update_slots_const;
-            pub const STATIC_MEM_ALIGN = static_mem_largest_align_const;
-            pub const STATIC_MEM_STARTS = static_category_mem_starts_const;
-            pub const STATIC_FREE_BIT_BLOCK_STARTS = static_category_free_bit_block_starts_const;
-            pub const STATIC_UPDATE_SLOT_STARTS = static_category_update_slot_starts_const;
-            pub var static_param_memory: [STATIC_MEM_LEN]u8 align(STATIC_MEM_ALIGN) = undefined;
-            pub var static_free_block_memory: [STATIC_FREE_BIT_BLOCK_LEN]usize = @splat(math.maxInt(usize));
-            pub var static_always_change_memory: [STATIC_FREE_BIT_BLOCK_LEN]usize = @splat(0);
-            pub var static_update_slot_memory: [STATIC_UPDATE_SLOT_LEN]UpdateSlice = undefined;
-            pub var categories: [NUM_CATEGORIES]Category = build: {
-                var out: [NUM_CATEGORIES]Category = undefined;
-                next_cat: for (0..NUM_CATEGORIES) |cat_idx| {
-                    const cat: CategoryName = @enumFromInt(cat_idx);
-                    const def = CATEGORY_DEFS[cat_idx];
-                    for (static_categories_ordered_by_param_align_const[0..], 0..) |cat_with_static_mem, static_idx| {
-                        if (cat == cat_with_static_mem) {
-                            const static_start = STATIC_MEM_STARTS[static_idx];
-                            const update_start = STATIC_UPDATE_SLOT_STARTS[static_idx];
-                            const free_bit_block_start = STATIC_FREE_BIT_BLOCK_STARTS[static_idx];
-                            const free_bit_block_end = STATIC_FREE_BIT_BLOCK_STARTS[static_idx + 1];
-                            out[cat_idx] = Category{
-                                .alloc = DummyAllocator.allocator_panic_free_noop,
-                                .data = .{
-                                    .ptr = @ptrCast(@alignCast(&static_param_memory[static_start])),
-                                    .ptr_2 = @ptrCast(&static_update_slot_memory[update_start]),
-                                    .len = 0,
-                                    .cap = @intCast(def.expected_maximum_num_params),
-                                    .free_list = .{
-                                        .free_bits = .{
-                                            .list = .{
-                                                .ptr = @ptrCast(&static_free_block_memory[free_bit_block_start]),
-                                                .len = @intCast(free_bit_block_end - free_bit_block_start),
-                                                .cap = @intCast(free_bit_block_end - free_bit_block_start),
-                                            },
-                                            .index_len = 0,
-                                        },
-                                        .free_count = 0,
-                                    },
-                                },
-                                .meta = .{
-                                    .list = .{
-                                        .ptr = @ptrCast(&static_always_change_memory[free_bit_block_start]),
-                                        .len = @intCast(free_bit_block_end - free_bit_block_start),
-                                        .cap = @intCast(free_bit_block_end - free_bit_block_start),
-                                    },
-                                    .index_len = 0,
-                                },
-                            };
-                            continue :next_cat;
-                        }
-                    }
-                    out[cat_idx] = Category{};
+            pub const META_FREE_LEN = if (INCLUDE_META) PowerOf2.align_value_forward(PowerOf2.USIZE_POWER, num_cast(NUM_CATEGORIES_NO_META, usize)) >> PowerOf2.USIZE_BITS_SHIFT;
+            pub var meta_memory: if (INCLUDE_META) [NUM_CATEGORIES_NO_META]Index else void = if (INCLUDE_META) @splat(0) else void{};
+            pub var meta_dependants: if (INCLUDE_META) [NUM_CATEGORIES_NO_META]UpdateSlice else void = if (INCLUDE_META) @splat(.{}) else void{};
+            pub var meta_free: if (INCLUDE_META) [META_FREE_LEN]usize else void = if (INCLUDE_META) @splat(0) else void{};
+            pub var meta_meta = if (INCLUDE_META) build: {
+                const blocks_needed = MetaList.blocks_needed(NUM_CATEGORIES_NO_META);
+                var out_mem: [blocks_needed]usize = @splat(0);
+                const fill = MetaData{
+                    .always_update = SETTINGS.INCLUDE_META_CATEGORY == .META_CATEGORY_LENGTH_AND_VALUE_CHANGE,
+                    .delete_if_parent_deleted = false,
+                    .if_not_deleted_set_value_default_when_parent_deleted = false,
+                    .generation = 0,
+                };
+                var bit_list = MetaList{
+                    .list = .{
+                        .ptr = @ptrCast(&out_mem[0]),
+                        .len = blocks_needed,
+                        .cap = blocks_needed,
+                    },
+                    .index_len = NUM_CATEGORIES_NO_META,
+                };
+                for (0..NUM_CATEGORIES_NO_META) |n| {
+                    bit_list.set(n, fill);
                 }
-                break :build out;
-            };
+                break :build out_mem;
+            } else void{};
+            pub var categories: [NUM_CATEGORIES]Category = @splat(Category{});
 
             // UPDATE QUEUE
             pub const RecursionCount: type = update_count_int;
@@ -528,26 +580,12 @@ pub fn ParametricStateSystem(
                 return .DO_NOT_QUEUE;
             }
             pub const MAX_TRIGGERS_PER_PARAM = SETTINGS.MAX_NUM_TRIGGERED_UPDATES_ON_PARAM_CHANGE;
-            pub const UpdateQueue = UniqueQueue(UpdatePackage, UpdatePackageUnique, UpdatePackage.equals, UpdatePackage.equals_unique, handle_recursion, handle_current_repeat, UpdatePackage.to_unique);
+            pub const UpdateQueue = UniqueQueue(UpdatePackage, UpdatePackageUnique, UpdatePackage.equals, UpdatePackage.equals_unique, handle_recursion, handle_current_repeat, UpdatePackage.to_unique, if (CHECK_UNIQUES) .CHECK_PREVIOUSLY_QUEUED_UNIQUES else .SKIP_CHECKING_PREVIOUS_UNIQUE_LIST);
             pub const RECURSION_ALLOWED = SETTINGS.ALLOWED_RECURSIVE_UPDATES > 0;
+            pub const CHECK_UNIQUES = RECURSION_ALLOWED or _RecursionAssert._should_assert();
             pub const RECURSION_LIMIT = SETTINGS.ALLOWED_RECURSIVE_UPDATES;
-            pub const STATIC_UPDATE_QUEUE_LEN = if (SETTINGS.UPDATE_QUEUE_STATIC_LENGTH) |LEN| LEN else 0;
-            pub const UNIQUE_STATIC_UPDATE_QUEUE_LEN = if (SETTINGS.UNIQUE_UPDATE_QUEUE_STATIC_LENGTH) |LEN| LEN else 0;
             pub var update_queue_alloc: Allocator = DummyAllocator.allocator_panic_free_noop;
-            pub var static_update_queue_mem: [STATIC_UPDATE_QUEUE_LEN]UpdatePackage = undefined;
-            pub var unique_static_update_queue_mem: [UNIQUE_STATIC_UPDATE_QUEUE_LEN]UpdatePackageUnique = undefined;
-            pub var update_queue: UpdateQueue = build: {
-                var queue = UpdateQueue{};
-                if (STATIC_UPDATE_QUEUE_LEN > 0) {
-                    queue.queue_ptr = @ptrCast(&static_update_queue_mem[0]);
-                    queue.queue_cap = STATIC_UPDATE_QUEUE_LEN;
-                }
-                if (UNIQUE_STATIC_UPDATE_QUEUE_LEN > 0) {
-                    queue.unique_ptr = @ptrCast(&unique_static_update_queue_mem[0]);
-                    queue.unique_cap = UNIQUE_STATIC_UPDATE_QUEUE_LEN;
-                }
-                break :build queue;
-            };
+            pub var update_queue: UpdateQueue = UpdateQueue{};
             pub var updates_in_progress: bool = false;
 
             // PAYLOAD LOCATIONS
@@ -575,13 +613,16 @@ pub fn ParametricStateSystem(
                 }
 
                 pub fn to_unique(self: UpdatePackage) UpdatePackageUnique {
-                    return UpdatePackageUnique{
+                    var pkg = UpdatePackageUnique{
                         .func_idx = self.func_idx,
                         .first_payload_index = self.first_payload_index,
                         .in_count = self.in_count,
                         .out_count = self.out_count,
-                        .recursion_count = 0,
                     };
+                    if (USE_GENERATIONS) {
+                        pkg.recursion_count = 0;
+                    }
+                    return pkg;
                 }
 
                 pub fn start_of_inputs(self: UpdatePackage) u32 {
@@ -602,61 +643,27 @@ pub fn ParametricStateSystem(
                 first_payload_index: PayloadOffset,
                 in_count: PayloadInCount,
                 out_count: PayloadOutCount,
-                recursion_count: RecursionCount,
+                recursion_count: RecursionCount = 0,
             };
             pub const MAX_NUM_UNIQUE_FUNCTION_PAYLOADS = SETTINGS.MAX_NUM_UNIQUE_FUNCTION_PAYLOADS;
             pub const MAX_FREE_BLOCKS_FOR_UNIQUE_FUNCTION_PAYLOADS = PowerOf2.USIZE_POWER.align_value_forward(MAX_NUM_UNIQUE_FUNCTION_PAYLOADS) >> PowerOf2.USIZE_BITS_SHIFT;
-            pub const PayloadLocationPool = SimplePool(UpdatePackage, PayloadId, false, null, null, null);
-            pub var payload_location_list_alloc: Allocator = DummyAllocator.allocator_panic_free_noop;
-            pub var payload_location_static_mem: if (SETTINGS.PAYLOAD_LOCATION_LIST_USES_STATIC_MEMORY) [MAX_NUM_UNIQUE_FUNCTION_PAYLOADS]UpdatePackage else void = if (SETTINGS.PAYLOAD_LOCATION_LIST_USES_STATIC_MEMORY) undefined else void{};
-            pub var payload_location_free_static_mem: if (SETTINGS.PAYLOAD_LOCATION_LIST_USES_STATIC_MEMORY) [MAX_FREE_BLOCKS_FOR_UNIQUE_FUNCTION_PAYLOADS]usize else void = if (SETTINGS.PAYLOAD_LOCATION_LIST_USES_STATIC_MEMORY) @splat(math.maxInt(usize)) else void{};
-            pub var payload_location_pool: PayloadLocationPool = if (SETTINGS.PAYLOAD_LOCATION_LIST_USES_STATIC_MEMORY) PayloadLocationPool{
-                .ptr = @ptrCast(&payload_location_static_mem[0]),
-                .len = 0,
-                .cap = MAX_NUM_UNIQUE_FUNCTION_PAYLOADS,
-                .free_list = FreeList{
-                    .free_bits = .{
-                        .list = .{
-                            .ptr = @ptrCast(&payload_location_free_static_mem[0]),
-                            .len = MAX_FREE_BLOCKS_FOR_UNIQUE_FUNCTION_PAYLOADS,
-                            .cap = MAX_FREE_BLOCKS_FOR_UNIQUE_FUNCTION_PAYLOADS,
-                        },
-                        .index_len = 0,
-                    },
-                    .free_count = 0,
-                },
-            } else PayloadLocationPool{};
+            pub const PayloadLocationPool = SimplePool(UpdatePackage, PayloadId, null, null, null);
+            pub var payload_location_pool_alloc: Allocator = DummyAllocator.allocator_panic_free_noop;
+            pub var payload_location_pool: PayloadLocationPool = PayloadLocationPool{};
 
             // PAYLOAD DATA
             pub const PayloadOffset: type = func_payload_offset_int;
             pub const MAX_PAYLOAD_LIST_LIMIT = SETTINGS.MAX_PAYLOAD_LIST_LIMIT;
             pub const MAX_FREE_BLOCKS_FOR_PAYLOAD_DATA = PowerOf2.USIZE_POWER.align_value_forward(MAX_PAYLOAD_LIST_LIMIT) >> PowerOf2.USIZE_BITS_SHIFT;
-            pub const PayloadDataPool = SimplePool(ParamReadWriteOpaque, PayloadOffset, false, null, null, null);
-            pub var payload_data_list_alloc: Allocator = DummyAllocator.allocator_panic_free_noop;
-            pub var payload_data_static_mem: if (SETTINGS.PAYLOAD_LIST_USES_STATIC_MEMORY) [SETTINGS.MAX_PAYLOAD_LIST_LIMIT]ParamReadWriteOpaque else void = if (SETTINGS.PAYLOAD_LIST_USES_STATIC_MEMORY) undefined else void{};
-            pub var payload_data_free_static_mem: if (SETTINGS.PAYLOAD_LIST_USES_STATIC_MEMORY) [MAX_FREE_BLOCKS_FOR_PAYLOAD_DATA]usize else void = if (SETTINGS.PAYLOAD_LIST_USES_STATIC_MEMORY) @splat(math.maxInt(usize)) else void{};
-            pub var payload_data_pool: PayloadDataPool = if (SETTINGS.PAYLOAD_LIST_USES_STATIC_MEMORY) PayloadDataPool{
-                .ptr = @ptrCast(&payload_data_static_mem[0]),
-                .len = 0,
-                .cap = SETTINGS.MAX_PAYLOAD_LIST_LIMIT,
-                .free_list = FreeList{
-                    .free_bits = .{
-                        .list = .{
-                            .ptr = @ptrCast(&payload_data_free_static_mem[0]),
-                            .len = MAX_FREE_BLOCKS_FOR_PAYLOAD_DATA,
-                            .cap = MAX_FREE_BLOCKS_FOR_PAYLOAD_DATA,
-                        },
-                        .index_len = 0,
-                    },
-                    .free_count = 0,
-                },
-            } else PayloadDataPool{};
+            pub const PayloadDataPool = SimplePool(ParamReadWriteOpaque, PayloadOffset, null, null, null);
+            pub var payload_data_pool_alloc: Allocator = DummyAllocator.allocator_panic_free_noop;
+            pub var payload_data_pool: PayloadDataPool = PayloadDataPool{};
 
             // FUNCTIONS
             pub const NUM_FUNCS = _NUM_FUNCTIONS;
             pub const FuncId: type = func_idx;
-            pub const FunctionPool = SimplePool(*const UpdateFunction, FuncId, false, null, null, null);
             pub const TRACK_FUNC_DEPENDANTS = SETTINGS.ALLOW_FUNCTION_REPLACEMENT or SETTINGS.ALLOW_FUNCTION_DELETION;
+            pub const DELETE_DEPENDANTS_WHEN_FUNC_DELETED = SETTINGS.DELETE_DEPENDANT_PARAMETERS_WHEN_FUNCTION_DELETED;
             pub const MAX_INPUTS = SETTINGS.MAX_NUM_FUNCTION_INPUTS;
             pub const MAX_OUTPUTS = SETTINGS.MAX_NUM_FUNCTION_OUTPUTS;
             pub const UpdatePackageNoFunc = packed struct {
@@ -696,7 +703,7 @@ pub fn ParametricStateSystem(
             pub const FunctionDependants = UpdatePackageNoFunc;
             pub const FuncDependantList = List(FunctionDependants);
             pub var func_dependants: if (TRACK_FUNC_DEPENDANTS) [NUM_FUNCS]FuncDependantList else void = if (TRACK_FUNC_DEPENDANTS) @splat(.{}) else void{};
-            pub var func_dep_alloc: Allocator = DummyAllocator.allocator_panic_free_noop;
+            pub var func_dep_allocs: if (TRACK_FUNC_DEPENDANTS) [NUM_FUNCS]Allocator else void = if (TRACK_FUNC_DEPENDANTS) @splat(DummyAllocator.allocator_panic_free_noop) else void{};
             pub var update_funcs: [NUM_FUNCS]*const UpdateFunction = undefined;
             pub var funcs_init: [NUM_FUNCS]bool = @splat(false);
             pub var func_gens: if (USE_GENERATIONS and SETTINGS.ALLOW_FUNCTION_DELETION) [NUM_FUNCS]GenId else void = if (USE_GENERATIONS and SETTINGS.ALLOW_FUNCTION_DELETION) @splat(0) else void{};
@@ -775,14 +782,14 @@ pub fn ParametricStateSystem(
                 var mutex_key: MutexKey, const owns_key: bool = _mutex_key.lock_if_needed(&INTERNAL.access_lock);
                 defer mutex_key.unlock_if_needed(owns_key);
                 if (USE_GENERATIONS and !SKIP_GEN_CHECK and _Assert._should_assert()) {
-                    const found_gen = categories[cat_idx].generations.get(@intCast(index));
+                    const found_gen = categories[cat_idx].meta.get(@intCast(index)).generation;
                     assert_with_reason(found_gen == gen, @src(), "attempted to access parameter (category `{s}` index {d}) with mismatched generation (requested {d}, found {d})", .{ @tagName(num_cast(cat_idx, CategoryName)), index, gen, found_gen });
                 }
                 const list_opaque = categories[cat_idx].data;
                 const list_typed = list_opaque.to_typed(T);
                 const old: T = list_typed.ptr[index];
                 list_typed.ptr[index] = val;
-                const is_equal: *const fn (a: T, b: T) bool = @ptrCast(@alignCast(CATEGORY_DEFS[cat_idx].type_equality_func));
+                const is_equal: *const fn (a: T, b: T) bool = @ptrCast(@alignCast(CATEGORY_EQUALITY_FUNCS[cat_idx]));
                 if (!is_equal(old, val) or categories[cat_idx].meta.get(@intCast(index)).always_update) {
                     const update_slice: UpdateSlice = categories[cat_idx].data.ptr_2[index];
                     if (update_slice.update_count > 0) {
@@ -800,7 +807,7 @@ pub fn ParametricStateSystem(
                 var mutex_key: MutexKey, const owns_key: bool = _mutex_key.lock_if_needed(&INTERNAL.access_lock);
                 defer mutex_key.unlock_if_needed(owns_key);
                 if (USE_GENERATIONS and !SKIP_GEN_CHECK and _Assert._should_assert()) {
-                    const found_gen = categories[cat_idx].generations.get(@intCast(index));
+                    const found_gen = categories[cat_idx].meta.get(@intCast(index)).generation;
                     assert_with_reason(found_gen == gen, @src(), "attempted to access parameter (category `{s}` index {d}) with mismatched generation (requested {d}, found {d})", .{ @tagName(num_cast(cat_idx, CategoryName)), index, gen, found_gen });
                 }
                 const T_SIZE = CATEGORY_TYPE_SIZES[cat_idx];
@@ -809,7 +816,7 @@ pub fn ParametricStateSystem(
                 var old: [LARGEST_TYPE_SIZE]u8 = undefined;
                 @memcpy(old[0..T_SIZE], elem_bytes_opaque);
                 @memcpy(elem_bytes_opaque, val[0..T_SIZE]);
-                if (!bytes_are_equal(old, val[0..T_SIZE]) or categories[cat_idx].meta.get(@intCast(index)).always_update) {
+                if (!bytes_are_equal(old[0..T_SIZE], val[0..T_SIZE]) or categories[cat_idx].meta.get(@intCast(index)).always_update) {
                     const update_slice: UpdateSlice = categories[cat_idx].data.ptr_2[index];
                     if (update_slice.update_count > 0) {
                         const updates_to_trigger = payload_location_pool.ptr[update_slice.first_payload_u32()..update_slice.end_payload_u32_excluded()];
@@ -826,7 +833,7 @@ pub fn ParametricStateSystem(
                 var mutex_key: MutexKey, const owns_key: bool = _mutex_key.lock_if_needed(&INTERNAL.access_lock);
                 defer mutex_key.unlock_if_needed(owns_key);
                 if (USE_GENERATIONS and !SKIP_GEN_CHECK and _Assert._should_assert()) {
-                    const found_gen = categories[cat_idx].generations.get(@intCast(index));
+                    const found_gen = categories[cat_idx].meta.get(@intCast(index)).generation;
                     assert_with_reason(found_gen == gen, @src(), "attempted to access parameter (category `{s}` index {d}) with mismatched generation (requested {d}, found {d})", .{ @tagName(num_cast(cat_idx, CategoryName)), index, gen, found_gen });
                 }
                 const list_opaque = categories[cat_idx].data;
@@ -840,7 +847,12 @@ pub fn ParametricStateSystem(
                 const inputs: []const ParamReadOnlyOpaque = input_ptr[0..package.in_count];
                 const outputs: []const ParamReadWriteOpaque = output_ptr[0..package.out_count];
                 const func = update_funcs[package.func_idx];
-                func(mutex_key, inputs, outputs);
+                const interface = UpdateInterface{
+                    .key = mutex_key,
+                    .inputs = inputs,
+                    .outputs = outputs,
+                };
+                func(interface);
             }
 
             pub fn process_all_updates_if_needed(mutex_key: MutexKey) void {
@@ -849,7 +861,7 @@ pub fn ParametricStateSystem(
                     defer updates_in_progress = false;
                     while (update_queue.has_queued_items()) {
                         const next_update = update_queue.get_next_queued_guaranteed();
-                        process_one_update(mutex_key, next_update, false);
+                        process_one_update(mutex_key, next_update);
                     }
                     update_queue.reset();
                 }
@@ -875,12 +887,12 @@ pub fn ParametricStateSystem(
                     defer delete_in_progress = false;
                     if (SKIP_FIRST_GEN_CHECK and delete_queue_cursor < delete_queue.len) {
                         const param = delete_queue.ptr[delete_queue_cursor];
-                        process_one_delete(param, mutex_key, true);
+                        process_one_delete(param, mutex_key, true, false);
                         delete_queue_cursor += 1;
                     }
                     while (delete_queue_cursor < delete_queue.len) {
                         const param = delete_queue.ptr[delete_queue_cursor];
-                        process_one_delete(param, mutex_key, false);
+                        process_one_delete(param, mutex_key, false, false);
                         delete_queue_cursor += 1;
                     }
                     delete_queue.clear();
@@ -928,8 +940,8 @@ pub fn ParametricStateSystem(
 
             pub fn set_param_default_internal(param: ParamReadWriteOpaque, mutex_key: MutexKey, comptime SKIP_GEN_CHECK: bool, comptime SKIP_PROCESS_CHANGES: bool) void {
                 const OUT_SIZE = CATEGORY_TYPE_SIZES[param.category];
-                assert_with_reason(CATEGORY_DEFS[param.category].default_value_for_type != null, @src(), "parameter index {d} in category `{s}` has `delete_if_parent_deleted == false` and `if_not_deleted_set_value_default_when_parent_deleted == true` and its parent was deleted, but the category has no default value provided", .{ param.index, @tagName(num_cast(param.category, CategoryName)) });
-                const default_opaque_ptr: [*]const u8 = @ptrCast(@alignCast(CATEGORY_DEFS[param.category].default_value_for_type.?));
+                assert_with_reason(CATEGORY_DEFAULT_VALUES[param.category] != null, @src(), "parameter index {d} in category `{s}` has `delete_if_parent_deleted == false` and `if_not_deleted_set_value_default_when_parent_deleted == true` and its parent was deleted, but the category has no default value provided", .{ param.index, @tagName(num_cast(param.category, CategoryName)) });
+                const default_opaque_ptr: [*]const u8 = @ptrCast(@alignCast(CATEGORY_DEFAULT_VALUES[param.category].?));
                 const default_opaque_bytes = default_opaque_ptr[0..OUT_SIZE];
                 set_internal_opaque(param.category, param.index, param.generation, default_opaque_bytes, mutex_key, SKIP_GEN_CHECK, SKIP_PROCESS_CHANGES);
             }
@@ -953,7 +965,7 @@ pub fn ParametricStateSystem(
                     idx = claimed.idx;
                     ptr = claimed.ptr;
                 }
-                cat_meta.ensure_capacity_and_zero_new(@intCast(idx), cat_alloc);
+                cat_meta.set_len(num_cast(idx, usize) + 1, cat_alloc);
                 var meta = cat_meta.get(idx);
                 meta.always_update = update_mode == .ALWAYS_UPDATE_EVEN_IF_VALUE_UNCHANGED;
                 meta.delete_if_parent_deleted = false;
@@ -996,6 +1008,7 @@ pub fn ParametricStateSystem(
                 inline for (@typeInfo(DEFS).@"struct".fields) |field| {
                     const def: DerivedParamDef = @field(output_defs, field.name);
                     const cat_idx = @intFromEnum(def.category);
+                    // CHECKPOINT find way to make this runtime vvvvv
                     const def_type = INTERNAL.CATEGORY_DEFS[cat_idx].param_type;
                     var cat_data = INTERNAL.categories[cat_idx].data.to_typed_ptr(def_type);
                     var cat_meta = &INTERNAL.categories[cat_idx].meta;
@@ -1034,7 +1047,7 @@ pub fn ParametricStateSystem(
                         .generation = if (INTERNAL.USE_GENERATIONS) gen else 0,
                     };
                 }
-                const new_payload_package_range = INTERNAL.payload_data_pool.claim_range(@intCast(params_count), INTERNAL.payload_data_list_alloc);
+                const new_payload_package_range = INTERNAL.payload_data_pool.claim_range(@intCast(params_count), INTERNAL.payload_data_pool_alloc);
                 for (inputs_flat[0..], new_payload_package_range.slice[0..input_count]) |in, *opaque_param| {
                     opaque_param.* = ParamReadWriteOpaque{
                         .category = in.category,
@@ -1057,7 +1070,7 @@ pub fn ParametricStateSystem(
                     }
                     var input_update_slice: INTERNAL.UpdateSlice = INTERNAL.categories[input.category].data.ptr_2[input.index];
                     if (input_update_slice.update_count == 0) {
-                        const new_payload_slot = INTERNAL.payload_location_pool.claim_one(INTERNAL.payload_location_list_alloc);
+                        const new_payload_slot = INTERNAL.payload_location_pool.claim_one(INTERNAL.payload_location_pool_alloc);
                         input_update_slice.first_payload = @intCast(new_payload_slot.idx);
                         input_update_slice.update_count = 1;
                         new_update_package = INTERNAL.UpdatePackage{
@@ -1068,7 +1081,7 @@ pub fn ParametricStateSystem(
                         };
                         new_payload_slot.ptr.* = new_update_package;
                     } else {
-                        const new_payload_slice = INTERNAL.payload_location_pool.resize_range(input_update_slice.first_payload, input_update_slice.update_count, input_update_slice.update_count + 1, INTERNAL.payload_location_list_alloc);
+                        const new_payload_slice = INTERNAL.payload_location_pool.resize_range(input_update_slice.first_payload, input_update_slice.update_count, input_update_slice.update_count + 1, INTERNAL.payload_location_pool_alloc);
                         input_update_slice.first_payload = @intCast(new_payload_slice.start_idx);
                         input_update_slice.update_count += 1;
                         new_update_package = INTERNAL.UpdatePackage{
@@ -1083,7 +1096,7 @@ pub fn ParametricStateSystem(
                 if (TRACK_FUNC_DEPENDANTS) {
                     var func_deps: *FuncDependantList = &func_dependants[_func_idx];
                     const package_no_func = UpdatePackageNoFunc.from_update_package(new_update_package);
-                    _ = func_deps.append(package_no_func, func_dep_alloc);
+                    _ = func_deps.append(package_no_func, func_dep_allocs[_func_idx]);
                 }
                 INTERNAL.update_queue.queue(new_update_package, INTERNAL.update_queue_alloc);
                 if (!INTERNAL.updates_in_progress) {
@@ -1093,6 +1106,161 @@ pub fn ParametricStateSystem(
                 }
             }
         };
+
+        pub const InitializeFuncDependantsMem = struct {
+            func_name: FuncName,
+            init_mem: InitializeMem(INTERNAL.FunctionDependants),
+        };
+        pub const InitializeCategoryMem = struct {
+            category_name: CategoryName,
+            init_mem: InitializeMemWithSecondaryAndFreeAndMeta(u8, INTERNAL.UpdateSlice),
+        };
+
+        pub const InitPackage = struct {
+            delete_queue_memory: InitializeMem(ParamReadWriteOpaque),
+            payload_data_pool_memory: InitializeMemWithFree(ParamReadWriteOpaque),
+            update_package_pool_memory: InitializeMemWithFree(INTERNAL.UpdatePackage),
+            update_queue_memory: if (INTERNAL.CHECK_UNIQUES) InitializeMemWithSecondary(INTERNAL.UpdatePackage, INTERNAL.UpdatePackageUnique) else InitializeMem(INTERNAL.UpdatePackage),
+            function_dependants_memory: if (INTERNAL.TRACK_FUNC_DEPENDANTS) [INTERNAL.NUM_FUNCS]InitializeFuncDependantsMem else void,
+            parameter_memory: [INTERNAL.NUM_CATEGORIES_NO_META]InitializeCategoryMem,
+        };
+
+        pub fn initialize_memory(init: InitPackage) void {
+            switch (init.delete_queue_memory) {
+                .ALLOCATED => |A| {
+                    INTERNAL.delete_queue_alloc = A.alloc;
+                    INTERNAL.delete_queue = .init_capacity(A.init_capacity, A.alloc);
+                },
+                .STATIC_MEMORY => |S| {
+                    INTERNAL.delete_queue.ptr = S.ptr;
+                    INTERNAL.delete_queue.cap = @intCast(S.len);
+                },
+            }
+            switch (init.payload_data_pool_memory) {
+                .ALLOCATED => |A| {
+                    INTERNAL.payload_data_pool_alloc = A.alloc;
+                    INTERNAL.payload_data_pool = .init_capacity(@intCast(A.init_capacity), A.alloc);
+                },
+                .STATIC_MEMORY => |S| {
+                    INTERNAL.payload_data_pool.ptr = S.main_mem.ptr;
+                    INTERNAL.payload_data_pool.cap = @intCast(S.main_mem.len);
+                    INTERNAL.payload_data_pool.free_list.free_bits.list.ptr = S.free_list_mem.ptr;
+                    INTERNAL.payload_data_pool.free_list.free_bits.list.cap = @intCast(S.free_list_mem.len);
+                },
+            }
+            switch (init.update_package_pool_memory) {
+                .ALLOCATED => |A| {
+                    INTERNAL.payload_location_pool_alloc = A.alloc;
+                    INTERNAL.payload_location_pool = .init_capacity(@intCast(A.init_capacity), A.alloc);
+                },
+                .STATIC_MEMORY => |S| {
+                    INTERNAL.payload_location_pool.ptr = S.main_mem.ptr;
+                    INTERNAL.payload_location_pool.cap = @intCast(S.main_mem.len);
+                    INTERNAL.payload_location_pool.free_list.free_bits.list.ptr = S.free_list_mem.ptr;
+                    INTERNAL.payload_location_pool.free_list.free_bits.list.cap = @intCast(S.free_list_mem.len);
+                },
+            }
+            if (INTERNAL.CHECK_UNIQUES) {
+                const _init: InitializeMemWithSecondary(INTERNAL.UpdatePackage, INTERNAL.UpdatePackageUnique) = init.update_queue_memory;
+                switch (_init) {
+                    .ALLOCATED => |A| {
+                        INTERNAL.update_queue_alloc = A.alloc;
+                        INTERNAL.update_queue = .init_capacity(@intCast(A.init_capacity_main), @intCast(A.init_capacity_secondary), A.alloc);
+                    },
+                    .STATIC_MEMORY => |S| {
+                        INTERNAL.update_queue.queue_ptr = S.main_mem.ptr;
+                        INTERNAL.update_queue.queue_cap = @intCast(S.main_mem.len);
+                        INTERNAL.update_queue.unique_ptr = S.secondary_mem.ptr;
+                        INTERNAL.update_queue.unique_cap = @intCast(S.secondary_mem.len);
+                    },
+                }
+            } else {
+                const _init: InitializeMem(INTERNAL.UpdatePackage) = init.update_queue_memory;
+                switch (_init) {
+                    .ALLOCATED => |A| {
+                        INTERNAL.update_queue_alloc = A.alloc;
+                        INTERNAL.update_queue = .init_capacity(@intCast(A.init_capacity), 0, A.alloc);
+                    },
+                    .STATIC_MEMORY => |S| {
+                        INTERNAL.update_queue.queue_ptr = S.ptr;
+                        INTERNAL.update_queue.queue_cap = @intCast(S.len);
+                    },
+                }
+            }
+            if (INTERNAL.TRACK_FUNC_DEPENDANTS) {
+                const deps_init: [INTERNAL.NUM_FUNCS]InitializeFuncDependantsMem = init.function_dependants_memory;
+                var deps_init_done: [INTERNAL.NUM_FUNCS]bool = @splat(false);
+                for (deps_init[0..]) |d_init| {
+                    const f_idx = @intFromEnum(d_init.func_name);
+                    INTERNAL.assert_with_reason(deps_init_done[f_idx] == false, @src(), "function `{s}` had its dependants list memory initilized twice", .{@tagName(d_init.func_name)});
+                    deps_init_done[f_idx] = true;
+                    switch (d_init.init_mem) {
+                        .ALLOCATED => |A| {
+                            INTERNAL.func_dep_allocs[f_idx] = A.alloc;
+                            INTERNAL.func_dependants[f_idx] = INTERNAL.FuncDependantList.init_capacity(@intCast(A.init_capacity), A.alloc);
+                        },
+                        .STATIC_MEMORY => |S| {
+                            INTERNAL.func_dependants[f_idx].ptr = S.ptr;
+                            INTERNAL.func_dependants[f_idx].cap = @intCast(S.len);
+                        },
+                    }
+                }
+            }
+            var cat_inits_done: [INTERNAL.NUM_CATEGORIES]bool = @splat(false);
+            for (init.parameter_memory[0..]) |c_init| {
+                const c_idx = @intFromEnum(c_init.category_name);
+                INTERNAL.assert_with_reason(cat_inits_done[c_idx] == false, @src(), "category `{s}` had its parameter memory initilized twice", .{@tagName(c_init.category_name)});
+                cat_inits_done[c_idx] = true;
+                switch (c_init.init_mem) {
+                    .ALLOCATED => |A| {
+                        INTERNAL.categories[c_idx].alloc = A.alloc;
+                        INTERNAL.categories[c_idx].data = .init_capacity(A.init_capacity, INTERNAL.CATEGORY_TYPE_SIZES[c_idx], INTERNAL.CATEGORY_TYPE_ALIGNS[c_idx], A.alloc);
+                        INTERNAL.categories[c_idx].meta = .init_capacity(A.init_capacity, A.alloc);
+                    },
+                    .STATIC_MEMORY => |S| {
+                        INTERNAL.categories[c_idx].data.ptr = S.main_mem.ptr;
+                        INTERNAL.categories[c_idx].data.ptr_2 = S.secondary_mem.ptr;
+                        Assert.warn_with_reason(num_cast(S.main_mem.len / INTERNAL.CATEGORY_TYPE_SIZES[c_idx], usize) == S.secondary_mem.len, @src(), "the static memory for category `{s}` params ({d} bytes / {d} elem_size = {d} capacity) does not equal the static memory capacity for the update trigger slice ({d} capacity): The actual capacity will be set to the minimum of the two -> loss of expacted capacity", .{ @tagName(c_init.category_name), S.main_mem.len, INTERNAL.CATEGORY_TYPE_SIZES[c_idx], S.main_mem.len / INTERNAL.CATEGORY_TYPE_SIZES[c_idx], S.secondary_mem.len });
+                        INTERNAL.categories[c_idx].data.cap = @intCast(@min(num_cast(S.main_mem.len / INTERNAL.CATEGORY_TYPE_SIZES[c_idx], usize), S.secondary_mem.len));
+                        INTERNAL.categories[c_idx].meta.list.ptr = S.meta_list_mem.ptr;
+                        INTERNAL.categories[c_idx].meta.list.cap = @intCast(S.meta_list_mem.len);
+                        INTERNAL.categories[c_idx].data.free_list.free_bits.list.ptr = S.free_list_mem.ptr;
+                        INTERNAL.categories[c_idx].data.free_list.free_bits.list.cap = @intCast(S.free_list_mem.len);
+                    },
+                }
+            }
+            if (INTERNAL.INCLUDE_META) {
+                INTERNAL.categories[INTERNAL.META_CAT_IDX].data.ptr = @ptrCast(&INTERNAL.meta_memory[0]);
+                INTERNAL.categories[INTERNAL.META_CAT_IDX].data.len = @intCast(INTERNAL.NUM_CATEGORIES_NO_META);
+                INTERNAL.categories[INTERNAL.META_CAT_IDX].data.cap = @intCast(INTERNAL.NUM_CATEGORIES_NO_META);
+                INTERNAL.categories[INTERNAL.META_CAT_IDX].data.ptr_2 = @ptrCast(&INTERNAL.meta_dependants[0]);
+                INTERNAL.categories[INTERNAL.META_CAT_IDX].data.free_list.free_bits.list.ptr = @ptrCast(&INTERNAL.meta_free[0]);
+                INTERNAL.categories[INTERNAL.META_CAT_IDX].data.free_list.free_bits.list.len = @intCast(INTERNAL.meta_free.len);
+                INTERNAL.categories[INTERNAL.META_CAT_IDX].data.free_list.free_bits.list.cap = @intCast(INTERNAL.meta_free.len);
+                INTERNAL.categories[INTERNAL.META_CAT_IDX].data.free_list.free_bits.index_len = @intCast(INTERNAL.NUM_CATEGORIES_NO_META);
+                INTERNAL.categories[INTERNAL.META_CAT_IDX].data.free_list.free_count = 0;
+                INTERNAL.categories[INTERNAL.META_CAT_IDX].meta.list.ptr = @ptrCast(&INTERNAL.meta_meta[0]);
+                INTERNAL.categories[INTERNAL.META_CAT_IDX].meta.list.len = @intCast(INTERNAL.meta_meta.len);
+                INTERNAL.categories[INTERNAL.META_CAT_IDX].meta.list.cap = @intCast(INTERNAL.meta_meta.len);
+                INTERNAL.categories[INTERNAL.META_CAT_IDX].meta.index_len = @intCast(INTERNAL.NUM_CATEGORIES_NO_META);
+            }
+        }
+
+        pub fn free_memory() void {
+            INTERNAL.delete_queue.free(INTERNAL.delete_queue_alloc);
+            INTERNAL.payload_data_pool.free(INTERNAL.payload_data_pool_alloc);
+            INTERNAL.payload_location_pool.free(INTERNAL.payload_location_pool_alloc);
+            INTERNAL.update_queue.free(INTERNAL.update_queue_alloc);
+            if (INTERNAL.TRACK_FUNC_DEPENDANTS) {
+                for (0..INTERNAL.NUM_FUNCS) |f| {
+                    INTERNAL.func_dependants[f].free(INTERNAL.func_dep_allocs[f]);
+                }
+            }
+            for (0..INTERNAL.NUM_CATEGORIES_NO_META) |c| {
+                INTERNAL.categories[c].data.free(INTERNAL.CATEGORY_TYPE_SIZES[c], INTERNAL.categories[c].alloc);
+                INTERNAL.categories[c].meta.free_memory(INTERNAL.categories[c].alloc);
+            }
+        }
 
         /// Initialize an update function.
         ///
@@ -1368,12 +1536,15 @@ pub fn ParametricStateSystem(
                 }
 
                 pub fn as_input(self: ParamSelf) ParamUpdateInput(T) {
-                    return @bitCast(self);
+                    return ParamUpdateInput(T){
+                        .param = @bitCast(self),
+                        .key = .{},
+                    };
                 }
             };
         }
         pub fn ParamUpdateOutput(comptime T: type) type {
-            return packed struct {
+            return struct {
                 const TYPE = T;
                 const THIS_TYPE_ID: INTERNAL.CategoryId = find: {
                     for (INTERNAL.UNIQUE_TYPES[0..], 0..) |TT, i| {
@@ -1385,7 +1556,7 @@ pub fn ParametricStateSystem(
 
                 const ParamSelf = @This();
 
-                param: RootParam(T),
+                param: DerivedParam(T),
                 key: MutexKey,
 
                 /// Delete the parameter
@@ -1435,11 +1606,11 @@ pub fn ParametricStateSystem(
             }
 
             pub fn with_type(self: ParamReadWriteOpaque, comptime T: type) RootParam(T) {
-                INTERNAL.assert_with_reason(INTERNAL.CATEGORY_DEFS[self.category].param_type == T, @src(), "invalid category `{s}` (element type `{s}`) for converting to a param with type `{s}`", .{ @tagName(@as(CategoryName, @enumFromInt(self.category))), @typeName(INTERNAL.CATEGORY_DEFS[self.category].param_type), @typeName(T) });
+                INTERNAL.assert_with_reason(INTERNAL.CATEGORY_TYPE_IDS[self.category] == INTERNAL.IDForType(T), @src(), "invalid category `{s}` for converting to a param with type `{s}`", .{ @tagName(@as(CategoryName, @enumFromInt(self.category))), @typeName(T) });
                 return @bitCast(self);
             }
             pub fn with_type_and_mutex_key(self: ParamReadWriteOpaque, key: MutexKey, comptime T: type) ParamUpdateOutput(T) {
-                INTERNAL.assert_with_reason(INTERNAL.CATEGORY_DEFS[self.category].param_type == T, @src(), "invalid category `{s}` (element type `{s}`) for converting to a param with type `{s}`", .{ @tagName(@as(CategoryName, @enumFromInt(self.category))), @typeName(INTERNAL.CATEGORY_DEFS[self.category].param_type), @typeName(T) });
+                INTERNAL.assert_with_reason(INTERNAL.CATEGORY_TYPE_IDS[self.category] == INTERNAL.IDForType(T), @src(), "invalid category `{s}` for converting to a param with type `{s}`", .{ @tagName(@as(CategoryName, @enumFromInt(self.category))), @typeName(T) });
                 return ParamUpdateOutput(T){
                     .param = @bitCast(self),
                     .key = key,
@@ -1478,13 +1649,16 @@ pub fn ParametricStateSystem(
                 }
 
                 pub fn as_input(self: ParamSelf) ParamUpdateInput(T) {
-                    return @bitCast(self);
+                    return ParamUpdateInput(T){
+                        .param = @bitCast(self),
+                        .key = .{},
+                    };
                 }
             };
         }
         pub fn ParamUpdateInput(comptime T: type) type {
             return struct {
-                const TYPE = T;
+                pub const TYPE = T;
                 const THIS_TYPE_ID: INTERNAL.CategoryId = find: {
                     for (INTERNAL.UNIQUE_TYPES[0..], 0..) |TT, i| {
                         if (T == TT) break :find INTERNAL.UNIQUE_TYPE_IDS[i];
@@ -1531,11 +1705,11 @@ pub fn ParametricStateSystem(
             }
 
             pub fn with_type(self: ParamReadOnlyOpaque, comptime T: type) DerivedParam(T) {
-                INTERNAL.assert_with_reason(INTERNAL.CATEGORY_DEFS[self.category].param_type == T, @src(), "invalid category `{s}` (element type `{s}`) for converting to a param with type `{s}`", .{ @tagName(@as(CategoryName, @enumFromInt(self.category))), @typeName(INTERNAL.CATEGORY_DEFS[self.category].param_type), @typeName(T) });
+                INTERNAL.assert_with_reason(INTERNAL.CATEGORY_TYPE_IDS[self.category] == INTERNAL.IDForType(T), @src(), "invalid category `{s}` for converting to a param with type `{s}`", .{ @tagName(@as(CategoryName, @enumFromInt(self.category))), @typeName(T) });
                 return @bitCast(self);
             }
             pub fn with_type_and_mutex_key(self: ParamReadOnlyOpaque, key: MutexKey, comptime T: type) ParamUpdateInput(T) {
-                INTERNAL.assert_with_reason(INTERNAL.CATEGORY_DEFS[self.category].param_type == T, @src(), "invalid category `{s}` (element type `{s}`) for converting to a param with type `{s}`", .{ @tagName(@as(CategoryName, @enumFromInt(self.category))), @typeName(INTERNAL.CATEGORY_DEFS[self.category].param_type), @typeName(T) });
+                INTERNAL.assert_with_reason(INTERNAL.CATEGORY_TYPE_IDS[self.category] == INTERNAL.IDForType(T), @src(), "invalid category `{s}` for converting to a param with type `{s}`", .{ @tagName(@as(CategoryName, @enumFromInt(self.category))), @typeName(T) });
                 return ParamUpdateInput(T){
                     .param = @bitCast(self),
                     .key = key,
@@ -1599,7 +1773,7 @@ pub fn ParametricStateSystem(
         /// `OUTPUT_STRUCT` exists soley to act as an unambiguous target for the parameters created by `output_defs` to be mapped to and returned to the user,
         /// but you can re-use that struct type within the function body
         pub fn create_new_derived_param_set(update_function: FuncName, inputs: anytype, output_defs: anytype, comptime OUTPUT_STRUCT: type) OUTPUT_STRUCT {
-            INTERNAL.create_new_derived_param_set_internal(update_function, inputs, output_defs, OUTPUT_STRUCT, .{});
+            return INTERNAL.create_new_derived_param_set_internal(update_function, inputs, output_defs, OUTPUT_STRUCT, .{});
         }
 
         /// Create a set of related 'Derived' parameters that are all calculated by the same update function.
@@ -1619,7 +1793,7 @@ pub fn ParametricStateSystem(
         /// `OUTPUT_STRUCT` exists soley to act as an unambiguous target for the parameters created by `output_defs` to be mapped to and returned to the user,
         /// but you can re-use that struct type within the function body to re-build a set of named parameters
         pub fn create_new_derived_param_set_during_update(update_function: FuncName, inputs: anytype, output_defs: anytype, comptime OUTPUT_STRUCT: type, mutex_key: MutexKey) OUTPUT_STRUCT {
-            INTERNAL.create_new_derived_param_set_internal(update_function, inputs, output_defs, OUTPUT_STRUCT, mutex_key);
+            return INTERNAL.create_new_derived_param_set_internal(update_function, inputs, output_defs, OUTPUT_STRUCT, mutex_key);
         }
 
         /// Create a new 'Derived' parameter.
@@ -1671,10 +1845,10 @@ test "ParametricStateSystem" {
         .ALLOW_FUNCTION_DELETION = true,
         .ALLOW_FUNCTION_REPLACEMENT = true,
         .ALLOWED_RECURSIVE_UPDATES = 0,
-        .CATEGORY_WITH_LARGEST_INDEX_IS_META_CATEGORY_DESCRIBING_THE_PARAMETER_LENGTHS_OF_OTHER_CATEGORIES = true,
+        .INCLUDE_META_CATEGORY = .META_CATEGORY_LENGTH_AND_VALUE_CHANGE,
         .DELETE_DEPENDANT_PARAMETERS_WHEN_FUNCTION_DELETED = true,
         .ENABLE_THREAD_SAFETY = true,
-        .INDEX_GENERATION_MODE = .{ .PER_PARAMETER_INDEX_GENERATION_INT_POWER = ._256 },
+        .INDEX_GENERATION_MODE = .per_parameter_index_generation_int_power(._256),
         .MASTER_ASSERT_MODE = .ALWAYS_PANIC,
         .MAX_NUM_FUNCTION_INPUTS = 8,
         .MAX_NUM_FUNCTION_OUTPUTS = 8,
@@ -1682,18 +1856,13 @@ test "ParametricStateSystem" {
         .MAX_NUM_UNIQUE_FUNCTION_PAYLOADS = 65536,
         .MAX_NUM_VALUES_IN_ANY_CATEGORY = 65536,
         .MAX_PAYLOAD_LIST_LIMIT = 65536,
-        .PAYLOAD_LIST_USES_STATIC_MEMORY = true,
-        .PAYLOAD_LOCATION_LIST_USES_STATIC_MEMORY = true,
         .RECURSION_ASSERT_MODE = .ALWAYS_PANIC,
-        .UNIQUE_UPDATE_QUEUE_STATIC_LENGTH = 1024,
-        .UPDATE_QUEUE_STATIC_LENGTH = 1024,
     };
-    const Cats = enum(u3) {
+    const Cats = enum(u2) {
         POSITIONS,
         SIZES,
         AREAS,
         SCALARS,
-        CAT_LENS,
     };
     const Funcs = enum(u2) {
         VEC_PLUS_SCALAR,
@@ -1716,8 +1885,6 @@ test "ParametricStateSystem" {
             .category = .POSITIONS,
             .allow_free_slots = false,
             .default_value_for_type = @ptrCast(&Vec.ZERO),
-            .expected_maximum_num_params = 2,
-            .maximum_is_guaranteed = true,
             .param_type = Vec,
             .type_equality_func = Vec.equals,
         },
@@ -1725,8 +1892,6 @@ test "ParametricStateSystem" {
             .category = .SIZES,
             .allow_free_slots = true,
             .default_value_for_type = @ptrCast(&Vec.ZERO),
-            .expected_maximum_num_params = 2,
-            .maximum_is_guaranteed = false,
             .param_type = Vec,
             .type_equality_func = Vec.equals,
         },
@@ -1734,8 +1899,6 @@ test "ParametricStateSystem" {
             .category = .AREAS,
             .allow_free_slots = true,
             .default_value_for_type = @ptrCast(&F32_ZERO),
-            .expected_maximum_num_params = 0,
-            .maximum_is_guaranteed = false,
             .param_type = f32,
             .type_equality_func = PROTO.f32_equals,
         },
@@ -1743,21 +1906,51 @@ test "ParametricStateSystem" {
             .category = .SCALARS,
             .allow_free_slots = true,
             .default_value_for_type = @ptrCast(&F32_ZERO),
-            .expected_maximum_num_params = 1,
-            .maximum_is_guaranteed = true,
             .param_type = f32,
             .type_equality_func = PROTO.f32_equals,
         },
-        CatDef{
-            .category = .CAT_LENS,
-            .allow_free_slots = false,
-            .default_value_for_type = null,
-            .expected_maximum_num_params = 4,
-            .maximum_is_guaranteed = true,
-            .param_type = u2,
-            .type_equality_func = PROTO.u2_equals,
-        },
     }, Funcs);
+    const DebugAlloc = std.heap.DebugAllocator(.{});
+    var debug_alloc = DebugAlloc.init;
+    const alloc = debug_alloc.allocator();
+    PSS.initialize_memory(.{
+        .delete_queue_memory = .allocated(AllocInit{ .alloc = alloc, .init_capacity = 0 }),
+        .payload_data_pool_memory = .allocated(AllocInit{ .alloc = alloc, .init_capacity = 0 }),
+        .update_package_pool_memory = .allocated(AllocInit{ .alloc = alloc, .init_capacity = 0 }),
+        .update_queue_memory = .allocated(AllocInitWithSecondary{ .alloc = alloc, .init_capacity_main = 0, .init_capacity_secondary = 0 }),
+        .function_dependants_memory = .{
+            PSS.InitializeFuncDependantsMem{
+                .func_name = .VEC_PLUS_SCALAR,
+                .init_mem = .allocated(AllocInit{ .alloc = alloc, .init_capacity = 0 }),
+            },
+            PSS.InitializeFuncDependantsMem{
+                .func_name = .HALF_VEC_MINUS_2_SCALAR,
+                .init_mem = .allocated(AllocInit{ .alloc = alloc, .init_capacity = 0 }),
+            },
+            PSS.InitializeFuncDependantsMem{
+                .func_name = .LINKED_AREA_PARENT_AND_BUTTON,
+                .init_mem = .allocated(AllocInit{ .alloc = alloc, .init_capacity = 0 }),
+            },
+        },
+        .parameter_memory = .{
+            PSS.InitializeCategoryMem{
+                .category_name = .POSITIONS,
+                .init_mem = .allocated(AllocInit{ .alloc = alloc, .init_capacity = 0 }),
+            },
+            PSS.InitializeCategoryMem{
+                .category_name = .SIZES,
+                .init_mem = .allocated(AllocInit{ .alloc = alloc, .init_capacity = 0 }),
+            },
+            PSS.InitializeCategoryMem{
+                .category_name = .AREAS,
+                .init_mem = .allocated(AllocInit{ .alloc = alloc, .init_capacity = 0 }),
+            },
+            PSS.InitializeCategoryMem{
+                .category_name = .SCALARS,
+                .init_mem = .allocated(AllocInit{ .alloc = alloc, .init_capacity = 0 }),
+            },
+        },
+    });
     const CalcIface = PSS.UpdateInterface;
     const RootParam = PSS.RootParam;
     const DerivedParam = PSS.DerivedParam;
@@ -1850,14 +2043,14 @@ test "ParametricStateSystem" {
     }, ParentAreaButtonAreaOut);
 
     const debug = struct {
-        pub fn print_vals(parent_pos: RootParam(Vec), parent_size: RootParam(Vec), parent_area: DerivedParam(f32), button_pos: RootParam(Vec), button_size: RootParam(Vec), button_area: DerivedParam(f32), total_area: DerivedParam(f32)) void {
+        pub fn print_vals(parent_pos: RootParam(Vec), parent_size: RootParam(Vec), parent_area: DerivedParam(f32), button_pos: DerivedParam(Vec), button_size: DerivedParam(Vec), button_area: DerivedParam(f32), total_area: DerivedParam(f32)) void {
             std.debug.print("       X     Y     W     H       A\nP: {d: >5} {d: >5} {d: >5} {d: >5} {d: >7}\nB: {d: >5} {d: >5} {d: >5} {d: >5} {d: >7}\nT:                         {d: >7}\n", .{
                 parent_pos.get().x, parent_pos.get().y, parent_size.get().x, parent_size.get().y, parent_area.get(),
                 button_pos.get().x, button_pos.get().y, button_size.get().x, button_size.get().y, button_area.get(),
                 total_area.get(),
             });
         }
-        pub fn print_ids(parent_pos: RootParam(Vec), parent_size: RootParam(Vec), parent_area: DerivedParam(f32), button_pos: RootParam(Vec), button_size: RootParam(Vec), button_area: DerivedParam(f32), total_area: DerivedParam(f32)) void {
+        pub fn print_ids(parent_pos: RootParam(Vec), parent_size: RootParam(Vec), parent_area: DerivedParam(f32), button_pos: DerivedParam(Vec), button_size: DerivedParam(Vec), button_area: DerivedParam(f32), total_area: DerivedParam(f32)) void {
             std.debug.print("       X     Y     W     H     A\nP: {d: >5} {d: >5} {d: >5} {d: >5} {d: >5}\nB: {d: >5} {d: >5} {d: >5} {d: >5} {d: >5}\nT:                         {d: >5}\n", .{
                 parent_pos.index, parent_pos.index, parent_size.index, parent_size.index, parent_area.index,
                 button_pos.index, button_pos.index, button_size.index, button_size.index, button_area.index,
@@ -1867,8 +2060,8 @@ test "ParametricStateSystem" {
     };
 
     if (do_debug) {
-        debug.print_ids(ParentPos, ParentSize, Areas.parent_area, ButtonPos, ButtonSize, Areas.button_area, Areas.total_area);
-        debug.print_vals(ParentPos, ParentSize, Areas.parent_area, ButtonPos, ButtonSize, Areas.button_area, Areas.total_area);
+        debug.print_ids(ParentPos, ParentSize, Areas.parent_area.param, ButtonPos, ButtonSize, Areas.button_area.param, Areas.total_area.param);
+        debug.print_vals(ParentPos, ParentSize, Areas.parent_area.param, ButtonPos, ButtonSize, Areas.button_area.param, Areas.total_area.param);
     }
 
     try Test.expect_equal(ButtonPos.get().x, "ButtonPos.get().x", 132.0, "132.0", "failed automatic update", .{});
@@ -1884,8 +2077,8 @@ test "ParametricStateSystem" {
     Margin.set(48.0);
 
     if (do_debug) {
-        debug.print_ids(ParentPos, ParentSize, Areas.parent_area, ButtonPos, ButtonSize, Areas.button_area, Areas.total_area);
-        debug.print_vals(ParentPos, ParentSize, Areas.parent_area, ButtonPos, ButtonSize, Areas.button_area, Areas.total_area);
+        debug.print_ids(ParentPos, ParentSize, Areas.parent_area.param, ButtonPos, ButtonSize, Areas.button_area.param, Areas.total_area.param);
+        debug.print_vals(ParentPos, ParentSize, Areas.parent_area.param, ButtonPos, ButtonSize, Areas.button_area.param, Areas.total_area.param);
     }
 
     try Test.expect_equal(ButtonPos.get().x, "ButtonPos.get().x", 148.0, "148.0", "failed automatic update", .{});

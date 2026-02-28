@@ -77,12 +77,23 @@ pub fn BitList(comptime BITS_PER_INDEX: comptime_int, comptime ELEM_TYPE: type) 
             };
         }
 
+        pub fn free_memory(self: *Self, alloc: Allocator) void {
+            self.list.free(alloc);
+            self.* = undefined;
+        }
+
         fn block_offset(idx: usize) TrueIndex {
             var out: TrueIndex = undefined;
             const bit_idx = idx * BITS_PER_INDEX;
             out.block_index = bit_idx >> OFFSHIFT;
             out.bit_offset = @intCast(bit_idx & OFFMASK);
             return out;
+        }
+
+        pub fn blocks_needed(cap: usize) usize {
+            const bits_needed = BITS_PER_INDEX * cap;
+            const real_cap = std.mem.alignForward(usize, bits_needed, USIZEBITS) >> OFFSHIFT;
+            return real_cap + if (EVENLY_DIVISIBLE) 0 else 1;
         }
 
         pub fn get_raw(self: Self, idx: usize) BITS {
@@ -174,9 +185,8 @@ pub fn BitList(comptime BITS_PER_INDEX: comptime_int, comptime ELEM_TYPE: type) 
 
         pub fn ensure_capacity_and_zero_new(self: *Self, cap: usize, alloc: Allocator) void {
             const old_cap = self.list.cap;
-            const index = block_offset(cap - 1);
-            const real_cap = if (EVENLY_DIVISIBLE) index.block_index + 1 else index.block_index + 2;
-            self.list.ensure_free_slots(real_cap, alloc);
+            const need_cap = Self.blocks_needed(cap);
+            self.list.ensure_free_slots(need_cap, alloc);
             const new_cap = self.list.cap;
             @memset(self.list.ptr[old_cap..new_cap], 0);
         }
@@ -737,28 +747,37 @@ pub fn MultiBitList(comptime LIST_NAMES: type, comptime LIST_DEFS: EnumeratedDef
 
 pub const BoolList = BitList(1, bool);
 
-pub const FreeBitList = struct {
+pub const FreeBitList = extern struct {
     free_bits: BitList(1, bool) = .{},
     free_count: usize = 0,
 
     pub fn init_capacity(cap: usize, alloc: Allocator) FreeBitList {
         return FreeBitList{
-            .free_bits = BitList(1).init_capacity(cap, alloc),
+            .free_bits = BitList(1, bool).init_capacity(cap, alloc),
             .free_count = 0,
         };
+    }
+
+    pub fn blocks_needed(cap: usize) usize {
+        return BitList(1, bool).blocks_needed(cap);
+    }
+
+    pub fn free_memory(self: *FreeBitList, alloc: Allocator) void {
+        self.free_bits.list.free(alloc);
+        self.* = undefined;
     }
 
     pub fn set_len(self: *FreeBitList, len: usize, alloc: Allocator) void {
         self.free_bits.set_len(len, alloc);
     }
-    pub fn find_1_free_and_set_used(self: FreeBitList) ?usize {
+    pub fn find_1_free_and_set_used(self: *FreeBitList) ?usize {
         if (self.free_count == 0) return null;
         const idx = self.free_bits.find_first_bit_set();
         self.free_bits.clear(idx.?);
         self.free_count -= 1;
         return idx.?;
     }
-    pub fn find_range_free_and_set_used(self: FreeBitList, count: usize) ?usize {
+    pub fn find_range_free_and_set_used(self: *FreeBitList, count: usize) ?usize {
         if (self.free_count < count) return null;
         const idx = self.free_bits.find_first_n_consecutive_set_bits(count);
         if (idx) |i| {
@@ -770,16 +789,16 @@ pub const FreeBitList = struct {
     pub fn has_n_consecutive_frees_at_idx(self: FreeBitList, idx: usize, n: usize) bool {
         return self.free_bits.idx_has_n_consecutive_set_bits(idx, n);
     }
-    pub fn set_free(self: FreeBitList, idx: usize) void {
-        const val = 0b1;
-        self.free_bits.set_no_clear(idx, val);
+    pub fn set_free(self: *FreeBitList, idx: usize) void {
+        const val: u1 = 0b1;
+        self.free_bits.set_raw_no_clear(idx, val);
         self.free_count += 1;
     }
-    pub fn set_range_free(self: FreeBitList, idx: usize, count: usize) void {
+    pub fn set_range_free(self: *FreeBitList, idx: usize, count: usize) void {
         self.free_bits.set_range_bits(idx, count, .SET_1);
         self.free_count += count;
     }
-    pub fn set_range_used(self: FreeBitList, idx: usize, count: usize) void {
+    pub fn set_range_used(self: *FreeBitList, idx: usize, count: usize) void {
         self.free_bits.set_range_bits(idx, count, .SET_0);
         self.free_count -= count;
     }

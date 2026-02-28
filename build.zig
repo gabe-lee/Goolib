@@ -92,6 +92,8 @@ pub fn build(b: *std.Build) void {
 
     const lib_tests = b.addTest(.{
         .root_module = lib,
+        // A bug in the x86-64 backend affects some parts of this library
+        .use_llvm = true,
     });
 
     const run_lib_tests = b.addRunArtifact(lib_tests);

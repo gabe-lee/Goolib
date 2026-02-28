@@ -1438,8 +1438,17 @@ pub fn scalar_ptr_as_single_item_slice(ptr: anytype) []@typeInfo(@TypeOf(ptr)).p
     const T = @typeInfo(P).pointer.child;
     return @as([*]T, @ptrCast(@alignCast(ptr)))[0..1];
 }
+pub fn scalar_ptr_as_single_item_slice_const(ptr: anytype) []const @typeInfo(@TypeOf(ptr)).pointer.child {
+    const P = @TypeOf(ptr);
+    assert_with_reason(Types.type_is_single_item_pointer(P), @src(), "input `ptr` must be a pointer type, got type `{s}`", .{@typeName(P)});
+    const T = @typeInfo(P).pointer.child;
+    return @as([*]T, @ptrCast(@alignCast(ptr)))[0..1];
+}
 pub fn scalar_ptr_as_byte_slice(ptr: anytype) []u8 {
     return std.mem.sliceAsBytes(scalar_ptr_as_single_item_slice(ptr));
+}
+pub fn scalar_ptr_as_byte_slice_const(ptr: anytype) []const u8 {
+    return std.mem.sliceAsBytes(scalar_ptr_as_single_item_slice_const(ptr));
 }
 
 pub fn real_int_type(comptime T: type) type {

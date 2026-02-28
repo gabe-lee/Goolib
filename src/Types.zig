@@ -599,7 +599,7 @@ pub inline fn type_is_struct_with_all_fields_same_type(comptime T: type, comptim
         else => return false,
     }
     const STRUCT = INFO.@"struct";
-    for (STRUCT.fields) |field| {
+    inline for (STRUCT.fields) |field| {
         if (field.type != F) return false;
     }
     return true;
@@ -611,7 +611,7 @@ pub inline fn type_is_struct_with_all_decls_same_type(comptime T: type, comptime
         else => return false,
     }
     const STRUCT = INFO.@"struct";
-    for (STRUCT.decls) |decl| {
+    inline for (STRUCT.decls) |decl| {
         if (@TypeOf(@field(T, decl.name)) != D) return false;
     }
     return true;
@@ -624,7 +624,7 @@ pub inline fn type_is_struct_with_all_fields_same_type_any(comptime T: type) boo
     }
     const STRUCT = INFO.@"struct";
     const FIELD_TYPE = STRUCT.fields[0].type;
-    for (STRUCT.fields[1..]) |field| {
+    inline for (STRUCT.fields[1..]) |field| {
         if (field.type != FIELD_TYPE) return false;
     }
     return true;

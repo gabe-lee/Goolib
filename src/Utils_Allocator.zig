@@ -150,39 +150,49 @@ pub const Align = union(AlignMode) {
     }
 };
 
-pub fn realloc_custom(alloc: Allocator, old_mem: anytype, new_n: usize, comptime align_mode: Align, copy_mode: CopyMode, init_new_mode: InitNew(@typeInfo(@TypeOf(old_mem)).pointer.child), clear_old_mode: ClearOldMode) t: {
-    const Slice = @typeInfo(@TypeOf(old_mem)).pointer;
-    break :t Allocator.Error![]align(Slice.alignment) Slice.child;
+pub const ErrorBehavior = Root.CommonTypes.ErrorBehavior;
+pub const MemError = std.mem.Allocator.Error;
+
+pub fn smart_alloc(alloc: Allocator, old_mem_slice: anytype, new_cap: usize, align_mode: Align, copy_mode: CopyMode, init_new_mode: InitNew(@typeInfo(@TypeOf(old_mem_slice)).pointer.child), clear_old_mode: ClearOldMode, comptime ERROR_MODE: ErrorBehavior) t: {
+    const Slice = @typeInfo(@TypeOf(old_mem_slice)).pointer;
+    switch (ERROR_MODE) {
+        .RETURN_ERRORS, .RETURN_ERRORS_AND_WARN => {
+            break :t Allocator.Error![]align(Slice.alignment) Slice.child;
+        },
+        .ERRORS_PANIC, .ERRORS_ARE_UNREACHABLE => {
+            break :t []align(Slice.alignment) Slice.child;
+        },
+    }
 } {
-    //COPIED FROM Allocator.zig
-    const Slice = @typeInfo(@TypeOf(old_mem)).pointer;
-    const ALIGN = comptime align_mode.get_align(Slice.alignment);
+    if (old_mem_slice.len == new_cap) return old_mem_slice;
+    const Slice = @typeInfo(@TypeOf(old_mem_slice)).pointer;
+    const ALIGN = align_mode.get_align(Slice.alignment);
     const T = Slice.child;
-    if (old_mem.len == 0) {
-        return alloc.allocAdvancedWithRetAddr(T, .fromByteUnits(ALIGN), new_n, @returnAddress());
+    const OLD_BYTE_LEN = @sizeOf(T) * old_mem_slice.len;
+    const NEW_BYTE_LEN = @sizeOf(T) * new_cap;
+    if (OLD_BYTE_LEN == 0) {
+        const new_ptr: [*]u8 = alloc.rawAlloc(NEW_BYTE_LEN, .fromByteUnits(ALIGN), @returnAddress()) orelse return ERROR_MODE.handle(@src(), MemError.OutOfMemory);
+        const new_ptr_cast: [*]T = @ptrCast(@alignCast(new_ptr));
+        return new_ptr_cast[0..new_cap];
     }
-    if (new_n == 0) {
-        alloc.free(old_mem);
-        const ptr = comptime std.mem.alignBackward(usize, math.maxInt(usize), ALIGN);
-        return @as([*]align(ALIGN) T, @ptrFromInt(ptr))[0..0];
+    if (NEW_BYTE_LEN == 0) {
+        alloc.free(old_mem_slice);
+        return Utils.invalid_slice(T);
+    }
+    const old_byte_slice = mem.sliceAsBytes(old_mem_slice);
+
+    if (alloc.rawRemap(old_byte_slice, .fromByteUnits(ALIGN), NEW_BYTE_LEN, @returnAddress())) |new_ptr| {
+        const new_ptr_cast: [*]T = @ptrCast(@alignCast(new_ptr));
+        return new_ptr_cast[0..new_cap];
     }
 
-    const old_byte_slice = mem.sliceAsBytes(old_mem);
-    const byte_count = math.mul(usize, @sizeOf(T), new_n) catch return Allocator.Error.OutOfMemory;
-    // Note: can't set shrunk memory to undefined as memory shouldn't be modified on realloc failure
-    if (alloc.rawRemap(old_byte_slice, .fromByteUnits(ALIGN), byte_count, @returnAddress())) |p| {
-        const new_bytes: []align(ALIGN) u8 = @alignCast(p[0..byte_count]);
-        return mem.bytesAsSlice(T, new_bytes);
-    }
-
-    const new_mem = alloc.rawAlloc(byte_count, .fromByteUnits(ALIGN), @returnAddress()) orelse
-        return error.OutOfMemory;
-    const new_bytes: []align(ALIGN) u8 = @alignCast(new_mem[0..byte_count]);
-    const new_mem_types = mem.bytesAsSlice(T, new_bytes);
-    const copy_len = @min(byte_count, old_byte_slice.len);
+    const new_ptr: [*]u8 = alloc.rawAlloc(NEW_BYTE_LEN, .fromByteUnits(ALIGN), @returnAddress()) orelse return ERROR_MODE.handle(@src(), MemError.OutOfMemory);
+    const new_ptr_cast: [*]T = @ptrCast(@alignCast(new_ptr));
+    const new_mem: []T = new_ptr_cast[0..new_cap];
+    const copy_len = @min(NEW_BYTE_LEN, OLD_BYTE_LEN);
     switch (copy_mode) {
         .COPY_EXISTING_DATA => {
-            @memcpy(new_mem[0..copy_len], old_byte_slice[0..copy_len]);
+            @memcpy(new_ptr[0..copy_len], old_byte_slice[0..copy_len]);
         },
         .DONT_COPY_EXISTING_DATA => {},
     }
@@ -204,49 +214,54 @@ pub fn realloc_custom(alloc: Allocator, old_mem: anytype, new_n: usize, comptime
     switch (init_new_mode) {
         .MEMSET_NEW_UNDEFINED => {
             switch (copy_mode) {
-                .COPY_EXISTING_DATA => @memset(new_mem[copy_len..byte_count], undefined),
-                .DONT_COPY_EXISTING_DATA => @memset(new_mem[0..byte_count], undefined),
+                .COPY_EXISTING_DATA => @memset(new_ptr[copy_len..NEW_BYTE_LEN], undefined),
+                .DONT_COPY_EXISTING_DATA => @memset(new_ptr[0..NEW_BYTE_LEN], undefined),
             }
         },
         .FORCE_MEMSET_NEW_UNDEFINED => {
             switch (copy_mode) {
-                .COPY_EXISTING_DATA => Utils.secure_memset_undefined(u8, new_mem[copy_len..byte_count]),
-                .DONT_COPY_EXISTING_DATA => Utils.secure_memset_undefined(u8, new_mem[0..byte_count]),
+                .COPY_EXISTING_DATA => Utils.secure_memset_undefined(u8, new_ptr[copy_len..NEW_BYTE_LEN]),
+                .DONT_COPY_EXISTING_DATA => Utils.secure_memset_undefined(u8, new_ptr[0..NEW_BYTE_LEN]),
             }
         },
         .MEMSET_NEW_ZERO => {
             switch (copy_mode) {
-                .COPY_EXISTING_DATA => @memset(new_mem[copy_len..byte_count], 0),
-                .DONT_COPY_EXISTING_DATA => @memset(new_mem[0..byte_count], 0),
+                .COPY_EXISTING_DATA => @memset(new_ptr[copy_len..NEW_BYTE_LEN], 0),
+                .DONT_COPY_EXISTING_DATA => @memset(new_ptr[0..NEW_BYTE_LEN], 0),
             }
         },
         .FORCE_MEMSET_NEW_ZERO => {
             switch (copy_mode) {
-                .COPY_EXISTING_DATA => Utils.secure_zero(u8, new_mem[copy_len..byte_count]),
-                .DONT_COPY_EXISTING_DATA => Utils.secure_zero(u8, new_mem[0..byte_count]),
+                .COPY_EXISTING_DATA => Utils.secure_zero(u8, new_ptr[copy_len..NEW_BYTE_LEN]),
+                .DONT_COPY_EXISTING_DATA => Utils.secure_zero(u8, new_ptr[0..NEW_BYTE_LEN]),
             }
         },
         .MEMSET_NEW_CUSTOM => |init_val| {
             switch (copy_mode) {
-                .COPY_EXISTING_DATA => @memset(new_mem_types[@divExact(copy_len, @sizeOf(T))..@divExact(byte_count, @sizeOf(T))], init_val),
-                .DONT_COPY_EXISTING_DATA => @memset(new_mem_types[0..@divExact(byte_count, @sizeOf(T))], init_val),
+                .COPY_EXISTING_DATA => @memset(new_mem[@divExact(copy_len, @sizeOf(T))..@divExact(NEW_BYTE_LEN, @sizeOf(T))], init_val),
+                .DONT_COPY_EXISTING_DATA => @memset(new_mem[0..@divExact(NEW_BYTE_LEN, @sizeOf(T))], init_val),
             }
         },
         .FORCE_MEMSET_NEW_CUSTOM => |init_val| {
             switch (copy_mode) {
-                .COPY_EXISTING_DATA => Utils.secure_memset(T, new_mem_types[@divExact(copy_len, @sizeOf(T))..@divExact(byte_count, @sizeOf(T))], init_val),
-                .DONT_COPY_EXISTING_DATA => Utils.secure_memset(T, new_mem_types[0..@divExact(byte_count, @sizeOf(T))], init_val),
+                .COPY_EXISTING_DATA => Utils.secure_memset(T, new_mem[@divExact(copy_len, @sizeOf(T))..@divExact(NEW_BYTE_LEN, @sizeOf(T))], init_val),
+                .DONT_COPY_EXISTING_DATA => Utils.secure_memset(T, new_mem[0..@divExact(NEW_BYTE_LEN, @sizeOf(T))], init_val),
             }
         },
         .DONT_MEMSET_NEW => {},
     }
     alloc.rawFree(old_byte_slice, .fromByteUnits(ALIGN), @returnAddress());
-    return new_mem_types;
+    return new_mem;
 }
 
-pub fn realloc_custom_with_ptr_ptrs(alloc: Allocator, old_mem_ptr_ptr: anytype, old_mem_cap_ptr: anytype, new_n: usize, comptime align_mode: Align, copy_mode: CopyMode, init_new_mode: InitNew(@typeInfo(@typeInfo(@TypeOf(old_mem_ptr_ptr)).pointer.child).pointer.child), clear_old_mode: ClearOldMode) Allocator.Error!void {
+pub fn smart_alloc_ptr_ptrs(alloc: Allocator, old_mem_ptr_ptr: anytype, old_mem_cap_ptr: anytype, new_n: usize, align_mode: Align, copy_mode: CopyMode, init_new_mode: InitNew(@typeInfo(@typeInfo(@TypeOf(old_mem_ptr_ptr)).pointer.child).pointer.child), clear_old_mode: ClearOldMode, comptime ERROR_MODE: ErrorBehavior) switch (ERROR_MODE) {
+    .RETURN_ERRORS, .RETURN_ERRORS_AND_WARN => MemError!void,
+    .ERRORS_PANIC, .ERRORS_ARE_UNREACHABLE => void,
+} {
     const old_mem = old_mem_ptr_ptr.*[0..old_mem_cap_ptr.*];
-    const new_mem = try realloc_custom(alloc, old_mem, new_n, align_mode, copy_mode, init_new_mode, clear_old_mode);
+    const new_mem = if (comptime ERROR_MODE.does_error()) ( //
+        smart_alloc(alloc, old_mem, new_n, align_mode, copy_mode, init_new_mode, clear_old_mode, ERROR_MODE) catch |err| ERROR_MODE.panic(@src(), err)) //
+        else smart_alloc(alloc, old_mem, new_n, align_mode, copy_mode, init_new_mode, clear_old_mode, ERROR_MODE);
     old_mem_ptr_ptr.* = new_mem.ptr;
     old_mem_cap_ptr.* = @intCast(new_mem.len);
     return;

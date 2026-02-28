@@ -107,13 +107,13 @@ pub fn UniqueQueue(
 
         pub fn ensure_queue_capacity(self: *Queue, queue_cap: u32, alloc: Allocator) void {
             if (self.queue_cap < queue_cap) {
-                Utils.Alloc.realloc_custom_with_ptr_ptrs(alloc, &self.queue_ptr, &self.queue_cap, @intCast(queue_cap), .ALIGN_TO_TYPE, .COPY_EXISTING_DATA, .dont_memset_new(), .DONT_MEMSET_OLD) catch |err| assert_allocation_failure(@src(), T_QUEUE, @intCast(queue_cap), err);
+                Utils.Alloc.smart_alloc_ptr_ptrs(alloc, &self.queue_ptr, &self.queue_cap, @intCast(queue_cap), .ALIGN_TO_TYPE, .COPY_EXISTING_DATA, .dont_memset_new(), .DONT_MEMSET_OLD, .ERRORS_ARE_UNREACHABLE);
             }
         }
 
         pub fn ensure_unique_capacity(self: *Queue, unique_cap: u32, alloc: Allocator) void {
             if (DO_UNIQUE and self.unique_cap < unique_cap) {
-                Utils.Alloc.realloc_custom_with_ptr_ptrs(alloc, &self.unique_ptr, &self.unique_cap, @intCast(unique_cap), .ALIGN_TO_TYPE, .COPY_EXISTING_DATA, .dont_memset_new(), .DONT_MEMSET_OLD) catch |err| assert_allocation_failure(@src(), T_UNIQUE, @intCast(unique_cap), err);
+                Utils.Alloc.smart_alloc_ptr_ptrs(alloc, &self.unique_ptr, &self.unique_cap, @intCast(unique_cap), .ALIGN_TO_TYPE, .COPY_EXISTING_DATA, .dont_memset_new(), .DONT_MEMSET_OLD, .ERRORS_ARE_UNREACHABLE);
             }
         }
 
@@ -180,7 +180,7 @@ pub fn UniqueQueue(
             return self.queue_cursor < self.queue_len;
         }
 
-        pub fn get_next_queued(self: Queue) ?T_QUEUE {
+        pub fn get_next_queued(self: *Queue) ?T_QUEUE {
             if (self.queue_cursor < self.len) {
                 const val = self.queue_ptr[self.queue_cursor];
                 self.queue_cursor += 1;
@@ -189,7 +189,7 @@ pub fn UniqueQueue(
             return null;
         }
 
-        pub fn get_next_queued_guaranteed(self: Queue) T_QUEUE {
+        pub fn get_next_queued_guaranteed(self: *Queue) T_QUEUE {
             const val = self.queue_ptr[self.queue_cursor];
             self.queue_cursor += 1;
             return val;

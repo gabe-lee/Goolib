@@ -46,7 +46,7 @@ pub const SecondaryListSettings = struct {
     clear_released: ?*const anyopaque = null,
 };
 
-pub fn SimplePool(comptime T: type, comptime IDX: type, comptime BUILTIN_ALLOC: bool, comptime MEMSET_CLAIMED: ?T, comptime CLEAR_RELEASED: ?T, comptime SECONDARY_LIST: ?SecondaryListSettings) type {
+pub fn SimplePool(comptime T: type, comptime IDX: type, comptime MEMSET_CLAIMED: ?T, comptime CLEAR_RELEASED: ?T, comptime SECONDARY_LIST: ?SecondaryListSettings) type {
     assert_with_reason(Types.type_is_unsigned_int(IDX), @src(), "type `IDX` must be an unsigned int type, got type `{s}`", .{@typeName(IDX)});
     const HAS_SECONDARY = SECONDARY_LIST != null;
     return extern struct {
@@ -54,15 +54,17 @@ pub fn SimplePool(comptime T: type, comptime IDX: type, comptime BUILTIN_ALLOC: 
 
         ptr: [*]T = Utils.invalid_ptr_many(T),
         ptr_2: if (HAS_SECONDARY) [*]SECONDARY_LIST.?.elem_type else void = if (HAS_SECONDARY) @ptrCast(Utils.invalid_ptr_many(SECONDARY_LIST.?.elem_type)) else void{},
-        alloc: if (BUILTIN_ALLOC) Allocator else void = if (BUILTIN_ALLOC) DummyAlloc.allocator_panic_free_noop else void{},
         free_list: FreeList = .{},
         len: IDX = 0,
         cap: IDX = 0,
 
-        pub fn to_opaque(self: Pool) SimplePoolOpaque(IDX, BUILTIN_ALLOC) {
+        const SET: T = if (MEMSET_CLAIMED) |S| S else undefined;
+        const CLEAR: T = if (CLEAR_RELEASED) |C| C else undefined;
+
+        pub fn to_opaque(self: Pool) SimplePoolOpaque(IDX, Utils.scalar_ptr_as_byte_slice_const(&SET), Utils.scalar_ptr_as_byte_slice_const(&CLEAR), SECONDARY_LIST) {
             return @bitCast(self);
         }
-        pub fn to_opaque_ptr(self: *Pool) *SimplePoolOpaque(IDX, BUILTIN_ALLOC) {
+        pub fn to_opaque_ptr(self: *Pool) *SimplePoolOpaque(IDX, Utils.scalar_ptr_as_byte_slice_const(&SET), Utils.scalar_ptr_as_byte_slice_const(&CLEAR), SECONDARY_LIST) {
             return @ptrCast(@alignCast(self));
         }
 
@@ -78,7 +80,6 @@ pub fn SimplePool(comptime T: type, comptime IDX: type, comptime BUILTIN_ALLOC: 
                 .cap = @intCast(mem.len),
                 .free_list = .init_capacity(@intCast(cap), alloc),
             };
-            if (BUILTIN_ALLOC) pool.alloc = alloc;
             if (HAS_SECONDARY) {
                 const mem_2 = alloc.alloc(SECONDARY_LIST.?.elem_type, cap) catch |err| assert_allocation_failure(@src(), SECONDARY_LIST.?.elem_type, @intCast(cap), err);
                 pool.ptr_2 = mem_2.ptr;
@@ -86,16 +87,11 @@ pub fn SimplePool(comptime T: type, comptime IDX: type, comptime BUILTIN_ALLOC: 
             return pool;
         }
 
-        pub fn free_builtin(self: *Pool) void {
-            if (BUILTIN_ALLOC) {
-                self.free(self.alloc);
-            } else {
-                unreachable;
-            }
-        }
         pub fn free(self: *Pool, alloc: Allocator) void {
-            Utils.Alloc.realloc_custom(alloc, self.ptr[0..self.cap], 0, .ALIGN_TO_TYPE, .DONT_COPY_EXISTING_DATA, .dont_memset_new(), .dont_memset_old());
-            if (HAS_SECONDARY) Utils.Alloc.realloc_custom(alloc, self.ptr_2[0..self.cap], 0, .ALIGN_TO_TYPE, .DONT_COPY_EXISTING_DATA, .dont_memset_new(), .dont_memset_old());
+            _ = Utils.Alloc.smart_alloc(alloc, self.ptr[0..self.cap], 0, .ALIGN_TO_TYPE, .DONT_COPY_EXISTING_DATA, .dont_memset_new(), .DONT_MEMSET_OLD, .ERRORS_ARE_UNREACHABLE);
+            if (HAS_SECONDARY) {
+                _ = Utils.Alloc.smart_alloc(alloc, self.ptr_2[0..self.cap], 0, .ALIGN_TO_TYPE, .DONT_COPY_EXISTING_DATA, .dont_memset_new(), .DONT_MEMSET_OLD, .ERRORS_ARE_UNREACHABLE);
+            }
             self.free_list.free_bits.list.free(alloc);
             self.* = undefined;
         }
@@ -109,36 +105,25 @@ pub fn SimplePool(comptime T: type, comptime IDX: type, comptime BUILTIN_ALLOC: 
             start_idx: IDX,
         };
 
-        pub fn ensure_capacity_builtin(self: *Pool, cap: IDX) void {
-            if (BUILTIN_ALLOC) {
-                ensure_capacity(self, cap, self.alloc);
-            } else {
-                unreachable;
-            }
-        }
         pub fn ensure_capacity(self: *Pool, cap: IDX, alloc: Allocator) void {
             if (self.cap >= cap) return;
-            const new_mem = Utils.Alloc.realloc_custom(alloc, self.ptr[0..self.cap], @intCast(cap), .ALIGN_TO_TYPE, .COPY_EXISTING_DATA, .dont_memset_new(), .dont_memset_old()) catch |err| assert_allocation_failure(@src(), T, @intCast(cap), err);
+            const new_mem = Utils.Alloc.smart_alloc(alloc, self.ptr[0..self.cap], @intCast(cap), .ALIGN_TO_TYPE, .COPY_EXISTING_DATA, .dont_memset_new(), .DONT_MEMSET_OLD, .ERRORS_ARE_UNREACHABLE);
             self.ptr = new_mem.ptr;
             self.cap = @intCast(new_mem.len);
             if (HAS_SECONDARY) {
-                const new_mem_2 = Utils.Alloc.realloc_custom(alloc, self.ptr_2[0..self.cap], @intCast(cap), .ALIGN_TO_TYPE, .COPY_EXISTING_DATA, .dont_memset_new(), .dont_memset_old()) catch |err| assert_allocation_failure(@src(), SECONDARY_LIST.?.elem_type, @intCast(cap), err);
+                const new_mem_2 = Utils.Alloc.smart_alloc(alloc, self.ptr_2[0..self.cap], @intCast(cap), .ALIGN_TO_TYPE, .COPY_EXISTING_DATA, .dont_memset_new(), .DONT_MEMSET_OLD, .ERRORS_ARE_UNREACHABLE);
                 self.ptr_2 = new_mem_2.ptr;
             }
         }
 
-        pub fn claim_one_builtin(self: *Pool) void {
-            if (BUILTIN_ALLOC) return claim_one(self, self.alloc);
-            unreachable;
-        }
         pub fn claim_one(self: *Pool, alloc: Allocator) ClaimedItem {
             if (self.free_list.find_1_free_and_set_used()) |new_idx| {
                 return ClaimedItem{
                     .ptr = @ptrCast(self.ptr + new_idx),
-                    .idx = new_idx,
+                    .idx = @intCast(new_idx),
                 };
             }
-            self.ensure_capacity_no_builtin(self.len + 1, alloc);
+            self.ensure_capacity(self.len + 1, alloc);
             self.free_list.set_len(@intCast(self.len + 1), alloc);
             const new_idx = self.len;
             self.len += 1;
@@ -155,10 +140,6 @@ pub fn SimplePool(comptime T: type, comptime IDX: type, comptime BUILTIN_ALLOC: 
             };
         }
 
-        pub fn claim_range_builtin(self: *Pool) void {
-            if (BUILTIN_ALLOC) return claim_range(self, self.alloc);
-            unreachable;
-        }
         pub fn claim_range(self: *Pool, count: IDX, alloc: Allocator) ClaimedRange {
             if (self.free_list.find_range_free_and_set_used(@intCast(count))) |new_idx| {
                 return ClaimedRange{
@@ -244,15 +225,6 @@ pub fn SimplePool(comptime T: type, comptime IDX: type, comptime BUILTIN_ALLOC: 
             return new_range;
         }
 
-        pub fn resize_range_slice_builtin(self: *Pool, old_slice: []const T, new_count: IDX) ClaimedRange {
-            if (BUILTIN_ALLOC) return self.resize_range_slice(old_slice, new_count, self.alloc);
-            unreachable;
-        }
-        pub fn resize_range_builtin(self: *Pool, idx: IDX, old_count: IDX, new_count: IDX) ClaimedRange {
-            if (BUILTIN_ALLOC) return self.resize_range(idx, old_count, new_count, self.alloc);
-            unreachable;
-        }
-
         pub fn find_index_for_ptr(self: Pool, ptr: *const T) IDX {
             const ptr_addr = @intFromPtr(ptr);
             const pool_addr = @intFromPtr(self.ptr);
@@ -289,7 +261,7 @@ pub fn SimplePool(comptime T: type, comptime IDX: type, comptime BUILTIN_ALLOC: 
     };
 }
 
-pub fn SimplePoolOpaque(comptime IDX: type, comptime BUILTIN_ALLOC: bool, comptime _: ?[]const u8, comptime CLEAR_RELEASED: ?[]const u8, comptime SECONDARY_LIST: ?SecondaryListSettings) type {
+pub fn SimplePoolOpaque(comptime IDX: type, comptime MEMSET_NEW: ?[]const u8, comptime CLEAR_RELEASED: ?[]const u8, comptime SECONDARY_LIST: ?SecondaryListSettings) type {
     assert_with_reason(Types.type_is_unsigned_int(IDX), @src(), "type `IDX` must be an unsigned int type, got type `{s}`", .{@typeName(IDX)});
     const HAS_SECONDARY = SECONDARY_LIST != null;
     return extern struct {
@@ -297,10 +269,34 @@ pub fn SimplePoolOpaque(comptime IDX: type, comptime BUILTIN_ALLOC: bool, compti
 
         ptr: [*]u8 = @ptrCast(Utils.invalid_ptr_many(u8)),
         ptr_2: if (HAS_SECONDARY) [*]SECONDARY_LIST.?.elem_type else void = if (HAS_SECONDARY) @ptrCast(Utils.invalid_ptr_many(SECONDARY_LIST.?.elem_type)) else void{},
-        alloc: if (BUILTIN_ALLOC) Allocator else void = if (BUILTIN_ALLOC) DummyAlloc.allocator_panic_free_noop else void{},
         free_list: FreeList = .{},
         len: IDX = 0,
         cap: IDX = 0,
+
+        const SET: []const u8 = if (MEMSET_NEW) |S| S else undefined;
+        const CLEAR: []const u8 = if (CLEAR_RELEASED) |C| C else undefined;
+
+        pub fn init_capacity(type_cap: usize, elem_size: usize, elem_align: usize, alloc: Allocator) Pool {
+            const real_cap = type_cap * elem_size;
+            var pool = Pool{
+                .free_list = .init_capacity(type_cap, alloc),
+            };
+            Utils.Alloc.smart_alloc_ptr_ptrs(alloc, &pool.ptr, &pool.cap, real_cap, .custom_align(elem_align), .DONT_COPY_EXISTING_DATA, .dont_memset_new(), .DONT_MEMSET_OLD, .ERRORS_ARE_UNREACHABLE);
+            if (HAS_SECONDARY) {
+                var dummy_cap: IDX = 0;
+                Utils.Alloc.smart_alloc_ptr_ptrs(alloc, &pool.ptr_2, &dummy_cap, real_cap, .ALIGN_TO_TYPE, .DONT_COPY_EXISTING_DATA, .dont_memset_new(), .DONT_MEMSET_OLD, .ERRORS_ARE_UNREACHABLE);
+            }
+            return pool;
+        }
+        pub fn free(self: *Pool, elem_size: usize, alloc: Allocator) void {
+            const real_cap = self.cap * elem_size;
+            alloc.free(self.ptr[0..real_cap]);
+            if (HAS_SECONDARY) {
+                alloc.free(self.ptr_2[0..self.cap]);
+            }
+            self.free_list.free_memory(alloc);
+            self.* = undefined;
+        }
 
         pub fn opaque_elem_ptr(self: Pool, index: usize, elem_size: usize) [*]u8 {
             assert_idx_less_than_len(index, self.len, @src());
@@ -316,9 +312,9 @@ pub fn SimplePoolOpaque(comptime IDX: type, comptime BUILTIN_ALLOC: bool, compti
             const byte_index = index * elem_size;
             assert_idx_less_than_len(index, self.len, @src());
             self.free_list.set_free(index);
-            if (CLEAR_RELEASED) |val| {
+            if (CLEAR_RELEASED) |bytes| {
                 const elem_bytes = (self.ptr + byte_index)[0..elem_size];
-                @memset(elem_bytes, val[0..elem_size]);
+                @memset(elem_bytes, bytes[0..elem_size]);
             }
             if (HAS_SECONDARY and SECONDARY_LIST.?.clear_released != null) {
                 const t_ptr: *const SECONDARY_LIST.?.elem_type = @ptrCast(@alignCast(SECONDARY_LIST.?.clear_released));
@@ -326,10 +322,10 @@ pub fn SimplePoolOpaque(comptime IDX: type, comptime BUILTIN_ALLOC: bool, compti
             }
         }
 
-        pub fn to_typed(self: Pool, comptime T: type) SimplePool(T, IDX, BUILTIN_ALLOC, null, null, SECONDARY_LIST) {
+        pub fn to_typed(self: Pool, comptime T: type) SimplePool(T, IDX, if (MEMSET_NEW != null) @as(*const T, @ptrCast(@alignCast(SET.ptr))).* else null, if (CLEAR_RELEASED != null) @as(*const T, @ptrCast(@alignCast(CLEAR.ptr))).* else null, SECONDARY_LIST) {
             return @bitCast(self);
         }
-        pub fn to_typed_ptr(self: *Pool, comptime T: type) *SimplePool(T, IDX, BUILTIN_ALLOC, null, null, SECONDARY_LIST) {
+        pub fn to_typed_ptr(self: *Pool, comptime T: type) *SimplePool(T, IDX, if (MEMSET_NEW != null) @as(*const T, @ptrCast(@alignCast(SET.ptr))).* else null, if (CLEAR_RELEASED != null) @as(*const T, @ptrCast(@alignCast(CLEAR.ptr))).* else null, SECONDARY_LIST) {
             return @ptrCast(@alignCast(self));
         }
     };
