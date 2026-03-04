@@ -38,6 +38,8 @@ const assert_with_reason = Assert.assert_with_reason;
 const assert_allocation_failure = Assert.assert_allocation_failure;
 const assert_unreachable = Assert.assert_unreachable;
 const num_cast = Root.Cast.num_cast;
+const smart_alloc = Utils.Alloc.smart_alloc;
+const smart_alloc_ptr_ptrs = Utils.Alloc.smart_alloc_ptr_ptrs;
 
 pub const PreviousQueueResult = enum(u8) {
     CONTINUE_TO_CHECK_CURRENTLY_QUEUED,
@@ -81,14 +83,10 @@ pub fn UniqueQueue(
         pub fn init_capacity(queue_cap: u32, unique_cap: u32, alloc: Allocator) Queue {
             var _queue = Queue{};
             if (queue_cap > 0) {
-                const queue_mem = alloc.alloc(T_QUEUE, @intCast(queue_cap)) catch |err| assert_allocation_failure(@src(), T_QUEUE, @intCast(queue_cap), err);
-                _queue.queue_ptr = queue_mem.ptr;
-                _queue.queue_cap = @intCast(queue_mem.len);
+                smart_alloc_ptr_ptrs(alloc, &_queue.queue_ptr, &_queue.queue_cap, queue_cap, .{}, .{});
             }
             if (DO_UNIQUE and unique_cap > 0) {
-                const unique_mem = alloc.alloc(T_UNIQUE, @intCast(unique_cap)) catch |err| assert_allocation_failure(@src(), T_UNIQUE, @intCast(unique_cap), err);
-                _queue.unique_ptr = unique_mem.ptr;
-                _queue.unique_cap = @intCast(unique_mem.len);
+                smart_alloc_ptr_ptrs(alloc, &_queue.unique_ptr, &_queue.unique_cap, unique_cap, .{}, .{});
             }
             return _queue;
         }
@@ -107,13 +105,13 @@ pub fn UniqueQueue(
 
         pub fn ensure_queue_capacity(self: *Queue, queue_cap: u32, alloc: Allocator) void {
             if (self.queue_cap < queue_cap) {
-                Utils.Alloc.smart_alloc_ptr_ptrs(alloc, &self.queue_ptr, &self.queue_cap, @intCast(queue_cap), .ALIGN_TO_TYPE, .COPY_EXISTING_DATA, .dont_memset_new(), .DONT_MEMSET_OLD, .ERRORS_ARE_UNREACHABLE);
+                Utils.Alloc.smart_alloc_ptr_ptrs(alloc, &self.queue_ptr, &self.queue_cap, @intCast(queue_cap), .{}, .{});
             }
         }
 
         pub fn ensure_unique_capacity(self: *Queue, unique_cap: u32, alloc: Allocator) void {
             if (DO_UNIQUE and self.unique_cap < unique_cap) {
-                Utils.Alloc.smart_alloc_ptr_ptrs(alloc, &self.unique_ptr, &self.unique_cap, @intCast(unique_cap), .ALIGN_TO_TYPE, .COPY_EXISTING_DATA, .dont_memset_new(), .DONT_MEMSET_OLD, .ERRORS_ARE_UNREACHABLE);
+                Utils.Alloc.smart_alloc_ptr_ptrs(alloc, &self.unique_ptr, &self.unique_cap, @intCast(unique_cap), .{}, .{});
             }
         }
 

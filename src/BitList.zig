@@ -48,7 +48,7 @@ const SetMode = enum(u8) {
 
 const TrueIndex = struct {
     block_index: usize = 0,
-    bit_offset: math.Log2Int(usize) = 0,
+    bit_offset: math.Log2IntCeil(usize) = 0,
 };
 
 pub fn BitList(comptime BITS_PER_INDEX: comptime_int, comptime ELEM_TYPE: type) type {
@@ -66,6 +66,7 @@ pub fn BitList(comptime BITS_PER_INDEX: comptime_int, comptime ELEM_TYPE: type) 
         const EVENLY_DIVISIBLE = USIZEBITS % BITS_PER_INDEX == 0;
         const OFFSHIFT = if (USIZEBITS == 32) 5 else 6;
         const OFFMASK = (1 << OFFSHIFT) - 1;
+
         const BITMASK = (@as(usize, 1) << BITS_PER_INDEX) - 1;
 
         pub fn init_capacity(cap: usize, alloc: Allocator) Self {
@@ -79,7 +80,7 @@ pub fn BitList(comptime BITS_PER_INDEX: comptime_int, comptime ELEM_TYPE: type) 
 
         pub fn free_memory(self: *Self, alloc: Allocator) void {
             self.list.free(alloc);
-            self.* = undefined;
+            self.index_len = 0;
         }
 
         fn block_offset(idx: usize) TrueIndex {
@@ -101,12 +102,12 @@ pub fn BitList(comptime BITS_PER_INDEX: comptime_int, comptime ELEM_TYPE: type) 
             const index = block_offset(idx);
             if (EVENLY_DIVISIBLE) {
                 var value = self.list.ptr[index.block_index];
-                value >>= index.bit_offset;
+                value >>= @intCast(index.bit_offset);
                 value &= BITMASK;
                 return @intCast(value);
             } else {
                 var value = self.list.ptr[index.block_index];
-                value >>= index.bit_offset;
+                value >>= @intCast(index.bit_offset);
                 var value_2 = self.list.ptr[index.block_index + 1];
                 const offset_2: math.Log2Int(usize) = num_cast((USIZEBITS - 1) - num_cast(index.bit_offset, usize), math.Log2Int(usize));
                 value_2 <<= offset_2;
@@ -127,8 +128,8 @@ pub fn BitList(comptime BITS_PER_INDEX: comptime_int, comptime ELEM_TYPE: type) 
             if (EVENLY_DIVISIBLE) {
                 var block = self.list.ptr[index.block_index];
                 var value: usize = @intCast(val);
-                const mask = BITMASK << index.bit_offset;
-                value <<= index.bit_offset;
+                const mask = BITMASK << @intCast(index.bit_offset);
+                value <<= @intCast(index.bit_offset);
                 if (mode != .BIT_OR_ONLY) {
                     block &= ~mask;
                 }
@@ -139,8 +140,8 @@ pub fn BitList(comptime BITS_PER_INDEX: comptime_int, comptime ELEM_TYPE: type) 
             } else {
                 var block = self.list.ptr[index.block_index];
                 var value: usize = @intCast(val);
-                var mask = BITMASK << index.bit_offset;
-                value <<= index.bit_offset;
+                var mask = BITMASK << @intCast(index.bit_offset);
+                value <<= @intCast(index.bit_offset);
                 if (mode != .BIT_OR_ONLY) {
                     block &= ~mask;
                 }
@@ -183,7 +184,7 @@ pub fn BitList(comptime BITS_PER_INDEX: comptime_int, comptime ELEM_TYPE: type) 
             self.set_internal(idx, 0, .CLEAR_ONLY);
         }
 
-        pub fn ensure_capacity_and_zero_new(self: *Self, cap: usize, alloc: Allocator) void {
+        fn ensure_capacity_and_zero_new(self: *Self, cap: usize, alloc: Allocator) void {
             const old_cap = self.list.cap;
             const need_cap = Self.blocks_needed(cap);
             self.list.ensure_free_slots(need_cap, alloc);
@@ -191,6 +192,17 @@ pub fn BitList(comptime BITS_PER_INDEX: comptime_int, comptime ELEM_TYPE: type) 
             @memset(self.list.ptr[old_cap..new_cap], 0);
         }
         pub fn set_len(self: *Self, len: usize, alloc: Allocator) void {
+            self.ensure_capacity_and_zero_new(len, alloc);
+            self.index_len = len;
+        }
+        pub fn grow_len_if_needed(self: *Self, len: usize, alloc: Allocator) void {
+            if (self.index_len >= len) return;
+            self.ensure_capacity_and_zero_new(len, alloc);
+            self.index_len = len;
+        }
+        pub fn grow_len_if_needed_for_idx(self: *Self, idx: usize, alloc: Allocator) void {
+            if (idx < self.index_len) return;
+            const len = idx + 1;
             self.ensure_capacity_and_zero_new(len, alloc);
             self.index_len = len;
         }
@@ -204,7 +216,7 @@ pub fn BitList(comptime BITS_PER_INDEX: comptime_int, comptime ELEM_TYPE: type) 
             var consecutive_ones: usize = 0;
             var consecutive_ones_start: usize = if (FROM_START) 0 else idx;
             if (!FROM_START) {
-                var block = self.list.ptr[block_idx] >> start_block.bit_offset;
+                var block = self.list.ptr[block_idx] >> @intCast(start_block.bit_offset);
                 while (true) {
                     const skip_zeroes: usize = @min(bits_left, num_cast(@ctz(block), usize));
                     bits_idx += skip_zeroes;
@@ -274,7 +286,7 @@ pub fn BitList(comptime BITS_PER_INDEX: comptime_int, comptime ELEM_TYPE: type) 
             var consecutive_zeroes: usize = 0;
             var consecutive_zeroes_start: usize = if (FROM_START) 0 else idx;
             if (!FROM_START) {
-                var block = (~self.list.ptr[block_idx]) >> start_block.bit_offset;
+                var block = (~self.list.ptr[block_idx]) >> @intCast(start_block.bit_offset);
                 while (true) {
                     const skip_ones: usize = @min(bits_left, num_cast(@ctz(block), usize));
                     bits_idx += skip_ones;
@@ -416,7 +428,7 @@ pub fn BitList(comptime BITS_PER_INDEX: comptime_int, comptime ELEM_TYPE: type) 
             const end = start + count;
             Assert.assert_with_reason(end <= self.index_len, @src(), "start {d} + count {d} ({d}) is greater than the max index len {d}", .{ start, count, end, self.index_len });
             const real_start = block_offset(start);
-            const val_in_first_block = Utils.first_n_bits_set(usize, @intCast(@min(USIZEBITS, count))) << real_start.bit_offset;
+            const val_in_first_block = Utils.first_n_bits_set(usize, @intCast(@min(USIZEBITS, count))) << @intCast(real_start.bit_offset);
             switch (mode) {
                 .SET_1 => self.list.ptr[real_start.block_index] |= val_in_first_block,
                 .SET_0 => self.list.ptr[real_start.block_index] &= ~val_in_first_block,
@@ -448,6 +460,38 @@ pub fn BitList(comptime BITS_PER_INDEX: comptime_int, comptime ELEM_TYPE: type) 
             raw = ~raw;
             self.set_raw(idx, raw);
         }
+
+        pub fn count_bits_set_at_and_after_index(self: Self, idx: usize) usize {
+            Assert.assert_with_reason(BITS_PER_INDEX == 1, @src(), "you can only call this function when `BITS_PER_INDEX == 1`, got {d}", .{BITS_PER_INDEX});
+            const first = block_offset(idx);
+            const last = block_offset(self.index_len - 1);
+            var block_idx = last.block_index;
+            var block = self.list.ptr[block_idx];
+            const trim_last = (USIZEBITS - 1) - last.bit_offset;
+            block <<= @intCast(trim_last);
+            block >>= @intCast(trim_last);
+            var count: usize = 0;
+            if (last.block_index == first.block_index) {
+                block >>= @intCast(first.bit_offset);
+                count += @popCount(block);
+                return count;
+            }
+            count += @popCount(block);
+            block_idx -= 1;
+            while (block_idx > first.block_index) : (block_idx -= 1) {
+                block = self.list.ptr[block_idx];
+                count += @popCount(block);
+            }
+            block = self.list.ptr[block_idx];
+            block >>= @intCast(first.bit_offset);
+            count += @popCount(block);
+            return count;
+        }
+        pub fn count_bits_unset_at_and_after_index(self: Self, idx: usize) usize {
+            const bits_set = self.count_bits_set_at_and_after_index(idx);
+            const all_bits_at_and_after = self.index_len - idx;
+            return all_bits_at_and_after - bits_set;
+        }
     };
 }
 
@@ -459,8 +503,9 @@ test "BitList" {
         0b1111111110000011111111101111111101111111000111111001111100011110,
         //           116
         0b1111111111110000000000000000000000000000000000000000000000000011,
+        //                             162                               128
         0b1111111111111111111111111111111111111111111111111111111111111111,
-    };
+    }; // 6+7+8+9+9+2+12+64
     const list = BList{
         .list = .{ .ptr = @ptrCast(&data), .cap = 3, .len = 3 },
         .index_len = 192,
@@ -479,6 +524,9 @@ test "BitList" {
     try Test.expect_equal(list.find_first_n_consecutive_set_bits_starting_at(45, 6), "list.find_first_n_consecutive_set_bits_starting_at(45, 6)", 55, "55", "wrong result", .{});
     try Test.expect_equal(list.idx_has_n_consecutive_set_bits(45, 5), "list.idx_has_n_consecutive_set_bits(45, 5)", true, "true", "wrong result", .{});
     try Test.expect_equal(list.idx_has_n_consecutive_set_bits(45, 6), "list.idx_has_n_consecutive_set_bits(45, 6)", false, "false", "wrong result", .{});
+    try Test.expect_equal(list.count_bits_set_at_and_after_index(15), "list.count_bits_set_at_and_after_index(15)", 117, "117", "wrong result", .{});
+    try Test.expect_equal(list.count_bits_set_at_and_after_index(24), "list.count_bits_set_at_and_after_index(24)", 111, "111", "wrong result", .{});
+    try Test.expect_equal(list.count_bits_set_at_and_after_index(162), "list.count_bits_set_at_and_after_index(162)", 30, "30", "wrong result", .{});
     data[0] = ~data[0];
     data[1] = ~data[1];
     data[2] = ~data[2];
@@ -764,11 +812,25 @@ pub const FreeBitList = extern struct {
 
     pub fn free_memory(self: *FreeBitList, alloc: Allocator) void {
         self.free_bits.list.free(alloc);
-        self.* = undefined;
     }
 
     pub fn set_len(self: *FreeBitList, len: usize, alloc: Allocator) void {
+        if (len < self.free_bits.index_len) {
+            const free_lost = self.free_bits.count_bits_set_at_and_after_index(@intCast(len));
+            self.free_count -= free_lost;
+        }
         self.free_bits.set_len(len, alloc);
+    }
+    pub fn grow_len_if_needed(self: *FreeBitList, len: usize, alloc: Allocator) void {
+        if (len > self.free_bits.index_len) {
+            self.set_len(len, alloc);
+        }
+    }
+    pub fn grow_len_if_needed_for_idx(self: *FreeBitList, idx: usize, alloc: Allocator) void {
+        const len = idx + 1;
+        if (len > self.free_bits.index_len) {
+            self.set_len(len, alloc);
+        }
     }
     pub fn find_1_free_and_set_used(self: *FreeBitList) ?usize {
         if (self.free_count == 0) return null;

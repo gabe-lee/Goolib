@@ -53,6 +53,7 @@ const ct_assert_allocation_failure = Assert.assert_allocation_failure;
 const ct_assert_field_is_type = Assert.assert_field_is_type;
 
 const num_cast = Root.Cast.num_cast;
+const name_cast = Root.Cast.name_cast;
 
 const List8 = List(u8);
 const List16 = List(u16);
@@ -613,16 +614,17 @@ pub fn ParametricStateSystem(
                 }
 
                 pub fn to_unique(self: UpdatePackage) UpdatePackageUnique {
-                    var pkg = UpdatePackageUnique{
-                        .func_idx = self.func_idx,
-                        .first_payload_index = self.first_payload_index,
-                        .in_count = self.in_count,
-                        .out_count = self.out_count,
-                    };
-                    if (USE_GENERATIONS) {
-                        pkg.recursion_count = 0;
+                    if (RECURSION_ALLOWED) {
+                        const pkg = UpdatePackageUnique{
+                            .func_idx = self.func_idx,
+                            .first_payload_index = self.first_payload_index,
+                            .in_count = self.in_count,
+                            .out_count = self.out_count,
+                        };
+                        return pkg;
+                    } else {
+                        return self;
                     }
-                    return pkg;
                 }
 
                 pub fn start_of_inputs(self: UpdatePackage) u32 {
@@ -638,13 +640,13 @@ pub fn ParametricStateSystem(
                     return num_cast(self.first_payload_index, u32) + num_cast(self.in_count, u32) + num_cast(self.out_count, u32);
                 }
             };
-            pub const UpdatePackageUnique = packed struct {
+            pub const UpdatePackageUnique = if (INTERNAL.RECURSION_ALLOWED) packed struct {
                 func_idx: FuncId,
                 first_payload_index: PayloadOffset,
                 in_count: PayloadInCount,
                 out_count: PayloadOutCount,
                 recursion_count: RecursionCount = 0,
-            };
+            } else UpdatePackage;
             pub const MAX_NUM_UNIQUE_FUNCTION_PAYLOADS = SETTINGS.MAX_NUM_UNIQUE_FUNCTION_PAYLOADS;
             pub const MAX_FREE_BLOCKS_FOR_UNIQUE_FUNCTION_PAYLOADS = PowerOf2.USIZE_POWER.align_value_forward(MAX_NUM_UNIQUE_FUNCTION_PAYLOADS) >> PowerOf2.USIZE_BITS_SHIFT;
             pub const PayloadLocationPool = SimplePool(UpdatePackage, PayloadId, null, null, null);
@@ -915,7 +917,7 @@ pub fn ParametricStateSystem(
                         categories[param.category].meta.set(@intCast(param.index), meta);
                     }
                     const THIS_SIZE = CATEGORY_TYPE_SIZES[param.category];
-                    categories[param.category].data.release_opaque(@intCast(param.index), THIS_SIZE);
+                    categories[param.category].data.release_one(@intCast(param.index), THIS_SIZE);
                     const update_slice: UpdateSlice = categories[param.category].data.ptr_2[param.index];
                     categories[param.category].data.ptr_2[param.index] = .{};
                     if (update_slice.update_count > 0) {
@@ -954,18 +956,11 @@ pub fn ParametricStateSystem(
                 var cat_data = INTERNAL.categories[cat_idx].data.to_typed_ptr(T);
                 var cat_meta = &INTERNAL.categories[cat_idx].meta;
                 const cat_alloc = INTERNAL.categories[cat_idx].alloc;
-                var idx: Index = undefined;
-                var ptr: *T = undefined;
-                if (specific_index) |i| {
-                    INTERNAL.assert_with_reason(cat_data.free_list.idx_is_free(@intCast(i)), @src(), "index {d} in category `{s}` was not free to create new root param", .{ i, @tagName(category) });
-                    idx = i;
-                    ptr = &cat_data.ptr[i];
-                } else {
-                    const claimed = cat_data.claim_one(cat_alloc);
-                    idx = claimed.idx;
-                    ptr = claimed.ptr;
-                }
-                cat_meta.set_len(num_cast(idx, usize) + 1, cat_alloc);
+                const claimed = if (specific_index) |i| cat_data.claim_one_specific(i, cat_alloc) else cat_data.claim_one(cat_alloc);
+                const idx: Index = claimed.idx;
+                std.debug.print("root claimed: category {d}, index {d}\nfree_list_len: {d}\n", .{ cat_idx, idx, INTERNAL.categories[cat_idx].data.free_list.free_bits.index_len }); //DEBUG
+                const ptr: *T = claimed.ptr;
+                cat_meta.grow_len_if_needed_for_idx(@intCast(idx), cat_alloc);
                 var meta = cat_meta.get(idx);
                 meta.always_update = update_mode == .ALWAYS_UPDATE_EVEN_IF_VALUE_UNCHANGED;
                 meta.delete_if_parent_deleted = false;
@@ -997,30 +992,26 @@ pub fn ParametricStateSystem(
                 };
                 INTERNAL.assert_with_reason(Types.type_is_struct_with_all_fields_same_type(DEFS, DerivedParamDef), @src(), "`output_defs` must be a struct type where each field is a `DerivedParamDef`, got type `{s}`", .{@typeName(DEFS)});
                 INTERNAL.assert_with_reason(Types.type_is_struct(OUTPUT_STRUCT), @src(), "type `OUTPUT_STRUCT` must be a struct type, got type `{s}`", .{@typeName(OUTPUT_STRUCT)});
+                INTERNAL.assert_with_reason(Types.two_structs_have_exact_same_field_names_and_order(DEFS, OUTPUT_STRUCT), @src(), "type `OUTPUT_STRUCT` and the type of `output_defs` must have the same number of fields, and all fields have the same names in the same order", .{});
                 INTERNAL.assert_with_reason(@typeInfo(DEFS).@"struct".fields.len <= INTERNAL.MAX_OUTPUTS, @src(), "the number of outputs ({d}) exceeds the maximum number possible ({d})", .{ @typeInfo(DEFS).@"struct".fields.len, INTERNAL.MAX_OUTPUTS });
                 INTERNAL.assert_with_reason(INTERNAL.funcs_init[@intFromEnum(update_function)] == true, @src(), "function `{s}` was not initialized", .{@tagName(update_function)});
                 const _func_idx: INTERNAL.FuncId = @intFromEnum(update_function);
                 const input_count = inputs_flat.len;
                 const output_count = @typeInfo(DEFS).@"struct".fields.len;
                 const params_count = input_count + output_count;
-                var defs = output_defs;
-                var gen: INTERNAL.GenId = undefined;
-                inline for (@typeInfo(DEFS).@"struct".fields) |field| {
-                    const def: DerivedParamDef = @field(output_defs, field.name);
+                var out: OUTPUT_STRUCT = undefined;
+                inline for (@typeInfo(DEFS).@"struct".fields, @typeInfo(OUTPUT_STRUCT).@"struct".fields) |def_field, out_field| {
+                    const def: DerivedParamDef = @field(output_defs, def_field.name);
                     const cat_idx = @intFromEnum(def.category);
-                    // CHECKPOINT find way to make this runtime vvvvv
-                    const def_type = INTERNAL.CATEGORY_DEFS[cat_idx].param_type;
-                    var cat_data = INTERNAL.categories[cat_idx].data.to_typed_ptr(def_type);
+                    var cat_data = INTERNAL.categories[cat_idx].data;
                     var cat_meta = &INTERNAL.categories[cat_idx].meta;
                     const cat_alloc = INTERNAL.categories[cat_idx].alloc;
-                    INTERNAL.assert_with_reason(field.type == DerivedParam(def_type), @src(), "field `{s}` on output struct must be type `DerivedParam({s})`, got type `{s}`", .{@typeName(field.type)});
-                    var out_field: DerivedParam(def_type) = undefined;
-                    const idx = if (def.specific_index) |i| ensure_cap: {
-                        cat_data.ensure_capacity(@intCast(i + 1), cat_alloc);
-                        break :ensure_cap i;
-                    } else cat_data.claim_one(cat_alloc).idx;
-                    @field(defs, field.name).specific_index = idx;
-                    cat_meta.ensure_capacity_and_zero_new(@intCast(idx + 1), cat_alloc);
+                    const ELEM_SIZE = CATEGORY_TYPE_SIZES[cat_idx];
+                    const ELEM_ALIGN = CATEGORY_TYPE_ALIGNS[cat_idx];
+                    var out_param: ParamReadOnlyOpaque = undefined;
+                    const idx = if (def.specific_index) |i| cat_data.claim_one_specific(i, ELEM_SIZE, ELEM_ALIGN, cat_alloc).idx else cat_data.claim_one(ELEM_SIZE, ELEM_ALIGN, cat_alloc).idx;
+                    std.debug.print("derived claimed: category {d}, index {d}\nfree_list_len: {d}\n", .{ cat_idx, idx, INTERNAL.categories[cat_idx].data.free_list.free_bits.index_len }); //DEBUG
+                    cat_meta.grow_len_if_needed_for_idx(@intCast(idx), cat_alloc);
                     const meta = INTERNAL.MetaData{
                         .always_update = def.always_update,
                         .delete_if_parent_deleted = def.delete_when_parent_is_deleted,
@@ -1028,24 +1019,13 @@ pub fn ParametricStateSystem(
                         .generation = cat_meta.get(@intCast(idx)).generation,
                     };
                     cat_meta.set(@intCast(idx), meta);
-                    out_field.category = @intCast(cat_idx);
-                    out_field.index = @intCast(idx);
+                    out_param.category = @intCast(cat_idx);
+                    out_param.index = @intCast(idx);
                     if (INTERNAL.USE_GENERATIONS) {
-                        gen = @intCast(cat_meta.get(.GEN, @intCast(idx)));
-                        out_field.generation = gen;
+                        out_param.generation = meta.generation;
                     }
-                    @field(defs, field.name) = out_field;
-                }
-                var out: OUTPUT_STRUCT = undefined;
-                inline for (@typeInfo(DEFS).@"struct".fields) |field| {
-                    const def: DerivedParamDef = @field(output_defs, field.name);
-                    const cat_idx = @intFromEnum(def.category);
-                    const def_type = INTERNAL.CATEGORY_DEFS[cat_idx].param_type;
-                    @field(out, field.name) = DerivedParam(def_type){
-                        .category = def.category,
-                        .index = def.specific_index.?,
-                        .generation = if (INTERNAL.USE_GENERATIONS) gen else 0,
-                    };
+                    INTERNAL.assert_with_reason(IDForType(@field(out_field.type, "TYPE")) == CATEGORY_TYPE_IDS[cat_idx], @src(), "field `{s}` on output struct must be type `DerivedParam(<category type for category {s}>)`, got type `{s}`", .{ def_field.name, name_cast(cat_idx, CategoryName), @typeName(def_field.type) });
+                    @field(out, out_field.name) = @bitCast(out_param);
                 }
                 const new_payload_package_range = INTERNAL.payload_data_pool.claim_range(@intCast(params_count), INTERNAL.payload_data_pool_alloc);
                 for (inputs_flat[0..], new_payload_package_range.slice[0..input_count]) |in, *opaque_param| {
@@ -1055,8 +1035,8 @@ pub fn ParametricStateSystem(
                         .generation = if (INTERNAL.USE_GENERATIONS) in.generation else 0,
                     };
                 }
-                for (@typeInfo(DEFS).@"struct".fields, new_payload_package_range.slice[input_count..params_count]) |field, *opaque_param| {
-                    opaque_param.* = ParamReadWriteOpaque{
+                inline for (@typeInfo(OUTPUT_STRUCT).@"struct".fields, 0..) |field, f| {
+                    new_payload_package_range.slice[input_count..params_count][f] = ParamReadWriteOpaque{
                         .category = @field(out, field.name).category,
                         .index = @field(out, field.name).index,
                         .generation = if (INTERNAL.USE_GENERATIONS) @field(out, field.name).generation else 0,
@@ -1064,9 +1044,10 @@ pub fn ParametricStateSystem(
                 }
                 var new_update_package: INTERNAL.UpdatePackage = undefined;
                 for (inputs_flat[0..]) |input| {
+                    std.debug.print("\ninput: {any}\nfree_bits: {b:0>64}\n", .{ input, INTERNAL.categories[input.category].data.free_list.free_bits.list.ptr[0] }); //DEBUG
                     INTERNAL.assert_with_reason(INTERNAL.categories[input.category].data.free_list.idx_is_used(@intCast(input.index)), @src(), "index {d} in category `{s}` was a free index", .{ input.index, @tagName(num_cast(input.category, CategoryName)) });
                     if (INTERNAL.USE_GENERATIONS) {
-                        INTERNAL.assert_with_reason(INTERNAL.categories[input.category].meta.get(@intCast(input.index)).generation == input.generation, "index {d} in category `{s}` had mismatched generation (requested {d}, found {d})", .{ input.index, @tagName(num_cast(input.category, CategoryName)), input.generation, INTERNAL.categories[input.category].meta.get(@intCast(input.index)).generation });
+                        INTERNAL.assert_with_reason(INTERNAL.categories[input.category].meta.get(@intCast(input.index)).generation == input.generation, @src(), "index {d} in category `{s}` had mismatched generation (requested {d}, found {d})", .{ input.index, @tagName(num_cast(input.category, CategoryName)), input.generation, INTERNAL.categories[input.category].meta.get(@intCast(input.index)).generation });
                     }
                     var input_update_slice: INTERNAL.UpdateSlice = INTERNAL.categories[input.category].data.ptr_2[input.index];
                     if (input_update_slice.update_count == 0) {
@@ -1104,6 +1085,7 @@ pub fn ParametricStateSystem(
                     defer INTERNAL.updates_in_progress = false;
                     INTERNAL.process_all_updates_if_needed(mutex_key);
                 }
+                return out;
             }
         };
 
@@ -1957,17 +1939,20 @@ test "ParametricStateSystem" {
     const ParamUpdateInput = PSS.ParamUpdateInput;
     const ParamUpdateOutput = PSS.ParamUpdateOutput;
     const DerivedParamDef = PSS.DerivedParamDef;
-    const VecAndScalarIn = struct {
+    const VecAndScalar_UpdateIn = struct {
         vec: ParamUpdateInput(Vec),
         scalar: ParamUpdateInput(f32),
     };
-    const VecOut = struct {
+    // const VecOut = struct {
+    //     vec: DerivedParam(Vec),
+    // };
+    const Vec_UpdateOut = struct {
         vec: ParamUpdateOutput(Vec),
     };
     // const F32Object = struct {
     //     a: f32,
     // };
-    const ParentSizeButtonSizeIn = struct {
+    const ParentSizeButtonSize_UpdateIn = struct {
         parent_size: ParamUpdateInput(Vec),
         button_size: ParamUpdateInput(Vec),
     };
@@ -1976,15 +1961,21 @@ test "ParametricStateSystem" {
         button_area: DerivedParamDef,
         total_area: DerivedParamDef,
     };
-    const ParentAreaButtonAreaOut = struct {
+    const ParentAreaButtonArea_UpdateOut = struct {
         parent_area: ParamUpdateOutput(f32),
         button_area: ParamUpdateOutput(f32),
         total_area: ParamUpdateOutput(f32),
     };
+    const ParentAreaButtonAreaOut = struct {
+        parent_area: DerivedParam(f32),
+        button_area: DerivedParam(f32),
+        total_area: DerivedParam(f32),
+    };
+
     const CALC = struct {
         fn vec_plus_scalar(iface: CalcIface) void {
-            const in = iface.make_input_struct(VecAndScalarIn);
-            const out = iface.make_output_struct(VecOut);
+            const in = iface.make_input_struct(VecAndScalar_UpdateIn);
+            const out = iface.make_output_struct(Vec_UpdateOut);
             const vec_in = in.vec.get();
             const scalar = in.scalar.get();
             const vec_out = vec_in.add(Vec{ .x = scalar, .y = scalar });
@@ -1992,8 +1983,8 @@ test "ParametricStateSystem" {
             iface.commit_deletions_and_changes();
         }
         fn half_vec_minus_2_scalar(iface: CalcIface) void {
-            const in = iface.make_input_struct(VecAndScalarIn);
-            const out = iface.make_output_struct(VecOut);
+            const in = iface.make_input_struct(VecAndScalar_UpdateIn);
+            const out = iface.make_output_struct(Vec_UpdateOut);
             const vec_in = in.vec.get();
             const scalar = in.scalar.get();
             const vec_out = vec_in.scale(0.5).subtract_scale(Vec{ .x = scalar, .y = scalar }, 2);
@@ -2001,8 +1992,8 @@ test "ParametricStateSystem" {
             iface.commit_deletions_and_changes();
         }
         fn linked_area_parent_and_button(iface: CalcIface) void {
-            const in = iface.make_input_struct(ParentSizeButtonSizeIn);
-            const out = iface.make_output_struct(ParentAreaButtonAreaOut);
+            const in = iface.make_input_struct(ParentSizeButtonSize_UpdateIn);
+            const out = iface.make_output_struct(ParentAreaButtonArea_UpdateOut);
             const parent_size = in.parent_size.get();
             const button_size = in.button_size.get();
             const parent_area = parent_size.component_mult();
@@ -2019,21 +2010,27 @@ test "ParametricStateSystem" {
     PSS.initialize_update_function(.HALF_VEC_MINUS_2_SCALAR, CALC.half_vec_minus_2_scalar);
     PSS.initialize_update_function(.LINKED_AREA_PARENT_AND_BUTTON, CALC.linked_area_parent_and_button);
 
+    // POSITIONS,
+    // SIZES,
+    // AREAS,
+    // SCALARS,
     const ParentPos = PSS.create_new_root_param(.POSITIONS, Vec{ .x = 100.0, .y = 200.0 }, .ONLY_UPDATE_ON_VALUE_CHANGE);
     const ParentSize = PSS.create_new_root_param(.SIZES, Vec{ .x = 800.0, .y = 600.0 }, .ONLY_UPDATE_ON_VALUE_CHANGE);
 
     const Margin = PSS.create_new_root_param(.SCALARS, 32.0, .ONLY_UPDATE_ON_VALUE_CHANGE);
 
-    const ButtonPos = PSS.create_new_derived_param(.VEC_PLUS_SCALAR, VecAndScalarIn{
+    //CHECKPOINT //FIXME Something wrong happens in the logic here vvv
+    const ButtonPos = PSS.create_new_derived_param(.VEC_PLUS_SCALAR, VecAndScalar_UpdateIn{
         .scalar = Margin.as_input(),
         .vec = ParentPos.as_input(),
     }, PSS.DerivedParamDef{ .category = .POSITIONS }, Vec);
-    const ButtonSize = PSS.create_new_derived_param(.HALF_VEC_MINUS_2_SCALAR, VecAndScalarIn{
+
+    const ButtonSize = PSS.create_new_derived_param(.HALF_VEC_MINUS_2_SCALAR, VecAndScalar_UpdateIn{
         .scalar = Margin.as_input(),
-        .vec = ParentPos.as_input(),
+        .vec = ParentSize.as_input(),
     }, PSS.DerivedParamDef{ .category = .SIZES }, Vec);
 
-    const Areas = PSS.create_new_derived_param_set(.LINKED_AREA_PARENT_AND_BUTTON, ParentSizeButtonSizeIn{
+    const Areas = PSS.create_new_derived_param_set(.LINKED_AREA_PARENT_AND_BUTTON, ParentSizeButtonSize_UpdateIn{
         .parent_size = ParentSize.as_input(),
         .button_size = ButtonSize.as_input(),
     }, ParentAreaButtonAreaOutDef{
@@ -2060,8 +2057,8 @@ test "ParametricStateSystem" {
     };
 
     if (do_debug) {
-        debug.print_ids(ParentPos, ParentSize, Areas.parent_area.param, ButtonPos, ButtonSize, Areas.button_area.param, Areas.total_area.param);
-        debug.print_vals(ParentPos, ParentSize, Areas.parent_area.param, ButtonPos, ButtonSize, Areas.button_area.param, Areas.total_area.param);
+        debug.print_ids(ParentPos, ParentSize, Areas.parent_area, ButtonPos, ButtonSize, Areas.button_area, Areas.total_area);
+        debug.print_vals(ParentPos, ParentSize, Areas.parent_area, ButtonPos, ButtonSize, Areas.button_area, Areas.total_area);
     }
 
     try Test.expect_equal(ButtonPos.get().x, "ButtonPos.get().x", 132.0, "132.0", "failed automatic update", .{});
@@ -2077,8 +2074,8 @@ test "ParametricStateSystem" {
     Margin.set(48.0);
 
     if (do_debug) {
-        debug.print_ids(ParentPos, ParentSize, Areas.parent_area.param, ButtonPos, ButtonSize, Areas.button_area.param, Areas.total_area.param);
-        debug.print_vals(ParentPos, ParentSize, Areas.parent_area.param, ButtonPos, ButtonSize, Areas.button_area.param, Areas.total_area.param);
+        debug.print_ids(ParentPos, ParentSize, Areas.parent_area, ButtonPos, ButtonSize, Areas.button_area, Areas.total_area);
+        debug.print_vals(ParentPos, ParentSize, Areas.parent_area, ButtonPos, ButtonSize, Areas.button_area, Areas.total_area);
     }
 
     try Test.expect_equal(ButtonPos.get().x, "ButtonPos.get().x", 148.0, "148.0", "failed automatic update", .{});

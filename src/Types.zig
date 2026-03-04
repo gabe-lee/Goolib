@@ -604,6 +604,19 @@ pub inline fn type_is_struct_with_all_fields_same_type(comptime T: type, comptim
     }
     return true;
 }
+pub inline fn two_structs_have_exact_same_field_names_and_order(comptime A: type, comptime B: type) bool {
+    const INFO_A = @typeInfo(A);
+    const INFO_B = @typeInfo(B);
+    const STRUCT_A = INFO_A.@"struct";
+    const STRUCT_B = INFO_B.@"struct";
+    if (STRUCT_A.fields.len != STRUCT_B.fields.len) return false;
+    inline for (STRUCT_A.fields, STRUCT_B.fields) |field_a, field_b| {
+        if (!std.mem.eql(u8, field_a.name, field_b.name)) {
+            return false;
+        }
+    }
+    return true;
+}
 pub inline fn type_is_struct_with_all_decls_same_type(comptime T: type, comptime D: type) bool {
     const INFO = @typeInfo(T);
     switch (INFO) {

@@ -39,6 +39,8 @@ const assert_unreachable = Assert.assert_unreachable;
 const assert_idx_less_than_len = Assert.assert_idx_less_than_len;
 const assert_idx_with_count_in_bounds = Assert.assert_idx_with_count_in_bounds;
 const num_cast = Root.Cast.num_cast;
+const smart_alloc = Utils.Alloc.smart_alloc;
+const smart_alloc_ptr_ptrs = Utils.Alloc.smart_alloc_ptr_ptrs;
 
 pub const SecondaryListSettings = struct {
     elem_type: type = void,
@@ -105,17 +107,47 @@ pub fn SimplePool(comptime T: type, comptime IDX: type, comptime MEMSET_CLAIMED:
             start_idx: IDX,
         };
 
-        pub fn ensure_capacity(self: *Pool, cap: IDX, alloc: Allocator) void {
+        fn ensure_capacity(self: *Pool, cap: IDX, alloc: Allocator) void {
             if (self.cap >= cap) return;
-            const new_mem = Utils.Alloc.smart_alloc(alloc, self.ptr[0..self.cap], @intCast(cap), .ALIGN_TO_TYPE, .COPY_EXISTING_DATA, .dont_memset_new(), .DONT_MEMSET_OLD, .ERRORS_ARE_UNREACHABLE);
-            self.ptr = new_mem.ptr;
-            self.cap = @intCast(new_mem.len);
             if (HAS_SECONDARY) {
-                const new_mem_2 = Utils.Alloc.smart_alloc(alloc, self.ptr_2[0..self.cap], @intCast(cap), .ALIGN_TO_TYPE, .COPY_EXISTING_DATA, .dont_memset_new(), .DONT_MEMSET_OLD, .ERRORS_ARE_UNREACHABLE);
+                const new_mem_2 = smart_alloc(alloc, self.ptr_2[0..self.cap], @intCast(cap), .{}, .{});
                 self.ptr_2 = new_mem_2.ptr;
             }
+            const new_mem = smart_alloc(alloc, self.ptr[0..self.cap], @intCast(cap), .{}, .{});
+            self.ptr = new_mem.ptr;
+            self.cap = @intCast(new_mem.len);
         }
-
+        pub fn set_len(self: *Pool, len: IDX, alloc: Allocator) void {
+            self.free_list.set_len(len, alloc);
+            self.ensure_capacity(len, alloc);
+            self.len = len;
+        }
+        pub fn grow_len_if_needed(self: *Pool, len: IDX, alloc: Allocator) void {
+            if (self.len < len) {
+                self.set_len(len, alloc);
+            }
+        }
+        pub fn grow_len_if_needed_for_idx(self: *Pool, idx: IDX, alloc: Allocator) void {
+            const len = idx + 1;
+            if (self.len < len) {
+                self.set_len(len, alloc);
+            }
+        }
+        pub fn claim_one_specific(self: *Pool, idx: IDX, alloc: Allocator) ClaimedItem {
+            assert_with_reason(idx >= self.free_list.free_bits.index_len or self.free_list.idx_is_free(@intCast(idx)), @src(), "index {d} was not free, cannot claim it", .{idx});
+            self.grow_len_if_needed_for_idx(idx, alloc);
+            if (MEMSET_CLAIMED) |val| {
+                self.ptr[idx] = val;
+            }
+            if (HAS_SECONDARY and SECONDARY_LIST.?.memset_claimed != null) {
+                const t_ptr: *const SECONDARY_LIST.?.elem_type = @ptrCast(@alignCast(SECONDARY_LIST.?.memset_claimed));
+                self.ptr_2[idx] = t_ptr.*;
+            }
+            return ClaimedItem{
+                .ptr = @ptrCast(self.ptr + idx),
+                .idx = idx,
+            };
+        }
         pub fn claim_one(self: *Pool, alloc: Allocator) ClaimedItem {
             if (self.free_list.find_1_free_and_set_used()) |new_idx| {
                 return ClaimedItem{
@@ -123,8 +155,7 @@ pub fn SimplePool(comptime T: type, comptime IDX: type, comptime MEMSET_CLAIMED:
                     .idx = @intCast(new_idx),
                 };
             }
-            self.ensure_capacity(self.len + 1, alloc);
-            self.free_list.set_len(@intCast(self.len + 1), alloc);
+            self.grow_len_if_needed_for_idx(self.len, alloc);
             const new_idx = self.len;
             self.len += 1;
             if (MEMSET_CLAIMED) |val| {
@@ -144,11 +175,10 @@ pub fn SimplePool(comptime T: type, comptime IDX: type, comptime MEMSET_CLAIMED:
             if (self.free_list.find_range_free_and_set_used(@intCast(count))) |new_idx| {
                 return ClaimedRange{
                     .slice = (self.ptr + new_idx)[0..count],
-                    .start_idx = new_idx,
+                    .start_idx = @intCast(new_idx),
                 };
             }
-            self.ensure_capacity_no_builtin(self.len + count, alloc);
-            self.free_list.set_len(@intCast(self.len + count), alloc);
+            self.grow_len_if_needed(self.len + count, alloc);
             const new_idx = self.len;
             self.len += count;
             if (MEMSET_CLAIMED) |val| {
@@ -162,6 +192,23 @@ pub fn SimplePool(comptime T: type, comptime IDX: type, comptime MEMSET_CLAIMED:
             return ClaimedRange{
                 .slice = (self.ptr + new_idx)[0..count],
                 .start_idx = new_idx,
+            };
+        }
+        pub fn claim_range_specific(self: *Pool, idx: IDX, count: IDX, alloc: Allocator) ClaimedRange {
+            assert_with_reason(idx >= self.free_list.free_bits.index_len or self.free_list.has_n_consecutive_frees_at_idx(@intCast(idx), @intCast(@min(count, self.len - idx))), @src(), "{d} indices starting from index {d} were not all free, cannot claim them", .{ count, idx });
+            const end = idx + count;
+            self.grow_len_if_needed(end, alloc);
+            if (MEMSET_CLAIMED) |val| {
+                @memset(self.ptr[idx .. idx + count], val);
+            }
+            if (HAS_SECONDARY and SECONDARY_LIST.?.memset_claimed != null) {
+                const sec_ptr: *const SECONDARY_LIST.?.elem_type = @ptrCast(@alignCast(SECONDARY_LIST.?.memset_claimed));
+                const sec_set = sec_ptr.*;
+                @memset(self.ptr_2[idx .. idx + count], sec_set);
+            }
+            return ClaimedRange{
+                .slice = (self.ptr + idx)[0..count],
+                .start_idx = idx,
             };
         }
 
@@ -202,11 +249,18 @@ pub fn SimplePool(comptime T: type, comptime IDX: type, comptime MEMSET_CLAIMED:
         }
         pub fn resize_range(self: *Pool, idx: IDX, old_count: IDX, new_count: IDX, alloc: Allocator) ClaimedRange {
             assert_idx_with_count_in_bounds(idx, old_count, self.len, @src());
-            if (new_count == old_count) return;
             const old_end = idx + old_count;
+            if (new_count == old_count) return ClaimedRange{
+                .slice = self.ptr[idx..old_end],
+                .start_idx = idx,
+            };
+
             if (new_count < old_count) {
                 self.release_range(old_end, old_count - new_count);
-                return;
+                return ClaimedRange{
+                    .slice = self.ptr[idx .. idx + new_count],
+                    .start_idx = idx,
+                };
             }
             const grow_count = new_count - old_count;
             if (self.free_list.has_n_consecutive_frees_at_idx(old_end, grow_count)) {
@@ -261,7 +315,7 @@ pub fn SimplePool(comptime T: type, comptime IDX: type, comptime MEMSET_CLAIMED:
     };
 }
 
-pub fn SimplePoolOpaque(comptime IDX: type, comptime MEMSET_NEW: ?[]const u8, comptime CLEAR_RELEASED: ?[]const u8, comptime SECONDARY_LIST: ?SecondaryListSettings) type {
+pub fn SimplePoolOpaque(comptime IDX: type, comptime MEMSET_CLAIMED: ?[]const u8, comptime CLEAR_RELEASED: ?[]const u8, comptime SECONDARY_LIST: ?SecondaryListSettings) type {
     assert_with_reason(Types.type_is_unsigned_int(IDX), @src(), "type `IDX` must be an unsigned int type, got type `{s}`", .{@typeName(IDX)});
     const HAS_SECONDARY = SECONDARY_LIST != null;
     return extern struct {
@@ -273,7 +327,7 @@ pub fn SimplePoolOpaque(comptime IDX: type, comptime MEMSET_NEW: ?[]const u8, co
         len: IDX = 0,
         cap: IDX = 0,
 
-        const SET: []const u8 = if (MEMSET_NEW) |S| S else undefined;
+        const SET: []const u8 = if (MEMSET_CLAIMED) |S| S else undefined;
         const CLEAR: []const u8 = if (CLEAR_RELEASED) |C| C else undefined;
 
         pub fn init_capacity(type_cap: usize, elem_size: usize, elem_align: usize, alloc: Allocator) Pool {
@@ -281,10 +335,10 @@ pub fn SimplePoolOpaque(comptime IDX: type, comptime MEMSET_NEW: ?[]const u8, co
             var pool = Pool{
                 .free_list = .init_capacity(type_cap, alloc),
             };
-            Utils.Alloc.smart_alloc_ptr_ptrs(alloc, &pool.ptr, &pool.cap, real_cap, .custom_align(elem_align), .DONT_COPY_EXISTING_DATA, .dont_memset_new(), .DONT_MEMSET_OLD, .ERRORS_ARE_UNREACHABLE);
+            smart_alloc_ptr_ptrs(alloc, &pool.ptr, &pool.cap, real_cap, .{ .align_mode = .custom_align(elem_align) }, .{});
             if (HAS_SECONDARY) {
                 var dummy_cap: IDX = 0;
-                Utils.Alloc.smart_alloc_ptr_ptrs(alloc, &pool.ptr_2, &dummy_cap, real_cap, .ALIGN_TO_TYPE, .DONT_COPY_EXISTING_DATA, .dont_memset_new(), .DONT_MEMSET_OLD, .ERRORS_ARE_UNREACHABLE);
+                smart_alloc_ptr_ptrs(alloc, &pool.ptr_2, &dummy_cap, real_cap, .{}, .{});
             }
             return pool;
         }
@@ -298,6 +352,15 @@ pub fn SimplePoolOpaque(comptime IDX: type, comptime MEMSET_NEW: ?[]const u8, co
             self.* = undefined;
         }
 
+        pub const ClaimedItem = struct {
+            ptr: *u8,
+            idx: IDX,
+        };
+        pub const ClaimedRange = struct {
+            slice: []u8,
+            start_idx: IDX,
+        };
+
         pub fn opaque_elem_ptr(self: Pool, index: usize, elem_size: usize) [*]u8 {
             assert_idx_less_than_len(index, self.len, @src());
             const byte_index = index * elem_size;
@@ -308,13 +371,132 @@ pub fn SimplePoolOpaque(comptime IDX: type, comptime MEMSET_NEW: ?[]const u8, co
             const byte_index = index * elem_size;
             return (self.ptr + byte_index)[0..elem_size];
         }
-        pub fn release_opaque(self: *Pool, index: usize, elem_size: usize) void {
+        fn ensure_capacity(self: *Pool, cap: IDX, elem_size: usize, elem_align: usize, alloc: Allocator) void {
+            if (self.cap >= cap) return;
+            const real_cap = num_cast(self.cap, usize) * elem_size;
+            const real_cap_new = num_cast(cap, usize) * elem_size;
+            if (HAS_SECONDARY) {
+                const new_mem_2 = smart_alloc(alloc, self.ptr_2[0..self.cap], @intCast(cap), .{}, .{});
+                self.ptr_2 = new_mem_2.ptr;
+            }
+            const new_mem = smart_alloc(alloc, self.ptr[0..real_cap], @intCast(real_cap_new), .{ .align_mode = .custom_align(elem_align) }, .{});
+            self.ptr = new_mem.ptr;
+            self.cap = cap;
+        }
+        pub fn set_len(self: *Pool, len: IDX, elem_size: usize, elem_align: usize, alloc: Allocator) void {
+            self.free_list.set_len(len, alloc);
+            self.ensure_capacity(len, elem_size, elem_align, alloc);
+            self.len = len;
+        }
+        pub fn grow_len_if_needed(self: *Pool, len: IDX, elem_size: usize, elem_align: usize, alloc: Allocator) void {
+            if (self.len < len) {
+                self.set_len(len, elem_size, elem_align, alloc);
+            }
+        }
+        pub fn grow_len_if_needed_for_idx(self: *Pool, idx: IDX, elem_size: usize, elem_align: usize, alloc: Allocator) void {
+            const len = idx + 1;
+            if (self.len < len) {
+                self.set_len(len, elem_size, elem_align, alloc);
+            }
+        }
+        pub fn claim_one_specific(self: *Pool, idx: IDX, elem_size: usize, elem_align: usize, alloc: Allocator) ClaimedItem {
+            assert_with_reason(idx >= self.free_list.free_bits.index_len or self.free_list.idx_is_free(@intCast(idx)), @src(), "index {d} was not free, cannot claim it", .{idx});
+            const byte_idx = (idx * elem_size);
+            self.grow_len_if_needed_for_idx(idx, elem_size, elem_align, alloc);
+            if (MEMSET_CLAIMED) |bytes| {
+                @memcpy(self.ptr[byte_idx..(byte_idx + bytes.len)], bytes);
+            }
+            if (HAS_SECONDARY and SECONDARY_LIST.?.memset_claimed != null) {
+                const t_ptr: *const SECONDARY_LIST.?.elem_type = @ptrCast(@alignCast(SECONDARY_LIST.?.memset_claimed));
+                self.ptr_2[idx] = t_ptr.*;
+            }
+            return ClaimedItem{
+                .ptr = @ptrCast(self.ptr + byte_idx),
+                .idx = idx,
+            };
+        }
+        pub fn claim_one(self: *Pool, elem_size: usize, elem_align: usize, alloc: Allocator) ClaimedItem {
+            if (self.free_list.find_1_free_and_set_used()) |new_idx| {
+                return ClaimedItem{
+                    .ptr = @ptrCast(self.ptr + (new_idx * elem_size)),
+                    .idx = @intCast(new_idx),
+                };
+            }
+            self.grow_len_if_needed_for_idx(self.len, elem_size, elem_align, alloc);
+            const new_idx = self.len;
+            self.len += 1;
+            const byte_idx = (new_idx * elem_size);
+            if (MEMSET_CLAIMED) |bytes| {
+                @memcpy(self.ptr[byte_idx..(byte_idx + bytes.len)], bytes);
+            }
+            if (HAS_SECONDARY and SECONDARY_LIST.?.memset_claimed != null) {
+                const t_ptr: *const SECONDARY_LIST.?.elem_type = @ptrCast(@alignCast(SECONDARY_LIST.?.memset_claimed));
+                self.ptr_2[new_idx] = t_ptr.*;
+            }
+            return ClaimedItem{
+                .ptr = @ptrCast(self.ptr + byte_idx),
+                .idx = new_idx,
+            };
+        }
+
+        pub fn claim_range(self: *Pool, count: IDX, elem_size: usize, elem_align: usize, alloc: Allocator) ClaimedRange {
+            if (self.free_list.find_range_free_and_set_used(@intCast(count))) |new_idx| {
+                return ClaimedRange{
+                    .slice = (self.ptr + (new_idx * elem_size))[0..(count * elem_size)],
+                    .start_idx = new_idx,
+                };
+            }
+            self.grow_len_if_needed(self.len + count, elem_size, elem_align, alloc);
+            const new_idx = self.len;
+            const byte_idx = new_idx * elem_size;
+            self.len += count;
+            if (MEMSET_CLAIMED) |bytes| {
+                var offset = byte_idx;
+                for (0..count) |_| {
+                    @memset(self.ptr[offset .. offset + elem_size], bytes);
+                    offset += elem_size;
+                }
+            }
+            if (HAS_SECONDARY and SECONDARY_LIST.?.memset_claimed != null) {
+                const t_ptr: *const SECONDARY_LIST.?.elem_type = @ptrCast(@alignCast(SECONDARY_LIST.?.memset_claimed));
+                const t_set = t_ptr.*;
+                @memset(self.ptr_2[new_idx .. new_idx + count], t_set);
+            }
+            return ClaimedRange{
+                .slice = (self.ptr + byte_idx)[0..(count * elem_size)],
+                .start_idx = new_idx,
+            };
+        }
+        pub fn claim_range_specific(self: *Pool, idx: IDX, count: IDX, elem_size: usize, elem_align: usize, alloc: Allocator) ClaimedRange {
+            assert_with_reason(idx >= self.free_list.free_bits.index_len or self.free_list.has_n_consecutive_frees_at_idx(@intCast(idx), @intCast(@min(count, self.len - idx))), @src(), "{d} indices starting from index {d} were not all free, cannot claim them", .{ count, idx });
+            const end = idx + count;
+            self.grow_len_if_needed(end, elem_size, elem_align, alloc);
+            const byte_idx = idx * elem_size;
+            if (MEMSET_CLAIMED) |bytes| {
+                var offset = byte_idx;
+                for (0..count) |_| {
+                    @memset(self.ptr[offset .. offset + elem_size], bytes);
+                    offset += elem_size;
+                }
+            }
+            if (HAS_SECONDARY and SECONDARY_LIST.?.memset_claimed != null) {
+                const t_ptr: *const SECONDARY_LIST.?.elem_type = @ptrCast(@alignCast(SECONDARY_LIST.?.memset_claimed));
+                const t_set = t_ptr.*;
+                @memset(self.ptr_2[idx .. idx + count], t_set);
+            }
+            return ClaimedRange{
+                .slice = (self.ptr + byte_idx)[0..(count * elem_size)],
+                .start_idx = idx,
+            };
+        }
+
+        pub fn release_one(self: *Pool, index: usize, elem_size: usize) void {
             const byte_index = index * elem_size;
             assert_idx_less_than_len(index, self.len, @src());
             self.free_list.set_free(index);
             if (CLEAR_RELEASED) |bytes| {
                 const elem_bytes = (self.ptr + byte_index)[0..elem_size];
-                @memset(elem_bytes, bytes[0..elem_size]);
+                @memset(elem_bytes, bytes);
             }
             if (HAS_SECONDARY and SECONDARY_LIST.?.clear_released != null) {
                 const t_ptr: *const SECONDARY_LIST.?.elem_type = @ptrCast(@alignCast(SECONDARY_LIST.?.clear_released));
@@ -322,10 +504,28 @@ pub fn SimplePoolOpaque(comptime IDX: type, comptime MEMSET_NEW: ?[]const u8, co
             }
         }
 
-        pub fn to_typed(self: Pool, comptime T: type) SimplePool(T, IDX, if (MEMSET_NEW != null) @as(*const T, @ptrCast(@alignCast(SET.ptr))).* else null, if (CLEAR_RELEASED != null) @as(*const T, @ptrCast(@alignCast(CLEAR.ptr))).* else null, SECONDARY_LIST) {
+        pub fn release_range(self: *Pool, idx: IDX, count: IDX, elem_size: usize) void {
+            assert_idx_with_count_in_bounds(idx, count, self.len, @src());
+            self.free_list.set_range_free(@intCast(idx), @intCast(count));
+            const byte_idx = num_cast(idx, usize) + elem_size;
+            if (CLEAR_RELEASED) |bytes| {
+                var offset = byte_idx;
+                for (0..count) |_| {
+                    @memset(self.ptr[offset .. offset + elem_size], bytes);
+                    offset += elem_size;
+                }
+            }
+            if (HAS_SECONDARY and SECONDARY_LIST.?.clear_released != null) {
+                const t_ptr: *const SECONDARY_LIST.?.elem_type = @ptrCast(@alignCast(SECONDARY_LIST.?.clear_released));
+                const t_set = t_ptr.*;
+                @memset(self.ptr_2[idx .. idx + count], t_set);
+            }
+        }
+
+        pub fn to_typed(self: Pool, comptime T: type) SimplePool(T, IDX, if (MEMSET_CLAIMED != null) @as(*const T, @ptrCast(@alignCast(SET.ptr))).* else null, if (CLEAR_RELEASED != null) @as(*const T, @ptrCast(@alignCast(CLEAR.ptr))).* else null, SECONDARY_LIST) {
             return @bitCast(self);
         }
-        pub fn to_typed_ptr(self: *Pool, comptime T: type) *SimplePool(T, IDX, if (MEMSET_NEW != null) @as(*const T, @ptrCast(@alignCast(SET.ptr))).* else null, if (CLEAR_RELEASED != null) @as(*const T, @ptrCast(@alignCast(CLEAR.ptr))).* else null, SECONDARY_LIST) {
+        pub fn to_typed_ptr(self: *Pool, comptime T: type) *SimplePool(T, IDX, if (MEMSET_CLAIMED != null) @as(*const T, @ptrCast(@alignCast(SET.ptr))).* else null, if (CLEAR_RELEASED != null) @as(*const T, @ptrCast(@alignCast(CLEAR.ptr))).* else null, SECONDARY_LIST) {
             return @ptrCast(@alignCast(self));
         }
     };

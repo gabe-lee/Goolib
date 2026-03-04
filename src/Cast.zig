@@ -348,6 +348,23 @@ pub fn TypeSliceSameProps(comptime POINTER_OR_SLICE: type, comptime NEW_TYPE: ty
         },
     });
 }
+pub fn TypeSliceSamePropsAndType(comptime POINTER_OR_SLICE: type) type {
+    const INFO = @typeInfo(POINTER_OR_SLICE);
+    assert_with_reason(INFO == .pointer, @src(), "type of `POINTER_OR_SLICE` must be a pointer type, got type `{s}`", .{@typeName(POINTER_OR_SLICE)});
+    const PTR = INFO.pointer;
+    return @Type(.{
+        .pointer = .{
+            .size = .slice,
+            .is_const = PTR.is_const,
+            .is_volatile = PTR.is_volatile,
+            .is_allowzero = PTR.is_allowzero,
+            .alignment = PTR.alignment,
+            .address_space = PTR.address_space,
+            .child = PTR.child,
+            .sentinel_ptr = PTR.sentinel_ptr,
+        },
+    });
+}
 
 pub fn many_item_with_sentinel_to_slice(many_item_ptr_with_sentinel: anytype) SameTypeSliceSameProps(@TypeOf(many_item_ptr_with_sentinel)) {
     const MANY_ITEM_WITH_SENT = @TypeOf(many_item_ptr_with_sentinel);
@@ -446,4 +463,43 @@ pub fn any_ptr_to_many_item_ptr(ptr_or_slice: anytype) [*]@typeInfo(@TypeOf(ptr_
         else => assert_unreachable(@src(), "`ptr_or_slice` must be a pointer or slice type, got type `{s}`", .{@typeName(T)}),
     };
     return @ptrCast(ptr);
+}
+
+pub fn any_ptr_to_zero_len_slice(ptr_or_slice: anytype) TypeSliceSamePropsAndType(@TypeOf(ptr_or_slice)) {
+    const T = @TypeOf(ptr_or_slice);
+    const ptr = switch (@typeInfo(T)) {
+        .pointer => |PTR| switch (PTR.size) {
+            .one, .c, .many => ptr_or_slice,
+            .slice => ptr_or_slice.ptr,
+        },
+        else => assert_unreachable(@src(), "`ptr_or_slice` must be a pointer or slice type, got type `{s}`", .{@typeName(T)}),
+    };
+    var out: TypeSliceSamePropsAndType(@TypeOf(ptr_or_slice)) = undefined;
+    out.ptr = ptr;
+    out.len = 0;
+    return out;
+}
+
+pub fn name_cast(val: anytype, comptime ENUM_TYPE_FOR_INT: ?type) []const u8 {
+    const T = @TypeOf(val);
+    switch (@typeInfo(T)) {
+        .int, .comptime_int => {
+            if (ENUM_TYPE_FOR_INT) |E_TYPE| {
+                return @tagName(num_cast(val, E_TYPE));
+            }
+            return std.fmt.comptimePrint("<instance of type `{s}`>", .{@typeName(T)});
+        },
+        .error_set => {
+            return @errorName(val);
+        },
+        .@"enum", .@"union" => {
+            return @tagName(val);
+        },
+        .type => {
+            return @typeName(val);
+        },
+        else => {
+            return std.fmt.comptimePrint("<instance of type `{s}`>", .{@typeName(T)});
+        },
+    }
 }
