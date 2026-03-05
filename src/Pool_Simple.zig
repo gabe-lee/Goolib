@@ -42,6 +42,8 @@ const num_cast = Root.Cast.num_cast;
 const smart_alloc = Utils.Alloc.smart_alloc;
 const smart_alloc_ptr_ptrs = Utils.Alloc.smart_alloc_ptr_ptrs;
 
+const DEBUG = std.debug.print;
+
 pub const SecondaryListSettings = struct {
     elem_type: type = void,
     memset_claimed: ?*const anyopaque = null,
@@ -136,6 +138,7 @@ pub fn SimplePool(comptime T: type, comptime IDX: type, comptime MEMSET_CLAIMED:
         pub fn claim_one_specific(self: *Pool, idx: IDX, alloc: Allocator) ClaimedItem {
             assert_with_reason(idx >= self.free_list.free_bits.index_len or self.free_list.idx_is_free(@intCast(idx)), @src(), "index {d} was not free, cannot claim it", .{idx});
             self.grow_len_if_needed_for_idx(idx, alloc);
+            self.free_list.set_used(idx);
             if (MEMSET_CLAIMED) |val| {
                 self.ptr[idx] = val;
             }
@@ -150,14 +153,17 @@ pub fn SimplePool(comptime T: type, comptime IDX: type, comptime MEMSET_CLAIMED:
         }
         pub fn claim_one(self: *Pool, alloc: Allocator) ClaimedItem {
             if (self.free_list.find_1_free_and_set_used()) |new_idx| {
+                // DEBUG("POOL FOUND FREE\npool len: {d}\nfree len: {d}\nfree block len: {d}\nclaimed idx: {d}\n", .{ self.len, self.free_list.free_bits.index_len, self.free_list.free_bits.list.len, new_idx });
+
                 return ClaimedItem{
                     .ptr = @ptrCast(self.ptr + new_idx),
                     .idx = @intCast(new_idx),
                 };
             }
-            self.grow_len_if_needed_for_idx(self.len, alloc);
             const new_idx = self.len;
-            self.len += 1;
+            self.grow_len_if_needed_for_idx(new_idx, alloc);
+            self.free_list.set_used(new_idx);
+            // DEBUG("POOL CREATE NEW\npool len: {d}\nfree len: {d}\nfree block len: {d}\nclaimed idx: {d}\n", .{ self.len, self.free_list.free_bits.index_len, self.free_list.free_bits.list.len, new_idx });
             if (MEMSET_CLAIMED) |val| {
                 self.ptr[new_idx] = val;
             }
@@ -178,9 +184,9 @@ pub fn SimplePool(comptime T: type, comptime IDX: type, comptime MEMSET_CLAIMED:
                     .start_idx = @intCast(new_idx),
                 };
             }
-            self.grow_len_if_needed(self.len + count, alloc);
             const new_idx = self.len;
-            self.len += count;
+            self.grow_len_if_needed(self.len + count, alloc);
+            self.free_list.set_range_used(@intCast(new_idx), @intCast(count));
             if (MEMSET_CLAIMED) |val| {
                 @memset(self.ptr[new_idx .. new_idx + count], val);
             }
@@ -198,6 +204,7 @@ pub fn SimplePool(comptime T: type, comptime IDX: type, comptime MEMSET_CLAIMED:
             assert_with_reason(idx >= self.free_list.free_bits.index_len or self.free_list.has_n_consecutive_frees_at_idx(@intCast(idx), @intCast(@min(count, self.len - idx))), @src(), "{d} indices starting from index {d} were not all free, cannot claim them", .{ count, idx });
             const end = idx + count;
             self.grow_len_if_needed(end, alloc);
+            self.free_list.set_range_used(@intCast(idx), @intCast(count));
             if (MEMSET_CLAIMED) |val| {
                 @memset(self.ptr[idx .. idx + count], val);
             }
@@ -264,7 +271,7 @@ pub fn SimplePool(comptime T: type, comptime IDX: type, comptime MEMSET_CLAIMED:
             }
             const grow_count = new_count - old_count;
             if (self.free_list.has_n_consecutive_frees_at_idx(old_end, grow_count)) {
-                _ = self.free_list.set_range_used(old_end, grow_count);
+                self.free_list.set_range_used(old_end, grow_count);
                 return ClaimedRange{
                     .slice = self.ptr[idx .. old_end + grow_count],
                     .start_idx = idx,
@@ -422,9 +429,9 @@ pub fn SimplePoolOpaque(comptime IDX: type, comptime MEMSET_CLAIMED: ?[]const u8
                     .idx = @intCast(new_idx),
                 };
             }
-            self.grow_len_if_needed_for_idx(self.len, elem_size, elem_align, alloc);
             const new_idx = self.len;
-            self.len += 1;
+            self.grow_len_if_needed_for_idx(new_idx, elem_size, elem_align, alloc);
+            self.free_list.set_used(new_idx);
             const byte_idx = (new_idx * elem_size);
             if (MEMSET_CLAIMED) |bytes| {
                 @memcpy(self.ptr[byte_idx..(byte_idx + bytes.len)], bytes);
@@ -449,7 +456,6 @@ pub fn SimplePoolOpaque(comptime IDX: type, comptime MEMSET_CLAIMED: ?[]const u8
             self.grow_len_if_needed(self.len + count, elem_size, elem_align, alloc);
             const new_idx = self.len;
             const byte_idx = new_idx * elem_size;
-            self.len += count;
             if (MEMSET_CLAIMED) |bytes| {
                 var offset = byte_idx;
                 for (0..count) |_| {

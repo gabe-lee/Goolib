@@ -55,6 +55,8 @@ const ct_assert_field_is_type = Assert.assert_field_is_type;
 const num_cast = Root.Cast.num_cast;
 const name_cast = Root.Cast.name_cast;
 
+const DEBUG = std.debug.print;
+
 const List8 = List(u8);
 const List16 = List(u16);
 const List32 = List(u32);
@@ -568,7 +570,7 @@ pub fn ParametricStateSystem(
                 if (RECURSION_ALLOWED) {
                     if (previously_queued.recursion_count < RECURSION_LIMIT) {
                         previously_queued.recursion_count += 1;
-                        return .CONTINUE_TO_CHECK_CURRENTLY_QUEUED;
+                        return .QUEUE;
                     } else {
                         return .DO_NOT_QUEUE;
                     }
@@ -958,7 +960,6 @@ pub fn ParametricStateSystem(
                 const cat_alloc = INTERNAL.categories[cat_idx].alloc;
                 const claimed = if (specific_index) |i| cat_data.claim_one_specific(i, cat_alloc) else cat_data.claim_one(cat_alloc);
                 const idx: Index = claimed.idx;
-                std.debug.print("root claimed: category {d}, index {d}\nfree_list_len: {d}\n", .{ cat_idx, idx, INTERNAL.categories[cat_idx].data.free_list.free_bits.index_len }); //DEBUG
                 const ptr: *T = claimed.ptr;
                 cat_meta.grow_len_if_needed_for_idx(@intCast(idx), cat_alloc);
                 var meta = cat_meta.get(idx);
@@ -1003,14 +1004,13 @@ pub fn ParametricStateSystem(
                 inline for (@typeInfo(DEFS).@"struct".fields, @typeInfo(OUTPUT_STRUCT).@"struct".fields) |def_field, out_field| {
                     const def: DerivedParamDef = @field(output_defs, def_field.name);
                     const cat_idx = @intFromEnum(def.category);
-                    var cat_data = INTERNAL.categories[cat_idx].data;
+                    var cat_data = &INTERNAL.categories[cat_idx].data;
                     var cat_meta = &INTERNAL.categories[cat_idx].meta;
                     const cat_alloc = INTERNAL.categories[cat_idx].alloc;
                     const ELEM_SIZE = CATEGORY_TYPE_SIZES[cat_idx];
                     const ELEM_ALIGN = CATEGORY_TYPE_ALIGNS[cat_idx];
                     var out_param: ParamReadOnlyOpaque = undefined;
                     const idx = if (def.specific_index) |i| cat_data.claim_one_specific(i, ELEM_SIZE, ELEM_ALIGN, cat_alloc).idx else cat_data.claim_one(ELEM_SIZE, ELEM_ALIGN, cat_alloc).idx;
-                    std.debug.print("derived claimed: category {d}, index {d}\nfree_list_len: {d}\n", .{ cat_idx, idx, INTERNAL.categories[cat_idx].data.free_list.free_bits.index_len }); //DEBUG
                     cat_meta.grow_len_if_needed_for_idx(@intCast(idx), cat_alloc);
                     const meta = INTERNAL.MetaData{
                         .always_update = def.always_update,
@@ -1044,12 +1044,11 @@ pub fn ParametricStateSystem(
                 }
                 var new_update_package: INTERNAL.UpdatePackage = undefined;
                 for (inputs_flat[0..]) |input| {
-                    std.debug.print("\ninput: {any}\nfree_bits: {b:0>64}\n", .{ input, INTERNAL.categories[input.category].data.free_list.free_bits.list.ptr[0] }); //DEBUG
                     INTERNAL.assert_with_reason(INTERNAL.categories[input.category].data.free_list.idx_is_used(@intCast(input.index)), @src(), "index {d} in category `{s}` was a free index", .{ input.index, @tagName(num_cast(input.category, CategoryName)) });
                     if (INTERNAL.USE_GENERATIONS) {
                         INTERNAL.assert_with_reason(INTERNAL.categories[input.category].meta.get(@intCast(input.index)).generation == input.generation, @src(), "index {d} in category `{s}` had mismatched generation (requested {d}, found {d})", .{ input.index, @tagName(num_cast(input.category, CategoryName)), input.generation, INTERNAL.categories[input.category].meta.get(@intCast(input.index)).generation });
                     }
-                    var input_update_slice: INTERNAL.UpdateSlice = INTERNAL.categories[input.category].data.ptr_2[input.index];
+                    var input_update_slice: *INTERNAL.UpdateSlice = &INTERNAL.categories[input.category].data.ptr_2[input.index];
                     if (input_update_slice.update_count == 0) {
                         const new_payload_slot = INTERNAL.payload_location_pool.claim_one(INTERNAL.payload_location_pool_alloc);
                         input_update_slice.first_payload = @intCast(new_payload_slot.idx);
@@ -1080,11 +1079,7 @@ pub fn ParametricStateSystem(
                     _ = func_deps.append(package_no_func, func_dep_allocs[_func_idx]);
                 }
                 INTERNAL.update_queue.queue(new_update_package, INTERNAL.update_queue_alloc);
-                if (!INTERNAL.updates_in_progress) {
-                    INTERNAL.updates_in_progress = true;
-                    defer INTERNAL.updates_in_progress = false;
-                    INTERNAL.process_all_updates_if_needed(mutex_key);
-                }
+                INTERNAL.process_all_updates_if_needed(mutex_key);
                 return out;
             }
         };
@@ -1445,7 +1440,7 @@ pub fn ParametricStateSystem(
                 INTERNAL.assert_with_reason(self.outputs.len == @typeInfo(OUT_STRUCT).@"struct".fields.len, @src(), "type `OUT_STRUCT` must have exactly the same number of fields as `read_write_params_opaque.len`, got fields {d} != inputs {d}", .{ @typeInfo(OUT_STRUCT).@"struct".fields.len, self.outputs.len });
                 var object: OUT_STRUCT = undefined;
                 inline for (@typeInfo(OUT_STRUCT).@"struct".fields, 0..) |field, f| {
-                    INTERNAL.assert_with_reason(Types.type_has_decl_with_type(field.type, "TYPE", type), @src(), "field `{s}` is not a valid input parameter field (missing const declaration `pub const TYPE = <param type>;`)", .{field.name});
+                    INTERNAL.assert_with_reason(Types.type_has_decl_with_type(field.type, "TYPE", type), @src(), "field `{s}` is not a valid output parameter field (missing const declaration `pub const TYPE = <param type>;`)", .{field.name});
                     INTERNAL.assert_with_reason(field.type == ParamUpdateOutput(comptime @field(field.type, "TYPE")), @src(), "field `{s}` is not a valid input parameter field (is not a `ParamUpdateOutput(T)`)", .{field.name});
                     @field(object, field.name) = self.outputs[f].with_type_and_mutex_key(self.key, comptime @field(field.type, "TYPE"));
                 }
@@ -1527,7 +1522,7 @@ pub fn ParametricStateSystem(
         }
         pub fn ParamUpdateOutput(comptime T: type) type {
             return struct {
-                const TYPE = T;
+                pub const TYPE = T;
                 const THIS_TYPE_ID: INTERNAL.CategoryId = find: {
                     for (INTERNAL.UNIQUE_TYPES[0..], 0..) |TT, i| {
                         if (T == TT) break :find INTERNAL.UNIQUE_TYPE_IDS[i];
@@ -1979,6 +1974,7 @@ test "ParametricStateSystem" {
             const vec_in = in.vec.get();
             const scalar = in.scalar.get();
             const vec_out = vec_in.add(Vec{ .x = scalar, .y = scalar });
+
             out.vec.set(vec_out);
             iface.commit_deletions_and_changes();
         }
@@ -2019,7 +2015,6 @@ test "ParametricStateSystem" {
 
     const Margin = PSS.create_new_root_param(.SCALARS, 32.0, .ONLY_UPDATE_ON_VALUE_CHANGE);
 
-    //CHECKPOINT //FIXME Something wrong happens in the logic here vvv
     const ButtonPos = PSS.create_new_derived_param(.VEC_PLUS_SCALAR, VecAndScalar_UpdateIn{
         .scalar = Margin.as_input(),
         .vec = ParentPos.as_input(),
@@ -2079,13 +2074,13 @@ test "ParametricStateSystem" {
     }
 
     try Test.expect_equal(ButtonPos.get().x, "ButtonPos.get().x", 148.0, "148.0", "failed automatic update", .{});
-    try Test.expect_equal(ButtonPos.get().y, "ButtonPos.get().y", 381.0, "381.0", "failed automatic update", .{});
+    try Test.expect_equal(ButtonPos.get().y, "ButtonPos.get().y", 248.0, "248.0", "failed automatic update", .{});
     try Test.expect_equal(ButtonSize.get().x, "ButtonSize.get().x", 399.0, "399.0", "failed automatic update", .{});
-    try Test.expect_equal(ButtonSize.get().y, "ButtonSize.get().y", 204.0, "204.0", "failed automatic update", .{});
+    try Test.expect_equal(ButtonSize.get().y, "ButtonSize.get().y", 70.5, "70.5", "failed automatic update", .{});
 
-    try Test.expect_equal(Areas.parent_area.get(), "Areas.parent_area.get()", 594000.0, "594000.0", "failed automatic update", .{});
-    try Test.expect_equal(Areas.button_area.get(), "Areas.button_area.get()", 81396.0, "81396.0", "failed automatic update", .{});
-    try Test.expect_equal(Areas.total_area.get(), "Areas.total_area.get()", 675396.0, "675396.0", "failed automatic update", .{});
+    try Test.expect_equal(Areas.parent_area.get(), "Areas.parent_area.get()", 329670.0, "329670.0", "failed automatic update", .{});
+    try Test.expect_equal(Areas.button_area.get(), "Areas.button_area.get()", 28129.5, "28129.5", "failed automatic update", .{});
+    try Test.expect_equal(Areas.total_area.get(), "Areas.total_area.get()", 357799.5, "357799.5", "failed automatic update", .{});
 
     // if (do_debug) {
     //     std.debug.print("TestTable MEM: {d} bytes\n", .{my_param_table.total_memory_footprint()});

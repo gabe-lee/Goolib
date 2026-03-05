@@ -33,6 +33,8 @@ const EnumeratedDefinitions = Utils.EnumeratedDefs.EnumeratedDefinitions;
 
 const num_cast = Root.Cast.num_cast;
 
+const DEBUG = std.debug.print;
+
 const List = Root.IList.List;
 
 const SetOneZeroMode = enum(u8) {
@@ -184,12 +186,21 @@ pub fn BitList(comptime BITS_PER_INDEX: comptime_int, comptime ELEM_TYPE: type) 
             self.set_internal(idx, 0, .CLEAR_ONLY);
         }
 
-        fn ensure_capacity_and_zero_new(self: *Self, cap: usize, alloc: Allocator) void {
+        pub fn ensure_capacity_and_zero_new(self: *Self, cap: usize, alloc: Allocator) void {
             const old_cap = self.list.cap;
             const need_cap = Self.blocks_needed(cap);
             self.list.ensure_free_slots(need_cap, alloc);
             const new_cap = self.list.cap;
+            self.list.len = self.list.cap;
             @memset(self.list.ptr[old_cap..new_cap], 0);
+        }
+        pub fn ensure_capacity_and_fill_new_ones(self: *Self, cap: usize, alloc: Allocator) void {
+            const old_cap = self.list.cap;
+            const need_cap = Self.blocks_needed(cap);
+            self.list.ensure_free_slots(need_cap, alloc);
+            const new_cap = self.list.cap;
+            self.list.len = self.list.cap;
+            @memset(self.list.ptr[old_cap..new_cap], 1);
         }
         pub fn set_len(self: *Self, len: usize, alloc: Allocator) void {
             self.ensure_capacity_and_zero_new(len, alloc);
@@ -204,6 +215,21 @@ pub fn BitList(comptime BITS_PER_INDEX: comptime_int, comptime ELEM_TYPE: type) 
             if (idx < self.index_len) return;
             const len = idx + 1;
             self.ensure_capacity_and_zero_new(len, alloc);
+            self.index_len = len;
+        }
+        pub fn set_len_fill_new_ones(self: *Self, len: usize, alloc: Allocator) void {
+            self.ensure_capacity_and_fill_new_ones(len, alloc);
+            self.index_len = len;
+        }
+        pub fn grow_len_if_needed_fill_new_ones(self: *Self, len: usize, alloc: Allocator) void {
+            if (self.index_len >= len) return;
+            self.ensure_capacity_and_fill_new_ones(len, alloc);
+            self.index_len = len;
+        }
+        pub fn grow_len_if_needed_for_idx_fill_new_ones(self: *Self, idx: usize, alloc: Allocator) void {
+            if (idx < self.index_len) return;
+            const len = idx + 1;
+            self.ensure_capacity_and_fill_new_ones(len, alloc);
             self.index_len = len;
         }
 
@@ -510,6 +536,8 @@ test "BitList" {
         .list = .{ .ptr = @ptrCast(&data), .cap = 3, .len = 3 },
         .index_len = 192,
     };
+    try Test.expect_equal(list.find_first_bit_set(), "list.find_first_bit_set()", 1, "1", "wrong result", .{});
+    try Test.expect_equal(list.find_first_bit_unset(), "list.find_first_bit_unset()", 0, "0", "wrong result", .{});
     try Test.expect_equal(list.find_first_n_consecutive_set_bits(4), "list.find_first_n_consecutive_set_bits(4)", 1, "1", "wrong result", .{});
     try Test.expect_equal(list.find_first_n_consecutive_set_bits(5), "list.find_first_n_consecutive_set_bits(5)", 8, "8", "wrong result", .{});
     try Test.expect_equal(list.find_first_n_consecutive_set_bits(6), "list.find_first_n_consecutive_set_bits(6)", 15, "15", "wrong result", .{});
@@ -818,8 +846,10 @@ pub const FreeBitList = extern struct {
         if (len < self.free_bits.index_len) {
             const free_lost = self.free_bits.count_bits_set_at_and_after_index(@intCast(len));
             self.free_count -= free_lost;
+        } else {
+            self.free_count += len - self.free_bits.index_len;
         }
-        self.free_bits.set_len(len, alloc);
+        self.free_bits.set_len_fill_new_ones(len, alloc);
     }
     pub fn grow_len_if_needed(self: *FreeBitList, len: usize, alloc: Allocator) void {
         if (len > self.free_bits.index_len) {
@@ -834,7 +864,9 @@ pub const FreeBitList = extern struct {
     }
     pub fn find_1_free_and_set_used(self: *FreeBitList) ?usize {
         if (self.free_count == 0) return null;
+        DEBUG("free list count: {d}\nfree_list len: {d}\nfree list blocks: {any}\n", .{ self.free_count, self.free_bits.list.len, self.free_bits.list.slice() });
         const idx = self.free_bits.find_first_bit_set();
+        Assert.assert_with_reason(idx != null, @src(), "free count was greater than 0, but no free bit was found, internal error", .{});
         self.free_bits.clear(idx.?);
         self.free_count -= 1;
         return idx.?;
@@ -855,6 +887,10 @@ pub const FreeBitList = extern struct {
         const val: u1 = 0b1;
         self.free_bits.set_raw_no_clear(idx, val);
         self.free_count += 1;
+    }
+    pub fn set_used(self: *FreeBitList, idx: usize) void {
+        self.free_bits.clear(idx);
+        self.free_count -= 1;
     }
     pub fn set_range_free(self: *FreeBitList, idx: usize, count: usize) void {
         self.free_bits.set_range_bits(idx, count, .SET_1);

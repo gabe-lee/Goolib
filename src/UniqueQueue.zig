@@ -42,12 +42,12 @@ const smart_alloc = Utils.Alloc.smart_alloc;
 const smart_alloc_ptr_ptrs = Utils.Alloc.smart_alloc_ptr_ptrs;
 
 pub const PreviousQueueResult = enum(u8) {
-    CONTINUE_TO_CHECK_CURRENTLY_QUEUED,
+    QUEUE,
     DO_NOT_QUEUE,
     UNREACHABLE,
 };
 pub const CurrentlyQueuedResult = enum(u8) {
-    QUEUE,
+    CONTINUE_TO_CHECK_RECURSION,
     DO_NOT_QUEUE,
     UNREACHABLE,
 };
@@ -131,6 +131,22 @@ pub fn UniqueQueue(
 
         pub fn queue(self: *Queue, val: T_QUEUE, alloc: Allocator) void {
             var to_queue = val;
+            for (self.queue_ptr[self.queue_cursor..self.queue_len]) |*current| {
+                if (QUEUED_EQUALS_QUEUED_FUNC(to_queue, current.*)) {
+                    const result = HANDLE_CURRENTLY_QUEUED(&to_queue, current);
+                    switch (result) {
+                        .UNREACHABLE => {
+                            assert_unreachable(@src(), "cannot queue an item that is currently queued\nalready queued: {any}\nattempted to queue: {any}\n", .{ current.*, val });
+                            return;
+                        },
+                        .DO_NOT_QUEUE => {
+                            return;
+                        },
+                        .CONTINUE_TO_CHECK_RECURSION => {},
+                    }
+                    break;
+                }
+            }
             if (DO_UNIQUE) {
                 var is_unique: bool = true;
                 for (self.unique_ptr[0..self.unique_len]) |*unique| {
@@ -144,7 +160,7 @@ pub fn UniqueQueue(
                             .DO_NOT_QUEUE => {
                                 return;
                             },
-                            .CONTINUE_TO_CHECK_CURRENTLY_QUEUED => {},
+                            .QUEUE => {},
                         }
                         is_unique = false;
                         break;
@@ -153,22 +169,6 @@ pub fn UniqueQueue(
                 if (is_unique) {
                     const new_unique = CREATE_NEW_UNIQUE(to_queue);
                     self.add_unique(new_unique, alloc);
-                }
-            }
-            for (self.queue_ptr[self.queue_cursor..self.queue_len]) |*current| {
-                if (QUEUED_EQUALS_QUEUED_FUNC(to_queue, current.*)) {
-                    const result = HANDLE_CURRENTLY_QUEUED(&to_queue, current);
-                    switch (result) {
-                        .UNREACHABLE => {
-                            assert_unreachable(@src(), "cannot queue an item that is currently queued\nalready queued: {any}\nattempted to queue: {any}\n", .{ current.*, val });
-                            return;
-                        },
-                        .DO_NOT_QUEUE => {
-                            return;
-                        },
-                        .QUEUE => {},
-                    }
-                    break;
                 }
             }
             self.queue_internal(val, alloc);

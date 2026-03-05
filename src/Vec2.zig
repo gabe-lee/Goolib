@@ -200,7 +200,7 @@ pub fn define_vec2_type(comptime T: type) type {
         }
 
         pub fn subtract_scale(self: Vec2, subtract_vec: Vec2, scale_subtract_vec_by: anytype) Vec2 {
-            return self.add(subtract_vec.scale(scale_subtract_vec_by));
+            return self.subtract(subtract_vec.scale(scale_subtract_vec_by));
         }
 
         pub fn squared(self: Vec2) Vec2 {
