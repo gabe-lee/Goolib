@@ -864,7 +864,6 @@ pub const FreeBitList = extern struct {
     }
     pub fn find_1_free_and_set_used(self: *FreeBitList) ?usize {
         if (self.free_count == 0) return null;
-        DEBUG("free list count: {d}\nfree_list len: {d}\nfree list blocks: {any}\n", .{ self.free_count, self.free_bits.list.len, self.free_bits.list.slice() });
         const idx = self.free_bits.find_first_bit_set();
         Assert.assert_with_reason(idx != null, @src(), "free count was greater than 0, but no free bit was found, internal error", .{});
         self.free_bits.clear(idx.?);

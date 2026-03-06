@@ -153,8 +153,6 @@ pub fn SimplePool(comptime T: type, comptime IDX: type, comptime MEMSET_CLAIMED:
         }
         pub fn claim_one(self: *Pool, alloc: Allocator) ClaimedItem {
             if (self.free_list.find_1_free_and_set_used()) |new_idx| {
-                // DEBUG("POOL FOUND FREE\npool len: {d}\nfree len: {d}\nfree block len: {d}\nclaimed idx: {d}\n", .{ self.len, self.free_list.free_bits.index_len, self.free_list.free_bits.list.len, new_idx });
-
                 return ClaimedItem{
                     .ptr = @ptrCast(self.ptr + new_idx),
                     .idx = @intCast(new_idx),
@@ -163,7 +161,6 @@ pub fn SimplePool(comptime T: type, comptime IDX: type, comptime MEMSET_CLAIMED:
             const new_idx = self.len;
             self.grow_len_if_needed_for_idx(new_idx, alloc);
             self.free_list.set_used(new_idx);
-            // DEBUG("POOL CREATE NEW\npool len: {d}\nfree len: {d}\nfree block len: {d}\nclaimed idx: {d}\n", .{ self.len, self.free_list.free_bits.index_len, self.free_list.free_bits.list.len, new_idx });
             if (MEMSET_CLAIMED) |val| {
                 self.ptr[new_idx] = val;
             }
@@ -336,6 +333,16 @@ pub fn SimplePoolOpaque(comptime IDX: type, comptime MEMSET_CLAIMED: ?[]const u8
 
         const SET: []const u8 = if (MEMSET_CLAIMED) |S| S else undefined;
         const CLEAR: []const u8 = if (CLEAR_RELEASED) |C| C else undefined;
+
+        pub fn PoolTyped(comptime T: type) type {
+            return SimplePool(T, IDX, if (MEMSET_CLAIMED != null) @as(*const T, @ptrCast(@alignCast(SET.ptr))).* else null, if (CLEAR_RELEASED != null) @as(*const T, @ptrCast(@alignCast(CLEAR.ptr))).* else null, SECONDARY_LIST);
+        }
+        pub fn ClaimedItemTyped(comptime T: type) type {
+            return PoolTyped(T).ClaimedItem;
+        }
+        pub fn ClaimedRangeTyped(comptime T: type) type {
+            return PoolTyped(T).ClaimedRange;
+        }
 
         pub fn init_capacity(type_cap: usize, elem_size: usize, elem_align: usize, alloc: Allocator) Pool {
             const real_cap = type_cap * elem_size;
@@ -528,10 +535,10 @@ pub fn SimplePoolOpaque(comptime IDX: type, comptime MEMSET_CLAIMED: ?[]const u8
             }
         }
 
-        pub fn to_typed(self: Pool, comptime T: type) SimplePool(T, IDX, if (MEMSET_CLAIMED != null) @as(*const T, @ptrCast(@alignCast(SET.ptr))).* else null, if (CLEAR_RELEASED != null) @as(*const T, @ptrCast(@alignCast(CLEAR.ptr))).* else null, SECONDARY_LIST) {
+        pub fn to_typed(self: Pool, comptime T: type) PoolTyped(T) {
             return @bitCast(self);
         }
-        pub fn to_typed_ptr(self: *Pool, comptime T: type) *SimplePool(T, IDX, if (MEMSET_CLAIMED != null) @as(*const T, @ptrCast(@alignCast(SET.ptr))).* else null, if (CLEAR_RELEASED != null) @as(*const T, @ptrCast(@alignCast(CLEAR.ptr))).* else null, SECONDARY_LIST) {
+        pub fn to_typed_ptr(self: *Pool, comptime T: type) *PoolTyped(T) {
             return @ptrCast(@alignCast(self));
         }
     };

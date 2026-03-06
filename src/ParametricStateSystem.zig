@@ -69,9 +69,10 @@ const BitListModule = Root.BitList;
 const FreeList = BitListModule.FreeBitList;
 const BoolList = BitListModule.BoolList;
 
-pub const AlwaysUpdateMode = enum(u8) {
-    ONLY_UPDATE_ON_VALUE_CHANGE,
-    ALWAYS_UPDATE_EVEN_IF_VALUE_UNCHANGED,
+pub const UpdateMode = enum(u2) {
+    NEVER_TRIGGER_UPDATES = 0,
+    ONLY_TRIGGER_UPDATES_ON_VALUE_CHANGE = 1,
+    ALWAYS_TRIGGER_UPDATES_EVEN_IF_VALUE_UNCHANGED = 2,
 };
 
 pub const ParentDeleteMode = enum(u8) {
@@ -79,10 +80,21 @@ pub const ParentDeleteMode = enum(u8) {
     DEFAULT_VALUE_WHEN_PARENT_IS_DELETED,
 };
 
+pub const ParamDefKind = enum(u8) {
+    ROOT,
+    DERIVED,
+};
+pub const ParamDefKindWithGroup = enum(u8) {
+    ROOT,
+    DERIVED_SINGLE,
+    DERIVED_GROUP,
+};
+
 pub const InitializeMode = enum(u8) {
     ALLOCATED,
     STATIC_MEMORY,
 };
+
 pub fn StaticMemWithFree(comptime T: type) type {
     return struct {
         main_mem: []T,
@@ -487,6 +499,9 @@ pub fn ParametricStateSystem(
                 }
                 assert_unreachable(@src(), "type `{s}` is not valid for ANY parameter category", .{@typeName(T)});
             }
+            pub var temp_param_outputs: [MAX_OUTPUTS]ParamReadOnlyOpaque = undefined;
+            pub var temp_param_defs: [MAX_OUTPUTS]ParamReadOnlyDef = undefined;
+            pub var temp_param_outputs_len: usize = 0;
 
             // CATEGORIES
             pub const USE_GENERATIONS = SETTINGS.INDEX_GENERATION_MODE == .PER_PARAMETER_INDEX_GENERATION_INT_POWER;
@@ -510,10 +525,10 @@ pub fn ParametricStateSystem(
                 .elem_type = UpdateSlice,
             });
             pub const MetaData = packed struct {
-                always_update: bool,
-                delete_if_parent_deleted: bool,
-                if_not_deleted_set_value_default_when_parent_deleted: bool,
-                generation: if (USE_GENERATIONS) GenId else u0,
+                update_mode: UpdateMode = .ONLY_TRIGGER_UPDATES_ON_VALUE_CHANGE,
+                delete_if_parent_deleted: bool = false,
+                if_not_deleted_set_value_default_when_parent_deleted: bool = false,
+                generation: if (USE_GENERATIONS) GenId else u0 = 0,
             };
             pub const MetaDataBits = @bitSizeOf(MetaData);
             pub const MetaList = BitListModule.BitList(MetaDataBits, MetaData);
@@ -544,7 +559,7 @@ pub fn ParametricStateSystem(
                 const blocks_needed = MetaList.blocks_needed(NUM_CATEGORIES_NO_META);
                 var out_mem: [blocks_needed]usize = @splat(0);
                 const fill = MetaData{
-                    .always_update = SETTINGS.INCLUDE_META_CATEGORY == .META_CATEGORY_LENGTH_AND_VALUE_CHANGE,
+                    .update_mode = if (SETTINGS.INCLUDE_META_CATEGORY == .META_CATEGORY_LENGTH_AND_VALUE_CHANGE) .ALWAYS_TRIGGER_UPDATES_EVEN_IF_VALUE_UNCHANGED else .ONLY_TRIGGER_UPDATES_ON_VALUE_CHANGE,
                     .delete_if_parent_deleted = false,
                     .if_not_deleted_set_value_default_when_parent_deleted = false,
                     .generation = 0,
@@ -794,15 +809,18 @@ pub fn ParametricStateSystem(
                 const old: T = list_typed.ptr[index];
                 list_typed.ptr[index] = val;
                 const is_equal: *const fn (a: T, b: T) bool = @ptrCast(@alignCast(CATEGORY_EQUALITY_FUNCS[cat_idx]));
-                if (!is_equal(old, val) or categories[cat_idx].meta.get(@intCast(index)).always_update) {
-                    const update_slice: UpdateSlice = categories[cat_idx].data.ptr_2[index];
-                    if (update_slice.update_count > 0) {
-                        const updates_to_trigger = payload_location_pool.ptr[update_slice.first_payload_u32()..update_slice.end_payload_u32_excluded()];
-                        for (updates_to_trigger) |to_trigger| {
-                            update_queue.queue(to_trigger, update_queue_alloc);
-                        }
-                        if (!SKIP_PROCESS_CHANGES) {
-                            process_all_updates_if_needed(mutex_key);
+                const update_mode = categories[cat_idx].meta.get(@intCast(index)).update_mode;
+                if (update_mode != .NEVER_TRIGGER_UPDATES) {
+                    if (!is_equal(old, val) or update_mode == .ALWAYS_TRIGGER_UPDATES_EVEN_IF_VALUE_UNCHANGED) {
+                        const update_slice: UpdateSlice = categories[cat_idx].data.ptr_2[index];
+                        if (update_slice.update_count > 0) {
+                            const updates_to_trigger = payload_location_pool.ptr[update_slice.first_payload_u32()..update_slice.end_payload_u32_excluded()];
+                            for (updates_to_trigger) |to_trigger| {
+                                update_queue.queue(to_trigger, update_queue_alloc);
+                            }
+                            if (!SKIP_PROCESS_CHANGES) {
+                                process_all_updates_if_needed(mutex_key);
+                            }
                         }
                     }
                 }
@@ -820,15 +838,18 @@ pub fn ParametricStateSystem(
                 var old: [LARGEST_TYPE_SIZE]u8 = undefined;
                 @memcpy(old[0..T_SIZE], elem_bytes_opaque);
                 @memcpy(elem_bytes_opaque, val[0..T_SIZE]);
-                if (!bytes_are_equal(old[0..T_SIZE], val[0..T_SIZE]) or categories[cat_idx].meta.get(@intCast(index)).always_update) {
-                    const update_slice: UpdateSlice = categories[cat_idx].data.ptr_2[index];
-                    if (update_slice.update_count > 0) {
-                        const updates_to_trigger = payload_location_pool.ptr[update_slice.first_payload_u32()..update_slice.end_payload_u32_excluded()];
-                        for (updates_to_trigger) |to_trigger| {
-                            update_queue.queue(to_trigger, update_queue_alloc);
-                        }
-                        if (!SKIP_PROCESS_CHANGES) {
-                            process_all_updates_if_needed(mutex_key);
+                const update_mode = categories[cat_idx].meta.get(@intCast(index)).update_mode;
+                if (update_mode != .NEVER_TRIGGER_UPDATES) {
+                    if (!bytes_are_equal(old[0..T_SIZE], val[0..T_SIZE]) or update_mode == .ALWAYS_TRIGGER_UPDATES_EVEN_IF_VALUE_UNCHANGED) {
+                        const update_slice: UpdateSlice = categories[cat_idx].data.ptr_2[index];
+                        if (update_slice.update_count > 0) {
+                            const updates_to_trigger = payload_location_pool.ptr[update_slice.first_payload_u32()..update_slice.end_payload_u32_excluded()];
+                            for (updates_to_trigger) |to_trigger| {
+                                update_queue.queue(to_trigger, update_queue_alloc);
+                            }
+                            if (!SKIP_PROCESS_CHANGES) {
+                                process_all_updates_if_needed(mutex_key);
+                            }
                         }
                     }
                 }
@@ -950,7 +971,7 @@ pub fn ParametricStateSystem(
                 set_internal_opaque(param.category, param.index, param.generation, default_opaque_bytes, mutex_key, SKIP_GEN_CHECK, SKIP_PROCESS_CHANGES);
             }
 
-            pub fn create_new_root_param_internal(comptime category: CategoryName, specific_index: ?Index, initial_val: CategoryType(category), update_mode: AlwaysUpdateMode, _mutex_key: MutexKey) RootParam(CategoryType(category)) {
+            pub fn create_new_root_param_internal(comptime category: CategoryName, specific_index: ?Index, initial_val: CategoryType(category), update_mode: UpdateMode, _mutex_key: MutexKey, comptime SKIP_CLAIM: bool) ParamReadWrite(CategoryType(category)) {
                 var mutex_key: MutexKey, const owns_key: bool = _mutex_key.lock_if_needed(&INTERNAL.access_lock);
                 defer mutex_key.unlock_if_needed(owns_key);
                 const cat_idx = @intFromEnum(category);
@@ -958,62 +979,92 @@ pub fn ParametricStateSystem(
                 var cat_data = INTERNAL.categories[cat_idx].data.to_typed_ptr(T);
                 var cat_meta = &INTERNAL.categories[cat_idx].meta;
                 const cat_alloc = INTERNAL.categories[cat_idx].alloc;
-                const claimed = if (specific_index) |i| cat_data.claim_one_specific(i, cat_alloc) else cat_data.claim_one(cat_alloc);
+                const claimed = if (SKIP_CLAIM) check_idx_is_specific: {
+                    INTERNAL.assert_with_reason(specific_index != null, @src(), "cannot use `SKIP_CLAIM` when param definition does not provide a specific index", .{});
+                    break :check_idx_is_specific INTERNAL.CategoryPool.ClaimedItemTyped(T){
+                        .idx = specific_index.?,
+                        .ptr = &cat_data.ptr[specific_index.?],
+                    };
+                } else if (specific_index) |i| cat_data.claim_one_specific(i, cat_alloc) else cat_data.claim_one(cat_alloc);
                 const idx: Index = claimed.idx;
                 const ptr: *T = claimed.ptr;
                 cat_meta.grow_len_if_needed_for_idx(@intCast(idx), cat_alloc);
                 var meta = cat_meta.get(idx);
-                meta.always_update = update_mode == .ALWAYS_UPDATE_EVEN_IF_VALUE_UNCHANGED;
+                meta.update_mode = update_mode;
                 meta.delete_if_parent_deleted = false;
                 meta.if_not_deleted_set_value_default_when_parent_deleted = false;
                 cat_meta.set(idx, meta);
                 ptr.* = initial_val;
-                return RootParam(T){
+                return ParamReadWrite(T){
                     .category = @intCast(cat_idx),
                     .index = @intCast(idx),
                     .generation = if (INTERNAL.USE_GENERATIONS) meta.generation else 0,
                 };
             }
 
-            pub fn create_new_derived_param_set_internal(update_function: FuncName, inputs: anytype, output_defs: anytype, comptime OUTPUT_STRUCT: type, _mutex_key: MutexKey) OUTPUT_STRUCT {
-                var mutex_key: MutexKey, const owns_key: bool = _mutex_key.lock_if_needed(&INTERNAL.access_lock);
-                defer mutex_key.unlock_if_needed(owns_key);
+            pub fn create_new_derived_param_set_internal_struct(update_function: FuncName, inputs: anytype, output_defs: anytype, comptime OUTPUT_STRUCT: type, _mutex_key: MutexKey) OUTPUT_STRUCT {
                 const DEFS = @TypeOf(output_defs);
                 const INS = @TypeOf(inputs);
-                INTERNAL.assert_with_reason(Types.type_is_struct(INS), @src(), "`inputs` must be a struct type where each field is a `ParamUpdateInput(T)`, got type `{s}`", .{@typeName(INS)});
+                INTERNAL.assert_with_reason(Types.type_is_struct(INS), @src(), "`inputs` must be a struct type where each field is a `ParamReadOnly(T)` or `ParamReadWrite(T)` or `ParamUpdateInput(T)`, got type `{s}`", .{@typeName(INS)});
                 INTERNAL.assert_with_reason(@typeInfo(INS).@"struct".fields.len <= INTERNAL.MAX_INPUTS, @src(), "the number of inputs ({d}) exceeds the maximum number possible ({d})", .{ @typeInfo(INS).@"struct".fields.len, INTERNAL.MAX_INPUTS });
-                const inputs_flat: [@typeInfo(INS).@"struct".fields.len]ParamReadOnlyOpaque = build: {
-                    var out: [@typeInfo(INS).@"struct".fields.len]ParamReadOnlyOpaque = undefined;
-                    inline for (@typeInfo(INS).@"struct".fields, 0..) |field, f| {
-                        assert_with_reason(Types.type_has_decl_with_type(field.type, "TYPE", type), @src(), "field `{s}` on the input struct is not a `ParamUpdateInput(T)` (missing declaration `const TYPE: type = <param type>`)", .{field.name});
-                        assert_with_reason(field.type == ParamUpdateInput(@field(field.type, "TYPE")), @src(), "field `{s}` on the input struct is not a `ParamUpdateInput(T)`", .{field.name});
-                        out[f] = @field(inputs, field.name).to_opaque();
-                    }
-                    break :build out;
-                };
-                INTERNAL.assert_with_reason(Types.type_is_struct_with_all_fields_same_type(DEFS, DerivedParamDef), @src(), "`output_defs` must be a struct type where each field is a `DerivedParamDef`, got type `{s}`", .{@typeName(DEFS)});
+                INTERNAL.assert_with_reason(Types.type_is_struct_with_all_fields_same_type(DEFS, ParamReadOnlyDef), @src(), "`output_defs` must be a struct type where each field is a `ParamReadOnlyDef`, got type `{s}`", .{@typeName(DEFS)});
                 INTERNAL.assert_with_reason(Types.type_is_struct(OUTPUT_STRUCT), @src(), "type `OUTPUT_STRUCT` must be a struct type, got type `{s}`", .{@typeName(OUTPUT_STRUCT)});
                 INTERNAL.assert_with_reason(Types.two_structs_have_exact_same_field_names_and_order(DEFS, OUTPUT_STRUCT), @src(), "type `OUTPUT_STRUCT` and the type of `output_defs` must have the same number of fields, and all fields have the same names in the same order", .{});
-                INTERNAL.assert_with_reason(@typeInfo(DEFS).@"struct".fields.len <= INTERNAL.MAX_OUTPUTS, @src(), "the number of outputs ({d}) exceeds the maximum number possible ({d})", .{ @typeInfo(DEFS).@"struct".fields.len, INTERNAL.MAX_OUTPUTS });
+                inline for (@typeInfo(DEFS).@"struct".fields, @typeInfo(OUTPUT_STRUCT).@"struct".fields) |def_field, out_field| {
+                    const cat_idx = @intFromEnum(@field(output_defs, def_field.name).category);
+                    INTERNAL.assert_with_reason(IDForType(@field(out_field.type, "TYPE")) == CATEGORY_TYPE_IDS[cat_idx], @src(), "field `{s}` on output struct must be type `ParamReadOnly(<category type for category {s}>)`, got type `{s}`", .{ def_field.name, name_cast(cat_idx, CategoryName), @typeName(def_field.type) });
+                }
+                const inputs_flat: [@typeInfo(INS).@"struct".fields.len]ParamReadOnlyOpaque = build: {
+                    var flat: [@typeInfo(INS).@"struct".fields.len]ParamReadOnlyOpaque = undefined;
+                    inline for (@typeInfo(INS).@"struct".fields, 0..) |field, f| {
+                        assert_with_reason(Types.type_has_decl_with_type(field.type, "TYPE", type), @src(), "field `{s}` on the input struct is not a `ParamReadOnly(T)` or `ParamReadWrite(T)` or `ParamUpdateInput(T)` (missing declaration `const TYPE: type = <param type>`)", .{field.name});
+                        assert_with_reason(field.type == ParamReadOnly(@field(field.type, "TYPE")) or field.type == ParamReadWrite(@field(field.type, "TYPE")) or field.type == ParamUpdateInput(@field(field.type, "TYPE")), @src(), "field `{s}` on the input struct is not a `ParamReadOnly(T)` or `ParamReadWrite(T)` or `ParamUpdateInput(T)`, got type `{s}`", .{ field.name, @typeName(field.type) });
+                        flat[f] = @field(inputs, field.name).to_opaque_read_only();
+                    }
+                    break :build flat;
+                };
+                const defs_flat: [@typeInfo(DEFS).@"struct".fields.len]ParamReadOnlyDef = build: {
+                    var flat: [@typeInfo(DEFS).@"struct".fields.len]ParamReadOnlyDef = undefined;
+                    inline for (@typeInfo(DEFS).@"struct".fields, 0..) |field, f| {
+                        assert_with_reason(field.type == ParamReadOnlyDef, @src(), "field `{s}` on the output def struct is not a `ParamReadOnlyDef`", .{field.name});
+                        flat[f] = @field(output_defs, field.name);
+                    }
+                    break :build flat;
+                };
+                var outputs_flat: [@typeInfo(DEFS).@"struct".fields.len]ParamReadOnlyOpaque = undefined;
+                create_new_derived_param_set_internal(update_function, inputs_flat[0..], defs_flat[0..], outputs_flat[0..], _mutex_key, false);
+                var out_struct: OUTPUT_STRUCT = undefined;
+                inline for (@typeInfo(OUTPUT_STRUCT).@"struct".fields, 0..) |field, f| {
+                    @field(out_struct, field.name) = @bitCast(outputs_flat[f]);
+                }
+                return out_struct;
+            }
+
+            pub fn create_new_derived_param_set_internal(update_function: FuncName, inputs: []const ParamReadOnlyOpaque, output_defs: []const ParamReadOnlyDef, outputs: []ParamReadOnlyOpaque, _mutex_key: MutexKey, comptime SKIP_CLAIM: bool) void {
+                var mutex_key: MutexKey, const owns_key: bool = _mutex_key.lock_if_needed(&INTERNAL.access_lock);
+                defer mutex_key.unlock_if_needed(owns_key);
+                INTERNAL.assert_with_reason(output_defs.len == outputs.len, @src(), "`output_defs.len` must equal `outputs.len`, got {d} != {d}", .{ output_defs.len, outputs.len });
+                INTERNAL.assert_with_reason(inputs.len <= INTERNAL.MAX_INPUTS, @src(), "the number of inputs ({d}) exceeds the maximum number possible ({d})", .{ inputs.len, INTERNAL.MAX_INPUTS });
+                INTERNAL.assert_with_reason(output_defs.len <= INTERNAL.MAX_OUTPUTS, @src(), "the number of outputs ({d}) exceeds the maximum number possible ({d})", .{ output_defs.len, INTERNAL.MAX_OUTPUTS });
                 INTERNAL.assert_with_reason(INTERNAL.funcs_init[@intFromEnum(update_function)] == true, @src(), "function `{s}` was not initialized", .{@tagName(update_function)});
                 const _func_idx: INTERNAL.FuncId = @intFromEnum(update_function);
-                const input_count = inputs_flat.len;
-                const output_count = @typeInfo(DEFS).@"struct".fields.len;
+                const input_count = inputs.len;
+                const output_count = output_defs.len;
                 const params_count = input_count + output_count;
-                var out: OUTPUT_STRUCT = undefined;
-                inline for (@typeInfo(DEFS).@"struct".fields, @typeInfo(OUTPUT_STRUCT).@"struct".fields) |def_field, out_field| {
-                    const def: DerivedParamDef = @field(output_defs, def_field.name);
+                for (output_defs, outputs) |def, *out_param| {
                     const cat_idx = @intFromEnum(def.category);
                     var cat_data = &INTERNAL.categories[cat_idx].data;
                     var cat_meta = &INTERNAL.categories[cat_idx].meta;
                     const cat_alloc = INTERNAL.categories[cat_idx].alloc;
                     const ELEM_SIZE = CATEGORY_TYPE_SIZES[cat_idx];
                     const ELEM_ALIGN = CATEGORY_TYPE_ALIGNS[cat_idx];
-                    var out_param: ParamReadOnlyOpaque = undefined;
-                    const idx = if (def.specific_index) |i| cat_data.claim_one_specific(i, ELEM_SIZE, ELEM_ALIGN, cat_alloc).idx else cat_data.claim_one(ELEM_SIZE, ELEM_ALIGN, cat_alloc).idx;
+                    const idx = if (SKIP_CLAIM) check_idx_is_specific: {
+                        INTERNAL.assert_with_reason(def.specific_index != null, @src(), "cannot use `SKIP_CLAIM` when param definition does not provide a specific index", .{});
+                        break :check_idx_is_specific def.specific_index.?;
+                    } else if (def.specific_index) |i| cat_data.claim_one_specific(i, ELEM_SIZE, ELEM_ALIGN, cat_alloc).idx else cat_data.claim_one(ELEM_SIZE, ELEM_ALIGN, cat_alloc).idx;
                     cat_meta.grow_len_if_needed_for_idx(@intCast(idx), cat_alloc);
                     const meta = INTERNAL.MetaData{
-                        .always_update = def.always_update,
+                        .update_mode = def.update_mode,
                         .delete_if_parent_deleted = def.delete_when_parent_is_deleted,
                         .if_not_deleted_set_value_default_when_parent_deleted = def.if_not_deleted_set_value_default_when_parent_deleted,
                         .generation = cat_meta.get(@intCast(idx)).generation,
@@ -1024,26 +1075,16 @@ pub fn ParametricStateSystem(
                     if (INTERNAL.USE_GENERATIONS) {
                         out_param.generation = meta.generation;
                     }
-                    INTERNAL.assert_with_reason(IDForType(@field(out_field.type, "TYPE")) == CATEGORY_TYPE_IDS[cat_idx], @src(), "field `{s}` on output struct must be type `DerivedParam(<category type for category {s}>)`, got type `{s}`", .{ def_field.name, name_cast(cat_idx, CategoryName), @typeName(def_field.type) });
-                    @field(out, out_field.name) = @bitCast(out_param);
                 }
                 const new_payload_package_range = INTERNAL.payload_data_pool.claim_range(@intCast(params_count), INTERNAL.payload_data_pool_alloc);
-                for (inputs_flat[0..], new_payload_package_range.slice[0..input_count]) |in, *opaque_param| {
-                    opaque_param.* = ParamReadWriteOpaque{
-                        .category = in.category,
-                        .index = in.index,
-                        .generation = if (INTERNAL.USE_GENERATIONS) in.generation else 0,
-                    };
+                for (outputs, new_payload_package_range.slice[input_count..params_count]) |output, *opaque_param| {
+                    opaque_param.* = @bitCast(output);
                 }
-                inline for (@typeInfo(OUTPUT_STRUCT).@"struct".fields, 0..) |field, f| {
-                    new_payload_package_range.slice[input_count..params_count][f] = ParamReadWriteOpaque{
-                        .category = @field(out, field.name).category,
-                        .index = @field(out, field.name).index,
-                        .generation = if (INTERNAL.USE_GENERATIONS) @field(out, field.name).generation else 0,
-                    };
+                for (inputs, new_payload_package_range.slice[0..input_count]) |input, *opaque_param| {
+                    opaque_param.* = @bitCast(input);
                 }
                 var new_update_package: INTERNAL.UpdatePackage = undefined;
-                for (inputs_flat[0..]) |input| {
+                for (inputs) |input| {
                     INTERNAL.assert_with_reason(INTERNAL.categories[input.category].data.free_list.idx_is_used(@intCast(input.index)), @src(), "index {d} in category `{s}` was a free index", .{ input.index, @tagName(num_cast(input.category, CategoryName)) });
                     if (INTERNAL.USE_GENERATIONS) {
                         INTERNAL.assert_with_reason(INTERNAL.categories[input.category].meta.get(@intCast(input.index)).generation == input.generation, @src(), "index {d} in category `{s}` had mismatched generation (requested {d}, found {d})", .{ input.index, @tagName(num_cast(input.category, CategoryName)), input.generation, INTERNAL.categories[input.category].meta.get(@intCast(input.index)).generation });
@@ -1080,7 +1121,84 @@ pub fn ParametricStateSystem(
                 }
                 INTERNAL.update_queue.queue(new_update_package, INTERNAL.update_queue_alloc);
                 INTERNAL.process_all_updates_if_needed(mutex_key);
-                return out;
+            }
+
+            pub fn create_consecutive_indexed_params_internal(comptime category: CategoryName, specific_index: ?Index, defs: []const ParamDefConsecutive(type_for_category(category)), outputs: []Param(type_for_category(category)), _mutex_key: MutexKey) void {
+                var mutex_key: MutexKey, const owns_key: bool = _mutex_key.lock_if_needed(&INTERNAL.access_lock);
+                defer mutex_key.unlock_if_needed(owns_key);
+                const cat_idx = @intFromEnum(category);
+                const T = INTERNAL.CATEGORY_DEFS[cat_idx].param_type;
+                var cat_data = INTERNAL.categories[cat_idx].data.to_typed_ptr(T);
+                // var cat_meta = INTERNAL.categories[cat_idx].meta;
+                const cat_alloc = INTERNAL.categories[cat_idx].alloc;
+                const count = make: {
+                    var c: usize = 0;
+                    for (defs) |def| {
+                        switch (def) {
+                            .ROOT => {
+                                c += 1;
+                            },
+                            .DERIVED_SINGLE => {
+                                c += 1;
+                            },
+                            .DERIVED_GROUP => |derived_def| {
+                                c += derived_def.output_defs.len;
+                            },
+                        }
+                    }
+                    break :make c;
+                };
+                INTERNAL.assert_with_reason(count == outputs.len, @src(), "the total sum of parameter outputs ({d}, one each for `.ROOT` and `.DERIVED_SINGLE` outputs, or `.DERIVED_GROUP.output_defs.len`) must equal `outputs.len` {d}", .{ count, outputs.len });
+                var range: INTERNAL.CategoryPool.ClaimedRangeTyped(T) = undefined;
+                if (specific_index) |idx| {
+                    range = cat_data.claim_range_specific(idx, @intCast(count), cat_alloc);
+                } else {
+                    range = cat_data.claim_range(@intCast(count), cat_alloc);
+                }
+                var param_idx: usize = range.start_idx;
+                var out_idx: usize = 0;
+                for (defs) |def| {
+                    switch (def) {
+                        .ROOT => |root_def| {
+                            outputs[out_idx] = .root(INTERNAL.create_new_root_param_internal(category, @intCast(param_idx), root_def.initial_value, root_def.update_mode, mutex_key, true));
+                            param_idx += 1;
+                            out_idx += 1;
+                        },
+                        .DERIVED_SINGLE => |derived_def| {
+                            const defs_arr: [1]ParamReadOnlyDef = .{ParamReadOnlyDef{
+                                .category = category,
+                                .delete_when_parent_is_deleted = derived_def.output_def.delete_when_parent_is_deleted,
+                                .if_not_deleted_set_value_default_when_parent_deleted = derived_def.output_def.if_not_deleted_set_value_default_when_parent_deleted,
+                                .specific_index = @intCast(param_idx),
+                                .update_mode = derived_def.output_def.update_mode,
+                            }};
+                            var outs: [1]ParamReadOnlyOpaque = undefined;
+                            INTERNAL.create_new_derived_param_set_internal(derived_def.update_function, derived_def.inputs, defs_arr[0..1], outs[0..1], mutex_key, true);
+                            outputs[out_idx] = .derived(@bitCast(outs[0]));
+                            param_idx += 1;
+                            out_idx += 1;
+                        },
+                        .DERIVED_GROUP => |derived_def| {
+                            INTERNAL.assert_with_reason(derived_def.output_defs.len == derived_def.output_params_opaque_temp.len, @src(), "`derived_def.output_defs_mutable.len ` ({d}) must equal `derived_def.output_params_opaque_temp.len` ({d})", .{ derived_def.output_defs.len, derived_def.output_params_opaque_temp.len });
+                            INTERNAL.temp_param_outputs_len = 0;
+                            for (derived_def.output_defs) |out_def| {
+                                var temp_def: *ParamReadOnlyDef = &INTERNAL.temp_param_defs[INTERNAL.temp_param_outputs_len];
+                                temp_def.category = category;
+                                temp_def.specific_index = @intCast(param_idx);
+                                temp_def.update_mode = out_def.update_mode;
+                                temp_def.delete_when_parent_is_deleted = out_def.delete_when_parent_is_deleted;
+                                temp_def.if_not_deleted_set_value_default_when_parent_deleted = out_def.if_not_deleted_set_value_default_when_parent_deleted;
+                                param_idx += 1;
+                                INTERNAL.temp_param_outputs_len += 1;
+                            }
+                            INTERNAL.create_new_derived_param_set_internal(derived_def.update_function, derived_def.inputs, INTERNAL.temp_param_defs[0..INTERNAL.temp_param_outputs_len], INTERNAL.temp_param_outputs[0..INTERNAL.temp_param_outputs_len], mutex_key, true);
+                            for (INTERNAL.temp_param_outputs[0..INTERNAL.temp_param_outputs_len]) |param_opaque| {
+                                outputs[out_idx] = .derived(@bitCast(param_opaque));
+                                out_idx += 1;
+                            }
+                        },
+                    }
+                }
             }
         };
 
@@ -1370,14 +1488,14 @@ pub fn ParametricStateSystem(
         /// The user must ensure the correct struct is used for the params:
         ///   - the struct has the same number of fields as `read_only_params_opaque.len`
         ///   - each field is in the same declared order (from top to bottom) as its matching param in the `read_only_params_opaque` list
-        ///   - each field is a `DerivedParam(<param type>)`
+        ///   - each field is a `ParamReadOnly(<param type>)`
         pub fn make_read_only_param_struct(read_only_params_opaque: []const ParamReadOnlyOpaque, comptime STRUCT: type) STRUCT {
-            INTERNAL.assert_with_reason(Types.type_is_struct(STRUCT), @src(), "type `STRUCT` must be a struct type where each field is a `DerivedParam(T)`, got type `{s}`", .{@typeName(STRUCT)});
+            INTERNAL.assert_with_reason(Types.type_is_struct(STRUCT), @src(), "type `STRUCT` must be a struct type where each field is a `ParamReadOnly(T)`, got type `{s}`", .{@typeName(STRUCT)});
             INTERNAL.assert_with_reason(read_only_params_opaque.len == @typeInfo(STRUCT).@"struct".fields.len, @src(), "type `STRUCT` must have exactly the same number of fields as `read_only_params_opaque.len`, got fields {d} != inputs {d}", .{ @typeInfo(STRUCT).@"struct".fields.len, read_only_params_opaque.len });
             var object: STRUCT = undefined;
             inline for (@typeInfo(STRUCT).@"struct".fields, 0..) |field, f| {
                 INTERNAL.assert_with_reason(Types.type_has_decl_with_type(field.type, "TYPE", type), @src(), "field `{s}` is not a valid input parameter field (missing const declaration `pub const TYPE = <param type>;`)", .{field.name});
-                INTERNAL.assert_with_reason(field.type == DerivedParam(comptime @field(field.type, "TYPE")), @src(), "field `{s}` is not a valid input parameter field (is not a `DerivedParam(T)`)", .{field.name});
+                INTERNAL.assert_with_reason(field.type == ParamReadOnly(comptime @field(field.type, "TYPE")), @src(), "field `{s}` is not a valid input parameter field (is not a `ParamReadOnly(T)`)", .{field.name});
                 @field(object, field.name) = read_only_params_opaque[f].with_type(comptime @field(field.type, "TYPE"));
             }
             return object;
@@ -1388,14 +1506,14 @@ pub fn ParametricStateSystem(
         /// The user must ensure the correct struct is used for the params:
         ///   - the struct has the same number of fields as `read_write_params_opaque.len`
         ///   - each field is in the same declared order (from top to bottom) as its matching param in the `read_write_params_opaque` list
-        ///   - each field is a `RootParam(<param type>)`
+        ///   - each field is a `ParamReadWrite(<param type>)`
         pub fn make_read_write_param_struct(read_write_params_opaque: []const ParamReadWriteOpaque, comptime STRUCT: type) STRUCT {
-            INTERNAL.assert_with_reason(Types.type_is_struct(STRUCT), @src(), "type `STRUCT` must be a struct type where each field is a `DerivedParam(T)`, got type `{s}`", .{@typeName(STRUCT)});
+            INTERNAL.assert_with_reason(Types.type_is_struct(STRUCT), @src(), "type `STRUCT` must be a struct type where each field is a `ParamReadOnly(T)`, got type `{s}`", .{@typeName(STRUCT)});
             INTERNAL.assert_with_reason(read_write_params_opaque.len == @typeInfo(STRUCT).@"struct".fields.len, @src(), "type `STRUCT` must have exactly the same number of fields as `read_write_params_opaque.len`, got fields {d} != inputs {d}", .{ @typeInfo(STRUCT).@"struct".fields.len, read_write_params_opaque.len });
             var object: STRUCT = undefined;
             inline for (@typeInfo(STRUCT).@"struct".fields, 0..) |field, f| {
                 INTERNAL.assert_with_reason(Types.type_has_decl_with_type(field.type, "TYPE", type), @src(), "field `{s}` is not a valid input parameter field (missing const declaration `pub const TYPE = <param type>;`)", .{field.name});
-                INTERNAL.assert_with_reason(field.type == RootParam(comptime @field(field.type, "TYPE")), @src(), "field `{s}` is not a valid input parameter field (is not a `RootParam(T)`)", .{field.name});
+                INTERNAL.assert_with_reason(field.type == ParamReadWrite(comptime @field(field.type, "TYPE")), @src(), "field `{s}` is not a valid input parameter field (is not a `ParamReadWrite(T)`)", .{field.name});
                 @field(object, field.name) = read_write_params_opaque[f].with_type(comptime @field(field.type, "TYPE"));
             }
             return object;
@@ -1411,6 +1529,59 @@ pub fn ParametricStateSystem(
             outputs: []const ParamReadWriteOpaque,
             key: MutexKey,
 
+            /// Create a new 'Root' parameter at a specific index. Root parameters are not dependant on any other parameter and
+            /// are never automatically updated.
+            ///
+            /// Any parameter depending on a root parameter cannot be initialized if the root parameter is not initialized
+            pub fn create_new_root_param_at_specific_index_during_update(self: UpdateInterface, comptime category: CategoryName, index: Index, initial_val: CategoryType(category), update_mode: UpdateMode) ParamReadWrite(CategoryType(category)) {
+                return INTERNAL.create_new_root_param_internal(category, index, initial_val, update_mode, self.key);
+            }
+            /// Create a new 'Root' parameter at the next free index. Root parameters are not dependant on any other parameter and
+            /// are never automatically updated.
+            ///
+            /// Any parameter depending on a root parameter cannot be initialized if the root parameter is not initialized
+            pub fn create_new_root_param_during_update(self: UpdateInterface, comptime category: CategoryName, initial_val: CategoryType(category), update_mode: UpdateMode) ParamReadWrite(CategoryType(category)) {
+                return INTERNAL.create_new_root_param_internal(category, null, initial_val, update_mode, self.key);
+            }
+
+            /// Create a set of related 'Derived' parameters that are all calculated by the same update function.
+            /// When *any* input parameter is changed, the update function will be called, potentially changing some or all
+            /// of the output parameters.
+            ///
+            /// Param `output_defs` MUST be a struct where every field is a `ParamReadOnlyDef`
+            ///
+            /// Param `OUTPUT_STRUCT` MUST be a struct TYPE where each field name matches a field nam on `output_defs`,
+            /// and each field type is a `ParamReadOnly(T)` where `T` is the type of the parameter Category it belonds to.
+            ///
+            /// When called, the function pointer associated with `update_function_name` will recieve the specified opaque read-only input param slice,
+            /// as well as an opaque read/write output param slice *IN THE SAME ORDER AS THE FIELDS ON `OUTPUT_STRUCT`*
+            ///
+            /// `OUTPUT_STRUCT` exists soley to act as an unambiguous target for the parameters created by `output_defs` to be mapped to and returned to the user
+            pub fn create_new_derived_param_set_from_struct_during_update(self: UpdateInterface, update_function: FuncName, inputs: anytype, output_defs: anytype, comptime OUTPUT_STRUCT: type) OUTPUT_STRUCT {
+                return INTERNAL.create_new_derived_param_set_internal(update_function, inputs, output_defs, OUTPUT_STRUCT, self.key);
+            }
+
+            /// Create a set of related 'Derived' parameters that are all calculated by the same update function.
+            /// When *any* input parameter is changed, the update function will be called, potentially changing some or all
+            /// of the output parameters.
+            pub fn create_new_derived_param_set_during_update(self: UpdateInterface, update_function: FuncName, inputs: []const ParamReadOnlyOpaque, output_defs: []const ParamReadOnlyDef, outputs: []ParamReadOnlyOpaque) void {
+                INTERNAL.create_new_derived_param_set_internal(update_function, inputs, output_defs, outputs, self.key);
+            }
+
+            /// Create a new 'Derived' parameter.
+            /// When *any* input parameter is changed, the update function will be called, potentially changing the derived parameter.
+            ///
+            /// provide the `mutex_key` from the update function you are calling this from
+            ///
+            /// When called, the update function pointer associated with `update_function_name` will recieve the specified opaque read-only input param slice,
+            /// as well as a single opaque read/write output param
+            pub fn create_new_derived_param_during_update(self: UpdateInterface, update_function: FuncName, inputs: anytype, output_def: ParamReadOnlyDef, comptime OUTPUT_TYPE: type) ParamReadOnly(OUTPUT_TYPE) {
+                const defs: [1]ParamReadOnlyDef = .{output_def};
+                var outs: [1]ParamReadOnlyOpaque = undefined;
+                INTERNAL.create_new_derived_param_set_internal(update_function, inputs, defs[0..1], outs[0..1], self.key);
+                return @bitCast(outs[0]);
+            }
+
             /// Make an un-ambiguous struct for update function inputs
             ///
             /// The user must ensure the correct struct is used for the inputs:
@@ -1424,7 +1595,7 @@ pub fn ParametricStateSystem(
                 inline for (@typeInfo(IN_STRUCT).@"struct".fields, 0..) |field, f| {
                     INTERNAL.assert_with_reason(Types.type_has_decl_with_type(field.type, "TYPE", type), @src(), "field `{s}` is not a valid input parameter field (missing const declaration `pub const TYPE = <param type>;`)", .{field.name});
                     INTERNAL.assert_with_reason(field.type == ParamUpdateInput(comptime @field(field.type, "TYPE")), @src(), "field `{s}` is not a valid input parameter field (is not a `ParamUpdateInput(T)`)", .{field.name});
-                    @field(object, field.name) = self.inputs[f].with_type_and_mutex_key(self.key, comptime @field(field.type, "TYPE"));
+                    @field(object, field.name) = self.inputs[f].as_update_input(self.key, comptime @field(field.type, "TYPE"));
                 }
                 return object;
             }
@@ -1442,7 +1613,7 @@ pub fn ParametricStateSystem(
                 inline for (@typeInfo(OUT_STRUCT).@"struct".fields, 0..) |field, f| {
                     INTERNAL.assert_with_reason(Types.type_has_decl_with_type(field.type, "TYPE", type), @src(), "field `{s}` is not a valid output parameter field (missing const declaration `pub const TYPE = <param type>;`)", .{field.name});
                     INTERNAL.assert_with_reason(field.type == ParamUpdateOutput(comptime @field(field.type, "TYPE")), @src(), "field `{s}` is not a valid input parameter field (is not a `ParamUpdateOutput(T)`)", .{field.name});
-                    @field(object, field.name) = self.outputs[f].with_type_and_mutex_key(self.key, comptime @field(field.type, "TYPE"));
+                    @field(object, field.name) = self.outputs[f].as_update_output(self.key, comptime @field(field.type, "TYPE"));
                 }
                 return object;
             }
@@ -1456,11 +1627,14 @@ pub fn ParametricStateSystem(
                 INTERNAL.process_all_updates_if_needed(self.key);
             }
         };
+        pub fn type_for_category(comptime category: CategoryName) type {
+            return INTERNAL.CATEGORY_DEFS[@intFromEnum(category)].param_type;
+        }
         pub const UpdateFunction = fn (iface: UpdateInterface) void;
         pub fn CategoryType(comptime name: CategoryName) type {
             return INTERNAL.CATEGORY_DEFS[@intFromEnum(name)].param_type;
         }
-        pub fn RootParam(comptime T: type) type {
+        pub fn ParamReadWrite(comptime T: type) type {
             return packed struct {
                 const TYPE = T;
                 const THIS_TYPE_ID: INTERNAL.CategoryId = find: {
@@ -1479,11 +1653,26 @@ pub fn ParametricStateSystem(
                 /// USER ALTERATION NOT RECOMENDED AFTER CREATION
                 generation: INTERNAL.GenId,
 
-                pub fn to_opaque_input(self: RootParam) ParamReadOnlyOpaque {
+                pub inline fn to_opaque_read_only(self: ParamSelf) ParamReadOnlyOpaque {
                     return @bitCast(self);
                 }
-                pub fn to_opaque(self: RootParam) ParamReadWriteOpaque {
+                pub inline fn to_opaque(self: ParamSelf) ParamReadWriteOpaque {
                     return @bitCast(self);
+                }
+                pub inline fn to_opaque_read_write(self: ParamSelf) ParamReadWriteOpaque {
+                    return @bitCast(self);
+                }
+                pub inline fn to_read_only(self: ParamSelf) ParamReadOnly(T) {
+                    return @bitCast(self);
+                }
+                pub inline fn to_read_write(self: ParamSelf) ParamSelf {
+                    return self;
+                }
+                pub fn as_update_input(self: ParamSelf, key: MutexKey) ParamUpdateInput(T) {
+                    return ParamUpdateInput(T){
+                        .param = @bitCast(self),
+                        .key = key,
+                    };
                 }
 
                 /// Delete the parameter
@@ -1511,13 +1700,6 @@ pub fn ParametricStateSystem(
                     INTERNAL.assert_with_reason(INTERNAL.CATEGORY_TYPE_IDS[self.category] == THIS_TYPE_ID, @src(), "category type does not match the parameter type", .{});
                     return INTERNAL.get_internal(T, self.category, self.index, self.generation, .{}, false);
                 }
-
-                pub fn as_input(self: ParamSelf) ParamUpdateInput(T) {
-                    return ParamUpdateInput(T){
-                        .param = @bitCast(self),
-                        .key = .{},
-                    };
-                }
             };
         }
         pub fn ParamUpdateOutput(comptime T: type) type {
@@ -1533,7 +1715,7 @@ pub fn ParametricStateSystem(
 
                 const ParamSelf = @This();
 
-                param: DerivedParam(T),
+                param: ParamReadOnly(T),
                 key: MutexKey,
 
                 /// Delete the parameter
@@ -1582,11 +1764,18 @@ pub fn ParametricStateSystem(
                 INTERNAL.delete_internal(self.category, self.index, self.generation, .{}, false, false);
             }
 
-            pub fn with_type(self: ParamReadWriteOpaque, comptime T: type) RootParam(T) {
+            pub fn with_type(self: ParamReadWriteOpaque, comptime T: type) ParamReadWrite(T) {
                 INTERNAL.assert_with_reason(INTERNAL.CATEGORY_TYPE_IDS[self.category] == INTERNAL.IDForType(T), @src(), "invalid category `{s}` for converting to a param with type `{s}`", .{ @tagName(@as(CategoryName, @enumFromInt(self.category))), @typeName(T) });
                 return @bitCast(self);
             }
-            pub fn with_type_and_mutex_key(self: ParamReadWriteOpaque, key: MutexKey, comptime T: type) ParamUpdateOutput(T) {
+            pub fn as_update_input(self: ParamReadOnlyOpaque, key: MutexKey, comptime T: type) ParamUpdateInput(T) {
+                INTERNAL.assert_with_reason(INTERNAL.CATEGORY_TYPE_IDS[self.category] == INTERNAL.IDForType(T), @src(), "invalid category `{s}` for converting to a param with type `{s}`", .{ @tagName(@as(CategoryName, @enumFromInt(self.category))), @typeName(T) });
+                return ParamUpdateInput(T){
+                    .param = @bitCast(self),
+                    .key = key,
+                };
+            }
+            pub fn as_update_output(self: ParamReadWriteOpaque, key: MutexKey, comptime T: type) ParamUpdateOutput(T) {
                 INTERNAL.assert_with_reason(INTERNAL.CATEGORY_TYPE_IDS[self.category] == INTERNAL.IDForType(T), @src(), "invalid category `{s}` for converting to a param with type `{s}`", .{ @tagName(@as(CategoryName, @enumFromInt(self.category))), @typeName(T) });
                 return ParamUpdateOutput(T){
                     .param = @bitCast(self),
@@ -1594,7 +1783,7 @@ pub fn ParametricStateSystem(
                 };
             }
         };
-        pub fn DerivedParam(comptime T: type) type {
+        pub fn ParamReadOnly(comptime T: type) type {
             return packed struct {
                 const TYPE = T;
                 const THIS_TYPE_ID: INTERNAL.CategoryId = find: {
@@ -1613,6 +1802,34 @@ pub fn ParametricStateSystem(
                 /// USER ALTERATION NOT RECOMENDED AFTER CREATION
                 generation: INTERNAL.GenId,
 
+                pub inline fn to_opaque_read_only(self: ParamSelf) ParamReadOnlyOpaque {
+                    return @bitCast(self);
+                }
+                pub inline fn to_opaque(self: ParamSelf) ParamReadOnlyOpaque {
+                    return @bitCast(self);
+                }
+                inline fn to_opaque_read_write(self: ParamSelf) ParamReadWriteOpaque {
+                    return @bitCast(self);
+                }
+                inline fn to_read_write(self: ParamSelf) ParamReadWrite(T) {
+                    return @bitCast(self);
+                }
+                pub inline fn to_read_only(self: ParamSelf) ParamReadOnly(T) {
+                    return self;
+                }
+                pub fn as_update_input(self: ParamSelf, key: MutexKey) ParamUpdateInput(T) {
+                    return ParamUpdateInput(T){
+                        .param = @bitCast(self),
+                        .key = key,
+                    };
+                }
+                fn as_update_output(self: ParamSelf, key: MutexKey) ParamUpdateOutput(T) {
+                    return ParamUpdateOutput(T){
+                        .param = @bitCast(self),
+                        .key = key,
+                    };
+                }
+
                 /// Delete the parameter
                 pub fn delete(self: ParamSelf) void {
                     INTERNAL.assert_with_reason(INTERNAL.CATEGORY_TYPE_IDS[self.category] == THIS_TYPE_ID, @src(), "category type does not match the parameter type", .{});
@@ -1623,13 +1840,6 @@ pub fn ParametricStateSystem(
                 pub fn get(self: ParamSelf) T {
                     INTERNAL.assert_with_reason(INTERNAL.CATEGORY_TYPE_IDS[self.category] == THIS_TYPE_ID, @src(), "category type does not match the parameter type", .{});
                     return INTERNAL.get_internal(T, self.category, self.index, self.generation, .{}, false);
-                }
-
-                pub fn as_input(self: ParamSelf) ParamUpdateInput(T) {
-                    return ParamUpdateInput(T){
-                        .param = @bitCast(self),
-                        .key = .{},
-                    };
                 }
             };
         }
@@ -1646,7 +1856,7 @@ pub fn ParametricStateSystem(
                 const ParamSelf = @This();
 
                 /// USER ALTERATION NOT RECOMENDED AFTER CREATION
-                param: DerivedParam(T),
+                param: ParamReadOnly(T),
                 /// USER ALTERATION NOT RECOMENDED AFTER CREATION
                 key: MutexKey,
 
@@ -1664,8 +1874,20 @@ pub fn ParametricStateSystem(
                     return INTERNAL.get_internal(T, self.param.category, self.param.index, self.param.generation, self.key, false);
                 }
 
-                pub fn to_opaque(self: ParamSelf) ParamReadOnlyOpaque {
+                pub inline fn to_opaque_read_only(self: ParamSelf) ParamReadOnlyOpaque {
                     return @bitCast(self.param);
+                }
+                pub inline fn to_opaque(self: ParamSelf) ParamReadOnlyOpaque {
+                    return @bitCast(self.param);
+                }
+                inline fn to_opaque_read_write(self: ParamSelf) ParamReadWriteOpaque {
+                    return @bitCast(self.param);
+                }
+                inline fn to_read_write(self: ParamSelf) ParamReadWrite(T) {
+                    return @bitCast(self.param);
+                }
+                pub inline fn to_read_only(self: ParamSelf) ParamReadOnly(T) {
+                    return self.param;
                 }
             };
         }
@@ -1681,11 +1903,18 @@ pub fn ParametricStateSystem(
                 INTERNAL.delete_internal(self.category, self.index, self.generation, .{}, false, false);
             }
 
-            pub fn with_type(self: ParamReadOnlyOpaque, comptime T: type) DerivedParam(T) {
+            pub fn with_type(self: ParamReadOnlyOpaque, comptime T: type) ParamReadOnly(T) {
                 INTERNAL.assert_with_reason(INTERNAL.CATEGORY_TYPE_IDS[self.category] == INTERNAL.IDForType(T), @src(), "invalid category `{s}` for converting to a param with type `{s}`", .{ @tagName(@as(CategoryName, @enumFromInt(self.category))), @typeName(T) });
                 return @bitCast(self);
             }
-            pub fn with_type_and_mutex_key(self: ParamReadOnlyOpaque, key: MutexKey, comptime T: type) ParamUpdateInput(T) {
+            pub fn as_update_output(self: ParamReadOnlyOpaque, key: MutexKey, comptime T: type) ParamUpdateOutput(T) {
+                INTERNAL.assert_with_reason(INTERNAL.CATEGORY_TYPE_IDS[self.category] == INTERNAL.IDForType(T), @src(), "invalid category `{s}` for converting to a param with type `{s}`", .{ @tagName(@as(CategoryName, @enumFromInt(self.category))), @typeName(T) });
+                return ParamUpdateOutput(T){
+                    .param = @bitCast(self),
+                    .key = key,
+                };
+            }
+            pub fn as_update_input(self: ParamReadOnlyOpaque, key: MutexKey, comptime T: type) ParamUpdateInput(T) {
                 INTERNAL.assert_with_reason(INTERNAL.CATEGORY_TYPE_IDS[self.category] == INTERNAL.IDForType(T), @src(), "invalid category `{s}` for converting to a param with type `{s}`", .{ @tagName(@as(CategoryName, @enumFromInt(self.category))), @typeName(T) });
                 return ParamUpdateInput(T){
                     .param = @bitCast(self),
@@ -1698,38 +1927,20 @@ pub fn ParametricStateSystem(
         /// are never automatically updated.
         ///
         /// Any parameter depending on a root parameter cannot be initialized if the root parameter is not initialized
-        pub fn create_new_root_param_at_specific_index(comptime category: CategoryName, index: Index, initial_val: CategoryType(category), update_mode: AlwaysUpdateMode) RootParam(CategoryType(category)) {
-            return INTERNAL.create_new_root_param_internal(category, index, initial_val, update_mode, .{});
+        pub fn create_new_root_param_at_specific_index(comptime category: CategoryName, index: Index, initial_val: CategoryType(category), update_mode: UpdateMode) ParamReadWrite(CategoryType(category)) {
+            return INTERNAL.create_new_root_param_internal(category, index, initial_val, update_mode, .{}, false);
         }
         /// Create a new 'Root' parameter at the next free index. Root parameters are not dependant on any other parameter and
         /// are never automatically updated.
         ///
         /// Any parameter depending on a root parameter cannot be initialized if the root parameter is not initialized
-        pub fn create_new_root_param(comptime category: CategoryName, initial_val: CategoryType(category), update_mode: AlwaysUpdateMode) RootParam(CategoryType(category)) {
-            return INTERNAL.create_new_root_param_internal(category, null, initial_val, update_mode, .{});
-        }
-        /// Create a new 'Root' parameter at a specific index. Root parameters are not dependant on any other parameter and
-        /// are never automatically updated.
-        ///
-        /// Any parameter depending on a root parameter cannot be initialized if the root parameter is not initialized
-        ///
-        /// provide the `mutex_key` from the update function you are calling this from
-        pub fn create_new_root_param_at_specific_index_during_update(comptime category: CategoryName, index: Index, initial_val: CategoryType(category), update_mode: AlwaysUpdateMode, _mutex_key: MutexKey) RootParam(CategoryType(category)) {
-            return INTERNAL.create_new_root_param_internal(category, index, initial_val, update_mode, _mutex_key);
-        }
-        /// Create a new 'Root' parameter at the next free index. Root parameters are not dependant on any other parameter and
-        /// are never automatically updated.
-        ///
-        /// Any parameter depending on a root parameter cannot be initialized if the root parameter is not initialized
-        ///
-        /// provide the `mutex_key` from the update function you are calling this from
-        pub fn create_new_root_param_during_update(comptime category: CategoryName, initial_val: CategoryType(category), update_mode: AlwaysUpdateMode, _mutex_key: MutexKey) RootParam(CategoryType(category)) {
-            return INTERNAL.create_new_root_param_internal(category, null, initial_val, update_mode, _mutex_key);
+        pub fn create_new_root_param(comptime category: CategoryName, initial_val: CategoryType(category), update_mode: UpdateMode) ParamReadWrite(CategoryType(category)) {
+            return INTERNAL.create_new_root_param_internal(category, null, initial_val, update_mode, .{}, false);
         }
 
-        pub const DerivedParamDef = struct {
+        pub const ParamReadOnlyDef = struct {
             category: CategoryName,
-            always_update: bool = false,
+            update_mode: UpdateMode = .ONLY_TRIGGER_UPDATES_ON_VALUE_CHANGE,
             delete_when_parent_is_deleted: bool = false,
             if_not_deleted_set_value_default_when_parent_deleted: bool = false,
             specific_index: ?Index = null,
@@ -1739,38 +1950,25 @@ pub fn ParametricStateSystem(
         /// When *any* input parameter is changed, the update function will be called, potentially changing some or all
         /// of the output parameters.
         ///
-        /// Param `output_defs` MUST be a struct where every field is a `DerivedParamDef`
+        /// Param `output_defs` MUST be a struct where every field is a `ParamReadOnlyDef`
         ///
         /// Param `OUTPUT_STRUCT` MUST be a struct TYPE where each field name matches a field nam on `output_defs`,
-        /// and each field type is a `DerivedParam(T)` where `T` is the type of the parameter Category it belonds to.
+        /// and each field type is a `ParamReadOnly(T)` where `T` is the type of the parameter Category it belonds to.
         ///
         /// When called, the function pointer associated with `update_function_name` will recieve the specified opaque read-only input param slice,
         /// as well as an opaque read/write output param slice *IN THE SAME ORDER AS THE FIELDS ON `OUTPUT_STRUCT`*
         ///
         /// `OUTPUT_STRUCT` exists soley to act as an unambiguous target for the parameters created by `output_defs` to be mapped to and returned to the user,
         /// but you can re-use that struct type within the function body
-        pub fn create_new_derived_param_set(update_function: FuncName, inputs: anytype, output_defs: anytype, comptime OUTPUT_STRUCT: type) OUTPUT_STRUCT {
-            return INTERNAL.create_new_derived_param_set_internal(update_function, inputs, output_defs, OUTPUT_STRUCT, .{});
+        pub fn create_new_derived_param_set_from_struct(update_function: FuncName, inputs: anytype, output_defs: anytype, comptime OUTPUT_STRUCT: type) OUTPUT_STRUCT {
+            return INTERNAL.create_new_derived_param_set_internal_struct(update_function, inputs, output_defs, OUTPUT_STRUCT, .{});
         }
 
         /// Create a set of related 'Derived' parameters that are all calculated by the same update function.
         /// When *any* input parameter is changed, the update function will be called, potentially changing some or all
         /// of the output parameters.
-        ///
-        /// provide the `mutex_key` from the update function you are calling this from
-        ///
-        /// Param `output_defs` MUST be a struct where every field is a `DerivedParamDef`
-        ///
-        /// Param `OUTPUT_STRUCT` MUST be a struct TYPE where each field name matches a field nam on `output_defs`,
-        /// and each field type is a `DerivedParam(T)` where `T` is the type of the parameter Category it belonds to.
-        ///
-        /// When called, the function pointer associated with `update_function_name` will recieve the specified opaque read-only input param slice,
-        /// as well as an opaque read/write output param slice *IN THE SAME ORDER AS THE FIELDS ON `OUTPUT_STRUCT`*
-        ///
-        /// `OUTPUT_STRUCT` exists soley to act as an unambiguous target for the parameters created by `output_defs` to be mapped to and returned to the user,
-        /// but you can re-use that struct type within the function body to re-build a set of named parameters
-        pub fn create_new_derived_param_set_during_update(update_function: FuncName, inputs: anytype, output_defs: anytype, comptime OUTPUT_STRUCT: type, mutex_key: MutexKey) OUTPUT_STRUCT {
-            return INTERNAL.create_new_derived_param_set_internal(update_function, inputs, output_defs, OUTPUT_STRUCT, mutex_key);
+        pub fn create_new_derived_param_set(update_function: FuncName, inputs: []const ParamReadOnlyOpaque, output_defs: []const ParamReadOnlyDef, outputs: []ParamReadOnlyOpaque) void {
+            INTERNAL.create_new_derived_param_set_internal(update_function, inputs, output_defs, outputs, .{}, false);
         }
 
         /// Create a new 'Derived' parameter.
@@ -1778,46 +1976,179 @@ pub fn ParametricStateSystem(
         ///
         /// When called, the update function pointer associated with `update_function_name` will recieve the specified opaque read-only input param slice,
         /// as well as a single opaque read/write output param
-        pub fn create_new_derived_param(update_function: FuncName, inputs: anytype, output_def: DerivedParamDef, comptime OUTPUT_TYPE: type) DerivedParam(OUTPUT_TYPE) {
+        pub fn create_new_derived_param_from_input_struct(update_function: FuncName, inputs: anytype, output_def: ParamReadOnlyDef, comptime OUTPUT_TYPE: type) ParamReadOnly(OUTPUT_TYPE) {
             const DEF_PROTO = struct {
-                param: DerivedParamDef,
+                param: ParamReadOnlyDef,
             };
             const defs = DEF_PROTO{
                 .param = output_def,
             };
             const OUT_PROTO = struct {
-                param: DerivedParam(OUTPUT_TYPE),
+                param: ParamReadOnly(OUTPUT_TYPE),
             };
-            const out = INTERNAL.create_new_derived_param_set_internal(update_function, inputs, defs, OUT_PROTO, .{});
+
+            const out = INTERNAL.create_new_derived_param_set_internal_struct(update_function, inputs, defs, OUT_PROTO, .{});
             return out.param;
         }
-
         /// Create a new 'Derived' parameter.
         /// When *any* input parameter is changed, the update function will be called, potentially changing the derived parameter.
         ///
-        /// provide the `mutex_key` from the update function you are calling this from
-        ///
         /// When called, the update function pointer associated with `update_function_name` will recieve the specified opaque read-only input param slice,
         /// as well as a single opaque read/write output param
-        pub fn create_new_derived_param_during_update(update_function: FuncName, inputs: anytype, output_def: DerivedParamDef, comptime OUTPUT_TYPE: type, mutex_key: MutexKey) DerivedParam(OUTPUT_TYPE) {
-            const DEF_PROTO = struct {
-                param: DerivedParamDef,
+        pub fn create_new_derived_param(update_function: FuncName, inputs: []const ParamReadOnlyOpaque, output_def: ParamReadOnlyDef, comptime OUTPUT_TYPE: type) ParamReadOnly(OUTPUT_TYPE) {
+            const defs: [1]ParamReadOnlyDef = .{output_def};
+            var outs: [1]ParamReadOnlyOpaque = undefined;
+            INTERNAL.create_new_derived_param_set_internal(update_function, inputs, defs[0..1], outs[0..1], .{}, false);
+            return @bitCast(outs[0]);
+        }
+
+        pub fn ParamReadWriteDefConsecutive(comptime T: type) type {
+            return struct {
+                initial_value: T,
+                update_mode: UpdateMode = .ONLY_TRIGGER_UPDATES_ON_VALUE_CHANGE,
             };
-            const defs = DEF_PROTO{
-                .param = output_def,
+        }
+        pub const ParamReadOnlyDefNoCategoryOrIndex = struct {
+            update_mode: UpdateMode = .ONLY_TRIGGER_UPDATES_ON_VALUE_CHANGE,
+            delete_when_parent_is_deleted: bool = false,
+            if_not_deleted_set_value_default_when_parent_deleted: bool = false,
+        };
+        pub const ParamReadOnlyDefConsecutiveSingle = struct {
+            update_function: FuncName,
+            inputs: []const ParamReadOnlyOpaque,
+            output_def: ParamReadOnlyDefNoCategoryOrIndex,
+        };
+        pub const ParamReadOnlyDefConsecutiveGroup = struct {
+            update_function: FuncName,
+            inputs: []const ParamReadOnlyOpaque,
+            output_defs: []const ParamReadOnlyDefNoCategoryOrIndex,
+        };
+
+        pub fn ParamDefConsecutive(comptime T: type) type {
+            return union(ParamDefKindWithGroup) {
+                ROOT: ParamReadWriteDefConsecutive(T),
+                DERIVED_SINGLE: ParamReadOnlyDefConsecutiveSingle,
+                DERIVED_GROUP: ParamReadOnlyDefConsecutiveGroup,
+
+                pub fn root(def: ParamReadWriteDefConsecutive(T)) ParamDefConsecutive {
+                    return ParamDefConsecutive{ .ROOT = def };
+                }
+                pub fn derived_single(def: ParamReadOnlyDefConsecutiveSingle) ParamDefConsecutive {
+                    return ParamDefConsecutive{ .DERIVED_SINGLE = def };
+                }
+                pub fn derived_group(def: ParamReadOnlyDefConsecutiveGroup) ParamDefConsecutive {
+                    return ParamDefConsecutive{ .DERIVED_GROUP = def };
+                }
             };
-            const OUT_PROTO = struct {
-                param: DerivedParam(OUTPUT_TYPE),
+        }
+
+        pub const ParamOpaque = union(ParamDefKind) {
+            ROOT: ParamReadWriteOpaque,
+            DERIVED: ParamReadOnlyOpaque,
+
+            pub fn root(param: ParamReadWriteOpaque) ParamOpaque {
+                return ParamOpaque{ .ROOT = param };
+            }
+            pub fn derived(param: ParamReadOnlyOpaque) ParamOpaque {
+                return ParamOpaque{ .DERIVED = param };
+            }
+        };
+
+        pub fn Param(comptime T: type) type {
+            return union(ParamDefKind) {
+                ROOT: ParamReadWrite(T),
+                DERIVED: ParamReadOnly(T),
+
+                pub fn root(param: ParamReadWrite(T)) @This() {
+                    return @This(){ .ROOT = param };
+                }
+                pub fn derived(param: ParamReadOnly(T)) @This() {
+                    return @This(){ .DERIVED = param };
+                }
             };
-            const out = INTERNAL.create_new_derived_param_set_internal(update_function, inputs, defs, OUT_PROTO, mutex_key);
-            return out.param;
+        }
+
+        pub fn create_consecutive_indexed_params(comptime category: CategoryName, specific_index: ?Index, defs: []const ParamDefConsecutive(type_for_category(category)), outputs: []Param(type_for_category(category))) void {
+            const cat_idx = @intFromEnum(category);
+            const T = INTERNAL.CATEGORY_DEFS[cat_idx].param_type;
+            var cat_data = INTERNAL.categories[cat_idx].data.to_typed_ptr(T);
+            // var cat_meta = INTERNAL.categories[cat_idx].meta;
+            const cat_alloc = INTERNAL.categories[cat_idx].alloc;
+            const count = make: {
+                var c: usize = 0;
+                for (defs) |def| {
+                    switch (def) {
+                        .ROOT => {
+                            c += 1;
+                        },
+                        .DERIVED_SINGLE => {
+                            c += 1;
+                        },
+                        .DERIVED_GROUP => |derived_def| {
+                            c += derived_def.output_defs.len;
+                        },
+                    }
+                }
+                break :make c;
+            };
+            INTERNAL.assert_with_reason(count == outputs.len, @src(), "the total sum of parameter outputs ({d}, one each for `.ROOT` and `.DERIVED_SINGLE` outputs, or `.DERIVED_GROUP.output_defs.len`) must equal `outputs.len` {d}", .{ count, outputs.len });
+            var range: INTERNAL.CategoryPool.ClaimedRangeTyped(T) = undefined;
+            if (specific_index) |idx| {
+                range = cat_data.claim_range_specific(idx, @intCast(count), cat_alloc);
+            } else {
+                range = cat_data.claim_range(@intCast(count), cat_alloc);
+            }
+            var param_idx: usize = range.start_idx;
+            var out_idx: usize = 0;
+            for (defs) |def| {
+                switch (def) {
+                    .ROOT => |root_def| {
+                        outputs[out_idx] = .root(INTERNAL.create_new_root_param_internal(category, @intCast(param_idx), root_def.initial_value, root_def.update_mode, .{}, true));
+                        param_idx += 1;
+                        out_idx += 1;
+                    },
+                    .DERIVED_SINGLE => |derived_def| {
+                        const defs_arr: [1]ParamReadOnlyDef = .{ParamReadOnlyDef{
+                            .category = category,
+                            .delete_when_parent_is_deleted = derived_def.output_def.delete_when_parent_is_deleted,
+                            .if_not_deleted_set_value_default_when_parent_deleted = derived_def.output_def.if_not_deleted_set_value_default_when_parent_deleted,
+                            .specific_index = @intCast(param_idx),
+                            .update_mode = derived_def.output_def.update_mode,
+                        }};
+                        var outs: [1]ParamReadOnlyOpaque = undefined;
+                        INTERNAL.create_new_derived_param_set_internal(derived_def.update_function, derived_def.inputs, defs_arr[0..1], outs[0..1], .{}, true);
+                        outputs[out_idx] = .derived(@bitCast(outs[0]));
+                        param_idx += 1;
+                        out_idx += 1;
+                    },
+                    .DERIVED_GROUP => |derived_def| {
+                        INTERNAL.assert_with_reason(derived_def.output_defs.len == derived_def.output_params_opaque_temp.len, @src(), "`derived_def.output_defs_mutable.len ` ({d}) must equal `derived_def.output_params_opaque_temp.len` ({d})", .{ derived_def.output_defs.len, derived_def.output_params_opaque_temp.len });
+                        INTERNAL.temp_param_outputs_len = 0;
+                        for (derived_def.output_defs) |out_def| {
+                            var temp_def: *ParamReadOnlyDef = &INTERNAL.temp_param_defs[INTERNAL.temp_param_outputs_len];
+                            temp_def.category = category;
+                            temp_def.specific_index = @intCast(param_idx);
+                            temp_def.update_mode = out_def.update_mode;
+                            temp_def.delete_when_parent_is_deleted = out_def.delete_when_parent_is_deleted;
+                            temp_def.if_not_deleted_set_value_default_when_parent_deleted = out_def.if_not_deleted_set_value_default_when_parent_deleted;
+                            param_idx += 1;
+                            INTERNAL.temp_param_outputs_len += 1;
+                        }
+                        INTERNAL.create_new_derived_param_set_internal(derived_def.update_function, derived_def.inputs, INTERNAL.temp_param_defs[0..INTERNAL.temp_param_outputs_len], INTERNAL.temp_param_outputs[0..INTERNAL.temp_param_outputs_len], .{}, true);
+                        for (INTERNAL.temp_param_outputs[0..INTERNAL.temp_param_outputs_len]) |param_opaque| {
+                            outputs[out_idx] = .derived(@bitCast(param_opaque));
+                            out_idx += 1;
+                        }
+                    },
+                }
+            }
         }
     };
 }
 
 test "ParametricStateSystem" {
     const Test = Root.Testing;
-    const do_debug = true;
+    const do_debug = false;
     const settings = Settings{
         .ALLOW_FUNCTION_DELETION = true,
         .ALLOW_FUNCTION_REPLACEMENT = true,
@@ -1929,17 +2260,17 @@ test "ParametricStateSystem" {
         },
     });
     const CalcIface = PSS.UpdateInterface;
-    const RootParam = PSS.RootParam;
-    const DerivedParam = PSS.DerivedParam;
+    const ParamReadWrite = PSS.ParamReadWrite;
+    const ParamReadOnly = PSS.ParamReadOnly;
     const ParamUpdateInput = PSS.ParamUpdateInput;
     const ParamUpdateOutput = PSS.ParamUpdateOutput;
-    const DerivedParamDef = PSS.DerivedParamDef;
+    const ParamReadOnlyDef = PSS.ParamReadOnlyDef;
     const VecAndScalar_UpdateIn = struct {
         vec: ParamUpdateInput(Vec),
         scalar: ParamUpdateInput(f32),
     };
     // const VecOut = struct {
-    //     vec: DerivedParam(Vec),
+    //     vec: ParamReadOnly(Vec),
     // };
     const Vec_UpdateOut = struct {
         vec: ParamUpdateOutput(Vec),
@@ -1952,9 +2283,9 @@ test "ParametricStateSystem" {
         button_size: ParamUpdateInput(Vec),
     };
     const ParentAreaButtonAreaOutDef = struct {
-        parent_area: DerivedParamDef,
-        button_area: DerivedParamDef,
-        total_area: DerivedParamDef,
+        parent_area: ParamReadOnlyDef,
+        button_area: ParamReadOnlyDef,
+        total_area: ParamReadOnlyDef,
     };
     const ParentAreaButtonArea_UpdateOut = struct {
         parent_area: ParamUpdateOutput(f32),
@@ -1962,9 +2293,9 @@ test "ParametricStateSystem" {
         total_area: ParamUpdateOutput(f32),
     };
     const ParentAreaButtonAreaOut = struct {
-        parent_area: DerivedParam(f32),
-        button_area: DerivedParam(f32),
-        total_area: DerivedParam(f32),
+        parent_area: ParamReadOnly(f32),
+        button_area: ParamReadOnly(f32),
+        total_area: ParamReadOnly(f32),
     };
 
     const CALC = struct {
@@ -2010,24 +2341,24 @@ test "ParametricStateSystem" {
     // SIZES,
     // AREAS,
     // SCALARS,
-    const ParentPos = PSS.create_new_root_param(.POSITIONS, Vec{ .x = 100.0, .y = 200.0 }, .ONLY_UPDATE_ON_VALUE_CHANGE);
-    const ParentSize = PSS.create_new_root_param(.SIZES, Vec{ .x = 800.0, .y = 600.0 }, .ONLY_UPDATE_ON_VALUE_CHANGE);
+    const ParentPos = PSS.create_new_root_param(.POSITIONS, Vec{ .x = 100.0, .y = 200.0 }, .ONLY_TRIGGER_UPDATES_ON_VALUE_CHANGE);
+    const ParentSize = PSS.create_new_root_param(.SIZES, Vec{ .x = 800.0, .y = 600.0 }, .ONLY_TRIGGER_UPDATES_ON_VALUE_CHANGE);
 
-    const Margin = PSS.create_new_root_param(.SCALARS, 32.0, .ONLY_UPDATE_ON_VALUE_CHANGE);
+    const Margin = PSS.create_new_root_param(.SCALARS, 32.0, .ONLY_TRIGGER_UPDATES_ON_VALUE_CHANGE);
 
-    const ButtonPos = PSS.create_new_derived_param(.VEC_PLUS_SCALAR, VecAndScalar_UpdateIn{
-        .scalar = Margin.as_input(),
-        .vec = ParentPos.as_input(),
-    }, PSS.DerivedParamDef{ .category = .POSITIONS }, Vec);
+    const ButtonPos = PSS.create_new_derived_param_from_input_struct(.VEC_PLUS_SCALAR, VecAndScalar_UpdateIn{
+        .scalar = Margin.as_update_input(.{}),
+        .vec = ParentPos.as_update_input(.{}),
+    }, PSS.ParamReadOnlyDef{ .category = .POSITIONS }, Vec);
 
-    const ButtonSize = PSS.create_new_derived_param(.HALF_VEC_MINUS_2_SCALAR, VecAndScalar_UpdateIn{
-        .scalar = Margin.as_input(),
-        .vec = ParentSize.as_input(),
-    }, PSS.DerivedParamDef{ .category = .SIZES }, Vec);
+    const ButtonSize = PSS.create_new_derived_param_from_input_struct(.HALF_VEC_MINUS_2_SCALAR, VecAndScalar_UpdateIn{
+        .scalar = Margin.as_update_input(.{}),
+        .vec = ParentSize.as_update_input(.{}),
+    }, PSS.ParamReadOnlyDef{ .category = .SIZES }, Vec);
 
-    const Areas = PSS.create_new_derived_param_set(.LINKED_AREA_PARENT_AND_BUTTON, ParentSizeButtonSize_UpdateIn{
-        .parent_size = ParentSize.as_input(),
-        .button_size = ButtonSize.as_input(),
+    const Areas = PSS.create_new_derived_param_set_from_struct(.LINKED_AREA_PARENT_AND_BUTTON, ParentSizeButtonSize_UpdateIn{
+        .parent_size = ParentSize.as_update_input(.{}),
+        .button_size = ButtonSize.as_update_input(.{}),
     }, ParentAreaButtonAreaOutDef{
         .parent_area = .{ .category = .AREAS },
         .button_area = .{ .category = .AREAS },
@@ -2035,14 +2366,14 @@ test "ParametricStateSystem" {
     }, ParentAreaButtonAreaOut);
 
     const debug = struct {
-        pub fn print_vals(parent_pos: RootParam(Vec), parent_size: RootParam(Vec), parent_area: DerivedParam(f32), button_pos: DerivedParam(Vec), button_size: DerivedParam(Vec), button_area: DerivedParam(f32), total_area: DerivedParam(f32)) void {
+        pub fn print_vals(parent_pos: ParamReadWrite(Vec), parent_size: ParamReadWrite(Vec), parent_area: ParamReadOnly(f32), button_pos: ParamReadOnly(Vec), button_size: ParamReadOnly(Vec), button_area: ParamReadOnly(f32), total_area: ParamReadOnly(f32)) void {
             std.debug.print("       X     Y     W     H       A\nP: {d: >5} {d: >5} {d: >5} {d: >5} {d: >7}\nB: {d: >5} {d: >5} {d: >5} {d: >5} {d: >7}\nT:                         {d: >7}\n", .{
                 parent_pos.get().x, parent_pos.get().y, parent_size.get().x, parent_size.get().y, parent_area.get(),
                 button_pos.get().x, button_pos.get().y, button_size.get().x, button_size.get().y, button_area.get(),
                 total_area.get(),
             });
         }
-        pub fn print_ids(parent_pos: RootParam(Vec), parent_size: RootParam(Vec), parent_area: DerivedParam(f32), button_pos: DerivedParam(Vec), button_size: DerivedParam(Vec), button_area: DerivedParam(f32), total_area: DerivedParam(f32)) void {
+        pub fn print_ids(parent_pos: ParamReadWrite(Vec), parent_size: ParamReadWrite(Vec), parent_area: ParamReadOnly(f32), button_pos: ParamReadOnly(Vec), button_size: ParamReadOnly(Vec), button_area: ParamReadOnly(f32), total_area: ParamReadOnly(f32)) void {
             std.debug.print("       X     Y     W     H     A\nP: {d: >5} {d: >5} {d: >5} {d: >5} {d: >5}\nB: {d: >5} {d: >5} {d: >5} {d: >5} {d: >5}\nT:                         {d: >5}\n", .{
                 parent_pos.index, parent_pos.index, parent_size.index, parent_size.index, parent_area.index,
                 button_pos.index, button_pos.index, button_size.index, button_size.index, button_area.index,
