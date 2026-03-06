@@ -31,6 +31,12 @@ const SHOULD_ASSERT = Assert.SHOULD_ASSERT;
 const assert_with_reason = Assert.assert_with_reason;
 const assert_unreachable = Assert.assert_unreachable;
 
+pub const PossibleKeyMode = enum(u8) {
+    NO_KEY_CREATED,
+    KEY_CREATED_IN_THIS_SCOPE,
+    KEY_CREATED_IN_HIGHER_SCOPE,
+};
+
 /// A mutex with additional safety features in `.Debug` and `.ReleaseSafe` modes.
 ///
 /// When locked it returns a `Key` that is the only way to unlock the mutex.
@@ -88,6 +94,49 @@ pub fn KeyedMutex(comptime ENABLE: bool) type {
                 return Key{};
             }
         }
+
+        pub const PossibleKey = union(PossibleKeyMode) {
+            NO_KEY_CREATED,
+            KEY_CREATED_IN_THIS_SCOPE: Key,
+            KEY_CREATED_IN_HIGHER_SCOPE,
+
+            pub fn no_key() PossibleKey {
+                return PossibleKey{.NO_KEY_CREATED};
+            }
+
+            /// Returns the new state of the PossibleKey after possible locking
+            pub fn lock_if_needed(self: PossibleKey, mutex: *SelfMutex) PossibleKey {
+                if (ENABLE) {
+                    switch (self) {
+                        .NO_KEY_CREATED => {
+                            return PossibleKey{ .KEY_CREATED_IN_THIS_SCOPE = mutex.lock() };
+                        },
+                        .KEY_CREATED_IN_THIS_SCOPE => |key| {
+                            assert_with_reason(key.ptr != null, @src(), "key had no associated mutex, but was `KEY_CREATED_IN_THIS_SCOPE`", .{});
+                            assert_with_reason(@intFromPtr(key.ptr) == @intFromPtr(mutex), @src(), "key already has ownership of unrelated mutex", .{});
+                            return self;
+                        },
+                        .KEY_CREATED_IN_HIGHER_SCOPE => return self,
+                    }
+                } else {
+                    return PossibleKey{.KEY_CREATED_IN_HIGHER_SCOPE};
+                }
+            }
+
+            /// Returns the new state of the PossibleKey after possible unlocking
+            pub fn unlock_if_needed(self: PossibleKey) PossibleKey {
+                if (ENABLE) {
+                    switch (self) {
+                        .KEY_CREATED_IN_THIS_SCOPE => |key| {
+                            var mut_key = key;
+                            mut_key.unlock();
+                            return PossibleKey{.NO_KEY_CREATED};
+                        },
+                        else => return self,
+                    }
+                }
+            }
+        };
 
         pub const Key = struct {
             ptr: if (ENABLE) ?*SelfMutex else void = if (ENABLE) null else void{},

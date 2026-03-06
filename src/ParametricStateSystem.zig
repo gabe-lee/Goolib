@@ -75,9 +75,23 @@ pub const UpdateMode = enum(u2) {
     ALWAYS_TRIGGER_UPDATES_EVEN_IF_VALUE_UNCHANGED = 2,
 };
 
-pub const ParentDeleteMode = enum(u8) {
-    DELETE_WHEN_PARENT_IS_DELETED,
-    DEFAULT_VALUE_WHEN_PARENT_IS_DELETED,
+pub const ParentDeleteMode = enum(u2) {
+    DELETE_WHEN_PARENT_IS_DELETED = 0,
+    SET_DEFAULT_VALUE_WHEN_PARENT_IS_DELETED = 1,
+    RETAIN_LAST_VALUE_WHEN_PARENT_DELETED = 2,
+    TRIGGER_UPDATE_WHEN_PARENT_DELETED = 3,
+};
+
+pub const GetDeletedParamMode = enum(u2) {
+    CAN_NEVER_GET_THIS_PARAM_WHEN_DELETED = 0,
+    RETURN_DEFAULT_VALUE_WHEN_GET_DELETED = 1,
+    RETURN_DEFAULT_VALUE_WHEN_GET_DELETED_AND_WARN = 2,
+};
+
+pub const SetDeletedParamMode = enum(u2) {
+    CAN_NEVER_SET_THIS_PARAM_WHEN_DELETED = 0,
+    IGNORE_SETTING_PARAM_WHEN_DELETED = 1,
+    IGNORE_SETTING_PARAM_WHEN_DELETED_AND_WARN = 2,
 };
 
 pub const ParamDefKind = enum(u8) {
@@ -526,8 +540,9 @@ pub fn ParametricStateSystem(
             });
             pub const MetaData = packed struct {
                 update_mode: UpdateMode = .ONLY_TRIGGER_UPDATES_ON_VALUE_CHANGE,
-                delete_if_parent_deleted: bool = false,
-                if_not_deleted_set_value_default_when_parent_deleted: bool = false,
+                parent_delete_behavior: ParentDeleteMode = .TRIGGER_UPDATE_WHEN_PARENT_DELETED,
+                get_deleted_behavior: GetDeletedParamMode = .CAN_NEVER_GET_THIS_PARAM_WHEN_DELETED,
+                set_deleted_behavior: SetDeletedParamMode = .CAN_NEVER_SET_THIS_PARAM_WHEN_DELETED,
                 generation: if (USE_GENERATIONS) GenId else u0 = 0,
             };
             pub const MetaDataBits = @bitSizeOf(MetaData);
@@ -560,8 +575,9 @@ pub fn ParametricStateSystem(
                 var out_mem: [blocks_needed]usize = @splat(0);
                 const fill = MetaData{
                     .update_mode = if (SETTINGS.INCLUDE_META_CATEGORY == .META_CATEGORY_LENGTH_AND_VALUE_CHANGE) .ALWAYS_TRIGGER_UPDATES_EVEN_IF_VALUE_UNCHANGED else .ONLY_TRIGGER_UPDATES_ON_VALUE_CHANGE,
-                    .delete_if_parent_deleted = false,
-                    .if_not_deleted_set_value_default_when_parent_deleted = false,
+                    .parent_delete_behavior = .RETAIN_LAST_VALUE_WHEN_PARENT_DELETED,
+                    .get_deleted_behavior = .CAN_NEVER_GET_THIS_PARAM_WHEN_DELETED,
+                    .set_deleted_behavior = .CAN_NEVER_SET_THIS_PARAM_WHEN_DELETED,
                     .generation = 0,
                 };
                 var bit_list = MetaList{
@@ -800,6 +816,8 @@ pub fn ParametricStateSystem(
             pub fn set_internal(comptime T: type, cat_idx: CategoryId, index: Index, gen: GenId, val: T, _mutex_key: MutexKey, comptime SKIP_GEN_CHECK: bool, comptime SKIP_PROCESS_CHANGES: bool) void {
                 var mutex_key: MutexKey, const owns_key: bool = _mutex_key.lock_if_needed(&INTERNAL.access_lock);
                 defer mutex_key.unlock_if_needed(owns_key);
+                const is_used = categories[cat_idx].data.free_list.idx_is_used(@intCast(index));
+                assert_with_reason(is_used, @src(), "attempted to access parameter (category `{s}` index {d}) that was not in a used state (is currently free memory)", .{ @tagName(num_cast(cat_idx, CategoryName)), index });
                 if (USE_GENERATIONS and !SKIP_GEN_CHECK and _Assert._should_assert()) {
                     const found_gen = categories[cat_idx].meta.get(@intCast(index)).generation;
                     assert_with_reason(found_gen == gen, @src(), "attempted to access parameter (category `{s}` index {d}) with mismatched generation (requested {d}, found {d})", .{ @tagName(num_cast(cat_idx, CategoryName)), index, gen, found_gen });
@@ -828,6 +846,8 @@ pub fn ParametricStateSystem(
             pub fn set_internal_opaque(cat_idx: CategoryId, index: Index, gen: GenId, val: []const u8, _mutex_key: MutexKey, comptime SKIP_GEN_CHECK: bool, comptime SKIP_PROCESS_CHANGES: bool) void {
                 var mutex_key: MutexKey, const owns_key: bool = _mutex_key.lock_if_needed(&INTERNAL.access_lock);
                 defer mutex_key.unlock_if_needed(owns_key);
+                const is_used = categories[cat_idx].data.free_list.idx_is_used(@intCast(index));
+                assert_with_reason(is_used, @src(), "attempted to access parameter (category `{s}` index {d}) that was not in a used state (is currently free memory)", .{ @tagName(num_cast(cat_idx, CategoryName)), index });
                 if (USE_GENERATIONS and !SKIP_GEN_CHECK and _Assert._should_assert()) {
                     const found_gen = categories[cat_idx].meta.get(@intCast(index)).generation;
                     assert_with_reason(found_gen == gen, @src(), "attempted to access parameter (category `{s}` index {d}) with mismatched generation (requested {d}, found {d})", .{ @tagName(num_cast(cat_idx, CategoryName)), index, gen, found_gen });
@@ -857,9 +877,36 @@ pub fn ParametricStateSystem(
             pub fn get_internal(comptime T: type, cat_idx: CategoryId, index: Index, gen: GenId, _mutex_key: MutexKey, comptime SKIP_GEN_CHECK: bool) T {
                 var mutex_key: MutexKey, const owns_key: bool = _mutex_key.lock_if_needed(&INTERNAL.access_lock);
                 defer mutex_key.unlock_if_needed(owns_key);
+                const is_used = categories[cat_idx].data.free_list.idx_is_used(@intCast(index));
+                const meta = categories[cat_idx].meta.get(@intCast(index));
+                if (!is_used) {
+                    switch (meta.get_deleted_behavior) {
+                        .CAN_NEVER_GET_THIS_PARAM_WHEN_DELETED => assert_unreachable(@src(), "attempted to access parameter (category `{s}` index {d}) that was not used (free memory space)", .{ @tagName(num_cast(cat_idx, CategoryName)), index }),
+                        else => {
+                            assert_with_reason(CATEGORY_DEFAULT_VALUES[cat_idx] != null, @src(), "getting parameter `{s}` index {d} that was not used (free memory space) (settings set to return default value), but category has no default value", .{ name_cast(cat_idx, CategoryName), index });
+                            if (meta.get_deleted_behavior == .RETURN_DEFAULT_VALUE_WHEN_GET_DELETED_AND_WARN) {
+                                Assert.warn_unconditional_always(@src(), "get paramteter that was not used (free memory space) `{s}` index {d}", .{ name_cast(cat_idx, CategoryName), index });
+                            }
+                            const default_ptr: *const T = @ptrCast(@alignCast(CATEGORY_DEFAULT_VALUES[cat_idx].?));
+                            return default_ptr.*;
+                        },
+                    }
+                }
                 if (USE_GENERATIONS and !SKIP_GEN_CHECK and _Assert._should_assert()) {
-                    const found_gen = categories[cat_idx].meta.get(@intCast(index)).generation;
-                    assert_with_reason(found_gen == gen, @src(), "attempted to access parameter (category `{s}` index {d}) with mismatched generation (requested {d}, found {d})", .{ @tagName(num_cast(cat_idx, CategoryName)), index, gen, found_gen });
+                    const found_gen = meta.generation;
+                    if (found_gen != gen) {
+                        switch (meta.get_deleted_behavior) {
+                            .CAN_NEVER_GET_THIS_PARAM_WHEN_DELETED => assert_unreachable(@src(), "attempted to access parameter (category `{s}` index {d}) with mismatched generation (requested {d}, found {d})", .{ @tagName(num_cast(cat_idx, CategoryName)), index, gen, found_gen }),
+                            else => {
+                                assert_with_reason(CATEGORY_DEFAULT_VALUES[cat_idx] != null, @src(), "getting parameter `{s}` index {d} with mismatched generation (settings set to return default value), but category has no default value", .{ name_cast(cat_idx, CategoryName), index });
+                                if (meta.get_deleted_behavior == .RETURN_DEFAULT_VALUE_WHEN_GET_DELETED_AND_WARN) {
+                                    Assert.warn_unconditional_always(@src(), "get paramteter with mismatched generation `{s}` index {d}", .{ name_cast(cat_idx, CategoryName), index });
+                                }
+                                const default_ptr: *const T = @ptrCast(@alignCast(CATEGORY_DEFAULT_VALUES[cat_idx].?));
+                                return default_ptr.*;
+                            },
+                        }
+                    }
                 }
                 const list_opaque = categories[cat_idx].data;
                 const list_typed = list_opaque.to_typed(T);
@@ -922,6 +969,7 @@ pub fn ParametricStateSystem(
                     }
                     delete_queue.clear();
                     delete_queue_cursor = 0;
+                    process_all_updates_if_needed(mutex_key);
                 }
             }
 
@@ -932,14 +980,14 @@ pub fn ParametricStateSystem(
             pub fn process_one_delete(param: ParamReadWriteOpaque, mutex_key: MutexKey, comptime SKIP_GEN_CHECK: bool, comptime SKIP_PROCESS_CHANGES: bool) void {
                 if (categories[param.category].data.free_list.idx_is_used(@intCast(param.index))) {
                     var meta = categories[param.category].meta.get(@intCast(param.index));
+                    const THIS_SIZE = CATEGORY_TYPE_SIZES[param.category];
                     if (USE_GENERATIONS) {
                         if (!SKIP_GEN_CHECK) {
-                            assert_with_reason(param.generation == meta.generation, @src(), "param to delete (category `{s}` index {d}) references an older generation than the param in that location (requested {d}, found {d})", .{ @tagName(num_cast(param.category, CategoryName)), param.index, param.generation, meta.generation });
+                            assert_with_reason(param.generation == meta.generation, @src(), "param to delete (category `{s}` index {d}) references an older generation than the param in that location (checked for {d}, found {d})", .{ @tagName(num_cast(param.category, CategoryName)), param.index, param.generation, meta.generation });
                         }
                         meta.generation += 1;
                         categories[param.category].meta.set(@intCast(param.index), meta);
                     }
-                    const THIS_SIZE = CATEGORY_TYPE_SIZES[param.category];
                     categories[param.category].data.release_one(@intCast(param.index), THIS_SIZE);
                     const update_slice: UpdateSlice = categories[param.category].data.ptr_2[param.index];
                     categories[param.category].data.ptr_2[param.index] = .{};
@@ -947,16 +995,27 @@ pub fn ParametricStateSystem(
                         const update_packages = payload_location_pool.ptr[update_slice.first_payload_u32()..update_slice.end_payload_u32_excluded()];
                         for (update_packages) |package| {
                             const out_params = payload_data_pool.ptr[package.start_of_outputs()..package.end_of_outputs_excluded()];
+                            var trigger_update: bool = false;
                             for (out_params) |out| {
-                                const out_meta = categories[param.category].meta.get(@intCast(out.index));
+                                const out_meta = categories[out.category].meta.get(@intCast(out.index));
                                 if (USE_GENERATIONS) {
-                                    assert_with_reason(out.generation == out_meta.generation, @src(), "param to consider deleting (category `{s}` index {d}) references an older generation than the param in that location (requested {d}, found {d})", .{ @tagName(num_cast(out.category, CategoryName)), out.index, out.generation, out_meta.generation });
+                                    assert_with_reason(out.generation == out_meta.generation, @src(), "param to consider deleting (category `{s}` index {d}) references an older generation than the param in that location (checked for {d}, found {d})", .{ @tagName(num_cast(out.category, CategoryName)), out.index, out.generation, out_meta.generation });
                                 }
-                                if (out_meta.delete_if_parent_deleted) {
-                                    _ = delete_queue.append(out, delete_queue_alloc);
-                                } else if (out_meta.if_not_deleted_set_value_default_when_parent_deleted) {
-                                    set_param_default_internal(out, mutex_key, false, SKIP_PROCESS_CHANGES);
+                                switch (out_meta.parent_delete_behavior) {
+                                    .DELETE_WHEN_PARENT_IS_DELETED => {
+                                        _ = delete_queue.append(out, delete_queue_alloc);
+                                    },
+                                    .SET_DEFAULT_VALUE_WHEN_PARENT_IS_DELETED => {
+                                        set_param_default_internal(out, mutex_key, false, SKIP_PROCESS_CHANGES);
+                                    },
+                                    .RETAIN_LAST_VALUE_WHEN_PARENT_DELETED => {},
+                                    .TRIGGER_UPDATE_WHEN_PARENT_DELETED => {
+                                        trigger_update = true;
+                                    },
                                 }
+                            }
+                            if (trigger_update) {
+                                _ = update_queue.queue(package, update_queue_alloc);
                             }
                         }
                     }
@@ -971,7 +1030,7 @@ pub fn ParametricStateSystem(
                 set_internal_opaque(param.category, param.index, param.generation, default_opaque_bytes, mutex_key, SKIP_GEN_CHECK, SKIP_PROCESS_CHANGES);
             }
 
-            pub fn create_new_root_param_internal(comptime category: CategoryName, specific_index: ?Index, initial_val: CategoryType(category), update_mode: UpdateMode, _mutex_key: MutexKey, comptime SKIP_CLAIM: bool) ParamReadWrite(CategoryType(category)) {
+            pub fn create_new_root_param_internal(comptime category: CategoryName, initial_val: CategoryType(category), settings: ParamReadWriteSettings, _mutex_key: MutexKey, comptime SKIP_CLAIM: bool) ParamReadWrite(CategoryType(category)) {
                 var mutex_key: MutexKey, const owns_key: bool = _mutex_key.lock_if_needed(&INTERNAL.access_lock);
                 defer mutex_key.unlock_if_needed(owns_key);
                 const cat_idx = @intFromEnum(category);
@@ -980,19 +1039,20 @@ pub fn ParametricStateSystem(
                 var cat_meta = &INTERNAL.categories[cat_idx].meta;
                 const cat_alloc = INTERNAL.categories[cat_idx].alloc;
                 const claimed = if (SKIP_CLAIM) check_idx_is_specific: {
-                    INTERNAL.assert_with_reason(specific_index != null, @src(), "cannot use `SKIP_CLAIM` when param definition does not provide a specific index", .{});
+                    INTERNAL.assert_with_reason(settings.specific_index != null, @src(), "cannot use `SKIP_CLAIM` when param definition does not provide a specific index", .{});
                     break :check_idx_is_specific INTERNAL.CategoryPool.ClaimedItemTyped(T){
-                        .idx = specific_index.?,
-                        .ptr = &cat_data.ptr[specific_index.?],
+                        .idx = settings.specific_index.?,
+                        .ptr = &cat_data.ptr[settings.specific_index.?],
                     };
-                } else if (specific_index) |i| cat_data.claim_one_specific(i, cat_alloc) else cat_data.claim_one(cat_alloc);
+                } else if (settings.specific_index) |i| cat_data.claim_one_specific(i, cat_alloc) else cat_data.claim_one(cat_alloc);
                 const idx: Index = claimed.idx;
                 const ptr: *T = claimed.ptr;
                 cat_meta.grow_len_if_needed_for_idx(@intCast(idx), cat_alloc);
                 var meta = cat_meta.get(idx);
-                meta.update_mode = update_mode;
-                meta.delete_if_parent_deleted = false;
-                meta.if_not_deleted_set_value_default_when_parent_deleted = false;
+                meta.update_mode = settings.update_mode;
+                meta.parent_delete_behavior = .RETAIN_LAST_VALUE_WHEN_PARENT_DELETED;
+                meta.get_deleted_behavior = settings.get_deleted_mode;
+                meta.set_deleted_behavior = settings.set_deleted_mode;
                 cat_meta.set(idx, meta);
                 ptr.* = initial_val;
                 return ParamReadWrite(T){
@@ -1065,8 +1125,8 @@ pub fn ParametricStateSystem(
                     cat_meta.grow_len_if_needed_for_idx(@intCast(idx), cat_alloc);
                     const meta = INTERNAL.MetaData{
                         .update_mode = def.update_mode,
-                        .delete_if_parent_deleted = def.delete_when_parent_is_deleted,
-                        .if_not_deleted_set_value_default_when_parent_deleted = def.if_not_deleted_set_value_default_when_parent_deleted,
+                        .parent_delete_behavior = def.parent_delete_mode,
+                        .get_deleted_behavior = def.get_deleted_mode,
                         .generation = cat_meta.get(@intCast(idx)).generation,
                     };
                     cat_meta.set(@intCast(idx), meta);
@@ -1923,27 +1983,172 @@ pub fn ParametricStateSystem(
             }
         };
 
-        /// Create a new 'Root' parameter at a specific index. Root parameters are not dependant on any other parameter and
-        /// are never automatically updated.
-        ///
-        /// Any parameter depending on a root parameter cannot be initialized if the root parameter is not initialized
-        pub fn create_new_root_param_at_specific_index(comptime category: CategoryName, index: Index, initial_val: CategoryType(category), update_mode: UpdateMode) ParamReadWrite(CategoryType(category)) {
-            return INTERNAL.create_new_root_param_internal(category, index, initial_val, update_mode, .{}, false);
-        }
         /// Create a new 'Root' parameter at the next free index. Root parameters are not dependant on any other parameter and
         /// are never automatically updated.
         ///
         /// Any parameter depending on a root parameter cannot be initialized if the root parameter is not initialized
-        pub fn create_new_root_param(comptime category: CategoryName, initial_val: CategoryType(category), update_mode: UpdateMode) ParamReadWrite(CategoryType(category)) {
-            return INTERNAL.create_new_root_param_internal(category, null, initial_val, update_mode, .{}, false);
+        pub fn create_new_root_param(comptime category: CategoryName, initial_val: CategoryType(category), settings: ParamReadWriteSettings) ParamReadWrite(CategoryType(category)) {
+            return INTERNAL.create_new_root_param_internal(category, initial_val, settings, .{}, false);
         }
+
+        pub const ParamReadWriteSettings = struct {
+            update_mode: UpdateMode = .ONLY_TRIGGER_UPDATES_ON_VALUE_CHANGE,
+            get_deleted_mode: GetDeletedParamMode = .CAN_NEVER_GET_THIS_PARAM_WHEN_DELETED,
+            set_deleted_mode: SetDeletedParamMode = .CAN_NEVER_SET_THIS_PARAM_WHEN_DELETED,
+            specific_index: ?Index = null,
+
+            pub fn default() ParamReadWriteSettings {
+                return ParamReadWriteSettings{};
+            }
+            pub fn no_access_when_deleted(self: ParamReadWriteSettings) ParamReadWriteSettings {
+                var def = self;
+                def.get_deleted_mode = .CAN_NEVER_GET_THIS_PARAM_WHEN_DELETED;
+                def.set_deleted_mode = .CAN_NEVER_SET_THIS_PARAM_WHEN_DELETED;
+                return def;
+            }
+            pub fn default_value_when_deleted(self: ParamReadWriteSettings) ParamReadWriteSettings {
+                var def = self;
+                def.get_deleted_mode = .RETURN_DEFAULT_VALUE_WHEN_GET_DELETED;
+                def.set_deleted_mode = .IGNORE_SETTING_PARAM_WHEN_DELETED;
+                return def;
+            }
+            pub fn allow_access_when_deleted_but_warn(self: ParamReadWriteSettings) ParamReadWriteSettings {
+                var def = self;
+                def.get_deleted_mode = .RETURN_DEFAULT_VALUE_WHEN_GET_DELETED_AND_WARN;
+                def.set_deleted_mode = .IGNORE_SETTING_PARAM_WHEN_DELETED_AND_WARN;
+                return def;
+            }
+            pub fn with_index(self: ParamReadWriteSettings, index: Index) ParamReadWriteSettings {
+                var def = self;
+                def.specific_index = index;
+                return def;
+            }
+            pub fn with_update_mode(self: ParamReadWriteSettings, update_mode: UpdateMode) ParamReadWriteSettings {
+                var def = self;
+                def.update_mode = update_mode;
+                return def;
+            }
+        };
 
         pub const ParamReadOnlyDef = struct {
             category: CategoryName,
             update_mode: UpdateMode = .ONLY_TRIGGER_UPDATES_ON_VALUE_CHANGE,
-            delete_when_parent_is_deleted: bool = false,
-            if_not_deleted_set_value_default_when_parent_deleted: bool = false,
+            parent_delete_mode: ParentDeleteMode = .TRIGGER_UPDATE_WHEN_PARENT_DELETED,
+            get_deleted_mode: GetDeletedParamMode = .CAN_NEVER_GET_THIS_PARAM_WHEN_DELETED,
+            set_deleted_mode: SetDeletedParamMode = .CAN_NEVER_SET_THIS_PARAM_WHEN_DELETED,
             specific_index: ?Index = null,
+
+            pub fn new_def(category: CategoryName) ParamReadOnlyDef {
+                return ParamReadOnlyDef{ .category = category };
+            }
+            pub fn with_parent_delete_mode(self: ParamReadOnlyDef, parent_delete_mode: ParentDeleteMode) ParamReadOnlyDef {
+                var def = self;
+                def.parent_delete_mode = parent_delete_mode;
+                return def;
+            }
+            pub fn no_access_when_deleted(self: ParamReadOnlyDef) ParamReadOnlyDef {
+                var def = self;
+                def.get_deleted_mode = .CAN_NEVER_GET_THIS_PARAM_WHEN_DELETED;
+                def.set_deleted_mode = .CAN_NEVER_SET_THIS_PARAM_WHEN_DELETED;
+                return def;
+            }
+            pub fn default_value_when_deleted(self: ParamReadOnlyDef) ParamReadOnlyDef {
+                var def = self;
+                def.get_deleted_mode = .RETURN_DEFAULT_VALUE_WHEN_GET_DELETED;
+                def.set_deleted_mode = .IGNORE_SETTING_PARAM_WHEN_DELETED;
+                return def;
+            }
+            pub fn default_value_when_deleted_but_warn(self: ParamReadOnlyDef) ParamReadOnlyDef {
+                var def = self;
+                def.get_deleted_mode = .RETURN_DEFAULT_VALUE_WHEN_GET_DELETED_AND_WARN;
+                def.set_deleted_mode = .IGNORE_SETTING_PARAM_WHEN_DELETED_AND_WARN;
+                return def;
+            }
+            pub fn with_index(self: ParamReadOnlyDef, index: Index) ParamReadOnlyDef {
+                var def = self;
+                def.specific_index = index;
+                return def;
+            }
+            pub fn with_update_mode(self: ParamReadOnlyDef, update_mode: UpdateMode) ParamReadOnlyDef {
+                var def = self;
+                def.update_mode = update_mode;
+                return def;
+            }
+        };
+        pub fn ParamReadWriteDefConsecutive(comptime T: type) type {
+            return struct {
+                initial_value: T,
+                update_mode: UpdateMode = .ONLY_TRIGGER_UPDATES_ON_VALUE_CHANGE,
+                get_deleted_mode: GetDeletedParamMode = .CAN_NEVER_GET_THIS_PARAM_WHEN_DELETED,
+                set_deleted_mode: SetDeletedParamMode = .CAN_NEVER_SET_THIS_PARAM_WHEN_DELETED,
+
+                pub fn new_def(initial_value: T) @This() {
+                    return @This(){
+                        .initial_value = initial_value,
+                    };
+                }
+                pub fn no_access_when_deleted(self: @This()) @This() {
+                    var def = self;
+                    def.get_deleted_mode = .CAN_NEVER_GET_THIS_PARAM_WHEN_DELETED;
+                    def.set_deleted_mode = .CAN_NEVER_SET_THIS_PARAM_WHEN_DELETED;
+                    return def;
+                }
+                pub fn allow_access_when_deleted(self: @This()) @This() {
+                    var def = self;
+                    def.get_deleted_mode = .RETURN_DEFAULT_VALUE_WHEN_GET_DELETED;
+                    def.set_deleted_mode = .IGNORE_SETTING_PARAM_WHEN_DELETED;
+                    return def;
+                }
+                pub fn allow_access_when_deleted_but_warn(self: @This()) @This() {
+                    var def = self;
+                    def.get_deleted_mode = .RETURN_DEFAULT_VALUE_WHEN_GET_DELETED_AND_WARN;
+                    def.set_deleted_mode = .IGNORE_SETTING_PARAM_WHEN_DELETED_AND_WARN;
+                    return def;
+                }
+                pub fn with_update_mode(self: @This(), update_mode: UpdateMode) @This() {
+                    var def = self;
+                    def.update_mode = update_mode;
+                    return def;
+                }
+            };
+        }
+        pub const ParamReadOnlyDefNoCategoryOrIndex = struct {
+            update_mode: UpdateMode = .ONLY_TRIGGER_UPDATES_ON_VALUE_CHANGE,
+            parent_delete_mode: ParentDeleteMode = .TRIGGER_UPDATE_WHEN_PARENT_DELETED,
+            get_deleted_mode: GetDeletedParamMode = .CAN_NEVER_GET_THIS_PARAM_WHEN_DELETED,
+            set_deleted_mode: SetDeletedParamMode = .CAN_NEVER_SET_THIS_PARAM_WHEN_DELETED,
+
+            pub fn new_def() ParamReadOnlyDefNoCategoryOrIndex {
+                return ParamReadOnlyDefNoCategoryOrIndex{};
+            }
+            pub fn with_parent_delete_mode(self: ParamReadOnlyDefNoCategoryOrIndex, parent_delete_mode: ParentDeleteMode) ParamReadOnlyDefNoCategoryOrIndex {
+                var def = self;
+                def.parent_delete_mode = parent_delete_mode;
+                return def;
+            }
+            pub fn no_access_when_deleted(self: ParamReadOnlyDefNoCategoryOrIndex) ParamReadOnlyDefNoCategoryOrIndex {
+                var def = self;
+                def.get_deleted_mode = .CAN_NEVER_GET_THIS_PARAM_WHEN_DELETED;
+                def.set_deleted_mode = .CAN_NEVER_SET_THIS_PARAM_WHEN_DELETED;
+                return def;
+            }
+            pub fn allow_access_when_deleted(self: ParamReadOnlyDefNoCategoryOrIndex) ParamReadOnlyDefNoCategoryOrIndex {
+                var def = self;
+                def.get_deleted_mode = .RETURN_DEFAULT_VALUE_WHEN_GET_DELETED;
+                def.set_deleted_mode = .IGNORE_SETTING_PARAM_WHEN_DELETED;
+                return def;
+            }
+            pub fn allow_access_when_deleted_but_warn(self: ParamReadOnlyDefNoCategoryOrIndex) ParamReadOnlyDefNoCategoryOrIndex {
+                var def = self;
+                def.get_deleted_mode = .RETURN_DEFAULT_VALUE_WHEN_GET_DELETED_AND_WARN;
+                def.set_deleted_mode = .IGNORE_SETTING_PARAM_WHEN_DELETED_AND_WARN;
+                return def;
+            }
+            pub fn with_update_mode(self: ParamReadOnlyDefNoCategoryOrIndex, update_mode: UpdateMode) ParamReadOnlyDefNoCategoryOrIndex {
+                var def = self;
+                def.update_mode = update_mode;
+                return def;
+            }
         };
 
         /// Create a set of related 'Derived' parameters that are all calculated by the same update function.
@@ -2002,17 +2207,6 @@ pub fn ParametricStateSystem(
             return @bitCast(outs[0]);
         }
 
-        pub fn ParamReadWriteDefConsecutive(comptime T: type) type {
-            return struct {
-                initial_value: T,
-                update_mode: UpdateMode = .ONLY_TRIGGER_UPDATES_ON_VALUE_CHANGE,
-            };
-        }
-        pub const ParamReadOnlyDefNoCategoryOrIndex = struct {
-            update_mode: UpdateMode = .ONLY_TRIGGER_UPDATES_ON_VALUE_CHANGE,
-            delete_when_parent_is_deleted: bool = false,
-            if_not_deleted_set_value_default_when_parent_deleted: bool = false,
-        };
         pub const ParamReadOnlyDefConsecutiveSingle = struct {
             update_function: FuncName,
             inputs: []const ParamReadOnlyOpaque,
@@ -2030,14 +2224,14 @@ pub fn ParametricStateSystem(
                 DERIVED_SINGLE: ParamReadOnlyDefConsecutiveSingle,
                 DERIVED_GROUP: ParamReadOnlyDefConsecutiveGroup,
 
-                pub fn root(def: ParamReadWriteDefConsecutive(T)) ParamDefConsecutive {
-                    return ParamDefConsecutive{ .ROOT = def };
+                pub fn root(def: ParamReadWriteDefConsecutive(T)) ParamDefConsecutive(T) {
+                    return ParamDefConsecutive(T){ .ROOT = def };
                 }
-                pub fn derived_single(def: ParamReadOnlyDefConsecutiveSingle) ParamDefConsecutive {
-                    return ParamDefConsecutive{ .DERIVED_SINGLE = def };
+                pub fn derived_single(def: ParamReadOnlyDefConsecutiveSingle) ParamDefConsecutive(T) {
+                    return ParamDefConsecutive(T){ .DERIVED_SINGLE = def };
                 }
-                pub fn derived_group(def: ParamReadOnlyDefConsecutiveGroup) ParamDefConsecutive {
-                    return ParamDefConsecutive{ .DERIVED_GROUP = def };
+                pub fn derived_group(def: ParamReadOnlyDefConsecutiveGroup) ParamDefConsecutive(T) {
+                    return ParamDefConsecutive(T){ .DERIVED_GROUP = def };
                 }
             };
         }
@@ -2103,15 +2297,16 @@ pub fn ParametricStateSystem(
             for (defs) |def| {
                 switch (def) {
                     .ROOT => |root_def| {
-                        outputs[out_idx] = .root(INTERNAL.create_new_root_param_internal(category, @intCast(param_idx), root_def.initial_value, root_def.update_mode, .{}, true));
+                        outputs[out_idx] = .root(INTERNAL.create_new_root_param_internal(category, root_def.initial_value, .{ .specific_index = @intCast(param_idx), .update_mode = root_def.update_mode }, .{}, true));
                         param_idx += 1;
                         out_idx += 1;
                     },
                     .DERIVED_SINGLE => |derived_def| {
                         const defs_arr: [1]ParamReadOnlyDef = .{ParamReadOnlyDef{
                             .category = category,
-                            .delete_when_parent_is_deleted = derived_def.output_def.delete_when_parent_is_deleted,
-                            .if_not_deleted_set_value_default_when_parent_deleted = derived_def.output_def.if_not_deleted_set_value_default_when_parent_deleted,
+                            .get_deleted_mode = derived_def.output_def.get_deleted_mode,
+                            .set_deleted_mode = derived_def.output_def.set_deleted_mode,
+                            .parent_delete_mode = derived_def.output_def.parent_delete_mode,
                             .specific_index = @intCast(param_idx),
                             .update_mode = derived_def.output_def.update_mode,
                         }};
@@ -2122,15 +2317,16 @@ pub fn ParametricStateSystem(
                         out_idx += 1;
                     },
                     .DERIVED_GROUP => |derived_def| {
-                        INTERNAL.assert_with_reason(derived_def.output_defs.len == derived_def.output_params_opaque_temp.len, @src(), "`derived_def.output_defs_mutable.len ` ({d}) must equal `derived_def.output_params_opaque_temp.len` ({d})", .{ derived_def.output_defs.len, derived_def.output_params_opaque_temp.len });
+                        INTERNAL.assert_with_reason(derived_def.output_defs.len <= INTERNAL.MAX_OUTPUTS, @src(), "`derived_def.output_defs_mutable.len ` ({d}) must b less than or equal to `INTERNAL.MAX_OUTPUTS` ({d})", .{ derived_def.output_defs.len, INTERNAL.MAX_OUTPUTS });
                         INTERNAL.temp_param_outputs_len = 0;
                         for (derived_def.output_defs) |out_def| {
                             var temp_def: *ParamReadOnlyDef = &INTERNAL.temp_param_defs[INTERNAL.temp_param_outputs_len];
                             temp_def.category = category;
                             temp_def.specific_index = @intCast(param_idx);
                             temp_def.update_mode = out_def.update_mode;
-                            temp_def.delete_when_parent_is_deleted = out_def.delete_when_parent_is_deleted;
-                            temp_def.if_not_deleted_set_value_default_when_parent_deleted = out_def.if_not_deleted_set_value_default_when_parent_deleted;
+                            temp_def.get_deleted_mode = out_def.get_deleted_mode;
+                            temp_def.set_deleted_mode = out_def.set_deleted_mode;
+                            temp_def.parent_delete_mode = out_def.parent_delete_mode;
                             param_idx += 1;
                             INTERNAL.temp_param_outputs_len += 1;
                         }
@@ -2172,10 +2368,12 @@ test "ParametricStateSystem" {
         AREAS,
         SCALARS,
     };
-    const Funcs = enum(u2) {
+    const Funcs = enum(u3) {
         VEC_PLUS_SCALAR,
         HALF_VEC_MINUS_2_SCALAR,
         LINKED_AREA_PARENT_AND_BUTTON,
+        BOT_LEFT_AND_FAR_CORNER_PLUS_MARGIN,
+        TOP_RIGHT_PLUS_MARGIN,
     };
     const CatDef = CategoryTypeDef(Cats);
     const Vec = Root.Vec2.define_vec2_type(f32);
@@ -2239,6 +2437,14 @@ test "ParametricStateSystem" {
                 .func_name = .LINKED_AREA_PARENT_AND_BUTTON,
                 .init_mem = .allocated(AllocInit{ .alloc = alloc, .init_capacity = 0 }),
             },
+            PSS.InitializeFuncDependantsMem{
+                .func_name = .BOT_LEFT_AND_FAR_CORNER_PLUS_MARGIN,
+                .init_mem = .allocated(AllocInit{ .alloc = alloc, .init_capacity = 0 }),
+            },
+            PSS.InitializeFuncDependantsMem{
+                .func_name = .TOP_RIGHT_PLUS_MARGIN,
+                .init_mem = .allocated(AllocInit{ .alloc = alloc, .init_capacity = 0 }),
+            },
         },
         .parameter_memory = .{
             PSS.InitializeCategoryMem{
@@ -2269,15 +2475,14 @@ test "ParametricStateSystem" {
         vec: ParamUpdateInput(Vec),
         scalar: ParamUpdateInput(f32),
     };
-    // const VecOut = struct {
-    //     vec: ParamReadOnly(Vec),
-    // };
+    const PosSizeMargin_UpdateIn = struct {
+        pos: ParamUpdateInput(Vec),
+        size: ParamUpdateInput(Vec),
+        margin: ParamUpdateInput(f32),
+    };
     const Vec_UpdateOut = struct {
         vec: ParamUpdateOutput(Vec),
     };
-    // const F32Object = struct {
-    //     a: f32,
-    // };
     const ParentSizeButtonSize_UpdateIn = struct {
         parent_size: ParamUpdateInput(Vec),
         button_size: ParamUpdateInput(Vec),
@@ -2296,6 +2501,13 @@ test "ParametricStateSystem" {
         parent_area: ParamReadOnly(f32),
         button_area: ParamReadOnly(f32),
         total_area: ParamReadOnly(f32),
+    };
+    const VecAndVec_UpdateOut = struct {
+        vec_1: ParamUpdateOutput(Vec),
+        vec_2: ParamUpdateOutput(Vec),
+    };
+    const OneVec_UpdateOut = struct {
+        vec: ParamUpdateOutput(Vec),
     };
 
     const CALC = struct {
@@ -2331,38 +2543,59 @@ test "ParametricStateSystem" {
             out.total_area.set(total_area);
             iface.commit_deletions_and_changes();
         }
+        fn vec_plus_vec_plus_margin_out_vec_0Y_and_vec_XY(iface: CalcIface) void {
+            const in = iface.make_input_struct(PosSizeMargin_UpdateIn);
+            const out = iface.make_output_struct(VecAndVec_UpdateOut);
+            const pos = in.pos.get();
+            const size = in.size.get();
+            const margin = in.margin.get();
+            const far_corner = pos.add(size).add(Vec{ .x = margin, .y = margin });
+            const bot_left = Vec{ .x = 0, .y = far_corner.y };
+            out.vec_1.set(bot_left);
+            out.vec_2.set(far_corner);
+            iface.commit_deletions_and_changes();
+        }
+        fn vec_plus_vec_plus_margin_out_vec_X0(iface: CalcIface) void {
+            const in = iface.make_input_struct(PosSizeMargin_UpdateIn);
+            const out = iface.make_output_struct(OneVec_UpdateOut);
+            const pos = in.pos.get();
+            const size = in.size.get();
+            const margin = in.margin.get();
+            const far_corner = pos.add(size).add(Vec{ .x = margin, .y = margin });
+            const top_right = Vec{ .x = far_corner.x, .y = 0 };
+            out.vec.set(top_right);
+            iface.commit_deletions_and_changes();
+        }
     };
 
     PSS.initialize_update_function(.VEC_PLUS_SCALAR, CALC.vec_plus_scalar);
     PSS.initialize_update_function(.HALF_VEC_MINUS_2_SCALAR, CALC.half_vec_minus_2_scalar);
     PSS.initialize_update_function(.LINKED_AREA_PARENT_AND_BUTTON, CALC.linked_area_parent_and_button);
+    PSS.initialize_update_function(.BOT_LEFT_AND_FAR_CORNER_PLUS_MARGIN, CALC.vec_plus_vec_plus_margin_out_vec_0Y_and_vec_XY);
+    PSS.initialize_update_function(.TOP_RIGHT_PLUS_MARGIN, CALC.vec_plus_vec_plus_margin_out_vec_X0);
 
-    // POSITIONS,
-    // SIZES,
-    // AREAS,
-    // SCALARS,
-    const ParentPos = PSS.create_new_root_param(.POSITIONS, Vec{ .x = 100.0, .y = 200.0 }, .ONLY_TRIGGER_UPDATES_ON_VALUE_CHANGE);
-    const ParentSize = PSS.create_new_root_param(.SIZES, Vec{ .x = 800.0, .y = 600.0 }, .ONLY_TRIGGER_UPDATES_ON_VALUE_CHANGE);
+    const ParentPos = PSS.create_new_root_param(.POSITIONS, Vec{ .x = 100.0, .y = 200.0 }, .default());
+    const ParentSize = PSS.create_new_root_param(.SIZES, Vec{ .x = 800.0, .y = 600.0 }, .default());
 
-    const Margin = PSS.create_new_root_param(.SCALARS, 32.0, .ONLY_TRIGGER_UPDATES_ON_VALUE_CHANGE);
+    const Margin = PSS.create_new_root_param(.SCALARS, 32.0, .default());
 
     const ButtonPos = PSS.create_new_derived_param_from_input_struct(.VEC_PLUS_SCALAR, VecAndScalar_UpdateIn{
         .scalar = Margin.as_update_input(.{}),
         .vec = ParentPos.as_update_input(.{}),
-    }, PSS.ParamReadOnlyDef{ .category = .POSITIONS }, Vec);
+    }, PSS.ParamReadOnlyDef.new_def(.POSITIONS).default_value_when_deleted(), Vec);
 
     const ButtonSize = PSS.create_new_derived_param_from_input_struct(.HALF_VEC_MINUS_2_SCALAR, VecAndScalar_UpdateIn{
         .scalar = Margin.as_update_input(.{}),
         .vec = ParentSize.as_update_input(.{}),
-    }, PSS.ParamReadOnlyDef{ .category = .SIZES }, Vec);
+    }, PSS.ParamReadOnlyDef.new_def(.SIZES).default_value_when_deleted(), Vec);
 
     const Areas = PSS.create_new_derived_param_set_from_struct(.LINKED_AREA_PARENT_AND_BUTTON, ParentSizeButtonSize_UpdateIn{
         .parent_size = ParentSize.as_update_input(.{}),
         .button_size = ButtonSize.as_update_input(.{}),
     }, ParentAreaButtonAreaOutDef{
-        .parent_area = .{ .category = .AREAS },
-        .button_area = .{ .category = .AREAS },
-        .total_area = .{ .category = .AREAS },
+        .parent_area = PSS.ParamReadOnlyDef.new_def(.AREAS).no_access_when_deleted(),
+        .button_area = PSS.ParamReadOnlyDef.new_def(.AREAS).no_access_when_deleted().with_parent_delete_mode(.TRIGGER_UPDATE_WHEN_PARENT_DELETED),
+        .total_area = PSS.ParamReadOnlyDef.new_def(.AREAS).no_access_when_deleted(),
     }, ParentAreaButtonAreaOut);
 
     const debug = struct {
@@ -2412,6 +2645,57 @@ test "ParametricStateSystem" {
     try Test.expect_equal(Areas.parent_area.get(), "Areas.parent_area.get()", 329670.0, "329670.0", "failed automatic update", .{});
     try Test.expect_equal(Areas.button_area.get(), "Areas.button_area.get()", 28129.5, "28129.5", "failed automatic update", .{});
     try Test.expect_equal(Areas.total_area.get(), "Areas.total_area.get()", 357799.5, "357799.5", "failed automatic update", .{});
+
+    ButtonPos.delete();
+    ButtonSize.delete();
+
+    try Test.expect_equal(Areas.parent_area.get(), "Areas.parent_area.get()", 329670.0, "329670.0", "failed automatic update", .{});
+    try Test.expect_equal(Areas.button_area.get(), "Areas.button_area.get()", 0, "0", "failed automatic update", .{});
+    try Test.expect_equal(Areas.total_area.get(), "Areas.total_area.get()", 329670.0, "329670.0", "failed automatic update", .{});
+
+    var RectCorners: [4]PSS.Param(Vec) = undefined;
+    PSS.create_consecutive_indexed_params(.POSITIONS, null, &.{
+        PSS.ParamDefConsecutive(Vec).root(.new_def(.ZERO)),
+        PSS.ParamDefConsecutive(Vec).derived_group(.{
+            .inputs = &.{ ParentPos.to_opaque_read_only(), ParentSize.to_opaque_read_only(), Margin.to_opaque_read_only() },
+            .output_defs = &.{
+                PSS.ParamReadOnlyDefNoCategoryOrIndex{},
+                PSS.ParamReadOnlyDefNoCategoryOrIndex{},
+            },
+            .update_function = .BOT_LEFT_AND_FAR_CORNER_PLUS_MARGIN,
+        }),
+        PSS.ParamDefConsecutive(Vec).derived_single(.{
+            .inputs = &.{ ParentPos.to_opaque_read_only(), ParentSize.to_opaque_read_only(), Margin.to_opaque_read_only() },
+            .output_def = PSS.ParamReadOnlyDefNoCategoryOrIndex{},
+            .update_function = .TOP_RIGHT_PLUS_MARGIN,
+        }),
+    }, RectCorners[0..]);
+    const TopLeft = RectCorners[0].ROOT;
+    const BotLeft = RectCorners[1].DERIVED;
+    const BotRight = RectCorners[2].DERIVED;
+    const TopRight = RectCorners[3].DERIVED;
+    const CornersFirstIdx = TopLeft.index;
+    const CornersSecondIdx = BotLeft.index;
+    const CornersThirdIdx = BotRight.index;
+    const CornersFourthIdx = TopRight.index;
+
+    if (do_debug) {
+        std.debug.print("\nTOP LEFT: {any}\nBOT LEFT: {any}\nBOT RIGHT: {any}\nTOP RIGHT: {any}\n", .{
+            TopLeft.get(),
+            BotLeft.get(),
+            BotRight.get(),
+            TopRight.get(),
+        });
+    }
+
+    try Test.expect_equal_method(TopLeft.get(), "TopLeft.get()", Vec{ .x = 0, .y = 0 }, "Vec{ .x = 0, .y = 0 }", "failed automatic update", .{});
+    try Test.expect_equal_method(BotLeft.get(), "BotLeft.get()", Vec{ .x = 0, .y = 581 }, "Vec{ .x = 0, .y = 581 }", "failed automatic update", .{});
+    try Test.expect_equal_method(BotRight.get(), "BotRight.get()", Vec{ .x = 1138, .y = 581 }, "Vec{ .x = 1138, .y = 581 }", "failed automatic update", .{});
+    try Test.expect_equal_method(TopRight.get(), "TopRight.get()", Vec{ .x = 1138, .y = 0 }, "Vec{ .x = 1138, .y = 0 }", "failed automatic update", .{});
+
+    try Test.expect_equal(CornersSecondIdx, "CornersSecondIdx", CornersFirstIdx + 1, "CornersFirstIdx + 1", "failed automatic update", .{});
+    try Test.expect_equal(CornersThirdIdx, "CornersThirdIdx", CornersFirstIdx + 2, "CornersFirstIdx + 2", "failed automatic update", .{});
+    try Test.expect_equal(CornersFourthIdx, "CornersFourthIdx", CornersFirstIdx + 3, "CornersFirstIdx + 3", "failed automatic update", .{});
 
     // if (do_debug) {
     //     std.debug.print("TestTable MEM: {d} bytes\n", .{my_param_table.total_memory_footprint()});
