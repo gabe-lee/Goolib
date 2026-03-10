@@ -628,13 +628,13 @@ pub fn CompactCoupledAllocationSystem(comptime _DEFINITION: CCAS_Definition) typ
                     fn p_move(self: *SliceSelf, old_idx: usize, new_idx: usize, _: void) void {
                         lock_data();
                         const slice = self.zig_slice_no_lock();
-                        Utils.slice_move_one(slice, old_idx, new_idx);
+                        Utils.mem_move_one(slice, old_idx, new_idx);
                         unlock_data();
                     }
                     fn p_move_range(self: *SliceSelf, range: IList.Range, new_first_idx: usize, _: void) void {
                         lock_data();
                         const slice = self.zig_slice_no_lock();
-                        Utils.slice_move_many(slice, range.first_idx, range.last_idx, new_first_idx);
+                        Utils.mem_move_many_include_last(slice, range.first_idx, range.last_idx, new_first_idx);
                         unlock_data();
                     }
                     fn p_try_ensure_free_slots(_: *SliceSelf, _: usize, _: void) error{failed_to_grow_list}!void {
@@ -1692,13 +1692,13 @@ pub fn CompactCoupledAllocationSystem(comptime _DEFINITION: CCAS_Definition) typ
                     fn p_move(self: *ListSelf, old_idx: usize, new_idx: usize, _: void) void {
                         lock_data();
                         const slice = self.zig_slice_no_lock();
-                        Utils.slice_move_one(slice, old_idx, new_idx);
+                        Utils.mem_move_one(slice, old_idx, new_idx);
                         unlock_data();
                     }
                     fn p_move_range(self: *ListSelf, range: IList.Range, new_first_idx: usize, _: void) void {
                         lock_data();
                         const slice = self.zig_slice_no_lock();
-                        Utils.slice_move_many(slice, range.first_idx, range.last_idx, new_first_idx);
+                        Utils.mem_move_many_include_last(slice, range.first_idx, range.last_idx, new_first_idx);
                         unlock_data();
                     }
                     fn p_try_ensure_free_slots(self: *ListSelf, count: usize, _: void) error{failed_to_grow_list}!void {

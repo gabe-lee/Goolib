@@ -60,10 +60,10 @@ pub fn ArrayListAdapter(comptime T: type) type {
                 self.items.ptr[idx] = val;
             }
             fn p_move(self: *std.ArrayList(T), old_idx: usize, new_idx: usize, _: Allocator) void {
-                Utils.slice_move_one(self.items.ptr[0..self.items.len], old_idx, new_idx);
+                Utils.mem_move_one(self.items.ptr[0..self.items.len], old_idx, new_idx);
             }
             fn p_move_range(self: *std.ArrayList(T), range: IList.Range, new_first_idx: usize, _: Allocator) void {
-                Utils.slice_move_many(self.items.ptr[0..self.items.len], range.first_idx, range.last_idx, new_first_idx);
+                Utils.mem_move_many_include_last(self.items.ptr[0..self.items.len], range.first_idx, range.last_idx, new_first_idx);
             }
             fn p_try_ensure_free_slots(self: *std.ArrayList(T), count: usize, alloc: Allocator) error{failed_to_grow_list}!void {
                 const have = self.capacity - self.items.len;

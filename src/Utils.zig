@@ -649,7 +649,7 @@ pub fn bools_to_switchable_integer(comptime count: comptime_int, bools: [count]b
 //     return result;
 // }
 
-pub fn slice_move_one(slice: anytype, old_idx: usize, new_idx: usize) void {
+pub fn mem_move_one(slice: anytype, old_idx: usize, new_idx: usize) void {
     Assert.assert_with_reason(Types.type_is_slice(@TypeOf(slice)), @src(), "type of `slice` was not a slice type, got {s}", .{@typeName(@TypeOf(slice))});
     const T = @typeInfo(@TypeOf(slice)).pointer.child;
     var widx: isize = @intCast(old_idx);
@@ -664,7 +664,7 @@ pub fn slice_move_one(slice: anytype, old_idx: usize, new_idx: usize) void {
     slice[@intCast(widx)] = val;
 }
 
-pub fn slice_move_many(slice: anytype, old_first: usize, old_last_inclusive: usize, new_first: usize) void {
+pub fn mem_move_many_include_last(slice: anytype, old_first: usize, old_last_inclusive: usize, new_first: usize) void {
     Assert.assert_with_reason(Types.type_is_slice(@TypeOf(slice)), @src(), "type of `slice` was not a slice type, got {s}", .{@typeName(@TypeOf(slice))});
     const T = @typeInfo(@TypeOf(slice)).pointer.child;
     Assert.assert_with_reason(old_first <= old_last_inclusive, @src(), "`old_first` MUST be <= `old_last_inclusive`, got ({d}, {d})", .{ old_first, old_last_inclusive });
@@ -679,12 +679,17 @@ pub fn slice_move_many(slice: anytype, old_first: usize, old_last_inclusive: usi
         total_range = slice[old_first .. new_first + len_a];
         slice_b = slice[old_last_inclusive + 1 .. new_first + len_a];
     }
-    slice_reverse(T, slice_a);
-    slice_reverse(T, slice_b);
-    slice_reverse(T, total_range);
+    mem_reverse(T, slice_a);
+    mem_reverse(T, slice_b);
+    mem_reverse(T, total_range);
+}
+pub inline fn mem_move_many(slice: anytype, old_first: usize, old_last_exclusive: usize, new_first: usize) void {
+    return mem_move_many_include_last(slice, old_first, old_last_exclusive - 1, new_first);
 }
 
-pub fn slice_reverse(comptime T: type, slice: []T) void {
+pub fn mem_reverse(slice: anytype) void {
+    Assert.assert_with_reason(Types.type_is_slice(@TypeOf(slice)), @src(), "type of `slice` was not a slice type, got {s}", .{@typeName(@TypeOf(slice))});
+    const T = Types.pointer_child_type(slice);
     if (slice.len == 0) return;
     var left: usize = 0;
     var right: usize = slice.len - 1;
@@ -1656,4 +1661,9 @@ pub fn invalid_slice_const(comptime T: type) []const T {
 
 pub fn comptime_debug_print(comptime _fmt: []const u8, args: anytype) void {
     std.debug.print("{s}", .{std.fmt.comptimePrint(_fmt, args)});
+}
+
+pub inline fn dereference_opaque(ptr: *const anyopaque, comptime T: type) T {
+    const cast: *const T = @ptrCast(@alignCast(ptr));
+    return cast.*;
 }

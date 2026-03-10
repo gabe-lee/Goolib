@@ -1714,6 +1714,20 @@ pub const PowerOf2 = enum(u8) {
         i = i +% 1;
         return @enumFromInt(@ctz(i));
     }
+    pub fn round_up_to_power_of_2_at_least(power: PowerOf2, int_or_ptr: anytype) PowerOf2 {
+        const rounded = round_down_to_power_of_2(int_or_ptr);
+        return @enumFromInt(@max(@intFromEnum(power), @intFromEnum(rounded)));
+    }
+    pub fn round_up_to_power_of_2_at_least_value_type(power: PowerOf2, int_or_ptr: anytype) PowerOf2 {
+        const T = @TypeOf(int_or_ptr);
+        const INFO = @typeInfo(T);
+        const pow = round_up_to_power_of_2_at_least(power, int_or_ptr);
+        switch (INFO) {
+            .int => return @as(T, 1) << @intCast(@intFromEnum(pow)),
+            .@"enum" => return @enumFromInt(@as(Types.enum_tag_type(T), 1) << @intCast(@intFromEnum(pow))),
+            .pointer => return @ptrFromInt(@as(usize, 1) << @intCast(@intFromEnum(pow))),
+        }
+    }
 
     pub fn round_up_to_power_of_2_value_type(int_or_ptr: anytype) @TypeOf(int_or_ptr) {
         const T = @TypeOf(int_or_ptr);
@@ -1729,7 +1743,7 @@ pub const PowerOf2 = enum(u8) {
     pub fn round_down_to_power_of_2(int_or_ptr: anytype) PowerOf2 {
         const pow = round_up_to_power_of_2(int_or_ptr);
         const lower = @intFromEnum(pow) - 1;
-        return @intFromEnum(lower);
+        return @enumFromInt(lower);
     }
 
     pub fn round_down_to_power_of_2_value_type(int_or_ptr: anytype) @TypeOf(int_or_ptr) {

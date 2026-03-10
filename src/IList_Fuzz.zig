@@ -670,7 +670,7 @@ pub fn make_op_table(
             const n2 = rand.uintLessThan(usize, state.ref_list.items.len);
             const idx_1: usize = state.test_list.nth_idx(n1);
             const idx_2: usize = state.test_list.nth_idx(n2);
-            Utils.slice_move_one(state.ref_list.items, n1, n2);
+            Utils.mem_move_one(state.ref_list.items, n1, n2);
             state.test_list.move(idx_1, idx_2);
             return verify_whole_state(state, "move", idx_1, idx_2, 0, alloc);
         }
@@ -690,7 +690,7 @@ pub fn make_op_table(
             const idx_1: usize = state.test_list.nth_idx(n1);
             const idx_2: usize = state.test_list.nth_idx(n2);
             const idx_3: usize = state.test_list.nth_idx(n3);
-            Utils.slice_move_many(state.ref_list.items, n1, n2, n3);
+            Utils.mem_move_many_include_last(state.ref_list.items, n1, n2, n3);
             state.test_list.move_range(.new_range(idx_1, idx_2), idx_3);
             return verify_whole_state(state, "move_range", idx_1, idx_2, idx_3, alloc);
         }

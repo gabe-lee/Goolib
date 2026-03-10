@@ -57,6 +57,7 @@ pub const FlexSlice = @import("./FlexSlice.zig");
 pub const Fuzz = @import("./Fuzz.zig");
 pub const GenericAllocator = @import("./GenericAllocator.zig");
 pub const GenId = @import("./GenId.zig");
+pub const GetSetType = @import("./GetSetType.zig");
 pub const IList_ArrayListAdapter = @import("./IList_ArrayListAdapter.zig");
 pub const IList_Iterator = @import("./IList_Iterator.zig");
 pub const IList_List = @import("./IList_List.zig");
@@ -128,6 +129,7 @@ comptime {
         _ = @import("./Fuzz.zig");
         _ = @import("./GenericAllocator.zig");
         _ = @import("./GenId.zig");
+        _ = @import("./GetSetType.zig");
         _ = @import("./IList_ArrayListAdapter.zig");
         _ = @import("./IList_Iterator.zig");
         _ = @import("./IList_List.zig");

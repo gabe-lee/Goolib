@@ -489,7 +489,7 @@ pub fn MultiSortList(comptime T: type, comptime UNINIT: T, comptime IDX: type, c
                 for (self.sort_lists[0..], 0..) |*sort, sort_idx| {
                     sort_reports[sort_idx] = move_one_indirect_indexes(sort, old_idx, delta, smallest_other, largest_other, dir);
                 }
-                Utils.slice_move_one(self.primary_list.ptr[0..self.primary_list.len], old_idx, new_idx);
+                Utils.mem_move_one(self.primary_list.ptr[0..self.primary_list.len], old_idx, new_idx);
                 switch (dir) {
                     .this_up__other_down => {
                         smallest_other -= 1;
@@ -532,7 +532,7 @@ pub fn MultiSortList(comptime T: type, comptime UNINIT: T, comptime IDX: type, c
                 for (self.sort_lists[0..], 0..) |*sort, sort_idx| {
                     sort_reports[sort_idx] = move_range_indirect_indexes(sort, smallest_shifted_up, largest_shifted_up, delta_up, smallest_shifted_down, largest_shifted_down, delta_down);
                 }
-                Utils.slice_move_many(self.primary_list.ptr[0..self.primary_list.len], range.first_idx, range.last_idx, new_first_idx);
+                Utils.mem_move_many_include_last(self.primary_list.ptr[0..self.primary_list.len], range.first_idx, range.last_idx, new_first_idx);
                 smallest_shifted_down -= delta_down;
                 largest_shifted_down -= delta_down;
                 smallest_shifted_up += delta_up;

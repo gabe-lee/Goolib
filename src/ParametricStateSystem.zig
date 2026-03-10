@@ -1412,7 +1412,7 @@ pub fn ParametricStateSystem(
                 }
             }
             for (0..INTERNAL.NUM_CATEGORIES_NO_META) |c| {
-                INTERNAL.categories[c].data.free(INTERNAL.CATEGORY_TYPE_SIZES[c], INTERNAL.categories[c].alloc);
+                INTERNAL.categories[c].data.free(INTERNAL.CATEGORY_TYPE_SIZES[c], INTERNAL.CATEGORY_TYPE_ALIGNS[c], INTERNAL.categories[c].alloc);
                 INTERNAL.categories[c].meta.free_memory(INTERNAL.categories[c].alloc);
             }
         }
@@ -2465,6 +2465,7 @@ test "ParametricStateSystem" {
             },
         },
     });
+    defer PSS.free_memory();
     const CalcIface = PSS.UpdateInterface;
     const ParamReadWrite = PSS.ParamReadWrite;
     const ParamReadOnly = PSS.ParamReadOnly;

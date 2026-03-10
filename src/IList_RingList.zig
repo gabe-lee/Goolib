@@ -194,7 +194,7 @@ pub fn RingList(comptime T: type) type {
                     var tmp_len = self.cap;
                     const n_remove = self.start - slens.seg_1;
                     Utils.mem_remove(self.ptr, &tmp_len, slens.seg_1, n_remove);
-                    Utils.slice_move_many(self.ptr[0..self.len], slens.seg_1, self.len - 1, 0);
+                    Utils.mem_move_many_include_last(self.ptr[0..self.len], slens.seg_1, self.len - 1, 0);
                 } else {
                     var tmp_len: u32 = self.start + self.len;
                     Utils.mem_remove(self.ptr, &tmp_len, 0, self.start);

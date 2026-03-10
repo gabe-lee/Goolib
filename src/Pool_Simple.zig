@@ -92,9 +92,9 @@ pub fn SimplePool(comptime T: type, comptime IDX: type, comptime MEMSET_CLAIMED:
         }
 
         pub fn free(self: *Pool, alloc: Allocator) void {
-            _ = Utils.Alloc.smart_alloc(alloc, self.ptr[0..self.cap], 0, .ALIGN_TO_TYPE, .DONT_COPY_EXISTING_DATA, .dont_memset_new(), .DONT_MEMSET_OLD, .ERRORS_ARE_UNREACHABLE);
+            _ = Utils.Alloc.smart_alloc(alloc, self.ptr[0..self.cap], 0, .{}, .{});
             if (HAS_SECONDARY) {
-                _ = Utils.Alloc.smart_alloc(alloc, self.ptr_2[0..self.cap], 0, .ALIGN_TO_TYPE, .DONT_COPY_EXISTING_DATA, .dont_memset_new(), .DONT_MEMSET_OLD, .ERRORS_ARE_UNREACHABLE);
+                _ = Utils.Alloc.smart_alloc(alloc, self.ptr_2[0..self.cap], 0, .{}, .{});
             }
             self.free_list.free_bits.list.free(alloc);
             self.* = undefined;
@@ -356,11 +356,12 @@ pub fn SimplePoolOpaque(comptime IDX: type, comptime MEMSET_CLAIMED: ?[]const u8
             }
             return pool;
         }
-        pub fn free(self: *Pool, elem_size: usize, alloc: Allocator) void {
-            const real_cap = self.cap * elem_size;
+        pub fn free(self: *Pool, elem_size: usize, elem_align: usize, alloc: Allocator) void {
+            var real_cap = self.cap * elem_size;
+            smart_alloc_ptr_ptrs(alloc, &self.ptr, &real_cap, 0, .{ .align_mode = .custom_align(elem_align) }, .{});
             alloc.free(self.ptr[0..real_cap]);
             if (HAS_SECONDARY) {
-                alloc.free(self.ptr_2[0..self.cap]);
+                smart_alloc_ptr_ptrs(alloc, &self.ptr_2, &self.cap, 0, .{}, .{});
             }
             self.free_list.free_memory(alloc);
             self.* = undefined;

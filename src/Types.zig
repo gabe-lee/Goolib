@@ -38,6 +38,9 @@ const Utils = Root.Utils;
 const assert_with_reason = Assert.assert_with_reason;
 const assert_unreachable = Assert.assert_unreachable;
 
+pub const Type = std.builtin.Type;
+pub const TypeId = std.builtin.TypeId;
+
 pub const fsize = switch (@bitSizeOf(usize)) {
     16 => f16,
     32 => f32,
@@ -54,6 +57,15 @@ pub fn FloatSizeForMaxIntExact(comptime INT: type) type {
         (MathX.MAX_EXACT_INTEGER_F64 + 1)...MathX.MAX_EXACT_INTEGER_F128 => f128,
         else => assert_unreachable(@src(), "integer type has a max positive size of {d}, which is outside the range an f128 can exactly represent", .{MAX}),
     }
+}
+
+pub fn SmallestUnsignedIntWithAtLeastNBits(comptime N: comptime_int) type {
+    const LIMIT = @min(256, 1 << N);
+    const POW: MathX.PowerOf2 = @enumFromInt(LIMIT);
+    return POW.unsigned_integer_type_that_holds_all_values_less_than();
+}
+pub fn SmallestUnsignedIntThatCanHoldValue(comptime V: comptime_int) type {
+    return MathX.PowerOf2.round_up_to_power_of_2_at_least(._128, V).unsigned_integer_type_that_holds_all_values_up_to_and_including();
 }
 
 pub fn UnsignedIntegerWithSameSize(comptime T: type) type {
@@ -1073,7 +1085,7 @@ pub const ConstDeclDefinition = struct {
 
     pub fn has_decl_error(comptime self: ConstDeclDefinition, comptime T: type) ?InterfaceSignatureError {
         if (!@hasDecl(T, self.name)) return InterfaceSignatureError.missing_const_declaration;
-        if (@FieldType(T, self.name) != self.T) return InterfaceSignatureError.const_declaration_wrong_type;
+        if (@TypeOf(@field(T, self.name)) != self.T) return InterfaceSignatureError.const_declaration_wrong_type;
         if (self.needed_val) |need_val_opaque| {
             const need_val: *const self.T = @ptrCast(@alignCast(need_val_opaque));
             if (@field(T, self.name) != need_val) return InterfaceSignatureError.const_declaration_wrong_type;
