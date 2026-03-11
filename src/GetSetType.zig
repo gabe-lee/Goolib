@@ -319,6 +319,388 @@ pub fn SimpleGetSetIndirect(comptime T: type) type {
     };
 }
 
+pub const GetSetKind = enum(u8) {
+    GET_ONLY,
+    GET_AND_SET,
+};
+
+pub const DirectIndirectKind = enum(u8) {
+    DIRECT,
+    INDIRECT,
+};
+
+pub const TypeKind = enum(u8) {
+    ANY,
+    KIND,
+    EXACT_TYPE,
+};
+
+pub const ElemRequirement = union(TypeKind) {
+    ANY,
+    KIND: Types.Kind,
+    EXACT_TYPE: type,
+
+    pub fn kind(comptime kind_: Types.Kind) ElemRequirement {
+        return ElemRequirement{ .KIND = kind_ };
+    }
+    pub fn exact_type(comptime T: type) ElemRequirement {
+        return ElemRequirement{ .EXACT_TYPE = T };
+    }
+
+    pub fn with_type(comptime self: ElemRequirement, comptime TYPE: type) TypeWithElemRequirements {
+        return TypeWithElemRequirements{
+            .TYPE = TYPE,
+            .REQ = self,
+        };
+    }
+};
+
+pub const TypeWithElemRequirements = struct {
+    TYPE: type,
+    REQ: ElemRequirement,
+
+    pub inline fn assert_valid(comptime self: TypeWithElemRequirements, comptime src: ?std.builtin.SourceLocation) void {
+        switch (self.REQ) {
+            .ANY => {},
+            .KIND => |K| {
+                K.assert_type_is_same_kind(@field(self.TYPE, "ELEM"), src);
+            },
+            .EXACT_TYPE => |T| {
+                Assert.assert_with_reason(T == @field(self.TYPE, "ELEM"), src, "type `{s}` is not required type `{s}`", .{ @typeName(@field(self.TYPE, "ELEM")), @typeName(T) });
+            },
+        }
+    }
+};
+
+pub const GetOrGetSetDirect = union(GetSetKind) {
+    GET_ONLY: type,
+    GET_AND_SET: type,
+
+    pub fn get_only(comptime T: type) GetOrGetSetDirect {
+        return GetOrGetSetDirect{ .GET_ONLY = T };
+    }
+    pub fn get_and_set(comptime T: type) GetOrGetSetDirect {
+        return GetOrGetSetDirect{ .GET_AND_SET = T };
+    }
+
+    pub fn with_requirements(comptime self: GetOrGetSetDirect, comptime req: ElemRequirement) GetOrGetSetDirect_WithReq {
+        switch (self) {
+            .GET_AND_SET => |T| {
+                return GetOrGetSetDirect_WithReq{ .GET_AND_SET = req.with_type(T) };
+            },
+            .GET_ONLY => |T| {
+                return GetOrGetSetDirect_WithReq{ .GET_ONLY = req.with_type(T) };
+            },
+        }
+    }
+    pub fn unrwap_type(comptime self: GetOrGetSetDirect) type {
+        switch (self) {
+            .GET_ONLY, .GET_AND_SET => |TR| {
+                return TR.TYPE;
+            },
+        }
+    }
+};
+pub const GetOrGetSetIndirect = union(GetSetKind) {
+    GET_ONLY: type,
+    GET_AND_SET: type,
+
+    pub fn get_only(comptime T: type) GetOrGetSetIndirect {
+        return GetOrGetSetIndirect{ .GET_ONLY = T };
+    }
+    pub fn get_and_set(comptime T: type) GetOrGetSetIndirect {
+        return GetOrGetSetIndirect{ .GET_AND_SET = T };
+    }
+
+    pub fn with_requirements(comptime self: GetOrGetSetIndirect, comptime req: ElemRequirement) GetOrGetSetIndirect_WithReq {
+        switch (self) {
+            .GET_AND_SET => |T| {
+                return GetOrGetSetIndirect_WithReq{ .GET_AND_SET = req.with_type(T) };
+            },
+            .GET_ONLY => |T| {
+                return GetOrGetSetIndirect_WithReq{ .GET_ONLY = req.with_type(T) };
+            },
+        }
+    }
+    pub fn unrwap_type(comptime self: GetOrGetSetIndirect) type {
+        switch (self) {
+            .GET_ONLY, .GET_AND_SET => |TR| {
+                return TR.TYPE;
+            },
+        }
+    }
+};
+pub const GetOrGetSetDirectIndexed = union(GetSetKind) {
+    GET_ONLY: type,
+    GET_AND_SET: type,
+
+    pub fn get_only(comptime T: type) GetOrGetSetDirectIndexed {
+        return GetOrGetSetDirectIndexed{ .GET_ONLY = T };
+    }
+    pub fn get_and_set(comptime T: type) GetOrGetSetDirectIndexed {
+        return GetOrGetSetDirectIndexed{ .GET_AND_SET = T };
+    }
+
+    pub fn with_requirements(comptime self: GetOrGetSetDirectIndexed, comptime req: ElemRequirement) GetOrGetSetDirectIndexed_WithReq {
+        switch (self) {
+            .GET_AND_SET => |T| {
+                return GetOrGetSetDirectIndexed_WithReq{ .GET_AND_SET = req.with_type(T) };
+            },
+            .GET_ONLY => |T| {
+                return GetOrGetSetDirectIndexed_WithReq{ .GET_ONLY = req.with_type(T) };
+            },
+        }
+    }
+    pub fn unrwap_type(comptime self: GetOrGetSetDirectIndexed) type {
+        switch (self) {
+            .GET_ONLY, .GET_AND_SET => |TR| {
+                return TR.TYPE;
+            },
+        }
+    }
+};
+pub const GetOrGetSetIndirectIndexed = union(GetSetKind) {
+    GET_ONLY: type,
+    GET_AND_SET: type,
+
+    pub fn get_only(comptime T: type) GetOrGetSetIndirectIndexed {
+        return GetOrGetSetIndirectIndexed{ .GET_ONLY = T };
+    }
+    pub fn get_and_set(comptime T: type) GetOrGetSetIndirectIndexed {
+        return GetOrGetSetIndirectIndexed{ .GET_AND_SET = T };
+    }
+
+    pub fn with_requirements(comptime self: GetOrGetSetIndirectIndexed, comptime req: ElemRequirement) GetOrGetSetIndirectIndexed_WithReq {
+        switch (self) {
+            .GET_AND_SET => |T| {
+                return GetOrGetSetIndirectIndexed_WithReq{ .GET_AND_SET = req.with_type(T) };
+            },
+            .GET_ONLY => |T| {
+                return GetOrGetSetIndirectIndexed_WithReq{ .GET_ONLY = req.with_type(T) };
+            },
+        }
+    }
+    pub fn unrwap_type(comptime self: GetOrGetSetIndirectIndexed) type {
+        switch (self) {
+            .GET_ONLY, .GET_AND_SET => |TR| {
+                return TR.TYPE;
+            },
+        }
+    }
+};
+
+pub const GetSetIndirectOrDirectIndexed = union(DirectIndirectKind) {
+    DIRECT: type,
+    INDIRECT: type,
+
+    pub fn direct(comptime T: type) GetSetIndirectOrDirectIndexed {
+        return GetSetIndirectOrDirectIndexed{ .DIRECT = T };
+    }
+    pub fn indirect(comptime T: type) GetSetIndirectOrDirectIndexed {
+        return GetSetIndirectOrDirectIndexed{ .INDIRECT = T };
+    }
+
+    pub fn with_requirements(comptime self: GetSetIndirectOrDirectIndexed, comptime req: ElemRequirement) GetSetDirectOrIndirectIndexed_WithReq {
+        switch (self) {
+            .DIRECT => |T| {
+                return GetSetDirectOrIndirectIndexed_WithReq{ .DIRECT = req.with_type(T) };
+            },
+            .INDIRECT => |T| {
+                return GetSetDirectOrIndirectIndexed_WithReq{ .INDIRECT = req.with_type(T) };
+            },
+        }
+    }
+    pub fn unrwap_type(comptime self: GetSetIndirectOrDirectIndexed) type {
+        switch (self) {
+            .DIRECT, .INDIRECT => |TR| {
+                return TR.TYPE;
+            },
+        }
+    }
+};
+
+pub const GetSetIndirectOrDirect = union(DirectIndirectKind) {
+    DIRECT: type,
+    INDIRECT: type,
+
+    pub fn direct(comptime T: type) GetSetIndirectOrDirect {
+        return GetSetIndirectOrDirect{ .DIRECT = T };
+    }
+    pub fn indirect(comptime T: type) GetSetIndirectOrDirect {
+        return GetSetIndirectOrDirect{ .INDIRECT = T };
+    }
+
+    pub fn with_requirements(comptime self: GetSetIndirectOrDirect, comptime req: ElemRequirement) GetSetDirectOrIndirectIndexed_WithReq {
+        switch (self) {
+            .DIRECT => |T| {
+                return GetSetDirectOrIndirectIndexed_WithReq{ .DIRECT = req.with_type(T) };
+            },
+            .INDIRECT => |T| {
+                return GetSetDirectOrIndirectIndexed_WithReq{ .INDIRECT = req.with_type(T) };
+            },
+        }
+    }
+    pub fn unrwap_type(comptime self: GetSetIndirectOrDirect) type {
+        switch (self) {
+            .DIRECT, .INDIRECT => |TR| {
+                return TR.TYPE;
+            },
+        }
+    }
+};
+pub const GetOrGetSetDirect_WithReq = union(GetSetKind) {
+    GET_ONLY: TypeWithElemRequirements,
+    GET_AND_SET: TypeWithElemRequirements,
+
+    pub inline fn assert_valid(comptime self: GetOrGetSetDirect_WithReq, comptime src: ?std.builtin.SourceLocation) void {
+        switch (self) {
+            .GET_ONLY => |TR| {
+                assert_type_has_get_only(TR.TYPE, src);
+                TR.assert_valid(src);
+            },
+            .GET_AND_SET => |TR| {
+                assert_type_has_direct_get_and_set(TR.TYPE, src);
+                TR.assert_valid(src);
+            },
+        }
+    }
+
+    pub fn unrwap_type(comptime self: GetOrGetSetDirect_WithReq) type {
+        switch (self) {
+            .GET_ONLY, .GET_AND_SET => |TR| {
+                return TR.TYPE;
+            },
+        }
+    }
+};
+pub const GetOrGetSetIndirect_WithReq = union(GetSetKind) {
+    GET_ONLY: TypeWithElemRequirements,
+    GET_AND_SET: TypeWithElemRequirements,
+
+    pub inline fn assert_valid(comptime self: GetOrGetSetIndirect_WithReq, comptime src: ?std.builtin.SourceLocation) void {
+        switch (self) {
+            .GET_ONLY => |TR| {
+                assert_type_has_get_only(TR.TYPE, src);
+                TR.assert_valid(src);
+            },
+            .GET_AND_SET => |TR| {
+                assert_type_has_indirect_get_and_set(TR.TYPE, src);
+                TR.assert_valid(src);
+            },
+        }
+    }
+
+    pub fn unrwap_type(comptime self: GetOrGetSetIndirect_WithReq) type {
+        switch (self) {
+            .GET_ONLY, .GET_AND_SET => |TR| {
+                return TR.TYPE;
+            },
+        }
+    }
+};
+pub const GetOrGetSetDirectIndexed_WithReq = union(GetSetKind) {
+    GET_ONLY: TypeWithElemRequirements,
+    GET_AND_SET: TypeWithElemRequirements,
+
+    pub inline fn assert_valid(comptime self: GetOrGetSetDirectIndexed_WithReq, comptime src: ?std.builtin.SourceLocation) void {
+        switch (self) {
+            .GET_ONLY => |TR| {
+                assert_type_has_indexed_get_only(TR.TYPE, src);
+                TR.assert_valid(src);
+            },
+            .GET_AND_SET => |TR| {
+                assert_type_has_indexed_direct_get_and_set(TR.TYPE, src);
+                TR.assert_valid(src);
+            },
+        }
+    }
+
+    pub fn unrwap_type(comptime self: GetOrGetSetDirectIndexed_WithReq) type {
+        switch (self) {
+            .GET_ONLY, .GET_AND_SET => |TR| {
+                return TR.TYPE;
+            },
+        }
+    }
+};
+
+pub const GetOrGetSetIndirectIndexed_WithReq = union(GetSetKind) {
+    GET_ONLY: TypeWithElemRequirements,
+    GET_AND_SET: TypeWithElemRequirements,
+
+    pub inline fn assert_valid(comptime self: GetOrGetSetIndirectIndexed_WithReq, comptime src: ?std.builtin.SourceLocation) void {
+        switch (self) {
+            .GET_ONLY => |TR| {
+                assert_type_has_indexed_get_only(TR.TYPE, src);
+                TR.assert_valid(src);
+            },
+            .GET_AND_SET => |TR| {
+                assert_type_has_indexed_indirect_get_and_set(TR.TYPE, src);
+                TR.assert_valid(src);
+            },
+        }
+    }
+
+    pub fn unrwap_type(comptime self: GetOrGetSetIndirectIndexed_WithReq) type {
+        switch (self) {
+            .GET_ONLY, .GET_AND_SET => |TR| {
+                return TR.TYPE;
+            },
+        }
+    }
+};
+
+pub const GetSetDirectOrIndirectIndexed_WithReq = union(DirectIndirectKind) {
+    DIRECT: TypeWithElemRequirements,
+    INDIRECT: TypeWithElemRequirements,
+
+    pub inline fn assert_valid(comptime self: GetSetDirectOrIndirectIndexed_WithReq, comptime src: ?std.builtin.SourceLocation) void {
+        switch (self) {
+            .DIRECT => |TR| {
+                assert_type_has_indexed_direct_get_and_set(TR.TYPE, src);
+                TR.assert_valid(src);
+            },
+            .INDIRECT => |TR| {
+                assert_type_has_indexed_indirect_get_and_set(TR.TYPE, src);
+                TR.assert_valid(src);
+            },
+        }
+    }
+
+    pub fn unrwap_type(comptime self: GetSetDirectOrIndirectIndexed_WithReq) type {
+        switch (self) {
+            .DIRECT, .INDIRECT => |TR| {
+                return TR.TYPE;
+            },
+        }
+    }
+};
+pub const GetSetDirectOrIndirect_WithReq = union(DirectIndirectKind) {
+    DIRECT: TypeWithElemRequirements,
+    INDIRECT: TypeWithElemRequirements,
+
+    pub inline fn assert_valid(comptime self: GetSetDirectOrIndirect_WithReq, comptime src: ?std.builtin.SourceLocation) void {
+        switch (self) {
+            .DIRECT => |TR| {
+                assert_type_has_direct_get_and_set(TR.TYPE, src);
+                TR.assert_valid(src);
+            },
+            .INDIRECT => |TR| {
+                assert_type_has_indirect_get_and_set(TR.TYPE, src);
+                TR.assert_valid(src);
+            },
+        }
+    }
+
+    pub fn unrwap_type(comptime self: GetSetDirectOrIndirect_WithReq) type {
+        switch (self) {
+            .DIRECT, .INDIRECT => |TR| {
+                return TR.TYPE;
+            },
+        }
+    }
+};
+
 test "GetSet interface" {
     const GetSetArrU8 = SimpleGetSetArray(u8, 8);
     const GetSetSliceU8 = SimpleGetSetSlice(u8, usize);

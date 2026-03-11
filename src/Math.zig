@@ -596,6 +596,31 @@ pub fn upgrade_greater_than_or_equal_out(a: anytype, b: anytype, comptime OUT: t
     return num_cast(nums.a >= nums.b, OUT);
 }
 
+pub fn upgrade_abs_difference(a: anytype, b: anytype) Upgraded2Numbers(@TypeOf(a), @TypeOf(b)).T {
+    const nums = upgrade_2_numbers_for_math(a, b);
+    if (nums.a >= nums.b) {
+        return nums.a - nums.b;
+    } else {
+        return nums.b - nums.a;
+    }
+}
+pub fn upgrade_abs_difference_out(a: anytype, b: anytype, comptime OUT: type) OUT {
+    const nums = upgrade_2_numbers_for_math(a, b);
+    if (nums.a >= nums.b) {
+        return num_cast(nums.a - nums.b, OUT);
+    } else {
+        return num_cast(nums.b - nums.a, OUT);
+    }
+}
+
+pub fn abs_difference(a: anytype, b: @TypeOf(a)) @TypeOf(a) {
+    if (a >= b) {
+        return a - b;
+    } else {
+        return b - a;
+    }
+}
+
 pub fn change_per_unit_time_required_to_reach_val_at_time(comptime T: type, current: T, target: T, time: T) T {
     return (target - current) * (1.0 / time);
 }
