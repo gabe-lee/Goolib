@@ -92,6 +92,7 @@ pub fn build(b: *std.Build) void {
 
     const lib_tests = b.addTest(.{
         .root_module = lib,
+        .test_runner = .{ .path = b.path("testrunner_src/test_runner.zig"), .mode = .simple },
     });
 
     const run_lib_tests = b.addRunArtifact(lib_tests);

@@ -43,7 +43,7 @@ pub const TypeId = std.builtin.TypeId;
 /// This is an alternative representation of `std.builtin.TypeId`
 pub const Kind = enum(std.meta.Tag(TypeId)) {
     TYPE = @intFromEnum(TypeId.type),
-    VOID = @intFromEnum(TypeId.type),
+    VOID = @intFromEnum(TypeId.void),
     BOOL = @intFromEnum(TypeId.bool),
     NO_RETURN = @intFromEnum(TypeId.noreturn),
     INT = @intFromEnum(TypeId.int),
@@ -281,7 +281,7 @@ pub const KindInfo = union(Kind) {
     pub inline fn is_vector(comptime K: KindInfo) bool {
         return K == .VECTOR;
     }
-    pub inline fn is_array_or_vector(comptime K: Kind) bool {
+    pub inline fn is_array_or_vector(comptime K: KindInfo) bool {
         return K == .ARRAY or K == .VECTOR;
     }
     pub inline fn is_enum_literal(comptime K: KindInfo) bool {
@@ -292,6 +292,17 @@ pub const KindInfo = union(Kind) {
             if (K == A) return true;
         }
         return false;
+    }
+    pub inline fn get_len(comptime K: KindInfo) comptime_int {
+        switch (K) {
+            .ARRAY => |A| {
+                return A.len;
+            },
+            .VECTOR => |V| {
+                return V.len;
+            },
+            else => assert_unreachable(@src(), "kind was not an array or vector, has no comptime len, got type `{s}`", .{@tagName(K)}),
+        }
     }
     pub inline fn has_child(comptime K: KindInfo) bool {
         switch (K) {

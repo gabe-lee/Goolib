@@ -53,6 +53,7 @@ pub const FileFormat = @import("./FileFormat.zig");
 // pub const Filegen = @import("./Filegen.zig");
 pub const Flags = @import("./Flags.zig");
 pub const FlexSlice = @import("./FlexSlice.zig");
+pub const FrameTimingManager = @import("./FrameTimingManager.zig");
 // pub const Format = @import("./Format.zig");
 pub const Fuzz = @import("./Fuzz.zig");
 pub const GenericAllocator = @import("./GenericAllocator.zig");
@@ -125,6 +126,7 @@ comptime {
         // _ = @import("./Filegen.zig");
         _ = @import("./Flags.zig");
         _ = @import("./FlexSlice.zig");
+        _ = @import("./FrameTimingManager.zig");
         // pub const Format = @import("./Format.zig");
         _ = @import("./Fuzz.zig");
         _ = @import("./GenericAllocator.zig");

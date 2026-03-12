@@ -243,6 +243,187 @@ pub fn assert_getset_has_elem_class_with_child_class(comptime T: type, comptime 
     Assert.assert_with_reason(@typeInfo(CHILD) == CHILD_ID, src, "type `{s}` has wrong child class `{s}`, need `{s}`", .{ @typeName(T), @tagName(@typeInfo(CHILD)), @tagName(CHILD_ID) });
 }
 
+pub fn FuncBodyGet(comptime T: type, comptime BODY: fn () T) type {
+    return struct {
+        const FUNC = BODY;
+
+        pub const ELEM = T;
+
+        pub fn get(_: @This()) T {
+            return FUNC();
+        }
+    };
+}
+pub fn FuncBodyGetSet(comptime T: type, comptime GET_BODY: fn () T, comptime SET_BODY: fn (val: T) void) type {
+    return struct {
+        const GET_FUNC = GET_BODY;
+        const SET_FUNC = SET_BODY;
+
+        pub const ELEM = T;
+
+        pub fn get(_: @This()) T {
+            return GET_FUNC();
+        }
+        pub fn set(_: @This(), val: T) void {
+            SET_FUNC(val);
+        }
+    };
+}
+pub fn FuncBodyGetWithUserdata(comptime T: type, comptime USERDATA: type, comptime BODY: fn (USERDATA) T) type {
+    return struct {
+        const FUNC = BODY;
+        pub const ELEM = T;
+
+        userdata: USERDATA,
+
+        pub fn get(self: @This()) T {
+            return FUNC(self.userdata);
+        }
+    };
+}
+pub fn FuncBodyGetSetWithUserdata(comptime T: type, comptime USERDATA: type, comptime GET_BODY: fn (USERDATA) T, comptime SET_BODY: fn (USERDATA, T) void) type {
+    return struct {
+        const GET_FUNC = GET_BODY;
+        const SET_FUNC = SET_BODY;
+        pub const ELEM = T;
+
+        userdata: USERDATA,
+
+        pub fn get(self: @This()) T {
+            return GET_FUNC(self.userdata);
+        }
+        pub fn set(self: @This(), val: T) void {
+            SET_FUNC(self.userdata, val);
+        }
+    };
+}
+pub fn FuncPtrGet(comptime T: type) type {
+    return struct {
+        pub const ELEM = T;
+
+        func: *const fn () T,
+
+        pub fn get(self: @This()) T {
+            return self.func();
+        }
+    };
+}
+pub fn FuncPtrGetSet(comptime T: type) type {
+    return struct {
+        pub const ELEM = T;
+
+        get_func: *const fn () T,
+        set_func: *const fn (val: T) void,
+
+        pub fn get(self: @This()) T {
+            return self.get_func();
+        }
+        pub fn set(self: @This(), val: T) void {
+            self.set_func(val);
+        }
+    };
+}
+pub fn FuncPtrGetWithUserdata(comptime T: type, comptime USERDATA: type) type {
+    return struct {
+        pub const ELEM = T;
+
+        func: *const fn (userdata: USERDATA) T,
+        userdata: USERDATA,
+
+        pub fn get(self: @This()) T {
+            return self.func(self.userdata);
+        }
+    };
+}
+pub fn FuncPtrGetSetWithUserdata(comptime T: type, comptime USERDATA: type) type {
+    return struct {
+        pub const ELEM = T;
+
+        get_func: *const fn (userdata: USERDATA) T,
+        set_func: *const fn (userdata: USERDATA, val: T) void,
+        userdata: USERDATA,
+
+        pub fn get(self: @This()) T {
+            return self.get_func(self.userdata);
+        }
+        pub fn set(self: @This(), val: T) void {
+            self.set_func(self.userdata, val);
+        }
+    };
+}
+
+/// `set` is a no-op here, but if you need a constant that fulfills a get-set...
+pub fn ConstGetSetArray(comptime val: anytype) type {
+    const T = @TypeOf(val);
+    const K = Types.KindInfo.get_kind_info(T);
+    Assert.assert_with_reason(K.is_array_or_vector(), @src(), "type of 'val' is not an array or vector type, got `{s}`", .{@typeName(T)});
+    const LEN = K.get_len();
+    return struct {
+        pub const VAL: T = val;
+        pub const ELEM = T;
+        pub const INDEX = Types.SmallestUnsignedIntThatCanHoldValue(LEN);
+
+        pub fn get(self: @This(), index: INDEX) T {
+            return self.arr[index];
+        }
+        pub fn set(_: *@This(), _: INDEX, _: T) void {
+            return;
+        }
+        pub fn len(_: @This()) INDEX {
+            return LEN;
+        }
+    };
+}
+pub fn ConstGetArray(comptime val: anytype) type {
+    const T = @TypeOf(val);
+    const K = Types.KindInfo.get_kind_info(T);
+    Assert.assert_with_reason(K.is_array_or_vector(), @src(), "type of 'val' is not an array or vector type, got `{s}`", .{@typeName(T)});
+    const LEN = K.get_len();
+    return struct {
+        pub const VAL: T = val;
+        pub const ELEM = T;
+        pub const INDEX = Types.SmallestUnsignedIntThatCanHoldValue(LEN);
+
+        pub fn get(_: @This(), index: INDEX) T {
+            return VAL[index];
+        }
+        pub fn len(_: @This()) INDEX {
+            return LEN;
+        }
+    };
+}
+
+/// `set` is a no-op here, but if you need a constant that fulfills a get-set...
+pub fn ConstGetSet(comptime val: anytype) type {
+    const T = @TypeOf(val);
+    const K = Types.KindInfo.get_kind_info(T);
+    Assert.assert_with_reason(K.is_array_or_vector(), @src(), "type of 'val' is not an array or vector type, got `{s}`", .{@typeName(T)});
+    const LEN = K.get_len();
+    return struct {
+        pub const VAL: T = val;
+        pub const ELEM = T;
+        pub const INDEX = Types.SmallestUnsignedIntThatCanHoldValue(LEN);
+
+        pub fn get(_: @This()) T {
+            return VAL;
+        }
+        pub fn set(_: *@This(), _: T) void {
+            return;
+        }
+    };
+}
+pub fn ConstGet(comptime val: anytype) type {
+    const T = @TypeOf(val);
+    return struct {
+        pub const VAL: T = val;
+        pub const ELEM = T;
+
+        pub fn get(_: @This()) T {
+            return VAL;
+        }
+    };
+}
+
 pub fn SimpleGetSetArray(comptime T: type, comptime N: comptime_int) type {
     return extern struct {
         arr: [N]T = undefined,
@@ -395,8 +576,8 @@ pub const GetOrGetSetDirect = union(GetSetKind) {
     }
     pub fn unrwap_type(comptime self: GetOrGetSetDirect) type {
         switch (self) {
-            .GET_ONLY, .GET_AND_SET => |TR| {
-                return TR.TYPE;
+            .GET_ONLY, .GET_AND_SET => |TYPE| {
+                return TYPE;
             },
         }
     }
@@ -424,8 +605,8 @@ pub const GetOrGetSetIndirect = union(GetSetKind) {
     }
     pub fn unrwap_type(comptime self: GetOrGetSetIndirect) type {
         switch (self) {
-            .GET_ONLY, .GET_AND_SET => |TR| {
-                return TR.TYPE;
+            .GET_ONLY, .GET_AND_SET => |TYPE| {
+                return TYPE;
             },
         }
     }
@@ -453,8 +634,8 @@ pub const GetOrGetSetDirectIndexed = union(GetSetKind) {
     }
     pub fn unrwap_type(comptime self: GetOrGetSetDirectIndexed) type {
         switch (self) {
-            .GET_ONLY, .GET_AND_SET => |TR| {
-                return TR.TYPE;
+            .GET_ONLY, .GET_AND_SET => |TYPE| {
+                return TYPE;
             },
         }
     }
@@ -482,8 +663,8 @@ pub const GetOrGetSetIndirectIndexed = union(GetSetKind) {
     }
     pub fn unrwap_type(comptime self: GetOrGetSetIndirectIndexed) type {
         switch (self) {
-            .GET_ONLY, .GET_AND_SET => |TR| {
-                return TR.TYPE;
+            .GET_ONLY, .GET_AND_SET => |TYPE| {
+                return TYPE;
             },
         }
     }

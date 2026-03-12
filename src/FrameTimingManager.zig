@@ -24,7 +24,6 @@
 const std = @import("std");
 const math = std.math;
 const build = @import("builtin");
-const config = @import("config");
 const init_zero = std.mem.zeroes;
 const Allocator = std.mem.Allocator;
 
@@ -138,36 +137,49 @@ pub fn FrameTimingManager(comptime CONFIG: FrameTimingManagerConfig) type {
         ticks_per_second: CONFIG.TICKS_PER_SECOND_GET_TYPE.unrwap_type(),
         display_framerate: CONFIG.DISPLAY_FRAMERATE_GET_TYPE.unrwap_type(),
         curr_frame_time: CONFIG.CURR_FRAME_TIME_GET_TYPE.unrwap_type(),
-        prev_frame_time: if (CONFIG.PREV_FRAME_TIME_GETSET_TYPE) |TYPE| TYPE.unrwap_type() else LocalGetSet(CONFIG.INTEGER_TYPE),
-        desired_seconds_per_update: if (CONFIG.DESIRED_SECONDS_PER_UPDATE_GETSET_TYPE) |TYPE| TYPE.unrwap_type() else LocalGetSet(CONFIG.FLOAT_TYPE),
-        desired_ticks_per_update: if (CONFIG.DESIRED_TICKS_PER_UPDATE_GETSET_TYPE) |TYPE| TYPE.unrwap_type() else LocalGetSet(CONFIG.INTEGER_TYPE),
-        vsync_max_error: if (CONFIG.VSYNC_MAX_ERROR_GETSET_TYPE) |TYPE| TYPE.unrwap_type() else LocalGetSet(CONFIG.INTEGER_TYPE),
-        snap_ticks_list: if (CONFIG.SNAP_FREQUENCIES_GETSET_TYPE) |TYPE| TYPE.unrwap_type() else LocalGetSetArray(CONFIG.INTEGER_TYPE, CONFIG.SNAP_FREQUENCIES_LIST_LEN_IF_NOT_PROVIDED),
-        delta_ticks: if (CONFIG.DELTA_TICKS_GETSET_TYPE) |TYPE| TYPE.unrwap_type() else LocalGetSet(CONFIG.INTEGER_TYPE),
-        tick_accumulator: if (CONFIG.TICK_ACCUMULATOR_GETSET_TYPE) |TYPE| TYPE.unrwap_type() else LocalGetSet(CONFIG.INTEGER_TYPE),
-        recent_deltas_list: if (CONFIG.RECENT_DELTAS_LIST_GETSET_TYPE) |TYPE| TYPE.unrwap_type() else LocalGetSetArray(CONFIG.INTEGER_TYPE, CONFIG.TIME_AVERAGER_LIST_LEN_IF_NOT_PROVIDED),
+        prev_frame_time: if (CONFIG.PREV_FRAME_TIME_GETSET_TYPE) |TYPE| TYPE.unrwap_type() else LocalGetSet(CONFIG.INTEGER_TYPE) = if (CONFIG.PREV_FRAME_TIME_GETSET_TYPE != null) undefined else LocalGetSet(CONFIG.INTEGER_TYPE){ .val = 0 },
+        desired_seconds_per_update: if (CONFIG.DESIRED_SECONDS_PER_UPDATE_GETSET_TYPE) |TYPE| TYPE.unrwap_type() else LocalGetSet(CONFIG.FLOAT_TYPE) = if (CONFIG.DESIRED_SECONDS_PER_UPDATE_GETSET_TYPE != null) undefined else LocalGetSet(CONFIG.FLOAT_TYPE){ .val = 0 },
+        desired_ticks_per_update: if (CONFIG.DESIRED_TICKS_PER_UPDATE_GETSET_TYPE) |TYPE| TYPE.unrwap_type() else LocalGetSet(CONFIG.INTEGER_TYPE) = if (CONFIG.DESIRED_TICKS_PER_UPDATE_GETSET_TYPE != null) undefined else LocalGetSet(CONFIG.INTEGER_TYPE){ .val = 0 },
+        vsync_max_error: if (CONFIG.VSYNC_MAX_ERROR_GETSET_TYPE) |TYPE| TYPE.unrwap_type() else LocalGetSet(CONFIG.INTEGER_TYPE) = if (CONFIG.VSYNC_MAX_ERROR_GETSET_TYPE != null) undefined else LocalGetSet(CONFIG.INTEGER_TYPE){ .val = 0 },
+        snap_ticks_list: if (CONFIG.SNAP_FREQUENCIES_GETSET_TYPE) |TYPE| TYPE.unrwap_type() else LocalGetSetArray(CONFIG.INTEGER_TYPE, CONFIG.SNAP_FREQUENCIES_LIST_LEN_IF_NOT_PROVIDED) = if (CONFIG.SNAP_FREQUENCIES_GETSET_TYPE != null) undefined else LocalGetSetArray(CONFIG.INTEGER_TYPE, CONFIG.SNAP_FREQUENCIES_LIST_LEN_IF_NOT_PROVIDED){ .arr = @splat(0) },
+        delta_ticks: if (CONFIG.DELTA_TICKS_GETSET_TYPE) |TYPE| TYPE.unrwap_type() else LocalGetSet(CONFIG.INTEGER_TYPE) = if (CONFIG.DELTA_TICKS_GETSET_TYPE != null) undefined else LocalGetSet(CONFIG.INTEGER_TYPE){ .val = 0 },
+        tick_accumulator: if (CONFIG.TICK_ACCUMULATOR_GETSET_TYPE) |TYPE| TYPE.unrwap_type() else LocalGetSet(CONFIG.INTEGER_TYPE) = if (CONFIG.TICK_ACCUMULATOR_GETSET_TYPE != null) undefined else LocalGetSet(CONFIG.INTEGER_TYPE){ .val = 0 },
+        recent_deltas_list: if (CONFIG.RECENT_DELTAS_LIST_GETSET_TYPE) |TYPE| TYPE.unrwap_type() else LocalGetSetArray(CONFIG.INTEGER_TYPE, CONFIG.TIME_AVERAGER_LIST_LEN_IF_NOT_PROVIDED) = if (CONFIG.RECENT_DELTAS_LIST_GETSET_TYPE != null) undefined else LocalGetSetArray(CONFIG.INTEGER_TYPE, CONFIG.TIME_AVERAGER_LIST_LEN_IF_NOT_PROVIDED){ .arr = @splat(0) },
         recent_deltas_idx: CONFIG.INTEGER_TYPE = 0,
         locked_mode_min_updates_remaining: if (!CONFIG.LOCKED_MODE_MIN_UPDATES_PER_FRAME_IS_ALWAYS_1) usize else void = if (!CONFIG.LOCKED_MODE_MIN_UPDATES_PER_FRAME_IS_ALWAYS_1) 0 else void{},
-        recent_deltas_average_residual: if (CONFIG.RECENT_DELTAS_AVERAGE_RESIDUAL_GETSET_TYPE) |TYPE| TYPE.unrwap_type() else LocalGetSet(CONFIG.INTEGER_TYPE),
-        recent_deltas_sum: if (CONFIG.RECENT_DELTAS_SUM_GETSET_TYPE) |TYPE| TYPE.unrwap_type() else LocalGetSet(CONFIG.INTEGER_TYPE),
+        recent_deltas_average_residual: if (CONFIG.RECENT_DELTAS_AVERAGE_RESIDUAL_GETSET_TYPE) |TYPE| TYPE.unrwap_type() else LocalGetSet(CONFIG.INTEGER_TYPE) = if (CONFIG.RECENT_DELTAS_AVERAGE_RESIDUAL_GETSET_TYPE != null) undefined else LocalGetSet(CONFIG.INTEGER_TYPE){ .val = 0 },
+        recent_deltas_sum: if (CONFIG.RECENT_DELTAS_SUM_GETSET_TYPE) |TYPE| TYPE.unrwap_type() else LocalGetSet(CONFIG.INTEGER_TYPE) = if (CONFIG.RECENT_DELTAS_SUM_GETSET_TYPE != null) undefined else LocalGetSet(CONFIG.INTEGER_TYPE){ .val = 0 },
         should_resync: bool = false,
         debug_info: if (CONFIG.INCLUDE_DEBUG_INFO) DebugInfo else void = if (CONFIG.INCLUDE_DEBUG_INFO) DebugInfo{} else void{},
 
         pub const DebugInfo = struct {
             num_times_time_added: u64 = 0,
             total_time_added: u64 = 0,
+            // vsync snap
             times_snapped_to_ticks: u64 = 0,
             time_drift_due_to_snap: i64 = 0,
+            sum_of_absolute_drift_due_to_snap: u64 = 0,
+            // resync
             num_times_resynced: u64 = 0,
             total_time_lost_to_resync: u64 = 0,
-            sum_of_absolute_drift_due_to_snap: u64 = 0,
+            // averaging
+            total_abs_diff_between_raw_and_averaged_deltas: u64 = 0,
+            largest_abs_diff_between_raw_and_averaged_deltas: u64 = 0,
+            total_drift_from_delta_averaging: i64 = 0,
+            // time returned
             num_times_time_returned_for_use: u64 = 0,
             total_fixed_time_returned: u64 = 0,
             total_variable_time_returned: u64 = 0,
-            num_times_variable_time_did_not_equal_fixed_time_returned: u64 = 0,
-            sum_of_difference_between_variable_and_fixed_time: u64 = 0,
-            current_total_variable_time: u64 = 0,
-            sum_of_total_variable_time_when_variable_time_did_not_equal_fixed_time: u64 = 0,
+            // locked mode
+            locked_mode_num_times_fixed_time_not_included_in_frame: u64 = 0,
+            locked_mode_sum_of_fixed_time_not_included_in_frame: u64 = 0,
+            // unlocked mode
+            unlocked_mode_num_times_variable_time_did_not_equal_fixed_time_returned: u64 = 0,
+            unlocked_mode_sum_of_difference_between_variable_and_fixed_time: u64 = 0,
+            unlocked_mode_largest_difference_between_variable_and_fixed_time: u64 = 0,
+            unlocked_mode_current_total_variable_time: u64 = 0,
+            unlocked_mode_sum_of_total_variable_time_when_variable_time_did_not_equal_fixed_time: u64 = 0,
+            // recent tracker
             recent_frame_deltas: [64]u64 = @splat(0),
             recent_frame_delta_sum: u64 = 0,
             recent_frame_idx: u8 = 0,
@@ -227,7 +239,7 @@ pub fn FrameTimingManager(comptime CONFIG: FrameTimingManagerConfig) type {
                 self.desired_ticks_per_update.set(desired_ticks_per_update);
             }
             if (SETTINGS.INITIALIZE_TICK_SNAPS_AND_VSYNC_ERROR) {
-                const display_framerate: CONFIG.INTEGER_TYPE = self.desired_framerate.get();
+                const display_framerate: CONFIG.INTEGER_TYPE = self.display_framerate.get();
                 const snap_hertz: CONFIG.INTEGER_TYPE = if (display_framerate == 0) 60 else display_framerate;
                 const snap_ticks_list_len = self.snap_ticks_list.len();
                 const ticks_per_second = self.ticks_per_second.get();
@@ -235,7 +247,7 @@ pub fn FrameTimingManager(comptime CONFIG: FrameTimingManagerConfig) type {
                     const this_snap = (ticks_per_second / snap_hertz) * num_cast(i + 1, CONFIG.INTEGER_TYPE);
                     self.snap_ticks_list.set(@intCast(i), this_snap);
                 }
-                const vsync_max_error = MathX.upgrade_multiply_out(CONFIG.VSYNC_ERROR_SNAP_RATIO, snap_hertz, CONFIG.INTEGER_TYPE);
+                const vsync_max_error = MathX.upgrade_multiply_out(CONFIG.VSYNC_ERROR_SNAP_RATIO, ticks_per_second, CONFIG.INTEGER_TYPE);
                 self.vsync_max_error.set(vsync_max_error);
             }
             if (SETTINGS.INITIALIZE_RECENT_DELTAS) {
@@ -285,6 +297,7 @@ pub fn FrameTimingManager(comptime CONFIG: FrameTimingManagerConfig) type {
                         self.debug_info.time_drift_due_to_snap += drift;
                     }
                     delta_ticks = snap_tick;
+                    break;
                 }
             }
             const recent_deltas_list_len: CONFIG.INTEGER_TYPE = @intCast(self.recent_deltas_list.len());
@@ -296,12 +309,20 @@ pub fn FrameTimingManager(comptime CONFIG: FrameTimingManagerConfig) type {
             self.recent_deltas_sum.set(new_average_sum);
             self.recent_deltas_idx += 1;
             self.recent_deltas_idx %= recent_deltas_list_len;
+            const old_delta_ticks = if (CONFIG.INCLUDE_DEBUG_INFO) delta_ticks else void{};
             delta_ticks = new_average_sum / recent_deltas_list_len;
             var new_residual = self.recent_deltas_average_residual.get();
             new_residual += new_average_sum % recent_deltas_list_len;
             delta_ticks += new_residual / recent_deltas_list_len;
             new_residual = new_residual % recent_deltas_list_len;
             self.recent_deltas_average_residual.set(new_residual);
+            if (CONFIG.INCLUDE_DEBUG_INFO) {
+                const diff_raw_and_averaged_deltas = num_cast(delta_ticks, i64) - num_cast(old_delta_ticks, i64);
+                const abs_diff_raw_and_averaged_deltas = @abs(diff_raw_and_averaged_deltas);
+                self.debug_info.total_abs_diff_between_raw_and_averaged_deltas += abs_diff_raw_and_averaged_deltas;
+                self.debug_info.largest_abs_diff_between_raw_and_averaged_deltas = @max(abs_diff_raw_and_averaged_deltas, self.debug_info.largest_abs_diff_between_raw_and_averaged_deltas);
+                self.debug_info.total_drift_from_delta_averaging += diff_raw_and_averaged_deltas;
+            }
             var accumulated_ticks = self.tick_accumulator.get();
             accumulated_ticks += delta_ticks;
             if (accumulated_ticks > desired_ticks_per_update * CONFIG.MAX_ACCUMULATED_UPDATES) {
@@ -310,8 +331,7 @@ pub fn FrameTimingManager(comptime CONFIG: FrameTimingManagerConfig) type {
             if (self.should_resync) {
                 if (CONFIG.INCLUDE_DEBUG_INFO) {
                     self.debug_info.num_times_resynced += 1;
-                    const time_lost = accumulated_ticks - desired_ticks_per_update;
-                    self.debug_info.total_time_lost_to_resync += num_cast(time_lost, u64);
+                    self.debug_info.total_time_lost_to_resync += num_cast(accumulated_ticks, u64);
                 }
                 accumulated_ticks = desired_ticks_per_update;
                 delta_ticks = desired_ticks_per_update;
@@ -360,7 +380,7 @@ pub fn FrameTimingManager(comptime CONFIG: FrameTimingManagerConfig) type {
                         to_use.variable_seconds = desired_seconds_per_update;
                         to_use.variable_ticks = desired_ticks_per_update;
                         if (CONFIG.INCLUDE_DEBUG_INFO) {
-                            self.debug_info.current_total_variable_time += desired_ticks_per_update;
+                            self.debug_info.unlocked_mode_current_total_variable_time += desired_ticks_per_update;
                             self.debug_info.total_variable_time_returned += num_cast(desired_ticks_per_update, u64);
                         }
                     }
@@ -370,29 +390,29 @@ pub fn FrameTimingManager(comptime CONFIG: FrameTimingManagerConfig) type {
                     return to_use;
                 } else if (variable_ticks_left > 0) {
                     if (CONFIG.INCLUDE_DEBUG_INFO) {
-                        self.debug_info.current_total_variable_time += variable_ticks_left;
-                        self.debug_info.num_times_variable_time_did_not_equal_fixed_time_returned += 1;
-                        self.debug_info.sum_of_difference_between_variable_and_fixed_time += num_cast(ticks_left, u64);
-                        self.debug_info.sum_of_total_variable_time_when_variable_time_did_not_equal_fixed_time += self.debug_info.current_total_variable_time;
+                        self.debug_info.unlocked_mode_current_total_variable_time += variable_ticks_left;
+                        self.debug_info.unlocked_mode_num_times_variable_time_did_not_equal_fixed_time_returned += 1;
+                        self.debug_info.unlocked_mode_sum_of_difference_between_variable_and_fixed_time += num_cast(ticks_left, u64);
+                        self.debug_info.unlocked_mode_largest_difference_between_variable_and_fixed_time = @max(self.debug_info.unlocked_mode_largest_difference_between_variable_and_fixed_time, ticks_left);
+                        self.debug_info.unlocked_mode_sum_of_total_variable_time_when_variable_time_did_not_equal_fixed_time += self.debug_info.unlocked_mode_current_total_variable_time;
                         self.debug_info.total_variable_time_returned += num_cast(variable_ticks_left, u64);
                     }
                     const to_use = TimeToUse{
                         .variable_seconds = MathX.upgrade_to_float(variable_ticks_left, CONFIG.FLOAT_TYPE) / MathX.upgrade_to_float(self.ticks_per_second.get(), CONFIG.FLOAT_TYPE),
                         .variable_ticks = variable_ticks_left,
                         .render_interp_ratio = MathX.upgrade_to_float(ticks_left, CONFIG.FLOAT_TYPE) / MathX.upgrade_to_float(desired_ticks_per_update, CONFIG.FLOAT_TYPE),
+                        .full_fixed_update = false,
                     };
                     variable_ticks_left = 0;
                     self.delta_ticks.set(variable_ticks_left);
                     return to_use;
                 } else if (CONFIG.INCLUDE_DEBUG_INFO) {
-                    self.debug_info.current_total_variable_time = 0;
+                    self.debug_info.unlocked_mode_current_total_variable_time = 0;
                 }
             } else {
-                if (CONFIG.LOCKED_MODE_MIN_UPDATES_PER_FRAME_IS_ALWAYS_1) {
-                    var locked_mode_min_remaining = self.locked_mode_min_updates_remaining.get();
-                    if (locked_mode_min_remaining > 0) {
-                        locked_mode_min_remaining -= 1;
-                        self.locked_mode_min_updates_remaining.set(locked_mode_min_remaining);
+                if (!CONFIG.LOCKED_MODE_MIN_UPDATES_PER_FRAME_IS_ALWAYS_1) {
+                    if (self.locked_mode_min_updates_remaining > 0) {
+                        self.locked_mode_min_updates_remaining -= 1;
                         return TimeToUse{
                             .fixed_seconds = desired_seconds_per_update,
                             .fixed_ticks = desired_ticks_per_update,
@@ -403,8 +423,7 @@ pub fn FrameTimingManager(comptime CONFIG: FrameTimingManagerConfig) type {
                     const locked_mode_min_updates_per_frame = self.locked_mode_min_updates_per_frame.get();
                     const ticks_left_min_block = desired_ticks_per_update * locked_mode_min_updates_per_frame;
                     if (ticks_left >= ticks_left_min_block) {
-                        locked_mode_min_remaining = locked_mode_min_updates_per_frame - 1;
-                        self.locked_mode_min_updates_remaining.set(locked_mode_min_remaining);
+                        self.locked_mode_min_updates_remaining = locked_mode_min_updates_per_frame - 1;
                         ticks_left -= ticks_left_min_block;
                         self.tick_accumulator.set(ticks_left);
                         return TimeToUse{
@@ -413,6 +432,9 @@ pub fn FrameTimingManager(comptime CONFIG: FrameTimingManagerConfig) type {
                             .variable_seconds = desired_seconds_per_update,
                             .variable_ticks = desired_ticks_per_update,
                         };
+                    } else if (CONFIG.INCLUDE_DEBUG_INFO and ticks_left > 0) {
+                        self.debug_info.locked_mode_num_times_fixed_time_not_included_in_frame += 1;
+                        self.debug_info.locked_mode_sum_of_fixed_time_not_included_in_frame += ticks_left;
                     }
                 } else {
                     if (ticks_left >= desired_ticks_per_update) {
@@ -424,6 +446,9 @@ pub fn FrameTimingManager(comptime CONFIG: FrameTimingManagerConfig) type {
                             .variable_seconds = desired_seconds_per_update,
                             .variable_ticks = desired_ticks_per_update,
                         };
+                    } else if (CONFIG.INCLUDE_DEBUG_INFO and ticks_left > 0) {
+                        self.debug_info.locked_mode_num_times_fixed_time_not_included_in_frame += 1;
+                        self.debug_info.locked_mode_sum_of_fixed_time_not_included_in_frame += ticks_left;
                     }
                 }
             }
@@ -434,6 +459,7 @@ pub fn FrameTimingManager(comptime CONFIG: FrameTimingManagerConfig) type {
             if (CONFIG.INCLUDE_DEBUG_INFO) {
                 const average_ticks_per_frame = num_cast(self.debug_info.total_time_added, f64) / num_cast(self.debug_info.num_times_time_added, f64);
                 const ticks_per_sec = self.ticks_per_second.get();
+                const total_seconds_run = num_cast(self.debug_info.total_time_added, f64) / num_cast(ticks_per_sec, f64);
                 const average_sec_per_frame = average_ticks_per_frame / num_cast(ticks_per_sec, f64);
                 const total_average_fps = 1.0 / average_sec_per_frame;
                 const average_ms_per_frame = average_sec_per_frame * 1000.0;
@@ -441,7 +467,63 @@ pub fn FrameTimingManager(comptime CONFIG: FrameTimingManagerConfig) type {
                 const recent_average_sec_per_frame = recent_average_ticks_per_frame / num_cast(ticks_per_sec, f64);
                 const recent_average_fps = 1.0 / recent_average_sec_per_frame;
                 const recent_average_ms_per_frame = recent_average_sec_per_frame * 1000.0;
-                //CHECKPOINT
+                const average_abs_diff_raw_and_averaged_deltas = num_cast(self.debug_info.total_abs_diff_between_raw_and_averaged_deltas, f64) / num_cast(self.debug_info.num_times_time_added, f64);
+                const average_abs_diff_raw_and_averaged_deltas_sec = average_abs_diff_raw_and_averaged_deltas / num_cast(ticks_per_sec, f64);
+                const max_abs_diff_raw_and_averaged_deltas_sec = num_cast(self.debug_info.largest_abs_diff_between_raw_and_averaged_deltas, f64) / num_cast(ticks_per_sec, f64);
+                const drift_from_raw_and_averaged_deltas_sec = num_cast(self.debug_info.total_drift_from_delta_averaging, f64) / num_cast(ticks_per_sec, f64);
+                const average_variable_fixed_difference = num_cast(self.debug_info.unlocked_mode_sum_of_difference_between_variable_and_fixed_time, f64) / num_cast(self.debug_info.unlocked_mode_num_times_variable_time_did_not_equal_fixed_time_returned, f64);
+                const average_variable_fixed_difference_sec = average_variable_fixed_difference / num_cast(ticks_per_sec, f64);
+                const largest_variable_fixed_difference_sec = num_cast(self.debug_info.unlocked_mode_largest_difference_between_variable_and_fixed_time, f64) / num_cast(ticks_per_sec, f64);
+                const average_locked_mode_fixed_time_leftover = num_cast(self.debug_info.locked_mode_sum_of_fixed_time_not_included_in_frame, f64) / num_cast(self.debug_info.locked_mode_num_times_fixed_time_not_included_in_frame, f64);
+                const average_locked_mode_fixed_time_leftover_sec = average_locked_mode_fixed_time_leftover / num_cast(ticks_per_sec, f64);
+                const total_average_locked_mode_fixed_time_leftover = num_cast(self.debug_info.locked_mode_sum_of_fixed_time_not_included_in_frame, f64) / num_cast(self.debug_info.num_times_time_returned_for_use, f64);
+                const total_average_locked_mode_fixed_time_leftover_sec = total_average_locked_mode_fixed_time_leftover / num_cast(ticks_per_sec, f64);
+                const total_time_lost_to_resync_sec = num_cast(self.debug_info.total_time_lost_to_resync, f64) / num_cast(ticks_per_sec, f64);
+                const average_time_lost_to_resync = num_cast(self.debug_info.total_time_lost_to_resync, f64) / num_cast(self.debug_info.num_times_resynced, f64);
+                const average_time_lost_to_resync_sec = average_time_lost_to_resync / num_cast(ticks_per_sec, f64);
+                const percent_of_frames_that_snapped = (num_cast(self.debug_info.times_snapped_to_ticks, f64) / num_cast(self.debug_info.num_times_time_added, f64)) * 100.0;
+                const total_snap_drift_secs = num_cast(self.debug_info.time_drift_due_to_snap, f64) / num_cast(ticks_per_sec, f64);
+                const average_snap_drift = num_cast(self.debug_info.sum_of_absolute_drift_due_to_snap, f64) / num_cast(self.debug_info.times_snapped_to_ticks, f64);
+                const average_snap_drift_secs = average_snap_drift / num_cast(ticks_per_sec, f64);
+                std.debug.print("\n===TIME DEBUG===\nTOTAL TIME: {d} ({d: >.2} secs)\nTOTAL FRAMES: {d}\n-----TOTAL AVERAGE\nAVERAGE TICKS PER FRAME: {d: >.0}\nAVERAGE SEC PER FRAME: {d: >.5}\nAVERAGE MS PER FRAME: {d: >.3}\nAVERAGE FPS: {d: >.3}\n-----RECENT AVERAGE\nRECENT TICKS PER FRAME: {d: >.0}\nRECENT SEC PER FRAME: {d: >.5}\nRECENT MS PER FRAME: {d: >.3}\nRECENT FPS: {d: >.3}\n-----AVERAGING EFFECTS\nTOTAL DRIFT DUE TO DELTA AVERAGING: {d} ({d: >.5} sec)\nAVERAGE ABS DRIFT DUE TO DELTA AVERAGING: {d: >.0} ({d: >.5} sec)\nLARGEST SINGLE DRIFT DUE TO DELTA AVERAGING: {d: >.0} ({d: >.5} sec)\n-----RESYNC\nNUM TIMES RESYNCED: {d}\nTOTAL TIME LOST: {d} ({d: >.3} sec)\nAVERAGE TIME LOST: {d: >.0} ({d: >.3} sec)\n-----VSYNC SNAP\nPERCENT OF FRAMES THAT SNAPPED TO VSYNC MULTIPLE: {d: >3.1}%\nFINAL DRIFT EFFECT FROM SNAPS: {d} ({d: >.3} sec)\nAVERAGE SNAP DELTA ABSOLUTE: {d: >.0}  ({d: >.5} sec)", .{
+                    self.debug_info.total_time_added,
+                    total_seconds_run,
+                    self.debug_info.num_times_time_added,
+                    average_ticks_per_frame,
+                    average_sec_per_frame,
+                    average_ms_per_frame,
+                    total_average_fps,
+                    recent_average_ticks_per_frame,
+                    recent_average_sec_per_frame,
+                    recent_average_ms_per_frame,
+                    recent_average_fps,
+                    self.debug_info.total_drift_from_delta_averaging,
+                    drift_from_raw_and_averaged_deltas_sec,
+                    average_abs_diff_raw_and_averaged_deltas,
+                    average_abs_diff_raw_and_averaged_deltas_sec,
+                    self.debug_info.largest_abs_diff_between_raw_and_averaged_deltas,
+                    max_abs_diff_raw_and_averaged_deltas_sec,
+                    self.debug_info.num_times_resynced,
+                    self.debug_info.total_time_lost_to_resync,
+                    total_time_lost_to_resync_sec,
+                    average_time_lost_to_resync,
+                    average_time_lost_to_resync_sec,
+                    percent_of_frames_that_snapped,
+                    self.debug_info.time_drift_due_to_snap,
+                    total_snap_drift_secs,
+                    average_snap_drift,
+                    average_snap_drift_secs,
+                });
+                std.debug.print("\n-----LOCKED MODE\nTOTAL AVERAGE TICKS LEFTOVER PER FRAME: {d: >.3} ({d: >.5} sec)\nAVERAGE TICKS LEFTOVER PER FRAME WHEN NOT ZERO: {d: >.3} ({d: >.5} sec)\n-----UNLOCKED MODE\nAVERAGE FIXED VARIABLE DIFF: {d: >.3} ({d: >.5} sec)\nMAX FIXED VARIABLE DIFF: {d: >.3} ({d: >.5} sec)\n", .{
+                    total_average_locked_mode_fixed_time_leftover,
+                    total_average_locked_mode_fixed_time_leftover_sec,
+                    average_locked_mode_fixed_time_leftover,
+                    average_locked_mode_fixed_time_leftover_sec,
+                    average_variable_fixed_difference,
+                    average_variable_fixed_difference_sec,
+                    self.debug_info.unlocked_mode_largest_difference_between_variable_and_fixed_time,
+                    largest_variable_fixed_difference_sec,
+                });
             }
         }
 
@@ -451,7 +533,92 @@ pub fn FrameTimingManager(comptime CONFIG: FrameTimingManagerConfig) type {
             variable_seconds: CONFIG.FLOAT_TYPE = 0,
             variable_ticks: CONFIG.INTEGER_TYPE = 0,
             render_interp_ratio: CONFIG.FLOAT_TYPE = 1.0,
-            full_fixed_update: bool = false,
+            full_fixed_update: bool = true,
         };
     };
+}
+
+test FrameTimingManager {
+    const RUN_TEST = false;
+    if (RUN_TEST) {
+        const old_test_log_level = std.testing.log_level;
+        defer std.testing.log_level = old_test_log_level;
+        std.testing.log_level = .debug;
+        Assert.warn_unconditional_always(@src(), "Long-running test. You may wish to disable this test for normal testing (test has `RUN_TEST: bool` variable inside)", .{});
+        const SECONDS_TO_RUN = 60;
+        const EMULATE_DISPLAY_HERTZ: u64 = 60;
+        const RAND_FRAME_PERCENT: f64 = 0.10;
+        const SLEEP_MULTIPLIER: u64 = 1;
+        const TICKS_PER_SECOND: u64 = 1_000_000_000;
+        const TIME_TO_RUN = TICKS_PER_SECOND * SECONDS_TO_RUN;
+        const TICKS_PER_UPDATE = TICKS_PER_SECOND / EMULATE_DISPLAY_HERTZ;
+        const TICKS_PER_UPDATE_I: i64 = @intCast(TICKS_PER_UPDATE);
+        const RAND_DELTA = MathX.upgrade_multiply_out(TICKS_PER_UPDATE_I, RAND_FRAME_PERCENT, i64);
+        var rand_core = std.Random.DefaultPrng.init(@intCast(std.time.microTimestamp()));
+        const rand = rand_core.random();
+        const DESIRED_FRAME_RATE: f64 = 60;
+        const DESIRED_FRAME_RATE_T = GetSetModule.ConstGet(DESIRED_FRAME_RATE);
+        const LOCKED_MODE_MIN_UPDATES: u64 = 1;
+        const LOCKED_MODE_MIN_UPDATES_T = GetSetModule.ConstGet(LOCKED_MODE_MIN_UPDATES);
+        const UNLOCK_FRAME_RATE: bool = false;
+        const UNLOCK_FRAME_RATE_T = GetSetModule.ConstGet(UNLOCK_FRAME_RATE);
+        const TICKS_PER_SECOND_T = GetSetModule.ConstGet(TICKS_PER_SECOND);
+
+        const DISPLAY_FRAMERATE_T = GetSetModule.ConstGet(EMULATE_DISPLAY_HERTZ);
+        const PROTO = struct {
+            fn get_timestamp() u64 {
+                const nano = std.time.nanoTimestamp();
+                const nano_trunc: i64 = @truncate(nano);
+                return @intCast(nano_trunc);
+            }
+        };
+        const CURR_FRAME_TIME_T = GetSetModule.FuncBodyGet(u64, PROTO.get_timestamp);
+        const CONFIG = FrameTimingManagerConfig{
+            .CURR_FRAME_TIME_GET_TYPE = .get_only(CURR_FRAME_TIME_T),
+            .DESIRED_FRAMERATE_GET_TYPE = .get_only(DESIRED_FRAME_RATE_T),
+            .LOCKED_MODE_MIN_UPDATES_PER_FRAME_GET_TYPE = .get_only(LOCKED_MODE_MIN_UPDATES_T),
+            .UNLOCK_FRAMERATE_GET_TYPE = .get_only(UNLOCK_FRAME_RATE_T),
+            .TICKS_PER_SECOND_GET_TYPE = .get_only(TICKS_PER_SECOND_T),
+            .DISPLAY_FRAMERATE_GET_TYPE = .get_only(DISPLAY_FRAMERATE_T),
+            .INTEGER_TYPE = u64,
+            .FLOAT_TYPE = f64,
+            .INCLUDE_DEBUG_INFO = true,
+            .VSYNC_ERROR_SNAP_RATIO = 0.0002,
+        };
+        const Manager = FrameTimingManager(CONFIG);
+        var manager = Manager{
+            .curr_frame_time = CURR_FRAME_TIME_T{},
+            .locked_mode_min_updates_per_frame = LOCKED_MODE_MIN_UPDATES_T{},
+            .unlock_framerate = UNLOCK_FRAME_RATE_T{},
+            .desired_framerate = DESIRED_FRAME_RATE_T{},
+            .ticks_per_second = TICKS_PER_SECOND_T{},
+            .display_framerate = DISPLAY_FRAMERATE_T{},
+        };
+        manager.initialize(.ALL);
+        var t: u64 = 0;
+        var s: u64 = 0;
+        var real_prev_time: i128 = std.time.nanoTimestamp();
+        var next_sec_log = TICKS_PER_SECOND;
+        std.debug.print("\n[FrameTimingManager test] 0/{d} seconds elapsed         ", .{SECONDS_TO_RUN});
+        while (t < TIME_TO_RUN) {
+            const delta = rand.intRangeAtMost(i64, -RAND_DELTA, RAND_DELTA);
+            const time_to_sleep: u64 = @intCast(TICKS_PER_UPDATE_I + delta);
+            std.Thread.sleep(time_to_sleep * SLEEP_MULTIPLIER);
+            const real_new_time = std.time.nanoTimestamp();
+            manager.add_time();
+            const real_delta: u64 = @intCast(real_new_time - real_prev_time);
+            real_prev_time = real_new_time;
+            t += real_delta;
+            while (manager.has_more_time_to_use()) |time_to_use| {
+                _ = time_to_use;
+            }
+            if (t > next_sec_log) {
+                s += 1;
+                next_sec_log += TICKS_PER_SECOND;
+                std.debug.print("\x1b[1G                                                        ", .{});
+                std.debug.print("\x1b[1G[FrameTimingManager test] {d}/{d} seconds elapsed", .{ s, SECONDS_TO_RUN });
+            }
+        }
+        manager.print_debug_info();
+    }
 }
