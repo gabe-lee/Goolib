@@ -22,3 +22,28 @@
 // 3. This notice may not be removed or altered from any source distribution.
 
 pub const Bitmap = @import("./FileFormat_Bitmap.zig");
+
+pub const DataSourceKind = enum(u8) {
+    FILE,
+    BYTES_ALIGNED,
+    BYTES_UNALIGNED,
+};
+
+pub fn AlignedBytesConst(comptime ALIGN: comptime_int) type {
+    return struct {
+        data: []align(ALIGN) const u8,
+        cursor: usize = 0,
+    };
+}
+pub const BytesConst = struct {
+    data: []align(NATIVE_DATA_ALIGN) const u8,
+    cursor: usize = 0,
+};
+
+pub const FileReader
+
+pub const InputDataSource = union(DataSourceKind) {
+    FILE: File,
+    BYTES_ALIGNED: []align(NATIVE_DATA_ALIGN) const u8,
+    BYTES_UNALIGNED: []const u8,
+};
