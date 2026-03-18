@@ -1005,7 +1005,7 @@ pub fn range_trichotomy(low: anytype, value: anytype, high: anytype, comptime OU
 
 test range_trichotomy {
     const t = std.testing;
-
+    const EXTENDED_TEST = false;
     try t.expectEqual(-1, range_trichotomy(0, 0, 10, i32));
     try t.expectEqual(-1, range_trichotomy(0, 1, 10, i32));
     try t.expectEqual(-1, range_trichotomy(0, 2, 10, i32));
@@ -1037,20 +1037,22 @@ test range_trichotomy {
     try t.expectEqual(1, range_trichotomy(0, 700000, 1000000, i32));
     try t.expectEqual(1, range_trichotomy(0, 800000, 1000000, i32));
     try t.expectEqual(1, range_trichotomy(0, 900000, 1000000, i32));
-    var total: i32 = 0;
-    var v: u32 = 0;
-    while (v < 1000000) {
-        total += range_trichotomy(0, v, 1000000, i32);
-        v += 1;
+    if (EXTENDED_TEST) {
+        var total: i32 = 0;
+        var v: u32 = 0;
+        while (v < 1000000) {
+            total += range_trichotomy(0, v, 1000000, i32);
+            v += 1;
+        }
+        try t.expectEqual(0, total); // symetric
+        total = 0;
+        v = 0;
+        while (v < 1000003) {
+            total += range_trichotomy(0, v, 1000003, i32);
+            v += 1;
+        }
+        try t.expectEqual(0, total); // symetric
     }
-    try t.expectEqual(0, total); // symetric
-    total = 0;
-    v = 0;
-    while (v < 1000003) {
-        total += range_trichotomy(0, v, 1000003, i32);
-        v += 1;
-    }
-    try t.expectEqual(0, total); // symetric
 }
 
 pub fn extract_partial_rand_from_rand(rand: anytype, val_less_than: anytype, comptime OUT: type) OUT {

@@ -607,7 +607,19 @@ pub inline fn integer_type_A_has_bits_greater_than_or_equal_to_B(comptime A: typ
 pub inline fn integer_type_A_has_bits_greater_than_or_equal_to_N(comptime A: type, comptime N: comptime_int) bool {
     return @typeInfo(A).int.bits >= N;
 }
-
+pub fn union_and_enum_have_exact_same_fields(comptime UNION: type, comptime ENUM: type) bool {
+    const U_INFO = @typeInfo(UNION).@"union";
+    const E_INFO = @typeInfo(ENUM).@"enum";
+    next_union_field: inline for (U_INFO.fields) |u_field| {
+        inline for (E_INFO.fields) |e_field| {
+            if (u_field.name == e_field.name) {
+                continue :next_union_field;
+            }
+        }
+        return false;
+    }
+    return true;
+}
 pub inline fn type_is_struct_with_all_fields_same_type(comptime T: type, comptime F: type) bool {
     const INFO = @typeInfo(T);
     switch (INFO) {
@@ -1344,4 +1356,199 @@ pub fn error_union_error(comptime T: type) type {
     }
 }
 
-// pub fn array_has_element_with_every_enum_reperesented_once_in_field(comptime ENUM: type, comptime FIELD: []const u8, )
+/// create a bare union type with the same fields as the tagged union
+///
+/// This does not and *cannot* copy static declarations
+pub fn bare_union_with_same_fields_as_tagged_union(comptime UNION: type, comptime NEW_LAYOUT: ?std.builtin.Type.ContainerLayout) type {
+    const TAGGED_INFO = @typeInfo(UNION).@"union";
+    const BARE_INFO = Type{ .@"union" = .{
+        .decls = &.{},
+        .fields = TAGGED_INFO.fields,
+        .layout = if (NEW_LAYOUT) |LAY| LAY else TAGGED_INFO.layout,
+        .tag_type = null,
+    } };
+    return @Type(BARE_INFO);
+}
+
+pub const DefinedLayout = enum(u8) {
+    EXTERN,
+    PACKED,
+
+    pub inline fn to_native(comptime self: DefinedLayout) std.builtin.Type.ContainerLayout {
+        return switch (self) {
+            .EXTERN => std.builtin.Type.ContainerLayout.@"extern",
+            .PACKED => std.builtin.Type.ContainerLayout.@"packed",
+        };
+    }
+};
+
+/// Creates a struct type that can behave similar to tagged union, but has a well-defined memory layout
+/// for serialization or MMIO
+///
+/// Specifically, it is an `extern` struct with one of the following possible 2 layouts:
+///   - if the alignment of the tag type is greater than or equal to the align of the resulting bare union type:
+///     1. tag
+///     2. union
+///   - if the alignment of the tag type is less than the align of the resulting bare union type:
+///     1. union
+///     2. tag
+///
+/// `DECLS_` should be a struct type (possibly empty if no declarations are needed) that
+/// is attatched to the struct and holds only static declarations and has no fields
+pub fn HybridUnion(comptime TAGGED_UNION: type, comptime DECLS_: type, comptime UNION_LAYOUT: DefinedLayout) type {
+    Kind.STRUCT.assert_type_is_same_kind(DECLS_, @src());
+    const DECL_INFO = KindInfo.get_kind_info(DECLS_).STRUCT;
+    assert_with_reason(DECL_INFO.fields.len == 0, @src(), "`DECLS_` must not have any instance fields, only static declarations", .{});
+    const UNION = bare_union_with_same_fields_as_tagged_union(TAGGED_UNION, UNION_LAYOUT.to_native());
+    const TAG = @typeInfo(TAGGED_UNION).@"union".tag_type.?;
+    const BARE_ALIGN = @alignOf(UNION);
+    const TAG_ALIGN = @alignOf(TAG);
+    return extern struct {
+        const Self = @This();
+
+        _1: if (TAG_AT_BEGIN) TAG else UNION,
+        _2: if (TAG_AT_BEGIN) UNION else TAG,
+
+        const FUNCS = HybridUnionAdapter(Self, if (TAG_AT_BEGIN) "_1" else "_2", if (TAG_AT_BEGIN) "_2" else "_1");
+
+        pub const DECLS = DECLS_;
+        pub const TAG_AT_BEGIN = TAG_ALIGN >= BARE_ALIGN;
+        pub const TAG_OFFSET = if (TAG_AT_BEGIN) @offsetOf(Self, "_1") else @offsetOf(Self, "_2");
+        pub const UNION_OFFSET = if (TAG_AT_BEGIN) @offsetOf(Self, "_2") else @offsetOf(Self, "_1");
+
+        pub inline fn tag_parent_ptr(tag: *TAG) *Self {
+            return @fieldParentPtr(if (TAG_AT_BEGIN) "_1" else "_2", tag);
+        }
+        pub inline fn tag_parent_ptr_const(tag: *const TAG) *const Self {
+            return @fieldParentPtr(if (TAG_AT_BEGIN) "_1" else "_2", @constCast(tag));
+        }
+        pub inline fn bare_union_parent_ptr(bare_union: *UNION) *Self {
+            return @fieldParentPtr(if (TAG_AT_BEGIN) "_2" else "_1", bare_union);
+        }
+        pub inline fn bare_union_parent_ptr_const(bare_union: *const UNION) *const Self {
+            return @fieldParentPtr(if (TAG_AT_BEGIN) "_2" else "_1", @constCast(bare_union));
+        }
+        pub inline fn from_tagged(tagged: TAGGED_UNION) Self {
+            const active_tag: TAG = std.meta.activeTag(tagged);
+            const bare_union: UNION = switch (active_tag) {
+                inline else => |active| @unionInit(UNION, @tagName(active), @field(tagged, @tagName(active))),
+            };
+            return Self{
+                ._1 = if (TAG_AT_BEGIN) active_tag else bare_union,
+                ._2 = if (TAG_AT_BEGIN) bare_union else active_tag,
+            };
+        }
+        pub inline fn to_tagged(self: Self) TAGGED_UNION {
+            return switch (if (TAG_AT_BEGIN) self._1 else self._2) {
+                inline else => |active| @unionInit(TAGGED_UNION, @tagName(active), @field(if (TAG_AT_BEGIN) self._2 else self._1, @tagName(active))),
+            };
+        }
+
+        pub inline fn tag_get(self: Self) TAG {
+            if (TAG_AT_BEGIN) {
+                return @field(self, "_1");
+            } else {
+                return @field(self, "_2");
+            }
+        }
+        pub inline fn tag_ptr(self: *Self) *TAG {
+            if (TAG_AT_BEGIN) {
+                return &@field(self, "_1");
+            } else {
+                return &@field(self, "_2");
+            }
+        }
+        pub inline fn tag_ptr_const(self: *const Self) *const TAG {
+            if (TAG_AT_BEGIN) {
+                return &@field(self, "_1");
+            } else {
+                return &@field(self, "_2");
+            }
+        }
+        pub inline fn tag_set(self: *Self, new_tag: TAG) void {
+            if (TAG_AT_BEGIN) {
+                @field(self, "_1") = new_tag;
+            } else {
+                @field(self, "_2") = new_tag;
+            }
+        }
+
+        pub inline fn bare_union_get(self: Self) UNION {
+            if (TAG_AT_BEGIN) {
+                return @field(self, "_2");
+            } else {
+                return @field(self, "_1");
+            }
+        }
+        pub inline fn bare_union_ptr(self: *Self) *UNION {
+            if (TAG_AT_BEGIN) {
+                return &@field(self, "_2");
+            } else {
+                return &@field(self, "_1");
+            }
+        }
+        pub inline fn bare_union_ptr_const(self: *const Self) *const UNION {
+            if (TAG_AT_BEGIN) {
+                return &@field(self, "_2");
+            } else {
+                return &@field(self, "_1");
+            }
+        }
+        pub inline fn bare_union_set(self: *Self, new_bare_union: UNION) void {
+            if (TAG_AT_BEGIN) {
+                @field(self, "_2") = new_bare_union;
+            } else {
+                @field(self, "_1") = new_bare_union;
+            }
+        }
+
+        pub inline fn get(self: Self, comptime tag: TAG) @FieldType(UNION, @tagName(tag)) {
+            return FUNCS.get(self, tag);
+        }
+        pub inline fn get_ptr(self: *Self, comptime tag: TAG) *@FieldType(UNION, @tagName(tag)) {
+            return FUNCS.get_ptr(self, tag);
+        }
+        pub inline fn get_ptr_const(self: *const Self, comptime tag: TAG) *const @FieldType(UNION, @tagName(tag)) {
+            return FUNCS.get_ptr_const(self, tag);
+        }
+        pub inline fn set(self: *Self, comptime tag: TAG, val: @FieldType(UNION, @tagName(tag))) void {
+            FUNCS.set(self, tag, val);
+        }
+    };
+}
+
+/// Returns a set of get/set functions that can be used within a parent struct to treat a pair of its bare union and enum tag fields as
+/// a psuedo tagged union
+pub fn HybridUnionAdapter(comptime PARENT_STRUCT: type, comptime tag_field: []const u8, comptime bare_union_field: []const u8) type {
+    Kind.STRUCT.assert_type_is_same_kind(PARENT_STRUCT, @src());
+    assert_with_reason(@hasField(PARENT_STRUCT, tag_field), @src(), "`PARENT_STRUCT` must have union tag field `{s}`", .{tag_field});
+    const TAG_TYPE = @FieldType(PARENT_STRUCT, tag_field);
+    Kind.ENUM.assert_type_is_same_kind(TAG_TYPE, @src());
+    assert_with_reason(@hasField(PARENT_STRUCT, bare_union_field), @src(), "`PARENT_STRUCT` must have bare union field `{s}`", .{bare_union_field});
+    const UNION_TYPE = @FieldType(PARENT_STRUCT, bare_union_field);
+    Kind.UNION.assert_type_is_same_kind(UNION_TYPE, @src());
+    const U_INFO = @typeInfo(UNION_TYPE).@"union";
+    assert_with_reason(U_INFO.tag_type == null, @src(), "union type for field `{s}` must be a bare union (no tag)", .{bare_union_field});
+    assert_with_reason(union_and_enum_have_exact_same_fields(UNION_TYPE, TAG_TYPE), @src(), "union `{s}` and tag `{s} must have all the same fields", .{});
+    return struct {
+        fn assert_tag(parent: PARENT_STRUCT, comptime tag: TAG_TYPE) void {
+            const current_tag = @field(parent, tag_field);
+            assert_with_reason(current_tag == tag, @src(), "union field `{s}` is not active, current field is `{s}`", .{ @tagName(tag), @tagName(current_tag) });
+        }
+        pub fn get(parent: PARENT_STRUCT, comptime tag: TAG_TYPE) @FieldType(UNION_TYPE, @tagName(tag)) {
+            assert_tag(parent, tag);
+            return @field(@field(parent, bare_union_field), @tagName(tag));
+        }
+        pub fn get_ptr(parent: *PARENT_STRUCT, comptime tag: TAG_TYPE) *@FieldType(UNION_TYPE, @tagName(tag)) {
+            assert_tag(parent, tag);
+            return &@field(@field(parent, bare_union_field), @tagName(tag));
+        }
+        pub fn get_ptr_const(parent: *const PARENT_STRUCT, comptime tag: TAG_TYPE) *const @FieldType(UNION_TYPE, @tagName(tag)) {
+            assert_tag(parent, tag);
+            return &@field(@field(parent, bare_union_field), @tagName(tag));
+        }
+        pub fn set(parent: *PARENT_STRUCT, comptime tag: TAG_TYPE, val: @FieldType(UNION_TYPE, @tagName(tag))) void {
+            @field(parent, bare_union_field) = @unionInit(UNION_TYPE, @tagName(tag), val);
+        }
+    };
+}

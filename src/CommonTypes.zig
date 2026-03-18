@@ -363,14 +363,14 @@ pub const Alignment = enum(u64) {
 };
 
 pub const Endian = enum(u8) {
-    LITTLE = 0,
-    BIG = 1,
+    LITTLE_ENDIAN = 0,
+    BIG_ENDIAN = 1,
 
-    pub const NATIVE = if (build.cpu.arch.endian() == .little) Endian.LITTLE else Endian.BIG;
+    pub const NATIVE = if (build.cpu.arch.endian() == .little) Endian.LITTLE_ENDIAN else Endian.BIG_ENDIAN;
     pub fn to_zig(self: Endian) std.builtin.Endian {
         return switch (self) {
-            .LITTLE => std.builtin.Endian.little,
-            .BIG => std.builtin.Endian.big,
+            .LITTLE_ENDIAN => std.builtin.Endian.little,
+            .BIG_ENDIAN => std.builtin.Endian.big,
         };
     }
 };

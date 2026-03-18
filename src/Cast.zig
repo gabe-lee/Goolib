@@ -35,6 +35,32 @@ const List = Root.IList.List;
 const assert_with_reason = Assert.assert_with_reason;
 const assert_unreachable = Assert.assert_unreachable;
 
+fn force_bitcast_internal(comptime FROM: type, from: *const FROM, comptime TO: type, comptime ASSERT_SIZE: bool) TO {
+    const TO_SIZE = @sizeOf(TO);
+    const FROM_SIZE = @sizeOf(FROM);
+    if (ASSERT_SIZE) {
+        assert_with_reason(FROM_SIZE == TO_SIZE, @src(), "sizes must be equal, got FROM_SIZE: {d} != TO_SIZE {d}", .{ FROM_SIZE, TO_SIZE });
+    }
+    const FROM_PTR = *const [FROM_SIZE]u8;
+    const TO_PTR = *[TO_SIZE]u8;
+    const from_cast: FROM_PTR = @ptrCast(from);
+    var to: TO = undefined;
+    const to_cast: TO_PTR = @ptrCast(&to);
+    if (ASSERT_SIZE) {
+        @memcpy(to_cast[0..TO_SIZE], from_cast[0..FROM_SIZE]);
+    } else {
+        const MIN_SIZE = @min(FROM_SIZE, TO_SIZE);
+        @memcpy(to_cast[0..MIN_SIZE], from_cast[0..MIN_SIZE]);
+    }
+    return to;
+}
+pub inline fn force_bitcast_same_size(comptime FROM: type, from: *const FROM, comptime TO: type) TO {
+    return force_bitcast_internal(FROM, from, TO, true);
+}
+pub inline fn force_bitcast_diff_size(comptime FROM: type, from: *const FROM, comptime TO: type) TO {
+    return force_bitcast_internal(FROM, from, TO, false);
+}
+
 pub inline fn bit_cast(from: anytype, comptime TO: type) TO {
     return @as(TO, @bitCast(from));
 }

@@ -204,9 +204,7 @@ pub const KindInfo = union(Kind) {
         const int = comptime @intFromEnum(@typeInfo(T));
         const id_tag: TypeId = comptime @enumFromInt(int);
         const kind_tag: Kind = comptime @enumFromInt(int);
-        comptime var info: KindInfo = undefined;
-        @field(info, @tagName(kind_tag)) = @field(INFO, @tagName(id_tag));
-        return info;
+        return @unionInit(KindInfo, @tagName(kind_tag), @field(INFO, @tagName(id_tag)));
     }
     pub inline fn type_is_same_kind(comptime K: KindInfo, comptime T: type) bool {
         return Kind.get_kind(T) == K.kind();

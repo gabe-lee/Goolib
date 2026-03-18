@@ -29,21 +29,21 @@ pub const DataSourceKind = enum(u8) {
     BYTES_UNALIGNED,
 };
 
-pub fn AlignedBytesConst(comptime ALIGN: comptime_int) type {
-    return struct {
-        data: []align(ALIGN) const u8,
-        cursor: usize = 0,
-    };
-}
-pub const BytesConst = struct {
-    data: []align(NATIVE_DATA_ALIGN) const u8,
-    cursor: usize = 0,
-};
+// pub fn AlignedBytesConst(comptime ALIGN: comptime_int) type {
+//     return struct {
+//         data: []align(ALIGN) const u8,
+//         cursor: usize = 0,
+//     };
+// }
+// pub const BytesConst = struct {
+//     data: []align(NATIVE_DATA_ALIGN) const u8,
+//     cursor: usize = 0,
+// };
 
-pub const FileReader
+// pub const FileReader
 
-pub const InputDataSource = union(DataSourceKind) {
-    FILE: File,
-    BYTES_ALIGNED: []align(NATIVE_DATA_ALIGN) const u8,
-    BYTES_UNALIGNED: []const u8,
-};
+// pub const InputDataSource = union(DataSourceKind) {
+//     FILE: File,
+//     BYTES_ALIGNED: []align(NATIVE_DATA_ALIGN) const u8,
+//     BYTES_UNALIGNED: []const u8,
+// };

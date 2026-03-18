@@ -84,6 +84,7 @@ pub const Rect2 = @import("./Rect2.zig");
 pub const RectPacker = @import("./RectPacker.zig");
 // pub const Result = @import("./Result.zig");
 pub const SDL3 = if (build.is_test or !config.NO_SDL) @import("./SDL3.zig") else struct {};
+pub const Serializer = @import("./Serializer.zig");
 pub const Shape = @import("./Shape.zig");
 pub const SlabBucketAllocator = @import("./SlabBucketAllocator.zig");
 pub const Sort = @import("./Sort.zig");
@@ -158,6 +159,7 @@ comptime {
         _ = if (!config.NO_SDL) @import("./SDL3.zig") else struct {};
         _ = if (!config.NO_SDL) @import("./SDL3_ShaderContract.zig") else struct {};
         _ = if (!config.NO_SDL) @import("./SDL3_GraphicsController.zig") else struct {};
+        _ = @import("./Serializer.zig");
         _ = @import("./Shape.zig");
         _ = @import("./SlabBucketAllocator.zig");
         _ = @import("./Sort.zig");
