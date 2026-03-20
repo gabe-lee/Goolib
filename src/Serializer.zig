@@ -573,8 +573,9 @@ pub const SerialRoutineBuilder = struct {
             switch (op) {
                 .NATIVE_TO_SERIAL_NO_SWAP => |move| {
                     self.d_assert_with_reason(mode == .NORMAL, @src(), "must be in `.NORMAL` mode for this op, curr mode is `{s}`", .{@tagName(mode)});
-                    self.d_assert_with_reason(ser_idx >= move.native_to_serial_delta, @src(), "native_to_serial_delta would cause serial index to go below zero", .{});
-                    const native_start: usize = @intCast(ser_idx - (num_cast(move.native_to_serial_delta, isize) + dynamic_serial_adjustment));
+                    const native_start_i: isize = ser_idx - (num_cast(move.native_to_serial_delta, isize) + dynamic_serial_adjustment);
+                    self.d_assert_with_reason(native_start_i >= 0, @src(), "(serial_idx + native_to_serial_delta + dynamic_serial_adjustment) would cause native index to go below zero", .{});
+                    const native_start: usize = @intCast(native_start_i);
                     const native_end = native_start + num_cast(move.copy_len, usize);
                     const serial_start = num_cast(ser_idx, usize);
                     const serial_end = serial_start + num_cast(move.copy_len, usize);
@@ -591,8 +592,9 @@ pub const SerialRoutineBuilder = struct {
                 },
                 .NATIVE_TO_SERIAL_SWAP => |move| {
                     self.d_assert_with_reason(mode == .NORMAL, @src(), "must be in `.NORMAL` mode for this op, curr mode is `{s}`", .{@tagName(mode)});
-                    self.d_assert_with_reason(ser_idx > move.native_to_serial_delta, @src(), "native_to_serial_delta would cause serial index to go below zero", .{});
-                    const native_start: usize = @intCast(ser_idx - (num_cast(move.native_to_serial_delta, isize) + dynamic_serial_adjustment));
+                    const native_start_i: isize = ser_idx - (num_cast(move.native_to_serial_delta, isize) + dynamic_serial_adjustment);
+                    self.d_assert_with_reason(native_start_i >= 0, @src(), "(serial_idx + native_to_serial_delta + dynamic_serial_adjustment) would cause native index to go below zero", .{});
+                    const native_start: usize = @intCast(native_start_i);
                     const native_end = native_start + num_cast(move.copy_len, usize);
                     const serial_start = num_cast(ser_idx, usize);
                     const serial_end = serial_start + num_cast(move.copy_len, usize);
@@ -614,8 +616,9 @@ pub const SerialRoutineBuilder = struct {
                 },
                 .NATIVE_TO_SERIAL_NO_SWAP_SAVE_TAG => |move| {
                     self.d_assert_with_reason(mode == .NEED_UNION_TAG_SERIAL_CAPTURE_NEXT, @src(), "must be in `.NEED_UNION_TAG_SERIAL_CAPTURE_NEXT` mode for this op, curr mode is `{s}`", .{@tagName(mode)});
-                    self.d_assert_with_reason(ser_idx > move.native_to_serial_delta, @src(), "native_to_serial_delta would cause serial index to go below zero", .{});
-                    const native_start: usize = @intCast(ser_idx - (num_cast(move.native_to_serial_delta, isize) + dynamic_serial_adjustment));
+                    const native_start_i: isize = ser_idx - (num_cast(move.native_to_serial_delta, isize) + dynamic_serial_adjustment);
+                    self.d_assert_with_reason(native_start_i >= 0, @src(), "(serial_idx + native_to_serial_delta + dynamic_serial_adjustment) would cause native index to go below zero", .{});
+                    const native_start: usize = @intCast(native_start_i);
                     const native_end = native_start + num_cast(move.copy_len, usize);
                     const serial_start = num_cast(ser_idx, usize);
                     const serial_end = serial_start + num_cast(move.copy_len, usize);
@@ -634,8 +637,9 @@ pub const SerialRoutineBuilder = struct {
                 },
                 .NATIVE_TO_SERIAL_SWAP_SAVE_TAG => |move| {
                     self.d_assert_with_reason(mode == .NEED_UNION_TAG_SERIAL_CAPTURE_NEXT, @src(), "must be in `.NEED_UNION_TAG_SERIAL_CAPTURE_NEXT` mode for this op, curr mode is `{s}`", .{@tagName(mode)});
-                    self.d_assert_with_reason(ser_idx > move.native_to_serial_delta, @src(), "native_to_serial_delta would cause serial index to go below zero", .{});
-                    const native_start: usize = @intCast(ser_idx - (num_cast(move.native_to_serial_delta, isize) + dynamic_serial_adjustment));
+                    const native_start_i: isize = ser_idx - (num_cast(move.native_to_serial_delta, isize) + dynamic_serial_adjustment);
+                    self.d_assert_with_reason(native_start_i >= 0, @src(), "(serial_idx + native_to_serial_delta + dynamic_serial_adjustment) would cause native index to go below zero", .{});
+                    const native_start: usize = @intCast(native_start_i);
                     const native_end = native_start + num_cast(move.copy_len, usize);
                     const serial_start = num_cast(ser_idx, usize);
                     const serial_end = serial_start + num_cast(move.copy_len, usize);
