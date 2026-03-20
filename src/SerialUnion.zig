@@ -49,9 +49,10 @@ const TypeId = std.builtin.TypeId;
 const Kind = Types.Kind;
 const KindInfo = Types.KindInfo;
 const DefinedLayout = Types.DefinedLayout;
-const SerializeModule = Root.Serializer.Simple;
+const SerializeModule = Root.Serializer;
 const SerialRoutineBuilder = SerializeModule.SerialRoutineBuilder;
-const ByteDataOp = SerializeModule.ByteDataOp;
+const ByteDataOp = SerializeModule.DataOp;
+const SerialSettings = SerializeModule.SerialSettings;
 
 /// Creates a struct type that can behave similar to tagged union, but has a well-defined memory layout
 /// for serialization or MMIO
@@ -66,7 +67,7 @@ const ByteDataOp = SerializeModule.ByteDataOp;
 ///
 /// `DECLS_` should be a struct type (possibly empty if no declarations are needed) that
 /// is attatched to the struct and holds only static declarations and has no fields
-pub fn HybridUnion(comptime TAGGED_UNION: type, comptime DECLS_: type, comptime UNION_LAYOUT: DefinedLayout) type {
+pub fn SerialUnion(comptime TAGGED_UNION: type, comptime DECLS_: type, comptime UNION_LAYOUT: DefinedLayout) type {
     Kind.STRUCT.assert_type_is_same_kind(DECLS_, @src());
     const DECL_INFO = KindInfo.get_kind_info(DECLS_).STRUCT;
     assert_with_reason(DECL_INFO.fields.len == 0, @src(), "`DECLS_` must not have any instance fields, only static declarations", .{});
@@ -80,7 +81,7 @@ pub fn HybridUnion(comptime TAGGED_UNION: type, comptime DECLS_: type, comptime 
         _1: if (TAG_AT_BEGIN) TAG else UNION,
         _2: if (TAG_AT_BEGIN) UNION else TAG,
 
-        const FUNCS = HybridUnionAdapter(Self, if (TAG_AT_BEGIN) "_1" else "_2", if (TAG_AT_BEGIN) "_2" else "_1");
+        const FUNCS = SerialUnionAdapter(Self, if (TAG_AT_BEGIN) "_1" else "_2", if (TAG_AT_BEGIN) "_2" else "_1");
 
         pub const DECLS = DECLS_;
         pub const TAG_TYPE = TAG;
@@ -96,6 +97,15 @@ pub fn HybridUnion(comptime TAGGED_UNION: type, comptime DECLS_: type, comptime 
             self.tag_set(tag);
             self.set(tag, val);
             return self;
+        }
+
+        pub fn equals(a: Self, b: Self) bool {
+            if (a.tag_get() != b.tag_get()) return false;
+            switch (a.tag_get()) {
+                inline else => |t| {
+                    return Utils.object_equals(a.get(t), b.get(t));
+                },
+            }
         }
 
         pub inline fn tag_parent_ptr(tag: *TAG) *Self {
@@ -124,6 +134,9 @@ pub fn HybridUnion(comptime TAGGED_UNION: type, comptime DECLS_: type, comptime 
             return switch (if (TAG_AT_BEGIN) self._1 else self._2) {
                 inline else => |active| @unionInit(TAGGED_UNION, @tagName(active), @field(if (TAG_AT_BEGIN) self._2 else self._1, @tagName(active))),
             };
+        }
+        pub inline fn tag_is_active(self: Self, tag: TAG) bool {
+            return self.tag_get() == tag;
         }
 
         pub inline fn tag_get(self: Self) TAG {
@@ -197,10 +210,10 @@ pub fn HybridUnion(comptime TAGGED_UNION: type, comptime DECLS_: type, comptime 
             FUNCS.set(self, tag, val);
         }
 
-        pub fn custom_serialize_routine(comptime builder: *SerialRoutineBuilder, comptime curr_native_offset_: i32, comptime TARGET_ENDIAN: Endian) void {
-            const tag_native_offset = curr_native_offset_ + TAG_OFFSET;
-            const union_native_offset = curr_native_offset_ + UNION_OFFSET;
-            comptime var union_builder = builder.start_union_routine_builder(tag_native_offset, TARGET_ENDIAN, TAG_TYPE, FIELD_COUNT);
+        pub fn custom_serialize_routine(comptime builder: *SerialRoutineBuilder, comptime curr_native_offset: usize, comptime SETTINGS: SerialSettings) void {
+            const tag_native_offset = curr_native_offset + TAG_OFFSET;
+            const union_native_offset = curr_native_offset + UNION_OFFSET;
+            comptime var union_builder = builder.start_union_routine_builder(tag_native_offset, SETTINGS, TAG_TYPE, FIELD_COUNT);
             inline for (@typeInfo(UNION).@"union".fields) |u_field| {
                 const tag_raw = find: {
                     inline for (@typeInfo(TAG_TYPE).@"enum".fields) |e_field| {
@@ -211,16 +224,16 @@ pub fn HybridUnion(comptime TAGGED_UNION: type, comptime DECLS_: type, comptime 
                     unreachable;
                 };
                 const tag_val: TAG = @enumFromInt(tag_raw);
-                union_builder.add_type(builder, tag_val, union_native_offset, TARGET_ENDIAN, u_field.type, 2000);
+                union_builder.add_type(builder, tag_val, union_native_offset, u_field.type, SETTINGS);
             }
-            union_builder.end_union_builder();
+            union_builder.end_union_builder(builder);
         }
     };
 }
 
 /// Returns a set of get/set functions that can be used within a parent struct to treat a pair of its bare union and enum tag fields as
 /// a psuedo tagged union
-pub fn HybridUnionAdapter(comptime PARENT_STRUCT: type, comptime tag_field: []const u8, comptime bare_union_field: []const u8) type {
+pub fn SerialUnionAdapter(comptime PARENT_STRUCT: type, comptime tag_field: []const u8, comptime bare_union_field: []const u8) type {
     Kind.STRUCT.assert_type_is_same_kind(PARENT_STRUCT, @src());
     assert_with_reason(@hasField(PARENT_STRUCT, tag_field), @src(), "`PARENT_STRUCT` must have union tag field `{s}`", .{tag_field});
     const TAG_TYPE = @FieldType(PARENT_STRUCT, tag_field);

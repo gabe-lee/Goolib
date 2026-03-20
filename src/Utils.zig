@@ -1667,3 +1667,85 @@ pub inline fn dereference_opaque(ptr: *const anyopaque, comptime T: type) T {
     const cast: *const T = @ptrCast(@alignCast(ptr));
     return cast.*;
 }
+
+/// Compares two of any type for equality. Containers that do not support comparison
+/// on their own are compared on a field-by-field basis. Pointers are not followed.
+///
+/// This functions is the same as `std.meta.eql()` EXCEPT that if a struct or union type `T` has a method `pub fn equals(a: T, b: T) bool`,
+/// it will call that function instead of the normal equality checks
+pub fn object_equals(a: anytype, b: @TypeOf(a)) bool {
+    const T = @TypeOf(a);
+    switch (@typeInfo(T)) {
+        .@"struct" => |info| {
+            if (@hasDecl(T, "equals") and @TypeOf(@field(T, "equals")) == fn (T, T) bool) {
+                return @call(.auto, @field(T, "equals"), .{ a, b });
+            }
+            if (info.layout == .@"packed") return a == b;
+
+            inline for (info.fields) |field_info| {
+                if (!object_equals(@field(a, field_info.name), @field(b, field_info.name))) return false;
+            }
+            return true;
+        },
+        .error_union => {
+            if (a) |a_p| {
+                if (b) |b_p| return object_equals(a_p, b_p) else |_| return false;
+            } else |a_e| {
+                if (b) |_| return false else |b_e| return a_e == b_e;
+            }
+        },
+        .@"union" => |info| {
+            if (@hasDecl(T, "equals") and @FieldType(T, "equals") == fn (T, T) bool) {
+                return @call(.auto, @field(T, "equals"), .{ a, b });
+            }
+            if (info.tag_type) |UnionTag| {
+                const tag_a: UnionTag = a;
+                const tag_b: UnionTag = b;
+                if (tag_a != tag_b) return false;
+
+                return switch (a) {
+                    inline else => |val, tag| return object_equals(val, @field(b, @tagName(tag))),
+                };
+            }
+
+            @compileError("cannot compare untagged union type " ++ @typeName(T));
+        },
+        .array => {
+            if (a.len != b.len) return false;
+            for (a, 0..) |e, i|
+                if (!object_equals(e, b[i])) return false;
+            return true;
+        },
+        .vector => |info| {
+            var i: usize = 0;
+            while (i < info.len) : (i += 1) {
+                if (!object_equals(a[i], b[i])) return false;
+            }
+            return true;
+        },
+        .pointer => |info| {
+            return switch (info.size) {
+                .one, .many, .c => a == b,
+                .slice => a.ptr == b.ptr and a.len == b.len,
+            };
+        },
+        .optional => {
+            if (a == null and b == null) return true;
+            if (a == null or b == null) return false;
+            return object_equals(a.?, b.?);
+        },
+        .@"enum" => {
+            if (@hasDecl(T, "equals") and @FieldType(T, "equals") == fn (T, T) bool) {
+                return @call(.auto, @field(T, "equals"), .{ a, b });
+            }
+            return a == b;
+        },
+        .@"opaque" => {
+            if (@hasDecl(T, "equals") and @FieldType(T, "equals") == fn (T, T) bool) {
+                return @call(.auto, @field(T, "equals"), .{ a, b });
+            }
+            assert_unreachable(@src(), "opaque types can only be tested for equality if they implement `pub fn equals(a: T, b: T) bool`", .{});
+        },
+        else => return a == b,
+    }
+}
