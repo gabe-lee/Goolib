@@ -59,9 +59,10 @@ pub const ByteOpKind = enum(u8) {
     NATIVE_TO_SERIAL_NO_SWAP_SAVE_TAG,
     NATIVE_TO_SERIAL_SWAP_SAVE_TAG,
     UNION_HEADER,
-    ROUTINE_OFFSET,
     UNION_TAG_ID,
-    SKIP_AHEAD_OPS,
+    UNION_ROUTINE_START,
+
+    UNION_ROUTINE_END,
 };
 
 pub const DataOp = union(ByteOpKind) {
@@ -70,9 +71,9 @@ pub const DataOp = union(ByteOpKind) {
     NATIVE_TO_SERIAL_NO_SWAP_SAVE_TAG: MemCopyMove,
     NATIVE_TO_SERIAL_SWAP_SAVE_TAG: MemCopyMove,
     UNION_HEADER: UnionHeader,
-    ROUTINE_OFFSET: usize,
     UNION_TAG_ID: u64,
-    SKIP_AHEAD_OPS: usize,
+    UNION_ROUTINE_START: UnionRoutineStart,
+    UNION_ROUTINE_END: UnionRoutineEndTemp,
 
     pub fn mem_move_no_swap(comptime native_to_serial_delta: i32, comptime copy_len: u32) DataOp {
         return DataOp{ .NATIVE_TO_SERIAL_NO_SWAP = .mem_copy_move(native_to_serial_delta, copy_len) };
@@ -93,14 +94,20 @@ pub const DataOp = union(ByteOpKind) {
     pub fn union_header(comptime num_fields: usize, comptime tag_type: type) DataOp {
         return DataOp{ .UNION_HEADER = UnionHeader{ .num_fields = @intCast(num_fields), .tag_type = OpaqueUnionTag.from_tag_type(tag_type) } };
     }
-    pub fn routine_offset(offset_to_routine: usize) DataOp {
-        return DataOp{ .ROUTINE_OFFSET = offset_to_routine };
+    pub fn union_routine_start(comptime offset_to_first_routine_op: u32, comptime total_num_ops: u32) DataOp {
+        return DataOp{ .UNION_ROUTINE_START = UnionRoutineStart{
+            .offset_to_first_routine_op = offset_to_first_routine_op,
+            .total_num_ops = total_num_ops,
+        } };
     }
     pub fn union_tag_id(comptime endian_tag_as_u64: u64) DataOp {
         return DataOp{ .UNION_TAG_ID = endian_tag_as_u64 };
     }
-    pub fn skip_ahead(comptime ops_to_skip: usize) DataOp {
-        return DataOp{ .SKIP_AHEAD_OPS = ops_to_skip };
+    pub fn union_routine_end_temp(comptime current_builder_op_len: usize, comptime this_routine_bytes: u32) DataOp {
+        return DataOp{ .UNION_ROUTINE_END = UnionRoutineEndTemp{
+            .delta = RoutineEndDelta{ .true_op_index_of_routine_end = @intCast(current_builder_op_len) },
+            .routine_serial_delta_adjustment = this_routine_bytes,
+        } };
     }
 
     pub fn can_combine(comptime prev: DataOp, comptime next: DataOp) ?DataOp {
@@ -111,6 +118,39 @@ pub const DataOp = union(ByteOpKind) {
         }
         return null;
     }
+};
+
+pub const UnionRoutineStart = struct {
+    offset_to_first_routine_op: u32,
+    total_num_ops: u32,
+};
+
+pub const UnionRoutineEndTemp = struct {
+    delta: RoutineEndDelta,
+    routine_serial_delta_adjustment: u32,
+
+    pub fn finalize(comptime self: *UnionRoutineEndTemp, comptime current_builder_op_len: usize) void {
+        const old_op_len: usize = @intCast(self.delta.true_op_index_of_routine_end);
+        const true_delta = current_builder_op_len - old_op_len;
+        self.delta = RoutineEndDelta{ .ops_to_advance_to_exit_union = @intCast(true_delta) };
+    }
+
+    pub fn concrete(comptime self: UnionRoutineEndTemp) UnionRoutineEnd {
+        return UnionRoutineEnd{
+            .ops_to_advance_to_exit_union = self.delta.ops_to_advance_to_exit_union,
+            .routine_serial_adjustment = self.routine_serial_delta_adjustment,
+        };
+    }
+};
+
+pub const UnionRoutineEnd = struct {
+    ops_to_advance_to_exit_union: u32,
+    routine_serial_adjustment: u32,
+};
+
+pub const RoutineEndDelta = union {
+    true_op_index_of_routine_end: u32,
+    ops_to_advance_to_exit_union: u32,
 };
 
 pub const MemCopyMove = struct {
@@ -246,51 +286,62 @@ pub const UnionHeader = struct {
 
 pub const UnionRoutineBuilder = struct {
     meta_data_ops: []DataOp,
-    skip_ahead_op_indexes: []usize,
-    skip_ahead_idx: usize = 0,
+    routine_end_op_indexes: []usize,
+    meta_data_ops_root: usize = 0,
+    routine_end_slot_idx: usize = 0,
     routine_idx: usize = 0,
     field_count: usize,
     routine_total_ops: usize = 0,
-    routine_union_serial_start: usize,
     union_tag_opaque: OpaqueUnionTag,
 
-    fn current_routine_offset(comptime self: *UnionRoutineBuilder) *u64 {
-        return &self.meta_data_ops[(self.routine_idx << 1) + 1].ROUTINE_OFFSET;
+    fn current_routine_start_op(comptime self: *UnionRoutineBuilder) *UnionRoutineStart {
+        return &self.meta_data_ops[(self.routine_idx << 1) + 1].UNION_ROUTINE_START;
     }
-    fn current_tag(comptime self: *UnionRoutineBuilder) *u64 {
+    fn current_routine_start_op_true_idx(comptime self: *UnionRoutineBuilder) usize {
+        return self.meta_data_ops_root + ((self.routine_idx << 1) + 1);
+    }
+    fn current_routine_tag_op(comptime self: *UnionRoutineBuilder) *u64 {
         return &self.meta_data_ops[self.routine_idx << 1].UNION_TAG_ID;
+    }
+    fn current_routine_tag_op_true_idx(comptime self: *UnionRoutineBuilder) usize {
+        return self.meta_data_ops_root + (self.routine_idx << 1);
+    }
+    fn delta_between_current_routine_start_op_idx_and_first_op_in_its_routine(comptime self: *UnionRoutineBuilder, comptime builder: *SerialRoutineBuilder) u32 {
+        const true_start = self.current_routine_start_op_true_idx();
+        const true_end = builder.ops_len;
+        return @intCast(true_end - true_start);
     }
 
     pub fn add_type(comptime self: *UnionRoutineBuilder, comptime builder: *SerialRoutineBuilder, comptime tag_value: anytype, comptime union_native_offset: usize, comptime TYPE: type, comptime SETTINGS: SerialSettings) void {
         const prev_serial_offset = builder.curr_serial_offset;
-        const curr_routine_offset = self.current_routine_offset();
-        const curr_tag = self.current_tag();
+        const prev_routine_ops_idx = builder.ops_len;
+        const curr_routine_start = self.current_routine_start_op();
+        const curr_tag_id = self.current_routine_tag_op();
+        // const curr_tag_id_op_true_idx = self.current_routine_tag_op_true_idx();
         const TAG_OPQ = OpaqueUnionTag.from_tag_type(@TypeOf(tag_value));
         builder.d_assert_with_reason(TAG_OPQ == self.union_tag_opaque, @src(), "opaque tag param from `tag_value` (`{s}`) does not match the one this union builder was created with (`{s}`)", .{ @tagName(TAG_OPQ), @tagName(self.union_tag_opaque) });
         const tag_u64 = TAG_OPQ.cast_tag_to_endian_u64(SETTINGS.TARGET_ENDIAN, tag_value);
-        curr_routine_offset.* += self.routine_total_ops;
-        curr_tag.* = tag_u64;
+        curr_routine_start.offset_to_first_routine_op = self.delta_between_current_routine_start_op_idx_and_first_op_in_its_routine(builder);
+        curr_tag_id.* = tag_u64;
         builder.add_type(union_native_offset, TYPE, SETTINGS);
-        const routine_size = builder.curr_serial_offset - prev_serial_offset;
-        self.routine_total_ops += routine_size;
-        self.routine_idx += 1;
+        const this_routine_bytes = builder.curr_serial_offset - prev_serial_offset;
         builder.ensure_space_for_n_more_ops(1);
-        builder.ops[builder.ops_len] = .skip_ahead(0);
-        self.skip_ahead_op_indexes[self.skip_ahead_idx] = @intCast(builder.ops_len);
+        builder.ops[builder.ops_len] = .union_routine_end_temp(builder.ops_len, this_routine_bytes);
+        self.routine_end_op_indexes[self.routine_end_slot_idx] = @intCast(builder.ops_len);
         builder.ops_len += 1;
-        self.skip_ahead_idx += 1;
-        builder.curr_serial_offset = self.routine_union_serial_start;
-        // CHECKPOINT
-        // Change `SkipAhead` to `UnionRoutineEnd` with an offset to the next op and a new `serial delta adjustment`
-        // during planning treat union portion of serial as 0 (dynamic from `serial delta adjustment`)
-        // during serialization, accumulate `serial delta adjustment` and add it to every call of `native_to_serial_delta` from the plan
+        self.routine_end_slot_idx += 1;
+        const routine_ops = (builder.ops_len - prev_routine_ops_idx) + 1;
+        curr_routine_start.total_num_ops = @intCast(routine_ops);
+        self.routine_total_ops += routine_ops;
+        self.routine_idx += 1;
+        builder.curr_serial_offset = prev_serial_offset;
     }
 
     pub fn end_union_builder(comptime self: *UnionRoutineBuilder, comptime builder: *SerialRoutineBuilder) void {
         builder.d_assert_with_reason(self.routine_idx == self.field_count, @src(), "cannot end union serial routine builder: not all field tags had routines specified", .{});
-        for (self.skip_ahead_op_indexes) |skip_ahead_op_idx| {
-            const delta: u32 = @intCast(builder.ops_len - num_cast(skip_ahead_op_idx, usize));
-            builder.ops[skip_ahead_op_idx].SKIP_AHEAD_OPS = delta;
+        for (self.routine_end_op_indexes) |routine_end_op_idx| {
+            const routine_end: *UnionRoutineEndTemp = &builder.ops[routine_end_op_idx].UNION_ROUTINE_END;
+            routine_end.finalize(builder.ops_len);
         }
         builder.curr_union_depth -= 1;
         builder.skip_ahead_len -= self.field_count;
@@ -330,7 +381,7 @@ pub const SerialSettings = struct {
     TARGET_ENDIAN: Endian = .LITTLE_ENDIAN,
     EVAL_QUOTA: u32 = 5000,
     ADD_ROUTINE_DEBUG_INFO: bool = false,
-    TARGET_DEBUG_INDEX: ?usize = 0,
+    TARGET_DEBUG_INDEX: ?usize = null,
     // COMPRESS_INT: bool = false,
 };
 
@@ -361,7 +412,10 @@ pub const SerialRoutineBuilder = struct {
         self.curr_union_depth = 0;
         self.max_union_depth = 0;
         self.debug_stack_len = 0;
+        self.debug_target = null;
         self.debug_target_printed = false;
+        self.max_union_depth = 0;
+        self.curr_union_depth = 0;
     }
 
     fn d_assert_with_reason(comptime self: *SerialRoutineBuilder, condition: bool, comptime src_loc: ?std.builtin.SourceLocation, reason_fmt: []const u8, reason_args: anytype) void {
@@ -396,7 +450,14 @@ pub const SerialRoutineBuilder = struct {
         SERIAL_TO_NATIVE,
     };
 
-    /// This is an un-optimized, comptime-only function that will run the serial routine on opaque test data to ensure proper operation
+    const TEST_SER_MODE = enum(u8) {
+        NORMAL,
+        NEED_UNION_TAG_SERIAL_CAPTURE_NEXT,
+        NEED_UNION_TAG_ID_NEXT,
+        NEED_UNION_START_NEXT,
+    };
+
+    /// This is an un-optimized, comptime-only function that will run the serial/deserial routine on opaque test data to ensure proper operation
     ///
     /// For an optimized runtime method, you must use `SerialRoutineBuilder.finalize()` to produce a concrete serializer type for the current
     /// specific serial object.
@@ -405,24 +466,19 @@ pub const SerialRoutineBuilder = struct {
         comptime var tag_got: u64 = undefined;
         comptime var num_tags_this_union: u32 = 0;
         comptime var tags_checked_this_union: u32 = 0;
-        comptime var save_tag_must_come_next: bool = false;
-        comptime var routine_offset_must_come_next: bool = false;
-        comptime var routine_tag_id_must_come_next: bool = false;
-        comptime var allowed_to_have_union_header: bool = true;
-        comptime var allowed_normal_move: bool = true;
-        comptime var allowed_skip_ahead: bool = true;
+        comptime var allowed_union_ends: u32 = 0;
         comptime var op_idx: usize = 0;
+        comptime var dynamic_serial_adjustment: isize = 0;
+        comptime var mode: TEST_SER_MODE = .NORMAL;
         while (op_idx < self.ops_len) {
             const op = self.ops[op_idx];
             switch (op) {
                 .NATIVE_TO_SERIAL_NO_SWAP => |move| {
-                    self.d_assert_with_reason(!save_tag_must_come_next, @src(), "the op immediately following a union header MUST be a 'save tag' move", .{});
-                    self.d_assert_with_reason(allowed_normal_move, @src(), "a data move is not allowed here", .{});
-                    // @compileLog(ser_idx); //DEBUG
+                    self.d_assert_with_reason(mode == .NORMAL, @src(), "must be in `.NORMAL` mode for this op, curr mode is `{s}`", .{@tagName(mode)});
                     self.d_assert_with_reason(ser_idx >= move.native_to_serial_delta, @src(), "native_to_serial_delta would cause serial index to go below zero", .{});
-                    const native_start: usize = @intCast(ser_idx - num_cast(move.native_to_serial_delta, isize));
+                    const native_start: usize = @intCast(ser_idx - (num_cast(move.native_to_serial_delta, isize) + dynamic_serial_adjustment));
                     const native_end = native_start + num_cast(move.copy_len, usize);
-                    const serial_start = num_cast(ser_idx, usize);
+                    const serial_start = num_cast(ser_idx, usize) + dynamic_serial_adjustment;
                     const serial_end = serial_start + num_cast(move.copy_len, usize);
                     switch (DIRECTION) {
                         .NATIVE_TO_SERIAL => {
@@ -436,12 +492,11 @@ pub const SerialRoutineBuilder = struct {
                     op_idx += 1;
                 },
                 .NATIVE_TO_SERIAL_SWAP => |move| {
-                    self.d_assert_with_reason(!save_tag_must_come_next, @src(), "the op immediately following a union header MUST be a 'save tag' move", .{});
-                    self.d_assert_with_reason(allowed_normal_move, @src(), "a data move is not allowed here", .{});
+                    self.d_assert_with_reason(mode == .NORMAL, @src(), "must be in `.NORMAL` mode for this op, curr mode is `{s}`", .{@tagName(mode)});
                     self.d_assert_with_reason(ser_idx > move.native_to_serial_delta, @src(), "native_to_serial_delta would cause serial index to go below zero", .{});
-                    const native_start: usize = @intCast(ser_idx - num_cast(move.native_to_serial_delta, isize));
+                    const native_start: usize = @intCast(ser_idx - (num_cast(move.native_to_serial_delta, isize) + dynamic_serial_adjustment));
                     const native_end = native_start + num_cast(move.copy_len, usize);
-                    const serial_start = num_cast(ser_idx, usize);
+                    const serial_start = num_cast(ser_idx, usize) + dynamic_serial_adjustment;
                     const serial_end = serial_start + num_cast(move.copy_len, usize);
                     comptime var sidx: usize = num_cast(ser_idx, usize);
                     comptime var nidx: usize = native_end;
@@ -460,11 +515,11 @@ pub const SerialRoutineBuilder = struct {
                     op_idx += 1;
                 },
                 .NATIVE_TO_SERIAL_NO_SWAP_SAVE_TAG => |move| {
-                    self.d_assert_with_reason(save_tag_must_come_next, @src(), "can only save a union tag from serial data immediately following a `UnionHeader` op", .{});
+                    self.d_assert_with_reason(mode == .NEED_UNION_TAG_SERIAL_CAPTURE_NEXT, @src(), "must be in `.NEED_UNION_TAG_SERIAL_CAPTURE_NEXT` mode for this op, curr mode is `{s}`", .{@tagName(mode)});
                     self.d_assert_with_reason(ser_idx > move.native_to_serial_delta, @src(), "native_to_serial_delta would cause serial index to go below zero", .{});
-                    const native_start: usize = @intCast(ser_idx - num_cast(move.native_to_serial_delta, isize));
+                    const native_start: usize = @intCast(ser_idx - (num_cast(move.native_to_serial_delta, isize) + dynamic_serial_adjustment));
                     const native_end = native_start + num_cast(move.copy_len, usize);
-                    const serial_start = num_cast(ser_idx, usize);
+                    const serial_start = num_cast(ser_idx, usize) + dynamic_serial_adjustment;
                     const serial_end = serial_start + num_cast(move.copy_len, usize);
                     switch (DIRECTION) {
                         .NATIVE_TO_SERIAL => {
@@ -477,13 +532,12 @@ pub const SerialRoutineBuilder = struct {
                     ser_idx += num_cast(move.copy_len, isize);
                     op_idx += 1;
                     tag_got = OpaqueUnionTag.cast_endian_serial_to_endian_u64_any(serial_slice[serial_start..serial_end]);
-                    save_tag_must_come_next = false;
-                    routine_tag_id_must_come_next = true;
+                    mode = .NEED_UNION_TAG_ID_NEXT;
                 },
                 .NATIVE_TO_SERIAL_SWAP_SAVE_TAG => |move| {
-                    self.d_assert_with_reason(save_tag_must_come_next, @src(), "can only save a union tag from serial data immediately following a `UnionHeader` op", .{});
+                    self.d_assert_with_reason(mode == .NEED_UNION_TAG_SERIAL_CAPTURE_NEXT, @src(), "must be in `.NEED_UNION_TAG_SERIAL_CAPTURE_NEXT` mode for this op, curr mode is `{s}`", .{@tagName(mode)});
                     self.d_assert_with_reason(ser_idx > move.native_to_serial_delta, @src(), "native_to_serial_delta would cause serial index to go below zero", .{});
-                    const native_start: usize = @intCast(ser_idx - num_cast(move.native_to_serial_delta, isize));
+                    const native_start: usize = @intCast(ser_idx - (num_cast(move.native_to_serial_delta, isize) + dynamic_serial_adjustment));
                     const native_end = native_start + num_cast(move.copy_len, usize);
                     const serial_start = num_cast(ser_idx, usize);
                     const serial_end = serial_start + num_cast(move.copy_len, usize);
@@ -503,32 +557,19 @@ pub const SerialRoutineBuilder = struct {
                     ser_idx += num_cast(move.copy_len, isize);
                     op_idx += 1;
                     tag_got = OpaqueUnionTag.cast_endian_serial_to_endian_u64_any(serial_slice[serial_start..serial_end]);
-                    save_tag_must_come_next = false;
-                    routine_tag_id_must_come_next = true;
+                    mode = .NEED_UNION_TAG_ID_NEXT;
                 },
                 .UNION_HEADER => |header| {
-                    self.d_assert_with_reason(allowed_to_have_union_header, @src(), "cannot have another union header in the middle of a union meta group", .{});
+                    self.d_assert_with_reason(mode == .NORMAL, @src(), "must be in `.NORMAL` mode for this op, curr mode is `{s}`", .{@tagName(mode)});
                     num_tags_this_union = header.num_fields;
                     tags_checked_this_union = 0;
                     op_idx += 1;
-                    save_tag_must_come_next = true;
-                    allowed_to_have_union_header = false;
-                    allowed_normal_move = false;
-                    allowed_skip_ahead = false;
-                },
-                .ROUTINE_OFFSET => |offset_to_routine_ops| {
-                    self.d_assert_with_reason(routine_offset_must_come_next, @src(), "a routine offset can only come directly after a routine tag id", .{});
-                    op_idx += offset_to_routine_ops;
-                    routine_offset_must_come_next = false;
-                    allowed_to_have_union_header = true;
-                    allowed_normal_move = true;
-                    allowed_skip_ahead = true;
+                    mode = .NEED_UNION_TAG_SERIAL_CAPTURE_NEXT;
                 },
                 .UNION_TAG_ID => |tag_match| {
-                    self.d_assert_with_reason(routine_tag_id_must_come_next, @src(), "a routine tag id can only come directly after the tag serial capture or after a previous routine offset", .{});
+                    self.d_assert_with_reason(mode == .NEED_UNION_TAG_ID_NEXT, @src(), "must be in `.NEED_UNION_TAG_ID_NEXT` mode for this op, curr mode is `{s}`", .{@tagName(mode)});
                     if (tag_got == tag_match) {
-                        routine_offset_must_come_next = true;
-                        routine_tag_id_must_come_next = false;
+                        mode = .NEED_UNION_START_NEXT;
                         op_idx += 1;
                     } else {
                         op_idx += 2;
@@ -536,9 +577,18 @@ pub const SerialRoutineBuilder = struct {
                         self.d_assert_with_reason(tags_checked_this_union < num_tags_this_union, @src(), "did not find a match for the captured union tag. If the provided native tag is valid, there is something wrong with the SerialRoutineBuilder internal logic, otherwise it may be an issue with the test data. At runtime this should never happen, as the data source comes from zig-validated types", .{});
                     }
                 },
-                .SKIP_AHEAD_OPS => |num_to_skip| {
-                    self.d_assert_with_reason(allowed_skip_ahead, @src(), "cannot skip ahead here", .{});
-                    op_idx += num_to_skip;
+                .UNION_ROUTINE_START => |routine_start| {
+                    self.d_assert_with_reason(mode == .NEED_UNION_START_NEXT, @src(), "must be in `.NEED_UNION_START_NEXT` mode for this op, curr mode is `{s}`", .{@tagName(mode)});
+                    op_idx += routine_start.offset_to_first_routine_op;
+                    mode = .NORMAL;
+                    allowed_union_ends += 1;
+                },
+                .UNION_ROUTINE_END => |routine_end| {
+                    self.d_assert_with_reason(mode == .NORMAL, @src(), "must be in `.NORMAL` mode for this op, curr mode is `{s}`", .{@tagName(mode)});
+                    self.d_assert_with_reason(allowed_union_ends > 0, @src(), "union ends not allowed here (no union routine has been started)", .{});
+                    allowed_union_ends -= 1;
+                    op_idx += num_cast(routine_end.delta.ops_to_advance_to_exit_union, u32);
+                    dynamic_serial_adjustment += num_cast(routine_end.routine_serial_delta_adjustment, isize);
                 },
             }
         }
@@ -621,31 +671,31 @@ pub const SerialRoutineBuilder = struct {
         self.ops[self.ops_len] = .union_header(FIELD_COUNT, TAG_TYPE);
         self.ops_len += 1;
         self.add_endian_bytes(tag_native_offset, UTAG_SIZE, SETTINGS, .IS_A_UNION_TAG);
-        const tag_to_routine_slots = self.add_union_meta_slots(META_SLOT_COUNT);
+        const meta_slots: []DataOp, const meta_root: usize = self.add_union_meta_slots(META_SLOT_COUNT);
         comptime var tag_to_routine_offset: usize = META_SLOT_COUNT;
         comptime var tag_to_routine_idx: usize = 0;
         while (tag_to_routine_idx < FIELD_COUNT) {
             const real_idx = tag_to_routine_idx << 1;
-            tag_to_routine_slots[real_idx] = .union_tag_id(0);
-            tag_to_routine_slots[real_idx + 1] = .routine_offset(tag_to_routine_offset - 1);
+            meta_slots[real_idx] = .union_tag_id(0);
+            meta_slots[real_idx + 1] = .union_routine_start(tag_to_routine_offset - 1, 0);
             tag_to_routine_offset -= 2;
             tag_to_routine_idx += 1;
         }
         self.curr_union_depth += 1;
         self.max_union_depth = @max(self.max_union_depth, self.curr_union_depth);
         return UnionRoutineBuilder{
-            .meta_data_ops = tag_to_routine_slots,
+            .meta_data_ops = meta_slots,
+            .meta_data_ops_root = meta_root,
             .union_tag_opaque = UTAG,
             .field_count = FIELD_COUNT,
-            .skip_ahead_op_indexes = skip_ahead_slots,
-            .routine_union_serial_start = self.curr_serial_offset,
+            .routine_end_op_indexes = skip_ahead_slots,
         };
     }
-    pub fn add_union_meta_slots(comptime self: *SerialRoutineBuilder, comptime COUNT: usize) []DataOp {
+    pub fn add_union_meta_slots(comptime self: *SerialRoutineBuilder, comptime COUNT: usize) struct { []DataOp, usize } {
         self.ensure_space_for_n_more_ops(COUNT);
         const start = self.ops_len;
         self.ops_len += COUNT;
-        return self.ops.ptr[start..self.ops_len];
+        return .{ self.ops.ptr[start..self.ops_len], start };
     }
     pub fn add_type_with_custom_serializer(comptime self: *SerialRoutineBuilder, comptime curr_native_offset: usize, comptime TYPE: type, comptime SETTINGS: SerialSettings) void {
         self.d_assert_with_reason(type_has_custom_serialize(TYPE), @src(), "type `{s}` does not have a custom serialize function", .{@typeName(TYPE)});
@@ -916,18 +966,22 @@ test SerialRoutineBuilder {
             pub const EXAMPLE_5 = Serial.new(.PET, DogOrCat.EXAMPLE_3);
             pub const EXAMPLE_6 = Serial.new(.PET, DogOrCat.EXAMPLE_4);
         };
+        const MAGIC: [4]u8 = .{ '1', '2', '3', '4' };
         const TestStruct = extern struct {
             version: u32 = 1,
             timestamp: i64 = 1999_12_01,
             msg: PetOrPerson.Serial = PetOrPerson.EXAMPLE_1,
+            magic: [4]u8 = MAGIC,
+            msg_2: PetOrPerson.Serial = PetOrPerson.EXAMPLE_3,
+            magic_2: [4]u8 = MAGIC,
 
-            pub const EXAMPLE_0 = @This(){ .msg = PetOrPerson.EXAMPLE_1, .timestamp = 1234_56_78 };
-            pub const EXAMPLE_1 = @This(){ .msg = PetOrPerson.EXAMPLE_1, .timestamp = 1999_12_01 };
-            pub const EXAMPLE_2 = @This(){ .msg = PetOrPerson.EXAMPLE_2, .timestamp = 1999_12_02 };
-            pub const EXAMPLE_3 = @This(){ .msg = PetOrPerson.EXAMPLE_3, .timestamp = 1999_12_03 };
-            pub const EXAMPLE_4 = @This(){ .msg = PetOrPerson.EXAMPLE_4, .timestamp = 1999_12_04 };
-            pub const EXAMPLE_5 = @This(){ .msg = PetOrPerson.EXAMPLE_5, .timestamp = 1999_12_05 };
-            pub const EXAMPLE_6 = @This(){ .msg = PetOrPerson.EXAMPLE_6, .timestamp = 1999_12_06 };
+            pub const EXAMPLE_0 = @This(){ .msg = PetOrPerson.EXAMPLE_1, .msg_2 = PetOrPerson.EXAMPLE_1, .timestamp = 1234_56_78 };
+            pub const EXAMPLE_1 = @This(){ .msg = PetOrPerson.EXAMPLE_1, .msg_2 = PetOrPerson.EXAMPLE_3, .timestamp = 1999_12_01 };
+            pub const EXAMPLE_2 = @This(){ .msg = PetOrPerson.EXAMPLE_2, .msg_2 = PetOrPerson.EXAMPLE_4, .timestamp = 1999_12_02 };
+            pub const EXAMPLE_3 = @This(){ .msg = PetOrPerson.EXAMPLE_3, .msg_2 = PetOrPerson.EXAMPLE_5, .timestamp = 1999_12_03 };
+            pub const EXAMPLE_4 = @This(){ .msg = PetOrPerson.EXAMPLE_4, .msg_2 = PetOrPerson.EXAMPLE_6, .timestamp = 1999_12_04 };
+            pub const EXAMPLE_5 = @This(){ .msg = PetOrPerson.EXAMPLE_5, .msg_2 = PetOrPerson.EXAMPLE_1, .timestamp = 1999_12_05 };
+            pub const EXAMPLE_6 = @This(){ .msg = PetOrPerson.EXAMPLE_6, .msg_2 = PetOrPerson.EXAMPLE_2, .timestamp = 1999_12_06 };
         };
         var test_struct_in = TestStruct.EXAMPLE_1;
         var test_struct_out = TestStruct.EXAMPLE_2;
@@ -938,9 +992,8 @@ test SerialRoutineBuilder {
         builder.debug_stack = debug_buf[0..1024];
         const settings = SerialSettings{
             .TARGET_ENDIAN = .LITTLE_ENDIAN,
-            .EVAL_QUOTA = 10000,
+            .EVAL_QUOTA = 50000,
             .ADD_ROUTINE_DEBUG_INFO = false,
-            .TARGET_DEBUG_INDEX = 13,
         };
         builder.build_routine_for_type(TestStruct, settings);
         var test_serial: [1024]u8 = undefined;
@@ -957,7 +1010,6 @@ test SerialRoutineBuilder {
             TestStruct.EXAMPLE_6,
         };
         for (test_cases[0..], 0..) |case_struct, i| {
-            @compileLog(i);
             test_struct_in = case_struct;
             test_struct_out = TestStruct.EXAMPLE_0;
             serial_len_in = builder.test_serialize(input_native_bytes, test_serial[0..1024]);
