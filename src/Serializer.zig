@@ -53,6 +53,104 @@ const DEBUG_CT = Utils.comptime_debug_print;
 
 pub const NATIVE_ENDIAN = Endian.NATIVE;
 
+pub const SerialWriteError = error{
+    serial_destination_ran_out_of_space,
+    unknown_write_error,
+    union_tag_in_native_didnt_match_any_valid_tag,
+};
+
+pub const SerialReadError = error{
+    serial_source_ran_out_of_data,
+    unknown_read_error,
+    union_tag_in_serial_didnt_match_any_valid_tag,
+};
+
+const SerialKind = enum(u8) { SLICE, READER_WRITER };
+
+const SerialSource = union {
+    slice: []const u8,
+    reader: *std.Io.Reader,
+
+    pub fn read_data_in_order(self: SerialSource, comptime KIND: SerialKind, native_slice: []u8, native_start: usize, native_end: usize, serial_start: usize, serial_end: usize) SerialReadError!void {
+        switch (KIND) {
+            .SLICE => {
+                const serial_data = self.slice;
+                if (serial_end > serial_data.len) return SerialReadError.serial_source_ran_out_of_data;
+                @memcpy(native_slice[native_start..native_end], serial_data[serial_start..serial_end]);
+            },
+            .READER_WRITER => {
+                const reader = self.reader;
+                reader.readSliceAll(native_slice[native_start..native_end]) catch |err| switch (err) {
+                    .ReadFailed => return SerialReadError.unknown_read_error,
+                    .EndOfStream => return SerialReadError.serial_source_ran_out_of_data,
+                };
+            },
+        }
+    }
+    pub fn read_data_swap(self: SerialSource, comptime KIND: SerialKind, native_slice: []u8, native_start: usize, native_end: usize, serial_start: usize, serial_end: usize) SerialReadError!void {
+        switch (KIND) {
+            .SLICE => {
+                const serial_data = self.slice;
+                if (serial_end > serial_data.len) return SerialReadError.serial_source_ran_out_of_data;
+                var sidx: usize = serial_start;
+                var nidx: usize = native_end;
+                while (sidx < serial_end) : (sidx += 1) {
+                    nidx -= 1;
+                    native_slice[nidx] = serial_data[sidx];
+                }
+            },
+            .READER_WRITER => {
+                const reader = self.reader;
+                reader.readSliceAll(native_slice[native_start..native_end]) catch |err| switch (err) {
+                    .ReadFailed => return SerialReadError.unknown_read_error,
+                    .EndOfStream => return SerialReadError.serial_source_ran_out_of_data,
+                };
+                std.mem.reverse(u8, native_slice[native_start..native_end]);
+            },
+        }
+    }
+};
+const SerialDest = union {
+    slice: []u8,
+    writer: *std.Io.Writer,
+
+    pub fn write_data_in_order(self: SerialDest, comptime KIND: SerialKind, native_data: []const u8, native_start: usize, native_end: usize, serial_start: usize, serial_end: usize) SerialWriteError!void {
+        switch (KIND) {
+            .SLICE => {
+                const serial_slice = self.slice;
+                @memcpy(serial_slice[serial_start..serial_end], native_data[native_start..native_end]);
+            },
+            .READER_WRITER => {
+                const writer = self.writer;
+                writer.writeAll(native_data[native_start..native_end]) catch return SerialWriteError.serial_destination_ran_out_of_space;
+            },
+        }
+    }
+    pub fn write_data_swap(self: SerialDest, comptime KIND: SerialKind, native_data: []const u8, native_start: usize, native_end: usize, serial_start: usize, serial_end: usize) SerialWriteError!void {
+        _ = native_start;
+        switch (KIND) {
+            .SLICE => {
+                const serial_slice = self.slice;
+                var sidx: usize = serial_start;
+                var nidx: usize = native_end;
+                while (sidx < serial_end) : (sidx += 1) {
+                    nidx -= 1;
+                    serial_slice[sidx] = native_data[nidx];
+                }
+            },
+            .READER_WRITER => {
+                const writer = self.writer;
+                var sidx: usize = serial_start;
+                var nidx: usize = native_end;
+                while (sidx < serial_end) : (sidx += 1) {
+                    nidx -= 1;
+                    writer.writeByte(native_data[nidx]) catch return SerialWriteError.serial_destination_ran_out_of_space;
+                }
+            },
+        }
+    }
+};
+
 pub const ByteOpKind = enum(u8) {
     NATIVE_TO_SERIAL_NO_SWAP,
     NATIVE_TO_SERIAL_SWAP,
@@ -61,7 +159,7 @@ pub const ByteOpKind = enum(u8) {
     UNION_HEADER,
     UNION_TAG_ID,
     UNION_ROUTINE_START,
-
+    UNION_ROUTINE_END_TEMP,
     UNION_ROUTINE_END,
 };
 
@@ -73,7 +171,8 @@ pub const DataOp = union(ByteOpKind) {
     UNION_HEADER: UnionHeader,
     UNION_TAG_ID: u64,
     UNION_ROUTINE_START: UnionRoutineStart,
-    UNION_ROUTINE_END: UnionRoutineEndTemp,
+    UNION_ROUTINE_END_TEMP: UnionRoutineEndTemp,
+    UNION_ROUTINE_END: UnionRoutineEnd,
 
     pub fn mem_move_no_swap(comptime native_to_serial_delta: i32, comptime copy_len: u32) DataOp {
         return DataOp{ .NATIVE_TO_SERIAL_NO_SWAP = .mem_copy_move(native_to_serial_delta, copy_len) };
@@ -104,7 +203,7 @@ pub const DataOp = union(ByteOpKind) {
         return DataOp{ .UNION_TAG_ID = endian_tag_as_u64 };
     }
     pub fn union_routine_end_temp(comptime current_builder_op_len: usize, comptime this_routine_bytes: u32) DataOp {
-        return DataOp{ .UNION_ROUTINE_END = UnionRoutineEndTemp{
+        return DataOp{ .UNION_ROUTINE_END_TEMP = UnionRoutineEndTemp{
             .delta = RoutineEndDelta{ .true_op_index_of_routine_end = @intCast(current_builder_op_len) },
             .routine_serial_delta_adjustment = this_routine_bytes,
         } };
@@ -138,14 +237,14 @@ pub const UnionRoutineEndTemp = struct {
     pub fn concrete(comptime self: UnionRoutineEndTemp) UnionRoutineEnd {
         return UnionRoutineEnd{
             .ops_to_advance_to_exit_union = self.delta.ops_to_advance_to_exit_union,
-            .routine_serial_adjustment = self.routine_serial_delta_adjustment,
+            .routine_serial_delta_adjustment = self.routine_serial_delta_adjustment,
         };
     }
 };
 
 pub const UnionRoutineEnd = struct {
     ops_to_advance_to_exit_union: u32,
-    routine_serial_adjustment: u32,
+    routine_serial_delta_adjustment: u32,
 };
 
 pub const RoutineEndDelta = union {
@@ -241,6 +340,13 @@ pub const OpaqueUnionTag = enum(u8) {
         var u64_bytes: [8]u8 align(8) = @splat(0);
         assert_with_reason(serial.len == 1 or serial.len == 2 or serial.len == 4 or serial.len == 8, @src(), "serial wrong len", .{});
         @memcpy(u64_bytes[0..serial.len], serial);
+        return @bitCast(u64_bytes);
+    }
+    pub fn cast_serial_and_swap_to_endian_u64_any(serial: []const u8) u64 {
+        var u64_bytes: [8]u8 align(8) = @splat(0);
+        assert_with_reason(serial.len == 1 or serial.len == 2 or serial.len == 4 or serial.len == 8, @src(), "serial wrong len", .{});
+        @memcpy(u64_bytes[0..serial.len], serial);
+        std.mem.reverse(u8, u64_bytes[0..serial.len]);
         return @bitCast(u64_bytes);
     }
     pub fn cast_tag_to_endian_u64(comptime self: OpaqueUnionTag, comptime TARGET_ENDIAN: Endian, tag: anytype) u64 {
@@ -340,7 +446,7 @@ pub const UnionRoutineBuilder = struct {
     pub fn end_union_builder(comptime self: *UnionRoutineBuilder, comptime builder: *SerialRoutineBuilder) void {
         builder.d_assert_with_reason(self.routine_idx == self.field_count, @src(), "cannot end union serial routine builder: not all field tags had routines specified", .{});
         for (self.routine_end_op_indexes) |routine_end_op_idx| {
-            const routine_end: *UnionRoutineEndTemp = &builder.ops[routine_end_op_idx].UNION_ROUTINE_END;
+            const routine_end: *UnionRoutineEndTemp = &builder.ops[routine_end_op_idx].UNION_ROUTINE_END_TEMP;
             routine_end.finalize(builder.ops_len);
         }
         builder.curr_union_depth -= 1;
@@ -386,6 +492,8 @@ pub const SerialSettings = struct {
 };
 
 pub const SerialRoutineBuilder = struct {
+    root_type: ?type = null,
+    endian: Endian = .NATIVE,
     ops: []DataOp = &.{},
     skip_ahead_stack: []usize = &.{},
     debug_stack: []u8 = &.{},
@@ -398,14 +506,15 @@ pub const SerialRoutineBuilder = struct {
     curr_union_depth: u32 = 0,
     max_union_depth: u32 = 0,
 
-    pub fn init(comptime op_buffer: []DataOp, comptime skip_ahead_buffer: []usize) SerialRoutineBuilder {
+    pub fn init(comptime op_buffer: []DataOp, comptime union_end_buffer: []usize) SerialRoutineBuilder {
         return SerialRoutineBuilder{
             .ops = op_buffer,
-            .skip_ahead_stack = skip_ahead_buffer,
+            .skip_ahead_stack = union_end_buffer,
         };
     }
 
     pub fn reset(comptime self: *SerialRoutineBuilder) void {
+        self.root_type = null;
         self.curr_serial_offset = 0;
         self.skip_ahead_len = 0;
         self.ops_len = 0;
@@ -416,6 +525,7 @@ pub const SerialRoutineBuilder = struct {
         self.debug_target_printed = false;
         self.max_union_depth = 0;
         self.curr_union_depth = 0;
+        self.endian = .LITTLE_ENDIAN;
     }
 
     fn d_assert_with_reason(comptime self: *SerialRoutineBuilder, condition: bool, comptime src_loc: ?std.builtin.SourceLocation, reason_fmt: []const u8, reason_args: anytype) void {
@@ -445,18 +555,6 @@ pub const SerialRoutineBuilder = struct {
         }
     }
 
-    const SER_DIR = enum(u8) {
-        NATIVE_TO_SERIAL,
-        SERIAL_TO_NATIVE,
-    };
-
-    const TEST_SER_MODE = enum(u8) {
-        NORMAL,
-        NEED_UNION_TAG_SERIAL_CAPTURE_NEXT,
-        NEED_UNION_TAG_ID_NEXT,
-        NEED_UNION_START_NEXT,
-    };
-
     /// This is an un-optimized, comptime-only function that will run the serial/deserial routine on opaque test data to ensure proper operation
     ///
     /// For an optimized runtime method, you must use `SerialRoutineBuilder.finalize()` to produce a concrete serializer type for the current
@@ -478,7 +576,7 @@ pub const SerialRoutineBuilder = struct {
                     self.d_assert_with_reason(ser_idx >= move.native_to_serial_delta, @src(), "native_to_serial_delta would cause serial index to go below zero", .{});
                     const native_start: usize = @intCast(ser_idx - (num_cast(move.native_to_serial_delta, isize) + dynamic_serial_adjustment));
                     const native_end = native_start + num_cast(move.copy_len, usize);
-                    const serial_start = num_cast(ser_idx, usize) + dynamic_serial_adjustment;
+                    const serial_start = num_cast(ser_idx, usize);
                     const serial_end = serial_start + num_cast(move.copy_len, usize);
                     switch (DIRECTION) {
                         .NATIVE_TO_SERIAL => {
@@ -496,7 +594,7 @@ pub const SerialRoutineBuilder = struct {
                     self.d_assert_with_reason(ser_idx > move.native_to_serial_delta, @src(), "native_to_serial_delta would cause serial index to go below zero", .{});
                     const native_start: usize = @intCast(ser_idx - (num_cast(move.native_to_serial_delta, isize) + dynamic_serial_adjustment));
                     const native_end = native_start + num_cast(move.copy_len, usize);
-                    const serial_start = num_cast(ser_idx, usize) + dynamic_serial_adjustment;
+                    const serial_start = num_cast(ser_idx, usize);
                     const serial_end = serial_start + num_cast(move.copy_len, usize);
                     comptime var sidx: usize = num_cast(ser_idx, usize);
                     comptime var nidx: usize = native_end;
@@ -519,7 +617,7 @@ pub const SerialRoutineBuilder = struct {
                     self.d_assert_with_reason(ser_idx > move.native_to_serial_delta, @src(), "native_to_serial_delta would cause serial index to go below zero", .{});
                     const native_start: usize = @intCast(ser_idx - (num_cast(move.native_to_serial_delta, isize) + dynamic_serial_adjustment));
                     const native_end = native_start + num_cast(move.copy_len, usize);
-                    const serial_start = num_cast(ser_idx, usize) + dynamic_serial_adjustment;
+                    const serial_start = num_cast(ser_idx, usize);
                     const serial_end = serial_start + num_cast(move.copy_len, usize);
                     switch (DIRECTION) {
                         .NATIVE_TO_SERIAL => {
@@ -583,13 +681,14 @@ pub const SerialRoutineBuilder = struct {
                     mode = .NORMAL;
                     allowed_union_ends += 1;
                 },
-                .UNION_ROUTINE_END => |routine_end| {
+                .UNION_ROUTINE_END_TEMP => |routine_end| {
                     self.d_assert_with_reason(mode == .NORMAL, @src(), "must be in `.NORMAL` mode for this op, curr mode is `{s}`", .{@tagName(mode)});
                     self.d_assert_with_reason(allowed_union_ends > 0, @src(), "union ends not allowed here (no union routine has been started)", .{});
                     allowed_union_ends -= 1;
                     op_idx += num_cast(routine_end.delta.ops_to_advance_to_exit_union, u32);
                     dynamic_serial_adjustment += num_cast(routine_end.routine_serial_delta_adjustment, isize);
                 },
+                else => assert_unreachable(@src(), "op `{s}` is not allowed here", .{@tagName(op)}),
             }
         }
         return @intCast(ser_idx);
@@ -611,11 +710,35 @@ pub const SerialRoutineBuilder = struct {
         return self.test_serialize_internal(native_slice, serial_slice, .SERIAL_TO_NATIVE);
     }
 
+    pub fn quick_build_and_finalize_serial_routine_for_type(comptime op_buffer: []DataOp, comptime union_end_buffer: []usize, comptime TYPE: type, comptime SETTINGS: SerialSettings) type {
+        var builder = init(op_buffer, union_end_buffer);
+        return builder.build_and_finalize_serial_routine_for_type(TYPE, SETTINGS);
+    }
+
     pub fn build_routine_for_type(comptime self: *SerialRoutineBuilder, comptime TYPE: type, comptime SETTINGS: SerialSettings) void {
         @setEvalBranchQuota(SETTINGS.EVAL_QUOTA);
         self.reset();
+        self.root_type = TYPE;
         self.debug_target = SETTINGS.TARGET_DEBUG_INDEX;
+        self.endian = SETTINGS.TARGET_ENDIAN;
         self.add_type(0, TYPE, SETTINGS);
+    }
+
+    pub fn finalize_routine_for_current_type(comptime self: SerialRoutineBuilder) type {
+        comptime var OPS: [self.ops_len]DataOp = undefined;
+        @memcpy(OPS[0..], self.ops[0..self.ops_len]);
+        for (OPS[0..]) |*op| {
+            if (op.* == .UNION_ROUTINE_END_TEMP) {
+                op.* = DataOp{ .UNION_ROUTINE_END = op.UNION_ROUTINE_END_TEMP.concrete() };
+            }
+        }
+        const OPS_CONST = OPS;
+        return define_serial_routine(self.ops_len, OPS_CONST, self.root_type.?, self.endian);
+    }
+
+    pub fn build_and_finalize_serial_routine_for_type(comptime self: *SerialRoutineBuilder, comptime TYPE: type, comptime SETTINGS: SerialSettings) type {
+        self.build_routine_for_type(TYPE, SETTINGS);
+        return finalize_routine_for_current_type(self.*);
     }
 
     pub fn ensure_space_for_n_more_ops(comptime self: *SerialRoutineBuilder, comptime n: usize) void {
@@ -793,196 +916,349 @@ pub const SerialRoutineBuilder = struct {
     }
 };
 
+const SER_DIR = enum(u8) {
+    NATIVE_TO_SERIAL,
+    SERIAL_TO_NATIVE,
+};
+
+const TEST_SER_MODE = enum(u8) {
+    NORMAL,
+    NEED_UNION_TAG_SERIAL_CAPTURE_NEXT,
+    NEED_UNION_TAG_ID_NEXT,
+    NEED_UNION_START_NEXT,
+};
+
+/// USE WITH CAUTION! This performs NO safety checking/validation and assumes the routine is well-formed
+pub fn define_serial_routine(comptime TOTAL_OPS_: usize, comptime ROUTINE_: [TOTAL_OPS_]DataOp, comptime TYPE_: type, comptime ENDIAN_: Endian) type {
+    return struct {
+        pub const TOTAL_OPS = TOTAL_OPS_;
+        pub const TYPE = TYPE_;
+        pub const ENDIAN = ENDIAN_;
+        pub const ROUTINE = ROUTINE_;
+
+        pub fn serialize_to_slice(val_ptr: *const TYPE, serial_slice: []u8) SerialWriteError!usize {
+            const native: []u8 = @alignCast(@constCast(std.mem.asBytes(val_ptr)));
+            return serial_internal(TOTAL_OPS, ROUTINE[0..TOTAL_OPS], .NATIVE_TO_SERIAL, .SLICE, native, SerialDest{ .slice = serial_slice });
+        }
+        pub fn serialize_to_writer(val_ptr: *const TYPE, writer: *std.Io.Writer) SerialWriteError!usize {
+            const native: []u8 = @alignCast(@constCast(std.mem.asBytes(val_ptr)));
+            return serial_internal(TOTAL_OPS, ROUTINE[0..TOTAL_OPS], .NATIVE_TO_SERIAL, .READER_WRITER, native, SerialDest{ .writer = writer });
+        }
+        pub fn deserialize_from_slice(serial_data: []const u8, val_ptr: *TYPE) SerialReadError!usize {
+            const native: []u8 = @alignCast(std.mem.asBytes(val_ptr));
+            return serial_internal(TOTAL_OPS, ROUTINE[0..TOTAL_OPS], .SERIAL_TO_NATIVE, .SLICE, native, SerialSource{ .slice = serial_data });
+        }
+        pub fn deserialize_from_reader(reader: *std.Io.Reader, val_ptr: *TYPE) SerialReadError!usize {
+            const native: []u8 = @alignCast(std.mem.asBytes(val_ptr));
+            return serial_internal(TOTAL_OPS, ROUTINE[0..TOTAL_OPS], .SERIAL_TO_NATIVE, .READER_WRITER, native, SerialSource{ .reader = reader });
+        }
+    };
+}
+
+fn serial_internal(comptime NUM_OPS: usize, comptime ROUTINE: []const DataOp, comptime DIR: SER_DIR, comptime SERIAL: SerialKind, native: []u8, serial: if (DIR == .SERIAL_TO_NATIVE) SerialSource else SerialDest) (if (DIR == .SERIAL_TO_NATIVE) SerialReadError else SerialWriteError)!usize {
+    var ser_idx: isize = 0;
+    var tag_got: u64 = undefined;
+    var num_tags_this_union: u32 = 0;
+    var tags_checked_this_union: u32 = 0;
+    var op_idx: usize = 0;
+    var dynamic_serial_adjustment: isize = 0;
+    while (op_idx < NUM_OPS) {
+        const op = ROUTINE[op_idx];
+        switch (op) {
+            .NATIVE_TO_SERIAL_NO_SWAP => |move| {
+                const native_start: usize = @intCast(ser_idx - (num_cast(move.native_to_serial_delta, isize) + dynamic_serial_adjustment));
+                const native_end = native_start + num_cast(move.copy_len, usize);
+                const serial_start = num_cast(ser_idx, usize);
+                const serial_end = serial_start + num_cast(move.copy_len, usize);
+                switch (DIR) {
+                    .NATIVE_TO_SERIAL => {
+                        try serial.write_data_in_order(SERIAL, native, native_start, native_end, serial_start, serial_end);
+                    },
+                    .SERIAL_TO_NATIVE => {
+                        try serial.read_data_in_order(SERIAL, native, native_start, native_end, serial_start, serial_end);
+                    },
+                }
+                ser_idx += num_cast(move.copy_len, isize);
+                op_idx += 1;
+            },
+            .NATIVE_TO_SERIAL_SWAP => |move| {
+                const native_start: usize = @intCast(ser_idx - (num_cast(move.native_to_serial_delta, isize) + dynamic_serial_adjustment));
+                const native_end = native_start + num_cast(move.copy_len, usize);
+                const serial_start = num_cast(ser_idx, usize);
+                const serial_end = serial_start + num_cast(move.copy_len, usize);
+                switch (DIR) {
+                    .NATIVE_TO_SERIAL => {
+                        try serial.write_data_swap(SERIAL, native, native_start, native_end, serial_start, serial_end);
+                    },
+                    .SERIAL_TO_NATIVE => {
+                        try serial.read_data_swap(SERIAL, native, native_start, native_end, serial_start, serial_end);
+                    },
+                }
+                ser_idx += num_cast(move.copy_len, isize);
+                op_idx += 1;
+            },
+            .NATIVE_TO_SERIAL_NO_SWAP_SAVE_TAG => |move| {
+                const native_start: usize = @intCast(ser_idx - (num_cast(move.native_to_serial_delta, isize) + dynamic_serial_adjustment));
+                const native_end = native_start + num_cast(move.copy_len, usize);
+                const serial_start = num_cast(ser_idx, usize);
+                const serial_end = serial_start + num_cast(move.copy_len, usize);
+                switch (DIR) {
+                    .NATIVE_TO_SERIAL => {
+                        try serial.write_data_in_order(SERIAL, native, native_start, native_end, serial_start, serial_end);
+                    },
+                    .SERIAL_TO_NATIVE => {
+                        try serial.read_data_in_order(SERIAL, native, native_start, native_end, serial_start, serial_end);
+                    },
+                }
+                ser_idx += num_cast(move.copy_len, isize);
+                op_idx += 1;
+                tag_got = OpaqueUnionTag.cast_endian_serial_to_endian_u64_any(native[native_start..native_end]);
+            },
+            .NATIVE_TO_SERIAL_SWAP_SAVE_TAG => |move| {
+                const native_start: usize = @intCast(ser_idx - (num_cast(move.native_to_serial_delta, isize) + dynamic_serial_adjustment));
+                const native_end = native_start + num_cast(move.copy_len, usize);
+                const serial_start = num_cast(ser_idx, usize);
+                const serial_end = serial_start + num_cast(move.copy_len, usize);
+                switch (DIR) {
+                    .NATIVE_TO_SERIAL => {
+                        try serial.write_data_swap(SERIAL, native, native_start, native_end, serial_start, serial_end);
+                    },
+                    .SERIAL_TO_NATIVE => {
+                        try serial.read_data_swap(SERIAL, native, native_start, native_end, serial_start, serial_end);
+                    },
+                }
+                ser_idx += num_cast(move.copy_len, isize);
+                op_idx += 1;
+                tag_got = OpaqueUnionTag.cast_serial_and_swap_to_endian_u64_any(native[native_start..native_end]);
+            },
+            .UNION_HEADER => |header| {
+                num_tags_this_union = header.num_fields;
+                tags_checked_this_union = 0;
+                op_idx += 1;
+            },
+            .UNION_TAG_ID => |tag_match| {
+                if (tag_got == tag_match) {
+                    op_idx += 1;
+                } else {
+                    op_idx += 2;
+                    tags_checked_this_union += 1;
+                    if (tags_checked_this_union >= num_tags_this_union) switch (DIR) {
+                        .NATIVE_TO_SERIAL => return SerialWriteError.union_tag_in_native_didnt_match_any_valid_tag,
+                        .SERIAL_TO_NATIVE => return SerialReadError.union_tag_in_serial_didnt_match_any_valid_tag,
+                    };
+                }
+            },
+            .UNION_ROUTINE_START => |routine_start| {
+                op_idx += routine_start.offset_to_first_routine_op;
+            },
+            .UNION_ROUTINE_END => |routine_end| {
+                op_idx += num_cast(routine_end.ops_to_advance_to_exit_union, u32);
+                dynamic_serial_adjustment += num_cast(routine_end.routine_serial_delta_adjustment, isize);
+            },
+            else => unreachable,
+        }
+    }
+    return @intCast(ser_idx);
+}
+
 test SerialRoutineBuilder {
     const Test = Root.Testing;
-    comptime {
-        const Color = enum(u32) {
-            INVIS = 0x00_00_00_00,
-            BLACK = 0x00_00_00_FF,
-            WHITE = 0xFF_FF_FF_FF,
-            RED = 0xFF_00_00_FF,
-            GREEN = 0x00_FF_00_FF,
-            BLUE = 0x00_00_FF_FF,
-        };
-        const MsgKind = enum(u8) {
-            PERSON,
-            PET,
-        };
-        const PetKind = enum(u8) {
-            DOG,
-            CAT,
-        };
-        const Kitten = extern struct {
-            name: [8]u8 = @splat(' '),
-            age: u8 = 0,
-            color: Color = .BLACK,
+    const Color = enum(u32) {
+        INVIS = 0x00_00_00_00,
+        BLACK = 0x00_00_00_FF,
+        WHITE = 0xFF_FF_FF_FF,
+        RED = 0xFF_00_00_FF,
+        GREEN = 0x00_FF_00_FF,
+        BLUE = 0x00_00_FF_FF,
+    };
+    const MsgKind = enum(u8) {
+        PERSON,
+        PET,
+    };
+    const PetKind = enum(u8) {
+        DOG,
+        CAT,
+    };
+    const Kitten = extern struct {
+        name: [8]u8 = @splat(' '),
+        age: u8 = 0,
+        color: Color = .BLACK,
 
-            pub const EXAMPLE_1 = @This(){
-                .name = .{ 'M', 'i', 't', 'z', 'y', ' ', ' ', ' ' },
-                .age = 1,
-                .color = .RED,
-            };
-            pub const EXAMPLE_2 = @This(){
-                .name = .{ 'H', 'e', 'n', 'r', 'y', ' ', ' ', ' ' },
-                .age = 2,
-                .color = .BLUE,
-            };
-            pub const EXAMPLE_3 = @This(){
-                .name = .{ 'S', 'c', 'a', 'm', 'p', 'e', 'r', ' ' },
-                .age = 1,
-                .color = .INVIS,
-            };
+        pub const EXAMPLE_1 = @This(){
+            .name = .{ 'M', 'i', 't', 'z', 'y', ' ', ' ', ' ' },
+            .age = 1,
+            .color = .RED,
         };
-        const Cat = extern struct {
-            name: [8]u8 = @splat(' '),
-            age: u8 = 0,
-            color: Color = .WHITE,
-            street_fights_win_loss: i64 = 0,
-            kittens: [4]Kitten = @splat(.{}),
-            num_kittens: u8 = 0,
-
-            pub const EXAMPLE_1 = @This(){
-                .name = .{ 'O', 'p', 'a', 'l', ' ', ' ', ' ', ' ' },
-                .age = 5,
-                .color = .GREEN,
-                .street_fights_win_loss = 999,
-                .kittens = .{
-                    Kitten.EXAMPLE_1,
-                    Kitten.EXAMPLE_2,
-                    Kitten.EXAMPLE_3,
-                    .{},
-                },
-                .num_kittens = 3,
-            };
-            pub const EXAMPLE_2 = @This(){
-                .name = .{ 'T', 'a', 'b', 'b', 'y', ' ', ' ', ' ' },
-                .age = 10,
-                .color = .RED,
-                .street_fights_win_loss = 69420,
-                .kittens = .{
-                    .{},
-                    .{},
-                    .{},
-                    .{},
-                },
-                .num_kittens = 0,
-            };
+        pub const EXAMPLE_2 = @This(){
+            .name = .{ 'H', 'e', 'n', 'r', 'y', ' ', ' ', ' ' },
+            .age = 2,
+            .color = .BLUE,
         };
-        const Puppy = extern struct {
-            name: [8]u8 = @splat(' '),
-            age: u8 = 0,
-            color: Color = .BLACK,
-
-            pub const EXAMPLE_1 = @This(){
-                .name = .{ 'R', 'a', 's', 'c', 'a', 'l', ' ', ' ' },
-                .age = 1,
-                .color = .BLACK,
-            };
-            pub const EXAMPLE_2 = @This(){
-                .name = .{ 'F', 'i', 'f', 'i', ' ', ' ', ' ', ' ' },
-                .age = 1,
-                .color = .WHITE,
-            };
-            pub const EXAMPLE_3 = @This(){
-                .name = .{ 'D', 'e', 's', 't', 'r', 'o', 'y', ' ' },
-                .age = 2,
-                .color = .INVIS,
-            };
+        pub const EXAMPLE_3 = @This(){
+            .name = .{ 'S', 'c', 'a', 'm', 'p', 'e', 'r', ' ' },
+            .age = 1,
+            .color = .INVIS,
         };
-        const Dog = extern struct {
-            name: [8]u8 = @splat(' '),
-            bones_eaten: u64 = 0,
-            age: u8 = 0,
-            color: Color = .BLACK,
-            puppies: [5]Puppy = @splat(.{}),
-            puppies_len: u8 = 0,
+    };
+    const Cat = extern struct {
+        name: [8]u8 = @splat(' '),
+        age: u8 = 0,
+        color: Color = .WHITE,
+        street_fights_win_loss: i64 = 0,
+        kittens: [4]Kitten = @splat(.{}),
+        num_kittens: u8 = 0,
 
-            pub const EXAMPLE_1 = @This(){
-                .name = .{ 'F', 'i', 'd', 'o', ' ', ' ', ' ', ' ' },
-                .age = 8,
-                .color = .BLACK,
-                .bones_eaten = 305,
-                .puppies = .{
-                    Puppy.EXAMPLE_1,
-                    Puppy.EXAMPLE_2,
-                    Puppy.EXAMPLE_3,
-                    .{},
-                    .{},
-                },
-                .puppies_len = 3,
-            };
-            pub const EXAMPLE_2 = @This(){
-                .name = .{ 'S', 'p', 'o', 't', 'i', 'c', 'u', 's' },
-                .age = 6,
-                .color = .RED,
-                .bones_eaten = 1024,
-                .puppies = .{
-                    Puppy.EXAMPLE_3,
-                    .{},
-                    .{},
-                    .{},
-                    .{},
-                },
-                .puppies_len = 1,
-            };
+        pub const EXAMPLE_1 = @This(){
+            .name = .{ 'O', 'p', 'a', 'l', ' ', ' ', ' ', ' ' },
+            .age = 5,
+            .color = .GREEN,
+            .street_fights_win_loss = 999,
+            .kittens = .{
+                Kitten.EXAMPLE_1,
+                Kitten.EXAMPLE_2,
+                Kitten.EXAMPLE_3,
+                .{},
+            },
+            .num_kittens = 3,
         };
-        const Person = extern struct {
-            money: f32 = 0.0,
-            age: u8 = 0,
-            name: [12]u8 = @splat(' '),
-
-            pub const EXAMPLE_1 = @This(){
-                .money = 3.1415,
-                .age = 24,
-                .name = .{ 'T', 'i', 'm', 'o', 't', 'h', 'y', ' ', ' ', ' ', ' ', ' ' },
-            };
-            pub const EXAMPLE_2 = @This(){
-                .money = 0.45,
-                .age = 30,
-                .name = .{ 'G', 'a', 'b', 'e', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ' },
-            };
+        pub const EXAMPLE_2 = @This(){
+            .name = .{ 'T', 'a', 'b', 'b', 'y', ' ', ' ', ' ' },
+            .age = 10,
+            .color = .RED,
+            .street_fights_win_loss = 69420,
+            .kittens = .{
+                .{},
+                .{},
+                .{},
+                .{},
+            },
+            .num_kittens = 0,
         };
-        const DogOrCat = union(PetKind) {
-            DOG: Dog,
-            CAT: Cat,
+    };
+    const Puppy = extern struct {
+        name: [8]u8 = @splat(' '),
+        age: u8 = 0,
+        color: Color = .BLACK,
 
-            pub const Serial = Root.SerialUnion.SerialUnion(@This(), struct {}, .EXTERN);
-
-            pub const EXAMPLE_1 = Serial.new(.DOG, Dog.EXAMPLE_1);
-            pub const EXAMPLE_2 = Serial.new(.DOG, Dog.EXAMPLE_2);
-            pub const EXAMPLE_3 = Serial.new(.CAT, Cat.EXAMPLE_1);
-            pub const EXAMPLE_4 = Serial.new(.CAT, Cat.EXAMPLE_2);
+        pub const EXAMPLE_1 = @This(){
+            .name = .{ 'R', 'a', 's', 'c', 'a', 'l', ' ', ' ' },
+            .age = 1,
+            .color = .BLACK,
         };
-        const PetOrPerson = union(MsgKind) {
-            PERSON: Person,
-            PET: DogOrCat.Serial,
-
-            pub const Serial = Root.SerialUnion.SerialUnion(@This(), struct {}, .EXTERN);
-
-            pub const EXAMPLE_1 = Serial.new(.PERSON, Person.EXAMPLE_1);
-            pub const EXAMPLE_2 = Serial.new(.PERSON, Person.EXAMPLE_2);
-            pub const EXAMPLE_3 = Serial.new(.PET, DogOrCat.EXAMPLE_1);
-            pub const EXAMPLE_4 = Serial.new(.PET, DogOrCat.EXAMPLE_2);
-            pub const EXAMPLE_5 = Serial.new(.PET, DogOrCat.EXAMPLE_3);
-            pub const EXAMPLE_6 = Serial.new(.PET, DogOrCat.EXAMPLE_4);
+        pub const EXAMPLE_2 = @This(){
+            .name = .{ 'F', 'i', 'f', 'i', ' ', ' ', ' ', ' ' },
+            .age = 1,
+            .color = .WHITE,
         };
-        const MAGIC: [4]u8 = .{ '1', '2', '3', '4' };
-        const TestStruct = extern struct {
-            version: u32 = 1,
-            timestamp: i64 = 1999_12_01,
-            msg: PetOrPerson.Serial = PetOrPerson.EXAMPLE_1,
-            magic: [4]u8 = MAGIC,
-            msg_2: PetOrPerson.Serial = PetOrPerson.EXAMPLE_3,
-            magic_2: [4]u8 = MAGIC,
-
-            pub const EXAMPLE_0 = @This(){ .msg = PetOrPerson.EXAMPLE_1, .msg_2 = PetOrPerson.EXAMPLE_1, .timestamp = 1234_56_78 };
-            pub const EXAMPLE_1 = @This(){ .msg = PetOrPerson.EXAMPLE_1, .msg_2 = PetOrPerson.EXAMPLE_3, .timestamp = 1999_12_01 };
-            pub const EXAMPLE_2 = @This(){ .msg = PetOrPerson.EXAMPLE_2, .msg_2 = PetOrPerson.EXAMPLE_4, .timestamp = 1999_12_02 };
-            pub const EXAMPLE_3 = @This(){ .msg = PetOrPerson.EXAMPLE_3, .msg_2 = PetOrPerson.EXAMPLE_5, .timestamp = 1999_12_03 };
-            pub const EXAMPLE_4 = @This(){ .msg = PetOrPerson.EXAMPLE_4, .msg_2 = PetOrPerson.EXAMPLE_6, .timestamp = 1999_12_04 };
-            pub const EXAMPLE_5 = @This(){ .msg = PetOrPerson.EXAMPLE_5, .msg_2 = PetOrPerson.EXAMPLE_1, .timestamp = 1999_12_05 };
-            pub const EXAMPLE_6 = @This(){ .msg = PetOrPerson.EXAMPLE_6, .msg_2 = PetOrPerson.EXAMPLE_2, .timestamp = 1999_12_06 };
+        pub const EXAMPLE_3 = @This(){
+            .name = .{ 'D', 'e', 's', 't', 'r', 'o', 'y', ' ' },
+            .age = 2,
+            .color = .INVIS,
         };
+    };
+    const Dog = extern struct {
+        name: [8]u8 = @splat(' '),
+        bones_eaten: u64 = 0,
+        age: u8 = 0,
+        color: Color = .BLACK,
+        puppies: [5]Puppy = @splat(.{}),
+        puppies_len: u8 = 0,
+
+        pub const EXAMPLE_1 = @This(){
+            .name = .{ 'F', 'i', 'd', 'o', ' ', ' ', ' ', ' ' },
+            .age = 8,
+            .color = .BLACK,
+            .bones_eaten = 305,
+            .puppies = .{
+                Puppy.EXAMPLE_1,
+                Puppy.EXAMPLE_2,
+                Puppy.EXAMPLE_3,
+                .{},
+                .{},
+            },
+            .puppies_len = 3,
+        };
+        pub const EXAMPLE_2 = @This(){
+            .name = .{ 'S', 'p', 'o', 't', 'i', 'c', 'u', 's' },
+            .age = 6,
+            .color = .RED,
+            .bones_eaten = 1024,
+            .puppies = .{
+                Puppy.EXAMPLE_3,
+                .{},
+                .{},
+                .{},
+                .{},
+            },
+            .puppies_len = 1,
+        };
+    };
+    const Person = extern struct {
+        money: f32 = 0.0,
+        age: u8 = 0,
+        name: [12]u8 = @splat(' '),
+
+        pub const EXAMPLE_1 = @This(){
+            .money = 3.1415,
+            .age = 24,
+            .name = .{ 'T', 'i', 'm', 'o', 't', 'h', 'y', ' ', ' ', ' ', ' ', ' ' },
+        };
+        pub const EXAMPLE_2 = @This(){
+            .money = 0.45,
+            .age = 30,
+            .name = .{ 'G', 'a', 'b', 'e', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ' },
+        };
+    };
+    const DogOrCat = union(PetKind) {
+        DOG: Dog,
+        CAT: Cat,
+
+        pub const Serial = Root.SerialUnion.SerialUnion(@This(), struct {}, .EXTERN);
+
+        pub const EXAMPLE_1 = Serial.new(.DOG, Dog.EXAMPLE_1);
+        pub const EXAMPLE_2 = Serial.new(.DOG, Dog.EXAMPLE_2);
+        pub const EXAMPLE_3 = Serial.new(.CAT, Cat.EXAMPLE_1);
+        pub const EXAMPLE_4 = Serial.new(.CAT, Cat.EXAMPLE_2);
+    };
+    const PetOrPerson = union(MsgKind) {
+        PERSON: Person,
+        PET: DogOrCat.Serial,
+
+        pub const Serial = Root.SerialUnion.SerialUnion(@This(), struct {}, .EXTERN);
+
+        pub const EXAMPLE_1 = Serial.new(.PERSON, Person.EXAMPLE_1);
+        pub const EXAMPLE_2 = Serial.new(.PERSON, Person.EXAMPLE_2);
+        pub const EXAMPLE_3 = Serial.new(.PET, DogOrCat.EXAMPLE_1);
+        pub const EXAMPLE_4 = Serial.new(.PET, DogOrCat.EXAMPLE_2);
+        pub const EXAMPLE_5 = Serial.new(.PET, DogOrCat.EXAMPLE_3);
+        pub const EXAMPLE_6 = Serial.new(.PET, DogOrCat.EXAMPLE_4);
+    };
+    const MAGIC: [4]u8 = .{ '1', '2', '3', '4' };
+    const TestStruct = extern struct {
+        version: u32 = 1,
+        timestamp: i64 = 1999_12_01,
+        msg: PetOrPerson.Serial = PetOrPerson.EXAMPLE_1,
+        magic: [4]u8 = MAGIC,
+        msg_2: PetOrPerson.Serial = PetOrPerson.EXAMPLE_3,
+        magic_2: [4]u8 = MAGIC,
+
+        pub const EXAMPLE_0 = @This(){ .msg = PetOrPerson.EXAMPLE_1, .msg_2 = PetOrPerson.EXAMPLE_1, .timestamp = 1234_56_78 };
+        pub const EXAMPLE_1 = @This(){ .msg = PetOrPerson.EXAMPLE_1, .msg_2 = PetOrPerson.EXAMPLE_3, .timestamp = 1999_12_01 };
+        pub const EXAMPLE_2 = @This(){ .msg = PetOrPerson.EXAMPLE_2, .msg_2 = PetOrPerson.EXAMPLE_4, .timestamp = 1999_12_02 };
+        pub const EXAMPLE_3 = @This(){ .msg = PetOrPerson.EXAMPLE_3, .msg_2 = PetOrPerson.EXAMPLE_5, .timestamp = 1999_12_03 };
+        pub const EXAMPLE_4 = @This(){ .msg = PetOrPerson.EXAMPLE_4, .msg_2 = PetOrPerson.EXAMPLE_6, .timestamp = 1999_12_04 };
+        pub const EXAMPLE_5 = @This(){ .msg = PetOrPerson.EXAMPLE_5, .msg_2 = PetOrPerson.EXAMPLE_1, .timestamp = 1999_12_05 };
+        pub const EXAMPLE_6 = @This(){ .msg = PetOrPerson.EXAMPLE_6, .msg_2 = PetOrPerson.EXAMPLE_2, .timestamp = 1999_12_06 };
+    };
+    const test_cases = [_]TestStruct{
+        TestStruct.EXAMPLE_1,
+        TestStruct.EXAMPLE_2,
+        TestStruct.EXAMPLE_3,
+        TestStruct.EXAMPLE_4,
+        TestStruct.EXAMPLE_5,
+        TestStruct.EXAMPLE_6,
+    };
+    const CONCRETE = comptime build: {
         var test_struct_in = TestStruct.EXAMPLE_1;
         var test_struct_out = TestStruct.EXAMPLE_2;
         var op_buf: [1024]DataOp = undefined;
@@ -1001,14 +1277,6 @@ test SerialRoutineBuilder {
         const output_native_bytes = std.mem.asBytes(&test_struct_out);
         var serial_len_in: usize = undefined;
         var serial_len_out: usize = undefined;
-        const test_cases = [_]TestStruct{
-            TestStruct.EXAMPLE_1,
-            TestStruct.EXAMPLE_2,
-            TestStruct.EXAMPLE_3,
-            TestStruct.EXAMPLE_4,
-            TestStruct.EXAMPLE_5,
-            TestStruct.EXAMPLE_6,
-        };
         for (test_cases[0..], 0..) |case_struct, i| {
             test_struct_in = case_struct;
             test_struct_out = TestStruct.EXAMPLE_0;
@@ -1017,5 +1285,19 @@ test SerialRoutineBuilder {
             try Test.expect_equal(serial_len_in, "serial_len_in", serial_len_out, "serial_len_out", "serial mismatch between in and out on same data (test case {d})", .{i});
             try Test.expect_true(Utils.object_equals(test_struct_in, test_struct_out), "Utils.object_equals(test_struct_in, test_struct_out)", "input and output structs didnt have same values for same serial (test case {d})", .{i});
         }
+        break :build builder.finalize_routine_for_current_type();
+    };
+    var test_struct_in = TestStruct.EXAMPLE_1;
+    var test_struct_out = TestStruct.EXAMPLE_2;
+    var test_serial: [1024]u8 = undefined;
+    var serial_len_in: usize = undefined;
+    var serial_len_out: usize = undefined;
+    for (test_cases[0..], 0..) |case_struct, i| {
+        test_struct_in = case_struct;
+        test_struct_out = TestStruct.EXAMPLE_0;
+        serial_len_in = try CONCRETE.serialize_to_slice(&test_struct_in, test_serial[0..1024]);
+        serial_len_out = try CONCRETE.deserialize_from_slice(test_serial[0..1024], &test_struct_out);
+        try Test.expect_equal(serial_len_in, "serial_len_in", serial_len_out, "serial_len_out", "serial mismatch between in and out on same data (test case {d})", .{i});
+        try Test.expect_true(Utils.object_equals(test_struct_in, test_struct_out), "Utils.object_equals(test_struct_in, test_struct_out)", "input and output structs didnt have same values for same serial (test case {d})", .{i});
     }
 }
