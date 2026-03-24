@@ -1722,7 +1722,7 @@ pub const PowerOf2 = enum(u8) {
         const INFO = @typeInfo(T);
         var i = switch (INFO) {
             .int => @abs(int_or_ptr),
-            .comptime_int => if (comptime int_or_ptr < 0) @abs(@as(i64, int_or_ptr)) else @as(u64, int_or_ptr),
+            .comptime_int => if (comptime int_or_ptr < 0) @abs(@as(i128, int_or_ptr)) else @as(u128, int_or_ptr),
             .@"enum" => @abs(@intFromEnum(int_or_ptr)),
             .pointer => @intFromPtr(int_or_ptr),
             else => assert_unreachable(@src(), "type `{s}` not a valid input type", .{@typeName(T)}),
@@ -1737,7 +1737,14 @@ pub const PowerOf2 = enum(u8) {
         if (comptime BITS > 32) i |= i >> 32;
         if (comptime BITS > 64) i |= i >> 64;
         if (comptime BITS > 128) i |= i >> 128;
-        if (comptime BITS > 256) assert_unreachable(@src(), "integers with bit lengths greater than 256 are not supported, got bit width {d}", .{BITS});
+        if (comptime BITS > 256) i |= i >> 256;
+        if (comptime BITS > 512) i |= i >> 512;
+        if (comptime BITS > 1024) i |= i >> 1024;
+        if (comptime BITS > 2048) i |= i >> 2048;
+        if (comptime BITS > 4096) i |= i >> 4096;
+        if (comptime BITS > 8192) i |= i >> 8192;
+        if (comptime BITS > 16384) i |= i >> 16384;
+        if (comptime BITS > 32768) i |= i >> 32768;
         i = i +% 1;
         return @enumFromInt(@ctz(i));
     }

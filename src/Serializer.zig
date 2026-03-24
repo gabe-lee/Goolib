@@ -42,6 +42,7 @@ const Endian = Root.CommonTypes.Endian;
 
 const Reader = std.Io.Reader;
 const Writer = std.Io.Writer;
+const Hash = std.hash.XxHash64;
 
 const assert_with_reason = Assert.assert_with_reason;
 const assert_unreachable = Assert.assert_unreachable;
@@ -53,16 +54,101 @@ const DEBUG_CT = Utils.comptime_debug_print;
 
 pub const NATIVE_ENDIAN = Endian.NATIVE;
 
+pub const BytePacking = enum(u8) {
+    /// Serialize data in little endian order with the same size
+    /// as the native type
+    LITTLE_ENDIAN,
+    /// Serialize data in big endian order with the same size
+    /// as the native type
+    BIG_ENDIAN,
+    /// Serialize data using VarInts, which can greatly reduce
+    /// the size of the serialized data at the cost of additional
+    /// processing time.
+    ///
+    /// Specifically, this uses a
+    /// variation of GVE (Group Varint Encoding), where the routine
+    /// inserts varint header ops at comptime where needed,
+    /// and during runtime serialization/deserialization the routine will
+    /// read/write a number of bits from/to the accumulated header byte slots,
+    /// where the bits read/written indicate how many bytes the current value requires.
+    ///
+    /// This reduces the number of CPU branches required to serialize a single value and eliminates
+    /// additional bit shifting/masking ops on the data bytes, but one caveat is that when serializing
+    /// to an `std.Io.Writer`, the routine must seek back its position to update previously written
+    /// header bytes, then seek back to the current write position. Depending on the concrete implementation
+    /// of the `std.Io.Writer`, this may incur a perofrormance penalty, or in some cases may be impossible.
+    VARINT_USING_HEADERS,
+    /// Serialize data using VarInts, which can greatly reduce
+    /// the size of the serialized data at the cost of additional
+    /// processing time.
+    ///
+    /// Specifically, this uses the 'PrefixVarint' method,
+    /// where a single byte is used before the actual data bytes to indicate how many bytes
+    /// to consume for the value.
+    ///
+    /// This reduces the number of CPU branches required to serialize a single value and eliminates
+    /// additional bit shifting/masking ops on the data bytes, but generally uses slightly more memory footprint
+    /// for varints than `VARINT_USING_HEADERS` or `VARINT_USING_SIGNAL_BIT`, especially when the values to serialize
+    /// are often small compared to the maximum value the type can hold, but does not require reading/writing to a header
+    /// byte that came earlier in the serial stream as in the case of `VARINT_USING_HEADERS`
+    VARINT_USING_PREFIX,
+    // /// Serialize data using VarInts, which can greatly reduce
+    // /// the size of the serialized data at the cost of additional
+    // /// processing time.
+    // ///
+    // /// Specifically, this uses the traditional VarInt method,
+    // /// where each byte encodes 7 bits of real data, and uses the most significant bit to
+    // /// signal whether another byte needs to be processed after it.
+    // ///
+    // /// This method has a small memory footprint and does not require
+    // /// seeking back to a previous index of the serial stream like `VARINT_USING_HEADERS`,
+    // /// but causes many more CPU branches and requires bit shifting/masking operations to unpack the data
+    // VARINT_USING_CONTINUE_BIT,
+};
+
 pub const SerialWriteError = error{
+    /// The destination for the serial data ran out of space for the routine to
+    /// fully serialize the object
     serial_destination_ran_out_of_space,
+    /// A write error occured on the serial destination, but the
+    /// destination does not specify exactly what failed
     unknown_write_error,
+    /// The union tag in the current native union does not match any valid
+    /// tag the serialization routine recorded on the native type at comptime.
+    ///
+    /// This may indicate that the union was changed, but the routine was not recompiled
+    /// with the object containing the new version of the union.
     union_tag_in_native_didnt_match_any_valid_tag,
 };
 
 pub const SerialReadError = error{
+    /// The source of serial data did not have enough
+    /// bytes for the routine to fully deserialize the target
+    /// object
     serial_source_ran_out_of_data,
+    /// A read error occured on the source, but the source does not specify
+    /// exactly what failed
     unknown_read_error,
+    /// The union tag in the serial data does not match any valid
+    /// tag the serialization routine recorded on the native type
     union_tag_in_serial_didnt_match_any_valid_tag,
+    /// The 'magic identifier' bytes at the start of the serial
+    /// data did not match the one expected by the serialization routine.
+    ///
+    /// You may need to use a different serial routine.
+    magic_identifier_mismatch,
+    /// The serial routine version recorded in the serialized
+    /// data does not match the one expected by the serial routine.
+    ///
+    /// You may need to use a different serial routine
+    serial_version_mismatch,
+    /// The serial routine hash recorded in the serial data
+    /// did not match the one expected by the serial routine.
+    ///
+    /// If the version DOES match and this does not, it usually indicates
+    /// that you changed the native object to be serialized without incrementing
+    /// the version counter associated with it.
+    serial_routine_hash_mismatch,
 };
 
 const SerialKind = enum(u8) { SLICE, READER_WRITER };
@@ -151,11 +237,16 @@ const SerialDest = union {
     }
 };
 
-pub const ByteOpKind = enum(u8) {
-    NATIVE_TO_SERIAL_NO_SWAP,
-    NATIVE_TO_SERIAL_SWAP,
-    NATIVE_TO_SERIAL_NO_SWAP_SAVE_TAG,
-    NATIVE_TO_SERIAL_SWAP_SAVE_TAG,
+pub const OpKind = enum(u8) {
+    MOVE_DATA_NO_SWAP,
+    MOVE_DATA_SWAP,
+    MOVE_DATA_NO_SWAP_SAVE_TAG,
+    MOVE_DATA_SWAP_SAVE_TAG,
+    MOVE_DATA_NO_SWAP_VARINT_G,
+    MOVE_DATA_SWAP_VARINT_G,
+    MOVE_DATA_NO_SWAP_SAVE_TAG_VARINT_G,
+    MOVE_DATA_SWAP_SAVE_TAG_VARINT_G,
+    VARINT_G_HEADER,
     UNION_HEADER,
     UNION_TAG_ID,
     UNION_ROUTINE_START,
@@ -163,11 +254,16 @@ pub const ByteOpKind = enum(u8) {
     UNION_ROUTINE_END,
 };
 
-pub const DataOp = union(ByteOpKind) {
-    NATIVE_TO_SERIAL_NO_SWAP: MemCopyMove,
-    NATIVE_TO_SERIAL_SWAP: MemCopyMove,
-    NATIVE_TO_SERIAL_NO_SWAP_SAVE_TAG: MemCopyMove,
-    NATIVE_TO_SERIAL_SWAP_SAVE_TAG: MemCopyMove,
+pub const DataOp = union(OpKind) {
+    MOVE_DATA_NO_SWAP: MemCopyMove,
+    MOVE_DATA_SWAP: MemCopyMove,
+    MOVE_DATA_NO_SWAP_SAVE_TAG: MemCopyMove,
+    MOVE_DATA_SWAP_SAVE_TAG: MemCopyMove,
+    MOVE_DATA_NO_SWAP_VARINT_G: MemCopyMove,
+    MOVE_DATA_SWAP_VARINT_G: MemCopyMove,
+    MOVE_DATA_NO_SWAP_SAVE_TAG_VARINT_G: MemCopyMove,
+    MOVE_DATA_SWAP_SAVE_TAG_VARINT_G: MemCopyMove,
+    VARINT_G_HEADER: VarInt_G_Header,
     UNION_HEADER: UnionHeader,
     UNION_TAG_ID: u64,
     UNION_ROUTINE_START: UnionRoutineStart,
@@ -175,20 +271,40 @@ pub const DataOp = union(ByteOpKind) {
     UNION_ROUTINE_END: UnionRoutineEnd,
 
     pub fn mem_move_no_swap(comptime native_to_serial_delta: i32, comptime copy_len: u32) DataOp {
-        return DataOp{ .NATIVE_TO_SERIAL_NO_SWAP = .mem_copy_move(native_to_serial_delta, copy_len) };
+        return DataOp{ .MOVE_DATA_NO_SWAP = .mem_copy_move(native_to_serial_delta, copy_len) };
     }
     pub fn mem_move_swap(comptime native_to_serial_delta: i32, comptime copy_len: u32) DataOp {
         assert_with_reason(copy_len > 1, @src(), "mem swap data ops cannot be 1 byte in size, because 1 byte cant be endian swapped", .{});
-        return DataOp{ .NATIVE_TO_SERIAL_SWAP = .mem_copy_move(native_to_serial_delta, copy_len) };
+        return DataOp{ .MOVE_DATA_SWAP = .mem_copy_move(native_to_serial_delta, copy_len) };
     }
     pub fn mem_move_no_swap_save_tag(comptime native_to_serial_delta: i32, comptime copy_len: u32) DataOp {
         assert_with_reason(copy_len == 1 or copy_len == 2 or copy_len == 4 or copy_len == 8, @src(), "'_save_tag()' data ops can only be 1, 2, 4, or 8 bytes in size, got {d}", .{copy_len});
-        return DataOp{ .NATIVE_TO_SERIAL_NO_SWAP_SAVE_TAG = .mem_copy_move(native_to_serial_delta, copy_len) };
+        return DataOp{ .MOVE_DATA_NO_SWAP_SAVE_TAG = .mem_copy_move(native_to_serial_delta, copy_len) };
     }
     pub fn mem_move_swap_save_tag(comptime native_to_serial_delta: i32, comptime copy_len: u32) DataOp {
         assert_with_reason(copy_len > 1, @src(), "mem swap data ops cannot be 1 byte in size, because 1 byte cant be endian swapped", .{});
         assert_with_reason(copy_len == 2 or copy_len == 4 or copy_len == 8, @src(), "'_save_tag()' data ops can only be 1, 2, 4, or 8 bytes in size, got {d}", .{copy_len});
-        return DataOp{ .NATIVE_TO_SERIAL_SWAP_SAVE_TAG = .mem_copy_move(native_to_serial_delta, copy_len) };
+        return DataOp{ .MOVE_DATA_SWAP_SAVE_TAG = .mem_copy_move(native_to_serial_delta, copy_len) };
+    }
+    pub fn mem_move_no_swap_varint_g(comptime native_to_serial_delta: i32, comptime copy_len: u32) DataOp {
+        return DataOp{ .MOVE_DATA_NO_SWAP_VARINT_G = .mem_copy_move(native_to_serial_delta, copy_len) };
+    }
+    pub fn mem_move_swap_varint_g(comptime native_to_serial_delta: i32, comptime copy_len: u32) DataOp {
+        assert_with_reason(copy_len > 1, @src(), "mem swap data ops cannot be 1 byte in size, because 1 byte cant be endian swapped", .{});
+        return DataOp{ .MOVE_DATA_SWAP_VARINT_G = .mem_copy_move(native_to_serial_delta, copy_len) };
+    }
+    pub fn mem_move_no_swap_save_tag_varint_g(comptime native_to_serial_delta: i32, comptime copy_len: u32) DataOp {
+        assert_with_reason(copy_len == 1 or copy_len == 2 or copy_len == 4 or copy_len == 8, @src(), "'_save_tag()' data ops can only be 1, 2, 4, or 8 bytes in size, got {d}", .{copy_len});
+        return DataOp{ .MOVE_DATA_NO_SWAP_SAVE_TAG_VARINT_G = .mem_copy_move(native_to_serial_delta, copy_len) };
+    }
+    pub fn mem_move_swap_save_tag_varint_g(comptime native_to_serial_delta: i32, comptime copy_len: u32) DataOp {
+        assert_with_reason(copy_len > 1, @src(), "mem swap data ops cannot be 1 byte in size, because 1 byte cant be endian swapped", .{});
+        assert_with_reason(copy_len == 2 or copy_len == 4 or copy_len == 8, @src(), "'_save_tag()' data ops can only be 1, 2, 4, or 8 bytes in size, got {d}", .{copy_len});
+        return DataOp{ .MOVE_DATA_SWAP_SAVE_TAG_VARINT_G = .mem_copy_move(native_to_serial_delta, copy_len) };
+    }
+    pub fn varint_g_header(comptime num_following_varint_bytes: u32) DataOp {
+        assert_with_reason(num_following_varint_bytes > 0 and num_following_varint_bytes <= 4, @src(), "`num_following_varint_bytes` must be more than 0 and less than or equal to 4, got {d}", .{num_following_varint_bytes});
+        return DataOp{ .VARINT_G_HEADER = VarInt_G_Header{ .number_of_following_header_bytes = num_following_varint_bytes, .offset_to_next_varint_g_header = 0 } };
     }
     pub fn union_header(comptime num_fields: usize, comptime tag_type: type) DataOp {
         return DataOp{ .UNION_HEADER = UnionHeader{ .num_fields = @intCast(num_fields), .tag_type = OpaqueUnionTag.from_tag_type(tag_type) } };
@@ -210,13 +326,18 @@ pub const DataOp = union(ByteOpKind) {
     }
 
     pub fn can_combine(comptime prev: DataOp, comptime next: DataOp) ?DataOp {
-        if (prev == .NATIVE_TO_SERIAL_NO_SWAP and next == .NATIVE_TO_SERIAL_NO_SWAP) {
-            if (prev.NATIVE_TO_SERIAL_NO_SWAP.native_to_serial_delta == next.NATIVE_TO_SERIAL_NO_SWAP.native_to_serial_delta) {
-                return DataOp.mem_move_no_swap(prev.NATIVE_TO_SERIAL_NO_SWAP.native_to_serial_delta, prev.NATIVE_TO_SERIAL_NO_SWAP.copy_len + next.NATIVE_TO_SERIAL_NO_SWAP.copy_len);
+        if (prev == .MOVE_DATA_NO_SWAP and next == .MOVE_DATA_NO_SWAP) {
+            if (prev.MOVE_DATA_NO_SWAP.native_to_serial_delta == next.MOVE_DATA_NO_SWAP.native_to_serial_delta) {
+                return DataOp.mem_move_no_swap(prev.MOVE_DATA_NO_SWAP.native_to_serial_delta, prev.MOVE_DATA_NO_SWAP.copy_len + next.MOVE_DATA_NO_SWAP.copy_len);
             }
         }
         return null;
     }
+};
+
+pub const VarInt_G_Header = struct {
+    number_of_following_header_bytes: u32,
+    offset_to_next_varint_g_header: u32,
 };
 
 pub const UnionRoutineStart = struct {
@@ -426,7 +547,7 @@ pub const UnionRoutineBuilder = struct {
         // const curr_tag_id_op_true_idx = self.current_routine_tag_op_true_idx();
         const TAG_OPQ = OpaqueUnionTag.from_tag_type(@TypeOf(tag_value));
         builder.d_assert_with_reason(TAG_OPQ == self.union_tag_opaque, @src(), "opaque tag param from `tag_value` (`{s}`) does not match the one this union builder was created with (`{s}`)", .{ @tagName(TAG_OPQ), @tagName(self.union_tag_opaque) });
-        const tag_u64 = TAG_OPQ.cast_tag_to_endian_u64(SETTINGS.TARGET_ENDIAN, tag_value);
+        const tag_u64 = TAG_OPQ.cast_tag_to_endian_u64(SETTINGS.INTEGER_BYTE_PACKING, tag_value);
         curr_routine_start.offset_to_first_routine_op = self.delta_between_current_routine_start_op_idx_and_first_op_in_its_routine(builder);
         curr_tag_id.* = tag_u64;
         builder.add_type(union_native_offset, TYPE, SETTINGS);
@@ -472,34 +593,115 @@ pub const SaveTagMode = enum(u8) {
 };
 
 pub const CustomSerializeFn = fn (comptime self: *SerialRoutineBuilder, comptime curr_native_offset: usize, comptime SETTINGS: SerialSettings) void;
+pub const CustomSerializeFnSig = "fn (comptime self: *SerialRoutineBuilder, comptime curr_native_offset: usize, comptime SETTINGS: SerialSettings) void";
 pub const CustomSerializeFnName = "custom_serialize_routine";
 
 pub fn type_has_custom_serialize(comptime T: type) bool {
     if (@hasDecl(T, CustomSerializeFnName)) {
         if (@TypeOf(@field(T, CustomSerializeFnName)) == CustomSerializeFn) {
             return true;
+        } else {
+            Assert.warn_unconditional_always(@src(), "type `{s}` has a `{s}` declaration, but it does not match the signature `{s}`", .{ @typeName(T), CustomSerializeFnName, CustomSerializeFnSig });
         }
     }
     return false;
 }
 
-pub const SerialSettings = struct {
-    TARGET_ENDIAN: Endian = .LITTLE_ENDIAN,
-    EVAL_QUOTA: u32 = 5000,
+pub const SerialInitSettings = struct {
+    /// You may need to set this MUCH higher depending on how complex the object you are serializing
+    /// is. A serial routine is created at COMPTIME, and the compiler will tell you with a compiler error
+    /// if this needs to be larger.
+    ///
+    /// This has no effect on the serialization process at runtime.
+    COMPTIME_EVAL_QUOTA: u32 = 5000,
+    /// For debugging purposes. If you are having issues and you can pinpoint at what byte
+    /// serializeation/deserialization is failing, set this to true to maybe get some info back about it
     ADD_ROUTINE_DEBUG_INFO: bool = false,
+    /// For debugging purposes. If you are having issues and you can pinpoint at what byte
+    /// serializeation/deserialization is failing, you can put that byte index here
+    /// to get some info back about it.
     TARGET_DEBUG_INDEX: ?usize = null,
-    // COMPRESS_INT: bool = false,
+    /// If non-null, include a set of 'magic' bytes at the very start of the serialized data
+    /// AND as a constant on the routine serializer
+    /// that can be used as a quick identifier for the data being serialized.
+    ///
+    /// When attempting to read serial data, if the magic id does not match the const
+    /// saved on the routine, an `error.magic_identifier_mismatch` will be returned.
+    ///
+    /// For example, you might use this if you are creating a file format so that
+    /// code reading the file data can verify that they are definitely reading the format they are expecting,
+    /// OR possibly if a file/network message has multiple possible serial formats
+    /// (independant of the format *version*), the consumer can read this value
+    /// and choose a code path to evaluate it with using a switch statement.
+    ///
+    /// (see https://en.wikipedia.org/wiki/List_of_file_signatures)
+    ///
+    /// You should try to avoid using the same 'magic identifier' as other well-known
+    /// magic identifiers *if your format may be used in the same context as those formats*
+    /// (if your format will generally not be expected to be used in the same context
+    /// as another format with a conflicting identifier, there is no problem using
+    /// the same identifier)
+    MAGIC_IDENTIFIER: ?[]const u8 = null,
+    /// If non-null, this should be the version of the object being serialized,
+    /// and this 4-byte version number will be at the beginning of the serial
+    /// stream (AFTER the 'magic identifier', if that is also included),
+    /// AND will be saved as a constant on the final routine. If there is
+    /// a version mismatch between the serial stream and the constant on the
+    /// routine, an `error.serial_version_mismatch` will be returned when
+    /// deserialization is attempted.
+    ///
+    /// If you want to support backwards compatibility with older versions,
+    /// ANY time you change ANY part of the object to serialize, you should
+    /// increase this version number by 1 and retain the old routine
+    /// (and probbably the old object too) in your code somewhere.
+    ROUTINE_VERSION: ?u32 = null,
+    /// If true, also include a 64-bit (8-byte) hash after the 'version'. This is not
+    /// a hash of the actual serial data, but a hash of the object type and compiled routine
+    ///
+    /// This is usually not needed, but can be an additional validation check if there are errors
+    /// occuring even when the version matches. If any part of the object type to serialize or the
+    /// compiled routine mismatches the hash in the serial data, it indicates that there is
+    /// a definite disparity between the code writing the serial data and the code reading it.
+    INCLUDE_ROUTINE_HASH_WITH_VERSION: bool = false,
+};
+
+pub const SerialSettings = struct {
+    /// How to pack integers in the serial data.
+    ///
+    /// When `LITTLE_ENDIAN` or `BIG_ENDIAN` is chosen, bytes will be packed using the same size as their
+    /// native code size, in the specified endian byte order. If this is chosen, `LITTLE_ENDIAN` is
+    /// in most cases the best choice, as most target platforms are natively little-endian, allowing for
+    /// faster processing.
+    ///
+    /// When one of the `VARINT_` modes are chosen, data is compressed such that smaller runtime values require
+    /// fewer bytes than the native code type maximum, at the cost of additional processing time. When
+    /// one of these are desired, `VARINT_USING_HEADERS` is a good choice as long as seeking back
+    /// to a previous point in the serial stream to re-write one byte is possible
+    INTEGER_BYTE_PACKING: BytePacking = .LITTLE_ENDIAN,
+    /// How to pack float bytes in the serial data. `LITTLE_ENDIAN` is
+    /// in most cases the best choice, as most target platforms are natively little-endian, allowing for
+    /// faster processing.
+    ///
+    /// Floats are not allowed to be packed as VarInts, because floating point encoding forces all
+    /// bytes to be used in almost all cases, which results in nearly-guaranteed wasted processing and
+    /// memory footprint.
+    FLOAT_BYTE_ORDER: Endian = .LITTLE_ENDIAN,
 };
 
 pub const SerialRoutineBuilder = struct {
     root_type: ?type = null,
     endian: Endian = .NATIVE,
+    magic_id: ?[]const u8 = null,
+    routine_version: ?u32 = null,
+    routine_hash: ?Hash = null,
     ops: []DataOp = &.{},
     skip_ahead_stack: []usize = &.{},
     debug_stack: []u8 = &.{},
     debug_stack_len: usize = 0,
     debug_target: ?usize = null,
     debug_target_printed: bool = false,
+    current_varint_g_bits: u8 = 0,
+    prev_varint_g_header_slot: usize = 0,
     ops_len: usize = 0,
     skip_ahead_len: usize = 0,
     curr_serial_offset: usize = 0,
@@ -525,6 +727,8 @@ pub const SerialRoutineBuilder = struct {
         self.debug_target_printed = false;
         self.max_union_depth = 0;
         self.curr_union_depth = 0;
+        self.routine_hash = null;
+        self.routine_version = null;
         self.endian = .LITTLE_ENDIAN;
     }
 
@@ -571,7 +775,7 @@ pub const SerialRoutineBuilder = struct {
         while (op_idx < self.ops_len) {
             const op = self.ops[op_idx];
             switch (op) {
-                .NATIVE_TO_SERIAL_NO_SWAP => |move| {
+                .MOVE_DATA_NO_SWAP => |move| {
                     self.d_assert_with_reason(mode == .NORMAL, @src(), "must be in `.NORMAL` mode for this op, curr mode is `{s}`", .{@tagName(mode)});
                     const native_start_i: isize = ser_idx - (num_cast(move.native_to_serial_delta, isize) + dynamic_serial_adjustment);
                     self.d_assert_with_reason(native_start_i >= 0, @src(), "(serial_idx + native_to_serial_delta + dynamic_serial_adjustment) would cause native index to go below zero", .{});
@@ -590,7 +794,7 @@ pub const SerialRoutineBuilder = struct {
                     ser_idx += num_cast(move.copy_len, isize);
                     op_idx += 1;
                 },
-                .NATIVE_TO_SERIAL_SWAP => |move| {
+                .MOVE_DATA_SWAP => |move| {
                     self.d_assert_with_reason(mode == .NORMAL, @src(), "must be in `.NORMAL` mode for this op, curr mode is `{s}`", .{@tagName(mode)});
                     const native_start_i: isize = ser_idx - (num_cast(move.native_to_serial_delta, isize) + dynamic_serial_adjustment);
                     self.d_assert_with_reason(native_start_i >= 0, @src(), "(serial_idx + native_to_serial_delta + dynamic_serial_adjustment) would cause native index to go below zero", .{});
@@ -614,7 +818,7 @@ pub const SerialRoutineBuilder = struct {
                     ser_idx += num_cast(move.copy_len, isize);
                     op_idx += 1;
                 },
-                .NATIVE_TO_SERIAL_NO_SWAP_SAVE_TAG => |move| {
+                .MOVE_DATA_NO_SWAP_SAVE_TAG => |move| {
                     self.d_assert_with_reason(mode == .NEED_UNION_TAG_SERIAL_CAPTURE_NEXT, @src(), "must be in `.NEED_UNION_TAG_SERIAL_CAPTURE_NEXT` mode for this op, curr mode is `{s}`", .{@tagName(mode)});
                     const native_start_i: isize = ser_idx - (num_cast(move.native_to_serial_delta, isize) + dynamic_serial_adjustment);
                     self.d_assert_with_reason(native_start_i >= 0, @src(), "(serial_idx + native_to_serial_delta + dynamic_serial_adjustment) would cause native index to go below zero", .{});
@@ -635,7 +839,7 @@ pub const SerialRoutineBuilder = struct {
                     tag_got = OpaqueUnionTag.cast_endian_serial_to_endian_u64_any(serial_slice[serial_start..serial_end]);
                     mode = .NEED_UNION_TAG_ID_NEXT;
                 },
-                .NATIVE_TO_SERIAL_SWAP_SAVE_TAG => |move| {
+                .MOVE_DATA_SWAP_SAVE_TAG => |move| {
                     self.d_assert_with_reason(mode == .NEED_UNION_TAG_SERIAL_CAPTURE_NEXT, @src(), "must be in `.NEED_UNION_TAG_SERIAL_CAPTURE_NEXT` mode for this op, curr mode is `{s}`", .{@tagName(mode)});
                     const native_start_i: isize = ser_idx - (num_cast(move.native_to_serial_delta, isize) + dynamic_serial_adjustment);
                     self.d_assert_with_reason(native_start_i >= 0, @src(), "(serial_idx + native_to_serial_delta + dynamic_serial_adjustment) would cause native index to go below zero", .{});
@@ -720,11 +924,11 @@ pub const SerialRoutineBuilder = struct {
     }
 
     pub fn build_routine_for_type(comptime self: *SerialRoutineBuilder, comptime TYPE: type, comptime SETTINGS: SerialSettings) void {
-        @setEvalBranchQuota(SETTINGS.EVAL_QUOTA);
+        @setEvalBranchQuota(SETTINGS.COMPTIME_EVAL_QUOTA);
         self.reset();
         self.root_type = TYPE;
         self.debug_target = SETTINGS.TARGET_DEBUG_INDEX;
-        self.endian = SETTINGS.TARGET_ENDIAN;
+        self.endian = SETTINGS.INTEGER_BYTE_PACKING;
         self.add_type(0, TYPE, SETTINGS);
     }
 
@@ -756,17 +960,74 @@ pub const SerialRoutineBuilder = struct {
         self.d_assert_with_reason(self.debug_stack_len + n <= self.debug_stack.len, @src(), "ran out of space for debug info. Need at least {d} bytes (possibly more), have {d}. provide a larger buffer", .{ self.debug_stack_len + n, self.debug_stack.len });
     }
 
-    pub fn add_endian_bytes(comptime self: *SerialRoutineBuilder, comptime curr_native_offset: usize, comptime size: usize, comptime SETTINGS: SerialSettings, comptime UNION_TAG: SaveTagMode) void {
+    pub fn add_integer_bytes(comptime self: *SerialRoutineBuilder, comptime curr_native_offset: usize, comptime byte_len: usize, comptime SETTINGS: SerialSettings, comptime UNION_TAG: SaveTagMode) void {
+        assert_with_reason(byte_len > 0, @src(), "cannot add a data type to serialze that has zero size", .{});
+        with_new_mode: switch (SETTINGS.INTEGER_BYTE_PACKING) {
+            .LITTLE_ENDIAN, .BIG_ENDIAN => {
+                self.ensure_space_for_n_more_ops(1);
+                const SWAP = NATIVE_ENDIAN != SETTINGS.INTEGER_BYTE_PACKING;
+                const native_to_serial_delta: i32 = if (self.curr_serial_offset >= curr_native_offset) num_cast(self.curr_serial_offset - curr_native_offset, i32) else -num_cast(curr_native_offset - self.curr_serial_offset, i32);
+                if (SWAP and byte_len > 1) {
+                    switch (UNION_TAG) {
+                        .IS_A_UNION_TAG => self.ops[self.ops_len] = .mem_move_swap_save_tag(native_to_serial_delta, @intCast(byte_len)),
+                        .NOT_A_UNION_TAG => self.ops[self.ops_len] = .mem_move_swap(native_to_serial_delta, @intCast(byte_len)),
+                    }
+                    self.ops_len += 1;
+                    self.curr_serial_offset += num_cast(byte_len, i32);
+                } else {
+                    const has_prev = self.ops_len > 0;
+                    comptime var prev: DataOp = DataOp.mem_move_swap(0, 2);
+                    if (has_prev) {
+                        prev = self.ops[self.ops_len - 1];
+                    }
+                    const next = switch (UNION_TAG) {
+                        .IS_A_UNION_TAG => DataOp.mem_move_no_swap_save_tag(native_to_serial_delta, byte_len),
+                        .NOT_A_UNION_TAG => DataOp.mem_move_no_swap(native_to_serial_delta, byte_len),
+                    };
+                    if (prev.can_combine(next)) |combined| {
+                        self.ops[self.ops_len - 1] = combined;
+                    } else {
+                        self.ops[self.ops_len] = next;
+                        self.ops_len += 1;
+                    }
+                    self.curr_serial_offset += num_cast(byte_len, i32);
+                }
+            },
+            .VARINT_USING_HEADERS => {
+                if (byte_len == 1) {
+                    continue :with_new_mode .LITTLE_ENDIAN;
+                }
+                //CHECKPOINT figues out how to do this
+                self.ensure_space_for_n_more_ops(2);
+                const max_byte_consume_needed_power = MathX.PowerOf2.round_up_to_power_of_2(byte_len);
+                const bits_needed: u8 = @intFromEnum(max_byte_consume_needed_power);
+                self.current_varint_g_bits += bits_needed;
+                if (self.current_varint_g_bits > 32) {
+                    const bits_in_next_header = (self.current_varint_g_bits - 32);
+                    const bytes_in_next_header = (bits_in_next_header + 7) >> 3;
+                    self.ops[self.prev_varint_g_header_slot].VARINT_G_HEADER.offset_to_next_varint_g_header = num_cast(self.ops_len - self.prev_varint_g_header_slot, u32);
+                    self.ops[self.ops_len] = .varint_g_header(bytes_in_next_header);
+                    self.prev_varint_g_header_slot = self.ops_len;
+                    self.ops_len += 1;
+                    self.current_varint_g_bits -= bits_in_next_header;
+                }
+                self.ensure_space_for_n_more_ops(1);
+            },
+            .VARINT_USING_PREFIX => {},
+        }
+    }
+
+    pub fn add_varint_bytes(comptime self: *SerialRoutineBuilder, comptime curr_native_offset: usize, comptime max_size: usize, comptime SETTINGS: SerialSettings, comptime UNION_TAG: SaveTagMode) void {
         self.ensure_space_for_n_more_ops(1);
-        const SWAP = NATIVE_ENDIAN != SETTINGS.TARGET_ENDIAN;
+        const SWAP = NATIVE_ENDIAN != SETTINGS.INTEGER_BYTE_PACKING;
         const native_to_serial_delta: i32 = if (self.curr_serial_offset >= curr_native_offset) num_cast(self.curr_serial_offset - curr_native_offset, i32) else -num_cast(curr_native_offset - self.curr_serial_offset, i32);
-        if (SWAP and size > 1) {
+        if (SWAP and max_size > 1) {
             switch (UNION_TAG) {
-                .IS_A_UNION_TAG => self.ops[self.ops_len] = .mem_move_swap_save_tag(native_to_serial_delta, @intCast(size)),
-                .NOT_A_UNION_TAG => self.ops[self.ops_len] = .mem_move_swap(native_to_serial_delta, @intCast(size)),
+                .IS_A_UNION_TAG => self.ops[self.ops_len] = .mem_move_swap_save_tag(native_to_serial_delta, @intCast(max_size)),
+                .NOT_A_UNION_TAG => self.ops[self.ops_len] = .mem_move_swap(native_to_serial_delta, @intCast(max_size)),
             }
             self.ops_len += 1;
-            self.curr_serial_offset += num_cast(size, i32);
+            self.curr_serial_offset += num_cast(max_size, i32);
         } else {
             const has_prev = self.ops_len > 0;
             comptime var prev: DataOp = DataOp.mem_move_swap(0, 2);
@@ -774,8 +1035,8 @@ pub const SerialRoutineBuilder = struct {
                 prev = self.ops[self.ops_len - 1];
             }
             const next = switch (UNION_TAG) {
-                .IS_A_UNION_TAG => DataOp.mem_move_no_swap_save_tag(native_to_serial_delta, size),
-                .NOT_A_UNION_TAG => DataOp.mem_move_no_swap(native_to_serial_delta, size),
+                .IS_A_UNION_TAG => DataOp.mem_move_no_swap_save_tag(native_to_serial_delta, max_size),
+                .NOT_A_UNION_TAG => DataOp.mem_move_no_swap(native_to_serial_delta, max_size),
             };
             if (prev.can_combine(next)) |combined| {
                 self.ops[self.ops_len - 1] = combined;
@@ -783,7 +1044,7 @@ pub const SerialRoutineBuilder = struct {
                 self.ops[self.ops_len] = next;
                 self.ops_len += 1;
             }
-            self.curr_serial_offset += num_cast(size, i32);
+            self.curr_serial_offset += num_cast(max_size, i32);
         }
     }
 
@@ -797,7 +1058,7 @@ pub const SerialRoutineBuilder = struct {
         self.skip_ahead_len += FIELD_COUNT;
         self.ops[self.ops_len] = .union_header(FIELD_COUNT, TAG_TYPE);
         self.ops_len += 1;
-        self.add_endian_bytes(tag_native_offset, UTAG_SIZE, SETTINGS, .IS_A_UNION_TAG);
+        self.add_integer_bytes(tag_native_offset, UTAG_SIZE, SETTINGS, .IS_A_UNION_TAG);
         const meta_slots: []DataOp, const meta_root: usize = self.add_union_meta_slots(META_SLOT_COUNT);
         comptime var tag_to_routine_offset: usize = META_SLOT_COUNT;
         comptime var tag_to_routine_idx: usize = 0;
@@ -840,7 +1101,7 @@ pub const SerialRoutineBuilder = struct {
                     @memcpy(debug_slice, "(" ++ NAME ++ ")");
                     self.debug_stack_len += NAME.len + 2;
                 }
-                self.add_endian_bytes(curr_native_offset, @sizeOf(TYPE), SETTINGS, .NOT_A_UNION_TAG);
+                self.add_integer_bytes(curr_native_offset, @sizeOf(TYPE), SETTINGS, .NOT_A_UNION_TAG);
                 if (SETTINGS.ADD_ROUTINE_DEBUG_INFO) {
                     self.print_debug_target(@src());
                     const NAME = @typeName(TYPE);
@@ -933,6 +1194,8 @@ const TEST_SER_MODE = enum(u8) {
 };
 
 /// USE WITH CAUTION! This performs NO safety checking/validation and assumes the routine is well-formed
+///
+/// The normal, safe way to get a concrete serial routine is to use a `SerialRoutineBuilder` and use one of the `finalize()` funcs on it.
 pub fn define_serial_routine(comptime TOTAL_OPS_: usize, comptime ROUTINE_: [TOTAL_OPS_]DataOp, comptime TYPE_: type, comptime ENDIAN_: Endian) type {
     return struct {
         pub const TOTAL_OPS = TOTAL_OPS_;
@@ -960,7 +1223,7 @@ pub fn define_serial_routine(comptime TOTAL_OPS_: usize, comptime ROUTINE_: [TOT
 }
 
 fn serial_internal(comptime NUM_OPS: usize, comptime ROUTINE: []const DataOp, comptime DIR: SER_DIR, comptime SERIAL: SerialKind, native: []u8, serial: if (DIR == .SERIAL_TO_NATIVE) SerialSource else SerialDest) (if (DIR == .SERIAL_TO_NATIVE) SerialReadError else SerialWriteError)!usize {
-    var ser_idx: isize = 0;
+    var serial_idx: isize = 0;
     var tag_got: u64 = undefined;
     var num_tags_this_union: u32 = 0;
     var tags_checked_this_union: u32 = 0;
@@ -969,10 +1232,10 @@ fn serial_internal(comptime NUM_OPS: usize, comptime ROUTINE: []const DataOp, co
     while (op_idx < NUM_OPS) {
         const op = ROUTINE[op_idx];
         switch (op) {
-            .NATIVE_TO_SERIAL_NO_SWAP => |move| {
-                const native_start: usize = @intCast(ser_idx - (num_cast(move.native_to_serial_delta, isize) + dynamic_serial_adjustment));
+            .MOVE_DATA_NO_SWAP => |move| {
+                const native_start: usize = @intCast(serial_idx - (num_cast(move.native_to_serial_delta, isize) + dynamic_serial_adjustment));
                 const native_end = native_start + num_cast(move.copy_len, usize);
-                const serial_start = num_cast(ser_idx, usize);
+                const serial_start = num_cast(serial_idx, usize);
                 const serial_end = serial_start + num_cast(move.copy_len, usize);
                 switch (DIR) {
                     .NATIVE_TO_SERIAL => {
@@ -982,13 +1245,13 @@ fn serial_internal(comptime NUM_OPS: usize, comptime ROUTINE: []const DataOp, co
                         try serial.read_data_in_order(SERIAL, native, native_start, native_end, serial_start, serial_end);
                     },
                 }
-                ser_idx += num_cast(move.copy_len, isize);
+                serial_idx += num_cast(move.copy_len, isize);
                 op_idx += 1;
             },
-            .NATIVE_TO_SERIAL_SWAP => |move| {
-                const native_start: usize = @intCast(ser_idx - (num_cast(move.native_to_serial_delta, isize) + dynamic_serial_adjustment));
+            .MOVE_DATA_SWAP => |move| {
+                const native_start: usize = @intCast(serial_idx - (num_cast(move.native_to_serial_delta, isize) + dynamic_serial_adjustment));
                 const native_end = native_start + num_cast(move.copy_len, usize);
-                const serial_start = num_cast(ser_idx, usize);
+                const serial_start = num_cast(serial_idx, usize);
                 const serial_end = serial_start + num_cast(move.copy_len, usize);
                 switch (DIR) {
                     .NATIVE_TO_SERIAL => {
@@ -998,13 +1261,13 @@ fn serial_internal(comptime NUM_OPS: usize, comptime ROUTINE: []const DataOp, co
                         try serial.read_data_swap(SERIAL, native, native_start, native_end, serial_start, serial_end);
                     },
                 }
-                ser_idx += num_cast(move.copy_len, isize);
+                serial_idx += num_cast(move.copy_len, isize);
                 op_idx += 1;
             },
-            .NATIVE_TO_SERIAL_NO_SWAP_SAVE_TAG => |move| {
-                const native_start: usize = @intCast(ser_idx - (num_cast(move.native_to_serial_delta, isize) + dynamic_serial_adjustment));
+            .MOVE_DATA_NO_SWAP_SAVE_TAG => |move| {
+                const native_start: usize = @intCast(serial_idx - (num_cast(move.native_to_serial_delta, isize) + dynamic_serial_adjustment));
                 const native_end = native_start + num_cast(move.copy_len, usize);
-                const serial_start = num_cast(ser_idx, usize);
+                const serial_start = num_cast(serial_idx, usize);
                 const serial_end = serial_start + num_cast(move.copy_len, usize);
                 switch (DIR) {
                     .NATIVE_TO_SERIAL => {
@@ -1014,14 +1277,14 @@ fn serial_internal(comptime NUM_OPS: usize, comptime ROUTINE: []const DataOp, co
                         try serial.read_data_in_order(SERIAL, native, native_start, native_end, serial_start, serial_end);
                     },
                 }
-                ser_idx += num_cast(move.copy_len, isize);
+                serial_idx += num_cast(move.copy_len, isize);
                 op_idx += 1;
                 tag_got = OpaqueUnionTag.cast_endian_serial_to_endian_u64_any(native[native_start..native_end]);
             },
-            .NATIVE_TO_SERIAL_SWAP_SAVE_TAG => |move| {
-                const native_start: usize = @intCast(ser_idx - (num_cast(move.native_to_serial_delta, isize) + dynamic_serial_adjustment));
+            .MOVE_DATA_SWAP_SAVE_TAG => |move| {
+                const native_start: usize = @intCast(serial_idx - (num_cast(move.native_to_serial_delta, isize) + dynamic_serial_adjustment));
                 const native_end = native_start + num_cast(move.copy_len, usize);
-                const serial_start = num_cast(ser_idx, usize);
+                const serial_start = num_cast(serial_idx, usize);
                 const serial_end = serial_start + num_cast(move.copy_len, usize);
                 switch (DIR) {
                     .NATIVE_TO_SERIAL => {
@@ -1031,7 +1294,7 @@ fn serial_internal(comptime NUM_OPS: usize, comptime ROUTINE: []const DataOp, co
                         try serial.read_data_swap(SERIAL, native, native_start, native_end, serial_start, serial_end);
                     },
                 }
-                ser_idx += num_cast(move.copy_len, isize);
+                serial_idx += num_cast(move.copy_len, isize);
                 op_idx += 1;
                 tag_got = OpaqueUnionTag.cast_serial_and_swap_to_endian_u64_any(native[native_start..native_end]);
             },
@@ -1062,7 +1325,7 @@ fn serial_internal(comptime NUM_OPS: usize, comptime ROUTINE: []const DataOp, co
             else => unreachable,
         }
     }
-    return @intCast(ser_idx);
+    return @intCast(serial_idx);
 }
 
 test SerialRoutineBuilder {
@@ -1271,8 +1534,8 @@ test SerialRoutineBuilder {
         var builder = SerialRoutineBuilder.init(op_buf[0..1024], skip_buf[0..256]);
         builder.debug_stack = debug_buf[0..1024];
         const settings = SerialSettings{
-            .TARGET_ENDIAN = .LITTLE_ENDIAN,
-            .EVAL_QUOTA = 50000,
+            .INTEGER_BYTE_PACKING = .LITTLE_ENDIAN,
+            .COMPTIME_EVAL_QUOTA = 50000,
             .ADD_ROUTINE_DEBUG_INFO = false,
         };
         builder.build_routine_for_type(TestStruct, settings);
