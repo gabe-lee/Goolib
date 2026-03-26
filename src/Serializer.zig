@@ -83,36 +83,13 @@ pub const BytePacking = enum(u8) {
     /// the size of the serialized data at the cost of additional
     /// processing time.
     ///
-    /// Specifically, this uses the 'PrefixVarint' method,
-    /// where the leading bits of the first byte (or first couple bytes for very large values) to signal the total
-    /// number of bytes for the value, and the following bytes are in LITTLE ENDIAN order
-    ///
-    /// This reduces the number of CPU branches required to serialize a single value and eliminates
-    /// additional bit shifting/masking ops on the data bytes
-    VARINT_USING_PREFIX_LITTLE_ENDIAN,
-    /// Serialize data using VarInts, which can greatly reduce
-    /// the size of the serialized data at the cost of additional
-    /// processing time.
-    ///
-    /// Specifically, this uses the 'PrefixVarint' method,
+    /// Specifically, this uses the 'PrefixVarint' method in BIG ENDIAN,
     /// where the leading bits of the first byte (or first couple bytes for very large values) to signal the total
     /// number of bytes for the value, and the following bytes are in BIG ENDIAN order
     ///
     /// This reduces the number of CPU branches required to serialize a single value and eliminates
     /// additional bit shifting/masking ops on the data bytes
-    VARINT_USING_PREFIX_BIG_ENDIAN,
-    // /// Serialize data using VarInts, which can greatly reduce
-    // /// the size of the serialized data at the cost of additional
-    // /// processing time.
-    // ///
-    // /// Specifically, this uses the traditional VarInt method,
-    // /// where each byte encodes 7 bits of real data, and uses the most significant bit to
-    // /// signal whether another byte needs to be processed after it.
-    // ///
-    // /// This method has a small memory footprint and does not require
-    // /// seeking back to a previous index of the serial stream like `VARINT_USING_HEADERS`,
-    // /// but causes many more CPU branches and requires bit shifting/masking operations to unpack the data
-    // VARINT_USING_CONTINUE_BIT,
+    VARINT_USING_PREFIX,
 };
 
 pub const IntegerSign = enum(u8) {
@@ -163,6 +140,9 @@ pub const SerialReadError = error{
     /// that you changed the native object to be serialized without incrementing
     /// the version counter associated with it.
     serial_routine_hash_mismatch,
+    /// If the serial stream indicates a VarInt integer, but the native size
+    /// is not 2, 4, 8, or 16 it is an error
+    serial_varint_unsupported_target_native_size,
 };
 
 const SerialKind = enum(u8) { SLICE, READER_WRITER };
@@ -262,19 +242,10 @@ pub const OpKind = enum(u8) {
     MOVE_DATA_SWAP,
     MOVE_DATA_NO_SWAP_SAVE_TAG,
     MOVE_DATA_SWAP_SAVE_TAG,
-    // MOVE_DATA_VARINT_G,
-    // MOVE_DATA_VARINT_G_SAVE_TAG,
-    // MOVE_DATA_VARINT_GS,
-    // MOVE_DATA_VARINT_GS_SAVE_TAG,
-    // VARINT_G_HEADER,
     MOVE_DATA_VARINT_P,
     MOVE_DATA_VARINT_P_SAVE_TAG,
     MOVE_DATA_VARINT_PS,
     MOVE_DATA_VARINT_PS_SAVE_TAG,
-    MOVE_DATA_VARINT_P_SWAP,
-    MOVE_DATA_VARINT_P_SWAP_SAVE_TAG,
-    MOVE_DATA_VARINT_PS_SWAP,
-    MOVE_DATA_VARINT_PS_SWAP_SAVE_TAG,
     UNION_HEADER,
     UNION_TAG_ID,
     UNION_ROUTINE_START,
@@ -287,19 +258,10 @@ pub const DataOp = union(OpKind) {
     MOVE_DATA_SWAP: MemCopyMove,
     MOVE_DATA_NO_SWAP_SAVE_TAG: MemCopyMove,
     MOVE_DATA_SWAP_SAVE_TAG: MemCopyMove,
-    // MOVE_DATA_VARINT_G: MemCopyMove,
-    // MOVE_DATA_VARINT_G_SAVE_TAG: MemCopyMove,
-    // MOVE_DATA_VARINT_GS: MemCopyMove,
-    // MOVE_DATA_VARINT_GS_SAVE_TAG: MemCopyMove,
-    // VARINT_G_HEADER: VarInt_G_Header,
     MOVE_DATA_VARINT_P: MemCopyMove,
     MOVE_DATA_VARINT_P_SAVE_TAG: MemCopyMove,
     MOVE_DATA_VARINT_PS: MemCopyMove,
     MOVE_DATA_VARINT_PS_SAVE_TAG: MemCopyMove,
-    MOVE_DATA_VARINT_P_SWAP: MemCopyMove,
-    MOVE_DATA_VARINT_P_SWAP_SAVE_TAG: MemCopyMove,
-    MOVE_DATA_VARINT_PS_SWAP: MemCopyMove,
-    MOVE_DATA_VARINT_PS_SWAP_SAVE_TAG: MemCopyMove,
     UNION_HEADER: UnionHeader,
     UNION_TAG_ID: u64,
     UNION_ROUTINE_START: UnionRoutineStart,
@@ -322,25 +284,6 @@ pub const DataOp = union(OpKind) {
         assert_with_reason(copy_len == 2 or copy_len == 4 or copy_len == 8, @src(), "'_save_tag()' data ops can only be 1, 2, 4, or 8 bytes in size, got {d}", .{copy_len});
         return DataOp{ .MOVE_DATA_SWAP_SAVE_TAG = .mem_copy_move(native_to_serial_delta, copy_len) };
     }
-    // pub fn mem_move_varint_g(comptime native_to_serial_delta: i32, comptime copy_len: u32) DataOp {
-    //     return DataOp{ .MOVE_DATA_VARINT_G = .mem_copy_move(native_to_serial_delta, copy_len) };
-    // }
-    // pub fn mem_move_varint_g_save_tag(comptime native_to_serial_delta: i32, comptime copy_len: u32) DataOp {
-    //     assert_with_reason(copy_len == 1 or copy_len == 2 or copy_len == 4 or copy_len == 8, @src(), "'_save_tag()' data ops can only be 1, 2, 4, or 8 bytes in size, got {d}", .{copy_len});
-    //     return DataOp{ .MOVE_DATA_VARINT_G_SAVE_TAG = .mem_copy_move(native_to_serial_delta, copy_len) };
-    // }
-    // pub fn mem_move_varint_gs(comptime native_to_serial_delta: i32, comptime copy_len: u32) DataOp {
-    //     return DataOp{ .MOVE_DATA_VARINT_GS = .mem_copy_move(native_to_serial_delta, copy_len) };
-    // }
-    // pub fn mem_move_varint_gs_save_tag(comptime native_to_serial_delta: i32, comptime copy_len: u32) DataOp {
-    //     assert_with_reason(copy_len == 1 or copy_len == 2 or copy_len == 4 or copy_len == 8, @src(), "'_save_tag()' data ops can only be 1, 2, 4, or 8 bytes in size, got {d}", .{copy_len});
-    //     return DataOp{ .MOVE_DATA_VARINT_GS_SAVE_TAG = .mem_copy_move(native_to_serial_delta, copy_len) };
-    // }
-    // pub fn varint_g_header(comptime num_following_varint_bytes: u32) DataOp {
-    //     assert_with_reason(num_following_varint_bytes > 0 and num_following_varint_bytes <= 4, @src(), "`num_following_varint_bytes` must be more than 0 and less than or equal to 4, got {d}", .{num_following_varint_bytes});
-    //     return DataOp{ .VARINT_G_HEADER = VarInt_G_Header{ .number_of_following_header_bytes = num_following_varint_bytes, .offset_to_next_varint_g_header = 0 } };
-    // }
-
     pub fn mem_move_varint_p(comptime native_to_serial_delta: i32, comptime copy_len: u32) DataOp {
         return DataOp{ .MOVE_DATA_VARINT_P = .mem_copy_move(native_to_serial_delta, copy_len) };
     }
@@ -354,20 +297,6 @@ pub const DataOp = union(OpKind) {
     pub fn mem_move_varint_ps_save_tag(comptime native_to_serial_delta: i32, comptime copy_len: u32) DataOp {
         assert_with_reason(copy_len == 1 or copy_len == 2 or copy_len == 4 or copy_len == 8, @src(), "'_save_tag()' data ops can only be 1, 2, 4, or 8 bytes in size, got {d}", .{copy_len});
         return DataOp{ .MOVE_DATA_VARINT_PS_SAVE_TAG = .mem_copy_move(native_to_serial_delta, copy_len) };
-    }
-    pub fn mem_move_varint_p_swap(comptime native_to_serial_delta: i32, comptime copy_len: u32) DataOp {
-        return DataOp{ .MOVE_DATA_VARINT_P_SWAP = .mem_copy_move(native_to_serial_delta, copy_len) };
-    }
-    pub fn mem_move_varint_p_swap_save_tag(comptime native_to_serial_delta: i32, comptime copy_len: u32) DataOp {
-        assert_with_reason(copy_len == 1 or copy_len == 2 or copy_len == 4 or copy_len == 8, @src(), "'_save_tag()' data ops can only be 1, 2, 4, or 8 bytes in size, got {d}", .{copy_len});
-        return DataOp{ .MOVE_DATA_VARINT_P_SWAP_SAVE_TAG = .mem_copy_move(native_to_serial_delta, copy_len) };
-    }
-    pub fn mem_move_varint_ps_swap(comptime native_to_serial_delta: i32, comptime copy_len: u32) DataOp {
-        return DataOp{ .MOVE_DATA_VARINT_PS_SWAP = .mem_copy_move(native_to_serial_delta, copy_len) };
-    }
-    pub fn mem_move_varint_ps_swap_save_tag(comptime native_to_serial_delta: i32, comptime copy_len: u32) DataOp {
-        assert_with_reason(copy_len == 1 or copy_len == 2 or copy_len == 4 or copy_len == 8, @src(), "'_save_tag()' data ops can only be 1, 2, 4, or 8 bytes in size, got {d}", .{copy_len});
-        return DataOp{ .MOVE_DATA_VARINT_PS_SWAP_SAVE_TAG = .mem_copy_move(native_to_serial_delta, copy_len) };
     }
     pub fn union_header(comptime num_fields: usize, comptime tag_type: type) DataOp {
         return DataOp{ .UNION_HEADER = UnionHeader{ .num_fields = @intCast(num_fields), .tag_type = OpaqueUnionTag.from_tag_type(tag_type) } };
@@ -754,6 +683,8 @@ pub const SerialSettings = struct {
     /// in most cases the best choice, as most target platforms are natively little-endian, allowing for
     /// faster processing.
     ///
+    /// If `INTEGER_BYTE_PACKING` is an endian mode, this should match that mode.
+    ///
     /// Floats are not allowed to be packed as VarInts, because floating point encoding forces all
     /// bytes to be used in almost all cases, which results in nearly-guaranteed wasted processing and
     /// memory footprint.
@@ -857,16 +788,11 @@ pub const SerialRoutineBuilder = struct {
                 .MOVE_DATA_VARINT_P_SAVE_TAG,
                 .MOVE_DATA_VARINT_PS,
                 .MOVE_DATA_VARINT_PS_SAVE_TAG,
-                .MOVE_DATA_VARINT_P_SWAP,
-                .MOVE_DATA_VARINT_P_SWAP_SAVE_TAG,
-                .MOVE_DATA_VARINT_PS_SWAP,
-                .MOVE_DATA_VARINT_PS_SWAP_SAVE_TAG,
                 => |move| {
                     const native_start_i: isize = ser_idx - (num_cast(move.native_to_serial_delta, isize) + dynamic_serial_adjustment);
                     self.d_assert_with_reason(native_start_i >= 0, @src(), "(serial_idx + native_to_serial_delta + dynamic_serial_adjustment) would cause native index to go below zero", .{});
                     const native_start: usize = @intCast(native_start_i);
                     const native_end = native_start + num_cast(move.copy_len, usize);
-                    const native_len = native_end - native_start;
                     const serial_start = num_cast(ser_idx, usize);
                     const serial_end = serial_start + num_cast(move.copy_len, usize);
                     const SWAP = switch (op) {
@@ -879,10 +805,6 @@ pub const SerialRoutineBuilder = struct {
                         => false,
                         .MOVE_DATA_SWAP,
                         .MOVE_DATA_SWAP_SAVE_TAG,
-                        .MOVE_DATA_VARINT_P_SWAP,
-                        .MOVE_DATA_VARINT_P_SWAP_SAVE_TAG,
-                        .MOVE_DATA_VARINT_PS_SWAP,
-                        .MOVE_DATA_VARINT_PS_SWAP_SAVE_TAG,
                         => true,
                         else => unreachable,
                     };
@@ -890,38 +812,34 @@ pub const SerialRoutineBuilder = struct {
                         .MOVE_DATA_NO_SWAP,
                         .MOVE_DATA_SWAP,
                         .MOVE_DATA_VARINT_P,
-                        .MOVE_DATA_VARINT_P_SWAP,
                         .MOVE_DATA_VARINT_PS,
-                        .MOVE_DATA_VARINT_PS_SWAP,
                         => false,
                         .MOVE_DATA_NO_SWAP_SAVE_TAG,
                         .MOVE_DATA_SWAP_SAVE_TAG,
                         .MOVE_DATA_VARINT_P_SAVE_TAG,
-                        .MOVE_DATA_VARINT_P_SWAP_SAVE_TAG,
                         .MOVE_DATA_VARINT_PS_SAVE_TAG,
-                        .MOVE_DATA_VARINT_PS_SWAP_SAVE_TAG,
                         => true,
                         else => unreachable,
                     };
+                    if (!SAVE_TAG) {
+                        self.d_assert_with_reason(mode == .NORMAL, @src(), "must be in `.NORMAL` mode for this op, curr mode is `{s}`", .{@tagName(mode)});
+                    } else {
+                        self.d_assert_with_reason(mode == .NEED_UNION_TAG_CAPTURE_NEXT, @src(), "must be in `.NEED_UNION_TAG_CAPTURE_NEXT` mode for this op, curr mode is `{s}`", .{@tagName(mode)});
+                    }
                     const ZIGZAG = switch (op) {
                         .MOVE_DATA_NO_SWAP,
                         .MOVE_DATA_SWAP,
-                        .MOVE_DATA_VARINT_P,
-                        .MOVE_DATA_VARINT_P_SWAP,
                         .MOVE_DATA_NO_SWAP_SAVE_TAG,
                         .MOVE_DATA_SWAP_SAVE_TAG,
+                        .MOVE_DATA_VARINT_P,
                         .MOVE_DATA_VARINT_P_SAVE_TAG,
-                        .MOVE_DATA_VARINT_P_SWAP_SAVE_TAG,
                         => false,
                         .MOVE_DATA_VARINT_PS,
-                        .MOVE_DATA_VARINT_PS_SWAP,
                         .MOVE_DATA_VARINT_PS_SAVE_TAG,
-                        .MOVE_DATA_VARINT_PS_SWAP_SAVE_TAG,
                         // zigzag requires knowing the native size concretely, so only i16, i32, i64, isize, and i128 are supported
-                        => move.copy_len == 2 or move.copy_len == 4 or move.copy_len == 8 or move.copy_len == 16,
+                        => true,
                         else => unreachable,
                     };
-                    comptime var zigzag_temp: [16]u8 = undefined;
                     const TECH = switch (op) {
                         .MOVE_DATA_NO_SWAP,
                         .MOVE_DATA_SWAP,
@@ -929,81 +847,28 @@ pub const SerialRoutineBuilder = struct {
                         .MOVE_DATA_SWAP_SAVE_TAG,
                         => SER_TECH.NORMAL,
                         .MOVE_DATA_VARINT_P,
-                        .MOVE_DATA_VARINT_P_SWAP,
                         .MOVE_DATA_VARINT_P_SAVE_TAG,
-                        .MOVE_DATA_VARINT_P_SWAP_SAVE_TAG,
                         .MOVE_DATA_VARINT_PS,
-                        .MOVE_DATA_VARINT_PS_SWAP,
                         .MOVE_DATA_VARINT_PS_SAVE_TAG,
-                        .MOVE_DATA_VARINT_PS_SWAP_SAVE_TAG,
                         => SER_TECH.VARINT_P,
                         else => unreachable,
                     };
+                    if (TECH == .VARINT_P) {
+                        assert_with_reason(move.copy_len == 2 or move.copy_len == 4 or move.copy_len == 8 or move.copy_len == 16, @src(), "Varints are only supported for integer sizes 2, 4, 8, or 16, got {d}", .{move.copy_len});
+                    }
                     switch (TECH) {
                         .NORMAL => comptime do_serial_move_mem(move, &ser_idx, &op_idx, serial_slice, serial_start, serial_end, native_slice, native_start, native_end, SWAP, DIRECTION),
-                        .VARINT_P => switch (ZIGZAG) {
-                            true => switch (DIRECTION) {
-                                .NATIVE_TO_SERIAL => {
-                                    @memcpy(zigzag_temp[0..native_len], native_slice[native_start..native_end]);
-                                },
-                                .SERIAL_TO_NATIVE => {},
-                            },
-                            false => {},
+                        .VARINT_P => {
+                            const fail = switch (ZIGZAG) {
+                                true => comptime do_varint_p_move_mem(move, &dynamic_serial_adjustment, &op_idx, serial_slice, serial_start, native_slice, native_start, native_end, true, DIRECTION),
+                                false => comptime do_varint_p_move_mem(move, &dynamic_serial_adjustment, &op_idx, serial_slice, serial_start, native_slice, native_start, native_end, false, DIRECTION),
+                            };
+                            assert_with_reason(fail == false, @src(), "do_varint_p_move_mem failed: ran out of serial data", .{});
                         },
                     }
-                    switch (op) {
-                        .MOVE_DATA_NO_SWAP,
-                        .MOVE_DATA_SWAP,
-                        .MOVE_DATA_SWAP_SAVE_TAG,
-                        .MOVE_DATA_NO_SWAP_SAVE_TAG,
-                        => self.do_serial_move_mem(move, &ser_idx, &op_idx, serial_slice, serial_start, serial_end, native_slice, native_start, native_end, SWAP, DIRECTION),
-                        .MOVE_DATA_VARINT_P,
-                        .MOVE_DATA_VARINT_P_SWAP,
-                        .MOVE_DATA_VARINT_P_SAVE_TAG,
-                        .MOVE_DATA_VARINT_P_SWAP_SAVE_TAG,
-                        => {},
-                        .MOVE_DATA_VARINT_PS,
-                        .MOVE_DATA_VARINT_PS_SWAP,
-                        .MOVE_DATA_VARINT_PS_SAVE_TAG,
-                        .MOVE_DATA_VARINT_PS_SWAP_SAVE_TAG,
-                        => {
-                            // DO SERIAL
-                            tag_got = OpaqueUnionTag.cast_native_bytes_to_endian_u64_any(native_slice[serial_start..serial_end]);
-                            mode = .NEED_UNION_TAG_ID_NEXT;
-                        },
-                        else => unreachable,
-                    }
-                },
-                .MOVE_DATA_SWAP, .MOVE_DATA_SWAP_SAVE_TAG => |move| {
-                    self.d_assert_with_reason(mode == .NORMAL, @src(), "must be in `.NORMAL` mode for this op, curr mode is `{s}`", .{@tagName(mode)});
-                    const native_start_i: isize = ser_idx - (num_cast(move.native_to_serial_delta, isize) + dynamic_serial_adjustment);
-                    self.d_assert_with_reason(native_start_i >= 0, @src(), "(serial_idx + native_to_serial_delta + dynamic_serial_adjustment) would cause native index to go below zero", .{});
-                    const native_start: usize = @intCast(native_start_i);
-                    const native_end = native_start + num_cast(move.copy_len, usize);
-                    const serial_start = num_cast(ser_idx, usize);
-                    const serial_end = serial_start + num_cast(move.copy_len, usize);
-                    comptime var sidx: usize = num_cast(ser_idx, usize);
-                    comptime var nidx: usize = native_end;
-                    while (sidx < serial_end) : (sidx += 1) {
-                        nidx -= 1;
-                        switch (DIRECTION) {
-                            .NATIVE_TO_SERIAL => {
-                                serial_slice[sidx] = native_slice[nidx];
-                            },
-                            .SERIAL_TO_NATIVE => {
-                                native_slice[nidx] = serial_slice[sidx];
-                            },
-                        }
-                    }
-                    ser_idx += num_cast(move.copy_len, isize);
-                    op_idx += 1;
-                    switch (op) {
-                        .MOVE_DATA_SWAP_SAVE_TAG => {
-                            tag_got = OpaqueUnionTag.cast_endian_serial_to_endian_u64_any(serial_slice[serial_start..serial_end]);
-                            mode = .NEED_UNION_TAG_ID_NEXT;
-                        },
-                        .MOVE_DATA_SWAP => {},
-                        else => unreachable,
+                    if (SAVE_TAG) {
+                        tag_got = OpaqueUnionTag.cast_native_bytes_to_endian_u64_any(native_slice[native_start..native_end]);
+                        mode = .NEED_UNION_TAG_ID_NEXT;
                     }
                 },
                 .UNION_HEADER => |header| {
@@ -1011,7 +876,7 @@ pub const SerialRoutineBuilder = struct {
                     num_tags_this_union = header.num_fields;
                     tags_checked_this_union = 0;
                     op_idx += 1;
-                    mode = .NEED_UNION_TAG_SERIAL_CAPTURE_NEXT;
+                    mode = .NEED_UNION_TAG_CAPTURE_NEXT;
                 },
                 .UNION_TAG_ID => |tag_match| {
                     self.d_assert_with_reason(mode == .NEED_UNION_TAG_ID_NEXT, @src(), "must be in `.NEED_UNION_TAG_ID_NEXT` mode for this op, curr mode is `{s}`", .{@tagName(mode)});
@@ -1137,58 +1002,10 @@ pub const SerialRoutineBuilder = struct {
                     self.curr_serial_offset += num_cast(BYTE_LEN, i32);
                 }
             },
-            // .VARINT_USING_HEADERS => {
-            //     if (BYTE_LEN == 1) {
-            //         continue :with_new_mode .LITTLE_ENDIAN;
-            //     }
-            //     self.ensure_space_for_n_more_ops(2);
-            //     const max_byte_consume_needed_power = MathX.PowerOf2.round_up_to_power_of_2(BYTE_LEN);
-            //     const bits_needed: u8 = @intFromEnum(max_byte_consume_needed_power);
-            //     self.current_varint_g_bits += bits_needed;
-            //     if (self.current_varint_g_bits > 32) {
-            //         const bits_in_next_header = (self.current_varint_g_bits - 32);
-            //         const bytes_in_next_header = (bits_in_next_header + 7) >> 3;
-            //         self.ops[self.prev_varint_g_header_slot].VARINT_G_HEADER.offset_to_next_varint_g_header = num_cast(self.ops_len - self.prev_varint_g_header_slot, u32);
-            //         self.ops[self.ops_len] = .varint_g_header(bytes_in_next_header);
-            //         self.prev_varint_g_header_slot = self.ops_len;
-            //         self.ops_len += 1;
-            //         self.current_varint_g_bits = bits_in_next_header;
-            //     }
-            //     const native_to_serial_delta: i32 = if (self.curr_serial_offset >= curr_native_offset) num_cast(self.curr_serial_offset - curr_native_offset, i32) else -num_cast(curr_native_offset - self.curr_serial_offset, i32);
-            //     switch (UNION_TAG) {
-            //         .IS_A_UNION_TAG => switch (INT_SIGN) {
-            //             .UNSIGNED => self.ops[self.ops_len] = .mem_move_varint_g_save_tag(native_to_serial_delta, @intCast(BYTE_LEN)),
-            //             .SIGNED => self.ops[self.ops_len] = .mem_move_varint_gs_save_tag(native_to_serial_delta, @intCast(BYTE_LEN)),
-            //         },
-            //         .NOT_A_UNION_TAG => switch (INT_SIGN) {
-            //             .UNSIGNED => self.ops[self.ops_len] = .mem_move_varint_g(native_to_serial_delta, @intCast(BYTE_LEN)),
-            //             .SIGNED => self.ops[self.ops_len] = .mem_move_varint_gs(native_to_serial_delta, @intCast(BYTE_LEN)),
-            //         },
-            //     }
-            //     self.ops_len += 1;
-            // },
-            .VARINT_USING_PREFIX_LITTLE_ENDIAN, .VARINT_USING_PREFIX_BIG_ENDIAN => {
-                if (BYTE_LEN == 1) {
-                    continue :with_new_mode .LITTLE_ENDIAN;
+            .VARINT_USING_PREFIX => {
+                if (BYTE_LEN == 1 or BYTE_LEN == 3 or (BYTE_LEN >= 5 and BYTE_LEN <= 7) or (BYTE_LEN >= 9 and BYTE_LEN <= 15) or BYTE_LEN > 16) {
+                    continue :with_new_mode if (SETTINGS.FLOAT_BYTE_ORDER == .BIG_ENDIAN) BytePacking.BIG_ENDIAN else BytePacking.LITTLE_ENDIAN;
                 }
-                // 0xxxxxxx = 1 byte (< 128)
-                // 10xxxxxx = 2 byte (< 16384)
-                // 110xxxxx = 3 byte (< 2097152)
-                // 1110xxxx = 4 byte (< 268435456)
-                // 11110xxx = 5 byte (< 34359738368)
-                // 111110xx = 6 byte (< 4398046511104)
-                // 1111110x = 7 byte (< 562949953421312)
-                // 11111110 = 8 byte (< 72057594037927936)
-                // 11111111 = 9+ byte:
-                // 11111111 0xxxxxxx = 9 byte  (< 9223372036854775808)
-                // 11111111 10xxxxxx = 10 byte
-                // 11111111 110xxxxx = 11 byte
-                // 11111111 1110xxxx = 12 byte
-                // 11111111 11110xxx = 13 byte
-                // 11111111 111110xx = 14 byte
-                // 11111111 1111110x = 15 byte
-                // 11111111 11111110 = 16 byte
-                // 11111111 11111111 = 17+ bytes...
                 const SWAP = (NATIVE_ENDIAN == .BIG_ENDIAN and SETTINGS.INTEGER_BYTE_PACKING == .VARINT_USING_PREFIX_LITTLE_ENDIAN) or (NATIVE_ENDIAN == .LITTLE_ENDIAN and SETTINGS.INTEGER_BYTE_PACKING == .VARINT_USING_PREFIX_BIG_ENDIAN);
                 const native_to_serial_delta: i32 = if (self.curr_serial_offset >= curr_native_offset) num_cast(self.curr_serial_offset - curr_native_offset, i32) else -num_cast(curr_native_offset - self.curr_serial_offset, i32);
                 switch (SWAP) {
@@ -1406,7 +1223,7 @@ const SER_TECH = enum(u8) {
 
 const TEST_SER_MODE = enum(u8) {
     NORMAL,
-    NEED_UNION_TAG_SERIAL_CAPTURE_NEXT,
+    NEED_UNION_TAG_CAPTURE_NEXT,
     NEED_UNION_TAG_ID_NEXT,
     NEED_UNION_START_NEXT,
 };
@@ -1440,76 +1257,48 @@ pub fn define_serial_routine(comptime TOTAL_OPS_: usize, comptime ROUTINE_: [TOT
     };
 }
 
-fn do_zigzag_adjustment(temp_buffer: *[16]u8, native_size: usize, comptime DIR: SER_DIR) void {
-    assert_with_reason(native_size == 2 or native_size == 4 or native_size == 8 or native_size == 16, @src(), "zigzag encoding only supported for i16, i32, i64, isize, and i128, got native integer with {d} bytes", .{native_size});
+fn do_zigzag_adjustment(comptime NATIVE_SIZE: comptime_int, temp_buffer: *align(@alignOf(u128)) [NATIVE_SIZE]u8, comptime DIR: SER_DIR) void {
+    assert_with_reason(NATIVE_SIZE == 2 or NATIVE_SIZE == 4 or NATIVE_SIZE == 8 or NATIVE_SIZE == 16, @src(), "zigzag encoding only supported for i16, i32, i64, isize, and i128, got native integer with {d} bytes", .{NATIVE_SIZE});
     switch (DIR) {
-        .NATIVE_TO_SERIAL => switch (native_size) {
+        .NATIVE_TO_SERIAL => switch (NATIVE_SIZE) {
             2 => {
-                const bytes: [2]u8 = undefined;
-                @memcpy(bytes[0..], temp_buffer[0..2]);
-                const i16_int: i16 = @bitCast(bytes);
-                const u16_int: u16 = @bitCast((i16_int >> 15) ^ (i16_int << 1));
-                bytes = @bitCast(u16_int);
-                @memcpy(temp_buffer[0..2], bytes);
+                const int: *align(@alignOf(u128)) i16 = @ptrCast(@alignCast(temp_buffer));
+                int.* = (int >> 15) ^ (int << 1);
             },
             4 => {
-                const bytes: [4]u8 = undefined;
-                @memcpy(bytes[0..4], temp_buffer[0..4]);
-                const i32_int: i32 = @bitCast(bytes);
-                const u32_int: u32 = @bitCast((i32_int >> 31) ^ (i32_int << 1));
-                bytes = @bitCast(u32_int);
-                @memcpy(temp_buffer[0..4], bytes);
+                const int: *align(@alignOf(u128)) i32 = @ptrCast(@alignCast(temp_buffer));
+                int.* = (int >> 31) ^ (int << 1);
             },
             8 => {
-                const bytes: [8]u8 = undefined;
-                @memcpy(bytes[0..8], temp_buffer[0..8]);
-                const i64_int: i64 = @bitCast(bytes);
-                const u64_int: u64 = @bitCast((i64_int >> 63) ^ (i64_int << 1));
-                bytes = @bitCast(u64_int);
-                @memcpy(temp_buffer[0..8], bytes);
+                const int: *align(@alignOf(u128)) i64 = @ptrCast(@alignCast(temp_buffer));
+                int.* = (int >> 63) ^ (int << 1);
             },
             16 => {
-                const bytes: [16]u8 = undefined;
-                @memcpy(bytes[0..16], temp_buffer[0..16]);
-                const i128_int: i128 = @bitCast(bytes);
-                const u128_int: u128 = @bitCast((i128_int >> 127) ^ (i128_int << 1));
-                bytes = @bitCast(u128_int);
-                @memcpy(temp_buffer[0..16], bytes);
+                const int: *align(@alignOf(u128)) i128 = @ptrCast(@alignCast(temp_buffer));
+                int.* = (int >> 127) ^ (int << 1);
             },
             else => unreachable,
         },
-        .SERIAL_TO_NATIVE => switch (native_size) {
+        .SERIAL_TO_NATIVE => switch (NATIVE_SIZE) {
             2 => {
-                const bytes: [2]u8 = undefined;
-                @memcpy(bytes[0..], temp_buffer[0..2]);
-                const u16_int: u16 = @bitCast(bytes);
-                const i16_int: i16 = bit_cast(u16_int >> 1, i16) ^ -(bit_cast(u16_int, i16) & 1);
-                bytes = @bitCast(i16_int);
-                @memcpy(temp_buffer[0..2], bytes);
+                const int: *align(@alignOf(u128)) i16 = @ptrCast(@alignCast(temp_buffer));
+                const uint: *align(@alignOf(u128)) u16 = @ptrCast(@alignCast(temp_buffer));
+                int.* = bit_cast(uint >> 1, i16) ^ -(bit_cast(uint, i16) & 1);
             },
             4 => {
-                const bytes: [4]u8 = undefined;
-                @memcpy(bytes[0..4], temp_buffer[0..4]);
-                const u32_int: u32 = @bitCast(bytes);
-                const i32_int: i32 = bit_cast(u32_int >> 1, i32) ^ -(bit_cast(u32_int, i32) & 1);
-                bytes = @bitCast(i32_int);
-                @memcpy(temp_buffer[0..4], bytes);
+                const int: *align(@alignOf(u128)) i32 = @ptrCast(@alignCast(temp_buffer));
+                const uint: *align(@alignOf(u128)) u32 = @ptrCast(@alignCast(temp_buffer));
+                int.* = bit_cast(uint >> 1, i32) ^ -(bit_cast(uint, i32) & 1);
             },
             8 => {
-                const bytes: [8]u8 = undefined;
-                @memcpy(bytes[0..8], temp_buffer[0..8]);
-                const u64_int: u64 = @bitCast(bytes);
-                const i64_int: i64 = bit_cast(u64_int >> 1, i64) ^ -(bit_cast(u64_int, i64) & 1);
-                bytes = @bitCast(i64_int);
-                @memcpy(temp_buffer[0..8], bytes);
+                const int: *align(@alignOf(u128)) i64 = @ptrCast(@alignCast(temp_buffer));
+                const uint: *align(@alignOf(u128)) u64 = @ptrCast(@alignCast(temp_buffer));
+                int.* = bit_cast(uint >> 1, i64) ^ -(bit_cast(uint, i64) & 1);
             },
             16 => {
-                const bytes: [16]u8 = undefined;
-                @memcpy(bytes[0..16], temp_buffer[0..16]);
-                const u128_int: u128 = @bitCast(bytes);
-                const i128_int: i128 = bit_cast(u128_int >> 1, i128) ^ -(bit_cast(u128_int, i128) & 1);
-                bytes = @bitCast(i128_int);
-                @memcpy(temp_buffer[0..16], bytes);
+                const int: *align(@alignOf(u128)) i128 = @ptrCast(@alignCast(temp_buffer));
+                const uint: *align(@alignOf(u128)) u128 = @ptrCast(@alignCast(temp_buffer));
+                int.* = bit_cast(uint >> 1, i128) ^ -(bit_cast(uint, i128) & 1);
             },
             else => unreachable,
         },
@@ -1546,158 +1335,321 @@ fn do_serial_move_mem(move: MemCopyMove, ser_idx: *isize, op_idx: *usize, serial
     op_idx.* += 1;
 }
 
-fn do_varint_p_move_mem(move: MemCopyMove, ser_idx: *isize, op_idx: usize, serial: []u8, serial_start: usize, serial_end: usize, native: []u8, native_start: usize, native_end: usize, native_len: usize, zigzag: bool, comptime SWAP: bool, comptime DIR: SER_DIR) void {
-    // 0xxxxxxx = 1 byte (< 128)
-    // 10xxxxxx = 2 byte (< 16384)
-    // 110xxxxx = 3 byte (< 2097152)
-    // 1110xxxx = 4 byte (< 268435456)
-    // 11110xxx = 5 byte (< 34359738368)
-    // 111110xx = 6 byte (< 4398046511104)
-    // 1111110x = 7 byte (< 562949953421312)
-    // 11111110 = 8 byte (< 72057594037927936)
-    // 11111111 = 9+ byte:
-    // 11111111 0xxxxxxx = 9 byte  (< 9223372036854775808)
-    // 11111111 10xxxxxx = 10 byte
-    // 11111111 110xxxxx = 11 byte
-    // 11111111 1110xxxx = 12 byte
-    // 11111111 11110xxx = 13 byte
-    // 11111111 111110xx = 14 byte
-    // 11111111 1111110x = 15 byte
-    // 11111111 11111110 = 16 byte
-    var temp_buffer: [16]u8 = undefined;
+/// NUM, LEAST_SIG_IDX, MOST_SIG_IDX
+const NLM = struct { usize, usize, usize };
+
+fn more_sig(comptime start: comptime_int, comptime move: comptime_int) comptime_int {
+    if (NATIVE_ENDIAN == .BIG_ENDIAN) {
+        return start - move;
+    } else {
+        return start + move;
+    }
+}
+fn less_sig(comptime start: comptime_int, comptime move: comptime_int) comptime_int {
+    if (NATIVE_ENDIAN == .BIG_ENDIAN) {
+        return start + move;
+    } else {
+        return start - move;
+    }
+}
+
+fn do_varint_p_move_mem(move: MemCopyMove, dynamic_serial_adjustment: *isize, op_idx: *usize, serial: []u8, serial_start: usize, native: []u8, native_start: usize, native_end: usize, comptime ZIGZAG: bool, comptime DIR: SER_DIR) bool {
+    // 1 byte (< 128)
+    // ________ ________ ________┃0AAAAAAA
+    // 2 byte (< 16384)          ┃
+    // ________ ________ ________┃10AAAAAA xxxxxxxx
+    // 3 byte (< 2097152)        ┃
+    // ________ ________ ________┃110AAAAA xxxxxxxx xxxxxxxx
+    // 4 byte (< 268435456)      ┃
+    // ________ ________ ________┃1110AAAA xxxxxxxx xxxxxxxx xxxxxxxx
+    // 5 byte (< 34359738368)    ┃
+    // ________ ________ ________┃11110AAA xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx
+    // 6 byte (< 4398046511104)  ┃
+    // ________ ________ ________┃111110AA xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx
+    // 7 byte (< 562949953421312)┃
+    // ________ ________ ________┃1111110A xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx
+    // 8 byte (< 72057594037927936)
+    // ________ ________ ________┃11111110 AAAAAAAA xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx
+    // 9 byte for u64:           ┃
+    // ________ ________ 11111111┃AAAAAAAA xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx
+    // 9 byte for u128 (< 9223372036854775808)
+    // ________ ________ ________┃11111111 0AAAAAAA xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx
+    // 10 byte (< 1180591620717411303424)
+    // ________ ________ ________┃11111111 10AAAAAA xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx
+    // 11 byte (< 151115727451828646838272)
+    // ________ ________ ________┃11111111 110AAAAA xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx
+    // 12 byte (< 19342813113834066795298816)
+    // ________ ________ ________┃11111111 1110AAAA xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx
+    // 13 byte (< 2475880078570760549798248448)
+    // ________ ________ ________┃11111111 11110AAA xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx
+    // 14 byte (< 316912650057057350374175801344)
+    // ________ ________ ________┃11111111 111110AA xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx
+    // 15 byte (< 40564819207303340847894502572032)
+    // ________ ________ ________┃11111111 1111110A xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx
+    // 16 byte (< 5192296858534827628530496329220096)
+    // ________ ________ ________┃11111111 11111110 AAAAAAAA xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx
+    // 17 bytes (< 664613997892457936451903530140172288)
+    // ________ ________ 11111111┃11111111 0AAAAAAA xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx
+    // 18 bytes (< 85070591730234615865843651857942052864)
+    // ________ 11111111 11111111┃10AAAAAA xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx
+    // 19 bytes (<= 340282366920938463463374607431768211455)
+    // 11111111 11111111 110_____┃AAAAAAAA xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx
+    //                      ^^^^^ If any of these bits are not 0, it is an error if you are
+    //                            strict on non-canonical reps, but they have no effect on the
+    //                            final value either way
+    const native_len = move.copy_len;
     assert_with_reason(native_len == 2 or native_len == 4 or native_len == 8 or native_len == 16, @src(), "VarInts are only upported for 2, 4, 8, or 16 byte integers, got native len {d}", .{native_len});
+    var temp_buffer: [35]u8 align(@alignOf(u128)) = @splat(0);
+    const val_offset: *align(@alignOf(u128)) u8 = &temp_buffer[16];
     switch (DIR) {
         .NATIVE_TO_SERIAL => {
             switch (native_len) {
-                2 => @memcpy(temp_buffer[0..2], native[native_start..native_end]),
-                4 => @memcpy(temp_buffer[0..4], native[native_start..native_end]),
-                8 => @memcpy(temp_buffer[0..8], native[native_start..native_end]),
-                16 => @memcpy(temp_buffer[0..16], native[native_start..native_end]),
+                2 => @memcpy(temp_buffer[16..18], native[native_start..native_end]),
+                4 => @memcpy(temp_buffer[16..20], native[native_start..native_end]),
+                8 => @memcpy(temp_buffer[16..24], native[native_start..native_end]),
+                16 => @memcpy(temp_buffer[16..32], native[native_start..native_end]),
                 else => unreachable,
             }
-            if (zigzag) {
-                do_zigzag_adjustment(&temp_buffer, native_len, DIR);
-            }
-            const num_bytes = switch (native_len) {
+            const num_bytes: usize, const least_sig_byte_with_data: usize, const most_sig_byte_with_data: usize = switch (native_len) {
                 2 => get: {
-                    var u16_bytes: [2]u8 = undefined;
-                    @memcpy(u16_bytes[0..2], temp_buffer[0..2]);
-                    const u16_int: u16 = @bitCast(u16_bytes);
-                    break :get switch (u16_int) {
-                        0...127 => 1,
-                        128...16383 => 2,
-                        16384...0xFFFF => 3,
+                    if (ZIGZAG) do_zigzag_adjustment(2, @ptrCast(val_offset), .NATIVE_TO_SERIAL);
+                    const uint: *const u16 = @ptrCast(@alignCast(val_offset));
+                    const LSB: comptime_int = if (NATIVE_ENDIAN == .BIG_ENDIAN) 17 else 16;
+                    break :get switch (uint.*) {
+                        0...127 => NLM{ 1, LSB, LSB },
+                        128...16383 => add_prefix: {
+                            temp_buffer[more_sig(LSB, 1)] |= 0b10_000000;
+                            break :add_prefix NLM{ 2, LSB, more_sig(LSB, 1) };
+                        },
+                        16384...0xFFFF => add_prefix: {
+                            temp_buffer[more_sig(LSB, 2)] |= 0b110_00000;
+                            break :add_prefix NLM{ 3, LSB, more_sig(LSB, 2) };
+                        },
                     };
                 },
                 4 => get: {
-                    var u32_bytes: [4]u8 = undefined;
-                    @memcpy(u32_bytes[0..4], temp_buffer[0..4]);
-                    const u32_int: u32 = @bitCast(u32_bytes);
-                    break :get switch (u32_int) {
-                        0...127 => 1,
-                        128...16383 => 2,
-                        16384...2097151 => 3,
-                        2097152...268435455 => 4,
-                        268435456...0xFFFFFFFF => 5,
+                    if (ZIGZAG) do_zigzag_adjustment(4, @ptrCast(val_offset), .NATIVE_TO_SERIAL);
+                    const uint: *const u32 = @ptrCast(@alignCast(val_offset));
+                    const LSB = if (NATIVE_ENDIAN == .BIG_ENDIAN) 19 else 16;
+                    break :get switch (uint.*) {
+                        0...127 => NLM{ 1, LSB, LSB },
+                        128...16383 => add_prefix: {
+                            temp_buffer[more_sig(LSB, 1)] |= 0b10_000000;
+                            break :add_prefix NLM{ 2, LSB, more_sig(LSB, 1) };
+                        },
+                        16384...2097151 => add_prefix: {
+                            temp_buffer[more_sig(LSB, 2)] |= 0b110_00000;
+                            break :add_prefix NLM{ 3, LSB, more_sig(LSB, 2) };
+                        },
+                        2097152...268435455 => add_prefix: {
+                            temp_buffer[more_sig(LSB, 3)] |= 0b1110_00000;
+                            break :add_prefix NLM{ 4, LSB, more_sig(LSB, 3) };
+                        },
+                        268435456...0xFFFFFFFF => add_prefix: {
+                            temp_buffer[more_sig(LSB, 4)] |= 0b11110_0000;
+                            break :add_prefix NLM{ 5, LSB, more_sig(LSB, 4) };
+                        },
                     };
                 },
-                8 => @memcpy(temp_buffer[0..8], native[native_start..native_end]), //CHECKPOINT
-                16 => @memcpy(temp_buffer[0..16], native[native_start..native_end]),
+                8 => get: {
+                    if (ZIGZAG) do_zigzag_adjustment(8, @ptrCast(val_offset), .NATIVE_TO_SERIAL);
+                    const uint: *const u64 = @ptrCast(@alignCast(val_offset));
+                    const LSB = if (NATIVE_ENDIAN == .BIG_ENDIAN) 23 else 16;
+                    break :get switch (uint.*) {
+                        0...127 => NLM{ 1, LSB, LSB },
+                        128...16383 => add_prefix: {
+                            temp_buffer[more_sig(LSB, 1)] |= 0b10_000000;
+                            break :add_prefix NLM{ 2, LSB, more_sig(LSB, 1) };
+                        },
+                        16384...2097151 => add_prefix: {
+                            temp_buffer[more_sig(LSB, 2)] |= 0b110_00000;
+                            break :add_prefix NLM{ 3, LSB, more_sig(LSB, 2) };
+                        },
+                        2097152...268435455 => add_prefix: {
+                            temp_buffer[more_sig(LSB, 3)] |= 0b1110_0000;
+                            break :add_prefix NLM{ 4, LSB, more_sig(LSB, 3) };
+                        },
+                        268435456...34359738367 => add_prefix: {
+                            temp_buffer[more_sig(LSB, 4)] |= 0b11110_000;
+                            break :add_prefix NLM{ 5, LSB, more_sig(LSB, 4) };
+                        },
+                        34359738368...4398046511103 => add_prefix: {
+                            temp_buffer[more_sig(LSB, 5)] |= 0b111110_00;
+                            break :add_prefix NLM{ 6, LSB, more_sig(LSB, 5) };
+                        },
+                        4398046511104...562949953421311 => add_prefix: {
+                            temp_buffer[more_sig(LSB, 6)] |= 0b1111110_0;
+                            break :add_prefix NLM{ 7, LSB, more_sig(LSB, 6) };
+                        },
+                        562949953421312...72057594037927935 => add_prefix: {
+                            temp_buffer[more_sig(LSB, 7)] |= 0b11111110;
+                            break :add_prefix NLM{ 8, LSB, more_sig(LSB, 7) };
+                        },
+                        72057594037927936...9223372036854775807 => add_prefix: {
+                            temp_buffer[more_sig(LSB, 8)] |= 0b11111111;
+                            break :add_prefix NLM{ 9, LSB, more_sig(LSB, 8) };
+                        },
+                    };
+                },
+                16 => get: {
+                    if (ZIGZAG) do_zigzag_adjustment(16, @ptrCast(val_offset), .NATIVE_TO_SERIAL);
+                    const uint: *const u128 = @ptrCast(@alignCast(val_offset));
+                    const LSB = if (NATIVE_ENDIAN == .BIG_ENDIAN) 31 else 16;
+                    break :get switch (uint.*) {
+                        0...127 => NLM{ 1, LSB, LSB },
+                        128...16383 => add_prefix: {
+                            temp_buffer[more_sig(LSB, 1)] |= 0b10_000000;
+                            break :add_prefix NLM{ 2, LSB, more_sig(LSB, 1) };
+                        },
+                        16384...2097151 => add_prefix: {
+                            temp_buffer[more_sig(LSB, 2)] |= 0b110_00000;
+                            break :add_prefix NLM{ 3, LSB, more_sig(LSB, 2) };
+                        },
+                        2097152...268435455 => add_prefix: {
+                            temp_buffer[more_sig(LSB, 3)] |= 0b1110_0000;
+                            break :add_prefix NLM{ 4, LSB, more_sig(LSB, 3) };
+                        },
+                        268435456...34359738367 => add_prefix: {
+                            temp_buffer[more_sig(LSB, 4)] |= 0b11110_000;
+                            break :add_prefix NLM{ 5, LSB, more_sig(LSB, 4) };
+                        },
+                        34359738368...4398046511103 => add_prefix: {
+                            temp_buffer[more_sig(LSB, 5)] |= 0b111110_00;
+                            break :add_prefix NLM{ 6, LSB, more_sig(LSB, 5) };
+                        },
+                        4398046511104...562949953421311 => add_prefix: {
+                            temp_buffer[more_sig(LSB, 6)] |= 0b1111110_0;
+                            break :add_prefix NLM{ 7, LSB, more_sig(LSB, 6) };
+                        },
+                        562949953421312...72057594037927935 => add_prefix: {
+                            temp_buffer[more_sig(LSB, 7)] |= 0b11111110;
+                            break :add_prefix NLM{ 8, LSB, more_sig(LSB, 7) };
+                        },
+                        72057594037927936...9223372036854775807 => add_prefix: {
+                            temp_buffer[more_sig(LSB, 8)] |= 0b11111111;
+                            // temp_buffer[more_sig(LSB, 7)] |= 0b0_0000000;
+                            break :add_prefix NLM{ 9, LSB, more_sig(LSB, 8) };
+                        },
+                        9223372036854775808...1180591620717411303423 => add_prefix: {
+                            temp_buffer[more_sig(LSB, 9)] |= 0b11111111;
+                            temp_buffer[more_sig(LSB, 8)] |= 0b10_000000;
+                            break :add_prefix NLM{ 10, LSB, more_sig(LSB, 9) };
+                        },
+                        1180591620717411303424...151115727451828646838271 => add_prefix: {
+                            temp_buffer[more_sig(LSB, 10)] |= 0b11111111;
+                            temp_buffer[more_sig(LSB, 9)] |= 0b110_00000;
+                            break :add_prefix NLM{ 11, LSB, more_sig(LSB, 10) };
+                        },
+                        151115727451828646838272...19342813113834066795298815 => add_prefix: {
+                            temp_buffer[more_sig(LSB, 11)] |= 0b11111111;
+                            temp_buffer[more_sig(LSB, 10)] |= 0b1110_0000;
+                            break :add_prefix NLM{ 12, LSB, more_sig(LSB, 11) };
+                        },
+                        19342813113834066795298816...2475880078570760549798248447 => add_prefix: {
+                            temp_buffer[more_sig(LSB, 12)] |= 0b11111111;
+                            temp_buffer[more_sig(LSB, 11)] |= 0b11110_000;
+                            break :add_prefix NLM{ 13, LSB, more_sig(LSB, 12) };
+                        },
+                        2475880078570760549798248448...316912650057057350374175801343 => add_prefix: {
+                            temp_buffer[more_sig(LSB, 13)] |= 0b11111111;
+                            temp_buffer[more_sig(LSB, 12)] |= 0b111110_00;
+                            break :add_prefix NLM{ 14, LSB, more_sig(LSB, 13) };
+                        },
+                        316912650057057350374175801344...40564819207303340847894502572031 => add_prefix: {
+                            temp_buffer[more_sig(LSB, 14)] |= 0b11111111;
+                            temp_buffer[more_sig(LSB, 13)] |= 0b1111110_0;
+                            break :add_prefix NLM{ 15, LSB, more_sig(LSB, 14) };
+                        },
+                        40564819207303340847894502572032...5192296858534827628530496329220095 => add_prefix: {
+                            temp_buffer[more_sig(LSB, 15)] |= 0b11111111;
+                            temp_buffer[more_sig(LSB, 14)] |= 0b11111110;
+                            break :add_prefix NLM{ 16, LSB, more_sig(LSB, 15) };
+                        },
+                        5192296858534827628530496329220096...664613997892457936451903530140172287 => add_prefix: {
+                            temp_buffer[more_sig(LSB, 16)] |= 0b11111111;
+                            temp_buffer[more_sig(LSB, 15)] |= 0b11111111;
+                            // temp_buffer[more_sig(LSB, 14)] |= 0b0_0000000;
+                            break :add_prefix NLM{ 17, LSB, more_sig(LSB, 16) };
+                        },
+                        664613997892457936451903530140172288...85070591730234615865843651857942052863 => add_prefix: {
+                            temp_buffer[more_sig(LSB, 17)] |= 0b11111111;
+                            temp_buffer[more_sig(LSB, 16)] |= 0b11111111;
+                            temp_buffer[more_sig(LSB, 15)] |= 0b10_000000;
+                            break :add_prefix NLM{ 18, LSB, more_sig(LSB, 17) };
+                        },
+                        85070591730234615865843651857942052864...0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF => add_prefix: {
+                            temp_buffer[more_sig(LSB, 18)] |= 0b11111111;
+                            temp_buffer[more_sig(LSB, 17)] |= 0b11111111;
+                            temp_buffer[more_sig(LSB, 16)] |= 0b110_00000;
+                            break :add_prefix NLM{ 19, LSB, more_sig(LSB, 18) };
+                        },
+                    };
+                },
                 else => unreachable,
             };
-            const MOST_SIG_BYTE = if (NATIVE_ENDIAN == .BIG_ENDIAN) native_start else native_end - 1;
-            const LEAST_SIG_BYTE = if (NATIVE_ENDIAN == .LITTLE_ENDIAN) native_start else native_end - 1;
-            const STEP_ADD = if (NATIVE_ENDIAN == .BIG_ENDIAN) 0 else 1;
-            const STEP_SUB = if (NATIVE_ENDIAN == .BIG_ENDIAN) 1 else 0;
-            var num_bytes: usize = 0;
-            var waste_bytes: usize = 0;
-            var trim_bits: usize = 0;
-            var i: usize = MOST_SIG_BYTE;
-            var b: u8 = native[i];
-            check_next_byte: switch (b) {
-                0b0_0000000...0b0_1111111 => {
-                    num_bytes += 1;
-                    trim_bits = 1;
-                },
-                0b10_000000...0b10_111111 => {
-                    num_bytes += 2;
-                    trim_bits = 2;
-                },
-                0b110_00000...0b110_11111 => {
-                    num_bytes += 3;
-                    trim_bits = 3;
-                },
-                0b1110_0000...0b1110_1111 => {
-                    num_bytes += 4;
-                    trim_bits = 4;
-                },
-                0b11110_000...0b11110_111 => {
-                    num_bytes += 5;
-                    trim_bits = 5;
-                },
-                0b111110_00...0b111110_11 => {
-                    num_bytes += 6;
-                    trim_bits = 6;
-                },
-                0b1111110_0...0b1111110_1 => {
-                    num_bytes += 7;
-                    trim_bits = 7;
-                },
-                0b11111110 => {
-                    num_bytes += 8;
-                    waste_bytes += 1;
-                },
-                0b11111111 => {
-                    num_bytes += 8;
-                    waste_bytes += 1;
-                    i = i + STEP_ADD - STEP_SUB;
-                    b = native[i];
-                    continue :check_next_byte b;
-                },
+            const serial_end = serial_start + num_bytes;
+            if (serial_end > serial.len) return false;
+            const first_byte = if (NATIVE_ENDIAN == .BIG_ENDIAN) most_sig_byte_with_data else least_sig_byte_with_data;
+            const byte_end = if (NATIVE_ENDIAN == .BIG_ENDIAN) least_sig_byte_with_data + 1 else most_sig_byte_with_data + 1;
+            if (NATIVE_ENDIAN != .BIG_ENDIAN) {
+                std.mem.reverse(u8, temp_buffer[first_byte..byte_end]);
             }
+            @memcpy(serial[serial_start..serial_end], temp_buffer[first_byte..byte_end]);
+            dynamic_serial_adjustment.* += num_cast(num_bytes, isize);
         },
-        .SERIAL_TO_NATIVE => {},
-    }
-    switch (SWAP) {
-        true => {
-            comptime var sidx: usize = num_cast(ser_idx.*, usize);
-            comptime var nidx: usize = native_end;
-            while (sidx < serial_end) : (sidx += 1) {
-                nidx -= 1;
-                switch (DIR) {
-                    .NATIVE_TO_SERIAL => {
-                        serial[sidx] = native[nidx];
-                    },
-                    .SERIAL_TO_NATIVE => {
-                        native[nidx] = serial[sidx];
-                    },
-                }
-            }
-        },
-        false => switch (DIR) {
-            .NATIVE_TO_SERIAL => {
-                @memcpy(serial[serial_start..serial_end], native[native_start..native_end]);
-            },
-            .SERIAL_TO_NATIVE => {
-                @memcpy(native[native_start..native_end], serial[serial_start..serial_end]);
-            },
-        },
-    }
-    ser_idx.* += num_cast(move.copy_len, isize);
-    op_idx.* += 1;
-}
+        .SERIAL_TO_NATIVE => {
+            // const MOST_SIG_BYTE = if (NATIVE_ENDIAN == .BIG_ENDIAN) native_start else native_end - 1;
+            // const LEAST_SIG_BYTE = if (NATIVE_ENDIAN == .LITTLE_ENDIAN) native_start else native_end - 1;
 
-fn get_num_varint_prefix_info(serial: []u8, serial_start: usize, native: []u8, native_start: usize, native_end: usize, SIGN: IntegerSign, comptime DIR: SER_DIR) VarintPrefixInfo {
-    var out: VarintPrefixInfo = .{};
-    switch (DIR) {
-        .NATIVE_TO_SERIAL => {
-            const native_size = native_end - native_start;
-            switch (native_size) {
-                2 => {},
-            }
+            // var num_bytes: usize = 0;
+            // var waste_bytes: usize = 0;
+            // var trim_bits: usize = 0;
+            // var i: usize = MOST_SIG_BYTE;
+            // var b: u8 = native[i];
+            // check_next_byte: switch (b) {
+            //     0b0_0000000...0b0_1111111 => {
+            //         num_bytes += 1;
+            //         trim_bits = 1;
+            //     },
+            //     0b10_000000...0b10_111111 => {
+            //         num_bytes += 2;
+            //         trim_bits = 2;
+            //     },
+            //     0b110_00000...0b110_11111 => {
+            //         num_bytes += 3;
+            //         trim_bits = 3;
+            //     },
+            //     0b1110_0000...0b1110_1111 => {
+            //         num_bytes += 4;
+            //         trim_bits = 4;
+            //     },
+            //     0b11110_000...0b11110_111 => {
+            //         num_bytes += 5;
+            //         trim_bits = 5;
+            //     },
+            //     0b111110_00...0b111110_11 => {
+            //         num_bytes += 6;
+            //         trim_bits = 6;
+            //     },
+            //     0b1111110_0...0b1111110_1 => {
+            //         num_bytes += 7;
+            //         trim_bits = 7;
+            //     },
+            //     0b11111110 => {
+            //         num_bytes += 8;
+            //         waste_bytes += 1;
+            //     },
+            //     0b11111111 => {
+            //         num_bytes += 8;
+            //         waste_bytes += 1;
+            //         i = i + STEP_ADD - STEP_SUB;
+            //         b = native[i];
+            //         continue :check_next_byte b;
+            //     },
+            // }
         },
-        .SERIAL_TO_NATIVE => {},
     }
+    op_idx.* += 1;
 }
 
 fn serial_internal(comptime NUM_OPS: usize, comptime ROUTINE: []const DataOp, comptime DIR: SER_DIR, comptime SERIAL: SerialKind, native: []u8, serial: if (DIR == .SERIAL_TO_NATIVE) SerialSource else SerialDest) (if (DIR == .SERIAL_TO_NATIVE) SerialReadError else SerialWriteError)!usize {
