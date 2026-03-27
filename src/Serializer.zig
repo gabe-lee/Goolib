@@ -46,6 +46,7 @@ const Hash = std.hash.XxHash64;
 
 const assert_with_reason = Assert.assert_with_reason;
 const assert_unreachable = Assert.assert_unreachable;
+const assert_unreachable_err = Assert.assert_unreachable_err;
 const assert_allocation_failure = Assert.assert_allocation_failure;
 const num_cast = Root.Cast.num_cast;
 const bit_cast = Root.Cast.bit_cast;
@@ -142,7 +143,10 @@ pub const SerialReadError = error{
     serial_routine_hash_mismatch,
     /// If the serial stream indicates a VarInt integer, but the native size
     /// is not 2, 4, 8, or 16 it is an error
-    serial_varint_unsupported_target_native_size,
+    varint_unsupported_target_native_size,
+    /// VarInts are required to use the smallest possible representation for both security
+    /// and memory considerations
+    varint_overlong_encoding,
 };
 
 const SerialKind = enum(u8) { SLICE, READER_WRITER };
@@ -189,7 +193,173 @@ const SerialSource = union {
             },
         }
     }
+    inline fn read_one_byte(self: SerialSource, comptime KIND: SerialKind, start: *usize) SerialReadError!u8 {
+        switch (KIND) {
+            .SLICE => {
+                const serial = self.slice;
+                if (start.* >= serial.len) return SerialReadError.serial_source_ran_out_of_data;
+                const val = serial[start.*];
+                start.* += 1;
+                return val;
+            },
+            .READER_WRITER => {
+                const reader = self.reader;
+                var b: [1]u8 = undefined;
+                reader.readSliceAll(b[0..1]) catch |err| switch (err) {
+                    .ReadFailed => return SerialReadError.unknown_read_error,
+                    .EndOfStream => return SerialReadError.serial_source_ran_out_of_data,
+                };
+                return b[0];
+            },
+        }
+    }
+    inline fn read_n_bytes(self: SerialSource, comptime KIND: SerialKind, start: *usize, dest: []u8) SerialReadError!void {
+        switch (KIND) {
+            .SLICE => {
+                const serial = self.slice;
+                const end = start.* + dest.len;
+                if (end > serial.len) return SerialReadError.serial_source_ran_out_of_data;
+                @memcpy(dest, serial[start.*..end]);
+                start.* += dest.len;
+            },
+            .READER_WRITER => {
+                const reader = self.reader;
+                reader.readSliceAll(dest) catch |err| switch (err) {
+                    .ReadFailed => return SerialReadError.unknown_read_error,
+                    .EndOfStream => return SerialReadError.serial_source_ran_out_of_data,
+                };
+            },
+        }
+    }
+    pub fn read_varint(self: SerialSource, comptime KIND: SerialKind, comptime ZIGZAG: bool, native_slice: []u8, native_start: usize, native_end: usize, native_len: usize, serial_start: usize) SerialReadError!usize {
+        assert_with_reason(native_len == 2 or native_len == 4 or native_len == 8 or native_len == 16, @src(), "VarInts are only upported for 2, 4, 8, or 16 byte integers, got native len {d}", .{native_len});
+        var temp_buffer: [32]u8 align(@alignOf(u128)) = @splat(0);
+        const val_offset: *align(@alignOf(u128)) u8 = &temp_buffer[16];
+        var additional_bytes_to_read: usize = 0;
+        var total_bytes: usize = 0;
+        var continue_bytes: usize = 0;
+        var temp_start: usize = undefined;
+        var start: usize = serial_start;
+        var b: u8 = try self.read_one_byte(KIND, &start);
+        const LSB: usize = switch (native_len) {
+            2 => 17,
+            4 => 19,
+            8 => 23,
+            16 => 31,
+            else => unreachable,
+        };
+        var MSB: usize = LSB;
+        check_next_byte: switch (b) {
+            0b0_0000000...0b0_1111111 => { // +1 byte
+                total_bytes += 1;
+                const pfx_byte = MSB + continue_bytes;
+                temp_buffer[pfx_byte] = b;
+                temp_start = pfx_byte;
+            },
+            0b10_000000...0b10_111111 => { // +2 bytes
+                b &= 0b00_111111;
+                MSB -= 1;
+                const pfx_byte = MSB + continue_bytes;
+                temp_buffer[pfx_byte] = b;
+                temp_start = pfx_byte;
+                additional_bytes_to_read += 1;
+                total_bytes += 2;
+            },
+            0b110_00000...0b110_11111 => { // +3 bytes
+                b &= 0b000_11111;
+                MSB -= 2;
+                const pfx_byte = MSB + continue_bytes;
+                temp_buffer[pfx_byte] = b;
+                temp_start = pfx_byte;
+                additional_bytes_to_read += 2;
+                total_bytes += 3;
+            },
+            0b1110_0000...0b1110_1111 => { // +4 bytes
+                b &= 0b0000_1111;
+                MSB -= 3;
+                const pfx_byte = MSB + continue_bytes;
+                temp_buffer[pfx_byte] = b;
+                temp_start = pfx_byte;
+                additional_bytes_to_read += 3;
+                total_bytes += 4;
+            },
+            0b11110_000...0b11110_111 => { // +5 bytes
+                b &= 0b00000_111;
+                MSB -= 4;
+                const pfx_byte = MSB + continue_bytes;
+                temp_buffer[pfx_byte] = b;
+                temp_start = pfx_byte;
+                additional_bytes_to_read += 4;
+                total_bytes += 5;
+            },
+            0b111110_00...0b111110_11 => { // +6 bytes
+                b &= 0b000000_11;
+                MSB -= 5;
+                const pfx_byte = MSB + continue_bytes;
+                temp_buffer[pfx_byte] = b;
+                temp_start = pfx_byte;
+                additional_bytes_to_read += 5;
+                total_bytes += 6;
+            },
+            0b1111110_0...0b1111110_1 => { // +7 bytes
+                b &= 0b0000000_1;
+                MSB -= 6;
+                const pfx_byte = MSB + continue_bytes;
+                temp_buffer[pfx_byte] = b;
+                temp_start = pfx_byte;
+                additional_bytes_to_read += 6;
+                total_bytes += 7;
+            },
+            0b11111110 => { // +8 bytes
+                MSB -= 7;
+                temp_start = MSB + continue_bytes;
+                additional_bytes_to_read += 7;
+                total_bytes += 8;
+            },
+            0b11111111 => {
+                if (native_len == 8) {
+                    MSB = 15;
+                    total_bytes = 9;
+                    additional_bytes_to_read = 8;
+                    temp_start = MSB;
+                    break :check_next_byte;
+                }
+                MSB -= 8;
+                additional_bytes_to_read += 7;
+                continue_bytes += 1;
+                total_bytes += 8;
+                if (MSB < 13) return SerialReadError.varint_overlong_encoding;
+                b = try self.read_one_byte(KIND, &start);
+                continue :check_next_byte b;
+            },
+        }
+        switch (native_len) {
+            2 => if (total_bytes > 3) return SerialReadError.varint_overlong_encoding,
+            4 => if (total_bytes > 5) return SerialReadError.varint_overlong_encoding,
+            8 => if (total_bytes > 9) return SerialReadError.varint_overlong_encoding,
+            16 => if (total_bytes > 19) return SerialReadError.varint_overlong_encoding,
+            else => unreachable,
+        }
+        const temp_start_additional = temp_start + 1;
+        const temp_end = temp_start_additional + additional_bytes_to_read;
+        try self.read_n_bytes(KIND, &start, temp_buffer[temp_start_additional..temp_end]);
+        if (NATIVE_ENDIAN == .LITTLE_ENDIAN) {
+            std.mem.reverse(u8, temp_buffer[16 .. 16 + native_len]);
+        }
+        if (ZIGZAG) {
+            switch (native_len) {
+                2 => do_zigzag_adjustment(2, @ptrCast(val_offset), .SERIAL_TO_NATIVE),
+                4 => do_zigzag_adjustment(4, @ptrCast(val_offset), .SERIAL_TO_NATIVE),
+                8 => do_zigzag_adjustment(8, @ptrCast(val_offset), .SERIAL_TO_NATIVE),
+                16 => do_zigzag_adjustment(16, @ptrCast(val_offset), .SERIAL_TO_NATIVE),
+                else => unreachable,
+            }
+        }
+        @memcpy(native_slice[native_start..native_end], temp_buffer[16 .. 16 + native_len]);
+        return total_bytes;
+    }
 };
+
 const SerialDest = union {
     slice: []u8,
     writer: *std.Io.Writer,
@@ -229,13 +399,365 @@ const SerialDest = union {
             },
         }
     }
+    /// NUM_BYTES, LEAST_SIG_IDX, MOST_SIG_IDX
+    const NLM = struct { usize, usize, usize };
+    pub fn write_varint(self: SerialDest, comptime KIND: SerialKind, comptime ZIGZAG: bool, native_data: []const u8, native_start: usize, native_end: usize, native_len: usize, serial_start: usize) SerialWriteError!usize {
+        assert_with_reason(native_len == 2 or native_len == 4 or native_len == 8 or native_len == 16, @src(), "VarInts are only supported for 2, 4, 8, or 16 byte integers, got native len {d}", .{native_len});
+        var temp_buffer: [35]u8 align(@alignOf(u128)) = @splat(0);
+        const val_offset: *align(@alignOf(u128)) u8 = &temp_buffer[16];
+        switch (native_len) {
+            2 => @memcpy(temp_buffer[16..18], native_data[native_start..native_end]),
+            4 => @memcpy(temp_buffer[16..20], native_data[native_start..native_end]),
+            8 => @memcpy(temp_buffer[16..24], native_data[native_start..native_end]),
+            16 => @memcpy(temp_buffer[16..32], native_data[native_start..native_end]),
+            else => unreachable,
+        }
+        const num_bytes: usize, const least_sig_byte_with_data: usize, const most_sig_byte_with_data: usize = switch (native_len) {
+            2 => get: {
+                if (ZIGZAG) do_zigzag_adjustment(2, @ptrCast(val_offset), .NATIVE_TO_SERIAL);
+                const uint: *const u16 = @ptrCast(@alignCast(val_offset));
+                const LSB: comptime_int = if (NATIVE_ENDIAN == .BIG_ENDIAN) 17 else 16;
+                break :get switch (uint.*) {
+                    0...127 => NLM{ 1, LSB, LSB },
+                    128...16383 => add_prefix: {
+                        temp_buffer[more_sig(LSB, 1)] |= 0b10_000000;
+                        break :add_prefix NLM{ 2, LSB, more_sig(LSB, 1) };
+                    },
+                    16384...0xFFFF => add_prefix: {
+                        temp_buffer[more_sig(LSB, 2)] |= 0b110_00000;
+                        break :add_prefix NLM{ 3, LSB, more_sig(LSB, 2) };
+                    },
+                };
+            },
+            4 => get: {
+                if (ZIGZAG) do_zigzag_adjustment(4, @ptrCast(val_offset), .NATIVE_TO_SERIAL);
+                const uint: *const u32 = @ptrCast(@alignCast(val_offset));
+                const LSB = if (NATIVE_ENDIAN == .BIG_ENDIAN) 19 else 16;
+                break :get switch (uint.*) {
+                    0...127 => NLM{ 1, LSB, LSB },
+                    128...16383 => add_prefix: {
+                        temp_buffer[more_sig(LSB, 1)] |= 0b10_000000;
+                        break :add_prefix NLM{ 2, LSB, more_sig(LSB, 1) };
+                    },
+                    16384...2097151 => add_prefix: {
+                        temp_buffer[more_sig(LSB, 2)] |= 0b110_00000;
+                        break :add_prefix NLM{ 3, LSB, more_sig(LSB, 2) };
+                    },
+                    2097152...268435455 => add_prefix: {
+                        temp_buffer[more_sig(LSB, 3)] |= 0b1110_0000;
+                        break :add_prefix NLM{ 4, LSB, more_sig(LSB, 3) };
+                    },
+                    268435456...0xFFFFFFFF => add_prefix: {
+                        temp_buffer[more_sig(LSB, 4)] |= 0b11110_000;
+                        break :add_prefix NLM{ 5, LSB, more_sig(LSB, 4) };
+                    },
+                };
+            },
+            8 => get: {
+                if (ZIGZAG) do_zigzag_adjustment(8, @ptrCast(val_offset), .NATIVE_TO_SERIAL);
+                const uint: *const u64 = @ptrCast(@alignCast(val_offset));
+                const LSB = if (NATIVE_ENDIAN == .BIG_ENDIAN) 23 else 16;
+                break :get switch (uint.*) {
+                    0...127 => NLM{ 1, LSB, LSB },
+                    128...16383 => add_prefix: {
+                        temp_buffer[more_sig(LSB, 1)] |= 0b10_000000;
+                        break :add_prefix NLM{ 2, LSB, more_sig(LSB, 1) };
+                    },
+                    16384...2097151 => add_prefix: {
+                        temp_buffer[more_sig(LSB, 2)] |= 0b110_00000;
+                        break :add_prefix NLM{ 3, LSB, more_sig(LSB, 2) };
+                    },
+                    2097152...268435455 => add_prefix: {
+                        temp_buffer[more_sig(LSB, 3)] |= 0b1110_0000;
+                        break :add_prefix NLM{ 4, LSB, more_sig(LSB, 3) };
+                    },
+                    268435456...34359738367 => add_prefix: {
+                        temp_buffer[more_sig(LSB, 4)] |= 0b11110_000;
+                        break :add_prefix NLM{ 5, LSB, more_sig(LSB, 4) };
+                    },
+                    34359738368...4398046511103 => add_prefix: {
+                        temp_buffer[more_sig(LSB, 5)] |= 0b111110_00;
+                        break :add_prefix NLM{ 6, LSB, more_sig(LSB, 5) };
+                    },
+                    4398046511104...562949953421311 => add_prefix: {
+                        temp_buffer[more_sig(LSB, 6)] |= 0b1111110_0;
+                        break :add_prefix NLM{ 7, LSB, more_sig(LSB, 6) };
+                    },
+                    562949953421312...72057594037927935 => add_prefix: {
+                        temp_buffer[more_sig(LSB, 7)] |= 0b11111110;
+                        break :add_prefix NLM{ 8, LSB, more_sig(LSB, 7) };
+                    },
+                    72057594037927936...0xFFFFFFFFFFFFFFFF => add_prefix: {
+                        temp_buffer[more_sig(LSB, 8)] |= 0b11111111;
+                        break :add_prefix NLM{ 9, LSB, more_sig(LSB, 8) };
+                    },
+                };
+            },
+            16 => get: {
+                if (ZIGZAG) do_zigzag_adjustment(16, @ptrCast(val_offset), .NATIVE_TO_SERIAL);
+                const uint: *const u128 = @ptrCast(@alignCast(val_offset));
+                const LSB = if (NATIVE_ENDIAN == .BIG_ENDIAN) 31 else 16;
+                break :get switch (uint.*) {
+                    0...127 => NLM{ 1, LSB, LSB },
+                    128...16383 => add_prefix: {
+                        temp_buffer[more_sig(LSB, 1)] |= 0b10_000000;
+                        break :add_prefix NLM{ 2, LSB, more_sig(LSB, 1) };
+                    },
+                    16384...2097151 => add_prefix: {
+                        temp_buffer[more_sig(LSB, 2)] |= 0b110_00000;
+                        break :add_prefix NLM{ 3, LSB, more_sig(LSB, 2) };
+                    },
+                    2097152...268435455 => add_prefix: {
+                        temp_buffer[more_sig(LSB, 3)] |= 0b1110_0000;
+                        break :add_prefix NLM{ 4, LSB, more_sig(LSB, 3) };
+                    },
+                    268435456...34359738367 => add_prefix: {
+                        temp_buffer[more_sig(LSB, 4)] |= 0b11110_000;
+                        break :add_prefix NLM{ 5, LSB, more_sig(LSB, 4) };
+                    },
+                    34359738368...4398046511103 => add_prefix: {
+                        temp_buffer[more_sig(LSB, 5)] |= 0b111110_00;
+                        break :add_prefix NLM{ 6, LSB, more_sig(LSB, 5) };
+                    },
+                    4398046511104...562949953421311 => add_prefix: {
+                        temp_buffer[more_sig(LSB, 6)] |= 0b1111110_0;
+                        break :add_prefix NLM{ 7, LSB, more_sig(LSB, 6) };
+                    },
+                    562949953421312...72057594037927935 => add_prefix: {
+                        temp_buffer[more_sig(LSB, 7)] |= 0b11111110;
+                        break :add_prefix NLM{ 8, LSB, more_sig(LSB, 7) };
+                    },
+                    72057594037927936...9223372036854775807 => add_prefix: {
+                        temp_buffer[more_sig(LSB, 8)] |= 0b11111111;
+                        // temp_buffer[more_sig(LSB, 7)] |= 0b0_0000000;
+                        break :add_prefix NLM{ 9, LSB, more_sig(LSB, 8) };
+                    },
+                    9223372036854775808...1180591620717411303423 => add_prefix: {
+                        temp_buffer[more_sig(LSB, 9)] |= 0b11111111;
+                        temp_buffer[more_sig(LSB, 8)] |= 0b10_000000;
+                        break :add_prefix NLM{ 10, LSB, more_sig(LSB, 9) };
+                    },
+                    1180591620717411303424...151115727451828646838271 => add_prefix: {
+                        temp_buffer[more_sig(LSB, 10)] |= 0b11111111;
+                        temp_buffer[more_sig(LSB, 9)] |= 0b110_00000;
+                        break :add_prefix NLM{ 11, LSB, more_sig(LSB, 10) };
+                    },
+                    151115727451828646838272...19342813113834066795298815 => add_prefix: {
+                        temp_buffer[more_sig(LSB, 11)] |= 0b11111111;
+                        temp_buffer[more_sig(LSB, 10)] |= 0b1110_0000;
+                        break :add_prefix NLM{ 12, LSB, more_sig(LSB, 11) };
+                    },
+                    19342813113834066795298816...2475880078570760549798248447 => add_prefix: {
+                        temp_buffer[more_sig(LSB, 12)] |= 0b11111111;
+                        temp_buffer[more_sig(LSB, 11)] |= 0b11110_000;
+                        break :add_prefix NLM{ 13, LSB, more_sig(LSB, 12) };
+                    },
+                    2475880078570760549798248448...316912650057057350374175801343 => add_prefix: {
+                        temp_buffer[more_sig(LSB, 13)] |= 0b11111111;
+                        temp_buffer[more_sig(LSB, 12)] |= 0b111110_00;
+                        break :add_prefix NLM{ 14, LSB, more_sig(LSB, 13) };
+                    },
+                    316912650057057350374175801344...40564819207303340847894502572031 => add_prefix: {
+                        temp_buffer[more_sig(LSB, 14)] |= 0b11111111;
+                        temp_buffer[more_sig(LSB, 13)] |= 0b1111110_0;
+                        break :add_prefix NLM{ 15, LSB, more_sig(LSB, 14) };
+                    },
+                    40564819207303340847894502572032...5192296858534827628530496329220095 => add_prefix: {
+                        temp_buffer[more_sig(LSB, 15)] |= 0b11111111;
+                        temp_buffer[more_sig(LSB, 14)] |= 0b11111110;
+                        break :add_prefix NLM{ 16, LSB, more_sig(LSB, 15) };
+                    },
+                    5192296858534827628530496329220096...664613997892457936451903530140172287 => add_prefix: {
+                        temp_buffer[more_sig(LSB, 16)] |= 0b11111111;
+                        temp_buffer[more_sig(LSB, 15)] |= 0b11111111;
+                        // temp_buffer[more_sig(LSB, 14)] |= 0b0_0000000;
+                        break :add_prefix NLM{ 17, LSB, more_sig(LSB, 16) };
+                    },
+                    664613997892457936451903530140172288...85070591730234615865843651857942052863 => add_prefix: {
+                        temp_buffer[more_sig(LSB, 17)] |= 0b11111111;
+                        temp_buffer[more_sig(LSB, 16)] |= 0b11111111;
+                        temp_buffer[more_sig(LSB, 15)] |= 0b10_000000;
+                        break :add_prefix NLM{ 18, LSB, more_sig(LSB, 17) };
+                    },
+                    85070591730234615865843651857942052864...0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF => add_prefix: {
+                        temp_buffer[more_sig(LSB, 18)] |= 0b11111111;
+                        temp_buffer[more_sig(LSB, 17)] |= 0b11111111;
+                        temp_buffer[more_sig(LSB, 16)] |= 0b110_00000;
+                        break :add_prefix NLM{ 19, LSB, more_sig(LSB, 18) };
+                    },
+                };
+            },
+            else => unreachable,
+        };
+        const first_byte = if (NATIVE_ENDIAN == .BIG_ENDIAN) most_sig_byte_with_data else least_sig_byte_with_data;
+        const byte_end = if (NATIVE_ENDIAN == .BIG_ENDIAN) least_sig_byte_with_data + 1 else most_sig_byte_with_data + 1;
+        if (NATIVE_ENDIAN != .BIG_ENDIAN) {
+            std.mem.reverse(u8, temp_buffer[first_byte..byte_end]);
+        }
+        switch (KIND) {
+            .SLICE => {
+                const serial = self.slice;
+                const serial_end = serial_start + num_bytes;
+                if (serial_end > serial.len) return SerialWriteError.serial_destination_ran_out_of_space;
+                @memcpy(serial[serial_start..serial_end], temp_buffer[first_byte..byte_end]);
+            },
+            .READER_WRITER => {
+                const writer = self.writer;
+                writer.writeAll(temp_buffer[first_byte..byte_end]) catch return SerialWriteError.serial_destination_ran_out_of_space;
+            },
+        }
+        return num_bytes;
+    }
 };
 
-const VarintPrefixInfo = struct {
-    data_bytes: usize = 0,
-    waste_bytes: usize = 0,
-    top_bits_to_trim: usize = 0,
-};
+test "VarInt round trip equality" {
+    const Test = Root.Testing;
+    var rand_core = std.Random.DefaultPrng.init(@bitCast(std.time.microTimestamp()));
+    const rand = rand_core.random();
+    const EXTENDED = false;
+    const ITERS_PER_TYPE = if (EXTENDED) 100000 else 100;
+    var serial_buf: [32]u8 = undefined;
+    const src = SerialSource{ .slice = serial_buf[0..32] };
+    const dst = SerialDest{ .slice = serial_buf[0..32] };
+
+    { // static u128
+        const static_exp: u128 = 0xF1_0F_0E_0D_0C_0B_0A_09_08_07_06_05_04_03_02_01;
+        const static_exp_bytes: [*]align(@alignOf(u128)) const u8 = @ptrCast(&static_exp);
+        var static_got: u128 = undefined;
+        var static_got_bytes: [*]align(@alignOf(u128)) u8 = @ptrCast(&static_got);
+        const len = try dst.write_varint(.SLICE, false, static_exp_bytes[0..16], 0, 16, 16, 0);
+        try Test.expect_equal(len, "len", 19, "19", "len encode wrong", .{});
+        try Test.expect_slices_equal_t(u8, serial_buf[0..19], "serial_buf[0..19]", &.{ 0xFF, 0xFF, 0b110_00000, 0xF1, 0x0F, 0x0E, 0x0D, 0x0C, 0x0B, 0x0A, 0x09, 0x08, 0x07, 0x06, 0x05, 0x04, 0x03, 0x02, 0x01 }, "{ 0xFF, 0xFF, 0b110_00000, 0xF1, 0x0F, 0x0E, 0x0D, 0x0C, 0x0B, 0x0A, 0x09, 0x08, 0x07, 0x06, 0x05, 0x04, 0x03, 0x02, 0x01 }", "static expected byte order mismatch", .{});
+        const len_2 = try src.read_varint(.SLICE, false, static_got_bytes[0..16], 0, 16, 16, 0);
+        try Test.expect_equal(len_2, "len_2", 19, "19", "len decode wrong", .{});
+        try Test.expect_equal(static_got, "static_got", static_got, "static_got", "static mismatch", .{});
+    }
+    { // static u64
+        const static_exp: u64 = 0xF8_07_06_05_04_03_02_01;
+        const static_exp_bytes: [*]align(@alignOf(u64)) const u8 = @ptrCast(&static_exp);
+        var static_got: u64 = undefined;
+        var static_got_bytes: [*]align(@alignOf(u64)) u8 = @ptrCast(&static_got);
+        const len = try dst.write_varint(.SLICE, false, static_exp_bytes[0..8], 0, 8, 8, 0);
+        try Test.expect_equal(len, "len", 9, "9", "len encode wrong", .{});
+        try Test.expect_slices_equal_t(u8, serial_buf[0..9], "serial_buf[0..9]", &.{ 0xFF, 0xF8, 0x07, 0x06, 0x05, 0x04, 0x03, 0x02, 0x01 }, "{ 0xFF, 0xF8, 0x07, 0x06, 0x05, 0x04, 0x03, 0x02, 0x01 }", "static expected byte order mismatch", .{});
+        const len_2 = try src.read_varint(.SLICE, false, static_got_bytes[0..8], 0, 8, 8, 0);
+        try Test.expect_equal(len_2, "len_2", 9, "9", "len decode wrong", .{});
+        try Test.expect_equal(static_got, "static_got", static_got, "static_got", "static mismatch", .{});
+    }
+    { // static u32
+        const static_exp: u32 = 0xF4_03_02_01;
+        const static_exp_bytes: [*]align(@alignOf(u32)) const u8 = @ptrCast(&static_exp);
+        var static_got: u32 = undefined;
+        var static_got_bytes: [*]align(@alignOf(u32)) u8 = @ptrCast(&static_got);
+        const len = try dst.write_varint(.SLICE, false, static_exp_bytes[0..4], 0, 4, 4, 0);
+        try Test.expect_equal(len, "len", 5, "5", "len encode wrong", .{});
+        try Test.expect_slices_equal_t(u8, serial_buf[0..5], "serial_buf[0..5]", &.{ 0b11110_000, 0xF4, 0x03, 0x02, 0x01 }, "{ 0b11110_000, 0xF4, 0x03, 0x02, 0x01 }", "static expected byte order mismatch", .{});
+        const len_2 = try src.read_varint(.SLICE, false, static_got_bytes[0..4], 0, 4, 4, 0);
+        try Test.expect_equal(len_2, "len_2", 5, "5", "len decode wrong", .{});
+        try Test.expect_equal(static_got, "static_got", static_got, "static_got", "static mismatch", .{});
+    }
+    { // static u16
+        const static_exp: u32 = 0xF2_01;
+        const static_exp_bytes: [*]align(@alignOf(u16)) const u8 = @ptrCast(&static_exp);
+        var static_got: u16 = undefined;
+        var static_got_bytes: [*]align(@alignOf(u16)) u8 = @ptrCast(&static_got);
+        const len = try dst.write_varint(.SLICE, false, static_exp_bytes[0..2], 0, 2, 2, 0);
+        try Test.expect_equal(len, "len", 3, "3", "len encode wrong", .{});
+        try Test.expect_slices_equal_t(u8, serial_buf[0..3], "serial_buf[0..3]", &.{ 0b110_00000, 0xF2, 0x01 }, "{ 0b110_00000, 0xF2, 0x01 }", "static expected byte order mismatch", .{});
+        const len_2 = try src.read_varint(.SLICE, false, static_got_bytes[0..2], 0, 2, 2, 0);
+        try Test.expect_equal(len_2, "len_2", 3, "3", "len decode wrong", .{});
+        try Test.expect_equal(static_got, "static_got", static_got, "static_got", "static mismatch", .{});
+    }
+
+    for (0..ITERS_PER_TYPE) |_| {
+        // u16
+        const val_orig: u16 = rand.int(u16);
+        const val_orig_bytes: [*]const u8 = @ptrCast(&val_orig);
+        var val_decoded: u16 = undefined;
+        const val_decoded_bytes: [*]u8 = @ptrCast(&val_decoded);
+        const w = try dst.write_varint(.SLICE, false, val_orig_bytes[0..2], 0, 2, 2, 0);
+        const r = try src.read_varint(.SLICE, false, val_decoded_bytes[0..2], 0, 2, 2, 0);
+        try Test.expect_equal(val_decoded, "val_decoded", val_orig, "val_orig", "varint round-trip value mismatch\n\tGOT {b:0>16}\n\tEXP {b:0>16}", .{ val_decoded, val_orig });
+        try Test.expect_equal(w, "bytes written", r, "bytes read", "varint round-trip bytes written/read mismatch", .{});
+    }
+    for (0..ITERS_PER_TYPE) |_| {
+        // i16
+        const val_orig: i16 = rand.int(i16);
+        const val_orig_bytes: [*]const u8 = @ptrCast(&val_orig);
+        var val_decoded: i16 = undefined;
+        const val_decoded_bytes: [*]u8 = @ptrCast(&val_decoded);
+        const w = try dst.write_varint(.SLICE, true, val_orig_bytes[0..2], 0, 2, 2, 0);
+        const r = try src.read_varint(.SLICE, true, val_decoded_bytes[0..2], 0, 2, 2, 0);
+        try Test.expect_equal(val_decoded, "val_decoded", val_orig, "val_orig", "varint round-trip value mismatch\n\tGOT {b:0>16}\n\tEXP {b:0>16}", .{ val_decoded, val_orig });
+        try Test.expect_equal(w, "bytes written", r, "bytes read", "varint round-trip bytes written/read mismatch", .{});
+    }
+    for (0..ITERS_PER_TYPE) |_| {
+        // u32
+        const val_orig: u32 = rand.int(u32);
+        const val_orig_bytes: [*]const u8 = @ptrCast(&val_orig);
+        var val_decoded: u32 = undefined;
+        const val_decoded_bytes: [*]u8 = @ptrCast(&val_decoded);
+        const w = try dst.write_varint(.SLICE, false, val_orig_bytes[0..4], 0, 4, 4, 0);
+        const r = try src.read_varint(.SLICE, false, val_decoded_bytes[0..4], 0, 4, 4, 0);
+        try Test.expect_equal(val_decoded, "val_decoded", val_orig, "val_orig", "varint round-trip value mismatch\n\tGOT {b:0>16}\n\tEXP {b:0>16}", .{ val_decoded, val_orig });
+        try Test.expect_equal(w, "bytes written", r, "bytes read", "varint round-trip bytes written/read mismatch", .{});
+    }
+    for (0..ITERS_PER_TYPE) |_| {
+        // i32
+        const val_orig: i32 = rand.int(i32);
+        const val_orig_bytes: [*]const u8 = @ptrCast(&val_orig);
+        var val_decoded: i32 = undefined;
+        const val_decoded_bytes: [*]u8 = @ptrCast(&val_decoded);
+        const w = try dst.write_varint(.SLICE, true, val_orig_bytes[0..4], 0, 4, 4, 0);
+        const r = try src.read_varint(.SLICE, true, val_decoded_bytes[0..4], 0, 4, 4, 0);
+        try Test.expect_equal(val_decoded, "val_decoded", val_orig, "val_orig", "varint round-trip value mismatch\n\tGOT {b:0>16}\n\tEXP {b:0>16}", .{ val_decoded, val_orig });
+        try Test.expect_equal(w, "bytes written", r, "bytes read", "varint round-trip bytes written/read mismatch", .{});
+    }
+    for (0..ITERS_PER_TYPE) |_| {
+        // u64
+        const val_orig: u64 = rand.int(u64);
+        const val_orig_bytes: [*]const u8 = @ptrCast(&val_orig);
+        var val_decoded: u64 = undefined;
+        const val_decoded_bytes: [*]u8 = @ptrCast(&val_decoded);
+        const w = try dst.write_varint(.SLICE, false, val_orig_bytes[0..8], 0, 8, 8, 0);
+        const r = try src.read_varint(.SLICE, false, val_decoded_bytes[0..8], 0, 8, 8, 0);
+        try Test.expect_equal(val_decoded, "val_decoded", val_orig, "val_orig", "varint round-trip value mismatch\n\tGOT {b:0>16}\n\tEXP {b:0>16}", .{ val_decoded, val_orig });
+        try Test.expect_equal(w, "bytes written", r, "bytes read", "varint round-trip bytes written/read mismatch", .{});
+    }
+    for (0..ITERS_PER_TYPE) |_| {
+        // i64
+        const val_orig: i64 = rand.int(i64);
+        const val_orig_bytes: [*]const u8 = @ptrCast(&val_orig);
+        var val_decoded: i64 = undefined;
+        const val_decoded_bytes: [*]u8 = @ptrCast(&val_decoded);
+        const w = try dst.write_varint(.SLICE, true, val_orig_bytes[0..8], 0, 8, 8, 0);
+        const r = try src.read_varint(.SLICE, true, val_decoded_bytes[0..8], 0, 8, 8, 0);
+        try Test.expect_equal(val_decoded, "val_decoded", val_orig, "val_orig", "varint round-trip value mismatch\n\tGOT {b:0>16}\n\tEXP {b:0>16}", .{ val_decoded, val_orig });
+        try Test.expect_equal(w, "bytes written", r, "bytes read", "varint round-trip bytes written/read mismatch", .{});
+    }
+    for (0..ITERS_PER_TYPE) |_| {
+        // u128
+        const val_orig: u128 = rand.int(u128);
+        const val_orig_bytes: [*]const u8 = @ptrCast(&val_orig);
+        var val_decoded: u128 = undefined;
+        const val_decoded_bytes: [*]u8 = @ptrCast(&val_decoded);
+        const w = try dst.write_varint(.SLICE, false, val_orig_bytes[0..16], 0, 16, 16, 0);
+        const r = try src.read_varint(.SLICE, false, val_decoded_bytes[0..16], 0, 16, 16, 0);
+        try Test.expect_equal(val_decoded, "val_decoded", val_orig, "val_orig", "varint round-trip value mismatch\n\tGOT {b:0>16}\n\tEXP {b:0>16}", .{ val_decoded, val_orig });
+        try Test.expect_equal(w, "bytes written", r, "bytes read", "varint round-trip bytes written/read mismatch", .{});
+    }
+    for (0..ITERS_PER_TYPE) |_| {
+        // i128
+        const val_orig: i128 = rand.int(i128);
+        const val_orig_bytes: [*]const u8 = @ptrCast(&val_orig);
+        var val_decoded: i128 = undefined;
+        const val_decoded_bytes: [*]u8 = @ptrCast(&val_decoded);
+        const w = try dst.write_varint(.SLICE, true, val_orig_bytes[0..16], 0, 16, 16, 0);
+        const r = try src.read_varint(.SLICE, true, val_decoded_bytes[0..16], 0, 16, 16, 0);
+        try Test.expect_equal(val_decoded, "val_decoded", val_orig, "val_orig", "varint round-trip value mismatch\n\tGOT {b:0>16}\n\tEXP {b:0>16}", .{ val_decoded, val_orig });
+        try Test.expect_equal(w, "bytes written", r, "bytes read", "varint round-trip bytes written/read mismatch", .{});
+    }
+}
 
 pub const OpKind = enum(u8) {
     MOVE_DATA_NO_SWAP,
@@ -393,6 +915,15 @@ pub const OpaqueUnionTag = enum(u8) {
             else => assert_unreachable(@src(), "tag type `{s}` is not supported", .{@typeName(TAG_TYPE)}),
         };
     }
+    pub fn from_byte_len(len: usize) OpaqueUnionTag {
+        return switch (len) {
+            1 => OpaqueUnionTag.U8,
+            2 => OpaqueUnionTag.U16,
+            4 => OpaqueUnionTag.U32,
+            8 => OpaqueUnionTag.U64,
+            else => assert_unreachable(@src(), "tag type size `{s}` is not supported", .{len}),
+        };
+    }
 
     pub fn bytes(comptime self: OpaqueUnionTag) u8 {
         return @intFromEnum(self);
@@ -443,65 +974,12 @@ pub const OpaqueUnionTag = enum(u8) {
     pub fn cast_tag(comptime self: OpaqueUnionTag, tag: anytype) self.opaque_type() {
         return @bitCast(@intFromEnum(tag));
     }
-    pub fn cast_endian_serial_to_endian_u64(comptime self: OpaqueUnionTag, serial: []const u8) u64 {
-        var u64_bytes: [8]u8 align(8) = @splat(0);
-        assert_with_reason(self.bytes() == serial.len, @src(), "serial wrong len", .{});
-        @memcpy(u64_bytes[0..serial.len], serial);
-        return @bitCast(u64_bytes);
-    }
-    pub fn cast_endian_serial_to_endian_u64_any(serial: []const u8) u64 {
-        var u64_bytes: [8]u8 align(8) = @splat(0);
-        assert_with_reason(serial.len == 1 or serial.len == 2 or serial.len == 4 or serial.len == 8, @src(), "serial wrong len", .{});
-        @memcpy(u64_bytes[0..serial.len], serial);
-        return @bitCast(u64_bytes);
-    }
-    pub fn cast_serial_and_swap_to_endian_u64_any(serial: []const u8) u64 {
-        var u64_bytes: [8]u8 align(8) = @splat(0);
-        assert_with_reason(serial.len == 1 or serial.len == 2 or serial.len == 4 or serial.len == 8, @src(), "serial wrong len", .{});
-        @memcpy(u64_bytes[0..serial.len], serial);
-        std.mem.reverse(u8, u64_bytes[0..serial.len]);
-        return @bitCast(u64_bytes);
-    }
-    pub fn cast_native_bytes_to_endian_u64_any(native: []const u8, comptime SWAP: bool) u64 {
+    pub fn cast_native_bytes_to_u64_LE(native: []const u8) u64 {
         var u64_bytes: [8]u8 align(8) = @splat(0);
         assert_with_reason(native.len == 1 or native.len == 2 or native.len == 4 or native.len == 8, @src(), "native wrong len", .{});
         @memcpy(u64_bytes[0..native.len], native);
-        if (SWAP) {
+        if (NATIVE_ENDIAN == .BIG_ENDIAN) {
             std.mem.reverse(u8, u64_bytes[0..native.len]);
-        }
-        return @bitCast(u64_bytes);
-    }
-    pub fn cast_tag_to_endian_u64(comptime self: OpaqueUnionTag, comptime TARGET_ENDIAN: Endian, tag: anytype) u64 {
-        const T = @TypeOf(tag);
-        assert_with_reason(self.bytes() == @sizeOf(T), @src(), "tag is wrong size", .{});
-        assert_with_reason(Types.type_is_enum(T), @src(), "tag must be an enum", .{});
-        const SWAP = TARGET_ENDIAN != NATIVE_ENDIAN;
-        var u64_bytes: [8]u8 align(8) = @splat(0);
-        switch (self) {
-            .U8 => {
-                const raw: u8 = @bitCast(@intFromEnum(tag));
-                u64_bytes[0] = raw;
-            },
-            .U16 => {
-                var raw: [2]u8 = @bitCast(@intFromEnum(tag));
-                if (SWAP) {
-                    std.mem.byteSwapAllElements(u8, raw[0..2]);
-                }
-                @memcpy(u64_bytes[0..2], raw[0..2]);
-            },
-            .U32 => {
-                var raw: [4]u8 = @bitCast(@intFromEnum(tag));
-                if (SWAP) {
-                    std.mem.byteSwapAllElements(u8, raw[0..4]);
-                }
-                @memcpy(u64_bytes[0..4], raw[0..4]);
-            },
-            .U64 => {
-                u64_bytes = @bitCast(@intFromEnum(tag));
-                if (SWAP) {
-                    std.mem.byteSwapAllElements(u8, u64_bytes[0..8]);
-                }
-            },
         }
         return @bitCast(u64_bytes);
     }
@@ -540,17 +1018,17 @@ pub const UnionRoutineBuilder = struct {
         return @intCast(true_end - true_start);
     }
 
-    pub fn add_type(comptime self: *UnionRoutineBuilder, comptime builder: *SerialRoutineBuilder, comptime tag_value: anytype, comptime union_native_offset: usize, comptime TYPE: type, comptime SETTINGS: SerialSettings) void {
+    pub fn add_type(comptime self: *UnionRoutineBuilder, comptime builder: *SerialRoutineBuilder, comptime tag_bytes: []const u8, comptime union_native_offset: usize, comptime TYPE: type, comptime SETTINGS: SerialSettings) void {
         const prev_serial_offset = builder.curr_serial_offset;
         const prev_routine_ops_idx = builder.ops_len;
         const curr_routine_start = self.current_routine_start_op();
         const curr_tag_id = self.current_routine_tag_op();
         // const curr_tag_id_op_true_idx = self.current_routine_tag_op_true_idx();
-        const TAG_OPQ = OpaqueUnionTag.from_tag_type(@TypeOf(tag_value));
+        const TAG_OPQ = OpaqueUnionTag.from_byte_len(tag_bytes.len);
         builder.d_assert_with_reason(TAG_OPQ == self.union_tag_opaque, @src(), "opaque tag param from `tag_value` (`{s}`) does not match the one this union builder was created with (`{s}`)", .{ @tagName(TAG_OPQ), @tagName(self.union_tag_opaque) });
-        const tag_u64 = TAG_OPQ.cast_tag_to_endian_u64(SETTINGS.INTEGER_BYTE_PACKING, tag_value);
+        const tag_u64_le = OpaqueUnionTag.cast_native_bytes_to_u64_LE(tag_bytes);
         curr_routine_start.offset_to_first_routine_op = self.delta_between_current_routine_start_op_idx_and_first_op_in_its_routine(builder);
-        curr_tag_id.* = tag_u64;
+        curr_tag_id.* = tag_u64_le;
         builder.add_type(union_native_offset, TYPE, SETTINGS);
         const this_routine_bytes = builder.curr_serial_offset - prev_serial_offset;
         builder.ensure_space_for_n_more_ops(1);
@@ -693,7 +1171,8 @@ pub const SerialSettings = struct {
 
 pub const SerialRoutineBuilder = struct {
     root_type: ?type = null,
-    integer_packing: Endian = .NATIVE,
+    integer_packing: BytePacking = .LITTLE_ENDIAN,
+    float_packing: Endian = .LITTLE_ENDIAN,
     magic_id: ?[]const u8 = null,
     routine_version: ?u32 = null,
     routine_hash: ?Hash = null,
@@ -857,17 +1336,16 @@ pub const SerialRoutineBuilder = struct {
                         assert_with_reason(move.copy_len == 2 or move.copy_len == 4 or move.copy_len == 8 or move.copy_len == 16, @src(), "Varints are only supported for integer sizes 2, 4, 8, or 16, got {d}", .{move.copy_len});
                     }
                     switch (TECH) {
-                        .NORMAL => comptime do_serial_move_mem(move, &ser_idx, &op_idx, serial_slice, serial_start, serial_end, native_slice, native_start, native_end, SWAP, DIRECTION),
+                        .NORMAL => comptime test_serial_move_mem(move, &ser_idx, &op_idx, serial_slice, serial_start, serial_end, native_slice, native_start, native_end, SWAP, DIRECTION),
                         .VARINT_P => {
-                            const fail = switch (ZIGZAG) {
-                                true => comptime do_varint_p_move_mem(move, &dynamic_serial_adjustment, &op_idx, serial_slice, serial_start, native_slice, native_start, native_end, true, DIRECTION),
-                                false => comptime do_varint_p_move_mem(move, &dynamic_serial_adjustment, &op_idx, serial_slice, serial_start, native_slice, native_start, native_end, false, DIRECTION),
-                            };
-                            assert_with_reason(fail == false, @src(), "do_varint_p_move_mem failed: ran out of serial data", .{});
+                            switch (ZIGZAG) {
+                                true => comptime test_serial_move_mem_varint(move, &dynamic_serial_adjustment, &op_idx, serial_slice, serial_start, native_slice, native_start, native_end, true, DIRECTION),
+                                false => comptime test_serial_move_mem_varint(move, &dynamic_serial_adjustment, &op_idx, serial_slice, serial_start, native_slice, native_start, native_end, false, DIRECTION),
+                            }
                         },
                     }
                     if (SAVE_TAG) {
-                        tag_got = OpaqueUnionTag.cast_native_bytes_to_endian_u64_any(native_slice[native_start..native_end]);
+                        tag_got = OpaqueUnionTag.cast_native_bytes_to_u64_LE(native_slice[native_start..native_end]);
                         mode = .NEED_UNION_TAG_ID_NEXT;
                     }
                 },
@@ -930,7 +1408,7 @@ pub const SerialRoutineBuilder = struct {
     }
 
     pub fn build_routine_for_type(comptime self: *SerialRoutineBuilder, comptime TYPE: type, comptime SETTINGS: SerialSettings, comptime INIT_SETTINGS: SerialInitSettings) void {
-        @setEvalBranchQuota(SETTINGS.COMPTIME_EVAL_QUOTA);
+        @setEvalBranchQuota(INIT_SETTINGS.COMPTIME_EVAL_QUOTA);
         self.reset();
         self.root_type = TYPE;
         self.debug_target = INIT_SETTINGS.TARGET_DEBUG_INDEX;
@@ -949,7 +1427,7 @@ pub const SerialRoutineBuilder = struct {
             }
         }
         const OPS_CONST = OPS;
-        return define_serial_routine(self.ops_len, OPS_CONST, self.root_type.?, self.integer_packing);
+        return define_serial_routine(self.ops_len, OPS_CONST, self.root_type.?, self.integer_packing, self.float_packing);
     }
 
     pub fn build_and_finalize_serial_routine_for_type(comptime self: *SerialRoutineBuilder, comptime TYPE: type, comptime SETTINGS: SerialSettings) type {
@@ -1006,28 +1484,15 @@ pub const SerialRoutineBuilder = struct {
                 if (BYTE_LEN == 1 or BYTE_LEN == 3 or (BYTE_LEN >= 5 and BYTE_LEN <= 7) or (BYTE_LEN >= 9 and BYTE_LEN <= 15) or BYTE_LEN > 16) {
                     continue :with_new_mode if (SETTINGS.FLOAT_BYTE_ORDER == .BIG_ENDIAN) BytePacking.BIG_ENDIAN else BytePacking.LITTLE_ENDIAN;
                 }
-                const SWAP = (NATIVE_ENDIAN == .BIG_ENDIAN and SETTINGS.INTEGER_BYTE_PACKING == .VARINT_USING_PREFIX_LITTLE_ENDIAN) or (NATIVE_ENDIAN == .LITTLE_ENDIAN and SETTINGS.INTEGER_BYTE_PACKING == .VARINT_USING_PREFIX_BIG_ENDIAN);
                 const native_to_serial_delta: i32 = if (self.curr_serial_offset >= curr_native_offset) num_cast(self.curr_serial_offset - curr_native_offset, i32) else -num_cast(curr_native_offset - self.curr_serial_offset, i32);
-                switch (SWAP) {
-                    true => switch (UNION_TAG) {
-                        .IS_A_UNION_TAG => switch (INT_SIGN) {
-                            .UNSIGNED => self.ops[self.ops_len] = .mem_move_varint_p_swap_save_tag(native_to_serial_delta, @intCast(BYTE_LEN)),
-                            .SIGNED => self.ops[self.ops_len] = .mem_move_varint_ps_swap_save_tag(native_to_serial_delta, @intCast(BYTE_LEN)),
-                        },
-                        .NOT_A_UNION_TAG => switch (INT_SIGN) {
-                            .UNSIGNED => self.ops[self.ops_len] = .mem_move_varint_p_swap(native_to_serial_delta, @intCast(BYTE_LEN)),
-                            .SIGNED => self.ops[self.ops_len] = .mem_move_varint_ps_swap(native_to_serial_delta, @intCast(BYTE_LEN)),
-                        },
+                switch (UNION_TAG) {
+                    .IS_A_UNION_TAG => switch (INT_SIGN) {
+                        .UNSIGNED => self.ops[self.ops_len] = .mem_move_varint_p_save_tag(native_to_serial_delta, @intCast(BYTE_LEN)),
+                        .SIGNED => self.ops[self.ops_len] = .mem_move_varint_ps_save_tag(native_to_serial_delta, @intCast(BYTE_LEN)),
                     },
-                    false => switch (UNION_TAG) {
-                        .IS_A_UNION_TAG => switch (INT_SIGN) {
-                            .UNSIGNED => self.ops[self.ops_len] = .mem_move_varint_p_save_tag(native_to_serial_delta, @intCast(BYTE_LEN)),
-                            .SIGNED => self.ops[self.ops_len] = .mem_move_varint_ps_save_tag(native_to_serial_delta, @intCast(BYTE_LEN)),
-                        },
-                        .NOT_A_UNION_TAG => switch (INT_SIGN) {
-                            .UNSIGNED => self.ops[self.ops_len] = .mem_move_varint_p(native_to_serial_delta, @intCast(BYTE_LEN)),
-                            .SIGNED => self.ops[self.ops_len] = .mem_move_varint_ps(native_to_serial_delta, @intCast(BYTE_LEN)),
-                        },
+                    .NOT_A_UNION_TAG => switch (INT_SIGN) {
+                        .UNSIGNED => self.ops[self.ops_len] = .mem_move_varint_p(native_to_serial_delta, @intCast(BYTE_LEN)),
+                        .SIGNED => self.ops[self.ops_len] = .mem_move_varint_ps(native_to_serial_delta, @intCast(BYTE_LEN)),
                     },
                 }
                 self.ops_len += 1;
@@ -1108,7 +1573,7 @@ pub const SerialRoutineBuilder = struct {
         const INFO = KindInfo.get_kind_info(TYPE);
         re_typed: switch (INFO) {
             .INT, .BOOL, .ENUM => {
-                if (SETTINGS.ADD_ROUTINE_DEBUG_INFO) {
+                if (self.add_debug_info) {
                     const NAME = @typeName(TYPE);
                     self.ensure_space_for_n_more_debug_bytes(NAME.len + 2);
                     const debug_slice: []u8 = self.debug_stack[self.debug_stack_len..][0 .. NAME.len + 2];
@@ -1118,22 +1583,22 @@ pub const SerialRoutineBuilder = struct {
                 const is_signed = INFO != .BOOL and if (INFO == .INT) Types.type_is_signed_int(TYPE) else Types.type_is_signed_int(std.meta.Tag(TYPE));
                 const SIGN = if (is_signed) IntegerSign.SIGNED else IntegerSign.UNSIGNED;
                 self.add_integer_bytes(curr_native_offset, @sizeOf(TYPE), SIGN, SETTINGS, .NOT_A_UNION_TAG);
-                if (SETTINGS.ADD_ROUTINE_DEBUG_INFO) {
+                if (self.add_debug_info) {
                     self.print_debug_target(@src());
                     const NAME = @typeName(TYPE);
                     self.debug_stack_len -= NAME.len + 2;
                 }
             },
             .FLOAT => {
-                if (SETTINGS.ADD_ROUTINE_DEBUG_INFO) {
+                if (self.add_debug_info) {
                     const NAME = @typeName(TYPE);
                     self.ensure_space_for_n_more_debug_bytes(NAME.len + 2);
                     const debug_slice: []u8 = self.debug_stack[self.debug_stack_len..][0 .. NAME.len + 2];
                     @memcpy(debug_slice, "(" ++ NAME ++ ")");
                     self.debug_stack_len += NAME.len + 2;
                 }
-                self.add_float_bytes(curr_native_offset, @sizeOf(TYPE), SETTINGS, .NOT_A_UNION_TAG);
-                if (SETTINGS.ADD_ROUTINE_DEBUG_INFO) {
+                self.add_float_bytes(curr_native_offset, @sizeOf(TYPE), SETTINGS);
+                if (self.add_debug_info) {
                     self.print_debug_target(@src());
                     const NAME = @typeName(TYPE);
                     self.debug_stack_len -= NAME.len + 2;
@@ -1143,7 +1608,7 @@ pub const SerialRoutineBuilder = struct {
                 const LEN = if (INFO.is_array()) INFO.ARRAY.len else INFO.VECTOR.len;
                 const CHILD = if (INFO.is_array()) INFO.ARRAY.child else INFO.VECTOR.child;
                 const CHILD_SIZE = @sizeOf(CHILD);
-                if (SETTINGS.ADD_ROUTINE_DEBUG_INFO) {
+                if (self.add_debug_info) {
                     const NAME = if (INFO.is_array()) "[Array]" else "[Vector]";
                     self.ensure_space_for_n_more_debug_bytes(NAME.len);
                     const debug_slice: []u8 = self.debug_stack[self.debug_stack_len..][0..NAME.len];
@@ -1155,7 +1620,7 @@ pub const SerialRoutineBuilder = struct {
                     self.add_type(local_native_offset, CHILD, SETTINGS);
                     local_native_offset += CHILD_SIZE;
                 }
-                if (SETTINGS.ADD_ROUTINE_DEBUG_INFO) {
+                if (self.add_debug_info) {
                     self.print_debug_target(@src());
                     const NAME = if (INFO.is_array()) "[Array]" else "[Vector]";
                     self.debug_stack_len -= NAME.len;
@@ -1165,7 +1630,7 @@ pub const SerialRoutineBuilder = struct {
                 if (S.backing_integer) |backing_int| {
                     continue :re_typed KindInfo.get_kind_info(backing_int);
                 } else {
-                    if (SETTINGS.ADD_ROUTINE_DEBUG_INFO) {
+                    if (self.add_debug_info) {
                         const NAME = @typeName(TYPE);
                         self.ensure_space_for_n_more_debug_bytes(NAME.len);
                         const debug_slice: []u8 = self.debug_stack[self.debug_stack_len..][0..NAME.len];
@@ -1176,7 +1641,7 @@ pub const SerialRoutineBuilder = struct {
                         self.add_type_with_custom_serializer(curr_native_offset, TYPE, SETTINGS);
                     } else {
                         inline for (S.fields) |field| {
-                            if (SETTINGS.ADD_ROUTINE_DEBUG_INFO) {
+                            if (self.add_debug_info) {
                                 const NAME = "\n." ++ field.name ++ ":";
                                 self.ensure_space_for_n_more_debug_bytes(NAME.len);
                                 const debug_slice: []u8 = self.debug_stack[self.debug_stack_len..][0..NAME.len];
@@ -1186,14 +1651,14 @@ pub const SerialRoutineBuilder = struct {
                             const local_offset = @offsetOf(TYPE, field.name);
                             const real_offset = curr_native_offset + local_offset;
                             self.add_type(real_offset, field.type, SETTINGS);
-                            if (SETTINGS.ADD_ROUTINE_DEBUG_INFO) {
+                            if (self.add_debug_info) {
                                 self.print_debug_target(@src());
                                 const NAME = "\n." ++ field.name ++ ":";
                                 self.debug_stack_len -= NAME.len;
                             }
                         }
                     }
-                    if (SETTINGS.ADD_ROUTINE_DEBUG_INFO) {
+                    if (self.add_debug_info) {
                         self.print_debug_target(@src());
                         const NAME = @typeName(TYPE);
                         self.debug_stack_len -= NAME.len;
@@ -1231,11 +1696,12 @@ const TEST_SER_MODE = enum(u8) {
 /// USE WITH CAUTION! This performs NO safety checking/validation and assumes the routine is well-formed
 ///
 /// The normal, safe way to get a concrete serial routine is to use a `SerialRoutineBuilder` and use one of the `finalize()` funcs on it.
-pub fn define_serial_routine(comptime TOTAL_OPS_: usize, comptime ROUTINE_: [TOTAL_OPS_]DataOp, comptime TYPE_: type, comptime ENDIAN_: Endian) type {
+pub fn define_serial_routine(comptime TOTAL_OPS_: usize, comptime ROUTINE_: [TOTAL_OPS_]DataOp, comptime TYPE_: type, comptime INT_PACKING_: BytePacking, comptime FLOAT_PACKING_: Endian) type {
     return struct {
         pub const TOTAL_OPS = TOTAL_OPS_;
         pub const TYPE = TYPE_;
-        pub const ENDIAN = ENDIAN_;
+        pub const FLOAT_PACKING = FLOAT_PACKING_;
+        pub const INT_PACKING = INT_PACKING_;
         pub const ROUTINE = ROUTINE_;
 
         pub fn serialize_to_slice(val_ptr: *const TYPE, serial_slice: []u8) SerialWriteError!usize {
@@ -1263,19 +1729,19 @@ fn do_zigzag_adjustment(comptime NATIVE_SIZE: comptime_int, temp_buffer: *align(
         .NATIVE_TO_SERIAL => switch (NATIVE_SIZE) {
             2 => {
                 const int: *align(@alignOf(u128)) i16 = @ptrCast(@alignCast(temp_buffer));
-                int.* = (int >> 15) ^ (int << 1);
+                int.* = (int.* >> 15) ^ (int.* << 1);
             },
             4 => {
                 const int: *align(@alignOf(u128)) i32 = @ptrCast(@alignCast(temp_buffer));
-                int.* = (int >> 31) ^ (int << 1);
+                int.* = (int.* >> 31) ^ (int.* << 1);
             },
             8 => {
                 const int: *align(@alignOf(u128)) i64 = @ptrCast(@alignCast(temp_buffer));
-                int.* = (int >> 63) ^ (int << 1);
+                int.* = (int.* >> 63) ^ (int.* << 1);
             },
             16 => {
                 const int: *align(@alignOf(u128)) i128 = @ptrCast(@alignCast(temp_buffer));
-                int.* = (int >> 127) ^ (int << 1);
+                int.* = (int.* >> 127) ^ (int.* << 1);
             },
             else => unreachable,
         },
@@ -1283,29 +1749,45 @@ fn do_zigzag_adjustment(comptime NATIVE_SIZE: comptime_int, temp_buffer: *align(
             2 => {
                 const int: *align(@alignOf(u128)) i16 = @ptrCast(@alignCast(temp_buffer));
                 const uint: *align(@alignOf(u128)) u16 = @ptrCast(@alignCast(temp_buffer));
-                int.* = bit_cast(uint >> 1, i16) ^ -(bit_cast(uint, i16) & 1);
+                int.* = bit_cast(uint.* >> 1, i16) ^ -(bit_cast(uint.*, i16) & 1);
             },
             4 => {
                 const int: *align(@alignOf(u128)) i32 = @ptrCast(@alignCast(temp_buffer));
                 const uint: *align(@alignOf(u128)) u32 = @ptrCast(@alignCast(temp_buffer));
-                int.* = bit_cast(uint >> 1, i32) ^ -(bit_cast(uint, i32) & 1);
+                int.* = bit_cast(uint.* >> 1, i32) ^ -(bit_cast(uint.*, i32) & 1);
             },
             8 => {
                 const int: *align(@alignOf(u128)) i64 = @ptrCast(@alignCast(temp_buffer));
                 const uint: *align(@alignOf(u128)) u64 = @ptrCast(@alignCast(temp_buffer));
-                int.* = bit_cast(uint >> 1, i64) ^ -(bit_cast(uint, i64) & 1);
+                int.* = bit_cast(uint.* >> 1, i64) ^ -(bit_cast(uint.*, i64) & 1);
             },
             16 => {
                 const int: *align(@alignOf(u128)) i128 = @ptrCast(@alignCast(temp_buffer));
                 const uint: *align(@alignOf(u128)) u128 = @ptrCast(@alignCast(temp_buffer));
-                int.* = bit_cast(uint >> 1, i128) ^ -(bit_cast(uint, i128) & 1);
+                int.* = bit_cast(uint.* >> 1, i128) ^ -(bit_cast(uint.*, i128) & 1);
             },
             else => unreachable,
         },
     }
 }
 
-fn do_serial_move_mem(move: MemCopyMove, ser_idx: *isize, op_idx: *usize, serial: []u8, serial_start: usize, serial_end: usize, native: []u8, native_start: usize, native_end: usize, comptime SWAP: bool, comptime DIR: SER_DIR) void {
+fn test_serial_move_mem_varint(move: MemCopyMove, dynamic_adjust: *isize, op_idx: *usize, serial: []u8, serial_start: usize, native: []u8, native_start: usize, native_end: usize, comptime ZIGZAG: bool, comptime DIR: SER_DIR) void {
+    switch (DIR) {
+        .NATIVE_TO_SERIAL => {
+            const dst = SerialDest{ .slice = serial };
+            const n = dst.write_varint(.SLICE, ZIGZAG, native, native_start, native_end, @intCast(move.copy_len), serial_start) catch |err| assert_unreachable_err(@src(), err);
+            dynamic_adjust.* += num_cast(n, isize);
+        },
+        .SERIAL_TO_NATIVE => {
+            const src = SerialSource{ .slice = serial };
+            const n = src.read_varint(.SLICE, ZIGZAG, native, native_start, native_end, @intCast(move.copy_len), serial_start) catch |err| assert_unreachable_err(@src(), err);
+            dynamic_adjust.* += num_cast(n, isize);
+        },
+    }
+    op_idx.* += 1;
+}
+
+fn test_serial_move_mem(move: MemCopyMove, ser_idx: *isize, op_idx: *usize, serial: []u8, serial_start: usize, serial_end: usize, native: []u8, native_start: usize, native_end: usize, comptime SWAP: bool, comptime DIR: SER_DIR) void {
     switch (SWAP) {
         true => {
             comptime var sidx: usize = num_cast(ser_idx.*, usize);
@@ -1335,9 +1817,6 @@ fn do_serial_move_mem(move: MemCopyMove, ser_idx: *isize, op_idx: *usize, serial
     op_idx.* += 1;
 }
 
-/// NUM, LEAST_SIG_IDX, MOST_SIG_IDX
-const NLM = struct { usize, usize, usize };
-
 fn more_sig(comptime start: comptime_int, comptime move: comptime_int) comptime_int {
     if (NATIVE_ENDIAN == .BIG_ENDIAN) {
         return start - move;
@@ -1353,304 +1832,254 @@ fn less_sig(comptime start: comptime_int, comptime move: comptime_int) comptime_
     }
 }
 
-fn do_varint_p_move_mem(move: MemCopyMove, dynamic_serial_adjustment: *isize, op_idx: *usize, serial: []u8, serial_start: usize, native: []u8, native_start: usize, native_end: usize, comptime ZIGZAG: bool, comptime DIR: SER_DIR) bool {
-    // 1 byte (< 128)
-    // ________ ________ ________┃0AAAAAAA
-    // 2 byte (< 16384)          ┃
-    // ________ ________ ________┃10AAAAAA xxxxxxxx
-    // 3 byte (< 2097152)        ┃
-    // ________ ________ ________┃110AAAAA xxxxxxxx xxxxxxxx
-    // 4 byte (< 268435456)      ┃
-    // ________ ________ ________┃1110AAAA xxxxxxxx xxxxxxxx xxxxxxxx
-    // 5 byte (< 34359738368)    ┃
-    // ________ ________ ________┃11110AAA xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx
-    // 6 byte (< 4398046511104)  ┃
-    // ________ ________ ________┃111110AA xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx
-    // 7 byte (< 562949953421312)┃
-    // ________ ________ ________┃1111110A xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx
-    // 8 byte (< 72057594037927936)
-    // ________ ________ ________┃11111110 AAAAAAAA xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx
-    // 9 byte for u64:           ┃
-    // ________ ________ 11111111┃AAAAAAAA xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx
-    // 9 byte for u128 (< 9223372036854775808)
-    // ________ ________ ________┃11111111 0AAAAAAA xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx
-    // 10 byte (< 1180591620717411303424)
-    // ________ ________ ________┃11111111 10AAAAAA xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx
-    // 11 byte (< 151115727451828646838272)
-    // ________ ________ ________┃11111111 110AAAAA xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx
-    // 12 byte (< 19342813113834066795298816)
-    // ________ ________ ________┃11111111 1110AAAA xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx
-    // 13 byte (< 2475880078570760549798248448)
-    // ________ ________ ________┃11111111 11110AAA xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx
-    // 14 byte (< 316912650057057350374175801344)
-    // ________ ________ ________┃11111111 111110AA xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx
-    // 15 byte (< 40564819207303340847894502572032)
-    // ________ ________ ________┃11111111 1111110A xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx
-    // 16 byte (< 5192296858534827628530496329220096)
-    // ________ ________ ________┃11111111 11111110 AAAAAAAA xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx
-    // 17 bytes (< 664613997892457936451903530140172288)
-    // ________ ________ 11111111┃11111111 0AAAAAAA xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx
-    // 18 bytes (< 85070591730234615865843651857942052864)
-    // ________ 11111111 11111111┃10AAAAAA xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx
-    // 19 bytes (<= 340282366920938463463374607431768211455)
-    // 11111111 11111111 110_____┃AAAAAAAA xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx
-    //                      ^^^^^ If any of these bits are not 0, it is an error if you are
-    //                            strict on non-canonical reps, but they have no effect on the
-    //                            final value either way
-    const native_len = move.copy_len;
-    assert_with_reason(native_len == 2 or native_len == 4 or native_len == 8 or native_len == 16, @src(), "VarInts are only upported for 2, 4, 8, or 16 byte integers, got native len {d}", .{native_len});
-    var temp_buffer: [35]u8 align(@alignOf(u128)) = @splat(0);
-    const val_offset: *align(@alignOf(u128)) u8 = &temp_buffer[16];
-    switch (DIR) {
-        .NATIVE_TO_SERIAL => {
-            switch (native_len) {
-                2 => @memcpy(temp_buffer[16..18], native[native_start..native_end]),
-                4 => @memcpy(temp_buffer[16..20], native[native_start..native_end]),
-                8 => @memcpy(temp_buffer[16..24], native[native_start..native_end]),
-                16 => @memcpy(temp_buffer[16..32], native[native_start..native_end]),
-                else => unreachable,
-            }
-            const num_bytes: usize, const least_sig_byte_with_data: usize, const most_sig_byte_with_data: usize = switch (native_len) {
-                2 => get: {
-                    if (ZIGZAG) do_zigzag_adjustment(2, @ptrCast(val_offset), .NATIVE_TO_SERIAL);
-                    const uint: *const u16 = @ptrCast(@alignCast(val_offset));
-                    const LSB: comptime_int = if (NATIVE_ENDIAN == .BIG_ENDIAN) 17 else 16;
-                    break :get switch (uint.*) {
-                        0...127 => NLM{ 1, LSB, LSB },
-                        128...16383 => add_prefix: {
-                            temp_buffer[more_sig(LSB, 1)] |= 0b10_000000;
-                            break :add_prefix NLM{ 2, LSB, more_sig(LSB, 1) };
-                        },
-                        16384...0xFFFF => add_prefix: {
-                            temp_buffer[more_sig(LSB, 2)] |= 0b110_00000;
-                            break :add_prefix NLM{ 3, LSB, more_sig(LSB, 2) };
-                        },
-                    };
-                },
-                4 => get: {
-                    if (ZIGZAG) do_zigzag_adjustment(4, @ptrCast(val_offset), .NATIVE_TO_SERIAL);
-                    const uint: *const u32 = @ptrCast(@alignCast(val_offset));
-                    const LSB = if (NATIVE_ENDIAN == .BIG_ENDIAN) 19 else 16;
-                    break :get switch (uint.*) {
-                        0...127 => NLM{ 1, LSB, LSB },
-                        128...16383 => add_prefix: {
-                            temp_buffer[more_sig(LSB, 1)] |= 0b10_000000;
-                            break :add_prefix NLM{ 2, LSB, more_sig(LSB, 1) };
-                        },
-                        16384...2097151 => add_prefix: {
-                            temp_buffer[more_sig(LSB, 2)] |= 0b110_00000;
-                            break :add_prefix NLM{ 3, LSB, more_sig(LSB, 2) };
-                        },
-                        2097152...268435455 => add_prefix: {
-                            temp_buffer[more_sig(LSB, 3)] |= 0b1110_00000;
-                            break :add_prefix NLM{ 4, LSB, more_sig(LSB, 3) };
-                        },
-                        268435456...0xFFFFFFFF => add_prefix: {
-                            temp_buffer[more_sig(LSB, 4)] |= 0b11110_0000;
-                            break :add_prefix NLM{ 5, LSB, more_sig(LSB, 4) };
-                        },
-                    };
-                },
-                8 => get: {
-                    if (ZIGZAG) do_zigzag_adjustment(8, @ptrCast(val_offset), .NATIVE_TO_SERIAL);
-                    const uint: *const u64 = @ptrCast(@alignCast(val_offset));
-                    const LSB = if (NATIVE_ENDIAN == .BIG_ENDIAN) 23 else 16;
-                    break :get switch (uint.*) {
-                        0...127 => NLM{ 1, LSB, LSB },
-                        128...16383 => add_prefix: {
-                            temp_buffer[more_sig(LSB, 1)] |= 0b10_000000;
-                            break :add_prefix NLM{ 2, LSB, more_sig(LSB, 1) };
-                        },
-                        16384...2097151 => add_prefix: {
-                            temp_buffer[more_sig(LSB, 2)] |= 0b110_00000;
-                            break :add_prefix NLM{ 3, LSB, more_sig(LSB, 2) };
-                        },
-                        2097152...268435455 => add_prefix: {
-                            temp_buffer[more_sig(LSB, 3)] |= 0b1110_0000;
-                            break :add_prefix NLM{ 4, LSB, more_sig(LSB, 3) };
-                        },
-                        268435456...34359738367 => add_prefix: {
-                            temp_buffer[more_sig(LSB, 4)] |= 0b11110_000;
-                            break :add_prefix NLM{ 5, LSB, more_sig(LSB, 4) };
-                        },
-                        34359738368...4398046511103 => add_prefix: {
-                            temp_buffer[more_sig(LSB, 5)] |= 0b111110_00;
-                            break :add_prefix NLM{ 6, LSB, more_sig(LSB, 5) };
-                        },
-                        4398046511104...562949953421311 => add_prefix: {
-                            temp_buffer[more_sig(LSB, 6)] |= 0b1111110_0;
-                            break :add_prefix NLM{ 7, LSB, more_sig(LSB, 6) };
-                        },
-                        562949953421312...72057594037927935 => add_prefix: {
-                            temp_buffer[more_sig(LSB, 7)] |= 0b11111110;
-                            break :add_prefix NLM{ 8, LSB, more_sig(LSB, 7) };
-                        },
-                        72057594037927936...9223372036854775807 => add_prefix: {
-                            temp_buffer[more_sig(LSB, 8)] |= 0b11111111;
-                            break :add_prefix NLM{ 9, LSB, more_sig(LSB, 8) };
-                        },
-                    };
-                },
-                16 => get: {
-                    if (ZIGZAG) do_zigzag_adjustment(16, @ptrCast(val_offset), .NATIVE_TO_SERIAL);
-                    const uint: *const u128 = @ptrCast(@alignCast(val_offset));
-                    const LSB = if (NATIVE_ENDIAN == .BIG_ENDIAN) 31 else 16;
-                    break :get switch (uint.*) {
-                        0...127 => NLM{ 1, LSB, LSB },
-                        128...16383 => add_prefix: {
-                            temp_buffer[more_sig(LSB, 1)] |= 0b10_000000;
-                            break :add_prefix NLM{ 2, LSB, more_sig(LSB, 1) };
-                        },
-                        16384...2097151 => add_prefix: {
-                            temp_buffer[more_sig(LSB, 2)] |= 0b110_00000;
-                            break :add_prefix NLM{ 3, LSB, more_sig(LSB, 2) };
-                        },
-                        2097152...268435455 => add_prefix: {
-                            temp_buffer[more_sig(LSB, 3)] |= 0b1110_0000;
-                            break :add_prefix NLM{ 4, LSB, more_sig(LSB, 3) };
-                        },
-                        268435456...34359738367 => add_prefix: {
-                            temp_buffer[more_sig(LSB, 4)] |= 0b11110_000;
-                            break :add_prefix NLM{ 5, LSB, more_sig(LSB, 4) };
-                        },
-                        34359738368...4398046511103 => add_prefix: {
-                            temp_buffer[more_sig(LSB, 5)] |= 0b111110_00;
-                            break :add_prefix NLM{ 6, LSB, more_sig(LSB, 5) };
-                        },
-                        4398046511104...562949953421311 => add_prefix: {
-                            temp_buffer[more_sig(LSB, 6)] |= 0b1111110_0;
-                            break :add_prefix NLM{ 7, LSB, more_sig(LSB, 6) };
-                        },
-                        562949953421312...72057594037927935 => add_prefix: {
-                            temp_buffer[more_sig(LSB, 7)] |= 0b11111110;
-                            break :add_prefix NLM{ 8, LSB, more_sig(LSB, 7) };
-                        },
-                        72057594037927936...9223372036854775807 => add_prefix: {
-                            temp_buffer[more_sig(LSB, 8)] |= 0b11111111;
-                            // temp_buffer[more_sig(LSB, 7)] |= 0b0_0000000;
-                            break :add_prefix NLM{ 9, LSB, more_sig(LSB, 8) };
-                        },
-                        9223372036854775808...1180591620717411303423 => add_prefix: {
-                            temp_buffer[more_sig(LSB, 9)] |= 0b11111111;
-                            temp_buffer[more_sig(LSB, 8)] |= 0b10_000000;
-                            break :add_prefix NLM{ 10, LSB, more_sig(LSB, 9) };
-                        },
-                        1180591620717411303424...151115727451828646838271 => add_prefix: {
-                            temp_buffer[more_sig(LSB, 10)] |= 0b11111111;
-                            temp_buffer[more_sig(LSB, 9)] |= 0b110_00000;
-                            break :add_prefix NLM{ 11, LSB, more_sig(LSB, 10) };
-                        },
-                        151115727451828646838272...19342813113834066795298815 => add_prefix: {
-                            temp_buffer[more_sig(LSB, 11)] |= 0b11111111;
-                            temp_buffer[more_sig(LSB, 10)] |= 0b1110_0000;
-                            break :add_prefix NLM{ 12, LSB, more_sig(LSB, 11) };
-                        },
-                        19342813113834066795298816...2475880078570760549798248447 => add_prefix: {
-                            temp_buffer[more_sig(LSB, 12)] |= 0b11111111;
-                            temp_buffer[more_sig(LSB, 11)] |= 0b11110_000;
-                            break :add_prefix NLM{ 13, LSB, more_sig(LSB, 12) };
-                        },
-                        2475880078570760549798248448...316912650057057350374175801343 => add_prefix: {
-                            temp_buffer[more_sig(LSB, 13)] |= 0b11111111;
-                            temp_buffer[more_sig(LSB, 12)] |= 0b111110_00;
-                            break :add_prefix NLM{ 14, LSB, more_sig(LSB, 13) };
-                        },
-                        316912650057057350374175801344...40564819207303340847894502572031 => add_prefix: {
-                            temp_buffer[more_sig(LSB, 14)] |= 0b11111111;
-                            temp_buffer[more_sig(LSB, 13)] |= 0b1111110_0;
-                            break :add_prefix NLM{ 15, LSB, more_sig(LSB, 14) };
-                        },
-                        40564819207303340847894502572032...5192296858534827628530496329220095 => add_prefix: {
-                            temp_buffer[more_sig(LSB, 15)] |= 0b11111111;
-                            temp_buffer[more_sig(LSB, 14)] |= 0b11111110;
-                            break :add_prefix NLM{ 16, LSB, more_sig(LSB, 15) };
-                        },
-                        5192296858534827628530496329220096...664613997892457936451903530140172287 => add_prefix: {
-                            temp_buffer[more_sig(LSB, 16)] |= 0b11111111;
-                            temp_buffer[more_sig(LSB, 15)] |= 0b11111111;
-                            // temp_buffer[more_sig(LSB, 14)] |= 0b0_0000000;
-                            break :add_prefix NLM{ 17, LSB, more_sig(LSB, 16) };
-                        },
-                        664613997892457936451903530140172288...85070591730234615865843651857942052863 => add_prefix: {
-                            temp_buffer[more_sig(LSB, 17)] |= 0b11111111;
-                            temp_buffer[more_sig(LSB, 16)] |= 0b11111111;
-                            temp_buffer[more_sig(LSB, 15)] |= 0b10_000000;
-                            break :add_prefix NLM{ 18, LSB, more_sig(LSB, 17) };
-                        },
-                        85070591730234615865843651857942052864...0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF => add_prefix: {
-                            temp_buffer[more_sig(LSB, 18)] |= 0b11111111;
-                            temp_buffer[more_sig(LSB, 17)] |= 0b11111111;
-                            temp_buffer[more_sig(LSB, 16)] |= 0b110_00000;
-                            break :add_prefix NLM{ 19, LSB, more_sig(LSB, 18) };
-                        },
-                    };
-                },
-                else => unreachable,
-            };
-            const serial_end = serial_start + num_bytes;
-            if (serial_end > serial.len) return false;
-            const first_byte = if (NATIVE_ENDIAN == .BIG_ENDIAN) most_sig_byte_with_data else least_sig_byte_with_data;
-            const byte_end = if (NATIVE_ENDIAN == .BIG_ENDIAN) least_sig_byte_with_data + 1 else most_sig_byte_with_data + 1;
-            if (NATIVE_ENDIAN != .BIG_ENDIAN) {
-                std.mem.reverse(u8, temp_buffer[first_byte..byte_end]);
-            }
-            @memcpy(serial[serial_start..serial_end], temp_buffer[first_byte..byte_end]);
-            dynamic_serial_adjustment.* += num_cast(num_bytes, isize);
-        },
-        .SERIAL_TO_NATIVE => {
-            // const MOST_SIG_BYTE = if (NATIVE_ENDIAN == .BIG_ENDIAN) native_start else native_end - 1;
-            // const LEAST_SIG_BYTE = if (NATIVE_ENDIAN == .LITTLE_ENDIAN) native_start else native_end - 1;
-
-            // var num_bytes: usize = 0;
-            // var waste_bytes: usize = 0;
-            // var trim_bits: usize = 0;
-            // var i: usize = MOST_SIG_BYTE;
-            // var b: u8 = native[i];
-            // check_next_byte: switch (b) {
-            //     0b0_0000000...0b0_1111111 => {
-            //         num_bytes += 1;
-            //         trim_bits = 1;
-            //     },
-            //     0b10_000000...0b10_111111 => {
-            //         num_bytes += 2;
-            //         trim_bits = 2;
-            //     },
-            //     0b110_00000...0b110_11111 => {
-            //         num_bytes += 3;
-            //         trim_bits = 3;
-            //     },
-            //     0b1110_0000...0b1110_1111 => {
-            //         num_bytes += 4;
-            //         trim_bits = 4;
-            //     },
-            //     0b11110_000...0b11110_111 => {
-            //         num_bytes += 5;
-            //         trim_bits = 5;
-            //     },
-            //     0b111110_00...0b111110_11 => {
-            //         num_bytes += 6;
-            //         trim_bits = 6;
-            //     },
-            //     0b1111110_0...0b1111110_1 => {
-            //         num_bytes += 7;
-            //         trim_bits = 7;
-            //     },
-            //     0b11111110 => {
-            //         num_bytes += 8;
-            //         waste_bytes += 1;
-            //     },
-            //     0b11111111 => {
-            //         num_bytes += 8;
-            //         waste_bytes += 1;
-            //         i = i + STEP_ADD - STEP_SUB;
-            //         b = native[i];
-            //         continue :check_next_byte b;
-            //     },
-            // }
-        },
-    }
-    op_idx.* += 1;
-}
+// fn do_varint_p_move_mem(move: MemCopyMove, dynamic_serial_adjustment: *isize, op_idx: *usize, serial: []u8, serial_start: usize, native: []u8, native_start: usize, native_end: usize, comptime ZIGZAG: bool, comptime DIR: SER_DIR) bool {
+//     // 1 byte (< 128)
+//     // ________ ________ ________┃0AAAAAAA
+//     // 2 byte (< 16384)          ┃
+//     // ________ ________ ________┃10AAAAAA xxxxxxxx
+//     // 3 byte (< 2097152)        ┃
+//     // ________ ________ ________┃110AAAAA xxxxxxxx xxxxxxxx
+//     // 4 byte (< 268435456)      ┃
+//     // ________ ________ ________┃1110AAAA xxxxxxxx xxxxxxxx xxxxxxxx
+//     // 5 byte (< 34359738368)    ┃
+//     // ________ ________ ________┃11110AAA xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx
+//     // 6 byte (< 4398046511104)  ┃
+//     // ________ ________ ________┃111110AA xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx
+//     // 7 byte (< 562949953421312)┃
+//     // ________ ________ ________┃1111110A xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx
+//     // 8 byte (< 72057594037927936)
+//     // ________ ________ ________┃11111110 AAAAAAAA xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx
+//     // 9 byte for u64:           ┃
+//     // ________ ________ 11111111┃AAAAAAAA xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx
+//     // 9 byte for u128 (< 9223372036854775808)
+//     // ________ ________ ________┃11111111 0AAAAAAA xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx
+//     // 10 byte (< 1180591620717411303424)
+//     // ________ ________ ________┃11111111 10AAAAAA xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx
+//     // 11 byte (< 151115727451828646838272)
+//     // ________ ________ ________┃11111111 110AAAAA xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx
+//     // 12 byte (< 19342813113834066795298816)
+//     // ________ ________ ________┃11111111 1110AAAA xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx
+//     // 13 byte (< 2475880078570760549798248448)
+//     // ________ ________ ________┃11111111 11110AAA xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx
+//     // 14 byte (< 316912650057057350374175801344)
+//     // ________ ________ ________┃11111111 111110AA xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx
+//     // 15 byte (< 40564819207303340847894502572032)
+//     // ________ ________ ________┃11111111 1111110A xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx
+//     // 16 byte (< 5192296858534827628530496329220096)
+//     // ________ ________ ________┃11111111 11111110 AAAAAAAA xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx
+//     // 17 bytes (< 664613997892457936451903530140172288)
+//     // ________ ________ 11111111┃11111111 0AAAAAAA xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx
+//     // 18 bytes (< 85070591730234615865843651857942052864)
+//     // ________ 11111111 11111111┃10AAAAAA xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx
+//     // 19 bytes (<= 340282366920938463463374607431768211455)
+//     // 11111111 11111111 110_____┃AAAAAAAA xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx
+//     //                      ^^^^^ If any of these bits are not 0, it is an error if you are
+//     //                            strict on non-canonical reps, but they have no effect on the
+//     //                            final value either way.
+//     const native_len = move.copy_len;
+//     assert_with_reason(native_len == 2 or native_len == 4 or native_len == 8 or native_len == 16, @src(), "VarInts are only upported for 2, 4, 8, or 16 byte integers, got native len {d}", .{native_len});
+//     var temp_buffer: [35]u8 align(@alignOf(u128)) = @splat(0);
+//     const val_offset: *align(@alignOf(u128)) u8 = &temp_buffer[16];
+//     switch (DIR) {
+//         .NATIVE_TO_SERIAL => {
+//             switch (native_len) {
+//                 2 => @memcpy(temp_buffer[16..18], native[native_start..native_end]),
+//                 4 => @memcpy(temp_buffer[16..20], native[native_start..native_end]),
+//                 8 => @memcpy(temp_buffer[16..24], native[native_start..native_end]),
+//                 16 => @memcpy(temp_buffer[16..32], native[native_start..native_end]),
+//                 else => unreachable,
+//             }
+//             const num_bytes: usize, const least_sig_byte_with_data: usize, const most_sig_byte_with_data: usize = switch (native_len) {
+//                 2 => get: {
+//                     if (ZIGZAG) do_zigzag_adjustment(2, @ptrCast(val_offset), .NATIVE_TO_SERIAL);
+//                     const uint: *const u16 = @ptrCast(@alignCast(val_offset));
+//                     const LSB: comptime_int = if (NATIVE_ENDIAN == .BIG_ENDIAN) 17 else 16;
+//                     break :get switch (uint.*) {
+//                         0...127 => NLM{ 1, LSB, LSB },
+//                         128...16383 => add_prefix: {
+//                             temp_buffer[more_sig(LSB, 1)] |= 0b10_000000;
+//                             break :add_prefix NLM{ 2, LSB, more_sig(LSB, 1) };
+//                         },
+//                         16384...0xFFFF => add_prefix: {
+//                             temp_buffer[more_sig(LSB, 2)] |= 0b110_00000;
+//                             break :add_prefix NLM{ 3, LSB, more_sig(LSB, 2) };
+//                         },
+//                     };
+//                 },
+//                 4 => get: {
+//                     if (ZIGZAG) do_zigzag_adjustment(4, @ptrCast(val_offset), .NATIVE_TO_SERIAL);
+//                     const uint: *const u32 = @ptrCast(@alignCast(val_offset));
+//                     const LSB = if (NATIVE_ENDIAN == .BIG_ENDIAN) 19 else 16;
+//                     break :get switch (uint.*) {
+//                         0...127 => NLM{ 1, LSB, LSB },
+//                         128...16383 => add_prefix: {
+//                             temp_buffer[more_sig(LSB, 1)] |= 0b10_000000;
+//                             break :add_prefix NLM{ 2, LSB, more_sig(LSB, 1) };
+//                         },
+//                         16384...2097151 => add_prefix: {
+//                             temp_buffer[more_sig(LSB, 2)] |= 0b110_00000;
+//                             break :add_prefix NLM{ 3, LSB, more_sig(LSB, 2) };
+//                         },
+//                         2097152...268435455 => add_prefix: {
+//                             temp_buffer[more_sig(LSB, 3)] |= 0b1110_00000;
+//                             break :add_prefix NLM{ 4, LSB, more_sig(LSB, 3) };
+//                         },
+//                         268435456...0xFFFFFFFF => add_prefix: {
+//                             temp_buffer[more_sig(LSB, 4)] |= 0b11110_0000;
+//                             break :add_prefix NLM{ 5, LSB, more_sig(LSB, 4) };
+//                         },
+//                     };
+//                 },
+//                 8 => get: {
+//                     if (ZIGZAG) do_zigzag_adjustment(8, @ptrCast(val_offset), .NATIVE_TO_SERIAL);
+//                     const uint: *const u64 = @ptrCast(@alignCast(val_offset));
+//                     const LSB = if (NATIVE_ENDIAN == .BIG_ENDIAN) 23 else 16;
+//                     break :get switch (uint.*) {
+//                         0...127 => NLM{ 1, LSB, LSB },
+//                         128...16383 => add_prefix: {
+//                             temp_buffer[more_sig(LSB, 1)] |= 0b10_000000;
+//                             break :add_prefix NLM{ 2, LSB, more_sig(LSB, 1) };
+//                         },
+//                         16384...2097151 => add_prefix: {
+//                             temp_buffer[more_sig(LSB, 2)] |= 0b110_00000;
+//                             break :add_prefix NLM{ 3, LSB, more_sig(LSB, 2) };
+//                         },
+//                         2097152...268435455 => add_prefix: {
+//                             temp_buffer[more_sig(LSB, 3)] |= 0b1110_0000;
+//                             break :add_prefix NLM{ 4, LSB, more_sig(LSB, 3) };
+//                         },
+//                         268435456...34359738367 => add_prefix: {
+//                             temp_buffer[more_sig(LSB, 4)] |= 0b11110_000;
+//                             break :add_prefix NLM{ 5, LSB, more_sig(LSB, 4) };
+//                         },
+//                         34359738368...4398046511103 => add_prefix: {
+//                             temp_buffer[more_sig(LSB, 5)] |= 0b111110_00;
+//                             break :add_prefix NLM{ 6, LSB, more_sig(LSB, 5) };
+//                         },
+//                         4398046511104...562949953421311 => add_prefix: {
+//                             temp_buffer[more_sig(LSB, 6)] |= 0b1111110_0;
+//                             break :add_prefix NLM{ 7, LSB, more_sig(LSB, 6) };
+//                         },
+//                         562949953421312...72057594037927935 => add_prefix: {
+//                             temp_buffer[more_sig(LSB, 7)] |= 0b11111110;
+//                             break :add_prefix NLM{ 8, LSB, more_sig(LSB, 7) };
+//                         },
+//                         72057594037927936...9223372036854775807 => add_prefix: {
+//                             temp_buffer[more_sig(LSB, 8)] |= 0b11111111;
+//                             break :add_prefix NLM{ 9, LSB, more_sig(LSB, 8) };
+//                         },
+//                     };
+//                 },
+//                 16 => get: {
+//                     if (ZIGZAG) do_zigzag_adjustment(16, @ptrCast(val_offset), .NATIVE_TO_SERIAL);
+//                     const uint: *const u128 = @ptrCast(@alignCast(val_offset));
+//                     const LSB = if (NATIVE_ENDIAN == .BIG_ENDIAN) 31 else 16;
+//                     break :get switch (uint.*) {
+//                         0...127 => NLM{ 1, LSB, LSB },
+//                         128...16383 => add_prefix: {
+//                             temp_buffer[more_sig(LSB, 1)] |= 0b10_000000;
+//                             break :add_prefix NLM{ 2, LSB, more_sig(LSB, 1) };
+//                         },
+//                         16384...2097151 => add_prefix: {
+//                             temp_buffer[more_sig(LSB, 2)] |= 0b110_00000;
+//                             break :add_prefix NLM{ 3, LSB, more_sig(LSB, 2) };
+//                         },
+//                         2097152...268435455 => add_prefix: {
+//                             temp_buffer[more_sig(LSB, 3)] |= 0b1110_0000;
+//                             break :add_prefix NLM{ 4, LSB, more_sig(LSB, 3) };
+//                         },
+//                         268435456...34359738367 => add_prefix: {
+//                             temp_buffer[more_sig(LSB, 4)] |= 0b11110_000;
+//                             break :add_prefix NLM{ 5, LSB, more_sig(LSB, 4) };
+//                         },
+//                         34359738368...4398046511103 => add_prefix: {
+//                             temp_buffer[more_sig(LSB, 5)] |= 0b111110_00;
+//                             break :add_prefix NLM{ 6, LSB, more_sig(LSB, 5) };
+//                         },
+//                         4398046511104...562949953421311 => add_prefix: {
+//                             temp_buffer[more_sig(LSB, 6)] |= 0b1111110_0;
+//                             break :add_prefix NLM{ 7, LSB, more_sig(LSB, 6) };
+//                         },
+//                         562949953421312...72057594037927935 => add_prefix: {
+//                             temp_buffer[more_sig(LSB, 7)] |= 0b11111110;
+//                             break :add_prefix NLM{ 8, LSB, more_sig(LSB, 7) };
+//                         },
+//                         72057594037927936...9223372036854775807 => add_prefix: {
+//                             temp_buffer[more_sig(LSB, 8)] |= 0b11111111;
+//                             // temp_buffer[more_sig(LSB, 7)] |= 0b0_0000000;
+//                             break :add_prefix NLM{ 9, LSB, more_sig(LSB, 8) };
+//                         },
+//                         9223372036854775808...1180591620717411303423 => add_prefix: {
+//                             temp_buffer[more_sig(LSB, 9)] |= 0b11111111;
+//                             temp_buffer[more_sig(LSB, 8)] |= 0b10_000000;
+//                             break :add_prefix NLM{ 10, LSB, more_sig(LSB, 9) };
+//                         },
+//                         1180591620717411303424...151115727451828646838271 => add_prefix: {
+//                             temp_buffer[more_sig(LSB, 10)] |= 0b11111111;
+//                             temp_buffer[more_sig(LSB, 9)] |= 0b110_00000;
+//                             break :add_prefix NLM{ 11, LSB, more_sig(LSB, 10) };
+//                         },
+//                         151115727451828646838272...19342813113834066795298815 => add_prefix: {
+//                             temp_buffer[more_sig(LSB, 11)] |= 0b11111111;
+//                             temp_buffer[more_sig(LSB, 10)] |= 0b1110_0000;
+//                             break :add_prefix NLM{ 12, LSB, more_sig(LSB, 11) };
+//                         },
+//                         19342813113834066795298816...2475880078570760549798248447 => add_prefix: {
+//                             temp_buffer[more_sig(LSB, 12)] |= 0b11111111;
+//                             temp_buffer[more_sig(LSB, 11)] |= 0b11110_000;
+//                             break :add_prefix NLM{ 13, LSB, more_sig(LSB, 12) };
+//                         },
+//                         2475880078570760549798248448...316912650057057350374175801343 => add_prefix: {
+//                             temp_buffer[more_sig(LSB, 13)] |= 0b11111111;
+//                             temp_buffer[more_sig(LSB, 12)] |= 0b111110_00;
+//                             break :add_prefix NLM{ 14, LSB, more_sig(LSB, 13) };
+//                         },
+//                         316912650057057350374175801344...40564819207303340847894502572031 => add_prefix: {
+//                             temp_buffer[more_sig(LSB, 14)] |= 0b11111111;
+//                             temp_buffer[more_sig(LSB, 13)] |= 0b1111110_0;
+//                             break :add_prefix NLM{ 15, LSB, more_sig(LSB, 14) };
+//                         },
+//                         40564819207303340847894502572032...5192296858534827628530496329220095 => add_prefix: {
+//                             temp_buffer[more_sig(LSB, 15)] |= 0b11111111;
+//                             temp_buffer[more_sig(LSB, 14)] |= 0b11111110;
+//                             break :add_prefix NLM{ 16, LSB, more_sig(LSB, 15) };
+//                         },
+//                         5192296858534827628530496329220096...664613997892457936451903530140172287 => add_prefix: {
+//                             temp_buffer[more_sig(LSB, 16)] |= 0b11111111;
+//                             temp_buffer[more_sig(LSB, 15)] |= 0b11111111;
+//                             // temp_buffer[more_sig(LSB, 14)] |= 0b0_0000000;
+//                             break :add_prefix NLM{ 17, LSB, more_sig(LSB, 16) };
+//                         },
+//                         664613997892457936451903530140172288...85070591730234615865843651857942052863 => add_prefix: {
+//                             temp_buffer[more_sig(LSB, 17)] |= 0b11111111;
+//                             temp_buffer[more_sig(LSB, 16)] |= 0b11111111;
+//                             temp_buffer[more_sig(LSB, 15)] |= 0b10_000000;
+//                             break :add_prefix NLM{ 18, LSB, more_sig(LSB, 17) };
+//                         },
+//                         85070591730234615865843651857942052864...0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF => add_prefix: {
+//                             temp_buffer[more_sig(LSB, 18)] |= 0b11111111;
+//                             temp_buffer[more_sig(LSB, 17)] |= 0b11111111;
+//                             temp_buffer[more_sig(LSB, 16)] |= 0b110_00000;
+//                             break :add_prefix NLM{ 19, LSB, more_sig(LSB, 18) };
+//                         },
+//                     };
+//                 },
+//                 else => unreachable,
+//             };
+//             const serial_end = serial_start + num_bytes;
+//             if (serial_end > serial.len) return false;
+//             const first_byte = if (NATIVE_ENDIAN == .BIG_ENDIAN) most_sig_byte_with_data else least_sig_byte_with_data;
+//             const byte_end = if (NATIVE_ENDIAN == .BIG_ENDIAN) least_sig_byte_with_data + 1 else most_sig_byte_with_data + 1;
+//             if (NATIVE_ENDIAN != .BIG_ENDIAN) {
+//                 std.mem.reverse(u8, temp_buffer[first_byte..byte_end]);
+//             }
+//             @memcpy(serial[serial_start..serial_end], temp_buffer[first_byte..byte_end]);
+//             dynamic_serial_adjustment.* += num_cast(num_bytes, isize);
+//         },
+//         .SERIAL_TO_NATIVE => {},
+//     }
+//     op_idx.* += 1;
+// }
 
 fn serial_internal(comptime NUM_OPS: usize, comptime ROUTINE: []const DataOp, comptime DIR: SER_DIR, comptime SERIAL: SerialKind, native: []u8, serial: if (DIR == .SERIAL_TO_NATIVE) SerialSource else SerialDest) (if (DIR == .SERIAL_TO_NATIVE) SerialReadError else SerialWriteError)!usize {
     var serial_idx: isize = 0;
@@ -1964,11 +2393,14 @@ test SerialRoutineBuilder {
         var builder = SerialRoutineBuilder.init(op_buf[0..1024], skip_buf[0..256]);
         builder.debug_stack = debug_buf[0..1024];
         const settings = SerialSettings{
-            .INTEGER_BYTE_PACKING = .LITTLE_ENDIAN,
+            .INTEGER_BYTE_PACKING = .VARINT_USING_PREFIX,
+            .FLOAT_BYTE_ORDER = .LITTLE_ENDIAN,
+        };
+        const init_settings = SerialInitSettings{
             .COMPTIME_EVAL_QUOTA = 50000,
             .ADD_ROUTINE_DEBUG_INFO = false,
         };
-        builder.build_routine_for_type(TestStruct, settings);
+        builder.build_routine_for_type(TestStruct, settings, init_settings);
         var test_serial: [1024]u8 = undefined;
         const input_native_bytes = std.mem.asBytes(&test_struct_in);
         const output_native_bytes = std.mem.asBytes(&test_struct_out);

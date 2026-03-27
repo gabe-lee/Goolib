@@ -226,6 +226,14 @@ pub fn expect_less_than_or_equal(val_a: anytype, str_a: []const u8, val_b: anyty
     }
 }
 
+pub fn expect_slices_equal_t(comptime T: type, val_a: []const T, str_a: []const u8, val_b: []const T, str_b: []const u8, comptime fail_description: []const u8, fail_args: anytype) !void {
+    if (!std.mem.eql(T, val_a, val_b)) {
+        print("\nFAILURE: " ++ fail_description, fail_args);
+        print("\n\tEXPECT: {s} == {s}\n\tSLICE A: {any}\n\tSLICE B: {any}\n", .{ str_a, str_b, val_a, val_b });
+        return TestError.test_expected_slices_equal;
+    }
+}
+
 pub fn expect_slices_equal(val_a: anytype, str_a: []const u8, val_b: anytype, str_b: []const u8, comptime fail_description: []const u8, fail_args: anytype) !void {
     if (!std.mem.eql(@typeInfo(@TypeOf(val_a)).pointer.child, val_a, val_b)) {
         print("\nFAILURE: " ++ fail_description, fail_args);

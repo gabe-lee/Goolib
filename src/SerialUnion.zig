@@ -224,7 +224,9 @@ pub fn SerialUnion(comptime TAGGED_UNION: type, comptime DECLS_: type, comptime 
                     unreachable;
                 };
                 const tag_val: TAG = @enumFromInt(tag_raw);
-                union_builder.add_type(builder, tag_val, union_native_offset, u_field.type, SETTINGS);
+                const tag_size = @sizeOf(TAG);
+                const tag_bytes: [*]const u8 = @ptrCast(&tag_val);
+                union_builder.add_type(builder, tag_bytes[0..tag_size], union_native_offset, u_field.type, SETTINGS);
             }
             union_builder.end_union_builder(builder);
         }
