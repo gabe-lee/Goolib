@@ -53,6 +53,7 @@ const SerializeModule = Root.Serializer;
 const SerialRoutineBuilder = SerializeModule.SerialRoutineBuilder;
 const ByteDataOp = SerializeModule.DataOp;
 const SerialSettings = SerializeModule.SerialSettings;
+const IntPacking = SerializeModule.IntegerPacking;
 
 /// Creates a struct type that can behave similar to tagged union, but has a well-defined memory layout
 /// for serialization or MMIO
@@ -210,26 +211,28 @@ pub fn SerialUnion(comptime TAGGED_UNION: type, comptime DECLS_: type, comptime 
             FUNCS.set(self, tag, val);
         }
 
-        pub fn custom_serialize_routine(comptime builder: *SerialRoutineBuilder, comptime curr_native_offset: usize, comptime SETTINGS: SerialSettings) void {
-            const tag_native_offset = curr_native_offset + TAG_OFFSET;
-            const union_native_offset = curr_native_offset + UNION_OFFSET;
-            comptime var union_builder = builder.start_union_routine_builder(tag_native_offset, SETTINGS, TAG_TYPE, FIELD_COUNT);
-            inline for (@typeInfo(UNION).@"union".fields) |u_field| {
-                const tag_raw = find: {
-                    inline for (@typeInfo(TAG_TYPE).@"enum".fields) |e_field| {
-                        if (std.mem.eql(u8, u_field.name, e_field.name)) {
-                            break :find e_field.value;
+        pub const SERIAL_INFO = struct {
+            pub fn custom_serialize_routine(comptime builder: *SerialRoutineBuilder, comptime curr_native_offset: usize, comptime OVERRIDE_INT_PACKING: ?IntPacking, comptime OVERRIDE_ENDIAN: ?Endian) void {
+                const tag_native_offset = curr_native_offset + TAG_OFFSET;
+                const union_native_offset = curr_native_offset + UNION_OFFSET;
+                comptime var union_builder = builder.start_union_routine_builder(tag_native_offset, TAG_TYPE, FIELD_COUNT, .USE_TARGET_ENDIAN, .LITTLE_ENDIAN);
+                inline for (@typeInfo(UNION).@"union".fields) |u_field| {
+                    const tag_raw = find: {
+                        inline for (@typeInfo(TAG_TYPE).@"enum".fields) |e_field| {
+                            if (std.mem.eql(u8, u_field.name, e_field.name)) {
+                                break :find e_field.value;
+                            }
                         }
-                    }
-                    unreachable;
-                };
-                const tag_val: TAG = @enumFromInt(tag_raw);
-                const tag_size = @sizeOf(TAG);
-                const tag_bytes: [*]const u8 = @ptrCast(&tag_val);
-                union_builder.add_type(builder, tag_bytes[0..tag_size], union_native_offset, u_field.type, SETTINGS);
+                        unreachable;
+                    };
+                    const tag_val: TAG = @enumFromInt(tag_raw);
+                    const tag_size = @sizeOf(TAG);
+                    const tag_bytes: [*]const u8 = @ptrCast(&tag_val);
+                    union_builder.add_type(builder, tag_bytes[0..tag_size], union_native_offset, u_field.type, OVERRIDE_INT_PACKING, OVERRIDE_ENDIAN);
+                }
+                union_builder.end_union_builder(builder);
             }
-            union_builder.end_union_builder(builder);
-        }
+        };
     };
 }
 

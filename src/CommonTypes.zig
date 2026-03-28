@@ -120,6 +120,11 @@ pub fn PossibleErrorBuilderFromMode(comptime ERRORS_MODE: ErrorBehavior) type {
     return PossibleErrorBuilder(comptime ERRORS_MODE.does_error());
 }
 
+pub const DebugMode = enum(u8) {
+    NO_DEBUG,
+    ASSERT_DEBUG,
+};
+
 /// TODO documentation
 pub const AssertBehavior = enum {
     /// TODO documentation
@@ -363,9 +368,13 @@ pub const Alignment = enum(u64) {
 };
 
 pub const Endian = enum(u8) {
+    /// The smallest (least significant) bytes are at the beginning of
+    /// the memory offset, then increase in significance
     LITTLE_ENDIAN = 0,
+    /// The largest (most significant) bytes are at the beginning of
+    /// the memory offset, then decrease in significance
     BIG_ENDIAN = 1,
-
+    /// The native endian-ness of the current target. This is usually LITTLE_ENDIAN
     pub const NATIVE = if (build.cpu.arch.endian() == .little) Endian.LITTLE_ENDIAN else Endian.BIG_ENDIAN;
     pub fn to_zig(self: Endian) std.builtin.Endian {
         return switch (self) {

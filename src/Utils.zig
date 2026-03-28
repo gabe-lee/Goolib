@@ -1749,3 +1749,10 @@ pub fn object_equals(a: anytype, b: @TypeOf(a)) bool {
         else => return a == b,
     }
 }
+
+pub fn comptime_print_log(comptime fmt_string: []const u8, args: anytype) void {
+    @compileLog(std.fmt.comptimePrint(fmt_string, args));
+}
+pub fn comptime_print_err(comptime fmt_string: []const u8, args: anytype) void {
+    @compileError(std.fmt.comptimePrint(fmt_string, args));
+}

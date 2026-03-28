@@ -53,6 +53,15 @@ pub inline fn print_header(comptime BEFORE: []const u8, comptime tag: []const u8
     return BEFORE ++ timing ++ tag ++ "[" ++ loc_prefix ++ link ++ loc_func ++ "]" ++ newline ++ log ++ AFTER ++ "\n";
 }
 
+pub inline fn print_header_no_special(comptime tag: []const u8, comptime in_comptime: bool, comptime src_loc: ?SourceLocation, comptime log: []const u8) []const u8 {
+    @setEvalBranchQuota(5000);
+    const timing = if (in_comptime) "COMPTIME " else "RUNTIME ";
+    const loc_prefix = if (src_loc) |s| "Zig => " ++ s.module ++ " => " else "";
+    const loc_func = if (src_loc) |s| s.fn_name ++ "(...)" else "";
+    const link = if (src_loc) |s| s.file ++ ":" ++ std.fmt.comptimePrint("{d}", .{s.line}) ++ ":" ++ std.fmt.comptimePrint("{d}", .{s.column}) ++ " => " else "";
+    return timing ++ tag ++ "[" ++ loc_prefix ++ link ++ loc_func ++ "]" ++ " " ++ log;
+}
+
 pub inline fn err_header(comptime in_comptime: bool, comptime src_loc: ?SourceLocation, comptime log: []const u8) []const u8 {
     return print_header(ANSI.FG_RED, "ERROR: ", in_comptime, src_loc, log, ANSI.RESET);
 }
@@ -63,6 +72,16 @@ pub inline fn warn_header(comptime in_comptime: bool, comptime src_loc: ?SourceL
 
 pub inline fn info_header(comptime in_comptime: bool, comptime src_loc: ?SourceLocation, comptime log: []const u8) []const u8 {
     return print_header("", "INFO: ", in_comptime, src_loc, log, "");
+}
+
+pub inline fn comptime_err_header(comptime in_comptime: bool, comptime src_loc: ?SourceLocation, comptime log: []const u8) []const u8 {
+    return print_header_no_special("ERROR: ", in_comptime, src_loc, log);
+}
+pub inline fn comptime_warn_header(comptime in_comptime: bool, comptime src_loc: ?SourceLocation, comptime log: []const u8) []const u8 {
+    return print_header_no_special("WARN: ", in_comptime, src_loc, log);
+}
+pub inline fn comptime_info_header(comptime in_comptime: bool, comptime src_loc: ?SourceLocation, comptime log: []const u8) []const u8 {
+    return print_header_no_special("INFO: ", in_comptime, src_loc, log);
 }
 
 pub inline fn assert_with_reason(condition: bool, comptime src_loc: ?SourceLocation, reason_fmt: []const u8, reason_args: anytype) void {
@@ -98,7 +117,7 @@ pub inline fn warn_with_reason(condition: bool, comptime src_loc: ?SourceLocatio
     if (in_comptime or build.mode == .Debug or build.mode == .ReleaseSafe) {
         if (!condition) {
             if (in_comptime) {
-                std.debug.print(std.fmt.comptimePrint(warn_header(in_comptime, src_loc, reason_fmt), reason_args));
+                @compileLog(std.fmt.comptimePrint(comptime_warn_header(in_comptime, src_loc, reason_fmt), reason_args));
             } else {
                 std.debug.print(warn_header(in_comptime, src_loc, reason_fmt), reason_args);
             }
@@ -108,7 +127,7 @@ pub inline fn warn_with_reason(condition: bool, comptime src_loc: ?SourceLocatio
 pub inline fn warn_with_reason_always(condition: bool, comptime src_loc: ?SourceLocation, reason_fmt: []const u8, reason_args: anytype) void {
     if (!condition) {
         if (@inComptime()) {
-            std.debug.print(std.fmt.comptimePrint(warn_header(true, src_loc, reason_fmt), reason_args));
+            @compileLog(std.fmt.comptimePrint(comptime_warn_header(true, src_loc, reason_fmt), reason_args));
         } else {
             std.debug.print(warn_header(false, src_loc, reason_fmt), reason_args);
         }
@@ -118,7 +137,7 @@ pub inline fn warn_with_reason_always(condition: bool, comptime src_loc: ?Source
 pub inline fn warn_unconditional(comptime src_loc: ?SourceLocation, reason_fmt: []const u8, reason_args: anytype) void {
     if (@inComptime() or build.mode == .Debug or build.mode == .ReleaseSafe) {
         if (@inComptime()) {
-            std.debug.print(std.fmt.comptimePrint(warn_header(true, src_loc, reason_fmt), reason_args));
+            @compileLog(std.fmt.comptimePrint(comptime_warn_header(true, src_loc, reason_fmt), reason_args));
         } else {
             std.debug.print(warn_header(false, src_loc, reason_fmt), reason_args);
         }
@@ -127,7 +146,7 @@ pub inline fn warn_unconditional(comptime src_loc: ?SourceLocation, reason_fmt: 
 
 pub inline fn warn_unconditional_always(comptime src_loc: ?SourceLocation, reason_fmt: []const u8, reason_args: anytype) void {
     if (@inComptime()) {
-        std.debug.print(std.fmt.comptimePrint(warn_header(true, src_loc, reason_fmt), reason_args));
+        @compileLog(std.fmt.comptimePrint(comptime_warn_header(true, src_loc, reason_fmt), reason_args));
     } else {
         std.debug.print(warn_header(false, src_loc, reason_fmt), reason_args);
     }
