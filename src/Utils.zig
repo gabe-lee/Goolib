@@ -46,6 +46,7 @@ pub const _Fuzzer = @import("./Utils_Fuzz.zig");
 pub const Alloc = @import("./Utils_Allocator.zig");
 pub const File = @import("./Utils_File.zig");
 pub const EnumeratedDefs = @import("./Utils_EnumeratedDefs.zig");
+pub const Mem = @import("./Utils_Mem.zig");
 
 pub inline fn inline_swap(comptime T: type, a: *T, b: *T, temp: *T) void {
     temp.* = a.*;
@@ -1304,6 +1305,7 @@ test mem_remove_sparse_by_filter_func {
     }
 }
 
+//DEPRECATE
 pub fn mem_realloc(comptime T: type, comptime I: type, ptr: *[*]T, len: I, cap: *I, new_cap: I, alloc: Allocator, comptime RET_BOOL: bool) if (RET_BOOL) bool else void {
     assert_with_reason(Types.type_is_unsigned_int(I), @src(), "type `I` was not an unsigned integer type, got {s}", .{@typeName(I)});
     const old_slice = ptr.*[0..cap.*];

@@ -54,6 +54,10 @@ const bit_cast = Root.Cast.bit_cast;
 const read_int = std.mem.readInt;
 const DEBUG = std.debug.print;
 const DEBUG_CT = Utils.comptime_debug_print;
+const reverse_slice = Utils.Mem.reverse_slice;
+const reverse_array = Utils.Mem.reverse_array;
+const array_or_slice_equal = Utils.Mem.array_or_slice_equal;
+const ptr_as_bytes = Utils.Mem.ptr_as_bytes;
 
 pub const NATIVE_ENDIAN = Endian.NATIVE;
 
@@ -79,8 +83,14 @@ pub const IntegerPacking = enum(u8) {
     USE_VARINTS,
 };
 
+/// This is only needed when using integers packed as VarInts,
+/// as it signals that signed integers to use zig-zag encoding
+/// in addition to the varint encoding
 pub const IntegerSign = enum(u8) {
+    /// Integer is unsigned. This is only needed when using Integers packed as VarInts
     UNSIGNED,
+    /// Integer is signed. This is only needed when using Integers packed as VarInts,
+    /// as it causes signed integers to use zig-zag encoding
     SIGNED,
 };
 
@@ -118,15 +128,17 @@ pub const SerialReadError = error{
     /// The serial routine version recorded in the serialized
     /// data does not match the one expected by the serial routine.
     ///
-    /// You may need to use a different serial routine
-    serial_version_mismatch,
-    /// The serial routine hash recorded in the serial data
-    /// did not match the one expected by the serial routine.
+    /// The version recorded in the serial stream is lower than the one expected;
     ///
-    /// If the version DOES match and this does not, it usually indicates
-    /// that you changed the native object to be serialized without incrementing
-    /// the version counter associated with it.
-    serial_routine_hash_mismatch,
+    /// You may need to use a different serial routine
+    serial_version_mismatch_lower,
+    /// The serial routine version recorded in the serialized
+    /// data does not match the one expected by the serial routine.
+    ///
+    /// The version recorded in the serial stream is higher than the one expected;
+    ///
+    /// You may need to use a different serial routine
+    serial_version_mismatch_higher,
     /// If the serial stream indicates a VarInt integer, but the native size
     /// is not 2, 4, 8, or 16 it is an error
     varint_unsupported_target_native_size,
@@ -135,7 +147,10 @@ pub const SerialReadError = error{
     varint_overlong_encoding,
 };
 
-const SerialKind = enum(u8) { SLICE, READER_WRITER };
+const SerialKind = enum(u8) {
+    SLICE,
+    READER_WRITER,
+};
 
 const SerialSource = union {
     slice: []const u8,
@@ -1179,14 +1194,6 @@ pub const SerialSettings = struct {
     /// increase this version number by 1 and retain the old routine
     /// (and probbably the old object too) in your code somewhere.
     ROUTINE_VERSION: ?u32 = null,
-    /// If true, also include a 64-bit (8-byte) hash after the 'version'. This is not
-    /// a hash of the actual serial data, but a hash of the object type and compiled routine
-    ///
-    /// This is usually not needed, but can be an additional validation check if there are errors
-    /// occuring even when the version matches. If any part of the object type to serialize or the
-    /// compiled routine mismatches the hash in the serial data, it indicates that there is
-    /// a definite disparity between the code writing the serial data and the code reading it.
-    INCLUDE_ROUTINE_HASH_WITH_VERSION: bool = false,
 };
 
 pub const SerialRoutineBuilder = struct {
@@ -1195,7 +1202,6 @@ pub const SerialRoutineBuilder = struct {
     target_endian: Endian = .LITTLE_ENDIAN,
     magic_id: ?[]const u8 = null,
     routine_version: ?u32 = null,
-    routine_hash: ?Hash = null,
     ops: []DataOp = &.{},
     skip_ahead_stack: []usize = &.{},
     add_debug_info: bool = false,
@@ -1230,7 +1236,6 @@ pub const SerialRoutineBuilder = struct {
         self.debug_target_printed = false;
         self.max_union_depth = 0;
         self.curr_union_depth = 0;
-        self.routine_hash = null;
         self.routine_version = null;
         self.add_debug_info = false;
         self.target_endian = .LITTLE_ENDIAN;
@@ -1303,6 +1308,8 @@ pub const SerialRoutineBuilder = struct {
         self.integer_packing = SETTINGS.INTEGER_BYTE_PACKING;
         self.target_endian = SETTINGS.TARGET_ENDIAN;
         self.add_debug_info = SETTINGS.ADD_ROUTINE_DEBUG_INFO;
+        self.magic_id = SETTINGS.MAGIC_IDENTIFIER;
+        self.routine_version = SETTINGS.ROUTINE_VERSION;
         self.add_type(0, TYPE, null, null);
     }
 
@@ -1315,7 +1322,7 @@ pub const SerialRoutineBuilder = struct {
             }
         }
         const OPS_CONST = OPS;
-        return define_serial_routine(self.ops_len, OPS_CONST, self.root_type.?, self.integer_packing, self.target_endian);
+        return define_serial_routine(self.ops_len, OPS_CONST, self.root_type.?, self.integer_packing, self.target_endian, self.routine_version, self.magic_id);
     }
 
     pub fn build_and_finalize_serial_routine_for_type(comptime self: *SerialRoutineBuilder, comptime TYPE: type, comptime SETTINGS: SerialSettings) type {
@@ -1334,13 +1341,11 @@ pub const SerialRoutineBuilder = struct {
         self.d_assert_with_reason(self.debug_stack_len + n <= self.debug_stack.len, @src(), "ran out of space for debug info. Need at least {d} bytes (possibly more), have {d}. provide a larger buffer", .{ self.debug_stack_len + n, self.debug_stack.len });
     }
 
-    pub fn add_integer_bytes(comptime self: *SerialRoutineBuilder, comptime curr_native_offset: usize, comptime KIND: Types.Kind, comptime BYTE_LEN: usize, comptime INT_SIGN: IntegerSign, comptime UNION_TAG: SaveTagMode, comptime OVERRIDE_PACKING: ?IntegerPacking, comptime OVERRIDE_ENDIAN: ?Endian) void {
+    pub fn add_integer_bytes(comptime self: *SerialRoutineBuilder, comptime curr_native_offset: usize, comptime BYTE_LEN: usize, comptime INT_SIGN: IntegerSign, comptime UNION_TAG: SaveTagMode, comptime OVERRIDE_PACKING: ?IntegerPacking, comptime OVERRIDE_ENDIAN: ?Endian) void {
         assert_with_reason(BYTE_LEN > 0, @src(), "cannot add a data type to serialze that has zero size", .{});
         assert_with_reason(BYTE_LEN <= 8129, @src(), "integers can never be larger than 8129 bytes long (65536 bits, 8KiB), got byte len {d}", .{BYTE_LEN});
         const MODE = if (OVERRIDE_PACKING) |OVERRIDE| OVERRIDE else self.integer_packing;
         const ENDIAN = if (OVERRIDE_ENDIAN) |END| END else self.target_endian;
-        // TODO HASH INTEGER TYPE FROM INPUTS
-        _ = KIND;
         with_new_mode: switch (MODE) {
             .USE_TARGET_ENDIAN => {
                 self.ensure_space_for_n_more_ops(1);
@@ -1397,7 +1402,6 @@ pub const SerialRoutineBuilder = struct {
         const ENDIAN = if (OVERRIDE_ENDIAN) |END| END else self.target_endian;
         self.ensure_space_for_n_more_ops(1);
         const SWAP = NATIVE_ENDIAN != ENDIAN;
-        // TODO HASH FLOAT TYPE FROM INPUTS
         const native_to_serial_delta: i32 = if (self.curr_serial_offset >= curr_native_offset) num_cast(self.curr_serial_offset - curr_native_offset, i32) else -num_cast(curr_native_offset - self.curr_serial_offset, i32);
         if (SWAP and BYTE_LEN > 1) {
             self.ops[self.ops_len] = .mem_move_swap(native_to_serial_delta, @intCast(BYTE_LEN));
@@ -1432,7 +1436,7 @@ pub const SerialRoutineBuilder = struct {
         self.ops_len += 1;
         const is_signed = Types.type_is_signed_int(std.meta.Tag(TAG_TYPE));
         const SIGN = if (is_signed) IntegerSign.SIGNED else IntegerSign.UNSIGNED;
-        self.add_integer_bytes(tag_native_offset, .ENUM, UTAG_SIZE, SIGN, .IS_A_UNION_TAG, OVERRIDE_INT_PACKING_FOR_TAG, OVERRIDE_ENDIAN_FOR_TAG);
+        self.add_integer_bytes(tag_native_offset, UTAG_SIZE, SIGN, .IS_A_UNION_TAG, OVERRIDE_INT_PACKING_FOR_TAG, OVERRIDE_ENDIAN_FOR_TAG);
         const meta_slots: []DataOp, const meta_root: usize = self.add_union_meta_slots(META_SLOT_COUNT);
         comptime var tag_to_routine_offset: usize = META_SLOT_COUNT;
         comptime var tag_to_routine_idx: usize = 0;
@@ -1479,7 +1483,7 @@ pub const SerialRoutineBuilder = struct {
                 }
                 const is_signed = INFO != .BOOL and if (INFO == .INT) Types.type_is_signed_int(TYPE) else Types.type_is_signed_int(std.meta.Tag(TYPE));
                 const SIGN = if (is_signed) IntegerSign.SIGNED else IntegerSign.UNSIGNED;
-                self.add_integer_bytes(curr_native_offset, INFO.kind(), @sizeOf(TYPE), SIGN, .NOT_A_UNION_TAG, OVERRIDE_INT_PACKING, OVERRIDE_ENDIAN);
+                self.add_integer_bytes(curr_native_offset, @sizeOf(TYPE), SIGN, .NOT_A_UNION_TAG, OVERRIDE_INT_PACKING, OVERRIDE_ENDIAN);
                 if (self.add_debug_info) {
                     self.print_debug_target(@src());
                     const NAME = @typeName(TYPE);
@@ -1594,32 +1598,174 @@ const TEST_SER_MODE = enum(u8) {
     }
 };
 
+pub const VersionMatch = enum(u8) {
+    MATCH,
+    SERIAL_VERSION_LOWER,
+    SERIAL_VERSION_HIGHER,
+};
+
 /// USE WITH CAUTION! This performs NO safety checking/validation and assumes the routine is well-formed
 ///
 /// The normal, safe way to get a concrete serial routine is to use a `SerialRoutineBuilder` and use one of the `finalize()` funcs on it.
-pub fn define_serial_routine(comptime TOTAL_OPS_: usize, comptime ROUTINE_: [TOTAL_OPS_]DataOp, comptime TYPE_: type, comptime INT_PACKING_: IntegerPacking, comptime TARGET_ENDIAN_: Endian) type {
+pub fn define_serial_routine(comptime TOTAL_OPS_: usize, comptime ROUTINE_: [TOTAL_OPS_]DataOp, comptime TYPE_: type, comptime INT_PACKING_: IntegerPacking, comptime TARGET_ENDIAN_: Endian, comptime VERSION_: ?u32, comptime MAGIC_: ?[]const u8) type {
     return struct {
         pub const TOTAL_OPS = TOTAL_OPS_;
         pub const TYPE = TYPE_;
         pub const TARGET_ENDIAN = TARGET_ENDIAN_;
         pub const INT_PACKING = INT_PACKING_;
         pub const ROUTINE = ROUTINE_;
+        pub const VERSION = VERSION_;
+        pub const ID_LEN = if (MAGIC_) |ID| ID.len else 0;
+        pub const MAGIC_ID: ?[ID_LEN]u8 = build: {
+            if (MAGIC_ == null) break :build null;
+            var id: [ID_LEN]u8 = undefined;
+            @memcpy(id[0..], MAGIC_.?);
+            break :build id;
+        };
+        pub const DATA_START = ID_LEN + (if (VERSION != null) 4 else 0);
+        pub const VER_START = (if (MAGIC_ID) |ID| ID.len else 0);
+
+        pub fn id_matches_slice(serial_slice: []const u8) SerialReadError!bool {
+            if (MAGIC_ID) |ID| {
+                if (serial_slice.len < ID.len) return SerialReadError.serial_source_ran_out_of_data;
+                return array_or_slice_equal(ID, serial_slice[0..ID.len]);
+            } else {
+                return true;
+            }
+        }
+        pub fn version_matches_slice(serial_slice: []const u8) SerialReadError!VersionMatch {
+            if (VERSION) |VER| {
+                const ver_from_serial = try get_version_from_slice(serial_slice);
+                if (VER == ver_from_serial) {
+                    return VersionMatch.MATCH;
+                } else if (ver_from_serial < VER) {
+                    return VersionMatch.SERIAL_VERSION_LOWER;
+                } else {
+                    return VersionMatch.SERIAL_VERSION_HIGHER;
+                }
+            } else {
+                return VersionMatch.MATCH;
+            }
+        }
+        /// Returns `0` if the routine has no version
+        pub fn get_version_from_slice(serial_slice: []const u8) SerialReadError!u32 {
+            if (VERSION != null) {
+                if (serial_slice.len < VER_START + 4) return SerialReadError.serial_source_ran_out_of_data;
+                var ver_from_serial: u32 = undefined;
+                var ver_bytes = ptr_as_bytes(&ver_from_serial);
+                @memcpy(ver_bytes[0..4], serial_slice[VER_START .. VER_START + 4]);
+                if (NATIVE_ENDIAN != .LITTLE_ENDIAN) {
+                    reverse_array(ver_bytes);
+                }
+                return ver_from_serial;
+            }
+            return 0;
+        }
+        /// Returns `0` if the routine has no version
+        ///
+        /// Routine must have NO magic identifier, or You MUST have called `get_id_from_reader`
+        /// FIRST before calling this, even if you do not use the id value
+        pub fn get_version_from_reader(reader: *std.Io.Reader) SerialReadError!u32 {
+            if (VERSION != null) {
+                const bytes: [DATA_START]u8 = undefined;
+                reader.readSliceAll(bytes[VER_START..DATA_START]) catch |err| switch (err) {
+                    .ReadFailed => return SerialReadError.unknown_read_error,
+                    .EndOfStream => return SerialReadError.serial_source_ran_out_of_data,
+                };
+                return get_version_from_slice(bytes);
+            }
+            return 0;
+        }
+
+        /// Returns `[0]u8{}` if the routine has no id
+        pub fn get_id_from_slice(serial_slice: []const u8) SerialReadError![ID_LEN]u8 {
+            if (MAGIC_ID != null) {
+                if (serial_slice.len < ID_LEN) return SerialReadError.serial_source_ran_out_of_data;
+                var id: [ID_LEN]u8 = undefined;
+                @memcpy(id[0..ID_LEN], serial_slice[0..ID_LEN]);
+                return id;
+            }
+            return .{};
+        }
+
+        /// Returns `[0]u8{}` if the routine has no id
+        ///
+        /// You MUST call this before calling `get_version_from_reader`,
+        /// even if you do not need to use the value
+        pub fn get_id_from_reader(reader: *std.Io.Reader) SerialReadError![ID_LEN]u8 {
+            if (MAGIC_ID != null) {
+                var id: [ID_LEN]u8 = undefined;
+                reader.readSliceAll(id[0..ID_LEN]) catch |err| switch (err) {
+                    .ReadFailed => return SerialReadError.unknown_read_error,
+                    .EndOfStream => return SerialReadError.serial_source_ran_out_of_data,
+                };
+                return id;
+            }
+            return .{};
+        }
 
         pub fn serialize_to_slice(val_ptr: *const TYPE, serial_slice: []u8) SerialWriteError!usize {
             const native: []u8 = @alignCast(@constCast(std.mem.asBytes(val_ptr)));
-            return serial_internal(TOTAL_OPS, ROUTINE[0..TOTAL_OPS], .NATIVE_TO_SERIAL, .SLICE, native, SerialDest{ .slice = serial_slice }, .NO_DEBUG);
+            if (MAGIC_ID) |ID| {
+                @memcpy(serial_slice[0..ID.len], ID[0..]);
+            }
+            if (VERSION) |VER| {
+                var ver_to_serial: u32 = VER;
+                var ver_bytes = ptr_as_bytes(&ver_to_serial);
+                if (NATIVE_ENDIAN != .LITTLE_ENDIAN) {
+                    reverse_array(ver_bytes);
+                }
+                @memcpy(serial_slice[VER_START .. VER_START + 4], ver_bytes[0..4]);
+            }
+            return DATA_START + try serial_internal(TOTAL_OPS, ROUTINE[0..TOTAL_OPS], .NATIVE_TO_SERIAL, .SLICE, native, SerialDest{ .slice = serial_slice[DATA_START..] }, .NO_DEBUG);
         }
         pub fn serialize_to_writer(val_ptr: *const TYPE, writer: *std.Io.Writer) SerialWriteError!usize {
             const native: []u8 = @alignCast(@constCast(std.mem.asBytes(val_ptr)));
-            return serial_internal(TOTAL_OPS, ROUTINE[0..TOTAL_OPS], .NATIVE_TO_SERIAL, .READER_WRITER, native, SerialDest{ .writer = writer }, .NO_DEBUG);
+            if (MAGIC_ID) |ID| {
+                writer.writeAll(ID) catch return SerialWriteError.serial_destination_ran_out_of_space;
+            }
+            if (VERSION) |VER| {
+                var ver_to_serial: u32 = VER;
+                var ver_bytes = ptr_as_bytes(&ver_to_serial);
+                if (NATIVE_ENDIAN != .LITTLE_ENDIAN) {
+                    reverse_array(ver_bytes);
+                }
+                writer.writeAll(ver_bytes[0..4]) catch return SerialWriteError.serial_destination_ran_out_of_space;
+            }
+            return DATA_START + try serial_internal(TOTAL_OPS, ROUTINE[0..TOTAL_OPS], .NATIVE_TO_SERIAL, .READER_WRITER, native, SerialDest{ .writer = writer }, .NO_DEBUG);
         }
         pub fn deserialize_from_slice(serial_data: []const u8, val_ptr: *TYPE) SerialReadError!usize {
             const native: []u8 = @alignCast(std.mem.asBytes(val_ptr));
-            return serial_internal(TOTAL_OPS, ROUTINE[0..TOTAL_OPS], .SERIAL_TO_NATIVE, .SLICE, native, SerialSource{ .slice = serial_data }, .NO_DEBUG);
+            if (!try id_matches_slice(serial_data)) return SerialReadError.magic_identifier_mismatch;
+            switch (try version_matches_slice(serial_data)) {
+                .MATCH => {},
+                .SERIAL_VERSION_HIGHER => return SerialReadError.serial_version_mismatch_higher,
+                .SERIAL_VERSION_LOWER => return SerialReadError.serial_version_mismatch_lower,
+            }
+            return DATA_START + try serial_internal(TOTAL_OPS, ROUTINE[0..TOTAL_OPS], .SERIAL_TO_NATIVE, .SLICE, native, SerialSource{ .slice = serial_data[DATA_START..] }, .NO_DEBUG);
         }
         pub fn deserialize_from_reader(reader: *std.Io.Reader, val_ptr: *TYPE) SerialReadError!usize {
+            var pre_read: [DATA_START]u8 = undefined;
+            if (MAGIC_ID != null) {
+                reader.readSliceAll(pre_read[0..VER_START]) catch |err| switch (err) {
+                    .ReadFailed => return SerialReadError.unknown_read_error,
+                    .EndOfStream => return SerialReadError.serial_source_ran_out_of_data,
+                };
+                if (!(id_matches_slice(pre_read) catch unreachable)) return SerialReadError.magic_identifier_mismatch;
+            }
+            if (VERSION != null) {
+                reader.readSliceAll(pre_read[VER_START..DATA_START]) catch |err| switch (err) {
+                    .ReadFailed => return SerialReadError.unknown_read_error,
+                    .EndOfStream => return SerialReadError.serial_source_ran_out_of_data,
+                };
+                switch (version_matches_slice(pre_read) catch unreachable) {
+                    .MATCH => {},
+                    .SERIAL_VERSION_HIGHER => return SerialReadError.serial_version_mismatch_higher,
+                    .SERIAL_VERSION_LOWER => return SerialReadError.serial_version_mismatch_lower,
+                }
+            }
             const native: []u8 = @alignCast(std.mem.asBytes(val_ptr));
-            return serial_internal(TOTAL_OPS, ROUTINE[0..TOTAL_OPS], .SERIAL_TO_NATIVE, .READER_WRITER, native, SerialSource{ .reader = reader }, .NO_DEBUG);
+            return DATA_START + try serial_internal(TOTAL_OPS, ROUTINE[0..TOTAL_OPS], .SERIAL_TO_NATIVE, .READER_WRITER, native, SerialSource{ .reader = reader }, .NO_DEBUG);
         }
     };
 }
@@ -1670,52 +1816,6 @@ fn do_zigzag_adjustment(comptime NATIVE_SIZE: comptime_int, temp_buffer: *align(
             else => unreachable,
         },
     }
-}
-
-fn test_serial_move_mem_varint(move: MemCopyMove, dynamic_adjust: *isize, op_idx: *usize, serial: []u8, serial_start: usize, native: []u8, native_start: usize, native_end: usize, comptime ZIGZAG: bool, comptime DIR: SER_DIR) void {
-    switch (DIR) {
-        .NATIVE_TO_SERIAL => {
-            const dst = SerialDest{ .slice = serial };
-            const n = dst.write_varint(.SLICE, ZIGZAG, native, native_start, native_end, @intCast(move.copy_len), serial_start) catch |err| assert_unreachable_err(@src(), err);
-            dynamic_adjust.* += num_cast(n, isize);
-        },
-        .SERIAL_TO_NATIVE => {
-            const src = SerialSource{ .slice = serial };
-            const n = src.read_varint(.SLICE, ZIGZAG, native, native_start, native_end, @intCast(move.copy_len), serial_start) catch |err| assert_unreachable_err(@src(), err);
-            dynamic_adjust.* += num_cast(n, isize);
-        },
-    }
-    op_idx.* += 1;
-}
-
-fn test_serial_move_mem(move: MemCopyMove, ser_idx: *isize, op_idx: *usize, serial: []u8, serial_start: usize, serial_end: usize, native: []u8, native_start: usize, native_end: usize, comptime SWAP: bool, comptime DIR: SER_DIR) void {
-    switch (SWAP) {
-        true => {
-            comptime var sidx: usize = num_cast(ser_idx.*, usize);
-            comptime var nidx: usize = native_end;
-            while (sidx < serial_end) : (sidx += 1) {
-                nidx -= 1;
-                switch (DIR) {
-                    .NATIVE_TO_SERIAL => {
-                        serial[sidx] = native[nidx];
-                    },
-                    .SERIAL_TO_NATIVE => {
-                        native[nidx] = serial[sidx];
-                    },
-                }
-            }
-        },
-        false => switch (DIR) {
-            .NATIVE_TO_SERIAL => {
-                @memcpy(serial[serial_start..serial_end], native[native_start..native_end]);
-            },
-            .SERIAL_TO_NATIVE => {
-                @memcpy(native[native_start..native_end], serial[serial_start..serial_end]);
-            },
-        },
-    }
-    ser_idx.* += num_cast(move.copy_len, isize);
-    op_idx.* += 1;
 }
 
 fn more_sig(comptime start: comptime_int, comptime move: comptime_int) comptime_int {
@@ -2161,6 +2261,8 @@ test SerialRoutineBuilder {
             .TARGET_ENDIAN = .BIG_ENDIAN,
             .COMPTIME_EVAL_QUOTA = 50000,
             .ADD_ROUTINE_DEBUG_INFO = false,
+            .MAGIC_IDENTIFIER = "TeSt",
+            .ROUTINE_VERSION = 1,
         };
         builder.build_routine_for_type(TestStruct, settings);
         var test_serial: [1024]u8 = undefined;

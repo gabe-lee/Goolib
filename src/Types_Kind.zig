@@ -340,6 +340,60 @@ pub const KindInfo = union(Kind) {
             else => return false,
         }
     }
+    pub inline fn child_type(comptime K: KindInfo) type {
+        switch (K) {
+            .POINTER => |P| {
+                return P.child;
+            },
+            .ARRAY => |A| {
+                return A.child;
+            },
+            .VECTOR => |V| {
+                return V.child;
+            },
+            .OPTIONAL => |O| {
+                return O.child;
+            },
+            else => assert_unreachable(@src(), "kind `{s}` has no child", .{@tagName(K)}),
+        }
+    }
+    pub inline fn has_impicit_equals(comptime K: KindInfo) bool {
+        return switch (K) {
+            .INT, .ENUM, .FLOAT, .COMPTIME_INT, .COMPTIME_FLOAT, .BOOL => true,
+            else => false,
+        };
+    }
+    /// The type of the element when using index syntax, for example `my_thing[0]`
+    pub inline fn indexed_child_type(comptime K: KindInfo) type {
+        switch (K) {
+            .POINTER => |P| {
+                switch (P.size) {
+                    .one, .c => {
+                        const CHILD_INFO = KindInfo.get_kind_info(P.child);
+                        switch (CHILD_INFO) {
+                            .ARRAY => |A| {
+                                return A.child;
+                            },
+                            .VECTOR => |V| {
+                                return V.child;
+                            },
+                            else => assert_unreachable(@src(), "cannot index into a single-item pointer that does not point to either an array or vector", .{}),
+                        }
+                    },
+                    .slice, .many => {
+                        return P.child;
+                    },
+                }
+            },
+            .ARRAY => |A| {
+                return A.child;
+            },
+            .VECTOR => |V| {
+                return V.child;
+            },
+            else => assert_unreachable(@src(), "kind `{s}` has no child type", .{@tagName(K)}),
+        }
+    }
     pub inline fn child_kind(comptime K: KindInfo) Kind {
         switch (K) {
             .POINTER => |P| {
@@ -420,11 +474,17 @@ pub const KindInfo = union(Kind) {
             else => return false,
         }
     }
+    pub inline fn has_len(comptime K: KindInfo) bool {
+        return K == .ARRAY or K == .VECTOR or (K == .POINTER and (K.POINTER.size == .slice or Kind.get_kind(K.POINTER.child).is_array_or_vector()));
+    }
     pub inline fn has_indexable_child_kind(comptime K: KindInfo, comptime KK: Kind) bool {
         if (K == .POINTER and K.POINTER.size == .one and K.child_kind().is_array_or_vector()) {
             return K.child_kind_info().has_child_kind(KK);
         }
         return K.is_indexable() and K.has_child_kind(KK);
+    }
+    pub inline fn has_indexable_child_that_matches(comptime K: KindInfo, comptime KK: KindInfo) bool {
+        return K.is_indexable() and KK.is_indexable() and K.indexed_child_type() == KK.indexed_child_type();
     }
     pub inline fn assert_has_indexable_child_kind(comptime K: KindInfo, comptime KK: Kind, comptime src: ?std.builtin.SourceLocation) void {
         assert_with_reason(K.has_indexable_child_kind(KK), src, "kind {any} does not have an indexable child kind `{s}`", .{ K, @tagName(KK) });
