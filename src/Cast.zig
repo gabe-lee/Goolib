@@ -26,6 +26,7 @@ const build = @import("builtin");
 const log = std.log;
 const mem = std.mem;
 const Allocator = std.mem.Allocator;
+const math = std.math;
 
 const Root = @import("./_root.zig");
 const Assert = Root.Assert;
@@ -34,6 +35,8 @@ const Utils = Root.Utils;
 const List = Root.IList.List;
 const assert_with_reason = Assert.assert_with_reason;
 const assert_unreachable = Assert.assert_unreachable;
+const Log2Int = math.Log2Int;
+const Log2IntCeil = math.Log2IntCeil;
 
 fn force_bitcast_internal(comptime FROM: type, from: *const FROM, comptime TO: type, comptime ASSERT_SIZE: bool) TO {
     const TO_SIZE = @sizeOf(TO);
@@ -67,6 +70,13 @@ pub inline fn bit_cast(from: anytype, comptime TO: type) TO {
 
 pub fn real_cast(val: anytype) Utils.real_type(@TypeOf(val)) {
     return num_cast(val, Utils.real_type(@TypeOf(val)));
+}
+
+pub fn int_cast_log2(from: anytype, comptime TO: type) Log2Int(TO) {
+    return num_cast(from, Log2Int(TO));
+}
+pub fn int_cast_log2_ceil(from: anytype, comptime TO: type) Log2IntCeil(TO) {
+    return num_cast(from, Log2IntCeil(TO));
 }
 
 pub fn num_cast(from: anytype, comptime TO: type) TO {

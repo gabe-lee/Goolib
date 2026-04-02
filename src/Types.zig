@@ -73,14 +73,19 @@ pub fn SmallestUnsignedIntThatCanHoldValue(comptime V: comptime_int) type {
 }
 
 pub fn UnsignedIntegerWithSameSize(comptime T: type) type {
-    return switch (@sizeOf(T)) {
-        1 => u8,
-        2 => u16,
-        4 => u32,
-        8 => u64,
-        16 => u128,
-        else => assert_unreachable(@src(), "type `{s}` does not have a native matching integer size, its size is `{d}`", .{ @typeName(T), @sizeOf(T) }),
-    };
+    const bytes = @sizeOf(T);
+    const bits: u16 = bytes << 3;
+    const uint = std.meta.Int(.unsigned, bits);
+    assert_with_reason(@sizeOf(uint) == @sizeOf(T), @src(), "type `{s}` does not have a native matching integer size, its size is `{d}`, but converted to an integer is `{d}`", .{ @typeName(T), @sizeOf(T), @sizeOf(uint) });
+    return uint;
+}
+
+pub fn SignedIntegerWithSameSize(comptime T: type) type {
+    const bytes = @sizeOf(T);
+    const bits: u16 = bytes << 3;
+    const int = std.meta.Int(.signed, bits);
+    assert_with_reason(@sizeOf(int) == @sizeOf(T), @src(), "type `{s}` does not have a native matching integer size, its size is `{d}`, but converted to an integer is `{d}`", .{ @typeName(T), @sizeOf(T), @sizeOf(int) });
+    return int;
 }
 
 pub fn intcast(val: anytype, comptime T: type) T {

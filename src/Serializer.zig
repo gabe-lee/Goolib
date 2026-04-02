@@ -31,7 +31,6 @@ const Utils = Root.Utils;
 const Allocator = std.mem.Allocator;
 const AllocInfal = Root.AllocatorInfallible;
 const DummyAllocator = Root.DummyAllocator;
-const Flags = Root.Flags;
 const IList = Root.IList.IList;
 const List = Root.IList_List.List;
 const Range = Root.IList.Range;
@@ -40,6 +39,7 @@ const KindInfo = Types.KindInfo;
 const Kind = Types.Kind;
 const Endian = Root.CommonTypes.Endian;
 const DebugMode = Root.CommonTypes.DebugMode;
+const Flags = Root.Flags.Flags;
 
 const Reader = std.Io.Reader;
 const Writer = std.Io.Writer;
@@ -829,6 +829,8 @@ pub const OpKind = enum(u8) {
     POINTER_ROUTINE_END,
     FULL_CUSTOM_FUNCTION,
 };
+
+pub const OpKind2 = Flags(enum(u8) { MOVE_DATA = 0b00000_001, UNION }, enum(u8) {});
 
 pub const DataOp = union(OpKind) {
     MOVE_DATA_NO_SWAP: MemCopyMove,

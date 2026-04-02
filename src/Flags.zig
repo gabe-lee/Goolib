@@ -31,7 +31,13 @@ const Root = @import("./_root.zig");
 const Utils = Root.Utils;
 const Types = Root.Types;
 const Assert = Root.Assert;
+const MathX = Root.Math;
 const assert_with_reason = Assert.assert_with_reason;
+const Kind = Root.Types.Kind;
+const KindInfo = Root.Types.KindInfo;
+const num_cast = Root.Cast.num_cast;
+const int_cast_log2 = Root.Cast.int_cast_log2;
+const int_cast_log2_ceil = Root.Cast.int_cast_log2_ceil;
 
 pub fn Flags(comptime FLAGS_ENUM: type, comptime GROUPS_ENUM: type) type {
     const INFO_1 = @typeInfo(FLAGS_ENUM);

@@ -35,6 +35,9 @@ const Utils = Root.Utils;
 const assert_with_reason = Assert.assert_with_reason;
 const assert_unreachable = Assert.assert_unreachable;
 const num_cast = Root.Cast.num_cast;
+const bit_cast = Root.Cast.bit_cast;
+pub const UnsignedIntegerWithSameSize = Types.UnsignedIntegerWithSameSize;
+pub const SignedIntegerWithSameSize = Types.SignedIntegerWithSameSize;
 
 const Math = @This();
 
@@ -1791,3 +1794,66 @@ pub const PowerOf2 = enum(u8) {
         }
     }
 };
+
+/// This encoding method maps any value with a bit-pattern that corresponds to a small
+/// signed integer to small unsigned integers
+/// for various data-compression techniques. Examples:
+///   - 0 => 0
+///   - -1 => 1
+///   - 1 => 2
+///   - -2 => 3
+///   - 2 => 4
+///
+/// This is typically intended for signed integer inputs, but any value type is
+/// allowed in case there is a use case where the possible bit patterns map well
+/// to zig-zag values
+pub fn zig_zag_encode(value: anytype) UnsignedIntegerWithSameSize(@TypeOf(value)) {
+    const T = @TypeOf(value);
+    const INT = SignedIntegerWithSameSize(T);
+    const UINT = UnsignedIntegerWithSameSize(T);
+    const SHIFT: math.Log2Int(UINT) = @intCast(@typeInfo(UINT).int.bits - 1);
+    var int: INT = @bitCast(value);
+    int = (int >> SHIFT) ^ (int << 1);
+    return @bitCast(int);
+}
+
+/// This decoding method un-maps small unsigned integers to a bit pattern that
+/// corresponds to a small signed integer,
+/// for various data-compression techniques. Examples:
+///   - 0 => 0
+///   - 1 => -1
+///   - 2 => 1
+///   - 3 => -2
+///   - 4 => 2
+///
+/// This is typically intended for signed integer outputs, but any value type is
+/// allowed in case there is a use case where the possible bit patterns map well
+/// to zig-zag values
+pub fn zig_zag_decode(comptime OUT: type, zig_zag: UnsignedIntegerWithSameSize(OUT)) OUT {
+    const INT = SignedIntegerWithSameSize(OUT);
+    const UINT = UnsignedIntegerWithSameSize(OUT);
+    const uint: UINT = @bitCast(zig_zag);
+    const int: INT = (bit_cast(uint >> 1, INT)) ^ (-bit_cast(uint & 1, INT));
+    return @bitCast(int);
+}
+
+test "zig_zag_encoding" {
+    const Test = Root.Testing;
+    const I_CASES = [_]i32{ 0, -1, -2, 1, 2 };
+    const U_CASES = [_]u32{ 0, 1, 3, 2, 4 };
+    var rand_core = std.Random.DefaultPrng.init(@bitCast(std.time.microTimestamp()));
+    const rand = rand_core.random();
+    const NUM_RAND = 100;
+    for (I_CASES[0..], U_CASES[0..]) |i, u| {
+        const uu = zig_zag_encode(i);
+        try Test.expect_equal(u, "expected_uint", uu, "zig_zag_encode(i)", "fail", .{});
+        const ii = zig_zag_decode(i32, uu);
+        try Test.expect_equal(i, "expected_int", ii, "zig_zag_decode(i32, zig_zag_encode(i))", "fail", .{});
+    }
+    for (0..NUM_RAND) |_| {
+        const i = rand.int(i32);
+        const u = zig_zag_encode(i);
+        const ii = zig_zag_decode(i32, u);
+        try Test.expect_equal(i, "original_int", ii, "zig_zag_decode(i32, zig_zag_encode(original_int))", "fail", .{});
+    }
+}
