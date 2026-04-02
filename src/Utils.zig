@@ -1662,7 +1662,7 @@ pub fn invalid_slice_const(comptime T: type) []const T {
 }
 
 pub fn comptime_debug_print(comptime _fmt: []const u8, args: anytype) void {
-    std.debug.print("{s}", .{std.fmt.comptimePrint(_fmt, args)});
+    @compileLog(std.fmt.comptimePrint(_fmt, args));
 }
 
 pub inline fn dereference_opaque(ptr: *const anyopaque, comptime T: type) T {
