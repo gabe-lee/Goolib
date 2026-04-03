@@ -1752,6 +1752,54 @@ pub fn object_equals(a: anytype, b: @TypeOf(a)) bool {
     }
 }
 
+/// Reports whether calling `object_equals()` on the type is valid
+pub fn has_object_equals(comptime T: type) bool {
+    switch (@typeInfo(T)) {
+        .@"struct" => |info| {
+            if (@hasDecl(T, "equals") and @TypeOf(@field(T, "equals")) == fn (T, T) bool) {
+                return true;
+            }
+            if (info.layout == .@"packed") return true;
+
+            inline for (info.fields) |field_info| {
+                if (!has_object_equals(@FieldType(T, field_info.name))) return false;
+            }
+            return true;
+        },
+        .error_union => |info| {
+            return has_object_equals(info.payload);
+        },
+        .@"union" => |info| {
+            if (@hasDecl(T, "equals") and @FieldType(T, "equals") == fn (T, T) bool) {
+                return true;
+            }
+            if (info.tag_type == null) return false;
+            inline for (info.fields) |field_info| {
+                if (!has_object_equals(@FieldType(T, field_info.name))) return false;
+            }
+        },
+        .array => |info| {
+            return has_object_equals(info.child);
+        },
+        .vector => |info| {
+            return has_object_equals(info.child);
+        },
+        .optional => |info| {
+            return has_object_equals(info.child);
+        },
+        .@"opaque" => {
+            if (@hasDecl(T, "equals") and @FieldType(T, "equals") == fn (T, T) bool) {
+                return true;
+            }
+            return false;
+        },
+        .int, .comptime_int, .float, .comptime_float, .@"enum", .bool, .error_set, .enum_literal, .type, .void, .pointer => {
+            return true;
+        },
+        else => return false,
+    }
+}
+
 pub fn comptime_print_log(comptime fmt_string: []const u8, args: anytype) void {
     @compileLog(std.fmt.comptimePrint(fmt_string, args));
 }
