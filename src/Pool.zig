@@ -53,14 +53,13 @@ pub fn Pool(comptime T: type, comptime T_DEFAULT: T, comptime IDX_TYPE: type, co
         free_count: IDX_TYPE = 0,
         lock: if (NEEDS_LOCK) std.Thread.Mutex else void = if (NEEDS_LOCK) std.Thread.Mutex{} else void{},
 
-        pub const Slot = union {
+        pub const Slot = extern union {
             item: T,
             next_free: IDX_TYPE,
         };
 
         pub const BlockPtr = *[BLOCK_SIZE]Slot;
         pub const Block = [BLOCK_SIZE]Slot;
-        // pub const ITEM_PTR_OFFSET_FROM_SLOT = @offsetOf(Slot, "item");
 
         pub fn init_empty(alloc: Allocator) Self {
             return Self{
@@ -82,6 +81,7 @@ pub fn Pool(comptime T: type, comptime T_DEFAULT: T, comptime IDX_TYPE: type, co
             }
             return self;
         }
+        
 
         pub fn claim(self: *Self) *T {
             if (NEEDS_LOCK) {

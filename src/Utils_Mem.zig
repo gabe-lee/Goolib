@@ -44,6 +44,7 @@ const Kind = Types.Kind;
 const KindInfo = Types.KindInfo;
 
 const NON_SIMD_UNROLL_LEN: comptime_int = 8;
+const USIZE_SIZE: comptime_int = @sizeOf(usize);
 
 /// This should match `std.mem.use_vectors`
 pub const use_vectors = switch (build.zig_backend) {
@@ -277,4 +278,66 @@ pub fn ptr_as_bytes(ptr: anytype) PtrAsBytes(@TypeOf(ptr)) {
             return ptr_adjust[0..size];
         },
     }
+}
+
+// const HAS_MOVEBE = build.cpu.has(.x86, std.Target.x86.Feature.movbe);
+
+// fn movebe()
+
+pub fn memcopy_swap_order(byte_len: anytype, noalias dest: anytype, noalias source: anytype) void {
+    const real_dest = memcopy_get_dest(byte_len, dest, source);
+    reverse_slice(real_dest);
+}
+
+pub fn memcopy_swap_order_int(comptime TYPE: type, noalias dest: *align(@alignOf(TYPE)) [@sizeOf(TYPE)]u8, noalias source: *align(@alignOf(TYPE)) const [@sizeOf(TYPE)]u8) void {
+    @memcpy(dest, source);
+    const UINT_TYPE = Types.UnsignedIntegerWithSameSize(TYPE);
+    const dest_int: *UINT_TYPE = @ptrCast(dest);
+    dest_int.* = @byteSwap(dest_int.*);
+}
+
+fn memcopy_get_dest(byte_len: anytype, noalias dest: anytype, noalias source: anytype) []u8 {
+    const DEST = @TypeOf(dest);
+    const SRC = @TypeOf(source);
+    const DEST_INFO = KindInfo.get_kind_info(DEST);
+    const SRC_INFO = KindInfo.get_kind_info(SRC);
+    const real_dest: []u8 = switch (DEST_INFO) {
+        .POINTER => |POINTER| switch (POINTER.size) {
+            .one, .c, .many => @as([*]u8, @ptrCast(dest))[0..byte_len],
+            .slice => @as([*]u8, @ptrCast(dest.ptr))[0..byte_len],
+        },
+        .OPTIONAL => |OPTIONAL| check_non_null: {
+            assert_with_reason(dest != null, @src(), "cannot copy to a null destination", .{});
+            break :check_non_null switch (KindInfo.get_kind_info(OPTIONAL.child)) {
+                .POINTER => |POINTER| switch (POINTER.size) {
+                    .one, .c, .many => @as([*]u8, @ptrCast(dest.?))[0..byte_len],
+                    .slice => @as([*]u8, @ptrCast(dest.?.ptr))[0..byte_len],
+                },
+                else => assert_unreachable(@src(), "dest must be a pointer type, got type `{s}`", .{@typeName(SRC)}),
+            };
+        },
+        else => assert_unreachable(@src(), "dest must be a pointer type, got type `{s}`", .{@typeName(SRC)}),
+    };
+    const real_src: []const u8 = switch (SRC_INFO) {
+        .POINTER => |POINTER| switch (POINTER.size) {
+            .one, .c, .many => @as([*]u8, @ptrCast(source))[0..byte_len],
+            .slice => @as([*]u8, @ptrCast(source.ptr))[0..byte_len],
+        },
+        .OPTIONAL => |OPTIONAL| check_non_null: {
+            assert_with_reason(source != null, @src(), "cannot copy from a null source", .{});
+            break :check_non_null switch (KindInfo.get_kind_info(OPTIONAL.child)) {
+                .POINTER => |POINTER| switch (POINTER.size) {
+                    .one, .c, .many => @as([*]u8, @ptrCast(source.?))[0..byte_len],
+                    .slice => @as([*]u8, @ptrCast(source.?.ptr))[0..byte_len],
+                },
+                else => assert_unreachable(@src(), "source must be a pointer type, got type `{s}`", .{@typeName(SRC)}),
+            };
+        },
+        else => assert_unreachable(@src(), "source must be a pointer type, got type `{s}`", .{@typeName(SRC)}),
+    };
+    @memcpy(real_dest[0..byte_len], real_src[0..byte_len]);
+}
+
+pub fn memcopy(byte_len: anytype, noalias dest: anytype, noalias source: anytype) void {
+    _ = memcopy_get_dest(byte_len, dest, source);
 }

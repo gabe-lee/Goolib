@@ -88,6 +88,7 @@ pub fn SignedIntegerWithSameSize(comptime T: type) type {
     return int;
 }
 
+// DEPRECATE move to Cast.zig
 pub fn intcast(val: anytype, comptime T: type) T {
     assert_with_reason(type_is_int(T), @src(), "output type T must be an integer type, got type `{s}`", .{@typeName(T)});
     const V = @TypeOf(val);
@@ -104,6 +105,7 @@ pub fn intcast(val: anytype, comptime T: type) T {
     }
 }
 
+// DEPRECATE move to Cast.zig
 pub fn floatcast(val: anytype, comptime T: type) T {
     assert_with_reason(type_is_float(T), @src(), "output type T must be a float type, got type `{s}`", .{@typeName(T)});
     const V = @TypeOf(val);
@@ -120,6 +122,7 @@ pub fn floatcast(val: anytype, comptime T: type) T {
     }
 }
 
+// DEPRECATE move to Cast.zig
 pub fn ptr_cast_const(ptr_or_slice: anytype, comptime new_type: type) *const new_type {
     const PTR = @TypeOf(ptr_or_slice);
     const P_INFO = @typeInfo(PTR);
@@ -131,6 +134,7 @@ pub fn ptr_cast_const(ptr_or_slice: anytype, comptime new_type: type) *const new
     };
 }
 
+// DEPRECATE move to Cast.zig
 pub fn ptr_cast(ptr_or_slice: anytype, comptime new_type: type) *new_type {
     const PTR = @TypeOf(ptr_or_slice);
     const P_INFO = @typeInfo(PTR);
@@ -148,6 +152,7 @@ pub fn ptr_cast(ptr_or_slice: anytype, comptime new_type: type) *new_type {
     };
 }
 
+// DEPRECATE move to Cast.zig
 pub fn slice_cast(ptr_or_slice: anytype, comptime T: type, len: usize) []T {
     const PTR = @TypeOf(ptr_or_slice);
     const P_INFO = @typeInfo(PTR);
@@ -165,6 +170,7 @@ pub fn slice_cast(ptr_or_slice: anytype, comptime T: type, len: usize) []T {
     };
     return ptr[0..len];
 }
+// DEPRECATE move to Cast.zig
 pub fn slice_cast_implicit_len(ptr_or_slice: anytype, comptime T: type) []T {
     const PTR = @TypeOf(ptr_or_slice);
     const P_INFO = @typeInfo(PTR);
@@ -188,7 +194,7 @@ pub fn slice_cast_implicit_len(ptr_or_slice: anytype, comptime T: type) []T {
     const new_len = raw_len / @sizeOf(T);
     return ptr[0..new_len];
 }
-
+// DEPRECATE move to Cast.zig
 pub fn raw_ptr_cast_const(ptr_or_slice: anytype) [*]const u8 {
     const PTR = @TypeOf(ptr_or_slice);
     const P_INFO = @typeInfo(PTR);
@@ -196,7 +202,7 @@ pub fn raw_ptr_cast_const(ptr_or_slice: anytype) [*]const u8 {
     const PTR_INFO = P_INFO.pointer;
     return if (PTR_INFO.size == .slice) @ptrCast(@alignCast(ptr_or_slice.ptr)) else @ptrCast(@alignCast(ptr_or_slice));
 }
-
+// DEPRECATE move to Cast.zig
 pub fn raw_ptr_cast(ptr_or_slice: anytype) [*]u8 {
     const PTR = @TypeOf(ptr_or_slice);
     const P_INFO = @typeInfo(PTR);
@@ -204,7 +210,7 @@ pub fn raw_ptr_cast(ptr_or_slice: anytype) [*]u8 {
     const PTR_INFO = P_INFO.pointer;
     return if (PTR_INFO.size == .slice) @ptrCast(@alignCast(ptr_or_slice.ptr)) else @ptrCast(@alignCast(ptr_or_slice));
 }
-
+// DEPRECATE move to Cast.zig
 pub fn raw_slice_cast_const(slice_or_many_with_sentinel: anytype) []const u8 {
     const SLICE = @TypeOf(slice_or_many_with_sentinel);
     const S_INFO = @typeInfo(SLICE);
@@ -220,7 +226,7 @@ pub fn raw_slice_cast_const(slice_or_many_with_sentinel: anytype) []const u8 {
     const len: usize = slice_or_many_with_sentinel.len * SIZE;
     return ptr[0..len];
 }
-
+// DEPRECATE move to Cast.zig
 pub fn raw_slice_cast(slice_or_many_with_sentinel: anytype) []u8 {
     const SLICE = @TypeOf(slice_or_many_with_sentinel);
     const S_INFO = @typeInfo(SLICE);
@@ -235,6 +241,25 @@ pub fn raw_slice_cast(slice_or_many_with_sentinel: anytype) []u8 {
     const ptr: [*]u8 = @ptrCast(@alignCast(slice_with_len.ptr));
     const len: usize = slice_or_many_with_sentinel.len * SIZE;
     return ptr[0..len];
+}
+pub fn SliceChild(comptime T: type) type {
+    const INFO = KindInfo.get_kind_info(T);
+    switch (INFO) {
+        .POINTER => |POINTER| {
+            const CHILD_INFO = KindInfo.get_kind_info(POINTER.child);
+            if (POINTER.size == .one and CHILD_INFO == .ARRAY) return CHILD_INFO.ARRAY.child;
+            if (POINTER.size == .one and CHILD_INFO == .VECTOR) return CHILD_INFO.VECTOR.child;
+            assert_with_reason(POINTER.size == .many or POINTER.size == .slice, @src(), "type `{s}` is not a slice, many-item-pointer, array, or vector", .{@typeName(T)});
+            return POINTER.child;
+        },
+        .ARRAY => |ARRAY| {
+            return ARRAY.child;
+        },
+        .VECTOR => |VECTOR| {
+            return VECTOR.child;
+        },
+        else => assert_unreachable(@src(), "type `{s}` is not a slice, array, or vector", .{@typeName(T)}),
+    }
 }
 
 pub fn all_enum_values_start_from_zero_with_no_gaps(comptime ENUM: type) bool {

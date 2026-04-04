@@ -91,6 +91,7 @@ pub const Serializer = @import("./Serializer.zig");
 pub const Shape = @import("./Shape.zig");
 pub const SlabBucketAllocator = @import("./SlabBucketAllocator.zig");
 pub const Sort = @import("./Sort.zig");
+pub const Stack = @import("./Stack.zig");
 pub const SweepPruneList = @import("./SweepPruneList.zig");
 // pub const StaticAllocVectorizedStructOfArrays = @import("./StaticAllocVectorizedStructOfArrays.zig");
 // pub const Template = @import("./Template.zig");
@@ -169,6 +170,7 @@ comptime {
         _ = @import("./Shape.zig");
         _ = @import("./SlabBucketAllocator.zig");
         _ = @import("./Sort.zig");
+        _ = @import("./Stack.zig");
         _ = @import("./SweepPruneList.zig");
         // _ = @import("./StaticAllocVectorizedStructOfArrays.zig");
         // _ = @import("./Template.zig");

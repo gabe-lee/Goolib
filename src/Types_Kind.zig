@@ -35,6 +35,7 @@ const BinarySearch = Root.BinarySearch;
 const Assert = Root.Assert;
 const MathX = Root.Math;
 const Utils = Root.Utils;
+const CyclesPossible = Root.CommonTypes.CyclesPossible;
 const assert_with_reason = Assert.assert_with_reason;
 const assert_unreachable = Assert.assert_unreachable;
 

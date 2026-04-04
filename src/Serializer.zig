@@ -44,6 +44,12 @@ const Flags = Root.Flags.Flags;
 const Reader = std.Io.Reader;
 const Writer = std.Io.Writer;
 const Hash = std.hash.XxHash64;
+const PowerOf2 = MathX.PowerOf2;
+const Pool = Root.Pool.Simple.SimplePool;
+const StackStatic = Root.Stack.StackStatic;
+const SliceRangeSmall = Root.CommonTypes.SliceRangeSmall;
+
+const DUMMY_ALLOC = DummyAllocator.allocator_panic_free_noop;
 
 const assert_with_reason = Assert.assert_with_reason;
 const assert_unreachable = Assert.assert_unreachable;
@@ -1263,6 +1269,16 @@ pub const SubRoutineMode = enum(u8) {
     SLICE_POINTER,
 };
 
+const CyclesPossible = enum(u8) {
+    CYCLES_IMPOSSIBLE,
+    CYCLES_POSSIBLE,
+    CYCLES_INFINITE,
+};
+
+const EvalHeirarchyResult = struct {
+    cycles: CyclesPossible = .CYCLES_IMPOSSIBLE,
+};
+
 pub const CustomComptimeBuilderRoutineFunc = fn (comptime self: *SerialRoutineBuilder, comptime curr_native_offset: usize, comptime SETTINGS: SerialFieldSettings) void;
 pub const CustomSerializeDecl = "SERIAL_INFO";
 pub const CustomSerializeSetting = "OBJECT_SETTINGS";
@@ -1474,12 +1490,81 @@ const RefSlice = struct {
     }
 };
 
+
+pub const HeirarchyMember = struct {
+    object_type: type = void,
+    num_siblings: u32 = 0,
+    num_children: u32 = 0,
+    num_branches: u32 = 0,
+    children_range: SliceRangeSmall = .{},
+    self_index: u32 = 0,
+    parent_index: u32 = 0,
+    has_parent: bool = false,
+    at_least_one_branch_is_childless: bool = false,
+    cycles: CyclesPossible = .CYCLES_IMPOSSIBLE,
+};
+
+pub const HeirarchyMemberPool = Pool(HeirarchyMember, u32, HeirarchyMember{}, null, null);
+
+pub const BuilderBufferArraySizes = struct {
+    op_buffer_len: u32 = 512,
+    union_end_buffer_len: u32 = 128,
+    alloc_name_buffer_len: u32 = 512,
+    alloc_name_list_len: u32 = 64,
+    subroutine_stack_len: u32 = 128,
+    heirarchy_pool_len: u32 = 512,
+    heirarchy_stack_len: u32 = 64,
+    cycle_eval_list_len: u32 = 64,
+};
+
+const CycleEval = struct {
+    start_at_heriarchy_index: u32,
+    look_for_type: type,
+};
+
+pub fn BuilderBufferArrays(comptime sizes: BuilderBufferArraySizes) type {
+    return struct {
+        const Self = @This();
+
+        op_buffer_arr: [sizes.op_buffer_len]DataOp = undefined,
+        union_end_buffer_arr: [sizes.union_end_buffer_len]DataOp = undefined,
+        alloc_name_buffer_arr: [sizes.alloc_name_buffer_len]u8 = undefined,
+        alloc_name_list_arr: [sizes.alloc_name_list_len]RefSlice = undefined,
+        subroutine_stack_arr: [sizes.subroutine_stack_len]SubRoutineMode = undefined,
+        heirarchy_pool_arr: [sizes.heirarchy_pool_len]HeirarchyMember = undefined,
+        heirarchy_pool_free_arr: [((sizes.heirarchy_pool_len + PowerOf2.USIZE_BITS_MINUS_ONE) >> PowerOf2.USIZE_BITS_SHIFT)]usize = undefined,
+        heirarchy_stack_arr: [sizes.heirarchy_stack_len]HeirarchyMember = undefined,
+        cycle_eval_list_arr: [sizes.cycle_eval_list_len]CycleEval = undefined,
+
+        pub inline fn new() Self {
+            return Self{};
+        }
+
+        pub inline fn buffers(self: *Self) BuilderBuffers {
+            return BuilderBuffers{
+                .op_buffer = self.op_buffer_arr[0..],
+                .union_end_buffer = self.union_end_buffer_arr[0..],
+                .alloc_name_buffer = self.alloc_name_buffer_arr[0..],
+                .alloc_name_list = self.alloc_name_list_arr[0..],
+                .subroutine_stack = self.subroutine_stack_arr[0..],
+                .heirarchy_pool = self.heirarchy_pool_arr[0..],
+                .heirarchy_stack = self.heirarchy_stack_arr[0..],
+                .cycle_eval_list = self.cycle_eval_list_arr[0..],
+            };
+        }
+    };
+}
+
 pub const BuilderBuffers = struct {
     op_buffer: []DataOp,
     union_end_buffer: []usize = &.{},
     alloc_name_buffer: []u8 = &.{},
     alloc_name_list: []RefSlice = &.{},
     subroutine_stack: []SubRoutineMode = &.{},
+    heirarchy_pool: []HeirarchyMember = &.{},
+    heirarchy_pool_free: []usize = &.{},
+    heirarchy_stack: []HeirarchyMember = &.{},
+    cycle_eval_list: []CycleEval = &.{},
 };
 
 const DEFAULT_ALLOC_NAME = "_DEFAULT_ALLOC_";
@@ -1492,6 +1577,7 @@ pub const SerialRoutineBuilder = struct {
         .allocator_name = DEFAULT_ALLOC_NAME,
         .custom_routine = .NO_CUSTOM_ROUTINE,
         .pointer_mode = .DISALLOW_POINTERS,
+        .usize_compat = .USIZE_ALWAYS_VARINT,
     },
     alloc_name_buffer: []u8 = &.{},
     alloc_name_buffer_len: usize = 0,
@@ -1499,24 +1585,22 @@ pub const SerialRoutineBuilder = struct {
     alloc_name_list_len: usize = 0,
     magic_id: ?[]const u8 = null,
     routine_version: ?u32 = null,
-    ops: []DataOp = &.{},
-    subroutines: []SubRoutineMode = &.{},
-    subroutines_len: usize = 0,
-    skip_ahead_stack: []usize = &.{},
+    ops: StackStatic(DataOp) = .{},
+    subroutines: StackStatic(SubRoutineMode) = .{},
+    heirarchy_pool: HeirarchyMemberPool = .{},
+    heirarchy_stack: StackStatic(u32) = .{},
+    skip_ahead_stack: StackStatic(usize) = .{},
+    cycle_check: StackStatic(CycleEval) = .{},
     add_debug_info: bool = false,
-    debug_stack: []u8 = &.{},
-    debug_stack_len: usize = 0,
-    debug_target: ?usize = null,
-    debug_target_printed: bool = false,
     current_varint_g_bits: u8 = 0,
     prev_varint_g_header_slot: usize = 0,
-    ops_len: usize = 0,
-    skip_ahead_len: usize = 0,
     curr_serial_offset: usize = 0,
     curr_union_depth: u32 = 0,
     max_union_depth: u32 = 0,
     curr_pointer_depth: u32 = 0,
     max_pointer_depth: u32 = 0,
+    curr_total_depth: u32 = 0,
+    max_total_depth: u32 = 0,
 
     pub fn init(comptime buffers: BuilderBuffers) SerialRoutineBuilder {
         return SerialRoutineBuilder{
@@ -1525,6 +1609,8 @@ pub const SerialRoutineBuilder = struct {
             .alloc_name_buffer = buffers.alloc_name_buffer,
             .alloc_name_list = buffers.alloc_name_list,
             .subroutines = buffers.subroutine_stack,
+            .heirarchy_pool = buffers.heirarchy_buffer,
+            .heirarchy_stack = buffers.heirarchy_stack,
         };
     }
 
@@ -1542,6 +1628,9 @@ pub const SerialRoutineBuilder = struct {
         self.curr_union_depth = 0;
         self.routine_version = null;
         self.add_debug_info = false;
+        self.subroutines_len = 0;
+        self.heirarchy_buffer_len = 0;
+        self.he = 0;
         assert_with_reason(self.alloc_name_buffer.len >= DEFAULT_ALLOC_NAME.len, @src(), "`alloc_name_buffer` must be at least {d} bytes in size for the default allocator name `{s}`", .{ DEFAULT_ALLOC_NAME.len, DEFAULT_ALLOC_NAME });
         assert_with_reason(self.alloc_name_list.len >= 1, @src(), "`alloc_name_list` must be at least 1 element in size for the default allocator name `{s}`", .{DEFAULT_ALLOC_NAME});
         @memcpy(self.alloc_name_buffer[0..DEFAULT_ALLOC_NAME.len], DEFAULT_ALLOC_NAME);
@@ -1556,6 +1645,7 @@ pub const SerialRoutineBuilder = struct {
         self.default_settings.pointer_mode = .DISALLOW_POINTERS;
         self.default_settings.target_endian = .LITTLE_ENDIAN;
         self.default_settings.integer_packing = .USE_TARGET_ENDIAN;
+        self.default_settings.usize_compat = .USIZE_ALWAYS_VARINT;
     }
 
     fn d_assert_with_reason(comptime self: *SerialRoutineBuilder, condition: bool, comptime src_loc: ?std.builtin.SourceLocation, reason_fmt: []const u8, reason_args: anytype) void {
@@ -1592,6 +1682,7 @@ pub const SerialRoutineBuilder = struct {
         settings.pointer_mode = if (opt_settings.pointer_mode) |ptr_mode| ptr_mode else self.default_settings.pointer_mode;
         settings.allocator_name = if (opt_settings.allocator_name) |alloc| alloc else self.default_settings.allocator_name;
         settings.custom_routine = if (opt_settings.custom_routine) |routine| routine else self.default_settings.custom_routine;
+        settings.usize_compat = if (opt_settings.usize_compat) |compat| compat else self.default_settings.usize_compat;
         return settings;
     }
 
@@ -1680,6 +1771,115 @@ pub const SerialRoutineBuilder = struct {
         self.magic_id = SETTINGS.MAGIC_IDENTIFIER;
         self.routine_version = SETTINGS.ROUTINE_VERSION;
         self.add_type(0, null, null, TYPE);
+    }
+
+    pub fn ensure_space_for_n_more_heirarchy_buf(comptime self: *SerialRoutineBuilder, comptime n: usize) void {
+        assert_with_reason(self.heirarchy_buffer_len + n <= self.heirarchy_pool.len, @src(), "ran out of space in heirarchy buffer. Need at least {d} (possibly more), have {d}. provide a larger buffer", .{ self.heirarchy_buffer_len + n, self.heirarchy_pool.len });
+    }
+
+    pub fn ensure_space_for_n_more_heirarchy_stack(comptime self: *SerialRoutineBuilder, comptime n: usize) void {
+        assert_with_reason(self.heirarchy_stack_len + n <= self.heirarchy_stack.len, @src(), "ran out of space in heirarchy stack. Need at least {d} (possibly more), have {d}. provide a larger buffer", .{ self.heirarchy_stack_len + n, self.heirarchy_stack.len });
+    }
+
+    
+
+    /// This function is primarily for detecting a cyclic pointer reference in an object
+    /// with no branches that can break the cycle (unions/error-unions/optionals/pointers with possibly zero-length)
+    /// 
+    /// It can also be used to create a debug heirarchy map to give better results when debugging a serialization routine
+    pub fn eval_heirarchy(comptime self: *SerialRoutineBuilder, comptime RESULT: *EvalHeirarchyResult, comptime TYPE: type, comptime HAS_PARENT: bool, comptime PARENT_IDX: u32, comptime SELF_IDX: ?u32, comptime NUM_SIBLINGS: u32) void {
+        const INFO = KindInfo.get_kind_info(TYPE);
+        comptime var this_member = if (SELF_IDX) |SIDX| get: {
+            @branchHint(.unlikely);
+            const this_member_ptr: *HeirarchyMember = &self.heirarchy_pool.ptr[SIDX];
+            this_member_ptr.self_index = SIDX;
+            break :get this_member_ptr;
+        } else get: {
+            const this_member_slot = self.heirarchy_pool.claim_one(DUMMY_ALLOC);
+            this_member_slot.ptr.self_index = this_member_slot.idx;
+            break :get this_member_slot.ptr;
+        };
+        this_member.object_type = TYPE;
+        this_member.has_parent = HAS_PARENT;
+        this_member.parent_index = PARENT_IDX;
+        handle_children: switch (INFO) {
+            .STRUCT => |STRUCT| {
+                self.heirarchy_stack.push_to_stack(this_member.self_index, DUMMY_ALLOC);
+                this_member.num_children = @intCast(STRUCT.fields.len);
+                const children_slots = self.heirarchy_pool.claim_range(@intCast(STRUCT.fields.len), DUMMY_ALLOC);
+                this_member.children_range = .new_with_len(children_slots.start_idx, @intCast(this_member.num_children));
+                inline for (STRUCT.fields, 0..) |child_field, child_idx| {
+                    self.eval_heirarchy(RESULT, child_field.type, true, member.self_index, children_slots.start_idx + num_cast(child_idx, u32), member.num_siblings);
+                }
+                // self.heirarchy.
+            },
+            .UNION => |UNION| {
+                this_member.num_children = @intCast(UNION.fields.len);
+                this_member.num_branches = @intCast(UNION.fields.len);
+                const children_slots = self.heirarchy_pool.claim_range(@intCast(UNION.fields.len), DUMMY_ALLOC);
+                inline for (UNION.fields, 0..) |child_field, child_idx| {
+                    const CHILD_INFO = KindInfo.get_kind_info(child_field.type);
+                    switch (CHILD_INFO) {
+                        .OPTIONAL, .VOID, .ERROR_UNION, .INT, .FLOAT, .COMPTIME_INT, .COMPTIME_FLOAT, .ERROR_SET, .NULL, .BOOL, .ENUM, .NO_RETURN => {
+                            this_member.at_least_one_branch_is_childless = true;
+                        },
+                        else => {},
+                    }
+                    self.eval_heirarchy(RESULT, child_field.type, true, member.self_index, children_slots.start_idx + num_cast(child_idx, u32), member.num_siblings);
+                }
+            },
+            .OPTIONAL => |OPTIONAL| {
+                this_member.num_children = 1;
+                this_member.num_branches = 1;
+            },
+            .POINTER => |POINTER| {
+                switch (POINTER.size) {
+                    .one => {
+                        this_member.num_children = 1;
+                    },
+                    .c => {
+                        this_member.num_children = 1;
+                        this_member.num_branches = 1;
+                    },
+                    .many => {
+                        this_member.num_children = 1;
+                        // A zero-length many-item-pointer with a sentinel can be considered a 'branch',
+                        // as it has nothing to follow
+                        this_member.num_branches = if (POINTER.sentinel_ptr == null) 0 else 1;
+                    },
+                    .slice => {
+                        this_member.num_children = 1;
+                        // A zero-length slice can be considered a 'branch',
+                        // as it has nothing to follow
+                        this_member.num_branches = 1; 
+                    },
+                }
+                comptime var stack_idx = self.heirarchy_stack.len;
+                comptime var at_least_one_branch_in_stack: bool = false; 
+                while (stack_idx > 0) {
+                    stack_idx -= 1;
+                    const prev_member_in_stack_idx = self.heirarchy_stack.get_item(stack_idx);
+                    const prev_member_in_stack: *const HeirarchyMember = &self.heirarchy_pool.ptr[prev_member_in_stack_idx];
+                    if (prev_member_in_stack.num_branches > 0) {
+                        at_least_one_branch_in_stack = true;
+                    }
+                    if (prev_member_in_stack.object_type == POINTER.child) {
+                        RESULT.cycles = if (at_least_one_branch_in_stack) .CYCLES_POSSIBLE else .CYCLES_INFINITE;
+                        if (RESULT.cycles == .CYCLES_INFINITE) assert_unreachable(@src(), "serialization routine is guaranteed to cause an infinite loop due to a cyclic pointer reference: `{s}` points back to a `{s}` which has `{s}` as a child in its heirarch with no branches for possible other types or no type", .{@typeName(TYPE), @typeName(POINTER.child), @typeName(TYPE)});
+                        self.cycle_check.push_to_stack(CycleEval{.look_for_type = POINTER.child, .start_at_heriarchy_index = prev_member_in_stack.self_index,}, .{});
+                        break :handle_children;
+                    }
+                }
+                const child_slot = self.heirarchy_pool.claim_one(DUMMY_ALLOC);
+                self.eval_heirarchy(RESULT, POINTER.child, true, this_member.self_index, child_slot.idx, 0);
+            },
+            .ERROR_UNION => |ERROR_UNION| {
+                this_member.num_children = 1;
+                this_member.num_branches = 1;
+            },
+            else => {},
+        }
+        
     }
 
     pub fn finalize_routine_for_current_type(comptime self: SerialRoutineBuilder) type {
@@ -2497,7 +2697,7 @@ fn serial_internal(comptime NUM_OPS: usize, comptime ROUTINE: []const DataOp, co
                 if (DO_DEBUG) {
                     MODE.assert_mode(.NORMAL, .SINGLE_ITEM_POINTER_HEADER, DO_DEBUG, @src());
                 }
-                make_starts_and_ends(serial_idx, @sizeOf(usize), native_to_serial_delta: i32, dynamic_serial_adjustment_stack[curr_dynamic_adjust_len - 1], DEBUG_MODE);
+                // make_starts_and_ends(serial_idx, @sizeOf(usize), native_to_serial_delta: i32, dynamic_serial_adjustment_stack[curr_dynamic_adjust_len - 1], DEBUG_MODE);
                 switch (DIR) {
                     .SERIAL_TO_NATIVE => {
                         const new_loc = allocators[ptr_header.allocator_id].rawAlloc(@intCast(ptr_header.elem_size), .fromByteUnits(@intCast(ptr_header.elem_align)), @returnAddress()) orelse return SerialReadError.allocation_error;

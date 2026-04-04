@@ -28,6 +28,7 @@ const math = std.math;
 const Root = @import("./_root.zig");
 const FlexSlice = Root.FlexSlice.FlexSlice;
 const Assert = Root.Assert;
+const SliceChild = Root.Types.SliceChild;
 
 const assert_unreachable = Assert.assert_unreachable;
 
@@ -119,6 +120,62 @@ pub fn PossibleErrorBuilder(comptime ERRORS: bool) type {
 pub fn PossibleErrorBuilderFromMode(comptime ERRORS_MODE: ErrorBehavior) type {
     return PossibleErrorBuilder(comptime ERRORS_MODE.does_error());
 }
+
+pub const SliceRange = struct {
+    start: usize = 0,
+    end: usize = 0,
+
+    pub inline fn len(self: SliceRange) usize {
+        return self.end - self.start;
+    }
+
+    pub fn new_with_len(start: usize, len_: usize) SliceRange {
+        return SliceRange{ .start = start, .end = start + len_ };
+    }
+    pub fn new_with_end(start: usize, end: usize) SliceRange {
+        return SliceRange{ .start = start, .end = end };
+    }
+
+    pub fn get_slice(self: SliceRange, slice: anytype) []SliceChild(@TypeOf(slice)) {
+        return slice[self.start..self.end];
+    }
+};
+
+pub const SliceRangeSmall = struct {
+    start: u32 = 0,
+    end: u32 = 0,
+
+    pub inline fn len(self: SliceRangeSmall) u32 {
+        return self.end - self.start;
+    }
+
+    pub fn new_with_len(start: u32, len_: u32) SliceRangeSmall {
+        return SliceRangeSmall{ .start = start, .end = start + len_ };
+    }
+    pub fn new_with_end(start: u32, end: u32) SliceRangeSmall {
+        return SliceRangeSmall{ .start = start, .end = end };
+    }
+
+    pub fn get_slice(self: SliceRange, slice: anytype) []SliceChild(@TypeOf(slice)) {
+        return slice[self.start..self.end];
+    }
+};
+
+const CyclesPossible = enum(u8) {
+    CYCLES_IMPOSSIBLE,
+    CYCLES_POSSIBLE,
+    CYCLES_INFINITE,
+};
+
+pub const StaticDynamic = enum(u8) {
+    STATIC,
+    DYNAMIC,
+};
+
+pub const CacheAllocator = enum(u8) {
+    CACHE_ALLOCATOR,
+    PROVIDE_ALLOCATOR_ON_FUNC_CALLS,
+};
 
 pub const DebugMode = enum(u8) {
     NO_DEBUG,

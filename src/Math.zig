@@ -1593,6 +1593,8 @@ pub const PowerOf2 = enum(u8) {
     _,
 
     pub const USIZE_POWER = if (@sizeOf(usize) == 4) PowerOf2._32 else PowerOf2._64;
+    pub const USIZE_BITS = if (@sizeOf(usize) == 4) 32 else 64;
+    pub const USIZE_BITS_MINUS_ONE = USIZE_BITS - 1;
     pub const USIZE_BITS_SHIFT = if (@sizeOf(usize) == 4) 5 else 6;
 
     pub fn align_of_type(comptime T: type) PowerOf2 {

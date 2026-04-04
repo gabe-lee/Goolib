@@ -91,6 +91,30 @@ pub fn SimplePool(comptime T: type, comptime IDX: type, comptime MEMSET_CLAIMED:
             return pool;
         }
 
+        pub fn init_static(main_buffer: []T, free_buffer: []usize, secondary_buffer: if (HAS_SECONDARY) []SECONDARY_LIST.?.elem_type else void) Pool {
+            assert_with_reason(free_buffer.len * @bitSizeOf(usize) >= main_buffer.len, @src(), "free buffer is not large enough for main buffer, free buffer has {d} bits, need {d} bits", .{ free_buffer.len * @bitSizeOf(usize), main_buffer.len });
+            if (HAS_SECONDARY) {
+                assert_with_reason(secondary_buffer.len >= main_buffer.len, @src(), "secondary buffer len ({d}) is smaller than main buffer len ({d})", .{ secondary_buffer.len, main_buffer.len });
+            }
+            return Pool{
+                .ptr = main_buffer.ptr,
+                .cap = @intCast(main_buffer.len),
+                .len = 0,
+                .free_list = .{
+                    .free_bits = .{
+                        .list = .{
+                            .ptr = free_buffer,
+                            .cap = free_buffer.len,
+                            .len = 0,
+                        },
+                        .index_len = 0,
+                    },
+                    .free_count = 0,
+                },
+                .ptr_2 = if (HAS_SECONDARY) secondary_buffer.ptr else void{},
+            };
+        }
+
         pub fn free(self: *Pool, alloc: Allocator) void {
             _ = Utils.Alloc.smart_alloc(alloc, self.ptr[0..self.cap], 0, .{}, .{});
             if (HAS_SECONDARY) {
