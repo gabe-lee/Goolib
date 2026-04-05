@@ -124,12 +124,12 @@ pub const SerialReadError = error{
     allocation_error,
 };
 
-const SerialKind = enum(u8) {
+pub const SerialKind = enum(u8) {
     SLICE,
     READER_WRITER,
 };
 
-const SerialSourceSlice = struct {
+pub const SerialSourceSlice = struct {
     data: []const u8,
     cursor: usize,
 
@@ -153,7 +153,7 @@ const SerialSourceSlice = struct {
         self.cursor += 1;
     }
 };
-const SerialSourceReader = struct {
+pub const SerialSourceReader = struct {
     reader: *std.Io.Reader,
 
     pub fn new(reader: *std.Io.Reader) SerialSourceReader {
@@ -177,9 +177,16 @@ const SerialSourceReader = struct {
     }
 };
 
-const SerialSource = union {
+pub const SerialSource = union {
     slice: *SerialSourceSlice,
     reader: SerialSourceReader,
+
+    pub fn new_from_slice(source_slice: *SerialSourceSlice) SerialSource {
+        return SerialSource{ .slice = source_slice };
+    }
+    pub fn new_from_reader(reader: *std.Io.Reader) SerialSource {
+        return SerialSource{ .reader = SerialSourceReader.new(reader) };
+    }
 
     pub fn read_n_bytes_in_order(self: SerialSource, comptime KIND: SerialKind, n: usize, native_dest: [*]u8) SerialReadError!void {
         switch (KIND) {
@@ -344,7 +351,7 @@ const SerialSource = union {
     }
 };
 
-const SerialDestSlice = struct {
+pub const SerialDestSlice = struct {
     data: []u8,
     cursor: usize,
 
@@ -369,7 +376,7 @@ const SerialDestSlice = struct {
     }
 };
 
-const SerialDestWriter = struct {
+pub const SerialDestWriter = struct {
     writer: *std.Io.Writer,
 
     pub fn new(writer: *std.Io.Writer) SerialDestWriter {
@@ -391,9 +398,16 @@ const SerialDestWriter = struct {
     }
 };
 
-const SerialDest = union {
+pub const SerialDest = union {
     slice: *SerialDestSlice,
     writer: SerialDestWriter,
+
+    pub fn new_from_slice(dest_slice: *SerialDestSlice) SerialDest {
+        return SerialDest{ .slice = dest_slice };
+    }
+    pub fn new_from_writer(writer: *std.Io.Writer) SerialDest {
+        return SerialDest{ .writer = SerialDestWriter.new(writer) };
+    }
 
     pub fn finalize(self: SerialDest, comptime KIND: SerialKind) SerialWriteError!void {
         switch (KIND) {
