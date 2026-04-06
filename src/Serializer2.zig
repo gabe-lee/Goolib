@@ -223,13 +223,9 @@ pub const DataOpKind = enum(u8) {
     UNION_HEADER,
     UNION_TAG_ID,
     // Pointer Control
-    READ_POINTER_OR_ALLOCATE_STATIC_LEN,
-    READ_POINTER_OR_ALLOCATE_DYNAMIC_LEN,
-
-    // SINGLE_ITEM_POINTER_HEADER,
-    // MANY_ITEM_POINTER_HEADER,
-
-    READ_POINTER_LEN,
+    FOLLOW_OR_ALLOCATE_POINTER_STATIC_LEN,
+    FOLLOW_OR_ALLOCATE_POINTER_DYNAMIC_LEN,
+    // Custom
     FULL_CUSTOM_FUNCTION,
 };
 
@@ -239,16 +235,13 @@ pub const DataOp = extern union {
     DATA_TRANSFER: DataTransfer,
     // Subroutines
     SUBROUTINE: SubroutineStart,
-    // Mode control
+    // Unions
     UNION_HEADER: UnionHeader,
     UNION_TAG_ID: UnionTagId,
-    // SUBROUTINE_START,
-    // SINGLE_ITEM_POINTER_HEADER,
-    // MANY_ITEM_POINTER_HEADER,
-    // POINTER_ROUTINE_END,
-    // READ_POINTER_LEN,
-    // START_SUBROUTINE,
-    // FULL_CUSTOM_FUNCTION,
+    // Pointers
+    POINTER: FollowOrAllocatePointer,
+    // Custtom
+    FULL_CUSTOM_FUNCTION: CustomFunctions,
 
     pub fn get_kind(self: DataOp) DataOpKind {
         return self.GENERIC.kind;
@@ -266,7 +259,7 @@ pub const DataOp = extern union {
         return DataOp{ .UNION_HEADER = UnionHeader{ .num_fields = num_fields } };
     }
 
-    pub fn new_union_tag_id(comptime tag_as_u64_le: u64) DataOp {
+    pub fn new_union_tag_id_op(comptime tag_as_u64_le: u64) DataOp {
         return DataOp{ .UNION_TAG_ID = UnionTagId{ .tag_as_u64_le = tag_as_u64_le } };
     }
 
@@ -276,6 +269,18 @@ pub const DataOp = extern union {
             else => assert_unreachable(@src(), "cannot create a `SubroutineStart` op with kind `{s}`", .{@tagName(kind)}),
         }
         return DataOp{ .SUBROUTINE = SubroutineStart{ .subroutine_first_op = subroutine_first_op, .subroutine_num_ops = subroutine_num_ops, .subroutine_static_repeat = subroutine_static_repeat, .kind = kind } };
+    }
+
+    pub fn new_pointer_follow_or_allocate_op(comptime elem_size: u32, comptime elem_align: i32, comptime static_len: u32, comptime kind: DataOpKind) DataOp {
+        switch (kind) {
+            .FOLLOW_OR_ALLOCATE_POINTER_STATIC_LEN, .FOLLOW_OR_ALLOCATE_POINTER_DYNAMIC_LEN => {},
+            else => assert_unreachable(@src(), "cannot create a `FollowOrAllocatePointer` op with kind `{s}`", .{@tagName(kind)}),
+        }
+        return DataOp{ .POINTER = FollowOrAllocatePointer{ .elem_size = elem_size, .elem_align = elem_align, .static_len = static_len, .kind = kind } };
+    }
+
+    pub fn new_custom_functions_op(comptime funcs: *const CustomRuntimeSerializeFuncs) DataOp {
+        return DataOp{ .FULL_CUSTOM_FUNCTION = CustomFunctions{ .funcs = funcs } };
     }
 };
 
@@ -332,6 +337,28 @@ const SubroutineStart = extern struct {
     kind: DataOpKind = .START_SUBROUTINE_NO_REPEAT_CURRENT_REGION,
 };
 
+const FollowOrAllocatePointer = extern struct {
+    elem_size: u32 = 1,
+    elem_align: u32 = 1,
+    static_len: u32 = 1,
+    __padding: [3]u8 = @splat(0),
+    /// The kind tag, used both for determining the union field, and how to handle
+    /// union fields with multiple modes
+    kind: DataOpKind = .FOLLOW_OR_ALLOCATE_POINTER_STATIC_LEN,
+};
+
+const CustomFunctions = extern struct {
+    /// A pair of serialize and deserialize functions
+    /// that are called in place on DataOp bytecode. When
+    /// an object defines these, it must handle ANY AND ALL serialization
+    /// of all children as well.
+    funcs: *const CustomRuntimeSerializeFuncs = undefined,
+    __padding: [15 - @sizeOf(usize)]u8 = @splat(0),
+    /// The kind tag, used both for determining the union field, and how to handle
+    /// union fields with multiple modes
+    kind: DataOpKind = .FULL_CUSTOM_FUNCTION,
+};
+
 const UniqueSerialType = struct {
     object_type: type,
     object_settings: ObjectSerialSettings,
@@ -357,12 +384,36 @@ pub const DataCacheMode = enum(u8) {
     CACHE_LEN,
 };
 
+pub const SubroutineRepeatMode = enum(u8) {
+    STATIC_REPEAT_OR_NO_REPEAT,
+    DYNAMIC_REPEAT,
+};
+
+pub const SubroutineAllocRegionMode = enum(u8) {
+    SAME_MEMORY_REGION,
+    SUB_ALLOCATED_REGION,
+};
+
+pub const PointerLenMode = enum(u8) {
+    STATIC_LEN_POINTER,
+    DYNAMIC_LEN_POINTER,
+};
+
 pub const DataOpManagerLowLevel = struct {
     ops: []DataOp = &.{},
     len: u32 = 0,
 
+    fn assert_ops_space(comptime self: *DataOpManagerLowLevel, comptime n: u32, comptime src: std.builtin.SourceLocation) void {
+        assert_with_reason(self.len + n <= self.ops.len, src, "ran out of space in ops buffer, need at least len {d}, have len {d}, provide a larger `OP_BUFFER_MAX_LEN` during SerialManager initialization", .{ self.len + n, self.ops.len });
+    }
+
+    fn push_op(comptime self: *DataOpManagerLowLevel, comptime op: DataOp) void {
+        self.ops[self.len] = op;
+        self.len += 1;
+    }
+
     pub fn add_transfer_data_op(comptime self: *DataOpManagerLowLevel, comptime native_size: u32, comptime offset_to_next_field: i32, comptime serial_size: u32, comptime TARGET_ENDIAN: Endian, comptime TECH: DataTransferTech, comptime CACHE: DataCacheMode) void {
-        assert_with_reason(self.len < self.ops.len, @src(), "", .{});
+        self.assert_ops_space(1, @src());
         comptime var kind: DataOpKind = if (native_size == 1) DataOpKind.TRANSFER_SAME_ENDIAN else switch (TECH) {
             .TARGET_ENDIAN_SAME_SIZE => switch (TARGET_ENDIAN) {
                 .BIG_ENDIAN => switch (NATIVE_ENDIAN) {
@@ -395,17 +446,73 @@ pub const DataOpManagerLowLevel = struct {
             },
         };
         const op = DataOp.new_transfer_data_op(native_size, offset_to_next_field, serial_size, kind);
-        self.ops[self.len] = op;
-        self.len += 1;
+        self.push_op(op);
     }
 
-    // CHECKPOINT more add op methods and HighLevel version
+    pub fn add_union_header_op(comptime self: *DataOpManagerLowLevel, comptime num_fields: u32) void {
+        self.assert_ops_space(1, @src());
+        const op = DataOp.new_union_header_op(num_fields);
+        self.push_op(op);
+    }
+
+    pub fn add_union_tag_op(comptime self: *DataOpManagerLowLevel, comptime tag_as_u64_le: u64) void {
+        self.assert_ops_space(1, @src());
+        const op = DataOp.new_union_tag_id_op(tag_as_u64_le);
+        self.push_op(op);
+    }
+
+    pub fn add_subroutine_start_op(comptime self: *DataOpManagerLowLevel, comptime subroutine_first_op: u32, comptime subroutine_num_ops: u32, comptime subroutine_static_repeat: u32, comptime REPEAT: SubroutineRepeatMode, comptime REGION: SubroutineAllocRegionMode) void {
+        self.assert_ops_space(1, @src());
+        const kind: DataOpKind = switch (REGION) {
+            .SAME_MEMORY_REGION => switch (REPEAT) {
+                .DYNAMIC_REPEAT => DataOpKind.START_SUBROUTINE_DYNAMIC_REPEAT_ALLOCATED_REGION,
+                .STATIC_REPEAT_OR_NO_REPEAT => if (subroutine_static_repeat <= 1) DataOpKind.START_SUBROUTINE_NO_REPEAT_ALLOCATED_REGION else DataOpKind.START_SUBROUTINE_STATIC_REPEAT_ALLOCATED_REGION,
+            },
+            .SUB_ALLOCATED_REGION => switch (REPEAT) {
+                .DYNAMIC_REPEAT => DataOpKind.START_SUBROUTINE_DYNAMIC_REPEAT_CURRENT_REGION,
+                .STATIC_REPEAT_OR_NO_REPEAT => if (subroutine_static_repeat <= 1) DataOpKind.START_SUBROUTINE_NO_REPEAT_CURRENT_REGION else DataOpKind.START_SUBROUTINE_STATIC_REPEAT_CURRENT_REGION,
+            },
+        };
+        const op = DataOp.new_subroutine_op(subroutine_first_op, subroutine_num_ops, subroutine_static_repeat, kind);
+        self.push_op(op);
+    }
+
+    pub fn add_pointer_follow_or_allocate_op(comptime self: *DataOpManagerLowLevel, comptime elem_size: u32, comptime elem_align: u32, comptime static_len: u32, comptime LEN_MODE: PointerLenMode) void {
+        self.assert_ops_space(1, @src());
+        const kind: DataOpKind = switch (LEN_MODE) {
+            .STATIC_LEN_POINTER => DataOpKind.FOLLOW_OR_ALLOCATE_POINTER_STATIC_LEN,
+            .DYNAMIC_LEN_POINTER => DataOpKind.FOLLOW_OR_ALLOCATE_POINTER_DYNAMIC_LEN,
+        };
+        const op = DataOp.new_pointer_follow_or_allocate_op(elem_size, elem_align, static_len, kind);
+        self.push_op(op);
+    }
+
+    pub fn add_custom_functions_op(comptime self: *DataOpManagerLowLevel, comptime funcs: *const CustomRuntimeSerializeFuncs) void {
+        self.assert_ops_space(1, @src());
+        const op = DataOp.new_custom_functions_op(funcs);
+        self.push_op(op);
+    }
+};
+
+pub const DataOpManagerHighLevel = struct {
+    low_level: DataOpManagerLowLevel,
+
+    fn assert_ops_space(comptime self: *DataOpManagerHighLevel, comptime n: u32, comptime src: std.builtin.SourceLocation) void {
+        self.low_level.assert_ops_space(n, src);
+    }
+
+    fn push_op(comptime self: *DataOpManagerHighLevel, comptime op: DataOp) void {
+        self.low_level.push_op(op);
+    }
+
+    // CHECKPOINT High-level methods for consumers to use to to more conveniently generate ops
 };
 
 const RoutineStackFrame = struct {
     routine_start: u32,
     routine_end: u32,
     routine_idx: u32,
+    routine_repeat_left: u32,
 };
 
 pub const PointerMode = enum(u8) {
