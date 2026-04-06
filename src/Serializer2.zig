@@ -78,16 +78,6 @@ pub const SerialSourceReader = ReadWrite.SerialSourceReader;
 pub const SerialWriteError = ReadWrite.SerialWriteError;
 pub const SerialReadError = ReadWrite.SerialReadError;
 
-fn crude_assert_slice_mem_leayout() void {
-    comptime {
-        const A = []u8;
-        const B = []std.builtin.Type;
-
-        const A_len_off = @offsetOf(A, "len");
-        const A_ptr_off = @offsetOf(A, "ptr");
-    }
-}
-
 pub const IntegerPacking = enum(u8) {
     /// Serialize integers at their native size, and packed
     /// in the target byte order for the serial routine
@@ -135,7 +125,7 @@ pub const CustomSerialRoutineMode = enum(u8) {
 ///
 /// `SETTINGS.CUSTOM_ROUTINE == .NO_CUSTOM_ROUTINE` because that setting has already been evaluated as `.CUSTOM_COMPTIME_OP_LIST`,
 /// and it is overwritten before being passed to this function to prevent an infinite loop or incorrect inheritance by children types
-pub const CustomComptimeRoutineOpsBuilder = fn (comptime SETTINGS: ObjectSerialSettings, comptime OPS_BUFFER: []DataOp, comptime UNIQUE_TYPE_BUFFER: []const UniqueSerialType) u32;
+pub const CustomComptimeRoutineOpsBuilder = fn (comptime SETTINGS: ObjectSerialSettings, comptime OP_MANAGER: *DataOpManagerHighLevel) u32;
 
 /// Param `self` is a pointer to the object to serialize, and `settings` is the intended
 /// serial settings for this 'type + settings' pair
@@ -189,9 +179,8 @@ pub const CustomSerialRoutine = union(CustomSerialRoutineMode) {
 pub const SerialManagerArrayLens = struct {
     UNIQUE_TYPE_BUFFER_MAX_LEN: u32 = 128,
     OP_BUFFER_MAX_LEN: u32 = 1024,
-    // union_end_buffer_len: u32 = 128,
-    // alloc_name_buffer_len: u32 = 512,
-    // alloc_name_list_len: u32 = 64,
+    ALLOC_NAME_BYTES_BUFFER_MAX_LEN: u32 = 512,
+    ALLOC_NAME_LIST_MAX_LEN: u32 = 64,
     // subroutine_stack_len: u32 = 128,
     // heirarchy_pool_len: u32 = 512,
     // heirarchy_stack_len: u32 = 64,
@@ -199,6 +188,8 @@ pub const SerialManagerArrayLens = struct {
 };
 
 pub const DataOpKind = enum(u8) {
+    // Native Address Control
+    ADD_NATIVE_OFFSET,
     // Data Transfer
     TRANSFER_SAME_ENDIAN,
     TRANSFER_SAME_ENDIAN_SAVE_TAG,
@@ -212,6 +203,8 @@ pub const DataOpKind = enum(u8) {
     TRANSFER_VARINT_ZIGZAG,
     TRANSFER_VARINT_ZIGZAG_SAVE_TAG,
     TRANSFER_VARINT_ZIGZAG_SAVE_LEN,
+    // Ref Unique Type Subroutine
+    REF_UNIQUE_TYPE,
     // Subroutines
     START_SUBROUTINE_NO_REPEAT_CURRENT_REGION,
     START_SUBROUTINE_NO_REPEAT_ALLOCATED_REGION,
@@ -230,9 +223,14 @@ pub const DataOpKind = enum(u8) {
 };
 
 pub const DataOp = extern union {
+    // Generic (get kind from ANY payload)
     GENERIC: DataOpGeneric,
+    // Native Address Control
+    ADD_NATIVE_OFFSET: AddNativeOffset,
     // Data Transfer
     DATA_TRANSFER: DataTransfer,
+    // Ref Unique Type for Subroutine
+    REF_UNIQUE_TYPE_SUBRS: RefUniqueTypeSubroutine,
     // Subroutines
     SUBROUTINE: SubroutineStart,
     // Unions
@@ -240,11 +238,15 @@ pub const DataOp = extern union {
     UNION_TAG_ID: UnionTagId,
     // Pointers
     POINTER: FollowOrAllocatePointer,
-    // Custtom
+    // Custom
     FULL_CUSTOM_FUNCTION: CustomFunctions,
 
     pub fn get_kind(self: DataOp) DataOpKind {
         return self.GENERIC.kind;
+    }
+
+    pub fn new_add_native_offset_op(comptime offset: i32) DataOp {
+        return DataOp{ .ADD_NATIVE_OFFSET = AddNativeOffset{ .offset = offset } };
     }
 
     pub fn new_transfer_data_op(comptime native_size: u32, comptime offset_to_next_field: i32, comptime serial_size: u32, comptime kind: DataOpKind) DataOp {
@@ -263,24 +265,28 @@ pub const DataOp = extern union {
         return DataOp{ .UNION_TAG_ID = UnionTagId{ .tag_as_u64_le = tag_as_u64_le } };
     }
 
-    pub fn new_subroutine_op(comptime subroutine_first_op: u32, comptime subroutine_num_ops: i32, comptime subroutine_static_repeat: u32, comptime kind: DataOpKind) DataOp {
+    pub fn new_subroutine_op(comptime subroutine_first_op: u32, comptime subroutine_num_ops: u16, comptime subroutine_static_repeat: u32, comptime offset_to_next_field: i32, comptime kind: DataOpKind) DataOp {
         switch (kind) {
             .START_SUBROUTINE_NO_REPEAT_CURRENT_REGION, .START_SUBROUTINE_NO_REPEAT_ALLOCATED_REGION, .START_SUBROUTINE_STATIC_REPEAT_CURRENT_REGION, .START_SUBROUTINE_DYNAMIC_REPEAT_CURRENT_REGION, .START_SUBROUTINE_STATIC_REPEAT_ALLOCATED_REGION, .START_SUBROUTINE_DYNAMIC_REPEAT_ALLOCATED_REGION => {},
             else => assert_unreachable(@src(), "cannot create a `SubroutineStart` op with kind `{s}`", .{@tagName(kind)}),
         }
-        return DataOp{ .SUBROUTINE = SubroutineStart{ .subroutine_first_op = subroutine_first_op, .subroutine_num_ops = subroutine_num_ops, .subroutine_static_repeat = subroutine_static_repeat, .kind = kind } };
+        return DataOp{ .SUBROUTINE = SubroutineStart{ .subroutine_first_op = subroutine_first_op, .subroutine_num_ops = subroutine_num_ops, .subroutine_static_repeat = subroutine_static_repeat, .offset_to_next_field = offset_to_next_field, .kind = kind } };
     }
 
-    pub fn new_pointer_follow_or_allocate_op(comptime elem_size: u32, comptime elem_align: i32, comptime static_len: u32, comptime kind: DataOpKind) DataOp {
+    pub fn new_ref_unique_subrs_op(comptime unique_type_index: u32, comptime offset_to_next_field: i32) DataOp {
+        return DataOp{ .REF_UNIQUE_TYPE_SUBRS = RefUniqueTypeSubroutine{ .unique_type_index = unique_type_index, .offset_to_next_field = offset_to_next_field } };
+    }
+
+    pub fn new_pointer_follow_or_allocate_op(comptime elem_size: u32, comptime elem_align: u16, comptime static_len: u32, comptime offset_to_next_field: i32, comptime kind: DataOpKind) DataOp {
         switch (kind) {
             .FOLLOW_OR_ALLOCATE_POINTER_STATIC_LEN, .FOLLOW_OR_ALLOCATE_POINTER_DYNAMIC_LEN => {},
             else => assert_unreachable(@src(), "cannot create a `FollowOrAllocatePointer` op with kind `{s}`", .{@tagName(kind)}),
         }
-        return DataOp{ .POINTER = FollowOrAllocatePointer{ .elem_size = elem_size, .elem_align = elem_align, .static_len = static_len, .kind = kind } };
+        return DataOp{ .POINTER = FollowOrAllocatePointer{ .elem_size = elem_size, .elem_align = elem_align, .static_len = static_len, .offset_to_next_field = offset_to_next_field, .kind = kind } };
     }
 
-    pub fn new_custom_functions_op(comptime funcs: *const CustomRuntimeSerializeFuncs) DataOp {
-        return DataOp{ .FULL_CUSTOM_FUNCTION = CustomFunctions{ .funcs = funcs } };
+    pub fn new_custom_functions_op(comptime funcs: *const CustomRuntimeSerializeFuncs, comptime offset_to_next_field: i32) DataOp {
+        return DataOp{ .FULL_CUSTOM_FUNCTION = CustomFunctions{ .funcs = funcs, .offset_to_next_field = offset_to_next_field } };
     }
 };
 
@@ -289,6 +295,14 @@ const DataOpGeneric = extern struct {
     /// The kind tag, used both for determining the union field, and how to handle
     /// union fields with multiple modes
     kind: DataOpKind,
+};
+
+const AddNativeOffset = extern struct {
+    offset: i32 = 0,
+    __padding: [11]u8 = @splat(0),
+    /// The kind tag, used both for determining the union field, and how to handle
+    /// union fields with multiple modes
+    kind: DataOpKind = .ADD_NATIVE_OFFSET,
 };
 
 const DataTransfer = extern struct {
@@ -327,11 +341,28 @@ const UnionTagId = extern struct {
     kind: DataOpKind = .UNION_TAG_ID,
 };
 
+const RefUniqueTypeSubroutine = extern struct {
+    unique_type_index: u32 = 0,
+    offset_to_next_field: i32 = 0,
+    // subroutine_static_repeat: u32 = 1,
+    // intended_kind: DataOpKind = .START_SUBROUTINE_NO_REPEAT_CURRENT_REGION,
+    __padding: [7]u8 = @splat(0),
+    /// The kind tag, used both for determining the union field, and how to handle
+    /// union fields with multiple modes
+    kind: DataOpKind = .REF_UNIQUE_TYPE,
+
+    // fn to_subroutine_start(comptime self: RefUniqueTypeSubroutine, comptime fully_complete_uniques_list: []const UniqueSerialType) DataOp {
+    //     const unique = fully_complete_uniques_list[self.unique_type_index];
+    //     return DataOp.new_subroutine_op(unique.routine_start, unique.routine_end - unique.routine_start, self.subroutine_static_repeat, self.intended_kind);
+    // }
+};
+
 const SubroutineStart = extern struct {
     subroutine_first_op: u32 = 0,
-    subroutine_num_ops: u32 = 0,
     subroutine_static_repeat: u32 = 1,
-    __padding: [3]u8 = @splat(0),
+    offset_to_next_field: i32 = 0,
+    subroutine_num_ops: u16 = 0,
+    __padding: [1]u8 = @splat(0),
     /// The kind tag, used both for determining the union field, and how to handle
     /// union fields with multiple modes
     kind: DataOpKind = .START_SUBROUTINE_NO_REPEAT_CURRENT_REGION,
@@ -339,9 +370,10 @@ const SubroutineStart = extern struct {
 
 const FollowOrAllocatePointer = extern struct {
     elem_size: u32 = 1,
-    elem_align: u32 = 1,
     static_len: u32 = 1,
-    __padding: [3]u8 = @splat(0),
+    offset_to_next_field: i32 = 0,
+    elem_align: u16 = 1,
+    __padding: [1]u8 = @splat(0),
     /// The kind tag, used both for determining the union field, and how to handle
     /// union fields with multiple modes
     kind: DataOpKind = .FOLLOW_OR_ALLOCATE_POINTER_STATIC_LEN,
@@ -353,7 +385,8 @@ const CustomFunctions = extern struct {
     /// an object defines these, it must handle ANY AND ALL serialization
     /// of all children as well.
     funcs: *const CustomRuntimeSerializeFuncs = undefined,
-    __padding: [15 - @sizeOf(usize)]u8 = @splat(0),
+    offset_to_next_field: i32 = 0,
+    __padding: [11 - @sizeOf(usize)]u8 = @splat(0),
     /// The kind tag, used both for determining the union field, and how to handle
     /// union fields with multiple modes
     kind: DataOpKind = .FULL_CUSTOM_FUNCTION,
@@ -365,6 +398,7 @@ const UniqueSerialType = struct {
     routine_start: u32 = 0,
     routine_end: u32 = 0,
     routine_made: bool = false,
+    usage_refs: u32 = 0,
 
     pub fn equals(comptime a: UniqueSerialType, b: UniqueSerialType) bool {
         return a.object_type == b.object_type and a.object_settings.equals(b.object_settings);
@@ -400,8 +434,20 @@ pub const PointerLenMode = enum(u8) {
 };
 
 pub const DataOpManagerLowLevel = struct {
+    current_type: type,
+    current_settings: ObjectSerialSettings,
+    unique_types: []const UniqueSerialType,
     ops: []DataOp = &.{},
     len: u32 = 0,
+
+    fn new(comptime current_type: type, comptime current_settings: ObjectSerialSettings, comptime uniques: []const UniqueSerialType, comptime unused_ops_list: []DataOp) DataOpManagerLowLevel {
+        return DataOpManagerLowLevel{
+            .current_type = current_type,
+            .current_settings = current_settings,
+            .unique_types = uniques,
+            .ops = unused_ops_list,
+        };
+    }
 
     fn assert_ops_space(comptime self: *DataOpManagerLowLevel, comptime n: u32, comptime src: std.builtin.SourceLocation) void {
         assert_with_reason(self.len + n <= self.ops.len, src, "ran out of space in ops buffer, need at least len {d}, have len {d}, provide a larger `OP_BUFFER_MAX_LEN` during SerialManager initialization", .{ self.len + n, self.ops.len });
@@ -410,6 +456,12 @@ pub const DataOpManagerLowLevel = struct {
     fn push_op(comptime self: *DataOpManagerLowLevel, comptime op: DataOp) void {
         self.ops[self.len] = op;
         self.len += 1;
+    }
+
+    pub fn add_add_native_offset_op(comptime self: *DataOpManagerLowLevel, comptime offset: i32) void {
+        self.assert_ops_space(1, @src());
+        const op = DataOp.new_add_native_offset_op(offset);
+        self.push_op(op);
     }
 
     pub fn add_transfer_data_op(comptime self: *DataOpManagerLowLevel, comptime native_size: u32, comptime offset_to_next_field: i32, comptime serial_size: u32, comptime TARGET_ENDIAN: Endian, comptime TECH: DataTransferTech, comptime CACHE: DataCacheMode) void {
@@ -461,7 +513,7 @@ pub const DataOpManagerLowLevel = struct {
         self.push_op(op);
     }
 
-    pub fn add_subroutine_start_op(comptime self: *DataOpManagerLowLevel, comptime subroutine_first_op: u32, comptime subroutine_num_ops: u32, comptime subroutine_static_repeat: u32, comptime REPEAT: SubroutineRepeatMode, comptime REGION: SubroutineAllocRegionMode) void {
+    pub fn add_subroutine_start_op(comptime self: *DataOpManagerLowLevel, comptime subroutine_first_op: u32, comptime subroutine_num_ops: u16, comptime subroutine_static_repeat: u32, comptime offset_to_next_field: i32, comptime REPEAT: SubroutineRepeatMode, comptime REGION: SubroutineAllocRegionMode) void {
         self.assert_ops_space(1, @src());
         const kind: DataOpKind = switch (REGION) {
             .SAME_MEMORY_REGION => switch (REPEAT) {
@@ -473,39 +525,145 @@ pub const DataOpManagerLowLevel = struct {
                 .STATIC_REPEAT_OR_NO_REPEAT => if (subroutine_static_repeat <= 1) DataOpKind.START_SUBROUTINE_NO_REPEAT_CURRENT_REGION else DataOpKind.START_SUBROUTINE_STATIC_REPEAT_CURRENT_REGION,
             },
         };
-        const op = DataOp.new_subroutine_op(subroutine_first_op, subroutine_num_ops, subroutine_static_repeat, kind);
+        const op = DataOp.new_subroutine_op(subroutine_first_op, subroutine_num_ops, subroutine_static_repeat, offset_to_next_field, kind);
         self.push_op(op);
     }
 
-    pub fn add_pointer_follow_or_allocate_op(comptime self: *DataOpManagerLowLevel, comptime elem_size: u32, comptime elem_align: u32, comptime static_len: u32, comptime LEN_MODE: PointerLenMode) void {
+    pub fn add_ref_unique_subroutine_op(comptime self: *DataOpManagerLowLevel, comptime unique_type_idx: u32, comptime offset_to_next_field: i32) void {
+        self.assert_ops_space(1, @src());
+        const op = DataOp.new_ref_unique_subrs_op(unique_type_idx, offset_to_next_field);
+        self.push_op(op);
+    }
+
+    pub fn add_pointer_follow_or_allocate_op(comptime self: *DataOpManagerLowLevel, comptime elem_size: u32, comptime elem_align: u16, comptime static_len: u32, comptime offset_to_next_field: i32, comptime LEN_MODE: PointerLenMode) void {
         self.assert_ops_space(1, @src());
         const kind: DataOpKind = switch (LEN_MODE) {
             .STATIC_LEN_POINTER => DataOpKind.FOLLOW_OR_ALLOCATE_POINTER_STATIC_LEN,
             .DYNAMIC_LEN_POINTER => DataOpKind.FOLLOW_OR_ALLOCATE_POINTER_DYNAMIC_LEN,
         };
-        const op = DataOp.new_pointer_follow_or_allocate_op(elem_size, elem_align, static_len, kind);
+        const op = DataOp.new_pointer_follow_or_allocate_op(elem_size, elem_align, static_len, offset_to_next_field, kind);
         self.push_op(op);
     }
 
-    pub fn add_custom_functions_op(comptime self: *DataOpManagerLowLevel, comptime funcs: *const CustomRuntimeSerializeFuncs) void {
+    pub fn add_custom_functions_op(comptime self: *DataOpManagerLowLevel, comptime funcs: *const CustomRuntimeSerializeFuncs, comptime offset_to_next_field: i32) void {
         self.assert_ops_space(1, @src());
-        const op = DataOp.new_custom_functions_op(funcs);
+        const op = DataOp.new_custom_functions_op(funcs, offset_to_next_field);
         self.push_op(op);
+    }
+
+    // UTILS
+
+    pub fn get_settings_for_sub_type(comptime self: *DataOpManagerLowLevel, comptime SUB_TYPE_FIELD: ?[]const u8, comptime SUB_TYPE: type) ObjectSerialSettings {
+        const FIELD_SETTINGS: ?OptionalObjectSerialSettings = if (SUB_TYPE_FIELD) |FIELD| get_field_settings(self.current_type, FIELD) else null;
+        const OBJECT_SETTINGS: ?OptionalObjectSerialSettings = get_object_settings(SUB_TYPE);
+        const SETTINGS = self.current_settings.combined_with_optional(OBJECT_SETTINGS).combined_with_optional(FIELD_SETTINGS);
+        return SETTINGS;
+    }
+
+    pub fn locate_unique_type_idx(comptime self: *DataOpManagerLowLevel, comptime TYPE: type, comptime SETTINGS: ObjectSerialSettings) u32 {
+        for (self.unique_types, 0..) |unique_type, i| {
+            if (unique_type.object_type == TYPE and unique_type.object_settings.equals(SETTINGS)) return num_cast(i, u32);
+        }
+        assert_unreachable(@src(), "did not find unique object index for 'type + settings' pair.\nThe likely cause is that during the initial evaluation pass a type was saved with a number of unique `ObjectSerialSettings`,\nbut inside a `CUSTOM_COMPTIME_MANAGER_OPS_ROUTINE` provided by the user, the settings provided to locate the unique pair didn't match any recorded pair:\n\nTYPE: {s}\n\nSETTINGS: {any}", .{ @typeName(TYPE), SETTINGS });
+    }
+
+    pub fn get_offset_between_two_fields(comptime self: *DataOpManagerLowLevel, comptime START_FIELD: ?[]const u8, comptime END_FIELD: ?[]const u8) i32 {
+        const start_offset: u32 = if (START_FIELD) |SF| get: {
+            assert_with_reason(@hasField(self.current_type, SF), @src(), "current type `{s}` does not have field `{s}`", .{ @typeName(self.current_type), SF });
+            break :get @offsetOf(self.current_type, SF);
+        } else 0;
+        const end_offset: u32 = if (END_FIELD) |EF| get: {
+            assert_with_reason(@hasField(self.current_type, EF), @src(), "current type `{s}` does not have field `{s}`", .{ @typeName(self.current_type), EF });
+            break :get @offsetOf(self.current_type, EF);
+        } else 0;
+        if (start_offset > end_offset) {
+            return -num_cast(start_offset - end_offset, i32);
+        } else {
+            return num_cast(end_offset - start_offset, i32);
+        }
     }
 };
 
-pub const DataOpManagerHighLevel = struct {
+pub const DataOpManagerStruct = struct {
     low_level: DataOpManagerLowLevel,
+    prev_field: ?[]const u8 = null,
+    next_field: ?[]const u8 = null,
+    cached_tag_field: ?[]const u8 = null,
+    cached_len_field: ?[]const u8 = null,
 
-    fn assert_ops_space(comptime self: *DataOpManagerHighLevel, comptime n: u32, comptime src: std.builtin.SourceLocation) void {
+    fn new(comptime current_type: type, comptime current_settings: ObjectSerialSettings, comptime uniques: []const UniqueSerialType, comptime unused_ops_list: []DataOp) DataOpManagerStruct {
+        return DataOpManagerStruct{
+            .low_level = DataOpManagerLowLevel.new(current_type, current_settings, uniques, unused_ops_list),
+        };
+    }
+
+    fn assert_ops_space(comptime self: *DataOpManagerStruct, comptime n: u32, comptime src: std.builtin.SourceLocation) void {
         self.low_level.assert_ops_space(n, src);
     }
 
-    fn push_op(comptime self: *DataOpManagerHighLevel, comptime op: DataOp) void {
+    fn push_op(comptime self: *DataOpManagerStruct, comptime op: DataOp) void {
         self.low_level.push_op(op);
     }
 
-    // CHECKPOINT High-level methods for consumers to use to to more conveniently generate ops
+    pub fn add_normal_routine_for_field(comptime self: *DataOpManagerStruct, FIELD: []const u8, comptime NEXT_FIELD: ?[]const u8) void {
+        assert_with_reason(@hasField(self.low_level.current_type, FIELD), @src(), "struct `{s}` does not have field `{s}`", .{ @typeName(self.low_level.current_type), FIELD });
+        if (NEXT_FIELD) |NEXT| assert_with_reason(@hasField(self.low_level.current_type, NEXT), @src(), "struct `{s}` does not have NEXT field `{s}`", .{ @typeName(self.low_level.current_type), NEXT });
+        if (self.prev_field != null) assert_with_reason(self.next_field != null and std.mem.eql(u8, self.next_field.?, FIELD), @src(), "the prev field you added indicated the next field to add was `{s}`, but the next field you actually added was `{s}`: routine offsets will be broken", .{ if (self.next_field) |next| next else "<void, end struct>", FIELD });
+        const TYPE = @FieldType(self.low_level.current_type, FIELD);
+        if (self.prev_field == null and @offsetOf(self.low_level.current_type, FIELD) != 0) {
+            self.low_level.add_add_native_offset_op(@offsetOf(self.low_level.current_type, FIELD));
+        }
+        self.prev_field = FIELD;
+        self.next_field = NEXT_FIELD;
+        const offset_to_next_field = self.low_level.get_offset_between_two_fields(FIELD, NEXT_FIELD);
+        const SETTINGS = self.low_level.get_settings_for_sub_type(FIELD, TYPE);
+        const UNIQUE_IDX = self.low_level.locate_unique_type_idx(TYPE, SETTINGS);
+        self.low_level.add_ref_unique_subroutine_op(UNIQUE_IDX, offset_to_next_field);
+    }
+
+    /// This method ignores ALL inherited `integer_packing` and `target_endian` settings, and allows optional cacheing of data and other
+    /// non-standard encodings, such as encoding a float as a varint, and/or encoding an unsigned integer or floats using zig-zag encoding
+    pub fn add_custom_numeric_field_op(comptime self: *DataOpManagerStruct, FIELD: []const u8, comptime NEXT_FIELD: ?[]const u8, comptime TARGET_ENDIAN: Endian, comptime CACHE_DATA: DataCacheMode, comptime TECH: DataTransferTech) void {
+        assert_with_reason(@hasField(self.low_level.current_type, FIELD), @src(), "struct `{s}` does not have field `{s}`", .{ @typeName(self.low_level.current_type), FIELD });
+        if (NEXT_FIELD) |NEXT| assert_with_reason(@hasField(self.low_level.current_type, NEXT), @src(), "struct `{s}` does not have NEXT field `{s}`", .{ @typeName(self.low_level.current_type), NEXT });
+        if (self.prev_field != null) assert_with_reason(self.next_field != null and std.mem.eql(u8, self.next_field.?, FIELD), @src(), "the prev field you added indicated the next field to add was `{s}`, but the next field you actually added was `{s}`: routine offsets will be broken", .{ if (self.next_field) |next| next else "<void, end struct>", FIELD });
+        const TYPE = @FieldType(self.low_level.current_type, FIELD);
+        if (self.prev_field == null and @offsetOf(self.low_level.current_type, FIELD) != 0) {
+            self.low_level.add_add_native_offset_op(@offsetOf(self.low_level.current_type, FIELD));
+        }
+        self.prev_field = FIELD;
+        self.next_field = NEXT_FIELD;
+        switch (CACHE_DATA) {
+            .DONT_CACHE_DATA => {},
+            .CACHE_LEN => {
+                self.cached_len_field = FIELD;
+            },
+            .CACHE_TAG => {
+                self.cached_tag_field = FIELD;
+            },
+        }
+        const offset_to_next_field = self.low_level.get_offset_between_two_fields(FIELD, NEXT_FIELD);
+        const INFO = KindInfo.get_kind_info(TYPE);
+        re_typed: switch (INFO) {
+            .INT => {
+                const SER_SIZE = if (TECH != .TARGET_ENDIAN_SAME_SIZE) 0 else @sizeOf(TYPE);
+                self.low_level.add_transfer_data_op(@sizeOf(TYPE), offset_to_next_field, SER_SIZE, TARGET_ENDIAN, TECH, CACHE_DATA);
+            },
+            .ENUM => |ENUM| {
+                const TAG = ENUM.tag_type;
+                const TAG_INFO = KindInfo.get_kind_info(TAG);
+                continue :re_typed TAG_INFO;
+            },
+            .BOOL => {
+                continue :re_typed KindInfo.get_kind_info(u8);
+            },
+            .FLOAT => {
+                const SER_SIZE = if (TECH != .TARGET_ENDIAN_SAME_SIZE) 0 else @sizeOf(TYPE);
+                self.low_level.add_transfer_data_op(@sizeOf(TYPE), offset_to_next_field, SER_SIZE, TARGET_ENDIAN, TECH, CACHE_DATA);
+            },
+            else => assert_unreachable(@src(), "type kind `{s}` is not eligble for high-level `add_custom_native_numeric_type_data_transfer_op` method", .{@tagName(INFO)}),
+        }
+    }
 };
 
 const RoutineStackFrame = struct {
@@ -596,13 +754,11 @@ pub const DEFAULT_ALLOC_NAME = "_DEFAULT_ALLOC_";
 
 fn eval_provided_types_to_count_and_record_all_unique_types(comptime TYPES_FOR_SERIALIZATION: []const type, comptime DEFAULT_SETTINGS: ObjectSerialSettings, comptime ARRAY_LENS: SerialManagerArrayLens, comptime UNIQUE_TYPE_ARRAY: *[ARRAY_LENS.UNIQUE_TYPE_BUFFER_MAX_LEN]UniqueSerialType, comptime UNIQUE_TYPE_ARRAY_LEN: *u32) void {
     for (TYPES_FOR_SERIALIZATION) |TYPE_TO_SERIALIZE| {
-        eval_one_type_to_count_and_record_all_unique_types(TYPE_TO_SERIALIZE, DEFAULT_SETTINGS, null, ARRAY_LENS, UNIQUE_TYPE_ARRAY, UNIQUE_TYPE_ARRAY_LEN);
+        eval_one_type_to_count_and_record_all_unique_types(TYPE_TO_SERIALIZE, DEFAULT_SETTINGS, null, null, null, ARRAY_LENS, UNIQUE_TYPE_ARRAY, UNIQUE_TYPE_ARRAY_LEN);
     }
 }
 
-fn eval_one_type_to_count_and_record_all_unique_types(comptime TYPE: type, comptime ROOT_SETTINGS: ObjectSerialSettings, comptime SETTINGS_FROM_PARENT: ?OptionalObjectSerialSettings, comptime ARRAY_LENS: SerialManagerArrayLens, comptime UNIQUE_TYPE_ARRAY: *[ARRAY_LENS.UNIQUE_TYPE_BUFFER_MAX_LEN]UniqueSerialType, comptime UNIQUE_TYPE_ARRAY_LEN: *u32) void {
-    const OBJECT_SETTINGS = get_object_settings(TYPE);
-    comptime var SETTINGS = ROOT_SETTINGS.combined_with_optional(OBJECT_SETTINGS).combined_with_optional(SETTINGS_FROM_PARENT);
+fn add_unique_type(comptime TYPE: type, comptime SETTINGS: ObjectSerialSettings, comptime IS_ROOT: bool, comptime ARRAY_LENS: SerialManagerArrayLens, comptime UNIQUE_TYPE_ARRAY: *[ARRAY_LENS.UNIQUE_TYPE_BUFFER_MAX_LEN]UniqueSerialType, comptime UNIQUE_TYPE_ARRAY_LEN: *u32) void {
     for (UNIQUE_TYPE_ARRAY[0..UNIQUE_TYPE_ARRAY_LEN.*]) |TYPE_ALREADY_RECORDED| {
         if (TYPE == TYPE_ALREADY_RECORDED.object_type and SETTINGS.equals(TYPE_ALREADY_RECORDED.object_settings)) return;
     }
@@ -610,27 +766,83 @@ fn eval_one_type_to_count_and_record_all_unique_types(comptime TYPE: type, compt
     UNIQUE_TYPE_ARRAY[UNIQUE_TYPE_ARRAY_LEN.*] = UniqueSerialType{
         .object_type = TYPE,
         .object_settings = SETTINGS,
+        .at_least_usage_ref = IS_ROOT,
     };
     UNIQUE_TYPE_ARRAY_LEN.* += 1;
+}
+
+fn eval_one_type_to_count_and_record_all_unique_types(comptime TYPE: type, comptime ROOT_SETTINGS: ObjectSerialSettings, comptime PARENT_TYPE: ?type, comptime FIELD_ON_PARENT: ?[]const u8, comptime SETTINGS_FROM_PARENT: ?OptionalObjectSerialSettings, comptime ARRAY_LENS: SerialManagerArrayLens, comptime UNIQUE_TYPE_ARRAY: *[ARRAY_LENS.UNIQUE_TYPE_BUFFER_MAX_LEN]UniqueSerialType, comptime UNIQUE_TYPE_ARRAY_LEN: *u32) void {
+    const OBJECT_SETTINGS = get_object_settings(TYPE);
+    const SETTINGS = ROOT_SETTINGS.combined_with_optional(OBJECT_SETTINGS).combined_with_optional(SETTINGS_FROM_PARENT);
     const TYPE_INFO = KindInfo.get_kind_info(TYPE);
+    const IS_ROOT = PARENT_TYPE != null;
+    // if (@sizeOf(TYPE) == 0) return;
+    // if (SETTINGS.CUSTOM_ROUTINE == .CUSTOM_RUNTIME_SERIALIZE) {
+    //     add_unique_type(TYPE, SETTINGS, ARRAY_LENS, UNIQUE_TYPE_ARRAY, UNIQUE_TYPE_ARRAY_LEN);
+    //     return;
+    // }
     switch (TYPE_INFO) {
+        .INT, .FLOAT, .BOOL, .ENUM, .COMPTIME_INT, .COMPTIME_FLOAT, .ERROR_SET, .VOID, .TYPE, .FRAME, .ANYFRAME, .FUNCTION, .NO_RETURN, .UNDEFINED, .ENUM_LITERAL, .NULL, .OPAQUE => {
+            add_unique_type(TYPE, SETTINGS, IS_ROOT, ARRAY_LENS, UNIQUE_TYPE_ARRAY, UNIQUE_TYPE_ARRAY_LEN);
+        },
+        // .COMPTIME_INT, .COMPTIME_FLOAT => {
+        //     add_unique_type(TYPE, SETTINGS, ARRAY_LENS, UNIQUE_TYPE_ARRAY, UNIQUE_TYPE_ARRAY_LEN);
+        //     // assert_unreachable(@src(), "`comptime_int` and `comptime_float` types are not allowed for serialization without a `SETTINGS.CUSTOM_ROUTINE == .CUSTOM_RUNTIME_SERIALIZE`, as they have no fixed size and no runtime memory address", .{});
+        // },
+        .ERROR_UNION => |ERROR_UNION| {
+            // if (SETTINGS.CUSTOM_ROUTINE == .NO_CUSTOM_ROUTINE) {
+            //     assert_unreachable(@src(), "`error` and `error_union` types are not allowed for serialization *WITHOUT A CUSTOM ROUTINE*, because their numeric values are not well-defined (the compiler arbitrarily picks unique integers for each unique error, and code completely unrelated to the serialized types can cause the numeric assignments to change, or the numeric assignments can change from target platform to platform even if the source code is the same)", .{});
+            // }
+            add_unique_type(TYPE, SETTINGS, IS_ROOT, ARRAY_LENS, UNIQUE_TYPE_ARRAY, UNIQUE_TYPE_ARRAY_LEN);
+            eval_one_type_to_count_and_record_all_unique_types(ERROR_UNION.payload, SETTINGS, TYPE, null, null, ARRAY_LENS, UNIQUE_TYPE_ARRAY, UNIQUE_TYPE_ARRAY_LEN);
+        },
+        // .TYPE, .FRAME, .ANYFRAME, .FUNCTION, .NO_RETURN, .UNDEFINED, .ENUM_LITERAL, .NULL => {
+        //     add_unique_type(TYPE, SETTINGS, ARRAY_LENS, UNIQUE_TYPE_ARRAY, UNIQUE_TYPE_ARRAY_LEN);
+        //     // assert_unreachable(@src(), "type kind `{s}` is not allowed for serialization without `SETTINGS.CUSTOM_ROUTINE == .CUSTOM_RUNTIME_SERIALIZE`, because it is either a comptime-only type, or is a value that only has relevance in the specific compiled binary it belongs to", .{@tagName(TYPE_INFO)});
+        // },
+        .POINTER => |POINTER| {
+            // switch (SETTINGS.POINTER_MODE) {
+            //     .FOLLOW_POINTERS => {},
+            //     .IGNORE_POINTERS => {
+            //         return;
+            //     },
+            //     .DISALLOW_POINTERS => {
+            //         assert_unreachable(@src(), "pointers are not allowed at this object heirarchy location per the serial settings inherited (in priority order):\n\t(1) Field settings for `{s}` on parent type `{s}`: {s}\n\t(2) Object settings on pointer: (null, pointers cannot have object settings)\n\t(3) Root settings inherited from heirarchy: {s}", .{ if (FIELD_ON_PARENT) |F| F else "<none>", if (PARENT_TYPE) |P| @typeName(P) else "<no parent>", if (SETTINGS_FROM_PARENT) |S| (if (S.POINTER_MODE) |SP| @tagName(SP) else "null") else "<no setting>", @tagName(ROOT_SETTINGS.POINTER_MODE) });
+            //     },
+            // }
+            add_unique_type(TYPE, SETTINGS, IS_ROOT, ARRAY_LENS, UNIQUE_TYPE_ARRAY, UNIQUE_TYPE_ARRAY_LEN);
+            eval_one_type_to_count_and_record_all_unique_types(POINTER.child, SETTINGS, TYPE, null, null, ARRAY_LENS, UNIQUE_TYPE_ARRAY, UNIQUE_TYPE_ARRAY_LEN);
+        },
         .STRUCT => |STRUCT| {
+            add_unique_type(TYPE, SETTINGS, IS_ROOT, ARRAY_LENS, UNIQUE_TYPE_ARRAY, UNIQUE_TYPE_ARRAY_LEN);
             inline for (STRUCT.fields) |field| {
                 const FIELD_SETTINGS = get_field_settings(TYPE, field.name);
-                eval_one_type_to_count_and_record_all_unique_types(field.type, SETTINGS, FIELD_SETTINGS, ARRAY_LENS, UNIQUE_TYPE_ARRAY, UNIQUE_TYPE_ARRAY_LEN);
+                eval_one_type_to_count_and_record_all_unique_types(field.type, SETTINGS, TYPE, field.name, FIELD_SETTINGS, ARRAY_LENS, UNIQUE_TYPE_ARRAY, UNIQUE_TYPE_ARRAY_LEN);
             }
         },
         .UNION => |UNION| {
+            add_unique_type(TYPE, SETTINGS, IS_ROOT, ARRAY_LENS, UNIQUE_TYPE_ARRAY, UNIQUE_TYPE_ARRAY_LEN);
             inline for (UNION.fields) |field| {
                 const FIELD_SETTINGS = get_field_settings(TYPE, field.name);
-                eval_one_type_to_count_and_record_all_unique_types(field.type, SETTINGS, FIELD_SETTINGS, ARRAY_LENS, UNIQUE_TYPE_ARRAY, UNIQUE_TYPE_ARRAY_LEN);
+                eval_one_type_to_count_and_record_all_unique_types(field.type, SETTINGS, TYPE, field.name, FIELD_SETTINGS, ARRAY_LENS, UNIQUE_TYPE_ARRAY, UNIQUE_TYPE_ARRAY_LEN);
             }
         },
-        else => {},
+        .ARRAY => |ARRAY| {
+            add_unique_type(TYPE, SETTINGS, IS_ROOT, ARRAY_LENS, UNIQUE_TYPE_ARRAY, UNIQUE_TYPE_ARRAY_LEN);
+            eval_one_type_to_count_and_record_all_unique_types(ARRAY.child, SETTINGS, TYPE, null, null, ARRAY_LENS, UNIQUE_TYPE_ARRAY, UNIQUE_TYPE_ARRAY_LEN);
+        },
+        .VECTOR => |VECTOR| {
+            add_unique_type(TYPE, SETTINGS, IS_ROOT, ARRAY_LENS, UNIQUE_TYPE_ARRAY, UNIQUE_TYPE_ARRAY_LEN);
+            eval_one_type_to_count_and_record_all_unique_types(VECTOR.child, SETTINGS, TYPE, null, null, ARRAY_LENS, UNIQUE_TYPE_ARRAY, UNIQUE_TYPE_ARRAY_LEN);
+        },
+        .OPTIONAL => |OPTIONAL| {
+            add_unique_type(TYPE, SETTINGS, IS_ROOT, ARRAY_LENS, UNIQUE_TYPE_ARRAY, UNIQUE_TYPE_ARRAY_LEN);
+            eval_one_type_to_count_and_record_all_unique_types(OPTIONAL.child, SETTINGS, TYPE, null, null, ARRAY_LENS, UNIQUE_TYPE_ARRAY, UNIQUE_TYPE_ARRAY_LEN);
+        },
     }
 }
 
-fn get_object_settings(comptime TYPE: type) ?ObjectSerialSettings {
+fn get_object_settings(comptime TYPE: type) ?OptionalObjectSerialSettings {
     const KIND = Kind.get_kind(TYPE);
     switch (KIND) {
         .STRUCT, .ENUM, .UNION, .OPAQUE => {
@@ -668,12 +880,29 @@ fn get_field_settings(comptime PARENT: type, comptime FIELD_ON_PARENT: []const u
 
 fn build_op_routines_for_all_unique_types(comptime ARRAY_LENS: SerialManagerArrayLens, comptime UNIQUE_TYPE_ARRAY: *[ARRAY_LENS.UNIQUE_TYPE_ARRAY_MAX_LEN]UniqueSerialType, comptime UNIQUE_TYPE_ARRAY_LEN: u32, comptime OP_BUFFER: *[ARRAY_LENS.OP_BUFFER_MAX_LEN]DataOp, comptime OP_BUFFER_LEN: *u32) void {
     for (UNIQUE_TYPE_ARRAY[0..UNIQUE_TYPE_ARRAY_LEN]) |*TYPE_TO_SERIALIZE| {
-        build_op_routine_for_type(TYPE_TO_SERIALIZE, ARRAY_LENS, OP_BUFFER, OP_BUFFER_LEN);
+        build_op_routine_for_type(TYPE_TO_SERIALIZE, ARRAY_LENS, UNIQUE_TYPE_ARRAY, UNIQUE_TYPE_ARRAY_LEN, OP_BUFFER, OP_BUFFER_LEN);
     }
 }
 
-fn build_op_routine_for_type(comptime UNIQUE_TYPE: *UniqueSerialType, comptime ARRAY_LENS: SerialManagerArrayLens, comptime OP_BUFFER: *[ARRAY_LENS.OP_BUFFER_MAX_LEN]DataOp, comptime OP_BUFFER_LEN: *u32) void {
+fn build_op_routine_for_type(comptime UNIQUE_TYPE: *UniqueSerialType, comptime ARRAY_LENS: SerialManagerArrayLens, comptime UNIQUE_TYPE_ARRAY: *[ARRAY_LENS.UNIQUE_TYPE_ARRAY_MAX_LEN]UniqueSerialType, comptime UNIQUE_TYPE_ARRAY_LEN: u32, comptime OP_BUFFER: *[ARRAY_LENS.OP_BUFFER_MAX_LEN]DataOp, comptime OP_BUFFER_LEN: *u32) void {
     if (UNIQUE_TYPE.routine_made) return;
+    UNIQUE_TYPE.routine_made = true;
+    const first_op = OP_BUFFER_LEN.*;
+    comptime var op_manager = DataOpManagerHighLevel.new(UNIQUE_TYPE_ARRAY[0..UNIQUE_TYPE_ARRAY_LEN], OP_BUFFER[first_op..ARRAY_LENS.OP_BUFFER_MAX_LEN]);
+    const CUSTOM_MODE = UNIQUE_TYPE.object_settings.CUSTOM_ROUTINE;
+    const SETTINGS_WITHOUT_CUSTOM = UNIQUE_TYPE.object_settings.with_custom_routine_removed();
+    switch (CUSTOM_MODE) {
+        .CUSTOM_COMPTIME_MANAGER_OPS_ROUTINE => |add_custom_ops| {
+            add_custom_ops(SETTINGS_WITHOUT_CUSTOM, &op_manager);
+        },
+        .CUSTOM_RUNTIME_SERIALIZE => |funcs| {
+            op_manager.low_level.add_custom_functions_op(funcs);
+        },
+        .NO_CUSTOM_ROUTINE => {
+            //FIXME
+        },
+    }
+    //CHECKPOINT
 }
 
 pub fn SerializationManager(comptime TYPES_FOR_SERIALIZATION: []const type, comptime DEFAULT_SERIAL_SETTINGS: ObjectSerialSettings, comptime ARRAY_MAX_LENS: SerialManagerArrayLens) type {
