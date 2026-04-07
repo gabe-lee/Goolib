@@ -214,7 +214,10 @@ pub const DataOpKind = enum(u8) {
     START_SUBROUTINE_DYNAMIC_REPEAT_ALLOCATED_REGION,
     // Union Control
     UNION_HEADER,
-    UNION_TAG_ID,
+    UNION_TAG_ID_ONE_FOLLOWING,
+    UNION_TAG_ID_TWO_FOLLOWING,
+    UNION_TAG_RANGE_ONE_FOLLOWING,
+    UNION_TAG_RANGE_TWO_FOLLOWING,
     // Pointer Control
     FOLLOW_OR_ALLOCATE_POINTER_STATIC_LEN,
     FOLLOW_OR_ALLOCATE_POINTER_DYNAMIC_LEN,
@@ -236,6 +239,7 @@ pub const DataOp = extern union {
     // Unions
     UNION_HEADER: UnionHeader,
     UNION_TAG_ID: UnionTagId,
+    UNION_TAG_RANGE: UnionTagRange,
     // Pointers
     POINTER: FollowOrAllocatePointer,
     // Custom
@@ -261,8 +265,24 @@ pub const DataOp = extern union {
         return DataOp{ .UNION_HEADER = UnionHeader{ .num_fields = num_fields } };
     }
 
-    pub fn new_union_tag_id_op(comptime tag_as_u64_le: u64) DataOp {
-        return DataOp{ .UNION_TAG_ID = UnionTagId{ .tag_as_u64_le = tag_as_u64_le } };
+    pub fn new_union_tag_id_op(comptime tag_as_u64_native_endian: u64, comptime num_following_commands: u8) DataOp {
+        switch (num_following_commands) {
+            1 => return DataOp{ .UNION_TAG_ID = UnionTagId{ .tag_as_u64_le = if (NATIVE_ENDIAN != .LITTLE_ENDIAN) @byteSwap(tag_as_u64_native_endian) else tag_as_u64_native_endian, .kind = .UNION_TAG_ID_ONE_FOLLOWING } },
+            2 => return DataOp{ .UNION_TAG_ID = UnionTagId{ .tag_as_u64_le = if (NATIVE_ENDIAN != .LITTLE_ENDIAN) @byteSwap(tag_as_u64_native_endian) else tag_as_u64_native_endian, .kind = .UNION_TAG_ID_TWO_FOLLOWING } },
+            else => assert_unreachable(@src(), "only union tags with 1 or 2 following commands are supported, got `{d}`", .{num_following_commands}),
+        }
+    }
+
+    pub fn new_union_tag_range_op(comptime tag_min_as_u64_native_endian: u64, comptime tag_max_as_u64_native_endian: u64, comptime num_following_commands) DataOp {
+        var range = UnionTagRange{
+            .max_as_u64_le = if (NATIVE_ENDIAN != .LITTLE_ENDIAN) @byteSwap(tag_max_as_u64_native_endian) else tag_max_as_u64_native_endian,
+        };
+        range.set_min_native_endian(tag_min_as_u64_native_endian);
+        switch (num_following_commands) {
+            1 => DataOp{ .UNION_TAG_RANGE = range, .kind = .UNION_TAG_RANGE_ONE_FOLLOWING },
+            2 => DataOp{ .UNION_TAG_RANGE = range, .kind = .UNION_TAG_RANGE_TWO_FOLLOWING },
+            else => assert_unreachable(@src(), "only union tag ranges with 1 or 2 following commands are supported, got `{d}`", .{num_following_commands}),
+        }
     }
 
     pub fn new_subroutine_op(comptime subroutine_first_op: u32, comptime subroutine_num_ops: u16, comptime subroutine_static_repeat: u32, comptime offset_to_next_field: i32, comptime kind: DataOpKind) DataOp {
@@ -338,7 +358,61 @@ const UnionTagId = extern struct {
     __padding: [7]u8 = @splat(0),
     /// The kind tag, used both for determining the union field, and how to handle
     /// union fields with multiple modes
-    kind: DataOpKind = .UNION_TAG_ID,
+    kind: DataOpKind = .UNION_TAG_ID_ONE_FOLLOWING,
+
+    pub fn tag_matches(self: UnionTagId, value_as_u64_in_native_endian: u64) bool {
+        if (NATIVE_ENDIAN != .LITTLE_ENDIAN) {
+            return self.tag_as_u64_le == @byteSwap(value_as_u64_in_native_endian);
+        } else {
+            return self.tag_as_u64_le == value_as_u64_in_native_endian;
+        }
+    }
+};
+const UnionTagRange = extern struct {
+    /// The union tag max value (inclusive) first bitcast to a u64,
+    /// then swapped to little-endian order, if needed
+    max_as_u64_le: u64 = 0,
+    /// The 4 least significant bytes of the min tag value
+    /// in little-endian order
+    min_as_u64_native_endian_bytes_0_4: u32 = 0,
+    /// The next 2 least significant bytes of the min tag value
+    /// (after `min_as_u64_le_bytes_0_4`) in little-endian order
+    min_as_u64_native_endian_bytes_4_6: u16 = 0,
+    /// the most significant byte of the min tag value
+    min_as_u64_native_endian_byte_6: u8 = 0,
+    /// The kind tag, used both for determining the union field, and how to handle
+    /// union fields with multiple modes
+    kind: DataOpKind = .UNION_TAG_RANGE_ONE_FOLLOWING,
+
+    pub fn tag_matches(self: UnionTagRange, value_as_u64_in_native_endian: u64) bool {
+        const min_le = self.get_min_le();
+        if (NATIVE_ENDIAN != .LITTLE_ENDIAN) {
+            const val_swapped = @byteSwap(value_as_u64_in_native_endian);
+            return min_le <= val_swapped and val_swapped <= self.max_as_u64_le;
+        } else {
+            return min_le <= value_as_u64_in_native_endian and value_as_u64_in_native_endian <= self.max_as_u64_le;
+        }
+    }
+
+    pub fn get_min_le(self: UnionTagRange) u64 {
+        const val: u64 = num_cast(self.min_as_u64_native_endian_bytes_0_4, u64);
+        val |= num_cast(self.min_as_u64_native_endian_bytes_4_6, u64) << 32;
+        val |= num_cast(self.min_as_u64_native_endian_byte_6, u64) << 48;
+        if (NATIVE_ENDIAN != .LITTLE_ENDIAN) {
+            val = @byteSwap(val);
+        }
+        return val;
+    }
+
+    pub fn set_min_native_endian(self: *UnionTagRange, val_in_native_endian: u64) void {
+        assert_with_reason(val_in_native_endian < (1 << 54), @src(), "min value too large ({d}). Unfortunately, due to sizing constraints on the SerialManager DataOp type (each DataOp is exactly 16 bytes, and one byte MUST be reserved for the DataOpKind), the minimum tag value of a UnionTagRange MUST be less than {d}. If your use case doesn't work with this constraint, you must use some other serialization technique (possibly custom runtime serial funcs)", .{ val_in_native_endian, 1 << 54 });
+        const bytes_0_4: u32 = num_cast(val_in_native_endian & 0x00_0000_FFFFFFFF, u32);
+        const bytes_4_6: u16 = num_cast((val_in_native_endian & 0x00_FFFF_00000000) >> 32, u16);
+        const byte_6: u16 = num_cast((val_in_native_endian & 0xFF_0000_00000000) >> 48, u8);
+        self.min_as_u64_native_endian_bytes_0_4 = bytes_0_4;
+        self.min_as_u64_native_endian_bytes_4_6 = bytes_4_6;
+        self.min_as_u64_native_endian_byte_6 = byte_6;
+    }
 };
 
 const RefUniqueTypeSubroutine = extern struct {
@@ -433,8 +507,9 @@ pub const PointerLenMode = enum(u8) {
     DYNAMIC_LEN_POINTER,
 };
 
-pub const DataOpManagerLowLevel = struct {
+pub const DataOpBuilderLowLevel = struct {
     current_type: type,
+    current_kind: Kind,
     current_settings: ObjectSerialSettings,
     unique_types: []const UniqueSerialType,
     used_ops: []const DataOp = &.{},
@@ -443,9 +518,10 @@ pub const DataOpManagerLowLevel = struct {
     len: u32 = 0,
     // subroutine_max_len_to_inline: u8 = 1,
 
-    fn new(comptime current_type: type, comptime current_settings: ObjectSerialSettings, comptime uniques: []const UniqueSerialType, comptime used_ops: []const DataOp, comptime unused_ops: []DataOp) DataOpManagerLowLevel {
-        return DataOpManagerLowLevel{
+    fn new(comptime current_type: type, comptime current_settings: ObjectSerialSettings, comptime uniques: []const UniqueSerialType, comptime used_ops: []const DataOp, comptime unused_ops: []DataOp) DataOpBuilderLowLevel {
+        return DataOpBuilderLowLevel{
             .current_type = current_type,
+            .current_kind = Kind.get_kind(current_type),
             .current_settings = current_settings,
             .unique_types = uniques,
             .ops_offset = num_cast(used_ops.len, u32),
@@ -454,22 +530,22 @@ pub const DataOpManagerLowLevel = struct {
         };
     }
 
-    fn assert_ops_space(comptime self: *DataOpManagerLowLevel, comptime n: u32, comptime src: std.builtin.SourceLocation) void {
+    fn assert_ops_space(comptime self: *DataOpBuilderLowLevel, comptime n: u32, comptime src: std.builtin.SourceLocation) void {
         assert_with_reason(self.len + n <= self.ops.len, src, "ran out of space in ops buffer, need at least len {d}, have len {d}, provide a larger `OP_BUFFER_MAX_LEN` during SerialManager initialization", .{ self.len + n, self.ops.len });
     }
 
-    fn push_op(comptime self: *DataOpManagerLowLevel, comptime op: DataOp) void {
+    fn push_op(comptime self: *DataOpBuilderLowLevel, comptime op: DataOp) void {
         self.ops[self.len] = op;
         self.len += 1;
     }
 
-    pub fn add_add_native_offset_op(comptime self: *DataOpManagerLowLevel, comptime offset: i32) void {
+    pub fn add_add_native_offset_op(comptime self: *DataOpBuilderLowLevel, comptime offset: i32) void {
         self.assert_ops_space(1, @src());
         const op = DataOp.new_add_native_offset_op(offset);
         self.push_op(op);
     }
 
-    pub fn add_transfer_data_op(comptime self: *DataOpManagerLowLevel, comptime native_size: u32, comptime offset_to_next_field: i32, comptime serial_size: u32, comptime TARGET_ENDIAN: Endian, comptime TECH: DataTransferTech, comptime CACHE: DataCacheMode) void {
+    pub fn add_transfer_data_op(comptime self: *DataOpBuilderLowLevel, comptime native_size: u32, comptime offset_to_next_field: i32, comptime serial_size: u32, comptime TARGET_ENDIAN: Endian, comptime TECH: DataTransferTech, comptime CACHE: DataCacheMode) void {
         self.assert_ops_space(1, @src());
         comptime var kind: DataOpKind = if (native_size == 1) DataOpKind.TRANSFER_SAME_ENDIAN else switch (TECH) {
             .TARGET_ENDIAN_SAME_SIZE => switch (TARGET_ENDIAN) {
@@ -506,19 +582,25 @@ pub const DataOpManagerLowLevel = struct {
         self.push_op(op);
     }
 
-    pub fn add_union_header_op(comptime self: *DataOpManagerLowLevel, comptime num_fields: u32) void {
+    pub fn add_union_header_op(comptime self: *DataOpBuilderLowLevel, comptime num_fields: u32) void {
         self.assert_ops_space(1, @src());
         const op = DataOp.new_union_header_op(num_fields);
         self.push_op(op);
     }
 
-    pub fn add_union_tag_op(comptime self: *DataOpManagerLowLevel, comptime tag_as_u64_le: u64) void {
+    pub fn add_union_tag_op(comptime self: *DataOpBuilderLowLevel, comptime tag_as_u64_native_endian: u64, comptime num_following_ops: u32) void {
         self.assert_ops_space(1, @src());
-        const op = DataOp.new_union_tag_id_op(tag_as_u64_le);
+        const op = DataOp.new_union_tag_id_op(tag_as_u64_native_endian, num_following_ops);
         self.push_op(op);
     }
 
-    pub fn add_subroutine_start_op(comptime self: *DataOpManagerLowLevel, comptime subroutine_first_op: u32, comptime subroutine_num_ops: u16, comptime subroutine_static_repeat: u32, comptime offset_to_next_field: i32, comptime REPEAT: SubroutineRepeatMode, comptime REGION: SubroutineAllocRegionMode) void {
+    pub fn add_union_range_op(comptime self: *DataOpBuilderLowLevel, comptime min_as_u64_native_endian: u64, comptime max_as_u64_native_endian: u64, comptime num_following_ops: u32) void {
+        self.assert_ops_space(1, @src());
+        const op = DataOp.new_union_tag_range_op(min_as_u64_native_endian, max_as_u64_native_endian, num_following_ops);
+        self.push_op(op);
+    }
+
+    pub fn add_subroutine_start_op(comptime self: *DataOpBuilderLowLevel, comptime subroutine_first_op: u32, comptime subroutine_num_ops: u16, comptime subroutine_static_repeat: u32, comptime offset_to_next_field: i32, comptime REPEAT: SubroutineRepeatMode, comptime REGION: SubroutineAllocRegionMode) void {
         self.assert_ops_space(1, @src());
         const kind: DataOpKind = switch (REGION) {
             .SAME_MEMORY_REGION => switch (REPEAT) {
@@ -534,7 +616,7 @@ pub const DataOpManagerLowLevel = struct {
         self.push_op(op);
     }
 
-    pub fn add_inline_subroutine_start_op(comptime self: *DataOpManagerLowLevel, comptime subroutine_num_ops: u16, comptime subroutine_static_repeat: u32, comptime offset_to_next_field: i32, comptime REPEAT: SubroutineRepeatMode, comptime REGION: SubroutineAllocRegionMode) void {
+    pub fn add_inline_subroutine_start_op(comptime self: *DataOpBuilderLowLevel, comptime subroutine_num_ops: u16, comptime subroutine_static_repeat: u32, comptime offset_to_next_field: i32, comptime REPEAT: SubroutineRepeatMode, comptime REGION: SubroutineAllocRegionMode) void {
         self.assert_ops_space(1, @src());
         const kind: DataOpKind = switch (REGION) {
             .SAME_MEMORY_REGION => switch (REPEAT) {
@@ -551,7 +633,7 @@ pub const DataOpManagerLowLevel = struct {
         self.push_op(op);
     }
 
-    pub fn add_ref_unique_type_op(comptime self: *DataOpManagerLowLevel, comptime unique_type_idx: u32, comptime offset_to_next_field: i32) void {
+    pub fn add_ref_unique_type_op(comptime self: *DataOpBuilderLowLevel, comptime unique_type_idx: u32, comptime offset_to_next_field: i32) void {
         // VERIFY I might be able to inline referenced ops if they are already defined?
         // const unique = self.unique_types[unique_type_idx];
         // if (unique.routine_made and (unique.routine_end - unique.routine_start < self.subroutine_max_len_to_inline)) {
@@ -567,7 +649,7 @@ pub const DataOpManagerLowLevel = struct {
         self.push_op(op);
     }
 
-    pub fn add_pointer_follow_or_allocate_op(comptime self: *DataOpManagerLowLevel, comptime elem_size: u32, comptime elem_align: u16, comptime static_len: u32, comptime offset_to_next_field: i32, comptime LEN_MODE: PointerLenMode) void {
+    pub fn add_pointer_follow_or_allocate_op(comptime self: *DataOpBuilderLowLevel, comptime elem_size: u32, comptime elem_align: u16, comptime static_len: u32, comptime offset_to_next_field: i32, comptime LEN_MODE: PointerLenMode) void {
         self.assert_ops_space(1, @src());
         const kind: DataOpKind = switch (LEN_MODE) {
             .STATIC_LEN_POINTER => DataOpKind.FOLLOW_OR_ALLOCATE_POINTER_STATIC_LEN,
@@ -577,7 +659,7 @@ pub const DataOpManagerLowLevel = struct {
         self.push_op(op);
     }
 
-    pub fn add_custom_functions_op(comptime self: *DataOpManagerLowLevel, comptime funcs: *const CustomRuntimeSerializeFuncs, comptime offset_to_next_field: i32) void {
+    pub fn add_custom_functions_op(comptime self: *DataOpBuilderLowLevel, comptime funcs: *const CustomRuntimeSerializeFuncs, comptime offset_to_next_field: i32) void {
         self.assert_ops_space(1, @src());
         const op = DataOp.new_custom_functions_op(funcs, offset_to_next_field);
         self.push_op(op);
@@ -585,21 +667,14 @@ pub const DataOpManagerLowLevel = struct {
 
     // UTILS
 
-    pub fn get_settings_for_sub_type(comptime self: *DataOpManagerLowLevel, comptime SUB_TYPE_FIELD: ?[]const u8, comptime SUB_TYPE: type) ObjectSerialSettings {
-        const FIELD_SETTINGS: ?OptionalObjectSerialSettings = if (SUB_TYPE_FIELD) |FIELD| get_field_settings(self.current_type, FIELD) else null;
-        const OBJECT_SETTINGS: ?OptionalObjectSerialSettings = get_object_settings(SUB_TYPE);
-        const SETTINGS = self.current_settings.combined_with_optional(OBJECT_SETTINGS).combined_with_optional(FIELD_SETTINGS);
-        return SETTINGS;
-    }
-
-    pub fn locate_unique_type_idx(comptime self: *DataOpManagerLowLevel, comptime TYPE: type, comptime SETTINGS: ObjectSerialSettings) u32 {
+    pub fn locate_unique_type_idx(comptime self: *DataOpBuilderLowLevel, comptime TYPE: type, comptime SETTINGS: ObjectSerialSettings) u32 {
         for (self.unique_types, 0..) |unique_type, i| {
             if (unique_type.object_type == TYPE and unique_type.object_settings.equals(SETTINGS)) return num_cast(i, u32);
         }
         assert_unreachable(@src(), "did not find unique object index for 'type + settings' pair.\nThe likely cause is that during the initial evaluation pass a type was saved with a number of unique `ObjectSerialSettings`,\nbut inside a `CUSTOM_COMPTIME_MANAGER_OPS_ROUTINE` provided by the user, the settings provided to locate the unique pair didn't match any recorded pair:\n\nTYPE: {s}\n\nSETTINGS: {any}", .{ @typeName(TYPE), SETTINGS });
     }
 
-    pub fn get_offset_between_two_fields(comptime self: *DataOpManagerLowLevel, comptime START_FIELD: ?[]const u8, comptime END_FIELD: ?[]const u8) i32 {
+    pub fn get_offset_between_two_fields(comptime self: *DataOpBuilderLowLevel, comptime START_FIELD: ?[]const u8, comptime END_FIELD: ?[]const u8) i32 {
         const start_offset: u32 = if (START_FIELD) |SF| get: {
             assert_with_reason(@hasField(self.current_type, SF), @src(), "current type `{s}` does not have field `{s}`", .{ @typeName(self.current_type), SF });
             break :get @offsetOf(self.current_type, SF);
@@ -614,123 +689,23 @@ pub const DataOpManagerLowLevel = struct {
             return num_cast(end_offset - start_offset, i32);
         }
     }
-};
 
-pub const DataOpManagerStruct = struct {
-    low_level: DataOpManagerLowLevel,
-    prev_field: ?[]const u8 = null,
-    next_field: ?[]const u8 = null,
-    cached_tag_field: ?[]const u8 = null,
-    cached_len_field: ?[]const u8 = null,
-
-    fn new(comptime current_type: type, comptime current_settings: ObjectSerialSettings, comptime uniques: []const UniqueSerialType, comptime used_ops: []const DataOp, comptime unused_ops: []DataOp) DataOpManagerStruct {
-        return DataOpManagerStruct{
-            .low_level = DataOpManagerLowLevel.new(current_type, current_settings, uniques, used_ops, unused_ops),
+    pub fn get_final_settings_for_value(comptime self: *DataOpBuilderLowLevel, comptime TYPE: ?type, comptime FIELD: ?[]const u8) ObjectSerialSettings {
+        const REAL_TYPE = if (TYPE) |T| T else get: {
+            assert_with_reason(self.current_kind == .STRUCT and FIELD != null, @src(), "if `TYPE` is not provided, the current (parent) type must be a stuct and `FIELD` must not be null, got parent kind `{s}`, field `{any}`", .{ @tagName(self.current_kind), FIELD });
+            break :get @FieldType(self.current_type, FIELD.?);
         };
+        const FIELD_SETTINGS: ?OptionalObjectSerialSettings = if (FIELD != null) get: {
+            assert_with_reason(self.current_kind == .STRUCT, @src(), "if `FIELD` is provided, the current (parent) type must be a stuct, got parent kind `{s}`", .{@tagName(self.current_kind)});
+            const F_TYPE = @FieldType(self.current_type, FIELD.?);
+            assert_with_reason(REAL_TYPE == F_TYPE, @src(), "the type provided does not match the type on field `{s}`, got:\nTYPE = `{s}`\ntype from FIELD = `{s}`", .{ FIELD.?, @typeName(REAL_TYPE), @typeName(F_TYPE) });
+            break :get get_field_settings(self.current_type, FIELD.?);
+        } else null;
+        const OBJECT_SETTINGS = get_object_settings(REAL_TYPE);
+        return self.current_settings.combined_with_optional(OBJECT_SETTINGS).combined_with_optional(FIELD_SETTINGS);
     }
 
-    fn assert_ops_space(comptime self: *DataOpManagerStruct, comptime n: u32, comptime src: std.builtin.SourceLocation) void {
-        self.low_level.assert_ops_space(n, src);
-    }
-
-    fn push_op(comptime self: *DataOpManagerStruct, comptime op: DataOp) void {
-        self.low_level.push_op(op);
-    }
-
-    pub fn add_normal_routine_for_field(comptime self: *DataOpManagerStruct, FIELD: []const u8, comptime NEXT_FIELD: ?[]const u8) void {
-        assert_with_reason(@hasField(self.low_level.current_type, FIELD), @src(), "struct `{s}` does not have field `{s}`", .{ @typeName(self.low_level.current_type), FIELD });
-        if (NEXT_FIELD) |NEXT| assert_with_reason(@hasField(self.low_level.current_type, NEXT), @src(), "struct `{s}` does not have NEXT field `{s}`", .{ @typeName(self.low_level.current_type), NEXT });
-        if (self.prev_field != null) assert_with_reason(self.next_field != null and std.mem.eql(u8, self.next_field.?, FIELD), @src(), "the prev field you added indicated the next field to add was `{s}`, but the next field you actually added was `{s}`: routine offsets will be broken", .{ if (self.next_field) |next| next else "<void, end struct>", FIELD });
-        const TYPE = @FieldType(self.low_level.current_type, FIELD);
-        if (self.prev_field == null and @offsetOf(self.low_level.current_type, FIELD) != 0) {
-            self.low_level.add_add_native_offset_op(@offsetOf(self.low_level.current_type, FIELD));
-        }
-        self.prev_field = FIELD;
-        self.next_field = NEXT_FIELD;
-        const offset_to_next_field = self.low_level.get_offset_between_two_fields(FIELD, NEXT_FIELD);
-        const SETTINGS = self.low_level.get_settings_for_sub_type(FIELD, TYPE);
-        const UNIQUE_IDX = self.low_level.locate_unique_type_idx(TYPE, SETTINGS);
-        self.low_level.add_ref_unique_type_op(UNIQUE_IDX, offset_to_next_field);
-    }
-
-    /// This method ignores ALL inherited `integer_packing` and `target_endian` settings, and allows optional cacheing of data and other
-    /// non-standard encodings, such as encoding a float as a varint, and/or encoding an unsigned integer or floats using zig-zag encoding
-    ///
-    /// Valid field types are:
-    ///   - Integers
-    ///   - Bools
-    ///   - Enums
-    ///   - Floats
-    ///   - Packed Structs
-    pub fn add_numeric_field_op_with_custom_settings(comptime self: *DataOpManagerStruct, FIELD: []const u8, comptime NEXT_FIELD: ?[]const u8, comptime TARGET_ENDIAN: Endian, comptime CACHE_DATA: DataCacheMode, comptime TECH: DataTransferTech) void {
-        assert_with_reason(@hasField(self.low_level.current_type, FIELD), @src(), "struct `{s}` does not have field `{s}`", .{ @typeName(self.low_level.current_type), FIELD });
-        if (NEXT_FIELD) |NEXT| assert_with_reason(@hasField(self.low_level.current_type, NEXT), @src(), "struct `{s}` does not have NEXT field `{s}`", .{ @typeName(self.low_level.current_type), NEXT });
-        if (self.prev_field != null) assert_with_reason(self.next_field != null and std.mem.eql(u8, self.next_field.?, FIELD), @src(), "the prev field you added indicated the next field to add was `{s}`, but the next field you actually added was `{s}`: routine offsets will be broken", .{ if (self.next_field) |next| next else "<void, end struct>", FIELD });
-        const TYPE = @FieldType(self.low_level.current_type, FIELD);
-        if (self.prev_field == null and @offsetOf(self.low_level.current_type, FIELD) != 0) {
-            self.low_level.add_add_native_offset_op(@offsetOf(self.low_level.current_type, FIELD));
-        }
-        self.prev_field = FIELD;
-        self.next_field = NEXT_FIELD;
-        switch (CACHE_DATA) {
-            .DONT_CACHE_DATA => {},
-            .CACHE_LEN => {
-                self.cached_len_field = FIELD;
-            },
-            .CACHE_TAG => {
-                self.cached_tag_field = FIELD;
-            },
-        }
-        const offset_to_next_field = self.low_level.get_offset_between_two_fields(FIELD, NEXT_FIELD);
-        if (@sizeOf(TYPE) == 0) {
-            if (offset_to_next_field != 0) {
-                self.low_level.add_add_native_offset_op(offset_to_next_field);
-            }
-            return;
-        }
-        const INFO = KindInfo.get_kind_info(TYPE);
-        re_typed: switch (INFO) {
-            .INT => {
-                const SER_SIZE = if (TECH != .TARGET_ENDIAN_SAME_SIZE) 0 else @sizeOf(TYPE);
-                self.low_level.add_transfer_data_op(@sizeOf(TYPE), offset_to_next_field, SER_SIZE, TARGET_ENDIAN, TECH, CACHE_DATA);
-            },
-            .ENUM => |ENUM| {
-                const TAG = ENUM.tag_type;
-                const TAG_INFO = KindInfo.get_kind_info(TAG);
-                continue :re_typed TAG_INFO;
-            },
-            .BOOL => {
-                continue :re_typed KindInfo.get_kind_info(u8);
-            },
-            .FLOAT => {
-                const SER_SIZE = if (TECH != .TARGET_ENDIAN_SAME_SIZE) 0 else @sizeOf(TYPE);
-                self.low_level.add_transfer_data_op(@sizeOf(TYPE), offset_to_next_field, SER_SIZE, TARGET_ENDIAN, TECH, CACHE_DATA);
-            },
-            .STRUCT => |STRUCT| {
-                if (STRUCT.backing_integer) |BACKING_INT| {
-                    const BACKING_KIND = KindInfo.get_kind_info(BACKING_INT);
-                    continue :re_typed BACKING_KIND;
-                }
-                assert_unreachable(@src(), "type kind `{s}` is not eligble for high-level `add_numeric_field_op_with_custom_settings` method", .{@tagName(INFO)});
-            },
-            else => assert_unreachable(@src(), "type kind `{s}` is not eligble for high-level `add_numeric_field_op_with_custom_settings` method", .{@tagName(INFO)}),
-        }
-    }
-
-    /// This uses the current settings on the parent struct and fields settings for the field to add a data transfer op
-    ///
-    /// Valid field types are:
-    ///   - Integers
-    ///   - Bools
-    ///   - Enums
-    ///   - Floats
-    ///   - Packed Structs
-    pub fn add_numeric_field_op(comptime self: *DataOpManagerStruct, FIELD: []const u8, comptime NEXT_FIELD: ?[]const u8) void {
-        assert_with_reason(@hasField(self.low_level.current_type, FIELD), @src(), "struct `{s}` does not have field `{s}`", .{ @typeName(self.low_level.current_type), FIELD });
-        const TYPE = @FieldType(self.low_level.current_type, FIELD);
-        const FIELD_SETTINGS = get_field_settings(self.low_level.current_type, FIELD);
-        const OBJECT_SETTINGS = get_object_settings(TYPE);
-        const SETTINGS = self.low_level.current_settings.combined_with_optional(OBJECT_SETTINGS).combined_with_optional(FIELD_SETTINGS);
+    pub fn get_tech_for_numeric_type(comptime _: *DataOpBuilderLowLevel, comptime SETTINGS: ObjectSerialSettings, comptime TYPE: type) DataTransferTech {
         const KIND_INFO = KindInfo.get_kind_info(TYPE);
         const TECH = if (@sizeOf(TYPE) <= 1) DataTransferTech.TARGET_ENDIAN_SAME_SIZE else switch (KIND_INFO) {
             .INT, .ENUM, .BOOL, .STRUCT => switch (SETTINGS.INTEGER_PACKING) {
@@ -744,7 +719,282 @@ pub const DataOpManagerStruct = struct {
             .FLOAT => DataTransferTech.TARGET_ENDIAN_SAME_SIZE,
             else => assert_unreachable(@src(), "only Ints, Floats, Bools, Enums, or Packed Structs are allowed as numeric field ops, got type `{s}`", .{@typeName(TYPE)}),
         };
+        return TECH;
+    }
+
+    pub fn get_numeric_elem_type_and_total_len_for_numeric_array_type(comptime _: *DataOpBuilderLowLevel, comptime TYPE: type) struct { type, u32 } {
+        const KIND_INFO = KindInfo.get_kind_info(TYPE);
+        comptime var CHILD_TYPE: type = undefined;
+        comptime var AT_LEAST_ONE_DEEP: bool = false;
+        comptime var TOTAL_LEN: u32 = 1;
+        find_deeper_element: switch (KIND_INFO) {
+            .INT, .ENUM, .BOOL, .STRUCT, .UNION, .FLOAT => {},
+            .ARRAY => |ARRAY| {
+                AT_LEAST_ONE_DEEP = true;
+                TOTAL_LEN *= ARRAY.len;
+                const CHILD_KIND = KindInfo.get_kind_info(ARRAY.child);
+                CHILD_TYPE = ARRAY.child;
+                continue :find_deeper_element CHILD_KIND;
+            },
+            .VECTOR => |VECTOR| {
+                AT_LEAST_ONE_DEEP = true;
+                TOTAL_LEN *= VECTOR.len;
+                const CHILD_KIND = KindInfo.get_kind_info(VECTOR.child);
+                CHILD_TYPE = VECTOR.child;
+                continue :find_deeper_element CHILD_KIND;
+            },
+            else => assert_unreachable(@src(), "only Ints, Floats, Bools, Enums, Packed Structs, or Packed Unions are allowed as child elements of numeric array field ops, got type `{s}`", .{@typeName(CHILD_TYPE)}),
+        }
+        assert_with_reason(AT_LEAST_ONE_DEEP, @src(), "top-level type was not an Array or Vector, got type `{s}`", .{@typeName(TYPE)});
+        return .{ CHILD_TYPE, TOTAL_LEN };
+    }
+
+    pub fn re_type_numeric_type(comptime self: *DataOpBuilderLowLevel, comptime IN_TYPE: type) type {
+        const INFO = KindInfo.get_kind_info(IN_TYPE);
+        switch (INFO) {
+            .INT, .FLOAT => {
+                return IN_TYPE;
+            },
+            .BOOL => {
+                return u8;
+            },
+            .ENUM => |ENUM| {
+                return ENUM.tag_type;
+            },
+            .STRUCT => |STRUCT| {
+                assert_with_reason(STRUCT.backing_integer != null, @src(), "only packed structs can be re-typed as numeric types, got type `{s}`", .{@typeName(IN_TYPE)});
+                return STRUCT.backing_integer.?;
+            },
+            .UNION => |UNION| {
+                assert_with_reason(UNION.layout == .@"extern", @src(), "only packed unions can be re-typed as numeric types, got type `{s}`", .{@typeName(IN_TYPE)});
+                const INT = std.meta.Int(.unsigned, @bitSizeOf(IN_TYPE));
+                assert_with_reason(@sizeOf(INT) == @sizeOf(IN_TYPE), @src(), "the size of the input union {d} did not match the size of the infered integer used to back it {d}, this packed union is not eligible for direct numeric inference, but may still be used in a packed struct", .{ @sizeOf(IN_TYPE), @sizeOf(INT) });
+                return INT;
+            },
+            else => assert_with_reason(UNION.layout == .@"extern", @src(), "only Ints, Floats, Bools, Enums, Packed Structs, or Packed Unions can be re-typed as numeric types, got type `{s}`", .{@typeName(IN_TYPE)}),
+        }
+    }
+
+    pub fn goto_next_field_if_this_type_size_0(comptime self: *DataOpBuilderLowLevel, comptime TYPE: type, comptime OFFSET_TO_NEXT_FIELD: i32) bool {
+        if (@sizeOf(TYPE) == 0) {
+            if (OFFSET_TO_NEXT_FIELD != 0) {
+                self.add_add_native_offset_op(OFFSET_TO_NEXT_FIELD);
+            }
+            return true;
+        }
+        return false;
+    }
+};
+
+pub const NO_FIELD_CACHE = "<cached but no field>";
+
+pub const DataOpBuilderStruct = struct {
+    low_level: DataOpBuilderLowLevel,
+    prev_field: ?[]const u8 = null,
+    next_field: ?[]const u8 = null,
+    cached_tag_field: ?[]const u8 = null,
+    cached_len_field: ?[]const u8 = null,
+    union_fields_needed: u32 = 0,
+    union_fields_added: u32 = 0,
+
+    fn new(comptime current_type: type, comptime current_settings: ObjectSerialSettings, comptime uniques: []const UniqueSerialType, comptime used_ops: []const DataOp, comptime unused_ops: []DataOp) DataOpBuilderStruct {
+        return DataOpBuilderStruct{
+            .low_level = DataOpBuilderLowLevel.new(current_type, current_settings, uniques, used_ops, unused_ops),
+        };
+    }
+
+    fn assert_ops_space(comptime self: *DataOpBuilderStruct, comptime n: u32, comptime src: std.builtin.SourceLocation) void {
+        self.low_level.assert_ops_space(n, src);
+    }
+
+    fn push_op(comptime self: *DataOpBuilderStruct, comptime op: DataOp) void {
+        self.low_level.push_op(op);
+    }
+
+    // FIXME This needs to be re-worked
+    // pub fn add_normal_routine_for_field(comptime self: *DataOpBuilderStruct, comptime FIELD: []const u8, comptime NEXT_FIELD: ?[]const u8) void {
+    //     assert_with_reason(@hasField(self.low_level.current_type, FIELD), @src(), "struct `{s}` does not have field `{s}`", .{ @typeName(self.low_level.current_type), FIELD });
+    //     if (NEXT_FIELD) |NEXT| assert_with_reason(@hasField(self.low_level.current_type, NEXT), @src(), "struct `{s}` does not have NEXT field `{s}`", .{ @typeName(self.low_level.current_type), NEXT });
+    //     if (self.prev_field != null) assert_with_reason(self.next_field != null and std.mem.eql(u8, self.next_field.?, FIELD), @src(), "the prev field you added indicated the next field to add was `{s}`, but the next field you actually added was `{s}`: routine offsets will be broken", .{ if (self.next_field) |next| next else "<void, end struct>", FIELD });
+    //     const TYPE = @FieldType(self.low_level.current_type, FIELD);
+    //     if (self.prev_field == null and @offsetOf(self.low_level.current_type, FIELD) != 0) {
+    //         self.low_level.add_add_native_offset_op(@offsetOf(self.low_level.current_type, FIELD));
+    //     }
+    //     self.prev_field = FIELD;
+    //     self.next_field = NEXT_FIELD;
+    //     const offset_to_next_field = self.low_level.get_offset_between_two_fields(FIELD, NEXT_FIELD);
+    //     const SETTINGS = self.low_level.get_settings_for_sub_type(FIELD, TYPE);
+    //     const UNIQUE_IDX = self.low_level.locate_unique_type_idx(TYPE, SETTINGS);
+    //     self.low_level.add_ref_unique_type_op(UNIQUE_IDX, offset_to_next_field);
+    // }
+
+    /// This method ignores ALL inherited `integer_packing` and `target_endian` settings, and allows optional cacheing of data and other
+    /// non-standard encodings, such as encoding a float as a varint, and/or encoding an unsigned integer or floats using zig-zag encoding
+    ///
+    /// Valid field types are:
+    ///   - Integers
+    ///   - Bools
+    ///   - Enums
+    ///   - Floats
+    ///   - Packed Structs
+    ///   - Packed Unions
+    fn _internal_add_numeric_field_op_with_custom_settings(comptime self: *DataOpBuilderStruct, comptime TYPE: type, comptime TYPE_FIELD: ?[]const u8, comptime OFFSET_TO_NEXT_VALUE: i32, comptime TARGET_ENDIAN: Endian, comptime CACHE_DATA: DataCacheMode, comptime TECH: DataTransferTech) void {
+        if (self.low_level.goto_next_field_if_this_type_size_0(TYPE, OFFSET_TO_NEXT_VALUE)) {
+            return;
+        }
+        switch (CACHE_DATA) {
+            .DONT_CACHE_DATA => {},
+            .CACHE_LEN => {
+                self.cached_len_field = if (TYPE_FIELD) |F| F else NO_FIELD_CACHE;
+            },
+            .CACHE_TAG => {
+                self.cached_tag_field = if (TYPE_FIELD) |F| F else NO_FIELD_CACHE;
+            },
+        }
+        const INFO = KindInfo.get_kind_info(TYPE);
+        const NUMERIC_TYPE = self.low_level.re_type_numeric_type(TYPE);
+        const SER_SIZE = if (TECH != .TARGET_ENDIAN_SAME_SIZE) 0 else @sizeOf(TYPE);
+        self.low_level.add_transfer_data_op(@sizeOf(TYPE), OFFSET_TO_NEXT_VALUE, SER_SIZE, TARGET_ENDIAN, TECH, CACHE_DATA);
+    }
+
+    /// This uses the current settings on the parent struct (if any) and fields settings (if any) for the field to add a data transfer op
+    ///
+    /// Valid field types are:
+    ///   - Integers
+    ///   - Bools
+    ///   - Enums
+    ///   - Floats
+    ///   - Packed Structs
+    ///   - Packed Unions
+    fn _internal_add_numeric_field_op(comptime self: *DataOpBuilderStruct, comptime TYPE: type, comptime TYPE_FIELD: ?[]const u8, comptime OFFSET_TO_NEXT_VALUE: i32) void {
+        const SETTINGS = self.low_level.get_final_settings_for_value(TYPE, TYPE_FIELD);
+        const TECH = self.low_level.get_tech_for_numeric_type(SETTINGS, TYPE);
+        const ENDIAN = SETTINGS.TARGET_ENDIAN;
+        return self._internal_add_numeric_field_op_with_custom_settings(TYPE, TYPE_FIELD, OFFSET_TO_NEXT_VALUE, ENDIAN, .DONT_CACHE_DATA, TECH);
+    }
+
+    /// This uses the current settings on the parent struct (if any) and fields settings (if any) for the field to add a data transfer op
+    ///
+    /// Allows optional caching of data transfered
+    ///
+    /// Valid field types are:
+    ///   - Integers
+    ///   - Bools
+    ///   - Enums
+    ///   - Floats
+    ///   - Packed Structs
+    ///   - Packed Unions
+    fn _internal_add_numeric_field_op_cache_data(comptime self: *DataOpBuilderStruct, comptime TYPE: type, comptime TYPE_FIELD: ?[]const u8, comptime OFFSET_TO_NEXT_VALUE: i32, comptime CACHE: DataCacheMode) void {
+        const SETTINGS = self.low_level.get_final_settings_for_value(TYPE, TYPE_FIELD);
+        const TECH = self.low_level.get_tech_for_numeric_type(SETTINGS, TYPE);
+        const ENDIAN = SETTINGS.TARGET_ENDIAN;
+        return self._internal_add_numeric_field_op_with_custom_settings(TYPE, TYPE_FIELD, OFFSET_TO_NEXT_VALUE, ENDIAN, CACHE, TECH);
+    }
+
+    /// This method ignores ALL inherited `integer_packing` and `target_endian` settings, and allows optional cacheing of data and other
+    /// non-standard encodings, such as encoding a float as a varint, and/or encoding an unsigned integer or floats using zig-zag encoding
+    ///
+    /// Valid field types are:
+    ///   - Integers
+    ///   - Bools
+    ///   - Enums
+    ///   - Floats
+    ///   - Packed Structs
+    ///   - Packed Unions
+    pub fn add_numeric_field_op_with_custom_settings(comptime self: *DataOpBuilderStruct, FIELD: []const u8, comptime NEXT_FIELD: ?[]const u8, comptime TARGET_ENDIAN: Endian, comptime CACHE_DATA: DataCacheMode, comptime TECH: DataTransferTech) void {
+        assert_with_reason(self.low_level.current_kind == .STRUCT, @src(), "current type kind is not a struct, current kind is `{s}`, real type `{s}`", .{ @tagName(self.low_level.current_kind), @typeName(self.low_level.current_type) });
+        assert_with_reason(@hasField(self.low_level.current_type, FIELD), @src(), "struct `{s}` does not have field `{s}`", .{ @typeName(self.low_level.current_type), FIELD });
+        if (NEXT_FIELD) |NEXT| assert_with_reason(@hasField(self.low_level.current_type, NEXT), @src(), "struct `{s}` does not have NEXT field `{s}`", .{ @typeName(self.low_level.current_type), NEXT });
+        if (self.prev_field != null) assert_with_reason(self.next_field != null and std.mem.eql(u8, self.next_field.?, FIELD), @src(), "the prev field you added indicated the next field to add was `{s}`, but the next field you actually added was `{s}`: routine offsets will be broken", .{ if (self.next_field) |next| next else "<void, end struct>", FIELD });
+        const TYPE = @FieldType(self.low_level.current_type, FIELD);
+        if (self.prev_field == null and @offsetOf(self.low_level.current_type, FIELD) != 0) {
+            self.low_level.add_add_native_offset_op(@offsetOf(self.low_level.current_type, FIELD));
+        }
+        self.prev_field = FIELD;
+        self.next_field = NEXT_FIELD;
+        const offset_to_next_field = self.low_level.get_offset_between_two_fields(FIELD, NEXT_FIELD);
+        self._internal_add_numeric_field_op_with_custom_settings(TYPE, FIELD, offset_to_next_field, TARGET_ENDIAN, CACHE_DATA, TECH);
+    }
+
+    /// This method ignores ALL inherited `integer_packing` and `target_endian` settings, and allows optional cacheing of data and other
+    /// non-standard encodings, such as encoding a float as a varint, and/or encoding an unsigned integer or floats using zig-zag encoding
+    ///
+    /// Valid field types are:
+    ///   - Integers
+    ///   - Bools
+    ///   - Enums
+    ///   - Floats
+    ///   - Packed Structs
+    ///   - Packed Unions
+    fn _internal_add_numeric_array_field_op_with_custom_settings(comptime self: *DataOpBuilderStruct, comptime TYPE: type, comptime TYPE_FIELD: ?[]const u8, comptime OFFSET_TO_NEXT_VALUE: i32, comptime TARGET_ENDIAN: Endian, comptime TECH: DataTransferTech) void {
+        if (self.low_level.goto_next_field_if_this_type_size_0(TYPE, OFFSET_TO_NEXT_VALUE)) {
+            return;
+        }
+        const FINAL_ELEMENT_TYPE: type, const TOTAL_LEN: u32 = self.low_level.get_numeric_elem_type_and_total_len_for_numeric_array_type(TYPE);
+        const FINAL_ELEMENT_SIZE = @sizeOf(FINAL_ELEMENT_TYPE);
+        if (FINAL_ELEMENT_SIZE == 1) {
+            self.low_level.add_transfer_data_op(TOTAL_LEN, OFFSET_TO_NEXT_VALUE, TOTAL_LEN, TARGET_ENDIAN, .TARGET_ENDIAN_SAME_SIZE, .DONT_CACHE_DATA);
+        } else {
+            self.low_level.add_inline_subroutine_start_op(1, TOTAL_LEN, OFFSET_TO_NEXT_VALUE, .STATIC_REPEAT_OR_NO_REPEAT, .SAME_MEMORY_REGION);
+            const PER_ELEMENT_OFFSET: i32 = num_cast(@sizeOf(FINAL_ELEMENT_TYPE), i32);
+            const NUMERIC_TYPE = self.low_level.re_type_numeric_type(FINAL_ELEMENT_TYPE);
+            const SER_SIZE = if (TECH != .TARGET_ENDIAN_SAME_SIZE) 0 else @sizeOf(NUMERIC_TYPE);
+            self.low_level.add_transfer_data_op(@sizeOf(NUMERIC_TYPE), PER_ELEMENT_OFFSET, SER_SIZE, TARGET_ENDIAN, TECH, .DONT_CACHE_DATA);
+        }
+    }
+
+    /// This uses the current settings on the parent struct (if any) and fields settings (if any) for the field to add a data transfer op
+    ///
+    /// Valid field types are:
+    ///   - Integers
+    ///   - Bools
+    ///   - Enums
+    ///   - Floats
+    ///   - Packed Structs
+    ///   - Packed Unions
+    fn _internal_add_numeric_array_field_op(comptime self: *DataOpBuilderStruct, comptime TYPE: type, comptime TYPE_FIELD: ?[]const u8, comptime OFFSET_TO_NEXT_VALUE: i32) void {
+        const SETTINGS = self.low_level.get_final_settings_for_value(TYPE, TYPE_FIELD);
+        const TECH = self.low_level.get_tech_for_numeric_type(SETTINGS, TYPE);
+        const ENDIAN = SETTINGS.TARGET_ENDIAN;
+        return self._internal_add_numeric_array_field_op_with_custom_settings(TYPE, TYPE_FIELD, OFFSET_TO_NEXT_VALUE, ENDIAN, .DONT_CACHE_DATA, TECH);
+    }
+
+    /// This uses the current settings on the parent struct and fields settings for the field to add a data transfer op
+    ///
+    /// Valid field types are:
+    ///   - Integers
+    ///   - Bools
+    ///   - Enums
+    ///   - Floats
+    ///   - Packed Structs
+    ///   - Packed Unions
+    pub fn add_numeric_field_op(comptime self: *DataOpBuilderStruct, FIELD: []const u8, comptime NEXT_FIELD: ?[]const u8) void {
+        assert_with_reason(self.low_level.current_kind == .STRUCT, @src(), "current type kind is not a struct, current kind is `{s}`, real type `{s}`", .{ @tagName(self.low_level.current_kind), @typeName(self.low_level.current_type) });
+        assert_with_reason(@hasField(self.low_level.current_type, FIELD), @src(), "struct `{s}` does not have field `{s}`", .{ @typeName(self.low_level.current_type), FIELD });
+        const TYPE = @FieldType(self.low_level.current_type, FIELD);
+        const SETTINGS = self.low_level.get_final_settings_for_value(TYPE, FIELD);
+        const TECH = self.low_level.get_tech_for_numeric_type(SETTINGS, TYPE);
         self.add_numeric_field_op_with_custom_settings(FIELD, NEXT_FIELD, SETTINGS.TARGET_ENDIAN, .DONT_CACHE_DATA, TECH);
+    }
+
+    /// This uses the current settings on the parent struct and fields settings for the field to add a data transfer op
+    ///
+    /// Allows optional caching of data transfered
+    ///
+    /// Valid field types are:
+    ///   - Integers
+    ///   - Bools
+    ///   - Enums
+    ///   - Floats
+    ///   - Packed Structs
+    ///   - Packed Unions
+    pub fn add_numeric_field_op_cache_data(comptime self: *DataOpBuilderStruct, FIELD: []const u8, comptime NEXT_FIELD: ?[]const u8, comptime CACHE: DataCacheMode) void {
+        assert_with_reason(self.low_level.current_kind == .STRUCT, @src(), "current type kind is not a struct, current kind is `{s}`, real type `{s}`", .{ @tagName(self.low_level.current_kind), @typeName(self.low_level.current_type) });
+        assert_with_reason(@hasField(self.low_level.current_type, FIELD), @src(), "struct `{s}` does not have field `{s}`", .{ @typeName(self.low_level.current_type), FIELD });
+        const TYPE = @FieldType(self.low_level.current_type, FIELD);
+        const SETTINGS = self.low_level.get_final_settings_for_value(TYPE, FIELD);
+        const TECH = self.low_level.get_tech_for_numeric_type(SETTINGS, TYPE);
+        self.add_numeric_field_op_with_custom_settings(FIELD, NEXT_FIELD, SETTINGS.TARGET_ENDIAN, CACHE, TECH);
     }
 
     /// This method ignores ALL inherited `integer_packing` and `target_endian` settings, and allows optional cacheing of data and other
@@ -757,7 +1007,9 @@ pub const DataOpManagerStruct = struct {
     ///   - Enums
     ///   - Floats
     ///   - Packed Structs
-    pub fn add_numeric_array_field_op_with_custom_settings(comptime self: *DataOpManagerStruct, FIELD: []const u8, comptime NEXT_FIELD: ?[]const u8, comptime TARGET_ENDIAN: Endian, comptime TECH: DataTransferTech) void {
+    ///   - Packed Unions
+    pub fn add_numeric_array_field_op_with_custom_settings(comptime self: *DataOpBuilderStruct, FIELD: []const u8, comptime NEXT_FIELD: ?[]const u8, comptime TARGET_ENDIAN: Endian, comptime TECH: DataTransferTech) void {
+        assert_with_reason(self.low_level.current_kind == .STRUCT, @src(), "current type kind is not a struct, current kind is `{s}`, real type `{s}`", .{ @tagName(self.low_level.current_kind), @typeName(self.low_level.current_type) });
         assert_with_reason(@hasField(self.low_level.current_type, FIELD), @src(), "struct `{s}` does not have field `{s}`", .{ @typeName(self.low_level.current_type), FIELD });
         if (NEXT_FIELD) |NEXT| assert_with_reason(@hasField(self.low_level.current_type, NEXT), @src(), "struct `{s}` does not have NEXT field `{s}`", .{ @typeName(self.low_level.current_type), NEXT });
         if (self.prev_field != null) assert_with_reason(self.next_field != null and std.mem.eql(u8, self.next_field.?, FIELD), @src(), "the prev field you added indicated the next field to add was `{s}`, but the next field you actually added was `{s}`: routine offsets will be broken", .{ if (self.next_field) |next| next else "<void, end struct>", FIELD });
@@ -768,70 +1020,7 @@ pub const DataOpManagerStruct = struct {
         self.prev_field = FIELD;
         self.next_field = NEXT_FIELD;
         const offset_to_next_field = self.low_level.get_offset_between_two_fields(FIELD, NEXT_FIELD);
-        if (@sizeOf(TYPE) == 0) {
-            if (offset_to_next_field != 0) {
-                self.low_level.add_add_native_offset_op(offset_to_next_field);
-            }
-            return;
-        }
-        const KIND_INFO = KindInfo.get_kind_info(TYPE);
-        comptime var TOTAL_LEN: u32 = 1;
-        comptime var AT_LEAST_ONE_DEEP: bool = false;
-        comptime var FINAL_ELEMENT_TYPE: type = undefined;
-        go_deeper: switch (KIND_INFO) {
-            .ARRAY => |ARRAY| {
-                TOTAL_LEN = TOTAL_LEN * ARRAY.len;
-                AT_LEAST_ONE_DEEP = true;
-                FINAL_ELEMENT_TYPE = ARRAY.child;
-                const CHILD_INFO = KindInfo.get_kind_info(ARRAY.child);
-                continue :go_deeper CHILD_INFO;
-            },
-            .VECTOR => |VECTOR| {
-                TOTAL_LEN = TOTAL_LEN * VECTOR.len;
-                AT_LEAST_ONE_DEEP = true;
-                FINAL_ELEMENT_TYPE = VECTOR.child;
-                const CHILD_INFO = KindInfo.get_kind_info(VECTOR.child);
-                continue :go_deeper CHILD_INFO;
-            },
-            else => {
-                assert_with_reason(AT_LEAST_ONE_DEEP, @src(), "top-level field type was not an Array or Vector, got type `{s}`", .{@typeName(TYPE)});
-                switch (KIND_INFO) {
-                    .INT, .ENUM, .BOOL, .FLOAT => {},
-                    .STRUCT => |STRUCT| {
-                        assert_with_reason(STRUCT.backing_integer != null, @src(), "only Ints, Floats, Bools, Enums, or Packed Structs are allowed as child elements of numeric array field ops, got type `{s}`", .{@typeName(FINAL_ELEMENT_TYPE)});
-                    },
-                    else => assert_unreachable(@src(), "only Ints, Floats, Bools, Enums, or Packed Structs are allowed as child elements of numeric array field ops, got type `{s}`", .{@typeName(FINAL_ELEMENT_TYPE)}),
-                }
-            },
-        }
-        const FINAL_ELEMENT_SIZE = @sizeOf(FINAL_ELEMENT_TYPE);
-        if (FINAL_ELEMENT_SIZE == 1) {
-            self.low_level.add_transfer_data_op(TOTAL_LEN, offset_to_next_field, TOTAL_LEN, TARGET_ENDIAN, .TARGET_ENDIAN_SAME_SIZE, .DONT_CACHE_DATA);
-        } else {
-            self.low_level.add_inline_subroutine_start_op(1, TOTAL_LEN, offset_to_next_field, .STATIC_REPEAT_OR_NO_REPEAT, .SAME_MEMORY_REGION);
-            const FINAL_ELEMENT_INFO = KindInfo.get_kind_info(FINAL_ELEMENT_TYPE);
-            const PER_ELEMENT_OFFSET: i32 = num_cast(@sizeOf(FINAL_ELEMENT_TYPE), i32);
-            re_typed_final_element: switch (FINAL_ELEMENT_INFO) {
-                .INT => {
-                    const SER_SIZE = if (TECH != .TARGET_ENDIAN_SAME_SIZE) 0 else @sizeOf(FINAL_ELEMENT_TYPE);
-                    self.low_level.add_transfer_data_op(@sizeOf(FINAL_ELEMENT_TYPE), PER_ELEMENT_OFFSET, SER_SIZE, TARGET_ENDIAN, TECH, .DONT_CACHE_DATA);
-                },
-                .ENUM => |ENUM| {
-                    const TAG = ENUM.tag_type;
-                    const TAG_INFO = KindInfo.get_kind_info(TAG);
-                    continue :re_typed_final_element TAG_INFO;
-                },
-                .FLOAT => {
-                    const SER_SIZE = if (TECH != .TARGET_ENDIAN_SAME_SIZE) 0 else @sizeOf(FINAL_ELEMENT_TYPE);
-                    self.low_level.add_transfer_data_op(@sizeOf(FINAL_ELEMENT_TYPE), PER_ELEMENT_OFFSET, SER_SIZE, TARGET_ENDIAN, TECH, .DONT_CACHE_DATA);
-                },
-                .STRUCT => |STRUCT| {
-                    const BACKING_KIND = KindInfo.get_kind_info(STRUCT.backing_integer.?);
-                    continue :re_typed_final_element BACKING_KIND;
-                },
-                else => unreachable,
-            }
-        }
+        self._internal_add_numeric_array_field_op_with_custom_settings(TYPE, FIELD, offset_to_next_field, TARGET_ENDIAN, TECH);
     }
 
     /// This uses the current settings on the parent struct and fields settings for the field to add a data transfer op
@@ -843,45 +1032,238 @@ pub const DataOpManagerStruct = struct {
     ///   - Enums
     ///   - Floats
     ///   - Packed Structs
-    pub fn add_numeric_array_field_op(comptime self: *DataOpManagerStruct, FIELD: []const u8, comptime NEXT_FIELD: ?[]const u8) void {
+    ///   - Packed Unions
+    pub fn add_numeric_array_field_op(comptime self: *DataOpBuilderStruct, FIELD: []const u8, comptime NEXT_FIELD: ?[]const u8) void {
+        assert_with_reason(self.low_level.current_kind == .STRUCT, @src(), "current type kind is not a struct, current kind is `{s}`, real type `{s}`", .{ @tagName(self.low_level.current_kind), @typeName(self.low_level.current_type) });
         assert_with_reason(@hasField(self.low_level.current_type, FIELD), @src(), "struct `{s}` does not have field `{s}`", .{ @typeName(self.low_level.current_type), FIELD });
         const TYPE = @FieldType(self.low_level.current_type, FIELD);
-        const FIELD_SETTINGS = get_field_settings(self.low_level.current_type, FIELD);
-        const OBJECT_SETTINGS = get_object_settings(TYPE);
-        const SETTINGS = self.low_level.current_settings.combined_with_optional(OBJECT_SETTINGS).combined_with_optional(FIELD_SETTINGS);
-        const KIND_INFO = KindInfo.get_kind_info(TYPE);
-        comptime var CHILD_SIZE = 0;
-        comptime var CHILD_TYPE: type = undefined;
-        const TECH = find_deeper_element: switch (KIND_INFO) {
-            .INT, .ENUM, .BOOL, .STRUCT => if (CHILD_SIZE <= 1) DataTransferTech.TARGET_ENDIAN_SAME_SIZE else switch (SETTINGS.INTEGER_PACKING) {
-                .USE_TARGET_ENDIAN => DataTransferTech.TARGET_ENDIAN_SAME_SIZE,
-                .USE_VARINTS => switch (KIND_INFO) {
-                    .INT => |INT| if (INT.signedness == .signed) DataTransferTech.VARINT_ZIGZAG else DataTransferTech.VARINT,
-                    .ENUM, .BOOL, .STRUCT => DataTransferTech.VARINT,
-                    else => unreachable,
-                },
-            },
-            .FLOAT => DataTransferTech.TARGET_ENDIAN_SAME_SIZE,
-            .ARRAY => |ARRAY| {
-                const CHILD_KIND = KindInfo.get_kind_info(ARRAY.child);
-                CHILD_SIZE = @sizeOf(ARRAY.child);
-                CHILD_TYPE = ARRAY.child;
-                continue :find_deeper_element CHILD_KIND;
-            },
-            .VECTOR => |VECTOR| {
-                const CHILD_KIND = KindInfo.get_kind_info(VECTOR.child);
-                CHILD_SIZE = @sizeOf(VECTOR.child);
-                CHILD_TYPE = VECTOR.child;
-                continue :find_deeper_element CHILD_KIND;
-            },
-            else => assert_unreachable(@src(), "only Ints, Floats, Bools, Enums, or Packed Structs are allowed as child elements of numeric array field ops, got type `{s}`", .{@typeName(CHILD_TYPE)}),
-        };
+        const SETTINGS = self.low_level.get_final_settings_for_value(TYPE, FIELD);
+        const TECH = self.low_level.get_tech_for_numeric_array_type(SETTINGS, TYPE);
         self.add_numeric_array_field_op_with_custom_settings(FIELD, NEXT_FIELD, SETTINGS.TARGET_ENDIAN, TECH);
     }
 
-    // CHECKPOINT Union methods and Pointer methods
+    /// Build an extern union subroutine using a tag cached by a previous data transfer op. Note the input parameters:
+    ///   - `CACHED_TAG_FIELD` = the field name that was previously cached MUST MATCH the one recorded
+    ///   - `TAG_TYPE` = an Enum or Integer type that is used to choose the active union field.
+    ///     - These do not necessarily need to correlate 1-to-1 with the union fields,
+    /// the builder is responsible for correctly filling in the union data based on tag values
+    pub fn start_extern_union_builder_with_cached_tag(comptime self: *DataOpBuilderStruct, comptime CACHED_TAG_FIELD: []const u8, comptime TAG_TYPE: type, FIELD: []const u8, comptime NEXT_FIELD: ?[]const u8) DataOpBuilderExternUnion(TAG_TYPE) {
+        assert_with_reason(self.low_level.current_kind == .STRUCT, @src(), "current type kind is not a struct, current kind is `{s}`, real type `{s}`", .{ @tagName(self.low_level.current_kind), @typeName(self.low_level.current_type) });
+        assert_with_reason(@hasField(self.low_level.current_type, FIELD), @src(), "struct `{s}` does not have field `{s}`", .{ @typeName(self.low_level.current_type), FIELD });
+        assert_with_reason(self.cached_tag_field != null and std.mem.eql(u8, self.cached_tag_field.?, CACHED_TAG_FIELD), @src(), "intended field for cached tag: `{s}` is not the one that is recorded as being cached: `{s}`", .{ CACHED_TAG_FIELD, if (self.cached_tag_field) |c| c else "<no tag field cached>" });
+        const TYPE = @FieldType(self.low_level.current_type, FIELD);
+        const SETTINGS = self.low_level.get_final_settings_for_value(TYPE, FIELD);
+        const KIND = KindInfo.get_kind_info(TYPE);
+        assert_with_reason(KIND == .UNION and KIND.UNION.tag_type == null and KIND.UNION.layout == .@"extern", @src(), "type of `FIELD` must be an extern union type (it is the only union type with a well defined memory layout for automatic serialization), got type `{s}`", .{@typeName(TYPE)});
+        const UNION_BUILDER = DataOpBuilderExternUnion(TAG_TYPE);
+        const header_op_idx = self.low_level.len;
+        self.low_level.add_union_header_op(0);
+        const union_builder = UNION_BUILDER{
+            .builder = self,
+            .settings = SETTINGS,
+            .op_idx_for_header = header_op_idx,
+            .union_type = TYPE,
+        };
+        return union_builder;
+    }
+
+    // CHECKPOINT pointers/sub-struct types
 
 };
+
+pub fn DataOpBuilderExternUnion(comptime TAG_TYPE: type) type {
+    return struct {
+        const Self = @This();
+
+        builder: *DataOpBuilderStruct,
+        union_type: type,
+        settings: ObjectSerialSettings,
+        op_idx_for_header: u32,
+        num_branches: u32 = 0,
+
+        fn cast_val_to_u64(comptime val: TAG_TYPE) u64 {
+            const INFO = KindInfo.get_kind_info(TAG_TYPE);
+            switch (INFO) {
+                .ENUM => |ENUM| {
+                    const INT = ENUM.tag_type;
+                    const int = @intFromEnum(val);
+                    const uint: Types.UnsignedIntegerWithSameSize(INT) = @bitCast(int);
+                    return num_cast(uint, u64);
+                },
+                .INT => {
+                    const uint: Types.UnsignedIntegerWithSameSize(INT) = @bitCast(val);
+                    return num_cast(uint, u64);
+                },
+                else => assert_unreachable(@src(), "only Enums or Integers are allowed as `TAG_TYPE`, got type `{s}`", .{@typeName(TAG_TYPE)}),
+            }
+        }
+
+        /// This uses the current settings on the parent union, object settings, and field settings for the field to add a data transfer op
+        ///
+        /// Valid field types are:
+        ///   - Integers
+        ///   - Bools
+        ///   - Enums
+        ///   - Floats
+        ///   - Packed Structs
+        ///   - Packed Unions
+        pub fn add_single_tag_id_numeric_op(comptime self: *Self, comptime tag: TAG_TYPE, comptime FIELD: []const u8) void {
+            assert_with_reason(@hasField(self.union_type, FIELD), @src(), "union type `{s}` does not have field `{s}`", .{ @typeName(self.union_type), FIELD });
+            const TYPE = @FieldType(self.union_type, FIELD);
+            const FIELD_SETTINGS = get_field_settings(self.union_type, FIELD);
+            const OBJECT_SETTINGS = get_object_settings(TYPE);
+            const SETTINGS = self.settings.combined_with_optional(OBJECT_SETTINGS).combined_with_optional(FIELD_SETTINGS);
+            const TECH = self.builder.low_level.get_tech_for_numeric_type(SETTINGS, TYPE);
+            self.add_single_tag_id_numeric_op_with_custom_settings(tag, FIELD, SETTINGS.TARGET_ENDIAN, .DONT_CACHE_DATA, TECH);
+        }
+
+        /// This method ignores ALL inherited `integer_packing` and `target_endian` settings, and allows optional cacheing of data and other
+        /// non-standard encodings, such as encoding a float as a varint, and/or encoding an unsigned integer or floats using zig-zag encoding
+        ///
+        /// Valid field types are:
+        ///   - Integers
+        ///   - Bools
+        ///   - Enums
+        ///   - Floats
+        ///   - Packed Structs
+        ///   - Packed Unions
+        pub fn add_single_tag_id_numeric_op_with_custom_settings(comptime self: *Self, comptime tag: TAG_TYPE, comptime FIELD: []const u8, comptime TARGET_ENDIAN: Endian, comptime CACHE: DataCacheMode, comptime TECH: DataTransferTech) void {
+            const as_u64 = cast_val_to_u64(tag);
+            assert_with_reason(@hasField(self.union_type, FIELD), @src(), "union type `{s}` does not have field `{s}`", .{ @typeName(self.union_type), FIELD });
+            const TYPE = @FieldType(self.union_type, FIELD);
+            self.builder.low_level.add_union_tag_op(as_u64, 1);
+            self.builder._internal_add_numeric_field_op_with_custom_settings(TYPE, FIELD, 0, TARGET_ENDIAN, CACHE, TECH);
+            self.num_branches += 1;
+        }
+
+        /// This uses the current settings on the parent union, object settings, and field settings for the field to add a data transfer op
+        ///
+        /// Valid field types are:
+        ///   - Integers
+        ///   - Bools
+        ///   - Enums
+        ///   - Floats
+        ///   - Packed Structs
+        ///   - Packed Unions
+        pub fn add_single_tag_id_numeric_array_op(comptime self: *Self, comptime tag: TAG_TYPE, comptime FIELD: []const u8) void {
+            assert_with_reason(@hasField(self.union_type, FIELD), @src(), "union type `{s}` does not have field `{s}`", .{ @typeName(self.union_type), FIELD });
+            const TYPE = @FieldType(self.union_type, FIELD);
+            const FIELD_SETTINGS = get_field_settings(self.union_type, FIELD);
+            const OBJECT_SETTINGS = get_object_settings(TYPE);
+            const SETTINGS = self.settings.combined_with_optional(OBJECT_SETTINGS).combined_with_optional(FIELD_SETTINGS);
+            const TECH = self.builder.low_level.get_tech_for_numeric_type(SETTINGS, TYPE);
+            self.add_single_tag_id_numeric_array_op_with_custom_settings(tag, FIELD, SETTINGS.TARGET_ENDIAN, TECH);
+        }
+
+        /// This method ignores ALL inherited `integer_packing` and `target_endian` settings, and allows optional cacheing of data and other
+        /// non-standard encodings, such as encoding a float as a varint, and/or encoding an unsigned integer or floats using zig-zag encoding
+        ///
+        /// Valid field types are:
+        ///   - Integers
+        ///   - Bools
+        ///   - Enums
+        ///   - Floats
+        ///   - Packed Structs
+        ///   - Packed Unions
+        pub fn add_single_tag_id_numeric_array_op_with_custom_settings(comptime self: *Self, comptime tag: TAG_TYPE, comptime FIELD: []const u8, comptime TARGET_ENDIAN: Endian, comptime TECH: DataTransferTech) void {
+            const as_u64 = cast_val_to_u64(tag);
+            assert_with_reason(@hasField(self.union_type, FIELD), @src(), "union type `{s}` does not have field `{s}`", .{ @typeName(self.union_type), FIELD });
+            const TYPE = @FieldType(self.union_type, FIELD);
+            const FINAL_ELEMENT_TYPE: type, _ = self.builder.low_level.get_numeric_elem_type_and_total_len_for_numeric_array_type(TYPE);
+            const NUM_FOLLOWING = if (@sizeOf(FINAL_ELEMENT_TYPE) == 1) 1 else 2;
+            self.builder.low_level.add_union_tag_op(as_u64, NUM_FOLLOWING);
+            self.builder._internal_add_numeric_array_field_op_with_custom_settings(TYPE, FIELD, 0, TARGET_ENDIAN, TECH);
+            self.num_branches += 1;
+        }
+
+        /// This uses the current settings on the parent union, object settings, and field settings for the field to add a data transfer op
+        ///
+        /// Valid field types are:
+        ///   - Integers
+        ///   - Bools
+        ///   - Enums
+        ///   - Floats
+        ///   - Packed Structs
+        ///   - Packed Unions
+        pub fn add_tag_range_id_numeric_op(comptime self: *Self, comptime tag_min: TAG_TYPE, comptime tag_max: TAG_TYPE, comptime FIELD: []const u8) void {
+            assert_with_reason(@hasField(self.union_type, FIELD), @src(), "union type `{s}` does not have field `{s}`", .{ @typeName(self.union_type), FIELD });
+            const TYPE = @FieldType(self.union_type, FIELD);
+            const FIELD_SETTINGS = get_field_settings(self.union_type, FIELD);
+            const OBJECT_SETTINGS = get_object_settings(TYPE);
+            const SETTINGS = self.settings.combined_with_optional(OBJECT_SETTINGS).combined_with_optional(FIELD_SETTINGS);
+            const TECH = self.builder.low_level.get_tech_for_numeric_type(SETTINGS, TYPE);
+            self.add_tag_range_id_numeric_op_with_custom_settings(tag_min, tag_max, FIELD, SETTINGS.TARGET_ENDIAN, .DONT_CACHE_DATA, TECH);
+        }
+
+        /// This method ignores ALL inherited `integer_packing` and `target_endian` settings, and allows optional cacheing of data and other
+        /// non-standard encodings, such as encoding a float as a varint, and/or encoding an unsigned integer or floats using zig-zag encoding
+        ///
+        /// Valid field types are:
+        ///   - Integers
+        ///   - Bools
+        ///   - Enums
+        ///   - Floats
+        ///   - Packed Structs
+        ///   - Packed Unions
+        pub fn add_tag_range_id_numeric_op_with_custom_settings(comptime self: *Self, comptime tag_min: TAG_TYPE, comptime tag_max: TAG_TYPE, comptime FIELD: []const u8, comptime TARGET_ENDIAN: Endian, comptime CACHE: DataCacheMode, comptime TECH: DataTransferTech) void {
+            const min_as_u64 = cast_val_to_u64(tag_min);
+            const max_as_u64 = cast_val_to_u64(tag_max);
+            assert_with_reason(@hasField(self.union_type, FIELD), @src(), "union type `{s}` does not have field `{s}`", .{ @typeName(self.union_type), FIELD });
+            const TYPE = @FieldType(self.union_type, FIELD);
+            self.builder.low_level.add_union_range_op(min_as_u64, max_as_u64, 1);
+            self.builder._internal_add_numeric_field_op_with_custom_settings(TYPE, FIELD, 0, TARGET_ENDIAN, CACHE, TECH);
+            self.num_branches += 1;
+        }
+
+        /// This uses the current settings on the parent union, object settings, and field settings for the field to add a data transfer op
+        ///
+        /// Valid field types are:
+        ///   - Integers
+        ///   - Bools
+        ///   - Enums
+        ///   - Floats
+        ///   - Packed Structs
+        ///   - Packed Unions
+        pub fn add_tag_range_id_numeric_array_op(comptime self: *Self, comptime tag_min: TAG_TYPE, comptime tag_max: TAG_TYPE, comptime FIELD: []const u8) void {
+            assert_with_reason(@hasField(self.union_type, FIELD), @src(), "union type `{s}` does not have field `{s}`", .{ @typeName(self.union_type), FIELD });
+            const TYPE = @FieldType(self.union_type, FIELD);
+            const FIELD_SETTINGS = get_field_settings(self.union_type, FIELD);
+            const OBJECT_SETTINGS = get_object_settings(TYPE);
+            const SETTINGS = self.settings.combined_with_optional(OBJECT_SETTINGS).combined_with_optional(FIELD_SETTINGS);
+            const TECH = self.builder.low_level.get_tech_for_numeric_type(SETTINGS, TYPE);
+            self.add_tag_range_id_numeric_array_op_with_custom_settings(tag_min, tag_max, FIELD, SETTINGS.TARGET_ENDIAN, TECH);
+        }
+
+        /// This method ignores ALL inherited `integer_packing` and `target_endian` settings, and allows optional cacheing of data and other
+        /// non-standard encodings, such as encoding a float as a varint, and/or encoding an unsigned integer or floats using zig-zag encoding
+        ///
+        /// Valid field types are:
+        ///   - Integers
+        ///   - Bools
+        ///   - Enums
+        ///   - Floats
+        ///   - Packed Structs
+        ///   - Packed Unions
+        pub fn add_tag_range_id_numeric_array_op_with_custom_settings(comptime self: *Self, comptime tag_min: TAG_TYPE, comptime tag_max: TAG_TYPE, comptime FIELD: []const u8, comptime TARGET_ENDIAN: Endian, comptime TECH: DataTransferTech) void {
+            const min_as_u64 = cast_val_to_u64(tag_min);
+            const max_as_u64 = cast_val_to_u64(tag_max);
+            assert_with_reason(@hasField(self.union_type, FIELD), @src(), "union type `{s}` does not have field `{s}`", .{ @typeName(self.union_type), FIELD });
+            const TYPE = @FieldType(self.union_type, FIELD);
+            const FINAL_ELEMENT_TYPE: type, _ = self.builder.low_level.get_numeric_elem_type_and_total_len_for_numeric_array_type(TYPE);
+            const NUM_FOLLOWING = if (@sizeOf(FINAL_ELEMENT_TYPE) == 1) 1 else 2;
+            self.builder.low_level.add_union_tag_op(min_as_u64, max_as_u64, NUM_FOLLOWING);
+            self.builder._internal_add_numeric_array_field_op_with_custom_settings(TYPE, FIELD, 0, TARGET_ENDIAN, TECH);
+            self.num_branches += 1;
+        }
+
+        // CHECKPOINT pointers/subroutine types
+
+        pub fn finalize(comptime self: *Self) void {
+            self.builder.low_level.ops[self.op_idx_for_header].UNION_HEADER.num_fields = self.num_branches;
+            self.* = undefined;
+        }
+    };
+}
 
 const RoutineStackFrame = struct {
     routine_start: u32,
