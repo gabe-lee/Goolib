@@ -1597,6 +1597,12 @@ pub const PowerOf2 = enum(u8) {
     pub const USIZE_BITS_MINUS_ONE = USIZE_BITS - 1;
     pub const USIZE_BITS_SHIFT = if (@sizeOf(usize) == 4) 5 else 6;
 
+    pub fn to_alloc_align(self: PowerOf2) std.mem.Alignment {
+        const raw = @intFromEnum(self);
+        const raw_cast: math.Log2Int(usize) = @intCast(raw);
+        return @enumFromInt(raw_cast);
+    }
+
     pub fn align_of_type(comptime T: type) PowerOf2 {
         return @enumFromInt(@as(u8, @alignOf(T)));
     }
@@ -1629,23 +1635,23 @@ pub const PowerOf2 = enum(u8) {
         return std.meta.Int(.unsigned, total_limit);
     }
 
-    pub fn alignment(int_or_ptr: anytype) PowerOf2 {
+    pub fn alignment_power(int_or_ptr: anytype) PowerOf2 {
         const T = @TypeOf(int_or_ptr);
         const INFO = @typeInfo(T);
         switch (INFO) {
             .int => {
                 const i = @abs(int_or_ptr);
-                const tz = @ctz(i);
+                const tz = @min(@ctz(i), 255);
                 return @enumFromInt(tz);
             },
             .@"enum" => {
                 const i = @abs(@intFromEnum(int_or_ptr));
-                const tz = @ctz(i);
+                const tz = @min(@ctz(i), 255);
                 return @enumFromInt(tz);
             },
             .pointer => {
                 const i = @intFromPtr(int_or_ptr);
-                const tz = @ctz(i);
+                const tz = @min(@ctz(i), 255);
                 return @enumFromInt(tz);
             },
             else => assert_unreachable(@src(), "type `{s}` not a valid input type", .{@typeName(T)}),
@@ -1655,14 +1661,14 @@ pub const PowerOf2 = enum(u8) {
         return min_align.value_is_aligned_at_least(int_or_ptr);
     }
     pub fn value_is_aligned_at_least(self: PowerOf2, int_or_ptr: anytype) bool {
-        const val_align = alignment(int_or_ptr);
+        const val_align = alignment_power(int_or_ptr);
         return @intFromEnum(val_align) >= @intFromEnum(self);
     }
     pub inline fn exactly_aligned_to(int_or_ptr: anytype, min_align: PowerOf2) bool {
         return min_align.value_is_aligned_exactly(int_or_ptr);
     }
     pub fn value_is_aligned_exactly(self: PowerOf2, int_or_ptr: anytype) bool {
-        const val_align = alignment(int_or_ptr);
+        const val_align = alignment_power(int_or_ptr);
         return @intFromEnum(val_align) == @intFromEnum(self);
     }
     pub fn power_of_2(n: anytype) PowerOf2 {

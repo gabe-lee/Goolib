@@ -219,8 +219,10 @@ pub const DataOpKind = enum(u8) {
     UNION_TAG_RANGE_ONE_FOLLOWING,
     UNION_TAG_RANGE_TWO_FOLLOWING,
     // Pointer Control
-    FOLLOW_OR_ALLOCATE_POINTER_STATIC_LEN,
-    FOLLOW_OR_ALLOCATE_POINTER_DYNAMIC_LEN,
+    ALLOCATED_POINTER_STATIC_LEN,
+    ALLOCATED_POINTER_DYNAMIC_LEN,
+    POINTER_TO_PREVIOUSLY_ALLOCATED_REGION_STATIC_LEN,
+    POINTER_TO_PREVIOUSLY_ALLOCATED_REGION_DYNAMIC_LEN,
     // Custom
     FULL_CUSTOM_FUNCTION,
 };
@@ -241,7 +243,7 @@ pub const DataOp = extern union {
     UNION_TAG_ID: UnionTagId,
     UNION_TAG_RANGE: UnionTagRange,
     // Pointers
-    POINTER: FollowOrAllocatePointer,
+    POINTER: Pointer,
     // Custom
     FULL_CUSTOM_FUNCTION: CustomFunctions,
 
@@ -297,12 +299,21 @@ pub const DataOp = extern union {
         return DataOp{ .REF_UNIQUE_TYPE_SUBRS = RefUniqueTypeSubroutine{ .unique_type_index = unique_type_index, .offset_to_next_field = offset_to_next_field } };
     }
 
-    pub fn new_pointer_follow_or_allocate_op(comptime elem_size: u32, comptime elem_align: u16, comptime static_len: u32, comptime offset_to_next_field: i32, comptime kind: DataOpKind) DataOp {
+    pub fn new_allocated_pointer_op(comptime elem_size: u32, comptime elem_align: u32, comptime alloc_idx: u16, comptime static_len: u32, comptime offset_to_next_field: i32, comptime kind: DataOpKind) DataOp {
         switch (kind) {
-            .FOLLOW_OR_ALLOCATE_POINTER_STATIC_LEN, .FOLLOW_OR_ALLOCATE_POINTER_DYNAMIC_LEN => {},
-            else => assert_unreachable(@src(), "cannot create a `FollowOrAllocatePointer` op with kind `{s}`", .{@tagName(kind)}),
+            .ALLOCATED_POINTER_STATIC_LEN, .ALLOCATED_POINTER_DYNAMIC_LEN => {},
+            else => assert_unreachable(@src(), "cannot create a `AllocatedPointer` op with kind `{s}`", .{@tagName(kind)}),
         }
-        return DataOp{ .POINTER = FollowOrAllocatePointer{ .elem_size = elem_size, .elem_align = elem_align, .static_len = static_len, .offset_to_next_field = offset_to_next_field, .kind = kind } };
+        const ptr_align_power = PowerOf2.alignment_power(elem_align);
+        return DataOp{ .POINTER = Pointer{ .elem_size = elem_size, .ptr_align_power = ptr_align_power, .alloc_idx = alloc_idx, .static_len = static_len, .offset_to_next_field = offset_to_next_field, .kind = kind } };
+    }
+
+    pub fn new_previous_allocation_ref_op(comptime elem_size: u32, comptime static_len: u32, comptime offset_to_next_field: i32, comptime kind: DataOpKind) DataOp {
+        switch (kind) {
+            .POINTER_TO_PREVIOUSLY_ALLOCATED_REGION_DYNAMIC_LEN, .POINTER_TO_PREVIOUSLY_ALLOCATED_REGION_STATIC_LEN => {},
+            else => assert_unreachable(@src(), "cannot create a `PreviousAllocationReference` op with kind `{s}`", .{@tagName(kind)}),
+        }
+        return DataOp{ .Pointer = Pointer{ .elem_size = elem_size, .static_len = static_len, .offset_to_next_field = offset_to_next_field, .kind = kind } };
     }
 
     pub fn new_custom_functions_op(comptime funcs: *const CustomRuntimeSerializeFuncs, comptime offset_to_next_field: i32) DataOp {
@@ -368,6 +379,7 @@ const UnionTagId = extern struct {
         }
     }
 };
+
 const UnionTagRange = extern struct {
     /// The union tag max value (inclusive) first bitcast to a u64,
     /// then swapped to little-endian order, if needed
@@ -442,16 +454,17 @@ const SubroutineStart = extern struct {
     kind: DataOpKind = .START_SUBROUTINE_NO_REPEAT_CURRENT_REGION,
 };
 
-const FollowOrAllocatePointer = extern struct {
+const Pointer = extern struct {
     elem_size: u32 = 1,
     static_len: u32 = 1,
     offset_to_next_field: i32 = 0,
-    elem_align: u16 = 1,
-    __padding: [1]u8 = @splat(0),
+    alloc_idx: u16 = 0,
+    ptr_align_power: PowerOf2 = ._1,
     /// The kind tag, used both for determining the union field, and how to handle
     /// union fields with multiple modes
-    kind: DataOpKind = .FOLLOW_OR_ALLOCATE_POINTER_STATIC_LEN,
+    kind: DataOpKind = .ALLOCATED_POINTER_STATIC_LEN,
 };
+
 
 const CustomFunctions = extern struct {
     /// A pair of serialize and deserialize functions
@@ -512,31 +525,32 @@ pub const DataOpBuilderLowLevel = struct {
     current_kind: Kind,
     current_settings: ObjectSerialSettings,
     unique_types: []const UniqueSerialType,
-    used_ops: []const DataOp = &.{},
-    ops_offset: u32 = 0,
     ops: []DataOp = &.{},
-    len: u32 = 0,
+    ops_len: u32 = 0,
+    alloc_buf: []u8 = &.{},
+    alloc_buf_len: u32 = 0,
+    alloc_names: []SliceRange = &.{},
+    alloc_names_len: u32 = 0,
     // subroutine_max_len_to_inline: u8 = 1,
 
-    fn new(comptime current_type: type, comptime current_settings: ObjectSerialSettings, comptime uniques: []const UniqueSerialType, comptime used_ops: []const DataOp, comptime unused_ops: []DataOp) DataOpBuilderLowLevel {
+    fn new(comptime current_type: type, comptime current_settings: ObjectSerialSettings, comptime uniques: []const UniqueSerialType, comptime ops: []DataOp) DataOpBuilderLowLevel {
         return DataOpBuilderLowLevel{
             .current_type = current_type,
             .current_kind = Kind.get_kind(current_type),
             .current_settings = current_settings,
             .unique_types = uniques,
-            .ops_offset = num_cast(used_ops.len, u32),
             .ops = unused_ops,
-            .used_ops = used_ops,
         };
     }
 
+
     fn assert_ops_space(comptime self: *DataOpBuilderLowLevel, comptime n: u32, comptime src: std.builtin.SourceLocation) void {
-        assert_with_reason(self.len + n <= self.ops.len, src, "ran out of space in ops buffer, need at least len {d}, have len {d}, provide a larger `OP_BUFFER_MAX_LEN` during SerialManager initialization", .{ self.len + n, self.ops.len });
+        assert_with_reason(self.ops_len + n <= self.ops.len, src, "ran out of space in ops buffer, need at least len {d}, have len {d}, provide a larger `OP_BUFFER_MAX_LEN` during SerialManager initialization", .{ self.ops_len + n, self.ops.len });
     }
 
     fn push_op(comptime self: *DataOpBuilderLowLevel, comptime op: DataOp) void {
-        self.ops[self.len] = op;
-        self.len += 1;
+        self.ops[self.ops_len] = op;
+        self.ops_len += 1;
     }
 
     pub fn add_add_native_offset_op(comptime self: *DataOpBuilderLowLevel, comptime offset: i32) void {
@@ -628,7 +642,7 @@ pub const DataOpBuilderLowLevel = struct {
                 .STATIC_REPEAT_OR_NO_REPEAT => if (subroutine_static_repeat <= 1) DataOpKind.START_SUBROUTINE_NO_REPEAT_CURRENT_REGION else DataOpKind.START_SUBROUTINE_STATIC_REPEAT_CURRENT_REGION,
             },
         };
-        const subroutine_first_op = self.ops_offset + self.len + 1;
+        const subroutine_first_op = self.ops_offset + self.ops_len + 1;
         const op = DataOp.new_subroutine_op(subroutine_first_op, subroutine_num_ops, subroutine_static_repeat, offset_to_next_field, kind);
         self.push_op(op);
     }
@@ -649,13 +663,23 @@ pub const DataOpBuilderLowLevel = struct {
         self.push_op(op);
     }
 
-    pub fn add_pointer_follow_or_allocate_op(comptime self: *DataOpBuilderLowLevel, comptime elem_size: u32, comptime elem_align: u16, comptime static_len: u32, comptime offset_to_next_field: i32, comptime LEN_MODE: PointerLenMode) void {
+    pub fn add_allocated_pointer_op(comptime self: *DataOpBuilderLowLevel, comptime elem_size: u32, comptime ptr_align: u32, alloc_idx: u16, comptime static_len: u32, comptime offset_to_next_field: i32, comptime LEN_MODE: PointerLenMode) void {
         self.assert_ops_space(1, @src());
         const kind: DataOpKind = switch (LEN_MODE) {
-            .STATIC_LEN_POINTER => DataOpKind.FOLLOW_OR_ALLOCATE_POINTER_STATIC_LEN,
-            .DYNAMIC_LEN_POINTER => DataOpKind.FOLLOW_OR_ALLOCATE_POINTER_DYNAMIC_LEN,
+            .STATIC_LEN_POINTER => DataOpKind.ALLOCATED_POINTER_STATIC_LEN,
+            .DYNAMIC_LEN_POINTER => DataOpKind.ALLOCATED_POINTER_DYNAMIC_LEN,
         };
-        const op = DataOp.new_pointer_follow_or_allocate_op(elem_size, elem_align, static_len, offset_to_next_field, kind);
+        const op = DataOp.new_allocated_pointer_op(elem_size, ptr_align, alloc_idx, static_len, offset_to_next_field, kind);
+        self.push_op(op);
+    }
+
+    pub fn add_prev_allocation_ref_pointer_op(comptime self: *DataOpBuilderLowLevel, comptime elem_size: u32, comptime ptr_align: u32, alloc_idx: u16, comptime static_len: u32, comptime offset_to_next_field: i32, comptime LEN_MODE: PointerLenMode) void {
+        self.assert_ops_space(1, @src());
+        const kind: DataOpKind = switch (LEN_MODE) {
+            .STATIC_LEN_POINTER => DataOpKind.POINTER_TO_PREVIOUSLY_ALLOCATED_REGION_STATIC_LEN,
+            .DYNAMIC_LEN_POINTER => DataOpKind.POINTER_TO_PREVIOUSLY_ALLOCATED_REGION_DYNAMIC_LEN,
+        };
+        const op = DataOp.new_previous_allocation_ref_op(elem_size, ptr_align, alloc_idx, static_len, offset_to_next_field, kind);
         self.push_op(op);
     }
 
@@ -784,6 +808,22 @@ pub const DataOpBuilderLowLevel = struct {
         }
         return false;
     }
+
+    pub fn get_or_add_alloc_name_index(comptime self: *DataOpBuilderLowLevel, comptime alloc_name: []const u8) u16 {
+        for (self.alloc_names[0..self.alloc_names_len], 0..) |existing_name_segment, i| {
+            const existing_name = self.alloc_buf[existing_name_segment.start..existing_name_segment.end];
+            if (std.mem.eql(u8, existing_name, alloc_name)) return num_cast(i, u32);
+        }
+        const alloc_name_len_u32 = num_cast(alloc_name.len, u32);
+        assert_with_reason(self.alloc_buf_len + alloc_name_len_u32 <= self.alloc_buf.len, @src(), "ran out of space for allocator name bytes, have len {d}, need at least len {d}, provide a larger `ALLOC_NAME_BYTES_BUFFER_MAX_LEN` during initialization", .{ self.alloc_buf.len, self.alloc_buf_len + alloc_name_len_u32 });
+        assert_with_reason(self.alloc_names_len < self.alloc_names.len, @src(), "ran out of space for allocator name slots, have len {d}, need at least len {d}, provide a larger `ALLOC_NAME_LIST_MAX_LEN` during initialization", .{ self.alloc_names.len, self.alloc_names_len + 1 });
+        self.alloc_names[self.alloc_names_len] = SliceRange.new_with_len(self.alloc_buf_len, alloc_name_len_u32);
+        const idx: u16 = @intCast(self.alloc_names_len);
+        self.alloc_names_len += 1;
+        @memcpy(self.alloc_buf[self.alloc_buf_len .. self.alloc_buf_len + alloc_name_len_u32], alloc_name);
+        self.alloc_buf_len += alloc_name_len_u32;
+        return idx;
+    }
 };
 
 pub const NO_FIELD_CACHE = "<cached but no field>";
@@ -838,7 +878,7 @@ pub const DataOpBuilderStruct = struct {
     ///   - Floats
     ///   - Packed Structs
     ///   - Packed Unions
-    fn _internal_add_numeric_field_op_with_custom_settings(comptime self: *DataOpBuilderStruct, comptime TYPE: type, comptime TYPE_FIELD: ?[]const u8, comptime OFFSET_TO_NEXT_VALUE: i32, comptime TARGET_ENDIAN: Endian, comptime CACHE_DATA: DataCacheMode, comptime TECH: DataTransferTech) void {
+    fn _internal_add_numeric_field_with_custom_settings(comptime self: *DataOpBuilderStruct, comptime TYPE: type, comptime TYPE_FIELD: ?[]const u8, comptime OFFSET_TO_NEXT_VALUE: i32, comptime TARGET_ENDIAN: Endian, comptime CACHE_DATA: DataCacheMode, comptime TECH: DataTransferTech) void {
         if (self.low_level.goto_next_field_if_this_type_size_0(TYPE, OFFSET_TO_NEXT_VALUE)) {
             return;
         }
@@ -866,11 +906,11 @@ pub const DataOpBuilderStruct = struct {
     ///   - Floats
     ///   - Packed Structs
     ///   - Packed Unions
-    fn _internal_add_numeric_field_op(comptime self: *DataOpBuilderStruct, comptime TYPE: type, comptime TYPE_FIELD: ?[]const u8, comptime OFFSET_TO_NEXT_VALUE: i32) void {
+    fn _internal_add_numeric_field(comptime self: *DataOpBuilderStruct, comptime TYPE: type, comptime TYPE_FIELD: ?[]const u8, comptime OFFSET_TO_NEXT_VALUE: i32) void {
         const SETTINGS = self.low_level.get_final_settings_for_value(TYPE, TYPE_FIELD);
         const TECH = self.low_level.get_tech_for_numeric_type(SETTINGS, TYPE);
         const ENDIAN = SETTINGS.TARGET_ENDIAN;
-        return self._internal_add_numeric_field_op_with_custom_settings(TYPE, TYPE_FIELD, OFFSET_TO_NEXT_VALUE, ENDIAN, .DONT_CACHE_DATA, TECH);
+        return self._internal_add_numeric_field_with_custom_settings(TYPE, TYPE_FIELD, OFFSET_TO_NEXT_VALUE, ENDIAN, .DONT_CACHE_DATA, TECH);
     }
 
     /// This uses the current settings on the parent struct (if any) and fields settings (if any) for the field to add a data transfer op
@@ -884,11 +924,11 @@ pub const DataOpBuilderStruct = struct {
     ///   - Floats
     ///   - Packed Structs
     ///   - Packed Unions
-    fn _internal_add_numeric_field_op_cache_data(comptime self: *DataOpBuilderStruct, comptime TYPE: type, comptime TYPE_FIELD: ?[]const u8, comptime OFFSET_TO_NEXT_VALUE: i32, comptime CACHE: DataCacheMode) void {
+    fn _internal_add_numeric_field_cache_data(comptime self: *DataOpBuilderStruct, comptime TYPE: type, comptime TYPE_FIELD: ?[]const u8, comptime OFFSET_TO_NEXT_VALUE: i32, comptime CACHE: DataCacheMode) void {
         const SETTINGS = self.low_level.get_final_settings_for_value(TYPE, TYPE_FIELD);
         const TECH = self.low_level.get_tech_for_numeric_type(SETTINGS, TYPE);
         const ENDIAN = SETTINGS.TARGET_ENDIAN;
-        return self._internal_add_numeric_field_op_with_custom_settings(TYPE, TYPE_FIELD, OFFSET_TO_NEXT_VALUE, ENDIAN, CACHE, TECH);
+        return self._internal_add_numeric_field_with_custom_settings(TYPE, TYPE_FIELD, OFFSET_TO_NEXT_VALUE, ENDIAN, CACHE, TECH);
     }
 
     /// This method ignores ALL inherited `integer_packing` and `target_endian` settings, and allows optional cacheing of data and other
@@ -901,7 +941,7 @@ pub const DataOpBuilderStruct = struct {
     ///   - Floats
     ///   - Packed Structs
     ///   - Packed Unions
-    pub fn add_numeric_field_op_with_custom_settings(comptime self: *DataOpBuilderStruct, FIELD: []const u8, comptime NEXT_FIELD: ?[]const u8, comptime TARGET_ENDIAN: Endian, comptime CACHE_DATA: DataCacheMode, comptime TECH: DataTransferTech) void {
+    pub fn add_numeric_field_with_custom_settings(comptime self: *DataOpBuilderStruct, FIELD: []const u8, comptime NEXT_FIELD: ?[]const u8, comptime TARGET_ENDIAN: Endian, comptime CACHE_DATA: DataCacheMode, comptime TECH: DataTransferTech) void {
         assert_with_reason(self.low_level.current_kind == .STRUCT, @src(), "current type kind is not a struct, current kind is `{s}`, real type `{s}`", .{ @tagName(self.low_level.current_kind), @typeName(self.low_level.current_type) });
         assert_with_reason(@hasField(self.low_level.current_type, FIELD), @src(), "struct `{s}` does not have field `{s}`", .{ @typeName(self.low_level.current_type), FIELD });
         if (NEXT_FIELD) |NEXT| assert_with_reason(@hasField(self.low_level.current_type, NEXT), @src(), "struct `{s}` does not have NEXT field `{s}`", .{ @typeName(self.low_level.current_type), NEXT });
@@ -913,7 +953,7 @@ pub const DataOpBuilderStruct = struct {
         self.prev_field = FIELD;
         self.next_field = NEXT_FIELD;
         const offset_to_next_field = self.low_level.get_offset_between_two_fields(FIELD, NEXT_FIELD);
-        self._internal_add_numeric_field_op_with_custom_settings(TYPE, FIELD, offset_to_next_field, TARGET_ENDIAN, CACHE_DATA, TECH);
+        self._internal_add_numeric_field_with_custom_settings(TYPE, FIELD, offset_to_next_field, TARGET_ENDIAN, CACHE_DATA, TECH);
     }
 
     /// This method ignores ALL inherited `integer_packing` and `target_endian` settings, and allows optional cacheing of data and other
@@ -926,7 +966,7 @@ pub const DataOpBuilderStruct = struct {
     ///   - Floats
     ///   - Packed Structs
     ///   - Packed Unions
-    fn _internal_add_numeric_array_field_op_with_custom_settings(comptime self: *DataOpBuilderStruct, comptime TYPE: type, comptime TYPE_FIELD: ?[]const u8, comptime OFFSET_TO_NEXT_VALUE: i32, comptime TARGET_ENDIAN: Endian, comptime TECH: DataTransferTech) void {
+    fn _internal_add_numeric_array_field_with_custom_settings(comptime self: *DataOpBuilderStruct, comptime TYPE: type, comptime TYPE_FIELD: ?[]const u8, comptime OFFSET_TO_NEXT_VALUE: i32, comptime TARGET_ENDIAN: Endian, comptime TECH: DataTransferTech) void {
         if (self.low_level.goto_next_field_if_this_type_size_0(TYPE, OFFSET_TO_NEXT_VALUE)) {
             return;
         }
@@ -952,11 +992,11 @@ pub const DataOpBuilderStruct = struct {
     ///   - Floats
     ///   - Packed Structs
     ///   - Packed Unions
-    fn _internal_add_numeric_array_field_op(comptime self: *DataOpBuilderStruct, comptime TYPE: type, comptime TYPE_FIELD: ?[]const u8, comptime OFFSET_TO_NEXT_VALUE: i32) void {
+    fn _internal_add_numeric_array_field(comptime self: *DataOpBuilderStruct, comptime TYPE: type, comptime TYPE_FIELD: ?[]const u8, comptime OFFSET_TO_NEXT_VALUE: i32) void {
         const SETTINGS = self.low_level.get_final_settings_for_value(TYPE, TYPE_FIELD);
         const TECH = self.low_level.get_tech_for_numeric_type(SETTINGS, TYPE);
         const ENDIAN = SETTINGS.TARGET_ENDIAN;
-        return self._internal_add_numeric_array_field_op_with_custom_settings(TYPE, TYPE_FIELD, OFFSET_TO_NEXT_VALUE, ENDIAN, .DONT_CACHE_DATA, TECH);
+        return self._internal_add_numeric_array_field_with_custom_settings(TYPE, TYPE_FIELD, OFFSET_TO_NEXT_VALUE, ENDIAN, .DONT_CACHE_DATA, TECH);
     }
 
     /// This uses the current settings on the parent struct and fields settings for the field to add a data transfer op
@@ -968,13 +1008,13 @@ pub const DataOpBuilderStruct = struct {
     ///   - Floats
     ///   - Packed Structs
     ///   - Packed Unions
-    pub fn add_numeric_field_op(comptime self: *DataOpBuilderStruct, FIELD: []const u8, comptime NEXT_FIELD: ?[]const u8) void {
+    pub fn add_numeric_field(comptime self: *DataOpBuilderStruct, FIELD: []const u8, comptime NEXT_FIELD: ?[]const u8) void {
         assert_with_reason(self.low_level.current_kind == .STRUCT, @src(), "current type kind is not a struct, current kind is `{s}`, real type `{s}`", .{ @tagName(self.low_level.current_kind), @typeName(self.low_level.current_type) });
         assert_with_reason(@hasField(self.low_level.current_type, FIELD), @src(), "struct `{s}` does not have field `{s}`", .{ @typeName(self.low_level.current_type), FIELD });
         const TYPE = @FieldType(self.low_level.current_type, FIELD);
         const SETTINGS = self.low_level.get_final_settings_for_value(TYPE, FIELD);
         const TECH = self.low_level.get_tech_for_numeric_type(SETTINGS, TYPE);
-        self.add_numeric_field_op_with_custom_settings(FIELD, NEXT_FIELD, SETTINGS.TARGET_ENDIAN, .DONT_CACHE_DATA, TECH);
+        self.add_numeric_field_with_custom_settings(FIELD, NEXT_FIELD, SETTINGS.TARGET_ENDIAN, .DONT_CACHE_DATA, TECH);
     }
 
     /// This uses the current settings on the parent struct and fields settings for the field to add a data transfer op
@@ -988,13 +1028,13 @@ pub const DataOpBuilderStruct = struct {
     ///   - Floats
     ///   - Packed Structs
     ///   - Packed Unions
-    pub fn add_numeric_field_op_cache_data(comptime self: *DataOpBuilderStruct, FIELD: []const u8, comptime NEXT_FIELD: ?[]const u8, comptime CACHE: DataCacheMode) void {
+    pub fn add_numeric_field_and_cache_data(comptime self: *DataOpBuilderStruct, FIELD: []const u8, comptime NEXT_FIELD: ?[]const u8, comptime CACHE: DataCacheMode) void {
         assert_with_reason(self.low_level.current_kind == .STRUCT, @src(), "current type kind is not a struct, current kind is `{s}`, real type `{s}`", .{ @tagName(self.low_level.current_kind), @typeName(self.low_level.current_type) });
         assert_with_reason(@hasField(self.low_level.current_type, FIELD), @src(), "struct `{s}` does not have field `{s}`", .{ @typeName(self.low_level.current_type), FIELD });
         const TYPE = @FieldType(self.low_level.current_type, FIELD);
         const SETTINGS = self.low_level.get_final_settings_for_value(TYPE, FIELD);
         const TECH = self.low_level.get_tech_for_numeric_type(SETTINGS, TYPE);
-        self.add_numeric_field_op_with_custom_settings(FIELD, NEXT_FIELD, SETTINGS.TARGET_ENDIAN, CACHE, TECH);
+        self.add_numeric_field_with_custom_settings(FIELD, NEXT_FIELD, SETTINGS.TARGET_ENDIAN, CACHE, TECH);
     }
 
     /// This method ignores ALL inherited `integer_packing` and `target_endian` settings, and allows optional cacheing of data and other
@@ -1008,7 +1048,7 @@ pub const DataOpBuilderStruct = struct {
     ///   - Floats
     ///   - Packed Structs
     ///   - Packed Unions
-    pub fn add_numeric_array_field_op_with_custom_settings(comptime self: *DataOpBuilderStruct, FIELD: []const u8, comptime NEXT_FIELD: ?[]const u8, comptime TARGET_ENDIAN: Endian, comptime TECH: DataTransferTech) void {
+    pub fn add_numeric_array_field_with_custom_settings(comptime self: *DataOpBuilderStruct, FIELD: []const u8, comptime NEXT_FIELD: ?[]const u8, comptime TARGET_ENDIAN: Endian, comptime TECH: DataTransferTech) void {
         assert_with_reason(self.low_level.current_kind == .STRUCT, @src(), "current type kind is not a struct, current kind is `{s}`, real type `{s}`", .{ @tagName(self.low_level.current_kind), @typeName(self.low_level.current_type) });
         assert_with_reason(@hasField(self.low_level.current_type, FIELD), @src(), "struct `{s}` does not have field `{s}`", .{ @typeName(self.low_level.current_type), FIELD });
         if (NEXT_FIELD) |NEXT| assert_with_reason(@hasField(self.low_level.current_type, NEXT), @src(), "struct `{s}` does not have NEXT field `{s}`", .{ @typeName(self.low_level.current_type), NEXT });
@@ -1020,7 +1060,7 @@ pub const DataOpBuilderStruct = struct {
         self.prev_field = FIELD;
         self.next_field = NEXT_FIELD;
         const offset_to_next_field = self.low_level.get_offset_between_two_fields(FIELD, NEXT_FIELD);
-        self._internal_add_numeric_array_field_op_with_custom_settings(TYPE, FIELD, offset_to_next_field, TARGET_ENDIAN, TECH);
+        self._internal_add_numeric_array_field_with_custom_settings(TYPE, FIELD, offset_to_next_field, TARGET_ENDIAN, TECH);
     }
 
     /// This uses the current settings on the parent struct and fields settings for the field to add a data transfer op
@@ -1033,13 +1073,13 @@ pub const DataOpBuilderStruct = struct {
     ///   - Floats
     ///   - Packed Structs
     ///   - Packed Unions
-    pub fn add_numeric_array_field_op(comptime self: *DataOpBuilderStruct, FIELD: []const u8, comptime NEXT_FIELD: ?[]const u8) void {
+    pub fn add_numeric_array_field(comptime self: *DataOpBuilderStruct, FIELD: []const u8, comptime NEXT_FIELD: ?[]const u8) void {
         assert_with_reason(self.low_level.current_kind == .STRUCT, @src(), "current type kind is not a struct, current kind is `{s}`, real type `{s}`", .{ @tagName(self.low_level.current_kind), @typeName(self.low_level.current_type) });
         assert_with_reason(@hasField(self.low_level.current_type, FIELD), @src(), "struct `{s}` does not have field `{s}`", .{ @typeName(self.low_level.current_type), FIELD });
         const TYPE = @FieldType(self.low_level.current_type, FIELD);
         const SETTINGS = self.low_level.get_final_settings_for_value(TYPE, FIELD);
         const TECH = self.low_level.get_tech_for_numeric_array_type(SETTINGS, TYPE);
-        self.add_numeric_array_field_op_with_custom_settings(FIELD, NEXT_FIELD, SETTINGS.TARGET_ENDIAN, TECH);
+        self.add_numeric_array_field_with_custom_settings(FIELD, NEXT_FIELD, SETTINGS.TARGET_ENDIAN, TECH);
     }
 
     /// Build an extern union subroutine using a tag cached by a previous data transfer op. Note the input parameters:
@@ -1056,7 +1096,7 @@ pub const DataOpBuilderStruct = struct {
         const KIND = KindInfo.get_kind_info(TYPE);
         assert_with_reason(KIND == .UNION and KIND.UNION.tag_type == null and KIND.UNION.layout == .@"extern", @src(), "type of `FIELD` must be an extern union type (it is the only union type with a well defined memory layout for automatic serialization), got type `{s}`", .{@typeName(TYPE)});
         const UNION_BUILDER = DataOpBuilderExternUnion(TAG_TYPE);
-        const header_op_idx = self.low_level.len;
+        const header_op_idx = self.low_level.ops_len;
         self.low_level.add_union_header_op(0);
         const union_builder = UNION_BUILDER{
             .builder = self,
@@ -1065,6 +1105,33 @@ pub const DataOpBuilderStruct = struct {
             .union_type = TYPE,
         };
         return union_builder;
+    }
+
+    fn _internal_add_pointer_to_single_numeric_value_with_custom_settings(comptime self: *DataOpBuilderStruct, comptime PTR_TYPE: type, comptime FIELD: ?[]const u8, comptime OFFSET_TO_NEXT_VALUE: i32, comptime ALLOC_NAME: ?[]const u8, comptime TARGET_ENDIAN: Endian, comptime CACHE_DATA: DataCacheMode, comptime TECH: DataTransferTech) void {
+        const PTR_INFO = KindInfo.get_kind_info(PTR_TYPE);
+        assert_with_reason(PTR_INFO == .POINTER and PTR_INFO.POINTER.size != .slice, @src(), "type of field `{s}` on type `{s}` was not a single-item pointer, got type `{s}`", .{FIELD, @typeName(self.low_level.current_type)});
+        const ELEM_SIZE = @sizeOf(PTR_INFO.POINTER.child);
+        const PTR_ALIGN = PTR_INFO.POINTER.alignment;
+        const REAL_ALLOC_NAME = if (ALLOC_NAME) |A_N| A_N else DEFAULT_ALLOC_NAME;
+        const alloc_idx = self.low_level.get_or_add_alloc_name_index(REAL_ALLOC_NAME);
+        self.low_level.add_pointer_follow_or_allocate_op(ELEM_SIZE, PTR_ALIGN, alloc_idx, 1, OFFSET_TO_NEXT_VALUE, comptime LEN_MODE: PointerLenMode)
+        //CHECKPOINT
+    }
+
+    pub fn add_pointer_to_single_numeric_value_with_custom_settings(comptime self: *DataOpBuilderStruct, FIELD: []const u8, comptime NEXT_FIELD: ?[]const u8, comptime ALLOC_NAME: ?[]const u8, comptime TARGET_ENDIAN: Endian, comptime CACHE_DATA: DataCacheMode, comptime TECH: DataTransferTech) void {
+        assert_with_reason(self.low_level.current_kind == .STRUCT, @src(), "current type kind is not a struct, current kind is `{s}`, real type `{s}`", .{ @tagName(self.low_level.current_kind), @typeName(self.low_level.current_type) });
+        assert_with_reason(@hasField(self.low_level.current_type, FIELD), @src(), "struct `{s}` does not have field `{s}`", .{ @typeName(self.low_level.current_type), FIELD });
+        const PTR_TYPE = @FieldType(self.low_level.current_type, FIELD);
+        if (NEXT_FIELD) |NEXT| assert_with_reason(@hasField(self.low_level.current_type, NEXT), @src(), "struct `{s}` does not have NEXT field `{s}`", .{ @typeName(self.low_level.current_type), NEXT });
+        if (self.prev_field != null) assert_with_reason(self.next_field != null and std.mem.eql(u8, self.next_field.?, FIELD), @src(), "the prev field you added indicated the next field to add was `{s}`, but the next field you actually added was `{s}`: routine offsets will be broken", .{ if (self.next_field) |next| next else "<void, end struct>", FIELD });
+        if (self.prev_field == null and @offsetOf(self.low_level.current_type, FIELD) != 0) {
+            self.low_level.add_add_native_offset_op(@offsetOf(self.low_level.current_type, FIELD));
+        }
+        self.prev_field = FIELD;
+        self.next_field = NEXT_FIELD;
+        const offset_to_next_field = self.low_level.get_offset_between_two_fields(FIELD, NEXT_FIELD);
+        //CHECKPOINT
+        
     }
 
     // CHECKPOINT pointers/sub-struct types
@@ -1132,7 +1199,7 @@ pub fn DataOpBuilderExternUnion(comptime TAG_TYPE: type) type {
             assert_with_reason(@hasField(self.union_type, FIELD), @src(), "union type `{s}` does not have field `{s}`", .{ @typeName(self.union_type), FIELD });
             const TYPE = @FieldType(self.union_type, FIELD);
             self.builder.low_level.add_union_tag_op(as_u64, 1);
-            self.builder._internal_add_numeric_field_op_with_custom_settings(TYPE, FIELD, 0, TARGET_ENDIAN, CACHE, TECH);
+            self.builder._internal_add_numeric_field_with_custom_settings(TYPE, FIELD, 0, TARGET_ENDIAN, CACHE, TECH);
             self.num_branches += 1;
         }
 
@@ -1172,7 +1239,7 @@ pub fn DataOpBuilderExternUnion(comptime TAG_TYPE: type) type {
             const FINAL_ELEMENT_TYPE: type, _ = self.builder.low_level.get_numeric_elem_type_and_total_len_for_numeric_array_type(TYPE);
             const NUM_FOLLOWING = if (@sizeOf(FINAL_ELEMENT_TYPE) == 1) 1 else 2;
             self.builder.low_level.add_union_tag_op(as_u64, NUM_FOLLOWING);
-            self.builder._internal_add_numeric_array_field_op_with_custom_settings(TYPE, FIELD, 0, TARGET_ENDIAN, TECH);
+            self.builder._internal_add_numeric_array_field_with_custom_settings(TYPE, FIELD, 0, TARGET_ENDIAN, TECH);
             self.num_branches += 1;
         }
 
@@ -1211,7 +1278,7 @@ pub fn DataOpBuilderExternUnion(comptime TAG_TYPE: type) type {
             assert_with_reason(@hasField(self.union_type, FIELD), @src(), "union type `{s}` does not have field `{s}`", .{ @typeName(self.union_type), FIELD });
             const TYPE = @FieldType(self.union_type, FIELD);
             self.builder.low_level.add_union_range_op(min_as_u64, max_as_u64, 1);
-            self.builder._internal_add_numeric_field_op_with_custom_settings(TYPE, FIELD, 0, TARGET_ENDIAN, CACHE, TECH);
+            self.builder._internal_add_numeric_field_with_custom_settings(TYPE, FIELD, 0, TARGET_ENDIAN, CACHE, TECH);
             self.num_branches += 1;
         }
 
@@ -1252,7 +1319,7 @@ pub fn DataOpBuilderExternUnion(comptime TAG_TYPE: type) type {
             const FINAL_ELEMENT_TYPE: type, _ = self.builder.low_level.get_numeric_elem_type_and_total_len_for_numeric_array_type(TYPE);
             const NUM_FOLLOWING = if (@sizeOf(FINAL_ELEMENT_TYPE) == 1) 1 else 2;
             self.builder.low_level.add_union_tag_op(min_as_u64, max_as_u64, NUM_FOLLOWING);
-            self.builder._internal_add_numeric_array_field_op_with_custom_settings(TYPE, FIELD, 0, TARGET_ENDIAN, TECH);
+            self.builder._internal_add_numeric_array_field_with_custom_settings(TYPE, FIELD, 0, TARGET_ENDIAN, TECH);
             self.num_branches += 1;
         }
 

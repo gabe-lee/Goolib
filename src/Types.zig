@@ -75,17 +75,33 @@ pub fn SmallestUnsignedIntThatCanHoldValue(comptime V: comptime_int) type {
 pub fn UnsignedIntegerWithSameSize(comptime T: type) type {
     const bytes = @sizeOf(T);
     const bits: u16 = bytes << 3;
-    const uint = std.meta.Int(.unsigned, bits);
-    assert_with_reason(@sizeOf(uint) == @sizeOf(T), @src(), "type `{s}` does not have a native matching integer size, its size is `{d}`, but converted to an integer is `{d}`", .{ @typeName(T), @sizeOf(T), @sizeOf(uint) });
-    return uint;
+    const UINT = std.meta.Int(.unsigned, bits);
+    assert_with_reason(@sizeOf(UINT) == @sizeOf(T), @src(), "type `{s}` does not have a native matching integer size, its size is `{d}`, but converted to an integer is `{d}`", .{ @typeName(T), @sizeOf(T), @sizeOf(UINT) });
+    return UINT;
+}
+
+pub fn TryUnsignedIntegerWithSameSize(comptime T: type) ?type {
+    const bytes = @sizeOf(T);
+    const bits: u16 = bytes << 3;
+    const UINT = std.meta.Int(.unsigned, bits);
+    if (@sizeOf(UINT) != @sizeOf(T)) return null;
+    return UINT;
 }
 
 pub fn SignedIntegerWithSameSize(comptime T: type) type {
     const bytes = @sizeOf(T);
     const bits: u16 = bytes << 3;
-    const int = std.meta.Int(.signed, bits);
-    assert_with_reason(@sizeOf(int) == @sizeOf(T), @src(), "type `{s}` does not have a native matching integer size, its size is `{d}`, but converted to an integer is `{d}`", .{ @typeName(T), @sizeOf(T), @sizeOf(int) });
-    return int;
+    const INT = std.meta.Int(.signed, bits);
+    assert_with_reason(@sizeOf(INT) == @sizeOf(T), @src(), "type `{s}` does not have a native matching integer size, its size is `{d}`, but converted to an integer is `{d}`", .{ @typeName(T), @sizeOf(T), @sizeOf(INT) });
+    return INT;
+}
+
+pub fn TrySignedIntegerWithSameSize(comptime T: type) ?type {
+    const bytes = @sizeOf(T);
+    const bits: u16 = bytes << 3;
+    const INT = std.meta.Int(.signed, bits);
+    if (@sizeOf(INT) != @sizeOf(T)) return null;
+    return INT;
 }
 
 // DEPRECATE move to Cast.zig
