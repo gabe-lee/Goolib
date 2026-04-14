@@ -47,6 +47,7 @@ pub const Alloc = @import("./Utils_Allocator.zig");
 pub const File = @import("./Utils_File.zig");
 pub const EnumeratedDefs = @import("./Utils_EnumeratedDefs.zig");
 pub const Mem = @import("./Utils_Mem.zig");
+pub const Format = @import("./Utils_Format.zig");
 
 pub inline fn inline_swap(comptime T: type, a: *T, b: *T, temp: *T) void {
     temp.* = a.*;
@@ -1805,4 +1806,49 @@ pub fn comptime_print_log(comptime fmt_string: []const u8, args: anytype) void {
 }
 pub fn comptime_print_err(comptime fmt_string: []const u8, args: anytype) void {
     @compileError(std.fmt.comptimePrint(fmt_string, args));
+}
+
+// pub const ShortUniqueTypeName = struct {
+//     bytes: [64]u8 = @splat(' '),
+//     len: u8 = 0,
+
+//     pub fn slice(comptime self: ShortUniqueTypeName) []const u8 {
+//         return self.bytes[0..self.len];
+//     }
+// };
+
+pub fn short_unique_type_name(comptime T: type) []const u8 {
+    const full_name: []const u8 = @typeName(T);
+    comptime var hasher = std.hash.XxHash32.init(0);
+    comptime hasher.update(full_name);
+    const hash = comptime hasher.final();
+    const hash_as_str_res = comptime Format.num_to_hex(hash, .{});
+    const hash_as_str = comptime hash_as_str_res.slice();
+    comptime var start_of_base_name: usize = 0;
+    comptime var end_of_base_name: usize = 0;
+    comptime var char_idx: usize = 0;
+    comptime var generic_depth: usize = 0;
+    while (char_idx < full_name.len) : (char_idx += 1) {
+        const char = full_name.ptr[char_idx];
+        if (generic_depth == 0 and char == '.') {
+            start_of_base_name = char_idx + 1;
+            end_of_base_name = char_idx + 1;
+        } else if (char == '(') {
+            generic_depth += 1;
+        } else if (char == ')') {
+            generic_depth -= 1;
+        } else if (generic_depth == 0) {
+            end_of_base_name += 1;
+        }
+    }
+    return full_name[start_of_base_name..end_of_base_name] ++ "(" ++ hash_as_str ++ ")";
+}
+
+pub fn type_hash32_as_hex_string(comptime T: type) []const u8 {
+    const full_name: []const u8 = @typeName(T);
+    comptime var hasher = std.hash.XxHash32.init(0);
+    comptime hasher.update(full_name);
+    const hash = comptime hasher.final();
+    const hash_as_str_res = comptime Format.num_to_hex(hash, .{});
+    return comptime hash_as_str_res.slice();
 }

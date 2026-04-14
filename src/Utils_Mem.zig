@@ -27,7 +27,6 @@ const builtin = std.builtin;
 const SourceLocation = builtin.SourceLocation;
 const mem = std.mem;
 const assert = std.debug.assert;
-const build = @import("builtin");
 const Allocator = std.mem.Allocator;
 const Writer = std.Io.Writer;
 const Utils = Root.Utils;
@@ -396,58 +395,91 @@ const CompositeLayout = struct {
     post_bytes: usize,
 };
 
-inline fn integer_composite_layout(comptime SRC_TYPE: type, comptime DST_TYPE: type) CompositeLayout {
-    const SRC_SIZE = @sizeOf(SRC_TYPE);
-    const SRC_ALIGN = @alignOf(SRC_TYPE);
-    const DST_SIZE = @sizeOf(DST_TYPE);
-    const DST_ALIGN = @alignOf(DST_TYPE);
-    comptime var curr_src_offset: usize = 0;
-    comptime var curr_dst_offset: usize = DST_SIZE - 1;
-    comptime var curr_src_align: usize = SRC_ALIGN;
-    comptime var curr_dst_align: usize = std.mem.Alignment.fromByteUnits(DST_ALIGN + curr_dst_offset);
-    comptime var comps: [SIZE]CompositeKind = undefined;
-    comptime var comps_len: usize = 0;
-    inline while (curr_offset < SIZE) {
-        const remaining_bytes = SIZE - curr_offset;
-        const comp = CompositeKind.get_composite_for_remaining_bytes_and_align(remaining_bytes, curr_align);
-        curr_offset += comp.get_size();
-        curr_align = @min(curr_align, comp.get_size());
-        comps[]
-    }
-}
+// inline fn integer_composite_layout(comptime SRC_TYPE: type, comptime DST_TYPE: type) CompositeLayout {
+//     const SRC_SIZE = @sizeOf(SRC_TYPE);
+//     const SRC_ALIGN = @alignOf(SRC_TYPE);
+//     const DST_SIZE = @sizeOf(DST_TYPE);
+//     const DST_ALIGN = @alignOf(DST_TYPE);
+//     comptime var curr_src_offset: usize = 0;
+//     comptime var curr_dst_offset: usize = DST_SIZE - 1;
+//     comptime var curr_src_align: usize = SRC_ALIGN;
+//     comptime var curr_dst_align: usize = std.mem.Alignment.fromByteUnits(DST_ALIGN + curr_dst_offset);
+//     comptime var comps: [SIZE]CompositeKind = undefined;
+//     comptime var comps_len: usize = 0;
+//     inline while (curr_offset < SIZE) {
+//         const remaining_bytes = SIZE - curr_offset;
+//         const comp = CompositeKind.get_composite_for_remaining_bytes_and_align(remaining_bytes, curr_align);
+//         curr_offset += comp.get_size();
+//         curr_align = @min(curr_align, comp.get_size());
+//         comps[]
+//     }
+// }
 
-inline fn single_memcopy_swap_as_integer_composites(
-    comptime UINT_TYPE: type,
-    UINT_PTR: [*]UINT_TYPE,
-    comptime DST_ELEM: type,
-    DST_PTR: [*]DST_ELEM,
-    comptime SRC_ELEM: type,
-    SRC_PTR: [*]SRC_ELEM,
-) void {
-    const UINT_SIZE = @sizeOf(UINT_TYPE);
-    const UINT_ALIGN = @alignOf(UINT_TYPE);
-    const DST_SIZE = @sizeOf(DST_ELEM);
-    const DST_ALIGN = @alignOf(DST_ELEM);
-    const SRC_SIZE = @sizeOf(SRC_ELEM);
-    const SRC_ALIGN = @alignOf(SRC_ELEM);
-    if (SRC_ALIGN == UINT_ALIGN) {
-        const src_uint_ptr: *const UINT_TYPE = @ptrCast(SRC_PTR);
-        UINT_PTR.* = src_uint_ptr.*;
-    } else {
-        const src_bytes_ptr: *const [SRC_SIZE]u8 = @ptrCast(SRC_PTR);
-        const uint_bytes_ptr: *[UINT_SIZE]u8 = @ptrCast(UINT_PTR);
-        @memcpy(uint_bytes_ptr[0..UINT_SIZE], src_bytes_ptr[0..SRC_SIZE]);
-    }
-    UINT_PTR.* = @byteSwap(UINT_PTR.*);
-    if (DST_ALIGN == UINT_ALIGN) {
-        const dst_uint_ptr: *UINT_TYPE = @ptrCast(DST_PTR);
-        dst_uint_ptr.* = UINT_PTR.*;
-    } else {
-        const dst_bytes_ptr: *[DST_SIZE]u8 = @ptrCast(DST_PTR);
-        const uint_bytes_ptr: *const [UINT_SIZE]u8 = @ptrCast(UINT_PTR);
-        @memcpy(dst_bytes_ptr[0..DST_SIZE], uint_bytes_ptr[0..UINT_SIZE]);
-    }
-}
+// inline fn single_memcopy_swap_as_integer_composites(
+//     comptime UINT_TYPE: type,
+//     UINT_PTR: [*]UINT_TYPE,
+//     comptime DST_ELEM: type,
+//     DST_PTR: [*]DST_ELEM,
+//     comptime SRC_ELEM: type,
+//     SRC_PTR: [*]SRC_ELEM,
+// ) void {
+//     const UINT_SIZE = @sizeOf(UINT_TYPE);
+//     const UINT_ALIGN = @alignOf(UINT_TYPE);
+//     const DST_SIZE = @sizeOf(DST_ELEM);
+//     const DST_ALIGN = @alignOf(DST_ELEM);
+//     const SRC_SIZE = @sizeOf(SRC_ELEM);
+//     const SRC_ALIGN = @alignOf(SRC_ELEM);
+//     if (SRC_ALIGN == UINT_ALIGN) {
+//         const src_uint_ptr: *const UINT_TYPE = @ptrCast(SRC_PTR);
+//         UINT_PTR.* = src_uint_ptr.*;
+//     } else {
+//         const src_bytes_ptr: *const [SRC_SIZE]u8 = @ptrCast(SRC_PTR);
+//         const uint_bytes_ptr: *[UINT_SIZE]u8 = @ptrCast(UINT_PTR);
+//         @memcpy(uint_bytes_ptr[0..UINT_SIZE], src_bytes_ptr[0..SRC_SIZE]);
+//     }
+//     UINT_PTR.* = @byteSwap(UINT_PTR.*);
+//     if (DST_ALIGN == UINT_ALIGN) {
+//         const dst_uint_ptr: *UINT_TYPE = @ptrCast(DST_PTR);
+//         dst_uint_ptr.* = UINT_PTR.*;
+//     } else {
+//         const dst_bytes_ptr: *[DST_SIZE]u8 = @ptrCast(DST_PTR);
+//         const uint_bytes_ptr: *const [UINT_SIZE]u8 = @ptrCast(UINT_PTR);
+//         @memcpy(dst_bytes_ptr[0..DST_SIZE], uint_bytes_ptr[0..UINT_SIZE]);
+//     }
+// }
+
+// inline fn single_memcopy_swap_as_integer_composites(
+//     comptime UINT_TYPE: type,
+//     UINT_PTR: [*]UINT_TYPE,
+//     comptime DST_ELEM: type,
+//     DST_PTR: [*]DST_ELEM,
+//     comptime SRC_ELEM: type,
+//     SRC_PTR: [*]SRC_ELEM,
+// ) void {
+//     const UINT_SIZE = @sizeOf(UINT_TYPE);
+//     const UINT_ALIGN = @alignOf(UINT_TYPE);
+//     const DST_SIZE = @sizeOf(DST_ELEM);
+//     const DST_ALIGN = @alignOf(DST_ELEM);
+//     const SRC_SIZE = @sizeOf(SRC_ELEM);
+//     const SRC_ALIGN = @alignOf(SRC_ELEM);
+//     if (SRC_ALIGN == UINT_ALIGN) {
+//         const src_uint_ptr: *const UINT_TYPE = @ptrCast(SRC_PTR);
+//         UINT_PTR.* = src_uint_ptr.*;
+//     } else {
+//         const src_bytes_ptr: *const [SRC_SIZE]u8 = @ptrCast(SRC_PTR);
+//         const uint_bytes_ptr: *[UINT_SIZE]u8 = @ptrCast(UINT_PTR);
+//         @memcpy(uint_bytes_ptr[0..UINT_SIZE], src_bytes_ptr[0..SRC_SIZE]);
+//     }
+//     UINT_PTR.* = @byteSwap(UINT_PTR.*);
+//     if (DST_ALIGN == UINT_ALIGN) {
+//         const dst_uint_ptr: *UINT_TYPE = @ptrCast(DST_PTR);
+//         dst_uint_ptr.* = UINT_PTR.*;
+//     } else {
+//         const dst_bytes_ptr: *[DST_SIZE]u8 = @ptrCast(DST_PTR);
+//         const uint_bytes_ptr: *const [UINT_SIZE]u8 = @ptrCast(UINT_PTR);
+//         @memcpy(dst_bytes_ptr[0..DST_SIZE], uint_bytes_ptr[0..UINT_SIZE]);
+//     }
+// }
 
 pub fn memcopy_swap_order_typed(noalias dest: anytype, noalias source: anytype, comptime COPY_LEN: CopyLen) void {
     _ = memcopy_swap_order_typed_get_num_copied(dest, source, COPY_LEN);
@@ -458,7 +490,7 @@ pub fn memcopy_swap_order_typed_get_num_copied(noalias dest: anytype, noalias so
     const SRC = @TypeOf(source);
     const DST_INFO = KindInfo.get_kind_info(DST);
     const SRC_INFO = KindInfo.get_kind_info(SRC);
-    const DST_ELEM, const DST_ELEM_SIZE, const DST_LEN: ?usize, const DST_PTR, const DST_ALIGN = switch (DST_INFO) {
+    const DST_ELEM, const DST_ELEM_SIZE, const DST_LEN: ?usize, const DST_PTR, _ = switch (DST_INFO) {
         .POINTER => |POINTER| .{
             POINTER.child,
             @sizeOf(POINTER.child),
@@ -475,7 +507,7 @@ pub fn memcopy_swap_order_typed_get_num_copied(noalias dest: anytype, noalias so
         },
         else => assert_unreachable(@src(), "only pointers are allowed for `dest` and `source`", .{}),
     };
-    const SRC_ELEM, const SRC_ELEM_SIZE, const SRC_LEN: ?usize, const SRC_PTR, const DST_ALIGN = switch (SRC_INFO) {
+    const SRC_ELEM, const SRC_ELEM_SIZE, const SRC_LEN: ?usize, const SRC_PTR, _ = switch (SRC_INFO) {
         .POINTER => |POINTER| .{
             POINTER.child,
             @sizeOf(POINTER.child),
