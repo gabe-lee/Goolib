@@ -79,6 +79,10 @@ pub fn int_cast_log2_ceil(from: anytype, comptime TO: type) Log2IntCeil(TO) {
     return num_cast(from, Log2IntCeil(TO));
 }
 
+pub fn abs_cast(from: anytype, comptime TO: type) TO {
+    return num_cast(@abs(from), TO);
+}
+
 pub fn num_cast(from: anytype, comptime TO: type) TO {
     const FROM = @TypeOf(from);
     const FI = @typeInfo(FROM);

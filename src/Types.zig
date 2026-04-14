@@ -408,6 +408,9 @@ pub inline fn pointer_field_child_type(comptime T: type, comptime field: []const
 pub inline fn pointer_child_type(comptime T: type) type {
     return @typeInfo(T).pointer.child;
 }
+pub inline fn pointer_child_child_type(comptime T: type) type {
+    return @typeInfo(@typeInfo(T).pointer.child).pointer.child;
+}
 pub inline fn pointer_type_has_sentinel(comptime T: type) bool {
     return @typeInfo(T).pointer.sentinel_ptr != null;
 }

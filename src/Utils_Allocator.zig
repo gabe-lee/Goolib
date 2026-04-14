@@ -42,6 +42,7 @@ const Utils = Root.Utils;
 const GrowthMode = Root.CommonTypes.GrowthModel;
 const assert_with_reason = Assert.assert_with_reason;
 const assert_unreachable = Assert.assert_unreachable;
+const KindInfo = Types.KindInfo;
 
 const CACHE_LINE = std.atomic.cache_line;
 
@@ -439,4 +440,32 @@ pub fn smart_alloc_ptr_ptrs(alloc: Allocator, old_mem_ptr_ptr: anytype, old_mem_
     old_mem_ptr_ptr.* = new_mem.ptr;
     old_mem_cap_ptr.* = @intCast(new_mem.len);
     return;
+}
+
+pub fn smart_push_to_list_many_ptr(ptr_to_data_pointer: anytype, ptr_to_len: anytype, ptr_to_cap: anytype, val: Types.pointer_child_child_type(@TypeOf(ptr_to_data_pointer)), alloc: Allocator, settings: SmartAllocSettings(Types.pointer_child_child_type(@TypeOf(ptr_to_data_pointer))), comptime comptime_settings: SmartAllocComptimeSettings(Types.pointer_child_child_type(@TypeOf(ptr_to_data_pointer)))) switch (comptime_settings.ERROR_MODE) {
+    .RETURN_ERRORS, .RETURN_ERRORS_AND_WARN => AllocErr!void,
+    .ERRORS_PANIC, .ERRORS_ARE_UNREACHABLE => void,
+} {
+    if (ptr_to_len.* >= ptr_to_cap.*) {
+        if (comptime comptime_settings.ERROR_MODE.does_error()) ( //
+            try smart_alloc_ptr_ptrs(alloc, ptr_to_data_pointer, ptr_to_cap, @intCast(ptr_to_len.* + 1), settings, comptime_settings)) //
+        else smart_alloc_ptr_ptrs(alloc, ptr_to_data_pointer, ptr_to_cap, @intCast(ptr_to_len.* + 1), settings, comptime_settings);
+    }
+    ptr_to_data_pointer.*[ptr_to_len.*] = val;
+    ptr_to_len.* += 1;
+}
+
+pub fn smart_push_to_list_slice(ptr_to_slice: anytype, ptr_to_cap: anytype, val: Types.pointer_child_child_type(@TypeOf(ptr_to_slice)), alloc: Allocator, settings: SmartAllocSettings(Types.pointer_child_child_type(@TypeOf(ptr_to_slice))), comptime comptime_settings: SmartAllocComptimeSettings(Types.pointer_child_child_type(@TypeOf(ptr_to_slice)))) switch (comptime_settings.ERROR_MODE) {
+    .RETURN_ERRORS, .RETURN_ERRORS_AND_WARN => AllocErr!void,
+    .ERRORS_PANIC, .ERRORS_ARE_UNREACHABLE => void,
+} {
+    if (ptr_to_slice.*.len >= ptr_to_cap.*) {
+        const new_mem = if (comptime comptime_settings.ERROR_MODE.does_error()) ( //
+            try smart_alloc(alloc, ptr_to_slice.*.ptr[0..ptr_to_cap.*], @intCast(ptr_to_slice.*.len + 1), settings, comptime_settings)) //
+            else smart_alloc(alloc, ptr_to_slice.*.ptr[0..ptr_to_cap.*], @intCast(ptr_to_slice.*.len + 1), settings, comptime_settings);
+        ptr_to_cap.* = @intCast(new_mem.len);
+        ptr_to_slice.* = new_mem[0..ptr_to_slice.*.len];
+    }
+    ptr_to_slice.*.ptr[ptr_to_slice.*.len] = val;
+    ptr_to_slice.*.len += 1;
 }

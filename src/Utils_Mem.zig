@@ -633,3 +633,5 @@ fn memcopy_len_get_dest(byte_len: anytype, noalias dest: anytype, noalias source
 pub fn memcopy_len(byte_len: anytype, noalias dest: anytype, noalias source: anytype) void {
     _ = memcopy_len_get_dest(byte_len, dest, source);
 }
+
+
