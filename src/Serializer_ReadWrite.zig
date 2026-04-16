@@ -147,6 +147,13 @@ pub const SerialSourceSlice = struct {
         self.cursor = source_end;
     }
 
+    pub fn read_n_bytes_swapped(self: *SerialSourceSlice, n: usize, native_dest: [*]u8) SerialReadError!void {
+        const source_end = self.cursor + n;
+        if (source_end > self.data.len) return SerialReadError.serial_source_ran_out_of_data;
+        Utils.Mem.memcopy_while_reversing_order(native_dest[0..n], self.data[self.cursor..source_end]);
+        self.cursor = source_end;
+    }
+
     pub fn read_one_byte(self: *SerialSourceSlice, native_dest: [*]u8) SerialReadError!void {
         if (self.cursor >= self.data.len) return SerialReadError.serial_source_ran_out_of_data;
         native_dest[0] = self.data[self.cursor];
@@ -164,6 +171,13 @@ pub const SerialSourceReader = struct {
 
     pub fn read_n_bytes(self: SerialSourceReader, n: usize, native_dest: [*]u8) SerialReadError!void {
         self.reader.readSliceAll(native_dest[0..n]) catch |err| switch (err) {
+            .ReadFailed => return SerialReadError.unknown_read_error,
+            .EndOfStream => return SerialReadError.serial_source_ran_out_of_data,
+        };
+    }
+
+    pub fn read_n_bytes_swapped(self: SerialSourceReader, n: usize, native_dest: [*]u8) SerialReadError!void {
+        Utils.Mem.memcopy_from_reader_while_reversing_order(native_dest[0..n], self.reader) catch |err| switch (err) {
             .ReadFailed => return SerialReadError.unknown_read_error,
             .EndOfStream => return SerialReadError.serial_source_ran_out_of_data,
         };
@@ -200,6 +214,14 @@ pub const SerialSource = union {
             },
         }
     }
+    pub fn read_type_in_order(self: SerialSource, comptime KIND: SerialKind, comptime T: type, native_dest: *T) SerialReadError!void {
+        const N = @sizeOf(T);
+        if (N == 1) {
+            return self.read_one_byte(KIND, @ptrCast(native_dest));
+        } else {
+            return self.read_n_bytes_in_order(KIND, N, @ptrCast(native_dest));
+        }
+    }
     pub fn read_one_byte(self: SerialSource, comptime KIND: SerialKind, native_dest: [*]u8) SerialReadError!void {
         switch (KIND) {
             .SLICE => {
@@ -212,20 +234,21 @@ pub const SerialSource = union {
             },
         }
     }
-    pub fn read_type_in_order(self: SerialSourceReader, comptime T: type, native_dest: *T) SerialReadError!void {
-        const N = @sizeOf(T);
-        if (N == 1) {
-            return self.read_one_byte(@ptrCast(native_dest));
-        } else {
-            return self.read_n_bytes(N, @ptrCast(native_dest));
+    pub fn read_n_bytes_swapped(self: SerialSource, comptime KIND: SerialKind, n: usize, native_dest: [*]u8) SerialReadError!void {
+        switch (KIND) {
+            .SLICE => {
+                const ser = self.slice;
+                return ser.read_n_bytes_swapped(n, native_dest);
+            },
+            .READER_WRITER => {
+                const ser = self.reader;
+                return ser.read_n_bytes_swapped(n, native_dest);
+            },
         }
     }
-    pub fn read_type_swap_bytes(self: SerialSourceReader, comptime T: type, native_dest: *T) SerialReadError!void {
+    pub fn read_type_swapped(self: SerialSource, comptime KIND: SerialKind, comptime T: type, native_dest: *T) SerialReadError!void {
         const N = @sizeOf(T);
-        try self.read_n_bytes(N, @ptrCast(native_dest));
-        const UINT_TYPE = Types.UnsignedIntegerWithSameSize(T);
-        const native_dest_uint: *UINT_TYPE = @ptrCast(native_dest);
-        native_dest_uint.* = @byteSwap(native_dest_uint.*);
+        return self.read_n_bytes_swapped(KIND, N, @ptrCast(native_dest));
     }
     pub fn read_varint(self: SerialSource, comptime KIND: SerialKind, comptime ZIGZAG: bool, comptime T: type, native_dest: *T) SerialReadError!usize {
         const NATIVE_LEN = @sizeOf(T);
@@ -369,6 +392,13 @@ pub const SerialDestSlice = struct {
         self.cursor = dest_end;
     }
 
+    pub fn write_n_bytes_swapped(self: *SerialDestSlice, n: usize, native_src: [*]const u8) SerialWriteError!void {
+        const dest_end = self.cursor + n;
+        if (dest_end > self.data.len) return SerialWriteError.serial_destination_ran_out_of_space;
+        Utils.Mem.memcopy_while_reversing_order(self.data[self.cursor..dest_end], native_src[0..n]);
+        self.cursor = dest_end;
+    }
+
     pub fn write_one_byte(self: *SerialDestSlice, native_src: [*]u8) SerialWriteError!void {
         if (self.cursor >= self.data.len) return SerialWriteError.serial_destination_ran_out_of_space;
         self.data[self.cursor] = native_src[0];
@@ -387,6 +417,10 @@ pub const SerialDestWriter = struct {
 
     pub fn write_n_bytes(self: SerialDestWriter, n: usize, native_src: [*]u8) SerialWriteError!void {
         self.writer.writeAll(native_src[0..n]) catch return SerialWriteError.serial_destination_ran_out_of_space;
+    }
+
+    pub fn write_n_bytes_swapped(self: SerialDestWriter, n: usize, native_src: [*]u8) SerialWriteError!void {
+        Utils.Mem.memcopy_to_writer_while_reversing_order(self.writer, native_src[0..n]) catch return SerialWriteError.serial_destination_ran_out_of_space;
     }
 
     pub fn write_one_byte(self: SerialDestWriter, native_src: [*]u8) SerialWriteError!void {
@@ -431,6 +465,14 @@ pub const SerialDest = union {
             },
         }
     }
+    pub fn write_type_in_order(self: SerialDest, comptime T: type, native_src: *T) SerialWriteError!void {
+        const N = @sizeOf(T);
+        if (N == 1) {
+            return self.write_one_byte(@ptrCast(native_src));
+        } else {
+            return self.write_n_bytes_in_order(N, @ptrCast(native_src));
+        }
+    }
     pub fn write_one_byte(self: SerialDest, comptime KIND: SerialKind, native_src: [*]u8) SerialWriteError!void {
         switch (KIND) {
             .SLICE => {
@@ -443,19 +485,26 @@ pub const SerialDest = union {
             },
         }
     }
-    pub fn write_type_in_order(self: SerialDest, comptime T: type, native_src: *T) SerialWriteError!void {
-        const N = @sizeOf(T);
-        if (N == 1) {
-            return self.write_one_byte(@ptrCast(native_src));
-        } else {
-            return self.write_n_bytes_in_order(N, @ptrCast(native_src));
+
+    pub fn write_n_bytes_swapped(self: SerialDest, comptime KIND: SerialKind, n: usize, native_src: [*]u8) SerialWriteError!void {
+        switch (KIND) {
+            .SLICE => {
+                const ser = self.slice;
+                return ser.write_n_bytes_swapped(n, native_src);
+            },
+            .READER_WRITER => {
+                const ser = self.writer;
+                return ser.write_n_bytes_swapped(n, native_src);
+            },
         }
     }
-    pub fn write_type_swap_bytes(self: SerialDest, comptime T: type, native_src: *T) SerialWriteError!void {
-        try self.write_type_in_order(T, native_src);
-        const UINT_TYPE = Types.UnsignedIntegerWithSameSize(T);
-        const native_src_uint: *UINT_TYPE = @ptrCast(native_src);
-        native_src_uint.* = @byteSwap(native_src_uint.*);
+    pub fn write_type_swapped(self: SerialDest, comptime KIND: SerialKind, comptime T: type, native_src: *T) SerialWriteError!void {
+        const N = @sizeOf(T);
+        if (N == 1) {
+            return self.write_one_byte(KIND, @ptrCast(native_src));
+        } else {
+            return self.write_n_bytes_swapped(KIND, N, @ptrCast(native_src));
+        }
     }
 
     /// NUM_BYTES, LEAST_SIG_IDX, MOST_SIG_IDX

@@ -224,7 +224,7 @@ pub const SerialManagerArrayLens = struct {
 
 pub const DataOpKind = enum(u8) {
     // Native Address Control
-    ADD_NATIVE_OFFSET,
+    MOVE_NATIVE_POINTER,
     // Data Transfer
     TRANSFER_SAME_ENDIAN,
     TRANSFER_SAME_ENDIAN_SAVE_TAG,
@@ -248,22 +248,16 @@ pub const DataOpKind = enum(u8) {
     NON_ZERO_READ_OR_WRITE_1_ELSE_0_SAVE_LEN,
     NON_ZERO_READ_OR_WRITE_1_ELSE_0_SAVE_NULL,
     // Ref Unique Type Subroutine
-    REF_UNIQUE_TYPE,
+    REF_UNIQUE_TYPE_NO_REPEAT,
+    REF_UNIQUE_TYPE_STATIC_REPEAT,
+    REF_UNIQUE_TYPE_DYNAMIC_REPEAT,
     // Subroutines
-    START_SUBROUTINE_NO_REPEAT_CURRENT_REGION,
-    START_SUBROUTINE_NO_REPEAT_ALLOCATED_REGION,
-    START_SUBROUTINE_STATIC_REPEAT_CURRENT_REGION,
-    START_SUBROUTINE_DYNAMIC_REPEAT_CURRENT_REGION,
-    START_SUBROUTINE_STATIC_REPEAT_ALLOCATED_REGION,
-    START_SUBROUTINE_DYNAMIC_REPEAT_ALLOCATED_REGION,
+    START_SUBROUTINE_NO_REPEAT,
+    START_SUBROUTINE_STATIC_REPEAT,
+    START_SUBROUTINE_DYNAMIC_REPEAT,
     // Union Control
     UNION_HEADER,
-    UNION_TAG_ID_ONE_FOLLOWING,
-    UNION_TAG_ID_TWO_FOLLOWING,
-    UNION_TAG_ID_THREE_FOLLOWING,
-    UNION_TAG_ID_FOUR_FOLLOWING,
-    UNION_TAG_ID_FIVE_FOLLOWING,
-    UNION_TAG_ID_SIX_FOLLOWING,
+    UNION_TAG_ID,
     UNION_TAG_RANGE_ONE_FOLLOWING,
     UNION_TAG_RANGE_TWO_FOLLOWING,
     UNION_TAG_RANGE_THREE_FOLLOWING,
@@ -271,16 +265,10 @@ pub const DataOpKind = enum(u8) {
     UNION_TAG_RANGE_FIVE_FOLLOWING,
     UNION_TAG_RANGE_SIX_FOLLOWING,
     // Pointer Control
-    ALLOCATED_POINTER_STATIC_LEN,
-    ALLOCATED_POINTER_DYNAMIC_LEN,
-    ALLOCATED_POINTER_STATIC_LEN_OR_NULL,
-    ALLOCATED_POINTER_DYNAMIC_LEN_OR_NULL,
-    ALLOCATED_POINTER_STATIC_LEN_WITH_SENTINEL,
-    ALLOCATED_POINTER_DYNAMIC_LEN_WITH_SENTINEL,
-    ALLOCATED_POINTER_STATIC_LEN_WITH_SENTINEL_OR_NULL,
-    ALLOCATED_POINTER_DYNAMIC_LEN_WITH_SENTINEL_OR_NULL,
-    // POINTER_TO_PREVIOUSLY_ALLOCATED_REGION_STATIC_LEN,
-    // POINTER_TO_PREVIOUSLY_ALLOCATED_REGION_DYNAMIC_LEN,
+    ALLOCATED_POINTER_TO_ONE_OBJECT,
+    ALLOCATED_POINTER_TO_MANY_ONJECTS,
+    ALLOCATED_POINTER_TO_ONE_OBJECT_OR_NULL,
+    ALLOCATED_POINTER_TO_MANY_OBJECTS_OR_NULL,
     POINTER_SENTINEL,
     // Custom
     FULL_CUSTOM_FUNCTION,
@@ -294,13 +282,13 @@ pub const DataOp = extern union {
     // Generic (get kind from ANY payload)
     GENERIC: DataOpGeneric,
     // Native Address Control
-    ADD_NATIVE_OFFSET: AddNativeOffset,
+    MOVE_NATIVE_POINTER: MoveNativePointer,
     // Data Transfer
     DATA_TRANSFER: DataTransfer,
     // Ref Unique Type for Subroutine
     REF_UNIQUE_TYPE_SUBRS: RefUniqueTypeSubroutine,
     // Subroutines
-    SUBROUTINE: SubroutineStart,
+    SUBROUTINE: Subroutine,
     // Unions
     UNION_HEADER: UnionHeader,
     UNION_TAG_ID: UnionTagId,
@@ -317,8 +305,8 @@ pub const DataOp = extern union {
         return self.GENERIC.kind;
     }
 
-    pub fn new_add_native_offset_op(comptime offset: i32) DataOp {
-        return DataOp{ .ADD_NATIVE_OFFSET = AddNativeOffset{ .offset = offset } };
+    pub fn new_move_native_ptr_op(comptime offset: i32) DataOp {
+        return DataOp{ .MOVE_NATIVE_POINTER = MoveNativePointer{ .offset = offset } };
     }
 
     pub fn new_transfer_data_op(comptime native_size: u32, comptime offset_to_next_field: i32, comptime serial_size: u32, comptime kind: DataOpKind) DataOp {
@@ -383,23 +371,43 @@ pub const DataOp = extern union {
 
     pub fn new_subroutine_op(comptime subroutine_first_op: u32, comptime subroutine_num_ops: u16, comptime subroutine_static_repeat: u32, comptime offset_to_next_field: i32, comptime kind: DataOpKind) DataOp {
         switch (kind) {
-            .START_SUBROUTINE_NO_REPEAT_CURRENT_REGION, .START_SUBROUTINE_NO_REPEAT_ALLOCATED_REGION, .START_SUBROUTINE_STATIC_REPEAT_CURRENT_REGION, .START_SUBROUTINE_DYNAMIC_REPEAT_CURRENT_REGION, .START_SUBROUTINE_STATIC_REPEAT_ALLOCATED_REGION, .START_SUBROUTINE_DYNAMIC_REPEAT_ALLOCATED_REGION => {},
+            .START_SUBROUTINE_NO_REPEAT,
+            .START_SUBROUTINE_NO_REPEAT_ALLOCATED_REGION,
+            .START_SUBROUTINE_STATIC_REPEAT,
+            .START_SUBROUTINE_DYNAMIC_REPEAT,
+            .START_SUBROUTINE_STATIC_REPEAT_ALLOCATED_REGION,
+            .START_SUBROUTINE_DYNAMIC_REPEAT_ALLOCATED_REGION,
+            => {},
             else => assert_unreachable(@src(), "cannot create a `SubroutineStart` op with kind `{s}`", .{@tagName(kind)}),
         }
-        return DataOp{ .SUBROUTINE = SubroutineStart{ .subroutine_first_op = subroutine_first_op, .subroutine_num_ops = subroutine_num_ops, .subroutine_static_repeat = subroutine_static_repeat, .offset_to_next_field = offset_to_next_field, .kind = kind } };
+        return DataOp{ .SUBROUTINE = Subroutine{ .subroutine_first_op = subroutine_first_op, .subroutine_num_ops = subroutine_num_ops, .subroutine_static_repeat = subroutine_static_repeat, .offset_to_next_field = offset_to_next_field, .kind = kind } };
     }
 
-    pub fn new_ref_unique_struct_and_settings_op(comptime unique_type_index: u32, comptime offset_to_next_field: i32) DataOp {
-        return DataOp{ .REF_UNIQUE_TYPE_SUBRS = RefUniqueTypeSubroutine{ .unique_type_index = unique_type_index, .offset_to_next_field = offset_to_next_field } };
-    }
-
-    pub fn new_allocated_pointer_op(comptime elem_size: u32, comptime elem_align: u32, comptime alloc_idx: u16, comptime static_len: u32, comptime offset_to_next_field: i32, comptime kind: DataOpKind) DataOp {
+    pub fn new_ref_unique_struct_and_settings_op(comptime unique_type_index: u32, comptime offset_to_next_field: i32, comptime kind: DataOpKind) DataOp {
         switch (kind) {
-            .ALLOCATED_POINTER_STATIC_LEN, .ALLOCATED_POINTER_DYNAMIC_LEN => {},
+            .REF_UNIQUE_TYPE_STATIC_REPEAT,
+            .REF_UNIQUE_TYPE_DYNAMIC_REPEAT_ALLOCATED_REGION,
+            .REF_UNIQUE_TYPE_DYNAMIC_REPEAT_CURRENT_REGION,
+            .REF_UNIQUE_TYPE_NO_REPEAT_ALLOCATED_REGION,
+            .REF_UNIQUE_TYPE_NO_REPEAT,
+            .REF_UNIQUE_TYPE_STATIC_REPEAT_ALLOCATED_REGION,
+            => {},
+            else => assert_unreachable(@src(), "cannot create a `RefUniqueTypeSubroutine` op with kind `{s}`", .{@tagName(kind)}),
+        }
+        return DataOp{ .REF_UNIQUE_TYPE_SUBRS = RefUniqueTypeSubroutine{ .unique_type_index = unique_type_index, .offset_to_next_field = offset_to_next_field, .kind = kind } };
+    }
+
+    pub fn new_allocated_pointer_op(comptime elem_size: u32, comptime elem_align: u32, comptime alloc_idx: u16, comptime num_subroutine_ops: u32, comptime offset_to_next_field: i32, comptime kind: DataOpKind) DataOp {
+        switch (kind) {
+            .ALLOCATED_POINTER_TO_ONE_OBJECT,
+            .ALLOCATED_POINTER_TO_ONE_OBJECT_OR_NULL,
+            .ALLOCATED_POINTER_TO_MANY_ONJECTS,
+            .ALLOCATED_POINTER_TO_MANY_OBJECTS_OR_NULL,
+            => {},
             else => assert_unreachable(@src(), "cannot create a `AllocatedPointer` op with kind `{s}`", .{@tagName(kind)}),
         }
         const ptr_align_power = PowerOf2.alignment_power(elem_align);
-        return DataOp{ .POINTER = Pointer{ .elem_size = elem_size, .ptr_align_power = ptr_align_power, .alloc_idx = alloc_idx, .static_len = static_len, .offset_to_next_field = offset_to_next_field, .kind = kind } };
+        return DataOp{ .POINTER = Pointer{ .elem_size = elem_size, .ptr_align_power = ptr_align_power, .alloc_idx = alloc_idx, .num_subroutine_ops = num_subroutine_ops, .offset_to_next_field = offset_to_next_field, .kind = kind } };
     }
 
     pub fn new_pointer_sentinel_op(comptime elem_size: u32, comptime sentinel_data: *const anyopaque) DataOp {
@@ -434,12 +442,12 @@ const DataOpGeneric = extern struct {
     kind: DataOpKind,
 };
 
-const AddNativeOffset = extern struct {
+const MoveNativePointer = extern struct {
     offset: i32 = 0,
     __padding: [11]u8 = @splat(0),
     /// The kind tag, used both for determining the union field, and how to handle
     /// union fields with multiple modes
-    kind: DataOpKind = .ADD_NATIVE_OFFSET,
+    kind: DataOpKind = .MOVE_NATIVE_POINTER,
 };
 
 const DataTransfer = extern struct {
@@ -472,10 +480,11 @@ const UnionTagId = extern struct {
     /// The union tag value first bitcast to a u64,
     /// then swapped to little-endian order, if needed
     tag_as_u64_le: u64 = 0,
-    __padding: [7]u8 = @splat(0),
+    num_ops_in_tag: u32 = 0,
+    __padding: [3]u8 = @splat(0),
     /// The kind tag, used both for determining the union field, and how to handle
     /// union fields with multiple modes
-    kind: DataOpKind = .UNION_TAG_ID_ONE_FOLLOWING,
+    kind: DataOpKind = .UNION_TAG_ID,
 
     pub fn tag_matches(self: UnionTagId, value_as_u64_in_native_endian: u64) bool {
         if (NATIVE_ENDIAN != .LITTLE_ENDIAN) {
@@ -491,10 +500,9 @@ const UnionTagRange = extern struct {
     /// then swapped to little-endian order, if needed
     max_as_u64_le: u64 = 0,
     /// The 4 least significant bytes of the min tag value
-    /// in little-endian order
     min_as_u64_native_endian_bytes_0_4: u32 = 0,
     /// The next 2 least significant bytes of the min tag value
-    /// (after `min_as_u64_le_bytes_0_4`) in little-endian order
+    /// (after `min_as_u64_native_endian_bytes_0_4`)
     min_as_u64_native_endian_bytes_4_6: u16 = 0,
     /// the most significant byte of the min tag value
     min_as_u64_native_endian_byte_6: u8 = 0,
@@ -535,22 +543,26 @@ const UnionTagRange = extern struct {
 
 const RefUniqueTypeSubroutine = extern struct {
     unique_type_index: u32 = 0,
+    subroutine_static_repeat: u32 = 1,
     offset_to_next_field: i32 = 0,
-    // subroutine_static_repeat: u32 = 1,
-    // intended_kind: DataOpKind = .START_SUBROUTINE_NO_REPEAT_CURRENT_REGION,
-    __padding: [7]u8 = @splat(0),
+    __padding: [3]u8 = @splat(0),
     /// The kind tag, used both for determining the union field, and how to handle
     /// union fields with multiple modes
-    kind: DataOpKind = .REF_UNIQUE_TYPE,
-    //CHECKPOINT make this match `Subroutine` kinds, at comptime must convert this into a subroutine data op,
+    kind: DataOpKind = .REF_UNIQUE_TYPE_NO_REPEAT,
 
-    // fn to_subroutine_start(comptime self: RefUniqueTypeSubroutine, comptime fully_complete_uniques_list: []const UniqueSerialType) DataOp {
-    //     const unique = fully_complete_uniques_list[self.unique_type_index];
-    //     return DataOp.new_subroutine_op(unique.routine_start, unique.routine_end - unique.routine_start, self.subroutine_static_repeat, self.intended_kind);
-    // }
+    fn to_subroutine_start(comptime self: RefUniqueTypeSubroutine, comptime fully_complete_uniques_list: []const UniqueSerialStructAndSettingsFinal) DataOp {
+        const unique = fully_complete_uniques_list[self.unique_type_index];
+        const kind: DataOpKind = switch (self.kind) {
+            .REF_UNIQUE_TYPE_NO_REPEAT => .START_SUBROUTINE_NO_REPEAT,
+            .REF_UNIQUE_TYPE_STATIC_REPEAT => .START_SUBROUTINE_STATIC_REPEAT,
+            .REF_UNIQUE_TYPE_DYNAMIC_REPEAT => .START_SUBROUTINE_DYNAMIC_REPEAT,
+            else => unreachable,
+        };
+        return DataOp.new_subroutine_op(unique.routine_start, num_cast(unique.routine_end - unique.routine_start, u16), self.subroutine_static_repeat, self.offset_to_next_field, kind);
+    }
 };
 
-const SubroutineStart = extern struct {
+const Subroutine = extern struct {
     subroutine_first_op: u32 = 0,
     subroutine_static_repeat: u32 = 1,
     offset_to_next_field: i32 = 0,
@@ -558,18 +570,18 @@ const SubroutineStart = extern struct {
     __padding: [1]u8 = @splat(0),
     /// The kind tag, used both for determining the union field, and how to handle
     /// union fields with multiple modes
-    kind: DataOpKind = .START_SUBROUTINE_NO_REPEAT_CURRENT_REGION,
+    kind: DataOpKind = .START_SUBROUTINE_NO_REPEAT,
 };
 
 const Pointer = extern struct {
     elem_size: u32 = 1,
-    static_len: u32 = 1,
+    num_subroutine_ops: u32 = 0,
     offset_to_next_field: i32 = 0,
     alloc_idx: u16 = 0,
     ptr_align_power: PowerOf2 = ._1,
     /// The kind tag, used both for determining the union field, and how to handle
     /// union fields with multiple modes
-    kind: DataOpKind = .ALLOCATED_POINTER_STATIC_LEN,
+    kind: DataOpKind = .ALLOCATED_POINTER_TO_ONE_OBJECT,
 };
 
 const Sentinel = extern struct {
@@ -688,14 +700,14 @@ pub const SubroutineAllocRegionMode = enum(u8) {
 };
 
 pub const PointerLenMode = enum(u8) {
-    STATIC_LEN_POINTER,
-    DYNAMIC_LEN_POINTER,
-    STATIC_LEN_POINTER_OR_NULL,
-    DYNAMIC_LEN_POINTER_OR_NULL,
-    STATIC_LEN_POINTER_WITH_SENTINEL,
-    DYNAMIC_LEN_POINTER_WITH_SENTINEL,
-    STATIC_LEN_POINTER_WITH_SENTINEL_OR_NULL,
-    DYNAMIC_LEN_POINTER_WITH_SENTINEL_OR_NULL,
+    POINTER_TO_ONE_OBJECT,
+    POINTER_TO_MANY_ONJECTS,
+    POINTER_TO_ONE_OBJECT_OR_NULL,
+    POINTER_TO_MANY_OBJECTS_OR_NULL,
+    // STATIC_LEN_POINTER_WITH_SENTINEL,
+    // DYNAMIC_LEN_POINTER_WITH_SENTINEL,
+    // STATIC_LEN_POINTER_WITH_SENTINEL_OR_NULL,
+    // DYNAMIC_LEN_POINTER_WITH_SENTINEL_OR_NULL,
 };
 
 // pub const InterpretAnyPointerAsSingle = enum(u8) {
@@ -706,7 +718,6 @@ pub const TypeOpPatternKind = enum(u8) {
     MOVE_TO_NEXT,
     OPTIONAL,
     POINTER,
-    POINTER_SUBROUTINE,
     ARRAY,
     FLAT_ARRAY,
     NUMERIC,
@@ -728,9 +739,9 @@ pub const CompleteTypeSerialInfo = struct {
     SETTINGS_BEFORE_OVERRIDE: ObjectSerialSettings = .{},
     SETTINGS_AFTER_OVERRIDE: ObjectSerialSettings = .{},
     NUM_OPS_REQUIRED_TO_SERIALIZE: u32 = 0,
-    PTR_SUBROUTINE_LEN: u16 = 0,
-    OP_PATTERN: [6]TypeOpPatternKind = @splat(TypeOpPatternKind.MOVE_TO_NEXT),
-    OP_PATTERN_OFFSETS_TO_NEXT: [6]i32 = @splat(0),
+    PTR_SUBROUTINE_LEN: u32 = 0,
+    OP_PATTERN: [5]TypeOpPatternKind = @splat(TypeOpPatternKind.MOVE_TO_NEXT),
+    OP_PATTERN_OFFSETS_TO_NEXT: [5]i32 = @splat(0),
     TARGET_ENDIAN: Endian = .LITTLE_ENDIAN,
     USIZE_COMPAT: UsizeCompatMode = .USIZE_ALWAYS_VARINT,
     USIZE_SER_SIZE: u32 = 0,
@@ -741,7 +752,7 @@ pub const CompleteTypeSerialInfo = struct {
     PTR_ALIGN: comptime_int = 1,
     ALLOC_IDX: u16 = 0xFFFF,
     PTR_IS_NULLABLE: bool = false,
-    PTR_LEN_MODE: PointerLenMode = .STATIC_LEN_POINTER,
+    PTR_LEN_MODE: PointerLenMode = .POINTER_TO_ONE_OBJECT,
     IS_POINTER: bool = false,
     DATA_IS_ARRAY: bool = false,
     PTR_SENTINEL: ?*const anyopaque = null,
@@ -915,7 +926,7 @@ pub const DataOpBuilderLowLevel = struct {
     internal: DataOpBuilderInternal,
 
     pub fn add_move_native_offset_op(comptime self: *DataOpBuilderLowLevel, comptime offset: i32) void {
-        const op = DataOp.new_add_native_offset_op(offset);
+        const op = DataOp.new_move_native_ptr_op(offset);
         self.internal.push_op(self, op);
     }
 
@@ -987,8 +998,8 @@ pub const DataOpBuilderLowLevel = struct {
                 .STATIC_REPEAT_OR_NO_REPEAT => if (subroutine_static_repeat <= 1) DataOpKind.START_SUBROUTINE_NO_REPEAT_ALLOCATED_REGION else DataOpKind.START_SUBROUTINE_STATIC_REPEAT_ALLOCATED_REGION,
             },
             .SUB_ALLOCATED_REGION => switch (REPEAT) {
-                .DYNAMIC_REPEAT => DataOpKind.START_SUBROUTINE_DYNAMIC_REPEAT_CURRENT_REGION,
-                .STATIC_REPEAT_OR_NO_REPEAT => if (subroutine_static_repeat <= 1) DataOpKind.START_SUBROUTINE_NO_REPEAT_CURRENT_REGION else DataOpKind.START_SUBROUTINE_STATIC_REPEAT_CURRENT_REGION,
+                .DYNAMIC_REPEAT => DataOpKind.START_SUBROUTINE_DYNAMIC_REPEAT,
+                .STATIC_REPEAT_OR_NO_REPEAT => if (subroutine_static_repeat <= 1) DataOpKind.START_SUBROUTINE_NO_REPEAT else DataOpKind.START_SUBROUTINE_STATIC_REPEAT,
             },
         };
         const op = DataOp.new_subroutine_op(subroutine_first_op, subroutine_num_ops, subroutine_static_repeat, offset_to_next_field, kind);
@@ -1002,8 +1013,8 @@ pub const DataOpBuilderLowLevel = struct {
                 .STATIC_REPEAT_OR_NO_REPEAT => if (subroutine_static_repeat <= 1) DataOpKind.START_SUBROUTINE_NO_REPEAT_ALLOCATED_REGION else DataOpKind.START_SUBROUTINE_STATIC_REPEAT_ALLOCATED_REGION,
             },
             .SUB_ALLOCATED_REGION => switch (REPEAT) {
-                .DYNAMIC_REPEAT => DataOpKind.START_SUBROUTINE_DYNAMIC_REPEAT_CURRENT_REGION,
-                .STATIC_REPEAT_OR_NO_REPEAT => if (subroutine_static_repeat <= 1) DataOpKind.START_SUBROUTINE_NO_REPEAT_CURRENT_REGION else DataOpKind.START_SUBROUTINE_STATIC_REPEAT_CURRENT_REGION,
+                .DYNAMIC_REPEAT => DataOpKind.START_SUBROUTINE_DYNAMIC_REPEAT,
+                .STATIC_REPEAT_OR_NO_REPEAT => if (subroutine_static_repeat <= 1) DataOpKind.START_SUBROUTINE_NO_REPEAT else DataOpKind.START_SUBROUTINE_STATIC_REPEAT,
             },
         };
         const subroutine_first_op = self.ops_offset + self.ops_len + 1;
@@ -1016,18 +1027,14 @@ pub const DataOpBuilderLowLevel = struct {
         self.internal.push_op(self, op);
     }
 
-    pub fn add_allocated_pointer_op(comptime self: *DataOpBuilderLowLevel, comptime elem_size: u32, comptime ptr_align: u32, alloc_idx: u16, comptime static_len: u32, comptime offset_to_next_field: i32, comptime LEN_MODE: PointerLenMode) void {
+    pub fn add_allocated_pointer_op(comptime self: *DataOpBuilderLowLevel, comptime elem_size: u32, comptime ptr_align: u32, alloc_idx: u16, comptime num_subroutine_ops: u32, comptime offset_to_next_field: i32, comptime LEN_MODE: PointerLenMode) void {
         const kind: DataOpKind = switch (LEN_MODE) {
-            .STATIC_LEN_POINTER => DataOpKind.ALLOCATED_POINTER_STATIC_LEN,
-            .STATIC_LEN_POINTER_OR_NULL => DataOpKind.ALLOCATED_POINTER_STATIC_LEN_OR_NULL,
-            .STATIC_LEN_POINTER_WITH_SENTINEL => DataOpKind.ALLOCATED_POINTER_STATIC_LEN_WITH_SENTINEL,
-            .STATIC_LEN_POINTER_WITH_SENTINEL_OR_NULL => DataOpKind.ALLOCATED_POINTER_STATIC_LEN_WITH_SENTINEL_OR_NULL,
-            .DYNAMIC_LEN_POINTER => DataOpKind.ALLOCATED_POINTER_DYNAMIC_LEN,
-            .DYNAMIC_LEN_POINTER_OR_NULL => DataOpKind.ALLOCATED_POINTER_DYNAMIC_LEN_OR_NULL,
-            .DYNAMIC_LEN_POINTER_WITH_SENTINEL => DataOpKind.ALLOCATED_POINTER_DYNAMIC_LEN_WITH_SENTINEL,
-            .DYNAMIC_LEN_POINTER_WITH_SENTINEL_OR_NULL => DataOpKind.ALLOCATED_POINTER_DYNAMIC_LEN_WITH_SENTINEL_OR_NULL,
+            .POINTER_TO_ONE_OBJECT => DataOpKind.ALLOCATED_POINTER_TO_ONE_OBJECT,
+            .POINTER_TO_ONE_OBJECT_OR_NULL => DataOpKind.ALLOCATED_POINTER_TO_ONE_OBJECT_OR_NULL,
+            .POINTER_TO_MANY_ONJECTS => DataOpKind.ALLOCATED_POINTER_TO_MANY_ONJECTS,
+            .POINTER_TO_MANY_OBJECTS_OR_NULL => DataOpKind.ALLOCATED_POINTER_TO_MANY_OBJECTS_OR_NULL,
         };
-        const op = DataOp.new_allocated_pointer_op(elem_size, ptr_align, alloc_idx, static_len, offset_to_next_field, kind);
+        const op = DataOp.new_allocated_pointer_op(elem_size, ptr_align, alloc_idx, num_subroutine_ops, offset_to_next_field, kind);
         self.internal.push_op(self, op);
     }
 
@@ -1038,8 +1045,8 @@ pub const DataOpBuilderLowLevel = struct {
 
     pub fn add_prev_allocation_ref_pointer_op(comptime self: *DataOpBuilderLowLevel, comptime elem_size: u32, comptime ptr_align: u32, alloc_idx: u16, comptime static_len: u32, comptime offset_to_next_field: i32, comptime LEN_MODE: PointerLenMode) void {
         const kind: DataOpKind = switch (LEN_MODE) {
-            .STATIC_LEN_POINTER => DataOpKind.POINTER_TO_PREVIOUSLY_ALLOCATED_REGION_STATIC_LEN,
-            .DYNAMIC_LEN_POINTER => DataOpKind.POINTER_TO_PREVIOUSLY_ALLOCATED_REGION_DYNAMIC_LEN,
+            .POINTER_TO_ONE_OBJECT => DataOpKind.POINTER_TO_PREVIOUSLY_ALLOCATED_REGION_STATIC_LEN,
+            .POINTER_TO_MANY_ONJECTS => DataOpKind.POINTER_TO_PREVIOUSLY_ALLOCATED_REGION_DYNAMIC_LEN,
         };
         const op = DataOp.new_previous_allocation_ref_op(elem_size, ptr_align, alloc_idx, static_len, offset_to_next_field, kind);
         self.internal.push_op(self, op);
@@ -1374,17 +1381,17 @@ pub const DataOpBuilderLowLevel = struct {
         info.NEEDS_CACHED_LEN = info.POINTER_KIND == .many;
         info.PTR_LEN_MODE = switch (info.POINTER_KIND) {
             .one => switch (info.PTR_IS_NULLABLE) {
-                true => PointerLenMode.STATIC_LEN_POINTER_OR_NULL,
-                false => PointerLenMode.STATIC_LEN_POINTER,
+                true => PointerLenMode.POINTER_TO_ONE_OBJECT_OR_NULL,
+                false => PointerLenMode.POINTER_TO_ONE_OBJECT,
             },
             .many => switch (info.PTR_IS_NULLABLE) {
                 true => switch (info.PTR_SENTINEL != null) {
                     true => PointerLenMode.DYNAMIC_LEN_POINTER_WITH_SENTINEL_OR_NULL,
-                    false => PointerLenMode.DYNAMIC_LEN_POINTER_OR_NULL,
+                    false => PointerLenMode.POINTER_TO_MANY_OBJECTS_OR_NULL,
                 },
                 false => switch (info.PTR_SENTINEL != null) {
                     true => PointerLenMode.DYNAMIC_LEN_POINTER_WITH_SENTINEL,
-                    false => PointerLenMode.DYNAMIC_LEN_POINTER,
+                    false => PointerLenMode.POINTER_TO_MANY_ONJECTS,
                 },
             },
             else => unreachable,
@@ -1434,16 +1441,13 @@ pub const DataOpBuilderLowLevel = struct {
             info.OP_PATTERN[i] = .POINTER;
             info.OP_PATTERN_OFFSETS_TO_NEXT[i] = info.OFFSET_TO_NEXT_FIELD;
             i += 1;
-            info.OP_PATTERN[i] = .POINTER_SUBROUTINE;
-            info.OP_PATTERN_OFFSETS_TO_NEXT[i] = 0;
-            i += 1;
-            info.PTR_SUBROUTINE_LEN = 1;
         }
         if (info.DATA_IS_ARRAY) {
             if (info.ARRAY_CAN_BE_BULK_COPIED) {
                 info.OP_PATTERN[i] = .FLAT_ARRAY;
                 info.OP_PATTERN_OFFSETS_TO_NEXT[i] = if (info.IS_POINTER) info.REAL_DATA_SIZE else info.OFFSET_TO_NEXT_FIELD;
                 i += 1;
+                info.PTR_SUBROUTINE_LEN += 1;
             } else {
                 info.OP_PATTERN[i] = .ARRAY;
                 info.OP_PATTERN_OFFSETS_TO_NEXT[i] = if (info.IS_POINTER) info.REAL_DATA_SIZE else info.OFFSET_TO_NEXT_FIELD;
@@ -1451,11 +1455,13 @@ pub const DataOpBuilderLowLevel = struct {
                 info.OP_PATTERN[i] = if (info.IS_NUMERIC_PATTERN) .NUMERIC else .STRUCT;
                 info.OP_PATTERN_OFFSETS_TO_NEXT[i] = num_cast(@sizeOf(info.RAW_FINAL_TYPE), i32);
                 i += 1;
+                info.PTR_SUBROUTINE_LEN += 2;
             }
         } else {
             info.OP_PATTERN[i] = if (info.IS_NUMERIC_PATTERN) .NUMERIC else .STRUCT;
             info.OP_PATTERN_OFFSETS_TO_NEXT[i] = if (info.IS_POINTER) num_cast(@sizeOf(info.PTR_CHILD_TYPE), i32) else info.OFFSET_TO_NEXT_FIELD;
             i += 1;
+            info.PTR_SUBROUTINE_LEN += 1;
         }
         if (info.IS_POINTER and info.HAS_SENTINEL) {
             info.OP_PATTERN[i] = .ADD_SENTINEL;
@@ -1478,14 +1484,14 @@ pub const DataOpBuilderLowLevel = struct {
     pub fn add_ops_for_complete_type_serial_info(comptime self: *DataOpBuilderLowLevel, comptime info: CompleteTypeSerialInfo) void {
         for (info.OP_PATTERN[0..info.NUM_OPS_REQUIRED_TO_SERIALIZE], info.OP_PATTERN_OFFSETS_TO_NEXT[0..info.NUM_OPS_REQUIRED_TO_SERIALIZE]) |pattern, offset_to_next| {
             switch (pattern) {
+                .MOVE_TO_NEXT => {
+                    self.add_move_native_offset_op(offset_to_next);
+                },
                 .OPTIONAL => {
                     self.add_transfer_data_op(@sizeOf(usize), offset_to_next, 1, info.TARGET_ENDIAN, .NON_ZERO_READ_OR_WRITE_1_ELSE_0, .CACHE_NULL);
                 },
                 .POINTER => {
-                    self.add_allocated_pointer_op(@sizeOf(info.PTR_CHILD_TYPE), info.PTR_ALIGN, info.ALLOC_IDX, 1, offset_to_next, info.PTR_LEN_MODE);
-                },
-                .POINTER_SUBROUTINE => {
-                    self.add_inline_subroutine_start_op(info.PTR_SUBROUTINE_LEN, 1, offset_to_next, .STATIC_REPEAT_OR_NO_REPEAT, .SUB_ALLOCATED_REGION);
+                    self.add_allocated_pointer_op(@sizeOf(info.PTR_CHILD_TYPE), info.PTR_ALIGN, info.ALLOC_IDX, info.PTR_SUBROUTINE_LEN, offset_to_next, info.PTR_LEN_MODE);
                 },
                 .FLAT_ARRAY => {
                     self.add_transfer_data_op(info.REAL_DATA_SIZE, offset_to_next, info.REAL_DATA_SER_SIZE, info.TARGET_ENDIAN, .TARGET_ENDIAN_SAME_SIZE, DataCacheMode.DONT_CACHE_DATA);
@@ -1496,14 +1502,11 @@ pub const DataOpBuilderLowLevel = struct {
                 .NUMERIC => {
                     self.add_transfer_data_op(@sizeOf(info.RAW_FINAL_TYPE), offset_to_next, info.RAW_FINAL_TYPE_SER_SIZE, info.TARGET_ENDIAN, info.TECH, info.CACHE_MODE);
                 },
-                .ADD_SENTINEL => {
-                    self.add_pointer_sentinel_op(@sizeOf(info.PTR_CHILD_TYPE), info.PTR_SENTINEL.?);
-                },
-                .MOVE_TO_NEXT => {
-                    self.add_move_native_offset_op(offset_to_next);
-                },
                 .STRUCT => {
                     self.add_ref_unique_type_op(info.STRUCT_UNIQUE_IDX, offset_to_next);
+                },
+                .ADD_SENTINEL => {
+                    self.add_pointer_sentinel_op(@sizeOf(info.PTR_CHILD_TYPE), info.PTR_SENTINEL.?);
                 },
             }
         }
@@ -1767,20 +1770,54 @@ pub fn DataOpBuilderExternUnion(comptime TAG_TYPE: type) type {
 }
 
 const RoutineStackFrame = struct {
-    routine_start: u32,
-    routine_end: u32,
-    routine_idx: u32,
-    routine_repeat_left: u32,
-    native_offset_after_routine: i32,
-    pop_mem_region_after_complete: bool = false,
-};
+    min_native_addr: usize = 0,
+    max_native_addr: usize = 0,
+    native_ptr: [*]u8 = Utils.invalid_ptr_many(u8),
+    routine_start: u32 = 0,
+    routine_end: u32 = 0,
+    routine_idx: u32 = 0,
+    routine_repeat_left: u32 = 0,
+    cache_len: usize = 0,
+    has_len: bool = false,
+    cache_tag: u64 = 0,
+    has_tag: bool = false,
+    cache_null: bool = false,
+    has_null: bool = false,
 
-const MemRegionStackFrame = struct {
-    min_addr: usize,
-    max_addr: usize,
-    native_ptr: [*]u8,
+    fn clone_keep_cache(self: *RoutineStackFrame) RoutineStackFrame {
+        return self.*;
+    }
+    fn clone_ptr_only(self: *RoutineStackFrame) RoutineStackFrame {
+        return RoutineStackFrame{
+            .min_native_addr = self.min_native_addr,
+            .max_native_addr = self.max_native_addr,
+            .native_ptr = self.native_ptr,
+        };
+    }
+    fn clone_with_empty_cache(self: *RoutineStackFrame) RoutineStackFrame {
+        var routine = self.*;
+        routine.cache_len = 0;
+        routine.cache_null = false;
+        routine.cache_tag = 0;
+        routine.has_len = false;
+        routine.has_null = false;
+        routine.has_tag = false;
+        return routine;
+    }
 
-    pub fn move_ptr(self: *MemRegionStackFrame, delta: i32) void {
+    fn set_new_memory_region(self: *RoutineStackFrame, ptr: [*]u8, byte_len: usize) void {
+        self.min_native_addr = @intFromPtr(ptr);
+        self.max_native_addr = self.min_native_addr + byte_len;
+        self.native_ptr = ptr;
+    }
+
+    fn set_op_slice_starting_from_current(self: *RoutineStackFrame, num_ops: u32, repeat: u32) void {
+        self.routine_start - self.routine_idx;
+        self.routine_end = self.routine_start + num_ops;
+        self.routine_repeat_left = repeat;
+    }
+
+    fn move_native_ptr(self: *RoutineStackFrame, delta: i32) void {
         if (delta < 0) {
             self.native_ptr -= abs_cast(delta, usize);
         } else {
@@ -1788,15 +1825,56 @@ const MemRegionStackFrame = struct {
         }
         if (Assert.should_assert()) {
             const native_addr = @intFromPtr(self.native_ptr);
-            assert_with_reason(self.min_addr <= native_addr and native_addr < self.max_addr, @src(), "native pointer offset caused the native pointer to escape its memory region: ptr address {s}", .{if (self.min_addr > native_addr) "too low" else "too high"});
+            assert_with_reason(self.min_native_addr <= native_addr and native_addr < self.max_native_addr, @src(), "native pointer offset caused the native pointer to escape its memory region: new ptr address {s}", .{if (self.min_native_addr > native_addr) "too low" else "too high"});
         }
     }
-    pub fn move_ptr_backward(self: *MemRegionStackFrame, delta: u32) void {
-        self.native_ptr -= num_cast(delta, usize);
+
+    fn move_native_ptr_backward(self: *RoutineStackFrame, backward_offset: u32) void {
+        self.native_ptr -= num_cast(backward_offset, usize);
         if (Assert.should_assert()) {
             const native_addr = @intFromPtr(self.native_ptr);
-            assert_with_reason(self.min_addr <= native_addr and native_addr < self.max_addr, @src(), "native pointer offset caused the native pointer to escape its memory region: ptr address {s}", .{if (self.min_addr > native_addr) "too low" else "too high"});
+            assert_with_reason(self.min_native_addr <= native_addr and native_addr < self.max_native_addr, @src(), "native pointer offset caused the native pointer to escape its memory region: new ptr address {s}", .{if (self.min_native_addr > native_addr) "too low" else "too high"});
         }
+    }
+
+    fn move_native_ptr_forward(self: *RoutineStackFrame, forward_offset: u32) void {
+        self.native_ptr += num_cast(forward_offset, usize);
+        if (Assert.should_assert()) {
+            const native_addr = @intFromPtr(self.native_ptr);
+            assert_with_reason(self.min_native_addr <= native_addr and native_addr < self.max_native_addr, @src(), "native pointer offset caused the native pointer to escape its memory region: new ptr address {s}", .{if (self.min_native_addr > native_addr) "too low" else "too high"});
+        }
+    }
+
+    pub fn increment_op(self: *RoutineStackFrame, n: u32) void {
+        assert_with_reason(self.routine_idx + n <= self.routine_end, @src(), "incrementing the current routine op index by {d} exceeds the maximum range of the routine's op slice", .{n});
+        self.routine_idx += n;
+        if (self.routine_idx == self.routine_end) {
+            self.routine_repeat_left -= 1;
+            if (self.routine_repeat_left > 0) {
+                self.routine_idx = self.routine_start;
+            }
+        }
+    }
+
+    pub fn get_cached_len(self: *const RoutineStackFrame) usize {
+        assert_with_reason(self.has_len, @src(), "no 'len' cached, but it is required", .{});
+        return self.cache_len;
+    }
+    pub fn get_cached_tag(self: *const RoutineStackFrame) u64 {
+        assert_with_reason(self.has_tag, @src(), "no 'tag' cached, but it is required", .{});
+        return self.cache_tag;
+    }
+    pub fn get_cached_null(self: *const RoutineStackFrame) bool {
+        assert_with_reason(self.has_null, @src(), "no 'null' cached, but it is required", .{});
+        return self.cache_null;
+    }
+
+    pub fn is_done(self: *RoutineStackFrame) bool {
+        return self.routine_repeat_left == 0;
+    }
+
+    pub fn not_done(self: *RoutineStackFrame) bool {
+        return self.routine_repeat_left > 0;
     }
 };
 
@@ -1945,24 +2023,27 @@ pub fn SerializationManager(comptime MAIN_TYPES_FOR_SERIALIZATION: []const type,
     comptime var _FINAL_OPS_LIST: [_BUILDER.low_level.internal.ops_len]DataOp = undefined;
     comptime var _FINAL_UNIQUE_LIST: [_BUILDER.low_level.internal.unique_len]UniqueSerialStructAndSettingsFinal = undefined;
     comptime var _FINAL_UNIQUE_LIST_ROOT: [MAIN_TYPES_FOR_SERIALIZATION.len]UniqueSerialStructAndSettingsFinal = undefined;
-    // comptime var _FINAL_ALLOC_NAME_BUFFER: [_BUILDER.low_level.internal.alloc_buf_len]u8 = undefined;
-    // comptime var _FINAL_ALLOC_NAME_LIST: [_BUILDER.low_level.internal.alloc_names_len]SliceRange = undefined;
     comptime {
-        @memcpy(_FINAL_OPS_LIST[0..], _OP_BUFFER[0.._BUILDER.low_level.internal.ops_len]);
-        // @memcpy(_FINAL_ALLOC_NAME_BUFFER[0..], _ALLOC_NAME_BUFFER[0.._BUILDER.low_level.internal.alloc_buf_len]);
-        // @memcpy(_FINAL_ALLOC_NAME_LIST[0..], _ALLOC_NAME_LIST[0.._BUILDER.low_level.internal.alloc_names_len]);
         for (_UNIQUE_TYPE_ARRAY[0.._BUILDER.low_level.internal.unique_len], 0..) |unique, u| {
             _FINAL_UNIQUE_LIST[u] = unique.to_final();
             if (u < MAIN_TYPES_FOR_SERIALIZATION.len) {
                 _FINAL_UNIQUE_LIST_ROOT[u] = _FINAL_UNIQUE_LIST[u];
             }
         }
+        for (_OP_BUFFER[0.._BUILDER.low_level.internal.ops_len], 0..) |op, o| {
+            const kind = op.GENERIC.kind;
+            const final_op = switch (kind) {
+                .REF_UNIQUE_TYPE_NO_REPEAT,
+                .REF_UNIQUE_TYPE_STATIC_REPEAT,
+                .REF_UNIQUE_TYPE_DYNAMIC_REPEAT,
+                => op.REF_UNIQUE_TYPE_SUBRS.to_subroutine_start(_FINAL_UNIQUE_LIST[0..]),
+                else => op,
+            };
+            _FINAL_OPS_LIST[o] = final_op;
+        }
     }
     const _FINAL_OPS_LIST_CONST = _FINAL_OPS_LIST;
-    const _FINAL_UNIQUE_LIST_CONST = _FINAL_UNIQUE_LIST;
     const _FINAL_UNIQUE_LIST_ROOT_CONST = _FINAL_UNIQUE_LIST_ROOT;
-    // const _FINAL_ALLOC_NAME_BUFFER_CONST = _FINAL_ALLOC_NAME_BUFFER;
-    // const _FINAL_ALLOC_NAME_LIST_CONST = _FINAL_ALLOC_NAME_LIST;
     const _FINAL_OP_USED_TRACKER_CONST = _OP_USED_TRACKER;
     const _FINAL_NUM_ALLOCS = _BUILDER.low_level.internal.alloc_names_len;
     const _FINAL_ALLOC_STRUCT_FIELDS = comptime make: {
@@ -1979,10 +2060,11 @@ pub fn SerializationManager(comptime MAIN_TYPES_FOR_SERIALIZATION: []const type,
         }
         break :make fields;
     };
+
     return struct {
         const Self = @This();
         pub const OPS = _FINAL_OPS_LIST_CONST;
-        pub const UNIQUES = _FINAL_UNIQUE_LIST_CONST;
+        // pub const UNIQUES = _FINAL_UNIQUE_LIST_CONST;
         pub const ROOT_TYPES = _FINAL_UNIQUE_LIST_ROOT_CONST;
         const OP_USED = _FINAL_OP_USED_TRACKER_CONST;
         const A_FIELDS = _FINAL_ALLOC_STRUCT_FIELDS;
@@ -1998,40 +2080,21 @@ pub fn SerializationManager(comptime MAIN_TYPES_FOR_SERIALIZATION: []const type,
         routine_stack_ptr: [*]RoutineStackFrame = Utils.invalid_ptr_many(RoutineStackFrame),
         routine_stack_len: u32 = 0,
         routine_stack_cap: u32 = 0,
-        native_mem_stack_ptr: [*]MemRegionStackFrame = Utils.invalid_ptr_many(MemRegionStackFrame),
-        native_mem_stack_len: u32 = 0,
-        native_mem_stack_cap: u32 = 0,
         curr_routine: *RoutineStackFrame = Utils.invalid_ptr(RoutineStackFrame),
-        curr_region: *MemRegionStackFrame = Utils.invalid_ptr(MemRegionStackFrame),
-        cache_len: usize = 0,
-        has_len: bool = false,
-        cache_tag: u64 = 0,
-        has_tag: bool = false,
-        cache_null: bool = false,
-        has_null: bool = false,
         obj_allocs: [NUM_ALLOCS]Allocator = @splat(DummyAllocator.allocator_panic_free_noop),
         self_alloc: Allocator = DummyAllocator.allocator_panic_free_noop,
         byte_count: usize = 0,
 
-        pub fn init(initial_routine_stack_capacity: u32, initial_mem_region_capacity: u32, allocator: Allocator) Self {
+        pub fn init(initial_routine_stack_capacity: u32, allocator: Allocator) Self {
             var self = Self{
                 .self_alloc = allocator,
             };
             Utils.Alloc.smart_alloc_ptr_ptrs(allocator, &self.routine_stack_ptr, &self.routine_stack_cap, @intCast(initial_routine_stack_capacity), .{}, .{});
-            Utils.Alloc.smart_alloc_ptr_ptrs(allocator, &self.native_mem_stack_ptr, &self.routine_stack_cap, @intCast(initial_mem_region_capacity), .{}, .{});
             return self;
         }
 
         fn reset(self: *Self) void {
             self.routine_stack_len = 0;
-            self.native_mem_stack_len = 0;
-            self.cache_len = 0;
-            self.has_len = false;
-            self.cache_null = false;
-            self.has_null = false;
-            self.cache_tag = 0;
-            self.has_tag = false;
-            self.curr_region = Utils.invalid_ptr(MemRegionStackFrame);
             self.curr_routine = Utils.invalid_ptr(RoutineStackFrame);
             self.obj_allocs = @splat(DummyAllocator.allocator_panic_free_noop);
             self.byte_count = 0;
@@ -2064,42 +2127,23 @@ pub fn SerializationManager(comptime MAIN_TYPES_FOR_SERIALIZATION: []const type,
             return arr;
         }
 
-        fn push_routine_frame_from_unique(self: *Self, unique: UniqueSerialStructAndSettingsFinal, num_repeat: u32, offset_after: i32, pop_region_after: bool) void {
-            const routine = RoutineStackFrame{
-                .native_offset_after_routine = offset_after,
-                .routine_start = unique.routine_start,
-                .routine_end = unique.routine_end,
-                .routine_idx = unique.routine_start,
-                .routine_repeat_left = num_repeat,
-                .pop_mem_region_after_complete = pop_region_after,
-            };
+        fn push_routine_frame(self: *Self, routine: RoutineStackFrame) void {
             Alloc.smart_push_to_list_many_ptr(&self.routine_stack_ptr, &self.routine_stack_len, &self.routine_stack_cap, routine, self.self_alloc, .{}, .{});
             self.curr_routine = &self.routine_stack_ptr[self.routine_stack_len - 1];
         }
-        fn push_routine_frame_from_unique_ref(self: *Self, ref: RefUniqueTypeSubroutine, num_repeat: bool, pop_region_after: bool) void {
-            const unique = UNIQUES[ref.unique_type_index];
+        fn push_routine_frame_from_root_unique(self: *Self, comptime unique: UniqueSerialStructAndSettingsFinal, ptr_to_object: [*]u8) void {
+            const min_addr = @intFromPtr(ptr_to_object);
+            const max_addr = min_addr + @sizeOf(unique.object_type);
             const routine = RoutineStackFrame{
-                .native_offset_after_routine = ref.offset_to_next_field,
+                .native_ptr = ptr_to_object,
+                .min_native_addr = min_addr,
+                .max_native_addr = max_addr,
                 .routine_start = unique.routine_start,
                 .routine_end = unique.routine_end,
                 .routine_idx = unique.routine_start,
-                .routine_repeat_left = num_repeat,
-                .pop_mem_region_after_complete = pop_region_after,
+                .routine_repeat_left = 1,
             };
-            Alloc.smart_push_to_list_many_ptr(&self.routine_stack_ptr, &self.routine_stack_len, &self.routine_stack_cap, routine, self.self_alloc, .{}, .{});
-            self.curr_routine = &self.routine_stack_ptr[self.routine_stack_len - 1];
-        }
-        fn push_routine_frame_from_subrs(self: *Self, subrs: SubroutineStart, static_repeat: bool, dynamic_repeat: u32, pop_region_after: bool) void {
-            const routine = RoutineStackFrame{
-                .native_offset_after_routine = subrs.offset_to_next_field,
-                .routine_start = subrs.subroutine_first_op,
-                .routine_end = subrs.subroutine_first_op + subrs.subroutine_num_ops,
-                .routine_idx = subrs.subroutine_first_op,
-                .routine_repeat_left = if (static_repeat) subrs.subroutine_static_repeat else dynamic_repeat,
-                .pop_mem_region_after_complete = pop_region_after,
-            };
-            Alloc.smart_push_to_list_many_ptr(&self.routine_stack_ptr, &self.routine_stack_len, &self.routine_stack_cap, routine, self.self_alloc, .{}, .{});
-            self.curr_routine = &self.routine_stack_ptr[self.routine_stack_len - 1];
+            self.push_routine_frame(routine);
         }
         fn pop_routine_frame(self: *Self) void {
             assert_with_reason(self.routine_stack_len > 0, @src(), "no routine stack to pop, something went wrong in the internal logic", .{});
@@ -2109,58 +2153,39 @@ pub fn SerializationManager(comptime MAIN_TYPES_FOR_SERIALIZATION: []const type,
             }
         }
 
-        fn push_mem_region_frame(self: *Self, ptr: [*]u8, len: usize) void {
-            const region = MemRegionStackFrame{
-                .native_ptr = ptr,
-                .min_addr = @intFromPtr(ptr),
-                .max_addr = @intFromPtr(ptr) + len,
-            };
-            Alloc.smart_push_to_list_many_ptr(&self.native_mem_stack_ptr, &self.native_mem_stack_len, &self.native_mem_stack_cap, region, self.self_alloc, .{}, .{});
-            self.curr_region = &self.native_mem_stack_ptr[self.native_mem_stack_len - 1];
-        }
-        fn pop_mem_region_frame(self: *Self) void {
-            assert_with_reason(self.native_mem_stack_len > 0, @src(), "no memory region to pop, something went wrong in the internal logic", .{});
-            self.native_mem_stack_len -= 1;
-            if (self.native_mem_stack_len > 0) {
-                @branchHint(.likely);
-                self.curr_region = &self.native_mem_stack_ptr[self.native_mem_stack_len - 1];
-            }
-        }
-
         fn handle_alloc_pointer(self: *Self, comptime DIR: SERDIR, ptr_op: Pointer, comptime need_cached_len: bool, comptime need_cached_null: bool) void {
-            const len = if (need_cached_len) get: {
-                assert_with_reason(self.has_len, @src(), "no len cached for dynamic pointer", .{});
-                break :get num_cast(ptr_op.elem_size, usize) * self.cache_len;
-            } else num_cast(ptr_op.elem_size * ptr_op.static_len, usize);
-            const is_null: bool = if (need_cached_null) get: {
-                assert_with_reason(self.has_null, @src(), "no cached null for nullable pointer", .{});
-                break :get self.cache_null;
-            } else false;
-
+            const repeat: usize = if (need_cached_len) self.curr_routine.get_cached_len() else 1;
+            const byte_len: usize = num_cast(ptr_op.elem_size, usize) * repeat;
+            const is_null: bool = if (need_cached_null) self.curr_routine.get_cached_null() else false;
+            var pointer_subroutine = self.curr_routine.clone_with_empty_cache();
+            self.curr_routine.move_native_ptr(ptr_op.offset_to_next_field);
+            self.curr_routine.increment_op(1 + ptr_op.num_subroutine_ops);
             if (!is_null) {
                 switch (DIR) {
                     .NATIVE_TO_SERIAL => {
-                        const addr_of_native_pointer_slot: *usize = @ptrCast(@alignCast(self.curr_region.native_ptr));
+                        const addr_of_native_pointer_slot: *usize = @ptrCast(@alignCast(pointer_subroutine.native_ptr));
                         const new_native_ptr_region: [*]u8 = @ptrFromInt(addr_of_native_pointer_slot.*);
-                        self.curr_region.move_ptr(ptr_op.offset_to_next_field);
-                        self.push_mem_region_frame(new_native_ptr_region, len);
+                        pointer_subroutine.set_new_memory_region(new_native_ptr_region, byte_len);
+                        pointer_subroutine.increment_op(1);
+                        pointer_subroutine.set_op_slice_starting_from_current(ptr_op.num_subroutine_ops, repeat);
+                        self.push_routine_frame(pointer_subroutine);
                     },
                     .SERIAL_TO_NATIVE => {
-                        const addr_of_native_pointer_slot: *usize = @ptrCast(@alignCast(self.curr_region.native_ptr));
-                        self.curr_region.move_ptr(ptr_op.offset_to_next_field);
-                        self.push_mem_region_frame(Utils.invalid_ptr_many(u8), 0);
                         const alloc = self.obj_allocs[ptr_op.alloc_idx];
-                        var temp_len: usize = 0;
-                        Alloc.smart_alloc_ptr_ptrs(alloc, &self.curr_region.native_ptr, &temp_len, len, .{}, .{});
-                        self.curr_region.max_addr += temp_len;
-                        addr_of_native_pointer_slot.* = @intFromPtr(self.curr_region.native_ptr);
+                        const new_native_ptr_region = Alloc.smart_alloc_new(alloc, u8, byte_len, .{ .align_mode = .custom_align(ptr_op.ptr_align_power.value_as_type(usize)) }, .{});
+                        const addr_of_native_pointer_slot: *usize = @ptrCast(@alignCast(pointer_subroutine.native_ptr));
+                        addr_of_native_pointer_slot.* = @intFromPtr(new_native_ptr_region.ptr);
+                        pointer_subroutine.set_new_memory_region(new_native_ptr_region.ptr, byte_len);
+                        pointer_subroutine.increment_op(1);
+                        pointer_subroutine.set_op_slice_starting_from_current(ptr_op.num_subroutine_ops, repeat);
+                        self.push_routine_frame(pointer_subroutine);
                     },
                 }
             }
         }
 
         fn handle_non_zero_read_write_1_else_0(self: *Self, comptime DIR: SERDIR, comptime SER: ReadWrite.SerialKind, comptime CACHE: DataCacheMode, data: DataTransfer, serial: DIR.serial_type()) DIR.error_type()!void {
-            const ptr = self.curr_region.native_ptr;
+            const ptr = self.curr_routine.native_ptr;
             const slice = ptr[0..data.native_size];
             var val: u8 = 0;
             switch (DIR) {
@@ -2192,21 +2217,72 @@ pub fn SerializationManager(comptime MAIN_TYPES_FOR_SERIALIZATION: []const type,
             }
             switch (CACHE) {
                 .CACHE_LEN => {
-                    self.cache_len = num_cast(val, usize);
-                    self.has_len = true;
+                    self.curr_routine.cache_len = num_cast(val, usize);
+                    self.curr_routine.has_len = true;
                 },
                 .CACHE_NULL => {
-                    self.cache_null = val > 0;
-                    self.has_null = true;
+                    self.curr_routine.cache_null = val > 0;
+                    self.curr_routine.has_null = true;
                 },
                 .CACHE_TAG => {
-                    self.cache_tag = num_cast(val, u64);
-                    self.has_tag = true;
+                    self.curr_routine.cache_tag = num_cast(val, u64);
+                    self.curr_routine.has_tag = true;
                 },
             }
             self.byte_count += 1;
-            self.curr_routine.routine_idx += 1;
-            self.curr_region.move_ptr(data.offset_to_next_field);
+            self.curr_routine.increment_op(1);
+            self.curr_routine.move_native_ptr(data.offset_to_next_field);
+        }
+
+        fn handle_endian_transfer(self: *Self, comptime DIR: SERDIR, comptime SER: ReadWrite.SerialKind, comptime SAME_ENDIAN: bool, comptime CACHE: DataCacheMode, data: DataTransfer, serial: DIR.serial_type()) DIR.error_type()!void {
+            switch (DIR) {
+                .NATIVE_TO_SERIAL => {
+                    const ser: SerialDest = serial;
+                    if (SAME_ENDIAN) {
+                        try ser.write_n_bytes_in_order(SER, @intCast(data.native_size), self.curr_routine.native_ptr);
+                    } else {
+                        try ser.write_n_bytes_swapped(SER, @intCast(data.native_size), self.curr_routine.native_ptr);
+                    }
+                },
+                .SERIAL_TO_NATIVE => {
+                    const ser: SerialSource = serial;
+                    if (SAME_ENDIAN) {
+                        try ser.read_n_bytes_in_order(SER, @intCast(data.native_size), self.curr_routine.native_ptr);
+                    } else {
+                        try ser.read_n_bytes_swapped(SER, @intCast(data.native_size), self.curr_routine.native_ptr);
+                    }
+                },
+            }
+            switch (CACHE) {
+                .CACHE_LEN => {
+                    Utils.Mem.copy_arbitrary_length_bytes_in_native_endian_to_typed_pointer(usize, &self.curr_routine.cache_len, self.curr_routine.native_ptr[0..data.native_size]);
+                    self.curr_routine.has_len = true;
+                },
+                .CACHE_NULL => {
+                    var val: u8 = 0;
+                    for (self.curr_routine.native_ptr[0..data.native_size]) |b| {
+                        val |= b;
+                    }
+                    self.curr_routine.cache_null = val > 0;
+                    self.curr_routine.has_null = true;
+                },
+                .CACHE_TAG => {
+                    Utils.Mem.copy_arbitrary_length_bytes_in_native_endian_to_typed_pointer(u64, &self.curr_routine.cache_tag, self.curr_routine.native_ptr[0..data.native_size]);
+                    self.curr_routine.has_tag = true;
+                },
+            }
+            self.byte_count += @intCast(data.native_size);
+            self.curr_routine.increment_op(1);
+            self.curr_routine.move_native_ptr(data.offset_to_next_field);
+        }
+
+        fn handle_subroutine(self: *Self, subroutine: Subroutine, repeat: u32) void {
+            self.curr_routine.increment_op(1);
+            var subroutine_frame = self.curr_routine.clone_keep_cache();
+            self.curr_routine.increment_op(@intCast(subroutine.subroutine_num_ops));
+            self.curr_routine.move_native_ptr(subroutine.offset_to_next_field);
+            subroutine_frame.set_op_slice_starting_from_current(subroutine.subroutine_num_ops, num_cast(repeat, u32));
+            self.push_routine_frame(subroutine_frame);
         }
 
         fn op_isnt_ever_used(comptime OP_KIND: DataOpKind) bool {
@@ -2222,96 +2298,80 @@ pub fn SerializationManager(comptime MAIN_TYPES_FOR_SERIALIZATION: []const type,
                 assert_unreachable(@src(), "type `{s}` was not provided as one of the 'main' types to serialize. If you want to serialize this type, include it in the `MAIN_TYPES_FOR_SERIALIZATION` parameter during `SerializationManager` type definition", .{@typeName(T)});
             };
             self.reset();
-            self.push_routine_frame_from_unique(UNIQUE, 1, 0, true);
-            self.push_mem_region_frame(native, native_size);
-            var byte_count: usize = 0;
+            self.push_routine_frame_from_root_unique(UNIQUE);
             serial_loop: while (true) {
-                if (self.curr_routine.routine_idx >= self.curr_routine.routine_end) {
-                    if (self.curr_routine.pop_mem_region_after_complete) {
-                        self.pop_mem_region_frame();
-                    }
-                    self.routine_stack_len -= 1;
-                    if (self.routine_stack_len == 0) break :serial_loop;
-                    self.curr_routine = &self.routine_stack_ptr[self.routine_stack_len - 1];
+                while (self.routine_stack_len > 0 and self.curr_routine.is_done()) {
+                    self.pop_routine_frame();
+                }
+                if (self.routine_stack_len == 0) {
+                    break :serial_loop;
                 }
                 const op = OPS[self.curr_routine.routine_idx];
                 const kind = op.GENERIC.kind;
                 switch (kind) {
-                    .ADD_NATIVE_OFFSET => {
-                        if (op_isnt_ever_used(.ADD_NATIVE_OFFSET)) unreachable;
-                        const delta = op.ADD_NATIVE_OFFSET.offset;
-                        self.curr_region.move_ptr(delta);
-                        self.curr_routine.routine_idx += 1;
+                    .MOVE_NATIVE_POINTER => {
+                        if (op_isnt_ever_used(.MOVE_NATIVE_POINTER)) unreachable;
+                        const delta = op.MOVE_NATIVE_POINTER.offset;
+                        self.curr_routine.move_native_ptr(delta);
+                        self.curr_routine.increment_op(1);
                     },
-                    .ALLOCATED_POINTER_DYNAMIC_LEN => {
-                        if (op_isnt_ever_used(.ALLOCATED_POINTER_DYNAMIC_LEN)) unreachable;
+                    .ALLOCATED_POINTER_TO_MANY_ONJECTS => {
+                        if (op_isnt_ever_used(.ALLOCATED_POINTER_TO_MANY_ONJECTS)) unreachable;
                         const data = op.POINTER;
                         self.handle_alloc_pointer(DIR, data, true, false);
                     },
-                    .ALLOCATED_POINTER_DYNAMIC_LEN_OR_NULL => {
-                        if (op_isnt_ever_used(.ALLOCATED_POINTER_DYNAMIC_LEN_OR_NULL)) unreachable;
+                    .ALLOCATED_POINTER_TO_MANY_OBJECTS_OR_NULL => {
+                        if (op_isnt_ever_used(.ALLOCATED_POINTER_TO_MANY_OBJECTS_OR_NULL)) unreachable;
                         const data = op.POINTER;
                         self.handle_alloc_pointer(DIR, data, true, true);
                     },
-                    .ALLOCATED_POINTER_DYNAMIC_LEN_WITH_SENTINEL => {
-                        if (op_isnt_ever_used(.ALLOCATED_POINTER_DYNAMIC_LEN_WITH_SENTINEL)) unreachable;
-                        @panic("unimplemented");
-                    },
-                    .ALLOCATED_POINTER_DYNAMIC_LEN_WITH_SENTINEL_OR_NULL => {
-                        if (op_isnt_ever_used(.ALLOCATED_POINTER_DYNAMIC_LEN_WITH_SENTINEL_OR_NULL)) unreachable;
-                        @panic("unimplemented");
-                    },
-                    .ALLOCATED_POINTER_STATIC_LEN => {
-                        if (op_isnt_ever_used(.ALLOCATED_POINTER_STATIC_LEN)) unreachable;
+                    .ALLOCATED_POINTER_TO_ONE_OBJECT => {
+                        if (op_isnt_ever_used(.ALLOCATED_POINTER_TO_ONE_OBJECT)) unreachable;
                         const data = op.POINTER;
                         self.handle_alloc_pointer(DIR, data, false, false);
                     },
-                    .ALLOCATED_POINTER_STATIC_LEN_OR_NULL => {
-                        if (op_isnt_ever_used(.ALLOCATED_POINTER_STATIC_LEN_OR_NULL)) unreachable;
+                    .ALLOCATED_POINTER_TO_ONE_OBJECT_OR_NULL => {
+                        if (op_isnt_ever_used(.ALLOCATED_POINTER_TO_ONE_OBJECT_OR_NULL)) unreachable;
                         const data = op.POINTER;
                         self.handle_alloc_pointer(DIR, data, false, true);
-                    },
-                    .ALLOCATED_POINTER_STATIC_LEN_WITH_SENTINEL => {
-                        if (op_isnt_ever_used(.ALLOCATED_POINTER_STATIC_LEN_WITH_SENTINEL)) unreachable;
-                        @panic("unimplemented");
-                    },
-                    .ALLOCATED_POINTER_STATIC_LEN_WITH_SENTINEL_OR_NULL => {
-                        if (op_isnt_ever_used(.ALLOCATED_POINTER_STATIC_LEN_WITH_SENTINEL_OR_NULL)) unreachable;
-                        @panic("unimplemented");
                     },
                     .DATA_MANIPULATION_NATIVE_TO_SERIAL => {
                         if (op_isnt_ever_used(.DATA_MANIPULATION_NATIVE_TO_SERIAL)) unreachable;
                         if (DIR == .NATIVE_TO_SERIAL) {
                             const data = op.DATA_MANIP_NATIVE_TO_SERIAL;
-                            var cloned_region = self.curr_region.*;
-                            cloned_region.move_ptr(data.offset_to_object_addr);
-                            data.func(@ptrCast(cloned_region.native_ptr), external);
+                            var manip_ptr = self.curr_routine.clone_ptr_only();
+                            manip_ptr.move_native_ptr(data.offset_to_object_addr);
+                            data.func(@ptrCast(manip_ptr.native_ptr), external);
                         }
+                        self.curr_routine.increment_op(1);
                     },
                     .DATA_MANIPULATION_SERIAL_TO_NATIVE => {
                         if (op_isnt_ever_used(.DATA_MANIPULATION_SERIAL_TO_NATIVE)) unreachable;
                         if (DIR == .SERIAL_TO_NATIVE) {
-                            const data = op.DATA_MANIP_SERIAL_TO_NATIVE;
-                            var cloned_region = self.curr_region.*;
-                            cloned_region.move_ptr(data.offset_to_object_addr);
-                            data.func(@ptrCast(cloned_region.native_ptr), external);
+                            const data = op.DATA_MANIP_NATIVE_TO_SERIAL;
+                            var manip_ptr = self.curr_routine.clone_ptr_only();
+                            manip_ptr.move_native_ptr(data.offset_to_object_addr);
+                            data.func(@ptrCast(manip_ptr.native_ptr), external);
                         }
+                        self.curr_routine.increment_op(1);
                     },
                     .FULL_CUSTOM_FUNCTION => {
                         if (op_isnt_ever_used(.FULL_CUSTOM_FUNCTION)) unreachable;
                         const data = op.FULL_CUSTOM_FUNCTION;
-                        var cloned_region = self.curr_region.*;
-                        cloned_region.move_ptr_backward(data.get_neg_offset_to_object_addr());
+                        var object_ptr = self.curr_routine.clone_ptr_only();
+                        object_ptr.move_native_ptr_backward(data.get_neg_offset_to_object_addr());
                         switch (DIR) {
                             .NATIVE_TO_SERIAL => {
-                                const bytes_written = try data.funcs.write_to_serial(@ptrCast(cloned_region.native_ptr), serial);
-                                byte_count += bytes_written;
+                                const bytes_written = try data.funcs.write_to_serial(@ptrCast(object_ptr.native_ptr), serial, SER);
+                                self.byte_count += bytes_written;
                             },
                             .SERIAL_TO_NATIVE => {
-                                const bytes_read = try data.funcs.write_to_serial(@ptrCast(cloned_region.native_ptr), serial);
-                                byte_count += bytes_read;
+                                const bytes_read = try data.funcs.read_from_serial(@ptrCast(object_ptr.native_ptr), serial, SER);
+                                self.byte_count += bytes_read;
                             },
                         }
+                        self.curr_routine.increment_op(1);
+                        self.curr_routine.move_native_ptr(data.offset_to_next_field);
                     },
                     .NON_ZERO_READ_OR_WRITE_1_ELSE_0 => {
                         if (op_isnt_ever_used(.NON_ZERO_READ_OR_WRITE_1_ELSE_0)) unreachable;
@@ -2340,14 +2400,69 @@ pub fn SerializationManager(comptime MAIN_TYPES_FOR_SERIALIZATION: []const type,
                         const sentinel_bytes = sentinel_bytes_ptr[0..data.elem_size];
                         const native_bytes = self.curr_region.native_ptr[0..data.elem_size];
                         @memcpy(native_bytes, sentinel_bytes);
-                        self.curr_routine.routine_idx += 1;
+                        self.curr_routine.increment_op(1);
                     },
-                    .REF_UNIQUE_TYPE => {
-                        if (op_isnt_ever_used(.REF_UNIQUE_TYPE)) unreachable;
-                        const ref = op.REF_UNIQUE_TYPE_SUBRS;
-                        self.push_routine_frame_from_unique_ref(ref, num_repeat: bool, pop_region_after: bool)
-                        //CHECKPOINT something is wrong here... I need a repeat count from static or dynamic len, but `RefUniqueTypeSubroutine` has neither
+                    .REF_UNIQUE_TYPE_NO_REPEAT,
+                    .REF_UNIQUE_TYPE_STATIC_REPEAT,
+                    .REF_UNIQUE_TYPE_DYNAMIC_REPEAT,
+                    => unreachable, // These are converted to `START_SUBROUTINE_` versions at comptime
+                    .START_SUBROUTINE_NO_REPEAT => {
+                        if (op_isnt_ever_used(.START_SUBROUTINE_NO_REPEAT)) unreachable;
+                        const subroutine = op.SUBROUTINE;
+                        self.handle_subroutine(subroutine, 1);
                     },
+                    .START_SUBROUTINE_STATIC_REPEAT => {
+                        if (op_isnt_ever_used(.START_SUBROUTINE_STATIC_REPEAT)) unreachable;
+                        const subroutine = op.SUBROUTINE;
+                        self.handle_subroutine(subroutine, subroutine.subroutine_static_repeat);
+                    },
+                    .START_SUBROUTINE_DYNAMIC_REPEAT => {
+                        if (op_isnt_ever_used(.START_SUBROUTINE_DYNAMIC_REPEAT)) unreachable;
+                        const subroutine = op.SUBROUTINE;
+                        const repeat = self.curr_routine.get_cached_len();
+                        self.handle_subroutine(subroutine, num_cast(repeat, u32));
+                    },
+                    .TRANSFER_SAME_ENDIAN => {
+                        if (op_isnt_ever_used(.TRANSFER_SAME_ENDIAN)) unreachable;
+                        const data = op.DATA_TRANSFER;
+                        self.handle_endian_transfer(DIR, SER, true, .DONT_CACHE_DATA, data, serial);
+                    },
+                    .TRANSFER_SAME_ENDIAN_SAVE_LEN => {
+                        if (op_isnt_ever_used(.TRANSFER_SAME_ENDIAN_SAVE_LEN)) unreachable;
+                        const data = op.DATA_TRANSFER;
+                        self.handle_endian_transfer(DIR, SER, true, .CACHE_LEN, data, serial);
+                    },
+                    .TRANSFER_SAME_ENDIAN_SAVE_NULL => {
+                        if (op_isnt_ever_used(.TRANSFER_SAME_ENDIAN_SAVE_NULL)) unreachable;
+                        const data = op.DATA_TRANSFER;
+                        self.handle_endian_transfer(DIR, SER, true, .CACHE_NULL, data, serial);
+                    },
+                    .TRANSFER_SAME_ENDIAN_SAVE_TAG => {
+                        if (op_isnt_ever_used(.TRANSFER_SAME_ENDIAN_SAVE_TAG)) unreachable;
+                        const data = op.DATA_TRANSFER;
+                        self.handle_endian_transfer(DIR, SER, true, .CACHE_TAG, data, serial);
+                    },
+                    .TRANSFER_SWAP_ENDIAN => {
+                        if (op_isnt_ever_used(.TRANSFER_SWAP_ENDIAN)) unreachable;
+                        const data = op.DATA_TRANSFER;
+                        self.handle_endian_transfer(DIR, SER, false, .DONT_CACHE_DATA, data, serial);
+                    },
+                    .TRANSFER_SWAP_ENDIAN_SAVE_LEN => {
+                        if (op_isnt_ever_used(.TRANSFER_SWAP_ENDIAN_SAVE_LEN)) unreachable;
+                        const data = op.DATA_TRANSFER;
+                        self.handle_endian_transfer(DIR, SER, false, .CACHE_LEN, data, serial);
+                    },
+                    .TRANSFER_SWAP_ENDIAN_SAVE_NULL => {
+                        if (op_isnt_ever_used(.TRANSFER_SWAP_ENDIAN_SAVE_NULL)) unreachable;
+                        const data = op.DATA_TRANSFER;
+                        self.handle_endian_transfer(DIR, SER, false, .CACHE_NULL, data, serial);
+                    },
+                    .TRANSFER_SWAP_ENDIAN_SAVE_TAG => {
+                        if (op_isnt_ever_used(.TRANSFER_SWAP_ENDIAN_SAVE_TAG)) unreachable;
+                        const data = op.DATA_TRANSFER;
+                        self.handle_endian_transfer(DIR, SER, false, .CACHE_TAG, data, serial);
+                    },
+                    //CHECKPOINT finish op switch
                 }
             }
         }

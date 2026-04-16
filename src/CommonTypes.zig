@@ -439,6 +439,13 @@ pub const Endian = enum(u8) {
             .BIG_ENDIAN => std.builtin.Endian.big,
         };
     }
+
+    pub inline fn native_is_little_endian() bool {
+        return NATIVE == .LITTLE_ENDIAN;
+    }
+    pub inline fn native_is_big_endian() bool {
+        return NATIVE == .BIG_ENDIAN;
+    }
 };
 
 pub const AngleType = enum(u8) {

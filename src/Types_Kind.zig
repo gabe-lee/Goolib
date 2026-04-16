@@ -309,7 +309,7 @@ pub const KindInfo = union(Kind) {
         }
         return false;
     }
-    pub inline fn get_len(comptime K: KindInfo) comptime_int {
+    pub inline fn get_len_comptime(comptime K: KindInfo) comptime_int {
         switch (K) {
             .ARRAY => |A| {
                 return A.len;
@@ -477,6 +477,14 @@ pub const KindInfo = union(Kind) {
     }
     pub inline fn has_len(comptime K: KindInfo) bool {
         return K == .ARRAY or K == .VECTOR or (K == .POINTER and (K.POINTER.size == .slice or Kind.get_kind(K.POINTER.child).is_array_or_vector()));
+    }
+    pub inline fn get_len(comptime K: KindInfo, k_val: anytype) usize {
+        return switch (K) {
+            .ARRAY => k_val.len,
+            .VECTOR => k_val.len,
+            .POINTER => k_val.len,
+            else => assert_unreachable(@src(), "kind `{s}` type `{s}` has no len", .{ @tagName(K), @typeName(@TypeOf(k_val)) }),
+        };
     }
     pub inline fn has_indexable_child_kind(comptime K: KindInfo, comptime KK: Kind) bool {
         if (K == .POINTER and K.POINTER.size == .one and K.child_kind().is_array_or_vector()) {

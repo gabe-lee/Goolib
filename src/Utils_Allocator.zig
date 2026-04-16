@@ -442,6 +442,18 @@ pub fn smart_alloc_ptr_ptrs(alloc: Allocator, old_mem_ptr_ptr: anytype, old_mem_
     return;
 }
 
+pub fn smart_alloc_new(alloc: Allocator, comptime T: type, new_cap: usize, settings: SmartAllocSettings(T), comptime comptime_settings: SmartAllocComptimeSettings(T)) switch (comptime_settings.ERROR_MODE) {
+    .RETURN_ERRORS, .RETURN_ERRORS_AND_WARN => AllocErr![]T,
+    .ERRORS_PANIC, .ERRORS_ARE_UNREACHABLE => []T,
+} {
+    var ptr: [*]T = Utils.invalid_ptr_many(T);
+    var len: usize = 0;
+    if (comptime comptime_settings.ERROR_MODE.does_error()) ( //
+        try smart_alloc_ptr_ptrs(alloc, &ptr, &len, new_cap, settings, comptime_settings)) //
+    else smart_alloc_ptr_ptrs(alloc, &ptr, &len, new_cap, settings, comptime_settings);
+    return ptr[0..len];
+}
+
 pub fn smart_push_to_list_many_ptr(ptr_to_data_pointer: anytype, ptr_to_len: anytype, ptr_to_cap: anytype, val: Types.pointer_child_child_type(@TypeOf(ptr_to_data_pointer)), alloc: Allocator, settings: SmartAllocSettings(Types.pointer_child_child_type(@TypeOf(ptr_to_data_pointer))), comptime comptime_settings: SmartAllocComptimeSettings(Types.pointer_child_child_type(@TypeOf(ptr_to_data_pointer)))) switch (comptime_settings.ERROR_MODE) {
     .RETURN_ERRORS, .RETURN_ERRORS_AND_WARN => AllocErr!void,
     .ERRORS_PANIC, .ERRORS_ARE_UNREACHABLE => void,
