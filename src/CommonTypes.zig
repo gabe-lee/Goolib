@@ -26,6 +26,7 @@ const build = @import("builtin");
 const math = std.math;
 
 const Root = @import("./_root.zig");
+const Math = Root.Math;
 const FlexSlice = Root.FlexSlice.FlexSlice;
 const Assert = Root.Assert;
 const SliceChild = Root.Types.SliceChild;
@@ -448,9 +449,14 @@ pub const Endian = enum(u8) {
     }
 };
 
-pub const AngleType = enum(u8) {
+pub const AngleType = enum {
     RADIANS,
     DEGREES,
+};
+
+pub const ComptimeRuntime = enum {
+    RUNTIME,
+    COMPTIME,
 };
 
 pub const FillRule = enum {
@@ -509,6 +515,28 @@ pub const ParamRefType = enum(u8) {
 pub const ShouldTranslate = enum(u8) {
     IGNORE_TRANSLATIONS,
     PREFORM_TRANSLATIONS,
+};
+
+pub const Trinary = enum(u2) {
+    UNDEFINED,
+    FALSE,
+    TRUE,
+};
+
+pub const Bool1 = enum(u1) {
+    FALSE = 0,
+    TRUE = 1,
+
+    pub fn multiply(self: Bool1, val: anytype) Math.Upgraded2Numbers(u1, @TypeOf(val)).T {
+        return Math.upgrade_multiply(@intFromEnum(self), val);
+    }
+    pub fn multiply_out(self: Bool1, val: anytype, comptime OUT: type) OUT {
+        return Math.upgrade_multiply_out(@intFromEnum(self), val, OUT);
+    }
+
+    pub fn is_true(self: Bool1) bool {
+        return @bitCast(@intFromEnum(self));
+    }
 };
 
 pub const Bool32 = enum(u32) {

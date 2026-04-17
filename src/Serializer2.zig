@@ -41,6 +41,7 @@ const Endian = Root.CommonTypes.Endian;
 const DebugMode = Root.CommonTypes.DebugMode;
 const Flags = Root.Flags.Flags;
 const Alloc = Utils.Alloc;
+const Tri = Root.CommonTypes.Trinary;
 
 const Reader = std.Io.Reader;
 const Writer = std.Io.Writer;
@@ -49,6 +50,7 @@ const PowerOf2 = MathX.PowerOf2;
 const Pool = Root.Pool.Simple.SimplePool;
 const StackStatic = Root.Stack.StackStatic;
 const SliceRange = Root.CommonTypes.SliceRangeSmall;
+const Bool = Root.CommonTypes.Bool1;
 
 const DUMMY_ALLOC = DummyAllocator.allocator_panic_free_noop;
 
@@ -258,12 +260,7 @@ pub const DataOpKind = enum(u8) {
     // Union Control
     UNION_HEADER,
     UNION_TAG_ID,
-    UNION_TAG_RANGE_ONE_FOLLOWING,
-    UNION_TAG_RANGE_TWO_FOLLOWING,
-    UNION_TAG_RANGE_THREE_FOLLOWING,
-    UNION_TAG_RANGE_FOUR_FOLLOWING,
-    UNION_TAG_RANGE_FIVE_FOLLOWING,
-    UNION_TAG_RANGE_SIX_FOLLOWING,
+    UNION_TAG_RANGE,
     // Pointer Control
     ALLOCATED_POINTER_TO_ONE_OBJECT,
     ALLOCATED_POINTER_TO_MANY_ONJECTS,
@@ -306,10 +303,11 @@ pub const DataOp = extern union {
     }
 
     pub fn new_move_native_ptr_op(comptime offset: i32) DataOp {
-        return DataOp{ .MOVE_NATIVE_POINTER = MoveNativePointer{ .offset = offset } };
+        const neg_off: u32, const pos_off: u32 = neg_pos_offset_from_delta(offset);
+        return DataOp{ .MOVE_NATIVE_POINTER = MoveNativePointer{ .forward_offset = pos_off, .backward_offset = neg_off } };
     }
 
-    pub fn new_transfer_data_op(comptime native_size: u32, comptime offset_to_next_field: i32, comptime serial_size: u32, comptime kind: DataOpKind) DataOp {
+    pub fn new_transfer_data_op(comptime native_size: u32, comptime offset_to_next_field: i32, comptime static_serial_size: u32, comptime kind: DataOpKind) DataOp {
         switch (kind) {
             .NON_ZERO_READ_OR_WRITE_1_ELSE_0,
             .NON_ZERO_READ_OR_WRITE_1_ELSE_0_SAVE_LEN,
@@ -334,67 +332,53 @@ pub const DataOp = extern union {
             => {},
             else => assert_unreachable(@src(), "cannot create a `DataTransfer` op with kind `{s}`", .{@tagName(kind)}),
         }
-        return DataOp{ .DATA_TRANSFER = DataTransfer{ .native_size = native_size, .offset_to_next_field = offset_to_next_field, .serial_size = serial_size, .kind = kind } };
+        const neg_off: u32, const pos_off: u32 = neg_pos_offset_from_delta(offset_to_next_field);
+        return DataOp{ .DATA_TRANSFER = DataTransfer{ .native_size = native_size, .forward_offset_to_next_field = pos_off, .backward_offset_to_next_field = neg_off, .static_serial_size = static_serial_size, .kind = kind } };
     }
 
-    pub fn new_union_header_op(comptime num_fields: u32) DataOp {
-        return DataOp{ .UNION_HEADER = UnionHeader{ .num_fields = num_fields } };
+    pub fn new_union_header_op(comptime num_fields: u32, comptime offset_to_next_field: i32) DataOp {
+        const neg_off: u32, const pos_off: u32 = neg_pos_offset_from_delta(offset_to_next_field);
+        return DataOp{ .UNION_HEADER = UnionHeader{ .num_fields = num_fields, .forward_offset_to_next_field = pos_off, .backward_offset_to_next_field = neg_off } };
     }
 
-    pub fn new_union_tag_id_op(comptime tag_as_u64_native_endian: u64, comptime num_following_commands: u32) DataOp {
-        switch (num_following_commands) {
-            1 => return DataOp{ .UNION_TAG_ID = UnionTagId{ .tag_as_u64_le = if (NATIVE_ENDIAN != .LITTLE_ENDIAN) @byteSwap(tag_as_u64_native_endian) else tag_as_u64_native_endian, .kind = .UNION_TAG_ID_ONE_FOLLOWING } },
-            2 => return DataOp{ .UNION_TAG_ID = UnionTagId{ .tag_as_u64_le = if (NATIVE_ENDIAN != .LITTLE_ENDIAN) @byteSwap(tag_as_u64_native_endian) else tag_as_u64_native_endian, .kind = .UNION_TAG_ID_TWO_FOLLOWING } },
-            3 => return DataOp{ .UNION_TAG_ID = UnionTagId{ .tag_as_u64_le = if (NATIVE_ENDIAN != .LITTLE_ENDIAN) @byteSwap(tag_as_u64_native_endian) else tag_as_u64_native_endian, .kind = .UNION_TAG_ID_THREE_FOLLOWING } },
-            4 => return DataOp{ .UNION_TAG_ID = UnionTagId{ .tag_as_u64_le = if (NATIVE_ENDIAN != .LITTLE_ENDIAN) @byteSwap(tag_as_u64_native_endian) else tag_as_u64_native_endian, .kind = .UNION_TAG_ID_FOUR_FOLLOWING } },
-            5 => return DataOp{ .UNION_TAG_ID = UnionTagId{ .tag_as_u64_le = if (NATIVE_ENDIAN != .LITTLE_ENDIAN) @byteSwap(tag_as_u64_native_endian) else tag_as_u64_native_endian, .kind = .UNION_TAG_ID_FIVE_FOLLOWING } },
-            6 => return DataOp{ .UNION_TAG_ID = UnionTagId{ .tag_as_u64_le = if (NATIVE_ENDIAN != .LITTLE_ENDIAN) @byteSwap(tag_as_u64_native_endian) else tag_as_u64_native_endian, .kind = .UNION_TAG_ID_SIX_FOLLOWING } },
-            else => assert_unreachable(@src(), "only union tags with 1-6 following commands are supported, got `{d}`", .{num_following_commands}),
-        }
-    }
-
-    pub fn new_union_tag_range_op(comptime tag_min_as_u64_native_endian: u64, comptime tag_max_as_u64_native_endian: u64, comptime num_following_commands: u32) DataOp {
-        var range = UnionTagRange{
-            .max_as_u64_le = if (NATIVE_ENDIAN != .LITTLE_ENDIAN) @byteSwap(tag_max_as_u64_native_endian) else tag_max_as_u64_native_endian,
+    pub fn new_union_tag_id_op(comptime tag_as_u64: u64, comptime num_following_commands: u32) DataOp {
+        return UnionTagId{
+            .tag_as_u64 = tag_as_u64,
+            .num_ops_in_tag = num_following_commands,
         };
-        range.set_min_native_endian(tag_min_as_u64_native_endian);
-        switch (num_following_commands) {
-            1 => DataOp{ .UNION_TAG_RANGE = range, .kind = .UNION_TAG_RANGE_ONE_FOLLOWING },
-            2 => DataOp{ .UNION_TAG_RANGE = range, .kind = .UNION_TAG_RANGE_TWO_FOLLOWING },
-            3 => DataOp{ .UNION_TAG_RANGE = range, .kind = .UNION_TAG_RANGE_THREE_FOLLOWING },
-            4 => DataOp{ .UNION_TAG_RANGE = range, .kind = .UNION_TAG_RANGE_FOUR_FOLLOWING },
-            5 => DataOp{ .UNION_TAG_RANGE = range, .kind = .UNION_TAG_RANGE_FIVE_FOLLOWING },
-            6 => DataOp{ .UNION_TAG_RANGE = range, .kind = .UNION_TAG_RANGE_SIX_FOLLOWING },
-            else => assert_unreachable(@src(), "only union tag ranges with 1-6 following commands are supported, got `{d}`", .{num_following_commands}),
-        }
     }
 
-    pub fn new_subroutine_op(comptime subroutine_first_op: u32, comptime subroutine_num_ops: u16, comptime subroutine_static_repeat: u32, comptime offset_to_next_field: i32, comptime kind: DataOpKind) DataOp {
+    pub fn new_union_tag_range_op(comptime tag_min_as_u64: u64, comptime tag_max_as_u64: u64, comptime num_following_commands: u32) DataOp {
+        return UnionTagRange{
+            .min_as_u64 = tag_min_as_u64,
+            .max_as_u64 = tag_max_as_u64,
+            .num_ops_in_tag = num_following_commands,
+        };
+    }
+
+    pub fn new_subroutine_op(comptime subroutine_first_op: u32, comptime subroutine_num_ops: u32, comptime subroutine_static_repeat: u32, comptime offset_to_next_field: i32, comptime INLINE: InlineMode, comptime kind: DataOpKind) DataOp {
         switch (kind) {
             .START_SUBROUTINE_NO_REPEAT,
-            .START_SUBROUTINE_NO_REPEAT_ALLOCATED_REGION,
             .START_SUBROUTINE_STATIC_REPEAT,
             .START_SUBROUTINE_DYNAMIC_REPEAT,
-            .START_SUBROUTINE_STATIC_REPEAT_ALLOCATED_REGION,
-            .START_SUBROUTINE_DYNAMIC_REPEAT_ALLOCATED_REGION,
             => {},
             else => assert_unreachable(@src(), "cannot create a `SubroutineStart` op with kind `{s}`", .{@tagName(kind)}),
         }
-        return DataOp{ .SUBROUTINE = Subroutine{ .subroutine_first_op = subroutine_first_op, .subroutine_num_ops = subroutine_num_ops, .subroutine_static_repeat = subroutine_static_repeat, .offset_to_next_field = offset_to_next_field, .kind = kind } };
+        const neg_off: u32, const pos_off: u32 = neg_pos_offset_from_delta(offset_to_next_field);
+        const IS_INLINE: Bool = if (INLINE == .INLINE) Bool.TRUE else Bool.FALSE;
+        return DataOp{ .SUBROUTINE = Subroutine{ .subroutine_first_op = subroutine_first_op, .subroutine_num_ops = subroutine_num_ops, .subroutine_static_repeat = subroutine_static_repeat, .forward_offset_to_next_field = pos_off, .backward_offset_to_next_field = neg_off, .ops_are_inline = IS_INLINE, .kind = kind } };
     }
 
-    pub fn new_ref_unique_struct_and_settings_op(comptime unique_type_index: u32, comptime offset_to_next_field: i32, comptime kind: DataOpKind) DataOp {
+    pub fn new_ref_unique_struct_and_settings_op(comptime unique_type_index: u32, comptime subroutine_static_repeat: u32, comptime offset_to_next_field: i32, comptime kind: DataOpKind) DataOp {
         switch (kind) {
-            .REF_UNIQUE_TYPE_STATIC_REPEAT,
-            .REF_UNIQUE_TYPE_DYNAMIC_REPEAT_ALLOCATED_REGION,
-            .REF_UNIQUE_TYPE_DYNAMIC_REPEAT_CURRENT_REGION,
-            .REF_UNIQUE_TYPE_NO_REPEAT_ALLOCATED_REGION,
             .REF_UNIQUE_TYPE_NO_REPEAT,
-            .REF_UNIQUE_TYPE_STATIC_REPEAT_ALLOCATED_REGION,
+            .REF_UNIQUE_TYPE_STATIC_REPEAT,
+            .REF_UNIQUE_TYPE_DYNAMIC_REPEAT,
             => {},
             else => assert_unreachable(@src(), "cannot create a `RefUniqueTypeSubroutine` op with kind `{s}`", .{@tagName(kind)}),
         }
-        return DataOp{ .REF_UNIQUE_TYPE_SUBRS = RefUniqueTypeSubroutine{ .unique_type_index = unique_type_index, .offset_to_next_field = offset_to_next_field, .kind = kind } };
+        const neg_off: u32, const pos_off: u32 = neg_pos_offset_from_delta(offset_to_next_field);
+        return DataOp{ .REF_UNIQUE_TYPE_SUBRS = RefUniqueTypeSubroutine{ .unique_type_index = unique_type_index, .subroutine_static_repeat = subroutine_static_repeat, .forward_offset_to_next_field = pos_off, .backward_offset_to_next_field = neg_off, .kind = kind } };
     }
 
     pub fn new_allocated_pointer_op(comptime elem_size: u32, comptime elem_align: u32, comptime alloc_idx: u16, comptime num_subroutine_ops: u32, comptime offset_to_next_field: i32, comptime kind: DataOpKind) DataOp {
@@ -406,148 +390,127 @@ pub const DataOp = extern union {
             => {},
             else => assert_unreachable(@src(), "cannot create a `AllocatedPointer` op with kind `{s}`", .{@tagName(kind)}),
         }
+        const neg_off: u32, const pos_off: u32 = neg_pos_offset_from_delta(offset_to_next_field);
         const ptr_align_power = PowerOf2.alignment_power(elem_align);
-        return DataOp{ .POINTER = Pointer{ .elem_size = elem_size, .ptr_align_power = ptr_align_power, .alloc_idx = alloc_idx, .num_subroutine_ops = num_subroutine_ops, .offset_to_next_field = offset_to_next_field, .kind = kind } };
+        return DataOp{ .POINTER = Pointer{ .elem_size = elem_size, .ptr_align_power = ptr_align_power, .alloc_idx = alloc_idx, .num_inline_subroutine_ops = num_subroutine_ops, .forward_offset_to_next_field = pos_off, .backward_offset_to_next_field = neg_off, .kind = kind } };
     }
 
     pub fn new_pointer_sentinel_op(comptime elem_size: u32, comptime sentinel_data: *const anyopaque) DataOp {
         return DataOp{ .SENTINEL = Sentinel{ .elem_size = elem_size, .sentinel_data = sentinel_data } };
     }
 
-    // pub fn new_previous_allocation_ref_op(comptime elem_size: u32, comptime static_len: u32, comptime offset_to_next_field: i32, comptime kind: DataOpKind) DataOp {
-    //     switch (kind) {
-    //         .POINTER_TO_PREVIOUSLY_ALLOCATED_REGION_DYNAMIC_LEN, .POINTER_TO_PREVIOUSLY_ALLOCATED_REGION_STATIC_LEN => {},
-    //         else => assert_unreachable(@src(), "cannot create a `PreviousAllocationReference` op with kind `{s}`", .{@tagName(kind)}),
-    //     }
-    //     return DataOp{ .Pointer = Pointer{ .elem_size = elem_size, .static_len = static_len, .offset_to_next_field = offset_to_next_field, .kind = kind } };
-    // }
-
-    pub fn new_custom_functions_op(comptime funcs: *const CustomRuntimeSerializeFuncs, comptime offset_to_next_field: i32) DataOp {
-        return DataOp{ .FULL_CUSTOM_FUNCTION = CustomFunctions{ .funcs = funcs, .offset_to_next_field = offset_to_next_field } };
+    pub fn new_custom_functions_op(comptime funcs: *const CustomRuntimeSerializeFuncs, comptime offset_to_next_field: i32, comptime neg_offset_to_object_addr: u32) DataOp {
+        const neg_off: u32, const pos_off: u32 = neg_pos_offset_from_delta(offset_to_next_field);
+        return DataOp{ .FULL_CUSTOM_FUNCTION = CustomFunctions{ .funcs = funcs, .forward_offset_to_next_field = pos_off, .backward_offset_to_next_field = neg_off, .neg_offset_to_object_addr = neg_offset_to_object_addr } };
     }
 
-    pub fn new_data_manip_native_to_serial_op(comptime func: *const DataManipulationNativeToSerial) DataOp {
-        return DataOp{ .DATA_MANIP_NATIVE_TO_SERIAL = DataManipNativeToSerial{ .func = func } };
+    pub fn new_data_manip_native_to_serial_op(comptime func: *const DataManipulationNativeToSerial, comptime neg_offset_to_object_addr: u32) DataOp {
+        return DataOp{ .DATA_MANIP_NATIVE_TO_SERIAL = DataManipNativeToSerial{ .func = func, .neg_offset_to_object_addr = neg_offset_to_object_addr } };
     }
 
-    pub fn new_data_manip_serial_to_native_op(comptime func: *const DataManipulationSerialToNative) DataOp {
-        return DataOp{ .DATA_MANIP_SERIAL_TO_NATIVE = DataManipSerialToNative{ .func = func } };
+    pub fn new_data_manip_serial_to_native_op(comptime func: *const DataManipulationSerialToNative, comptime neg_offset_to_object_addr: u32) DataOp {
+        return DataOp{ .DATA_MANIP_SERIAL_TO_NATIVE = DataManipSerialToNative{ .func = func, .neg_offset_to_object_addr = neg_offset_to_object_addr } };
     }
 };
 
+const InlineMode = enum {
+    INLINE,
+    EXTERNAL,
+};
+
+inline fn neg_pos_offset_from_delta(delta: i32) struct { u32, u32 } {
+    return .{
+        num_cast(@abs(@min(delta, 0)), u32),
+        num_cast(@max(delta, 0), u32),
+    };
+}
+
+const DATA_OP_SIZE = 24;
+const DATA_OP_ALIGN = 8;
+const DATA_OP_KIND_OFFSET = DATA_OP_SIZE - 1;
+
+fn assert_data_op_layout(comptime T: type) void {
+    assert_with_reason(@sizeOf(T) == DATA_OP_SIZE, @src(), "DataOp union member type `{s}` does not have required size {d}", .{ @typeName(T), DATA_OP_SIZE });
+    assert_with_reason(@alignOf(T) == DATA_OP_ALIGN, @src(), "DataOp union member type `{s}` does not have required align {d}", .{ @typeName(T), DATA_OP_ALIGN });
+    assert_with_reason(@hasField(T, "kind") and @FieldType(T, "kind") == DataOpKind, @src(), "DataOp union member type `{s}` does not have field `kind : DataOpKind`", .{ @typeName(T), DATA_OP_ALIGN });
+    assert_with_reason(@offsetOf(T, "kind") == DATA_OP_KIND_OFFSET, @src(), "DataOp union member type `{s}` field `kind` is not at required offset `{d}", .{ @typeName(T), DATA_OP_KIND_OFFSET });
+}
+
 const DataOpGeneric = extern struct {
-    __padding: [15]u8 = @splat(0),
-    /// The kind tag, used both for determining the union field, and how to handle
-    /// union fields with multiple modes
+    __padding: [DATA_OP_KIND_OFFSET]u8 = @splat(0),
     kind: DataOpKind,
+
+    const _ = {
+        assert_data_op_layout(DataOpGeneric);
+    };
 };
 
 const MoveNativePointer = extern struct {
-    offset: i32 = 0,
-    __padding: [11]u8 = @splat(0),
-    /// The kind tag, used both for determining the union field, and how to handle
-    /// union fields with multiple modes
+    forward_offset: u32 = 0,
+    backward_offset: u32 = 0,
+    __padding: [DATA_OP_KIND_OFFSET - 8]u8 = @splat(0),
     kind: DataOpKind = .MOVE_NATIVE_POINTER,
+
+    const _ = {
+        assert_data_op_layout(MoveNativePointer);
+    };
 };
 
 const DataTransfer = extern struct {
-    /// The size of the native types (number of bytes to fill)
     native_size: u32 = 0,
-    /// The number of bytes to move from the current native field offset
-    /// to the offset of the next sibling field to transfer. The
-    /// last field should have an offset that moves back to the start of the object
-    offset_to_next_field: i32 = 0,
-    /// If 0, this indicates VarInt (variable size)
-    ///
-    /// If non-zero, but not equal to native_size, it indicates the value will be
-    /// truncated in one of the serial directions
-    serial_size: u32 = 0,
-    __padding: [3]u8 = @splat(0),
-    /// The kind tag, used both for determining the union field, and how to handle
-    /// union fields with multiple modes
+    forward_offset_to_next_field: u32 = 0,
+    backward_offset_to_next_field: u32 = 0,
+    static_serial_size: u32 = 0,
+    __padding: [DATA_OP_KIND_OFFSET - 16]u8 = @splat(0),
     kind: DataOpKind = .TRANSFER_SAME_ENDIAN,
+
+    const _ = {
+        assert_data_op_layout(DataTransfer);
+    };
 };
 
 const UnionHeader = extern struct {
     num_fields: u32 = 0,
-    __padding: [11]u8 = @splat(0),
-    /// The kind tag, used both for determining the union field, and how to handle
-    /// union fields with multiple modes
+    total_num_ops_in_union: u32 = 0,
+    forward_offset_to_next_field: u32 = 0,
+    backward_offset_to_next_field: u32 = 0,
+    __padding: [DATA_OP_KIND_OFFSET - 16]u8 = @splat(0),
     kind: DataOpKind = .UNION_HEADER,
+
+    const _ = {
+        assert_data_op_layout(UnionHeader);
+    };
 };
 
 const UnionTagId = extern struct {
-    /// The union tag value first bitcast to a u64,
-    /// then swapped to little-endian order, if needed
-    tag_as_u64_le: u64 = 0,
+    tag_as_u64: u64 = 0,
     num_ops_in_tag: u32 = 0,
-    __padding: [3]u8 = @splat(0),
-    /// The kind tag, used both for determining the union field, and how to handle
-    /// union fields with multiple modes
+    __padding: [DATA_OP_KIND_OFFSET - 12]u8 = @splat(0),
     kind: DataOpKind = .UNION_TAG_ID,
 
-    pub fn tag_matches(self: UnionTagId, value_as_u64_in_native_endian: u64) bool {
-        if (NATIVE_ENDIAN != .LITTLE_ENDIAN) {
-            return self.tag_as_u64_le == @byteSwap(value_as_u64_in_native_endian);
-        } else {
-            return self.tag_as_u64_le == value_as_u64_in_native_endian;
-        }
-    }
+    const _ = {
+        assert_data_op_layout(UnionTagId);
+    };
 };
 
 const UnionTagRange = extern struct {
-    /// The union tag max value (inclusive) first bitcast to a u64,
-    /// then swapped to little-endian order, if needed
-    max_as_u64_le: u64 = 0,
-    /// The 4 least significant bytes of the min tag value
-    min_as_u64_native_endian_bytes_0_4: u32 = 0,
-    /// The next 2 least significant bytes of the min tag value
-    /// (after `min_as_u64_native_endian_bytes_0_4`)
-    min_as_u64_native_endian_bytes_4_6: u16 = 0,
-    /// the most significant byte of the min tag value
-    min_as_u64_native_endian_byte_6: u8 = 0,
-    /// The kind tag, used both for determining the union field, and how to handle
-    /// union fields with multiple modes
-    kind: DataOpKind = .UNION_TAG_RANGE_ONE_FOLLOWING,
+    min_as_u64: u64 = 0,
+    max_as_u64: u64 = 0,
+    num_ops_in_tag: u32 = 0,
+    __padding: [DATA_OP_KIND_OFFSET - 20]u8 = @splat(0),
+    kind: DataOpKind = .UNION_TAG_RANGE,
 
-    pub fn tag_matches(self: UnionTagRange, value_as_u64_in_native_endian: u64) bool {
-        const min_le = self.get_min_le();
-        if (NATIVE_ENDIAN != .LITTLE_ENDIAN) {
-            const val_swapped = @byteSwap(value_as_u64_in_native_endian);
-            return min_le <= val_swapped and val_swapped <= self.max_as_u64_le;
-        } else {
-            return min_le <= value_as_u64_in_native_endian and value_as_u64_in_native_endian <= self.max_as_u64_le;
-        }
-    }
-
-    pub fn get_min_le(self: UnionTagRange) u64 {
-        const val: u64 = num_cast(self.min_as_u64_native_endian_bytes_0_4, u64);
-        val |= num_cast(self.min_as_u64_native_endian_bytes_4_6, u64) << 32;
-        val |= num_cast(self.min_as_u64_native_endian_byte_6, u64) << 48;
-        if (NATIVE_ENDIAN != .LITTLE_ENDIAN) {
-            val = @byteSwap(val);
-        }
-        return val;
-    }
-
-    pub fn set_min_native_endian(self: *UnionTagRange, val_in_native_endian: u64) void {
-        assert_with_reason(val_in_native_endian < (1 << 54), @src(), "min value too large ({d}). Unfortunately, due to sizing constraints on the SerialManager DataOp type (each DataOp is exactly 16 bytes, and one byte MUST be reserved for the DataOpKind), the minimum tag value of a UnionTagRange MUST be less than {d}. If your use case doesn't work with this constraint, you must use some other serialization technique (possibly custom runtime serial funcs)", .{ val_in_native_endian, 1 << 54 });
-        const bytes_0_4: u32 = num_cast(val_in_native_endian & 0x00_0000_FFFFFFFF, u32);
-        const bytes_4_6: u16 = num_cast((val_in_native_endian & 0x00_FFFF_00000000) >> 32, u16);
-        const byte_6: u16 = num_cast((val_in_native_endian & 0xFF_0000_00000000) >> 48, u8);
-        self.min_as_u64_native_endian_bytes_0_4 = bytes_0_4;
-        self.min_as_u64_native_endian_bytes_4_6 = bytes_4_6;
-        self.min_as_u64_native_endian_byte_6 = byte_6;
-    }
+    const _ = {
+        assert_data_op_layout(UnionTagRange);
+    };
 };
 
 const RefUniqueTypeSubroutine = extern struct {
     unique_type_index: u32 = 0,
     subroutine_static_repeat: u32 = 1,
-    offset_to_next_field: i32 = 0,
-    __padding: [3]u8 = @splat(0),
-    /// The kind tag, used both for determining the union field, and how to handle
-    /// union fields with multiple modes
+    forward_offset_to_next_field: u32 = 0,
+    backward_offset_to_next_field: u32 = 0,
+    __padding: [DATA_OP_KIND_OFFSET - 16]u8 = @splat(0),
     kind: DataOpKind = .REF_UNIQUE_TYPE_NO_REPEAT,
 
     fn to_subroutine_start(comptime self: RefUniqueTypeSubroutine, comptime fully_complete_uniques_list: []const UniqueSerialStructAndSettingsFinal) DataOp {
@@ -560,91 +523,86 @@ const RefUniqueTypeSubroutine = extern struct {
         };
         return DataOp.new_subroutine_op(unique.routine_start, num_cast(unique.routine_end - unique.routine_start, u16), self.subroutine_static_repeat, self.offset_to_next_field, kind);
     }
+
+    const _ = {
+        assert_data_op_layout(RefUniqueTypeSubroutine);
+    };
 };
 
 const Subroutine = extern struct {
     subroutine_first_op: u32 = 0,
     subroutine_static_repeat: u32 = 1,
-    offset_to_next_field: i32 = 0,
-    subroutine_num_ops: u16 = 0,
-    __padding: [1]u8 = @splat(0),
-    /// The kind tag, used both for determining the union field, and how to handle
-    /// union fields with multiple modes
+    forward_offset_to_next_field: u32 = 0,
+    backward_offset_to_next_field: u32 = 0,
+    subroutine_num_ops: u32 = 0,
+    ops_are_inline: bool = false,
+    __padding: [DATA_OP_KIND_OFFSET - 21]u8 = @splat(0),
     kind: DataOpKind = .START_SUBROUTINE_NO_REPEAT,
+
+    const _ = {
+        assert_data_op_layout(Subroutine);
+    };
 };
 
 const Pointer = extern struct {
     elem_size: u32 = 1,
-    num_subroutine_ops: u32 = 0,
-    offset_to_next_field: i32 = 0,
+    num_inline_subroutine_ops: u32 = 0,
+    forward_offset_to_next_field: u32 = 0,
+    backward_offset_to_next_field: u32 = 0,
     alloc_idx: u16 = 0,
     ptr_align_power: PowerOf2 = ._1,
-    /// The kind tag, used both for determining the union field, and how to handle
-    /// union fields with multiple modes
+    __padding: [DATA_OP_KIND_OFFSET - 19]u8 = @splat(0),
     kind: DataOpKind = .ALLOCATED_POINTER_TO_ONE_OBJECT,
+
+    const _ = {
+        assert_data_op_layout(Pointer);
+    };
 };
 
 const Sentinel = extern struct {
     sentinel_data: *const anyopaque,
     elem_size: u32 = 1,
-    __padding: [11 - @sizeOf(usize)]u8 = @splat(0),
-    /// The kind tag, used both for determining the union field, and how to handle
-    /// union fields with multiple modes
+    __padding: [DATA_OP_KIND_OFFSET - (4 + @sizeOf(usize))]u8 = @splat(0),
     kind: DataOpKind = .POINTER_SENTINEL,
+
+    const _ = {
+        assert_data_op_layout(Sentinel);
+    };
 };
 
 const CustomFunctions = extern struct {
-    /// A pair of serialize and deserialize functions
-    /// that are called in place on DataOp bytecode. When
-    /// an object defines these, it must handle ANY AND ALL serialization
-    /// of all children as well.
     funcs: *const CustomRuntimeSerializeFuncs = undefined,
-    offset_to_next_field: i32 = 0,
-    neg_offset_to_object_addr_lo: u16 = 0,
-    neg_offset_to_object_addr_hi: u8 = 0,
-    __padding: [8 - @sizeOf(usize)]u8 = @splat(0),
-    /// The kind tag, used both for determining the union field, and how to handle
-    /// union fields with multiple modes
+    forward_offset_to_next_field: u32 = 0,
+    backward_offset_to_next_field: u32 = 0,
+    neg_offset_to_object_addr: u32 = 0,
+    __padding: [DATA_OP_KIND_OFFSET - (12 + @sizeOf(usize))]u8 = @splat(0),
     kind: DataOpKind = .FULL_CUSTOM_FUNCTION,
 
-    pub fn get_neg_offset_to_object_addr(self: CustomFunctions) u32 {
-        return num_cast(self.neg_offset_to_object_addr_lo, u32) | (num_cast(self.neg_offset_to_object_addr_hi, u32) << 16);
-    }
-
-    pub fn set_neg_offset_to_object_addr(self: *CustomFunctions, neg_offset: u32) void {
-        const lo = num_cast(neg_offset, u16);
-        const hi = num_cast(neg_offset >> 16, u8);
-        self.neg_offset_to_object_addr_lo = lo;
-        self.neg_offset_to_object_addr_hi = hi;
-    }
+    const _ = {
+        assert_data_op_layout(CustomFunctions);
+    };
 };
 
 const DataManipNativeToSerial = extern struct {
-    /// This is a custom user-provided function that can be injected into the
-    /// middle of the serialization process to alter the native data BEFORE it is serialized.
-    ///
-    /// This function should only manipulate fields/values that have NOT YET
-    /// been serialized, as it will have no effect on the ones that already have
     func: *const DataManipulationNativeToSerial = undefined,
-    offset_to_object_addr: i32 = 0,
-    __padding: [11 - @sizeOf(usize)]u8 = @splat(0),
-    /// The kind tag, used both for determining the union field, and how to handle
-    /// union fields with multiple modes
+    neg_offset_to_object_addr: u32 = 0,
+    __padding: [DATA_OP_KIND_OFFSET - (4 + @sizeOf(usize))]u8 = @splat(0),
     kind: DataOpKind = .DATA_MANIPULATION_NATIVE_TO_SERIAL,
+
+    const _ = {
+        assert_data_op_layout(DataManipNativeToSerial);
+    };
 };
 
 const DataManipSerialToNative = extern struct {
-    /// This is a custom user-provided function that can be injected into the middle of the
-    /// de-serialization process to alter the native data AFTER it has been de-serialized.
-    ///
-    /// This function should only manipulate fields/values that have ALREADY been de-serialized,
-    /// as it will have no effect on the ones that have not yet been (they will be overwritten)
     func: *const DataManipulationSerialToNative = undefined,
-    offset_to_object_addr: i32 = 0,
-    __padding: [11 - @sizeOf(usize)]u8 = @splat(0),
-    /// The kind tag, used both for determining the union field, and how to handle
-    /// union fields with multiple modes
+    neg_offset_to_object_addr: u32 = 0,
+    __padding: [DATA_OP_KIND_OFFSET - (4 + @sizeOf(usize))]u8 = @splat(0),
     kind: DataOpKind = .DATA_MANIPULATION_SERIAL_TO_NATIVE,
+
+    const _ = {
+        assert_data_op_layout(DataManipSerialToNative);
+    };
 };
 
 const UniqueSerialStructAndSettingsBuild = struct {
@@ -1812,17 +1770,32 @@ const RoutineStackFrame = struct {
     }
 
     fn set_op_slice_starting_from_current(self: *RoutineStackFrame, num_ops: u32, repeat: u32) void {
-        self.routine_start - self.routine_idx;
+        self.routine_start = self.routine_idx;
         self.routine_end = self.routine_start + num_ops;
         self.routine_repeat_left = repeat;
     }
 
-    fn move_native_ptr(self: *RoutineStackFrame, delta: i32) void {
+    fn set_op_slice_starting_from_non_inline_subroutine_op(self: *RoutineStackFrame, subroutine: Subroutine, repeat: u32) void {
+        self.routine_start = subroutine.subroutine_first_op;
+        self.routine_end = subroutine.subroutine_first_op + num_cast(subroutine.subroutine_num_ops, u32);
+        self.routine_idx = subroutine.subroutine_first_op;
+        self.routine_repeat_left = repeat;
+    }
+
+    fn move_native_ptr_i32(self: *RoutineStackFrame, delta: i32) void {
         if (delta < 0) {
             self.native_ptr -= abs_cast(delta, usize);
         } else {
             self.native_ptr += num_cast(delta, usize);
         }
+        if (Assert.should_assert()) {
+            const native_addr = @intFromPtr(self.native_ptr);
+            assert_with_reason(self.min_native_addr <= native_addr and native_addr < self.max_native_addr, @src(), "native pointer offset caused the native pointer to escape its memory region: new ptr address {s}", .{if (self.min_native_addr > native_addr) "too low" else "too high"});
+        }
+    }
+
+    fn move_native_ptr_pos_neg(self: *RoutineStackFrame, pos_offset: u32, neg_offset: u32) void {
+        self.native_ptr = (self.native_ptr + pos_offset) - neg_offset;
         if (Assert.should_assert()) {
             const native_addr = @intFromPtr(self.native_ptr);
             assert_with_reason(self.min_native_addr <= native_addr and native_addr < self.max_native_addr, @src(), "native pointer offset caused the native pointer to escape its memory region: new ptr address {s}", .{if (self.min_native_addr > native_addr) "too low" else "too high"});
@@ -2157,17 +2130,17 @@ pub fn SerializationManager(comptime MAIN_TYPES_FOR_SERIALIZATION: []const type,
             const repeat: usize = if (need_cached_len) self.curr_routine.get_cached_len() else 1;
             const byte_len: usize = num_cast(ptr_op.elem_size, usize) * repeat;
             const is_null: bool = if (need_cached_null) self.curr_routine.get_cached_null() else false;
+            self.curr_routine.increment_op(1);
             var pointer_subroutine = self.curr_routine.clone_with_empty_cache();
-            self.curr_routine.move_native_ptr(ptr_op.offset_to_next_field);
-            self.curr_routine.increment_op(1 + ptr_op.num_subroutine_ops);
+            self.curr_routine.move_native_ptr_pos_neg(ptr_op.forward_offset_to_next_field, ptr_op.backward_offset_to_next_field);
+            self.curr_routine.increment_op(ptr_op.num_inline_subroutine_ops);
             if (!is_null) {
                 switch (DIR) {
                     .NATIVE_TO_SERIAL => {
                         const addr_of_native_pointer_slot: *usize = @ptrCast(@alignCast(pointer_subroutine.native_ptr));
                         const new_native_ptr_region: [*]u8 = @ptrFromInt(addr_of_native_pointer_slot.*);
                         pointer_subroutine.set_new_memory_region(new_native_ptr_region, byte_len);
-                        pointer_subroutine.increment_op(1);
-                        pointer_subroutine.set_op_slice_starting_from_current(ptr_op.num_subroutine_ops, repeat);
+                        pointer_subroutine.set_op_slice_starting_from_current(ptr_op.num_inline_subroutine_ops, repeat);
                         self.push_routine_frame(pointer_subroutine);
                     },
                     .SERIAL_TO_NATIVE => {
@@ -2176,8 +2149,7 @@ pub fn SerializationManager(comptime MAIN_TYPES_FOR_SERIALIZATION: []const type,
                         const addr_of_native_pointer_slot: *usize = @ptrCast(@alignCast(pointer_subroutine.native_ptr));
                         addr_of_native_pointer_slot.* = @intFromPtr(new_native_ptr_region.ptr);
                         pointer_subroutine.set_new_memory_region(new_native_ptr_region.ptr, byte_len);
-                        pointer_subroutine.increment_op(1);
-                        pointer_subroutine.set_op_slice_starting_from_current(ptr_op.num_subroutine_ops, repeat);
+                        pointer_subroutine.set_op_slice_starting_from_current(ptr_op.num_inline_subroutine_ops, repeat);
                         self.push_routine_frame(pointer_subroutine);
                     },
                 }
@@ -2231,7 +2203,7 @@ pub fn SerializationManager(comptime MAIN_TYPES_FOR_SERIALIZATION: []const type,
             }
             self.byte_count += 1;
             self.curr_routine.increment_op(1);
-            self.curr_routine.move_native_ptr(data.offset_to_next_field);
+            self.curr_routine.move_native_ptr_pos_neg(data.forward_offset_to_next_field, data.backward_offset_to_next_field);
         }
 
         fn handle_endian_transfer(self: *Self, comptime DIR: SERDIR, comptime SER: ReadWrite.SerialKind, comptime SAME_ENDIAN: bool, comptime CACHE: DataCacheMode, data: DataTransfer, serial: DIR.serial_type()) DIR.error_type()!void {
@@ -2273,32 +2245,109 @@ pub fn SerializationManager(comptime MAIN_TYPES_FOR_SERIALIZATION: []const type,
             }
             self.byte_count += @intCast(data.native_size);
             self.curr_routine.increment_op(1);
-            self.curr_routine.move_native_ptr(data.offset_to_next_field);
+            self.curr_routine.move_native_ptr_pos_neg(data.forward_offset_to_next_field, data.backward_offset_to_next_field);
+        }
+
+        fn handle_varint_transfer(self: *Self, comptime DIR: SERDIR, comptime SER: ReadWrite.SerialKind, comptime ZIGZAG: bool, comptime CACHE: DataCacheMode, data: DataTransfer, serial: DIR.serial_type()) DIR.error_type()!void {
+            var n: usize = 0;
+            switch (data.native_size) {
+                2 => switch (DIR) {
+                    .NATIVE_TO_SERIAL => {
+                        const ser: SerialDest = serial;
+                        n = try ser.write_varint(SER, ZIGZAG, u16, @ptrCast(@alignCast(self.curr_routine.native_ptr)));
+                    },
+                    .SERIAL_TO_NATIVE => {
+                        const ser: SerialSource = serial;
+                        n = try ser.read_varint(SER, ZIGZAG, u16, @ptrCast(@alignCast(self.curr_routine.native_ptr)));
+                    },
+                },
+                4 => switch (DIR) {
+                    .NATIVE_TO_SERIAL => {
+                        const ser: SerialDest = serial;
+                        n = try ser.write_varint(SER, ZIGZAG, u32, @ptrCast(@alignCast(self.curr_routine.native_ptr)));
+                    },
+                    .SERIAL_TO_NATIVE => {
+                        const ser: SerialSource = serial;
+                        n = try ser.read_varint(SER, ZIGZAG, u32, @ptrCast(@alignCast(self.curr_routine.native_ptr)));
+                    },
+                },
+                8 => switch (DIR) {
+                    .NATIVE_TO_SERIAL => {
+                        const ser: SerialDest = serial;
+                        n = try ser.write_varint(SER, ZIGZAG, u64, @ptrCast(@alignCast(self.curr_routine.native_ptr)));
+                    },
+                    .SERIAL_TO_NATIVE => {
+                        const ser: SerialSource = serial;
+                        n = try ser.read_varint(SER, ZIGZAG, u64, @ptrCast(@alignCast(self.curr_routine.native_ptr)));
+                    },
+                },
+                16 => switch (DIR) {
+                    .NATIVE_TO_SERIAL => {
+                        const ser: SerialDest = serial;
+                        n = try ser.write_varint(SER, ZIGZAG, u128, @ptrCast(@alignCast(self.curr_routine.native_ptr)));
+                    },
+                    .SERIAL_TO_NATIVE => {
+                        const ser: SerialSource = serial;
+                        n = try ser.read_varint(SER, ZIGZAG, u128, @ptrCast(@alignCast(self.curr_routine.native_ptr)));
+                    },
+                },
+                else => assert_unreachable(@src(), "varints can only be encoded to/from types with byte size 2, 4, 8, or 16, got native data size {d}", .{data.native_size}),
+            }
+            switch (CACHE) {
+                .CACHE_LEN => {
+                    Utils.Mem.copy_arbitrary_length_bytes_in_native_endian_to_typed_pointer(usize, &self.curr_routine.cache_len, self.curr_routine.native_ptr[0..data.native_size]);
+                    self.curr_routine.has_len = true;
+                },
+                .CACHE_NULL => {
+                    var val: u8 = 0;
+                    for (self.curr_routine.native_ptr[0..data.native_size]) |b| {
+                        val |= b;
+                    }
+                    self.curr_routine.cache_null = val > 0;
+                    self.curr_routine.has_null = true;
+                },
+                .CACHE_TAG => {
+                    Utils.Mem.copy_arbitrary_length_bytes_in_native_endian_to_typed_pointer(u64, &self.curr_routine.cache_tag, self.curr_routine.native_ptr[0..data.native_size]);
+                    self.curr_routine.has_tag = true;
+                },
+            }
+            self.byte_count += n;
+            self.curr_routine.increment_op(1);
+            self.curr_routine.move_native_ptr_pos_neg(data.forward_offset_to_next_field, data.backward_offset_to_next_field);
         }
 
         fn handle_subroutine(self: *Self, subroutine: Subroutine, repeat: u32) void {
             self.curr_routine.increment_op(1);
             var subroutine_frame = self.curr_routine.clone_keep_cache();
-            self.curr_routine.increment_op(@intCast(subroutine.subroutine_num_ops));
-            self.curr_routine.move_native_ptr(subroutine.offset_to_next_field);
-            subroutine_frame.set_op_slice_starting_from_current(subroutine.subroutine_num_ops, num_cast(repeat, u32));
+            if (subroutine.ops_are_inline) {
+                self.curr_routine.increment_op(subroutine_num_opsine_increment);
+                subroutine_frame.set_op_slice_starting_from_current(subroutine.subroutine_num_ops, repeat);
+            } else {
+                subroutine_frame.set_op_slice_starting_from_non_inline_subroutine_op(subroutine.subroutine_num_ops, repeat);
+            }
             self.push_routine_frame(subroutine_frame);
+            self.curr_routine.move_native_ptr_pos_neg(subroutine.forward_offset_to_next_field, subroutine.backward_offset_to_next_field);
         }
 
         fn op_isnt_ever_used(comptime OP_KIND: DataOpKind) bool {
             return comptime !OP_USED[@intFromEnum(OP_KIND)];
         }
 
-        fn serialize_internal(self: *Self, object: anytype, comptime DIR: SERDIR, comptime SER: ReadWrite.SerialKind, native: [*]u8, native_size: usize, serial: DIR.serial_type(), allocs: [NUM_ALLOCS]Allocator, external: ?*anyopaque) DIR.error_type()!usize {
-            const T = @TypeOf(object);
-            const UNIQUE = comptime find: {
-                for (ROOT_TYPES[0..]) |root| {
-                    if (root.object_type == T) break :find root;
-                }
-                assert_unreachable(@src(), "type `{s}` was not provided as one of the 'main' types to serialize. If you want to serialize this type, include it in the `MAIN_TYPES_FOR_SERIALIZATION` parameter during `SerializationManager` type definition", .{@typeName(T)});
-            };
+        fn serialize_internal(self: *Self, native_ptr: [*]u8, native_size: usize, comptime DIR: SERDIR, comptime SER: ReadWrite.SerialKind, serial: DIR.serial_type(), allocs: [NUM_ALLOCS]Allocator, external: ?*anyopaque) DIR.error_type()!usize {
+            // const T = @TypeOf(object_ptr);
+            // const TT = @typeInfo(T).pointer.child;
+            // const UNIQUE = comptime find: {
+            //     for (ROOT_TYPES[0..]) |root| {
+            //         if (root.object_type == TT) break :find root;
+            //     }
+            //     assert_unreachable(@src(), "type `{s}` was not provided as one of the 'main' types to serialize. If you want to serialize this type, include it in the `MAIN_TYPES_FOR_SERIALIZATION` parameter during `SerializationManager` type definition", .{@typeName(TT)});
+            // };
             self.reset();
-            self.push_routine_frame_from_root_unique(UNIQUE);
+            self.obj_allocs = allocs;
+            var init_frame = RoutineStackFrame{};
+            init_frame.set_new_memory_region(native_ptr, native_size);
+            self.push_routine_frame(init_frame);
+            // self.push_routine_frame_from_root_unique(UNIQUE, @ptrCast(object_ptr));
             serial_loop: while (true) {
                 while (self.routine_stack_len > 0 and self.curr_routine.is_done()) {
                     self.pop_routine_frame();
@@ -2312,7 +2361,7 @@ pub fn SerializationManager(comptime MAIN_TYPES_FOR_SERIALIZATION: []const type,
                     .MOVE_NATIVE_POINTER => {
                         if (op_isnt_ever_used(.MOVE_NATIVE_POINTER)) unreachable;
                         const delta = op.MOVE_NATIVE_POINTER.offset;
-                        self.curr_routine.move_native_ptr(delta);
+                        self.curr_routine.move_native_ptr_i32(delta);
                         self.curr_routine.increment_op(1);
                     },
                     .ALLOCATED_POINTER_TO_MANY_ONJECTS => {
@@ -2340,7 +2389,7 @@ pub fn SerializationManager(comptime MAIN_TYPES_FOR_SERIALIZATION: []const type,
                         if (DIR == .NATIVE_TO_SERIAL) {
                             const data = op.DATA_MANIP_NATIVE_TO_SERIAL;
                             var manip_ptr = self.curr_routine.clone_ptr_only();
-                            manip_ptr.move_native_ptr(data.offset_to_object_addr);
+                            manip_ptr.move_native_ptr_i32(data.offset_to_object_addr);
                             data.func(@ptrCast(manip_ptr.native_ptr), external);
                         }
                         self.curr_routine.increment_op(1);
@@ -2350,7 +2399,7 @@ pub fn SerializationManager(comptime MAIN_TYPES_FOR_SERIALIZATION: []const type,
                         if (DIR == .SERIAL_TO_NATIVE) {
                             const data = op.DATA_MANIP_NATIVE_TO_SERIAL;
                             var manip_ptr = self.curr_routine.clone_ptr_only();
-                            manip_ptr.move_native_ptr(data.offset_to_object_addr);
+                            manip_ptr.move_native_ptr_i32(data.offset_to_object_addr);
                             data.func(@ptrCast(manip_ptr.native_ptr), external);
                         }
                         self.curr_routine.increment_op(1);
@@ -2371,7 +2420,7 @@ pub fn SerializationManager(comptime MAIN_TYPES_FOR_SERIALIZATION: []const type,
                             },
                         }
                         self.curr_routine.increment_op(1);
-                        self.curr_routine.move_native_ptr(data.offset_to_next_field);
+                        self.curr_routine.move_native_ptr_i32(data.offset_to_next_field);
                     },
                     .NON_ZERO_READ_OR_WRITE_1_ELSE_0 => {
                         if (op_isnt_ever_used(.NON_ZERO_READ_OR_WRITE_1_ELSE_0)) unreachable;
@@ -2462,9 +2511,101 @@ pub fn SerializationManager(comptime MAIN_TYPES_FOR_SERIALIZATION: []const type,
                         const data = op.DATA_TRANSFER;
                         self.handle_endian_transfer(DIR, SER, false, .CACHE_TAG, data, serial);
                     },
-                    //CHECKPOINT finish op switch
+                    .TRANSFER_VARINT => {
+                        if (op_isnt_ever_used(.TRANSFER_VARINT)) unreachable;
+                        const data = op.DATA_TRANSFER;
+                        self.handle_varint_transfer(DIR, SER, false, .DONT_CACHE_DATA, data, serial);
+                    },
+                    .TRANSFER_VARINT_SAVE_LEN => {
+                        if (op_isnt_ever_used(.TRANSFER_VARINT_SAVE_LEN)) unreachable;
+                        const data = op.DATA_TRANSFER;
+                        self.handle_varint_transfer(DIR, SER, false, .CACHE_LEN, data, serial);
+                    },
+                    .TRANSFER_VARINT_SAVE_NULL => {
+                        if (op_isnt_ever_used(.TRANSFER_VARINT_SAVE_NULL)) unreachable;
+                        const data = op.DATA_TRANSFER;
+                        self.handle_varint_transfer(DIR, SER, false, .CACHE_NULL, data, serial);
+                    },
+                    .TRANSFER_VARINT_SAVE_TAG => {
+                        if (op_isnt_ever_used(.TRANSFER_VARINT_SAVE_TAG)) unreachable;
+                        const data = op.DATA_TRANSFER;
+                        self.handle_varint_transfer(DIR, SER, false, .CACHE_TAG, data, serial);
+                    },
+                    .TRANSFER_VARINT_ZIGZAG => {
+                        if (op_isnt_ever_used(.TRANSFER_VARINT_ZIGZAG)) unreachable;
+                        const data = op.DATA_TRANSFER;
+                        self.handle_varint_transfer(DIR, SER, true, .DONT_CACHE_DATA, data, serial);
+                    },
+                    .TRANSFER_VARINT_ZIGZAG_SAVE_LEN => {
+                        if (op_isnt_ever_used(.TRANSFER_VARINT_ZIGZAG_SAVE_LEN)) unreachable;
+                        const data = op.DATA_TRANSFER;
+                        self.handle_varint_transfer(DIR, SER, true, .CACHE_LEN, data, serial);
+                    },
+                    .TRANSFER_VARINT_ZIGZAG_SAVE_NULL => {
+                        if (op_isnt_ever_used(.TRANSFER_VARINT_ZIGZAG_SAVE_NULL)) unreachable;
+                        const data = op.DATA_TRANSFER;
+                        self.handle_varint_transfer(DIR, SER, true, .CACHE_NULL, data, serial);
+                    },
+                    .TRANSFER_VARINT_ZIGZAG_SAVE_TAG => {
+                        if (op_isnt_ever_used(.TRANSFER_VARINT_ZIGZAG_SAVE_TAG)) unreachable;
+                        const data = op.DATA_TRANSFER;
+                        self.handle_varint_transfer(DIR, SER, true, .CACHE_TAG, data, serial);
+                    },
+                    .UNION_HEADER => {
+                        if (op_isnt_ever_used(.UNION_HEADER)) unreachable;
+                        const header = op.UNION_HEADER;
+                        self.curr_routine.increment_op(1);
+                        var union_subroutine = self.curr_routine.clone_keep_cache();
+                        self.curr_routine.increment_op(header.total_num_ops_in_union);
+                        self.curr_routine.move_native_ptr_pos_neg(header.forward_offset_to_next_field, header.backward_offset_to_next_field);
+                        const cached_tag = union_subroutine.get_cached_tag();
+                        var t: u32 = 0;
+                        check_if_found: switch (true) {
+                            true => {
+                                while (t < header.num_fields) : (t += 1) {
+                                    const next_op = OPS[union_subroutine.routine_idx];
+                                    const next_kind = op.GENERIC.kind;
+                                    union_subroutine.increment_op(1);
+                                    switch (next_kind) {
+                                        .UNION_TAG_ID => {
+                                            if (op_isnt_ever_used(.UNION_TAG_ID)) unreachable;
+                                            const tag_op = next_op.UNION_TAG_ID;
+                                            if (tag_op.tag_as_u64 == cached_tag) {
+                                                union_subroutine.set_op_slice_starting_from_current(tag_op.num_ops_in_tag, 1);
+                                                self.push_routine_frame(union_subroutine);
+                                                break :check_if_found;
+                                            }
+                                            union_subroutine.increment_op(tag_op.num_ops_in_tag);
+                                        },
+                                        .UNION_TAG_RANGE => {
+                                            if (op_isnt_ever_used(.UNION_TAG_RANGE)) unreachable;
+                                            const tag_op = next_op.UNION_TAG_RANGE;
+                                            if (tag_op.min_as_u64 <= cached_tag and cached_tag <= tag_op.max_as_u64) {
+                                                union_subroutine.set_op_slice_starting_from_current(tag_op.num_ops_in_tag, 1);
+                                                self.push_routine_frame(union_subroutine);
+                                                break :check_if_found;
+                                            }
+                                            union_subroutine.increment_op(tag_op.num_ops_in_tag);
+                                        },
+                                        else => assert_unreachable(@src(), "only `UNION_TAG_ID` or `UNION_TAG_RANGE` ops are allowed after a `UNION_HEADER` op, got invalid op `{s}", .{@tagName(next_kind)}),
+                                    }
+                                }
+                                continue :check_if_found false;
+                            },
+                            false => {
+                                return switch (DIR) {
+                                    .NATIVE_TO_SERIAL => SerialWriteError.union_tag_in_native_didnt_match_any_valid_tag,
+                                    .SERIAL_TO_NATIVE => SerialReadError.union_tag_in_serial_didnt_match_any_valid_tag,
+                                };
+                            },
+                        }
+                    },
+                    .UNION_TAG_ID,
+                    .UNION_TAG_RANGE,
+                    => assert_unreachable(@src(), "DataOp `{s}` is only allowed after a UnionHeader op, but found one free-floating", .{@tagName(kind)}),
                 }
             }
+            return self.byte_count;
         }
     };
 }
