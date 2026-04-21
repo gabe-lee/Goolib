@@ -62,6 +62,29 @@ pub const use_vectors = switch (build.zig_backend) {
     else => true,
 };
 
+pub fn pointer_resides_in_slice(comptime T: type, slice: []const T, pointer: *const T) bool {
+    const start_addr = @intFromPtr(slice.ptr);
+    const end_addr = @intFromPtr(slice.ptr + slice.len - 1);
+    const ptr_addr = @intFromPtr(pointer);
+    return start_addr <= ptr_addr and ptr_addr <= end_addr;
+}
+
+pub fn slice_resides_in_slice(comptime T: type, slice: []const T, sub_slice: []const T) bool {
+    const start_addr = @intFromPtr(slice.ptr);
+    const end_addr = @intFromPtr(slice.ptr + slice.len - 1);
+    const sub_start_addr = @intFromPtr(sub_slice.ptr);
+    const sub_end_addr = @intFromPtr(sub_slice.ptr + sub_slice.len - 1);
+    return start_addr <= sub_start_addr and sub_end_addr <= end_addr;
+}
+
+pub fn index_from_pointer(comptime T: type, comptime IDX: type, base_ptr: [*]const T, elem_ptr: *const T) IDX {
+    const base_addr = @intFromPtr(base_ptr);
+    const elem_addr = @intFromPtr(elem_ptr);
+    assert_with_reason(elem_addr >= base_addr, @src(), "elem_addr {x} < base_addr {x}, pointer cannot possibly be part of the base collection", .{ elem_addr, base_addr });
+    const addr_delta = @intFromPtr(elem_ptr) - @intFromPtr(base_ptr);
+    return @intCast(addr_delta / @sizeOf(T));
+}
+
 /// This should match `std.mem.reverseVector`
 inline fn reverse_vector_slice(comptime N: usize, comptime T: type, a: []T) [N]T {
     var res: [N]T = undefined;
@@ -70,6 +93,31 @@ inline fn reverse_vector_slice(comptime N: usize, comptime T: type, a: []T) [N]T
     }
     return res;
 }
+
+pub fn move_block_of_elements_include_last_and_preserve_displaced(slice: anytype, first_elem_to_move: anytype, last_elem_to_move: anytype, idx_to_place_elements: usize) void {
+    Assert.assert_with_reason(Types.type_is_slice(@TypeOf(slice)), @src(), "type of `slice` was not a slice type, got {s}", .{@typeName(@TypeOf(slice))});
+    const T = @typeInfo(@TypeOf(slice)).pointer.child;
+    Assert.assert_with_reason(first_elem_to_move <= last_elem_to_move, @src(), "`old_first` MUST be <= `old_last_inclusive`, got ({d}, {d})", .{ first_elem_to_move, last_elem_to_move });
+    const len_a = (last_elem_to_move - first_elem_to_move) + 1;
+    const slice_a = slice[first_elem_to_move .. first_elem_to_move + len_a];
+    var total_range: []T = undefined;
+    var slice_b: []T = undefined;
+    if (idx_to_place_elements < first_elem_to_move) {
+        total_range = slice[idx_to_place_elements .. last_elem_to_move + 1];
+        slice_b = slice[idx_to_place_elements..first_elem_to_move];
+    } else {
+        total_range = slice[first_elem_to_move .. idx_to_place_elements + len_a];
+        slice_b = slice[last_elem_to_move + 1 .. idx_to_place_elements + len_a];
+    }
+    reverse_slice(slice_a);
+    reverse_slice(slice_b);
+    reverse_slice(total_range);
+}
+pub fn move_block_of_elements_and_preserve_displaced(slice: anytype, first_elem_to_move: anytype, elems_to_move_end_exclusive: anytype, idx_to_place_elements: anytype) void {
+    return move_block_of_elements_include_last_and_preserve_displaced(slice, first_elem_to_move, elems_to_move_end_exclusive - 1, idx_to_place_elements);
+}
+
+//CHECKPOINT move mem_ funcs from Utils base to here
 
 pub fn reverse_array(arr_ptr: anytype) void {
     const T = @TypeOf(arr_ptr);

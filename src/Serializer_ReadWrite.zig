@@ -129,6 +129,17 @@ pub const SerialKind = enum(u8) {
     READER_WRITER,
 };
 
+pub const VarintSize = enum(u8) {
+    _2_BYTES = 2,
+    _4_BYTES = 4,
+    _8_BYTES = 8,
+    _16_BYTES = 16,
+
+    pub fn bytes(comptime self: VarintSize) u8 {
+        return @intFromEnum(self);
+    }
+};
+
 pub const SerialSourceSlice = struct {
     data: []const u8,
     cursor: usize,
@@ -171,27 +182,27 @@ pub const SerialSourceReader = struct {
 
     pub fn read_n_bytes(self: SerialSourceReader, n: usize, native_dest: [*]u8) SerialReadError!void {
         self.reader.readSliceAll(native_dest[0..n]) catch |err| switch (err) {
-            .ReadFailed => return SerialReadError.unknown_read_error,
-            .EndOfStream => return SerialReadError.serial_source_ran_out_of_data,
+            error.ReadFailed => return SerialReadError.unknown_read_error,
+            error.EndOfStream => return SerialReadError.serial_source_ran_out_of_data,
         };
     }
 
     pub fn read_n_bytes_swapped(self: SerialSourceReader, n: usize, native_dest: [*]u8) SerialReadError!void {
         Utils.Mem.memcopy_from_reader_while_reversing_order(native_dest[0..n], self.reader) catch |err| switch (err) {
-            .ReadFailed => return SerialReadError.unknown_read_error,
-            .EndOfStream => return SerialReadError.serial_source_ran_out_of_data,
+            error.ReadFailed => return SerialReadError.unknown_read_error,
+            error.EndOfStream => return SerialReadError.serial_source_ran_out_of_data,
         };
     }
 
     pub fn read_one_byte(self: SerialSourceReader, native_dest: [*]u8) SerialReadError!void {
         self.reader.readSliceAll(native_dest[0..1]) catch |err| switch (err) {
-            .ReadFailed => return SerialReadError.unknown_read_error,
-            .EndOfStream => return SerialReadError.serial_source_ran_out_of_data,
+            error.ReadFailed => return SerialReadError.unknown_read_error,
+            error.EndOfStream => return SerialReadError.serial_source_ran_out_of_data,
         };
     }
 };
 
-pub const SerialSource = union {
+pub const SerialSource = union(enum) {
     slice: *SerialSourceSlice,
     reader: SerialSourceReader,
 
@@ -202,58 +213,62 @@ pub const SerialSource = union {
         return SerialSource{ .reader = SerialSourceReader.new(reader) };
     }
 
-    pub fn read_n_bytes_in_order(self: SerialSource, comptime KIND: SerialKind, n: usize, native_dest: [*]u8) SerialReadError!void {
-        switch (KIND) {
-            .SLICE => {
-                const ser = self.slice;
-                return ser.read_n_bytes(n, native_dest);
+    pub fn read_n_bytes_in_order(self: SerialSource, n: usize, native_dest: [*]u8) SerialReadError!void {
+        switch (self) {
+            .slice => |slice| {
+                return slice.read_n_bytes(n, native_dest);
             },
-            .READER_WRITER => {
-                const ser = self.reader;
-                return ser.read_n_bytes(n, native_dest);
+            .reader => |reader| {
+                return reader.read_n_bytes(n, native_dest);
             },
         }
     }
-    pub fn read_type_in_order(self: SerialSource, comptime KIND: SerialKind, comptime T: type, native_dest: *T) SerialReadError!void {
+    pub fn read_type_in_order(self: SerialSource, comptime T: type, native_dest: *T) SerialReadError!void {
         const N = @sizeOf(T);
         if (N == 1) {
-            return self.read_one_byte(KIND, @ptrCast(native_dest));
+            return self.read_one_byte(@ptrCast(native_dest));
         } else {
-            return self.read_n_bytes_in_order(KIND, N, @ptrCast(native_dest));
+            return self.read_n_bytes_in_order(N, @ptrCast(native_dest));
         }
     }
-    pub fn read_one_byte(self: SerialSource, comptime KIND: SerialKind, native_dest: [*]u8) SerialReadError!void {
-        switch (KIND) {
-            .SLICE => {
-                const ser = self.slice;
-                return ser.read_one_byte(native_dest);
+    pub fn read_one_byte(self: SerialSource, native_dest: [*]u8) SerialReadError!void {
+        switch (self) {
+            .slice => |slice| {
+                return slice.read_one_byte(native_dest);
             },
-            .READER_WRITER => {
-                const ser = self.reader;
-                return ser.read_one_byte(native_dest);
-            },
-        }
-    }
-    pub fn read_n_bytes_swapped(self: SerialSource, comptime KIND: SerialKind, n: usize, native_dest: [*]u8) SerialReadError!void {
-        switch (KIND) {
-            .SLICE => {
-                const ser = self.slice;
-                return ser.read_n_bytes_swapped(n, native_dest);
-            },
-            .READER_WRITER => {
-                const ser = self.reader;
-                return ser.read_n_bytes_swapped(n, native_dest);
+            .reader => |reader| {
+                return reader.read_one_byte(native_dest);
             },
         }
     }
-    pub fn read_type_swapped(self: SerialSource, comptime KIND: SerialKind, comptime T: type, native_dest: *T) SerialReadError!void {
+    pub fn read_n_bytes_swapped(self: SerialSource, n: usize, native_dest: [*]u8) SerialReadError!void {
+        switch (self) {
+            .slice => |slice| {
+                return slice.read_n_bytes_swapped(n, native_dest);
+            },
+            .reader => |reader| {
+                return reader.read_n_bytes_swapped(n, native_dest);
+            },
+        }
+    }
+    pub fn read_type_swapped(self: SerialSource, comptime T: type, native_dest: *T) SerialReadError!void {
         const N = @sizeOf(T);
-        return self.read_n_bytes_swapped(KIND, N, @ptrCast(native_dest));
+        return self.read_n_bytes_swapped(N, @ptrCast(native_dest));
     }
-    pub fn read_varint(self: SerialSource, comptime KIND: SerialKind, comptime ZIGZAG: bool, comptime T: type, native_dest: *T) SerialReadError!usize {
-        const NATIVE_LEN = @sizeOf(T);
+    pub fn read_varint_typed(self: SerialSource, comptime ZIGZAG: bool, comptime TYPE: type, native_dest: *TYPE) SerialReadError!usize {
+        const SIZE = switch (@sizeOf(TYPE)) {
+            2 => VarintSize._2_BYTES,
+            4 => VarintSize._4_BYTES,
+            8 => VarintSize._8_BYTES,
+            16 => VarintSize._16_BYTES,
+            else => assert_unreachable(@src(), "VarInts are only available for types in 2, 4, 8, or 16 byte sizes, got byte size {d} for type `{s}`", .{ @sizeOf(TYPE), @typeName(TYPE) }),
+        };
+        return self.read_varint(ZIGZAG, SIZE, @ptrCast(native_dest));
+    }
+    pub fn read_varint(self: SerialSource, comptime ZIGZAG: bool, comptime SIZE: VarintSize, native_dest: [*]u8) SerialReadError!usize {
+        const NATIVE_LEN = comptime SIZE.bytes();
         assert_with_reason(NATIVE_LEN == 2 or NATIVE_LEN == 4 or NATIVE_LEN == 8 or NATIVE_LEN == 16, @src(), "VarInts are only upported for 2, 4, 8, or 16 byte types with well-defined memory layouts, got native len {d}", .{NATIVE_LEN});
-        const NATIVE_UINT = std.meta.Int(.unsigned, NATIVE_LEN * 8);
+        const NATIVE_UINT = std.meta.Int(.unsigned, @intCast(NATIVE_LEN * 8));
         var temp_buffer: [32]u8 align(@alignOf(u128)) = @splat(0);
         const temp_uint: *NATIVE_UINT = @ptrCast(@alignCast(&temp_buffer[16]));
         var additional_bytes_to_read: usize = 0;
@@ -261,7 +276,7 @@ pub const SerialSource = union {
         var continue_bytes: usize = 0;
         var temp_start: usize = undefined;
         var b: u8 = undefined;
-        try self.read_one_byte(KIND, @ptrCast(&b));
+        try self.read_one_byte(@ptrCast(&b));
         const LSB: usize = switch (NATIVE_LEN) {
             2 => 17,
             4 => 19,
@@ -349,8 +364,8 @@ pub const SerialSource = union {
                 additional_bytes_to_read += 7;
                 continue_bytes += 1;
                 total_bytes += 8;
-                if (MSB < 13) return SerialReadError.varint_overlong_encoding_or_value_too_large_or_value_too_large;
-                try self.read_one_byte(KIND, @ptrCast(&b));
+                if (MSB < 13) return SerialReadError.varint_overlong_encoding_or_value_too_large;
+                try self.read_one_byte(@ptrCast(&b));
                 continue :check_next_byte b;
             },
         }
@@ -362,7 +377,7 @@ pub const SerialSource = union {
             else => unreachable,
         }
         const temp_start_additional = temp_start + 1;
-        try self.read_n_bytes_in_order(KIND, additional_bytes_to_read, @ptrCast(&temp_buffer[temp_start_additional]));
+        try self.read_n_bytes_in_order(additional_bytes_to_read, @ptrCast(&temp_buffer[temp_start_additional]));
         if (NATIVE_ENDIAN == .LITTLE_ENDIAN) {
             temp_uint.* = @byteSwap(temp_uint.*);
         }
@@ -432,7 +447,7 @@ pub const SerialDestWriter = struct {
     }
 };
 
-pub const SerialDest = union {
+pub const SerialDest = union(enum) {
     slice: *SerialDestSlice,
     writer: SerialDestWriter,
 
@@ -443,25 +458,22 @@ pub const SerialDest = union {
         return SerialDest{ .writer = SerialDestWriter.new(writer) };
     }
 
-    pub fn finalize(self: SerialDest, comptime KIND: SerialKind) SerialWriteError!void {
-        switch (KIND) {
-            .SLICE => {},
-            .READER_WRITER => {
-                const ser = self.writer;
-                return ser.flush();
+    pub fn finalize(self: SerialDest) SerialWriteError!void {
+        switch (self) {
+            .slice => {},
+            .writer => |writer| {
+                return writer.flush();
             },
         }
     }
 
-    pub fn write_n_bytes_in_order(self: SerialDest, comptime KIND: SerialKind, n: usize, native_src: [*]u8) SerialWriteError!void {
-        switch (KIND) {
-            .SLICE => {
-                const ser = self.slice;
-                return ser.write_n_bytes(n, native_src);
+    pub fn write_n_bytes_in_order(self: SerialDest, n: usize, native_src: [*]u8) SerialWriteError!void {
+        switch (self) {
+            .slice => |slice| {
+                return slice.write_n_bytes(n, native_src);
             },
-            .READER_WRITER => {
-                const ser = self.writer;
-                return ser.write_n_bytes(n, native_src);
+            .writer => |writer| {
+                return writer.write_n_bytes(n, native_src);
             },
         }
     }
@@ -473,50 +485,56 @@ pub const SerialDest = union {
             return self.write_n_bytes_in_order(N, @ptrCast(native_src));
         }
     }
-    pub fn write_one_byte(self: SerialDest, comptime KIND: SerialKind, native_src: [*]u8) SerialWriteError!void {
-        switch (KIND) {
-            .SLICE => {
-                const ser = self.slice;
-                return ser.write_one_byte(native_src);
+    pub fn write_one_byte(self: SerialDest, native_src: [*]u8) SerialWriteError!void {
+        switch (self) {
+            .slice => |slice| {
+                return slice.write_one_byte(native_src);
             },
-            .READER_WRITER => {
-                const ser = self.writer;
-                return ser.write_one_byte(native_src);
+            .writer => |writer| {
+                return writer.write_one_byte(native_src);
             },
         }
     }
 
-    pub fn write_n_bytes_swapped(self: SerialDest, comptime KIND: SerialKind, n: usize, native_src: [*]u8) SerialWriteError!void {
-        switch (KIND) {
-            .SLICE => {
-                const ser = self.slice;
-                return ser.write_n_bytes_swapped(n, native_src);
+    pub fn write_n_bytes_swapped(self: SerialDest, n: usize, native_src: [*]u8) SerialWriteError!void {
+        switch (self) {
+            .slice => |slice| {
+                return slice.write_n_bytes_swapped(n, native_src);
             },
-            .READER_WRITER => {
-                const ser = self.writer;
-                return ser.write_n_bytes_swapped(n, native_src);
+            .writer => |writer| {
+                return writer.write_n_bytes_swapped(n, native_src);
             },
         }
     }
-    pub fn write_type_swapped(self: SerialDest, comptime KIND: SerialKind, comptime T: type, native_src: *T) SerialWriteError!void {
+    pub fn write_type_swapped(self: SerialDest, comptime T: type, native_src: *T) SerialWriteError!void {
         const N = @sizeOf(T);
         if (N == 1) {
-            return self.write_one_byte(KIND, @ptrCast(native_src));
+            return self.write_one_byte(@ptrCast(native_src));
         } else {
-            return self.write_n_bytes_swapped(KIND, N, @ptrCast(native_src));
+            return self.write_n_bytes_swapped(N, @ptrCast(native_src));
         }
     }
 
     /// NUM_BYTES, LEAST_SIG_IDX, MOST_SIG_IDX
     const NLM = struct { usize, usize, usize };
 
-    pub fn write_varint(self: SerialDest, comptime KIND: SerialKind, comptime ZIGZAG: bool, comptime T: type, native_src: *const T) SerialWriteError!usize {
-        const NATIVE_LEN = @sizeOf(T);
+    pub fn write_varint_typed(self: SerialDest, comptime ZIGZAG: bool, comptime TYPE: type, native_src: *const TYPE) SerialWriteError!usize {
+        const SIZE = switch (@sizeOf(TYPE)) {
+            2 => VarintSize._2_BYTES,
+            4 => VarintSize._4_BYTES,
+            8 => VarintSize._8_BYTES,
+            16 => VarintSize._16_BYTES,
+            else => assert_unreachable(@src(), "VarInts are only available for types in 2, 4, 8, or 16 byte sizes, got byte size {d} for type `{s}`", .{ @sizeOf(TYPE), @typeName(TYPE) }),
+        };
+        return self.write_varint(ZIGZAG, SIZE, @ptrCast(native_src));
+    }
+    pub fn write_varint(self: SerialDest, comptime ZIGZAG: bool, comptime SIZE: VarintSize, native_src: [*]const u8) SerialWriteError!usize {
+        const NATIVE_LEN = comptime SIZE.bytes();
         assert_with_reason(NATIVE_LEN == 2 or NATIVE_LEN == 4 or NATIVE_LEN == 8 or NATIVE_LEN == 16, @src(), "VarInts are only supported for 2, 4, 8, or 16 byte data types with a well-defined memory layout, got native len {d}", .{NATIVE_LEN});
         var temp_buffer: [35]u8 align(@alignOf(u128)) = @splat(0);
-        const NATIVE_UINT = std.meta.Int(.unsigned, NATIVE_LEN * 8);
+        const NATIVE_UINT = std.meta.Int(.unsigned, @intCast(NATIVE_LEN * 8));
         const temp_uint: *NATIVE_UINT = @ptrCast(@alignCast(&temp_buffer[16]));
-        temp_uint.* = @bitCast(native_src.*);
+        @memcpy(temp_buffer[16 .. 16 + NATIVE_LEN], native_src[0..NATIVE_LEN]);
         const num_bytes: usize, const least_sig_byte_with_data: usize, const most_sig_byte_with_data: usize = switch (NATIVE_LEN) {
             2 => get: {
                 if (ZIGZAG) temp_uint.* = @bitCast(zig_zag_encode(temp_uint.*));
@@ -695,14 +713,12 @@ pub const SerialDest = union {
         if (NATIVE_ENDIAN != .BIG_ENDIAN) {
             Utils.Mem.reverse_slice(temp_buffer[first_byte..byte_end]);
         }
-        switch (KIND) {
-            .SLICE => {
-                const ser = self.slice;
-                try ser.write_n_bytes(num_bytes, @ptrCast(&temp_buffer[first_byte]));
+        switch (self) {
+            .slice => |slice| {
+                try slice.write_n_bytes(num_bytes, @ptrCast(&temp_buffer[first_byte]));
             },
-            .READER_WRITER => {
-                const ser = self.writer;
-                try ser.write_n_bytes(num_bytes, @ptrCast(&temp_buffer[first_byte]));
+            .writer => |writer| {
+                try writer.write_n_bytes(num_bytes, @ptrCast(&temp_buffer[first_byte]));
             },
         }
         return num_bytes;
@@ -776,54 +792,48 @@ test "VarInt round trip equality" {
     const EXTENDED = false;
     const ITERS_PER_TYPE = if (EXTENDED) 100000 else 100;
     var serial_buf: [32]u8 = undefined;
-    const src = SerialSource{ .slice = serial_buf[0..32] };
-    const dst = SerialDest{ .slice = serial_buf[0..32] };
+    var serial_source = SerialSourceSlice.new(serial_buf[0..]);
+    var serial_dest = SerialDestSlice.new(serial_buf[0..]);
+    const src = SerialSource.new_from_slice(&serial_source);
+    const dst = SerialDest.new_from_slice(&serial_dest);
 
     { // static u128
         const static_exp: u128 = 0xF1_0F_0E_0D_0C_0B_0A_09_08_07_06_05_04_03_02_01;
-        const static_exp_bytes: [*]align(@alignOf(u128)) const u8 = @ptrCast(&static_exp);
         var static_got: u128 = undefined;
-        var static_got_bytes: [*]align(@alignOf(u128)) u8 = @ptrCast(&static_got);
-        const len = try dst.write_varint(.SLICE, false, static_exp_bytes[0..16], 0, 16, 16, 0);
+        const len = try dst.write_varint_typed(false, u128, &static_exp);
         try Test.expect_equal(len, "len", 19, "19", "len encode wrong", .{});
         try Test.expect_slices_equal_t(u8, serial_buf[0..19], "serial_buf[0..19]", &.{ 0xFF, 0xFF, 0b110_00000, 0xF1, 0x0F, 0x0E, 0x0D, 0x0C, 0x0B, 0x0A, 0x09, 0x08, 0x07, 0x06, 0x05, 0x04, 0x03, 0x02, 0x01 }, "{ 0xFF, 0xFF, 0b110_00000, 0xF1, 0x0F, 0x0E, 0x0D, 0x0C, 0x0B, 0x0A, 0x09, 0x08, 0x07, 0x06, 0x05, 0x04, 0x03, 0x02, 0x01 }", "static expected byte order mismatch", .{});
-        const len_2 = try src.read_varint(.SLICE, false, static_got_bytes[0..16], 0, 16, 16, 0);
+        const len_2 = try src.read_varint_typed(false, u128, &static_got);
         try Test.expect_equal(len_2, "len_2", 19, "19", "len decode wrong", .{});
         try Test.expect_equal(static_got, "static_got", static_got, "static_got", "static mismatch", .{});
     }
     { // static u64
         const static_exp: u64 = 0xF8_07_06_05_04_03_02_01;
-        const static_exp_bytes: [*]align(@alignOf(u64)) const u8 = @ptrCast(&static_exp);
         var static_got: u64 = undefined;
-        var static_got_bytes: [*]align(@alignOf(u64)) u8 = @ptrCast(&static_got);
-        const len = try dst.write_varint(.SLICE, false, static_exp_bytes[0..8], 0, 8, 8, 0);
+        const len = try dst.write_varint_typed(false, u64, &static_exp);
         try Test.expect_equal(len, "len", 9, "9", "len encode wrong", .{});
         try Test.expect_slices_equal_t(u8, serial_buf[0..9], "serial_buf[0..9]", &.{ 0xFF, 0xF8, 0x07, 0x06, 0x05, 0x04, 0x03, 0x02, 0x01 }, "{ 0xFF, 0xF8, 0x07, 0x06, 0x05, 0x04, 0x03, 0x02, 0x01 }", "static expected byte order mismatch", .{});
-        const len_2 = try src.read_varint(.SLICE, false, static_got_bytes[0..8], 0, 8, 8, 0);
+        const len_2 = try src.read_varint_typed(false, u64, &static_got);
         try Test.expect_equal(len_2, "len_2", 9, "9", "len decode wrong", .{});
         try Test.expect_equal(static_got, "static_got", static_got, "static_got", "static mismatch", .{});
     }
     { // static u32
         const static_exp: u32 = 0xF4_03_02_01;
-        const static_exp_bytes: [*]align(@alignOf(u32)) const u8 = @ptrCast(&static_exp);
         var static_got: u32 = undefined;
-        var static_got_bytes: [*]align(@alignOf(u32)) u8 = @ptrCast(&static_got);
-        const len = try dst.write_varint(.SLICE, false, static_exp_bytes[0..4], 0, 4, 4, 0);
+        const len = try dst.write_varint_typed(false, u32, &static_exp);
         try Test.expect_equal(len, "len", 5, "5", "len encode wrong", .{});
         try Test.expect_slices_equal_t(u8, serial_buf[0..5], "serial_buf[0..5]", &.{ 0b11110_000, 0xF4, 0x03, 0x02, 0x01 }, "{ 0b11110_000, 0xF4, 0x03, 0x02, 0x01 }", "static expected byte order mismatch", .{});
-        const len_2 = try src.read_varint(.SLICE, false, static_got_bytes[0..4], 0, 4, 4, 0);
+        const len_2 = try src.read_varint_typed(false, u32, &static_got);
         try Test.expect_equal(len_2, "len_2", 5, "5", "len decode wrong", .{});
         try Test.expect_equal(static_got, "static_got", static_got, "static_got", "static mismatch", .{});
     }
     { // static u16
-        const static_exp: u32 = 0xF2_01;
-        const static_exp_bytes: [*]align(@alignOf(u16)) const u8 = @ptrCast(&static_exp);
+        const static_exp: u16 = 0xF2_01;
         var static_got: u16 = undefined;
-        var static_got_bytes: [*]align(@alignOf(u16)) u8 = @ptrCast(&static_got);
-        const len = try dst.write_varint(.SLICE, false, static_exp_bytes[0..2], 0, 2, 2, 0);
+        const len = try dst.write_varint_typed(false, u16, &static_exp);
         try Test.expect_equal(len, "len", 3, "3", "len encode wrong", .{});
         try Test.expect_slices_equal_t(u8, serial_buf[0..3], "serial_buf[0..3]", &.{ 0b110_00000, 0xF2, 0x01 }, "{ 0b110_00000, 0xF2, 0x01 }", "static expected byte order mismatch", .{});
-        const len_2 = try src.read_varint(.SLICE, false, static_got_bytes[0..2], 0, 2, 2, 0);
+        const len_2 = try src.read_varint_typed(false, u16, &static_got);
         try Test.expect_equal(len_2, "len_2", 3, "3", "len decode wrong", .{});
         try Test.expect_equal(static_got, "static_got", static_got, "static_got", "static mismatch", .{});
     }
@@ -831,88 +841,72 @@ test "VarInt round trip equality" {
     for (0..ITERS_PER_TYPE) |_| {
         // u16
         const val_orig: u16 = rand.int(u16);
-        const val_orig_bytes: [*]const u8 = @ptrCast(&val_orig);
         var val_decoded: u16 = undefined;
-        const val_decoded_bytes: [*]u8 = @ptrCast(&val_decoded);
-        const w = try dst.write_varint(.SLICE, false, val_orig_bytes[0..2], 0, 2, 2, 0);
-        const r = try src.read_varint(.SLICE, false, val_decoded_bytes[0..2], 0, 2, 2, 0);
+        const w = try dst.write_varint_typed(false, u16, &val_orig);
+        const r = try src.read_varint_typed(false, u16, &val_decoded);
         try Test.expect_equal(val_decoded, "val_decoded", val_orig, "val_orig", "varint round-trip value mismatch\n\tGOT {b:0>16}\n\tEXP {b:0>16}", .{ val_decoded, val_orig });
         try Test.expect_equal(w, "bytes written", r, "bytes read", "varint round-trip bytes written/read mismatch", .{});
     }
     for (0..ITERS_PER_TYPE) |_| {
         // i16
         const val_orig: i16 = rand.int(i16);
-        const val_orig_bytes: [*]const u8 = @ptrCast(&val_orig);
         var val_decoded: i16 = undefined;
-        const val_decoded_bytes: [*]u8 = @ptrCast(&val_decoded);
-        const w = try dst.write_varint(.SLICE, true, val_orig_bytes[0..2], 0, 2, 2, 0);
-        const r = try src.read_varint(.SLICE, true, val_decoded_bytes[0..2], 0, 2, 2, 0);
+        const w = try dst.write_varint_typed(true, i16, &val_orig);
+        const r = try src.read_varint_typed(true, i16, &val_decoded);
         try Test.expect_equal(val_decoded, "val_decoded", val_orig, "val_orig", "varint round-trip value mismatch\n\tGOT {b:0>16}\n\tEXP {b:0>16}", .{ val_decoded, val_orig });
         try Test.expect_equal(w, "bytes written", r, "bytes read", "varint round-trip bytes written/read mismatch", .{});
     }
     for (0..ITERS_PER_TYPE) |_| {
         // u32
         const val_orig: u32 = rand.int(u32);
-        const val_orig_bytes: [*]const u8 = @ptrCast(&val_orig);
         var val_decoded: u32 = undefined;
-        const val_decoded_bytes: [*]u8 = @ptrCast(&val_decoded);
-        const w = try dst.write_varint(.SLICE, false, val_orig_bytes[0..4], 0, 4, 4, 0);
-        const r = try src.read_varint(.SLICE, false, val_decoded_bytes[0..4], 0, 4, 4, 0);
+        const w = try dst.write_varint_typed(false, u32, &val_orig);
+        const r = try src.read_varint_typed(false, u32, &val_decoded);
         try Test.expect_equal(val_decoded, "val_decoded", val_orig, "val_orig", "varint round-trip value mismatch\n\tGOT {b:0>16}\n\tEXP {b:0>16}", .{ val_decoded, val_orig });
         try Test.expect_equal(w, "bytes written", r, "bytes read", "varint round-trip bytes written/read mismatch", .{});
     }
     for (0..ITERS_PER_TYPE) |_| {
         // i32
         const val_orig: i32 = rand.int(i32);
-        const val_orig_bytes: [*]const u8 = @ptrCast(&val_orig);
         var val_decoded: i32 = undefined;
-        const val_decoded_bytes: [*]u8 = @ptrCast(&val_decoded);
-        const w = try dst.write_varint(.SLICE, true, val_orig_bytes[0..4], 0, 4, 4, 0);
-        const r = try src.read_varint(.SLICE, true, val_decoded_bytes[0..4], 0, 4, 4, 0);
+        const w = try dst.write_varint_typed(true, i32, &val_orig);
+        const r = try src.read_varint_typed(true, i32, &val_decoded);
         try Test.expect_equal(val_decoded, "val_decoded", val_orig, "val_orig", "varint round-trip value mismatch\n\tGOT {b:0>16}\n\tEXP {b:0>16}", .{ val_decoded, val_orig });
         try Test.expect_equal(w, "bytes written", r, "bytes read", "varint round-trip bytes written/read mismatch", .{});
     }
     for (0..ITERS_PER_TYPE) |_| {
         // u64
         const val_orig: u64 = rand.int(u64);
-        const val_orig_bytes: [*]const u8 = @ptrCast(&val_orig);
         var val_decoded: u64 = undefined;
-        const val_decoded_bytes: [*]u8 = @ptrCast(&val_decoded);
-        const w = try dst.write_varint(.SLICE, false, val_orig_bytes[0..8], 0, 8, 8, 0);
-        const r = try src.read_varint(.SLICE, false, val_decoded_bytes[0..8], 0, 8, 8, 0);
+        const w = try dst.write_varint_typed(false, u64, &val_orig);
+        const r = try src.read_varint_typed(false, u64, &val_decoded);
         try Test.expect_equal(val_decoded, "val_decoded", val_orig, "val_orig", "varint round-trip value mismatch\n\tGOT {b:0>16}\n\tEXP {b:0>16}", .{ val_decoded, val_orig });
         try Test.expect_equal(w, "bytes written", r, "bytes read", "varint round-trip bytes written/read mismatch", .{});
     }
     for (0..ITERS_PER_TYPE) |_| {
         // i64
         const val_orig: i64 = rand.int(i64);
-        const val_orig_bytes: [*]const u8 = @ptrCast(&val_orig);
         var val_decoded: i64 = undefined;
-        const val_decoded_bytes: [*]u8 = @ptrCast(&val_decoded);
-        const w = try dst.write_varint(.SLICE, true, val_orig_bytes[0..8], 0, 8, 8, 0);
-        const r = try src.read_varint(.SLICE, true, val_decoded_bytes[0..8], 0, 8, 8, 0);
+        const w = try dst.write_varint_typed(true, i64, &val_orig);
+        const r = try src.read_varint_typed(true, i64, &val_decoded);
         try Test.expect_equal(val_decoded, "val_decoded", val_orig, "val_orig", "varint round-trip value mismatch\n\tGOT {b:0>16}\n\tEXP {b:0>16}", .{ val_decoded, val_orig });
         try Test.expect_equal(w, "bytes written", r, "bytes read", "varint round-trip bytes written/read mismatch", .{});
     }
     for (0..ITERS_PER_TYPE) |_| {
         // u128
         const val_orig: u128 = rand.int(u128);
-        const val_orig_bytes: [*]const u8 = @ptrCast(&val_orig);
         var val_decoded: u128 = undefined;
-        const val_decoded_bytes: [*]u8 = @ptrCast(&val_decoded);
-        const w = try dst.write_varint(.SLICE, false, val_orig_bytes[0..16], 0, 16, 16, 0);
-        const r = try src.read_varint(.SLICE, false, val_decoded_bytes[0..16], 0, 16, 16, 0);
+        const w = try dst.write_varint_typed(false, u128, &val_orig);
+        const r = try src.read_varint_typed(false, u128, &val_decoded);
         try Test.expect_equal(val_decoded, "val_decoded", val_orig, "val_orig", "varint round-trip value mismatch\n\tGOT {b:0>16}\n\tEXP {b:0>16}", .{ val_decoded, val_orig });
         try Test.expect_equal(w, "bytes written", r, "bytes read", "varint round-trip bytes written/read mismatch", .{});
     }
     for (0..ITERS_PER_TYPE) |_| {
         // i128
         const val_orig: i128 = rand.int(i128);
-        const val_orig_bytes: [*]const u8 = @ptrCast(&val_orig);
         var val_decoded: i128 = undefined;
-        const val_decoded_bytes: [*]u8 = @ptrCast(&val_decoded);
-        const w = try dst.write_varint(.SLICE, true, val_orig_bytes[0..16], 0, 16, 16, 0);
-        const r = try src.read_varint(.SLICE, true, val_decoded_bytes[0..16], 0, 16, 16, 0);
+        const w = try dst.write_varint_typed(true, i128, &val_orig);
+        const r = try src.read_varint_typed(true, i128, &val_decoded);
         try Test.expect_equal(val_decoded, "val_decoded", val_orig, "val_orig", "varint round-trip value mismatch\n\tGOT {b:0>16}\n\tEXP {b:0>16}", .{ val_decoded, val_orig });
         try Test.expect_equal(w, "bytes written", r, "bytes read", "varint round-trip bytes written/read mismatch", .{});
     }

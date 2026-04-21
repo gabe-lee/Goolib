@@ -27,7 +27,7 @@ const math = std.math;
 
 const Root = @import("./_root.zig");
 const Math = Root.Math;
-const FlexSlice = Root.FlexSlice.FlexSlice;
+const FlexSlice = Root.FlexSlice.GooSlice;
 const Assert = Root.Assert;
 const SliceChild = Root.Types.SliceChild;
 
@@ -258,9 +258,14 @@ pub const WriteError = error{
     write_buffer_too_short,
 };
 
+pub const Nullability = enum {
+    NOT_NULLABLE,
+    NULLABLE,
+};
+
 pub const Mutability = enum {
-    immutable,
-    mutable,
+    IMMUTABLE,
+    MUTABLE,
 };
 
 pub const LenMutability = enum {
@@ -303,15 +308,15 @@ pub fn ArrayLen(comptime N: comptime_int, comptime T: type) type {
             return self.arr[0..self.len];
         }
 
-        pub inline fn flex_slice(self: *Self) FlexSlice(T, math.IntFittingRange(0, N), .mutable) {
-            return FlexSlice(T, math.IntFittingRange(0, N), .mutable){
+        pub inline fn flex_slice(self: *Self) FlexSlice(T, math.IntFittingRange(0, N), .MUTABLE) {
+            return FlexSlice(T, math.IntFittingRange(0, N), .MUTABLE){
                 .ptr = &self.arr[0],
                 .len = self.len,
             };
         }
 
-        pub inline fn flex_slice_const(self: *const Self) FlexSlice(T, math.IntFittingRange(0, N), .immutable) {
-            return FlexSlice(T, math.IntFittingRange(0, N), .immutable){
+        pub inline fn flex_slice_const(self: *const Self) FlexSlice(T, math.IntFittingRange(0, N), .IMMUTABLE) {
+            return FlexSlice(T, math.IntFittingRange(0, N), .IMMUTABLE){
                 .ptr = &self.arr[0],
                 .len = self.len,
             };

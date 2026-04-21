@@ -151,9 +151,6 @@ pub inline fn secure_memset_undefined(comptime T: type, slice: []volatile T) voi
         @memset(slice, 0);
     }
 }
-pub inline fn secure_memset_const(comptime T: type, slice: []volatile T, comptime val: T) void {
-    @memset(slice, val);
-}
 pub inline fn secure_memset(comptime T: type, slice: []volatile T, val: T) void {
     @memset(slice, val);
 }
@@ -348,20 +345,6 @@ pub inline fn comp_switch(comptime cond: bool, true_val: anytype, false_val: any
     return false_val;
 }
 
-pub fn pointer_resides_in_slice(comptime T: type, slice: []const T, pointer: *const T) bool {
-    const start_addr = @intFromPtr(slice.ptr);
-    const end_addr = @intFromPtr(slice.ptr + slice.len - 1);
-    const ptr_addr = @intFromPtr(pointer);
-    return start_addr <= ptr_addr and ptr_addr <= end_addr;
-}
-
-pub fn slice_resides_in_slice(comptime T: type, slice: []const T, sub_slice: []const T) bool {
-    const start_addr = @intFromPtr(slice.ptr);
-    const end_addr = @intFromPtr(slice.ptr + slice.len - 1);
-    const sub_start_addr = @intFromPtr(sub_slice.ptr);
-    const sub_end_addr = @intFromPtr(sub_slice.ptr + sub_slice.len - 1);
-    return start_addr <= sub_start_addr and sub_end_addr <= end_addr;
-}
 
 pub fn deep_equal(val_a: anytype, val_b: anytype) bool {
     const A = @TypeOf(val_a);
@@ -615,13 +598,6 @@ pub fn shallow_equal(val_a: anytype, val_b: anytype) bool {
     }
 }
 
-pub fn index_from_pointer(comptime T: type, comptime IDX: type, base_ptr: [*]const T, elem_ptr: *const T) IDX {
-    const base_addr = @intFromPtr(base_ptr);
-    const elem_addr = @intFromPtr(elem_ptr);
-    assert_with_reason(elem_addr >= base_addr, @src(), "elem_addr {x} < base_addr {x}, pointer cannot possibly be part of the base collection", .{ elem_addr, base_addr });
-    const addr_delta = @intFromPtr(elem_ptr) - @intFromPtr(base_ptr);
-    return @intCast(addr_delta / @sizeOf(T));
-}
 
 pub fn bools_to_switchable_integer(comptime count: comptime_int, bools: [count]bool) std.meta.Int(.unsigned, count) {
     const RESULT = std.meta.Int(.unsigned, count);
@@ -666,44 +642,6 @@ pub fn mem_move_one(slice: anytype, old_idx: usize, new_idx: usize) void {
     slice[@intCast(widx)] = val;
 }
 
-pub fn mem_move_many_include_last(slice: anytype, old_first: usize, old_last_inclusive: usize, new_first: usize) void {
-    Assert.assert_with_reason(Types.type_is_slice(@TypeOf(slice)), @src(), "type of `slice` was not a slice type, got {s}", .{@typeName(@TypeOf(slice))});
-    const T = @typeInfo(@TypeOf(slice)).pointer.child;
-    Assert.assert_with_reason(old_first <= old_last_inclusive, @src(), "`old_first` MUST be <= `old_last_inclusive`, got ({d}, {d})", .{ old_first, old_last_inclusive });
-    const len_a = (old_last_inclusive - old_first) + 1;
-    const slice_a = slice[old_first .. old_first + len_a];
-    var total_range: []T = undefined;
-    var slice_b: []T = undefined;
-    if (new_first < old_first) {
-        total_range = slice[new_first .. old_last_inclusive + 1];
-        slice_b = slice[new_first..old_first];
-    } else {
-        total_range = slice[old_first .. new_first + len_a];
-        slice_b = slice[old_last_inclusive + 1 .. new_first + len_a];
-    }
-    mem_reverse(T, slice_a);
-    mem_reverse(T, slice_b);
-    mem_reverse(T, total_range);
-}
-pub inline fn mem_move_many(slice: anytype, old_first: usize, old_last_exclusive: usize, new_first: usize) void {
-    return mem_move_many_include_last(slice, old_first, old_last_exclusive - 1, new_first);
-}
-
-pub fn mem_reverse(slice: anytype) void {
-    Assert.assert_with_reason(Types.type_is_slice(@TypeOf(slice)), @src(), "type of `slice` was not a slice type, got {s}", .{@typeName(@TypeOf(slice))});
-    const T = Types.pointer_child_type(slice);
-    if (slice.len == 0) return;
-    var left: usize = 0;
-    var right: usize = slice.len - 1;
-    var tmp: T = undefined;
-    while (left < right) {
-        tmp = slice[right];
-        slice[right] = slice[left];
-        slice[left] = tmp;
-        left += 1;
-        right -= 1;
-    }
-}
 
 const HEX = [16]u8{ '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'A', 'B', 'C', 'D', 'E', 'F' };
 const HEX_MASK = 0b00001111;

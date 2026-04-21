@@ -50,12 +50,13 @@ const Kind = Types.Kind;
 const KindInfo = Types.KindInfo;
 const DefinedLayout = Types.DefinedLayout;
 const SerializeModule = Root.Serializer;
-const SerialRoutineBuilder = SerializeModule.SerialRoutineBuilder;
+// const SerialRoutineBuilder = SerializeModule.SerialRoutineBuilder;
 const ByteDataOp = SerializeModule.DataOp;
-const SerialSettings = SerializeModule.SerialSettings;
+const ObjectSerialSettings = SerializeModule.ObjectSerialSettings;
 const IntPacking = SerializeModule.IntegerPacking;
-const SerialFieldOptionalSettings = SerializeModule.SerialFieldOptionalSettings;
-const SerialFieldSettings = SerializeModule.SerialFieldSettings;
+pub const OptionalObjectSerialSettings = SerializeModule.OptionalObjectSerialSettings;
+const CacheMode = SerializeModule.DataCacheMode;
+const UseCachedLen = SerializeModule.UseCachedLen;
 
 /// Creates a struct type that can behave similar to tagged union, but has a well-defined memory layout
 /// for serialization or MMIO
@@ -78,16 +79,17 @@ const SerialFieldSettings = SerializeModule.SerialFieldSettings;
 ///     // other union fields
 /// };
 /// const PER_FIELD_SERIAL_SETTINGS = struct {
-///     pub const tag_with_custom_serial_settings = SerialFieldOptionalSettings{
+///     pub const tag_with_custom_serial_settings = OptionalObjectSerialSettings{
 ///         // Fill in your settings
 ///     };
 /// };
+/// const MySerialUnion = SerialUnion(MyUnion, struct{}, PER_FIELD_SERIAL_SETTINGS);
 /// ```
-pub fn SerialUnion(comptime TAGGED_UNION: type, comptime DECLS_: type, comptime UNION_LAYOUT: DefinedLayout, comptime PER_FIELD_SERIAL_SETTINGS: ?type) type {
+pub fn SerialUnion(comptime TAGGED_UNION: type, comptime DECLS_: type, comptime PER_FIELD_SERIAL_SETTINGS: ?type) type {
     Kind.STRUCT.assert_type_is_same_kind(DECLS_, @src());
     const DECL_INFO = KindInfo.get_kind_info(DECLS_).STRUCT;
     assert_with_reason(DECL_INFO.fields.len == 0, @src(), "`DECLS_` must not have any instance fields, only static declarations", .{});
-    const UNION_ = bare_union_with_same_fields_as_tagged_union(TAGGED_UNION, UNION_LAYOUT.to_native());
+    const UNION_ = bare_union_with_same_fields_as_tagged_union(TAGGED_UNION, .@"extern");
     const TAG = @typeInfo(TAGGED_UNION).@"union".tag_type.?;
     const BARE_ALIGN = @alignOf(UNION_);
     const TAG_ALIGN = @alignOf(TAG);
@@ -107,6 +109,8 @@ pub fn SerialUnion(comptime TAGGED_UNION: type, comptime DECLS_: type, comptime 
         pub const FIELD_COUNT = @typeInfo(UNION).@"union".fields.len;
         pub const TAG_OFFSET = if (TAG_AT_BEGIN) @offsetOf(Self, "_1") else @offsetOf(Self, "_2");
         pub const UNION_OFFSET = if (TAG_AT_BEGIN) @offsetOf(Self, "_2") else @offsetOf(Self, "_1");
+        pub const TAG_FIELD: []const u8 = if (TAG_AT_BEGIN) "_1" else "_2";
+        pub const UNION_FIELD: []const u8 = if (TAG_AT_BEGIN) "_2" else "_1";
 
         pub inline fn new(comptime tag: TAG, val: @FieldType(UNION, @tagName(tag))) Self {
             var self: Self = undefined;
@@ -227,10 +231,10 @@ pub fn SerialUnion(comptime TAGGED_UNION: type, comptime DECLS_: type, comptime 
         }
 
         pub const SERIAL_INFO = struct {
-            pub fn custom_serialize_routine(comptime builder: *SerialRoutineBuilder, comptime curr_native_offset: usize, comptime settings: SerializeModule.SerialFieldSettings) void {
-                const tag_native_offset = curr_native_offset + TAG_OFFSET;
-                const union_native_offset = curr_native_offset + UNION_OFFSET;
-                comptime var union_builder = builder.start_union_routine_builder(tag_native_offset, TAG_TYPE, FIELD_COUNT, settings);
+            pub fn custom_serialize_routine(comptime OP_BUILDER: *SerializeModule.DataOpBuilderHighLevel) void {
+                OP_BUILDER.add_field(TAG_FIELD, .next_field_is(UNION_FIELD), .no_len_needed(), .{ .CACHE = CacheMode.CACHE_TAG });
+                var TAG_BUILDER = OP_BUILDER.start_extern_union_builder_with_cached_tag(UNION_FIELD, null, TAG_FIELD, TAG_TYPE, .{});
+                const old_settings = OP_BUILDER.get_settings();
                 inline for (@typeInfo(UNION).@"union".fields) |u_field| {
                     const tag_raw = find: {
                         inline for (@typeInfo(TAG_TYPE).@"enum".fields) |e_field| {
@@ -241,18 +245,16 @@ pub fn SerialUnion(comptime TAGGED_UNION: type, comptime DECLS_: type, comptime 
                         unreachable;
                     };
                     const tag_val: TAG = @enumFromInt(tag_raw);
-                    const tag_size = @sizeOf(TAG);
-                    const tag_bytes: [*]const u8 = @ptrCast(&tag_val);
-                    const settings_without_custom_routine = settings.without_custom_routine();
-                    const field_settings = SerializeModule.get_parent_field_settings(Self, u_field.name);
-                    const on_object_settings = SerializeModule.get_on_object_settings(u_field.type);
-                    const final_settings = SerializeModule.combine_field_settings(settings_without_custom_routine, field_settings, on_object_settings);
-                    union_builder.add_union_type_provide_settings(builder, tag_bytes[0..tag_size], union_native_offset, u_field.type, final_settings);
+                    const field_settings = SerializeModule.get_field_settings(Self, u_field.name);
+                    const new_settings = old_settings.combined_with_optional(field_settings);
+                    OP_BUILDER.low_level.internal.object_settings = new_settings;
+                    TAG_BUILDER.add_field(.single_tag_value(tag_val), u_field.name, UseCachedLen.no_len_needed(), .{});
                 }
-                union_builder.end_union_builder(builder);
+                OP_BUILDER.low_level.internal.object_settings = old_settings;
+                TAG_BUILDER.finalize();
             }
-            pub const OBJECT_SETTINGS = SerializeModule.SerialFieldOptionalSettings{
-                .custom_routine = .{ .CUSTOM_COMPTIME_BUILDER_ROUTINE = custom_serialize_routine },
+            pub const OBJECT_SETTINGS = SerializeModule.OptionalObjectSerialSettings{
+                .CUSTOM_ROUTINE = .{ .CUSTOM_COMPTIME_MANAGER_OPS_ROUTINE = custom_serialize_routine },
             };
             pub const FIELD_SETTINGS = if (PER_FIELD_SERIAL_SETTINGS) |F_SET| F_SET else struct {};
         };

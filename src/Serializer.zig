@@ -40,6 +40,8 @@ const Kind = Types.Kind;
 const Endian = Root.CommonTypes.Endian;
 const DebugMode = Root.CommonTypes.DebugMode;
 const Flags = Root.Flags.Flags;
+const Alloc = Utils.Alloc;
+const Tri = Root.CommonTypes.Trinary;
 
 const Reader = std.Io.Reader;
 const Writer = std.Io.Writer;
@@ -47,7 +49,8 @@ const Hash = std.hash.XxHash64;
 const PowerOf2 = MathX.PowerOf2;
 const Pool = Root.Pool.Simple.SimplePool;
 const StackStatic = Root.Stack.StackStatic;
-const SliceRangeSmall = Root.CommonTypes.SliceRangeSmall;
+const SliceRange = Root.CommonTypes.SliceRangeSmall;
+const Bool = Root.CommonTypes.Bool1;
 
 const DUMMY_ALLOC = DummyAllocator.allocator_panic_free_noop;
 
@@ -56,6 +59,7 @@ const assert_unreachable = Assert.assert_unreachable;
 const assert_unreachable_err = Assert.assert_unreachable_err;
 const assert_allocation_failure = Assert.assert_allocation_failure;
 const num_cast = Root.Cast.num_cast;
+const abs_cast = Root.Cast.abs_cast;
 const bit_cast = Root.Cast.bit_cast;
 const read_int = std.mem.readInt;
 const DEBUG = std.debug.print;
@@ -67,7 +71,21 @@ const ptr_as_bytes = Utils.Mem.ptr_as_bytes;
 
 pub const NATIVE_ENDIAN = Endian.NATIVE;
 
+pub const ReadWrite = @import("./Serializer_ReadWrite.zig");
+
+pub const SerialDest = ReadWrite.SerialDest;
+pub const SerialDestSlice = ReadWrite.SerialDestSlice;
+pub const SerialDestWriter = ReadWrite.SerialDestWriter;
+pub const SerialSource = ReadWrite.SerialSource;
+pub const SerialSourceSlice = ReadWrite.SerialSourceSlice;
+pub const SerialSourceReader = ReadWrite.SerialSourceReader;
+pub const SerialWriteError = ReadWrite.SerialWriteError;
+pub const SerialReadError = ReadWrite.SerialReadError;
+pub const SerialKind = ReadWrite.SerialKind;
+
 pub const IntegerPacking = enum(u8) {
+    /// If value is 0, serialize zero, else serialize 1
+    NON_ZERO_READ_OR_WRITE_1_ELSE_0,
     /// Serialize integers at their native size, and packed
     /// in the target byte order for the serial routine
     USE_TARGET_ENDIAN,
@@ -100,1150 +118,1728 @@ pub const IntegerSign = enum(u8) {
     SIGNED,
 };
 
-pub const SerialWriteError = error{
-    /// The destination for the serial data ran out of space for the routine to
-    /// fully serialize the object
-    serial_destination_ran_out_of_space,
-    /// A write error occured on the serial destination, but the
-    /// destination does not specify exactly what failed
-    unknown_write_error,
-    /// The union tag in the current native union does not match any valid
-    /// tag the serialization routine recorded on the native type at comptime.
-    ///
-    /// This may indicate that the union was changed, but the routine was not recompiled
-    /// with the object containing the new version of the union.
-    union_tag_in_native_didnt_match_any_valid_tag,
+/// A custom function that takes the serial settings for this unique 'type + settings' pair, and
+/// uses the provided `DataOpBuilderStruct` to build a set of operation needed to serialize the type.
+///
+/// `SETTINGS.CUSTOM_ROUTINE == .NO_CUSTOM_ROUTINE` because that setting has already been evaluated as `.CUSTOM_COMPTIME_OP_LIST`,
+/// and it is overwritten before being passed to this function to prevent an infinite loop or incorrect inheritance by children types
+pub const CustomComptimeRoutineOpsBuilder = fn (comptime OP_BUILDER: *DataOpBuilderHighLevel) void;
+
+/// Param `self` is a pointer to the object to serialize, and `settings` is the intended
+/// serial settings for this 'type + settings' pair
+///
+/// `self` calls an arbitrary number of write commands on the `serial_dest`
+/// to write its data, then returns
+///
+/// `settings.CUSTOM_ROUTINE == .NO_CUSTOM_ROUTINE` because that setting has already been evaluated as `.CUSTOM_RUNTIME_SERIALIZE`,
+/// and it is overwritten before being passed to this function to prevent an infinite loop or incorrect inheritance by children types
+pub const CustomWriteToSerialFunc = fn (self: *const anyopaque, serial_dest: SerialDest) SerialWriteError!usize;
+/// Param `self` is a pointer to the object to serialize, and `settings` is the intended
+/// serial settings for this 'type + settings' pair
+///
+/// `self` calls an arbitrary number of read commands on the `serial_source`
+/// to read its data, then returns
+///
+/// `settings.CUSTOM_ROUTINE == .NO_CUSTOM_ROUTINE` because that setting has already been evaluated as `.CUSTOM_RUNTIME_SERIALIZE`,
+/// and it is overwritten before being passed to this function to prevent an infinite loop or incorrect inheritance by children types
+pub const CustomReadFromSerialFunc = fn (self: *anyopaque, serial_source: SerialSource) SerialReadError!usize;
+/// This is a custom user-provided function that can be injected into the middle of the serialization process
+/// to alter the native data BEFORE it is serialized.
+///
+/// This function should only manipulate fields/values that have NOT YET been serialized,
+/// as it will have no effect on the ones that already have
+///
+/// `external_data` is an optional opaque pointer to an arbitrary type that the user
+/// provides at runtime, if needed. The same exact object pointer will be provided to ALL calls to any
+/// `DataManipulationNativeToSerial` or `DataManipulationSerialToNative`.
+///
+/// This should *generally* also match the effect of a provided `DataManipulationSerialToNative`,
+/// but inverted. For example, if a `DataManipulationSerialToNative` sets 4 bits that
+/// are server-side only and the client does not have, this function should clear
+/// those 4 bits when this object is being sent out to the client
+pub const DataManipulationNativeToSerial = fn (self: *anyopaque, external_data: ?*anyopaque) void;
+/// This is a custom user-provided function that can be injected into the middle of the de-serialization process
+/// to alter the native data AFTER it has been de-serialized.
+///
+/// This function should only manipulate fields/values that have ALREADY been de-serialized,
+/// as it will have no effect on the ones that have not yet been (they will be overwritten)
+///
+/// `external_data` is an optional opaque pointer to an arbitrary type that the user
+/// provides at runtime, if needed. The same exact object pointer will be provided to ALL calls to any
+/// `DataManipulationNativeToSerial` or `DataManipulationSerialToNative`.
+///
+/// This should *generally* also match the effect of a provided `DataManipulationNativeToSerial`,
+/// but inverted. For example, if a `DataManipulationNativeToSerial` clears 4 bits that
+/// are server-side only and should not be seen by the client, this function should re-set
+/// those 4 bits when this object comes back from the client (probably using `external_data`)
+pub const DataManipulationSerialToNative = fn (self: *anyopaque, external_data: ?*anyopaque) void;
+
+pub const CustomRuntimeSerializeFuncs = struct {
+    write_to_serial: *const CustomWriteToSerialFunc,
+    read_from_serial: *const CustomReadFromSerialFunc,
 };
 
-pub const SerialReadError = error{
-    /// The source of serial data did not have enough
-    /// bytes for the routine to fully deserialize the target
-    /// object
-    serial_source_ran_out_of_data,
-    /// A read error occured on the source, but the source does not specify
-    /// exactly what failed
-    unknown_read_error,
-    /// The union tag in the serial data does not match any valid
-    /// tag the serialization routine recorded on the native type
-    union_tag_in_serial_didnt_match_any_valid_tag,
-    /// The 'magic identifier' bytes at the start of the serial
-    /// data did not match the one expected by the serialization routine.
-    ///
-    /// You may need to use a different serial routine.
-    magic_identifier_mismatch,
-    /// The serial routine version recorded in the serialized
-    /// data does not match the one expected by the serial routine.
-    ///
-    /// The version recorded in the serial stream is lower than the one expected;
-    ///
-    /// You may need to use a different serial routine
-    serial_version_mismatch_lower,
-    /// The serial routine version recorded in the serialized
-    /// data does not match the one expected by the serial routine.
-    ///
-    /// The version recorded in the serial stream is higher than the one expected;
-    ///
-    /// You may need to use a different serial routine
-    serial_version_mismatch_higher,
-    /// If the serial stream indicates a VarInt integer, but the native size
-    /// is not 2, 4, 8, or 16 it is an error
-    varint_unsupported_target_native_size,
-    /// VarInts are required to use the smallest possible representation for both security
-    /// and memory considerations
-    varint_overlong_encoding,
-    /// Serializtion requires allocating memory, but the provided allocator failed
-    allocation_error,
-};
+pub const CustomSerialRoutine = union(enum) {
+    /// Use the default logic for serialization
+    NO_CUSTOM_ROUTINE,
+    /// Use a custom function to generate comptime serial ops for this 'type + settings' pair
+    CUSTOM_COMPTIME_MANAGER_OPS_ROUTINE: CustomComptimeRoutineOpsBuilder,
+    /// Run a completely custom function at runtime to serialize this
+    /// object, using no comptime-generated bytecode.
+    CUSTOM_RUNTIME_SERIALIZE: *const CustomRuntimeSerializeFuncs,
 
-const SerialKind = enum(u8) {
-    SLICE,
-    READER_WRITER,
-};
-
-const SerialSource = union {
-    slice: []const u8,
-    reader: *std.Io.Reader,
-
-    pub fn read_data_in_order(self: SerialSource, comptime KIND: SerialKind, native_slice: []u8, native_start: usize, native_end: usize, serial_start: usize, serial_end: usize) SerialReadError!void {
-        switch (KIND) {
-            .SLICE => {
-                const serial_data = self.slice;
-                if (serial_end > serial_data.len) return SerialReadError.serial_source_ran_out_of_data;
-                @memcpy(native_slice[native_start..native_end], serial_data[serial_start..serial_end]);
+    pub fn equals(a: CustomSerialRoutine, b: CustomSerialRoutine) bool {
+        if (std.meta.activeTag(a) != std.meta.activeTag(b)) return false;
+        switch (a) {
+            .NO_CUSTOM_ROUTINE => return true,
+            .CUSTOM_COMPTIME_MANAGER_OPS_ROUTINE => |func| {
+                return func == b.CUSTOM_COMPTIME_MANAGER_OPS_ROUTINE;
             },
-            .READER_WRITER => {
-                const reader = self.reader;
-                reader.readSliceAll(native_slice[native_start..native_end]) catch |err| switch (err) {
-                    .ReadFailed => return SerialReadError.unknown_read_error,
-                    .EndOfStream => return SerialReadError.serial_source_ran_out_of_data,
-                };
+            .CUSTOM_RUNTIME_SERIALIZE => |funcs| {
+                return ( //
+                    funcs.read_from_serial == b.CUSTOM_RUNTIME_SERIALIZE.read_from_serial and
+                        funcs.write_to_serial == b.CUSTOM_RUNTIME_SERIALIZE.write_to_serial);
             },
         }
-    }
-    pub fn read_data_swap(self: SerialSource, comptime KIND: SerialKind, native_slice: []u8, native_start: usize, native_end: usize, serial_start: usize, serial_end: usize) SerialReadError!void {
-        switch (KIND) {
-            .SLICE => {
-                const serial_data = self.slice;
-                if (serial_end > serial_data.len) return SerialReadError.serial_source_ran_out_of_data;
-                var sidx: usize = serial_start;
-                var nidx: usize = native_end;
-                while (sidx < serial_end) : (sidx += 1) {
-                    nidx -= 1;
-                    native_slice[nidx] = serial_data[sidx];
-                }
-            },
-            .READER_WRITER => {
-                const reader = self.reader;
-                reader.readSliceAll(native_slice[native_start..native_end]) catch |err| switch (err) {
-                    .ReadFailed => return SerialReadError.unknown_read_error,
-                    .EndOfStream => return SerialReadError.serial_source_ran_out_of_data,
-                };
-                std.mem.reverse(u8, native_slice[native_start..native_end]);
-            },
-        }
-    }
-    inline fn read_one_byte(self: SerialSource, comptime KIND: SerialKind, start: *usize) SerialReadError!u8 {
-        switch (KIND) {
-            .SLICE => {
-                const serial = self.slice;
-                if (start.* >= serial.len) return SerialReadError.serial_source_ran_out_of_data;
-                const val = serial[start.*];
-                start.* += 1;
-                return val;
-            },
-            .READER_WRITER => {
-                const reader = self.reader;
-                var b: [1]u8 = undefined;
-                reader.readSliceAll(b[0..1]) catch |err| switch (err) {
-                    .ReadFailed => return SerialReadError.unknown_read_error,
-                    .EndOfStream => return SerialReadError.serial_source_ran_out_of_data,
-                };
-                return b[0];
-            },
-        }
-    }
-    inline fn read_n_bytes(self: SerialSource, comptime KIND: SerialKind, start: *usize, dest: []u8) SerialReadError!void {
-        switch (KIND) {
-            .SLICE => {
-                const serial = self.slice;
-                const end = start.* + dest.len;
-                if (end > serial.len) return SerialReadError.serial_source_ran_out_of_data;
-                @memcpy(dest, serial[start.*..end]);
-                start.* += dest.len;
-            },
-            .READER_WRITER => {
-                const reader = self.reader;
-                reader.readSliceAll(dest) catch |err| switch (err) {
-                    .ReadFailed => return SerialReadError.unknown_read_error,
-                    .EndOfStream => return SerialReadError.serial_source_ran_out_of_data,
-                };
-            },
-        }
-    }
-    pub fn read_varint(self: SerialSource, comptime KIND: SerialKind, comptime ZIGZAG: bool, native_slice: []u8, native_start: usize, native_end: usize, native_len: usize, serial_start: usize) SerialReadError!usize {
-        assert_with_reason(native_len == 2 or native_len == 4 or native_len == 8 or native_len == 16, @src(), "VarInts are only upported for 2, 4, 8, or 16 byte integers, got native len {d}", .{native_len});
-        var temp_buffer: [32]u8 align(@alignOf(u128)) = @splat(0);
-        const val_offset: *align(@alignOf(u128)) u8 = &temp_buffer[16];
-        var additional_bytes_to_read: usize = 0;
-        var total_bytes: usize = 0;
-        var continue_bytes: usize = 0;
-        var temp_start: usize = undefined;
-        var start: usize = serial_start;
-        var b: u8 = try self.read_one_byte(KIND, &start);
-        const LSB: usize = switch (native_len) {
-            2 => 17,
-            4 => 19,
-            8 => 23,
-            16 => 31,
-            else => unreachable,
-        };
-        var MSB: usize = LSB;
-        check_next_byte: switch (b) {
-            0b0_0000000...0b0_1111111 => { // +1 byte
-                total_bytes += 1;
-                const pfx_byte = MSB + continue_bytes;
-                temp_buffer[pfx_byte] = b;
-                temp_start = pfx_byte;
-            },
-            0b10_000000...0b10_111111 => { // +2 bytes
-                b &= 0b00_111111;
-                MSB -= 1;
-                const pfx_byte = MSB + continue_bytes;
-                temp_buffer[pfx_byte] = b;
-                temp_start = pfx_byte;
-                additional_bytes_to_read += 1;
-                total_bytes += 2;
-            },
-            0b110_00000...0b110_11111 => { // +3 bytes
-                b &= 0b000_11111;
-                MSB -= 2;
-                const pfx_byte = MSB + continue_bytes;
-                temp_buffer[pfx_byte] = b;
-                temp_start = pfx_byte;
-                additional_bytes_to_read += 2;
-                total_bytes += 3;
-            },
-            0b1110_0000...0b1110_1111 => { // +4 bytes
-                b &= 0b0000_1111;
-                MSB -= 3;
-                const pfx_byte = MSB + continue_bytes;
-                temp_buffer[pfx_byte] = b;
-                temp_start = pfx_byte;
-                additional_bytes_to_read += 3;
-                total_bytes += 4;
-            },
-            0b11110_000...0b11110_111 => { // +5 bytes
-                b &= 0b00000_111;
-                MSB -= 4;
-                const pfx_byte = MSB + continue_bytes;
-                temp_buffer[pfx_byte] = b;
-                temp_start = pfx_byte;
-                additional_bytes_to_read += 4;
-                total_bytes += 5;
-            },
-            0b111110_00...0b111110_11 => { // +6 bytes
-                b &= 0b000000_11;
-                MSB -= 5;
-                const pfx_byte = MSB + continue_bytes;
-                temp_buffer[pfx_byte] = b;
-                temp_start = pfx_byte;
-                additional_bytes_to_read += 5;
-                total_bytes += 6;
-            },
-            0b1111110_0...0b1111110_1 => { // +7 bytes
-                b &= 0b0000000_1;
-                MSB -= 6;
-                const pfx_byte = MSB + continue_bytes;
-                temp_buffer[pfx_byte] = b;
-                temp_start = pfx_byte;
-                additional_bytes_to_read += 6;
-                total_bytes += 7;
-            },
-            0b11111110 => { // +8 bytes
-                MSB -= 7;
-                temp_start = MSB + continue_bytes;
-                additional_bytes_to_read += 7;
-                total_bytes += 8;
-            },
-            0b11111111 => {
-                if (native_len == 8) {
-                    MSB = 15;
-                    total_bytes = 9;
-                    additional_bytes_to_read = 8;
-                    temp_start = MSB;
-                    break :check_next_byte;
-                }
-                MSB -= 8;
-                additional_bytes_to_read += 7;
-                continue_bytes += 1;
-                total_bytes += 8;
-                if (MSB < 13) return SerialReadError.varint_overlong_encoding;
-                b = try self.read_one_byte(KIND, &start);
-                continue :check_next_byte b;
-            },
-        }
-        switch (native_len) {
-            2 => if (total_bytes > 3) return SerialReadError.varint_overlong_encoding,
-            4 => if (total_bytes > 5) return SerialReadError.varint_overlong_encoding,
-            8 => if (total_bytes > 9) return SerialReadError.varint_overlong_encoding,
-            16 => if (total_bytes > 19) return SerialReadError.varint_overlong_encoding,
-            else => unreachable,
-        }
-        const temp_start_additional = temp_start + 1;
-        const temp_end = temp_start_additional + additional_bytes_to_read;
-        try self.read_n_bytes(KIND, &start, temp_buffer[temp_start_additional..temp_end]);
-        if (NATIVE_ENDIAN == .LITTLE_ENDIAN) {
-            std.mem.reverse(u8, temp_buffer[16 .. 16 + native_len]);
-        }
-        if (ZIGZAG) {
-            switch (native_len) {
-                2 => do_zigzag_adjustment(2, @ptrCast(val_offset), .SERIAL_TO_NATIVE),
-                4 => do_zigzag_adjustment(4, @ptrCast(val_offset), .SERIAL_TO_NATIVE),
-                8 => do_zigzag_adjustment(8, @ptrCast(val_offset), .SERIAL_TO_NATIVE),
-                16 => do_zigzag_adjustment(16, @ptrCast(val_offset), .SERIAL_TO_NATIVE),
-                else => unreachable,
-            }
-        }
-        @memcpy(native_slice[native_start..native_end], temp_buffer[16 .. 16 + native_len]);
-        return total_bytes;
     }
 };
 
-const SerialDest = union {
-    slice: []u8,
-    writer: *std.Io.Writer,
-
-    pub fn write_data_in_order(self: SerialDest, comptime KIND: SerialKind, native_data: []const u8, native_start: usize, native_end: usize, serial_start: usize, serial_end: usize) SerialWriteError!void {
-        switch (KIND) {
-            .SLICE => {
-                const serial_slice = self.slice;
-                @memcpy(serial_slice[serial_start..serial_end], native_data[native_start..native_end]);
-            },
-            .READER_WRITER => {
-                const writer = self.writer;
-                writer.writeAll(native_data[native_start..native_end]) catch return SerialWriteError.serial_destination_ran_out_of_space;
-            },
-        }
-    }
-    pub fn write_data_swap(self: SerialDest, comptime KIND: SerialKind, native_data: []const u8, native_start: usize, native_end: usize, serial_start: usize, serial_end: usize) SerialWriteError!void {
-        _ = native_start;
-        switch (KIND) {
-            .SLICE => {
-                const serial_slice = self.slice;
-                var sidx: usize = serial_start;
-                var nidx: usize = native_end;
-                while (sidx < serial_end) : (sidx += 1) {
-                    nidx -= 1;
-                    serial_slice[sidx] = native_data[nidx];
-                }
-            },
-            .READER_WRITER => {
-                const writer = self.writer;
-                var sidx: usize = serial_start;
-                var nidx: usize = native_end;
-                while (sidx < serial_end) : (sidx += 1) {
-                    nidx -= 1;
-                    writer.writeByte(native_data[nidx]) catch return SerialWriteError.serial_destination_ran_out_of_space;
-                }
-            },
-        }
-    }
-    /// NUM_BYTES, LEAST_SIG_IDX, MOST_SIG_IDX
-    const NLM = struct { usize, usize, usize };
-    pub fn write_varint(self: SerialDest, comptime KIND: SerialKind, comptime ZIGZAG: bool, native_data: []const u8, native_start: usize, native_end: usize, native_len: usize, serial_start: usize) SerialWriteError!usize {
-        assert_with_reason(native_len == 2 or native_len == 4 or native_len == 8 or native_len == 16, @src(), "VarInts are only supported for 2, 4, 8, or 16 byte integers, got native len {d}", .{native_len});
-        var temp_buffer: [35]u8 align(@alignOf(u128)) = @splat(0);
-        const val_offset: *align(@alignOf(u128)) u8 = &temp_buffer[16];
-        switch (native_len) {
-            2 => @memcpy(temp_buffer[16..18], native_data[native_start..native_end]),
-            4 => @memcpy(temp_buffer[16..20], native_data[native_start..native_end]),
-            8 => @memcpy(temp_buffer[16..24], native_data[native_start..native_end]),
-            16 => @memcpy(temp_buffer[16..32], native_data[native_start..native_end]),
-            else => unreachable,
-        }
-        const num_bytes: usize, const least_sig_byte_with_data: usize, const most_sig_byte_with_data: usize = switch (native_len) {
-            2 => get: {
-                if (ZIGZAG) do_zigzag_adjustment(2, @ptrCast(val_offset), .NATIVE_TO_SERIAL);
-                const uint: *const u16 = @ptrCast(@alignCast(val_offset));
-                const LSB: comptime_int = if (NATIVE_ENDIAN == .BIG_ENDIAN) 17 else 16;
-                break :get switch (uint.*) {
-                    0...127 => NLM{ 1, LSB, LSB },
-                    128...16383 => add_prefix: {
-                        temp_buffer[more_sig(LSB, 1)] |= 0b10_000000;
-                        break :add_prefix NLM{ 2, LSB, more_sig(LSB, 1) };
-                    },
-                    16384...0xFFFF => add_prefix: {
-                        temp_buffer[more_sig(LSB, 2)] |= 0b110_00000;
-                        break :add_prefix NLM{ 3, LSB, more_sig(LSB, 2) };
-                    },
-                };
-            },
-            4 => get: {
-                if (ZIGZAG) do_zigzag_adjustment(4, @ptrCast(val_offset), .NATIVE_TO_SERIAL);
-                const uint: *const u32 = @ptrCast(@alignCast(val_offset));
-                const LSB = if (NATIVE_ENDIAN == .BIG_ENDIAN) 19 else 16;
-                break :get switch (uint.*) {
-                    0...127 => NLM{ 1, LSB, LSB },
-                    128...16383 => add_prefix: {
-                        temp_buffer[more_sig(LSB, 1)] |= 0b10_000000;
-                        break :add_prefix NLM{ 2, LSB, more_sig(LSB, 1) };
-                    },
-                    16384...2097151 => add_prefix: {
-                        temp_buffer[more_sig(LSB, 2)] |= 0b110_00000;
-                        break :add_prefix NLM{ 3, LSB, more_sig(LSB, 2) };
-                    },
-                    2097152...268435455 => add_prefix: {
-                        temp_buffer[more_sig(LSB, 3)] |= 0b1110_0000;
-                        break :add_prefix NLM{ 4, LSB, more_sig(LSB, 3) };
-                    },
-                    268435456...0xFFFFFFFF => add_prefix: {
-                        temp_buffer[more_sig(LSB, 4)] |= 0b11110_000;
-                        break :add_prefix NLM{ 5, LSB, more_sig(LSB, 4) };
-                    },
-                };
-            },
-            8 => get: {
-                if (ZIGZAG) do_zigzag_adjustment(8, @ptrCast(val_offset), .NATIVE_TO_SERIAL);
-                const uint: *const u64 = @ptrCast(@alignCast(val_offset));
-                const LSB = if (NATIVE_ENDIAN == .BIG_ENDIAN) 23 else 16;
-                break :get switch (uint.*) {
-                    0...127 => NLM{ 1, LSB, LSB },
-                    128...16383 => add_prefix: {
-                        temp_buffer[more_sig(LSB, 1)] |= 0b10_000000;
-                        break :add_prefix NLM{ 2, LSB, more_sig(LSB, 1) };
-                    },
-                    16384...2097151 => add_prefix: {
-                        temp_buffer[more_sig(LSB, 2)] |= 0b110_00000;
-                        break :add_prefix NLM{ 3, LSB, more_sig(LSB, 2) };
-                    },
-                    2097152...268435455 => add_prefix: {
-                        temp_buffer[more_sig(LSB, 3)] |= 0b1110_0000;
-                        break :add_prefix NLM{ 4, LSB, more_sig(LSB, 3) };
-                    },
-                    268435456...34359738367 => add_prefix: {
-                        temp_buffer[more_sig(LSB, 4)] |= 0b11110_000;
-                        break :add_prefix NLM{ 5, LSB, more_sig(LSB, 4) };
-                    },
-                    34359738368...4398046511103 => add_prefix: {
-                        temp_buffer[more_sig(LSB, 5)] |= 0b111110_00;
-                        break :add_prefix NLM{ 6, LSB, more_sig(LSB, 5) };
-                    },
-                    4398046511104...562949953421311 => add_prefix: {
-                        temp_buffer[more_sig(LSB, 6)] |= 0b1111110_0;
-                        break :add_prefix NLM{ 7, LSB, more_sig(LSB, 6) };
-                    },
-                    562949953421312...72057594037927935 => add_prefix: {
-                        temp_buffer[more_sig(LSB, 7)] |= 0b11111110;
-                        break :add_prefix NLM{ 8, LSB, more_sig(LSB, 7) };
-                    },
-                    72057594037927936...0xFFFFFFFFFFFFFFFF => add_prefix: {
-                        temp_buffer[more_sig(LSB, 8)] |= 0b11111111;
-                        break :add_prefix NLM{ 9, LSB, more_sig(LSB, 8) };
-                    },
-                };
-            },
-            16 => get: {
-                if (ZIGZAG) do_zigzag_adjustment(16, @ptrCast(val_offset), .NATIVE_TO_SERIAL);
-                const uint: *const u128 = @ptrCast(@alignCast(val_offset));
-                const LSB = if (NATIVE_ENDIAN == .BIG_ENDIAN) 31 else 16;
-                break :get switch (uint.*) {
-                    0...127 => NLM{ 1, LSB, LSB },
-                    128...16383 => add_prefix: {
-                        temp_buffer[more_sig(LSB, 1)] |= 0b10_000000;
-                        break :add_prefix NLM{ 2, LSB, more_sig(LSB, 1) };
-                    },
-                    16384...2097151 => add_prefix: {
-                        temp_buffer[more_sig(LSB, 2)] |= 0b110_00000;
-                        break :add_prefix NLM{ 3, LSB, more_sig(LSB, 2) };
-                    },
-                    2097152...268435455 => add_prefix: {
-                        temp_buffer[more_sig(LSB, 3)] |= 0b1110_0000;
-                        break :add_prefix NLM{ 4, LSB, more_sig(LSB, 3) };
-                    },
-                    268435456...34359738367 => add_prefix: {
-                        temp_buffer[more_sig(LSB, 4)] |= 0b11110_000;
-                        break :add_prefix NLM{ 5, LSB, more_sig(LSB, 4) };
-                    },
-                    34359738368...4398046511103 => add_prefix: {
-                        temp_buffer[more_sig(LSB, 5)] |= 0b111110_00;
-                        break :add_prefix NLM{ 6, LSB, more_sig(LSB, 5) };
-                    },
-                    4398046511104...562949953421311 => add_prefix: {
-                        temp_buffer[more_sig(LSB, 6)] |= 0b1111110_0;
-                        break :add_prefix NLM{ 7, LSB, more_sig(LSB, 6) };
-                    },
-                    562949953421312...72057594037927935 => add_prefix: {
-                        temp_buffer[more_sig(LSB, 7)] |= 0b11111110;
-                        break :add_prefix NLM{ 8, LSB, more_sig(LSB, 7) };
-                    },
-                    72057594037927936...9223372036854775807 => add_prefix: {
-                        temp_buffer[more_sig(LSB, 8)] |= 0b11111111;
-                        // temp_buffer[more_sig(LSB, 7)] |= 0b0_0000000;
-                        break :add_prefix NLM{ 9, LSB, more_sig(LSB, 8) };
-                    },
-                    9223372036854775808...1180591620717411303423 => add_prefix: {
-                        temp_buffer[more_sig(LSB, 9)] |= 0b11111111;
-                        temp_buffer[more_sig(LSB, 8)] |= 0b10_000000;
-                        break :add_prefix NLM{ 10, LSB, more_sig(LSB, 9) };
-                    },
-                    1180591620717411303424...151115727451828646838271 => add_prefix: {
-                        temp_buffer[more_sig(LSB, 10)] |= 0b11111111;
-                        temp_buffer[more_sig(LSB, 9)] |= 0b110_00000;
-                        break :add_prefix NLM{ 11, LSB, more_sig(LSB, 10) };
-                    },
-                    151115727451828646838272...19342813113834066795298815 => add_prefix: {
-                        temp_buffer[more_sig(LSB, 11)] |= 0b11111111;
-                        temp_buffer[more_sig(LSB, 10)] |= 0b1110_0000;
-                        break :add_prefix NLM{ 12, LSB, more_sig(LSB, 11) };
-                    },
-                    19342813113834066795298816...2475880078570760549798248447 => add_prefix: {
-                        temp_buffer[more_sig(LSB, 12)] |= 0b11111111;
-                        temp_buffer[more_sig(LSB, 11)] |= 0b11110_000;
-                        break :add_prefix NLM{ 13, LSB, more_sig(LSB, 12) };
-                    },
-                    2475880078570760549798248448...316912650057057350374175801343 => add_prefix: {
-                        temp_buffer[more_sig(LSB, 13)] |= 0b11111111;
-                        temp_buffer[more_sig(LSB, 12)] |= 0b111110_00;
-                        break :add_prefix NLM{ 14, LSB, more_sig(LSB, 13) };
-                    },
-                    316912650057057350374175801344...40564819207303340847894502572031 => add_prefix: {
-                        temp_buffer[more_sig(LSB, 14)] |= 0b11111111;
-                        temp_buffer[more_sig(LSB, 13)] |= 0b1111110_0;
-                        break :add_prefix NLM{ 15, LSB, more_sig(LSB, 14) };
-                    },
-                    40564819207303340847894502572032...5192296858534827628530496329220095 => add_prefix: {
-                        temp_buffer[more_sig(LSB, 15)] |= 0b11111111;
-                        temp_buffer[more_sig(LSB, 14)] |= 0b11111110;
-                        break :add_prefix NLM{ 16, LSB, more_sig(LSB, 15) };
-                    },
-                    5192296858534827628530496329220096...664613997892457936451903530140172287 => add_prefix: {
-                        temp_buffer[more_sig(LSB, 16)] |= 0b11111111;
-                        temp_buffer[more_sig(LSB, 15)] |= 0b11111111;
-                        // temp_buffer[more_sig(LSB, 14)] |= 0b0_0000000;
-                        break :add_prefix NLM{ 17, LSB, more_sig(LSB, 16) };
-                    },
-                    664613997892457936451903530140172288...85070591730234615865843651857942052863 => add_prefix: {
-                        temp_buffer[more_sig(LSB, 17)] |= 0b11111111;
-                        temp_buffer[more_sig(LSB, 16)] |= 0b11111111;
-                        temp_buffer[more_sig(LSB, 15)] |= 0b10_000000;
-                        break :add_prefix NLM{ 18, LSB, more_sig(LSB, 17) };
-                    },
-                    85070591730234615865843651857942052864...0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF => add_prefix: {
-                        temp_buffer[more_sig(LSB, 18)] |= 0b11111111;
-                        temp_buffer[more_sig(LSB, 17)] |= 0b11111111;
-                        temp_buffer[more_sig(LSB, 16)] |= 0b110_00000;
-                        break :add_prefix NLM{ 19, LSB, more_sig(LSB, 18) };
-                    },
-                };
-            },
-            else => unreachable,
-        };
-        const first_byte = if (NATIVE_ENDIAN == .BIG_ENDIAN) most_sig_byte_with_data else least_sig_byte_with_data;
-        const byte_end = if (NATIVE_ENDIAN == .BIG_ENDIAN) least_sig_byte_with_data + 1 else most_sig_byte_with_data + 1;
-        if (NATIVE_ENDIAN != .BIG_ENDIAN) {
-            std.mem.reverse(u8, temp_buffer[first_byte..byte_end]);
-        }
-        switch (KIND) {
-            .SLICE => {
-                const serial = self.slice;
-                const serial_end = serial_start + num_bytes;
-                if (serial_end > serial.len) return SerialWriteError.serial_destination_ran_out_of_space;
-                @memcpy(serial[serial_start..serial_end], temp_buffer[first_byte..byte_end]);
-            },
-            .READER_WRITER => {
-                const writer = self.writer;
-                writer.writeAll(temp_buffer[first_byte..byte_end]) catch return SerialWriteError.serial_destination_ran_out_of_space;
-            },
-        }
-        return num_bytes;
-    }
+pub const SerialManagerArrayLens = struct {
+    UNIQUE_TYPE_BUFFER_MAX_LEN: u32 = 128,
+    OP_BUFFER_MAX_LEN: u32 = 1024,
+    ALLOC_NAME_BYTES_BUFFER_MAX_LEN: u32 = 512,
+    ALLOC_NAME_LIST_MAX_LEN: u32 = 64,
+    SUB_OBJECT_STACK_MAX_LEN: u32 = 32,
+    // heirarchy_pool_len: u32 = 512,
+    // heirarchy_stack_len: u32 = 64,
+    // cycle_eval_list_len: u32 = 64,
 };
 
-// 1 byte (< 128)
-// ________ ________ ________┃0AAAAAAA
-// 2 byte (< 16384)          ┃
-// ________ ________ ________┃10AAAAAA xxxxxxxx
-// 3 byte (< 2097152)        ┃
-// ________ ________ ________┃110AAAAA xxxxxxxx xxxxxxxx
-// 4 byte (< 268435456)      ┃
-// ________ ________ ________┃1110AAAA xxxxxxxx xxxxxxxx xxxxxxxx
-// 5 byte (< 34359738368)    ┃
-// ________ ________ ________┃11110AAA xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx
-// 6 byte (< 4398046511104)  ┃
-// ________ ________ ________┃111110AA xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx
-// 7 byte (< 562949953421312)┃
-// ________ ________ ________┃1111110A xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx
-// 8 byte (< 72057594037927936)
-// ________ ________ ________┃11111110 AAAAAAAA xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx
-// 9 byte for u64:           ┃
-// ________ ________ 11111111┃AAAAAAAA xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx
-// 9 byte for u128 (< 9223372036854775808)
-// ________ ________ ________┃11111111 0AAAAAAA xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx
-// 10 byte (< 1180591620717411303424)
-// ________ ________ ________┃11111111 10AAAAAA xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx
-// 11 byte (< 151115727451828646838272)
-// ________ ________ ________┃11111111 110AAAAA xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx
-// 12 byte (< 19342813113834066795298816)
-// ________ ________ ________┃11111111 1110AAAA xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx
-// 13 byte (< 2475880078570760549798248448)
-// ________ ________ ________┃11111111 11110AAA xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx
-// 14 byte (< 316912650057057350374175801344)
-// ________ ________ ________┃11111111 111110AA xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx
-// 15 byte (< 40564819207303340847894502572032)
-// ________ ________ ________┃11111111 1111110A xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx
-// 16 byte (< 5192296858534827628530496329220096)
-// ________ ________ ________┃11111111 11111110 AAAAAAAA xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx
-// 17 bytes (< 664613997892457936451903530140172288)
-// ________ ________ 11111111┃11111111 0AAAAAAA xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx
-// 18 bytes (< 85070591730234615865843651857942052864)
-// ________ 11111111 11111111┃10AAAAAA xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx
-// 19 bytes (<= 340282366920938463463374607431768211455)
-// 11111111 11111111 110_____┃AAAAAAAA xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx
-//                      ^^^^^ If any of these bits are not 0, it is an error if you are
-//                            strict on non-canonical reps, but they have no effect on the
-//                            final value either way.
-
-test "VarInt round trip equality" {
-    const Test = Root.Testing;
-    var rand_core = std.Random.DefaultPrng.init(@bitCast(std.time.microTimestamp()));
-    const rand = rand_core.random();
-    const EXTENDED = false;
-    const ITERS_PER_TYPE = if (EXTENDED) 100000 else 100;
-    var serial_buf: [32]u8 = undefined;
-    const src = SerialSource{ .slice = serial_buf[0..32] };
-    const dst = SerialDest{ .slice = serial_buf[0..32] };
-
-    { // static u128
-        const static_exp: u128 = 0xF1_0F_0E_0D_0C_0B_0A_09_08_07_06_05_04_03_02_01;
-        const static_exp_bytes: [*]align(@alignOf(u128)) const u8 = @ptrCast(&static_exp);
-        var static_got: u128 = undefined;
-        var static_got_bytes: [*]align(@alignOf(u128)) u8 = @ptrCast(&static_got);
-        const len = try dst.write_varint(.SLICE, false, static_exp_bytes[0..16], 0, 16, 16, 0);
-        try Test.expect_equal(len, "len", 19, "19", "len encode wrong", .{});
-        try Test.expect_slices_equal_t(u8, serial_buf[0..19], "serial_buf[0..19]", &.{ 0xFF, 0xFF, 0b110_00000, 0xF1, 0x0F, 0x0E, 0x0D, 0x0C, 0x0B, 0x0A, 0x09, 0x08, 0x07, 0x06, 0x05, 0x04, 0x03, 0x02, 0x01 }, "{ 0xFF, 0xFF, 0b110_00000, 0xF1, 0x0F, 0x0E, 0x0D, 0x0C, 0x0B, 0x0A, 0x09, 0x08, 0x07, 0x06, 0x05, 0x04, 0x03, 0x02, 0x01 }", "static expected byte order mismatch", .{});
-        const len_2 = try src.read_varint(.SLICE, false, static_got_bytes[0..16], 0, 16, 16, 0);
-        try Test.expect_equal(len_2, "len_2", 19, "19", "len decode wrong", .{});
-        try Test.expect_equal(static_got, "static_got", static_got, "static_got", "static mismatch", .{});
-    }
-    { // static u64
-        const static_exp: u64 = 0xF8_07_06_05_04_03_02_01;
-        const static_exp_bytes: [*]align(@alignOf(u64)) const u8 = @ptrCast(&static_exp);
-        var static_got: u64 = undefined;
-        var static_got_bytes: [*]align(@alignOf(u64)) u8 = @ptrCast(&static_got);
-        const len = try dst.write_varint(.SLICE, false, static_exp_bytes[0..8], 0, 8, 8, 0);
-        try Test.expect_equal(len, "len", 9, "9", "len encode wrong", .{});
-        try Test.expect_slices_equal_t(u8, serial_buf[0..9], "serial_buf[0..9]", &.{ 0xFF, 0xF8, 0x07, 0x06, 0x05, 0x04, 0x03, 0x02, 0x01 }, "{ 0xFF, 0xF8, 0x07, 0x06, 0x05, 0x04, 0x03, 0x02, 0x01 }", "static expected byte order mismatch", .{});
-        const len_2 = try src.read_varint(.SLICE, false, static_got_bytes[0..8], 0, 8, 8, 0);
-        try Test.expect_equal(len_2, "len_2", 9, "9", "len decode wrong", .{});
-        try Test.expect_equal(static_got, "static_got", static_got, "static_got", "static mismatch", .{});
-    }
-    { // static u32
-        const static_exp: u32 = 0xF4_03_02_01;
-        const static_exp_bytes: [*]align(@alignOf(u32)) const u8 = @ptrCast(&static_exp);
-        var static_got: u32 = undefined;
-        var static_got_bytes: [*]align(@alignOf(u32)) u8 = @ptrCast(&static_got);
-        const len = try dst.write_varint(.SLICE, false, static_exp_bytes[0..4], 0, 4, 4, 0);
-        try Test.expect_equal(len, "len", 5, "5", "len encode wrong", .{});
-        try Test.expect_slices_equal_t(u8, serial_buf[0..5], "serial_buf[0..5]", &.{ 0b11110_000, 0xF4, 0x03, 0x02, 0x01 }, "{ 0b11110_000, 0xF4, 0x03, 0x02, 0x01 }", "static expected byte order mismatch", .{});
-        const len_2 = try src.read_varint(.SLICE, false, static_got_bytes[0..4], 0, 4, 4, 0);
-        try Test.expect_equal(len_2, "len_2", 5, "5", "len decode wrong", .{});
-        try Test.expect_equal(static_got, "static_got", static_got, "static_got", "static mismatch", .{});
-    }
-    { // static u16
-        const static_exp: u32 = 0xF2_01;
-        const static_exp_bytes: [*]align(@alignOf(u16)) const u8 = @ptrCast(&static_exp);
-        var static_got: u16 = undefined;
-        var static_got_bytes: [*]align(@alignOf(u16)) u8 = @ptrCast(&static_got);
-        const len = try dst.write_varint(.SLICE, false, static_exp_bytes[0..2], 0, 2, 2, 0);
-        try Test.expect_equal(len, "len", 3, "3", "len encode wrong", .{});
-        try Test.expect_slices_equal_t(u8, serial_buf[0..3], "serial_buf[0..3]", &.{ 0b110_00000, 0xF2, 0x01 }, "{ 0b110_00000, 0xF2, 0x01 }", "static expected byte order mismatch", .{});
-        const len_2 = try src.read_varint(.SLICE, false, static_got_bytes[0..2], 0, 2, 2, 0);
-        try Test.expect_equal(len_2, "len_2", 3, "3", "len decode wrong", .{});
-        try Test.expect_equal(static_got, "static_got", static_got, "static_got", "static mismatch", .{});
-    }
-
-    for (0..ITERS_PER_TYPE) |_| {
-        // u16
-        const val_orig: u16 = rand.int(u16);
-        const val_orig_bytes: [*]const u8 = @ptrCast(&val_orig);
-        var val_decoded: u16 = undefined;
-        const val_decoded_bytes: [*]u8 = @ptrCast(&val_decoded);
-        const w = try dst.write_varint(.SLICE, false, val_orig_bytes[0..2], 0, 2, 2, 0);
-        const r = try src.read_varint(.SLICE, false, val_decoded_bytes[0..2], 0, 2, 2, 0);
-        try Test.expect_equal(val_decoded, "val_decoded", val_orig, "val_orig", "varint round-trip value mismatch\n\tGOT {b:0>16}\n\tEXP {b:0>16}", .{ val_decoded, val_orig });
-        try Test.expect_equal(w, "bytes written", r, "bytes read", "varint round-trip bytes written/read mismatch", .{});
-    }
-    for (0..ITERS_PER_TYPE) |_| {
-        // i16
-        const val_orig: i16 = rand.int(i16);
-        const val_orig_bytes: [*]const u8 = @ptrCast(&val_orig);
-        var val_decoded: i16 = undefined;
-        const val_decoded_bytes: [*]u8 = @ptrCast(&val_decoded);
-        const w = try dst.write_varint(.SLICE, true, val_orig_bytes[0..2], 0, 2, 2, 0);
-        const r = try src.read_varint(.SLICE, true, val_decoded_bytes[0..2], 0, 2, 2, 0);
-        try Test.expect_equal(val_decoded, "val_decoded", val_orig, "val_orig", "varint round-trip value mismatch\n\tGOT {b:0>16}\n\tEXP {b:0>16}", .{ val_decoded, val_orig });
-        try Test.expect_equal(w, "bytes written", r, "bytes read", "varint round-trip bytes written/read mismatch", .{});
-    }
-    for (0..ITERS_PER_TYPE) |_| {
-        // u32
-        const val_orig: u32 = rand.int(u32);
-        const val_orig_bytes: [*]const u8 = @ptrCast(&val_orig);
-        var val_decoded: u32 = undefined;
-        const val_decoded_bytes: [*]u8 = @ptrCast(&val_decoded);
-        const w = try dst.write_varint(.SLICE, false, val_orig_bytes[0..4], 0, 4, 4, 0);
-        const r = try src.read_varint(.SLICE, false, val_decoded_bytes[0..4], 0, 4, 4, 0);
-        try Test.expect_equal(val_decoded, "val_decoded", val_orig, "val_orig", "varint round-trip value mismatch\n\tGOT {b:0>16}\n\tEXP {b:0>16}", .{ val_decoded, val_orig });
-        try Test.expect_equal(w, "bytes written", r, "bytes read", "varint round-trip bytes written/read mismatch", .{});
-    }
-    for (0..ITERS_PER_TYPE) |_| {
-        // i32
-        const val_orig: i32 = rand.int(i32);
-        const val_orig_bytes: [*]const u8 = @ptrCast(&val_orig);
-        var val_decoded: i32 = undefined;
-        const val_decoded_bytes: [*]u8 = @ptrCast(&val_decoded);
-        const w = try dst.write_varint(.SLICE, true, val_orig_bytes[0..4], 0, 4, 4, 0);
-        const r = try src.read_varint(.SLICE, true, val_decoded_bytes[0..4], 0, 4, 4, 0);
-        try Test.expect_equal(val_decoded, "val_decoded", val_orig, "val_orig", "varint round-trip value mismatch\n\tGOT {b:0>16}\n\tEXP {b:0>16}", .{ val_decoded, val_orig });
-        try Test.expect_equal(w, "bytes written", r, "bytes read", "varint round-trip bytes written/read mismatch", .{});
-    }
-    for (0..ITERS_PER_TYPE) |_| {
-        // u64
-        const val_orig: u64 = rand.int(u64);
-        const val_orig_bytes: [*]const u8 = @ptrCast(&val_orig);
-        var val_decoded: u64 = undefined;
-        const val_decoded_bytes: [*]u8 = @ptrCast(&val_decoded);
-        const w = try dst.write_varint(.SLICE, false, val_orig_bytes[0..8], 0, 8, 8, 0);
-        const r = try src.read_varint(.SLICE, false, val_decoded_bytes[0..8], 0, 8, 8, 0);
-        try Test.expect_equal(val_decoded, "val_decoded", val_orig, "val_orig", "varint round-trip value mismatch\n\tGOT {b:0>16}\n\tEXP {b:0>16}", .{ val_decoded, val_orig });
-        try Test.expect_equal(w, "bytes written", r, "bytes read", "varint round-trip bytes written/read mismatch", .{});
-    }
-    for (0..ITERS_PER_TYPE) |_| {
-        // i64
-        const val_orig: i64 = rand.int(i64);
-        const val_orig_bytes: [*]const u8 = @ptrCast(&val_orig);
-        var val_decoded: i64 = undefined;
-        const val_decoded_bytes: [*]u8 = @ptrCast(&val_decoded);
-        const w = try dst.write_varint(.SLICE, true, val_orig_bytes[0..8], 0, 8, 8, 0);
-        const r = try src.read_varint(.SLICE, true, val_decoded_bytes[0..8], 0, 8, 8, 0);
-        try Test.expect_equal(val_decoded, "val_decoded", val_orig, "val_orig", "varint round-trip value mismatch\n\tGOT {b:0>16}\n\tEXP {b:0>16}", .{ val_decoded, val_orig });
-        try Test.expect_equal(w, "bytes written", r, "bytes read", "varint round-trip bytes written/read mismatch", .{});
-    }
-    for (0..ITERS_PER_TYPE) |_| {
-        // u128
-        const val_orig: u128 = rand.int(u128);
-        const val_orig_bytes: [*]const u8 = @ptrCast(&val_orig);
-        var val_decoded: u128 = undefined;
-        const val_decoded_bytes: [*]u8 = @ptrCast(&val_decoded);
-        const w = try dst.write_varint(.SLICE, false, val_orig_bytes[0..16], 0, 16, 16, 0);
-        const r = try src.read_varint(.SLICE, false, val_decoded_bytes[0..16], 0, 16, 16, 0);
-        try Test.expect_equal(val_decoded, "val_decoded", val_orig, "val_orig", "varint round-trip value mismatch\n\tGOT {b:0>16}\n\tEXP {b:0>16}", .{ val_decoded, val_orig });
-        try Test.expect_equal(w, "bytes written", r, "bytes read", "varint round-trip bytes written/read mismatch", .{});
-    }
-    for (0..ITERS_PER_TYPE) |_| {
-        // i128
-        const val_orig: i128 = rand.int(i128);
-        const val_orig_bytes: [*]const u8 = @ptrCast(&val_orig);
-        var val_decoded: i128 = undefined;
-        const val_decoded_bytes: [*]u8 = @ptrCast(&val_decoded);
-        const w = try dst.write_varint(.SLICE, true, val_orig_bytes[0..16], 0, 16, 16, 0);
-        const r = try src.read_varint(.SLICE, true, val_decoded_bytes[0..16], 0, 16, 16, 0);
-        try Test.expect_equal(val_decoded, "val_decoded", val_orig, "val_orig", "varint round-trip value mismatch\n\tGOT {b:0>16}\n\tEXP {b:0>16}", .{ val_decoded, val_orig });
-        try Test.expect_equal(w, "bytes written", r, "bytes read", "varint round-trip bytes written/read mismatch", .{});
-    }
-}
-
-pub const OpKind = enum(u8) {
-    // Data Moves
-    MOVE_DATA_NO_SWAP,
-    MOVE_DATA_SWAP,
-    MOVE_DATA_NO_SWAP_SAVE_TAG,
-    MOVE_DATA_SWAP_SAVE_TAG,
-    MOVE_DATA_NO_SWAP_SAVE_LEN,
-    MOVE_DATA_SWAP_SAVE_LEN,
-    MOVE_DATA_VARINT_P,
-    MOVE_DATA_VARINT_P_SAVE_TAG,
-    MOVE_DATA_VARINT_P_SAVE_LEN,
-    MOVE_DATA_VARINT_PS,
-    MOVE_DATA_VARINT_PS_SAVE_TAG,
-    MOVE_DATA_VARINT_PS_SAVE_LEN,
-    // Data Moves for allocated data
-    MOVE_ALLOC_DATA_NO_SWAP,
-    MOVE_ALLOC_DATA_SWAP,
-    MOVE_ALLOC_DATA_NO_SWAP_SAVE_TAG,
-    MOVE_ALLOC_DATA_SWAP_SAVE_TAG,
-    MOVE_ALLOC_DATA_NO_SWAP_SAVE_LEN,
-    MOVE_ALLOC_DATA_SWAP_SAVE_LEN,
-    // Mode control
+pub const DataOpKind = enum(u8) {
+    // Native Address Control
+    MOVE_NATIVE_POINTER,
+    // Data Transfer
+    TRANSFER_SAME_ENDIAN,
+    TRANSFER_SAME_ENDIAN_SAVE_TAG,
+    TRANSFER_SAME_ENDIAN_SAVE_LEN,
+    TRANSFER_SAME_ENDIAN_SAVE_NULL,
+    TRANSFER_SWAP_ENDIAN,
+    TRANSFER_SWAP_ENDIAN_SAVE_TAG,
+    TRANSFER_SWAP_ENDIAN_SAVE_LEN,
+    TRANSFER_SWAP_ENDIAN_SAVE_NULL,
+    TRANSFER_VARINT,
+    TRANSFER_VARINT_SAVE_TAG,
+    TRANSFER_VARINT_SAVE_LEN,
+    TRANSFER_VARINT_SAVE_NULL,
+    TRANSFER_VARINT_ZIGZAG,
+    TRANSFER_VARINT_ZIGZAG_SAVE_TAG,
+    TRANSFER_VARINT_ZIGZAG_SAVE_LEN,
+    TRANSFER_VARINT_ZIGZAG_SAVE_NULL,
+    // Optional or Bool Transfer
+    NON_ZERO_READ_OR_WRITE_1_ELSE_0,
+    NON_ZERO_READ_OR_WRITE_1_ELSE_0_SAVE_TAG,
+    NON_ZERO_READ_OR_WRITE_1_ELSE_0_SAVE_LEN,
+    NON_ZERO_READ_OR_WRITE_1_ELSE_0_SAVE_NULL,
+    // Ref Unique Type Subroutine
+    REF_UNIQUE_TYPE_NO_REPEAT,
+    REF_UNIQUE_TYPE_STATIC_REPEAT,
+    REF_UNIQUE_TYPE_DYNAMIC_REPEAT,
+    // Subroutines
+    START_SUBROUTINE_NO_REPEAT,
+    START_SUBROUTINE_STATIC_REPEAT,
+    START_SUBROUTINE_DYNAMIC_REPEAT,
+    // Union Control
     UNION_HEADER,
     UNION_TAG_ID,
-    UNION_ROUTINE_START,
-    UNION_ROUTINE_END,
-    SINGLE_ITEM_POINTER_HEADER,
-    MANY_ITEM_POINTER_HEADER,
-    SLICE_POINTER_HEADER,
-    // NULLABLE_SINGLE_ITEM_POINTER_HEADER,
-    // NULLABLE_MANY_ITEM_POINTER_HEADER,
-    POINTER_ROUTINE_END,
-    READ_POINTER_LEN,
+    UNION_TAG_RANGE,
+    // Pointer Control
+    ALLOCATED_POINTER_TO_ONE_OBJECT,
+    ALLOCATED_POINTER_TO_MANY_ONJECTS,
+    ALLOCATED_POINTER_TO_ONE_OBJECT_OR_NULL,
+    ALLOCATED_POINTER_TO_MANY_OBJECTS_OR_NULL,
+    POINTER_SENTINEL,
+    // Custom
     FULL_CUSTOM_FUNCTION,
+    DATA_MANIPULATION_NATIVE_TO_SERIAL,
+    DATA_MANIPULATION_SERIAL_TO_NATIVE,
+
+    pub const NUM_OP_KINDS = @intFromEnum(DataOpKind.DATA_MANIPULATION_SERIAL_TO_NATIVE) + 1;
 };
 
-// pub const DataOpPacking = enum()
+pub const DataOp = extern union {
+    // Generic (get kind from ANY payload)
+    GENERIC: DataOpGeneric,
+    // Native Address Control
+    MOVE_NATIVE_POINTER: MoveNativePointer,
+    // Data Transfer
+    DATA_TRANSFER: DataTransfer,
+    // Ref Unique Type for Subroutine
+    REF_UNIQUE_TYPE_SUBRS: RefUniqueTypeSubroutine,
+    // Subroutines
+    SUBROUTINE: Subroutine,
+    // Unions
+    UNION_HEADER: UnionHeader,
+    UNION_TAG_ID: UnionTagId,
+    UNION_TAG_RANGE: UnionTagRange,
+    // Pointers
+    POINTER: Pointer,
+    SENTINEL: Sentinel,
+    // Custom
+    FULL_CUSTOM_FUNCTION: CustomFunctions,
+    DATA_MANIP_NATIVE_TO_SERIAL: DataManipNativeToSerial,
+    DATA_MANIP_SERIAL_TO_NATIVE: DataManipSerialToNative,
 
-// pub const OpKind2 = enum(u8){};
+    pub fn get_kind(self: DataOp) DataOpKind {
+        return self.GENERIC.kind;
+    }
 
-// pub const DataOp2 = struct {
-//     data: [2]u32,
-//     kind: OpKind2,
-//     in_alloc: bool,
-//     packing: IntegerPacking,
+    pub fn new_move_native_ptr_op(comptime offset: i32) DataOp {
+        const neg_off: u32, const pos_off: u32 = neg_pos_offset_from_delta(offset);
+        return DataOp{ .MOVE_NATIVE_POINTER = MoveNativePointer{ .forward_offset = pos_off, .backward_offset = neg_off } };
+    }
+
+    pub fn new_transfer_data_op(comptime native_size: u32, comptime offset_to_next_field: i32, comptime static_serial_size: u32, comptime kind: DataOpKind) DataOp {
+        switch (kind) {
+            .NON_ZERO_READ_OR_WRITE_1_ELSE_0,
+            .NON_ZERO_READ_OR_WRITE_1_ELSE_0_SAVE_LEN,
+            .NON_ZERO_READ_OR_WRITE_1_ELSE_0_SAVE_TAG,
+            .NON_ZERO_READ_OR_WRITE_1_ELSE_0_SAVE_NULL,
+            .TRANSFER_SAME_ENDIAN,
+            .TRANSFER_SAME_ENDIAN_SAVE_TAG,
+            .TRANSFER_SAME_ENDIAN_SAVE_LEN,
+            .TRANSFER_SAME_ENDIAN_SAVE_NULL,
+            .TRANSFER_SWAP_ENDIAN,
+            .TRANSFER_SWAP_ENDIAN_SAVE_TAG,
+            .TRANSFER_SWAP_ENDIAN_SAVE_LEN,
+            .TRANSFER_SWAP_ENDIAN_SAVE_NULL,
+            .TRANSFER_VARINT,
+            .TRANSFER_VARINT_SAVE_TAG,
+            .TRANSFER_VARINT_SAVE_LEN,
+            .TRANSFER_VARINT_SAVE_NULL,
+            .TRANSFER_VARINT_ZIGZAG,
+            .TRANSFER_VARINT_ZIGZAG_SAVE_TAG,
+            .TRANSFER_VARINT_ZIGZAG_SAVE_LEN,
+            .TRANSFER_VARINT_ZIGZAG_SAVE_NULL,
+            => {},
+            else => assert_unreachable(@src(), "cannot create a `DataTransfer` op with kind `{s}`", .{@tagName(kind)}),
+        }
+        const neg_off: u32, const pos_off: u32 = neg_pos_offset_from_delta(offset_to_next_field);
+        return DataOp{ .DATA_TRANSFER = DataTransfer{ .native_size = native_size, .forward_offset_to_next_field = pos_off, .backward_offset_to_next_field = neg_off, .static_serial_size = static_serial_size, .kind = kind } };
+    }
+
+    pub fn new_union_header_op(comptime num_fields: u32, comptime offset_to_next_field: i32) DataOp {
+        const neg_off: u32, const pos_off: u32 = neg_pos_offset_from_delta(offset_to_next_field);
+        return DataOp{ .UNION_HEADER = UnionHeader{ .num_fields = num_fields, .forward_offset_to_next_field = pos_off, .backward_offset_to_next_field = neg_off } };
+    }
+
+    pub fn new_union_tag_id_op(comptime tag_as_u64: u64, comptime num_following_commands: u32) DataOp {
+        return UnionTagId{
+            .tag_as_u64 = tag_as_u64,
+            .num_ops_in_tag = num_following_commands,
+        };
+    }
+
+    pub fn new_union_tag_range_op(comptime tag_min_as_u64: u64, comptime tag_max_as_u64: u64, comptime num_following_commands: u32) DataOp {
+        return UnionTagRange{
+            .min_as_u64 = tag_min_as_u64,
+            .max_as_u64 = tag_max_as_u64,
+            .num_ops_in_tag = num_following_commands,
+        };
+    }
+
+    pub fn new_subroutine_op(comptime subroutine_first_op: u32, comptime subroutine_num_ops: u32, comptime subroutine_static_repeat: u32, comptime offset_to_next_field: i32, comptime INLINE: InlineMode, comptime kind: DataOpKind) DataOp {
+        switch (kind) {
+            .START_SUBROUTINE_NO_REPEAT,
+            .START_SUBROUTINE_STATIC_REPEAT,
+            .START_SUBROUTINE_DYNAMIC_REPEAT,
+            => {},
+            else => assert_unreachable(@src(), "cannot create a `SubroutineStart` op with kind `{s}`", .{@tagName(kind)}),
+        }
+        const neg_off: u32, const pos_off: u32 = neg_pos_offset_from_delta(offset_to_next_field);
+        const IS_INLINE: Bool = if (INLINE == .INLINE) Bool.TRUE else Bool.FALSE;
+        return DataOp{ .SUBROUTINE = Subroutine{ .subroutine_first_op = subroutine_first_op, .subroutine_num_ops = subroutine_num_ops, .subroutine_static_repeat = subroutine_static_repeat, .forward_offset_to_next_field = pos_off, .backward_offset_to_next_field = neg_off, .ops_are_inline = IS_INLINE, .kind = kind } };
+    }
+
+    pub fn new_ref_unique_struct_and_settings_op(comptime unique_type_index: u32, comptime subroutine_static_repeat: u32, comptime offset_to_next_field: i32, comptime kind: DataOpKind) DataOp {
+        switch (kind) {
+            .REF_UNIQUE_TYPE_NO_REPEAT,
+            .REF_UNIQUE_TYPE_STATIC_REPEAT,
+            .REF_UNIQUE_TYPE_DYNAMIC_REPEAT,
+            => {},
+            else => assert_unreachable(@src(), "cannot create a `RefUniqueTypeSubroutine` op with kind `{s}`", .{@tagName(kind)}),
+        }
+        const neg_off: u32, const pos_off: u32 = neg_pos_offset_from_delta(offset_to_next_field);
+        return DataOp{ .REF_UNIQUE_TYPE_SUBRS = RefUniqueTypeSubroutine{ .unique_type_index = unique_type_index, .subroutine_static_repeat = subroutine_static_repeat, .forward_offset_to_next_field = pos_off, .backward_offset_to_next_field = neg_off, .kind = kind } };
+    }
+
+    pub fn new_allocated_pointer_op(comptime elem_size: u32, comptime elem_align: u32, comptime alloc_idx: u16, comptime num_subroutine_ops: u32, comptime offset_to_next_field: i32, comptime kind: DataOpKind) DataOp {
+        switch (kind) {
+            .ALLOCATED_POINTER_TO_ONE_OBJECT,
+            .ALLOCATED_POINTER_TO_ONE_OBJECT_OR_NULL,
+            .ALLOCATED_POINTER_TO_MANY_ONJECTS,
+            .ALLOCATED_POINTER_TO_MANY_OBJECTS_OR_NULL,
+            => {},
+            else => assert_unreachable(@src(), "cannot create a `AllocatedPointer` op with kind `{s}`", .{@tagName(kind)}),
+        }
+        const neg_off: u32, const pos_off: u32 = neg_pos_offset_from_delta(offset_to_next_field);
+        const ptr_align_power = PowerOf2.alignment_power(elem_align);
+        return DataOp{ .POINTER = Pointer{ .elem_size = elem_size, .ptr_align_power = ptr_align_power, .alloc_idx = alloc_idx, .num_inline_subroutine_ops = num_subroutine_ops, .forward_offset_to_next_field = pos_off, .backward_offset_to_next_field = neg_off, .kind = kind } };
+    }
+
+    pub fn new_pointer_sentinel_op(comptime elem_size: u32, comptime sentinel_data: *const anyopaque) DataOp {
+        return DataOp{ .SENTINEL = Sentinel{ .elem_size = elem_size, .sentinel_data = sentinel_data } };
+    }
+
+    pub fn new_custom_functions_op(comptime funcs: *const CustomRuntimeSerializeFuncs, comptime offset_to_next_field: i32, comptime neg_offset_to_object_addr: u32) DataOp {
+        const neg_off: u32, const pos_off: u32 = neg_pos_offset_from_delta(offset_to_next_field);
+        return DataOp{ .FULL_CUSTOM_FUNCTION = CustomFunctions{ .funcs = funcs, .forward_offset_to_next_field = pos_off, .backward_offset_to_next_field = neg_off, .neg_offset_to_object_addr = neg_offset_to_object_addr } };
+    }
+
+    pub fn new_data_manip_native_to_serial_op(comptime func: *const DataManipulationNativeToSerial, comptime neg_offset_to_object_addr: u32) DataOp {
+        return DataOp{ .DATA_MANIP_NATIVE_TO_SERIAL = DataManipNativeToSerial{ .func = func, .neg_offset_to_object_addr = neg_offset_to_object_addr } };
+    }
+
+    pub fn new_data_manip_serial_to_native_op(comptime func: *const DataManipulationSerialToNative, comptime neg_offset_to_object_addr: u32) DataOp {
+        return DataOp{ .DATA_MANIP_SERIAL_TO_NATIVE = DataManipSerialToNative{ .func = func, .neg_offset_to_object_addr = neg_offset_to_object_addr } };
+    }
+};
+
+const InlineMode = enum {
+    INLINE,
+    EXTERNAL,
+};
+
+inline fn neg_pos_offset_from_delta(delta: i32) struct { u32, u32 } {
+    return .{
+        num_cast(@abs(@min(delta, 0)), u32),
+        num_cast(@max(delta, 0), u32),
+    };
+}
+
+const DATA_OP_SIZE = 24;
+const DATA_OP_ALIGN = 8;
+const DATA_OP_KIND_OFFSET = DATA_OP_SIZE - 1;
+
+fn assert_data_op_layout(comptime T: type) void {
+    assert_with_reason(@sizeOf(T) == DATA_OP_SIZE, @src(), "DataOp union member type `{s}` does not have required size {d}", .{ @typeName(T), DATA_OP_SIZE });
+    assert_with_reason(@alignOf(T) == DATA_OP_ALIGN, @src(), "DataOp union member type `{s}` does not have required align {d}", .{ @typeName(T), DATA_OP_ALIGN });
+    assert_with_reason(@hasField(T, "kind") and @FieldType(T, "kind") == DataOpKind, @src(), "DataOp union member type `{s}` does not have field `kind : DataOpKind`", .{ @typeName(T), DATA_OP_ALIGN });
+    assert_with_reason(@offsetOf(T, "kind") == DATA_OP_KIND_OFFSET, @src(), "DataOp union member type `{s}` field `kind` is not at required offset `{d}", .{ @typeName(T), DATA_OP_KIND_OFFSET });
+}
+
+const DataOpGeneric = extern struct {
+    __padding: [DATA_OP_KIND_OFFSET]u8 = @splat(0),
+    kind: DataOpKind,
+
+    const _ = {
+        assert_data_op_layout(DataOpGeneric);
+    };
+};
+
+const MoveNativePointer = extern struct {
+    forward_offset: u32 = 0,
+    backward_offset: u32 = 0,
+    __padding: [DATA_OP_KIND_OFFSET - 8]u8 = @splat(0),
+    kind: DataOpKind = .MOVE_NATIVE_POINTER,
+
+    const _ = {
+        assert_data_op_layout(MoveNativePointer);
+    };
+};
+
+const DataTransfer = extern struct {
+    native_size: u32 = 0,
+    forward_offset_to_next_field: u32 = 0,
+    backward_offset_to_next_field: u32 = 0,
+    static_serial_size: u32 = 0,
+    __padding: [DATA_OP_KIND_OFFSET - 16]u8 = @splat(0),
+    kind: DataOpKind = .TRANSFER_SAME_ENDIAN,
+
+    const _ = {
+        assert_data_op_layout(DataTransfer);
+    };
+};
+
+const UnionHeader = extern struct {
+    num_fields: u32 = 0,
+    total_num_ops_in_union_after_header: u32 = 0,
+    forward_offset_to_next_field: u32 = 0,
+    backward_offset_to_next_field: u32 = 0,
+    __padding: [DATA_OP_KIND_OFFSET - 16]u8 = @splat(0),
+    kind: DataOpKind = .UNION_HEADER,
+
+    const _ = {
+        assert_data_op_layout(UnionHeader);
+    };
+};
+
+const UnionTagId = extern struct {
+    tag_as_u64: u64 = 0,
+    num_ops_in_tag: u32 = 0,
+    __padding: [DATA_OP_KIND_OFFSET - 12]u8 = @splat(0),
+    kind: DataOpKind = .UNION_TAG_ID,
+
+    const _ = {
+        assert_data_op_layout(UnionTagId);
+    };
+};
+
+const UnionTagRange = extern struct {
+    min_as_u64: u64 = 0,
+    max_as_u64: u64 = 0,
+    num_ops_in_tag: u32 = 0,
+    __padding: [DATA_OP_KIND_OFFSET - 20]u8 = @splat(0),
+    kind: DataOpKind = .UNION_TAG_RANGE,
+
+    const _ = {
+        assert_data_op_layout(UnionTagRange);
+    };
+};
+
+const RefUniqueTypeSubroutine = extern struct {
+    unique_type_index: u32 = 0,
+    subroutine_static_repeat: u32 = 1,
+    forward_offset_to_next_field: u32 = 0,
+    backward_offset_to_next_field: u32 = 0,
+    __padding: [DATA_OP_KIND_OFFSET - 16]u8 = @splat(0),
+    kind: DataOpKind = .REF_UNIQUE_TYPE_NO_REPEAT,
+
+    fn to_subroutine_start(comptime self: RefUniqueTypeSubroutine, comptime fully_complete_uniques_list: []const UniqueSerialStructAndSettingsFinal) DataOp {
+        const unique = fully_complete_uniques_list[self.unique_type_index];
+        const kind: DataOpKind = switch (self.kind) {
+            .REF_UNIQUE_TYPE_NO_REPEAT => .START_SUBROUTINE_NO_REPEAT,
+            .REF_UNIQUE_TYPE_STATIC_REPEAT => .START_SUBROUTINE_STATIC_REPEAT,
+            .REF_UNIQUE_TYPE_DYNAMIC_REPEAT => .START_SUBROUTINE_DYNAMIC_REPEAT,
+            else => unreachable,
+        };
+        return DataOp.new_subroutine_op(unique.routine_start, num_cast(unique.routine_end - unique.routine_start, u16), self.subroutine_static_repeat, self.offset_to_next_field, kind);
+    }
+
+    const _ = {
+        assert_data_op_layout(RefUniqueTypeSubroutine);
+    };
+};
+
+const Subroutine = extern struct {
+    subroutine_first_op: u32 = 0,
+    subroutine_static_repeat: u32 = 1,
+    forward_offset_to_next_field: u32 = 0,
+    backward_offset_to_next_field: u32 = 0,
+    subroutine_num_ops: u32 = 0,
+    ops_are_inline: bool = false,
+    __padding: [DATA_OP_KIND_OFFSET - 21]u8 = @splat(0),
+    kind: DataOpKind = .START_SUBROUTINE_NO_REPEAT,
+
+    const _ = {
+        assert_data_op_layout(Subroutine);
+    };
+};
+
+const Pointer = extern struct {
+    elem_size: u32 = 1,
+    num_inline_subroutine_ops: u32 = 0,
+    forward_offset_to_next_field: u32 = 0,
+    backward_offset_to_next_field: u32 = 0,
+    alloc_idx: u16 = 0,
+    ptr_align_power: PowerOf2 = ._1,
+    __padding: [DATA_OP_KIND_OFFSET - 19]u8 = @splat(0),
+    kind: DataOpKind = .ALLOCATED_POINTER_TO_ONE_OBJECT,
+
+    const _ = {
+        assert_data_op_layout(Pointer);
+    };
+};
+
+const Sentinel = extern struct {
+    sentinel_data: *const anyopaque,
+    elem_size: u32 = 1,
+    __padding: [DATA_OP_KIND_OFFSET - (4 + @sizeOf(usize))]u8 = @splat(0),
+    kind: DataOpKind = .POINTER_SENTINEL,
+
+    const _ = {
+        assert_data_op_layout(Sentinel);
+    };
+};
+
+const CustomFunctions = extern struct {
+    funcs: *const CustomRuntimeSerializeFuncs = undefined,
+    forward_offset_to_next_field: u32 = 0,
+    backward_offset_to_next_field: u32 = 0,
+    neg_offset_to_object_addr: u32 = 0,
+    __padding: [DATA_OP_KIND_OFFSET - (12 + @sizeOf(usize))]u8 = @splat(0),
+    kind: DataOpKind = .FULL_CUSTOM_FUNCTION,
+
+    const _ = {
+        assert_data_op_layout(CustomFunctions);
+    };
+};
+
+const DataManipNativeToSerial = extern struct {
+    func: *const anyopaque = undefined,
+    neg_offset_to_object_addr: u32 = 0,
+    __padding: [DATA_OP_KIND_OFFSET - (4 + @sizeOf(usize))]u8 = @splat(0),
+    kind: DataOpKind = .DATA_MANIPULATION_NATIVE_TO_SERIAL,
+
+    const _ = {
+        assert_data_op_layout(DataManipNativeToSerial);
+    };
+};
+
+const DataManipSerialToNative = extern struct {
+    func: *const anyopaque = undefined,
+    neg_offset_to_object_addr: u32 = 0,
+    __padding: [DATA_OP_KIND_OFFSET - (4 + @sizeOf(usize))]u8 = @splat(0),
+    kind: DataOpKind = .DATA_MANIPULATION_SERIAL_TO_NATIVE,
+
+    const _ = {
+        assert_data_op_layout(DataManipSerialToNative);
+    };
+};
+
+const UniqueSerialStructAndSettingsBuild = struct {
+    object_type: type,
+    object_settings: ObjectSerialSettings,
+    routine_start: u32 = 0,
+    routine_end: u32 = 0,
+    routine_made: bool = false,
+
+    pub fn equals(comptime a: UniqueSerialStructAndSettingsBuild, b: UniqueSerialStructAndSettingsBuild) bool {
+        return a.object_type == b.object_type and a.object_settings.equals(b.object_settings);
+    }
+
+    pub fn to_final(comptime self: UniqueSerialStructAndSettingsBuild) UniqueSerialStructAndSettingsFinal {
+        assert_with_reason(self.routine_made, @src(), "routine for type `{s}`, settings `{any}` was never made (or never recorded as being made), cannot finalize", .{ @typeName(self.object_type), self.object_settings });
+        return UniqueSerialStructAndSettingsFinal{
+            .object_type = self.object_type,
+            .routine_start = self.routine_start,
+            .routine_end = self.routine_end,
+        };
+    }
+};
+
+const UniqueSerialStructAndSettingsFinal = struct {
+    object_type: type,
+    routine_start: u32 = 0,
+    routine_end: u32 = 0,
+};
+
+pub const DataTransferTech = enum(u8) {
+    NON_ZERO_READ_OR_WRITE_1_ELSE_0,
+    TARGET_ENDIAN_SAME_SIZE,
+    // ENDIAN_TRUNCATE_LARGER,
+    VARINT_ZIGZAG,
+    VARINT,
+};
+
+pub const DataCacheMode = enum(u8) {
+    DONT_CACHE_DATA,
+    CACHE_TAG,
+    CACHE_LEN,
+    CACHE_NULL,
+};
+
+pub const SubroutineRepeatMode = enum(u8) {
+    STATIC_REPEAT_OR_NO_REPEAT,
+    DYNAMIC_REPEAT,
+};
+
+pub const SubroutineAllocRegionMode = enum(u8) {
+    SAME_MEMORY_REGION,
+    SUB_ALLOCATED_REGION,
+};
+
+pub const PointerLenMode = enum(u8) {
+    POINTER_TO_ONE_OBJECT,
+    POINTER_TO_MANY_ONJECTS,
+    POINTER_TO_ONE_OBJECT_OR_NULL,
+    POINTER_TO_MANY_OBJECTS_OR_NULL,
+    // STATIC_LEN_POINTER_WITH_SENTINEL,
+    // DYNAMIC_LEN_POINTER_WITH_SENTINEL,
+    // STATIC_LEN_POINTER_WITH_SENTINEL_OR_NULL,
+    // DYNAMIC_LEN_POINTER_WITH_SENTINEL_OR_NULL,
+};
+
+// pub const InterpretAnyPointerAsSingle = enum(u8) {
+//     ALLOW_ANY_NON_SLICE_TO_BE
 // };
 
+pub const TypeOpPatternKind = enum(u8) {
+    MOVE_TO_NEXT,
+    OPTIONAL,
+    POINTER,
+    ARRAY,
+    FLAT_ARRAY,
+    NUMERIC,
+    ADD_SENTINEL,
+    STRUCT,
+};
 
-pub const DataOp = union(OpKind) {
-    MOVE_DATA_NO_SWAP: MemCopyMove,
-    MOVE_DATA_SWAP: MemCopyMove,
-    MOVE_DATA_NO_SWAP_SAVE_TAG: MemCopyMove,
-    MOVE_DATA_SWAP_SAVE_TAG: MemCopyMove,
-    MOVE_DATA_NO_SWAP_SAVE_LEN: MemCopyMove,
-    MOVE_DATA_SWAP_SAVE_LEN: MemCopyMove,
-    MOVE_DATA_VARINT_P: MemCopyMove,
-    MOVE_DATA_VARINT_P_SAVE_TAG: MemCopyMove,
-    MOVE_DATA_VARINT_P_SAVE_LEN: MemCopyMove,
-    MOVE_DATA_VARINT_PS: MemCopyMove,
-    MOVE_DATA_VARINT_PS_SAVE_TAG: MemCopyMove,
-    MOVE_DATA_VARINT_PS_SAVE_LEN: MemCopyMove,
-    MOVE_ALLOC_DATA_NO_SWAP: MemCopyMove,
-    MOVE_ALLOC_DATA_SWAP: MemCopyMove,
-    MOVE_ALLOC_DATA_NO_SWAP_SAVE_TAG: MemCopyMove,
-    MOVE_ALLOC_DATA_SWAP_SAVE_TAG: MemCopyMove,
-    MOVE_ALLOC_DATA_NO_SWAP_SAVE_LEN: MemCopyMove,
-    MOVE_ALLOC_DATA_SWAP_SAVE_LEN: MemCopyMove,
-    UNION_HEADER: UnionHeader,
-    UNION_TAG_ID: u64,
-    UNION_ROUTINE_START: UnionRoutineStart,
-    UNION_ROUTINE_END: UnionRoutineEnd,
-    SINGLE_ITEM_POINTER_HEADER: PointerHeader,
-    MANY_ITEM_POINTER_HEADER: PointerHeader,
-    SLICE_POINTER_HEADER: PointerHeader,
-    // NULLABLE_SINGLE_ITEM_POINTER_HEADER: PointerHeader,
-    // NULLABLE_MANY_ITEM_POINTER_HEADER: PointerHeader,
-    NULL_SKIP_AHEAD: NullSkipAhead,
-    POINTER_ROUTINE_END,
-    READ_POINTER_LEN: PointerLen,
-    FULL_CUSTOM_FUNCTION: *const CustomRuntimeSerializeFuncs,
+pub const CompleteTypeSerialInfo = struct {
+    TYPE: type = void,
+    PTR_CHILD_TYPE: type = void,
+    ARR_ELEM_TYPE: type = void,
+    RAW_FINAL_TYPE: type = void,
+    STRUCT_UNIQUE_IDX: u32 = 0,
+    RAW_FINAL_TYPE_SER_SIZE: u32 = 0,
+    REAL_DATA_SIZE: u32 = 0,
+    REAL_DATA_SER_SIZE: u32 = 0,
+    REAL_DATA_SIZE_WITH_SENTINEL: u32 = 0,
+    OFFSET_TO_NEXT_FIELD: i32 = 0,
+    SETTINGS_BEFORE_OVERRIDE: ObjectSerialSettings = .{},
+    SETTINGS_AFTER_OVERRIDE: ObjectSerialSettings = .{},
+    NUM_OPS_REQUIRED_TO_SERIALIZE: u32 = 0,
+    PTR_SUBROUTINE_LEN: u32 = 0,
+    OP_PATTERN: [5]TypeOpPatternKind = @splat(TypeOpPatternKind.MOVE_TO_NEXT),
+    OP_PATTERN_OFFSETS_TO_NEXT: [5]i32 = @splat(0),
+    TARGET_ENDIAN: Endian = .LITTLE_ENDIAN,
+    USIZE_COMPAT: UsizeCompatMode = .USIZE_ALWAYS_VARINT,
+    USIZE_SER_SIZE: u32 = 0,
+    CACHE_MODE: DataCacheMode = .DONT_CACHE_DATA,
+    TECH: DataTransferTech = .TARGET_ENDIAN_SAME_SIZE,
+    USIZE_TECH: DataTransferTech = .VARINT,
+    TOTAL_ARR_LEN: u32 = 1,
+    PTR_ALIGN: comptime_int = 1,
+    ALLOC_IDX: u16 = 0xFFFF,
+    PTR_IS_NULLABLE: bool = false,
+    PTR_LEN_MODE: PointerLenMode = .POINTER_TO_ONE_OBJECT,
+    IS_POINTER: bool = false,
+    DATA_IS_ARRAY: bool = false,
+    PTR_SENTINEL: ?*const anyopaque = null,
+    HAS_SENTINEL: bool = false,
+    ARRAY_CAN_BE_BULK_COPIED: bool = false,
+    POINTER_KIND: std.builtin.Type.Pointer.Size = .slice,
+    IS_NUMERIC_PATTERN: bool = false,
+    IS_STRUCT_PATTERN: bool = false,
+    IS_VALID: bool = false,
+    NEEDS_CACHED_LEN: bool = false,
+};
 
-    pub fn mem_move_no_swap(comptime native_to_serial_delta: i32, comptime copy_len: u32) DataOp {
-        return DataOp{ .MOVE_DATA_NO_SWAP = .mem_copy_move(native_to_serial_delta, copy_len) };
-    }
-    pub fn mem_move_swap(comptime native_to_serial_delta: i32, comptime copy_len: u32) DataOp {
-        assert_with_reason(copy_len > 1, @src(), "mem swap data ops cannot be 1 byte in size, because 1 byte cant be endian swapped", .{});
-        return DataOp{ .MOVE_DATA_SWAP = .mem_copy_move(native_to_serial_delta, copy_len) };
-    }
-    pub fn mem_move_no_swap_save_tag(comptime native_to_serial_delta: i32, comptime copy_len: u32) DataOp {
-        assert_with_reason(copy_len == 1 or copy_len == 2 or copy_len == 4 or copy_len == 8, @src(), "'_save_tag()' data ops can only be 1, 2, 4, or 8 bytes in size, got {d}", .{copy_len});
-        return DataOp{ .MOVE_DATA_NO_SWAP_SAVE_TAG = .mem_copy_move(native_to_serial_delta, copy_len) };
-    }
-    pub fn mem_move_swap_save_tag(comptime native_to_serial_delta: i32, comptime copy_len: u32) DataOp {
-        assert_with_reason(copy_len > 1, @src(), "mem swap data ops cannot be 1 byte in size, because 1 byte cant be endian swapped", .{});
-        assert_with_reason(copy_len == 2 or copy_len == 4 or copy_len == 8, @src(), "'_save_tag()' data ops can only be 1, 2, 4, or 8 bytes in size, got {d}", .{copy_len});
-        return DataOp{ .MOVE_DATA_SWAP_SAVE_TAG = .mem_copy_move(native_to_serial_delta, copy_len) };
-    }
-    pub fn mem_move_no_swap_save_len(comptime native_to_serial_delta: i32, comptime copy_len: u32) DataOp {
-        assert_with_reason(copy_len == 1 or copy_len == 2 or copy_len == 4 or copy_len == 8, @src(), "'_save_len()' data ops can only be 1, 2, 4, or 8 bytes in size, got {d}", .{copy_len});
-        return DataOp{ .MOVE_DATA_NO_SWAP_SAVE_LEN = .mem_copy_move(native_to_serial_delta, copy_len) };
-    }
-    pub fn mem_move_swap_save_len(comptime native_to_serial_delta: i32, comptime copy_len: u32) DataOp {
-        assert_with_reason(copy_len > 1, @src(), "mem swap data ops cannot be 1 byte in size, because 1 byte cant be endian swapped", .{});
-        assert_with_reason(copy_len == 2 or copy_len == 4 or copy_len == 8, @src(), "'_save_len()' data ops can only be 1, 2, 4, or 8 bytes in size, got {d}", .{copy_len});
-        return DataOp{ .MOVE_DATA_SWAP_SAVE_LEN = .mem_copy_move(native_to_serial_delta, copy_len) };
-    }
-    pub fn mem_move_varint_p(comptime native_to_serial_delta: i32, comptime copy_len: u32) DataOp {
-        return DataOp{ .MOVE_DATA_VARINT_P = .mem_copy_move(native_to_serial_delta, copy_len) };
-    }
-    pub fn mem_move_varint_p_save_tag(comptime native_to_serial_delta: i32, comptime copy_len: u32) DataOp {
-        assert_with_reason(copy_len == 1 or copy_len == 2 or copy_len == 4 or copy_len == 8, @src(), "'_save_tag()' data ops can only be 1, 2, 4, or 8 bytes in size, got {d}", .{copy_len});
-        return DataOp{ .MOVE_DATA_VARINT_P_SAVE_TAG = .mem_copy_move(native_to_serial_delta, copy_len) };
-    }
-    pub fn mem_move_varint_p_save_len(comptime native_to_serial_delta: i32, comptime copy_len: u32) DataOp {
-        assert_with_reason(copy_len == 1 or copy_len == 2 or copy_len == 4 or copy_len == 8, @src(), "'_save_len()' data ops can only be 1, 2, 4, or 8 bytes in size, got {d}", .{copy_len});
-        return DataOp{ .MOVE_DATA_VARINT_P_SAVE_LEN = .mem_copy_move(native_to_serial_delta, copy_len) };
-    }
-    pub fn mem_move_varint_ps(comptime native_to_serial_delta: i32, comptime copy_len: u32) DataOp {
-        return DataOp{ .MOVE_DATA_VARINT_PS = .mem_copy_move(native_to_serial_delta, copy_len) };
-    }
-    pub fn mem_move_varint_ps_save_tag(comptime native_to_serial_delta: i32, comptime copy_len: u32) DataOp {
-        assert_with_reason(copy_len == 1 or copy_len == 2 or copy_len == 4 or copy_len == 8, @src(), "'_save_tag()' data ops can only be 1, 2, 4, or 8 bytes in size, got {d}", .{copy_len});
-        return DataOp{ .MOVE_DATA_VARINT_PS_SAVE_TAG = .mem_copy_move(native_to_serial_delta, copy_len) };
-    }
-    pub fn mem_move_varint_ps_save_len(comptime native_to_serial_delta: i32, comptime copy_len: u32) DataOp {
-        assert_with_reason(copy_len == 1 or copy_len == 2 or copy_len == 4 or copy_len == 8, @src(), "'_save_len()' data ops can only be 1, 2, 4, or 8 bytes in size, got {d}", .{copy_len});
-        return DataOp{ .MOVE_DATA_VARINT_PS_SAVE_LEN = .mem_copy_move(native_to_serial_delta, copy_len) };
-    }
+pub const PointerLen = enum(u8) {
+    SINGLE_ITEM,
+    MANY_ITEM,
+};
 
-    pub fn alloc_mem_move_no_swap(comptime native_to_serial_delta: i32, comptime copy_len: u32) DataOp {
-        return DataOp{ .MOVE_ALLOC_DATA_NO_SWAP = .mem_copy_move(native_to_serial_delta, copy_len) };
-    }
-    pub fn alloc_mem_move_swap(comptime native_to_serial_delta: i32, comptime copy_len: u32) DataOp {
-        assert_with_reason(copy_len > 1, @src(), "mem swap data ops cannot be 1 byte in size, because 1 byte cant be endian swapped", .{});
-        return DataOp{ .MOVE_ALLOC_DATA_SWAP = .mem_copy_move(native_to_serial_delta, copy_len) };
-    }
-    pub fn alloc_mem_move_no_swap_save_tag(comptime native_to_serial_delta: i32, comptime copy_len: u32) DataOp {
-        assert_with_reason(copy_len == 1 or copy_len == 2 or copy_len == 4 or copy_len == 8, @src(), "'_save_tag()' data ops can only be 1, 2, 4, or 8 bytes in size, got {d}", .{copy_len});
-        return DataOp{ .MOVE_ALLOC_DATA_NO_SWAP_SAVE_TAG = .mem_copy_move(native_to_serial_delta, copy_len) };
-    }
-    pub fn alloc_mem_move_swap_save_tag(comptime native_to_serial_delta: i32, comptime copy_len: u32) DataOp {
-        assert_with_reason(copy_len > 1, @src(), "mem swap data ops cannot be 1 byte in size, because 1 byte cant be endian swapped", .{});
-        assert_with_reason(copy_len == 2 or copy_len == 4 or copy_len == 8, @src(), "'_save_tag()' data ops can only be 1, 2, 4, or 8 bytes in size, got {d}", .{copy_len});
-        return DataOp{ .MOVE_ALLOC_DATA_SWAP_SAVE_TAG = .mem_copy_move(native_to_serial_delta, copy_len) };
-    }
-    pub fn alloc_mem_move_no_swap_save_len(comptime native_to_serial_delta: i32, comptime copy_len: u32) DataOp {
-        assert_with_reason(copy_len == 1 or copy_len == 2 or copy_len == 4 or copy_len == 8, @src(), "'_save_len()' data ops can only be 1, 2, 4, or 8 bytes in size, got {d}", .{copy_len});
-        return DataOp{ .MOVE_ALLOC_DATA_NO_SWAP_SAVE_LEN = .mem_copy_move(native_to_serial_delta, copy_len) };
-    }
-    pub fn alloc_mem_move_swap_save_len(comptime native_to_serial_delta: i32, comptime copy_len: u32) DataOp {
-        assert_with_reason(copy_len > 1, @src(), "mem swap data ops cannot be 1 byte in size, because 1 byte cant be endian swapped", .{});
-        assert_with_reason(copy_len == 2 or copy_len == 4 or copy_len == 8, @src(), "'_save_len()' data ops can only be 1, 2, 4, or 8 bytes in size, got {d}", .{copy_len});
-        return DataOp{ .MOVE_ALLOC_DATA_SWAP_SAVE_LEN = .mem_copy_move(native_to_serial_delta, copy_len) };
+pub const SerialSettingsOverride = struct {
+    TARGET_ENDIAN: ?Endian = null,
+    INTEGER_PACKING: ?IntegerPacking = null,
+    USIZE_COMPATABILITY: ?UsizeCompatMode = null,
+    POINTER_MODE: ?PointerMode = null,
+    POINTER_LEN_MODE: ?PointerLen = null,
+    CACHE: ?DataCacheMode = null,
+};
+
+/// The 'lowest' level of DataOpBuilder. This holds all the core
+/// data fields of a DataOpBuilder, and all the methods not intended to be used
+/// by a library consumer.
+pub const DataOpBuilderInternal = extern struct {
+    cached_len_field: ?[]const u8 = null,
+    cached_null_field: ?[]const u8 = null,
+    prev_field: ?[]const u8 = null,
+    next_field: ?[]const u8 = null,
+    cached_tag_field: ?[]const u8 = null,
+    ops_used_tracker: *[DataOpKind.NUM_OP_KINDS]bool = undefined,
+    unique: []UniqueSerialStructAndSettingsBuild = &.{},
+    ops: []DataOp = &.{},
+    alloc_names: []SliceRange = &.{},
+    alloc_buf: []u8 = &.{},
+    object_type: type = void,
+    object_settings: ObjectSerialSettings = .{},
+    unique_len: u32 = 0,
+    ops_len: u32 = 0,
+    alloc_buf_len: u32 = 0,
+    alloc_names_len: u32 = 0,
+    cached_tag_type: type = void,
+
+    pub fn build_all_type_routines_starting_from_these_root_types(comptime self: *DataOpBuilderInternal, comptime TYPES_FOR_SERIALIZATION: []const type, comptime DEFAULT_SETTINGS: ObjectSerialSettings) void {
+        for (TYPES_FOR_SERIALIZATION) |TYPE_TO_SERIALIZE| {
+            const OBJECT_SETTINGS = get_object_settings(TYPE_TO_SERIALIZE);
+            const SETTINGS = DEFAULT_SETTINGS.with_custom_routine_removed().combined_with_optional(OBJECT_SETTINGS);
+            _ = self.locate_or_create_unique_type_idx(TYPE_TO_SERIALIZE, SETTINGS);
+        }
+        comptime var u: u32 = 0;
+        while (u < self.unique_len) : (u += 1) {
+            const UNIQUE: *UniqueSerialStructAndSettingsBuild = &self.unique[u];
+            self.build_routine_for_unique_type(UNIQUE);
+        }
     }
 
-    pub fn union_header(comptime num_fields: usize, comptime tag_type: type) DataOp {
-        return DataOp{ .UNION_HEADER = UnionHeader{ .num_fields = @intCast(num_fields), .tag_type = OpaqueUnionTag.from_tag_type(tag_type) } };
-    }
-    pub fn union_routine_start(comptime offset_to_first_routine_op: u32, comptime total_num_ops: u32) DataOp {
-        return DataOp{ .UNION_ROUTINE_START = UnionRoutineStart{
-            .offset_to_first_routine_op = offset_to_first_routine_op,
-            .total_num_ops = total_num_ops,
-        } };
-    }
-    pub fn union_tag_id(comptime endian_tag_as_u64: u64) DataOp {
-        return DataOp{ .UNION_TAG_ID = endian_tag_as_u64 };
-    }
-    pub fn union_routine_end(comptime current_builder_op_len: usize, comptime this_routine_bytes: u32) DataOp {
-        return DataOp{ .UNION_ROUTINE_END_TEMP = UnionRoutineEnd{
-            .ops_to_advance_to_exit_union = @intCast(current_builder_op_len),
-            .routine_serial_delta_adjustment = this_routine_bytes,
-        } };
-    }
-
-    pub fn single_item_pointer_header(comptime allocator_name: []const u8, comptime elem_size: u32, comptime builder: *SerialRoutineBuilder) DataOp {
-        const alloc_idx = builder.find_alloc_name_idx(allocator_name);
-        return DataOp{ .SINGLE_ITEM_POINTER_HEADER = PointerHeader{
-            .elem_size = elem_size,
-            .allocator_id = alloc_idx,
-        } };
-    }
-
-    pub fn many_item_pointer_header(comptime allocator_name: []const u8, comptime elem_size: u32, comptime builder: *SerialRoutineBuilder) DataOp {
-        const alloc_idx = builder.find_alloc_name_idx(allocator_name);
-        return DataOp{ .MANY_ITEM_POINTER_HEADER = PointerHeader{
-            .elem_size = elem_size,
-            .allocator_id = alloc_idx,
-        } };
-    }
-
-    pub fn slice_pointer_header(comptime allocator_name: []const u8, comptime elem_size: u32, comptime builder: *SerialRoutineBuilder) DataOp {
-        const alloc_idx = builder.find_alloc_name_idx(allocator_name);
-        return DataOp{ .SLICE_POINTER_HEADER = PointerHeader{
-            .elem_size = elem_size,
-            .allocator_id = alloc_idx,
-        } };
-    }
-
-    pub fn pointer_routine_end() DataOp {
-        return DataOp{.POINTER_ROUTINE_END};
+    pub fn build_routine_for_unique_type(comptime self: *DataOpBuilderInternal, comptime UNIQUE: *UniqueSerialStructAndSettingsBuild) void {
+        if (!UNIQUE.routine_made) {
+            const builder: *DataOpBuilderHighLevel = @ptrCast(self);
+            self.object_type = UNIQUE.object_type;
+            self.object_settings = UNIQUE.object_settings;
+            // self.object_name_hash = Utils.type_hash32_as_hex_string(self.object_type);
+            self.prev_field = null;
+            self.next_field = null;
+            self.cached_len_field = null;
+            self.cached_null_field = null;
+            self.cached_tag_field = null;
+            self.cached_tag_type = void;
+            const KIND_INFO = KindInfo.get_kind_info(self.object_type);
+            const _STRUCT: ?std.builtin.Type.Struct = if (KIND_INFO == .STRUCT) KIND_INFO.STRUCT else null;
+            const routine_start = self.ops_len;
+            switch (self.object_settings.CUSTOM_ROUTINE) {
+                .CUSTOM_COMPTIME_MANAGER_OPS_ROUTINE => |routine| {
+                    self.object_settings = self.object_settings.with_custom_routine_removed();
+                    routine(self.object_settings.with_custom_routine_removed(), @ptrCast(self));
+                },
+                .CUSTOM_RUNTIME_SERIALIZE => |funcs| {
+                    self.object_settings = self.object_settings.with_custom_routine_removed();
+                    builder.low_level.add_custom_functions_op(funcs, 0);
+                },
+                .NO_CUSTOM_ROUTINE => {
+                    if (_STRUCT) |STRUCT| {
+                        inline for (STRUCT.fields, 0..) |field, f| {
+                            const next_field: WithNextField = if (f + 1 == STRUCT.fields.len) WithNextField.this_is_last_field() else WithNextField.next_field_is(STRUCT.fields[f + 1].name);
+                            builder.add_field(field.name, next_field, .no_len_needed(), .{});
+                        }
+                    } else {
+                        assert_unreachable(@src(), "only Struct types are allowed to have a routine built unconditionaly.\nEnums, Unions, Opaques, and ErrorSets are allowed *ONLY IF A CUSTOM ROUTINE BUILDER OR PAIR OF RUNTIME SERIALIZATION FUNCTIONS ARE PROVIDED BY THEM* (by using a pub const declaration on the type with the name `{s}`)\nGot kind `{s}` without custom serialization procedure, real type `{s}`", .{ @tagName(Kind.get_kind(self.object_type)), @typeName(self.object_type) });
+                    }
+                },
+            }
+            const routine_end = self.ops_len;
+            UNIQUE.routine_made = true;
+            UNIQUE.routine_start = routine_start;
+            UNIQUE.routine_end = routine_end;
+        }
     }
 
-    pub fn null_skip_ahead_uninit() DataOp {
-        return DataOp{ .NULL_SKIP_AHEAD = NullSkipAhead{ .ops_to_advance_to_exit_routine = 0 } };
+    pub fn push_op(comptime self: *DataOpBuilderInternal, comptime op: DataOp) void {
+        assert_with_reason(self.ops_len < self.ops.len, @src(), "ran out of space in ops buffer, need at least len {d}, have len {d}, provide a larger `OP_BUFFER_MAX_LEN` during SerialManager initialization", .{ self.ops_len + 1, self.ops.len });
+        const KIND = op.GENERIC.kind;
+        self.ops_used_tracker[@intFromEnum(KIND)] = true;
+        self.ops[self.ops_len] = op;
+        self.ops_len += 1;
     }
 
-    pub fn pointer_len(len_elem_size: u32) DataOp {
-        return DataOp{ .READ_POINTER_LEN = PointerLen{ .len_size = len_elem_size } };
+    pub fn locate_or_create_unique_type_idx(comptime self: *DataOpBuilderInternal, comptime TYPE: type, comptime SETTINGS: ObjectSerialSettings) u32 {
+        const potential_new_unique = UniqueSerialStructAndSettingsBuild{
+            .object_type = TYPE,
+            .object_settings = SETTINGS,
+        };
+        for (self.unique[0..self.unique_len], 0..) |unique_type, i| {
+            if (potential_new_unique.equals(unique_type)) return num_cast(i, u32);
+        }
+        assert_with_reason(self.unique_len < self.unique.len, @src(), "ran out of space in unique type list, need at least {d} slots, have {d} slots, provide a larger `UNIQUE_TYPE_BUFFER_MAX_LEN` at SerializationManager initialization", .{ self.unique_len + 1, self.unique.len });
+        self.unique[self.unique_len] = potential_new_unique;
+        const idx = self.unique_len;
+        self.unique_len += 1;
+        return idx;
     }
 
-    pub fn fully_custom_functions(funcs: *const CustomRuntimeSerializeFuncs) DataOp {
-        return DataOp{ .FULL_CUSTOM_FUNCTION = funcs };
+    pub fn assert_cached_len_match(comptime self: *const DataOpBuilderInternal, comptime EXPECTED_CACHED_LEN: []const u8, comptime src: std.builtin.SourceLocation) void {
+        assert_with_reason(self.cached_len_field != null and std.mem.eql(u8, EXPECTED_CACHED_LEN, self.cached_len_field.?), src, "expected cached len field `{s}` did not match the recorded cached len field `{s}`, logic error likely", .{ EXPECTED_CACHED_LEN, if (self.cached_len_field) |cached| cached else NO_LEN_CACHE });
     }
 
-    pub fn can_combine(comptime prev: DataOp, comptime next: DataOp) ?DataOp {
-        if (prev == .MOVE_DATA_NO_SWAP and next == .MOVE_DATA_NO_SWAP) {
-            if (prev.MOVE_DATA_NO_SWAP.native_to_serial_delta == next.MOVE_DATA_NO_SWAP.native_to_serial_delta) {
-                return DataOp.mem_move_no_swap(prev.MOVE_DATA_NO_SWAP.native_to_serial_delta, prev.MOVE_DATA_NO_SWAP.copy_len + next.MOVE_DATA_NO_SWAP.copy_len);
+    pub fn assert_cached_tag_match(comptime self: *const DataOpBuilderInternal, comptime EXPECTED_CACHED_TAG: []const u8, comptime src: std.builtin.SourceLocation) void {
+        assert_with_reason(self.cached_tag_field != null and std.mem.eql(u8, EXPECTED_CACHED_TAG, self.cached_tag_field.?), src, "expected cached tag field `{s}` did not match the recorded cached tag field `{s}`, logic error likely", .{ EXPECTED_CACHED_TAG, if (self.cached_tag_field) |cached| cached else NO_LEN_CACHE });
+    }
+
+    pub fn assert_cached_tag_and_type_match(comptime self: *const DataOpBuilderInternal, comptime EXPECTED_CACHED_TAG: []const u8, comptime EXPECTED_TAG_TYPE: type, comptime src: std.builtin.SourceLocation) void {
+        assert_with_reason(self.cached_tag_field != null and std.mem.eql(u8, EXPECTED_CACHED_TAG, self.cached_tag_field.?), src, "expected cached tag field `{s}` did not match the recorded cached tag field `{s}`, logic error likely", .{ EXPECTED_CACHED_TAG, if (self.cached_tag_field) |cached| cached else NO_LEN_CACHE });
+        assert_with_reason(self.cached_tag_type == EXPECTED_TAG_TYPE, src, "expected cached tag type `{s}` did not match the recorded cached tag type `{s}`, logic error likely", .{ @typeName(EXPECTED_TAG_TYPE), @typeName(self.cached_tag_type) });
+    }
+
+    pub fn assert_cached_null_match(comptime self: *const DataOpBuilderInternal, comptime EXPECTED_CACHED_NULL: []const u8, comptime src: std.builtin.SourceLocation) void {
+        assert_with_reason(self.cached_null_field != null and std.mem.eql(u8, EXPECTED_CACHED_NULL, self.cached_null_field.?), src, "expected cached null field `{s}` did not match the recorded cached null field `{s}`, logic error likely", .{ EXPECTED_CACHED_NULL, if (self.cached_null_field) |cached| cached else NO_NULL_CACHE });
+    }
+
+    pub fn handle_cached_values(comptime self: *DataOpBuilderInternal, comptime FIELD: []const u8, comptime COMPLETE_INFO: CompleteTypeSerialInfo) void {
+        if (COMPLETE_INFO.PTR_IS_NULLABLE) {
+            self.cached_null_field = FIELD;
+        }
+        switch (COMPLETE_INFO.CACHE_MODE) {
+            .DONT_CACHE_DATA => {},
+            .CACHE_LEN => {
+                self.cached_len_field = FIELD;
+            },
+            .CACHE_TAG => {
+                self.cached_tag_field = FIELD;
+                self.cached_tag_type = COMPLETE_INFO.ARR_ELEM_TYPE;
+            },
+            .CACHE_NULL => {
+                self.cached_null_field = FIELD;
+            },
+        }
+    }
+};
+
+/// A 'low-level' DataOpBuilder. You can add specific ops in any custom order,
+/// and it is up to the library consumer to ensure it is correct.
+pub const DataOpBuilderLowLevel = extern struct {
+    /// The 'lowest' level of DataOpBuilder. This holds all the core
+    /// data fields of a DataOpBuilder, and all the methods not *intended* to be used
+    /// by a library consumer, though they are still available if needed.
+    internal: DataOpBuilderInternal,
+
+    pub fn add_move_native_offset_op(comptime self: *DataOpBuilderLowLevel, comptime offset: i32) void {
+        const op = DataOp.new_move_native_ptr_op(offset);
+        self.internal.push_op(self, op);
+    }
+
+    pub fn add_transfer_data_op(comptime self: *DataOpBuilderLowLevel, comptime native_size: u32, comptime offset_to_next_field: i32, comptime serial_size: u32, comptime TARGET_ENDIAN: Endian, comptime TECH: DataTransferTech, comptime CACHE: DataCacheMode) void {
+        comptime var kind: DataOpKind = if (TECH == .NON_ZERO_READ_OR_WRITE_1_ELSE_0) DataOpKind.NON_ZERO_READ_OR_WRITE_1_ELSE_0 else if (native_size == 1) DataOpKind.TRANSFER_SAME_ENDIAN else switch (TECH) {
+            .TARGET_ENDIAN_SAME_SIZE => switch (TARGET_ENDIAN) {
+                .BIG_ENDIAN => switch (NATIVE_ENDIAN) {
+                    .BIG_ENDIAN => DataOpKind.TRANSFER_SAME_ENDIAN,
+                    .LITTLE_ENDIAN => DataOpKind.TRANSFER_SWAP_ENDIAN,
+                },
+                .LITTLE_ENDIAN => switch (NATIVE_ENDIAN) {
+                    .BIG_ENDIAN => DataOpKind.TRANSFER_SWAP_ENDIAN,
+                    .LITTLE_ENDIAN => DataOpKind.TRANSFER_SAME_ENDIAN,
+                },
+            },
+            .VARINT => DataOpKind.TRANSFER_VARINT,
+            .VARINT_ZIGZAG => DataOpKind.TRANSFER_VARINT_ZIGZAG,
+        };
+        kind = switch (CACHE) {
+            .DONT_CACHE_DATA => kind,
+            .CACHE_LEN => switch (kind) {
+                .TRANSFER_SAME_ENDIAN => DataOpKind.TRANSFER_SAME_ENDIAN_SAVE_LEN,
+                .TRANSFER_SWAP_ENDIAN => DataOpKind.TRANSFER_SWAP_ENDIAN_SAVE_LEN,
+                .TRANSFER_VARINT => DataOpKind.TRANSFER_VARINT_SAVE_LEN,
+                .TRANSFER_VARINT_ZIGZAG => DataOpKind.TRANSFER_VARINT_ZIGZAG_SAVE_LEN,
+                .NON_ZERO_READ_OR_WRITE_1_ELSE_0 => DataOpKind.NON_ZERO_READ_OR_WRITE_1_ELSE_0_SAVE_LEN,
+                else => unreachable,
+            },
+            .CACHE_TAG => switch (kind) {
+                .TRANSFER_SAME_ENDIAN => DataOpKind.TRANSFER_SAME_ENDIAN_SAVE_TAG,
+                .TRANSFER_SWAP_ENDIAN => DataOpKind.TRANSFER_SWAP_ENDIAN_SAVE_TAG,
+                .TRANSFER_VARINT => DataOpKind.TRANSFER_VARINT_SAVE_TAG,
+                .TRANSFER_VARINT_ZIGZAG => DataOpKind.TRANSFER_VARINT_ZIGZAG_SAVE_TAG,
+                .NON_ZERO_READ_OR_WRITE_1_ELSE_0 => DataOpKind.NON_ZERO_READ_OR_WRITE_1_ELSE_0_SAVE_TAG,
+                else => unreachable,
+            },
+            .CACHE_NULL => switch (kind) {
+                .TRANSFER_SAME_ENDIAN => DataOpKind.TRANSFER_SAME_ENDIAN_SAVE_TAG,
+                .TRANSFER_SWAP_ENDIAN => DataOpKind.TRANSFER_SWAP_ENDIAN_SAVE_TAG,
+                .TRANSFER_VARINT => DataOpKind.TRANSFER_VARINT_SAVE_TAG,
+                .TRANSFER_VARINT_ZIGZAG => DataOpKind.TRANSFER_VARINT_ZIGZAG_SAVE_TAG,
+                .NON_ZERO_READ_OR_WRITE_1_ELSE_0 => DataOpKind.NON_ZERO_READ_OR_WRITE_1_ELSE_0_SAVE_TAG,
+                else => unreachable,
+            },
+        };
+        const op = DataOp.new_transfer_data_op(native_size, offset_to_next_field, serial_size, kind);
+        self.internal.push_op(self, op);
+    }
+
+    pub fn add_union_header_op(comptime self: *DataOpBuilderLowLevel, comptime num_fields: u32) void {
+        const op = DataOp.new_union_header_op(num_fields);
+        self.internal.push_op(self, op);
+    }
+
+    pub fn add_union_tag_op(comptime self: *DataOpBuilderLowLevel, comptime tag_as_u64_native_endian: u64, comptime num_following_ops: u32) void {
+        const op = DataOp.new_union_tag_id_op(tag_as_u64_native_endian, num_following_ops);
+        self.internal.push_op(self, op);
+    }
+
+    pub fn add_union_range_op(comptime self: *DataOpBuilderLowLevel, comptime min_as_u64_native_endian: u64, comptime max_as_u64_native_endian: u64, comptime num_following_ops: u32) void {
+        const op = DataOp.new_union_tag_range_op(min_as_u64_native_endian, max_as_u64_native_endian, num_following_ops);
+        self.internal.push_op(self, op);
+    }
+
+    pub fn add_subroutine_start_op(comptime self: *DataOpBuilderLowLevel, comptime subroutine_first_op: u32, comptime subroutine_num_ops: u16, comptime subroutine_static_repeat: u32, comptime offset_to_next_field: i32, comptime REPEAT: SubroutineRepeatMode, comptime REGION: SubroutineAllocRegionMode) void {
+        const kind: DataOpKind = switch (REGION) {
+            .SAME_MEMORY_REGION => switch (REPEAT) {
+                .DYNAMIC_REPEAT => DataOpKind.START_SUBROUTINE_DYNAMIC_REPEAT_ALLOCATED_REGION,
+                .STATIC_REPEAT_OR_NO_REPEAT => if (subroutine_static_repeat <= 1) DataOpKind.START_SUBROUTINE_NO_REPEAT_ALLOCATED_REGION else DataOpKind.START_SUBROUTINE_STATIC_REPEAT_ALLOCATED_REGION,
+            },
+            .SUB_ALLOCATED_REGION => switch (REPEAT) {
+                .DYNAMIC_REPEAT => DataOpKind.START_SUBROUTINE_DYNAMIC_REPEAT,
+                .STATIC_REPEAT_OR_NO_REPEAT => if (subroutine_static_repeat <= 1) DataOpKind.START_SUBROUTINE_NO_REPEAT else DataOpKind.START_SUBROUTINE_STATIC_REPEAT,
+            },
+        };
+        const op = DataOp.new_subroutine_op(subroutine_first_op, subroutine_num_ops, subroutine_static_repeat, offset_to_next_field, kind);
+        self.internal.push_op(self, op);
+    }
+
+    pub fn add_inline_subroutine_start_op(comptime self: *DataOpBuilderLowLevel, comptime subroutine_num_ops: u16, comptime subroutine_static_repeat: u32, comptime offset_to_next_field: i32, comptime REPEAT: SubroutineRepeatMode, comptime REGION: SubroutineAllocRegionMode) void {
+        const kind: DataOpKind = switch (REGION) {
+            .SAME_MEMORY_REGION => switch (REPEAT) {
+                .DYNAMIC_REPEAT => DataOpKind.START_SUBROUTINE_DYNAMIC_REPEAT_ALLOCATED_REGION,
+                .STATIC_REPEAT_OR_NO_REPEAT => if (subroutine_static_repeat <= 1) DataOpKind.START_SUBROUTINE_NO_REPEAT_ALLOCATED_REGION else DataOpKind.START_SUBROUTINE_STATIC_REPEAT_ALLOCATED_REGION,
+            },
+            .SUB_ALLOCATED_REGION => switch (REPEAT) {
+                .DYNAMIC_REPEAT => DataOpKind.START_SUBROUTINE_DYNAMIC_REPEAT,
+                .STATIC_REPEAT_OR_NO_REPEAT => if (subroutine_static_repeat <= 1) DataOpKind.START_SUBROUTINE_NO_REPEAT else DataOpKind.START_SUBROUTINE_STATIC_REPEAT,
+            },
+        };
+        const subroutine_first_op = self.ops_offset + self.ops_len + 1;
+        const op = DataOp.new_subroutine_op(subroutine_first_op, subroutine_num_ops, subroutine_static_repeat, offset_to_next_field, kind);
+        self.internal.push_op(self, op);
+    }
+
+    pub fn add_ref_unique_type_op(comptime self: *DataOpBuilderLowLevel, comptime unique_type_idx: u32, comptime offset_to_next_field: i32) void {
+        const op = DataOp.new_ref_unique_struct_and_settings_op(unique_type_idx, offset_to_next_field);
+        self.internal.push_op(self, op);
+    }
+
+    pub fn add_allocated_pointer_op(comptime self: *DataOpBuilderLowLevel, comptime elem_size: u32, comptime ptr_align: u32, alloc_idx: u16, comptime num_subroutine_ops: u32, comptime offset_to_next_field: i32, comptime LEN_MODE: PointerLenMode) void {
+        const kind: DataOpKind = switch (LEN_MODE) {
+            .POINTER_TO_ONE_OBJECT => DataOpKind.ALLOCATED_POINTER_TO_ONE_OBJECT,
+            .POINTER_TO_ONE_OBJECT_OR_NULL => DataOpKind.ALLOCATED_POINTER_TO_ONE_OBJECT_OR_NULL,
+            .POINTER_TO_MANY_ONJECTS => DataOpKind.ALLOCATED_POINTER_TO_MANY_ONJECTS,
+            .POINTER_TO_MANY_OBJECTS_OR_NULL => DataOpKind.ALLOCATED_POINTER_TO_MANY_OBJECTS_OR_NULL,
+        };
+        const op = DataOp.new_allocated_pointer_op(elem_size, ptr_align, alloc_idx, num_subroutine_ops, offset_to_next_field, kind);
+        self.internal.push_op(self, op);
+    }
+
+    pub fn add_pointer_sentinel_op(comptime self: *DataOpBuilderLowLevel, comptime elem_size: u32, comptime sentinel_data: *const anyopaque) void {
+        const op = DataOp.new_pointer_sentinel_op(elem_size, sentinel_data);
+        self.internal.push_op(self, op);
+    }
+
+    pub fn add_prev_allocation_ref_pointer_op(comptime self: *DataOpBuilderLowLevel, comptime elem_size: u32, comptime ptr_align: u32, alloc_idx: u16, comptime static_len: u32, comptime offset_to_next_field: i32, comptime LEN_MODE: PointerLenMode) void {
+        const kind: DataOpKind = switch (LEN_MODE) {
+            .POINTER_TO_ONE_OBJECT => DataOpKind.POINTER_TO_PREVIOUSLY_ALLOCATED_REGION_STATIC_LEN,
+            .POINTER_TO_MANY_ONJECTS => DataOpKind.POINTER_TO_PREVIOUSLY_ALLOCATED_REGION_DYNAMIC_LEN,
+        };
+        const op = DataOp.new_previous_allocation_ref_op(elem_size, ptr_align, alloc_idx, static_len, offset_to_next_field, kind);
+        self.internal.push_op(self, op);
+    }
+
+    pub fn add_custom_functions_op(comptime self: *DataOpBuilderLowLevel, comptime funcs: *const CustomRuntimeSerializeFuncs, comptime offset_to_next_field: i32) void {
+        const op = DataOp.new_custom_functions_op(funcs, offset_to_next_field);
+        self.internal.push_op(self, op);
+    }
+
+    pub fn add_data_manip_serial_to_native_op(comptime self: *DataOpBuilderLowLevel, comptime func: *const DataManipulationSerialToNative) void {
+        const op = DataOp.new_data_manip_serial_to_native_op(func);
+        self.internal.push_op(self, op);
+    }
+
+    pub fn add_data_manip_native_to_serial_op(comptime self: *DataOpBuilderLowLevel, comptime func: *const DataManipulationNativeToSerial) void {
+        const op = DataOp.new_data_manip_native_to_serial_op(func);
+        self.internal.push_op(self, op);
+    }
+
+    // UTILS
+
+    pub fn get_offset_between_two_fields_on_current_type(comptime self: *DataOpBuilderLowLevel, comptime START_FIELD: ?[]const u8, comptime END_FIELD: ?[]const u8) i32 {
+        const TYPE = self.internal.object_type;
+        const start_offset: u32 = if (START_FIELD) |SF| get: {
+            assert_with_reason(@hasField(TYPE, SF), @src(), "current type `{s}` does not have field `{s}`", .{ @typeName(TYPE), SF });
+            break :get @offsetOf(TYPE, SF);
+        } else 0;
+        const end_offset: u32 = if (END_FIELD) |EF| get: {
+            assert_with_reason(@hasField(TYPE, EF), @src(), "current type `{s}` does not have field `{s}`", .{ @typeName(TYPE), EF });
+            break :get @offsetOf(TYPE, EF);
+        } else 0;
+        if (start_offset > end_offset) {
+            return -num_cast(start_offset - end_offset, i32);
+        } else {
+            return num_cast(end_offset - start_offset, i32);
+        }
+    }
+
+    pub fn get_tech_for_numeric_type(comptime SETTINGS: ObjectSerialSettings, comptime TYPE: type) DataTransferTech {
+        const KIND_INFO = KindInfo.get_kind_info(TYPE);
+        const TECH = if (@sizeOf(TYPE) <= 1) (if (TYPE == bool) DataTransferTech.NON_ZERO_READ_OR_WRITE_1_ELSE_0 else DataTransferTech.TARGET_ENDIAN_SAME_SIZE) else switch (KIND_INFO) {
+            .INT, .ENUM, .STRUCT, .UNION => switch (SETTINGS.INTEGER_PACKING) {
+                .USE_TARGET_ENDIAN => DataTransferTech.TARGET_ENDIAN_SAME_SIZE,
+                .USE_VARINTS => switch (KIND_INFO) {
+                    .INT => |INT| if (INT.signedness == .signed) DataTransferTech.VARINT_ZIGZAG else DataTransferTech.VARINT,
+                    .ENUM => |ENUM| get_base: {
+                        const INT = KindInfo.get_kind_info(ENUM.tag_type).INT;
+                        break :get_base if (INT.signedness == .signed) DataTransferTech.VARINT_ZIGZAG else DataTransferTech.VARINT;
+                    },
+                    .STRUCT, .UNION => DataTransferTech.VARINT,
+                    else => unreachable,
+                },
+                .NON_ZERO_READ_OR_WRITE_1_ELSE_0 => DataTransferTech.NON_ZERO_READ_OR_WRITE_1_ELSE_0,
+            },
+            .FLOAT => DataTransferTech.TARGET_ENDIAN_SAME_SIZE,
+            else => assert_unreachable(@src(), "only Ints, Floats, Bools, Enums, or Packed Structs are allowed as numeric field ops, got type `{s}`", .{@typeName(TYPE)}),
+        };
+        if (TYPE == usize or TYPE == isize) {
+            TECH = if (TECH == .NON_ZERO_READ_OR_WRITE_1_ELSE_0) TECH else if (TYPE == isize and SETTINGS.USIZE_COMPATABILITY == .USIZE_ALWAYS_VARINT) DataTransferTech.VARINT_ZIGZAG else if (TYPE == usize and SETTINGS.USIZE_COMPATABILITY == .USIZE_ALWAYS_VARINT) DataTransferTech.VARINT else TECH;
+        }
+        return TECH;
+    }
+
+    pub fn re_type_numeric_type(comptime IN_TYPE: type) type {
+        const INFO = KindInfo.get_kind_info(IN_TYPE);
+        switch (INFO) {
+            .INT, .FLOAT => {
+                return IN_TYPE;
+            },
+            .BOOL => {
+                return u8;
+            },
+            .ENUM => |ENUM| {
+                return ENUM.tag_type;
+            },
+            .STRUCT => |STRUCT| {
+                assert_with_reason(STRUCT.backing_integer != null, @src(), "only packed structs can be re-typed as numeric types, got type `{s}`", .{@typeName(IN_TYPE)});
+                return STRUCT.backing_integer.?;
+            },
+            .UNION => |UNION| {
+                assert_with_reason(UNION.layout == .@"extern", @src(), "only packed unions can be re-typed as numeric types, got type `{s}`", .{@typeName(IN_TYPE)});
+                const INT = std.meta.Int(.unsigned, @bitSizeOf(IN_TYPE));
+                assert_with_reason(@sizeOf(INT) == @sizeOf(IN_TYPE), @src(), "the size of the input union {d} did not match the size of the infered integer used to back it {d}, this packed union is not eligible for direct numeric inference, but may still be used in a packed struct", .{ @sizeOf(IN_TYPE), @sizeOf(INT) });
+                return INT;
+            },
+            else => assert_unreachable(@src(), "only Ints, Floats, Bools, Enums, Packed Structs, or Packed Unions can be re-typed as numeric types, got type `{s}`", .{@typeName(IN_TYPE)}),
+        }
+    }
+
+    pub fn get_or_add_alloc_name_index(comptime self: *DataOpBuilderLowLevel, comptime alloc_name: []const u8) u16 {
+        for (self.alloc_names[0..self.alloc_names_len], 0..) |existing_name_segment, i| {
+            const existing_name = self.alloc_buf[existing_name_segment.start..existing_name_segment.end];
+            if (std.mem.eql(u8, existing_name, alloc_name)) return num_cast(i, u32);
+        }
+        const alloc_name_len_u32 = num_cast(alloc_name.len, u32);
+        assert_with_reason(self.alloc_buf_len + alloc_name_len_u32 <= self.alloc_buf.len, @src(), "ran out of space for allocator name bytes, have len {d}, need at least len {d}, provide a larger `ALLOC_NAME_BYTES_BUFFER_MAX_LEN` during initialization", .{ self.alloc_buf.len, self.alloc_buf_len + alloc_name_len_u32 });
+        assert_with_reason(self.alloc_names_len < self.alloc_names.len, @src(), "ran out of space for allocator name slots, have len {d}, need at least len {d}, provide a larger `ALLOC_NAME_LIST_MAX_LEN` during initialization", .{ self.alloc_names.len, self.alloc_names_len + 1 });
+        self.alloc_names[self.alloc_names_len] = SliceRange.new_with_len(self.alloc_buf_len, alloc_name_len_u32);
+        const idx: u16 = @intCast(self.alloc_names_len);
+        self.alloc_names_len += 1;
+        @memcpy(self.alloc_buf[self.alloc_buf_len .. self.alloc_buf_len + alloc_name_len_u32], alloc_name);
+        self.alloc_buf_len += alloc_name_len_u32;
+        return idx;
+    }
+
+    pub fn get_type_settings_and_offset_from_field_and_next_field(comptime self: *DataOpBuilderLowLevel, comptime FIELD: []const u8, comptime NEXT_FIELD: ?[]const u8, comptime OVERRIDES: SerialSettingsOverride) struct { type, ObjectSerialSettings, i32 } {
+        const OFFSET_TO_NEXT_FIELD = self.get_offset_between_two_fields_on_current_type(FIELD, NEXT_FIELD);
+        const TYPE, const SETTINGS = self.get_type_and_final_settings_for_sub_type_or_field_on_current_type(null, FIELD);
+        const FINAL_SETTINGS = SETTINGS.combined_with_overrides(OVERRIDES);
+        return .{ TYPE, FINAL_SETTINGS, OFFSET_TO_NEXT_FIELD };
+    }
+
+    pub fn get_type_and_final_settings_for_sub_type_or_field_on_current_type(comptime self: *DataOpBuilderLowLevel, comptime TYPE: ?type, comptime FIELD: ?[]const u8) struct { type, ObjectSerialSettings } {
+        const PARENT_TYPE = self.internal.object_type;
+        const KIND = KindInfo.get_kind_info(PARENT_TYPE);
+        const CHILD_TYPE = if (TYPE) |T| T else get: {
+            assert_with_reason(KIND == .STRUCT and FIELD != null, @src(), "if `TYPE` is not provided, the current (parent) type must be a struct and `FIELD` must not be null, got parent kind `{s}`, field `{s}`", .{ @tagName(KIND), if (FIELD) |F| F else NO_FIELD_CACHE });
+            break :get @FieldType(PARENT_TYPE, FIELD.?);
+        };
+        const FIELD_SETTINGS: ?OptionalObjectSerialSettings = if (FIELD != null) get: {
+            assert_with_reason(KIND == .STRUCT, @src(), "if `FIELD` is provided, the current (parent) type must be a stuct, got parent kind `{s}`", .{@tagName(KIND)});
+            const F_TYPE = @FieldType(PARENT_TYPE, FIELD.?);
+            assert_with_reason(CHILD_TYPE == F_TYPE, @src(), "the type provided does not match the type on field `{s}`, got:\nTYPE = `{s}`\ntype from FIELD = `{s}`", .{ FIELD.?, @typeName(CHILD_TYPE), @typeName(F_TYPE) });
+            break :get get_field_settings(PARENT_TYPE, FIELD.?);
+        } else null;
+        const OBJECT_SETTINGS = get_object_settings(CHILD_TYPE);
+        return .{ CHILD_TYPE, self.internal.object_settings.with_custom_routine_removed().combined_with_optional(OBJECT_SETTINGS).combined_with_optional(FIELD_SETTINGS) };
+    }
+
+    pub fn handle_field_links_and_get_offset_to_next(comptime self: *DataOpBuilderLowLevel, comptime FIELD: []const u8, comptime NEXT_FIELD: ?[]const u8) i32 {
+        const TYPE = self.internal.object_type;
+        const KIND = KindInfo.get_kind_info(TYPE);
+        assert_with_reason(KIND == .STRUCT, @src(), "current type kind is not a struct, current kind is `{s}`, real type `{s}`", .{ @tagName(KIND), @typeName(TYPE) });
+        assert_with_reason(KIND.STRUCT.backing_integer == null, @src(), "cannot generate standard DataOps for fields of a Packed Struct, because the field offsets may not match the bit offsets. Either serialize the packed struct as its backing integer type (recommended, always works correctly), or use custom runtime serial/deserial functions", .{});
+        assert_with_reason(@hasField(TYPE, FIELD), @src(), "struct `{s}` does not have field `{s}`", .{ @typeName(TYPE), FIELD });
+        if (NEXT_FIELD) |NEXT| assert_with_reason(@hasField(TYPE, NEXT), @src(), "struct `{s}` does not have NEXT field `{s}`", .{ @typeName(TYPE), NEXT });
+        if (self.internal.prev_field != null) assert_with_reason(self.internal.next_field != null and std.mem.eql(u8, self.internal.next_field.?, FIELD), @src(), "the prev field you added indicated the next field to add was `{s}`, but the next field you actually added was `{s}`: routine offsets will be broken", .{ if (self.internal.next_field) |next| next else NO_FIELD_END_STRUCT, FIELD });
+        if (self.internal.prev_field == null and @offsetOf(TYPE, FIELD) != 0) {
+            self.add_move_native_offset_op(@offsetOf(TYPE, FIELD));
+        }
+        self.internal.prev_field = FIELD;
+        self.internal.next_field = NEXT_FIELD;
+        return self.get_offset_between_two_fields_on_current_type(FIELD, NEXT_FIELD);
+    }
+
+    /// This method takes ANY of the following type patterns and serializes them in 1-5 ops:
+    ///   - `NUMERIC_OR_STRUCT`
+    ///   - `[ARRAY_OR_VECTOR]NUMERIC_OR_STRUCT`
+    ///   - `[CHAIN][OF][NESTED][ARRAYS][OR][VECTORS]NUMERIC_OR_STRUCT`
+    ///   - `*NUMERIC_OR_STRUCT`
+    ///   - `?*NUMERIC_OR_STRUCT`
+    ///   - `[*]NUMERIC_OR_STRUCT`
+    ///   - `?[*]NUMERIC_OR_STRUCT`
+    ///   - `*[ARRAY_OR_VECTOR]NUMERIC_OR_STRUCT`
+    ///   - `?*[ARRAY_OR_VECTOR]NUMERIC_OR_STRUCT`
+    ///   - `[*][ARRAY_OR_VECTOR]NUMERIC_OR_STRUCT`
+    ///   - `?[*][ARRAY_OR_VECTOR]NUMERIC_OR_STRUCT`
+    ///   - `*[CHAIN][OF][NESTED][ARRAYS][OR][VECTORS]NUMERIC_OR_STRUCT`
+    ///   - `?*[CHAIN][OF][NESTED][ARRAYS][OR][VECTORS]NUMERIC_OR_STRUCT`
+    ///   - `[*][CHAIN][OF][NESTED][ARRAYS][OR][VECTORS]NUMERIC_OR_STRUCT`
+    ///   - `?[*][CHAIN][OF][NESTED][ARRAYS][OR][VECTORS]NUMERIC_OR_STRUCT`
+    ///
+    /// Where `NUMERIC` is one of the following:
+    ///   - Integer
+    ///   - Enum
+    ///   - Bool
+    ///   - Float
+    ///   - Packed Struct
+    ///   - Packed Union
+    ///   - Any zero-size type (Skips field, even pointers to them, since any pointer address is valid)
+    ///
+    /// Where `STRUCT` must be a non-packed struct (otherwise it will be a numeric)
+    pub fn get_complete_type_info_from_field_and_next_field(comptime self: *DataOpBuilderLowLevel, comptime FIELD: []const u8, comptime NEXT_FIELD: ?[]const u8, comptime OVERRIDES: SerialSettingsOverride) CompleteTypeSerialInfo {
+        const OFFSET_TO_NEXT_FIELD = self.get_offset_between_two_fields_on_current_type(FIELD, NEXT_FIELD);
+        const TYPE, const SETTINGS = self.get_type_and_final_settings_for_sub_type_or_field_on_current_type(null, FIELD);
+        return self.get_complete_type_info_from_type_settings_and_offset_to_next(TYPE, OFFSET_TO_NEXT_FIELD, SETTINGS, OVERRIDES);
+    }
+
+    /// This method takes ANY of the following type patterns and serializes them in 1-6 ops:
+    ///   - `NUMERIC_OR_STRUCT`
+    ///   - `[ARRAY_OR_VECTOR]NUMERIC_OR_STRUCT`
+    ///   - `[CHAIN][OF][NESTED][ARRAYS][OR][VECTORS]NUMERIC_OR_STRUCT`
+    ///   - `*NUMERIC_OR_STRUCT`
+    ///   - `?*NUMERIC_OR_STRUCT`
+    ///   - `[*]NUMERIC_OR_STRUCT`
+    ///   - `?[*]NUMERIC_OR_STRUCT`
+    ///   - `*[ARRAY_OR_VECTOR]NUMERIC_OR_STRUCT`
+    ///   - `?*[ARRAY_OR_VECTOR]NUMERIC_OR_STRUCT`
+    ///   - `[*][ARRAY_OR_VECTOR]NUMERIC_OR_STRUCT`
+    ///   - `?[*][ARRAY_OR_VECTOR]NUMERIC_OR_STRUCT`
+    ///   - `*[CHAIN][OF][NESTED][ARRAYS][OR][VECTORS]NUMERIC_OR_STRUCT`
+    ///   - `?*[CHAIN][OF][NESTED][ARRAYS][OR][VECTORS]NUMERIC_OR_STRUCT`
+    ///   - `[*][CHAIN][OF][NESTED][ARRAYS][OR][VECTORS]NUMERIC_OR_STRUCT`
+    ///   - `?[*][CHAIN][OF][NESTED][ARRAYS][OR][VECTORS]NUMERIC_OR_STRUCT`
+    ///
+    /// Where `NUMERIC` is one of the following:
+    ///   - Integer
+    ///   - Enum
+    ///   - Bool
+    ///   - Float
+    ///   - Packed Struct
+    ///   - Packed Union
+    ///   - Any zero-size type (Skips field, even pointers to them, since any pointer address is valid)
+    ///
+    /// Where `STRUCT` must be a non-packed struct (otherwise it will be a numeric)
+    pub fn get_complete_type_info_from_type_settings_and_offset_to_next(comptime self: *DataOpBuilderLowLevel, comptime TYPE: type, comptime OFFSET_TO_NEXT_FIELD: i32, comptime SETTINGS: ObjectSerialSettings, comptime OVERRIDES: SerialSettingsOverride) CompleteTypeSerialInfo {
+        comptime var info: CompleteTypeSerialInfo = .{};
+        const FINAL_SETTINGS = SETTINGS.combined_with_overrides(OVERRIDES);
+        info.SETTINGS_AFTER_OVERRIDE = FINAL_SETTINGS;
+        info.SETTINGS_BEFORE_OVERRIDE = SETTINGS;
+        info.OFFSET_TO_NEXT_FIELD = OFFSET_TO_NEXT_FIELD;
+        info.TYPE = TYPE;
+        info.PTR_CHILD_TYPE = TYPE;
+        info.ARR_ELEM_TYPE = TYPE;
+        info.TARGET_ENDIAN = FINAL_SETTINGS.TARGET_ENDIAN;
+        info.USIZE_COMPAT = FINAL_SETTINGS.USIZE_COMPATABILITY;
+        info.CACHE_MODE = if (OVERRIDES.CACHE) |CACHE| CACHE else DataCacheMode.DONT_CACHE_DATA;
+        info.NUM_OPS_REQUIRED_TO_SERIALIZE = 0;
+        const KIND_INFO = KindInfo.get_kind_info(TYPE);
+        comptime var POINTER_ALLOWED: bool = true;
+        comptime var POINTER_REQUIRED: bool = false;
+        comptime var OPTIONAL_ALLOWED: bool = true;
+        comptime var T: type = TYPE;
+        with_info: switch (KIND_INFO) {
+            .VOID => {
+                if (POINTER_REQUIRED) break :with_info;
+                info.IS_VALID = true;
+                info.NUM_OPS_REQUIRED_TO_SERIALIZE = 1;
+                info.OP_PATTERN[0] = .MOVE_TO_NEXT;
+                info.OP_PATTERN_OFFSETS_TO_NEXT[0] = info.OFFSET_TO_NEXT_FIELD;
+                return;
+            },
+            .INT, .FLOAT, .ENUM, .BOOL => {
+                if (POINTER_REQUIRED) break :with_info;
+                if (@sizeOf(T) == 0) continue :with_info KindInfo.get_kind_info(void);
+                info.IS_NUMERIC_PATTERN = true;
+                info.IS_VALID = true;
+                info.ARR_ELEM_TYPE = T;
+                info.RAW_FINAL_TYPE = DataOpBuilderLowLevel.re_type_numeric_type(T);
+            },
+            .STRUCT => |STRUCT| {
+                if (POINTER_REQUIRED) break :with_info;
+                if (@sizeOf(T) == 0) continue :with_info KindInfo.get_kind_info(void);
+                info.IS_VALID = true;
+                if (STRUCT.backing_integer == null) {
+                    info.IS_STRUCT_PATTERN = true;
+                    info.STRUCT_UNIQUE_IDX = self.locate_or_create_unique_type_idx(T, info.SETTINGS_AFTER_OVERRIDE);
+                    info.ARR_ELEM_TYPE = T;
+                    info.RAW_FINAL_TYPE = T;
+                } else {
+                    info.IS_NUMERIC_PATTERN = true;
+                    info.ARR_ELEM_TYPE = T;
+                    info.RAW_FINAL_TYPE = DataOpBuilderLowLevel.re_type_numeric_type(STRUCT.backing_integer.?);
+                }
+            },
+            .UNION => |UNION| {
+                if (POINTER_REQUIRED) break :with_info;
+                if (@sizeOf(T) == 0) continue :with_info KindInfo.get_kind_info(void);
+                if (UNION.layout != .@"packed") break :with_info;
+                info.IS_NUMERIC_PATTERN = true;
+                info.IS_VALID = true;
+                info.ARR_ELEM_TYPE = T;
+                info.RAW_FINAL_TYPE = DataOpBuilderLowLevel.re_type_numeric_type(Types.UnsignedIntegerWithSameSize(T));
+            },
+            .ARRAY => |ARRAY| {
+                if (POINTER_REQUIRED) break :with_info;
+                if (@sizeOf(T) == 0) continue :with_info KindInfo.get_kind_info(void);
+                info.TOTAL_ARR_LEN *= ARRAY.len;
+                info.DATA_IS_ARRAY = true;
+                POINTER_ALLOWED = false;
+                OPTIONAL_ALLOWED = false;
+                T = ARRAY.child;
+                continue :with_info KindInfo.get_kind_info(T);
+            },
+            .VECTOR => |VECTOR| {
+                if (POINTER_REQUIRED) break :with_info;
+                if (@sizeOf(T) == 0) continue :with_info KindInfo.get_kind_info(void);
+                info.TOTAL_ARR_LEN *= VECTOR.len;
+                info.DATA_IS_ARRAY = true;
+                POINTER_ALLOWED = false;
+                OPTIONAL_ALLOWED = false;
+                T = VECTOR.child;
+                continue :with_info KindInfo.get_kind_info(T);
+            },
+            .POINTER => |POINTER| {
+                if (FINAL_SETTINGS.POINTER_MODE == .DISALLOW_POINTERS or POINTER.size == .slice or !POINTER_ALLOWED) break :with_info;
+                if (FINAL_SETTINGS.POINTER_MODE == .IGNORE_POINTERS) continue :with_info KindInfo.get_kind_info(void);
+                POINTER_REQUIRED = false;
+                POINTER_ALLOWED = false;
+                OPTIONAL_ALLOWED = false;
+                info.IS_POINTER = true;
+                info.REAL_DATA_IN_SEPARATE_REGION = true;
+                info.PTR_ALIGN = POINTER.alignment;
+                info.ALLOC_IDX = self.get_or_add_alloc_name_index(FINAL_SETTINGS.ALLOCATOR_NAME);
+                info.PTR_CHILD_TYPE = POINTER.child;
+                info.POINTER_KIND = if (POINTER.size == .c) .one else POINTER.size;
+                info.PTR_SENTINEL = POINTER.sentinel_ptr;
+                if (info.PTR_SENTINEL != null) {
+                    info.HAS_SENTINEL = true;
+                }
+                T = POINTER.child;
+                continue :with_info KindInfo.get_kind_info(T);
+            },
+            .OPTIONAL => |OPTIONAL| {
+                if (POINTER_REQUIRED or !OPTIONAL_ALLOWED) break :with_info;
+                POINTER_REQUIRED = true;
+                OPTIONAL_ALLOWED = false;
+                info.PTR_IS_NULLABLE = true;
+                T = OPTIONAL.child;
+                continue :with_info KindInfo.get_kind_info(T);
+            },
+            else => {
+                if (POINTER_REQUIRED) break :with_info;
+                if (@sizeOf(T) == 0) {
+                    info.IS_VALID = true;
+                    info.NUM_OPS_REQUIRED_TO_SERIALIZE = 1;
+                    info.OP_PATTERN[0] = .MOVE_TO_NEXT;
+                    info.OP_PATTERN_OFFSETS_TO_NEXT[0] = info.OFFSET_TO_NEXT_FIELD;
+                    return;
+                }
+            },
+        }
+        assert_with_reason(info.IS_VALID, @src(), "type is not an allowed type for the `get_complete_type_info______________()` funcs.\nAllowed type patterns are:\n\t- NUMERIC_OR_STRUCT\n\t- [ARRAY OR VECTOR]NUMERIC_OR_STRUCT\n\t- [CHAIN][OF][NESTED][ARRAYS][OR][VECTORS]NUMERIC_OR_STRUCT\n\t- *NUMERIC_OR_STRUCT\n\t- [*]NUMERIC_OR_STRUCT\n\t- ?*NUMERIC_OR_STRUCT\n\t- ?[*]NUMERIC_OR_STRUCT\n\t- *[ARRAY OR VECTOR]NUMERIC_OR_STRUCT\n\t- ?*[ARRAY OR VECTOR]NUMERIC_OR_STRUCT\n\t- [*][ARRAY OR VECTOR]NUMERIC_OR_STRUCT\n\t- ?[*][ARRAY OR VECTOR]NUMERIC_OR_STRUCT\n\t- *[CHAIN][OF][NESTED][ARRAYS][OR][VECTORS]NUMERIC_OR_STRUCT\n\t- ?*[CHAIN][OF][NESTED][ARRAYS][OR][VECTORS]NUMERIC_OR_STRUCT\n\t- [*][CHAIN][OF][NESTED][ARRAYS][OR][VECTORS]NUMERIC_OR_STRUCT\n\t- ?[*][CHAIN][OF][NESTED][ARRAYS][OR][VECTORS]NUMERIC_OR_STRUCT\nWhere `NUMERIC` is one of the following:\n\t- Integer\n\t- Enum\n\t- Bool\n\t- Float\n\t- Packed Struct\n\t- Packed Union\n`STRUCT` must be a non-packed struct (otherwise it will be a numeric)\nGot invalid type `{s}`\n", .{@typeName(TYPE)});
+        assert_with_reason(info.CACHE_MODE == .DONT_CACHE_DATA or info.TOTAL_ARR_LEN == 1, @src(), "cannot cache data from arrays or nested arrays whose total flattened length is not EXACTLY 1, got `TOTAL_ARR_LEN` = {d}", .{info.TOTAL_ARR_LEN});
+        if (OVERRIDES.POINTER_LEN_MODE) |PTR_LEN_OVERRIDE| {
+            switch (PTR_LEN_OVERRIDE) {
+                .SINGLE_ITEM => info.POINTER_KIND = .one,
+                .MANY_ITEM => info.POINTER_KIND = .many,
             }
         }
-        return null;
-    }
-};
-
-pub const PointerLen = struct {
-    len_size: u32,
-    capture_mode: IntegerPacking,
-};
-
-pub const NullSkipAhead = struct {
-    ops_to_advance_to_exit_routine: u32,
-};
-
-pub const PointerHeader = struct {
-    elem_size: u32,
-    elem_align: u16,
-    allocator_id: u16,
-};
-
-pub const PointerLenHeader = struct {
-
-};
-
-pub const UnionRoutineStart = struct {
-    offset_to_first_routine_op: u32,
-    total_num_ops: u32,
-};
-
-pub const UnionRoutineEnd = struct {
-    ops_to_advance_to_exit_union: u32,
-    routine_serial_delta_adjustment: u32,
-};
-
-pub const RoutineEndDelta = union {
-    true_op_index_of_routine_end: u32,
-    ops_to_advance_to_exit_routine: u32,
-};
-
-pub const MemCopyMove = struct {
-    native_to_serial_delta: i32 = 0,
-    copy_len: u32 = 0,
-
-    pub inline fn mem_copy_move(comptime native_to_serial_delta: i32, comptime copy_len: u32) MemCopyMove {
-        return MemCopyMove{ .native_to_serial_delta = native_to_serial_delta, .copy_len = copy_len };
-    }
-};
-
-pub const OpaqueUnionTag = enum(u8) {
-    U8 = 1,
-    U16 = 2,
-    U32 = 4,
-    U64 = 8,
-
-    pub fn from_union(comptime UNION: type) OpaqueUnionTag {
-        const TAG_TYPE = KindInfo.get_kind_info(UNION).UNION.tag_type.?;
-        return from_tag_type(TAG_TYPE);
-    }
-    pub fn from_tag_type(comptime TAG_TYPE: type) OpaqueUnionTag {
-        return switch (@sizeOf(TAG_TYPE)) {
-            1 => OpaqueUnionTag.U8,
-            2 => OpaqueUnionTag.U16,
-            4 => OpaqueUnionTag.U32,
-            8 => OpaqueUnionTag.U64,
-            else => assert_unreachable(@src(), "tag type `{s}` is not supported", .{@typeName(TAG_TYPE)}),
+        info.NEEDS_CACHED_LEN = info.POINTER_KIND == .many;
+        info.PTR_LEN_MODE = switch (info.POINTER_KIND) {
+            .one => switch (info.PTR_IS_NULLABLE) {
+                true => PointerLenMode.POINTER_TO_ONE_OBJECT_OR_NULL,
+                false => PointerLenMode.POINTER_TO_ONE_OBJECT,
+            },
+            .many => switch (info.PTR_IS_NULLABLE) {
+                true => switch (info.PTR_SENTINEL != null) {
+                    true => PointerLenMode.DYNAMIC_LEN_POINTER_WITH_SENTINEL_OR_NULL,
+                    false => PointerLenMode.POINTER_TO_MANY_OBJECTS_OR_NULL,
+                },
+                false => switch (info.PTR_SENTINEL != null) {
+                    true => PointerLenMode.DYNAMIC_LEN_POINTER_WITH_SENTINEL,
+                    false => PointerLenMode.POINTER_TO_MANY_ONJECTS,
+                },
+            },
+            else => unreachable,
         };
-    }
-    pub fn from_byte_len(len: usize) OpaqueUnionTag {
-        return switch (len) {
-            1 => OpaqueUnionTag.U8,
-            2 => OpaqueUnionTag.U16,
-            4 => OpaqueUnionTag.U32,
-            8 => OpaqueUnionTag.U64,
-            else => assert_unreachable(@src(), "tag type size `{s}` is not supported", .{len}),
+        info.REAL_DATA_SIZE = info.TOTAL_ARR_LEN * @sizeOf(info.RAW_FINAL_TYPE);
+        info.REAL_DATA_SIZE_WITH_SENTINEL = if (info.HAS_SENTINEL) info.REAL_DATA_SIZE + @sizeOf(info.PTR_CHILD_TYPE) else info.REAL_DATA_SIZE;
+        info.REAL_DATA_SER_SIZE = if (info.REAL_DATA_SIZE == 0) 0 else switch (info.TECH) {
+            .TARGET_ENDIAN_SAME_SIZE => info.REAL_DATA_SIZE,
+            .NON_ZERO_READ_OR_WRITE_1_ELSE_0 => info.TOTAL_ARR_LEN * 1,
+            else => 0,
         };
-    }
-
-    pub fn bytes(comptime self: OpaqueUnionTag) u8 {
-        return @intFromEnum(self);
-    }
-    pub fn bytes_usize(comptime self: OpaqueUnionTag) usize {
-        return @intCast(@intFromEnum(self));
-    }
-
-    pub fn opaque_type(comptime self: OpaqueUnionTag) type {
-        return switch (self) {
-            .U8 => u8,
-            .U16 => u16,
-            .U32 => u32,
-            .U64 => u64,
-        };
-    }
-
-    pub fn undef(comptime self: OpaqueUnionTag) self.opaque_type() {
-        return switch (self) {
-            .U8 => 0xAA,
-            .U16 => 0xAAAA,
-            .U32 => 0xAAAAAAAA,
-            .U64 => 0xAAAAAAAAAAAAAAAA,
-        };
-    }
-    pub fn zero(comptime self: OpaqueUnionTag) self.opaque_type() {
-        return 0;
-    }
-    pub fn tag_ptr_from_union_ptr_and_offset(comptime self: OpaqueUnionTag, comptime UNION: type, union_ptr: *UNION, offset: usize) *self.opaque_type() {
-        var raw_ptr: [*]u8 = @ptrCast(union_ptr);
-        raw_ptr += offset;
-        return @ptrCast(@alignCast(raw_ptr));
-    }
-    pub fn tag_ptr_from_union_ptr_and_offset_const(comptime self: OpaqueUnionTag, comptime UNION: type, union_ptr: *const UNION, offset: usize) *const self.opaque_type() {
-        var raw_ptr: [*]const u8 = @ptrCast(union_ptr);
-        raw_ptr += offset;
-        return @ptrCast(@alignCast(raw_ptr));
-    }
-
-    pub fn from_serial_slice(comptime self: OpaqueUnionTag, data: []const u8) self.opaque_type() {
-        assert_with_reason(num_cast(self, usize) <= data.len, @src(), "data slice is not long enough for this union tag (need {d} bytes, got {d})", .{ @intFromEnum(self), data.len });
-    }
-
-    pub fn cast_union_tag(comptime self: OpaqueUnionTag, any_union: anytype) self.opaque_type() {
-        const tag = std.meta.activeTag(any_union);
-        return @bitCast(tag);
-    }
-    pub fn cast_tag(comptime self: OpaqueUnionTag, tag: anytype) self.opaque_type() {
-        return @bitCast(@intFromEnum(tag));
-    }
-    pub fn cast_native_bytes_to_u64_LE(native: []const u8) u64 {
-        var u64_bytes: [8]u8 align(8) = @splat(0);
-        assert_with_reason(native.len == 1 or native.len == 2 or native.len == 4 or native.len == 8, @src(), "native wrong len", .{});
-        @memcpy(u64_bytes[0..native.len], native);
-        if (NATIVE_ENDIAN == .BIG_ENDIAN) {
-            std.mem.reverse(u8, u64_bytes[0..native.len]);
+        info.USIZE_TECH = get_tech_for_numeric_type(FINAL_SETTINGS, usize);
+        if (info.IS_NUMERIC_PATTERN) {
+            info.TECH = get_tech_for_numeric_type(FINAL_SETTINGS, info.RAW_FINAL_TYPE);
+            info.RAW_FINAL_TYPE_SER_SIZE = if (info.REAL_DATA_SIZE == 0) 0 else switch (info.TECH) {
+                .TARGET_ENDIAN_SAME_SIZE => @sizeOf(info.RAW_FINAL_TYPE),
+                .NON_ZERO_READ_OR_WRITE_1_ELSE_0 => 1,
+                else => 0,
+            };
+            info.USIZE_SER_SIZE = switch (info.USIZE_TECH) {
+                .TARGET_ENDIAN_SAME_SIZE => @sizeOf(usize),
+                .NON_ZERO_READ_OR_WRITE_1_ELSE_0 => 1,
+                else => 0,
+            };
+            if (info.DATA_IS_ARRAY) {
+                if (info.TOTAL_ARR_LEN == 1) {
+                    info.DATA_IS_ARRAY = false;
+                    info.NUM_OPS_REQUIRED_TO_SERIALIZE -= 1;
+                    info.OP_PATTERN[info.NUM_OPS_REQUIRED_TO_SERIALIZE - 1] = .NUMERIC;
+                } else if (@sizeOf(info.RAW_FINAL_TYPE) == 1 or (info.TECH == .TARGET_ENDIAN_SAME_SIZE and info.TARGET_ENDIAN == NATIVE_ENDIAN)) {
+                    info.NUM_OPS_REQUIRED_TO_SERIALIZE -= 1;
+                    info.ARRAY_CAN_BE_BULK_COPIED = true;
+                    info.OP_PATTERN[info.NUM_OPS_REQUIRED_TO_SERIALIZE - 1] = .FLAT_ARRAY;
+                }
+            }
+        } else {
+            comptime assert_with_reason(info.IS_STRUCT_PATTERN, @src(), "somehow the complete info was `VALID`, but both `IS_NUMERIC_PATTERN` and `IS_STRUCT_PATTERN` were false, internal logic error", .{});
         }
-        return @bitCast(u64_bytes);
-    }
-};
-
-pub const UnionHeader = struct {
-    num_fields: u32,
-    tag_type: OpaqueUnionTag,
-};
-
-pub const UnionRoutineBuilder = struct {
-    meta_data_ops: []DataOp,
-    routine_end_op_indexes: []usize,
-    parent_field_settings: ?SerialFieldOptionalSettings = null,
-    meta_data_ops_root: usize = 0,
-    routine_end_slot_idx: usize = 0,
-    routine_idx: usize = 0,
-    field_count: usize,
-    routine_total_ops: usize = 0,
-    union_tag_opaque: OpaqueUnionTag,
-
-    fn current_routine_start_op(comptime self: *UnionRoutineBuilder) *UnionRoutineStart {
-        return &self.meta_data_ops[(self.routine_idx << 1) + 1].UNION_ROUTINE_START;
-    }
-    fn current_routine_start_op_true_idx(comptime self: *UnionRoutineBuilder) usize {
-        return self.meta_data_ops_root + ((self.routine_idx << 1) + 1);
-    }
-    fn current_routine_tag_op(comptime self: *UnionRoutineBuilder) *u64 {
-        return &self.meta_data_ops[self.routine_idx << 1].UNION_TAG_ID;
-    }
-    fn current_routine_tag_op_true_idx(comptime self: *UnionRoutineBuilder) usize {
-        return self.meta_data_ops_root + (self.routine_idx << 1);
-    }
-    fn delta_between_current_routine_start_op_idx_and_first_op_in_its_routine(comptime self: *UnionRoutineBuilder, comptime builder: *SerialRoutineBuilder) u32 {
-        const true_start = self.current_routine_start_op_true_idx();
-        const true_end = builder.ops_len;
-        return @intCast(true_end - true_start);
-    }
-
-    pub fn add_union_type_provide_settings(comptime self: *UnionRoutineBuilder, comptime builder: *SerialRoutineBuilder, comptime tag_bytes: []const u8, comptime union_native_offset: usize, comptime TYPE: type, comptime settings: SerialFieldSettings) void {
-        const prev_serial_offset = builder.curr_serial_offset;
-        const prev_routine_ops_idx = builder.ops_len;
-        const curr_routine_start = self.current_routine_start_op();
-        const curr_tag_id = self.current_routine_tag_op();
-        const TAG_OPQ = OpaqueUnionTag.from_byte_len(tag_bytes.len);
-        assert_with_reason(TAG_OPQ == self.union_tag_opaque, @src(), "opaque tag param from `tag_value` (`{s}`) does not match the one this union builder was created with (`{s}`)", .{ @tagName(TAG_OPQ), @tagName(self.union_tag_opaque) });
-        const tag_u64_le = OpaqueUnionTag.cast_native_bytes_to_u64_LE(tag_bytes);
-        curr_routine_start.offset_to_first_routine_op = self.delta_between_current_routine_start_op_idx_and_first_op_in_its_routine(builder);
-        curr_tag_id.* = tag_u64_le;
-        builder.add_type_provide_settings(union_native_offset, TYPE, settings);
-        const this_routine_bytes = builder.curr_serial_offset - prev_serial_offset;
-        builder.ensure_space_for_n_more_ops(1);
-        builder.ops[builder.ops_len] = .union_routine_end_temp(builder.ops_len, this_routine_bytes);
-        self.routine_end_op_indexes[self.routine_end_slot_idx] = @intCast(builder.ops_len);
-        builder.ops_len += 1;
-        self.routine_end_slot_idx += 1;
-        const routine_ops = (builder.ops_len - prev_routine_ops_idx) + 1;
-        curr_routine_start.total_num_ops = @intCast(routine_ops);
-        self.routine_total_ops += routine_ops;
-        self.routine_idx += 1;
-        builder.curr_serial_offset = prev_serial_offset;
-    }
-
-    pub fn end_union_builder(comptime self: *UnionRoutineBuilder, comptime builder: *SerialRoutineBuilder) void {
-        assert_with_reason(self.routine_idx == self.field_count, @src(), "cannot end union serial routine builder: not all field tags had routines specified", .{});
-        for (self.routine_end_op_indexes) |routine_end_op_idx| {
-            const routine_end: *UnionRoutineEnd = &builder.ops[routine_end_op_idx].UNION_ROUTINE_END_TEMP;
-            const ops_to_skip = builder.ops_len - routine_end.ops_to_advance_to_exit_union;
-            routine_end.ops_to_advance_to_exit_union = ops_to_skip;
+        assert_with_reason(info.REAL_DATA_SIZE > 0, @src(), "somehow a zero-sized element type didnt short-circuit as a `MOVE_NEXT` op", .{});
+        comptime var i: usize = 0;
+        if (info.PTR_IS_NULLABLE) {
+            info.OP_PATTERN[i] = .OPTIONAL;
+            info.OP_PATTERN_OFFSETS_TO_NEXT[i] = 0;
+            i += 1;
         }
-        builder.curr_union_depth -= 1;
-        builder.skip_ahead_len -= self.field_count;
-        assert_with_reason(builder.subroutines_len > 0 and builder.subroutines[builder.subroutines_len - 1] == .UNION, @src(), "current subroutine was not a union, cannot 'end' a union that isnt started", .{});
-        builder.subroutines_len -= 1;
+        if (info.IS_POINTER) {
+            info.OP_PATTERN[i] = .POINTER;
+            info.OP_PATTERN_OFFSETS_TO_NEXT[i] = info.OFFSET_TO_NEXT_FIELD;
+            i += 1;
+        }
+        if (info.DATA_IS_ARRAY) {
+            if (info.ARRAY_CAN_BE_BULK_COPIED) {
+                info.OP_PATTERN[i] = .FLAT_ARRAY;
+                info.OP_PATTERN_OFFSETS_TO_NEXT[i] = if (info.IS_POINTER) info.REAL_DATA_SIZE else info.OFFSET_TO_NEXT_FIELD;
+                i += 1;
+                info.PTR_SUBROUTINE_LEN += 1;
+            } else {
+                info.OP_PATTERN[i] = .ARRAY;
+                info.OP_PATTERN_OFFSETS_TO_NEXT[i] = if (info.IS_POINTER) info.REAL_DATA_SIZE else info.OFFSET_TO_NEXT_FIELD;
+                i += 1;
+                info.OP_PATTERN[i] = if (info.IS_NUMERIC_PATTERN) .NUMERIC else .STRUCT;
+                info.OP_PATTERN_OFFSETS_TO_NEXT[i] = num_cast(@sizeOf(info.RAW_FINAL_TYPE), i32);
+                i += 1;
+                info.PTR_SUBROUTINE_LEN += 2;
+            }
+        } else {
+            info.OP_PATTERN[i] = if (info.IS_NUMERIC_PATTERN) .NUMERIC else .STRUCT;
+            info.OP_PATTERN_OFFSETS_TO_NEXT[i] = if (info.IS_POINTER) num_cast(@sizeOf(info.PTR_CHILD_TYPE), i32) else info.OFFSET_TO_NEXT_FIELD;
+            i += 1;
+            info.PTR_SUBROUTINE_LEN += 1;
+        }
+        if (info.IS_POINTER and info.HAS_SENTINEL) {
+            info.OP_PATTERN[i] = .ADD_SENTINEL;
+            info.OP_PATTERN_OFFSETS_TO_NEXT[i] = 0;
+            info.PTR_SUBROUTINE_LEN += 1;
+            i += 1;
+        }
+        return info;
+    }
+
+    /// Be careful, this does not validate the `CompleteTypeSerialInfo` is correct, so if you build one manually and it is incorrect,
+    /// this will poison your serial routine.
+    pub fn add_ops_for_complete_type_serial_info_and_update_cached_values(comptime self: *DataOpBuilderLowLevel, comptime info: CompleteTypeSerialInfo, comptime FIELD: []const u8) void {
+        self.add_ops_for_complete_type_serial_info(info);
+        self.internal.handle_cached_values(FIELD, info);
+    }
+
+    /// Be careful, this does not validate the `CompleteTypeSerialInfo` is correct, so if you build one manually and it is incorrect,
+    /// this will poison your serial routine.
+    pub fn add_ops_for_complete_type_serial_info(comptime self: *DataOpBuilderLowLevel, comptime info: CompleteTypeSerialInfo) void {
+        for (info.OP_PATTERN[0..info.NUM_OPS_REQUIRED_TO_SERIALIZE], info.OP_PATTERN_OFFSETS_TO_NEXT[0..info.NUM_OPS_REQUIRED_TO_SERIALIZE]) |pattern, offset_to_next| {
+            switch (pattern) {
+                .MOVE_TO_NEXT => {
+                    self.add_move_native_offset_op(offset_to_next);
+                },
+                .OPTIONAL => {
+                    self.add_transfer_data_op(@sizeOf(usize), offset_to_next, 1, info.TARGET_ENDIAN, .NON_ZERO_READ_OR_WRITE_1_ELSE_0, .CACHE_NULL);
+                },
+                .POINTER => {
+                    self.add_allocated_pointer_op(@sizeOf(info.PTR_CHILD_TYPE), info.PTR_ALIGN, info.ALLOC_IDX, info.PTR_SUBROUTINE_LEN, offset_to_next, info.PTR_LEN_MODE);
+                },
+                .FLAT_ARRAY => {
+                    self.add_transfer_data_op(info.REAL_DATA_SIZE, offset_to_next, info.REAL_DATA_SER_SIZE, info.TARGET_ENDIAN, .TARGET_ENDIAN_SAME_SIZE, DataCacheMode.DONT_CACHE_DATA);
+                },
+                .ARRAY => {
+                    self.add_inline_subroutine_start_op(1, info.TOTAL_ARR_LEN, offset_to_next, .STATIC_REPEAT_OR_NO_REPEAT, .SAME_MEMORY_REGION);
+                },
+                .NUMERIC => {
+                    self.add_transfer_data_op(@sizeOf(info.RAW_FINAL_TYPE), offset_to_next, info.RAW_FINAL_TYPE_SER_SIZE, info.TARGET_ENDIAN, info.TECH, info.CACHE_MODE);
+                },
+                .STRUCT => {
+                    self.add_ref_unique_type_op(info.STRUCT_UNIQUE_IDX, offset_to_next);
+                },
+                .ADD_SENTINEL => {
+                    self.add_pointer_sentinel_op(@sizeOf(info.PTR_CHILD_TYPE), info.PTR_SENTINEL.?);
+                },
+            }
+        }
     }
 };
 
-pub const RoutineStepKind = enum(u8) {
-    BYTE_MOVE,
-    UNION_HEADER,
-    UNION_SUBROUTINE_OFFSET,
+pub const NO_FIELD_CACHE = "<cached but no field>";
+pub const NO_LEN_CACHE = "<no cached len>";
+pub const NO_TAG_CACHE = "<no cached tag>";
+pub const NO_NULL_CACHE = "<no cached null>";
+pub const NO_FIELD_END_STRUCT = "<null, end struct>";
+
+pub const WithNextField = struct {
+    next: ?[]const u8 = null,
+
+    pub fn next_field_is(field: []const u8) WithNextField {
+        return WithNextField{ .next = field };
+    }
+    pub fn this_is_last_field() WithNextField {
+        return WithNextField{ .next = null };
+    }
+};
+
+pub const UseCachedLen = struct {
+    cached: ?[]const u8 = null,
+
+    pub fn use_cached_len_field(field: []const u8) UseCachedLen {
+        return UseCachedLen{ .cached = field };
+    }
+    pub fn no_len_needed() UseCachedLen {
+        return UseCachedLen{ .cached = null };
+    }
+};
+
+/// A 'high-level' DataOpBuilder. This is usually the best choice
+/// for most custom serialization solutions, as it generally ensures
+/// correct functionality. Only valid when the current type is a struct type,
+/// but it provides extensions for building custom union and optional routines.
+pub const DataOpBuilderHighLevel = extern struct {
+    /// A 'low-level' DataOpBuilder. You can add specific ops in any custom order,
+    /// and it is up to the library consumer to ensure it is correct.
+    low_level: DataOpBuilderLowLevel,
+
+    pub fn get_settings(self: *const DataOpBuilderHighLevel) ObjectSerialSettings {
+        return self.low_level.internal.object_settings;
+    }
+
+    /// Add a struct field using the standard procedure. Supported numeric fields will have
+    /// their ops written inline in 1-6 ops, while non-packed structs will
+    /// reference their unique 'struct + settings' as recorded in the
+    /// `unique_structs: []const UniqueSerialStructAndSettings` list generated by the SerializationManager
+    ///
+    /// Valid type patterns are:
+    ///   - `NUMERIC_OR_STRUCT`
+    ///   - `[ARRAY_OR_VECTOR]NUMERIC_OR_STRUCT`
+    ///   - `[CHAIN][OF][NESTED][ARRAYS][OR][VECTORS]NUMERIC_OR_STRUCT`
+    ///   - `*NUMERIC_OR_STRUCT`
+    ///   - `?*NUMERIC_OR_STRUCT`
+    ///   - `*[ARRAY_OR_VECTOR]NUMERIC_OR_STRUCT`
+    ///   - `?*[ARRAY_OR_VECTOR]NUMERIC_OR_STRUCT`
+    ///   - `*[CHAIN][OF][NESTED][ARRAYS][OR][VECTORS]NUMERIC_OR_STRUCT`
+    ///   - `?*[CHAIN][OF][NESTED][ARRAYS][OR][VECTORS]NUMERIC_OR_STRUCT`
+    ///   - `[*]NUMERIC_OR_STRUCT`
+    ///   - `?[*]NUMERIC_OR_STRUCT`
+    ///   - `[*][ARRAY_OR_VECTOR]NUMERIC_OR_STRUCT`
+    ///   - `?[*][ARRAY_OR_VECTOR]NUMERIC_OR_STRUCT`
+    ///   - `[*][CHAIN][OF][NESTED][ARRAYS][OR][VECTORS]NUMERIC_OR_STRUCT`
+    ///   - `?[*][CHAIN][OF][NESTED][ARRAYS][OR][VECTORS]NUMERIC_OR_STRUCT`
+    ///
+    /// Where `NUMERIC` is one of the following:
+    ///   - Integer
+    ///   - Enum
+    ///   - Bool
+    ///   - Float
+    ///   - Packed Struct
+    ///   - Packed Union
+    ///   - Any zero-size type (Skips field, even pointers to them, since any pointer address is valid)
+    ///
+    /// Where `STRUCT` must be a non-packed struct (otherwise it will be a numeric)
+    ///
+    /// Other type patterns must be handled with manual `DataOpBuilderLowLevel` calls, manual runtime serialization functions, or using one of the
+    /// provided `Serial______` types that have pre-defined custom routines and can behave like their native counterparts:
+    ///  - Non-packed unions => `SerialTaggedUnion` or `SerialPunnedUnion`
+    ///  - Non-pointer optionals => `SerialOptional`
+    ///  - Slices => `SerialSlice`
+    ///  - Errors => use an Enum instead
+    ///    - error int values are not even compatible across zig binaries, let alone in foreign consumers
+    ///  - Error unions => Combine solutions for 'non-packed unions' and 'errors'
+    ///    - One union branch is an enum with the error code
+    ///    - One union branch with the payload
+    ///    - ... or your custom op calls or runtime serial functions
+    ///  - Arrays of pointers or pointers to arrays of pointers => Manual op calls or runtime funcs only
+    ///    - This may change in the future but greatly complicates serialization
+    pub fn add_field(comptime self: *DataOpBuilderHighLevel, comptime FIELD: []const u8, comptime NEXT_FIELD: WithNextField, comptime USE_LEN: UseCachedLen, comptime OVERRIDES: SerialSettingsOverride) CompleteTypeSerialInfo {
+        _ = self.low_level.handle_field_links_and_get_offset_to_next(FIELD, NEXT_FIELD.next);
+        if (USE_LEN.cached != null) {
+            self.low_level.internal.assert_cached_len_match(USE_LEN.cached.?, @src());
+        }
+        const COMPLETE_INFO = comptime self.low_level.get_complete_type_info_from_field_and_next_field(FIELD, NEXT_FIELD, OVERRIDES);
+        if (USE_LEN.cached != null or COMPLETE_INFO.NEEDS_CACHED_LEN == true) {
+            assert_with_reason(USE_LEN.cached != null, @src(), "you must have a cached len at this point. If you know a cached len exists, provide the name of the cached field for validation", .{});
+            self.low_level.internal.assert_cached_len_match(USE_LEN.cached.?, @src());
+            assert_with_reason(COMPLETE_INFO.NEEDS_CACHED_LEN == true, @src(), "it was expected that the type required a cached len, but the complete info indicated it didn't", .{});
+        }
+        self.low_level.add_ops_for_complete_type_serial_info(COMPLETE_INFO);
+        self.low_level.internal.handle_cached_values(FIELD, COMPLETE_INFO);
+        return COMPLETE_INFO;
+    }
+
+    /// Build an extern union subroutine using a tag cached by a previous data transfer op. Note the input parameters:
+    ///   - `CACHED_TAG_FIELD` = the field name that was previously cached MUST MATCH the one recorded. This is mainly for validation of expected behavior.
+    ///   - `TAG_TYPE` = an Enum or Integer type that is used to choose the active union field.
+    ///     - These do not necessarily need to correlate 1-to-1 with the union fields,
+    /// the builder is responsible for correctly filling in the union data based on tag values
+    pub fn start_extern_union_builder_with_cached_tag(comptime self: *DataOpBuilderHighLevel, comptime FIELD: []const u8, comptime NEXT_FIELD: ?[]const u8, comptime CACHED_TAG_FIELD: []const u8, comptime TAG_TYPE: type, comptime OVERRIDES: SerialSettingsOverride) DataOpBuilderExternUnion(TAG_TYPE) {
+        self.low_level.internal.assert_cached_tag_and_type_match(self, CACHED_TAG_FIELD, TAG_TYPE, @src());
+        _ = self.low_level.handle_field_links_and_get_offset_to_next(self, FIELD, NEXT_FIELD);
+        const TYPE, const SETTINGS, const OFFSET_TO_NEXT_FIELD = self.low_level.get_type_settings_and_offset_from_field_and_next_field(FIELD, NEXT_FIELD, OVERRIDES);
+        const KIND = KindInfo.get_kind_info(TYPE);
+        assert_with_reason(KIND == .UNION and KIND.UNION.tag_type == null and KIND.UNION.layout == .@"extern", @src(), "type of `FIELD` must be an extern union type (it is the only union type with a well defined memory layout for automatic serialization), got type `{s}`", .{@typeName(TYPE)});
+        const header_op_idx = self.low_level.internal.ops_len;
+        self.low_level.add_union_header_op(0);
+        const UNION_BUILDER = DataOpBuilderExternUnion(TAG_TYPE);
+        const union_builder = UNION_BUILDER{
+            .builder = self,
+            .settings = SETTINGS,
+            .op_idx_for_header = header_op_idx,
+            .union_type = TYPE,
+            .union_field = FIELD,
+            .offset_to_next_field = OFFSET_TO_NEXT_FIELD,
+        };
+        return union_builder;
+    }
+};
+
+pub fn DataOpBuilderExternUnion(comptime TAG_TYPE: type) type {
+    return struct {
+        const Self = @This();
+        builder: *DataOpBuilderHighLevel,
+        union_type: type,
+        union_field: []const u8,
+        settings: ObjectSerialSettings,
+        op_idx_for_header: u32,
+        num_branches: u32 = 0,
+        union_fields_needed: u32 = 0,
+        union_fields_added: u32 = 0,
+        offset_to_next_field: i32 = 0,
+
+        fn cast_val_to_u64(comptime val: TAG_TYPE) u64 {
+            const INFO = KindInfo.get_kind_info(TAG_TYPE);
+            switch (INFO) {
+                .ENUM => |ENUM| {
+                    const INT = ENUM.tag_type;
+                    const int = @intFromEnum(val);
+                    const uint: Types.UnsignedIntegerWithSameSize(INT) = @bitCast(int);
+                    return num_cast(uint, u64);
+                },
+                .INT => {
+                    const uint: Types.UnsignedIntegerWithSameSize(TAG_TYPE) = @bitCast(val);
+                    return num_cast(uint, u64);
+                },
+                else => assert_unreachable(@src(), "only Enums or Integers are allowed as `TAG_TYPE`, got type `{s}`", .{@typeName(TAG_TYPE)}),
+            }
+        }
+
+        pub const TagMode = union(enum) {
+            SINGLE_TAG_VALUE: TAG_TYPE,
+            RANGE_OF_TAG_VALUES: struct { min: TAG_TYPE, max: TAG_TYPE },
+
+            pub fn single_tag_value(val: TAG_TYPE) TagMode {
+                return TagMode{ .SINGLE_TAG_VALUE = val };
+            }
+            pub fn range_of_tag_values(min: TAG_TYPE, max: TAG_TYPE) TagMode {
+                return TagMode{ .RANGE_OF_TAG_VALUES = .{ .min = min, .max = max } };
+            }
+        };
+
+        /// Add an extern union field using the standard procedure. Supported numeric fields will have
+        /// their ops written inline in 1-6 ops, while non-packed structs will
+        /// reference their unique 'struct + settings' subroutine as recorded in the
+        /// `unique_structs: []const UniqueSerialStructAndSettings` list generated by the SerializationManager
+        ///
+        /// Valid type patterns are:
+        ///   - `NUMERIC_OR_STRUCT`
+        ///   - `[ARRAY_OR_VECTOR]NUMERIC_OR_STRUCT`
+        ///   - `[CHAIN][OF][NESTED][ARRAYS][OR][VECTORS]NUMERIC_OR_STRUCT`
+        ///   - `*NUMERIC_OR_STRUCT`
+        ///   - `?*NUMERIC_OR_STRUCT`
+        ///   - `*[ARRAY_OR_VECTOR]NUMERIC_OR_STRUCT`
+        ///   - `?*[ARRAY_OR_VECTOR]NUMERIC_OR_STRUCT`
+        ///   - `*[CHAIN][OF][NESTED][ARRAYS][OR][VECTORS]NUMERIC_OR_STRUCT`
+        ///   - `?*[CHAIN][OF][NESTED][ARRAYS][OR][VECTORS]NUMERIC_OR_STRUCT`
+        ///   - `[*]NUMERIC_OR_STRUCT`
+        ///   - `?[*]NUMERIC_OR_STRUCT`
+        ///   - `[*][ARRAY_OR_VECTOR]NUMERIC_OR_STRUCT`
+        ///   - `?[*][ARRAY_OR_VECTOR]NUMERIC_OR_STRUCT`
+        ///   - `[*][CHAIN][OF][NESTED][ARRAYS][OR][VECTORS]NUMERIC_OR_STRUCT`
+        ///   - `?[*][CHAIN][OF][NESTED][ARRAYS][OR][VECTORS]NUMERIC_OR_STRUCT`
+        ///
+        /// Where `NUMERIC` is one of the following:
+        ///   - Integer
+        ///   - Enum
+        ///   - Bool
+        ///   - Float
+        ///   - Packed Struct
+        ///   - Packed Union
+        ///   - Any zero-size type (Skips field, even pointers to them, since any pointer address is valid)
+        ///
+        /// Where `STRUCT` must be a non-packed struct (otherwise it will be a numeric)
+        ///
+        /// Other type patterns must be handled with manual `DataOpBuilderLowLevel` calls, manual runtime serialization functions, or using one of the
+        /// provided `Serial______` types that have pre-defined custom routines and can behave like their native counterparts:
+        ///  - Non-packed unions => `SerialTaggedUnion` or `SerialPunnedUnion`
+        ///  - Non-pointer optionals => `SerialOptional`
+        ///  - Slices => `SerialSlice`
+        ///  - Errors => use an Enum instead
+        ///    - error int values are not even compatible across zig binaries, let alone in foreign consumers
+        ///  - Error unions => Combine solutions for 'non-packed unions' and 'errors'
+        ///    - One union branch is an enum with the error code
+        ///    - One union branch with the payload
+        ///    - ... or your custom op calls or runtime serial functions
+        ///  - Arrays of pointers or pointers to arrays of pointers => Manual op calls or runtime funcs only
+        ///    - This may change in the future but greatly complicates serialization
+        pub fn add_field(comptime self: *Self, comptime TAG: TagMode, comptime FIELD: []const u8, comptime USE_LEN: DataOpBuilderHighLevel.UseCachedLen, comptime OVERRIDES: SerialSettingsOverride) CompleteTypeSerialInfo {
+            assert_with_reason(@hasField(self.union_type, FIELD), @src(), "union type `{s}` does not have field `{s}`", .{ @typeName(self.union_type), FIELD });
+            const TYPE = @FieldType(self.union_type, FIELD);
+            const FIELD_SETTINGS = get_field_settings(self.union_type, FIELD);
+            const OBJECT_SETTINGS = get_object_settings(TYPE);
+            const SETTINGS = self.settings.with_custom_routine_removed().combined_with_optional(OBJECT_SETTINGS).combined_with_optional(FIELD_SETTINGS);
+            if (USE_LEN.cached != null) {
+                DataOpBuilderHighLevel.INTERNAL.assert_cached_len_match(self.builder, USE_LEN.cached.?, @src());
+            }
+            const COMPLETE_INFO = comptime self.builder.low_level.get_complete_type_info_from_type_settings_and_offset_to_next(TYPE, self.offset_to_next_field, SETTINGS, OVERRIDES);
+            if (USE_LEN.cached != null or COMPLETE_INFO.NEEDS_CACHED_LEN == true) {
+                assert_with_reason(USE_LEN.cached != null, @src(), "you must have a cached len at this point. If you know a cached len exists, provide the name of the cached field for validation", .{});
+                DataOpBuilderHighLevel.INTERNAL.assert_cached_len_match(self, USE_LEN.cached.?, @src());
+                assert_with_reason(COMPLETE_INFO.NEEDS_CACHED_LEN == true, @src(), "it was expected that the type required a cached len, but the complete info indicated it didn't", .{});
+            }
+            switch (TAG) {
+                .SINGLE_TAG_VALUE => |val| {
+                    const as_u64 = cast_val_to_u64(val);
+                    self.builder.low_level.add_union_tag_op(as_u64, COMPLETE_INFO.NUM_OPS_REQUIRED_TO_SERIALIZE);
+                },
+                .RANGE_OF_TAG_VALUES => |range| {
+                    const min_as_u64 = cast_val_to_u64(range.min);
+                    const max_as_u64 = cast_val_to_u64(range.max);
+                    self.builder.low_level.add_union_range_op(min_as_u64, max_as_u64, COMPLETE_INFO.NUM_OPS_REQUIRED_TO_SERIALIZE);
+                },
+            }
+            self.builder.low_level.add_ops_for_complete_type_serial_info(COMPLETE_INFO);
+            DataOpBuilderHighLevel.INTERNAL.handle_cached_values(self.builder, self.union_field ++ "." ++ FIELD, COMPLETE_INFO);
+            self.num_branches += 1;
+            return COMPLETE_INFO;
+        }
+
+        pub fn finalize(comptime self: *Self) void {
+            self.builder.low_level.internal.ops[self.op_idx_for_header].UNION_HEADER.num_fields = self.num_branches;
+            self.builder.low_level.internal.ops[self.op_idx_for_header].UNION_HEADER.total_num_ops_in_union_after_header = self.builder.low_level.internal.ops_len - self.op_idx_for_header;
+            self.* = undefined;
+        }
+    };
+}
+
+const RoutineStackFrame = struct {
+    min_native_addr: usize = 0,
+    max_native_addr: usize = 0,
+    native_ptr: [*]u8 = Utils.invalid_ptr_many(u8),
+    routine_start: u32 = 0,
+    routine_end: u32 = 0,
+    routine_idx: u32 = 0,
+    routine_repeat_left: u32 = 0,
+    cache_len: usize = 0,
+    has_len: bool = false,
+    cache_tag: u64 = 0,
+    has_tag: bool = false,
+    cache_null: bool = false,
+    has_null: bool = false,
+
+    fn clone_keep_cache(self: *RoutineStackFrame) RoutineStackFrame {
+        return self.*;
+    }
+    fn clone_ptr_only(self: *RoutineStackFrame) RoutineStackFrame {
+        return RoutineStackFrame{
+            .min_native_addr = self.min_native_addr,
+            .max_native_addr = self.max_native_addr,
+            .native_ptr = self.native_ptr,
+        };
+    }
+    fn clone_with_empty_cache(self: *RoutineStackFrame) RoutineStackFrame {
+        var routine = self.*;
+        routine.cache_len = 0;
+        routine.cache_null = false;
+        routine.cache_tag = 0;
+        routine.has_len = false;
+        routine.has_null = false;
+        routine.has_tag = false;
+        return routine;
+    }
+
+    fn set_new_memory_region(self: *RoutineStackFrame, ptr: [*]u8, byte_len: usize) void {
+        self.min_native_addr = @intFromPtr(ptr);
+        self.max_native_addr = self.min_native_addr + byte_len;
+        self.native_ptr = ptr;
+    }
+
+    fn set_op_slice_starting_from_current(self: *RoutineStackFrame, num_ops: u32, repeat: u32) void {
+        self.routine_start = self.routine_idx;
+        self.routine_end = self.routine_start + num_ops;
+        self.routine_repeat_left = repeat;
+    }
+
+    fn set_op_slice_starting_from_non_inline_subroutine_op(self: *RoutineStackFrame, subroutine: Subroutine, repeat: u32) void {
+        self.routine_start = subroutine.subroutine_first_op;
+        self.routine_end = subroutine.subroutine_first_op + num_cast(subroutine.subroutine_num_ops, u32);
+        self.routine_idx = subroutine.subroutine_first_op;
+        self.routine_repeat_left = repeat;
+    }
+
+    fn move_native_ptr_i32(self: *RoutineStackFrame, delta: i32) void {
+        if (delta < 0) {
+            self.native_ptr -= abs_cast(delta, usize);
+        } else {
+            self.native_ptr += num_cast(delta, usize);
+        }
+        if (Assert.should_assert()) {
+            const native_addr = @intFromPtr(self.native_ptr);
+            assert_with_reason(self.min_native_addr <= native_addr and native_addr < self.max_native_addr, @src(), "native pointer offset caused the native pointer to escape its memory region: new ptr address {s}", .{if (self.min_native_addr > native_addr) "too low" else "too high"});
+        }
+    }
+
+    fn move_native_ptr_pos_neg(self: *RoutineStackFrame, pos_offset: u32, neg_offset: u32) void {
+        self.native_ptr = (self.native_ptr + pos_offset) - neg_offset;
+        if (Assert.should_assert()) {
+            const native_addr = @intFromPtr(self.native_ptr);
+            assert_with_reason(self.min_native_addr <= native_addr and native_addr < self.max_native_addr, @src(), "native pointer offset caused the native pointer to escape its memory region: new ptr address {s}", .{if (self.min_native_addr > native_addr) "too low" else "too high"});
+        }
+    }
+
+    fn move_native_ptr_backward(self: *RoutineStackFrame, backward_offset: u32) void {
+        self.native_ptr -= num_cast(backward_offset, usize);
+        if (Assert.should_assert()) {
+            const native_addr = @intFromPtr(self.native_ptr);
+            assert_with_reason(self.min_native_addr <= native_addr and native_addr < self.max_native_addr, @src(), "native pointer offset caused the native pointer to escape its memory region: new ptr address {s}", .{if (self.min_native_addr > native_addr) "too low" else "too high"});
+        }
+    }
+
+    fn move_native_ptr_forward(self: *RoutineStackFrame, forward_offset: u32) void {
+        self.native_ptr += num_cast(forward_offset, usize);
+        if (Assert.should_assert()) {
+            const native_addr = @intFromPtr(self.native_ptr);
+            assert_with_reason(self.min_native_addr <= native_addr and native_addr < self.max_native_addr, @src(), "native pointer offset caused the native pointer to escape its memory region: new ptr address {s}", .{if (self.min_native_addr > native_addr) "too low" else "too high"});
+        }
+    }
+
+    pub fn increment_op(self: *RoutineStackFrame, n: u32) void {
+        assert_with_reason(self.routine_idx + n <= self.routine_end, @src(), "incrementing the current routine op index by {d} exceeds the maximum range of the routine's op slice", .{n});
+        self.routine_idx += n;
+        if (self.routine_idx == self.routine_end) {
+            self.routine_repeat_left -= 1;
+            if (self.routine_repeat_left > 0) {
+                self.routine_idx = self.routine_start;
+            }
+        }
+    }
+
+    pub fn get_cached_len(self: *const RoutineStackFrame) usize {
+        assert_with_reason(self.has_len, @src(), "no 'len' cached, but it is required", .{});
+        return self.cache_len;
+    }
+    pub fn get_cached_tag(self: *const RoutineStackFrame) u64 {
+        assert_with_reason(self.has_tag, @src(), "no 'tag' cached, but it is required", .{});
+        return self.cache_tag;
+    }
+    pub fn get_cached_null(self: *const RoutineStackFrame) bool {
+        assert_with_reason(self.has_null, @src(), "no 'null' cached, but it is required", .{});
+        return self.cache_null;
+    }
+
+    pub fn is_done(self: *RoutineStackFrame) bool {
+        return self.routine_repeat_left == 0;
+    }
+
+    pub fn not_done(self: *RoutineStackFrame) bool {
+        return self.routine_repeat_left > 0;
+    }
 };
 
 pub const PointerMode = enum(u8) {
@@ -1257,150 +1853,8 @@ pub const PointerMode = enum(u8) {
     FOLLOW_POINTERS,
 };
 
-pub const SaveTagMode = enum(u8) {
-    NOT_A_UNION_TAG,
-    IS_A_UNION_TAG,
-};
-
-pub const SubRoutineMode = enum(u8) {
-    UNION,
-    SINGLE_POINTER,
-    MANY_POINTER,
-    SLICE_POINTER,
-};
-
-const CyclesPossible = enum(u8) {
-    CYCLES_IMPOSSIBLE,
-    CYCLES_POSSIBLE,
-    CYCLES_INFINITE,
-};
-
-const EvalHeirarchyResult = struct {
-    cycles: CyclesPossible = .CYCLES_IMPOSSIBLE,
-};
-
-pub const CustomComptimeBuilderRoutineFunc = fn (comptime self: *SerialRoutineBuilder, comptime curr_native_offset: usize, comptime SETTINGS: SerialFieldSettings) void;
-pub const CustomSerializeDecl = "SERIAL_INFO";
-pub const CustomSerializeSetting = "OBJECT_SETTINGS";
-pub const CustomSerializeFieldSetting = "FIELD_SETTINGS";
-pub const CustomSerializeFieldAllocSetting = "FIELD_ALLOCATOR_NAMES";
-pub const SerialFieldOptionalSettingsName = "SerialFieldOptionalSettings";
-pub const SerialFieldSettingsName = "SerialFieldSettings";
-
-pub const CustomSerialRoutineMode = enum(u8) {
-    NO_CUSTOM_ROUTINE,
-    CUSTOM_COMPTIME_BUILDER_ROUTINE,
-    CUSTOM_RUNTIME_SERIALIZE,
-};
-
-/// Param `self` is a pointer to the object to serialize.
-///
-/// The return `usize` value is the number of bytes written after `start_index`
-pub const CustomWriteToSerialFunc = fn (self: *const anyopaque, serial_dest: SerialDest, start_index: usize) SerialWriteError!usize;
-/// Param `self` is a pointer to the object to serialize.
-///
-/// The return `usize` value is the number of bytes read after `start_index`
-pub const CustomReadFromSerialFunc = fn (self: *anyopaque, serial_source: SerialSource, start_index: usize) SerialReadError!usize;
-
-pub const CustomRuntimeSerializeFuncs = struct {
-    write_to_serial: *const CustomWriteToSerialFunc,
-    read_from_serial: *const CustomReadFromSerialFunc,
-};
-
-pub const CustomSerialRoutine = union(CustomSerialRoutineMode) {
-    /// Use the default logic for serialization
-    NO_CUSTOM_ROUTINE,
-    /// Add custom comptime routine builder logic to the `SerialRoutineBuilder`
-    CUSTOM_COMPTIME_BUILDER_ROUTINE: CustomComptimeBuilderRoutineFunc,
-    /// Run a completely custom function at runtime to serialize this
-    /// object, using no comptime-generated bytecode.
-    CUSTOM_RUNTIME_SERIALIZE: *const CustomRuntimeSerializeFuncs,
-};
-
-pub const SerialFieldOptionalSettings = struct {
-    target_endian: ?Endian = null,
-    integer_packing: ?IntegerPacking = null,
-    allocator_name: ?[]const u8 = null,
-    pointer_mode: ?PointerMode = null,
-    custom_routine: CustomSerialRoutine = .NO_CUSTOM_ROUTINE,
-    usize_compat: ?UsizeCompatMode = null,
-};
-
-pub fn combine_field_settings(comptime default_settings: SerialFieldSettings, comptime parent_field_settings: ?SerialFieldOptionalSettings, comptime object_settings: ?SerialFieldOptionalSettings) SerialFieldSettings {
-    var final_settings = default_settings;
-    if (object_settings) |settings| {
-        if (settings.allocator_name) |alloc| final_settings.allocator_name = alloc;
-        if (settings.integer_packing) |int_pack| final_settings.integer_packing = int_pack;
-        if (settings.pointer_mode) |ptr_mode| final_settings.pointer_mode = ptr_mode;
-        if (settings.target_endian) |endian| final_settings.target_endian = endian;
-        if (settings.usize_compat) |compat| final_settings.usize_compat = compat;
-        if (settings.custom_routine != .NO_CUSTOM_ROUTINE) final_settings.custom_routine = settings.custom_routine;
-    }
-    if (parent_field_settings) |settings| {
-        if (settings.allocator_name) |alloc| final_settings.allocator_name = alloc;
-        if (settings.integer_packing) |int_pack| final_settings.integer_packing = int_pack;
-        if (settings.pointer_mode) |ptr_mode| final_settings.pointer_mode = ptr_mode;
-        if (settings.target_endian) |endian| final_settings.target_endian = endian;
-        if (settings.usize_compat) |compat| final_settings.usize_compat = compat;
-        if (settings.custom_routine != .NO_CUSTOM_ROUTINE) final_settings.custom_routine = settings.custom_routine;
-    }
-    return final_settings;
-}
-
-pub const SerialFieldSettings = struct {
-    target_endian: Endian = .LITTLE_ENDIAN,
-    integer_packing: IntegerPacking = .USE_TARGET_ENDIAN,
-    allocator_name: []const u8 = DEFAULT_ALLOC_NAME,
-    pointer_mode: PointerMode = .DISALLOW_POINTERS,
-    custom_routine: CustomSerialRoutine = .NO_CUSTOM_ROUTINE,
-    usize_compat: UsizeCompatMode = .USIZE_ALWAYS_VARINT,
-
-    pub fn without_custom_routine(comptime self: SerialFieldSettings) SerialFieldSettings {
-        var settings = self;
-        settings.custom_routine = .NO_CUSTOM_ROUTINE;
-        return settings;
-    }
-};
-
-pub fn get_on_object_settings(comptime TYPE: type) ?SerialFieldOptionalSettings {
-    const KIND = Kind.get_kind(TYPE);
-    switch (KIND) {
-        .STRUCT, .ENUM, .UNION, .OPAQUE => {
-            if (@hasDecl(TYPE, CustomSerializeDecl)) {
-                const serial_info = @field(TYPE, CustomSerializeDecl);
-                assert_with_reason(Kind.STRUCT.type_is_same_kind(serial_info), @src(), "type `{s}` has a `{s}` declaration, but it is not a structure type (it must be a struct), got type `{s}`", .{ @typeName(TYPE), CustomSerializeDecl, @typeName(@TypeOf(serial_info)) });
-                if (@hasDecl(serial_info, CustomSerializeSetting)) {
-                    const object_settings = @field(serial_info, CustomSerializeSetting);
-                    assert_with_reason(@TypeOf(object_settings) == SerialFieldOptionalSettings, @src(), "type `{s}` has a `{s}.{s}` declaration, but it is not a `SerialFieldSettings`, got type `{s}`", .{ @typeName(TYPE), CustomSerializeDecl, CustomSerializeSetting });
-                    return object_settings;
-                }
-            }
-        },
-        else => {},
-    }
-    return null;
-}
-
-pub fn get_parent_field_settings(comptime PARENT: ?type, comptime FIELD_ON_PARENT: ?[]const u8) ?SerialFieldOptionalSettings {
-    if (PARENT != null or FIELD_ON_PARENT != null) assert_with_reason(PARENT != null and FIELD_ON_PARENT != null, @src(), "if either `PARENT` or `FIELD_ON_PARENT` is not null, the other must also not be null", .{});
-    if (PARENT != null and FIELD_ON_PARENT != null and @hasDecl(PARENT.?, CustomSerializeDecl)) {
-        const serial_info = @field(PARENT.?, CustomSerializeDecl);
-        assert_with_reason(Kind.STRUCT.type_is_same_kind(serial_info), @src(), "type parent `{s}` has a `{s}` declaration, but it is not a structure type (it must be a struct)", .{ @typeName(PARENT.?), CustomSerializeDecl });
-        if (@hasDecl(serial_info, CustomSerializeFieldSetting)) {
-            const serial_field_settings = @field(serial_info, CustomSerializeFieldSetting);
-            assert_with_reason(Kind.STRUCT.type_is_same_kind(serial_field_settings), @src(), "type parent `{s}` has a `{s}.{s}` declaration, but it is not a structure type (it must be a struct, where each decl is of the form `pub const <field on parent>: SerialFieldSettings = .{...};)", .{ @typeName(PARENT.?), CustomSerializeDecl, CustomSerializeFieldSetting });
-            if (@hasDecl(serial_field_settings, FIELD_ON_PARENT.?)) {
-                const field_settings = @field(serial_field_settings, FIELD_ON_PARENT.?);
-                assert_with_reason(@TypeOf(field_settings) == SerialFieldOptionalSettings, @src(), "type parent `{s}` has a `{s}.{s}.{s}` declaration, but it is not a `SerialFieldSettings`, got type `{s}`", .{ @typeName(PARENT.?), CustomSerializeDecl, CustomSerializeFieldSetting, FIELD_ON_PARENT.? });
-                return field_settings;
-            }
-        }
-    }
-    return null;
-}
-
 pub const UsizeCompatMode = enum(u8) {
-    /// usize and isize have no compatibility between 64 and 32 bit platforms
+    /// usize and isize have no compatibility between 64 bit and 32 bit platforms
     NO_USIZE_COMPATIBILITY,
     // /// Forces usize and isize to always be serialized as a u64 for compatibility
     // /// between 64-bit and 32-bit platforms
@@ -1410,1344 +1864,785 @@ pub const UsizeCompatMode = enum(u8) {
     USIZE_ALWAYS_VARINT,
 };
 
-pub const SerialSettings = struct {
-    /// How to pack integers in the serial data.
-    ///
-    /// When `USE_TARGET_ENDIAN` is chosen, bytes will be packed using the same size as their
-    /// native code size, in the target endian byte order.
-    ///
-    /// When `USE_VARINTS` is chosen, data is compressed such that smaller runtime values require
-    /// fewer bytes than the native code type maximum, at the cost of additional processing time.
-    INTEGER_BYTE_PACKING: IntegerPacking = .USE_TARGET_ENDIAN,
-    /// This forces usize and isize to be serialized in way that can be read the same way
-    /// on both 64-bit and 32-bit platforms.
-    USIZE_COMPATIBILITY: UsizeCompatMode = .USIZE_ALWAYS_VARINT,
-    /// How to pack float bytes in the serial data. `LITTLE_ENDIAN` is
-    /// in most cases the best choice, as most target platforms are natively little-endian, allowing for
-    /// faster processing.
+pub const ObjectSerialSettings = struct {
+    INTEGER_PACKING: IntegerPacking = .USE_TARGET_ENDIAN,
     TARGET_ENDIAN: Endian = .LITTLE_ENDIAN,
-    /// You may need to set this MUCH higher depending on how complex the object you are serializing
-    /// is. A serial routine is created at COMPTIME, and the compiler will tell you with a compiler error
-    /// if this needs to be larger.
-    ///
-    /// This has no effect on the serialization process at runtime.
-    COMPTIME_EVAL_QUOTA: u32 = 5000,
-    /// For debugging purposes. If you are having issues and you can pinpoint at what byte
-    /// serializeation/deserialization is failing, set this to true to maybe get some info back about it
-    ADD_ROUTINE_DEBUG_INFO: bool = false,
-    /// For debugging purposes. If you are having issues and you can pinpoint at what byte
-    /// serializeation/deserialization is failing, you can put that byte index here
-    /// to get some info back about it.
-    TARGET_DEBUG_INDEX: ?usize = null,
-    /// If non-null, include a set of 'magic' bytes at the very start of the serialized data
-    /// AND as a constant on the routine serializer
-    /// that can be used as a quick identifier for the data being serialized.
-    ///
-    /// When attempting to read serial data, if the magic id does not match the const
-    /// saved on the routine, an `error.magic_identifier_mismatch` will be returned.
-    ///
-    /// For example, you might use this if you are creating a file format so that
-    /// code reading the file data can verify that they are definitely reading the format they are expecting,
-    /// OR possibly if a file/network message has multiple possible serial formats
-    /// (independant of the format *version*), the consumer can read this value
-    /// and choose a code path to evaluate it with using a switch statement.
-    ///
-    /// (see https://en.wikipedia.org/wiki/List_of_file_signatures)
-    ///
-    /// You should try to avoid using the same 'magic identifier' as other well-known
-    /// magic identifiers *if your format may be used in the same context as those formats*
-    /// (if your format will generally not be expected to be used in the same context
-    /// as another format with a conflicting identifier, there is no problem using
-    /// the same identifier)
-    MAGIC_IDENTIFIER: ?[]const u8 = null,
-    /// If non-null, this should be the version of the object being serialized,
-    /// and this 4-byte version number will be at the beginning of the serial
-    /// stream (AFTER the 'magic identifier', if that is also included),
-    /// AND will be saved as a constant on the final routine. If there is
-    /// a version mismatch between the serial stream and the constant on the
-    /// routine, an `error.serial_version_mismatch` will be returned when
-    /// deserialization is attempted.
-    ///
-    /// If you want to support backwards compatibility with older versions,
-    /// ANY time you change ANY part of the object to serialize, you should
-    /// increase this version number by 1 and retain the old routine
-    /// (and probbably the old object too) in your code somewhere.
-    ROUTINE_VERSION: ?u32 = null,
-    /// Whether to disallow, ignore, or follow pointers and slices:
-    ///   - `DISALLOW_POINTERS` = pointers in object to serialize cause panic at comptime
-    ///   - `IGNORE_POINTERS` = pointers are ignored and not serialized
-    ///   - `FOLLOW_POINTERS` = follow pointers and serialize the data they hold, including
-    /// any pointers the pointed-to object(s) may contain
-    POINTER_MODE: PointerMode = .DISALLOW_POINTERS,
-};
+    ALLOCATOR_NAME: []const u8 = DEFAULT_ALLOC_NAME,
+    POINTER_MODE: PointerMode = .FOLLOW_POINTERS,
+    CUSTOM_ROUTINE: CustomSerialRoutine = .NO_CUSTOM_ROUTINE,
+    USIZE_COMPATABILITY: UsizeCompatMode = .USIZE_ALWAYS_VARINT,
 
-const RefSlice = struct {
-    start: u32,
-    len: u32,
+    pub fn equals(a: ObjectSerialSettings, b: ObjectSerialSettings) bool {
+        return ( //
+            a.INTEGER_PACKING == b.INTEGER_PACKING and
+                a.TARGET_ENDIAN == b.TARGET_ENDIAN and
+                a.POINTER_MODE == b.POINTER_MODE and
+                a.USIZE_COMPATABILITY == b.USIZE_COMPATABILITY and
+                std.mem.eql(u8, a.ALLOCATOR_NAME, b.ALLOCATOR_NAME) and
+                a.CUSTOM_ROUTINE.equals(b.CUSTOM_ROUTINE)
+                //
+        );
+    }
 
-    pub inline fn hydrate(self: RefSlice, ref_buffer: []u8) []u8 {
-        return ref_buffer[self.start..][0..self.len];
+    pub fn combined_with_optional(self: ObjectSerialSettings, optionals: ?OptionalObjectSerialSettings) ObjectSerialSettings {
+        var out = self;
+        if (optionals) |opt| {
+            if (opt.ALLOCATOR_NAME) |alloc_name| out.ALLOCATOR_NAME = alloc_name;
+            if (opt.CUSTOM_ROUTINE) |routine| out.CUSTOM_ROUTINE = routine;
+            if (opt.INTEGER_PACKING) |int_packing| out.INTEGER_PACKING = int_packing;
+            if (opt.POINTER_MODE) |ptr_mode| out.POINTER_MODE = ptr_mode;
+            if (opt.TARGET_ENDIAN) |endian| out.TARGET_ENDIAN = endian;
+            if (opt.USIZE_COMPATABILITY) |compat| out.USIZE_COMPATABILITY = compat;
+        }
+        return out;
+    }
+
+    pub fn combined_with_overrides(self: ObjectSerialSettings, overrides: SerialSettingsOverride) ObjectSerialSettings {
+        var out = self;
+        if (overrides.INTEGER_PACKING) |int_packing| out.INTEGER_PACKING = int_packing;
+        if (overrides.POINTER_MODE) |ptr_mode| out.POINTER_MODE = ptr_mode;
+        if (overrides.TARGET_ENDIAN) |endian| out.TARGET_ENDIAN = endian;
+        if (overrides.USIZE_COMPATABILITY) |compat| out.USIZE_COMPATABILITY = compat;
+        return out;
+    }
+
+    pub fn with_custom_routine_removed(self: ObjectSerialSettings) ObjectSerialSettings {
+        var out = self;
+        out.CUSTOM_ROUTINE = .NO_CUSTOM_ROUTINE;
+        return out;
     }
 };
 
-
-pub const HeirarchyMember = struct {
-    object_type: type = void,
-    num_siblings: u32 = 0,
-    num_children: u32 = 0,
-    num_branches: u32 = 0,
-    children_range: SliceRangeSmall = .{},
-    self_index: u32 = 0,
-    parent_index: u32 = 0,
-    has_parent: bool = false,
-    at_least_one_branch_is_childless: bool = false,
-    cycles: CyclesPossible = .CYCLES_IMPOSSIBLE,
+pub const OptionalObjectSerialSettings = struct {
+    INTEGER_PACKING: ?IntegerPacking = null,
+    TARGET_ENDIAN: ?Endian = null,
+    ALLOCATOR_NAME: ?[]const u8 = null,
+    POINTER_MODE: ?PointerMode = null,
+    CUSTOM_ROUTINE: ?CustomSerialRoutine = null,
+    USIZE_COMPATABILITY: ?UsizeCompatMode = null,
 };
 
-pub const HeirarchyMemberPool = Pool(HeirarchyMember, u32, HeirarchyMember{}, null, null);
+pub const SERIAL_INFO_DECL = "SERIAL_INFO";
+pub const OBJECT_SETTINGS_DECL = "OBJECT_SETTINGS";
+pub const FIELD_SETTINGS_DECL = "FIELD_SETTINGS";
+pub const FIELD_ALLOC_DECL = "FIELD_ALLOCATOR_NAMES";
+pub const OPTIONAL_OBJECT_SETTINGS_TYPE_NAME = "OptionalObjectSerialSettings";
+pub const OBJECT_SETTINGS_TYPE_NAME = "ObjectSerialSettings";
+pub const DEFAULT_ALLOC_NAME = "_DEFAULT_ALLOC_";
 
-pub const BuilderBufferArraySizes = struct {
-    op_buffer_len: u32 = 512,
-    union_end_buffer_len: u32 = 128,
-    alloc_name_buffer_len: u32 = 512,
-    alloc_name_list_len: u32 = 64,
-    subroutine_stack_len: u32 = 128,
-    heirarchy_pool_len: u32 = 512,
-    heirarchy_stack_len: u32 = 64,
-    cycle_eval_list_len: u32 = 64,
-};
+pub fn get_object_settings(comptime TYPE: type) ?OptionalObjectSerialSettings {
+    const KIND = Kind.get_kind(TYPE);
+    switch (KIND) {
+        .STRUCT, .ENUM, .UNION, .OPAQUE => {
+            if (@hasDecl(TYPE, SERIAL_INFO_DECL)) {
+                const serial_info = @field(TYPE, SERIAL_INFO_DECL);
+                assert_with_reason(Kind.STRUCT.type_is_same_kind(serial_info), @src(), "type `{s}` has a `{s}` declaration, but it is not a struct type (it must be a struct), got type `{s}`", .{ @typeName(TYPE), SERIAL_INFO_DECL, @typeName(@TypeOf(serial_info)) });
+                if (@hasDecl(serial_info, OBJECT_SETTINGS_DECL)) {
+                    const object_settings = @field(serial_info, OBJECT_SETTINGS_DECL);
+                    assert_with_reason(@TypeOf(object_settings) == OptionalObjectSerialSettings, @src(), "type `{s}` has a `{s}.{s}` declaration, but it is not a `{s}`, got type `{s}`", .{ @typeName(TYPE), SERIAL_INFO_DECL, OBJECT_SETTINGS_DECL, @typeName(OptionalObjectSerialSettings), @typeName(@TypeOf(object_settings)) });
+                    return object_settings;
+                }
+            }
+        },
+        else => {},
+    }
+    return null;
+}
 
-const CycleEval = struct {
-    start_at_heriarchy_index: u32,
-    look_for_type: type,
-};
+pub fn get_field_settings(comptime PARENT: type, comptime FIELD_ON_PARENT: []const u8) ?OptionalObjectSerialSettings {
+    if (@hasDecl(PARENT, SERIAL_INFO_DECL)) {
+        const serial_info = @field(PARENT, SERIAL_INFO_DECL);
+        assert_with_reason(Kind.STRUCT.type_is_same_kind(serial_info), @src(), "type parent `{s}` has a `{s}` declaration, but it is not a struct type (it must be a struct)", .{ @typeName(PARENT), SERIAL_INFO_DECL });
+        if (@hasDecl(serial_info, FIELD_SETTINGS_DECL)) {
+            const serial_field_settings = @field(serial_info, FIELD_SETTINGS_DECL);
+            assert_with_reason(Kind.STRUCT.type_is_same_kind(serial_field_settings), @src(), "type parent `{s}` has a `{s}.{s}` declaration, but it is not a struct type (it must be a struct, where each decl is of the form `pub const <field on parent>: SerialFieldSettings = .{...};)", .{ @typeName(PARENT), SERIAL_INFO_DECL, FIELD_SETTINGS_DECL });
+            if (@hasDecl(serial_field_settings, FIELD_ON_PARENT)) {
+                const field_settings = @field(serial_field_settings, FIELD_ON_PARENT);
+                assert_with_reason(@TypeOf(field_settings) == OptionalObjectSerialSettings, @src(), "type parent `{s}` has a `{s}.{s}.{s}` declaration, but it is not a `{s}`, got type `{s}`", .{ @typeName(PARENT.?), SERIAL_INFO_DECL, FIELD_SETTINGS_DECL, FIELD_ON_PARENT, @typeName(OptionalObjectSerialSettings), @typeName(@TypeOf(field_settings)) });
+                return field_settings;
+            }
+        }
+    }
+    return null;
+}
 
-pub fn BuilderBufferArrays(comptime sizes: BuilderBufferArraySizes) type {
+pub fn SerializationManager(comptime MAIN_TYPES_FOR_SERIALIZATION: []const type, comptime DEFAULT_SERIAL_SETTINGS: ObjectSerialSettings, comptime ARRAY_MAX_LENS: SerialManagerArrayLens) type {
+    comptime var _UNIQUE_TYPE_ARRAY: [ARRAY_MAX_LENS.UNIQUE_TYPE_BUFFER_MAX_LEN]UniqueSerialStructAndSettingsBuild = undefined;
+    comptime var _OP_BUFFER: [ARRAY_MAX_LENS.OP_BUFFER_MAX_LEN]DataOp = undefined;
+    comptime var _ALLOC_NAME_BUFFER: [ARRAY_MAX_LENS.ALLOC_NAME_BYTES_BUFFER_MAX_LEN]u8 = undefined;
+    comptime var _ALLOC_NAME_LIST: [ARRAY_MAX_LENS.ALLOC_NAME_LIST_MAX_LEN]SliceRange = undefined;
+    comptime var _OP_USED_TRACKER: [DataOpKind.NUM_OP_KINDS]bool = @splat(false);
+    comptime var _BUILDER = DataOpBuilderHighLevel{
+        .low_level = DataOpBuilderLowLevel{
+            .internal = DataOpBuilderInternal{
+                .ops_used_tracker = &_OP_USED_TRACKER,
+                .unique = _UNIQUE_TYPE_ARRAY[0..],
+                .ops = _OP_BUFFER[0..],
+                .alloc_buf = _ALLOC_NAME_BUFFER[0..],
+                .alloc_names = _ALLOC_NAME_LIST[0..],
+            },
+        },
+    };
+    _BUILDER.low_level.internal.build_all_type_routines_starting_from_these_root_types(MAIN_TYPES_FOR_SERIALIZATION, DEFAULT_SERIAL_SETTINGS);
+    comptime var _FINAL_OPS_LIST: [_BUILDER.low_level.internal.ops_len]DataOp = undefined;
+    comptime var _FINAL_UNIQUE_LIST: [_BUILDER.low_level.internal.unique_len]UniqueSerialStructAndSettingsFinal = undefined;
+    comptime var _FINAL_UNIQUE_LIST_ROOT: [MAIN_TYPES_FOR_SERIALIZATION.len]UniqueSerialStructAndSettingsFinal = undefined;
+    comptime {
+        for (_UNIQUE_TYPE_ARRAY[0.._BUILDER.low_level.internal.unique_len], 0..) |unique, u| {
+            _FINAL_UNIQUE_LIST[u] = unique.to_final();
+            if (u < MAIN_TYPES_FOR_SERIALIZATION.len) {
+                _FINAL_UNIQUE_LIST_ROOT[u] = _FINAL_UNIQUE_LIST[u];
+            }
+        }
+        for (_OP_BUFFER[0.._BUILDER.low_level.internal.ops_len], 0..) |op, o| {
+            const kind = op.GENERIC.kind;
+            const final_op = switch (kind) {
+                .REF_UNIQUE_TYPE_NO_REPEAT,
+                .REF_UNIQUE_TYPE_STATIC_REPEAT,
+                .REF_UNIQUE_TYPE_DYNAMIC_REPEAT,
+                => op.REF_UNIQUE_TYPE_SUBRS.to_subroutine_start(_FINAL_UNIQUE_LIST[0..]),
+                else => op,
+            };
+            _FINAL_OPS_LIST[o] = final_op;
+        }
+    }
+    const _FINAL_OPS_LIST_CONST = _FINAL_OPS_LIST;
+    const _FINAL_UNIQUE_LIST_ROOT_CONST = _FINAL_UNIQUE_LIST_ROOT;
+    const _FINAL_OP_USED_TRACKER_CONST = _OP_USED_TRACKER;
+    const _FINAL_NUM_ALLOCS = _BUILDER.low_level.internal.alloc_names_len;
+    const _FINAL_ALLOC_STRUCT_FIELDS = comptime make: {
+        var fields: [_FINAL_NUM_ALLOCS]std.builtin.Type.StructField = undefined;
+        for (_ALLOC_NAME_LIST[0.._FINAL_NUM_ALLOCS], 0..) |name_slice, f| {
+            const name: []const u8 = _ALLOC_NAME_BUFFER[name_slice.start..name_slice.end];
+            fields[f] = std.builtin.Type.StructField{
+                .alignment = @alignOf(Allocator),
+                .default_value_ptr = @ptrCast(&DummyAllocator.allocator_panic_free_noop),
+                .is_comptime = false,
+                .name = name,
+                .type = Allocator,
+            };
+        }
+        break :make fields;
+    };
+
     return struct {
         const Self = @This();
+        pub const OPS = _FINAL_OPS_LIST_CONST;
+        // pub const UNIQUES = _FINAL_UNIQUE_LIST_CONST;
+        pub const ROOT_TYPES = _FINAL_UNIQUE_LIST_ROOT_CONST;
+        const OP_USED = _FINAL_OP_USED_TRACKER_CONST;
+        const A_FIELDS = _FINAL_ALLOC_STRUCT_FIELDS;
+        const NUM_ALLOCS = _FINAL_NUM_ALLOCS;
+        pub const AllocatorsStruct: type = @Type(std.builtin.Type{ .@"struct" = std.builtin.Type.Struct{
+            .backing_integer = null,
+            .decls = &.{},
+            .is_tuple = false,
+            .layout = .auto,
+            .fields = A_FIELDS[0..],
+        } });
+        pub const INTEGER_PACKING = DEFAULT_SERIAL_SETTINGS.INTEGER_PACKING;
+        pub const TARGET_ENDIAN = DEFAULT_SERIAL_SETTINGS.TARGET_ENDIAN;
+        pub const POINTER_MODE = DEFAULT_SERIAL_SETTINGS.POINTER_MODE;
+        pub const USIZE_COMPATIBILITY = DEFAULT_SERIAL_SETTINGS.USIZE_COMPATABILITY;
 
-        op_buffer_arr: [sizes.op_buffer_len]DataOp = undefined,
-        union_end_buffer_arr: [sizes.union_end_buffer_len]DataOp = undefined,
-        alloc_name_buffer_arr: [sizes.alloc_name_buffer_len]u8 = undefined,
-        alloc_name_list_arr: [sizes.alloc_name_list_len]RefSlice = undefined,
-        subroutine_stack_arr: [sizes.subroutine_stack_len]SubRoutineMode = undefined,
-        heirarchy_pool_arr: [sizes.heirarchy_pool_len]HeirarchyMember = undefined,
-        heirarchy_pool_free_arr: [((sizes.heirarchy_pool_len + PowerOf2.USIZE_BITS_MINUS_ONE) >> PowerOf2.USIZE_BITS_SHIFT)]usize = undefined,
-        heirarchy_stack_arr: [sizes.heirarchy_stack_len]HeirarchyMember = undefined,
-        cycle_eval_list_arr: [sizes.cycle_eval_list_len]CycleEval = undefined,
+        routine_stack_ptr: [*]RoutineStackFrame = Utils.invalid_ptr_many(RoutineStackFrame),
+        routine_stack_len: u32 = 0,
+        routine_stack_cap: u32 = 0,
+        curr_routine: *RoutineStackFrame = Utils.invalid_ptr(RoutineStackFrame),
+        obj_allocs: [NUM_ALLOCS]Allocator = @splat(DummyAllocator.allocator_panic_free_noop),
+        self_alloc: Allocator = DummyAllocator.allocator_panic_free_noop,
+        byte_count: usize = 0,
 
-        pub inline fn new() Self {
-            return Self{};
-        }
-
-        pub inline fn buffers(self: *Self) BuilderBuffers {
-            return BuilderBuffers{
-                .op_buffer = self.op_buffer_arr[0..],
-                .union_end_buffer = self.union_end_buffer_arr[0..],
-                .alloc_name_buffer = self.alloc_name_buffer_arr[0..],
-                .alloc_name_list = self.alloc_name_list_arr[0..],
-                .subroutine_stack = self.subroutine_stack_arr[0..],
-                .heirarchy_pool = self.heirarchy_pool_arr[0..],
-                .heirarchy_stack = self.heirarchy_stack_arr[0..],
-                .cycle_eval_list = self.cycle_eval_list_arr[0..],
+        pub fn init(initial_routine_stack_capacity: u32, allocator: Allocator) Self {
+            var self = Self{
+                .self_alloc = allocator,
             };
+            Utils.Alloc.smart_alloc_ptr_ptrs(allocator, &self.routine_stack_ptr, &self.routine_stack_cap, @intCast(initial_routine_stack_capacity), .{}, .{});
+            return self;
         }
-    };
-}
 
-pub const BuilderBuffers = struct {
-    op_buffer: []DataOp,
-    union_end_buffer: []usize = &.{},
-    alloc_name_buffer: []u8 = &.{},
-    alloc_name_list: []RefSlice = &.{},
-    subroutine_stack: []SubRoutineMode = &.{},
-    heirarchy_pool: []HeirarchyMember = &.{},
-    heirarchy_pool_free: []usize = &.{},
-    heirarchy_stack: []HeirarchyMember = &.{},
-    cycle_eval_list: []CycleEval = &.{},
-};
-
-const DEFAULT_ALLOC_NAME = "_DEFAULT_ALLOC_";
-
-pub const SerialRoutineBuilder = struct {
-    root_type: ?type = null,
-    default_settings: SerialFieldSettings = SerialFieldSettings{
-        .target_endian = .LITTLE_ENDIAN,
-        .integer_packing = .USE_TARGET_ENDIAN,
-        .allocator_name = DEFAULT_ALLOC_NAME,
-        .custom_routine = .NO_CUSTOM_ROUTINE,
-        .pointer_mode = .DISALLOW_POINTERS,
-        .usize_compat = .USIZE_ALWAYS_VARINT,
-    },
-    alloc_name_buffer: []u8 = &.{},
-    alloc_name_buffer_len: usize = 0,
-    alloc_name_list: []RefSlice = &.{},
-    alloc_name_list_len: usize = 0,
-    magic_id: ?[]const u8 = null,
-    routine_version: ?u32 = null,
-    ops: StackStatic(DataOp) = .{},
-    subroutines: StackStatic(SubRoutineMode) = .{},
-    heirarchy_pool: HeirarchyMemberPool = .{},
-    heirarchy_stack: StackStatic(u32) = .{},
-    skip_ahead_stack: StackStatic(usize) = .{},
-    cycle_check: StackStatic(CycleEval) = .{},
-    add_debug_info: bool = false,
-    current_varint_g_bits: u8 = 0,
-    prev_varint_g_header_slot: usize = 0,
-    curr_serial_offset: usize = 0,
-    curr_union_depth: u32 = 0,
-    max_union_depth: u32 = 0,
-    curr_pointer_depth: u32 = 0,
-    max_pointer_depth: u32 = 0,
-    curr_total_depth: u32 = 0,
-    max_total_depth: u32 = 0,
-
-    pub fn init(comptime buffers: BuilderBuffers) SerialRoutineBuilder {
-        return SerialRoutineBuilder{
-            .ops = buffers.op_buffer,
-            .skip_ahead_stack = buffers.union_end_buffer,
-            .alloc_name_buffer = buffers.alloc_name_buffer,
-            .alloc_name_list = buffers.alloc_name_list,
-            .subroutines = buffers.subroutine_stack,
-            .heirarchy_pool = buffers.heirarchy_buffer,
-            .heirarchy_stack = buffers.heirarchy_stack,
-        };
-    }
-
-    pub fn reset(comptime self: *SerialRoutineBuilder) void {
-        self.root_type = null;
-        self.curr_serial_offset = 0;
-        self.skip_ahead_len = 0;
-        self.ops_len = 0;
-        self.curr_union_depth = 0;
-        self.max_union_depth = 0;
-        self.debug_stack_len = 0;
-        self.debug_target = null;
-        self.debug_target_printed = false;
-        self.max_union_depth = 0;
-        self.curr_union_depth = 0;
-        self.routine_version = null;
-        self.add_debug_info = false;
-        self.subroutines_len = 0;
-        self.heirarchy_buffer_len = 0;
-        self.he = 0;
-        assert_with_reason(self.alloc_name_buffer.len >= DEFAULT_ALLOC_NAME.len, @src(), "`alloc_name_buffer` must be at least {d} bytes in size for the default allocator name `{s}`", .{ DEFAULT_ALLOC_NAME.len, DEFAULT_ALLOC_NAME });
-        assert_with_reason(self.alloc_name_list.len >= 1, @src(), "`alloc_name_list` must be at least 1 element in size for the default allocator name `{s}`", .{DEFAULT_ALLOC_NAME});
-        @memcpy(self.alloc_name_buffer[0..DEFAULT_ALLOC_NAME.len], DEFAULT_ALLOC_NAME);
-        self.alloc_name_list[0] = RefSlice{
-            .start = 0,
-            .len = @intCast(DEFAULT_ALLOC_NAME.len),
-        };
-        self.alloc_name_buffer_len = DEFAULT_ALLOC_NAME.len;
-        self.alloc_name_list_len = 1;
-        self.default_settings.custom_routine = .NO_CUSTOM_ROUTINE;
-        self.default_settings.allocator_name = DEFAULT_ALLOC_NAME;
-        self.default_settings.pointer_mode = .DISALLOW_POINTERS;
-        self.default_settings.target_endian = .LITTLE_ENDIAN;
-        self.default_settings.integer_packing = .USE_TARGET_ENDIAN;
-        self.default_settings.usize_compat = .USIZE_ALWAYS_VARINT;
-    }
-
-    fn d_assert_with_reason(comptime self: *SerialRoutineBuilder, condition: bool, comptime src_loc: ?std.builtin.SourceLocation, reason_fmt: []const u8, reason_args: anytype) void {
-        if (self.debug_stack_len > 0 and self.debug_stack.len >= self.debug_stack_len) {
-            const debug_arg = .{self.debug_stack[0..self.debug_stack_len]};
-            assert_with_reason(condition, src_loc, "(DEBUG LOC: {s} )\n" ++ reason_fmt, debug_arg ++ reason_args);
-        } else {
-            assert_with_reason(condition, src_loc, reason_fmt, reason_args);
+        fn reset(self: *Self) void {
+            self.routine_stack_len = 0;
+            self.curr_routine = Utils.invalid_ptr(RoutineStackFrame);
+            self.obj_allocs = @splat(DummyAllocator.allocator_panic_free_noop);
+            self.byte_count = 0;
         }
-    }
-    fn d_assert_unreachable(comptime self: *SerialRoutineBuilder, comptime src_loc: ?std.builtin.SourceLocation, reason_fmt: []const u8, reason_args: anytype) void {
-        if (self.debug_stack_len > 0 and self.debug_stack.len >= self.debug_stack_len) {
-            const debug_arg = .{self.debug_stack[0..self.debug_stack_len]};
-            assert_unreachable(src_loc, "(DEBUG LOC: {s} )\n" ++ reason_fmt, debug_arg ++ reason_args);
-        } else {
-            assert_unreachable(src_loc, reason_fmt, reason_args);
-        }
-    }
-    fn print_debug_target(comptime self: *SerialRoutineBuilder, comptime src_loc: ?std.builtin.SourceLocation) void {
-        if (!self.debug_target_printed) {
-            if (self.debug_target) |target| {
-                if (self.curr_serial_offset > target) {
-                    self.debug_target_printed = true;
-                    assert_unreachable(src_loc, "DEBUG TARGET FOUND:\n\t{s}\n", .{self.debug_stack[0..self.debug_stack_len]});
+
+        const SERDIR = enum {
+            NATIVE_TO_SERIAL,
+            SERIAL_TO_NATIVE,
+
+            fn serial_type(comptime self: SERDIR) type {
+                switch (self) {
+                    .NATIVE_TO_SERIAL => SerialDest,
+                    .SERIAL_TO_NATIVE => SerialSource,
                 }
             }
-        }
-    }
 
-    fn combine_optional_field_settings(self: *const SerialRoutineBuilder, opt_settings: SerialFieldOptionalSettings) SerialFieldSettings {
-        var settings = SerialFieldSettings{};
-        settings.target_endian = if (opt_settings.target_endian) |end| end else self.default_settings.target_endian;
-        settings.integer_packing = if (opt_settings.integer_packing) |int_pack| int_pack else self.default_settings.integer_packing;
-        settings.pointer_mode = if (opt_settings.pointer_mode) |ptr_mode| ptr_mode else self.default_settings.pointer_mode;
-        settings.allocator_name = if (opt_settings.allocator_name) |alloc| alloc else self.default_settings.allocator_name;
-        settings.custom_routine = if (opt_settings.custom_routine) |routine| routine else self.default_settings.custom_routine;
-        settings.usize_compat = if (opt_settings.usize_compat) |compat| compat else self.default_settings.usize_compat;
-        return settings;
-    }
-
-    fn get_type_settings(self: *const SerialRoutineBuilder, comptime PARENT: ?type, comptime FIELD_ON_PARENT: ?[]const u8, comptime TYPE: type) SerialFieldSettings {
-        const parent_field_settings = get_parent_field_settings(PARENT, FIELD_ON_PARENT);
-        const on_object_settings = get_on_object_settings(TYPE);
-        return combine_field_settings(self.default_settings, parent_field_settings, on_object_settings);
-    }
-
-    fn get_type_settings_provide_parent_field_settings(self: *const SerialRoutineBuilder, comptime TYPE: type, comptime PARENT_FIELD_SETTINGS: ?SerialFieldOptionalSettings) SerialFieldSettings {
-        const on_object_settings = get_on_object_settings(TYPE);
-        return combine_field_settings(self.default_settings, PARENT_FIELD_SETTINGS, on_object_settings);
-    }
-
-    fn get_type_settings_provide_on_object_settings(self: *const SerialRoutineBuilder, comptime PARENT: ?type, comptime FIELD_ON_PARENT: ?[]const u8, comptime ON_OBJECT_SETTINGS: ?SerialFieldOptionalSettings) SerialFieldSettings {
-        const parent_field_settings = get_parent_field_settings(PARENT, FIELD_ON_PARENT);
-        return combine_field_settings(self.default_settings, parent_field_settings, ON_OBJECT_SETTINGS);
-    }
-
-    fn find_alloc_name_idx(comptime self: *SerialRoutineBuilder, comptime allocator_name: []const u8) u32 {
-        comptime var found_prev: bool = false;
-        comptime var alloc_idx: u32 = 0;
-        for (self.alloc_name_list[0..self.alloc_name_list_len], 0..) |prev_named_alloc_ref, i| {
-            const prev_named_alloc = prev_named_alloc_ref.hydrate(self.alloc_name_buffer);
-            if (array_or_slice_equal(prev_named_alloc, allocator_name)) {
-                found_prev = true;
-                alloc_idx = @intCast(i);
-                break;
+            fn error_type(comptime self: SERDIR) type {
+                switch (self) {
+                    .NATIVE_TO_SERIAL => ReadWrite.SerialWriteError,
+                    .SERIAL_TO_NATIVE => ReadWrite.SerialReadError,
+                }
             }
+        };
+
+        fn alloc_array(allocs: AllocatorsStruct) [NUM_ALLOCS]Allocator {
+            var arr: [NUM_ALLOCS]Allocator = undefined;
+            inline for (@typeInfo(AllocatorsStruct).@"struct".fields, 0..) |field, f| {
+                arr[f] = @field(allocs, field.name);
+            }
+            return arr;
         }
-        if (!found_prev) {
-            assert_with_reason(self.alloc_name_list_len < self.alloc_name_list.len, @src(), "ran out of slots for additional named allocators, have {d}, need at least {d}, provide a larger `alloc_name_list` during init", .{ self.alloc_name_list.len, self.alloc_name_list_len + 1 });
-            assert_with_reason(self.alloc_name_buffer_len + allocator_name.len <= self.alloc_name_buffer.len, @src(), "ran out of bytes for additional named allocator names, have {d}, need at least {d}, provide a larger `alloc_name_buffer` during init", .{ self.alloc_name_buffer.len, self.alloc_name_buffer_len + allocator_name.len });
-            @memcpy(self.alloc_name_buffer[self.alloc_name_buffer_len..][0..allocator_name.len], allocator_name);
-            self.alloc_name_list[self.alloc_name_list_len] = RefSlice{
-                .start = @intCast(self.alloc_name_buffer_len),
-                .len = @intCast(allocator_name.len),
+
+        fn push_routine_frame(self: *Self, routine: RoutineStackFrame) void {
+            Alloc.smart_push_to_list_many_ptr(&self.routine_stack_ptr, &self.routine_stack_len, &self.routine_stack_cap, routine, self.self_alloc, .{}, .{});
+            self.curr_routine = &self.routine_stack_ptr[self.routine_stack_len - 1];
+        }
+        fn push_routine_frame_from_root_unique(self: *Self, comptime unique: UniqueSerialStructAndSettingsFinal, ptr_to_object: [*]u8) void {
+            const min_addr = @intFromPtr(ptr_to_object);
+            const max_addr = min_addr + @sizeOf(unique.object_type);
+            const routine = RoutineStackFrame{
+                .native_ptr = ptr_to_object,
+                .min_native_addr = min_addr,
+                .max_native_addr = max_addr,
+                .routine_start = unique.routine_start,
+                .routine_end = unique.routine_end,
+                .routine_idx = unique.routine_start,
+                .routine_repeat_left = 1,
             };
-            self.alloc_name_buffer_len += allocator_name.len;
-            alloc_idx = @intCast(self.alloc_name_list_len);
-            self.alloc_name_list_len += 1;
+            self.push_routine_frame(routine);
         }
-        return alloc_idx;
-    }
-
-    /// This is an un-optimized, comptime-only function that will run the serial/deserial routine on opaque test data to ensure proper operation
-    ///
-    /// For an optimized runtime method, you must use `SerialRoutineBuilder.finalize()` to produce a concrete serializer type for the current
-    /// specific serial object.
-    fn test_serialize_internal(comptime self: *SerialRoutineBuilder, comptime native_slice: []u8, comptime serial_slice: []u8, comptime DIRECTION: SER_DIR) usize {
-        const serial = if (DIRECTION == .NATIVE_TO_SERIAL) SerialDest{ .slice = serial_slice } else SerialSource{ .slice = serial_slice };
-        const num = serial_internal(self.ops_len, self.ops[0..self.ops_len], DIRECTION, .SLICE, native_slice, serial, .ASSERT_DEBUG) catch |err| assert_unreachable_err(@src(), err);
-        return num;
-    }
-    /// This is an un-optimized, comptime-only function that will run the serial routine on opaque test data to ensure proper operation
-    ///
-    /// For an optimized runtime method, you must use `SerialRoutineBuilder.finalize()` to produce a concrete serializer type for the current
-    /// specific serial object.
-    pub fn test_serialize(comptime self: *SerialRoutineBuilder, comptime native_bytes: []const u8, comptime serial_slice: []u8) usize {
-        const native_slice: []u8 = @constCast(native_bytes);
-        return self.test_serialize_internal(native_slice, serial_slice, .NATIVE_TO_SERIAL);
-    }
-    /// This is an un-optimized, comptime-only function that will run the serial routine on opaque test data to ensure proper operation
-    ///
-    /// For an optimized runtime method, you must use `SerialRoutineBuilder.finalize()` to produce a concrete serializer type for the current
-    /// specific serial object.
-    pub fn test_deserialize(comptime self: *SerialRoutineBuilder, comptime serial_bytes: []const u8, comptime native_slice: []u8) usize {
-        const serial_slice: []u8 = @constCast(serial_bytes);
-        return self.test_serialize_internal(native_slice, serial_slice, .SERIAL_TO_NATIVE);
-    }
-
-    pub fn quick_build_and_finalize_serial_routine_for_type(comptime op_buffer: []DataOp, comptime union_end_buffer: []usize, comptime TYPE: type, comptime SETTINGS: SerialSettings) type {
-        var builder = init(op_buffer, union_end_buffer);
-        return builder.build_and_finalize_serial_routine_for_type(TYPE, SETTINGS);
-    }
-
-    pub fn build_routine_for_type(comptime self: *SerialRoutineBuilder, comptime TYPE: type, comptime SETTINGS: SerialSettings) void {
-        @setEvalBranchQuota(SETTINGS.COMPTIME_EVAL_QUOTA);
-        self.reset();
-        self.root_type = TYPE;
-        self.debug_target = SETTINGS.TARGET_DEBUG_INDEX;
-        self.default_settings.integer_packing = SETTINGS.INTEGER_BYTE_PACKING;
-        self.default_settings.target_endian = SETTINGS.TARGET_ENDIAN;
-        self.default_settings.pointer_mode = SETTINGS.POINTER_MODE;
-        self.add_debug_info = SETTINGS.ADD_ROUTINE_DEBUG_INFO;
-        self.magic_id = SETTINGS.MAGIC_IDENTIFIER;
-        self.routine_version = SETTINGS.ROUTINE_VERSION;
-        self.add_type(0, null, null, TYPE);
-    }
-
-    pub fn ensure_space_for_n_more_heirarchy_buf(comptime self: *SerialRoutineBuilder, comptime n: usize) void {
-        assert_with_reason(self.heirarchy_buffer_len + n <= self.heirarchy_pool.len, @src(), "ran out of space in heirarchy buffer. Need at least {d} (possibly more), have {d}. provide a larger buffer", .{ self.heirarchy_buffer_len + n, self.heirarchy_pool.len });
-    }
-
-    pub fn ensure_space_for_n_more_heirarchy_stack(comptime self: *SerialRoutineBuilder, comptime n: usize) void {
-        assert_with_reason(self.heirarchy_stack_len + n <= self.heirarchy_stack.len, @src(), "ran out of space in heirarchy stack. Need at least {d} (possibly more), have {d}. provide a larger buffer", .{ self.heirarchy_stack_len + n, self.heirarchy_stack.len });
-    }
-
-    
-
-    /// This function is primarily for detecting a cyclic pointer reference in an object
-    /// with no branches that can break the cycle (unions/error-unions/optionals/pointers with possibly zero-length)
-    /// 
-    /// It can also be used to create a debug heirarchy map to give better results when debugging a serialization routine
-    pub fn eval_heirarchy(comptime self: *SerialRoutineBuilder, comptime RESULT: *EvalHeirarchyResult, comptime TYPE: type, comptime HAS_PARENT: bool, comptime PARENT_IDX: u32, comptime SELF_IDX: ?u32, comptime NUM_SIBLINGS: u32) void {
-        const INFO = KindInfo.get_kind_info(TYPE);
-        comptime var this_member = if (SELF_IDX) |SIDX| get: {
-            @branchHint(.unlikely);
-            const this_member_ptr: *HeirarchyMember = &self.heirarchy_pool.ptr[SIDX];
-            this_member_ptr.self_index = SIDX;
-            break :get this_member_ptr;
-        } else get: {
-            const this_member_slot = self.heirarchy_pool.claim_one(DUMMY_ALLOC);
-            this_member_slot.ptr.self_index = this_member_slot.idx;
-            break :get this_member_slot.ptr;
-        };
-        this_member.object_type = TYPE;
-        this_member.has_parent = HAS_PARENT;
-        this_member.parent_index = PARENT_IDX;
-        handle_children: switch (INFO) {
-            .STRUCT => |STRUCT| {
-                self.heirarchy_stack.push_to_stack(this_member.self_index, DUMMY_ALLOC);
-                this_member.num_children = @intCast(STRUCT.fields.len);
-                const children_slots = self.heirarchy_pool.claim_range(@intCast(STRUCT.fields.len), DUMMY_ALLOC);
-                this_member.children_range = .new_with_len(children_slots.start_idx, @intCast(this_member.num_children));
-                inline for (STRUCT.fields, 0..) |child_field, child_idx| {
-                    self.eval_heirarchy(RESULT, child_field.type, true, member.self_index, children_slots.start_idx + num_cast(child_idx, u32), member.num_siblings);
-                }
-                // self.heirarchy.
-            },
-            .UNION => |UNION| {
-                this_member.num_children = @intCast(UNION.fields.len);
-                this_member.num_branches = @intCast(UNION.fields.len);
-                const children_slots = self.heirarchy_pool.claim_range(@intCast(UNION.fields.len), DUMMY_ALLOC);
-                inline for (UNION.fields, 0..) |child_field, child_idx| {
-                    const CHILD_INFO = KindInfo.get_kind_info(child_field.type);
-                    switch (CHILD_INFO) {
-                        .OPTIONAL, .VOID, .ERROR_UNION, .INT, .FLOAT, .COMPTIME_INT, .COMPTIME_FLOAT, .ERROR_SET, .NULL, .BOOL, .ENUM, .NO_RETURN => {
-                            this_member.at_least_one_branch_is_childless = true;
-                        },
-                        else => {},
-                    }
-                    self.eval_heirarchy(RESULT, child_field.type, true, member.self_index, children_slots.start_idx + num_cast(child_idx, u32), member.num_siblings);
-                }
-            },
-            .OPTIONAL => |OPTIONAL| {
-                this_member.num_children = 1;
-                this_member.num_branches = 1;
-            },
-            .POINTER => |POINTER| {
-                switch (POINTER.size) {
-                    .one => {
-                        this_member.num_children = 1;
-                    },
-                    .c => {
-                        this_member.num_children = 1;
-                        this_member.num_branches = 1;
-                    },
-                    .many => {
-                        this_member.num_children = 1;
-                        // A zero-length many-item-pointer with a sentinel can be considered a 'branch',
-                        // as it has nothing to follow
-                        this_member.num_branches = if (POINTER.sentinel_ptr == null) 0 else 1;
-                    },
-                    .slice => {
-                        this_member.num_children = 1;
-                        // A zero-length slice can be considered a 'branch',
-                        // as it has nothing to follow
-                        this_member.num_branches = 1; 
-                    },
-                }
-                comptime var stack_idx = self.heirarchy_stack.len;
-                comptime var at_least_one_branch_in_stack: bool = false; 
-                while (stack_idx > 0) {
-                    stack_idx -= 1;
-                    const prev_member_in_stack_idx = self.heirarchy_stack.get_item(stack_idx);
-                    const prev_member_in_stack: *const HeirarchyMember = &self.heirarchy_pool.ptr[prev_member_in_stack_idx];
-                    if (prev_member_in_stack.num_branches > 0) {
-                        at_least_one_branch_in_stack = true;
-                    }
-                    if (prev_member_in_stack.object_type == POINTER.child) {
-                        RESULT.cycles = if (at_least_one_branch_in_stack) .CYCLES_POSSIBLE else .CYCLES_INFINITE;
-                        if (RESULT.cycles == .CYCLES_INFINITE) assert_unreachable(@src(), "serialization routine is guaranteed to cause an infinite loop due to a cyclic pointer reference: `{s}` points back to a `{s}` which has `{s}` as a child in its heirarch with no branches for possible other types or no type", .{@typeName(TYPE), @typeName(POINTER.child), @typeName(TYPE)});
-                        self.cycle_check.push_to_stack(CycleEval{.look_for_type = POINTER.child, .start_at_heriarchy_index = prev_member_in_stack.self_index,}, .{});
-                        break :handle_children;
-                    }
-                }
-                const child_slot = self.heirarchy_pool.claim_one(DUMMY_ALLOC);
-                self.eval_heirarchy(RESULT, POINTER.child, true, this_member.self_index, child_slot.idx, 0);
-            },
-            .ERROR_UNION => |ERROR_UNION| {
-                this_member.num_children = 1;
-                this_member.num_branches = 1;
-            },
-            else => {},
-        }
-        
-    }
-
-    pub fn finalize_routine_for_current_type(comptime self: SerialRoutineBuilder) type {
-        comptime var OPS: [self.ops_len]DataOp = undefined;
-        @memcpy(OPS[0..], self.ops[0..self.ops_len]);
-        for (OPS[0..]) |*op| {
-            if (op.* == .UNION_ROUTINE_END_TEMP) {
-                op.* = DataOp{ .UNION_ROUTINE_END = op.UNION_ROUTINE_END_TEMP.concrete() };
+        fn pop_routine_frame(self: *Self) void {
+            assert_with_reason(self.routine_stack_len > 0, @src(), "no routine stack to pop, something went wrong in the internal logic", .{});
+            self.routine_stack_len -= 1;
+            if (self.routine_stack_len > 0) {
+                self.curr_routine = &self.routine_stack_ptr[self.routine_stack_len - 1];
             }
         }
-        const OPS_CONST = OPS;
-        return define_serial_routine(self.ops_len, OPS_CONST, self.root_type.?, self.default_settings.target_endian, self.routine_version, self.magic_id);
-    }
 
-    pub fn build_and_finalize_serial_routine_for_type(comptime self: *SerialRoutineBuilder, comptime TYPE: type, comptime SETTINGS: SerialSettings) type {
-        self.build_routine_for_type(TYPE, SETTINGS);
-        return finalize_routine_for_current_type(self.*);
-    }
-
-    pub fn ensure_space_for_n_more_ops(comptime self: *SerialRoutineBuilder, comptime n: usize) void {
-        assert_with_reason(self.ops_len + n <= self.ops.len, @src(), "ran out of space for data ops. Need at least {d} (possibly more), have {d}. provide a larger buffer", .{ self.ops_len + n, self.ops.len });
-    }
-
-    pub fn ensure_space_for_n_more_subroutines(comptime self: *SerialRoutineBuilder, comptime n: usize) void {
-        assert_with_reason(self.subroutines_len + n <= self.subroutines.len, @src(), "ran out of space for subroutines (unions/pointers). Need at least {d} (possibly more), have {d}. provide a larger buffer", .{ self.subroutines_len + n, self.subroutines.len });
-    }
-
-    pub fn ensure_space_for_n_more_skip_ahead(comptime self: *SerialRoutineBuilder, comptime n: usize) void {
-        assert_with_reason(self.skip_ahead_len + n <= self.skip_ahead_stack.len, @src(), "ran out of space for skip-ahead index caches. Need at least {d} (possibly more), have {d}. provide a larger buffer", .{ self.skip_ahead_len + n, self.skip_ahead_stack.len });
-    }
-    pub fn ensure_space_for_n_more_debug_bytes(comptime self: *SerialRoutineBuilder, comptime n: usize) void {
-        assert_with_reason(self.debug_stack_len + n <= self.debug_stack.len, @src(), "ran out of space for debug info. Need at least {d} bytes (possibly more), have {d}. provide a larger buffer", .{ self.debug_stack_len + n, self.debug_stack.len });
-    }
-
-    pub fn add_integer_bytes(comptime self: *SerialRoutineBuilder, comptime curr_native_offset: usize, comptime BYTE_LEN: usize, comptime INT_SIGN: IntegerSign, comptime UNION_TAG: SaveTagMode, comptime SETTINGS: SerialFieldSettings) void {
-        assert_with_reason(BYTE_LEN > 0, @src(), "cannot add a data type to serialze that has zero size", .{});
-        assert_with_reason(BYTE_LEN <= 8129, @src(), "integers can never be larger than 8129 bytes long (65536 bits, 8KiB), got byte len {d}", .{BYTE_LEN});
-        with_new_mode: switch (SETTINGS.integer_packing) {
-            .USE_TARGET_ENDIAN => {
-                self.ensure_space_for_n_more_ops(1);
-                const SWAP = NATIVE_ENDIAN != SETTINGS.target_endian;
-                const native_to_serial_delta: i32 = if (self.curr_serial_offset >= curr_native_offset) num_cast(self.curr_serial_offset - curr_native_offset, i32) else -num_cast(curr_native_offset - self.curr_serial_offset, i32);
-                if (SWAP and BYTE_LEN > 1) {
-                    switch (UNION_TAG) {
-                        .IS_A_UNION_TAG => self.ops[self.ops_len] = .mem_move_swap_save_tag(native_to_serial_delta, @intCast(BYTE_LEN)),
-                        .NOT_A_UNION_TAG => self.ops[self.ops_len] = .mem_move_swap(native_to_serial_delta, @intCast(BYTE_LEN)),
-                    }
-                    self.ops_len += 1;
-                    self.curr_serial_offset += num_cast(BYTE_LEN, i32);
-                } else {
-                    const has_prev = self.ops_len > 0;
-                    comptime var prev: DataOp = DataOp.mem_move_swap(0, 2);
-                    if (has_prev) {
-                        prev = self.ops[self.ops_len - 1];
-                    }
-                    const next = switch (UNION_TAG) {
-                        .IS_A_UNION_TAG => DataOp.mem_move_no_swap_save_tag(native_to_serial_delta, BYTE_LEN),
-                        .NOT_A_UNION_TAG => DataOp.mem_move_no_swap(native_to_serial_delta, BYTE_LEN),
-                    };
-                    if (prev.can_combine(next)) |combined| {
-                        self.ops[self.ops_len - 1] = combined;
-                    } else {
-                        self.ops[self.ops_len] = next;
-                        self.ops_len += 1;
-                    }
-                    self.curr_serial_offset += num_cast(BYTE_LEN, i32);
-                }
-            },
-            .USE_VARINTS => {
-                if (BYTE_LEN == 1 or BYTE_LEN == 3 or (BYTE_LEN >= 5 and BYTE_LEN <= 7) or (BYTE_LEN >= 9 and BYTE_LEN <= 15) or BYTE_LEN > 16) {
-                    continue :with_new_mode .USE_TARGET_ENDIAN;
-                }
-                const native_to_serial_delta: i32 = if (self.curr_serial_offset >= curr_native_offset) num_cast(self.curr_serial_offset - curr_native_offset, i32) else -num_cast(curr_native_offset - self.curr_serial_offset, i32);
-                switch (UNION_TAG) {
-                    .IS_A_UNION_TAG => switch (INT_SIGN) {
-                        .UNSIGNED => self.ops[self.ops_len] = .mem_move_varint_p_save_tag(native_to_serial_delta, @intCast(BYTE_LEN)),
-                        .SIGNED => self.ops[self.ops_len] = .mem_move_varint_ps_save_tag(native_to_serial_delta, @intCast(BYTE_LEN)),
-                    },
-                    .NOT_A_UNION_TAG => switch (INT_SIGN) {
-                        .UNSIGNED => self.ops[self.ops_len] = .mem_move_varint_p(native_to_serial_delta, @intCast(BYTE_LEN)),
-                        .SIGNED => self.ops[self.ops_len] = .mem_move_varint_ps(native_to_serial_delta, @intCast(BYTE_LEN)),
-                    },
-                }
-                self.ops_len += 1;
-            },
-        }
-    }
-
-    pub fn add_float_bytes(comptime self: *SerialRoutineBuilder, comptime curr_native_offset: usize, comptime BYTE_LEN: usize, comptime SETTINGS: SerialFieldSettings) void {
-        assert_with_reason(BYTE_LEN > 0, @src(), "cannot add a data type to serialze that has zero size", .{});
-        const ENDIAN = SETTINGS.target_endian;
-        self.ensure_space_for_n_more_ops(1);
-        const SWAP = NATIVE_ENDIAN != ENDIAN;
-        const native_to_serial_delta: i32 = if (self.curr_serial_offset >= curr_native_offset) num_cast(self.curr_serial_offset - curr_native_offset, i32) else -num_cast(curr_native_offset - self.curr_serial_offset, i32);
-        if (SWAP and BYTE_LEN > 1) {
-            self.ops[self.ops_len] = .mem_move_swap(native_to_serial_delta, @intCast(BYTE_LEN));
-            self.ops_len += 1;
-            self.curr_serial_offset += num_cast(BYTE_LEN, i32);
-        } else {
-            const has_prev = self.ops_len > 0;
-            comptime var prev: DataOp = DataOp.mem_move_swap(0, 2);
-            if (has_prev) {
-                prev = self.ops[self.ops_len - 1];
-            }
-            const next = DataOp.mem_move_no_swap(native_to_serial_delta, BYTE_LEN);
-            if (prev.can_combine(next)) |combined| {
-                self.ops[self.ops_len - 1] = combined;
-            } else {
-                self.ops[self.ops_len] = next;
-                self.ops_len += 1;
-            }
-            self.curr_serial_offset += num_cast(BYTE_LEN, i32);
-        }
-    }
-
-    pub fn start_union_routine_builder(comptime self: *SerialRoutineBuilder, comptime tag_native_offset: usize, comptime TAG_TYPE: type, comptime FIELD_COUNT: usize, comptime settings: SerialFieldSettings) UnionRoutineBuilder {
-        const UTAG = OpaqueUnionTag.from_tag_type(TAG_TYPE);
-        const UTAG_SIZE = UTAG.bytes_usize();
-        const META_SLOT_COUNT = (FIELD_COUNT << 1);
-        self.ensure_space_for_n_more_ops(2 + META_SLOT_COUNT);
-        self.ensure_space_for_n_more_skip_ahead(FIELD_COUNT);
-        const skip_ahead_slots: []usize = self.skip_ahead_stack[self.skip_ahead_len..][0..FIELD_COUNT];
-        self.skip_ahead_len += FIELD_COUNT;
-        self.ops[self.ops_len] = .union_header(FIELD_COUNT, TAG_TYPE);
-        self.ops_len += 1;
-        const is_signed = Types.type_is_signed_int(std.meta.Tag(TAG_TYPE));
-        const SIGN = if (is_signed) IntegerSign.SIGNED else IntegerSign.UNSIGNED;
-        self.add_integer_bytes(tag_native_offset, UTAG_SIZE, SIGN, .IS_A_UNION_TAG, settings);
-        const meta_slots: []DataOp, const meta_root: usize = self.add_union_meta_slots(META_SLOT_COUNT);
-        comptime var tag_to_routine_offset: usize = META_SLOT_COUNT;
-        comptime var tag_to_routine_idx: usize = 0;
-        while (tag_to_routine_idx < FIELD_COUNT) {
-            const real_idx = tag_to_routine_idx << 1;
-            meta_slots[real_idx] = .union_tag_id(0);
-            meta_slots[real_idx + 1] = .union_routine_start(tag_to_routine_offset - 1, 0);
-            tag_to_routine_offset -= 2;
-            tag_to_routine_idx += 1;
-        }
-        self.curr_union_depth += 1;
-        self.max_union_depth = @max(self.max_union_depth, self.curr_union_depth);
-        assert_with_reason(self.subroutines_len < self.subroutines.len, @src(), "ran out of slots for subroutine tags on the subroutine stack, have capacity for {d}, need at least {d}, provide a larger `subroutine_stack` at init", .{ self.subroutines.len, self.subroutines_len + 1 });
-        self.subroutines[self.subroutines_len] = .UNION;
-        self.subroutines_len += 1;
-        return UnionRoutineBuilder{
-            .meta_data_ops = meta_slots,
-            .meta_data_ops_root = meta_root,
-            .union_tag_opaque = UTAG,
-            .field_count = FIELD_COUNT,
-            .routine_end_op_indexes = skip_ahead_slots,
-        };
-    }
-
-    pub fn add_union_meta_slots(comptime self: *SerialRoutineBuilder, comptime COUNT: usize) struct { []DataOp, usize } {
-        self.ensure_space_for_n_more_ops(COUNT);
-        const start = self.ops_len;
-        self.ops_len += COUNT;
-        return .{ self.ops.ptr[start..self.ops_len], start };
-    }
-
-    pub fn add_type_provide_settings(comptime self: *SerialRoutineBuilder, comptime curr_native_offset: usize, comptime TYPE: type, comptime settings: SerialFieldSettings) void {
-        const INFO = KindInfo.get_kind_info(TYPE);
-        switch (settings.custom_routine) {
-            .CUSTOM_RUNTIME_SERIALIZE => |runtime_funcs| {
-                self.ensure_space_for_n_more_ops(1);
-                self.ops[self.ops_len] = DataOp.fully_custom_functions(runtime_funcs);
-                self.ops_len += 1;
-                return;
-            },
-            .CUSTOM_COMPTIME_BUILDER_ROUTINE => |builder_routine| {
-                builder_routine(self, curr_native_offset, settings);
-                return;
-            },
-            .NO_CUSTOM_ROUTINE => {
-                re_typed: switch (INFO) {
-                    .INT, .BOOL, .ENUM => {
-                        // TODO re-implement debug with tree
-                        const is_signed = INFO != .BOOL and if (INFO == .INT) Types.type_is_signed_int(TYPE) else Types.type_is_signed_int(std.meta.Tag(TYPE));
-                        const SIGN = if (is_signed) IntegerSign.SIGNED else IntegerSign.UNSIGNED;
-                        if (TYPE == usize or TYPE == isize or (INFO == .ENUM and (INFO.ENUM.tag_type == usize or INFO.ENUM.tag_type == isize))) {
-                            if (settings.usize_compat == .USIZE_ALWAYS_VARINT) {
-                                comptime var new_settings = settings;
-                                new_settings.integer_packing = .USE_VARINTS;
-                                self.add_integer_bytes(curr_native_offset, @sizeOf(TYPE), SIGN, .NOT_A_UNION_TAG, new_settings);
-                                return;
-                            }
-                        }
-                        self.add_integer_bytes(curr_native_offset, @sizeOf(TYPE), SIGN, .NOT_A_UNION_TAG, settings);
-                    },
-                    .FLOAT => {
-                        // TODO re-implement debug with tree
-                        self.add_float_bytes(curr_native_offset, @sizeOf(TYPE), settings);
-                    },
-                    .ARRAY, .VECTOR => {
-                        const LEN = if (INFO.is_array()) INFO.ARRAY.len else INFO.VECTOR.len;
-                        const CHILD = if (INFO.is_array()) INFO.ARRAY.child else INFO.VECTOR.child;
-                        const CHILD_SIZE = @sizeOf(CHILD);
-                        // TODO re-implement debug with tree
-                        comptime var local_native_offset = curr_native_offset;
-                        for (0..LEN) |_| {
-                            self.add_type(local_native_offset, null, null, CHILD);
-                            local_native_offset += CHILD_SIZE;
-                        }
-                    },
-                    .STRUCT => |S| {
-                        if (S.backing_integer) |backing_int| {
-                            continue :re_typed KindInfo.get_kind_info(backing_int);
-                        } else {
-                            // TODO re-implement debug with tree
-                            inline for (S.fields) |field| {
-                                // TODO re-implement debug with tree
-                                const local_offset = @offsetOf(TYPE, field.name);
-                                const real_offset = curr_native_offset + local_offset;
-                                self.add_type(real_offset, TYPE, field.name, field.type);
-                            }
-                        }
-                    },
-                    .POINTER => |PTR| {
-                        switch (settings.pointer_mode) {
-                            .DISALLOW_POINTERS => assert_unreachable(@src(), "pointers are not allowed in this serial object according to the pointer mode setting", .{}),
-                            .IGNORE_POINTERS => return,
-                            .FOLLOW_POINTERS => {},
-                        }
-                        const ELEM = PTR.child;
-                        const ELEM_SIZE = @sizeOf(ELEM);
-                        self.ensure_space_for_n_more_subroutines(1);
-                        const null_skip_op = self.ops_len;
-                        if (PTR.size == .c) {
-                            self.ensure_space_for_n_more_ops(1);
-                            self.ops[self.ops_len] = DataOp.null_skip_ahead_uninit();
-                            self.ops_len += 1;
-                        }
-                        self.ensure_space_for_n_more_ops(1);
-                        self.ops[self.ops_len] = switch (PTR.size) {
-                            .one, .c => DataOp.single_item_pointer_header(settings.allocator_name, ELEM_SIZE, self),
-                            .many => check: {
-                                assert_with_reason(PTR.sentinel_ptr != null, @src(), "cannot serialize a many-item pointer without a sentinel value, got type `{s}`", .{@typeName(TYPE)});
-                                assert_with_reason(Utils.has_object_equals(ELEM), @src(), "cannot serialize a many-item pointer with a sentinel type that cannot be compared for equality, got type `{s}`", .{@typeName(TYPE)});
-                                break :check DataOp.many_item_pointer_header(settings.allocator_name, ELEM_SIZE, self);
-                            },
-                            .slice => DataOp.slice_pointer_header(settings.allocator_name, ELEM_SIZE, self),
-                        };
-                        self.ops_len += 1;
-                        switch (PTR.size) {
-                            .many, .slice => {
-                                self.ensure_space_for_n_more_ops(1);
-                                self.ops[self.ops_len] = DataOp.pointer_len(8, settings.integer_packing);
-                                self.ops_len += 1;
-                            },
-                        }
-                        self.curr_pointer_depth += 1;
-                        self.max_pointer_depth = @max(self.max_pointer_depth, self.curr_pointer_depth);
-                        self.subroutines[self.subroutines_len] = .SINGLE_POINTER;
-                        self.subroutines_len += 1;
-                        self.add_type(0, null, null, ELEM);
-                        self.ensure_space_for_n_more_ops(1);
-                        self.ops[self.ops_len] = DataOp.pointer_routine_end();
-                        self.ops_len += 1;
-                        self.subroutines_len -= 1;
-                        self.curr_pointer_depth -= 1;
-                        if (PTR.size == .c) {
-                            const null_skip_delta = self.ops_len - null_skip_op;
-                            self.ops[null_skip_op].NULL_SKIP_AHEAD.ops_to_advance_to_exit_routine = null_skip_delta;
-                        }
-                    },
-                    .OPTIONAL => |OPT| {
-                        const CHILD_KIND = KindInfo.get_kind_info(OPT.child);
-                        switch (CHILD_KIND) {
-                            .POINTER => |PTR| {
-                                if (PTR.size == .c) {
-                                    continue :re_typed CHILD_KIND;
-                                }
-                                const null_skip_op = self.ops_len;
-                                self.ensure_space_for_n_more_ops(1);
-                                self.ops[self.ops_len] = DataOp.null_skip_ahead_uninit();
-                                self.ops_len += 1;
-                                self.add_type(curr_native_offset, null, null, OPT.child);
-                                const null_skip_delta = self.ops_len - null_skip_op;
-                                self.ops[null_skip_op].NULL_SKIP_AHEAD.ops_to_advance_to_exit_routine = null_skip_delta;
-                            },
-                            else => assert_unreachable(@src(), "only optional pointers (nullable pointers) are eligible for automatic serialization. You must do one of the following instead:\n\t- Include a declaration of `{s}.{s}` (struct type) on the parent object that holds the optional (if any), and have a declaration on it that matches this optional's field name that is a `{s}` with a `custom_routine` value that is not `.NO_CUSTOM_ROUTINE`\n\t- Use `SerialOptional`, which is an extern struct that implements a custom serialize function", .{ CustomSerializeDecl, CustomSerializeFieldSetting, SerialFieldOptionalSettingsName }),
-                        }
-                    },
-                    .UNION => {
-                        assert_unreachable(@src(), "unions are not supported for *automatic* serialization. You must do one of the following instead:\n\t- Include a declaration of `{s}.{s}` (type of {s}) on the union, with a `custom_routine` value that is not `.NO_CUSTOM_ROUTINE`\n\t- Include a declaration of `{s}.{s}` (struct type) on the parent object that holds the union (if any), and have a declaration on it that matches this union's field name that is a `{s}` with a `custom_routine` value that is not `.NO_CUSTOM_ROUTINE`\n\t- Use `SerialUnion`, which is an extern struct that implements a custom serialize function", .{ CustomSerializeDecl, CustomSerializeSetting, SerialFieldOptionalSettingsName, CustomSerializeDecl, CustomSerializeFieldSetting, SerialFieldOptionalSettingsName });
-                    },
-                    else => assert_unreachable(@src(), "type kind `{s}` does not have a serializer (simple) routine, exact type is `{s}`", .{ @tagName(INFO), @typeName(TYPE) }),
-                }
-            },
-        }
-    }
-
-    pub fn add_type(comptime self: *SerialRoutineBuilder, comptime curr_native_offset: usize, comptime PARENT: ?type, comptime FIELD_ON_PARENT: ?[]const u8, comptime TYPE: type) void {
-        const settings = self.get_type_settings(PARENT, FIELD_ON_PARENT, TYPE);
-        return self.add_type_provide_settings(curr_native_offset, TYPE, settings);
-    }
-};
-
-const SER_DIR = enum(u8) {
-    NATIVE_TO_SERIAL,
-    SERIAL_TO_NATIVE,
-};
-const SER_TECH = enum(u8) {
-    NORMAL,
-    VARINT_P,
-};
-
-const TEST_SER_MODE = enum(u8) {
-    NORMAL,
-    NEED_UNION_TAG_CAPTURE_NEXT,
-    NEED_UNION_TAG_ID_NEXT,
-    NEED_UNION_START_NEXT,
-
-    fn assert_mode(self: TEST_SER_MODE, need: TEST_SER_MODE, op: OpKind, comptime SHOULD_ASSERT: bool, comptime src: std.builtin.SourceLocation) void {
-        if (SHOULD_ASSERT) assert_with_reason(self == need, src, "op `{s}` is not allowed when mode is not `{s}`, got mode `{s}`", .{ @tagName(op), @tagName(need), @tagName(self) });
-    }
-};
-
-pub const VersionMatch = enum(u8) {
-    MATCH,
-    SERIAL_VERSION_LOWER,
-    SERIAL_VERSION_HIGHER,
-};
-
-/// USE WITH CAUTION! This performs NO safety checking/validation and assumes the routine is well-formed
-///
-/// The normal, safe way to get a concrete serial routine is to use a `SerialRoutineBuilder` and use one of the `finalize()` funcs on it.
-pub fn define_serial_routine(comptime TOTAL_OPS_: usize, comptime ROUTINE_: [TOTAL_OPS_]DataOp, comptime TYPE_: type, comptime TARGET_ENDIAN_: Endian, comptime VERSION_: ?u32, comptime MAGIC_: ?[]const u8) type {
-    return struct {
-        pub const TOTAL_OPS = TOTAL_OPS_;
-        pub const TYPE = TYPE_;
-        pub const TARGET_ENDIAN = TARGET_ENDIAN_;
-        pub const ROUTINE = ROUTINE_;
-        pub const VERSION = VERSION_;
-        pub const ID_LEN = if (MAGIC_) |ID| ID.len else 0;
-        pub const MAGIC_ID: ?[ID_LEN]u8 = build: {
-            if (MAGIC_ == null) break :build null;
-            var id: [ID_LEN]u8 = undefined;
-            @memcpy(id[0..], MAGIC_.?);
-            break :build id;
-        };
-        pub const DATA_START = ID_LEN + (if (VERSION != null) 4 else 0);
-        pub const VER_START = (if (MAGIC_ID) |ID| ID.len else 0);
-
-        pub fn id_matches_slice(serial_slice: []const u8) SerialReadError!bool {
-            if (MAGIC_ID) |ID| {
-                if (serial_slice.len < ID.len) return SerialReadError.serial_source_ran_out_of_data;
-                return array_or_slice_equal(ID, serial_slice[0..ID.len]);
-            } else {
-                return true;
-            }
-        }
-        pub fn version_matches_slice(serial_slice: []const u8) SerialReadError!VersionMatch {
-            if (VERSION) |VER| {
-                const ver_from_serial = try get_version_from_slice(serial_slice);
-                if (VER == ver_from_serial) {
-                    return VersionMatch.MATCH;
-                } else if (ver_from_serial < VER) {
-                    return VersionMatch.SERIAL_VERSION_LOWER;
-                } else {
-                    return VersionMatch.SERIAL_VERSION_HIGHER;
-                }
-            } else {
-                return VersionMatch.MATCH;
-            }
-        }
-        /// Returns `0` if the routine has no version
-        pub fn get_version_from_slice(serial_slice: []const u8) SerialReadError!u32 {
-            if (VERSION != null) {
-                if (serial_slice.len < VER_START + 4) return SerialReadError.serial_source_ran_out_of_data;
-                var ver_from_serial: u32 = undefined;
-                var ver_bytes = ptr_as_bytes(&ver_from_serial);
-                @memcpy(ver_bytes[0..4], serial_slice[VER_START .. VER_START + 4]);
-                if (NATIVE_ENDIAN != .LITTLE_ENDIAN) {
-                    reverse_array(ver_bytes);
-                }
-                return ver_from_serial;
-            }
-            return 0;
-        }
-        /// Returns `0` if the routine has no version
-        ///
-        /// Routine must have NO magic identifier, or You MUST have called `get_id_from_reader`
-        /// FIRST before calling this, even if you do not use the id value
-        pub fn get_version_from_reader(reader: *std.Io.Reader) SerialReadError!u32 {
-            if (VERSION != null) {
-                const bytes: [DATA_START]u8 = undefined;
-                reader.readSliceAll(bytes[VER_START..DATA_START]) catch |err| switch (err) {
-                    .ReadFailed => return SerialReadError.unknown_read_error,
-                    .EndOfStream => return SerialReadError.serial_source_ran_out_of_data,
-                };
-                return get_version_from_slice(bytes);
-            }
-            return 0;
-        }
-
-        /// Returns `[0]u8{}` if the routine has no id
-        pub fn get_id_from_slice(serial_slice: []const u8) SerialReadError![ID_LEN]u8 {
-            if (MAGIC_ID != null) {
-                if (serial_slice.len < ID_LEN) return SerialReadError.serial_source_ran_out_of_data;
-                var id: [ID_LEN]u8 = undefined;
-                @memcpy(id[0..ID_LEN], serial_slice[0..ID_LEN]);
-                return id;
-            }
-            return .{};
-        }
-
-        /// Returns `[0]u8{}` if the routine has no id
-        ///
-        /// You MUST call this before calling `get_version_from_reader`,
-        /// even if you do not need to use the value
-        pub fn get_id_from_reader(reader: *std.Io.Reader) SerialReadError![ID_LEN]u8 {
-            if (MAGIC_ID != null) {
-                var id: [ID_LEN]u8 = undefined;
-                reader.readSliceAll(id[0..ID_LEN]) catch |err| switch (err) {
-                    .ReadFailed => return SerialReadError.unknown_read_error,
-                    .EndOfStream => return SerialReadError.serial_source_ran_out_of_data,
-                };
-                return id;
-            }
-            return .{};
-        }
-
-        pub fn serialize_to_slice(val_ptr: *const TYPE, serial_slice: []u8) SerialWriteError!usize {
-            const native: []u8 = @alignCast(@constCast(std.mem.asBytes(val_ptr)));
-            if (MAGIC_ID) |ID| {
-                @memcpy(serial_slice[0..ID.len], ID[0..]);
-            }
-            if (VERSION) |VER| {
-                var ver_to_serial: u32 = VER;
-                var ver_bytes = ptr_as_bytes(&ver_to_serial);
-                if (NATIVE_ENDIAN != .LITTLE_ENDIAN) {
-                    reverse_array(ver_bytes);
-                }
-                @memcpy(serial_slice[VER_START .. VER_START + 4], ver_bytes[0..4]);
-            }
-            return DATA_START + try serial_internal(TOTAL_OPS, ROUTINE[0..TOTAL_OPS], .NATIVE_TO_SERIAL, .SLICE, native, SerialDest{ .slice = serial_slice[DATA_START..] }, .NO_DEBUG);
-        }
-        pub fn serialize_to_writer(val_ptr: *const TYPE, writer: *std.Io.Writer) SerialWriteError!usize {
-            const native: []u8 = @alignCast(@constCast(std.mem.asBytes(val_ptr)));
-            if (MAGIC_ID) |ID| {
-                writer.writeAll(ID) catch return SerialWriteError.serial_destination_ran_out_of_space;
-            }
-            if (VERSION) |VER| {
-                var ver_to_serial: u32 = VER;
-                var ver_bytes = ptr_as_bytes(&ver_to_serial);
-                if (NATIVE_ENDIAN != .LITTLE_ENDIAN) {
-                    reverse_array(ver_bytes);
-                }
-                writer.writeAll(ver_bytes[0..4]) catch return SerialWriteError.serial_destination_ran_out_of_space;
-            }
-            return DATA_START + try serial_internal(TOTAL_OPS, ROUTINE[0..TOTAL_OPS], .NATIVE_TO_SERIAL, .READER_WRITER, native, SerialDest{ .writer = writer }, .NO_DEBUG);
-        }
-        pub fn deserialize_from_slice(serial_data: []const u8, val_ptr: *TYPE) SerialReadError!usize {
-            const native: []u8 = @alignCast(std.mem.asBytes(val_ptr));
-            if (!try id_matches_slice(serial_data)) return SerialReadError.magic_identifier_mismatch;
-            switch (try version_matches_slice(serial_data)) {
-                .MATCH => {},
-                .SERIAL_VERSION_HIGHER => return SerialReadError.serial_version_mismatch_higher,
-                .SERIAL_VERSION_LOWER => return SerialReadError.serial_version_mismatch_lower,
-            }
-            return DATA_START + try serial_internal(TOTAL_OPS, ROUTINE[0..TOTAL_OPS], .SERIAL_TO_NATIVE, .SLICE, native, SerialSource{ .slice = serial_data[DATA_START..] }, .NO_DEBUG);
-        }
-        pub fn deserialize_from_reader(reader: *std.Io.Reader, val_ptr: *TYPE) SerialReadError!usize {
-            var pre_read: [DATA_START]u8 = undefined;
-            if (MAGIC_ID != null) {
-                reader.readSliceAll(pre_read[0..VER_START]) catch |err| switch (err) {
-                    .ReadFailed => return SerialReadError.unknown_read_error,
-                    .EndOfStream => return SerialReadError.serial_source_ran_out_of_data,
-                };
-                if (!(id_matches_slice(pre_read) catch unreachable)) return SerialReadError.magic_identifier_mismatch;
-            }
-            if (VERSION != null) {
-                reader.readSliceAll(pre_read[VER_START..DATA_START]) catch |err| switch (err) {
-                    .ReadFailed => return SerialReadError.unknown_read_error,
-                    .EndOfStream => return SerialReadError.serial_source_ran_out_of_data,
-                };
-                switch (version_matches_slice(pre_read) catch unreachable) {
-                    .MATCH => {},
-                    .SERIAL_VERSION_HIGHER => return SerialReadError.serial_version_mismatch_higher,
-                    .SERIAL_VERSION_LOWER => return SerialReadError.serial_version_mismatch_lower,
-                }
-            }
-            const native: []u8 = @alignCast(std.mem.asBytes(val_ptr));
-            return DATA_START + try serial_internal(TOTAL_OPS, ROUTINE[0..TOTAL_OPS], .SERIAL_TO_NATIVE, .READER_WRITER, native, SerialSource{ .reader = reader }, .NO_DEBUG);
-        }
-    };
-}
-
-fn do_zigzag_adjustment(comptime NATIVE_SIZE: comptime_int, temp_buffer: *align(@alignOf(u128)) [NATIVE_SIZE]u8, comptime DIR: SER_DIR) void {
-    assert_with_reason(NATIVE_SIZE == 2 or NATIVE_SIZE == 4 or NATIVE_SIZE == 8 or NATIVE_SIZE == 16, @src(), "zigzag encoding only supported for i16, i32, i64, isize, and i128, got native integer with {d} bytes", .{NATIVE_SIZE});
-    switch (DIR) {
-        .NATIVE_TO_SERIAL => switch (NATIVE_SIZE) {
-            2 => {
-                const int: *align(@alignOf(u128)) i16 = @ptrCast(@alignCast(temp_buffer));
-                int.* = (int.* >> 15) ^ (int.* << 1);
-            },
-            4 => {
-                const int: *align(@alignOf(u128)) i32 = @ptrCast(@alignCast(temp_buffer));
-                int.* = (int.* >> 31) ^ (int.* << 1);
-            },
-            8 => {
-                const int: *align(@alignOf(u128)) i64 = @ptrCast(@alignCast(temp_buffer));
-                int.* = (int.* >> 63) ^ (int.* << 1);
-            },
-            16 => {
-                const int: *align(@alignOf(u128)) i128 = @ptrCast(@alignCast(temp_buffer));
-                int.* = (int.* >> 127) ^ (int.* << 1);
-            },
-            else => unreachable,
-        },
-        .SERIAL_TO_NATIVE => switch (NATIVE_SIZE) {
-            2 => {
-                const int: *align(@alignOf(u128)) i16 = @ptrCast(@alignCast(temp_buffer));
-                const uint: *align(@alignOf(u128)) u16 = @ptrCast(@alignCast(temp_buffer));
-                int.* = bit_cast(uint.* >> 1, i16) ^ -(bit_cast(uint.*, i16) & 1);
-            },
-            4 => {
-                const int: *align(@alignOf(u128)) i32 = @ptrCast(@alignCast(temp_buffer));
-                const uint: *align(@alignOf(u128)) u32 = @ptrCast(@alignCast(temp_buffer));
-                int.* = bit_cast(uint.* >> 1, i32) ^ -(bit_cast(uint.*, i32) & 1);
-            },
-            8 => {
-                const int: *align(@alignOf(u128)) i64 = @ptrCast(@alignCast(temp_buffer));
-                const uint: *align(@alignOf(u128)) u64 = @ptrCast(@alignCast(temp_buffer));
-                int.* = bit_cast(uint.* >> 1, i64) ^ -(bit_cast(uint.*, i64) & 1);
-            },
-            16 => {
-                const int: *align(@alignOf(u128)) i128 = @ptrCast(@alignCast(temp_buffer));
-                const uint: *align(@alignOf(u128)) u128 = @ptrCast(@alignCast(temp_buffer));
-                int.* = bit_cast(uint.* >> 1, i128) ^ -(bit_cast(uint.*, i128) & 1);
-            },
-            else => unreachable,
-        },
-    }
-}
-
-fn more_sig(comptime start: comptime_int, comptime move: comptime_int) comptime_int {
-    if (NATIVE_ENDIAN == .BIG_ENDIAN) {
-        return start - move;
-    } else {
-        return start + move;
-    }
-}
-fn less_sig(comptime start: comptime_int, comptime move: comptime_int) comptime_int {
-    if (NATIVE_ENDIAN == .BIG_ENDIAN) {
-        return start + move;
-    } else {
-        return start - move;
-    }
-}
-
-const NNSS = struct { usize, usize, usize, usize };
-
-fn make_starts_and_ends(serial_idx: isize, native_len: u32, native_to_serial_delta: i32, dynamic_serial_adjustment: isize, comptime DEBUG_MODE: DebugMode) NNSS {
-    const native_start_i: isize = serial_idx - (num_cast(native_to_serial_delta, isize) + dynamic_serial_adjustment);
-    if (DEBUG_MODE == .ASSERT_DEBUG) {
-        assert_with_reason(native_start_i >= 0, @src(), "`native_start = serial_idx - (native_to_serial_delta + dynamic_serial_adjustment)` causes `native_start` to be less than zero\n`{d} = {d} - ({d} + {d})`", .{ native_start_i, serial_idx, native_to_serial_delta, dynamic_serial_adjustment });
-    }
-    const native_start: usize = @intCast(native_start_i);
-    const native_end = native_start + num_cast(native_len, usize);
-    const serial_start = num_cast(serial_idx, usize);
-    const serial_end = serial_start + num_cast(native_len, usize);
-    return NNSS{ native_start, native_end, serial_start, serial_end };
-}
-
-fn move_data_no_swap(comptime IN_ALLOC: bool, comptime DIR: SER_DIR, comptime SERIAL: SerialKind, move: MemCopyMove, serial_idx: *isize, dynamic_serial_adjustment: *isize, native: []u8, serial: if (DIR == .SERIAL_TO_NATIVE) SerialSource else SerialDest, comptime DEBUG_MODE: DebugMode) (if (DIR == .SERIAL_TO_NATIVE) SerialReadError else SerialWriteError)!NNSS {
-    const nnss = make_starts_and_ends(serial_idx.*, move.copy_len, move.native_to_serial_delta, dynamic_serial_adjustment, DEBUG_MODE);
-    const native_start: usize, const native_end: usize, const serial_start: usize, const serial_end: usize = nnss;
-    switch (DIR) {
-        .NATIVE_TO_SERIAL => {
-            try serial.write_data_in_order(SERIAL, native, native_start, native_end, serial_start, serial_end);
-        },
-        .SERIAL_TO_NATIVE => {
-            try serial.read_data_in_order(SERIAL, native, native_start, native_end, serial_start, serial_end);
-        },
-    }
-    serial_idx.* += num_cast(move.copy_len, isize);
-    if (IN_ALLOC) {
-        dynamic_serial_adjustment.* += num_cast(move.copy_len, isize);
-    }
-    return nnss;
-}
-
-fn move_data_swap(comptime IN_ALLOC: bool, comptime DIR: SER_DIR, comptime SERIAL: SerialKind, move: MemCopyMove, serial_idx: *isize, dynamic_serial_adjustment: *isize, native: []u8, serial: if (DIR == .SERIAL_TO_NATIVE) SerialSource else SerialDest, comptime DEBUG_MODE: DebugMode) (if (DIR == .SERIAL_TO_NATIVE) SerialReadError else SerialWriteError)!NNSS {
-    const nnss = make_starts_and_ends(serial_idx.*, move.copy_len, move.native_to_serial_delta, dynamic_serial_adjustment, DEBUG_MODE);
-    const native_start: usize, const native_end: usize, const serial_start: usize, const serial_end: usize = nnss;
-    switch (DIR) {
-        .NATIVE_TO_SERIAL => {
-            try serial.write_data_swap(SERIAL, native, native_start, native_end, serial_start, serial_end);
-        },
-        .SERIAL_TO_NATIVE => {
-            try serial.read_data_swap(SERIAL, native, native_start, native_end, serial_start, serial_end);
-        },
-    }
-    serial_idx.* += num_cast(move.copy_len, isize);
-    if (IN_ALLOC) {
-        dynamic_serial_adjustment.* += num_cast(move.copy_len, isize);
-    }
-    return nnss;
-}
-
-fn move_data_varint(comptime DIR: SER_DIR, comptime SERIAL: SerialKind, comptime SIGNED: IntegerSign, move: MemCopyMove, serial_idx: *isize, dynamic_serial_adjustment: *isize, native: []u8, serial: if (DIR == .SERIAL_TO_NATIVE) SerialSource else SerialDest, comptime DEBUG_MODE: DebugMode) (if (DIR == .SERIAL_TO_NATIVE) SerialReadError else SerialWriteError)!NNSS {
-    const nnss = make_starts_and_ends(serial_idx.*, move.copy_len, move.native_to_serial_delta, dynamic_serial_adjustment.*, DEBUG_MODE);
-    const native_start: usize, const native_end: usize, const serial_start: usize, _ = nnss;
-    const num_bytes = switch (DIR) {
-        .NATIVE_TO_SERIAL => switch (SIGNED) {
-            .SIGNED => try serial.write_varint(SERIAL, true, native, native_start, native_end, @intCast(move.copy_len), serial_start),
-            .UNSIGNED => try serial.write_varint(SERIAL, false, native, native_start, native_end, @intCast(move.copy_len), serial_start),
-        },
-        .SERIAL_TO_NATIVE => switch (SIGNED) {
-            .SIGNED => try serial.read_varint(SERIAL, true, native, native_start, native_end, @intCast(move.copy_len), serial_start),
-            .UNSIGNED => try serial.read_varint(SERIAL, false, native, native_start, native_end, @intCast(move.copy_len), serial_start),
-        },
-    };
-    serial_idx.* += num_cast(num_bytes, isize);
-    dynamic_serial_adjustment.* += num_cast(num_bytes, isize);
-    return nnss;
-}
-
-fn save_tag(tag_got: *u64, native: []u8, native_start: usize, native_end: usize) void {
-    tag_got.* = OpaqueUnionTag.cast_native_bytes_to_u64_LE(native[native_start..native_end]);
-}
-
-// fn save_len(len_got: *u64, native: []u8, native_start: usize, native_end: usize, mode: IntegerPacking) void {
-//     switch (mode) {
-//         .USE_TARGET_ENDIAN => {},
-//         .USE_VARINTS => {},
-//     }
-//     tag_got.* = OpaqueUnionTag.cast_native_bytes_to_u64_LE(native[native_start..native_end]);
-// }
-
-pub const SubroutineRepeat = struct {
-    op_to_return_to: u32,
-    num_repeats_left: u32,
-};
-
-fn serial_internal(comptime NUM_OPS: usize, comptime ROUTINE: []const DataOp, comptime DIR: SER_DIR, comptime SERIAL: SerialKind, comptime native_loc_stack: [][]u8, comptime dynamic_serial_adjustment_stack: []isize, comptime subroutine_repeat_stack: []SubroutineRepeat, allocators: []const Allocator, serial: if (DIR == .SERIAL_TO_NATIVE) SerialSource else SerialDest, comptime DEBUG_MODE: DebugMode, debug_subroutine_mode_stack: if (DebugMode == .ASSERT_DEBUG) []SubRoutineMode else void) (if (DIR == .SERIAL_TO_NATIVE) SerialReadError else SerialWriteError)!usize {
-    var serial_idx: isize = 0;
-    var tag_got: u64 = undefined;
-    var num_tags_this_union: u32 = 0;
-    var tags_checked_this_union: u32 = 0;
-    var op_idx: usize = 0;
-    var dynamic_serial_adjustment: isize = 0;
-    const DO_DEBUG = DEBUG_MODE == .ASSERT_DEBUG;
-    var MODE: if (DO_DEBUG) TEST_SER_MODE else void = if (DO_DEBUG) .NORMAL else void{};
-    var curr_native_loc_len: usize = 0;
-    var curr_subroutine_repeat_len = 0;
-    dynamic_serial_adjustment_stack[0] = 0;
-    var curr_dynamic_adjust_len = 1;
-    var curr_subroutine_len: if (DO_DEBUG) usize else u0 = 0;
-    var has_subroutine = if (DO_DEBUG) false else void{};
-    var temp_len: [8]u8 = undefined;
-    while (op_idx < NUM_OPS) {
-        const op = ROUTINE[op_idx];
-        switch (op) {
-            .MOVE_DATA_NO_SWAP => |move| {
-                if (DO_DEBUG) {
-                    MODE.assert_mode(.NORMAL, .MOVE_DATA_NO_SWAP, DO_DEBUG, @src());
-                }
-                _ = try move_data_no_swap(DIR, SERIAL, move, &serial_idx, dynamic_serial_adjustment, native_loc_stack[curr_native_loc_len - 1], serial, DEBUG_MODE);
-                op_idx += 1;
-            },
-            .MOVE_DATA_NO_SWAP_SAVE_TAG => |move| {
-                if (DO_DEBUG) {
-                    MODE.assert_mode(.NEED_UNION_TAG_CAPTURE_NEXT, .MOVE_DATA_NO_SWAP_SAVE_TAG, DO_DEBUG, @src());
-                }
-                const native_start: usize, const native_end: usize, _, _ = try move_data_no_swap(DIR, SERIAL, move, &serial_idx, dynamic_serial_adjustment, native_loc_stack[curr_native_loc_len - 1], serial, DEBUG_MODE);
-                save_tag(&tag_got, native_loc_stack[curr_native_loc_len - 1], native_start, native_end);
-                op_idx += 1;
-                if (DO_DEBUG) {
-                    MODE = .NEED_UNION_TAG_ID_NEXT;
-                }
-            },
-            .MOVE_DATA_SWAP => |move| {
-                if (DO_DEBUG) {
-                    MODE.assert_mode(.NORMAL, .MOVE_DATA_SWAP, DO_DEBUG, @src());
-                }
-                _ = try move_data_swap(DIR, SERIAL, move, &serial_idx, dynamic_serial_adjustment, native_loc_stack[curr_native_loc_len - 1], serial, DEBUG_MODE);
-                op_idx += 1;
-            },
-            .MOVE_DATA_SWAP_SAVE_TAG => |move| {
-                if (DO_DEBUG) {
-                    MODE.assert_mode(.NEED_UNION_TAG_CAPTURE_NEXT, .MOVE_DATA_SWAP_SAVE_TAG, DO_DEBUG, @src());
-                }
-                const native_start: usize, const native_end: usize, _, _ = try move_data_swap(DIR, SERIAL, move, &serial_idx, dynamic_serial_adjustment, native_loc_stack[curr_native_loc_len - 1], serial, DEBUG_MODE);
-                save_tag(&tag_got, native_loc_stack[curr_native_loc_len - 1], native_start, native_end);
-                op_idx += 1;
-                if (DO_DEBUG) {
-                    MODE = .NEED_UNION_TAG_ID_NEXT;
-                }
-            },
-            .MOVE_DATA_VARINT_P => |move| {
-                if (DO_DEBUG) {
-                    MODE.assert_mode(.NORMAL, .MOVE_DATA_VARINT_P, DO_DEBUG, @src());
-                }
-                _ = try move_data_varint(DIR, SERIAL, .UNSIGNED, move, &serial_idx, &dynamic_serial_adjustment, native_loc_stack[curr_native_loc_len - 1], serial, DEBUG_MODE);
-                op_idx += 1;
-            },
-            .MOVE_DATA_VARINT_P_SAVE_TAG => |move| {
-                if (DO_DEBUG) {
-                    MODE.assert_mode(.NEED_UNION_TAG_CAPTURE_NEXT, .MOVE_DATA_VARINT_P_SAVE_TAG, DO_DEBUG, @src());
-                }
-                const native_start: usize, const native_end: usize, _, _ = try move_data_varint(DIR, SERIAL, .UNSIGNED, move, &serial_idx, &dynamic_serial_adjustment, native_loc_stack[curr_native_loc_len - 1], serial, DEBUG_MODE);
-                save_tag(&tag_got, native_loc_stack[curr_native_loc_len - 1], native_start, native_end);
-                op_idx += 1;
-                if (DO_DEBUG) {
-                    MODE = .NEED_UNION_TAG_ID_NEXT;
-                }
-            },
-            .MOVE_DATA_VARINT_PS => |move| {
-                if (DO_DEBUG) {
-                    MODE.assert_mode(.NORMAL, .MOVE_DATA_VARINT_PS, DO_DEBUG, @src());
-                }
-                _ = try move_data_varint(DIR, SERIAL, .SIGNED, move, &serial_idx, &dynamic_serial_adjustment, native_loc_stack[curr_native_loc_len - 1], serial, DEBUG_MODE);
-                op_idx += 1;
-            },
-            .MOVE_DATA_VARINT_PS_SAVE_TAG => |move| {
-                if (DO_DEBUG) {
-                    MODE.assert_mode(.NEED_UNION_TAG_CAPTURE_NEXT, .MOVE_DATA_VARINT_PS_SAVE_TAG, DO_DEBUG, @src());
-                }
-                const native_start: usize, const native_end: usize, _, _ = try move_data_varint(DIR, SERIAL, .SIGNED, move, &serial_idx, &dynamic_serial_adjustment, native_loc_stack[curr_native_loc_len - 1], serial, DEBUG_MODE);
-                save_tag(&tag_got, native_loc_stack[curr_native_loc_len - 1], native_start, native_end);
-                op_idx += 1;
-                if (DO_DEBUG) {
-                    MODE = .NEED_UNION_TAG_ID_NEXT;
-                }
-            },
-            //
-            .MOVE_ALLOC_DATA_NO_SWAP => |move| {
-                if (DO_DEBUG) {
-                    MODE.assert_mode(.NORMAL, .MOVE_DATA_NO_SWAP, DO_DEBUG, @src());
-                }
-                _ = try move_data_no_swap(true, DIR, SERIAL, move, &serial_idx, dynamic_serial_adjustment, native_loc_stack[curr_native_loc_len - 1], serial, DEBUG_MODE);
-                op_idx += 1;
-            },
-            .MOVE_ALLOC_DATA_NO_SWAP_SAVE_TAG => |move| {
-                if (DO_DEBUG) {
-                    MODE.assert_mode(.NEED_UNION_TAG_CAPTURE_NEXT, .MOVE_DATA_NO_SWAP_SAVE_TAG, DO_DEBUG, @src());
-                }
-                const native_start: usize, const native_end: usize, _, _ = try move_data_no_swap(true, DIR, SERIAL, move, &serial_idx, dynamic_serial_adjustment, native_loc_stack[curr_native_loc_len - 1], serial, DEBUG_MODE);
-                save_tag(&tag_got, native_loc_stack[curr_native_loc_len - 1], native_start, native_end);
-                op_idx += 1;
-                if (DO_DEBUG) {
-                    MODE = .NEED_UNION_TAG_ID_NEXT;
-                }
-            },
-            .MOVE_ALLOC_DATA_SWAP => |move| {
-                if (DO_DEBUG) {
-                    MODE.assert_mode(.NORMAL, .MOVE_DATA_SWAP, DO_DEBUG, @src());
-                }
-                _ = try move_data_swap(true, DIR, SERIAL, move, &serial_idx, dynamic_serial_adjustment, native_loc_stack[curr_native_loc_len - 1], serial, DEBUG_MODE);
-                op_idx += 1;
-            },
-            .MOVE_ALLOC_DATA_SWAP_SAVE_TAG => |move| {
-                if (DO_DEBUG) {
-                    MODE.assert_mode(.NEED_UNION_TAG_CAPTURE_NEXT, .MOVE_DATA_SWAP_SAVE_TAG, DO_DEBUG, @src());
-                }
-                const native_start: usize, const native_end: usize, _, _ = try move_data_swap(true, DIR, SERIAL, move, &serial_idx, dynamic_serial_adjustment, native_loc_stack[curr_native_loc_len - 1], serial, DEBUG_MODE);
-                save_tag(&tag_got, native_loc_stack[curr_native_loc_len - 1], native_start, native_end);
-                op_idx += 1;
-                if (DO_DEBUG) {
-                    MODE = .NEED_UNION_TAG_ID_NEXT;
-                }
-            },
-            .UNION_HEADER => |header| {
-                if (DO_DEBUG) {
-                    MODE.assert_mode(.NORMAL, .UNION_HEADER, DO_DEBUG, @src());
-                }
-                num_tags_this_union = header.num_fields;
-                tags_checked_this_union = 0;
-                op_idx += 1;
-                if (DO_DEBUG) {
-                    MODE = .NEED_UNION_TAG_CAPTURE_NEXT;
-                }
-            },
-            .UNION_TAG_ID => |tag_match| {
-                if (DO_DEBUG) {
-                    MODE.assert_mode(.NEED_UNION_TAG_ID_NEXT, .UNION_TAG_ID, DO_DEBUG, @src());
-                }
-                if (tag_got == tag_match) {
-                    op_idx += 1;
-                    if (DO_DEBUG) {
-                        MODE = .NEED_UNION_START_NEXT;
-                    }
-                } else {
-                    op_idx += 2;
-                    tags_checked_this_union += 1;
-                    if (tags_checked_this_union >= num_tags_this_union) switch (DIR) {
-                        .NATIVE_TO_SERIAL => return SerialWriteError.union_tag_in_native_didnt_match_any_valid_tag,
-                        .SERIAL_TO_NATIVE => return SerialReadError.union_tag_in_serial_didnt_match_any_valid_tag,
-                    };
-                }
-            },
-            .UNION_ROUTINE_START => |routine_start| {
-                if (DO_DEBUG) {
-                    MODE.assert_mode(.NEED_UNION_START_NEXT, .UNION_ROUTINE_START, DO_DEBUG, @src());
-                }
-                op_idx += routine_start.offset_to_first_routine_op;
-                if (DO_DEBUG) {
-                    debug_subroutine_mode_stack[curr_subroutine_len] = SubRoutineMode.UNION;
-                    curr_subroutine_len += 1;
-                    MODE = .NORMAL;
-                }
-            },
-            .UNION_ROUTINE_END => |routine_end| {
-                if (DO_DEBUG) {
-                    MODE.assert_mode(.NORMAL, .UNION_ROUTINE_END, DO_DEBUG, @src());
-                    assert_with_reason(curr_subroutine_len > 0 and debug_subroutine_mode_stack[curr_subroutine_len - 1] == SubRoutineMode.UNION, @src(), "union ends not allowed here (no union routine has been started)", .{});
-                    curr_subroutine_len -= 1;
-                }
-                op_idx += num_cast(routine_end.ops_to_advance_to_exit_union, u32);
-                dynamic_serial_adjustment += num_cast(routine_end.routine_serial_delta_adjustment, isize);
-            },
-            .SINGLE_ITEM_POINTER_HEADER => |ptr_header| {
-                if (DO_DEBUG) {
-                    MODE.assert_mode(.NORMAL, .SINGLE_ITEM_POINTER_HEADER, DO_DEBUG, @src());
-                }
-                // make_starts_and_ends(serial_idx, @sizeOf(usize), native_to_serial_delta: i32, dynamic_serial_adjustment_stack[curr_dynamic_adjust_len - 1], DEBUG_MODE);
+        fn handle_alloc_pointer(self: *Self, comptime DIR: SERDIR, ptr_op: Pointer, comptime need_cached_len: bool, comptime need_cached_null: bool) void {
+            const repeat: usize = if (need_cached_len) self.curr_routine.get_cached_len() else 1;
+            const byte_len: usize = num_cast(ptr_op.elem_size, usize) * repeat;
+            const is_null: bool = if (need_cached_null) self.curr_routine.get_cached_null() else false;
+            self.curr_routine.increment_op(1);
+            var pointer_subroutine = self.curr_routine.clone_with_empty_cache();
+            self.curr_routine.move_native_ptr_pos_neg(ptr_op.forward_offset_to_next_field, ptr_op.backward_offset_to_next_field);
+            self.curr_routine.increment_op(ptr_op.num_inline_subroutine_ops);
+            if (!is_null) {
                 switch (DIR) {
-                    .SERIAL_TO_NATIVE => {
-                        const new_loc = allocators[ptr_header.allocator_id].rawAlloc(@intCast(ptr_header.elem_size), .fromByteUnits(@intCast(ptr_header.elem_align)), @returnAddress()) orelse return SerialReadError.allocation_error;
-                        native_loc_stack[curr_native_loc_len] = new_loc[0..ptr_header.elem_size];
-                        curr_native_loc_len += 1;
-                    },
                     .NATIVE_TO_SERIAL => {
-                        const new_loc = native_loc_stack[curr_native_loc_len - 1]
-                        // CHECKPOINT hmm, something is wrong here, how to do this...
+                        const addr_of_native_pointer_slot: *usize = @ptrCast(@alignCast(pointer_subroutine.native_ptr));
+                        const new_native_ptr_region: [*]u8 = @ptrFromInt(addr_of_native_pointer_slot.*);
+                        pointer_subroutine.set_new_memory_region(new_native_ptr_region, byte_len);
+                        pointer_subroutine.set_op_slice_starting_from_current(ptr_op.num_inline_subroutine_ops, repeat);
+                        self.push_routine_frame(pointer_subroutine);
+                    },
+                    .SERIAL_TO_NATIVE => {
+                        const alloc = self.obj_allocs[ptr_op.alloc_idx];
+                        const new_native_ptr_region = Alloc.smart_alloc_new(alloc, u8, byte_len, .{ .align_mode = .custom_align(ptr_op.ptr_align_power.value_as_type(usize)) }, .{});
+                        const addr_of_native_pointer_slot: *usize = @ptrCast(@alignCast(pointer_subroutine.native_ptr));
+                        addr_of_native_pointer_slot.* = @intFromPtr(new_native_ptr_region.ptr);
+                        pointer_subroutine.set_new_memory_region(new_native_ptr_region.ptr, byte_len);
+                        pointer_subroutine.set_op_slice_starting_from_current(ptr_op.num_inline_subroutine_ops, repeat);
+                        self.push_routine_frame(pointer_subroutine);
                     },
                 }
-                if (DO_DEBUG) {
-                    debug_subroutine_stack[curr_subroutine_len] = SubRoutineMode.SINGLE_POINTER;
-                    curr_subroutine_len += 1;
-                    MODE = .NORMAL;
-                }
-                op_idx += 1;
-            },
-            // .MANY_ITEM_POINTER_HEADER => |ptr_header| {
-            //     if (DO_DEBUG) {
-            //         MODE.assert_mode(.NORMAL, .MANY_ITEM_POINTER_HEADER, DO_DEBUG, @src());
-            //     }
-            // },
-            .POINTER_ROUTINE_END => {
-                if (DO_DEBUG) {
-                    MODE.assert_mode(.NORMAL, .POINTER_ROUTINE_END, DO_DEBUG, @src());
-                }
-                if (curr_subroutine_repeat_len > 0) {
-                    if (subroutine_repeat_stack[curr_subroutine_repeat_len - 1].num_repeats_left > 0) {
-                        subroutine_repeat_stack[curr_subroutine_repeat_len - 1].num_repeats_left -= 1;
-                        op_idx = @intCast(subroutine_repeat_stack[curr_subroutine_repeat_len - 1].op_to_return_to);
-                        continue;
+            }
+        }
+
+        fn handle_non_zero_read_write_1_else_0(self: *Self, comptime DIR: SERDIR, comptime SER: ReadWrite.SerialKind, comptime CACHE: DataCacheMode, data: DataTransfer, serial: DIR.serial_type()) DIR.error_type()!void {
+            const ptr = self.curr_routine.native_ptr;
+            const slice = ptr[0..data.native_size];
+            var val: u8 = 0;
+            switch (DIR) {
+                .NATIVE_TO_SERIAL => {
+                    const ser: SerialDest = serial;
+                    for (slice) |byte| {
+                        val |= byte;
+                    }
+                    val |= val >> 1;
+                    val |= val >> 2;
+                    val |= val >> 4;
+                    val &= 1;
+                    try ser.write_one_byte(SER, @ptrCast(&val));
+                },
+                .SERIAL_TO_NATIVE => {
+                    const ser: SerialSource = serial;
+                    try ser.read_one_byte(SER, @ptrCast(&val));
+                    val |= val >> 1;
+                    val |= val >> 2;
+                    val |= val >> 4;
+                    val &= 1;
+                    @memset(slice, 0);
+                    if (NATIVE_ENDIAN == .LITTLE_ENDIAN) {
+                        slice[0] = val;
                     } else {
-                        curr_subroutine_repeat_len -= 1;
+                        slice[slice.len - 1] = val;
+                    }
+                },
+            }
+            switch (CACHE) {
+                .CACHE_LEN => {
+                    self.curr_routine.cache_len = num_cast(val, usize);
+                    self.curr_routine.has_len = true;
+                },
+                .CACHE_NULL => {
+                    self.curr_routine.cache_null = val > 0;
+                    self.curr_routine.has_null = true;
+                },
+                .CACHE_TAG => {
+                    self.curr_routine.cache_tag = num_cast(val, u64);
+                    self.curr_routine.has_tag = true;
+                },
+            }
+            self.byte_count += 1;
+            self.curr_routine.increment_op(1);
+            self.curr_routine.move_native_ptr_pos_neg(data.forward_offset_to_next_field, data.backward_offset_to_next_field);
+        }
+
+        fn handle_endian_transfer(self: *Self, comptime DIR: SERDIR, comptime SER: ReadWrite.SerialKind, comptime SAME_ENDIAN: bool, comptime CACHE: DataCacheMode, data: DataTransfer, serial: DIR.serial_type()) DIR.error_type()!void {
+            switch (DIR) {
+                .NATIVE_TO_SERIAL => {
+                    const ser: SerialDest = serial;
+                    if (SAME_ENDIAN) {
+                        try ser.write_n_bytes_in_order(SER, @intCast(data.native_size), self.curr_routine.native_ptr);
+                    } else {
+                        try ser.write_n_bytes_swapped(SER, @intCast(data.native_size), self.curr_routine.native_ptr);
+                    }
+                },
+                .SERIAL_TO_NATIVE => {
+                    const ser: SerialSource = serial;
+                    if (SAME_ENDIAN) {
+                        try ser.read_n_bytes_in_order(SER, @intCast(data.native_size), self.curr_routine.native_ptr);
+                    } else {
+                        try ser.read_n_bytes_swapped(SER, @intCast(data.native_size), self.curr_routine.native_ptr);
+                    }
+                },
+            }
+            switch (CACHE) {
+                .CACHE_LEN => {
+                    Utils.Mem.copy_arbitrary_length_bytes_in_native_endian_to_typed_pointer(usize, &self.curr_routine.cache_len, self.curr_routine.native_ptr[0..data.native_size]);
+                    self.curr_routine.has_len = true;
+                },
+                .CACHE_NULL => {
+                    var val: u8 = 0;
+                    for (self.curr_routine.native_ptr[0..data.native_size]) |b| {
+                        val |= b;
+                    }
+                    self.curr_routine.cache_null = val > 0;
+                    self.curr_routine.has_null = true;
+                },
+                .CACHE_TAG => {
+                    Utils.Mem.copy_arbitrary_length_bytes_in_native_endian_to_typed_pointer(u64, &self.curr_routine.cache_tag, self.curr_routine.native_ptr[0..data.native_size]);
+                    self.curr_routine.has_tag = true;
+                },
+            }
+            self.byte_count += @intCast(data.native_size);
+            self.curr_routine.increment_op(1);
+            self.curr_routine.move_native_ptr_pos_neg(data.forward_offset_to_next_field, data.backward_offset_to_next_field);
+        }
+
+        fn handle_varint_transfer(self: *Self, comptime DIR: SERDIR, comptime SER: ReadWrite.SerialKind, comptime ZIGZAG: bool, comptime CACHE: DataCacheMode, data: DataTransfer, serial: DIR.serial_type()) DIR.error_type()!void {
+            var n: usize = 0;
+            switch (data.native_size) {
+                2 => switch (DIR) {
+                    .NATIVE_TO_SERIAL => {
+                        const ser: SerialDest = serial;
+                        n = try ser.write_varint(SER, ZIGZAG, u16, @ptrCast(@alignCast(self.curr_routine.native_ptr)));
+                    },
+                    .SERIAL_TO_NATIVE => {
+                        const ser: SerialSource = serial;
+                        n = try ser.read_varint(SER, ZIGZAG, u16, @ptrCast(@alignCast(self.curr_routine.native_ptr)));
+                    },
+                },
+                4 => switch (DIR) {
+                    .NATIVE_TO_SERIAL => {
+                        const ser: SerialDest = serial;
+                        n = try ser.write_varint(SER, ZIGZAG, u32, @ptrCast(@alignCast(self.curr_routine.native_ptr)));
+                    },
+                    .SERIAL_TO_NATIVE => {
+                        const ser: SerialSource = serial;
+                        n = try ser.read_varint(SER, ZIGZAG, u32, @ptrCast(@alignCast(self.curr_routine.native_ptr)));
+                    },
+                },
+                8 => switch (DIR) {
+                    .NATIVE_TO_SERIAL => {
+                        const ser: SerialDest = serial;
+                        n = try ser.write_varint(SER, ZIGZAG, u64, @ptrCast(@alignCast(self.curr_routine.native_ptr)));
+                    },
+                    .SERIAL_TO_NATIVE => {
+                        const ser: SerialSource = serial;
+                        n = try ser.read_varint(SER, ZIGZAG, u64, @ptrCast(@alignCast(self.curr_routine.native_ptr)));
+                    },
+                },
+                16 => switch (DIR) {
+                    .NATIVE_TO_SERIAL => {
+                        const ser: SerialDest = serial;
+                        n = try ser.write_varint(SER, ZIGZAG, u128, @ptrCast(@alignCast(self.curr_routine.native_ptr)));
+                    },
+                    .SERIAL_TO_NATIVE => {
+                        const ser: SerialSource = serial;
+                        n = try ser.read_varint(SER, ZIGZAG, u128, @ptrCast(@alignCast(self.curr_routine.native_ptr)));
+                    },
+                },
+                else => assert_unreachable(@src(), "varints can only be encoded to/from types with byte size 2, 4, 8, or 16, got native data size {d}", .{data.native_size}),
+            }
+            switch (CACHE) {
+                .CACHE_LEN => {
+                    Utils.Mem.copy_arbitrary_length_bytes_in_native_endian_to_typed_pointer(usize, &self.curr_routine.cache_len, self.curr_routine.native_ptr[0..data.native_size]);
+                    self.curr_routine.has_len = true;
+                },
+                .CACHE_NULL => {
+                    var val: u8 = 0;
+                    for (self.curr_routine.native_ptr[0..data.native_size]) |b| {
+                        val |= b;
+                    }
+                    self.curr_routine.cache_null = val > 0;
+                    self.curr_routine.has_null = true;
+                },
+                .CACHE_TAG => {
+                    Utils.Mem.copy_arbitrary_length_bytes_in_native_endian_to_typed_pointer(u64, &self.curr_routine.cache_tag, self.curr_routine.native_ptr[0..data.native_size]);
+                    self.curr_routine.has_tag = true;
+                },
+            }
+            self.byte_count += n;
+            self.curr_routine.increment_op(1);
+            self.curr_routine.move_native_ptr_pos_neg(data.forward_offset_to_next_field, data.backward_offset_to_next_field);
+        }
+
+        fn handle_subroutine(self: *Self, subroutine: Subroutine, repeat: u32) void {
+            self.curr_routine.increment_op(1);
+            var subroutine_frame = self.curr_routine.clone_keep_cache();
+            if (subroutine.ops_are_inline) {
+                self.curr_routine.increment_op(subroutine.subroutine_num_ops);
+                subroutine_frame.set_op_slice_starting_from_current(subroutine.subroutine_num_ops, repeat);
+            } else {
+                subroutine_frame.set_op_slice_starting_from_non_inline_subroutine_op(subroutine.subroutine_num_ops, repeat);
+            }
+            self.push_routine_frame(subroutine_frame);
+            self.curr_routine.move_native_ptr_pos_neg(subroutine.forward_offset_to_next_field, subroutine.backward_offset_to_next_field);
+        }
+
+        fn op_isnt_ever_used(comptime OP_KIND: DataOpKind) bool {
+            return comptime !OP_USED[@intFromEnum(OP_KIND)];
+        }
+
+        fn get_root_frame(comptime T: type, object_ptr: *T) RoutineStackFrame {
+            const unique = comptime find: {
+                for (ROOT_TYPES[0..]) |root| {
+                    if (root.object_type == T) {
+                        break :find root;
                     }
                 }
-                if (DO_DEBUG) {
-                    MODE.assert_mode(.NORMAL, .POINTER_ROUTINE_END, DO_DEBUG, @src());
-                    assert_with_reason(curr_subroutine_len > 0 and debug_subroutine_mode_stack[curr_subroutine_len - 1] == SubRoutineMode.UNION, @src(), "union ends not allowed here (no union routine has been started)", .{});
-                    curr_subroutine_len -= 1;
-                }
-            },
-            //CHECKPOINT add remaining ops
-            else => unreachable,
+                assert_unreachable(@src(), "type `{s}` is not a type recorded by the SerializationManager at comptime definition. If you need to serialize this type, include it in the root types to serialize", .{@typeName(T)});
+            };
+            var frame = RoutineStackFrame{};
+            frame.set_new_memory_region(@ptrCast(object_ptr), @sizeOf(T));
+            frame.routine_start = unique.routine_start;
+            frame.routine_end = unique.routine_end;
+            frame.routine_idx = unique.routine_start;
+            frame.routine_repeat_left = 1;
+            return frame;
         }
-    }
-    return @intCast(serial_idx);
+
+        pub fn serialize_object_to_slice(self: *Self, comptime T: type, object_ptr: *const T, dest_slice: []u8, allocators: AllocatorsStruct, external_data: ?*anyopaque) SerialWriteError!usize {
+            var serial_slice = SerialDestSlice.new(dest_slice);
+            const serial = SerialDest.new_from_slice(&serial_slice);
+            const allocs = alloc_array(allocators);
+            const root_frame = get_root_frame(T, @constCast(object_ptr));
+            return self.serialize_internal(root_frame, .NATIVE_TO_SERIAL, .SLICE, serial, allocs, external_data);
+        }
+
+        pub fn serialize_object_to_writer(self: *Self, comptime T: type, object_ptr: *const T, dest_writer: *std.Io.Writer, allocators: AllocatorsStruct, external_data: ?*anyopaque) SerialWriteError!usize {
+            const serial = SerialDest.new_from_writer(dest_writer);
+            const allocs = alloc_array(allocators);
+            const root_frame = get_root_frame(T, @constCast(object_ptr));
+            return self.serialize_internal(root_frame, .NATIVE_TO_SERIAL, .READER_WRITER, serial, allocs, external_data);
+        }
+
+        pub fn deserialize_object_from_slice(self: *Self, comptime T: type, object_ptr: *T, source_slice: []const u8, allocators: AllocatorsStruct, external_data: ?*anyopaque) SerialReadError!usize {
+            var serial_slice = SerialSourceSlice.new(source_slice);
+            const serial = SerialSource.new_from_slice(&serial_slice);
+            const allocs = alloc_array(allocators);
+            const root_frame = get_root_frame(T, object_ptr);
+            return self.serialize_internal(root_frame, .SERIAL_TO_NATIVE, .SLICE, serial, allocs, external_data);
+        }
+
+        pub fn deserialize_object_from_reader(self: *Self, comptime T: type, object_ptr: *T, source_reader: *std.Io.Writer, allocators: AllocatorsStruct, external_data: ?*anyopaque) SerialReadError!usize {
+            const serial = SerialSource.new_from_reader(source_reader);
+            const allocs = alloc_array(allocators);
+            const root_frame = get_root_frame(T, object_ptr);
+            return self.serialize_internal(root_frame, .SERIAL_TO_NATIVE, .READER_WRITER, serial, allocs, external_data);
+        }
+
+        fn serialize_internal(self: *Self, root_frame: RoutineStackFrame, comptime DIR: SERDIR, comptime SER: ReadWrite.SerialKind, serial: DIR.serial_type(), allocs: [NUM_ALLOCS]Allocator, external: ?*anyopaque) DIR.error_type()!usize {
+            self.reset();
+            self.obj_allocs = allocs;
+            self.push_routine_frame(root_frame);
+            serial_loop: while (true) {
+                while (self.routine_stack_len > 0 and self.curr_routine.is_done()) {
+                    self.pop_routine_frame();
+                }
+                if (self.routine_stack_len == 0) {
+                    break :serial_loop;
+                }
+                const op = OPS[self.curr_routine.routine_idx];
+                const kind = op.GENERIC.kind;
+                switch (kind) {
+                    .MOVE_NATIVE_POINTER => {
+                        if (op_isnt_ever_used(.MOVE_NATIVE_POINTER)) unreachable;
+                        const delta = op.MOVE_NATIVE_POINTER.offset;
+                        self.curr_routine.move_native_ptr_i32(delta);
+                        self.curr_routine.increment_op(1);
+                    },
+                    .ALLOCATED_POINTER_TO_MANY_ONJECTS => {
+                        if (op_isnt_ever_used(.ALLOCATED_POINTER_TO_MANY_ONJECTS)) unreachable;
+                        const data = op.POINTER;
+                        self.handle_alloc_pointer(DIR, data, true, false);
+                    },
+                    .ALLOCATED_POINTER_TO_MANY_OBJECTS_OR_NULL => {
+                        if (op_isnt_ever_used(.ALLOCATED_POINTER_TO_MANY_OBJECTS_OR_NULL)) unreachable;
+                        const data = op.POINTER;
+                        self.handle_alloc_pointer(DIR, data, true, true);
+                    },
+                    .ALLOCATED_POINTER_TO_ONE_OBJECT => {
+                        if (op_isnt_ever_used(.ALLOCATED_POINTER_TO_ONE_OBJECT)) unreachable;
+                        const data = op.POINTER;
+                        self.handle_alloc_pointer(DIR, data, false, false);
+                    },
+                    .ALLOCATED_POINTER_TO_ONE_OBJECT_OR_NULL => {
+                        if (op_isnt_ever_used(.ALLOCATED_POINTER_TO_ONE_OBJECT_OR_NULL)) unreachable;
+                        const data = op.POINTER;
+                        self.handle_alloc_pointer(DIR, data, false, true);
+                    },
+                    .DATA_MANIPULATION_NATIVE_TO_SERIAL => {
+                        if (op_isnt_ever_used(.DATA_MANIPULATION_NATIVE_TO_SERIAL)) unreachable;
+                        if (DIR == .NATIVE_TO_SERIAL) {
+                            const data = op.DATA_MANIP_NATIVE_TO_SERIAL;
+                            var manip_ptr = self.curr_routine.clone_ptr_only();
+                            manip_ptr.move_native_ptr_i32(data.offset_to_object_addr);
+                            data.func(@ptrCast(manip_ptr.native_ptr), external);
+                        }
+                        self.curr_routine.increment_op(1);
+                    },
+                    .DATA_MANIPULATION_SERIAL_TO_NATIVE => {
+                        if (op_isnt_ever_used(.DATA_MANIPULATION_SERIAL_TO_NATIVE)) unreachable;
+                        if (DIR == .SERIAL_TO_NATIVE) {
+                            const data = op.DATA_MANIP_NATIVE_TO_SERIAL;
+                            var manip_ptr = self.curr_routine.clone_ptr_only();
+                            manip_ptr.move_native_ptr_i32(data.offset_to_object_addr);
+                            data.func(@ptrCast(manip_ptr.native_ptr), external);
+                        }
+                        self.curr_routine.increment_op(1);
+                    },
+                    .FULL_CUSTOM_FUNCTION => {
+                        if (op_isnt_ever_used(.FULL_CUSTOM_FUNCTION)) unreachable;
+                        const data = op.FULL_CUSTOM_FUNCTION;
+                        var object_ptr = self.curr_routine.clone_ptr_only();
+                        object_ptr.move_native_ptr_backward(data.get_neg_offset_to_object_addr());
+                        switch (DIR) {
+                            .NATIVE_TO_SERIAL => {
+                                const bytes_written = try data.funcs.write_to_serial(@ptrCast(object_ptr.native_ptr), serial, SER);
+                                self.byte_count += bytes_written;
+                            },
+                            .SERIAL_TO_NATIVE => {
+                                const bytes_read = try data.funcs.read_from_serial(@ptrCast(object_ptr.native_ptr), serial, SER);
+                                self.byte_count += bytes_read;
+                            },
+                        }
+                        self.curr_routine.increment_op(1);
+                        self.curr_routine.move_native_ptr_i32(data.offset_to_next_field);
+                    },
+                    .NON_ZERO_READ_OR_WRITE_1_ELSE_0 => {
+                        if (op_isnt_ever_used(.NON_ZERO_READ_OR_WRITE_1_ELSE_0)) unreachable;
+                        const data = op.DATA_TRANSFER;
+                        self.handle_non_zero_read_write_1_else_0(DIR, SER, .DONT_CACHE_DATA, data, serial);
+                    },
+                    .NON_ZERO_READ_OR_WRITE_1_ELSE_0_SAVE_LEN => {
+                        if (op_isnt_ever_used(.NON_ZERO_READ_OR_WRITE_1_ELSE_0_SAVE_LEN)) unreachable;
+                        const data = op.DATA_TRANSFER;
+                        self.handle_non_zero_read_write_1_else_0(DIR, SER, .CACHE_LEN, data, serial);
+                    },
+                    .NON_ZERO_READ_OR_WRITE_1_ELSE_0_SAVE_NULL => {
+                        if (op_isnt_ever_used(.NON_ZERO_READ_OR_WRITE_1_ELSE_0_SAVE_NULL)) unreachable;
+                        const data = op.DATA_TRANSFER;
+                        self.handle_non_zero_read_write_1_else_0(DIR, SER, .CACHE_NULL, data, serial);
+                    },
+                    .NON_ZERO_READ_OR_WRITE_1_ELSE_0_SAVE_TAG => {
+                        if (op_isnt_ever_used(.NON_ZERO_READ_OR_WRITE_1_ELSE_0_SAVE_TAG)) unreachable;
+                        const data = op.DATA_TRANSFER;
+                        self.handle_non_zero_read_write_1_else_0(DIR, SER, .CACHE_TAG, data, serial);
+                    },
+                    .POINTER_SENTINEL => {
+                        if (op_isnt_ever_used(.POINTER_SENTINEL)) unreachable;
+                        const data = op.SENTINEL;
+                        const sentinel_bytes_ptr: [*]const u8 = @ptrCast(data.sentinel_data);
+                        const sentinel_bytes = sentinel_bytes_ptr[0..data.elem_size];
+                        const native_bytes = self.curr_region.native_ptr[0..data.elem_size];
+                        @memcpy(native_bytes, sentinel_bytes);
+                        self.curr_routine.increment_op(1);
+                    },
+                    .REF_UNIQUE_TYPE_NO_REPEAT,
+                    .REF_UNIQUE_TYPE_STATIC_REPEAT,
+                    .REF_UNIQUE_TYPE_DYNAMIC_REPEAT,
+                    => unreachable, // These are converted to `START_SUBROUTINE_` versions at comptime
+                    .START_SUBROUTINE_NO_REPEAT => {
+                        if (op_isnt_ever_used(.START_SUBROUTINE_NO_REPEAT)) unreachable;
+                        const subroutine = op.SUBROUTINE;
+                        self.handle_subroutine(subroutine, 1);
+                    },
+                    .START_SUBROUTINE_STATIC_REPEAT => {
+                        if (op_isnt_ever_used(.START_SUBROUTINE_STATIC_REPEAT)) unreachable;
+                        const subroutine = op.SUBROUTINE;
+                        self.handle_subroutine(subroutine, subroutine.subroutine_static_repeat);
+                    },
+                    .START_SUBROUTINE_DYNAMIC_REPEAT => {
+                        if (op_isnt_ever_used(.START_SUBROUTINE_DYNAMIC_REPEAT)) unreachable;
+                        const subroutine = op.SUBROUTINE;
+                        const repeat = self.curr_routine.get_cached_len();
+                        self.handle_subroutine(subroutine, num_cast(repeat, u32));
+                    },
+                    .TRANSFER_SAME_ENDIAN => {
+                        if (op_isnt_ever_used(.TRANSFER_SAME_ENDIAN)) unreachable;
+                        const data = op.DATA_TRANSFER;
+                        self.handle_endian_transfer(DIR, SER, true, .DONT_CACHE_DATA, data, serial);
+                    },
+                    .TRANSFER_SAME_ENDIAN_SAVE_LEN => {
+                        if (op_isnt_ever_used(.TRANSFER_SAME_ENDIAN_SAVE_LEN)) unreachable;
+                        const data = op.DATA_TRANSFER;
+                        self.handle_endian_transfer(DIR, SER, true, .CACHE_LEN, data, serial);
+                    },
+                    .TRANSFER_SAME_ENDIAN_SAVE_NULL => {
+                        if (op_isnt_ever_used(.TRANSFER_SAME_ENDIAN_SAVE_NULL)) unreachable;
+                        const data = op.DATA_TRANSFER;
+                        self.handle_endian_transfer(DIR, SER, true, .CACHE_NULL, data, serial);
+                    },
+                    .TRANSFER_SAME_ENDIAN_SAVE_TAG => {
+                        if (op_isnt_ever_used(.TRANSFER_SAME_ENDIAN_SAVE_TAG)) unreachable;
+                        const data = op.DATA_TRANSFER;
+                        self.handle_endian_transfer(DIR, SER, true, .CACHE_TAG, data, serial);
+                    },
+                    .TRANSFER_SWAP_ENDIAN => {
+                        if (op_isnt_ever_used(.TRANSFER_SWAP_ENDIAN)) unreachable;
+                        const data = op.DATA_TRANSFER;
+                        self.handle_endian_transfer(DIR, SER, false, .DONT_CACHE_DATA, data, serial);
+                    },
+                    .TRANSFER_SWAP_ENDIAN_SAVE_LEN => {
+                        if (op_isnt_ever_used(.TRANSFER_SWAP_ENDIAN_SAVE_LEN)) unreachable;
+                        const data = op.DATA_TRANSFER;
+                        self.handle_endian_transfer(DIR, SER, false, .CACHE_LEN, data, serial);
+                    },
+                    .TRANSFER_SWAP_ENDIAN_SAVE_NULL => {
+                        if (op_isnt_ever_used(.TRANSFER_SWAP_ENDIAN_SAVE_NULL)) unreachable;
+                        const data = op.DATA_TRANSFER;
+                        self.handle_endian_transfer(DIR, SER, false, .CACHE_NULL, data, serial);
+                    },
+                    .TRANSFER_SWAP_ENDIAN_SAVE_TAG => {
+                        if (op_isnt_ever_used(.TRANSFER_SWAP_ENDIAN_SAVE_TAG)) unreachable;
+                        const data = op.DATA_TRANSFER;
+                        self.handle_endian_transfer(DIR, SER, false, .CACHE_TAG, data, serial);
+                    },
+                    .TRANSFER_VARINT => {
+                        if (op_isnt_ever_used(.TRANSFER_VARINT)) unreachable;
+                        const data = op.DATA_TRANSFER;
+                        self.handle_varint_transfer(DIR, SER, false, .DONT_CACHE_DATA, data, serial);
+                    },
+                    .TRANSFER_VARINT_SAVE_LEN => {
+                        if (op_isnt_ever_used(.TRANSFER_VARINT_SAVE_LEN)) unreachable;
+                        const data = op.DATA_TRANSFER;
+                        self.handle_varint_transfer(DIR, SER, false, .CACHE_LEN, data, serial);
+                    },
+                    .TRANSFER_VARINT_SAVE_NULL => {
+                        if (op_isnt_ever_used(.TRANSFER_VARINT_SAVE_NULL)) unreachable;
+                        const data = op.DATA_TRANSFER;
+                        self.handle_varint_transfer(DIR, SER, false, .CACHE_NULL, data, serial);
+                    },
+                    .TRANSFER_VARINT_SAVE_TAG => {
+                        if (op_isnt_ever_used(.TRANSFER_VARINT_SAVE_TAG)) unreachable;
+                        const data = op.DATA_TRANSFER;
+                        self.handle_varint_transfer(DIR, SER, false, .CACHE_TAG, data, serial);
+                    },
+                    .TRANSFER_VARINT_ZIGZAG => {
+                        if (op_isnt_ever_used(.TRANSFER_VARINT_ZIGZAG)) unreachable;
+                        const data = op.DATA_TRANSFER;
+                        self.handle_varint_transfer(DIR, SER, true, .DONT_CACHE_DATA, data, serial);
+                    },
+                    .TRANSFER_VARINT_ZIGZAG_SAVE_LEN => {
+                        if (op_isnt_ever_used(.TRANSFER_VARINT_ZIGZAG_SAVE_LEN)) unreachable;
+                        const data = op.DATA_TRANSFER;
+                        self.handle_varint_transfer(DIR, SER, true, .CACHE_LEN, data, serial);
+                    },
+                    .TRANSFER_VARINT_ZIGZAG_SAVE_NULL => {
+                        if (op_isnt_ever_used(.TRANSFER_VARINT_ZIGZAG_SAVE_NULL)) unreachable;
+                        const data = op.DATA_TRANSFER;
+                        self.handle_varint_transfer(DIR, SER, true, .CACHE_NULL, data, serial);
+                    },
+                    .TRANSFER_VARINT_ZIGZAG_SAVE_TAG => {
+                        if (op_isnt_ever_used(.TRANSFER_VARINT_ZIGZAG_SAVE_TAG)) unreachable;
+                        const data = op.DATA_TRANSFER;
+                        self.handle_varint_transfer(DIR, SER, true, .CACHE_TAG, data, serial);
+                    },
+                    .UNION_HEADER => {
+                        if (op_isnt_ever_used(.UNION_HEADER)) unreachable;
+                        const header = op.UNION_HEADER;
+                        self.curr_routine.increment_op(1);
+                        var union_subroutine = self.curr_routine.clone_keep_cache();
+                        self.curr_routine.increment_op(header.total_num_ops_in_union_after_header);
+                        self.curr_routine.move_native_ptr_pos_neg(header.forward_offset_to_next_field, header.backward_offset_to_next_field);
+                        const cached_tag = union_subroutine.get_cached_tag();
+                        var t: u32 = 0;
+                        check_if_found: switch (true) {
+                            true => {
+                                while (t < header.num_fields) : (t += 1) {
+                                    const next_op = OPS[union_subroutine.routine_idx];
+                                    const next_kind = op.GENERIC.kind;
+                                    union_subroutine.increment_op(1);
+                                    switch (next_kind) {
+                                        .UNION_TAG_ID => {
+                                            if (op_isnt_ever_used(.UNION_TAG_ID)) unreachable;
+                                            const tag_op = next_op.UNION_TAG_ID;
+                                            if (tag_op.tag_as_u64 == cached_tag) {
+                                                union_subroutine.set_op_slice_starting_from_current(tag_op.num_ops_in_tag, 1);
+                                                self.push_routine_frame(union_subroutine);
+                                                break :check_if_found;
+                                            }
+                                            union_subroutine.increment_op(tag_op.num_ops_in_tag);
+                                        },
+                                        .UNION_TAG_RANGE => {
+                                            if (op_isnt_ever_used(.UNION_TAG_RANGE)) unreachable;
+                                            const tag_op = next_op.UNION_TAG_RANGE;
+                                            if (tag_op.min_as_u64 <= cached_tag and cached_tag <= tag_op.max_as_u64) {
+                                                union_subroutine.set_op_slice_starting_from_current(tag_op.num_ops_in_tag, 1);
+                                                self.push_routine_frame(union_subroutine);
+                                                break :check_if_found;
+                                            }
+                                            union_subroutine.increment_op(tag_op.num_ops_in_tag);
+                                        },
+                                        else => assert_unreachable(@src(), "only `UNION_TAG_ID` or `UNION_TAG_RANGE` ops are allowed after a `UNION_HEADER` op, got invalid op `{s}", .{@tagName(next_kind)}),
+                                    }
+                                }
+                                continue :check_if_found false;
+                            },
+                            false => {
+                                return switch (DIR) {
+                                    .NATIVE_TO_SERIAL => SerialWriteError.union_tag_in_native_didnt_match_any_valid_tag,
+                                    .SERIAL_TO_NATIVE => SerialReadError.union_tag_in_serial_didnt_match_any_valid_tag,
+                                };
+                            },
+                        }
+                    },
+                    .UNION_TAG_ID,
+                    .UNION_TAG_RANGE,
+                    => assert_unreachable(@src(), "DataOp `{s}` is only allowed after a UnionHeader op, but found one free-floating", .{@tagName(kind)}),
+                }
+            }
+            return self.byte_count;
+        }
+    };
 }
 
-test SerialRoutineBuilder {
+test SerializationManager {
     const PRINT_SERIAL_SIZE: bool = false;
     const Test = Root.Testing;
     const Color = enum(u32) {
@@ -2900,7 +2795,7 @@ test SerialRoutineBuilder {
         DOG: Dog,
         CAT: Cat,
 
-        pub const Serial = Root.SerialUnion.SerialUnion(@This(), struct {}, .EXTERN, null);
+        pub const Serial = Root.SerialUnion.SerialUnion(@This(), struct {}, null);
 
         pub const EXAMPLE_1 = Serial.new(.DOG, Dog.EXAMPLE_1);
         pub const EXAMPLE_2 = Serial.new(.DOG, Dog.EXAMPLE_2);
@@ -2911,7 +2806,7 @@ test SerialRoutineBuilder {
         PERSON: Person,
         PET: DogOrCat.Serial,
 
-        pub const Serial = Root.SerialUnion.SerialUnion(@This(), struct {}, .EXTERN, null);
+        pub const Serial = Root.SerialUnion.SerialUnion(@This(), struct {}, null);
 
         pub const EXAMPLE_1 = Serial.new(.PERSON, Person.EXAMPLE_1);
         pub const EXAMPLE_2 = Serial.new(.PERSON, Person.EXAMPLE_2);
@@ -2945,62 +2840,36 @@ test SerialRoutineBuilder {
         TestStruct.EXAMPLE_5,
         TestStruct.EXAMPLE_6,
     };
-    const CONCRETE = comptime build: {
-        var test_struct_in = TestStruct.EXAMPLE_1;
-        var test_struct_out = TestStruct.EXAMPLE_2;
-        var op_buf: [1024]DataOp = undefined;
-        var union_end_buf: [256]usize = undefined;
-        var debug_buf: [1024]u8 = undefined;
-        var alloc_name_buf: [256]u8 = undefined;
-        var alloc_name_list: [32]RefSlice = undefined;
-        var subrs_stack: [64]SubRoutineMode = undefined;
-        const bufs = BuilderBuffers{
-            .alloc_name_buffer = alloc_name_buf[0..],
-            .alloc_name_list = alloc_name_list[0..],
-            .op_buffer = op_buf[0..],
-            .subroutine_stack = subrs_stack[0..],
-            .union_end_buffer = union_end_buf[0..],
-        };
-        var builder = SerialRoutineBuilder.init(bufs);
-        builder.debug_stack = debug_buf[0..1024];
-        const settings = SerialSettings{
-            .INTEGER_BYTE_PACKING = .USE_TARGET_ENDIAN,
-            .TARGET_ENDIAN = .BIG_ENDIAN,
-            .COMPTIME_EVAL_QUOTA = 50000,
-            .ADD_ROUTINE_DEBUG_INFO = false,
-            .MAGIC_IDENTIFIER = "TeSt",
-            .ROUTINE_VERSION = 1,
-            .POINTER_MODE = .DISALLOW_POINTERS,
-        };
-        builder.build_routine_for_type(TestStruct, settings);
-        var test_serial: [1024]u8 = undefined;
-        const input_native_bytes = std.mem.asBytes(&test_struct_in);
-        const output_native_bytes = std.mem.asBytes(&test_struct_out);
-        var serial_len_in: usize = undefined;
-        var serial_len_out: usize = undefined;
-        for (test_cases[0..], 0..) |case_struct, i| {
-            test_struct_in = case_struct;
-            test_struct_out = TestStruct.EXAMPLE_0;
-            serial_len_in = builder.test_serialize(input_native_bytes, test_serial[0..1024]);
-            serial_len_out = builder.test_deserialize(test_serial[0..1024], output_native_bytes);
-            try Test.expect_equal(serial_len_in, "serial_len_in", serial_len_out, "serial_len_out", "serial mismatch between in and out on same data (test case {d})", .{i});
-            try Test.expect_true(Utils.object_equals(test_struct_in, test_struct_out), "Utils.object_equals(test_struct_in, test_struct_out)", "input and output structs didnt have same values for same serial (test case {d})", .{i});
-        }
-        break :build builder.finalize_routine_for_current_type();
-    };
+    const Manager = SerializationManager(&.{
+        TestStruct,
+    }, .{
+        .INTEGER_PACKING = .USE_TARGET_ENDIAN,
+        .POINTER_MODE = .FOLLOW_POINTERS,
+        .TARGET_ENDIAN = .LITTLE_ENDIAN,
+        .USIZE_COMPATABILITY = .USIZE_ALWAYS_VARINT,
+    }, .{
+        .ALLOC_NAME_LIST_MAX_LEN = 16,
+        .ALLOC_NAME_BYTES_BUFFER_MAX_LEN = 512,
+        .OP_BUFFER_MAX_LEN = 1024,
+        .SUB_OBJECT_STACK_MAX_LEN = 32,
+        .UNIQUE_TYPE_BUFFER_MAX_LEN = 32,
+    });
+    const allocator = std.heap.smp_allocator;
+    var manager = Manager.init(32, allocator);
     var test_struct_in = TestStruct.EXAMPLE_1;
     var test_struct_out = TestStruct.EXAMPLE_2;
     var test_serial: [1024]u8 = undefined;
     var serial_len_in: usize = undefined;
     var serial_len_out: usize = undefined;
     if (PRINT_SERIAL_SIZE) {
-        std.debug.print("Serializer Tests: {s} {s}\n", .{ @tagName(CONCRETE.INT_PACKING), @tagName(CONCRETE.TARGET_ENDIAN) });
+        std.debug.print("Serializer Tests: {s} {s}\n", .{ @tagName(Manager.INTEGER_PACKING), @tagName(Manager.TARGET_ENDIAN) });
     }
     for (test_cases[0..], 0..) |case_struct, i| {
+        var object = case_struct;
         test_struct_in = case_struct;
         test_struct_out = TestStruct.EXAMPLE_0;
-        serial_len_in = try CONCRETE.serialize_to_slice(&test_struct_in, test_serial[0..1024]);
-        serial_len_out = try CONCRETE.deserialize_from_slice(test_serial[0..1024], &test_struct_out);
+        serial_len_in = try manager.serialize_object_to_slice(TestStruct, &object, test_serial[0..], .{}, null);
+        serial_len_out = try manager.deserialize_object_from_slice(TestStruct, &object, test_serial[0..], .{}, null);
         try Test.expect_equal(serial_len_in, "serial_len_in", serial_len_out, "serial_len_out", "serial mismatch between in and out on same data (test case {d})", .{i});
         try Test.expect_true(Utils.object_equals(test_struct_in, test_struct_out), "Utils.object_equals(test_struct_in, test_struct_out)", "input and output structs didnt have same values for same serial (test case {d})", .{i});
         if (PRINT_SERIAL_SIZE) {
