@@ -112,6 +112,9 @@ pub const Kind = enum(std.meta.Tag(TypeId)) {
     pub inline fn is_comptime_int(comptime K: Kind) bool {
         return K == .COMPTIME_INT;
     }
+    pub inline fn is_int_or_comptime_int(comptime K: KindInfo) bool {
+        return K == .INT or K == .COMPTIME_INT;
+    }
     pub inline fn is_undefined(comptime K: Kind) bool {
         return K == .UNDEFINED;
     }
@@ -228,6 +231,9 @@ pub const KindInfo = union(Kind) {
     }
     pub inline fn is_int(comptime K: KindInfo) bool {
         return K == .INT;
+    }
+    pub inline fn is_int_or_comptime_int(comptime K: KindInfo) bool {
+        return K == .INT or K == .COMPTIME_INT;
     }
     pub inline fn is_float(comptime K: KindInfo) bool {
         return K == .FLOAT;
@@ -375,10 +381,10 @@ pub const KindInfo = union(Kind) {
                             .ARRAY => |A| {
                                 return A.child;
                             },
-                            .VECTOR => |V| {
-                                return V.child;
+                            .VECTOR => {
+                                assert_unreachable(@src(), "vectors are no longer indexable as of zig 0.16, they must be coerced to an array first", .{@tagName(K)});
                             },
-                            else => assert_unreachable(@src(), "cannot index into a single-item pointer that does not point to either an array or vector", .{}),
+                            else => assert_unreachable(@src(), "cannot index into a single-item pointer that does not point to an array", .{}),
                         }
                     },
                     .slice, .many => {
@@ -389,10 +395,10 @@ pub const KindInfo = union(Kind) {
             .ARRAY => |A| {
                 return A.child;
             },
-            .VECTOR => |V| {
-                return V.child;
+            .VECTOR => {
+                assert_unreachable(@src(), "vectors are no longer indexable as of zig 0.16, they must be coerced to an array first", .{@tagName(K)});
             },
-            else => assert_unreachable(@src(), "kind `{s}` has no child type", .{@tagName(K)}),
+            else => assert_unreachable(@src(), "kind `{s}` has no indexable child type", .{@tagName(K)}),
         }
     }
     pub inline fn child_kind(comptime K: KindInfo) Kind {
@@ -466,14 +472,17 @@ pub const KindInfo = union(Kind) {
     pub inline fn is_indexable(comptime K: KindInfo) bool {
         switch (K) {
             .POINTER => |P| {
-                return P.size == .many or P.size == .slice or (P.size == .one and Kind.get_kind(P.child).is_any_of(&.{ .ARRAY, .VECTOR }));
+                return P.size == .many or P.size == .slice or (P.size == .one and Kind.get_kind(P.child).is_array());
             },
-            .ARRAY, .VECTOR => return true,
+            .ARRAY => return true,
             .STRUCT => |S| {
                 return S.is_tuple;
             },
             else => return false,
         }
+    }
+    pub inline fn assert_is_indexable(comptime K: KindInfo, comptime src: std.builtin.SourceLocation) void {
+        assert_with_reason(K.is_indexable(), src, "kind `{s}` is not indexible, must be a many-item pointer, slice, or pointer to an array", .{@tagName(K)});
     }
     pub inline fn has_len(comptime K: KindInfo) bool {
         return K == .ARRAY or K == .VECTOR or (K == .POINTER and (K.POINTER.size == .slice or Kind.get_kind(K.POINTER.child).is_array_or_vector()));

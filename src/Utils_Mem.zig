@@ -33,7 +33,7 @@ const Utils = Root.Utils;
 const fmt = std.fmt;
 
 const Root = @import("./_root.zig");
-const object_equals = Root.Utils.object_equals;
+const object_equals = Root.Utils.shallow_equals;
 const Assert = Root.Assert;
 const Types = Root.Types;
 const Test = Root.Testing;
@@ -42,6 +42,7 @@ const assert_unreachable = Assert.assert_unreachable;
 const ptr_cast = Root.Cast.ptr_cast;
 const num_cast = Root.Cast.num_cast;
 const Endian = Root.CommonTypes.Endian;
+const Math = Root.Math;
 
 const Kind = Types.Kind;
 const KindInfo = Types.KindInfo;
@@ -85,6 +86,25 @@ pub fn index_from_pointer(comptime T: type, comptime IDX: type, base_ptr: [*]con
     return @intCast(addr_delta / @sizeOf(T));
 }
 
+pub inline fn secure_zero(comptime T: type, slice: []volatile T) void {
+    const raw_len = slice.len * @sizeOf(T);
+    const u8_ptr: [*]volatile u8 = @ptrCast(slice.ptr);
+    @memset(u8_ptr[0..raw_len], 0);
+}
+pub inline fn secure_memset_undefined(comptime T: type, slice: []volatile T) void {
+    if (build.mode == .Debug or build.mode == .ReleaseSafe) {
+        const cast_ptr: [*]volatile u8 = @ptrCast(@alignCast(slice.ptr));
+        const byte_len = slice.len * @sizeOf(T);
+        const cast_slice: []volatile u8 = cast_ptr[0..byte_len];
+        @memset(cast_slice, 0xAA);
+    } else {
+        @memset(slice, 0);
+    }
+}
+pub inline fn secure_memset(comptime T: type, slice: []volatile T, val: T) void {
+    @memset(slice, val);
+}
+
 /// This should match `std.mem.reverseVector`
 inline fn reverse_vector_slice(comptime N: usize, comptime T: type, a: []T) [N]T {
     var res: [N]T = undefined;
@@ -94,30 +114,382 @@ inline fn reverse_vector_slice(comptime N: usize, comptime T: type, a: []T) [N]T
     return res;
 }
 
-pub fn move_block_of_elements_include_last_and_preserve_displaced(slice: anytype, first_elem_to_move: anytype, last_elem_to_move: anytype, idx_to_place_elements: usize) void {
-    Assert.assert_with_reason(Types.type_is_slice(@TypeOf(slice)), @src(), "type of `slice` was not a slice type, got {s}", .{@typeName(@TypeOf(slice))});
-    const T = @typeInfo(@TypeOf(slice)).pointer.child;
-    Assert.assert_with_reason(first_elem_to_move <= last_elem_to_move, @src(), "`old_first` MUST be <= `old_last_inclusive`, got ({d}, {d})", .{ first_elem_to_move, last_elem_to_move });
-    const len_a = (last_elem_to_move - first_elem_to_move) + 1;
-    const slice_a = slice[first_elem_to_move .. first_elem_to_move + len_a];
+pub fn move_one_and_preserve_displaced(buffer: anytype, old_idx: anytype, new_idx: anytype) void {
+    const BUF = @TypeOf(buffer);
+    const T = Types.IndexableChild(BUF);
+    var widx: isize = @intCast(old_idx);
+    const step: isize = if (new_idx > old_idx) 1 else -1;
+    var ridx: isize = widx + step;
+    const val: T = buffer[old_idx];
+    while (widx != new_idx) {
+        buffer[@intCast(widx)] = buffer[@intCast(ridx)];
+        widx = ridx;
+        ridx += step;
+    }
+    buffer[@intCast(widx)] = val;
+}
+
+pub fn move_block_of_elements_include_last_and_preserve_displaced(buffer: anytype, first_idx_to_move: anytype, last_idx_to_move: anytype, idx_to_place_elements: usize) void {
+    const BUF = @TypeOf(buffer);
+    const T = Types.IndexableChild(BUF);
+    Assert.assert_with_reason(first_idx_to_move <= last_idx_to_move, @src(), "`old_first` MUST be <= `old_last_inclusive`, got ({d}, {d})", .{ first_idx_to_move, last_idx_to_move });
+    const len_a = (last_idx_to_move - first_idx_to_move) + 1;
+    const slice_a = buffer[first_idx_to_move .. first_idx_to_move + len_a];
     var total_range: []T = undefined;
     var slice_b: []T = undefined;
-    if (idx_to_place_elements < first_elem_to_move) {
-        total_range = slice[idx_to_place_elements .. last_elem_to_move + 1];
-        slice_b = slice[idx_to_place_elements..first_elem_to_move];
+    if (idx_to_place_elements < first_idx_to_move) {
+        total_range = buffer[idx_to_place_elements .. last_idx_to_move + 1];
+        slice_b = buffer[idx_to_place_elements..first_idx_to_move];
     } else {
-        total_range = slice[first_elem_to_move .. idx_to_place_elements + len_a];
-        slice_b = slice[last_elem_to_move + 1 .. idx_to_place_elements + len_a];
+        total_range = buffer[first_idx_to_move .. idx_to_place_elements + len_a];
+        slice_b = buffer[last_idx_to_move + 1 .. idx_to_place_elements + len_a];
     }
     reverse_slice(slice_a);
     reverse_slice(slice_b);
     reverse_slice(total_range);
 }
+
 pub fn move_block_of_elements_and_preserve_displaced(slice: anytype, first_elem_to_move: anytype, elems_to_move_end_exclusive: anytype, idx_to_place_elements: anytype) void {
     return move_block_of_elements_include_last_and_preserve_displaced(slice, first_elem_to_move, elems_to_move_end_exclusive - 1, idx_to_place_elements);
 }
 
-//CHECKPOINT move mem_ funcs from Utils base to here
+/// This function aligns an address forward, with the additional condition that the object
+/// memory span cannot cross some *larger* boundary alignment, *UNLESS* the original offset
+/// was also already aligned to the larger boundary offset. If the aligned address would cause
+/// the object to cross the boundary alignment *AND* it was not already aligned to the boundary
+/// alignment, it instead returns an address aligned to the larger boundary alignment.
+pub fn align_forward_without_breaking_align_boundary_unless_offset_boundary_aligned(offset: usize, len: usize, object_align: usize, boundary_align: usize) usize {
+    assert_with_reason(object_align <= boundary_align, @src(), "object_align must be <= boundary_align to use this function, got {d} > {d}", .{ object_align, boundary_align });
+    const initial_align = std.mem.alignForward(usize, offset, object_align);
+    const initial_delta = initial_align - offset;
+    if (initial_delta == 0 or object_align == boundary_align) return initial_align;
+    const start_boundary_align = std.mem.alignBackward(usize, initial_align, boundary_align);
+    const end_minus_one_boundary_align = std.mem.alignBackward(usize, initial_align + len - 1, boundary_align);
+    if (start_boundary_align == end_minus_one_boundary_align) return initial_align;
+    return std.mem.alignForward(usize, offset, boundary_align);
+}
+
+/// The function should return `true` if `item_to_check == search_param`
+pub fn MatchFunc(comptime SEARCH_PARAM: type, comptime ELEM: type) type {
+    return fn (search_param: SEARCH_PARAM, item_to_check: ELEM) bool;
+}
+/// The function should return `true` if `item_to_check == search_param`
+pub fn MatchFuncUserdata(comptime SEARCH_PARAM: type, comptime ELEM: type, comptime USERDATA: type) type {
+    return fn (search_param: SEARCH_PARAM, item_to_check: ELEM, userdata: USERDATA) bool;
+}
+
+/// The function should return `true` if `search_param < item_to_check`
+pub fn LessThanFunc(comptime SEARCH_PARAM: type, comptime ELEM: type) type {
+    return fn (search_param: SEARCH_PARAM, item_to_check: ELEM) bool;
+}
+/// The function should return `true` if `search_param < item_to_check`
+pub fn LessThanFuncUserdata(comptime SEARCH_PARAM: type, comptime ELEM: type, comptime USERDATA: type) type {
+    return fn (search_param: SEARCH_PARAM, item_to_check: ELEM, userdata: USERDATA) bool;
+}
+
+/// Searches a memory region for a matching item using the native `==` operator
+///
+/// returns the index found, else `null` if  not found
+pub fn search_implicit(buffer: anytype, start: anytype, end_exclusive: anytype, find_val: anytype, comptime IDX_TYPE: type) ?IDX_TYPE {
+    _ = Types.IndexableChild(buffer);
+    for (buffer[start..end_exclusive], 0..) |item, i| {
+        if (Utils.shallow_equals(item, find_val)) return @intCast(i);
+    }
+    return null;
+}
+
+/// Searches a memory region for a matching item using an equality function
+///
+/// returns the index found, else `null` if  not found
+pub fn search_with_func(buffer: anytype, start: anytype, end_exclusive: anytype, search_param: anytype, match_fn: *const MatchFunc(@TypeOf(search_param), Types.IndexableChild(@TypeOf(buffer))), comptime IDX_TYPE: type) ?IDX_TYPE {
+    _ = Types.IndexableChild(buffer);
+    for (buffer[start..end_exclusive], 0..) |item, i| {
+        if (match_fn(search_param, item)) return @intCast(i);
+    }
+    return null;
+}
+
+/// Searches a memory slice for a matching item using an equality function with userdata
+///
+/// returns the index found, else `null` if  not found
+pub fn search_with_func_and_userdata(buffer: anytype, start: anytype, end_exclusive: anytype, search_param: anytype, userdata: anytype, match_fn: *const MatchFuncUserdata(@TypeOf(search_param), Types.IndexableChild(@TypeOf(buffer)), @TypeOf(userdata)), comptime IDX_TYPE: type) ?IDX_TYPE {
+    _ = Types.IndexableChild(buffer);
+    for (buffer[start..end_exclusive], 0..) |item, i| {
+        if (match_fn(search_param, item, userdata)) return @intCast(i);
+    }
+    return null;
+}
+
+pub const BinarySearchResultKind = enum(u2) {
+    FOUND,
+    NOT_FOUND_WITHIN_RANGE,
+    NOT_FOUND_ABOVE_MAX,
+    NOT_FOUND_BELOW_MIN,
+};
+
+pub fn BinarySerachResult(comptime IDX_TYPE: type) type {
+    return struct {
+        idx: IDX_TYPE,
+        result: BinarySearchResultKind,
+    };
+}
+
+const BinarySearchKind = enum(u8) {
+    IMPLICIT,
+    FUNC,
+    FUNC_USERDATA,
+};
+
+fn BinarySearchPackage(comptime SEARCH_PARAM: type, comptime ELEM_TYPE: type, comptime USERDATA: type) type {
+    return union {
+        const Self = @This();
+
+        IMPLICIT: void,
+        FUNC: struct {
+            match: MatchFunc(SEARCH_PARAM, ELEM_TYPE),
+            less_than: LessThanFunc(SEARCH_PARAM, ELEM_TYPE),
+        },
+        FUNC_USERDATA: struct {
+            match: MatchFuncUserdata(SEARCH_PARAM, ELEM_TYPE, USERDATA),
+            less_than: LessThanFuncUserdata(SEARCH_PARAM, ELEM_TYPE, USERDATA),
+        },
+
+        fn match(self: Self, comptime MODE: BinarySearchKind, search_param: SEARCH_PARAM, item: ELEM_TYPE, userdata: USERDATA) bool {
+            switch (comptime MODE) {
+                .IMPLICIT => {
+                    return Utils.shallow_equal(search_param, item);
+                },
+                .FUNC => {
+                    const func = self.FUNC;
+                    return func.match(search_param, item);
+                },
+                .FUNC_USERDATA => {
+                    const func = self.FUNC_USERDATA;
+                    return func.match(search_param, item, userdata);
+                },
+            }
+        }
+
+        fn search_param_less_than_item(self: Self, comptime MODE: BinarySearchKind, search_param: SEARCH_PARAM, item: ELEM_TYPE, userdata: USERDATA) bool {
+            switch (comptime MODE) {
+                .IMPLICIT => {
+                    return Utils.Compare.less_than(search_param, item);
+                },
+                .FUNC => {
+                    const func = self.FUNC;
+                    return func.less_than(search_param, item);
+                },
+                .FUNC_USERDATA => {
+                    const func = self.FUNC_USERDATA;
+                    return func.less_than(search_param, item, userdata);
+                },
+            }
+        }
+    };
+}
+
+fn binary_search_internal(buffer: anytype, start: anytype, end_exclusive: anytype, search_param: anytype, userdata: anytype, comptime IDX_TYPE: type, package: BinarySearchPackage(@TypeOf(search_param), Types.IndexableChild(@TypeOf(buffer)), @TypeOf(userdata)), comptime PKG_MODE: BinarySearchKind) BinarySerachResult(IDX_TYPE) {
+    const T = Types.IndexableChild(buffer);
+    const DID_MOVE_RIGHT: IDX_TYPE = Math.bit_flood_left(@as(IDX_TYPE, 1));
+    var idx: IDX_TYPE = @intCast(start);
+    const min = idx;
+    var len: IDX_TYPE = Math.upgrade_subtract_out(end_exclusive, start, IDX_TYPE);
+    if (len == 0) return BinarySerachResult(IDX_TYPE){
+        .idx = idx,
+        .result = .NOT_FOUND_ABOVE_MAX,
+    };
+    const max: IDX_TYPE = @intCast(end_exclusive - 1);
+    var moved_right_mask: IDX_TYPE = 0;
+    var last_item: if (Assert.should_assert()) T else void = if (Assert.should_assert()) buffer[idx + (len >> 1) - 1] else void{};
+    while (len > 1) {
+        const half = len >> 1;
+        const item = buffer[idx + half - 1];
+        if (Assert.should_assert()) {
+            if (moved_right_mask == DID_MOVE_RIGHT) {
+                assert_with_reason(package.match(PKG_MODE, last_item, item, userdata) or package.search_param_less_than_item(PKG_MODE, last_item, item, userdata), @src(), "buffer was not sorted, cannot perform a binary search", .{});
+            } else {
+                assert_with_reason(package.match(PKG_MODE, last_item, item, userdata) or !package.search_param_less_than_item(PKG_MODE, last_item, item, userdata), @src(), "buffer was not sorted, cannot perform a binary search", .{});
+            }
+        }
+        moved_right_mask = @intCast(@intFromBool(!package.search_param_less_than_item(PKG_MODE, search_param, item, userdata)));
+        moved_right_mask = Math.bit_flood_left(moved_right_mask);
+        idx += half & moved_right_mask;
+        len -= half;
+        if (Assert.should_assert()) {
+            last_item = item;
+        }
+    }
+    if (package.match(PKG_MODE, search_param, buffer[idx], userdata)) return BinarySerachResult(IDX_TYPE){
+        .idx = idx,
+        .result = .FOUND,
+    };
+    if (idx <= min) {
+        return BinarySerachResult(IDX_TYPE){
+            .idx = idx,
+            .result = .NOT_FOUND_BELOW_MIN,
+        };
+    }
+    if (idx >= max) {
+        return BinarySerachResult(IDX_TYPE){
+            .idx = idx,
+            .result = .NOT_FOUND_ABOVE_MAX,
+        };
+    }
+    return BinarySerachResult(IDX_TYPE){
+        .idx = idx,
+        .result = .NOT_FOUND_WITHIN_RANGE,
+    };
+}
+
+/// Searches a memory region for a matching item using the native `==` operator
+///
+/// returns the index found, else `null` if  not found
+pub fn binary_search_implicit(buffer: anytype, start: anytype, end_exclusive: anytype, find_val: anytype, comptime IDX_TYPE: type) BinarySerachResult(IDX_TYPE) {
+    const package = BinarySearchPackage(@TypeOf(find_val), Types.IndexableChild(@TypeOf(buffer)), void){ .IMPLICIT = void{} };
+    return binary_search_internal(buffer, start, end_exclusive, find_val, void{}, IDX_TYPE, package, .IMPLICIT);
+}
+
+/// Searches a memory region for a matching item using the native `==` operator
+///
+/// returns the index found, else `null` if  not found
+pub fn binary_search_with_func(buffer: anytype, start: anytype, end_exclusive: anytype, search_param: anytype, match_fn: *const MatchFunc(@TypeOf(search_param), Types.IndexableChild(@TypeOf(buffer))), less_than_fn: *const LessThanFunc(@TypeOf(search_param), Types.IndexableChild(@TypeOf(buffer))), comptime IDX_TYPE: type) BinarySerachResult(IDX_TYPE) {
+    const package = BinarySearchPackage(@TypeOf(search_param), Types.IndexableChild(@TypeOf(buffer)), void){ .FUNC = .{
+        .less_than = less_than_fn,
+        .match = match_fn,
+    } };
+    return binary_search_internal(buffer, start, end_exclusive, search_param, void{}, IDX_TYPE, package, .FUNC);
+}
+
+/// Searches a memory region for a matching item using the native `==` operator
+///
+/// returns the index found, else `null` if  not found
+pub fn binary_search_with_func_and_userdata(buffer: anytype, start: anytype, end_exclusive: anytype, search_param: anytype, userdata: anytype, match_fn: *const MatchFuncUserdata(@TypeOf(search_param), Types.IndexableChild(@TypeOf(buffer)), @TypeOf(userdata)), less_than_fn: *const LessThanFuncUserdata(@TypeOf(search_param), Types.IndexableChild(@TypeOf(buffer)), @TypeOf(userdata)), comptime IDX_TYPE: type) BinarySerachResult(IDX_TYPE) {
+    const package = BinarySearchPackage(@TypeOf(search_param), Types.IndexableChild(@TypeOf(buffer)), @TypeOf(userdata)){ .FUNC_USERDATA = .{
+        .less_than = less_than_fn,
+        .match = match_fn,
+    } };
+    return binary_search_internal(buffer, start, end_exclusive, search_param, userdata, IDX_TYPE, package, .FUNC_USERDATA);
+}
+
+/// This method moves all items at `data_ptr[start..]` up `n` places,
+/// and alters `len_ptr` to reflect the new length
+///
+/// Assumes `data_ptr[0..(len_ptr.* + n)]` is a valid slice (sufficient memory is allocated)
+pub fn insert(data_ptr: anytype, len_ptr: anytype, start: usize, n: usize) void {
+    const PTR = @TypeOf(data_ptr);
+    const LEN_PTR = @TypeOf(len_ptr);
+    assert_with_reason(Types.type_is_many_item_pointer(PTR), @src(), "type of `data_ptr` must be a many-item-pointer, got type {s}", .{@typeName(PTR)});
+    assert_with_reason(Types.type_is_single_item_pointer(LEN_PTR), @src(), "type of `len_ptr` must be a single-item-pointer to an integer type, got type {s}", .{@typeName(LEN_PTR)});
+    const LEN = @typeInfo(LEN_PTR).pointer.child;
+    assert_with_reason(Types.type_is_int(LEN), @src(), "type of `len_ptr` must be a single-item-pointer to an integer type, got type {s}", .{@typeName(LEN_PTR)});
+    const new_start = start + n;
+    const move_len: usize = @as(usize, @intCast(len_ptr.*)) - start;
+    @memmove(data_ptr[new_start .. new_start + move_len], data_ptr[start .. start + move_len]);
+    len_ptr.* += @intCast(n);
+}
+
+/// This method moves all items at `data_ptr[start+n..]` down `n` places,
+/// and alters `len_ptr` to reflect the new length
+pub fn remove(data_ptr: anytype, len_ptr: anytype, start: usize, n: usize) void {
+    const PTR = @TypeOf(data_ptr);
+    const LEN_PTR = @TypeOf(len_ptr);
+    assert_with_reason(Types.type_is_many_item_pointer(PTR), @src(), "type of `data_ptr` must be a many-item-pointer, got type {s}", .{@typeName(PTR)});
+    assert_with_reason(Types.type_is_single_item_pointer(LEN_PTR), @src(), "type of `len_ptr` must be a single-item-pointer to an integer type, got type {s}", .{@typeName(LEN_PTR)});
+    const LEN = @typeInfo(LEN_PTR).pointer.child;
+    assert_with_reason(Types.type_is_int(LEN), @src(), "type of `len_ptr` must be a single-item-pointer to an integer type, got type {s}", .{@typeName(LEN_PTR)});
+    const new_start = start + n;
+    const move_len: usize = @as(usize, @intCast(len_ptr.*)) - new_start;
+    @memmove(data_ptr[start .. start + move_len], data_ptr[new_start .. new_start + move_len]);
+    len_ptr.* -= @intCast(n);
+}
+
+/// This method deletes all of the indexes from the provided list (sorted low to high)
+/// by moving all indexes above the first one in the list and not ALSO included in the list,
+/// down.
+pub fn remove_sparse_by_indexes_sorted_low_to_high(data_ptr: anytype, len_ptr: anytype, sorted_indexes: []const usize) void {
+    if (sorted_indexes.len == 0 or sorted_indexes[0] >= len_ptr.*) return;
+    const PTR = @TypeOf(data_ptr);
+    const LEN_PTR = @TypeOf(len_ptr);
+    assert_with_reason(Types.type_is_many_item_pointer(PTR), @src(), "type of `data_ptr` must be a many-item-pointer, got type {s}", .{@typeName(PTR)});
+    const PTR_INFO = @typeInfo(PTR).pointer;
+    assert_with_reason(Types.type_is_single_item_pointer(LEN_PTR), @src(), "type of `len_ptr` must be a single-item-pointer to an integer type, got type {s}", .{@typeName(LEN_PTR)});
+    const LEN = @typeInfo(LEN_PTR).pointer.child;
+    assert_with_reason(Types.type_is_int(LEN), @src(), "type of `len_ptr` must be a single-item-pointer to an integer type, got type {s}", .{@typeName(LEN_PTR)});
+    var read_idx: usize = sorted_indexes[0] + 1;
+    var write_idx: usize = sorted_indexes[0];
+    var del_idx_idx: usize = 1;
+    var del_idx: usize = undefined;
+    const slice: []PTR_INFO.child = data_ptr[0..@as(usize, @intCast(len_ptr.*))];
+    while (del_idx_idx < sorted_indexes.len) {
+        del_idx = sorted_indexes[del_idx_idx];
+        while (read_idx < del_idx) {
+            slice[write_idx] = slice[read_idx];
+            read_idx += 1;
+            write_idx += 1;
+        }
+        read_idx += 1;
+        del_idx_idx += 1;
+    }
+    while (read_idx < slice.len) {
+        slice[write_idx] = slice[read_idx];
+        read_idx += 1;
+        write_idx += 1;
+    }
+    len_ptr.* -= @intCast(del_idx_idx);
+}
+
+/// This method deletes all of the indexes from the provided list (sorted low to high)
+/// by moving all indexes above the first on in the list and not ALSO included in the list,
+/// down.
+pub fn remove_sparse_by_values_in_list_order(comptime T: type, data_ptr: [*]T, len_ptr: anytype, known_start_index: usize, equality_func: *const fn (a: T, b: T) bool, values_in_order: []const T) void {
+    if (values_in_order.len == 0) return;
+    const LEN_PTR = @TypeOf(len_ptr);
+    assert_with_reason(Types.type_is_single_item_pointer(LEN_PTR), @src(), "type of `len_ptr` must be a single-item-pointer to an integer type, got type {s}", .{@typeName(LEN_PTR)});
+    const LEN = @typeInfo(LEN_PTR).pointer.child;
+    assert_with_reason(Types.type_is_int(LEN), @src(), "type of `len_ptr` must be a single-item-pointer to an integer type, got type {s}", .{@typeName(LEN_PTR)});
+    var read_idx: usize = known_start_index;
+    var write_idx: usize = known_start_index;
+    var del_val_idx: usize = 0;
+    var del_val: T = values_in_order[0];
+    var found_at_least_one: bool = false;
+    const slice: []T = data_ptr[0..@as(usize, @intCast(len_ptr.*))];
+    while (read_idx < slice.len) {
+        const this_val = slice[read_idx];
+        if (equality_func(this_val, del_val)) {
+            del_val_idx += 1;
+            if (del_val_idx < values_in_order.len) {
+                del_val = values_in_order[del_val_idx];
+            }
+            write_idx = read_idx;
+            read_idx += 1;
+            found_at_least_one = true;
+            break;
+        } else {
+            read_idx += 1;
+        }
+    }
+    while (read_idx < slice.len and del_val_idx < values_in_order.len) {
+        const this_val = slice[read_idx];
+        if (equality_func(this_val, del_val)) {
+            del_val_idx += 1;
+            read_idx += 1;
+            if (del_val_idx < values_in_order.len) {
+                del_val = values_in_order[del_val_idx];
+            }
+        } else {
+            slice[write_idx] = slice[read_idx];
+            read_idx += 1;
+            write_idx += 1;
+        }
+    }
+    if (!found_at_least_one) return;
+    while (read_idx < slice.len) {
+        slice[write_idx] = slice[read_idx];
+        read_idx += 1;
+        write_idx += 1;
+    }
+    len_ptr.* -= @intCast(del_val_idx);
+}
 
 pub fn reverse_array(arr_ptr: anytype) void {
     const T = @TypeOf(arr_ptr);

@@ -33,7 +33,7 @@ const Utils = Root.Utils;
 const fmt = std.fmt;
 
 const Root = @import("./_root.zig");
-const object_equals = Root.Utils.object_equals;
+const object_equals = Root.Utils.shallow_equals;
 const Assert = Root.Assert;
 const Types = Root.Types;
 const assert_with_reason = Assert.assert_with_reason;

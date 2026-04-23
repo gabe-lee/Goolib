@@ -44,6 +44,7 @@ pub const TypeId = std.builtin.TypeId;
 const _TK = @import("./Types_Kind.zig");
 pub const Kind = _TK.Kind;
 pub const KindInfo = _TK.KindInfo;
+pub const Id = @import("./Types_Id.zig");
 
 pub const fsize = switch (@bitSizeOf(usize)) {
     16 => f16,
@@ -94,6 +95,16 @@ pub fn SignedIntegerWithSameSize(comptime T: type) type {
     const INT = std.meta.Int(.signed, bits);
     assert_with_reason(@sizeOf(INT) == @sizeOf(T), @src(), "type `{s}` does not have a native matching integer size, its size is `{d}`, but converted to an integer is `{d}`", .{ @typeName(T), @sizeOf(T), @sizeOf(INT) });
     return INT;
+}
+
+pub fn FloatWithSameSize(comptime T: type) type {
+    const SIZE = @sizeOf(T);
+    return switch (SIZE) {
+        2 => f16,
+        4 => f32,
+        8 => f64,
+        else => assert_unreachable(@src(), "ony ltpes with sizes 2, 4, or 8 have the same size as a native float, got size {d} for type `{s}`", .{ SIZE, @typeName(T) }),
+    };
 }
 
 pub fn TrySignedIntegerWithSameSize(comptime T: type) ?type {
@@ -276,6 +287,41 @@ pub fn SliceChild(comptime T: type) type {
         },
         else => assert_unreachable(@src(), "type `{s}` is not a slice, array, or vector", .{@typeName(T)}),
     }
+}
+
+pub fn IndexableChild(comptime PARENT: type) type {
+    return KindInfo.get_kind_info(PARENT).indexed_child_type();
+}
+
+pub fn has_len(comptime T: type) bool {
+    const K = KindInfo.get_kind_info(T);
+    switch (K) {
+        .ARRAY, .VECTOR => return true,
+        .POINTER => |POINTER| {
+            switch (POINTER.size) {
+                .slice => return true,
+                .many => return false,
+                .one, .c => {
+                    const KK = KindInfo.get_kind_info(POINTER.child);
+                    switch (KK) {
+                        .ARRAY, .VECTOR => return true,
+                        else => return false,
+                    }
+                },
+            }
+        },
+        .STRUCT => {
+            if (@hasField(T, "len")) {
+                const K_LEN = KindInfo.get_kind_info(@FieldType(T, "len"));
+                return K_LEN.is_int_or_comptime_int();
+            }
+            return false;
+        },
+        else => return false,
+    }
+}
+pub fn assert_has_len(comptime T: type, comptime src: std.builtin.SourceLocation) void {
+    assert_with_reason(has_len(T), src, "type `{s}` has no `len` field", .{@typeName(T)});
 }
 
 pub fn all_enum_values_start_from_zero_with_no_gaps(comptime ENUM: type) bool {
@@ -574,6 +620,205 @@ pub inline fn type_is_numeric(comptime T: type) bool {
 }
 pub inline fn type_is_numeric_not_comptime(comptime T: type) bool {
     return @typeInfo(T) == .int or @typeInfo(T) == .float;
+}
+
+pub const FlatPtrInfo = struct {
+    addr: usize = 0,
+    len: usize = 0,
+
+    pub fn equals(self: FlatPtrInfo, other: FlatPtrInfo) bool {
+        if (self.was_not_pointer or other.was_not_pointer) return false;
+        if (self.is_null != other.is_null) return false;
+        return ( //
+            (self.addr == other.addr) and
+                (self.len == other.len) //
+        );
+    }
+};
+
+pub fn get_flat_ptr_info(ptr: anytype) FlatPtrInfo {
+    const T = @TypeOf(ptr);
+    const INFO = KindInfo.get_kind_info(T);
+    switch (INFO) {
+        .POINTER => |POINTER| {
+            switch (POINTER.size) {
+                .one, .c, .many => {
+                    return FlatPtrInfo{
+                        .addr = @intFromPtr(ptr),
+                        .len = 1,
+                    };
+                },
+                .slice => {
+                    return FlatPtrInfo{
+                        .addr = @intFromPtr(ptr.ptr),
+                        .len = ptr.len,
+                    };
+                },
+            }
+        },
+        .OPTIONAL => |OPTIONAL| {
+            const INFO_2 = KindInfo.get_kind_info(OPTIONAL.child);
+            switch (INFO_2) {
+                .POINTER => |POINTER| {
+                    if (ptr == null) return FlatPtrInfo{
+                        .addr = 0,
+                        .len = 0,
+                    };
+                    switch (POINTER.size) {
+                        .one, .c, .many => {
+                            return FlatPtrInfo{
+                                .addr = @intFromPtr(ptr.?),
+                                .len = 1,
+                            };
+                        },
+                        .slice => {
+                            return FlatPtrInfo{
+                                .addr = @intFromPtr(ptr.?.ptr),
+                                .len = ptr.?.len,
+                            };
+                        },
+                    }
+                },
+                else => assert_unreachable(@src(), "type was not a pointer, got `{s}`", .{@typeName(T)}),
+            }
+        },
+        else => assert_unreachable(@src(), "type was not a pointer, got `{s}`", .{@typeName(T)}),
+    }
+}
+
+pub const PointerFinalChild = struct {
+    TYPE: type,
+    DEPTH: u32 = 0,
+};
+
+pub inline fn DeepestPointerChild(comptime T: type) PointerFinalChild {
+    const INFO = KindInfo.get_kind_info(T);
+    comptime var result = PointerFinalChild{ .TYPE = T };
+    deeper: switch (INFO) {
+        .POINTER => |POINTER| {
+            result.TYPE = POINTER.child;
+            result.DEPTH += 1;
+            continue :deeper KindInfo.get_kind_info(result.TYPE);
+        },
+        else => return result,
+    }
+}
+
+pub fn unrwap_all_pointers(val: anytype) DeepestPointerChild(@TypeOf(val)).TYPE {
+    const T = @TypeOf(val);
+    const UNWRAP = DeepestPointerChild(T);
+    if (UNWRAP.DEPTH == 0) return val;
+    var d: u32 = 1;
+    var addr: usize = @intFromPtr(val);
+    while (d < UNWRAP.DEPTH) : (d += 1) {
+        const next_addr_ptr: *const usize = @ptrFromInt(addr);
+        addr = next_addr_ptr.*;
+    }
+    const final_ptr: *const UNWRAP.TYPE = @ptrFromInt(addr);
+    return final_ptr.*;
+}
+
+pub const NumericTransform = enum(u8) {
+    NONE_NEEDED,
+    INT_TO_INT,
+    FLOAT_TO_FLOAT,
+    FLOAT_TO_INT,
+    INT_TO_FLOAT,
+    @"BIT_CAST_SIGNED => INT_TO_INT",
+    @"BIT_CAST_SIGNED => INT_TO_FLOAT",
+    @"BIT_CAST_UNSIGNED => INT_TO_INT",
+    @"BIT_CAST_UNSIGNED => INT_TO_FLOAT",
+    @"BIT_CAST_FLOAT => FLOAT_TO_FLOAT",
+    @"BIT_CAST_FLOAT => FLOAT_TO_INT",
+    @"ENUM_TO_INT => INT_TO_INT",
+    @"ENUM_TO_INT => INT_TO_FLOAT",
+    @"BOOL_TO_INT => INT_TO_INT",
+    @"BOOL_TO_INT => INT_TO_FLOAT",
+    @"PTR_TO_INT => INT_TO_INT",
+    @"PTR_TO_INT => INT_TO_FLOAT",
+
+    pub fn transform(comptime self: NumericTransform, in: anytype, comptime OUT: type) OUT {
+        const IN = @TypeOf(in);
+        switch (self) {
+            NumericTransform.NONE_NEEDED => {
+                return in;
+            },
+            NumericTransform.INT_TO_INT => {
+                return @intCast(in);
+            },
+            NumericTransform.FLOAT_TO_FLOAT => {
+                return @floatCast(in);
+            },
+            NumericTransform.FLOAT_TO_INT => {
+                return @intFromFloat(in);
+            },
+            NumericTransform.INT_TO_FLOAT => {
+                return @floatFromInt(in);
+            },
+            NumericTransform.@"BIT_CAST_SIGNED => INT_TO_INT" => {
+                return @intCast(@as(SignedIntegerWithSameSize(IN), @bitCast(in)));
+            },
+            NumericTransform.@"BIT_CAST_SIGNED => INT_TO_FLOAT" => {
+                return @floatFromInt(@as(SignedIntegerWithSameSize(IN), @bitCast(in)));
+            },
+            NumericTransform.@"BIT_CAST_UNSIGNED => INT_TO_INT" => {
+                return @intCast(@as(UnsignedIntegerWithSameSize(IN), @bitCast(in)));
+            },
+            NumericTransform.@"BIT_CAST_UNSIGNED => INT_TO_FLOAT" => {
+                return @floatFromInt(@as(UnsignedIntegerWithSameSize(IN), @bitCast(in)));
+            },
+            NumericTransform.@"BIT_CAST_FLOAT => FLOAT_TO_FLOAT" => {
+                return @floatCast(@as(FloatWithSameSize(IN), @bitCast(in)));
+            },
+            NumericTransform.@"BIT_CAST_FLOAT => FLOAT_TO_INT" => {
+                return @intFromFloat(@as(FloatWithSameSize(IN), @bitCast(in)));
+            },
+            NumericTransform.@"ENUM_TO_INT => INT_TO_INT" => {
+                return @intCast(@as(enum_tag_type(IN), @enumFromInt(in)));
+            },
+            NumericTransform.@"ENUM_TO_INT => INT_TO_FLOAT" => {
+                return @floatFromInt(@as(enum_tag_type(IN), @enumFromInt(in)));
+            },
+            NumericTransform.@"BOOL_TO_INT => INT_TO_INT" => {
+                return @intCast(@intFromBool(in));
+            },
+            NumericTransform.@"BOOL_TO_INT => INT_TO_FLOAT" => {
+                return @floatFromInt(@intFromBool(in));
+            },
+            NumericTransform.@"PTR_TO_INT => INT_TO_INT" => {
+                return @intCast(@intFromPtr(in));
+            },
+            NumericTransform.@"PTR_TO_INT => INT_TO_FLOAT" => {
+                return @floatFromInt(@intFromPtr(in));
+            },
+        }
+    }
+};
+pub inline fn numeric_equivalent_type_and_transform(comptime T: type) struct { type, NumericTransform } {
+    const INFO = KindInfo.get_kind_info(T);
+    switch (INFO) {
+        .INT => return .{ T, NumericTransform.NONE_NEEDED },
+        .FLOAT => return .{ T, NumericTransform.NONE_NEEDED },
+        .BOOL => return .{ u1, NumericTransform.@"BOOL_TO_INT => INT_TO_INT" },
+        .ENUM => |ENUM| return .{ ENUM.tag_type, NumericTransform.@"ENUM_TO_INT => INT_TO_INT" },
+        .STRUCT => |STRUCT| {
+            assert_with_reason(STRUCT.backing_integer != null, @src(), "only packed structs have numeric equivalent types, got non-packed struct `{s}`", .{@typeName(T)});
+            .{ STRUCT.backing_integer.?, NumericTransform.@"BIT_CAST_UNSIGNED => INT_TO_INT" };
+        },
+        .UNION => |UNION| {
+            assert_with_reason(UNION.layout != .@"packed", @src(), "only packed unions have numeric equivalent types, got non-packed struct `{s}`", .{@typeName(T)});
+            return .{ std.meta.Int(.unsigned, @bitSizeOf(UNION)), NumericTransform.@"BIT_CAST_UNSIGNED => INT_TO_INT" };
+        },
+        .POINTER => return .{ usize, NumericTransform.@"PTR_TO_INT => INT_TO_INT" },
+        .OPTIONAL => |OPTIONAL| {
+            const CHILD_INFO = KindInfo.get_kind_info(OPTIONAL.child);
+            assert_with_reason(CHILD_INFO == .POINTER, @src(), "only optional pointers have numeric equivalent types, got type `{s}`", .{@typeName(T)});
+            return .{ usize, NumericTransform.@"PTR_TO_INT => INT_TO_INT" };
+        },
+        .COMPTIME_FLOAT => return .{ f64, NumericTransform.FLOAT_TO_FLOAT },
+        .COMPTIME_INT => return .{ u64, NumericTransform.INT_TO_INT },
+        else => assert_unreachable(@src(), "kind `{s}`, type `{s}` has no numeric equivalent type", .{ @tagName(INFO), @typeName(T) }),
+    }
 }
 pub inline fn type_is_equatable(comptime T: type) bool {
     const I = @typeInfo(T);

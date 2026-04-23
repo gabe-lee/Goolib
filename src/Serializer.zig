@@ -2871,7 +2871,7 @@ test SerializationManager {
         serial_len_in = try manager.serialize_object_to_slice(TestStruct, &object, test_serial[0..], .{}, null);
         serial_len_out = try manager.deserialize_object_from_slice(TestStruct, &object, test_serial[0..], .{}, null);
         try Test.expect_equal(serial_len_in, "serial_len_in", serial_len_out, "serial_len_out", "serial mismatch between in and out on same data (test case {d})", .{i});
-        try Test.expect_true(Utils.object_equals(test_struct_in, test_struct_out), "Utils.object_equals(test_struct_in, test_struct_out)", "input and output structs didnt have same values for same serial (test case {d})", .{i});
+        try Test.expect_true(Utils.shallow_equals(test_struct_in, test_struct_out), "Utils.object_equals(test_struct_in, test_struct_out)", "input and output structs didnt have same values for same serial (test case {d})", .{i});
         if (PRINT_SERIAL_SIZE) {
             std.debug.print("Case {d}: SIZE = {d}\n", .{ i, serial_len_in });
         }

@@ -263,6 +263,16 @@ pub const Nullability = enum {
     NULLABLE,
 };
 
+pub const NullPropagation = enum {
+    DO_NOT_PROPOGATE_NULL,
+    PROPOGATE_NULL,
+};
+
+pub const NullOperation = enum {
+    DISALLOW,
+    ALLOW_AS_NOOP,
+};
+
 pub const Mutability = enum {
     IMMUTABLE,
     MUTABLE,

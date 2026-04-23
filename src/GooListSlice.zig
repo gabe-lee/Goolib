@@ -26,9 +26,12 @@ const build = @import("builtin");
 const assert = std.debug.assert;
 
 const Root = @import("./_root.zig");
+const Types = Root.Types;
 const CommonTypes = Root.CommonTypes;
 const Mutability = CommonTypes.Mutability;
 const Nullability = CommonTypes.Nullability;
+const NullPropagation = CommonTypes.NullPropagation;
+const NullOperation = CommonTypes.NullOperation;
 const Utils = Root.Utils;
 const Assert = Root.Assert;
 const u_secure_memset = Utils.secure_memset;
@@ -39,6 +42,10 @@ const assert_with_reason = Assert.assert_with_reason;
 const assert_unreachable = Assert.assert_unreachable;
 // const InsertionSort = Root.InsertionSort;
 // const BinarySearch = Root.BinarySearch;
+const MatchFunc = Utils.Mem.MatchFunc;
+const MatchFuncUserdata = Utils.Mem.MatchFuncUserdata;
+const LessThanFunc = Utils.Mem.LessThanFunc;
+const LessThanFuncUserdata = Utils.Mem.LessThanFuncUserdata;
 
 const STRUCT_NAME = "GooSlice";
 const ERR_CANNOT_INCREASE_START = "START_MUTABILITY != .increase_only or .increase_or_decrease, operation would increase start address";
@@ -57,13 +64,35 @@ const ERR_IMMUTABLE = "the slice was declared immutable and its elements cannot 
 const ERR_INDEX_CHUNK_OOB = "requested or provided start + count ({d} + {d} = {d}) would put the resulting sub-slice out of original bounds (len = {d})";
 const ERR_SHIFT_OVERLAP = "a `shift({s}) -> @memcopy` operation isn't shifted far enough to guarantee no overlap (min_shift = len = {d})";
 
-pub fn GooSlice(comptime T: type, comptime Idx: type, comptime ELEM_MUTABILITY: Mutability, comptime PTR_NULLABILITY: Nullability) type {
-    if (@typeInfo(Idx) != .int) @compileError("type `Idx` must be an integer type");
+pub const GooListSliceMode = enum(u1) {
+    SLICE,
+    LIST,
+};
+
+pub const GooListSliceDefinition = struct {
+    T: type,
+    IDX: type = usize,
+    ELEM_MUTABILITY: Mutability = .MUTABLE,
+    PTR_NULLABILITY: Nullability = .NOT_NULLABLE,
+    MODE: GooListSliceMode = .SLICE,
+};
+
+pub fn GooListSlice(comptime DEF: GooListSliceDefinition) type {
+    if (@typeInfo(DEF.IDX) != .int) @compileError("type `Idx` must be an integer type");
     return extern struct {
         const Self = @This();
+        pub const GOOLIB_TYPE_ID = Types.Id.get_type_id(Self);
 
-        ptr: Ptr = PTR_DEFAULT,
+        ptr: Ptr = INVALID_DATA_POINTER,
         len: Idx = 0,
+        cap: if (IS_LIST) Idx else void = if (IS_LIST) 0 else void{},
+
+        pub const T = DEF.T;
+        pub const Idx = DEF.IDX;
+        const ELEM_MUTABILITY = DEF.ELEM_MUTABILITY;
+        const PTR_NULLABILITY = DEF.PTR_NULLABILITY;
+        const MODE = DEF.MODE;
+        const IS_LIST = MODE == .LIST;
 
         pub const Ptr = switch (ELEM_MUTABILITY) {
             .IMMUTABLE => switch (PTR_NULLABILITY) {
@@ -81,7 +110,7 @@ pub fn GooSlice(comptime T: type, comptime Idx: type, comptime ELEM_MUTABILITY: 
         };
         pub const ElemPtr = switch (ELEM_MUTABILITY) {
             .IMMUTABLE => *const T,
-            .MUTABLE => *T,
+            .MUTABLE => T,
         };
         pub const ZigSlice = switch (ELEM_MUTABILITY) {
             .IMMUTABLE => switch (PTR_NULLABILITY) {
@@ -99,24 +128,17 @@ pub fn GooSlice(comptime T: type, comptime Idx: type, comptime ELEM_MUTABILITY: 
         };
         const MUTABLE = ELEM_MUTABILITY == .MUTABLE;
         const NULLABLE = PTR_NULLABILITY == .NULLABLE;
-        const PTR_DEFAULT: Ptr = switch (PTR_NULLABILITY) {
+        const INVALID_DATA_POINTER: Ptr = switch (PTR_NULLABILITY) {
             .NULLABLE => null,
             .NOT_NULLABLE => switch (ELEM_MUTABILITY) {
                 .IMMUTABLE => Utils.invalid_ptr_many_const(T),
                 .MUTABLE => Utils.invalid_ptr_many(T),
             },
         };
-
-        pub fn is_empty(self: Self) bool {
-            return self.len == 0;
-        }
-        pub fn is_null(self: Self) bool {
-            if (NULLABLE) {
-                return false;
-            } else {
-                return self.ptr == null;
-            }
-        }
+        const INVALID_ELEM_PTR = switch (ELEM_MUTABILITY) {
+            .IMMUTABLE => Utils.invalid_ptr_const(T),
+            .MUTABLE => Utils.invalid_ptr(T),
+        };
 
         pub fn from_slice(slice: ZigSlice) Self {
             var out = Self{};
@@ -198,6 +220,17 @@ pub fn GooSlice(comptime T: type, comptime Idx: type, comptime ELEM_MUTABILITY: 
         pub fn new_with_start_and_end(root_ptr: Ptr, start: Idx, end_excluded: Idx) Self {
             assert_start_and_end_in_order(start, end_excluded, @src());
             return Self{ .ptr = root_ptr + start, .len = end_excluded - start };
+        }
+
+        pub fn is_null(self: Self) bool {
+            if (NULLABLE) {
+                return self.ptr == null;
+            }
+            return false;
+        }
+
+        pub fn is_empty(self: Self) bool {
+            return self.len <= 0;
         }
 
         pub fn ptr_never_null(self: Self) PtrNeverNull {
@@ -442,6 +475,7 @@ pub fn GooSlice(comptime T: type, comptime Idx: type, comptime ELEM_MUTABILITY: 
             @memcpy(new_slice.to_slice_never_null(), self.to_slice_never_null());
             return new_slice;
         }
+
         pub fn copy_leftward_always_overlaps(self: Self, n_positions_to_the_left: Idx) Self {
             self.assert_not_null(@src());
             assert_mutable(@src());
@@ -460,50 +494,162 @@ pub fn GooSlice(comptime T: type, comptime Idx: type, comptime ELEM_MUTABILITY: 
             self.assert_not_null(@src());
             Utils.Mem.reverse_slice(self.to_slice_never_null());
         }
-        //CHECKPOINT update mem manipulation funcs
 
-        pub fn find_item_idx(self: Self, comptime Param: type, param: Param, match_fn: *const fn (param: Param, item: *const T) bool) ?Idx {
-            Utils.mem
+        pub fn find_item_idx_implicit(self: Self, find_val: anytype) ?Idx {
             self.assert_not_null(@src());
-            var i: Idx = 0;
-            while (i < self.len) : (i += 1) {
-                const item: *const T = &(self.ptr_never_null()[@intCast(i)]);
-                if (match_fn(param, item)) return i;
-            }
-            return null;
+            return Utils.Mem.search_implicit(self.ptr_never_null(), 0, self.len, find_val, Idx);
         }
 
-        pub fn find_item_ptr(self: Self, comptime Param: type, param: Param, match_fn: *const fn (param: Param, item: *const T) bool) ?*T {
+        pub fn find_item_ptr_implicit(self: Self, find_val: anytype) ?ElemPtr {
             self.assert_not_null(@src());
-            var i: Idx = 0;
-            while (i < self.len) : (i += 1) {
-                const item: *T = &(self.ptr_never_null()[@intCast(i)]);
-                if (match_fn(param, item)) return item;
+            const idx = Utils.Mem.search_implicit(self.ptr_never_null(), 0, self.len, find_val, Idx);
+            if (idx) |i| {
+                return &self.ptr_never_null()[i];
             }
-            return null;
         }
 
-        pub fn find_item_const_ptr(self: Self, comptime Param: type, param: Param, match_fn: *const fn (param: Param, item: *const T) bool) ?*const T {
+        pub fn find_item_copy_implicit(self: Self, find_val: anytype) ?T {
             self.assert_not_null(@src());
-            var i: Idx = 0;
-            while (i < self.len) : (i += 1) {
-                const item: *const T = &(self.ptr_never_null()[@intCast(i)]);
-                if (match_fn(param, item)) return item;
+            const idx = Utils.Mem.search_implicit(self.ptr_never_null(), 0, self.len, find_val, Idx);
+            if (idx) |i| {
+                return self.ptr_never_null()[i];
             }
-            return null;
         }
 
-        pub fn find_item_and_copy(self: Self, comptime Param: type, param: Param, match_fn: *const fn (param: Param, item: *const T) bool) ?T {
+        pub fn find_item_idx_with_func(self: Self, search_param: anytype, match_fn: *const MatchFunc(@TypeOf(search_param), T)) ?Idx {
             self.assert_not_null(@src());
-            var i: Idx = 0;
-            while (i < self.len) : (i += 1) {
-                const item: *const T = &(self.ptr_never_null()[@intCast(i)]);
-                if (match_fn(param, item)) return item.*;
-            }
-            return null;
+            return Utils.Mem.search_with_func(self.ptr_never_null(), 0, self.len, search_param, match_fn, Idx);
         }
 
-        pub fn find_exactly_n_item_indexes_from_n_params_in_order(self: Self, comptime Param: type, params: []const Param, match_fn: *const fn (param: Param, item: *const T) bool, output_buf: []Idx) bool {
+        pub fn find_item_ptr_with_func(self: Self, search_param: anytype, match_fn: *const MatchFunc(@TypeOf(search_param), T)) ?ElemPtr {
+            self.assert_not_null(@src());
+            const idx = Utils.Mem.search_with_func(self.ptr_never_null(), 0, self.len, search_param, match_fn, usize);
+            if (idx) |i| {
+                return &self.ptr_never_null()[i];
+            }
+        }
+
+        pub fn find_item_copy_with_func(self: Self, search_param: anytype, match_fn: *const MatchFunc(@TypeOf(search_param), T)) ?T {
+            self.assert_not_null(@src());
+            const idx = Utils.Mem.search_with_func(self.ptr_never_null(), 0, self.len, search_param, match_fn, usize);
+            if (idx) |i| {
+                return self.ptr_never_null()[i];
+            }
+        }
+
+        pub fn find_item_idx_with_func_and_userdata(self: Self, search_param: anytype, userdata: anytype, match_fn: *const MatchFuncUserdata(@TypeOf(search_param), T, @TypeOf(userdata))) ?Idx {
+            self.assert_not_null(@src());
+            return Utils.Mem.search_with_func_and_userdata(self.ptr_never_null(), 0, self.len, search_param, userdata, match_fn, Idx);
+        }
+
+        pub fn find_item_ptr_with_func_and_userdata(self: Self, search_param: anytype, userdata: anytype, match_fn: *const MatchFuncUserdata(@TypeOf(search_param), T, @TypeOf(userdata))) ?ElemPtr {
+            self.assert_not_null(@src());
+            const idx = Utils.Mem.search_with_func_and_userdata(self.ptr_never_null(), 0, self.len, search_param, userdata, match_fn, usize);
+            if (idx) |i| {
+                return &self.ptr_never_null()[i];
+            }
+        }
+
+        pub fn find_item_copy_with_func_and_userdata(self: Self, search_param: anytype, userdata: anytype, match_fn: *const MatchFuncUserdata(@TypeOf(search_param), T, @TypeOf(userdata))) ?T {
+            self.assert_not_null(@src());
+            const idx = Utils.Mem.search_with_func_and_userdata(self.ptr_never_null(), 0, self.len, search_param, userdata, match_fn, usize);
+            if (idx) |i| {
+                return self.ptr_never_null()[i];
+            }
+        }
+
+        pub const BinarySearchResult = Utils.Mem.BinarySerachResult(Idx);
+        pub const BinarySearchResultWithPtr = struct {
+            result: Utils.Mem.BinarySerachResult(Idx),
+            ptr: ElemPtr = INVALID_ELEM_PTR,
+        };
+        pub const BinarySearchResultWithVal = struct {
+            result: Utils.Mem.BinarySerachResult(Idx),
+            val: T = undefined,
+        };
+
+        pub fn binary_search_item_idx_implicit(self: Self, find_val: anytype) BinarySearchResult {
+            self.assert_not_null(@src());
+            return Utils.Mem.binary_search_implicit(self.ptr_never_null(), 0, self.len, find_val, Idx);
+        }
+
+        pub fn binary_search_item_ptr_implicit(self: Self, find_val: anytype) BinarySearchResultWithPtr {
+            self.assert_not_null(@src());
+            var result_with_ptr = BinarySearchResultWithPtr{
+                .result = Utils.Mem.binary_search_implicit(self.ptr_never_null(), 0, self.len, find_val, Idx),
+            };
+            if (result_with_ptr.result.result == .FOUND) {
+                result_with_ptr.ptr = &self.ptr_never_null()[result_with_ptr.result.idx];
+            }
+            return result_with_ptr;
+        }
+
+        pub fn binary_search_item_copy_implicit(self: Self, find_val: anytype) BinarySearchResultWithVal {
+            self.assert_not_null(@src());
+            var result_with_val = BinarySearchResultWithVal{
+                .result = Utils.Mem.binary_search_implicit(self.ptr_never_null(), 0, self.len, find_val, Idx),
+            };
+            if (result_with_val.result.result == .FOUND) {
+                result_with_val.val = self.ptr_never_null()[result_with_val.result.idx];
+            }
+            return result_with_val;
+        }
+
+        pub fn binary_search_item_idx_with_func(self: Self, search_param: anytype, match_fn: *const MatchFunc(@TypeOf(search_param), T), less_than_fn: *const LessThanFunc(@TypeOf(search_param), T)) BinarySearchResult {
+            self.assert_not_null(@src());
+            return Utils.Mem.binary_search_with_func(self.ptr_never_null(), 0, self.len, search_param, match_fn, less_than_fn, Idx);
+        }
+
+        pub fn binary_search_item_ptr_with_func(self: Self, search_param: anytype, match_fn: *const MatchFunc(@TypeOf(search_param), T), less_than_fn: *const LessThanFunc(@TypeOf(search_param), T)) BinarySearchResultWithPtr {
+            self.assert_not_null(@src());
+            var result_with_ptr = BinarySearchResultWithPtr{
+                .result = Utils.Mem.binary_search_with_func(self.ptr_never_null(), 0, self.len, search_param, match_fn, less_than_fn, Idx),
+            };
+            if (result_with_ptr.result.result == .FOUND) {
+                result_with_ptr.ptr = &self.ptr_never_null()[result_with_ptr.result.idx];
+            }
+            return result_with_ptr;
+        }
+
+        pub fn binary_search_item_copy_with_func(self: Self, search_param: anytype, match_fn: *const MatchFunc(@TypeOf(search_param), T), less_than_fn: *const LessThanFunc(@TypeOf(search_param), T)) BinarySearchResultWithVal {
+            self.assert_not_null(@src());
+            var result_with_val = BinarySearchResultWithVal{
+                .result = Utils.Mem.binary_search_with_func(self.ptr_never_null(), 0, self.len, search_param, match_fn, less_than_fn, Idx),
+            };
+            if (result_with_val.result.result == .FOUND) {
+                result_with_val.val = self.ptr_never_null()[result_with_val.result.idx];
+            }
+            return result_with_val;
+        }
+
+        pub fn binary_search_item_idx_with_func_and_userdata(self: Self, search_param: anytype, userdata: anytype, match_fn: *const MatchFuncUserdata(@TypeOf(search_param), T, @TypeOf(userdata)), less_than_fn: *const LessThanFuncUserdata(@TypeOf(search_param), T, @TypeOf(userdata))) BinarySearchResult {
+            self.assert_not_null(@src());
+            return Utils.Mem.binary_search_with_func_and_userdata(self.ptr_never_null(), 0, self.len, search_param, userdata, match_fn, less_than_fn, Idx);
+        }
+
+        pub fn binary_search_item_ptr_with_func_and_userdata(self: Self, search_param: anytype, userdata: anytype, match_fn: *const MatchFuncUserdata(@TypeOf(search_param), T, @TypeOf(userdata)), less_than_fn: *const LessThanFuncUserdata(@TypeOf(search_param), T, @TypeOf(userdata))) BinarySearchResultWithPtr {
+            self.assert_not_null(@src());
+            var result_with_ptr = BinarySearchResultWithPtr{
+                .result = Utils.Mem.binary_search_with_func_and_userdata(self.ptr_never_null(), 0, self.len, search_param, userdata, match_fn, less_than_fn, Idx),
+            };
+            if (result_with_ptr.result.result == .FOUND) {
+                result_with_ptr.ptr = &self.ptr_never_null()[result_with_ptr.result.idx];
+            }
+            return result_with_ptr;
+        }
+
+        pub fn binary_search_item_copy_with_func_and_userdata(self: Self, search_param: anytype, userdata: anytype, match_fn: *const MatchFuncUserdata(@TypeOf(search_param), T, @TypeOf(userdata)), less_than_fn: *const LessThanFuncUserdata(@TypeOf(search_param), T, @TypeOf(userdata))) BinarySearchResultWithVal {
+            self.assert_not_null(@src());
+            var result_with_val = BinarySearchResultWithVal{
+                .result = Utils.Mem.binary_search_with_func_and_userdata(self.ptr_never_null(), 0, self.len, search_param, userdata, match_fn, less_than_fn, Idx),
+            };
+            if (result_with_val.result.result == .FOUND) {
+                result_with_val.val = self.ptr_never_null()[result_with_val.result.idx];
+            }
+            return result_with_val;
+        }
+
+        pub fn find_exactly_n_item_indexes_from_n_search_params_in_order(self: Self, search_params: anytype, match_fn: *const fn (search_param: Types.IndexableChild(@TypeOf(search_params)), item: T) bool, output_buf: []Idx) bool {
             self.assert_not_null(@src());
             assert(output_buf.len >= params.len);
             var i: usize = 0;

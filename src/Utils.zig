@@ -38,6 +38,7 @@ const BinarySearch = Root.BinarySearch;
 const Assert = Root.Assert;
 const Types = Root.Types;
 const Test = Root.Testing;
+const Math = Root.Math;
 const assert_with_reason = Assert.assert_with_reason;
 const assert_unreachable = Assert.assert_unreachable;
 
@@ -48,6 +49,7 @@ pub const File = @import("./Utils_File.zig");
 pub const EnumeratedDefs = @import("./Utils_EnumeratedDefs.zig");
 pub const Mem = @import("./Utils_Mem.zig");
 pub const Format = @import("./Utils_Format.zig");
+pub const Compare = @import("./Utils_Compare.zig");
 
 pub inline fn inline_swap(comptime T: type, a: *T, b: *T, temp: *T) void {
     temp.* = a.*;
@@ -135,119 +137,6 @@ pub const CArgsList = struct {
         return CArgsList{ .ptr = ptr, .len = len };
     }
 };
-
-pub inline fn secure_zero(comptime T: type, slice: []volatile T) void {
-    const raw_len = slice.len * @sizeOf(T);
-    const u8_ptr: [*]volatile u8 = @ptrCast(slice.ptr);
-    @memset(u8_ptr[0..raw_len], 0);
-}
-pub inline fn secure_memset_undefined(comptime T: type, slice: []volatile T) void {
-    if (build.mode == .Debug or build.mode == .ReleaseSafe) {
-        const cast_ptr: [*]volatile u8 = @ptrCast(@alignCast(slice.ptr));
-        const byte_len = slice.len * @sizeOf(T);
-        const cast_slice: []volatile u8 = cast_ptr[0..byte_len];
-        @memset(cast_slice, 0xAA);
-    } else {
-        @memset(slice, 0);
-    }
-}
-pub inline fn secure_memset(comptime T: type, slice: []volatile T, val: T) void {
-    @memset(slice, val);
-}
-
-pub inline fn can_infer_type_order(comptime T: type) bool {
-    switch (@typeInfo(T)) {
-        .int, .comptime_int, .float, .comptime_float, .bool, .@"enum" => return true,
-        .pointer => |info| {
-            if (info.size != .one) return false;
-            switch (@typeInfo(info.child)) {
-                .int, .comptime_int, .float, .comptime_float, .bool, .@"enum" => return true,
-                else => return false,
-            }
-        },
-        else => return false,
-    }
-}
-
-pub inline fn infered_less_than(a: anytype, b: anytype) bool {
-    const A = @TypeOf(a);
-    const B = @TypeOf(b);
-    assert_with_reason(can_infer_type_order(A), @src(), "type of `a` (" ++ @typeName(A) ++ ") cannot infer order", .{});
-    assert_with_reason(can_infer_type_order(B), @src(), "type of `b` (" ++ @typeName(B) ++ ") cannot infer order", .{});
-    const aa = if (Types.type_is_pointer_or_slice(A)) unwrap: {
-        const AA = Types.pointer_child_type(A);
-        break :unwrap if (Types.type_is_bool(AA)) @intFromBool(a.*) else if (Types.type_is_enum(AA)) @intFromEnum(a.*) else a.*;
-    } else if (Types.type_is_bool(A)) @intFromBool(a) else if (Types.type_is_enum(A)) @intFromEnum(a) else a;
-    const bb = if (Types.type_is_pointer_or_slice(A)) unwrap: {
-        const BB = Types.pointer_child_type(B);
-        break :unwrap if (Types.type_is_bool(BB)) @intFromBool(b.*) else if (Types.type_is_enum(BB)) @intFromEnum(b.*) else b.*;
-    } else if (Types.type_is_bool(B)) @intFromBool(b) else if (Types.type_is_enum(B)) @intFromEnum(b) else b;
-    return aa < bb;
-}
-
-pub inline fn infered_greater_than(a: anytype, b: anytype) bool {
-    const A = @TypeOf(a);
-    const B = @TypeOf(b);
-    assert_with_reason(can_infer_type_order(A), @src(), "type of `a` (" ++ @typeName(A) ++ ") cannot infer order", .{});
-    assert_with_reason(can_infer_type_order(B), @src(), "type of `b` (" ++ @typeName(B) ++ ") cannot infer order", .{});
-    const aa = if (Types.type_is_pointer_or_slice(A)) unwrap: {
-        const AA = Types.pointer_child_type(A);
-        break :unwrap if (Types.type_is_bool(AA)) @intFromBool(a.*) else if (Types.type_is_enum(AA)) @intFromEnum(a.*) else a.*;
-    } else if (Types.type_is_bool(A)) @intFromBool(a) else if (Types.type_is_enum(A)) @intFromEnum(a) else a;
-    const bb = if (Types.type_is_pointer_or_slice(A)) unwrap: {
-        const BB = Types.pointer_child_type(B);
-        break :unwrap if (Types.type_is_bool(BB)) @intFromBool(b.*) else if (Types.type_is_enum(BB)) @intFromEnum(b.*) else b.*;
-    } else if (Types.type_is_bool(B)) @intFromBool(b) else if (Types.type_is_enum(B)) @intFromEnum(b) else b;
-    return aa > bb;
-}
-
-pub inline fn infered_less_than_or_equal(a: anytype, b: anytype) bool {
-    const A = @TypeOf(a);
-    const B = @TypeOf(b);
-    assert_with_reason(can_infer_type_order(A), @src(), "type of `a` (" ++ @typeName(A) ++ ") cannot infer order", .{});
-    assert_with_reason(can_infer_type_order(B), @src(), "type of `b` (" ++ @typeName(B) ++ ") cannot infer order", .{});
-    const aa = if (Types.type_is_pointer_or_slice(A)) unwrap: {
-        const AA = Types.pointer_child_type(A);
-        break :unwrap if (Types.type_is_bool(AA)) @intFromBool(a.*) else if (Types.type_is_enum(AA)) @intFromEnum(a.*) else a.*;
-    } else if (Types.type_is_bool(A)) @intFromBool(a) else if (Types.type_is_enum(A)) @intFromEnum(a) else a;
-    const bb = if (Types.type_is_pointer_or_slice(A)) unwrap: {
-        const BB = Types.pointer_child_type(B);
-        break :unwrap if (Types.type_is_bool(BB)) @intFromBool(b.*) else if (Types.type_is_enum(BB)) @intFromEnum(b.*) else b.*;
-    } else if (Types.type_is_bool(B)) @intFromBool(b) else if (Types.type_is_enum(B)) @intFromEnum(b) else b;
-    return aa <= bb;
-}
-
-pub inline fn infered_greater_than_or_equal(a: anytype, b: anytype) bool {
-    const A = @TypeOf(a);
-    const B = @TypeOf(b);
-    assert_with_reason(can_infer_type_order(A), @src(), "type of `a` (" ++ @typeName(A) ++ ") cannot infer order", .{});
-    assert_with_reason(can_infer_type_order(B), @src(), "type of `b` (" ++ @typeName(B) ++ ") cannot infer order", .{});
-    const aa = if (Types.type_is_pointer_or_slice(A)) unwrap: {
-        const AA = Types.pointer_child_type(A);
-        break :unwrap if (Types.type_is_bool(AA)) @intFromBool(a.*) else if (Types.type_is_enum(AA)) @intFromEnum(a.*) else a.*;
-    } else if (Types.type_is_bool(A)) @intFromBool(a) else if (Types.type_is_enum(A)) @intFromEnum(a) else a;
-    const bb = if (Types.type_is_pointer_or_slice(A)) unwrap: {
-        const BB = Types.pointer_child_type(B);
-        break :unwrap if (Types.type_is_bool(BB)) @intFromBool(b.*) else if (Types.type_is_enum(BB)) @intFromEnum(b.*) else b.*;
-    } else if (Types.type_is_bool(B)) @intFromBool(b) else if (Types.type_is_enum(B)) @intFromEnum(b) else b;
-    return aa >= bb;
-}
-
-pub inline fn infered_equal(a: anytype, b: anytype) bool {
-    const A = @TypeOf(a);
-    const B = @TypeOf(b);
-    assert_with_reason(can_infer_type_order(A), @src(), "type of `a` (" ++ @typeName(A) ++ ") cannot infer order", .{});
-    assert_with_reason(can_infer_type_order(B), @src(), "type of `b` (" ++ @typeName(B) ++ ") cannot infer order", .{});
-    const aa = if (Types.type_is_pointer_or_slice(A)) unwrap: {
-        const AA = Types.pointer_child_type(A);
-        break :unwrap if (Types.type_is_bool(AA)) @intFromBool(a.*) else if (Types.type_is_enum(AA)) @intFromEnum(a.*) else a.*;
-    } else if (Types.type_is_bool(A)) @intFromBool(a) else if (Types.type_is_enum(A)) @intFromEnum(a) else a;
-    const bb = if (Types.type_is_pointer_or_slice(A)) unwrap: {
-        const BB = Types.pointer_child_type(B);
-        break :unwrap if (Types.type_is_bool(BB)) @intFromBool(b.*) else if (Types.type_is_enum(BB)) @intFromEnum(b.*) else b.*;
-    } else if (Types.type_is_bool(B)) @intFromBool(b) else if (Types.type_is_enum(B)) @intFromEnum(b) else b;
-    return aa == bb;
-}
 
 pub fn memcopy(from_src: anytype, to_dst: anytype, count: usize) void {
     if (count == 0) return;
@@ -344,7 +233,6 @@ pub inline fn comp_switch(comptime cond: bool, true_val: anytype, false_val: any
     if (cond) return true_val;
     return false_val;
 }
-
 
 pub fn deep_equal(val_a: anytype, val_b: anytype) bool {
     const A = @TypeOf(val_a);
@@ -598,7 +486,6 @@ pub fn shallow_equal(val_a: anytype, val_b: anytype) bool {
     }
 }
 
-
 pub fn bools_to_switchable_integer(comptime count: comptime_int, bools: [count]bool) std.meta.Int(.unsigned, count) {
     const RESULT = std.meta.Int(.unsigned, count);
     var result: RESULT = 0;
@@ -626,22 +513,6 @@ pub fn bools_to_switchable_integer(comptime count: comptime_int, bools: [count]b
 //     }
 //     return result;
 // }
-
-pub fn mem_move_one(slice: anytype, old_idx: usize, new_idx: usize) void {
-    Assert.assert_with_reason(Types.type_is_slice(@TypeOf(slice)), @src(), "type of `slice` was not a slice type, got {s}", .{@typeName(@TypeOf(slice))});
-    const T = @typeInfo(@TypeOf(slice)).pointer.child;
-    var widx: isize = @intCast(old_idx);
-    const step: isize = if (new_idx > old_idx) 1 else -1;
-    var ridx: isize = widx + step;
-    const val: T = slice[old_idx];
-    while (widx != new_idx) {
-        slice[@intCast(widx)] = slice[@intCast(ridx)];
-        widx = ridx;
-        ridx += step;
-    }
-    slice[@intCast(widx)] = val;
-}
-
 
 const HEX = [16]u8{ '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'A', 'B', 'C', 'D', 'E', 'F' };
 const HEX_MASK = 0b00001111;
@@ -819,272 +690,6 @@ pub fn alloc_fail_err(alloc: Allocator, comptime src: builtin.SourceLocation, er
 pub fn alloc_fail_str(alloc: Allocator, comptime src: builtin.SourceLocation, comptime str: []const u8, args: anytype) []const u8 {
     const fullargs = .{SrcFmt.new(src)} ++ args;
     return fmt.allocPrint(alloc, "{f} -> " ++ str, fullargs) catch return str;
-}
-
-/// This function aligns an address forward, with the additional condition that the object
-/// memory span cannot cross some *larger* boundary alignment, *UNLESS* the original offset
-/// was also already aligned to the larger boundary offset. If the aligned address would cause
-/// the object to cross the boundary alignment *AND* it was not already aligned to the boundary
-/// alignment, it instead returns an address aligned to the larger boundary alignment.
-pub fn align_forward_without_breaking_align_boundary_unless_offset_boundary_aligned(offset: usize, len: usize, object_align: usize, boundary_align: usize) usize {
-    assert_with_reason(object_align <= boundary_align, @src(), "object_align must be <= boundary_align to use this function, got {d} > {d}", .{ object_align, boundary_align });
-    const initial_align = std.mem.alignForward(usize, offset, object_align);
-    const initial_delta = initial_align - offset;
-    if (initial_delta == 0 or object_align == boundary_align) return initial_align;
-    const start_boundary_align = std.mem.alignBackward(usize, initial_align, boundary_align);
-    const end_minus_one_boundary_align = std.mem.alignBackward(usize, initial_align + len - 1, boundary_align);
-    if (start_boundary_align == end_minus_one_boundary_align) return initial_align;
-    return std.mem.alignForward(usize, offset, boundary_align);
-}
-
-/// Searches a memory slice for a matching item using the native `==` operator
-///
-/// returns the index found, else `null` if  not found
-pub fn mem_search_implicit(data_ptr: anytype, start: usize, end_exclusive: usize, find_val: anytype) ?usize {
-    const PTR = @TypeOf(data_ptr);
-    assert_with_reason(Types.type_is_many_item_pointer(PTR), @src(), "type of `data_ptr` must be a many-item-pointer, got type {s}", .{@typeName(PTR)});
-    for (data_ptr[start..end_exclusive], 0..) |item, i| {
-        if (item == find_val) return i;
-    }
-    return null;
-}
-/// Searches a memory slice for a matching item using an equality function
-///
-/// returns the index found, else `null` if  not found
-pub fn mem_search_with_func(data_ptr: anytype, start: usize, end_exclusive: usize, find_val: anytype, equals: *const fn (a: @typeInfo(@TypeOf(data_ptr)).pointer.child, b: @TypeOf(find_val)) bool) ?usize {
-    const PTR = @TypeOf(data_ptr);
-    assert_with_reason(Types.type_is_many_item_pointer(PTR), @src(), "type of `data_ptr` must be a many-item-pointer, got type {s}", .{@typeName(PTR)});
-    for (data_ptr[start..end_exclusive], 0..) |item, i| {
-        if (equals(item, find_val)) return i;
-    }
-    return null;
-}
-/// Searches a memory slice for a matching item using an equality function with userdata
-///
-/// returns the index found, else `null` if  not found
-pub fn mem_search_with_func_and_userdata(data_ptr: anytype, start: usize, end_exclusive: usize, find_val: anytype, userdata: anytype, equals: *const fn (a: @typeInfo(@TypeOf(data_ptr)).pointer.child, b: @TypeOf(find_val), userdata: @TypeOf(userdata)) bool) ?usize {
-    const PTR = @TypeOf(data_ptr);
-    assert_with_reason(Types.type_is_many_item_pointer(PTR), @src(), "type of `data_ptr` must be a many-item-pointer, got type {s}", .{@typeName(PTR)});
-    for (data_ptr[start..end_exclusive], 0..) |item, i| {
-        if (equals(item, find_val, userdata)) return i;
-    }
-    return null;
-}
-
-/// Sorts a portion of a memory region using the provided `greater_than` function
-/// and the `insertion sort` algorithm
-///
-/// Assumes `data_ptr[0..end_exclusive]` is a valid slice (sufficient memory is allocated)
-pub fn mem_sort(_data_ptr: anytype, start: usize, end_exclusive: usize, userdata: anytype, greater_than: *const fn (a: @typeInfo(@TypeOf(_data_ptr)).pointer.child, b: @typeInfo(@TypeOf(_data_ptr)).pointer.child, userdata: @TypeOf(userdata)) bool) void {
-    const PTR = @TypeOf(_data_ptr);
-    assert_with_reason(Types.type_is_pointer_or_slice(PTR), @src(), "type of `data_ptr` must be a pointer or slice, got type {s}", .{@typeName(PTR)});
-    const T = @typeInfo(@TypeOf(_data_ptr)).pointer.child;
-    var data_ptr = Root.Cast.any_ptr_to_many_item_ptr(_data_ptr);
-    var i: usize = start + 1;
-    var j: usize = undefined;
-    var jj: usize = undefined;
-    var move_val: T = undefined;
-    var test_val: T = undefined;
-    while (i < end_exclusive) {
-        move_val = data_ptr[i];
-        j = i - 1;
-        jj = i;
-        while (greater_than(test_val, move_val, userdata)) {
-            test_val = data_ptr[j];
-            data_ptr[jj] = data_ptr[j];
-            if (j == start) break;
-            jj = j;
-            j -= 1;
-        }
-        data_ptr[jj] = move_val;
-        i += 1;
-    }
-}
-
-/// Sorts a portion of a memory region using the `>` operator
-/// and the `insertion sort` algorithm
-///
-/// Assumes `data_ptr[0..end_exclusive]` is a valid slice (sufficient memory is allocated)
-pub fn mem_sort_implicit(data_ptr: anytype, start: usize, end_exclusive: usize) void {
-    const PTR = @TypeOf(data_ptr);
-    assert_with_reason(Types.type_is_many_item_pointer(PTR), @src(), "type of `data_ptr` must be a many-item-pointer, got type {s}", .{@typeName(PTR)});
-    const T = @typeInfo(@TypeOf(data_ptr)).pointer.child;
-    var i: usize = start + 1;
-    var j: usize = undefined;
-    var jj: usize = undefined;
-    var move_val: T = undefined;
-    var test_val: T = undefined;
-    while (i < end_exclusive) {
-        move_val = data_ptr[i];
-        j = i - 1;
-        jj = i;
-        while (test_val > move_val) {
-            test_val = data_ptr[j];
-            data_ptr[jj] = data_ptr[j];
-            if (j == start) break;
-            jj = j;
-            j -= 1;
-        }
-        data_ptr[jj] = move_val;
-        i += 1;
-    }
-}
-
-pub fn mem_is_sorted_implicit(data_ptr: anytype, start: usize, end_exclusive: usize) bool {
-    const PTR = @TypeOf(data_ptr);
-    assert_with_reason(Types.type_is_many_item_pointer(PTR), @src(), "type of `data_ptr` must be a many-item-pointer, got type {s}", .{@typeName(PTR)});
-    var i = start;
-    var ii = start + 1;
-    while (ii < end_exclusive) {
-        if (data_ptr[i] > data_ptr[ii]) return false;
-        i = ii;
-        ii += 1;
-    }
-    return true;
-}
-pub fn mem_is_sorted_with_func(data_ptr: anytype, start: usize, end_exclusive: usize, greater_than: *const fn (a: @typeInfo(@TypeOf(data_ptr)).pointer.child, b: @typeInfo(@TypeOf(data_ptr)).pointer.child) bool) bool {
-    const PTR = @TypeOf(data_ptr);
-    assert_with_reason(Types.type_is_many_item_pointer(PTR), @src(), "type of `data_ptr` must be a many-item-pointer, got type {s}", .{@typeName(PTR)});
-    var i = start;
-    var ii = start + 1;
-    while (ii < end_exclusive) {
-        if (greater_than(data_ptr[i], data_ptr[ii])) return false;
-        i = ii;
-        ii += 1;
-    }
-    return true;
-}
-pub fn mem_is_sorted_with_func_and_userdata(data_ptr: anytype, start: usize, end_exclusive: usize, userdata: anytype, greater_than: *const fn (a: @typeInfo(@TypeOf(data_ptr)).pointer.child, b: @typeInfo(@TypeOf(data_ptr)).pointer.child, userdata: @TypeOf(userdata)) bool) bool {
-    const PTR = @TypeOf(data_ptr);
-    assert_with_reason(Types.type_is_many_item_pointer(PTR), @src(), "type of `data_ptr` must be a many-item-pointer, got type {s}", .{@typeName(PTR)});
-    var i = start;
-    var ii = start + 1;
-    while (ii < end_exclusive) {
-        if (greater_than(data_ptr[i], data_ptr[ii], userdata)) return false;
-        i = ii;
-        ii += 1;
-    }
-    return true;
-}
-
-/// This method moves all items at `data_ptr[start..]` up `n` places,
-/// and alters `len_ptr` to reflect the new length
-///
-/// Assumes `data_ptr[0..(len_ptr.* + n)]` is a valid slice (sufficient memory is allocated)
-pub fn mem_insert(data_ptr: anytype, len_ptr: anytype, start: usize, n: usize) void {
-    const PTR = @TypeOf(data_ptr);
-    const LEN_PTR = @TypeOf(len_ptr);
-    assert_with_reason(Types.type_is_many_item_pointer(PTR), @src(), "type of `data_ptr` must be a many-item-pointer, got type {s}", .{@typeName(PTR)});
-    assert_with_reason(Types.type_is_single_item_pointer(LEN_PTR), @src(), "type of `len_ptr` must be a single-item-pointer to an integer type, got type {s}", .{@typeName(LEN_PTR)});
-    const LEN = @typeInfo(LEN_PTR).pointer.child;
-    assert_with_reason(Types.type_is_int(LEN), @src(), "type of `len_ptr` must be a single-item-pointer to an integer type, got type {s}", .{@typeName(LEN_PTR)});
-    const new_start = start + n;
-    const move_len: usize = @as(usize, @intCast(len_ptr.*)) - start;
-    @memmove(data_ptr[new_start .. new_start + move_len], data_ptr[start .. start + move_len]);
-    len_ptr.* += @intCast(n);
-}
-
-/// This method moves all items at `data_ptr[start+n..]` down `n` places,
-/// and alters `len_ptr` to reflect the new length
-pub fn mem_remove(data_ptr: anytype, len_ptr: anytype, start: usize, n: usize) void {
-    const PTR = @TypeOf(data_ptr);
-    const LEN_PTR = @TypeOf(len_ptr);
-    assert_with_reason(Types.type_is_many_item_pointer(PTR), @src(), "type of `data_ptr` must be a many-item-pointer, got type {s}", .{@typeName(PTR)});
-    assert_with_reason(Types.type_is_single_item_pointer(LEN_PTR), @src(), "type of `len_ptr` must be a single-item-pointer to an integer type, got type {s}", .{@typeName(LEN_PTR)});
-    const LEN = @typeInfo(LEN_PTR).pointer.child;
-    assert_with_reason(Types.type_is_int(LEN), @src(), "type of `len_ptr` must be a single-item-pointer to an integer type, got type {s}", .{@typeName(LEN_PTR)});
-    const new_start = start + n;
-    const move_len: usize = @as(usize, @intCast(len_ptr.*)) - new_start;
-    @memmove(data_ptr[start .. start + move_len], data_ptr[new_start .. new_start + move_len]);
-    len_ptr.* -= @intCast(n);
-}
-
-/// This method deletes all of the indexes from the provided list (sorted low to high)
-/// by moving all indexes above the first on in the list and not ALSO included in the list,
-/// down.
-pub fn mem_remove_sparse_by_indexes_sorted_low_to_high(data_ptr: anytype, len_ptr: anytype, sorted_indexes: []const usize) void {
-    if (sorted_indexes.len == 0 or sorted_indexes[0] >= len_ptr.*) return;
-    const PTR = @TypeOf(data_ptr);
-    const LEN_PTR = @TypeOf(len_ptr);
-    assert_with_reason(Types.type_is_many_item_pointer(PTR), @src(), "type of `data_ptr` must be a many-item-pointer, got type {s}", .{@typeName(PTR)});
-    const PTR_INFO = @typeInfo(PTR).pointer;
-    assert_with_reason(Types.type_is_single_item_pointer(LEN_PTR), @src(), "type of `len_ptr` must be a single-item-pointer to an integer type, got type {s}", .{@typeName(LEN_PTR)});
-    const LEN = @typeInfo(LEN_PTR).pointer.child;
-    assert_with_reason(Types.type_is_int(LEN), @src(), "type of `len_ptr` must be a single-item-pointer to an integer type, got type {s}", .{@typeName(LEN_PTR)});
-    var read_idx: usize = sorted_indexes[0] + 1;
-    var write_idx: usize = sorted_indexes[0];
-    var del_idx_idx: usize = 1;
-    var del_idx: usize = undefined;
-    const slice: []PTR_INFO.child = data_ptr[0..@as(usize, @intCast(len_ptr.*))];
-    while (del_idx_idx < sorted_indexes.len) {
-        del_idx = sorted_indexes[del_idx_idx];
-        while (read_idx < del_idx) {
-            slice[write_idx] = slice[read_idx];
-            read_idx += 1;
-            write_idx += 1;
-        }
-        read_idx += 1;
-        del_idx_idx += 1;
-    }
-    while (read_idx < slice.len) {
-        slice[write_idx] = slice[read_idx];
-        read_idx += 1;
-        write_idx += 1;
-    }
-    len_ptr.* -= @intCast(del_idx_idx);
-}
-
-/// This method deletes all of the indexes from the provided list (sorted low to high)
-/// by moving all indexes above the first on in the list and not ALSO included in the list,
-/// down.
-pub fn mem_remove_sparse_by_values_in_list_order(comptime T: type, data_ptr: [*]T, len_ptr: anytype, known_start_index: usize, equality_func: *const fn (a: T, b: T) bool, values_in_order: []const T) void {
-    if (values_in_order.len == 0) return;
-    const LEN_PTR = @TypeOf(len_ptr);
-    assert_with_reason(Types.type_is_single_item_pointer(LEN_PTR), @src(), "type of `len_ptr` must be a single-item-pointer to an integer type, got type {s}", .{@typeName(LEN_PTR)});
-    const LEN = @typeInfo(LEN_PTR).pointer.child;
-    assert_with_reason(Types.type_is_int(LEN), @src(), "type of `len_ptr` must be a single-item-pointer to an integer type, got type {s}", .{@typeName(LEN_PTR)});
-    var read_idx: usize = known_start_index;
-    var write_idx: usize = known_start_index;
-    var del_val_idx: usize = 0;
-    var del_val: T = values_in_order[0];
-    var found_at_least_one: bool = false;
-    const slice: []T = data_ptr[0..@as(usize, @intCast(len_ptr.*))];
-    while (read_idx < slice.len) {
-        const this_val = slice[read_idx];
-        if (equality_func(this_val, del_val)) {
-            del_val_idx += 1;
-            if (del_val_idx < values_in_order.len) {
-                del_val = values_in_order[del_val_idx];
-            }
-            write_idx = read_idx;
-            read_idx += 1;
-            found_at_least_one = true;
-            break;
-        } else {
-            read_idx += 1;
-        }
-    }
-    while (read_idx < slice.len and del_val_idx < values_in_order.len) {
-        const this_val = slice[read_idx];
-        if (equality_func(this_val, del_val)) {
-            del_val_idx += 1;
-            read_idx += 1;
-            if (del_val_idx < values_in_order.len) {
-                del_val = values_in_order[del_val_idx];
-            }
-        } else {
-            slice[write_idx] = slice[read_idx];
-            read_idx += 1;
-            write_idx += 1;
-        }
-    }
-    if (!found_at_least_one) return;
-    while (read_idx < slice.len) {
-        slice[write_idx] = slice[read_idx];
-        read_idx += 1;
-        write_idx += 1;
-    }
-    len_ptr.* -= @intCast(del_val_idx);
 }
 
 pub const FilterResult = struct {
@@ -1612,82 +1217,126 @@ pub inline fn dereference_opaque(ptr: *const anyopaque, comptime T: type) T {
 /// Compares two of any type for equality. Containers that do not support comparison
 /// on their own are compared on a field-by-field basis. Pointers are not followed.
 ///
-/// This functions is the same as `std.meta.eql()` EXCEPT that if a struct or union type `T` has a method `pub fn equals(a: T, b: T) bool`,
-/// it will call that function instead of the normal equality checks
-pub fn object_equals(a: anytype, b: @TypeOf(a)) bool {
-    const T = @TypeOf(a);
-    switch (@typeInfo(T)) {
-        .@"struct" => |info| {
-            if (@hasDecl(T, "equals") and @TypeOf(@field(T, "equals")) == fn (T, T) bool) {
-                return @call(.auto, @field(T, "equals"), .{ a, b });
+/// Struct, Enum, Union, and Opaque types
+pub fn shallow_equals(a: anytype, b: anytype) bool {
+    const T_A = @TypeOf(a);
+    const T_B = @TypeOf(b);
+    const T_SAME = T_A == T_B;
+    const T_DIFF = T_A != T_B;
+    const INFO_A = Types.KindInfo.get_kind_info(T_A);
+    switch (INFO_A) {
+        .STRUCT => |STRUCT| {
+            if (@hasDecl(T_A, "equals") and @TypeOf(@field(T_A, "equals")) == fn (T_A, T_B) bool) {
+                return @call(.auto, @field(T_A, "equals"), .{ a, b });
+            } else if (T_DIFF and @hasDecl(T_B, "equals") and @TypeOf(@field(T_B, "equals")) == fn (T_B, T_A) bool) {
+                return @call(.auto, @field(T_B, "equals"), .{ b, a });
             }
-            if (info.layout == .@"packed") return a == b;
+            assert_with_reason(T_SAME, @src(), "cannot compare two structs with different types, got `{s}` and `{s}`", .{ @typeName(T_A), @typeName(T_B) });
+            if (STRUCT.layout == .@"packed") return a == b;
 
-            inline for (info.fields) |field_info| {
-                if (!object_equals(@field(a, field_info.name), @field(b, field_info.name))) return false;
+            inline for (STRUCT.fields) |field_info| {
+                if (!shallow_equals(@field(a, field_info.name), @field(b, field_info.name))) return false;
             }
             return true;
         },
-        .error_union => {
+        .ERROR_UNION => {
             if (a) |a_p| {
-                if (b) |b_p| return object_equals(a_p, b_p) else |_| return false;
+                if (b) |b_p| return shallow_equals(a_p, b_p) else |_| return false;
             } else |a_e| {
                 if (b) |_| return false else |b_e| return a_e == b_e;
             }
         },
-        .@"union" => |info| {
-            if (@hasDecl(T, "equals") and @FieldType(T, "equals") == fn (T, T) bool) {
-                return @call(.auto, @field(T, "equals"), .{ a, b });
+        .UNION => |UNION| {
+            if (@hasDecl(T_A, "equals") and @TypeOf(@field(T_A, "equals")) == fn (T_A, T_B) bool) {
+                return @call(.auto, @field(T_A, "equals"), .{ a, b });
+            } else if (T_DIFF and @hasDecl(T_B, "equals") and @TypeOf(@field(T_B, "equals")) == fn (T_B, T_A) bool) {
+                return @call(.auto, @field(T_B, "equals"), .{ b, a });
             }
-            if (info.tag_type) |UnionTag| {
+            assert_with_reason(T_SAME, @src(), "cannot compare two unions with different types, got `{s}` and `{s}`", .{ @typeName(T_A), @typeName(T_B) });
+            if (UNION.tag_type) |UnionTag| {
                 const tag_a: UnionTag = a;
                 const tag_b: UnionTag = b;
                 if (tag_a != tag_b) return false;
 
                 return switch (a) {
-                    inline else => |val, tag| return object_equals(val, @field(b, @tagName(tag))),
+                    inline else => |val, tag| return shallow_equals(val, @field(b, @tagName(tag))),
                 };
             }
-
-            @compileError("cannot compare untagged union type " ++ @typeName(T));
+            if (UNION.layout == .@"packed") {
+                const CONTAINER = packed struct {
+                    u: T_A,
+                };
+                const u_a = CONTAINER{
+                    .u = a,
+                };
+                const u_b = CONTAINER{
+                    .u = b,
+                };
+                return u_a == u_b;
+            }
+            @compileError("cannot compare untagged and non-packed union type " ++ @typeName(T_A));
         },
-        .array => {
-            if (a.len != b.len) return false;
-            for (a, 0..) |e, i|
-                if (!object_equals(e, b[i])) return false;
+        .ARRAY => {
+            assert_with_reason(T_SAME, @src(), "cannot compare two arrays with different types, got `{s}` and `{s}`", .{ @typeName(T_A), @typeName(T_B) });
+            for (a[0..], b[0..]) |aa, bb|
+                if (!shallow_equals(aa, bb)) return false;
             return true;
         },
-        .vector => |info| {
-            var i: usize = 0;
-            while (i < info.len) : (i += 1) {
-                if (!object_equals(a[i], b[i])) return false;
-            }
+        .VECTOR => |VECTOR| {
+            assert_with_reason(T_SAME, @src(), "cannot compare two vectors with different types, got `{s}` and `{s}`", .{ @typeName(T_A), @typeName(T_B) });
+            const arr_a: [VECTOR.len]VECTOR.child = a;
+            const arr_b: [VECTOR.len]VECTOR.child = b;
+            for (arr_a[0..], arr_b[0..]) |aa, bb|
+                if (!shallow_equals(aa, bb)) return false;
             return true;
         },
-        .pointer => |info| {
-            return switch (info.size) {
-                .one, .many, .c => a == b,
-                .slice => a.ptr == b.ptr and a.len == b.len,
-            };
+        .POINTER => {
+            const flat_a = Types.get_flat_ptr_info(a);
+            const flat_b = Types.get_flat_ptr_info(b);
+            return flat_a.equals(flat_b);
         },
-        .optional => {
-            if (a == null and b == null) return true;
-            if (a == null or b == null) return false;
-            return object_equals(a.?, b.?);
-        },
-        .@"enum" => {
-            if (@hasDecl(T, "equals") and @FieldType(T, "equals") == fn (T, T) bool) {
-                return @call(.auto, @field(T, "equals"), .{ a, b });
+        .OPTIONAL => |OPTIONAL| {
+            const child_info = Types.KindInfo.get_kind_info(OPTIONAL.child);
+            switch (child_info) {
+                .POINTER => {
+                    const flat_a = Types.get_flat_ptr_info(a);
+                    const flat_b = Types.get_flat_ptr_info(b);
+                    return flat_a.equals(flat_b);
+                },
+                else => {
+                    assert_with_reason(T_SAME, @src(), "cannot compare two optionals with different types, got `{s}` and `{s}`", .{ @typeName(T_A), @typeName(T_B) });
+                    if (a == null and b == null) return true;
+                    if (a == null or b == null) return false;
+                    return shallow_equals(a.?, b.?);
+                },
             }
+        },
+        .ENUM => {
+            if (@hasDecl(T_A, "equals") and @TypeOf(@field(T_A, "equals")) == fn (T_A, T_B) bool) {
+                return @call(.auto, @field(T_A, "equals"), .{ a, b });
+            } else if (T_DIFF and @hasDecl(T_B, "equals") and @TypeOf(@field(T_B, "equals")) == fn (T_B, T_A) bool) {
+                return @call(.auto, @field(T_B, "equals"), .{ b, a });
+            }
+            assert_with_reason(T_SAME, @src(), "cannot compare two enums with different types, got `{s}` and `{s}`", .{ @typeName(T_A), @typeName(T_B) });
             return a == b;
         },
-        .@"opaque" => {
-            if (@hasDecl(T, "equals") and @FieldType(T, "equals") == fn (T, T) bool) {
-                return @call(.auto, @field(T, "equals"), .{ a, b });
+        .OPAQUE => {
+            if (@hasDecl(T_A, "equals") and @TypeOf(@field(T_A, "equals")) == fn (T_A, T_B) bool) {
+                return @call(.auto, @field(T_A, "equals"), .{ a, b });
+            } else if (T_DIFF and @hasDecl(T_B, "equals") and @TypeOf(@field(T_B, "equals")) == fn (T_B, T_A) bool) {
+                return @call(.auto, @field(T_B, "equals"), .{ b, a });
             }
             assert_unreachable(@src(), "opaque types can only be tested for equality if they implement `pub fn equals(a: T, b: T) bool`", .{});
         },
-        else => return a == b,
+        .ERROR_SET => {
+            if (@hasDecl(T_A, "equals") and @TypeOf(@field(T_A, "equals")) == fn (T_A, T_B) bool) {
+                return @call(.auto, @field(T_A, "equals"), .{ a, b });
+            } else if (T_DIFF and @hasDecl(T_B, "equals") and @TypeOf(@field(T_B, "equals")) == fn (T_B, T_A) bool) {
+                return @call(.auto, @field(T_B, "equals"), .{ b, a });
+            }
+            return a == b;
+        },
+        else => return Math.upgrade_equal_to(a, b),
     }
 }
 

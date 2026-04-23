@@ -123,7 +123,7 @@ pub fn SerialUnion(comptime TAGGED_UNION: type, comptime DECLS_: type, comptime 
             if (a.tag_get() != b.tag_get()) return false;
             switch (a.tag_get()) {
                 inline else => |t| {
-                    return Utils.object_equals(a.get(t), b.get(t));
+                    return Utils.shallow_equals(a.get(t), b.get(t));
                 },
             }
         }

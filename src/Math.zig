@@ -313,9 +313,13 @@ pub fn largest_int_type_for_math(comptime A: type, comptime B: type, comptime AB
 }
 
 pub const NumberUpgradeModeAndType = struct {
-    mode: NumberUpgradeMode,
-    type_A: type,
-    type_B: type,
+    TYPE_AA: type,
+    TRANSFORM_A_TO_AA: Types.NumericTransform,
+    TYPE_BB: type,
+    TRANSFORM_B_TO_BB: Types.NumericTransform,
+    TYPE_X: type,
+    TRANSFORM_BB_TO_X: Types.NumericTransform,
+    TRANSFORM_AA_TO_X: Types.NumericTransform,
 };
 
 pub fn upgrade_mode_and_types_vector(comptime A: type, comptime B: type) NumberUpgradeModeAndType {
@@ -328,69 +332,75 @@ pub fn upgrade_mode_and_types_vector(comptime A: type, comptime B: type) NumberU
     const B_CHILD = B_INFO.child;
     const UP_CHILD = upgrade_mode_and_types(A_CHILD, B_CHILD);
     return NumberUpgradeModeAndType{
-        .mode = UP_CHILD.mode,
-        .type_A = @Vector(A_INFO.len, UP_CHILD.type_A),
-        .type_B = @Vector(B_INFO.len, UP_CHILD.type_B),
+        .TYPE_AA = @Vector(A_INFO.len, UP_CHILD.TYPE_AA),
+        .TRANSFORM_A_TO_AA = UP_CHILD.TRANSFORM_A_TO_AA,
+        .TYPE_BB = @Vector(B_INFO.len, UP_CHILD.TYPE_BB),
+        .TRANSFORM_B_TO_BB = UP_CHILD.TRANSFORM_B_TO_BB,
+        .TYPE_X = @Vector(A_INFO.len, UP_CHILD.TYPE_X),
+        .TRANSFORM_AA_TO_X = UP_CHILD.TRANSFORM_AA_TO_X,
+        .TRANSFORM_BB_TO_X = UP_CHILD.TRANSFORM_BB_TO_X,
     };
 }
 
 pub fn upgrade_mode_and_types(comptime A: type, comptime B: type) NumberUpgradeModeAndType {
-    assert_with_reason(Types.type_is_numeric(A), @src(), "type `A` must be a numeric type, got type `{s}`", .{@typeName(A)});
-    assert_with_reason(Types.type_is_numeric(B), @src(), "type `B` must be a numeric type, got type `{s}`", .{@typeName(B)});
-    const AA: type = check: {
-        if (Types.type_is_comptime(A)) {
-            if (Types.type_is_float(A)) {
-                break :check f64;
-            } else {
-                break :check i64;
-            }
-        } else {
-            break :check A;
-        }
-    };
-    const BB: type = check: {
-        if (Types.type_is_comptime(B)) {
-            if (Types.type_is_float(B)) {
-                break :check f64;
-            } else {
-                break :check i64;
-            }
-        } else {
-            break :check B;
-        }
-    };
-    comptime var MODE: NumberUpgradeMode = undefined;
-    if (Types.type_is_float(AA) != Types.type_is_float(BB)) {
+    const AA, const TRANSFORM_TO_AA = Types.numeric_equivalent_type_and_transform(A);
+    const BB, const TRANSFORM_TO_BB = Types.numeric_equivalent_type_and_transform(B);
+    comptime var X: type = undefined;
+    comptime var TRANSFORM_AA_TO_X: Types.NumericTransform = undefined;
+    comptime var TRANSFORM_BB_TO_X: Types.NumericTransform = undefined;
+    if (AA == BB) {
+        X = AA;
+        TRANSFORM_AA_TO_X = .NONE_NEEDED;
+        TRANSFORM_BB_TO_X = .NONE_NEEDED;
+    } else if (Types.type_is_float(AA) != Types.type_is_float(BB)) {
         if (Types.type_is_int(AA)) {
-            MODE = .upgrade_A_to_float;
+            X = BB;
+            TRANSFORM_AA_TO_X = .INT_TO_FLOAT;
+            TRANSFORM_BB_TO_X = .NONE_NEEDED;
         } else {
-            MODE = .upgrade_B_to_float;
+            X = AA;
+            TRANSFORM_AA_TO_X = .NONE_NEEDED;
+            TRANSFORM_BB_TO_X = .INT_TO_FLOAT;
         }
     } else {
         if (Types.type_is_float(AA)) {
             const IA = @typeInfo(AA).float;
             const IB = @typeInfo(BB).float;
             if (IA.bits > IB.bits) {
-                MODE = .both_float_A_large;
+                X = AA;
+                TRANSFORM_AA_TO_X = .NONE_NEEDED;
+                TRANSFORM_BB_TO_X = .FLOAT_TO_FLOAT;
             } else {
-                MODE = .both_float_B_large;
+                X = BB;
+                TRANSFORM_AA_TO_X = .FLOAT_TO_FLOAT;
+                TRANSFORM_BB_TO_X = .NONE_NEEDED;
             }
         } else {
             const IA = @typeInfo(AA).int;
             const IB = @typeInfo(BB).int;
             if (IA.signedness != IB.signedness) {
-                MODE = .mixed_class_ints;
+                X = largest_int_type_for_math(AA, BB, 64);
+                TRANSFORM_AA_TO_X = .INT_TO_INT;
+                TRANSFORM_BB_TO_X = .INT_TO_INT;
             } else if (IA.bits > IB.bits) {
-                MODE = .same_class_ints_A_large;
+                X = AA;
+                TRANSFORM_AA_TO_X = .NONE_NEEDED;
+                TRANSFORM_BB_TO_X = .INT_TO_INT;
             } else {
-                MODE = .same_class_ints_B_large;
+                X = BB;
+                TRANSFORM_AA_TO_X = .INT_TO_INT;
+                TRANSFORM_BB_TO_X = .NONE_NEEDED;
             }
         }
     }
     return NumberUpgradeModeAndType{
-        .mode = MODE,
-        .type_A = AA,
-        .type_B = BB,
+        .TYPE_AA = AA,
+        .TRANSFORM_A_TO_AA = TRANSFORM_TO_AA,
+        .TYPE_BB = BB,
+        .TRANSFORM_B_TO_BB = TRANSFORM_TO_BB,
+        .TYPE_X = X,
+        .TRANSFORM_AA_TO_X = TRANSFORM_AA_TO_X,
+        .TRANSFORM_BB_TO_X = TRANSFORM_BB_TO_X,
     };
 }
 
@@ -399,13 +409,8 @@ pub fn Upgraded2Numbers(comptime A: type, comptime B: type) type {
     const B_INFO = @typeInfo(B);
     const VECTOR = A_INFO == .vector or B_INFO == .vector;
     const mode_and_types = if (VECTOR) upgrade_mode_and_types_vector(A, B) else upgrade_mode_and_types(A, B);
-    const T_: type = switch (mode_and_types.mode) {
-        .same_class_ints_B_large, .both_float_B_large, .upgrade_A_to_float => mode_and_types.type_B,
-        .same_class_ints_A_large, .both_float_A_large, .upgrade_B_to_float => mode_and_types.type_A,
-        .mixed_class_ints => if (VECTOR) largest_int_type_for_math_vector(A, B, 64) else largest_int_type_for_math(mode_and_types.type_A, mode_and_types.type_B, 64),
-    };
     return struct {
-        pub const T = T_;
+        pub const T = mode_and_types.TYPE_X;
         pub const IS_VECTOR = VECTOR;
         a: T = if (VECTOR) @splat(0) else 0,
         b: T = if (VECTOR) @splat(0) else 0,
@@ -418,10 +423,10 @@ pub fn upgrade_2_numbers_for_math(a: anytype, b: anytype) Upgraded2Numbers(@Type
     const A_INFO = @typeInfo(A);
     const B_INFO = @typeInfo(B);
     const UPGRADE = if (A_INFO == .vector or B_INFO == .vector) upgrade_mode_and_types_vector(A, B) else upgrade_mode_and_types(A, B);
-    const RESULT = Upgraded2Numbers(UPGRADE.type_A, UPGRADE.type_B);
+    const RESULT = Upgraded2Numbers(UPGRADE.TYPE_AA, UPGRADE.TYPE_BB);
     return RESULT{
-        .a = num_cast(a, RESULT.T),
-        .b = num_cast(b, RESULT.T),
+        .a = UPGRADE.TRANSFORM_AA_TO_X.transform(UPGRADE.TRANSFORM_A_TO_AA.transform(a, UPGRADE.TYPE_AA), UPGRADE.TYPE_X),
+        .b = UPGRADE.TRANSFORM_BB_TO_X.transform(UPGRADE.TRANSFORM_B_TO_BB.transform(a, UPGRADE.TYPE_AA), UPGRADE.TYPE_X),
     };
 }
 
@@ -1522,6 +1527,47 @@ pub fn tan_bezier_rad(radians: anytype) @TypeOf(radians) {
 pub fn tan_bezier_deg(degrees: anytype) @TypeOf(degrees) {
     const sin, const cos = sin_cos_bezier_deg(degrees);
     return tan_from_sin_cos(sin, cos);
+}
+
+pub fn bit_flood_left(val: anytype) @TypeOf(val) {
+    const T = @TypeOf(val);
+    const B = @bitSizeOf(T);
+    var result = val;
+    comptime var b = 1;
+    inline while (b < B) {
+        result |= result << b;
+        b += b;
+    }
+    return result;
+}
+
+pub fn bit_flood_right(val: anytype) @TypeOf(val) {
+    const T = @TypeOf(val);
+    const B = @bitSizeOf(T);
+    var result = val;
+    comptime var b = 1;
+    inline while (b < B) {
+        result |= result >> b;
+        b += b;
+    }
+    return result;
+}
+
+pub fn bit_flood_any(val: anytype) @TypeOf(val) {
+    const T = @TypeOf(val);
+    const B = @bitSizeOf(T);
+    var result = val;
+    comptime var b = 1;
+    inline while (b < B) {
+        result |= result << b;
+        b += b;
+    }
+    b = 1;
+    inline while (b < B) {
+        result |= result >> b;
+        b += b;
+    }
+    return result;
 }
 
 pub const PowerOf2 = enum(u8) {
