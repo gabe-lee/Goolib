@@ -278,18 +278,50 @@ pub const Mutability = enum {
     MUTABLE,
 };
 
+pub const SandboxMode = enum {
+    NO_SANDBOXING,
+    INCLUDE_SANDBOX_GUARDS,
+
+    pub const SANDBOX_IN_SAFE_BUILD_ONLY: SandboxMode = if (Assert.should_assert()) SandboxMode.INCLUDE_SANDBOX_GUARDS else SandboxMode.NO_SANDBOXING;
+};
+
 pub const LenMutability = enum {
-    immutable,
-    shrink_only,
-    grow_only,
-    shrink_or_grow,
+    LEN_IS_IMMUTABLE,
+    LEN_CAN_ONLY_SHRINK,
+    LEN_CAN_ONLY_GROW,
+    LEN_CAN_SHRINK_OR_GROW,
+};
+pub const CapMutability = enum {
+    CAPACITY_IS_IMMUTABLE,
+    CAPACITY_CAN_ONLY_SHRINK,
+    CAPACITY_CAN_ONLY_GROW,
+    CAPACITY_CAN_SHRINK_OR_GROW,
+};
+
+pub const Reallocatability = enum {
+    CAN_REALLOC_MEMORY,
+    CANNOT_REALLOC_MEMORY,
+};
+
+pub const CapReallocMutability = enum {
+    REALLOC_MUST_HAVE_SAME_CAPACITY,
+    REALLOC_CAN_GROW_CAP_ONLY,
+    REALLOC_CAN_SHRINK_CAP_ONLY,
+    REALLOC_CAN_GROW_OR_SHRINK_CAP,
 };
 
 pub const PosMutability = enum {
-    immutable,
-    increase_only,
-    decrease_only,
-    increase_or_decrease,
+    POS_IS_IMMUTABLE,
+    POS_CAN_INCREASE_ONLY,
+    POS_CAN_DECREASE_ONLY,
+    POS_CAN_INCREASE_OR_DECREASE,
+};
+
+pub const PtrMutability = enum {
+    PTR_IS_IMMUTABLE,
+    PTR_ADDR_CAN_INCREASE_ONLY,
+    PTR_ADDR_CAN_DECREASE_ONLY,
+    PTR_ADDR_CAN_INCREASE_OR_DECREASE,
 };
 
 pub const PathKind = enum(u8) {

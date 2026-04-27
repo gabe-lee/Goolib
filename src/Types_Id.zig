@@ -30,8 +30,21 @@ pub const TypeIdMode = enum(u8) {
     TYPE_NAME_HASH,
 };
 
+pub const GOOLIB_DATA_DECL_NAME = "GOOLIB_TYPE_DATA";
 pub const MODE = TypeIdMode.LINKSECTION_ADDRESS;
 pub const TypeId = u64;
+pub const GoolibTypeData = extern struct {
+    id: TypeId,
+    kind: TypeId,
+    category: StructCategory,
+
+    pub fn lookup_type_data(comptime T: type) ?GoolibTypeData {
+        if (!@hasDecl(T, GOOLIB_DATA_DECL_NAME)) return null;
+        const DECL = @field(T, GOOLIB_DATA_DECL_NAME);
+        if (@TypeOf(DECL) != GoolibTypeData) return null;
+        return DECL;
+    }
+};
 
 const TYPE_ID_SECTION_NAME = ".bss.GoolibTypeIds";
 const @"GoolibTypeIds.head": u8 linksection(TYPE_ID_SECTION_NAME ++ "0") = 0;
@@ -60,3 +73,48 @@ pub fn get_type_id(comptime T: type) TypeId {
         },
     }
 }
+
+pub fn get_kind_id(comptime manual_kind_name: []const u8) TypeId {
+    const hash = Hash.hash(0, manual_kind_name);
+    return @intCast(hash);
+}
+
+pub fn get_type_data(comptime T: type, comptime kind_name: []const u8, comptime category: StructCategory) GoolibTypeData {
+    return GoolibTypeData{
+        .id = get_type_id(T),
+        .kind = @intCast(Hash.hash(0, kind_name)),
+        .category = category,
+    };
+}
+
+pub const StructCategory = enum(TypeId) {
+    NO_STRUCT_CATEGORY,
+    POINTER,
+    SLICE,
+    LIST,
+    UNION,
+    NUMERIC,
+};
+
+// pub const StructCategoryInfo = union(StructCategory) {
+//     NO_STRUCT_CATEGORY: void,
+//     POINTER: struct {
+//         ptr_field: [][]const u8,
+//     },
+//     SLICE: struct {
+//         ptr_field: [][]const u8,
+//         len_field: [][]const u8,
+//     },
+//     LIST: struct {
+//         ptr_field: [][]const u8,
+//         len_field: [][]const u8,
+//         cap_field: [][]const u8,
+//     },
+//     UNION: struct {
+//         tag_field: [][]const u8,
+//         val_field: [][]const u8,
+//     },
+//     NUMERIC: struct {
+//         val_field: [][]const u8,
+//     },
+// };

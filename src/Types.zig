@@ -1121,6 +1121,99 @@ pub fn make_const_slice_from_sentinel_ptr_max_len(comptime T: type, comptime S: 
     return ptr[0..i :S];
 }
 
+pub fn get_mem_len(mem_val: anytype, comptime IDX: type) IDX {
+    const T = @TypeOf(mem_val);
+    const INFO = KindInfo.get_kind_info(T);
+    switch (INFO) {
+        .POINTER => |POINTER| {
+            const CHILD_INFO = KindInfo.get_kind_info(POINTER.child);
+            switch (POINTER.size) {
+                .one, .c => switch (CHILD_INFO) {
+                    .ARRAY => |ARRAY| {
+                        return @intCast(ARRAY.len);
+                    },
+                    .VECTOR => |VECTOR| {
+                        return @intCast(VECTOR.len);
+                    },
+                    else => return 1,
+                },
+                .many => return math.maxInt(IDX),
+                .slice => return @intCast(mem_val.len),
+            }
+        },
+        .ARRAY => |ARRAY| {
+            return @intCast(ARRAY.len);
+        },
+        .VECTOR => |VECTOR| {
+            return @intCast(VECTOR.len);
+        },
+        .OPTIONAL => |OPTIONAL| {
+            const PAYLOAD_INFO = KindInfo.get_kind_info(OPTIONAL.child);
+            switch (PAYLOAD_INFO) {
+                .POINTER => |POINTER| {
+                    if (mem_val == null) return 0;
+                    const CHILD_INFO = KindInfo.get_kind_info(POINTER.child);
+                    switch (POINTER.size) {
+                        .one, .c => switch (CHILD_INFO) {
+                            .ARRAY => |ARRAY| {
+                                return @intCast(ARRAY.len);
+                            },
+                            .VECTOR => |VECTOR| {
+                                return @intCast(VECTOR.len);
+                            },
+                            else => return 1,
+                        },
+                        .many => return math.maxInt(IDX),
+                        .slice => return @intCast(mem_val.?.len),
+                    }
+                },
+                .ARRAY => |ARRAY| {
+                    if (mem_val == null) return 0;
+                    return @intCast(ARRAY.len);
+                },
+                .VECTOR => |VECTOR| {
+                    if (mem_val == null) return 0;
+                    return @intCast(VECTOR.len);
+                },
+                else => {
+                    if (Id.GoolibTypeData.lookup_type_data(T)) |data| {
+                        if (data.category == .SLICE or data.category == .LIST) {
+                            return @intCast(mem_val.len);
+                        }
+                    }
+                    assert_unreachable(@src(), "type `{s}` does not have a len", .{@typeName(T)});
+                },
+            }
+        },
+        else => {
+            if (Id.GoolibTypeData.lookup_type_data(T)) |data| {
+                if (data.category == .SLICE or data.category == .LIST) {
+                    return @intCast(mem_val.len);
+                }
+            }
+            assert_unreachable(@src(), "type `{s}` does not have a len", .{@typeName(T)});
+        },
+    }
+}
+
+pub fn get_mem_ptr_addr(mem_val: anytype) usize {
+    const T = @TypeOf(mem_val);
+    const INFO = KindInfo.get_kind_info(T);
+    switch (INFO) {
+        .POINTER, .OPTIONAL => {
+            return @intFromPtr(mem_val);
+        },
+        else => {
+            if (Id.GoolibTypeData.lookup_type_data(T)) |data| {
+                if (data.category == .POINTER or data.category == .SLICE or data.category == .LIST) {
+                    return @intFromPtr(mem_val.ptr);
+                }
+            }
+            assert_unreachable(@src(), "type `{s}` does not have a pointer field/value", .{@typeName(T)});
+        },
+    }
+}
+
 pub fn get_ptr_len(ptr: anytype) usize {
     const T = @TypeOf(ptr);
     const I = @typeInfo(T);
