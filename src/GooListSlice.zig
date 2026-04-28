@@ -34,17 +34,20 @@ const NullPropagation = CommonTypes.NullPropagation;
 const NullOperation = CommonTypes.NullOperation;
 const Utils = Root.Utils;
 const Cast = Root.Cast;
+const Hash = std.hash.XxHash64;
 const Assert = Root.Assert;
 const Allocator = std.mem.Allocator;
+const KindINfo = Types.KindInfo;
 const util_secure_memset = Utils.Mem.secure_memset;
 const util_secure_zero = Utils.Mem.secure_zero;
 const util_secure_memset_undefined = Utils.Mem.secure_memset_undefined;
 const assert_with_reason = Assert.assert_with_reason;
 const assert_unreachable = Assert.assert_unreachable;
+const assert_unreachable_err = Assert.assert_unreachable_err;
 const num_cast = Cast.num_cast;
 // const InsertionSort = Root.InsertionSort;
 // const BinarySearch = Root.BinarySearch;
-const ComparFunc = Utils.Mem.CompareFunc;
+const CompareFunc = Utils.Mem.CompareFunc;
 const CompareFuncUserdata = Utils.Mem.CompareFuncUserdata;
 const GrowthModel = CommonTypes.GrowthModel;
 const SandboxMode = CommonTypes.SandboxMode;
@@ -66,6 +69,7 @@ const ERR_OPERATE_IMMUTABLE_ELEM = STRUCT_NAME ++ "(ELEM_MUTABILITY = .immutable
 const ERR_OPERATE_NULL = "cannot operate on null ptr";
 const ERR_SHRINK_OOB = "shrink count ({d}) would cause condition `first_address > last_address` (max shrink = len = {d})";
 const ERR_START_END_REVERSED = "provided start ({d}) and end ({s}) indexes would cause condition `first_address > last_address`";
+const ERR_LEN_PLUS_N_EXCCEEDS_CAP = "current len ({d}) plus N more items ({d}) exceeds the current capacity ({d})";
 const ERR_INDEX_OOB = "the largest requested or provided index ({d}) is out of GooListSlice bounds (len = {d})";
 const ERR_LEN_ZERO = "the GooListSlice length is zero, cannot index any element";
 const ERR_LEN_GREATER_THAN_CAP = "the GooListSlice length {d} is greater than capacity {d}";
@@ -91,6 +95,32 @@ const ERR_PTR_CANNOT_REALLOC = "pointer cannot be reallocated when `.REALLOCABIL
 pub const GooListSliceMode = enum(u1) {
     SLICE,
     LIST,
+};
+
+const OriginFuncAllocAssume = enum {
+    ASSUME_CAPACITY,
+    REALLOCATE,
+};
+const OriginFuncReturn = enum {
+    SELF_ONLY,
+    IDX,
+    REF,
+};
+const OriginFuncCount = enum {
+    ONE,
+    MANY,
+};
+const OriginFuncSetVal = enum {
+    EMPTY_SLOTS,
+    SET_VALS,
+};
+const OriginFuncValSetLoc = enum {
+    APPEND,
+    INSERT,
+};
+const OriginInPlace = enum {
+    RET_NEW,
+    IN_PLACE,
 };
 
 pub const SubSliceMode = enum {
@@ -153,7 +183,7 @@ pub const GooListSliceDefinition = struct {
             .IDX = IDX,
             .ELEM_MUTABILITY = .MUTABLE,
             .PTR_NULLABILITY = .NOT_NULLABLE,
-            .MODE = .LIST,
+            .MODE = .SLICE,
             .SANDBOX = .NO_SANDBOXING,
             .CAP_MUTABILITY = .CAPACITY_IS_IMMUTABLE,
             .CAP_REALLOC_MUTABILITY = .REALLOC_CAN_GROW_OR_SHRINK_CAP,
@@ -270,6 +300,7 @@ pub const GooListSliceDefinition = struct {
     }
 };
 pub const KIND_GooListSlice = "Goolib.GooListSlice.GooListSlice";
+pub const KIND_HASH_GooListSlice = Hash.hash(0, KIND_GooListSlice);
 pub fn GooListSlice(comptime DEF_: GooListSliceDefinition) type {
     if (@typeInfo(DEF_.IDX) != .int) @compileError("type `Idx` must be an integer type");
     return extern struct {
@@ -277,10 +308,14 @@ pub fn GooListSlice(comptime DEF_: GooListSliceDefinition) type {
         pub const GOOLIB_TYPE_DATA = Types.Id.get_type_data(ListSlice, KIND_GooListSlice, if (IS_LIST) .LIST else .SLICE);
 
         ptr: Ptr = INVALID_DATA_POINTER,
-        len: Idx = 0,
-        cap: if (IS_LIST) Idx else void = if (IS_LIST) 0 else void{},
         min_address: if (SANDBOX) usize else void = if (SANDBOX) 0 else void{},
         max_address_excluded: if (SANDBOX) usize else void = if (SANDBOX) 0 else void{},
+        len: Idx = 0,
+        cap: if (IS_LIST) Idx else void = if (IS_LIST) 0 else void{},
+
+        //**********
+        // CONSTS
+        //**********
 
         pub const DEF = DEF_;
         pub const T = DEF.T;
@@ -292,14 +327,63 @@ pub fn GooListSlice(comptime DEF_: GooListSliceDefinition) type {
         const IS_LIST = MODE == .LIST;
         const SANDBOX = DEF.SANDBOX == .INCLUDE_SANDBOX_GUARDS;
 
+        pub const Ptr = switch (ELEM_MUTABILITY) {
+            .IMMUTABLE => switch (PTR_NULLABILITY) {
+                .NOT_NULLABLE => [*]const T,
+                .NULLABLE => ?[*]const T,
+            },
+            .MUTABLE => switch (PTR_NULLABILITY) {
+                .NOT_NULLABLE => [*]T,
+                .NULLABLE => ?[*]T,
+            },
+        };
+        pub const PtrNeverNull = switch (ELEM_MUTABILITY) {
+            .IMMUTABLE => [*]const T,
+            .MUTABLE => [*]T,
+        };
+        pub const ElemPtr = switch (ELEM_MUTABILITY) {
+            .IMMUTABLE => *const T,
+            .MUTABLE => *T,
+        };
+        pub const ZigSlice = switch (ELEM_MUTABILITY) {
+            .IMMUTABLE => switch (PTR_NULLABILITY) {
+                .NOT_NULLABLE => []const T,
+                .NULLABLE => ?[]const T,
+            },
+            .MUTABLE => switch (PTR_NULLABILITY) {
+                .NOT_NULLABLE => []T,
+                .NULLABLE => ?[]T,
+            },
+        };
+        pub const ZigSliceNeverNull = switch (ELEM_MUTABILITY) {
+            .IMMUTABLE => []const T,
+            .MUTABLE => []T,
+        };
+        pub const ZigSliceNeverNullConst = []const T;
+        const MUTABLE = ELEM_MUTABILITY == .MUTABLE;
+        const NULLABLE = PTR_NULLABILITY == .NULLABLE;
+        const INVALID_DATA_POINTER: Ptr = switch (PTR_NULLABILITY) {
+            .NULLABLE => null,
+            .NOT_NULLABLE => switch (ELEM_MUTABILITY) {
+                .IMMUTABLE => Utils.invalid_ptr_many_const(T),
+                .MUTABLE => Utils.invalid_ptr_many(T),
+            },
+        };
+        const INVALID_ELEM_PTR = switch (ELEM_MUTABILITY) {
+            .IMMUTABLE => Utils.invalid_ptr_const(T),
+            .MUTABLE => Utils.invalid_ptr(T),
+        };
+
+        //**********
+        // TYPE CHANGE
+        //**********
+
         pub fn with_mutablility(comptime mutability: Mutability) type {
             return GooListSlice(DEF.with_mutablility(mutability));
         }
-
         pub fn with_nullability(comptime nullability: Nullability) type {
             return GooListSlice(DEF.with_nullability(nullability));
         }
-
         pub fn with_index_type(comptime index_type: type) type {
             return GooListSlice(DEF.with_index_type(index_type));
         }
@@ -339,79 +423,6 @@ pub fn GooListSlice(comptime DEF_: GooListSliceDefinition) type {
         pub const SubSliceStatic = GooListSlice(DEF.sub_slice_static());
         pub const SubSliceImmutable = GooListSlice(DEF.sub_slice_immutable());
         pub const SubSliceStaticImmutable = GooListSlice(DEF.sub_slice_static_immutable());
-
-        pub const Ptr = switch (ELEM_MUTABILITY) {
-            .IMMUTABLE => switch (PTR_NULLABILITY) {
-                .NOT_NULLABLE => [*]const T,
-                .NULLABLE => ?[*]const T,
-            },
-            .MUTABLE => switch (PTR_NULLABILITY) {
-                .NOT_NULLABLE => [*]T,
-                .NULLABLE => ?[*]T,
-            },
-        };
-        pub const PtrNeverNull = switch (ELEM_MUTABILITY) {
-            .IMMUTABLE => [*]const T,
-            .MUTABLE => [*]T,
-        };
-        pub const ElemPtr = switch (ELEM_MUTABILITY) {
-            .IMMUTABLE => *const T,
-            .MUTABLE => T,
-        };
-        pub const ZigSlice = switch (ELEM_MUTABILITY) {
-            .IMMUTABLE => switch (PTR_NULLABILITY) {
-                .NOT_NULLABLE => []const T,
-                .NULLABLE => ?[]const T,
-            },
-            .MUTABLE => switch (PTR_NULLABILITY) {
-                .NOT_NULLABLE => []T,
-                .NULLABLE => ?[]T,
-            },
-        };
-        pub const ZigSliceNeverNull = switch (ELEM_MUTABILITY) {
-            .IMMUTABLE => []const T,
-            .MUTABLE => []T,
-        };
-        const MUTABLE = ELEM_MUTABILITY == .MUTABLE;
-        const NULLABLE = PTR_NULLABILITY == .NULLABLE;
-        const INVALID_DATA_POINTER: Ptr = switch (PTR_NULLABILITY) {
-            .NULLABLE => null,
-            .NOT_NULLABLE => switch (ELEM_MUTABILITY) {
-                .IMMUTABLE => Utils.invalid_ptr_many_const(T),
-                .MUTABLE => Utils.invalid_ptr_many(T),
-            },
-        };
-        const INVALID_ELEM_PTR = switch (ELEM_MUTABILITY) {
-            .IMMUTABLE => Utils.invalid_ptr_const(T),
-            .MUTABLE => Utils.invalid_ptr(T),
-        };
-
-        pub fn from_slice(slice: ZigSlice) ListSlice {
-            var out = ListSlice{};
-            if (NULLABLE and slice != null) {
-                if (slice != null) {
-                    out.ptr = slice.?.ptr;
-                    out.len = @intCast(slice.?.len);
-                }
-            } else {
-                out.ptr = slice.ptr;
-                out.len = @intCast(slice.len);
-            }
-            return out;
-        }
-
-        pub fn to_slice(self: ListSlice) ZigSlice {
-            if (NULLABLE) {
-                if (self.ptr == null) return null;
-                return self.ptr_never_null()[0..self.len];
-            } else {
-                return self.ptr[0..self.len];
-            }
-        }
-        pub fn to_slice_never_null(self: ListSlice) ZigSliceNeverNull {
-            self.assert_not_null(@src());
-            self.ptr_never_null()[0..self.len];
-        }
 
         pub fn change_mutability(self: ListSlice, comptime new_elem_mutability: Mutability) ListSlice.with_mutablility(new_elem_mutability) {
             if (new_elem_mutability == ELEM_MUTABILITY) return self;
@@ -473,9 +484,20 @@ pub fn GooListSlice(comptime DEF_: GooListSliceDefinition) type {
             };
         }
 
+        //**********
+        // ASSERTS
+        //**********
+
         fn assert_not_null(self: ListSlice, comptime src: std.builtin.SourceLocation) void {
             if (NULLABLE) {
                 assert_with_reason(self.ptr != null, src, ERR_OPERATE_NULL, .{});
+            }
+        }
+        fn assert_len_n_less_than_cap(self: ListSlice, n: Idx, comptime src: std.builtin.SourceLocation) void {
+            if (IS_LIST) {
+                assert_with_reason(self.len + n <= self.cap, src, ERR_LEN_PLUS_N_EXCCEEDS_CAP, .{ self.len, n, self.cap });
+            } else {
+                self.assert_len_greater_or_equal_count(n, src);
             }
         }
         fn assert_start_and_end_in_order(start: Idx, end: Idx, comptime src: std.builtin.SourceLocation) void {
@@ -515,8 +537,8 @@ pub fn GooListSlice(comptime DEF_: GooListSliceDefinition) type {
             }
         }
         fn assert_free_slots(self: ListSlice, count: Idx, comptime src: std.builtin.SourceLocation) void {
-            const free = self.free_slots();
-            assert_with_reason(free >= count, src, ERR_NOT_ENOUGH_FREE_SLOTS, .{ free, count });
+            const _free = self.free_slots();
+            assert_with_reason(_free >= count, src, ERR_NOT_ENOUGH_FREE_SLOTS, .{ _free, count });
         }
         fn unimplemented(comptime src: std.builtin.SourceLocation) noreturn {
             assert_unreachable(src, ERR_UNIMPLEMENTED, .{@tagName(DEF.MODE)});
@@ -533,6 +555,22 @@ pub fn GooListSlice(comptime DEF_: GooListSliceDefinition) type {
                 const SIZE_T = @sizeOf(T);
                 const addr_on_right = SIZE_T * num_cast(n_space_on_right, usize);
                 assert_with_reason(@intFromPtr(self) + (num_cast(if (IS_SLICE) self.len else self.cap, usize) * SIZE_T) + addr_on_right <= self.max_address_excluded, src, ERR_ESCAPE_SANDBOX_RIGHT, .{});
+            }
+        }
+        fn assert_len_grow(self: ListSlice, n: Idx, comptime src: std.builtin.SourceLocation) void {
+            if (IS_SLICE) {
+                assert_cap_grow(src);
+                self.assert_sandbox_right_grow(n, src);
+            } else {
+                self.assert_len_n_less_than_cap(n, src);
+            }
+        }
+        fn assert_len_shrink(self: ListSlice, n: Idx, comptime src: std.builtin.SourceLocation) void {
+            if (IS_SLICE) {
+                assert_cap_shrink(src);
+                self.assert_len_greater_or_equal_count(n, src);
+            } else {
+                self.assert_len_greater_or_equal_count(n, src);
             }
         }
         fn assert_cap_grow(comptime src: std.builtin.SourceLocation) void {
@@ -568,8 +606,40 @@ pub fn GooListSlice(comptime DEF_: GooListSliceDefinition) type {
             }
         }
 
-        pub fn alloc_new(alloc: Allocator, capacity: Idx) ListSlice {
+        //**********
+        // INIT AND UTIL
+        //**********
+
+        pub fn alloc_new(capacity: Idx, alloc: Allocator) ListSlice {
             return realloc_exact(ListSlice{}, alloc, capacity);
+        }
+
+        pub fn from_slice(slice: ZigSlice) ListSlice {
+            var out = ListSlice{};
+            if (NULLABLE and slice != null) {
+                if (slice != null) {
+                    out.ptr = slice.?.ptr;
+                    out.len = @intCast(slice.?.len);
+                }
+            } else {
+                out.ptr = slice.ptr;
+                out.len = @intCast(slice.len);
+            }
+            return out;
+        }
+
+        pub fn to_slice(self: ListSlice) ZigSlice {
+            if (NULLABLE) {
+                if (self.ptr == null) return null;
+                return self.ptr_never_null()[0..self.len];
+            } else {
+                return self.ptr[0..self.len];
+            }
+        }
+
+        pub fn to_slice_never_null(self: ListSlice) ZigSliceNeverNull {
+            self.assert_not_null(@src());
+            self.ptr_never_null()[0..self.len];
         }
 
         pub fn is_null(self: ListSlice) bool {
@@ -577,6 +647,15 @@ pub fn GooListSlice(comptime DEF_: GooListSliceDefinition) type {
                 return self.ptr == null;
             }
             return false;
+        }
+
+        pub fn clear(self: ListSlice) ListSlice {
+            var new_self = self;
+            new_self.len = 0;
+            return new_self;
+        }
+        pub fn in_place_clear(self: *ListSlice) void {
+            self.len = 0;
         }
 
         pub fn is_empty(self: ListSlice) bool {
@@ -596,6 +675,10 @@ pub fn GooListSlice(comptime DEF_: GooListSliceDefinition) type {
                 return self.ptr;
             }
         }
+
+        //**********
+        // WINDOW MOVEMENT
+        //**********
 
         pub fn grow_right(self: ListSlice, count: Idx) ListSlice {
             self.assert_not_null(@src());
@@ -744,6 +827,10 @@ pub fn GooListSlice(comptime DEF_: GooListSliceDefinition) type {
             };
         }
 
+        //**********
+        // GET/SET
+        //**********
+
         pub fn get_item_ptr(self: ListSlice, idx: Idx) ElemPtr {
             self.assert_not_null(@src());
             self.assert_idx_in_range(idx, @src());
@@ -820,6 +907,10 @@ pub fn GooListSlice(comptime DEF_: GooListSliceDefinition) type {
             self.ptr_never_null()[self.len - 1 - nth_from_end] = val;
         }
 
+        //**********
+        // MEMCOPY/MEMSET
+        //**********
+
         pub fn memcopy_to(self: ListSlice, dest: anytype) void {
             self.assert_not_null(@src());
             @memcpy(dest, self.to_slice_never_null());
@@ -854,6 +945,10 @@ pub fn GooListSlice(comptime DEF_: GooListSliceDefinition) type {
             assert_mutable(@src());
             util_secure_memset(T, self.to_slice_never_null(), val);
         }
+
+        //**********
+        // DATA MOVEMENT
+        //**********
 
         pub fn copy_rightward(self: ListSlice, n_positions_to_the_right: Idx) ListSlice {
             self.assert_not_null(@src());
@@ -966,12 +1061,16 @@ pub fn GooListSlice(comptime DEF_: GooListSliceDefinition) type {
             Utils.Mem.reverse_slice(self.ptr_never_null()[0..self.len]);
         }
 
+        //**********
+        // SEARCH
+        //**********
+
         pub fn search_for_item_implicit(self: ListSlice, search_val: anytype) ?Idx {
             self.assert_not_null(@src());
             return Utils.Mem.search_implicit(self.ptr_never_null(), 0, self.len, search_val, Idx);
         }
 
-        pub fn search_for_item_with_func(self: ListSlice, search_param: anytype, match_fn: *const ComparFunc(@TypeOf(search_param), T)) ?Idx {
+        pub fn search_for_item_with_func(self: ListSlice, search_param: anytype, match_fn: *const CompareFunc(@TypeOf(search_param), T)) ?Idx {
             self.assert_not_null(@src());
             return Utils.Mem.search_with_func(self.ptr_never_null(), 0, self.len, search_param, match_fn, Idx);
         }
@@ -988,13 +1087,13 @@ pub fn GooListSlice(comptime DEF_: GooListSliceDefinition) type {
         }
 
         /// Returns number of indexes found and appended to output buffer
-        pub fn search_for_many_items_with_func(self: ListSlice, search_vals: anytype, search_vals_order: Utils.Mem.LinearSearchOrder, output_buffer: anytype, match_fn: *const ComparFunc(Types.IndexableChild(@TypeOf(search_vals)), T)) Idx {
+        pub fn search_for_many_items_with_func(self: ListSlice, search_vals: anytype, search_vals_order: Utils.Mem.LinearSearchOrder, output_buffer: anytype, match_fn: *const CompareFunc(Types.IndexableChild(@TypeOf(search_vals)), T)) Idx {
             self.assert_not_null(@src());
             return Utils.Mem.search_for_many_with_func(self.ptr_never_null(), 0, self.len, search_vals, search_vals_order, match_fn, output_buffer, Idx);
         }
 
         /// Returns number of indexes found and appended to output buffer
-        pub fn search_for_many_items_with_func_and_userdata(self: ListSlice, userdata: anytype, search_vals: anytype, search_vals_order: Utils.Mem.LinearSearchOrder, output_buffer: anytype, match_fn: *const ComparFunc(Types.IndexableChild(@TypeOf(search_vals)), T, @TypeOf(userdata))) Idx {
+        pub fn search_for_many_items_with_func_and_userdata(self: ListSlice, userdata: anytype, search_vals: anytype, search_vals_order: Utils.Mem.LinearSearchOrder, output_buffer: anytype, match_fn: *const CompareFunc(Types.IndexableChild(@TypeOf(search_vals)), T, @TypeOf(userdata))) Idx {
             self.assert_not_null(@src());
             return Utils.Mem.search_for_many_with_func_and_userdata(self.ptr_never_null(), 0, self.len, search_vals, search_vals_order, userdata, match_fn, output_buffer, Idx);
         }
@@ -1006,7 +1105,7 @@ pub fn GooListSlice(comptime DEF_: GooListSliceDefinition) type {
             return Utils.Mem.binary_search_implicit(self.ptr_never_null(), 0, self.len, find_val, Idx);
         }
 
-        pub fn binary_search_for_item_idx_with_func(self: ListSlice, search_param: anytype, match_fn: *const ComparFunc(@TypeOf(search_param), T), less_than_fn: *const CompareFunc(@TypeOf(search_param), T)) BinarySearchResult {
+        pub fn binary_search_for_item_idx_with_func(self: ListSlice, search_param: anytype, match_fn: *const CompareFunc(@TypeOf(search_param), T), less_than_fn: *const CompareFunc(@TypeOf(search_param), T)) BinarySearchResult {
             self.assert_not_null(@src());
             return Utils.Mem.binary_search_with_func(self.ptr_never_null(), 0, self.len, search_param, match_fn, less_than_fn, Idx);
         }
@@ -1021,7 +1120,7 @@ pub fn GooListSlice(comptime DEF_: GooListSliceDefinition) type {
             return Utils.Mem.binary_search_many_implicit(self.ptr_never_null(), 0, self.len, search_vals, search_vals_order, output_buffer, Idx);
         }
 
-        pub fn binary_search_for_many_items_idx_with_func(self: ListSlice, search_params: anytype, search_params_order: Utils.Mem.BinarySearchOrder, match_fn: *const ComparFunc(Types.IndexableChild(@TypeOf(search_params)), T), less_than_fn: *const CompareFunc(Types.IndexableChild(@TypeOf(search_params)), T), output_buffer: anytype) Idx {
+        pub fn binary_search_for_many_items_idx_with_func(self: ListSlice, search_params: anytype, search_params_order: Utils.Mem.BinarySearchOrder, match_fn: *const CompareFunc(Types.IndexableChild(@TypeOf(search_params)), T), less_than_fn: *const CompareFunc(Types.IndexableChild(@TypeOf(search_params)), T), output_buffer: anytype) Idx {
             self.assert_not_null(@src());
             return Utils.Mem.binary_search_many_with_func(self.ptr_never_null(), 0, self.len, search_params, search_params_order, match_fn, less_than_fn, output_buffer, Idx);
         }
@@ -1030,6 +1129,10 @@ pub fn GooListSlice(comptime DEF_: GooListSliceDefinition) type {
             self.assert_not_null(@src());
             return Utils.Mem.binary_search_many_with_func_and_userdata(self.ptr_never_null(), 0, self.len, search_params, search_params_order, userdata, match_fn, less_than_fn, output_buffer, Idx);
         }
+
+        //**********
+        // SORTING
+        //**********
 
         pub fn insertion_sort_implicit(self: *ListSlice) void {
             self.assert_not_null(@src());
@@ -1061,16 +1164,31 @@ pub fn GooListSlice(comptime DEF_: GooListSliceDefinition) type {
             return Root.Sort.is_sorted_with_func_and_userdata(self.ptr_never_null(), 0, self.len, userdata, greater_than_fn);
         }
 
+        //**********
+        // REALLOC
+        //**********
+
+        pub fn free(self: ListSlice, alloc: Allocator) ListSlice {
+            if (self.is_null()) return ListSlice{};
+            alloc.free(self.to_slice_never_null()) catch |err| assert_unreachable_err(@src(), err);
+            return ListSlice{};
+        }
+
+        pub fn in_place_free(self: *ListSlice, alloc: Allocator) void {
+            var self_val = self.*;
+            self_val = self_val.free(alloc);
+            self.* = self_val;
+        }
+
         pub fn ensure_free_slots(self: ListSlice, needed_free_slots: Idx, alloc: Allocator) ListSlice {
             assert_list(@src());
             const new_len = self.len + needed_free_slots;
             if (new_len <= self.cap) return;
             assert_ptr_realloc(@src());
             assert_cap_realloc_grow(@src());
-            var new_list_slice = self;
-            Utils.Alloc.smart_alloc_ptr_ptrs(alloc, &new_list_slice.ptr, &new_list_slice.cap, new_len, .{ .grow_mode = .GROW_BY_50_PERCENT }, .{ .GROW_MODE = .GROW_BY_50_PERCENT });
-            new_list_slice.len = new_len;
-            return new_list_slice;
+            var new_self = self;
+            Utils.Alloc.smart_alloc_ptr_ptrs(alloc, &new_self.ptr, &new_self.cap, new_len, .{ .grow_mode = .GROW_BY_50_PERCENT }, .{ .GROW_MODE = .GROW_BY_50_PERCENT });
+            return new_self;
         }
 
         pub fn ensure_free_slots_custom_grow(self: ListSlice, needed_free_slots: Idx, alloc: Allocator, grow: GrowthModel, comptime grow_comptime_known: ?GrowthModel) ListSlice {
@@ -1079,10 +1197,21 @@ pub fn GooListSlice(comptime DEF_: GooListSliceDefinition) type {
             if (new_len <= self.cap) return;
             assert_ptr_realloc(@src());
             assert_cap_realloc_grow(@src());
-            var new_list_slice = self;
-            Utils.Alloc.smart_alloc_ptr_ptrs(alloc, &new_list_slice.ptr, &new_list_slice.cap, new_len, .{ .grow_mode = grow }, .{ .GROW_MODE = grow_comptime_known });
-            new_list_slice.len = new_len;
-            return new_list_slice;
+            var new_self = self;
+            Utils.Alloc.smart_alloc_ptr_ptrs(alloc, &new_self.ptr, &new_self.cap, new_len, .{ .grow_mode = grow }, .{ .GROW_MODE = grow_comptime_known });
+            return new_self;
+        }
+
+        pub fn in_place_ensure_free_slots(self: *ListSlice, needed_free_slots: Idx, alloc: Allocator) void {
+            var self_val = self.*;
+            self_val = self_val.ensure_free_slots(needed_free_slots, alloc);
+            self.* = self_val;
+        }
+
+        pub fn in_place_ensure_free_slots_custom_grow(self: *ListSlice, needed_free_slots: Idx, alloc: Allocator, grow: GrowthModel, comptime grow_comptime_known: ?GrowthModel) void {
+            var self_val = self.*;
+            self_val = self_val.ensure_free_slots_custom_grow(needed_free_slots, alloc, grow, grow_comptime_known);
+            self.* = self_val;
         }
 
         pub fn shrink_cap_reserve_at_most(self: ListSlice, at_most_n_free_slots: Idx, alloc: Allocator) ListSlice {
@@ -1096,7 +1225,13 @@ pub fn GooListSlice(comptime DEF_: GooListSliceDefinition) type {
             return new_self;
         }
 
-        pub fn realloc_exact(self: ListSlice, alloc: Allocator, new_capacity: Idx) ListSlice {
+        pub fn in_place_shrink_cap_reserve_at_most(self: *ListSlice, at_most_n_free_slots: Idx, alloc: Allocator) void {
+            var self_val = self.*;
+            self_val = self_val.shrink_cap_reserve_at_most(at_most_n_free_slots, alloc);
+            self.* = self_val;
+        }
+
+        pub fn realloc_exact(self: ListSlice, new_capacity: Idx, alloc: Allocator) ListSlice {
             assert_ptr_realloc(@src());
             var new_self = self;
             if (IS_LIST) {
@@ -1122,6 +1257,559 @@ pub fn GooListSlice(comptime DEF_: GooListSliceDefinition) type {
             return new_self;
         }
 
-        // CHECKPOINT
+        pub fn in_place_realloc_exact(self: *ListSlice, new_capacity: Idx, alloc: Allocator) void {
+            var self_val = self.*;
+            self_val = self_val.realloc_exact(new_capacity, alloc);
+            self.* = self_val;
+        }
+
+        //**********
+        // UNIVERSAL APPEND/INSERT
+        //**********
+
+        fn expand_internal(
+            comptime origin_in_place: OriginInPlace,
+            self: if (origin_in_place == .RET_NEW) ListSlice else *ListSlice,
+            comptime origin_count: OriginFuncCount,
+            count: Idx,
+            comptime origin_alloc: OriginFuncAllocAssume,
+            alloc: if (origin_alloc == .REALLOCATE) Allocator else void,
+            comptime origin_return: OriginFuncReturn,
+            comptime origin_set: OriginFuncSetVal,
+            vals: if (origin_set == .SET_VALS) (if (origin_count == .ONE) T else []const T) else void,
+            comptime origin_loc: OriginFuncValSetLoc,
+            insert_idx: if (origin_loc == .INSERT) Idx else void,
+        ) return_type: {
+            break :return_type switch (origin_in_place) {
+                .RET_NEW => switch (origin_return) {
+                    .SELF_ONLY => ListSlice,
+                    .IDX => switch (origin_count) {
+                        .ONE => struct { ListSlice, Idx },
+                        .MANY => struct { ListSlice, Idx, Idx },
+                    },
+                    .REF => switch (origin_count) {
+                        .ONE => struct { ListSlice, ElemPtr },
+                        .MANY => struct { ListSlice, ListSlice.with_sub_slice_mode(.STATIC) },
+                    },
+                },
+                .IN_PLACE => switch (origin_return) {
+                    .SELF_ONLY => void,
+                    .IDX => switch (origin_count) {
+                        .ONE => Idx,
+                        .MANY => struct { Idx, Idx },
+                    },
+                    .REF => switch (origin_count) {
+                        .ONE => ElemPtr,
+                        .MANY => ListSlice.with_sub_slice_mode(.STATIC),
+                    },
+                },
+            };
+        } {
+            var new_self = if (origin_in_place == .RET_NEW) self else self.*;
+            const old_len = new_self.len;
+            const real_count: Idx = if (origin_count == .ONE) 1 else count;
+            switch (origin_alloc) {
+                .ASSUME_CAPACITY => {
+                    self.assert_not_null(@src());
+                    if (IS_LIST) {
+                        new_self.assert_len_n_less_than_cap(count, @src());
+                    } else {
+                        new_self.assert_sandbox_right_grow(real_count, @src());
+                    }
+                },
+                .REALLOCATE => {
+                    if (IS_LIST) {
+                        new_self = new_self.ensure_free_slots(real_count, alloc);
+                    } else {
+                        new_self = new_self.realloc_exact(self.len + real_count, alloc);
+                    }
+                },
+            }
+            const first_new_idx = switch (origin_loc) {
+                .APPEND => if (IS_LIST) new_self.len else new_self.len - real_count,
+                .INSERT => insert_idx,
+            };
+            if (IS_LIST) new_self.len += real_count;
+            const last_idx = switch (origin_loc) {
+                .APPEND => new_self.len,
+                .INSERT => insert_idx + real_count,
+            };
+            if (origin_loc == .INSERT and last_idx < new_self.len) {
+                @branchHint(.likely);
+                assert_mutable(@src());
+                @memmove(self.ptr_never_null()[first_new_idx + real_count .. new_self.len], self.ptr_never_null()[first_new_idx..old_len]);
+            }
+            switch (origin_set) {
+                .EMPTY_SLOTS => {},
+                .SET_VALS => {
+                    assert_mutable(@src());
+                    switch (origin_count) {
+                        .ONE => {
+                            new_self.ptr_never_null()[first_new_idx] = vals;
+                        },
+                        .MANY => {
+                            @memcpy(new_self.ptr_never_null()[first_new_idx..last_idx], vals);
+                        },
+                    }
+                },
+            }
+            if (origin_in_place == .IN_PLACE) {
+                self.* = new_self;
+            }
+            return switch (origin_in_place) {
+                .RET_NEW => switch (origin_return) {
+                    .SELF_ONLY => new_self,
+                    .IDX => switch (origin_count) {
+                        .ONE => .{ new_self, first_new_idx },
+                        .MANY => .{ new_self, first_new_idx, last_idx },
+                    },
+                    .REF => switch (origin_count) {
+                        .ONE => .{ new_self, new_self.get_item_ptr(first_new_idx) },
+                        .MANY => .{ new_self, new_self.sub_slice_start_end(first_new_idx, last_idx, .STATIC) },
+                    },
+                },
+                .IN_PLACE => switch (origin_return) {
+                    .SELF_ONLY => void{},
+                    .IDX => switch (origin_count) {
+                        .ONE => first_new_idx,
+                        .MANY => struct { first_new_idx, last_idx },
+                    },
+                    .REF => switch (origin_count) {
+                        .ONE => new_self.get_item_ptr(first_new_idx),
+                        .MANY => new_self.sub_slice_start_end(first_new_idx, last_idx, .STATIC),
+                    },
+                },
+            };
+        }
+
+        //**********
+        // APPEND
+        //**********
+
+        pub fn append_one_empty_slot_assume_capacity_get_idx(self: ListSlice) struct { ListSlice, Idx } {
+            return expand_internal(.RET_NEW, self, .ONE, 1, .ASSUME_CAPACITY, void{}, .IDX, .EMPTY_SLOTS, void{}, .APPEND, void{});
+        }
+
+        pub fn append_one_empty_slot_assume_capacity_get_elem_ptr(self: ListSlice) struct { ListSlice, ElemPtr } {
+            return expand_internal(.RET_NEW, self, .ONE, 1, .ASSUME_CAPACITY, void{}, .REF, .EMPTY_SLOTS, void{}, .APPEND, void{});
+        }
+
+        pub fn append_one_empty_slot_assume_capacity(self: ListSlice) ListSlice {
+            return expand_internal(.RET_NEW, self, .ONE, 1, .ASSUME_CAPACITY, void{}, .SELF_ONLY, .EMPTY_SLOTS, void{}, .APPEND, void{});
+        }
+
+        pub fn append_many_empty_slots_assume_capacity_get_idx_range(self: ListSlice, count: Idx) struct { ListSlice, Idx, Idx } {
+            return expand_internal(.RET_NEW, self, .MANY, count, .ASSUME_CAPACITY, void{}, .IDX, .EMPTY_SLOTS, void{}, .APPEND, void{});
+        }
+
+        pub fn append_many_empty_slots_assume_capacity_get_sub_slice(self: ListSlice, count: Idx) struct { ListSlice, ListSlice.with_sub_slice_mode(.STATIC) } {
+            return expand_internal(.RET_NEW, self, .MANY, count, .ASSUME_CAPACITY, void{}, .REF, .EMPTY_SLOTS, void{}, .APPEND, void{});
+        }
+
+        pub fn append_many_empty_slots_assume_capacity(self: ListSlice, count: Idx) ListSlice {
+            return expand_internal(.RET_NEW, self, .MANY, count, .ASSUME_CAPACITY, void{}, .SELF_ONLY, .EMPTY_SLOTS, void{}, .APPEND, void{});
+        }
+
+        pub fn append_one_empty_slot_get_idx(self: ListSlice, alloc: Allocator) struct { ListSlice, Idx } {
+            return expand_internal(.RET_NEW, self, .ONE, 1, .REALLOCATE, alloc, .IDX, .EMPTY_SLOTS, void{}, .APPEND, void{});
+        }
+
+        pub fn append_one_empty_slot_get_elem_ptr(self: ListSlice, alloc: Allocator) struct { ListSlice, ElemPtr } {
+            return expand_internal(.RET_NEW, self, .ONE, 1, .REALLOCATE, alloc, .REF, .EMPTY_SLOTS, void{}, .APPEND, void{});
+        }
+
+        pub fn append_one_empty_slot(self: ListSlice, alloc: Allocator) ListSlice {
+            return expand_internal(.RET_NEW, self, .ONE, 1, .REALLOCATE, alloc, .SELF_ONLY, .EMPTY_SLOTS, void{}, .APPEND, void{});
+        }
+
+        pub fn append_many_empty_slots_get_idx_range(self: ListSlice, count: Idx, alloc: Allocator) struct { ListSlice, Idx, Idx } {
+            return expand_internal(.RET_NEW, self, .MANY, count, .REALLOCATE, alloc, .IDX, .EMPTY_SLOTS, void{}, .APPEND, void{});
+        }
+
+        pub fn append_many_empty_slots_get_sub_slice(self: ListSlice, count: Idx, alloc: Allocator) struct { ListSlice, ListSlice.with_sub_slice_mode(.STATIC) } {
+            return expand_internal(.RET_NEW, self, .MANY, count, .REALLOCATE, alloc, .REF, .EMPTY_SLOTS, void{}, .APPEND, void{});
+        }
+
+        pub fn append_many_empty_slots(self: ListSlice, count: Idx, alloc: Allocator) ListSlice {
+            return expand_internal(.RET_NEW, self, .MANY, count, .REALLOCATE, alloc, .SELF_ONLY, .EMPTY_SLOTS, void{}, .APPEND, void{});
+        }
+
+        pub fn append_one_item_assume_capacity_get_idx(self: ListSlice, item: T) struct { ListSlice, Idx } {
+            return expand_internal(.RET_NEW, self, .ONE, 1, .ASSUME_CAPACITY, void{}, .IDX, .SET_VALS, item, .APPEND, void{});
+        }
+
+        pub fn append_one_item_assume_capacity_get_elem_ptr(self: ListSlice, item: T) struct { ListSlice, ElemPtr } {
+            return expand_internal(.RET_NEW, self, .ONE, 1, .ASSUME_CAPACITY, void{}, .REF, .SET_VALS, item, .APPEND, void{});
+        }
+
+        pub fn append_one_item_assume_capacity(self: ListSlice, item: T) ListSlice {
+            return expand_internal(.RET_NEW, self, .ONE, 1, .ASSUME_CAPACITY, void{}, .SELF_ONLY, .SET_VALS, item, .APPEND, void{});
+        }
+
+        pub fn append_one_item_get_idx(self: ListSlice, item: T, alloc: Allocator) struct { ListSlice, Idx } {
+            return expand_internal(.RET_NEW, self, .ONE, 1, .REALLOCATE, alloc, .IDX, .SET_VALS, item, .APPEND, void{});
+        }
+
+        pub fn append_one_item_get_elem_ptr(self: ListSlice, item: T, alloc: Allocator) struct { ListSlice, ElemPtr } {
+            return expand_internal(.RET_NEW, self, .ONE, 1, .REALLOCATE, alloc, .REF, .SET_VALS, item, .APPEND, void{});
+        }
+
+        pub fn append_one_item(self: ListSlice, item: T, alloc: Allocator) ListSlice {
+            return expand_internal(.RET_NEW, self, .ONE, 1, .REALLOCATE, alloc, .SELF_ONLY, .SET_VALS, item, .APPEND, void{});
+        }
+
+        pub fn append_many_items_assume_capacity_get_idx_range(self: ListSlice, items: []const T) struct { ListSlice, Idx, Idx } {
+            return expand_internal(.RET_NEW, self, .MANY, @intCast(items.len), .ASSUME_CAPACITY, void, .IDX, .SET_VALS, items, .APPEND, void{});
+        }
+
+        pub fn append_many_items_assume_capacity_get_sub_slice(self: ListSlice, items: []const T) struct { ListSlice, ListSlice.with_sub_slice_mode(.STATIC) } {
+            return expand_internal(.RET_NEW, self, .MANY, @intCast(items.len), .ASSUME_CAPACITY, void, .REF, .SET_VALS, items, .APPEND, void{});
+        }
+
+        pub fn append_many_items_assume_capacity(self: ListSlice, items: []const T) ListSlice {
+            return expand_internal(.RET_NEW, self, .MANY, @intCast(items.len), .ASSUME_CAPACITY, void, .SELF_ONLY, .SET_VALS, items, .APPEND, void{});
+        }
+
+        pub fn append_many_items_get_idx_range(self: ListSlice, items: []const T, alloc: Allocator) struct { ListSlice, Idx, Idx } {
+            return expand_internal(.RET_NEW, self, .MANY, @intCast(items.len), .REALLOCATE, alloc, .IDX, .SET_VALS, items, .APPEND, void{});
+        }
+
+        pub fn append_many_items_get_sub_slice(self: ListSlice, items: []const T, alloc: Allocator) struct { ListSlice, ListSlice.with_sub_slice_mode(.STATIC) } {
+            return expand_internal(.RET_NEW, self, .MANY, @intCast(items.len), .REALLOCATE, alloc, .REF, .SET_VALS, items, .APPEND, void{});
+        }
+
+        pub fn append_many_items(self: ListSlice, items: []const T, alloc: Allocator) ListSlice {
+            return expand_internal(.RET_NEW, self, .MANY, @intCast(items.len), .REALLOCATE, alloc, .SELF_ONLY, .SET_VALS, items, .APPEND, void{});
+        }
+
+        //**********
+        // APPEND IN-PLACE
+        //**********
+
+        pub fn in_place_append_one_empty_slot_assume_capacity_get_idx(self: *ListSlice) Idx {
+            return expand_internal(.IN_PLACE, self, .ONE, 1, .ASSUME_CAPACITY, void{}, .IDX, .EMPTY_SLOTS, void{}, .APPEND, void{});
+        }
+
+        pub fn in_place_append_one_empty_slot_assume_capacity_get_elem_ptr(self: *ListSlice) ElemPtr {
+            return expand_internal(.IN_PLACE, self, .ONE, 1, .ASSUME_CAPACITY, void{}, .REF, .EMPTY_SLOTS, void{}, .APPEND, void{});
+        }
+
+        pub fn in_place_append_one_empty_slot_assume_capacity(self: *ListSlice) void {
+            return expand_internal(.IN_PLACE, self, .ONE, 1, .ASSUME_CAPACITY, void{}, .SELF_ONLY, .EMPTY_SLOTS, void{}, .APPEND, void{});
+        }
+
+        pub fn in_place_append_many_empty_slots_assume_capacity_get_idx_range(self: *ListSlice, count: Idx) struct { Idx, Idx } {
+            return expand_internal(.IN_PLACE, self, .MANY, count, .ASSUME_CAPACITY, void{}, .IDX, .EMPTY_SLOTS, void{}, .APPEND, void{});
+        }
+
+        pub fn in_place_append_many_empty_slots_assume_capacity_get_sub_slice(self: *ListSlice, count: Idx) ListSlice.with_sub_slice_mode(.STATIC) {
+            return expand_internal(.IN_PLACE, self, .MANY, count, .ASSUME_CAPACITY, void{}, .REF, .EMPTY_SLOTS, void{}, .APPEND, void{});
+        }
+
+        pub fn in_place_append_many_empty_slots_assume_capacity(self: *ListSlice, count: Idx) void {
+            return expand_internal(.IN_PLACE, self, .MANY, count, .ASSUME_CAPACITY, void{}, .SELF_ONLY, .EMPTY_SLOTS, void{}, .APPEND, void{});
+        }
+
+        pub fn in_place_append_one_empty_slot_get_idx(self: *ListSlice, alloc: Allocator) Idx {
+            return expand_internal(.IN_PLACE, self, .ONE, 1, .REALLOCATE, alloc, .IDX, .EMPTY_SLOTS, void{}, .APPEND, void{});
+        }
+
+        pub fn in_place_append_one_empty_slot_get_elem_ptr(self: *ListSlice, alloc: Allocator) ElemPtr {
+            return expand_internal(.IN_PLACE, self, .ONE, 1, .REALLOCATE, alloc, .REF, .EMPTY_SLOTS, void{}, .APPEND, void{});
+        }
+
+        pub fn in_place_append_one_empty_slot(self: *ListSlice, alloc: Allocator) void {
+            return expand_internal(.IN_PLACE, self, .ONE, 1, .REALLOCATE, alloc, .SELF_ONLY, .EMPTY_SLOTS, void{}, .APPEND, void{});
+        }
+
+        pub fn in_place_append_many_empty_slots_get_idx_range(self: *ListSlice, count: Idx, alloc: Allocator) struct { Idx, Idx } {
+            return expand_internal(.IN_PLACE, self, .MANY, count, .REALLOCATE, alloc, .IDX, .EMPTY_SLOTS, void{}, .APPEND, void{});
+        }
+
+        pub fn in_place_append_many_empty_slots_get_sub_slice(self: *ListSlice, count: Idx, alloc: Allocator) ListSlice.with_sub_slice_mode(.STATIC) {
+            return expand_internal(.IN_PLACE, self, .MANY, count, .REALLOCATE, alloc, .REF, .EMPTY_SLOTS, void{}, .APPEND, void{});
+        }
+
+        pub fn in_place_append_many_empty_slots(self: *ListSlice, count: Idx, alloc: Allocator) void {
+            return expand_internal(.IN_PLACE, self, .MANY, count, .REALLOCATE, alloc, .SELF_ONLY, .EMPTY_SLOTS, void{}, .APPEND, void{});
+        }
+
+        pub fn in_place_append_one_item_assume_capacity_get_idx(self: *ListSlice, item: T) Idx {
+            return expand_internal(.IN_PLACE, self, .ONE, 1, .ASSUME_CAPACITY, void{}, .IDX, .SET_VALS, item, .APPEND, void{});
+        }
+
+        pub fn in_place_append_one_item_assume_capacity_get_elem_ptr(self: *ListSlice, item: T) ElemPtr {
+            return expand_internal(.IN_PLACE, self, .ONE, 1, .ASSUME_CAPACITY, void{}, .REF, .SET_VALS, item, .APPEND, void{});
+        }
+
+        pub fn in_place_append_one_item_assume_capacity(self: *ListSlice, item: T) void {
+            return expand_internal(.IN_PLACE, self, .ONE, 1, .ASSUME_CAPACITY, void{}, .SELF_ONLY, .SET_VALS, item, .APPEND, void{});
+        }
+
+        pub fn in_place_append_one_item_get_idx(self: *ListSlice, item: T, alloc: Allocator) Idx {
+            return expand_internal(.IN_PLACE, self, .ONE, 1, .REALLOCATE, alloc, .IDX, .SET_VALS, item, .APPEND, void{});
+        }
+
+        pub fn in_place_append_one_item_get_elem_ptr(self: *ListSlice, item: T, alloc: Allocator) ElemPtr {
+            return expand_internal(.IN_PLACE, self, .ONE, 1, .REALLOCATE, alloc, .REF, .SET_VALS, item, .APPEND, void{});
+        }
+
+        pub fn in_place_append_one_item(self: *ListSlice, item: T, alloc: Allocator) void {
+            return expand_internal(.IN_PLACE, self, .ONE, 1, .REALLOCATE, alloc, .SELF_ONLY, .SET_VALS, item, .APPEND, void{});
+        }
+
+        pub fn in_place_append_many_items_assume_capacity_get_idx_range(self: *ListSlice, items: []const T) struct { Idx, Idx } {
+            return expand_internal(.IN_PLACE, self, .MANY, @intCast(items.len), .ASSUME_CAPACITY, void, .IDX, .SET_VALS, items, .APPEND, void{});
+        }
+
+        pub fn in_place_append_many_items_assume_capacity_get_sub_slice(self: *ListSlice, items: []const T) ListSlice.with_sub_slice_mode(.STATIC) {
+            return expand_internal(.IN_PLACE, self, .MANY, @intCast(items.len), .ASSUME_CAPACITY, void, .REF, .SET_VALS, items, .APPEND, void{});
+        }
+
+        pub fn in_place_append_many_items_assume_capacity(self: *ListSlice, items: []const T) void {
+            return expand_internal(.IN_PLACE, self, .MANY, @intCast(items.len), .ASSUME_CAPACITY, void, .SELF_ONLY, .SET_VALS, items, .APPEND, void{});
+        }
+
+        pub fn in_place_append_many_items_get_idx_range(self: *ListSlice, items: []const T, alloc: Allocator) struct { Idx, Idx } {
+            return expand_internal(.IN_PLACE, self, .MANY, @intCast(items.len), .REALLOCATE, alloc, .IDX, .SET_VALS, items, .APPEND, void{});
+        }
+
+        pub fn in_place_append_many_items_get_sub_slice(self: *ListSlice, items: []const T, alloc: Allocator) ListSlice.with_sub_slice_mode(.STATIC) {
+            return expand_internal(.IN_PLACE, self, .MANY, @intCast(items.len), .REALLOCATE, alloc, .REF, .SET_VALS, items, .APPEND, void{});
+        }
+
+        pub fn in_place_append_many_items(self: *ListSlice, items: []const T, alloc: Allocator) void {
+            return expand_internal(.IN_PLACE, self, .MANY, @intCast(items.len), .REALLOCATE, alloc, .SELF_ONLY, .SET_VALS, items, .APPEND, void{});
+        }
+
+        //**********
+        // INSERT
+        //**********
+
+        pub fn insert_one_empty_slot_assume_capacity_get_idx(self: ListSlice, idx: Idx) struct { ListSlice, Idx } {
+            return expand_internal(.RET_NEW, self, .ONE, 1, .ASSUME_CAPACITY, void{}, .IDX, .EMPTY_SLOTS, void{}, .INSERT, idx);
+        }
+
+        pub fn insert_one_empty_slot_assume_capacity_get_elem_ptr(self: ListSlice, idx: Idx) struct { ListSlice, ElemPtr } {
+            return expand_internal(.RET_NEW, self, .ONE, 1, .ASSUME_CAPACITY, void{}, .REF, .EMPTY_SLOTS, void{}, .INSERT, idx);
+        }
+
+        pub fn insert_one_empty_slot_assume_capacity(self: ListSlice, idx: Idx) ListSlice {
+            return expand_internal(.RET_NEW, self, .ONE, 1, .ASSUME_CAPACITY, void{}, .SELF_ONLY, .EMPTY_SLOTS, void{}, .INSERT, idx);
+        }
+
+        pub fn insert_many_empty_slots_assume_capacity_get_idx_range(self: ListSlice, idx: Idx, count: Idx) struct { ListSlice, Idx, Idx } {
+            return expand_internal(.RET_NEW, self, .MANY, count, .ASSUME_CAPACITY, void{}, .IDX, .EMPTY_SLOTS, void{}, .INSERT, idx);
+        }
+
+        pub fn insert_many_empty_slots_assume_capacity_get_sub_slice(self: ListSlice, idx: Idx, count: Idx) struct { ListSlice, ListSlice.with_sub_slice_mode(.STATIC) } {
+            return expand_internal(.RET_NEW, self, .MANY, count, .ASSUME_CAPACITY, void{}, .REF, .EMPTY_SLOTS, void{}, .INSERT, idx);
+        }
+
+        pub fn insert_many_empty_slots_assume_capacity(self: ListSlice, idx: Idx, count: Idx) ListSlice {
+            return expand_internal(.RET_NEW, self, .MANY, count, .ASSUME_CAPACITY, void{}, .SELF_ONLY, .EMPTY_SLOTS, void{}, .INSERT, idx);
+        }
+
+        pub fn insert_one_empty_slot_get_idx(self: ListSlice, idx: Idx, alloc: Allocator) struct { ListSlice, Idx } {
+            return expand_internal(.RET_NEW, self, .ONE, 1, .REALLOCATE, alloc, .IDX, .EMPTY_SLOTS, void{}, .INSERT, idx);
+        }
+
+        pub fn insert_one_empty_slot_get_elem_ptr(self: ListSlice, idx: Idx, alloc: Allocator) struct { ListSlice, ElemPtr } {
+            return expand_internal(.RET_NEW, self, .ONE, 1, .REALLOCATE, alloc, .REF, .EMPTY_SLOTS, void{}, .INSERT, idx);
+        }
+
+        pub fn insert_one_empty_slot(self: ListSlice, idx: Idx, alloc: Allocator) ListSlice {
+            return expand_internal(.RET_NEW, self, .ONE, 1, .REALLOCATE, alloc, .SELF_ONLY, .EMPTY_SLOTS, void{}, .INSERT, idx);
+        }
+
+        pub fn insert_many_empty_slots_get_idx_range(self: ListSlice, idx: Idx, count: Idx, alloc: Allocator) struct { ListSlice, Idx, Idx } {
+            return expand_internal(.RET_NEW, self, .MANY, count, .REALLOCATE, alloc, .IDX, .EMPTY_SLOTS, void{}, .INSERT, idx);
+        }
+
+        pub fn insert_many_empty_slots_get_sub_slice(self: ListSlice, idx: Idx, count: Idx, alloc: Allocator) struct { ListSlice, ListSlice.with_sub_slice_mode(.STATIC) } {
+            return expand_internal(.RET_NEW, self, .MANY, count, .REALLOCATE, alloc, .REF, .EMPTY_SLOTS, void{}, .INSERT, idx);
+        }
+
+        pub fn insert_many_empty_slots(self: ListSlice, idx: Idx, count: Idx, alloc: Allocator) ListSlice {
+            return expand_internal(.RET_NEW, self, .MANY, count, .REALLOCATE, alloc, .SELF_ONLY, .EMPTY_SLOTS, void{}, .INSERT, idx);
+        }
+
+        pub fn insert_one_item_assume_capacity_get_idx(self: ListSlice, idx: Idx, item: T) struct { ListSlice, Idx } {
+            return expand_internal(.RET_NEW, self, .ONE, 1, .ASSUME_CAPACITY, void{}, .IDX, .SET_VALS, item, .INSERT, idx);
+        }
+
+        pub fn insert_one_item_assume_capacity_get_elem_ptr(self: ListSlice, idx: Idx, item: T) struct { ListSlice, ElemPtr } {
+            return expand_internal(.RET_NEW, self, .ONE, 1, .ASSUME_CAPACITY, void{}, .REF, .SET_VALS, item, .INSERT, idx);
+        }
+
+        pub fn insert_one_item_assume_capacity(self: ListSlice, idx: Idx, item: T) ListSlice {
+            return expand_internal(.RET_NEW, self, .ONE, 1, .ASSUME_CAPACITY, void{}, .SELF_ONLY, .SET_VALS, item, .INSERT, idx);
+        }
+
+        pub fn insert_one_item_get_idx(self: ListSlice, idx: Idx, item: T, alloc: Allocator) struct { ListSlice, Idx } {
+            return expand_internal(.RET_NEW, self, .ONE, 1, .REALLOCATE, alloc, .IDX, .SET_VALS, item, .INSERT, idx);
+        }
+
+        pub fn insert_one_item_get_elem_ptr(self: ListSlice, idx: Idx, item: T, alloc: Allocator) struct { ListSlice, ElemPtr } {
+            return expand_internal(.RET_NEW, self, .ONE, 1, .REALLOCATE, alloc, .REF, .SET_VALS, item, .INSERT, idx);
+        }
+
+        pub fn insert_one_item(self: ListSlice, idx: Idx, item: T, alloc: Allocator) ListSlice {
+            return expand_internal(.RET_NEW, self, .ONE, 1, .REALLOCATE, alloc, .SELF_ONLY, .SET_VALS, item, .INSERT, idx);
+        }
+
+        pub fn insert_many_items_assume_capacity_get_idx_range(self: ListSlice, idx: Idx, items: []const T) struct { ListSlice, Idx, Idx } {
+            return expand_internal(.RET_NEW, self, .MANY, @intCast(items.len), .ASSUME_CAPACITY, void, .IDX, .SET_VALS, items, .INSERT, idx);
+        }
+
+        pub fn insert_many_items_assume_capacity_get_sub_slice(self: ListSlice, idx: Idx, items: []const T) struct { ListSlice, ListSlice.with_sub_slice_mode(.STATIC) } {
+            return expand_internal(.RET_NEW, self, .MANY, @intCast(items.len), .ASSUME_CAPACITY, void, .REF, .SET_VALS, items, .INSERT, idx);
+        }
+
+        pub fn insert_many_items_assume_capacity(self: ListSlice, idx: Idx, items: []const T) ListSlice {
+            return expand_internal(.RET_NEW, self, .MANY, @intCast(items.len), .ASSUME_CAPACITY, void, .SELF_ONLY, .SET_VALS, items, .INSERT, idx);
+        }
+
+        pub fn insert_many_items_get_idx_range(self: ListSlice, idx: Idx, items: []const T, alloc: Allocator) struct { ListSlice, Idx, Idx } {
+            return expand_internal(.RET_NEW, self, .MANY, @intCast(items.len), .REALLOCATE, alloc, .IDX, .SET_VALS, items, .INSERT, idx);
+        }
+
+        pub fn insert_many_items_get_sub_slice(self: ListSlice, idx: Idx, items: []const T, alloc: Allocator) struct { ListSlice, ListSlice.with_sub_slice_mode(.STATIC) } {
+            return expand_internal(.RET_NEW, self, .MANY, @intCast(items.len), .REALLOCATE, alloc, .REF, .SET_VALS, items, .INSERT, idx);
+        }
+
+        pub fn insert_many_items(self: ListSlice, idx: Idx, items: []const T, alloc: Allocator) ListSlice {
+            return expand_internal(.RET_NEW, self, .MANY, @intCast(items.len), .REALLOCATE, alloc, .SELF_ONLY, .SET_VALS, items, .INSERT, idx);
+        }
+
+        //**********
+        // INSERT IN-PLACE
+        //**********
+
+        pub fn in_place_insert_one_empty_slot_assume_capacity_get_idx(self: *ListSlice, idx: Idx) Idx {
+            return expand_internal(.IN_PLACE, self, .ONE, 1, .ASSUME_CAPACITY, void{}, .IDX, .EMPTY_SLOTS, void{}, .INSERT, idx);
+        }
+
+        pub fn in_place_insert_one_empty_slot_assume_capacity_get_elem_ptr(self: *ListSlice, idx: Idx) ElemPtr {
+            return expand_internal(.IN_PLACE, self, .ONE, 1, .ASSUME_CAPACITY, void{}, .REF, .EMPTY_SLOTS, void{}, .INSERT, idx);
+        }
+
+        pub fn in_place_insert_one_empty_slot_assume_capacity(self: *ListSlice, idx: Idx) void {
+            return expand_internal(.IN_PLACE, self, .ONE, 1, .ASSUME_CAPACITY, void{}, .SELF_ONLY, .EMPTY_SLOTS, void{}, .INSERT, idx);
+        }
+
+        pub fn in_place_insert_many_empty_slots_assume_capacity_get_idx_range(self: *ListSlice, idx: Idx, count: Idx) struct { Idx, Idx } {
+            return expand_internal(.IN_PLACE, self, .MANY, count, .ASSUME_CAPACITY, void{}, .IDX, .EMPTY_SLOTS, void{}, .INSERT, idx);
+        }
+
+        pub fn in_place_insert_many_empty_slots_assume_capacity_get_sub_slice(self: *ListSlice, idx: Idx, count: Idx) ListSlice.with_sub_slice_mode(.STATIC) {
+            return expand_internal(.IN_PLACE, self, .MANY, count, .ASSUME_CAPACITY, void{}, .REF, .EMPTY_SLOTS, void{}, .INSERT, idx);
+        }
+
+        pub fn in_place_insert_many_empty_slots_assume_capacity(self: *ListSlice, idx: Idx, count: Idx) void {
+            return expand_internal(.IN_PLACE, self, .MANY, count, .ASSUME_CAPACITY, void{}, .SELF_ONLY, .EMPTY_SLOTS, void{}, .INSERT, idx);
+        }
+
+        pub fn in_place_insert_one_empty_slot_get_idx(self: *ListSlice, idx: Idx, alloc: Allocator) Idx {
+            return expand_internal(.IN_PLACE, self, .ONE, 1, .REALLOCATE, alloc, .IDX, .EMPTY_SLOTS, void{}, .INSERT, idx);
+        }
+
+        pub fn in_place_insert_one_empty_slot_get_elem_ptr(self: *ListSlice, idx: Idx, alloc: Allocator) ElemPtr {
+            return expand_internal(.IN_PLACE, self, .ONE, 1, .REALLOCATE, alloc, .REF, .EMPTY_SLOTS, void{}, .INSERT, idx);
+        }
+
+        pub fn in_place_insert_one_empty_slot(self: *ListSlice, idx: Idx, alloc: Allocator) void {
+            return expand_internal(.IN_PLACE, self, .ONE, 1, .REALLOCATE, alloc, .SELF_ONLY, .EMPTY_SLOTS, void{}, .INSERT, idx);
+        }
+
+        pub fn in_place_insert_many_empty_slots_get_idx_range(self: *ListSlice, idx: Idx, count: Idx, alloc: Allocator) struct { Idx, Idx } {
+            return expand_internal(.IN_PLACE, self, .MANY, count, .REALLOCATE, alloc, .IDX, .EMPTY_SLOTS, void{}, .INSERT, idx);
+        }
+
+        pub fn in_place_insert_many_empty_slots_get_sub_slice(self: *ListSlice, idx: Idx, count: Idx, alloc: Allocator) ListSlice.with_sub_slice_mode(.STATIC) {
+            return expand_internal(.IN_PLACE, self, .MANY, count, .REALLOCATE, alloc, .REF, .EMPTY_SLOTS, void{}, .INSERT, idx);
+        }
+
+        pub fn in_place_insert_many_empty_slots(self: *ListSlice, idx: Idx, count: Idx, alloc: Allocator) void {
+            return expand_internal(.IN_PLACE, self, .MANY, count, .REALLOCATE, alloc, .SELF_ONLY, .EMPTY_SLOTS, void{}, .INSERT, idx);
+        }
+
+        pub fn in_place_insert_one_item_assume_capacity_get_idx(self: *ListSlice, idx: Idx, item: T) Idx {
+            return expand_internal(.IN_PLACE, self, .ONE, 1, .ASSUME_CAPACITY, void{}, .IDX, .SET_VALS, item, .INSERT, idx);
+        }
+
+        pub fn in_place_insert_one_item_assume_capacity_get_elem_ptr(self: *ListSlice, idx: Idx, item: T) ElemPtr {
+            return expand_internal(.IN_PLACE, self, .ONE, 1, .ASSUME_CAPACITY, void{}, .REF, .SET_VALS, item, .INSERT, idx);
+        }
+
+        pub fn in_place_insert_one_item_assume_capacity(self: *ListSlice, idx: Idx, item: T) void {
+            return expand_internal(.IN_PLACE, self, .ONE, 1, .ASSUME_CAPACITY, void{}, .SELF_ONLY, .SET_VALS, item, .INSERT, idx);
+        }
+
+        pub fn in_place_insert_one_item_get_idx(self: *ListSlice, idx: Idx, item: T, alloc: Allocator) Idx {
+            return expand_internal(.IN_PLACE, self, .ONE, 1, .REALLOCATE, alloc, .IDX, .SET_VALS, item, .INSERT, idx);
+        }
+
+        pub fn in_place_insert_one_item_get_elem_ptr(self: *ListSlice, idx: Idx, item: T, alloc: Allocator) ElemPtr {
+            return expand_internal(.IN_PLACE, self, .ONE, 1, .REALLOCATE, alloc, .REF, .SET_VALS, item, .INSERT, idx);
+        }
+
+        pub fn in_place_insert_one_item(self: *ListSlice, idx: Idx, item: T, alloc: Allocator) void {
+            return expand_internal(.IN_PLACE, self, .ONE, 1, .REALLOCATE, alloc, .SELF_ONLY, .SET_VALS, item, .INSERT, idx);
+        }
+
+        pub fn in_place_insert_many_items_assume_capacity_get_idx_range(self: *ListSlice, idx: Idx, items: []const T) struct { Idx, Idx } {
+            return expand_internal(.IN_PLACE, self, .MANY, @intCast(items.len), .ASSUME_CAPACITY, void, .IDX, .SET_VALS, items, .INSERT, idx);
+        }
+
+        pub fn in_place_insert_many_items_assume_capacity_get_sub_slice(self: *ListSlice, idx: Idx, items: []const T) ListSlice.with_sub_slice_mode(.STATIC) {
+            return expand_internal(.IN_PLACE, self, .MANY, @intCast(items.len), .ASSUME_CAPACITY, void, .REF, .SET_VALS, items, .INSERT, idx);
+        }
+
+        pub fn in_place_insert_many_items_assume_capacity(self: *ListSlice, idx: Idx, items: []const T) void {
+            return expand_internal(.IN_PLACE, self, .MANY, @intCast(items.len), .ASSUME_CAPACITY, void, .SELF_ONLY, .SET_VALS, items, .INSERT, idx);
+        }
+
+        pub fn in_place_insert_many_items_get_idx_range(self: *ListSlice, idx: Idx, items: []const T, alloc: Allocator) struct { Idx, Idx } {
+            return expand_internal(.IN_PLACE, self, .MANY, @intCast(items.len), .REALLOCATE, alloc, .IDX, .SET_VALS, items, .INSERT, idx);
+        }
+
+        pub fn in_place_insert_many_items_get_sub_slice(self: *ListSlice, idx: Idx, items: []const T, alloc: Allocator) ListSlice.with_sub_slice_mode(.STATIC) {
+            return expand_internal(.IN_PLACE, self, .MANY, @intCast(items.len), .REALLOCATE, alloc, .REF, .SET_VALS, items, .INSERT, idx);
+        }
+
+        pub fn in_place_insert_many_items(self: *ListSlice, idx: Idx, items: []const T, alloc: Allocator) void {
+            return expand_internal(.IN_PLACE, self, .MANY, @intCast(items.len), .REALLOCATE, alloc, .SELF_ONLY, .SET_VALS, items, .INSERT, idx);
+        }
+
+        //CHECKPOINT
+
+        //**********
+        // SORTED INSERT
+        //**********
+
+        //**********
+        // UNIVERSAL DELETE/REMOVE
+        //**********
+
+        //**********
+        // DELETE
+        //**********
+
+        //**********
+        // DELETE IN-PLACE
+        //**********
+
+        //**********
+        // REMOVE
+        //**********
+
+        //**********
+        // REMOVE IN-PLACE
+        //**********
+
+        //**********
+        // MAP/FILTER/ACCUMULATE
+        //**********
     };
 }
