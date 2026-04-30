@@ -2140,7 +2140,7 @@ pub fn SerializationManager(comptime MAIN_TYPES_FOR_SERIALIZATION: []const type,
                     },
                     .SERIAL_TO_NATIVE => {
                         const alloc = self.obj_allocs[ptr_op.alloc_idx];
-                        const new_native_ptr_region = Alloc.smart_alloc_new(alloc, u8, byte_len, .{ .align_mode = .custom_align(ptr_op.ptr_align_power.value_as_type(usize)) }, .{});
+                        const new_native_ptr_region = Alloc.smart_alloc_new(alloc, u8, byte_len, .{ .old_align = .custom_align(ptr_op.ptr_align_power.value_as_type(usize)) }, .{});
                         const addr_of_native_pointer_slot: *usize = @ptrCast(@alignCast(pointer_subroutine.native_ptr));
                         addr_of_native_pointer_slot.* = @intFromPtr(new_native_ptr_region.ptr);
                         pointer_subroutine.set_new_memory_region(new_native_ptr_region.ptr, byte_len);

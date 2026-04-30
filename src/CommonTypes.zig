@@ -210,19 +210,11 @@ pub const GrowthModel = enum {
     /// TODO documentation
     GROW_EXACT_NEEDED,
     /// TODO documentation
-    GROW_EXACT_NEEDED_ATOMIC_PADDING,
-    /// TODO documentation
     GROW_BY_100_PERCENT,
-    /// TODO documentation
-    GROW_BY_100_PERCENT_ATOMIC_PADDING,
     /// TODO documentation
     GROW_BY_50_PERCENT,
     /// TODO documentation
-    GROW_BY_50_PERCENT_ATOMIC_PADDING,
-    /// TODO documentation
     GROW_BY_25_PERCENT,
-    /// TODO documentation
-    GROW_BY_25_PERCENT_ATOMIC_PADDING,
 };
 
 /// TODO documentation
@@ -301,6 +293,23 @@ pub const CapMutability = enum {
 pub const Reallocatability = enum {
     CAN_REALLOC_MEMORY,
     CANNOT_REALLOC_MEMORY,
+};
+
+pub const MemoryAllocationStatus = enum {
+    /// The indicated region of memory references existing memory
+    /// on the stack or an existing allocation.
+    /// It cannot be re-allocated, and altering the pointer address and/or
+    /// length of the region must respect the original region limits.
+    REFERENCE_TO_EXISTING_MEMORY,
+    /// The indicated region of memory was allocated. It should be freed
+    /// when no longer needed, and is unsafe to alter the pointer address and/or
+    /// length of the memory by any other means than re-allocation
+    ALLOCATED_MEMORY,
+};
+
+pub const MemoryParadigm = enum {
+    OBJECTS_STORED_WHOLE,
+    OBJECT_FIELDS_STORED_IN_SEPARATE_REGIONS,
 };
 
 pub const CapReallocMutability = enum {

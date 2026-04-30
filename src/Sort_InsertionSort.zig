@@ -30,7 +30,6 @@ const Types = Root.Types;
 const Utils = Root.Utils;
 const Assert = Root.Assert;
 const assert_with_reason = Assert.assert_with_reason;
-const infered_greater_than = Utils.infered_greater_than;
 const SortAlgorithm = Root.CommonTypes.SortAlgorithm;
 const inline_swap = Root.Utils.inline_swap;
 const Iterator = Root.Iterator;

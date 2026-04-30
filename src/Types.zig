@@ -64,12 +64,12 @@ pub fn FloatSizeForMaxIntExact(comptime INT: type) type {
     }
 }
 
-pub fn SmallestUnsignedIntWithAtLeastNBits(comptime N: comptime_int) type {
+pub fn SmallestUnsignedIntWithAtLeastNBits(comptime N: anytype) type {
     const LIMIT = @min(256, 1 << N);
     const POW: MathX.PowerOf2 = @enumFromInt(LIMIT);
     return POW.unsigned_integer_type_that_holds_all_values_less_than();
 }
-pub fn SmallestUnsignedIntThatCanHoldValue(comptime V: comptime_int) type {
+pub fn SmallestUnsignedIntThatCanHoldValue(comptime V: anytype) type {
     return MathX.PowerOf2.round_up_to_power_of_2_at_least(._128, V).unsigned_integer_type_that_holds_all_values_up_to_and_including();
 }
 
@@ -452,10 +452,20 @@ pub inline fn pointer_field_child_type(comptime T: type, comptime field: []const
     return @typeInfo(@FieldType(T, field)).pointer.child;
 }
 pub inline fn pointer_child_type(comptime T: type) type {
-    return @typeInfo(T).pointer.child;
+    switch (KindInfo.get_kind_info(T)) {
+        .OPTIONAL => |OPTIONAL| {
+            switch (KindInfo.get_kind_info(OPTIONAL.child)) {
+                .POINTER => |POINTER| return POINTER.child,
+                else => {},
+            }
+        },
+        .POINTER => |POINTER| return POINTER.child,
+        else => {},
+    }
+    assert_unreachable(@src(), "type `{s}` is not a pointer type", .{@typeName(T)});
 }
 pub inline fn pointer_child_child_type(comptime T: type) type {
-    return @typeInfo(@typeInfo(T).pointer.child).pointer.child;
+    return pointer_child_type(pointer_child_type(T));
 }
 pub inline fn pointer_type_has_sentinel(comptime T: type) bool {
     return @typeInfo(T).pointer.sentinel_ptr != null;

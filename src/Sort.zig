@@ -40,6 +40,7 @@ const assert_unreachable = Assert.assert_unreachable;
 
 pub const InsertionSort = @import("./Sort_InsertionSort.zig");
 pub const QuickSort = @import("./Sort_Quicksort.zig");
+pub const CommonCompare = @import("./Sort_CommonCompare.zig");
 
 pub fn is_sorted_implicit(buffer: anytype, start: anytype, end_exclusive: anytype) bool {
     const BUF = @TypeOf(buffer);
