@@ -307,6 +307,27 @@ pub const MemoryAllocationStatus = enum {
     ALLOCATED_MEMORY,
 };
 
+// pub const FalseSharingMode = enum(u8) {
+//     /// No false-shaing mitigations
+//     IGNORE_FALSE_SHARING,
+//     /// Always forces pointer to be aligned to the platform
+//     /// cache-line size, and adds an extra (unusble) buffer
+//     /// of elements at least as large as the cache-line size
+//     /// before and after all allocation methods
+//     ///
+//     /// This prevents false sharing bewteen this memory region and those adjacent to it,
+//     /// but not necessarily between region elements
+//     PREVENT_FALSE_SHARING_FOR_REGION,
+//     /// Asserts that individual elements MUST be aligned to at least
+//     /// the size of a platform cache-line, thereby guaranteeing
+//     /// no false sharing can occur between elements.
+//     ///
+//     /// When combined with `MEM_PARADIGM == .OBJECT_FIELDS_STORED_IN_SEPARATE_REGIONS`,
+//     /// this asserts that each individual FIELD is on it's own cache line, which can
+//     /// GREATLY increase the memory footprint with a lot of wasted space
+//     PREVENT_FALSE_SHARING_PER_ELEMENT,
+// };
+
 pub const MemoryParadigm = enum {
     OBJECTS_STORED_WHOLE,
     OBJECT_FIELDS_STORED_IN_SEPARATE_REGIONS,

@@ -39,6 +39,8 @@ const Assert = Root.Assert;
 const Sort = Root.Sort;
 const Allocator = std.mem.Allocator;
 const KindInfo = Types.KindInfo;
+const StructField = std.builtin.Type.StructField;
+const EnumField = std.builtin.Type.EnumField;
 const util_secure_memset = Utils.Mem.secure_memset;
 const util_secure_zero = Utils.Mem.secure_zero;
 const util_secure_memset_undefined = Utils.Mem.secure_memset_undefined;
@@ -74,7 +76,9 @@ const ERR_OPERATE_IMMUTABLE_ELEM = STRUCT_NAME ++ "(ELEM_MUTABILITY = .immutable
 const ERR_OPERATE_NULL = "cannot operate on null ptr";
 const ERR_SHRINK_OOB = "shrink count ({d}) would cause condition `first_address > last_address` (max shrink = len = {d})";
 const ERR_START_END_REVERSED = "provided start ({d}) and end ({s}) indexes would cause condition `first_address > last_address`";
-const ERR_LEN_PLUS_N_EXCCEEDS_CAP = "current len ({d}) plus N more items ({d}) exceeds the current capacity ({d})";
+const ERR_COUNT_TOO_LARGE = "count {d} is larger than max {d}";
+const ERR_LEN_PLUS_N_EXCEEDS_CAP = "current len ({d}) plus N more items ({d}) exceeds the current capacity ({d})";
+const ERR_SUB_LEN_PLUS_N_EXCEEDS_LEN = "current sub_offset ({d}) plus sub-len ({d}) plus N more items ({d}) exceeds the current root len ({d})";
 const ERR_INDEX_OOB = "the largest requested or provided index ({d}) is out of GooListSlice bounds (len = {d})";
 const ERR_EMPTY = "GooListSlice is empty, no 'first' or 'last' element exists";
 const ERR_LEN_ZERO = "the GooListSlice length is zero, cannot index any element";
@@ -87,12 +91,16 @@ const ERR_NOT_SLICE = "this method requires a GooListSlice with mode `.SLICE`";
 const ERR_NOT_ENOUGH_FREE_SLOTS = "there were not enough free slots to complete the operation, needed {d}, have {d}";
 const ERR_UNIMPLEMENTED = "this method is not implemented for mode `{s}`";
 const ERR_INDEX_CHUNK_OOB = "requested or provided start + count ({d} + {d} = {d}) would put the resulting sub-slice out of original bounds (len = {d})";
+const ERR_SUB_SLICE_OOB = "requested or provided start + count ({d} + {d} = {d}) would put the resulting sub-slice out of original bounds (len = {d})";
 const ERR_NOT_POSSIBLE_WITH_SOA = "this method is not possible when the Memory Paradigm is `." ++ @tagName(MemoryParadigm.OBJECT_FIELDS_STORED_IN_SEPARATE_REGIONS) ++ "`";
+const ERR_NOT_POSSIBLE_WITH_SOA_WITHOUT_PRESERVE_MATCH = "this method is not possible when the Memory Paradigm is `." ++ @tagName(MemoryParadigm.OBJECT_FIELDS_STORED_IN_SEPARATE_REGIONS) ++ "` and the start offset is not 0 or the len does not equal the root len (or there is no preservation)";
 const ERR_MUST_BE_SOA = "this method is not possible when the Memory Paradigm is NOT `." ++ @tagName(MemoryParadigm.OBJECT_FIELDS_STORED_IN_SEPARATE_REGIONS) ++ "`";
-const ERR_NOT_POSSIBLE_WITH_SOA_AND_NO_START_OFFSET = "this method is not possible when the Memory Paradigm is `." ++ @tagName(MemoryParadigm.OBJECT_FIELDS_STORED_IN_SEPARATE_REGIONS) ++ "` and a start offset is not included";
+const ERR_NOT_POSSIBLE_WITH_SOA_AND_NO_PRESERVE = "this method is not possible when the Memory Paradigm is `." ++ @tagName(MemoryParadigm.OBJECT_FIELDS_STORED_IN_SEPARATE_REGIONS) ++ "` and a start offset is not included";
 const ERR_ALTER_ALLOCATED_MEM = "cannot alter the memory region of allocated memory (cannot move base pointer, or change max capacity)";
 const ERR_REALLOC_REF_MEMORY = "cannot reallocate memory that is only a reference to memory that is tracked elsewhere (either on the stack or in a separate allocated memory slice)";
+const ERR_ROOT_NOT_PRESERVED_SOA = "cannot use this method when the Memory Paradigm is `." ++ @tagName(MemoryParadigm.OBJECT_FIELDS_STORED_IN_SEPARATE_REGIONS) ++ "` and `.PRESERVE_ROOT_PTR_AND_LEN == false`";
 const ERR_START_OFFSET_TOO_SMALL = "either the start offset was not sufficient (when paradigm is `." ++ @tagName(MemoryParadigm.OBJECT_FIELDS_STORED_IN_SEPARATE_REGIONS) ++ "`) or there was no start offset, need at least {d} offset, had offset {d}";
+const ERR_SRC_DEST_LEN_MISMATCH = "source len ({d}) does not match dest len ({d}) for memcopy/memmove purposes";
 // const ERR_SHIFT_OVERLAP = "a `shift({s}) -> @memcopy` operation isn't shifted far enough to guarantee no overlap (min_shift = len = {d})";
 
 pub const GooListSliceMode = enum(u1) {
@@ -141,27 +149,6 @@ pub const SubSliceMode = enum {
     STATIC_IMMUTABLE,
 };
 
-pub const FalseSharingMode = enum(u8) {
-    /// No false-shaing mitigations
-    IGNORE_FALSE_SHARING,
-    /// Always forces pointer to be aligned to the platform
-    /// cache-line size, and adds an extra (unusble) buffer
-    /// of elements at least as large as the cache-line size
-    /// before and after all allocation methods
-    ///
-    /// This prevents false sharing bewteen this memory region and those adjacent to it,
-    /// but not necessarily between region elements
-    PREVENT_FALSE_SHARING_FOR_REGION,
-    /// Asserts that individual elements MUST be aligned to at least
-    /// the size of a platform cache-line, thereby guaranteeing
-    /// no false sharing can occur between elements.
-    ///
-    /// When combined with `MEM_PARADIGM == .OBJECT_FIELDS_STORED_IN_SEPARATE_REGIONS`,
-    /// this asserts that each individual FIELD is on it's own cache line, which can
-    /// GREATLY increase the memory footprint with a lot of wasted space
-    PREVENT_FALSE_SHARING_PER_ELEMENT,
-};
-
 pub const GooListSliceDefinitionOptional = struct {
     T: ?type = null,
     IDX: ?type = null,
@@ -170,9 +157,8 @@ pub const GooListSliceDefinitionOptional = struct {
     PTR_NULLABILITY: ?Nullability = null,
     MODE: ?GooListSliceMode = null,
     ALLOC_STATUS: ?MemoryAllocationStatus = null,
-    INCLUDE_START_OFFSET: ?bool = null,
+    PRESERVE_ROOT_PTR_AND_LEN: ?bool = null,
     MEM_PARADIGM: ?MemoryParadigm = null,
-    FALSE_SHARING: ?FalseSharingMode = null,
     INITIALIZE_NEW_ELEMENTS: ?*const anyopaque = null,
     SECURE_ZERO_FREED_MEMORY: ?bool = null,
 };
@@ -185,9 +171,8 @@ pub const GooListSliceDefinition = struct {
     PTR_NULLABILITY: Nullability = .NOT_NULLABLE,
     MODE: GooListSliceMode = .SLICE,
     ALLOC_STATUS: MemoryAllocationStatus = .REFERENCE_TO_EXISTING_MEMORY,
-    INCLUDE_START_OFFSET: bool = false,
+    PRESERVE_ROOT_PTR_AND_LEN: bool = false,
     MEM_PARADIGM: MemoryParadigm = .OBJECTS_STORED_WHOLE,
-    FALSE_SHARING: FalseSharingMode = .IGNORE_FALSE_SHARING,
     INITIALIZE_NEW_ELEMENTS: ?*const anyopaque = null,
     SECURE_ZERO_FREED_MEMORY: bool = false,
 
@@ -221,7 +206,7 @@ pub const GooListSliceDefinition = struct {
         new_def.MODE = .SLICE;
         new_def.ALLOC_STATUS = .REFERENCE_TO_EXISTING_MEMORY;
         if (DEF.MEM_PARADIGM == .OBJECT_FIELDS_STORED_IN_SEPARATE_REGIONS) {
-            new_def.INCLUDE_START_OFFSET = true;
+            new_def.PRESERVE_ROOT_PTR_AND_LEN = true;
         }
         return new_def;
     }
@@ -230,7 +215,7 @@ pub const GooListSliceDefinition = struct {
         new_def.MODE = .SLICE;
         new_def.ALLOC_STATUS = .REFERENCE_TO_EXISTING_MEMORY;
         if (DEF.MEM_PARADIGM == .OBJECT_FIELDS_STORED_IN_SEPARATE_REGIONS) {
-            new_def.INCLUDE_START_OFFSET = true;
+            new_def.PRESERVE_ROOT_PTR_AND_LEN = true;
         }
         return new_def;
     }
@@ -240,7 +225,7 @@ pub const GooListSliceDefinition = struct {
         new_def.ELEM_MUTABILITY = .IMMUTABLE;
         new_def.ALLOC_STATUS = .REFERENCE_TO_EXISTING_MEMORY;
         if (DEF.MEM_PARADIGM == .OBJECT_FIELDS_STORED_IN_SEPARATE_REGIONS) {
-            new_def.INCLUDE_START_OFFSET = true;
+            new_def.PRESERVE_ROOT_PTR_AND_LEN = true;
         }
         return new_def;
     }
@@ -250,7 +235,7 @@ pub const GooListSliceDefinition = struct {
         new_def.ELEM_MUTABILITY = .IMMUTABLE;
         new_def.ALLOC_STATUS = .REFERENCE_TO_EXISTING_MEMORY;
         if (DEF.MEM_PARADIGM == .OBJECT_FIELDS_STORED_IN_SEPARATE_REGIONS) {
-            new_def.INCLUDE_START_OFFSET = true;
+            new_def.PRESERVE_ROOT_PTR_AND_LEN = true;
         }
         return new_def;
     }
@@ -265,10 +250,10 @@ pub const GooListSliceDefinition = struct {
         if (overrides.MODE) |MODE| new.MODE = MODE;
         if (overrides.ALLOC_STATUS) |A_STAT| new.ALLOC_STATUS = A_STAT;
         if (overrides.MEM_PARADIGM) |PARADIGM| new.MEM_PARADIGM = PARADIGM;
-        if (overrides.INCLUDE_START_OFFSET) |OFF| new.INCLUDE_START_OFFSET = OFF;
+        if (overrides.PRESERVE_ROOT_PTR_AND_LEN) |OFF| new.PRESERVE_ROOT_PTR_AND_LEN = OFF;
+        if (overrides.INCLUDE_ROOT_LEN) |RLEN| new.INCLUDE_ROOT_LEN = RLEN;
         if (overrides.INITIALIZE_NEW_ELEMENTS) |INIT| new.INITIALIZE_NEW_ELEMENTS = INIT;
         if (overrides.SECURE_ZERO_FREED_MEMORY) |ZERO| new.SECURE_ZERO_FREED_MEMORY = ZERO;
-        if (overrides.FALSE_SHARING) |FS| new.FALSE_SHARING = FS;
         return new;
     }
 
@@ -322,14 +307,9 @@ pub const GooListSliceDefinition = struct {
         new.SECURE_ZERO_FREED_MEMORY = secure_zero;
         return new;
     }
-    pub fn with_included_start_offset(comptime self: GooListSliceDefinition, comptime include_start_offset: bool) GooListSliceDefinition {
+    pub fn with_preserved_root_ptr_len(comptime self: GooListSliceDefinition, comptime preserve_root_ptr_len: bool) GooListSliceDefinition {
         var new = self;
-        new.INCLUDE_START_OFFSET = include_start_offset;
-        return new;
-    }
-    pub fn with_false_sharing_protection(comptime self: GooListSliceDefinition, comptime protection: FalseSharingMode) GooListSliceDefinition {
-        var new = self;
-        new.FALSE_SHARING = protection;
+        new.PRESERVE_ROOT_PTR_AND_LEN = preserve_root_ptr_len;
         return new;
     }
 };
@@ -350,16 +330,17 @@ pub const KIND_GooListSlice = "Goolib.GooListSlice.GooListSlice";
 pub const KIND_HASH_GooListSlice = Hash.hash(0, KIND_GooListSlice);
 pub const DECL_BOOL_GooListSlice = "GOOLIB_GooListSlice";
 pub fn GooListSlice(comptime DEF_: GooListSliceDefinition) type {
-    if (@typeInfo(DEF_.IDX) != .int) @compileError("type `Idx` must be an integer type");
+    assert_with_reason(Types.type_is_unsigned_int(DEF_.IDX), @src(), "type of index integer must be an unsigned integer type", .{});
     return extern struct {
         const ListSlice = @This();
         pub const GOOLIB_TYPE_DATA = Types.Id.get_type_data(ListSlice, KIND_GooListSlice, if (IS_LIST) .LIST else .SLICE);
         pub const GOOLIB_GooListSlice = true;
 
         ptr: Ptr = INVALID_DATA_POINTER,
-        len: Idx = 0,
+        root_len: Idx = 0,
+        sub_offset: if (PRESERVE_ROOT) Idx else void = if (PRESERVE_ROOT) 0 else void{},
+        sub_len: if (PRESERVE_ROOT) Idx else void = if (PRESERVE_ROOT) 0 else void{},
         cap: if (IS_LIST) Idx else void = if (IS_LIST) 0 else void{},
-        off: if (OFFSET) Idx else void = if (OFFSET) 0 else void{},
 
         //**********
         // CONSTS
@@ -368,12 +349,13 @@ pub fn GooListSlice(comptime DEF_: GooListSliceDefinition) type {
         pub const DEF = DEF_;
         pub const T = DEF.T;
         pub const Idx = DEF.IDX;
+        pub const ALIGN = if (DEF.MEM_PARADIGM == .OBJECTS_STORED_WHOLE) DEF.ALIGN.get_align(@alignOf(T)) else DEF.ALIGN.get_align(FIELD_MAX_ALIGN);
         const ELEM_MUTABILITY = DEF.ELEM_MUTABILITY;
         const PTR_NULLABILITY = DEF.PTR_NULLABILITY;
         const MODE = DEF.MODE;
         const IS_SLICE = MODE == .SLICE;
         const IS_LIST = MODE == .LIST;
-        const OFFSET = DEF.INCLUDE_START_OFFSET;
+        const PRESERVE_ROOT = DEF.PRESERVE_ROOT_PTR_AND_LEN;
         const SOA = DEF.MEM_PARADIGM == .OBJECT_FIELDS_STORED_IN_SEPARATE_REGIONS;
         const T_NUM_FIELDS: usize = get: {
             const INFO = KindInfo.get_kind_info(T);
@@ -412,8 +394,7 @@ pub fn GooListSlice(comptime DEF_: GooListSliceDefinition) type {
             Sort.InsertionSort.insertion_sort_with_func(out[0..], Sort.CommonCompare.StructField.smaller_align_to_the_right_gt);
             break :create out;
         };
-        const T_MAX_ALIGN = T_FIELD_DATA[0].alignment;
-        const T_MAX_ALIGN = T_FIELD_DATA[0].alignment;
+        const FIELD_MAX_ALIGN = T_FIELD_DATA[0].alignment;
         const T_SIZE = switch (DEF.MEM_PARADIGM) {
             .OBJECTS_STORED_WHOLE => @sizeOf(T),
             .OBJECT_FIELDS_STORED_IN_SEPARATE_REGIONS => calc: {
@@ -445,7 +426,6 @@ pub fn GooListSlice(comptime DEF_: GooListSliceDefinition) type {
             }
             break :create e_fields;
         };
-        //CHECKPOINT fix align/alloc for false-sharing modes
         pub const FieldEnum = @Type(.{ .@"enum" = .{
             .decls = &.{},
             .fields = T_FIELDS_ENUM_FIELDS[0..],
@@ -463,73 +443,54 @@ pub fn GooListSlice(comptime DEF_: GooListSliceDefinition) type {
         fn FieldType(comptime field: FieldEnum) type {
             return T_FIELD_DATA[@intFromEnum(field)].type;
         }
-        pub const MAX_ALIGN = calc: {
-            var a = if (DEF.MEM_PARADIGM == .OBJECTS_STORED_WHOLE) DEF.ALIGN.get_align(@alignOf(T)) else DEF.ALIGN.get_align(T_MAX_ALIGN);
-            if (DEF.FALSE_SHARING != .IGNORE_FALSE_SHARING) {
-                a = @max(a, std.atomic.cache_line);
-            }
-            break :calc a;
-        };
-        const TT = switch (DEF.FALSE_SHARING) {
-            .PREVENT_FALSE_SHARING_PER_ELEMENT => switch (DEF.MEM_PARADIGM) {
-                .OBJECTS_STORED_WHOLE => {
-                    if ()
-                },
-                .OBJECT_FIELDS_STORED_IN_SEPARATE_REGIONS => {},
-            },
-            .IGNORE_FALSE_SHARING, .PREVENT_FALSE_SHARING_FOR_REGION => switch (DEF.MEM_PARADIGM) {
-                .OBJECTS_STORED_WHOLE => T,
-                .OBJECT_FIELDS_STORED_IN_SEPARATE_REGIONS => u8,
-            },
-        };
-        const ADD_CACHE_TAIL = DEF.FALSE_SHARING == .PREVENT_FALSE_SHARING_FOR_REGION and @min(@sizeOf(T), @alignOf(T)) < std.atomic.cache_line;
+
         pub const Ptr = switch (DEF.MEM_PARADIGM) {
             .OBJECTS_STORED_WHOLE => switch (ELEM_MUTABILITY) {
                 .IMMUTABLE => switch (PTR_NULLABILITY) {
-                    .NOT_NULLABLE => [*]align(MAX_ALIGN) const T,
-                    .NULLABLE => ?[*]align(MAX_ALIGN) const T,
+                    .NOT_NULLABLE => [*]align(ALIGN) const T,
+                    .NULLABLE => ?[*]align(ALIGN) const T,
                 },
                 .MUTABLE => switch (PTR_NULLABILITY) {
-                    .NOT_NULLABLE => [*]align(MAX_ALIGN) T,
-                    .NULLABLE => ?[*]align(MAX_ALIGN) T,
+                    .NOT_NULLABLE => [*]align(ALIGN) T,
+                    .NULLABLE => ?[*]align(ALIGN) T,
                 },
             },
             .OBJECT_FIELDS_STORED_IN_SEPARATE_REGIONS => switch (ELEM_MUTABILITY) {
                 .IMMUTABLE => switch (PTR_NULLABILITY) {
-                    .NOT_NULLABLE => [*]align(MAX_ALIGN) const u8,
-                    .NULLABLE => ?[*]align(MAX_ALIGN) const u8,
+                    .NOT_NULLABLE => [*]align(ALIGN) const u8,
+                    .NULLABLE => ?[*]align(ALIGN) const u8,
                 },
                 .MUTABLE => switch (PTR_NULLABILITY) {
-                    .NOT_NULLABLE => [*]align(MAX_ALIGN) u8,
-                    .NULLABLE => ?[*]align(MAX_ALIGN) u8,
+                    .NOT_NULLABLE => [*]align(ALIGN) u8,
+                    .NULLABLE => ?[*]align(ALIGN) u8,
                 },
             },
         };
         pub const BytePtr = switch (ELEM_MUTABILITY) {
             .IMMUTABLE => switch (PTR_NULLABILITY) {
-                .NOT_NULLABLE => [*]const u8,
-                .NULLABLE => ?[*]const u8,
+                .NOT_NULLABLE => [*]align(ALIGN) const u8,
+                .NULLABLE => ?[*]align(ALIGN) const u8,
             },
             .MUTABLE => switch (PTR_NULLABILITY) {
-                .NOT_NULLABLE => [*]u8,
-                .NULLABLE => ?[*]u8,
+                .NOT_NULLABLE => [*]align(ALIGN) u8,
+                .NULLABLE => ?[*]align(ALIGN) u8,
             },
         };
         pub const PtrNeverNull = switch (ELEM_MUTABILITY) {
-            .IMMUTABLE => [*]const T,
-            .MUTABLE => [*]T,
+            .IMMUTABLE => [*]align(ALIGN) const T,
+            .MUTABLE => [*]align(ALIGN) T,
         };
         pub const PtrNeverNullVolatile = switch (ELEM_MUTABILITY) {
-            .IMMUTABLE => [*]const volatile T,
-            .MUTABLE => [*]volatile T,
+            .IMMUTABLE => [*]align(ALIGN) const volatile T,
+            .MUTABLE => [*]align(ALIGN) volatile T,
         };
         pub const BytePtrNeverNull = switch (ELEM_MUTABILITY) {
-            .IMMUTABLE => [*]align(T_MAX_ALIGN) const u8,
-            .MUTABLE => [*]align(T_MAX_ALIGN) u8,
+            .IMMUTABLE => [*]align(ALIGN) const u8,
+            .MUTABLE => [*]align(ALIGN) u8,
         };
         pub const BytePtrNeverNullVolatile = switch (ELEM_MUTABILITY) {
-            .IMMUTABLE => [*]align(T_MAX_ALIGN) const volatile u8,
-            .MUTABLE => [*]align(T_MAX_ALIGN) volatile u8,
+            .IMMUTABLE => [*]align(ALIGN) const volatile u8,
+            .MUTABLE => [*]align(ALIGN) volatile u8,
         };
         pub const ElemPtr = switch (ELEM_MUTABILITY) {
             .IMMUTABLE => *const T,
@@ -561,17 +522,17 @@ pub fn GooListSlice(comptime DEF_: GooListSliceDefinition) type {
         }
         pub const ZigSlice = switch (ELEM_MUTABILITY) {
             .IMMUTABLE => switch (PTR_NULLABILITY) {
-                .NOT_NULLABLE => []const T,
-                .NULLABLE => ?[]const T,
+                .NOT_NULLABLE => []align(ALIGN) const T,
+                .NULLABLE => ?[]align(ALIGN) const T,
             },
             .MUTABLE => switch (PTR_NULLABILITY) {
-                .NOT_NULLABLE => []T,
-                .NULLABLE => ?[]T,
+                .NOT_NULLABLE => []align(ALIGN) T,
+                .NULLABLE => ?[]align(ALIGN) T,
             },
         };
         pub const ZigSliceNeverNull = switch (ELEM_MUTABILITY) {
-            .IMMUTABLE => []const T,
-            .MUTABLE => []T,
+            .IMMUTABLE => []align(ALIGN) const T,
+            .MUTABLE => []align(ALIGN) T,
         };
         pub const ZigSliceNeverNullConst = []const T;
         const MUTABLE = ELEM_MUTABILITY == .MUTABLE;
@@ -579,8 +540,8 @@ pub fn GooListSlice(comptime DEF_: GooListSliceDefinition) type {
         const INVALID_DATA_POINTER: Ptr = switch (PTR_NULLABILITY) {
             .NULLABLE => null,
             .NOT_NULLABLE => switch (ELEM_MUTABILITY) {
-                .IMMUTABLE => if (SOA) Utils.invalid_ptr_many_const_custom_align(u8, T_MAX_ALIGN) else Utils.invalid_ptr_many_const(T),
-                .MUTABLE => if (SOA) Utils.invalid_ptr_many_custom_align(u8, T_MAX_ALIGN) else Utils.invalid_ptr_many(T),
+                .IMMUTABLE => if (SOA) Utils.invalid_ptr_many_const_custom_align(u8, ALIGN) else Utils.invalid_ptr_many_const_custom_align(T, ALIGN),
+                .MUTABLE => if (SOA) Utils.invalid_ptr_many_custom_align(u8, ALIGN) else Utils.invalid_ptr_many_custom_align(T, ALIGN),
             },
         };
         const INVALID_ELEM_PTR = switch (ELEM_MUTABILITY) {
@@ -613,8 +574,8 @@ pub fn GooListSlice(comptime DEF_: GooListSliceDefinition) type {
         pub fn with_alloc_status(comptime alloc_status: MemoryAllocationStatus) type {
             return GooListSlice(DEF.with_alloc_status(alloc_status));
         }
-        pub fn with_included_start_offset(comptime include_start_offset: bool) type {
-            return GooListSlice(DEF.with_included_start_offset(include_start_offset));
+        pub fn with_preserved_root_ptr_len(comptime preserve_root_ptr_len: bool) type {
+            return GooListSlice(DEF.with_preserved_root_ptr_len(preserve_root_ptr_len));
         }
         pub fn with_memory_paradigm(comptime paradigm: MemoryParadigm) type {
             return GooListSlice(DEF.with_memory_paradigm(paradigm));
@@ -645,22 +606,22 @@ pub fn GooListSlice(comptime DEF_: GooListSliceDefinition) type {
             if (new_elem_mutability == ELEM_MUTABILITY) return self;
             return ListSlice.with_mutablility(new_elem_mutability){
                 .ptr = if (new_elem_mutability == .MUTABLE) @constCast(self.ptr) else self.ptr,
-                .len = self.len,
+                .root_len = self.root_len,
             };
         }
         pub fn change_nullability(self: ListSlice, comptime new_ptr_nullability: Nullability) ListSlice.with_nullability(new_ptr_nullability) {
             if (new_ptr_nullability == PTR_NULLABILITY) return self;
             return ListSlice.with_nullability(new_ptr_nullability){
-                .ptr = if (new_ptr_nullability == .NULLABLE) self.ptr else self.ptr_never_null(),
-                .len = self.len,
+                .ptr = if (new_ptr_nullability == .NULLABLE) self.ptr else self.root_ptr_never_null(),
+                .root_len = self.root_len,
             };
         }
         pub fn change_mode(self: ListSlice, comptime new_mode: GooListSliceMode) ListSlice.with_mode(new_mode) {
             if (new_mode == DEF.MODE) return self;
             return ListSlice.with_mode(new_mode){
                 .ptr = self.ptr,
-                .len = if (new_mode == .SLICE) self.cap else self.len,
-                .cap = if (new_mode == .LIST) self.len else void{},
+                .root_len = if (new_mode == .SLICE) self.cap else self.root_len,
+                .cap = if (new_mode == .LIST) self.root_len else void{},
             };
         }
         pub fn change_ptr_mutability(self: ListSlice, comptime new_ptr_mutability: PtrMutability) ListSlice.with_ptr_mutability(new_ptr_mutability) {
@@ -681,21 +642,22 @@ pub fn GooListSlice(comptime DEF_: GooListSliceDefinition) type {
         pub fn change_new_element_initilization(self: ListSlice, comptime new_init: ?*const anyopaque) ListSlice.with_init_new_elements(new_init) {
             return @bitCast(self);
         }
-        pub fn change_included_start_offset(self: ListSlice, comptime include_start_offset: bool) ListSlice.with_included_start_offset(include_start_offset) {
-            if (include_start_offset == DEF.INCLUDE_START_OFFSET) return self;
-            if (include_start_offset == false) {
-                assert_not_SOA(@src());
-                return ListSlice.with_included_start_offset(false){
-                    .ptr = self.ptr + self.off,
-                    .len = self.len,
+        pub fn change_preserved_root_ptr_and_len(self: ListSlice, comptime preserve_root_ptr_len: bool) ListSlice.with_preserved_root_ptr_len(preserve_root_ptr_len) {
+            if (preserve_root_ptr_len == DEF.PRESERVE_ROOT_PTR_AND_LEN) return self;
+            if (preserve_root_ptr_len == false) {
+                self.assert_not_SOA_or_start_offset_is_zero_and_root_len_is_len(@src());
+                return ListSlice.with_preserved_root_ptr_len(false){
+                    .ptr = self.ptr + self.sub_offset,
+                    .root_len = self.sub_len,
                     .cap = self.cap,
                 };
             } else {
-                return ListSlice.with_included_start_offset(true){
+                return ListSlice.with_preserved_root_ptr_len(true){
                     .ptr = self.ptr,
-                    .len = self.len,
+                    .root_len = self.root_len,
                     .cap = self.cap,
-                    .off = 0,
+                    .sub_offset = 0,
+                    .sub_len = self.root_len,
                 };
             }
         }
@@ -713,31 +675,39 @@ pub fn GooListSlice(comptime DEF_: GooListSliceDefinition) type {
         }
         fn assert_len_n_less_than_cap(self: ListSlice, n: Idx, comptime src: std.builtin.SourceLocation) void {
             if (IS_LIST) {
-                assert_with_reason(self.len + n <= self.cap, src, ERR_LEN_PLUS_N_EXCCEEDS_CAP, .{ self.len, n, self.cap });
-            } else {
-                self.assert_len_greater_or_equal_count(n, src);
+                assert_with_reason(self.root_len + n <= self.cap, src, ERR_LEN_PLUS_N_EXCEEDS_CAP, .{ self.root_len, n, self.cap });
             }
         }
+        fn assert_sub_len_n_less_than_len(self: ListSlice, n: Idx, comptime src: std.builtin.SourceLocation) void {
+            if (PRESERVE_ROOT) {
+                assert_with_reason(self.sub_offset + self.sub_len + n <= self.root_len, src, ERR_SUB_LEN_PLUS_N_EXCEEDS_LEN, .{ self.sub_offset, self.sub_len, n, self.root_len });
+            }
+        }
+
         fn assert_start_and_end_in_order(start: Idx, end: Idx, comptime src: std.builtin.SourceLocation) void {
             assert_with_reason(end >= start, src, ERR_START_END_REVERSED, .{ start, end });
         }
+        fn assert_count_less_than_or_equal_max(count: Idx, max: Idx, comptime src: std.builtin.SourceLocation) void {
+            assert_with_reason(count <= max, src, ERR_COUNT_TOO_LARGE, .{ count, max });
+        }
         fn assert_len_greater_or_equal_count(self: ListSlice, count: Idx, comptime src: std.builtin.SourceLocation) void {
-            assert_with_reason(self.len >= count, src, ERR_SHRINK_OOB, .{ count, self.len });
+            assert_with_reason(self.root_len >= count, src, ERR_SHRINK_OOB, .{ count, self.root_len });
         }
-        fn assert_start_plus_len_in_range(self: ListSlice, start: Idx, len: Idx, comptime src: std.builtin.SourceLocation) void {
-            assert_with_reason(start + len <= self.len, src, ERR_INDEX_CHUNK_OOB, .{ start, len, start + len, self.len });
+        // fn assert_start_plus_len_in_range(self: ListSlice, start: Idx, len: Idx, comptime src: std.builtin.SourceLocation) void {
+        //     assert_with_reason(start + len <= self.root_len, src, ERR_INDEX_CHUNK_OOB, .{ start, len, start + len, self.root_len });
+        // }
+        fn assert_len_in_range(self: ListSlice, len_: Idx, comptime src: std.builtin.SourceLocation) void {
+            assert_with_reason(len_ <= self.root_len, src, ERR_INDEX_CHUNK_OOB, .{ 0, len_, len_, self.root_len });
         }
-        fn assert_len_in_range(self: ListSlice, len: Idx, comptime src: std.builtin.SourceLocation) void {
-            assert_with_reason(len <= self.len, src, ERR_INDEX_CHUNK_OOB, .{ 0, len, len, self.len });
-        }
-        fn assert_len_in_range_from_end(self: ListSlice, len: Idx, comptime src: std.builtin.SourceLocation) void {
-            assert_with_reason(len <= self.len, src, ERR_INDEX_CHUNK_OOB, .{ self.len - len, len, self.len, self.len });
+        fn assert_subslice_in_range(self: ListSlice, start: Idx, len_: Idx, comptime src: std.builtin.SourceLocation) void {
+            const end = start + len_;
+            assert_with_reason(end <= self.len(), src, ERR_SUB_SLICE_OOB, .{ start, len_, end, self.len() });
         }
         fn assert_idx_in_range(self: ListSlice, idx: Idx, comptime src: std.builtin.SourceLocation) void {
-            assert_with_reason(idx < self.len, src, ERR_INDEX_OOB, .{ idx, self.len });
+            assert_with_reason(idx < self.len(), src, ERR_INDEX_OOB, .{ idx, self.root_len });
         }
         fn assert_len_non_zero(self: ListSlice, comptime src: std.builtin.SourceLocation) void {
-            assert_with_reason(self.len > 0, src, ERR_LEN_ZERO, .{});
+            assert_with_reason(self.root_len > 0, src, ERR_LEN_ZERO, .{});
         }
         fn assert_mutable(comptime src: std.builtin.SourceLocation) void {
             if (!MUTABLE) {
@@ -763,21 +733,24 @@ pub fn GooListSlice(comptime DEF_: GooListSliceDefinition) type {
         }
         pub fn assert_valid(self: ListSlice, comptime src: std.builtin.SourceLocation) void {
             if (IS_LIST) {
-                assert_with_reason(self.len <= self.cap, src, ERR_LEN_GREATER_THAN_CAP, .{ self.len, self.cap });
+                assert_with_reason(self.root_len <= self.cap, src, ERR_LEN_GREATER_THAN_CAP, .{ self.root_len, self.cap });
             }
-            assert_with_reason(self.len >= 0 or (if (IS_LIST) self.cap >= 0 else true), src, ERR_LEN_OR_CAP_NEGATIVE, .{ self.len, self.cap });
+            assert_with_reason(self.root_len >= 0 or (if (IS_LIST) self.cap >= 0 else true), src, ERR_LEN_OR_CAP_NEGATIVE, .{ self.root_len, self.cap });
             if (Assert.should_assert() and self.is_null()) {
-                assert_with_reason(self.len == 0 and (if (IS_LIST) self.cap == 0 else true), src, ERR_LEN_OR_CAP_NONZERO_WHEN_NULL, .{ self.len, self.cap });
+                assert_with_reason(self.root_len == 0 and (if (IS_LIST) self.cap == 0 else true), src, ERR_LEN_OR_CAP_NONZERO_WHEN_NULL, .{ self.root_len, self.cap });
             }
         }
         fn assert_not_SOA(comptime src: std.builtin.SourceLocation) void {
             assert_with_reason(DEF.MEM_PARADIGM == .OBJECTS_STORED_WHOLE, src, ERR_NOT_POSSIBLE_WITH_SOA, .{});
         }
+        fn assert_not_SOA_or_start_offset_is_zero_and_root_len_is_len(self: ListSlice, comptime src: std.builtin.SourceLocation) void {
+            assert_with_reason(DEF.MEM_PARADIGM == .OBJECTS_STORED_WHOLE or (DEF.PRESERVE_ROOT_PTR_AND_LEN == true and self.sub_offset == 0 and self.sub_len == self.root_len), src, ERR_NOT_POSSIBLE_WITH_SOA_WITHOUT_PRESERVE_MATCH, .{});
+        }
         fn assert_SOA(comptime src: std.builtin.SourceLocation) void {
             assert_with_reason(DEF.MEM_PARADIGM == .OBJECT_FIELDS_STORED_IN_SEPARATE_REGIONS, src, ERR_MUST_BE_SOA, .{});
         }
-        fn assert_not_SOA_or_start_offset(comptime src: std.builtin.SourceLocation) void {
-            assert_with_reason(DEF.MEM_PARADIGM == .OBJECTS_STORED_WHOLE or DEF.INCLUDE_START_OFFSET == true, src, ERR_NOT_POSSIBLE_WITH_SOA_AND_NO_START_OFFSET, .{});
+        fn assert_not_SOA_or_preserve_root(comptime src: std.builtin.SourceLocation) void {
+            assert_with_reason(DEF.MEM_PARADIGM == .OBJECTS_STORED_WHOLE or DEF.PRESERVE_ROOT_PTR_AND_LEN == true, src, ERR_ROOT_NOT_PRESERVED_SOA, .{});
         }
         fn assert_not_allocated(comptime src: std.builtin.SourceLocation) void {
             assert_with_reason(DEF.ALLOC_STATUS == .REFERENCE_TO_EXISTING_MEMORY, src, ERR_ALTER_ALLOCATED_MEM, .{});
@@ -786,7 +759,13 @@ pub fn GooListSlice(comptime DEF_: GooListSliceDefinition) type {
             assert_with_reason(DEF.ALLOC_STATUS == .ALLOCATED_MEMORY, src, ERR_REALLOC_REF_MEMORY, .{});
         }
         fn assert_start_offset_at_least(self: ListSlice, n: Idx, comptime src: std.builtin.SourceLocation) void {
-            assert_with_reason(self.idx_start_offset() >= n, src, ERR_START_OFFSET_TOO_SMALL, .{ n, self.idx_start_offset() });
+            assert_with_reason(self.idx_offset() >= n, src, ERR_START_OFFSET_TOO_SMALL, .{ n, self.idx_offset() });
+        }
+        fn assert_preserve_root(comptime src: std.builtin.SourceLocation) void {
+            assert_with_reason(DEF.PRESERVE_ROOT_PTR_AND_LEN == true, src, ERR_ROOT_NOT_PRESERVED_SOA, .{});
+        }
+        fn assert_src_dest_len_equal(src_len: Idx, dest_len: Idx, comptime src: std.builtin.SourceLocation) void {
+            assert_with_reason(src_len == dest_len, src, ERR_SRC_DEST_LEN_MISMATCH, .{ src_len, dest_len });
         }
 
         //**********
@@ -803,11 +782,11 @@ pub fn GooListSlice(comptime DEF_: GooListSliceDefinition) type {
             if (NULLABLE and slice != null) {
                 if (slice != null) {
                     out.ptr = slice.?.ptr;
-                    out.len = @intCast(slice.?.len);
+                    out.root_len = @intCast(slice.?.len);
                 }
             } else {
                 out.ptr = slice.ptr;
-                out.len = @intCast(slice.len);
+                out.root_len = @intCast(slice.len);
             }
             return out;
         }
@@ -816,16 +795,16 @@ pub fn GooListSlice(comptime DEF_: GooListSliceDefinition) type {
             assert_not_SOA(@src());
             if (NULLABLE) {
                 if (self.ptr == null) return null;
-                return self.ptr_never_null()[self.idx_start_offset() .. self.idx_start_offset() + self.len];
+                return self.root_ptr_never_null()[self.idx_offset() .. self.idx_offset() + self.root_len];
             } else {
-                return self.ptr[self.idx_start_offset() .. self.idx_start_offset() + self.len];
+                return self.ptr[self.idx_offset() .. self.idx_offset() + self.root_len];
             }
         }
 
         pub fn to_slice_never_null(self: ListSlice) ZigSliceNeverNull {
             assert_not_SOA(@src());
             self.assert_not_null(@src());
-            self.ptr_never_null()[self.idx_start_offset() .. self.idx_start_offset() + self.len];
+            self.root_ptr_never_null()[self.true_start()..self.true_end()];
         }
 
         pub fn is_null(self: ListSlice) bool {
@@ -837,35 +816,48 @@ pub fn GooListSlice(comptime DEF_: GooListSliceDefinition) type {
 
         pub fn clear(self: ListSlice) ListSlice {
             var new_self = self;
-            new_self.len = 0;
+            if (PRESERVE_ROOT) {
+                new_self.sub_len = 0;
+            } else {
+                new_self.root_len = 0;
+            }
             return new_self;
         }
 
-        pub fn in_place_clear(self: *ListSlice) void {
-            self.len = 0;
+        pub fn ref_clear(self: *ListSlice) void {
+            if (PRESERVE_ROOT) {
+                self.sub_len = 0;
+            } else {
+                self.root_len = 0;
+            }
         }
 
         pub fn is_empty(self: ListSlice) bool {
-            return self.len <= 0;
+            return self.len() == 0;
+        }
+        pub fn not_empty(self: ListSlice) bool {
+            return self.len() > 0;
         }
 
         pub fn free_slots(self: ListSlice) Idx {
             if (IS_SLICE) return 0;
-            return self.cap - self.len;
+            return self.cap - self.root_len;
         }
 
-        pub fn idx_start_offset(self: ListSlice) Idx {
-            return if (OFFSET) self.off else 0;
+        pub fn true_idx(self: ListSlice, idx: Idx) Idx {
+            return idx + if (PRESERVE_ROOT) self.sub_offset else 0;
         }
-        pub fn true_idx_from_ptr(self: ListSlice, idx: Idx) Idx {
-            return idx + self.idx_start_offset();
+        pub fn true_start(self: ListSlice) Idx {
+            return if (PRESERVE_ROOT) self.sub_offset else 0;
         }
-        pub fn true_len_from_ptr(self: ListSlice) Idx {
-            return if (OFFSET) self.len + self.off else self.len;
+        pub fn true_end(self: ListSlice) Idx {
+            return if (PRESERVE_ROOT) self.sub_offset + self.sub_len else self.root_len;
+        }
+        pub fn len(self: ListSlice) Idx {
+            return if (PRESERVE_ROOT) self.sub_len else self.root_len;
         }
 
-        pub fn ptr_never_null(self: ListSlice) PtrNeverNull {
-            assert_not_SOA(@src());
+        pub fn root_ptr_never_null(self: ListSlice) PtrNeverNull {
             self.assert_not_null(@src());
             if (NULLABLE) {
                 return self.ptr.?;
@@ -873,8 +865,7 @@ pub fn GooListSlice(comptime DEF_: GooListSliceDefinition) type {
                 return self.ptr;
             }
         }
-        pub fn ptr_never_null_volatile(self: ListSlice) PtrNeverNullVolatile {
-            assert_not_SOA(@src());
+        pub fn root_ptr_never_null_volatile(self: ListSlice) PtrNeverNullVolatile {
             self.assert_not_null(@src());
             if (NULLABLE) {
                 return self.ptr.?;
@@ -883,15 +874,8 @@ pub fn GooListSlice(comptime DEF_: GooListSliceDefinition) type {
             }
         }
 
-        pub fn byte_ptr_never_null(self: ListSlice) BytePtrNeverNull {
-            self.assert_not_null(@src());
-            if (NULLABLE) {
-                return @ptrCast(self.ptr.?);
-            } else {
-                return @ptrCast(self.ptr);
-            }
-        }
-        pub fn byte_ptr_never_null_volatile(self: ListSlice) BytePtrNeverNullVolatile {
+        pub fn root_byte_ptr_never_null(self: ListSlice) BytePtrNeverNull {
+            self.assert_not_SOA_or_start_offset_is_zero_and_root_len_is_len(@src());
             self.assert_not_null(@src());
             if (NULLABLE) {
                 return @ptrCast(self.ptr.?);
@@ -900,210 +884,191 @@ pub fn GooListSlice(comptime DEF_: GooListSliceDefinition) type {
             }
         }
 
-        fn field_chunk_ptr_never_null_known_true_len(self: ListSlice, len_usize: usize, comptime field: FieldEnum) FieldPtrMany(field) {
+        pub fn root_byte_ptr_never_null_volatile(self: ListSlice) BytePtrNeverNullVolatile {
+            self.assert_not_SOA_or_start_offset_is_zero_and_root_len_is_len(@src());
+            self.assert_not_null(@src());
+            if (NULLABLE) {
+                return @ptrCast(self.ptr.?);
+            } else {
+                return @ptrCast(self.ptr);
+            }
+        }
+
+        pub fn root_field_chunk_ptr(self: ListSlice, comptime field: FieldEnum) FieldPtrMany(field) {
             assert_SOA(@src());
             self.assert_not_null(@src());
-            const root_addr = @intFromPtr(self.byte_ptr_never_null());
+            const root_addr = @intFromPtr(self.root_byte_ptr_never_null());
             const base_offet = T_FIELD_OFFSETS[@intFromEnum(field)];
-            const field_chunk_offset = base_offet * len_usize;
+            const field_chunk_offset = base_offet * num_cast(self.root_len, usize);
             return @ptrFromInt(root_addr + field_chunk_offset);
         }
 
-        pub fn field_chunk_ptr_never_null(self: ListSlice, comptime field: FieldEnum) FieldPtrMany(field) {
+        pub fn root_field_chunk_slice(self: ListSlice, comptime field: FieldEnum) FieldSlice(field) {
             assert_SOA(@src());
             self.assert_not_null(@src());
-            const len_usize = num_cast(self.true_len_from_ptr(), usize);
-            return field_chunk_ptr_never_null_known_true_len(self, len_usize, field);
+            return root_field_chunk_ptr(self, field)[0..self.root_len];
         }
-        pub fn field_chunk_slice_never_null(self: ListSlice, comptime field: FieldEnum) FieldSlice(field) {
-            assert_SOA(@src());
+
+        pub fn field_chunk_ptr(self: ListSlice, comptime field: FieldEnum) FieldPtrMany(field) {
+            const root = self.root_field_chunk_ptr(field);
+            return root + self.true_start();
+        }
+        pub fn field_chunk_slice(self: ListSlice, comptime field: FieldEnum) FieldSlice(field) {
+            const root = self.root_field_chunk_ptr(field);
+            return root[self.true_start()..self.true_end()];
+        }
+        pub fn incr_len(self: ListSlice, n: Idx) ListSlice {
             self.assert_not_null(@src());
-            const len_usize = num_cast(self.true_len_from_ptr(), usize);
-            return field_chunk_ptr_never_null_known_true_len(self, len_usize, field)[0..self.len];
+            var new_self = self;
+            switch (PRESERVE_ROOT) {
+                true => {
+                    self.assert_sub_len_n_less_than_len(n, @src());
+                    new_self.sub_len += n;
+                },
+                false => {
+                    self.assert_len_n_less_than_cap(n, @src());
+                    new_self.root_len += n;
+                },
+            }
+            return new_self;
+        }
+        pub fn decr_len(self: ListSlice, n: Idx) ListSlice {
+            self.assert_not_null(@src());
+            var new_self = self;
+            switch (PRESERVE_ROOT) {
+                true => {
+                    assert_count_less_than_or_equal_max(n, new_self.sub_len, @src());
+                    new_self.sub_len -= n;
+                },
+                false => {
+                    assert_count_less_than_or_equal_max(n, new_self.root_len, @src());
+                    new_self.root_len -= n;
+                },
+            }
+            return new_self;
+        }
+        pub fn set_len(self: ListSlice, new_len: Idx) ListSlice {
+            self.assert_not_null(@src());
+            var new_self = self;
+            switch (PRESERVE_ROOT) {
+                true => {
+                    new_self.sub_len = new_len;
+                    self.assert_sub_len_n_less_than_len(0, @src());
+                },
+                false => {
+                    new_self.root_len = new_len;
+                    self.assert_len_n_less_than_cap(0, @src());
+                },
+            }
+            return new_self;
+        }
+        fn incr_start(self: ListSlice, n: Idx) ListSlice {
+            self.assert_not_null(@src());
+            var new_self = self;
+            if (SOA) assert_preserve_root(@src());
+            switch (PRESERVE_ROOT) {
+                true => new_self.sub_offset += n,
+                false => new_self.ptr = new_self.ptr + n,
+            }
+            return new_self;
+        }
+        fn decr_start(self: ListSlice, n: Idx) ListSlice {
+            self.assert_not_null(@src());
+            var new_self = self;
+            if (SOA) assert_preserve_root(@src());
+            switch (PRESERVE_ROOT) {
+                true => {
+                    new_self.assert_start_offset_at_least(n, @src());
+                    new_self.sub_offset -= n;
+                },
+                false => new_self.ptr = new_self.ptr - n,
+            }
+            return new_self;
         }
 
         //**********
         // WINDOW/SUB-SLICE
         //**********
 
-        pub fn grow_window_right(self: ListSlice, count: Idx) ListSlice {
+        pub fn grow_sub_slice_right(self: ListSlice, count: Idx) ListSlice {
+            assert_not_allocated(@src());
+            assert_slice(@src());
+            return self.incr_len(count);
+        }
+
+        pub fn grow_sub_slice_left(self: ListSlice, count: Idx) ListSlice {
+            assert_not_allocated(@src());
+            assert_slice(@src());
+            return self.decr_start(count).incr_len(count);
+        }
+
+        pub fn shrink_sub_slice_right(self: ListSlice, count: Idx) ListSlice {
+            assert_not_allocated(@src());
+            assert_slice(@src());
+            return self.decr_len(count);
+        }
+
+        pub fn shrink_sub_slice_left(self: ListSlice, count: Idx) ListSlice {
             assert_not_allocated(@src());
             assert_slice(@src());
             self.assert_not_null(@src());
-            var new_self = self;
-            new_self.len += count;
+            return self.incr_start(count).decr_len(count);
         }
 
-        pub fn grow_window_left(self: ListSlice, count: Idx) ListSlice {
-            assert_not_SOA_or_start_offset(@src());
+        pub fn shift_sub_slice_right(self: ListSlice, count: Idx) ListSlice {
             assert_not_allocated(@src());
             assert_slice(@src());
             self.assert_not_null(@src());
-            if (SOA) self.assert_start_offset_at_least(count, @src());
-            const off_adj: Idx = if (OFFSET) @min(count, self.off) else 0;
-            const ptr_adj: Idx = count - off_adj;
-            var new_self = self;
-            if (OFFSET) new_self.off -= off_adj;
-            new_self.ptr = self.ptr_never_null() - ptr_adj;
-            new_self.len += count;
-            return new_self;
+            return self.incr_start(count);
         }
 
-        pub fn shrink_window_right(self: ListSlice, count: Idx) ListSlice {
+        pub fn shift_sub_slice_left(self: ListSlice, count: Idx) ListSlice {
             assert_not_allocated(@src());
             assert_slice(@src());
             self.assert_not_null(@src());
-            self.assert_len_greater_or_equal_count(count, @src());
-            var new_self = self;
-            new_self.len -= count;
-            return new_self;
+            return self.decr_start(count);
         }
 
-        pub fn shrink_window_left(self: ListSlice, count: Idx) ListSlice {
-            assert_not_SOA_or_start_offset(@src());
-            assert_not_allocated(@src());
-            assert_slice(@src());
+        pub fn sub_slice_start_len(self: ListSlice, start: Idx, new_len: Idx, comptime mode: SubSliceMode) ListSlice.with_sub_slice_mode(mode) {
             self.assert_not_null(@src());
-            self.assert_len_greater_or_equal_count(count, @src());
-            var new_self = self;
-            if (OFFSET) {
-                new_self.off += count;
-            } else {
-                new_self.ptr = self.ptr_never_null() + count;
-            }
-            new_self.len -= count;
-            return new_self;
-        }
-
-        pub fn shift_window_right(self: ListSlice, count: Idx) ListSlice {
-            assert_not_SOA_or_start_offset(@src());
-            assert_not_allocated(@src());
-            self.assert_not_null(@src());
-            var new_self = self;
-            if (OFFSET) {
-                new_self.off += count;
-            } else {
-                new_self.ptr = self.ptr_never_null() + count;
-            }
-        }
-
-        pub fn shift_window_left(self: ListSlice, count: Idx) ListSlice {
-            assert_not_SOA_or_start_offset(@src());
-            assert_not_allocated(@src());
-            self.assert_not_null(@src());
-            if (SOA) self.assert_start_offset_at_least(count, @src());
-            const off_adj: Idx = if (OFFSET) @min(count, self.off) else 0;
-            const ptr_adj: Idx = count - off_adj;
-            var new_self = self;
-            if (OFFSET) new_self.off -= off_adj;
-            new_self.ptr = self.ptr_never_null() - ptr_adj;
-        }
-
-        pub fn sub_slice_start_len(self: ListSlice, start: Idx, len: Idx, comptime mode: SubSliceMode) ListSlice.with_sub_slice_mode(mode) {
-            self.assert_not_null(@src());
-            self.assert_start_plus_len_in_range(start, len, @src());
+            self.assert_subslice_in_range(start, new_len, @src());
             const NewListSlice = ListSlice.with_sub_slice_mode(mode);
-            if (NewListSlice.DEF.INCLUDE_START_OFFSET) {
+            if (NewListSlice.DEF.PRESERVE_ROOT_PTR_AND_LEN) {
                 return NewListSlice{
-                    .ptr = @ptrCast(self.ptr_never_null()),
-                    .len = len,
-                    .off = self.idx_start_offset() + start,
+                    .ptr = @ptrCast(self.root_ptr_never_null()),
+                    .root_len = self.root_len,
+                    .sub_offset = self.true_idx(start),
+                    .sub_len = new_len,
                 };
             } else {
                 return NewListSlice{
-                    .ptr = @ptrCast(self.ptr_never_null() + start),
-                    .len = len,
+                    .ptr = @ptrCast(self.root_ptr_never_null() + start),
+                    .root_len = new_len,
                 };
             }
         }
 
         pub fn sub_slice_start_end(self: ListSlice, start: Idx, end_excluded: Idx, comptime mode: SubSliceMode) ListSlice.with_sub_slice_mode(mode) {
-            self.assert_not_null(@src());
             assert_start_and_end_in_order(start, end_excluded, @src());
-            const len = end_excluded - start;
-            self.assert_start_plus_len_in_range(start, len, @src());
-            const NewListSlice = ListSlice.with_sub_slice_mode(mode);
-            if (NewListSlice.DEF.INCLUDE_START_OFFSET) {
-                return NewListSlice{
-                    .ptr = @ptrCast(self.ptr_never_null()),
-                    .len = len,
-                    .off = self.idx_start_offset() + start,
-                };
-            } else {
-                return NewListSlice{
-                    .ptr = @ptrCast(self.ptr_never_null() + start),
-                    .len = len,
-                };
-            }
+            const new_len = end_excluded - start;
+            return self.sub_slice_start_len(start, new_len, mode);
         }
 
-        pub fn sub_slice_from_start(self: ListSlice, len: Idx, comptime mode: SubSliceMode) ListSlice.with_sub_slice_mode(mode) {
-            self.assert_not_null(@src());
-            self.assert_len_in_range(len, @src());
-            const NewListSlice = ListSlice.with_sub_slice_mode(mode);
-            if (NewListSlice.DEF.INCLUDE_START_OFFSET) {
-                return NewListSlice{
-                    .ptr = @ptrCast(self.ptr_never_null()),
-                    .len = len,
-                    .off = self.idx_start_offset(),
-                };
-            } else {
-                return NewListSlice{
-                    .ptr = @ptrCast(self.ptr_never_null()),
-                    .len = len,
-                };
-            }
+        pub fn sub_slice_from_start(self: ListSlice, new_len: Idx, comptime mode: SubSliceMode) ListSlice.with_sub_slice_mode(mode) {
+            return self.sub_slice_start_len(0, new_len, mode);
         }
 
-        pub fn sub_slice_from_end(self: ListSlice, len: Idx, comptime mode: SubSliceMode) ListSlice.with_sub_slice_mode(mode) {
-            assert_not_SOA(@src());
-            self.assert_not_null(@src());
-            self.assert_len_in_range_from_end(len, @src());
-            const diff = self.len - len;
-            return ListSlice.with_sub_slice_mode(mode){
-                .ptr = @ptrCast(self.ptr_never_null() + diff),
-                .len = len,
-            };
+        pub fn sub_slice_from_end(self: ListSlice, new_len: Idx, comptime mode: SubSliceMode) ListSlice.with_sub_slice_mode(mode) {
+            const start = self.root_len - new_len;
+            return self.sub_slice_start_len(start, new_len, mode);
         }
 
-        pub fn new_slice_immediately_before(self: ListSlice, len: Idx, comptime mode: SubSliceMode) ListSlice.with_sub_slice_mode(mode) {
-            assert_not_SOA_or_start_offset(@src());
-            assert_slice(@src());
-            self.assert_not_null(@src());
-            if (SOA) self.assert_start_offset_at_least(len, @src());
-            const off_adj: Idx = if (OFFSET) @min(len, self.off) else 0;
-            const ptr_adj: Idx = len - off_adj;
-            const NewListSlice = ListSlice.with_sub_slice_mode(mode);
-            if (NewListSlice.DEF.INCLUDE_START_OFFSET) {
-                return NewListSlice{
-                    .ptr = @ptrCast(self.ptr_never_null() - ptr_adj),
-                    .len = len,
-                    .off = self.idx_start_offset() - off_adj,
-                };
-            } else {
-                return NewListSlice{
-                    .ptr = @ptrCast(self.ptr_never_null() - len),
-                    .len = len,
-                };
-            }
+        pub fn new_slice_immediately_before(self: ListSlice, new_len: Idx, comptime mode: SubSliceMode) ListSlice.with_sub_slice_mode(mode) {
+            return self.sub_slice_from_start(0, mode).decr_start(new_len);
         }
 
-        pub fn new_slice_immediately_after(self: ListSlice, len: Idx, comptime mode: SubSliceMode) ListSlice.with_sub_slice_mode(mode) {
-            assert_slice(@src());
-            self.assert_not_null(@src());
-            const NewListSlice = ListSlice.with_sub_slice_mode(mode);
-            if (NewListSlice.DEF.INCLUDE_START_OFFSET) {
-                return NewListSlice{
-                    .ptr = @ptrCast(self.ptr_never_null()),
-                    .len = len,
-                    .off = self.idx_start_offset() + self.len,
-                };
-            } else {
-                return NewListSlice{
-                    .ptr = @ptrCast(self.ptr_never_null() + self.len),
-                    .len = len,
-                };
-            }
+        pub fn new_slice_immediately_after(self: ListSlice, new_len: Idx, comptime mode: SubSliceMode) ListSlice.with_sub_slice_mode(mode) {
+            return self.sub_slice_from_end(0, mode).incr_len(new_len);
         }
 
         //**********
@@ -1114,12 +1079,12 @@ pub fn GooListSlice(comptime DEF_: GooListSliceDefinition) type {
             assert_not_SOA(@src());
             self.assert_not_null(@src());
             self.assert_idx_in_range(idx, @src());
-            return &self.ptr_never_null()[self.true_idx_from_ptr(idx)];
+            return &self.root_ptr_never_null()[self.true_idx(idx)];
         }
 
         pub fn get_last_item_ptr(self: ListSlice) ElemPtr {
             self.assert_not_empty(@src());
-            return self.get_item_ptr(self.len - 1);
+            return self.get_item_ptr(self.len() - 1);
         }
 
         pub fn get_first_item_ptr(self: ListSlice) ElemPtr {
@@ -1129,7 +1094,7 @@ pub fn GooListSlice(comptime DEF_: GooListSliceDefinition) type {
 
         pub fn get_item_ptr_nth_from_end(self: ListSlice, nth_from_end: Idx) ElemPtr {
             self.assert_idx_in_range(nth_from_end, @src());
-            return self.get_item_ptr(self.len - 1 - nth_from_end);
+            return self.get_item_ptr(self.len() - 1 - nth_from_end);
         }
 
         pub fn get_item(self: ListSlice, idx: Idx) T {
@@ -1137,24 +1102,19 @@ pub fn GooListSlice(comptime DEF_: GooListSliceDefinition) type {
             self.assert_idx_in_range(idx, @src());
             if (SOA) {
                 var val: T = undefined;
-                const idx_usize = num_cast(self.true_idx_from_ptr(idx), usize);
-                const len_usize = num_cast(self.true_len_from_ptr(), usize);
-                const root_addr = @intFromPtr(self.byte_ptr_never_null());
-                inline for (T_FIELD_DATA[0..], T_FIELD_OFFSETS[0..], T_FIELDS_ENUM_TAGS[0..]) |field, base_offset, tag| {
-                    const field_chunk_offset = base_offset * len_usize;
-                    const field_offset = root_addr + field_chunk_offset + (@sizeOf(field.type) * idx_usize);
-                    const field_ptr: FieldPtr(tag) = @ptrFromInt(field_offset);
+                inline for (T_FIELD_DATA[0..]) |field| {
+                    const field_ptr = self.get_item_field_ptr(field, idx);
                     @field(val, field.name) = field_ptr.*;
                 }
                 return val;
             } else {
-                return self.ptr_never_null()[self.true_idx_from_ptr(idx)];
+                return self.root_ptr_never_null()[self.true_idx(idx)];
             }
         }
 
         pub fn get_last_item(self: ListSlice) T {
             self.assert_not_empty(@src());
-            return self.get_item(self.len - 1);
+            return self.get_item(self.len() - 1);
         }
 
         pub fn get_first_item(self: ListSlice) T {
@@ -1164,25 +1124,19 @@ pub fn GooListSlice(comptime DEF_: GooListSliceDefinition) type {
 
         pub fn get_item_nth_from_end(self: ListSlice, nth_from_end: Idx) T {
             self.assert_not_empty(@src());
-            return self.get_item(self.len - 1 - nth_from_end);
+            return self.get_item(self.len() - 1 - nth_from_end);
         }
 
         pub fn get_item_field(self: ListSlice, comptime field: FieldEnum, idx: Idx) FieldType(field) {
             self.assert_not_null(@src());
             self.assert_idx_in_range(idx, @src());
-            if (SOA) {
-                const idx_usize = num_cast(self.true_idx_from_ptr(idx), usize);
-                const field_chunk = self.field_chunk_ptr_never_null(field);
-                const field_ptr: FieldPtr(field) = &field_chunk[idx_usize];
-                return field_ptr.*;
-            } else {
-                return @field(self.ptr_never_null()[self.true_idx_from_ptr(idx)], @tagName(field));
-            }
+            const field_ptr = self.get_item_field_ptr(field, idx);
+            return field_ptr.*;
         }
 
         pub fn get_last_item_field(self: ListSlice, comptime field: FieldEnum) FieldType(field) {
             self.assert_not_empty(@src());
-            return self.get_item_field(field, self.len - 1);
+            return self.get_item_field(field, self.len() - 1);
         }
 
         pub fn get_first_item_field(self: ListSlice, comptime field: FieldEnum) FieldType(field) {
@@ -1192,25 +1146,28 @@ pub fn GooListSlice(comptime DEF_: GooListSliceDefinition) type {
 
         pub fn get_item_field_nth_from_end(self: ListSlice, comptime field: FieldEnum, nth_from_end: Idx) FieldType(field) {
             self.assert_idx_in_range(nth_from_end, @src());
-            return self.get_item_field(field, self.len - 1 - nth_from_end);
+            return self.get_item_field(field, self.len() - 1 - nth_from_end);
         }
 
         pub fn get_item_field_ptr(self: ListSlice, comptime field: FieldEnum, idx: Idx) FieldPtr(field) {
             self.assert_not_null(@src());
             self.assert_idx_in_range(idx, @src());
             if (SOA) {
-                const idx_usize = num_cast(self.true_idx_from_ptr(idx), usize);
-                const field_chunk = self.field_chunk_ptr_never_null(field);
-                const field_ptr: FieldPtr(field) = &field_chunk[idx_usize];
-                return field_ptr;
+                const root = self.root_field_chunk_slice(field);
+                return &root[self.true_idx(idx)];
             } else {
-                return &@field(&self.ptr_never_null()[self.true_idx_from_ptr(idx)], @tagName(field));
+                const root = self.root_ptr_never_null();
+                return &@field(&root[self.true_idx(idx)], @tagName(field));
             }
+        }
+
+        pub fn get_item_field_ptr_volatile(self: ListSlice, comptime field: FieldEnum, idx: Idx) FieldPtrVolatile(field) {
+            return self.get_item_field_ptr(field, idx);
         }
 
         pub fn get_last_item_field_ptr(self: ListSlice, comptime field: FieldEnum) FieldPtr(field) {
             self.assert_not_empty(@src());
-            return self.get_item_field_ptr(field, self.len - 1);
+            return self.get_item_field_ptr(field, self.len() - 1);
         }
 
         pub fn get_first_item_field_ptr(self: ListSlice, comptime field: FieldEnum) FieldPtr(field) {
@@ -1220,7 +1177,7 @@ pub fn GooListSlice(comptime DEF_: GooListSliceDefinition) type {
 
         pub fn get_item_field_ptr_nth_from_end(self: ListSlice, comptime field: FieldEnum, nth_from_end: Idx) FieldPtr(field) {
             self.assert_idx_in_range(nth_from_end, @src());
-            return self.get_item_field_ptr(field, self.len - 1 - nth_from_end);
+            return self.get_item_field_ptr(field, self.len() - 1 - nth_from_end);
         }
 
         pub fn set_item(self: ListSlice, idx: Idx, val: T) void {
@@ -1228,21 +1185,18 @@ pub fn GooListSlice(comptime DEF_: GooListSliceDefinition) type {
             self.assert_not_null(@src());
             self.assert_idx_in_range(idx, @src());
             if (SOA) {
-                const idx_usize = num_cast(self.true_idx_from_ptr(idx), usize);
-                const len_usize = num_cast(self.true_len_from_ptr(), usize);
                 inline for (T_FIELD_DATA[0..]) |field| {
-                    const field_chunk = self.field_chunk_ptr_never_null_known_true_len(len_usize, field);
-                    const field_ptr: FieldPtr(field) = &field_chunk[idx_usize];
+                    const field_ptr = self.get_item_field_ptr(field, idx);
                     field_ptr.* = @field(val, field.name);
                 }
             } else {
-                self.ptr_never_null()[self.true_idx_from_ptr(idx)] = val;
+                self.root_ptr_never_null()[self.true_idx(idx)] = val;
             }
         }
 
         pub fn set_last_item(self: ListSlice, val: T) void {
             self.assert_not_empty(@src());
-            self.set_item(self.len - 1, val);
+            self.set_item(self.len() - 1, val);
         }
 
         pub fn set_first_item(self: ListSlice, val: T) void {
@@ -1252,26 +1206,18 @@ pub fn GooListSlice(comptime DEF_: GooListSliceDefinition) type {
 
         pub fn set_item_nth_from_end(self: ListSlice, nth_from_end: Idx, val: T) void {
             self.assert_idx_in_range(nth_from_end, @src());
-            self.set_item(self.len - 1 - nth_from_end, val);
+            self.set_item(self.len() - 1 - nth_from_end, val);
         }
 
         pub fn set_item_field(self: ListSlice, comptime field: FieldEnum, idx: Idx, val: FieldType(field)) void {
             assert_mutable(@src());
-            self.assert_not_null(@src());
-            self.assert_idx_in_range(idx, @src());
-            if (SOA) {
-                const idx_usize = num_cast(self.true_idx_from_ptr(idx), usize);
-                const field_chunk = self.field_chunk_ptr_never_null(field);
-                const field_ptr: FieldPtr(field) = &field_chunk[idx_usize];
-                field_ptr.* = val;
-            } else {
-                @field(&self.ptr_never_null()[self.true_idx_from_ptr(idx)], @tagName(field)).* = val;
-            }
+            const field_ptr = self.get_item_field_ptr(field, idx);
+            field_ptr.* = val;
         }
 
         pub fn set_last_item_field(self: ListSlice, comptime field: FieldEnum, val: FieldType(field)) void {
             self.assert_not_empty(@src());
-            self.set_item_field(field, self.len - 1, val);
+            self.set_item_field(field, self.len() - 1, val);
         }
 
         pub fn set_first_item_field(self: ListSlice, comptime field: FieldEnum, val: FieldType(field)) void {
@@ -1281,7 +1227,7 @@ pub fn GooListSlice(comptime DEF_: GooListSliceDefinition) type {
 
         pub fn set_item_field_nth_from_end(self: ListSlice, comptime field: FieldEnum, nth_from_end: Idx, val: FieldType(field)) void {
             self.assert_idx_in_range(nth_from_end, @src());
-            self.set_item_field(field, self.len - 1 - nth_from_end, val);
+            self.set_item_field(field, self.len() - 1 - nth_from_end, val);
         }
 
         pub fn set_item_volatile(self: ListSlice, idx: Idx, val: T) void {
@@ -1289,69 +1235,236 @@ pub fn GooListSlice(comptime DEF_: GooListSliceDefinition) type {
             self.assert_not_null(@src());
             self.assert_idx_in_range(idx, @src());
             if (SOA) {
-                const idx_usize = num_cast(self.true_idx_from_ptr(idx), usize);
-                const len_usize = num_cast(self.true_len_from_ptr(), usize);
                 inline for (T_FIELD_DATA[0..]) |field| {
-                    const field_chunk = self.field_chunk_ptr_never_null_known_true_len(len_usize, field);
-                    const field_ptr: FieldPtr(field) = &field_chunk[idx_usize];
+                    const field_ptr = self.get_item_field_ptr_volatile(field, idx);
                     field_ptr.* = @field(val, field.name);
                 }
             } else {
-                self.ptr_never_null_volatile()[self.true_idx_from_ptr(idx)] = val;
+                self.root_ptr_never_null_volatile()[self.true_idx(idx)] = val;
             }
+        }
+
+        pub fn set_item_field_volatile(self: ListSlice, comptime field: FieldEnum, idx: Idx, val: FieldType(field)) void {
+            assert_mutable(@src());
+            const field_ptr = self.get_item_field_ptr_volatile(field, idx);
+            field_ptr.* = val;
         }
 
         //**********
         // MEMCOPY/MEMSET
         //**********
-
-        pub fn memcopy_to(self: ListSlice, dest: anytype) void {
+        fn copy_individual_backward(dest: anytype, src: anytype, len_: Idx) void {
+            var i: Idx = 0;
+            var s: Idx = len_;
+            var d: Idx = len_;
+            const DEST = @TypeOf(dest);
+            const SRC = @TypeOf(src);
+            while (i < len_) {
+                s -= 1;
+                d -= 1;
+                const val = if (type_is_GooListSlice(SRC)) src.get_item(s) else src[s];
+                if (type_is_GooListSlice(DEST)) {
+                    dest.set_item(d, val);
+                } else {
+                    dest[d] = val;
+                }
+                i += 1;
+            }
+        }
+        fn copy_individual_forward(dest: anytype, src: anytype, len_: Idx) void {
+            var i: Idx = 0;
+            var s: Idx = 0;
+            var d: Idx = 0;
+            const DEST = @TypeOf(dest);
+            const SRC = @TypeOf(src);
+            while (i < len_) {
+                const val = if (type_is_GooListSlice(SRC)) src.get_item(s) else src[s];
+                if (type_is_GooListSlice(DEST)) {
+                    dest.set_item(d, val);
+                } else {
+                    dest[d] = val;
+                }
+                i += 1;
+                s += 1;
+                d += 1;
+            }
+        }
+        pub fn memcopy_count_to(self: ListSlice, count: Idx, dest: anytype) void {
             const DEST = @TypeOf(dest);
             self.assert_not_null(@src());
             either_soa: switch (DEF.MEM_PARADIGM) {
                 .OBJECT_FIELDS_STORED_IN_SEPARATE_REGIONS => {
-                    var i: Idx = 0;
-                    while (i < self.len) : (i += 1) {
-                        const val = self.get_item(i);
-                        if (type_is_GooListSlice(DEST)) {
-                            dest.set_item(i, val);
-                        } else {
-                            dest[i] = val;
-                        }
+                    copy_individual_forward(dest, self, count);
+                },
+                .OBJECTS_STORED_WHOLE => {
+                    if (type_is_GooListSlice(DEST)) {
+                        if (DEST.DEF.MEM_PARADIGM == MemoryParadigm.OBJECT_FIELDS_STORED_IN_SEPARATE_REGIONS) continue :either_soa .OBJECT_FIELDS_STORED_IN_SEPARATE_REGIONS;
+                        @memcpy(dest.to_slice_never_null()[0..count], self.to_slice_never_null()[0..count]);
+                    } else {
+                        @memcpy(dest[0..count], self.to_slice_never_null()[0..count]);
+                    }
+                },
+            }
+        }
+        pub fn memcopy_to(self: ListSlice, dest: anytype) void {
+            self.memcopy_count_to(self.len(), dest);
+        }
+        pub fn memmove_right_count_to(self: ListSlice, count: Idx, dest: anytype) void {
+            const DEST = @TypeOf(dest);
+            self.assert_not_null(@src());
+            either_soa: switch (DEF.MEM_PARADIGM) {
+                .OBJECT_FIELDS_STORED_IN_SEPARATE_REGIONS => {
+                    copy_individual_backward(dest, self, count);
+                },
+                .OBJECTS_STORED_WHOLE => {
+                    if (type_is_GooListSlice(DEST)) {
+                        if (DEST.DEF.MEM_PARADIGM == MemoryParadigm.OBJECT_FIELDS_STORED_IN_SEPARATE_REGIONS) continue :either_soa .OBJECT_FIELDS_STORED_IN_SEPARATE_REGIONS;
+                        @memmove(dest.to_slice_never_null()[0..count], self.to_slice_never_null()[0..count]);
+                    } else {
+                        @memmove(dest[0..count], self.to_slice_never_null()[0..count]);
+                    }
+                },
+            }
+        }
+        pub fn memmove_left_count_to(self: ListSlice, count: Idx, dest: anytype) void {
+            const DEST = @TypeOf(dest);
+            self.assert_not_null(@src());
+            either_soa: switch (DEF.MEM_PARADIGM) {
+                .OBJECT_FIELDS_STORED_IN_SEPARATE_REGIONS => {
+                    copy_individual_forward(dest, self, count);
+                },
+                .OBJECTS_STORED_WHOLE => {
+                    if (type_is_GooListSlice(DEST)) {
+                        if (DEST.DEF.MEM_PARADIGM == MemoryParadigm.OBJECT_FIELDS_STORED_IN_SEPARATE_REGIONS) continue :either_soa .OBJECT_FIELDS_STORED_IN_SEPARATE_REGIONS;
+                        @memmove(dest.to_slice_never_null()[0..count], self.to_slice_never_null()[0..count]);
+                    } else {
+                        @memmove(dest[0..count], self.to_slice_never_null()[0..count]);
+                    }
+                },
+            }
+        }
+        pub fn memmove_count_to(self: ListSlice, count: Idx, dest: anytype) void {
+            const DEST = @TypeOf(dest);
+            self.assert_not_null(@src());
+            either_soa: switch (DEF.MEM_PARADIGM) {
+                .OBJECT_FIELDS_STORED_IN_SEPARATE_REGIONS => {
+                    const addr_src: usize = @intFromPtr(self.root_ptr_never_null()) + (T_SIZE * self.true_start());
+                    const addr_dst: usize = if (type_is_GooListSlice(DEST)) @intFromPtr(dest.root_ptr_never_null()) + (T_SIZE * dest.true_start()) else @intFromPtr(&dest[0]);
+                    if (addr_src < addr_dst) {
+                        copy_individual_backward(dest, self, count);
+                    } else {
+                        copy_individual_forward(dest, self, count);
                     }
                 },
                 .OBJECTS_STORED_WHOLE => {
                     if (type_is_GooListSlice(DEST)) {
                         if (DEST.DEF.MEM_PARADIGM == MemoryParadigm.OBJECT_FIELDS_STORED_IN_SEPARATE_REGIONS) continue :either_soa .OBJECT_FIELDS_STORED_IN_SEPARATE_REGIONS;
-                        @memcpy(dest.to_slice_never_null(), self.to_slice_never_null());
+                        @memmove(dest.to_slice_never_null()[0..count], self.to_slice_never_null()[0..count]);
                     } else {
-                        @memcpy(dest, self.to_slice_never_null());
+                        @memmove(dest[0..count], self.to_slice_never_null()[0..count]);
                     }
                 },
             }
         }
+        pub fn memmove_left_to(self: ListSlice, dest: anytype) void {
+            self.memmove_left_count_to(self.len(), dest);
+        }
+        pub fn memmove_right_to(self: ListSlice, dest: anytype) void {
+            self.memmove_right_count_to(self.len(), dest);
+        }
+        pub fn memmove_to(self: ListSlice, dest: anytype) void {
+            self.memmove_count_to(self.len(), dest);
+        }
 
-        pub fn memcopy_from(self: ListSlice, source: anytype) void {
+        pub fn memcopy_count_from(self: ListSlice, count: Idx, source: anytype) void {
             assert_mutable(@src());
             const SRC = @TypeOf(source);
             self.assert_not_null(@src());
             either_soa: switch (DEF.MEM_PARADIGM) {
                 .OBJECT_FIELDS_STORED_IN_SEPARATE_REGIONS => {
-                    var i: Idx = 0;
-                    while (i < self.len) : (i += 1) {
-                        const val = if (type_is_GooListSlice(SRC)) source.get_item(i) else source[i];
-                        self.set_item(i, val);
+                    copy_individual_forward(self, source, count);
+                },
+                .OBJECTS_STORED_WHOLE => {
+                    if (type_is_GooListSlice(SRC)) {
+                        if (SRC.DEF.MEM_PARADIGM == MemoryParadigm.OBJECT_FIELDS_STORED_IN_SEPARATE_REGIONS) continue :either_soa .OBJECT_FIELDS_STORED_IN_SEPARATE_REGIONS;
+                        @memcpy(self.to_slice_never_null()[0..count], source.to_slice_never_null()[0..count]);
+                    } else {
+                        @memcpy(self.to_slice_never_null()[0..count], source[0..count]);
+                    }
+                },
+            }
+        }
+        pub fn memcopy_from(self: ListSlice, source: anytype) void {
+            self.memcopy_count_from(self.len(), source);
+        }
+        pub fn memmove_count_from(self: ListSlice, count: Idx, source: anytype) void {
+            assert_mutable(@src());
+            const SRC = @TypeOf(source);
+            self.assert_not_null(@src());
+            either_soa: switch (DEF.MEM_PARADIGM) {
+                .OBJECT_FIELDS_STORED_IN_SEPARATE_REGIONS => {
+                    const addr_dst: usize = @intFromPtr(self.root_ptr_never_null()) + (T_SIZE * self.true_start());
+                    const addr_src: usize = if (type_is_GooListSlice(SRC)) @intFromPtr(source.root_ptr_never_null()) + (T_SIZE * source.true_start()) else @intFromPtr(&source[0]);
+                    if (addr_src < addr_dst) {
+                        copy_individual_backward(self, source, count);
+                    } else {
+                        copy_individual_forward(self, source, count);
                     }
                 },
                 .OBJECTS_STORED_WHOLE => {
                     if (type_is_GooListSlice(SRC)) {
                         if (SRC.DEF.MEM_PARADIGM == MemoryParadigm.OBJECT_FIELDS_STORED_IN_SEPARATE_REGIONS) continue :either_soa .OBJECT_FIELDS_STORED_IN_SEPARATE_REGIONS;
-                        @memcpy(self.to_slice_never_null(), source.to_slice_never_null());
+                        @memmove(self.to_slice_never_null()[0..count], source.to_slice_never_null()[0..count]);
                     } else {
-                        @memcpy(self.to_slice_never_null(), source);
+                        @memmove(self.to_slice_never_null()[0..count], source[0..count]);
                     }
                 },
             }
+        }
+        pub fn memmove_left_count_from(self: ListSlice, count: Idx, source: anytype) void {
+            assert_mutable(@src());
+            const SRC = @TypeOf(source);
+            self.assert_not_null(@src());
+            either_soa: switch (DEF.MEM_PARADIGM) {
+                .OBJECT_FIELDS_STORED_IN_SEPARATE_REGIONS => {
+                    copy_individual_forward(self, source, count);
+                },
+                .OBJECTS_STORED_WHOLE => {
+                    if (type_is_GooListSlice(SRC)) {
+                        if (SRC.DEF.MEM_PARADIGM == MemoryParadigm.OBJECT_FIELDS_STORED_IN_SEPARATE_REGIONS) continue :either_soa .OBJECT_FIELDS_STORED_IN_SEPARATE_REGIONS;
+                        @memmove(self.to_slice_never_null()[0..count], source.to_slice_never_null()[0..count]);
+                    } else {
+                        @memmove(self.to_slice_never_null()[0..count], source[0..count]);
+                    }
+                },
+            }
+        }
+        pub fn memmove_right_count_from(self: ListSlice, count: Idx, source: anytype) void {
+            assert_mutable(@src());
+            const SRC = @TypeOf(source);
+            self.assert_not_null(@src());
+            either_soa: switch (DEF.MEM_PARADIGM) {
+                .OBJECT_FIELDS_STORED_IN_SEPARATE_REGIONS => {
+                    copy_individual_backward(self, source, count);
+                },
+                .OBJECTS_STORED_WHOLE => {
+                    if (type_is_GooListSlice(SRC)) {
+                        if (SRC.DEF.MEM_PARADIGM == MemoryParadigm.OBJECT_FIELDS_STORED_IN_SEPARATE_REGIONS) continue :either_soa .OBJECT_FIELDS_STORED_IN_SEPARATE_REGIONS;
+                        @memmove(self.to_slice_never_null()[0..count], source.to_slice_never_null()[0..count]);
+                    } else {
+                        @memmove(self.to_slice_never_null()[0..count], source[0..count]);
+                    }
+                },
+            }
+        }
+        pub fn memmove_from(self: ListSlice, dest: anytype) void {
+            self.memmove_count_from(self.len(), dest);
+        }
+        pub fn memmove_left_from(self: ListSlice, dest: anytype) void {
+            self.memmove_left_count_from(self.len(), dest);
+        }
+        pub fn memmove_right_from(self: ListSlice, dest: anytype) void {
+            self.memmove_right_count_from(self.len(), dest);
         }
 
         pub fn memset(self: ListSlice, val: T) void {
@@ -1359,7 +1472,7 @@ pub fn GooListSlice(comptime DEF_: GooListSliceDefinition) type {
             self.assert_not_null(@src());
             if (SOA) {
                 var i: Idx = 0;
-                while (i < self.len) : (i += 1) {
+                while (i < self.root_len) : (i += 1) {
                     self.set_item(i, val);
                 }
             } else {
@@ -1372,7 +1485,7 @@ pub fn GooListSlice(comptime DEF_: GooListSliceDefinition) type {
             self.assert_not_null(@src());
             if (SOA) {
                 var i: Idx = 0;
-                while (i < self.len) : (i += 1) {
+                while (i < self.root_len) : (i += 1) {
                     self.set_item_volatile(i, 0);
                 }
             } else {
@@ -1385,7 +1498,7 @@ pub fn GooListSlice(comptime DEF_: GooListSliceDefinition) type {
             self.assert_not_null(@src());
             if (SOA) {
                 var i: Idx = 0;
-                while (i < self.len) : (i += 1) {
+                while (i < self.root_len) : (i += 1) {
                     self.set_item_volatile(i, undefined);
                 }
             } else {
@@ -1398,7 +1511,7 @@ pub fn GooListSlice(comptime DEF_: GooListSliceDefinition) type {
             self.assert_not_null(@src());
             if (SOA) {
                 var i: Idx = 0;
-                while (i < self.len) : (i += 1) {
+                while (i < self.root_len) : (i += 1) {
                     self.set_item_volatile(i, val);
                 }
             } else {
@@ -1414,11 +1527,11 @@ pub fn GooListSlice(comptime DEF_: GooListSliceDefinition) type {
             assert_slice(@src());
             assert_mutable(@src());
             self.assert_not_null(@src());
-            const new_self = self.shift_window_right(n_positions_to_the_right);
-            if (n_positions_to_the_right > self.len) {
-                @memcpy(new_self.to_slice_never_null(), self.to_slice_never_null());
+            const new_self = self.shift_sub_slice_right(n_positions_to_the_right);
+            if (n_positions_to_the_right >= self.len()) {
+                self.memcopy_to(new_self);
             } else {
-                @memmove(new_self.to_slice_never_null(), self.to_slice_never_null());
+                self.memmove_right_to(new_self);
             }
             return new_self;
         }
@@ -1427,8 +1540,8 @@ pub fn GooListSlice(comptime DEF_: GooListSliceDefinition) type {
             assert_mutable(@src());
             assert_slice(@src());
             self.assert_not_null(@src());
-            const new_self = self.shift_window_right(n_positions_to_the_right);
-            @memcpy(new_self.to_slice_never_null(), self.to_slice_never_null());
+            const new_self = self.shift_sub_slice_right(n_positions_to_the_right);
+            self.memcopy_to(new_self);
             return new_self;
         }
 
@@ -1436,8 +1549,8 @@ pub fn GooListSlice(comptime DEF_: GooListSliceDefinition) type {
             assert_mutable(@src());
             assert_slice(@src());
             self.assert_not_null(@src());
-            const new_self = self.shift_window_right(n_positions_to_the_right);
-            @memmove(new_self.to_slice_never_null(), self.to_slice_never_null());
+            const new_self = self.shift_sub_slice_right(n_positions_to_the_right);
+            self.memmove_right_to(new_self);
             return new_self;
         }
 
@@ -1445,11 +1558,11 @@ pub fn GooListSlice(comptime DEF_: GooListSliceDefinition) type {
             assert_mutable(@src());
             assert_slice(@src());
             self.assert_not_null(@src());
-            const new_self = self.shift_window_left(n_positions_to_the_left);
-            if (n_positions_to_the_left > self.len) {
-                @memcpy(new_self.to_slice_never_null(), self.to_slice_never_null());
+            const new_self = self.shift_sub_slice_left(n_positions_to_the_left);
+            if (n_positions_to_the_left >= self.len()) {
+                self.memcopy_to(new_self);
             } else {
-                @memmove(new_self.to_slice_never_null(), self.to_slice_never_null());
+                self.memmove_left_to(new_self);
             }
             return new_self;
         }
@@ -1458,18 +1571,18 @@ pub fn GooListSlice(comptime DEF_: GooListSliceDefinition) type {
             assert_mutable(@src());
             assert_slice(@src());
             self.assert_not_null(@src());
-            const new_slice = self.shift_window_left(n_positions_to_the_left);
-            @memcpy(new_slice.to_slice_never_null(), self.to_slice_never_null());
-            return new_slice;
+            const new_self = self.shift_sub_slice_left(n_positions_to_the_left);
+            self.memcopy_to(new_self);
+            return new_self;
         }
 
         pub fn copy_leftward_always_overlaps(self: ListSlice, n_positions_to_the_left: Idx) ListSlice {
             assert_mutable(@src());
             assert_slice(@src());
             self.assert_not_null(@src());
-            const new_slice = self.shift_window_left(n_positions_to_the_left);
-            @memmove(new_slice.to_slice_never_null(), self.to_slice_never_null());
-            return new_slice;
+            const new_self = self.shift_sub_slice_left(n_positions_to_the_left);
+            self.memmove_left_to(new_self);
+            return new_self;
         }
 
         pub fn swap(self: ListSlice, idx_a: Idx, idx_b: Idx) void {
@@ -1483,7 +1596,14 @@ pub fn GooListSlice(comptime DEF_: GooListSliceDefinition) type {
         pub fn reverse(self: ListSlice) void {
             self.assert_not_null(@src());
             assert_mutable(@src());
-            Utils.Mem.reverse_slice(self.to_slice_never_null());
+            if (SOA) {
+                inline for (T_FIELDS_ENUM_TAGS[0..]) |field| {
+                    const field_slice = self.field_chunk_slice(field);
+                    Utils.Mem.reverse_slice(field_slice);
+                }
+            } else {
+                Utils.Mem.reverse_slice(self.to_slice_never_null());
+            }
         }
 
         pub fn move_one_and_preserve_displaced(self: ListSlice, old_index: Idx, new_index: Idx) void {
@@ -1491,109 +1611,143 @@ pub fn GooListSlice(comptime DEF_: GooListSliceDefinition) type {
             self.assert_idx_in_range(old_index, @src());
             self.assert_idx_in_range(new_index, @src());
             assert_mutable(@src());
-            Utils.Mem.move_one_and_preserve_displaced(self.ptr_never_null(), old_index, new_index);
+            if (SOA) {
+                inline for (T_FIELDS_ENUM_TAGS[0..]) |field| {
+                    const field_slice = self.field_chunk_slice(field);
+                    Utils.Mem.move_one_and_preserve_displaced(field_slice.ptr, old_index, new_index);
+                }
+            } else {
+                Utils.Mem.move_one_and_preserve_displaced(self.root_ptr_never_null(), old_index, new_index);
+            }
         }
 
         pub fn move_range_and_preserve_displaced(self: ListSlice, first_index_to_move: Idx, indexes_to_move_end_excluded: Idx, index_to_place_elements: Idx) void {
             self.assert_not_null(@src());
             self.assert_idx_in_range(first_index_to_move, @src());
             self.assert_len_in_range(indexes_to_move_end_excluded, @src());
-            self.assert_start_plus_len_in_range(index_to_place_elements, indexes_to_move_end_excluded - first_index_to_move, @src());
-            Utils.Mem.move_range_and_preserve_displaced(self.ptr_never_null(), first_index_to_move, indexes_to_move_end_excluded, index_to_place_elements);
+            self.assert_subslice_in_range(index_to_place_elements, indexes_to_move_end_excluded - first_index_to_move, @src());
+            if (SOA) {
+                inline for (T_FIELDS_ENUM_TAGS[0..]) |field| {
+                    const field_slice = self.field_chunk_slice(field);
+                    Utils.Mem.move_range_and_preserve_displaced(field_slice.ptr, first_index_to_move, indexes_to_move_end_excluded, index_to_place_elements);
+                }
+            } else {
+                Utils.Mem.move_range_and_preserve_displaced(self.root_ptr_never_null(), first_index_to_move, indexes_to_move_end_excluded, index_to_place_elements);
+            }
         }
 
         pub fn rotate_left(self: ListSlice, delta_left: Idx) void {
             self.assert_not_null(@src());
-            const delta_left_mod = @mod(delta_left, self.len);
+            const delta_left_mod = @mod(delta_left, self.len());
             if (delta_left_mod == 0) {
                 @branchHint(.unlikely);
                 return;
             }
-            Utils.Mem.reverse_slice(self.ptr_never_null()[0..delta_left_mod]);
-            Utils.Mem.reverse_slice(self.ptr_never_null()[delta_left_mod..self.len]);
-            Utils.Mem.reverse_slice(self.ptr_never_null()[0..self.len]);
+            if (SOA) {
+                inline for (T_FIELDS_ENUM_TAGS[0..]) |field| {
+                    const field_slice = self.field_chunk_slice(field);
+                    Utils.Mem.reverse_slice(field_slice[0..delta_left_mod]);
+                    Utils.Mem.reverse_slice(field_slice[delta_left_mod..self.len()]);
+                    Utils.Mem.reverse_slice(field_slice[0..self.len()]);
+                }
+            } else {
+                Utils.Mem.reverse_slice(self.root_ptr_never_null()[0..delta_left_mod]);
+                Utils.Mem.reverse_slice(self.root_ptr_never_null()[delta_left_mod..self.len()]);
+                Utils.Mem.reverse_slice(self.root_ptr_never_null()[0..self.len()]);
+            }
         }
 
         pub fn rotate_right(self: ListSlice, delta_right: Idx) void {
             self.assert_not_null(@src());
-            var delta_right_mod = @mod(delta_right, self.len);
+            var delta_right_mod = @mod(delta_right, self.len());
             if (delta_right_mod == 0) {
                 @branchHint(.unlikely);
                 return;
             }
-            delta_right_mod = self.len - delta_right_mod;
-            Utils.Mem.reverse_slice(self.ptr_never_null()[0..delta_right_mod]);
-            Utils.Mem.reverse_slice(self.ptr_never_null()[delta_right_mod..self.len]);
-            Utils.Mem.reverse_slice(self.ptr_never_null()[0..self.len]);
+            delta_right_mod = self.len() - delta_right_mod;
+            if (SOA) {
+                inline for (T_FIELDS_ENUM_TAGS[0..]) |field| {
+                    const field_slice = self.field_chunk_slice(field);
+                    Utils.Mem.reverse_slice(field_slice[0..delta_right_mod]);
+                    Utils.Mem.reverse_slice(field_slice[delta_right_mod..self.len()]);
+                    Utils.Mem.reverse_slice(field_slice[0..self.len()]);
+                }
+            } else {
+                Utils.Mem.reverse_slice(self.root_ptr_never_null()[0..delta_right_mod]);
+                Utils.Mem.reverse_slice(self.root_ptr_never_null()[delta_right_mod..self.len()]);
+                Utils.Mem.reverse_slice(self.root_ptr_never_null()[0..self.len()]);
+            }
         }
 
         //**********
         // SEARCH
         //**********
 
+        //CHECKPOINT update for SOA mode
+
         pub fn search_for_item_implicit(self: ListSlice, search_val: anytype) ?Idx {
             self.assert_not_null(@src());
-            return Utils.Mem.search_implicit(self.ptr_never_null(), 0, self.len, search_val, Idx);
+            return Utils.Mem.search_implicit(self.root_ptr_never_null(), 0, self.root_len, search_val, Idx);
         }
 
         pub fn search_for_item_with_func(self: ListSlice, search_param: anytype, match_fn: *const CompareFunc(@TypeOf(search_param), T)) ?Idx {
             self.assert_not_null(@src());
-            return Utils.Mem.search_with_func(self.ptr_never_null(), 0, self.len, search_param, match_fn, Idx);
+            return Utils.Mem.search_with_func(self.root_ptr_never_null(), 0, self.root_len, search_param, match_fn, Idx);
         }
 
         pub fn search_for_item_with_func_and_userdata(self: ListSlice, search_param: anytype, userdata: anytype, match_fn: *const CompareFuncUserdata(@TypeOf(search_param), T, @TypeOf(userdata))) ?Idx {
             self.assert_not_null(@src());
-            return Utils.Mem.search_with_func_and_userdata(self.ptr_never_null(), 0, self.len, search_param, userdata, match_fn, Idx);
+            return Utils.Mem.search_with_func_and_userdata(self.root_ptr_never_null(), 0, self.root_len, search_param, userdata, match_fn, Idx);
         }
 
         /// Returns number of indexes found and appended to output buffer
         pub fn search_for_many_items_implicit(self: ListSlice, search_vals: anytype, search_vals_order: Utils.Mem.LinearSearchOrder, output_buffer: anytype) Idx {
             self.assert_not_null(@src());
-            return Utils.Mem.search_for_many_implicit(self.ptr_never_null(), 0, self.len, search_vals, search_vals_order, output_buffer, Idx);
+            return Utils.Mem.search_for_many_implicit(self.root_ptr_never_null(), 0, self.root_len, search_vals, search_vals_order, output_buffer, Idx);
         }
 
         /// Returns number of indexes found and appended to output buffer
         pub fn search_for_many_items_with_func(self: ListSlice, search_vals: anytype, search_vals_order: Utils.Mem.LinearSearchOrder, output_buffer: anytype, match_fn: *const CompareFunc(Types.IndexableChild(@TypeOf(search_vals)), T)) Idx {
             self.assert_not_null(@src());
-            return Utils.Mem.search_for_many_with_func(self.ptr_never_null(), 0, self.len, search_vals, search_vals_order, match_fn, output_buffer, Idx);
+            return Utils.Mem.search_for_many_with_func(self.root_ptr_never_null(), 0, self.root_len, search_vals, search_vals_order, match_fn, output_buffer, Idx);
         }
 
         /// Returns number of indexes found and appended to output buffer
         pub fn search_for_many_items_with_func_and_userdata(self: ListSlice, userdata: anytype, search_vals: anytype, search_vals_order: Utils.Mem.LinearSearchOrder, output_buffer: anytype, match_fn: *const CompareFunc(Types.IndexableChild(@TypeOf(search_vals)), T, @TypeOf(userdata))) Idx {
             self.assert_not_null(@src());
-            return Utils.Mem.search_for_many_with_func_and_userdata(self.ptr_never_null(), 0, self.len, search_vals, search_vals_order, userdata, match_fn, output_buffer, Idx);
+            return Utils.Mem.search_for_many_with_func_and_userdata(self.root_ptr_never_null(), 0, self.root_len, search_vals, search_vals_order, userdata, match_fn, output_buffer, Idx);
         }
 
         pub const BinarySearchResult = Utils.Mem.BinarySerachResult(Idx);
 
         pub fn binary_search_for_item_implicit(self: ListSlice, find_val: anytype) BinarySearchResult {
             self.assert_not_null(@src());
-            return Utils.Mem.binary_search_implicit(self.ptr_never_null(), 0, self.len, find_val, Idx);
+            return Utils.Mem.binary_search_implicit(self.root_ptr_never_null(), 0, self.root_len, find_val, Idx);
         }
 
         pub fn binary_search_for_item_idx_with_func(self: ListSlice, search_param: anytype, match_fn: *const CompareFunc(@TypeOf(search_param), T), less_than_fn: *const CompareFunc(@TypeOf(search_param), T)) BinarySearchResult {
             self.assert_not_null(@src());
-            return Utils.Mem.binary_search_with_func(self.ptr_never_null(), 0, self.len, search_param, match_fn, less_than_fn, Idx);
+            return Utils.Mem.binary_search_with_func(self.root_ptr_never_null(), 0, self.root_len, search_param, match_fn, less_than_fn, Idx);
         }
 
         pub fn binary_search_for_item_idx_with_func_and_userdata(self: ListSlice, search_param: anytype, userdata: anytype, match_fn: *const CompareFuncUserdata(@TypeOf(search_param), T, @TypeOf(userdata)), less_than_fn: *const CompareFuncUserdata(@TypeOf(search_param), T, @TypeOf(userdata))) BinarySearchResult {
             self.assert_not_null(@src());
-            return Utils.Mem.binary_search_with_func_and_userdata(self.ptr_never_null(), 0, self.len, search_param, userdata, match_fn, less_than_fn, Idx);
+            return Utils.Mem.binary_search_with_func_and_userdata(self.root_ptr_never_null(), 0, self.root_len, search_param, userdata, match_fn, less_than_fn, Idx);
         }
 
         pub fn binary_search_for_many_items_implicit(self: ListSlice, search_vals: anytype, search_vals_order: Utils.Mem.BinarySearchOrder, output_buffer: anytype) Idx {
             self.assert_not_null(@src());
-            return Utils.Mem.binary_search_many_implicit(self.ptr_never_null(), 0, self.len, search_vals, search_vals_order, output_buffer, Idx);
+            return Utils.Mem.binary_search_many_implicit(self.root_ptr_never_null(), 0, self.root_len, search_vals, search_vals_order, output_buffer, Idx);
         }
 
         pub fn binary_search_for_many_items_idx_with_func(self: ListSlice, search_params: anytype, search_params_order: Utils.Mem.BinarySearchOrder, match_fn: *const CompareFunc(Types.IndexableChild(@TypeOf(search_params)), T), less_than_fn: *const CompareFunc(Types.IndexableChild(@TypeOf(search_params)), T), output_buffer: anytype) Idx {
             self.assert_not_null(@src());
-            return Utils.Mem.binary_search_many_with_func(self.ptr_never_null(), 0, self.len, search_params, search_params_order, match_fn, less_than_fn, output_buffer, Idx);
+            return Utils.Mem.binary_search_many_with_func(self.root_ptr_never_null(), 0, self.root_len, search_params, search_params_order, match_fn, less_than_fn, output_buffer, Idx);
         }
 
         pub fn binary_search_for_many_items_idx_with_func_and_userdata(self: ListSlice, search_params: anytype, search_params_order: Utils.Mem.BinarySearchOrder, userdata: anytype, match_fn: *const CompareFuncUserdata(Types.IndexableChild(@TypeOf(search_params)), T, @TypeOf(userdata)), less_than_fn: *const CompareFuncUserdata(Types.IndexableChild(@TypeOf(search_params)), T, @TypeOf(userdata)), output_buffer: anytype) Idx {
             self.assert_not_null(@src());
-            return Utils.Mem.binary_search_many_with_func_and_userdata(self.ptr_never_null(), 0, self.len, search_params, search_params_order, userdata, match_fn, less_than_fn, output_buffer, Idx);
+            return Utils.Mem.binary_search_many_with_func_and_userdata(self.root_ptr_never_null(), 0, self.root_len, search_params, search_params_order, userdata, match_fn, less_than_fn, output_buffer, Idx);
         }
 
         //**********
@@ -1602,32 +1756,32 @@ pub fn GooListSlice(comptime DEF_: GooListSliceDefinition) type {
 
         pub fn insertion_sort_implicit(self: *ListSlice) void {
             self.assert_not_null(@src());
-            Root.Sort.InsertionSort.insertion_sort_implicit(self.ptr_never_null()[0..self.len]);
+            Root.Sort.InsertionSort.insertion_sort_implicit(self.root_ptr_never_null()[0..self.root_len]);
         }
 
         pub fn insertion_sort_with_func(self: *ListSlice, greater_than_fn: *const Utils.Mem.CompareFunc(T, T)) void {
             self.assert_not_null(@src());
-            Root.Sort.InsertionSort.insertion_sort_with_func(self.ptr_never_null()[0..self.len], greater_than_fn);
+            Root.Sort.InsertionSort.insertion_sort_with_func(self.root_ptr_never_null()[0..self.root_len], greater_than_fn);
         }
 
         pub fn insertion_sort_with_func_and_userdata(self: *ListSlice, userdata: anytype, greater_than_fn: *const Utils.Mem.CompareFuncUserdata(T, T, @TypeOf(userdata))) void {
             self.assert_not_null(@src());
-            Root.Sort.InsertionSort.insertion_sort_with_func_and_userdata(self.ptr_never_null()[0..self.len], userdata, greater_than_fn);
+            Root.Sort.InsertionSort.insertion_sort_with_func_and_userdata(self.root_ptr_never_null()[0..self.root_len], userdata, greater_than_fn);
         }
 
         pub fn is_sorted_implicit(self: ListSlice) bool {
             self.assert_not_null(@src());
-            return Root.Sort.is_sorted_implicit(self.ptr_never_null(), 0, self.len);
+            return Root.Sort.is_sorted_implicit(self.root_ptr_never_null(), 0, self.root_len);
         }
 
         pub fn is_sorted_with_func(self: ListSlice, greater_than_fn: *const Utils.Mem.CompareFunc(T, T)) bool {
             self.assert_not_null(@src());
-            return Root.Sort.is_sorted_with_func(self.ptr_never_null(), 0, self.len, greater_than_fn);
+            return Root.Sort.is_sorted_with_func(self.root_ptr_never_null(), 0, self.root_len, greater_than_fn);
         }
 
         pub fn is_sorted_with_func_and_userdata(self: ListSlice, userdata: anytype, greater_than_fn: *const Utils.Mem.CompareFuncUserdata(T, T, @TypeOf(userdata))) bool {
             self.assert_not_null(@src());
-            return Root.Sort.is_sorted_with_func_and_userdata(self.ptr_never_null(), 0, self.len, userdata, greater_than_fn);
+            return Root.Sort.is_sorted_with_func_and_userdata(self.root_ptr_never_null(), 0, self.root_len, userdata, greater_than_fn);
         }
 
         //**********
@@ -1639,7 +1793,7 @@ pub fn GooListSlice(comptime DEF_: GooListSliceDefinition) type {
             return ListSlice{};
         }
 
-        pub fn in_place_free(self: *ListSlice, alloc: Allocator) void {
+        pub fn ref_free(self: *ListSlice, alloc: Allocator) void {
             var self_val = self.*;
             self_val = self_val.free(alloc);
             self.* = self_val;
@@ -1664,7 +1818,7 @@ pub fn GooListSlice(comptime DEF_: GooListSliceDefinition) type {
         }
         pub fn ensure_free_slots_custom_settings(self: ListSlice, needed_free_slots: Idx, alloc: Allocator, settings: AllocSettings, comptime settings_comptime: ?AllocSettingsComptime) ListSlice {
             assert_list(@src());
-            const new_len = self.len + needed_free_slots;
+            const new_len = self.root_len + needed_free_slots;
             if (new_len <= self.cap) return;
             assert_allocated(@src());
             var new_self = self;
@@ -1672,18 +1826,18 @@ pub fn GooListSlice(comptime DEF_: GooListSliceDefinition) type {
             return new_self;
         }
 
-        pub fn in_place_ensure_free_slots(self: *ListSlice, needed_free_slots: Idx, alloc: Allocator) void {
+        pub fn ref_ensure_free_slots(self: *ListSlice, needed_free_slots: Idx, alloc: Allocator) void {
             var self_val = self.*;
             self_val = self_val.ensure_free_slots(needed_free_slots, alloc);
             self.* = self_val;
         }
 
-        pub fn in_place_ensure_free_slots_custom_grow(self: *ListSlice, needed_free_slots: Idx, alloc: Allocator, grow: GrowthModel, comptime grow_comptime_known: ?GrowthModel) void {
+        pub fn ref_ensure_free_slots_custom_grow(self: *ListSlice, needed_free_slots: Idx, alloc: Allocator, grow: GrowthModel, comptime grow_comptime_known: ?GrowthModel) void {
             var self_val = self.*;
             self_val = self_val.ensure_free_slots_custom_grow(needed_free_slots, alloc, grow, grow_comptime_known);
             self.* = self_val;
         }
-        pub fn in_place_ensure_free_slots_custom_settings(self: *ListSlice, needed_free_slots: Idx, alloc: Allocator, settings: AllocSettings, comptime settings_comptime: ?AllocSettingsComptime) void {
+        pub fn ref_ensure_free_slots_custom_settings(self: *ListSlice, needed_free_slots: Idx, alloc: Allocator, settings: AllocSettings, comptime settings_comptime: ?AllocSettingsComptime) void {
             var self_val = self.*;
             self_val = self_val.ensure_free_slots_custom_settings(needed_free_slots, alloc, settings, settings_comptime);
             self.* = self_val;
@@ -1691,10 +1845,10 @@ pub fn GooListSlice(comptime DEF_: GooListSliceDefinition) type {
 
         pub fn shrink_cap_reserve_at_most(self: ListSlice, at_most_n_free_slots: Idx, alloc: Allocator) ListSlice {
             assert_list(@src());
-            const curr_free = self.cap - self.len;
+            const curr_free = self.cap - self.root_len;
             if (curr_free <= at_most_n_free_slots) return self;
             assert_allocated(@src());
-            const new_cap = self.len + at_most_n_free_slots;
+            const new_cap = self.root_len + at_most_n_free_slots;
             var new_self = self;
             Utils.Alloc.smart_alloc_ptr_ptrs(
                 alloc,
@@ -1707,7 +1861,7 @@ pub fn GooListSlice(comptime DEF_: GooListSliceDefinition) type {
             return new_self;
         }
 
-        pub fn in_place_shrink_cap_reserve_at_most(self: *ListSlice, at_most_n_free_slots: Idx, alloc: Allocator) void {
+        pub fn ref_shrink_cap_reserve_at_most(self: *ListSlice, at_most_n_free_slots: Idx, alloc: Allocator) void {
             var self_val = self.*;
             self_val = self_val.shrink_cap_reserve_at_most(at_most_n_free_slots, alloc);
             self.* = self_val;
@@ -1722,20 +1876,20 @@ pub fn GooListSlice(comptime DEF_: GooListSliceDefinition) type {
             var new_self = self;
             if (IS_LIST) {
                 Utils.Alloc.smart_alloc_ptr_ptrs(alloc, &new_self.ptr, &new_self.cap, @intCast(new_capacity), settings, settings_comptime);
-                new_self.len = @min(self.len, new_self.cap);
+                new_self.root_len = @min(self.root_len, new_self.cap);
             } else {
-                Utils.Alloc.smart_alloc_ptr_ptrs(alloc, &new_self.ptr, &new_self.len, @intCast(new_capacity), settings, settings_comptime);
+                Utils.Alloc.smart_alloc_ptr_ptrs(alloc, &new_self.ptr, &new_self.root_len, @intCast(new_capacity), settings, settings_comptime);
             }
             return new_self;
         }
 
-        pub fn in_place_realloc_exact(self: *ListSlice, new_capacity: Idx, alloc: Allocator) void {
+        pub fn ref_realloc_exact(self: *ListSlice, new_capacity: Idx, alloc: Allocator) void {
             var self_val = self.*;
             self_val = self_val.realloc_exact(new_capacity, alloc);
             self.* = self_val;
         }
 
-        pub fn in_place_realloc_exact_custom_settings(self: *ListSlice, new_capacity: Idx, alloc: Allocator, settings: AllocSettings, comptime settings_comptime: ?AllocSettingsComptime) void {
+        pub fn ref_realloc_exact_custom_settings(self: *ListSlice, new_capacity: Idx, alloc: Allocator, settings: AllocSettings, comptime settings_comptime: ?AllocSettingsComptime) void {
             var self_val = self.*;
             self_val = self_val.realloc_exact_custom_settings(new_capacity, alloc, settings, settings_comptime);
             self.* = self_val;
@@ -1784,7 +1938,7 @@ pub fn GooListSlice(comptime DEF_: GooListSliceDefinition) type {
             };
         } {
             var new_self = if (origin_in_place == .RET_NEW) self else self.*;
-            const old_len = new_self.len;
+            const old_len = new_self.root_len;
             const real_count: Idx = if (origin_count == .ONE) 1 else count;
             switch (origin_alloc) {
                 .ASSUME_CAPACITY => {
@@ -1797,23 +1951,23 @@ pub fn GooListSlice(comptime DEF_: GooListSliceDefinition) type {
                     if (IS_LIST) {
                         new_self = new_self.ensure_free_slots(real_count, alloc);
                     } else {
-                        new_self = new_self.realloc_exact(self.len + real_count, alloc);
+                        new_self = new_self.realloc_exact(self.root_len + real_count, alloc);
                     }
                 },
             }
             const first_new_idx = switch (origin_loc) {
-                .APPEND => if (IS_LIST) new_self.len else new_self.len - real_count,
+                .APPEND => if (IS_LIST) new_self.root_len else new_self.root_len - real_count,
                 .INSERT => insert_idx,
             };
-            if (IS_LIST) new_self.len += real_count;
+            if (IS_LIST) new_self.root_len += real_count;
             const last_idx = switch (origin_loc) {
-                .APPEND => new_self.len,
+                .APPEND => new_self.root_len,
                 .INSERT => insert_idx + real_count,
             };
-            if (origin_loc == .INSERT and last_idx < new_self.len) {
+            if (origin_loc == .INSERT and last_idx < new_self.root_len) {
                 @branchHint(.likely);
                 assert_mutable(@src());
-                @memmove(self.ptr_never_null()[first_new_idx + real_count .. new_self.len], self.ptr_never_null()[first_new_idx..old_len]);
+                @memmove(self.root_ptr_never_null()[first_new_idx + real_count .. new_self.root_len], self.root_ptr_never_null()[first_new_idx..old_len]);
             }
             switch (origin_set) {
                 .EMPTY_SLOTS => {},
@@ -1821,10 +1975,10 @@ pub fn GooListSlice(comptime DEF_: GooListSliceDefinition) type {
                     assert_mutable(@src());
                     switch (origin_count) {
                         .ONE => {
-                            new_self.ptr_never_null()[first_new_idx] = vals;
+                            new_self.root_ptr_never_null()[first_new_idx] = vals;
                         },
                         .MANY => {
-                            @memcpy(new_self.ptr_never_null()[first_new_idx..last_idx], vals);
+                            @memcpy(new_self.root_ptr_never_null()[first_new_idx..last_idx], vals);
                         },
                     }
                 },
@@ -1962,99 +2116,99 @@ pub fn GooListSlice(comptime DEF_: GooListSliceDefinition) type {
         // APPEND IN-PLACE
         //**********
 
-        pub fn in_place_append_one_empty_slot_assume_capacity_get_idx(self: *ListSlice) Idx {
+        pub fn ref_append_one_empty_slot_assume_capacity_get_idx(self: *ListSlice) Idx {
             return expand_internal(.IN_PLACE, self, .ONE, 1, .ASSUME_CAPACITY, void{}, .IDX, .EMPTY_SLOTS, void{}, .APPEND, void{});
         }
 
-        pub fn in_place_append_one_empty_slot_assume_capacity_get_elem_ptr(self: *ListSlice) ElemPtr {
+        pub fn ref_append_one_empty_slot_assume_capacity_get_elem_ptr(self: *ListSlice) ElemPtr {
             return expand_internal(.IN_PLACE, self, .ONE, 1, .ASSUME_CAPACITY, void{}, .REF, .EMPTY_SLOTS, void{}, .APPEND, void{});
         }
 
-        pub fn in_place_append_one_empty_slot_assume_capacity(self: *ListSlice) void {
+        pub fn ref_append_one_empty_slot_assume_capacity(self: *ListSlice) void {
             return expand_internal(.IN_PLACE, self, .ONE, 1, .ASSUME_CAPACITY, void{}, .SELF_ONLY, .EMPTY_SLOTS, void{}, .APPEND, void{});
         }
 
-        pub fn in_place_append_many_empty_slots_assume_capacity_get_idx_range(self: *ListSlice, count: Idx) struct { Idx, Idx } {
+        pub fn ref_append_many_empty_slots_assume_capacity_get_idx_range(self: *ListSlice, count: Idx) struct { Idx, Idx } {
             return expand_internal(.IN_PLACE, self, .MANY, count, .ASSUME_CAPACITY, void{}, .IDX, .EMPTY_SLOTS, void{}, .APPEND, void{});
         }
 
-        pub fn in_place_append_many_empty_slots_assume_capacity_get_sub_slice(self: *ListSlice, count: Idx) ListSlice.with_sub_slice_mode(.STATIC) {
+        pub fn ref_append_many_empty_slots_assume_capacity_get_sub_slice(self: *ListSlice, count: Idx) ListSlice.with_sub_slice_mode(.STATIC) {
             return expand_internal(.IN_PLACE, self, .MANY, count, .ASSUME_CAPACITY, void{}, .REF, .EMPTY_SLOTS, void{}, .APPEND, void{});
         }
 
-        pub fn in_place_append_many_empty_slots_assume_capacity(self: *ListSlice, count: Idx) void {
+        pub fn ref_append_many_empty_slots_assume_capacity(self: *ListSlice, count: Idx) void {
             return expand_internal(.IN_PLACE, self, .MANY, count, .ASSUME_CAPACITY, void{}, .SELF_ONLY, .EMPTY_SLOTS, void{}, .APPEND, void{});
         }
 
-        pub fn in_place_append_one_empty_slot_get_idx(self: *ListSlice, alloc: Allocator) Idx {
+        pub fn ref_append_one_empty_slot_get_idx(self: *ListSlice, alloc: Allocator) Idx {
             return expand_internal(.IN_PLACE, self, .ONE, 1, .REALLOCATE, alloc, .IDX, .EMPTY_SLOTS, void{}, .APPEND, void{});
         }
 
-        pub fn in_place_append_one_empty_slot_get_elem_ptr(self: *ListSlice, alloc: Allocator) ElemPtr {
+        pub fn ref_append_one_empty_slot_get_elem_ptr(self: *ListSlice, alloc: Allocator) ElemPtr {
             return expand_internal(.IN_PLACE, self, .ONE, 1, .REALLOCATE, alloc, .REF, .EMPTY_SLOTS, void{}, .APPEND, void{});
         }
 
-        pub fn in_place_append_one_empty_slot(self: *ListSlice, alloc: Allocator) void {
+        pub fn ref_append_one_empty_slot(self: *ListSlice, alloc: Allocator) void {
             return expand_internal(.IN_PLACE, self, .ONE, 1, .REALLOCATE, alloc, .SELF_ONLY, .EMPTY_SLOTS, void{}, .APPEND, void{});
         }
 
-        pub fn in_place_append_many_empty_slots_get_idx_range(self: *ListSlice, count: Idx, alloc: Allocator) struct { Idx, Idx } {
+        pub fn ref_append_many_empty_slots_get_idx_range(self: *ListSlice, count: Idx, alloc: Allocator) struct { Idx, Idx } {
             return expand_internal(.IN_PLACE, self, .MANY, count, .REALLOCATE, alloc, .IDX, .EMPTY_SLOTS, void{}, .APPEND, void{});
         }
 
-        pub fn in_place_append_many_empty_slots_get_sub_slice(self: *ListSlice, count: Idx, alloc: Allocator) ListSlice.with_sub_slice_mode(.STATIC) {
+        pub fn ref_append_many_empty_slots_get_sub_slice(self: *ListSlice, count: Idx, alloc: Allocator) ListSlice.with_sub_slice_mode(.STATIC) {
             return expand_internal(.IN_PLACE, self, .MANY, count, .REALLOCATE, alloc, .REF, .EMPTY_SLOTS, void{}, .APPEND, void{});
         }
 
-        pub fn in_place_append_many_empty_slots(self: *ListSlice, count: Idx, alloc: Allocator) void {
+        pub fn ref_append_many_empty_slots(self: *ListSlice, count: Idx, alloc: Allocator) void {
             return expand_internal(.IN_PLACE, self, .MANY, count, .REALLOCATE, alloc, .SELF_ONLY, .EMPTY_SLOTS, void{}, .APPEND, void{});
         }
 
-        pub fn in_place_append_one_item_assume_capacity_get_idx(self: *ListSlice, item: T) Idx {
+        pub fn ref_append_one_item_assume_capacity_get_idx(self: *ListSlice, item: T) Idx {
             return expand_internal(.IN_PLACE, self, .ONE, 1, .ASSUME_CAPACITY, void{}, .IDX, .SET_VALS, item, .APPEND, void{});
         }
 
-        pub fn in_place_append_one_item_assume_capacity_get_elem_ptr(self: *ListSlice, item: T) ElemPtr {
+        pub fn ref_append_one_item_assume_capacity_get_elem_ptr(self: *ListSlice, item: T) ElemPtr {
             return expand_internal(.IN_PLACE, self, .ONE, 1, .ASSUME_CAPACITY, void{}, .REF, .SET_VALS, item, .APPEND, void{});
         }
 
-        pub fn in_place_append_one_item_assume_capacity(self: *ListSlice, item: T) void {
+        pub fn ref_append_one_item_assume_capacity(self: *ListSlice, item: T) void {
             return expand_internal(.IN_PLACE, self, .ONE, 1, .ASSUME_CAPACITY, void{}, .SELF_ONLY, .SET_VALS, item, .APPEND, void{});
         }
 
-        pub fn in_place_append_one_item_get_idx(self: *ListSlice, item: T, alloc: Allocator) Idx {
+        pub fn ref_append_one_item_get_idx(self: *ListSlice, item: T, alloc: Allocator) Idx {
             return expand_internal(.IN_PLACE, self, .ONE, 1, .REALLOCATE, alloc, .IDX, .SET_VALS, item, .APPEND, void{});
         }
 
-        pub fn in_place_append_one_item_get_elem_ptr(self: *ListSlice, item: T, alloc: Allocator) ElemPtr {
+        pub fn ref_append_one_item_get_elem_ptr(self: *ListSlice, item: T, alloc: Allocator) ElemPtr {
             return expand_internal(.IN_PLACE, self, .ONE, 1, .REALLOCATE, alloc, .REF, .SET_VALS, item, .APPEND, void{});
         }
 
-        pub fn in_place_append_one_item(self: *ListSlice, item: T, alloc: Allocator) void {
+        pub fn ref_append_one_item(self: *ListSlice, item: T, alloc: Allocator) void {
             return expand_internal(.IN_PLACE, self, .ONE, 1, .REALLOCATE, alloc, .SELF_ONLY, .SET_VALS, item, .APPEND, void{});
         }
 
-        pub fn in_place_append_many_items_assume_capacity_get_idx_range(self: *ListSlice, items: []const T) struct { Idx, Idx } {
+        pub fn ref_append_many_items_assume_capacity_get_idx_range(self: *ListSlice, items: []const T) struct { Idx, Idx } {
             return expand_internal(.IN_PLACE, self, .MANY, @intCast(items.len), .ASSUME_CAPACITY, void, .IDX, .SET_VALS, items, .APPEND, void{});
         }
 
-        pub fn in_place_append_many_items_assume_capacity_get_sub_slice(self: *ListSlice, items: []const T) ListSlice.with_sub_slice_mode(.STATIC) {
+        pub fn ref_append_many_items_assume_capacity_get_sub_slice(self: *ListSlice, items: []const T) ListSlice.with_sub_slice_mode(.STATIC) {
             return expand_internal(.IN_PLACE, self, .MANY, @intCast(items.len), .ASSUME_CAPACITY, void, .REF, .SET_VALS, items, .APPEND, void{});
         }
 
-        pub fn in_place_append_many_items_assume_capacity(self: *ListSlice, items: []const T) void {
+        pub fn ref_append_many_items_assume_capacity(self: *ListSlice, items: []const T) void {
             return expand_internal(.IN_PLACE, self, .MANY, @intCast(items.len), .ASSUME_CAPACITY, void, .SELF_ONLY, .SET_VALS, items, .APPEND, void{});
         }
 
-        pub fn in_place_append_many_items_get_idx_range(self: *ListSlice, items: []const T, alloc: Allocator) struct { Idx, Idx } {
+        pub fn ref_append_many_items_get_idx_range(self: *ListSlice, items: []const T, alloc: Allocator) struct { Idx, Idx } {
             return expand_internal(.IN_PLACE, self, .MANY, @intCast(items.len), .REALLOCATE, alloc, .IDX, .SET_VALS, items, .APPEND, void{});
         }
 
-        pub fn in_place_append_many_items_get_sub_slice(self: *ListSlice, items: []const T, alloc: Allocator) ListSlice.with_sub_slice_mode(.STATIC) {
+        pub fn ref_append_many_items_get_sub_slice(self: *ListSlice, items: []const T, alloc: Allocator) ListSlice.with_sub_slice_mode(.STATIC) {
             return expand_internal(.IN_PLACE, self, .MANY, @intCast(items.len), .REALLOCATE, alloc, .REF, .SET_VALS, items, .APPEND, void{});
         }
 
-        pub fn in_place_append_many_items(self: *ListSlice, items: []const T, alloc: Allocator) void {
+        pub fn ref_append_many_items(self: *ListSlice, items: []const T, alloc: Allocator) void {
             return expand_internal(.IN_PLACE, self, .MANY, @intCast(items.len), .REALLOCATE, alloc, .SELF_ONLY, .SET_VALS, items, .APPEND, void{});
         }
 
@@ -2162,99 +2316,99 @@ pub fn GooListSlice(comptime DEF_: GooListSliceDefinition) type {
         // INSERT IN-PLACE
         //**********
 
-        pub fn in_place_insert_one_empty_slot_assume_capacity_get_idx(self: *ListSlice, idx: Idx) Idx {
+        pub fn ref_insert_one_empty_slot_assume_capacity_get_idx(self: *ListSlice, idx: Idx) Idx {
             return expand_internal(.IN_PLACE, self, .ONE, 1, .ASSUME_CAPACITY, void{}, .IDX, .EMPTY_SLOTS, void{}, .INSERT, idx);
         }
 
-        pub fn in_place_insert_one_empty_slot_assume_capacity_get_elem_ptr(self: *ListSlice, idx: Idx) ElemPtr {
+        pub fn ref_insert_one_empty_slot_assume_capacity_get_elem_ptr(self: *ListSlice, idx: Idx) ElemPtr {
             return expand_internal(.IN_PLACE, self, .ONE, 1, .ASSUME_CAPACITY, void{}, .REF, .EMPTY_SLOTS, void{}, .INSERT, idx);
         }
 
-        pub fn in_place_insert_one_empty_slot_assume_capacity(self: *ListSlice, idx: Idx) void {
+        pub fn ref_insert_one_empty_slot_assume_capacity(self: *ListSlice, idx: Idx) void {
             return expand_internal(.IN_PLACE, self, .ONE, 1, .ASSUME_CAPACITY, void{}, .SELF_ONLY, .EMPTY_SLOTS, void{}, .INSERT, idx);
         }
 
-        pub fn in_place_insert_many_empty_slots_assume_capacity_get_idx_range(self: *ListSlice, idx: Idx, count: Idx) struct { Idx, Idx } {
+        pub fn ref_insert_many_empty_slots_assume_capacity_get_idx_range(self: *ListSlice, idx: Idx, count: Idx) struct { Idx, Idx } {
             return expand_internal(.IN_PLACE, self, .MANY, count, .ASSUME_CAPACITY, void{}, .IDX, .EMPTY_SLOTS, void{}, .INSERT, idx);
         }
 
-        pub fn in_place_insert_many_empty_slots_assume_capacity_get_sub_slice(self: *ListSlice, idx: Idx, count: Idx) ListSlice.with_sub_slice_mode(.STATIC) {
+        pub fn ref_insert_many_empty_slots_assume_capacity_get_sub_slice(self: *ListSlice, idx: Idx, count: Idx) ListSlice.with_sub_slice_mode(.STATIC) {
             return expand_internal(.IN_PLACE, self, .MANY, count, .ASSUME_CAPACITY, void{}, .REF, .EMPTY_SLOTS, void{}, .INSERT, idx);
         }
 
-        pub fn in_place_insert_many_empty_slots_assume_capacity(self: *ListSlice, idx: Idx, count: Idx) void {
+        pub fn ref_insert_many_empty_slots_assume_capacity(self: *ListSlice, idx: Idx, count: Idx) void {
             return expand_internal(.IN_PLACE, self, .MANY, count, .ASSUME_CAPACITY, void{}, .SELF_ONLY, .EMPTY_SLOTS, void{}, .INSERT, idx);
         }
 
-        pub fn in_place_insert_one_empty_slot_get_idx(self: *ListSlice, idx: Idx, alloc: Allocator) Idx {
+        pub fn ref_insert_one_empty_slot_get_idx(self: *ListSlice, idx: Idx, alloc: Allocator) Idx {
             return expand_internal(.IN_PLACE, self, .ONE, 1, .REALLOCATE, alloc, .IDX, .EMPTY_SLOTS, void{}, .INSERT, idx);
         }
 
-        pub fn in_place_insert_one_empty_slot_get_elem_ptr(self: *ListSlice, idx: Idx, alloc: Allocator) ElemPtr {
+        pub fn ref_insert_one_empty_slot_get_elem_ptr(self: *ListSlice, idx: Idx, alloc: Allocator) ElemPtr {
             return expand_internal(.IN_PLACE, self, .ONE, 1, .REALLOCATE, alloc, .REF, .EMPTY_SLOTS, void{}, .INSERT, idx);
         }
 
-        pub fn in_place_insert_one_empty_slot(self: *ListSlice, idx: Idx, alloc: Allocator) void {
+        pub fn ref_insert_one_empty_slot(self: *ListSlice, idx: Idx, alloc: Allocator) void {
             return expand_internal(.IN_PLACE, self, .ONE, 1, .REALLOCATE, alloc, .SELF_ONLY, .EMPTY_SLOTS, void{}, .INSERT, idx);
         }
 
-        pub fn in_place_insert_many_empty_slots_get_idx_range(self: *ListSlice, idx: Idx, count: Idx, alloc: Allocator) struct { Idx, Idx } {
+        pub fn ref_insert_many_empty_slots_get_idx_range(self: *ListSlice, idx: Idx, count: Idx, alloc: Allocator) struct { Idx, Idx } {
             return expand_internal(.IN_PLACE, self, .MANY, count, .REALLOCATE, alloc, .IDX, .EMPTY_SLOTS, void{}, .INSERT, idx);
         }
 
-        pub fn in_place_insert_many_empty_slots_get_sub_slice(self: *ListSlice, idx: Idx, count: Idx, alloc: Allocator) ListSlice.with_sub_slice_mode(.STATIC) {
+        pub fn ref_insert_many_empty_slots_get_sub_slice(self: *ListSlice, idx: Idx, count: Idx, alloc: Allocator) ListSlice.with_sub_slice_mode(.STATIC) {
             return expand_internal(.IN_PLACE, self, .MANY, count, .REALLOCATE, alloc, .REF, .EMPTY_SLOTS, void{}, .INSERT, idx);
         }
 
-        pub fn in_place_insert_many_empty_slots(self: *ListSlice, idx: Idx, count: Idx, alloc: Allocator) void {
+        pub fn ref_insert_many_empty_slots(self: *ListSlice, idx: Idx, count: Idx, alloc: Allocator) void {
             return expand_internal(.IN_PLACE, self, .MANY, count, .REALLOCATE, alloc, .SELF_ONLY, .EMPTY_SLOTS, void{}, .INSERT, idx);
         }
 
-        pub fn in_place_insert_one_item_assume_capacity_get_idx(self: *ListSlice, idx: Idx, item: T) Idx {
+        pub fn ref_insert_one_item_assume_capacity_get_idx(self: *ListSlice, idx: Idx, item: T) Idx {
             return expand_internal(.IN_PLACE, self, .ONE, 1, .ASSUME_CAPACITY, void{}, .IDX, .SET_VALS, item, .INSERT, idx);
         }
 
-        pub fn in_place_insert_one_item_assume_capacity_get_elem_ptr(self: *ListSlice, idx: Idx, item: T) ElemPtr {
+        pub fn ref_insert_one_item_assume_capacity_get_elem_ptr(self: *ListSlice, idx: Idx, item: T) ElemPtr {
             return expand_internal(.IN_PLACE, self, .ONE, 1, .ASSUME_CAPACITY, void{}, .REF, .SET_VALS, item, .INSERT, idx);
         }
 
-        pub fn in_place_insert_one_item_assume_capacity(self: *ListSlice, idx: Idx, item: T) void {
+        pub fn ref_insert_one_item_assume_capacity(self: *ListSlice, idx: Idx, item: T) void {
             return expand_internal(.IN_PLACE, self, .ONE, 1, .ASSUME_CAPACITY, void{}, .SELF_ONLY, .SET_VALS, item, .INSERT, idx);
         }
 
-        pub fn in_place_insert_one_item_get_idx(self: *ListSlice, idx: Idx, item: T, alloc: Allocator) Idx {
+        pub fn ref_insert_one_item_get_idx(self: *ListSlice, idx: Idx, item: T, alloc: Allocator) Idx {
             return expand_internal(.IN_PLACE, self, .ONE, 1, .REALLOCATE, alloc, .IDX, .SET_VALS, item, .INSERT, idx);
         }
 
-        pub fn in_place_insert_one_item_get_elem_ptr(self: *ListSlice, idx: Idx, item: T, alloc: Allocator) ElemPtr {
+        pub fn ref_insert_one_item_get_elem_ptr(self: *ListSlice, idx: Idx, item: T, alloc: Allocator) ElemPtr {
             return expand_internal(.IN_PLACE, self, .ONE, 1, .REALLOCATE, alloc, .REF, .SET_VALS, item, .INSERT, idx);
         }
 
-        pub fn in_place_insert_one_item(self: *ListSlice, idx: Idx, item: T, alloc: Allocator) void {
+        pub fn ref_insert_one_item(self: *ListSlice, idx: Idx, item: T, alloc: Allocator) void {
             return expand_internal(.IN_PLACE, self, .ONE, 1, .REALLOCATE, alloc, .SELF_ONLY, .SET_VALS, item, .INSERT, idx);
         }
 
-        pub fn in_place_insert_many_items_assume_capacity_get_idx_range(self: *ListSlice, idx: Idx, items: []const T) struct { Idx, Idx } {
+        pub fn ref_insert_many_items_assume_capacity_get_idx_range(self: *ListSlice, idx: Idx, items: []const T) struct { Idx, Idx } {
             return expand_internal(.IN_PLACE, self, .MANY, @intCast(items.len), .ASSUME_CAPACITY, void, .IDX, .SET_VALS, items, .INSERT, idx);
         }
 
-        pub fn in_place_insert_many_items_assume_capacity_get_sub_slice(self: *ListSlice, idx: Idx, items: []const T) ListSlice.with_sub_slice_mode(.STATIC) {
+        pub fn ref_insert_many_items_assume_capacity_get_sub_slice(self: *ListSlice, idx: Idx, items: []const T) ListSlice.with_sub_slice_mode(.STATIC) {
             return expand_internal(.IN_PLACE, self, .MANY, @intCast(items.len), .ASSUME_CAPACITY, void, .REF, .SET_VALS, items, .INSERT, idx);
         }
 
-        pub fn in_place_insert_many_items_assume_capacity(self: *ListSlice, idx: Idx, items: []const T) void {
+        pub fn ref_insert_many_items_assume_capacity(self: *ListSlice, idx: Idx, items: []const T) void {
             return expand_internal(.IN_PLACE, self, .MANY, @intCast(items.len), .ASSUME_CAPACITY, void, .SELF_ONLY, .SET_VALS, items, .INSERT, idx);
         }
 
-        pub fn in_place_insert_many_items_get_idx_range(self: *ListSlice, idx: Idx, items: []const T, alloc: Allocator) struct { Idx, Idx } {
+        pub fn ref_insert_many_items_get_idx_range(self: *ListSlice, idx: Idx, items: []const T, alloc: Allocator) struct { Idx, Idx } {
             return expand_internal(.IN_PLACE, self, .MANY, @intCast(items.len), .REALLOCATE, alloc, .IDX, .SET_VALS, items, .INSERT, idx);
         }
 
-        pub fn in_place_insert_many_items_get_sub_slice(self: *ListSlice, idx: Idx, items: []const T, alloc: Allocator) ListSlice.with_sub_slice_mode(.STATIC) {
+        pub fn ref_insert_many_items_get_sub_slice(self: *ListSlice, idx: Idx, items: []const T, alloc: Allocator) ListSlice.with_sub_slice_mode(.STATIC) {
             return expand_internal(.IN_PLACE, self, .MANY, @intCast(items.len), .REALLOCATE, alloc, .REF, .SET_VALS, items, .INSERT, idx);
         }
 
-        pub fn in_place_insert_many_items(self: *ListSlice, idx: Idx, items: []const T, alloc: Allocator) void {
+        pub fn ref_insert_many_items(self: *ListSlice, idx: Idx, items: []const T, alloc: Allocator) void {
             return expand_internal(.IN_PLACE, self, .MANY, @intCast(items.len), .REALLOCATE, alloc, .SELF_ONLY, .SET_VALS, items, .INSERT, idx);
         }
 
