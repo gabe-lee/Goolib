@@ -1617,7 +1617,7 @@ pub fn GooListSlice(comptime DEF_: GooListSliceDefinition) type {
                     Utils.Mem.move_one_and_preserve_displaced(field_slice.ptr, old_index, new_index);
                 }
             } else {
-                Utils.Mem.move_one_and_preserve_displaced(self.root_ptr_never_null(), old_index, new_index);
+                Utils.Mem.move_one_and_preserve_displaced(self.to_slice_never_null(), old_index, new_index);
             }
         }
 
@@ -1632,7 +1632,7 @@ pub fn GooListSlice(comptime DEF_: GooListSliceDefinition) type {
                     Utils.Mem.move_range_and_preserve_displaced(field_slice.ptr, first_index_to_move, indexes_to_move_end_excluded, index_to_place_elements);
                 }
             } else {
-                Utils.Mem.move_range_and_preserve_displaced(self.root_ptr_never_null(), first_index_to_move, indexes_to_move_end_excluded, index_to_place_elements);
+                Utils.Mem.move_range_and_preserve_displaced(self.to_slice_never_null(), first_index_to_move, indexes_to_move_end_excluded, index_to_place_elements);
             }
         }
 
@@ -1651,9 +1651,9 @@ pub fn GooListSlice(comptime DEF_: GooListSliceDefinition) type {
                     Utils.Mem.reverse_slice(field_slice[0..self.len()]);
                 }
             } else {
-                Utils.Mem.reverse_slice(self.root_ptr_never_null()[0..delta_left_mod]);
-                Utils.Mem.reverse_slice(self.root_ptr_never_null()[delta_left_mod..self.len()]);
-                Utils.Mem.reverse_slice(self.root_ptr_never_null()[0..self.len()]);
+                Utils.Mem.reverse_slice(self.to_slice_never_null()[0..delta_left_mod]);
+                Utils.Mem.reverse_slice(self.to_slice_never_null()[delta_left_mod..self.len()]);
+                Utils.Mem.reverse_slice(self.to_slice_never_null()[0..self.len()]);
             }
         }
 
@@ -1673,9 +1673,9 @@ pub fn GooListSlice(comptime DEF_: GooListSliceDefinition) type {
                     Utils.Mem.reverse_slice(field_slice[0..self.len()]);
                 }
             } else {
-                Utils.Mem.reverse_slice(self.root_ptr_never_null()[0..delta_right_mod]);
-                Utils.Mem.reverse_slice(self.root_ptr_never_null()[delta_right_mod..self.len()]);
-                Utils.Mem.reverse_slice(self.root_ptr_never_null()[0..self.len()]);
+                Utils.Mem.reverse_slice(self.to_slice_never_null()[0..delta_right_mod]);
+                Utils.Mem.reverse_slice(self.to_slice_never_null()[delta_right_mod..self.len()]);
+                Utils.Mem.reverse_slice(self.to_slice_never_null()[0..self.len()]);
             }
         }
 
