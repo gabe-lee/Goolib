@@ -34,7 +34,7 @@ const math = std.math;
 const fmt = std.fmt;
 
 const Root = @import("./_root.zig");
-const object_equals = Root.Utils.shallow_equals;
+const object_equals = Root.Utils.Compare.shallow_equals;
 const Assert = Root.Assert;
 const Types = Root.Types;
 const Test = Root.Testing;
@@ -170,223 +170,49 @@ pub fn align_forward_without_breaking_align_boundary_unless_offset_boundary_alig
     return std.mem.alignForward(usize, offset, boundary_align);
 }
 
-/// The function should return `true` if `item_to_check == search_param`
-pub fn CompareFunc(comptime SEARCH_PARAM: type, comptime ELEM: type) type {
-    return fn (search_param: SEARCH_PARAM, item_to_check: ELEM) bool;
-}
-/// The function should return `true` if `item_to_check == search_param`
-pub fn CompareFuncUserdata(comptime SEARCH_PARAM: type, comptime ELEM: type, comptime USERDATA: type) type {
-    return fn (search_param: SEARCH_PARAM, item_to_check: ELEM, userdata: USERDATA) bool;
-}
 
-/// Searches a memory region for a matching item using the native `==` operator
-///
-/// returns the index found, else `null` if  not found
-pub fn search_implicit(buffer: anytype, start: anytype, end_exclusive: anytype, find_val: anytype, comptime IDX_TYPE: type) ?IDX_TYPE {
-    _ = Types.IndexableChild(buffer);
-    for (buffer[start..end_exclusive], 0..) |item, i| {
-        if (Utils.shallow_equals(item, find_val)) return @intCast(i);
-    }
-    return null;
-}
-
-/// Searches a memory region for a matching item using an equality function
-///
-/// returns the index found, else `null` if  not found
-pub fn search_with_func(buffer: anytype, start: anytype, end_exclusive: anytype, search_param: anytype, match_fn: *const CompareFunc(@TypeOf(search_param), Types.IndexableChild(@TypeOf(buffer))), comptime IDX_TYPE: type) ?IDX_TYPE {
-    _ = Types.IndexableChild(buffer);
-    for (buffer[start..end_exclusive], 0..) |item, i| {
-        if (match_fn(search_param, item)) return @intCast(i);
-    }
-    return null;
-}
-
-/// Searches a memory slice for a matching item using an equality function with userdata
-///
-/// returns the index found, else `null` if  not found
-pub fn search_with_func_and_userdata(buffer: anytype, start: anytype, end_exclusive: anytype, search_param: anytype, userdata: anytype, match_fn: *const CompareFuncUserdata(@TypeOf(search_param), Types.IndexableChild(@TypeOf(buffer)), @TypeOf(userdata)), comptime IDX_TYPE: type) ?IDX_TYPE {
-    _ = Types.IndexableChild(buffer);
-    for (buffer[start..end_exclusive], 0..) |item, i| {
-        if (match_fn(search_param, item, userdata)) return @intCast(i);
-    }
-    return null;
-}
-
-pub const LinearSearchOrder = enum {
-    SEARCH_PARAMS_IN_SAME_ORDER_AS_THEIR_ORDER_IN_BUFFER,
-    SEARCH_PARAMS_UNORDERED,
-};
-
-fn LinearSearchPackage(comptime SEARCH_PARAM: type, comptime ELEM_TYPE: type, comptime USERDATA: type) type {
-    return union {
-        const Self = @This();
-
-        IMPLICIT: void,
-        FUNC: struct {
-            match: CompareFunc(SEARCH_PARAM, ELEM_TYPE),
-        },
-        FUNC_USERDATA: struct {
-            match: CompareFuncUserdata(SEARCH_PARAM, ELEM_TYPE, USERDATA),
-        },
-
-        fn match(self: Self, comptime MODE: SearchKind, search_param: SEARCH_PARAM, item: ELEM_TYPE, userdata: USERDATA) bool {
-            switch (comptime MODE) {
-                .IMPLICIT => {
-                    return Utils.shallow_equal(search_param, item);
-                },
-                .FUNC => {
-                    const func = self.FUNC;
-                    return func.match(search_param, item);
-                },
-                .FUNC_USERDATA => {
-                    const func = self.FUNC_USERDATA;
-                    return func.match(search_param, item, userdata);
-                },
-            }
-        }
-    };
-}
-
-test "Utils.Mem search for one item funcs" {
-    var rand_core = std.Random.DefaultPrng.init(@bitCast(std.time.microTimestamp()));
-    const rand = rand_core.random();
-    const NUM_ITERATIONS = 5;
-    var buf_1: [1]u32 = undefined;
-    var buf_8: [8]u32 = undefined;
-    var buf_9: [9]u32 = undefined;
-    const empty_always_null_idx = search_implicit(buf_1[0..1], 0, 0, 0, usize);
-    try Test.expect_null(empty_always_null_idx, "empty_always_null_idx", "fail", .{});
-    const PROTO = struct {
-        fn do_search_tests(buf: []u8) anyerror!void {
-            const N = buf.len;
-            for (0..NUM_ITERATIONS) |_| {
-                for (0..N) |i| {
-                    buf[i] = rand.int(u32);
-                }
-                Root.Sort.InsertionSort.insertion_sort_implicit(buf[0..]);
-                var should_not_find: u32 = undefined;
-                find_another_val_not_in_list: while (true) {
-                    should_not_find = rand.int(u32);
-                    for (buf[0..]) |good_val| {
-                        if (good_val == should_not_find) continue :find_another_val_not_in_list;
-                    }
-                    break :find_another_val_not_in_list;
-                }
-                const should_not_find_idx_linear = search_implicit(buf[0..], 0, N, should_not_find, usize);
-                try Test.expect_null(should_not_find_idx_linear, "should_not_find_idx_linear", "fail", .{});
-                const should_not_find_tag = if (should_not_find < buf[0]) BinarySearchResultKind.NOT_FOUND_BELOW_MIN else if (should_not_find > buf[N - 1]) BinarySearchResultKind.NOT_FOUND_ABOVE_MAX else BinarySearchResultKind.NOT_FOUND_WITHIN_RANGE;
-                const should_not_find_idx_binary = binary_search_implicit(buf[0..], 0, N, should_not_find, usize);
-                try Test.expect_equal(should_not_find_idx_binary.result, "should_not_find_idx_binary.result", should_not_find_tag, @tagName(should_not_find_tag), "fail", .{});
-                for (buf[0..], 0..) |should_find, i| {
-                    const should_find_idx_linear = search_implicit(buf[0..], 0, N, should_find, usize);
-                    try Test.expect_not_null(should_find_idx_linear, "should_find_idx_linear", "fail", .{});
-                    try Test.expect_equal(should_find_idx_linear.?, "should_find_idx_linear.?", i, "i", "fail", .{});
-                    const should_find_idx_binary = binary_search_implicit(buf[0..], 0, N, should_find, usize);
-                    try Test.expect_equal(should_find_idx_binary.result, "should_find_idx_binary.result", BinarySearchResultKind.FOUND, ".FOUND", "fail", .{});
-                    try Test.expect_equal(should_find_idx_binary.idx, "should_find_idx_binary.idx", i, "i", "fail", .{});
-                }
-            }
-        }
-    };
-    try PROTO.do_search_tests(buf_1[0..]);
-    try PROTO.do_search_tests(buf_8[0..]);
-    try PROTO.do_search_tests(buf_9[0..]);
-}
-
-fn search_for_many_internal(
-    buffer: anytype,
-    start: anytype,
-    end_exclusive: anytype,
-    userdata: anytype,
-    search_params: anytype,
+pub fn search_for_many(
+    comptime PKG: Utils.Compare.SearchPackage,
+    data: PKG.DATA_CONTAINER,
+    data_start: PKG.DATA_CONTAINER_IDX_TYPE,
+    data_end_exclusive: PKG.DATA_CONTAINER_IDX_TYPE,
+    search_params: PKG.SEARCH_PARAM_CONTAINER,
+    search_start: PKG.SEARCH_PARAM_CONTAINER_IDX_TYPE,
+    search_end_exclusive: PKG.SEARCH_PARAM_CONTAINER_IDX_TYPE,
+    results: PKG.RESULT_CONTAINER,
+    results_start: PKG.RESULT_CONTAINER_IDX_TYPE,
+    results_end_exclusive: PKG.RESULT_CONTAINER_IDX_TYPE,
     search_order: LinearSearchOrder,
-    package: LinearSearchPackage(Types.IndexableChild(@TypeOf(search_params)), Types.IndexableChild(@TypeOf(buffer)), @TypeOf(userdata)),
-    PKG_MODE: SearchKind,
-    output_buf: anytype,
-    comptime IDX_TYPE: type,
-) IDX_TYPE {
-    const PARAM_COUNT: IDX_TYPE = Types.get_mem_len(search_params, IDX_TYPE);
-    if (PARAM_COUNT == 0) return 0;
-    var param_idx: IDX_TYPE = 0;
-    var out_idx: IDX_TYPE = 0;
-    const out_limit: IDX_TYPE = Types.get_mem_len(output_buf, IDX_TYPE);
-    var buf_idx: IDX_TYPE = undefined;
-    var min_buf_idx: IDX_TYPE = @intCast(start);
-    const buf_limit: IDX_TYPE = @intCast(end_exclusive);
-    var val_to_find: Types.IndexableChild(@TypeOf(search_params)) = undefined;
-    next_item_to_find: while (param_idx < PARAM_COUNT) : (param_idx += 1) {
-        val_to_find = search_params[param_idx];
-        buf_idx = @intCast(min_buf_idx);
-        while (buf_idx < buf_limit) : (buf_idx += 1) {
-            const val_in_buf = buffer[buf_idx];
-            if (package.match(PKG_MODE, val_to_find, val_in_buf, userdata)) {
-                assert_with_reason(out_idx < out_limit, @src(), "ran out of space in output buffer. Need at least len {d}, got len {d}", .{ out_idx + 1, out_limit });
-                output_buf[out_idx] = buf_idx;
-                out_idx += 1;
-                if (search_order == .SEARCH_PARAMS_IN_SAME_ORDER_AS_THEIR_ORDER_IN_BUFFER) {
-                    min_buf_idx = buf_idx;
+    userdata: PKG.USERDATA_TYPE,
+) PKG.RESULT_CONTAINER_IDX_TYPE {
+    const DATA_IDX = PKG.DATA_CONTAINER_IDX_TYPE;
+    const SEARCH_IDX = PKG.SEARCH_PARAM_CONTAINER_IDX_TYPE;
+    const RESULT_IDX = PKG.RESULT_CONTAINER_IDX_TYPE;
+    if (search_start >= search_end_exclusive or data_start >= data_end_exclusive) return 0;
+    var search_idx: SEARCH_IDX = search_start;
+    var result_idx: RESULT_IDX = results_start;
+    var data_idx: DATA_IDX = undefined;
+    var min_data_idx: DATA_IDX = data_start;
+    var search_item: PKG.SEARCH_PARAM_CONTAINER_ELEM = undefined;
+    next_item_to_find: while (search_idx < search_end_exclusive) : (search_idx += 1) {
+        search_item = PKG.get_search_param(search_params, search_idx);
+        data_idx = @intCast(min_data_idx);
+        while (data_idx < data_end_exclusive) : (data_idx += 1) {
+            const data_item = PKG.get_item(data, data_idx);
+            if (PKG.match_item(userdata, data_item, search_item)) {
+                assert_with_reason(result_idx < results_end_exclusive, @src(), "ran out of space in result container. with `results_start` == {d}, need `results_end_exclusive` >= {d}, got `results_end_exclusive` == {d}", .{ results_start, result_idx + 1, results_end_exclusive });
+                PKG.set_result(results, result_idx, @intCast(data_idx));
+                result_idx += 1;
+                if (search_order == .SEARCH_PARAMS_IN_SAME_ORDER_AS_THEIR_ORDER_IN_DATA_BUFFER) {
+                    min_data_idx = data_idx;
                 }
                 continue :next_item_to_find;
             }
         }
     }
-    return out_idx;
+    return result_idx;
 }
 
-/// Searches a memory region for matching items using `Utils.shallow_equals()`
-///
-/// returns the number of indexes found
-pub fn search_for_many_implicit(
-    buffer: anytype,
-    start: anytype,
-    end_exclusive: anytype,
-    search_vals: anytype,
-    search_order: LinearSearchOrder,
-    output_buffer: anytype,
-    comptime IDX_TYPE: type,
-) IDX_TYPE {
-    const package = LinearSearchPackage(Types.IndexableChild(@TypeOf(search_vals)), Types.IndexableChild(@TypeOf(buffer)), void){ .IMPLICIT = void{} };
-    return search_for_many_internal(buffer, start, end_exclusive, void{}, search_vals, search_order, package, .IMPLICIT, output_buffer, IDX_TYPE);
-}
-
-/// Searches a memory region for a matching item using an equality function
-///
-/// returns the number of indexes found
-pub fn search_for_many_with_func(
-    buffer: anytype,
-    start: anytype,
-    end_exclusive: anytype,
-    search_vals: anytype,
-    search_order: LinearSearchOrder,
-    match_fn: *const CompareFunc(Types.IndexableChild(@TypeOf(search_vals)), Types.IndexableChild(@TypeOf(buffer))),
-    output_buffer: anytype,
-    comptime IDX_TYPE: type,
-) IDX_TYPE {
-    const package = LinearSearchPackage(Types.IndexableChild(@TypeOf(search_vals)), Types.IndexableChild(@TypeOf(buffer)), void){ .FUNC = .{
-        .match = match_fn,
-    } };
-    return search_for_many_internal(buffer, start, end_exclusive, void{}, search_vals, search_order, package, .FUNC, output_buffer, IDX_TYPE);
-}
-
-/// Searches a memory slice for a matching item using an equality function with userdata
-///
-/// returns the number of indexes found
-pub fn search_for_many_with_func_and_userdata(
-    buffer: anytype,
-    start: anytype,
-    end_exclusive: anytype,
-    search_vals: anytype,
-    search_order: LinearSearchOrder,
-    userdata: anytype,
-    match_fn: *const CompareFuncUserdata(Types.IndexableChild(@TypeOf(search_vals)), Types.IndexableChild(@TypeOf(buffer)), @TypeOf(userdata)),
-    output_buffer: anytype,
-    comptime IDX_TYPE: type,
-) IDX_TYPE {
-    const package = LinearSearchPackage(Types.IndexableChild(@TypeOf(search_vals)), Types.IndexableChild(@TypeOf(buffer)), @TypeOf(userdata)){ .FUNC_USERDATA = .{
-        .match = match_fn,
-    } };
-    return search_for_many_internal(buffer, start, end_exclusive, userdata, search_vals, search_order, package, .FUNC_USERDATA, output_buffer, IDX_TYPE);
-}
 
 pub const BinarySearchResultKind = enum(u2) {
     FOUND,
@@ -404,8 +230,11 @@ pub fn BinarySerachResult(comptime IDX_TYPE: type) type {
 
 const SearchKind = enum(u8) {
     IMPLICIT,
+    IMPLICIT_GETTER,
     FUNC,
+    FUNC_GETTER,
     FUNC_USERDATA,
+    FUNC_USERDATA_GETTER,
 };
 
 fn BinarySearchPackage(comptime SEARCH_PARAM: type, comptime ELEM_TYPE: type, comptime USERDATA: type) type {
@@ -414,12 +243,12 @@ fn BinarySearchPackage(comptime SEARCH_PARAM: type, comptime ELEM_TYPE: type, co
 
         IMPLICIT: void,
         FUNC: struct {
-            match: CompareFunc(SEARCH_PARAM, ELEM_TYPE),
-            less_than: CompareFunc(SEARCH_PARAM, ELEM_TYPE),
+            match: Utils.Compare.CompareFunc(SEARCH_PARAM, ELEM_TYPE),
+            less_than: Utils.Compare.CompareFunc(SEARCH_PARAM, ELEM_TYPE),
         },
         FUNC_USERDATA: struct {
-            match: CompareFuncUserdata(SEARCH_PARAM, ELEM_TYPE, USERDATA),
-            less_than: CompareFuncUserdata(SEARCH_PARAM, ELEM_TYPE, USERDATA),
+            match: Utils.Compare.CompareFuncUserdata(SEARCH_PARAM, ELEM_TYPE, USERDATA),
+            less_than: Utils.Compare.CompareFuncUserdata(SEARCH_PARAM, ELEM_TYPE, USERDATA),
         },
 
         fn match(self: Self, comptime MODE: SearchKind, search_param: SEARCH_PARAM, item: ELEM_TYPE, userdata: USERDATA) bool {
@@ -456,7 +285,16 @@ fn BinarySearchPackage(comptime SEARCH_PARAM: type, comptime ELEM_TYPE: type, co
     };
 }
 
-fn binary_search_internal(buffer: anytype, start: anytype, end_exclusive: anytype, search_param: anytype, userdata: anytype, comptime IDX_TYPE: type, package: BinarySearchPackage(@TypeOf(search_param), Types.IndexableChild(@TypeOf(buffer)), @TypeOf(userdata)), comptime PKG_MODE: SearchKind) BinarySerachResult(IDX_TYPE) {
+fn binary_search_internal(
+    buffer: anytype,
+    start: anytype,
+    end_exclusive: anytype,
+    search_param: anytype,
+    userdata: anytype,
+    comptime IDX_TYPE: type,
+    package: BinarySearchPackage(@TypeOf(search_param), Types.IndexableChild(@TypeOf(buffer)), @TypeOf(userdata)),
+    comptime PKG_MODE: SearchKind,
+) BinarySerachResult(IDX_TYPE) {
     _ = Types.IndexableChild(buffer);
     // const DID_MOVE_RIGHT: IDX_TYPE = Math.bit_flood_left(@as(IDX_TYPE, 1));
     var idx: IDX_TYPE = @intCast(start);
@@ -509,7 +347,7 @@ pub fn binary_search_implicit(buffer: anytype, start: anytype, end_exclusive: an
 /// Searches a memory region for a matching item using the native `==` operator
 ///
 /// returns the index found, else `null` if  not found
-pub fn binary_search_with_func(buffer: anytype, start: anytype, end_exclusive: anytype, search_param: anytype, match_fn: *const CompareFunc(@TypeOf(search_param), Types.IndexableChild(@TypeOf(buffer))), less_than_fn: *const CompareFunc(@TypeOf(search_param), Types.IndexableChild(@TypeOf(buffer))), comptime IDX_TYPE: type) BinarySerachResult(IDX_TYPE) {
+pub fn binary_search_with_func(buffer: anytype, start: anytype, end_exclusive: anytype, search_param: anytype, match_fn: *const Utils.Compare.CompareFunc(@TypeOf(search_param), Types.IndexableChild(@TypeOf(buffer))), less_than_fn: *const Utils.Compare.CompareFunc(@TypeOf(search_param), Types.IndexableChild(@TypeOf(buffer))), comptime IDX_TYPE: type) BinarySerachResult(IDX_TYPE) {
     const package = BinarySearchPackage(@TypeOf(search_param), Types.IndexableChild(@TypeOf(buffer)), void){ .FUNC = .{
         .less_than = less_than_fn,
         .match = match_fn,
@@ -520,7 +358,7 @@ pub fn binary_search_with_func(buffer: anytype, start: anytype, end_exclusive: a
 /// Searches a memory region for a matching item using the native `==` operator
 ///
 /// returns the index found, else `null` if  not found
-pub fn binary_search_with_func_and_userdata(buffer: anytype, start: anytype, end_exclusive: anytype, search_param: anytype, userdata: anytype, match_fn: *const CompareFuncUserdata(@TypeOf(search_param), Types.IndexableChild(@TypeOf(buffer)), @TypeOf(userdata)), less_than_fn: *const CompareFuncUserdata(@TypeOf(search_param), Types.IndexableChild(@TypeOf(buffer)), @TypeOf(userdata)), comptime IDX_TYPE: type) BinarySerachResult(IDX_TYPE) {
+pub fn binary_search_with_func_and_userdata(buffer: anytype, start: anytype, end_exclusive: anytype, search_param: anytype, userdata: anytype, match_fn: *const Utils.Compare.CompareFuncUserdata(@TypeOf(search_param), Types.IndexableChild(@TypeOf(buffer)), @TypeOf(userdata)), less_than_fn: *const Utils.Compare.CompareFuncUserdata(@TypeOf(search_param), Types.IndexableChild(@TypeOf(buffer)), @TypeOf(userdata)), comptime IDX_TYPE: type) BinarySerachResult(IDX_TYPE) {
     const package = BinarySearchPackage(@TypeOf(search_param), Types.IndexableChild(@TypeOf(buffer)), @TypeOf(userdata)){ .FUNC_USERDATA = .{
         .less_than = less_than_fn,
         .match = match_fn,
@@ -595,8 +433,8 @@ pub fn binary_search_many_with_func(
     end_exclusive: anytype,
     search_params: anytype,
     search_params_order: BinarySearchOrder,
-    match_fn: *const CompareFunc(Types.IndexableChild(@TypeOf(search_params)), Types.IndexableChild(@TypeOf(buffer))),
-    less_than_fn: *const CompareFunc(Types.IndexableChild(@TypeOf(search_params)), Types.IndexableChild(@TypeOf(buffer))),
+    match_fn: *const Utils.Compare.CompareFunc(Types.IndexableChild(@TypeOf(search_params)), Types.IndexableChild(@TypeOf(buffer))),
+    less_than_fn: *const Utils.Compare.CompareFunc(Types.IndexableChild(@TypeOf(search_params)), Types.IndexableChild(@TypeOf(buffer))),
     output_buffer: anytype,
     comptime IDX_TYPE: type,
 ) BinarySerachResult(IDX_TYPE) {
@@ -617,8 +455,8 @@ pub fn binary_search_many_with_func_and_userdata(
     search_params: anytype,
     search_params_order: BinarySearchOrder,
     userdata: anytype,
-    match_fn: *const CompareFuncUserdata(Types.IndexableChild(@TypeOf(search_params)), Types.IndexableChild(@TypeOf(buffer)), @TypeOf(userdata)),
-    less_than_fn: *const CompareFuncUserdata(Types.IndexableChild(@TypeOf(search_params)), Types.IndexableChild(@TypeOf(buffer)), @TypeOf(userdata)),
+    match_fn: *const Utils.Compare.CompareFuncUserdata(Types.IndexableChild(@TypeOf(search_params)), Types.IndexableChild(@TypeOf(buffer)), @TypeOf(userdata)),
+    less_than_fn: *const Utils.Compare.CompareFuncUserdata(Types.IndexableChild(@TypeOf(search_params)), Types.IndexableChild(@TypeOf(buffer)), @TypeOf(userdata)),
     output_buffer: anytype,
     comptime IDX_TYPE: type,
 ) BinarySerachResult(IDX_TYPE) {

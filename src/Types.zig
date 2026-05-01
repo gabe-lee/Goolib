@@ -292,6 +292,9 @@ pub fn SliceChild(comptime T: type) type {
 pub fn IndexableChild(comptime PARENT: type) type {
     return KindInfo.get_kind_info(PARENT).indexed_child_type();
 }
+pub fn is_indexable(comptime PARENT: type) bool {
+    return KindInfo.get_kind_info(PARENT).is_indexable();
+}
 
 pub fn has_len(comptime T: type) bool {
     const K = KindInfo.get_kind_info(T);

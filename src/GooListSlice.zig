@@ -54,6 +54,8 @@ const SmartAllocSettings = Utils.Alloc.SmartAllocSettings;
 const SmartAllocComptimeSettings = Utils.Alloc.SmartAllocComptimeSettings;
 const CompareFunc = Utils.Mem.CompareFunc;
 const CompareFuncUserdata = Utils.Mem.CompareFuncUserdata;
+const GetFunc = Utils.Mem.GetFunc;
+const SetFunc = Utils.Mem.SetFunc;
 const GrowthModel = CommonTypes.GrowthModel;
 const SandboxMode = CommonTypes.SandboxMode;
 const LenMutability = CommonTypes.LenMutability;
@@ -340,7 +342,7 @@ pub fn GooListSlice(comptime DEF_: GooListSliceDefinition) type {
         root_len: Idx = 0,
         sub_offset: if (PRESERVE_ROOT) Idx else void = if (PRESERVE_ROOT) 0 else void{},
         sub_len: if (PRESERVE_ROOT) Idx else void = if (PRESERVE_ROOT) 0 else void{},
-        cap: if (IS_LIST) Idx else void = if (IS_LIST) 0 else void{},
+        list_cap: if (IS_LIST) Idx else void = if (IS_LIST) 0 else void{},
 
         //**********
         // CONSTS
@@ -620,8 +622,8 @@ pub fn GooListSlice(comptime DEF_: GooListSliceDefinition) type {
             if (new_mode == DEF.MODE) return self;
             return ListSlice.with_mode(new_mode){
                 .ptr = self.ptr,
-                .root_len = if (new_mode == .SLICE) self.cap else self.root_len,
-                .cap = if (new_mode == .LIST) self.root_len else void{},
+                .root_len = if (new_mode == .SLICE) self.list_cap else self.root_len,
+                .list_cap = if (new_mode == .LIST) self.root_len else void{},
             };
         }
         pub fn change_ptr_mutability(self: ListSlice, comptime new_ptr_mutability: PtrMutability) ListSlice.with_ptr_mutability(new_ptr_mutability) {
@@ -649,13 +651,13 @@ pub fn GooListSlice(comptime DEF_: GooListSliceDefinition) type {
                 return ListSlice.with_preserved_root_ptr_len(false){
                     .ptr = self.ptr + self.sub_offset,
                     .root_len = self.sub_len,
-                    .cap = self.cap,
+                    .list_cap = self.list_cap,
                 };
             } else {
                 return ListSlice.with_preserved_root_ptr_len(true){
                     .ptr = self.ptr,
                     .root_len = self.root_len,
-                    .cap = self.cap,
+                    .list_cap = self.list_cap,
                     .sub_offset = 0,
                     .sub_len = self.root_len,
                 };
@@ -675,7 +677,7 @@ pub fn GooListSlice(comptime DEF_: GooListSliceDefinition) type {
         }
         fn assert_len_n_less_than_cap(self: ListSlice, n: Idx, comptime src: std.builtin.SourceLocation) void {
             if (IS_LIST) {
-                assert_with_reason(self.root_len + n <= self.cap, src, ERR_LEN_PLUS_N_EXCEEDS_CAP, .{ self.root_len, n, self.cap });
+                assert_with_reason(self.root_len + n <= self.list_cap, src, ERR_LEN_PLUS_N_EXCEEDS_CAP, .{ self.root_len, n, self.list_cap });
             }
         }
         fn assert_sub_len_n_less_than_len(self: ListSlice, n: Idx, comptime src: std.builtin.SourceLocation) void {
@@ -733,11 +735,11 @@ pub fn GooListSlice(comptime DEF_: GooListSliceDefinition) type {
         }
         pub fn assert_valid(self: ListSlice, comptime src: std.builtin.SourceLocation) void {
             if (IS_LIST) {
-                assert_with_reason(self.root_len <= self.cap, src, ERR_LEN_GREATER_THAN_CAP, .{ self.root_len, self.cap });
+                assert_with_reason(self.root_len <= self.list_cap, src, ERR_LEN_GREATER_THAN_CAP, .{ self.root_len, self.list_cap });
             }
-            assert_with_reason(self.root_len >= 0 or (if (IS_LIST) self.cap >= 0 else true), src, ERR_LEN_OR_CAP_NEGATIVE, .{ self.root_len, self.cap });
+            assert_with_reason(self.root_len >= 0 or (if (IS_LIST) self.list_cap >= 0 else true), src, ERR_LEN_OR_CAP_NEGATIVE, .{ self.root_len, self.list_cap });
             if (Assert.should_assert() and self.is_null()) {
-                assert_with_reason(self.root_len == 0 and (if (IS_LIST) self.cap == 0 else true), src, ERR_LEN_OR_CAP_NONZERO_WHEN_NULL, .{ self.root_len, self.cap });
+                assert_with_reason(self.root_len == 0 and (if (IS_LIST) self.list_cap == 0 else true), src, ERR_LEN_OR_CAP_NONZERO_WHEN_NULL, .{ self.root_len, self.list_cap });
             }
         }
         fn assert_not_SOA(comptime src: std.builtin.SourceLocation) void {
@@ -841,7 +843,7 @@ pub fn GooListSlice(comptime DEF_: GooListSliceDefinition) type {
 
         pub fn free_slots(self: ListSlice) Idx {
             if (IS_SLICE) return 0;
-            return self.cap - self.root_len;
+            return self.list_cap - self.root_len;
         }
 
         pub fn true_idx(self: ListSlice, idx: Idx) Idx {
@@ -855,6 +857,9 @@ pub fn GooListSlice(comptime DEF_: GooListSliceDefinition) type {
         }
         pub fn len(self: ListSlice) Idx {
             return if (PRESERVE_ROOT) self.sub_len else self.root_len;
+        }
+        pub fn cap(self: ListSlice) Idx {
+            return if (IS_LIST) self.list_cap else self.root_len;
         }
 
         pub fn root_ptr_never_null(self: ListSlice) PtrNeverNull {
@@ -898,8 +903,8 @@ pub fn GooListSlice(comptime DEF_: GooListSliceDefinition) type {
             assert_SOA(@src());
             self.assert_not_null(@src());
             const root_addr = @intFromPtr(self.root_byte_ptr_never_null());
-            const base_offet = T_FIELD_OFFSETS[@intFromEnum(field)];
-            const field_chunk_offset = base_offet * num_cast(self.root_len, usize);
+            const base_offset = T_FIELD_OFFSETS[@intFromEnum(field)];
+            const field_chunk_offset = base_offset * num_cast(self.cap(), usize);
             return @ptrFromInt(root_addr + field_chunk_offset);
         }
 
@@ -1074,6 +1079,23 @@ pub fn GooListSlice(comptime DEF_: GooListSliceDefinition) type {
         //**********
         // GET/SET
         //**********
+
+        pub fn field_getter(comptime field: FieldEnum) GetFunc(ListSlice, Idx, FieldType(field)) {
+            const PROTO = struct {
+                fn get(self: ListSlice, idx: Idx) FieldType(field) {
+                    return self.get_item_field(field, idx);
+                }
+            };
+            return PROTO.get;
+        }
+        pub fn field_setter(comptime field: FieldEnum) SetFunc(ListSlice, Idx, FieldType(field)) {
+            const PROTO = struct {
+                fn set(self: ListSlice, idx: Idx, val: FieldType(field)) void {
+                    self.set_item_field(field, idx, val);
+                }
+            };
+            return PROTO.set;
+        }
 
         pub fn get_item_ptr(self: ListSlice, idx: Idx) ElemPtr {
             assert_not_SOA(@src());
@@ -1614,7 +1636,7 @@ pub fn GooListSlice(comptime DEF_: GooListSliceDefinition) type {
             if (SOA) {
                 inline for (T_FIELDS_ENUM_TAGS[0..]) |field| {
                     const field_slice = self.field_chunk_slice(field);
-                    Utils.Mem.move_one_and_preserve_displaced(field_slice.ptr, old_index, new_index);
+                    Utils.Mem.move_one_and_preserve_displaced(field_slice, old_index, new_index);
                 }
             } else {
                 Utils.Mem.move_one_and_preserve_displaced(self.to_slice_never_null(), old_index, new_index);
@@ -1629,7 +1651,7 @@ pub fn GooListSlice(comptime DEF_: GooListSliceDefinition) type {
             if (SOA) {
                 inline for (T_FIELDS_ENUM_TAGS[0..]) |field| {
                     const field_slice = self.field_chunk_slice(field);
-                    Utils.Mem.move_range_and_preserve_displaced(field_slice.ptr, first_index_to_move, indexes_to_move_end_excluded, index_to_place_elements);
+                    Utils.Mem.move_range_and_preserve_displaced(field_slice, first_index_to_move, indexes_to_move_end_excluded, index_to_place_elements);
                 }
             } else {
                 Utils.Mem.move_range_and_preserve_displaced(self.to_slice_never_null(), first_index_to_move, indexes_to_move_end_excluded, index_to_place_elements);
@@ -1683,22 +1705,49 @@ pub fn GooListSlice(comptime DEF_: GooListSliceDefinition) type {
         // SEARCH
         //**********
 
-        //CHECKPOINT update for SOA mode
-
-        pub fn search_for_item_implicit(self: ListSlice, search_val: anytype) ?Idx {
+        pub fn search_for_item_implicit(self: ListSlice, search_val: T) ?Idx {
             self.assert_not_null(@src());
-            return Utils.Mem.search_implicit(self.root_ptr_never_null(), 0, self.root_len, search_val, Idx);
+            if (SOA) {
+                return Utils.Mem.search_implicit_with_getter(self, 0, self.len(), search_val, Idx, T, ListSlice.get_item);
+            } else {
+                return Utils.Mem.search_implicit(self.to_slice_never_null(), 0, self.len(), search_val, Idx);
+            }
         }
 
         pub fn search_for_item_with_func(self: ListSlice, search_param: anytype, match_fn: *const CompareFunc(@TypeOf(search_param), T)) ?Idx {
             self.assert_not_null(@src());
-            return Utils.Mem.search_with_func(self.root_ptr_never_null(), 0, self.root_len, search_param, match_fn, Idx);
+            if (SOA) {
+                return Utils.Mem.search_with_func_and_getter(self, 0, self.len(), search_param, Idx, T, match_fn, ListSlice.get_item);
+            } else {
+                return Utils.Mem.search_with_func(self.to_slice_never_null(), 0, self.len(), search_param, match_fn, Idx);
+            }
         }
 
         pub fn search_for_item_with_func_and_userdata(self: ListSlice, search_param: anytype, userdata: anytype, match_fn: *const CompareFuncUserdata(@TypeOf(search_param), T, @TypeOf(userdata))) ?Idx {
             self.assert_not_null(@src());
-            return Utils.Mem.search_with_func_and_userdata(self.root_ptr_never_null(), 0, self.root_len, search_param, userdata, match_fn, Idx);
+            if (SOA) {
+                return Utils.Mem.search_with_func_userdata_and_getter(self, 0, self.len(), search_param, userdata, Idx, T, match_fn, ListSlice.get_item);
+            } else {
+                return Utils.Mem.search_with_func_and_userdata(self.to_slice_never_null(), 0, self.len(), search_param, userdata, Idx, T, match_fn);
+            }
         }
+
+        pub fn search_for_item_via_field_implicit(self: ListSlice, comptime field: FieldEnum, search_val: FieldType(field)) ?Idx {
+            self.assert_not_null(@src());
+            return Utils.Mem.search_implicit_with_getter(self, 0, self.len(), search_val, Idx, FieldType(field), field_getter(field));
+        }
+
+        pub fn search_for_item_via_field_with_func(self: ListSlice, comptime field: FieldEnum, search_param: anytype, match_fn: *const CompareFunc(@TypeOf(search_param), FieldType(field))) ?Idx {
+            self.assert_not_null(@src());
+            return Utils.Mem.search_with_func_and_getter(self, 0, self.len(), search_param, Idx, FieldType(field), match_fn, field_getter(field));
+        }
+
+        pub fn search_for_item_via_field_with_func_and_userdata(self: ListSlice, comptime field: FieldEnum, search_param: anytype, userdata: anytype, match_fn: *const CompareFuncUserdata(@TypeOf(search_param), FieldType(field), @TypeOf(userdata))) ?Idx {
+            self.assert_not_null(@src());
+            return Utils.Mem.search_with_func_userdata_and_getter(self, 0, self.len(), search_param, userdata, Idx, FieldType(field), match_fn, field_getter(field));
+        }
+
+        //CHECKPOINT update for SOA mode
 
         /// Returns number of indexes found and appended to output buffer
         pub fn search_for_many_items_implicit(self: ListSlice, search_vals: anytype, search_vals_order: Utils.Mem.LinearSearchOrder, output_buffer: anytype) Idx {
@@ -1819,10 +1868,10 @@ pub fn GooListSlice(comptime DEF_: GooListSliceDefinition) type {
         pub fn ensure_free_slots_custom_settings(self: ListSlice, needed_free_slots: Idx, alloc: Allocator, settings: AllocSettings, comptime settings_comptime: ?AllocSettingsComptime) ListSlice {
             assert_list(@src());
             const new_len = self.root_len + needed_free_slots;
-            if (new_len <= self.cap) return;
+            if (new_len <= self.list_cap) return;
             assert_allocated(@src());
             var new_self = self;
-            Utils.Alloc.smart_alloc_ptr_ptrs(alloc, &new_self.ptr, &new_self.cap, new_len, settings, settings_comptime);
+            Utils.Alloc.smart_alloc_ptr_ptrs(alloc, &new_self.ptr, &new_self.list_cap, new_len, settings, settings_comptime);
             return new_self;
         }
 
@@ -1845,7 +1894,7 @@ pub fn GooListSlice(comptime DEF_: GooListSliceDefinition) type {
 
         pub fn shrink_cap_reserve_at_most(self: ListSlice, at_most_n_free_slots: Idx, alloc: Allocator) ListSlice {
             assert_list(@src());
-            const curr_free = self.cap - self.root_len;
+            const curr_free = self.list_cap - self.root_len;
             if (curr_free <= at_most_n_free_slots) return self;
             assert_allocated(@src());
             const new_cap = self.root_len + at_most_n_free_slots;
@@ -1853,7 +1902,7 @@ pub fn GooListSlice(comptime DEF_: GooListSliceDefinition) type {
             Utils.Alloc.smart_alloc_ptr_ptrs(
                 alloc,
                 &new_self.ptr,
-                &new_self.cap,
+                &new_self.list_cap,
                 @intCast(new_cap),
                 .{ .clear_old_mode = if (DEF.SECURE_ZERO_FREED_MEMORY) .MEMSET_OLD_ZERO else .DONT_MEMSET_OLD },
                 .{ .CLEAR_OLD_MODE = if (DEF.SECURE_ZERO_FREED_MEMORY) .MEMSET_OLD_ZERO else .DONT_MEMSET_OLD },
@@ -1875,8 +1924,8 @@ pub fn GooListSlice(comptime DEF_: GooListSliceDefinition) type {
             assert_allocated(@src());
             var new_self = self;
             if (IS_LIST) {
-                Utils.Alloc.smart_alloc_ptr_ptrs(alloc, &new_self.ptr, &new_self.cap, @intCast(new_capacity), settings, settings_comptime);
-                new_self.root_len = @min(self.root_len, new_self.cap);
+                Utils.Alloc.smart_alloc_ptr_ptrs(alloc, &new_self.ptr, &new_self.list_cap, @intCast(new_capacity), settings, settings_comptime);
+                new_self.root_len = @min(self.root_len, new_self.list_cap);
             } else {
                 Utils.Alloc.smart_alloc_ptr_ptrs(alloc, &new_self.ptr, &new_self.root_len, @intCast(new_capacity), settings, settings_comptime);
             }
