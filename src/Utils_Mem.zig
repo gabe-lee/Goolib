@@ -174,6 +174,61 @@ pub fn align_forward_without_breaking_align_boundary_unless_offset_boundary_alig
     return std.mem.alignForward(usize, offset, boundary_align);
 }
 
+/// A utility 'type of container element' function that returns the natural element type for a container:
+///   - Indexable types return the type that is analogous to `@typeOf(container[0])`
+///     - (slices, many-item pointers, arrays, vectors, single-item pointers to arrays/vectors, Zig ArrayList, GooLibSlice, etc.)
+///   - Single-item pointers return the pointer child type
+///   - Raw values return their own type
+///   - std.Io.Reader and std.Io.Writer = u8 (use `ElementTypeOrDefaultForReaderWriter()` to assign an element in these cases)
+///
+/// These types match those expected by the other memory utility funcs in this module (`get()`, `set()`, etc.)
+pub fn ElementType(comptime CONTAINER: type) type {
+    if (comptime Root.GooListSlice.type_is_GooListSlice(CONTAINER)) {
+        return CONTAINER.T;
+    } else if (comptime @hasField(CONTAINER, "items") and Types.type_is_slice(@FieldType(CONTAINER, "items"))) {
+        return Types.pointer_child_type(@FieldType(CONTAINER, "items"));
+    } else if (comptime KindInfo.get_kind_info(CONTAINER).is_indexable()) {
+        return KindInfo.get_kind_info(CONTAINER).indexed_child_type();
+    } else if (comptime Types.type_is_vector(CONTAINER)) {
+        return KindInfo.get_kind_info(CONTAINER).VECTOR.child;
+    } else if (comptime Types.type_is_pointer_to_vector(CONTAINER)) {
+        KindInfo.get_kind_info(KindInfo.get_kind_info(CONTAINER).POINTER.child).VECTOR.child;
+    } else if (comptime Types.type_is_pointer_or_slice_possibly_optional(CONTAINER)) {
+        return KindInfo.get_kind_info(CONTAINER).pointer_child_type();
+    } else if (comptime CONTAINER == *std.Io.Reader or CONTAINER == *std.Io.Writer) {
+        return u8;
+    } else {
+        return CONTAINER;
+    }
+}
+/// A utility 'type of container element' function that returns the natural element type for a container:
+///   - Indexable types return the type that is analogous to `@typeOf(container[0])`
+///     - (slices, many-item pointers, arrays, vectors, single-item pointers to arrays/vectors, Zig ArrayList, GooLibSlice, etc.)
+///   - Single-item pointers return the pointer child type
+///   - Raw values return their own type
+///   - std.Io.Reader and std.Io.Writer = provided `DEFAULT` type
+///
+/// These types match those expected by the other memory utility funcs in this module (`get()`, `set()`, etc.)
+pub fn ElementTypeOrDefaultForReaderWriter(comptime CONTAINER: type, comptime DEFAULT: type) type {
+    if (comptime Root.GooListSlice.type_is_GooListSlice(CONTAINER)) {
+        return CONTAINER.T;
+    } else if (comptime KindInfo.get_kind_info(CONTAINER).is_struct() and @hasField(CONTAINER, "items") and Types.type_is_slice(@FieldType(CONTAINER, "items"))) {
+        return Types.pointer_child_type(@FieldType(CONTAINER, "items"));
+    } else if (comptime KindInfo.get_kind_info(CONTAINER).is_indexable()) {
+        return KindInfo.get_kind_info(CONTAINER).indexed_child_type();
+    } else if (comptime Types.type_is_vector(CONTAINER)) {
+        return KindInfo.get_kind_info(CONTAINER).VECTOR.child;
+    } else if (comptime Types.type_is_pointer_to_vector(CONTAINER)) {
+        KindInfo.get_kind_info(KindInfo.get_kind_info(CONTAINER).POINTER.child).VECTOR.child;
+    } else if (comptime Types.type_is_pointer_or_slice_possibly_optional(CONTAINER)) {
+        return KindInfo.get_kind_info(CONTAINER).pointer_child_type();
+    } else if (comptime CONTAINER == *std.Io.Reader or CONTAINER == *std.Io.Writer) {
+        return DEFAULT;
+    } else {
+        return CONTAINER;
+    }
+}
+
 /// A utility 'append' function that accepts any of the following containers:
 ///   - GooListSlice
 ///   - ArrayList (asserts that no allocation error returned)
@@ -187,23 +242,63 @@ pub fn append(container: anytype, val: anytype, alloc: Allocator) @TypeOf(contai
     const CONTAINER = @TypeOf(container);
     const ELEM = @TypeOf(val);
     var new_container = container;
-    if (Root.GooListSlice.type_is_GooListSlice_with_element_type(CONTAINER, ELEM)) {
+    if (comptime Root.GooListSlice.type_is_GooListSlice_with_element_type(CONTAINER, ELEM)) {
         new_container = new_container.append(val, alloc);
-    } else if (Types.type_is_zig_list(CONTAINER, ELEM)) {
+    } else if (comptime Types.type_is_zig_list(CONTAINER, ELEM)) {
         new_container.append(alloc, val) catch |err| assert_unreachable_err(@src(), err);
-    } else if (Types.type_is_zig_list_managed(CONTAINER, ELEM)) {
+    } else if (comptime Types.type_is_zig_list_managed(CONTAINER, ELEM)) {
         new_container.append(val) catch |err| assert_unreachable_err(@src(), err);
-    } else if (Types.type_is_slice_with_child_type(CONTAINER, ELEM)) {
-        new_container[new_container.len] = val;
-        new_container = new_container[0 .. new_container.len + 1];
-    } else if (Types.type_is_many_item_pointer_with_child_type(CONTAINER, ELEM)) {
+    } else if (comptime Types.type_is_slice_with_child_type(CONTAINER, ELEM)) {
+        new_container.ptr[new_container.len] = val;
+        new_container = new_container.ptr[0 .. new_container.len + 1];
+    } else if (comptime Types.type_is_many_item_pointer_with_child_type(CONTAINER, ELEM)) {
         new_container[0] = val;
         new_container += 1;
-    } else if (Types.type_is_pointer_with_child_type(CONTAINER, ELEM)) {
+    } else if (comptime Types.type_is_pointer_with_child_type(CONTAINER, ELEM)) {
         new_container.* = val;
-    } else if (CONTAINER == ELEM) {
+    } else if (comptime CONTAINER == ELEM) {
         new_container = val;
-    } else if (CONTAINER == *std.Io.Writer) {
+    } else if (comptime CONTAINER == *std.Io.Writer) {
+        const c: *std.Io.Writer = new_container;
+        const as_bytes = std.mem.asBytes(&val);
+        c.writeAll(as_bytes) catch |err| assert_unreachable_err(@src(), err);
+        new_container = c;
+    } else {
+        assert_unreachable(@src(), "cannot implicitly append type `{s}` to container type `{s}`", .{ @typeName(ELEM), @typeName(CONTAINER) });
+    }
+    return new_container;
+}
+
+/// A utility 'append assume capacity' function that accepts any of the following containers:
+///   - GooListSlice
+///   - ArrayList (asserts that no allocation error returned)
+///   - ArrayListManaged (asserts that no allocation error returned)
+///   - slices ([]T, assumes extending slice length is valid and does not use allocator)
+///   - many-item pointers ([*]T, assumes incrementing pointer address is valid and does not use allocator)
+///   - single-item pointers (*T, overwrites current value, use with caution)
+///   - raw values with the same type as the new value (value is replaced, use with caution)
+///   - *std.Io.Writer (value written as raw bytes, asserts no write error occurs)
+pub fn append_assume_capacity(container: anytype, val: anytype) @TypeOf(container) {
+    const CONTAINER = @TypeOf(container);
+    const ELEM = @TypeOf(val);
+    var new_container = container;
+    if (comptime Root.GooListSlice.type_is_GooListSlice_with_element_type(CONTAINER, ELEM)) {
+        new_container = new_container.append_assume_capacity(val);
+    } else if (comptime Types.type_is_zig_list(CONTAINER, ELEM)) {
+        new_container.appendAssumeCapacity(val);
+    } else if (comptime Types.type_is_zig_list_managed(CONTAINER, ELEM)) {
+        new_container.appendAssumeCapacity(val);
+    } else if (comptime Types.type_is_slice_with_child_type(CONTAINER, ELEM)) {
+        new_container.ptr[new_container.len] = val;
+        new_container = new_container.ptr[0 .. new_container.len + 1];
+    } else if (comptime Types.type_is_many_item_pointer_with_child_type(CONTAINER, ELEM)) {
+        new_container[0] = val;
+        new_container += 1;
+    } else if (comptime Types.type_is_pointer_with_child_type(CONTAINER, ELEM)) {
+        new_container.* = val;
+    } else if (comptime CONTAINER == ELEM) {
+        new_container = val;
+    } else if (comptime CONTAINER == *std.Io.Writer) {
         const c: *std.Io.Writer = new_container;
         const as_bytes = std.mem.asBytes(&val);
         c.writeAll(as_bytes) catch |err| assert_unreachable_err(@src(), err);
@@ -227,24 +322,24 @@ pub fn dequeue(comptime ELEM: type, container: anytype) struct { @TypeOf(contain
     const CONTAINER = @TypeOf(container);
     var new_container = container;
     var val: ELEM = undefined;
-    if (Root.GooListSlice.type_is_GooListSlice_with_element_type(CONTAINER, ELEM)) {
+    if (comptime Root.GooListSlice.type_is_GooListSlice_with_element_type(CONTAINER, ELEM)) {
         val = new_container.get_first_item();
         new_container = new_container.shrink_sub_slice_left(1);
-    } else if (Types.type_is_zig_list(CONTAINER, ELEM) or Types.type_is_zig_list_managed(CONTAINER, ELEM)) {
+    } else if (comptime Types.type_is_zig_list(CONTAINER, ELEM) or Types.type_is_zig_list_managed(CONTAINER, ELEM)) {
         val = new_container.items[0];
         new_container.items = new_container.items[1..];
         new_container.capacity -= 1;
-    } else if (Types.type_is_slice_with_child_type(CONTAINER, ELEM)) {
+    } else if (comptime Types.type_is_slice_with_child_type(CONTAINER, ELEM)) {
         val = new_container[0];
         new_container = new_container[1..];
-    } else if (Types.type_is_many_item_pointer_with_child_type(CONTAINER, ELEM)) {
+    } else if (comptime Types.type_is_many_item_pointer_with_child_type(CONTAINER, ELEM)) {
         val = new_container[0];
         new_container += 1;
-    } else if (Types.type_is_pointer_with_child_type(CONTAINER, ELEM)) {
+    } else if (comptime Types.type_is_pointer_with_child_type(CONTAINER, ELEM)) {
         val = new_container.*;
-    } else if (CONTAINER == ELEM) {
+    } else if (comptime CONTAINER == ELEM) {
         val = new_container;
-    } else if (CONTAINER == *std.Io.Reader) {
+    } else if (comptime CONTAINER == *std.Io.Reader) {
         const reader: *std.Io.Reader = new_container;
         const as_bytes = std.mem.asBytes(&val);
         reader.readSliceAll(as_bytes) catch |err| assert_unreachable_err(@src(), err);
@@ -320,24 +415,24 @@ pub fn set(container: anytype, idx: anytype, val: anytype) @TypeOf(container) {
     const CONTAINER = @TypeOf(container);
     const ELEM = @TypeOf(val);
     var new_container = container;
-    if (Root.GooListSlice.type_is_GooListSlice_with_element_type(CONTAINER, ELEM)) {
+    if (comptime Root.GooListSlice.type_is_GooListSlice_with_element_type(CONTAINER, ELEM)) {
         new_container.set_item(idx, val);
-    } else if (Types.type_is_zig_list(CONTAINER, ELEM) or Types.type_is_zig_list_managed(CONTAINER, ELEM)) {
+    } else if (comptime Types.type_is_zig_list(CONTAINER, ELEM) or Types.type_is_zig_list_managed(CONTAINER, ELEM)) {
         new_container.items[idx] = val;
-    } else if (Types.KindInfo.get_kind_info(CONTAINER).has_indexable_child_type(ELEM)) {
+    } else if (comptime KindInfo.get_kind_info(CONTAINER).has_indexable_child_type(ELEM)) {
         new_container[idx] = val;
-    } else if (Types.type_is_vector_with_child_type(CONTAINER, ELEM)) {
+    } else if (comptime Types.type_is_vector_with_child_type(CONTAINER, ELEM)) {
         const as_array = vector_to_array(new_container);
         as_array[idx] = val;
         new_container = array_to_vector(as_array);
-    } else if (Types.type_is_pointer_to_vector_with_child_type(CONTAINER, ELEM)) {
+    } else if (comptime Types.type_is_pointer_to_vector_with_child_type(CONTAINER, ELEM)) {
         const as_array_ptr = Cast.vector_to_array_pointer(new_container);
         as_array_ptr[idx] = val;
         new_container = Cast.array_to_vector_pointer(as_array_ptr);
-    } else if (Types.type_is_pointer_with_child_type(CONTAINER, ELEM)) {
+    } else if (comptime Types.type_is_pointer_with_child_type(CONTAINER, ELEM)) {
         assert_with_reason(idx == 0, @src(), "cannot `set` a single-item pointer at any index other than 0, got idx {d}", .{idx});
         new_container.* = val;
-    } else if (CONTAINER == ELEM) {
+    } else if (comptime CONTAINER == ELEM) {
         assert_with_reason(idx == 0, @src(), "cannot `set` a raw value at any index other than 0, got idx {d}", .{idx});
         new_container = val;
     } else {
@@ -363,7 +458,7 @@ pub fn get(comptime ELEM: type, container: anytype, idx: anytype) ELEM {
         return container.get_item(idx);
     } else if (comptime Types.type_is_zig_list(CONTAINER, ELEM) or Types.type_is_zig_list_managed(CONTAINER, ELEM)) {
         return container.items[idx];
-    } else if (comptime Types.KindInfo.get_kind_info(CONTAINER).has_indexable_child_type(ELEM)) {
+    } else if (comptime KindInfo.get_kind_info(CONTAINER).has_indexable_child_type(ELEM)) {
         return container[idx];
     } else if (comptime Types.type_is_vector_with_child_type(CONTAINER, ELEM)) {
         const as_array = vector_to_array(container);
@@ -380,6 +475,60 @@ pub fn get(comptime ELEM: type, container: anytype, idx: anytype) ELEM {
     } else {
         assert_unreachable(@src(), "cannot implicitly 'get at index' with element type `{s}` for container type `{s}`", .{ @typeName(ELEM), @typeName(CONTAINER) });
     }
+}
+/// A utility 'swap two elements' function that accepts any of the following containers:
+///   - GooListSlice
+///   - ArrayList
+///   - ArrayListManaged
+///   - slices ([]T)
+///   - many-item pointers ([*]T)
+///   - single-item pointers to arrays (*[N]T)
+///   - single-item pointers (*T, asserts index is 0)
+///   - raw values with the same type as the new value (asserts index is 0)
+///   - raw arrays or vectors ([N]T, @Vector(N, T))
+///   - pointers to arrays or vectors (*[N]T, *@Vector(N, T))
+pub fn swap(comptime ELEM: type, container: anytype, idx_a: anytype, idx_b: @TypeOf(idx_a)) @TypeOf(container) {
+    const val_a = get(ELEM, container, idx_a);
+    const val_b = get(ELEM, container, idx_b);
+    var new_container = set(container, idx_a, val_b);
+    new_container = set(new_container, idx_b, val_a);
+    return new_container;
+}
+
+/// A utility 'scramble' function that swaps random pairs of indices within the given range,
+/// and accepts any of the following containers:
+///   - GooListSlice
+///   - ArrayList
+///   - ArrayListManaged
+///   - slices ([]T)
+///   - many-item pointers ([*]T)
+///   - single-item pointers to arrays (*[N]T)
+///   - single-item pointers (*T, asserts index is 0)
+///   - raw values with the same type as the new value (asserts index is 0)
+///   - raw arrays or vectors ([N]T, @Vector(N, T))
+///   - pointers to arrays or vectors (*[N]T, *@Vector(N, T))
+pub fn scramble(comptime ELEM: type, container: anytype, range_start: anytype, range_end_exclusive: anytype, rand: std.Random, iterations: anytype) @TypeOf(container) {
+    const IDX = Cast.RuntimeNumeric(@TypeOf(range_end_exclusive));
+    var new_container = container;
+    const span = range_end_exclusive - range_start;
+    if (span <= 1) return container;
+    if (span == 2) {
+        if (rand.boolean()) {
+            return swap(ELEM, container, range_start, range_start + 1);
+        }
+    }
+    var n: IDX = 0;
+    while (n < iterations) : (n += 1) {
+        const idx_a = rand.intRangeAtMost(IDX, @intCast(range_start), range_end_exclusive - 1);
+        const idx_b = get_different: {
+            while (true) {
+                const possible_b = rand.intRangeAtMost(IDX, range_start, range_end_exclusive - 1);
+                if (possible_b != idx_a) break :get_different possible_b;
+            }
+        };
+        new_container = swap(ELEM, new_container, idx_a, idx_b);
+    }
+    return new_container;
 }
 
 /// This method moves all items at `data_ptr[start..]` up `n` places,

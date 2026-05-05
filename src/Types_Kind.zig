@@ -241,6 +241,9 @@ pub const KindInfo = union(Kind) {
     pub inline fn is_pointer(comptime K: KindInfo) bool {
         return K == .POINTER;
     }
+    pub inline fn is_pointer_or_optional_pointer(comptime K: KindInfo) bool {
+        return K == .POINTER or (K == .OPTIONAL and KindInfo.get_kind_info(K.OPTIONAL.child) == .POINTER);
+    }
     pub inline fn is_array(comptime K: KindInfo) bool {
         return K == .ARRAY;
     }
@@ -360,6 +363,17 @@ pub const KindInfo = union(Kind) {
             },
             .OPTIONAL => |O| {
                 return O.child;
+            },
+            else => assert_unreachable(@src(), "kind `{s}` has no child", .{@tagName(K)}),
+        }
+    }
+    pub inline fn pointer_child_type(comptime K: KindInfo) type {
+        switch (K) {
+            .POINTER => |P| {
+                return P.child;
+            },
+            .OPTIONAL => |O| {
+                return KindInfo.get_kind_info(O.child).POINTER.child;
             },
             else => assert_unreachable(@src(), "kind `{s}` has no child", .{@tagName(K)}),
         }

@@ -28,12 +28,20 @@ const testing = std.testing;
 const Root = @import("./_root.zig");
 const Utils = Root.Utils;
 const MathX = Root.Math;
+const SourceLocation = std.builtin.SourceLocation;
 
 pub fn print(comptime fmt: []const u8, args: anytype) void {
     if (@inComptime()) {
         @compileError(std.fmt.comptimePrint(fmt, args));
     } else if (testing.backend_can_print) {
         std.debug.print(fmt, args);
+    }
+}
+pub fn print_src(comptime src: SourceLocation, comptime fmt: []const u8, args: anytype) void {
+    if (@inComptime()) {
+        @compileError(std.fmt.comptimePrint("\nFAILED AT: " ++ Utils.Format.fmt_src_loc(src) ++ fmt, args));
+    } else if (testing.backend_can_print) {
+        std.debug.print("\nFAILED AT: " ++ Utils.Format.fmt_src_loc(src) ++ fmt, args);
     }
 }
 
@@ -66,11 +74,27 @@ pub fn expect_true(condition: bool, comptime condition_str: []const u8, comptime
     }
 }
 
+pub fn expect_true_src(condition: bool, comptime src: SourceLocation, comptime fail_description: []const u8, fail_args: anytype) !void {
+    if (!condition) {
+        print_src(src, "\nFAILURE: " ++ fail_description, fail_args);
+        print("\n\tEXPECT: true\n\tACTUAL: false\n", .{});
+        return TestError.test_expected_true;
+    }
+}
+
 pub fn expect_false(condition: bool, condition_str: []const u8, comptime fail_description: []const u8, fail_args: anytype) !void {
     if (condition) {
         print("\nFAILURE: " ++ fail_description, fail_args);
         print("\n\tEXPECT: {s} == false\n\tACTUAL: {s} == true\n", .{ condition_str, condition_str });
         return TestError.test_expected_false;
+    }
+}
+
+pub fn expect_false_src(condition: bool, comptime src: SourceLocation, comptime fail_description: []const u8, fail_args: anytype) !void {
+    if (condition) {
+        print_src(src, "\nFAILURE: " ++ fail_description, fail_args);
+        print("\n\tEXPECT: false\n\tACTUAL: true\n", .{});
+        return TestError.test_expected_true;
     }
 }
 
@@ -80,6 +104,16 @@ pub fn expect_equal_struct(val_a: anytype, str_a: []const u8, val_b: anytype, st
     if (!val_a.equals(val_b)) {
         print("\nFAILURE: " ++ fail_description, fail_args);
         print("\n\tEXPECT: {s} == {s}\n\tEXPECT: {any} == {any}\n\tACTUAL: {any} != {any}\n", .{ str_a, str_b, val_a, val_b, val_a, val_b });
+        return TestError.test_expected_equal;
+    }
+}
+
+pub fn expect_equal_struct_src(val_a: anytype, val_b: anytype, comptime src: SourceLocation, comptime fail_description: []const u8, fail_args: anytype) !void {
+    if (!std.meta.hasMethod(@TypeOf(val_a), "equals")) return TestError.test_struct_equal_structs_didnt_have_fn_equals;
+    if (@TypeOf(val_a) != @TypeOf(val_b)) return TestError.test_struct_equal_structs_different_struct_types;
+    if (!val_a.equals(val_b)) {
+        print_src(src, "\nFAILURE: " ++ fail_description, fail_args);
+        print("\n\tEXPECT EQUAL\n\tACTUAL A: {any}\n\tACTUAL B: {any}\n", .{ val_a, val_b });
         return TestError.test_expected_equal;
     }
 }
@@ -94,6 +128,16 @@ pub fn expect_not_equal_struct(val_a: anytype, str_a: []const u8, val_b: anytype
     }
 }
 
+pub fn expect_not_equal_struct_src(val_a: anytype, val_b: anytype, comptime src: SourceLocation, comptime fail_description: []const u8, fail_args: anytype) !void {
+    if (!std.meta.hasMethod(@TypeOf(val_a), "equals")) return TestError.test_struct_equal_structs_didnt_have_fn_equals;
+    if (@TypeOf(val_a) != @TypeOf(val_b)) return TestError.test_struct_equal_structs_different_struct_types;
+    if (val_a.equals(val_b)) {
+        print_src(src, "\nFAILURE: " ++ fail_description, fail_args);
+        print("\n\tEXPECT NOT EQUAL\n\tACTUAL A: {any}\n\tACTUAL B: {any}\n", .{ val_a, val_b });
+        return TestError.test_expected_not_equal;
+    }
+}
+
 pub fn expect_approx_equal(val_a: anytype, str_a: []const u8, epsilon: anytype, eps_str: []const u8, val_b: anytype, str_b: []const u8, comptime fail_description: []const u8, fail_args: anytype) !void {
     if ((std.meta.hasMethod(@TypeOf(val_a), "approx_equals") and !val_a.approx_equals(val_b)) or !MathX.approx_equal_with_epsilon(@TypeOf(val_a), val_a, val_b, epsilon)) {
         print("\nFAILURE: " ++ fail_description, fail_args);
@@ -102,32 +146,40 @@ pub fn expect_approx_equal(val_a: anytype, str_a: []const u8, epsilon: anytype, 
     }
 }
 
+pub fn expect_approx_equal_src(val_a: anytype, epsilon: anytype, val_b: anytype, comptime src: SourceLocation, comptime fail_description: []const u8, fail_args: anytype) !void {
+    if ((std.meta.hasMethod(@TypeOf(val_a), "approx_equals") and !val_a.approx_equals(val_b)) or !MathX.approx_equal_with_epsilon(@TypeOf(val_a), val_a, val_b, epsilon)) {
+        print_src(src, "\nFAILURE: " ++ fail_description, fail_args);
+        print("\n\tEXPECT APPROX EQUAL (± {any})\n\tACTUAL: {any} != {any}\n", .{ epsilon, val_a, val_b });
+        return TestError.test_expected_equal;
+    }
+}
+
 pub fn expect_equal(val_a: anytype, str_a: []const u8, val_b: anytype, str_b: []const u8, comptime fail_description: []const u8, fail_args: anytype) !void {
-    if ((std.meta.hasMethod(@TypeOf(val_a), "equals") and !val_a.equals(val_b)) or val_a != val_b) {
+    if (!Utils.shallow_equal(val_a, val_b)) {
         print("\nFAILURE: " ++ fail_description, fail_args);
         print("\n\tEXPECT: {s} == {s}\n\tEXPECT: {any} == {any}\n\tACTUAL: {any} != {any}\n", .{ str_a, str_b, val_a, val_b, val_a, val_b });
         return TestError.test_expected_equal;
     }
 }
-pub fn expect_equal_method(val_a: anytype, str_a: []const u8, val_b: anytype, str_b: []const u8, comptime fail_description: []const u8, fail_args: anytype) !void {
-    if (!val_a.equals(val_b)) {
-        print("\nFAILURE: " ++ fail_description, fail_args);
-        print("\n\tEXPECT: {s} == {s}\n\tEXPECT: {any} == {any}\n\tACTUAL: {any} != {any}\n", .{ str_a, str_b, val_a, val_b, val_a, val_b });
+pub fn expect_equal_src(val_a: anytype, val_b: anytype, comptime src: SourceLocation, comptime fail_description: []const u8, fail_args: anytype) !void {
+    if (!Utils.shallow_equal(val_a, val_b)) {
+        print_src(src, "\nFAILURE: " ++ fail_description, fail_args);
+        print("\n\tEXPECT EQUAL\n\tACTUAL: {any} != {any}\n", .{ val_a, val_b });
         return TestError.test_expected_equal;
     }
 }
 
 pub fn expect_not_equal(val_a: anytype, str_a: []const u8, val_b: anytype, str_b: []const u8, comptime fail_description: []const u8, fail_args: anytype) !void {
-    if ((std.meta.hasMethod(@TypeOf(val_a), "equals") and val_a.equals(val_b)) or val_a == val_b) {
+    if (Utils.shallow_equal(val_a, val_b)) {
         print("\nFAILURE: " ++ fail_description, fail_args);
         print("\n\tEXPECT: {s} != {s}\n\tEXPECT: {any} != {any}\n\tACTUAL: {any} == {any}\n", .{ str_a, str_b, val_a, val_b, val_a, val_b });
         return TestError.test_expected_not_equal;
     }
 }
-pub fn expect_not_equal_method(val_a: anytype, str_a: []const u8, val_b: anytype, str_b: []const u8, comptime fail_description: []const u8, fail_args: anytype) !void {
-    if (val_a.equals(val_b)) {
-        print("\nFAILURE: " ++ fail_description, fail_args);
-        print("\n\tEXPECT: {s} != {s}\n\tEXPECT: {any} != {any}\n\tACTUAL: {any} == {any}\n", .{ str_a, str_b, val_a, val_b, val_a, val_b });
+pub fn expect_not_equal_src(val_a: anytype, val_b: anytype, comptime src: SourceLocation, comptime fail_description: []const u8, fail_args: anytype) !void {
+    if (Utils.shallow_equal(val_a, val_b)) {
+        print_src(src, "\nFAILURE: " ++ fail_description, fail_args);
+        print("\n\tEXPECT NOT EQUAL\n\tACTUAL: {any} == {any}\n", .{ val_a, val_b });
         return TestError.test_expected_not_equal;
     }
 }
@@ -136,6 +188,13 @@ pub fn expect_equal_char(val_a: anytype, str_a: []const u8, val_b: anytype, str_
     if (val_a != val_b) {
         print("\nFAILURE: " ++ fail_description, fail_args);
         print("\n\tEXPECT: {s} == {s}\n\tEXPECT: {c} == {c}\n\tACTUAL: {c} != {c}\n", .{ str_a, str_b, val_a, val_b, val_a, val_b });
+        return TestError.test_expected_equal;
+    }
+}
+pub fn expect_equal_char_src(val_a: anytype, val_b: anytype, comptime src: SourceLocation, comptime fail_description: []const u8, fail_args: anytype) !void {
+    if (val_a != val_b) {
+        print_src(src, "\nFAILURE: " ++ fail_description, fail_args);
+        print("\n\tEXPECT EQUAL\n\tACTUAL: {c} != {c}\n", .{ val_a, val_b });
         return TestError.test_expected_equal;
     }
 }
@@ -148,10 +207,26 @@ pub fn expect_not_equal_char(val_a: anytype, str_a: []const u8, val_b: anytype, 
     }
 }
 
+pub fn expect_not_equal_char_src(val_a: anytype, val_b: anytype, comptime src: SourceLocation, comptime fail_description: []const u8, fail_args: anytype) !void {
+    if (val_a == val_b) {
+        print_src(src, "\nFAILURE: " ++ fail_description, fail_args);
+        print("\n\tEXPECT NOT EQUAL\n\tACTUAL: {c} == {c}\n", .{ val_a, val_b });
+        return TestError.test_expected_equal;
+    }
+}
+
 pub fn expect_null(val_a: anytype, str_a: []const u8, comptime fail_description: []const u8, fail_args: anytype) !void {
     if (val_a != null) {
         print("\nFAILURE: " ++ fail_description, fail_args);
         print("\n\tEXPECT: {s} == null\n\tEXPECT: {any} == null\n\tACTUAL: {any} != null\n", .{ str_a, val_a, val_a });
+        return TestError.test_expected_null;
+    }
+}
+
+pub fn expect_null_src(val_a: anytype, comptime src: SourceLocation, comptime fail_description: []const u8, fail_args: anytype) !void {
+    if (val_a != null) {
+        print_src(src, "\nFAILURE: " ++ fail_description, fail_args);
+        print("\n\tEXPECT NULL\n\tACTUAL: {any} != null\n", .{val_a});
         return TestError.test_expected_null;
     }
 }
@@ -163,16 +238,30 @@ pub fn expect_not_null(val_a: anytype, str_a: []const u8, comptime fail_descript
         return TestError.test_expected_not_null;
     }
 }
+pub fn expect_not_null_src(val_a: anytype, comptime src: SourceLocation, comptime fail_description: []const u8, fail_args: anytype) !void {
+    if (val_a == null) {
+        print_src(src, "\nFAILURE: " ++ fail_description, fail_args);
+        print("\n\tEXPECT NOT NULL\n\tACTUAL: null\n", .{});
+        return TestError.test_expected_null;
+    }
+}
 
-pub fn expect_any_err(val_a: anytype, str_a: []const u8, comptime fail_description: []const u8, fail_args: anytype) !void {
+pub fn expect_any_err_union(val_a: anytype, str_a: []const u8, comptime fail_description: []const u8, fail_args: anytype) !void {
     if (val_a) |va| {
         print("\nFAILURE: " ++ fail_description, fail_args);
         print("\n\tEXPECT: {s} == anyerror\n\tEXPECT: {any} == anyerror\n\tACTUAL: {any} != anyerror\n", .{ str_a, va, va });
         return TestError.test_expected_any_error;
     } else |_| {}
 }
+pub fn expect_any_err_union_src(val_a: anytype, comptime src: SourceLocation, comptime fail_description: []const u8, fail_args: anytype) !void {
+    if (val_a) |va| {
+        print_src(src, "\nFAILURE: " ++ fail_description, fail_args);
+        print("\n\tEXPECT ERROR\n\tACTUAL (PAYLOAD): {any}\n", .{va});
+        return TestError.test_expected_any_error;
+    } else |_| {}
+}
 
-pub fn expect_specific_err(val_a: anytype, str_a: []const u8, err: anyerror, comptime fail_description: []const u8, fail_args: anytype) !void {
+pub fn expect_specific_err_union(val_a: anytype, str_a: []const u8, err: anyerror, comptime fail_description: []const u8, fail_args: anytype) !void {
     if (val_a) |va| {
         print("\nFAILURE: " ++ fail_description, fail_args);
         print("\n\tEXPECT: {s} == {s}\n\tEXPECT: {any} == {s}\n\tACTUAL: {any} != {s}\n", .{ str_a, @errorName(err), va, @errorName(err), va, @errorName(err) });
@@ -185,11 +274,31 @@ pub fn expect_specific_err(val_a: anytype, str_a: []const u8, err: anyerror, com
         }
     }
 }
+pub fn expect_specific_err_union_src(val_a: anytype, err: anyerror, comptime src: SourceLocation, comptime fail_description: []const u8, fail_args: anytype) !void {
+    if (val_a) |va| {
+        print_src(src, "\nFAILURE: " ++ fail_description, fail_args);
+        print("\n\tEXPECT ERR `{s}`\n\tACTUAL (PAYLOAD): {any}\n", .{ @errorName(err), va });
+        return TestError.test_expected_specific_error;
+    } else |e| {
+        if (e != err) {
+            print_src(src, "\nFAILURE: " ++ fail_description, fail_args);
+            print("\n\tEXPECT ERR `{s}`\n\tACTUAL ERR: `{s}`\n", .{ @errorName(err), @errorName(e) });
+            return TestError.test_expected_specific_error;
+        }
+    }
+}
 
-pub fn expect_no_err(val_a: anytype, str_a: []const u8, comptime fail_description: []const u8, fail_args: anytype) !void {
+pub fn expect_no_err_union(val_a: anytype, str_a: []const u8, comptime fail_description: []const u8, fail_args: anytype) !void {
     if (val_a) |_| {} else |err| {
         print("\nFAILURE: " ++ fail_description, fail_args);
         print("\n\tEXPECT: {s} != anyerror\n\tEXPECT: {any} != {s}\n\tACTUAL: {any} == {s}\n", .{ str_a, val_a, @errorName(err), val_a, @errorName(err) });
+        return TestError.test_expected_any_error;
+    }
+}
+pub fn expect_no_err_union_src(val_a: anytype, comptime src: SourceLocation, comptime fail_description: []const u8, fail_args: anytype) !void {
+    if (val_a) |_| {} else |err| {
+        print_src(src, "\nFAILURE: " ++ fail_description, fail_args);
+        print("\n\tEXPECT PAYLOAD\n\tACTUAL (ERROR): {s}\n", .{@errorName(err)});
         return TestError.test_expected_any_error;
     }
 }

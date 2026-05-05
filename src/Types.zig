@@ -562,6 +562,11 @@ pub inline fn type_has_decl_with_any_float_type(comptime T: type, comptime decl:
 pub inline fn type_is_pointer_or_slice(comptime T: type) bool {
     return @typeInfo(T) == .pointer;
 }
+
+pub inline fn type_is_pointer_or_slice_possibly_optional(comptime T: type) bool {
+    const INFO = KindInfo.get_kind_info(T);
+    return INFO.is_pointer_or_optional_pointer();
+}
 pub inline fn type_is_zig_list(comptime T: type, comptime ELEM: type) bool {
     return T == std.ArrayList(ELEM);
 }
@@ -621,6 +626,9 @@ pub inline fn type_is_array_with_child_type(comptime T: type, comptime CHILD: ty
 }
 pub inline fn type_is_pointer_to_vector_with_child_type(comptime T: type, comptime CHILD: type) bool {
     return @typeInfo(T) == .pointer and @typeInfo(@typeInfo(T).pointer.child) == .vector and @typeInfo(@typeInfo(T).pointer.child).vector.child == CHILD;
+}
+pub inline fn type_is_pointer_to_vector(comptime T: type) bool {
+    return @typeInfo(T) == .pointer and @typeInfo(@typeInfo(T).pointer.child) == .vector;
 }
 pub inline fn array_or_vector_child_type(comptime T: type) type {
     if (@typeInfo(T) == .array) return @typeInfo(T).array.child;

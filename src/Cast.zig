@@ -102,6 +102,17 @@ pub fn array_to_vector_pointer_const(array_pointer: anytype) *const @Vector(@typ
     return @ptrCast(array_pointer);
 }
 
+pub fn RuntimeNumeric(comptime T: type) type {
+    const INFO = Types.KindInfo.get_kind_info(T);
+    return switch (INFO) {
+        .COMPTIME_FLOAT => f64,
+        .COMPTIME_INT => u64,
+        .INT => T,
+        .FLOAT => T,
+        else => assert_unreachable(@src(), "type `{s}` was not a number", .{@typeName(T)}),
+    };
+}
+
 pub fn num_cast(from: anytype, comptime TO: type) TO {
     const FROM = @TypeOf(from);
     const FI = @typeInfo(FROM);
