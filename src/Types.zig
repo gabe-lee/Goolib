@@ -562,6 +562,12 @@ pub inline fn type_has_decl_with_any_float_type(comptime T: type, comptime decl:
 pub inline fn type_is_pointer_or_slice(comptime T: type) bool {
     return @typeInfo(T) == .pointer;
 }
+pub inline fn type_is_zig_list(comptime T: type, comptime ELEM: type) bool {
+    return T == std.ArrayList(ELEM);
+}
+pub inline fn type_is_zig_list_managed(comptime T: type, comptime ELEM: type) bool {
+    return T == std.array_list.Managed(ELEM);
+}
 pub inline fn type_is_slice(comptime T: type) bool {
     return @typeInfo(T) == .pointer and @typeInfo(T).pointer.size == .slice;
 }
@@ -570,6 +576,12 @@ pub inline fn type_is_slice_with_child_type(comptime T: type, comptime C: type) 
 }
 pub inline fn type_is_many_item_pointer(comptime T: type) bool {
     return @typeInfo(T) == .pointer and @typeInfo(T).pointer.size == .many;
+}
+pub inline fn type_is_many_item_pointer_with_child_type(comptime T: type, comptime ELEM: type) bool {
+    return @typeInfo(T) == .pointer and @typeInfo(T).pointer.size == .many and @typeInfo(T).pointer.child == ELEM;
+}
+pub inline fn type_is_many_item_pointer_or_slice(comptime T: type) bool {
+    return @typeInfo(T) == .pointer and (@typeInfo(T).pointer.size == .many or @typeInfo(T).pointer.size == .slice);
 }
 pub inline fn type_is_single_item_pointer(comptime T: type) bool {
     return @typeInfo(T) == .pointer and @typeInfo(T).pointer.size == .one;
@@ -598,8 +610,17 @@ pub inline fn type_is_array_or_vector(comptime T: type) bool {
 pub inline fn type_is_vector(comptime T: type) bool {
     return @typeInfo(T) == .vector;
 }
+pub inline fn type_is_vector_with_child_type(comptime T: type, comptime CHILD: type) bool {
+    return @typeInfo(T) == .vector and @typeInfo(T).vector.child == CHILD;
+}
 pub inline fn type_is_array(comptime T: type) bool {
     return @typeInfo(T) == .array;
+}
+pub inline fn type_is_array_with_child_type(comptime T: type, comptime CHILD: type) bool {
+    return @typeInfo(T) == .array and @typeInfo(T).array.child == CHILD;
+}
+pub inline fn type_is_pointer_to_vector_with_child_type(comptime T: type, comptime CHILD: type) bool {
+    return @typeInfo(T) == .pointer and @typeInfo(@typeInfo(T).pointer.child) == .vector and @typeInfo(@typeInfo(T).pointer.child).vector.child == CHILD;
 }
 pub inline fn array_or_vector_child_type(comptime T: type) type {
     if (@typeInfo(T) == .array) return @typeInfo(T).array.child;

@@ -132,7 +132,7 @@ comptime {
         _ = @import("./FileFormat.zig");
         // _ = @import("./Filegen.zig");
         _ = @import("./Flags.zig");
-        _ = @import("./FlexSlice.zig");
+        // _ = @import("./FlexSlice.zig");
         _ = @import("./FrameTimingManager.zig");
         // pub const Format = @import("./Format.zig");
         _ = @import("./Fuzz.zig");

@@ -38,7 +38,7 @@ const num_cast = Root.Cast.num_cast;
 const bit_cast = Root.Cast.bit_cast;
 pub const UnsignedIntegerWithSameSize = Types.UnsignedIntegerWithSameSize;
 pub const SignedIntegerWithSameSize = Types.SignedIntegerWithSameSize;
-
+const DEBUG = std.debug.print;
 const Math = @This();
 
 pub const fsize = Types.fsize;
@@ -426,7 +426,7 @@ pub fn upgrade_2_numbers_for_math(a: anytype, b: anytype) Upgraded2Numbers(@Type
     const RESULT = Upgraded2Numbers(UPGRADE.TYPE_AA, UPGRADE.TYPE_BB);
     return RESULT{
         .a = UPGRADE.TRANSFORM_AA_TO_X.transform(UPGRADE.TRANSFORM_A_TO_AA.transform(a, UPGRADE.TYPE_AA), UPGRADE.TYPE_X),
-        .b = UPGRADE.TRANSFORM_BB_TO_X.transform(UPGRADE.TRANSFORM_B_TO_BB.transform(a, UPGRADE.TYPE_AA), UPGRADE.TYPE_X),
+        .b = UPGRADE.TRANSFORM_BB_TO_X.transform(UPGRADE.TRANSFORM_B_TO_BB.transform(b, UPGRADE.TYPE_BB), UPGRADE.TYPE_X),
     };
 }
 

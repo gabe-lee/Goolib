@@ -34,14 +34,18 @@ const math = std.math;
 const fmt = std.fmt;
 
 const Root = @import("./_root.zig");
+const Cast = Root.Cast;
 const object_equals = Root.Utils.Compare.shallow_equals;
 const Assert = Root.Assert;
 const Types = Root.Types;
 const Test = Root.Testing;
 const assert_with_reason = Assert.assert_with_reason;
 const assert_unreachable = Assert.assert_unreachable;
+const assert_unreachable_err = Assert.assert_unreachable_err;
 const ptr_cast = Root.Cast.ptr_cast;
 const num_cast = Root.Cast.num_cast;
+const array_to_vector = Cast.array_to_vector;
+const vector_to_array = Cast.vector_to_array;
 const Endian = Root.CommonTypes.Endian;
 const Math = Root.Math;
 
@@ -170,301 +174,212 @@ pub fn align_forward_without_breaking_align_boundary_unless_offset_boundary_alig
     return std.mem.alignForward(usize, offset, boundary_align);
 }
 
-
-pub fn search_for_many(
-    comptime PKG: Utils.Compare.SearchPackage,
-    data: PKG.DATA_CONTAINER,
-    data_start: PKG.DATA_CONTAINER_IDX_TYPE,
-    data_end_exclusive: PKG.DATA_CONTAINER_IDX_TYPE,
-    search_params: PKG.SEARCH_PARAM_CONTAINER,
-    search_start: PKG.SEARCH_PARAM_CONTAINER_IDX_TYPE,
-    search_end_exclusive: PKG.SEARCH_PARAM_CONTAINER_IDX_TYPE,
-    results: PKG.RESULT_CONTAINER,
-    results_start: PKG.RESULT_CONTAINER_IDX_TYPE,
-    results_end_exclusive: PKG.RESULT_CONTAINER_IDX_TYPE,
-    search_order: LinearSearchOrder,
-    userdata: PKG.USERDATA_TYPE,
-) PKG.RESULT_CONTAINER_IDX_TYPE {
-    const DATA_IDX = PKG.DATA_CONTAINER_IDX_TYPE;
-    const SEARCH_IDX = PKG.SEARCH_PARAM_CONTAINER_IDX_TYPE;
-    const RESULT_IDX = PKG.RESULT_CONTAINER_IDX_TYPE;
-    if (search_start >= search_end_exclusive or data_start >= data_end_exclusive) return 0;
-    var search_idx: SEARCH_IDX = search_start;
-    var result_idx: RESULT_IDX = results_start;
-    var data_idx: DATA_IDX = undefined;
-    var min_data_idx: DATA_IDX = data_start;
-    var search_item: PKG.SEARCH_PARAM_CONTAINER_ELEM = undefined;
-    next_item_to_find: while (search_idx < search_end_exclusive) : (search_idx += 1) {
-        search_item = PKG.get_search_param(search_params, search_idx);
-        data_idx = @intCast(min_data_idx);
-        while (data_idx < data_end_exclusive) : (data_idx += 1) {
-            const data_item = PKG.get_item(data, data_idx);
-            if (PKG.match_item(userdata, data_item, search_item)) {
-                assert_with_reason(result_idx < results_end_exclusive, @src(), "ran out of space in result container. with `results_start` == {d}, need `results_end_exclusive` >= {d}, got `results_end_exclusive` == {d}", .{ results_start, result_idx + 1, results_end_exclusive });
-                PKG.set_result(results, result_idx, @intCast(data_idx));
-                result_idx += 1;
-                if (search_order == .SEARCH_PARAMS_IN_SAME_ORDER_AS_THEIR_ORDER_IN_DATA_BUFFER) {
-                    min_data_idx = data_idx;
-                }
-                continue :next_item_to_find;
-            }
-        }
+/// A utility 'append' function that accepts any of the following containers:
+///   - GooListSlice
+///   - ArrayList (asserts that no allocation error returned)
+///   - ArrayListManaged (asserts that no allocation error returned)
+///   - slices ([]T, assumes extending slice length is valid and does not use allocator)
+///   - many-item pointers ([*]T, assumes incrementing pointer address is valid and does not use allocator)
+///   - single-item pointers (*T, overwrites current value, use with caution)
+///   - raw values with the same type as the new value (value is replaced, use with caution)
+///   - *std.Io.Writer (value written as raw bytes, asserts no write error occurs)
+pub fn append(container: anytype, val: anytype, alloc: Allocator) @TypeOf(container) {
+    const CONTAINER = @TypeOf(container);
+    const ELEM = @TypeOf(val);
+    var new_container = container;
+    if (Root.GooListSlice.type_is_GooListSlice_with_element_type(CONTAINER, ELEM)) {
+        new_container = new_container.append(val, alloc);
+    } else if (Types.type_is_zig_list(CONTAINER, ELEM)) {
+        new_container.append(alloc, val) catch |err| assert_unreachable_err(@src(), err);
+    } else if (Types.type_is_zig_list_managed(CONTAINER, ELEM)) {
+        new_container.append(val) catch |err| assert_unreachable_err(@src(), err);
+    } else if (Types.type_is_slice_with_child_type(CONTAINER, ELEM)) {
+        new_container[new_container.len] = val;
+        new_container = new_container[0 .. new_container.len + 1];
+    } else if (Types.type_is_many_item_pointer_with_child_type(CONTAINER, ELEM)) {
+        new_container[0] = val;
+        new_container += 1;
+    } else if (Types.type_is_pointer_with_child_type(CONTAINER, ELEM)) {
+        new_container.* = val;
+    } else if (CONTAINER == ELEM) {
+        new_container = val;
+    } else if (CONTAINER == *std.Io.Writer) {
+        const c: *std.Io.Writer = new_container;
+        const as_bytes = std.mem.asBytes(&val);
+        c.writeAll(as_bytes) catch |err| assert_unreachable_err(@src(), err);
+        new_container = c;
+    } else {
+        assert_unreachable(@src(), "cannot implicitly append type `{s}` to container type `{s}`", .{ @typeName(ELEM), @typeName(CONTAINER) });
     }
-    return result_idx;
+    return new_container;
 }
 
-
-pub const BinarySearchResultKind = enum(u2) {
-    FOUND,
-    NOT_FOUND_WITHIN_RANGE,
-    NOT_FOUND_ABOVE_MAX,
-    NOT_FOUND_BELOW_MIN,
-};
-
-pub fn BinarySerachResult(comptime IDX_TYPE: type) type {
-    return struct {
-        idx: IDX_TYPE,
-        result: BinarySearchResultKind,
-    };
-}
-
-const SearchKind = enum(u8) {
-    IMPLICIT,
-    IMPLICIT_GETTER,
-    FUNC,
-    FUNC_GETTER,
-    FUNC_USERDATA,
-    FUNC_USERDATA_GETTER,
-};
-
-fn BinarySearchPackage(comptime SEARCH_PARAM: type, comptime ELEM_TYPE: type, comptime USERDATA: type) type {
-    return union {
-        const Self = @This();
-
-        IMPLICIT: void,
-        FUNC: struct {
-            match: Utils.Compare.CompareFunc(SEARCH_PARAM, ELEM_TYPE),
-            less_than: Utils.Compare.CompareFunc(SEARCH_PARAM, ELEM_TYPE),
-        },
-        FUNC_USERDATA: struct {
-            match: Utils.Compare.CompareFuncUserdata(SEARCH_PARAM, ELEM_TYPE, USERDATA),
-            less_than: Utils.Compare.CompareFuncUserdata(SEARCH_PARAM, ELEM_TYPE, USERDATA),
-        },
-
-        fn match(self: Self, comptime MODE: SearchKind, search_param: SEARCH_PARAM, item: ELEM_TYPE, userdata: USERDATA) bool {
-            switch (comptime MODE) {
-                .IMPLICIT => {
-                    return Utils.shallow_equal(search_param, item);
-                },
-                .FUNC => {
-                    const func = self.FUNC;
-                    return func.match(search_param, item);
-                },
-                .FUNC_USERDATA => {
-                    const func = self.FUNC_USERDATA;
-                    return func.match(search_param, item, userdata);
-                },
-            }
-        }
-
-        fn search_param_less_than_item(self: Self, comptime MODE: SearchKind, search_param: SEARCH_PARAM, item: ELEM_TYPE, userdata: USERDATA) bool {
-            switch (comptime MODE) {
-                .IMPLICIT => {
-                    return Utils.Compare.less_than(search_param, item);
-                },
-                .FUNC => {
-                    const func = self.FUNC;
-                    return func.less_than(search_param, item);
-                },
-                .FUNC_USERDATA => {
-                    const func = self.FUNC_USERDATA;
-                    return func.less_than(search_param, item, userdata);
-                },
-            }
-        }
-    };
-}
-
-fn binary_search_internal(
-    buffer: anytype,
-    start: anytype,
-    end_exclusive: anytype,
-    search_param: anytype,
-    userdata: anytype,
-    comptime IDX_TYPE: type,
-    package: BinarySearchPackage(@TypeOf(search_param), Types.IndexableChild(@TypeOf(buffer)), @TypeOf(userdata)),
-    comptime PKG_MODE: SearchKind,
-) BinarySerachResult(IDX_TYPE) {
-    _ = Types.IndexableChild(buffer);
-    // const DID_MOVE_RIGHT: IDX_TYPE = Math.bit_flood_left(@as(IDX_TYPE, 1));
-    var idx: IDX_TYPE = @intCast(start);
-    const min = idx;
-    var len: IDX_TYPE = Math.upgrade_subtract_out(end_exclusive, start, IDX_TYPE);
-    if (len == 0) return BinarySerachResult(IDX_TYPE){
-        .idx = idx,
-        .result = .NOT_FOUND_ABOVE_MAX,
-    };
-    const max: IDX_TYPE = @intCast(end_exclusive - 1);
-    var moved_right_mask: IDX_TYPE = 0;
-    while (len > 1) {
-        const half = len >> 1;
-        const item = buffer[idx + half - 1];
-        moved_right_mask = @intCast(@intFromBool(!package.search_param_less_than_item(PKG_MODE, search_param, item, userdata)));
-        moved_right_mask = Math.bit_flood_left(moved_right_mask);
-        idx += half & moved_right_mask;
-        len -= half;
+/// A utility 'dequeue' (get first item and increment start location) function that accepts any of the following containers:
+///   - GooListSlice
+///   - ArrayList (asserts length is not 0)
+///   - ArrayListManaged (asserts length is not 0)
+///   - slices ([]T, asserts length is not 0)
+///   - many-item pointers ([*]T, assumes incrementing pointer address is valid)
+///   - single-item pointers (*T, returns value but does not increment address, use with caution)
+///   - raw values with the same type as requested (value is returned, use with caution)
+///   - *std.Io.Reader (value read as raw bytes, no checks for validity, asserts no read error occurs)
+pub fn dequeue(comptime ELEM: type, container: anytype) struct { @TypeOf(container), ELEM } {
+    const CONTAINER = @TypeOf(container);
+    var new_container = container;
+    var val: ELEM = undefined;
+    if (Root.GooListSlice.type_is_GooListSlice_with_element_type(CONTAINER, ELEM)) {
+        val = new_container.get_first_item();
+        new_container = new_container.shrink_sub_slice_left(1);
+    } else if (Types.type_is_zig_list(CONTAINER, ELEM) or Types.type_is_zig_list_managed(CONTAINER, ELEM)) {
+        val = new_container.items[0];
+        new_container.items = new_container.items[1..];
+        new_container.capacity -= 1;
+    } else if (Types.type_is_slice_with_child_type(CONTAINER, ELEM)) {
+        val = new_container[0];
+        new_container = new_container[1..];
+    } else if (Types.type_is_many_item_pointer_with_child_type(CONTAINER, ELEM)) {
+        val = new_container[0];
+        new_container += 1;
+    } else if (Types.type_is_pointer_with_child_type(CONTAINER, ELEM)) {
+        val = new_container.*;
+    } else if (CONTAINER == ELEM) {
+        val = new_container;
+    } else if (CONTAINER == *std.Io.Reader) {
+        const reader: *std.Io.Reader = new_container;
+        const as_bytes = std.mem.asBytes(&val);
+        reader.readSliceAll(as_bytes) catch |err| assert_unreachable_err(@src(), err);
+        new_container = reader;
+    } else {
+        assert_unreachable(@src(), "cannot implicitly dequeue type `{s}` from container type `{s}`", .{ @typeName(ELEM), @typeName(CONTAINER) });
     }
-    if (package.match(PKG_MODE, search_param, buffer[idx], userdata)) return BinarySerachResult(IDX_TYPE){
-        .idx = idx,
-        .result = .FOUND,
-    };
-    if (idx <= min) {
-        return BinarySerachResult(IDX_TYPE){
-            .idx = idx,
-            .result = .NOT_FOUND_BELOW_MIN,
+    return .{ new_container, val };
+}
+
+/// A utility 'dequeue or null' (if any items exist, get first item and increment start location) function that accepts any of the following containers:
+///   - GooListSlice
+///   - ArrayList
+///   - ArrayListManaged
+///   - slices ([]T)
+///   - many-item pointers ([*]T, assumes incrementing pointer address is valid, never null)
+///   - single-item pointers (*T, returns value but does not increment address, use with caution)
+///   - raw values with the same type as requested (value is returned, use with caution)
+///   - *std.Io.Reader (value read as raw bytes, no checks for validity, read error results in null value)
+pub fn dequeue_or_null(comptime ELEM: type, container: anytype) struct { @TypeOf(container), ?ELEM } {
+    const CONTAINER = @TypeOf(container);
+    var new_container = container;
+    var val: ?ELEM = null;
+    if (comptime Root.GooListSlice.type_is_GooListSlice_with_element_type(CONTAINER, ELEM)) {
+        if (new_container.len() > 0) {
+            val = new_container.get_first_item();
+            new_container = new_container.shrink_sub_slice_left(1);
+        }
+    } else if (comptime Types.type_is_zig_list(CONTAINER, ELEM) or Types.type_is_zig_list_managed(CONTAINER, ELEM)) {
+        if (new_container.items.len > 0) {
+            val = new_container.items[0];
+            new_container.items = new_container.items[1..];
+            new_container.capacity -= 1;
+        }
+    } else if (comptime Types.type_is_slice_with_child_type(CONTAINER, ELEM)) {
+        if (new_container.len > 0) {
+            val = new_container[0];
+            new_container = new_container[1..];
+        }
+    } else if (comptime Types.type_is_many_item_pointer_with_child_type(CONTAINER, ELEM)) {
+        val = new_container[0];
+        new_container += 1;
+    } else if (comptime Types.type_is_pointer_with_child_type(CONTAINER, ELEM)) {
+        val = new_container.*;
+    } else if (comptime CONTAINER == ELEM) {
+        val = new_container;
+    } else if (comptime CONTAINER == *std.Io.Reader) {
+        const reader: *std.Io.Reader = new_container;
+        val = @as(ELEM, undefined);
+        const as_bytes = std.mem.asBytes(&val.?);
+        reader.readSliceAll(as_bytes) catch {
+            val = null;
         };
+        new_container = reader;
+    } else {
+        assert_unreachable(@src(), "cannot implicitly dequeue type `{s}` from container type `{s}`", .{ @typeName(ELEM), @typeName(CONTAINER) });
     }
-    if (idx >= max) {
-        return BinarySerachResult(IDX_TYPE){
-            .idx = idx,
-            .result = .NOT_FOUND_ABOVE_MAX,
-        };
+    return .{ new_container, val };
+}
+
+/// A utility 'set element at index' function that accepts any of the following containers:
+///   - GooListSlice
+///   - ArrayList
+///   - ArrayListManaged
+///   - slices ([]T)
+///   - many-item pointers ([*]T)
+///   - single-item pointers to arrays (*[N]T)
+///   - single-item pointers (*T, asserts index is 0)
+///   - raw values with the same type as the new value (asserts index is 0)
+///   - raw arrays or vectors ([N]T, @Vector(N, T))
+///   - pointers to arrays or vectors (*[N]T, *@Vector(N, T))
+pub fn set(container: anytype, idx: anytype, val: anytype) @TypeOf(container) {
+    const CONTAINER = @TypeOf(container);
+    const ELEM = @TypeOf(val);
+    var new_container = container;
+    if (Root.GooListSlice.type_is_GooListSlice_with_element_type(CONTAINER, ELEM)) {
+        new_container.set_item(idx, val);
+    } else if (Types.type_is_zig_list(CONTAINER, ELEM) or Types.type_is_zig_list_managed(CONTAINER, ELEM)) {
+        new_container.items[idx] = val;
+    } else if (Types.KindInfo.get_kind_info(CONTAINER).has_indexable_child_type(ELEM)) {
+        new_container[idx] = val;
+    } else if (Types.type_is_vector_with_child_type(CONTAINER, ELEM)) {
+        const as_array = vector_to_array(new_container);
+        as_array[idx] = val;
+        new_container = array_to_vector(as_array);
+    } else if (Types.type_is_pointer_to_vector_with_child_type(CONTAINER, ELEM)) {
+        const as_array_ptr = Cast.vector_to_array_pointer(new_container);
+        as_array_ptr[idx] = val;
+        new_container = Cast.array_to_vector_pointer(as_array_ptr);
+    } else if (Types.type_is_pointer_with_child_type(CONTAINER, ELEM)) {
+        assert_with_reason(idx == 0, @src(), "cannot `set` a single-item pointer at any index other than 0, got idx {d}", .{idx});
+        new_container.* = val;
+    } else if (CONTAINER == ELEM) {
+        assert_with_reason(idx == 0, @src(), "cannot `set` a raw value at any index other than 0, got idx {d}", .{idx});
+        new_container = val;
+    } else {
+        assert_unreachable(@src(), "cannot implicitly 'set at index' with element type `{s}` for container type `{s}`", .{ @typeName(ELEM), @typeName(CONTAINER) });
     }
-    return BinarySerachResult(IDX_TYPE){
-        .idx = idx,
-        .result = .NOT_FOUND_WITHIN_RANGE,
-    };
+    return new_container;
 }
 
-/// Searches a memory region for a matching item using the native `==` operator
-///
-/// returns the index found, else `null` if  not found
-pub fn binary_search_implicit(buffer: anytype, start: anytype, end_exclusive: anytype, find_val: anytype, comptime IDX_TYPE: type) BinarySerachResult(IDX_TYPE) {
-    const package = BinarySearchPackage(@TypeOf(find_val), Types.IndexableChild(@TypeOf(buffer)), void){ .IMPLICIT = void{} };
-    return binary_search_internal(buffer, start, end_exclusive, find_val, void{}, IDX_TYPE, package, .IMPLICIT);
-}
-
-/// Searches a memory region for a matching item using the native `==` operator
-///
-/// returns the index found, else `null` if  not found
-pub fn binary_search_with_func(buffer: anytype, start: anytype, end_exclusive: anytype, search_param: anytype, match_fn: *const Utils.Compare.CompareFunc(@TypeOf(search_param), Types.IndexableChild(@TypeOf(buffer))), less_than_fn: *const Utils.Compare.CompareFunc(@TypeOf(search_param), Types.IndexableChild(@TypeOf(buffer))), comptime IDX_TYPE: type) BinarySerachResult(IDX_TYPE) {
-    const package = BinarySearchPackage(@TypeOf(search_param), Types.IndexableChild(@TypeOf(buffer)), void){ .FUNC = .{
-        .less_than = less_than_fn,
-        .match = match_fn,
-    } };
-    return binary_search_internal(buffer, start, end_exclusive, search_param, void{}, IDX_TYPE, package, .FUNC);
-}
-
-/// Searches a memory region for a matching item using the native `==` operator
-///
-/// returns the index found, else `null` if  not found
-pub fn binary_search_with_func_and_userdata(buffer: anytype, start: anytype, end_exclusive: anytype, search_param: anytype, userdata: anytype, match_fn: *const Utils.Compare.CompareFuncUserdata(@TypeOf(search_param), Types.IndexableChild(@TypeOf(buffer)), @TypeOf(userdata)), less_than_fn: *const Utils.Compare.CompareFuncUserdata(@TypeOf(search_param), Types.IndexableChild(@TypeOf(buffer)), @TypeOf(userdata)), comptime IDX_TYPE: type) BinarySerachResult(IDX_TYPE) {
-    const package = BinarySearchPackage(@TypeOf(search_param), Types.IndexableChild(@TypeOf(buffer)), @TypeOf(userdata)){ .FUNC_USERDATA = .{
-        .less_than = less_than_fn,
-        .match = match_fn,
-    } };
-    return binary_search_internal(buffer, start, end_exclusive, search_param, userdata, IDX_TYPE, package, .FUNC_USERDATA);
-}
-
-pub const BinarySearchOrder = enum {
-    SEARCH_PARAMS_IN_ORDER,
-    SEARCH_PARAMS_UNORDERED,
-};
-
-fn binary_search_many_internal(buffer: anytype, start: anytype, end_exclusive: anytype, search_params: anytype, search_params_order: BinarySearchOrder, userdata: anytype, comptime IDX_TYPE: type, package: BinarySearchPackage(Types.IndexableChild(@TypeOf(search_params)), Types.IndexableChild(@TypeOf(buffer)), @TypeOf(userdata)), comptime PKG_MODE: SearchKind, output_buffer: anytype) IDX_TYPE {
-    const PARAM_COUNT: IDX_TYPE = Types.get_mem_len(search_params, IDX_TYPE);
-    if (PARAM_COUNT == 0) return 0;
-    var param_idx: IDX_TYPE = 0;
-    var out_idx: IDX_TYPE = 0;
-    const out_limit: IDX_TYPE = Types.get_mem_len(output_buffer, IDX_TYPE);
-    _ = Types.IndexableChild(buffer);
-    var buf_idx: IDX_TYPE = undefined;
-    var min_buf_idx: IDX_TYPE = @intCast(start);
-    const max_buf_idx: IDX_TYPE = @intCast(end_exclusive - 1);
-    var buffer_len: IDX_TYPE = undefined;
-    if (buffer_len == 0) return 0;
-    // const DID_MOVE_RIGHT: IDX_TYPE = Math.bit_flood_left(@as(IDX_TYPE, 1));
-    var moved_right_mask: IDX_TYPE = 0;
-    while (param_idx < PARAM_COUNT) : (param_idx += 1) {
-        const search_param = search_params[param_idx];
-        buf_idx = min_buf_idx;
-        buffer_len = (max_buf_idx + 1) - min_buf_idx;
-        while (buffer_len > 1) {
-            const half = buffer_len >> 1;
-            const item = buffer[buf_idx + half - 1];
-            moved_right_mask = @intCast(@intFromBool(!package.search_param_less_than_item(PKG_MODE, search_param, item, userdata)));
-            moved_right_mask = Math.bit_flood_left(moved_right_mask);
-            buf_idx += half & moved_right_mask;
-            buffer_len -= half;
-        }
-        if (package.match(PKG_MODE, search_param, buffer[buf_idx], userdata)) {
-            assert_with_reason(out_idx < out_limit, @src(), "ran out of space in output buffer. Need at least len {d}, got len {d}", .{ out_idx + 1, out_limit });
-            output_buffer[out_idx] = buf_idx;
-            out_idx += 1;
-        }
-        if (search_params_order == .SEARCH_PARAMS_IN_ORDER) {
-            min_buf_idx = buf_idx;
-        }
+/// A utility 'get element at index' function that accepts any of the following containers:
+///   - GooListSlice
+///   - ArrayList
+///   - ArrayListManaged
+///   - slices ([]T)
+///   - many-item pointers ([*]const T)
+///   - single-item pointers to arrays (*const [N]T)
+///   - single-item pointers (*const T, asserts index is 0)
+///   - raw values with the same type as the new value (asserts index is 0)
+///   - raw arrays or vectors ([N]T, @Vector(N, T))
+///   - pointers to arrays or vectors (*const [N]T, *const @Vector(N, T))
+pub fn get(comptime ELEM: type, container: anytype, idx: anytype) ELEM {
+    const CONTAINER = @TypeOf(container);
+    if (comptime Root.GooListSlice.type_is_GooListSlice_with_element_type(CONTAINER, ELEM)) {
+        return container.get_item(idx);
+    } else if (comptime Types.type_is_zig_list(CONTAINER, ELEM) or Types.type_is_zig_list_managed(CONTAINER, ELEM)) {
+        return container.items[idx];
+    } else if (comptime Types.KindInfo.get_kind_info(CONTAINER).has_indexable_child_type(ELEM)) {
+        return container[idx];
+    } else if (comptime Types.type_is_vector_with_child_type(CONTAINER, ELEM)) {
+        const as_array = vector_to_array(container);
+        return as_array[idx];
+    } else if (comptime Types.type_is_pointer_to_vector_with_child_type(CONTAINER, ELEM)) {
+        const as_array_ptr = Cast.vector_to_array_pointer(container);
+        return as_array_ptr[idx];
+    } else if (comptime Types.type_is_pointer_with_child_type(CONTAINER, ELEM)) {
+        assert_with_reason(idx == 0, @src(), "cannot `get` a single-item pointer at any index other than 0, got idx {d}", .{idx});
+        return container.*;
+    } else if (comptime CONTAINER == ELEM) {
+        assert_with_reason(idx == 0, @src(), "cannot `get` a raw value at any index other than 0, got idx {d}", .{idx});
+        return container;
+    } else {
+        assert_unreachable(@src(), "cannot implicitly 'get at index' with element type `{s}` for container type `{s}`", .{ @typeName(ELEM), @typeName(CONTAINER) });
     }
-}
-
-/// Searches a memory region for a matching item using the native `==` operator
-///
-/// returns the index found, else `null` if  not found
-pub fn binary_search_many_implicit(
-    buffer: anytype,
-    start: anytype,
-    end_exclusive: anytype,
-    search_params: anytype,
-    search_params_order: BinarySearchOrder,
-    output_buffer: anytype,
-    comptime IDX_TYPE: type,
-) IDX_TYPE {
-    const package = BinarySearchPackage(Types.IndexableChild(@TypeOf(search_params)), Types.IndexableChild(@TypeOf(buffer)), void){ .IMPLICIT = void{} };
-    return binary_search_many_internal(buffer, start, end_exclusive, search_params, search_params_order, void{}, IDX_TYPE, package, .IMPLICIT, output_buffer);
-}
-
-/// Searches a memory region for a matching item using the native `==` operator
-///
-/// returns the index found, else `null` if  not found
-pub fn binary_search_many_with_func(
-    buffer: anytype,
-    start: anytype,
-    end_exclusive: anytype,
-    search_params: anytype,
-    search_params_order: BinarySearchOrder,
-    match_fn: *const Utils.Compare.CompareFunc(Types.IndexableChild(@TypeOf(search_params)), Types.IndexableChild(@TypeOf(buffer))),
-    less_than_fn: *const Utils.Compare.CompareFunc(Types.IndexableChild(@TypeOf(search_params)), Types.IndexableChild(@TypeOf(buffer))),
-    output_buffer: anytype,
-    comptime IDX_TYPE: type,
-) BinarySerachResult(IDX_TYPE) {
-    const package = BinarySearchPackage(Types.IndexableChild(@TypeOf(search_params)), Types.IndexableChild(@TypeOf(buffer)), void){ .FUNC = .{
-        .less_than = less_than_fn,
-        .match = match_fn,
-    } };
-    return binary_search_many_internal(buffer, start, end_exclusive, search_params, search_params_order, void{}, IDX_TYPE, package, .FUNC, output_buffer);
-}
-
-/// Searches a memory region for a matching item using the native `==` operator
-///
-/// returns the index found, else `null` if  not found
-pub fn binary_search_many_with_func_and_userdata(
-    buffer: anytype,
-    start: anytype,
-    end_exclusive: anytype,
-    search_params: anytype,
-    search_params_order: BinarySearchOrder,
-    userdata: anytype,
-    match_fn: *const Utils.Compare.CompareFuncUserdata(Types.IndexableChild(@TypeOf(search_params)), Types.IndexableChild(@TypeOf(buffer)), @TypeOf(userdata)),
-    less_than_fn: *const Utils.Compare.CompareFuncUserdata(Types.IndexableChild(@TypeOf(search_params)), Types.IndexableChild(@TypeOf(buffer)), @TypeOf(userdata)),
-    output_buffer: anytype,
-    comptime IDX_TYPE: type,
-) BinarySerachResult(IDX_TYPE) {
-    const package = BinarySearchPackage(Types.IndexableChild(@TypeOf(search_params)), Types.IndexableChild(@TypeOf(buffer)), @TypeOf(userdata)){ .FUNC_USERDATA = .{
-        .less_than = less_than_fn,
-        .match = match_fn,
-    } };
-    return binary_search_many_internal(buffer, start, end_exclusive, search_params, search_params_order, userdata, IDX_TYPE, package, .FUNC_USERDATA, output_buffer);
 }
 
 /// This method moves all items at `data_ptr[start..]` up `n` places,

@@ -1,7 +1,11 @@
 {
     "zig.testArgs": [
-        "build",
         "test",
-        "-Dtest-filter=${filter}"
-    ]
+        "--dep",
+        "config",
+        "-Mroot=${path}",
+        "-Mconfig=./src/_config_for_standalone_test.zig",
+        "--test-filter",
+        "${filter}",
+    ],
 }

@@ -50,7 +50,7 @@ pub const EnumeratedDefs = @import("./Utils_EnumeratedDefs.zig");
 pub const Mem = @import("./Utils_Mem.zig");
 pub const Format = @import("./Utils_Format.zig");
 pub const Compare = @import("./Utils_Compare.zig");
-pub const Search = @import("./Utils.Search.zig");
+pub const Search = @import("./Utils_Search.zig");
 
 pub inline fn inline_swap(comptime T: type, a: *T, b: *T, temp: *T) void {
     temp.* = a.*;

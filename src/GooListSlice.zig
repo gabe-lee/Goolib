@@ -328,6 +328,18 @@ pub fn type_is_GooListSlice(comptime T: type) bool {
     }
     return false;
 }
+pub fn type_is_GooListSlice_with_element_type(comptime T: type, comptime ELEM: type) bool {
+    const INFO = KindInfo.get_kind_info(T);
+    if (INFO == .STRUCT) {
+        if (@hasDecl(T, DECL_BOOL_GooListSlice)) {
+            const is_gls = @field(T, DECL_BOOL_GooListSlice);
+            if (@TypeOf(is_gls) == bool) {
+                return is_gls == true and T.T == ELEM;
+            }
+        }
+    }
+    return false;
+}
 pub const KIND_GooListSlice = "Goolib.GooListSlice.GooListSlice";
 pub const KIND_HASH_GooListSlice = Hash.hash(0, KIND_GooListSlice);
 pub const DECL_BOOL_GooListSlice = "GOOLIB_GooListSlice";

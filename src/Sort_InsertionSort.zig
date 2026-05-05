@@ -38,8 +38,7 @@ const Iterator = Root.Iterator;
 pub fn insertion_sort_implicit(buffer: anytype) void {
     const BUF = @TypeOf(buffer);
     const T = Types.IndexableChild(BUF);
-    Types.assert_has_len(BUF);
-    assert_with_reason(Utils.can_infer_type_order(T), @src(), "cannot inherently order type " ++ @typeName(T), .{});
+    Types.assert_has_len(BUF, @src());
     var i: usize = 1;
     var j: usize = undefined;
     var jj: usize = undefined;

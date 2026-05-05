@@ -31,6 +31,7 @@ const Utils = Root.Utils;
 const assert_with_reason = Root.Assert.assert_with_reason;
 const assert_unreachable = Root.Assert.assert_unreachable;
 
+const DEBUG = std.debug.print;
 pub const Order = enum(i8) {
     A_LESS_THAN_B = -1,
     A_EQUAL_B = 0,

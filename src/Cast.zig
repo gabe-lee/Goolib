@@ -83,6 +83,25 @@ pub fn abs_cast(from: anytype, comptime TO: type) TO {
     return num_cast(@abs(from), TO);
 }
 
+pub fn vector_to_array(vector: anytype) [@typeInfo(@TypeOf(vector)).vector.len]@typeInfo(@TypeOf(vector)).vector.child {
+    return @as([@typeInfo(@TypeOf(vector)).vector.len]@typeInfo(@TypeOf(vector)).vector.child, vector);
+}
+pub fn vector_to_array_pointer(vector_pointer: anytype) *const [@typeInfo(@typeInfo(@TypeOf(vector_pointer)).pointer.child).vector.len]@typeInfo(@typeInfo(@TypeOf(vector_pointer)).pointer.child).vector.child {
+    return @ptrCast(vector_pointer);
+}
+pub fn vector_to_array_pointer_const(vector_pointer: anytype) *[@typeInfo(@typeInfo(@TypeOf(vector_pointer)).pointer.child).vector.len]@typeInfo(@typeInfo(@TypeOf(vector_pointer)).pointer.child).vector.child {
+    return @ptrCast(vector_pointer);
+}
+pub fn array_to_vector(array: anytype) @Vector(@typeInfo(@TypeOf(array)).array.len, @typeInfo(@TypeOf(array)).array.child) {
+    return @as(@Vector(@typeInfo(@TypeOf(array)).array.len, @typeInfo(@TypeOf(array)).array.child), array);
+}
+pub fn array_to_vector_pointer(array_pointer: anytype) *@Vector(@typeInfo(@typeInfo(@TypeOf(array_pointer)).pointer.child).array.len, @typeInfo(@typeInfo(@TypeOf(array_pointer)).pointer.child).array.child) {
+    return @ptrCast(array_pointer);
+}
+pub fn array_to_vector_pointer_const(array_pointer: anytype) *const @Vector(@typeInfo(@typeInfo(@TypeOf(array_pointer)).pointer.child).array.len, @typeInfo(@typeInfo(@TypeOf(array_pointer)).pointer.child).array.child) {
+    return @ptrCast(array_pointer);
+}
+
 pub fn num_cast(from: anytype, comptime TO: type) TO {
     const FROM = @TypeOf(from);
     const FI = @typeInfo(FROM);
