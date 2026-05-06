@@ -24,6 +24,7 @@
 const std = @import("std");
 const build = @import("builtin");
 const assert = std.debug.assert;
+const math = std.math;
 
 const Root = @import("./_root.zig");
 const Types = Root.Types;
@@ -41,6 +42,8 @@ const Allocator = std.mem.Allocator;
 const KindInfo = Types.KindInfo;
 const StructField = std.builtin.Type.StructField;
 const EnumField = std.builtin.Type.EnumField;
+const IoWriter = std.Io.Writer;
+const IoReader = std.Io.Reader;
 const util_secure_memset = Utils.Mem.secure_memset;
 const util_secure_zero = Utils.Mem.secure_zero;
 const util_secure_memset_undefined = Utils.Mem.secure_memset_undefined;
@@ -49,13 +52,8 @@ const assert_unreachable = Assert.assert_unreachable;
 const assert_unreachable_err = Assert.assert_unreachable_err;
 const num_cast = Cast.num_cast;
 
-pub const SeekOrigin = enum(u8) {
-    FROM_CURRENT_POSITION,
-    FROM_START,
-    FROM_END,
-};
-
 pub const SeekError = error{
+    invalid_data_source,
     attempt_to_seek_before_start,
     attempt_to_seek_after_end,
     cannot_seek,
@@ -63,177 +61,535 @@ pub const SeekError = error{
     cannot_seek_backward,
 };
 pub const SeekForwardError = error{
+    invalid_data_source,
     attempt_to_seek_after_end,
     cannot_seek,
     cannot_seek_forward,
 };
 pub const CannotSeekForwardError = error{
+    invalid_data_source,
     cannot_seek,
     cannot_seek_forward,
 };
 pub const SeekBackwardError = error{
+    invalid_data_source,
     attempt_to_seek_before_start,
     cannot_seek,
     cannot_seek_backward,
 };
 pub const CannotSeekBackwardError = error{
+    invalid_data_source,
     cannot_seek,
     cannot_seek_backward,
 };
 pub const CannotSeekError = error{
+    invalid_data_source,
     cannot_seek,
     cannot_seek_forward,
     cannot_seek_backward,
 };
 pub const ReadError = error{
+    cannot_read,
+    invalid_data_source,
+    read_timeout,
+    read_canceled,
     too_few_items_available_to_read,
+};
+
+pub const ReadConstrainedError = error{
+    cannot_read,
+    invalid_data_source,
+    read_timeout,
+    read_canceled,
+};
+pub const WriteError = error{
+    cannot_write,
+    invalid_data_destination,
+    write_canceled,
+    write_timeout,
+    not_enough_space_to_write,
+};
+pub const WriteConstrainedError = error{
+    cannot_write,
+    invalid_data_destination,
+    write_canceled,
+    write_timeout,
+};
+
+pub const ReadWriteError = error{
+    // read
+    cannot_read,
+    invalid_data_source,
+    read_timeout,
+    read_canceled,
+    too_few_items_available_to_read,
+    // write
+    cannot_write,
+    invalid_data_destination,
+    write_canceled,
+    write_timeout,
+    not_enough_space_to_write,
+};
+
+pub const ReadWriteErrorConstrained = error{
+    // read
+    cannot_read,
+    invalid_data_source,
+    read_timeout,
+    read_canceled,
+    // write
+    cannot_write,
+    invalid_data_destination,
+    write_canceled,
+    write_timeout,
 };
 
 pub const SeekResult = struct {
     delta: isize = 0,
     err: ?SeekError = null,
+
+    pub fn check_error(self: SeekResult) SeekError!void {
+        if (self.err) |err| return err;
+    }
+    pub fn assert_no_error(self: SeekResult, comptime src: std.builtin.SourceLocation) void {
+        self.check_error() catch |err| assert_unreachable_err(src, err);
+    }
+    pub fn check_error_constrained(self: SeekResult) CannotSeekError!void {
+        if (self.err) |err| switch (err) {
+            SeekError.attempt_to_seek_after_end, SeekError.attempt_to_seek_before_start => {},
+            else => |e| return @errorCast(e),
+        };
+    }
+    pub fn assert_no_error_constrained(self: SeekResult, comptime src: std.builtin.SourceLocation) void {
+        self.check_error_constrained() catch |err| assert_unreachable_err(src, err);
+    }
 };
 
 pub const ReadResult = struct {
     num: usize = 0,
     err: ?ReadError = null,
+
+    pub fn check_error(self: ReadResult) ReadError!void {
+        if (self.err) |err| return err;
+    }
+    pub fn assert_no_error(self: ReadResult, comptime src: std.builtin.SourceLocation) void {
+        self.check_error() catch |err| assert_unreachable_err(src, err);
+    }
 };
 
-pub fn TypeReader(comptime T: type) type {
+pub const WriteResult = struct {
+    num: usize = 0,
+    err: ?WriteError = null,
+
+    pub fn check_error(self: WriteResult) WriteError!void {
+        if (self.err) |err| return err;
+    }
+    pub fn assert_no_error(self: WriteResult, comptime src: std.builtin.SourceLocation) void {
+        self.check_error() catch |err| assert_unreachable_err(src, err);
+    }
+};
+
+pub const ReadWriteResult = struct {
+    num: usize = 0,
+    err: ?ReadWriteError = null,
+
+    pub fn check_error(self: ReadWriteResult) ReadWriteError!void {
+        if (self.err) |err| return err;
+    }
+    pub fn assert_no_error(self: ReadWriteResult, comptime src: std.builtin.SourceLocation) void {
+        self.check_error() catch |err| assert_unreachable_err(src, err);
+    }
+};
+
+pub const Count = union(enum) {
+    ALL: void,
+    EXACT: usize,
+    AT_LEAST: usize,
+    AT_MOST: usize,
+    MIN_MAX: struct { usize, usize },
+
+    pub fn all_items() Count {
+        return Count{ .ALL = void{} };
+    }
+    pub fn exactly_one_item() Count {
+        return Count{ .EXACT = 1 };
+    }
+    pub fn exactly_n_items(n: usize) Count {
+        return Count{ .EXACT = n };
+    }
+    pub fn at_least_n_items(n: usize) Count {
+        return Count{ .AT_LEAST = n };
+    }
+    pub fn at_least_one_item() Count {
+        return Count{ .AT_LEAST = 1 };
+    }
+    pub fn at_most_n_items(n: usize) Count {
+        return Count{ .AT_MOST = n };
+    }
+    pub fn at_most_one_item() Count {
+        return Count{ .AT_MOST = 1 };
+    }
+    pub fn between_min_and_max_items(min: usize, max: usize) Count {
+        return Count{ .MIN_MAX = .{ min, max } };
+    }
+    pub fn between_one_and_max_items(max: usize) Count {
+        return Count{ .MIN_MAX = .{ 1, max } };
+    }
+
+    pub fn min_num(self: Count) ?usize {
+        return switch (self) {
+            .ALL => null,
+            .EXACT => |val| val,
+            .AT_LEAST => |val| val,
+            .AT_MOST => 0,
+            .MIN_MAX => |vals| vals[0],
+        };
+    }
+};
+
+pub const SeekOrigin = enum(u8) {
+    FROM_CURRENT_POSITION,
+    FROM_READ_POSITION,
+    FROM_WRITE_POSITION,
+    FROM_START,
+    FROM_END,
+};
+
+pub const SeekPos = enum(u8) {
+    READ_POS,
+    WRITE_POS,
+};
+
+pub const PeekRead = enum(u8) {
+    PEEK,
+    READ,
+};
+
+pub const SetWrite = enum(u8) {
+    SET,
+    WRITE,
+};
+
+pub fn GooReaderWriter(comptime T: type) type {
     return struct {
-        object: *anyopaque,
         vtable: *const VTABLE,
 
         pub const VTABLE = struct {
-            seek: *const fn (object: *anyopaque, origin: SeekOrigin, delta: isize) SeekResult,
-            peek_n: *const fn (object: *anyopaque, n: usize, dest: [*]T) ReadResult,
-            read_n: *const fn (object: *anyopaque, n: usize, dest: [*]T) ReadResult,
+            /// Move the read or write position forward or backward with respect to `origin`
+            ///
+            /// Should always provide an error if the seek could not be completed
+            /// as requested, but should attempt to move as far as possible
+            seek: *const fn (interface: *Self, pos: SeekPos, origin: SeekOrigin, delta: isize) SeekResult,
+            /// Copy a number of items defined by `count` starting from the current read position
+            /// to the destination pointer, but do not advance the read position
+            ///
+            /// Should always provide an error if the minimum number of requested
+            /// items are not copied, but should attempt to copy as many as possible
+            peek: *const fn (interface: *Self, count: Count, dest: [*]T) ReadResult,
+            /// Copy a number of items defined by `count` starting from the current read position
+            /// to the destination pointer and advance the read position
+            ///
+            /// Should always provide an error if the minimum number of requested
+            /// items are not copied, but should attempt to copy as many as possible
+            read: *const fn (interface: *Self, count: Count, dest: [*]T) ReadResult,
+            /// Copy a number of items defined by `count` starting at the current write position
+            /// from the source pointer, but do not advance the write position
+            ///
+            /// Should always provide an error if the minimum number of requested
+            /// items are not copied, but should attempt to copy as many as possible
+            set: *const fn (interface: *Self, count: Count, source: [*]const u8) WriteResult,
+            /// Copy a number of items defined by `count` starting at the current write position
+            /// from the source pointer and advance the write position
+            ///
+            /// Should always provide an error if the minimum number of requested
+            /// items are not copied, but should attempt to copy as many as possible
+            write: *const fn (interface: *Self, count: Count, source: [*]const u8) WriteResult,
+            /// Copy a number of items defined by `count` starting at the current read position
+            /// of this `GooReaderWriter` to the current write position of the destination
+            /// `GooReaderWriter`
+            ///
+            /// `read_mode` and `write_mode` determine whether the source read position
+            /// and the destination write position are advanced, respectively
+            ///
+            /// Should always provide an error if the minimum number of requested
+            /// items are not copied, but should attempt to copy as many as possible
+            stream_to_dest: *const fn (this_interface: *Self, count: Count, read_mode: PeekRead, dest_interface: *Self, write_mode: SetWrite) ReadWriteResult,
         };
         const Self = @This();
 
-        pub fn seek_raw(self: Self, origin: SeekOrigin, delta: isize) SeekResult {
-            return self.vtable.seek(self.object, origin, delta);
+        pub const Delimiter = union(enum) {
+            ONE: T,
+            PATTERN: []const T,
+            ANY_ONE: []const T,
+            ANY_PATTERN: []const []const T,
+
+            pub fn delimiter_val(val: T) Delimiter {
+                return Delimiter{ .ONE = val };
+            }
+            pub fn delimiter_pattern(pattern: []const T) Delimiter {
+                return Delimiter{ .PATTERN = pattern };
+            }
+            pub fn any_delimiter_val(vals: []const T) Delimiter {
+                return Delimiter{ .ANY_ONE = vals };
+            }
+            pub fn any_delimiter_pattern(patterns: []const []const T) Delimiter {
+                return Delimiter{ .ANY_PATTERN = patterns };
+            }
+
+            pub fn max_buffer_size_for_check(self: Delimiter) usize {
+                switch (self) {
+                    .ONE, .ANY_ONE => return 1,
+                    .PATTERN => |pat| return pat.len,
+                    .ANY_PATTERN => |pats| {
+                        var max: usize = 0;
+                        for (pats) |pat| {
+                            max = @max(max, pat.len);
+                        }
+                        return max;
+                    },
+                }
+            }
+            pub fn comptime_max_buffer_size_for_check(comptime self: Delimiter) usize {
+                switch (comptime self) {
+                    .ONE, .ANY_ONE => return 1,
+                    .PATTERN => |pat| return comptime pat.len,
+                    .ANY_PATTERN => |pats| {
+                        var max: usize = 0;
+                        inline for (pats) |pat| {
+                            max = @max(max, pat.len);
+                        }
+                        return comptime max;
+                    },
+                }
+            }
+        };
+
+        pub fn byte_reader(self: *Self) ByteReader {
+            assert_with_reason(T == u8, @src(), "T is not u8 (got `{s}`), cannot cast to byte reader", .{@typeName(T)});
+            return ByteReader{ .u8_reader = self };
         }
-        pub fn seek_get_delta(self: Self, origin: SeekOrigin, delta: isize) SeekError!isize {
-            const raw = self.seek_raw(origin, delta);
-            if (raw.err) |err| return err;
-            return raw.delta;
+
+        //*********
+        // SEEK
+        //*********
+
+        pub fn seek_full_info(self: *Self, pos: SeekPos, origin: SeekOrigin, delta: isize) SeekResult {
+            return self.vtable.seek(self, pos, origin, delta);
         }
-        pub fn seek(self: Self, origin: SeekOrigin, delta: isize) SeekError!void {
-            const raw = self.seek_raw(origin, delta);
-            if (raw.err) |err| return err;
+        pub fn seek_return_delta(self: *Self, pos: SeekPos, origin: SeekOrigin, delta: isize) SeekError!isize {
+            const result = self.seek_full_info(pos, origin, delta);
+            try result.check_error();
+            return result.delta;
         }
-        pub fn seek_constrained_get_delta(self: Self, origin: SeekOrigin, delta: isize) CannotSeekError!isize {
-            const raw = self.seek_raw(origin, delta);
-            if (raw.err) |err| switch (err) {
-                SeekError.attempt_to_seek_after_end, SeekError.attempt_to_seek_before_start => {},
-                else => |e| return @errorCast(e),
-            };
-            return raw.delta;
+        pub fn seek(self: *Self, pos: SeekPos, origin: SeekOrigin, delta: isize) SeekError!void {
+            const result = self.seek_full_info(pos, origin, delta);
+            try result.check_error();
         }
-        pub fn seek_constrained(self: Self, origin: SeekOrigin, delta: isize) CannotSeekError!void {
-            const raw = self.seek_raw(origin, delta);
-            if (raw.err) |err| switch (err) {
-                SeekError.attempt_to_seek_after_end, SeekError.attempt_to_seek_before_start => {},
-                else => |e| return @errorCast(e),
-            };
+        pub fn seek_constrained_return_delta(self: *Self, pos: SeekPos, origin: SeekOrigin, delta: isize) CannotSeekError!isize {
+            const result = self.seek_full_info(pos, origin, delta);
+            try result.check_error_constrained();
+            return result.delta;
         }
-        pub fn advance_one(self: Self) SeekForwardError!void {
-            self.seek(.FROM_CURRENT_POSITION, 1) catch |err| return @errorCast(err);
+        pub fn seek_constrained(self: *Self, origin: SeekOrigin, delta: isize) CannotSeekError!void {
+            const result = self.seek_full_info(origin, delta);
+            try result.check_error_constrained();
         }
-        pub fn advance_one_constrained(self: Self) CannotSeekForwardError!void {
-            self.seek_constrained(.FROM_CURRENT_POSITION, 1) catch |err| return @errorCast(err);
+        pub fn seek_return_delta_never_err(self: *Self, pos: SeekPos, origin: SeekOrigin, delta: isize) isize {
+            const result = self.seek_full_info(pos, origin, delta);
+            result.assert_no_error(@src());
+            return result.delta;
         }
-        pub fn advance_one_constrained_get_delta(self: Self) CannotSeekForwardError!usize {
-            const delta = self.seek_constrained_get_delta(.FROM_CURRENT_POSITION, 1) catch |err| return @errorCast(err);
-            return @intCast(delta);
+        pub fn seek_never_err(self: *Self, pos: SeekPos, origin: SeekOrigin, delta: isize) void {
+            const result = self.seek_full_info(pos, origin, delta);
+            result.assert_no_error(@src());
         }
-        pub fn advance_n(self: Self, n: usize) SeekForwardError!void {
-            self.seek(.FROM_CURRENT_POSITION, num_cast(n, isize)) catch |err| return @errorCast(err);
+        pub fn seek_constrained_return_delta_never_err(self: *Self, pos: SeekPos, origin: SeekOrigin, delta: isize) isize {
+            const result = self.seek_full_info(pos, origin, delta);
+            result.assert_no_error_constrained(@src());
+            return result.delta;
         }
-        pub fn advance_n_constrained(self: Self, n: usize) CannotSeekForwardError!void {
-            self.seek_constrained(.FROM_CURRENT_POSITION, num_cast(n, isize)) catch |err| return @errorCast(err);
+        pub fn seek_constrained_never_err(self: *Self, origin: SeekOrigin, delta: isize) void {
+            const result = self.seek_full_info(origin, delta);
+            result.assert_no_error_constrained(@src());
         }
-        pub fn advance_n_constrained_get_delta(self: Self, n: usize) CannotSeekForwardError!void {
-            const delta = self.seek_constrained_get_delta(.FROM_CURRENT_POSITION, num_cast(n, isize)) catch |err| return @errorCast(err);
-            return @intCast(delta);
+        pub fn advance(self: *Self, count: usize) SeekForwardError!void {
+            self.seek(.FROM_CURRENT_POSITION, num_cast(count, isize)) catch |err| return @errorCast(err);
         }
-        pub fn rollback_one(self: Self) SeekBackwardError!void {
-            self.seek(.FROM_CURRENT_POSITION, -1) catch |err| return @errorCast(err);
+        pub fn advance_constrained(self: *Self, count: usize) CannotSeekForwardError!void {
+            self.seek_constrained(.FROM_CURRENT_POSITION, num_cast(count, isize)) catch |err| return @errorCast(err);
         }
-        pub fn rollback_one_constrained(self: Self) CannotSeekBackwardError!void {
-            self.seek_constrained(.FROM_CURRENT_POSITION, -1) catch |err| return @errorCast(err);
+        pub fn advance_never_err(self: *Self, count: usize) void {
+            self.seek_never_err(.FROM_CURRENT_POSITION, num_cast(count, isize));
         }
-        pub fn rollback_one_constrained_get_delta(self: Self) CannotSeekBackwardError!usize {
-            const delta = self.seek_constrained_get_delta(.FROM_CURRENT_POSITION, -1) catch |err| return @errorCast(err);
-            return @intCast(-delta);
+        pub fn advance_constrained_never_err(self: *Self, count: usize) void {
+            self.seek_constrained_never_err(.FROM_CURRENT_POSITION, num_cast(count, isize));
         }
-        pub fn rollback_n(self: Self, n: usize) SeekBackwardError!void {
-            self.seek(.FROM_CURRENT_POSITION, -num_cast(n, isize)) catch |err| return @errorCast(err);
+        pub fn rollback(self: *Self, count: usize) SeekBackwardError!void {
+            self.seek(.FROM_CURRENT_POSITION, -num_cast(count, isize)) catch |err| return @errorCast(err);
         }
-        pub fn rollback_n_constrained(self: Self, n: usize) CannotSeekBackwardError!void {
-            self.seek_constrained(.FROM_CURRENT_POSITION, -num_cast(n, isize)) catch |err| return @errorCast(err);
+        pub fn rollback_constrained(self: *Self, count: usize) CannotSeekBackwardError!void {
+            self.seek_constrained(.FROM_CURRENT_POSITION, -num_cast(count, isize)) catch |err| return @errorCast(err);
         }
-        pub fn rollback_n_constrained_get_delta(self: Self, n: usize) CannotSeekBackwardError!usize {
-            const delta = self.seek_constrained(.FROM_CURRENT_POSITION, -num_cast(n, isize)) catch |err| return @errorCast(err);
-            return @intCast(-delta);
+        pub fn rollback_never_err(self: *Self, count: usize) void {
+            self.seek_never_err(.FROM_CURRENT_POSITION, -num_cast(count, isize));
         }
-        pub fn peek_raw(self: Self, n: usize, dest: [*]T) ReadResult {
-            return self.vtable.peek_n(self.object, n, dest);
+        pub fn rollback_constrained_never_err(self: *Self, count: usize) void {
+            self.seek_constrained_never_err(.FROM_CURRENT_POSITION, -num_cast(count, isize));
         }
-        pub fn peek_one(self: Self) ReadError!T {
-            var val: T = undefined;
-            const result = self.peek_raw(1, @ptrCast(&val));
-            if (result.err) |err| return err;
-            return val;
+
+        //*********
+        // PEEK
+        //*********
+
+        pub fn peek_full_info(self: *Self, count: Count, dest: [*]T) ReadResult {
+            return self.vtable.peek(self, count, dest);
         }
-        pub fn peek_n(self: Self, n: usize, dest: [*]T) ReadError!void {
-            const result = self.peek_raw(n, dest);
-            if (result.err) |err| return err;
+        pub fn peek(self: *Self, count: Count, dest: [*]T) ReadError!void {
+            const result = self.peek_full_info(count, dest);
+            try result.check_error();
         }
-        pub fn peek_zero_or_one(self: Self) ?T {
-            var val: T = undefined;
-            const result = self.peek_raw(1, @ptrCast(&val));
-            if (result.num == 0) return null;
-            return val;
-        }
-        pub fn peek_up_to_n(self: Self, n: usize, dest: [*]T) usize {
-            const result = self.peek_raw(n, dest);
+        pub fn peek_return_num(self: *Self, count: Count, dest: [*]T) ReadError!usize {
+            const result = self.peek_full_info(count, dest);
+            try result.check_error();
             return result.num;
         }
-        pub fn read_raw(self: Self, n: usize, dest: [*]T) struct { ReadResult, SeekResult } {
-            const p = self.peek_raw(n, dest);
-            if (p.err != null) return .{ p, .{} };
-            const s = self.seek_raw(.FROM_CURRENT_POSITION, num_cast(n, isize));
-            return .{ p, s };
+        pub fn peek_never_err(self: *Self, count: Count, dest: [*]T) void {
+            const result = self.peek_full_info(count, dest);
+            result.assert_no_error(@src());
         }
-        pub fn read_one(self: Self) ReadError!T {
-            if (self.peek_one()) |val| {
-                self.advance_one() catch |err| return @errorCast(err);
-                return val;
-            } else |err| {
-                return @errorCast(err);
-            }
-        }
-        pub fn read_n(self: Self, n: usize, dest: [*]T) ReadError!void {
-            if (self.peek_n(n, dest)) |_| {
-                self.advance_n(n) catch |err| return @errorCast(err);
-            } else |err| {
-                return @errorCast(err);
-            }
-        }
-        pub fn read_zero_or_one(self: Self) ?T {
-            if (self.peek_one()) |val| {
-                self.advance_one() catch |err| return @errorCast(err);
-                return val;
-            } else |err| {
-                return @errorCast(err);
-            }
-        }
-        pub fn read_up_to_n(self: Self, n: usize, dest: [*]T) ReadError!usize {
-            const result = self.peek_raw(n, dest);
-            if (result.err) |err| return err;
+        pub fn peek_return_num_never_err(self: *Self, count: Count, dest: [*]T) usize {
+            const result = self.peek_full_info(count, dest);
+            result.assert_no_error(@src());
             return result.num;
+        }
+
+        //*********
+        // READ
+        //*********
+
+        pub fn read_full_info(self: *Self, count: Count, dest: [*]T) ReadResult {
+            return self.vtable.read(self, count, dest);
+        }
+        pub fn read(self: *Self, count: Count, dest: [*]T) ReadError!void {
+            const result = self.read_full_info(count, dest);
+            try result.check_error();
+        }
+        pub fn read_return_num(self: *Self, count: Count, dest: [*]T) ReadError!usize {
+            const result = self.read_full_info(count, dest);
+            try result.check_error();
+            return result.num;
+        }
+        pub fn read_never_err(self: *Self, count: Count, dest: [*]T) void {
+            const result = self.read_full_info(count, dest);
+            result.assert_no_error(@src());
+        }
+        pub fn read_return_num_never_err(self: *Self, count: Count, dest: [*]T) usize {
+            const result = self.read_full_info(count, dest);
+            result.assert_no_error(@src());
+            return result.num;
+        }
+
+        //*********
+        // SET
+        //*********
+
+        pub fn set_full_info(self: *Self, count: Count, source: [*]const T) WriteResult {
+            return self.vtable.set(self, count, source);
+        }
+        pub fn set(self: *Self, count: Count, source: [*]const T) WriteError!void {
+            const result = self.set_full_info(count, source);
+            try result.check_error();
+        }
+        pub fn set_return_num(self: *Self, count: Count, source: [*]const T) WriteError!usize {
+            const result = self.set_full_info(count, source);
+            try result.check_error();
+            return result.num;
+        }
+        pub fn set_never_err(self: *Self, count: Count, source: [*]const T) void {
+            const result = self.set_full_info(count, source);
+            result.assert_no_error(@src());
+        }
+        pub fn set_return_num_never_err(self: *Self, count: Count, source: [*]const T) usize {
+            const result = self.set_full_info(count, source);
+            result.assert_no_error(@src());
+            return result.num;
+        }
+
+        //*********
+        // WRITE
+        //*********
+
+        pub fn write_full_info(self: *Self, count: Count, source: [*]const T) WriteResult {
+            return self.vtable.write(self, count, source);
+        }
+        pub fn write(self: *Self, count: Count, source: [*]const T) WriteError!void {
+            const result = self.write_full_info(count, source);
+            try result.check_error();
+        }
+        pub fn write_return_num(self: *Self, count: Count, source: [*]const T) WriteError!usize {
+            const result = self.write_full_info(count, source);
+            try result.check_error();
+            return result.num;
+        }
+        pub fn write_never_err(self: *Self, count: Count, source: [*]const T) void {
+            const result = self.write_full_info(count, source);
+            result.assert_no_error(@src());
+        }
+        pub fn write_return_num_never_err(self: *Self, count: Count, source: [*]const T) usize {
+            const result = self.write_full_info(count, source);
+            result.assert_no_error(@src());
+            return result.num;
+        }
+
+        //*********
+        // STREAM
+        //*********
+
+        pub fn stream_to_dest_full_info(self: *Self, count: Count, read_mode: PeekRead, dest: *Self, write_mode: SetWrite) ReadWriteResult {
+            return self.vtable.stream_to_dest(self, count, read_mode, dest, write_mode);
+        }
+        pub fn stream_to_dest(self: *Self, count: Count, read_mode: PeekRead, dest: *Self, write_mode: SetWrite) ReadWriteError!void {
+            const result = self.stream_to_dest_full_info(count, read_mode, dest, write_mode);
+            try result.check_error();
+        }
+        pub fn stream_to_dest_return_num(self: *Self, count: Count, read_mode: PeekRead, dest: *Self, write_mode: SetWrite) ReadWriteError!usize {
+            const result = self.stream_to_dest_full_info(count, read_mode, dest, write_mode);
+            try result.check_error();
+            return result.num;
+        }
+        pub fn stream_to_dest_never_err(self: *Self, count: Count, read_mode: PeekRead, dest: *Self, write_mode: SetWrite) void {
+            const result = self.stream_to_dest_full_info(count, read_mode, dest, write_mode);
+            result.assert_no_error(@src());
+        }
+        pub fn stream_to_dest_return_num_never_err(self: *Self, count: Count, read_mode: PeekRead, dest: *Self, write_mode: SetWrite) usize {
+            const result = self.stream_to_dest_full_info(count, read_mode, dest, write_mode);
+            result.assert_no_error(@src());
+            return result.num;
+        }
+        //*********
+        // PEEK SPECIAL
+        //*********
+
+        fn peek_until_delimiter_return_num_internal(self: *Self, delimiter: Delimiter, dest: [*]T) ReadError!usize {
+            var count: usize = 0;
+            var possible_matches: usize = 0;
+            var check_start: usize = 0;
+            var new_dest = dest;
+            var first_possible_match_ptr = dest;
+            while (true) {
+                try self.peek(.exactly_one_item(), new_dest);
+                new_dest += 1;
+                //CHECKPOINT
+            }
+        }
+
+        pub fn peek_until_delimiter_return_num(self: *Self, delimiter: Delimiter, check_buffer: []T, dest: [*]T) ReadError!usize {
+            assert_with_reason(check_buffer.len >= delimiter.max_buffer_size_for_check(), @src(), "check_buffer is not large enough for the largest delimiter pattern provided, have len {d}, need len {d}", .{ check_buffer.len, delimiter.max_buffer_size_for_check() });
+            return self.peek_until_delimiter_return_num_internal(delimiter, check_buffer, dest);
         }
     };
 }
+
+pub const ByteReader = struct {
+    u8_iface: *GooReaderWriter(u8),
+};

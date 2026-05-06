@@ -23,6 +23,7 @@
 
 const std = @import("std");
 const build = @import("builtin");
+const w = std.Io.Writer;
 const assert = std.debug.assert;
 
 const Root = @import("./_root.zig");
@@ -52,10 +53,10 @@ const num_cast = Cast.num_cast;
 // const BinarySearch = Root.BinarySearch;
 const SmartAllocSettings = Utils.Alloc.SmartAllocSettings;
 const SmartAllocComptimeSettings = Utils.Alloc.SmartAllocComptimeSettings;
-const CompareFunc = Utils.Mem.CompareFunc;
-const CompareFuncUserdata = Utils.Mem.CompareFuncUserdata;
-const GetFunc = Utils.Mem.GetFunc;
-const SetFunc = Utils.Mem.SetFunc;
+// const CompareFunc = Utils.Mem.CompareFunc;
+// const CompareFuncUserdata = Utils.Mem.CompareFuncUserdata;
+// const GetFunc = Utils.Mem.GetFunc;
+// const SetFunc = Utils.Mem.SetFunc;
 const GrowthModel = CommonTypes.GrowthModel;
 const SandboxMode = CommonTypes.SandboxMode;
 const LenMutability = CommonTypes.LenMutability;

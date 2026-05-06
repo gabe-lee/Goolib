@@ -130,7 +130,7 @@ pub fn build(b: *std.Build) void {
         .name = "breakout",
         .root_module = breakout_mod,
     });
-    breakout.want_lto = optimize != .Debug;
+    breakout.lto = if (optimize != .Debug) std.zig.LtoMode.full else std.zig.LtoMode.none;
     breakout.root_module.addImport("Goolib", lib);
     b.installArtifact(breakout);
 
