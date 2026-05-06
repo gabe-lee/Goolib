@@ -270,6 +270,16 @@ pub const SetWrite = enum(u8) {
     WRITE,
 };
 
+const UntilDelimiterStage = enum(u8) {
+    SEARCH,
+    FOUND,
+};
+const IncludeDelimiter = enum(u8) {
+    INCLIDE_DELIMITER_IN_READ,
+    READ_UP_TO_DELIMITER_THEN_STOP,
+    READ_UP_TO_DELIMITER_THEN_DISCARD_IT,
+};
+
 pub fn GooReaderWriter(comptime T: type) type {
     return struct {
         vtable: *const VTABLE,
@@ -316,53 +326,6 @@ pub fn GooReaderWriter(comptime T: type) type {
             stream_to_dest: *const fn (this_interface: *Self, count: Count, read_mode: PeekRead, dest_interface: *Self, write_mode: SetWrite) ReadWriteResult,
         };
         const Self = @This();
-
-        pub const Delimiter = union(enum) {
-            ONE: T,
-            PATTERN: []const T,
-            ANY_ONE: []const T,
-            ANY_PATTERN: []const []const T,
-
-            pub fn delimiter_val(val: T) Delimiter {
-                return Delimiter{ .ONE = val };
-            }
-            pub fn delimiter_pattern(pattern: []const T) Delimiter {
-                return Delimiter{ .PATTERN = pattern };
-            }
-            pub fn any_delimiter_val(vals: []const T) Delimiter {
-                return Delimiter{ .ANY_ONE = vals };
-            }
-            pub fn any_delimiter_pattern(patterns: []const []const T) Delimiter {
-                return Delimiter{ .ANY_PATTERN = patterns };
-            }
-
-            pub fn max_buffer_size_for_check(self: Delimiter) usize {
-                switch (self) {
-                    .ONE, .ANY_ONE => return 1,
-                    .PATTERN => |pat| return pat.len,
-                    .ANY_PATTERN => |pats| {
-                        var max: usize = 0;
-                        for (pats) |pat| {
-                            max = @max(max, pat.len);
-                        }
-                        return max;
-                    },
-                }
-            }
-            pub fn comptime_max_buffer_size_for_check(comptime self: Delimiter) usize {
-                switch (comptime self) {
-                    .ONE, .ANY_ONE => return 1,
-                    .PATTERN => |pat| return comptime pat.len,
-                    .ANY_PATTERN => |pats| {
-                        var max: usize = 0;
-                        inline for (pats) |pat| {
-                            max = @max(max, pat.len);
-                        }
-                        return comptime max;
-                    },
-                }
-            }
-        };
 
         pub fn byte_reader(self: *Self) ByteReader {
             assert_with_reason(T == u8, @src(), "T is not u8 (got `{s}`), cannot cast to byte reader", .{@typeName(T)});
@@ -412,29 +375,29 @@ pub fn GooReaderWriter(comptime T: type) type {
             const result = self.seek_full_info(origin, delta);
             result.assert_no_error_constrained(@src());
         }
-        pub fn advance(self: *Self, count: usize) SeekForwardError!void {
-            self.seek(.FROM_CURRENT_POSITION, num_cast(count, isize)) catch |err| return @errorCast(err);
+        pub fn advance(self: *Self, pos: SeekPos, count: usize) SeekForwardError!void {
+            self.seek(pos, .FROM_CURRENT_POSITION, num_cast(count, isize)) catch |err| return @errorCast(err);
         }
-        pub fn advance_constrained(self: *Self, count: usize) CannotSeekForwardError!void {
-            self.seek_constrained(.FROM_CURRENT_POSITION, num_cast(count, isize)) catch |err| return @errorCast(err);
+        pub fn advance_constrained(self: *Self, pos: SeekPos, count: usize) CannotSeekForwardError!void {
+            self.seek_constrained(pos, .FROM_CURRENT_POSITION, num_cast(count, isize)) catch |err| return @errorCast(err);
         }
-        pub fn advance_never_err(self: *Self, count: usize) void {
-            self.seek_never_err(.FROM_CURRENT_POSITION, num_cast(count, isize));
+        pub fn advance_never_err(self: *Self, pos: SeekPos, count: usize) void {
+            self.seek_never_err(pos, .FROM_CURRENT_POSITION, num_cast(count, isize));
         }
-        pub fn advance_constrained_never_err(self: *Self, count: usize) void {
-            self.seek_constrained_never_err(.FROM_CURRENT_POSITION, num_cast(count, isize));
+        pub fn advance_constrained_never_err(self: *Self, pos: SeekPos, count: usize) void {
+            self.seek_constrained_never_err(pos, .FROM_CURRENT_POSITION, num_cast(count, isize));
         }
-        pub fn rollback(self: *Self, count: usize) SeekBackwardError!void {
-            self.seek(.FROM_CURRENT_POSITION, -num_cast(count, isize)) catch |err| return @errorCast(err);
+        pub fn rollback(self: *Self, pos: SeekPos, count: usize) SeekBackwardError!void {
+            self.seek(pos, .FROM_CURRENT_POSITION, -num_cast(count, isize)) catch |err| return @errorCast(err);
         }
-        pub fn rollback_constrained(self: *Self, count: usize) CannotSeekBackwardError!void {
-            self.seek_constrained(.FROM_CURRENT_POSITION, -num_cast(count, isize)) catch |err| return @errorCast(err);
+        pub fn rollback_constrained(self: *Self, pos: SeekPos, count: usize) CannotSeekBackwardError!void {
+            self.seek_constrained(pos, .FROM_CURRENT_POSITION, -num_cast(count, isize)) catch |err| return @errorCast(err);
         }
-        pub fn rollback_never_err(self: *Self, count: usize) void {
-            self.seek_never_err(.FROM_CURRENT_POSITION, -num_cast(count, isize));
+        pub fn rollback_never_err(self: *Self, pos: SeekPos, count: usize) void {
+            self.seek_never_err(pos, .FROM_CURRENT_POSITION, -num_cast(count, isize));
         }
-        pub fn rollback_constrained_never_err(self: *Self, count: usize) void {
-            self.seek_constrained_never_err(.FROM_CURRENT_POSITION, -num_cast(count, isize));
+        pub fn rollback_constrained_never_err(self: *Self, pos: SeekPos, count: usize) void {
+            self.seek_constrained_never_err(pos, .FROM_CURRENT_POSITION, -num_cast(count, isize));
         }
 
         //*********
@@ -570,22 +533,168 @@ pub fn GooReaderWriter(comptime T: type) type {
         // PEEK SPECIAL
         //*********
 
-        fn peek_until_delimiter_return_num_internal(self: *Self, delimiter: Delimiter, dest: [*]T) ReadError!usize {
-            var count: usize = 0;
-            var possible_matches: usize = 0;
-            var check_start: usize = 0;
-            var new_dest = dest;
-            var first_possible_match_ptr = dest;
-            while (true) {
-                try self.peek(.exactly_one_item(), new_dest);
-                new_dest += 1;
-                //CHECKPOINT
+        pub const Delimiter = union(enum) {
+            ONE: T,
+            PATTERN: []const T,
+            ANY_ONE: []const T,
+            ANY_PATTERN_FIRST_FOUND: []const []const T,
+            ANY_PATTERN_LONGEST_FOUND: []const []const T,
+
+            pub fn delimiter_val(val: T) Delimiter {
+                return Delimiter{ .ONE = val };
             }
+            pub fn delimiter_pattern(pattern: []const T) Delimiter {
+                return Delimiter{ .PATTERN = pattern };
+            }
+            pub fn any_delimiter_val(vals: []const T) Delimiter {
+                return Delimiter{ .ANY_ONE = vals };
+            }
+            pub fn any_delimiter_pattern_first_found(patterns: []const []const T) Delimiter {
+                return Delimiter{ .ANY_PATTERN_FIRST_FOUND = patterns };
+            }
+            pub fn any_delimiter_pattern_longest_found(patterns: []const []const T) Delimiter {
+                return Delimiter{ .ANY_PATTERN_LONGEST_FOUND = patterns };
+            }
+
+            pub fn max_buffer_size_for_check(self: Delimiter) usize {
+                switch (self) {
+                    .ONE, .ANY_ONE => return 1,
+                    .PATTERN => |pat| return pat.len,
+                    .ANY_PATTERN_FIRST_FOUND, .ANY_PATTERN_LONGEST_FOUND => |pats| {
+                        var max: usize = 0;
+                        for (pats) |pat| {
+                            max = @max(max, pat.len);
+                        }
+                        return max;
+                    },
+                }
+            }
+            pub fn comptime_max_buffer_size_for_check(comptime self: Delimiter) usize {
+                switch (comptime self) {
+                    .ONE, .ANY_ONE => return 1,
+                    .PATTERN => |pat| return comptime pat.len,
+                    .ANY_PATTERN_FIRST_FOUND, .ANY_PATTERN_LONGEST_FOUND => |pats| {
+                        var max: usize = 0;
+                        inline for (pats) |pat| {
+                            max = @max(max, pat.len);
+                        }
+                        return comptime max;
+                    },
+                }
+            }
+        };
+
+        pub const FoundDelimiter = union(enum) {
+            ONE: T,
+            PATTERN: []const T,
+        };
+
+        pub const FoundDelimiterResult = struct {
+            num_items_read: usize = 0,
+            delimter_found: bool = false,
+            delimiter: FoundDelimiter = undefined,
+        };
+
+        pub fn read_until_delimiter(self: *Self, delimiter: Delimiter, read_mode: PeekRead, include: IncludeDelimiter, dest: [*]T) ReadError!FoundDelimiterResult {
+            var count: usize = 0;
+            var new_dest = dest;
+            var found_len: usize = 0;
+            var found_delim: FoundDelimiter = undefined;
+            search_loop: while (true) {
+                self.read(.exactly_one_item(), new_dest) catch |err| switch (err) {
+                    ReadError.too_few_items_available_to_read => break :search_loop,
+                    else => return err,
+                };
+                count += 1;
+                switch (delimiter) {
+                    .ONE => |val| {
+                        if (new_dest[0] == val) {
+                            found_len = 1;
+                            found_delim = .{ .ONE = val };
+                            break :search_loop;
+                        }
+                    },
+                    .ANY_ONE => |vals| {
+                        for (vals) |val| {
+                            if (new_dest[0] == val) {
+                                found_len = 1;
+                                found_delim = .{ .ONE = val };
+                                break :search_loop;
+                            }
+                        }
+                    },
+                    .PATTERN => |pattern| {
+                        var i = pattern.len;
+                        var past_dest = new_dest + 1;
+                        while (i > 0) {
+                            i -= 1;
+                            past_dest -= 1;
+                            const val = pattern[i];
+                            if (val != past_dest[0]) break;
+                            if (i == 0) {
+                                found_len = pattern.len;
+                                found_delim = .{ .PATTERN = pattern };
+                                break :search_loop;
+                            }
+                        }
+                    },
+                    .ANY_PATTERN_FIRST_FOUND, .ANY_PATTERN_LONGEST_FOUND => |patterns| {
+                        var longest_found: usize = 0;
+                        var longest_found_delim: FoundDelimiter = undefined;
+                        for (patterns) |pattern| {
+                            if (delimiter == .ANY_PATTERN_LONGEST_FOUND and longest_found >= pattern.len) continue;
+                            var i = pattern.len;
+                            var past_dest = new_dest + 1;
+                            while (i > 0) {
+                                i -= 1;
+                                past_dest -= 1;
+                                const val = pattern[i];
+                                if (val != past_dest[0]) break;
+                                if (i == 0) {
+                                    if (delimiter == .ANY_PATTERN_FIRST_FOUND) {
+                                        found_len = pattern.len;
+                                        found_delim = .{ .PATTERN = pattern };
+                                        break :search_loop;
+                                    }
+                                    longest_found = pattern.len;
+                                    longest_found_delim = .{ .PATTERN = pattern };
+                                }
+                            }
+                        }
+                        if (longest_found > 0) {
+                            found_len = longest_found;
+                            found_delim = longest_found_delim;
+                            break :search_loop;
+                        }
+                    },
+                }
+                new_dest += 1;
+            }
+            var result = FoundDelimiterResult{
+                .delimiter = found_delim,
+                .delimter_found = found_len > 0,
+            };
+            switch (read_mode) {
+                .PEEK => self.rollback_never_err(.READ_POS, count),
+                .READ => switch (include) {
+                    .INCLIDE_DELIMITER_IN_READ => {
+                        result.num_items_read = count;
+                    },
+                    .READ_UP_TO_DELIMITER_THEN_DISCARD_IT => {
+                        result.num_items_read = count - found_len;
+                    },
+                    .READ_UP_TO_DELIMITER_THEN_STOP => {
+                        self.rollback_never_err(.READ_POS, found_len);
+                        result.num_items_read = count - found_len;
+                    },
+                },
+            }
+            return result;
         }
 
         pub fn peek_until_delimiter_return_num(self: *Self, delimiter: Delimiter, check_buffer: []T, dest: [*]T) ReadError!usize {
             assert_with_reason(check_buffer.len >= delimiter.max_buffer_size_for_check(), @src(), "check_buffer is not large enough for the largest delimiter pattern provided, have len {d}, need len {d}", .{ check_buffer.len, delimiter.max_buffer_size_for_check() });
-            return self.peek_until_delimiter_return_num_internal(delimiter, check_buffer, dest);
+            return self.read_until_delimiter_return_num_internal(delimiter, check_buffer, dest);
         }
     };
 }
