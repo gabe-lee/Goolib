@@ -11,3 +11,5 @@ refs
 .scrap
 ./scrap
 /test_out
+zig-pkg
+/zig-pkg
