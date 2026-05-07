@@ -647,3 +647,24 @@ pub const ContinueModeWithUnreachable = enum(u8) {
     STOP,
     UNREACHABLE,
 };
+
+pub fn HashFn(comptime T: type) type {
+    return fn (object: T) u64;
+}
+
+pub fn HashFnUserdata(comptime T: type, comptime USERDATA: type) type {
+    return fn (object: T, userdata: USERDATA) u64;
+}
+
+pub fn GetFn(comptime DATA_STRUCTURE: type, comptime IDX_TYPE: type, comptime ELEM_TYPE: type) type {
+    return fn (data: DATA_STRUCTURE, idx: IDX_TYPE) ELEM_TYPE;
+}
+pub fn GetFnUserdata(comptime DATA_STRUCTURE: type, comptime IDX_TYPE: type, comptime ELEM_TYPE: type, comptime USERDATA_TYPE: type) type {
+    return fn (data: DATA_STRUCTURE, idx: IDX_TYPE, userdata: USERDATA_TYPE) ELEM_TYPE;
+}
+pub fn SetFn(comptime DATA_STRUCTURE: type, comptime IDX_TYPE: type, comptime ELEM_TYPE: type) type {
+    return fn (data: DATA_STRUCTURE, idx: IDX_TYPE, val: ELEM_TYPE) DATA_STRUCTURE;
+}
+pub fn SetFnUserdata(comptime DATA_STRUCTURE: type, comptime IDX_TYPE: type, comptime ELEM_TYPE: type, comptime USERDATA_TYPE: type) type {
+    return fn (data: DATA_STRUCTURE, idx: IDX_TYPE, val: ELEM_TYPE, userdata: USERDATA_TYPE) DATA_STRUCTURE;
+}

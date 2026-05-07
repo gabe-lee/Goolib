@@ -387,53 +387,38 @@ pub fn SameTypeSliceSameProps(comptime POINTER_OR_SLICE: type) type {
     const INFO = @typeInfo(POINTER_OR_SLICE);
     assert_with_reason(INFO == .pointer, @src(), "type of `POINTER_OR_SLICE` must be a pointer type, got type `{s}`", .{@typeName(POINTER_OR_SLICE)});
     const PTR = INFO.pointer;
-    return @Type(.{
-        .pointer = .{
-            .size = .slice,
-            .is_const = PTR.is_const,
-            .is_volatile = PTR.is_volatile,
-            .is_allowzero = PTR.is_allowzero,
-            .alignment = PTR.alignment,
-            .address_space = PTR.address_space,
-            .child = PTR.child,
-            .sentinel_ptr = PTR.sentinel_ptr,
-        },
-    });
+    return @Pointer(.slice, .{
+        .@"addrspace" = PTR.address_space,
+        .@"align" = PTR.alignment,
+        .@"allowzero" = PTR.is_allowzero,
+        .@"const" = PTR.is_const,
+        .@"volatile" = PTR.is_volatile,
+    }, PTR.child, PTR.sentinel_ptr);
 }
 
 pub fn TypeSliceSameProps(comptime POINTER_OR_SLICE: type, comptime NEW_TYPE: type) type {
     const INFO = @typeInfo(POINTER_OR_SLICE);
     assert_with_reason(INFO == .pointer, @src(), "type of `POINTER_OR_SLICE` must be a pointer type, got type `{s}`", .{@typeName(POINTER_OR_SLICE)});
     const PTR = INFO.pointer;
-    return @Type(.{
-        .pointer = .{
-            .size = .slice,
-            .is_const = PTR.is_const,
-            .is_volatile = PTR.is_volatile,
-            .is_allowzero = PTR.is_allowzero,
-            .alignment = PTR.alignment,
-            .address_space = PTR.address_space,
-            .child = NEW_TYPE,
-            .sentinel_ptr = if (PTR.child == NEW_TYPE) PTR.sentinel_ptr else null,
-        },
-    });
+    return @Pointer(.slice, .{
+        .@"addrspace" = PTR.address_space,
+        .@"align" = PTR.alignment,
+        .@"allowzero" = PTR.is_allowzero,
+        .@"const" = PTR.is_const,
+        .@"volatile" = PTR.is_volatile,
+    }, NEW_TYPE, if (PTR.child == NEW_TYPE) PTR.sentinel_ptr else null);
 }
 pub fn TypeSliceSamePropsAndType(comptime POINTER_OR_SLICE: type) type {
     const INFO = @typeInfo(POINTER_OR_SLICE);
     assert_with_reason(INFO == .pointer, @src(), "type of `POINTER_OR_SLICE` must be a pointer type, got type `{s}`", .{@typeName(POINTER_OR_SLICE)});
     const PTR = INFO.pointer;
-    return @Type(.{
-        .pointer = .{
-            .size = .slice,
-            .is_const = PTR.is_const,
-            .is_volatile = PTR.is_volatile,
-            .is_allowzero = PTR.is_allowzero,
-            .alignment = PTR.alignment,
-            .address_space = PTR.address_space,
-            .child = PTR.child,
-            .sentinel_ptr = PTR.sentinel_ptr,
-        },
-    });
+    return @Pointer(.slice, .{
+        .@"addrspace" = PTR.address_space,
+        .@"align" = PTR.alignment,
+        .@"allowzero" = PTR.is_allowzero,
+        .@"const" = PTR.is_const,
+        .@"volatile" = PTR.is_volatile,
+    }, PTR.child, PTR.sentinel_ptr);
 }
 
 pub fn many_item_with_sentinel_to_slice(many_item_ptr_with_sentinel: anytype) SameTypeSliceSameProps(@TypeOf(many_item_ptr_with_sentinel)) {
@@ -454,35 +439,25 @@ pub fn ByteSliceSameProps(comptime POINTER_OR_SLICE: type) type {
     const INFO = @typeInfo(POINTER_OR_SLICE);
     assert_with_reason(INFO == .pointer, @src(), "type of `POINTER_OR_SLICE` must be a pointer type, got type `{s}`", .{@typeName(POINTER_OR_SLICE)});
     const PTR = INFO.pointer;
-    return @Type(.{
-        .pointer = .{
-            .size = .slice,
-            .is_const = PTR.is_const,
-            .is_volatile = PTR.is_volatile,
-            .is_allowzero = PTR.is_allowzero,
-            .alignment = PTR.alignment,
-            .address_space = PTR.address_space,
-            .child = u8,
-            .sentinel_ptr = if (PTR.child == u8) PTR.sentinel_ptr else null,
-        },
-    });
+    return @Pointer(.slice, .{
+        .@"addrspace" = PTR.address_space,
+        .@"align" = PTR.alignment,
+        .@"allowzero" = PTR.is_allowzero,
+        .@"const" = PTR.is_const,
+        .@"volatile" = PTR.is_volatile,
+    }, u8, if (PTR.child == u8) PTR.sentinel_ptr else null);
 }
 pub fn ByteSliceSamePropsAlign1(comptime POINTER_OR_SLICE: type) type {
     const INFO = @typeInfo(POINTER_OR_SLICE);
     assert_with_reason(INFO == .pointer, @src(), "type of `POINTER_OR_SLICE` must be a pointer type, got type `{s}`", .{@typeName(POINTER_OR_SLICE)});
     const PTR = INFO.pointer;
-    return @Type(.{
-        .pointer = .{
-            .size = .slice,
-            .is_const = PTR.is_const,
-            .is_volatile = PTR.is_volatile,
-            .is_allowzero = PTR.is_allowzero,
-            .alignment = 1,
-            .address_space = PTR.address_space,
-            .child = u8,
-            .sentinel_ptr = if (PTR.child == u8) PTR.sentinel_ptr else null,
-        },
-    });
+    return @Pointer(.slice, .{
+        .@"addrspace" = PTR.address_space,
+        .@"align" = 1,
+        .@"allowzero" = PTR.is_allowzero,
+        .@"const" = PTR.is_const,
+        .@"volatile" = PTR.is_volatile,
+    }, u8, if (PTR.child == u8) PTR.sentinel_ptr else null);
 }
 
 pub fn bytes_cast(pointer_or_slice: anytype) ByteSliceSameProps(@TypeOf(pointer_or_slice)) {

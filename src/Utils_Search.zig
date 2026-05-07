@@ -48,8 +48,8 @@ const Math = Root.Math;
 
 const Kind = Types.Kind;
 const KindInfo = Types.KindInfo;
-const CompareFuncUserdata = Utils.Compare.CompareFuncUserdata;
-const CompareFunc = Utils.Compare.CompareFunc;
+const CompareFnUserdata = Utils.Compare.CompareFnUserdata;
+const CompareFn = Utils.Compare.CompareFn;
 
 pub const SearchOrder = enum {
     SEARCH_PARAMS_IN_SAME_ORDER_AS_THEIR_ORDER_IN_DATA_BUFFER,
@@ -863,9 +863,9 @@ pub const SearchPackage = struct {
     }
     pub fn CompareSearchToItemFn(comptime self: SearchPackage) type {
         if (self.HAS_USERDATA_TYPE) {
-            return CompareFuncUserdata(self.SEARCH_PARAM_CONTAINER_ELEM, self.DATA_CONTAINER_ELEM, self.USERDATA_TYPE);
+            return CompareFnUserdata(self.SEARCH_PARAM_CONTAINER_ELEM, self.DATA_CONTAINER_ELEM, self.USERDATA_TYPE);
         } else {
-            return CompareFunc(self.SEARCH_PARAM_CONTAINER_ELEM, self.DATA_CONTAINER_ELEM);
+            return CompareFn(self.SEARCH_PARAM_CONTAINER_ELEM, self.DATA_CONTAINER_ELEM);
         }
     }
 };

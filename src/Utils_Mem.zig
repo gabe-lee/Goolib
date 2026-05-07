@@ -822,18 +822,13 @@ fn CopyPtrAttrs(
     comptime child: type,
 ) type {
     const info = @typeInfo(source).pointer;
-    return @Type(.{
-        .pointer = .{
-            .size = size,
-            .is_const = info.is_const,
-            .is_volatile = info.is_volatile,
-            .is_allowzero = info.is_allowzero,
-            .alignment = info.alignment,
-            .address_space = info.address_space,
-            .child = child,
-            .sentinel_ptr = null,
-        },
-    });
+    @Pointer(size, .{
+        .@"addrspace" = info.address_space,
+        .@"align" = info.alignment,
+        .@"allowzero" = info.is_allowzero,
+        .@"const" = info.is_const,
+        .@"volatile" = info.is_volatile,
+    }, child, null);
 }
 
 fn PtrAsBytes(comptime PTR: type) type {

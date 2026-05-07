@@ -1714,49 +1714,51 @@ pub fn make_temp_value_struct_from_struct_type(comptime STRUCT_TYPE: type) type 
     const INFO = @typeInfo(STRUCT_TYPE);
     switch (INFO) {
         .@"struct" => |STRUCT| {
-            comptime var new_fields: [STRUCT.fields.len]std.builtin.Type.StructField = undefined;
-            inline for (STRUCT.fields, new_fields) |field, *new_field| {
-                switch (@typeInfo(new_field.type)) {
+            // comptime var new_fields: [STRUCT.fields.len]std.builtin.Type.StructField = undefined;
+            comptime var field_names: [STRUCT.fields.len][]const u8 = undefined;
+            comptime var field_types: [STRUCT.fields.len]type = undefined;
+            comptime var field_attrs: [STRUCT.fields.len]std.builtin.Type.StructField.Attributes = undefined;
+            inline for (STRUCT.fields, 0..) |field, f| {
+                switch (@typeInfo(field.type)) {
                     .pointer => |P| {
-                        new_field.* = std.builtin.Type.StructField{
-                            .alignment = field.alignment,
+                        field_names[f] = field.name;
+                        field_types[f] = P.child;
+                        field_attrs[f] = std.builtin.Type.StructField.Attributes{
+                            .@"align" = field.alignment,
+                            .@"comptime" = field.is_comptime,
                             .default_value_ptr = null,
-                            .is_comptime = field.is_comptime,
-                            .name = field.name,
-                            .type = P.child,
                         };
                     },
                     .array => |A| {
-                        new_field.* = std.builtin.Type.StructField{
-                            .alignment = field.alignment,
+                        field_names[f] = field.name;
+                        field_types[f] = A.child;
+                        field_attrs[f] = std.builtin.Type.StructField.Attributes{
+                            .@"align" = field.alignment,
+                            .@"comptime" = field.is_comptime,
                             .default_value_ptr = null,
-                            .is_comptime = field.is_comptime,
-                            .name = field.name,
-                            .type = A.child,
                         };
                     },
                     .vector => |V| {
-                        new_field.* = std.builtin.Type.StructField{
-                            .alignment = field.alignment,
+                        field_names[f] = field.name;
+                        field_types[f] = V.child;
+                        field_attrs[f] = std.builtin.Type.StructField.Attributes{
+                            .@"align" = field.alignment,
+                            .@"comptime" = field.is_comptime,
                             .default_value_ptr = null,
-                            .is_comptime = field.is_comptime,
-                            .name = field.name,
-                            .type = V.child,
                         };
                     },
                     else => {
-                        new_field.* = field;
+                        field_names[f] = field.name;
+                        field_types[f] = field.type;
+                        field_attrs[f] = std.builtin.Type.StructField.Attributes{
+                            .@"align" = field.alignment,
+                            .@"comptime" = field.is_comptime,
+                            .default_value_ptr = field.default_value_ptr,
+                        };
                     },
                 }
             }
-            const new_type = std.builtin.Type{ .@"struct" = .{
-                .backing_integer = STRUCT.backing_integer,
-                .decls = &.{},
-                .fields = new_fields[0..],
-                .is_tuple = STRUCT.is_tuple,
-                .layout = STRUCT.layout,
-            } };
-            return @Type(new_type);
+            return @Struct(STRUCT.layout, STRUCT.backing_integer, &field_names, &field_types, &field_attrs);
         },
         else => assert_unreachable(@src(), "type `STRUCT_TYPE` must be a struct type, got type `{s}`", .{@typeName(STRUCT_TYPE)}),
     }
@@ -1790,13 +1792,16 @@ pub fn error_union_error(comptime T: type) type {
 /// This does not and *cannot* copy static declarations
 pub fn bare_union_with_same_fields_as_tagged_union(comptime UNION: type, comptime NEW_LAYOUT: ?std.builtin.Type.ContainerLayout) type {
     const TAGGED_INFO = @typeInfo(UNION).@"union";
-    const BARE_INFO = Type{ .@"union" = .{
-        .decls = &.{},
-        .fields = TAGGED_INFO.fields,
-        .layout = if (NEW_LAYOUT) |LAY| LAY else TAGGED_INFO.layout,
-        .tag_type = null,
-    } };
-    return @Type(BARE_INFO);
+    const NUM_FIELDS = TAGGED_INFO.fields.len;
+    comptime var field_names: [NUM_FIELDS][]const u8 = undefined;
+    comptime var field_types: [NUM_FIELDS]type = undefined;
+    comptime var field_attrs: [NUM_FIELDS]std.builtin.Type.UnionField.Attributes = undefined;
+    inline for (TAGGED_INFO.fields, 0..) |field, f| {
+        field_names[f] = field.name;
+        field_types[f] = field.type;
+        field_attrs[f] = std.builtin.Type.UnionField.Attributes{ .@"align" = field.alignment };
+    }
+    @Union(if (NEW_LAYOUT) |LAY| LAY else TAGGED_INFO.layout, null, &field_names, &field_types, &field_attrs);
 }
 
 pub const DefinedLayout = enum(u8) {

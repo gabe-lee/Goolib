@@ -41,6 +41,8 @@ pub const SignedIntegerWithSameSize = Types.SignedIntegerWithSameSize;
 const DEBUG = std.debug.print;
 const Math = @This();
 
+pub const Std = std.math;
+
 pub const fsize = Types.fsize;
 
 pub const PI = math.pi;

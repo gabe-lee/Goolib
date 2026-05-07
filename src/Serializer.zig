@@ -2010,19 +2010,22 @@ pub fn SerializationManager(comptime MAIN_TYPES_FOR_SERIALIZATION: []const type,
     const _FINAL_UNIQUE_LIST_ROOT_CONST = _FINAL_UNIQUE_LIST_ROOT;
     const _FINAL_OP_USED_TRACKER_CONST = _OP_USED_TRACKER;
     const _FINAL_NUM_ALLOCS = _BUILDER.low_level.internal.alloc_names_len;
+    const SEPARATED_STRUCT_FIELDS_TYPE = struct {
+        NAME: [_FINAL_NUM_ALLOCS][]const u8 = undefined,
+        TYPE: [_FINAL_NUM_ALLOCS]type = @splat(Allocator),
+        ATTR: [_FINAL_NUM_ALLOCS]std.builtin.Type.StructField.Attributes = @splat(std.builtin.Type.StructField.Attributes{
+            .@"align" = @alignOf(Allocator),
+            .@"comptime" = false,
+            .default_value_ptr = @ptrCast(&DummyAllocator.allocator_panic_free_noop),
+        }),
+    };
     const _FINAL_ALLOC_STRUCT_FIELDS = comptime make: {
-        var fields: [_FINAL_NUM_ALLOCS]std.builtin.Type.StructField = undefined;
+        var out: SEPARATED_STRUCT_FIELDS_TYPE = .{};
         for (_ALLOC_NAME_LIST[0.._FINAL_NUM_ALLOCS], 0..) |name_slice, f| {
             const name: []const u8 = _ALLOC_NAME_BUFFER[name_slice.start..name_slice.end];
-            fields[f] = std.builtin.Type.StructField{
-                .alignment = @alignOf(Allocator),
-                .default_value_ptr = @ptrCast(&DummyAllocator.allocator_panic_free_noop),
-                .is_comptime = false,
-                .name = name,
-                .type = Allocator,
-            };
+            out.NAME[f] = name;
         }
-        break :make fields;
+        break :make out;
     };
 
     return struct {
@@ -2033,13 +2036,7 @@ pub fn SerializationManager(comptime MAIN_TYPES_FOR_SERIALIZATION: []const type,
         const OP_USED = _FINAL_OP_USED_TRACKER_CONST;
         const A_FIELDS = _FINAL_ALLOC_STRUCT_FIELDS;
         const NUM_ALLOCS = _FINAL_NUM_ALLOCS;
-        pub const AllocatorsStruct: type = @Type(std.builtin.Type{ .@"struct" = std.builtin.Type.Struct{
-            .backing_integer = null,
-            .decls = &.{},
-            .is_tuple = false,
-            .layout = .auto,
-            .fields = A_FIELDS[0..],
-        } });
+        pub const AllocatorsStruct: type = @Struct(.auto, null, A_FIELDS[0..], &.{}, .{});
         pub const INTEGER_PACKING = DEFAULT_SERIAL_SETTINGS.INTEGER_PACKING;
         pub const TARGET_ENDIAN = DEFAULT_SERIAL_SETTINGS.TARGET_ENDIAN;
         pub const POINTER_MODE = DEFAULT_SERIAL_SETTINGS.POINTER_MODE;

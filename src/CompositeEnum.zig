@@ -96,7 +96,8 @@ pub fn CompositeEnum(comptime ENUMS: anytype) type {
         const E_INT_INFO = KindInfo.get_kind_info(E_INT).INT;
         const E_INT_BITS = E_INT_INFO.bits;
         ENUM_TAG_TYPES[i] = E_INT;
-        const E_INT_RAW = @Type(std.builtin.Type{ .int = .{ .bits = E_INT_INFO.bits, .signedness = .unsigned } });
+        const E_INT_RAW = @Int(.unsigned, E_INT_INFO.bits);
+
         ENUM_TAG_TYPES_RAW[i] = E_INT_RAW;
         comptime var COMPOSITE: E_INT_RAW = 0;
         comptime var HAS_NONZERO: bool = false;

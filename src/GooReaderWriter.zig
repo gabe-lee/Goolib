@@ -51,6 +51,7 @@ const assert_with_reason = Assert.assert_with_reason;
 const assert_unreachable = Assert.assert_unreachable;
 const assert_unreachable_err = Assert.assert_unreachable_err;
 const num_cast = Cast.num_cast;
+const ll = std.DoublyLinkedList.Node
 
 pub const SeekError = error{
     invalid_data_source,
@@ -533,30 +534,30 @@ pub fn GooReaderWriter(comptime T: type) type {
         // PEEK SPECIAL
         //*********
 
-        pub const Delimiter = union(enum) {
+        pub const ItemPattern = union(enum) {
             ONE: T,
             PATTERN: []const T,
             ANY_ONE: []const T,
             ANY_PATTERN_FIRST_FOUND: []const []const T,
             ANY_PATTERN_LONGEST_FOUND: []const []const T,
 
-            pub fn delimiter_val(val: T) Delimiter {
-                return Delimiter{ .ONE = val };
+            pub fn delimiter_val(val: T) ItemPattern {
+                return ItemPattern{ .ONE = val };
             }
-            pub fn delimiter_pattern(pattern: []const T) Delimiter {
-                return Delimiter{ .PATTERN = pattern };
+            pub fn delimiter_pattern(pattern: []const T) ItemPattern {
+                return ItemPattern{ .PATTERN = pattern };
             }
-            pub fn any_delimiter_val(vals: []const T) Delimiter {
-                return Delimiter{ .ANY_ONE = vals };
+            pub fn any_delimiter_val(vals: []const T) ItemPattern {
+                return ItemPattern{ .ANY_ONE = vals };
             }
-            pub fn any_delimiter_pattern_first_found(patterns: []const []const T) Delimiter {
-                return Delimiter{ .ANY_PATTERN_FIRST_FOUND = patterns };
+            pub fn any_delimiter_pattern_first_found(patterns: []const []const T) ItemPattern {
+                return ItemPattern{ .ANY_PATTERN_FIRST_FOUND = patterns };
             }
-            pub fn any_delimiter_pattern_longest_found(patterns: []const []const T) Delimiter {
-                return Delimiter{ .ANY_PATTERN_LONGEST_FOUND = patterns };
+            pub fn any_delimiter_pattern_longest_found(patterns: []const []const T) ItemPattern {
+                return ItemPattern{ .ANY_PATTERN_LONGEST_FOUND = patterns };
             }
 
-            pub fn max_buffer_size_for_check(self: Delimiter) usize {
+            pub fn max_buffer_size_for_check(self: ItemPattern) usize {
                 switch (self) {
                     .ONE, .ANY_ONE => return 1,
                     .PATTERN => |pat| return pat.len,
@@ -569,7 +570,7 @@ pub fn GooReaderWriter(comptime T: type) type {
                     },
                 }
             }
-            pub fn comptime_max_buffer_size_for_check(comptime self: Delimiter) usize {
+            pub fn comptime_max_buffer_size_for_check(comptime self: ItemPattern) usize {
                 switch (comptime self) {
                     .ONE, .ANY_ONE => return 1,
                     .PATTERN => |pat| return comptime pat.len,
@@ -584,22 +585,25 @@ pub fn GooReaderWriter(comptime T: type) type {
             }
         };
 
-        pub const FoundDelimiter = union(enum) {
+        pub const FoundPattern = union(enum) {
             ONE: T,
             PATTERN: []const T,
         };
 
-        pub const FoundDelimiterResult = struct {
+        pub const AdvancedReadResult = struct {
             num_items_read: usize = 0,
+            num_items_skipped: usize = 0,
             delimter_found: bool = false,
-            delimiter: FoundDelimiter = undefined,
+            delimiter_len: usize = 0,
+            delimiter: FoundPattern = undefined,
         };
 
-        pub fn read_until_delimiter(self: *Self, delimiter: Delimiter, read_mode: PeekRead, include: IncludeDelimiter, dest: [*]T) ReadError!FoundDelimiterResult {
+        pub fn read_until_delimiter(self: *Self, delimiter: ItemPattern, read_mode: PeekRead, include: IncludeDelimiter, dest: [*]T) ReadError!FoundDelimiterResult {
+            // CHECKPOINT change this to 'advance_until' with 'skip' patterns option?
             var count: usize = 0;
             var new_dest = dest;
             var found_len: usize = 0;
-            var found_delim: FoundDelimiter = undefined;
+            var found_delim: FoundPattern = undefined;
             search_loop: while (true) {
                 self.read(.exactly_one_item(), new_dest) catch |err| switch (err) {
                     ReadError.too_few_items_available_to_read => break :search_loop,
@@ -640,7 +644,7 @@ pub fn GooReaderWriter(comptime T: type) type {
                     },
                     .ANY_PATTERN_FIRST_FOUND, .ANY_PATTERN_LONGEST_FOUND => |patterns| {
                         var longest_found: usize = 0;
-                        var longest_found_delim: FoundDelimiter = undefined;
+                        var longest_found_delim: FoundPattern = undefined;
                         for (patterns) |pattern| {
                             if (delimiter == .ANY_PATTERN_LONGEST_FOUND and longest_found >= pattern.len) continue;
                             var i = pattern.len;
@@ -692,7 +696,7 @@ pub fn GooReaderWriter(comptime T: type) type {
             return result;
         }
 
-        pub fn peek_until_delimiter_return_num(self: *Self, delimiter: Delimiter, check_buffer: []T, dest: [*]T) ReadError!usize {
+        pub fn peek_until_delimiter_return_num(self: *Self, delimiter: ItemPattern, check_buffer: []T, dest: [*]T) ReadError!usize {
             assert_with_reason(check_buffer.len >= delimiter.max_buffer_size_for_check(), @src(), "check_buffer is not large enough for the largest delimiter pattern provided, have len {d}, need len {d}", .{ check_buffer.len, delimiter.max_buffer_size_for_check() });
             return self.read_until_delimiter_return_num_internal(delimiter, check_buffer, dest);
         }

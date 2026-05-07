@@ -291,10 +291,10 @@ pub fn has_object_equals(comptime T: type) bool {
 }
 
 /// The function should return `true` if `item_to_check == search_param`
-pub fn CompareFunc(comptime TA: type, comptime TB: type) type {
+pub fn CompareFn(comptime TA: type, comptime TB: type) type {
     return fn (a: TA, b: TB) bool;
 }
 /// The function should return `true` if `item_to_check == search_param`
-pub fn CompareFuncUserdata(comptime TA: type, comptime TB: type, comptime USERDATA: type) type {
+pub fn CompareFnUserdata(comptime TA: type, comptime TB: type, comptime USERDATA: type) type {
     return fn (a: TA, b: TB, userdata: USERDATA) bool;
 }

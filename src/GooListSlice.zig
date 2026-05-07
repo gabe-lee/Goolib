@@ -53,8 +53,8 @@ const num_cast = Cast.num_cast;
 // const BinarySearch = Root.BinarySearch;
 const SmartAllocSettings = Utils.Alloc.SmartAllocSettings;
 const SmartAllocComptimeSettings = Utils.Alloc.SmartAllocComptimeSettings;
-// const CompareFunc = Utils.Mem.CompareFunc;
-// const CompareFuncUserdata = Utils.Mem.CompareFuncUserdata;
+const CompareFunc = Utils.Compare.CompareFn;
+const CompareFuncUserdata = Utils.Compare.CompareFnUserdata;
 // const GetFunc = Utils.Mem.GetFunc;
 // const SetFunc = Utils.Mem.SetFunc;
 const GrowthModel = CommonTypes.GrowthModel;
@@ -67,6 +67,8 @@ const Reallocatability = CommonTypes.Reallocatability;
 const MemoryParadigm = CommonTypes.MemoryParadigm;
 const MemoryAllocationStatus = CommonTypes.MemoryAllocationStatus;
 const ATOMIC_PADDING = std.atomic.cache_line;
+const GetFunc = CommonTypes.GetFn;
+const SetFunc = CommonTypes.SetFn;
 
 const STRUCT_NAME = "GooListSlice";
 const ERR_CANNOT_INCREASE_START = "START_MUTABILITY != .increase_only or .increase_or_decrease, operation would increase start address";
@@ -429,24 +431,22 @@ pub fn GooListSlice(comptime DEF_: GooListSliceDefinition) type {
             }
             break :calc out;
         };
-        const T_FIELDS_ENUM_FIELDS = create: {
-            var e_fields: [T_NUM_FIELDS]std.builtin.Type.EnumField = undefined;
-            var i: comptime_int = 0;
+        const T_FIELD_ENUM_TAG_TYPE = Types.SmallestUnsignedIntThatCanHoldValue(T_NUM_FIELDS - 1);
+        const FIELD_INDEX_NAMES_STRUCT = struct {
+            IDX: [T_NUM_FIELDS]T_FIELD_ENUM_TAG_TYPE,
+            NAME: [T_NUM_FIELDS][]const u8,
+        };
+        const FIELD_INDEX_NAMES = create: {
+            var out: FIELD_INDEX_NAMES_STRUCT = undefined;
+            var i: T_FIELD_ENUM_TAG_TYPE = 0;
             for (T_FIELD_DATA[0..]) |field| {
-                e_fields[i] = std.builtin.Type.EnumField{
-                    .name = field.name,
-                    .value = i,
-                };
+                out.IDX[i] = i;
+                out.NAME[i] = field.name;
                 i += 1;
             }
-            break :create e_fields;
+            break :create out;
         };
-        pub const FieldEnum = @Type(.{ .@"enum" = .{
-            .decls = &.{},
-            .fields = T_FIELDS_ENUM_FIELDS[0..],
-            .is_exhaustive = true,
-            .tag_type = Types.SmallestUnsignedIntThatCanHoldValue(T_NUM_FIELDS - 1),
-        } });
+        pub const FieldEnum = @Enum(T_FIELD_ENUM_TAG_TYPE, .exhaustive, FIELD_INDEX_NAMES.NAME[0..], &FIELD_INDEX_NAMES.IDX);
         const T_FIELDS_ENUM_TAGS: [T_NUM_FIELDS]FieldEnum = create: {
             var out: [T_NUM_FIELDS]FieldEnum = undefined;
             var i: comptime_int = 0;

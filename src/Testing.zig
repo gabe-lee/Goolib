@@ -311,10 +311,26 @@ pub fn expect_greater_than(val_a: anytype, str_a: []const u8, val_b: anytype, st
     }
 }
 
+pub fn expect_greater_than_src(val_a: anytype, val_b: anytype, comptime src: SourceLocation, comptime fail_description: []const u8, fail_args: anytype) !void {
+    if (val_a <= val_b) {
+        print_src(src, "\nFAILURE: " ++ fail_description, fail_args);
+        print("\n\tEXPECT GREATER THAN\n\tACTUAL: {any} <= {any}\n", .{ val_a, val_b });
+        return TestError.test_expected_greater_than;
+    }
+}
+
 pub fn expect_greater_than_or_equal(val_a: anytype, str_a: []const u8, val_b: anytype, str_b: []const u8, comptime fail_description: []const u8, fail_args: anytype) !void {
     if (val_a < val_b) {
         print("\nFAILURE: " ++ fail_description, fail_args);
         print("\n\tEXPECT: {s} >= {s}\n\tEXPECT: {any} >= {any}\n\tACTUAL: {any} < {any}\n", .{ str_a, str_b, val_a, val_b, val_a, val_b });
+        return TestError.test_expected_greater_than_or_equal;
+    }
+}
+
+pub fn expect_greater_than_or_equal_src(val_a: anytype, val_b: anytype, comptime src: SourceLocation, comptime fail_description: []const u8, fail_args: anytype) !void {
+    if (val_a < val_b) {
+        print_src(src, "\nFAILURE: " ++ fail_description, fail_args);
+        print("\n\tEXPECT GREATER THAN OR EQUAL\n\tACTUAL: {any} < {any}\n", .{ val_a, val_b });
         return TestError.test_expected_greater_than_or_equal;
     }
 }
@@ -327,10 +343,26 @@ pub fn expect_less_than(val_a: anytype, str_a: []const u8, val_b: anytype, str_b
     }
 }
 
+pub fn expect_less_than_src(val_a: anytype, val_b: anytype, comptime src: SourceLocation, comptime fail_description: []const u8, fail_args: anytype) !void {
+    if (val_a >= val_b) {
+        print_src(src, "\nFAILURE: " ++ fail_description, fail_args);
+        print("\n\tEXPECT LESS THAN\n\tACTUAL: {any} >= {any}\n", .{ val_a, val_b });
+        return TestError.test_expected_less_than;
+    }
+}
+
 pub fn expect_less_than_or_equal(val_a: anytype, str_a: []const u8, val_b: anytype, str_b: []const u8, comptime fail_description: []const u8, fail_args: anytype) !void {
     if (val_a > val_b) {
         print("\nFAILURE: " ++ fail_description, fail_args);
         print("\n\tEXPECT: {s} <= {s}\n\tEXPECT: {any} <= {any}\n\tACTUAL: {any} > {any}\n", .{ str_a, str_b, val_a, val_b, val_a, val_b });
+        return TestError.test_expected_less_than_or_equal;
+    }
+}
+
+pub fn expect_less_than_or_equal_src(val_a: anytype, val_b: anytype, comptime src: SourceLocation, comptime fail_description: []const u8, fail_args: anytype) !void {
+    if (val_a > val_b) {
+        print_src(src, "\nFAILURE: " ++ fail_description, fail_args);
+        print("\n\tEXPECT LESS THAN OR EQUAL\n\tACTUAL: {any} > {any}\n", .{ val_a, val_b });
         return TestError.test_expected_less_than_or_equal;
     }
 }

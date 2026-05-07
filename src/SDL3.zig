@@ -7976,7 +7976,7 @@ pub const GPU_VertexElementFormat = enum(c_uint) {
             if (Types.type_is_struct_with_all_fields_same_type_any(zig_type)) {
                 const ARRAY_LEN = INFO.@"struct".fields.len;
                 const ARRAY_CHILD = INFO.@"struct".fields[0].type;
-                const ARRAY = @Type(std.builtin.Type.Array{ .child = ARRAY_CHILD, .len = ARRAY_LEN, .sentinel_ptr = null });
+                const ARRAY = [ARRAY_LEN]ARRAY_CHILD;
                 return best_fit_from_zig_type(ARRAY);
             }
         }

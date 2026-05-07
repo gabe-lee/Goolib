@@ -531,7 +531,7 @@ pub fn quick_hex(val: anytype) [@sizeOf(@TypeOf(val)) * 2]u8 {
     assert_with_reason(LIMIT > 0 and LIMIT <= 8, @src(), "can only quick_hex() on types with size > 0 and size <= 8, got type {s} (size = {d})", .{ @typeName(T), LIMIT });
     switch (I) {
         .int, .float, .@"enum", .pointer => {
-            const uint: @Type(.{ .int = .{ .bits = @bitSizeOf(T), .signedness = .unsigned } }) = @bitCast(val);
+            const uint: @Int(.unsigned, @bitSizeOf(T)) = @bitCast(val);
             uval = @intCast(uint);
         },
         .comptime_int => {
@@ -539,7 +539,7 @@ pub fn quick_hex(val: anytype) [@sizeOf(@TypeOf(val)) * 2]u8 {
         },
         .comptime_float => {
             const flt: f64 = val;
-            const uint: @Type(.{ .int = .{ .bits = @bitSizeOf(T), .signedness = .unsigned } }) = @bitCast(flt);
+            const uint: @Int(.unsigned, @bitSizeOf(T)) = @bitCast(flt);
             uval = @intCast(uint);
         },
         .bool => {
@@ -581,7 +581,7 @@ pub fn quick_unhex(bytes: []const u8, comptime T: type) T {
     const I = @typeInfo(T);
     switch (I) {
         .int, .float, .@"enum", .pointer => {
-            const uint: @Type(.{ .int = .{ .bits = @bitSizeOf(T), .signedness = .unsigned } }) = @intCast(val);
+            const uint: @Int(.unsigned, @bitSizeOf(T)) = @intCast(val);
             return @bitCast(uint);
         },
         .bool => {
@@ -612,7 +612,7 @@ pub fn quick_dec(val: anytype) QuickDecResult {
     assert_with_reason(LIMIT > 0 and LIMIT <= 8, @src(), "can only quick_dec() on types with size > 0 and size <= 8, got type {s} (size = {d})", .{ @typeName(T), LIMIT });
     switch (I) {
         .int, .float, .@"enum", .pointer => {
-            const uint: @Type(.{ .int = .{ .bits = @bitSizeOf(T), .signedness = .unsigned } }) = @bitCast(val);
+            const uint: @Int(.unsigned, @bitSizeOf(T)) = @bitCast(val);
             uval = @intCast(uint);
         },
         .comptime_int => {
@@ -620,7 +620,7 @@ pub fn quick_dec(val: anytype) QuickDecResult {
         },
         .comptime_float => {
             const flt: f64 = val;
-            const uint: @Type(.{ .int = .{ .bits = @bitSizeOf(T), .signedness = .unsigned } }) = @bitCast(flt);
+            const uint: @Int(.unsigned, @bitSizeOf(T)) = @bitCast(flt);
             uval = @intCast(uint);
         },
         .bool => {
@@ -655,7 +655,7 @@ pub fn quick_undec(bytes: []const u8, comptime T: type) T {
     const I = @typeInfo(T);
     switch (I) {
         .int, .float, .@"enum", .pointer => {
-            const uint: @Type(.{ .int = .{ .bits = @bitSizeOf(T), .signedness = .unsigned } }) = @intCast(val);
+            const uint: @Int(.unsigned, @bitSizeOf(T)) = @intCast(val);
             return @bitCast(uint);
         },
         .bool => {
