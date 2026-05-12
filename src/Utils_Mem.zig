@@ -68,6 +68,20 @@ pub const use_vectors = switch (build.zig_backend) {
     else => true,
 };
 
+pub const ValReturnMode = enum(u8) {
+    VAL,
+    PTR,
+    CONST_PTR,
+
+    pub fn get_type(comptime self: ValReturnMode, comptime T: type) type {
+        switch (self) {
+            .VAL => T,
+            .PTR => *T,
+            .CONST_PTR => *const T,
+        }
+    }
+};
+
 pub fn pointer_resides_in_slice(comptime T: type, slice: []const T, pointer: *const T) bool {
     const start_addr = @intFromPtr(slice.ptr);
     const end_addr = @intFromPtr(slice.ptr + slice.len - 1);
@@ -441,6 +455,115 @@ pub fn set(container: anytype, idx: anytype, val: anytype) @TypeOf(container) {
     return new_container;
 }
 
+/// A utility that builds a prototype 'set element field at index' function that accepts any of the following containers:
+///   - GooListSlice
+///   - ArrayList
+///   - ArrayListManaged
+///   - slices ([]T)
+///   - many-item pointers ([*]const T)
+///   - single-item pointers to arrays (*const [N]T)
+///   - single-item pointers (*const T, asserts index is 0)
+///   - raw values with the same type as the new value (asserts index is 0)
+///   - raw arrays or vectors ([N]T, @Vector(N, T))
+///   - pointers to arrays or vectors (*const [N]T, *const @Vector(N, T))
+pub fn set_field_concrete_proto(comptime CONTAINER: type, comptime ELEM: type, comptime FIELD_NAME: []const u8, comptime FIELD_TYPE: type, comptime IDX: type) type {
+    const SET_FIELD_FN = fn (container: CONTAINER, idx: IDX, val: FIELD_TYPE) CONTAINER;
+    if (comptime Root.GooListSlice.type_is_GooListSlice_with_element_type(CONTAINER, ELEM)) {
+        return struct {
+            pub fn set_field(container: CONTAINER, idx: IDX, val: FIELD_TYPE) CONTAINER {
+                container.set_item_field(FIELD_NAME, idx, val);
+                return container;
+            }
+
+            pub const SetFieldFn = SET_FIELD_FN;
+        };
+    } else if (comptime Types.type_is_zig_list(CONTAINER, ELEM) or Types.type_is_zig_list_managed(CONTAINER, ELEM)) {
+        return struct {
+            pub fn set_field(container: CONTAINER, idx: IDX, val: FIELD_TYPE) CONTAINER {
+                @field(&container.items[idx], FIELD_NAME) = val;
+                return container;
+            }
+
+            pub const SetFieldFn = SET_FIELD_FN;
+        };
+    } else if (comptime KindInfo.get_kind_info(CONTAINER).has_indexable_child_type(ELEM)) {
+        return struct {
+            pub fn set_field(container: CONTAINER, idx: IDX, val: FIELD_TYPE) CONTAINER {
+                @field(&container[idx], FIELD_NAME) = val;
+                return container;
+            }
+
+            pub const SetFieldFn = SET_FIELD_FN;
+        };
+    } else if (comptime Types.type_is_vector_with_child_type(CONTAINER, ELEM)) {
+        return struct {
+            pub fn set_field(container: CONTAINER, idx: IDX, val: FIELD_TYPE) CONTAINER {
+                const as_array = vector_to_array(container);
+                @field(&as_array[idx], FIELD_NAME) = val;
+                return array_to_vector(as_array);
+            }
+
+            pub const SetFieldFn = SET_FIELD_FN;
+        };
+    } else if (comptime Types.type_is_pointer_to_vector_with_child_type(CONTAINER, ELEM)) {
+        return struct {
+            pub fn set_field(container: CONTAINER, idx: IDX, val: FIELD_TYPE) CONTAINER {
+                const as_array_ptr = Cast.vector_to_array_pointer(container);
+                @field(as_array_ptr[idx], FIELD_NAME) = val;
+                return Cast.array_to_vector_pointer(as_array_ptr);
+            }
+
+            pub const SetFieldFn = SET_FIELD_FN;
+        };
+    } else if (comptime Types.type_is_pointer_with_child_type(CONTAINER, ELEM)) {
+        return struct {
+            pub fn set_field(container: CONTAINER, idx: IDX, val: FIELD_TYPE) CONTAINER {
+                assert_with_reason(idx == 0, @src(), "cannot `set` a single-item pointer at any index other than 0, got idx {d}", .{idx});
+                @field(container, FIELD_NAME) = val;
+                return container;
+            }
+
+            pub const SetFieldFn = SET_FIELD_FN;
+        };
+    } else if (comptime CONTAINER == ELEM) {
+        return struct {
+            pub fn set_field(container: CONTAINER, idx: IDX, val: FIELD_TYPE) CONTAINER {
+                assert_with_reason(idx == 0, @src(), "cannot `set` a raw value at any index other than 0, got idx {d}", .{idx});
+                var new_container = container;
+                @field(new_container, FIELD_NAME) = val;
+                return new_container;
+            }
+
+            pub const SetFieldFn = SET_FIELD_FN;
+        };
+    } else {
+        return struct {
+            pub fn set_field(container: CONTAINER, _: IDX, _: FIELD_TYPE) CONTAINER {
+                assert_unreachable(@src(), "cannot implicitly 'set field at index' with element type `{s}` for container type `{s}`", .{ @typeName(ELEM), @typeName(CONTAINER) });
+                return container;
+            }
+
+            pub const SetFieldFn = SET_FIELD_FN;
+        };
+    }
+}
+
+/// A utility 'set element field at index' function that accepts any of the following containers:
+///   - GooListSlice
+///   - ArrayList
+///   - ArrayListManaged
+///   - slices ([]T)
+///   - many-item pointers ([*]T)
+///   - single-item pointers to arrays (*[N]T)
+///   - single-item pointers (*T, asserts index is 0)
+///   - raw values with the same type as the new value (asserts index is 0)
+///   - raw arrays or vectors ([N]T, @Vector(N, T))
+///   - pointers to arrays or vectors (*[N]T, *@Vector(N, T))
+pub fn set_field(container: anytype, comptime ELEM: type, comptime field: []const u8, idx: anytype, val: anytype) @TypeOf(container) {
+    const PROTO = set_field_concrete_proto(@TypeOf(container), ELEM, field, @TypeOf(val), @TypeOf(idx));
+    return PROTO.set_field(container, idx, val);
+}
+
 /// A utility 'get element at index' function that accepts any of the following containers:
 ///   - GooListSlice
 ///   - ArrayList
@@ -476,6 +599,233 @@ pub fn get(comptime ELEM: type, container: anytype, idx: anytype) ELEM {
         assert_unreachable(@src(), "cannot implicitly 'get at index' with element type `{s}` for container type `{s}`", .{ @typeName(ELEM), @typeName(CONTAINER) });
     }
 }
+
+/// A utility 'get element at index' function that accepts any of the following containers:
+///   - GooListSlice
+///   - ArrayList
+///   - ArrayListManaged
+///   - slices ([]T)
+///   - many-item pointers ([*]const T)
+///   - single-item pointers to arrays (*const [N]T)
+///   - single-item pointers (*const T, asserts index is 0)
+///   - raw values with the same type as the new value (asserts index is 0)
+///   - raw arrays or vectors ([N]T, @Vector(N, T))
+///   - pointers to arrays or vectors (*const [N]T, *const @Vector(N, T))
+pub fn get_ptr(comptime ELEM: type, container: anytype, idx: anytype) *ELEM {
+    const CONTAINER = @TypeOf(container);
+    if (comptime Root.GooListSlice.type_is_GooListSlice_with_element_type(CONTAINER, ELEM)) {
+        return container.get_item_ptr(idx);
+    } else if (comptime Types.type_is_zig_list(CONTAINER, ELEM) or Types.type_is_zig_list_managed(CONTAINER, ELEM)) {
+        return &container.items[idx];
+    } else if (comptime KindInfo.get_kind_info(CONTAINER).has_indexable_child_type(ELEM)) {
+        return &container[idx];
+    } else if (comptime Types.type_is_vector_with_child_type(CONTAINER, ELEM)) {
+        const as_array = vector_to_array(container);
+        return &as_array[idx];
+    } else if (comptime Types.type_is_pointer_to_vector_with_child_type(CONTAINER, ELEM)) {
+        const as_array_ptr = Cast.vector_to_array_pointer(container);
+        return &as_array_ptr[idx];
+    } else if (comptime Types.type_is_pointer_with_child_type(CONTAINER, ELEM)) {
+        assert_with_reason(idx == 0, @src(), "cannot `get` a single-item pointer at any index other than 0, got idx {d}", .{idx});
+        return container;
+    } else if (comptime CONTAINER == ELEM) {
+        assert_with_reason(idx == 0, @src(), "cannot `get` a raw value at any index other than 0, got idx {d}", .{idx});
+        return &container;
+    } else {
+        assert_unreachable(@src(), "cannot implicitly 'get ptr at index' with element type `{s}` for container type `{s}`", .{ @typeName(ELEM), @typeName(CONTAINER) });
+    }
+}
+
+/// A utility 'get element at index' function that accepts any of the following containers:
+///   - GooListSlice
+///   - ArrayList
+///   - ArrayListManaged
+///   - slices ([]T)
+///   - many-item pointers ([*]const T)
+///   - single-item pointers to arrays (*const [N]T)
+///   - single-item pointers (*const T, asserts index is 0)
+///   - raw values with the same type as the new value (asserts index is 0)
+///   - raw arrays or vectors ([N]T, @Vector(N, T))
+///   - pointers to arrays or vectors (*const [N]T, *const @Vector(N, T))
+pub fn get_ptr_const(comptime ELEM: type, container: anytype, idx: anytype) *const ELEM {
+    const CONTAINER = @TypeOf(container);
+    if (comptime Root.GooListSlice.type_is_GooListSlice_with_element_type(CONTAINER, ELEM)) {
+        return container.get_item_ptr(idx);
+    } else if (comptime Types.type_is_zig_list(CONTAINER, ELEM) or Types.type_is_zig_list_managed(CONTAINER, ELEM)) {
+        return &container.items[idx];
+    } else if (comptime KindInfo.get_kind_info(CONTAINER).has_indexable_child_type(ELEM)) {
+        return &container[idx];
+    } else if (comptime Types.type_is_vector_with_child_type(CONTAINER, ELEM)) {
+        const as_array = vector_to_array(container);
+        return &as_array[idx];
+    } else if (comptime Types.type_is_pointer_to_vector_with_child_type(CONTAINER, ELEM)) {
+        const as_array_ptr = Cast.vector_to_array_pointer(container);
+        return &as_array_ptr[idx];
+    } else if (comptime Types.type_is_pointer_with_child_type(CONTAINER, ELEM)) {
+        assert_with_reason(idx == 0, @src(), "cannot `get` a single-item pointer at any index other than 0, got idx {d}", .{idx});
+        return container;
+    } else if (comptime CONTAINER == ELEM) {
+        assert_with_reason(idx == 0, @src(), "cannot `get` a raw value at any index other than 0, got idx {d}", .{idx});
+        return &container;
+    } else {
+        assert_unreachable(@src(), "cannot implicitly 'get ptr at index' with element type `{s}` for container type `{s}`", .{ @typeName(ELEM), @typeName(CONTAINER) });
+    }
+}
+
+/// A utility that builds a prototype 'get element field at index' function that accepts any of the following containers:
+///   - GooListSlice
+///   - ArrayList
+///   - ArrayListManaged
+///   - slices ([]T)
+///   - many-item pointers ([*]const T)
+///   - single-item pointers to arrays (*const [N]T)
+///   - single-item pointers (*const T, asserts index is 0)
+///   - raw values with the same type as the new value (asserts index is 0)
+///   - raw arrays or vectors ([N]T, @Vector(N, T))
+///   - pointers to arrays or vectors (*const [N]T, *const @Vector(N, T))
+pub fn get_field_concrete_proto(comptime CONTAINER: type, comptime ELEM: type, comptime FIELD_NAME: []const u8, comptime FIELD_TYPE: type, comptime RETURN_MODE: ValReturnMode, comptime IDX: type) type {
+    const VAL_TO_RETURN = RETURN_MODE.get_type(FIELD_TYPE);
+    const GET_FIELD_FN = fn (container: CONTAINER, idx: IDX) VAL_TO_RETURN;
+    if (comptime Root.GooListSlice.type_is_GooListSlice_with_element_type(CONTAINER, ELEM)) {
+        return struct {
+            pub fn get_field(container: CONTAINER, idx: IDX) VAL_TO_RETURN {
+                switch (comptime RETURN_MODE) {
+                    .VAL => return container.get_item_field(FIELD_NAME, idx),
+                    .PTR, .CONST_PTR => return container.get_item_field_ptr(FIELD_NAME, idx),
+                }
+            }
+
+            pub const GetFieldFn = GET_FIELD_FN;
+        };
+    } else if (comptime Types.type_is_zig_list(CONTAINER, ELEM) or Types.type_is_zig_list_managed(CONTAINER, ELEM)) {
+        return struct {
+            pub fn get_field(container: CONTAINER, idx: IDX) VAL_TO_RETURN {
+                switch (comptime RETURN_MODE) {
+                    .VAL => return @field(&container.items[idx], FIELD_NAME),
+                    .PTR, .CONST_PTR => return &@field(&container.items[idx], FIELD_NAME),
+                }
+            }
+
+            pub const GetFieldFn = GET_FIELD_FN;
+        };
+    } else if (comptime KindInfo.get_kind_info(CONTAINER).has_indexable_child_type(ELEM)) {
+        return struct {
+            pub fn get_field(container: CONTAINER, idx: IDX) VAL_TO_RETURN {
+                switch (comptime RETURN_MODE) {
+                    .VAL => return @field(&container[idx], FIELD_NAME),
+                    .PTR, .CONST_PTR => return &@field(&container[idx], FIELD_NAME),
+                }
+            }
+
+            pub const GetFieldFn = GET_FIELD_FN;
+        };
+    } else if (comptime Types.type_is_vector_with_child_type(CONTAINER, ELEM)) {
+        return struct {
+            pub fn get_field(container: CONTAINER, idx: IDX) VAL_TO_RETURN {
+                const as_array = vector_to_array(container);
+                switch (comptime RETURN_MODE) {
+                    .VAL => return @field(as_array[idx], FIELD_NAME),
+                    .PTR, .CONST_PTR => return &@field(as_array[idx], FIELD_NAME),
+                }
+            }
+
+            pub const GetFieldFn = GET_FIELD_FN;
+        };
+    } else if (comptime Types.type_is_pointer_to_vector_with_child_type(CONTAINER, ELEM)) {
+        return struct {
+            pub fn get_field(container: CONTAINER, idx: IDX) VAL_TO_RETURN {
+                const as_array_ptr = Cast.vector_to_array_pointer(container);
+                switch (comptime RETURN_MODE) {
+                    .VAL => return @field(&as_array_ptr[idx], FIELD_NAME),
+                    .PTR, .CONST_PTR => return &@field(&as_array_ptr[idx], FIELD_NAME),
+                }
+            }
+
+            pub const GetFieldFn = GET_FIELD_FN;
+        };
+    } else if (comptime Types.type_is_pointer_with_child_type(CONTAINER, ELEM)) {
+        return struct {
+            pub fn get_field(container: CONTAINER, idx: IDX) VAL_TO_RETURN {
+                assert_with_reason(idx == 0, @src(), "cannot `get` a single-item pointer at any index other than 0, got idx {d}", .{idx});
+                switch (comptime RETURN_MODE) {
+                    .VAL => return @field(container, FIELD_NAME),
+                    .PTR, .CONST_PTR => return &@field(container, FIELD_NAME),
+                }
+            }
+
+            pub const GetFieldFn = GET_FIELD_FN;
+        };
+    } else if (comptime CONTAINER == ELEM) {
+        return struct {
+            pub fn get_field(container: CONTAINER, idx: IDX) VAL_TO_RETURN {
+                assert_with_reason(idx == 0, @src(), "cannot `get` a raw value at any index other than 0, got idx {d}", .{idx});
+                switch (comptime RETURN_MODE) {
+                    .VAL => return @field(&container, FIELD_NAME),
+                    .PTR, .CONST_PTR => return &@field(&container, FIELD_NAME),
+                }
+            }
+
+            pub const GetFieldFn = GET_FIELD_FN;
+        };
+    } else {
+        return struct {
+            pub fn get_field(_: CONTAINER, _: IDX) VAL_TO_RETURN {
+                assert_unreachable(@src(), "cannot implicitly 'get field at index' with element type `{s}` for container type `{s}`", .{ @typeName(ELEM), @typeName(CONTAINER) });
+            }
+
+            pub const GetFieldFn = GET_FIELD_FN;
+        };
+    }
+}
+
+/// A utility 'get element field value at index' function that accepts any of the following containers:
+///   - GooListSlice
+///   - ArrayList
+///   - ArrayListManaged
+///   - slices ([]T)
+///   - many-item pointers ([*]const T)
+///   - single-item pointers to arrays (*const [N]T)
+///   - single-item pointers (*const T, asserts index is 0)
+///   - raw values with the same type as the new value (asserts index is 0)
+///   - raw arrays or vectors ([N]T, @Vector(N, T))
+///   - pointers to arrays or vectors (*const [N]T, *const @Vector(N, T))
+pub fn get_field(container: anytype, comptime ELEM: type, comptime field: []const u8, idx: anytype) Types.field_type(ELEM, field) {
+    const PROTO = get_field_concrete_proto(@TypeOf(container), ELEM, field, Types.field_type(ELEM, field), .VAL, @TypeOf(idx));
+    return PROTO.get_field(container, idx);
+}
+
+/// A utility 'get element field pointer at index' function that accepts any of the following containers:
+///   - GooListSlice
+///   - ArrayList
+///   - ArrayListManaged
+///   - slices ([]T)
+///   - many-item pointers ([*]const T)
+///   - single-item pointers to arrays (*const [N]T)
+///   - single-item pointers (*const T, asserts index is 0)
+///   - raw values with the same type as the new value (asserts index is 0)
+///   - raw arrays or vectors ([N]T, @Vector(N, T))
+///   - pointers to arrays or vectors (*const [N]T, *const @Vector(N, T))
+pub fn get_field_ptr(container: anytype, comptime ELEM: type, comptime field: []const u8, idx: anytype) *Types.field_type(ELEM, field) {
+    const PROTO = get_field_concrete_proto(@TypeOf(container), ELEM, field, Types.field_type(ELEM, field), .PTR, @TypeOf(idx));
+    return PROTO.get_field(container, idx);
+}
+
+/// A utility 'get element field const pointer at index' function that accepts any of the following containers:
+///   - GooListSlice
+///   - ArrayList
+///   - ArrayListManaged
+///   - slices ([]T)
+///   - many-item pointers ([*]const T)
+///   - single-item pointers to arrays (*const [N]T)
+///   - single-item pointers (*const T, asserts index is 0)
+///   - raw values with the same type as the new value (asserts index is 0)
+///   - raw arrays or vectors ([N]T, @Vector(N, T))
+///   - pointers to arrays or vectors (*const [N]T, *const @Vector(N, T))
+pub fn get_field_const_ptr(container: anytype, comptime ELEM: type, comptime field: []const u8, idx: anytype) *const Types.field_type(ELEM, field) {
+    const PROTO = get_field_concrete_proto(@TypeOf(container), ELEM, field, Types.field_type(ELEM, field), .CONST_PTR, @TypeOf(idx));
+    return PROTO.get_field(container, idx);
+}
+
 /// A utility 'swap two elements' function that accepts any of the following containers:
 ///   - GooListSlice
 ///   - ArrayList

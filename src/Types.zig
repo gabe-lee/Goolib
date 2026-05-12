@@ -37,6 +37,8 @@ const MathX = Root.Math;
 const Utils = Root.Utils;
 const assert_with_reason = Assert.assert_with_reason;
 const assert_unreachable = Assert.assert_unreachable;
+pub const StructFieldAttr = Type.StructField.Attributes;
+pub const UnionFieldAttr = Type.UnionField.Attributes;
 
 pub const Type = std.builtin.Type;
 pub const TypeId = std.builtin.TypeId;
@@ -1815,3 +1817,197 @@ pub const DefinedLayout = enum(u8) {
         };
     }
 };
+
+pub fn StructInfo(comptime NUM_FIELDS: type) type {
+    return struct {
+        layout: Type.ContainerLayout,
+        backing_int: ?type,
+        field_names: [NUM_FIELDS][]const u8,
+        field_types: [NUM_FIELDS]type,
+        field_attrs: [NUM_FIELDS]StructFieldAttr,
+
+        pub fn build_struct_type(comptime self: @This()) type {
+            return @Struct(self.layout, self.backing_int, self.field_names[0..], &self.field_types, &self.field_attrs);
+        }
+
+        pub fn type_for_field(comptime self: @This(), comptime field: []const u8) type {
+            inline for (self.field_names, 0..) |f_name, f| {
+                if (std.mem.eql(u8, field, f_name)) {
+                    return self.field_types[f];
+                }
+            }
+            if (std.mem.eql(u8, field, "@Self")) {
+                return self.build_struct_type();
+            }
+            assert_unreachable(@src(), "struct has no field `{s}`\nvalid fields: {any}", .{ field, self.field_names });
+        }
+
+        pub fn type_attrs_for_field(comptime self: @This(), comptime field: []const u8) struct { type, StructFieldAttr } {
+            inline for (self.field_names, 0..) |f_name, f| {
+                if (std.mem.eql(u8, field, f_name)) {
+                    return .{ self.field_types[f], self.field_attrs[f] };
+                }
+            }
+            if (std.mem.eql(u8, field, "@Self")) {
+                const T = self.build_struct_type();
+                return .{ T, StructFieldAttr{ .@"align" = @alignOf(T) } };
+            }
+            assert_unreachable(@src(), "struct has no field `{s}`\nvalid fields: {any}", .{ field, self.field_names });
+        }
+
+        pub fn to_struct_info(comptime self: @This()) @This() {
+            return self;
+        }
+    };
+}
+
+pub fn extract_struct_info(comptime STRUCT: type) StructInfo(@typeInfo(STRUCT).@"struct".fields.len) {
+    const INFO = @typeInfo(STRUCT).@"struct";
+    const NUM_FIELDS = INFO.fields.len;
+    comptime var NAMES: [NUM_FIELDS][]const u8 = undefined;
+    comptime var TYPES: [NUM_FIELDS]type = undefined;
+    comptime var ATTRS: [NUM_FIELDS]StructFieldAttr = undefined;
+    inline for (INFO.fields, 0..) |field, f| {
+        NAMES[f] = field.name;
+        TYPES[f] = field.type;
+        ATTRS[f] = StructFieldAttr{
+            .@"align" = field.alignment,
+            .@"comptime" = field.is_comptime,
+            .default_value_ptr = field.default_value_ptr,
+        };
+    }
+    return StructInfo(NUM_FIELDS){
+        .backing_int = INFO.backing_integer,
+        .layout = INFO.layout,
+        .field_names = NAMES,
+        .field_types = TYPES,
+        .field_attrs = ATTRS,
+    };
+}
+
+pub fn UnionInfo(comptime NUM_FIELDS: type) type {
+    return struct {
+        layout: Type.ContainerLayout,
+        tag_type: ?type,
+        field_names: [NUM_FIELDS][]const u8,
+        field_types: [NUM_FIELDS]type,
+        field_attrs: [NUM_FIELDS]UnionFieldAttr,
+
+        pub fn build_union_type(comptime self: @This()) type {
+            return @Union(self.layout, self.tag_type, self.field_names[0..], &self.field_types, &self.field_attrs);
+        }
+
+        pub fn type_for_field(comptime self: @This(), comptime field: []const u8) type {
+            inline for (self.field_names, 0..) |f_name, f| {
+                if (std.mem.eql(u8, field, f_name)) {
+                    return self.field_types[f];
+                }
+            }
+            if (std.mem.eql(u8, field, "@Self")) {
+                return self.build_union_type();
+            }
+            assert_unreachable(@src(), "union has no field `{s}`\nvalid fields: {any}", .{ field, self.field_names });
+        }
+
+        pub fn type_attrs_for_field(comptime self: @This(), comptime field: []const u8) struct { type, UnionFieldAttr } {
+            inline for (self.field_names, 0..) |f_name, f| {
+                if (std.mem.eql(u8, field, f_name)) {
+                    return .{ self.field_types[f], self.field_attrs[f] };
+                }
+            }
+            if (std.mem.eql(u8, field, "@Self")) {
+                const T = self.build_union_type();
+                return .{ T, UnionFieldAttr{ .@"align" = @alignOf(T) } };
+            }
+            assert_unreachable(@src(), "union has no field `{s}`\nvalid fields: {any}", .{ field, self.field_names });
+        }
+
+        pub fn to_struct_info(comptime self: @This()) StructInfo(NUM_FIELDS) {
+            comptime var new_attrs: [NUM_FIELDS]StructFieldAttr = undefined;
+            inline for (self.field_attrs, 0..) |attr, a| {
+                new_attrs[a] = StructFieldAttr{
+                    .@"align" = attr.@"align",
+                };
+            }
+            return StructInfo(NUM_FIELDS){
+                .layout = .auto,
+                .backing_int = null,
+                .field_attrs = new_attrs,
+                .field_names = self.field_names,
+                .field_types = self.field_types,
+            };
+        }
+    };
+}
+
+pub fn extract_union_info(comptime UNION: type) UnionInfo(@typeInfo(UNION).@"union".fields.len) {
+    const INFO = @typeInfo(UNION).@"union";
+    const NUM_FIELDS = INFO.fields.len;
+    comptime var NAMES: [NUM_FIELDS][]const u8 = undefined;
+    comptime var TYPES: [NUM_FIELDS]type = undefined;
+    comptime var ATTRS: [NUM_FIELDS]UnionFieldAttr = undefined;
+    inline for (INFO.fields, 0..) |field, f| {
+        NAMES[f] = field.name;
+        TYPES[f] = field.type;
+        ATTRS[f] = UnionFieldAttr{
+            .@"align" = field.alignment,
+        };
+    }
+    return UnionInfo(NUM_FIELDS){
+        .backing_int = INFO.backing_integer,
+        .layout = INFO.layout,
+        .field_names = NAMES,
+        .field_types = TYPES,
+        .field_attrs = ATTRS,
+    };
+}
+
+pub fn extract_non_struct_union_dummy_field_info(comptime T: type) NonStructUnionTypeDummyFieldInfo {
+    return NonStructUnionTypeDummyFieldInfo{
+        .field_types = .{T},
+        .field_attrs = .{StructFieldAttr{ .@"align" = @alignOf(T) }},
+    };
+}
+
+pub const NonStructUnionTypeDummyFieldInfo = struct {
+    field_names: [1][]const u8 = .{"@Self"},
+    field_types: [1]type,
+    field_attrs: [1]StructFieldAttr,
+
+    pub fn type_for_field(comptime self: @This(), comptime field: []const u8) type {
+        if (std.mem.eql(u8, field, "@Self")) {
+            return self.field_types[0];
+        }
+        assert_unreachable(@src(), "non-struct, non-union type only accepts the string \"@Self\" as a 'field', which returns its own type (it has no fields). got field `{s}`", .{field});
+    }
+
+    pub fn type_attrs_for_field(comptime self: @This(), comptime field: []const u8) struct { type, StructFieldAttr } {
+        return .{ self.type_for_field(field), StructFieldAttr{ .@"align" = @alignOf(self.field_types[0]) } };
+    }
+
+    pub fn to_struct_info(comptime self: @This()) StructInfo(1) {
+        return StructInfo(1){
+            .layout = .auto,
+            .backing_int = null,
+            .field_attrs = .{StructFieldAttr{
+                .@"align" = @alignOf(self.object_type),
+            }},
+            .field_names = .{"Self"},
+            .field_types = .{self.object_type},
+        };
+    }
+};
+
+pub fn extract_struct_union_or_dummy_field_info(comptime T: type) type {
+    const KIND = KindInfo.get_kind_info(T);
+    switch (KIND) {
+        .STRUCT => return extract_struct_info(T),
+        .UNION => return extract_union_info(T),
+        else => return extract_non_struct_union_dummy_field_info(T),
+    }
+}
+
+pub fn field_type(comptime ELEM: type, comptime field: []const u8) type {
+    const INFO = extract_struct_union_or_dummy_field_info(ELEM);
+    return INFO.type_for_field(field);
+}

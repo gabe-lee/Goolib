@@ -158,11 +158,27 @@ pub const ManySameOrderExpectation = enum(u8) {
     USE_HOARE_2_WAY_PARTITION,
 };
 
+pub const FieldTyper = fn (comptime field: []const u8) type;
 pub fn GetFn(comptime DATA_STRUCTURE: type, comptime IDX_TYPE: type, comptime ELEM_TYPE: type, comptime USERDATA_TYPE: type) type {
     return fn (data: DATA_STRUCTURE, idx: IDX_TYPE, userdata: USERDATA_TYPE) ELEM_TYPE;
 }
+pub fn GetPtrFn(comptime DATA_STRUCTURE: type, comptime IDX_TYPE: type, comptime ELEM_TYPE: type, comptime USERDATA_TYPE: type) type {
+    return fn (data: DATA_STRUCTURE, idx: IDX_TYPE, userdata: USERDATA_TYPE) *ELEM_TYPE;
+}
+pub fn GetConstPtrFn(comptime DATA_STRUCTURE: type, comptime IDX_TYPE: type, comptime ELEM_TYPE: type, comptime USERDATA_TYPE: type) type {
+    return fn (data: DATA_STRUCTURE, idx: IDX_TYPE, userdata: USERDATA_TYPE) *const ELEM_TYPE;
+}
+pub fn GetFieldFn(comptime DATA_STRUCTURE: type, comptime IDX_TYPE: type, comptime FIELD_TYPE: type, comptime USERDATA_TYPE: type) type {
+    return fn (data: DATA_STRUCTURE, comptime field: []const u8, idx: IDX_TYPE, userdata: USERDATA_TYPE) FIELD_TYPE;
+}
+pub fn GetFieldPtrFn(comptime DATA_STRUCTURE: type, comptime IDX_TYPE: type, comptime FIELD_TYPE: type, comptime USERDATA_TYPE: type) type {
+    return fn (data: DATA_STRUCTURE, comptime field: []const u8, idx: IDX_TYPE, userdata: USERDATA_TYPE) *FIELD_TYPE;
+}
 pub fn SetFn(comptime DATA_STRUCTURE: type, comptime IDX_TYPE: type, comptime ELEM_TYPE: type, comptime USERDATA_TYPE: type) type {
     return fn (data: DATA_STRUCTURE, idx: IDX_TYPE, val: ELEM_TYPE, userdata: USERDATA_TYPE) DATA_STRUCTURE;
+}
+pub fn SetFieldFn(comptime DATA_STRUCTURE: type, comptime IDX_TYPE: type, comptime FIELD_TYPE: type, comptime USERDATA_TYPE: type) type {
+    return fn (data: DATA_STRUCTURE, comptime field: []const u8, idx: IDX_TYPE, val: FIELD_TYPE, userdata: USERDATA_TYPE) DATA_STRUCTURE;
 }
 pub fn SwapFn(comptime DATA_STRUCTURE: type, comptime IDX_TYPE: type, comptime USERDATA_TYPE: type) type {
     return fn (data: DATA_STRUCTURE, idx_a: IDX_TYPE, idx_b: IDX_TYPE, userdata: USERDATA_TYPE) DATA_STRUCTURE;
@@ -185,12 +201,78 @@ pub const DataManipulationPackage = struct {
             pub const USERDATA_ = DEF_.USERDATA;
 
             pub const Getter_ = GetFn(DATA_, IDX_, ELEM_, USERDATA_);
+            pub const PtrGetter_ = GetPtrFn(DATA_, IDX_, ELEM_, USERDATA_);
+            pub const ConstPtrGetter_ = GetConstPtrFn(DATA_, IDX_, ELEM_, USERDATA_);
+            pub const FieldGetter_ = GetFieldFn(DATA_, IDX_, ELEM_, TYPE_FOR_FIELD, USERDATA_);
+            pub const FieldPtrGetter_ = GetFieldPtrFn(DATA_, IDX_, ELEM_, TYPE_FOR_FIELD, USERDATA_);
             pub const Setter_ = SetFn(DATA_, IDX_, ELEM_, USERDATA_);
+            pub const FieldSetter_ = SetFieldFn(DATA_, IDX_, ELEM_, TYPE_FOR_FIELD, USERDATA_);
             pub const Swapper_ = SwapFn(DATA_, IDX_, USERDATA_);
             pub const Comparer_ = CompareFn(ELEM_, ELEM_, USERDATA_);
 
+            pub const FieldInfo_ = Types.extract_struct_union_or_dummy_field_info(ELEM_);
+            const TYPE_FOR_FIELD: fn (comptime INFO: @TypeOf(FieldInfo_), comptime field: []const u8) type = FieldInfo_.type_for_field;
+            pub fn TypeForField(comptime field: []const u8) type {
+                return FieldInfo_.type_for_field(field);
+            }
+            const FieldInfoAsStructInfo_: Types.StructInfo(FieldInfo_.field_names.len) = FieldInfo_.as_struct_info();
+            const FieldGettersStructInfo = make: {
+                const getters = FieldInfoAsStructInfo_;
+                for (getters.field_names, getters.field_types, getters.field_attrs) |NAME, *FT, *ATTR| {
+                    const PROTO = Utils.Mem.get_field_concrete_proto(DATA_, ELEM_, NAME, FT.*, .VAL, IDX_);
+                    FT.* = PROTO.GetFieldFn;
+                    ATTR.@"align" = @alignOf(PROTO.GetFieldFn);
+                    ATTR.@"comptime" = false;
+                    ATTR.default_value_ptr = &PROTO.get_field;
+                }
+                break :make getters;
+            };
+            pub const FieldGetters = FieldGettersStructInfo.build_struct_type();
+            const FieldPtrGettersStructInfo = make: {
+                const getters = FieldInfoAsStructInfo_;
+                for (getters.field_names, getters.field_types, getters.field_attrs) |NAME, *FT, *ATTR| {
+                    const PROTO = Utils.Mem.get_field_concrete_proto(DATA_, ELEM_, NAME, FT.*, .PTR, IDX_);
+                    FT.* = PROTO.GetFieldFn;
+                    ATTR.@"align" = @alignOf(PROTO.GetFieldFn);
+                    ATTR.@"comptime" = false;
+                    ATTR.default_value_ptr = &PROTO.get_field;
+                }
+                break :make getters;
+            };
+            pub const FieldPtrGetters = FieldPtrGettersStructInfo.build_struct_type();
+            const FieldConstPtrGettersStructInfo = make: {
+                const getters = FieldInfoAsStructInfo_;
+                for (getters.field_names, getters.field_types, getters.field_attrs) |NAME, *FT, *ATTR| {
+                    const PROTO = Utils.Mem.get_field_concrete_proto(DATA_, ELEM_, NAME, FT.*, .CONST_PTR, IDX_);
+                    FT.* = PROTO.GetFieldFn;
+                    ATTR.@"align" = @alignOf(PROTO.GetFieldFn);
+                    ATTR.@"comptime" = false;
+                    ATTR.default_value_ptr = &PROTO.get_field;
+                }
+                break :make getters;
+            };
+            pub const FieldConstPtrGetters = FieldPtrGettersStructInfo.build_struct_type();
+            const FieldSettersStructInfo = make: {
+                const setters = FieldInfoAsStructInfo_;
+                for (setters.field_names, setters.field_types, setters.field_attrs) |NAME, *TYPE, *ATTR| {
+                    const PROTO = Utils.Mem.set_field_concrete_proto(DATA_, ELEM_, NAME, TYPE.*, .VAL, IDX_);
+                    TYPE.* = PROTO.SetFieldFn;
+                    ATTR.@"align" = @alignOf(PROTO.SetFieldFn);
+                    ATTR.@"comptime" = false;
+                    ATTR.default_value_ptr = &PROTO.set_field;
+                }
+                break :make setters;
+            };
+            pub const FieldSetters = FieldSettersStructInfo.build_struct_type();
+
             GET: Getter_ = default_get,
+            GET_PTR: PtrGetter_ = default_get_ptr,
+            GET_CONST_PTR: ConstPtrGetter_ = default_get_const_ptr,
+            GET_FIELD: FieldGetters = .{},
+            GET_FIELD_PTR: FieldPtrGetters = .{},
+            GET_FIELD_CONST_PTR: FieldConstPtrGetters = .{},
             SET: Setter_ = default_set,
+            SET_FIELD: FieldSetters = .{},
             SWAP: Swapper_ = default_swap,
             GREATER_THAN: Comparer_ = default_greater_than,
             GREATER_THAN_OR_EQUAL: Comparer_ = default_greater_than_or_equal,
@@ -201,6 +283,12 @@ pub const DataManipulationPackage = struct {
 
             fn default_get(data: DATA_, idx: IDX_, _: USERDATA_) ELEM_ {
                 return Utils.Mem.get(ELEM_, data, idx);
+            }
+            fn default_get_ptr(data: DATA_, idx: IDX_, _: USERDATA_) *ELEM_ {
+                return Utils.Mem.get_ptr(ELEM_, data, idx);
+            }
+            fn default_get_const_ptr(data: DATA_, idx: IDX_, _: USERDATA_) *const ELEM_ {
+                return Utils.Mem.get_ptr_const(ELEM_, data, idx);
             }
             fn default_set(data: DATA_, idx: IDX_, val: ELEM_, _: USERDATA_) DATA_ {
                 return Utils.Mem.set(data, idx, val);
@@ -225,22 +313,55 @@ pub const DataManipulationPackage = struct {
             }
 
             pub const CustomDataTransferFuncs = struct {
-                GET: Getter_,
-                SET: Setter_,
+                GET: ?Getter_ = null,
+                GET_PTR: ?PtrGetter_ = null,
+                GET_PTR_CONST: ?ConstPtrGetter_ = null,
+                SET: ?Setter_ = null,
                 SWAP: ?Swapper_ = null,
             };
 
             pub fn with_custom_data_transfer(comptime FUNCS: @This(), comptime custom: CustomDataTransferFuncs) @This() {
                 const PROTO = struct {
+                    fn infer_get(data: DATA_, idx: IDX_, userdata: USERDATA_) ELEM_ {
+                        if (comptime custom.GET_PTR_CONST) |get_cnst_ptr| {
+                            return get_cnst_ptr(data, idx, userdata).*;
+                        } else if (comptime custom.GET_PTR) |get_ptr| {
+                            return get_ptr(data, idx, userdata).*;
+                        } else {
+                            unreachable;
+                        }
+                    }
+                    fn infer_get_ptr(_: DATA_, _: IDX_, _: USERDATA_) *ELEM_ {
+                        unreachable;
+                    }
+                    fn infer_get_ptr_const(data: DATA_, idx: IDX_, userdata: USERDATA_) *const ELEM_ {
+                        if (comptime custom.GET_PTR) |get_ptr| {
+                            return get_ptr(data, idx, userdata).*;
+                        } else {
+                            unreachable;
+                        }
+                    }
+                    fn infer_set(data: DATA_, idx: IDX_, val: ELEM_, userdata: USERDATA_) DATA_ {
+                        if (comptime custom.GET_PTR) |get_ptr| {
+                            get_ptr(data, idx, userdata).* = val;
+                            return data;
+                        } else {
+                            unreachable;
+                        }
+                    }
                     fn infer_swap(data: DATA_, idx_a: IDX_, idx_b: IDX_, userdata: USERDATA_) DATA_ {
-                        const tmp = custom.getter(data, idx_b, userdata);
-                        const new_data = custom.setter(data, idx_b, custom.getter(data, idx_a, userdata), userdata);
-                        return custom.setter(new_data, idx_a, tmp, userdata);
+                        const GET = if (comptime custom.GET) |GET| GET else infer_get;
+                        const SET = if (comptime custom.SET) |SET| SET else infer_set;
+                        const tmp = GET(data, idx_b, userdata);
+                        const new_data = SET(data, idx_b, GET(data, idx_a, userdata), userdata);
+                        return SET(new_data, idx_a, tmp, userdata);
                     }
                 };
                 comptime var NEW_FUNCS = FUNCS;
-                NEW_FUNCS.GET = custom.GET;
-                NEW_FUNCS.SET = custom.SET;
+                NEW_FUNCS.GET = if (custom.GET) |GET| GET else PROTO.infer_get;
+                NEW_FUNCS.GET_PTR = if (custom.GET_PTR) |GET_PTR| GET_PTR else PROTO.infer_get_ptr;
+                NEW_FUNCS.GET_CONST_PTR = if (custom.GET_CONST_PTR) |GET_CONST_PTR| GET_CONST_PTR else PROTO.infer_get_ptr_const;
+                NEW_FUNCS.SET = if (custom.SET) |SET| SET else PROTO.infer_set;
                 NEW_FUNCS.SWAP = if (custom.SWAP) |SWAP| SWAP else PROTO.infer_swap;
                 return NEW_FUNCS;
             }
@@ -575,13 +696,12 @@ pub const DataManipulationPackage = struct {
 
                     /// Quicksort using a number of optimizations (similar to Introsort):
                     ///   - Use Insertion Sort when partitions become small
-                    ///     - Defers many small insertion sorts to the very end of the process as one final large insertion sort
                     ///   - Median-of-three pivot (not random, always first, middle, last)
                     ///   - Manually choose a partition scheme based on stated expectations about items with equal order
                     ///     - Many items same order unlikely = 2-way Hoare scheme
                     ///     - Many items same order likely = 3-way 'Dutch National Flag' scheme
                     ///   - No rescursion, only a comptime sized stack of partition index ranges and a while loop
-                    ///   - (Optional) Fallback to Heapsort/Insertion sort if partition degeneracy detected (more than 2x the average case)
+                    ///   - (Optional) Fallback to Heapsort/Insertion sort if partition degeneracy detected (more than N x the average partition depth)
                     ///
                     /// Stable:
                     ///   - No
@@ -603,7 +723,7 @@ pub const DataManipulationPackage = struct {
                     ///     - No fallback enabled   = O(n^2) (fully/nearly sorted or adversarial input)
                     ///
                     /// Space:
-                    ///   - O(log n)
+                    ///   - O(log n) (implemented as a comptime-sized stack)
                     pub fn quicksort(in: SortInputs, comptime SETTINGS: QuicksortSettings) DATA {
                         const Partition = QuicksortPartition(SETTINGS.FALLBACK_WHEN_DEGENERATE);
                         if (in.end_excluded - in.start < 2) {
