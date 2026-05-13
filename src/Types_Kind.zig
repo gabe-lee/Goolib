@@ -241,6 +241,18 @@ pub const KindInfo = union(Kind) {
     pub inline fn is_pointer(comptime K: KindInfo) bool {
         return K == .POINTER;
     }
+    pub inline fn is_single_item_pointer(comptime K: KindInfo) bool {
+        return K == .POINTER and K.POINTER.size == .one;
+    }
+    pub inline fn is_many_item_pointer(comptime K: KindInfo) bool {
+        return K == .POINTER and K.POINTER.size == .many;
+    }
+    pub inline fn is_non_slice_pointer(comptime K: KindInfo) bool {
+        return K == .POINTER and K.POINTER.size != .slice;
+    }
+    pub inline fn is_slice(comptime K: KindInfo) bool {
+        return K == .POINTER and K.POINTER.size == .slice;
+    }
     pub inline fn is_pointer_or_optional_pointer(comptime K: KindInfo) bool {
         return K == .POINTER or (K == .OPTIONAL and KindInfo.get_kind_info(K.OPTIONAL.child) == .POINTER);
     }

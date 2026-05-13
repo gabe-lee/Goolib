@@ -177,13 +177,13 @@ pub fn move_range_and_preserve_displaced(slice: anytype, first_elem_to_move: any
 /// was also already aligned to the larger boundary offset. If the aligned address would cause
 /// the object to cross the boundary alignment *AND* it was not already aligned to the boundary
 /// alignment, it instead returns an address aligned to the larger boundary alignment.
-pub fn align_forward_without_breaking_align_boundary_unless_offset_boundary_aligned(offset: usize, len: usize, object_align: usize, boundary_align: usize) usize {
+pub fn align_forward_without_breaking_align_boundary_unless_offset_boundary_aligned(offset: usize, len_: usize, object_align: usize, boundary_align: usize) usize {
     assert_with_reason(object_align <= boundary_align, @src(), "object_align must be <= boundary_align to use this function, got {d} > {d}", .{ object_align, boundary_align });
     const initial_align = std.mem.alignForward(usize, offset, object_align);
     const initial_delta = initial_align - offset;
     if (initial_delta == 0 or object_align == boundary_align) return initial_align;
     const start_boundary_align = std.mem.alignBackward(usize, initial_align, boundary_align);
-    const end_minus_one_boundary_align = std.mem.alignBackward(usize, initial_align + len - 1, boundary_align);
+    const end_minus_one_boundary_align = std.mem.alignBackward(usize, initial_align + len_ - 1, boundary_align);
     if (start_boundary_align == end_minus_one_boundary_align) return initial_align;
     return std.mem.alignForward(usize, offset, boundary_align);
 }
@@ -476,6 +476,7 @@ pub fn set_field_concrete_proto(comptime CONTAINER: type, comptime ELEM: type, c
             }
 
             pub const SetFieldFn = SET_FIELD_FN;
+            pub const OptSetFieldFn = ?SET_FIELD_FN;
         };
     } else if (comptime Types.type_is_zig_list(CONTAINER, ELEM) or Types.type_is_zig_list_managed(CONTAINER, ELEM)) {
         return struct {
@@ -485,6 +486,7 @@ pub fn set_field_concrete_proto(comptime CONTAINER: type, comptime ELEM: type, c
             }
 
             pub const SetFieldFn = SET_FIELD_FN;
+            pub const OptSetFieldFn = ?SET_FIELD_FN;
         };
     } else if (comptime KindInfo.get_kind_info(CONTAINER).has_indexable_child_type(ELEM)) {
         return struct {
@@ -494,6 +496,7 @@ pub fn set_field_concrete_proto(comptime CONTAINER: type, comptime ELEM: type, c
             }
 
             pub const SetFieldFn = SET_FIELD_FN;
+            pub const OptSetFieldFn = ?SET_FIELD_FN;
         };
     } else if (comptime Types.type_is_vector_with_child_type(CONTAINER, ELEM)) {
         return struct {
@@ -504,6 +507,7 @@ pub fn set_field_concrete_proto(comptime CONTAINER: type, comptime ELEM: type, c
             }
 
             pub const SetFieldFn = SET_FIELD_FN;
+            pub const OptSetFieldFn = ?SET_FIELD_FN;
         };
     } else if (comptime Types.type_is_pointer_to_vector_with_child_type(CONTAINER, ELEM)) {
         return struct {
@@ -524,6 +528,7 @@ pub fn set_field_concrete_proto(comptime CONTAINER: type, comptime ELEM: type, c
             }
 
             pub const SetFieldFn = SET_FIELD_FN;
+            pub const OptSetFieldFn = ?SET_FIELD_FN;
         };
     } else if (comptime CONTAINER == ELEM) {
         return struct {
@@ -535,6 +540,7 @@ pub fn set_field_concrete_proto(comptime CONTAINER: type, comptime ELEM: type, c
             }
 
             pub const SetFieldFn = SET_FIELD_FN;
+            pub const OptSetFieldFn = ?SET_FIELD_FN;
         };
     } else {
         return struct {
@@ -544,6 +550,7 @@ pub fn set_field_concrete_proto(comptime CONTAINER: type, comptime ELEM: type, c
             }
 
             pub const SetFieldFn = SET_FIELD_FN;
+            pub const OptSetFieldFn = ?SET_FIELD_FN;
         };
     }
 }
@@ -599,6 +606,37 @@ pub fn get(comptime ELEM: type, container: anytype, idx: anytype) ELEM {
         assert_unreachable(@src(), "cannot implicitly 'get at index' with element type `{s}` for container type `{s}`", .{ @typeName(ELEM), @typeName(CONTAINER) });
     }
 }
+
+// /// A utility 'get element at index' function that accepts any of the following containers:
+// ///   - GooListSlice
+// ///   - ArrayList
+// ///   - ArrayListManaged
+// ///   - slices ([]T)
+// ///   - many-item pointers ([*]const T)
+// ///   - single-item pointers to arrays (*const [N]T)
+// ///   - single-item pointers (*const T, asserts index is 0)
+// ///   - raw values with the same type as the new value (asserts index is 0)
+// ///   - raw arrays or vectors ([N]T, @Vector(N, T))
+// ///   - pointers to arrays or vectors (*const [N]T, *const @Vector(N, T))
+// pub fn len(comptime IDX: type, comptime ELEM: type, container: anytype) IDX {
+//     const CONTAINER = @TypeOf(container);
+//     if (comptime Root.GooListSlice.type_is_GooListSlice_with_element_type(CONTAINER, ELEM)) {
+//         return @intCast(container.len());
+//     } else if (comptime Types.type_is_zig_list(CONTAINER, ELEM) or Types.type_is_zig_list_managed(CONTAINER, ELEM)) {
+//         return @intCast(container.items.len);
+//     } else if (comptime KindInfo.get_kind_info(CONTAINER).has_len(ELEM)) {
+//         return @intCast(container.len);
+//     } else if (comptime Types.type_is_pointer_with_child_type(CONTAINER, ELEM)) {
+//         return 1;
+//     } else if (comptime Types.type_is_optional(CONTAINER, ELEM)) {
+//         return 1;
+//     } else if (comptime CONTAINER == ELEM) {
+//         assert_with_reason(idx == 0, @src(), "cannot `get` a raw value at any index other than 0, got idx {d}", .{idx});
+//         return container;
+//     } else {
+//         assert_unreachable(@src(), "cannot implicitly 'get at index' with element type `{s}` for container type `{s}`", .{ @typeName(ELEM), @typeName(CONTAINER) });
+//     }
+// }
 
 /// A utility 'get element at index' function that accepts any of the following containers:
 ///   - GooListSlice
@@ -696,6 +734,7 @@ pub fn get_field_concrete_proto(comptime CONTAINER: type, comptime ELEM: type, c
             }
 
             pub const GetFieldFn = GET_FIELD_FN;
+            pub const OptGetFieldFn = ?GET_FIELD_FN;
         };
     } else if (comptime Types.type_is_zig_list(CONTAINER, ELEM) or Types.type_is_zig_list_managed(CONTAINER, ELEM)) {
         return struct {
@@ -707,6 +746,7 @@ pub fn get_field_concrete_proto(comptime CONTAINER: type, comptime ELEM: type, c
             }
 
             pub const GetFieldFn = GET_FIELD_FN;
+            pub const OptGetFieldFn = ?GET_FIELD_FN;
         };
     } else if (comptime KindInfo.get_kind_info(CONTAINER).has_indexable_child_type(ELEM)) {
         return struct {
@@ -718,6 +758,7 @@ pub fn get_field_concrete_proto(comptime CONTAINER: type, comptime ELEM: type, c
             }
 
             pub const GetFieldFn = GET_FIELD_FN;
+            pub const OptGetFieldFn = ?GET_FIELD_FN;
         };
     } else if (comptime Types.type_is_vector_with_child_type(CONTAINER, ELEM)) {
         return struct {
@@ -730,6 +771,7 @@ pub fn get_field_concrete_proto(comptime CONTAINER: type, comptime ELEM: type, c
             }
 
             pub const GetFieldFn = GET_FIELD_FN;
+            pub const OptGetFieldFn = ?GET_FIELD_FN;
         };
     } else if (comptime Types.type_is_pointer_to_vector_with_child_type(CONTAINER, ELEM)) {
         return struct {
@@ -742,6 +784,7 @@ pub fn get_field_concrete_proto(comptime CONTAINER: type, comptime ELEM: type, c
             }
 
             pub const GetFieldFn = GET_FIELD_FN;
+            pub const OptGetFieldFn = ?GET_FIELD_FN;
         };
     } else if (comptime Types.type_is_pointer_with_child_type(CONTAINER, ELEM)) {
         return struct {
@@ -754,6 +797,7 @@ pub fn get_field_concrete_proto(comptime CONTAINER: type, comptime ELEM: type, c
             }
 
             pub const GetFieldFn = GET_FIELD_FN;
+            pub const OptGetFieldFn = ?GET_FIELD_FN;
         };
     } else if (comptime CONTAINER == ELEM) {
         return struct {
@@ -766,6 +810,7 @@ pub fn get_field_concrete_proto(comptime CONTAINER: type, comptime ELEM: type, c
             }
 
             pub const GetFieldFn = GET_FIELD_FN;
+            pub const OptGetFieldFn = ?GET_FIELD_FN;
         };
     } else {
         return struct {
@@ -774,6 +819,7 @@ pub fn get_field_concrete_proto(comptime CONTAINER: type, comptime ELEM: type, c
             }
 
             pub const GetFieldFn = GET_FIELD_FN;
+            pub const OptGetFieldFn = ?GET_FIELD_FN;
         };
     }
 }

@@ -169,16 +169,16 @@ pub fn GetConstPtrFn(comptime DATA_STRUCTURE: type, comptime IDX_TYPE: type, com
     return fn (data: DATA_STRUCTURE, idx: IDX_TYPE, userdata: USERDATA_TYPE) *const ELEM_TYPE;
 }
 pub fn GetFieldFn(comptime DATA_STRUCTURE: type, comptime IDX_TYPE: type, comptime FIELD_TYPE: type, comptime USERDATA_TYPE: type) type {
-    return fn (data: DATA_STRUCTURE, comptime field: []const u8, idx: IDX_TYPE, userdata: USERDATA_TYPE) FIELD_TYPE;
+    return fn (data: DATA_STRUCTURE, idx: IDX_TYPE, userdata: USERDATA_TYPE) FIELD_TYPE;
 }
 pub fn GetFieldPtrFn(comptime DATA_STRUCTURE: type, comptime IDX_TYPE: type, comptime FIELD_TYPE: type, comptime USERDATA_TYPE: type) type {
-    return fn (data: DATA_STRUCTURE, comptime field: []const u8, idx: IDX_TYPE, userdata: USERDATA_TYPE) *FIELD_TYPE;
+    return fn (data: DATA_STRUCTURE, idx: IDX_TYPE, userdata: USERDATA_TYPE) *FIELD_TYPE;
 }
 pub fn SetFn(comptime DATA_STRUCTURE: type, comptime IDX_TYPE: type, comptime ELEM_TYPE: type, comptime USERDATA_TYPE: type) type {
     return fn (data: DATA_STRUCTURE, idx: IDX_TYPE, val: ELEM_TYPE, userdata: USERDATA_TYPE) DATA_STRUCTURE;
 }
 pub fn SetFieldFn(comptime DATA_STRUCTURE: type, comptime IDX_TYPE: type, comptime FIELD_TYPE: type, comptime USERDATA_TYPE: type) type {
-    return fn (data: DATA_STRUCTURE, comptime field: []const u8, idx: IDX_TYPE, val: FIELD_TYPE, userdata: USERDATA_TYPE) DATA_STRUCTURE;
+    return fn (data: DATA_STRUCTURE, idx: IDX_TYPE, val: FIELD_TYPE, userdata: USERDATA_TYPE) DATA_STRUCTURE;
 }
 pub fn SwapFn(comptime DATA_STRUCTURE: type, comptime IDX_TYPE: type, comptime USERDATA_TYPE: type) type {
     return fn (data: DATA_STRUCTURE, idx_a: IDX_TYPE, idx_b: IDX_TYPE, userdata: USERDATA_TYPE) DATA_STRUCTURE;
@@ -186,6 +186,157 @@ pub fn SwapFn(comptime DATA_STRUCTURE: type, comptime IDX_TYPE: type, comptime U
 pub fn CompareFn(comptime TA: type, comptime TB: type, comptime USERDATA: type) type {
     return fn (a: TA, b: TB, userdata: USERDATA) bool;
 }
+pub fn InnateIndexFn(comptime IDX: type, comptime USERDATA: type) type {
+    return fn(userdata: USERDATA) IDX;
+}
+pub fn IndexFn(comptime IDX: type, comptime USERDATA: type) type {
+    return fn(idx: IDX, userdata: USERDATA) IDX;
+}
+
+const FuncSource = enum(u8) {
+    UNUSABLE,
+    CUSTOM,
+    INFER,
+    DEFAULT,
+};
+
+const FieldFuncKind = enum(u8) {
+    GET,
+    GET_PTR,
+    GET_CONST_PTR,
+    SET,
+};
+
+const FuncKind = enum(u8) {
+    GET,
+    GET_PTR,
+    GET_CONST_PTR,
+    SET,
+    SWAP,
+    GREATER_THAN,
+    GREATER_THAN_OR_EQUAL,
+    LESS_THAN,
+    LESS_THAN_OR_EQUAL,
+    ORDER_EQUALS,
+    EXACT_EQUALS,
+};
+
+const FUNC_FLAG_INT = u32;
+const F = struct {
+    const GET: FUNC_FLAG_INT = 1 << 0;
+    const GET_PTR: FUNC_FLAG_INT = 1 << 1;
+    const GET_CONST_PTR: FUNC_FLAG_INT = 1 << 2;
+    const SET: FUNC_FLAG_INT = 1 << 3;
+    const SWAP: FUNC_FLAG_INT = 1 << 4;
+    const GREATER_THAN: FUNC_FLAG_INT = 1 << 5;
+    const GREATER_THAN_OR_EQUAL: FUNC_FLAG_INT = 1 << 6;
+    const LESS_THAN: FUNC_FLAG_INT = 1 << 7;
+    const LESS_THAN_OR_EQUAL: FUNC_FLAG_INT = 1 << 8;
+    const ORDER_EQUALS: FUNC_FLAG_INT = 1 << 9;
+    const EXACT_EQUALS: FUNC_FLAG_INT = 1 << 10;
+};
+const FuncFlags = struct {
+    flags: FUNC_FLAG_INT = 0,
+
+    fn add_if_not_null(flags: *FuncFlags, flag: FUNC_FLAG_INT, not_null: anytype) void {
+        if (not_null != null) {
+            flags.flags |= flag;
+        }
+    }
+
+    fn has_all(flags: FuncFlags, flag: FUNC_FLAG_INT) bool {
+        return (flags & flag) == flag;
+    }
+    fn has_any(flags: FuncFlags, flag: FUNC_FLAG_INT) bool {
+        return (flags & flag) > 0;
+    }
+    fn has_none(flags: FuncFlags, flag: FUNC_FLAG_INT) bool {
+        return (flags & flag) == 0;
+    }
+};
+const INFER = struct {
+    const GET_FROM_CONST_PTR = F.GET_CONST_PTR;
+    const GET_FROM_PTR = F.GET_PTR;
+    const CONST_PTR_FROM_PTR = F.GET_PTR;
+    const SET_FROM_PTR = F.GET_PTR;
+    const SWAP_FROM_PTR = F.GET_PTR;
+    const SWAP_FROM_GET_SET = F.GET | F.SET;
+    const GT_FROM_LTEQ = F.LESS_THAN_OR_EQUAL;
+    const GT_FROM_LT_EQ = F.LESS_THAN | F.EXACT_EQUALS;
+    const GT_FROM_LT_OQ = F.LESS_THAN | F.ORDER_EQUALS;
+    const LT_FROM_GTEQ = F.GREATER_THAN_OR_EQUAL;
+    const LT_FROM_GT_EQ = F.GREATER_THAN | F.EXACT_EQUALS;
+    const LT_FROM_GT_OQ = F.GREATER_THAN | F.ORDER_EQUALS;
+    const EQOQ_FROM_GT_LT = F.GREATER_THAN | F.LESS_THAN;
+    const OQ_FROM_EQ = F.EXACT_EQUALS;
+    const EQ_FROM_OQ = F.ORDER_EQUALS;
+    const GTEQ_FROM_LT = F.LESS_THAN;
+    const GTEQ_FROM_GT_EQ = F.GREATER_THAN | F.EXACT_EQUALS;
+    const GTEQ_FROM_GT_OQ = F.GREATER_THAN | F.ORDER_EQUALS;
+    const LTEQ_FROM_GT = F.GREATER_THAN;
+    const LTEQ_FROM_LT_EQ = F.LESS_THAN | F.EXACT_EQUALS;
+    const LTEQ_FROM_LT_OQ = F.LESS_THAN | F.ORDER_EQUALS;
+};
+const CATEGORY = struct {
+    const GET_SET = F.GET | F.GET_CONST_PTR | F.GET_PTR | F.SET;
+    const COMPARE_ORDER = F.LESS_THAN | F.LESS_THAN_OR_EQUAL | F.GREATER_THAN | F.GREATER_THAN_OR_EQUAL | F.ORDER_EQUALS;
+};
+
+const FieldFuncSourceTracker = struct {
+    MAIN: *const MainFuncSourceTracker,
+    NAME: []const u8 = "",
+    GET: FuncSource = .DEFAULT,
+    GET_PTR: FuncSource = .DEFAULT,
+    GET_CONST_PTR: FuncSource = .DEFAULT,
+    SET: FuncSource = .DEFAULT,
+
+    pub fn new(comptime name: []const u8, comptime main: *const MainFuncSourceTracker) FieldFuncSourceTracker {
+        return FieldFuncSourceTracker{
+            .NAME = name,
+            .MAIN = main,
+        };
+    }
+
+    pub fn has(comptime track: FieldFuncSourceTracker, comptime custom: FieldFuncKind) bool {
+        return @field(track, @tagName(custom)) == .CUSTOM;
+    }
+
+    pub fn has_all(comptime track: FieldFuncSourceTracker, comptime provided_funcs: []const FieldFuncKind) bool {
+        inline for (provided_funcs) |provided_fn| {
+            if (@field(track, @tagName(provided_fn)) != .CUSTOM) return false;
+        }
+        return true;
+    }
+};
+
+const MainFuncSourceTracker = struct {
+    GET: FuncSource = .DEFAULT,
+    GET_PTR: FuncSource = .DEFAULT,
+    GET_CONST_PTR: FuncSource = .DEFAULT,
+    SET: FuncSource = .DEFAULT,
+    SWAP: FuncSource = .DEFAULT,
+    GREATER_THAN: FuncSource = .DEFAULT,
+    GREATER_THAN_OR_EQUAL: FuncSource = .DEFAULT,
+    LESS_THAN: FuncSource = .DEFAULT,
+    LESS_THAN_OR_EQUAL: FuncSource = .DEFAULT,
+    ORDER_EQUALS: FuncSource = .DEFAULT,
+    EXACT_EQUALS: FuncSource = .DEFAULT,
+
+    pub fn new() MainFuncSourceTracker {
+        return MainFuncSourceTracker{};
+    }
+
+    pub fn has(comptime track: MainFuncSourceTracker, comptime custom: FuncKind) bool {
+        return @field(track, @tagName(custom)) == .CUSTOM;
+    }
+
+    pub fn has_all(comptime track: MainFuncSourceTracker, comptime provided_funcs: []const FuncKind) bool {
+        inline for (provided_funcs) |provided_fn| {
+            if (@field(track, @tagName(provided_fn)) != .CUSTOM) return false;
+        }
+        return true;
+    }
+};
 
 pub const DataManipulationPackage = struct {
     DATA: type = undefined,
@@ -200,22 +351,34 @@ pub const DataManipulationPackage = struct {
             pub const IDX_ = DEF_.IDX;
             pub const USERDATA_ = DEF_.USERDATA;
 
-            pub const Getter_ = GetFn(DATA_, IDX_, ELEM_, USERDATA_);
-            pub const PtrGetter_ = GetPtrFn(DATA_, IDX_, ELEM_, USERDATA_);
-            pub const ConstPtrGetter_ = GetConstPtrFn(DATA_, IDX_, ELEM_, USERDATA_);
-            pub const FieldGetter_ = GetFieldFn(DATA_, IDX_, ELEM_, TYPE_FOR_FIELD, USERDATA_);
-            pub const FieldPtrGetter_ = GetFieldPtrFn(DATA_, IDX_, ELEM_, TYPE_FOR_FIELD, USERDATA_);
-            pub const Setter_ = SetFn(DATA_, IDX_, ELEM_, USERDATA_);
-            pub const FieldSetter_ = SetFieldFn(DATA_, IDX_, ELEM_, TYPE_FOR_FIELD, USERDATA_);
-            pub const Swapper_ = SwapFn(DATA_, IDX_, USERDATA_);
-            pub const Comparer_ = CompareFn(ELEM_, ELEM_, USERDATA_);
-
-            pub const FieldInfo_ = Types.extract_struct_union_or_dummy_field_info(ELEM_);
-            const TYPE_FOR_FIELD: fn (comptime INFO: @TypeOf(FieldInfo_), comptime field: []const u8) type = FieldInfo_.type_for_field;
-            pub fn TypeForField(comptime field: []const u8) type {
-                return FieldInfo_.type_for_field(field);
+            pub const Getter = GetFn(DATA_, IDX_, ELEM_, USERDATA_);
+            pub const PtrGetter = GetPtrFn(DATA_, IDX_, ELEM_, USERDATA_);
+            pub const ConstPtrGetter = GetConstPtrFn(DATA_, IDX_, ELEM_, USERDATA_);
+            pub fn FieldGetter(comptime F: type) type {
+                return GetFn(DATA_, IDX_, F, USERDATA_);
             }
-            const FieldInfoAsStructInfo_: Types.StructInfo(FieldInfo_.field_names.len) = FieldInfo_.as_struct_info();
+            pub fn FieldPtrGetter(comptime F: type) type {
+                return GetPtrFn(DATA_, IDX_, F, USERDATA_);
+            }
+            pub fn FieldConstPtrGetter(comptime F: type) type {
+                return GetConstPtrFn(DATA_, IDX_, F, USERDATA_);
+            }
+            pub const Setter = SetFn(DATA_, IDX_, ELEM_, USERDATA_);
+            pub fn FieldSetter(comptime F: type) type {
+                return SetFn(DATA_, IDX_, F, USERDATA_);
+            }
+            pub const Swapper = SwapFn(DATA_, IDX_, USERDATA_);
+            pub const Comparer = CompareFn(ELEM_, ELEM_, USERDATA_);
+            pub const InnateIndexer = InnateIndexFn(IDX_, USERDATA_);
+            pub const Indexer = IndexFn(IDX_, USERDATA_);
+
+            pub const FieldInfo = Types.extract_struct_union_or_dummy_field_info(ELEM_);
+            const TYPE_FOR_FIELD: fn (comptime INFO: @TypeOf(FieldInfo), comptime field: []const u8) type = FieldInfo.type_for_field;
+            pub fn TypeForField(comptime field: []const u8) type {
+                return FieldInfo.type_for_field(field);
+            }
+            const FieldInfoAsStructInfo_: Types.StructInfo(FieldInfo.field_names.len) = FieldInfo.as_struct_info();
+
             const FieldGettersStructInfo = make: {
                 const getters = FieldInfoAsStructInfo_;
                 for (getters.field_names, getters.field_types, getters.field_attrs) |NAME, *FT, *ATTR| {
@@ -223,11 +386,25 @@ pub const DataManipulationPackage = struct {
                     FT.* = PROTO.GetFieldFn;
                     ATTR.@"align" = @alignOf(PROTO.GetFieldFn);
                     ATTR.@"comptime" = false;
-                    ATTR.default_value_ptr = &PROTO.get_field;
+                    ATTR.default_value_ptr = @ptrCast(&PROTO.get_field);
                 }
                 break :make getters;
             };
             pub const FieldGetters = FieldGettersStructInfo.build_struct_type();
+
+            const FieldCustomGettersStructInfo = make: {
+                const getters = FieldInfoAsStructInfo_;
+                for (getters.field_names, getters.field_types, getters.field_attrs) |NAME, *FT, *ATTR| {
+                    const PROTO = Utils.Mem.get_field_concrete_proto(DATA_, ELEM_, NAME, FT.*, .VAL, IDX_);
+                    FT.* = PROTO.OptGetFieldFn;
+                    ATTR.@"align" = @alignOf(PROTO.OptGetFieldFn);
+                    ATTR.@"comptime" = false;
+                    ATTR.default_value_ptr = @ptrCast(&null);
+                }
+                break :make getters;
+            };
+            pub const FieldCustomGetters = FieldCustomGettersStructInfo.build_struct_type();
+
             const FieldPtrGettersStructInfo = make: {
                 const getters = FieldInfoAsStructInfo_;
                 for (getters.field_names, getters.field_types, getters.field_attrs) |NAME, *FT, *ATTR| {
@@ -240,6 +417,20 @@ pub const DataManipulationPackage = struct {
                 break :make getters;
             };
             pub const FieldPtrGetters = FieldPtrGettersStructInfo.build_struct_type();
+
+            const FieldOptPtrGettersStructInfo = make: {
+                const getters = FieldInfoAsStructInfo_;
+                for (getters.field_names, getters.field_types, getters.field_attrs) |NAME, *FT, *ATTR| {
+                    const PROTO = Utils.Mem.get_field_concrete_proto(DATA_, ELEM_, NAME, FT.*, .PTR, IDX_);
+                    FT.* = PROTO.OptGetFieldFn;
+                    ATTR.@"align" = @alignOf(PROTO.OptGetFieldFn);
+                    ATTR.@"comptime" = false;
+                    ATTR.default_value_ptr = @ptrCast(&null);
+                }
+                break :make getters;
+            };
+            pub const FieldCustomPtrGetters = FieldOptPtrGettersStructInfo.build_struct_type();
+
             const FieldConstPtrGettersStructInfo = make: {
                 const getters = FieldInfoAsStructInfo_;
                 for (getters.field_names, getters.field_types, getters.field_attrs) |NAME, *FT, *ATTR| {
@@ -251,7 +442,21 @@ pub const DataManipulationPackage = struct {
                 }
                 break :make getters;
             };
-            pub const FieldConstPtrGetters = FieldPtrGettersStructInfo.build_struct_type();
+            pub const FieldConstPtrGetters = FieldConstPtrGettersStructInfo.build_struct_type();
+
+            const FieldOptConstPtrGettersStructInfo = make: {
+                const getters = FieldInfoAsStructInfo_;
+                for (getters.field_names, getters.field_types, getters.field_attrs) |NAME, *FT, *ATTR| {
+                    const PROTO = Utils.Mem.get_field_concrete_proto(DATA_, ELEM_, NAME, FT.*, .CONST_PTR, IDX_);
+                    FT.* = PROTO.OptGetFieldFn;
+                    ATTR.@"align" = @alignOf(PROTO.OptGetFieldFn);
+                    ATTR.@"comptime" = false;
+                    ATTR.default_value_ptr = @ptrCast(&null);
+                }
+                break :make getters;
+            };
+            pub const FieldCustomConstPtrGetters = FieldOptConstPtrGettersStructInfo.build_struct_type();
+
             const FieldSettersStructInfo = make: {
                 const setters = FieldInfoAsStructInfo_;
                 for (setters.field_names, setters.field_types, setters.field_attrs) |NAME, *TYPE, *ATTR| {
@@ -265,21 +470,55 @@ pub const DataManipulationPackage = struct {
             };
             pub const FieldSetters = FieldSettersStructInfo.build_struct_type();
 
-            GET: Getter_ = default_get,
-            GET_PTR: PtrGetter_ = default_get_ptr,
-            GET_CONST_PTR: ConstPtrGetter_ = default_get_const_ptr,
+            const FieldOptSettersStructInfo = make: {
+                const setters = FieldInfoAsStructInfo_;
+                for (setters.field_names, setters.field_types, setters.field_attrs) |NAME, *TYPE, *ATTR| {
+                    const PROTO = Utils.Mem.set_field_concrete_proto(DATA_, ELEM_, NAME, TYPE.*, .VAL, IDX_);
+                    TYPE.* = PROTO.OptSetFieldFn;
+                    ATTR.@"align" = @alignOf(PROTO.OptSetFieldFn);
+                    ATTR.@"comptime" = false;
+                    ATTR.default_value_ptr = @ptrCast(&null);
+                }
+                break :make setters;
+            };
+            pub const FieldCustomSetters = FieldOptSettersStructInfo.build_struct_type();
+
+            const FieldFlagsStructInfo = make: {
+                const flags_info = FieldInfoAsStructInfo_;
+                for (flags_info.field_types, flags_info.field_attrs) |*TYPE, *ATTR| {
+                    TYPE.* = FuncFlags;
+                    ATTR.@"align" = @alignOf(FuncFlags);
+                    ATTR.@"comptime" = false;
+                    ATTR.default_value_ptr = @ptrCast(&FuncFlags{});
+                }
+                break :make flags_info;
+            };
+            pub const FieldFlags = FieldFlagsStructInfo.build_struct_type();
+
+            FIRST_IDX: InnateIndexer = default_first_index,
+            LAST_INDEX = InnateIndexer = 
+            GET: Getter = default_get,
+            GET_PTR: PtrGetter = default_get_ptr,
+            GET_CONST_PTR: ConstPtrGetter = default_get_const_ptr,
             GET_FIELD: FieldGetters = .{},
             GET_FIELD_PTR: FieldPtrGetters = .{},
             GET_FIELD_CONST_PTR: FieldConstPtrGetters = .{},
-            SET: Setter_ = default_set,
+            SET: Setter = default_set,
             SET_FIELD: FieldSetters = .{},
-            SWAP: Swapper_ = default_swap,
-            GREATER_THAN: Comparer_ = default_greater_than,
-            GREATER_THAN_OR_EQUAL: Comparer_ = default_greater_than_or_equal,
-            LESS_THAN: Comparer_ = default_less_than,
-            LESS_THAN_OR_EQUAL: Comparer_ = default_less_than_or_equal,
-            ORDER_EQUALS: Comparer_ = default_equals,
-            EXACT_EQUALS: Comparer_ = default_equals,
+            SWAP: Swapper = default_swap,
+            GREATER_THAN: Comparer = default_greater_than,
+            GREATER_THAN_OR_EQUAL: Comparer = default_greater_than_or_equal,
+            LESS_THAN: Comparer = default_less_than,
+            LESS_THAN_OR_EQUAL: Comparer = default_less_than_or_equal,
+            ORDER_EQUALS: Comparer = default_equals,
+            EXACT_EQUALS: Comparer = default_equals,
+
+            fn default_first_index(_: USERDATA_) IDX_ {
+                return 0;
+            }
+            fn default_last_index(_: USERDATA_) IDX_ {
+                return Utils.Mem.
+            }
 
             fn default_get(data: DATA_, idx: IDX_, _: USERDATA_) ELEM_ {
                 return Utils.Mem.get(ELEM_, data, idx);
@@ -312,67 +551,409 @@ pub const DataManipulationPackage = struct {
                 return Utils.Compare.shallow_equals(val_a, val_b);
             }
 
-            pub const CustomDataTransferFuncs = struct {
-                GET: ?Getter_ = null,
-                GET_PTR: ?PtrGetter_ = null,
-                GET_PTR_CONST: ?ConstPtrGetter_ = null,
-                SET: ?Setter_ = null,
-                SWAP: ?Swapper_ = null,
+            pub const CustomDataFuncs = struct {
+                GET: ?Getter = null,
+                GET_PTR: ?PtrGetter = null,
+                GET_PTR_CONST: ?ConstPtrGetter = null,
+                SET: ?Setter = null,
+                FIELD_GET: FieldCustomGetters = .{},
+                FIELD_GET_PTR: FieldCustomPtrGetters = .{},
+                FIELD_GET_CONST_PTR: FieldCustomConstPtrGetters = .{},
+                FIELD_SET: FieldCustomSetters = .{},
+                SWAP: ?Swapper = null,
+                LESS_THAN: ?Comparer = null,
+                LESS_THAN_OR_EQUAL: ?Comparer = null,
+                GREATER_THAN: ?Comparer = null,
+                GREATER_THAN_OR_EQUAL: ?Comparer = null,
+                ORDER_EQUALS: ?Comparer = null,
+                EXACT_EQUALS: ?Comparer = null,
             };
 
-            pub fn with_custom_data_transfer(comptime FUNCS: @This(), comptime custom: CustomDataTransferFuncs) @This() {
+            pub fn with_custom_functions(comptime FUNCS: @This(), comptime ALLOW_DEFAULT: bool, comptime func: CustomDataFuncs) type {
+                //********
+                // BUILD FLAGS FOR PROVIDED CUSTOM FUNCTIONS
+                //********
+                comptime var FLAGS = FuncFlags{};
+                comptime var FIELD_FLAGS = FieldFlags{};
+                inline for (@typeInfo(F).@"struct".decls) |FNN| {
+                    const FN_NAME = FNN.name;
+                    if (comptime std.mem.eql(u8, FN_NAME, "FIELD_GET") or std.mem.eql(u8, FN_NAME, "FIELD_GET_PTR") or std.mem.eql(u8, FN_NAME, "FIELD_GET_CONST_PTR") or std.mem.eql(u8, FN_NAME, "FIELD_SET")) continue;
+                    FLAGS.add_if_not_null(@field(F, FN_NAME), @field(func, FN_NAME));
+                }
+                inline for (FieldInfoAsStructInfo_.field_names[0..]) |field_name| {
+                    @field(&FIELD_FLAGS, field_name).add_if_not_null(F.GET, @field(func.FIELD_GET, field_name));
+                    @field(&FIELD_FLAGS, field_name).add_if_not_null(F.GET_PTR, @field(func.FIELD_GET_PTR, field_name));
+                    @field(&FIELD_FLAGS, field_name).add_if_not_null(F.GET_CONST_PTR, @field(func.FIELD_GET_CONST_PTR, field_name));
+                    @field(&FIELD_FLAGS, field_name).add_if_not_null(F.SET, @field(func.FIELD_SET, field_name));
+                }
+                //********
+                // FUNCTION PROTOTYPE SELECTORS
+                //********
                 const PROTO = struct {
-                    fn infer_get(data: DATA_, idx: IDX_, userdata: USERDATA_) ELEM_ {
-                        if (comptime custom.GET_PTR_CONST) |get_cnst_ptr| {
-                            return get_cnst_ptr(data, idx, userdata).*;
-                        } else if (comptime custom.GET_PTR) |get_ptr| {
-                            return get_ptr(data, idx, userdata).*;
-                        } else {
-                            unreachable;
+                    const GET = struct {
+                        const cust = func.GET;
+                        fn infer_ptr(data: DATA_, idx: IDX_, userdata: USERDATA_) ELEM_ {
+                            return func.GET_PTR.?(data, idx, userdata).*;
                         }
-                    }
-                    fn infer_get_ptr(_: DATA_, _: IDX_, _: USERDATA_) *ELEM_ {
-                        unreachable;
-                    }
-                    fn infer_get_ptr_const(data: DATA_, idx: IDX_, userdata: USERDATA_) *const ELEM_ {
-                        if (comptime custom.GET_PTR) |get_ptr| {
-                            return get_ptr(data, idx, userdata).*;
-                        } else {
-                            unreachable;
+                        fn infer_const_ptr(data: DATA_, idx: IDX_, userdata: USERDATA_) ELEM_ {
+                            return func.GET_PTR_CONST.?(data, idx, userdata).*;
                         }
-                    }
-                    fn infer_set(data: DATA_, idx: IDX_, val: ELEM_, userdata: USERDATA_) DATA_ {
-                        if (comptime custom.GET_PTR) |get_ptr| {
-                            get_ptr(data, idx, userdata).* = val;
+                        fn unusable(_: DATA_, _: IDX_, _: USERDATA_) ELEM_ {
+                            assert_unreachable(@src(), "no `get` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
+                        }
+                        fn select(comptime FLAGS_: FuncFlags) Getter {
+                            comptime {
+                                if (FLAGS_.has_all(F.GET)) return cust.?;
+                                if (FLAGS_.has_all(INFER.GET_FROM_PTR)) return infer_ptr;
+                                if (FLAGS_.has_all(INFER.GET_FROM_CONST_PTR)) return infer_const_ptr;
+                                return if (ALLOW_DEFAULT) default_get else unusable;
+                            }
+                        }
+                    };
+                    const GET_PTR = struct {
+                        const cust = func.GET_PTR;
+                        fn unusable(_: DATA_, _: IDX_, _: USERDATA_) *ELEM_ {
+                            assert_unreachable(@src(), "no `get_ptr` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
+                        }
+                        fn select(comptime FLAGS_: FuncFlags) PtrGetter {
+                            comptime {
+                                if (FLAGS_.has_all(F.GET_PTR)) return cust.?;
+                                return if (ALLOW_DEFAULT) default_get_ptr else unusable;
+                            }
+                        }
+                    };
+                    const GET_CONST_PTR = struct {
+                        const cust = func.GET_PTR_CONST;
+                        fn infer_ptr(data: DATA_, idx: IDX_, userdata: USERDATA_) *const ELEM_ {
+                            return func.GET_PTR.?(data, idx, userdata);
+                        }
+                        fn unusable(_: DATA_, _: IDX_, _: USERDATA_) *const ELEM_ {
+                            assert_unreachable(@src(), "no `get_const_ptr` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
+                        }
+                        fn select(comptime FLAGS_: FuncFlags) ConstPtrGetter {
+                            comptime {
+                                if (FLAGS_.has_all(F.GET_CONST_PTR)) return cust.?;
+                                if (FLAGS_.has_all(INFER.CONST_PTR_FROM_PTR)) return infer_ptr;
+                                return if (ALLOW_DEFAULT) default_get_const_ptr else unusable;
+                            }
+                        }
+                    };
+                    const SET = struct {
+                        const cust = func.SET;
+                        fn infer_ptr(data: DATA_, idx: IDX_, val: ELEM_, userdata: USERDATA_) DATA_ {
+                            func.GET_PTR.?(data, idx, userdata).* = val;
                             return data;
-                        } else {
-                            unreachable;
                         }
-                    }
-                    fn infer_swap(data: DATA_, idx_a: IDX_, idx_b: IDX_, userdata: USERDATA_) DATA_ {
-                        const GET = if (comptime custom.GET) |GET| GET else infer_get;
-                        const SET = if (comptime custom.SET) |SET| SET else infer_set;
-                        const tmp = GET(data, idx_b, userdata);
-                        const new_data = SET(data, idx_b, GET(data, idx_a, userdata), userdata);
-                        return SET(new_data, idx_a, tmp, userdata);
-                    }
-                };
+                        fn unusable(_: DATA_, _: IDX_, _: ELEM_, _: USERDATA_) DATA_ {
+                            assert_unreachable(@src(), "no `set` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
+                        }
+                        fn select(comptime FLAGS_: FuncFlags) Setter {
+                            comptime {
+                                if (FLAGS_.has_all(F.SET)) return cust.?;
+                                if (FLAGS_.has_all(INFER.SET_FROM_PTR)) return infer_ptr;
+                                return if (ALLOW_DEFAULT) default_set else unusable;
+                            }
+                        }
+                    };
+                    const SWAP = struct {
+                        const cust = func.SWAP;
+                        fn infer_ptr(data: DATA_, idx_a: IDX_, idx_b: IDX_, userdata: USERDATA_) DATA_ {
+                            const GET_PTR: PtrGetter = comptime P_GET_PTR.select(FLAGS);
+                            const ptr_a = GET_PTR(data, idx_a, userdata);
+                            const ptr_b = GET_PTR(data, idx_b, userdata);
+                            const tmp = ptr_b.*;
+                            ptr_b.* = ptr_a.*;
+                            ptr_a.* = tmp;
+                            return data;
+                        }
+                        fn infer_get_set(data: DATA_, idx_a: IDX_, idx_b: IDX_, userdata: USERDATA_) DATA_ {
+                            const GET: Getter = comptime P_GET.select(FLAGS);
+                            const SET: Setter = comptime P_SET.select(FLAGS);
+                            const tmp = GET(data, idx_b, userdata);
+                            const data_2 = SET(data, idx_b, GET(data, idx_a, userdata), userdata);
+                            return SET(data_2, idx_a, tmp, userdata);
+                        }
+                        fn unusable(_: DATA_, _: IDX_, _: USERDATA_) ELEM_ {
+                            assert_unreachable(@src(), "no `swap` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
+                        }
+                        fn select(comptime FLAGS_: FuncFlags) Swapper {
+                            comptime {
+                                if (FLAGS_.has_all(F.SWAP)) return cust.?;
+                                if (FLAGS_.has_all(INFER.SWAP_FROM_PTR)) return infer_ptr;
+                                if (FLAGS_.has_all(INFER.SWAP_FROM_GET_SET)) return infer_get_set;
+                                return if (ALLOW_DEFAULT) default_swap else unusable;
+                            }
+                        }
+                    };
+                    const LESS_THAN = struct {
+                        const cust = func.LESS_THAN;
+                        fn infer_gteq(val_a: ELEM_, val_b: ELEM_, userdata: USERDATA_) bool {
+                            const GTEQ: Comparer = comptime GREATER_THAN_OR_EQUAL.select(FLAGS);
+                            return !GTEQ(val_a, val_b, userdata);
+                        }
+                        fn infer_gt_eq(val_a: ELEM_, val_b: ELEM_, userdata: USERDATA_) bool {
+                            const GT: Comparer = comptime GREATER_THAN.select(FLAGS);
+                            const EQ: Comparer = comptime EXACT_EQUAL.select(FLAGS);
+                            return !GT(val_a, val_b, userdata) and !EQ(val_a, val_b, userdata);
+                        }
+                        fn infer_gt_oq(val_a: ELEM_, val_b: ELEM_, userdata: USERDATA_) bool {
+                            const GT: Comparer = comptime GREATER_THAN.select(FLAGS);
+                            const OQ: Comparer = comptime ORDER_EQUAL.select(FLAGS);
+                            return !GT(val_a, val_b, userdata) and !OQ(val_a, val_b, userdata);
+                        }
+                        fn unusable(_: ELEM_, _: ELEM_, _: USERDATA_) bool {
+                            assert_unreachable(@src(), "no `less_than` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
+                        }
+                        fn select(comptime FLAGS_: FuncFlags) Comparer {
+                            comptime {
+                                if (FLAGS_.has_all(F.LESS_THAN)) return cust.?;
+                                if (FLAGS_.has_all(INFER.LT_FROM_GTEQ)) return infer_gteq;
+                                if (FLAGS_.has_all(INFER.LT_FROM_GT_OQ)) return infer_gt_oq;
+                                if (FLAGS_.has_all(INFER.LT_FROM_GT_EQ)) return infer_gt_eq;
+                                return if (ALLOW_DEFAULT) default_less_than else unusable;
+                            }
+                        }
+                    };
+                    const LESS_THAN_OR_EQUAL = struct {
+                        const cust = func.LESS_THAN_OR_EQUAL;
+                        fn infer_gt(val_a: ELEM_, val_b: ELEM_, userdata: USERDATA_) bool {
+                            const GT: Comparer = comptime GREATER_THAN.select(FLAGS);
+                            return !GT(val_a, val_b, userdata);
+                        }
+                        fn infer_lt_eq(val_a: ELEM_, val_b: ELEM_, userdata: USERDATA_) bool {
+                            const LT: Comparer = comptime LESS_THAN.select(FLAGS);
+                            const EQ: Comparer = comptime EXACT_EQUAL.select(FLAGS);
+                            return LT(val_a, val_b, userdata) or EQ(val_a, val_b, userdata);
+                        }
+                        fn infer_lt_oq(val_a: ELEM_, val_b: ELEM_, userdata: USERDATA_) bool {
+                            const LT: Comparer = comptime LESS_THAN.select(FLAGS);
+                            const OQ: Comparer = comptime ORDER_EQUAL.select(FLAGS);
+                            return LT(val_a, val_b, userdata) or OQ(val_a, val_b, userdata);
+                        }
+                        fn unusable(_: ELEM_, _: ELEM_, _: USERDATA_) bool {
+                            assert_unreachable(@src(), "no `less_than` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
+                        }
+                        fn select(comptime FLAGS_: FuncFlags) Comparer {
+                            comptime {
+                                if (FLAGS_.has_all(F.LESS_THAN_OR_EQUAL)) return cust.?;
+                                if (FLAGS_.has_all(INFER.LTEQ_FROM_GT)) return infer_gt;
+                                if (FLAGS_.has_all(INFER.LTEQ_FROM_LT_OQ)) return infer_lt_oq;
+                                if (FLAGS_.has_all(INFER.LTEQ_FROM_LT_EQ)) return infer_lt_eq;
+                                return if (ALLOW_DEFAULT) default_less_than_or_equal else unusable;
+                            }
+                        }
+                    };
+                    const GREATER_THAN = struct {
+                        const cust = func.LESS_THAN;
+                        fn infer_gteq(data: DATA_, idx_a: IDX_, idx_b: IDX_, userdata: USERDATA_) DATA_ {
+                            const GET_PTR: PtrGetter = comptime P_GET_PTR.select(FLAGS);
+                            const ptr_a = GET_PTR(data, idx_a, userdata);
+                            const ptr_b = GET_PTR(data, idx_b, userdata);
+                            const tmp = ptr_b.*;
+                            ptr_b.* = ptr_a.*;
+                            ptr_a.* = tmp;
+                            return data;
+                        }
+                        fn infer_get_set(data: DATA_, idx_a: IDX_, idx_b: IDX_, userdata: USERDATA_) DATA_ {
+                            const GET: Getter = comptime P_GET.select(FLAGS);
+                            const SET: Setter = comptime P_SET.select(FLAGS);
+                            const tmp = GET(data, idx_b, userdata);
+                            const data_2 = SET(data, idx_b, GET(data, idx_a, userdata), userdata);
+                            return SET(data_2, idx_a, tmp, userdata);
+                        }
+                        fn unusable(_: DATA_, _: IDX_, _: USERDATA_) ELEM_ {
+                            assert_unreachable(@src(), "no `swap` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
+                        }
+                        fn select(comptime FLAGS_: FuncFlags) Comparer {
+                            comptime {
+                                if (FLAGS_.has_all(F.LESS_THAN)) return cust.?;
+                                if (FLAGS_.has_all(INFER.LT_FROM_GTEQ)) return infer_ptr;
+                                if (FLAGS_.has_all(INFER.SWAP_FROM_GET_SET)) return infer_get_set;
+                                return if (ALLOW_DEFAULT) default_swap else unusable;
+                            }
+                        }
+                    };
+                    const GREATER_THAN_OR_EQUAL = struct {
+                        const cust = func.LESS_THAN;
+                        fn infer_gteq(data: DATA_, idx_a: IDX_, idx_b: IDX_, userdata: USERDATA_) DATA_ {
+                            const GET_PTR: PtrGetter = comptime P_GET_PTR.select(FLAGS);
+                            const ptr_a = GET_PTR(data, idx_a, userdata);
+                            const ptr_b = GET_PTR(data, idx_b, userdata);
+                            const tmp = ptr_b.*;
+                            ptr_b.* = ptr_a.*;
+                            ptr_a.* = tmp;
+                            return data;
+                        }
+                        fn infer_get_set(data: DATA_, idx_a: IDX_, idx_b: IDX_, userdata: USERDATA_) DATA_ {
+                            const GET: Getter = comptime P_GET.select(FLAGS);
+                            const SET: Setter = comptime P_SET.select(FLAGS);
+                            const tmp = GET(data, idx_b, userdata);
+                            const data_2 = SET(data, idx_b, GET(data, idx_a, userdata), userdata);
+                            return SET(data_2, idx_a, tmp, userdata);
+                        }
+                        fn unusable(_: DATA_, _: IDX_, _: USERDATA_) ELEM_ {
+                            assert_unreachable(@src(), "no `swap` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
+                        }
+                        fn select(comptime FLAGS_: FuncFlags) Comparer {
+                            comptime {
+                                if (FLAGS_.has_all(F.LESS_THAN)) return cust.?;
+                                if (FLAGS_.has_all(INFER.LT_FROM_GTEQ)) return infer_ptr;
+                                if (FLAGS_.has_all(INFER.SWAP_FROM_GET_SET)) return infer_get_set;
+                                return if (ALLOW_DEFAULT) default_swap else unusable;
+                            }
+                        }
+                    };
+                    const ORDER_EQUAL = struct {
+                        const cust = func.LESS_THAN;
+                        fn infer_gteq(data: DATA_, idx_a: IDX_, idx_b: IDX_, userdata: USERDATA_) DATA_ {
+                            const GET_PTR: PtrGetter = comptime P_GET_PTR.select(FLAGS);
+                            const ptr_a = GET_PTR(data, idx_a, userdata);
+                            const ptr_b = GET_PTR(data, idx_b, userdata);
+                            const tmp = ptr_b.*;
+                            ptr_b.* = ptr_a.*;
+                            ptr_a.* = tmp;
+                            return data;
+                        }
+                        fn infer_get_set(data: DATA_, idx_a: IDX_, idx_b: IDX_, userdata: USERDATA_) DATA_ {
+                            const GET: Getter = comptime P_GET.select(FLAGS);
+                            const SET: Setter = comptime P_SET.select(FLAGS);
+                            const tmp = GET(data, idx_b, userdata);
+                            const data_2 = SET(data, idx_b, GET(data, idx_a, userdata), userdata);
+                            return SET(data_2, idx_a, tmp, userdata);
+                        }
+                        fn unusable(_: DATA_, _: IDX_, _: USERDATA_) ELEM_ {
+                            assert_unreachable(@src(), "no `swap` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
+                        }
+                        fn select(comptime FLAGS_: FuncFlags) Comparer {
+                            comptime {
+                                if (FLAGS_.has_all(F.LESS_THAN)) return cust.?;
+                                if (FLAGS_.has_all(INFER.LT_FROM_GTEQ)) return infer_ptr;
+                                if (FLAGS_.has_all(INFER.SWAP_FROM_GET_SET)) return infer_get_set;
+                                return if (ALLOW_DEFAULT) default_swap else unusable;
+                            }
+                        }
+                    };
+                    const EXACT_EQUAL = struct {
+                        const cust = func.LESS_THAN;
+                        fn infer_gteq(data: DATA_, idx_a: IDX_, idx_b: IDX_, userdata: USERDATA_) DATA_ {
+                            const GET_PTR: PtrGetter = comptime P_GET_PTR.select(FLAGS);
+                            const ptr_a = GET_PTR(data, idx_a, userdata);
+                            const ptr_b = GET_PTR(data, idx_b, userdata);
+                            const tmp = ptr_b.*;
+                            ptr_b.* = ptr_a.*;
+                            ptr_a.* = tmp;
+                            return data;
+                        }
+                        fn infer_get_set(data: DATA_, idx_a: IDX_, idx_b: IDX_, userdata: USERDATA_) DATA_ {
+                            const GET: Getter = comptime P_GET.select(FLAGS);
+                            const SET: Setter = comptime P_SET.select(FLAGS);
+                            const tmp = GET(data, idx_b, userdata);
+                            const data_2 = SET(data, idx_b, GET(data, idx_a, userdata), userdata);
+                            return SET(data_2, idx_a, tmp, userdata);
+                        }
+                        fn unusable(_: DATA_, _: IDX_, _: USERDATA_) ELEM_ {
+                            assert_unreachable(@src(), "no `swap` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
+                        }
+                        fn select(comptime FLAGS_: FuncFlags) Comparer {
+                            comptime {
+                                if (FLAGS_.has_all(F.LESS_THAN)) return cust.?;
+                                if (FLAGS_.has_all(INFER.LT_FROM_GTEQ)) return infer_ptr;
+                                if (FLAGS_.has_all(INFER.SWAP_FROM_GET_SET)) return infer_get_set;
+                                return if (ALLOW_DEFAULT) default_swap else unusable;
+                            }
+                        }
+                    };
+                }
+                //********
+                // SELECT THE CORRECT FUNCTION FOR EACH
+                //********
                 comptime var NEW_FUNCS = FUNCS;
-                NEW_FUNCS.GET = if (custom.GET) |GET| GET else PROTO.infer_get;
-                NEW_FUNCS.GET_PTR = if (custom.GET_PTR) |GET_PTR| GET_PTR else PROTO.infer_get_ptr;
-                NEW_FUNCS.GET_CONST_PTR = if (custom.GET_CONST_PTR) |GET_CONST_PTR| GET_CONST_PTR else PROTO.infer_get_ptr_const;
-                NEW_FUNCS.SET = if (custom.SET) |SET| SET else PROTO.infer_set;
-                NEW_FUNCS.SWAP = if (custom.SWAP) |SWAP| SWAP else PROTO.infer_swap;
+                NEW_FUNCS.GET = comptime PROTO.GET.select(FLAGS);
+                NEW_FUNCS.GET_PTR = comptime PROTO.GET_PTR.select(FLAGS);
+                NEW_FUNCS.GET_CONST_PTR = comptime PROTO.GET_CONST_PTR.select(FLAGS);
+                NEW_FUNCS.SET = comptime PROTO.SET.select(FLAGS);
+                NEW_FUNCS.SWAP = comptime PROTO.SWAP.select(FLAGS);
+                
+                //********
+                // SELECT THE CORRECT FIELD FUNCTION FOR EACH
+                //********
+                inline for (FieldInfoAsStructInfo_.field_names[0..], FieldInfoAsStructInfo_.field_types[0..]) |field_name, field_type| {
+                    const P_F_GET = struct {
+                        const cust = @field(func.FIELD_GET, field_name);
+                        fn infer_ptr(data: DATA_, idx: IDX_, userdata: USERDATA_) field_type {
+                            return @field(func.FIELD_GET_PTR, field_name).?(data, idx, userdata).*;
+                        }
+                        fn infer_const_ptr(data: DATA_, idx: IDX_, userdata: USERDATA_) field_type {
+                            return @field(func.FIELD_GET_CONST_PTR, field_name).?(data, idx, userdata).*;
+                        }
+                        fn unusable(_: DATA_, _: IDX_, _: USERDATA_) field_type {
+                            assert_unreachable(@src(), "no `get field \"{s}\" value` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{field_name});
+                        }
+                        fn select(comptime FLAGS_: FuncFlags) FieldGetter(field_type) {
+                            comptime {
+                                if (FLAGS_.has_all(F.GET)) return cust.?;
+                                if (FLAGS_.has_all(INFER.GET_FROM_PTR)) return infer_ptr;
+                                if (FLAGS_.has_all(INFER.GET_FROM_CONST_PTR)) return infer_const_ptr;
+                                return if (ALLOW_DEFAULT) @field(FieldGetters{}, field_name) else unusable;
+                            }
+                        }
+                    };
+                    @field(NEW_FUNCS.GET_FIELD, field_name) = comptime P_F_GET.select(@field(FIELD_FLAGS, field_name));
+
+                    const P_F_GET_PTR = struct {
+                        const cust = @field(func.FIELD_GET_PTR, field_name);
+                        fn unusable(_: DATA_, _: IDX_, _: USERDATA_) *field_type {
+                            assert_unreachable(@src(), "no `get field \"{s}\" pointer` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{field_name});
+                        }
+                        fn select(comptime FLAGS_: FuncFlags) FieldPtrGetter(field_type) {
+                            comptime {
+                                if (FLAGS_.has_all(F.GET_PTR)) return cust.?;
+                                return if (ALLOW_DEFAULT) @field(FieldPtrGetters{}, field_name) else unusable;
+                            }
+                        }
+                    };
+                    @field(NEW_FUNCS.GET_FIELD_PTR, field_name) = comptime P_F_GET_PTR.select(@field(FIELD_FLAGS, field_name));
+
+                    const P_F_GET_CONST_PTR = struct {
+                        const cust = @field(func.FIELD_GET_CONST_PTR, field_name);
+                        fn infer_ptr(data: DATA_, idx: IDX_, userdata: USERDATA_) *const field_type {
+                            return @field(func.FIELD_GET_PTR, field_name).?(data, idx, userdata);
+                        }
+                        fn unusable(_: DATA_, _: IDX_, _: USERDATA_) *const field_type {
+                            assert_unreachable(@src(), "no `get field \"{s}\" const pointer` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{field_name});
+                        }
+                        fn select(comptime FLAGS_: FuncFlags) FieldConstPtrGetter(field_type) {
+                            comptime {
+                                if (FLAGS_.has_all(F.GET_CONST_PTR)) return cust.?;
+                                if (FLAGS_.has_all(INFER.CONST_PTR_FROM_PTR)) return infer_ptr;
+                                return if (ALLOW_DEFAULT) @field(FieldConstPtrGetters{}, field_name) else unusable;
+                            }
+                        }
+                    };
+                    @field(NEW_FUNCS.GET_FIELD_CONST_PTR, field_name) = comptime P_F_GET_CONST_PTR.select(@field(FIELD_FLAGS, field_name));
+
+                    const P_F_SET = struct {
+                        const cust = @field(func.FIELD_SET, field_name);
+                        fn infer_ptr(data: DATA_, idx: IDX_, val: field_type, userdata: USERDATA_) DATA_ {
+                            @field(func.FIELD_GET_PTR, field_name).?(data, idx, userdata).* = val;
+                            return data;
+                        }
+                        fn unusable(_: DATA_, _: IDX_, _: ELEM_, _: USERDATA_) DATA_ {
+                            assert_unreachable(@src(), "no `set field \"{s}\"` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{field_name});
+                        }
+                        fn select(comptime FLAGS_: FuncFlags) FieldSetter(field_type) {
+                            comptime {
+                                if (FLAGS_.has_all(F.SET)) return cust.?;
+                                if (FLAGS_.has_all(INFER.SET_FROM_PTR)) return infer_ptr;
+                                return if (ALLOW_DEFAULT) @field(FieldSetters{}, field_name) else unusable;
+                            }
+                        }
+                    };
+                    @field(NEW_FUNCS.SET_FIELD, field_name) = comptime P_F_SET.select(@field(FIELD_FLAGS, field_name));
+                }
+
                 return NEW_FUNCS;
             }
-            pub const CustomCompareFuncs = struct {
-                LESS_THAN: ?Comparer_ = null,
-                LESS_THAN_OR_EQUAL: ?Comparer_ = null,
-                GREATER_THAN: ?Comparer_ = null,
-                GREATER_THAN_OR_EQUAL: ?Comparer_ = null,
-                ORDER_EQUALS: ?Comparer_ = null,
-                EXACT_EQUALS: ?Comparer_ = null,
-            };
             pub fn with_custom_compare_funcs(comptime FUNCS: @This(), comptime custom: CustomCompareFuncs) @This() {
                 const PROTO = struct {
                     fn infer_greater_than(val_a: ELEM_, val_b: ELEM_, userdata: USERDATA_) bool {
@@ -456,10 +1037,10 @@ pub const DataManipulationPackage = struct {
                     pub const IDX = DEF.IDX;
                     pub const USERDATA = DEF.USERDATA;
 
-                    pub const Getter = Getter_;
-                    pub const Setter = Setter_;
-                    pub const Swapper = Swapper_;
-                    pub const Comparer = Comparer_;
+                    pub const Getter = Getter;
+                    pub const Setter = Setter;
+                    pub const Swapper = Swapper;
+                    pub const Comparer = Comparer;
 
                     pub const get = FUNCS.GET;
                     pub const set = FUNCS.SET;

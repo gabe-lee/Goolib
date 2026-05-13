@@ -101,6 +101,9 @@ pub inline fn assert_with_reason(condition: bool, comptime src_loc: ?SourceLocat
         }
     }
 }
+pub inline fn assert_in_comptime(comptime src_loc: ?SourceLocation) void {
+    assert_with_reason(@inComptime(), src_loc, "this function can only be called in a comptime context. you may need to specifiy 'comptime' before the function call if the compiler cannot infer the context is comptime", .{});
+}
 pub inline fn assert_with_reason_always_panic(condition: bool, comptime src_loc: ?SourceLocation, reason_fmt: []const u8, reason_args: anytype) void {
     if (!condition) {
         if (@inComptime()) {

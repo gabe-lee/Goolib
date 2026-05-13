@@ -564,7 +564,14 @@ pub inline fn type_has_decl_with_any_float_type(comptime T: type, comptime decl:
 pub inline fn type_is_pointer_or_slice(comptime T: type) bool {
     return @typeInfo(T) == .pointer;
 }
-
+pub inline fn type_is_optional_non_slice_pointer(comptime T: type) bool {
+    const INFO = KindInfo.get_kind_info(T);
+    return INFO.is_optional() and KindInfo.get_kind_info(INFO.OPTIONAL.child).is_non_slice_pointer();
+}
+pub inline fn type_is_optional_slice(comptime T: type) bool {
+    const INFO = KindInfo.get_kind_info(T);
+    return INFO.is_optional() and KindInfo.get_kind_info(INFO.OPTIONAL.child).is_slice();
+}
 pub inline fn type_is_pointer_or_slice_possibly_optional(comptime T: type) bool {
     const INFO = KindInfo.get_kind_info(T);
     return INFO.is_pointer_or_optional_pointer();
