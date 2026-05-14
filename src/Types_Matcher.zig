@@ -36,6 +36,8 @@ const assert_with_reason = Assert.assert_with_reason;
 const assert_unreachable = Assert.assert_unreachable;
 const assert_in_comptime = Assert.assert_in_comptime;
 
+const DEBUG = std.debug.print;
+
 pub const Type = std.builtin.Type;
 pub const TypeId = std.builtin.TypeId;
 
@@ -50,34 +52,87 @@ const MatchMode = enum(u8) {
     IS_NONE_OF,
 };
 
-const MatchResultKind = enum(u8) {
-    UNDEFINED = 0,
-    FAILED = 0b01,
-    PASSED = 0b10,
+const MatchModeNotNone = enum(u8) {
+    IS,
+    IS_ANY_OF,
+    NOT,
+    IS_NONE_OF,
+};
+
+const MatchFieldMode = enum(u8) {
+    NONE,
+    HAS_ALL_OF,
+    HAS_ANY_OF,
+    HAS_NONE_OF,
+    IS_EXACTLY,
+};
+
+const Ctx = enum(u8) {
+    is_exact_type,
+    is_kind,
+    TYPE,
+    VOID,
+    BOOL,
+    NO_RETURN,
+    INT,
+    FLOAT,
+    POINTER,
+    ARRAY,
+    STRUCT,
+    COMPTIME_FLOAT,
+    COMPTIME_INT,
+    UNDEFINED,
+    NULL,
+    OPTIONAL,
+    ERROR_UNION,
+    ERROR_SET,
+    ENUM,
+    UNION,
+    FUNCTION,
+    OPAQUE,
+    FRAME,
+    ANYFRAME,
+    VECTOR,
+    ENUM_LITERAL,
 };
 
 const MatchResult = struct {
-    result: u8 = 0,
+    state: u2 = 0,
 
-    pub fn new(comptime kind: MatchResultKind) MatchResult {
-        return MatchResult{ .result = @intFromEnum(kind) };
+    pub const INIT: u2 = 0b00;
+    pub const PASS: u2 = 0b10;
+    pub const FAIL: u2 = 0b01;
+    pub const PASS_FAIL: u2 = 0b11;
+
+    pub fn new(state: u2) MatchResult {
+        return MatchResult{ .state = state };
     }
 
     pub fn uninit() MatchResult {
-        return .new(.UNDEFINED);
+        return .new(INIT);
+    }
+
+    pub fn is_failing(comptime self: MatchResult) bool {
+        return (self.state & FAIL) == FAIL;
+    }
+    pub fn has_any_pass(comptime self: MatchResult) bool {
+        return (self.state & PASS) == PASS;
+    }
+    pub fn is_passing(comptime self: MatchResult) bool {
+        return self.state == PASS;
     }
 
     pub fn combine(comptime self: MatchResult, comptime other: MatchResult) MatchResult {
         var new_self = self;
-        new_self.result |= other.result;
+        new_self.state |= other.state;
         return new_self;
     }
 
     pub fn combine_passed(comptime self: MatchResult) MatchResult {
-        return self.combine(.new(.PASSED));
+        return self.combine(.new(PASS));
     }
     pub fn combine_failed(comptime self: MatchResult) MatchResult {
-        return self.combine(.new(.FAILED));
+        return self.combine(.new(FAIL));
     }
 
     pub fn and_must_be_false(comptime self: MatchResult, comptime cond: bool) MatchResult {
@@ -106,7 +161,7 @@ const MatchResult = struct {
     }
 
     pub fn final_match(comptime self: MatchResult) bool {
-        return self.result == 0b10;
+        return self.state == PASS;
     }
 };
 
@@ -116,6 +171,17 @@ pub fn MinMax(comptime T: type) type {
         max: T,
     };
 }
+
+pub const OpaqueVal = struct {
+    ptr: *const anyopaque,
+    byte_len: usize,
+
+    pub fn match(comptime self: OpaqueVal, comptime ptr: *const anyopaque) bool {
+        const self_bytes: [*]const u8 = @ptrCast(self.ptr);
+        const ptr_bytes: [*]const u8 = @ptrCast(ptr);
+        return std.mem.eql(u8, self_bytes[0..self.byte_len], ptr_bytes[0..self.byte_len]);
+    }
+};
 
 pub fn ValCondition(comptime T: type) type {
     return union(enum) {
@@ -133,6 +199,9 @@ pub fn ValCondition(comptime T: type) type {
         BEWTEEN_EXCLUDE_MIN: MinMax(T),
         BEWTEEN_EXCLUDE_BOTH: MinMax(T),
         CUSTOM: *const fn (val: T) bool,
+        EQUALS_STRING: []const u8,
+        EQUALS_OPAQUE_PTR: OpaqueVal,
+        EQUALS_STRING_OPAQUE_PTR: []const u8,
 
         pub fn no_cond() Self {
             return Self{ .NONE = void{} };
@@ -170,6 +239,21 @@ pub fn ValCondition(comptime T: type) type {
         pub fn has_custom_condition(cond: *const fn (val: T) bool) Self {
             return Self{ .CUSTOM = cond };
         }
+        pub fn equals_string(str: []const u8) Self {
+            return Self{ .EQUALS_STRING = str };
+        }
+        pub fn equals_string_opaque(str: []const u8) Self {
+            return Self{ .EQUALS_STRING_OPAQUE_PTR = str };
+        }
+        pub fn opaque_ptr_equals_this_ptr_val(ptr: anytype) Self {
+            const TT = @TypeOf(ptr);
+            const SIZE = @sizeOf(TT);
+            const opq = OpaqueVal{
+                .byte_len = SIZE,
+                .ptr = @ptrCast(ptr),
+            };
+            return Self{ .EQUALS_OPAQUE_PTR = opq };
+        }
 
         pub fn is_true(comptime self: Self, val: T) bool {
             return switch (comptime self) {
@@ -185,6 +269,9 @@ pub fn ValCondition(comptime T: type) type {
                 .BEWTEEN_EXCLUDE_MIN => |v| v.min < val and val <= v.max,
                 .BEWTEEN_EXCLUDE_BOTH => |v| v.min < val and val < v.max,
                 .CUSTOM => |cond| cond(val),
+                .EQUALS_STRING => |str| std.mem.eql(u8, str, val),
+                .EQUALS_STRING_OPAQUE_PTR => |str| std.mem.eql(u8, str, @as(*const []const u8, @ptrCast(@alignCast(val))).*),
+                .EQUALS_OPAQUE_PTR => |opq| opq.match(@ptrCast(val)),
             };
         }
     };
@@ -220,6 +307,62 @@ pub fn NullCondition(comptime T: type) type {
     };
 }
 
+const ValErr = error{
+    did_not_match_specific_value,
+    did_not_match_any_valid_value,
+    matched_specific_invalid_value,
+    matched_one_of_the_invalid_values,
+};
+
+pub fn MatchSlice(comptime T: type) type {
+    return union(MatchMode) {
+        const Self = @This();
+
+        NONE: void,
+        IS: []const T,
+        IS_ANY_OF: []const []const T,
+        NOT: []const T,
+        IS_NONE_OF: []const []const T,
+
+        pub fn no_requirement() Self {
+            return Self{ .NONE = void{} };
+        }
+
+        pub fn is(comptime val: []const T) Self {
+            return Self{ .IS = val };
+        }
+        pub fn is_any_of(comptime val: []const []const T) Self {
+            return Self{ .IS_ANY_OF = val };
+        }
+        pub fn is_not(comptime val: []const T) Self {
+            return Self{ .NOT = val };
+        }
+        pub fn is_none_of(comptime val: []const []const T) Self {
+            return Self{ .IS_NONE_OF = val };
+        }
+
+        pub fn match(comptime self: Self, comptime val: []const T) bool {
+            switch (self) {
+                .NONE => return true,
+                .IS => |match_val| return std.mem.eql(T, match_val, val),
+                .IS_ANY_OF => |match_vals| {
+                    inline for (match_vals) |match_val| {
+                        if (std.mem.eql(T, match_val, val)) return true;
+                    }
+                    return false;
+                },
+                .NOT => |match_val| return !std.mem.eql(T, match_val, val),
+                .IS_NONE_OF => |match_vals| {
+                    inline for (match_vals) |match_val| {
+                        if (std.mem.eql(T, match_val, val)) return false;
+                    }
+                    return true;
+                },
+            }
+        }
+    };
+}
+
 pub fn MatchValue(comptime T: type) type {
     return union(MatchMode) {
         const Self = @This();
@@ -236,6 +379,9 @@ pub fn MatchValue(comptime T: type) type {
 
         pub fn equals(val: T) Self {
             return Self{ .IS = .equals(val) };
+        }
+        pub fn equals_opaque_ptr(ptr: anytype) Self {
+            return Self{ .IS = .equals(@ptrCast(ptr)) };
         }
         pub fn not_equal(val: T) Self {
             return Self{ .IS = .not_equal(val) };
@@ -281,22 +427,22 @@ pub fn MatchValue(comptime T: type) type {
             return Self{ .IS_NONE_OF = conds };
         }
 
-        pub fn match(comptime self: Self, comptime val: T, comptime result: MatchResult) MatchResult {
+        pub fn match(comptime self: Self, comptime val: T) bool {
             switch (self) {
-                .NONE => return result,
-                .IS => |cond| return result.and_must_be_true(cond.is_true(val)),
+                .NONE => return true,
+                .IS => |cond| return cond.is_true(val),
                 .IS_ANY_OF => |conds| {
                     inline for (conds) |cond| {
-                        if (cond.is_true(val)) return result.combine_passed();
+                        if (cond.is_true(val)) return true;
                     }
-                    return result.combine_failed();
+                    return false;
                 },
-                .NOT => |cond| return result.and_must_be_false(cond.is_true(val)),
+                .NOT => |cond| return !cond.is_true(val),
                 .IS_NONE_OF => |conds| {
                     inline for (conds) |cond| {
-                        if (cond.is_true(val)) return result.combine_failed();
+                        if (cond.is_true(val)) return false;
                     }
-                    return result.combine_passed();
+                    return true;
                 },
             }
         }
@@ -306,6 +452,7 @@ pub fn MatchValue(comptime T: type) type {
 pub fn MatchOptionalValue(comptime T: type) type {
     return union(MatchMode) {
         const Self = @This();
+        const Child = @typeInfo(T).optional.child;
 
         NONE: void,
         IS: NullCondition(T),
@@ -315,6 +462,16 @@ pub fn MatchOptionalValue(comptime T: type) type {
 
         pub fn no_requirement() Self {
             return Self{ .NONE = void{} };
+        }
+
+        pub fn is_null() Self {
+            return Self.is(.is_null());
+        }
+        pub fn not_null() Self {
+            return Self.is(.not_null());
+        }
+        pub fn not_null_with_condition(comptime cond: ValCondition(Child)) Self {
+            return Self.is(.not_null_with_cond(cond));
         }
 
         pub fn is(comptime cond: NullCondition(T)) Self {
@@ -330,195 +487,257 @@ pub fn MatchOptionalValue(comptime T: type) type {
             return Self{ .IS_NONE_OF = conds };
         }
 
-        pub fn match(comptime self: Self, comptime val: T, comptime result: MatchResult) MatchResult {
+        pub fn match(comptime self: Self, comptime val: T) bool {
             switch (self) {
-                .NONE => return result,
-                .IS => |cond| return result.and_must_be_true(cond.is_true(val)),
+                .NONE => return true,
+                .IS => |cond| return cond.is_true(val),
                 .IS_ANY_OF => |conds| {
                     inline for (conds) |cond| {
-                        if (cond.is_true(val)) return result.combine_passed();
+                        if (cond.is_true(val)) return true;
                     }
-                    return result.combine_failed();
+                    return false;
                 },
-                .NOT => |cond| return result.and_must_be_false(cond.is_true(val)),
+                .NOT => |cond| return !cond.is_true(val),
                 .IS_NONE_OF => |conds| {
                     inline for (conds) |cond| {
-                        if (cond.is_true(val)) return result.combine_failed();
+                        if (cond.is_true(val)) return false;
                     }
-                    return result.combine_passed();
+                    return true;
                 },
             }
         }
     };
 }
+
+pub const MatchKindInfo = union(MatchModeNotNone) {
+    IS: KindInfoMatcher,
+    IS_ANY_OF: []const KindInfoMatcher,
+    NOT: KindInfoMatcher,
+    IS_NONE_OF: []const KindInfoMatcher,
+
+    pub fn is(comptime matcher: KindInfoMatcher) MatchKindInfo {
+        return MatchKindInfo{ .IS = matcher };
+    }
+    pub fn is_any_of(comptime matcher: []const KindInfoMatcher) MatchKindInfo {
+        return MatchKindInfo{ .IS_ANY_OF = matcher };
+    }
+    pub fn is_not(comptime matcher: KindInfoMatcher) MatchKindInfo {
+        return MatchKindInfo{ .NOT = matcher };
+    }
+    pub fn is_none_of(comptime matcher: []const KindInfoMatcher) MatchKindInfo {
+        return MatchKindInfo{ .IS_NONE_OF = matcher };
+    }
+
+    pub fn match(comptime self: MatchKindInfo, comptime TYPE: type, comptime info: KindInfo) bool {
+        switch (self) {
+            .IS => |matcher| return matcher.match(TYPE, info),
+            .IS_ANY_OF => |matchers| {
+                inline for (matchers) |matcher| {
+                    if (matcher.match(TYPE, info)) return true;
+                }
+                return false;
+            },
+            .NOT => |matcher| return !matcher.match(TYPE, info),
+            .IS_NONE_OF => |matchers| {
+                inline for (matchers) |matcher| {
+                    if (matcher.match(TYPE, info)) return false;
+                }
+                return true;
+            },
+        }
+    }
+};
 
 pub const KindConditionMode = enum(u8) {
     MUST_NOT_BE = 0,
     CAN_BE = 1,
+    MUST_BE = 2,
 };
 
-pub const TypeMatcher = MatchValue(type);
-pub const PtrSizeMatcher = MatchValue(Type.Pointer.Size);
-pub const OptAlignMatcher = MatchValue(?usize);
-pub const AlignMatcher = MatchValue(usize);
+pub const MatchState = enum(u8) {
+    NONE = 0,
+    PASS = 1,
+    FAIL = 2,
+};
 
-pub const KindMatcher = struct {
-    TYPE: GenericCondition(.TYPE) = .must_not_be(),
-    VOID: GenericCondition(.VOID) = .must_not_be(),
-    BOOL: GenericCondition(.BOOL) = .must_not_be(),
-    NO_RETURN: GenericCondition(.NO_RETURN) = .must_not_be(),
-    INT: IntCondition = .must_not_be_int(),
-    FLOAT: FloatCondition = .must_not_be_float(),
-    POINTER: PointerCondition = .must_not_be_pointer(),
-    ARRAY: KindConditionMode = undefined,
-    STRUCT: KindConditionMode = undefined,
-    COMPTIME_FLOAT: GenericCondition(.COMPTIME_FLOAT) = .must_not_be(),
-    COMPTIME_INT: GenericCondition(.COMPTIME_INT) = .must_not_be(),
-    UNDEFINED: GenericCondition(.UNDEFINED) = .must_not_be(),
-    NULL: GenericCondition(.NULL) = .must_not_be(),
-    OPTIONAL: KindConditionMode = undefined,
-    ERROR_UNION: KindConditionMode = undefined,
-    ERROR_SET: KindConditionMode = undefined,
-    ENUM: KindConditionMode = undefined,
-    UNION: KindConditionMode = undefined,
-    FUNCTION: KindConditionMode = undefined,
-    OPAQUE: KindConditionMode = undefined,
-    FRAME: KindConditionMode = undefined,
-    ANYFRAME: KindConditionMode = undefined,
-    VECTOR: KindConditionMode = undefined,
-    ENUM_LITERAL: GenericCondition(.ENUM_LITERAL) = .must_not_be(),
+pub const MatchFailure = struct {
+    ctx: []const u8 = "",
+    state: MatchState = .NONE,
 
-    pub fn must_be_type() KindMatcher {
-        return KindMatcher{
-            .TYPE = .can_be(),
-        };
-    }
-    pub fn must_be_void() KindMatcher {
-        return KindMatcher{
-            .VOID = .can_be(),
-        };
-    }
-    pub fn must_be_bool() KindMatcher {
-        return KindMatcher{
-            .BOOL = .can_be(),
-        };
-    }
-    pub fn must_be_no_return() KindMatcher {
-        return KindMatcher{
-            .NO_RETURN = .can_be(),
-        };
-    }
-    pub fn must_be_int(comptime cond: IntCondition) KindMatcher {
-        return KindMatcher{
-            .INT = cond,
-        };
-    }
-    pub fn must_be_float(comptime cond: FloatCondition) KindMatcher {
-        return KindMatcher{
-            .FLOAT = cond,
-        };
-    }
-    pub fn must_be_pointer(comptime cond: PointerCondition) KindMatcher {
-        return KindMatcher{
-            .POINTER = cond,
-        };
+    pub fn done(comptime self: MatchFailure) ?MatchFailure {
+        if (self.state != .NONE) return self;
+        return null;
     }
 
-    pub fn match(comptime self: KindMatcher, comptime info: KindInfo, comptime result: MatchResult) MatchResult {
-        comptime var new_result = result;
-        new_result = comptime self.TYPE.match(info, new_result);
-        new_result = comptime self.VOID.match(info, new_result);
-        new_result = comptime self.BOOL.match(info, new_result);
-        new_result = comptime self.NO_RETURN.match(info, new_result);
-        new_result = comptime self.INT.match(info, new_result);
-        new_result = comptime self.FLOAT.match(info, new_result);
-        new_result = comptime self.POINTER.match(info, new_result);
-        //CHECKPOINT
-        // new_result = self.ARRAY.match(info, new_result);
-        // new_result = self.STRUCT.match(info, new_result);
-        new_result = comptime self.COMPTIME_FLOAT.match(info, new_result);
-        new_result = comptime self.COMPTIME_INT.match(info, new_result);
-        new_result = comptime self.UNDEFINED.match(info, new_result);
-        new_result = comptime self.NULL.match(info, new_result);
-        // new_result = self.OPTIONAL.match(info, new_result);
-        // new_result = self.ERROR_UNION.match(info, new_result);
-        // new_result = self.ERROR_SET.match(info, new_result);
-        // new_result = self.ENUM.match(info, new_result);
-        // new_result = self.UNION.match(info, new_result);
-        // new_result = self.FUNCTION.match(info, new_result);
-        // new_result = self.OPAQUE.match(info, new_result);
-        // new_result = self.FRAME.match(info, new_result);
-        // new_result = self.ANYFRAME.match(info, new_result);
-        // new_result = self.VECTOR.match(info, new_result);
-        new_result = comptime self.ENUM_LITERAL.match(info, new_result);
-        return new_result;
+    pub fn must_be_true_else_return(comptime self: MatchFailure, comptime cond: bool, comptime fmt: []const u8, comptime args: anytype) ?MatchFailure {
+        if (!cond) {
+            return self.add_fail_context(fmt, args);
+        }
+    }
+
+    pub fn add_context(comptime self: MatchFailure, comptime fmt: []const u8, comptime args: anytype) MatchFailure {
+        if (build.mode == .Debug) {
+            comptime var new_self = self;
+            new_self.ctx = self.ctx ++ std.fmt.comptimePrint(fmt, args);
+            return new_self;
+        } else {
+            return self;
+        }
+    }
+    pub fn add_pass_context(comptime self: MatchFailure, comptime fmt: []const u8, comptime args: anytype) MatchFailure {
+        if (build.mode == .Debug) {
+            comptime var new_self = self;
+            new_self.ctx = self.ctx ++ std.fmt.comptimePrint(fmt, args);
+            new_self.state = .PASS;
+            return new_self;
+        } else {
+            comptime var new_self = self;
+            new_self.state = .PASS;
+            return new_self;
+        }
+    }
+    pub fn add_fail_context(comptime self: MatchFailure, comptime fmt: []const u8, comptime args: anytype) MatchFailure {
+        if (build.mode == .Debug) {
+            comptime var new_self = self;
+            new_self.ctx = self.ctx ++ std.fmt.comptimePrint(fmt, args);
+            new_self.state = .FAIL;
+            return new_self;
+        } else {
+            comptime var new_self = self;
+            new_self.state = .FAIL;
+            return new_self;
+        }
+    }
+
+    pub fn did_pass(comptime self: MatchFailure) bool {
+        return self.state == .PASS;
+    }
+    pub fn did_not_pass(comptime self: MatchFailure) bool {
+        return self.state != .PASS;
+    }
+    pub fn did_fail(comptime self: MatchFailure) bool {
+        return self.state == .FAIL;
+    }
+    pub fn did_not_fail(comptime self: MatchFailure) bool {
+        return self.state != .FAIL;
+    }
+    pub fn undefined_result(comptime self: MatchFailure) bool {
+        return self.state == .NONE;
+    }
+    pub fn did_pass_or_fail(comptime self: MatchFailure) bool {
+        return self.state != .NONE;
     }
 };
 
-pub fn GenericCondition(comptime KIND: Kind) type {
-    return union(KindConditionMode) {
-        const Self = @This();
+pub const KindInfoMatcher = union(enum) {
+    TYPE: void,
+    VOID: void,
+    BOOL: void,
+    NO_RETURN: void,
+    INT: IntMatcher,
+    FLOAT: FloatMatcher,
+    POINTER: PointerMatcher,
+    ARRAY: ArrayMatcher,
+    STRUCT: StructMatcher,
+    COMPTIME_FLOAT: void,
+    COMPTIME_INT: void,
+    UNDEFINED: void,
+    NULL: void,
+    OPTIONAL: OptionalMatcher,
+    ERROR_UNION: void, // FIXME
+    ERROR_SET: void, // FIXME
+    ENUM: void, // FIXME
+    UNION: void, // FIXME
+    FUNCTION: void, // FIXME
+    OPAQUE: void, // FIXME
+    FRAME: void, // FIXME
+    ANYFRAME: void, // FIXME
+    VECTOR: VectorMatcher,
+    ENUM_LITERAL: void,
 
-        MUST_NOT_BE: void,
-        CAN_BE: void,
-
-        pub fn must_not_be() Self {
-            return Self{ .MUST_NOT_BE = void{} };
-        }
-        pub fn can_be() Self {
-            return Self{ .CAN_BE = void{} };
-        }
-
-        pub fn match(comptime self: Self, comptime kind: KindInfo, comptime result: MatchResult) MatchResult {
-            switch (self) {
-                .CAN_BE => return result.and_pass_if_true(kind == KIND),
-                .MUST_NOT_BE => return result.and_fail_if_true(kind == KIND),
-            }
-        }
-    };
-}
-
-pub const IntCondition = union(KindConditionMode) {
-    MUST_NOT_BE: void,
-    CAN_BE: IntMatcher,
-
-    pub fn must_not_be_int() IntCondition {
-        return IntCondition{ .MUST_NOT_BE = void{} };
+    pub fn type_kind() KindInfoMatcher {
+        return KindInfoMatcher{ .TYPE = void{} };
     }
-    pub fn any_int() IntCondition {
-        return IntCondition{ .CAN_BE = .{} };
+    pub fn void_kind() KindInfoMatcher {
+        return KindInfoMatcher{ .VOID = void{} };
     }
-    pub fn with_bits(comptime bits: MatchValue(u16)) IntCondition {
-        return IntCondition{
-            .CAN_BE = .with_bits(bits),
-        };
+    pub fn bool_kind() KindInfoMatcher {
+        return KindInfoMatcher{ .BOOL = void{} };
     }
-    pub fn and_with_bits(comptime self: IntCondition, comptime bits: MatchValue(u16)) IntCondition {
-        comptime var new_self = self;
-        new_self.CAN_BE.bits = bits;
-        return new_self;
+    pub fn noreturn_kind() KindInfoMatcher {
+        return KindInfoMatcher{ .NO_RETURN = void{} };
     }
-    pub fn with_signedness(comptime signedness: MatchValue(builtin.Signedness)) IntCondition {
-        return IntCondition{
-            .CAN_BE = .with_signedness(signedness),
-        };
+    pub fn int_kind(comptime matcher: IntMatcher) KindInfoMatcher {
+        return KindInfoMatcher{ .INT = matcher };
     }
-    pub fn and_with_signedness(comptime self: IntCondition, comptime signedness: MatchValue(builtin.Signedness)) IntCondition {
-        comptime var new_self = self;
-        new_self.CAN_BE.signedness = signedness;
-        return new_self;
+    pub fn float_kind(comptime matcher: FloatMatcher) KindInfoMatcher {
+        return KindInfoMatcher{ .FLOAT = matcher };
+    }
+    pub fn pointer_kind(comptime matcher: PointerMatcher) KindInfoMatcher {
+        return KindInfoMatcher{ .POINTER = matcher };
+    }
+    pub fn array_kind(comptime matcher: ArrayMatcher) KindInfoMatcher {
+        return KindInfoMatcher{ .ARRAY = matcher };
+    }
+    pub fn vector_kind(comptime matcher: VectorMatcher) KindInfoMatcher {
+        return KindInfoMatcher{ .VECTOR = matcher };
+    }
+    pub fn struct_kind(comptime matcher: StructMatcher) KindInfoMatcher {
+        return KindInfoMatcher{ .STRUCT = matcher };
+    }
+    pub fn optional_kind(comptime matcher: OptionalMatcher) KindInfoMatcher {
+        return KindInfoMatcher{ .OPTIONAL = matcher };
     }
 
-    pub fn match(comptime self: IntCondition, comptime kind: KindInfo, comptime result: MatchResult) MatchResult {
+    pub fn match(comptime self: KindInfoMatcher, comptime TYPE: type, info: KindInfo) bool {
         switch (self) {
-            .CAN_BE => |matcher| {
-                if (kind == .INT) {
-                    return matcher.match(kind.INT, result);
-                }
-                return result;
+            .TYPE => return info == .TYPE,
+            .VOID => return info == .VOID,
+            .BOOL => return info == .BOOL,
+            .NO_RETURN => return info == .NO_RETURN,
+            .INT => |matcher| {
+                if (info != .INT) return false;
+                return matcher.match(info.INT);
             },
-            .MUST_NOT_BE => return result.and_fail_if_true(kind == .INT),
+            .FLOAT => |matcher| {
+                if (info != .FLOAT) return false;
+                return matcher.match(info.FLOAT);
+            },
+            .POINTER => |matcher| {
+                if (info != .POINTER) return false;
+                return matcher.match(info.POINTER);
+            },
+            .ARRAY => |matcher| {
+                if (info != .ARRAY) return false;
+                return matcher.match(info.ARRAY);
+            },
+            .STRUCT => |matcher| {
+                if (info != .STRUCT) return false;
+                return matcher.match(TYPE, info.STRUCT);
+            },
+            .COMPTIME_FLOAT => return info == .COMPTIME_FLOAT,
+            .COMPTIME_INT => return info == .COMPTIME_INT,
+            .UNDEFINED => return info == .UNDEFINED,
+            .NULL => return info == .NULL,
+            .OPTIONAL => |matcher| {
+                if (info != .OPTIONAL) return false;
+                return matcher.match(info.OPTIONAL);
+            },
+            .ERROR_UNION => {}, // FIXME //CHECKPOINT
+            .ERROR_SET => {}, // FIXME
+            .ENUM => {}, // FIXME
+            .UNION => {}, // FIXME
+            .FUNCTION => {}, // FIXME
+            .OPAQUE => {}, // FIXME
+            .FRAME => {}, // FIXME
+            .ANYFRAME => {}, // FIXME
+            .VECTOR => |matcher| {
+                if (info != .VECTOR) return false;
+                return matcher.match(info.VECTOR);
+            },
+            .ENUM_LITERAL => return info == .ENUM_LITERAL,
         }
+        return false;
     }
 };
 
@@ -547,65 +766,17 @@ pub const IntMatcher = struct {
         return new_self;
     }
 
-    pub fn match(comptime self: IntMatcher, comptime val: Type.Int, comptime result: MatchResult) MatchResult {
-        const r2 = self.bits.match(val.bits, result);
-        return self.signedness.match(val.signedness, r2);
-    }
-};
-
-pub const FloatCondition = union(KindConditionMode) {
-    MUST_NOT_BE: void,
-    CAN_BE: FloatMatcher,
-
-    pub fn must_not_be_float() FloatCondition {
-        return FloatCondition{ .MUST_NOT_BE = void{} };
-    }
-    pub fn can_be_float(comptime matcher: FloatMatcher) FloatCondition {
-        return FloatCondition{ .CAN_BE = matcher };
-    }
-
-    pub fn match(comptime self: FloatCondition, comptime kind: KindInfo, comptime result: MatchResult) MatchResult {
-        switch (self) {
-            .CAN_BE => |matcher| {
-                if (kind == .FLOAT) {
-                    return matcher.match(kind.FLOAT, result);
-                }
-                return result;
-            },
-            .MUST_NOT_BE => return result.and_fail_if_true(kind == .FLOAT),
-        }
+    pub fn match(comptime self: IntMatcher, comptime val: Type.Int) bool {
+        return self.bits.match(val.bits) //
+        and self.signedness.match(val.signedness);
     }
 };
 
 pub const FloatMatcher = struct {
     bits: MatchValue(u16) = .no_requirement(),
 
-    pub fn match(comptime self: FloatMatcher, comptime val: Type.Float, comptime result: MatchResult) MatchResult {
-        return self.bits.match(val.bits, result);
-    }
-};
-
-pub const PointerCondition = union(KindConditionMode) {
-    MUST_NOT_BE: void,
-    CAN_BE: FloatMatcher,
-
-    pub fn must_not_be_pointer() PointerCondition {
-        return PointerCondition{ .MUST_NOT_BE = void{} };
-    }
-    pub fn can_be_pointer(comptime matcher: FloatMatcher) PointerCondition {
-        return PointerCondition{ .CAN_BE = matcher };
-    }
-
-    pub fn match(comptime self: PointerCondition, comptime kind: KindInfo, comptime result: MatchResult) MatchResult {
-        switch (self) {
-            .CAN_BE => |matcher| {
-                if (kind == .POINTER) {
-                    return matcher.match(kind.POINTER, result);
-                }
-                return result;
-            },
-            .MUST_NOT_BE => return result.and_fail_if_true(kind == .POINTER),
-        }
+    pub fn match(comptime self: FloatMatcher, comptime val: Type.Float) bool {
+        return self.bits.match(val.bits);
     }
 };
 
@@ -615,65 +786,467 @@ pub const PointerMatcher = struct {
     is_volatile: MatchValue(bool) = .no_requirement(),
     alignment: MatchOptionalValue(?usize) = .no_requirement(),
     address_space: MatchValue(builtin.AddressSpace) = .no_requirement(),
-    child: *const TypeOrKindMatch = &TypeOrKindMatch.NO_REQ,
+    child: *const TypeMatcher = &TypeMatcher.NO_REQ,
     is_allowzero: MatchValue(bool) = .no_requirement(),
     sentinel_ptr: MatchOptionalValue(?*const anyopaque) = .no_requirement(),
 
-    pub fn match(comptime self: PointerMatcher, comptime val: Type.Pointer, comptime result: MatchResult) MatchResult {
-        comptime var new_result = result;
-        new_result = self.size.match(val.size, new_result);
-        new_result = self.is_const.match(val.is_const, new_result);
-        new_result = self.is_volatile.match(val.is_volatile, new_result);
-        new_result = self.alignment.match(val.alignment, new_result);
-        new_result = self.address_space.match(val.address_space, new_result);
-        new_result = self.is_allowzero.match(val.is_allowzero, new_result);
-        new_result = self.child.match(val.child, new_result);
-        new_result = self.sentinel_ptr.match(val.sentinel_ptr, new_result);
-        return new_result;
+    pub fn match(comptime self: PointerMatcher, comptime val: Type.Pointer) bool {
+        return self.size.match(val.size) //
+        and self.is_const.match(val.is_const) //
+        and self.is_volatile.match(val.is_volatile) //
+        and self.alignment.match(val.alignment) //
+        and self.address_space.match(val.address_space) //
+        and self.is_allowzero.match(val.is_allowzero) //
+        and self.child.match(val.child) //
+        and self.sentinel_ptr.match(val.sentinel_ptr);
     }
 };
 
-pub const TypeOrKindMatch = union(enum) {
+pub const ArrayMatcher = struct {
+    len: MatchValue(usize) = .no_requirement(),
+    child: *const TypeMatcher = &TypeMatcher.NO_REQ,
+    sentinel_ptr: MatchOptionalValue(?*const anyopaque) = .no_requirement(),
+
+    pub fn match(comptime self: ArrayMatcher, comptime val: Type.Array) bool {
+        return self.len.match(val.len) //
+        and self.child.match(val.child) //
+        and self.sentinel_ptr.match(val.sentinel_ptr);
+    }
+};
+
+pub const VectorMatcher = struct {
+    len: MatchValue(usize) = .no_requirement(),
+    child: *const TypeMatcher = &TypeMatcher.NO_REQ,
+
+    pub fn match(comptime self: VectorMatcher, comptime val: Type.Vector) bool {
+        return self.len.match(val.len) //
+        and self.child.match(val.child);
+    }
+};
+
+pub const OptionalMatcher = struct {
+    child: *const TypeMatcher = &TypeMatcher.NO_REQ,
+
+    pub fn match(comptime self: VectorMatcher, comptime val: Type.Optional) bool {
+        return self.child.match(val.child);
+    }
+};
+
+pub const StructMatcher = struct {
+    layout: MatchValue(Type.ContainerLayout) = .no_requirement(),
+    backing_integer: MatchOptionalValue(?type) = .no_requirement(),
+    is_tuple: MatchValue(bool) = .no_requirement(),
+    fields: AllStructFieldsMatcher = .no_requirement(),
+    decls: AllDeclsMatcher = .no_requirement(),
+
+    pub fn match(comptime self: StructMatcher, comptime STRUCT_TYPE: type, comptime val: Type.Struct) bool {
+        // _ = STRUCT_TYPE;
+        const result = self.layout.match(val.layout) //
+            and self.backing_integer.match(val.backing_integer) //
+            and self.is_tuple.match(val.is_tuple) //
+            and self.fields.match(STRUCT_TYPE, val.fields) //
+            and self.decls.match(STRUCT_TYPE, val.decls); //
+        return result;
+    }
+};
+
+pub const FlexFieldMatchers = struct {
+    /// This is tested first, and any matched fields are removed from the
+    /// available fields to match
+    first_has_all_of: []const StructFieldMatcher = &.{},
+    /// This is tested second, and any matched fields are removed from the
+    /// available fields to match. It will not test any of the fields
+    /// matched by `first_has_all_of` (if any)
+    then_has_any_of: []const StructFieldMatcher = &.{},
+    /// This is tested third. It will not test any of the fields
+    /// matched by `first_has_all_of` (if any) or any of the fields matched
+    /// by `second_has_any_of` (if any)
+    finally_has_none_of: []const StructFieldMatcher = &.{},
+};
+pub const AllStructFieldsMatcher = union(enum) {
+    NONE: void,
+    EXACT: []const StructFieldMatcher,
+    FLEX: FlexFieldMatchers,
+
+    pub fn no_requirement() AllStructFieldsMatcher {
+        return AllStructFieldsMatcher{ .NONE = void{} };
+    }
+
+    pub fn with_exactly_these_fields(comptime field_matchers: []const StructFieldMatcher) AllStructFieldsMatcher {
+        return AllStructFieldsMatcher{ .EXACT = field_matchers };
+    }
+    pub fn with_flexible_field_conditions(comptime field_matchers: FlexFieldMatchers) AllStructFieldsMatcher {
+        return AllStructFieldsMatcher{ .FLEX = field_matchers };
+    }
+
+    pub fn match(comptime self: AllStructFieldsMatcher, comptime STRUCT_TYPE: type, comptime fields: []const Type.StructField) bool {
+        switch (self) {
+            .NONE => {},
+            .EXACT => |matchers| {
+                if (matchers.len != fields.len) return false;
+                comptime var matched_fields: [fields.len]bool = @splat(false);
+                comptime var num_matched: usize = 0;
+                next_match: inline for (matchers) |matcher| {
+                    next_field: inline for (fields, 0..) |field, f| {
+                        if (matched_fields[f]) continue :next_field;
+                        if (matcher.match(STRUCT_TYPE, field)) {
+                            matched_fields[f] = true;
+                            num_matched += 1;
+                            continue :next_match;
+                        }
+                    }
+                }
+                if (num_matched != matchers.len) return false;
+            },
+            .FLEX => |cond| {
+                comptime var matched_fields: [fields.len]bool = @splat(false);
+                if (cond.first_has_all_of.len > 0) {
+                    if (fields.len < cond.first_has_all_of.len) return false;
+                    comptime var num_matched: usize = 0;
+                    next_match: inline for (cond.first_has_all_of) |matcher| {
+                        next_field: inline for (fields, 0..) |field, f| {
+                            if (matched_fields[f]) continue :next_field;
+                            if (matcher.match(STRUCT_TYPE, field)) {
+                                matched_fields[f] = true;
+                                num_matched += 1;
+                                continue :next_match;
+                            }
+                        }
+                    }
+                    if (num_matched != cond.first_has_all_of.len) return false;
+                }
+                if (cond.then_has_any_of.len > 0) {
+                    comptime var found_match: bool = false;
+                    next_match: inline for (cond.then_has_any_of) |matcher| {
+                        next_field: inline for (fields, 0..) |field, f| {
+                            if (matched_fields[f]) continue :next_field;
+                            if (matcher.match(STRUCT_TYPE, field)) {
+                                matched_fields[f] = true;
+                                found_match = true;
+                                continue :next_match;
+                            }
+                        }
+                    }
+                    if (!found_match) return false;
+                }
+                if (cond.finally_has_none_of.len > 0) {
+                    inline for (cond.finally_has_none_of) |matcher| {
+                        next_field: inline for (fields, 0..) |field, f| {
+                            if (matched_fields[f]) continue :next_field;
+                            if (matcher.match(STRUCT_TYPE, field)) {
+                                return false;
+                            }
+                        }
+                    }
+                }
+            },
+        }
+        return true;
+    }
+};
+
+pub const StructFieldMatcher = struct {
+    offset: MatchValue(usize) = .no_requirement(),
+    bit_offset: MatchValue(usize) = .no_requirement(),
+    name: MatchSlice(u8) = .no_requirement(),
+    type: *const TypeMatcher = &TypeMatcher.NO_REQ,
+    default_value_ptr: MatchOptionalValue(?*const anyopaque) = .no_requirement(),
+    is_comptime: MatchValue(bool) = .no_requirement(),
+    alignment: MatchOptionalValue(?usize) = .no_requirement(),
+
+    pub fn field_name(comptime name: []const u8) StructFieldMatcher {
+        return StructFieldMatcher{
+            .name = .is(name),
+        };
+    }
+    pub fn field_name_and_type(comptime name: []const u8, comptime T: type) StructFieldMatcher {
+        return StructFieldMatcher{
+            .name = .is(name),
+            .type = &TypeMatcher.type_is(T),
+        };
+    }
+    pub fn field_name_and_kind(comptime name: []const u8, comptime matcher: MatchKindInfo) StructFieldMatcher {
+        return StructFieldMatcher{
+            .name = .is(name),
+            .type = &TypeMatcher.kind(matcher),
+        };
+    }
+    pub fn field_name_type_and_default(comptime name: []const u8, comptime T: type, default: *const T) StructFieldMatcher {
+        return StructFieldMatcher{
+            .name = .is(name),
+            .type = &TypeMatcher.type_is(T),
+            .default_value_ptr = .not_null_with_condition(.opaque_ptr_equals_this_ptr_val(default)),
+        };
+    }
+    pub fn field_name_type_and_default_string(comptime name: []const u8, default: []const u8) StructFieldMatcher {
+        return StructFieldMatcher{
+            .name = .is(name),
+            .type = &TypeMatcher.type_is([]const u8),
+            .default_value_ptr = .not_null_with_condition(.equals_string_opaque(default)),
+        };
+    }
+
+    pub fn match(comptime self: StructFieldMatcher, comptime STRUCT: type, comptime field: Type.StructField) bool {
+        const result = self.name.match(field.name) //
+            and self.is_comptime.match(field.is_comptime) //
+            and self.alignment.match(field.alignment) //
+            and self.type.match(field.type) //
+            and self.default_value_ptr.match(field.default_value_ptr) //
+            and self.offset.match(@offsetOf(STRUCT, field.name)) //
+            and self.bit_offset.match(@bitOffsetOf(STRUCT, field.name));
+        return result;
+    }
+};
+
+pub const FlexDeclMatchers = struct {
+    /// This is tested first, and any matched decls are removed from the
+    /// available decls to match
+    first_has_all_of: []const DeclMatcher = &.{},
+    /// This is tested second, and any matched decls are removed from the
+    /// available decls to match. It will not test any of the decls
+    /// matched by `first_has_all_of` (if any)
+    then_has_any_of: []const DeclMatcher = &.{},
+    /// This is tested third. It will not test any of the decls
+    /// matched by `first_has_all_of` (if any) or any of the decls matched
+    /// by `second_has_any_of` (if any)
+    finally_has_none_of: []const DeclMatcher = &.{},
+};
+
+pub const AllDeclsMatcher = union(enum) {
+    NONE: void,
+    EXACT: []const DeclMatcher,
+    FLEX: FlexDeclMatchers,
+
+    pub fn no_requirement() AllDeclsMatcher {
+        return AllDeclsMatcher{ .NONE = void{} };
+    }
+
+    pub fn with_exactly_these_decls(comptime decl_matchers: []const DeclMatcher) AllDeclsMatcher {
+        return AllDeclsMatcher{ .EXACT = decl_matchers };
+    }
+    pub fn with_flexible_decl_conditions(comptime decl_matchers: FlexDeclMatchers) AllDeclsMatcher {
+        return AllDeclsMatcher{ .FLEX = decl_matchers };
+    }
+
+    pub fn match(comptime self: AllDeclsMatcher, comptime OBJECT_TYPE: type, comptime decls: []const Type.Declaration) bool {
+        switch (self) {
+            .NONE => {},
+            .EXACT => |matchers| {
+                if (matchers.len != decls.len) return false;
+                comptime var matched_decls: [decls.len]bool = @splat(false);
+                next_match: inline for (matchers) |matcher| {
+                    next_field: inline for (decls, 0..) |decl, d| {
+                        if (matched_decls[d]) continue :next_field;
+                        const unwrapped = UnwrappedDecl.new(OBJECT_TYPE, decl);
+                        if (matcher.match(unwrapped)) {
+                            matched_decls[d] = true;
+                            continue :next_match;
+                        }
+                    }
+                    return false;
+                }
+            },
+            .FLEX => |cond| {
+                comptime var matched_decls: [decls.len]bool = @splat(false);
+                if (cond.first_has_all_of.len > 0) {
+                    if (decls.len < cond.first_has_all_of.len) return false;
+                    comptime var num_matched: usize = 0;
+                    next_match: inline for (cond.first_has_all_of) |matcher| {
+                        next_decl: inline for (decls, 0..) |decl, d| {
+                            if (matched_decls[d]) continue :next_decl;
+                            const unwrapped = UnwrappedDecl.new(OBJECT_TYPE, decl);
+                            if (matcher.match(unwrapped)) {
+                                matched_decls[d] = true;
+                                num_matched += 1;
+                                continue :next_match;
+                            }
+                        }
+                    }
+                    if (num_matched != cond.first_has_all_of.len) return false;
+                }
+                if (cond.then_has_any_of.len > 0) {
+                    comptime var found_match: bool = false;
+                    next_match: inline for (cond.then_has_any_of) |matcher| {
+                        next_decl: inline for (decls, 0..) |decl, d| {
+                            if (matched_decls[d]) continue :next_decl;
+                            const unwrapped = UnwrappedDecl.new(OBJECT_TYPE, decl);
+                            if (matcher.match(unwrapped)) {
+                                matched_decls[d] = true;
+                                found_match = true;
+                                continue :next_match;
+                            }
+                        }
+                    }
+                    if (!found_match) return false;
+                }
+                if (cond.finally_has_none_of.len > 0) {
+                    inline for (cond.finally_has_none_of) |matcher| {
+                        next_decl: inline for (decls, 0..) |decl, d| {
+                            if (matched_decls[d]) continue :next_decl;
+                            const unwrapped = UnwrappedDecl.new(OBJECT_TYPE, decl);
+                            if (matcher.match(unwrapped)) {
+                                return false;
+                            }
+                        }
+                    }
+                }
+            },
+        }
+        return true;
+    }
+};
+
+pub const DeclMatcher = struct {
+    name: MatchSlice(u8) = .no_requirement(),
+    type: *const TypeMatcher = &TypeMatcher.NO_REQ,
+    value: MatchValue(*const anyopaque) = .no_requirement(),
+
+    pub fn decl_name(comptime name: []const u8) DeclMatcher {
+        return DeclMatcher{
+            .name = .is(name),
+        };
+    }
+    pub fn decl_name_and_type(comptime name: []const u8, comptime T: type) DeclMatcher {
+        return DeclMatcher{
+            .name = .is(name),
+            .type = &TypeMatcher.type_is(T),
+        };
+    }
+    pub fn decl_name_and_kind(comptime name: []const u8, comptime matcher: MatchKindInfo) DeclMatcher {
+        return DeclMatcher{
+            .name = .is(name),
+            .type = &TypeMatcher.kind(matcher),
+        };
+    }
+    pub fn decl_name_type_and_value(comptime name: []const u8, comptime T: type, default: *const T) DeclMatcher {
+        return DeclMatcher{
+            .name = .is(name),
+            .type = &TypeMatcher.type_is(T),
+            .value = .is(.opaque_ptr_equals_this_ptr_val(default)),
+        };
+    }
+    pub fn decl_name_type_and_string_value(comptime name: []const u8, default: []const u8) DeclMatcher {
+        return DeclMatcher{
+            .name = .is(name),
+            .type = &TypeMatcher.type_is([]const u8),
+            .value = .is(.equals_string_opaque(default)),
+        };
+    }
+
+    pub fn match(comptime self: DeclMatcher, comptime decl: UnwrappedDecl) bool {
+        return self.name.match(decl.name) //
+        and self.type.match(decl.type) //
+        and self.value.match(decl.value);
+    }
+};
+
+pub const UnwrappedDecl = struct {
+    name: []const u8,
+    type: type,
+    value: *const anyopaque,
+
+    pub fn new(comptime OBJECT: type, comptime decl: Type.Declaration) UnwrappedDecl {
+        return UnwrappedDecl{
+            .name = decl.name,
+            .type = @TypeOf(@field(OBJECT, decl.name)),
+            .value = @ptrCast(&@field(OBJECT, decl.name)),
+        };
+    }
+};
+
+pub const TypeMatcher = union(enum) {
     TYPE: MatchValue(type),
-    KIND: KindMatcher,
+    KIND: MatchKindInfo,
     NONE: void,
 
-    pub const NO_REQ = TypeOrKindMatch{ .NONE = void{} };
+    pub const NO_REQ = TypeMatcher{ .NONE = void{} };
 
-    pub fn no_requirement() TypeOrKindMatch {
+    pub fn no_requirement() TypeMatcher {
         return NO_REQ;
     }
-    pub fn type_condition(comptime matcher: TypeMatcher) TypeOrKindMatch {
-        return TypeOrKindMatch{ .TYPE = matcher };
+    pub fn type_condition(comptime matcher: MatchValue(type)) TypeMatcher {
+        return TypeMatcher{ .TYPE = matcher };
     }
-    pub fn type_is(comptime T: type) TypeOrKindMatch {
-        return TypeOrKindMatch{ .TYPE = TypeMatcher.equals(T) };
+    pub fn type_is(comptime T: type) TypeMatcher {
+        return TypeMatcher{ .TYPE = MatchValue(type).equals(T) };
     }
-    pub fn kind(comptime matcher: KindMatcher) TypeOrKindMatch {
-        return TypeOrKindMatch{ .KIND = matcher };
+    pub fn kind(comptime matcher: MatchKindInfo) TypeMatcher {
+        return TypeMatcher{ .KIND = matcher };
     }
 
-    pub fn match(comptime self: TypeOrKindMatch, comptime T: type, comptime result: MatchResult) MatchResult {
-        switch (self) {
-            .TYPE => |matcher| return matcher.match(T, result),
-            .KIND => |matcher| return matcher.match(KindInfo.get_kind_info(T), result),
-            .NONE => return result,
+    pub fn match(comptime self: *const TypeMatcher, comptime T: type) bool {
+        switch (self.*) {
+            .TYPE => |matcher| return matcher.match(T),
+            .KIND => |matcher| return matcher.match(T, KindInfo.get_kind_info(T)),
+            .NONE => return true,
         }
     }
 };
 
-pub fn type_match(comptime T: type, comptime condition: TypeOrKindMatch) bool {
+pub fn type_match(comptime T: type, comptime condition: TypeMatcher) bool {
     assert_in_comptime(@src());
-    const result = condition.match(T, .uninit());
-    // std.debug.print("\nresult: {any}\n", .{result});
-    return result.final_match();
+    return condition.match(T);
 }
 
 test type_match {
     const Test = Root.Testing;
 
-    const check_is_less_than_42_bits = comptime type_match(u32, .kind(.must_be_int(.with_bits(.less_than(42)))));
-    const check_is_less_than_24_bits = comptime type_match(u32, .kind(.must_be_int(.with_bits(.less_than(24)))));
+    const check_is_less_than_42_bits = comptime type_match(u32, .kind(.is(.int_kind(.with_bits(.less_than(42))))));
+    const check_is_less_than_24_bits = comptime type_match(u32, .kind(.is(.int_kind(.with_bits(.less_than(24))))));
     try Test.expect_true_src(check_is_less_than_42_bits, @src(), "", .{});
     try Test.expect_false_src(check_is_less_than_24_bits, @src(), "", .{});
+
+    const PetKind = enum(u8) { CAT, DOG };
+
+    const Pet = struct {
+        kind: PetKind,
+        age: u8 = 1,
+        fixed: bool = false,
+    };
+
+    const Person = struct {
+        name: []const u8 = "<DEFAULT>",
+        age: u32 = 0,
+        pets: []const Pet = &.{},
+        married: bool = false,
+
+        pub const JOHN = @This(){
+            .age = 33,
+            .name = "John",
+            .pets = &.{
+                Pet{
+                    .kind = .CAT,
+                    .age = 2,
+                    .fixed = true,
+                },
+                Pet{
+                    .kind = .DOG,
+                    .age = 8,
+                    .fixed = false,
+                },
+            },
+        };
+
+        pub const EMPTY: []const @This() = &.{};
+    };
+
+    const check_person_exact = comptime type_match(Person, .type_is(Person));
+    const check_person_shape = comptime type_match(Person, .kind(.is(.struct_kind(StructMatcher{
+        .is_tuple = .equals(false),
+        .layout = .equals(.auto),
+        .backing_integer = .is_null(),
+        .fields = .with_exactly_these_fields(&.{
+            .field_name_type_and_default_string("name", "<DEFAULT>"),
+            .field_name_type_and_default("age", u32, &@as(u32, 0)),
+            .field_name_and_type("pets", []const Pet),
+            .field_name_and_kind("married", .is(.bool_kind())),
+        }),
+        .decls = .with_exactly_these_decls(&.{
+            .decl_name_type_and_value("JOHN", Person, &Person.JOHN),
+            .decl_name_and_kind("EMPTY", .is(.pointer_kind(.{}))),
+        }),
+    }))));
+
+    try Test.expect_true_src(check_person_exact, @src(), "", .{});
+    try Test.expect_true_src(check_person_shape, @src(), "", .{});
 }

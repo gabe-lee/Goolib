@@ -46,7 +46,7 @@ const Kind = Types.Kind;
 const KindInfo = Types.KindInfo;
 
 pub fn fmt_src_loc(comptime src: std.builtin.SourceLocation) []const u8 {
-    return "Zig → " ++ src.module ++ " → " ++ src.fn_name ++ "(...):" ++ std.fmt.comptimePrint("{d}", .{src.line}) ++ ":" ++ std.fmt.comptimePrint("{d}", .{src.column});
+    return "Zig → " ++ src.module ++ " → " ++ src.file ++ ":" ++ std.fmt.comptimePrint("{d}", .{src.line}) ++ ":" ++ std.fmt.comptimePrint("{d}", .{src.column});
 }
 
 pub const HEX_PREFIX = "0x";
