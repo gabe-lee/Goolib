@@ -353,12 +353,13 @@ const INFER = struct {
     const ROTATE_FROM_SWAP = F.SWAP;
     const ROTATE_FROM_GET_SET = F.GET | F.SET;
 
-    const MOVE_ONE_FROM_GET_SET = F.GET | F.SET | F.NEXT_INDEX | F.PREV_INDEX;
-
     const MOVE_FROM_ROTATE = F.ROTATE_RANGE_LEFT | F.ROTATE_RANGE_RIGHT;
     const MOVE_FROM_REVERSE = F.REVERSE_RANGE;
     const MOVE_FROM_SWAP = F.SWAP;
     const MOVE_FROM_GET_SET = F.GET | F.SET;
+
+    const MOVE_ONE_FROM_GET_SET = F.GET | F.SET | F.NEXT_INDEX | F.PREV_INDEX;
+    const MOVE_ONE_FROM_MOVE_BLOCK = F.MOVE_BLOCK_PRESERVE;
 };
 
 pub fn native_type_data_manipulation_package(comptime DATA_STRUCTURE: type, comptime ELEM: type) type {
@@ -1645,10 +1646,10 @@ pub const DataManipulationPackage = struct {
                             fn unusable(_: DATA_, _: USERDATA_) COUNT_ {
                                 assert_unreachable(@src(), "no `set_len` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
                             }
-                            fn select(comptime FLAGS_: FuncFlags) T_FN_GET {
+                            fn select(comptime FLAGS_: FuncFlags) T_FN_SET_LEN {
                                 comptime {
                                     if (FLAGS_.has(F.SET_LEN)) return func.SET_LEN.?;
-                                    return if (ALLOW_DEFAULT) default_len else unusable;
+                                    return if (ALLOW_DEFAULT) default_set_len else unusable;
                                 }
                             }
                         };
@@ -1791,6 +1792,10 @@ pub const DataManipulationPackage = struct {
                             }
                         };
                         const MOVE_ONE_PRESERVE = struct {
+                            fn infer_move_block(data: DATA_, old_id: ID_, new_id: ID_, userdata: USERDATA_) DATA_ {
+                                const MOVE_BLOCK = comptime MOVE_BLOCK_PRESERVE.select(FLAGS);
+                                return MOVE_BLOCK(data, old_id, old_id, new_id, userdata);
+                            }
                             fn infer_get_set(data: DATA_, old_id: ID_, new_id: ID_, userdata: USERDATA_) DATA_ {
                                 assert_valid(data, old_id, userdata, @src());
                                 assert_valid(data, new_id, userdata, @src());
@@ -1848,6 +1853,7 @@ pub const DataManipulationPackage = struct {
                                 comptime {
                                     if (FLAGS_.has(F.MOVE_ONE_PRESERVE)) return func.MOVE_ONE_PRESERVE.?;
                                     if (FLAGS_.has(INFER.MOVE_ONE_FROM_GET_SET)) return infer_get_set;
+                                    if (FLAGS_.has(INFER.MOVE_ONE_FROM_MOVE_BLOCK)) return infer_move_block;
                                     if (FLAGS_.has_any(&.{ INFER.MOVE_FROM_GET_SET, INFER.MOVE_FROM_REVERSE, INFER.MOVE_FROM_SWAP, INFER.MOVE_FROM_ROTATE })) return infer_rotate;
                                     return if (ALLOW_DEFAULT) default_move_one_preserve else unusable;
                                 }
@@ -1879,7 +1885,7 @@ pub const DataManipulationPackage = struct {
                                 return new_data;
                             }
                             fn unusable(_: DATA_, _: ID_, _: ID_, _: ID_, _: USERDATA_) DATA_ {
-                                assert_unreachable(@src(), "no `move_elemen_block_preserve_displaced_elements` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
+                                assert_unreachable(@src(), "no `move_element_block_preserve_displaced_elements` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
                             }
                             fn select(comptime FLAGS_: FuncFlags) T_FN_MOVE_BLOCK_PRESERVE {
                                 comptime {
@@ -2011,27 +2017,56 @@ pub const DataManipulationPackage = struct {
             }
             pub fn Finalize(comptime FUNCS: DEF_WITH_FUNCS) type {
                 return struct {
-                    pub const DEF = DEF__;
-                    pub const HAS_USERDATA = DEF.USERDATA != void;
+                    pub const DEF = CORE_DEF_;
                     pub const DATA = DEF.DATA;
                     pub const ID = DEF.ID;
                     pub const ELEM = DEF.ELEM;
-                    pub const COUNT_INT = DEF.COUNT_INT;
+                    pub const COUNT = DEF.COUNT_INT;
                     pub const USERDATA = DEF.USERDATA;
 
-                    pub const get = FUNCS.GET;
-                    pub const set = FUNCS.SET;
-                    pub const swap = FUNCS.SWAP;
-                    pub const less_than = FUNCS.LESS_THAN;
-                    pub const less_than_or_equal = FUNCS.LESS_THAN_OR_EQUAL;
-                    pub const greater_than = FUNCS.GREATER_THAN;
-                    pub const greater_than_or_equal = FUNCS.GREATER_THAN_OR_EQUAL;
-                    pub const order_equals = FUNCS.ORDER_EQUALS;
-                    pub const exact_equals = FUNCS.EXACT_EQUALS;
+                    pub const get: fn (DATA, ID, USERDATA) ELEM = FUNCS.GET;
+                    pub const get_ptr: fn (DATA, ID, USERDATA) *ELEM = FUNCS.GET_PTR;
+                    pub const get_const_ptr: fn (DATA, ID, USERDATA) *const ELEM = FUNCS.GET_CONST_PTR;
+                    pub const get_field = FUNCS.GET_FIELD;
+                    pub const get_field_ptr = FUNCS.GET_FIELD_PTR;
+                    pub const get_field_const_ptr = FUNCS.GET_FIELD_CONST_PTR;
+                    pub const set: fn (DATA, ID, ELEM, USERDATA) DATA = FUNCS.SET;
+                    pub const set_field = FUNCS.SET_FIELD;
+                    pub const get_len: fn (DATA, USERDATA) COUNT = FUNCS.GET_LEN;
+                    pub const set_len: fn (DATA, new_len: COUNT, USERDATA) DATA = FUNCS.SET_LEN;
+                    pub const id_valid: fn (DATA, ID, USERDATA) bool = FUNCS.VALID_ID;
+                    pub const id_less_than_id: fn (DATA, a: ID, b: ID, USERDATA) bool = FUNCS.ID_LESS_THAN_ID;
+                    pub const id_less_than_or_equal_id: fn (DATA, a: ID, b: ID, USERDATA) bool = FUNCS.ID_LESS_THAN_OR_EQUAL_ID;
+                    pub const first_id: fn (DATA, USERDATA) ID = FUNCS.FIRST_ID;
+                    pub const last_id: fn (DATA, USERDATA) ID = FUNCS.LAST_ID;
+                    pub const nth_id_from_start: fn (DATA, n: COUNT, USERDATA) ID = FUNCS.NTH_ID_FROM_START;
+                    pub const nth_id_from_end: fn (DATA, n: COUNT, USERDATA) ID = FUNCS.NTH_ID_FROM_END;
+                    pub const next_id: fn (DATA, curr_id: ID, USERDATA) ID = FUNCS.NEXT_ID;
+                    pub const prev_id: fn (DATA, curr_id: ID, USERDATA) ID = FUNCS.PREV_ID;
+                    pub const nth_next_id: fn (DATA, curr_id: ID, n: COUNT, USERDATA) ID = FUNCS.NTH_NEXT_ID;
+                    pub const nth_prev_id: fn (DATA, curr_id: ID, n: COUNT, USERDATA) ID = FUNCS.NTH_PREV_ID;
+                    pub const range_len: fn (DATA, first: ID, last: ID, USERDATA) COUNT = FUNCS.RANGE_LEN;
+                    pub const swap: fn (DATA, a: ID, b: ID, USERDATA) DATA = FUNCS.SWAP;
+                    pub const less_than: fn (a: ELEM, b: ELEM, USERDATA) bool = FUNCS.LESS_THAN;
+                    pub const less_than_or_equal: fn (a: ELEM, b: ELEM, USERDATA) bool = FUNCS.LESS_THAN_OR_EQUAL;
+                    pub const greater_than: fn (a: ELEM, b: ELEM, USERDATA) bool = FUNCS.GREATER_THAN;
+                    pub const greater_than_or_equal: fn (a: ELEM, b: ELEM, USERDATA) bool = FUNCS.GREATER_THAN_OR_EQUAL;
+                    pub const order_equals: fn (a: ELEM, b: ELEM, USERDATA) bool = FUNCS.ORDER_EQUALS;
+                    pub const exact_equals: fn (a: ELEM, b: ELEM, USERDATA) bool = FUNCS.EXACT_EQUALS;
+                    pub const reverse_range: fn (DATA, first: ID, last: ID, USERDATA) DATA = FUNCS.REVERSE_RANGE;
+                    pub const rotate_range_left: fn (DATA, first: ID, last: ID, COUNT, USERDATA) DATA = FUNCS.ROTATE_LEFT;
+                    pub const rotate_range_right: fn (DATA, first: ID, last: ID, COUNT, USERDATA) DATA = FUNCS.ROTATE_RIGHT;
+                    pub const move_one_displace_others: fn (DATA, old_id: ID, new_id: ID, USERDATA) DATA = FUNCS.MOVE_ONE_PRESERVE;
+                    pub const move_range_displace_others: fn (DATA, old_first: ID, old_last: ID, new_first: ID, USERDATA) DATA = FUNCS.MOVE_BLOCK_PRESERVE;
+                    pub const scramble: fn (DATA, rand: Random, first: ID, last: ID, iterations: COUNT, USERDATA) DATA = FUNCS.SCRAMBLE;
 
-                    pub fn swap_already_have_b(data: DATA, idx_a: IDX, idx_b: IDX, val_b: ELEM, userdata: USERDATA) DATA {
-                        const new_data = set(data, idx_b, get(data, idx_a, userdata), userdata);
-                        return set(new_data, idx_a, val_b, userdata);
+                    pub fn start_end_excl_len(data: DATA, start: ID, end_excl: ID, userdata: USERDATA) COUNT {
+                        return range_len(data, start, prev_id(data, end_excl, userdata), userdata);
+                    }
+
+                    pub fn swap_already_have_b(data: DATA, id_a: ID, id_b: ID, val_b: ELEM, userdata: USERDATA) DATA {
+                        const new_data = set(data, id_b, get(data, id_a, userdata), userdata);
+                        return set(new_data, id_a, val_b, userdata);
                     }
 
                     pub const USERDATA_UNINIT = if (USERDATA == void) void{} else undefined;
@@ -2073,7 +2108,7 @@ pub const DataManipulationPackage = struct {
                         /// Otherwise fallback to heapsort.
                         FALLBACK_WHEN_DEGENERATE_INSERTION_SORT_MAX_INPUT_LEN: comptime_int = 128,
                     };
-
+                    //CHECKPOINT fix these for new API
                     pub const SortInputs = if (HAS_USERDATA) struct {
                         data: DATA,
                         start: IDX = 0,
