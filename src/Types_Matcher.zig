@@ -1196,7 +1196,10 @@ test type_match {
     try Test.expect_true_src(check_is_less_than_42_bits, @src(), "", .{});
     try Test.expect_false_src(check_is_less_than_24_bits, @src(), "", .{});
 
-    const PetKind = enum(u8) { CAT, DOG };
+    const PetKind = enum(u8) {
+        CAT,
+        DOG,
+    };
 
     const Pet = struct {
         kind: PetKind,
