@@ -202,6 +202,39 @@ pub const ManySameOrderExpectation = enum(u8) {
     USE_HOARE_2_WAY_PARTITION,
 };
 
+const FIELD_FUNCS_EXAMPLE =
+    \\pub const MyStruct = struct{{
+    \\  my_writable_field: u32,
+    \\  my_readonly_field: []const u8,
+    \\}};
+    \\
+    \\pub const FieldFuncs = struct{{
+    \\  pub const my_writable_field = struct{{
+    \\    pub const FIELD_TYPE: type = u32;
+    \\    pub fn get(data: DATA, id: ID, userdata: USERDATA) FIELD_TYPE {{
+    \\      return data[id].my_writable_field;
+    \\    }}
+    \\    pub fn get_ptr(data: DATA, id: ID, userdata: USERDATA) *FIELD_TYPE {{
+    \\      return &data[id].my_writable_field;
+    \\    }}
+    \\    pub fn get_const_ptr(data: DATA, id: ID, userdata: USERDATA) *FIELD_TYPE {{
+    \\      return &data[id].my_writable_field;
+    \\    }}
+    \\    pub fn set(data: DATA, id: ID, val: FIELD_TYPE, userdata: USERDATA) DATA {{
+    \\      data[id].my_writable_field = val;
+    \\      return data;
+    \\    }}
+    \\  }};
+    \\  
+    \\  pub const my_readonly_field = struct {{
+    \\    pub const FIELD_TYPE: type = []const u8;
+    \\    pub fn get(data: DATA, id: ID, userdata: USERDATA) FIELD_TYPE {{
+    \\      return data[id].my_readonly_field;
+    \\    }}
+    \\  }};
+    \\}};
+;
+
 pub const FieldTyper = fn (comptime field: []const u8) type;
 pub fn GetFn(comptime DATA_STRUCTURE: type, comptime IDX_TYPE: type, comptime ELEM_TYPE: type, comptime USERDATA_TYPE: type) type {
     return fn (data: DATA_STRUCTURE, idx: IDX_TYPE, userdata: USERDATA_TYPE) ELEM_TYPE;
@@ -311,16 +344,16 @@ const F = struct {
     const INVALID_ID_BEFORE: CUSTOM_FLAG = 1 << 47;
 };
 const FuncFlags = struct {
-    flags: CUSTOM_FLAG = 0,
+    raw: CUSTOM_FLAG = 0,
 
     fn add_if_not_null(comptime flags: *FuncFlags, comptime flag: CUSTOM_FLAG, comptime not_null: anytype) void {
         if (not_null != null) {
-            flags.flags |= flag;
+            flags.raw |= flag;
         }
     }
 
     fn has(comptime flags: FuncFlags, comptime flag: CUSTOM_FLAG) bool {
-        return (flags & flag) == flag;
+        return (flags.raw & flag) == flag;
     }
     fn has_any(comptime flags: FuncFlags, comptime any_flag: []const CUSTOM_FLAG) bool {
         inline for (any_flag) |flag| {
@@ -471,17 +504,17 @@ pub fn native_data_structure_manipulation_package(comptime DATA_STRUCTURE: type,
         .COUNT_INT = usize,
         .USERDATA = void,
     };
-    return core.CustomFunctions(.NONE).with_custom_functions(true, .{}).Finalize();
+    return core.WithCoreAccesFuncs(.NONE).select_functions(true, .{}, {}).Finalize(void, {});
 }
 
 pub fn contiguous_memory_manipulation_package_using_core_access(comptime CORE_DEF: DataManipulationPackage, comptime CORE_ACCESS: CORE_DEF.CoreAccessFuncs()) type {
-    return CORE_DEF.CustomFunctions(CORE_ACCESS).with_custom_functions(true, .{});
+    return CORE_DEF.WithCoreAccesFuncs(CORE_ACCESS).select_functions(true, .{}, {}).Finalize(void, {});
 }
-pub fn custom_memory_manipulation_package_no_defaults(comptime CORE_DEF: DataManipulationPackage, comptime CUSTOM_FUNCS: CORE_DEF.CustomFunctions(.NONE)) type {
-    return CORE_DEF.CustomFunctions(.NONE).with_custom_functions(false, CUSTOM_FUNCS);
+pub fn custom_memory_manipulation_package_no_defaults(comptime CORE_DEF: DataManipulationPackage, comptime CUSTOM_FUNCS: CORE_DEF.WithCoreAccesFuncs(.NONE), comptime CUSTOM_FIELD_FUNCS: anytype) type {
+    return CORE_DEF.WithCoreAccesFuncs(.NONE).select_functions(false, CUSTOM_FUNCS, CUSTOM_FIELD_FUNCS).Finalize(@TypeOf(CUSTOM_FIELD_FUNCS), CUSTOM_FIELD_FUNCS);
 }
-pub fn custom_memory_manipulation_package_default_fallbacks_with_core_access(comptime CORE_DEF: DataManipulationPackage, comptime CORE_ACCESS: CORE_DEF.CoreAccessFuncs(), comptime CUSTOM_FUNCS: CORE_DEF.CustomFunctions(CORE_ACCESS)) type {
-    return CORE_DEF.CustomFunctions(CORE_ACCESS).with_custom_functions(true, CUSTOM_FUNCS);
+pub fn custom_memory_manipulation_package_default_fallbacks_with_core_access(comptime CORE_DEF: DataManipulationPackage, comptime CORE_ACCESS: CORE_DEF.CoreAccessFuncs(), comptime CUSTOM_FUNCS: CORE_DEF.WithCoreAccesFuncs(CORE_ACCESS), comptime CUSTOM_FIELD_FUNCS: anytype) type {
+    return CORE_DEF.WithCoreAccesFuncs(CORE_ACCESS).select_functions(true, CUSTOM_FUNCS, CUSTOM_FIELD_FUNCS).Finalize(@TypeOf(CUSTOM_FIELD_FUNCS), CUSTOM_FIELD_FUNCS);
 }
 
 pub const DataManipulationPackage = struct {
@@ -516,6 +549,7 @@ pub const DataManipulationPackage = struct {
     pub fn CoreAccessFuncs(comptime CORE_DEF: DataManipulationPackage) type {
         return struct {
             get_base_ptr: ?fn (data: CORE_DEF.DATA, userdata: CORE_DEF.USERDATA) [*]CORE_DEF.ELEM = null,
+            get_bast_ptr_const: ?fn (data: CORE_DEF.DATA, userdata: CORE_DEF.USERDATA) [*]const CORE_DEF.ELEM = null,
             set_base_ptr: ?fn (data: CORE_DEF.DATA, ptr: [*]CORE_DEF.ELEM, userdata: CORE_DEF.USERDATA) CORE_DEF.DATA = null,
             get_len: ?fn (data: CORE_DEF.DATA, userdata: CORE_DEF.USERDATA) CORE_DEF.COUNT_INT = null,
             set_len: ?fn (data: CORE_DEF.DATA, len: CORE_DEF.COUNT_INT, userdata: CORE_DEF.USERDATA) CORE_DEF.DATA = null,
@@ -526,7 +560,7 @@ pub const DataManipulationPackage = struct {
         };
     }
 
-    pub fn CustomFunctions(comptime CORE_DEF_: DataManipulationPackage, comptime CORE_ACCESS_FUNCS: CORE_DEF_.CoreAccessFuncs()) type {
+    pub fn WithCoreAccesFuncs(comptime CORE_DEF_: DataManipulationPackage, comptime CORE_ACCESS_FUNCS: CORE_DEF_.CoreAccessFuncs()) type {
         return struct {
             const DEF_WITH_FUNCS = @This();
             pub const CORE_DEF = CORE_DEF_;
@@ -536,194 +570,42 @@ pub const DataManipulationPackage = struct {
             pub const ID_ = CORE_DEF.ID;
             pub const USERDATA_ = CORE_DEF.USERDATA;
 
-            pub const FieldInfo = Types.extract_struct_union_or_dummy_field_info(ELEM_);
-            const TYPE_FOR_FIELD: fn (comptime INFO: @TypeOf(FieldInfo), comptime field: []const u8) type = FieldInfo.type_for_field;
-            pub fn TypeForField(comptime field: []const u8) type {
-                return FieldInfo.type_for_field(field);
-            }
-            const FieldInfoAsStructInfo_: Types.StructInfo(FieldInfo.field_names.len) = FieldInfo.to_struct_info();
-            // CHECKPOINT //FIXME Fix this for use with function bodies... function bodies cannot be put into arrays and the rebuild with `@Struct()`
-            const FieldGettersStructInfo = make: {
-                var getters = FieldInfoAsStructInfo_;
-                for (getters.field_names[0..], getters.field_types[0..], getters.field_attrs[0..]) |NAME, *FT, *ATTR| {
-                    const PROTO = struct {
-                        fn default_get(data: DATA_, id: ID_, userdata: USERDATA_) *FT.* {
-                            return @field(&default_get_base_ptr(data, userdata)[id], NAME);
-                        }
-                        const FN = fn (DATA_, ID_, USERDATA_) FT.*;
-                    };
-                    FT.* = PROTO.FN;
-                    ATTR.@"align" = @alignOf(PROTO.FN);
-                    ATTR.@"comptime" = false;
-                    ATTR.default_value_ptr = @ptrCast(&PROTO.default_get);
-                }
-                break :make getters;
-            };
-            pub const FieldGetters = FieldGettersStructInfo.build_struct_type();
-            pub const DefaultFieldGetters = FieldGetters{};
-
-            const FieldCustomGettersStructInfo = make: {
-                var getters = FieldInfoAsStructInfo_;
-                for (getters.field_types[0..], getters.field_attrs[0..]) |*FT, *ATTR| {
-                    const FN = fn (DATA_, ID_, USERDATA_) FT.*;
-                    FT.* = FN;
-                    ATTR.@"align" = @alignOf(FN);
-                    ATTR.@"comptime" = false;
-                    ATTR.default_value_ptr = @ptrCast(&null);
-                }
-                break :make getters;
-            };
-            pub const FieldCustomGetters = FieldCustomGettersStructInfo.build_struct_type();
-
-            const FieldPtrGettersStructInfo = make: {
-                var getters = FieldInfoAsStructInfo_;
-                for (getters.field_names[0..], getters.field_types[0..], getters.field_attrs[0..]) |NAME, *FT, *ATTR| {
-                    const PROTO = struct {
-                        fn default_get_ptr(data: DATA_, id: ID_, userdata: USERDATA_) *FT.* {
-                            return &@field(&default_get_base_ptr(data, userdata)[id], NAME);
-                        }
-                        const FN = fn (DATA_, ID_, USERDATA_) *FT.*;
-                    };
-                    FT.* = PROTO.FN;
-                    ATTR.@"align" = @alignOf(PROTO.FN);
-                    ATTR.@"comptime" = false;
-                    ATTR.default_value_ptr = @ptrCast(&PROTO.default_get_ptr);
-                }
-                break :make getters;
-            };
-            pub const FieldPtrGetters = FieldPtrGettersStructInfo.build_struct_type();
-            pub const DefaultFieldPtrGetters = FieldPtrGetters{};
-
-            const FieldOptPtrGettersStructInfo = make: {
-                var getters = FieldInfoAsStructInfo_;
-                for (getters.field_types[0..], getters.field_attrs[0..]) |*FT, *ATTR| {
-                    const FN = fn (DATA_, ID_, USERDATA_) *FT.*;
-                    FT.* = FN;
-                    ATTR.@"align" = @alignOf(FN);
-                    ATTR.@"comptime" = false;
-                    ATTR.default_value_ptr = @ptrCast(&null);
-                }
-                break :make getters;
-            };
-            pub const FieldCustomPtrGetters = FieldOptPtrGettersStructInfo.build_struct_type();
-
-            const FieldConstPtrGettersStructInfo = make: {
-                var getters = FieldInfoAsStructInfo_;
-                for (getters.field_names[0..], getters.field_types[0..], getters.field_attrs[0..]) |NAME, *FT, *ATTR| {
-                    const PROTO = struct {
-                        fn default_get_const_ptr(data: DATA_, id: ID_, userdata: USERDATA_) *const FT.* {
-                            return &@field(&default_get_base_ptr(data, userdata)[id], NAME);
-                        }
-                        const FN = fn (DATA_, ID_, USERDATA_) *const FT.*;
-                    };
-                    FT.* = PROTO.FN;
-                    ATTR.@"align" = @alignOf(PROTO.FN);
-                    ATTR.@"comptime" = false;
-                    ATTR.default_value_ptr = @ptrCast(&PROTO.default_get_const_ptr);
-                }
-                break :make getters;
-            };
-            pub const FieldConstPtrGetters = FieldConstPtrGettersStructInfo.build_struct_type();
-            pub const DefaultFieldConstPtrGetters = FieldConstPtrGetters{};
-
-            const FieldOptConstPtrGettersStructInfo = make: {
-                var getters = FieldInfoAsStructInfo_;
-                for (getters.field_types[0..], getters.field_attrs[0..]) |*FT, *ATTR| {
-                    const FN = fn (DATA_, ID_, USERDATA_) *const FT.*;
-                    FT.* = FN;
-                    ATTR.@"align" = @alignOf(FN);
-                    ATTR.@"comptime" = false;
-                    ATTR.default_value_ptr = @ptrCast(&null);
-                }
-                break :make getters;
-            };
-            pub const FieldCustomConstPtrGetters = FieldOptConstPtrGettersStructInfo.build_struct_type();
-
-            const FieldSettersStructInfo = make: {
-                var setters = FieldInfoAsStructInfo_;
-                for (setters.field_names[0..], setters.field_types[0..], setters.field_attrs[0..]) |NAME, *TYPE, *ATTR| {
-                    const PROTO = struct {
-                        fn default_set(data: DATA_, id: ID_, val: TYPE.*, userdata: USERDATA_) DATA_ {
-                            @field(&default_get_base_ptr(data, userdata)[id], NAME) = val;
-                            return data;
-                        }
-                        const FN = fn (DATA_, ID_, TYPE.*, USERDATA_) DATA_;
-                    };
-                    TYPE.* = PROTO.FN;
-                    ATTR.@"align" = @alignOf(PROTO.FN);
-                    ATTR.@"comptime" = false;
-                    ATTR.default_value_ptr = &PROTO.default_set;
-                }
-                break :make setters;
-            };
-            pub const FieldSetters = FieldSettersStructInfo.build_struct_type();
-            pub const DefaultFieldSetters = FieldSetters{};
-
-            const FieldOptSettersStructInfo = make: {
-                var setters = FieldInfoAsStructInfo_;
-                for (setters.field_types[0..], setters.field_attrs[0..]) |*TYPE, *ATTR| {
-                    const FN = fn (DATA_, ID_, TYPE.*, USERDATA_) DATA_;
-                    TYPE.* = FN;
-                    ATTR.@"align" = @alignOf(FN);
-                    ATTR.@"comptime" = false;
-                    ATTR.default_value_ptr = @ptrCast(&null);
-                }
-                break :make setters;
-            };
-            pub const FieldCustomSetters = FieldOptSettersStructInfo.build_struct_type();
-
-            const FieldFlagsStructInfo = make: {
-                var flags_info = FieldInfoAsStructInfo_;
-                for (flags_info.field_types[0..], flags_info.field_attrs[0..]) |*TYPE, *ATTR| {
-                    TYPE.* = FuncFlags;
-                    ATTR.@"align" = @alignOf(FuncFlags);
-                    ATTR.@"comptime" = false;
-                    ATTR.default_value_ptr = @ptrCast(&FuncFlags{});
-                }
-                break :make flags_info;
-            };
-            pub const FieldFlags = FieldFlagsStructInfo.build_struct_type();
-
-            ID_LESS_THAN: T_FN_ID_LESS_THAN = default_id_less_than,
-            ID_LESS_THAN_OR_EQUAL: T_FN_ID_LESS_THAN_OR_EQUAL = default_id_less_than_or_equal,
-            ID_GREATER_THAN: T_FN_ID_GREATER_THAN = default_id_greater_than,
-            ID_GREATER_THAN_OR_EQUAL: T_FN_ID_GREATER_THAN_OR_EQUAL = default_id_greater_than_or_equal,
-            ID_EQUALS: T_FN_ID_EQUALS = default_id_equals,
-            ID_VALID: T_FN_ID_VALID = default_id_valid,
-            ID_INVALID_AFTER: T_FN_ID_INVALID_AFTER = default_id_invalid_after,
-            ID_INVALID_BEFORE: T_FN_ID_INVALID_BEFORE = default_id_invalid_before,
-            FIRST_ID: T_FN_FIRST_ID = default_first_index,
-            LAST_ID: T_FN_LAST_ID = default_last_index,
-            NTH_ID_FROM_START: T_FN_NTH_ID_FROM_START = default_nth_index_from_start,
-            NTH_ID_FROM_END: T_FN_NTH_ID_FROM_END = default_nth_index_from_end,
-            PREV_ID: T_FN_PREV_ID = default_prev_idx,
-            NEXT_ID: T_FN_NEXT_ID = default_next_idx,
-            NTH_PREV_ID: T_FN_PREV_ID = default_nth_prev_idx,
-            NTH_NEXT_ID: T_FN_NEXT_ID = default_nth_next_idx,
-            GET_LEN: T_FN_LEN = default_len,
-            SET_LEN: T_FN_SET_LEN = default_set_len,
-            RANGE_LEN: T_FN_RANGE_LEN = default_range_len,
-            GET: T_FN_GET = default_get,
-            GET_PTR: T_FN_GET_PTR = default_get_ptr,
-            GET_CONST_PTR: T_FN_GET_CONST_PTR = default_get_const_ptr,
-            GET_FIELD: FieldGetters = .{},
-            GET_FIELD_PTR: FieldPtrGetters = .{},
-            GET_FIELD_CONST_PTR: FieldConstPtrGetters = .{},
-            SET: T_FN_SET = default_set,
-            SET_FIELD: FieldSetters = .{},
-            SWAP: T_FN_SWAP = default_swap,
-            GREATER_THAN: T_FN_GREATER_THAN = default_greater_than,
-            GREATER_THAN_OR_EQUAL: T_FN_GREATER_THAN_OR_EQUAL = default_greater_than_or_equal,
-            LESS_THAN: T_FN_LESS_THAN = default_less_than,
-            LESS_THAN_OR_EQUAL: T_FN_LESS_THAN_OR_EQUAL = default_less_than_or_equal,
-            ORDER_EQUALS: T_FN_EQUALS = default_equals,
-            EXACT_EQUALS: T_FN_EQUALS = default_equals,
-            REVERSE_RANGE: T_FN_REVERSE = default_reverse_range,
-            MOVE_ONE_PRESERVE: T_FN_MOVE_ONE_PRESERVE = default_move_one_preserve,
-            MOVE_BLOCK_PRESERVE: T_FN_MOVE_BLOCK_PRESERVE = default_move_block_preserve,
-            ROTATE_RIGHT: T_FN_ROTATE_RIGHT = default_rotate_range_right,
-            ROTATE_LEFT: T_FN_ROTATE_LEFT = default_rotate_range_left,
-            SCRAMBLE: T_FN_SCRAMBLE = default_scramble,
+            ID_LESS_THAN: FN_ID_COMPARE,
+            ID_LESS_THAN_OR_EQUAL: FN_ID_COMPARE,
+            ID_GREATER_THAN: FN_ID_COMPARE,
+            ID_GREATER_THAN_OR_EQUAL: FN_ID_COMPARE,
+            ID_EQUALS: FN_ID_COMPARE,
+            ID_VALID: FN_ID_CHECK,
+            ID_INVALID_AFTER: FN_IMPLICIT_ID,
+            ID_INVALID_BEFORE: FN_IMPLICIT_ID,
+            FIRST_ID: FN_IMPLICIT_ID,
+            LAST_ID: FN_IMPLICIT_ID,
+            NTH_ID_FROM_START: FN_IMPLICIT_NTH_ID,
+            NTH_ID_FROM_END: FN_IMPLICIT_NTH_ID,
+            PREV_ID: FN_ADJACENT_ID,
+            NEXT_ID: FN_ADJACENT_ID,
+            NTH_PREV_ID: FN_NTH_ID,
+            NTH_NEXT_ID: FN_NTH_ID,
+            GET_LEN: FN_IMPLICIT_COUNT,
+            SET_LEN: FN_SET_COUNT,
+            RANGE_LEN: FN_RANGE_COUNT,
+            GET: FN_GET,
+            GET_PTR: FN_GET_PTR,
+            GET_CONST_PTR: FN_GET_CONST_PTR,
+            SET: FN_SET,
+            SWAP: FN_SWAP,
+            GREATER_THAN: FN_ELEM_COMPARE,
+            GREATER_THAN_OR_EQUAL: FN_ELEM_COMPARE,
+            LESS_THAN: FN_ELEM_COMPARE,
+            LESS_THAN_OR_EQUAL: FN_ELEM_COMPARE,
+            ORDER_EQUALS: FN_ELEM_COMPARE,
+            EXACT_EQUALS: FN_ELEM_COMPARE,
+            REVERSE_RANGE: FN_RANGE_OP,
+            MOVE_ONE_PRESERVE: FN_RANGE_OP,
+            MOVE_BLOCK_PRESERVE: FN_MOVE_BLOCK,
+            ROTATE_RIGHT: FN_ROTATE,
+            ROTATE_LEFT: FN_ROTATE,
+            SCRAMBLE: FN_SCRAMBLE,
 
             fn default_get_base_ptr(data: DATA_, userdata: USERDATA_) [*]ELEM_ {
                 if (comptime CORE_ACCESS_FUNCS.get_base_ptr) |get_base| {
@@ -741,7 +623,29 @@ pub const DataManipulationPackage = struct {
                     } else {
                         unreachable;
                     }
-                } else if (comptime Types.type_is_slice(DATA_)) {
+                } else if (comptime Types.type_is_slice(DATA_) and !KindInfo.get_kind_info(DATA_).POINTER.is_const) {
+                    return @ptrCast(data.ptr);
+                } else {
+                    unreachable;
+                }
+            }
+            fn default_get_base_ptr_const(data: DATA_, userdata: USERDATA_) [*]const ELEM_ {
+                if (comptime CORE_ACCESS_FUNCS.get_base_ptr) |get_base| {
+                    return get_base(data, userdata);
+                }
+                if (comptime Types.type_is_struct(DATA_)) {
+                    if (comptime @hasField(DATA_, "items")) {
+                        if (comptime @hasField(@FieldType(DATA_, "items"), "ptr")) {
+                            return @ptrCast(data.items.ptr);
+                        } else {
+                            unreachable;
+                        }
+                    } else if (comptime @hasField(DATA_, "ptr")) {
+                        return @ptrCast(data.ptr);
+                    } else {
+                        unreachable;
+                    }
+                } else if (comptime Types.type_is_slice(DATA_) and KindInfo.get_kind_info(DATA_).POINTER.is_const) {
                     return @ptrCast(data.ptr);
                 } else {
                     unreachable;
@@ -771,44 +675,6 @@ pub const DataManipulationPackage = struct {
                 }
                 return new_data;
             }
-
-            const T_FN_ID_LESS_THAN = @TypeOf(default_id_less_than);
-            fn default_id_less_than(_: DATA_, id_a: ID_, id_b: ID_, _: USERDATA_) bool {
-                return id_a < id_b;
-            }
-            const T_FN_ID_LESS_THAN_OR_EQUAL = @TypeOf(default_id_less_than_or_equal);
-            fn default_id_less_than_or_equal(_: DATA_, id_a: ID_, id_b: ID_, _: USERDATA_) bool {
-                return id_a <= id_b;
-            }
-            const T_FN_ID_GREATER_THAN = @TypeOf(default_id_greater_than);
-            fn default_id_greater_than(_: DATA_, id_a: ID_, id_b: ID_, _: USERDATA_) bool {
-                return id_a > id_b;
-            }
-            const T_FN_ID_GREATER_THAN_OR_EQUAL = @TypeOf(default_id_greater_than_or_equal);
-            fn default_id_greater_than_or_equal(_: DATA_, id_a: ID_, id_b: ID_, _: USERDATA_) bool {
-                return id_a >= id_b;
-            }
-            const T_FN_ID_EQUALS = @TypeOf(default_id_equals);
-            fn default_id_equals(_: DATA_, id_a: ID_, id_b: ID_, _: USERDATA_) bool {
-                return id_a == id_b;
-            }
-            const T_FN_ID_VALID = @TypeOf(default_id_valid);
-            fn default_id_valid(data: DATA_, id: ID_, userdata: USERDATA_) bool {
-                return 0 <= id and id < default_len(data, userdata);
-            }
-            const T_FN_ID_INVALID_AFTER = @TypeOf(default_id_invalid_after);
-            fn default_id_invalid_after(data: DATA_, userdata: USERDATA_) ID_ {
-                return @intCast(default_len(data, userdata));
-            }
-            const T_FN_ID_INVALID_BEFORE = @TypeOf(default_id_invalid_before);
-            fn default_id_invalid_before(_: DATA_, _: USERDATA_) ID_ {
-                return @intCast(math.maxInt(COUNT_));
-            }
-            const T_FN_FIRST_ID = @TypeOf(default_first_index);
-            fn default_first_index(_: DATA_, _: USERDATA_) ID_ {
-                return 0;
-            }
-            const T_FN_LEN = @TypeOf(default_len);
             fn default_len(data: DATA_, userdata: USERDATA_) COUNT_ {
                 if (comptime CORE_ACCESS_FUNCS.get_len) |get_len| {
                     return get_len(data, userdata);
@@ -831,7 +697,6 @@ pub const DataManipulationPackage = struct {
                     unreachable;
                 }
             }
-            const T_FN_SET_LEN = @TypeOf(default_set_len);
             fn default_set_len(data: DATA_, new_len: COUNT_, userdata: USERDATA_) DATA_ {
                 if (comptime CORE_ACCESS_FUNCS.set_len) |set_len| {
                     return set_len(data, new_len, userdata);
@@ -856,1450 +721,1295 @@ pub const DataManipulationPackage = struct {
                 }
                 return new_data;
             }
-            const T_FN_NTH_ID_FROM_START = @TypeOf(default_nth_index_from_start);
-            fn default_nth_index_from_start(_: DATA_, n: ID_, _: USERDATA_) ID_ {
-                return n;
-            }
-            const T_FN_LAST_ID = @TypeOf(default_last_index);
-            fn default_last_index(data: DATA_, userdata: USERDATA_) ID_ {
-                return default_len(data, userdata) - 1;
-            }
-            const T_FN_NTH_ID_FROM_END = @TypeOf(default_nth_index_from_end);
-            fn default_nth_index_from_end(data: DATA_, n: COUNT_, userdata: USERDATA_) ID_ {
-                return default_len(data, userdata) - 1 - n;
-            }
-            const T_FN_PREV_ID = @TypeOf(default_prev_idx);
-            fn default_prev_idx(_: DATA_, curr: ID_, _: USERDATA_) ID_ {
-                return curr - 1;
-            }
-            const T_FN_NEXT_ID = @TypeOf(default_next_idx);
-            fn default_next_idx(_: DATA_, curr: ID_, _: USERDATA_) ID_ {
-                return curr + 1;
-            }
-            const T_FN_NTH_PREV_ID = @TypeOf(default_nth_prev_idx);
-            fn default_nth_prev_idx(_: DATA_, curr: ID_, n: COUNT_, _: USERDATA_) ID_ {
-                return curr - n;
-            }
-            const T_FN_NTH_NEXT_ID = @TypeOf(default_nth_next_idx);
-            fn default_nth_next_idx(_: DATA_, curr: ID_, n: COUNT_, _: USERDATA_) ID_ {
-                return curr + n;
-            }
-            const T_FN_RANGE_LEN = @TypeOf(default_range_len);
-            fn default_range_len(_: DATA_, first: ID_, last: ID_, _: USERDATA_) ID_ {
-                return (last + 1) - first;
-            }
-            const T_FN_VALID_ID = @TypeOf(default_valid_id);
-            fn default_valid_id(data: DATA_, id: ID_, userdata: USERDATA_) bool {
-                return id >= 0 and id < default_len(data, userdata);
-            }
-            const T_FN_GET = @TypeOf(default_get);
-            fn default_get(data: DATA_, id: ID_, userdata: USERDATA_) ELEM_ {
-                return default_get_base_ptr(data, userdata)[id];
-            }
-            const T_FN_GET_PTR = @TypeOf(default_get_ptr);
-            fn default_get_ptr(data: DATA_, id: ID_, userdata: USERDATA_) *ELEM_ {
-                return &default_get_base_ptr(data, userdata)[id];
-            }
-            const T_FN_GET_CONST_PTR = @TypeOf(default_get_const_ptr);
-            fn default_get_const_ptr(data: DATA_, id: ID_, userdata: USERDATA_) *const ELEM_ {
-                return &default_get_base_ptr(data, userdata)[id];
-            }
-            const T_FN_SET = @TypeOf(default_set);
-            fn default_set(data: DATA_, id: ID_, val: ELEM_, userdata: USERDATA_) DATA_ {
-                const new_data = data;
-                default_get_base_ptr(new_data, userdata)[id] = val;
-                return new_data;
-            }
-            const T_FN_SWAP = @TypeOf(default_swap);
-            fn default_swap(data: DATA_, id_a: ID_, id_b: ID_, userdata: USERDATA_) DATA_ {
-                var new_data = data;
-                const tmp = default_get(new_data, id_b, userdata);
-                new_data = default_set(new_data, id_b, default_get(new_data, id_a, userdata), userdata);
-                new_data = default_set(new_data, id_a, tmp, userdata);
-                return new_data;
-            }
-            const T_FN_GREATER_THAN = @TypeOf(default_greater_than);
-            fn default_greater_than(val_a: ELEM_, val_b: ELEM_, _: USERDATA_) bool {
-                return val_a > val_b;
-            }
-            const T_FN_GREATER_THAN_OR_EQUAL = @TypeOf(default_greater_than_or_equal);
-            fn default_greater_than_or_equal(val_a: ELEM_, val_b: ELEM_, _: USERDATA_) bool {
-                return val_a >= val_b;
-            }
-            const T_FN_LESS_THAN = @TypeOf(default_less_than);
-            fn default_less_than(val_a: ELEM_, val_b: ELEM_, _: USERDATA_) bool {
-                return val_a < val_b;
-            }
-            const T_FN_LESS_THAN_OR_EQUAL = @TypeOf(default_less_than_or_equal);
-            fn default_less_than_or_equal(val_a: ELEM_, val_b: ELEM_, _: USERDATA_) bool {
-                return val_a <= val_b;
-            }
-            const T_FN_EQUALS = @TypeOf(default_equals);
-            fn default_equals(val_a: ELEM_, val_b: ELEM_, _: USERDATA_) bool {
-                return val_a == val_b;
-            }
-            const T_FN_REVERSE = @TypeOf(default_reverse_range);
-            fn default_reverse_range(data: DATA_, first: ID_, last: ID_, userdata: USERDATA_) DATA_ {
-                const new_data = data;
-                Utils.Mem.reverse_slice(default_get_base_ptr(new_data, userdata)[first .. last + 1]);
-                return new_data;
-            }
-            const T_FN_MOVE_ONE_PRESERVE = @TypeOf(default_move_one_preserve);
-            fn default_move_one_preserve(data: DATA_, old_id: ID_, new_id: ID_, userdata: USERDATA_) DATA_ {
-                assert_with_reason(old_id < default_len(data, userdata), @src(), "index {d} out of range for len {d}", .{ old_id, default_len(data, userdata) });
-                assert_with_reason(new_id < default_len(data, userdata), @src(), "index {d} out of range for len {d}", .{ new_id, default_len(data, userdata) });
-                var new_data = data;
-                if (old_id == new_id) return data;
-                if (old_id < new_id) {
-                    const old_val = default_get(data, old_id, userdata);
-                    var i = old_id;
-                    var ii = i;
-                    while (i != new_id) {
-                        i += 1;
-                        const val_to_move = default_get(data, i, userdata);
-                        new_data = default_set(new_data, ii, val_to_move, userdata);
-                        ii = i;
-                    }
-                    new_data = default_set(new_data, new_id, old_val, userdata);
-                } else {
-                    const old_val = default_get(data, old_id, userdata);
-                    var i = old_id;
-                    var ii = i;
-                    while (i != new_id) {
-                        i -= 1;
-                        const val_to_move = default_get(data, i, userdata);
-                        new_data = default_set(new_data, ii, val_to_move, userdata);
-                        ii = i;
-                    }
-                    new_data = default_set(new_data, new_id, old_val, userdata);
-                }
-                return new_data;
-            }
-            const T_FN_MOVE_BLOCK_PRESERVE = @TypeOf(default_move_block_preserve);
-            fn default_move_block_preserve(data: DATA_, first_old_id: ID_, last_old_id: ID_, new_first_id: ID_, userdata: USERDATA_) DATA_ {
-                assert_with_reason(first_old_id < default_len(data, userdata), @src(), "index {d} out of range for len {d}", .{ first_old_id, default_len(data, userdata) });
-                assert_with_reason(last_old_id < default_len(data, userdata), @src(), "index {d} out of range for len {d}", .{ last_old_id, default_len(data, userdata) });
-                assert_with_reason(new_first_id < default_len(data, userdata), @src(), "index {d} out of range for len {d}", .{ new_first_id, default_len(data, userdata) });
-                assert_with_reason(first_old_id <= last_old_id, @src(), "first id must be <= last id (by data order), got `{any}` > `{any}`", .{ first_old_id, last_old_id });
-                var new_data = data;
-                if (first_old_id == new_first_id) return data;
-                const block_len = (last_old_id + 1) - first_old_id;
-                if (first_old_id < new_first_id) {
-                    const new_last_id = new_first_id + (block_len - 1);
-                    assert_with_reason(new_last_id < default_len(data, userdata), @src(), "index {d} out of range for len {d}", .{ new_last_id, default_len(data, userdata) });
-                    const delta = new_first_id - first_old_id;
-                    new_data = default_rotate_range_left(data, first_old_id, new_last_id, delta, userdata);
-                } else {
-                    const delta = first_old_id - new_first_id;
-                    new_data = default_rotate_range_right(data, new_first_id, last_old_id, delta, userdata);
-                }
-                return new_data;
-            }
-            const T_FN_ROTATE_RIGHT = @TypeOf(default_rotate_range_right);
-            fn default_rotate_range_right(data: DATA_, first: ID_, last: ID_, count: COUNT_, userdata: USERDATA_) DATA_ {
-                if (last < first) return data;
-                const end_exl = last + 1;
-                const len = end_exl - first;
-                const shift = count % len;
-                if (shift == 0) return data;
-                const edge = first + (len - shift);
-                Utils.Mem.reverse_slice(default_get_base_ptr(data, userdata)[first..edge]);
-                Utils.Mem.reverse_slice(default_get_base_ptr(data, userdata)[edge..end_exl]);
-                Utils.Mem.reverse_slice(default_get_base_ptr(data, userdata)[first..end_exl]);
-                return data;
-            }
-            const T_FN_ROTATE_LEFT = @TypeOf(default_rotate_range_left);
-            fn default_rotate_range_left(data: DATA_, first: ID_, last: ID_, count: COUNT_, userdata: USERDATA_) DATA_ {
-                if (last < first) return data;
-                const end_exl = last + 1;
-                const len = end_exl - first;
-                const shift = count % len;
-                if (shift == 0) return data;
-                const edge = first + shift;
-                Utils.Mem.reverse_slice(default_get_base_ptr(data, userdata)[first..edge]);
-                Utils.Mem.reverse_slice(default_get_base_ptr(data, userdata)[edge..end_exl]);
-                Utils.Mem.reverse_slice(default_get_base_ptr(data, userdata)[first..end_exl]);
-                return data;
-            }
-            const T_FN_SCRAMBLE = @TypeOf(default_scramble);
-            fn default_scramble(data: DATA_, rand: Random, first: ID_, last: ID_, iterations: COUNT_, userdata: USERDATA_) DATA_ {
-                var new_data = data;
-                const span = (last + 1) - first;
-                if (span <= 1) return data;
-                if (span == 2) {
-                    if (rand.boolean()) {
-                        return default_swap(data, first, last);
-                    }
-                }
-                var n: COUNT_ = 0;
-                const first_idx = rand.intRangeAtMost(ID_, first, last);
-                const first_val = default_get(data, first_idx, userdata);
-                var empty_idx: ID_ = first_idx;
-                while (n < iterations) : (n += 1) {
-                    const move_idx = find_different_idx: {
-                        while (true) {
-                            const possible_different = rand.intRangeAtMost(ID_, first_idx, last);
-                            if (possible_different != empty_idx) break :find_different_idx possible_different;
-                        }
-                    };
-                    new_data = default_set(data, empty_idx, default_get(data, move_idx, userdata), userdata);
-                    empty_idx = move_idx;
-                }
-                return default_set(new_data, empty_idx, first_val, userdata);
-            }
+
             const DEFAULT_ALWAYS_INVALID_ID: ID_ = if (Types.type_is_int(ID_)) math.maxInt(ID_) else if (Types.type_is_optional(ID_)) null else undefined;
 
+            pub const FN_ID_COMPARE = fn (DATA_, ID_, ID_, USERDATA_) bool;
+            pub const FN_ID_CHECK = fn (DATA_, ID_, USERDATA_) bool;
+            pub const FN_ELEM_COMPARE = fn (ELEM_, ELEM_, USERDATA_) bool;
+            pub const FN_IMPLICIT_ID = fn (DATA_, USERDATA_) ID_;
+            pub const FN_IMPLICIT_NTH_ID = fn (DATA_, COUNT_, USERDATA_) ID_;
+            pub const FN_NTH_ID = fn (DATA_, ID_, COUNT_, USERDATA_) ID_;
+            pub const FN_ADJACENT_ID = fn (DATA_, ID_, USERDATA_) ID_;
+            pub const FN_IMPLICIT_COUNT = fn (DATA_, USERDATA_) COUNT_;
+            pub const FN_SET_COUNT = fn (DATA_, COUNT_, USERDATA_) DATA_;
+            pub const FN_RANGE_COUNT = fn (DATA_, ID_, ID_, USERDATA_) COUNT_;
+            pub const FN_GET = fn (DATA_, ID_, USERDATA_) ELEM_;
+            pub const FN_GET_PTR = fn (DATA_, ID_, USERDATA_) *ELEM_;
+            pub const FN_GET_CONST_PTR = fn (DATA_, ID_, USERDATA_) *const ELEM_;
+            pub const FN_SET = fn (DATA_, ID_, ELEM_, USERDATA_) DATA_;
+            pub const FN_SWAP = fn (DATA_, ID_, ID_, USERDATA_) DATA_;
+            pub const FN_RANGE_OP = fn (DATA_, ID_, ID_, USERDATA_) DATA_;
+            pub const FN_MOVE_BLOCK = fn (DATA_, ID_, ID_, ID_, USERDATA_) DATA_;
+            pub const FN_ROTATE = fn (DATA_, ID_, ID_, COUNT_, USERDATA_) DATA_;
+            pub const FN_SCRAMBLE = fn (DATA_, Random, ID_, ID_, COUNT_, USERDATA_) DATA_;
+
             pub const CustomDataFuncs = struct {
-                ID_LESS_THAN: ?T_FN_ID_LESS_THAN = null,
-                ID_LESS_THAN_OR_EQUAL: ?T_FN_ID_LESS_THAN_OR_EQUAL = null,
-                ID_GREATER_THAN: ?T_FN_ID_GREATER_THAN = null,
-                ID_GREATER_THAN_OR_EQUAL: ?T_FN_ID_GREATER_THAN_OR_EQUAL = null,
-                ID_EQUALS: ?T_FN_ID_EQUALS = null,
-                VALID_ID: ?T_FN_VALID_ID = null,
-                INVALID_ID_AFTER: ?T_FN_ID_INVALID_AFTER = null,
-                INVALID_ID_BEFORE: ?T_FN_ID_INVALID_BEFORE = null,
-                GET: ?T_FN_GET = null,
-                GET_PTR: ?T_FN_GET_PTR = null,
-                GET_PTR_CONST: ?T_FN_GET_CONST_PTR = null,
-                SET: ?T_FN_SET = null,
-                FIELD_GET: FieldCustomGetters = .{},
-                FIELD_GET_PTR: FieldCustomPtrGetters = .{},
-                FIELD_GET_CONST_PTR: FieldCustomConstPtrGetters = .{},
-                FIELD_SET: FieldCustomSetters = .{},
-                SWAP: ?T_FN_SWAP = null,
-                LESS_THAN: ?T_FN_LESS_THAN = null,
-                LESS_THAN_OR_EQUAL: ?T_FN_LESS_THAN_OR_EQUAL = null,
-                GREATER_THAN: ?T_FN_GREATER_THAN = null,
-                GREATER_THAN_OR_EQUAL: ?T_FN_GREATER_THAN_OR_EQUAL = null,
-                ORDER_EQUALS: ?T_FN_EQUALS = null,
-                EXACT_EQUALS: ?T_FN_EQUALS = null,
-                FIRST_ID: ?T_FN_FIRST_ID = null,
-                LAST_ID: ?T_FN_LAST_ID = null,
-                NTH_ID_FROM_START: ?T_FN_NTH_ID_FROM_START = null,
-                NTH_ID_FROM_END: ?T_FN_NTH_ID_FROM_END = null,
-                NEXT_ID: ?T_FN_NEXT_ID = null,
-                PREV_ID: ?T_FN_PREV_ID = null,
-                NTH_PREV_ID: ?T_FN_NTH_PREV_ID = null,
-                NTH_NEXT_ID: ?T_FN_NTH_NEXT_ID = null,
-                GET_LEN: ?T_FN_LEN = null,
-                SET_LEN: ?T_FN_SET_LEN = null,
-                RANGE_LEN: ?T_FN_RANGE_LEN = null,
-                REVERSE_RANGE: ?T_FN_REVERSE = null,
-                MOVE_ONE_PRESERVE: ?T_FN_MOVE_ONE_PRESERVE = null,
-                MOVE_BLOCK_PRESERVE: ?T_FN_MOVE_BLOCK_PRESERVE = null,
-                ROTATE_RANGE_RIGHT: ?T_FN_ROTATE_RIGHT = null,
-                ROTATE_RANGE_LEFT: ?T_FN_ROTATE_LEFT = null,
-                SCRAMBLE: ?T_FN_SCRAMBLE = null,
+                ID_LESS_THAN: ?FN_ID_COMPARE = null,
+                ID_LESS_THAN_OR_EQUAL: ?FN_ID_COMPARE = null,
+                ID_GREATER_THAN: ?FN_ID_COMPARE = null,
+                ID_GREATER_THAN_OR_EQUAL: ?FN_ID_COMPARE = null,
+                ID_EQUALS: ?FN_ID_COMPARE = null,
+                VALID_ID: ?FN_ID_CHECK = null,
+                INVALID_ID_AFTER: ?FN_IMPLICIT_ID = null,
+                INVALID_ID_BEFORE: ?FN_IMPLICIT_ID = null,
+                GET: ?FN_GET = null,
+                GET_PTR: ?FN_GET_PTR = null,
+                GET_PTR_CONST: ?FN_GET_CONST_PTR = null,
+                SET: ?FN_SET = null,
+                SWAP: ?FN_SWAP = null,
+                LESS_THAN: ?FN_ELEM_COMPARE = null,
+                LESS_THAN_OR_EQUAL: ?FN_ELEM_COMPARE = null,
+                GREATER_THAN: ?FN_ELEM_COMPARE = null,
+                GREATER_THAN_OR_EQUAL: ?FN_ELEM_COMPARE = null,
+                ORDER_EQUALS: ?FN_ELEM_COMPARE = null,
+                EXACT_EQUALS: ?FN_ELEM_COMPARE = null,
+                FIRST_ID: ?FN_IMPLICIT_ID = null,
+                LAST_ID: ?FN_IMPLICIT_ID = null,
+                NTH_ID_FROM_START: ?FN_IMPLICIT_NTH_ID = null,
+                NTH_ID_FROM_END: ?FN_IMPLICIT_NTH_ID = null,
+                NEXT_ID: ?FN_ADJACENT_ID = null,
+                PREV_ID: ?FN_ADJACENT_ID = null,
+                NTH_PREV_ID: ?FN_NTH_ID = null,
+                NTH_NEXT_ID: ?FN_NTH_ID = null,
+                GET_LEN: ?FN_IMPLICIT_COUNT = null,
+                SET_LEN: ?FN_SET_COUNT = null,
+                RANGE_LEN: ?FN_RANGE_COUNT = null,
+                REVERSE_RANGE: ?FN_RANGE_OP = null,
+                MOVE_ONE_PRESERVE: ?FN_RANGE_OP = null,
+                MOVE_BLOCK_PRESERVE: ?FN_MOVE_BLOCK = null,
+                ROTATE_RANGE_RIGHT: ?FN_ROTATE = null,
+                ROTATE_RANGE_LEFT: ?FN_ROTATE = null,
+                SCRAMBLE: ?FN_SCRAMBLE = null,
             };
 
-            pub fn with_custom_functions(comptime ALLOW_DEFAULT: bool, comptime func: CustomDataFuncs) DEF_WITH_FUNCS {
+            pub fn FunctionSelector(comptime CUSTOM: CustomDataFuncs, comptime FLAGS: FuncFlags, comptime ALLOW_DEFAULT: bool) type {
+                return struct {
+                    const ALWAYS_INVALID = if (CUSTOM.ALWAYS_INVALID_ID) |INVALID| INVALID else DEFAULT_ALWAYS_INVALID_ID;
+                    const INVALID_ID_AFTER = struct {
+                        const func: FN_IMPLICIT_ID = if (CUSTOM.INVALID_ID_AFTER) |cust| cust //
+                            else if (ALLOW_DEFAULT) default else unusable;
+                        fn default(data: DATA_, userdata: USERDATA_) ID_ {
+                            return @intCast(GET_LEN.default(data, userdata));
+                        }
+                        fn unusable(_: DATA_, _: USERDATA_) bool {
+                            assert_unreachable(@src(), "no `invalid_id_after` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
+                        }
+                    };
+                    const INVALID_ID_BEFORE = struct {
+                        const func: FN_IMPLICIT_ID = if (CUSTOM.INVALID_ID_BEFORE) |cust| cust //
+                            else if (ALLOW_DEFAULT) default else unusable;
+                        fn default(_: DATA_, _: USERDATA_) ID_ {
+                            return @intCast(math.maxInt(COUNT_));
+                        }
+                        fn unusable(_: DATA_, _: USERDATA_) bool {
+                            assert_unreachable(@src(), "no `invalid_id_before` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
+                        }
+                    };
+                    const ID_VALID = struct {
+                        const func: FN_ID_CHECK = if (CUSTOM.VALID_ID) |cust| cust //
+                            else if (FLAGS.has(INFER.VALID_ID.FROM_FIRST_LAST_LTEQ)) infer_lteq //
+                            else if (FLAGS.has(INFER.VALID_ID.FROM_FIRST_LAST_GTEQ)) infer_gteq //
+                            else if (FLAGS.has(INFER.VALID_ID.FROM_FIRST_LAST_LT_EQ)) infer_lt_eq //
+                            else if (FLAGS.has(INFER.VALID_ID.FROM_FIRST_LAST_GT_EQ)) infer_gt_eq //
+                            else if (ALLOW_DEFAULT) default else unusable;
+                        fn default(data: DATA_, id: ID_, userdata: USERDATA_) bool {
+                            return 0 <= id and id < GET_LEN.default(data, userdata);
+                        }
+                        fn infer_lteq(data: DATA_, id: ID_, userdata: USERDATA_) bool {
+                            const LTEQ = ID_LESS_THAN_OR_EQUAL.func;
+                            const FIRST = FIRST_ID.func;
+                            const LAST = LAST_ID.func;
+                            const first = FIRST(data, userdata);
+                            const last = LAST(data, userdata);
+                            return LTEQ(data, first, id, userdata) and LTEQ(data, id, last, userdata);
+                        }
+                        fn infer_gteq(data: DATA_, id: ID_, userdata: USERDATA_) bool {
+                            const GTEQ = ID_GREATER_THAN_OR_EQUAL.func;
+                            const FIRST = FIRST_ID.func;
+                            const LAST = LAST_ID.func;
+                            const first = FIRST(data, userdata);
+                            const last = LAST(data, userdata);
+                            return GTEQ(data, id, first, userdata) and GTEQ(data, last, id, userdata);
+                        }
+                        fn infer_lt_eq(data: DATA_, id: ID_, userdata: USERDATA_) bool {
+                            const LT = ID_LESS_THAN.func;
+                            const EQ = ID_EQUALS.func;
+                            const FIRST = FIRST_ID.func;
+                            const LAST = LAST_ID.func;
+                            const first = FIRST(data, userdata);
+                            const last = LAST(data, userdata);
+                            return (LT(data, first, id, userdata) or (EQ(data, first, id, userdata))) and (LT(data, id, last, userdata) or EQ(data, id, last, userdata));
+                        }
+                        fn infer_gt_eq(data: DATA_, id: ID_, userdata: USERDATA_) bool {
+                            const GT = ID_GREATER_THAN.func;
+                            const EQ = ID_EQUALS.func;
+                            const FIRST = FIRST_ID.func;
+                            const LAST = LAST_ID.func;
+                            const first = FIRST(data, userdata);
+                            const last = LAST(data, userdata);
+                            return (GT(data, id, first, userdata) or (EQ(data, first, id, userdata))) and (GT(data, last, id, userdata) or EQ(data, id, last, userdata));
+                        }
+                        fn unusable(_: DATA_, _: ID_, _: USERDATA_) bool {
+                            assert_unreachable(@src(), "no `valid_id` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
+                        }
+                    };
+
+                    fn assert_valid_id(data: DATA_, id: ID_, userdata: USERDATA_, comptime src: SourceLocation) bool {
+                        const VALID = ID_VALID.func;
+                        assert_with_reason(VALID(data, id, userdata), src, "id `{any}` is not valid for the current data structure state", .{id});
+                    }
+                    const ID_LESS_THAN = struct {
+                        const T_FN = @TypeOf(default);
+                        const func: FN_ID_COMPARE = if (CUSTOM.ID_LESS_THAN) |cust| cust //
+                            else if (FLAGS.has(INFER.ID_LT.FROM_GTEQ)) infer_gteq //
+                            else if (FLAGS.has(INFER.ID_LT.FROM_GT_EQ)) infer_gt_eq //
+                            else if (ALLOW_DEFAULT) default else unusable;
+                        fn default(_: DATA_, id_a: ID_, id_b: ID_, _: USERDATA_) bool {
+                            return id_a < id_b;
+                        }
+                        fn infer_gteq(data: DATA_, id_a: ID_, id_b: ID_, userdata: USERDATA_) bool {
+                            const GTEQ = ID_GREATER_THAN_OR_EQUAL.func;
+                            return !GTEQ(data, id_a, id_b, userdata);
+                        }
+                        fn infer_gt_eq(data: DATA_, id_a: ID_, id_b: ID_, userdata: USERDATA_) bool {
+                            const GT = ID_GREATER_THAN.func;
+                            const EQ = ID_EQUALS.func;
+                            return !GT(data, id_a, id_b, userdata) and !EQ(data, id_a, id_b, userdata);
+                        }
+                        fn unusable(_: DATA_, _: ID_, _: ID_, _: USERDATA_) bool {
+                            assert_unreachable(@src(), "no `id_a less than id_b` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
+                        }
+                    };
+                    const ID_LESS_THAN_OR_EQUAL = struct {
+                        const func: FN_ID_COMPARE = if (CUSTOM.ID_LESS_THAN_OR_EQUAL) |cust| cust //
+                            else if (FLAGS.has(INFER.ID_LTEQ.FROM_GT)) infer_gt //
+                            else if (FLAGS.has(INFER.ID_LTEQ.FROM_LT_EQ)) infer_lt_eq //
+                            else if (ALLOW_DEFAULT) default else unusable;
+                        fn default(_: DATA_, id_a: ID_, id_b: ID_, _: USERDATA_) bool {
+                            return id_a <= id_b;
+                        }
+                        fn infer_gt(data: DATA_, id_a: ID_, id_b: ID_, userdata: USERDATA_) bool {
+                            const GT = ID_GREATER_THAN.func;
+                            return !GT(data, id_a, id_b, userdata);
+                        }
+                        fn infer_lt_eq(data: DATA_, id_a: ID_, id_b: ID_, userdata: USERDATA_) bool {
+                            const LT = ID_LESS_THAN.func;
+                            const EQ = ID_EQUALS.func;
+                            return LT(data, id_a, id_b, userdata) or EQ(data, id_a, id_b, userdata);
+                        }
+                        fn unusable(_: DATA_, _: ID_, _: ID_, _: USERDATA_) ELEM_ {
+                            assert_unreachable(@src(), "no `id_a less than or equal id_b` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
+                        }
+                    };
+                    const ID_GREATER_THAN = struct {
+                        const func: FN_ID_COMPARE = if (CUSTOM.ID_GREATER_THAN) |cust| cust //
+                            else if (FLAGS.has(INFER.ID_GT.FROM_LTEQ)) infer_lteq //
+                            else if (FLAGS.has(INFER.ID_GT.FROM_LT_EQ)) infer_lt_eq //
+                            else if (ALLOW_DEFAULT) default else unusable;
+                        fn default(_: DATA_, id_a: ID_, id_b: ID_, _: USERDATA_) bool {
+                            return id_a > id_b;
+                        }
+                        fn infer_lteq(data: DATA_, id_a: ID_, id_b: ID_, userdata: USERDATA_) bool {
+                            const LTEQ = ID_LESS_THAN_OR_EQUAL.func;
+                            return !LTEQ(data, id_a, id_b, userdata);
+                        }
+                        fn infer_lt_eq(data: DATA_, id_a: ID_, id_b: ID_, userdata: USERDATA_) bool {
+                            const LT = ID_LESS_THAN.func;
+                            const EQ = ID_EQUALS.func;
+                            return !LT(data, id_a, id_b, userdata) and !EQ(data, id_a, id_b, userdata);
+                        }
+                        fn unusable(_: DATA_, _: ID_, _: ID_, _: USERDATA_) ELEM_ {
+                            assert_unreachable(@src(), "no `id_a greater than id_b` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
+                        }
+                    };
+                    const ID_GREATER_THAN_OR_EQUAL = struct {
+                        const func: FN_ID_COMPARE = if (CUSTOM.ID_GREATER_THAN_OR_EQUAL) |cust| cust //
+                            else if (FLAGS.has(INFER.ID_GTEQ.FROM_LT)) infer_lt //
+                            else if (FLAGS.has(INFER.ID_GTEQ.FROM_GT_EQ)) infer_gt_eq //
+                            else if (ALLOW_DEFAULT) default else unusable;
+                        fn default(_: DATA_, id_a: ID_, id_b: ID_, _: USERDATA_) bool {
+                            return id_a >= id_b;
+                        }
+                        fn infer_lt(data: DATA_, id_a: ID_, id_b: ID_, userdata: USERDATA_) bool {
+                            const LT = ID_LESS_THAN.func;
+                            return !LT(data, id_a, id_b, userdata);
+                        }
+                        fn infer_gt_eq(data: DATA_, id_a: ID_, id_b: ID_, userdata: USERDATA_) bool {
+                            const GT = ID_GREATER_THAN.func;
+                            const EQ = ID_EQUALS.func;
+                            return GT(data, id_a, id_b, userdata) or EQ(data, id_a, id_b, userdata);
+                        }
+                        fn unusable(_: DATA_, _: ID_, _: ID_, _: USERDATA_) ELEM_ {
+                            assert_unreachable(@src(), "no `id_a greater than or equal id_b` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
+                        }
+                    };
+                    const ID_EQUALS = struct {
+                        const func: FN_ID_COMPARE = if (CUSTOM.ID_EQUALS) |cust| cust //
+                            else if (FLAGS.has(INFER.ID_EQ.FROM_GT_LT)) infer_gt_lt //
+                            else if (ALLOW_DEFAULT) default else unusable;
+                        fn default(_: DATA_, id_a: ID_, id_b: ID_, _: USERDATA_) bool {
+                            return id_a == id_b;
+                        }
+                        fn infer_gt_lt(data: DATA_, id_a: ID_, id_b: ID_, userdata: USERDATA_) bool {
+                            const GT = ID_GREATER_THAN.func;
+                            const LT = ID_LESS_THAN.func;
+                            return !GT(data, id_a, id_b, userdata) and !LT(data, id_a, id_b, userdata);
+                        }
+                        fn unusable(_: DATA_, _: ID_, _: ID_, _: USERDATA_) ELEM_ {
+                            assert_unreachable(@src(), "no `id_a less than or equal id_b` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
+                        }
+                    };
+                    const GET = struct {
+                        const func: FN_GET = if (CUSTOM.GET) |cust| cust //
+                            else if (FLAGS.has(INFER.GET.FROM_PTR)) infer_ptr //
+                            else if (FLAGS.has(INFER.GET.FROM_CONST_PTR)) infer_const_ptr //
+                            else if (ALLOW_DEFAULT) default else unusable;
+                        fn default(data: DATA_, id: ID_, userdata: USERDATA_) ELEM_ {
+                            return default_get_base_ptr_const(data, userdata)[id];
+                        }
+                        fn infer_ptr(data: DATA_, id: ID_, userdata: USERDATA_) ELEM_ {
+                            assert_valid_id(data, id, userdata, @src());
+                            return CUSTOM.GET_PTR.?(data, id, userdata).*;
+                        }
+                        fn infer_const_ptr(data: DATA_, id: ID_, userdata: USERDATA_) ELEM_ {
+                            assert_valid_id(data, id, userdata, @src());
+                            return CUSTOM.GET_PTR_CONST.?(data, id, userdata).*;
+                        }
+                        fn unusable(_: DATA_, _: ID_, _: USERDATA_) ELEM_ {
+                            assert_unreachable(@src(), "no `get` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
+                        }
+                    };
+                    const GET_PTR = struct {
+                        const func: FN_GET_PTR = if (CUSTOM.GET_PTR) |cust| cust //
+                            else if (ALLOW_DEFAULT) default else unusable;
+                        const T_FN_GET_PTR = @TypeOf(default);
+                        fn default(data: DATA_, id: ID_, userdata: USERDATA_) *ELEM_ {
+                            return &default_get_base_ptr(data, userdata)[id];
+                        }
+                        fn unusable(_: DATA_, _: ID_, _: USERDATA_) *ELEM_ {
+                            assert_unreachable(@src(), "no `get_ptr` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
+                        }
+                    };
+                    const GET_CONST_PTR = struct {
+                        const func: FN_GET_CONST_PTR = if (CUSTOM.GET_PTR_CONST) |cust| cust //
+                            else if (FLAGS.has(INFER.CONST_PTR.FROM_PTR)) infer_ptr //
+                            else if (ALLOW_DEFAULT) default else unusable;
+                        fn default(data: DATA_, id: ID_, userdata: USERDATA_) *const ELEM_ {
+                            return &default_get_base_ptr_const(data, userdata)[id];
+                        }
+                        fn infer_ptr(data: DATA_, id: ID_, userdata: USERDATA_) *const ELEM_ {
+                            assert_valid_id(data, id, userdata, @src());
+                            return CUSTOM.GET_PTR.?(data, id, userdata);
+                        }
+                        fn unusable(_: DATA_, _: ID_, _: USERDATA_) *const ELEM_ {
+                            assert_unreachable(@src(), "no `get_const_ptr` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
+                        }
+                    };
+                    const SET = struct {
+                        const func: FN_SET = if (CUSTOM.SET) |cust| cust //
+                            else if (FLAGS.has(INFER.SET.FROM_PTR)) infer_ptr //
+                            else if (ALLOW_DEFAULT) default else unusable;
+                        fn default(data: DATA_, id: ID_, val: ELEM_, userdata: USERDATA_) DATA_ {
+                            const new_data = data;
+                            default_get_base_ptr(new_data, userdata)[id] = val;
+                            return new_data;
+                        }
+                        fn infer_ptr(data: DATA_, id: ID_, val: ELEM_, userdata: USERDATA_) DATA_ {
+                            assert_valid_id(data, id, userdata, @src());
+                            CUSTOM.GET_PTR.?(data, id, userdata).* = val;
+                            return data;
+                        }
+                        fn unusable(_: DATA_, _: ID_, _: ELEM_, _: USERDATA_) DATA_ {
+                            assert_unreachable(@src(), "no `set` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
+                        }
+                    };
+                    const SWAP = struct {
+                        const func: FN_SWAP = if (CUSTOM.SWAP) |cust| cust //
+                            else if (FLAGS.has(INFER.SWAP.FROM_PTR)) infer_ptr //
+                            else if (FLAGS.has(INFER.SWAP.FROM_GET_SET)) infer_get_set //
+                            else if (ALLOW_DEFAULT) default else unusable;
+                        fn default(data: DATA_, id_a: ID_, id_b: ID_, userdata: USERDATA_) DATA_ {
+                            var new_data = data;
+                            const tmp = GET.default(new_data, id_b, userdata);
+                            new_data = SET.default(new_data, id_b, GET.default(new_data, id_a, userdata), userdata);
+                            new_data = SET.default(new_data, id_a, tmp, userdata);
+                            return new_data;
+                        }
+                        fn infer_ptr(data: DATA_, id_a: ID_, id_b: ID_, userdata: USERDATA_) DATA_ {
+                            assert_valid_id(data, id_a, userdata, @src());
+                            assert_valid_id(data, id_b, userdata, @src());
+                            const GET_PTR_ = GET_PTR.func;
+                            const ptr_a = GET_PTR_(data, id_a, userdata);
+                            const ptr_b = GET_PTR_(data, id_b, userdata);
+                            const tmp = ptr_b.*;
+                            ptr_b.* = ptr_a.*;
+                            ptr_a.* = tmp;
+                            return data;
+                        }
+                        fn infer_get_set(data: DATA_, id_a: ID_, id_b: ID_, userdata: USERDATA_) DATA_ {
+                            const GET_ = GET.func;
+                            const SET_ = SET.func;
+                            assert_valid_id(data, id_a, userdata, @src());
+                            assert_valid_id(data, id_b, userdata, @src());
+                            const tmp = GET_(data, id_b, userdata);
+                            const data_2 = SET_(data, id_b, GET_(data, id_a, userdata), userdata);
+                            return SET_(data_2, id_a, tmp, userdata);
+                        }
+                        fn unusable(_: DATA_, _: ID_, _: ID_, _: USERDATA_) DATA_ {
+                            assert_unreachable(@src(), "no `swap` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
+                        }
+                    };
+                    const LESS_THAN = struct {
+                        const func: FN_ELEM_COMPARE = if (CUSTOM.LESS_THAN) |cust| cust //
+                            else if (FLAGS.has(INFER.LT.FROM_GTEQ)) infer_gteq //
+                            else if (FLAGS.has(INFER.LT.FROM_GT_OQ)) infer_gt_oq //
+                            else if (FLAGS.has(INFER.LT.FROM_GT_EQ)) infer_gt_eq //
+                            else if (ALLOW_DEFAULT) default else unusable;
+                        fn default(val_a: ELEM_, val_b: ELEM_, _: USERDATA_) bool {
+                            return val_a < val_b;
+                        }
+                        fn infer_gteq(val_a: ELEM_, val_b: ELEM_, userdata: USERDATA_) bool {
+                            const GTEQ = GREATER_THAN_OR_EQUAL.func;
+                            return !GTEQ(val_a, val_b, userdata);
+                        }
+                        fn infer_gt_eq(val_a: ELEM_, val_b: ELEM_, userdata: USERDATA_) bool {
+                            const GT = GREATER_THAN.func;
+                            const EQ = EXACT_EQUAL.func;
+                            return !GT(val_a, val_b, userdata) and !EQ(val_a, val_b, userdata);
+                        }
+                        fn infer_gt_oq(val_a: ELEM_, val_b: ELEM_, userdata: USERDATA_) bool {
+                            const GT = GREATER_THAN.func;
+                            const OQ = ORDER_EQUAL.func;
+                            return !GT(val_a, val_b, userdata) and !OQ(val_a, val_b, userdata);
+                        }
+                        fn unusable(_: ELEM_, _: ELEM_, _: USERDATA_) bool {
+                            assert_unreachable(@src(), "no `less_than` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
+                        }
+                    };
+                    const LESS_THAN_OR_EQUAL = struct {
+                        const func: FN_ELEM_COMPARE = if (CUSTOM.LESS_THAN_OR_EQUAL) |cust| cust //
+                            else if (FLAGS.has(INFER.LTEQ.FROM_GT)) infer_gt //
+                            else if (FLAGS.has(INFER.LTEQ.FROM_LT_OQ)) infer_lt_oq //
+                            else if (FLAGS.has(INFER.LTEQ.FROM_LT_EQ)) infer_lt_eq //
+                            else if (ALLOW_DEFAULT) default else unusable;
+                        fn default(val_a: ELEM_, val_b: ELEM_, _: USERDATA_) bool {
+                            return val_a <= val_b;
+                        }
+                        fn infer_gt(val_a: ELEM_, val_b: ELEM_, userdata: USERDATA_) bool {
+                            const GT = GREATER_THAN.func;
+                            return !GT(val_a, val_b, userdata);
+                        }
+                        fn infer_lt_eq(val_a: ELEM_, val_b: ELEM_, userdata: USERDATA_) bool {
+                            const LT = LESS_THAN.func;
+                            const EQ = EXACT_EQUAL.func;
+                            return LT(val_a, val_b, userdata) or EQ(val_a, val_b, userdata);
+                        }
+                        fn infer_lt_oq(val_a: ELEM_, val_b: ELEM_, userdata: USERDATA_) bool {
+                            const LT = LESS_THAN.func;
+                            const OQ = ORDER_EQUAL.func;
+                            return LT(val_a, val_b, userdata) or OQ(val_a, val_b, userdata);
+                        }
+                        fn unusable(_: ELEM_, _: ELEM_, _: USERDATA_) bool {
+                            assert_unreachable(@src(), "no `less_than_or_equal` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
+                        }
+                    };
+                    const GREATER_THAN = struct {
+                        const func: FN_ELEM_COMPARE = if (CUSTOM.GREATER_THAN) |cust| cust //
+                            else if (FLAGS.has(INFER.GT.FROM_LTEQ)) infer_lteq //
+                            else if (FLAGS.has(INFER.GT.FROM_LT_OQ)) infer_lt_oq //
+                            else if (FLAGS.has(INFER.GT.FROM_LT_EQ)) infer_lt_eq //
+                            else if (ALLOW_DEFAULT) default else unusable;
+                        fn default(val_a: ELEM_, val_b: ELEM_, _: USERDATA_) bool {
+                            return val_a > val_b;
+                        }
+                        fn infer_lteq(val_a: ELEM_, val_b: ELEM_, userdata: USERDATA_) bool {
+                            const LTEQ = LESS_THAN_OR_EQUAL.func;
+                            return !LTEQ(val_a, val_b, userdata);
+                        }
+                        fn infer_lt_eq(val_a: ELEM_, val_b: ELEM_, userdata: USERDATA_) bool {
+                            const LT = LESS_THAN.func;
+                            const EQ = EXACT_EQUAL.func;
+                            return !LT(val_a, val_b, userdata) and !EQ(val_a, val_b, userdata);
+                        }
+                        fn infer_lt_oq(val_a: ELEM_, val_b: ELEM_, userdata: USERDATA_) bool {
+                            const LT = LESS_THAN.func;
+                            const OQ = ORDER_EQUAL.func;
+                            return !LT(val_a, val_b, userdata) and !OQ(val_a, val_b, userdata);
+                        }
+                        fn unusable(_: ELEM_, _: ELEM_, _: USERDATA_) bool {
+                            assert_unreachable(@src(), "no `greater_than` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
+                        }
+                    };
+                    const GREATER_THAN_OR_EQUAL = struct {
+                        const func: FN_ELEM_COMPARE = if (CUSTOM.GREATER_THAN_OR_EQUAL) |cust| cust //
+                            else if (FLAGS.has(INFER.GTEQ.FROM_LT)) infer_lt //
+                            else if (FLAGS.has(INFER.GTEQ.FROM_GT_OQ)) infer_gt_oq //
+                            else if (FLAGS.has(INFER.GTEQ.FROM_GT_EQ)) infer_gt_eq //
+                            else if (ALLOW_DEFAULT) default else unusable;
+                        fn default(val_a: ELEM_, val_b: ELEM_, _: USERDATA_) bool {
+                            return val_a >= val_b;
+                        }
+                        fn infer_lt(val_a: ELEM_, val_b: ELEM_, userdata: USERDATA_) bool {
+                            const LT = LESS_THAN.func;
+                            return !LT(val_a, val_b, userdata);
+                        }
+                        fn infer_gt_eq(val_a: ELEM_, val_b: ELEM_, userdata: USERDATA_) bool {
+                            const GT = GREATER_THAN.func;
+                            const EQ = EXACT_EQUAL.func;
+                            return !GT(val_a, val_b, userdata) and !EQ(val_a, val_b, userdata);
+                        }
+                        fn infer_gt_oq(val_a: ELEM_, val_b: ELEM_, userdata: USERDATA_) bool {
+                            const GT = GREATER_THAN.func;
+                            const OQ = ORDER_EQUAL.func;
+                            return !GT(val_a, val_b, userdata) and !OQ(val_a, val_b, userdata);
+                        }
+                        fn unusable(_: ELEM_, _: ELEM_, _: USERDATA_) bool {
+                            assert_unreachable(@src(), "no `greater_than_or_equal` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
+                        }
+                    };
+                    const ORDER_EQUAL = struct {
+                        const func: FN_ELEM_COMPARE = if (CUSTOM.ORDER_EQUALS) |cust| cust //
+                            else if (FLAGS.has(INFER.OQ.FROM_EQ)) infer_eq //
+                            else if (FLAGS.has(INFER.OQ.FROM_GT_LT)) infer_gt_lt //
+                            else if (ALLOW_DEFAULT) default else unusable;
+                        fn default(val_a: ELEM_, val_b: ELEM_, _: USERDATA_) bool {
+                            return val_a == val_b;
+                        }
+                        fn infer_eq(val_a: ELEM_, val_b: ELEM_, userdata: USERDATA_) bool {
+                            const EQ = EXACT_EQUAL.func;
+                            return !EQ(val_a, val_b, userdata);
+                        }
+                        fn infer_gt_lt(val_a: ELEM_, val_b: ELEM_, userdata: USERDATA_) bool {
+                            const GT = GREATER_THAN.func;
+                            const LT = LESS_THAN.func;
+                            return !GT(val_a, val_b, userdata) and !LT(val_a, val_b, userdata);
+                        }
+                        fn unusable(_: ELEM_, _: ELEM_, _: USERDATA_) bool {
+                            assert_unreachable(@src(), "no `order_equals` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
+                        }
+                    };
+                    const EXACT_EQUAL = struct {
+                        const func: FN_ELEM_COMPARE = if (CUSTOM.EXACT_EQUALS) |cust| cust //
+                            else if (FLAGS.has(INFER.EQ.FROM_OQ)) infer_oq //
+                            else if (FLAGS.has(INFER.EQ.FROM_GT_LT)) infer_gt_lt //
+                            else if (ALLOW_DEFAULT) default else unusable;
+                        fn default(val_a: ELEM_, val_b: ELEM_, _: USERDATA_) bool {
+                            return val_a == val_b;
+                        }
+                        fn infer_oq(val_a: ELEM_, val_b: ELEM_, userdata: USERDATA_) bool {
+                            const OQ = ORDER_EQUAL.func;
+                            return !OQ(val_a, val_b, userdata);
+                        }
+                        fn infer_gt_lt(val_a: ELEM_, val_b: ELEM_, userdata: USERDATA_) bool {
+                            const GT = GREATER_THAN.func;
+                            const LT = LESS_THAN.func;
+                            return !GT(val_a, val_b, userdata) and !LT(val_a, val_b, userdata);
+                        }
+                        fn unusable(_: ELEM_, _: ELEM_, _: USERDATA_) bool {
+                            assert_unreachable(@src(), "no `exactly_equals` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
+                        }
+                    };
+                    const FIRST_ID = struct {
+                        const func: FN_IMPLICIT_ID = if (CUSTOM.FIRST_ID) |cust| cust //
+                            else if (FLAGS.has(INFER.FIRST_ID.FROM_NTH_FROM_START)) infer_nth_start //
+                            else if (FLAGS.has(INFER.FIRST_ID.FROM_LEN_NTH_FROM_END)) infer_nth_end //
+                            else if (FLAGS.has(INFER.FIRST_ID.FROM_LAST_LEN_NTH_PREV)) infer_last_len_nth_prev //
+                            else if (FLAGS.has(INFER.FIRST_ID.FROM_LAST_LEN_PREV)) infer_last_len_prev //
+                            else if (ALLOW_DEFAULT) default else unusable;
+                        fn default(_: DATA_, _: USERDATA_) ID_ {
+                            return 0;
+                        }
+                        fn infer_nth_start(data: DATA_, userdata: USERDATA_) ID_ {
+                            const NTH_START = NTH_FROM_START.func;
+                            return NTH_START(data, 0, userdata);
+                        }
+                        fn infer_nth_end(data: DATA_, userdata: USERDATA_) ID_ {
+                            const NTH_END = NTH_FROM_END.func;
+                            const LEN_ = GET_LEN.func;
+                            return NTH_END(data, LEN_(data, userdata), userdata);
+                        }
+                        fn infer_last_len_nth_prev(data: DATA_, userdata: USERDATA_) ID_ {
+                            const LAST = LAST_ID.func;
+                            const LEN_ = GET_LEN.func;
+                            const NTH_PREV_ = NTH_PREV_ID.func;
+                            return NTH_PREV_(data, LAST(data, userdata), LEN_(data, userdata), userdata);
+                        }
+                        fn infer_last_len_prev(data: DATA_, userdata: USERDATA_) ID_ {
+                            const LAST = LAST_ID.func;
+                            const LEN_ = GET_LEN.func;
+                            const PREV_ = PREV_ID.func;
+                            var l = LEN_(data, userdata);
+                            var i = LAST(data, userdata);
+                            while (l > 0) : (l -= 1) {
+                                i = PREV_(data, i, userdata);
+                            }
+                            return i;
+                        }
+                        fn unusable(_: DATA_, _: USERDATA_) ID_ {
+                            assert_unreachable(@src(), "no `first_index` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
+                        }
+                    };
+                    const LAST_ID = struct {
+                        const func: FN_IMPLICIT_ID = if (CUSTOM.LAST_ID) |cust| cust //
+                            else if (FLAGS.has(INFER.LAST_ID.FROM_NTH_FROM_LAST)) infer_nth_last //
+                            else if (FLAGS.has(INFER.LAST_ID.FROM_LEN_NTH_FROM_START)) infer_nth_start //
+                            else if (FLAGS.has(INFER.LAST_ID.FROM_FIRST_LEN_NTH_NEXT)) infer_first_len_nth_next //
+                            else if (FLAGS.has(INFER.LAST_ID.FROM_FIRST_LEN_NEXT)) infer_first_len_next //
+                            else if (ALLOW_DEFAULT) default else unusable;
+                        fn default(data: DATA_, userdata: USERDATA_) ID_ {
+                            return GET_LEN.default(data, userdata) - 1;
+                        }
+                        fn infer_nth_last(data: DATA_, userdata: USERDATA_) ID_ {
+                            const NTH_START = NTH_FROM_START.func;
+                            return NTH_START(data, 0, userdata);
+                        }
+                        fn infer_nth_start(data: DATA_, userdata: USERDATA_) ID_ {
+                            const NTH_START = NTH_FROM_START.func;
+                            const LEN_ = GET_LEN.func;
+                            return NTH_START(data, LEN_(data, userdata), userdata);
+                        }
+                        fn infer_first_len_nth_next(data: DATA_, userdata: USERDATA_) ID_ {
+                            const FIRST = FIRST_ID.func;
+                            const LEN_ = GET_LEN.func;
+                            const NTH_NEXT_ = NTH_PREV_ID.func;
+                            return NTH_NEXT_(data, FIRST(data, userdata), LEN_(data, userdata), userdata);
+                        }
+                        fn infer_first_len_next(data: DATA_, userdata: USERDATA_) ID_ {
+                            const FIRST = FIRST_ID.func;
+                            const LEN_ = GET_LEN.func;
+                            const NEXT_ = NEXT_ID.func;
+                            var l = LEN_(data, userdata);
+                            var i = FIRST(data, userdata);
+                            while (l > 0) : (l -= 1) {
+                                i = NEXT_(data, i, userdata);
+                            }
+                            return i;
+                        }
+                        fn unusable(_: DATA_, _: USERDATA_) ID_ {
+                            assert_unreachable(@src(), "no `last_index` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
+                        }
+                    };
+                    const NEXT_ID = struct {
+                        const func: FN_ADJACENT_ID = if (CUSTOM.NEXT_ID) |cust| cust //
+                            else if (FLAGS.has(INFER.NEXT_ID.FROM_NTH_NEXT)) infer_nth_next //
+                            else if (FLAGS.has(INFER.NEXT_ID.FROM_LAST_PREV)) infer_last_prev //
+                            else if (ALLOW_DEFAULT) default else unusable;
+                        fn default(_: DATA_, curr: ID_, _: USERDATA_) ID_ {
+                            return curr + 1;
+                        }
+                        fn infer_nth_next(data: DATA_, curr: ID_, userdata: USERDATA_) ID_ {
+                            assert_valid_id(data, curr, userdata, @src());
+                            const NTH_NEXT = NTH_NEXT_ID.func;
+                            return NTH_NEXT(data, curr, 1, userdata);
+                        }
+                        fn infer_last_prev(data: DATA_, curr: ID_, userdata: USERDATA_) ID_ {
+                            assert_valid_id(data, curr, userdata, @src());
+                            const LAST = LAST_ID.func;
+                            const PREV = PREV_ID.func;
+                            const ID_EQ = ID_EQUALS.func;
+                            const INVALID_END = comptime INVALID_ID_AFTER.select();
+                            const INVALID_BEFORE = comptime INVALID_ID_BEFORE.select();
+                            const VALID = comptime ID_VALID.select();
+                            var i = LAST(data, userdata);
+                            if (ID_EQ(data, i, curr, userdata)) return INVALID_END(data, userdata);
+                            var ii = PREV(data, i, userdata);
+                            while (!ID_EQ(data, i, curr, userdata)) {
+                                if (!VALID(data, ii, userdata)) return INVALID_BEFORE(data, userdata);
+                                i = ii;
+                                ii = PREV(data, i, userdata);
+                            }
+                            return i;
+                        }
+                        fn unusable(_: DATA_, _: ID_, _: USERDATA_) ID_ {
+                            assert_unreachable(@src(), "no `next_index` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
+                        }
+                    };
+                    const PREV_ID = struct {
+                        const func: FN_ADJACENT_ID = if (CUSTOM.PREV_ID) |cust| cust //
+                            else if (FLAGS.has(INFER.PREV_ID.FROM_NTH_PREV)) infer_nth_prev //
+                            else if (FLAGS.has(INFER.PREV_ID.FROM_FIRST_NEXT)) infer_first_next //
+                            else if (ALLOW_DEFAULT) default else unusable;
+                        fn default(_: DATA_, curr: ID_, _: USERDATA_) ID_ {
+                            return curr - 1;
+                        }
+                        fn infer_nth_prev(data: DATA_, curr: ID_, userdata: USERDATA_) ID_ {
+                            assert_valid_id(data, curr, userdata, @src());
+                            const NTH_PREV = NTH_PREV_ID.func;
+                            return NTH_PREV(data, curr, 1, userdata);
+                        }
+                        fn infer_first_next(data: DATA_, curr: ID_, userdata: USERDATA_) ID_ {
+                            assert_valid_id(data, curr, userdata, @src());
+                            const FIRST = FIRST_ID.func;
+                            const NEXT = NEXT_ID.func;
+                            const ID_EQ = ID_EQUALS.func;
+                            const INVALID_END = comptime INVALID_ID_AFTER.select();
+                            const INVALID_BEFORE = comptime INVALID_ID_BEFORE.select();
+                            const VALID = comptime ID_VALID.select();
+                            var i = FIRST(data, userdata);
+                            if (ID_EQ(data, i, curr, userdata)) return INVALID_END(data, userdata);
+                            var ii = NEXT(data, i, userdata);
+                            while (!ID_EQ(data, ii, curr, userdata)) {
+                                if (!VALID(data, ii, userdata)) return INVALID_BEFORE(data, userdata);
+                                i = ii;
+                                ii = NEXT(data, i, userdata);
+                            }
+                            return i;
+                        }
+                        fn unusable(_: DATA_, _: ID_, _: USERDATA_) ID_ {
+                            assert_unreachable(@src(), "no `prev_index` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
+                        }
+                    };
+                    const NTH_NEXT_ID = struct {
+                        const func: FN_NTH_ID = if (CUSTOM.NTH_PREV_ID) |cust| cust //
+                            else if (FLAGS.has(INFER.NTH_NEXT_ID.FROM_NEXT)) infer_next //
+                            else if (FLAGS.has(INFER.NTH_NEXT_ID.FROM_LAST_PREV)) infer_last_prev //
+                            else if (ALLOW_DEFAULT) default else unusable;
+                        fn default(_: DATA_, curr: ID_, n: COUNT_, _: USERDATA_) ID_ {
+                            return curr + n;
+                        }
+                        fn infer_next(data: DATA_, curr: ID_, n: COUNT_, userdata: USERDATA_) ID_ {
+                            assert_valid_id(data, curr, userdata, @src());
+                            const NEXT = NEXT_ID.func;
+                            var i = curr;
+                            var nn: COUNT_ = 0;
+                            while (nn < n) : (nn += 1) {
+                                i = NEXT(data, i, userdata);
+                            }
+                            return i;
+                        }
+                        fn infer_last_prev(data: DATA_, curr: ID_, n: COUNT_, userdata: USERDATA_) ID_ {
+                            assert_valid_id(data, curr, userdata, @src());
+                            const LAST = LAST_ID.func;
+                            const PREV = PREV_ID.func;
+                            const ID_EQ = ID_EQUALS.func;
+                            const INVALID_END = comptime INVALID_ID_AFTER.select();
+                            const INVALID_BEFORE = comptime INVALID_ID_BEFORE.select();
+                            const VALID = comptime ID_VALID.select();
+                            const last = LAST(data, userdata);
+                            var left_i = last;
+                            var nn: COUNT_ = 0;
+                            while (nn < n) : (nn += 1) {
+                                if (ID_EQ(data, left_i, curr, userdata) or !VALID(data, left_i, userdata)) return INVALID_END(data, userdata);
+                                left_i = PREV(data, curr, userdata);
+                            }
+                            var right_i = last;
+                            var left_ii = PREV(data, left_i, userdata);
+                            var right_ii = PREV(data, last, userdata);
+                            while (!ID_EQ(data, left_ii, curr, userdata)) {
+                                left_i = left_ii;
+                                left_ii = PREV(data, left_i, userdata);
+                                if (!VALID(data, left_ii, userdata)) return INVALID_BEFORE(data, userdata);
+                                right_i = right_ii;
+                                right_ii = PREV(data, right_i, userdata);
+                            }
+                            return right_i;
+                        }
+                        fn unusable(_: DATA_, _: ID_, _: COUNT_, _: USERDATA_) ID_ {
+                            assert_unreachable(@src(), "no `nth_next_index` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
+                        }
+                    };
+                    const NTH_PREV_ID = struct {
+                        const func: FN_NTH_ID = if (CUSTOM.NTH_PREV_ID) |cust| cust //
+                            else if (FLAGS.has(INFER.NTH_PREV_ID.FROM_PREV)) infer_prev //
+                            else if (FLAGS.has(INFER.NTH_PREV_ID.FROM_FIRST_NEXT)) infer_first_next //
+                            else if (ALLOW_DEFAULT) default else unusable;
+                        fn default(_: DATA_, curr: ID_, n: COUNT_, _: USERDATA_) ID_ {
+                            return curr - n;
+                        }
+                        fn infer_prev(data: DATA_, curr: ID_, n: COUNT_, userdata: USERDATA_) ID_ {
+                            assert_valid_id(data, curr, userdata, @src());
+                            const PREV = PREV_ID.func;
+                            var i = curr;
+                            var nn: COUNT_ = 0;
+                            while (nn < n) : (nn += 1) {
+                                i = PREV(data, i, userdata);
+                            }
+                            return i;
+                        }
+                        fn infer_first_next(data: DATA_, curr: ID_, n: COUNT_, userdata: USERDATA_) ID_ {
+                            assert_valid_id(data, curr, userdata, @src());
+                            const FIRST = FIRST_ID.func;
+                            const NEXT = NEXT_ID.func;
+                            const ID_EQ = ID_EQUALS.func;
+                            const INVALID_END = comptime INVALID_ID_AFTER.select();
+                            const INVALID_BEFORE = comptime INVALID_ID_BEFORE.select();
+                            const VALID = ID_VALID.func;
+                            const first = FIRST(data, userdata);
+                            var right_i = first;
+                            var nn: COUNT_ = 0;
+                            while (nn < n) : (nn += 1) {
+                                if (ID_EQ(data, right_i, curr, userdata) or !VALID(data, right_i, userdata)) return INVALID_END(data, userdata);
+                                right_i = NEXT(data, curr, userdata);
+                            }
+                            var left_i = first;
+                            var right_ii = NEXT(data, right_i, userdata);
+                            var left_ii = NEXT(data, first, userdata);
+                            while (!ID_EQ(data, right_ii, curr, userdata)) {
+                                right_i = right_ii;
+                                right_ii = NEXT(data, right_i, userdata);
+                                if (!VALID(data, right_ii, userdata)) return INVALID_BEFORE(data, userdata);
+                                left_i = left_ii;
+                                left_ii = NEXT(data, left_i, userdata);
+                            }
+                            return left_i;
+                        }
+                        fn unusable(_: DATA_, _: ID_, _: COUNT_, _: USERDATA_) ID_ {
+                            assert_unreachable(@src(), "no `nth_prev_id` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
+                        }
+                    };
+                    const NTH_FROM_START = struct {
+                        const func: FN_IMPLICIT_NTH_ID = if (CUSTOM.NTH_ID_FROM_START) |cust| cust //
+                            else if (FLAGS.has(INFER.NTH_FROM_START.FROM_FIRST_NTH_NEXT)) infer_first_nth_next //
+                            else if (FLAGS.has(INFER.NTH_FROM_START.FROM_FIRST_NEXT)) infer_first_next //
+                            else if (ALLOW_DEFAULT) default else unusable;
+                        fn default(_: DATA_, n: COUNT_, _: USERDATA_) ID_ {
+                            return n;
+                        }
+                        fn infer_first_nth_next(data: DATA_, n: COUNT_, userdata: USERDATA_) ID_ {
+                            const NTH_NEXT = NTH_NEXT_ID.func;
+                            const FIRST = FIRST_ID.func;
+                            return NTH_NEXT(data, FIRST(data, userdata), n, userdata);
+                        }
+                        fn infer_first_next(data: DATA_, n: COUNT_, userdata: USERDATA_) ID_ {
+                            const NEXT = NEXT_ID.func;
+                            const FIRST = FIRST_ID.func;
+                            var nn: COUNT_ = 0;
+                            var i = FIRST(data, userdata);
+                            while (nn < n) : (nn += 1) {
+                                i = NEXT(data, i, userdata);
+                            }
+                            return i;
+                        }
+                        fn unusable(_: DATA_, _: COUNT_, _: USERDATA_) ID_ {
+                            assert_unreachable(@src(), "no `nth_index_from_start` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
+                        }
+                    };
+                    const NTH_FROM_END = struct {
+                        const func: FN_IMPLICIT_NTH_ID = if (CUSTOM.NTH_ID_FROM_END) |cust| cust //
+                            else if (FLAGS.has(INFER.NTH_FROM_END.FROM_LAST_NTH_PREV)) infer_last_nth_prev //
+                            else if (FLAGS.has(INFER.NTH_FROM_END.FROM_LAST_PREV)) infer_last_prev //
+                            else if (ALLOW_DEFAULT) default else unusable;
+                        fn default(data: DATA_, n: COUNT_, userdata: USERDATA_) ID_ {
+                            return GET_LEN.default(data, userdata) - 1 - n;
+                        }
+                        fn infer_last_nth_prev(data: DATA_, n: COUNT_, userdata: USERDATA_) ID_ {
+                            const NTH_PREV = NTH_PREV_ID.func;
+                            const LAST = LAST_ID.func;
+                            return NTH_PREV(data, LAST(data, userdata), n, userdata);
+                        }
+                        fn infer_last_prev(data: DATA_, n: COUNT_, userdata: USERDATA_) ID_ {
+                            const PREV = PREV_ID.func;
+                            const LAST = LAST_ID.func;
+                            var nn: COUNT_ = 0;
+                            var i = LAST(data, userdata);
+                            while (nn < n) : (nn += 1) {
+                                i = PREV(data, i, userdata);
+                            }
+                            return i;
+                        }
+                        fn unusable(_: DATA_, _: COUNT_, _: USERDATA_) ID_ {
+                            assert_unreachable(@src(), "no `nth_index_from_end` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
+                        }
+                    };
+                    const GET_LEN = struct {
+                        const func: FN_IMPLICIT_COUNT = if (CUSTOM.GET_LEN) |cust| cust //
+                            else if (FLAGS.has(INFER.LEN.FROM_FIRST_LAST_RANGE_LEN)) infer_range_len //
+                            else if (FLAGS.has(INFER.LEN.FROM_FIRST_LAST_NEXT)) infer_first_last_next //
+                            else if (FLAGS.has(INFER.LEN.FROM_FIRST_LAST_PREV)) infer_first_last_prev //
+                            else if (ALLOW_DEFAULT) default else unusable;
+                        const default = default_len;
+                        fn infer_range_len(data: DATA_, userdata: USERDATA_) COUNT_ {
+                            const FIRST = FIRST_ID.func;
+                            const LAST = LAST_ID.func;
+                            const RANGE = RANGE_LEN.func;
+                            return RANGE(FIRST(data, userdata), LAST(data, userdata), userdata);
+                        }
+                        fn infer_first_last_next(data: DATA_, userdata: USERDATA_) COUNT_ {
+                            const FIRST = FIRST_ID.func;
+                            const LAST = LAST_ID.func;
+                            const NEXT = NEXT_ID.func;
+                            const VALID = ID_VALID.func;
+                            const ID_EQ = ID_EQUALS.func;
+                            var i = FIRST(data, userdata);
+                            const last = LAST(data, userdata);
+                            if (!VALID(data, i, userdata) or !VALID(data, last, userdata)) return 0;
+                            var n: COUNT_ = 1;
+                            while (!ID_EQ(data, i, last, userdata)) {
+                                i = NEXT(data, i, userdata);
+                                n += 1;
+                            }
+                            return n;
+                        }
+                        fn infer_first_last_prev(data: DATA_, userdata: USERDATA_) COUNT_ {
+                            const FIRST = FIRST_ID.func;
+                            const LAST = LAST_ID.func;
+                            const PREV = PREV_ID.func;
+                            const VALID = ID_VALID.func;
+                            const ID_EQ = ID_EQUALS.func;
+                            var i = LAST(data, userdata);
+                            const first = FIRST(data, userdata);
+                            if (!VALID(data, i, userdata) or !VALID(data, first, userdata)) return 0;
+                            var n: COUNT_ = 1;
+                            while (!ID_EQ(data, i, first, userdata)) {
+                                i = PREV(data, i, userdata);
+                                n += 1;
+                            }
+                            return n;
+                        }
+                        fn unusable(_: DATA_, _: USERDATA_) COUNT_ {
+                            assert_unreachable(@src(), "no `len` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
+                        }
+                    };
+                    const SET_LEN = struct {
+                        const func: FN_SET_COUNT = if (CUSTOM.SET_LEN) |cust| cust //
+                            else if (ALLOW_DEFAULT) default else unusable;
+                        const default = default_set_len;
+                        fn unusable(_: DATA_, _: USERDATA_) COUNT_ {
+                            assert_unreachable(@src(), "no `set_len` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
+                        }
+                    };
+                    const RANGE_LEN = struct {
+                        const func: FN_RANGE_COUNT = if (CUSTOM.RANGE_LEN) |cust| cust //
+                            else if (FLAGS.has(INFER.RANGE_LEN.FROM_NEXT)) infer_next //
+                            else if (FLAGS.has(INFER.RANGE_LEN.FROM_PREV)) infer_prev //
+                            else if (ALLOW_DEFAULT) default else unusable;
+                        fn default(_: DATA_, first: ID_, last: ID_, _: USERDATA_) ID_ {
+                            return (last + 1) - first;
+                        }
+                        fn infer_next(data: DATA_, first: ID_, last: ID_, userdata: USERDATA_) COUNT_ {
+                            assert_valid_id(data, first, userdata, @src());
+                            assert_valid_id(data, last, userdata, @src());
+                            const NEXT = NEXT_ID.func;
+                            const ID_LESS_OR_EQUAL = ID_LESS_THAN_OR_EQUAL.func;
+                            const VALID = ID_VALID.func;
+                            const ID_EQ = ID_EQUALS.func;
+                            if (!ID_LESS_OR_EQUAL(data, first, last, userdata)) return 0;
+                            var i = first;
+                            var n: COUNT_ = 1;
+                            while (!ID_EQ(data, i, last, userdata)) {
+                                if (!VALID(data, i, userdata)) return 0;
+                                i = NEXT(data, i, userdata);
+                                n += 1;
+                            }
+                            return n;
+                        }
+                        fn infer_prev(data: DATA_, first: ID_, last: ID_, userdata: USERDATA_) COUNT_ {
+                            assert_valid_id(data, first, userdata, @src());
+                            assert_valid_id(data, last, userdata, @src());
+                            const PREV = PREV_ID.func;
+                            const ID_LESS_OR_EQUAL = ID_LESS_THAN_OR_EQUAL.func;
+                            const VALID = ID_VALID.func;
+                            const ID_EQ = ID_EQUALS.func;
+                            if (!ID_LESS_OR_EQUAL(data, first, last, userdata)) return 0;
+                            var i = last;
+                            var n: COUNT_ = 1;
+                            while (!ID_EQ(data, i, first, userdata)) {
+                                if (!VALID(data, i, userdata)) return 0;
+                                i = PREV(data, i, userdata);
+                                n += 1;
+                            }
+                            return n;
+                        }
+                        fn unusable(_: DATA_, _: ID_, _: ID_, _: USERDATA_) COUNT_ {
+                            assert_unreachable(@src(), "no `range_len` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
+                        }
+                    };
+                    const REVERSE_RANGE = struct {
+                        const func: FN_RANGE_OP = if (CUSTOM.REVERSE_RANGE) |cust| cust //
+                            else if (FLAGS.has_any(&.{ INFER.REVERSE.FROM_GET_SET, INFER.REVERSE.FROM_SWAP })) infer_swap //
+                            else if (ALLOW_DEFAULT) default else unusable;
+                        fn default(data: DATA_, first: ID_, last: ID_, userdata: USERDATA_) DATA_ {
+                            const new_data = data;
+                            Utils.Mem.reverse_slice(default_get_base_ptr(new_data, userdata)[first .. last + 1]);
+                            return new_data;
+                        }
+                        fn infer_swap(data: DATA_, first: ID_, last: ID_, userdata: USERDATA_) DATA_ {
+                            assert_valid_id(data, first, userdata, @src());
+                            assert_valid_id(data, last, userdata, @src());
+                            const SWAP_ = SWAP.func;
+                            const NEXT = NEXT_ID.func;
+                            const PREV = PREV_ID.func;
+                            const ID_LESS_OR_EQUAL = ID_LESS_THAN_OR_EQUAL.func;
+                            const ID_EQ = ID_EQUALS.func;
+                            if (!ID_LESS_OR_EQUAL(data, first, last, userdata)) return 0;
+                            var new_data = data;
+                            var left = first;
+                            var right = last;
+                            while (!ID_EQ(data, left, right, userdata)) {
+                                new_data = SWAP_(new_data, left, right, userdata);
+                                left = NEXT(data, left, userdata);
+                                if (ID_EQ(data, left, right, userdata)) break;
+                                right = PREV(new_data, right, userdata);
+                            }
+                            return new_data;
+                        }
+                        fn unusable(_: DATA_, _: ID_, _: ID_, _: USERDATA_) DATA_ {
+                            assert_unreachable(@src(), "no `range_len` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
+                        }
+                    };
+                    const ROTATE_RIGHT = struct {
+                        const func: FN_ROTATE = if (CUSTOM.ROTATE_RANGE_RIGHT) |cust| cust //
+                            else if (FLAGS.has_any(&.{ INFER.ROTATE.FROM_GET_SET, INFER.ROTATE.FROM_REVERSE, INFER.ROTATE.FROM_SWAP })) infer_reverse //
+                            else if (ALLOW_DEFAULT) default else unusable;
+                        fn default(data: DATA_, first: ID_, last: ID_, count: COUNT_, userdata: USERDATA_) DATA_ {
+                            if (last < first) return data;
+                            const end_exl = last + 1;
+                            const len = end_exl - first;
+                            const shift = count % len;
+                            if (shift == 0) return data;
+                            const edge = first + (len - shift);
+                            Utils.Mem.reverse_slice(default_get_base_ptr(data, userdata)[first..edge]);
+                            Utils.Mem.reverse_slice(default_get_base_ptr(data, userdata)[edge..end_exl]);
+                            Utils.Mem.reverse_slice(default_get_base_ptr(data, userdata)[first..end_exl]);
+                            return data;
+                        }
+                        fn infer_reverse(data: DATA_, first: ID_, last: ID_, count: COUNT_, userdata: USERDATA_) DATA_ {
+                            assert_valid_id(data, first, userdata, @src());
+                            assert_valid_id(data, last, userdata, @src());
+                            const REV = REVERSE_RANGE.func;
+                            const NEXT = NEXT_ID.func;
+                            const NTH_PREV = NTH_PREV_ID.func;
+                            const ID_LESS_OR_EQUAL = comptime ID_LESS_THAN_OR_EQUAL.select();
+                            const RANGE_LEN_ = RANGE_LEN.func;
+                            if (!ID_LESS_OR_EQUAL(data, first, last, userdata)) return data;
+                            var new_data = data;
+                            const len = RANGE_LEN_(data, first, last, userdata);
+                            const shift = count % len;
+                            if (shift == 0) return data;
+                            const first_group_last_id = NTH_PREV(data, last, shift, userdata);
+                            const last_group_first_id = NEXT(data, first_group_last_id, userdata);
+                            new_data = REV(new_data, first, first_group_last_id, userdata);
+                            new_data = REV(new_data, last_group_first_id, last, new_data);
+                            new_data = REV(new_data, first, last, new_data);
+                            return new_data;
+                        }
+                        fn unusable(_: DATA_, _: ID_, _: ID_, _: COUNT_, _: USERDATA_) DATA_ {
+                            assert_unreachable(@src(), "no `rotate_range_right` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
+                        }
+                    };
+                    const ROTATE_LEFT = struct {
+                        const func: FN_ROTATE = if (CUSTOM.ROTATE_RANGE_LEFT) |cust| cust //
+                            else if (FLAGS.has_any(&.{ INFER.ROTATE.FROM_GET_SET, INFER.ROTATE.FROM_REVERSE, INFER.ROTATE.FROM_SWAP })) infer_reverse //
+                            else if (ALLOW_DEFAULT) default else unusable;
+                        fn default(data: DATA_, first: ID_, last: ID_, count: COUNT_, userdata: USERDATA_) DATA_ {
+                            if (last < first) return data;
+                            const end_exl = last + 1;
+                            const len = end_exl - first;
+                            const shift = count % len;
+                            if (shift == 0) return data;
+                            const edge = first + shift;
+                            Utils.Mem.reverse_slice(default_get_base_ptr(data, userdata)[first..edge]);
+                            Utils.Mem.reverse_slice(default_get_base_ptr(data, userdata)[edge..end_exl]);
+                            Utils.Mem.reverse_slice(default_get_base_ptr(data, userdata)[first..end_exl]);
+                            return data;
+                        }
+                        fn infer_reverse(data: DATA_, first: ID_, last: ID_, count: COUNT_, userdata: USERDATA_) DATA_ {
+                            assert_valid_id(data, first, userdata, @src());
+                            assert_valid_id(data, last, userdata, @src());
+                            const REV = REVERSE_RANGE.func;
+                            const NTH_NEXT = NTH_NEXT_ID.func;
+                            const PREV = PREV_ID.func;
+                            const ID_LESS_OR_EQUAL = comptime ID_LESS_THAN_OR_EQUAL.select();
+                            const RANGE_LEN_ = RANGE_LEN.func;
+                            if (!ID_LESS_OR_EQUAL(data, first, last, userdata)) return data;
+                            var new_data = data;
+                            const len = RANGE_LEN_(data, first, last, userdata);
+                            const shift = count % len;
+                            if (shift == 0) return data;
+                            const last_group_first_id = NTH_NEXT(data, last, shift, userdata);
+                            const first_group_last_id = PREV(data, last_group_first_id, userdata);
+                            new_data = REV(new_data, first, first_group_last_id, userdata);
+                            new_data = REV(new_data, last_group_first_id, last, new_data);
+                            new_data = REV(new_data, first, last, new_data);
+                            return new_data;
+                        }
+                        fn unusable(_: DATA_, _: ID_, _: ID_, _: COUNT_, _: USERDATA_) DATA_ {
+                            assert_unreachable(@src(), "no `rotate_range_left` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
+                        }
+                    };
+                    const MOVE_ONE_PRESERVE = struct {
+                        const func: FN_RANGE_OP = if (CUSTOM.MOVE_ONE_PRESERVE) |cust| cust //
+                            else if (FLAGS.has(INFER.MOVE_ONE.FROM_GET_SET)) infer_get_set //
+                            else if (FLAGS.has(INFER.MOVE_ONE.FROM_MOVE_BLOCK)) infer_move_block //
+                            else if (FLAGS.has_any(&.{ INFER.MOVE.FROM_GET_SET, INFER.MOVE.FROM_REVERSE, INFER.MOVE.FROM_SWAP, INFER.MOVE.FROM_ROTATE })) infer_rotate //
+                            else if (ALLOW_DEFAULT) default else unusable;
+                        fn default(data: DATA_, old_id: ID_, new_id: ID_, userdata: USERDATA_) DATA_ {
+                            assert_with_reason(old_id < GET_LEN.default(data, userdata), @src(), "index {d} out of range for len {d}", .{ old_id, GET_LEN.default(data, userdata) });
+                            assert_with_reason(new_id < GET_LEN.default(data, userdata), @src(), "index {d} out of range for len {d}", .{ new_id, GET_LEN.default(data, userdata) });
+                            var new_data = data;
+                            if (old_id == new_id) return data;
+                            if (old_id < new_id) {
+                                const old_val = GET.default(data, old_id, userdata);
+                                var i = old_id;
+                                var ii = i;
+                                while (i != new_id) {
+                                    i += 1;
+                                    const val_to_move = GET.default(data, i, userdata);
+                                    new_data = SET.default(new_data, ii, val_to_move, userdata);
+                                    ii = i;
+                                }
+                                new_data = SET.default(new_data, new_id, old_val, userdata);
+                            } else {
+                                const old_val = GET.default(data, old_id, userdata);
+                                var i = old_id;
+                                var ii = i;
+                                while (i != new_id) {
+                                    i -= 1;
+                                    const val_to_move = GET.default(data, i, userdata);
+                                    new_data = SET.default(new_data, ii, val_to_move, userdata);
+                                    ii = i;
+                                }
+                                new_data = SET.default(new_data, new_id, old_val, userdata);
+                            }
+                            return new_data;
+                        }
+                        fn infer_move_block(data: DATA_, old_id: ID_, new_id: ID_, userdata: USERDATA_) DATA_ {
+                            const MOVE_BLOCK = MOVE_BLOCK_PRESERVE.func;
+                            return MOVE_BLOCK(data, old_id, old_id, new_id, userdata);
+                        }
+                        fn infer_get_set(data: DATA_, old_id: ID_, new_id: ID_, userdata: USERDATA_) DATA_ {
+                            assert_valid_id(data, old_id, userdata, @src());
+                            assert_valid_id(data, new_id, userdata, @src());
+                            const GET_ = GET.func;
+                            const SET_ = SET.func;
+                            const NEXT = NEXT_ID.func;
+                            const PREV = PREV_ID.func;
+                            const ID_LESS_OR_EQUAL = ID_LESS_THAN_OR_EQUAL.func;
+                            const ID_EQ = ID_EQUALS.func;
+                            var new_data = data;
+                            if (ID_EQ(data, old_id, new_id, userdata)) return data;
+                            if (ID_LESS_OR_EQUAL(data, old_id, new_id, userdata)) {
+                                const old_val = GET_(data, old_id, userdata);
+                                var i = old_id;
+                                var ii = i;
+                                while (!ID_EQ(data, i, new_id, userdata)) {
+                                    i = NEXT(data, i, userdata);
+                                    const val_to_move = GET_(new_data, i, userdata);
+                                    new_data = SET_(new_data, ii, val_to_move, userdata);
+                                    ii = i;
+                                }
+                                new_data = SET_(data, new_id, old_val, userdata);
+                            } else {
+                                const old_val = GET_(data, old_id, userdata);
+                                var i = old_id;
+                                var ii = i;
+                                while (!ID_EQ(data, i, new_id, userdata)) {
+                                    i = PREV(data, i, userdata);
+                                    const val_to_move = GET_(new_data, i, userdata);
+                                    new_data = SET_(new_data, ii, val_to_move, userdata);
+                                    ii = i;
+                                }
+                                new_data = SET_(data, new_id, old_val, userdata);
+                            }
+                            return new_data;
+                        }
+                        fn infer_rotate(data: DATA_, old_id: ID_, new_id: ID_, userdata: USERDATA_) DATA_ {
+                            assert_valid_id(data, old_id, userdata, @src());
+                            assert_valid_id(data, new_id, userdata, @src());
+                            const ROT_L = ROTATE_LEFT.func;
+                            const ROT_R = ROTATE_RIGHT.func;
+                            const ID_LESS_OR_EQUAL = ID_LESS_THAN_OR_EQUAL.func;
+                            const ID_EQ = ID_EQUALS.func;
+                            var new_data = data;
+                            if (ID_EQ(data, old_id, new_id, userdata)) return data;
+                            if (ID_LESS_OR_EQUAL(data, old_id, new_id, userdata)) {
+                                new_data = ROT_L(data, old_id, new_id, 1, userdata);
+                            } else {
+                                new_data = ROT_R(data, new_id, old_id, 1, userdata);
+                            }
+                            return new_data;
+                        }
+                        fn unusable(_: DATA_, _: ID_, _: ID_, _: USERDATA_) DATA_ {
+                            assert_unreachable(@src(), "no `move_one_element_preserve_displaced_elements` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
+                        }
+                    };
+                    const MOVE_BLOCK_PRESERVE = struct {
+                        const func: FN_MOVE_BLOCK = if (CUSTOM.MOVE_BLOCK_PRESERVE) |cust| cust //
+                            else if (FLAGS.has_any(&.{ INFER.MOVE.FROM_GET_SET, INFER.MOVE.FROM_REVERSE, INFER.MOVE.FROM_SWAP, INFER.MOVE.FROM_ROTATE })) infer_rotate //
+                            else if (ALLOW_DEFAULT) default else unusable;
+                        fn default(data: DATA_, first_old_id: ID_, last_old_id: ID_, new_first_id: ID_, userdata: USERDATA_) DATA_ {
+                            assert_with_reason(first_old_id < GET_LEN.default(data, userdata), @src(), "index {d} out of range for len {d}", .{ first_old_id, GET_LEN.default(data, userdata) });
+                            assert_with_reason(last_old_id < GET_LEN.default(data, userdata), @src(), "index {d} out of range for len {d}", .{ last_old_id, GET_LEN.default(data, userdata) });
+                            assert_with_reason(new_first_id < GET_LEN.default(data, userdata), @src(), "index {d} out of range for len {d}", .{ new_first_id, GET_LEN.default(data, userdata) });
+                            assert_with_reason(first_old_id <= last_old_id, @src(), "first id must be <= last id (by data order), got `{any}` > `{any}`", .{ first_old_id, last_old_id });
+                            var new_data = data;
+                            if (first_old_id == new_first_id) return data;
+                            const block_len = (last_old_id + 1) - first_old_id;
+                            if (first_old_id < new_first_id) {
+                                const new_last_id = new_first_id + (block_len - 1);
+                                assert_with_reason(new_last_id < GET_LEN.default(data, userdata), @src(), "index {d} out of range for len {d}", .{ new_last_id, GET_LEN.default(data, userdata) });
+                                const delta = new_first_id - first_old_id;
+                                new_data = ROTATE_LEFT.default(data, first_old_id, new_last_id, delta, userdata);
+                            } else {
+                                const delta = first_old_id - new_first_id;
+                                new_data = ROTATE_RIGHT.default(data, new_first_id, last_old_id, delta, userdata);
+                            }
+                            return new_data;
+                        }
+                        fn infer_rotate(data: DATA_, first_old_id: ID_, last_old_id: ID_, new_first_id: ID_, userdata: USERDATA_) DATA_ {
+                            assert_valid_id(data, first_old_id, userdata, @src());
+                            assert_valid_id(data, last_old_id, userdata, @src());
+                            assert_valid_id(data, new_first_id, userdata, @src());
+                            const ROT_L = ROTATE_LEFT.func;
+                            const ROT_R = ROTATE_RIGHT.func;
+                            const RANGE_LEN_ = RANGE_LEN.func;
+                            const NTH_NEXT = NTH_NEXT_ID.func;
+                            const ID_LESS_OR_EQUAL = ID_LESS_THAN_OR_EQUAL.func;
+                            const ID_EQ = ID_EQUALS.func;
+                            assert_with_reason(ID_LESS_OR_EQUAL(data, first_old_id, last_old_id, userdata), @src(), "first id must be <= last id (by data order), got `{any}` > `{any}`", .{ first_old_id, last_old_id });
+                            var new_data = data;
+                            if (ID_EQ(data, first_old_id, new_first_id, userdata)) return data;
+                            const block_len = RANGE_LEN_(data, first_old_id, last_old_id, userdata);
+                            if (ID_LESS_OR_EQUAL(data, first_old_id, new_first_id, userdata)) {
+                                const new_last_id = NTH_NEXT(data, new_first_id, block_len - 1, userdata);
+                                assert_valid_id(data, new_last_id, userdata, @src());
+                                const delta = RANGE_LEN_(data, first_old_id, new_first_id, userdata) - 1;
+                                new_data = ROT_L(data, first_old_id, new_last_id, delta, userdata);
+                            } else {
+                                const delta = RANGE_LEN_(data, new_first_id, first_old_id, userdata) - 1;
+                                new_data = ROT_R(data, new_first_id, last_old_id, delta, userdata);
+                            }
+                            return new_data;
+                        }
+                        fn unusable(_: DATA_, _: ID_, _: ID_, _: ID_, _: USERDATA_) DATA_ {
+                            assert_unreachable(@src(), "no `move_element_block_preserve_displaced_elements` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
+                        }
+                    };
+                    const SCRAMBLE = struct {
+                        const func: FN_SCRAMBLE = if (CUSTOM.SCRAMBLE) |cust| cust //
+                            else if (ALLOW_DEFAULT) default else unusable;
+                        fn default(data: DATA_, rand: Random, first: ID_, last: ID_, iterations: COUNT_, userdata: USERDATA_) DATA_ {
+                            var new_data = data;
+                            const span = (last + 1) - first;
+                            if (span <= 1) return data;
+                            if (span == 2) {
+                                if (rand.boolean()) {
+                                    return SWAP.default(data, first, last);
+                                }
+                            }
+                            var n: COUNT_ = 0;
+                            const first_idx = rand.intRangeAtMost(ID_, first, last);
+                            const first_val = GET.default(data, first_idx, userdata);
+                            var empty_idx: ID_ = first_idx;
+                            while (n < iterations) : (n += 1) {
+                                const move_idx = find_different_idx: {
+                                    while (true) {
+                                        const possible_different = rand.intRangeAtMost(ID_, first_idx, last);
+                                        if (possible_different != empty_idx) break :find_different_idx possible_different;
+                                    }
+                                };
+                                new_data = SET.default(data, empty_idx, GET.default(data, move_idx, userdata), userdata);
+                                empty_idx = move_idx;
+                            }
+                            return SET.default(new_data, empty_idx, first_val, userdata);
+                        }
+                        fn unusable(_: DATA_, _: Random, _: ID_, _: ID_, _: COUNT_, _: USERDATA_) DATA_ {
+                            assert_unreachable(@src(), "no `scramble_elements` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
+                        }
+                    };
+                };
+            }
+
+            pub fn select_functions(comptime ALLOW_DEFAULT: bool, comptime CUSTOM: CustomDataFuncs, comptime CUSTOM_FIELD_FUNCS: anytype) DEF_WITH_FUNCS {
                 comptime {
-                    //********
                     // BUILD FLAGS FOR PROVIDED CUSTOM FUNCTIONS
-                    //********
                     var FLAGS = FuncFlags{};
-                    var FIELD_FLAGS = FieldFlags{};
                     for (@typeInfo(F).@"struct".decls) |FNN| {
                         const FN_NAME = FNN.name;
-                        if (std.mem.eql(u8, FN_NAME, "FIELD_GET") or std.mem.eql(u8, FN_NAME, "FIELD_GET_PTR") or std.mem.eql(u8, FN_NAME, "FIELD_GET_CONST_PTR") or std.mem.eql(u8, FN_NAME, "FIELD_SET")) continue;
-                        FLAGS.add_if_not_null(@field(F, FN_NAME), @field(func, FN_NAME));
+                        FLAGS.add_if_not_null(@field(F, FN_NAME), @field(CUSTOM, FN_NAME));
                     }
-                    for (FieldInfoAsStructInfo_.field_names[0..]) |field_name| {
-                        @field(&FIELD_FLAGS, field_name).add_if_not_null(F.GET, @field(func.FIELD_GET, field_name));
-                        @field(&FIELD_FLAGS, field_name).add_if_not_null(F.GET_PTR, @field(func.FIELD_GET_PTR, field_name));
-                        @field(&FIELD_FLAGS, field_name).add_if_not_null(F.GET_CONST_PTR, @field(func.FIELD_GET_CONST_PTR, field_name));
-                        @field(&FIELD_FLAGS, field_name).add_if_not_null(F.SET, @field(func.FIELD_SET, field_name));
-                    }
-                    //********
-                    // FUNCTION PROTOTYPE SELECTORS
-                    //********
-                    const PROTO = struct {
-                        const ALWAYS_INVALID = if (func.ALWAYS_INVALID_ID) |INVALID| INVALID else DEFAULT_ALWAYS_INVALID_ID;
-                        const INVALID_ID_AFTER = struct {
-                            fn unusable(_: DATA_, _: USERDATA_) bool {
-                                assert_unreachable(@src(), "no `invalid_id_after` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
-                            }
-                            fn select() T_FN_ID_INVALID_AFTER {
-                                comptime {
-                                    if (func.INVALID_ID_AFTER) |f| return f;
-                                    return if (ALLOW_DEFAULT) default_id_invalid_after else unusable;
-                                }
-                            }
-                        };
-                        const INVALID_ID_BEFORE = struct {
-                            fn unusable(_: DATA_, _: USERDATA_) bool {
-                                assert_unreachable(@src(), "no `invalid_id_before` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
-                            }
-                            fn select() T_FN_ID_INVALID_BEFORE {
-                                comptime {
-                                    if (func.INVALID_ID_BEFORE) |f| return f;
-                                    return if (ALLOW_DEFAULT) default_id_invalid_before else unusable;
-                                }
-                            }
-                        };
-                        const ID_VALID = struct {
-                            fn infer_lteq(data: DATA_, id: ID_, userdata: USERDATA_) bool {
-                                const LTEQ = comptime ID_LESS_THAN_OR_EQUAL.select(FLAGS);
-                                const FIRST = comptime FIRST_ID.select(FLAGS);
-                                const LAST = comptime LAST_ID.select(FLAGS);
-                                const first = FIRST(data, userdata);
-                                const last = LAST(data, userdata);
-                                return LTEQ(data, first, id, userdata) and LTEQ(data, id, last, userdata);
-                            }
-                            fn infer_gteq(data: DATA_, id: ID_, userdata: USERDATA_) bool {
-                                const GTEQ = comptime ID_GREATER_THAN_OR_EQUAL.select(FLAGS);
-                                const FIRST = comptime FIRST_ID.select(FLAGS);
-                                const LAST = comptime LAST_ID.select(FLAGS);
-                                const first = FIRST(data, userdata);
-                                const last = LAST(data, userdata);
-                                return GTEQ(data, id, first, userdata) and GTEQ(data, last, id, userdata);
-                            }
-                            fn infer_lt_eq(data: DATA_, id: ID_, userdata: USERDATA_) bool {
-                                const LT = comptime ID_LESS_THAN.select(FLAGS);
-                                const EQ = comptime ID_EQUALS.select(FLAGS);
-                                const FIRST = comptime FIRST_ID.select(FLAGS);
-                                const LAST = comptime LAST_ID.select(FLAGS);
-                                const first = FIRST(data, userdata);
-                                const last = LAST(data, userdata);
-                                return (LT(data, first, id, userdata) or (EQ(data, first, id, userdata))) and (LT(data, id, last, userdata) or EQ(data, id, last, userdata));
-                            }
-                            fn infer_gt_eq(data: DATA_, id: ID_, userdata: USERDATA_) bool {
-                                const GT = comptime ID_GREATER_THAN.select(FLAGS);
-                                const EQ = comptime ID_EQUALS.select(FLAGS);
-                                const FIRST = comptime FIRST_ID.select(FLAGS);
-                                const LAST = comptime LAST_ID.select(FLAGS);
-                                const first = FIRST(data, userdata);
-                                const last = LAST(data, userdata);
-                                return (GT(data, id, first, userdata) or (EQ(data, first, id, userdata))) and (GT(data, last, id, userdata) or EQ(data, id, last, userdata));
-                            }
-                            fn unusable(_: DATA_, _: ID_, _: USERDATA_) bool {
-                                assert_unreachable(@src(), "no `valid_id` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
-                            }
-                            fn select(comptime FLAGS_: FuncFlags) T_FN_VALID_ID {
-                                comptime {
-                                    if (func.VALID_ID) |f| return f;
-                                    if (FLAGS_.has(INFER.VALID_ID.FROM_FIRST_LAST_LTEQ)) return infer_lteq;
-                                    if (FLAGS_.has(INFER.VALID_ID.FROM_FIRST_LAST_GTEQ)) return infer_gteq;
-                                    if (FLAGS_.has(INFER.VALID_ID.FROM_FIRST_LAST_LT_EQ)) return infer_lt_eq;
-                                    if (FLAGS_.has(INFER.VALID_ID.FROM_FIRST_LAST_GT_EQ)) return infer_gt_eq;
-                                    return if (ALLOW_DEFAULT) default_valid_id else unusable;
-                                }
-                            }
-                        };
-                        fn assert_valid_id(data: DATA_, id: ID_, userdata: USERDATA_, comptime src: SourceLocation) bool {
-                            const VALID = comptime ID_VALID.select(FLAGS);
-                            assert_with_reason(VALID(data, id, userdata), src, "id `{any}` is not valid for the current data structure state", .{id});
-                        }
-                        const ID_LESS_THAN = struct {
-                            fn infer_gteq(data: DATA_, id_a: ID_, id_b: ID_, userdata: USERDATA_) bool {
-                                const GTEQ = comptime ID_GREATER_THAN_OR_EQUAL.select(FLAGS);
-                                return !GTEQ(data, id_a, id_b, userdata);
-                            }
-                            fn infer_gt_eq(data: DATA_, id_a: ID_, id_b: ID_, userdata: USERDATA_) bool {
-                                const GT = comptime ID_GREATER_THAN.select(FLAGS);
-                                const EQ = comptime ID_EQUALS.select(FLAGS);
-                                return !GT(data, id_a, id_b, userdata) and !EQ(data, id_a, id_b, userdata);
-                            }
-                            fn unusable(_: DATA_, _: ID_, _: ID_, _: USERDATA_) bool {
-                                assert_unreachable(@src(), "no `id_a less than id_b` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
-                            }
-                            fn select(comptime FLAGS_: FuncFlags) T_FN_ID_LESS_THAN {
-                                comptime {
-                                    if (func.ID_LESS_THAN) |f| return f;
-                                    if (FLAGS_.has(INFER.ID_LT.FROM_GTEQ)) return infer_gteq;
-                                    if (FLAGS_.has(INFER.ID_LT.FROM_GT_EQ)) return infer_gt_eq;
-                                    return if (ALLOW_DEFAULT) default_id_less_than else unusable;
-                                }
-                            }
-                        };
-                        const ID_LESS_THAN_OR_EQUAL = struct {
-                            fn infer_gt(data: DATA_, id_a: ID_, id_b: ID_, userdata: USERDATA_) bool {
-                                const GT = comptime ID_GREATER_THAN.select(FLAGS);
-                                return !GT(data, id_a, id_b, userdata);
-                            }
-                            fn infer_lt_eq(data: DATA_, id_a: ID_, id_b: ID_, userdata: USERDATA_) bool {
-                                const LT = comptime ID_LESS_THAN.select(FLAGS);
-                                const EQ = comptime ID_EQUALS.select(FLAGS);
-                                return LT(data, id_a, id_b, userdata) or EQ(data, id_a, id_b, userdata);
-                            }
-                            fn unusable(_: DATA_, _: ID_, _: ID_, _: USERDATA_) ELEM_ {
-                                assert_unreachable(@src(), "no `id_a less than or equal id_b` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
-                            }
-                            fn select(comptime FLAGS_: FuncFlags) T_FN_ID_LESS_THAN_OR_EQUAL {
-                                comptime {
-                                    if (func.ID_LESS_THAN_OR_EQUAL) |f| return f;
-                                    if (FLAGS_.has(INFER.ID_LTEQ.FROM_GT)) return infer_gt;
-                                    if (FLAGS_.has(INFER.ID_LTEQ.FROM_LT_EQ)) return infer_lt_eq;
-                                    return if (ALLOW_DEFAULT) default_id_less_than_or_equal else unusable;
-                                }
-                            }
-                        };
-                        const ID_GREATER_THAN = struct {
-                            fn infer_lteq(data: DATA_, id_a: ID_, id_b: ID_, userdata: USERDATA_) bool {
-                                const LTEQ = comptime ID_LESS_THAN_OR_EQUAL.select(FLAGS);
-                                return !LTEQ(data, id_a, id_b, userdata);
-                            }
-                            fn infer_lt_eq(data: DATA_, id_a: ID_, id_b: ID_, userdata: USERDATA_) bool {
-                                const LT = comptime ID_LESS_THAN.select(FLAGS);
-                                const EQ = comptime ID_EQUALS.select(FLAGS);
-                                return !LT(data, id_a, id_b, userdata) and !EQ(data, id_a, id_b, userdata);
-                            }
-                            fn unusable(_: DATA_, _: ID_, _: ID_, _: USERDATA_) ELEM_ {
-                                assert_unreachable(@src(), "no `id_a greater than id_b` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
-                            }
-                            fn select(comptime FLAGS_: FuncFlags) T_FN_ID_GREATER_THAN {
-                                comptime {
-                                    if (func.ID_GREATER_THAN) |f| return f;
-                                    if (FLAGS_.has(INFER.ID_GT.FROM_LTEQ)) return infer_lteq;
-                                    if (FLAGS_.has(INFER.ID_GT.FROM_LT_EQ)) return infer_lt_eq;
-                                    return if (ALLOW_DEFAULT) default_id_greater_than else unusable;
-                                }
-                            }
-                        };
-                        const ID_GREATER_THAN_OR_EQUAL = struct {
-                            fn infer_lt(data: DATA_, id_a: ID_, id_b: ID_, userdata: USERDATA_) bool {
-                                const LT = comptime ID_LESS_THAN.select(FLAGS);
-                                return !LT(data, id_a, id_b, userdata);
-                            }
-                            fn infer_gt_eq(data: DATA_, id_a: ID_, id_b: ID_, userdata: USERDATA_) bool {
-                                const GT = comptime ID_GREATER_THAN.select(FLAGS);
-                                const EQ = comptime ID_EQUALS.select(FLAGS);
-                                return GT(data, id_a, id_b, userdata) or EQ(data, id_a, id_b, userdata);
-                            }
-                            fn unusable(_: DATA_, _: ID_, _: ID_, _: USERDATA_) ELEM_ {
-                                assert_unreachable(@src(), "no `id_a greater than or equal id_b` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
-                            }
-                            fn select(comptime FLAGS_: FuncFlags) T_FN_ID_GREATER_THAN_OR_EQUAL {
-                                comptime {
-                                    if (func.ID_GREATER_THAN_OR_EQUAL) |f| return f;
-                                    if (FLAGS_.has(INFER.ID_GTEQ.FROM_LT)) return infer_lt;
-                                    if (FLAGS_.has(INFER.ID_GTEQ.FROM_GT_EQ)) return infer_gt_eq;
-                                    return if (ALLOW_DEFAULT) default_id_greater_than_or_equal else unusable;
-                                }
-                            }
-                        };
-                        const ID_EQUALS = struct {
-                            fn infer_gt_lt(data: DATA_, id_a: ID_, id_b: ID_, userdata: USERDATA_) bool {
-                                const GT = comptime ID_GREATER_THAN.select(FLAGS);
-                                const LT = comptime ID_LESS_THAN.select(FLAGS);
-                                return !GT(data, id_a, id_b, userdata) and !LT(data, id_a, id_b, userdata);
-                            }
-                            fn unusable(_: DATA_, _: ID_, _: ID_, _: USERDATA_) ELEM_ {
-                                assert_unreachable(@src(), "no `id_a less than or equal id_b` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
-                            }
-                            fn select(comptime FLAGS_: FuncFlags) T_FN_ID_LESS_THAN_OR_EQUAL {
-                                comptime {
-                                    if (func.ID_EQUALS) |f| return f;
-                                    if (FLAGS_.has(INFER.ID_EQ.FROM_GT_LT)) return infer_gt_lt;
-                                    return if (ALLOW_DEFAULT) default_id_equals else unusable;
-                                }
-                            }
-                        };
-                        const GET = struct {
-                            fn infer_ptr(data: DATA_, id: ID_, userdata: USERDATA_) ELEM_ {
-                                assert_valid_id(data, id, userdata, @src());
-                                return func.GET_PTR.?(data, id, userdata).*;
-                            }
-                            fn infer_const_ptr(data: DATA_, id: ID_, userdata: USERDATA_) ELEM_ {
-                                assert_valid_id(data, id, userdata, @src());
-                                return func.GET_PTR_CONST.?(data, id, userdata).*;
-                            }
-                            fn unusable(_: DATA_, _: ID_, _: USERDATA_) ELEM_ {
-                                assert_unreachable(@src(), "no `get` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
-                            }
-                            fn select(comptime FLAGS_: FuncFlags) T_FN_GET {
-                                comptime {
-                                    if (func.GET) |f| return f;
-                                    if (FLAGS_.has(INFER.GET_FROM_PTR)) return infer_ptr;
-                                    if (FLAGS_.has(INFER.GET_FROM_CONST_PTR)) return infer_const_ptr;
-                                    return if (ALLOW_DEFAULT) default_get else unusable;
-                                }
-                            }
-                        };
-                        const GET_PTR = struct {
-                            fn unusable(_: DATA_, _: ID_, _: USERDATA_) *ELEM_ {
-                                assert_unreachable(@src(), "no `get_ptr` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
-                            }
-                            fn select() T_FN_GET_PTR {
-                                comptime {
-                                    if (func.GET_PTR) |f| return f;
-                                    return if (ALLOW_DEFAULT) default_get_ptr else unusable;
-                                }
-                            }
-                        };
-                        const GET_CONST_PTR = struct {
-                            fn infer_ptr(data: DATA_, id: ID_, userdata: USERDATA_) *const ELEM_ {
-                                assert_valid_id(data, id, userdata, @src());
-                                return func.GET_PTR.?(data, id, userdata);
-                            }
-                            fn unusable(_: DATA_, _: ID_, _: USERDATA_) *const ELEM_ {
-                                assert_unreachable(@src(), "no `get_const_ptr` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
-                            }
-                            fn select(comptime FLAGS_: FuncFlags) T_FN_GET_CONST_PTR {
-                                comptime {
-                                    if (func.GET_PTR_CONST) |f| return f;
-                                    if (FLAGS_.has(INFER.CONST_PTR_FROM_PTR)) return infer_ptr;
-                                    return if (ALLOW_DEFAULT) default_get_const_ptr else unusable;
-                                }
-                            }
-                        };
-                        const SET = struct {
-                            fn infer_ptr(data: DATA_, id: ID_, val: ELEM_, userdata: USERDATA_) DATA_ {
-                                assert_valid_id(data, id, userdata, @src());
-                                func.GET_PTR.?(data, id, userdata).* = val;
-                                return data;
-                            }
-                            fn unusable(_: DATA_, _: ID_, _: ELEM_, _: USERDATA_) DATA_ {
-                                assert_unreachable(@src(), "no `set` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
-                            }
-                            fn select(comptime FLAGS_: FuncFlags) T_FN_SET {
-                                comptime {
-                                    if (func.SET) |f| return f;
-                                    if (FLAGS_.has(INFER.SET_FROM_PTR)) return infer_ptr;
-                                    return if (ALLOW_DEFAULT) default_set else unusable;
-                                }
-                            }
-                        };
-                        const SWAP = struct {
-                            fn infer_ptr(data: DATA_, id_a: ID_, id_b: ID_, userdata: USERDATA_) DATA_ {
-                                assert_valid_id(data, id_a, userdata, @src());
-                                assert_valid_id(data, id_b, userdata, @src());
-                                const GET_PTR_ = comptime GET_PTR.select(FLAGS);
-                                const ptr_a = GET_PTR_(data, id_a, userdata);
-                                const ptr_b = GET_PTR_(data, id_b, userdata);
-                                const tmp = ptr_b.*;
-                                ptr_b.* = ptr_a.*;
-                                ptr_a.* = tmp;
-                                return data;
-                            }
-                            fn infer_get_set(data: DATA_, id_a: ID_, id_b: ID_, userdata: USERDATA_) DATA_ {
-                                const GET_ = comptime GET.select(FLAGS);
-                                const SET_ = comptime SET.select(FLAGS);
-                                assert_valid_id(data, id_a, userdata, @src());
-                                assert_valid_id(data, id_b, userdata, @src());
-                                const tmp = GET_(data, id_b, userdata);
-                                const data_2 = SET_(data, id_b, GET_(data, id_a, userdata), userdata);
-                                return SET_(data_2, id_a, tmp, userdata);
-                            }
-                            fn unusable(_: DATA_, _: ID_, _: ID_, _: USERDATA_) DATA_ {
-                                assert_unreachable(@src(), "no `swap` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
-                            }
-                            fn select(comptime FLAGS_: FuncFlags) T_FN_SWAP {
-                                comptime {
-                                    if (func.SWAP) |f| return f;
-                                    if (FLAGS_.has(INFER.SWAP_FROM_PTR)) return infer_ptr;
-                                    if (FLAGS_.has(INFER.SWAP_FROM_GET_SET)) return infer_get_set;
-                                    return if (ALLOW_DEFAULT) default_swap else unusable;
-                                }
-                            }
-                        };
-                        const LESS_THAN = struct {
-                            fn infer_gteq(val_a: ELEM_, val_b: ELEM_, userdata: USERDATA_) bool {
-                                const GTEQ = comptime GREATER_THAN_OR_EQUAL.select(FLAGS);
-                                return !GTEQ(val_a, val_b, userdata);
-                            }
-                            fn infer_gt_eq(val_a: ELEM_, val_b: ELEM_, userdata: USERDATA_) bool {
-                                const GT = comptime GREATER_THAN.select(FLAGS);
-                                const EQ = comptime EXACT_EQUAL.select(FLAGS);
-                                return !GT(val_a, val_b, userdata) and !EQ(val_a, val_b, userdata);
-                            }
-                            fn infer_gt_oq(val_a: ELEM_, val_b: ELEM_, userdata: USERDATA_) bool {
-                                const GT = comptime GREATER_THAN.select(FLAGS);
-                                const OQ = comptime ORDER_EQUAL.select(FLAGS);
-                                return !GT(val_a, val_b, userdata) and !OQ(val_a, val_b, userdata);
-                            }
-                            fn unusable(_: ELEM_, _: ELEM_, _: USERDATA_) bool {
-                                assert_unreachable(@src(), "no `less_than` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
-                            }
-                            fn select(comptime FLAGS_: FuncFlags) T_FN_LESS_THAN {
-                                comptime {
-                                    if (func.LESS_THAN) |f| return f;
-                                    if (FLAGS_.has(INFER.LT_FROM_GTEQ)) return infer_gteq;
-                                    if (FLAGS_.has(INFER.LT_FROM_GT_OQ)) return infer_gt_oq;
-                                    if (FLAGS_.has(INFER.LT_FROM_GT_EQ)) return infer_gt_eq;
-                                    return if (ALLOW_DEFAULT) default_less_than else unusable;
-                                }
-                            }
-                        };
-                        const LESS_THAN_OR_EQUAL = struct {
-                            fn infer_gt(val_a: ELEM_, val_b: ELEM_, userdata: USERDATA_) bool {
-                                const GT = comptime GREATER_THAN.select(FLAGS);
-                                return !GT(val_a, val_b, userdata);
-                            }
-                            fn infer_lt_eq(val_a: ELEM_, val_b: ELEM_, userdata: USERDATA_) bool {
-                                const LT = comptime LESS_THAN.select(FLAGS);
-                                const EQ = comptime EXACT_EQUAL.select(FLAGS);
-                                return LT(val_a, val_b, userdata) or EQ(val_a, val_b, userdata);
-                            }
-                            fn infer_lt_oq(val_a: ELEM_, val_b: ELEM_, userdata: USERDATA_) bool {
-                                const LT = comptime LESS_THAN.select(FLAGS);
-                                const OQ = comptime ORDER_EQUAL.select(FLAGS);
-                                return LT(val_a, val_b, userdata) or OQ(val_a, val_b, userdata);
-                            }
-                            fn unusable(_: ELEM_, _: ELEM_, _: USERDATA_) bool {
-                                assert_unreachable(@src(), "no `less_than_or_equal` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
-                            }
-                            fn select(comptime FLAGS_: FuncFlags) T_FN_LESS_THAN_OR_EQUAL {
-                                comptime {
-                                    if (func.LESS_THAN_OR_EQUAL) |f| return f;
-                                    if (FLAGS_.has(INFER.LTEQ_FROM_GT)) return infer_gt;
-                                    if (FLAGS_.has(INFER.LTEQ_FROM_LT_OQ)) return infer_lt_oq;
-                                    if (FLAGS_.has(INFER.LTEQ_FROM_LT_EQ)) return infer_lt_eq;
-                                    return if (ALLOW_DEFAULT) default_less_than_or_equal else unusable;
-                                }
-                            }
-                        };
-                        const GREATER_THAN = struct {
-                            fn infer_lteq(val_a: ELEM_, val_b: ELEM_, userdata: USERDATA_) bool {
-                                const LTEQ = comptime LESS_THAN_OR_EQUAL.select(FLAGS);
-                                return !LTEQ(val_a, val_b, userdata);
-                            }
-                            fn infer_lt_eq(val_a: ELEM_, val_b: ELEM_, userdata: USERDATA_) bool {
-                                const LT = comptime LESS_THAN.select(FLAGS);
-                                const EQ = comptime EXACT_EQUAL.select(FLAGS);
-                                return !LT(val_a, val_b, userdata) and !EQ(val_a, val_b, userdata);
-                            }
-                            fn infer_lt_oq(val_a: ELEM_, val_b: ELEM_, userdata: USERDATA_) bool {
-                                const LT = comptime LESS_THAN.select(FLAGS);
-                                const OQ = comptime ORDER_EQUAL.select(FLAGS);
-                                return !LT(val_a, val_b, userdata) and !OQ(val_a, val_b, userdata);
-                            }
-                            fn unusable(_: ELEM_, _: ELEM_, _: USERDATA_) bool {
-                                assert_unreachable(@src(), "no `greater_than` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
-                            }
-                            fn select(comptime FLAGS_: FuncFlags) T_FN_GREATER_THAN {
-                                comptime {
-                                    if (func.GREATER_THAN) |f| return f;
-                                    if (FLAGS_.has(INFER.GT_FROM_LTEQ)) return infer_lteq;
-                                    if (FLAGS_.has(INFER.GT_FROM_LT_OQ)) return infer_lt_oq;
-                                    if (FLAGS_.has(INFER.GT_FROM_LT_EQ)) return infer_lt_eq;
-                                    return if (ALLOW_DEFAULT) default_greater_than else unusable;
-                                }
-                            }
-                        };
-                        const GREATER_THAN_OR_EQUAL = struct {
-                            fn infer_lt(val_a: ELEM_, val_b: ELEM_, userdata: USERDATA_) bool {
-                                const LT = comptime LESS_THAN.select(FLAGS);
-                                return !LT(val_a, val_b, userdata);
-                            }
-                            fn infer_gt_eq(val_a: ELEM_, val_b: ELEM_, userdata: USERDATA_) bool {
-                                const GT = comptime GREATER_THAN.select(FLAGS);
-                                const EQ = comptime EXACT_EQUAL.select(FLAGS);
-                                return !GT(val_a, val_b, userdata) and !EQ(val_a, val_b, userdata);
-                            }
-                            fn infer_gt_oq(val_a: ELEM_, val_b: ELEM_, userdata: USERDATA_) bool {
-                                const GT = comptime GREATER_THAN.select(FLAGS);
-                                const OQ = comptime ORDER_EQUAL.select(FLAGS);
-                                return !GT(val_a, val_b, userdata) and !OQ(val_a, val_b, userdata);
-                            }
-                            fn unusable(_: ELEM_, _: ELEM_, _: USERDATA_) bool {
-                                assert_unreachable(@src(), "no `greater_than_or_equal` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
-                            }
-                            fn select(comptime FLAGS_: FuncFlags) T_FN_GREATER_THAN_OR_EQUAL {
-                                comptime {
-                                    if (func.GREATER_THAN_OR_EQUAL) |f| return f;
-                                    if (FLAGS_.has(INFER.GTEQ_FROM_LT)) return infer_lt;
-                                    if (FLAGS_.has(INFER.GTEQ_FROM_GT_OQ)) return infer_gt_oq;
-                                    if (FLAGS_.has(INFER.GTEQ_FROM_GT_EQ)) return infer_gt_eq;
-                                    return if (ALLOW_DEFAULT) default_greater_than_or_equal else unusable;
-                                }
-                            }
-                        };
-                        const ORDER_EQUAL = struct {
-                            fn infer_eq(val_a: ELEM_, val_b: ELEM_, userdata: USERDATA_) bool {
-                                const EQ = comptime EXACT_EQUAL.select(FLAGS);
-                                return !EQ(val_a, val_b, userdata);
-                            }
-                            fn infer_gt_lt(val_a: ELEM_, val_b: ELEM_, userdata: USERDATA_) bool {
-                                const GT = comptime GREATER_THAN.select(FLAGS);
-                                const LT = comptime LESS_THAN.select(FLAGS);
-                                return !GT(val_a, val_b, userdata) and !LT(val_a, val_b, userdata);
-                            }
-                            fn unusable(_: ELEM_, _: ELEM_, _: USERDATA_) bool {
-                                assert_unreachable(@src(), "no `order_equals` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
-                            }
-                            fn select(comptime FLAGS_: FuncFlags) T_FN_EQUALS {
-                                comptime {
-                                    if (func.ORDER_EQUALS) |f| return f;
-                                    if (FLAGS_.has(INFER.OQ_FROM_EQ)) return infer_eq;
-                                    if (FLAGS_.has(INFER.EQOQ_FROM_GT_LT)) return infer_gt_lt;
-                                    return if (ALLOW_DEFAULT) default_equals else unusable;
-                                }
-                            }
-                        };
-                        const EXACT_EQUAL = struct {
-                            fn infer_oq(val_a: ELEM_, val_b: ELEM_, userdata: USERDATA_) bool {
-                                const OQ = comptime ORDER_EQUAL.select(FLAGS);
-                                return !OQ(val_a, val_b, userdata);
-                            }
-                            fn infer_gt_lt(val_a: ELEM_, val_b: ELEM_, userdata: USERDATA_) bool {
-                                const GT = comptime GREATER_THAN.select(FLAGS);
-                                const LT = comptime LESS_THAN.select(FLAGS);
-                                return !GT(val_a, val_b, userdata) and !LT(val_a, val_b, userdata);
-                            }
-                            fn unusable(_: ELEM_, _: ELEM_, _: USERDATA_) bool {
-                                assert_unreachable(@src(), "no `exactly_equals` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
-                            }
-                            fn select(comptime FLAGS_: FuncFlags) T_FN_EQUALS {
-                                comptime {
-                                    if (func.EXACT_EQUALS) |f| return f;
-                                    if (FLAGS_.has(INFER.EQ_FROM_OQ)) return infer_oq;
-                                    if (FLAGS_.has(INFER.EQOQ_FROM_GT_LT)) return infer_gt_lt;
-                                    return if (ALLOW_DEFAULT) default_equals else unusable;
-                                }
-                            }
-                        };
-                        const FIRST_ID = struct {
-                            fn infer_nth_start(data: DATA_, userdata: USERDATA_) ID_ {
-                                const NTH_START = comptime NTH_FROM_START.select(FLAGS);
-                                return NTH_START(data, 0, userdata);
-                            }
-                            fn infer_nth_end(data: DATA_, userdata: USERDATA_) ID_ {
-                                const NTH_END = comptime NTH_FROM_END.select(FLAGS);
-                                const LEN_ = comptime GET_LEN.select(FLAGS);
-                                return NTH_END(data, LEN_(data, userdata), userdata);
-                            }
-                            fn infer_last_len_nth_prev(data: DATA_, userdata: USERDATA_) ID_ {
-                                const LAST = comptime LAST_ID.select(FLAGS);
-                                const LEN_ = comptime GET_LEN.select(FLAGS);
-                                const NTH_PREV_ = comptime NTH_PREV_ID.select(FLAGS);
-                                return NTH_PREV_(data, LAST(data, userdata), LEN_(data, userdata), userdata);
-                            }
-                            fn infer_last_len_prev(data: DATA_, userdata: USERDATA_) ID_ {
-                                const LAST = comptime LAST_ID.select(FLAGS);
-                                const LEN_ = comptime GET_LEN.select(FLAGS);
-                                const PREV_ = comptime PREV_ID.select(FLAGS);
-                                var l = LEN_(data, userdata);
-                                var i = LAST(data, userdata);
-                                while (l > 0) : (l -= 1) {
-                                    i = PREV_(data, i, userdata);
-                                }
-                                return i;
-                            }
-                            fn unusable(_: DATA_, _: USERDATA_) ID_ {
-                                assert_unreachable(@src(), "no `first_index` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
-                            }
-                            fn select(comptime FLAGS_: FuncFlags) T_FN_FIRST_ID {
-                                comptime {
-                                    if (func.FIRST_ID) |f| return f;
-                                    if (FLAGS_.has(INFER.FIRST_FROM_NTH_FROM_START)) return infer_nth_start;
-                                    if (FLAGS_.has(INFER.FIRST_FROM_LEN_NTH_FROM_END)) return infer_nth_end;
-                                    if (FLAGS_.has(INFER.FIRST_FROM_LAST_LEN_NTH_PREV)) return infer_last_len_nth_prev;
-                                    if (FLAGS_.has(INFER.FIRST_FROM_LAST_LEN_PREV)) return infer_last_len_prev;
-                                    return if (ALLOW_DEFAULT) default_first_index else unusable;
-                                }
-                            }
-                        };
-                        const LAST_ID = struct {
-                            fn infer_nth_last(data: DATA_, userdata: USERDATA_) ID_ {
-                                const NTH_START = comptime NTH_FROM_START.select(FLAGS);
-                                return NTH_START(data, 0, userdata);
-                            }
-                            fn infer_nth_start(data: DATA_, userdata: USERDATA_) ID_ {
-                                const NTH_START = comptime NTH_FROM_START.select(FLAGS);
-                                const LEN_ = comptime GET_LEN.select(FLAGS);
-                                return NTH_START(data, LEN_(data, userdata), userdata);
-                            }
-                            fn infer_first_len_nth_next(data: DATA_, userdata: USERDATA_) ID_ {
-                                const FIRST = comptime FIRST_ID.select(FLAGS);
-                                const LEN_ = comptime GET_LEN.select(FLAGS);
-                                const NTH_NEXT_ = comptime NTH_PREV_ID.select(FLAGS);
-                                return NTH_NEXT_(data, FIRST(data, userdata), LEN_(data, userdata), userdata);
-                            }
-                            fn infer_first_len_next(data: DATA_, userdata: USERDATA_) ID_ {
-                                const FIRST = comptime FIRST_ID.select(FLAGS);
-                                const LEN_ = comptime GET_LEN.select(FLAGS);
-                                const NEXT_ = comptime NEXT_ID.select(FLAGS);
-                                var l = LEN_(data, userdata);
-                                var i = FIRST(data, userdata);
-                                while (l > 0) : (l -= 1) {
-                                    i = NEXT_(data, i, userdata);
-                                }
-                                return i;
-                            }
-                            fn unusable(_: DATA_, _: USERDATA_) ID_ {
-                                assert_unreachable(@src(), "no `last_index` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
-                            }
-                            fn select(comptime FLAGS_: FuncFlags) T_FN_LAST_ID {
-                                comptime {
-                                    if (func.LAST_ID) |f| return f;
-                                    if (FLAGS_.has(INFER.LAST_FROM_NTH_FROM_LAST)) return infer_nth_last;
-                                    if (FLAGS_.has(INFER.LAST_FROM_LEN_NTH_FROM_START)) return infer_nth_start;
-                                    if (FLAGS_.has(INFER.LAST_FROM_FIRST_LEN_NTH_NEXT)) return infer_first_len_nth_next;
-                                    if (FLAGS_.has(INFER.LAST_FROM_FIRST_LEN_NEXT)) return infer_first_len_next;
-                                    return if (ALLOW_DEFAULT) default_last_index else unusable;
-                                }
-                            }
-                        };
-                        const NEXT_ID = struct {
-                            fn infer_nth_next(data: DATA_, curr: ID_, userdata: USERDATA_) ID_ {
-                                assert_valid_id(data, curr, userdata, @src());
-                                const NTH_NEXT = comptime NTH_NEXT_ID.select(FLAGS);
-                                return NTH_NEXT(data, curr, 1, userdata);
-                            }
-                            fn infer_last_prev(data: DATA_, curr: ID_, userdata: USERDATA_) ID_ {
-                                assert_valid_id(data, curr, userdata, @src());
-                                const LAST = comptime LAST_ID.select(FLAGS);
-                                const PREV = comptime PREV_ID.select(FLAGS);
-                                const ID_EQ = comptime ID_EQUALS.select(FLAGS);
-                                const INVALID_END = comptime INVALID_ID_AFTER.select();
-                                const INVALID_BEFORE = comptime INVALID_ID_BEFORE.select();
-                                const VALID = comptime ID_VALID.select();
-                                var i = LAST(data, userdata);
-                                if (ID_EQ(data, i, curr, userdata)) return INVALID_END(data, userdata);
-                                var ii = PREV(data, i, userdata);
-                                while (!ID_EQ(data, i, curr, userdata)) {
-                                    if (!VALID(data, ii, userdata)) return INVALID_BEFORE(data, userdata);
-                                    i = ii;
-                                    ii = PREV(data, i, userdata);
-                                }
-                                return i;
-                            }
-                            fn unusable(_: DATA_, _: ID_, _: USERDATA_) ID_ {
-                                assert_unreachable(@src(), "no `next_index` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
-                            }
-                            fn select(comptime FLAGS_: FuncFlags) T_FN_NEXT_ID {
-                                comptime {
-                                    if (func.NEXT_ID) |f| return f;
-                                    if (FLAGS_.has(INFER.NEXT_IDX_FROM_NTH_NEXT)) return infer_nth_next;
-                                    if (FLAGS_.has(INFER.NEXT_IDX_FROM_LAST_PREV)) return infer_last_prev;
-                                    return if (ALLOW_DEFAULT) default_next_idx else unusable;
-                                }
-                            }
-                        };
-                        const PREV_ID = struct {
-                            fn infer_nth_prev(data: DATA_, curr: ID_, userdata: USERDATA_) ID_ {
-                                assert_valid_id(data, curr, userdata, @src());
-                                const NTH_PREV = comptime NTH_PREV_ID.select(FLAGS);
-                                return NTH_PREV(data, curr, 1, userdata);
-                            }
-                            fn infer_first_next(data: DATA_, curr: ID_, userdata: USERDATA_) ID_ {
-                                assert_valid_id(data, curr, userdata, @src());
-                                const FIRST = comptime FIRST_ID.select(FLAGS);
-                                const NEXT = comptime NEXT_ID.select(FLAGS);
-                                const ID_EQ = comptime ID_EQUALS.select(FLAGS);
-                                const INVALID_END = comptime INVALID_ID_AFTER.select();
-                                const INVALID_BEFORE = comptime INVALID_ID_BEFORE.select();
-                                const VALID = comptime ID_VALID.select();
-                                var i = FIRST(data, userdata);
-                                if (ID_EQ(data, i, curr, userdata)) return INVALID_END(data, userdata);
-                                var ii = NEXT(data, i, userdata);
-                                while (!ID_EQ(data, ii, curr, userdata)) {
-                                    if (!VALID(data, ii, userdata)) return INVALID_BEFORE(data, userdata);
-                                    i = ii;
-                                    ii = NEXT(data, i, userdata);
-                                }
-                                return i;
-                            }
-                            fn unusable(_: DATA_, _: ID_, _: USERDATA_) ID_ {
-                                assert_unreachable(@src(), "no `prev_index` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
-                            }
-                            fn select(comptime FLAGS_: FuncFlags) T_FN_PREV_ID {
-                                comptime {
-                                    if (func.PREV_ID) |f| return f;
-                                    if (FLAGS_.has(INFER.PREV_IDX_FROM_NTH_PREV)) return infer_nth_prev;
-                                    if (FLAGS_.has(INFER.PREV_IDX_FROM_FIRST_NEXT)) return infer_first_next;
-                                    return if (ALLOW_DEFAULT) default_next_idx else unusable;
-                                }
-                            }
-                        };
-                        const NTH_NEXT_ID = struct {
-                            fn infer_next(data: DATA_, curr: ID_, n: COUNT_, userdata: USERDATA_) ID_ {
-                                assert_valid_id(data, curr, userdata, @src());
-                                const NEXT = comptime NEXT_ID.select(FLAGS);
-                                var i = curr;
-                                var nn: COUNT_ = 0;
-                                while (nn < n) : (nn += 1) {
-                                    i = NEXT(data, i, userdata);
-                                }
-                                return i;
-                            }
-                            fn infer_last_prev(data: DATA_, curr: ID_, n: COUNT_, userdata: USERDATA_) ID_ {
-                                assert_valid_id(data, curr, userdata, @src());
-                                const LAST = comptime LAST_ID.select(FLAGS);
-                                const PREV = comptime PREV_ID.select(FLAGS);
-                                const ID_EQ = comptime ID_EQUALS.select(FLAGS);
-                                const INVALID_END = comptime INVALID_ID_AFTER.select();
-                                const INVALID_BEFORE = comptime INVALID_ID_BEFORE.select();
-                                const VALID = comptime ID_VALID.select();
-                                const last = LAST(data, userdata);
-                                var left_i = last;
-                                var nn: COUNT_ = 0;
-                                while (nn < n) : (nn += 1) {
-                                    if (ID_EQ(data, left_i, curr, userdata) or !VALID(data, left_i, userdata)) return INVALID_END(data, userdata);
-                                    left_i = PREV(data, curr, userdata);
-                                }
-                                var right_i = last;
-                                var left_ii = PREV(data, left_i, userdata);
-                                var right_ii = PREV(data, last, userdata);
-                                while (!ID_EQ(data, left_ii, curr, userdata)) {
-                                    left_i = left_ii;
-                                    left_ii = PREV(data, left_i, userdata);
-                                    if (!VALID(data, left_ii, userdata)) return INVALID_BEFORE(data, userdata);
-                                    right_i = right_ii;
-                                    right_ii = PREV(data, right_i, userdata);
-                                }
-                                return right_i;
-                            }
-                            fn unusable(_: DATA_, _: ID_, _: COUNT_, _: USERDATA_) ID_ {
-                                assert_unreachable(@src(), "no `nth_next_index` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
-                            }
-                            fn select(comptime FLAGS_: FuncFlags) T_FN_NTH_NEXT_ID {
-                                comptime {
-                                    if (func.NTH_PREV_ID) |f| return f;
-                                    if (FLAGS_.has(INFER.NTH_NEXT_IDX_FROM_NEXT)) return infer_next;
-                                    if (FLAGS_.has(INFER.NTH_NEXT_IDX_FROM_LAST_PREV)) return infer_last_prev;
-                                    return if (ALLOW_DEFAULT) default_next_idx else unusable;
-                                }
-                            }
-                        };
-                        const NTH_PREV_ID = struct {
-                            fn infer_prev(data: DATA_, curr: ID_, n: COUNT_, userdata: USERDATA_) ID_ {
-                                assert_valid_id(data, curr, userdata, @src());
-                                const PREV = comptime PREV_ID.select(FLAGS);
-                                var i = curr;
-                                var nn: COUNT_ = 0;
-                                while (nn < n) : (nn += 1) {
-                                    i = PREV(data, i, userdata);
-                                }
-                                return i;
-                            }
-                            fn infer_first_next(data: DATA_, curr: ID_, n: COUNT_, userdata: USERDATA_) ID_ {
-                                assert_valid_id(data, curr, userdata, @src());
-                                const FIRST = comptime FIRST_ID.select(FLAGS);
-                                const NEXT = comptime NEXT_ID.select(FLAGS);
-                                const ID_EQ = comptime ID_EQUALS.select(FLAGS);
-                                const INVALID_END = comptime INVALID_ID_AFTER.select();
-                                const INVALID_BEFORE = comptime INVALID_ID_BEFORE.select();
-                                const VALID = comptime ID_VALID.select(FLAGS);
-                                const first = FIRST(data, userdata);
-                                var right_i = first;
-                                var nn: COUNT_ = 0;
-                                while (nn < n) : (nn += 1) {
-                                    if (ID_EQ(data, right_i, curr, userdata) or !VALID(data, right_i, userdata)) return INVALID_END(data, userdata);
-                                    right_i = NEXT(data, curr, userdata);
-                                }
-                                var left_i = first;
-                                var right_ii = NEXT(data, right_i, userdata);
-                                var left_ii = NEXT(data, first, userdata);
-                                while (!ID_EQ(data, right_ii, curr, userdata)) {
-                                    right_i = right_ii;
-                                    right_ii = NEXT(data, right_i, userdata);
-                                    if (!VALID(data, right_ii, userdata)) return INVALID_BEFORE(data, userdata);
-                                    left_i = left_ii;
-                                    left_ii = NEXT(data, left_i, userdata);
-                                }
-                                return left_i;
-                            }
-                            fn unusable(_: DATA_, _: ID_, _: COUNT_, _: USERDATA_) ID_ {
-                                assert_unreachable(@src(), "no `nth_prev_id` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
-                            }
-                            fn select(comptime FLAGS_: FuncFlags) T_FN_NTH_PREV_ID {
-                                comptime {
-                                    if (func.NTH_PREV_ID) |f| return f;
-                                    if (FLAGS_.has(INFER.NTH_PREV_IDX_FROM_PREV)) return infer_prev;
-                                    if (FLAGS_.has(INFER.NTH_PREV_IDX_FROM_FIRST_NEXT)) return infer_first_next;
-                                    return if (ALLOW_DEFAULT) default_nth_prev_idx else unusable;
-                                }
-                            }
-                        };
-                        const NTH_FROM_START = struct {
-                            fn infer_first_nth_next(data: DATA_, n: COUNT_, userdata: USERDATA_) ID_ {
-                                const NTH_NEXT = comptime NTH_NEXT_ID.select(FLAGS);
-                                const FIRST = comptime FIRST_ID.select(FLAGS);
-                                return NTH_NEXT(data, FIRST(data, userdata), n, userdata);
-                            }
-                            fn infer_first_next(data: DATA_, n: COUNT_, userdata: USERDATA_) ID_ {
-                                const NEXT = comptime NEXT_ID.select(FLAGS);
-                                const FIRST = comptime FIRST_ID.select(FLAGS);
-                                var nn: COUNT_ = 0;
-                                var i = FIRST(data, userdata);
-                                while (nn < n) : (nn += 1) {
-                                    i = NEXT(data, i, userdata);
-                                }
-                                return i;
-                            }
-                            fn unusable(_: DATA_, _: COUNT_, _: USERDATA_) ID_ {
-                                assert_unreachable(@src(), "no `nth_index_from_start` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
-                            }
-                            fn select(comptime FLAGS_: FuncFlags) T_FN_NTH_ID_FROM_START {
-                                comptime {
-                                    if (func.NTH_ID_FROM_START) |f| return f;
-                                    if (FLAGS_.has(INFER.NTH_FROM_START_FROM_FIRST_NTH_NEXT)) return infer_first_nth_next;
-                                    if (FLAGS_.has(INFER.NTH_FROM_START_FROM_FIRST_NEXT)) return infer_first_next;
-                                    return if (ALLOW_DEFAULT) default_nth_index_from_start else unusable;
-                                }
-                            }
-                        };
-                        const NTH_FROM_END = struct {
-                            fn infer_last_nth_prev(data: DATA_, n: COUNT_, userdata: USERDATA_) ID_ {
-                                const NTH_PREV = comptime NTH_PREV_ID.select(FLAGS);
-                                const LAST = comptime LAST_ID.select(FLAGS);
-                                return NTH_PREV(data, LAST(data, userdata), n, userdata);
-                            }
-                            fn infer_last_prev(data: DATA_, n: COUNT_, userdata: USERDATA_) ID_ {
-                                const PREV = comptime PREV_ID.select(FLAGS);
-                                const LAST = comptime LAST_ID.select(FLAGS);
-                                var nn: COUNT_ = 0;
-                                var i = LAST(data, userdata);
-                                while (nn < n) : (nn += 1) {
-                                    i = PREV(data, i, userdata);
-                                }
-                                return i;
-                            }
-                            fn unusable(_: DATA_, _: COUNT_, _: USERDATA_) ID_ {
-                                assert_unreachable(@src(), "no `nth_index_from_end` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
-                            }
-                            fn select(comptime FLAGS_: FuncFlags) T_FN_NTH_ID_FROM_END {
-                                comptime {
-                                    if (func.NTH_ID_FROM_END) |f| return f;
-                                    if (FLAGS_.has(INFER.NTH_FROM_END_FROM_LAST_NTH_PREV)) return infer_last_nth_prev;
-                                    if (FLAGS_.has(INFER.NTH_FROM_END_FROM_LAST_PREV)) return infer_last_prev;
-                                    return if (ALLOW_DEFAULT) default_nth_index_from_end else unusable;
-                                }
-                            }
-                        };
-                        const GET_LEN = struct {
-                            fn infer_range_len(data: DATA_, userdata: USERDATA_) COUNT_ {
-                                const FIRST = comptime FIRST_ID.select(FLAGS);
-                                const LAST = comptime LAST_ID.select(FLAGS);
-                                const RANGE = comptime RANGE_LEN.select(FLAGS);
-                                return RANGE(FIRST(data, userdata), LAST(data, userdata), userdata);
-                            }
-                            fn infer_first_last_next(data: DATA_, userdata: USERDATA_) COUNT_ {
-                                const FIRST = comptime FIRST_ID.select(FLAGS);
-                                const LAST = comptime LAST_ID.select(FLAGS);
-                                const NEXT = comptime NEXT_ID.select(FLAGS);
-                                const VALID = comptime ID_VALID.select(FLAGS);
-                                const ID_EQ = comptime ID_EQUALS.select(FLAGS);
-                                var i = FIRST(data, userdata);
-                                const last = LAST(data, userdata);
-                                if (!VALID(data, i, userdata) or !VALID(data, last, userdata)) return 0;
-                                var n: COUNT_ = 1;
-                                while (!ID_EQ(data, i, last, userdata)) {
-                                    i = NEXT(data, i, userdata);
-                                    n += 1;
-                                }
-                                return n;
-                            }
-                            fn infer_first_last_prev(data: DATA_, userdata: USERDATA_) COUNT_ {
-                                const FIRST = comptime FIRST_ID.select(FLAGS);
-                                const LAST = comptime LAST_ID.select(FLAGS);
-                                const PREV = comptime PREV_ID.select(FLAGS);
-                                const VALID = comptime ID_VALID.select(FLAGS);
-                                const ID_EQ = comptime ID_EQUALS.select(FLAGS);
-                                var i = LAST(data, userdata);
-                                const first = FIRST(data, userdata);
-                                if (!VALID(data, i, userdata) or !VALID(data, first, userdata)) return 0;
-                                var n: COUNT_ = 1;
-                                while (!ID_EQ(data, i, first, userdata)) {
-                                    i = PREV(data, i, userdata);
-                                    n += 1;
-                                }
-                                return n;
-                            }
-                            fn unusable(_: DATA_, _: USERDATA_) COUNT_ {
-                                assert_unreachable(@src(), "no `len` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
-                            }
-                            fn select(comptime FLAGS_: FuncFlags) T_FN_GET {
-                                comptime {
-                                    if (func.GET_LEN) |f| return f;
-                                    if (FLAGS_.has(INFER.LEN_FROM_FIRST_LAST_RANGE_LEN)) return infer_range_len;
-                                    if (FLAGS_.has(INFER.LEN_FROM_FIRST_LAST_NEXT)) return infer_first_last_next;
-                                    if (FLAGS_.has(INFER.LEN_FROM_FIRST_LAST_PREV)) return infer_first_last_prev;
-                                    return if (ALLOW_DEFAULT) default_len else unusable;
-                                }
-                            }
-                        };
-                        const SET_LEN = struct {
-                            fn unusable(_: DATA_, _: USERDATA_) COUNT_ {
-                                assert_unreachable(@src(), "no `set_len` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
-                            }
-                            fn select() T_FN_SET_LEN {
-                                comptime {
-                                    if (func.SET_LEN) |f| return f;
-                                    return if (ALLOW_DEFAULT) default_set_len else unusable;
-                                }
-                            }
-                        };
-                        const RANGE_LEN = struct {
-                            fn infer_next(data: DATA_, first: ID_, last: ID_, userdata: USERDATA_) COUNT_ {
-                                assert_valid_id(data, first, userdata, @src());
-                                assert_valid_id(data, last, userdata, @src());
-                                const NEXT = comptime NEXT_ID.select(FLAGS);
-                                const ID_LESS_OR_EQUAL = comptime ID_LESS_THAN_OR_EQUAL.select(FLAGS);
-                                const VALID = comptime ID_VALID.select(FLAGS);
-                                const ID_EQ = comptime ID_EQUALS.select(FLAGS);
-                                if (!ID_LESS_OR_EQUAL(data, first, last, userdata)) return 0;
-                                var i = first;
-                                var n: COUNT_ = 1;
-                                while (!ID_EQ(data, i, last, userdata)) {
-                                    if (!VALID(data, i, userdata)) return 0;
-                                    i = NEXT(data, i, userdata);
-                                    n += 1;
-                                }
-                                return n;
-                            }
-                            fn infer_prev(data: DATA_, first: ID_, last: ID_, userdata: USERDATA_) COUNT_ {
-                                assert_valid_id(data, first, userdata, @src());
-                                assert_valid_id(data, last, userdata, @src());
-                                const PREV = comptime PREV_ID.select(FLAGS);
-                                const ID_LESS_OR_EQUAL = comptime ID_LESS_THAN_OR_EQUAL.select(FLAGS);
-                                const VALID = comptime ID_VALID.select(FLAGS);
-                                const ID_EQ = comptime ID_EQUALS.select(FLAGS);
-                                if (!ID_LESS_OR_EQUAL(data, first, last, userdata)) return 0;
-                                var i = last;
-                                var n: COUNT_ = 1;
-                                while (!ID_EQ(data, i, first, userdata)) {
-                                    if (!VALID(data, i, userdata)) return 0;
-                                    i = PREV(data, i, userdata);
-                                    n += 1;
-                                }
-                                return n;
-                            }
-                            fn unusable(_: DATA_, _: ID_, _: ID_, _: USERDATA_) COUNT_ {
-                                assert_unreachable(@src(), "no `range_len` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
-                            }
-                            fn select(comptime FLAGS_: FuncFlags) T_FN_RANGE_LEN {
-                                comptime {
-                                    if (func.RANGE_LEN) |f| return f;
-                                    if (FLAGS_.has(INFER.RANGE_LEN_FROM_NEXT)) return infer_next;
-                                    if (FLAGS_.has(INFER.RANGE_LEN_FROM_PREV)) return infer_prev;
-                                    return if (ALLOW_DEFAULT) default_range_len else unusable;
-                                }
-                            }
-                        };
-                        const REVERSE_RANGE = struct {
-                            fn infer_swap(data: DATA_, first: ID_, last: ID_, userdata: USERDATA_) DATA_ {
-                                assert_valid_id(data, first, userdata, @src());
-                                assert_valid_id(data, last, userdata, @src());
-                                const SWAP_ = comptime SWAP.select(FLAGS);
-                                const NEXT = comptime NEXT_ID.select(FLAGS);
-                                const PREV = comptime PREV_ID.select(FLAGS);
-                                const ID_LESS_OR_EQUAL = comptime ID_LESS_THAN_OR_EQUAL.select(FLAGS);
-                                const ID_EQ = comptime ID_EQUALS.select(FLAGS);
-                                if (!ID_LESS_OR_EQUAL(data, first, last, userdata)) return 0;
-                                var new_data = data;
-                                var left = first;
-                                var right = last;
-                                while (!ID_EQ(data, left, right, userdata)) {
-                                    new_data = SWAP_(new_data, left, right, userdata);
-                                    left = NEXT(data, left, userdata);
-                                    if (ID_EQ(data, left, right, userdata)) break;
-                                    right = PREV(new_data, right, userdata);
-                                }
-                                return new_data;
-                            }
-                            fn unusable(_: DATA_, _: ID_, _: ID_, _: USERDATA_) DATA_ {
-                                assert_unreachable(@src(), "no `range_len` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
-                            }
-                            fn select(comptime FLAGS_: FuncFlags) T_FN_REVERSE {
-                                comptime {
-                                    if (func.REVERSE_RANGE) |f| return f;
-                                    if (FLAGS_.has_any(&.{ INFER.REVERSE_FROM_GET_SET, INFER.REVERSE_FROM_SWAP })) return infer_swap;
-                                    return if (ALLOW_DEFAULT) default_reverse_range else unusable;
-                                }
-                            }
-                        };
-                        const ROTATE_RIGHT = struct {
-                            fn infer_reverse(data: DATA_, first: ID_, last: ID_, count: COUNT_, userdata: USERDATA_) DATA_ {
-                                assert_valid_id(data, first, userdata, @src());
-                                assert_valid_id(data, last, userdata, @src());
-                                const REV = comptime REVERSE_RANGE.select(FLAGS);
-                                const NEXT = comptime NEXT_ID.select(FLAGS);
-                                const NTH_PREV = comptime NTH_PREV_ID.select(FLAGS);
-                                const ID_LESS_OR_EQUAL = comptime ID_LESS_THAN_OR_EQUAL.select();
-                                const RANGE_LEN_ = comptime RANGE_LEN.select(FLAGS);
-                                if (!ID_LESS_OR_EQUAL(data, first, last, userdata)) return data;
-                                var new_data = data;
-                                const len = RANGE_LEN_(data, first, last, userdata);
-                                const shift = count % len;
-                                if (shift == 0) return data;
-                                const first_group_last_id = NTH_PREV(data, last, shift, userdata);
-                                const last_group_first_id = NEXT(data, first_group_last_id, userdata);
-                                new_data = REV(new_data, first, first_group_last_id, userdata);
-                                new_data = REV(new_data, last_group_first_id, last, new_data);
-                                new_data = REV(new_data, first, last, new_data);
-                                return new_data;
-                            }
-                            fn unusable(_: DATA_, _: ID_, _: ID_, _: COUNT_, _: USERDATA_) DATA_ {
-                                assert_unreachable(@src(), "no `rotate_range_right` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
-                            }
-                            fn select(comptime FLAGS_: FuncFlags) T_FN_ROTATE_RIGHT {
-                                comptime {
-                                    if (func.ROTATE_RANGE_RIGHT) |f| return f;
-                                    if (FLAGS_.has_any(&.{ INFER.ROTATE_FROM_GET_SET, INFER.ROTATE_FROM_REVERSE, INFER.ROTATE_FROM_SWAP })) return infer_reverse;
-                                    return if (ALLOW_DEFAULT) default_rotate_range_right else unusable;
-                                }
-                            }
-                        };
-                        const ROTATE_LEFT = struct {
-                            fn infer_reverse(data: DATA_, first: ID_, last: ID_, count: COUNT_, userdata: USERDATA_) DATA_ {
-                                assert_valid_id(data, first, userdata, @src());
-                                assert_valid_id(data, last, userdata, @src());
-                                const REV = comptime REVERSE_RANGE.select(FLAGS);
-                                const NTH_NEXT = comptime NTH_NEXT_ID.select(FLAGS);
-                                const PREV = comptime PREV_ID.select(FLAGS);
-                                const ID_LESS_OR_EQUAL = comptime ID_LESS_THAN_OR_EQUAL.select();
-                                const RANGE_LEN_ = comptime RANGE_LEN.select(FLAGS);
-                                if (!ID_LESS_OR_EQUAL(data, first, last, userdata)) return data;
-                                var new_data = data;
-                                const len = RANGE_LEN_(data, first, last, userdata);
-                                const shift = count % len;
-                                if (shift == 0) return data;
-                                const last_group_first_id = NTH_NEXT(data, last, shift, userdata);
-                                const first_group_last_id = PREV(data, last_group_first_id, userdata);
-                                new_data = REV(new_data, first, first_group_last_id, userdata);
-                                new_data = REV(new_data, last_group_first_id, last, new_data);
-                                new_data = REV(new_data, first, last, new_data);
-                                return new_data;
-                            }
-                            fn unusable(_: DATA_, _: ID_, _: ID_, _: COUNT_, _: USERDATA_) DATA_ {
-                                assert_unreachable(@src(), "no `rotate_range_left` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
-                            }
-                            fn select(comptime FLAGS_: FuncFlags) T_FN_ROTATE_RIGHT {
-                                comptime {
-                                    if (func.ROTATE_RANGE_LEFT) |f| return f;
-                                    if (FLAGS_.has_any(&.{ INFER.ROTATE_FROM_GET_SET, INFER.ROTATE_FROM_REVERSE, INFER.ROTATE_FROM_SWAP })) return infer_reverse;
-                                    return if (ALLOW_DEFAULT) default_rotate_range_right else unusable;
-                                }
-                            }
-                        };
-                        const MOVE_ONE_PRESERVE = struct {
-                            fn infer_move_block(data: DATA_, old_id: ID_, new_id: ID_, userdata: USERDATA_) DATA_ {
-                                const MOVE_BLOCK = comptime MOVE_BLOCK_PRESERVE.select(FLAGS);
-                                return MOVE_BLOCK(data, old_id, old_id, new_id, userdata);
-                            }
-                            fn infer_get_set(data: DATA_, old_id: ID_, new_id: ID_, userdata: USERDATA_) DATA_ {
-                                assert_valid_id(data, old_id, userdata, @src());
-                                assert_valid_id(data, new_id, userdata, @src());
-                                const GET_ = comptime GET.select(FLAGS);
-                                const SET_ = comptime SET.select(FLAGS);
-                                const NEXT = comptime NEXT_ID.select(FLAGS);
-                                const PREV = comptime PREV_ID.select(FLAGS);
-                                const ID_LESS_OR_EQUAL = comptime ID_LESS_THAN_OR_EQUAL.select(FLAGS);
-                                const ID_EQ = comptime ID_EQUALS.select(FLAGS);
-                                var new_data = data;
-                                if (ID_EQ(data, old_id, new_id, userdata)) return data;
-                                if (ID_LESS_OR_EQUAL(data, old_id, new_id, userdata)) {
-                                    const old_val = GET_(data, old_id, userdata);
-                                    var i = old_id;
-                                    var ii = i;
-                                    while (!ID_EQ(data, i, new_id, userdata)) {
-                                        i = NEXT(data, i, userdata);
-                                        const val_to_move = GET_(new_data, i, userdata);
-                                        new_data = SET_(new_data, ii, val_to_move, userdata);
-                                        ii = i;
-                                    }
-                                    new_data = SET_(data, new_id, old_val, userdata);
-                                } else {
-                                    const old_val = GET_(data, old_id, userdata);
-                                    var i = old_id;
-                                    var ii = i;
-                                    while (!ID_EQ(data, i, new_id, userdata)) {
-                                        i = PREV(data, i, userdata);
-                                        const val_to_move = GET_(new_data, i, userdata);
-                                        new_data = SET_(new_data, ii, val_to_move, userdata);
-                                        ii = i;
-                                    }
-                                    new_data = SET_(data, new_id, old_val, userdata);
-                                }
-                                return new_data;
-                            }
-                            fn infer_rotate(data: DATA_, old_id: ID_, new_id: ID_, userdata: USERDATA_) DATA_ {
-                                assert_valid_id(data, old_id, userdata, @src());
-                                assert_valid_id(data, new_id, userdata, @src());
-                                const ROT_L = comptime ROTATE_LEFT.select(FLAGS);
-                                const ROT_R = comptime ROTATE_RIGHT.select(FLAGS);
-                                const ID_LESS_OR_EQUAL = comptime ID_LESS_THAN_OR_EQUAL.select(FLAGS);
-                                const ID_EQ = comptime ID_EQUALS.select(FLAGS);
-                                var new_data = data;
-                                if (ID_EQ(data, old_id, new_id, userdata)) return data;
-                                if (ID_LESS_OR_EQUAL(data, old_id, new_id, userdata)) {
-                                    new_data = ROT_L(data, old_id, new_id, 1, userdata);
-                                } else {
-                                    new_data = ROT_R(data, new_id, old_id, 1, userdata);
-                                }
-                                return new_data;
-                            }
-                            fn unusable(_: DATA_, _: ID_, _: ID_, _: USERDATA_) DATA_ {
-                                assert_unreachable(@src(), "no `move_one_element_preserve_displaced_elements` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
-                            }
-                            fn select(comptime FLAGS_: FuncFlags) T_FN_MOVE_ONE_PRESERVE {
-                                comptime {
-                                    if (FLAGS_.has(F.MOVE_ONE_PRESERVE)) return func.MOVE_ONE_PRESERVE.?;
-                                    if (FLAGS_.has(INFER.MOVE_ONE_FROM_GET_SET)) return infer_get_set;
-                                    if (FLAGS_.has(INFER.MOVE_ONE_FROM_MOVE_BLOCK)) return infer_move_block;
-                                    if (FLAGS_.has_any(&.{ INFER.MOVE_FROM_GET_SET, INFER.MOVE_FROM_REVERSE, INFER.MOVE_FROM_SWAP, INFER.MOVE_FROM_ROTATE })) return infer_rotate;
-                                    return if (ALLOW_DEFAULT) default_move_one_preserve else unusable;
-                                }
-                            }
-                        };
-                        const MOVE_BLOCK_PRESERVE = struct {
-                            fn infer_rotate(data: DATA_, first_old_id: ID_, last_old_id: ID_, new_first_id: ID_, userdata: USERDATA_) DATA_ {
-                                assert_valid_id(data, first_old_id, userdata, @src());
-                                assert_valid_id(data, last_old_id, userdata, @src());
-                                assert_valid_id(data, new_first_id, userdata, @src());
-                                const ROT_L = comptime ROTATE_LEFT.select(FLAGS);
-                                const ROT_R = comptime ROTATE_RIGHT.select(FLAGS);
-                                const RANGE_LEN_ = comptime RANGE_LEN.select(FLAGS);
-                                const NTH_NEXT = comptime NTH_NEXT_ID.select(FLAGS);
-                                const ID_LESS_OR_EQUAL = comptime ID_LESS_THAN_OR_EQUAL.select(FLAGS);
-                                const ID_EQ = comptime ID_EQUALS.select(FLAGS);
-                                assert_with_reason(ID_LESS_OR_EQUAL(data, first_old_id, last_old_id, userdata), @src(), "first id must be <= last id (by data order), got `{any}` > `{any}`", .{ first_old_id, last_old_id });
-                                var new_data = data;
-                                if (ID_EQ(data, first_old_id, new_first_id, userdata)) return data;
-                                const block_len = RANGE_LEN_(data, first_old_id, last_old_id, userdata);
-                                if (ID_LESS_OR_EQUAL(data, first_old_id, new_first_id, userdata)) {
-                                    const new_last_id = NTH_NEXT(data, new_first_id, block_len - 1, userdata);
-                                    assert_valid_id(data, new_last_id, userdata, @src());
-                                    const delta = RANGE_LEN_(data, first_old_id, new_first_id, userdata) - 1;
-                                    new_data = ROT_L(data, first_old_id, new_last_id, delta, userdata);
-                                } else {
-                                    const delta = RANGE_LEN_(data, new_first_id, first_old_id, userdata) - 1;
-                                    new_data = ROT_R(data, new_first_id, last_old_id, delta, userdata);
-                                }
-                                return new_data;
-                            }
-                            fn unusable(_: DATA_, _: ID_, _: ID_, _: ID_, _: USERDATA_) DATA_ {
-                                assert_unreachable(@src(), "no `move_element_block_preserve_displaced_elements` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
-                            }
-                            fn select(comptime FLAGS_: FuncFlags) T_FN_MOVE_BLOCK_PRESERVE {
-                                comptime {
-                                    if (FLAGS_.has(F.MOVE_BLOCK_PRESERVE)) return func.MOVE_BLOCK_PRESERVE.?;
-                                    if (FLAGS_.has_any(&.{ INFER.MOVE_FROM_GET_SET, INFER.MOVE_FROM_REVERSE, INFER.MOVE_FROM_SWAP, INFER.MOVE_FROM_ROTATE })) return infer_rotate;
-                                    return if (ALLOW_DEFAULT) default_move_block_preserve else unusable;
-                                }
-                            }
-                        };
+                    // SELECT THE CORRECT FUNCTION FOR EACH GIVEN THE CUSTOM/FLAGS/ALLOW_DEFAULT
+                    const PROTO = FunctionSelector(CUSTOM, FLAGS, ALLOW_DEFAULT);
+                    const FINAL_FUNCS: DEF_WITH_FUNCS = DEF_WITH_FUNCS{
+                        .ID_EQUALS = PROTO.ID_EQUALS.func,
+                        .ID_LESS_THAN = PROTO.ID_LESS_THAN.func,
+                        .ID_LESS_THAN_OR_EQUAL = PROTO.ID_LESS_THAN_OR_EQUAL.func,
+                        .ID_GREATER_THAN = PROTO.ID_GREATER_THAN.func,
+                        .ID_GREATER_THAN_OR_EQUAL = PROTO.ID_GREATER_THAN_OR_EQUAL.func,
+                        .ID_VALID = PROTO.ID_VALID.func,
+                        .ID_INVALID_AFTER = PROTO.INVALID_ID_AFTER.func,
+                        .ID_INVALID_BEFORE = PROTO.INVALID_ID_BEFORE.func,
+                        .FIRST_ID = PROTO.FIRST_ID.func,
+                        .LAST_ID = PROTO.LAST_ID.func,
+                        .NTH_ID_FROM_START = PROTO.NTH_FROM_START.func,
+                        .NTH_ID_FROM_END = PROTO.NTH_FROM_END.func,
+                        .PREV_ID = PROTO.PREV_ID.func,
+                        .NEXT_ID = PROTO.NEXT_ID.func,
+                        .NTH_PREV_ID = PROTO.NTH_PREV_ID.func,
+                        .NTH_NEXT_ID = PROTO.NTH_NEXT_ID.func,
+                        .GET_LEN = PROTO.GET_LEN.func,
+                        .SET_LEN = PROTO.SET_LEN.func,
+                        .RANGE_LEN = PROTO.RANGE_LEN.func,
+                        .GET = PROTO.GET.func,
+                        .GET_PTR = PROTO.GET_PTR.func,
+                        .GET_CONST_PTR = PROTO.GET_CONST_PTR.func,
+                        .SET = PROTO.SET.func,
+                        .SWAP = PROTO.SWAP.func,
+                        .GREATER_THAN = PROTO.GREATER_THAN.func,
+                        .GREATER_THAN_OR_EQUAL = PROTO.GREATER_THAN_OR_EQUAL.func,
+                        .LESS_THAN = PROTO.LESS_THAN.func,
+                        .LESS_THAN_OR_EQUAL = PROTO.LESS_THAN_OR_EQUAL.func,
+                        .ORDER_EQUALS = PROTO.ORDER_EQUAL.func,
+                        .EXACT_EQUALS = PROTO.EXACT_EQUAL.func,
+                        .REVERSE_RANGE = PROTO.REVERSE_RANGE.func,
+                        .MOVE_ONE_PRESERVE = PROTO.MOVE_ONE_PRESERVE.func,
+                        .MOVE_BLOCK_PRESERVE = PROTO.MOVE_BLOCK_PRESERVE.func,
+                        .ROTATE_RIGHT = PROTO.ROTATE_RIGHT.func,
+                        .ROTATE_LEFT = PROTO.ROTATE_LEFT.func,
+                        .SCRAMBLE = PROTO.SCRAMBLE.func,
                     };
-                    //********
-                    // SELECT THE CORRECT FUNCTION FOR EACH
-                    //********
-                    var FINAL_FUNCS: DEF_WITH_FUNCS = DEF_WITH_FUNCS{
-                        .ID_EQUALS = PROTO.ID_EQUALS.select(FLAGS),
-                        .ID_LESS_THAN = PROTO.ID_LESS_THAN.select(FLAGS),
-                        .ID_LESS_THAN_OR_EQUAL = PROTO.ID_LESS_THAN_OR_EQUAL.select(FLAGS),
-                        .ID_GREATER_THAN = PROTO.ID_GREATER_THAN.select(FLAGS),
-                        .ID_GREATER_THAN_OR_EQUAL = PROTO.ID_GREATER_THAN_OR_EQUAL.select(FLAGS),
-                        .ID_VALID = PROTO.ID_VALID,
-                        .ID_INVALID_AFTER = PROTO.INVALID_ID_AFTER.select(),
-                        .ID_INVALID_BEFORE = PROTO.INVALID_ID_BEFORE.select(),
-                        .FIRST_ID = PROTO.FIRST_ID.select(FLAGS),
-                        .LAST_ID = PROTO.LAST_ID.select(FLAGS),
-                        .NTH_ID_FROM_START = PROTO.NTH_FROM_START.select(FLAGS),
-                        .NTH_ID_FROM_END = PROTO.NTH_FROM_END.select(FLAGS),
-                        .PREV_ID = PROTO.PREV_ID.select(FLAGS),
-                        .NEXT_ID = PROTO.NEXT_ID.select(FLAGS),
-                        .NTH_PREV_ID = PROTO.NTH_PREV_ID.select(FLAGS),
-                        .NTH_NEXT_ID = PROTO.NTH_NEXT_ID.select(FLAGS),
-                        .GET_LEN = PROTO.GET_LEN.select(FLAGS),
-                        .SET_LEN = PROTO.SET_LEN.select(FLAGS),
-                        .RANGE_LEN = PROTO.RANGE_LEN.select(FLAGS),
-                        .GET = PROTO.GET.select(FLAGS),
-                        .GET_PTR = PROTO.GET_PTR.select(FLAGS),
-                        .GET_CONST_PTR = PROTO.GET_CONST_PTR.select(FLAGS),
-                        .GET_FIELD = .{},
-                        .GET_FIELD_PTR = .{},
-                        .GET_FIELD_CONST_PTR = .{},
-                        .SET = PROTO.SET.select(FLAGS),
-                        .SET_FIELD = .{},
-                        .SWAP = PROTO.SWAP.select(FLAGS),
-                        .GREATER_THAN = PROTO.GREATER_THAN.select(FLAGS),
-                        .GREATER_THAN_OR_EQUAL = PROTO.GREATER_THAN_OR_EQUAL.select(FLAGS),
-                        .LESS_THAN = PROTO.LESS_THAN.select(FLAGS),
-                        .LESS_THAN_OR_EQUAL = PROTO.LESS_THAN_OR_EQUAL.select(FLAGS),
-                        .ORDER_EQUALS = PROTO.ORDER_EQUAL.select(FLAGS),
-                        .EXACT_EQUALS = PROTO.EXACT_EQUAL.select(FLAGS),
-                        .REVERSE_RANGE = PROTO.REVERSE_RANGE.select(FLAGS),
-                        .MOVE_ONE_PRESERVE = PROTO.MOVE_ONE_PRESERVE.select(FLAGS),
-                        .MOVE_BLOCK_PRESERVE = PROTO.MOVE_BLOCK_PRESERVE.select(FLAGS),
-                        .ROTATE_RIGHT = PROTO.ROTATE_RIGHT.select(FLAGS),
-                        .ROTATE_LEFT = PROTO.ROTATE_LEFT.select(FLAGS),
-                        .SCRAMBLE = undefined,
-                    };
-
-                    //********
-                    // BUILD PROTO AND SELECT GET/SET FUNCTION FOR FIELD ACCESS FUNCS
-                    //********
-                    for (FieldInfoAsStructInfo_.field_names[0..], FieldInfoAsStructInfo_.field_types[0..]) |field_name, field_type| {
-                        const P_F_GET = struct {
-                            const cust = @field(func.FIELD_GET, field_name);
-                            fn infer_ptr(data: DATA_, idx: COUNT_, userdata: USERDATA_) field_type {
-                                return @field(func.FIELD_GET_PTR, field_name).?(data, idx, userdata).*;
-                            }
-                            fn infer_const_ptr(data: DATA_, idx: COUNT_, userdata: USERDATA_) field_type {
-                                return @field(func.FIELD_GET_CONST_PTR, field_name).?(data, idx, userdata).*;
-                            }
-                            fn unusable(_: DATA_, _: COUNT_, _: USERDATA_) field_type {
-                                assert_unreachable(@src(), "no `get field \"{s}\" value` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{field_name});
-                            }
-                            fn select(comptime FLAGS_: FuncFlags) @FieldType(FieldGetters, field_name) {
-                                comptime {
-                                    if (FLAGS_.has(F.GET)) return cust.?;
-                                    if (FLAGS_.has(INFER.GET_FROM_PTR)) return infer_ptr;
-                                    if (FLAGS_.has(INFER.GET_FROM_CONST_PTR)) return infer_const_ptr;
-                                    return if (ALLOW_DEFAULT) @field(DefaultFieldGetters, field_name) else unusable;
+                    // CHECK FIELD FUNCS TYPE FOR PROPER LAYOUT
+                    const FIELD_FUNCS_TYPE = @TypeOf(CUSTOM_FIELD_FUNCS);
+                    const FIELD_FUNCS_KIND = KindInfo.get_kind_info(FIELD_FUNCS_TYPE);
+                    switch (FIELD_FUNCS_KIND) {
+                        .STRUCT => |STRUCT| {
+                            for (STRUCT.decls) |decl| {
+                                const DECL_TYPE = @TypeOf(@field(FIELD_FUNCS_TYPE, decl.name));
+                                const DECL_KIND = KindInfo.get_kind_info(DECL_TYPE);
+                                switch (DECL_KIND) {
+                                    .STRUCT => |DECL_STRUCT| {
+                                        assert_with_reason(@hasDecl(DECL_TYPE, "FIELD_TYPE") and @TypeOf(@field(DECL_TYPE, "FIELD_TYPE")) == type, @src(), "every sub-struct in the 'custom field funcs' struct MUST have a `pub const FIELD_TYPE: type = <type returned by the field functions>;` declaration, but field `{s}` was missing one. See the example:" ++ FIELD_FUNCS_EXAMPLE, .{decl.name});
+                                        const F_TYPE = @field(DECL_TYPE, "FIELD_TYPE");
+                                        const F_GET_FN = fn (DATA_, ID_, USERDATA_) F_TYPE;
+                                        const F_GET_PTR_FN = fn (DATA_, ID_, USERDATA_) *F_TYPE;
+                                        const F_GET_CONST_PTR_FN = fn (DATA_, ID_, USERDATA_) *const F_TYPE;
+                                        const F_SET_FN = fn (DATA_, ID_, F_TYPE, USERDATA_) DATA_;
+                                        for (DECL_STRUCT.decls) |func_decl| {
+                                            if (std.mem.eql(u8, func_decl.name, "FIELD_TYPE")) {} //
+                                            else if (std.mem.eql(u8, func_decl.name, "get")) {
+                                                const GOT_TYPE = @TypeOf(@field(DECL_TYPE, "get"));
+                                                assert_with_reason(GOT_TYPE == F_GET_FN, @src(), "field 'get' functions must have the signature: `{s}`, but found type `{s}`", .{ @typeName(F_GET_FN), @typeName(GOT_TYPE) });
+                                            } else if (std.mem.eql(u8, func_decl.name, "get_ptr")) {
+                                                const GOT_TYPE = @TypeOf(@field(DECL_TYPE, "get_ptr"));
+                                                assert_with_reason(GOT_TYPE == F_GET_PTR_FN, @src(), "field 'get_ptr' functions must have the signature: `{s}`, but found type `{s}`", .{ @typeName(F_GET_PTR_FN), @typeName(GOT_TYPE) });
+                                            } else if (std.mem.eql(u8, func_decl.name, "get_const_ptr")) {
+                                                const GOT_TYPE = @TypeOf(@field(DECL_TYPE, "get_const_ptr"));
+                                                assert_with_reason(GOT_TYPE == F_GET_PTR_FN, @src(), "field 'get_const_ptr' functions must have the signature: `{s}`, but found type `{s}`", .{ @typeName(F_GET_CONST_PTR_FN), @typeName(GOT_TYPE) });
+                                            } else if (std.mem.eql(u8, func_decl.name, "set")) {
+                                                const GOT_TYPE = @TypeOf(@field(DECL_TYPE, "set"));
+                                                assert_with_reason(GOT_TYPE == F_GET_PTR_FN, @src(), "field 'set' functions must have the signature: `{s}`, but found type `{s}`", .{ @typeName(F_SET_FN), @typeName(GOT_TYPE) });
+                                                continue;
+                                            } else {
+                                                assert_unreachable(@src(), "custom field function sub-struct `{s}` has a declaration other than the allowed `FIELD_TYPE`, `get`, `get_ptr`, `get_const_ptr`, `set` declarations, got illegal `{s}`", .{ decl.name, func_decl });
+                                            }
+                                        }
+                                    },
+                                    else => {
+                                        assert_unreachable(@src(), "provided 'custom field funcs' struct had a declaration that was not a struct type. All declarations on the outer struct must be struct types as in this example:" ++ FIELD_FUNCS_EXAMPLE, .{});
+                                    },
                                 }
                             }
-                        };
-                        @field(FINAL_FUNCS.GET_FIELD, field_name) = P_F_GET.select(@field(FIELD_FLAGS, field_name));
-
-                        const P_F_GET_PTR = struct {
-                            const cust = @field(func.FIELD_GET_PTR, field_name);
-                            fn unusable(_: DATA_, _: COUNT_, _: USERDATA_) *field_type {
-                                assert_unreachable(@src(), "no `get field \"{s}\" pointer` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{field_name});
-                            }
-                            fn select(comptime FLAGS_: FuncFlags) @FieldType(FieldPtrGetters, field_name) {
-                                comptime {
-                                    if (FLAGS_.has(F.GET_PTR)) return cust.?;
-                                    return if (ALLOW_DEFAULT) @field(DefaultFieldPtrGetters, field_name) else unusable;
-                                }
-                            }
-                        };
-                        @field(FINAL_FUNCS.GET_FIELD_PTR, field_name) = P_F_GET_PTR.select(@field(FIELD_FLAGS, field_name));
-
-                        const P_F_GET_CONST_PTR = struct {
-                            const cust = @field(func.FIELD_GET_CONST_PTR, field_name);
-                            fn infer_ptr(data: DATA_, idx: COUNT_, userdata: USERDATA_) *const field_type {
-                                return @field(func.FIELD_GET_PTR, field_name).?(data, idx, userdata);
-                            }
-                            fn unusable(_: DATA_, _: COUNT_, _: USERDATA_) *const field_type {
-                                assert_unreachable(@src(), "no `get field \"{s}\" const pointer` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{field_name});
-                            }
-                            fn select(comptime FLAGS_: FuncFlags) @FieldType(FieldConstPtrGetters, field_name) {
-                                comptime {
-                                    if (FLAGS_.has(F.GET_CONST_PTR)) return cust.?;
-                                    if (FLAGS_.has(INFER.CONST_PTR_FROM_PTR)) return infer_ptr;
-                                    return if (ALLOW_DEFAULT) @field(DefaultFieldConstPtrGetters, field_name) else unusable;
-                                }
-                            }
-                        };
-                        @field(FINAL_FUNCS.GET_FIELD_CONST_PTR, field_name) = P_F_GET_CONST_PTR.select(@field(FIELD_FLAGS, field_name));
-
-                        const P_F_SET = struct {
-                            const cust = @field(func.FIELD_SET, field_name);
-                            fn infer_ptr(data: DATA_, idx: ID_, val: field_type, userdata: USERDATA_) DATA_ {
-                                @field(func.FIELD_GET_PTR, field_name).?(data, idx, userdata).* = val;
-                                return data;
-                            }
-                            fn unusable(_: DATA_, _: ID_, _: field_type, _: USERDATA_) DATA_ {
-                                assert_unreachable(@src(), "no `set field \"{s}\"` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{field_name});
-                            }
-                            fn select(comptime FLAGS_: FuncFlags) @FieldType(FieldSetters, field_name) {
-                                comptime {
-                                    if (FLAGS_.has(F.SET)) return cust.?;
-                                    if (FLAGS_.has(INFER.SET_FROM_PTR)) return infer_ptr;
-                                    return if (ALLOW_DEFAULT) @field(DefaultFieldSetters, field_name) else unusable;
-                                }
-                            }
-                        };
-                        @field(FINAL_FUNCS.SET_FIELD, field_name) = P_F_SET.select(@field(FIELD_FLAGS, field_name));
+                        },
+                        .NULL, .VOID => {},
+                        else => {
+                            assert_unreachable(@src(), "type `{s}` is not a valid type for custom field functions. It must either be `null` or a struct type with the format:" ++ FIELD_FUNCS_EXAMPLE, .{@typeName(FIELD_FUNCS_TYPE)});
+                        },
                     }
                     return FINAL_FUNCS;
                 }
             }
-            pub fn Finalize(comptime FUNCS: DEF_WITH_FUNCS) type {
+            pub fn Finalize(comptime FUNCS: DEF_WITH_FUNCS, comptime CUSTOM_FIELD_FUNCS_TYPE: type, comptime CUSTOM_FIELD_FUNCS: CUSTOM_FIELD_FUNCS_TYPE) type {
                 return struct {
                     pub const DEF = CORE_DEF_;
                     pub const DATA = DEF.DATA;
@@ -2308,14 +2018,12 @@ pub const DataManipulationPackage = struct {
                     pub const COUNT = DEF.COUNT_INT;
                     pub const USERDATA = DEF.USERDATA;
 
+                    pub const field = CUSTOM_FIELD_FUNCS;
+
                     pub const get: fn (DATA, ID, USERDATA) ELEM = FUNCS.GET;
                     pub const get_ptr: fn (DATA, ID, USERDATA) *ELEM = FUNCS.GET_PTR;
                     pub const get_const_ptr: fn (DATA, ID, USERDATA) *const ELEM = FUNCS.GET_CONST_PTR;
-                    pub const get_field = FUNCS.GET_FIELD;
-                    pub const get_field_ptr = FUNCS.GET_FIELD_PTR;
-                    pub const get_field_const_ptr = FUNCS.GET_FIELD_CONST_PTR;
                     pub const set: fn (DATA, ID, ELEM, USERDATA) DATA = FUNCS.SET;
-                    pub const set_field = FUNCS.SET_FIELD;
                     pub const get_len: fn (DATA, USERDATA) COUNT = FUNCS.GET_LEN;
                     pub const set_len: fn (DATA, new_len: COUNT, USERDATA) DATA = FUNCS.SET_LEN;
                     pub const id_valid: fn (DATA, ID, USERDATA) bool = FUNCS.ID_VALID;
@@ -2414,7 +2122,6 @@ pub const DataManipulationPackage = struct {
 
                     pub const USERDATA_UNINIT = if (USERDATA == void) void{} else undefined;
 
-                    //CHECKPOINT fix these for new API
                     pub const SortInputs = struct {
                         data: DATA,
                         first: ID,
@@ -2866,12 +2573,12 @@ pub const DataManipulationPackage = struct {
 };
 
 test "Utils_DataManipulation => median_of_3_index" {
-    const STATIC_IDS = [3]u8{ 0, 1, 2 };
+    const STATIC_IDS = [3]usize{ 0, 1, 2 };
     const Case = struct {
         input: [3]u8,
-        med_idxs: []const u8,
+        med_idxs: []const usize,
 
-        pub fn new(vals: [3]u8, med_idxs: []const u8) @This() {
+        pub fn new(vals: [3]u8, med_idxs: []const usize) @This() {
             return @This(){
                 .input = vals,
                 .med_idxs = med_idxs,
@@ -2889,7 +2596,7 @@ test "Utils_DataManipulation => median_of_3_index" {
         Case.new(.{ 1, 1, 2 }, &.{ 0, 1 }),
         Case.new(.{ 1, 2, 2 }, &.{ 1, 2 }),
     };
-    const DMP = native_data_structure_manipulation_package([]u8, u8);
+    const DMP = native_data_structure_manipulation_package([]const u8, u8);
     next_case: for (cases) |case| {
         const med_idx, const med_val = DMP.median_of_3(case.input[0..], STATIC_IDS, {});
         for (case.med_idxs) |valid_median_idx| {
