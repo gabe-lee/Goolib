@@ -1825,7 +1825,7 @@ pub const DefinedLayout = enum(u8) {
     }
 };
 
-pub fn StructInfo(comptime NUM_FIELDS: type) type {
+pub fn StructInfo(comptime NUM_FIELDS: usize) type {
     return struct {
         layout: Type.ContainerLayout,
         backing_int: ?type,
@@ -1833,8 +1833,8 @@ pub fn StructInfo(comptime NUM_FIELDS: type) type {
         field_types: [NUM_FIELDS]type,
         field_attrs: [NUM_FIELDS]StructFieldAttr,
 
-        pub fn build_struct_type(comptime self: @This()) type {
-            return @Struct(self.layout, self.backing_int, self.field_names[0..], &self.field_types, &self.field_attrs);
+        pub fn build_struct_type(comptime self: *const @This()) type {
+            return @Struct(self.layout, self.backing_int, self.field_names[0..], self.field_types, self.field_attrs);
         }
 
         pub fn type_for_field(comptime self: @This(), comptime field: []const u8) type {
@@ -1892,7 +1892,7 @@ pub fn extract_struct_info(comptime STRUCT: type) StructInfo(@typeInfo(STRUCT).@
     };
 }
 
-pub fn UnionInfo(comptime NUM_FIELDS: type) type {
+pub fn UnionInfo(comptime NUM_FIELDS: usize) type {
     return struct {
         layout: Type.ContainerLayout,
         tag_type: ?type,
@@ -1996,16 +1996,23 @@ pub const NonStructUnionTypeDummyFieldInfo = struct {
         return StructInfo(1){
             .layout = .auto,
             .backing_int = null,
-            .field_attrs = .{StructFieldAttr{
-                .@"align" = @alignOf(self.object_type),
-            }},
-            .field_names = .{"Self"},
-            .field_types = .{self.object_type},
+            .field_attrs = self.field_attrs,
+            .field_names = self.field_names,
+            .field_types = self.field_types,
         };
     }
 };
 
-pub fn extract_struct_union_or_dummy_field_info(comptime T: type) type {
+pub fn ExtractStructUnionOrDummyType(comptime T: type) type {
+    const KIND = KindInfo.get_kind_info(T);
+    switch (KIND) {
+        .STRUCT => |STRUCT| return StructInfo(STRUCT.fields.len),
+        .UNION => |UNION| return UnionInfo(UNION.fields.len),
+        else => return NonStructUnionTypeDummyFieldInfo,
+    }
+}
+
+pub fn extract_struct_union_or_dummy_field_info(comptime T: type) ExtractStructUnionOrDummyType(T) {
     const KIND = KindInfo.get_kind_info(T);
     switch (KIND) {
         .STRUCT => return extract_struct_info(T),

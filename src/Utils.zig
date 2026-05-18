@@ -46,7 +46,6 @@ pub const _Fuzzer = @import("./Utils_Fuzz.zig");
 
 pub const Alloc = @import("./Utils_Allocator.zig");
 pub const File = @import("./Utils_File.zig");
-pub const EnumeratedDefs = @import("./Utils_EnumeratedDefs.zig");
 pub const Mem = @import("./Utils_Mem.zig");
 pub const Format = @import("./Utils_Format.zig");
 pub const Compare = @import("./Utils_Compare.zig");

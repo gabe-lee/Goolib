@@ -109,6 +109,11 @@ pub const SortOrder = enum(u8) {
     REVERSE,
 };
 
+const HeapKind = enum(u8) {
+    MIN_HEAP,
+    MAX_HEAP,
+};
+
 const BuilderValidation = if (Assert.should_assert()) enum(u8) {
     UNINITIALIZED,
     DEFAULT,
@@ -147,6 +152,44 @@ pub fn ResultItem(comptime DATA_IDX: type, comptime SEARCH_ELEM: type, comptime 
         }
     };
 }
+
+pub const QuicksortSettings = struct {
+    /// `33` (32 + 1) = max input len of 2^32 items,
+    /// if you really need more than this you can increase it, each
+    /// additional 1 added doubles the max input len (`34` (33 + 1) = 2^33 max)
+    QUICKSORT_MAX_STACK: u8 = 33,
+    /// Signals to use a different partitioning scheme depending on whether you
+    /// expect the data to have many items with equal order,
+    /// or whether it is rare or impossible to occur
+    SAME_ORDER_EXPECTATIONS: ManySameOrderExpectation = .MANY_ITEMS_WITH_SAME_ORDER_RARE_OR_IMPOSSIBLE,
+    /// The max size of a partition (sub-slice) to use quicksort.
+    /// Under this length, partitions will intead use insertion sort
+    QUICKSORT_TO_INSERTION_THRESHOLD: comptime_int = 24,
+    /// If the quicksort partition depth exceeds `DEGENERATE_DETECTION_FACTOR * log2(input_len)`,
+    /// it likely has a degenerate state (approaching worst case scenario).
+    /// Switch to insertion sort (if small total input) or heapsort instead,
+    ///
+    /// If the total input len is <= `FALLBACK_WHEN_DEGENERATE_INSERTION_SORT_MAX_INPUT_LEN` (default 128)
+    /// it falls back to insertion sort (lower overhead than heapsort, especially when quicksort has already
+    /// partially sorted the data to some degree)
+    ///
+    /// Otherwise, fallback to heapsort
+    FALLBACK_WHEN_DEGENERATE: bool = true,
+    /// When degenerate fallback is enable, this value controls how degenerate
+    /// the input needs to be before the fallback is triggered:
+    ///
+    /// ```zig
+    /// const MAX_PARTITION_DEPTH = DEGENERATE_DETECTION_FACTOR * log2(input_len);
+    /// ```
+    DEGENERATE_DETECTION_FACTOR: comptime_int = 2,
+    /// When the quicksort depth is more than twice the expected average depth (`DEGENERATE_DETECTION_FACTOR * log2(input_len)`),
+    /// if the total input len is less than this value it will
+    /// fallback to insertion sort on the entire input
+    /// (already partially sorted, lower overhead than heapsort for small lists)
+    ///
+    /// Otherwise fallback to heapsort.
+    FALLBACK_WHEN_DEGENERATE_INSERTION_SORT_MAX_INPUT_LEN: comptime_int = 128,
+};
 
 pub const ManySameOrderExpectation = enum(u8) {
     /// Same as `.USE_DUTCH_FLAG_3_WAY_PARTITION`
@@ -216,64 +259,70 @@ pub fn IdValidateFn(comptime DATA: type, comptime ID: type, comptime USERDATA: t
     return fn (data: DATA, i: ID, userdata: USERDATA) bool;
 }
 
-const FUNC_FLAG_INT = u64;
+const CUSTOM_FLAG = u64;
 const F = struct {
-    const GET: FUNC_FLAG_INT = 1 << 0;
-    const GET_PTR: FUNC_FLAG_INT = 1 << 1;
-    const GET_CONST_PTR: FUNC_FLAG_INT = 1 << 2;
-    const SET: FUNC_FLAG_INT = 1 << 3;
-    const SWAP: FUNC_FLAG_INT = 1 << 4;
-    const GREATER_THAN: FUNC_FLAG_INT = 1 << 5;
-    const GREATER_THAN_OR_EQUAL: FUNC_FLAG_INT = 1 << 6;
-    const LESS_THAN: FUNC_FLAG_INT = 1 << 7;
-    const LESS_THAN_OR_EQUAL: FUNC_FLAG_INT = 1 << 8;
-    const ORDER_EQUALS: FUNC_FLAG_INT = 1 << 9;
-    const EXACT_EQUALS: FUNC_FLAG_INT = 1 << 10;
-    const FIRST_INDEX: FUNC_FLAG_INT = 1 << 11;
-    const LAST_INDEX: FUNC_FLAG_INT = 1 << 12;
-    const NTH_INDEX_FROM_START: FUNC_FLAG_INT = 1 << 13;
-    const NTH_INDEX_FROM_END: FUNC_FLAG_INT = 1 << 14;
-    const PREV_INDEX: FUNC_FLAG_INT = 1 << 15;
-    const NEXT_INDEX: FUNC_FLAG_INT = 1 << 16;
-    const NTH_PREV_INDEX: FUNC_FLAG_INT = 1 << 17;
-    const NTH_NEXT_INDEX: FUNC_FLAG_INT = 1 << 18;
-    const GET_LEN: FUNC_FLAG_INT = 1 << 19;
-    const SET_LEN: FUNC_FLAG_INT = 1 << 20;
-    const GET_CAP: FUNC_FLAG_INT = 1 << 21;
-    const SET_CAP: FUNC_FLAG_INT = 1 << 22;
-    const RANGE_LEN: FUNC_FLAG_INT = 1 << 23;
-    const APPEND_ONE: FUNC_FLAG_INT = 1 << 24;
-    const APPEND_N: FUNC_FLAG_INT = 1 << 25;
-    const INSERT_ONE: FUNC_FLAG_INT = 1 << 26;
-    const INSERT_N: FUNC_FLAG_INT = 1 << 27;
-    const DELETE_ONE: FUNC_FLAG_INT = 1 << 28;
-    const DELETE_N: FUNC_FLAG_INT = 1 << 29;
-    const REVERSE_RANGE: FUNC_FLAG_INT = 1 << 30;
-    const ENSURE_SPACE: FUNC_FLAG_INT = 1 << 31;
-    const MOVE_ONE_PRESERVE: FUNC_FLAG_INT = 1 << 32;
-    const MOVE_BLOCK_PRESERVE: FUNC_FLAG_INT = 1 << 33;
-    const NEVER_OVERLAP_COPY_RANGE: FUNC_FLAG_INT = 1 << 34;
-    const MIGHT_OVERLAP_COPY_RANGE: FUNC_FLAG_INT = 1 << 35;
-    const MEMORY_CONTIGUOUS_IN_ORDER: FUNC_FLAG_INT = 1 << 36;
-    const ID_IN_RANGE: FUNC_FLAG_INT = 1 << 37;
-    const ROTATE_RANGE_LEFT: FUNC_FLAG_INT = 1 << 38;
-    const ROTATE_RANGE_RIGHT: FUNC_FLAG_INT = 1 << 39;
-    const SCRAMBLE: FUNC_FLAG_INT = 1 << 40;
-    const ID_LESS_THAN_ID: FUNC_FLAG_INT = 1 << 41;
+    const GET: CUSTOM_FLAG = 1 << 0;
+    const GET_PTR: CUSTOM_FLAG = 1 << 1;
+    const GET_CONST_PTR: CUSTOM_FLAG = 1 << 2;
+    const SET: CUSTOM_FLAG = 1 << 3;
+    const SWAP: CUSTOM_FLAG = 1 << 4;
+    const GREATER_THAN: CUSTOM_FLAG = 1 << 5;
+    const GREATER_THAN_OR_EQUAL: CUSTOM_FLAG = 1 << 6;
+    const LESS_THAN: CUSTOM_FLAG = 1 << 7;
+    const LESS_THAN_OR_EQUAL: CUSTOM_FLAG = 1 << 8;
+    const ORDER_EQUALS: CUSTOM_FLAG = 1 << 9;
+    const EXACT_EQUALS: CUSTOM_FLAG = 1 << 10;
+    const FIRST_ID: CUSTOM_FLAG = 1 << 11;
+    const LAST_ID: CUSTOM_FLAG = 1 << 12;
+    const NTH_ID_FROM_START: CUSTOM_FLAG = 1 << 13;
+    const NTH_ID_FROM_END: CUSTOM_FLAG = 1 << 14;
+    const PREV_ID: CUSTOM_FLAG = 1 << 15;
+    const NEXT_ID: CUSTOM_FLAG = 1 << 16;
+    const NTH_PREV_ID: CUSTOM_FLAG = 1 << 17;
+    const NTH_NEXT_ID: CUSTOM_FLAG = 1 << 18;
+    const GET_LEN: CUSTOM_FLAG = 1 << 19;
+    const SET_LEN: CUSTOM_FLAG = 1 << 20;
+    const GET_CAP: CUSTOM_FLAG = 1 << 21;
+    const SET_CAP: CUSTOM_FLAG = 1 << 22;
+    const RANGE_LEN: CUSTOM_FLAG = 1 << 23;
+    const APPEND_ONE: CUSTOM_FLAG = 1 << 24;
+    const APPEND_N: CUSTOM_FLAG = 1 << 25;
+    const INSERT_ONE: CUSTOM_FLAG = 1 << 26;
+    const INSERT_N: CUSTOM_FLAG = 1 << 27;
+    const DELETE_ONE: CUSTOM_FLAG = 1 << 28;
+    const DELETE_N: CUSTOM_FLAG = 1 << 29;
+    const REVERSE_RANGE: CUSTOM_FLAG = 1 << 30;
+    const ENSURE_SPACE: CUSTOM_FLAG = 1 << 31;
+    const MOVE_ONE_PRESERVE: CUSTOM_FLAG = 1 << 32;
+    const MOVE_BLOCK_PRESERVE: CUSTOM_FLAG = 1 << 33;
+    const NEVER_OVERLAP_COPY_RANGE: CUSTOM_FLAG = 1 << 34;
+    const MIGHT_OVERLAP_COPY_RANGE: CUSTOM_FLAG = 1 << 35;
+    const MEMORY_CONTIGUOUS_IN_ORDER: CUSTOM_FLAG = 1 << 36;
+    const ROTATE_RANGE_LEFT: CUSTOM_FLAG = 1 << 37;
+    const ROTATE_RANGE_RIGHT: CUSTOM_FLAG = 1 << 38;
+    const SCRAMBLE: CUSTOM_FLAG = 1 << 39;
+    const ID_LESS_THAN: CUSTOM_FLAG = 1 << 40;
+    const ID_LESS_THAN_OR_EQUAL: CUSTOM_FLAG = 1 << 41;
+    const ID_GREATER_THAN: CUSTOM_FLAG = 1 << 42;
+    const ID_GREATER_THAN_OR_EQUAL: CUSTOM_FLAG = 1 << 43;
+    const ID_EQUALS: CUSTOM_FLAG = 1 << 44;
+    const VALID_ID: CUSTOM_FLAG = 1 << 45;
+    const INVALID_ID_AFTER: CUSTOM_FLAG = 1 << 46;
+    const INVALID_ID_BEFORE: CUSTOM_FLAG = 1 << 47;
 };
 const FuncFlags = struct {
-    flags: FUNC_FLAG_INT = 0,
+    flags: CUSTOM_FLAG = 0,
 
-    fn add_if_not_null(comptime flags: *FuncFlags, comptime flag: FUNC_FLAG_INT, comptime not_null: anytype) void {
+    fn add_if_not_null(comptime flags: *FuncFlags, comptime flag: CUSTOM_FLAG, comptime not_null: anytype) void {
         if (not_null != null) {
             flags.flags |= flag;
         }
     }
 
-    fn has(comptime flags: FuncFlags, comptime flag: FUNC_FLAG_INT) bool {
+    fn has(comptime flags: FuncFlags, comptime flag: CUSTOM_FLAG) bool {
         return (flags & flag) == flag;
     }
-    fn has_any(comptime flags: FuncFlags, comptime any_flag: []const FUNC_FLAG_INT) bool {
+    fn has_any(comptime flags: FuncFlags, comptime any_flag: []const CUSTOM_FLAG) bool {
         inline for (any_flag) |flag| {
             if (flags.has(flag)) return true;
         }
@@ -281,98 +330,148 @@ const FuncFlags = struct {
     }
 };
 const INFER = struct {
-    const GET_FROM_CONST_PTR = F.GET_CONST_PTR;
-    const GET_FROM_PTR = F.GET_PTR;
-
-    const CONST_PTR_FROM_PTR = F.GET_PTR;
-
-    const SET_FROM_PTR = F.GET_PTR;
-
-    const SWAP_FROM_PTR = F.GET_PTR;
-    const SWAP_FROM_GET_SET = F.GET | F.SET;
-
-    const GT_FROM_LTEQ = F.LESS_THAN_OR_EQUAL;
-    const GT_FROM_LT_EQ = F.LESS_THAN | F.EXACT_EQUALS;
-    const GT_FROM_LT_OQ = F.LESS_THAN | F.ORDER_EQUALS;
-
-    const LT_FROM_GTEQ = F.GREATER_THAN_OR_EQUAL;
-    const LT_FROM_GT_EQ = F.GREATER_THAN | F.EXACT_EQUALS;
-    const LT_FROM_GT_OQ = F.GREATER_THAN | F.ORDER_EQUALS;
-
-    const EQOQ_FROM_GT_LT = F.GREATER_THAN | F.LESS_THAN;
-    const OQ_FROM_EQ = F.EXACT_EQUALS;
-    const EQ_FROM_OQ = F.ORDER_EQUALS;
-
-    const GTEQ_FROM_LT = F.LESS_THAN;
-    const GTEQ_FROM_GT_EQ = F.GREATER_THAN | F.EXACT_EQUALS;
-    const GTEQ_FROM_GT_OQ = F.GREATER_THAN | F.ORDER_EQUALS;
-
-    const LTEQ_FROM_GT = F.GREATER_THAN;
-    const LTEQ_FROM_LT_EQ = F.LESS_THAN | F.EXACT_EQUALS;
-    const LTEQ_FROM_LT_OQ = F.LESS_THAN | F.ORDER_EQUALS;
-
-    const NEXT_IDX_FROM_NTH_NEXT = F.NTH_NEXT_INDEX;
-    const NEXT_IDX_FROM_LAST_PREV = F.LAST_INDEX | F.PREV_INDEX;
-
-    const NTH_NEXT_IDX_FROM_NEXT = F.NEXT_INDEX;
-    const NTH_NEXT_IDX_FROM_LAST_PREV = F.LAST_INDEX | F.PREV_INDEX;
-
-    const PREV_IDX_FROM_NTH_PREV = F.NTH_PREV_INDEX;
-    const PREV_IDX_FROM_FIRST_NEXT = F.FIRST_INDEX | F.NEXT_INDEX;
-
-    const NTH_PREV_IDX_FROM_PREV = F.PREV_INDEX;
-    const NTH_PREV_IDX_FROM_FIRST_NEXT = F.FIRST_INDEX | F.NEXT_INDEX;
-
-    const RANGE_LEN_FROM_NEXT = F.NEXT_INDEX;
-    const RANGE_LEN_FROM_PREV = F.PREV_INDEX;
-
-    const LEN_FROM_FIRST_LAST_RANGE_LEN = F.FIRST_INDEX | F.LAST_INDEX | F.RANGE_LEN;
-    const LEN_FROM_FIRST_LAST_NEXT = F.FIRST_INDEX | F.LAST_INDEX | F.NEXT_INDEX;
-    const LEN_FROM_FIRST_LAST_PREV = F.FIRST_INDEX | F.LAST_INDEX | F.PREV_INDEX;
-
-    const LAST_FROM_FIRST_LEN_NTH_NEXT = F.FIRST_INDEX | F.GET_LEN | F.NTH_INDEX_FROM_START;
-    const LAST_FROM_FIRST_LEN_NEXT = F.FIRST_INDEX | F.GET_LEN | F.NEXT_INDEX;
-    const LAST_FROM_NTH_FROM_LAST = F.NTH_INDEX_FROM_END;
-    const LAST_FROM_LEN_NTH_FROM_START = F.NTH_INDEX_FROM_START | F.GET_LEN;
-
-    const FIRST_FROM_LAST_LEN_NTH_PREV = F.LAST_INDEX | F.GET_LEN | F.NTH_PREV_INDEX;
-    const FIRST_FROM_LAST_LEN_PREV = F.LAST_INDEX | F.GET_LEN | F.PREV_INDEX;
-    const FIRST_FROM_NTH_FROM_START = F.NTH_INDEX_FROM_START;
-    const FIRST_FROM_LEN_NTH_FROM_END = F.NTH_INDEX_FROM_END | F.GET_LEN;
-
-    const NTH_FROM_END_FROM_LAST_NTH_PREV = F.LAST_INDEX | F.NTH_PREV_INDEX;
-    const NTH_FROM_END_FROM_LAST_PREV = F.LAST_INDEX | F.PREV_INDEX;
-
-    const NTH_FROM_START_FROM_FIRST_NTH_NEXT = F.FIRST_INDEX | F.NTH_NEXT_INDEX;
-    const NTH_FROM_START_FROM_FIRST_NEXT = F.FIRST_INDEX | F.NEXT_INDEX;
-
-    const REVERSE_FROM_SWAP = F.SWAP;
-    const REVERSE_FROM_GET_SET = F.GET | F.SET;
-
-    const ROTATE_FROM_REVERSE = F.REVERSE_RANGE;
-    const ROTATE_FROM_SWAP = F.SWAP;
-    const ROTATE_FROM_GET_SET = F.GET | F.SET;
-
-    const MOVE_FROM_ROTATE = F.ROTATE_RANGE_LEFT | F.ROTATE_RANGE_RIGHT;
-    const MOVE_FROM_REVERSE = F.REVERSE_RANGE;
-    const MOVE_FROM_SWAP = F.SWAP;
-    const MOVE_FROM_GET_SET = F.GET | F.SET;
-
-    const MOVE_ONE_FROM_GET_SET = F.GET | F.SET | F.NEXT_INDEX | F.PREV_INDEX;
-    const MOVE_ONE_FROM_MOVE_BLOCK = F.MOVE_BLOCK_PRESERVE;
+    pub const GET = struct {
+        const FROM_CONST_PTR = F.GET_CONST_PTR;
+        const FROM_PTR = F.GET_PTR;
+    };
+    pub const CONST_PTR = struct {
+        const FROM_PTR = F.GET_PTR;
+    };
+    pub const SET = struct {
+        const FROM_PTR = F.GET_PTR;
+    };
+    pub const SWAP = struct {
+        const FROM_PTR = F.GET_PTR;
+        const FROM_GET_SET = F.GET | F.SET;
+    };
+    pub const GT = struct {
+        const FROM_LTEQ = F.LESS_THAN_OR_EQUAL;
+        const FROM_LT_EQ = F.LESS_THAN | F.EXACT_EQUALS;
+        const FROM_LT_OQ = F.LESS_THAN | F.ORDER_EQUALS;
+    };
+    pub const LT = struct {
+        const FROM_GTEQ = F.GREATER_THAN_OR_EQUAL;
+        const FROM_GT_EQ = F.GREATER_THAN | F.EXACT_EQUALS;
+        const FROM_GT_OQ = F.GREATER_THAN | F.ORDER_EQUALS;
+    };
+    pub const EQ = struct {
+        const FROM_OQ = F.ORDER_EQUALS;
+        const FROM_GT_LT = F.GREATER_THAN | F.LESS_THAN;
+    };
+    pub const OQ = struct {
+        const FROM_EQ = F.EXACT_EQUALS;
+        const FROM_GT_LT = F.GREATER_THAN | F.LESS_THAN;
+    };
+    pub const GTEQ = struct {
+        const FROM_LT = F.LESS_THAN;
+        const FROM_GT_EQ = F.GREATER_THAN | F.EXACT_EQUALS;
+        const FROM_GT_OQ = F.GREATER_THAN | F.ORDER_EQUALS;
+    };
+    pub const LTEQ = struct {
+        const FROM_GT = F.GREATER_THAN;
+        const FROM_LT_EQ = F.LESS_THAN | F.EXACT_EQUALS;
+        const FROM_LT_OQ = F.LESS_THAN | F.ORDER_EQUALS;
+    };
+    pub const ID_GT = struct {
+        const FROM_LTEQ = F.ID_LESS_THAN_OR_EQUAL;
+        const FROM_LT_EQ = F.ID_LESS_THAN | F.ID_EQUALS;
+    };
+    pub const ID_LT = struct {
+        const FROM_GTEQ = F.ID_GREATER_THAN_OR_EQUAL;
+        const FROM_GT_EQ = F.ID_GREATER_THAN | F.ID_EQUALS;
+    };
+    pub const ID_EQ = struct {
+        const FROM_GT_LT = F.ID_GREATER_THAN | F.ID_LESS_THAN;
+    };
+    pub const ID_GTEQ = struct {
+        const FROM_LT = F.ID_LESS_THAN;
+        const FROM_GT_EQ = F.ID_GREATER_THAN | F.ID_EQUALS;
+    };
+    pub const ID_LTEQ = struct {
+        const FROM_GT = F.ID_GREATER_THAN;
+        const FROM_LT_EQ = F.ID_LESS_THAN | F.ID_EQUALS;
+    };
+    pub const VALID_ID = struct {
+        const FROM_FIRST_LAST_LTEQ = F.FIRST_ID | F.LAST_ID | F.ID_LESS_THAN_OR_EQUAL;
+        const FROM_FIRST_LAST_GTEQ = F.FIRST_ID | F.LAST_ID | F.ID_GREATER_THAN_OR_EQUAL;
+        const FROM_FIRST_LAST_LT_EQ = F.FIRST_ID | F.LAST_ID | F.ID_LESS_THAN | F.ID_EQUALS;
+        const FROM_FIRST_LAST_GT_EQ = F.FIRST_ID | F.LAST_ID | F.ID_GREATER_THAN | F.ID_EQUALS;
+    };
+    pub const NEXT_ID = struct {
+        const FROM_NTH_NEXT = F.NTH_NEXT_ID;
+        const FROM_LAST_PREV = F.LAST_ID | F.PREV_ID;
+    };
+    pub const NTH_NEXT_ID = struct {
+        const FROM_NEXT = F.NEXT_ID;
+        const FROM_LAST_PREV = F.LAST_ID | F.PREV_ID;
+    };
+    pub const PREV_ID = struct {
+        const FROM_NTH_PREV = F.NTH_PREV_ID;
+        const FROM_FIRST_NEXT = F.FIRST_ID | F.NEXT_ID;
+    };
+    pub const NTH_PREV_ID = struct {
+        const FROM_PREV = F.PREV_ID;
+        const FROM_FIRST_NEXT = F.FIRST_ID | F.NEXT_ID;
+    };
+    pub const RANGE_LEN = struct {
+        const FROM_NEXT = F.NEXT_ID;
+        const FROM_PREV = F.PREV_ID;
+    };
+    pub const LEN = struct {
+        const FROM_FIRST_LAST_RANGE_LEN = F.FIRST_ID | F.LAST_ID | F.RANGE_LEN;
+        const FROM_FIRST_LAST_NEXT = F.FIRST_ID | F.LAST_ID | F.NEXT_ID;
+        const FROM_FIRST_LAST_PREV = F.FIRST_ID | F.LAST_ID | F.PREV_ID;
+    };
+    pub const LAST_ID = struct {
+        const FROM_FIRST_LEN_NTH_NEXT = F.FIRST_ID | F.GET_LEN | F.NTH_ID_FROM_START;
+        const FROM_FIRST_LEN_NEXT = F.FIRST_ID | F.GET_LEN | F.NEXT_ID;
+        const FROM_NTH_FROM_LAST = F.NTH_ID_FROM_END;
+        const FROM_LEN_NTH_FROM_START = F.NTH_ID_FROM_START | F.GET_LEN;
+    };
+    pub const FIRST_ID = struct {
+        const FROM_LAST_LEN_NTH_PREV = F.LAST_ID | F.GET_LEN | F.NTH_PREV_ID;
+        const FROM_LAST_LEN_PREV = F.LAST_ID | F.GET_LEN | F.PREV_ID;
+        const FROM_NTH_FROM_START = F.NTH_ID_FROM_START;
+        const FROM_LEN_NTH_FROM_END = F.NTH_ID_FROM_END | F.GET_LEN;
+    };
+    pub const NTH_FROM_END = struct {
+        const FROM_LAST_NTH_PREV = F.LAST_ID | F.NTH_PREV_ID;
+        const FROM_LAST_PREV = F.LAST_ID | F.PREV_ID;
+    };
+    pub const NTH_FROM_START = struct {
+        const FROM_FIRST_NTH_NEXT = F.FIRST_ID | F.NTH_NEXT_ID;
+        const FROM_FIRST_NEXT = F.FIRST_ID | F.NEXT_ID;
+    };
+    pub const REVERSE = struct {
+        const FROM_SWAP = F.SWAP;
+        const FROM_GET_SET = F.GET | F.SET;
+    };
+    pub const ROTATE = struct {
+        const FROM_REVERSE = F.REVERSE_RANGE;
+        const FROM_SWAP = F.SWAP;
+        const FROM_GET_SET = F.GET | F.SET;
+    };
+    pub const MOVE = struct {
+        const FROM_ROTATE = F.ROTATE_RANGE_LEFT | F.ROTATE_RANGE_RIGHT;
+        const FROM_REVERSE = F.REVERSE_RANGE;
+        const FROM_SWAP = F.SWAP;
+        const FROM_GET_SET = F.GET | F.SET;
+    };
+    pub const MOVE_ONE = struct {
+        const FROM_GET_SET = F.GET | F.SET | F.NEXT_ID | F.PREV_ID;
+        const FROM_MOVE_BLOCK = F.MOVE_BLOCK_PRESERVE;
+    };
 };
 
-pub fn native_type_data_manipulation_package(comptime DATA_STRUCTURE: type, comptime ELEM: type) type {
-    comptime {
-        const core = DataManipulationPackage{
-            .DATA = DATA_STRUCTURE,
-            .ELEM = ELEM,
-            .ID = usize,
-            .COUNT_INT = usize,
-            .USERDATA = void,
-        };
-        return core.CustomFunctions(.NONE).with_custom_functions(true, .{});
-    }
+pub fn native_data_structure_manipulation_package(comptime DATA_STRUCTURE: type, comptime ELEM: type) type {
+    const core = DataManipulationPackage{
+        .DATA = DATA_STRUCTURE,
+        .ELEM = ELEM,
+        .ID = usize,
+        .COUNT_INT = usize,
+        .USERDATA = void,
+    };
+    return core.CustomFunctions(.NONE).with_custom_functions(true, .{}).Finalize();
 }
 
 pub fn contiguous_memory_manipulation_package_using_core_access(comptime CORE_DEF: DataManipulationPackage, comptime CORE_ACCESS: CORE_DEF.CoreAccessFuncs()) type {
@@ -442,11 +541,11 @@ pub const DataManipulationPackage = struct {
             pub fn TypeForField(comptime field: []const u8) type {
                 return FieldInfo.type_for_field(field);
             }
-            const FieldInfoAsStructInfo_: Types.StructInfo(FieldInfo.field_names.len) = FieldInfo.as_struct_info();
-
+            const FieldInfoAsStructInfo_: Types.StructInfo(FieldInfo.field_names.len) = FieldInfo.to_struct_info();
+            // CHECKPOINT //FIXME Fix this for use with function bodies... function bodies cannot be put into arrays and the rebuild with `@Struct()`
             const FieldGettersStructInfo = make: {
-                const getters = FieldInfoAsStructInfo_;
-                for (getters.field_names, getters.field_types, getters.field_attrs) |NAME, *FT, *ATTR| {
+                var getters = FieldInfoAsStructInfo_;
+                for (getters.field_names[0..], getters.field_types[0..], getters.field_attrs[0..]) |NAME, *FT, *ATTR| {
                     const PROTO = struct {
                         fn default_get(data: DATA_, id: ID_, userdata: USERDATA_) *FT.* {
                             return @field(&default_get_base_ptr(data, userdata)[id], NAME);
@@ -464,8 +563,8 @@ pub const DataManipulationPackage = struct {
             pub const DefaultFieldGetters = FieldGetters{};
 
             const FieldCustomGettersStructInfo = make: {
-                const getters = FieldInfoAsStructInfo_;
-                for (getters.field_types, getters.field_attrs) |*FT, *ATTR| {
+                var getters = FieldInfoAsStructInfo_;
+                for (getters.field_types[0..], getters.field_attrs[0..]) |*FT, *ATTR| {
                     const FN = fn (DATA_, ID_, USERDATA_) FT.*;
                     FT.* = FN;
                     ATTR.@"align" = @alignOf(FN);
@@ -477,8 +576,8 @@ pub const DataManipulationPackage = struct {
             pub const FieldCustomGetters = FieldCustomGettersStructInfo.build_struct_type();
 
             const FieldPtrGettersStructInfo = make: {
-                const getters = FieldInfoAsStructInfo_;
-                for (getters.field_names, getters.field_types, getters.field_attrs) |NAME, *FT, *ATTR| {
+                var getters = FieldInfoAsStructInfo_;
+                for (getters.field_names[0..], getters.field_types[0..], getters.field_attrs[0..]) |NAME, *FT, *ATTR| {
                     const PROTO = struct {
                         fn default_get_ptr(data: DATA_, id: ID_, userdata: USERDATA_) *FT.* {
                             return &@field(&default_get_base_ptr(data, userdata)[id], NAME);
@@ -496,8 +595,8 @@ pub const DataManipulationPackage = struct {
             pub const DefaultFieldPtrGetters = FieldPtrGetters{};
 
             const FieldOptPtrGettersStructInfo = make: {
-                const getters = FieldInfoAsStructInfo_;
-                for (getters.field_types, getters.field_attrs) |*FT, *ATTR| {
+                var getters = FieldInfoAsStructInfo_;
+                for (getters.field_types[0..], getters.field_attrs[0..]) |*FT, *ATTR| {
                     const FN = fn (DATA_, ID_, USERDATA_) *FT.*;
                     FT.* = FN;
                     ATTR.@"align" = @alignOf(FN);
@@ -509,8 +608,8 @@ pub const DataManipulationPackage = struct {
             pub const FieldCustomPtrGetters = FieldOptPtrGettersStructInfo.build_struct_type();
 
             const FieldConstPtrGettersStructInfo = make: {
-                const getters = FieldInfoAsStructInfo_;
-                for (getters.field_names, getters.field_types, getters.field_attrs) |NAME, *FT, *ATTR| {
+                var getters = FieldInfoAsStructInfo_;
+                for (getters.field_names[0..], getters.field_types[0..], getters.field_attrs[0..]) |NAME, *FT, *ATTR| {
                     const PROTO = struct {
                         fn default_get_const_ptr(data: DATA_, id: ID_, userdata: USERDATA_) *const FT.* {
                             return &@field(&default_get_base_ptr(data, userdata)[id], NAME);
@@ -528,8 +627,8 @@ pub const DataManipulationPackage = struct {
             pub const DefaultFieldConstPtrGetters = FieldConstPtrGetters{};
 
             const FieldOptConstPtrGettersStructInfo = make: {
-                const getters = FieldInfoAsStructInfo_;
-                for (getters.field_types, getters.field_attrs) |*FT, *ATTR| {
+                var getters = FieldInfoAsStructInfo_;
+                for (getters.field_types[0..], getters.field_attrs[0..]) |*FT, *ATTR| {
                     const FN = fn (DATA_, ID_, USERDATA_) *const FT.*;
                     FT.* = FN;
                     ATTR.@"align" = @alignOf(FN);
@@ -541,8 +640,8 @@ pub const DataManipulationPackage = struct {
             pub const FieldCustomConstPtrGetters = FieldOptConstPtrGettersStructInfo.build_struct_type();
 
             const FieldSettersStructInfo = make: {
-                const setters = FieldInfoAsStructInfo_;
-                for (setters.field_names, setters.field_types, setters.field_attrs) |NAME, *TYPE, *ATTR| {
+                var setters = FieldInfoAsStructInfo_;
+                for (setters.field_names[0..], setters.field_types[0..], setters.field_attrs[0..]) |NAME, *TYPE, *ATTR| {
                     const PROTO = struct {
                         fn default_set(data: DATA_, id: ID_, val: TYPE.*, userdata: USERDATA_) DATA_ {
                             @field(&default_get_base_ptr(data, userdata)[id], NAME) = val;
@@ -561,8 +660,8 @@ pub const DataManipulationPackage = struct {
             pub const DefaultFieldSetters = FieldSetters{};
 
             const FieldOptSettersStructInfo = make: {
-                const setters = FieldInfoAsStructInfo_;
-                for (setters.field_types, setters.field_attrs) |*TYPE, *ATTR| {
+                var setters = FieldInfoAsStructInfo_;
+                for (setters.field_types[0..], setters.field_attrs[0..]) |*TYPE, *ATTR| {
                     const FN = fn (DATA_, ID_, TYPE.*, USERDATA_) DATA_;
                     TYPE.* = FN;
                     ATTR.@"align" = @alignOf(FN);
@@ -574,8 +673,8 @@ pub const DataManipulationPackage = struct {
             pub const FieldCustomSetters = FieldOptSettersStructInfo.build_struct_type();
 
             const FieldFlagsStructInfo = make: {
-                const flags_info = FieldInfoAsStructInfo_;
-                for (flags_info.field_types, flags_info.field_attrs) |*TYPE, *ATTR| {
+                var flags_info = FieldInfoAsStructInfo_;
+                for (flags_info.field_types[0..], flags_info.field_attrs[0..]) |*TYPE, *ATTR| {
                     TYPE.* = FuncFlags;
                     ATTR.@"align" = @alignOf(FuncFlags);
                     ATTR.@"comptime" = false;
@@ -585,8 +684,14 @@ pub const DataManipulationPackage = struct {
             };
             pub const FieldFlags = FieldFlagsStructInfo.build_struct_type();
 
-            ID_LESS_THAN_ID: T_FN_ID_LESS_THAN_ID = default_id_less_than_id,
-            ID_LESS_THAN_OR_EQUAL_ID: T_FN_ID_LESS_THAN_OR_EQUAL_ID = default_id_less_than_or_equal_id,
+            ID_LESS_THAN: T_FN_ID_LESS_THAN = default_id_less_than,
+            ID_LESS_THAN_OR_EQUAL: T_FN_ID_LESS_THAN_OR_EQUAL = default_id_less_than_or_equal,
+            ID_GREATER_THAN: T_FN_ID_GREATER_THAN = default_id_greater_than,
+            ID_GREATER_THAN_OR_EQUAL: T_FN_ID_GREATER_THAN_OR_EQUAL = default_id_greater_than_or_equal,
+            ID_EQUALS: T_FN_ID_EQUALS = default_id_equals,
+            ID_VALID: T_FN_ID_VALID = default_id_valid,
+            ID_INVALID_AFTER: T_FN_ID_INVALID_AFTER = default_id_invalid_after,
+            ID_INVALID_BEFORE: T_FN_ID_INVALID_BEFORE = default_id_invalid_before,
             FIRST_ID: T_FN_FIRST_ID = default_first_index,
             LAST_ID: T_FN_LAST_ID = default_last_index,
             NTH_ID_FROM_START: T_FN_NTH_ID_FROM_START = default_nth_index_from_start,
@@ -598,7 +703,6 @@ pub const DataManipulationPackage = struct {
             GET_LEN: T_FN_LEN = default_len,
             SET_LEN: T_FN_SET_LEN = default_set_len,
             RANGE_LEN: T_FN_RANGE_LEN = default_range_len,
-            VALID_ID: T_FN_VALID_ID = default_valid_id,
             GET: T_FN_GET = default_get,
             GET_PTR: T_FN_GET_PTR = default_get_ptr,
             GET_CONST_PTR: T_FN_GET_CONST_PTR = default_get_const_ptr,
@@ -668,13 +772,37 @@ pub const DataManipulationPackage = struct {
                 return new_data;
             }
 
-            const T_FN_ID_LESS_THAN_ID = @TypeOf(default_id_less_than_id);
-            fn default_id_less_than_id(_: DATA_, id_a: ID_, id_b: ID_, _: USERDATA_) bool {
+            const T_FN_ID_LESS_THAN = @TypeOf(default_id_less_than);
+            fn default_id_less_than(_: DATA_, id_a: ID_, id_b: ID_, _: USERDATA_) bool {
                 return id_a < id_b;
             }
-            const T_FN_ID_LESS_THAN_OR_EQUAL_ID = @TypeOf(default_id_less_than_or_equal_id);
-            fn default_id_less_than_or_equal_id(_: DATA_, id_a: ID_, id_b: ID_, _: USERDATA_) bool {
+            const T_FN_ID_LESS_THAN_OR_EQUAL = @TypeOf(default_id_less_than_or_equal);
+            fn default_id_less_than_or_equal(_: DATA_, id_a: ID_, id_b: ID_, _: USERDATA_) bool {
                 return id_a <= id_b;
+            }
+            const T_FN_ID_GREATER_THAN = @TypeOf(default_id_greater_than);
+            fn default_id_greater_than(_: DATA_, id_a: ID_, id_b: ID_, _: USERDATA_) bool {
+                return id_a > id_b;
+            }
+            const T_FN_ID_GREATER_THAN_OR_EQUAL = @TypeOf(default_id_greater_than_or_equal);
+            fn default_id_greater_than_or_equal(_: DATA_, id_a: ID_, id_b: ID_, _: USERDATA_) bool {
+                return id_a >= id_b;
+            }
+            const T_FN_ID_EQUALS = @TypeOf(default_id_equals);
+            fn default_id_equals(_: DATA_, id_a: ID_, id_b: ID_, _: USERDATA_) bool {
+                return id_a == id_b;
+            }
+            const T_FN_ID_VALID = @TypeOf(default_id_valid);
+            fn default_id_valid(data: DATA_, id: ID_, userdata: USERDATA_) bool {
+                return 0 <= id and id < default_len(data, userdata);
+            }
+            const T_FN_ID_INVALID_AFTER = @TypeOf(default_id_invalid_after);
+            fn default_id_invalid_after(data: DATA_, userdata: USERDATA_) ID_ {
+                return @intCast(default_len(data, userdata));
+            }
+            const T_FN_ID_INVALID_BEFORE = @TypeOf(default_id_invalid_before);
+            fn default_id_invalid_before(_: DATA_, _: USERDATA_) ID_ {
+                return @intCast(math.maxInt(COUNT_));
             }
             const T_FN_FIRST_ID = @TypeOf(default_first_index);
             fn default_first_index(_: DATA_, _: USERDATA_) ID_ {
@@ -922,9 +1050,14 @@ pub const DataManipulationPackage = struct {
             const DEFAULT_ALWAYS_INVALID_ID: ID_ = if (Types.type_is_int(ID_)) math.maxInt(ID_) else if (Types.type_is_optional(ID_)) null else undefined;
 
             pub const CustomDataFuncs = struct {
-                ID_LESS_THAN_ID: ?T_FN_ID_LESS_THAN_ID = null,
-                ID_LESS_THAN_OR_EQUAL_ID: ?T_FN_ID_LESS_THAN_OR_EQUAL_ID = null,
-                ALWAYS_INVALID_ID: ?ID_ = null,
+                ID_LESS_THAN: ?T_FN_ID_LESS_THAN = null,
+                ID_LESS_THAN_OR_EQUAL: ?T_FN_ID_LESS_THAN_OR_EQUAL = null,
+                ID_GREATER_THAN: ?T_FN_ID_GREATER_THAN = null,
+                ID_GREATER_THAN_OR_EQUAL: ?T_FN_ID_GREATER_THAN_OR_EQUAL = null,
+                ID_EQUALS: ?T_FN_ID_EQUALS = null,
+                VALID_ID: ?T_FN_VALID_ID = null,
+                INVALID_ID_AFTER: ?T_FN_ID_INVALID_AFTER = null,
+                INVALID_ID_BEFORE: ?T_FN_ID_INVALID_BEFORE = null,
                 GET: ?T_FN_GET = null,
                 GET_PTR: ?T_FN_GET_PTR = null,
                 GET_PTR_CONST: ?T_FN_GET_CONST_PTR = null,
@@ -948,10 +1081,9 @@ pub const DataManipulationPackage = struct {
                 PREV_ID: ?T_FN_PREV_ID = null,
                 NTH_PREV_ID: ?T_FN_NTH_PREV_ID = null,
                 NTH_NEXT_ID: ?T_FN_NTH_NEXT_ID = null,
-                LEN: ?T_FN_LEN = null,
+                GET_LEN: ?T_FN_LEN = null,
                 SET_LEN: ?T_FN_SET_LEN = null,
                 RANGE_LEN: ?T_FN_RANGE_LEN = null,
-                VALID_ID: ?T_FN_VALID_ID = null,
                 REVERSE_RANGE: ?T_FN_REVERSE = null,
                 MOVE_ONE_PRESERVE: ?T_FN_MOVE_ONE_PRESERVE = null,
                 MOVE_BLOCK_PRESERVE: ?T_FN_MOVE_BLOCK_PRESERVE = null,
@@ -960,7 +1092,7 @@ pub const DataManipulationPackage = struct {
                 SCRAMBLE: ?T_FN_SCRAMBLE = null,
             };
 
-            pub fn with_custom_functions(comptime ALLOW_DEFAULT: bool, comptime func: CustomDataFuncs) type {
+            pub fn with_custom_functions(comptime ALLOW_DEFAULT: bool, comptime func: CustomDataFuncs) DEF_WITH_FUNCS {
                 comptime {
                     //********
                     // BUILD FLAGS FOR PROVIDED CUSTOM FUNCTIONS
@@ -983,77 +1115,193 @@ pub const DataManipulationPackage = struct {
                     //********
                     const PROTO = struct {
                         const ALWAYS_INVALID = if (func.ALWAYS_INVALID_ID) |INVALID| INVALID else DEFAULT_ALWAYS_INVALID_ID;
-                        const VALID_ID = struct {
+                        const INVALID_ID_AFTER = struct {
+                            fn unusable(_: DATA_, _: USERDATA_) bool {
+                                assert_unreachable(@src(), "no `invalid_id_after` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
+                            }
+                            fn select() T_FN_ID_INVALID_AFTER {
+                                comptime {
+                                    if (func.INVALID_ID_AFTER) |f| return f;
+                                    return if (ALLOW_DEFAULT) default_id_invalid_after else unusable;
+                                }
+                            }
+                        };
+                        const INVALID_ID_BEFORE = struct {
+                            fn unusable(_: DATA_, _: USERDATA_) bool {
+                                assert_unreachable(@src(), "no `invalid_id_before` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
+                            }
+                            fn select() T_FN_ID_INVALID_BEFORE {
+                                comptime {
+                                    if (func.INVALID_ID_BEFORE) |f| return f;
+                                    return if (ALLOW_DEFAULT) default_id_invalid_before else unusable;
+                                }
+                            }
+                        };
+                        const ID_VALID = struct {
+                            fn infer_lteq(data: DATA_, id: ID_, userdata: USERDATA_) bool {
+                                const LTEQ = comptime ID_LESS_THAN_OR_EQUAL.select(FLAGS);
+                                const FIRST = comptime FIRST_ID.select(FLAGS);
+                                const LAST = comptime LAST_ID.select(FLAGS);
+                                const first = FIRST(data, userdata);
+                                const last = LAST(data, userdata);
+                                return LTEQ(data, first, id, userdata) and LTEQ(data, id, last, userdata);
+                            }
+                            fn infer_gteq(data: DATA_, id: ID_, userdata: USERDATA_) bool {
+                                const GTEQ = comptime ID_GREATER_THAN_OR_EQUAL.select(FLAGS);
+                                const FIRST = comptime FIRST_ID.select(FLAGS);
+                                const LAST = comptime LAST_ID.select(FLAGS);
+                                const first = FIRST(data, userdata);
+                                const last = LAST(data, userdata);
+                                return GTEQ(data, id, first, userdata) and GTEQ(data, last, id, userdata);
+                            }
+                            fn infer_lt_eq(data: DATA_, id: ID_, userdata: USERDATA_) bool {
+                                const LT = comptime ID_LESS_THAN.select(FLAGS);
+                                const EQ = comptime ID_EQUALS.select(FLAGS);
+                                const FIRST = comptime FIRST_ID.select(FLAGS);
+                                const LAST = comptime LAST_ID.select(FLAGS);
+                                const first = FIRST(data, userdata);
+                                const last = LAST(data, userdata);
+                                return (LT(data, first, id, userdata) or (EQ(data, first, id, userdata))) and (LT(data, id, last, userdata) or EQ(data, id, last, userdata));
+                            }
+                            fn infer_gt_eq(data: DATA_, id: ID_, userdata: USERDATA_) bool {
+                                const GT = comptime ID_GREATER_THAN.select(FLAGS);
+                                const EQ = comptime ID_EQUALS.select(FLAGS);
+                                const FIRST = comptime FIRST_ID.select(FLAGS);
+                                const LAST = comptime LAST_ID.select(FLAGS);
+                                const first = FIRST(data, userdata);
+                                const last = LAST(data, userdata);
+                                return (GT(data, id, first, userdata) or (EQ(data, first, id, userdata))) and (GT(data, last, id, userdata) or EQ(data, id, last, userdata));
+                            }
                             fn unusable(_: DATA_, _: ID_, _: USERDATA_) bool {
                                 assert_unreachable(@src(), "no `valid_id` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
                             }
-                            fn unknown(_: DATA_, _: ID_, _: USERDATA_) bool {
-                                return true;
-                            }
-                            fn select() T_FN_VALID_ID {
+                            fn select(comptime FLAGS_: FuncFlags) T_FN_VALID_ID {
                                 comptime {
-                                    if (func.VALID_ID) |f| f;
+                                    if (func.VALID_ID) |f| return f;
+                                    if (FLAGS_.has(INFER.VALID_ID.FROM_FIRST_LAST_LTEQ)) return infer_lteq;
+                                    if (FLAGS_.has(INFER.VALID_ID.FROM_FIRST_LAST_GTEQ)) return infer_gteq;
+                                    if (FLAGS_.has(INFER.VALID_ID.FROM_FIRST_LAST_LT_EQ)) return infer_lt_eq;
+                                    if (FLAGS_.has(INFER.VALID_ID.FROM_FIRST_LAST_GT_EQ)) return infer_gt_eq;
                                     return if (ALLOW_DEFAULT) default_valid_id else unusable;
                                 }
                             }
-                            fn try_select() T_FN_VALID_ID {
-                                comptime {
-                                    if (func.VALID_ID) |f| f;
-                                    return if (ALLOW_DEFAULT) default_valid_id else unknown;
-                                }
-                            }
                         };
-                        fn assert_valid(data: DATA_, id: ID_, userdata: USERDATA_, comptime src: SourceLocation) bool {
-                            const TRY_VALID = VALID_ID.try_select();
-                            assert_with_reason(TRY_VALID(data, id, userdata), src, "id `{any}` is not valid for the current data structure state", .{id});
+                        fn assert_valid_id(data: DATA_, id: ID_, userdata: USERDATA_, comptime src: SourceLocation) bool {
+                            const VALID = comptime ID_VALID.select(FLAGS);
+                            assert_with_reason(VALID(data, id, userdata), src, "id `{any}` is not valid for the current data structure state", .{id});
                         }
-                        const ID_LESS_THAN_ID = struct {
+                        const ID_LESS_THAN = struct {
+                            fn infer_gteq(data: DATA_, id_a: ID_, id_b: ID_, userdata: USERDATA_) bool {
+                                const GTEQ = comptime ID_GREATER_THAN_OR_EQUAL.select(FLAGS);
+                                return !GTEQ(data, id_a, id_b, userdata);
+                            }
+                            fn infer_gt_eq(data: DATA_, id_a: ID_, id_b: ID_, userdata: USERDATA_) bool {
+                                const GT = comptime ID_GREATER_THAN.select(FLAGS);
+                                const EQ = comptime ID_EQUALS.select(FLAGS);
+                                return !GT(data, id_a, id_b, userdata) and !EQ(data, id_a, id_b, userdata);
+                            }
                             fn unusable(_: DATA_, _: ID_, _: ID_, _: USERDATA_) bool {
                                 assert_unreachable(@src(), "no `id_a less than id_b` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
                             }
-                            fn unknown(_: DATA_, _: ID_, _: ID_, _: USERDATA_) bool {
-                                return true;
-                            }
-                            fn select() T_FN_ID_LESS_THAN_ID {
+                            fn select(comptime FLAGS_: FuncFlags) T_FN_ID_LESS_THAN {
                                 comptime {
-                                    if (func.ID_LESS_THAN_ID) |f| f;
-                                    return if (ALLOW_DEFAULT) default_id_less_than_id else unusable;
-                                }
-                            }
-                            fn try_select() T_FN_ID_LESS_THAN_ID {
-                                comptime {
-                                    if (func.ID_LESS_THAN_ID) |f| f;
-                                    return if (ALLOW_DEFAULT) default_id_less_than_id else unknown;
+                                    if (func.ID_LESS_THAN) |f| return f;
+                                    if (FLAGS_.has(INFER.ID_LT.FROM_GTEQ)) return infer_gteq;
+                                    if (FLAGS_.has(INFER.ID_LT.FROM_GT_EQ)) return infer_gt_eq;
+                                    return if (ALLOW_DEFAULT) default_id_less_than else unusable;
                                 }
                             }
                         };
-                        const ID_LESS_THAN_OR_EQUAL_ID = struct {
+                        const ID_LESS_THAN_OR_EQUAL = struct {
+                            fn infer_gt(data: DATA_, id_a: ID_, id_b: ID_, userdata: USERDATA_) bool {
+                                const GT = comptime ID_GREATER_THAN.select(FLAGS);
+                                return !GT(data, id_a, id_b, userdata);
+                            }
+                            fn infer_lt_eq(data: DATA_, id_a: ID_, id_b: ID_, userdata: USERDATA_) bool {
+                                const LT = comptime ID_LESS_THAN.select(FLAGS);
+                                const EQ = comptime ID_EQUALS.select(FLAGS);
+                                return LT(data, id_a, id_b, userdata) or EQ(data, id_a, id_b, userdata);
+                            }
                             fn unusable(_: DATA_, _: ID_, _: ID_, _: USERDATA_) ELEM_ {
                                 assert_unreachable(@src(), "no `id_a less than or equal id_b` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
                             }
-                            fn unknown(_: DATA_, _: ID_, _: ID_, _: USERDATA_) bool {
-                                return true;
-                            }
-                            fn select() T_FN_ID_LESS_THAN_OR_EQUAL_ID {
+                            fn select(comptime FLAGS_: FuncFlags) T_FN_ID_LESS_THAN_OR_EQUAL {
                                 comptime {
-                                    if (func.ID_LESS_THAN_OR_EQUAL_ID) |f| f;
-                                    return if (ALLOW_DEFAULT) default_id_less_than_or_equal_id else unusable;
+                                    if (func.ID_LESS_THAN_OR_EQUAL) |f| return f;
+                                    if (FLAGS_.has(INFER.ID_LTEQ.FROM_GT)) return infer_gt;
+                                    if (FLAGS_.has(INFER.ID_LTEQ.FROM_LT_EQ)) return infer_lt_eq;
+                                    return if (ALLOW_DEFAULT) default_id_less_than_or_equal else unusable;
                                 }
                             }
-                            fn try_select() T_FN_ID_LESS_THAN_OR_EQUAL_ID {
+                        };
+                        const ID_GREATER_THAN = struct {
+                            fn infer_lteq(data: DATA_, id_a: ID_, id_b: ID_, userdata: USERDATA_) bool {
+                                const LTEQ = comptime ID_LESS_THAN_OR_EQUAL.select(FLAGS);
+                                return !LTEQ(data, id_a, id_b, userdata);
+                            }
+                            fn infer_lt_eq(data: DATA_, id_a: ID_, id_b: ID_, userdata: USERDATA_) bool {
+                                const LT = comptime ID_LESS_THAN.select(FLAGS);
+                                const EQ = comptime ID_EQUALS.select(FLAGS);
+                                return !LT(data, id_a, id_b, userdata) and !EQ(data, id_a, id_b, userdata);
+                            }
+                            fn unusable(_: DATA_, _: ID_, _: ID_, _: USERDATA_) ELEM_ {
+                                assert_unreachable(@src(), "no `id_a greater than id_b` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
+                            }
+                            fn select(comptime FLAGS_: FuncFlags) T_FN_ID_GREATER_THAN {
                                 comptime {
-                                    if (func.ID_LESS_THAN_OR_EQUAL_ID) |f| f;
-                                    return if (ALLOW_DEFAULT) default_id_less_than_or_equal_id else unknown;
+                                    if (func.ID_GREATER_THAN) |f| return f;
+                                    if (FLAGS_.has(INFER.ID_GT.FROM_LTEQ)) return infer_lteq;
+                                    if (FLAGS_.has(INFER.ID_GT.FROM_LT_EQ)) return infer_lt_eq;
+                                    return if (ALLOW_DEFAULT) default_id_greater_than else unusable;
+                                }
+                            }
+                        };
+                        const ID_GREATER_THAN_OR_EQUAL = struct {
+                            fn infer_lt(data: DATA_, id_a: ID_, id_b: ID_, userdata: USERDATA_) bool {
+                                const LT = comptime ID_LESS_THAN.select(FLAGS);
+                                return !LT(data, id_a, id_b, userdata);
+                            }
+                            fn infer_gt_eq(data: DATA_, id_a: ID_, id_b: ID_, userdata: USERDATA_) bool {
+                                const GT = comptime ID_GREATER_THAN.select(FLAGS);
+                                const EQ = comptime ID_EQUALS.select(FLAGS);
+                                return GT(data, id_a, id_b, userdata) or EQ(data, id_a, id_b, userdata);
+                            }
+                            fn unusable(_: DATA_, _: ID_, _: ID_, _: USERDATA_) ELEM_ {
+                                assert_unreachable(@src(), "no `id_a greater than or equal id_b` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
+                            }
+                            fn select(comptime FLAGS_: FuncFlags) T_FN_ID_GREATER_THAN_OR_EQUAL {
+                                comptime {
+                                    if (func.ID_GREATER_THAN_OR_EQUAL) |f| return f;
+                                    if (FLAGS_.has(INFER.ID_GTEQ.FROM_LT)) return infer_lt;
+                                    if (FLAGS_.has(INFER.ID_GTEQ.FROM_GT_EQ)) return infer_gt_eq;
+                                    return if (ALLOW_DEFAULT) default_id_greater_than_or_equal else unusable;
+                                }
+                            }
+                        };
+                        const ID_EQUALS = struct {
+                            fn infer_gt_lt(data: DATA_, id_a: ID_, id_b: ID_, userdata: USERDATA_) bool {
+                                const GT = comptime ID_GREATER_THAN.select(FLAGS);
+                                const LT = comptime ID_LESS_THAN.select(FLAGS);
+                                return !GT(data, id_a, id_b, userdata) and !LT(data, id_a, id_b, userdata);
+                            }
+                            fn unusable(_: DATA_, _: ID_, _: ID_, _: USERDATA_) ELEM_ {
+                                assert_unreachable(@src(), "no `id_a less than or equal id_b` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
+                            }
+                            fn select(comptime FLAGS_: FuncFlags) T_FN_ID_LESS_THAN_OR_EQUAL {
+                                comptime {
+                                    if (func.ID_EQUALS) |f| return f;
+                                    if (FLAGS_.has(INFER.ID_EQ.FROM_GT_LT)) return infer_gt_lt;
+                                    return if (ALLOW_DEFAULT) default_id_equals else unusable;
                                 }
                             }
                         };
                         const GET = struct {
                             fn infer_ptr(data: DATA_, id: ID_, userdata: USERDATA_) ELEM_ {
-                                assert_valid(data, id, userdata, @src());
+                                assert_valid_id(data, id, userdata, @src());
                                 return func.GET_PTR.?(data, id, userdata).*;
                             }
                             fn infer_const_ptr(data: DATA_, id: ID_, userdata: USERDATA_) ELEM_ {
-                                assert_valid(data, id, userdata, @src());
+                                assert_valid_id(data, id, userdata, @src());
                                 return func.GET_PTR_CONST.?(data, id, userdata).*;
                             }
                             fn unusable(_: DATA_, _: ID_, _: USERDATA_) ELEM_ {
@@ -1061,7 +1309,7 @@ pub const DataManipulationPackage = struct {
                             }
                             fn select(comptime FLAGS_: FuncFlags) T_FN_GET {
                                 comptime {
-                                    if (FLAGS_.has(F.GET)) return func.GET.?;
+                                    if (func.GET) |f| return f;
                                     if (FLAGS_.has(INFER.GET_FROM_PTR)) return infer_ptr;
                                     if (FLAGS_.has(INFER.GET_FROM_CONST_PTR)) return infer_const_ptr;
                                     return if (ALLOW_DEFAULT) default_get else unusable;
@@ -1072,16 +1320,16 @@ pub const DataManipulationPackage = struct {
                             fn unusable(_: DATA_, _: ID_, _: USERDATA_) *ELEM_ {
                                 assert_unreachable(@src(), "no `get_ptr` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
                             }
-                            fn select(comptime FLAGS_: FuncFlags) T_FN_GET_PTR {
+                            fn select() T_FN_GET_PTR {
                                 comptime {
-                                    if (FLAGS_.has(F.GET_PTR)) return func.GET_PTR.?;
+                                    if (func.GET_PTR) |f| return f;
                                     return if (ALLOW_DEFAULT) default_get_ptr else unusable;
                                 }
                             }
                         };
                         const GET_CONST_PTR = struct {
                             fn infer_ptr(data: DATA_, id: ID_, userdata: USERDATA_) *const ELEM_ {
-                                assert_valid(data, id, userdata, @src());
+                                assert_valid_id(data, id, userdata, @src());
                                 return func.GET_PTR.?(data, id, userdata);
                             }
                             fn unusable(_: DATA_, _: ID_, _: USERDATA_) *const ELEM_ {
@@ -1089,7 +1337,7 @@ pub const DataManipulationPackage = struct {
                             }
                             fn select(comptime FLAGS_: FuncFlags) T_FN_GET_CONST_PTR {
                                 comptime {
-                                    if (FLAGS_.has(F.GET_CONST_PTR)) return func.GET_PTR_CONST.?;
+                                    if (func.GET_PTR_CONST) |f| return f;
                                     if (FLAGS_.has(INFER.CONST_PTR_FROM_PTR)) return infer_ptr;
                                     return if (ALLOW_DEFAULT) default_get_const_ptr else unusable;
                                 }
@@ -1097,7 +1345,7 @@ pub const DataManipulationPackage = struct {
                         };
                         const SET = struct {
                             fn infer_ptr(data: DATA_, id: ID_, val: ELEM_, userdata: USERDATA_) DATA_ {
-                                assert_valid(data, id, userdata, @src());
+                                assert_valid_id(data, id, userdata, @src());
                                 func.GET_PTR.?(data, id, userdata).* = val;
                                 return data;
                             }
@@ -1106,7 +1354,7 @@ pub const DataManipulationPackage = struct {
                             }
                             fn select(comptime FLAGS_: FuncFlags) T_FN_SET {
                                 comptime {
-                                    if (FLAGS_.has(F.SET)) return func.SET.?;
+                                    if (func.SET) |f| return f;
                                     if (FLAGS_.has(INFER.SET_FROM_PTR)) return infer_ptr;
                                     return if (ALLOW_DEFAULT) default_set else unusable;
                                 }
@@ -1114,8 +1362,8 @@ pub const DataManipulationPackage = struct {
                         };
                         const SWAP = struct {
                             fn infer_ptr(data: DATA_, id_a: ID_, id_b: ID_, userdata: USERDATA_) DATA_ {
-                                assert_valid(data, id_a, userdata, @src());
-                                assert_valid(data, id_b, userdata, @src());
+                                assert_valid_id(data, id_a, userdata, @src());
+                                assert_valid_id(data, id_b, userdata, @src());
                                 const GET_PTR_ = comptime GET_PTR.select(FLAGS);
                                 const ptr_a = GET_PTR_(data, id_a, userdata);
                                 const ptr_b = GET_PTR_(data, id_b, userdata);
@@ -1127,8 +1375,8 @@ pub const DataManipulationPackage = struct {
                             fn infer_get_set(data: DATA_, id_a: ID_, id_b: ID_, userdata: USERDATA_) DATA_ {
                                 const GET_ = comptime GET.select(FLAGS);
                                 const SET_ = comptime SET.select(FLAGS);
-                                assert_valid(data, id_a, userdata, @src());
-                                assert_valid(data, id_b, userdata, @src());
+                                assert_valid_id(data, id_a, userdata, @src());
+                                assert_valid_id(data, id_b, userdata, @src());
                                 const tmp = GET_(data, id_b, userdata);
                                 const data_2 = SET_(data, id_b, GET_(data, id_a, userdata), userdata);
                                 return SET_(data_2, id_a, tmp, userdata);
@@ -1138,7 +1386,7 @@ pub const DataManipulationPackage = struct {
                             }
                             fn select(comptime FLAGS_: FuncFlags) T_FN_SWAP {
                                 comptime {
-                                    if (FLAGS_.has(F.SWAP)) return func.SWAP.?;
+                                    if (func.SWAP) |f| return f;
                                     if (FLAGS_.has(INFER.SWAP_FROM_PTR)) return infer_ptr;
                                     if (FLAGS_.has(INFER.SWAP_FROM_GET_SET)) return infer_get_set;
                                     return if (ALLOW_DEFAULT) default_swap else unusable;
@@ -1165,7 +1413,7 @@ pub const DataManipulationPackage = struct {
                             }
                             fn select(comptime FLAGS_: FuncFlags) T_FN_LESS_THAN {
                                 comptime {
-                                    if (FLAGS_.has(F.LESS_THAN)) return func.LESS_THAN.?;
+                                    if (func.LESS_THAN) |f| return f;
                                     if (FLAGS_.has(INFER.LT_FROM_GTEQ)) return infer_gteq;
                                     if (FLAGS_.has(INFER.LT_FROM_GT_OQ)) return infer_gt_oq;
                                     if (FLAGS_.has(INFER.LT_FROM_GT_EQ)) return infer_gt_eq;
@@ -1193,7 +1441,7 @@ pub const DataManipulationPackage = struct {
                             }
                             fn select(comptime FLAGS_: FuncFlags) T_FN_LESS_THAN_OR_EQUAL {
                                 comptime {
-                                    if (FLAGS_.has(F.LESS_THAN_OR_EQUAL)) return func.LESS_THAN_OR_EQUAL.?;
+                                    if (func.LESS_THAN_OR_EQUAL) |f| return f;
                                     if (FLAGS_.has(INFER.LTEQ_FROM_GT)) return infer_gt;
                                     if (FLAGS_.has(INFER.LTEQ_FROM_LT_OQ)) return infer_lt_oq;
                                     if (FLAGS_.has(INFER.LTEQ_FROM_LT_EQ)) return infer_lt_eq;
@@ -1221,7 +1469,7 @@ pub const DataManipulationPackage = struct {
                             }
                             fn select(comptime FLAGS_: FuncFlags) T_FN_GREATER_THAN {
                                 comptime {
-                                    if (FLAGS_.has(F.GREATER_THAN)) return func.GREATER_THAN.?;
+                                    if (func.GREATER_THAN) |f| return f;
                                     if (FLAGS_.has(INFER.GT_FROM_LTEQ)) return infer_lteq;
                                     if (FLAGS_.has(INFER.GT_FROM_LT_OQ)) return infer_lt_oq;
                                     if (FLAGS_.has(INFER.GT_FROM_LT_EQ)) return infer_lt_eq;
@@ -1249,7 +1497,7 @@ pub const DataManipulationPackage = struct {
                             }
                             fn select(comptime FLAGS_: FuncFlags) T_FN_GREATER_THAN_OR_EQUAL {
                                 comptime {
-                                    if (FLAGS_.has(F.GREATER_THAN_OR_EQUAL)) return func.GREATER_THAN_OR_EQUAL.?;
+                                    if (func.GREATER_THAN_OR_EQUAL) |f| return f;
                                     if (FLAGS_.has(INFER.GTEQ_FROM_LT)) return infer_lt;
                                     if (FLAGS_.has(INFER.GTEQ_FROM_GT_OQ)) return infer_gt_oq;
                                     if (FLAGS_.has(INFER.GTEQ_FROM_GT_EQ)) return infer_gt_eq;
@@ -1272,7 +1520,7 @@ pub const DataManipulationPackage = struct {
                             }
                             fn select(comptime FLAGS_: FuncFlags) T_FN_EQUALS {
                                 comptime {
-                                    if (FLAGS_.has(F.ORDER_EQUALS)) return func.ORDER_EQUALS.?;
+                                    if (func.ORDER_EQUALS) |f| return f;
                                     if (FLAGS_.has(INFER.OQ_FROM_EQ)) return infer_eq;
                                     if (FLAGS_.has(INFER.EQOQ_FROM_GT_LT)) return infer_gt_lt;
                                     return if (ALLOW_DEFAULT) default_equals else unusable;
@@ -1294,7 +1542,7 @@ pub const DataManipulationPackage = struct {
                             }
                             fn select(comptime FLAGS_: FuncFlags) T_FN_EQUALS {
                                 comptime {
-                                    if (FLAGS_.has(F.EXACT_EQUALS)) return func.EXACT_EQUALS.?;
+                                    if (func.EXACT_EQUALS) |f| return f;
                                     if (FLAGS_.has(INFER.EQ_FROM_OQ)) return infer_oq;
                                     if (FLAGS_.has(INFER.EQOQ_FROM_GT_LT)) return infer_gt_lt;
                                     return if (ALLOW_DEFAULT) default_equals else unusable;
@@ -1333,7 +1581,7 @@ pub const DataManipulationPackage = struct {
                             }
                             fn select(comptime FLAGS_: FuncFlags) T_FN_FIRST_ID {
                                 comptime {
-                                    if (FLAGS_.has(F.FIRST_INDEX)) return func.FIRST_ID.?;
+                                    if (func.FIRST_ID) |f| return f;
                                     if (FLAGS_.has(INFER.FIRST_FROM_NTH_FROM_START)) return infer_nth_start;
                                     if (FLAGS_.has(INFER.FIRST_FROM_LEN_NTH_FROM_END)) return infer_nth_end;
                                     if (FLAGS_.has(INFER.FIRST_FROM_LAST_LEN_NTH_PREV)) return infer_last_len_nth_prev;
@@ -1374,7 +1622,7 @@ pub const DataManipulationPackage = struct {
                             }
                             fn select(comptime FLAGS_: FuncFlags) T_FN_LAST_ID {
                                 comptime {
-                                    if (FLAGS_.has(F.LAST_INDEX)) return func.LAST_ID.?;
+                                    if (func.LAST_ID) |f| return f;
                                     if (FLAGS_.has(INFER.LAST_FROM_NTH_FROM_LAST)) return infer_nth_last;
                                     if (FLAGS_.has(INFER.LAST_FROM_LEN_NTH_FROM_START)) return infer_nth_start;
                                     if (FLAGS_.has(INFER.LAST_FROM_FIRST_LEN_NTH_NEXT)) return infer_first_len_nth_next;
@@ -1385,19 +1633,23 @@ pub const DataManipulationPackage = struct {
                         };
                         const NEXT_ID = struct {
                             fn infer_nth_next(data: DATA_, curr: ID_, userdata: USERDATA_) ID_ {
-                                assert_valid(data, curr, userdata, @src());
+                                assert_valid_id(data, curr, userdata, @src());
                                 const NTH_NEXT = comptime NTH_NEXT_ID.select(FLAGS);
                                 return NTH_NEXT(data, curr, 1, userdata);
                             }
                             fn infer_last_prev(data: DATA_, curr: ID_, userdata: USERDATA_) ID_ {
-                                assert_valid(data, curr, userdata, @src());
+                                assert_valid_id(data, curr, userdata, @src());
                                 const LAST = comptime LAST_ID.select(FLAGS);
                                 const PREV = comptime PREV_ID.select(FLAGS);
+                                const ID_EQ = comptime ID_EQUALS.select(FLAGS);
+                                const INVALID_END = comptime INVALID_ID_AFTER.select();
+                                const INVALID_BEFORE = comptime INVALID_ID_BEFORE.select();
+                                const VALID = comptime ID_VALID.select();
                                 var i = LAST(data, userdata);
-                                if (i == curr) return ALWAYS_INVALID;
+                                if (ID_EQ(data, i, curr, userdata)) return INVALID_END(data, userdata);
                                 var ii = PREV(data, i, userdata);
-                                while (ii != curr) {
-                                    if (!VALID_ID(data, ii, userdata)) return ALWAYS_INVALID;
+                                while (!ID_EQ(data, i, curr, userdata)) {
+                                    if (!VALID(data, ii, userdata)) return INVALID_BEFORE(data, userdata);
                                     i = ii;
                                     ii = PREV(data, i, userdata);
                                 }
@@ -1408,7 +1660,7 @@ pub const DataManipulationPackage = struct {
                             }
                             fn select(comptime FLAGS_: FuncFlags) T_FN_NEXT_ID {
                                 comptime {
-                                    if (FLAGS_.has(F.NEXT_INDEX)) return func.NEXT_ID.?;
+                                    if (func.NEXT_ID) |f| return f;
                                     if (FLAGS_.has(INFER.NEXT_IDX_FROM_NTH_NEXT)) return infer_nth_next;
                                     if (FLAGS_.has(INFER.NEXT_IDX_FROM_LAST_PREV)) return infer_last_prev;
                                     return if (ALLOW_DEFAULT) default_next_idx else unusable;
@@ -1417,19 +1669,23 @@ pub const DataManipulationPackage = struct {
                         };
                         const PREV_ID = struct {
                             fn infer_nth_prev(data: DATA_, curr: ID_, userdata: USERDATA_) ID_ {
-                                assert_valid(data, curr, userdata, @src());
+                                assert_valid_id(data, curr, userdata, @src());
                                 const NTH_PREV = comptime NTH_PREV_ID.select(FLAGS);
                                 return NTH_PREV(data, curr, 1, userdata);
                             }
                             fn infer_first_next(data: DATA_, curr: ID_, userdata: USERDATA_) ID_ {
-                                assert_valid(data, curr, userdata, @src());
+                                assert_valid_id(data, curr, userdata, @src());
                                 const FIRST = comptime FIRST_ID.select(FLAGS);
                                 const NEXT = comptime NEXT_ID.select(FLAGS);
+                                const ID_EQ = comptime ID_EQUALS.select(FLAGS);
+                                const INVALID_END = comptime INVALID_ID_AFTER.select();
+                                const INVALID_BEFORE = comptime INVALID_ID_BEFORE.select();
+                                const VALID = comptime ID_VALID.select();
                                 var i = FIRST(data, userdata);
-                                if (i == curr) return ALWAYS_INVALID;
+                                if (ID_EQ(data, i, curr, userdata)) return INVALID_END(data, userdata);
                                 var ii = NEXT(data, i, userdata);
-                                while (ii != curr) {
-                                    if (!VALID_ID(data, ii, userdata)) return ALWAYS_INVALID;
+                                while (!ID_EQ(data, ii, curr, userdata)) {
+                                    if (!VALID(data, ii, userdata)) return INVALID_BEFORE(data, userdata);
                                     i = ii;
                                     ii = NEXT(data, i, userdata);
                                 }
@@ -1440,7 +1696,7 @@ pub const DataManipulationPackage = struct {
                             }
                             fn select(comptime FLAGS_: FuncFlags) T_FN_PREV_ID {
                                 comptime {
-                                    if (FLAGS_.has(F.PREV_INDEX)) return func.PREV_ID.?;
+                                    if (func.PREV_ID) |f| return f;
                                     if (FLAGS_.has(INFER.PREV_IDX_FROM_NTH_PREV)) return infer_nth_prev;
                                     if (FLAGS_.has(INFER.PREV_IDX_FROM_FIRST_NEXT)) return infer_first_next;
                                     return if (ALLOW_DEFAULT) default_next_idx else unusable;
@@ -1449,7 +1705,7 @@ pub const DataManipulationPackage = struct {
                         };
                         const NTH_NEXT_ID = struct {
                             fn infer_next(data: DATA_, curr: ID_, n: COUNT_, userdata: USERDATA_) ID_ {
-                                assert_valid(data, curr, userdata, @src());
+                                assert_valid_id(data, curr, userdata, @src());
                                 const NEXT = comptime NEXT_ID.select(FLAGS);
                                 var i = curr;
                                 var nn: COUNT_ = 0;
@@ -1459,23 +1715,27 @@ pub const DataManipulationPackage = struct {
                                 return i;
                             }
                             fn infer_last_prev(data: DATA_, curr: ID_, n: COUNT_, userdata: USERDATA_) ID_ {
-                                assert_valid(data, curr, userdata, @src());
+                                assert_valid_id(data, curr, userdata, @src());
                                 const LAST = comptime LAST_ID.select(FLAGS);
                                 const PREV = comptime PREV_ID.select(FLAGS);
+                                const ID_EQ = comptime ID_EQUALS.select(FLAGS);
+                                const INVALID_END = comptime INVALID_ID_AFTER.select();
+                                const INVALID_BEFORE = comptime INVALID_ID_BEFORE.select();
+                                const VALID = comptime ID_VALID.select();
                                 const last = LAST(data, userdata);
                                 var left_i = last;
                                 var nn: COUNT_ = 0;
                                 while (nn < n) : (nn += 1) {
-                                    if (left_i == curr or !VALID_ID(data, left_i, userdata)) return ALWAYS_INVALID;
+                                    if (ID_EQ(data, left_i, curr, userdata) or !VALID(data, left_i, userdata)) return INVALID_END(data, userdata);
                                     left_i = PREV(data, curr, userdata);
                                 }
                                 var right_i = last;
                                 var left_ii = PREV(data, left_i, userdata);
                                 var right_ii = PREV(data, last, userdata);
-                                while (left_ii != curr) {
+                                while (!ID_EQ(data, left_ii, curr, userdata)) {
                                     left_i = left_ii;
                                     left_ii = PREV(data, left_i, userdata);
-                                    if (!VALID_ID(data, left_ii, userdata)) return ALWAYS_INVALID;
+                                    if (!VALID(data, left_ii, userdata)) return INVALID_BEFORE(data, userdata);
                                     right_i = right_ii;
                                     right_ii = PREV(data, right_i, userdata);
                                 }
@@ -1486,7 +1746,7 @@ pub const DataManipulationPackage = struct {
                             }
                             fn select(comptime FLAGS_: FuncFlags) T_FN_NTH_NEXT_ID {
                                 comptime {
-                                    if (FLAGS_.has(F.NTH_NEXT_INDEX)) return func.NTH_PREV_ID.?;
+                                    if (func.NTH_PREV_ID) |f| return f;
                                     if (FLAGS_.has(INFER.NTH_NEXT_IDX_FROM_NEXT)) return infer_next;
                                     if (FLAGS_.has(INFER.NTH_NEXT_IDX_FROM_LAST_PREV)) return infer_last_prev;
                                     return if (ALLOW_DEFAULT) default_next_idx else unusable;
@@ -1495,7 +1755,7 @@ pub const DataManipulationPackage = struct {
                         };
                         const NTH_PREV_ID = struct {
                             fn infer_prev(data: DATA_, curr: ID_, n: COUNT_, userdata: USERDATA_) ID_ {
-                                assert_valid(data, curr, userdata, @src());
+                                assert_valid_id(data, curr, userdata, @src());
                                 const PREV = comptime PREV_ID.select(FLAGS);
                                 var i = curr;
                                 var nn: COUNT_ = 0;
@@ -1505,23 +1765,27 @@ pub const DataManipulationPackage = struct {
                                 return i;
                             }
                             fn infer_first_next(data: DATA_, curr: ID_, n: COUNT_, userdata: USERDATA_) ID_ {
-                                assert_valid(data, curr, userdata, @src());
+                                assert_valid_id(data, curr, userdata, @src());
                                 const FIRST = comptime FIRST_ID.select(FLAGS);
                                 const NEXT = comptime NEXT_ID.select(FLAGS);
+                                const ID_EQ = comptime ID_EQUALS.select(FLAGS);
+                                const INVALID_END = comptime INVALID_ID_AFTER.select();
+                                const INVALID_BEFORE = comptime INVALID_ID_BEFORE.select();
+                                const VALID = comptime ID_VALID.select(FLAGS);
                                 const first = FIRST(data, userdata);
                                 var right_i = first;
                                 var nn: COUNT_ = 0;
                                 while (nn < n) : (nn += 1) {
-                                    if (right_i == curr or !VALID_ID(data, right_i, userdata)) return ALWAYS_INVALID;
+                                    if (ID_EQ(data, right_i, curr, userdata) or !VALID(data, right_i, userdata)) return INVALID_END(data, userdata);
                                     right_i = NEXT(data, curr, userdata);
                                 }
                                 var left_i = first;
                                 var right_ii = NEXT(data, right_i, userdata);
                                 var left_ii = NEXT(data, first, userdata);
-                                while (right_ii != curr) {
+                                while (!ID_EQ(data, right_ii, curr, userdata)) {
                                     right_i = right_ii;
                                     right_ii = NEXT(data, right_i, userdata);
-                                    if (!VALID_ID(data, right_ii, userdata)) return ALWAYS_INVALID;
+                                    if (!VALID(data, right_ii, userdata)) return INVALID_BEFORE(data, userdata);
                                     left_i = left_ii;
                                     left_ii = NEXT(data, left_i, userdata);
                                 }
@@ -1532,7 +1796,7 @@ pub const DataManipulationPackage = struct {
                             }
                             fn select(comptime FLAGS_: FuncFlags) T_FN_NTH_PREV_ID {
                                 comptime {
-                                    if (FLAGS_.has(F.NTH_PREV_INDEX)) return func.NTH_PREV_ID.?;
+                                    if (func.NTH_PREV_ID) |f| return f;
                                     if (FLAGS_.has(INFER.NTH_PREV_IDX_FROM_PREV)) return infer_prev;
                                     if (FLAGS_.has(INFER.NTH_PREV_IDX_FROM_FIRST_NEXT)) return infer_first_next;
                                     return if (ALLOW_DEFAULT) default_nth_prev_idx else unusable;
@@ -1560,7 +1824,7 @@ pub const DataManipulationPackage = struct {
                             }
                             fn select(comptime FLAGS_: FuncFlags) T_FN_NTH_ID_FROM_START {
                                 comptime {
-                                    if (FLAGS_.has(F.NTH_INDEX_FROM_START)) return func.NTH_ID_FROM_START.?;
+                                    if (func.NTH_ID_FROM_START) |f| return f;
                                     if (FLAGS_.has(INFER.NTH_FROM_START_FROM_FIRST_NTH_NEXT)) return infer_first_nth_next;
                                     if (FLAGS_.has(INFER.NTH_FROM_START_FROM_FIRST_NEXT)) return infer_first_next;
                                     return if (ALLOW_DEFAULT) default_nth_index_from_start else unusable;
@@ -1588,7 +1852,7 @@ pub const DataManipulationPackage = struct {
                             }
                             fn select(comptime FLAGS_: FuncFlags) T_FN_NTH_ID_FROM_END {
                                 comptime {
-                                    if (FLAGS_.has(F.NTH_INDEX_FROM_END)) return func.NTH_ID_FROM_END.?;
+                                    if (func.NTH_ID_FROM_END) |f| return f;
                                     if (FLAGS_.has(INFER.NTH_FROM_END_FROM_LAST_NTH_PREV)) return infer_last_nth_prev;
                                     if (FLAGS_.has(INFER.NTH_FROM_END_FROM_LAST_PREV)) return infer_last_prev;
                                     return if (ALLOW_DEFAULT) default_nth_index_from_end else unusable;
@@ -1606,13 +1870,15 @@ pub const DataManipulationPackage = struct {
                                 const FIRST = comptime FIRST_ID.select(FLAGS);
                                 const LAST = comptime LAST_ID.select(FLAGS);
                                 const NEXT = comptime NEXT_ID.select(FLAGS);
-
+                                const VALID = comptime ID_VALID.select(FLAGS);
+                                const ID_EQ = comptime ID_EQUALS.select(FLAGS);
                                 var i = FIRST(data, userdata);
                                 const last = LAST(data, userdata);
-                                if (!VALID_ID(data, i, userdata) or !VALID_ID(data, last, userdata)) return 0;
+                                if (!VALID(data, i, userdata) or !VALID(data, last, userdata)) return 0;
                                 var n: COUNT_ = 1;
-                                while (i != last) : (n += 1) {
+                                while (!ID_EQ(data, i, last, userdata)) {
                                     i = NEXT(data, i, userdata);
+                                    n += 1;
                                 }
                                 return n;
                             }
@@ -1620,12 +1886,15 @@ pub const DataManipulationPackage = struct {
                                 const FIRST = comptime FIRST_ID.select(FLAGS);
                                 const LAST = comptime LAST_ID.select(FLAGS);
                                 const PREV = comptime PREV_ID.select(FLAGS);
+                                const VALID = comptime ID_VALID.select(FLAGS);
+                                const ID_EQ = comptime ID_EQUALS.select(FLAGS);
                                 var i = LAST(data, userdata);
                                 const first = FIRST(data, userdata);
-                                if (!VALID_ID(data, i, userdata) or !VALID_ID(data, first, userdata)) return 0;
+                                if (!VALID(data, i, userdata) or !VALID(data, first, userdata)) return 0;
                                 var n: COUNT_ = 1;
-                                while (i != first) : (n += 1) {
+                                while (!ID_EQ(data, i, first, userdata)) {
                                     i = PREV(data, i, userdata);
+                                    n += 1;
                                 }
                                 return n;
                             }
@@ -1634,7 +1903,7 @@ pub const DataManipulationPackage = struct {
                             }
                             fn select(comptime FLAGS_: FuncFlags) T_FN_GET {
                                 comptime {
-                                    if (FLAGS_.has(F.GET_LEN)) return func.LEN.?;
+                                    if (func.GET_LEN) |f| return f;
                                     if (FLAGS_.has(INFER.LEN_FROM_FIRST_LAST_RANGE_LEN)) return infer_range_len;
                                     if (FLAGS_.has(INFER.LEN_FROM_FIRST_LAST_NEXT)) return infer_first_last_next;
                                     if (FLAGS_.has(INFER.LEN_FROM_FIRST_LAST_PREV)) return infer_first_last_prev;
@@ -1646,39 +1915,43 @@ pub const DataManipulationPackage = struct {
                             fn unusable(_: DATA_, _: USERDATA_) COUNT_ {
                                 assert_unreachable(@src(), "no `set_len` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
                             }
-                            fn select(comptime FLAGS_: FuncFlags) T_FN_SET_LEN {
+                            fn select() T_FN_SET_LEN {
                                 comptime {
-                                    if (FLAGS_.has(F.SET_LEN)) return func.SET_LEN.?;
+                                    if (func.SET_LEN) |f| return f;
                                     return if (ALLOW_DEFAULT) default_set_len else unusable;
                                 }
                             }
                         };
                         const RANGE_LEN = struct {
                             fn infer_next(data: DATA_, first: ID_, last: ID_, userdata: USERDATA_) COUNT_ {
+                                assert_valid_id(data, first, userdata, @src());
+                                assert_valid_id(data, last, userdata, @src());
                                 const NEXT = comptime NEXT_ID.select(FLAGS);
-                                assert_valid(data, first, userdata, @src());
-                                assert_valid(data, last, userdata, @src());
-                                const TRY_ID_LESS_OR_EQUAL = comptime ID_LESS_THAN_OR_EQUAL_ID.try_select(FLAGS);
-                                if (!TRY_ID_LESS_OR_EQUAL(data, first, last, userdata)) return 0;
+                                const ID_LESS_OR_EQUAL = comptime ID_LESS_THAN_OR_EQUAL.select(FLAGS);
+                                const VALID = comptime ID_VALID.select(FLAGS);
+                                const ID_EQ = comptime ID_EQUALS.select(FLAGS);
+                                if (!ID_LESS_OR_EQUAL(data, first, last, userdata)) return 0;
                                 var i = first;
                                 var n: COUNT_ = 1;
-                                while (i != last) {
-                                    if (!VALID_ID(data, i, userdata)) return 0;
+                                while (!ID_EQ(data, i, last, userdata)) {
+                                    if (!VALID(data, i, userdata)) return 0;
                                     i = NEXT(data, i, userdata);
                                     n += 1;
                                 }
                                 return n;
                             }
                             fn infer_prev(data: DATA_, first: ID_, last: ID_, userdata: USERDATA_) COUNT_ {
-                                assert_valid(data, first, userdata, @src());
-                                assert_valid(data, last, userdata, @src());
+                                assert_valid_id(data, first, userdata, @src());
+                                assert_valid_id(data, last, userdata, @src());
                                 const PREV = comptime PREV_ID.select(FLAGS);
-                                const TRY_ID_LESS_OR_EQUAL = comptime ID_LESS_THAN_OR_EQUAL_ID.try_select(FLAGS);
-                                if (!TRY_ID_LESS_OR_EQUAL(data, first, last, userdata)) return 0;
+                                const ID_LESS_OR_EQUAL = comptime ID_LESS_THAN_OR_EQUAL.select(FLAGS);
+                                const VALID = comptime ID_VALID.select(FLAGS);
+                                const ID_EQ = comptime ID_EQUALS.select(FLAGS);
+                                if (!ID_LESS_OR_EQUAL(data, first, last, userdata)) return 0;
                                 var i = last;
                                 var n: COUNT_ = 1;
-                                while (i != first) {
-                                    if (!VALID_ID(data, i, userdata)) return 0;
+                                while (!ID_EQ(data, i, first, userdata)) {
+                                    if (!VALID(data, i, userdata)) return 0;
                                     i = PREV(data, i, userdata);
                                     n += 1;
                                 }
@@ -1689,7 +1962,7 @@ pub const DataManipulationPackage = struct {
                             }
                             fn select(comptime FLAGS_: FuncFlags) T_FN_RANGE_LEN {
                                 comptime {
-                                    if (FLAGS_.has(F.RANGE_LEN)) return func.RANGE_LEN.?;
+                                    if (func.RANGE_LEN) |f| return f;
                                     if (FLAGS_.has(INFER.RANGE_LEN_FROM_NEXT)) return infer_next;
                                     if (FLAGS_.has(INFER.RANGE_LEN_FROM_PREV)) return infer_prev;
                                     return if (ALLOW_DEFAULT) default_range_len else unusable;
@@ -1698,20 +1971,21 @@ pub const DataManipulationPackage = struct {
                         };
                         const REVERSE_RANGE = struct {
                             fn infer_swap(data: DATA_, first: ID_, last: ID_, userdata: USERDATA_) DATA_ {
-                                assert_valid(data, first, userdata, @src());
-                                assert_valid(data, last, userdata, @src());
+                                assert_valid_id(data, first, userdata, @src());
+                                assert_valid_id(data, last, userdata, @src());
                                 const SWAP_ = comptime SWAP.select(FLAGS);
                                 const NEXT = comptime NEXT_ID.select(FLAGS);
                                 const PREV = comptime PREV_ID.select(FLAGS);
-                                const TRY_ID_LESS_OR_EQUAL = comptime ID_LESS_THAN_OR_EQUAL_ID.try_select(FLAGS);
-                                if (!TRY_ID_LESS_OR_EQUAL(data, first, last, userdata)) return 0;
+                                const ID_LESS_OR_EQUAL = comptime ID_LESS_THAN_OR_EQUAL.select(FLAGS);
+                                const ID_EQ = comptime ID_EQUALS.select(FLAGS);
+                                if (!ID_LESS_OR_EQUAL(data, first, last, userdata)) return 0;
                                 var new_data = data;
                                 var left = first;
                                 var right = last;
-                                while (first != last) {
+                                while (!ID_EQ(data, left, right, userdata)) {
                                     new_data = SWAP_(new_data, left, right, userdata);
                                     left = NEXT(data, left, userdata);
-                                    if (left == right) break;
+                                    if (ID_EQ(data, left, right, userdata)) break;
                                     right = PREV(new_data, right, userdata);
                                 }
                                 return new_data;
@@ -1721,7 +1995,7 @@ pub const DataManipulationPackage = struct {
                             }
                             fn select(comptime FLAGS_: FuncFlags) T_FN_REVERSE {
                                 comptime {
-                                    if (FLAGS_.has(F.REVERSE_RANGE)) return func.REVERSE_RANGE.?;
+                                    if (func.REVERSE_RANGE) |f| return f;
                                     if (FLAGS_.has_any(&.{ INFER.REVERSE_FROM_GET_SET, INFER.REVERSE_FROM_SWAP })) return infer_swap;
                                     return if (ALLOW_DEFAULT) default_reverse_range else unusable;
                                 }
@@ -1729,14 +2003,14 @@ pub const DataManipulationPackage = struct {
                         };
                         const ROTATE_RIGHT = struct {
                             fn infer_reverse(data: DATA_, first: ID_, last: ID_, count: COUNT_, userdata: USERDATA_) DATA_ {
-                                assert_valid(data, first, userdata, @src());
-                                assert_valid(data, last, userdata, @src());
+                                assert_valid_id(data, first, userdata, @src());
+                                assert_valid_id(data, last, userdata, @src());
                                 const REV = comptime REVERSE_RANGE.select(FLAGS);
                                 const NEXT = comptime NEXT_ID.select(FLAGS);
                                 const NTH_PREV = comptime NTH_PREV_ID.select(FLAGS);
-                                const TRY_ID_LESS_THAN_OR_EQUAL = comptime ID_LESS_THAN_OR_EQUAL_ID.try_select();
+                                const ID_LESS_OR_EQUAL = comptime ID_LESS_THAN_OR_EQUAL.select();
                                 const RANGE_LEN_ = comptime RANGE_LEN.select(FLAGS);
-                                if (!TRY_ID_LESS_THAN_OR_EQUAL(data, first, last, userdata)) return data;
+                                if (!ID_LESS_OR_EQUAL(data, first, last, userdata)) return data;
                                 var new_data = data;
                                 const len = RANGE_LEN_(data, first, last, userdata);
                                 const shift = count % len;
@@ -1753,7 +2027,7 @@ pub const DataManipulationPackage = struct {
                             }
                             fn select(comptime FLAGS_: FuncFlags) T_FN_ROTATE_RIGHT {
                                 comptime {
-                                    if (FLAGS_.has(F.ROTATE_RANGE_RIGHT)) return func.ROTATE_RANGE_RIGHT.?;
+                                    if (func.ROTATE_RANGE_RIGHT) |f| return f;
                                     if (FLAGS_.has_any(&.{ INFER.ROTATE_FROM_GET_SET, INFER.ROTATE_FROM_REVERSE, INFER.ROTATE_FROM_SWAP })) return infer_reverse;
                                     return if (ALLOW_DEFAULT) default_rotate_range_right else unusable;
                                 }
@@ -1761,14 +2035,14 @@ pub const DataManipulationPackage = struct {
                         };
                         const ROTATE_LEFT = struct {
                             fn infer_reverse(data: DATA_, first: ID_, last: ID_, count: COUNT_, userdata: USERDATA_) DATA_ {
-                                assert_valid(data, first, userdata, @src());
-                                assert_valid(data, last, userdata, @src());
+                                assert_valid_id(data, first, userdata, @src());
+                                assert_valid_id(data, last, userdata, @src());
                                 const REV = comptime REVERSE_RANGE.select(FLAGS);
                                 const NTH_NEXT = comptime NTH_NEXT_ID.select(FLAGS);
                                 const PREV = comptime PREV_ID.select(FLAGS);
-                                const TRY_ID_LESS_THAN_OR_EQUAL = comptime ID_LESS_THAN_OR_EQUAL_ID.try_select();
+                                const ID_LESS_OR_EQUAL = comptime ID_LESS_THAN_OR_EQUAL.select();
                                 const RANGE_LEN_ = comptime RANGE_LEN.select(FLAGS);
-                                if (!TRY_ID_LESS_THAN_OR_EQUAL(data, first, last, userdata)) return data;
+                                if (!ID_LESS_OR_EQUAL(data, first, last, userdata)) return data;
                                 var new_data = data;
                                 const len = RANGE_LEN_(data, first, last, userdata);
                                 const shift = count % len;
@@ -1785,7 +2059,7 @@ pub const DataManipulationPackage = struct {
                             }
                             fn select(comptime FLAGS_: FuncFlags) T_FN_ROTATE_RIGHT {
                                 comptime {
-                                    if (FLAGS_.has(F.ROTATE_RANGE_LEFT)) return func.ROTATE_RANGE_LEFT.?;
+                                    if (func.ROTATE_RANGE_LEFT) |f| return f;
                                     if (FLAGS_.has_any(&.{ INFER.ROTATE_FROM_GET_SET, INFER.ROTATE_FROM_REVERSE, INFER.ROTATE_FROM_SWAP })) return infer_reverse;
                                     return if (ALLOW_DEFAULT) default_rotate_range_right else unusable;
                                 }
@@ -1797,20 +2071,21 @@ pub const DataManipulationPackage = struct {
                                 return MOVE_BLOCK(data, old_id, old_id, new_id, userdata);
                             }
                             fn infer_get_set(data: DATA_, old_id: ID_, new_id: ID_, userdata: USERDATA_) DATA_ {
-                                assert_valid(data, old_id, userdata, @src());
-                                assert_valid(data, new_id, userdata, @src());
+                                assert_valid_id(data, old_id, userdata, @src());
+                                assert_valid_id(data, new_id, userdata, @src());
                                 const GET_ = comptime GET.select(FLAGS);
                                 const SET_ = comptime SET.select(FLAGS);
                                 const NEXT = comptime NEXT_ID.select(FLAGS);
                                 const PREV = comptime PREV_ID.select(FLAGS);
-                                const ID_LESS_THAN_OR_EQUAL = comptime ID_LESS_THAN_OR_EQUAL_ID.select();
+                                const ID_LESS_OR_EQUAL = comptime ID_LESS_THAN_OR_EQUAL.select(FLAGS);
+                                const ID_EQ = comptime ID_EQUALS.select(FLAGS);
                                 var new_data = data;
-                                if (old_id == new_id) return data;
-                                if (ID_LESS_THAN_OR_EQUAL(data, old_id, new_id, userdata)) {
+                                if (ID_EQ(data, old_id, new_id, userdata)) return data;
+                                if (ID_LESS_OR_EQUAL(data, old_id, new_id, userdata)) {
                                     const old_val = GET_(data, old_id, userdata);
                                     var i = old_id;
                                     var ii = i;
-                                    while (i != new_id) {
+                                    while (!ID_EQ(data, i, new_id, userdata)) {
                                         i = NEXT(data, i, userdata);
                                         const val_to_move = GET_(new_data, i, userdata);
                                         new_data = SET_(new_data, ii, val_to_move, userdata);
@@ -1821,7 +2096,7 @@ pub const DataManipulationPackage = struct {
                                     const old_val = GET_(data, old_id, userdata);
                                     var i = old_id;
                                     var ii = i;
-                                    while (i != new_id) {
+                                    while (!ID_EQ(data, i, new_id, userdata)) {
                                         i = PREV(data, i, userdata);
                                         const val_to_move = GET_(new_data, i, userdata);
                                         new_data = SET_(new_data, ii, val_to_move, userdata);
@@ -1832,14 +2107,15 @@ pub const DataManipulationPackage = struct {
                                 return new_data;
                             }
                             fn infer_rotate(data: DATA_, old_id: ID_, new_id: ID_, userdata: USERDATA_) DATA_ {
-                                assert_valid(data, old_id, userdata, @src());
-                                assert_valid(data, new_id, userdata, @src());
+                                assert_valid_id(data, old_id, userdata, @src());
+                                assert_valid_id(data, new_id, userdata, @src());
                                 const ROT_L = comptime ROTATE_LEFT.select(FLAGS);
                                 const ROT_R = comptime ROTATE_RIGHT.select(FLAGS);
-                                const ID_LESS_THAN_OR_EQUAL = comptime ID_LESS_THAN_OR_EQUAL_ID.select();
+                                const ID_LESS_OR_EQUAL = comptime ID_LESS_THAN_OR_EQUAL.select(FLAGS);
+                                const ID_EQ = comptime ID_EQUALS.select(FLAGS);
                                 var new_data = data;
-                                if (old_id == new_id) return data;
-                                if (ID_LESS_THAN_OR_EQUAL(data, old_id, new_id, userdata)) {
+                                if (ID_EQ(data, old_id, new_id, userdata)) return data;
+                                if (ID_LESS_OR_EQUAL(data, old_id, new_id, userdata)) {
                                     new_data = ROT_L(data, old_id, new_id, 1, userdata);
                                 } else {
                                     new_data = ROT_R(data, new_id, old_id, 1, userdata);
@@ -1861,21 +2137,22 @@ pub const DataManipulationPackage = struct {
                         };
                         const MOVE_BLOCK_PRESERVE = struct {
                             fn infer_rotate(data: DATA_, first_old_id: ID_, last_old_id: ID_, new_first_id: ID_, userdata: USERDATA_) DATA_ {
-                                assert_valid(data, first_old_id, userdata, @src());
-                                assert_valid(data, last_old_id, userdata, @src());
-                                assert_valid(data, new_first_id, userdata, @src());
+                                assert_valid_id(data, first_old_id, userdata, @src());
+                                assert_valid_id(data, last_old_id, userdata, @src());
+                                assert_valid_id(data, new_first_id, userdata, @src());
                                 const ROT_L = comptime ROTATE_LEFT.select(FLAGS);
                                 const ROT_R = comptime ROTATE_RIGHT.select(FLAGS);
                                 const RANGE_LEN_ = comptime RANGE_LEN.select(FLAGS);
                                 const NTH_NEXT = comptime NTH_NEXT_ID.select(FLAGS);
-                                const ID_LESS_THAN_OR_EQUAL = comptime ID_LESS_THAN_OR_EQUAL_ID.select();
-                                assert_with_reason(ID_LESS_THAN_OR_EQUAL(data, first_old_id, last_old_id, userdata), @src(), "first id must be <= last id (by data order), got `{any}` > `{any}`", .{ first_old_id, last_old_id });
+                                const ID_LESS_OR_EQUAL = comptime ID_LESS_THAN_OR_EQUAL.select(FLAGS);
+                                const ID_EQ = comptime ID_EQUALS.select(FLAGS);
+                                assert_with_reason(ID_LESS_OR_EQUAL(data, first_old_id, last_old_id, userdata), @src(), "first id must be <= last id (by data order), got `{any}` > `{any}`", .{ first_old_id, last_old_id });
                                 var new_data = data;
-                                if (first_old_id == new_first_id) return data;
+                                if (ID_EQ(data, first_old_id, new_first_id, userdata)) return data;
                                 const block_len = RANGE_LEN_(data, first_old_id, last_old_id, userdata);
-                                if (ID_LESS_THAN_OR_EQUAL(data, first_old_id, new_first_id, userdata)) {
+                                if (ID_LESS_OR_EQUAL(data, first_old_id, new_first_id, userdata)) {
                                     const new_last_id = NTH_NEXT(data, new_first_id, block_len - 1, userdata);
-                                    assert_valid(data, new_last_id, userdata, @src());
+                                    assert_valid_id(data, new_last_id, userdata, @src());
                                     const delta = RANGE_LEN_(data, first_old_id, new_first_id, userdata) - 1;
                                     new_data = ROT_L(data, first_old_id, new_last_id, delta, userdata);
                                 } else {
@@ -1900,6 +2177,14 @@ pub const DataManipulationPackage = struct {
                     // SELECT THE CORRECT FUNCTION FOR EACH
                     //********
                     var FINAL_FUNCS: DEF_WITH_FUNCS = DEF_WITH_FUNCS{
+                        .ID_EQUALS = PROTO.ID_EQUALS.select(FLAGS),
+                        .ID_LESS_THAN = PROTO.ID_LESS_THAN.select(FLAGS),
+                        .ID_LESS_THAN_OR_EQUAL = PROTO.ID_LESS_THAN_OR_EQUAL.select(FLAGS),
+                        .ID_GREATER_THAN = PROTO.ID_GREATER_THAN.select(FLAGS),
+                        .ID_GREATER_THAN_OR_EQUAL = PROTO.ID_GREATER_THAN_OR_EQUAL.select(FLAGS),
+                        .ID_VALID = PROTO.ID_VALID,
+                        .ID_INVALID_AFTER = PROTO.INVALID_ID_AFTER.select(),
+                        .ID_INVALID_BEFORE = PROTO.INVALID_ID_BEFORE.select(),
                         .FIRST_ID = PROTO.FIRST_ID.select(FLAGS),
                         .LAST_ID = PROTO.LAST_ID.select(FLAGS),
                         .NTH_ID_FROM_START = PROTO.NTH_FROM_START.select(FLAGS),
@@ -1911,7 +2196,6 @@ pub const DataManipulationPackage = struct {
                         .GET_LEN = PROTO.GET_LEN.select(FLAGS),
                         .SET_LEN = PROTO.SET_LEN.select(FLAGS),
                         .RANGE_LEN = PROTO.RANGE_LEN.select(FLAGS),
-                        .VALID_ID = PROTO.VALID_ID,
                         .GET = PROTO.GET.select(FLAGS),
                         .GET_PTR = PROTO.GET_PTR.select(FLAGS),
                         .GET_CONST_PTR = PROTO.GET_CONST_PTR.select(FLAGS),
@@ -2012,7 +2296,7 @@ pub const DataManipulationPackage = struct {
                         };
                         @field(FINAL_FUNCS.SET_FIELD, field_name) = P_F_SET.select(@field(FIELD_FLAGS, field_name));
                     }
-                    return FINAL_FUNCS.Finalize();
+                    return FINAL_FUNCS;
                 }
             }
             pub fn Finalize(comptime FUNCS: DEF_WITH_FUNCS) type {
@@ -2034,9 +2318,14 @@ pub const DataManipulationPackage = struct {
                     pub const set_field = FUNCS.SET_FIELD;
                     pub const get_len: fn (DATA, USERDATA) COUNT = FUNCS.GET_LEN;
                     pub const set_len: fn (DATA, new_len: COUNT, USERDATA) DATA = FUNCS.SET_LEN;
-                    pub const id_valid: fn (DATA, ID, USERDATA) bool = FUNCS.VALID_ID;
-                    pub const id_less_than_id: fn (DATA, a: ID, b: ID, USERDATA) bool = FUNCS.ID_LESS_THAN_ID;
-                    pub const id_less_than_or_equal_id: fn (DATA, a: ID, b: ID, USERDATA) bool = FUNCS.ID_LESS_THAN_OR_EQUAL_ID;
+                    pub const id_valid: fn (DATA, ID, USERDATA) bool = FUNCS.ID_VALID;
+                    pub const id_invalid_after: fn (DATA, USERDATA) ID = FUNCS.ID_INVALID_AFTER;
+                    pub const id_invalid_before: fn (DATA, USERDATA) ID = FUNCS.ID_INVALID_BEFORE;
+                    pub const id_less_than: fn (DATA, a: ID, b: ID, USERDATA) bool = FUNCS.ID_LESS_THAN;
+                    pub const id_less_than_or_equal: fn (DATA, a: ID, b: ID, USERDATA) bool = FUNCS.ID_LESS_THAN_OR_EQUAL;
+                    pub const id_greater_than: fn (DATA, a: ID, b: ID, USERDATA) bool = FUNCS.ID_GREATER_THAN;
+                    pub const id_greater_than_or_equal: fn (DATA, a: ID, b: ID, USERDATA) bool = FUNCS.ID_GREATER_THAN_OR_EQUAL;
+                    pub const id_equals: fn (DATA, a: ID, b: ID, USERDATA) bool = FUNCS.ID_EQUALS;
                     pub const first_id: fn (DATA, USERDATA) ID = FUNCS.FIRST_ID;
                     pub const last_id: fn (DATA, USERDATA) ID = FUNCS.LAST_ID;
                     pub const nth_id_from_start: fn (DATA, n: COUNT, USERDATA) ID = FUNCS.NTH_ID_FROM_START;
@@ -2054,14 +2343,14 @@ pub const DataManipulationPackage = struct {
                     pub const order_equals: fn (a: ELEM, b: ELEM, USERDATA) bool = FUNCS.ORDER_EQUALS;
                     pub const exact_equals: fn (a: ELEM, b: ELEM, USERDATA) bool = FUNCS.EXACT_EQUALS;
                     pub const reverse_range: fn (DATA, first: ID, last: ID, USERDATA) DATA = FUNCS.REVERSE_RANGE;
-                    pub const rotate_range_left: fn (DATA, first: ID, last: ID, COUNT, USERDATA) DATA = FUNCS.ROTATE_LEFT;
-                    pub const rotate_range_right: fn (DATA, first: ID, last: ID, COUNT, USERDATA) DATA = FUNCS.ROTATE_RIGHT;
+                    pub const rotate_range_left: fn (DATA, first: ID, last: ID, n: COUNT, USERDATA) DATA = FUNCS.ROTATE_LEFT;
+                    pub const rotate_range_right: fn (DATA, first: ID, last: ID, n: COUNT, USERDATA) DATA = FUNCS.ROTATE_RIGHT;
                     pub const move_one_displace_others: fn (DATA, old_id: ID, new_id: ID, USERDATA) DATA = FUNCS.MOVE_ONE_PRESERVE;
                     pub const move_range_displace_others: fn (DATA, old_first: ID, old_last: ID, new_first: ID, USERDATA) DATA = FUNCS.MOVE_BLOCK_PRESERVE;
                     pub const scramble: fn (DATA, rand: Random, first: ID, last: ID, iterations: COUNT, USERDATA) DATA = FUNCS.SCRAMBLE;
 
-                    pub fn start_end_excl_len(data: DATA, start: ID, end_excl: ID, userdata: USERDATA) COUNT {
-                        return range_len(data, start, prev_id(data, end_excl, userdata), userdata);
+                    pub fn limit_len(data: DATA, start: ID, limit: ID, userdata: USERDATA) COUNT {
+                        return range_len(data, start, prev_id(data, limit, userdata), userdata);
                     }
 
                     pub fn swap_already_have_b(data: DATA, id_a: ID, id_b: ID, val_b: ELEM, userdata: USERDATA) DATA {
@@ -2069,50 +2358,67 @@ pub const DataManipulationPackage = struct {
                         return set(new_data, id_a, val_b, userdata);
                     }
 
+                    pub fn less_than_by_id(data: DATA, id_a: ID, id_b: ID, userdata: USERDATA) bool {
+                        const val_a = get(data, id_a, userdata);
+                        const val_b = get(data, id_b, userdata);
+                        return less_than(val_a, val_b, userdata);
+                    }
+                    pub fn less_than_or_equal_by_id(data: DATA, id_a: ID, id_b: ID, userdata: USERDATA) bool {
+                        const val_a = get(data, id_a, userdata);
+                        const val_b = get(data, id_b, userdata);
+                        return less_than_or_equal(val_a, val_b, userdata);
+                    }
+                    pub fn greater_than_by_id(data: DATA, id_a: ID, id_b: ID, userdata: USERDATA) bool {
+                        const val_a = get(data, id_a, userdata);
+                        const val_b = get(data, id_b, userdata);
+                        return greater_than(val_a, val_b, userdata);
+                    }
+                    pub fn greater_than_or_equal_by_id(data: DATA, id_a: ID, id_b: ID, userdata: USERDATA) bool {
+                        const val_a = get(data, id_a, userdata);
+                        const val_b = get(data, id_b, userdata);
+                        return greater_than_or_equal(val_a, val_b, userdata);
+                    }
+                    pub fn order_equals_by_id(data: DATA, id_a: ID, id_b: ID, userdata: USERDATA) bool {
+                        const val_a = get(data, id_a, userdata);
+                        const val_b = get(data, id_b, userdata);
+                        return order_equals(val_a, val_b, userdata);
+                    }
+                    pub fn exact_equals_by_id(data: DATA, id_a: ID, id_b: ID, userdata: USERDATA) bool {
+                        const val_a = get(data, id_a, userdata);
+                        const val_b = get(data, id_b, userdata);
+                        return exact_equals(val_a, val_b, userdata);
+                    }
+
+                    pub fn assert_id_less_than_id(data: DATA, id_a: ID, id_b: ID, userdata: USERDATA, comptime src: SourceLocation) void {
+                        assert_with_reason(id_less_than(data, id_a, id_b, userdata), src, "id_a `{any}` is not less than id_b `{any}`", .{ id_a, id_b });
+                    }
+                    pub fn assert_id_less_than_or_equal_id(data: DATA, id_a: ID, id_b: ID, userdata: USERDATA, comptime src: SourceLocation) void {
+                        assert_with_reason(id_less_than_or_equal(data, id_a, id_b, userdata), src, "id_a `{any}` is not less or equal to than id_b `{any}`", .{ id_a, id_b });
+                    }
+                    pub fn assert_id_valid(data: DATA, id: ID, userdata: USERDATA, comptime src: SourceLocation) void {
+                        assert_with_reason(id_valid(data, id, userdata), src, "id `{any}` is not valid for the data structure state (first = `{any}`, last = `{any}`, len = `{d}`)", .{ id, first_id(data, userdata), last_id(data, userdata), get_len(data, userdata) });
+                    }
+                    pub fn assert_valid_range(data: DATA, first: ID, last: ID, userdata: USERDATA, comptime src: SourceLocation) void {
+                        assert_id_valid(data, first, userdata, src);
+                        assert_id_valid(data, last, userdata, src);
+                        assert_id_less_than_or_equal_id(data, first, last, userdata, src);
+                    }
+                    pub fn assert_valid_range_3(data: DATA, first: ID, mid: ID, last: ID, userdata: USERDATA, comptime src: SourceLocation) void {
+                        assert_id_valid(data, first, userdata, src);
+                        assert_id_valid(data, mid, userdata, src);
+                        assert_id_valid(data, last, userdata, src);
+                        assert_id_less_than_or_equal_id(data, first, last, userdata, src);
+                        assert_id_less_than_or_equal_id(data, first, mid, userdata, src);
+                        assert_id_less_than_or_equal_id(data, mid, last, userdata, src);
+                    }
+
                     pub const USERDATA_UNINIT = if (USERDATA == void) void{} else undefined;
 
-                    pub const QuicksortSettings = struct {
-                        /// `33` (32 + 1) = max input len of 2^32 items,
-                        /// if you really need more than this you can increase it, each
-                        /// additional 1 added doubles the max input len (`34` (33 + 1) = 2^33 max)
-                        QUICKSORT_MAX_STACK: u8 = 33,
-                        /// Signals to use a different partitioning scheme depending on whether you
-                        /// expect the data to have many items with equal order,
-                        /// or whether it is rare or impossible to occur
-                        SAME_ORDER_EXPECTATIONS: ManySameOrderExpectation = .MANY_ITEMS_WITH_SAME_ORDER_RARE_OR_IMPOSSIBLE,
-                        /// The max size of a partition (sub-slice) to use quicksort.
-                        /// Under this length, partitions will intead use insertion sort
-                        QUICKSORT_TO_INSERTION_THRESHOLD: comptime_int = 24,
-                        /// If the quicksort partition depth exceeds `DEGENERATE_DETECTION_FACTOR * log2(input_len)`,
-                        /// it likely has a degenerate state (approaching worst case scenario).
-                        /// Switch to insertion sort (small total input) or heapsort instead,
-                        ///
-                        /// If the total input len is <= `FALLBACK_WHEN_DEGENERATE_INSERTION_SORT_MAX_INPUT_LEN` (default 128)
-                        /// it falls back to insertion sort (lower overhead than heapsort, especially when quicksort has already
-                        /// partially sorted the data to some degree)
-                        ///
-                        /// Otherwise, fallback to heapsort
-                        FALLBACK_WHEN_DEGENERATE: bool = true,
-                        /// When degenerate fallback is enable, this value controls how degenerate
-                        /// the input needs to be before the fallback is triggered:
-                        ///
-                        /// ```zig
-                        /// const MAX_PARTITION_DEPTH = DEGENERATE_DETECTION_FACTOR * log2(input_len);
-                        /// ```
-                        DEGENERATE_DETECTION_FACTOR: comptime_int = 2,
-                        /// When the quicksort depth is more than twice the expected average depth (`DEGENERATE_DETECTION_FACTOR * log2(input_len)`),
-                        /// if the total input len is less than this value it will
-                        /// fallback to insertion sort on the entire input
-                        /// (already partially sorted, lower overhead than heapsort for small lists)
-                        ///
-                        /// Otherwise fallback to heapsort.
-                        FALLBACK_WHEN_DEGENERATE_INSERTION_SORT_MAX_INPUT_LEN: comptime_int = 128,
-                    };
                     //CHECKPOINT fix these for new API
-                    pub const SortInputs = if (HAS_USERDATA) struct {
+                    pub const SortInputs = struct {
                         data: DATA,
-                        start: IDX = 0,
-                        end_excluded: IDX,
+                        first: ID,
+                        last: ID,
                         userdata: USERDATA = USERDATA_UNINIT,
 
                         pub fn with_data(self: SortInputs, new_data: DATA) SortInputs {
@@ -2121,87 +2427,58 @@ pub const DataManipulationPackage = struct {
                             return new_self;
                         }
 
-                        pub fn sub_slice(self: SortInputs, new_data: DATA, start: IDX, end_excluded: IDX) SortInputs {
+                        pub fn sub_slice(self: SortInputs, new_data: DATA, first: COUNT, last: COUNT) SortInputs {
                             return SortInputs{
                                 .data = new_data,
-                                .start = start,
-                                .end_excluded = end_excluded,
+                                .first = first,
+                                .last = last,
                                 .userdata = self.userdata,
                             };
                         }
                     };
-
-                    pub const SortInputsRelative = struct {
+                    pub const HeapifiyInputs = struct {
                         data: DATA,
-                        root: IDX = 0,
-                        rel_start: IDX = 0,
-                        rel_end_excluded: IDX,
-                        userdata: USERDATA = USERDATA_UNINIT,
-
-                        pub fn rel_to_true(self: SortInputsRelative, comptime USE_RELATIVE: bool, rel_idx: IDX) IDX {
-                            switch (comptime USE_RELATIVE) {
-                                true => return rel_idx + self.root,
-                                false => return rel_idx,
-                            }
-                        }
-                        pub fn true_to_rel(self: SortInputsRelative, comptime USE_RELATIVE: bool, true_idx: IDX) IDX {
-                            switch (comptime USE_RELATIVE) {
-                                true => return true_idx - self.root,
-                                false => return true_idx,
-                            }
-                        }
-                    };
-
-                    pub const SortPartition = struct {
-                        data: DATA,
-                        lo_idx: IDX,
-                        hi_idx: IDX,
+                        id: ID,
                         userdata: USERDATA = USERDATA_UNINIT,
                     };
 
-                    pub const SortSubHeap = struct {
-                        data: DATA,
-                        root_idx: IDX,
-                        len_from_root: IDX,
-                        userdata: USERDATA = USERDATA_UNINIT,
-                    };
+                    pub const IdElemPair = struct { COUNT, ELEM };
 
-                    pub const IndexElemPair = struct { IDX, ELEM };
-
-                    pub fn median_of_3(vals: [3]ELEM, idxs: [3]IDX, userdata: USERDATA) IndexElemPair {
-                        var idx = idxs;
-                        var tmp: IDX = undefined;
-                        if (less_than(vals[idx[1]], vals[idx[0]], userdata)) {
-                            tmp = idx[0];
-                            idx[0] = idx[1];
-                            idx[1] = tmp;
+                    pub fn median_of_3(data: DATA, ids_: [3]COUNT, userdata: USERDATA) IdElemPair {
+                        var ids = ids_;
+                        var tmp: COUNT = undefined;
+                        if (less_than_by_id(data, ids[1], ids[0], userdata)) {
+                            tmp = ids[0];
+                            ids[0] = ids[1];
+                            ids[1] = tmp;
                         }
-                        if (less_than(vals[idx[2]], vals[idx[0]], userdata)) {
-                            tmp = idx[0];
-                            idx[0] = idx[2];
-                            idx[2] = tmp;
+                        if (less_than_by_id(data, ids[2], ids[0], userdata)) {
+                            tmp = ids[0];
+                            ids[0] = ids[2];
+                            ids[2] = tmp;
                         }
-                        if (less_than(vals[idx[2]], vals[idx[1]], userdata)) {
-                            return .{ idx[2], vals[idx[2]] };
+                        if (less_than_by_id(data, ids[2], ids[1], userdata)) {
+                            return .{ ids[2], get(data, ids[2], userdata) };
                         }
-                        return .{ idx[1], vals[idx[1]] };
+                        return .{ ids[1], get(data, ids[1], userdata) };
                     }
 
-                    pub fn is_sorted(inputs: SortInputs) bool {
-                        if (inputs.end_excluded > inputs.start) {
-                            @branchHint(.likely);
-                            var idx_right = inputs.start + 1;
-                            var val_left: ELEM = get(inputs.data, inputs.start, inputs.userdata);
-                            var val_right: ELEM = undefined;
-                            while (idx_right < inputs.end_excluded) {
-                                @branchHint(.likely);
-                                val_right = get(inputs.data, idx_right, inputs.userdata);
-                                if (greater_than(val_left, val_right, inputs.userdata)) return false;
-                                val_left = val_right;
-                                idx_right += 1;
+                    pub fn is_sorted(in: SortInputs) bool {
+                        assert_valid_range(in.data, in.first, in.last, in.userdata, @src());
+                        if (id_equals(in.data, in.first, in.last, in.userdata)) return true;
+                        var next_id_to_check = next_id(in.data, in.first, in.userdata);
+                        var val_left: ELEM = get(in.data, in.start, in.userdata);
+                        var val_right: ELEM = undefined;
+                        while (true) {
+                            val_right = get(in.data, next_id_to_check, in.userdata);
+                            if (greater_than(val_left, val_right, in.userdata)) return false;
+                            if (id_equals(in.data, next_id_to_check, in.last, in.userdata)) {
+                                @branchHint(.unlikely);
+                                return true;
                             }
+                            val_left = val_right;
+                            next_id_to_check = next_id(in.data, next_id_to_check, in.userdata);
                         }
-                        return true;
                     }
 
                     /// Filters smaller ordered items down until they find an index where they would be
@@ -2228,45 +2505,55 @@ pub const DataManipulationPackage = struct {
                     /// Space:
                     ///   - O(1)
                     pub fn insertion_sort(in: SortInputs) DATA {
-                        var index_to_sort: IDX = in.start + 1;
-                        var idx_right: IDX = undefined;
-                        var idx_left: IDX = undefined;
-                        var value_to_sort: ELEM = undefined;
+                        assert_valid_range(in.data, in.first, in.last, in.userdata, @src());
+                        if (id_equals(in.data, in.first, in.last, in.userdata)) {
+                            @branchHint(.unlikely);
+                            return true;
+                        }
+                        var id_to_sort: COUNT = next_id(in.data, in.first, in.userdata);
+                        var id_right: COUNT = undefined;
+                        var id_left: COUNT = undefined;
+                        var val_to_sort: ELEM = undefined;
                         var data = in.data;
-                        while (index_to_sort < in.end_excluded) {
-                            @branchHint(.likely);
-                            value_to_sort = get(data, index_to_sort, in.userdata);
-                            idx_right = index_to_sort;
-                            inner: while (idx_right > in.start) {
-                                @branchHint(.likely);
-                                idx_left = idx_right - 1;
-                                const val_left = get(data, idx_left, in.userdata);
-                                if (greater_than(val_left, value_to_sort, in.userdata)) {
-                                    data = set(data, idx_right, val_left, in.userdata);
-                                    idx_right -= 1;
+                        while (true) {
+                            val_to_sort = get(data, id_to_sort, in.userdata);
+                            id_right = id_to_sort;
+                            inner: while (true) {
+                                id_left = prev_id(data, id_right, in.userdata);
+                                const val_left = get(data, id_left, in.userdata);
+                                if (greater_than(val_left, val_to_sort, in.userdata)) {
+                                    data = set(data, id_right, val_left, in.userdata);
+                                    id_right = id_left;
                                 } else {
                                     break :inner;
                                 }
+                                if (id_equals(data, id_left, in.first, in.userdata)) {
+                                    @branchHint(.unlikely);
+                                    break :inner;
+                                }
                             }
-                            data = set(data, idx_right, value_to_sort, in.userdata);
-                            index_to_sort += 1;
+                            data = set(data, id_right, val_to_sort, in.userdata);
+                            if (id_equals(data, id_to_sort, in.last, in.userdata)) {
+                                @branchHint(.unlikely);
+                                return data;
+                            }
+                            id_to_sort = next_id(data, id_to_sort, in.userdata);
                         }
-                        return data;
                     }
 
-                    fn assert_stack_can_support_sort_len(comptime SETTINGS: QuicksortSettings, start: IDX, end_excl: IDX, comptime src: SourceLocation) void {
-                        const data_len = end_excl - start;
-                        const needed_len: usize = @intCast(std.math.log2_int(IDX, data_len) + 2);
-                        assert_with_reason(SETTINGS.QUICKSORT_MAX_STACK >= needed_len, src, "the provided `.QUICKSORT_MAX_STACK` setting ({d}) is too small, need {d} for given the data len {d}", .{ SETTINGS.QUICKSORT_MAX_STACK, needed_len, data_len });
+                    fn assert_stack_can_support_sort_len(comptime SETTINGS: QuicksortSettings, in: SortInputs, comptime src: SourceLocation) void {
+                        const data_len = range_len(in.data, in.first, in.last, in.userdata);
+                        const needed_stack_len: u8 = @intCast(std.math.log2_int(COUNT, data_len) + 1);
+                        assert_with_reason(SETTINGS.QUICKSORT_MAX_STACK >= needed_stack_len, src, "the provided `.QUICKSORT_MAX_STACK` setting ({d}) is too small, need stack len {d} for given the data len {d}", .{ SETTINGS.QUICKSORT_MAX_STACK, needed_stack_len, data_len });
                     }
 
                     pub fn QuicksortPartition(comptime DEGENERATE_FALLBACK: bool) type {
                         return struct {
-                            lo_idx: IDX,
-                            hi_idx: IDX,
-                            budget: if (DEGENERATE_FALLBACK) IDX else void = if (DEGENERATE_FALLBACK) undefined else void{},
+                            lo_idx: COUNT,
+                            hi_idx: COUNT,
+                            budget: if (DEGENERATE_FALLBACK) COUNT else void = if (DEGENERATE_FALLBACK) undefined else void{},
 
-                            pub fn new(lo: IDX, hi: IDX, budget: IDX) @This() {
+                            pub fn new(lo: COUNT, hi: COUNT, budget: COUNT) @This() {
                                 var this = @This(){
                                     .lo_idx = lo,
                                     .hi_idx = hi,
@@ -2277,12 +2564,12 @@ pub const DataManipulationPackage = struct {
                                 return this;
                             }
 
-                            pub fn empty(self: @This()) bool {
-                                return self.lo_idx >= self.hi_idx;
+                            pub fn empty(self: @This(), data: DATA, userdata: USERDATA) bool {
+                                return !id_less_than_or_equal(data, self.lo_idx, self.hi_idx, userdata);
                             }
 
-                            pub fn len(self: @This()) IDX {
-                                return (self.hi_idx + 1) - self.lo_idx;
+                            pub fn len(self: @This(), data: DATA, userdata: USERDATA) COUNT {
+                                return range_len(data, self.lo_idx, self.hi_idx, userdata);
                             }
                         };
                     }
@@ -2318,17 +2605,16 @@ pub const DataManipulationPackage = struct {
                     /// Space:
                     ///   - O(log n) (implemented as a comptime-sized stack)
                     pub fn quicksort(in: SortInputs, comptime SETTINGS: QuicksortSettings) DATA {
+                        assert_valid_range(in.data, in.first, in.last, in.userdata, @src());
+                        if (in.first == in.last) return in.data;
+                        assert_stack_can_support_sort_len(SETTINGS, in, @src());
                         const Partition = QuicksortPartition(SETTINGS.FALLBACK_WHEN_DEGENERATE);
-                        if (in.end_excluded - in.start < 2) {
-                            @branchHint(.unlikely);
-                            return in.data;
-                        }
-                        const len = in.end_excluded - in.start;
-                        const degenerate_limit: IDX = if (comptime SETTINGS.FALLBACK_WHEN_DEGENERATE) @intCast(SETTINGS.DEGENERATE_DETECTION_FACTOR * math.log2_int(IDX, len)) else math.maxInt(IDX);
-                        assert_stack_can_support_sort_len(SETTINGS, in.start, in.end_excluded, @src());
+                        const len = range_len(in.data, in.first, in.last, in.userdata);
+                        const degenerate_limit: COUNT = if (comptime SETTINGS.FALLBACK_WHEN_DEGENERATE) (SETTINGS.DEGENERATE_DETECTION_FACTOR * @as(COUNT, @intCast(math.log2_int(COUNT, len)))) else math.maxInt(COUNT);
+                        assert_stack_can_support_sort_len(SETTINGS, in.first, in.last, @src());
                         var data = in.data;
                         var stack: [SETTINGS.QUICKSORT_MAX_STACK]Partition = undefined;
-                        stack[0] = Partition.new(in.start, in.end_excluded - 1, degenerate_limit);
+                        stack[0] = Partition.new(in.first, in.last, degenerate_limit);
                         var stack_len: u8 = 1;
                         next_partition: while (stack_len > 0) {
                             @branchHint(.likely);
@@ -2342,26 +2628,17 @@ pub const DataManipulationPackage = struct {
                                 }
                             }
                             assert_with_reason(!parent_partition.empty(), @src(), "it should be impossible to have an empty partition here", .{});
+                            const sub_slice = in.sub_slice(data, parent_partition.lo_idx, parent_partition.hi_idx);
                             if (parent_partition.len() <= SETTINGS.QUICKSORT_TO_INSERTION_THRESHOLD) {
-                                data = insertion_sort(in.sub_slice(data, parent_partition.lo_idx, parent_partition.hi_idx + 1));
+                                data = insertion_sort(sub_slice);
                                 continue :next_partition;
                             }
-                            data, const sub_partition = switch (SETTINGS.SAME_ORDER_EXPECTATIONS) {
-                                .MANY_ITEMS_WITH_SAME_ORDER_LIKELY, .USE_DUTCH_FLAG_3_WAY_PARTITION => quicksort_partition_dutch_flag(.{
-                                    .data = data,
-                                    .lo_idx = parent_partition.lo_idx,
-                                    .hi_idx = parent_partition.hi_idx,
-                                    .userdata = in.userdata,
-                                }),
-                                .MANY_ITEMS_WITH_SAME_ORDER_RARE_OR_IMPOSSIBLE, .USE_HOARE_2_WAY_PARTITION => quicksort_partition_hoare(.{
-                                    .data = data,
-                                    .lo_idx = parent_partition.lo_idx,
-                                    .hi_idx = parent_partition.hi_idx,
-                                    .userdata = in.userdata,
-                                }),
+                            data, const pivot = switch (SETTINGS.SAME_ORDER_EXPECTATIONS) {
+                                .MANY_ITEMS_WITH_SAME_ORDER_LIKELY, .USE_DUTCH_FLAG_3_WAY_PARTITION => quicksort_partition_dutch_flag(sub_slice),
+                                .MANY_ITEMS_WITH_SAME_ORDER_RARE_OR_IMPOSSIBLE, .USE_HOARE_2_WAY_PARTITION => quicksort_partition_hoare(sub_slice),
                             };
-                            const left_partition = Partition.new(parent_partition.lo_idx, sub_partition.sub_partition_left_hi, parent_partition.budget - 1);
-                            const right_partition = Partition.new(sub_partition.sub_partition_right_lo, parent_partition.hi_idx, parent_partition.budget - 1);
+                            const left_partition = Partition.new(parent_partition.lo_idx, pivot.sub_partition_left_hi, parent_partition.budget - 1);
+                            const right_partition = Partition.new(pivot.sub_partition_right_lo, parent_partition.hi_idx, parent_partition.budget - 1);
                             const left_len = left_partition.len();
                             const right_len = right_partition.len();
                             const left_empty: u8 = @intCast(@intFromBool(left_len == 0));
@@ -2388,162 +2665,162 @@ pub const DataManipulationPackage = struct {
                         return data;
                     }
 
-                    fn quicksort_partition_hoare(sub_slice: SortPartition) struct { DATA, PartitionResult } {
-                        const len = (sub_slice.hi_idx + 1) - sub_slice.lo_idx;
-                        const unsorted_idx = [3]IDX{ sub_slice.lo_idx, sub_slice.lo_idx + (len >> 1), sub_slice.hi_idx };
-                        const unsorted_vals = [3]ELEM{ get(sub_slice.data, unsorted_idx[0], sub_slice.userdata), get(sub_slice.data, unsorted_idx[1], sub_slice.userdata), get(sub_slice.data, unsorted_idx[2], sub_slice.userdata) };
-                        const median_idx, const pivot_item = median_of_3(unsorted_vals, unsorted_idx, sub_slice.userdata);
-                        var data = swap_already_have_b(sub_slice.data, sub_slice.lo_idx, median_idx, pivot_item, sub_slice.userdata);
-                        var left_idx = sub_slice.lo_idx;
-                        var right_idx = sub_slice.hi_idx;
+                    fn quicksort_partition_median_of_3(in: SortInputs) IdElemPair {
+                        const len = range_len(in.data, in.first, in.last, in.userdata);
+                        const mid = nth_next_id(in.data, in.first, (len >> 1), in.userdata);
+                        const unsorted_ids = [3]COUNT{ in.first, mid, in.last };
+                        return median_of_3(in.data, unsorted_ids, in.userdata);
+                    }
+
+                    fn quicksort_partition_hoare(in: SortInputs) struct { DATA, PartitionResult } {
+                        const median_idx, const pivot_item = quicksort_partition_median_of_3(in);
+                        var data = swap_already_have_b(in.data, in.first, median_idx, pivot_item, in.userdata);
+                        var left_id = in.first;
+                        var right_id = in.last;
                         var left_item: ELEM = undefined;
                         var right_item: ELEM = undefined;
                         while (true) {
-                            left_item = get(data, left_idx, sub_slice.userdata);
-                            while (less_than(left_item, pivot_item, sub_slice.userdata)) {
-                                left_idx += 1;
-                                left_item = get(data, left_idx, sub_slice.userdata);
+                            left_item = get(data, left_id, in.userdata);
+                            while (less_than(left_item, pivot_item, in.userdata)) {
+                                left_id = next_id(data, left_id, in.userdata);
+                                left_item = get(data, left_id, in.userdata);
                             }
-                            right_item = get(data, right_idx, sub_slice.userdata);
-                            while (greater_than(right_item, pivot_item, sub_slice.userdata)) {
-                                right_idx -|= 1;
-                                right_item = get(data, right_idx, sub_slice.userdata);
+                            right_item = get(data, right_id, in.userdata);
+                            while (greater_than(right_item, pivot_item, in.userdata)) {
+                                right_id = prev_id(data, right_id, in.userdata);
+                                right_item = get(data, right_id, in.userdata);
                             }
-                            if (left_idx >= right_idx) break;
-                            data = set(data, left_idx, right_item, sub_slice.userdata);
-                            data = set(data, right_idx, left_item, sub_slice.userdata);
-                            left_idx += 1;
-                            right_idx -|= 1;
+                            if (id_greater_than_or_equal(data, left_id, right_id, in.userdata)) break;
+                            data = set(data, left_id, right_item, in.userdata);
+                            data = set(data, right_id, left_item, in.userdata);
+                            left_id = next_id(data, left_id, in.userdata);
+                            right_id = prev_id(data, right_id, in.userdata);
                         }
                         return .{ data, PartitionResult{
-                            .sub_partition_left_hi = right_idx,
-                            .sub_partition_right_lo = right_idx + 1,
+                            .sub_partition_left_hi = right_id,
+                            .sub_partition_right_lo = next_id(data, right_id, in.userdata),
                         } };
                     }
 
-                    fn quicksort_partition_dutch_flag(sub_slice: SortPartition) struct { DATA, PartitionResult } {
-                        const len = (sub_slice.hi_idx + 1) - sub_slice.lo_idx;
-                        const unsorted_idx = [3]IDX{
-                            sub_slice.lo_idx,
-                            sub_slice.lo_idx + (len >> 1),
-                            sub_slice.hi_idx,
-                        };
-                        const unsorted_vals = [3]ELEM{
-                            get(sub_slice.data, unsorted_idx[0], sub_slice.userdata),
-                            get(sub_slice.data, unsorted_idx[1], sub_slice.userdata),
-                            get(sub_slice.data, unsorted_idx[2], sub_slice.userdata),
-                        };
-                        const median_idx, const pivot_item = median_of_3(unsorted_vals, unsorted_idx, sub_slice.userdata);
-                        var data = swap_already_have_b(sub_slice.data, sub_slice.lo_idx, median_idx, pivot_item, sub_slice.userdata);
-                        var smallest_idx_with_same_order_as_pivot = sub_slice.lo_idx;
-                        var check_idx = sub_slice.lo_idx;
-                        var largest_idx_with_same_order_as_pivot = sub_slice.hi_idx;
-
-                        while (check_idx < largest_idx_with_same_order_as_pivot) {
-                            const check_item = get(data, check_idx, sub_slice.userdata);
-                            if (less_than(check_item, pivot_item, sub_slice.userdata)) {
-                                data = swap_already_have_b(data, smallest_idx_with_same_order_as_pivot, check_idx, check_item, sub_slice.userdata);
-                                smallest_idx_with_same_order_as_pivot += 1;
-                                check_idx += 1;
-                            } else if (less_than(pivot_item, check_item, sub_slice.userdata)) {
-                                data = swap_already_have_b(data, largest_idx_with_same_order_as_pivot, check_idx, check_item, sub_slice.userdata);
-                                largest_idx_with_same_order_as_pivot -|= 1;
+                    fn quicksort_partition_dutch_flag(in: SortInputs) struct { DATA, PartitionResult } {
+                        const median_idx, const pivot_item = quicksort_partition_median_of_3(in);
+                        var data = swap_already_have_b(in.data, in.first, median_idx, pivot_item, in.userdata);
+                        var smallest_id_with_same_order_as_pivot = in.first;
+                        var check_id = in.first;
+                        var largest_id_with_same_order_as_pivot = in.last;
+                        while (id_less_than(data, check_id, largest_id_with_same_order_as_pivot, in.userdata)) {
+                            const check_item = get(data, check_id, in.userdata);
+                            if (less_than(check_item, pivot_item, in.userdata)) {
+                                data = swap_already_have_b(data, smallest_id_with_same_order_as_pivot, check_id, check_item, in.userdata);
+                                smallest_id_with_same_order_as_pivot = next_id(data, smallest_id_with_same_order_as_pivot, in.userdata);
+                                check_id = next_id(data, check_id, in.userdata);
+                            } else if (less_than(pivot_item, check_item, in.userdata)) {
+                                data = swap_already_have_b(data, largest_id_with_same_order_as_pivot, check_id, check_item, in.userdata);
+                                largest_id_with_same_order_as_pivot = prev_id(data, largest_id_with_same_order_as_pivot, in.userdata);
                             } else {
-                                check_idx += 1;
+                                check_id = next_id(data, check_id, in.userdata);
                             }
                         }
-
                         return .{ data, PartitionResult{
-                            .sub_partition_left_hi = smallest_idx_with_same_order_as_pivot -| 1,
-                            .sub_partition_right_lo = largest_idx_with_same_order_as_pivot + 1,
+                            .sub_partition_left_hi = prev_id(data, smallest_id_with_same_order_as_pivot, in.userdata),
+                            .sub_partition_right_lo = next_id(data, largest_id_with_same_order_as_pivot, in.userdata),
                         } };
                     }
 
-                    pub fn max_heapify_from_given_root(comptime USE_RELATIVE: bool, sub_heap: SortInputsRelative) DATA {
-                        var data = sub_heap.data;
-                        var target_idx = sub_heap.rel_start;
-                        var target_idx_true = if (USE_RELATIVE) sub_heap.rel_to_true(USE_RELATIVE, target_idx) else void{};
-                        const target_val = get(data, target_idx_true, sub_heap.userdata);
-                        const MAX_IDX = math.maxInt(IDX);
-                        const MAX_NO_CHILD_OVERFLOW = MAX_IDX >> 1;
+                    pub fn max_heap_sift_down_with_range(data: DATA, heap_first: ID, id: ID, heap_last: ID, userdata: USERDATA) DATA {
+                        return any_heap_sift_down_with_range(.MAX_HEAP, data, heap_first, id, heap_last, userdata);
+                    }
+                    fn any_heap_sift_down_with_range(comptime kind: HeapKind, data_: DATA, heap_first: ID, id: ID, heap_last: ID, userdata: USERDATA) DATA {
+                        assert_valid_range_3(data_, heap_first, id, heap_last, userdata, @src());
+                        const len = range_len(data_, heap_first, heap_last, userdata);
+                        var data = data_;
+                        var target_id = id;
+                        var target_id_len_from_start = limit_len(data, heap_first, target_id, userdata);
+                        const target_val = get(data, target_id, userdata);
+                        const max_len_no_left_child_overflow = math.maxInt(COUNT) >> 1;
                         while (true) {
-                            var largest_val_idx = target_idx;
-                            var largest_val_idx_true = target_idx_true;
-                            var largest_val = target_val;
-                            // Uses u1 bitwise math here to avoid a boolean short-circuit branch in machine code
-                            const left_child_idx_overflow = @intFromBool(target_idx > MAX_NO_CHILD_OVERFLOW);
-                            const left_child_idx = (target_idx << 1) | 1; // same as (idx * 2) + 1
-                            const left_child_oob_u1 = left_child_idx_overflow | @intFromBool(left_child_idx >= sub_heap.rel_end_excluded);
-                            const left_child_oob: bool = @bitCast(left_child_oob_u1);
-                            const right_child_idx_overflow = left_child_idx_overflow | @intFromBool(left_child_idx == MAX_IDX);
-                            const right_child_idx = left_child_idx +% 1;
-                            const right_child_oob_u1 = right_child_idx_overflow | @intFromBool(right_child_idx >= sub_heap.rel_end_excluded);
-                            const right_child_oob: bool = @bitCast(right_child_oob_u1);
-                            if (!left_child_oob) {
-                                const left_child_idx_true = if (USE_RELATIVE) sub_heap.rel_to_true(USE_RELATIVE, left_child_idx) else void{};
-                                const left_child_val = get(data, if (USE_RELATIVE) left_child_idx_true else left_child_idx, sub_heap.userdata);
-                                if (greater_than(left_child_val, target_val, sub_heap.userdata)) {
-                                    largest_val_idx = left_child_idx;
-                                    largest_val_idx_true = left_child_idx_true;
-                                    largest_val = left_child_val;
+                            var extreme_val_id = target_id;
+                            var extreme_val_len_from_start = target_id_len_from_start;
+                            var extreme_val = target_val;
+                            const left_child_len_from_start = (target_id_len_from_start << 1) | 1; // same as (target_id_len_from_start * 2) + 1
+                            if (target_id_len_from_start <= max_len_no_left_child_overflow and left_child_len_from_start < len) {
+                                const left_child_id = nth_next_id(data, heap_first, left_child_len_from_start, userdata);
+                                const left_child_val = get(data, left_child_id, userdata);
+                                switch (comptime kind) {
+                                    .MAX_HEAP => {
+                                        if (greater_than(left_child_val, target_val, userdata)) {
+                                            extreme_val_id = left_child_id;
+                                            extreme_val_len_from_start = left_child_len_from_start;
+                                            extreme_val = left_child_val;
+                                        }
+                                    },
+                                    .MIN_HEAP => {
+                                        if (less_than(left_child_val, target_val, userdata)) {
+                                            extreme_val_id = left_child_id;
+                                            extreme_val_len_from_start = left_child_len_from_start;
+                                            extreme_val = left_child_val;
+                                        }
+                                    },
+                                }
+                                const right_child_len_from_start = left_child_len_from_start +% 1;
+                                if (target_id_len_from_start < max_len_no_left_child_overflow and right_child_len_from_start < len) {
+                                    const right_child_id = next_id(data, left_child_id, userdata);
+                                    const right_child_val = get(data, right_child_id, userdata);
+                                    switch (comptime kind) {
+                                        .MAX_HEAP => {
+                                            if (greater_than(right_child_val, target_val, userdata)) {
+                                                extreme_val_id = right_child_id;
+                                                extreme_val_len_from_start = right_child_len_from_start;
+                                                extreme_val = right_child_val;
+                                            }
+                                        },
+                                        .MIN_HEAP => {
+                                            if (less_than(right_child_val, target_val, userdata)) {
+                                                extreme_val_id = right_child_id;
+                                                extreme_val_len_from_start = right_child_len_from_start;
+                                                extreme_val = right_child_val;
+                                            }
+                                        },
+                                    }
                                 }
                             }
-                            if (!right_child_oob) {
-                                const right_child_idx_true = if (USE_RELATIVE) sub_heap.rel_to_true(USE_RELATIVE, right_child_idx) else void{};
-                                const right_child_val = get(data, if (USE_RELATIVE) right_child_idx_true else right_child_idx, sub_heap.userdata);
-                                if (greater_than(right_child_val, target_val, sub_heap.userdata)) {
-                                    largest_val_idx = right_child_idx;
-                                    largest_val_idx_true = right_child_idx_true;
-                                    largest_val = right_child_val;
-                                }
-                            }
-                            if (largest_val_idx == target_idx) break; // target val in correct place
-                            // swap largest and target and update target idx
-                            data = set(data, if (USE_RELATIVE) largest_val_idx_true else largest_val_idx, target_val, sub_heap.userdata);
-                            data = set(data, if (USE_RELATIVE) target_idx_true else target_idx, largest_val, sub_heap.userdata);
-                            target_idx = largest_val_idx;
-                            target_idx_true = largest_val_idx_true;
+                            if (id_equals(data, extreme_val_id, target_id, userdata)) break; // target val in correct place
+                            // swap largest and target and update target id
+                            data = set(data, extreme_val_id, target_val, userdata);
+                            data = set(data, target_id, extreme_val, userdata);
+                            target_id = extreme_val_id;
+                            target_id_len_from_start = extreme_val_len_from_start;
                         }
                         return data;
                     }
 
-                    /// Uses Floyd's algorithm to turn a slice of data into a max heap in-place
-                    ///
-                    /// Note that if `inputs.start != 0`, THIS function handles it by performing math on
-                    /// indexes relative to `inputs.start` then adjusting any data `get` and `set`ops by
-                    /// adding `inputs.start` to get the correct values. The user must remember to
-                    /// either re-slice the data to start at index 0, or ALSO use relative indexes and
-                    /// adjust get and set ops for all heap operations afterward.
-                    pub fn build_max_heap(in: SortInputs) DATA {
-                        var data = in.data;
-                        const len = in.end_excluded - in.start;
-                        var non_leaf_idx = (len >> 1);
-                        if (in.start != 0) {
-                            // if the index range to turn into a max heap is not rooted at true 0,
-                            // we use relative values and adjust the index by `inputs.start`
-                            // within `max_heapify_from_given_root` for any `get` or `set`
-                            while (non_leaf_idx > 0) {
-                                non_leaf_idx -= 1;
-                                data = max_heapify_from_given_root(true, .{
-                                    .data = data,
-                                    .root = in.start,
-                                    .rel_start = non_leaf_idx,
-                                    .rel_end_excluded = len,
-                                    .userdata = in.userdata,
-                                });
-                            }
-                        } else {
-                            while (non_leaf_idx > 0) {
-                                non_leaf_idx -= 1;
-                                data = max_heapify_from_given_root(false, .{
-                                    .data = data,
-                                    .root = 0,
-                                    .rel_start = non_leaf_idx,
-                                    .rel_end_excluded = len,
-                                    .userdata = in.userdata,
-                                });
-                            }
+                    fn build_any_heap_within_range(comptime kind: HeapKind, old_data: DATA, first: ID, last: ID, userdata: USERDATA) DATA {
+                        var data = old_data;
+                        const len = range_len(data, first, last, userdata);
+                        var non_leaf_len_from_start = (len >> 1);
+                        while (non_leaf_len_from_start > 0) {
+                            non_leaf_len_from_start -= 1;
+                            const non_leaf_id = nth_id_from_start(data, non_leaf_len_from_start, userdata);
+                            data = any_heap_sift_down_with_range(kind, data, first, non_leaf_id, last, userdata);
                         }
+                        return data;
+                    }
+
+                    /// Uses Floyd's algorithm to turn a range of data into a max heap in-place
+                    pub fn build_max_heap_within_range(data: DATA, first: ID, last: ID, userdata: USERDATA) DATA {
+                        return build_any_heap_within_range(.MAX_HEAP, data, first, last, userdata);
+                    }
+                    /// Uses Floyd's algorithm to turn the data into a max heap in-place
+                    pub fn build_max_heap(data: DATA, userdata: USERDATA) DATA {
+                        return build_max_heap_within_range(data, first_id(data, userdata), last_id(data, userdata), userdata);
+                    }
+                    /// Uses Floyd's algorithm to turn a range of data into a min heap in-place
+                    pub fn build_min_heap_within_range(data: DATA, first: ID, last: ID, userdata: USERDATA) DATA {
+                        return build_any_heap_within_range(.MIN_HEAP, data, first, last, userdata);
+                    }
+                    /// Uses Floyd's algorithm to turn the data into a min heap in-place
+                    pub fn build_min_heap(data: DATA, userdata: USERDATA) DATA {
+                        return build_min_heap_within_range(data, first_id(data, userdata), last_id(data, userdata), userdata);
                     }
 
                     /// Builds a max-heap out of the given data range, then iteratively removes the max value
@@ -2566,42 +2843,21 @@ pub const DataManipulationPackage = struct {
                     ///
                     /// Space:
                     ///   - O(1)
-                    pub fn heapsort(inputs: SortInputs) DATA {
-                        var data = build_max_heap(inputs);
-
-                        var heap_end = inputs.end_excluded;
-                        const start_plus_one = inputs.start + 1;
-                        if (inputs.start != 0) {
-                            while (heap_end > start_plus_one) {
-                                heap_end -= 1;
-                                data = swap(data, heap_end, inputs.start, inputs.userdata);
-                                data = max_heapify_from_given_root(true, SortInputsRelative{
-                                    .data = data,
-                                    .root = inputs.start,
-                                    .rel_start = 0,
-                                    .rel_end_excluded = heap_end - inputs.start,
-                                    .userdata = inputs.userdata,
-                                });
-                            }
-                        } else {
-                            while (heap_end > start_plus_one) {
-                                heap_end -= 1;
-                                data = swap(data, heap_end, inputs.start, inputs.userdata);
-                                data = max_heapify_from_given_root(false, SortInputsRelative{
-                                    .data = data,
-                                    .root = 0,
-                                    .rel_start = 0,
-                                    .rel_end_excluded = heap_end,
-                                    .userdata = inputs.userdata,
-                                });
-                            }
+                    pub fn heapsort(data_: DATA, first: ID, last: ID, userdata: USERDATA) DATA {
+                        assert_valid_range(data_, first, last, userdata, @src());
+                        var data = build_max_heap_within_range(data_, first, last, userdata);
+                        var heap_end = last;
+                        while (!id_equals(data, heap_end, first, userdata)) {
+                            data = swap(data, heap_end, first, userdata);
+                            heap_end = prev_id(data, heap_end, userdata);
+                            data = max_heap_sift_down_with_range(data, first, first, heap_end, userdata);
                         }
                         return data;
                     }
 
                     const PartitionResult = struct {
-                        sub_partition_left_hi: IDX,
-                        sub_partition_right_lo: IDX,
+                        sub_partition_left_hi: COUNT,
+                        sub_partition_right_lo: COUNT,
                     };
                 };
             }
@@ -2610,7 +2866,7 @@ pub const DataManipulationPackage = struct {
 };
 
 test "Utils_DataManipulation => median_of_3_index" {
-    const IDX = [3]u8{ 0, 1, 2 };
+    const STATIC_IDS = [3]u8{ 0, 1, 2 };
     const Case = struct {
         input: [3]u8,
         med_idxs: []const u8,
@@ -2633,15 +2889,9 @@ test "Utils_DataManipulation => median_of_3_index" {
         Case.new(.{ 1, 1, 2 }, &.{ 0, 1 }),
         Case.new(.{ 1, 2, 2 }, &.{ 1, 2 }),
     };
-    const DMP_TYPES = DataManipulationPackage{
-        .DATA = [3]u8,
-        .ELEM = u8,
-        .COUNT_INT = u8,
-    };
-    const DMP_FUNCS = DMP_TYPES.CustomFunctions(){};
-    const DMP = DMP_FUNCS.Finalize();
+    const DMP = native_data_structure_manipulation_package([]u8, u8);
     next_case: for (cases) |case| {
-        const med_idx, const med_val = DMP.median_of_3(case.input, IDX, {});
+        const med_idx, const med_val = DMP.median_of_3(case.input[0..], STATIC_IDS, {});
         for (case.med_idxs) |valid_median_idx| {
             if (med_idx == valid_median_idx) {
                 if (med_val != case.input[med_idx]) return error.returned_val_isnt_the_one_at_that_index;
