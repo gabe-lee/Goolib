@@ -161,7 +161,7 @@ pub const QuicksortSettings = struct {
     /// Signals to use a different partitioning scheme depending on whether you
     /// expect the data to have many items with equal order,
     /// or whether it is rare or impossible to occur
-    SAME_ORDER_EXPECTATIONS: ManySameOrderExpectation = .MANY_ITEMS_WITH_SAME_ORDER_RARE_OR_IMPOSSIBLE,
+    SAME_ORDER_EXPECTATIONS: ManySameOrderExpectation = .DYNAMIC_BASED_ON_SAME_ORDER_DENSITY,
     /// The max size of a partition (sub-slice) to use quicksort.
     /// Under this length, partitions will intead use insertion sort
     QUICKSORT_TO_INSERTION_THRESHOLD: comptime_int = 24,
@@ -189,9 +189,25 @@ pub const QuicksortSettings = struct {
     ///
     /// Otherwise fallback to heapsort.
     FALLBACK_WHEN_DEGENERATE_INSERTION_SORT_MAX_INPUT_LEN: comptime_int = 128,
+    /// When using partition mode `.DYNAMIC_BASED_ON_SAME_ORDER_DENSITY`, this is
+    /// a percent threshold equal to `num_items_same_order_as_pivot / length_of_partition`,
+    /// above which a counter of `partitions_ith_many_dupes` is incremented.
+    ///
+    /// When that counter exceeds a threshold, the partition mode permanently swaps
+    /// to the 3-way scheme
+    DYNAMIC_PARTITION_SWAP_TO_3_WAY_THRESHOLD: f32 = 0.33,
+    /// When using partition mode `.DYNAMIC_BASED_ON_SAME_ORDER_DENSITY`, this is
+    /// the number of times a partion with a high number of items with
+    /// an equal order to the pivot are allowed before the partition mode
+    /// permanently swaps to the 3-way scheme
+    DYNAMIC_PARTITION_SWAP_TO_3_WAY_MAX_COUNT: comptime_int = 3,
 };
 
 pub const ManySameOrderExpectation = enum(u8) {
+    /// Starts with normal 2-way partition mode, but if
+    /// many items with the same order are detected
+    /// it swaps to the 3-way partition mode
+    DYNAMIC_BASED_ON_SAME_ORDER_DENSITY,
     /// Same as `.USE_DUTCH_FLAG_3_WAY_PARTITION`
     MANY_ITEMS_WITH_SAME_ORDER_LIKELY,
     /// Same as `.MANY_ITEMS_WITH_SAME_ORDER_LIKELY`
@@ -234,63 +250,6 @@ const FIELD_FUNCS_EXAMPLE =
     \\  }};
     \\}};
 ;
-
-pub const FieldTyper = fn (comptime field: []const u8) type;
-pub fn GetFn(comptime DATA_STRUCTURE: type, comptime IDX_TYPE: type, comptime ELEM_TYPE: type, comptime USERDATA_TYPE: type) type {
-    return fn (data: DATA_STRUCTURE, idx: IDX_TYPE, userdata: USERDATA_TYPE) ELEM_TYPE;
-}
-pub fn GetPtrFn(comptime DATA_STRUCTURE: type, comptime IDX_TYPE: type, comptime ELEM_TYPE: type, comptime USERDATA_TYPE: type) type {
-    return fn (data: DATA_STRUCTURE, idx: IDX_TYPE, userdata: USERDATA_TYPE) *ELEM_TYPE;
-}
-pub fn GetConstPtrFn(comptime DATA_STRUCTURE: type, comptime IDX_TYPE: type, comptime ELEM_TYPE: type, comptime USERDATA_TYPE: type) type {
-    return fn (data: DATA_STRUCTURE, idx: IDX_TYPE, userdata: USERDATA_TYPE) *const ELEM_TYPE;
-}
-pub fn GetFieldFn(comptime DATA_STRUCTURE: type, comptime IDX_TYPE: type, comptime FIELD_TYPE: type, comptime USERDATA_TYPE: type) type {
-    return fn (data: DATA_STRUCTURE, idx: IDX_TYPE, userdata: USERDATA_TYPE) FIELD_TYPE;
-}
-pub fn GetFieldPtrFn(comptime DATA_STRUCTURE: type, comptime IDX_TYPE: type, comptime FIELD_TYPE: type, comptime USERDATA_TYPE: type) type {
-    return fn (data: DATA_STRUCTURE, idx: IDX_TYPE, userdata: USERDATA_TYPE) *FIELD_TYPE;
-}
-pub fn SetFn(comptime DATA_STRUCTURE: type, comptime IDX_TYPE: type, comptime ELEM_TYPE: type, comptime USERDATA_TYPE: type) type {
-    return fn (data: DATA_STRUCTURE, idx: IDX_TYPE, val: ELEM_TYPE, userdata: USERDATA_TYPE) DATA_STRUCTURE;
-}
-pub fn SetFieldFn(comptime DATA_STRUCTURE: type, comptime IDX_TYPE: type, comptime FIELD_TYPE: type, comptime USERDATA_TYPE: type) type {
-    return fn (data: DATA_STRUCTURE, idx: IDX_TYPE, val: FIELD_TYPE, userdata: USERDATA_TYPE) DATA_STRUCTURE;
-}
-pub fn SwapFn(comptime DATA_STRUCTURE: type, comptime IDX_TYPE: type, comptime USERDATA_TYPE: type) type {
-    return fn (data: DATA_STRUCTURE, idx_a: IDX_TYPE, idx_b: IDX_TYPE, userdata: USERDATA_TYPE) DATA_STRUCTURE;
-}
-pub fn CompareFn(comptime TA: type, comptime TB: type, comptime USERDATA: type) type {
-    return fn (a: TA, b: TB, userdata: USERDATA) bool;
-}
-pub fn InnateCountFn(comptime DATA: type, comptime COUNT: type, comptime USERDATA: type) type {
-    return fn (data: DATA, userdata: USERDATA) COUNT;
-}
-pub fn InnateIndexFn(comptime DATA: type, comptime ID: type, comptime USERDATA: type) type {
-    return fn (data: DATA, userdata: USERDATA) ID;
-}
-pub fn InnateNthIndexFn(comptime DATA: type, comptime ID: type, comptime COUNT: type, comptime USERDATA: type) type {
-    return fn (data: DATA, n: COUNT, userdata: USERDATA) ID;
-}
-pub fn IndexFn(comptime DATA: type, comptime ID: type, comptime USERDATA: type) type {
-    return fn (data: DATA, n: ID, userdata: USERDATA) ID;
-}
-pub fn NthIndexFn(comptime DATA: type, comptime ID: type, comptime COUNT: type, comptime USERDATA: type) type {
-    return fn (data: DATA, idx: ID, n: COUNT, userdata: USERDATA) ID;
-}
-pub fn CountFn(comptime DATA: type, comptime ID: type, comptime COUNT: type, comptime USERDATA: type) type {
-    return fn (data: DATA, idx_a: ID, idx_b: ID, userdata: USERDATA) COUNT;
-}
-pub fn RangeOpFn(comptime DATA: type, comptime ID: type, comptime USERDATA: type) type {
-    return fn (data: DATA, idx_a: ID, idx_b: ID, userdata: USERDATA) DATA;
-}
-
-pub fn RangeOpExtraFn(comptime DATA: type, comptime ID: type, comptime USERDATA: type) type {
-    return fn (data: DATA, idx_a: ID, idx_b: ID, idx_c: ID, userdata: USERDATA) DATA;
-}
-pub fn IdValidateFn(comptime DATA: type, comptime ID: type, comptime USERDATA: type) type {
-    return fn (data: DATA, i: ID, userdata: USERDATA) bool;
-}
 
 const CUSTOM_FLAG = u64;
 const F = struct {
@@ -549,7 +508,7 @@ pub const DataManipulationPackage = struct {
     pub fn CoreAccessFuncs(comptime CORE_DEF: DataManipulationPackage) type {
         return struct {
             get_base_ptr: ?fn (data: CORE_DEF.DATA, userdata: CORE_DEF.USERDATA) [*]CORE_DEF.ELEM = null,
-            get_bast_ptr_const: ?fn (data: CORE_DEF.DATA, userdata: CORE_DEF.USERDATA) [*]const CORE_DEF.ELEM = null,
+            get_base_ptr_const: ?fn (data: CORE_DEF.DATA, userdata: CORE_DEF.USERDATA) [*]const CORE_DEF.ELEM = null,
             set_base_ptr: ?fn (data: CORE_DEF.DATA, ptr: [*]CORE_DEF.ELEM, userdata: CORE_DEF.USERDATA) CORE_DEF.DATA = null,
             get_len: ?fn (data: CORE_DEF.DATA, userdata: CORE_DEF.USERDATA) CORE_DEF.COUNT_INT = null,
             set_len: ?fn (data: CORE_DEF.DATA, len: CORE_DEF.COUNT_INT, userdata: CORE_DEF.USERDATA) CORE_DEF.DATA = null,
@@ -623,7 +582,7 @@ pub const DataManipulationPackage = struct {
                     } else {
                         unreachable;
                     }
-                } else if (comptime Types.type_is_slice(DATA_) and !KindInfo.get_kind_info(DATA_).POINTER.is_const) {
+                } else if (comptime Types.type_is_slice(DATA_)) {
                     return @ptrCast(data.ptr);
                 } else {
                     unreachable;
@@ -645,7 +604,7 @@ pub const DataManipulationPackage = struct {
                     } else {
                         unreachable;
                     }
-                } else if (comptime Types.type_is_slice(DATA_) and KindInfo.get_kind_info(DATA_).POINTER.is_const) {
+                } else if (comptime Types.type_is_slice(DATA_)) {
                     return @ptrCast(data.ptr);
                 } else {
                     unreachable;
@@ -722,8 +681,6 @@ pub const DataManipulationPackage = struct {
                 return new_data;
             }
 
-            const DEFAULT_ALWAYS_INVALID_ID: ID_ = if (Types.type_is_int(ID_)) math.maxInt(ID_) else if (Types.type_is_optional(ID_)) null else undefined;
-
             pub const FN_ID_COMPARE = fn (DATA_, ID_, ID_, USERDATA_) bool;
             pub const FN_ID_CHECK = fn (DATA_, ID_, USERDATA_) bool;
             pub const FN_ELEM_COMPARE = fn (ELEM_, ELEM_, USERDATA_) bool;
@@ -785,7 +742,6 @@ pub const DataManipulationPackage = struct {
 
             pub fn FunctionSelector(comptime CUSTOM: CustomDataFuncs, comptime FLAGS: FuncFlags, comptime ALLOW_DEFAULT: bool) type {
                 return struct {
-                    const ALWAYS_INVALID = if (CUSTOM.ALWAYS_INVALID_ID) |INVALID| INVALID else DEFAULT_ALWAYS_INVALID_ID;
                     const INVALID_ID_AFTER = struct {
                         const func: FN_IMPLICIT_ID = if (CUSTOM.INVALID_ID_AFTER) |cust| cust //
                             else if (ALLOW_DEFAULT) default else unusable;
@@ -1258,7 +1214,7 @@ pub const DataManipulationPackage = struct {
                             else if (FLAGS.has(INFER.LAST_ID.FROM_FIRST_LEN_NEXT)) infer_first_len_next //
                             else if (ALLOW_DEFAULT) default else unusable;
                         fn default(data: DATA_, userdata: USERDATA_) ID_ {
-                            return GET_LEN.default(data, userdata) - 1;
+                            return GET_LEN.default(data, userdata) -% 1;
                         }
                         fn infer_nth_last(data: DATA_, userdata: USERDATA_) ID_ {
                             const NTH_START = NTH_FROM_START.func;
@@ -2058,6 +2014,7 @@ pub const DataManipulationPackage = struct {
                     pub const scramble: fn (DATA, rand: Random, first: ID, last: ID, iterations: COUNT, USERDATA) DATA = FUNCS.SCRAMBLE;
 
                     pub fn limit_len(data: DATA, start: ID, limit: ID, userdata: USERDATA) COUNT {
+                        if (id_equals(data, start, limit, userdata)) return 0;
                         return range_len(data, start, prev_id(data, limit, userdata), userdata);
                     }
 
@@ -2170,21 +2127,25 @@ pub const DataManipulationPackage = struct {
                         return .{ ids[1], get(data, ids[1], userdata) };
                     }
 
-                    pub fn is_sorted(in: SortInputs) bool {
-                        assert_valid_range(in.data, in.first, in.last, in.userdata, @src());
-                        if (id_equals(in.data, in.first, in.last, in.userdata)) return true;
-                        var next_id_to_check = next_id(in.data, in.first, in.userdata);
-                        var val_left: ELEM = get(in.data, in.start, in.userdata);
+                    pub fn is_sorted(data: DATA, first: ID, last: ID, userdata: USERDATA) bool {
+                        if (get_len(data, userdata) == 0) {
+                            @branchHint(.unlikely);
+                            return true;
+                        }
+                        assert_valid_range(data, first, last, userdata, @src());
+                        if (id_equals(data, first, last, userdata)) return true;
+                        var next_id_to_check = next_id(data, first, userdata);
+                        var val_left: ELEM = get(data, first, userdata);
                         var val_right: ELEM = undefined;
                         while (true) {
-                            val_right = get(in.data, next_id_to_check, in.userdata);
-                            if (greater_than(val_left, val_right, in.userdata)) return false;
-                            if (id_equals(in.data, next_id_to_check, in.last, in.userdata)) {
+                            val_right = get(data, next_id_to_check, userdata);
+                            if (greater_than(val_left, val_right, userdata)) return false;
+                            if (id_equals(data, next_id_to_check, last, userdata)) {
                                 @branchHint(.unlikely);
                                 return true;
                             }
                             val_left = val_right;
-                            next_id_to_check = next_id(in.data, next_id_to_check, in.userdata);
+                            next_id_to_check = next_id(data, next_id_to_check, userdata);
                         }
                     }
 
@@ -2211,45 +2172,49 @@ pub const DataManipulationPackage = struct {
                     ///
                     /// Space:
                     ///   - O(1)
-                    pub fn insertion_sort(in: SortInputs) DATA {
-                        assert_valid_range(in.data, in.first, in.last, in.userdata, @src());
-                        if (id_equals(in.data, in.first, in.last, in.userdata)) {
+                    pub fn insertion_sort(data_: DATA, first: ID, last: ID, userdata: USERDATA) DATA {
+                        if (get_len(data_, userdata) == 0) {
                             @branchHint(.unlikely);
-                            return true;
+                            return data_;
                         }
-                        var id_to_sort: COUNT = next_id(in.data, in.first, in.userdata);
+                        assert_valid_range(data_, first, last, userdata, @src());
+                        if (id_equals(data_, first, last, userdata)) {
+                            @branchHint(.unlikely);
+                            return data_;
+                        }
+                        var id_to_sort: COUNT = next_id(data_, first, userdata);
                         var id_right: COUNT = undefined;
                         var id_left: COUNT = undefined;
                         var val_to_sort: ELEM = undefined;
-                        var data = in.data;
+                        var data = data_;
                         while (true) {
-                            val_to_sort = get(data, id_to_sort, in.userdata);
+                            val_to_sort = get(data, id_to_sort, userdata);
                             id_right = id_to_sort;
                             inner: while (true) {
-                                id_left = prev_id(data, id_right, in.userdata);
-                                const val_left = get(data, id_left, in.userdata);
-                                if (greater_than(val_left, val_to_sort, in.userdata)) {
-                                    data = set(data, id_right, val_left, in.userdata);
+                                id_left = prev_id(data, id_right, userdata);
+                                const val_left = get(data, id_left, userdata);
+                                if (greater_than(val_left, val_to_sort, userdata)) {
+                                    data = set(data, id_right, val_left, userdata);
                                     id_right = id_left;
                                 } else {
                                     break :inner;
                                 }
-                                if (id_equals(data, id_left, in.first, in.userdata)) {
+                                if (id_equals(data, id_left, first, userdata)) {
                                     @branchHint(.unlikely);
                                     break :inner;
                                 }
                             }
-                            data = set(data, id_right, val_to_sort, in.userdata);
-                            if (id_equals(data, id_to_sort, in.last, in.userdata)) {
+                            data = set(data, id_right, val_to_sort, userdata);
+                            if (id_equals(data, id_to_sort, last, userdata)) {
                                 @branchHint(.unlikely);
                                 return data;
                             }
-                            id_to_sort = next_id(data, id_to_sort, in.userdata);
+                            id_to_sort = next_id(data, id_to_sort, userdata);
                         }
                     }
 
-                    fn assert_stack_can_support_sort_len(comptime SETTINGS: QuicksortSettings, in: SortInputs, comptime src: SourceLocation) void {
-                        const data_len = range_len(in.data, in.first, in.last, in.userdata);
+                    fn assert_stack_can_support_sort_len(comptime SETTINGS: QuicksortSettings, data: DATA, first: ID, last: ID, userdata: USERDATA, comptime src: SourceLocation) void {
+                        const data_len = range_len(data, first, last, userdata);
                         const needed_stack_len: u8 = @intCast(std.math.log2_int(COUNT, data_len) + 1);
                         assert_with_reason(SETTINGS.QUICKSORT_MAX_STACK >= needed_stack_len, src, "the provided `.QUICKSORT_MAX_STACK` setting ({d}) is too small, need stack len {d} for given the data len {d}", .{ SETTINGS.QUICKSORT_MAX_STACK, needed_stack_len, data_len });
                     }
@@ -2284,10 +2249,11 @@ pub const DataManipulationPackage = struct {
                     /// Quicksort using a number of optimizations (similar to Introsort):
                     ///   - Use Insertion Sort when partitions become small
                     ///   - Median-of-three pivot (not random, always first, middle, last)
-                    ///   - Manually choose a partition scheme based on stated expectations about items with equal order
+                    ///   - User can choose a partition scheme based on stated expectations about items with equal order
+                    ///     - Unknown likelyhood of equal order items = Start with 2-way, but if many duplicates are detected change to 3-way
                     ///     - Many items same order unlikely = 2-way Hoare scheme
                     ///     - Many items same order likely = 3-way 'Dutch National Flag' scheme
-                    ///   - No rescursion, only a comptime sized stack of partition index ranges and a while loop
+                    ///   - No recursion, only a comptime sized stack of partition index ranges and a while loop
                     ///   - (Optional) Fallback to Heapsort/Insertion sort if partition degeneracy detected (more than N x the average partition depth)
                     ///
                     /// Stable:
@@ -2311,43 +2277,64 @@ pub const DataManipulationPackage = struct {
                     ///
                     /// Space:
                     ///   - O(log n) (implemented as a comptime-sized stack)
-                    pub fn quicksort(in: SortInputs, comptime SETTINGS: QuicksortSettings) DATA {
-                        assert_valid_range(in.data, in.first, in.last, in.userdata, @src());
-                        if (in.first == in.last) return in.data;
-                        assert_stack_can_support_sort_len(SETTINGS, in, @src());
+                    pub fn quicksort(data_: DATA, first: ID, last: ID, userdata: USERDATA, comptime SETTINGS: QuicksortSettings) DATA {
+                        if (get_len(data_, userdata) == 0) {
+                            @branchHint(.unlikely);
+                            return data_;
+                        }
+                        assert_valid_range(data_, first, last, userdata, @src());
+                        if (id_equals(data_, first, last, userdata)) return data_;
+                        assert_stack_can_support_sort_len(SETTINGS, data_, first, last, userdata, @src());
                         const Partition = QuicksortPartition(SETTINGS.FALLBACK_WHEN_DEGENERATE);
-                        const len = range_len(in.data, in.first, in.last, in.userdata);
+                        const len = range_len(data_, first, last, userdata);
                         const degenerate_limit: COUNT = if (comptime SETTINGS.FALLBACK_WHEN_DEGENERATE) (SETTINGS.DEGENERATE_DETECTION_FACTOR * @as(COUNT, @intCast(math.log2_int(COUNT, len)))) else math.maxInt(COUNT);
-                        assert_stack_can_support_sort_len(SETTINGS, in.first, in.last, @src());
-                        var data = in.data;
+                        var data = data_;
                         var stack: [SETTINGS.QUICKSORT_MAX_STACK]Partition = undefined;
-                        stack[0] = Partition.new(in.first, in.last, degenerate_limit);
+                        stack[0] = Partition.new(first, last, degenerate_limit);
                         var stack_len: u8 = 1;
+                        var force_3_way = if (SETTINGS.SAME_ORDER_EXPECTATIONS == .DYNAMIC_BASED_ON_SAME_ORDER_DENSITY) false else void{};
+                        var force_3_way_counter = if (SETTINGS.SAME_ORDER_EXPECTATIONS == .DYNAMIC_BASED_ON_SAME_ORDER_DENSITY) @as(COUNT, 0) else void{};
                         next_partition: while (stack_len > 0) {
                             @branchHint(.likely);
                             stack_len -= 1;
-                            const parent_partition = stack[stack_len];
-                            if (SETTINGS.FALLBACK_WHEN_DEGENERATE and parent_partition.budget <= 0) {
+                            const part = stack[stack_len];
+                            if (SETTINGS.FALLBACK_WHEN_DEGENERATE and part.budget <= 0) {
                                 if (len <= SETTINGS.FALLBACK_WHEN_DEGENERATE_INSERTION_SORT_MAX_INPUT_LEN) {
-                                    return insertion_sort(in.with_data(data));
+                                    return insertion_sort(data, first, last, userdata);
                                 } else {
-                                    return heapsort(in.with_data(data));
+                                    return heapsort(data, first, last, userdata);
                                 }
                             }
-                            assert_with_reason(!parent_partition.empty(), @src(), "it should be impossible to have an empty partition here", .{});
-                            const sub_slice = in.sub_slice(data, parent_partition.lo_idx, parent_partition.hi_idx);
-                            if (parent_partition.len() <= SETTINGS.QUICKSORT_TO_INSERTION_THRESHOLD) {
-                                data = insertion_sort(sub_slice);
+                            assert_with_reason(!part.empty(data, userdata), @src(), "it should be impossible to have an empty partition here", .{});
+                            if (part.len(data, userdata) <= SETTINGS.QUICKSORT_TO_INSERTION_THRESHOLD) {
+                                data = insertion_sort(data, part.lo_idx, part.hi_idx, userdata);
                                 continue :next_partition;
                             }
-                            data, const pivot = switch (SETTINGS.SAME_ORDER_EXPECTATIONS) {
-                                .MANY_ITEMS_WITH_SAME_ORDER_LIKELY, .USE_DUTCH_FLAG_3_WAY_PARTITION => quicksort_partition_dutch_flag(sub_slice),
-                                .MANY_ITEMS_WITH_SAME_ORDER_RARE_OR_IMPOSSIBLE, .USE_HOARE_2_WAY_PARTITION => quicksort_partition_hoare(sub_slice),
+                            data, const pivot = switch (comptime SETTINGS.SAME_ORDER_EXPECTATIONS) {
+                                .MANY_ITEMS_WITH_SAME_ORDER_LIKELY, .USE_DUTCH_FLAG_3_WAY_PARTITION => quicksort_partition_dutch_flag(data, part.lo_idx, part.hi_idx, userdata),
+                                .MANY_ITEMS_WITH_SAME_ORDER_RARE_OR_IMPOSSIBLE, .USE_HOARE_2_WAY_PARTITION => sort_partition_hoare(data, part.lo_idx, part.hi_idx, userdata, false),
+                                .DYNAMIC_BASED_ON_SAME_ORDER_DENSITY => blk: {
+                                    if (force_3_way) {
+                                        break :blk quicksort_partition_dutch_flag(data, part.lo_idx, part.hi_idx, userdata);
+                                    } else {
+                                        const res = sort_partition_hoare(data, part.lo_idx, part.hi_idx, userdata, true);
+                                        const parent_len_float: f32 = @floatFromInt(part.len(data, userdata));
+                                        const dupes_float: f32 = @floatFromInt(res.@"2");
+                                        const density = dupes_float / parent_len_float;
+                                        if (density >= SETTINGS.DYNAMIC_PARTITION_SWAP_TO_3_WAY_THRESHOLD) {
+                                            force_3_way_counter += 1;
+                                            if (force_3_way_counter > SETTINGS.DYNAMIC_PARTITION_SWAP_TO_3_WAY_MAX_COUNT) {
+                                                force_3_way = true;
+                                            }
+                                        }
+                                        break :blk .{ res.@"0", res.@"1" };
+                                    }
+                                },
                             };
-                            const left_partition = Partition.new(parent_partition.lo_idx, pivot.sub_partition_left_hi, parent_partition.budget - 1);
-                            const right_partition = Partition.new(pivot.sub_partition_right_lo, parent_partition.hi_idx, parent_partition.budget - 1);
-                            const left_len = left_partition.len();
-                            const right_len = right_partition.len();
+                            const left_partition = Partition.new(part.lo_idx, pivot.sub_partition_left_hi, part.budget - 1);
+                            const right_partition = Partition.new(pivot.sub_partition_right_lo, part.hi_idx, part.budget - 1);
+                            const left_len = left_partition.len(data, userdata);
+                            const right_len = right_partition.len(data, userdata);
                             const left_empty: u8 = @intCast(@intFromBool(left_len == 0));
                             const right_empty: u8 = @intCast(@intFromBool(right_len == 0));
                             const larger_partition, const larger_empty, const smaller_partition, const smaller_empty = if (left_len < right_len) .{
@@ -2372,65 +2359,88 @@ pub const DataManipulationPackage = struct {
                         return data;
                     }
 
-                    fn quicksort_partition_median_of_3(in: SortInputs) IdElemPair {
-                        const len = range_len(in.data, in.first, in.last, in.userdata);
-                        const mid = nth_next_id(in.data, in.first, (len >> 1), in.userdata);
-                        const unsorted_ids = [3]COUNT{ in.first, mid, in.last };
-                        return median_of_3(in.data, unsorted_ids, in.userdata);
+                    fn sort_partition_median_of_3(data: DATA, first: ID, last: ID, userdata: USERDATA) IdElemPair {
+                        const len = range_len(data, first, last, userdata);
+                        const mid = nth_next_id(data, first, (len >> 1), userdata);
+                        const unsorted_ids = [3]COUNT{ first, mid, last };
+                        return median_of_3(data, unsorted_ids, userdata);
                     }
 
-                    fn quicksort_partition_hoare(in: SortInputs) struct { DATA, PartitionResult } {
-                        const median_idx, const pivot_item = quicksort_partition_median_of_3(in);
-                        var data = swap_already_have_b(in.data, in.first, median_idx, pivot_item, in.userdata);
-                        var left_id = in.first;
-                        var right_id = in.last;
+                    fn sort_partition_hoare(data_: DATA, first: ID, last: ID, userdata: USERDATA, comptime COUNT_PIVOT_DUPES: bool) if (COUNT_PIVOT_DUPES) struct { DATA, PartitionResult, COUNT } else struct { DATA, PartitionResult } {
+                        const median_idx, const pivot_item = sort_partition_median_of_3(data_, first, last, userdata);
+                        var data = swap_already_have_b(data_, first, median_idx, pivot_item, userdata);
+                        var left_id = first;
+                        var right_id = last;
                         var left_item: ELEM = undefined;
                         var right_item: ELEM = undefined;
+                        var pivot_dupes: if (COUNT_PIVOT_DUPES) COUNT else void = if (COUNT_PIVOT_DUPES) 0 else {};
                         while (true) {
-                            left_item = get(data, left_id, in.userdata);
-                            while (less_than(left_item, pivot_item, in.userdata)) {
-                                left_id = next_id(data, left_id, in.userdata);
-                                left_item = get(data, left_id, in.userdata);
+                            left_item = get(data, left_id, userdata);
+                            while (less_than(left_item, pivot_item, userdata)) {
+                                left_id = next_id(data, left_id, userdata);
+                                left_item = get(data, left_id, userdata);
                             }
-                            right_item = get(data, right_id, in.userdata);
-                            while (greater_than(right_item, pivot_item, in.userdata)) {
-                                right_id = prev_id(data, right_id, in.userdata);
-                                right_item = get(data, right_id, in.userdata);
+                            if (comptime COUNT_PIVOT_DUPES) {
+                                const is_dupe = order_equals(left_item, pivot_item, userdata);
+                                pivot_dupes += @as(COUNT, @intCast(@intFromBool(is_dupe)));
                             }
-                            if (id_greater_than_or_equal(data, left_id, right_id, in.userdata)) break;
-                            data = set(data, left_id, right_item, in.userdata);
-                            data = set(data, right_id, left_item, in.userdata);
-                            left_id = next_id(data, left_id, in.userdata);
-                            right_id = prev_id(data, right_id, in.userdata);
+                            right_item = get(data, right_id, userdata);
+                            while (greater_than(right_item, pivot_item, userdata)) {
+                                right_id = prev_id(data, right_id, userdata);
+                                right_item = get(data, right_id, userdata);
+                            }
+                            if (comptime COUNT_PIVOT_DUPES) {
+                                const is_dupe = order_equals(right_item, pivot_item, userdata);
+                                pivot_dupes += @as(COUNT, @intCast(@intFromBool(is_dupe)));
+                            }
+                            if (id_greater_than_or_equal(data, left_id, right_id, userdata)) break;
+                            data = set(data, left_id, right_item, userdata);
+                            data = set(data, right_id, left_item, userdata);
+                            left_id = next_id(data, left_id, userdata);
+                            right_id = prev_id(data, right_id, userdata);
                         }
-                        return .{ data, PartitionResult{
-                            .sub_partition_left_hi = right_id,
-                            .sub_partition_right_lo = next_id(data, right_id, in.userdata),
-                        } };
+                        if (comptime COUNT_PIVOT_DUPES) {
+                            return .{
+                                data,
+                                PartitionResult{
+                                    .sub_partition_left_hi = right_id,
+                                    .sub_partition_right_lo = next_id(data, right_id, userdata),
+                                },
+                                pivot_dupes,
+                            };
+                        } else {
+                            return .{
+                                data,
+                                PartitionResult{
+                                    .sub_partition_left_hi = right_id,
+                                    .sub_partition_right_lo = next_id(data, right_id, userdata),
+                                },
+                            };
+                        }
                     }
 
-                    fn quicksort_partition_dutch_flag(in: SortInputs) struct { DATA, PartitionResult } {
-                        const median_idx, const pivot_item = quicksort_partition_median_of_3(in);
-                        var data = swap_already_have_b(in.data, in.first, median_idx, pivot_item, in.userdata);
-                        var smallest_id_with_same_order_as_pivot = in.first;
-                        var check_id = in.first;
-                        var largest_id_with_same_order_as_pivot = in.last;
-                        while (id_less_than(data, check_id, largest_id_with_same_order_as_pivot, in.userdata)) {
-                            const check_item = get(data, check_id, in.userdata);
-                            if (less_than(check_item, pivot_item, in.userdata)) {
-                                data = swap_already_have_b(data, smallest_id_with_same_order_as_pivot, check_id, check_item, in.userdata);
-                                smallest_id_with_same_order_as_pivot = next_id(data, smallest_id_with_same_order_as_pivot, in.userdata);
-                                check_id = next_id(data, check_id, in.userdata);
-                            } else if (less_than(pivot_item, check_item, in.userdata)) {
-                                data = swap_already_have_b(data, largest_id_with_same_order_as_pivot, check_id, check_item, in.userdata);
-                                largest_id_with_same_order_as_pivot = prev_id(data, largest_id_with_same_order_as_pivot, in.userdata);
+                    fn quicksort_partition_dutch_flag(data_: DATA, first: ID, last: ID, userdata: USERDATA) struct { DATA, PartitionResult } {
+                        const median_idx, const pivot_item = sort_partition_median_of_3(data_, first, last, userdata);
+                        var data = swap_already_have_b(data_, first, median_idx, pivot_item, userdata);
+                        var smallest_id_with_same_order_as_pivot = first;
+                        var check_id = first;
+                        var largest_id_with_same_order_as_pivot = last;
+                        while (id_less_than(data, check_id, largest_id_with_same_order_as_pivot, userdata)) {
+                            const check_item = get(data, check_id, userdata);
+                            if (less_than(check_item, pivot_item, userdata)) {
+                                data = swap_already_have_b(data, smallest_id_with_same_order_as_pivot, check_id, check_item, userdata);
+                                smallest_id_with_same_order_as_pivot = next_id(data, smallest_id_with_same_order_as_pivot, userdata);
+                                check_id = next_id(data, check_id, userdata);
+                            } else if (less_than(pivot_item, check_item, userdata)) {
+                                data = swap_already_have_b(data, largest_id_with_same_order_as_pivot, check_id, check_item, userdata);
+                                largest_id_with_same_order_as_pivot = prev_id(data, largest_id_with_same_order_as_pivot, userdata);
                             } else {
-                                check_id = next_id(data, check_id, in.userdata);
+                                check_id = next_id(data, check_id, userdata);
                             }
                         }
                         return .{ data, PartitionResult{
-                            .sub_partition_left_hi = prev_id(data, smallest_id_with_same_order_as_pivot, in.userdata),
-                            .sub_partition_right_lo = next_id(data, largest_id_with_same_order_as_pivot, in.userdata),
+                            .sub_partition_left_hi = prev_id(data, smallest_id_with_same_order_as_pivot, userdata),
+                            .sub_partition_right_lo = next_id(data, largest_id_with_same_order_as_pivot, userdata),
                         } };
                     }
 
@@ -2551,6 +2561,11 @@ pub const DataManipulationPackage = struct {
                     /// Space:
                     ///   - O(1)
                     pub fn heapsort(data_: DATA, first: ID, last: ID, userdata: USERDATA) DATA {
+                        // CHECKPOINT //FIXME hy is heapsort failing? 
+                        if (get_len(data_, userdata) == 0) {
+                            @branchHint(.unlikely);
+                            return data_;
+                        }
                         assert_valid_range(data_, first, last, userdata, @src());
                         var data = build_max_heap_within_range(data_, first, last, userdata);
                         var heap_end = last;
@@ -2567,6 +2582,198 @@ pub const DataManipulationPackage = struct {
                         sub_partition_right_lo: COUNT,
                     };
                 };
+            }
+        };
+    }
+};
+
+const SORT_TEST_CASES = struct {
+    pub const Case = struct {
+        input: []const u8,
+        expected_output: []const u8,
+    };
+
+    const in01 = [_]u8{};
+    const ex01 = [_]u8{};
+
+    const in02 = [_]u8{42};
+    const ex02 = [_]u8{42};
+
+    const in03 = [_]u8{ 1, 2 };
+    const ex03 = [_]u8{ 1, 2 };
+
+    const in04 = [_]u8{ 2, 1 };
+    const ex04 = [_]u8{ 1, 2 };
+
+    const in05 = [_]u8{ 7, 7 };
+    const ex05 = [_]u8{ 7, 7 };
+
+    const in06 = [_]u8{ 1, 2, 3, 4, 5, 6, 7, 8 };
+    const ex06 = [_]u8{ 1, 2, 3, 4, 5, 6, 7, 8 };
+
+    const in07 = [_]u8{ 8, 7, 6, 5, 4, 3, 2, 1 };
+    const ex07 = [_]u8{ 1, 2, 3, 4, 5, 6, 7, 8 };
+
+    const in08 = [_]u8{ 0, 0, 0, 0, 0 };
+    const ex08 = [_]u8{ 0, 0, 0, 0, 0 };
+
+    const in09 = [_]u8{ 255, 255, 255, 255, 255 };
+    const ex09 = [_]u8{ 255, 255, 255, 255, 255 };
+
+    const in10 = [_]u8{ 0, 255, 0, 255, 0, 255, 0, 255 };
+    const ex10 = [_]u8{ 0, 0, 0, 0, 255, 255, 255, 255 };
+
+    const in11 = [_]u8{ 255, 0, 128, 0, 255, 128 };
+    const ex11 = [_]u8{ 0, 0, 128, 128, 255, 255 };
+
+    const in12 = [_]u8{ 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5 };
+    const ex12 = [_]u8{ 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5 };
+
+    const in13 = [_]u8{ 1, 2, 1, 2, 1, 2, 1, 2 };
+    const ex13 = [_]u8{ 1, 1, 1, 1, 2, 2, 2, 2 };
+
+    const in14 = [_]u8{ 3, 1, 2, 3, 1, 2, 3, 1, 2, 3 };
+    const ex14 = [_]u8{ 1, 1, 1, 2, 2, 2, 3, 3, 3, 3 };
+
+    const in15 = [_]u8{ 9, 9, 9, 1, 9, 9, 9, 9, 9, 9 };
+    const ex15 = [_]u8{ 1, 9, 9, 9, 9, 9, 9, 9, 9, 9 };
+
+    const in16 = [_]u8{ 9, 1, 2, 3, 4, 5, 6, 7, 8 };
+    const ex16 = [_]u8{ 1, 2, 3, 4, 5, 6, 7, 8, 9 };
+
+    const in17 = [_]u8{ 2, 3, 4, 5, 6, 7, 8, 9, 1 };
+    const ex17 = [_]u8{ 1, 2, 3, 4, 5, 6, 7, 8, 9 };
+
+    const in18 = [_]u8{ 1, 2, 3, 5, 4, 6, 7, 8 };
+    const ex18 = [_]u8{ 1, 2, 3, 4, 5, 6, 7, 8 };
+
+    const in19 = [_]u8{ 1, 3, 5, 7, 8, 6, 4, 2 };
+    const ex19 = [_]u8{ 1, 2, 3, 4, 5, 6, 7, 8 };
+
+    const in20 = [_]u8{ 1, 2, 3, 1, 2, 3, 1, 2, 3, 1, 2, 3 };
+    const ex20 = [_]u8{ 1, 1, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3 };
+
+    const in21 = [_]u8{ 5, 6, 7, 8, 1, 2, 3, 4 };
+    const ex21 = [_]u8{ 1, 2, 3, 4, 5, 6, 7, 8 };
+
+    const in22 = [_]u8{ 200, 100, 100, 100, 100, 100, 50 };
+    const ex22 = [_]u8{ 50, 100, 100, 100, 100, 100, 200 };
+
+    const in23 = [_]u8{ 10, 30, 20, 10, 30, 20, 10, 30, 20 };
+    const ex23 = [_]u8{ 10, 10, 10, 20, 20, 20, 30, 30, 30 };
+
+    const in24 = [_]u8{
+        32, 31, 30, 29, 28, 27, 26, 25,
+        24, 23, 22, 21, 20, 19, 18, 17,
+        16, 15, 14, 13, 12, 11, 10, 9,
+        8,  7,  6,  5,  4,  3,  2,  1,
+    };
+    const ex24 = [_]u8{
+        1,  2,  3,  4,  5,  6,  7,  8,
+        9,  10, 11, 12, 13, 14, 15, 16,
+        17, 18, 19, 20, 21, 22, 23, 24,
+        25, 26, 27, 28, 29, 30, 31, 32,
+    };
+
+    const in25 = [_]u8{
+        255, 254, 253, 252, 251, 250, 249, 248,
+        247, 246, 245, 244, 243, 242, 241, 240,
+        128, 127, 126, 125, 3,   2,   1,   0,
+    };
+    const ex25 = [_]u8{
+        0,   1,   2,   3,   125, 126, 127, 128,
+        240, 241, 242, 243, 244, 245, 246, 247,
+        248, 249, 250, 251, 252, 253, 254, 255,
+    };
+
+    const CASES = [_]Case{
+        Case{ .input = in01[0..], .expected_output = ex01[0..] },
+        Case{ .input = in02[0..], .expected_output = ex02[0..] },
+        Case{ .input = in03[0..], .expected_output = ex03[0..] },
+        Case{ .input = in04[0..], .expected_output = ex04[0..] },
+        Case{ .input = in05[0..], .expected_output = ex05[0..] },
+        Case{ .input = in06[0..], .expected_output = ex06[0..] },
+        Case{ .input = in07[0..], .expected_output = ex07[0..] },
+        Case{ .input = in08[0..], .expected_output = ex08[0..] },
+        Case{ .input = in09[0..], .expected_output = ex09[0..] },
+        Case{ .input = in10[0..], .expected_output = ex10[0..] },
+        Case{ .input = in11[0..], .expected_output = ex11[0..] },
+        Case{ .input = in12[0..], .expected_output = ex12[0..] },
+        Case{ .input = in13[0..], .expected_output = ex13[0..] },
+        Case{ .input = in14[0..], .expected_output = ex14[0..] },
+        Case{ .input = in15[0..], .expected_output = ex15[0..] },
+        Case{ .input = in16[0..], .expected_output = ex16[0..] },
+        Case{ .input = in17[0..], .expected_output = ex17[0..] },
+        Case{ .input = in18[0..], .expected_output = ex18[0..] },
+        Case{ .input = in19[0..], .expected_output = ex19[0..] },
+        Case{ .input = in20[0..], .expected_output = ex20[0..] },
+        Case{ .input = in21[0..], .expected_output = ex21[0..] },
+        Case{ .input = in22[0..], .expected_output = ex22[0..] },
+        Case{ .input = in23[0..], .expected_output = ex23[0..] },
+        Case{ .input = in24[0..], .expected_output = ex24[0..] },
+        Case{ .input = in25[0..], .expected_output = ex25[0..] },
+    };
+    const LONGEST_CASE = find: {
+        var longest: usize = 0;
+        for (CASES[0..]) |case| {
+            longest = @max(longest, case.input.len);
+        }
+        break :find longest;
+    };
+};
+
+const TEST_UTILS = struct {
+    fn MakeBlindId(comptime DATA: type, comptime COUNT: type, comptime USERDATA: type, comptime LEN: fn (DATA, USERDATA) COUNT) type {
+        return struct {
+            const Self = @This();
+
+            raw: [4]u8 = @splat(0),
+
+            pub fn real(self: Self) u32 {
+                return @bitCast(self.raw);
+            }
+            pub fn new(id: u32) Self {
+                return Self{ .raw = @bitCast(id) };
+            }
+
+            fn id_less(_: DATA, a: Self, b: Self, _: USERDATA) bool {
+                return a.real() < b.real();
+            }
+            fn id_less_or_equal(_: DATA, a: Self, b: Self, _: USERDATA) bool {
+                return a.real() <= b.real();
+            }
+            fn id_greater(_: DATA, a: Self, b: Self, _: USERDATA) bool {
+                return a.real() > b.real();
+            }
+            fn id_greater_or_equal(_: DATA, a: Self, b: Self, _: USERDATA) bool {
+                return a.real() >= b.real();
+            }
+            fn id_equal(_: DATA, a: Self, b: Self, _: USERDATA) bool {
+                return a.real() == b.real();
+            }
+            fn first(_: DATA, _: USERDATA) Self {
+                return Self{};
+            }
+            fn nth_from_start(_: DATA, n: COUNT, _: USERDATA) Self {
+                return .new(@intCast(n));
+            }
+            fn next(_: DATA, id: Self, _: USERDATA) Self {
+                return new(id.real() + 1);
+            }
+            fn nth_next(_: DATA, id: Self, n: COUNT, _: USERDATA) Self {
+                return new(id.real() + @as(u32, @intCast(n)));
+            }
+            fn prev(_: DATA, id: Self, _: USERDATA) Self {
+                return new(id.real() - 1);
+            }
+            fn nth_prev(_: DATA, id: Self, n: COUNT, _: USERDATA) Self {
+                return new(id.real() - @as(u32, @intCast(n)));
+            }
+            fn last(data: DATA, userdata: USERDATA) Self {
+                return .new(@intCast(LEN(data, userdata) - 1));
+            }
+            fn nth_from_end(data: DATA, n: COUNT, userdata: USERDATA) Self {
+                return .new(@intCast(LEN(data, userdata) - 1 - n));
             }
         };
     }
@@ -2609,4 +2816,32 @@ test "Utils_DataManipulation => median_of_3_index" {
     }
 }
 
-// CHECKPOINT add test cases for sorting funcs
+test "Utils_DataManipulation => sorting algorithms (native ops)" {
+    const dmp = native_data_structure_manipulation_package([]u8, u8);
+    const BUF_MAX_LEN: usize = @max(SORT_TEST_CASES.LONGEST_CASE, 50);
+    var buf: [BUF_MAX_LEN]u8 = undefined;
+    var buf_len: usize = 0;
+    var is_sorted: bool = false;
+    for (SORT_TEST_CASES.CASES[0..]) |case| {
+        buf_len = case.input.len;
+        var buf_slice = buf[0..buf_len];
+        // Insertion Sort
+        @memcpy(buf_slice, case.input);
+        buf_slice = dmp.insertion_sort(buf_slice, 0, buf_len -% 1, {});
+        try Test.expect_slices_equal_t_src(u8, case.expected_output, buf_slice, @src(), "", .{});
+        is_sorted = dmp.is_sorted(buf_slice, 0, buf_len -% 1, {});
+        try Test.expect_true_src(is_sorted, @src(), "", .{});
+        // Quicksort
+        @memcpy(buf_slice, case.input);
+        buf_slice = dmp.quicksort(buf_slice, 0, buf_len -% 1, {}, .{});
+        try Test.expect_slices_equal_t_src(u8, case.expected_output, buf_slice, @src(), "", .{});
+        is_sorted = dmp.is_sorted(buf_slice, 0, buf_len -% 1, {});
+        try Test.expect_true_src(is_sorted, @src(), "", .{});
+        // Heapsort
+        @memcpy(buf_slice, case.input);
+        buf_slice = dmp.heapsort(buf_slice, 0, buf_len -% 1, {});
+        try Test.expect_slices_equal_t_src(u8, case.expected_output, buf_slice, @src(), "", .{});
+        is_sorted = dmp.is_sorted(buf_slice, 0, buf_len -% 1, {});
+        try Test.expect_true_src(is_sorted, @src(), "", .{});
+    }
+}
