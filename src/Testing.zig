@@ -45,6 +45,8 @@ pub fn print_src(comptime src: SourceLocation, comptime fmt: []const u8, args: a
     }
 }
 
+pub const io = std.testing.io;
+
 pub const TestError = error{
     test_expected_true,
     test_expected_false,
@@ -380,6 +382,26 @@ pub fn expect_slices_equal_t_src(comptime T: type, val_a: []const T, val_b: []co
         print_src(src, "\nFAILURE: " ++ fail_description, fail_args);
         print("\n\tEXPECT SLICES EQUAL\n\tSLICE A: {any}\n\tSLICE B: {any}\n", .{ val_a, val_b });
         return TestError.test_expected_slices_equal;
+    }
+}
+
+pub fn expect_slices_equal_t_func(comptime T: type, eql: *const fn (T, T) bool, val_a: []const T, str_a: []const u8, val_b: []const T, str_b: []const u8, comptime fail_description: []const u8, fail_args: anytype) !void {
+    for (val_a, val_b) |a, b| {
+        if (!eql(a, b)) {
+            print("\nFAILURE: " ++ fail_description, fail_args);
+            print("\n\tEXPECT: {s} == {s}\n\tSLICE A: {any}\n\tSLICE B: {any}\n", .{ str_a, str_b, val_a, val_b });
+            return TestError.test_expected_slices_equal;
+        }
+    }
+}
+
+pub fn expect_slices_equal_t_func_src(comptime T: type, eql: *const fn (T, T) bool, val_a: []const T, val_b: []const T, comptime src: SourceLocation, comptime fail_description: []const u8, fail_args: anytype) !void {
+    for (val_a, val_b) |a, b| {
+        if (!eql(a, b)) {
+            print_src(src, "\nFAILURE: " ++ fail_description, fail_args);
+            print("\n\tEXPECT SLICES EQUAL\n\tSLICE A: {any}\n\tSLICE B: {any}\n", .{ val_a, val_b });
+            return TestError.test_expected_slices_equal;
+        }
     }
 }
 

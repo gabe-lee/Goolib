@@ -36,12 +36,12 @@ pub fn seed_default_rand_and_get(seed: u64) StdRandom {
     default_rand = default_rand_core.random();
     return default_rand;
 }
-pub fn seed_default_rand_time_now() void {
-    default_rand_core = StdRandom.DefaultPrng.init(@intCast(std.time.microTimestamp()));
+pub fn seed_default_rand_time_now(io: std.Io) void {
+    default_rand_core = StdRandom.DefaultPrng.init(@intCast(std.Io.Clock.boot.now(io).toMilliseconds()));
     default_rand = default_rand_core.random();
 }
-pub fn seed_default_rand_time_now_and_get() StdRandom {
-    default_rand_core = StdRandom.DefaultPrng.init(@intCast(std.time.microTimestamp()));
+pub fn seed_default_rand_time_now_and_get(io: std.Io) StdRandom {
+    default_rand_core = StdRandom.DefaultPrng.init(@intCast(std.Io.Clock.boot.now(io).toMilliseconds()));
     default_rand = default_rand_core.random();
     return default_rand;
 }

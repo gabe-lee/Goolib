@@ -253,54 +253,54 @@ const FIELD_FUNCS_EXAMPLE =
 
 const CUSTOM_FLAG = u64;
 const F = struct {
-    const GET: CUSTOM_FLAG = 1 << 0;
-    const GET_PTR: CUSTOM_FLAG = 1 << 1;
-    const GET_CONST_PTR: CUSTOM_FLAG = 1 << 2;
-    const SET: CUSTOM_FLAG = 1 << 3;
-    const SWAP: CUSTOM_FLAG = 1 << 4;
-    const GREATER_THAN: CUSTOM_FLAG = 1 << 5;
-    const GREATER_THAN_OR_EQUAL: CUSTOM_FLAG = 1 << 6;
-    const LESS_THAN: CUSTOM_FLAG = 1 << 7;
-    const LESS_THAN_OR_EQUAL: CUSTOM_FLAG = 1 << 8;
-    const ORDER_EQUALS: CUSTOM_FLAG = 1 << 9;
-    const EXACT_EQUALS: CUSTOM_FLAG = 1 << 10;
-    const FIRST_ID: CUSTOM_FLAG = 1 << 11;
-    const LAST_ID: CUSTOM_FLAG = 1 << 12;
-    const NTH_ID_FROM_START: CUSTOM_FLAG = 1 << 13;
-    const NTH_ID_FROM_END: CUSTOM_FLAG = 1 << 14;
-    const PREV_ID: CUSTOM_FLAG = 1 << 15;
-    const NEXT_ID: CUSTOM_FLAG = 1 << 16;
-    const NTH_PREV_ID: CUSTOM_FLAG = 1 << 17;
-    const NTH_NEXT_ID: CUSTOM_FLAG = 1 << 18;
-    const GET_LEN: CUSTOM_FLAG = 1 << 19;
-    const SET_LEN: CUSTOM_FLAG = 1 << 20;
-    const GET_CAP: CUSTOM_FLAG = 1 << 21;
-    const SET_CAP: CUSTOM_FLAG = 1 << 22;
-    const RANGE_LEN: CUSTOM_FLAG = 1 << 23;
-    const APPEND_ONE: CUSTOM_FLAG = 1 << 24;
-    const APPEND_N: CUSTOM_FLAG = 1 << 25;
-    const INSERT_ONE: CUSTOM_FLAG = 1 << 26;
-    const INSERT_N: CUSTOM_FLAG = 1 << 27;
-    const DELETE_ONE: CUSTOM_FLAG = 1 << 28;
-    const DELETE_N: CUSTOM_FLAG = 1 << 29;
-    const REVERSE_RANGE: CUSTOM_FLAG = 1 << 30;
-    const ENSURE_SPACE: CUSTOM_FLAG = 1 << 31;
-    const MOVE_ONE_PRESERVE: CUSTOM_FLAG = 1 << 32;
-    const MOVE_BLOCK_PRESERVE: CUSTOM_FLAG = 1 << 33;
-    const NEVER_OVERLAP_COPY_RANGE: CUSTOM_FLAG = 1 << 34;
-    const MIGHT_OVERLAP_COPY_RANGE: CUSTOM_FLAG = 1 << 35;
-    const MEMORY_CONTIGUOUS_IN_ORDER: CUSTOM_FLAG = 1 << 36;
-    const ROTATE_RANGE_LEFT: CUSTOM_FLAG = 1 << 37;
-    const ROTATE_RANGE_RIGHT: CUSTOM_FLAG = 1 << 38;
-    const SCRAMBLE: CUSTOM_FLAG = 1 << 39;
-    const ID_LESS_THAN: CUSTOM_FLAG = 1 << 40;
-    const ID_LESS_THAN_OR_EQUAL: CUSTOM_FLAG = 1 << 41;
-    const ID_GREATER_THAN: CUSTOM_FLAG = 1 << 42;
-    const ID_GREATER_THAN_OR_EQUAL: CUSTOM_FLAG = 1 << 43;
-    const ID_EQUALS: CUSTOM_FLAG = 1 << 44;
-    const VALID_ID: CUSTOM_FLAG = 1 << 45;
-    const INVALID_ID_AFTER: CUSTOM_FLAG = 1 << 46;
-    const INVALID_ID_BEFORE: CUSTOM_FLAG = 1 << 47;
+    pub const GET: CUSTOM_FLAG = 1 << 0;
+    pub const GET_PTR: CUSTOM_FLAG = 1 << 1;
+    pub const GET_CONST_PTR: CUSTOM_FLAG = 1 << 2;
+    pub const SET: CUSTOM_FLAG = 1 << 3;
+    pub const SWAP: CUSTOM_FLAG = 1 << 4;
+    pub const GREATER_THAN: CUSTOM_FLAG = 1 << 5;
+    pub const GREATER_THAN_OR_EQUAL: CUSTOM_FLAG = 1 << 6;
+    pub const LESS_THAN: CUSTOM_FLAG = 1 << 7;
+    pub const LESS_THAN_OR_EQUAL: CUSTOM_FLAG = 1 << 8;
+    pub const ORDER_EQUALS: CUSTOM_FLAG = 1 << 9;
+    pub const EXACT_EQUALS: CUSTOM_FLAG = 1 << 10;
+    pub const FIRST_ID: CUSTOM_FLAG = 1 << 11;
+    pub const LAST_ID: CUSTOM_FLAG = 1 << 12;
+    pub const NTH_ID_FROM_START: CUSTOM_FLAG = 1 << 13;
+    pub const NTH_ID_FROM_END: CUSTOM_FLAG = 1 << 14;
+    pub const PREV_ID: CUSTOM_FLAG = 1 << 15;
+    pub const NEXT_ID: CUSTOM_FLAG = 1 << 16;
+    pub const NTH_PREV_ID: CUSTOM_FLAG = 1 << 17;
+    pub const NTH_NEXT_ID: CUSTOM_FLAG = 1 << 18;
+    pub const GET_LEN: CUSTOM_FLAG = 1 << 19;
+    pub const SET_LEN: CUSTOM_FLAG = 1 << 20;
+    // pub const GET_CAP: CUSTOM_FLAG = 1 << 21;
+    // pub const SET_CAP: CUSTOM_FLAG = 1 << 22;
+    pub const RANGE_LEN: CUSTOM_FLAG = 1 << 23;
+    // pub const APPEND_ONE: CUSTOM_FLAG = 1 << 24;
+    // pub const APPEND_N: CUSTOM_FLAG = 1 << 25;
+    // pub const INSERT_ONE: CUSTOM_FLAG = 1 << 26;
+    // pub const INSERT_N: CUSTOM_FLAG = 1 << 27;
+    // pub const DELETE_ONE: CUSTOM_FLAG = 1 << 28;
+    // pub const DELETE_N: CUSTOM_FLAG = 1 << 29;
+    pub const REVERSE_RANGE: CUSTOM_FLAG = 1 << 30;
+    // pub const ENSURE_SPACE: CUSTOM_FLAG = 1 << 31;
+    pub const MOVE_ONE_PRESERVE: CUSTOM_FLAG = 1 << 32;
+    pub const MOVE_BLOCK_PRESERVE: CUSTOM_FLAG = 1 << 33;
+    // pub const NEVER_OVERLAP_COPY_RANGE: CUSTOM_FLAG = 1 << 34;
+    // pub const MIGHT_OVERLAP_COPY_RANGE: CUSTOM_FLAG = 1 << 35;
+    // pub const MEMORY_CONTIGUOUS_IN_ORDER: CUSTOM_FLAG = 1 << 36;
+    pub const ROTATE_RANGE_LEFT: CUSTOM_FLAG = 1 << 37;
+    pub const ROTATE_RANGE_RIGHT: CUSTOM_FLAG = 1 << 38;
+    pub const SCRAMBLE: CUSTOM_FLAG = 1 << 39;
+    pub const ID_LESS_THAN: CUSTOM_FLAG = 1 << 40;
+    pub const ID_LESS_THAN_OR_EQUAL: CUSTOM_FLAG = 1 << 41;
+    pub const ID_GREATER_THAN: CUSTOM_FLAG = 1 << 42;
+    pub const ID_GREATER_THAN_OR_EQUAL: CUSTOM_FLAG = 1 << 43;
+    pub const ID_EQUALS: CUSTOM_FLAG = 1 << 44;
+    pub const VALID_ID: CUSTOM_FLAG = 1 << 45;
+    pub const INVALID_ID_AFTER: CUSTOM_FLAG = 1 << 46;
+    pub const INVALID_ID_BEFORE: CUSTOM_FLAG = 1 << 47;
 };
 const FuncFlags = struct {
     raw: CUSTOM_FLAG = 0,
@@ -463,17 +463,17 @@ pub fn native_data_structure_manipulation_package(comptime DATA_STRUCTURE: type,
         .COUNT_INT = usize,
         .USERDATA = void,
     };
-    return core.WithCoreAccesFuncs(.NONE).select_functions(true, .{}, {}).Finalize(void, {});
+    return core.WithCoreAccessFuncs(.NONE).select_functions(true, .{}, {}).Finalize(void, {});
 }
 
 pub fn contiguous_memory_manipulation_package_using_core_access(comptime CORE_DEF: DataManipulationPackage, comptime CORE_ACCESS: CORE_DEF.CoreAccessFuncs()) type {
-    return CORE_DEF.WithCoreAccesFuncs(CORE_ACCESS).select_functions(true, .{}, {}).Finalize(void, {});
+    return CORE_DEF.WithCoreAccessFuncs(CORE_ACCESS).select_functions(true, .{}, {}).Finalize(void, {});
 }
-pub fn custom_memory_manipulation_package_no_defaults(comptime CORE_DEF: DataManipulationPackage, comptime CUSTOM_FUNCS: CORE_DEF.WithCoreAccesFuncs(.NONE), comptime CUSTOM_FIELD_FUNCS: anytype) type {
-    return CORE_DEF.WithCoreAccesFuncs(.NONE).select_functions(false, CUSTOM_FUNCS, CUSTOM_FIELD_FUNCS).Finalize(@TypeOf(CUSTOM_FIELD_FUNCS), CUSTOM_FIELD_FUNCS);
+pub fn custom_memory_manipulation_package_no_defaults(comptime CORE_DEF: DataManipulationPackage, comptime CUSTOM_FUNCS: CORE_DEF.WithCoreAccessFuncs(.NONE), comptime CUSTOM_FIELD_FUNCS: anytype) type {
+    return CORE_DEF.WithCoreAccessFuncs(.NONE).select_functions(false, CUSTOM_FUNCS, CUSTOM_FIELD_FUNCS).Finalize(@TypeOf(CUSTOM_FIELD_FUNCS), CUSTOM_FIELD_FUNCS);
 }
-pub fn custom_memory_manipulation_package_default_fallbacks_with_core_access(comptime CORE_DEF: DataManipulationPackage, comptime CORE_ACCESS: CORE_DEF.CoreAccessFuncs(), comptime CUSTOM_FUNCS: CORE_DEF.WithCoreAccesFuncs(CORE_ACCESS), comptime CUSTOM_FIELD_FUNCS: anytype) type {
-    return CORE_DEF.WithCoreAccesFuncs(CORE_ACCESS).select_functions(true, CUSTOM_FUNCS, CUSTOM_FIELD_FUNCS).Finalize(@TypeOf(CUSTOM_FIELD_FUNCS), CUSTOM_FIELD_FUNCS);
+pub fn custom_memory_manipulation_package_default_fallbacks_with_core_access(comptime CORE_DEF: DataManipulationPackage, comptime CORE_ACCESS: CORE_DEF.CoreAccessFuncs(), comptime CUSTOM_FUNCS: CORE_DEF.WithCoreAccessFuncs(CORE_ACCESS), comptime CUSTOM_FIELD_FUNCS: anytype) type {
+    return CORE_DEF.WithCoreAccessFuncs(CORE_ACCESS).select_functions(true, CUSTOM_FUNCS, CUSTOM_FIELD_FUNCS).Finalize(@TypeOf(CUSTOM_FIELD_FUNCS), CUSTOM_FIELD_FUNCS);
 }
 
 pub const DataManipulationPackage = struct {
@@ -519,7 +519,7 @@ pub const DataManipulationPackage = struct {
         };
     }
 
-    pub fn WithCoreAccesFuncs(comptime CORE_DEF_: DataManipulationPackage, comptime CORE_ACCESS_FUNCS: CORE_DEF_.CoreAccessFuncs()) type {
+    pub fn WithCoreAccessFuncs(comptime CORE_DEF_: DataManipulationPackage, comptime CORE_ACCESS_FUNCS: CORE_DEF_.CoreAccessFuncs()) type {
         return struct {
             const DEF_WITH_FUNCS = @This();
             pub const CORE_DEF = CORE_DEF_;
@@ -712,7 +712,7 @@ pub const DataManipulationPackage = struct {
                 INVALID_ID_BEFORE: ?FN_IMPLICIT_ID = null,
                 GET: ?FN_GET = null,
                 GET_PTR: ?FN_GET_PTR = null,
-                GET_PTR_CONST: ?FN_GET_CONST_PTR = null,
+                GET_CONST_PTR: ?FN_GET_CONST_PTR = null,
                 SET: ?FN_SET = null,
                 SWAP: ?FN_SWAP = null,
                 LESS_THAN: ?FN_ELEM_COMPARE = null,
@@ -811,7 +811,7 @@ pub const DataManipulationPackage = struct {
                         }
                     };
 
-                    fn assert_valid_id(data: DATA_, id: ID_, userdata: USERDATA_, comptime src: SourceLocation) bool {
+                    fn assert_valid_id(data: DATA_, id: ID_, userdata: USERDATA_, comptime src: SourceLocation) void {
                         const VALID = ID_VALID.func;
                         assert_with_reason(VALID(data, id, userdata), src, "id `{any}` is not valid for the current data structure state", .{id});
                     }
@@ -948,7 +948,7 @@ pub const DataManipulationPackage = struct {
                         }
                     };
                     const GET_CONST_PTR = struct {
-                        const func: FN_GET_CONST_PTR = if (CUSTOM.GET_PTR_CONST) |cust| cust //
+                        const func: FN_GET_CONST_PTR = if (CUSTOM.GET_CONST_PTR) |cust| cust //
                             else if (FLAGS.has(INFER.CONST_PTR.FROM_PTR)) infer_ptr //
                             else if (ALLOW_DEFAULT) default else unusable;
                         fn default(data: DATA_, id: ID_, userdata: USERDATA_) *const ELEM_ {
@@ -1317,7 +1317,7 @@ pub const DataManipulationPackage = struct {
                         }
                     };
                     const NTH_NEXT_ID = struct {
-                        const func: FN_NTH_ID = if (CUSTOM.NTH_PREV_ID) |cust| cust //
+                        const func: FN_NTH_ID = if (CUSTOM.NTH_NEXT_ID) |cust| cust //
                             else if (FLAGS.has(INFER.NTH_NEXT_ID.FROM_NEXT)) infer_next //
                             else if (FLAGS.has(INFER.NTH_NEXT_ID.FROM_LAST_PREV)) infer_last_prev //
                             else if (ALLOW_DEFAULT) default else unusable;
@@ -1521,7 +1521,7 @@ pub const DataManipulationPackage = struct {
                         const func: FN_SET_COUNT = if (CUSTOM.SET_LEN) |cust| cust //
                             else if (ALLOW_DEFAULT) default else unusable;
                         const default = default_set_len;
-                        fn unusable(_: DATA_, _: USERDATA_) COUNT_ {
+                        fn unusable(_: DATA_, _: COUNT_, _: USERDATA_) DATA_ {
                             assert_unreachable(@src(), "no `set_len` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
                         }
                     };
@@ -2106,11 +2106,11 @@ pub const DataManipulationPackage = struct {
                         userdata: USERDATA = USERDATA_UNINIT,
                     };
 
-                    pub const IdElemPair = struct { COUNT, ELEM };
+                    pub const IdElemPair = struct { ID, ELEM };
 
-                    pub fn median_of_3(data: DATA, ids_: [3]COUNT, userdata: USERDATA) IdElemPair {
+                    pub fn median_of_3(data: DATA, ids_: [3]ID, userdata: USERDATA) IdElemPair {
                         var ids = ids_;
-                        var tmp: COUNT = undefined;
+                        var tmp: ID = undefined;
                         if (less_than_by_id(data, ids[1], ids[0], userdata)) {
                             tmp = ids[0];
                             ids[0] = ids[1];
@@ -2182,9 +2182,9 @@ pub const DataManipulationPackage = struct {
                             @branchHint(.unlikely);
                             return data_;
                         }
-                        var id_to_sort: COUNT = next_id(data_, first, userdata);
-                        var id_right: COUNT = undefined;
-                        var id_left: COUNT = undefined;
+                        var id_to_sort: ID = next_id(data_, first, userdata);
+                        var id_right: ID = undefined;
+                        var id_left: ID = undefined;
                         var val_to_sort: ELEM = undefined;
                         var data = data_;
                         while (true) {
@@ -2221,11 +2221,11 @@ pub const DataManipulationPackage = struct {
 
                     pub fn QuicksortPartition(comptime DEGENERATE_FALLBACK: bool) type {
                         return struct {
-                            lo_idx: COUNT,
-                            hi_idx: COUNT,
+                            lo_idx: ID,
+                            hi_idx: ID,
                             budget: if (DEGENERATE_FALLBACK) COUNT else void = if (DEGENERATE_FALLBACK) undefined else void{},
 
-                            pub fn new(lo: COUNT, hi: COUNT, budget: COUNT) @This() {
+                            pub fn new(lo: ID, hi: ID, budget: COUNT) @This() {
                                 var this = @This(){
                                     .lo_idx = lo,
                                     .hi_idx = hi,
@@ -2362,7 +2362,7 @@ pub const DataManipulationPackage = struct {
                     fn sort_partition_median_of_3(data: DATA, first: ID, last: ID, userdata: USERDATA) IdElemPair {
                         const len = range_len(data, first, last, userdata);
                         const mid = nth_next_id(data, first, (len >> 1), userdata);
-                        const unsorted_ids = [3]COUNT{ first, mid, last };
+                        const unsorted_ids = [3]ID{ first, mid, last };
                         return median_of_3(data, unsorted_ids, userdata);
                     }
 
@@ -2444,81 +2444,92 @@ pub const DataManipulationPackage = struct {
                         } };
                     }
 
-                    pub fn max_heap_sift_down_with_range(data: DATA, heap_first: ID, id: ID, heap_last: ID, userdata: USERDATA) DATA {
-                        return any_heap_sift_down_with_range(.MAX_HEAP, data, heap_first, id, heap_last, userdata);
+                    pub fn max_heap_sift_down_with_range(data: DATA, heap_first: ID, heap_last: ID, heap_len: COUNT, id: ID, id_n: COUNT, userdata: USERDATA) DATA {
+                        return any_heap_sift_down_with_range(.MAX_HEAP, data, heap_first, heap_last, heap_len, id, id_n, userdata);
                     }
-                    fn any_heap_sift_down_with_range(comptime kind: HeapKind, data_: DATA, heap_first: ID, id: ID, heap_last: ID, userdata: USERDATA) DATA {
+                    pub fn min_heap_sift_down_with_range(data: DATA, heap_first: ID, heap_last: ID, heap_len: COUNT, id: ID, id_n: COUNT, userdata: USERDATA) DATA {
+                        return any_heap_sift_down_with_range(.MIN_HEAP, data, heap_first, heap_last, heap_len, id, id_n, userdata);
+                    }
+                    fn any_heap_sift_down_with_range(comptime kind: HeapKind, data_: DATA, heap_first: ID, heap_last: ID, heap_len: COUNT, id: ID, id_n: COUNT, userdata: USERDATA) DATA {
                         assert_valid_range_3(data_, heap_first, id, heap_last, userdata, @src());
-                        const len = range_len(data_, heap_first, heap_last, userdata);
                         var data = data_;
                         var target_id = id;
-                        var target_id_len_from_start = limit_len(data, heap_first, target_id, userdata);
+                        var target_id_n = id_n;
                         const target_val = get(data, target_id, userdata);
-                        const max_len_no_left_child_overflow = math.maxInt(COUNT) >> 1;
+                        const max_n_no_left_child_overflow = math.maxInt(COUNT) >> 1;
+                        const max_n_no_right_child_overflow = max_n_no_left_child_overflow - 1;
                         while (true) {
                             var extreme_val_id = target_id;
-                            var extreme_val_len_from_start = target_id_len_from_start;
+                            var extreme_val_id_n = target_id_n;
                             var extreme_val = target_val;
-                            const left_child_len_from_start = (target_id_len_from_start << 1) | 1; // same as (target_id_len_from_start * 2) + 1
-                            if (target_id_len_from_start <= max_len_no_left_child_overflow and left_child_len_from_start < len) {
-                                const left_child_id = nth_next_id(data, heap_first, left_child_len_from_start, userdata);
-                                const left_child_val = get(data, left_child_id, userdata);
-                                switch (comptime kind) {
-                                    .MAX_HEAP => {
-                                        if (greater_than(left_child_val, target_val, userdata)) {
-                                            extreme_val_id = left_child_id;
-                                            extreme_val_len_from_start = left_child_len_from_start;
-                                            extreme_val = left_child_val;
-                                        }
-                                    },
-                                    .MIN_HEAP => {
-                                        if (less_than(left_child_val, target_val, userdata)) {
-                                            extreme_val_id = left_child_id;
-                                            extreme_val_len_from_start = left_child_len_from_start;
-                                            extreme_val = left_child_val;
-                                        }
-                                    },
-                                }
-                                const right_child_len_from_start = left_child_len_from_start +% 1;
-                                if (target_id_len_from_start < max_len_no_left_child_overflow and right_child_len_from_start < len) {
-                                    const right_child_id = next_id(data, left_child_id, userdata);
-                                    const right_child_val = get(data, right_child_id, userdata);
+                            if (target_id_n <= max_n_no_left_child_overflow) {
+                                @branchHint(.likely);
+                                const left_child_id_n = (target_id_n << 1) | 1; // same as (target_id_n * 2) + 1
+                                if (left_child_id_n < heap_len) {
+                                    const left_child_id = nth_next_id(data, heap_first, left_child_id_n, userdata);
+                                    const left_child_val = get(data, left_child_id, userdata);
                                     switch (comptime kind) {
                                         .MAX_HEAP => {
-                                            if (greater_than(right_child_val, target_val, userdata)) {
-                                                extreme_val_id = right_child_id;
-                                                extreme_val_len_from_start = right_child_len_from_start;
-                                                extreme_val = right_child_val;
+                                            if (greater_than(left_child_val, extreme_val, userdata)) {
+                                                extreme_val_id = left_child_id;
+                                                extreme_val_id_n = left_child_id_n;
+                                                extreme_val = left_child_val;
                                             }
                                         },
                                         .MIN_HEAP => {
-                                            if (less_than(right_child_val, target_val, userdata)) {
-                                                extreme_val_id = right_child_id;
-                                                extreme_val_len_from_start = right_child_len_from_start;
-                                                extreme_val = right_child_val;
+                                            if (less_than(left_child_val, extreme_val, userdata)) {
+                                                extreme_val_id = left_child_id;
+                                                extreme_val_id_n = left_child_id_n;
+                                                extreme_val = left_child_val;
                                             }
                                         },
+                                    }
+                                    if (target_id_n <= max_n_no_right_child_overflow) {
+                                        @branchHint(.likely);
+                                        const right_child_id_n = left_child_id_n + 1;
+                                        if (right_child_id_n < heap_len) {
+                                            const right_child_id = next_id(data, left_child_id, userdata);
+                                            const right_child_val = get(data, right_child_id, userdata);
+                                            switch (comptime kind) {
+                                                .MAX_HEAP => {
+                                                    if (greater_than(right_child_val, extreme_val, userdata)) {
+                                                        extreme_val_id = right_child_id;
+                                                        extreme_val_id_n = right_child_id_n;
+                                                        extreme_val = right_child_val;
+                                                    }
+                                                },
+                                                .MIN_HEAP => {
+                                                    if (less_than(right_child_val, extreme_val, userdata)) {
+                                                        extreme_val_id = right_child_id;
+                                                        extreme_val_id_n = right_child_id_n;
+                                                        extreme_val = right_child_val;
+                                                    }
+                                                },
+                                            }
+                                        }
                                     }
                                 }
                             }
                             if (id_equals(data, extreme_val_id, target_id, userdata)) break; // target val in correct place
-                            // swap largest and target and update target id
+                            // swap most extreme and target and update target id
                             data = set(data, extreme_val_id, target_val, userdata);
                             data = set(data, target_id, extreme_val, userdata);
                             target_id = extreme_val_id;
-                            target_id_len_from_start = extreme_val_len_from_start;
+                            target_id_n = extreme_val_id_n;
                         }
                         return data;
                     }
 
-                    fn build_any_heap_within_range(comptime kind: HeapKind, old_data: DATA, first: ID, last: ID, userdata: USERDATA) DATA {
-                        var data = old_data;
-                        const len = range_len(data, first, last, userdata);
-                        var non_leaf_len_from_start = (len >> 1);
-                        while (non_leaf_len_from_start > 0) {
-                            non_leaf_len_from_start -= 1;
-                            const non_leaf_id = nth_id_from_start(data, non_leaf_len_from_start, userdata);
-                            data = any_heap_sift_down_with_range(kind, data, first, non_leaf_id, last, userdata);
+                    fn build_any_heap_within_range(comptime kind: HeapKind, data_: DATA, first: ID, last: ID, userdata: USERDATA) DATA {
+                        var data = data_;
+                        const heap_len = range_len(data, first, last, userdata);
+                        if (heap_len < 2) return data;
+                        var curr_parent_node_n = ((heap_len - 2) >> 1) + 1;
+                        var curr_parent_node = nth_next_id(data, first, curr_parent_node_n, userdata);
+                        while (curr_parent_node_n > 0) {
+                            curr_parent_node_n -= 1;
+                            curr_parent_node = prev_id(data, curr_parent_node, userdata);
+                            data = any_heap_sift_down_with_range(kind, data, first, last, heap_len, curr_parent_node, curr_parent_node_n, userdata);
                         }
                         return data;
                     }
@@ -2538,6 +2549,56 @@ pub const DataManipulationPackage = struct {
                     /// Uses Floyd's algorithm to turn the data into a min heap in-place
                     pub fn build_min_heap(data: DATA, userdata: USERDATA) DATA {
                         return build_min_heap_within_range(data, first_id(data, userdata), last_id(data, userdata), userdata);
+                    }
+
+                    fn is_range_any_heap(comptime mode: HeapKind, data: DATA, first: ID, last: ID, userdata: USERDATA) bool {
+                        var node: ID = first;
+                        var node_n: COUNT = 0;
+                        const len = range_len(data, first, last, userdata);
+                        const half_len = len >> 1;
+                        while (node_n <= half_len) : ({
+                            node_n += 1;
+                            node = next_id(data, node, userdata);
+                        }) {
+                            const child_left_node_n = (node_n << 1) | 1;
+                            if (child_left_node_n >= len) continue;
+                            const node_val = get(data, node, userdata);
+                            const child_left_node = nth_next_id(data, first, child_left_node_n, userdata);
+                            const child_left_val = get(data, child_left_node, userdata);
+                            switch (mode) {
+                                .MIN_HEAP => {
+                                    if (less_than(child_left_val, node_val, userdata)) return false;
+                                },
+                                .MAX_HEAP => {
+                                    if (greater_than(child_left_val, node_val, userdata)) return false;
+                                },
+                            }
+                            const child_right_node_n = child_left_node_n +| 1;
+                            if (child_right_node_n >= len) continue;
+                            const child_right_node = next_id(data, child_left_node, userdata);
+                            const child_right_val = get(data, child_right_node, userdata);
+                            switch (mode) {
+                                .MIN_HEAP => {
+                                    if (less_than(child_right_val, node_val, userdata)) return false;
+                                },
+                                .MAX_HEAP => {
+                                    if (greater_than(child_right_val, node_val, userdata)) return false;
+                                },
+                            }
+                        }
+                        return true;
+                    }
+                    pub fn is_range_max_heap(data: DATA, first: ID, last: ID, userdata: USERDATA) bool {
+                        return is_range_any_heap(.MAX_HEAP, data, first, last, userdata);
+                    }
+                    pub fn is_range_min_heap(data: DATA, first: ID, last: ID, userdata: USERDATA) bool {
+                        return is_range_any_heap(.MIN_HEAP, data, first, last, userdata);
+                    }
+                    pub fn assert_range_is_max_heap(data: DATA, first: ID, last: ID, userdata: USERDATA) void {
+                        assert_with_reason(is_range_max_heap(data, first, last, userdata), @src(), "data structure is not a max-heap within range [{any} => {any}]\n{any}", .{ first, last, data });
+                    }
+                    pub fn assert_range_is_min_heap(data: DATA, first: ID, last: ID, userdata: USERDATA) void {
+                        assert_with_reason(is_range_min_heap(data, first, last, userdata), @src(), "data structure is not a min-heap within range [{any} => {any}]\n{any}", .{ first, last, data });
                     }
 
                     /// Builds a max-heap out of the given data range, then iteratively removes the max value
@@ -2561,25 +2622,27 @@ pub const DataManipulationPackage = struct {
                     /// Space:
                     ///   - O(1)
                     pub fn heapsort(data_: DATA, first: ID, last: ID, userdata: USERDATA) DATA {
-                        // CHECKPOINT //FIXME hy is heapsort failing? 
-                        if (get_len(data_, userdata) == 0) {
+                        // CHECKPOINT //FIXME why is heapsort failing?
+                        if (get_len(data_, userdata) < 2) {
                             @branchHint(.unlikely);
                             return data_;
                         }
                         assert_valid_range(data_, first, last, userdata, @src());
+                        var heap_len = range_len(data_, first, last, userdata);
                         var data = build_max_heap_within_range(data_, first, last, userdata);
-                        var heap_end = last;
-                        while (!id_equals(data, heap_end, first, userdata)) {
-                            data = swap(data, heap_end, first, userdata);
-                            heap_end = prev_id(data, heap_end, userdata);
-                            data = max_heap_sift_down_with_range(data, first, first, heap_end, userdata);
+                        var heap_last = last;
+                        while (heap_len > 1) {
+                            data = swap(data, heap_last, first, userdata);
+                            heap_last = prev_id(data, heap_last, userdata);
+                            heap_len -= 1;
+                            data = max_heap_sift_down_with_range(data, first, heap_last, heap_len, first, 0, userdata);
                         }
                         return data;
                     }
 
                     const PartitionResult = struct {
-                        sub_partition_left_hi: COUNT,
-                        sub_partition_right_lo: COUNT,
+                        sub_partition_left_hi: ID,
+                        sub_partition_right_lo: ID,
                     };
                 };
             }
@@ -2592,75 +2655,136 @@ const SORT_TEST_CASES = struct {
         input: []const u8,
         expected_output: []const u8,
     };
+    const BlindElem = TEST_UTILS.BLIND.ELEM;
+    pub const BlindCase = struct {
+        input: []const BlindElem,
+        expected_output: []const BlindElem,
+    };
+    fn U8_TO_BLIND(comptime U8_ARR: type) type {
+        return [@typeInfo(U8_ARR).array.len]BlindElem;
+    }
+    fn MakeBlind(u8_arr: anytype) U8_TO_BLIND(@TypeOf(u8_arr)) {
+        var out: U8_TO_BLIND(@TypeOf(u8_arr)) = undefined;
+        for (u8_arr[0..], 0..) |val, i| {
+            out[i] = BlindElem.new(@intCast(val));
+        }
+        return out;
+    }
 
     const in01 = [_]u8{};
     const ex01 = [_]u8{};
+    const b_in01 = MakeBlind(in01);
+    const b_ex01 = MakeBlind(ex01);
 
     const in02 = [_]u8{42};
     const ex02 = [_]u8{42};
+    const b_in02 = MakeBlind(in02);
+    const b_ex02 = MakeBlind(ex02);
 
     const in03 = [_]u8{ 1, 2 };
     const ex03 = [_]u8{ 1, 2 };
+    const b_in03 = MakeBlind(in03);
+    const b_ex03 = MakeBlind(ex03);
 
     const in04 = [_]u8{ 2, 1 };
     const ex04 = [_]u8{ 1, 2 };
+    const b_in04 = MakeBlind(in04);
+    const b_ex04 = MakeBlind(ex04);
 
     const in05 = [_]u8{ 7, 7 };
     const ex05 = [_]u8{ 7, 7 };
+    const b_in05 = MakeBlind(in05);
+    const b_ex05 = MakeBlind(ex05);
 
     const in06 = [_]u8{ 1, 2, 3, 4, 5, 6, 7, 8 };
     const ex06 = [_]u8{ 1, 2, 3, 4, 5, 6, 7, 8 };
+    const b_in06 = MakeBlind(in06);
+    const b_ex06 = MakeBlind(ex06);
 
     const in07 = [_]u8{ 8, 7, 6, 5, 4, 3, 2, 1 };
     const ex07 = [_]u8{ 1, 2, 3, 4, 5, 6, 7, 8 };
+    const b_in07 = MakeBlind(in07);
+    const b_ex07 = MakeBlind(ex07);
 
     const in08 = [_]u8{ 0, 0, 0, 0, 0 };
     const ex08 = [_]u8{ 0, 0, 0, 0, 0 };
+    const b_in08 = MakeBlind(in08);
+    const b_ex08 = MakeBlind(ex08);
 
     const in09 = [_]u8{ 255, 255, 255, 255, 255 };
     const ex09 = [_]u8{ 255, 255, 255, 255, 255 };
+    const b_in09 = MakeBlind(in09);
+    const b_ex09 = MakeBlind(ex09);
 
     const in10 = [_]u8{ 0, 255, 0, 255, 0, 255, 0, 255 };
     const ex10 = [_]u8{ 0, 0, 0, 0, 255, 255, 255, 255 };
+    const b_in10 = MakeBlind(in10);
+    const b_ex10 = MakeBlind(ex10);
 
     const in11 = [_]u8{ 255, 0, 128, 0, 255, 128 };
     const ex11 = [_]u8{ 0, 0, 128, 128, 255, 255 };
+    const b_in11 = MakeBlind(in11);
+    const b_ex11 = MakeBlind(ex11);
 
     const in12 = [_]u8{ 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5 };
     const ex12 = [_]u8{ 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5 };
+    const b_in12 = MakeBlind(in12);
+    const b_ex12 = MakeBlind(ex12);
 
     const in13 = [_]u8{ 1, 2, 1, 2, 1, 2, 1, 2 };
     const ex13 = [_]u8{ 1, 1, 1, 1, 2, 2, 2, 2 };
+    const b_in13 = MakeBlind(in13);
+    const b_ex13 = MakeBlind(ex13);
 
     const in14 = [_]u8{ 3, 1, 2, 3, 1, 2, 3, 1, 2, 3 };
     const ex14 = [_]u8{ 1, 1, 1, 2, 2, 2, 3, 3, 3, 3 };
+    const b_in14 = MakeBlind(in14);
+    const b_ex14 = MakeBlind(ex14);
 
     const in15 = [_]u8{ 9, 9, 9, 1, 9, 9, 9, 9, 9, 9 };
     const ex15 = [_]u8{ 1, 9, 9, 9, 9, 9, 9, 9, 9, 9 };
+    const b_in15 = MakeBlind(in15);
+    const b_ex15 = MakeBlind(ex15);
 
     const in16 = [_]u8{ 9, 1, 2, 3, 4, 5, 6, 7, 8 };
     const ex16 = [_]u8{ 1, 2, 3, 4, 5, 6, 7, 8, 9 };
+    const b_in16 = MakeBlind(in16);
+    const b_ex16 = MakeBlind(ex16);
 
     const in17 = [_]u8{ 2, 3, 4, 5, 6, 7, 8, 9, 1 };
     const ex17 = [_]u8{ 1, 2, 3, 4, 5, 6, 7, 8, 9 };
+    const b_in17 = MakeBlind(in17);
+    const b_ex17 = MakeBlind(ex17);
 
     const in18 = [_]u8{ 1, 2, 3, 5, 4, 6, 7, 8 };
     const ex18 = [_]u8{ 1, 2, 3, 4, 5, 6, 7, 8 };
+    const b_in18 = MakeBlind(in18);
+    const b_ex18 = MakeBlind(ex18);
 
     const in19 = [_]u8{ 1, 3, 5, 7, 8, 6, 4, 2 };
     const ex19 = [_]u8{ 1, 2, 3, 4, 5, 6, 7, 8 };
+    const b_in19 = MakeBlind(in19);
+    const b_ex19 = MakeBlind(ex19);
 
     const in20 = [_]u8{ 1, 2, 3, 1, 2, 3, 1, 2, 3, 1, 2, 3 };
     const ex20 = [_]u8{ 1, 1, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3 };
+    const b_in20 = MakeBlind(in20);
+    const b_ex20 = MakeBlind(ex20);
 
     const in21 = [_]u8{ 5, 6, 7, 8, 1, 2, 3, 4 };
     const ex21 = [_]u8{ 1, 2, 3, 4, 5, 6, 7, 8 };
+    const b_in21 = MakeBlind(in21);
+    const b_ex21 = MakeBlind(ex21);
 
     const in22 = [_]u8{ 200, 100, 100, 100, 100, 100, 50 };
     const ex22 = [_]u8{ 50, 100, 100, 100, 100, 100, 200 };
+    const b_in22 = MakeBlind(in22);
+    const b_ex22 = MakeBlind(ex22);
 
     const in23 = [_]u8{ 10, 30, 20, 10, 30, 20, 10, 30, 20 };
     const ex23 = [_]u8{ 10, 10, 10, 20, 20, 20, 30, 30, 30 };
+    const b_in23 = MakeBlind(in23);
+    const b_ex23 = MakeBlind(ex23);
 
     const in24 = [_]u8{
         32, 31, 30, 29, 28, 27, 26, 25,
@@ -2674,6 +2798,8 @@ const SORT_TEST_CASES = struct {
         17, 18, 19, 20, 21, 22, 23, 24,
         25, 26, 27, 28, 29, 30, 31, 32,
     };
+    const b_in24 = MakeBlind(in24);
+    const b_ex24 = MakeBlind(ex24);
 
     const in25 = [_]u8{
         255, 254, 253, 252, 251, 250, 249, 248,
@@ -2685,6 +2811,8 @@ const SORT_TEST_CASES = struct {
         240, 241, 242, 243, 244, 245, 246, 247,
         248, 249, 250, 251, 252, 253, 254, 255,
     };
+    const b_in25 = MakeBlind(in25);
+    const b_ex25 = MakeBlind(ex25);
 
     const CASES = [_]Case{
         Case{ .input = in01[0..], .expected_output = ex01[0..] },
@@ -2713,6 +2841,33 @@ const SORT_TEST_CASES = struct {
         Case{ .input = in24[0..], .expected_output = ex24[0..] },
         Case{ .input = in25[0..], .expected_output = ex25[0..] },
     };
+    const BLIND_CASES = [_]BlindCase{
+        BlindCase{ .input = b_in01[0..], .expected_output = b_ex01[0..] },
+        BlindCase{ .input = b_in02[0..], .expected_output = b_ex02[0..] },
+        BlindCase{ .input = b_in03[0..], .expected_output = b_ex03[0..] },
+        BlindCase{ .input = b_in04[0..], .expected_output = b_ex04[0..] },
+        BlindCase{ .input = b_in05[0..], .expected_output = b_ex05[0..] },
+        BlindCase{ .input = b_in06[0..], .expected_output = b_ex06[0..] },
+        BlindCase{ .input = b_in07[0..], .expected_output = b_ex07[0..] },
+        BlindCase{ .input = b_in08[0..], .expected_output = b_ex08[0..] },
+        BlindCase{ .input = b_in09[0..], .expected_output = b_ex09[0..] },
+        BlindCase{ .input = b_in10[0..], .expected_output = b_ex10[0..] },
+        BlindCase{ .input = b_in11[0..], .expected_output = b_ex11[0..] },
+        BlindCase{ .input = b_in12[0..], .expected_output = b_ex12[0..] },
+        BlindCase{ .input = b_in13[0..], .expected_output = b_ex13[0..] },
+        BlindCase{ .input = b_in14[0..], .expected_output = b_ex14[0..] },
+        BlindCase{ .input = b_in15[0..], .expected_output = b_ex15[0..] },
+        BlindCase{ .input = b_in16[0..], .expected_output = b_ex16[0..] },
+        BlindCase{ .input = b_in17[0..], .expected_output = b_ex17[0..] },
+        BlindCase{ .input = b_in18[0..], .expected_output = b_ex18[0..] },
+        BlindCase{ .input = b_in19[0..], .expected_output = b_ex19[0..] },
+        BlindCase{ .input = b_in20[0..], .expected_output = b_ex20[0..] },
+        BlindCase{ .input = b_in21[0..], .expected_output = b_ex21[0..] },
+        BlindCase{ .input = b_in22[0..], .expected_output = b_ex22[0..] },
+        BlindCase{ .input = b_in23[0..], .expected_output = b_ex23[0..] },
+        BlindCase{ .input = b_in24[0..], .expected_output = b_ex24[0..] },
+        BlindCase{ .input = b_in25[0..], .expected_output = b_ex25[0..] },
+    };
     const LONGEST_CASE = find: {
         var longest: usize = 0;
         for (CASES[0..]) |case| {
@@ -2720,63 +2875,200 @@ const SORT_TEST_CASES = struct {
         }
         break :find longest;
     };
+    const NUM_RANDOM_TESTS: usize = 50;
 };
 
 const TEST_UTILS = struct {
-    fn MakeBlindId(comptime DATA: type, comptime COUNT: type, comptime USERDATA: type, comptime LEN: fn (DATA, USERDATA) COUNT) type {
-        return struct {
-            const Self = @This();
+    const BLIND = struct {
+        const DATA = struct {
+            counter: u64 = 0,
 
-            raw: [4]u8 = @splat(0),
-
-            pub fn real(self: Self) u32 {
-                return @bitCast(self.raw);
-            }
-            pub fn new(id: u32) Self {
-                return Self{ .raw = @bitCast(id) };
-            }
-
-            fn id_less(_: DATA, a: Self, b: Self, _: USERDATA) bool {
-                return a.real() < b.real();
-            }
-            fn id_less_or_equal(_: DATA, a: Self, b: Self, _: USERDATA) bool {
-                return a.real() <= b.real();
-            }
-            fn id_greater(_: DATA, a: Self, b: Self, _: USERDATA) bool {
-                return a.real() > b.real();
-            }
-            fn id_greater_or_equal(_: DATA, a: Self, b: Self, _: USERDATA) bool {
-                return a.real() >= b.real();
-            }
-            fn id_equal(_: DATA, a: Self, b: Self, _: USERDATA) bool {
-                return a.real() == b.real();
-            }
-            fn first(_: DATA, _: USERDATA) Self {
-                return Self{};
-            }
-            fn nth_from_start(_: DATA, n: COUNT, _: USERDATA) Self {
-                return .new(@intCast(n));
-            }
-            fn next(_: DATA, id: Self, _: USERDATA) Self {
-                return new(id.real() + 1);
-            }
-            fn nth_next(_: DATA, id: Self, n: COUNT, _: USERDATA) Self {
-                return new(id.real() + @as(u32, @intCast(n)));
-            }
-            fn prev(_: DATA, id: Self, _: USERDATA) Self {
-                return new(id.real() - 1);
-            }
-            fn nth_prev(_: DATA, id: Self, n: COUNT, _: USERDATA) Self {
-                return new(id.real() - @as(u32, @intCast(n)));
-            }
-            fn last(data: DATA, userdata: USERDATA) Self {
-                return .new(@intCast(LEN(data, userdata) - 1));
-            }
-            fn nth_from_end(data: DATA, n: COUNT, userdata: USERDATA) Self {
-                return .new(@intCast(LEN(data, userdata) - 1 - n));
+            pub fn incr(self: DATA) DATA {
+                return DATA{
+                    .counter = self.counter + 1,
+                };
             }
         };
-    }
+        const USERDATA_CONCRETE = struct {
+            ptr: [*]ELEM,
+            len: COUNT = 0,
+            cap: COUNT = 0,
+        };
+        const USERDATA = *USERDATA_CONCRETE;
+        const COUNT = u32;
+        const ID = struct {
+            raw: [4]u8 = @splat(0),
+
+            pub fn real(self: ID) u32 {
+                return @bitCast(self.raw);
+            }
+            pub fn new(id: u32) ID {
+                return ID{ .raw = @bitCast(id) };
+            }
+        };
+        const ELEM = struct {
+            a: u16,
+            b: u16,
+
+            pub fn real(self: ELEM) u32 {
+                return (@as(u32, @intCast(self.a)) << 16) | @as(u32, @intCast(self.b));
+            }
+            pub fn new(val: u32) ELEM {
+                return ELEM{
+                    .a = @as(u16, @intCast(val >> 16)),
+                    .b = @as(u16, @intCast(val & 0xFFFF)),
+                };
+            }
+            pub fn equal(a: ELEM, b: ELEM) bool {
+                return a.real() == b.real();
+            }
+        };
+        const FUNC = struct {
+            fn get_len(_: DATA, userdata: USERDATA) COUNT {
+                return userdata.len;
+            }
+            fn set_len(data: DATA, new_len: COUNT, userdata: USERDATA) DATA {
+                userdata.len = new_len;
+                return data.incr();
+            }
+            fn get_cap(_: DATA, userdata: USERDATA) COUNT {
+                return userdata.len;
+            }
+            fn set_cap(data: DATA, new_cap: COUNT, userdata: USERDATA) DATA {
+                userdata.cap = new_cap;
+                return data.incr();
+            }
+            fn get_base_ptr(_: DATA, userdata: USERDATA) [*]ELEM {
+                return userdata.ptr;
+            }
+            fn get_base_ptr_const(_: DATA, userdata: USERDATA) [*]const ELEM {
+                return userdata.ptr;
+            }
+            fn set_base_ptr(data: DATA, ptr: [*]ELEM, userdata: USERDATA) DATA {
+                userdata.ptr = ptr;
+                return data.incr();
+            }
+            fn get(_: DATA, id: ID, userdata: USERDATA) ELEM {
+                return userdata.ptr[id.real()];
+            }
+            fn get_ptr(_: DATA, id: ID, userdata: USERDATA) *ELEM {
+                return &userdata.ptr[id.real()];
+            }
+            fn set(data: DATA, id: ID, val: ELEM, userdata: USERDATA) DATA {
+                userdata.ptr[id.real()] = val;
+                return data.incr();
+            }
+            fn id_less(_: DATA, a: ID, b: ID, _: USERDATA) bool {
+                return a.real() < b.real();
+            }
+            fn id_less_or_equal(_: DATA, a: ID, b: ID, _: USERDATA) bool {
+                return a.real() <= b.real();
+            }
+            fn id_greater(_: DATA, a: ID, b: ID, _: USERDATA) bool {
+                return a.real() > b.real();
+            }
+            fn id_greater_or_equal(_: DATA, a: ID, b: ID, _: USERDATA) bool {
+                return a.real() >= b.real();
+            }
+            fn id_equal(_: DATA, a: ID, b: ID, _: USERDATA) bool {
+                return a.real() == b.real();
+            }
+            fn first(_: DATA, _: USERDATA) ID {
+                return ID{};
+            }
+            fn nth_from_start(_: DATA, n: COUNT, _: USERDATA) ID {
+                return .new(@intCast(n));
+            }
+            fn next(_: DATA, id: ID, _: USERDATA) ID {
+                return ID.new(id.real() + 1);
+            }
+            fn nth_next(_: DATA, id: ID, n: COUNT, _: USERDATA) ID {
+                return ID.new(id.real() + @as(u32, @intCast(n)));
+            }
+            fn prev(_: DATA, id: ID, _: USERDATA) ID {
+                return ID.new(id.real() - 1);
+            }
+            fn nth_prev(_: DATA, id: ID, n: COUNT, _: USERDATA) ID {
+                return ID.new(id.real() - @as(u32, @intCast(n)));
+            }
+            fn last(data: DATA, userdata: USERDATA) ID {
+                return .new(@intCast(get_len(data, userdata) -% 1));
+            }
+            fn nth_from_end(data: DATA, n: COUNT, userdata: USERDATA) ID {
+                return .new(@intCast(get_len(data, userdata) -% 1 -% n));
+            }
+            fn elem_less(a: ELEM, b: ELEM, _: USERDATA) bool {
+                return a.real() < b.real();
+            }
+            fn elem_less_or_equal(a: ELEM, b: ELEM, _: USERDATA) bool {
+                return a.real() <= b.real();
+            }
+            fn elem_greater(a: ELEM, b: ELEM, _: USERDATA) bool {
+                return a.real() > b.real();
+            }
+            fn elem_greater_or_equal(a: ELEM, b: ELEM, _: USERDATA) bool {
+                return a.real() >= b.real();
+            }
+            fn elem_equal(a: ELEM, b: ELEM, _: USERDATA) bool {
+                return a.real() == b.real();
+            }
+            fn valid_id(_: DATA, id: ID, userdata: USERDATA) bool {
+                return 0 <= id.real() and id.real() < userdata.len;
+            }
+            fn invalid_after(_: DATA, userdata: USERDATA) ID {
+                return ID.new(@intCast(userdata.len));
+            }
+            fn invalid_before(_: DATA, _: USERDATA) ID {
+                return ID.new(math.maxInt(u32));
+            }
+        };
+        const BASE = DataManipulationPackage{
+            .COUNT_INT = COUNT,
+            .DATA = DATA,
+            .ELEM = ELEM,
+            .ID = ID,
+            .USERDATA = USERDATA,
+        };
+        const CORE_ACCESS = BASE.CoreAccessFuncs(){
+            .get_base_ptr = FUNC.get_base_ptr,
+            .get_base_ptr_const = FUNC.get_base_ptr,
+            .set_base_ptr = FUNC.set_base_ptr,
+            .get_len = FUNC.get_len,
+            .set_len = FUNC.set_len,
+            .get_cap = FUNC.get_cap,
+            .set_cap = FUNC.set_cap,
+        };
+        const PKG_WITH_CORE = BASE.WithCoreAccessFuncs(CORE_ACCESS).select_functions(false, .{}, {}).Finalize(void, {});
+        const BASE_WITH_CUSTOM = BASE.WithCoreAccessFuncs(.{});
+        const PKG_WITH_CUSTOM = BASE_WITH_CUSTOM.select_functions(false, BASE_WITH_CUSTOM.CustomDataFuncs{
+            .GET = FUNC.get,
+            .GET_PTR = FUNC.get_ptr,
+            .SET = FUNC.set,
+            .GET_LEN = FUNC.get_len,
+            .FIRST_ID = FUNC.first,
+            .LAST_ID = FUNC.last,
+            .NEXT_ID = FUNC.next,
+            .PREV_ID = FUNC.prev,
+            .NTH_NEXT_ID = FUNC.nth_next,
+            .NTH_PREV_ID = FUNC.nth_prev,
+            .NTH_ID_FROM_START = FUNC.nth_from_start,
+            .NTH_ID_FROM_END = FUNC.nth_from_end,
+            .ID_LESS_THAN = FUNC.id_less,
+            .ID_LESS_THAN_OR_EQUAL = FUNC.id_less_or_equal,
+            .ID_GREATER_THAN = FUNC.id_greater,
+            .ID_GREATER_THAN_OR_EQUAL = FUNC.id_greater_or_equal,
+            .ID_EQUALS = FUNC.id_equal,
+            .LESS_THAN = FUNC.elem_less,
+            .LESS_THAN_OR_EQUAL = FUNC.elem_less_or_equal,
+            .GREATER_THAN = FUNC.elem_greater,
+            .GREATER_THAN_OR_EQUAL = FUNC.elem_greater_or_equal,
+            .ORDER_EQUALS = FUNC.elem_equal,
+            .EXACT_EQUALS = FUNC.elem_equal,
+            .VALID_ID = FUNC.valid_id,
+            .INVALID_ID_AFTER = FUNC.invalid_after,
+            .INVALID_ID_BEFORE = FUNC.invalid_before,
+        }, {}).Finalize(void, {});
+    };
 };
 
 test "Utils_DataManipulation => median_of_3_index" {
@@ -2816,32 +3108,124 @@ test "Utils_DataManipulation => median_of_3_index" {
     }
 }
 
-test "Utils_DataManipulation => sorting algorithms (native ops)" {
-    const dmp = native_data_structure_manipulation_package([]u8, u8);
+test "Utils_DataManipulation => sorting algorithms" {
     const BUF_MAX_LEN: usize = @max(SORT_TEST_CASES.LONGEST_CASE, 50);
-    var buf: [BUF_MAX_LEN]u8 = undefined;
-    var buf_len: usize = 0;
-    var is_sorted: bool = false;
-    for (SORT_TEST_CASES.CASES[0..]) |case| {
-        buf_len = case.input.len;
-        var buf_slice = buf[0..buf_len];
-        // Insertion Sort
-        @memcpy(buf_slice, case.input);
-        buf_slice = dmp.insertion_sort(buf_slice, 0, buf_len -% 1, {});
-        try Test.expect_slices_equal_t_src(u8, case.expected_output, buf_slice, @src(), "", .{});
-        is_sorted = dmp.is_sorted(buf_slice, 0, buf_len -% 1, {});
-        try Test.expect_true_src(is_sorted, @src(), "", .{});
-        // Quicksort
-        @memcpy(buf_slice, case.input);
-        buf_slice = dmp.quicksort(buf_slice, 0, buf_len -% 1, {}, .{});
-        try Test.expect_slices_equal_t_src(u8, case.expected_output, buf_slice, @src(), "", .{});
-        is_sorted = dmp.is_sorted(buf_slice, 0, buf_len -% 1, {});
-        try Test.expect_true_src(is_sorted, @src(), "", .{});
-        // Heapsort
-        @memcpy(buf_slice, case.input);
-        buf_slice = dmp.heapsort(buf_slice, 0, buf_len -% 1, {});
-        try Test.expect_slices_equal_t_src(u8, case.expected_output, buf_slice, @src(), "", .{});
-        is_sorted = dmp.is_sorted(buf_slice, 0, buf_len -% 1, {});
-        try Test.expect_true_src(is_sorted, @src(), "", .{});
+    const rand = Root.Rand.seed_default_rand_time_now_and_get(Test.io);
+    {
+        const dmp = native_data_structure_manipulation_package([]u8, u8);
+        var buf: [BUF_MAX_LEN]u8 = undefined;
+        var buf_len: usize = 0;
+        var is_sorted: bool = false;
+        for (SORT_TEST_CASES.CASES[0..]) |case| {
+            buf_len = case.input.len;
+            var buf_slice = buf[0..buf_len];
+            // Insertion Sort
+            @memcpy(buf_slice, case.input);
+            buf_slice = dmp.insertion_sort(buf_slice, 0, buf_len -% 1, {});
+            try Test.expect_slices_equal_t_src(u8, case.expected_output, buf_slice, @src(), "", .{});
+            is_sorted = dmp.is_sorted(buf_slice, 0, buf_len -% 1, {});
+            try Test.expect_true_src(is_sorted, @src(), "", .{});
+            // Quicksort
+            @memcpy(buf_slice, case.input);
+            buf_slice = dmp.quicksort(buf_slice, 0, buf_len -% 1, {}, .{});
+            try Test.expect_slices_equal_t_src(u8, case.expected_output, buf_slice, @src(), "", .{});
+            is_sorted = dmp.is_sorted(buf_slice, 0, buf_len -% 1, {});
+            try Test.expect_true_src(is_sorted, @src(), "", .{});
+            // Heapsort
+            @memcpy(buf_slice, case.input);
+            buf_slice = dmp.heapsort(buf_slice, 0, buf_len -% 1, {});
+            try Test.expect_slices_equal_t_src(u8, case.expected_output, buf_slice, @src(), "", .{});
+            is_sorted = dmp.is_sorted(buf_slice, 0, buf_len -% 1, {});
+            try Test.expect_true_src(is_sorted, @src(), "", .{});
+        }
+        for (0..SORT_TEST_CASES.NUM_RANDOM_TESTS) |_| {
+            buf_len = rand.intRangeAtMost(usize, 2, BUF_MAX_LEN);
+            var buf_slice = buf[0..buf_len];
+            // Insertion Sort Random
+            for (0..buf_len) |i| {
+                buf[i] = rand.int(u8);
+            }
+            buf_slice = dmp.insertion_sort(buf_slice, 0, buf_len -% 1, {});
+            is_sorted = dmp.is_sorted(buf_slice, 0, buf_len -% 1, {});
+            try Test.expect_true_src(is_sorted, @src(), "", .{});
+            // Quicksort Random
+            for (0..buf_len) |i| {
+                buf[i] = rand.int(u8);
+            }
+            buf_slice = dmp.quicksort(buf_slice, 0, buf_len -% 1, {}, .{});
+            is_sorted = dmp.is_sorted(buf_slice, 0, buf_len -% 1, {});
+            try Test.expect_true_src(is_sorted, @src(), "", .{});
+            // Heapsort Random
+            for (0..buf_len) |i| {
+                buf[i] = rand.int(u8);
+            }
+            buf_slice = dmp.heapsort(buf_slice, 0, buf_len -% 1, {});
+            is_sorted = dmp.is_sorted(buf_slice, 0, buf_len -% 1, {});
+            try Test.expect_true_src(is_sorted, @src(), "", .{});
+        }
+    }
+    {
+        const dmp = TEST_UTILS.BLIND.PKG_WITH_CUSTOM;
+        const Blind = TEST_UTILS.BLIND.ELEM;
+        var buf: [BUF_MAX_LEN]Blind = undefined;
+        var buf_len: u32 = 0;
+        var is_sorted: bool = false;
+        var udata_concrete = TEST_UTILS.BLIND.USERDATA_CONCRETE{
+            .ptr = @ptrCast(&buf),
+            .len = 0,
+            .cap = 0,
+        };
+        const udata: TEST_UTILS.BLIND.USERDATA = &udata_concrete;
+        var data = TEST_UTILS.BLIND.DATA{};
+        for (SORT_TEST_CASES.BLIND_CASES[0..]) |case| {
+            buf_len = @intCast(case.input.len);
+            udata_concrete.len = buf_len;
+            udata_concrete.cap = buf_len;
+            const buf_slice = buf[0..buf_len];
+            // Insertion Sort
+            @memcpy(buf_slice, case.input);
+            data = dmp.insertion_sort(data, dmp.first_id(data, udata), dmp.last_id(data, udata), udata);
+            try Test.expect_slices_equal_t_func_src(Blind, Blind.equal, case.expected_output, buf_slice, @src(), "", .{});
+            is_sorted = dmp.is_sorted(data, dmp.first_id(data, udata), dmp.last_id(data, udata), udata);
+            try Test.expect_true_src(is_sorted, @src(), "", .{});
+            // Quicksort
+            @memcpy(buf_slice, case.input);
+            data = dmp.quicksort(data, dmp.first_id(data, udata), dmp.last_id(data, udata), udata, .{});
+            try Test.expect_slices_equal_t_func_src(Blind, Blind.equal, case.expected_output, buf_slice, @src(), "", .{});
+            is_sorted = dmp.is_sorted(data, dmp.first_id(data, udata), dmp.last_id(data, udata), udata);
+            try Test.expect_true_src(is_sorted, @src(), "", .{});
+            // Heapsort
+            @memcpy(buf_slice, case.input);
+            data = dmp.heapsort(data, dmp.first_id(data, udata), dmp.last_id(data, udata), udata);
+            try Test.expect_slices_equal_t_func_src(Blind, Blind.equal, case.expected_output, buf_slice, @src(), "", .{});
+            is_sorted = dmp.is_sorted(data, dmp.first_id(data, udata), dmp.last_id(data, udata), udata);
+            try Test.expect_true_src(is_sorted, @src(), "", .{});
+        }
+        for (0..SORT_TEST_CASES.NUM_RANDOM_TESTS) |_| {
+            buf_len = rand.intRangeAtMost(u32, 2, BUF_MAX_LEN);
+            udata_concrete.len = buf_len;
+            udata_concrete.cap = buf_len;
+            // Insertion Sort Random
+            for (0..buf_len) |i| {
+                buf[i] = Blind.new(rand.int(u32));
+            }
+            data = dmp.insertion_sort(data, dmp.first_id(data, udata), dmp.last_id(data, udata), udata);
+            is_sorted = dmp.is_sorted(data, dmp.first_id(data, udata), dmp.last_id(data, udata), udata);
+            try Test.expect_true_src(is_sorted, @src(), "", .{});
+            // Quicksort Random
+            for (0..buf_len) |i| {
+                buf[i] = Blind.new(rand.int(u32));
+            }
+            data = dmp.quicksort(data, dmp.first_id(data, udata), dmp.last_id(data, udata), udata, .{});
+            is_sorted = dmp.is_sorted(data, dmp.first_id(data, udata), dmp.last_id(data, udata), udata);
+            try Test.expect_true_src(is_sorted, @src(), "", .{});
+            // Heapsort Random
+            for (0..buf_len) |i| {
+                buf[i] = Blind.new(rand.int(u32));
+            }
+            data = dmp.heapsort(data, dmp.first_id(data, udata), dmp.last_id(data, udata), udata);
+            is_sorted = dmp.is_sorted(data, dmp.first_id(data, udata), dmp.last_id(data, udata), udata);
+            try Test.expect_true_src(is_sorted, @src(), "", .{});
+        }
     }
 }
