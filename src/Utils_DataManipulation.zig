@@ -274,17 +274,17 @@ const F = struct {
     pub const NTH_NEXT_ID: CUSTOM_FLAG = 1 << 18;
     pub const GET_LEN: CUSTOM_FLAG = 1 << 19;
     pub const SET_LEN: CUSTOM_FLAG = 1 << 20;
-    // pub const GET_CAP: CUSTOM_FLAG = 1 << 21;
-    // pub const SET_CAP: CUSTOM_FLAG = 1 << 22;
+    pub const GET_CAP: CUSTOM_FLAG = 1 << 21;
+    pub const SET_CAP: CUSTOM_FLAG = 1 << 22;
     pub const RANGE_LEN: CUSTOM_FLAG = 1 << 23;
-    // pub const APPEND_ONE: CUSTOM_FLAG = 1 << 24;
-    // pub const APPEND_N: CUSTOM_FLAG = 1 << 25;
-    // pub const INSERT_ONE: CUSTOM_FLAG = 1 << 26;
-    // pub const INSERT_N: CUSTOM_FLAG = 1 << 27;
-    // pub const DELETE_ONE: CUSTOM_FLAG = 1 << 28;
-    // pub const DELETE_N: CUSTOM_FLAG = 1 << 29;
+    pub const APPEND_ONE_SLOT_ASSUME_CAP: CUSTOM_FLAG = 1 << 24;
+    pub const APPEND_MANY_SLOTS_ASSUME_CAP: CUSTOM_FLAG = 1 << 25;
+    pub const INSERT_ONE_SLOT_ASSUME_CAP: CUSTOM_FLAG = 1 << 26;
+    pub const INSERT_MANY_SLOTS_ASSUME_CAP: CUSTOM_FLAG = 1 << 27;
+    pub const DELETE_ONE: CUSTOM_FLAG = 1 << 28;
+    pub const DELETE_RANGE: CUSTOM_FLAG = 1 << 29;
     pub const REVERSE_RANGE: CUSTOM_FLAG = 1 << 30;
-    // pub const ENSURE_SPACE: CUSTOM_FLAG = 1 << 31;
+    pub const ENSURE_SPACE: CUSTOM_FLAG = 1 << 31;
     pub const MOVE_ONE_PRESERVE: CUSTOM_FLAG = 1 << 32;
     pub const MOVE_BLOCK_PRESERVE: CUSTOM_FLAG = 1 << 33;
     // pub const NEVER_OVERLAP_COPY_RANGE: CUSTOM_FLAG = 1 << 34;
@@ -301,6 +301,12 @@ const F = struct {
     pub const VALID_ID: CUSTOM_FLAG = 1 << 45;
     pub const INVALID_ID_AFTER: CUSTOM_FLAG = 1 << 46;
     pub const INVALID_ID_BEFORE: CUSTOM_FLAG = 1 << 47;
+    pub const GET_BASE_PTR: CUSTOM_FLAG = 1 << 48;
+    pub const GET_BASE_CONST_PTR: CUSTOM_FLAG = 1 << 49;
+    pub const SET_BASE_PTR: CUSTOM_FLAG = 1 << 50;
+    pub const REALLOC_EXACT: CUSTOM_FLAG = 1 << 51;
+    pub const MOVE_RIGHT_NO_PRESERVE: CUSTOM_FLAG = 1 << 52;
+    pub const MOVE_LEFT_NO_PRESERVE: CUSTOM_FLAG = 1 << 53;
 };
 const FuncFlags = struct {
     raw: CUSTOM_FLAG = 0,
@@ -453,30 +459,64 @@ const INFER = struct {
         const FROM_GET_SET = F.GET | F.SET | F.NEXT_ID | F.PREV_ID;
         const FROM_MOVE_BLOCK = F.MOVE_BLOCK_PRESERVE;
     };
+    pub const REALLOC_EXACT = struct {
+        const FROM_BASE_PTR_CAP_LEN = F.GET_BASE_PTR | F.SET_BASE_PTR | F.GET_CAP | F.SET_CAP;
+    };
+    pub const ENSURE_SPACE = struct {
+        const FROM_REALLOC_CAP_LEN = F.REALLOC_EXACT | F.GET_LEN;
+        const FROM_BASE_PTR_CAP_LEN = F.GET_BASE_PTR | F.SET_BASE_PTR | F.GET_CAP | F.SET_CAP | F.GET_LEN;
+    };
+    pub const GET_BASE_CONST_PTR = struct {
+        const FROM_BASE_PTR = F.GET_BASE_PTR;
+    };
+    pub const APPEND_ONE = struct {
+        const FROM_APPEND_MANY = F.APPEND_MANY_SLOTS_ASSUME_CAP;
+    };
+    pub const APPEND_MANY = struct {
+        const FROM_APPEND_ONE = F.APPEND_ONE_SLOT_ASSUME_CAP;
+    };
+    pub const INSERT_ONE = struct {
+        const FROM_APPEND_ONE_MOVE_ONE = F.APPEND_ONE_SLOT_ASSUME_CAP;
+    };
+    pub const INSERT_MANY = struct {
+        const FROM_APPEND_MANY_MOVE_BLOCK = F.APPEND_MANY_SLOTS_ASSUME_CAP;
+    };
+    pub const MOVE_BLOCK_RIGHT_NO_PRESERVE = struct {
+        const FROM_GET_SET_PREV = F.GET | F.SET | F.PREV_ID;
+    };
+    pub const MOVE_BLOCK_LEFT_NO_PRESERVE = struct {
+        const FROM_GET_SET_NEXT = F.GET | F.SET | F.NEXT_ID;
+    };
+};
+
+pub const DefaultFuncMode = enum(u8) {
+    ALLOW_DEFAULT_IMPLEMENTATIONS,
+    NO_DEFAULT_IMPLEMENTATIONS,
 };
 
 pub fn native_data_structure_manipulation_package(comptime DATA_STRUCTURE: type, comptime ELEM: type) type {
-    const core = DataManipulationPackage{
+    const core = DataManipulationCore{
         .DATA = DATA_STRUCTURE,
         .ELEM = ELEM,
         .ID = usize,
         .COUNT_INT = usize,
         .USERDATA = void,
     };
-    return core.WithCoreAccessFuncs(.NONE).select_functions(true, .{}, {}).Finalize(void, {});
+    return core.define(.ALLOW_DEFAULT_IMPLEMENTATIONS, .{});
 }
 
-pub fn contiguous_memory_manipulation_package_using_core_access(comptime CORE_DEF: DataManipulationPackage, comptime CORE_ACCESS: CORE_DEF.CoreAccessFuncs()) type {
-    return CORE_DEF.WithCoreAccessFuncs(CORE_ACCESS).select_functions(true, .{}, {}).Finalize(void, {});
+pub fn contiguous_memory_manipulation_package_using_core_access(comptime CORE: DataManipulationCore, comptime CORE_ACCESS: CORE.CustomCoreAccessFunctions()) type {
+    const CUSTOM = CORE_ACCESS.to_full_custom();
+    return CORE.define(.ALLOW_DEFAULT_IMPLEMENTATIONS, CUSTOM);
 }
-pub fn custom_memory_manipulation_package_no_defaults(comptime CORE_DEF: DataManipulationPackage, comptime CUSTOM_FUNCS: CORE_DEF.WithCoreAccessFuncs(.NONE), comptime CUSTOM_FIELD_FUNCS: anytype) type {
-    return CORE_DEF.WithCoreAccessFuncs(.NONE).select_functions(false, CUSTOM_FUNCS, CUSTOM_FIELD_FUNCS).Finalize(@TypeOf(CUSTOM_FIELD_FUNCS), CUSTOM_FIELD_FUNCS);
+pub fn custom_memory_manipulation_package_no_defaults(comptime CORE: DataManipulationCore, comptime CUSTOM: CORE.Functions().CustomFunctions) type {
+    return CORE.define(.NO_DEFAULT_IMPLEMENTATIONS, CUSTOM);
 }
-pub fn custom_memory_manipulation_package_default_fallbacks_with_core_access(comptime CORE_DEF: DataManipulationPackage, comptime CORE_ACCESS: CORE_DEF.CoreAccessFuncs(), comptime CUSTOM_FUNCS: CORE_DEF.WithCoreAccessFuncs(CORE_ACCESS), comptime CUSTOM_FIELD_FUNCS: anytype) type {
-    return CORE_DEF.WithCoreAccessFuncs(CORE_ACCESS).select_functions(true, CUSTOM_FUNCS, CUSTOM_FIELD_FUNCS).Finalize(@TypeOf(CUSTOM_FIELD_FUNCS), CUSTOM_FIELD_FUNCS);
+pub fn custom_memory_manipulation_package_default_fallbacks(comptime CORE: DataManipulationCore, comptime CUSTOM: CORE.Functions().CustomFunctions) type {
+    return CORE.define(.ALLOW_DEFAULT_IMPLEMENTATIONS, CUSTOM);
 }
 
-pub const DataManipulationPackage = struct {
+pub const DataManipulationCore = struct {
     /// The homogenous data structure that will be acted upon
     DATA: type = undefined,
     /// The homogenous element type the data structe holds
@@ -505,29 +545,119 @@ pub const DataManipulationPackage = struct {
     /// and you need to use the reference type to get the real type out of the external userdata
     USERDATA: type = void,
 
-    pub fn CoreAccessFuncs(comptime CORE_DEF: DataManipulationPackage) type {
-        return struct {
-            get_base_ptr: ?fn (data: CORE_DEF.DATA, userdata: CORE_DEF.USERDATA) [*]CORE_DEF.ELEM = null,
-            get_base_ptr_const: ?fn (data: CORE_DEF.DATA, userdata: CORE_DEF.USERDATA) [*]const CORE_DEF.ELEM = null,
-            set_base_ptr: ?fn (data: CORE_DEF.DATA, ptr: [*]CORE_DEF.ELEM, userdata: CORE_DEF.USERDATA) CORE_DEF.DATA = null,
-            get_len: ?fn (data: CORE_DEF.DATA, userdata: CORE_DEF.USERDATA) CORE_DEF.COUNT_INT = null,
-            set_len: ?fn (data: CORE_DEF.DATA, len: CORE_DEF.COUNT_INT, userdata: CORE_DEF.USERDATA) CORE_DEF.DATA = null,
-            get_cap: ?fn (data: CORE_DEF.DATA, userdata: CORE_DEF.USERDATA) CORE_DEF.COUNT_INT = null,
-            set_cap: ?fn (data: CORE_DEF.DATA, cap: CORE_DEF.COUNT_INT, userdata: CORE_DEF.USERDATA) CORE_DEF.DATA = null,
+    pub fn define(comptime CORE: DataManipulationCore, comptime DEFAULT_MODE: DefaultFuncMode, comptime CUSTOM: CORE.Functions().CustomFunctions) type {
+        return CORE.select_functions(DEFAULT_MODE, CUSTOM).finalize();
+    }
 
-            pub const NONE = @This(){};
+    pub fn select_functions(comptime CORE: DataManipulationCore, comptime DEFAULT_MODE: DefaultFuncMode, comptime CUSTOM: CORE.Functions().CustomFunctions) CORE.Functions() {
+        comptime {
+            const ALLOW_DEFAULT = DEFAULT_MODE == .ALLOW_DEFAULT_IMPLEMENTATIONS;
+            const FUNC_SELECTOR = CORE.Functions().FUNC_SELECTOR;
+            const CORE_AND_FUNCS = CORE.Functions();
+            // BUILD FLAGS FOR PROVIDED CUSTOM FUNCTIONS
+            var FLAGS = FuncFlags{};
+            for (@typeInfo(F).@"struct".decls) |FNN| {
+                const FN_NAME = FNN.name;
+                FLAGS.add_if_not_null(@field(F, FN_NAME), @field(CUSTOM, FN_NAME));
+            }
+            // SELECT THE CORRECT FUNCTION FOR EACH GIVEN THE CUSTOM/FLAGS/ALLOW_DEFAULT
+            const SELECT = FUNC_SELECTOR(CUSTOM, FLAGS, ALLOW_DEFAULT);
+            const FINAL_FUNCS: CORE_AND_FUNCS = CORE_AND_FUNCS{
+                .ID_EQUALS = SELECT.ID_EQUALS.func,
+                .ID_LESS_THAN = SELECT.ID_LESS_THAN.func,
+                .ID_LESS_THAN_OR_EQUAL = SELECT.ID_LESS_THAN_OR_EQUAL.func,
+                .ID_GREATER_THAN = SELECT.ID_GREATER_THAN.func,
+                .ID_GREATER_THAN_OR_EQUAL = SELECT.ID_GREATER_THAN_OR_EQUAL.func,
+                .ID_VALID = SELECT.ID_VALID.func,
+                .ID_INVALID_AFTER = SELECT.INVALID_ID_AFTER.func,
+                .ID_INVALID_BEFORE = SELECT.INVALID_ID_BEFORE.func,
+                .FIRST_ID = SELECT.FIRST_ID.func,
+                .LAST_ID = SELECT.LAST_ID.func,
+                .NTH_ID_FROM_START = SELECT.NTH_FROM_START.func,
+                .NTH_ID_FROM_END = SELECT.NTH_FROM_END.func,
+                .PREV_ID = SELECT.PREV_ID.func,
+                .NEXT_ID = SELECT.NEXT_ID.func,
+                .NTH_PREV_ID = SELECT.NTH_PREV_ID.func,
+                .NTH_NEXT_ID = SELECT.NTH_NEXT_ID.func,
+                .GET_LEN = SELECT.GET_LEN.func,
+                .SET_LEN = SELECT.SET_LEN.func,
+                .GET_CAP = SELECT.GET_CAP.func,
+                .SET_CAP = SELECT.SET_CAP.func,
+                .GET_BASE_PTR = SELECT.GET_BASE_PTR.func,
+                .GET_BASE_CONST_PTR = SELECT.GET_BASE_CONST_PTR.func,
+                .SET_BASE_PTR = SELECT.SET_BASE_PTR.func,
+                .RANGE_LEN = SELECT.RANGE_LEN.func,
+                .GET = SELECT.GET.func,
+                .GET_PTR = SELECT.GET_PTR.func,
+                .GET_CONST_PTR = SELECT.GET_CONST_PTR.func,
+                .SET = SELECT.SET.func,
+                .SWAP = SELECT.SWAP.func,
+                .GREATER_THAN = SELECT.GREATER_THAN.func,
+                .GREATER_THAN_OR_EQUAL = SELECT.GREATER_THAN_OR_EQUAL.func,
+                .LESS_THAN = SELECT.LESS_THAN.func,
+                .LESS_THAN_OR_EQUAL = SELECT.LESS_THAN_OR_EQUAL.func,
+                .ORDER_EQUALS = SELECT.ORDER_EQUAL.func,
+                .EXACT_EQUALS = SELECT.EXACT_EQUAL.func,
+                .REVERSE_RANGE = SELECT.REVERSE_RANGE.func,
+                .MOVE_ONE_PRESERVE = SELECT.MOVE_ONE_PRESERVE.func,
+                .MOVE_BLOCK_PRESERVE = SELECT.MOVE_BLOCK_PRESERVE.func,
+                .ROTATE_RIGHT = SELECT.ROTATE_RIGHT.func,
+                .ROTATE_LEFT = SELECT.ROTATE_LEFT.func,
+                .SCRAMBLE = SELECT.SCRAMBLE.func,
+                .APPEND_ONE_SLOT_ASSUME_CAP = SELECT.APPEND_ONE_SLOT_ASSUME_CAP.func,
+                .APPEND_MANY_SLOTS_ASSUME_CAP = SELECT.APPEND_MANY_SLOTS_ASSUME_CAP.func,
+                .INSERT_ONE_SLOT_ASSUME_CAP = SELECT.INSERT_ONE_SLOT_ASSUME_CAP.func,
+                .INSERT_MANY_SLOTS_ASSUME_CAP = SELECT.INSERT_MANY_SLOTS_ASSUME_CAP.func,
+                .DELETE_ONE = SELECT.DELETE_ONE.func,
+                .DELETE_RANGE = SELECT.DELETE_RANGE.func,
+                .ENSURE_SPACE = SELECT.ENSURE_SPACE.func,
+                .REALLOC_EXACT = SELECT.REALLOC_EXACT.func,
+                .MOVE_BLOCK_RIGHT_NO_PRESERVE = SELECT.MOVE_BLOCK_RIGHT_NO_PRESERVE.func,
+                .MOVE_BLOCK_LEFT_NO_PRESERVE = SELECT.MOVE_BLOCK_LEFT_NO_PRESERVE.func,
+            };
+            return FINAL_FUNCS;
+        }
+    }
+
+    pub fn CustomCoreAccessFunctions(comptime CORE: DataManipulationCore) type {
+        return struct {
+            const CORE_ACCESS = @This();
+            const FN_IMPLICIT_COUNT = CORE.Functions().FN_IMPLICIT_COUNT;
+            const FN_SET_COUNT = CORE.Functions().FN_SET_COUNT;
+            const FN_GET_BASE_PTR = CORE.Functions().FN_GET_BASE_PTR;
+            const FN_GET_BASE_CONST_PTR = CORE.Functions().FN_GET_BASE_CONST_PTR;
+            const FN_SET_BASE_PTR = CORE.Functions().FN_SET_BASE_PTR;
+
+            GET_LEN: ?FN_IMPLICIT_COUNT = null,
+            SET_LEN: ?FN_SET_COUNT = null,
+            GET_CAP: ?FN_IMPLICIT_COUNT = null,
+            SET_CAP: ?FN_SET_COUNT = null,
+            GET_BASE_PTR: ?FN_GET_BASE_PTR = null,
+            GET_BASE_CONST_PTR: ?FN_GET_BASE_CONST_PTR = null,
+            SET_BASE_PTR: ?FN_SET_BASE_PTR = null,
+
+            pub fn to_full_custom(comptime SELF: CORE_ACCESS) CORE.Functions().CustomFunctions {
+                return CORE.Functions().CustomFunctions{
+                    .GET_LEN = SELF.GET_LEN,
+                    .SET_LEN = SELF.SET_LEN,
+                    .GET_CAP = SELF.GET_CAP,
+                    .SET_CAP = SELF.SET_CAP,
+                    .GET_BASE_PTR = SELF.GET_BASE_PTR,
+                    .GET_BASE_CONST_PTR = SELF.GET_BASE_CONST_PTR,
+                    .SET_BASE_PTR = SELF.SET_BASE_PTR,
+                };
+            }
         };
     }
 
-    pub fn WithCoreAccessFuncs(comptime CORE_DEF_: DataManipulationPackage, comptime CORE_ACCESS_FUNCS: CORE_DEF_.CoreAccessFuncs()) type {
+    pub fn Functions(comptime CORE_: DataManipulationCore) type {
         return struct {
-            const DEF_WITH_FUNCS = @This();
-            pub const CORE_DEF = CORE_DEF_;
-            pub const DATA_ = CORE_DEF.DATA;
-            pub const ELEM_ = CORE_DEF.ELEM;
-            pub const COUNT_ = CORE_DEF.COUNT_INT;
-            pub const ID_ = CORE_DEF.ID;
-            pub const USERDATA_ = CORE_DEF.USERDATA;
+            const CORE_AND_FUNCS = @This();
+            pub const DATA_ = CORE_.DATA;
+            pub const ELEM_ = CORE_.ELEM;
+            pub const COUNT_ = CORE_.COUNT_INT;
+            pub const ID_ = CORE_.ID;
+            pub const USERDATA_ = CORE_.USERDATA;
 
             ID_LESS_THAN: FN_ID_COMPARE,
             ID_LESS_THAN_OR_EQUAL: FN_ID_COMPARE,
@@ -547,6 +677,11 @@ pub const DataManipulationPackage = struct {
             NTH_NEXT_ID: FN_NTH_ID,
             GET_LEN: FN_IMPLICIT_COUNT,
             SET_LEN: FN_SET_COUNT,
+            GET_CAP: FN_IMPLICIT_COUNT,
+            SET_CAP: FN_SET_COUNT,
+            GET_BASE_PTR: FN_GET_BASE_PTR,
+            GET_BASE_CONST_PTR: FN_GET_BASE_CONST_PTR,
+            SET_BASE_PTR: FN_SET_BASE_PTR,
             RANGE_LEN: FN_RANGE_COUNT,
             GET: FN_GET,
             GET_PTR: FN_GET_PTR,
@@ -565,121 +700,16 @@ pub const DataManipulationPackage = struct {
             ROTATE_RIGHT: FN_ROTATE,
             ROTATE_LEFT: FN_ROTATE,
             SCRAMBLE: FN_SCRAMBLE,
-
-            fn default_get_base_ptr(data: DATA_, userdata: USERDATA_) [*]ELEM_ {
-                if (comptime CORE_ACCESS_FUNCS.get_base_ptr) |get_base| {
-                    return get_base(data, userdata);
-                }
-                if (comptime Types.type_is_struct(DATA_)) {
-                    if (comptime @hasField(DATA_, "items")) {
-                        if (comptime @hasField(@FieldType(DATA_, "items"), "ptr")) {
-                            return @ptrCast(data.items.ptr);
-                        } else {
-                            unreachable;
-                        }
-                    } else if (comptime @hasField(DATA_, "ptr")) {
-                        return @ptrCast(data.ptr);
-                    } else {
-                        unreachable;
-                    }
-                } else if (comptime Types.type_is_slice(DATA_)) {
-                    return @ptrCast(data.ptr);
-                } else {
-                    unreachable;
-                }
-            }
-            fn default_get_base_ptr_const(data: DATA_, userdata: USERDATA_) [*]const ELEM_ {
-                if (comptime CORE_ACCESS_FUNCS.get_base_ptr) |get_base| {
-                    return get_base(data, userdata);
-                }
-                if (comptime Types.type_is_struct(DATA_)) {
-                    if (comptime @hasField(DATA_, "items")) {
-                        if (comptime @hasField(@FieldType(DATA_, "items"), "ptr")) {
-                            return @ptrCast(data.items.ptr);
-                        } else {
-                            unreachable;
-                        }
-                    } else if (comptime @hasField(DATA_, "ptr")) {
-                        return @ptrCast(data.ptr);
-                    } else {
-                        unreachable;
-                    }
-                } else if (comptime Types.type_is_slice(DATA_)) {
-                    return @ptrCast(data.ptr);
-                } else {
-                    unreachable;
-                }
-            }
-            fn default_set_base_ptr(data: DATA_, ptr: [*]ELEM_, userdata: USERDATA_) DATA_ {
-                if (comptime CORE_ACCESS_FUNCS.set_base_ptr) |set_base| {
-                    return set_base(data, ptr, userdata);
-                }
-                var new_data = data;
-                if (comptime Types.type_is_struct(DATA_)) {
-                    if (comptime @hasField(DATA_, "items")) {
-                        if (comptime @hasField(@FieldType(DATA_, "items"), "ptr")) {
-                            new_data.items.ptr = @ptrCast(ptr);
-                        } else {
-                            unreachable;
-                        }
-                    } else if (comptime @hasField(DATA_, "ptr")) {
-                        new_data.ptr = @ptrCast(ptr);
-                    } else {
-                        unreachable;
-                    }
-                } else if (comptime Types.type_is_slice(DATA_)) {
-                    new_data.ptr = @ptrCast(ptr);
-                } else {
-                    unreachable;
-                }
-                return new_data;
-            }
-            fn default_len(data: DATA_, userdata: USERDATA_) COUNT_ {
-                if (comptime CORE_ACCESS_FUNCS.get_len) |get_len| {
-                    return get_len(data, userdata);
-                }
-                if (comptime Types.type_is_struct(DATA_)) {
-                    if (comptime @hasField(DATA_, "items")) {
-                        if (comptime @hasField(@FieldType(DATA_, "items"), "len")) {
-                            return @intCast(data.items.len);
-                        } else {
-                            unreachable;
-                        }
-                    } else if (comptime @hasField(DATA_, "len")) {
-                        return @intCast(data.len);
-                    } else {
-                        unreachable;
-                    }
-                } else if (comptime Types.type_is_slice(DATA_)) {
-                    return @intCast(data.len);
-                } else {
-                    unreachable;
-                }
-            }
-            fn default_set_len(data: DATA_, new_len: COUNT_, userdata: USERDATA_) DATA_ {
-                if (comptime CORE_ACCESS_FUNCS.set_len) |set_len| {
-                    return set_len(data, new_len, userdata);
-                }
-                var new_data = data;
-                if (comptime Types.type_is_struct(DATA_)) {
-                    if (comptime @hasField(DATA_, "items")) {
-                        if (comptime @hasField(@FieldType(DATA_, "items"), "len")) {
-                            new_data.items.len = new_len;
-                        } else {
-                            unreachable;
-                        }
-                    } else if (comptime @hasField(DATA_, "len")) {
-                        new_data.len = new_len;
-                    } else {
-                        unreachable;
-                    }
-                } else if (comptime Types.type_is_slice(DATA_)) {
-                    new_data.len = new_len;
-                } else {
-                    unreachable;
-                }
-                return new_data;
-            }
+            APPEND_ONE_SLOT_ASSUME_CAP: FN_APPEND_ONE_SLOT,
+            APPEND_MANY_SLOTS_ASSUME_CAP: FN_APPEND_N_SLOTS,
+            INSERT_ONE_SLOT_ASSUME_CAP: FN_INSERT_ONE_SLOT,
+            INSERT_MANY_SLOTS_ASSUME_CAP: FN_INSERT_N_SLOTS,
+            DELETE_ONE: FN_DELETE_ONE,
+            DELETE_RANGE: FN_DELETE_RANGE,
+            ENSURE_SPACE: FN_REALLOC,
+            REALLOC_EXACT: FN_REALLOC,
+            MOVE_BLOCK_RIGHT_NO_PRESERVE: FN_MOVE_BLOCK_NO_PRESERVE,
+            MOVE_BLOCK_LEFT_NO_PRESERVE: FN_MOVE_BLOCK_NO_PRESERVE,
 
             pub const FN_ID_COMPARE = fn (DATA_, ID_, ID_, USERDATA_) bool;
             pub const FN_ID_CHECK = fn (DATA_, ID_, USERDATA_) bool;
@@ -700,8 +730,19 @@ pub const DataManipulationPackage = struct {
             pub const FN_MOVE_BLOCK = fn (DATA_, ID_, ID_, ID_, USERDATA_) DATA_;
             pub const FN_ROTATE = fn (DATA_, ID_, ID_, COUNT_, USERDATA_) DATA_;
             pub const FN_SCRAMBLE = fn (DATA_, Random, ID_, ID_, COUNT_, USERDATA_) DATA_;
+            pub const FN_APPEND_ONE_SLOT = fn (DATA_, USERDATA_) struct { DATA_, ID_ };
+            pub const FN_APPEND_N_SLOTS = fn (DATA_, COUNT_, USERDATA_) struct { DATA_, ID_, ID_ };
+            pub const FN_INSERT_ONE_SLOT = fn (DATA_, ID_, USERDATA_) struct { DATA_, ID_ };
+            pub const FN_INSERT_N_SLOTS = fn (DATA_, ID_, COUNT_, USERDATA_) struct { DATA_, ID_, ID_ };
+            pub const FN_DELETE_ONE = fn (DATA_, ID_, USERDATA_) DATA_;
+            pub const FN_DELETE_RANGE = fn (DATA_, ID_, ID_, USERDATA_) DATA_;
+            pub const FN_REALLOC = fn (DATA_, Allocator, COUNT_, USERDATA_) DATA_;
+            pub const FN_GET_BASE_PTR = fn (DATA_, USERDATA_) [*]ELEM_;
+            pub const FN_GET_BASE_CONST_PTR = fn (DATA_, USERDATA_) [*]const ELEM_;
+            pub const FN_SET_BASE_PTR = fn (DATA_, [*]ELEM_, USERDATA_) DATA_;
+            pub const FN_MOVE_BLOCK_NO_PRESERVE = fn (DATA_, ID_, ID_, COUNT_, USERDATA_) DATA_;
 
-            pub const CustomDataFuncs = struct {
+            pub const CustomFunctions = struct {
                 ID_LESS_THAN: ?FN_ID_COMPARE = null,
                 ID_LESS_THAN_OR_EQUAL: ?FN_ID_COMPARE = null,
                 ID_GREATER_THAN: ?FN_ID_COMPARE = null,
@@ -731,6 +772,11 @@ pub const DataManipulationPackage = struct {
                 NTH_NEXT_ID: ?FN_NTH_ID = null,
                 GET_LEN: ?FN_IMPLICIT_COUNT = null,
                 SET_LEN: ?FN_SET_COUNT = null,
+                GET_CAP: ?FN_IMPLICIT_COUNT = null,
+                SET_CAP: ?FN_SET_COUNT = null,
+                GET_BASE_PTR: ?FN_GET_BASE_PTR = null,
+                GET_BASE_CONST_PTR: ?FN_GET_BASE_CONST_PTR = null,
+                SET_BASE_PTR: ?FN_SET_BASE_PTR = null,
                 RANGE_LEN: ?FN_RANGE_COUNT = null,
                 REVERSE_RANGE: ?FN_RANGE_OP = null,
                 MOVE_ONE_PRESERVE: ?FN_RANGE_OP = null,
@@ -738,15 +784,105 @@ pub const DataManipulationPackage = struct {
                 ROTATE_RANGE_RIGHT: ?FN_ROTATE = null,
                 ROTATE_RANGE_LEFT: ?FN_ROTATE = null,
                 SCRAMBLE: ?FN_SCRAMBLE = null,
+                APPEND_ONE_SLOT_ASSUME_CAP: ?FN_APPEND_ONE_SLOT = null,
+                APPEND_MANY_SLOTS_ASSUME_CAP: ?FN_APPEND_N_SLOTS = null,
+                INSERT_ONE_SLOT_ASSUME_CAP: ?FN_INSERT_ONE_SLOT = null,
+                INSERT_MANY_SLOTS_ASSUME_CAP: ?FN_INSERT_N_SLOTS = null,
+                DELETE_ONE: ?FN_DELETE_ONE = null,
+                DELETE_RANGE: ?FN_DELETE_RANGE = null,
+                ENSURE_SPACE: ?FN_REALLOC = null,
+                REALLOC_EXACT: ?FN_REALLOC = null,
+                MOVE_BLOCK_RIGHT_NO_PRESERVE: ?FN_MOVE_BLOCK_NO_PRESERVE = null,
+                MOVE_BLOCK_LEFT_NO_PRESERVE: ?FN_MOVE_BLOCK_NO_PRESERVE = null,
             };
 
-            pub fn FunctionSelector(comptime CUSTOM: CustomDataFuncs, comptime FLAGS: FuncFlags, comptime ALLOW_DEFAULT: bool) type {
+            pub fn FUNC_SELECTOR(comptime CUSTOM: CustomFunctions, comptime FLAGS: FuncFlags, comptime ALLOW_DEFAULT: bool) type {
                 return struct {
+                    const GET_BASE_PTR = struct {
+                        const func: FN_GET_BASE_PTR = if (CUSTOM.GET_BASE_PTR) |cust| cust //
+                            else if (ALLOW_DEFAULT) default else unusable;
+                        fn default(data: DATA_, _: USERDATA_) [*]ELEM_ {
+                            if (comptime Types.type_is_struct(DATA_)) {
+                                if (comptime @hasField(DATA_, "items")) {
+                                    if (comptime @hasField(@FieldType(DATA_, "items"), "ptr")) {
+                                        return @ptrCast(data.items.ptr);
+                                    } else {
+                                        unreachable;
+                                    }
+                                } else if (comptime @hasField(DATA_, "ptr")) {
+                                    return @ptrCast(data.ptr);
+                                } else {
+                                    unreachable;
+                                }
+                            } else if (comptime Types.type_is_slice(DATA_)) {
+                                return @ptrCast(data.ptr);
+                            } else {
+                                unreachable;
+                            }
+                        }
+                        fn unusable(_: DATA_, _: USERDATA_) [*]ELEM_ {
+                            assert_unreachable(@src(), "no `get_base_ptr` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
+                        }
+                    };
+                    const GET_BASE_CONST_PTR = struct {
+                        const func: FN_GET_BASE_CONST_PTR = if (CUSTOM.GET_BASE_CONST_PTR) |cust| cust //
+                            else if (ALLOW_DEFAULT) default else unusable;
+                        fn default(data: DATA_, _: USERDATA_) [*]const ELEM_ {
+                            if (comptime Types.type_is_struct(DATA_)) {
+                                if (comptime @hasField(DATA_, "items")) {
+                                    if (comptime @hasField(@FieldType(DATA_, "items"), "ptr")) {
+                                        return @ptrCast(data.items.ptr);
+                                    } else {
+                                        unreachable;
+                                    }
+                                } else if (comptime @hasField(DATA_, "ptr")) {
+                                    return @ptrCast(data.ptr);
+                                } else {
+                                    unreachable;
+                                }
+                            } else if (comptime Types.type_is_slice(DATA_)) {
+                                return @ptrCast(data.ptr);
+                            } else {
+                                unreachable;
+                            }
+                        }
+                        fn unusable(_: DATA_, _: USERDATA_) [*]ELEM_ {
+                            assert_unreachable(@src(), "no `get_base_const_ptr` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
+                        }
+                    };
+                    const SET_BASE_PTR = struct {
+                        const func: FN_SET_BASE_PTR = if (CUSTOM.SET_BASE_PTR) |cust| cust //
+                            else if (ALLOW_DEFAULT) default else unusable;
+                        fn default(data: DATA_, ptr: [*]ELEM_, _: USERDATA_) DATA_ {
+                            var new_data = data;
+                            if (comptime Types.type_is_struct(DATA_)) {
+                                if (comptime @hasField(DATA_, "items")) {
+                                    if (comptime @hasField(@FieldType(DATA_, "items"), "ptr")) {
+                                        new_data.items.ptr = @ptrCast(ptr);
+                                    } else {
+                                        unreachable;
+                                    }
+                                } else if (comptime @hasField(DATA_, "ptr")) {
+                                    new_data.ptr = @ptrCast(ptr);
+                                } else {
+                                    unreachable;
+                                }
+                            } else if (comptime Types.type_is_slice(DATA_)) {
+                                new_data.ptr = @ptrCast(ptr);
+                            } else {
+                                unreachable;
+                            }
+                            return new_data;
+                        }
+                        fn unusable(_: DATA_, _: USERDATA_) [*]ELEM_ {
+                            assert_unreachable(@src(), "no `set_base_ptr` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
+                        }
+                    };
                     const INVALID_ID_AFTER = struct {
                         const func: FN_IMPLICIT_ID = if (CUSTOM.INVALID_ID_AFTER) |cust| cust //
                             else if (ALLOW_DEFAULT) default else unusable;
                         fn default(data: DATA_, userdata: USERDATA_) ID_ {
-                            return @intCast(GET_LEN.default(data, userdata));
+                            return @intCast(GET_LEN.func(data, userdata));
                         }
                         fn unusable(_: DATA_, _: USERDATA_) bool {
                             assert_unreachable(@src(), "no `invalid_id_after` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
@@ -770,7 +906,7 @@ pub const DataManipulationPackage = struct {
                             else if (FLAGS.has(INFER.VALID_ID.FROM_FIRST_LAST_GT_EQ)) infer_gt_eq //
                             else if (ALLOW_DEFAULT) default else unusable;
                         fn default(data: DATA_, id: ID_, userdata: USERDATA_) bool {
-                            return 0 <= id and id < GET_LEN.default(data, userdata);
+                            return 0 <= id and id < GET_LEN.func(data, userdata);
                         }
                         fn infer_lteq(data: DATA_, id: ID_, userdata: USERDATA_) bool {
                             const LTEQ = ID_LESS_THAN_OR_EQUAL.func;
@@ -814,6 +950,11 @@ pub const DataManipulationPackage = struct {
                     fn assert_valid_id(data: DATA_, id: ID_, userdata: USERDATA_, comptime src: SourceLocation) void {
                         const VALID = ID_VALID.func;
                         assert_with_reason(VALID(data, id, userdata), src, "id `{any}` is not valid for the current data structure state", .{id});
+                    }
+                    fn assert_valid_range(data: DATA_, first: ID_, last: ID_, userdata: USERDATA_, comptime src: SourceLocation) void {
+                        assert_valid_id(data, first, userdata, src);
+                        assert_valid_id(data, last, userdata, src);
+                        assert_with_reason(ID_LESS_THAN_OR_EQUAL.func(data, first, last, userdata), src, "first id `{any}` was not before or equal to last id `{any}`", .{ first, last });
                     }
                     const ID_LESS_THAN = struct {
                         const T_FN = @TypeOf(default);
@@ -922,7 +1063,7 @@ pub const DataManipulationPackage = struct {
                             else if (FLAGS.has(INFER.GET.FROM_CONST_PTR)) infer_const_ptr //
                             else if (ALLOW_DEFAULT) default else unusable;
                         fn default(data: DATA_, id: ID_, userdata: USERDATA_) ELEM_ {
-                            return default_get_base_ptr_const(data, userdata)[id];
+                            return GET_BASE_CONST_PTR.func(data, userdata)[id];
                         }
                         fn infer_ptr(data: DATA_, id: ID_, userdata: USERDATA_) ELEM_ {
                             assert_valid_id(data, id, userdata, @src());
@@ -941,7 +1082,7 @@ pub const DataManipulationPackage = struct {
                             else if (ALLOW_DEFAULT) default else unusable;
                         const T_FN_GET_PTR = @TypeOf(default);
                         fn default(data: DATA_, id: ID_, userdata: USERDATA_) *ELEM_ {
-                            return &default_get_base_ptr(data, userdata)[id];
+                            return &GET_BASE_PTR.func(data, userdata)[id];
                         }
                         fn unusable(_: DATA_, _: ID_, _: USERDATA_) *ELEM_ {
                             assert_unreachable(@src(), "no `get_ptr` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
@@ -952,7 +1093,7 @@ pub const DataManipulationPackage = struct {
                             else if (FLAGS.has(INFER.CONST_PTR.FROM_PTR)) infer_ptr //
                             else if (ALLOW_DEFAULT) default else unusable;
                         fn default(data: DATA_, id: ID_, userdata: USERDATA_) *const ELEM_ {
-                            return &default_get_base_ptr_const(data, userdata)[id];
+                            return &GET_BASE_CONST_PTR.func(data, userdata)[id];
                         }
                         fn infer_ptr(data: DATA_, id: ID_, userdata: USERDATA_) *const ELEM_ {
                             assert_valid_id(data, id, userdata, @src());
@@ -968,7 +1109,7 @@ pub const DataManipulationPackage = struct {
                             else if (ALLOW_DEFAULT) default else unusable;
                         fn default(data: DATA_, id: ID_, val: ELEM_, userdata: USERDATA_) DATA_ {
                             const new_data = data;
-                            default_get_base_ptr(new_data, userdata)[id] = val;
+                            GET_BASE_PTR.func(new_data, userdata)[id] = val;
                             return new_data;
                         }
                         fn infer_ptr(data: DATA_, id: ID_, val: ELEM_, userdata: USERDATA_) DATA_ {
@@ -987,9 +1128,9 @@ pub const DataManipulationPackage = struct {
                             else if (ALLOW_DEFAULT) default else unusable;
                         fn default(data: DATA_, id_a: ID_, id_b: ID_, userdata: USERDATA_) DATA_ {
                             var new_data = data;
-                            const tmp = GET.default(new_data, id_b, userdata);
-                            new_data = SET.default(new_data, id_b, GET.default(new_data, id_a, userdata), userdata);
-                            new_data = SET.default(new_data, id_a, tmp, userdata);
+                            const tmp = GET.func(new_data, id_b, userdata);
+                            new_data = SET.func(new_data, id_b, GET.func(new_data, id_a, userdata), userdata);
+                            new_data = SET.func(new_data, id_a, tmp, userdata);
                             return new_data;
                         }
                         fn infer_ptr(data: DATA_, id_a: ID_, id_b: ID_, userdata: USERDATA_) DATA_ {
@@ -1214,7 +1355,7 @@ pub const DataManipulationPackage = struct {
                             else if (FLAGS.has(INFER.LAST_ID.FROM_FIRST_LEN_NEXT)) infer_first_len_next //
                             else if (ALLOW_DEFAULT) default else unusable;
                         fn default(data: DATA_, userdata: USERDATA_) ID_ {
-                            return GET_LEN.default(data, userdata) -% 1;
+                            return GET_LEN.func(data, userdata) -% 1;
                         }
                         fn infer_nth_last(data: DATA_, userdata: USERDATA_) ID_ {
                             const NTH_START = NTH_FROM_START.func;
@@ -1447,7 +1588,7 @@ pub const DataManipulationPackage = struct {
                             else if (FLAGS.has(INFER.NTH_FROM_END.FROM_LAST_PREV)) infer_last_prev //
                             else if (ALLOW_DEFAULT) default else unusable;
                         fn default(data: DATA_, n: COUNT_, userdata: USERDATA_) ID_ {
-                            return GET_LEN.default(data, userdata) - 1 - n;
+                            return GET_LEN.func(data, userdata) - 1 - n;
                         }
                         fn infer_last_nth_prev(data: DATA_, n: COUNT_, userdata: USERDATA_) ID_ {
                             const NTH_PREV = NTH_PREV_ID.func;
@@ -1474,7 +1615,25 @@ pub const DataManipulationPackage = struct {
                             else if (FLAGS.has(INFER.LEN.FROM_FIRST_LAST_NEXT)) infer_first_last_next //
                             else if (FLAGS.has(INFER.LEN.FROM_FIRST_LAST_PREV)) infer_first_last_prev //
                             else if (ALLOW_DEFAULT) default else unusable;
-                        const default = default_len;
+                        fn default(data: DATA_, _: USERDATA_) COUNT_ {
+                            if (comptime Types.type_is_struct(DATA_)) {
+                                if (comptime @hasField(DATA_, "items")) {
+                                    if (comptime @hasField(@FieldType(DATA_, "items"), "len")) {
+                                        return data.items.len;
+                                    } else {
+                                        unreachable;
+                                    }
+                                } else if (comptime @hasField(DATA_, "len")) {
+                                    return data.len;
+                                } else {
+                                    unreachable;
+                                }
+                            } else if (comptime Types.type_is_slice(DATA_)) {
+                                return data.len;
+                            } else {
+                                unreachable;
+                            }
+                        }
                         fn infer_range_len(data: DATA_, userdata: USERDATA_) COUNT_ {
                             const FIRST = FIRST_ID.func;
                             const LAST = LAST_ID.func;
@@ -1520,9 +1679,75 @@ pub const DataManipulationPackage = struct {
                     const SET_LEN = struct {
                         const func: FN_SET_COUNT = if (CUSTOM.SET_LEN) |cust| cust //
                             else if (ALLOW_DEFAULT) default else unusable;
-                        const default = default_set_len;
+                        fn default(data: DATA_, new_len: COUNT_, _: USERDATA_) DATA_ {
+                            var new_data = data;
+                            if (comptime Types.type_is_struct(DATA_)) {
+                                if (comptime @hasField(DATA_, "items")) {
+                                    if (comptime @hasField(@FieldType(DATA_, "items"), "len")) {
+                                        new_data.items.len = @intCast(new_len);
+                                    } else {
+                                        unreachable;
+                                    }
+                                } else if (comptime @hasField(DATA_, "len")) {
+                                    new_data.len = @intCast(new_len);
+                                } else {
+                                    unreachable;
+                                }
+                            } else if (comptime Types.type_is_slice(DATA_)) {
+                                new_data.len = @intCast(new_len);
+                            } else {
+                                unreachable;
+                            }
+                            return new_data;
+                        }
                         fn unusable(_: DATA_, _: COUNT_, _: USERDATA_) DATA_ {
                             assert_unreachable(@src(), "no `set_len` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
+                        }
+                    };
+                    const GET_CAP = struct {
+                        const func: FN_IMPLICIT_COUNT = if (CUSTOM.GET_CAP) |cust| cust //
+                            else if (ALLOW_DEFAULT) default else unusable;
+                        fn default(data: DATA_, _: USERDATA_) COUNT_ {
+                            if (comptime Types.type_is_struct(DATA_)) {
+                                if (comptime @hasField(DATA_, "capacity")) {
+                                    return @intCast(data.capacity);
+                                } else if (comptime @hasField(DATA_, "cap")) {
+                                    return @intCast(data.cap);
+                                } else {
+                                    unreachable;
+                                }
+                            } else if (comptime Types.type_is_slice(DATA_)) {
+                                return @intCast(data.len);
+                            } else {
+                                unreachable;
+                            }
+                        }
+                        fn unusable(_: DATA_, _: USERDATA_) COUNT_ {
+                            assert_unreachable(@src(), "no `get_cap` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
+                        }
+                    };
+                    const SET_CAP = struct {
+                        const func: FN_SET_COUNT = if (CUSTOM.SET_CAP) |cust| cust //
+                            else if (ALLOW_DEFAULT) default else unusable;
+                        fn default(data: DATA_, new_cap: COUNT_, _: USERDATA_) DATA_ {
+                            var new_data = data;
+                            if (comptime Types.type_is_struct(DATA_)) {
+                                if (comptime @hasField(DATA_, "capacity")) {
+                                    new_data.capacity = @intCast(new_cap);
+                                } else if (comptime @hasField(DATA_, "cap")) {
+                                    new_data.cap = @intCast(new_cap);
+                                } else {
+                                    unreachable;
+                                }
+                            } else if (comptime Types.type_is_slice(DATA_)) {
+                                new_data.len = @intCast(new_cap);
+                            } else {
+                                unreachable;
+                            }
+                            return new_data;
+                        }
+                        fn unusable(_: DATA_, _: COUNT_, _: USERDATA_) DATA_ {
+                            assert_unreachable(@src(), "no `set_cap` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
                         }
                     };
                     const RANGE_LEN = struct {
@@ -1577,7 +1802,7 @@ pub const DataManipulationPackage = struct {
                             else if (ALLOW_DEFAULT) default else unusable;
                         fn default(data: DATA_, first: ID_, last: ID_, userdata: USERDATA_) DATA_ {
                             const new_data = data;
-                            Utils.Mem.reverse_slice(default_get_base_ptr(new_data, userdata)[first .. last + 1]);
+                            Utils.Mem.reverse_slice(GET_BASE_PTR.func(new_data, userdata)[first .. last + 1]);
                             return new_data;
                         }
                         fn infer_swap(data: DATA_, first: ID_, last: ID_, userdata: USERDATA_) DATA_ {
@@ -1615,9 +1840,9 @@ pub const DataManipulationPackage = struct {
                             const shift = count % len;
                             if (shift == 0) return data;
                             const edge = first + (len - shift);
-                            Utils.Mem.reverse_slice(default_get_base_ptr(data, userdata)[first..edge]);
-                            Utils.Mem.reverse_slice(default_get_base_ptr(data, userdata)[edge..end_exl]);
-                            Utils.Mem.reverse_slice(default_get_base_ptr(data, userdata)[first..end_exl]);
+                            Utils.Mem.reverse_slice(GET_BASE_PTR.func(data, userdata)[first..edge]);
+                            Utils.Mem.reverse_slice(GET_BASE_PTR.func(data, userdata)[edge..end_exl]);
+                            Utils.Mem.reverse_slice(GET_BASE_PTR.func(data, userdata)[first..end_exl]);
                             return data;
                         }
                         fn infer_reverse(data: DATA_, first: ID_, last: ID_, count: COUNT_, userdata: USERDATA_) DATA_ {
@@ -1655,9 +1880,9 @@ pub const DataManipulationPackage = struct {
                             const shift = count % len;
                             if (shift == 0) return data;
                             const edge = first + shift;
-                            Utils.Mem.reverse_slice(default_get_base_ptr(data, userdata)[first..edge]);
-                            Utils.Mem.reverse_slice(default_get_base_ptr(data, userdata)[edge..end_exl]);
-                            Utils.Mem.reverse_slice(default_get_base_ptr(data, userdata)[first..end_exl]);
+                            Utils.Mem.reverse_slice(GET_BASE_PTR.func(data, userdata)[first..edge]);
+                            Utils.Mem.reverse_slice(GET_BASE_PTR.func(data, userdata)[edge..end_exl]);
+                            Utils.Mem.reverse_slice(GET_BASE_PTR.func(data, userdata)[first..end_exl]);
                             return data;
                         }
                         fn infer_reverse(data: DATA_, first: ID_, last: ID_, count: COUNT_, userdata: USERDATA_) DATA_ {
@@ -1691,32 +1916,32 @@ pub const DataManipulationPackage = struct {
                             else if (FLAGS.has_any(&.{ INFER.MOVE.FROM_GET_SET, INFER.MOVE.FROM_REVERSE, INFER.MOVE.FROM_SWAP, INFER.MOVE.FROM_ROTATE })) infer_rotate //
                             else if (ALLOW_DEFAULT) default else unusable;
                         fn default(data: DATA_, old_id: ID_, new_id: ID_, userdata: USERDATA_) DATA_ {
-                            assert_with_reason(old_id < GET_LEN.default(data, userdata), @src(), "index {d} out of range for len {d}", .{ old_id, GET_LEN.default(data, userdata) });
-                            assert_with_reason(new_id < GET_LEN.default(data, userdata), @src(), "index {d} out of range for len {d}", .{ new_id, GET_LEN.default(data, userdata) });
+                            assert_with_reason(old_id < GET_LEN.func(data, userdata), @src(), "index {d} out of range for len {d}", .{ old_id, GET_LEN.func(data, userdata) });
+                            assert_with_reason(new_id < GET_LEN.func(data, userdata), @src(), "index {d} out of range for len {d}", .{ new_id, GET_LEN.func(data, userdata) });
                             var new_data = data;
                             if (old_id == new_id) return data;
                             if (old_id < new_id) {
-                                const old_val = GET.default(data, old_id, userdata);
+                                const old_val = GET.func(data, old_id, userdata);
                                 var i = old_id;
                                 var ii = i;
                                 while (i != new_id) {
                                     i += 1;
-                                    const val_to_move = GET.default(data, i, userdata);
-                                    new_data = SET.default(new_data, ii, val_to_move, userdata);
+                                    const val_to_move = GET.func(data, i, userdata);
+                                    new_data = SET.func(new_data, ii, val_to_move, userdata);
                                     ii = i;
                                 }
-                                new_data = SET.default(new_data, new_id, old_val, userdata);
+                                new_data = SET.func(new_data, new_id, old_val, userdata);
                             } else {
-                                const old_val = GET.default(data, old_id, userdata);
+                                const old_val = GET.func(data, old_id, userdata);
                                 var i = old_id;
                                 var ii = i;
                                 while (i != new_id) {
                                     i -= 1;
-                                    const val_to_move = GET.default(data, i, userdata);
-                                    new_data = SET.default(new_data, ii, val_to_move, userdata);
+                                    const val_to_move = GET.func(data, i, userdata);
+                                    new_data = SET.func(new_data, ii, val_to_move, userdata);
                                     ii = i;
                                 }
-                                new_data = SET.default(new_data, new_id, old_val, userdata);
+                                new_data = SET.func(new_data, new_id, old_val, userdata);
                             }
                             return new_data;
                         }
@@ -1785,21 +2010,21 @@ pub const DataManipulationPackage = struct {
                             else if (FLAGS.has_any(&.{ INFER.MOVE.FROM_GET_SET, INFER.MOVE.FROM_REVERSE, INFER.MOVE.FROM_SWAP, INFER.MOVE.FROM_ROTATE })) infer_rotate //
                             else if (ALLOW_DEFAULT) default else unusable;
                         fn default(data: DATA_, first_old_id: ID_, last_old_id: ID_, new_first_id: ID_, userdata: USERDATA_) DATA_ {
-                            assert_with_reason(first_old_id < GET_LEN.default(data, userdata), @src(), "index {d} out of range for len {d}", .{ first_old_id, GET_LEN.default(data, userdata) });
-                            assert_with_reason(last_old_id < GET_LEN.default(data, userdata), @src(), "index {d} out of range for len {d}", .{ last_old_id, GET_LEN.default(data, userdata) });
-                            assert_with_reason(new_first_id < GET_LEN.default(data, userdata), @src(), "index {d} out of range for len {d}", .{ new_first_id, GET_LEN.default(data, userdata) });
+                            assert_with_reason(first_old_id < GET_LEN.func(data, userdata), @src(), "index {d} out of range for len {d}", .{ first_old_id, GET_LEN.func(data, userdata) });
+                            assert_with_reason(last_old_id < GET_LEN.func(data, userdata), @src(), "index {d} out of range for len {d}", .{ last_old_id, GET_LEN.func(data, userdata) });
+                            assert_with_reason(new_first_id < GET_LEN.func(data, userdata), @src(), "index {d} out of range for len {d}", .{ new_first_id, GET_LEN.func(data, userdata) });
                             assert_with_reason(first_old_id <= last_old_id, @src(), "first id must be <= last id (by data order), got `{any}` > `{any}`", .{ first_old_id, last_old_id });
                             var new_data = data;
                             if (first_old_id == new_first_id) return data;
                             const block_len = (last_old_id + 1) - first_old_id;
                             if (first_old_id < new_first_id) {
                                 const new_last_id = new_first_id + (block_len - 1);
-                                assert_with_reason(new_last_id < GET_LEN.default(data, userdata), @src(), "index {d} out of range for len {d}", .{ new_last_id, GET_LEN.default(data, userdata) });
+                                assert_with_reason(new_last_id < GET_LEN.func(data, userdata), @src(), "index {d} out of range for len {d}", .{ new_last_id, GET_LEN.func(data, userdata) });
                                 const delta = new_first_id - first_old_id;
-                                new_data = ROTATE_LEFT.default(data, first_old_id, new_last_id, delta, userdata);
+                                new_data = ROTATE_LEFT.func(data, first_old_id, new_last_id, delta, userdata);
                             } else {
                                 const delta = first_old_id - new_first_id;
-                                new_data = ROTATE_RIGHT.default(data, new_first_id, last_old_id, delta, userdata);
+                                new_data = ROTATE_RIGHT.func(data, new_first_id, last_old_id, delta, userdata);
                             }
                             return new_data;
                         }
@@ -1841,12 +2066,12 @@ pub const DataManipulationPackage = struct {
                             if (span <= 1) return data;
                             if (span == 2) {
                                 if (rand.boolean()) {
-                                    return SWAP.default(data, first, last);
+                                    return SWAP.func(data, first, last);
                                 }
                             }
                             var n: COUNT_ = 0;
                             const first_idx = rand.intRangeAtMost(ID_, first, last);
-                            const first_val = GET.default(data, first_idx, userdata);
+                            const first_val = GET.func(data, first_idx, userdata);
                             var empty_idx: ID_ = first_idx;
                             while (n < iterations) : (n += 1) {
                                 const move_idx = find_different_idx: {
@@ -1855,126 +2080,180 @@ pub const DataManipulationPackage = struct {
                                         if (possible_different != empty_idx) break :find_different_idx possible_different;
                                     }
                                 };
-                                new_data = SET.default(data, empty_idx, GET.default(data, move_idx, userdata), userdata);
+                                new_data = SET.func(data, empty_idx, GET.func(data, move_idx, userdata), userdata);
                                 empty_idx = move_idx;
                             }
-                            return SET.default(new_data, empty_idx, first_val, userdata);
+                            return SET.func(new_data, empty_idx, first_val, userdata);
                         }
                         fn unusable(_: DATA_, _: Random, _: ID_, _: ID_, _: COUNT_, _: USERDATA_) DATA_ {
                             assert_unreachable(@src(), "no `scramble_elements` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
                         }
                     };
+                    const APPEND_ONE_SLOT_ASSUME_CAP = struct {
+                        const func: FN_APPEND_ONE_SLOT = if (CUSTOM.APPEND_ONE_SLOT_ASSUME_CAP) |cust| cust //
+                            else if (FLAGS.has(INFER.APPEND_ONE.FROM_APPEND_MANY)) infer_append_many //
+                            else if (ALLOW_DEFAULT) default else unusable;
+                        fn default(data_: DATA_, userdata: USERDATA_) struct { DATA_, ID_ } {
+                            const len = GET_LEN.func(data_, userdata);
+                            const last = LAST_ID.func(data_, userdata);
+                            const data = SET_LEN.func(data_, len + 1, userdata);
+                            const new_id = NEXT_ID.func(data, last, userdata);
+                            return .{ data, new_id };
+                        }
+                        fn infer_append_many(data_: DATA_, userdata: USERDATA_) struct { DATA_, ID_ } {
+                            const data, const id, _ = APPEND_MANY_SLOTS_ASSUME_CAP.func(data_, 1, userdata);
+                            return .{ data, id };
+                        }
+                        fn unusable(_: DATA_, _: USERDATA_) struct { DATA_, ID_ } {
+                            assert_unreachable(@src(), "no `append_one_slot_assume_cap` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
+                        }
+                    };
+                    const APPEND_MANY_SLOTS_ASSUME_CAP = struct {
+                        const func: FN_APPEND_N_SLOTS = if (CUSTOM.APPEND_ONE_SLOT_ASSUME_CAP) |cust| cust //
+                            else if (FLAGS.has(INFER.APPEND_MANY.FROM_APPEND_ONE)) infer_append_one //
+                            else if (ALLOW_DEFAULT) default else unusable;
+                        fn default(data_: DATA_, n: COUNT_, userdata: USERDATA_) struct { DATA_, ID_, ID_ } {
+                            const len = GET_LEN.func(data_, userdata);
+                            const last = LAST_ID.func(data_, userdata);
+                            const data = SET_LEN.func(data_, len + n, userdata);
+                            const first_new_id = NEXT_ID.func(data, last, userdata);
+                            const last_new_id = NTH_NEXT_ID.func(data, first_new_id, n - 1, userdata);
+                            return .{ data, first_new_id, last_new_id };
+                        }
+                        fn infer_append_one(data_: DATA_, n: COUNT_, userdata: USERDATA_) struct { DATA_, ID_, ID_ } {
+                            var nn = n;
+                            var data = data_;
+                            var first: ID_ = undefined;
+                            var last: ID_ = undefined;
+                            while (nn > 0) : (nn -= 1) {
+                                data, const id = APPEND_ONE_SLOT_ASSUME_CAP.func(data_, userdata);
+                                if (nn == n) first = id;
+                                last = id;
+                            }
+                            return .{ data, first, last };
+                        }
+                        fn unusable(_: DATA_, _: COUNT_, _: USERDATA_) struct { DATA_, ID_, ID_ } {
+                            assert_unreachable(@src(), "no `append_many_slots_assume_cap` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
+                        }
+                    };
+                    const INSERT_ONE_SLOT_ASSUME_CAP = struct {
+                        const func: FN_INSERT_ONE_SLOT = if (CUSTOM.INSERT_ONE_SLOT_ASSUME_CAP) |cust| cust //
+                            else if (FLAGS.has(INFER.INSERT_ONE.FROM_APPEND_ONE_MOVE_ONE)) infer_append_move //
+                            else if (ALLOW_DEFAULT) default else unusable;
+                        fn default(data_: DATA_, id: ID_, userdata: USERDATA_) struct { DATA_, ID_ } {
+                            const len = GET_LEN.func(data_, userdata);
+                            const last = LAST_ID.func(data_, userdata);
+                            var data = SET_LEN.func(data_, len + 1, userdata);
+                            data = MOVE_BLOCK_RIGHT_NO_PRESERVE.func(data, id, last, 1, userdata);
+                            return .{ data, id };
+                        }
+                        fn infer_append_move(data_: DATA_, id: ID_, userdata: USERDATA_) struct { DATA_, ID_ } {
+                            const last = LAST_ID.func(data_, userdata);
+                            var data, _ = APPEND_ONE_SLOT_ASSUME_CAP.func(data_, userdata);
+                            data = MOVE_BLOCK_RIGHT_NO_PRESERVE.func(data, id, last, 1, userdata);
+                            return .{ data, id };
+                        }
+                        fn unusable(_: DATA_, _: ID_, _: USERDATA_) struct { DATA_, ID_ } {
+                            assert_unreachable(@src(), "no `insert_one_slot_assume_cap` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
+                        }
+                    };
+                    const INSERT_MANY_SLOTS_ASSUME_CAP = struct {
+                        const func: FN_INSERT_N_SLOTS = if (CUSTOM.INSERT_MANY_SLOTS_ASSUME_CAP) |cust| cust //
+                            else if (FLAGS.has(INFER.INSERT_MANY.FROM_APPEND_MANY_MOVE_BLOCK)) infer_append_move //
+                            else if (ALLOW_DEFAULT) default else unusable;
+                        fn default(data_: DATA_, id: ID_, n: COUNT_, userdata: USERDATA_) struct { DATA_, ID_, ID_ } {
+                            if (n == 0) return data_;
+                            assert_valid_id(data_, id, userdata, @src());
+                            const len = GET_LEN.func(data_, userdata);
+                            const last = LAST_ID.func(data_, userdata);
+                            var data = SET_LEN.func(data_, len + n, userdata);
+                            data = MOVE_BLOCK_RIGHT_NO_PRESERVE.func(data, id, last, n, userdata);
+                            return .{ data, id, NTH_NEXT_ID.func(data, id, n - 1, userdata) };
+                        }
+                        fn infer_append_move(data_: DATA_, id: ID_, n: COUNT_, userdata: USERDATA_) struct { DATA_, ID_, ID_ } {
+                            if (n == 0) return data_;
+                            assert_valid_id(data_, id, userdata, @src());
+                            const last = LAST_ID.func(data_, userdata);
+                            var data, _ = APPEND_MANY_SLOTS_ASSUME_CAP.func(data_, n, userdata);
+                            data = MOVE_BLOCK_RIGHT_NO_PRESERVE.func(data, id, last, n, userdata);
+                            return .{ data, id, NTH_NEXT_ID.func(data, id, n - 1, userdata) };
+                        }
+                        fn unusable(_: DATA_, _: ID_, _: COUNT_, _: USERDATA_) struct { DATA_, ID_, ID_ } {
+                            assert_unreachable(@src(), "no `insert_many_slots_assume_cap` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
+                        }
+                    };
+                    // CHECKPOINT finish these
+                    const DELETE_ONE = struct {
+                        const func: FN_DELETE_ONE = undefined;
+                    };
+                    const DELETE_RANGE = struct {
+                        const func: FN_DELETE_RANGE = undefined;
+                    };
+                    const ENSURE_SPACE = struct {
+                        const func: FN_REALLOC = undefined;
+                    };
+                    const REALLOC_EXACT = struct {
+                        const func: FN_REALLOC = undefined;
+                    };
+                    const MOVE_BLOCK_RIGHT_NO_PRESERVE = struct {
+                        const func: FN_MOVE_BLOCK_NO_PRESERVE = if (CUSTOM.MOVE_BLOCK_RIGHT_NO_PRESERVE) |cust| cust //
+                            else if (ALLOW_DEFAULT) default else unusable;
+                        fn default(data_: DATA_, first: ID_, last: ID_, count: COUNT_, userdata: USERDATA_) DATA_ {
+                            assert_valid_range(data_, first, last, userdata, @src());
+                            if (count == 0) {
+                                @branchHint(.unlikely);
+                                return data_;
+                            }
+                            var data = data_;
+                            var read = last;
+                            var write = NTH_NEXT_ID.func(data, read, count, userdata);
+                            while (true) {
+                                data = SET.func(data, write, GET.func(data, read, userdata), userdata);
+                                if (ID_EQUALS.func(data, read, first, userdata)) break;
+                                write = PREV_ID.func(data, write, userdata);
+                                read = PREV_ID.func(data, read, userdata);
+                            }
+                            return data;
+                        }
+                        fn unusable(_: DATA_, _: ID_, _: ID_, _: COUNT_, _: USERDATA_) DATA_ {
+                            assert_unreachable(@src(), "no `move_block_right_no_preserve` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
+                        }
+                    };
+                    const MOVE_BLOCK_LEFT_NO_PRESERVE = struct {
+                        const func: FN_MOVE_BLOCK_NO_PRESERVE = if (CUSTOM.MOVE_BLOCK_LEFT_NO_PRESERVE) |cust| cust //
+                            else if (ALLOW_DEFAULT) default else unusable;
+                        fn default(data_: DATA_, first: ID_, last: ID_, count: COUNT_, userdata: USERDATA_) DATA_ {
+                            assert_valid_range(data_, first, last, userdata, @src());
+                            if (count == 0) {
+                                @branchHint(.unlikely);
+                                return data_;
+                            }
+                            var data = data_;
+                            var read = first;
+                            var write = NTH_PREV_ID.func(data, read, count, userdata);
+                            while (true) {
+                                data = SET.func(data, write, GET.func(data, read, userdata), userdata);
+                                if (ID_EQUALS.func(data, read, last, userdata)) break;
+                                write = NEXT_ID.func(data, write, userdata);
+                                read = NEXT_ID.func(data, read, userdata);
+                            }
+                            return data;
+                        }
+                        fn unusable(_: DATA_, _: ID_, _: ID_, _: COUNT_, _: USERDATA_) DATA_ {
+                            assert_unreachable(@src(), "no `move_block_left_no_preserve` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
+                        }
+                    };
                 };
             }
 
-            pub fn select_functions(comptime ALLOW_DEFAULT: bool, comptime CUSTOM: CustomDataFuncs, comptime CUSTOM_FIELD_FUNCS: anytype) DEF_WITH_FUNCS {
-                comptime {
-                    // BUILD FLAGS FOR PROVIDED CUSTOM FUNCTIONS
-                    var FLAGS = FuncFlags{};
-                    for (@typeInfo(F).@"struct".decls) |FNN| {
-                        const FN_NAME = FNN.name;
-                        FLAGS.add_if_not_null(@field(F, FN_NAME), @field(CUSTOM, FN_NAME));
-                    }
-                    // SELECT THE CORRECT FUNCTION FOR EACH GIVEN THE CUSTOM/FLAGS/ALLOW_DEFAULT
-                    const PROTO = FunctionSelector(CUSTOM, FLAGS, ALLOW_DEFAULT);
-                    const FINAL_FUNCS: DEF_WITH_FUNCS = DEF_WITH_FUNCS{
-                        .ID_EQUALS = PROTO.ID_EQUALS.func,
-                        .ID_LESS_THAN = PROTO.ID_LESS_THAN.func,
-                        .ID_LESS_THAN_OR_EQUAL = PROTO.ID_LESS_THAN_OR_EQUAL.func,
-                        .ID_GREATER_THAN = PROTO.ID_GREATER_THAN.func,
-                        .ID_GREATER_THAN_OR_EQUAL = PROTO.ID_GREATER_THAN_OR_EQUAL.func,
-                        .ID_VALID = PROTO.ID_VALID.func,
-                        .ID_INVALID_AFTER = PROTO.INVALID_ID_AFTER.func,
-                        .ID_INVALID_BEFORE = PROTO.INVALID_ID_BEFORE.func,
-                        .FIRST_ID = PROTO.FIRST_ID.func,
-                        .LAST_ID = PROTO.LAST_ID.func,
-                        .NTH_ID_FROM_START = PROTO.NTH_FROM_START.func,
-                        .NTH_ID_FROM_END = PROTO.NTH_FROM_END.func,
-                        .PREV_ID = PROTO.PREV_ID.func,
-                        .NEXT_ID = PROTO.NEXT_ID.func,
-                        .NTH_PREV_ID = PROTO.NTH_PREV_ID.func,
-                        .NTH_NEXT_ID = PROTO.NTH_NEXT_ID.func,
-                        .GET_LEN = PROTO.GET_LEN.func,
-                        .SET_LEN = PROTO.SET_LEN.func,
-                        .RANGE_LEN = PROTO.RANGE_LEN.func,
-                        .GET = PROTO.GET.func,
-                        .GET_PTR = PROTO.GET_PTR.func,
-                        .GET_CONST_PTR = PROTO.GET_CONST_PTR.func,
-                        .SET = PROTO.SET.func,
-                        .SWAP = PROTO.SWAP.func,
-                        .GREATER_THAN = PROTO.GREATER_THAN.func,
-                        .GREATER_THAN_OR_EQUAL = PROTO.GREATER_THAN_OR_EQUAL.func,
-                        .LESS_THAN = PROTO.LESS_THAN.func,
-                        .LESS_THAN_OR_EQUAL = PROTO.LESS_THAN_OR_EQUAL.func,
-                        .ORDER_EQUALS = PROTO.ORDER_EQUAL.func,
-                        .EXACT_EQUALS = PROTO.EXACT_EQUAL.func,
-                        .REVERSE_RANGE = PROTO.REVERSE_RANGE.func,
-                        .MOVE_ONE_PRESERVE = PROTO.MOVE_ONE_PRESERVE.func,
-                        .MOVE_BLOCK_PRESERVE = PROTO.MOVE_BLOCK_PRESERVE.func,
-                        .ROTATE_RIGHT = PROTO.ROTATE_RIGHT.func,
-                        .ROTATE_LEFT = PROTO.ROTATE_LEFT.func,
-                        .SCRAMBLE = PROTO.SCRAMBLE.func,
-                    };
-                    // CHECK FIELD FUNCS TYPE FOR PROPER LAYOUT
-                    const FIELD_FUNCS_TYPE = @TypeOf(CUSTOM_FIELD_FUNCS);
-                    const FIELD_FUNCS_KIND = KindInfo.get_kind_info(FIELD_FUNCS_TYPE);
-                    switch (FIELD_FUNCS_KIND) {
-                        .STRUCT => |STRUCT| {
-                            for (STRUCT.decls) |decl| {
-                                const DECL_TYPE = @TypeOf(@field(FIELD_FUNCS_TYPE, decl.name));
-                                const DECL_KIND = KindInfo.get_kind_info(DECL_TYPE);
-                                switch (DECL_KIND) {
-                                    .STRUCT => |DECL_STRUCT| {
-                                        assert_with_reason(@hasDecl(DECL_TYPE, "FIELD_TYPE") and @TypeOf(@field(DECL_TYPE, "FIELD_TYPE")) == type, @src(), "every sub-struct in the 'custom field funcs' struct MUST have a `pub const FIELD_TYPE: type = <type returned by the field functions>;` declaration, but field `{s}` was missing one. See the example:" ++ FIELD_FUNCS_EXAMPLE, .{decl.name});
-                                        const F_TYPE = @field(DECL_TYPE, "FIELD_TYPE");
-                                        const F_GET_FN = fn (DATA_, ID_, USERDATA_) F_TYPE;
-                                        const F_GET_PTR_FN = fn (DATA_, ID_, USERDATA_) *F_TYPE;
-                                        const F_GET_CONST_PTR_FN = fn (DATA_, ID_, USERDATA_) *const F_TYPE;
-                                        const F_SET_FN = fn (DATA_, ID_, F_TYPE, USERDATA_) DATA_;
-                                        for (DECL_STRUCT.decls) |func_decl| {
-                                            if (std.mem.eql(u8, func_decl.name, "FIELD_TYPE")) {} //
-                                            else if (std.mem.eql(u8, func_decl.name, "get")) {
-                                                const GOT_TYPE = @TypeOf(@field(DECL_TYPE, "get"));
-                                                assert_with_reason(GOT_TYPE == F_GET_FN, @src(), "field 'get' functions must have the signature: `{s}`, but found type `{s}`", .{ @typeName(F_GET_FN), @typeName(GOT_TYPE) });
-                                            } else if (std.mem.eql(u8, func_decl.name, "get_ptr")) {
-                                                const GOT_TYPE = @TypeOf(@field(DECL_TYPE, "get_ptr"));
-                                                assert_with_reason(GOT_TYPE == F_GET_PTR_FN, @src(), "field 'get_ptr' functions must have the signature: `{s}`, but found type `{s}`", .{ @typeName(F_GET_PTR_FN), @typeName(GOT_TYPE) });
-                                            } else if (std.mem.eql(u8, func_decl.name, "get_const_ptr")) {
-                                                const GOT_TYPE = @TypeOf(@field(DECL_TYPE, "get_const_ptr"));
-                                                assert_with_reason(GOT_TYPE == F_GET_PTR_FN, @src(), "field 'get_const_ptr' functions must have the signature: `{s}`, but found type `{s}`", .{ @typeName(F_GET_CONST_PTR_FN), @typeName(GOT_TYPE) });
-                                            } else if (std.mem.eql(u8, func_decl.name, "set")) {
-                                                const GOT_TYPE = @TypeOf(@field(DECL_TYPE, "set"));
-                                                assert_with_reason(GOT_TYPE == F_GET_PTR_FN, @src(), "field 'set' functions must have the signature: `{s}`, but found type `{s}`", .{ @typeName(F_SET_FN), @typeName(GOT_TYPE) });
-                                                continue;
-                                            } else {
-                                                assert_unreachable(@src(), "custom field function sub-struct `{s}` has a declaration other than the allowed `FIELD_TYPE`, `get`, `get_ptr`, `get_const_ptr`, `set` declarations, got illegal `{s}`", .{ decl.name, func_decl });
-                                            }
-                                        }
-                                    },
-                                    else => {
-                                        assert_unreachable(@src(), "provided 'custom field funcs' struct had a declaration that was not a struct type. All declarations on the outer struct must be struct types as in this example:" ++ FIELD_FUNCS_EXAMPLE, .{});
-                                    },
-                                }
-                            }
-                        },
-                        .NULL, .VOID => {},
-                        else => {
-                            assert_unreachable(@src(), "type `{s}` is not a valid type for custom field functions. It must either be `null` or a struct type with the format:" ++ FIELD_FUNCS_EXAMPLE, .{@typeName(FIELD_FUNCS_TYPE)});
-                        },
-                    }
-                    return FINAL_FUNCS;
-                }
-            }
-            pub fn Finalize(comptime FUNCS: DEF_WITH_FUNCS, comptime CUSTOM_FIELD_FUNCS_TYPE: type, comptime CUSTOM_FIELD_FUNCS: CUSTOM_FIELD_FUNCS_TYPE) type {
+            pub fn finalize(comptime FUNCS: CORE_AND_FUNCS) type {
                 return struct {
-                    pub const DEF = CORE_DEF_;
+                    pub const DEF = CORE_;
                     pub const DATA = DEF.DATA;
                     pub const ID = DEF.ID;
                     pub const ELEM = DEF.ELEM;
                     pub const COUNT = DEF.COUNT_INT;
                     pub const USERDATA = DEF.USERDATA;
-
-                    pub const field = CUSTOM_FIELD_FUNCS;
 
                     pub const get: fn (DATA, ID, USERDATA) ELEM = FUNCS.GET;
                     pub const get_ptr: fn (DATA, ID, USERDATA) *ELEM = FUNCS.GET_PTR;
@@ -2012,6 +2291,12 @@ pub const DataManipulationPackage = struct {
                     pub const move_one_displace_others: fn (DATA, old_id: ID, new_id: ID, USERDATA) DATA = FUNCS.MOVE_ONE_PRESERVE;
                     pub const move_range_displace_others: fn (DATA, old_first: ID, old_last: ID, new_first: ID, USERDATA) DATA = FUNCS.MOVE_BLOCK_PRESERVE;
                     pub const scramble: fn (DATA, rand: Random, first: ID, last: ID, iterations: COUNT, USERDATA) DATA = FUNCS.SCRAMBLE;
+                    pub const append_one_slot_assume_capacity: fn (DATA, USERDATA) struct { DATA, ID } = FUNCS.APPEND_ONE_SLOT_ASSUME_CAP;
+                    pub const append_many_slots_assume_capacity: fn (DATA, count: COUNT, USERDATA) struct { DATA, ID, ID } = FUNCS.APPEND_MANY_SLOTS_ASSUME_CAP;
+                    pub const insert_one_slot_assume_capacity: fn (DATA, at_id: ID, USERDATA) struct { DATA, ID } = FUNCS.INSERT_ONE_SLOT_ASSUME_CAP;
+                    pub const insert_many_slots_assume_capacity: fn (DATA, at_id: ID, count: COUNT, USERDATA) struct { DATA, ID, ID } = FUNCS.INSERT_MANY_SLOTS_ASSUME_CAP;
+                    pub const move_block_right_no_preserve: fn (DATA, first: ID, last: ID, n_positions: COUNT, USERDATA) DATA = FUNCS.MOVE_BLOCK_RIGHT_NO_PRESERVE;
+                    pub const move_block_left_no_preserve: fn (DATA, first: ID, last: ID, n_positions: COUNT, USERDATA) DATA = FUNCS.MOVE_BLOCK_LEFT_NO_PRESERVE;
 
                     pub fn limit_len(data: DATA, start: ID, limit: ID, userdata: USERDATA) COUNT {
                         if (id_equals(data, start, limit, userdata)) return 0;
@@ -2172,7 +2457,36 @@ pub const DataManipulationPackage = struct {
                     ///
                     /// Space:
                     ///   - O(1)
-                    pub fn insertion_sort(data_: DATA, first: ID, last: ID, userdata: USERDATA) DATA {
+                    pub fn insertion_sort(data_: DATA, userdata: USERDATA) DATA {
+                        const first = first_id(data_, userdata);
+                        const last = last_id(data_, userdata);
+                        return insertion_sort_range(data_, first, last, userdata);
+                    }
+
+                    /// Filters smaller ordered items down until they find an index where they would be
+                    /// in the correct order. Simple, stable, and very fast for fully-sorted or nearly-sorted lists, and for small
+                    /// lists.
+                    ///
+                    /// Stable:
+                    ///   - YES
+                    ///
+                    /// Cache Locality:
+                    ///   - Great
+                    ///
+                    /// Initialization Overhead:
+                    ///   - None
+                    ///
+                    /// Per-Step Overhead:
+                    ///   - Low
+                    ///
+                    /// Time:
+                    ///   - Best    = O(n) (already sorted)
+                    ///   - Average = O(n^2)
+                    ///   - Worst   = O(n^2)
+                    ///
+                    /// Space:
+                    ///   - O(1)
+                    pub fn insertion_sort_range(data_: DATA, first: ID, last: ID, userdata: USERDATA) DATA {
                         if (get_len(data_, userdata) == 0) {
                             @branchHint(.unlikely);
                             return data_;
@@ -2277,7 +2591,44 @@ pub const DataManipulationPackage = struct {
                     ///
                     /// Space:
                     ///   - O(log n) (implemented as a comptime-sized stack)
-                    pub fn quicksort(data_: DATA, first: ID, last: ID, userdata: USERDATA, comptime SETTINGS: QuicksortSettings) DATA {
+                    pub fn quicksort(data_: DATA, userdata: USERDATA, comptime SETTINGS: QuicksortSettings) DATA {
+                        const first = first_id(data_, userdata);
+                        const last = last_id(data_, userdata);
+                        return quicksort_range(data_, first, last, userdata, SETTINGS);
+                    }
+
+                    /// Quicksort using a number of optimizations (similar to Introsort):
+                    ///   - Use Insertion Sort when partitions become small
+                    ///   - Median-of-three pivot (not random, always first, middle, last)
+                    ///   - User can choose a partition scheme based on stated expectations about items with equal order
+                    ///     - Unknown likelyhood of equal order items = Start with 2-way, but if many duplicates are detected change to 3-way
+                    ///     - Many items same order unlikely = 2-way Hoare scheme
+                    ///     - Many items same order likely = 3-way 'Dutch National Flag' scheme
+                    ///   - No recursion, only a comptime sized stack of partition index ranges and a while loop
+                    ///   - (Optional) Fallback to Heapsort/Insertion sort if partition degeneracy detected (more than N x the average partition depth)
+                    ///
+                    /// Stable:
+                    ///   - No
+                    ///
+                    /// Cache Locality:
+                    ///   - Great
+                    ///
+                    /// Initialization Overhead:
+                    ///   - Low
+                    ///
+                    /// Per-Step Overhead:
+                    ///   - Low
+                    ///
+                    /// Time:
+                    ///   - Best    = O(n log n)
+                    ///   - Average = O(n log n)
+                    ///   - Worst:
+                    ///     - With fallback enabled = (heapsort init overhead) + O(n log n)
+                    ///     - No fallback enabled   = O(n^2) (fully/nearly sorted or adversarial input)
+                    ///
+                    /// Space:
+                    ///   - O(log n) (implemented as a comptime-sized stack)
+                    pub fn quicksort_range(data_: DATA, first: ID, last: ID, userdata: USERDATA, comptime SETTINGS: QuicksortSettings) DATA {
                         if (get_len(data_, userdata) == 0) {
                             @branchHint(.unlikely);
                             return data_;
@@ -2300,14 +2651,14 @@ pub const DataManipulationPackage = struct {
                             const part = stack[stack_len];
                             if (SETTINGS.FALLBACK_WHEN_DEGENERATE and part.budget <= 0) {
                                 if (len <= SETTINGS.FALLBACK_WHEN_DEGENERATE_INSERTION_SORT_MAX_INPUT_LEN) {
-                                    return insertion_sort(data, first, last, userdata);
+                                    return insertion_sort_range(data, first, last, userdata);
                                 } else {
-                                    return heapsort(data, first, last, userdata);
+                                    return heapsort_range(data, first, last, userdata);
                                 }
                             }
                             assert_with_reason(!part.empty(data, userdata), @src(), "it should be impossible to have an empty partition here", .{});
                             if (part.len(data, userdata) <= SETTINGS.QUICKSORT_TO_INSERTION_THRESHOLD) {
-                                data = insertion_sort(data, part.lo_idx, part.hi_idx, userdata);
+                                data = insertion_sort_range(data, part.lo_idx, part.hi_idx, userdata);
                                 continue :next_partition;
                             }
                             data, const pivot = switch (comptime SETTINGS.SAME_ORDER_EXPECTATIONS) {
@@ -2450,6 +2801,7 @@ pub const DataManipulationPackage = struct {
                     pub fn min_heap_sift_down_with_range(data: DATA, heap_first: ID, heap_last: ID, heap_len: COUNT, id: ID, id_n: COUNT, userdata: USERDATA) DATA {
                         return any_heap_sift_down_with_range(.MIN_HEAP, data, heap_first, heap_last, heap_len, id, id_n, userdata);
                     }
+                    // TODO more heap operations
                     fn any_heap_sift_down_with_range(comptime kind: HeapKind, data_: DATA, heap_first: ID, heap_last: ID, heap_len: COUNT, id: ID, id_n: COUNT, userdata: USERDATA) DATA {
                         assert_valid_range_3(data_, heap_first, id, heap_last, userdata, @src());
                         var data = data_;
@@ -2621,8 +2973,33 @@ pub const DataManipulationPackage = struct {
                     ///
                     /// Space:
                     ///   - O(1)
-                    pub fn heapsort(data_: DATA, first: ID, last: ID, userdata: USERDATA) DATA {
-                        // CHECKPOINT //FIXME why is heapsort failing?
+                    pub fn heapsort(data_: DATA, userdata: USERDATA) DATA {
+                        const first = first_id(data_, userdata);
+                        const last = last_id(data_, userdata);
+                        return heapsort_range(data_, first, last, userdata);
+                    }
+
+                    /// Builds a max-heap out of the given data range, then iteratively removes the max value
+                    /// from the heap and moves it to the end of the range and re-heapifies the remaining elements
+                    ///
+                    /// Stable:
+                    ///   - NO
+                    ///
+                    /// Cache Locality:
+                    ///   - Poor
+                    ///
+                    /// Initialization Overhead:
+                    ///   - Medium
+                    ///
+                    /// Per-Step Overhead:
+                    ///   - Low
+                    ///
+                    /// Time:
+                    ///   - Always = O(n log n)
+                    ///
+                    /// Space:
+                    ///   - O(1)
+                    pub fn heapsort_range(data_: DATA, first: ID, last: ID, userdata: USERDATA) DATA {
                         if (get_len(data_, userdata) < 2) {
                             @branchHint(.unlikely);
                             return data_;
@@ -3022,7 +3399,7 @@ const TEST_UTILS = struct {
                 return ID.new(math.maxInt(u32));
             }
         };
-        const BASE = DataManipulationPackage{
+        const BASE = DataManipulationCore{
             .COUNT_INT = COUNT,
             .DATA = DATA,
             .ELEM = ELEM,
@@ -3121,19 +3498,19 @@ test "Utils_DataManipulation => sorting algorithms" {
             var buf_slice = buf[0..buf_len];
             // Insertion Sort
             @memcpy(buf_slice, case.input);
-            buf_slice = dmp.insertion_sort(buf_slice, 0, buf_len -% 1, {});
+            buf_slice = dmp.insertion_sort_range(buf_slice, 0, buf_len -% 1, {});
             try Test.expect_slices_equal_t_src(u8, case.expected_output, buf_slice, @src(), "", .{});
             is_sorted = dmp.is_sorted(buf_slice, 0, buf_len -% 1, {});
             try Test.expect_true_src(is_sorted, @src(), "", .{});
             // Quicksort
             @memcpy(buf_slice, case.input);
-            buf_slice = dmp.quicksort(buf_slice, 0, buf_len -% 1, {}, .{});
+            buf_slice = dmp.quicksort_range(buf_slice, 0, buf_len -% 1, {}, .{});
             try Test.expect_slices_equal_t_src(u8, case.expected_output, buf_slice, @src(), "", .{});
             is_sorted = dmp.is_sorted(buf_slice, 0, buf_len -% 1, {});
             try Test.expect_true_src(is_sorted, @src(), "", .{});
             // Heapsort
             @memcpy(buf_slice, case.input);
-            buf_slice = dmp.heapsort(buf_slice, 0, buf_len -% 1, {});
+            buf_slice = dmp.heapsort_range(buf_slice, 0, buf_len -% 1, {});
             try Test.expect_slices_equal_t_src(u8, case.expected_output, buf_slice, @src(), "", .{});
             is_sorted = dmp.is_sorted(buf_slice, 0, buf_len -% 1, {});
             try Test.expect_true_src(is_sorted, @src(), "", .{});
@@ -3145,21 +3522,21 @@ test "Utils_DataManipulation => sorting algorithms" {
             for (0..buf_len) |i| {
                 buf[i] = rand.int(u8);
             }
-            buf_slice = dmp.insertion_sort(buf_slice, 0, buf_len -% 1, {});
+            buf_slice = dmp.insertion_sort_range(buf_slice, 0, buf_len -% 1, {});
             is_sorted = dmp.is_sorted(buf_slice, 0, buf_len -% 1, {});
             try Test.expect_true_src(is_sorted, @src(), "", .{});
             // Quicksort Random
             for (0..buf_len) |i| {
                 buf[i] = rand.int(u8);
             }
-            buf_slice = dmp.quicksort(buf_slice, 0, buf_len -% 1, {}, .{});
+            buf_slice = dmp.quicksort_range(buf_slice, 0, buf_len -% 1, {}, .{});
             is_sorted = dmp.is_sorted(buf_slice, 0, buf_len -% 1, {});
             try Test.expect_true_src(is_sorted, @src(), "", .{});
             // Heapsort Random
             for (0..buf_len) |i| {
                 buf[i] = rand.int(u8);
             }
-            buf_slice = dmp.heapsort(buf_slice, 0, buf_len -% 1, {});
+            buf_slice = dmp.heapsort_range(buf_slice, 0, buf_len -% 1, {});
             is_sorted = dmp.is_sorted(buf_slice, 0, buf_len -% 1, {});
             try Test.expect_true_src(is_sorted, @src(), "", .{});
         }
@@ -3184,19 +3561,19 @@ test "Utils_DataManipulation => sorting algorithms" {
             const buf_slice = buf[0..buf_len];
             // Insertion Sort
             @memcpy(buf_slice, case.input);
-            data = dmp.insertion_sort(data, dmp.first_id(data, udata), dmp.last_id(data, udata), udata);
+            data = dmp.insertion_sort_range(data, dmp.first_id(data, udata), dmp.last_id(data, udata), udata);
             try Test.expect_slices_equal_t_func_src(Blind, Blind.equal, case.expected_output, buf_slice, @src(), "", .{});
             is_sorted = dmp.is_sorted(data, dmp.first_id(data, udata), dmp.last_id(data, udata), udata);
             try Test.expect_true_src(is_sorted, @src(), "", .{});
             // Quicksort
             @memcpy(buf_slice, case.input);
-            data = dmp.quicksort(data, dmp.first_id(data, udata), dmp.last_id(data, udata), udata, .{});
+            data = dmp.quicksort_range(data, dmp.first_id(data, udata), dmp.last_id(data, udata), udata, .{});
             try Test.expect_slices_equal_t_func_src(Blind, Blind.equal, case.expected_output, buf_slice, @src(), "", .{});
             is_sorted = dmp.is_sorted(data, dmp.first_id(data, udata), dmp.last_id(data, udata), udata);
             try Test.expect_true_src(is_sorted, @src(), "", .{});
             // Heapsort
             @memcpy(buf_slice, case.input);
-            data = dmp.heapsort(data, dmp.first_id(data, udata), dmp.last_id(data, udata), udata);
+            data = dmp.heapsort_range(data, dmp.first_id(data, udata), dmp.last_id(data, udata), udata);
             try Test.expect_slices_equal_t_func_src(Blind, Blind.equal, case.expected_output, buf_slice, @src(), "", .{});
             is_sorted = dmp.is_sorted(data, dmp.first_id(data, udata), dmp.last_id(data, udata), udata);
             try Test.expect_true_src(is_sorted, @src(), "", .{});
@@ -3209,21 +3586,21 @@ test "Utils_DataManipulation => sorting algorithms" {
             for (0..buf_len) |i| {
                 buf[i] = Blind.new(rand.int(u32));
             }
-            data = dmp.insertion_sort(data, dmp.first_id(data, udata), dmp.last_id(data, udata), udata);
+            data = dmp.insertion_sort_range(data, dmp.first_id(data, udata), dmp.last_id(data, udata), udata);
             is_sorted = dmp.is_sorted(data, dmp.first_id(data, udata), dmp.last_id(data, udata), udata);
             try Test.expect_true_src(is_sorted, @src(), "", .{});
             // Quicksort Random
             for (0..buf_len) |i| {
                 buf[i] = Blind.new(rand.int(u32));
             }
-            data = dmp.quicksort(data, dmp.first_id(data, udata), dmp.last_id(data, udata), udata, .{});
+            data = dmp.quicksort_range(data, dmp.first_id(data, udata), dmp.last_id(data, udata), udata, .{});
             is_sorted = dmp.is_sorted(data, dmp.first_id(data, udata), dmp.last_id(data, udata), udata);
             try Test.expect_true_src(is_sorted, @src(), "", .{});
             // Heapsort Random
             for (0..buf_len) |i| {
                 buf[i] = Blind.new(rand.int(u32));
             }
-            data = dmp.heapsort(data, dmp.first_id(data, udata), dmp.last_id(data, udata), udata);
+            data = dmp.heapsort_range(data, dmp.first_id(data, udata), dmp.last_id(data, udata), udata);
             is_sorted = dmp.is_sorted(data, dmp.first_id(data, udata), dmp.last_id(data, udata), udata);
             try Test.expect_true_src(is_sorted, @src(), "", .{});
         }
