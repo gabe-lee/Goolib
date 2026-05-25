@@ -49,6 +49,7 @@ pub const CompositeEnum = @import("./CompositeEnum.zig");
 pub const DataGrid = @import("./DataGrid.zig");
 // pub const Compare = @import("./Compare.zig");
 pub const DummyAllocator = @import("./DummyAllocator.zig");
+pub const DummyIo = @import("./DummyIo.zig");
 pub const EnumMap = @import("./EnumMap.zig");
 pub const FileFormat = @import("./FileFormat.zig");
 // pub const Filegen = @import("./Filegen.zig");
