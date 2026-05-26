@@ -482,10 +482,10 @@ const INFER = struct {
         const FROM_GET_SET = F.GET | F.SET | F.NEXT_ID | F.PREV_ID;
         const FROM_MOVE_BLOCK = F.MOVE_BLOCK_PRESERVE;
     };
-    pub const ENSURE_FREE_SPACE = struct {
-        const FROM_REALLOC_CAP_LEN = F.REALLOC_EXACT | F.GET_LEN;
-        const FROM_BASE_PTR_CAP_LEN = F.GET_BASE_PTR | F.SET_BASE_PTR | F.GET_CAP | F.SET_CAP | F.GET_LEN;
-    };
+    // pub const ENSURE_FREE_SPACE = struct {
+    //     const FROM_REALLOC_CAP_LEN = F.REALLOC_EXACT | F.GET_LEN;
+    //     const FROM_BASE_PTR_CAP_LEN = F.GET_BASE_PTR | F.SET_BASE_PTR | F.GET_CAP | F.SET_CAP | F.GET_LEN;
+    // };
     pub const GET_BASE_CONST_PTR = struct {
         const FROM_BASE_PTR = F.GET_BASE_PTR;
     };
@@ -536,6 +536,9 @@ const INFER = struct {
     };
     pub const LAST_CHILD_ID = struct {
         const FROM_NTH_CHILD_ID = F.NTH_CHILD_ID;
+    };
+    pub const ENSURE_FREE_SPACE = struct {
+        const FROM_GET_LEN_GET_SET_CAP = F.GET_LEN | F.SET_CAP | F.GET_CAP;
     };
 };
 
@@ -2380,10 +2383,19 @@ pub const DataManipulationCore = struct {
                         }
                     };
                     const ENSURE_FREE_SPACE = struct {
-                        const func: FN_SET_COUNT = undefined;
+                        const func: FN_SET_COUNT = if (CUSTOM.ENSURE_FREE_SPACE) |cust| cust else undefined; //
+                        // else if (FLAGS.has(INFER.DELETE_RANGE.FROM_DELETE_ONE)) infer_delete_one //
+                        // else if (ALLOW_DEFAULT) default else unusable;
+                        fn unusable(_: DATA_, _: COUNT_, _: USERDATA_) DATA_ {
+                            assert_unreachable(@src(), "no `ensure_free_space` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
+                        }
                     };
                     const TRIM_FREE_SPACE = struct {
                         const func: FN_SET_COUNT = undefined;
+                        //CHECKPOINT implement
+                        fn unusable(_: DATA_, _: COUNT_, _: USERDATA_) DATA_ {
+                            assert_unreachable(@src(), "no `trim_free_space` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
+                        }
                     };
                     const MOVE_BLOCK_RIGHT_NO_PRESERVE = struct {
                         const func: FN_MOVE_BLOCK_NO_PRESERVE = if (CUSTOM.MOVE_BLOCK_RIGHT_NO_PRESERVE) |cust| cust //

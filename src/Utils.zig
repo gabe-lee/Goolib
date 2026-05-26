@@ -42,8 +42,7 @@ const Math = Root.Math;
 const assert_with_reason = Assert.assert_with_reason;
 const assert_unreachable = Assert.assert_unreachable;
 
-pub const _Fuzzer = @import("./Utils_Fuzz.zig");
-
+pub const Fuzzer = @import("./Utils_Fuzz.zig");
 pub const Alloc = @import("./Utils_Allocator.zig");
 pub const File = @import("./Utils_File.zig");
 pub const Mem = @import("./Utils_Mem.zig");
@@ -51,6 +50,21 @@ pub const Format = @import("./Utils_Format.zig");
 pub const Compare = @import("./Utils_Compare.zig");
 pub const Search = @import("./Utils_Search.zig");
 pub const DataManipulation = @import("./Utils_DataManipulation.zig");
+pub const RecipeInference = @import("./Utils_RecipeInference.zig");
+
+comptime {
+    if (build.is_test) {
+        _ = @import("./Utils_Fuzz.zig");
+        _ = @import("./Utils_Allocator.zig");
+        _ = @import("./Utils_File.zig");
+        _ = @import("./Utils_Mem.zig");
+        _ = @import("./Utils_Format.zig");
+        _ = @import("./Utils_Compare.zig");
+        _ = @import("./Utils_Search.zig");
+        _ = @import("./Utils_DataManipulation.zig");
+        _ = @import("./Utils_RecipeInference.zig");
+    }
+}
 
 pub inline fn inline_swap(comptime T: type, a: *T, b: *T, temp: *T) void {
     temp.* = a.*;
