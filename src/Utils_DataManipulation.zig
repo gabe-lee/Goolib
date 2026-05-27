@@ -51,10 +51,12 @@ const Math = Root.Math;
 const Common = Root.CommonTypes;
 
 pub const Defaults = @import("./Utils_DataManipulation_Defaults.zig");
+pub const Recipes = @import("./Utils_DataManipulation_Recipes.zig");
 
 comptime {
     if (build.is_test) {
         _ = @import("./Utils_DataManipulation_Defaults.zig");
+        _ = @import("./Utils_DataManipulation_Recipes.zig");
     }
 }
 
@@ -233,320 +235,9 @@ pub const ManySameOrderExpectation = enum(u8) {
     USE_HOARE_2_WAY_PARTITION,
 };
 
-const FLAG = u128;
-const F = struct {
-    pub const GET: FLAG = 1 << 0;
-    pub const GET_PTR: FLAG = 1 << 1;
-    pub const GET_CONST_PTR: FLAG = 1 << 2;
-    pub const SET: FLAG = 1 << 3;
-    pub const SWAP: FLAG = 1 << 4;
-    pub const GREATER_THAN: FLAG = 1 << 5;
-    pub const GREATER_THAN_OR_EQUAL: FLAG = 1 << 6;
-    pub const LESS_THAN: FLAG = 1 << 7;
-    pub const LESS_THAN_OR_EQUAL: FLAG = 1 << 8;
-    pub const ORDER_EQUALS: FLAG = 1 << 9;
-    pub const EXACT_EQUALS: FLAG = 1 << 10;
-    pub const FIRST_ID: FLAG = 1 << 11;
-    pub const LAST_ID: FLAG = 1 << 12;
-    pub const NTH_ID_FROM_START: FLAG = 1 << 13;
-    pub const NTH_ID_FROM_END: FLAG = 1 << 14;
-    pub const PREV_ID: FLAG = 1 << 15;
-    pub const NEXT_ID: FLAG = 1 << 16;
-    pub const NTH_PREV_ID: FLAG = 1 << 17;
-    pub const NTH_NEXT_ID: FLAG = 1 << 18;
-    pub const GET_LEN: FLAG = 1 << 19;
-    pub const SET_LEN: FLAG = 1 << 20;
-    pub const GET_CAP: FLAG = 1 << 21;
-    pub const SET_CAP: FLAG = 1 << 22;
-    pub const RANGE_LEN: FLAG = 1 << 23;
-    pub const APPEND_ONE_SLOT_ASSUME_CAP: FLAG = 1 << 24;
-    pub const APPEND_MANY_SLOTS_ASSUME_CAP: FLAG = 1 << 25;
-    pub const INSERT_ONE_SLOT_ASSUME_CAP: FLAG = 1 << 26;
-    pub const INSERT_MANY_SLOTS_ASSUME_CAP: FLAG = 1 << 27;
-    pub const DELETE_ONE: FLAG = 1 << 28;
-    pub const DELETE_RANGE: FLAG = 1 << 29;
-    pub const REVERSE_RANGE: FLAG = 1 << 30;
-    pub const ENSURE_FREE_SPACE: FLAG = 1 << 31;
-    pub const MOVE_ONE_PRESERVE: FLAG = 1 << 32;
-    pub const MOVE_BLOCK_PRESERVE: FLAG = 1 << 33;
-    pub const TRIM_FREE_SPACE: FLAG = 1 << 34;
-    pub const GET_RANGE_SLICE: FLAG = 1 << 35;
-    pub const GET_RANGE_CONST_SLICE: FLAG = 1 << 36;
-    pub const ROTATE_RANGE_LEFT: FLAG = 1 << 37;
-    pub const ROTATE_RANGE_RIGHT: FLAG = 1 << 38;
-    pub const SCRAMBLE: FLAG = 1 << 39;
-    pub const ID_LESS_THAN: FLAG = 1 << 40;
-    pub const ID_LESS_THAN_OR_EQUAL: FLAG = 1 << 41;
-    pub const ID_GREATER_THAN: FLAG = 1 << 42;
-    pub const ID_GREATER_THAN_OR_EQUAL: FLAG = 1 << 43;
-    pub const ID_EQUALS: FLAG = 1 << 44;
-    pub const VALID_ID: FLAG = 1 << 45;
-    pub const INVALID_ID_AFTER_LAST_ID: FLAG = 1 << 46;
-    pub const INVALID_ID_BEFORE_FIRST_ID: FLAG = 1 << 47;
-    pub const GET_BASE_PTR: FLAG = 1 << 48;
-    pub const GET_BASE_CONST_PTR: FLAG = 1 << 49;
-    pub const SET_BASE_PTR: FLAG = 1 << 50;
-    pub const LIMIT_LEN: FLAG = 1 << 51;
-    pub const MOVE_BLOCK_RIGHT_NO_PRESERVE: FLAG = 1 << 52;
-    pub const MOVE_BLOCK_LEFT_NO_PRESERVE: FLAG = 1 << 53;
-    pub const FIRST_CHILD_ID: FLAG = 1 << 54;
-    pub const LAST_CHILD_ID: FLAG = 1 << 55;
-    pub const NTH_CHILD_ID: FLAG = 1 << 56;
-    pub const PARENT_ID: FLAG = 1 << 57;
-};
-pub const ExtraProperties = enum(FLAG) {
-    BASE_PTR_ADDRESS_CORRESPONDS_TO_ID_ZERO = 1 << 123,
-    ID_IS_INTEGER_TYPE_THAT_DIRECTLY_INDEXES_BASE_PTR = 1 << 124,
-    NO_MEMORY_GAPS_BETWEEN_ADJACENT_IDS = 1 << 125,
-    ELEMENTS_WITH_INCREASING_MEMORY_ADDRESSES_ALSO_HAVE_INCREASING_IDS = 1 << 126,
-    ALL_ELEMENTS_WITHIN_SAME_BASE_PTR_REGION = 1 << 127,
-
-    _,
-
-    pub const OFFSET_CLASSIC_INDEXING_SCHEME: ExtraProperties = @enumFromInt(ExtraProperties.ALL_ELEMENTS_WITHIN_SAME_BASE_PTR_REGION.raw() | //
-        ExtraProperties.ELEMENTS_WITH_INCREASING_MEMORY_ADDRESSES_ALSO_HAVE_INCREASING_IDS.raw() | //
-        ExtraProperties.ID_IS_INTEGER_TYPE_THAT_DIRECTLY_INDEXES_BASE_PTR.raw() | //
-        ExtraProperties.NO_MEMORY_GAPS_BETWEEN_ADJACENT_IDS.raw());
-
-    pub const CLASSIC_INDEXING_SCHEME: ExtraProperties = @enumFromInt(ExtraProperties.ALL_ELEMENTS_WITHIN_SAME_BASE_PTR_REGION.raw() | //
-        ExtraProperties.BASE_PTR_ADDRESS_CORRESPONDS_TO_ID_ZERO.raw() | //
-        ExtraProperties.ELEMENTS_WITH_INCREASING_MEMORY_ADDRESSES_ALSO_HAVE_INCREASING_IDS.raw() | //
-        ExtraProperties.ID_IS_INTEGER_TYPE_THAT_DIRECTLY_INDEXES_BASE_PTR.raw() | //
-        ExtraProperties.NO_MEMORY_GAPS_BETWEEN_ADJACENT_IDS.raw());
-
-    pub fn raw(self: ExtraProperties) FLAG {
-        return @intFromEnum(self);
-    }
-};
-const Flags = struct {
-    raw: FLAG = 0,
-
-    fn add_if_not_null(comptime flags: *Flags, comptime flag: FLAG, comptime not_null: anytype) void {
-        if (not_null != null) {
-            flags.raw |= flag;
-        }
-    }
-
-    fn has(comptime flags: Flags, comptime flag: FLAG) bool {
-        return (flags.raw & flag) == flag;
-    }
-    fn has_any(comptime flags: Flags, comptime any_flag: []const FLAG) bool {
-        inline for (any_flag) |flag| {
-            if (flags.has(flag)) return true;
-        }
-        return false;
-    }
-};
-const PROPERTY = struct {
-    pub const OFFSET_CLASSIC_INDEXING_SCHEME: FLAG = ExtraProperties.OFFSET_CLASSIC_INDEXING_SCHEME.raw();
-    pub const CLASSIC_INDEXING_SCHEME: FLAG = ExtraProperties.CLASSIC_INDEXING_SCHEME.raw();
-};
-const INFER = struct {
-    pub const GET = struct {
-        const FROM_BASE_PTR = F.GET_BASE_PTR | PROPERTY.CLASSIC_INDEXING_SCHEME;
-        const FROM_BASE_CONST_PTR = F.GET_BASE_CONST_PTR | PROPERTY.CLASSIC_INDEXING_SCHEME;
-        const FROM_CONST_PTR = F.GET_CONST_PTR;
-        const FROM_PTR = F.GET_PTR;
-    };
-    pub const CONST_PTR = struct {
-        const FROM_PTR = F.GET_PTR;
-    };
-    pub const SET = struct {
-        const FROM_BASE_PTR = F.GET_BASE_PTR | PROPERTY.CLASSIC_INDEXING_SCHEME;
-        const FROM_PTR = F.GET_PTR;
-    };
-    pub const SWAP = struct {
-        const FROM_PTR = F.GET_PTR;
-        const FROM_GET_SET = F.GET | F.SET;
-    };
-    pub const GT = struct {
-        const FROM_LTEQ = F.LESS_THAN_OR_EQUAL;
-        const FROM_LT_EQ = F.LESS_THAN | F.EXACT_EQUALS;
-        const FROM_LT_OQ = F.LESS_THAN | F.ORDER_EQUALS;
-    };
-    pub const LT = struct {
-        const FROM_GTEQ = F.GREATER_THAN_OR_EQUAL;
-        const FROM_GT_EQ = F.GREATER_THAN | F.EXACT_EQUALS;
-        const FROM_GT_OQ = F.GREATER_THAN | F.ORDER_EQUALS;
-    };
-    pub const EQ = struct {
-        const FROM_OQ = F.ORDER_EQUALS;
-        const FROM_GT_LT = F.GREATER_THAN | F.LESS_THAN;
-    };
-    pub const OQ = struct {
-        const FROM_EQ = F.EXACT_EQUALS;
-        const FROM_GT_LT = F.GREATER_THAN | F.LESS_THAN;
-    };
-    pub const GTEQ = struct {
-        const FROM_LT = F.LESS_THAN;
-        const FROM_GT_EQ = F.GREATER_THAN | F.EXACT_EQUALS;
-        const FROM_GT_OQ = F.GREATER_THAN | F.ORDER_EQUALS;
-    };
-    pub const LTEQ = struct {
-        const FROM_GT = F.GREATER_THAN;
-        const FROM_LT_EQ = F.LESS_THAN | F.EXACT_EQUALS;
-        const FROM_LT_OQ = F.LESS_THAN | F.ORDER_EQUALS;
-    };
-    pub const ID_GT = struct {
-        const FROM_LTEQ = F.ID_LESS_THAN_OR_EQUAL;
-        const FROM_LT_EQ = F.ID_LESS_THAN | F.ID_EQUALS;
-    };
-    pub const ID_LT = struct {
-        const FROM_GTEQ = F.ID_GREATER_THAN_OR_EQUAL;
-        const FROM_GT_EQ = F.ID_GREATER_THAN | F.ID_EQUALS;
-    };
-    pub const ID_EQ = struct {
-        const FROM_GT_LT = F.ID_GREATER_THAN | F.ID_LESS_THAN;
-    };
-    pub const ID_GTEQ = struct {
-        const FROM_LT = F.ID_LESS_THAN;
-        const FROM_GT_EQ = F.ID_GREATER_THAN | F.ID_EQUALS;
-    };
-    pub const ID_LTEQ = struct {
-        const FROM_GT = F.ID_GREATER_THAN;
-        const FROM_LT_EQ = F.ID_LESS_THAN | F.ID_EQUALS;
-    };
-    pub const VALID_ID = struct {
-        const FROM_FIRST_LAST_LTEQ = F.FIRST_ID | F.LAST_ID | F.ID_LESS_THAN_OR_EQUAL;
-        const FROM_FIRST_LAST_GTEQ = F.FIRST_ID | F.LAST_ID | F.ID_GREATER_THAN_OR_EQUAL;
-        const FROM_FIRST_LAST_LT_EQ = F.FIRST_ID | F.LAST_ID | F.ID_LESS_THAN | F.ID_EQUALS;
-        const FROM_FIRST_LAST_GT_EQ = F.FIRST_ID | F.LAST_ID | F.ID_GREATER_THAN | F.ID_EQUALS;
-    };
-    pub const NEXT_ID = struct {
-        const FROM_NTH_NEXT = F.NTH_NEXT_ID;
-        const FROM_LAST_PREV = F.LAST_ID | F.PREV_ID;
-    };
-    pub const NTH_NEXT_ID = struct {
-        const FROM_NEXT = F.NEXT_ID;
-        const FROM_LAST_PREV = F.LAST_ID | F.PREV_ID;
-    };
-    pub const PREV_ID = struct {
-        const FROM_NTH_PREV = F.NTH_PREV_ID;
-        const FROM_FIRST_NEXT = F.FIRST_ID | F.NEXT_ID;
-    };
-    pub const NTH_PREV_ID = struct {
-        const FROM_PREV = F.PREV_ID;
-        const FROM_FIRST_NEXT = F.FIRST_ID | F.NEXT_ID;
-    };
-    pub const RANGE_LEN = struct {
-        const FROM_LIMIT_LEN = F.LIMIT_LEN;
-        const FROM_NEXT = F.NEXT_ID;
-        const FROM_PREV = F.PREV_ID;
-    };
-    pub const LIMIT_LEN = struct {
-        const FROM_RANGE_LEN = F.RANGE_LEN;
-        const FROM_NEXT = F.NEXT_ID;
-        const FROM_PREV = F.PREV_ID;
-    };
-    pub const LEN = struct {
-        const FROM_FIRST_LAST_RANGE_LEN = F.FIRST_ID | F.LAST_ID | F.RANGE_LEN;
-        const FROM_FIRST_LAST_NEXT = F.FIRST_ID | F.LAST_ID | F.NEXT_ID;
-        const FROM_FIRST_LAST_PREV = F.FIRST_ID | F.LAST_ID | F.PREV_ID;
-    };
-    pub const LAST_ID = struct {
-        const FROM_FIRST_LEN_NTH_NEXT = F.FIRST_ID | F.GET_LEN | F.NTH_ID_FROM_START;
-        const FROM_FIRST_LEN_NEXT = F.FIRST_ID | F.GET_LEN | F.NEXT_ID;
-        const FROM_NTH_FROM_LAST = F.NTH_ID_FROM_END;
-        const FROM_LEN_NTH_FROM_START = F.NTH_ID_FROM_START | F.GET_LEN;
-    };
-    pub const FIRST_ID = struct {
-        const FROM_LAST_LEN_NTH_PREV = F.LAST_ID | F.GET_LEN | F.NTH_PREV_ID;
-        const FROM_LAST_LEN_PREV = F.LAST_ID | F.GET_LEN | F.PREV_ID;
-        const FROM_NTH_FROM_START = F.NTH_ID_FROM_START;
-        const FROM_LEN_NTH_FROM_END = F.NTH_ID_FROM_END | F.GET_LEN;
-    };
-    pub const NTH_FROM_END = struct {
-        const FROM_LAST_NTH_PREV = F.LAST_ID | F.NTH_PREV_ID;
-        const FROM_LAST_PREV = F.LAST_ID | F.PREV_ID;
-    };
-    pub const NTH_FROM_START = struct {
-        const FROM_FIRST_NTH_NEXT = F.FIRST_ID | F.NTH_NEXT_ID;
-        const FROM_FIRST_NEXT = F.FIRST_ID | F.NEXT_ID;
-    };
-    pub const REVERSE = struct {
-        const FROM_SWAP = F.SWAP;
-        const FROM_GET_SET = F.GET | F.SET;
-    };
-    pub const ROTATE = struct {
-        const FROM_REVERSE = F.REVERSE_RANGE;
-        const FROM_SWAP = F.SWAP;
-        const FROM_GET_SET = F.GET | F.SET;
-    };
-    pub const MOVE = struct {
-        const FROM_ROTATE = F.ROTATE_RANGE_LEFT | F.ROTATE_RANGE_RIGHT;
-        const FROM_REVERSE = F.REVERSE_RANGE;
-        const FROM_SWAP = F.SWAP;
-        const FROM_GET_SET = F.GET | F.SET;
-    };
-    pub const MOVE_ONE = struct {
-        const FROM_GET_SET = F.GET | F.SET | F.NEXT_ID | F.PREV_ID;
-        const FROM_MOVE_BLOCK = F.MOVE_BLOCK_PRESERVE;
-    };
-    // pub const ENSURE_FREE_SPACE = struct {
-    //     const FROM_REALLOC_CAP_LEN = F.REALLOC_EXACT | F.GET_LEN;
-    //     const FROM_BASE_PTR_CAP_LEN = F.GET_BASE_PTR | F.SET_BASE_PTR | F.GET_CAP | F.SET_CAP | F.GET_LEN;
-    // };
-    pub const GET_BASE_CONST_PTR = struct {
-        const FROM_BASE_PTR = F.GET_BASE_PTR;
-    };
-    pub const APPEND_ONE = struct {
-        const FROM_APPEND_MANY = F.APPEND_MANY_SLOTS_ASSUME_CAP;
-    };
-    pub const APPEND_MANY = struct {
-        const FROM_APPEND_ONE = F.APPEND_ONE_SLOT_ASSUME_CAP;
-    };
-    pub const INSERT_ONE = struct {
-        const FROM_INSERT_MANY = F.INSERT_MANY_SLOTS_ASSUME_CAP;
-        const FROM_APPEND_ONE_MOVE_ONE_GET_SET = F.APPEND_ONE_SLOT_ASSUME_CAP | F.GET | F.SET | F.PREV_ID;
-        const FROM_APPEND_ONE_MOVE_ONE_MOVE = F.APPEND_ONE_SLOT_ASSUME_CAP | F.MOVE_BLOCK_RIGHT_NO_PRESERVE;
-    };
-    pub const INSERT_MANY = struct {
-        const FROM_INSERT_ONE = F.INSERT_ONE_SLOT_ASSUME_CAP;
-        const FROM_APPEND_MANY_MOVE_BLOCK = F.APPEND_MANY_SLOTS_ASSUME_CAP;
-        const FROM_APPEND_ONE_MOVE_ONE_GET_SET = F.APPEND_ONE_SLOT_ASSUME_CAP | F.GET | F.SET | F.PREV_ID;
-    };
-    pub const DELETE_ONE = struct {
-        const FROM_DELETE_RANGE = F.DELETE_RANGE;
-    };
-    pub const DELETE_RANGE = struct {
-        const FROM_DELETE_ONE = F.DELETE_ONE;
-    };
-    pub const MOVE_BLOCK_RIGHT_NO_PRESERVE = struct {
-        const FROM_GET_SET_PREV = F.GET | F.SET | F.PREV_ID;
-    };
-    pub const MOVE_BLOCK_LEFT_NO_PRESERVE = struct {
-        const FROM_GET_SET_NEXT = F.GET | F.SET | F.NEXT_ID;
-    };
-    pub const GET_BASE_PTR_CONST = struct {
-        const FROM_BASE_PTR = F.GET_BASE_PTR;
-    };
-    pub const GET_RANGE_SLICE = struct {
-        const FROM_BASE_PTR_CLASSIC_INDEX = F.GET_BASE_PTR | PROPERTY.CLASSIC_INDEXING_SCHEME;
-        const FROM_PTR_OFFSET_CLASSIC_INDEX = F.GET_PTR | PROPERTY.OFFSET_CLASSIC_INDEXING_SCHEME;
-    };
-    pub const GET_RANGE_CONST_SLICE = struct {
-        const FROM_BASE_PTR_CLASSIC_INDEX = F.GET_BASE_PTR | PROPERTY.CLASSIC_INDEXING_SCHEME;
-        const FROM_BASE_CONST_PTR_CLASSIC_INDEX = F.GET_BASE_CONST_PTR | PROPERTY.CLASSIC_INDEXING_SCHEME;
-        const FROM_PTR_OFFSET_CLASSIC_INDEX = F.GET_PTR | PROPERTY.OFFSET_CLASSIC_INDEXING_SCHEME;
-        const FROM_CONST_PTR_OFFSET_CLASSIC_INDEX = F.GET_PTR | PROPERTY.OFFSET_CLASSIC_INDEXING_SCHEME;
-        const FROM_RANGE_SLICE = F.GET_RANGE_SLICE;
-    };
-    pub const FIRST_CHILD_ID = struct {
-        const FROM_NTH_CHILD_ID = F.NTH_CHILD_ID;
-    };
-    pub const LAST_CHILD_ID = struct {
-        const FROM_NTH_CHILD_ID = F.NTH_CHILD_ID;
-    };
-    pub const ENSURE_FREE_SPACE = struct {
-        const FROM_GET_LEN_GET_SET_CAP = F.GET_LEN | F.SET_CAP | F.GET_CAP;
-    };
-};
-
-const P = struct {};
-
-pub const DefaultFuncMode = enum(u8) {
-    ALLOW_DEFAULT_IMPLEMENTATIONS,
-    NO_DEFAULT_IMPLEMENTATIONS,
+pub const InferedFuncMode = enum(u8) {
+    ALLOW_INFERED_IMPLEMENTATIONS,
+    NO_INFERED_IMPLEMENTATIONS,
 };
 
 pub const DataManipulationCore = struct {
@@ -578,13 +269,13 @@ pub const DataManipulationCore = struct {
     /// and you need to use the reference type to get the real type out of the external userdata
     USERDATA: type = void,
 
-    pub fn define(comptime CORE: DataManipulationCore, comptime DEFAULT_MODE: DefaultFuncMode, comptime CUSTOM: CORE.CustomFunctions()) type {
+    pub fn define(comptime CORE: DataManipulationCore, comptime DEFAULT_MODE: InferedFuncMode, comptime CUSTOM: CORE.CustomFunctions()) type {
         return CORE.select_functions(DEFAULT_MODE, CUSTOM).finalize();
     }
 
-    pub fn select_functions(comptime CORE: DataManipulationCore, comptime DEFAULT_MODE: DefaultFuncMode, comptime CUSTOM: CORE.CustomFunctions()) CORE.Builder() {
+    pub fn select_functions(comptime CORE: DataManipulationCore, comptime DEFAULT_MODE: InferedFuncMode, comptime CUSTOM: CORE.CustomFunctions()) CORE.Builder() {
         comptime {
-            const ALLOW_DEFAULT = DEFAULT_MODE == .ALLOW_DEFAULT_IMPLEMENTATIONS;
+            const ALLOW_DEFAULT = DEFAULT_MODE == .ALLOW_INFERED_IMPLEMENTATIONS;
             const FUNC_SELECTOR = CORE.Builder().FUNC_SELECTOR;
             const CORE_AND_FUNCS = CORE.Builder();
             // BUILD FLAGS FOR PROVIDED CUSTOM FUNCTIONS
@@ -830,7 +521,26 @@ pub const DataManipulationCore = struct {
                 LIMIT_LEN: ?FN_RANGE_COUNT = null,
             };
 
-            pub fn FUNC_SELECTOR(comptime CUSTOM: CustomFunctions_, comptime FLAGS: Flags, comptime ALLOW_DEFAULT: bool) type {
+            pub fn FUNC_SELECTOR(comptime CUSTOM: CustomFunctions_, comptime ALLOW_DEFAULT: bool) type {
+                var provided_func_flags: [Recipes.PackageFlags.NUM_FLAGS]Recipes.FuncFlag = undefined;
+                var num_provided_func_flags: usize = 0;
+                inline for (@typeInfo(CUSTOM).@"struct".fields) |c_field| {
+                    if (@field(CUSTOM, c_field.name) != null) {
+                        var enum_tag: Recipes.PackageFlags = undefined;
+                        var found: bool = false;
+                        inline for (@typeInfo(Recipes.PackageFlags).@"enum".fields) |e_field| {
+                            if (std.mem.eql(u8, c_field.name, e_field.name)) {
+                                enum_tag = @enumFromInt(e_field.value);
+                                found = true;
+                                break;
+                            }
+                        }
+                        assert_unreachable(@src(), "custom functions struct has field `{s}` that does not match any enum field on Recipes.PackageFlags", .{c_field.name});
+                        provided_func_flags[num_provided_func_flags] = Recipes.FuncFlag.user_provided(enum_tag);
+                        num_provided_func_flags += 1;
+                    }
+                }
+                const SOLUTIONS = comptime Recipes.InferEngine.resolve_recipes_by_order(provided_func_flags[0..num_provided_func_flags], Recipes.RECIPES);
                 const SELECTOR = struct {
                     fn nth_child_of_n_ary_flat_array_tree(id_n: COUNT_, num_children_per_element: COUNT_, child_n: COUNT_) COUNT_ {
                         return (id_n * num_children_per_element) + child_n;
@@ -839,24 +549,50 @@ pub const DataManipulationCore = struct {
                         return @divFloor(child_n - 1, num_children_per_element);
                     }
                     const GET_BASE_PTR = struct {
-                        const func: FN_GET_BASE_PTR = if (CUSTOM.GET_BASE_PTR) |cust| cust //
-                            else unusable;
+                        const func: FN_GET_BASE_PTR = switch (SOLUTIONS[@intFromEnum(Recipes.PackageFlags.GET_BASE_PTR)]) {
+                            .UNAVAILABLE => unusable,
+                            .USER_PROVIDED => CUSTOM.GET_BASE_PTR.?,
+                            .INFERED_BY_RECIPE => |fn_tag| switch (fn_tag) {
+                                .infer_ptr => infer_ptr,
+                                else => unreachable,
+                            },
+                        };
+                        fn infer_ptr(data: DATA_, userdata: USERDATA_) [*]ELEM_ {
+                            const ptr = GET_PTR.func(data, FIRST_ID.func(data, userdata), userdata);
+                            return @ptrCast(ptr);
+                        }
                         fn unusable(_: DATA_, _: USERDATA_) [*]ELEM_ {
                             assert_unreachable(@src(), "no `get_base_ptr` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
                         }
                     };
                     const GET_BASE_CONST_PTR = struct {
-                        const func: FN_GET_BASE_CONST_PTR = if (CUSTOM.GET_BASE_CONST_PTR) |cust| cust //
-                            else if (FLAGS.has(INFER.GET_BASE_PTR_CONST.FROM_BASE_PTR)) infer_base_ptr //
-                            else unusable;
+                        const func: FN_GET_BASE_CONST_PTR = switch (SOLUTIONS[@intFromEnum(Recipes.PackageFlags.GET_BASE_CONST_PTR)]) {
+                            .UNAVAILABLE => unusable,
+                            .USER_PROVIDED => CUSTOM.GET_BASE_CONST_PTR.?,
+                            .INFERED_BY_RECIPE => |fn_tag| switch (fn_tag) {
+                                .infer_base_ptr => infer_base_ptr,
+                                .infer_const_ptr => infer_const_ptr,
+                                .infer_ptr => infer_ptr,
+                                else => unreachable,
+                            },
+                        };
                         fn infer_base_ptr(data: DATA_, userdata: USERDATA_) [*]const ELEM_ {
                             return GET_BASE_PTR.func(data, userdata);
+                        }
+                        fn infer_ptr(data: DATA_, userdata: USERDATA_) [*]const ELEM_ {
+                            const ptr = GET_PTR.func(data, FIRST_ID.func(data, userdata), userdata);
+                            return @ptrCast(ptr);
+                        }
+                        fn infer_const_ptr(data: DATA_, userdata: USERDATA_) [*]const ELEM_ {
+                            const ptr = GET_CONST_PTR.func(data, FIRST_ID.func(data, userdata), userdata);
+                            return @ptrCast(ptr);
                         }
                         fn unusable(_: DATA_, _: USERDATA_) [*]const ELEM_ {
                             assert_unreachable(@src(), "no `get_base_const_ptr` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
                         }
                     };
                     const SET_BASE_PTR = struct {
+                        //CHECKPOINT //FIXME implement new recipe solutions
                         const func: FN_SET_BASE_PTR = if (CUSTOM.SET_BASE_PTR) |cust| cust //
                             else unusable;
                         fn unusable(_: DATA_, _: [*]ELEM_, _: USERDATA_) DATA_ {
@@ -3624,7 +3360,7 @@ const TEST_UTILS = struct {
             .get_cap = FUNC.get_cap,
             .set_cap = FUNC.set_cap,
         };
-        const PKG_ACCESS_FUNCS = CORE.select_functions(.ALLOW_DEFAULT_IMPLEMENTATIONS, CORE.Builder().CustomFunctions_{
+        const PKG_ACCESS_FUNCS = CORE.select_functions(.ALLOW_INFERED_IMPLEMENTATIONS, CORE.Builder().CustomFunctions_{
             .GET_BASE_PTR = FUNC.get_base_ptr,
             .GET_BASE_PTR_CONST = FUNC.get_base_ptr_const,
             .SET_BASE_PTR = FUNC.set_base_ptr,
@@ -3633,7 +3369,7 @@ const TEST_UTILS = struct {
             .GET_CAP = FUNC.get_cap,
             .SET_CAP = FUNC.set_cap,
         }).finalize();
-        const PKG_FULL_CUSTOM_FUNCS = CORE.select_functions(.NO_DEFAULT_IMPLEMENTATIONS, CORE.Builder().CustomFunctions_{
+        const PKG_FULL_CUSTOM_FUNCS = CORE.select_functions(.NO_INFERED_IMPLEMENTATIONS, CORE.Builder().CustomFunctions_{
             .GET = FUNC.get,
             .GET_PTR = FUNC.get_ptr,
             .SET = FUNC.set,

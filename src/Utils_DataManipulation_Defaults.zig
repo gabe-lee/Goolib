@@ -531,53 +531,53 @@ pub fn default_functions_for_contiguous_mem_not_allocated(
 
 /// Automatic 'DataManipulationPackage' type for an `[]ELEM` that is not allocated
 pub fn slice_not_allocated_package(comptime ELEM: type) type {
-    return core_for_slice_not_allocated(ELEM).select_functions(.ALLOW_DEFAULT_IMPLEMENTATIONS, default_functions_for_slice_not_allocated(ELEM)).finalize();
+    return core_for_slice_not_allocated(ELEM).select_functions(.ALLOW_INFERED_IMPLEMENTATIONS, default_functions_for_slice_not_allocated(ELEM)).finalize();
 }
 
 /// Automatic 'DataManipulationPackage' type for an `[]ELEM` that is allocated from an Allocator
 pub fn slice_allocated_package(comptime ELEM: type) type {
-    return core_for_slice_allocated(ELEM).select_functions(.ALLOW_DEFAULT_IMPLEMENTATIONS, default_functions_for_slice_allocated(ELEM)).finalize();
+    return core_for_slice_allocated(ELEM).select_functions(.ALLOW_INFERED_IMPLEMENTATIONS, default_functions_for_slice_allocated(ELEM)).finalize();
 }
 
 /// Automatic 'DataManipulationPackage' type for an `[]const ELEM`
 pub fn const_slice_not_allocated_package(comptime ELEM: type) type {
-    return core_for_const_slice(ELEM).select_functions(.ALLOW_DEFAULT_IMPLEMENTATIONS, default_functions_for_const_slice(ELEM)).finalize();
+    return core_for_const_slice(ELEM).select_functions(.ALLOW_INFERED_IMPLEMENTATIONS, default_functions_for_const_slice(ELEM)).finalize();
 }
 
 /// Automatic 'DataManipulationPackage' type for an `std.ArrayList(ELEM)` that is not allocated
 pub fn arraylist_not_allocated_package(comptime ELEM: type) type {
-    return core_for_arraylist_not_allocated(ELEM).select_functions(.ALLOW_DEFAULT_IMPLEMENTATIONS, default_functions_for_arraylist_not_allocated(ELEM)).finalize();
+    return core_for_arraylist_not_allocated(ELEM).select_functions(.ALLOW_INFERED_IMPLEMENTATIONS, default_functions_for_arraylist_not_allocated(ELEM)).finalize();
 }
 
 /// Automatic 'DataManipulationPackage' type for an `std.ArrayList(ELEM)` that is allocated from an Allocator
 pub fn arraylist_allocated_package(comptime ELEM: type) type {
-    return core_for_arraylist_allocated(ELEM).select_functions(.ALLOW_DEFAULT_IMPLEMENTATIONS, default_functions_for_arraylist_allocated(ELEM)).finalize();
+    return core_for_arraylist_allocated(ELEM).select_functions(.ALLOW_INFERED_IMPLEMENTATIONS, default_functions_for_arraylist_allocated(ELEM)).finalize();
 }
 
 /// Automatic 'DataManipulationPackage' type for an arbitrary struct type that references memory that is allocated from an Allocator
 ///
 /// Necessary fields are accessed via the specified field names. For example if the object's 'ptr' is located at `my_object.items.ptr`, provide `&.{"items", "ptr"}` as the field access for it
 pub fn contiguous_mem_with_cap_allocated_package(comptime DATA: type, comptime INDEX: type, comptime ELEM: type, comptime PTR_ACCESS: []const []const u8, comptime LEN_ACCESS: []const []const u8, comptime CAP_ACCESS: []const []const u8) type {
-    return core_for_any_data_structure_with_contiguous_memory_allocated(DATA, INDEX, ELEM).select_functions(.ALLOW_DEFAULT_IMPLEMENTATIONS, default_functions_for_contiguous_mem_allocated(DATA, INDEX, ELEM, PTR_ACCESS, LEN_ACCESS, CAP_ACCESS, true)).finalize();
+    return core_for_any_data_structure_with_contiguous_memory_allocated(DATA, INDEX, ELEM).select_functions(.ALLOW_INFERED_IMPLEMENTATIONS, default_functions_for_contiguous_mem_allocated(DATA, INDEX, ELEM, PTR_ACCESS, LEN_ACCESS, CAP_ACCESS, true)).finalize();
 }
 
 /// Automatic 'DataManipulationPackage' type for an arbitrary struct type that references memory that is allocated from an Allocator
 ///
 /// Necessary fields are accessed via the specified field names. For example if the object's 'ptr' is located at `my_object.items.ptr`, provide `&.{"items", "ptr"}` as the field access for it
 pub fn contiguous_mem_allocated_package(comptime DATA: type, comptime INDEX: type, comptime ELEM: type, comptime PTR_ACCESS: []const []const u8, comptime LEN_ACCESS: []const []const u8) type {
-    return core_for_any_data_structure_with_contiguous_memory_allocated(DATA, INDEX, ELEM).select_functions(.ALLOW_DEFAULT_IMPLEMENTATIONS, default_functions_for_contiguous_mem_allocated(DATA, INDEX, ELEM, PTR_ACCESS, LEN_ACCESS, &.{}, false)).finalize();
+    return core_for_any_data_structure_with_contiguous_memory_allocated(DATA, INDEX, ELEM).select_functions(.ALLOW_INFERED_IMPLEMENTATIONS, default_functions_for_contiguous_mem_allocated(DATA, INDEX, ELEM, PTR_ACCESS, LEN_ACCESS, &.{}, false)).finalize();
 }
 
 /// Automatic 'DataManipulationPackage' type for an arbitrary struct type that references memory that is not allocated
 ///
 /// Necessary fields are accessed via the specified field names. For example if the object's 'ptr' is located at `my_object.items.ptr`, provide `&.{"items", "ptr"}` as the field access for it
 pub fn contiguous_mem_with_cap_not_allocated_package(comptime DATA: type, comptime INDEX: type, comptime ELEM: type, comptime PTR_ACCESS: []const []const u8, comptime LEN_ACCESS: []const []const u8, comptime CAP_ACCESS: []const []const u8) type {
-    return core_for_any_data_structure_with_contiguous_memory_not_allocated(DATA, INDEX, ELEM).select_functions(.ALLOW_DEFAULT_IMPLEMENTATIONS, default_functions_for_contiguous_mem_not_allocated(DATA, INDEX, ELEM, PTR_ACCESS, LEN_ACCESS, CAP_ACCESS, true)).finalize();
+    return core_for_any_data_structure_with_contiguous_memory_not_allocated(DATA, INDEX, ELEM).select_functions(.ALLOW_INFERED_IMPLEMENTATIONS, default_functions_for_contiguous_mem_not_allocated(DATA, INDEX, ELEM, PTR_ACCESS, LEN_ACCESS, CAP_ACCESS, true)).finalize();
 }
 
 /// Automatic 'DataManipulationPackage' type for an arbitrary struct type that references memory that is not allocated
 ///
 /// Necessary fields are accessed via the specified field names. For example if the object's 'ptr' is located at `my_object.items.ptr`, provide `&.{"items", "ptr"}` as the field access for it
 pub fn contiguous_mem_not_allocated_package(comptime DATA: type, comptime INDEX: type, comptime ELEM: type, comptime PTR_ACCESS: []const []const u8, comptime LEN_ACCESS: []const []const u8) type {
-    return core_for_any_data_structure_with_contiguous_memory_not_allocated(DATA, INDEX, ELEM).select_functions(.ALLOW_DEFAULT_IMPLEMENTATIONS, default_functions_for_contiguous_mem_not_allocated(DATA, INDEX, ELEM, PTR_ACCESS, LEN_ACCESS, &.{}, false)).finalize();
+    return core_for_any_data_structure_with_contiguous_memory_not_allocated(DATA, INDEX, ELEM).select_functions(.ALLOW_INFERED_IMPLEMENTATIONS, default_functions_for_contiguous_mem_not_allocated(DATA, INDEX, ELEM, PTR_ACCESS, LEN_ACCESS, &.{}, false)).finalize();
 }
