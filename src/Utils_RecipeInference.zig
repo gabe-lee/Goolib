@@ -82,10 +82,20 @@ pub const RecipeResolveBranch = enum(u2) {
     IS_AVAILABLE = 2,
 };
 
+pub const WeightO = enum {
+    one,
+    n,
+    log_n,
+    n_log_n,
+    n_squared,
+    exponential,
+};
+
 pub fn WeightModeInfo(comptime RecipeTag: type) type {
     return struct {
         tags_equal: ?*const fn (a: RecipeTag, b: RecipeTag) bool = null,
         weight_type: type = f32,
+        target_N: ?*const anyopaque = null,
     };
 }
 
@@ -97,18 +107,18 @@ pub fn RecipeInferenceEngine(comptime TargetEnum: type, comptime SolutionTag: ty
         pub const Log2BitFlagInt = math.Log2Int(BitFlagInt);
         pub const EnumTagInt = @typeInfo(TargetEnum).@"enum".tag_type;
         pub const HAS_WEIGHT = OptionalWeightInfo != null;
-        pub const RecipeWeightType = if (OptionalWeightInfo) |INFO| INFO.weight_type else void;
-        pub const MAX_RECIPE_WEIGHT: RecipeWeightType = if (HAS_WEIGHT) get: {
-            if (Types.type_is_int(RecipeWeightType)) break :get math.maxInt(RecipeWeightType);
-            if (Types.type_is_float(RecipeWeightType)) break :get math.inf(RecipeWeightType);
-            assert_unreachable(null, "`OptionalRecipeWeightType` was not `null`, but the type provided wasn't an integer or float, got type `{s}`", .{@typeName(RecipeWeightType)});
+        pub const WeightType = if (OptionalWeightInfo) |INFO| INFO.weight_type else void;
+        pub const MAX_RECIPE_WEIGHT: WeightType = if (HAS_WEIGHT) get: {
+            if (Types.type_is_int(WeightType)) break :get math.maxInt(WeightType);
+            if (Types.type_is_float(WeightType)) break :get math.inf(WeightType);
+            assert_unreachable(null, "`OptionalRecipeWeightType` was not `null`, but the type provided wasn't an integer or float, got type `{s}`", .{@typeName(WeightType)});
         } else void{};
         const recipe_tags_equal: *const fn (a: SolutionTag, b: SolutionTag) bool = if (OptionalWeightInfo != null and OptionalWeightInfo.?.tags_equal != null) OptionalWeightInfo.?.tags_equal.? else &defualt_tags_equal;
         fn defualt_tags_equal(a: SolutionTag, b: SolutionTag) bool {
             return Utils.shallow_equal(a, b);
         }
-        pub const NEUTRAL_RECIPE_WEIGHT: RecipeWeightType = if (HAS_WEIGHT) 1 else void{};
-        pub const ZERO_RECIPE_WEIGHT: RecipeWeightType = if (HAS_WEIGHT) 0 else void{};
+        pub const NEUTRAL_RECIPE_WEIGHT: WeightType = if (HAS_WEIGHT) 1 else void{};
+        pub const ZERO_RECIPE_WEIGHT: WeightType = if (HAS_WEIGHT) 0 else void{};
         pub const ALL_TARGETS: [NUM_BITS]TargetEnum = make: {
             var out: [NUM_BITS]TargetEnum = undefined;
             for (0..NUM_BITS) |i| {
@@ -124,28 +134,99 @@ pub fn RecipeInferenceEngine(comptime TargetEnum: type, comptime SolutionTag: ty
             }
             break :make out;
         };
+        fn get_log_n(n: WeightType) WeightType {
+            if (comptime !HAS_WEIGHT) return ZERO_RECIPE_WEIGHT;
+            if (Types.type_is_int(WeightType)) return @intCast(@ctz(n));
+            if (Types.type_is_float(WeightType)) return math.log2(n);
+            return NEUTRAL_RECIPE_WEIGHT;
+        }
+        pub const Weight = struct {
+            f: WeightType = ZERO_RECIPE_WEIGHT,
+            k: WeightType = NEUTRAL_RECIPE_WEIGHT,
+            O: WeightO = WeightO.one,
+
+            pub fn eval(self: Weight, target_n: WeightType) WeightType {
+                if (comptime !HAS_WEIGHT) return ZERO_RECIPE_WEIGHT;
+                const o: WeightType = switch (self.O) {
+                    .one => 1,
+                    .n => target_n,
+                    .log_n => get_log_n(target_n),
+                    .n_log_n => target_n * get_log_n(target_n),
+                    .n_squared => target_n * target_n,
+                    .exponential => math.pow(WeightType, 2, target_n),
+                };
+                return self.f + (self.k * o);
+            }
+
+            pub fn zero() Weight {
+                return Weight{ .k = ZERO_RECIPE_WEIGHT };
+            }
+            pub fn flat(flat_weight: WeightType) Weight {
+                return Weight{ .f = flat_weight };
+            }
+            pub fn one() Weight {
+                return Weight{};
+            }
+            pub fn n() Weight {
+                return Weight{ .O = .n };
+            }
+            pub fn k_n(k: WeightType) Weight {
+                return Weight{ .k = k, .O = .n };
+            }
+            pub fn log_n() Weight {
+                return Weight{ .O = .log_n };
+            }
+            pub fn k_log_n(k: WeightType) Weight {
+                return Weight{ .k = k, .O = .log_n };
+            }
+            pub fn n_log_n() Weight {
+                return Weight{ .O = .n_log_n };
+            }
+            pub fn k_n_log_n(k: WeightType) Weight {
+                return Weight{ .k = k, .O = .n_log_n };
+            }
+            pub fn n_squared() Weight {
+                return Weight{ .O = .n_squared };
+            }
+            pub fn k_n_squared(k: WeightType) Weight {
+                return Weight{ .k = k, .O = .n_squared };
+            }
+            pub fn exponential() Weight {
+                return Weight{ .O = .exponential };
+            }
+            pub fn k_exponential(k: WeightType) Weight {
+                return Weight{ .k = k, .O = .exponential };
+            }
+        };
+
         pub const Dependancy = struct {
             target: TargetEnum,
-            weight_multiplier: RecipeWeightType,
+            weight: Weight,
 
             pub fn depends_on(target: TargetEnum) Dependancy {
                 return Dependancy{
                     .target = target,
-                    .weight_multiplier = NEUTRAL_RECIPE_WEIGHT,
+                    .weight = .one(),
                 };
             }
-            pub fn depends_on_with_weight(target: TargetEnum, weight: RecipeWeightType) Dependancy {
+            pub fn depends_on_with_weight(target: TargetEnum, weight: Weight) Dependancy {
                 return Dependancy{
                     .target = target,
-                    .weight_multiplier = weight,
+                    .weight = weight,
+                };
+            }
+            pub fn depends_on_zero_weight(target: TargetEnum) Dependancy {
+                return Dependancy{
+                    .target = target,
+                    .weight = .zero(),
                 };
             }
         };
         pub const Recipe = struct {
             dependancies: []const Dependancy,
             variant_tag: SolutionTag,
-            special_mult_factor: RecipeWeightType = NEUTRAL_RECIPE_WEIGHT,
-            special_flat_add_factor: RecipeWeightType = ZERO_RECIPE_WEIGHT,
+            special_mult_factor: WeightType = NEUTRAL_RECIPE_WEIGHT,
+            special_flat_add_factor: WeightType = ZERO_RECIPE_WEIGHT,
 
             pub fn recipe(variant: SolutionTag, dependancies: []const Dependancy) Recipe {
                 return Recipe{
@@ -153,7 +234,7 @@ pub fn RecipeInferenceEngine(comptime TargetEnum: type, comptime SolutionTag: ty
                     .dependancies = dependancies,
                 };
             }
-            pub fn recipe_with_special_factors(variant: SolutionTag, special_multiplier: RecipeWeightType, special_flat_add: RecipeWeightType, dependancies: []const Dependancy) Recipe {
+            pub fn recipe_with_special_factors(variant: SolutionTag, special_multiplier: WeightType, special_flat_add: WeightType, dependancies: []const Dependancy) Recipe {
                 return Recipe{
                     .variant_tag = variant,
                     .dependancies = dependancies,
@@ -234,7 +315,7 @@ pub fn RecipeInferenceEngine(comptime TargetEnum: type, comptime SolutionTag: ty
 
         pub const Target = struct {
             target_enum: TargetEnum,
-            native_weight: RecipeWeightType = if (HAS_WEIGHT) 1 else void{},
+            native_weight: WeightType = if (HAS_WEIGHT) 1 else void{},
 
             pub fn user_provided(tar: TargetEnum) Target {
                 return Target{ .target_enum = tar };
@@ -242,35 +323,35 @@ pub fn RecipeInferenceEngine(comptime TargetEnum: type, comptime SolutionTag: ty
             pub fn set_property(tar: TargetEnum) Target {
                 return Target{ .target_enum = tar };
             }
-            pub fn user_provided_with_weight(tar: TargetEnum, weight: RecipeWeightType) Target {
+            pub fn user_provided_with_weight(tar: TargetEnum, weight: WeightType) Target {
                 return Target{
                     .target_enum = tar,
                     .native_weight = weight,
                 };
             }
         };
-        fn weight_approx_equal(a: RecipeWeightType, b: RecipeWeightType) bool {
+        fn weight_approx_equal(a: WeightType, b: WeightType) bool {
             if (comptime HAS_WEIGHT) {
-                if (Types.type_is_int(RecipeWeightType)) return a == b;
-                return math.approxEqRel(RecipeWeightType, a, b, 4 * math.floatEpsAt(RecipeWeightType, @min(a, b)));
+                if (Types.type_is_int(WeightType)) return a == b;
+                return math.approxEqRel(WeightType, a, b, 4 * math.floatEpsAt(WeightType, @min(a, b)));
             } else {
                 return true;
             }
         }
 
-        pub fn resolve_recipes_by_weight(user_provided_entities: []const Target, recipes: []const RecipeList) AllSolutions {
-            return resolve_recipes_internal(user_provided_entities, recipes, true);
+        pub fn resolve_recipes_by_weight(target_n: WeightType, user_provided_entities: []const Target, recipes: []const RecipeList) AllSolutions {
+            return resolve_recipes_internal(user_provided_entities, recipes, target_n, true);
         }
         pub fn resolve_recipes_by_order(user_provided_entities: []const Target, recipes: []const RecipeList) AllSolutions {
-            return resolve_recipes_internal(user_provided_entities, recipes, false);
+            return resolve_recipes_internal(user_provided_entities, recipes, 0, false);
         }
 
-        fn resolve_recipes_internal(user_provided_entities: []const Target, provided_recipes: []const RecipeList, comptime USE_WEIGHT_IF_AVAILABLE: bool) AllSolutions {
+        fn resolve_recipes_internal(user_provided_entities: []const Target, provided_recipes: []const RecipeList, target_n: WeightType, comptime USE_WEIGHT_IF_AVAILABLE: bool) AllSolutions {
             const USE_WEIGHT = comptime HAS_WEIGHT and USE_WEIGHT_IF_AVAILABLE;
             var available_bits: BitFlagInt = 0;
             var resolutions: AllSolutions = @splat(RecipeSolution.unavailable());
             var recipe_lists_found: BitFlagInt = 0;
-            var best_recipe_weights: [NUM_BITS]RecipeWeightType = @splat(MAX_RECIPE_WEIGHT);
+            var best_recipe_weights: [NUM_BITS]WeightType = @splat(MAX_RECIPE_WEIGHT);
             var recipes: AllRecipes = UNINIT_RECIPES;
 
             for (user_provided_entities) |target| {
@@ -319,13 +400,12 @@ pub fn RecipeInferenceEngine(comptime TargetEnum: type, comptime SolutionTag: ty
                                 continue :resolve .IS_AVAILABLE;
                             },
                             .IS_AVAILABLE => {
-                                var total_recipe_weight: RecipeWeightType = ZERO_RECIPE_WEIGHT;
+                                var total_recipe_weight: WeightType = ZERO_RECIPE_WEIGHT;
                                 if (comptime USE_WEIGHT) {
                                     for (recipe.dependancies) |dep| {
                                         const dep_bit_idx: Log2BitFlagInt = @intCast(@intFromEnum(dep.target));
                                         const current_dep_weight = best_recipe_weights[dep_bit_idx];
-                                        // TODO provide some more complex way to calculate weight? User provided weight function on a per-recipe basis?
-                                        total_recipe_weight += dep.weight_multiplier * current_dep_weight;
+                                        total_recipe_weight += dep.weight.eval(target_n) * current_dep_weight;
                                     }
                                     total_recipe_weight *= recipe.special_mult_factor;
                                     total_recipe_weight += recipe.special_flat_add_factor;
@@ -425,6 +505,7 @@ test RecipeInferenceEngine {
     });
     const RecipeList = Engine.RecipeList;
     const Target = Engine.Target;
+    // CHECKPOINT fix test for new weight mode
     const recipes: []const RecipeList = &.{
         .recipe_list(.ADD, &.{
             .recipe("a - (-b)", &.{

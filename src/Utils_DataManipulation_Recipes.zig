@@ -204,8 +204,13 @@ pub const InferFuncNames = enum {
     infer_get_set_move_block_right_overwrite,
     infer_nth_child,
 };
-
-pub const InferEngine = Utils.RecipeInference.RecipeInferenceEngine(PackageFlags, InferFuncNames, null);
+const N_WEIGHT = 100;
+const N_SQUARED_WEIGHT = 10000;
+const LOG_N_WEIGHT = 10;
+const WeightModeInfo = Utils.RecipeInference.WeightModeInfo(InferFuncNames);
+pub const InferEngine = Utils.RecipeInference.RecipeInferenceEngine(PackageFlags, InferFuncNames, WeightModeInfo{
+    .weight_type = u32,
+});
 pub const FuncFlag = InferEngine.Target;
 pub const RecipeList = InferEngine.RecipeList;
 pub const Recipe = InferEngine.Recipe;
@@ -214,13 +219,13 @@ pub const RECIPES: []const InferEngine.RecipeList = &.{
         .recipe(.infer_ptr, &.{
             .depends_on(.GET_PTR),
             .depends_on(.FIRST_ID),
-            // Classic indexing
-            .depends_on(.ID_IS_INTEGER_TYPE_THAT_DIRECTLY_INDEXES_BASE_PTR),
-            .depends_on(.ID_0_IS_FIRST_ITEM),
-            .depends_on(.ID_0_IS_AT_BASE_PTR_ADDRESS),
-            .depends_on(.ALL_ELEMENTS_IN_CONTIGUOUS_MEMORY_IN_ORDER),
-            .depends_on(.INCREASING_IDS_DIRECTLY_CORRESPOND_TO_INCREASING_ADDRESSES),
-            .depends_on(.ID_AFTER_LAST_IS_EQUAL_TO_LEN),
+            // ID Properties
+            .depends_on_zero_weight(.ID_IS_INTEGER_TYPE_THAT_DIRECTLY_INDEXES_BASE_PTR),
+            .depends_on_zero_weight(.ID_0_IS_FIRST_ITEM),
+            .depends_on_zero_weight(.ID_0_IS_AT_BASE_PTR_ADDRESS),
+            .depends_on_zero_weight(.ALL_ELEMENTS_IN_CONTIGUOUS_MEMORY_IN_ORDER),
+            .depends_on_zero_weight(.INCREASING_IDS_DIRECTLY_CORRESPOND_TO_INCREASING_ADDRESSES),
+            .depends_on_zero_weight(.ID_AFTER_LAST_IS_EQUAL_TO_LEN),
         }),
     }),
     .recipe_list(.GET_BASE_CONST_PTR, &.{
@@ -230,42 +235,42 @@ pub const RECIPES: []const InferEngine.RecipeList = &.{
         .recipe(.infer_const_ptr, &.{
             .depends_on(.GET_CONST_PTR),
             .depends_on(.FIRST_ID),
-            // Classic indexing
-            .depends_on(.ID_IS_INTEGER_TYPE_THAT_DIRECTLY_INDEXES_BASE_PTR),
-            .depends_on(.ID_0_IS_FIRST_ITEM),
-            .depends_on(.ID_0_IS_AT_BASE_PTR_ADDRESS),
-            .depends_on(.ALL_ELEMENTS_IN_CONTIGUOUS_MEMORY_IN_ORDER),
-            .depends_on(.INCREASING_IDS_DIRECTLY_CORRESPOND_TO_INCREASING_ADDRESSES),
-            .depends_on(.ID_AFTER_LAST_IS_EQUAL_TO_LEN),
+            // ID Properties
+            .depends_on_zero_weight(.ID_IS_INTEGER_TYPE_THAT_DIRECTLY_INDEXES_BASE_PTR),
+            .depends_on_zero_weight(.ID_0_IS_FIRST_ITEM),
+            .depends_on_zero_weight(.ID_0_IS_AT_BASE_PTR_ADDRESS),
+            .depends_on_zero_weight(.ALL_ELEMENTS_IN_CONTIGUOUS_MEMORY_IN_ORDER),
+            .depends_on_zero_weight(.INCREASING_IDS_DIRECTLY_CORRESPOND_TO_INCREASING_ADDRESSES),
+            .depends_on_zero_weight(.ID_AFTER_LAST_IS_EQUAL_TO_LEN),
         }),
         .recipe(.infer_ptr, &.{
             .depends_on(.GET_PTR),
             .depends_on(.FIRST_ID),
-            // Classic indexing
-            .depends_on(.ID_IS_INTEGER_TYPE_THAT_DIRECTLY_INDEXES_BASE_PTR),
-            .depends_on(.ID_0_IS_FIRST_ITEM),
-            .depends_on(.ID_0_IS_AT_BASE_PTR_ADDRESS),
-            .depends_on(.ALL_ELEMENTS_IN_CONTIGUOUS_MEMORY_IN_ORDER),
-            .depends_on(.INCREASING_IDS_DIRECTLY_CORRESPOND_TO_INCREASING_ADDRESSES),
-            .depends_on(.ID_AFTER_LAST_IS_EQUAL_TO_LEN),
+            // ID Properties
+            .depends_on_zero_weight(.ID_IS_INTEGER_TYPE_THAT_DIRECTLY_INDEXES_BASE_PTR),
+            .depends_on_zero_weight(.ID_0_IS_FIRST_ITEM),
+            .depends_on_zero_weight(.ID_0_IS_AT_BASE_PTR_ADDRESS),
+            .depends_on_zero_weight(.ALL_ELEMENTS_IN_CONTIGUOUS_MEMORY_IN_ORDER),
+            .depends_on_zero_weight(.INCREASING_IDS_DIRECTLY_CORRESPOND_TO_INCREASING_ADDRESSES),
+            .depends_on_zero_weight(.ID_AFTER_LAST_IS_EQUAL_TO_LEN),
         }),
     }),
     .recipe_list(.GET_RANGE_SLICE, &.{
         .recipe(.infer_base_ptr, &.{
             .depends_on(.GET_BASE_PTR),
-            // Classic indexing
-            .depends_on(.ID_IS_INTEGER_TYPE_THAT_DIRECTLY_INDEXES_BASE_PTR),
-            .depends_on(.ID_0_IS_FIRST_ITEM),
-            .depends_on(.ID_0_IS_AT_BASE_PTR_ADDRESS),
-            .depends_on(.ALL_ELEMENTS_IN_CONTIGUOUS_MEMORY_IN_ORDER),
-            .depends_on(.INCREASING_IDS_DIRECTLY_CORRESPOND_TO_INCREASING_ADDRESSES),
+            // ID Properties
+            .depends_on_zero_weight(.ID_IS_INTEGER_TYPE_THAT_DIRECTLY_INDEXES_BASE_PTR),
+            .depends_on_zero_weight(.ID_0_IS_FIRST_ITEM),
+            .depends_on_zero_weight(.ID_0_IS_AT_BASE_PTR_ADDRESS),
+            .depends_on_zero_weight(.ALL_ELEMENTS_IN_CONTIGUOUS_MEMORY_IN_ORDER),
+            .depends_on_zero_weight(.INCREASING_IDS_DIRECTLY_CORRESPOND_TO_INCREASING_ADDRESSES),
         }),
         .recipe(.infer_ptr, &.{
             .depends_on(.GET_PTR),
-            // Classic indexing
-            .depends_on(.ID_IS_INTEGER_TYPE_THAT_DIRECTLY_INDEXES_BASE_PTR),
-            .depends_on(.ALL_ELEMENTS_IN_CONTIGUOUS_MEMORY_IN_ORDER),
-            .depends_on(.INCREASING_IDS_DIRECTLY_CORRESPOND_TO_INCREASING_ADDRESSES),
+            // ID Properties
+            .depends_on_zero_weight(.ID_IS_INTEGER_TYPE_THAT_DIRECTLY_INDEXES_BASE_PTR),
+            .depends_on_zero_weight(.ALL_ELEMENTS_IN_CONTIGUOUS_MEMORY_IN_ORDER),
+            .depends_on_zero_weight(.INCREASING_IDS_DIRECTLY_CORRESPOND_TO_INCREASING_ADDRESSES),
         }),
     }),
     .recipe_list(.GET_RANGE_CONST_SLICE, &.{
@@ -274,19 +279,19 @@ pub const RECIPES: []const InferEngine.RecipeList = &.{
         }),
         .recipe(.infer_base_const_ptr, &.{
             .depends_on(.GET_BASE_CONST_PTR),
-            // Classic indexing
-            .depends_on(.ID_IS_INTEGER_TYPE_THAT_DIRECTLY_INDEXES_BASE_PTR),
-            .depends_on(.ID_0_IS_FIRST_ITEM),
-            .depends_on(.ID_0_IS_AT_BASE_PTR_ADDRESS),
-            .depends_on(.ALL_ELEMENTS_IN_CONTIGUOUS_MEMORY_IN_ORDER),
-            .depends_on(.INCREASING_IDS_DIRECTLY_CORRESPOND_TO_INCREASING_ADDRESSES),
+            // ID Properties
+            .depends_on_zero_weight(.ID_IS_INTEGER_TYPE_THAT_DIRECTLY_INDEXES_BASE_PTR),
+            .depends_on_zero_weight(.ID_0_IS_FIRST_ITEM),
+            .depends_on_zero_weight(.ID_0_IS_AT_BASE_PTR_ADDRESS),
+            .depends_on_zero_weight(.ALL_ELEMENTS_IN_CONTIGUOUS_MEMORY_IN_ORDER),
+            .depends_on_zero_weight(.INCREASING_IDS_DIRECTLY_CORRESPOND_TO_INCREASING_ADDRESSES),
         }),
         .recipe(.infer_const_ptr, &.{
             .depends_on(.GET_CONST_PTR),
-            // Classic indexing
-            .depends_on(.ID_IS_INTEGER_TYPE_THAT_DIRECTLY_INDEXES_BASE_PTR),
-            .depends_on(.ALL_ELEMENTS_IN_CONTIGUOUS_MEMORY_IN_ORDER),
-            .depends_on(.INCREASING_IDS_DIRECTLY_CORRESPOND_TO_INCREASING_ADDRESSES),
+            // ID Properties
+            .depends_on_zero_weight(.ID_IS_INTEGER_TYPE_THAT_DIRECTLY_INDEXES_BASE_PTR),
+            .depends_on_zero_weight(.ALL_ELEMENTS_IN_CONTIGUOUS_MEMORY_IN_ORDER),
+            .depends_on_zero_weight(.INCREASING_IDS_DIRECTLY_CORRESPOND_TO_INCREASING_ADDRESSES),
         }),
     }),
     .recipe_list(.GET, &.{
@@ -298,35 +303,35 @@ pub const RECIPES: []const InferEngine.RecipeList = &.{
         }),
         .recipe(.infer_base_const_ptr, &.{
             .depends_on(.GET_BASE_CONST_PTR),
-            // Classic indexing
-            .depends_on(.ID_IS_INTEGER_TYPE_THAT_DIRECTLY_INDEXES_BASE_PTR),
-            .depends_on(.ID_0_IS_FIRST_ITEM),
-            .depends_on(.ID_0_IS_AT_BASE_PTR_ADDRESS),
-            .depends_on(.ALL_ELEMENTS_IN_CONTIGUOUS_MEMORY_IN_ORDER),
-            .depends_on(.INCREASING_IDS_DIRECTLY_CORRESPOND_TO_INCREASING_ADDRESSES),
-            .depends_on(.ID_AFTER_LAST_IS_EQUAL_TO_LEN),
+            // ID Properties
+            .depends_on_zero_weight(.ID_IS_INTEGER_TYPE_THAT_DIRECTLY_INDEXES_BASE_PTR),
+            .depends_on_zero_weight(.ID_0_IS_FIRST_ITEM),
+            .depends_on_zero_weight(.ID_0_IS_AT_BASE_PTR_ADDRESS),
+            .depends_on_zero_weight(.ALL_ELEMENTS_IN_CONTIGUOUS_MEMORY_IN_ORDER),
+            .depends_on_zero_weight(.INCREASING_IDS_DIRECTLY_CORRESPOND_TO_INCREASING_ADDRESSES),
+            .depends_on_zero_weight(.ID_AFTER_LAST_IS_EQUAL_TO_LEN),
         }),
         .recipe(.infer_base_ptr, &.{
             .depends_on(.GET_BASE_PTR),
-            // Classic indexing
-            .depends_on(.ID_IS_INTEGER_TYPE_THAT_DIRECTLY_INDEXES_BASE_PTR),
-            .depends_on(.ID_0_IS_FIRST_ITEM),
-            .depends_on(.ID_0_IS_AT_BASE_PTR_ADDRESS),
-            .depends_on(.ALL_ELEMENTS_IN_CONTIGUOUS_MEMORY_IN_ORDER),
-            .depends_on(.INCREASING_IDS_DIRECTLY_CORRESPOND_TO_INCREASING_ADDRESSES),
-            .depends_on(.ID_AFTER_LAST_IS_EQUAL_TO_LEN),
+            // ID Properties
+            .depends_on_zero_weight(.ID_IS_INTEGER_TYPE_THAT_DIRECTLY_INDEXES_BASE_PTR),
+            .depends_on_zero_weight(.ID_0_IS_FIRST_ITEM),
+            .depends_on_zero_weight(.ID_0_IS_AT_BASE_PTR_ADDRESS),
+            .depends_on_zero_weight(.ALL_ELEMENTS_IN_CONTIGUOUS_MEMORY_IN_ORDER),
+            .depends_on_zero_weight(.INCREASING_IDS_DIRECTLY_CORRESPOND_TO_INCREASING_ADDRESSES),
+            .depends_on_zero_weight(.ID_AFTER_LAST_IS_EQUAL_TO_LEN),
         }),
     }),
     .recipe_list(.GET_PTR, &.{
         .recipe(.infer_base_ptr, &.{
             .depends_on(.GET_BASE_PTR),
-            // Classic indexing
-            .depends_on(.ID_IS_INTEGER_TYPE_THAT_DIRECTLY_INDEXES_BASE_PTR),
-            .depends_on(.ID_0_IS_FIRST_ITEM),
-            .depends_on(.ID_0_IS_AT_BASE_PTR_ADDRESS),
-            .depends_on(.ALL_ELEMENTS_IN_CONTIGUOUS_MEMORY_IN_ORDER),
-            .depends_on(.INCREASING_IDS_DIRECTLY_CORRESPOND_TO_INCREASING_ADDRESSES),
-            .depends_on(.ID_AFTER_LAST_IS_EQUAL_TO_LEN),
+            // ID Properties
+            .depends_on_zero_weight(.ID_IS_INTEGER_TYPE_THAT_DIRECTLY_INDEXES_BASE_PTR),
+            .depends_on_zero_weight(.ID_0_IS_FIRST_ITEM),
+            .depends_on_zero_weight(.ID_0_IS_AT_BASE_PTR_ADDRESS),
+            .depends_on_zero_weight(.ALL_ELEMENTS_IN_CONTIGUOUS_MEMORY_IN_ORDER),
+            .depends_on_zero_weight(.INCREASING_IDS_DIRECTLY_CORRESPOND_TO_INCREASING_ADDRESSES),
+            .depends_on_zero_weight(.ID_AFTER_LAST_IS_EQUAL_TO_LEN),
         }),
     }),
     .recipe_list(.GET_CONST_PTR, &.{
@@ -335,23 +340,23 @@ pub const RECIPES: []const InferEngine.RecipeList = &.{
         }),
         .recipe(.infer_base_const_ptr, &.{
             .depends_on(.GET_BASE_CONST_PTR),
-            // Classic indexing
-            .depends_on(.ID_IS_INTEGER_TYPE_THAT_DIRECTLY_INDEXES_BASE_PTR),
-            .depends_on(.ID_0_IS_FIRST_ITEM),
-            .depends_on(.ID_0_IS_AT_BASE_PTR_ADDRESS),
-            .depends_on(.ALL_ELEMENTS_IN_CONTIGUOUS_MEMORY_IN_ORDER),
-            .depends_on(.INCREASING_IDS_DIRECTLY_CORRESPOND_TO_INCREASING_ADDRESSES),
-            .depends_on(.ID_AFTER_LAST_IS_EQUAL_TO_LEN),
+            // ID Properties
+            .depends_on_zero_weight(.ID_IS_INTEGER_TYPE_THAT_DIRECTLY_INDEXES_BASE_PTR),
+            .depends_on_zero_weight(.ID_0_IS_FIRST_ITEM),
+            .depends_on_zero_weight(.ID_0_IS_AT_BASE_PTR_ADDRESS),
+            .depends_on_zero_weight(.ALL_ELEMENTS_IN_CONTIGUOUS_MEMORY_IN_ORDER),
+            .depends_on_zero_weight(.INCREASING_IDS_DIRECTLY_CORRESPOND_TO_INCREASING_ADDRESSES),
+            .depends_on_zero_weight(.ID_AFTER_LAST_IS_EQUAL_TO_LEN),
         }),
         .recipe(.infer_base_ptr, &.{
             .depends_on(.GET_BASE_PTR),
-            // Classic indexing
-            .depends_on(.ID_IS_INTEGER_TYPE_THAT_DIRECTLY_INDEXES_BASE_PTR),
-            .depends_on(.ID_0_IS_FIRST_ITEM),
-            .depends_on(.ID_0_IS_AT_BASE_PTR_ADDRESS),
-            .depends_on(.ALL_ELEMENTS_IN_CONTIGUOUS_MEMORY_IN_ORDER),
-            .depends_on(.INCREASING_IDS_DIRECTLY_CORRESPOND_TO_INCREASING_ADDRESSES),
-            .depends_on(.ID_AFTER_LAST_IS_EQUAL_TO_LEN),
+            // ID Properties
+            .depends_on_zero_weight(.ID_IS_INTEGER_TYPE_THAT_DIRECTLY_INDEXES_BASE_PTR),
+            .depends_on_zero_weight(.ID_0_IS_FIRST_ITEM),
+            .depends_on_zero_weight(.ID_0_IS_AT_BASE_PTR_ADDRESS),
+            .depends_on_zero_weight(.ALL_ELEMENTS_IN_CONTIGUOUS_MEMORY_IN_ORDER),
+            .depends_on_zero_weight(.INCREASING_IDS_DIRECTLY_CORRESPOND_TO_INCREASING_ADDRESSES),
+            .depends_on_zero_weight(.ID_AFTER_LAST_IS_EQUAL_TO_LEN),
         }),
     }),
     .recipe_list(.SET, &.{
@@ -360,13 +365,13 @@ pub const RECIPES: []const InferEngine.RecipeList = &.{
         }),
         .recipe(.infer_base_ptr, &.{
             .depends_on(.GET_BASE_PTR),
-            // Classic indexing
-            .depends_on(.ID_IS_INTEGER_TYPE_THAT_DIRECTLY_INDEXES_BASE_PTR),
-            .depends_on(.ID_0_IS_FIRST_ITEM),
-            .depends_on(.ID_0_IS_AT_BASE_PTR_ADDRESS),
-            .depends_on(.ALL_ELEMENTS_IN_CONTIGUOUS_MEMORY_IN_ORDER),
-            .depends_on(.INCREASING_IDS_DIRECTLY_CORRESPOND_TO_INCREASING_ADDRESSES),
-            .depends_on(.ID_AFTER_LAST_IS_EQUAL_TO_LEN),
+            // ID Properties
+            .depends_on_zero_weight(.ID_IS_INTEGER_TYPE_THAT_DIRECTLY_INDEXES_BASE_PTR),
+            .depends_on_zero_weight(.ID_0_IS_FIRST_ITEM),
+            .depends_on_zero_weight(.ID_0_IS_AT_BASE_PTR_ADDRESS),
+            .depends_on_zero_weight(.ALL_ELEMENTS_IN_CONTIGUOUS_MEMORY_IN_ORDER),
+            .depends_on_zero_weight(.INCREASING_IDS_DIRECTLY_CORRESPOND_TO_INCREASING_ADDRESSES),
+            .depends_on_zero_weight(.ID_AFTER_LAST_IS_EQUAL_TO_LEN),
         }),
     }),
     .recipe_list(.SWAP, &.{
@@ -375,9 +380,36 @@ pub const RECIPES: []const InferEngine.RecipeList = &.{
             .depends_on(.SET),
         }),
     }),
+    .recipe_list(.EXACT_EQUALS, &.{
+        .recipe(.infer_native, &.{
+            .depends_on_zero_weight(.ELEMENTS_ARE_NUMERIC),
+        }),
+        .recipe(.infer_oq, &.{
+            .depends_on(.ORDER_EQUALS),
+        }),
+        .recipe(.infer_gt_lt, &.{
+            .depends_on(.GREATER_THAN),
+            .depends_on(.LESS_THAN),
+        }),
+    }),
+    .recipe_list(.ORDER_EQUALS, &.{
+        .recipe(.infer_native, &.{
+            .depends_on_zero_weight(.ELEMENTS_ARE_NUMERIC),
+        }),
+        .recipe(.infer_eq, &.{
+            .depends_on(.EXACT_EQUALS),
+        }),
+        .recipe(.infer_gt_lt, &.{
+            .depends_on(.GREATER_THAN),
+            .depends_on(.LESS_THAN),
+        }),
+    }),
     .recipe_list(.GREATER_THAN, &.{
         .recipe(.infer_native, &.{
-            .depends_on(.ELEMENTS_ARE_NUMERIC),
+            .depends_on_zero_weight(.ELEMENTS_ARE_NUMERIC),
+        }),
+        .recipe(.infer_lt, &.{
+            .depends_on(.LESS_THAN),
         }),
         .recipe(.infer_lteq, &.{
             .depends_on(.LESS_THAN_OR_EQUAL),
@@ -393,7 +425,10 @@ pub const RECIPES: []const InferEngine.RecipeList = &.{
     }),
     .recipe_list(.LESS_THAN, &.{
         .recipe(.infer_native, &.{
-            .depends_on(.ELEMENTS_ARE_NUMERIC),
+            .depends_on_zero_weight(.ELEMENTS_ARE_NUMERIC),
+        }),
+        .recipe(.infer_gt, &.{
+            .depends_on(.GREATER_THAN),
         }),
         .recipe(.infer_gteq, &.{
             .depends_on(.GREATER_THAN_OR_EQUAL),
@@ -407,33 +442,12 @@ pub const RECIPES: []const InferEngine.RecipeList = &.{
             .depends_on(.EXACT_EQUALS),
         }),
     }),
-    .recipe_list(.EXACT_EQUALS, &.{
-        .recipe(.infer_native, &.{
-            .depends_on(.ELEMENTS_ARE_NUMERIC),
-        }),
-        .recipe(.infer_oq, &.{
-            .depends_on(.ORDER_EQUALS),
-        }),
-        .recipe(.infer_gt_lt, &.{
-            .depends_on(.GREATER_THAN),
-            .depends_on(.LESS_THAN),
-        }),
-    }),
-    .recipe_list(.ORDER_EQUALS, &.{
-        .recipe(.infer_native, &.{
-            .depends_on(.ELEMENTS_ARE_NUMERIC),
-        }),
-        .recipe(.infer_eq, &.{
-            .depends_on(.EXACT_EQUALS),
-        }),
-        .recipe(.infer_gt_lt, &.{
-            .depends_on(.GREATER_THAN),
-            .depends_on(.LESS_THAN),
-        }),
-    }),
     .recipe_list(.GREATER_THAN_OR_EQUAL, &.{
         .recipe(.infer_native, &.{
-            .depends_on(.ELEMENTS_ARE_NUMERIC),
+            .depends_on_zero_weight(.ELEMENTS_ARE_NUMERIC),
+        }),
+        .recipe(.infer_lteq, &.{
+            .depends_on(.LESS_THAN_OR_EQUAL),
         }),
         .recipe(.infer_lt, &.{
             .depends_on(.LESS_THAN),
@@ -449,7 +463,10 @@ pub const RECIPES: []const InferEngine.RecipeList = &.{
     }),
     .recipe_list(.LESS_THAN_OR_EQUAL, &.{
         .recipe(.infer_native, &.{
-            .depends_on(.ELEMENTS_ARE_NUMERIC),
+            .depends_on_zero_weight(.ELEMENTS_ARE_NUMERIC),
+        }),
+        .recipe(.infer_gteq, &.{
+            .depends_on(.GREATER_THAN_OR_EQUAL),
         }),
         .recipe(.infer_gt, &.{
             .depends_on(.GREATER_THAN),
@@ -463,12 +480,27 @@ pub const RECIPES: []const InferEngine.RecipeList = &.{
             .depends_on(.EXACT_EQUALS),
         }),
     }),
+    .recipe_list(.ID_EQUALS, &.{
+        .recipe(.infer_native, &.{
+            // ID Properties
+            .depends_on_zero_weight(.ID_IS_NUMERIC),
+            .depends_on_zero_weight(.ALL_ELEMENTS_IN_CONTIGUOUS_MEMORY_IN_ORDER),
+            .depends_on_zero_weight(.INCREASING_IDS_DIRECTLY_CORRESPOND_TO_INCREASING_ADDRESSES),
+        }),
+        .recipe(.infer_gt_lt, &.{
+            .depends_on(.ID_GREATER_THAN),
+            .depends_on(.ID_LESS_THAN),
+        }),
+    }),
     .recipe_list(.ID_GREATER_THAN, &.{
         .recipe(.infer_native, &.{
-            // Classic indexing
-            .depends_on(.ID_IS_NUMERIC),
-            .depends_on(.ALL_ELEMENTS_IN_CONTIGUOUS_MEMORY_IN_ORDER),
-            .depends_on(.INCREASING_IDS_DIRECTLY_CORRESPOND_TO_INCREASING_ADDRESSES),
+            // ID Properties
+            .depends_on_zero_weight(.ID_IS_NUMERIC),
+            .depends_on_zero_weight(.ALL_ELEMENTS_IN_CONTIGUOUS_MEMORY_IN_ORDER),
+            .depends_on_zero_weight(.INCREASING_IDS_DIRECTLY_CORRESPOND_TO_INCREASING_ADDRESSES),
+        }),
+        .recipe(.infer_lt, &.{
+            .depends_on(.ID_LESS_THAN),
         }),
         .recipe(.infer_lteq, &.{
             .depends_on(.ID_LESS_THAN_OR_EQUAL),
@@ -480,10 +512,13 @@ pub const RECIPES: []const InferEngine.RecipeList = &.{
     }),
     .recipe_list(.ID_LESS_THAN, &.{
         .recipe(.infer_native, &.{
-            // Classic indexing
-            .depends_on(.ID_IS_NUMERIC),
-            .depends_on(.ALL_ELEMENTS_IN_CONTIGUOUS_MEMORY_IN_ORDER),
-            .depends_on(.INCREASING_IDS_DIRECTLY_CORRESPOND_TO_INCREASING_ADDRESSES),
+            // ID Properties
+            .depends_on_zero_weight(.ID_IS_NUMERIC),
+            .depends_on_zero_weight(.ALL_ELEMENTS_IN_CONTIGUOUS_MEMORY_IN_ORDER),
+            .depends_on_zero_weight(.INCREASING_IDS_DIRECTLY_CORRESPOND_TO_INCREASING_ADDRESSES),
+        }),
+        .recipe(.infer_gt, &.{
+            .depends_on(.ID_GREATER_THAN),
         }),
         .recipe(.infer_gteq, &.{
             .depends_on(.ID_GREATER_THAN_OR_EQUAL),
@@ -493,24 +528,15 @@ pub const RECIPES: []const InferEngine.RecipeList = &.{
             .depends_on(.ID_EQUALS),
         }),
     }),
-    .recipe_list(.ID_EQUALS, &.{
-        .recipe(.infer_native, &.{
-            // Classic indexing
-            .depends_on(.ID_IS_NUMERIC),
-            .depends_on(.ALL_ELEMENTS_IN_CONTIGUOUS_MEMORY_IN_ORDER),
-            .depends_on(.INCREASING_IDS_DIRECTLY_CORRESPOND_TO_INCREASING_ADDRESSES),
-        }),
-        .recipe(.infer_gt_lt, &.{
-            .depends_on(.ID_GREATER_THAN),
-            .depends_on(.ID_LESS_THAN),
-        }),
-    }),
     .recipe_list(.ID_GREATER_THAN_OR_EQUAL, &.{
         .recipe(.infer_native, &.{
-            // Classic indexing
-            .depends_on(.ID_IS_NUMERIC),
-            .depends_on(.ALL_ELEMENTS_IN_CONTIGUOUS_MEMORY_IN_ORDER),
-            .depends_on(.INCREASING_IDS_DIRECTLY_CORRESPOND_TO_INCREASING_ADDRESSES),
+            // ID Properties
+            .depends_on_zero_weight(.ID_IS_NUMERIC),
+            .depends_on_zero_weight(.ALL_ELEMENTS_IN_CONTIGUOUS_MEMORY_IN_ORDER),
+            .depends_on_zero_weight(.INCREASING_IDS_DIRECTLY_CORRESPOND_TO_INCREASING_ADDRESSES),
+        }),
+        .recipe(.infer_lteq, &.{
+            .depends_on(.ID_LESS_THAN_OR_EQUAL),
         }),
         .recipe(.infer_lt, &.{
             .depends_on(.ID_LESS_THAN),
@@ -522,10 +548,13 @@ pub const RECIPES: []const InferEngine.RecipeList = &.{
     }),
     .recipe_list(.ID_LESS_THAN_OR_EQUAL, &.{
         .recipe(.infer_native, &.{
-            // Classic indexing
-            .depends_on(.ID_IS_NUMERIC),
-            .depends_on(.ALL_ELEMENTS_IN_CONTIGUOUS_MEMORY_IN_ORDER),
-            .depends_on(.INCREASING_IDS_DIRECTLY_CORRESPOND_TO_INCREASING_ADDRESSES),
+            // ID Properties
+            .depends_on_zero_weight(.ID_IS_NUMERIC),
+            .depends_on_zero_weight(.ALL_ELEMENTS_IN_CONTIGUOUS_MEMORY_IN_ORDER),
+            .depends_on_zero_weight(.INCREASING_IDS_DIRECTLY_CORRESPOND_TO_INCREASING_ADDRESSES),
+        }),
+        .recipe(.infer_gteq, &.{
+            .depends_on(.ID_GREATER_THAN_OR_EQUAL),
         }),
         .recipe(.infer_gt, &.{
             .depends_on(.ID_GREATER_THAN),
@@ -538,22 +567,22 @@ pub const RECIPES: []const InferEngine.RecipeList = &.{
     .recipe_list(.VALID_ID, &.{
         .recipe(.infer_native, &.{
             .depends_on(.GET_LEN),
-            // Classic indexing
-            .depends_on(.ID_IS_INTEGER_TYPE_THAT_DIRECTLY_INDEXES_BASE_PTR),
-            .depends_on(.ID_0_IS_FIRST_ITEM),
-            .depends_on(.ID_0_IS_AT_BASE_PTR_ADDRESS),
-            .depends_on(.ALL_ELEMENTS_IN_CONTIGUOUS_MEMORY_IN_ORDER),
-            .depends_on(.INCREASING_IDS_DIRECTLY_CORRESPOND_TO_INCREASING_ADDRESSES),
-            .depends_on(.ID_AFTER_LAST_IS_EQUAL_TO_LEN),
+            // ID Properties
+            .depends_on_zero_weight(.ID_IS_INTEGER_TYPE_THAT_DIRECTLY_INDEXES_BASE_PTR),
+            .depends_on_zero_weight(.ID_0_IS_FIRST_ITEM),
+            .depends_on_zero_weight(.ID_0_IS_AT_BASE_PTR_ADDRESS),
+            .depends_on_zero_weight(.ALL_ELEMENTS_IN_CONTIGUOUS_MEMORY_IN_ORDER),
+            .depends_on_zero_weight(.INCREASING_IDS_DIRECTLY_CORRESPOND_TO_INCREASING_ADDRESSES),
+            .depends_on_zero_weight(.ID_AFTER_LAST_IS_EQUAL_TO_LEN),
         }),
         .recipe(.infer_native_offset, &.{
             .depends_on(.LAST_ID),
             .depends_on(.FIRST_ID),
             // Classic offset indexing
-            .depends_on(.ID_IS_INTEGER_TYPE_THAT_DIRECTLY_INDEXES_BASE_PTR),
-            .depends_on(.ALL_ELEMENTS_IN_CONTIGUOUS_MEMORY_IN_ORDER),
-            .depends_on(.INCREASING_IDS_DIRECTLY_CORRESPOND_TO_INCREASING_ADDRESSES),
-            .depends_on(.ID_AFTER_LAST_IS_EQUAL_TO_LEN),
+            .depends_on_zero_weight(.ID_IS_INTEGER_TYPE_THAT_DIRECTLY_INDEXES_BASE_PTR),
+            .depends_on_zero_weight(.ALL_ELEMENTS_IN_CONTIGUOUS_MEMORY_IN_ORDER),
+            .depends_on_zero_weight(.INCREASING_IDS_DIRECTLY_CORRESPOND_TO_INCREASING_ADDRESSES),
+            .depends_on_zero_weight(.ID_AFTER_LAST_IS_EQUAL_TO_LEN),
         }),
         .recipe(.infer_first_last_id_less_equal, &.{
             .depends_on(.LAST_ID),
@@ -568,37 +597,43 @@ pub const RECIPES: []const InferEngine.RecipeList = &.{
     }),
     .recipe_list(.NEXT_ID, &.{
         .recipe(.infer_native, &.{
-            .depends_on(.ID_IS_INTEGER_TYPE_THAT_DIRECTLY_INDEXES_BASE_PTR),
-            .depends_on(.ALL_ELEMENTS_IN_CONTIGUOUS_MEMORY_IN_ORDER),
-            .depends_on(.INCREASING_IDS_DIRECTLY_CORRESPOND_TO_INCREASING_ADDRESSES),
+            .depends_on_zero_weight(.ID_IS_INTEGER_TYPE_THAT_DIRECTLY_INDEXES_BASE_PTR),
+            .depends_on_zero_weight(.ALL_ELEMENTS_IN_CONTIGUOUS_MEMORY_IN_ORDER),
+            .depends_on_zero_weight(.INCREASING_IDS_DIRECTLY_CORRESPOND_TO_INCREASING_ADDRESSES),
         }),
         .recipe(.infer_nth_next, &.{
             .depends_on(.NTH_NEXT_ID),
         }),
         .recipe(.infer_last_prev, &.{
             .depends_on(.LAST_ID),
-            .depends_on(.PREV_ID),
+            .depends_on_with_weight(.PREV_ID, N_WEIGHT),
+            .depends_on_with_weight(.ID_EQUALS, N_WEIGHT),
+            .depends_on_with_weight(.ID_VALID, N_WEIGHT),
+            .depends_on(.INVALID_ID_AFTER_LAST_ID),
         }),
     }),
     .recipe_list(.NTH_NEXT_ID, &.{
         .recipe(.infer_native, &.{
-            .depends_on(.ID_IS_INTEGER_TYPE_THAT_DIRECTLY_INDEXES_BASE_PTR),
-            .depends_on(.ALL_ELEMENTS_IN_CONTIGUOUS_MEMORY_IN_ORDER),
-            .depends_on(.INCREASING_IDS_DIRECTLY_CORRESPOND_TO_INCREASING_ADDRESSES),
+            .depends_on_zero_weight(.ID_IS_INTEGER_TYPE_THAT_DIRECTLY_INDEXES_BASE_PTR),
+            .depends_on_zero_weight(.ALL_ELEMENTS_IN_CONTIGUOUS_MEMORY_IN_ORDER),
+            .depends_on_zero_weight(.INCREASING_IDS_DIRECTLY_CORRESPOND_TO_INCREASING_ADDRESSES),
         }),
         .recipe(.infer_next, &.{
-            .depends_on(.NEXT_ID),
+            .depends_on_with_weight(.NEXT_ID, N_WEIGHT),
         }),
         .recipe(.infer_last_prev, &.{
             .depends_on(.LAST_ID),
-            .depends_on(.PREV_ID),
+            .depends_on_with_weight(.PREV_ID, N_WEIGHT),
+            .depends_on_with_weight(.ID_EQUALS, N_WEIGHT),
+            .depends_on_with_weight(.ID_VALID, N_WEIGHT),
+            .depends_on(.INVALID_ID_AFTER_LAST_ID),
         }),
     }),
     .recipe_list(.PREV_ID, &.{
         .recipe(.infer_native, &.{
-            .depends_on(.ID_IS_INTEGER_TYPE_THAT_DIRECTLY_INDEXES_BASE_PTR),
-            .depends_on(.ALL_ELEMENTS_IN_CONTIGUOUS_MEMORY_IN_ORDER),
-            .depends_on(.INCREASING_IDS_DIRECTLY_CORRESPOND_TO_INCREASING_ADDRESSES),
+            .depends_on_zero_weight(.ID_IS_INTEGER_TYPE_THAT_DIRECTLY_INDEXES_BASE_PTR),
+            .depends_on_zero_weight(.ALL_ELEMENTS_IN_CONTIGUOUS_MEMORY_IN_ORDER),
+            .depends_on_zero_weight(.INCREASING_IDS_DIRECTLY_CORRESPOND_TO_INCREASING_ADDRESSES),
         }),
         .recipe(.infer_nth_prev, &.{
             .depends_on(.NTH_PREV_ID),
@@ -606,13 +641,16 @@ pub const RECIPES: []const InferEngine.RecipeList = &.{
         .recipe(.infer_first_next, &.{
             .depends_on(.FIRST_ID),
             .depends_on(.NEXT_ID),
+            .depends_on(.ID_EQUALS),
+            .depends_on(.ID_VALID),
+            .depends_on(.INVALID_ID_BEFORE_FIRST_ID),
         }),
     }),
     .recipe_list(.NTH_PREV_ID, &.{
         .recipe(.infer_native, &.{
-            .depends_on(.ID_IS_INTEGER_TYPE_THAT_DIRECTLY_INDEXES_BASE_PTR),
-            .depends_on(.ALL_ELEMENTS_IN_CONTIGUOUS_MEMORY_IN_ORDER),
-            .depends_on(.INCREASING_IDS_DIRECTLY_CORRESPOND_TO_INCREASING_ADDRESSES),
+            .depends_on_zero_weight(.ID_IS_INTEGER_TYPE_THAT_DIRECTLY_INDEXES_BASE_PTR),
+            .depends_on_zero_weight(.ALL_ELEMENTS_IN_CONTIGUOUS_MEMORY_IN_ORDER),
+            .depends_on_zero_weight(.INCREASING_IDS_DIRECTLY_CORRESPOND_TO_INCREASING_ADDRESSES),
         }),
         .recipe(.infer_prev, &.{
             .depends_on(.PREV_ID),
@@ -620,42 +658,47 @@ pub const RECIPES: []const InferEngine.RecipeList = &.{
         .recipe(.infer_first_next, &.{
             .depends_on(.FIRST_ID),
             .depends_on(.NEXT_ID),
+            .depends_on(.ID_EQUALS),
+            .depends_on(.ID_VALID),
+            .depends_on(.INVALID_ID_BEFORE_FIRST_ID),
         }),
     }),
     .recipe_list(.NTH_CHILD_ID, &.{
         .recipe(.infer_native, &.{
-            .depends_on(.ID_IS_INTEGER_TYPE_THAT_DIRECTLY_INDEXES_BASE_PTR),
-            .depends_on(.ID_0_IS_FIRST_ITEM),
-            .depends_on(.ID_0_IS_AT_BASE_PTR_ADDRESS),
-            .depends_on(.ID_IS_INTEGER_TYPE_THAT_DIRECTLY_INDEXES_BASE_PTR),
-            .depends_on(.ALL_ELEMENTS_IN_CONTIGUOUS_MEMORY_IN_ORDER),
-            .depends_on(.INCREASING_IDS_DIRECTLY_CORRESPOND_TO_INCREASING_ADDRESSES),
+            .depends_on_zero_weight(.ID_IS_INTEGER_TYPE_THAT_DIRECTLY_INDEXES_BASE_PTR),
+            .depends_on_zero_weight(.ID_0_IS_FIRST_ITEM),
+            .depends_on_zero_weight(.ID_0_IS_AT_BASE_PTR_ADDRESS),
+            .depends_on_zero_weight(.ID_IS_INTEGER_TYPE_THAT_DIRECTLY_INDEXES_BASE_PTR),
+            .depends_on_zero_weight(.ALL_ELEMENTS_IN_CONTIGUOUS_MEMORY_IN_ORDER),
+            .depends_on_zero_weight(.INCREASING_IDS_DIRECTLY_CORRESPOND_TO_INCREASING_ADDRESSES),
         }),
         .recipe(.infer_native_offset, &.{
             .depends_on(.LIMIT_LEN),
             .depends_on(.FIRST_ID),
-            .depends_on(.ID_IS_INTEGER_TYPE_THAT_DIRECTLY_INDEXES_BASE_PTR),
-            .depends_on(.ID_IS_INTEGER_TYPE_THAT_DIRECTLY_INDEXES_BASE_PTR),
-            .depends_on(.ALL_ELEMENTS_IN_CONTIGUOUS_MEMORY_IN_ORDER),
-            .depends_on(.INCREASING_IDS_DIRECTLY_CORRESPOND_TO_INCREASING_ADDRESSES),
+            // ID props
+            .depends_on_zero_weight(.ID_IS_INTEGER_TYPE_THAT_DIRECTLY_INDEXES_BASE_PTR),
+            .depends_on_zero_weight(.ID_IS_INTEGER_TYPE_THAT_DIRECTLY_INDEXES_BASE_PTR),
+            .depends_on_zero_weight(.ALL_ELEMENTS_IN_CONTIGUOUS_MEMORY_IN_ORDER),
+            .depends_on_zero_weight(.INCREASING_IDS_DIRECTLY_CORRESPOND_TO_INCREASING_ADDRESSES),
         }),
     }),
     .recipe_list(.PARENT_ID, &.{
         .recipe(.infer_native, &.{
-            .depends_on(.ID_IS_INTEGER_TYPE_THAT_DIRECTLY_INDEXES_BASE_PTR),
-            .depends_on(.ID_0_IS_FIRST_ITEM),
-            .depends_on(.ID_0_IS_AT_BASE_PTR_ADDRESS),
-            .depends_on(.ID_IS_INTEGER_TYPE_THAT_DIRECTLY_INDEXES_BASE_PTR),
-            .depends_on(.ALL_ELEMENTS_IN_CONTIGUOUS_MEMORY_IN_ORDER),
-            .depends_on(.INCREASING_IDS_DIRECTLY_CORRESPOND_TO_INCREASING_ADDRESSES),
+            .depends_on_zero_weight(.ID_IS_INTEGER_TYPE_THAT_DIRECTLY_INDEXES_BASE_PTR),
+            .depends_on_zero_weight(.ID_0_IS_FIRST_ITEM),
+            .depends_on_zero_weight(.ID_0_IS_AT_BASE_PTR_ADDRESS),
+            .depends_on_zero_weight(.ID_IS_INTEGER_TYPE_THAT_DIRECTLY_INDEXES_BASE_PTR),
+            .depends_on_zero_weight(.ALL_ELEMENTS_IN_CONTIGUOUS_MEMORY_IN_ORDER),
+            .depends_on_zero_weight(.INCREASING_IDS_DIRECTLY_CORRESPOND_TO_INCREASING_ADDRESSES),
         }),
         .recipe(.infer_native_offset, &.{
             .depends_on(.LIMIT_LEN),
             .depends_on(.FIRST_ID),
-            .depends_on(.ID_IS_INTEGER_TYPE_THAT_DIRECTLY_INDEXES_BASE_PTR),
-            .depends_on(.ID_IS_INTEGER_TYPE_THAT_DIRECTLY_INDEXES_BASE_PTR),
-            .depends_on(.ALL_ELEMENTS_IN_CONTIGUOUS_MEMORY_IN_ORDER),
-            .depends_on(.INCREASING_IDS_DIRECTLY_CORRESPOND_TO_INCREASING_ADDRESSES),
+            // ID props
+            .depends_on_zero_weight(.ID_IS_INTEGER_TYPE_THAT_DIRECTLY_INDEXES_BASE_PTR),
+            .depends_on_zero_weight(.ID_IS_INTEGER_TYPE_THAT_DIRECTLY_INDEXES_BASE_PTR),
+            .depends_on_zero_weight(.ALL_ELEMENTS_IN_CONTIGUOUS_MEMORY_IN_ORDER),
+            .depends_on_zero_weight(.INCREASING_IDS_DIRECTLY_CORRESPOND_TO_INCREASING_ADDRESSES),
         }),
     }),
     .recipe_list(.FIRST_CHILD_ID, &.{
@@ -670,9 +713,9 @@ pub const RECIPES: []const InferEngine.RecipeList = &.{
     }),
     .recipe_list(.RANGE_LEN, &.{
         .recipe(.infer_native, &.{
-            .depends_on(.ID_IS_INTEGER_TYPE_THAT_DIRECTLY_INDEXES_BASE_PTR),
-            .depends_on(.ALL_ELEMENTS_IN_CONTIGUOUS_MEMORY_IN_ORDER),
-            .depends_on(.INCREASING_IDS_DIRECTLY_CORRESPOND_TO_INCREASING_ADDRESSES),
+            .depends_on_zero_weight(.ID_IS_INTEGER_TYPE_THAT_DIRECTLY_INDEXES_BASE_PTR),
+            .depends_on_zero_weight(.ALL_ELEMENTS_IN_CONTIGUOUS_MEMORY_IN_ORDER),
+            .depends_on_zero_weight(.INCREASING_IDS_DIRECTLY_CORRESPOND_TO_INCREASING_ADDRESSES),
         }),
         .recipe(.infer_limit, &.{
             .depends_on(.LIMIT_LEN),
@@ -680,52 +723,57 @@ pub const RECIPES: []const InferEngine.RecipeList = &.{
         .recipe(.infer_next, &.{
             .depends_on(.NEXT_ID),
             .depends_on(.ID_EQUALS),
+            .depends_on(.ID_LESS_OR_EQUAL),
         }),
         .recipe(.infer_prev, &.{
             .depends_on(.PREV_ID),
             .depends_on(.ID_EQUALS),
+            .depends_on(.ID_LESS_OR_EQUAL),
         }),
     }),
     .recipe_list(.INVALID_ID_AFTER_LAST_ID, &.{
         .recipe(.infer_native_last, &.{
             .depends_on(.LAST_ID),
             .depends_on(.NEXT_ID),
-            .depends_on(.ID_IS_INTEGER_TYPE_THAT_DIRECTLY_INDEXES_BASE_PTR),
-            .depends_on(.ALL_ELEMENTS_IN_CONTIGUOUS_MEMORY_IN_ORDER),
-            .depends_on(.INCREASING_IDS_DIRECTLY_CORRESPOND_TO_INCREASING_ADDRESSES),
-            .depends_on(.ID_AFTER_LAST_IS_EQUAL_TO_LEN),
+            // ID props
+            .depends_on_zero_weight(.ID_IS_INTEGER_TYPE_THAT_DIRECTLY_INDEXES_BASE_PTR),
+            .depends_on_zero_weight(.ALL_ELEMENTS_IN_CONTIGUOUS_MEMORY_IN_ORDER),
+            .depends_on_zero_weight(.INCREASING_IDS_DIRECTLY_CORRESPOND_TO_INCREASING_ADDRESSES),
+            .depends_on_zero_weight(.ID_AFTER_LAST_IS_EQUAL_TO_LEN),
         }),
         .recipe(.infer_native_len, &.{
             .depends_on(.GET_LEN),
-            .depends_on(.ID_IS_INTEGER_TYPE_THAT_DIRECTLY_INDEXES_BASE_PTR),
-            .depends_on(.ALL_ELEMENTS_IN_CONTIGUOUS_MEMORY_IN_ORDER),
-            .depends_on(.INCREASING_IDS_DIRECTLY_CORRESPOND_TO_INCREASING_ADDRESSES),
-            .depends_on(.ID_AFTER_LAST_IS_EQUAL_TO_LEN),
+            // ID props
+            .depends_on_zero_weight(.ID_IS_INTEGER_TYPE_THAT_DIRECTLY_INDEXES_BASE_PTR),
+            .depends_on_zero_weight(.ALL_ELEMENTS_IN_CONTIGUOUS_MEMORY_IN_ORDER),
+            .depends_on_zero_weight(.INCREASING_IDS_DIRECTLY_CORRESPOND_TO_INCREASING_ADDRESSES),
+            .depends_on_zero_weight(.ID_AFTER_LAST_IS_EQUAL_TO_LEN),
         }),
     }),
     .recipe_list(.INVALID_ID_BEFORE_FIRST_ID, &.{
         .recipe(.infer_native, &.{
-            .depends_on(.ID_0_IS_FIRST_ITEM),
-            .depends_on(.ID_0_IS_AT_BASE_PTR_ADDRESS),
-            .depends_on(.ID_IS_INTEGER_TYPE_THAT_DIRECTLY_INDEXES_BASE_PTR),
-            .depends_on(.ALL_ELEMENTS_IN_CONTIGUOUS_MEMORY_IN_ORDER),
-            .depends_on(.INCREASING_IDS_DIRECTLY_CORRESPOND_TO_INCREASING_ADDRESSES),
-            .depends_on(.ID_AFTER_LAST_IS_EQUAL_TO_LEN),
+            .depends_on_zero_weight(.ID_0_IS_FIRST_ITEM),
+            .depends_on_zero_weight(.ID_0_IS_AT_BASE_PTR_ADDRESS),
+            .depends_on_zero_weight(.ID_IS_INTEGER_TYPE_THAT_DIRECTLY_INDEXES_BASE_PTR),
+            .depends_on_zero_weight(.ALL_ELEMENTS_IN_CONTIGUOUS_MEMORY_IN_ORDER),
+            .depends_on_zero_weight(.INCREASING_IDS_DIRECTLY_CORRESPOND_TO_INCREASING_ADDRESSES),
+            .depends_on_zero_weight(.ID_AFTER_LAST_IS_EQUAL_TO_LEN),
         }),
         .recipe(.infer_native_offset, &.{
             .depends_on(.FIRST_ID),
             .depends_on(.PREV_ID),
-            .depends_on(.ID_IS_INTEGER_TYPE_THAT_DIRECTLY_INDEXES_BASE_PTR),
-            .depends_on(.ALL_ELEMENTS_IN_CONTIGUOUS_MEMORY_IN_ORDER),
-            .depends_on(.INCREASING_IDS_DIRECTLY_CORRESPOND_TO_INCREASING_ADDRESSES),
-            .depends_on(.ID_AFTER_LAST_IS_EQUAL_TO_LEN),
+            // ID props
+            .depends_on_zero_weight(.ID_IS_INTEGER_TYPE_THAT_DIRECTLY_INDEXES_BASE_PTR),
+            .depends_on_zero_weight(.ALL_ELEMENTS_IN_CONTIGUOUS_MEMORY_IN_ORDER),
+            .depends_on_zero_weight(.INCREASING_IDS_DIRECTLY_CORRESPOND_TO_INCREASING_ADDRESSES),
+            .depends_on_zero_weight(.ID_AFTER_LAST_IS_EQUAL_TO_LEN),
         }),
     }),
     .recipe_list(.LIMIT_LEN, &.{
         .recipe(.infer_native, &.{
-            .depends_on(.ID_IS_INTEGER_TYPE_THAT_DIRECTLY_INDEXES_BASE_PTR),
-            .depends_on(.ALL_ELEMENTS_IN_CONTIGUOUS_MEMORY_IN_ORDER),
-            .depends_on(.INCREASING_IDS_DIRECTLY_CORRESPOND_TO_INCREASING_ADDRESSES),
+            .depends_on_zero_weight(.ID_IS_INTEGER_TYPE_THAT_DIRECTLY_INDEXES_BASE_PTR),
+            .depends_on_zero_weight(.ALL_ELEMENTS_IN_CONTIGUOUS_MEMORY_IN_ORDER),
+            .depends_on_zero_weight(.INCREASING_IDS_DIRECTLY_CORRESPOND_TO_INCREASING_ADDRESSES),
         }),
         .recipe(.infer_range, &.{
             .depends_on(.RANGE_LEN),
@@ -740,19 +788,15 @@ pub const RECIPES: []const InferEngine.RecipeList = &.{
         }),
     }),
     .recipe_list(.GET_LEN, &.{
-        .recipe(.infer_native, &.{
-            // Classic indexing
-            .depends_on(.ID_IS_INTEGER_TYPE_THAT_DIRECTLY_INDEXES_BASE_PTR),
-            .depends_on(.ID_0_IS_FIRST_ITEM),
-            .depends_on(.ID_0_IS_AT_BASE_PTR_ADDRESS),
-            .depends_on(.ALL_ELEMENTS_IN_CONTIGUOUS_MEMORY_IN_ORDER),
-            .depends_on(.INCREASING_IDS_DIRECTLY_CORRESPOND_TO_INCREASING_ADDRESSES),
-            .depends_on(.ID_AFTER_LAST_IS_EQUAL_TO_LEN),
-        }),
         .recipe(.infer_native_last, &.{
             .depends_on(.LAST_ID),
-            // Classic indexing
-            .depends_on(.ID_AFTER_LAST_IS_EQUAL_TO_LEN),
+            // ID Properties
+            .depends_on_zero_weight(.ID_IS_INTEGER_TYPE_THAT_DIRECTLY_INDEXES_BASE_PTR),
+            .depends_on_zero_weight(.ID_0_IS_FIRST_ITEM),
+            .depends_on_zero_weight(.ID_0_IS_AT_BASE_PTR_ADDRESS),
+            .depends_on_zero_weight(.ALL_ELEMENTS_IN_CONTIGUOUS_MEMORY_IN_ORDER),
+            .depends_on_zero_weight(.INCREASING_IDS_DIRECTLY_CORRESPOND_TO_INCREASING_ADDRESSES),
+            .depends_on_zero_weight(.ID_AFTER_LAST_IS_EQUAL_TO_LEN),
         }),
         .recipe(.infer_range, &.{
             .depends_on(.FIRST_ID),
@@ -763,10 +807,10 @@ pub const RECIPES: []const InferEngine.RecipeList = &.{
     .recipe_list(.LAST_ID, &.{
         .recipe(.infer_native, &.{
             .depends_on(.GET_LEN),
-            // Classic indexing
-            .depends_on(.ALL_ELEMENTS_IN_CONTIGUOUS_MEMORY_IN_ORDER),
-            .depends_on(.INCREASING_IDS_DIRECTLY_CORRESPOND_TO_INCREASING_ADDRESSES),
-            .depends_on(.ID_AFTER_LAST_IS_EQUAL_TO_LEN),
+            // ID Properties
+            .depends_on_zero_weight(.ALL_ELEMENTS_IN_CONTIGUOUS_MEMORY_IN_ORDER),
+            .depends_on_zero_weight(.INCREASING_IDS_DIRECTLY_CORRESPOND_TO_INCREASING_ADDRESSES),
+            .depends_on_zero_weight(.ID_AFTER_LAST_IS_EQUAL_TO_LEN),
         }),
         .recipe(.infer_nth_from_end, &.{
             .depends_on(.NTH_ID_FROM_END),
@@ -775,20 +819,15 @@ pub const RECIPES: []const InferEngine.RecipeList = &.{
             .depends_on(.NTH_ID_FROM_START),
             .depends_on(.GET_LEN),
         }),
-        .recipe(.infer_first_len_nth_next, &.{
-            .depends_on(.FIRST_ID),
-            .depends_on(.GET_LEN),
-            .depends_on(.NTH_NEXT_ID),
-        }),
     }),
     .recipe_list(.FIRST_ID, &.{
         .recipe(.infer_native, &.{
-            .depends_on(.ID_IS_INTEGER_TYPE_THAT_DIRECTLY_INDEXES_BASE_PTR),
-            .depends_on(.ID_0_IS_FIRST_ITEM),
-            .depends_on(.ID_0_IS_AT_BASE_PTR_ADDRESS),
-            .depends_on(.ALL_ELEMENTS_IN_CONTIGUOUS_MEMORY_IN_ORDER),
-            .depends_on(.INCREASING_IDS_DIRECTLY_CORRESPOND_TO_INCREASING_ADDRESSES),
-            .depends_on(.ID_AFTER_LAST_IS_EQUAL_TO_LEN),
+            .depends_on_zero_weight(.ID_IS_INTEGER_TYPE_THAT_DIRECTLY_INDEXES_BASE_PTR),
+            .depends_on_zero_weight(.ID_0_IS_FIRST_ITEM),
+            .depends_on_zero_weight(.ID_0_IS_AT_BASE_PTR_ADDRESS),
+            .depends_on_zero_weight(.ALL_ELEMENTS_IN_CONTIGUOUS_MEMORY_IN_ORDER),
+            .depends_on_zero_weight(.INCREASING_IDS_DIRECTLY_CORRESPOND_TO_INCREASING_ADDRESSES),
+            .depends_on_zero_weight(.ID_AFTER_LAST_IS_EQUAL_TO_LEN),
         }),
         .recipe(.infer_nth_from_start, &.{
             .depends_on(.NTH_ID_FROM_START),
@@ -806,9 +845,10 @@ pub const RECIPES: []const InferEngine.RecipeList = &.{
     .recipe_list(.NTH_ID_FROM_END, &.{
         .recipe(.infer_native_last, &.{
             .depends_on(.LAST_ID),
-            .depends_on(.ID_IS_INTEGER_TYPE_THAT_DIRECTLY_INDEXES_BASE_PTR),
-            .depends_on(.ALL_ELEMENTS_IN_CONTIGUOUS_MEMORY_IN_ORDER),
-            .depends_on(.INCREASING_IDS_DIRECTLY_CORRESPOND_TO_INCREASING_ADDRESSES),
+            // ID props
+            .depends_on_zero_weight(.ID_IS_INTEGER_TYPE_THAT_DIRECTLY_INDEXES_BASE_PTR),
+            .depends_on_zero_weight(.ALL_ELEMENTS_IN_CONTIGUOUS_MEMORY_IN_ORDER),
+            .depends_on_zero_weight(.INCREASING_IDS_DIRECTLY_CORRESPOND_TO_INCREASING_ADDRESSES),
         }),
         .recipe(.infer_last_nth_prev, &.{
             .depends_on(.LAST_ID),
@@ -817,17 +857,18 @@ pub const RECIPES: []const InferEngine.RecipeList = &.{
     }),
     .recipe_list(.NTH_ID_FROM_START, &.{
         .recipe(.infer_native, &.{
-            .depends_on(.ID_IS_INTEGER_TYPE_THAT_DIRECTLY_INDEXES_BASE_PTR),
-            .depends_on(.ID_0_IS_FIRST_ITEM),
-            .depends_on(.ID_0_IS_AT_BASE_PTR_ADDRESS),
-            .depends_on(.ALL_ELEMENTS_IN_CONTIGUOUS_MEMORY_IN_ORDER),
-            .depends_on(.INCREASING_IDS_DIRECTLY_CORRESPOND_TO_INCREASING_ADDRESSES),
+            .depends_on_zero_weight(.ID_IS_INTEGER_TYPE_THAT_DIRECTLY_INDEXES_BASE_PTR),
+            .depends_on_zero_weight(.ID_0_IS_FIRST_ITEM),
+            .depends_on_zero_weight(.ID_0_IS_AT_BASE_PTR_ADDRESS),
+            .depends_on_zero_weight(.ALL_ELEMENTS_IN_CONTIGUOUS_MEMORY_IN_ORDER),
+            .depends_on_zero_weight(.INCREASING_IDS_DIRECTLY_CORRESPOND_TO_INCREASING_ADDRESSES),
         }),
         .recipe(.infer_native_first, &.{
             .depends_on(.FIRST_ID),
-            .depends_on(.ID_IS_INTEGER_TYPE_THAT_DIRECTLY_INDEXES_BASE_PTR),
-            .depends_on(.ALL_ELEMENTS_IN_CONTIGUOUS_MEMORY_IN_ORDER),
-            .depends_on(.INCREASING_IDS_DIRECTLY_CORRESPOND_TO_INCREASING_ADDRESSES),
+            // ID props
+            .depends_on_zero_weight(.ID_IS_INTEGER_TYPE_THAT_DIRECTLY_INDEXES_BASE_PTR),
+            .depends_on_zero_weight(.ALL_ELEMENTS_IN_CONTIGUOUS_MEMORY_IN_ORDER),
+            .depends_on_zero_weight(.INCREASING_IDS_DIRECTLY_CORRESPOND_TO_INCREASING_ADDRESSES),
         }),
         .recipe(.infer_first_nth_next, &.{
             .depends_on(.FIRST_ID),
@@ -835,11 +876,11 @@ pub const RECIPES: []const InferEngine.RecipeList = &.{
         }),
     }),
     .recipe_list(.REVERSE_RANGE, &.{
-        .recipe(.infer_slice, &.{
+        .recipe_with_special_factors(.infer_slice, 1, N_WEIGHT - 10, &.{
             .depends_on(.GET_RANGE_SLICE),
         }),
         .recipe(.infer_swap, &.{
-            .depends_on(.SWAP),
+            .depends_on_with_weight(.SWAP, N_WEIGHT),
         }),
     }),
     .recipe_list(.ROTATE_RANGE_LEFT, &.{
@@ -847,11 +888,11 @@ pub const RECIPES: []const InferEngine.RecipeList = &.{
             .depends_on(.ROTATE_RANGE_RIGHT),
         }),
         .recipe(.infer_reverse_nth_next, &.{
-            .depends_on(.REVERSE_RANGE),
+            .depends_on_with_weight(.REVERSE_RANGE, 2),
             .depends_on(.NTH_NEXT_ID),
         }),
         .recipe(.infer_reverse_nth_prev, &.{
-            .depends_on(.REVERSE_RANGE),
+            .depends_on_with_weight(.REVERSE_RANGE, 2),
             .depends_on(.NTH_PREV_ID),
         }),
     }),
@@ -860,16 +901,16 @@ pub const RECIPES: []const InferEngine.RecipeList = &.{
             .depends_on(.ROTATE_RANGE_LEFT),
         }),
         .recipe(.infer_reverse_nth_next, &.{
-            .depends_on(.REVERSE_RANGE),
+            .depends_on_with_weight(.REVERSE_RANGE, 2),
             .depends_on(.NTH_NEXT_ID),
         }),
         .recipe(.infer_reverse_nth_prev, &.{
-            .depends_on(.REVERSE_RANGE),
+            .depends_on_with_weight(.REVERSE_RANGE, 2),
             .depends_on(.NTH_PREV_ID),
         }),
     }),
     .recipe_list(.MOVE_ONE_RIGHT_DISPLACE, &.{
-        .recipe(.infer_get_set_move_block_left_overwrite, &.{
+        .recipe_with_special_factors(.infer_get_set_move_block_left_overwrite, 0.75, 0, &.{
             .depends_on(.GET),
             .depends_on(.SET),
             .depends_on(.MOVE_RANGE_LEFT_OVERWRITE),

@@ -542,10 +542,10 @@ pub const DataManipulationCore = struct {
                 }
                 const SOLUTIONS = comptime Recipes.InferEngine.resolve_recipes_by_order(provided_func_flags[0..num_provided_func_flags], Recipes.RECIPES);
                 const SELECTOR = struct {
-                    fn nth_child_of_n_ary_flat_array_tree(id_n: COUNT_, num_children_per_element: COUNT_, child_n: COUNT_) COUNT_ {
+                    inline fn nth_child_of_n_ary_flat_array_tree(id_n: COUNT_, num_children_per_element: COUNT_, child_n: COUNT_) COUNT_ {
                         return (id_n * num_children_per_element) + child_n;
                     }
-                    fn parent_of_n_ary_flat_array_tree(child_n: COUNT_, num_children_per_element: COUNT_) COUNT_ {
+                    inline fn parent_of_n_ary_flat_array_tree(child_n: COUNT_, num_children_per_element: COUNT_) COUNT_ {
                         return @divFloor(child_n - 1, num_children_per_element);
                     }
                     const GET_BASE_PTR = struct {
@@ -743,6 +743,7 @@ pub const DataManipulationCore = struct {
                             .USER_PROVIDED => CUSTOM.ID_LESS_THAN.?,
                             .INFERED_BY_RECIPE => |fn_tag| switch (fn_tag) {
                                 .infer_native => infer_native,
+                                .infer_gt => infer_gt,
                                 .infer_gteq => infer_gteq,
                                 .infer_gt_eq => infer_gt_eq,
                                 else => unreachable,
@@ -750,6 +751,9 @@ pub const DataManipulationCore = struct {
                         };
                         fn infer_native(_: DATA_, id_a: ID_, id_b: ID_, _: USERDATA_) bool {
                             return id_a < id_b;
+                        }
+                        fn infer_gt(data: DATA_, id_a: ID_, id_b: ID_, userdata: USERDATA_) bool {
+                            return ID_GREATER_THAN.func(data, id_b, id_a, userdata);
                         }
                         fn infer_gteq(data: DATA_, id_a: ID_, id_b: ID_, userdata: USERDATA_) bool {
                             return !ID_GREATER_THAN_OR_EQUAL.func(data, id_a, id_b, userdata);
@@ -767,6 +771,7 @@ pub const DataManipulationCore = struct {
                             .USER_PROVIDED => CUSTOM.ID_LESS_THAN_OR_EQUAL.?,
                             .INFERED_BY_RECIPE => |fn_tag| switch (fn_tag) {
                                 .infer_native => infer_native,
+                                .infer_gteq => infer_gteq,
                                 .infer_gt => infer_gt,
                                 .infer_lt_eq => infer_lt_eq,
                                 else => unreachable,
@@ -774,6 +779,9 @@ pub const DataManipulationCore = struct {
                         };
                         fn infer_native(_: DATA_, id_a: ID_, id_b: ID_, _: USERDATA_) bool {
                             return id_a <= id_b;
+                        }
+                        fn infer_gteq(data: DATA_, id_a: ID_, id_b: ID_, userdata: USERDATA_) bool {
+                            return ID_GREATER_THAN_OR_EQUAL.func(data, id_b, id_a, userdata);
                         }
                         fn infer_gt(data: DATA_, id_a: ID_, id_b: ID_, userdata: USERDATA_) bool {
                             return !ID_GREATER_THAN.func(data, id_a, id_b, userdata);
@@ -791,6 +799,7 @@ pub const DataManipulationCore = struct {
                             .USER_PROVIDED => CUSTOM.ID_GREATER_THAN.?,
                             .INFERED_BY_RECIPE => |fn_tag| switch (fn_tag) {
                                 .infer_native => infer_native,
+                                .infer_lt => infer_lt,
                                 .infer_lteq => infer_lteq,
                                 .infer_lt_eq => infer_lt_eq,
                                 else => unreachable,
@@ -798,6 +807,9 @@ pub const DataManipulationCore = struct {
                         };
                         fn infer_native(_: DATA_, id_a: ID_, id_b: ID_, _: USERDATA_) bool {
                             return id_a > id_b;
+                        }
+                        fn infer_lt(data: DATA_, id_a: ID_, id_b: ID_, userdata: USERDATA_) bool {
+                            return ID_LESS_THAN.func(data, id_b, id_a, userdata);
                         }
                         fn infer_lteq(data: DATA_, id_a: ID_, id_b: ID_, userdata: USERDATA_) bool {
                             return !ID_LESS_THAN_OR_EQUAL.func(data, id_a, id_b, userdata);
@@ -815,6 +827,7 @@ pub const DataManipulationCore = struct {
                             .USER_PROVIDED => CUSTOM.ID_GREATER_THAN_OR_EQUAL.?,
                             .INFERED_BY_RECIPE => |fn_tag| switch (fn_tag) {
                                 .infer_native => infer_native,
+                                .infer_lteq => infer_lteq,
                                 .infer_lt => infer_lt,
                                 .infer_gt_eq => infer_gt_eq,
                                 else => unreachable,
@@ -822,6 +835,9 @@ pub const DataManipulationCore = struct {
                         };
                         fn infer_native(_: DATA_, id_a: ID_, id_b: ID_, _: USERDATA_) bool {
                             return id_a >= id_b;
+                        }
+                        fn infer_lteq(data: DATA_, id_a: ID_, id_b: ID_, userdata: USERDATA_) bool {
+                            return ID_LESS_THAN_OR_EQUAL.func(data, id_b, id_a, userdata);
                         }
                         fn infer_lt(data: DATA_, id_a: ID_, id_b: ID_, userdata: USERDATA_) bool {
                             return !ID_LESS_THAN.func(data, id_a, id_b, userdata);
@@ -1066,6 +1082,7 @@ pub const DataManipulationCore = struct {
                             .USER_PROVIDED => CUSTOM.LESS_THAN.?,
                             .INFERED_BY_RECIPE => |fn_tag| switch (fn_tag) {
                                 .infer_native => infer_native,
+                                .infer_gt => infer_gt,
                                 .infer_gteq => infer_gteq,
                                 .infer_gt_oq => infer_gt_oq,
                                 .infer_gt_eq => infer_gt_eq,
@@ -1074,6 +1091,9 @@ pub const DataManipulationCore = struct {
                         };
                         fn infer_native(val_a: ELEM_, val_b: ELEM_, _: USERDATA_) bool {
                             return val_a < val_b;
+                        }
+                        fn infer_gt(val_a: ELEM_, val_b: ELEM_, userdata: USERDATA_) bool {
+                            return GREATER_THAN.func(val_b, val_a, userdata);
                         }
                         fn infer_gteq(val_a: ELEM_, val_b: ELEM_, userdata: USERDATA_) bool {
                             return !GREATER_THAN_OR_EQUAL.func(val_a, val_b, userdata);
@@ -1094,6 +1114,7 @@ pub const DataManipulationCore = struct {
                             .USER_PROVIDED => CUSTOM.LESS_THAN_OR_EQUAL.?,
                             .INFERED_BY_RECIPE => |fn_tag| switch (fn_tag) {
                                 .infer_native => infer_native,
+                                .infer_gteq => infer_gteq,
                                 .infer_gt => infer_gt,
                                 .infer_lt_oq => infer_lt_oq,
                                 .infer_lt_eq => infer_lt_eq,
@@ -1102,6 +1123,9 @@ pub const DataManipulationCore = struct {
                         };
                         fn infer_native(val_a: ELEM_, val_b: ELEM_, _: USERDATA_) bool {
                             return val_a <= val_b;
+                        }
+                        fn infer_gteq(val_a: ELEM_, val_b: ELEM_, userdata: USERDATA_) bool {
+                            return GREATER_THAN_OR_EQUAL.func(val_b, val_a, userdata);
                         }
                         fn infer_gt(val_a: ELEM_, val_b: ELEM_, userdata: USERDATA_) bool {
                             return !GREATER_THAN.func(val_a, val_b, userdata);
@@ -1122,6 +1146,7 @@ pub const DataManipulationCore = struct {
                             .USER_PROVIDED => CUSTOM.GREATER_THAN.?,
                             .INFERED_BY_RECIPE => |fn_tag| switch (fn_tag) {
                                 .infer_native => infer_native,
+                                .infer_lt => infer_lt,
                                 .infer_lteq => infer_lteq,
                                 .infer_lt_oq => infer_lt_oq,
                                 .infer_lt_eq => infer_lt_eq,
@@ -1130,6 +1155,9 @@ pub const DataManipulationCore = struct {
                         };
                         fn infer_native(val_a: ELEM_, val_b: ELEM_, _: USERDATA_) bool {
                             return val_a > val_b;
+                        }
+                        fn infer_lt(val_a: ELEM_, val_b: ELEM_, userdata: USERDATA_) bool {
+                            return LESS_THAN.func(val_b, val_a, userdata);
                         }
                         fn infer_lteq(val_a: ELEM_, val_b: ELEM_, userdata: USERDATA_) bool {
                             return !LESS_THAN_OR_EQUAL.func(val_a, val_b, userdata);
@@ -1150,6 +1178,7 @@ pub const DataManipulationCore = struct {
                             .USER_PROVIDED => CUSTOM.GREATER_THAN_OR_EQUAL.?,
                             .INFERED_BY_RECIPE => |fn_tag| switch (fn_tag) {
                                 .infer_native => infer_native,
+                                .infer_lteq => infer_lteq,
                                 .infer_lt => infer_lt,
                                 .infer_gt_oq => infer_gt_oq,
                                 .infer_gt_eq => infer_gt_eq,
@@ -1158,6 +1187,9 @@ pub const DataManipulationCore = struct {
                         };
                         fn infer_native(val_a: ELEM_, val_b: ELEM_, _: USERDATA_) bool {
                             return val_a >= val_b;
+                        }
+                        fn infer_lteq(val_a: ELEM_, val_b: ELEM_, userdata: USERDATA_) bool {
+                            return LESS_THAN_OR_EQUAL.func(val_b, val_a, userdata);
                         }
                         fn infer_lt(val_a: ELEM_, val_b: ELEM_, userdata: USERDATA_) bool {
                             return !LESS_THAN.func(val_a, val_b, userdata);
@@ -1221,114 +1253,79 @@ pub const DataManipulationCore = struct {
                         }
                     };
                     const FIRST_ID = struct {
-                        // CHECKPOINT //FIXME update for recipe inference
-                        const func: FN_IMPLICIT_ID = if (CUSTOM.FIRST_ID) |cust| cust //
-                            else if (FLAGS.has(INFER.FIRST_ID.FROM_NTH_FROM_START)) infer_nth_start //
-                            else if (FLAGS.has(INFER.FIRST_ID.FROM_LEN_NTH_FROM_END)) infer_nth_end //
-                            else if (FLAGS.has(INFER.FIRST_ID.FROM_LAST_LEN_NTH_PREV)) infer_last_len_nth_prev //
-                            else if (FLAGS.has(INFER.FIRST_ID.FROM_LAST_LEN_PREV)) infer_last_len_prev //
-                            else if (ALLOW_DEFAULT) default else unusable;
-                        fn default(_: DATA_, _: USERDATA_) ID_ {
+                        const func: FN_IMPLICIT_ID = switch (SOLUTIONS[@intFromEnum(Recipes.PackageFlags.FIRST_ID)]) {
+                            .UNAVAILABLE => unusable,
+                            .USER_PROVIDED => CUSTOM.FIRST_ID.?,
+                            .INFERED_BY_RECIPE => |fn_tag| switch (fn_tag) {
+                                .infer_native => infer_native,
+                                .infer_nth_from_start => infer_nth_from_start,
+                                .infer_len_nth_from_end => infer_len_nth_from_end,
+                                else => unreachable,
+                            },
+                        };
+                        fn infer_native(_: DATA_, _: USERDATA_) ID_ {
                             return 0;
                         }
-                        fn infer_nth_start(data: DATA_, userdata: USERDATA_) ID_ {
-                            const NTH_START = NTH_FROM_START.func;
-                            return NTH_START(data, 0, userdata);
+                        fn infer_nth_from_start(data: DATA_, userdata: USERDATA_) ID_ {
+                            return NTH_FROM_START.func(data, 0, userdata);
                         }
-                        fn infer_nth_end(data: DATA_, userdata: USERDATA_) ID_ {
-                            const NTH_END = NTH_FROM_END.func;
-                            const LEN_ = GET_LEN.func;
-                            return NTH_END(data, LEN_(data, userdata), userdata);
-                        }
-                        fn infer_last_len_nth_prev(data: DATA_, userdata: USERDATA_) ID_ {
-                            const LAST = LAST_ID.func;
-                            const LEN_ = GET_LEN.func;
-                            const NTH_PREV_ = NTH_PREV_ID.func;
-                            return NTH_PREV_(data, LAST(data, userdata), LEN_(data, userdata), userdata);
-                        }
-                        fn infer_last_len_prev(data: DATA_, userdata: USERDATA_) ID_ {
-                            const LAST = LAST_ID.func;
-                            const LEN_ = GET_LEN.func;
-                            const PREV_ = PREV_ID.func;
-                            var l = LEN_(data, userdata);
-                            var i = LAST(data, userdata);
-                            while (l > 0) : (l -= 1) {
-                                i = PREV_(data, i, userdata);
-                            }
-                            return i;
+                        fn infer_len_nth_from_end(data: DATA_, userdata: USERDATA_) ID_ {
+                            return NTH_FROM_END.func(data, GET_LEN.func(data, userdata), userdata);
                         }
                         fn unusable(_: DATA_, _: USERDATA_) ID_ {
                             assert_unreachable(@src(), "no `first_index` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
                         }
                     };
                     const LAST_ID = struct {
-                        const func: FN_IMPLICIT_ID = if (CUSTOM.LAST_ID) |cust| cust //
-                            else if (FLAGS.has(INFER.LAST_ID.FROM_NTH_FROM_LAST)) infer_nth_last //
-                            else if (FLAGS.has(INFER.LAST_ID.FROM_LEN_NTH_FROM_START)) infer_nth_start //
-                            else if (FLAGS.has(INFER.LAST_ID.FROM_FIRST_LEN_NTH_NEXT)) infer_first_len_nth_next //
-                            else if (FLAGS.has(INFER.LAST_ID.FROM_FIRST_LEN_NEXT)) infer_first_len_next //
-                            else if (ALLOW_DEFAULT) default else unusable;
-                        fn default(data: DATA_, userdata: USERDATA_) ID_ {
-                            return GET_LEN.func(data, userdata) -% 1;
+                        const func: FN_IMPLICIT_ID = switch (SOLUTIONS[@intFromEnum(Recipes.PackageFlags.LAST_ID)]) {
+                            .UNAVAILABLE => unusable,
+                            .USER_PROVIDED => CUSTOM.LAST_ID.?,
+                            .INFERED_BY_RECIPE => |fn_tag| switch (fn_tag) {
+                                .infer_native => infer_native,
+                                .infer_nth_from_end => infer_nth_from_end,
+                                .infer_len_nth_from_start => infer_len_nth_from_start,
+                                else => unreachable,
+                            },
+                        };
+                        fn infer_native(data: DATA_, userdata: USERDATA_) ID_ {
+                            return @intCast(GET_LEN.func(data, userdata) - 1);
                         }
-                        fn infer_nth_last(data: DATA_, userdata: USERDATA_) ID_ {
-                            const NTH_START = NTH_FROM_START.func;
-                            return NTH_START(data, 0, userdata);
+                        fn infer_nth_from_end(data: DATA_, userdata: USERDATA_) ID_ {
+                            return NTH_FROM_END.func(data, 0, userdata);
                         }
-                        fn infer_nth_start(data: DATA_, userdata: USERDATA_) ID_ {
-                            const NTH_START = NTH_FROM_START.func;
-                            const LEN_ = GET_LEN.func;
-                            return NTH_START(data, LEN_(data, userdata), userdata);
-                        }
-                        fn infer_first_len_nth_next(data: DATA_, userdata: USERDATA_) ID_ {
-                            const FIRST = FIRST_ID.func;
-                            const LEN_ = GET_LEN.func;
-                            const NTH_NEXT_ = NTH_PREV_ID.func;
-                            return NTH_NEXT_(data, FIRST(data, userdata), LEN_(data, userdata), userdata);
-                        }
-                        fn infer_first_len_next(data: DATA_, userdata: USERDATA_) ID_ {
-                            const FIRST = FIRST_ID.func;
-                            const LEN_ = GET_LEN.func;
-                            const NEXT_ = NEXT_ID.func;
-                            var l = LEN_(data, userdata);
-                            var i = FIRST(data, userdata);
-                            while (l > 0) : (l -= 1) {
-                                i = NEXT_(data, i, userdata);
-                            }
-                            return i;
+                        fn infer_len_nth_from_start(data: DATA_, userdata: USERDATA_) ID_ {
+                            return NTH_FROM_START.func(data, GET_LEN.func(data, userdata) - 1, userdata);
                         }
                         fn unusable(_: DATA_, _: USERDATA_) ID_ {
                             assert_unreachable(@src(), "no `last_index` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
                         }
                     };
                     const NEXT_ID = struct {
-                        const func: FN_ADJACENT_ID = if (CUSTOM.NEXT_ID) |cust| cust //
-                            else if (FLAGS.has(INFER.NEXT_ID.FROM_NTH_NEXT)) infer_nth_next //
-                            else if (FLAGS.has(INFER.NEXT_ID.FROM_LAST_PREV)) infer_last_prev //
-                            else if (ALLOW_DEFAULT) default else unusable;
-                        fn default(_: DATA_, curr: ID_, _: USERDATA_) ID_ {
+                        const func: FN_ADJACENT_ID = switch (SOLUTIONS[@intFromEnum(Recipes.PackageFlags.NEXT_ID)]) {
+                            .UNAVAILABLE => unusable,
+                            .USER_PROVIDED => CUSTOM.NEXT_ID.?,
+                            .INFERED_BY_RECIPE => |fn_tag| switch (fn_tag) {
+                                .infer_native => infer_native,
+                                .infer_nth_next => infer_nth_next,
+                                .infer_last_prev => infer_last_prev,
+                                else => unreachable,
+                            },
+                        };
+                        fn infer_native(_: DATA_, curr: ID_, _: USERDATA_) ID_ {
                             return curr + 1;
                         }
                         fn infer_nth_next(data: DATA_, curr: ID_, userdata: USERDATA_) ID_ {
-                            assert_valid_id(data, curr, userdata, @src());
-                            const NTH_NEXT = NTH_NEXT_ID.func;
-                            return NTH_NEXT(data, curr, 1, userdata);
+                            return NTH_NEXT_ID.func(data, curr, 1, userdata);
                         }
                         fn infer_last_prev(data: DATA_, curr: ID_, userdata: USERDATA_) ID_ {
                             assert_valid_id(data, curr, userdata, @src());
-                            const LAST = LAST_ID.func;
-                            const PREV = PREV_ID.func;
-                            const ID_EQ = ID_EQUALS.func;
-                            const INVALID_END = INVALID_ID_AFTER.func;
-                            const INVALID_BEFORE = INVALID_ID_BEFORE.func;
-                            const VALID = ID_VALID.func;
-                            var i = LAST(data, userdata);
-                            if (ID_EQ(data, i, curr, userdata)) return INVALID_END(data, userdata);
-                            var ii = PREV(data, i, userdata);
-                            while (!ID_EQ(data, i, curr, userdata)) {
-                                if (!VALID(data, ii, userdata)) return INVALID_BEFORE(data, userdata);
+                            var i = LAST_ID.func(data, userdata);
+                            if (ID_EQUALS.func(data, i, curr, userdata)) return INVALID_ID_AFTER.func(data, userdata);
+                            var ii = PREV_ID.func(data, i, userdata);
+                            while (!ID_EQUALS.func(data, i, curr, userdata)) {
+                                if (!ID_VALID.func(data, ii, userdata)) return ii;
                                 i = ii;
-                                ii = PREV(data, i, userdata);
+                                ii = PREV_ID.func(data, i, userdata);
                             }
                             return i;
                         }
@@ -1337,33 +1334,31 @@ pub const DataManipulationCore = struct {
                         }
                     };
                     const PREV_ID = struct {
-                        const func: FN_ADJACENT_ID = if (CUSTOM.PREV_ID) |cust| cust //
-                            else if (FLAGS.has(INFER.PREV_ID.FROM_NTH_PREV)) infer_nth_prev //
-                            else if (FLAGS.has(INFER.PREV_ID.FROM_FIRST_NEXT)) infer_first_next //
-                            else if (ALLOW_DEFAULT) default else unusable;
-                        fn default(_: DATA_, curr: ID_, _: USERDATA_) ID_ {
+                        const func: FN_ADJACENT_ID = switch (SOLUTIONS[@intFromEnum(Recipes.PackageFlags.PREV_ID)]) {
+                            .UNAVAILABLE => unusable,
+                            .USER_PROVIDED => CUSTOM.PREV_ID.?,
+                            .INFERED_BY_RECIPE => |fn_tag| switch (fn_tag) {
+                                .infer_native => infer_native,
+                                .infer_nth_prev => infer_nth_prev,
+                                .infer_first_next => infer_first_next,
+                                else => unreachable,
+                            },
+                        };
+                        fn infer_native(_: DATA_, curr: ID_, _: USERDATA_) ID_ {
                             return curr - 1;
                         }
                         fn infer_nth_prev(data: DATA_, curr: ID_, userdata: USERDATA_) ID_ {
-                            assert_valid_id(data, curr, userdata, @src());
-                            const NTH_PREV = NTH_PREV_ID.func;
-                            return NTH_PREV(data, curr, 1, userdata);
+                            return NTH_PREV_ID.func(data, curr, 1, userdata);
                         }
                         fn infer_first_next(data: DATA_, curr: ID_, userdata: USERDATA_) ID_ {
                             assert_valid_id(data, curr, userdata, @src());
-                            const FIRST = FIRST_ID.func;
-                            const NEXT = NEXT_ID.func;
-                            const ID_EQ = ID_EQUALS.func;
-                            const INVALID_END = comptime INVALID_ID_AFTER.func;
-                            const INVALID_BEFORE = comptime INVALID_ID_BEFORE.func;
-                            const VALID = comptime ID_VALID.func;
-                            var i = FIRST(data, userdata);
-                            if (ID_EQ(data, i, curr, userdata)) return INVALID_END(data, userdata);
-                            var ii = NEXT(data, i, userdata);
-                            while (!ID_EQ(data, ii, curr, userdata)) {
-                                if (!VALID(data, ii, userdata)) return INVALID_BEFORE(data, userdata);
+                            var i = FIRST_ID.func(data, userdata);
+                            if (ID_EQUALS.func(data, i, curr, userdata)) return INVALID_ID_BEFORE.func(data, userdata);
+                            var ii = NEXT_ID.func(data, i, userdata);
+                            while (!ID_EQUALS.func(data, ii, curr, userdata)) {
+                                if (!ID_VALID.func(data, ii, userdata)) return ii;
                                 i = ii;
-                                ii = NEXT(data, i, userdata);
+                                ii = NEXT_ID.func(data, i, userdata);
                             }
                             return i;
                         }
@@ -1372,47 +1367,45 @@ pub const DataManipulationCore = struct {
                         }
                     };
                     const NTH_NEXT_ID = struct {
-                        const func: FN_NTH_ID = if (CUSTOM.NTH_NEXT_ID) |cust| cust //
-                            else if (FLAGS.has(INFER.NTH_NEXT_ID.FROM_NEXT)) infer_next //
-                            else if (FLAGS.has(INFER.NTH_NEXT_ID.FROM_LAST_PREV)) infer_last_prev //
-                            else if (ALLOW_DEFAULT) default else unusable;
-                        fn default(_: DATA_, curr: ID_, n: COUNT_, _: USERDATA_) ID_ {
-                            return curr + n;
+                        const func: FN_NTH_ID = switch (SOLUTIONS[@intFromEnum(Recipes.PackageFlags.NTH_NEXT_ID)]) {
+                            .UNAVAILABLE => unusable,
+                            .USER_PROVIDED => CUSTOM.NTH_NEXT_ID.?,
+                            .INFERED_BY_RECIPE => |fn_tag| switch (fn_tag) {
+                                .infer_native => infer_native,
+                                .infer_next => infer_next,
+                                .infer_last_prev => infer_last_prev,
+                                else => unreachable,
+                            },
+                        };
+                        fn infer_native(_: DATA_, curr: ID_, n: COUNT_, _: USERDATA_) ID_ {
+                            return curr + @as(ID_, @intCast(n));
                         }
                         fn infer_next(data: DATA_, curr: ID_, n: COUNT_, userdata: USERDATA_) ID_ {
-                            assert_valid_id(data, curr, userdata, @src());
-                            const NEXT = NEXT_ID.func;
                             var i = curr;
                             var nn: COUNT_ = 0;
                             while (nn < n) : (nn += 1) {
-                                i = NEXT(data, i, userdata);
+                                i = NEXT_ID.func(data, i, userdata);
                             }
                             return i;
                         }
                         fn infer_last_prev(data: DATA_, curr: ID_, n: COUNT_, userdata: USERDATA_) ID_ {
-                            assert_valid_id(data, curr, userdata, @src());
-                            const LAST = LAST_ID.func;
-                            const PREV = PREV_ID.func;
-                            const ID_EQ = ID_EQUALS.func;
-                            const INVALID_END = comptime INVALID_ID_AFTER.func;
-                            const INVALID_BEFORE = comptime INVALID_ID_BEFORE.func;
-                            const VALID = comptime ID_VALID.func;
-                            const last = LAST(data, userdata);
+                            if (n == 0) return curr;
+                            const last = LAST_ID.func(data, userdata);
                             var left_i = last;
                             var nn: COUNT_ = 0;
                             while (nn < n) : (nn += 1) {
-                                if (ID_EQ(data, left_i, curr, userdata) or !VALID(data, left_i, userdata)) return INVALID_END(data, userdata);
-                                left_i = PREV(data, curr, userdata);
+                                if (ID_EQUALS.func(data, left_i, curr, userdata) or !ID_VALID.func(data, left_i, userdata)) return INVALID_ID_AFTER.func(data, userdata);
+                                left_i = PREV_ID.func(data, curr, userdata);
                             }
                             var right_i = last;
-                            var left_ii = PREV(data, left_i, userdata);
-                            var right_ii = PREV(data, last, userdata);
-                            while (!ID_EQ(data, left_ii, curr, userdata)) {
+                            var left_ii = PREV_ID.func(data, left_i, userdata);
+                            var right_ii = PREV_ID.func(data, last, userdata);
+                            while (!ID_EQUALS.func(data, left_ii, curr, userdata)) {
                                 left_i = left_ii;
-                                left_ii = PREV(data, left_i, userdata);
-                                if (!VALID(data, left_ii, userdata)) return INVALID_BEFORE(data, userdata);
+                                left_ii = PREV_ID.func(data, left_i, userdata);
+                                if (!ID_VALID.func(data, left_ii, userdata)) return left_ii;
                                 right_i = right_ii;
-                                right_ii = PREV(data, right_i, userdata);
+                                right_ii = PREV_ID.func(data, right_i, userdata);
                             }
                             return right_i;
                         }
@@ -1421,47 +1414,45 @@ pub const DataManipulationCore = struct {
                         }
                     };
                     const NTH_PREV_ID = struct {
-                        const func: FN_NTH_ID = if (CUSTOM.NTH_PREV_ID) |cust| cust //
-                            else if (FLAGS.has(INFER.NTH_PREV_ID.FROM_PREV)) infer_prev //
-                            else if (FLAGS.has(INFER.NTH_PREV_ID.FROM_FIRST_NEXT)) infer_first_next //
-                            else if (ALLOW_DEFAULT) default else unusable;
-                        fn default(_: DATA_, curr: ID_, n: COUNT_, _: USERDATA_) ID_ {
+                        const func: FN_NTH_ID = switch (SOLUTIONS[@intFromEnum(Recipes.PackageFlags.NTH_PREV_ID)]) {
+                            .UNAVAILABLE => unusable,
+                            .USER_PROVIDED => CUSTOM.NTH_PREV_ID.?,
+                            .INFERED_BY_RECIPE => |fn_tag| switch (fn_tag) {
+                                .infer_native => infer_native,
+                                .infer_prev => infer_prev,
+                                .infer_first_next => infer_first_next,
+                                else => unreachable,
+                            },
+                        };
+                        fn infer_native(_: DATA_, curr: ID_, n: COUNT_, _: USERDATA_) ID_ {
                             return curr - n;
                         }
                         fn infer_prev(data: DATA_, curr: ID_, n: COUNT_, userdata: USERDATA_) ID_ {
-                            assert_valid_id(data, curr, userdata, @src());
-                            const PREV = PREV_ID.func;
                             var i = curr;
                             var nn: COUNT_ = 0;
                             while (nn < n) : (nn += 1) {
-                                i = PREV(data, i, userdata);
+                                i = PREV_ID.func(data, i, userdata);
                             }
                             return i;
                         }
                         fn infer_first_next(data: DATA_, curr: ID_, n: COUNT_, userdata: USERDATA_) ID_ {
                             assert_valid_id(data, curr, userdata, @src());
-                            const FIRST = FIRST_ID.func;
-                            const NEXT = NEXT_ID.func;
-                            const ID_EQ = ID_EQUALS.func;
-                            const INVALID_END = comptime INVALID_ID_AFTER.func;
-                            const INVALID_BEFORE = comptime INVALID_ID_BEFORE.func;
-                            const VALID = ID_VALID.func;
-                            const first = FIRST(data, userdata);
+                            const first = FIRST_ID.func(data, userdata);
                             var right_i = first;
                             var nn: COUNT_ = 0;
                             while (nn < n) : (nn += 1) {
-                                if (ID_EQ(data, right_i, curr, userdata) or !VALID(data, right_i, userdata)) return INVALID_END(data, userdata);
-                                right_i = NEXT(data, curr, userdata);
+                                if (ID_EQUALS.func(data, right_i, curr, userdata) or !ID_VALID.func(data, right_i, userdata)) return INVALID_ID_AFTER.func(data, userdata);
+                                right_i = NEXT_ID.func(data, curr, userdata);
                             }
                             var left_i = first;
-                            var right_ii = NEXT(data, right_i, userdata);
-                            var left_ii = NEXT(data, first, userdata);
-                            while (!ID_EQ(data, right_ii, curr, userdata)) {
+                            var right_ii = NEXT_ID.func(data, right_i, userdata);
+                            var left_ii = NEXT_ID.func(data, first, userdata);
+                            while (!ID_EQUALS.func(data, right_ii, curr, userdata)) {
                                 right_i = right_ii;
-                                right_ii = NEXT(data, right_i, userdata);
-                                if (!VALID(data, right_ii, userdata)) return INVALID_BEFORE(data, userdata);
+                                right_ii = NEXT_ID.func(data, right_i, userdata);
+                                if (!ID_VALID.func(data, right_ii, userdata)) return right_ii;
                                 left_i = left_ii;
-                                left_ii = NEXT(data, left_i, userdata);
+                                left_ii = NEXT_ID.func(data, left_i, userdata);
                             }
                             return left_i;
                         }
@@ -1470,216 +1461,125 @@ pub const DataManipulationCore = struct {
                         }
                     };
                     const NTH_FROM_START = struct {
-                        const func: FN_IMPLICIT_NTH_ID = if (CUSTOM.NTH_ID_FROM_START) |cust| cust //
-                            else if (FLAGS.has(INFER.NTH_FROM_START.FROM_FIRST_NTH_NEXT)) infer_first_nth_next //
-                            else if (FLAGS.has(INFER.NTH_FROM_START.FROM_FIRST_NEXT)) infer_first_next //
-                            else if (ALLOW_DEFAULT) default else unusable;
-                        fn default(_: DATA_, n: COUNT_, _: USERDATA_) ID_ {
+                        const func: FN_NTH_ID = switch (SOLUTIONS[@intFromEnum(Recipes.PackageFlags.NTH_ID_FROM_START)]) {
+                            .UNAVAILABLE => unusable,
+                            .USER_PROVIDED => CUSTOM.NTH_ID_FROM_START.?,
+                            .INFERED_BY_RECIPE => |fn_tag| switch (fn_tag) {
+                                .infer_native => infer_native,
+                                .infer_native_first => infer_native_first,
+                                .infer_first_nth_next => infer_first_nth_next,
+                                else => unreachable,
+                            },
+                        };
+                        fn infer_native(_: DATA_, n: COUNT_, _: USERDATA_) ID_ {
                             return n;
                         }
-                        fn infer_first_nth_next(data: DATA_, n: COUNT_, userdata: USERDATA_) ID_ {
-                            const NTH_NEXT = NTH_NEXT_ID.func;
-                            const FIRST = FIRST_ID.func;
-                            return NTH_NEXT(data, FIRST(data, userdata), n, userdata);
+                        fn infer_native_first(data: DATA_, n: COUNT_, userdata: USERDATA_) ID_ {
+                            return FIRST_ID.func(data, userdata) + @as(ID_, @intCast(n));
                         }
-                        fn infer_first_next(data: DATA_, n: COUNT_, userdata: USERDATA_) ID_ {
-                            const NEXT = NEXT_ID.func;
-                            const FIRST = FIRST_ID.func;
-                            var nn: COUNT_ = 0;
-                            var i = FIRST(data, userdata);
-                            while (nn < n) : (nn += 1) {
-                                i = NEXT(data, i, userdata);
-                            }
-                            return i;
+                        fn infer_first_nth_next(data: DATA_, n: COUNT_, userdata: USERDATA_) ID_ {
+                            return NTH_NEXT_ID.func(data, FIRST_ID.func(data, userdata), n, userdata);
                         }
                         fn unusable(_: DATA_, _: COUNT_, _: USERDATA_) ID_ {
                             assert_unreachable(@src(), "no `nth_index_from_start` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
                         }
                     };
                     const NTH_FROM_END = struct {
-                        const func: FN_IMPLICIT_NTH_ID = if (CUSTOM.NTH_ID_FROM_END) |cust| cust //
-                            else if (FLAGS.has(INFER.NTH_FROM_END.FROM_LAST_NTH_PREV)) infer_last_nth_prev //
-                            else if (FLAGS.has(INFER.NTH_FROM_END.FROM_LAST_PREV)) infer_last_prev //
-                            else if (ALLOW_DEFAULT) default else unusable;
-                        fn default(data: DATA_, n: COUNT_, userdata: USERDATA_) ID_ {
-                            return GET_LEN.func(data, userdata) - 1 - n;
+                        const func: FN_NTH_ID = switch (SOLUTIONS[@intFromEnum(Recipes.PackageFlags.NTH_ID_FROM_END)]) {
+                            .UNAVAILABLE => unusable,
+                            .USER_PROVIDED => CUSTOM.NTH_ID_FROM_END.?,
+                            .INFERED_BY_RECIPE => |fn_tag| switch (fn_tag) {
+                                .infer_native => infer_native,
+                                .infer_last_nth_prev => infer_last_nth_prev,
+                                else => unreachable,
+                            },
+                        };
+                        fn infer_native(data: DATA_, n: COUNT_, userdata: USERDATA_) ID_ {
+                            return @intCast(GET_LEN.func(data, userdata) - 1 - n);
                         }
                         fn infer_last_nth_prev(data: DATA_, n: COUNT_, userdata: USERDATA_) ID_ {
-                            const NTH_PREV = NTH_PREV_ID.func;
-                            const LAST = LAST_ID.func;
-                            return NTH_PREV(data, LAST(data, userdata), n, userdata);
-                        }
-                        fn infer_last_prev(data: DATA_, n: COUNT_, userdata: USERDATA_) ID_ {
-                            const PREV = PREV_ID.func;
-                            const LAST = LAST_ID.func;
-                            var nn: COUNT_ = 0;
-                            var i = LAST(data, userdata);
-                            while (nn < n) : (nn += 1) {
-                                i = PREV(data, i, userdata);
-                            }
-                            return i;
+                            return NTH_PREV_ID.func(data, LAST_ID.func(data, userdata), n, userdata);
                         }
                         fn unusable(_: DATA_, _: COUNT_, _: USERDATA_) ID_ {
                             assert_unreachable(@src(), "no `nth_index_from_end` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
                         }
                     };
                     const GET_LEN = struct {
-                        const func: FN_IMPLICIT_COUNT = if (CUSTOM.GET_LEN) |cust| cust //
-                            else if (FLAGS.has(INFER.LEN.FROM_FIRST_LAST_RANGE_LEN)) infer_range_len //
-                            else if (FLAGS.has(INFER.LEN.FROM_FIRST_LAST_NEXT)) infer_first_last_next //
-                            else if (FLAGS.has(INFER.LEN.FROM_FIRST_LAST_PREV)) infer_first_last_prev //
-                            else if (ALLOW_DEFAULT) default else unusable;
-                        fn default(data: DATA_, _: USERDATA_) COUNT_ {
-                            if (comptime Types.type_is_struct(DATA_)) {
-                                if (comptime @hasField(DATA_, "items")) {
-                                    if (comptime @hasField(@FieldType(DATA_, "items"), "len")) {
-                                        return data.items.len;
-                                    } else {
-                                        unreachable;
-                                    }
-                                } else if (comptime @hasField(DATA_, "len")) {
-                                    return data.len;
-                                } else {
-                                    unreachable;
-                                }
-                            } else if (comptime Types.type_is_slice(DATA_)) {
-                                return data.len;
-                            } else {
-                                unreachable;
-                            }
+                        const func: FN_IMPLICIT_COUNT = switch (SOLUTIONS[@intFromEnum(Recipes.PackageFlags.GET_LEN)]) {
+                            .UNAVAILABLE => unusable,
+                            .USER_PROVIDED => CUSTOM.GET_LEN.?,
+                            .INFERED_BY_RECIPE => |fn_tag| switch (fn_tag) {
+                                .infer_native_last => infer_native_last,
+                                .infer_range => infer_range,
+                                else => unreachable,
+                            },
+                        };
+                        fn infer_native_last(data: DATA_, userdata: USERDATA_) COUNT_ {
+                            return @intCast(LAST_ID.func(data, userdata) + 1);
                         }
-                        fn infer_range_len(data: DATA_, userdata: USERDATA_) COUNT_ {
-                            const FIRST = FIRST_ID.func;
-                            const LAST = LAST_ID.func;
-                            const RANGE = RANGE_LEN.func;
-                            return RANGE(FIRST(data, userdata), LAST(data, userdata), userdata);
-                        }
-                        fn infer_first_last_next(data: DATA_, userdata: USERDATA_) COUNT_ {
-                            const FIRST = FIRST_ID.func;
-                            const LAST = LAST_ID.func;
-                            const NEXT = NEXT_ID.func;
-                            const VALID = ID_VALID.func;
-                            const ID_EQ = ID_EQUALS.func;
-                            var i = FIRST(data, userdata);
-                            const last = LAST(data, userdata);
-                            if (!VALID(data, i, userdata) or !VALID(data, last, userdata)) return 0;
-                            var n: COUNT_ = 1;
-                            while (!ID_EQ(data, i, last, userdata)) {
-                                i = NEXT(data, i, userdata);
-                                n += 1;
-                            }
-                            return n;
-                        }
-                        fn infer_first_last_prev(data: DATA_, userdata: USERDATA_) COUNT_ {
-                            const FIRST = FIRST_ID.func;
-                            const LAST = LAST_ID.func;
-                            const PREV = PREV_ID.func;
-                            const VALID = ID_VALID.func;
-                            const ID_EQ = ID_EQUALS.func;
-                            var i = LAST(data, userdata);
-                            const first = FIRST(data, userdata);
-                            if (!VALID(data, i, userdata) or !VALID(data, first, userdata)) return 0;
-                            var n: COUNT_ = 1;
-                            while (!ID_EQ(data, i, first, userdata)) {
-                                i = PREV(data, i, userdata);
-                                n += 1;
-                            }
-                            return n;
+                        fn infer_range(data: DATA_, userdata: USERDATA_) COUNT_ {
+                            return RANGE_LEN.func(FIRST_ID.func(data, userdata), LAST_ID.func(data, userdata), userdata);
                         }
                         fn unusable(_: DATA_, _: USERDATA_) COUNT_ {
-                            assert_unreachable(@src(), "no `len` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
+                            assert_unreachable(@src(), "no `get_len` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
                         }
                     };
                     const SET_LEN = struct {
-                        const func: FN_SET_COUNT = if (CUSTOM.SET_LEN) |cust| cust //
-                            else if (ALLOW_DEFAULT) default else unusable;
-                        fn default(data: DATA_, new_len: COUNT_, _: USERDATA_) DATA_ {
-                            var new_data = data;
-                            if (comptime Types.type_is_struct(DATA_)) {
-                                if (comptime @hasField(DATA_, "items")) {
-                                    if (comptime @hasField(@FieldType(DATA_, "items"), "len")) {
-                                        new_data.items.len = @intCast(new_len);
-                                    } else {
-                                        unreachable;
-                                    }
-                                } else if (comptime @hasField(DATA_, "len")) {
-                                    new_data.len = @intCast(new_len);
-                                } else {
-                                    unreachable;
-                                }
-                            } else if (comptime Types.type_is_slice(DATA_)) {
-                                new_data.len = @intCast(new_len);
-                            } else {
-                                unreachable;
-                            }
-                            return new_data;
-                        }
+                        const func: FN_SET_COUNT = switch (SOLUTIONS[@intFromEnum(Recipes.PackageFlags.SET_LEN)]) {
+                            .UNAVAILABLE => unusable,
+                            .USER_PROVIDED => CUSTOM.SET_LEN.?,
+                            .INFERED_BY_RECIPE => |fn_tag| switch (fn_tag) {
+                                else => unreachable,
+                            },
+                        };
                         fn unusable(_: DATA_, _: COUNT_, _: USERDATA_) DATA_ {
                             assert_unreachable(@src(), "no `set_len` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
                         }
                     };
                     const GET_CAP = struct {
-                        const func: FN_IMPLICIT_COUNT = if (CUSTOM.GET_CAP) |cust| cust //
-                            else if (ALLOW_DEFAULT) default else unusable;
-                        fn default(data: DATA_, _: USERDATA_) COUNT_ {
-                            if (comptime Types.type_is_struct(DATA_)) {
-                                if (comptime @hasField(DATA_, "capacity")) {
-                                    return @intCast(data.capacity);
-                                } else if (comptime @hasField(DATA_, "cap")) {
-                                    return @intCast(data.cap);
-                                } else {
-                                    unreachable;
-                                }
-                            } else if (comptime Types.type_is_slice(DATA_)) {
-                                return @intCast(data.len);
-                            } else {
-                                unreachable;
-                            }
-                        }
+                        const func: FN_IMPLICIT_COUNT = switch (SOLUTIONS[@intFromEnum(Recipes.PackageFlags.GET_CAP)]) {
+                            .UNAVAILABLE => unusable,
+                            .USER_PROVIDED => CUSTOM.GET_CAP.?,
+                            .INFERED_BY_RECIPE => |fn_tag| switch (fn_tag) {
+                                else => unreachable,
+                            },
+                        };
                         fn unusable(_: DATA_, _: USERDATA_) COUNT_ {
                             assert_unreachable(@src(), "no `get_cap` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
                         }
                     };
                     const SET_CAP = struct {
-                        const func: FN_SET_COUNT = if (CUSTOM.SET_CAP) |cust| cust //
-                            else if (ALLOW_DEFAULT) default else unusable;
-                        fn default(data: DATA_, new_cap: COUNT_, _: USERDATA_) DATA_ {
-                            var new_data = data;
-                            if (comptime Types.type_is_struct(DATA_)) {
-                                if (comptime @hasField(DATA_, "capacity")) {
-                                    new_data.capacity = @intCast(new_cap);
-                                } else if (comptime @hasField(DATA_, "cap")) {
-                                    new_data.cap = @intCast(new_cap);
-                                } else {
-                                    unreachable;
-                                }
-                            } else if (comptime Types.type_is_slice(DATA_)) {
-                                new_data.len = @intCast(new_cap);
-                            } else {
-                                unreachable;
-                            }
-                            return new_data;
-                        }
+                        const func: FN_SET_COUNT = switch (SOLUTIONS[@intFromEnum(Recipes.PackageFlags.SET_CAP)]) {
+                            .UNAVAILABLE => unusable,
+                            .USER_PROVIDED => CUSTOM.SET_CAP.?,
+                            .INFERED_BY_RECIPE => |fn_tag| switch (fn_tag) {
+                                else => unreachable,
+                            },
+                        };
                         fn unusable(_: DATA_, _: COUNT_, _: USERDATA_) DATA_ {
                             assert_unreachable(@src(), "no `set_cap` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
                         }
                     };
                     const RANGE_LEN = struct {
-                        const func: FN_RANGE_COUNT = if (CUSTOM.RANGE_LEN) |cust| cust //
-                            else if (FLAGS.has(INFER.RANGE_LEN.FROM_LIMIT_LEN)) infer_limit //
-                            else if (FLAGS.has(INFER.RANGE_LEN.FROM_NEXT)) infer_next //
-                            else if (FLAGS.has(INFER.RANGE_LEN.FROM_PREV)) infer_prev //
-                            else if (ALLOW_DEFAULT) default else unusable;
-                        fn default(_: DATA_, first: ID_, last: ID_, _: USERDATA_) ID_ {
-                            return (last + 1) - first;
+                        const func: FN_RANGE_COUNT = switch (SOLUTIONS[@intFromEnum(Recipes.PackageFlags.RANGE_LEN)]) {
+                            .UNAVAILABLE => unusable,
+                            .USER_PROVIDED => CUSTOM.RANGE_LEN.?,
+                            .INFERED_BY_RECIPE => |fn_tag| switch (fn_tag) {
+                                .infer_native => infer_native,
+                                .infer_limit => infer_limit,
+                                .infer_next => infer_next,
+                                .infer_prev => infer_prev,
+                                else => unreachable,
+                            },
+                        };
+                        fn infer_native(_: DATA_, first: ID_, last: ID_, _: USERDATA_) COUNT_ {
+                            return @intCast((last + 1) - first);
                         }
                         fn infer_limit(data: DATA_, first: ID_, last: ID_, userdata: USERDATA_) COUNT_ {
-                            assert_valid_range(data, first, last, userdata, @src());
                             const limit_len = LIMIT_LEN.func(data, first, last, userdata);
                             return limit_len + 1;
                         }
                         fn infer_next(data: DATA_, first: ID_, last: ID_, userdata: USERDATA_) COUNT_ {
-                            assert_valid_range(data, first, last, userdata, @src());
                             if (ID_EQUALS.func(data, first, last, userdata)) return 1;
                             var n: COUNT_ = 1;
                             var i: ID_ = NEXT_ID.func(data, first, userdata);
