@@ -174,8 +174,8 @@ pub const InferFuncNames = enum {
     infer_oq,
     infer_lt,
     infer_gt,
-    infer_first_id_less_equal,
-    infer_first_id_greater_equal,
+    infer_first_last_id_less_equal,
+    infer_first_last_id_greater_equal,
     infer_nth_next,
     infer_last_prev,
     infer_next,
@@ -269,6 +269,9 @@ pub const RECIPES: []const InferEngine.RecipeList = &.{
         }),
     }),
     .recipe_list(.GET_RANGE_CONST_SLICE, &.{
+        .recipe(.infer_range, &.{
+            .depends_on(.GET_RANGE_SLICE),
+        }),
         .recipe(.infer_base_const_ptr, &.{
             .depends_on(.GET_BASE_CONST_PTR),
             // Classic indexing
@@ -435,12 +438,12 @@ pub const RECIPES: []const InferEngine.RecipeList = &.{
         .recipe(.infer_lt, &.{
             .depends_on(.LESS_THAN),
         }),
-        .recipe(.infer_lt_oq, &.{
-            .depends_on(.LESS_THAN),
+        .recipe(.infer_gt_oq, &.{
+            .depends_on(.GREATER_THAN),
             .depends_on(.ORDER_EQUALS),
         }),
-        .recipe(.infer_lt_eq, &.{
-            .depends_on(.LESS_THAN),
+        .recipe(.infer_gt_eq, &.{
+            .depends_on(.GREATER_THAN),
             .depends_on(.EXACT_EQUALS),
         }),
     }),
@@ -451,12 +454,12 @@ pub const RECIPES: []const InferEngine.RecipeList = &.{
         .recipe(.infer_gt, &.{
             .depends_on(.GREATER_THAN),
         }),
-        .recipe(.infer_gt_oq, &.{
-            .depends_on(.GREATER_THAN),
+        .recipe(.infer_lt_oq, &.{
+            .depends_on(.LESS_THAN),
             .depends_on(.ORDER_EQUALS),
         }),
-        .recipe(.infer_gt_eq, &.{
-            .depends_on(.GREATER_THAN),
+        .recipe(.infer_lt_eq, &.{
+            .depends_on(.LESS_THAN),
             .depends_on(.EXACT_EQUALS),
         }),
     }),
@@ -544,7 +547,7 @@ pub const RECIPES: []const InferEngine.RecipeList = &.{
             .depends_on(.ID_AFTER_LAST_IS_EQUAL_TO_LEN),
         }),
         .recipe(.infer_native_offset, &.{
-            .depends_on(.GET_LEN),
+            .depends_on(.LAST_ID),
             .depends_on(.FIRST_ID),
             // Classic offset indexing
             .depends_on(.ID_IS_INTEGER_TYPE_THAT_DIRECTLY_INDEXES_BASE_PTR),
@@ -552,21 +555,12 @@ pub const RECIPES: []const InferEngine.RecipeList = &.{
             .depends_on(.INCREASING_IDS_DIRECTLY_CORRESPOND_TO_INCREASING_ADDRESSES),
             .depends_on(.ID_AFTER_LAST_IS_EQUAL_TO_LEN),
         }),
-        .recipe(.infer_native_range, &.{
-            .depends_on(.LAST_ID),
-            .depends_on(.FIRST_ID),
-            // Classic offset indexing
-            .depends_on(.ID_IS_NUMERIC),
-            .depends_on(.ALL_ELEMENTS_IN_CONTIGUOUS_MEMORY_IN_ORDER),
-            .depends_on(.INCREASING_IDS_DIRECTLY_CORRESPOND_TO_INCREASING_ADDRESSES),
-            .depends_on(.ID_AFTER_LAST_IS_EQUAL_TO_LEN),
-        }),
-        .recipe(.infer_first_id_less_equal, &.{
+        .recipe(.infer_first_last_id_less_equal, &.{
             .depends_on(.LAST_ID),
             .depends_on(.FIRST_ID),
             .depends_on(.ID_LESS_THAN_OR_EQUAL),
         }),
-        .recipe(.infer_first_id_greater_equal, &.{
+        .recipe(.infer_first_last_id_greater_equal, &.{
             .depends_on(.LAST_ID),
             .depends_on(.FIRST_ID),
             .depends_on(.ID_GREATER_THAN_OR_EQUAL),

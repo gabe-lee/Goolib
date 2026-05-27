@@ -592,120 +592,142 @@ pub const DataManipulationCore = struct {
                         }
                     };
                     const SET_BASE_PTR = struct {
-                        //CHECKPOINT //FIXME implement new recipe solutions
-                        const func: FN_SET_BASE_PTR = if (CUSTOM.SET_BASE_PTR) |cust| cust //
-                            else unusable;
+                        const func: FN_SET_BASE_PTR = switch (SOLUTIONS[@intFromEnum(Recipes.PackageFlags.SET_BASE_PTR)]) {
+                            .UNAVAILABLE => unusable,
+                            .USER_PROVIDED => CUSTOM.SET_BASE_PTR.?,
+                            .INFERED_BY_RECIPE => |fn_tag| switch (fn_tag) {
+                                else => unreachable,
+                            },
+                        };
                         fn unusable(_: DATA_, _: [*]ELEM_, _: USERDATA_) DATA_ {
                             assert_unreachable(@src(), "no `set_base_ptr` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
                         }
                     };
                     const GET_RANGE_SLICE = struct {
-                        const func: FN_GET_SLICE = if (CUSTOM.GET_RANGE_SLICE) |cust| cust //
-                            else if (FLAGS.has(INFER.GET_RANGE_SLICE.FROM_BASE_PTR_CLASSIC_INDEX)) infer_base_classic //
-                            else if (FLAGS.has(INFER.GET_RANGE_SLICE.FROM_PTR_OFFSET_CLASSIC_INDEX)) infer_base_classic_offset //
-                            else unusable;
-                        fn infer_base_classic(data: DATA_, first: ID_, last: ID_, userdata: USERDATA_) []ELEM_ {
+                        const func: FN_GET_SLICE = switch (SOLUTIONS[@intFromEnum(Recipes.PackageFlags.GET_RANGE_SLICE)]) {
+                            .UNAVAILABLE => unusable,
+                            .USER_PROVIDED => CUSTOM.GET_RANGE_SLICE.?,
+                            .INFERED_BY_RECIPE => |fn_tag| switch (fn_tag) {
+                                .infer_base_ptr => infer_base_ptr,
+                                .infer_ptr => infer_ptr,
+                                else => unreachable,
+                            },
+                        };
+                        fn infer_base_ptr(data: DATA_, first: ID_, last: ID_, userdata: USERDATA_) []ELEM_ {
                             const base = GET_BASE_PTR.func(data, userdata);
                             return base[first .. last + 1];
                         }
-                        fn infer_base_classic_offset(data: DATA_, first: ID_, last: ID_, userdata: USERDATA_) []ELEM_ {
-                            const first_ptr: [*]ELEM_ = @ptrCast(GET_PTR.func(data, userdata));
-                            return first_ptr[0 .. (last + 1) - first];
+                        fn infer_ptr(data: DATA_, first: ID_, last: ID_, userdata: USERDATA_) []ELEM_ {
+                            const ptr: [*]ELEM_ = @ptrCast(GET_PTR.func(data, first, userdata));
+                            return ptr[0 .. (last + 1) - first];
                         }
                         fn unusable(_: DATA_, _: ID_, _: ID_, _: USERDATA_) []ELEM_ {
                             assert_unreachable(@src(), "no `get_range_slice` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
                         }
                     };
                     const GET_RANGE_CONST_SLICE = struct {
-                        const func: FN_GET_CONST_SLICE = if (CUSTOM.GET_RANGE_CONST_SLICE) |cust| cust //
-                            else if (FLAGS.has(INFER.GET_RANGE_CONST_SLICE.FROM_RANGE_SLICE)) infer_range //
-                            else if (FLAGS.has_any(&.{ INFER.GET_RANGE_CONST_SLICE.FROM_BASE_PTR_CLASSIC_INDEX, INFER.GET_RANGE_CONST_SLICE.FROM_BASE_CONST_PTR_CLASSIC_INDEX })) infer_base_classic //
-                            else if (FLAGS.has_any(&.{ INFER.GET_RANGE_CONST_SLICE.FROM_PTR_OFFSET_CLASSIC_INDEX, INFER.GET_RANGE_CONST_SLICE.FROM_CONST_PTR_OFFSET_CLASSIC_INDEX })) infer_base_classic_offset //
-                            else unusable;
+                        const func: FN_GET_CONST_SLICE = switch (SOLUTIONS[@intFromEnum(Recipes.PackageFlags.GET_RANGE_CONST_SLICE)]) {
+                            .UNAVAILABLE => unusable,
+                            .USER_PROVIDED => CUSTOM.GET_RANGE_CONST_SLICE.?,
+                            .INFERED_BY_RECIPE => |fn_tag| switch (fn_tag) {
+                                .infer_range => infer_range,
+                                .infer_base_const_ptr => infer_base_const_ptr,
+                                .infer_const_ptr => infer_const_ptr,
+                                else => unreachable,
+                            },
+                        };
                         fn infer_range(data: DATA_, first: ID_, last: ID_, userdata: USERDATA_) []const ELEM_ {
                             return GET_RANGE_SLICE.func(data, first, last, userdata);
                         }
-                        fn infer_base_classic(data: DATA_, first: ID_, last: ID_, userdata: USERDATA_) []const ELEM_ {
-                            const base = GET_BASE_CONST_PTR.func(data, userdata);
+                        fn infer_base_const_ptr(data: DATA_, first: ID_, last: ID_, userdata: USERDATA_) []const ELEM_ {
+                            const base = GET_BASE_PTR.func(data, userdata);
                             return base[first .. last + 1];
                         }
-                        fn infer_base_classic_offset(data: DATA_, first: ID_, last: ID_, userdata: USERDATA_) []const ELEM_ {
-                            const first_ptr: [*]const ELEM_ = @ptrCast(GET_CONST_PTR.func(data, userdata));
-                            return first_ptr[0 .. (last + 1) - first];
+                        fn infer_const_ptr(data: DATA_, first: ID_, last: ID_, userdata: USERDATA_) []const ELEM_ {
+                            const ptr: [*]ELEM_ = @ptrCast(GET_PTR.func(data, first, userdata));
+                            return ptr[0 .. (last + 1) - first];
                         }
                         fn unusable(_: DATA_, _: ID_, _: ID_, _: USERDATA_) []const ELEM_ {
                             assert_unreachable(@src(), "no `get_range_const_slice` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
                         }
                     };
                     const INVALID_ID_AFTER = struct {
-                        const func: FN_IMPLICIT_ID = if (CUSTOM.INVALID_ID_AFTER_LAST_ID) |cust| cust //
-                            else if (ALLOW_DEFAULT) default else unusable;
-                        fn default(data: DATA_, userdata: USERDATA_) ID_ {
+                        const func: FN_IMPLICIT_ID = switch (SOLUTIONS[@intFromEnum(Recipes.PackageFlags.INVALID_ID_AFTER_LAST_ID)]) {
+                            .UNAVAILABLE => unusable,
+                            .USER_PROVIDED => CUSTOM.INVALID_ID_AFTER_LAST_ID.?,
+                            .INFERED_BY_RECIPE => |fn_tag| switch (fn_tag) {
+                                .infer_native_last => infer_native_last,
+                                .infer_native_len => infer_native_len,
+                                else => unreachable,
+                            },
+                        };
+                        fn infer_native_len(data: DATA_, userdata: USERDATA_) ID_ {
                             return @intCast(GET_LEN.func(data, userdata));
                         }
+                        fn infer_native_last(data: DATA_, userdata: USERDATA_) ID_ {
+                            return @intCast(LAST_ID.func(data, userdata) + 1);
+                        }
                         fn unusable(_: DATA_, _: USERDATA_) bool {
-                            assert_unreachable(@src(), "no `invalid_id_after` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
+                            assert_unreachable(@src(), "no `invalid_id_after_last_id` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
                         }
                     };
                     const INVALID_ID_BEFORE = struct {
-                        const func: FN_IMPLICIT_ID = if (CUSTOM.INVALID_ID_BEFORE_FIRST_ID) |cust| cust //
-                            else if (ALLOW_DEFAULT) default else unusable;
-                        fn default(_: DATA_, _: USERDATA_) ID_ {
+                        const func: FN_IMPLICIT_ID = switch (SOLUTIONS[@intFromEnum(Recipes.PackageFlags.INVALID_ID_BEFORE_FIRST_ID)]) {
+                            .UNAVAILABLE => unusable,
+                            .USER_PROVIDED => CUSTOM.INVALID_ID_BEFORE_FIRST_ID.?,
+                            .INFERED_BY_RECIPE => |fn_tag| switch (fn_tag) {
+                                .infer_native => infer_native,
+                                .infer_native_offset => infer_native_offset,
+                                else => unreachable,
+                            },
+                        };
+                        fn infer_native(_: DATA_, _: USERDATA_) ID_ {
                             return @intCast(math.maxInt(COUNT_));
                         }
+                        fn infer_native_offset(data: DATA_, userdata: USERDATA_) ID_ {
+                            return @intCast(FIRST_ID.func(data, userdata) -% 1);
+                        }
                         fn unusable(_: DATA_, _: USERDATA_) bool {
-                            assert_unreachable(@src(), "no `invalid_id_before` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
+                            assert_unreachable(@src(), "no `invalid_id_before_first_id` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
                         }
                     };
                     const ID_VALID = struct {
-                        const func: FN_ID_CHECK = if (CUSTOM.VALID_ID) |cust| cust //
-                            else if (FLAGS.has(INFER.VALID_ID.FROM_FIRST_LAST_LTEQ)) infer_lteq //
-                            else if (FLAGS.has(INFER.VALID_ID.FROM_FIRST_LAST_GTEQ)) infer_gteq //
-                            else if (FLAGS.has(INFER.VALID_ID.FROM_FIRST_LAST_LT_EQ)) infer_lt_eq //
-                            else if (FLAGS.has(INFER.VALID_ID.FROM_FIRST_LAST_GT_EQ)) infer_gt_eq //
-                            else if (ALLOW_DEFAULT) default else unusable;
+                        const func: FN_IMPLICIT_ID = switch (SOLUTIONS[@intFromEnum(Recipes.PackageFlags.VALID_ID)]) {
+                            .UNAVAILABLE => unusable,
+                            .USER_PROVIDED => CUSTOM.VALID_ID.?,
+                            .INFERED_BY_RECIPE => |fn_tag| switch (fn_tag) {
+                                .infer_native => infer_native,
+                                .infer_native_offset => infer_native_offset,
+                                .infer_first_last_id_less_equal => infer_first_last_id_less_equal,
+                                .infer_first_last_id_greater_equal => infer_first_last_id_greater_equal,
+                                else => unreachable,
+                            },
+                        };
                         fn default(data: DATA_, id: ID_, userdata: USERDATA_) bool {
                             return 0 <= id and id < GET_LEN.func(data, userdata);
                         }
-                        fn infer_lteq(data: DATA_, id: ID_, userdata: USERDATA_) bool {
-                            const LTEQ = ID_LESS_THAN_OR_EQUAL.func;
-                            const FIRST = FIRST_ID.func;
-                            const LAST = LAST_ID.func;
-                            const first = FIRST(data, userdata);
-                            const last = LAST(data, userdata);
-                            return LTEQ(data, first, id, userdata) and LTEQ(data, id, last, userdata);
+                        fn infer_native(data: DATA_, id: ID_, userdata: USERDATA_) bool {
+                            return 0 <= id and id < GET_LEN.func(data, userdata);
                         }
-                        fn infer_gteq(data: DATA_, id: ID_, userdata: USERDATA_) bool {
-                            const GTEQ = ID_GREATER_THAN_OR_EQUAL.func;
-                            const FIRST = FIRST_ID.func;
-                            const LAST = LAST_ID.func;
-                            const first = FIRST(data, userdata);
-                            const last = LAST(data, userdata);
-                            return GTEQ(data, id, first, userdata) and GTEQ(data, last, id, userdata);
+                        fn infer_native_offset(data: DATA_, id: ID_, userdata: USERDATA_) bool {
+                            const first = FIRST_ID.func(data, userdata);
+                            const last = LAST_ID.func(data, userdata);
+                            return first <= id and id <= last;
                         }
-                        fn infer_lt_eq(data: DATA_, id: ID_, userdata: USERDATA_) bool {
-                            const LT = ID_LESS_THAN.func;
-                            const EQ = ID_EQUALS.func;
-                            const FIRST = FIRST_ID.func;
-                            const LAST = LAST_ID.func;
-                            const first = FIRST(data, userdata);
-                            const last = LAST(data, userdata);
-                            return (LT(data, first, id, userdata) or (EQ(data, first, id, userdata))) and (LT(data, id, last, userdata) or EQ(data, id, last, userdata));
+                        fn infer_first_last_id_less_equal(data: DATA_, id: ID_, userdata: USERDATA_) bool {
+                            const first = FIRST_ID.func(data, userdata);
+                            const last = LAST_ID.func(data, userdata);
+                            return ID_LESS_THAN_OR_EQUAL.func(data, first, id, userdata) and ID_LESS_THAN_OR_EQUAL.func(data, id, last, userdata);
                         }
-                        fn infer_gt_eq(data: DATA_, id: ID_, userdata: USERDATA_) bool {
-                            const GT = ID_GREATER_THAN.func;
-                            const EQ = ID_EQUALS.func;
-                            const FIRST = FIRST_ID.func;
-                            const LAST = LAST_ID.func;
-                            const first = FIRST(data, userdata);
-                            const last = LAST(data, userdata);
-                            return (GT(data, id, first, userdata) or (EQ(data, first, id, userdata))) and (GT(data, last, id, userdata) or EQ(data, id, last, userdata));
+                        fn infer_first_last_id_greater_equal(data: DATA_, id: ID_, userdata: USERDATA_) bool {
+                            const first = FIRST_ID.func(data, userdata);
+                            const last = LAST_ID.func(data, userdata);
+                            return ID_GREATER_THAN_OR_EQUAL.func(data, id, first, userdata) and ID_GREATER_THAN_OR_EQUAL.func(data, last, id, userdata);
                         }
                         fn unusable(_: DATA_, _: ID_, _: USERDATA_) bool {
                             assert_unreachable(@src(), "no `valid_id` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
                         }
                     };
-
                     fn assert_valid_id(data: DATA_, id: ID_, userdata: USERDATA_, comptime src: SourceLocation) void {
                         const VALID = ID_VALID.func;
                         assert_with_reason(VALID(data, id, userdata), src, "id `{any}` is not valid for the current data structure state", .{id});
@@ -716,146 +738,174 @@ pub const DataManipulationCore = struct {
                         assert_with_reason(ID_LESS_THAN_OR_EQUAL.func(data, first, last, userdata), src, "first id `{any}` was not before or equal to last id `{any}`", .{ first, last });
                     }
                     const ID_LESS_THAN = struct {
-                        const T_FN = @TypeOf(default);
-                        const func: FN_ID_COMPARE = if (CUSTOM.ID_LESS_THAN) |cust| cust //
-                            else if (FLAGS.has(INFER.ID_LT.FROM_GTEQ)) infer_gteq //
-                            else if (FLAGS.has(INFER.ID_LT.FROM_GT_EQ)) infer_gt_eq //
-                            else if (ALLOW_DEFAULT) default else unusable;
-                        fn default(_: DATA_, id_a: ID_, id_b: ID_, _: USERDATA_) bool {
+                        const func: FN_ID_COMPARE = switch (SOLUTIONS[@intFromEnum(Recipes.PackageFlags.ID_LESS_THAN)]) {
+                            .UNAVAILABLE => unusable,
+                            .USER_PROVIDED => CUSTOM.ID_LESS_THAN.?,
+                            .INFERED_BY_RECIPE => |fn_tag| switch (fn_tag) {
+                                .infer_native => infer_native,
+                                .infer_gteq => infer_gteq,
+                                .infer_gt_eq => infer_gt_eq,
+                                else => unreachable,
+                            },
+                        };
+                        fn infer_native(_: DATA_, id_a: ID_, id_b: ID_, _: USERDATA_) bool {
                             return id_a < id_b;
                         }
                         fn infer_gteq(data: DATA_, id_a: ID_, id_b: ID_, userdata: USERDATA_) bool {
-                            const GTEQ = ID_GREATER_THAN_OR_EQUAL.func;
-                            return !GTEQ(data, id_a, id_b, userdata);
+                            return !ID_GREATER_THAN_OR_EQUAL.func(data, id_a, id_b, userdata);
                         }
                         fn infer_gt_eq(data: DATA_, id_a: ID_, id_b: ID_, userdata: USERDATA_) bool {
-                            const GT = ID_GREATER_THAN.func;
-                            const EQ = ID_EQUALS.func;
-                            return !GT(data, id_a, id_b, userdata) and !EQ(data, id_a, id_b, userdata);
+                            return !ID_GREATER_THAN.func(data, id_a, id_b, userdata) and !ID_EQUALS.func(data, id_a, id_b, userdata);
                         }
                         fn unusable(_: DATA_, _: ID_, _: ID_, _: USERDATA_) bool {
-                            assert_unreachable(@src(), "no `id_a less than id_b` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
+                            assert_unreachable(@src(), "no `id_less_than` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
                         }
                     };
                     const ID_LESS_THAN_OR_EQUAL = struct {
-                        const func: FN_ID_COMPARE = if (CUSTOM.ID_LESS_THAN_OR_EQUAL) |cust| cust //
-                            else if (FLAGS.has(INFER.ID_LTEQ.FROM_GT)) infer_gt //
-                            else if (FLAGS.has(INFER.ID_LTEQ.FROM_LT_EQ)) infer_lt_eq //
-                            else if (ALLOW_DEFAULT) default else unusable;
-                        fn default(_: DATA_, id_a: ID_, id_b: ID_, _: USERDATA_) bool {
+                        const func: FN_ID_COMPARE = switch (SOLUTIONS[@intFromEnum(Recipes.PackageFlags.ID_LESS_THAN_OR_EQUAL)]) {
+                            .UNAVAILABLE => unusable,
+                            .USER_PROVIDED => CUSTOM.ID_LESS_THAN_OR_EQUAL.?,
+                            .INFERED_BY_RECIPE => |fn_tag| switch (fn_tag) {
+                                .infer_native => infer_native,
+                                .infer_gt => infer_gt,
+                                .infer_lt_eq => infer_lt_eq,
+                                else => unreachable,
+                            },
+                        };
+                        fn infer_native(_: DATA_, id_a: ID_, id_b: ID_, _: USERDATA_) bool {
                             return id_a <= id_b;
                         }
                         fn infer_gt(data: DATA_, id_a: ID_, id_b: ID_, userdata: USERDATA_) bool {
-                            const GT = ID_GREATER_THAN.func;
-                            return !GT(data, id_a, id_b, userdata);
+                            return !ID_GREATER_THAN.func(data, id_a, id_b, userdata);
                         }
                         fn infer_lt_eq(data: DATA_, id_a: ID_, id_b: ID_, userdata: USERDATA_) bool {
-                            const LT = ID_LESS_THAN.func;
-                            const EQ = ID_EQUALS.func;
-                            return LT(data, id_a, id_b, userdata) or EQ(data, id_a, id_b, userdata);
+                            return ID_LESS_THAN.func(data, id_a, id_b, userdata) or ID_EQUALS.func(data, id_a, id_b, userdata);
                         }
                         fn unusable(_: DATA_, _: ID_, _: ID_, _: USERDATA_) ELEM_ {
-                            assert_unreachable(@src(), "no `id_a less than or equal id_b` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
+                            assert_unreachable(@src(), "no `id_less_than_or_equal` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
                         }
                     };
                     const ID_GREATER_THAN = struct {
-                        const func: FN_ID_COMPARE = if (CUSTOM.ID_GREATER_THAN) |cust| cust //
-                            else if (FLAGS.has(INFER.ID_GT.FROM_LTEQ)) infer_lteq //
-                            else if (FLAGS.has(INFER.ID_GT.FROM_LT_EQ)) infer_lt_eq //
-                            else if (ALLOW_DEFAULT) default else unusable;
-                        fn default(_: DATA_, id_a: ID_, id_b: ID_, _: USERDATA_) bool {
+                        const func: FN_ID_COMPARE = switch (SOLUTIONS[@intFromEnum(Recipes.PackageFlags.ID_GREATER_THAN)]) {
+                            .UNAVAILABLE => unusable,
+                            .USER_PROVIDED => CUSTOM.ID_GREATER_THAN.?,
+                            .INFERED_BY_RECIPE => |fn_tag| switch (fn_tag) {
+                                .infer_native => infer_native,
+                                .infer_lteq => infer_lteq,
+                                .infer_lt_eq => infer_lt_eq,
+                                else => unreachable,
+                            },
+                        };
+                        fn infer_native(_: DATA_, id_a: ID_, id_b: ID_, _: USERDATA_) bool {
                             return id_a > id_b;
                         }
                         fn infer_lteq(data: DATA_, id_a: ID_, id_b: ID_, userdata: USERDATA_) bool {
-                            const LTEQ = ID_LESS_THAN_OR_EQUAL.func;
-                            return !LTEQ(data, id_a, id_b, userdata);
+                            return !ID_LESS_THAN_OR_EQUAL.func(data, id_a, id_b, userdata);
                         }
                         fn infer_lt_eq(data: DATA_, id_a: ID_, id_b: ID_, userdata: USERDATA_) bool {
-                            const LT = ID_LESS_THAN.func;
-                            const EQ = ID_EQUALS.func;
-                            return !LT(data, id_a, id_b, userdata) and !EQ(data, id_a, id_b, userdata);
+                            return !ID_LESS_THAN.func(data, id_a, id_b, userdata) and !ID_EQUALS.func(data, id_a, id_b, userdata);
                         }
                         fn unusable(_: DATA_, _: ID_, _: ID_, _: USERDATA_) ELEM_ {
-                            assert_unreachable(@src(), "no `id_a greater than id_b` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
+                            assert_unreachable(@src(), "no `id_greater_than` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
                         }
                     };
                     const ID_GREATER_THAN_OR_EQUAL = struct {
-                        const func: FN_ID_COMPARE = if (CUSTOM.ID_GREATER_THAN_OR_EQUAL) |cust| cust //
-                            else if (FLAGS.has(INFER.ID_GTEQ.FROM_LT)) infer_lt //
-                            else if (FLAGS.has(INFER.ID_GTEQ.FROM_GT_EQ)) infer_gt_eq //
-                            else if (ALLOW_DEFAULT) default else unusable;
-                        fn default(_: DATA_, id_a: ID_, id_b: ID_, _: USERDATA_) bool {
+                        const func: FN_ID_COMPARE = switch (SOLUTIONS[@intFromEnum(Recipes.PackageFlags.ID_GREATER_THAN_OR_EQUAL)]) {
+                            .UNAVAILABLE => unusable,
+                            .USER_PROVIDED => CUSTOM.ID_GREATER_THAN_OR_EQUAL.?,
+                            .INFERED_BY_RECIPE => |fn_tag| switch (fn_tag) {
+                                .infer_native => infer_native,
+                                .infer_lt => infer_lt,
+                                .infer_gt_eq => infer_gt_eq,
+                                else => unreachable,
+                            },
+                        };
+                        fn infer_native(_: DATA_, id_a: ID_, id_b: ID_, _: USERDATA_) bool {
                             return id_a >= id_b;
                         }
                         fn infer_lt(data: DATA_, id_a: ID_, id_b: ID_, userdata: USERDATA_) bool {
-                            const LT = ID_LESS_THAN.func;
-                            return !LT(data, id_a, id_b, userdata);
+                            return !ID_LESS_THAN.func(data, id_a, id_b, userdata);
                         }
                         fn infer_gt_eq(data: DATA_, id_a: ID_, id_b: ID_, userdata: USERDATA_) bool {
-                            const GT = ID_GREATER_THAN.func;
-                            const EQ = ID_EQUALS.func;
-                            return GT(data, id_a, id_b, userdata) or EQ(data, id_a, id_b, userdata);
+                            return ID_GREATER_THAN.func(data, id_a, id_b, userdata) or ID_EQUALS.func(data, id_a, id_b, userdata);
                         }
                         fn unusable(_: DATA_, _: ID_, _: ID_, _: USERDATA_) ELEM_ {
-                            assert_unreachable(@src(), "no `id_a greater than or equal id_b` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
+                            assert_unreachable(@src(), "no `id_greater_than_or_equal` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
                         }
                     };
                     const ID_EQUALS = struct {
-                        const func: FN_ID_COMPARE = if (CUSTOM.ID_EQUALS) |cust| cust //
-                            else if (FLAGS.has(INFER.ID_EQ.FROM_GT_LT)) infer_gt_lt //
-                            else if (ALLOW_DEFAULT) default else unusable;
-                        fn default(_: DATA_, id_a: ID_, id_b: ID_, _: USERDATA_) bool {
+                        const func: FN_ID_COMPARE = switch (SOLUTIONS[@intFromEnum(Recipes.PackageFlags.ID_EQUALS)]) {
+                            .UNAVAILABLE => unusable,
+                            .USER_PROVIDED => CUSTOM.ID_EQUALS.?,
+                            .INFERED_BY_RECIPE => |fn_tag| switch (fn_tag) {
+                                .infer_native => infer_native,
+                                .infer_gt_lt => infer_gt_lt,
+                                else => unreachable,
+                            },
+                        };
+                        fn infer_native(_: DATA_, id_a: ID_, id_b: ID_, _: USERDATA_) bool {
                             return id_a == id_b;
                         }
                         fn infer_gt_lt(data: DATA_, id_a: ID_, id_b: ID_, userdata: USERDATA_) bool {
-                            const GT = ID_GREATER_THAN.func;
-                            const LT = ID_LESS_THAN.func;
-                            return !GT(data, id_a, id_b, userdata) and !LT(data, id_a, id_b, userdata);
+                            return !ID_GREATER_THAN.func(data, id_a, id_b, userdata) and !ID_LESS_THAN.func(data, id_a, id_b, userdata);
                         }
                         fn unusable(_: DATA_, _: ID_, _: ID_, _: USERDATA_) ELEM_ {
                             assert_unreachable(@src(), "no `id_a less than or equal id_b` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
                         }
                     };
                     const FIRST_CHILD_ID = struct {
-                        const func: FN_CHILD_ID_WITH_COUNT = if (CUSTOM.FIRST_CHILD_ID) |cust| cust //
-                            else if (FLAGS.has(INFER.FIRST_CHILD_ID.FROM_NTH_CHILD_ID)) infer_nth //
-                            else if (ALLOW_DEFAULT) default else unusable;
-                        fn infer_nth(data: DATA_, id: ID_, exact_num_children_per_element: COUNT_, userdata: USERDATA_) ID_ {
-                            return NTH_CHILD_ID.func(data, id, exact_num_children_per_element, 0, userdata);
-                        }
-                        fn default(data: DATA_, id: ID_, exact_num_children_per_element: COUNT_, userdata: USERDATA_) ID_ {
+                        const func: FN_CHILD_ID_WITH_COUNT = switch (SOLUTIONS[@intFromEnum(Recipes.PackageFlags.FIRST_CHILD_ID)]) {
+                            .UNAVAILABLE => unusable,
+                            .USER_PROVIDED => CUSTOM.FIRST_CHILD_ID.?,
+                            .INFERED_BY_RECIPE => |fn_tag| switch (fn_tag) {
+                                .infer_nth_child => infer_nth_child,
+                                else => unreachable,
+                            },
+                        };
+                        fn infer_nth_child(data: DATA_, id: ID_, exact_num_children_per_element: COUNT_, userdata: USERDATA_) ID_ {
                             assert_valid_id(data, id, userdata, @src());
-                            const id_n = LIMIT_LEN.func(data, FIRST_ID.func(data, userdata), id, userdata);
-                            const child_n = nth_child_of_n_ary_flat_array_tree(id_n, exact_num_children_per_element, 1);
-                            return NTH_FROM_START.func(data, child_n, userdata);
+                            return NTH_CHILD_ID.func(data, id, exact_num_children_per_element, 0, userdata);
                         }
                         fn unusable(_: DATA_, _: ID_, _: COUNT_, _: USERDATA_) ID_ {
                             assert_unreachable(@src(), "no `first_child_id` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
                         }
                     };
                     const LAST_CHILD_ID = struct {
-                        const func: FN_CHILD_ID_WITH_COUNT = if (CUSTOM.FIRST_CHILD_ID) |cust| cust //
-                            else if (FLAGS.has(INFER.LAST_CHILD_ID.FROM_NTH_CHILD_ID)) infer_nth //
-                            else if (ALLOW_DEFAULT) default else unusable;
-                        fn infer_nth(data: DATA_, id: ID_, exact_num_children_per_element: COUNT_, userdata: USERDATA_) ID_ {
-                            return NTH_CHILD_ID.func(data, id, exact_num_children_per_element, exact_num_children_per_element - 1, userdata);
-                        }
-                        fn default(data: DATA_, id: ID_, exact_num_children_per_element: COUNT_, userdata: USERDATA_) ID_ {
+                        const func: FN_CHILD_ID_WITH_COUNT = switch (SOLUTIONS[@intFromEnum(Recipes.PackageFlags.LAST_CHILD_ID)]) {
+                            .UNAVAILABLE => unusable,
+                            .USER_PROVIDED => CUSTOM.LAST_CHILD_ID.?,
+                            .INFERED_BY_RECIPE => |fn_tag| switch (fn_tag) {
+                                .infer_nth_child => infer_nth_child,
+                                else => unreachable,
+                            },
+                        };
+                        fn infer_nth_child(data: DATA_, id: ID_, exact_num_children_per_element: COUNT_, userdata: USERDATA_) ID_ {
                             assert_valid_id(data, id, userdata, @src());
-                            const id_n = LIMIT_LEN.func(data, FIRST_ID.func(data, userdata), id, userdata);
-                            const child_n = nth_child_of_n_ary_flat_array_tree(id_n, exact_num_children_per_element, exact_num_children_per_element);
-                            return NTH_FROM_START.func(data, child_n, userdata);
+                            return NTH_CHILD_ID.func(data, id, exact_num_children_per_element, exact_num_children_per_element - 1, userdata);
                         }
                         fn unusable(_: DATA_, _: ID_, _: COUNT_, _: USERDATA_) ID_ {
                             assert_unreachable(@src(), "no `last_child_id` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
                         }
                     };
                     const NTH_CHILD_ID = struct {
-                        const func: FN_NTH_CHILD_ID_WITH_COUNT = if (CUSTOM.FIRST_CHILD_ID) |cust| cust //
-                            else if (ALLOW_DEFAULT) default else unusable;
-                        fn default(data: DATA_, id: ID_, nth_child: COUNT_, exact_num_children_per_element: COUNT_, userdata: USERDATA_) ID_ {
+                        const func: FN_NTH_CHILD_ID_WITH_COUNT = switch (SOLUTIONS[@intFromEnum(Recipes.PackageFlags.NTH_CHILD_ID)]) {
+                            .UNAVAILABLE => unusable,
+                            .USER_PROVIDED => CUSTOM.NTH_CHILD_ID.?,
+                            .INFERED_BY_RECIPE => |fn_tag| switch (fn_tag) {
+                                .infer_native => infer_native,
+                                .infer_native_offset => infer_native_offset,
+                                else => unreachable,
+                            },
+                        };
+                        fn infer_native_offset(data: DATA_, id: ID_, nth_child: COUNT_, exact_num_children_per_element: COUNT_, userdata: USERDATA_) ID_ {
                             assert_valid_id(data, id, userdata, @src());
                             const id_n = LIMIT_LEN.func(data, FIRST_ID.func(data, userdata), id, userdata);
+                            const child_n = nth_child_of_n_ary_flat_array_tree(id_n, exact_num_children_per_element, nth_child + 1);
+                            return NTH_FROM_START.func(data, child_n, userdata);
+                        }
+                        fn infer_native(data: DATA_, id: ID_, nth_child: COUNT_, exact_num_children_per_element: COUNT_, userdata: USERDATA_) ID_ {
+                            assert_valid_id(data, id, userdata, @src());
+                            const id_n = id;
                             const child_n = nth_child_of_n_ary_flat_array_tree(id_n, exact_num_children_per_element, nth_child + 1);
                             return NTH_FROM_START.func(data, child_n, userdata);
                         }
@@ -864,11 +914,24 @@ pub const DataManipulationCore = struct {
                         }
                     };
                     const PARENT_ID = struct {
-                        const func: FN_CHILD_ID_WITH_COUNT = if (CUSTOM.PARENT_ID) |cust| cust //
-                            else if (ALLOW_DEFAULT) default else unusable;
-                        fn default(data: DATA_, id: ID_, exact_num_children_per_element: COUNT_, userdata: USERDATA_) ID_ {
+                        const func: FN_CHILD_ID_WITH_COUNT = switch (SOLUTIONS[@intFromEnum(Recipes.PackageFlags.PARENT_ID)]) {
+                            .UNAVAILABLE => unusable,
+                            .USER_PROVIDED => CUSTOM.PARENT_ID.?,
+                            .INFERED_BY_RECIPE => |fn_tag| switch (fn_tag) {
+                                .infer_native => infer_native,
+                                .infer_native_offset => infer_native_offset,
+                                else => unreachable,
+                            },
+                        };
+                        fn infer_native_offset(data: DATA_, id: ID_, exact_num_children_per_element: COUNT_, userdata: USERDATA_) ID_ {
                             assert_valid_id(data, id, userdata, @src());
                             const child_n = LIMIT_LEN.func(data, FIRST_ID.func(data, userdata), id, userdata);
+                            const parent_n = parent_of_n_ary_flat_array_tree(child_n, exact_num_children_per_element);
+                            return NTH_FROM_START.func(data, parent_n, userdata);
+                        }
+                        fn infer_native(data: DATA_, id: ID_, exact_num_children_per_element: COUNT_, userdata: USERDATA_) ID_ {
+                            assert_valid_id(data, id, userdata, @src());
+                            const child_n = id;
                             const parent_n = parent_of_n_ary_flat_array_tree(child_n, exact_num_children_per_element);
                             return NTH_FROM_START.func(data, parent_n, userdata);
                         }
@@ -877,12 +940,24 @@ pub const DataManipulationCore = struct {
                         }
                     };
                     const GET = struct {
-                        const func: FN_GET = if (CUSTOM.GET) |cust| cust //
-                            else if (FLAGS.has(INFER.GET.FROM_PTR)) infer_ptr //
-                            else if (FLAGS.has(INFER.GET.FROM_CONST_PTR)) infer_const_ptr //
-                            else if (ALLOW_DEFAULT) default else unusable;
-                        fn default(data: DATA_, id: ID_, userdata: USERDATA_) ELEM_ {
+                        const func: FN_GET = switch (SOLUTIONS[@intFromEnum(Recipes.PackageFlags.GET)]) {
+                            .UNAVAILABLE => unusable,
+                            .USER_PROVIDED => CUSTOM.GET.?,
+                            .INFERED_BY_RECIPE => |fn_tag| switch (fn_tag) {
+                                .infer_const_ptr => infer_const_ptr,
+                                .infer_ptr => infer_ptr,
+                                .infer_base_const_ptr => infer_base_const_ptr,
+                                .infer_base_ptr => infer_base_ptr,
+                                else => unreachable,
+                            },
+                        };
+                        fn infer_base_const_ptr(data: DATA_, id: ID_, userdata: USERDATA_) ELEM_ {
+                            assert_valid_id(data, id, userdata, @src());
                             return GET_BASE_CONST_PTR.func(data, userdata)[id];
+                        }
+                        fn infer_base_ptr(data: DATA_, id: ID_, userdata: USERDATA_) ELEM_ {
+                            assert_valid_id(data, id, userdata, @src());
+                            return GET_BASE_PTR.func(data, userdata)[id];
                         }
                         fn infer_ptr(data: DATA_, id: ID_, userdata: USERDATA_) ELEM_ {
                             assert_valid_id(data, id, userdata, @src());
@@ -897,10 +972,16 @@ pub const DataManipulationCore = struct {
                         }
                     };
                     const GET_PTR = struct {
-                        const func: FN_GET_PTR = if (CUSTOM.GET_PTR) |cust| cust //
-                            else if (ALLOW_DEFAULT) default else unusable;
-                        const T_FN_GET_PTR = @TypeOf(default);
-                        fn default(data: DATA_, id: ID_, userdata: USERDATA_) *ELEM_ {
+                        const func: FN_GET_PTR = switch (SOLUTIONS[@intFromEnum(Recipes.PackageFlags.GET_PTR)]) {
+                            .UNAVAILABLE => unusable,
+                            .USER_PROVIDED => CUSTOM.GET_PTR.?,
+                            .INFERED_BY_RECIPE => |fn_tag| switch (fn_tag) {
+                                .infer_base_ptr => infer_base_ptr,
+                                else => unreachable,
+                            },
+                        };
+                        fn infer_base_ptr(data: DATA_, id: ID_, userdata: USERDATA_) *ELEM_ {
+                            assert_valid_id(data, id, userdata, @src());
                             return &GET_BASE_PTR.func(data, userdata)[id];
                         }
                         fn unusable(_: DATA_, _: ID_, _: USERDATA_) *ELEM_ {
@@ -908,32 +989,51 @@ pub const DataManipulationCore = struct {
                         }
                     };
                     const GET_CONST_PTR = struct {
-                        const func: FN_GET_CONST_PTR = if (CUSTOM.GET_CONST_PTR) |cust| cust //
-                            else if (FLAGS.has(INFER.CONST_PTR.FROM_PTR)) infer_ptr //
-                            else if (ALLOW_DEFAULT) default else unusable;
-                        fn default(data: DATA_, id: ID_, userdata: USERDATA_) *const ELEM_ {
+                        const func: FN_GET_CONST_PTR = switch (SOLUTIONS[@intFromEnum(Recipes.PackageFlags.GET_CONST_PTR)]) {
+                            .UNAVAILABLE => unusable,
+                            .USER_PROVIDED => CUSTOM.GET_CONST_PTR.?,
+                            .INFERED_BY_RECIPE => |fn_tag| switch (fn_tag) {
+                                .infer_ptr => infer_ptr,
+                                .infer_base_const_ptr => infer_base_const_ptr,
+                                .infer_base_ptr => infer_base_ptr,
+                                else => unreachable,
+                            },
+                        };
+                        fn infer_base_const_ptr(data: DATA_, id: ID_, userdata: USERDATA_) *const ELEM_ {
+                            assert_valid_id(data, id, userdata, @src());
                             return &GET_BASE_CONST_PTR.func(data, userdata)[id];
+                        }
+                        fn infer_base_ptr(data: DATA_, id: ID_, userdata: USERDATA_) *const ELEM_ {
+                            assert_valid_id(data, id, userdata, @src());
+                            return &GET_BASE_PTR.func(data, userdata)[id];
                         }
                         fn infer_ptr(data: DATA_, id: ID_, userdata: USERDATA_) *const ELEM_ {
                             assert_valid_id(data, id, userdata, @src());
-                            return CUSTOM.GET_PTR.?(data, id, userdata);
+                            return GET_PTR.func(data, id, userdata);
                         }
                         fn unusable(_: DATA_, _: ID_, _: USERDATA_) *const ELEM_ {
                             assert_unreachable(@src(), "no `get_const_ptr` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
                         }
                     };
                     const SET = struct {
-                        const func: FN_SET = if (CUSTOM.SET) |cust| cust //
-                            else if (FLAGS.has(INFER.SET.FROM_PTR)) infer_ptr //
-                            else if (ALLOW_DEFAULT) default else unusable;
-                        fn default(data: DATA_, id: ID_, val: ELEM_, userdata: USERDATA_) DATA_ {
+                        const func: FN_SET = switch (SOLUTIONS[@intFromEnum(Recipes.PackageFlags.SET)]) {
+                            .UNAVAILABLE => unusable,
+                            .USER_PROVIDED => CUSTOM.SET.?,
+                            .INFERED_BY_RECIPE => |fn_tag| switch (fn_tag) {
+                                .infer_ptr => infer_ptr,
+                                .infer_base_ptr => infer_base_ptr,
+                                else => unreachable,
+                            },
+                        };
+                        fn infer_base_ptr(data: DATA_, id: ID_, val: ELEM_, userdata: USERDATA_) DATA_ {
+                            assert_valid_id(data, id, userdata, @src());
                             const new_data = data;
                             GET_BASE_PTR.func(new_data, userdata)[id] = val;
                             return new_data;
                         }
                         fn infer_ptr(data: DATA_, id: ID_, val: ELEM_, userdata: USERDATA_) DATA_ {
                             assert_valid_id(data, id, userdata, @src());
-                            CUSTOM.GET_PTR.?(data, id, userdata).* = val;
+                            GET_PTR.func(data, id, userdata).* = val;
                             return data;
                         }
                         fn unusable(_: DATA_, _: ID_, _: ELEM_, _: USERDATA_) DATA_ {
@@ -941,192 +1041,187 @@ pub const DataManipulationCore = struct {
                         }
                     };
                     const SWAP = struct {
-                        const func: FN_SWAP = if (CUSTOM.SWAP) |cust| cust //
-                            else if (FLAGS.has(INFER.SWAP.FROM_PTR)) infer_ptr //
-                            else if (FLAGS.has(INFER.SWAP.FROM_GET_SET)) infer_get_set //
-                            else if (ALLOW_DEFAULT) default else unusable;
-                        fn default(data: DATA_, id_a: ID_, id_b: ID_, userdata: USERDATA_) DATA_ {
+                        const func: FN_SWAP = switch (SOLUTIONS[@intFromEnum(Recipes.PackageFlags.SWAP)]) {
+                            .UNAVAILABLE => unusable,
+                            .USER_PROVIDED => CUSTOM.SWAP.?,
+                            .INFERED_BY_RECIPE => |fn_tag| switch (fn_tag) {
+                                .infer_get_set => infer_get_set,
+                                else => unreachable,
+                            },
+                        };
+                        fn infer_get_set(data: DATA_, id_a: ID_, id_b: ID_, userdata: USERDATA_) DATA_ {
                             var new_data = data;
                             const tmp = GET.func(new_data, id_b, userdata);
                             new_data = SET.func(new_data, id_b, GET.func(new_data, id_a, userdata), userdata);
                             new_data = SET.func(new_data, id_a, tmp, userdata);
                             return new_data;
                         }
-                        fn infer_ptr(data: DATA_, id_a: ID_, id_b: ID_, userdata: USERDATA_) DATA_ {
-                            assert_valid_id(data, id_a, userdata, @src());
-                            assert_valid_id(data, id_b, userdata, @src());
-                            const GET_PTR_ = GET_PTR.func;
-                            const ptr_a = GET_PTR_(data, id_a, userdata);
-                            const ptr_b = GET_PTR_(data, id_b, userdata);
-                            const tmp = ptr_b.*;
-                            ptr_b.* = ptr_a.*;
-                            ptr_a.* = tmp;
-                            return data;
-                        }
-                        fn infer_get_set(data: DATA_, id_a: ID_, id_b: ID_, userdata: USERDATA_) DATA_ {
-                            const GET_ = GET.func;
-                            const SET_ = SET.func;
-                            assert_valid_id(data, id_a, userdata, @src());
-                            assert_valid_id(data, id_b, userdata, @src());
-                            const tmp = GET_(data, id_b, userdata);
-                            const data_2 = SET_(data, id_b, GET_(data, id_a, userdata), userdata);
-                            return SET_(data_2, id_a, tmp, userdata);
-                        }
                         fn unusable(_: DATA_, _: ID_, _: ID_, _: USERDATA_) DATA_ {
                             assert_unreachable(@src(), "no `swap` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
                         }
                     };
                     const LESS_THAN = struct {
-                        const func: FN_ELEM_COMPARE = if (CUSTOM.LESS_THAN) |cust| cust //
-                            else if (FLAGS.has(INFER.LT.FROM_GTEQ)) infer_gteq //
-                            else if (FLAGS.has(INFER.LT.FROM_GT_OQ)) infer_gt_oq //
-                            else if (FLAGS.has(INFER.LT.FROM_GT_EQ)) infer_gt_eq //
-                            else if (ALLOW_DEFAULT) default else unusable;
-                        fn default(val_a: ELEM_, val_b: ELEM_, _: USERDATA_) bool {
+                        const func: FN_ELEM_COMPARE = switch (SOLUTIONS[@intFromEnum(Recipes.PackageFlags.LESS_THAN)]) {
+                            .UNAVAILABLE => unusable,
+                            .USER_PROVIDED => CUSTOM.LESS_THAN.?,
+                            .INFERED_BY_RECIPE => |fn_tag| switch (fn_tag) {
+                                .infer_native => infer_native,
+                                .infer_gteq => infer_gteq,
+                                .infer_gt_oq => infer_gt_oq,
+                                .infer_gt_eq => infer_gt_eq,
+                                else => unreachable,
+                            },
+                        };
+                        fn infer_native(val_a: ELEM_, val_b: ELEM_, _: USERDATA_) bool {
                             return val_a < val_b;
                         }
                         fn infer_gteq(val_a: ELEM_, val_b: ELEM_, userdata: USERDATA_) bool {
-                            const GTEQ = GREATER_THAN_OR_EQUAL.func;
-                            return !GTEQ(val_a, val_b, userdata);
+                            return !GREATER_THAN_OR_EQUAL.func(val_a, val_b, userdata);
                         }
                         fn infer_gt_eq(val_a: ELEM_, val_b: ELEM_, userdata: USERDATA_) bool {
-                            const GT = GREATER_THAN.func;
-                            const EQ = EXACT_EQUAL.func;
-                            return !GT(val_a, val_b, userdata) and !EQ(val_a, val_b, userdata);
+                            return !GREATER_THAN.func(val_a, val_b, userdata) and !EXACT_EQUAL.func(val_a, val_b, userdata);
                         }
                         fn infer_gt_oq(val_a: ELEM_, val_b: ELEM_, userdata: USERDATA_) bool {
-                            const GT = GREATER_THAN.func;
-                            const OQ = ORDER_EQUAL.func;
-                            return !GT(val_a, val_b, userdata) and !OQ(val_a, val_b, userdata);
+                            return !GREATER_THAN.func(val_a, val_b, userdata) and !ORDER_EQUAL.func(val_a, val_b, userdata);
                         }
                         fn unusable(_: ELEM_, _: ELEM_, _: USERDATA_) bool {
                             assert_unreachable(@src(), "no `less_than` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
                         }
                     };
                     const LESS_THAN_OR_EQUAL = struct {
-                        const func: FN_ELEM_COMPARE = if (CUSTOM.LESS_THAN_OR_EQUAL) |cust| cust //
-                            else if (FLAGS.has(INFER.LTEQ.FROM_GT)) infer_gt //
-                            else if (FLAGS.has(INFER.LTEQ.FROM_LT_OQ)) infer_lt_oq //
-                            else if (FLAGS.has(INFER.LTEQ.FROM_LT_EQ)) infer_lt_eq //
-                            else if (ALLOW_DEFAULT) default else unusable;
-                        fn default(val_a: ELEM_, val_b: ELEM_, _: USERDATA_) bool {
+                        const func: FN_ELEM_COMPARE = switch (SOLUTIONS[@intFromEnum(Recipes.PackageFlags.LESS_THAN_OR_EQUAL)]) {
+                            .UNAVAILABLE => unusable,
+                            .USER_PROVIDED => CUSTOM.LESS_THAN_OR_EQUAL.?,
+                            .INFERED_BY_RECIPE => |fn_tag| switch (fn_tag) {
+                                .infer_native => infer_native,
+                                .infer_gt => infer_gt,
+                                .infer_lt_oq => infer_lt_oq,
+                                .infer_lt_eq => infer_lt_eq,
+                                else => unreachable,
+                            },
+                        };
+                        fn infer_native(val_a: ELEM_, val_b: ELEM_, _: USERDATA_) bool {
                             return val_a <= val_b;
                         }
                         fn infer_gt(val_a: ELEM_, val_b: ELEM_, userdata: USERDATA_) bool {
-                            const GT = GREATER_THAN.func;
-                            return !GT(val_a, val_b, userdata);
+                            return !GREATER_THAN.func(val_a, val_b, userdata);
                         }
                         fn infer_lt_eq(val_a: ELEM_, val_b: ELEM_, userdata: USERDATA_) bool {
-                            const LT = LESS_THAN.func;
-                            const EQ = EXACT_EQUAL.func;
-                            return LT(val_a, val_b, userdata) or EQ(val_a, val_b, userdata);
+                            return LESS_THAN.func(val_a, val_b, userdata) or EXACT_EQUAL.func(val_a, val_b, userdata);
                         }
                         fn infer_lt_oq(val_a: ELEM_, val_b: ELEM_, userdata: USERDATA_) bool {
-                            const LT = LESS_THAN.func;
-                            const OQ = ORDER_EQUAL.func;
-                            return LT(val_a, val_b, userdata) or OQ(val_a, val_b, userdata);
+                            return LESS_THAN.func(val_a, val_b, userdata) or ORDER_EQUAL.func(val_a, val_b, userdata);
                         }
                         fn unusable(_: ELEM_, _: ELEM_, _: USERDATA_) bool {
                             assert_unreachable(@src(), "no `less_than_or_equal` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
                         }
                     };
                     const GREATER_THAN = struct {
-                        const func: FN_ELEM_COMPARE = if (CUSTOM.GREATER_THAN) |cust| cust //
-                            else if (FLAGS.has(INFER.GT.FROM_LTEQ)) infer_lteq //
-                            else if (FLAGS.has(INFER.GT.FROM_LT_OQ)) infer_lt_oq //
-                            else if (FLAGS.has(INFER.GT.FROM_LT_EQ)) infer_lt_eq //
-                            else if (ALLOW_DEFAULT) default else unusable;
-                        fn default(val_a: ELEM_, val_b: ELEM_, _: USERDATA_) bool {
+                        const func: FN_ELEM_COMPARE = switch (SOLUTIONS[@intFromEnum(Recipes.PackageFlags.GREATER_THAN)]) {
+                            .UNAVAILABLE => unusable,
+                            .USER_PROVIDED => CUSTOM.GREATER_THAN.?,
+                            .INFERED_BY_RECIPE => |fn_tag| switch (fn_tag) {
+                                .infer_native => infer_native,
+                                .infer_lteq => infer_lteq,
+                                .infer_lt_oq => infer_lt_oq,
+                                .infer_lt_eq => infer_lt_eq,
+                                else => unreachable,
+                            },
+                        };
+                        fn infer_native(val_a: ELEM_, val_b: ELEM_, _: USERDATA_) bool {
                             return val_a > val_b;
                         }
                         fn infer_lteq(val_a: ELEM_, val_b: ELEM_, userdata: USERDATA_) bool {
-                            const LTEQ = LESS_THAN_OR_EQUAL.func;
-                            return !LTEQ(val_a, val_b, userdata);
+                            return !LESS_THAN_OR_EQUAL.func(val_a, val_b, userdata);
                         }
                         fn infer_lt_eq(val_a: ELEM_, val_b: ELEM_, userdata: USERDATA_) bool {
-                            const LT = LESS_THAN.func;
-                            const EQ = EXACT_EQUAL.func;
-                            return !LT(val_a, val_b, userdata) and !EQ(val_a, val_b, userdata);
+                            return !LESS_THAN.func(val_a, val_b, userdata) and !EXACT_EQUAL.func(val_a, val_b, userdata);
                         }
                         fn infer_lt_oq(val_a: ELEM_, val_b: ELEM_, userdata: USERDATA_) bool {
-                            const LT = LESS_THAN.func;
-                            const OQ = ORDER_EQUAL.func;
-                            return !LT(val_a, val_b, userdata) and !OQ(val_a, val_b, userdata);
+                            return !LESS_THAN.func(val_a, val_b, userdata) and !ORDER_EQUAL.func(val_a, val_b, userdata);
                         }
                         fn unusable(_: ELEM_, _: ELEM_, _: USERDATA_) bool {
                             assert_unreachable(@src(), "no `greater_than` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
                         }
                     };
                     const GREATER_THAN_OR_EQUAL = struct {
-                        const func: FN_ELEM_COMPARE = if (CUSTOM.GREATER_THAN_OR_EQUAL) |cust| cust //
-                            else if (FLAGS.has(INFER.GTEQ.FROM_LT)) infer_lt //
-                            else if (FLAGS.has(INFER.GTEQ.FROM_GT_OQ)) infer_gt_oq //
-                            else if (FLAGS.has(INFER.GTEQ.FROM_GT_EQ)) infer_gt_eq //
-                            else if (ALLOW_DEFAULT) default else unusable;
-                        fn default(val_a: ELEM_, val_b: ELEM_, _: USERDATA_) bool {
+                        const func: FN_ELEM_COMPARE = switch (SOLUTIONS[@intFromEnum(Recipes.PackageFlags.GREATER_THAN_OR_EQUAL)]) {
+                            .UNAVAILABLE => unusable,
+                            .USER_PROVIDED => CUSTOM.GREATER_THAN_OR_EQUAL.?,
+                            .INFERED_BY_RECIPE => |fn_tag| switch (fn_tag) {
+                                .infer_native => infer_native,
+                                .infer_lt => infer_lt,
+                                .infer_gt_oq => infer_gt_oq,
+                                .infer_gt_eq => infer_gt_eq,
+                                else => unreachable,
+                            },
+                        };
+                        fn infer_native(val_a: ELEM_, val_b: ELEM_, _: USERDATA_) bool {
                             return val_a >= val_b;
                         }
                         fn infer_lt(val_a: ELEM_, val_b: ELEM_, userdata: USERDATA_) bool {
-                            const LT = LESS_THAN.func;
-                            return !LT(val_a, val_b, userdata);
+                            return !LESS_THAN.func(val_a, val_b, userdata);
                         }
                         fn infer_gt_eq(val_a: ELEM_, val_b: ELEM_, userdata: USERDATA_) bool {
-                            const GT = GREATER_THAN.func;
-                            const EQ = EXACT_EQUAL.func;
-                            return !GT(val_a, val_b, userdata) and !EQ(val_a, val_b, userdata);
+                            return !GREATER_THAN.func(val_a, val_b, userdata) and !EXACT_EQUAL.func(val_a, val_b, userdata);
                         }
                         fn infer_gt_oq(val_a: ELEM_, val_b: ELEM_, userdata: USERDATA_) bool {
-                            const GT = GREATER_THAN.func;
-                            const OQ = ORDER_EQUAL.func;
-                            return !GT(val_a, val_b, userdata) and !OQ(val_a, val_b, userdata);
+                            return !GREATER_THAN.func(val_a, val_b, userdata) and !ORDER_EQUAL.func(val_a, val_b, userdata);
                         }
                         fn unusable(_: ELEM_, _: ELEM_, _: USERDATA_) bool {
                             assert_unreachable(@src(), "no `greater_than_or_equal` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
                         }
                     };
                     const ORDER_EQUAL = struct {
-                        const func: FN_ELEM_COMPARE = if (CUSTOM.ORDER_EQUALS) |cust| cust //
-                            else if (FLAGS.has(INFER.OQ.FROM_EQ)) infer_eq //
-                            else if (FLAGS.has(INFER.OQ.FROM_GT_LT)) infer_gt_lt //
-                            else if (ALLOW_DEFAULT) default else unusable;
-                        fn default(val_a: ELEM_, val_b: ELEM_, _: USERDATA_) bool {
+                        const func: FN_ELEM_COMPARE = switch (SOLUTIONS[@intFromEnum(Recipes.PackageFlags.ORDER_EQUALS)]) {
+                            .UNAVAILABLE => unusable,
+                            .USER_PROVIDED => CUSTOM.ORDER_EQUALS.?,
+                            .INFERED_BY_RECIPE => |fn_tag| switch (fn_tag) {
+                                .infer_native => infer_native,
+                                .infer_eq => infer_eq,
+                                .infer_gt_lt => infer_gt_lt,
+                                else => unreachable,
+                            },
+                        };
+                        fn infer_native(val_a: ELEM_, val_b: ELEM_, _: USERDATA_) bool {
                             return val_a == val_b;
                         }
                         fn infer_eq(val_a: ELEM_, val_b: ELEM_, userdata: USERDATA_) bool {
-                            const EQ = EXACT_EQUAL.func;
-                            return !EQ(val_a, val_b, userdata);
+                            return !EXACT_EQUAL.func(val_a, val_b, userdata);
                         }
                         fn infer_gt_lt(val_a: ELEM_, val_b: ELEM_, userdata: USERDATA_) bool {
-                            const GT = GREATER_THAN.func;
-                            const LT = LESS_THAN.func;
-                            return !GT(val_a, val_b, userdata) and !LT(val_a, val_b, userdata);
+                            return !GREATER_THAN.func(val_a, val_b, userdata) and !LESS_THAN.func(val_a, val_b, userdata);
                         }
                         fn unusable(_: ELEM_, _: ELEM_, _: USERDATA_) bool {
                             assert_unreachable(@src(), "no `order_equals` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
                         }
                     };
                     const EXACT_EQUAL = struct {
-                        const func: FN_ELEM_COMPARE = if (CUSTOM.EXACT_EQUALS) |cust| cust //
-                            else if (FLAGS.has(INFER.EQ.FROM_OQ)) infer_oq //
-                            else if (FLAGS.has(INFER.EQ.FROM_GT_LT)) infer_gt_lt //
-                            else if (ALLOW_DEFAULT) default else unusable;
-                        fn default(val_a: ELEM_, val_b: ELEM_, _: USERDATA_) bool {
+                        const func: FN_ELEM_COMPARE = switch (SOLUTIONS[@intFromEnum(Recipes.PackageFlags.EXACT_EQUALS)]) {
+                            .UNAVAILABLE => unusable,
+                            .USER_PROVIDED => CUSTOM.EXACT_EQUALS.?,
+                            .INFERED_BY_RECIPE => |fn_tag| switch (fn_tag) {
+                                .infer_native => infer_native,
+                                .infer_oq => infer_oq,
+                                .infer_gt_lt => infer_gt_lt,
+                                else => unreachable,
+                            },
+                        };
+                        fn infer_native(val_a: ELEM_, val_b: ELEM_, _: USERDATA_) bool {
                             return val_a == val_b;
                         }
                         fn infer_oq(val_a: ELEM_, val_b: ELEM_, userdata: USERDATA_) bool {
-                            const OQ = ORDER_EQUAL.func;
-                            return !OQ(val_a, val_b, userdata);
+                            return !ORDER_EQUAL.func(val_a, val_b, userdata);
                         }
                         fn infer_gt_lt(val_a: ELEM_, val_b: ELEM_, userdata: USERDATA_) bool {
-                            const GT = GREATER_THAN.func;
-                            const LT = LESS_THAN.func;
-                            return !GT(val_a, val_b, userdata) and !LT(val_a, val_b, userdata);
+                            return !GREATER_THAN.func(val_a, val_b, userdata) and !LESS_THAN.func(val_a, val_b, userdata);
                         }
                         fn unusable(_: ELEM_, _: ELEM_, _: USERDATA_) bool {
                             assert_unreachable(@src(), "no `exactly_equals` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
                         }
                     };
                     const FIRST_ID = struct {
+                        // CHECKPOINT //FIXME update for recipe inference
                         const func: FN_IMPLICIT_ID = if (CUSTOM.FIRST_ID) |cust| cust //
                             else if (FLAGS.has(INFER.FIRST_ID.FROM_NTH_FROM_START)) infer_nth_start //
                             else if (FLAGS.has(INFER.FIRST_ID.FROM_LEN_NTH_FROM_END)) infer_nth_end //
