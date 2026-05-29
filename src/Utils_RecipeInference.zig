@@ -85,7 +85,8 @@ pub fn WeightModeInfo(comptime RecipeTag: type) type {
     };
 }
 
-pub fn RecipeInferenceEngine(comptime TargetEnum: type, comptime SolutionTag: type, comptime OptionalWeightInfo: ?WeightModeInfo(SolutionTag)) type {
+pub fn RecipeInferenceEngine(comptime EVAL_QUOTA: u32, comptime TargetEnum: type, comptime SolutionTag: type, comptime OptionalWeightInfo: ?WeightModeInfo(SolutionTag)) type {
+    @setEvalBranchQuota(EVAL_QUOTA);
     assert_with_reason(Types.all_enum_values_start_from_zero_with_no_gaps(TargetEnum), @src(), "all tags in `TargetEnum` must start from 0 and increase to max value with no gaps", .{});
     return struct {
         pub const NUM_BITS = @typeInfo(TargetEnum).@"enum".fields.len;
@@ -214,8 +215,8 @@ pub fn RecipeInferenceEngine(comptime TargetEnum: type, comptime SolutionTag: ty
         pub const Recipe = struct {
             dependancies: []const Dependancy,
             variant_tag: SolutionTag,
-            special_mult_factor: WeightType = NEUTRAL_RECIPE_WEIGHT,
-            special_flat_add_factor: WeightType = ZERO_RECIPE_WEIGHT,
+            special_mult_factor: Weight = .flat(NEUTRAL_RECIPE_WEIGHT),
+            special_flat_add_factor: Weight = .flat(ZERO_RECIPE_WEIGHT),
 
             pub fn recipe(variant: SolutionTag, dependancies: []const Dependancy) Recipe {
                 return Recipe{
@@ -295,6 +296,36 @@ pub fn RecipeInferenceEngine(comptime TargetEnum: type, comptime SolutionTag: ty
                 }
             }
             std.debug.print("\t+++++++++++++++++++++++\n\tNUM USER PROVIDED: {d}\n\tNUM INFERED: {d}\n\tNUM UNAVAILABLE: {d}\n", .{ num_user, num_infer, num_unavailable });
+        }
+        pub fn comptime_print_solutions(resolutions: AllSolutions) void {
+            @setEvalBranchQuota(100000);
+            Utils.comptime_debug_print("Recipe Solutions:\n", .{});
+            var num_user: usize = 0;
+            var num_unavailable: usize = 0;
+            var num_infer: usize = 0;
+            for (resolutions, ALL_TARGETS) |res, target| {
+                switch (res) {
+                    .USER_PROVIDED => {
+                        num_user += 1;
+                        Utils.comptime_debug_print("\t{s}: <USER>\n", .{@tagName(target)});
+                    },
+                    .UNAVAILABLE => {
+                        num_unavailable += 1;
+                        Utils.comptime_debug_print("\t{s}: <UNAVAILABLE>\n", .{@tagName(target)});
+                    },
+                    .INFERED_BY_RECIPE => |infer| {
+                        num_infer += 1;
+                        if (comptime Types.type_is_slice(SolutionTag) and Types.child_type(SolutionTag) == u8) {
+                            Utils.comptime_debug_print("\t{s}: <INFER> = {s}\n", .{ @tagName(target), infer });
+                        } else if (comptime Types.type_is_enum(SolutionTag)) {
+                            Utils.comptime_debug_print("\t{s}: <INFER> = {s}\n", .{ @tagName(target), @tagName(infer) });
+                        } else {
+                            Utils.comptime_debug_print("\t{s}: <INFER> = {any}\n", .{ @tagName(target), infer });
+                        }
+                    },
+                }
+            }
+            Utils.comptime_debug_print("\t+++++++++++++++++++++++\n\tNUM USER PROVIDED: {d}\n\tNUM INFERED: {d}\n\tNUM UNAVAILABLE: {d}\n", .{ num_user, num_infer, num_unavailable });
         }
 
         fn get_recipes_for_target(target: TargetEnum, recipes: AllRecipes) []const Recipe {
@@ -395,8 +426,8 @@ pub fn RecipeInferenceEngine(comptime TargetEnum: type, comptime SolutionTag: ty
                                         const current_dep_weight = best_recipe_weights[dep_bit_idx];
                                         total_recipe_weight += dep.weight.eval(target_n) * current_dep_weight;
                                     }
-                                    total_recipe_weight *= recipe.special_mult_factor;
-                                    total_recipe_weight += recipe.special_flat_add_factor;
+                                    total_recipe_weight *= recipe.special_mult_factor.eval(target_n);
+                                    total_recipe_weight += recipe.special_flat_add_factor.eval(target_n);
                                 }
 
                                 if (currently_available) {
