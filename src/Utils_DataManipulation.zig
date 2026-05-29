@@ -279,13 +279,8 @@ pub const DataManipulationCore = struct {
             const FUNC_SELECTOR = CORE.Builder().FUNC_SELECTOR;
             const CORE_AND_FUNCS = CORE.Builder();
             // BUILD FLAGS FOR PROVIDED CUSTOM FUNCTIONS
-            var FLAGS = Flags{};
-            for (@typeInfo(F).@"struct".decls) |FNN| {
-                const FN_NAME = FNN.name;
-                FLAGS.add_if_not_null(@field(F, FN_NAME), @field(CUSTOM, FN_NAME));
-            }
             // SELECT THE CORRECT FUNCTION FOR EACH GIVEN THE CUSTOM/FLAGS/ALLOW_DEFAULT
-            const SELECT = FUNC_SELECTOR(CUSTOM, FLAGS, ALLOW_DEFAULT);
+            const SELECT = FUNC_SELECTOR(CUSTOM, ALLOW_DEFAULT);
             const FINAL_FUNCS: CORE_AND_FUNCS = CORE_AND_FUNCS{
                 .ID_EQUALS = SELECT.ID_EQUALS.func,
                 .ID_LESS_THAN = SELECT.ID_LESS_THAN.func,
@@ -324,21 +319,21 @@ pub const DataManipulationCore = struct {
                 .ORDER_EQUALS = SELECT.ORDER_EQUAL.func,
                 .EXACT_EQUALS = SELECT.EXACT_EQUAL.func,
                 .REVERSE_RANGE = SELECT.REVERSE_RANGE.func,
-                .MOVE_ONE_PRESERVE = SELECT.MOVE_ONE_PRESERVE.func,
-                .MOVE_BLOCK_PRESERVE = SELECT.MOVE_BLOCK_PRESERVE.func,
+                .MOVE_ONE_RIGHT_DISPLACE = SELECT.MOVE_ONE_RIGHT_DISPLACE.func,
+                .MOVE_RANGE_RIGHT_DISPLACE = SELECT.MOVE_RANGE_RIGHT_DISPLACE.func,
                 .ROTATE_RIGHT = SELECT.ROTATE_RIGHT.func,
                 .ROTATE_LEFT = SELECT.ROTATE_LEFT.func,
                 .SCRAMBLE = SELECT.SCRAMBLE.func,
                 .APPEND_ONE_SLOT_ASSUME_CAP = SELECT.APPEND_ONE_SLOT_ASSUME_CAP.func,
                 .APPEND_MANY_SLOTS_ASSUME_CAP = SELECT.APPEND_MANY_SLOTS_ASSUME_CAP.func,
-                .INSERT_ONE_SLOT_ASSUME_CAP = SELECT.INSERT_ONE_SLOT_ASSUME_CAP.func,
-                .INSERT_MANY_SLOTS_ASSUME_CAP = SELECT.INSERT_MANY_SLOTS_ASSUME_CAP.func,
+                .INSERT_ONE_SLOT_BEFORE_ASSUME_CAP = SELECT.INSERT_ONE_SLOT_BEFORE_ASSUME_CAP.func,
+                .INSERT_MANY_SLOTS_BEFORE_ASSUME_CAP = SELECT.INSERT_MANY_SLOTS_BEFORE_ASSUME_CAP.func,
                 .DELETE_ONE = SELECT.DELETE_ONE.func,
                 .DELETE_RANGE = SELECT.DELETE_RANGE.func,
                 .ENSURE_FREE_SPACE = SELECT.ENSURE_FREE_SPACE.func,
                 .TRIM_FREE_SPACE = undefined, //FIXME
-                .MOVE_BLOCK_RIGHT_NO_PRESERVE = SELECT.MOVE_BLOCK_RIGHT_NO_PRESERVE.func,
-                .MOVE_BLOCK_LEFT_NO_PRESERVE = SELECT.MOVE_BLOCK_LEFT_NO_PRESERVE.func,
+                .MOVE_RANGE_RIGHT_OVERWRITE = SELECT.MOVE_RANGE_RIGHT_OVERWRITE.func,
+                .MOVE_RANGE_LEFT_OVERWRITE = SELECT.MOVE_RANGE_LEFT_OVERWRITE.func,
                 .GET_RANGE_SLICE = SELECT.GET_RANGE_SLICE.func,
                 .GET_RANGE_CONST_SLICE = SELECT.GET_RANGE_CONST_SLICE.func,
                 .FIRST_CHILD_ID = SELECT.FIRST_CHILD_ID.func,
@@ -370,6 +365,7 @@ pub const DataManipulationCore = struct {
             ID_GREATER_THAN_OR_EQUAL: FN_ID_COMPARE,
             ID_EQUALS: FN_ID_COMPARE,
             ID_VALID: FN_ID_CHECK,
+            //
             INVALID_ID_AFTER_LAST_ID: FN_IMPLICIT_ID,
             INVALID_ID_BEFORE_FIRST_ID: FN_IMPLICIT_ID,
             FIRST_ID: FN_IMPLICIT_ID,
@@ -380,6 +376,11 @@ pub const DataManipulationCore = struct {
             NEXT_ID: FN_ADJACENT_ID,
             NTH_PREV_ID: FN_NTH_ID,
             NTH_NEXT_ID: FN_NTH_ID,
+            FIRST_CHILD_ID: FN_CHILD_ID_WITH_COUNT,
+            LAST_CHILD_ID: FN_CHILD_ID_WITH_COUNT,
+            NTH_CHILD_ID: FN_NTH_CHILD_ID_WITH_COUNT,
+            PARENT_ID: FN_CHILD_ID_WITH_COUNT,
+            //
             GET_LEN: FN_IMPLICIT_COUNT,
             SET_LEN: FN_SET_COUNT,
             GET_CAP: FN_IMPLICIT_COUNT,
@@ -387,41 +388,44 @@ pub const DataManipulationCore = struct {
             GET_BASE_PTR: FN_GET_BASE_PTR,
             GET_BASE_CONST_PTR: FN_GET_BASE_CONST_PTR,
             SET_BASE_PTR: FN_SET_BASE_PTR,
+            GET_RANGE_SLICE: FN_GET_SLICE,
+            GET_RANGE_CONST_SLICE: FN_GET_CONST_SLICE,
+            //
             RANGE_LEN: FN_RANGE_COUNT,
+            LIMIT_LEN: FN_RANGE_COUNT,
+            //
             GET: FN_GET,
             GET_PTR: FN_GET_PTR,
             GET_CONST_PTR: FN_GET_CONST_PTR,
             SET: FN_SET,
-            SWAP: FN_SWAP,
+            //
             GREATER_THAN: FN_ELEM_COMPARE,
             GREATER_THAN_OR_EQUAL: FN_ELEM_COMPARE,
             LESS_THAN: FN_ELEM_COMPARE,
             LESS_THAN_OR_EQUAL: FN_ELEM_COMPARE,
             ORDER_EQUALS: FN_ELEM_COMPARE,
             EXACT_EQUALS: FN_ELEM_COMPARE,
+            //
+            SWAP: FN_SWAP,
             REVERSE_RANGE: FN_RANGE_OP,
-            MOVE_ONE_PRESERVE: FN_RANGE_OP,
-            MOVE_BLOCK_PRESERVE: FN_MOVE_BLOCK,
+            MOVE_ONE_OVERWRITE: FN_RANGE_OP,
+            MOVE_ONE_RIGHT_DISPLACE: FN_RANGE_OP,
+            MOVE_ONE_LEFT_DISPLACE: FN_RANGE_OP,
+            MOVE_RANGE_RIGHT_DISPLACE: FN_MOVE_RANGE_DISPLACE,
+            MOVE_RANGE_LEFT_DISPLACE: FN_MOVE_RANGE_DISPLACE,
+            MOVE_RANGE_RIGHT_OVERWRITE: FN_MOVE_RANGE_OVERWRITE,
+            MOVE_RANGE_LEFT_OVERWRITE: FN_MOVE_RANGE_OVERWRITE,
             ROTATE_RIGHT: FN_ROTATE,
             ROTATE_LEFT: FN_ROTATE,
             SCRAMBLE: FN_SCRAMBLE,
             APPEND_ONE_SLOT_ASSUME_CAP: FN_APPEND_ONE_SLOT,
             APPEND_MANY_SLOTS_ASSUME_CAP: FN_APPEND_N_SLOTS,
-            INSERT_ONE_SLOT_ASSUME_CAP: FN_INSERT_ONE_SLOT,
-            INSERT_MANY_SLOTS_ASSUME_CAP: FN_INSERT_N_SLOTS,
+            INSERT_ONE_SLOT_BEFORE_ASSUME_CAP: FN_INSERT_ONE_SLOT,
+            INSERT_MANY_SLOTS_BEFORE_ASSUME_CAP: FN_INSERT_N_SLOTS,
             DELETE_ONE: FN_DELETE_ONE,
             DELETE_RANGE: FN_DELETE_RANGE,
             ENSURE_FREE_SPACE: FN_SET_COUNT,
             TRIM_FREE_SPACE: FN_SET_COUNT,
-            MOVE_BLOCK_RIGHT_NO_PRESERVE: FN_MOVE_BLOCK_NO_PRESERVE,
-            MOVE_BLOCK_LEFT_NO_PRESERVE: FN_MOVE_BLOCK_NO_PRESERVE,
-            GET_RANGE_SLICE: FN_GET_SLICE,
-            GET_RANGE_CONST_SLICE: FN_GET_CONST_SLICE,
-            FIRST_CHILD_ID: FN_CHILD_ID_WITH_COUNT,
-            LAST_CHILD_ID: FN_CHILD_ID_WITH_COUNT,
-            NTH_CHILD_ID: FN_NTH_CHILD_ID_WITH_COUNT,
-            PARENT_ID: FN_CHILD_ID_WITH_COUNT,
-            LIMIT_LEN: FN_RANGE_COUNT,
 
             pub const AllocSettings = Utils.Alloc.SmartAllocSettings(ELEM_);
             pub const ComptimeAllocSettings = Utils.Alloc.SmartAllocComptimeSettings(ELEM_);
@@ -446,7 +450,8 @@ pub const DataManipulationCore = struct {
             pub const FN_SET = fn (DATA_, ID_, ELEM_, USERDATA_) DATA_;
             pub const FN_SWAP = fn (DATA_, ID_, ID_, USERDATA_) DATA_;
             pub const FN_RANGE_OP = fn (DATA_, ID_, ID_, USERDATA_) DATA_;
-            pub const FN_MOVE_BLOCK = fn (DATA_, ID_, ID_, ID_, USERDATA_) DATA_;
+            pub const FN_MOVE_RANGE_DISPLACE = fn (DATA_, ID_, ID_, ID_, USERDATA_) DATA_;
+            pub const FN_MOVE_RANGE_OVERWRITE = fn (DATA_, ID_, ID_, COUNT_, USERDATA_) DATA_;
             pub const FN_ROTATE = fn (DATA_, ID_, ID_, COUNT_, USERDATA_) DATA_;
             pub const FN_SCRAMBLE = fn (DATA_, Random, ID_, ID_, COUNT_, USERDATA_) DATA_;
             pub const FN_APPEND_ONE_SLOT = fn (DATA_, USERDATA_) struct { DATA_, ID_ };
@@ -458,9 +463,19 @@ pub const DataManipulationCore = struct {
             pub const FN_GET_BASE_PTR = fn (DATA_, USERDATA_) [*]ELEM_;
             pub const FN_GET_BASE_CONST_PTR = fn (DATA_, USERDATA_) [*]const ELEM_;
             pub const FN_SET_BASE_PTR = fn (DATA_, [*]ELEM_, USERDATA_) DATA_;
-            pub const FN_MOVE_BLOCK_NO_PRESERVE = fn (DATA_, ID_, ID_, COUNT_, USERDATA_) DATA_;
+            pub const FN_MOVE_RANGE_OVERWRITE = fn (DATA_, ID_, ID_, COUNT_, USERDATA_) DATA_;
 
             pub const CustomFunctions_ = struct {
+                GET_LEN: ?FN_IMPLICIT_COUNT = null,
+                SET_LEN: ?FN_SET_COUNT = null,
+                GET_CAP: ?FN_IMPLICIT_COUNT = null,
+                SET_CAP: ?FN_SET_COUNT = null,
+                GET_BASE_PTR: ?FN_GET_BASE_PTR = null,
+                GET_BASE_CONST_PTR: ?FN_GET_BASE_CONST_PTR = null,
+                SET_BASE_PTR: ?FN_SET_BASE_PTR = null,
+                GET_RANGE_SLICE: ?FN_GET_SLICE = null,
+                GET_RANGE_CONST_SLICE: ?FN_GET_CONST_SLICE = null,
+                //
                 ID_LESS_THAN: ?FN_ID_COMPARE = null,
                 ID_LESS_THAN_OR_EQUAL: ?FN_ID_COMPARE = null,
                 ID_GREATER_THAN: ?FN_ID_COMPARE = null,
@@ -469,17 +484,19 @@ pub const DataManipulationCore = struct {
                 VALID_ID: ?FN_ID_CHECK = null,
                 INVALID_ID_AFTER_LAST_ID: ?FN_IMPLICIT_ID = null,
                 INVALID_ID_BEFORE_FIRST_ID: ?FN_IMPLICIT_ID = null,
+                //
                 GET: ?FN_GET = null,
                 GET_PTR: ?FN_GET_PTR = null,
                 GET_CONST_PTR: ?FN_GET_CONST_PTR = null,
                 SET: ?FN_SET = null,
-                SWAP: ?FN_SWAP = null,
+                //
                 LESS_THAN: ?FN_ELEM_COMPARE = null,
                 LESS_THAN_OR_EQUAL: ?FN_ELEM_COMPARE = null,
                 GREATER_THAN: ?FN_ELEM_COMPARE = null,
                 GREATER_THAN_OR_EQUAL: ?FN_ELEM_COMPARE = null,
                 ORDER_EQUALS: ?FN_ELEM_COMPARE = null,
                 EXACT_EQUALS: ?FN_ELEM_COMPARE = null,
+                //
                 FIRST_ID: ?FN_IMPLICIT_ID = null,
                 LAST_ID: ?FN_IMPLICIT_ID = null,
                 NTH_ID_FROM_START: ?FN_IMPLICIT_NTH_ID = null,
@@ -488,40 +505,38 @@ pub const DataManipulationCore = struct {
                 PREV_ID: ?FN_ADJACENT_ID = null,
                 NTH_PREV_ID: ?FN_NTH_ID = null,
                 NTH_NEXT_ID: ?FN_NTH_ID = null,
-                GET_LEN: ?FN_IMPLICIT_COUNT = null,
-                SET_LEN: ?FN_SET_COUNT = null,
-                GET_CAP: ?FN_IMPLICIT_COUNT = null,
-                SET_CAP: ?FN_SET_COUNT = null,
-                GET_BASE_PTR: ?FN_GET_BASE_PTR = null,
-                GET_BASE_CONST_PTR: ?FN_GET_BASE_CONST_PTR = null,
-                SET_BASE_PTR: ?FN_SET_BASE_PTR = null,
-                RANGE_LEN: ?FN_RANGE_COUNT = null,
-                REVERSE_RANGE: ?FN_RANGE_OP = null,
-                MOVE_ONE_PRESERVE: ?FN_RANGE_OP = null,
-                MOVE_BLOCK_PRESERVE: ?FN_MOVE_BLOCK = null,
-                ROTATE_RANGE_RIGHT: ?FN_ROTATE = null,
-                ROTATE_RANGE_LEFT: ?FN_ROTATE = null,
-                SCRAMBLE: ?FN_SCRAMBLE = null,
-                APPEND_ONE_SLOT_ASSUME_CAP: ?FN_APPEND_ONE_SLOT = null,
-                APPEND_MANY_SLOTS_ASSUME_CAP: ?FN_APPEND_N_SLOTS = null,
-                INSERT_ONE_SLOT_ASSUME_CAP: ?FN_INSERT_ONE_SLOT = null,
-                INSERT_MANY_SLOTS_ASSUME_CAP: ?FN_INSERT_N_SLOTS = null,
-                DELETE_ONE: ?FN_DELETE_ONE = null,
-                DELETE_RANGE: ?FN_DELETE_RANGE = null,
-                ENSURE_FREE_SPACE: ?FN_SET_COUNT = null,
-                TRIM_FREE_SPACE: ?FN_SET_COUNT = null,
-                MOVE_BLOCK_RIGHT_NO_PRESERVE: ?FN_MOVE_BLOCK_NO_PRESERVE = null,
-                MOVE_BLOCK_LEFT_NO_PRESERVE: ?FN_MOVE_BLOCK_NO_PRESERVE = null,
-                GET_RANGE_SLICE: ?FN_GET_SLICE = null,
-                GET_RANGE_CONST_SLICE: ?FN_GET_CONST_SLICE = null,
                 FIRST_CHILD_ID: ?FN_CHILD_ID_WITH_COUNT = null,
                 LAST_CHILD_ID: ?FN_CHILD_ID_WITH_COUNT = null,
                 NTH_CHILD_ID: ?FN_NTH_CHILD_ID_WITH_COUNT = null,
                 PARENT_ID: ?FN_CHILD_ID_WITH_COUNT = null,
+                //
+                RANGE_LEN: ?FN_RANGE_COUNT = null,
                 LIMIT_LEN: ?FN_RANGE_COUNT = null,
+                //
+                SWAP: ?FN_SWAP = null,
+                REVERSE_RANGE: ?FN_RANGE_OP = null,
+                MOVE_ONE_RIGHT_DISPLACE: ?FN_RANGE_OP = null,
+                MOVE_ONE_LEFT_DISPLACE: ?FN_RANGE_OP = null,
+                MOVE_ONE_OVERWRITE: ?FN_RANGE_OP = null,
+                MOVE_RANGE_RIGHT_DISPLACE: ?FN_MOVE_RANGE_DISPLACE = null,
+                MOVE_RANGE_LEFT_DISPLACE: ?FN_MOVE_RANGE_DISPLACE = null,
+                MOVE_RANGE_RIGHT_OVERWRITE: ?FN_MOVE_RANGE_OVERWRITE = null,
+                MOVE_RANGE_LEFT_OVERWRITE: ?FN_MOVE_RANGE_OVERWRITE = null,
+                ROTATE_RANGE_RIGHT: ?FN_ROTATE = null,
+                ROTATE_RANGE_LEFT: ?FN_ROTATE = null,
+                SCRAMBLE: ?FN_SCRAMBLE = null,
+                //
+                APPEND_ONE_SLOT_ASSUME_CAP: ?FN_APPEND_ONE_SLOT = null,
+                APPEND_MANY_SLOTS_ASSUME_CAP: ?FN_APPEND_N_SLOTS = null,
+                INSERT_ONE_SLOT_BEFORE_ASSUME_CAP: ?FN_INSERT_ONE_SLOT = null,
+                INSERT_MANY_SLOTS_BEFORE_ASSUME_CAP: ?FN_INSERT_N_SLOTS = null,
+                DELETE_ONE: ?FN_DELETE_ONE = null,
+                DELETE_RANGE: ?FN_DELETE_RANGE = null,
+                ENSURE_FREE_SPACE: ?FN_SET_COUNT = null,
+                TRIM_FREE_SPACE: ?FN_SET_COUNT = null,
             };
 
-            pub fn FUNC_SELECTOR(comptime CUSTOM: CustomFunctions_, comptime ALLOW_DEFAULT: bool) type {
+            pub fn FUNC_SELECTOR(comptime CUSTOM: CustomFunctions_, comptime ALLOW_INFERED: bool) type {
                 var provided_func_flags: [Recipes.PackageFlags.NUM_FLAGS]Recipes.FuncFlag = undefined;
                 var num_provided_func_flags: usize = 0;
                 inline for (@typeInfo(CUSTOM).@"struct".fields) |c_field| {
@@ -540,7 +555,7 @@ pub const DataManipulationCore = struct {
                         num_provided_func_flags += 1;
                     }
                 }
-                const SOLUTIONS = comptime Recipes.InferEngine.resolve_recipes_by_order(provided_func_flags[0..num_provided_func_flags], Recipes.RECIPES);
+                const SOLUTIONS = comptime Recipes.InferEngine.resolve_recipes_by_weight(100, .ALWAYS_USE_USER_PROVIDED, provided_func_flags[0..num_provided_func_flags], Recipes.RECIPES);
                 const SELECTOR = struct {
                     inline fn nth_child_of_n_ary_flat_array_tree(id_n: COUNT_, num_children_per_element: COUNT_, child_n: COUNT_) COUNT_ {
                         return (id_n * num_children_per_element) + child_n;
@@ -552,7 +567,7 @@ pub const DataManipulationCore = struct {
                         const func: FN_GET_BASE_PTR = switch (SOLUTIONS[@intFromEnum(Recipes.PackageFlags.GET_BASE_PTR)]) {
                             .UNAVAILABLE => unusable,
                             .USER_PROVIDED => CUSTOM.GET_BASE_PTR.?,
-                            .INFERED_BY_RECIPE => |fn_tag| switch (fn_tag) {
+                            .INFERED_BY_RECIPE => |fn_tag| if (!ALLOW_INFERED) unusable else switch (fn_tag) {
                                 .infer_ptr => infer_ptr,
                                 else => unreachable,
                             },
@@ -569,7 +584,7 @@ pub const DataManipulationCore = struct {
                         const func: FN_GET_BASE_CONST_PTR = switch (SOLUTIONS[@intFromEnum(Recipes.PackageFlags.GET_BASE_CONST_PTR)]) {
                             .UNAVAILABLE => unusable,
                             .USER_PROVIDED => CUSTOM.GET_BASE_CONST_PTR.?,
-                            .INFERED_BY_RECIPE => |fn_tag| switch (fn_tag) {
+                            .INFERED_BY_RECIPE => |fn_tag| if (!ALLOW_INFERED) unusable else switch (fn_tag) {
                                 .infer_base_ptr => infer_base_ptr,
                                 .infer_const_ptr => infer_const_ptr,
                                 .infer_ptr => infer_ptr,
@@ -595,7 +610,7 @@ pub const DataManipulationCore = struct {
                         const func: FN_SET_BASE_PTR = switch (SOLUTIONS[@intFromEnum(Recipes.PackageFlags.SET_BASE_PTR)]) {
                             .UNAVAILABLE => unusable,
                             .USER_PROVIDED => CUSTOM.SET_BASE_PTR.?,
-                            .INFERED_BY_RECIPE => |fn_tag| switch (fn_tag) {
+                            .INFERED_BY_RECIPE => |fn_tag| if (!ALLOW_INFERED) unusable else switch (fn_tag) {
                                 else => unreachable,
                             },
                         };
@@ -607,7 +622,7 @@ pub const DataManipulationCore = struct {
                         const func: FN_GET_SLICE = switch (SOLUTIONS[@intFromEnum(Recipes.PackageFlags.GET_RANGE_SLICE)]) {
                             .UNAVAILABLE => unusable,
                             .USER_PROVIDED => CUSTOM.GET_RANGE_SLICE.?,
-                            .INFERED_BY_RECIPE => |fn_tag| switch (fn_tag) {
+                            .INFERED_BY_RECIPE => |fn_tag| if (!ALLOW_INFERED) unusable else switch (fn_tag) {
                                 .infer_base_ptr => infer_base_ptr,
                                 .infer_ptr => infer_ptr,
                                 else => unreachable,
@@ -629,7 +644,7 @@ pub const DataManipulationCore = struct {
                         const func: FN_GET_CONST_SLICE = switch (SOLUTIONS[@intFromEnum(Recipes.PackageFlags.GET_RANGE_CONST_SLICE)]) {
                             .UNAVAILABLE => unusable,
                             .USER_PROVIDED => CUSTOM.GET_RANGE_CONST_SLICE.?,
-                            .INFERED_BY_RECIPE => |fn_tag| switch (fn_tag) {
+                            .INFERED_BY_RECIPE => |fn_tag| if (!ALLOW_INFERED) unusable else switch (fn_tag) {
                                 .infer_range => infer_range,
                                 .infer_base_const_ptr => infer_base_const_ptr,
                                 .infer_const_ptr => infer_const_ptr,
@@ -655,7 +670,7 @@ pub const DataManipulationCore = struct {
                         const func: FN_IMPLICIT_ID = switch (SOLUTIONS[@intFromEnum(Recipes.PackageFlags.INVALID_ID_AFTER_LAST_ID)]) {
                             .UNAVAILABLE => unusable,
                             .USER_PROVIDED => CUSTOM.INVALID_ID_AFTER_LAST_ID.?,
-                            .INFERED_BY_RECIPE => |fn_tag| switch (fn_tag) {
+                            .INFERED_BY_RECIPE => |fn_tag| if (!ALLOW_INFERED) unusable else switch (fn_tag) {
                                 .infer_native_last => infer_native_last,
                                 .infer_native_len => infer_native_len,
                                 else => unreachable,
@@ -675,7 +690,7 @@ pub const DataManipulationCore = struct {
                         const func: FN_IMPLICIT_ID = switch (SOLUTIONS[@intFromEnum(Recipes.PackageFlags.INVALID_ID_BEFORE_FIRST_ID)]) {
                             .UNAVAILABLE => unusable,
                             .USER_PROVIDED => CUSTOM.INVALID_ID_BEFORE_FIRST_ID.?,
-                            .INFERED_BY_RECIPE => |fn_tag| switch (fn_tag) {
+                            .INFERED_BY_RECIPE => |fn_tag| if (!ALLOW_INFERED) unusable else switch (fn_tag) {
                                 .infer_native => infer_native,
                                 .infer_native_offset => infer_native_offset,
                                 else => unreachable,
@@ -692,10 +707,10 @@ pub const DataManipulationCore = struct {
                         }
                     };
                     const ID_VALID = struct {
-                        const func: FN_IMPLICIT_ID = switch (SOLUTIONS[@intFromEnum(Recipes.PackageFlags.VALID_ID)]) {
+                        const func: FN_ID_CHECK = switch (SOLUTIONS[@intFromEnum(Recipes.PackageFlags.VALID_ID)]) {
                             .UNAVAILABLE => unusable,
                             .USER_PROVIDED => CUSTOM.VALID_ID.?,
-                            .INFERED_BY_RECIPE => |fn_tag| switch (fn_tag) {
+                            .INFERED_BY_RECIPE => |fn_tag| if (!ALLOW_INFERED) unusable else switch (fn_tag) {
                                 .infer_native => infer_native,
                                 .infer_native_offset => infer_native_offset,
                                 .infer_first_last_id_less_equal => infer_first_last_id_less_equal,
@@ -737,11 +752,14 @@ pub const DataManipulationCore = struct {
                         assert_valid_id(data, last, userdata, src);
                         assert_with_reason(ID_LESS_THAN_OR_EQUAL.func(data, first, last, userdata), src, "first id `{any}` was not before or equal to last id `{any}`", .{ first, last });
                     }
+                    fn assert_id_less(data: DATA_, a: ID_, b: ID_, userdata: USERDATA_, comptime src: SourceLocation) void {
+                        assert_with_reason(ID_LESS_THAN.func(data, a, b, userdata), src, "id a `{any}` is not located before id b `{any}", .{ a, b });
+                    }
                     const ID_LESS_THAN = struct {
                         const func: FN_ID_COMPARE = switch (SOLUTIONS[@intFromEnum(Recipes.PackageFlags.ID_LESS_THAN)]) {
                             .UNAVAILABLE => unusable,
                             .USER_PROVIDED => CUSTOM.ID_LESS_THAN.?,
-                            .INFERED_BY_RECIPE => |fn_tag| switch (fn_tag) {
+                            .INFERED_BY_RECIPE => |fn_tag| if (!ALLOW_INFERED) unusable else switch (fn_tag) {
                                 .infer_native => infer_native,
                                 .infer_gt => infer_gt,
                                 .infer_gteq => infer_gteq,
@@ -769,7 +787,7 @@ pub const DataManipulationCore = struct {
                         const func: FN_ID_COMPARE = switch (SOLUTIONS[@intFromEnum(Recipes.PackageFlags.ID_LESS_THAN_OR_EQUAL)]) {
                             .UNAVAILABLE => unusable,
                             .USER_PROVIDED => CUSTOM.ID_LESS_THAN_OR_EQUAL.?,
-                            .INFERED_BY_RECIPE => |fn_tag| switch (fn_tag) {
+                            .INFERED_BY_RECIPE => |fn_tag| if (!ALLOW_INFERED) unusable else switch (fn_tag) {
                                 .infer_native => infer_native,
                                 .infer_gteq => infer_gteq,
                                 .infer_gt => infer_gt,
@@ -797,7 +815,7 @@ pub const DataManipulationCore = struct {
                         const func: FN_ID_COMPARE = switch (SOLUTIONS[@intFromEnum(Recipes.PackageFlags.ID_GREATER_THAN)]) {
                             .UNAVAILABLE => unusable,
                             .USER_PROVIDED => CUSTOM.ID_GREATER_THAN.?,
-                            .INFERED_BY_RECIPE => |fn_tag| switch (fn_tag) {
+                            .INFERED_BY_RECIPE => |fn_tag| if (!ALLOW_INFERED) unusable else switch (fn_tag) {
                                 .infer_native => infer_native,
                                 .infer_lt => infer_lt,
                                 .infer_lteq => infer_lteq,
@@ -825,7 +843,7 @@ pub const DataManipulationCore = struct {
                         const func: FN_ID_COMPARE = switch (SOLUTIONS[@intFromEnum(Recipes.PackageFlags.ID_GREATER_THAN_OR_EQUAL)]) {
                             .UNAVAILABLE => unusable,
                             .USER_PROVIDED => CUSTOM.ID_GREATER_THAN_OR_EQUAL.?,
-                            .INFERED_BY_RECIPE => |fn_tag| switch (fn_tag) {
+                            .INFERED_BY_RECIPE => |fn_tag| if (!ALLOW_INFERED) unusable else switch (fn_tag) {
                                 .infer_native => infer_native,
                                 .infer_lteq => infer_lteq,
                                 .infer_lt => infer_lt,
@@ -853,7 +871,7 @@ pub const DataManipulationCore = struct {
                         const func: FN_ID_COMPARE = switch (SOLUTIONS[@intFromEnum(Recipes.PackageFlags.ID_EQUALS)]) {
                             .UNAVAILABLE => unusable,
                             .USER_PROVIDED => CUSTOM.ID_EQUALS.?,
-                            .INFERED_BY_RECIPE => |fn_tag| switch (fn_tag) {
+                            .INFERED_BY_RECIPE => |fn_tag| if (!ALLOW_INFERED) unusable else switch (fn_tag) {
                                 .infer_native => infer_native,
                                 .infer_gt_lt => infer_gt_lt,
                                 else => unreachable,
@@ -873,7 +891,7 @@ pub const DataManipulationCore = struct {
                         const func: FN_CHILD_ID_WITH_COUNT = switch (SOLUTIONS[@intFromEnum(Recipes.PackageFlags.FIRST_CHILD_ID)]) {
                             .UNAVAILABLE => unusable,
                             .USER_PROVIDED => CUSTOM.FIRST_CHILD_ID.?,
-                            .INFERED_BY_RECIPE => |fn_tag| switch (fn_tag) {
+                            .INFERED_BY_RECIPE => |fn_tag| if (!ALLOW_INFERED) unusable else switch (fn_tag) {
                                 .infer_nth_child => infer_nth_child,
                                 else => unreachable,
                             },
@@ -890,7 +908,7 @@ pub const DataManipulationCore = struct {
                         const func: FN_CHILD_ID_WITH_COUNT = switch (SOLUTIONS[@intFromEnum(Recipes.PackageFlags.LAST_CHILD_ID)]) {
                             .UNAVAILABLE => unusable,
                             .USER_PROVIDED => CUSTOM.LAST_CHILD_ID.?,
-                            .INFERED_BY_RECIPE => |fn_tag| switch (fn_tag) {
+                            .INFERED_BY_RECIPE => |fn_tag| if (!ALLOW_INFERED) unusable else switch (fn_tag) {
                                 .infer_nth_child => infer_nth_child,
                                 else => unreachable,
                             },
@@ -907,7 +925,7 @@ pub const DataManipulationCore = struct {
                         const func: FN_NTH_CHILD_ID_WITH_COUNT = switch (SOLUTIONS[@intFromEnum(Recipes.PackageFlags.NTH_CHILD_ID)]) {
                             .UNAVAILABLE => unusable,
                             .USER_PROVIDED => CUSTOM.NTH_CHILD_ID.?,
-                            .INFERED_BY_RECIPE => |fn_tag| switch (fn_tag) {
+                            .INFERED_BY_RECIPE => |fn_tag| if (!ALLOW_INFERED) unusable else switch (fn_tag) {
                                 .infer_native => infer_native,
                                 .infer_native_offset => infer_native_offset,
                                 else => unreachable,
@@ -933,7 +951,7 @@ pub const DataManipulationCore = struct {
                         const func: FN_CHILD_ID_WITH_COUNT = switch (SOLUTIONS[@intFromEnum(Recipes.PackageFlags.PARENT_ID)]) {
                             .UNAVAILABLE => unusable,
                             .USER_PROVIDED => CUSTOM.PARENT_ID.?,
-                            .INFERED_BY_RECIPE => |fn_tag| switch (fn_tag) {
+                            .INFERED_BY_RECIPE => |fn_tag| if (!ALLOW_INFERED) unusable else switch (fn_tag) {
                                 .infer_native => infer_native,
                                 .infer_native_offset => infer_native_offset,
                                 else => unreachable,
@@ -959,7 +977,7 @@ pub const DataManipulationCore = struct {
                         const func: FN_GET = switch (SOLUTIONS[@intFromEnum(Recipes.PackageFlags.GET)]) {
                             .UNAVAILABLE => unusable,
                             .USER_PROVIDED => CUSTOM.GET.?,
-                            .INFERED_BY_RECIPE => |fn_tag| switch (fn_tag) {
+                            .INFERED_BY_RECIPE => |fn_tag| if (!ALLOW_INFERED) unusable else switch (fn_tag) {
                                 .infer_const_ptr => infer_const_ptr,
                                 .infer_ptr => infer_ptr,
                                 .infer_base_const_ptr => infer_base_const_ptr,
@@ -991,7 +1009,7 @@ pub const DataManipulationCore = struct {
                         const func: FN_GET_PTR = switch (SOLUTIONS[@intFromEnum(Recipes.PackageFlags.GET_PTR)]) {
                             .UNAVAILABLE => unusable,
                             .USER_PROVIDED => CUSTOM.GET_PTR.?,
-                            .INFERED_BY_RECIPE => |fn_tag| switch (fn_tag) {
+                            .INFERED_BY_RECIPE => |fn_tag| if (!ALLOW_INFERED) unusable else switch (fn_tag) {
                                 .infer_base_ptr => infer_base_ptr,
                                 else => unreachable,
                             },
@@ -1008,7 +1026,7 @@ pub const DataManipulationCore = struct {
                         const func: FN_GET_CONST_PTR = switch (SOLUTIONS[@intFromEnum(Recipes.PackageFlags.GET_CONST_PTR)]) {
                             .UNAVAILABLE => unusable,
                             .USER_PROVIDED => CUSTOM.GET_CONST_PTR.?,
-                            .INFERED_BY_RECIPE => |fn_tag| switch (fn_tag) {
+                            .INFERED_BY_RECIPE => |fn_tag| if (!ALLOW_INFERED) unusable else switch (fn_tag) {
                                 .infer_ptr => infer_ptr,
                                 .infer_base_const_ptr => infer_base_const_ptr,
                                 .infer_base_ptr => infer_base_ptr,
@@ -1035,7 +1053,7 @@ pub const DataManipulationCore = struct {
                         const func: FN_SET = switch (SOLUTIONS[@intFromEnum(Recipes.PackageFlags.SET)]) {
                             .UNAVAILABLE => unusable,
                             .USER_PROVIDED => CUSTOM.SET.?,
-                            .INFERED_BY_RECIPE => |fn_tag| switch (fn_tag) {
+                            .INFERED_BY_RECIPE => |fn_tag| if (!ALLOW_INFERED) unusable else switch (fn_tag) {
                                 .infer_ptr => infer_ptr,
                                 .infer_base_ptr => infer_base_ptr,
                                 else => unreachable,
@@ -1060,7 +1078,7 @@ pub const DataManipulationCore = struct {
                         const func: FN_SWAP = switch (SOLUTIONS[@intFromEnum(Recipes.PackageFlags.SWAP)]) {
                             .UNAVAILABLE => unusable,
                             .USER_PROVIDED => CUSTOM.SWAP.?,
-                            .INFERED_BY_RECIPE => |fn_tag| switch (fn_tag) {
+                            .INFERED_BY_RECIPE => |fn_tag| if (!ALLOW_INFERED) unusable else switch (fn_tag) {
                                 .infer_get_set => infer_get_set,
                                 else => unreachable,
                             },
@@ -1080,7 +1098,7 @@ pub const DataManipulationCore = struct {
                         const func: FN_ELEM_COMPARE = switch (SOLUTIONS[@intFromEnum(Recipes.PackageFlags.LESS_THAN)]) {
                             .UNAVAILABLE => unusable,
                             .USER_PROVIDED => CUSTOM.LESS_THAN.?,
-                            .INFERED_BY_RECIPE => |fn_tag| switch (fn_tag) {
+                            .INFERED_BY_RECIPE => |fn_tag| if (!ALLOW_INFERED) unusable else switch (fn_tag) {
                                 .infer_native => infer_native,
                                 .infer_gt => infer_gt,
                                 .infer_gteq => infer_gteq,
@@ -1112,7 +1130,7 @@ pub const DataManipulationCore = struct {
                         const func: FN_ELEM_COMPARE = switch (SOLUTIONS[@intFromEnum(Recipes.PackageFlags.LESS_THAN_OR_EQUAL)]) {
                             .UNAVAILABLE => unusable,
                             .USER_PROVIDED => CUSTOM.LESS_THAN_OR_EQUAL.?,
-                            .INFERED_BY_RECIPE => |fn_tag| switch (fn_tag) {
+                            .INFERED_BY_RECIPE => |fn_tag| if (!ALLOW_INFERED) unusable else switch (fn_tag) {
                                 .infer_native => infer_native,
                                 .infer_gteq => infer_gteq,
                                 .infer_gt => infer_gt,
@@ -1144,7 +1162,7 @@ pub const DataManipulationCore = struct {
                         const func: FN_ELEM_COMPARE = switch (SOLUTIONS[@intFromEnum(Recipes.PackageFlags.GREATER_THAN)]) {
                             .UNAVAILABLE => unusable,
                             .USER_PROVIDED => CUSTOM.GREATER_THAN.?,
-                            .INFERED_BY_RECIPE => |fn_tag| switch (fn_tag) {
+                            .INFERED_BY_RECIPE => |fn_tag| if (!ALLOW_INFERED) unusable else switch (fn_tag) {
                                 .infer_native => infer_native,
                                 .infer_lt => infer_lt,
                                 .infer_lteq => infer_lteq,
@@ -1176,7 +1194,7 @@ pub const DataManipulationCore = struct {
                         const func: FN_ELEM_COMPARE = switch (SOLUTIONS[@intFromEnum(Recipes.PackageFlags.GREATER_THAN_OR_EQUAL)]) {
                             .UNAVAILABLE => unusable,
                             .USER_PROVIDED => CUSTOM.GREATER_THAN_OR_EQUAL.?,
-                            .INFERED_BY_RECIPE => |fn_tag| switch (fn_tag) {
+                            .INFERED_BY_RECIPE => |fn_tag| if (!ALLOW_INFERED) unusable else switch (fn_tag) {
                                 .infer_native => infer_native,
                                 .infer_lteq => infer_lteq,
                                 .infer_lt => infer_lt,
@@ -1208,7 +1226,7 @@ pub const DataManipulationCore = struct {
                         const func: FN_ELEM_COMPARE = switch (SOLUTIONS[@intFromEnum(Recipes.PackageFlags.ORDER_EQUALS)]) {
                             .UNAVAILABLE => unusable,
                             .USER_PROVIDED => CUSTOM.ORDER_EQUALS.?,
-                            .INFERED_BY_RECIPE => |fn_tag| switch (fn_tag) {
+                            .INFERED_BY_RECIPE => |fn_tag| if (!ALLOW_INFERED) unusable else switch (fn_tag) {
                                 .infer_native => infer_native,
                                 .infer_eq => infer_eq,
                                 .infer_gt_lt => infer_gt_lt,
@@ -1232,7 +1250,7 @@ pub const DataManipulationCore = struct {
                         const func: FN_ELEM_COMPARE = switch (SOLUTIONS[@intFromEnum(Recipes.PackageFlags.EXACT_EQUALS)]) {
                             .UNAVAILABLE => unusable,
                             .USER_PROVIDED => CUSTOM.EXACT_EQUALS.?,
-                            .INFERED_BY_RECIPE => |fn_tag| switch (fn_tag) {
+                            .INFERED_BY_RECIPE => |fn_tag| if (!ALLOW_INFERED) unusable else switch (fn_tag) {
                                 .infer_native => infer_native,
                                 .infer_oq => infer_oq,
                                 .infer_gt_lt => infer_gt_lt,
@@ -1256,7 +1274,7 @@ pub const DataManipulationCore = struct {
                         const func: FN_IMPLICIT_ID = switch (SOLUTIONS[@intFromEnum(Recipes.PackageFlags.FIRST_ID)]) {
                             .UNAVAILABLE => unusable,
                             .USER_PROVIDED => CUSTOM.FIRST_ID.?,
-                            .INFERED_BY_RECIPE => |fn_tag| switch (fn_tag) {
+                            .INFERED_BY_RECIPE => |fn_tag| if (!ALLOW_INFERED) unusable else switch (fn_tag) {
                                 .infer_native => infer_native,
                                 .infer_nth_from_start => infer_nth_from_start,
                                 .infer_len_nth_from_end => infer_len_nth_from_end,
@@ -1280,7 +1298,7 @@ pub const DataManipulationCore = struct {
                         const func: FN_IMPLICIT_ID = switch (SOLUTIONS[@intFromEnum(Recipes.PackageFlags.LAST_ID)]) {
                             .UNAVAILABLE => unusable,
                             .USER_PROVIDED => CUSTOM.LAST_ID.?,
-                            .INFERED_BY_RECIPE => |fn_tag| switch (fn_tag) {
+                            .INFERED_BY_RECIPE => |fn_tag| if (!ALLOW_INFERED) unusable else switch (fn_tag) {
                                 .infer_native => infer_native,
                                 .infer_nth_from_end => infer_nth_from_end,
                                 .infer_len_nth_from_start => infer_len_nth_from_start,
@@ -1304,7 +1322,7 @@ pub const DataManipulationCore = struct {
                         const func: FN_ADJACENT_ID = switch (SOLUTIONS[@intFromEnum(Recipes.PackageFlags.NEXT_ID)]) {
                             .UNAVAILABLE => unusable,
                             .USER_PROVIDED => CUSTOM.NEXT_ID.?,
-                            .INFERED_BY_RECIPE => |fn_tag| switch (fn_tag) {
+                            .INFERED_BY_RECIPE => |fn_tag| if (!ALLOW_INFERED) unusable else switch (fn_tag) {
                                 .infer_native => infer_native,
                                 .infer_nth_next => infer_nth_next,
                                 .infer_last_prev => infer_last_prev,
@@ -1337,7 +1355,7 @@ pub const DataManipulationCore = struct {
                         const func: FN_ADJACENT_ID = switch (SOLUTIONS[@intFromEnum(Recipes.PackageFlags.PREV_ID)]) {
                             .UNAVAILABLE => unusable,
                             .USER_PROVIDED => CUSTOM.PREV_ID.?,
-                            .INFERED_BY_RECIPE => |fn_tag| switch (fn_tag) {
+                            .INFERED_BY_RECIPE => |fn_tag| if (!ALLOW_INFERED) unusable else switch (fn_tag) {
                                 .infer_native => infer_native,
                                 .infer_nth_prev => infer_nth_prev,
                                 .infer_first_next => infer_first_next,
@@ -1370,7 +1388,7 @@ pub const DataManipulationCore = struct {
                         const func: FN_NTH_ID = switch (SOLUTIONS[@intFromEnum(Recipes.PackageFlags.NTH_NEXT_ID)]) {
                             .UNAVAILABLE => unusable,
                             .USER_PROVIDED => CUSTOM.NTH_NEXT_ID.?,
-                            .INFERED_BY_RECIPE => |fn_tag| switch (fn_tag) {
+                            .INFERED_BY_RECIPE => |fn_tag| if (!ALLOW_INFERED) unusable else switch (fn_tag) {
                                 .infer_native => infer_native,
                                 .infer_next => infer_next,
                                 .infer_last_prev => infer_last_prev,
@@ -1417,7 +1435,7 @@ pub const DataManipulationCore = struct {
                         const func: FN_NTH_ID = switch (SOLUTIONS[@intFromEnum(Recipes.PackageFlags.NTH_PREV_ID)]) {
                             .UNAVAILABLE => unusable,
                             .USER_PROVIDED => CUSTOM.NTH_PREV_ID.?,
-                            .INFERED_BY_RECIPE => |fn_tag| switch (fn_tag) {
+                            .INFERED_BY_RECIPE => |fn_tag| if (!ALLOW_INFERED) unusable else switch (fn_tag) {
                                 .infer_native => infer_native,
                                 .infer_prev => infer_prev,
                                 .infer_first_next => infer_first_next,
@@ -1461,10 +1479,10 @@ pub const DataManipulationCore = struct {
                         }
                     };
                     const NTH_FROM_START = struct {
-                        const func: FN_NTH_ID = switch (SOLUTIONS[@intFromEnum(Recipes.PackageFlags.NTH_ID_FROM_START)]) {
+                        const func: FN_IMPLICIT_NTH_ID = switch (SOLUTIONS[@intFromEnum(Recipes.PackageFlags.NTH_ID_FROM_START)]) {
                             .UNAVAILABLE => unusable,
                             .USER_PROVIDED => CUSTOM.NTH_ID_FROM_START.?,
-                            .INFERED_BY_RECIPE => |fn_tag| switch (fn_tag) {
+                            .INFERED_BY_RECIPE => |fn_tag| if (!ALLOW_INFERED) unusable else switch (fn_tag) {
                                 .infer_native => infer_native,
                                 .infer_native_first => infer_native_first,
                                 .infer_first_nth_next => infer_first_nth_next,
@@ -1485,10 +1503,10 @@ pub const DataManipulationCore = struct {
                         }
                     };
                     const NTH_FROM_END = struct {
-                        const func: FN_NTH_ID = switch (SOLUTIONS[@intFromEnum(Recipes.PackageFlags.NTH_ID_FROM_END)]) {
+                        const func: FN_IMPLICIT_NTH_ID = switch (SOLUTIONS[@intFromEnum(Recipes.PackageFlags.NTH_ID_FROM_END)]) {
                             .UNAVAILABLE => unusable,
                             .USER_PROVIDED => CUSTOM.NTH_ID_FROM_END.?,
-                            .INFERED_BY_RECIPE => |fn_tag| switch (fn_tag) {
+                            .INFERED_BY_RECIPE => |fn_tag| if (!ALLOW_INFERED) unusable else switch (fn_tag) {
                                 .infer_native => infer_native,
                                 .infer_last_nth_prev => infer_last_nth_prev,
                                 else => unreachable,
@@ -1508,7 +1526,7 @@ pub const DataManipulationCore = struct {
                         const func: FN_IMPLICIT_COUNT = switch (SOLUTIONS[@intFromEnum(Recipes.PackageFlags.GET_LEN)]) {
                             .UNAVAILABLE => unusable,
                             .USER_PROVIDED => CUSTOM.GET_LEN.?,
-                            .INFERED_BY_RECIPE => |fn_tag| switch (fn_tag) {
+                            .INFERED_BY_RECIPE => |fn_tag| if (!ALLOW_INFERED) unusable else switch (fn_tag) {
                                 .infer_native_last => infer_native_last,
                                 .infer_range => infer_range,
                                 else => unreachable,
@@ -1528,7 +1546,7 @@ pub const DataManipulationCore = struct {
                         const func: FN_SET_COUNT = switch (SOLUTIONS[@intFromEnum(Recipes.PackageFlags.SET_LEN)]) {
                             .UNAVAILABLE => unusable,
                             .USER_PROVIDED => CUSTOM.SET_LEN.?,
-                            .INFERED_BY_RECIPE => |fn_tag| switch (fn_tag) {
+                            .INFERED_BY_RECIPE => |fn_tag| if (!ALLOW_INFERED) unusable else switch (fn_tag) {
                                 else => unreachable,
                             },
                         };
@@ -1540,7 +1558,7 @@ pub const DataManipulationCore = struct {
                         const func: FN_IMPLICIT_COUNT = switch (SOLUTIONS[@intFromEnum(Recipes.PackageFlags.GET_CAP)]) {
                             .UNAVAILABLE => unusable,
                             .USER_PROVIDED => CUSTOM.GET_CAP.?,
-                            .INFERED_BY_RECIPE => |fn_tag| switch (fn_tag) {
+                            .INFERED_BY_RECIPE => |fn_tag| if (!ALLOW_INFERED) unusable else switch (fn_tag) {
                                 else => unreachable,
                             },
                         };
@@ -1552,7 +1570,7 @@ pub const DataManipulationCore = struct {
                         const func: FN_SET_COUNT = switch (SOLUTIONS[@intFromEnum(Recipes.PackageFlags.SET_CAP)]) {
                             .UNAVAILABLE => unusable,
                             .USER_PROVIDED => CUSTOM.SET_CAP.?,
-                            .INFERED_BY_RECIPE => |fn_tag| switch (fn_tag) {
+                            .INFERED_BY_RECIPE => |fn_tag| if (!ALLOW_INFERED) unusable else switch (fn_tag) {
                                 else => unreachable,
                             },
                         };
@@ -1564,7 +1582,7 @@ pub const DataManipulationCore = struct {
                         const func: FN_RANGE_COUNT = switch (SOLUTIONS[@intFromEnum(Recipes.PackageFlags.RANGE_LEN)]) {
                             .UNAVAILABLE => unusable,
                             .USER_PROVIDED => CUSTOM.RANGE_LEN.?,
-                            .INFERED_BY_RECIPE => |fn_tag| switch (fn_tag) {
+                            .INFERED_BY_RECIPE => |fn_tag| if (!ALLOW_INFERED) unusable else switch (fn_tag) {
                                 .infer_native => infer_native,
                                 .infer_limit => infer_limit,
                                 .infer_next => infer_next,
@@ -1607,12 +1625,18 @@ pub const DataManipulationCore = struct {
                         }
                     };
                     const LIMIT_LEN = struct {
-                        const func: FN_RANGE_COUNT = if (CUSTOM.LIMIT_LEN) |cust| cust //
-                            else if (FLAGS.has(INFER.LIMIT_LEN.FROM_RANGE_LEN)) infer_range //
-                            else if (FLAGS.has(INFER.LIMIT_LEN.FROM_NEXT)) infer_next //
-                            else if (FLAGS.has(INFER.LIMIT_LEN.FROM_PREV)) infer_prev //
-                            else if (ALLOW_DEFAULT) default else unusable;
-                        fn default(_: DATA_, start: ID_, end_exclude: ID_, _: USERDATA_) ID_ {
+                        const func: FN_RANGE_COUNT = switch (SOLUTIONS[@intFromEnum(Recipes.PackageFlags.LIMIT_LEN)]) {
+                            .UNAVAILABLE => unusable,
+                            .USER_PROVIDED => CUSTOM.LIMIT_LEN.?,
+                            .INFERED_BY_RECIPE => |fn_tag| if (!ALLOW_INFERED) unusable else switch (fn_tag) {
+                                .infer_native => infer_native,
+                                .infer_range => infer_range,
+                                .infer_next => infer_next,
+                                .infer_prev => infer_prev,
+                                else => unreachable,
+                            },
+                        };
+                        fn infer_native(_: DATA_, start: ID_, end_exclude: ID_, _: USERDATA_) ID_ {
                             return end_exclude - start;
                         }
                         fn infer_range(data: DATA_, start: ID_, end_exclude: ID_, userdata: USERDATA_) ID_ {
@@ -1647,72 +1671,87 @@ pub const DataManipulationCore = struct {
                         }
                     };
                     const REVERSE_RANGE = struct {
-                        const func: FN_RANGE_OP = if (CUSTOM.REVERSE_RANGE) |cust| cust //
-                            else if (FLAGS.has_any(&.{ INFER.REVERSE.FROM_GET_SET, INFER.REVERSE.FROM_SWAP })) infer_swap //
-                            else if (ALLOW_DEFAULT) default else unusable;
-                        fn default(data: DATA_, first: ID_, last: ID_, userdata: USERDATA_) DATA_ {
+                        const func: FN_RANGE_OP = switch (SOLUTIONS[@intFromEnum(Recipes.PackageFlags.REVERSE_RANGE)]) {
+                            .UNAVAILABLE => unusable,
+                            .USER_PROVIDED => CUSTOM.REVERSE_RANGE.?,
+                            .INFERED_BY_RECIPE => |fn_tag| if (!ALLOW_INFERED) unusable else switch (fn_tag) {
+                                .infer_slice => infer_slice,
+                                .infer_swap => infer_swap,
+                                else => unreachable,
+                            },
+                        };
+                        fn infer_slice(data: DATA_, first: ID_, last: ID_, userdata: USERDATA_) DATA_ {
                             const new_data = data;
-                            Utils.Mem.reverse_slice(GET_BASE_PTR.func(new_data, userdata)[first .. last + 1]);
+                            const slice = GET_RANGE_SLICE.func(data, first, last, userdata);
+                            Utils.Mem.reverse_slice(slice);
                             return new_data;
                         }
                         fn infer_swap(data: DATA_, first: ID_, last: ID_, userdata: USERDATA_) DATA_ {
                             assert_valid_id(data, first, userdata, @src());
                             assert_valid_id(data, last, userdata, @src());
-                            const SWAP_ = SWAP.func;
-                            const NEXT = NEXT_ID.func;
-                            const PREV = PREV_ID.func;
-                            const ID_LESS_OR_EQUAL = ID_LESS_THAN_OR_EQUAL.func;
-                            const ID_EQ = ID_EQUALS.func;
-                            if (!ID_LESS_OR_EQUAL(data, first, last, userdata)) return 0;
+                            if (!ID_LESS_THAN_OR_EQUAL.func(data, first, last, userdata)) return data;
                             var new_data = data;
                             var left = first;
                             var right = last;
-                            while (!ID_EQ(data, left, right, userdata)) {
-                                new_data = SWAP_(new_data, left, right, userdata);
-                                left = NEXT(data, left, userdata);
-                                if (ID_EQ(data, left, right, userdata)) break;
-                                right = PREV(new_data, right, userdata);
+                            while (!ID_EQUALS.func(data, left, right, userdata)) {
+                                new_data = SWAP.func(new_data, left, right, userdata);
+                                left = NEXT_ID.func(data, left, userdata);
+                                if (ID_EQUALS.func(data, left, right, userdata)) break;
+                                right = PREV_ID.func(new_data, right, userdata);
                             }
                             return new_data;
                         }
                         fn unusable(_: DATA_, _: ID_, _: ID_, _: USERDATA_) DATA_ {
-                            assert_unreachable(@src(), "no `range_len` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
+                            assert_unreachable(@src(), "no `reverse_range` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
                         }
                     };
                     const ROTATE_RIGHT = struct {
-                        const func: FN_ROTATE = if (CUSTOM.ROTATE_RANGE_RIGHT) |cust| cust //
-                            else if (FLAGS.has_any(&.{ INFER.ROTATE.FROM_GET_SET, INFER.ROTATE.FROM_REVERSE, INFER.ROTATE.FROM_SWAP })) infer_reverse //
-                            else if (ALLOW_DEFAULT) default else unusable;
-                        fn default(data: DATA_, first: ID_, last: ID_, count: COUNT_, userdata: USERDATA_) DATA_ {
-                            if (last < first) return data;
-                            const end_exl = last + 1;
-                            const len = end_exl - first;
-                            const shift = count % len;
-                            if (shift == 0) return data;
-                            const edge = first + (len - shift);
-                            Utils.Mem.reverse_slice(GET_BASE_PTR.func(data, userdata)[first..edge]);
-                            Utils.Mem.reverse_slice(GET_BASE_PTR.func(data, userdata)[edge..end_exl]);
-                            Utils.Mem.reverse_slice(GET_BASE_PTR.func(data, userdata)[first..end_exl]);
-                            return data;
+                        const func: FN_ROTATE = switch (SOLUTIONS[@intFromEnum(Recipes.PackageFlags.ROTATE_RANGE_RIGHT)]) {
+                            .UNAVAILABLE => unusable,
+                            .USER_PROVIDED => CUSTOM.ROTATE_RANGE_RIGHT.?,
+                            .INFERED_BY_RECIPE => |fn_tag| if (!ALLOW_INFERED) unusable else switch (fn_tag) {
+                                .infer_rot_left => infer_rot_left,
+                                .infer_reverse_nth_next => infer_reverse_nth_next,
+                                .infer_reverse_nth_prev => infer_reverse_nth_prev,
+                                else => unreachable,
+                            },
+                        };
+                        fn infer_rot_left(data: DATA_, first: ID_, last: ID_, count: COUNT_, userdata: USERDATA_) DATA_ {
+                            const range_len = RANGE_LEN.func(data, first, last, userdata);
+                            if (range_len == 0) return data;
+                            const count_mod = count % range_len;
+                            const inverse_count = range_len - count_mod;
+                            return ROTATE_LEFT.func(data, first, last, inverse_count, userdata);
                         }
-                        fn infer_reverse(data: DATA_, first: ID_, last: ID_, count: COUNT_, userdata: USERDATA_) DATA_ {
+                        fn infer_reverse_nth_prev(data: DATA_, first: ID_, last: ID_, count: COUNT_, userdata: USERDATA_) DATA_ {
                             assert_valid_id(data, first, userdata, @src());
                             assert_valid_id(data, last, userdata, @src());
-                            const REV = REVERSE_RANGE.func;
-                            const NEXT = NEXT_ID.func;
-                            const NTH_PREV = NTH_PREV_ID.func;
-                            const ID_LESS_OR_EQUAL = comptime ID_LESS_THAN_OR_EQUAL.func;
-                            const RANGE_LEN_ = RANGE_LEN.func;
-                            if (!ID_LESS_OR_EQUAL(data, first, last, userdata)) return data;
+                            if (!ID_LESS_THAN.func(data, first, last, userdata)) return data;
                             var new_data = data;
-                            const len = RANGE_LEN_(data, first, last, userdata);
+                            const len = RANGE_LEN.func(data, first, last, userdata);
                             const shift = count % len;
                             if (shift == 0) return data;
-                            const first_group_last_id = NTH_PREV(data, last, shift, userdata);
-                            const last_group_first_id = NEXT(data, first_group_last_id, userdata);
-                            new_data = REV(new_data, first, first_group_last_id, userdata);
-                            new_data = REV(new_data, last_group_first_id, last, new_data);
-                            new_data = REV(new_data, first, last, new_data);
+                            const first_group_last_id = NTH_PREV_ID.func(data, last, shift, userdata);
+                            const last_group_first_id = NEXT_ID.func(data, first_group_last_id, userdata);
+                            new_data = REVERSE_RANGE.func(new_data, first, first_group_last_id, userdata);
+                            new_data = REVERSE_RANGE.func(new_data, last_group_first_id, last, new_data);
+                            new_data = REVERSE_RANGE.func(new_data, first, last, new_data);
+                            return new_data;
+                        }
+                        fn infer_reverse_nth_next(data: DATA_, first: ID_, last: ID_, count: COUNT_, userdata: USERDATA_) DATA_ {
+                            assert_valid_id(data, first, userdata, @src());
+                            assert_valid_id(data, last, userdata, @src());
+                            if (!ID_LESS_THAN.func(data, first, last, userdata)) return data;
+                            var new_data = data;
+                            const len = RANGE_LEN.func(data, first, last, userdata);
+                            const shift = count % len;
+                            if (shift == 0) return data;
+                            const inverse_shift = len - shift;
+                            const first_group_last_id = NTH_NEXT_ID.func(data, first, inverse_shift, userdata);
+                            const last_group_first_id = NEXT_ID.func(data, first_group_last_id, userdata);
+                            new_data = REVERSE_RANGE.func(new_data, first, first_group_last_id, userdata);
+                            new_data = REVERSE_RANGE.func(new_data, last_group_first_id, last, new_data);
+                            new_data = REVERSE_RANGE.func(new_data, first, last, new_data);
                             return new_data;
                         }
                         fn unusable(_: DATA_, _: ID_, _: ID_, _: COUNT_, _: USERDATA_) DATA_ {
@@ -1720,199 +1759,271 @@ pub const DataManipulationCore = struct {
                         }
                     };
                     const ROTATE_LEFT = struct {
-                        const func: FN_ROTATE = if (CUSTOM.ROTATE_RANGE_LEFT) |cust| cust //
-                            else if (FLAGS.has_any(&.{ INFER.ROTATE.FROM_GET_SET, INFER.ROTATE.FROM_REVERSE, INFER.ROTATE.FROM_SWAP })) infer_reverse //
-                            else if (ALLOW_DEFAULT) default else unusable;
-                        fn default(data: DATA_, first: ID_, last: ID_, count: COUNT_, userdata: USERDATA_) DATA_ {
-                            if (last < first) return data;
-                            const end_exl = last + 1;
-                            const len = end_exl - first;
-                            const shift = count % len;
-                            if (shift == 0) return data;
-                            const edge = first + shift;
-                            Utils.Mem.reverse_slice(GET_BASE_PTR.func(data, userdata)[first..edge]);
-                            Utils.Mem.reverse_slice(GET_BASE_PTR.func(data, userdata)[edge..end_exl]);
-                            Utils.Mem.reverse_slice(GET_BASE_PTR.func(data, userdata)[first..end_exl]);
-                            return data;
+                        const func: FN_ROTATE = switch (SOLUTIONS[@intFromEnum(Recipes.PackageFlags.ROTATE_RANGE_LEFT)]) {
+                            .UNAVAILABLE => unusable,
+                            .USER_PROVIDED => CUSTOM.ROTATE_RANGE_LEFT.?,
+                            .INFERED_BY_RECIPE => |fn_tag| if (!ALLOW_INFERED) unusable else switch (fn_tag) {
+                                .infer_rot_right => infer_rot_right,
+                                .infer_reverse_nth_next => infer_reverse_nth_next,
+                                .infer_reverse_nth_prev => infer_reverse_nth_prev,
+                                else => unreachable,
+                            },
+                        };
+                        fn infer_rot_right(data: DATA_, first: ID_, last: ID_, count: COUNT_, userdata: USERDATA_) DATA_ {
+                            const range_len = RANGE_LEN.func(data, first, last, userdata);
+                            if (range_len == 0) return data;
+                            const count_mod = count % range_len;
+                            const inverse_count = range_len - count_mod;
+                            return ROTATE_RIGHT.func(data, first, last, inverse_count, userdata);
                         }
-                        fn infer_reverse(data: DATA_, first: ID_, last: ID_, count: COUNT_, userdata: USERDATA_) DATA_ {
+                        fn infer_reverse_nth_next(data: DATA_, first: ID_, last: ID_, count: COUNT_, userdata: USERDATA_) DATA_ {
                             assert_valid_id(data, first, userdata, @src());
                             assert_valid_id(data, last, userdata, @src());
-                            const REV = REVERSE_RANGE.func;
-                            const NTH_NEXT = NTH_NEXT_ID.func;
-                            const PREV = PREV_ID.func;
-                            const ID_LESS_OR_EQUAL = comptime ID_LESS_THAN_OR_EQUAL.func;
-                            const RANGE_LEN_ = RANGE_LEN.func;
-                            if (!ID_LESS_OR_EQUAL(data, first, last, userdata)) return data;
+                            if (!ID_LESS_THAN.func(data, first, last, userdata)) return data;
                             var new_data = data;
-                            const len = RANGE_LEN_(data, first, last, userdata);
+                            const len = RANGE_LEN.func(data, first, last, userdata);
                             const shift = count % len;
                             if (shift == 0) return data;
-                            const last_group_first_id = NTH_NEXT(data, last, shift, userdata);
-                            const first_group_last_id = PREV(data, last_group_first_id, userdata);
-                            new_data = REV(new_data, first, first_group_last_id, userdata);
-                            new_data = REV(new_data, last_group_first_id, last, new_data);
-                            new_data = REV(new_data, first, last, new_data);
+                            const last_group_first_id = NTH_NEXT_ID.func(data, first, shift, userdata);
+                            const first_group_last_id = PREV_ID.func(data, last_group_first_id, userdata);
+                            new_data = REVERSE_RANGE.func(new_data, first, first_group_last_id, userdata);
+                            new_data = REVERSE_RANGE.func(new_data, last_group_first_id, last, new_data);
+                            new_data = REVERSE_RANGE.func(new_data, first, last, new_data);
+                            return new_data;
+                        }
+                        fn infer_reverse_nth_prev(data: DATA_, first: ID_, last: ID_, count: COUNT_, userdata: USERDATA_) DATA_ {
+                            assert_valid_id(data, first, userdata, @src());
+                            assert_valid_id(data, last, userdata, @src());
+                            if (!ID_LESS_THAN.func(data, first, last, userdata)) return data;
+                            var new_data = data;
+                            const len = RANGE_LEN.func(data, first, last, userdata);
+                            const shift = count % len;
+                            if (shift == 0) return data;
+                            const inverse_shift = len - shift;
+                            const last_group_first_id = NTH_PREV_ID.func(data, last, inverse_shift, userdata);
+                            const first_group_last_id = PREV_ID.func(data, last_group_first_id, userdata);
+                            new_data = REVERSE_RANGE.func(new_data, first, first_group_last_id, userdata);
+                            new_data = REVERSE_RANGE.func(new_data, last_group_first_id, last, new_data);
+                            new_data = REVERSE_RANGE.func(new_data, first, last, new_data);
                             return new_data;
                         }
                         fn unusable(_: DATA_, _: ID_, _: ID_, _: COUNT_, _: USERDATA_) DATA_ {
                             assert_unreachable(@src(), "no `rotate_range_left` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
                         }
                     };
-                    const MOVE_ONE_PRESERVE = struct {
-                        const func: FN_RANGE_OP = if (CUSTOM.MOVE_ONE_PRESERVE) |cust| cust //
-                            else if (FLAGS.has(INFER.MOVE_ONE.FROM_GET_SET)) infer_get_set //
-                            else if (FLAGS.has(INFER.MOVE_ONE.FROM_MOVE_BLOCK)) infer_move_block //
-                            else if (FLAGS.has_any(&.{ INFER.MOVE.FROM_GET_SET, INFER.MOVE.FROM_REVERSE, INFER.MOVE.FROM_SWAP, INFER.MOVE.FROM_ROTATE })) infer_rotate //
-                            else if (ALLOW_DEFAULT) default else unusable;
-                        fn default(data: DATA_, old_id: ID_, new_id: ID_, userdata: USERDATA_) DATA_ {
-                            assert_with_reason(old_id < GET_LEN.func(data, userdata), @src(), "index {d} out of range for len {d}", .{ old_id, GET_LEN.func(data, userdata) });
-                            assert_with_reason(new_id < GET_LEN.func(data, userdata), @src(), "index {d} out of range for len {d}", .{ new_id, GET_LEN.func(data, userdata) });
-                            var new_data = data;
-                            if (old_id == new_id) return data;
-                            if (old_id < new_id) {
-                                const old_val = GET.func(data, old_id, userdata);
-                                var i = old_id;
-                                var ii = i;
-                                while (i != new_id) {
-                                    i += 1;
-                                    const val_to_move = GET.func(data, i, userdata);
-                                    new_data = SET.func(new_data, ii, val_to_move, userdata);
-                                    ii = i;
-                                }
-                                new_data = SET.func(new_data, new_id, old_val, userdata);
-                            } else {
-                                const old_val = GET.func(data, old_id, userdata);
-                                var i = old_id;
-                                var ii = i;
-                                while (i != new_id) {
-                                    i -= 1;
-                                    const val_to_move = GET.func(data, i, userdata);
-                                    new_data = SET.func(new_data, ii, val_to_move, userdata);
-                                    ii = i;
-                                }
-                                new_data = SET.func(new_data, new_id, old_val, userdata);
-                            }
-                            return new_data;
-                        }
-                        fn infer_move_block(data: DATA_, old_id: ID_, new_id: ID_, userdata: USERDATA_) DATA_ {
-                            const MOVE_BLOCK = MOVE_BLOCK_PRESERVE.func;
-                            return MOVE_BLOCK(data, old_id, old_id, new_id, userdata);
-                        }
-                        fn infer_get_set(data: DATA_, old_id: ID_, new_id: ID_, userdata: USERDATA_) DATA_ {
+                    const MOVE_ONE_RIGHT_DISPLACE = struct {
+                        const func: FN_RANGE_OP = switch (SOLUTIONS[@intFromEnum(Recipes.PackageFlags.MOVE_ONE_RIGHT_DISPLACE)]) {
+                            .UNAVAILABLE => unusable,
+                            .USER_PROVIDED => CUSTOM.MOVE_ONE_RIGHT_DISPLACE.?,
+                            .INFERED_BY_RECIPE => |fn_tag| if (!ALLOW_INFERED) unusable else switch (fn_tag) {
+                                .infer_get_set_move_block_left_overwrite => infer_get_set_move_block_left_overwrite,
+                                .infer_mv_block_right => infer_mv_block_right,
+                                .infer_rot_left => infer_rot_left,
+                                else => unreachable,
+                            },
+                        };
+                        fn infer_get_set_move_block_left_overwrite(data_: DATA_, old_id: ID_, new_id: ID_, userdata: USERDATA_) DATA_ {
+                            var data = data_;
                             assert_valid_id(data, old_id, userdata, @src());
                             assert_valid_id(data, new_id, userdata, @src());
-                            const GET_ = GET.func;
-                            const SET_ = SET.func;
-                            const NEXT = NEXT_ID.func;
-                            const PREV = PREV_ID.func;
-                            const ID_LESS_OR_EQUAL = ID_LESS_THAN_OR_EQUAL.func;
-                            const ID_EQ = ID_EQUALS.func;
-                            var new_data = data;
-                            if (ID_EQ(data, old_id, new_id, userdata)) return data;
-                            if (ID_LESS_OR_EQUAL(data, old_id, new_id, userdata)) {
-                                const old_val = GET_(data, old_id, userdata);
-                                var i = old_id;
-                                var ii = i;
-                                while (!ID_EQ(data, i, new_id, userdata)) {
-                                    i = NEXT(data, i, userdata);
-                                    const val_to_move = GET_(new_data, i, userdata);
-                                    new_data = SET_(new_data, ii, val_to_move, userdata);
-                                    ii = i;
-                                }
-                                new_data = SET_(data, new_id, old_val, userdata);
-                            } else {
-                                const old_val = GET_(data, old_id, userdata);
-                                var i = old_id;
-                                var ii = i;
-                                while (!ID_EQ(data, i, new_id, userdata)) {
-                                    i = PREV(data, i, userdata);
-                                    const val_to_move = GET_(new_data, i, userdata);
-                                    new_data = SET_(new_data, ii, val_to_move, userdata);
-                                    ii = i;
-                                }
-                                new_data = SET_(data, new_id, old_val, userdata);
-                            }
-                            return new_data;
+                            if (ID_EQUALS.func(data, old_id, new_id, userdata)) return data;
+                            assert_id_less(data, old_id, new_id, userdata);
+                            const val = GET.func(data, old_id, userdata);
+                            const first_to_move = NEXT_ID.func(data, old_id, userdata);
+                            data = MOVE_RANGE_LEFT_OVERWRITE.func(data, first_to_move, new_id, 1, userdata);
+                            data = SET.func(data, new_id, val, userdata);
+                            return data;
                         }
-                        fn infer_rotate(data: DATA_, old_id: ID_, new_id: ID_, userdata: USERDATA_) DATA_ {
+                        fn infer_mv_block_right(data: DATA_, old_id: ID_, new_id: ID_, userdata: USERDATA_) DATA_ {
+                            return MOVE_RANGE_RIGHT_DISPLACE.func(data, old_id, old_id, new_id, userdata);
+                        }
+                        fn infer_rot_left(data: DATA_, old_id: ID_, new_id: ID_, userdata: USERDATA_) DATA_ {
                             assert_valid_id(data, old_id, userdata, @src());
                             assert_valid_id(data, new_id, userdata, @src());
-                            const ROT_L = ROTATE_LEFT.func;
-                            const ROT_R = ROTATE_RIGHT.func;
-                            const ID_LESS_OR_EQUAL = ID_LESS_THAN_OR_EQUAL.func;
-                            const ID_EQ = ID_EQUALS.func;
-                            var new_data = data;
-                            if (ID_EQ(data, old_id, new_id, userdata)) return data;
-                            if (ID_LESS_OR_EQUAL(data, old_id, new_id, userdata)) {
-                                new_data = ROT_L(data, old_id, new_id, 1, userdata);
-                            } else {
-                                new_data = ROT_R(data, new_id, old_id, 1, userdata);
-                            }
-                            return new_data;
+                            if (ID_EQUALS.func(data, old_id, new_id, userdata)) return data;
+                            assert_id_less(data, old_id, new_id, userdata);
+                            return ROTATE_LEFT.func(data, old_id, new_id, 1, userdata);
                         }
                         fn unusable(_: DATA_, _: ID_, _: ID_, _: USERDATA_) DATA_ {
-                            assert_unreachable(@src(), "no `move_one_element_preserve_displaced_elements` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
+                            assert_unreachable(@src(), "no `move_one_right_displace` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
                         }
                     };
-                    const MOVE_BLOCK_PRESERVE = struct {
-                        const func: FN_MOVE_BLOCK = if (CUSTOM.MOVE_BLOCK_PRESERVE) |cust| cust //
-                            else if (FLAGS.has_any(&.{ INFER.MOVE.FROM_GET_SET, INFER.MOVE.FROM_REVERSE, INFER.MOVE.FROM_SWAP, INFER.MOVE.FROM_ROTATE })) infer_rotate //
-                            else if (ALLOW_DEFAULT) default else unusable;
-                        fn default(data: DATA_, first_old_id: ID_, last_old_id: ID_, new_first_id: ID_, userdata: USERDATA_) DATA_ {
-                            assert_with_reason(first_old_id < GET_LEN.func(data, userdata), @src(), "index {d} out of range for len {d}", .{ first_old_id, GET_LEN.func(data, userdata) });
-                            assert_with_reason(last_old_id < GET_LEN.func(data, userdata), @src(), "index {d} out of range for len {d}", .{ last_old_id, GET_LEN.func(data, userdata) });
-                            assert_with_reason(new_first_id < GET_LEN.func(data, userdata), @src(), "index {d} out of range for len {d}", .{ new_first_id, GET_LEN.func(data, userdata) });
-                            assert_with_reason(first_old_id <= last_old_id, @src(), "first id must be <= last id (by data order), got `{any}` > `{any}`", .{ first_old_id, last_old_id });
-                            var new_data = data;
-                            if (first_old_id == new_first_id) return data;
-                            const block_len = (last_old_id + 1) - first_old_id;
-                            if (first_old_id < new_first_id) {
-                                const new_last_id = new_first_id + (block_len - 1);
-                                assert_with_reason(new_last_id < GET_LEN.func(data, userdata), @src(), "index {d} out of range for len {d}", .{ new_last_id, GET_LEN.func(data, userdata) });
-                                const delta = new_first_id - first_old_id;
-                                new_data = ROTATE_LEFT.func(data, first_old_id, new_last_id, delta, userdata);
-                            } else {
-                                const delta = first_old_id - new_first_id;
-                                new_data = ROTATE_RIGHT.func(data, new_first_id, last_old_id, delta, userdata);
-                            }
-                            return new_data;
+                    const MOVE_ONE_LEFT_DISPLACE = struct {
+                        const func: FN_RANGE_OP = switch (SOLUTIONS[@intFromEnum(Recipes.PackageFlags.MOVE_ONE_LEFT_DISPLACE)]) {
+                            .UNAVAILABLE => unusable,
+                            .USER_PROVIDED => CUSTOM.MOVE_ONE_LEFT_DISPLACE.?,
+                            .INFERED_BY_RECIPE => |fn_tag| if (!ALLOW_INFERED) unusable else switch (fn_tag) {
+                                .infer_get_set_move_block_right_overwrite => infer_get_set_move_block_right_overwrite,
+                                .infer_mv_block_left => infer_mv_block_left,
+                                .infer_rot_right => infer_rot_right,
+                                else => unreachable,
+                            },
+                        };
+                        fn infer_get_set_move_block_right_overwrite(data_: DATA_, old_id: ID_, new_id: ID_, userdata: USERDATA_) DATA_ {
+                            var data = data_;
+                            assert_valid_id(data, old_id, userdata, @src());
+                            assert_valid_id(data, new_id, userdata, @src());
+                            if (ID_EQUALS.func(data, old_id, new_id, userdata)) return data;
+                            assert_id_less(data, old_id, new_id, userdata);
+                            const val = GET.func(data, old_id, userdata);
+                            const first_to_move = NEXT_ID.func(data, old_id, userdata);
+                            data = MOVE_RANGE_RIGHT_OVERWRITE.func(data, first_to_move, new_id, 1, userdata);
+                            data = SET.func(data, new_id, val, userdata);
+                            return data;
                         }
-                        fn infer_rotate(data: DATA_, first_old_id: ID_, last_old_id: ID_, new_first_id: ID_, userdata: USERDATA_) DATA_ {
-                            assert_valid_id(data, first_old_id, userdata, @src());
-                            assert_valid_id(data, last_old_id, userdata, @src());
-                            assert_valid_id(data, new_first_id, userdata, @src());
-                            const ROT_L = ROTATE_LEFT.func;
-                            const ROT_R = ROTATE_RIGHT.func;
-                            const RANGE_LEN_ = RANGE_LEN.func;
-                            const NTH_NEXT = NTH_NEXT_ID.func;
-                            const ID_LESS_OR_EQUAL = ID_LESS_THAN_OR_EQUAL.func;
-                            const ID_EQ = ID_EQUALS.func;
-                            assert_with_reason(ID_LESS_OR_EQUAL(data, first_old_id, last_old_id, userdata), @src(), "first id must be <= last id (by data order), got `{any}` > `{any}`", .{ first_old_id, last_old_id });
-                            var new_data = data;
-                            if (ID_EQ(data, first_old_id, new_first_id, userdata)) return data;
-                            const block_len = RANGE_LEN_(data, first_old_id, last_old_id, userdata);
-                            if (ID_LESS_OR_EQUAL(data, first_old_id, new_first_id, userdata)) {
-                                const new_last_id = NTH_NEXT(data, new_first_id, block_len - 1, userdata);
-                                assert_valid_id(data, new_last_id, userdata, @src());
-                                const delta = RANGE_LEN_(data, first_old_id, new_first_id, userdata) - 1;
-                                new_data = ROT_L(data, first_old_id, new_last_id, delta, userdata);
-                            } else {
-                                const delta = RANGE_LEN_(data, new_first_id, first_old_id, userdata) - 1;
-                                new_data = ROT_R(data, new_first_id, last_old_id, delta, userdata);
-                            }
-                            return new_data;
+                        fn infer_mv_block_left(data: DATA_, old_id: ID_, new_id: ID_, userdata: USERDATA_) DATA_ {
+                            return MOVE_RANGE_LEFT_DISPLACE.func(data, old_id, old_id, new_id, userdata);
+                        }
+                        fn infer_rot_right(data: DATA_, old_id: ID_, new_id: ID_, userdata: USERDATA_) DATA_ {
+                            assert_valid_id(data, old_id, userdata, @src());
+                            assert_valid_id(data, new_id, userdata, @src());
+                            if (ID_EQUALS.func(data, old_id, new_id, userdata)) return data;
+                            assert_id_less(data, old_id, new_id, userdata);
+                            return ROTATE_RIGHT.func(data, old_id, new_id, 1, userdata);
+                        }
+                        fn unusable(_: DATA_, _: ID_, _: ID_, _: USERDATA_) DATA_ {
+                            assert_unreachable(@src(), "no `move_one_left_displace` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
+                        }
+                    };
+                    const MOVE_ONE_OVERWRITE = struct {
+                        const func: FN_RANGE_OP = switch (SOLUTIONS[@intFromEnum(Recipes.PackageFlags.MOVE_ONE_OVERWRITE)]) {
+                            .UNAVAILABLE => unusable,
+                            .USER_PROVIDED => CUSTOM.MOVE_ONE_OVERWRITE.?,
+                            .INFERED_BY_RECIPE => |fn_tag| if (!ALLOW_INFERED) unusable else switch (fn_tag) {
+                                .infer_get_set => infer_get_set,
+                                else => unreachable,
+                            },
+                        };
+                        fn infer_get_set(data: DATA_, old_id: ID_, new_id: ID_, userdata: USERDATA_) DATA_ {
+                            return SET.func(data, new_id, GET.func(data, old_id, userdata), userdata);
+                        }
+                        fn unusable(_: DATA_, _: ID_, _: ID_, _: USERDATA_) DATA_ {
+                            assert_unreachable(@src(), "no `move_one_overwrite` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
+                        }
+                    };
+                    const MOVE_RANGE_RIGHT_DISPLACE = struct {
+                        const func: FN_MOVE_RANGE_DISPLACE = switch (SOLUTIONS[@intFromEnum(Recipes.PackageFlags.MOVE_RANGE_RIGHT_DISPLACE)]) {
+                            .UNAVAILABLE => unusable,
+                            .USER_PROVIDED => CUSTOM.MOVE_RANGE_RIGHT_DISPLACE.?,
+                            .INFERED_BY_RECIPE => |fn_tag| if (!ALLOW_INFERED) unusable else switch (fn_tag) {
+                                .infer_rot_left => infer_rot_left,
+                                else => unreachable,
+                            },
+                        };
+                        fn infer_rot_left(data_: DATA_, first_old_id: ID_, last_old_id: ID_, new_first_id: ID_, userdata: USERDATA_) DATA_ {
+                            assert_valid_range(data_, first_old_id, last_old_id, userdata, @src());
+                            assert_valid_id(data_, new_first_id, userdata, @src());
+                            var data = data_;
+                            if (ID_EQUALS.func(data, first_old_id, new_first_id, userdata)) return data;
+                            assert_id_less(data, first_old_id, new_first_id, userdata, @src());
+                            const block_len = RANGE_LEN.func(data, first_old_id, last_old_id, userdata);
+                            const new_last = NTH_NEXT_ID.func(data, new_first_id, block_len - 1, userdata);
+                            assert_valid_id(data, new_last, userdata, @src());
+                            data = ROTATE_LEFT.func(data, first_old_id, new_last, block_len, userdata);
+                            return data;
                         }
                         fn unusable(_: DATA_, _: ID_, _: ID_, _: ID_, _: USERDATA_) DATA_ {
-                            assert_unreachable(@src(), "no `move_element_block_preserve_displaced_elements` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
+                            assert_unreachable(@src(), "no `move_range_right_displace` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
                         }
                     };
+                    const MOVE_RANGE_LEFT_DISPLACE = struct {
+                        const func: FN_MOVE_RANGE_DISPLACE = switch (SOLUTIONS[@intFromEnum(Recipes.PackageFlags.MOVE_RANGE_LEFT_DISPLACE)]) {
+                            .UNAVAILABLE => unusable,
+                            .USER_PROVIDED => CUSTOM.MOVE_RANGE_LEFT_DISPLACE.?,
+                            .INFERED_BY_RECIPE => |fn_tag| if (!ALLOW_INFERED) unusable else switch (fn_tag) {
+                                .infer_rot_right => infer_rot_right,
+                                else => unreachable,
+                            },
+                        };
+                        fn infer_rot_right(data_: DATA_, first_old_id: ID_, last_old_id: ID_, new_first_id: ID_, userdata: USERDATA_) DATA_ {
+                            assert_valid_range(data_, first_old_id, last_old_id, userdata, @src());
+                            assert_valid_id(data_, new_first_id, userdata, @src());
+                            var data = data_;
+                            if (ID_EQUALS.func(data, first_old_id, new_first_id, userdata)) return data;
+                            assert_id_less(data, new_first_id, first_old_id, userdata, @src());
+                            const block_len = RANGE_LEN.func(data, first_old_id, last_old_id, userdata);
+                            data = ROTATE_RIGHT.func(data, new_first_id, last_old_id, block_len, userdata);
+                            return data;
+                        }
+                        fn unusable(_: DATA_, _: ID_, _: ID_, _: ID_, _: USERDATA_) DATA_ {
+                            assert_unreachable(@src(), "no `move_range_left_displace` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
+                        }
+                    };
+                    const MOVE_RANGE_LEFT_OVERWRITE = struct {
+                        const func: FN_MOVE_RANGE_OVERWRITE = switch (SOLUTIONS[@intFromEnum(Recipes.PackageFlags.MOVE_RANGE_LEFT_OVERWRITE)]) {
+                            .UNAVAILABLE => unusable,
+                            .USER_PROVIDED => CUSTOM.MOVE_RANGE_LEFT_OVERWRITE.?,
+                            .INFERED_BY_RECIPE => |fn_tag| if (!ALLOW_INFERED) unusable else switch (fn_tag) {
+                                .infer_mv_one_overwrite => infer_mv_one_overwrite,
+                                else => unreachable,
+                            },
+                        };
+                        fn infer_mv_one_overwrite(data_: DATA_, first: ID_, last: ID_, count: COUNT_, userdata: USERDATA_) DATA_ {
+                            assert_valid_range(data_, first, last, userdata, @src());
+                            if (count == 0) {
+                                @branchHint(.unlikely);
+                                return data_;
+                            }
+                            var data = data_;
+                            var read = first;
+                            var write = NTH_PREV_ID.func(data, read, count, userdata);
+                            assert_valid_id(data, write, userdata, @src());
+                            while (true) {
+                                data = MOVE_ONE_OVERWRITE.func(data, read, write, userdata);
+                                if (ID_EQUALS.func(data, read, last, userdata)) break;
+                                write = NEXT_ID.func(data, write, userdata);
+                                read = NEXT_ID.func(data, read, userdata);
+                            }
+                            return data;
+                        }
+                        fn unusable(_: DATA_, _: ID_, _: ID_, _: COUNT_, _: USERDATA_) DATA_ {
+                            assert_unreachable(@src(), "no `move_range_left_overwrite` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
+                        }
+                    };
+                    const MOVE_RANGE_RIGHT_OVERWRITE = struct {
+                        const func: FN_MOVE_RANGE_DISPLACE = switch (SOLUTIONS[@intFromEnum(Recipes.PackageFlags.MOVE_RANGE_LEFT_OVERWRITE)]) {
+                            .UNAVAILABLE => unusable,
+                            .USER_PROVIDED => CUSTOM.MOVE_RANGE_LEFT_OVERWRITE.?,
+                            .INFERED_BY_RECIPE => |fn_tag| if (!ALLOW_INFERED) unusable else switch (fn_tag) {
+                                .infer_mv_one_overwrite => infer_mv_one_overwrite,
+                                else => unreachable,
+                            },
+                        };
+                        fn infer_mv_one_overwrite(data_: DATA_, first: ID_, last: ID_, count: COUNT_, userdata: USERDATA_) DATA_ {
+                            assert_valid_range(data_, first, last, userdata, @src());
+                            if (count == 0) {
+                                @branchHint(.unlikely);
+                                return data_;
+                            }
+                            var data = data_;
+                            var read = last;
+                            var write = NTH_NEXT_ID.func(data, read, count, userdata);
+                            assert_valid_id(data, write, userdata, @src());
+                            while (true) {
+                                data = MOVE_ONE_OVERWRITE.func(data, read, write, userdata);
+                                if (ID_EQUALS.func(data, read, first, userdata)) break;
+                                write = PREV_ID.func(data, write, userdata);
+                                read = PREV_ID.func(data, read, userdata);
+                            }
+                            return data;
+                        }
+                        fn unusable(_: DATA_, _: ID_, _: ID_, _: COUNT_, _: USERDATA_) DATA_ {
+                            assert_unreachable(@src(), "no `move_range_right_overwrite` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
+                        }
+                    };
+
                     const SCRAMBLE = struct {
-                        const func: FN_SCRAMBLE = if (CUSTOM.SCRAMBLE) |cust| cust //
-                            else if (ALLOW_DEFAULT) default else unusable;
-                        fn default(data: DATA_, rand: Random, first: ID_, last: ID_, iterations: COUNT_, userdata: USERDATA_) DATA_ {
-                            var new_data = data;
-                            const span = (last + 1) - first;
+                        const func: FN_SCRAMBLE = switch (SOLUTIONS[@intFromEnum(Recipes.PackageFlags.SCRAMBLE)]) {
+                            .UNAVAILABLE => unusable,
+                            .USER_PROVIDED => CUSTOM.SCRAMBLE.?,
+                            .INFERED_BY_RECIPE => |fn_tag| if (!ALLOW_INFERED) unusable else switch (fn_tag) {
+                                .infer_mv_one_overwrite => infer_mv_one_overwrite,
+                                else => unreachable,
+                            },
+                        };
+                        fn infer_mv_one_overwrite(data_: DATA_, rand: Random, first: ID_, last: ID_, iterations: COUNT_, userdata: USERDATA_) DATA_ {
+                            var data = data_;
+                            const span = RANGE_LEN.func(data, first, last, userdata);
                             if (span <= 1) return data;
                             if (span == 2) {
                                 if (rand.boolean()) {
@@ -1920,35 +2031,44 @@ pub const DataManipulationCore = struct {
                                 }
                             }
                             var n: COUNT_ = 0;
-                            const first_idx = rand.intRangeAtMost(ID_, first, last);
-                            const first_val = GET.func(data, first_idx, userdata);
-                            var empty_idx: ID_ = first_idx;
+                            const first_n = rand.intRangeLessThan(COUNT_, 0, span);
+                            const first_id = NTH_NEXT_ID.func(data, first, first_n, userdata);
+                            const first_val = GET.func(data, first_n, userdata);
+                            var empty_n: ID_ = first_n;
+                            var empty_id: ID_ = first_id;
                             while (n < iterations) : (n += 1) {
-                                const move_idx = find_different_idx: {
+                                const move_n = find_different_idx: {
                                     while (true) {
-                                        const possible_different = rand.intRangeAtMost(ID_, first_idx, last);
-                                        if (possible_different != empty_idx) break :find_different_idx possible_different;
+                                        const possible_different_n = rand.intRangeLessThan(COUNT_, 0, span);
+                                        if (possible_different_n != empty_n) break :find_different_idx possible_different_n;
                                     }
                                 };
-                                new_data = SET.func(data, empty_idx, GET.func(data, move_idx, userdata), userdata);
-                                empty_idx = move_idx;
+                                const move_id = NTH_NEXT_ID.func(data, first, move_n, userdata);
+                                data = MOVE_ONE_OVERWRITE.func(data, move_id, empty_id, userdata);
+                                empty_id = move_id;
+                                empty_n = move_n;
                             }
-                            return SET.func(new_data, empty_idx, first_val, userdata);
+                            return SET.func(data, empty_id, first_val, userdata);
                         }
                         fn unusable(_: DATA_, _: Random, _: ID_, _: ID_, _: COUNT_, _: USERDATA_) DATA_ {
                             assert_unreachable(@src(), "no `scramble_elements` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
                         }
                     };
                     const APPEND_ONE_SLOT_ASSUME_CAP = struct {
-                        const func: FN_APPEND_ONE_SLOT = if (CUSTOM.APPEND_ONE_SLOT_ASSUME_CAP) |cust| cust //
-                            else if (FLAGS.has(INFER.APPEND_ONE.FROM_APPEND_MANY)) infer_append_many //
-                            else if (ALLOW_DEFAULT) default else unusable;
-                        fn default(data_: DATA_, userdata: USERDATA_) struct { DATA_, ID_ } {
+                        const func: FN_APPEND_ONE_SLOT = switch (SOLUTIONS[@intFromEnum(Recipes.PackageFlags.APPEND_ONE_SLOT_ASSUME_CAP)]) {
+                            .UNAVAILABLE => unusable,
+                            .USER_PROVIDED => CUSTOM.APPEND_ONE_SLOT_ASSUME_CAP.?,
+                            .INFERED_BY_RECIPE => |fn_tag| if (!ALLOW_INFERED) unusable else switch (fn_tag) {
+                                .infer_append_many => infer_append_many,
+                                .infer_set_len => infer_set_len,
+                                else => unreachable,
+                            },
+                        };
+                        fn infer_set_len(data_: DATA_, userdata: USERDATA_) struct { DATA_, ID_ } {
                             const len = GET_LEN.func(data_, userdata);
-                            const last = LAST_ID.func(data_, userdata);
                             const data = SET_LEN.func(data_, len + 1, userdata);
-                            const new_id = NEXT_ID.func(data, last, userdata);
-                            return .{ data, new_id };
+                            const last = LAST_ID.func(data_, userdata);
+                            return .{ data, last };
                         }
                         fn infer_append_many(data_: DATA_, userdata: USERDATA_) struct { DATA_, ID_ } {
                             const data, const id, _ = APPEND_MANY_SLOTS_ASSUME_CAP.func(data_, 1, userdata);
@@ -1959,26 +2079,30 @@ pub const DataManipulationCore = struct {
                         }
                     };
                     const APPEND_MANY_SLOTS_ASSUME_CAP = struct {
-                        const func: FN_APPEND_N_SLOTS = if (CUSTOM.APPEND_ONE_SLOT_ASSUME_CAP) |cust| cust //
-                            else if (FLAGS.has(INFER.APPEND_MANY.FROM_APPEND_ONE)) infer_append_one //
-                            else if (ALLOW_DEFAULT) default else unusable;
-                        fn default(data_: DATA_, n: COUNT_, userdata: USERDATA_) struct { DATA_, ID_, ID_ } {
+                        const func: FN_APPEND_N_SLOTS = switch (SOLUTIONS[@intFromEnum(Recipes.PackageFlags.APPEND_MANY_SLOTS_ASSUME_CAP)]) {
+                            .UNAVAILABLE => unusable,
+                            .USER_PROVIDED => CUSTOM.APPEND_MANY_SLOTS_ASSUME_CAP.?,
+                            .INFERED_BY_RECIPE => |fn_tag| if (!ALLOW_INFERED) unusable else switch (fn_tag) {
+                                .infer_append_one => infer_append_one,
+                                .infer_set_len => infer_set_len,
+                                else => unreachable,
+                            },
+                        };
+                        fn infer_set_len(data_: DATA_, n: COUNT_, userdata: USERDATA_) struct { DATA_, ID_, ID_ } {
+                            if (n == 0) return .{ data_, INVALID_ID_AFTER.func(data_, userdata) };
                             const len = GET_LEN.func(data_, userdata);
-                            const last = LAST_ID.func(data_, userdata);
                             const data = SET_LEN.func(data_, len + n, userdata);
-                            const first_new_id = NEXT_ID.func(data, last, userdata);
-                            const last_new_id = NTH_NEXT_ID.func(data, first_new_id, n - 1, userdata);
+                            const last_new_id = LAST_ID.func(data, userdata);
+                            const first_new_id = NTH_PREV_ID.func(data, n - 1, userdata);
                             return .{ data, first_new_id, last_new_id };
                         }
                         fn infer_append_one(data_: DATA_, n: COUNT_, userdata: USERDATA_) struct { DATA_, ID_, ID_ } {
-                            var nn = n;
-                            var data = data_;
-                            var first: ID_ = undefined;
-                            var last: ID_ = undefined;
-                            while (nn > 0) : (nn -= 1) {
-                                data, const id = APPEND_ONE_SLOT_ASSUME_CAP.func(data_, userdata);
-                                if (nn == n) first = id;
-                                last = id;
+                            if (n == 0) return .{ data_, INVALID_ID_AFTER.func(data_, userdata) };
+                            var data, const first = APPEND_ONE_SLOT_ASSUME_CAP.func(data_, userdata);
+                            var last: ID_ = first;
+                            var nn = 1;
+                            while (nn < n) : (nn += 1) {
+                                data, last = APPEND_ONE_SLOT_ASSUME_CAP.func(data_, userdata);
                             }
                             return .{ data, first, last };
                         }
@@ -1986,81 +2110,81 @@ pub const DataManipulationCore = struct {
                             assert_unreachable(@src(), "no `append_many_slots_assume_cap` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
                         }
                     };
-                    const INSERT_ONE_SLOT_ASSUME_CAP = struct {
-                        const func: FN_INSERT_ONE_SLOT = if (CUSTOM.INSERT_ONE_SLOT_ASSUME_CAP) |cust| cust //
-                            else if (FLAGS.has(INFER.INSERT_ONE.FROM_INSERT_MANY)) infer_insert_many //
-                            else if (FLAGS.has_any(&.{ INFER.INSERT_ONE.FROM_APPEND_ONE_MOVE_ONE_GET_SET, INFER.INSERT_ONE.FROM_APPEND_ONE_MOVE_ONE_MOVE })) infer_append_move //
-                            else if (ALLOW_DEFAULT) default else unusable;
-                        fn default(data_: DATA_, id: ID_, userdata: USERDATA_) struct { DATA_, ID_ } {
-                            const len = GET_LEN.func(data_, userdata);
-                            const last = LAST_ID.func(data_, userdata);
-                            var data = SET_LEN.func(data_, len + 1, userdata);
-                            data = MOVE_BLOCK_RIGHT_NO_PRESERVE.func(data, id, last, 1, userdata);
-                            return .{ data, id };
-                        }
-                        fn infer_append_move(data_: DATA_, id: ID_, userdata: USERDATA_) struct { DATA_, ID_ } {
-                            const last = LAST_ID.func(data_, userdata);
+                    const INSERT_ONE_SLOT_BEFORE_ASSUME_CAP = struct {
+                        const func: FN_INSERT_ONE_SLOT = switch (SOLUTIONS[@intFromEnum(Recipes.PackageFlags.INSERT_ONE_SLOT_BEFORE_ASSUME_CAP)]) {
+                            .UNAVAILABLE => unusable,
+                            .USER_PROVIDED => CUSTOM.INSERT_ONE_SLOT_BEFORE_ASSUME_CAP.?,
+                            .INFERED_BY_RECIPE => |fn_tag| if (!ALLOW_INFERED) unusable else switch (fn_tag) {
+                                .infer_append_one => infer_append_one,
+                                .infer_insert_many => infer_insert_many,
+                                else => unreachable,
+                            },
+                        };
+                        fn infer_append_one(data_: DATA_, id: ID_, userdata: USERDATA_) struct { DATA_, ID_ } {
+                            assert_valid_id(data_, id, userdata, @src());
+                            const last_to_move = LAST_ID.func(data_, userdata);
                             var data, _ = APPEND_ONE_SLOT_ASSUME_CAP.func(data_, userdata);
-                            data = MOVE_BLOCK_RIGHT_NO_PRESERVE.func(data, id, last, 1, userdata);
+                            data = MOVE_RANGE_RIGHT_OVERWRITE.func(data, id, last_to_move, 1, userdata);
                             return .{ data, id };
                         }
                         fn infer_insert_many(data_: DATA_, id: ID_, userdata: USERDATA_) struct { DATA_, ID_ } {
-                            const data, const new_id, _ = INSERT_MANY_SLOTS_ASSUME_CAP.func(data_, id, id, 1, userdata);
+                            const data, const new_id, _ = INSERT_MANY_SLOTS_BEFORE_ASSUME_CAP.func(data_, id, 1, userdata);
                             return .{ data, new_id };
                         }
                         fn unusable(_: DATA_, _: ID_, _: USERDATA_) struct { DATA_, ID_ } {
-                            assert_unreachable(@src(), "no `insert_one_slot_assume_cap` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
+                            assert_unreachable(@src(), "no `insert_one_slot_before_assume_cap` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
                         }
                     };
-                    const INSERT_MANY_SLOTS_ASSUME_CAP = struct {
-                        const func: FN_INSERT_N_SLOTS = if (CUSTOM.INSERT_MANY_SLOTS_ASSUME_CAP) |cust| cust //
-                            else if (FLAGS.has_any(&.{ INFER.INSERT_MANY.FROM_APPEND_MANY_MOVE_BLOCK, INFER.INSERT_MANY.FROM_APPEND_ONE_MOVE_ONE_GET_SET })) infer_append_move //
-                            else if (FLAGS.has(INFER.INSERT_MANY.FROM_INSERT_ONE)) infer_insert_one //
-                            else if (ALLOW_DEFAULT) default else unusable;
-                        fn default(data_: DATA_, id: ID_, n: COUNT_, userdata: USERDATA_) struct { DATA_, ID_, ID_ } {
-                            if (n == 0) return data_;
-                            assert_valid_id(data_, id, userdata, @src());
-                            const len = GET_LEN.func(data_, userdata);
-                            const last = LAST_ID.func(data_, userdata);
-                            var data = SET_LEN.func(data_, len + n, userdata);
-                            data = MOVE_BLOCK_RIGHT_NO_PRESERVE.func(data, id, last, n, userdata);
-                            return .{ data, id, NTH_NEXT_ID.func(data, id, n - 1, userdata) };
-                        }
+                    const INSERT_MANY_SLOTS_BEFORE_ASSUME_CAP = struct {
+                        const func: FN_INSERT_N_SLOTS = switch (SOLUTIONS[@intFromEnum(Recipes.PackageFlags.INSERT_MANY_SLOTS_BEFORE_ASSUME_CAP)]) {
+                            .UNAVAILABLE => unusable,
+                            .USER_PROVIDED => CUSTOM.INSERT_MANY_SLOTS_BEFORE_ASSUME_CAP.?,
+                            .INFERED_BY_RECIPE => |fn_tag| if (!ALLOW_INFERED) unusable else switch (fn_tag) {
+                                .infer_append_many => infer_append_many,
+                                .infer_insert_one => infer_insert_one,
+                                else => unreachable,
+                            },
+                        };
                         fn infer_insert_one(data_: DATA_, id: ID_, n: COUNT_, userdata: USERDATA_) struct { DATA_, ID_, ID_ } {
                             if (n == 0) return .{ data_, undefined, undefined };
                             assert_valid_id(data_, id, userdata, @src());
                             var nn = n;
-                            var data, const last = INSERT_ONE_SLOT_ASSUME_CAP.func(data_, id, userdata);
-                            var first = last;
+                            var data, var first = INSERT_ONE_SLOT_BEFORE_ASSUME_CAP.func(data_, id, userdata);
                             nn -= 1;
                             while (nn > 0) : (nn -= 1) {
-                                data, first = INSERT_ONE_SLOT_ASSUME_CAP.func(data, first, userdata);
+                                data, first = INSERT_ONE_SLOT_BEFORE_ASSUME_CAP.func(data, first, userdata);
                             }
-                            return .{ data, first, last };
+                            return .{ data, first, NTH_NEXT_ID.func(data, first, n - 1, userdata) };
                         }
-                        fn infer_append_move(data_: DATA_, id: ID_, n: COUNT_, userdata: USERDATA_) struct { DATA_, ID_, ID_ } {
+                        fn infer_append_many(data_: DATA_, id: ID_, n: COUNT_, userdata: USERDATA_) struct { DATA_, ID_, ID_ } {
                             if (n == 0) return data_;
                             assert_valid_id(data_, id, userdata, @src());
-                            const last = LAST_ID.func(data_, userdata);
+                            const last_to_move = LAST_ID.func(data_, userdata);
                             var data, _ = APPEND_MANY_SLOTS_ASSUME_CAP.func(data_, n, userdata);
-                            data = MOVE_BLOCK_RIGHT_NO_PRESERVE.func(data, id, last, n, userdata);
+                            data = MOVE_RANGE_RIGHT_OVERWRITE.func(data, id, last_to_move, n, userdata);
                             return .{ data, id, NTH_NEXT_ID.func(data, id, n - 1, userdata) };
                         }
                         fn unusable(_: DATA_, _: ID_, _: COUNT_, _: USERDATA_) struct { DATA_, ID_, ID_ } {
-                            assert_unreachable(@src(), "no `insert_many_slots_assume_cap` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
+                            assert_unreachable(@src(), "no `insert_many_slots_before_assume_cap` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
                         }
                     };
                     const DELETE_ONE = struct {
-                        const func: FN_DELETE_ONE = if (CUSTOM.DELETE_ONE) |cust| cust //
-                            else if (FLAGS.has(INFER.DELETE_ONE.FROM_DELETE_RANGE)) infer_delete_range //
-                            else if (ALLOW_DEFAULT) default else unusable;
-                        fn default(data_: DATA_, id: ID_, userdata: USERDATA_) DATA_ {
+                        const func: FN_DELETE_ONE = switch (SOLUTIONS[@intFromEnum(Recipes.PackageFlags.DELETE_ONE)]) {
+                            .UNAVAILABLE => unusable,
+                            .USER_PROVIDED => CUSTOM.DELETE_ONE.?,
+                            .INFERED_BY_RECIPE => |fn_tag| if (!ALLOW_INFERED) unusable else switch (fn_tag) {
+                                .infer_delete_range => infer_delete_range,
+                                .infer_set_len => infer_set_len,
+                                else => unreachable,
+                            },
+                        };
+                        fn infer_set_len(data_: DATA_, id: ID_, userdata: USERDATA_) DATA_ {
                             assert_valid_id(data_, id, userdata, @src());
                             var data = data_;
                             const last = LAST_ID.func(data, userdata);
                             if (!ID_EQUALS.func(data, id, last, userdata)) {
                                 const first = NEXT_ID.func(data, id, userdata);
-                                data = MOVE_BLOCK_LEFT_NO_PRESERVE.func(data, first, last, 1, userdata);
+                                data = MOVE_RANGE_LEFT_OVERWRITE.func(data, first, last, 1, userdata);
                             }
                             const old_len = GET_LEN.func(data, userdata);
                             data = SET_LEN.func(data, old_len - 1, userdata);
@@ -2074,38 +2198,42 @@ pub const DataManipulationCore = struct {
                         }
                     };
                     const DELETE_RANGE = struct {
-                        const func: FN_DELETE_RANGE = if (CUSTOM.DELETE_RANGE) |cust| cust //
-                            else if (FLAGS.has(INFER.DELETE_RANGE.FROM_DELETE_ONE)) infer_delete_one //
-                            else if (ALLOW_DEFAULT) default else unusable;
-                        fn default(data_: DATA_, first: ID_, last: ID_, userdata: USERDATA_) DATA_ {
-                            if (ID_GREATER_THAN.func(data_, first, last, userdata)) {
-                                @branchHint(.unlikely);
-                                return data_;
-                            }
+                        const func: FN_DELETE_RANGE = switch (SOLUTIONS[@intFromEnum(Recipes.PackageFlags.DELETE_RANGE)]) {
+                            .UNAVAILABLE => unusable,
+                            .USER_PROVIDED => CUSTOM.DELETE_RANGE.?,
+                            .INFERED_BY_RECIPE => |fn_tag| if (!ALLOW_INFERED) unusable else switch (fn_tag) {
+                                .infer_delete_one => infer_delete_one,
+                                .infer_set_len => infer_set_len,
+                                else => unreachable,
+                            },
+                        };
+                        fn infer_set_len(data_: DATA_, first: ID_, last: ID_, userdata: USERDATA_) DATA_ {
+                            assert_valid_range(data_, first, last, userdata, @src());
                             var data = data_;
-                            const last_to_move = LAST_ID.func(data, userdata);
+                            const last_in_list = LAST_ID.func(data, userdata);
                             const count = RANGE_LEN.func(data, first, last, userdata);
                             const old_len = GET_LEN.func(data, userdata);
-                            if (!ID_EQUALS.func(data, last_to_move, last, userdata)) {
-                                const first_to_move = NEXT_ID.func(data, last, userdata);
-                                data = MOVE_BLOCK_LEFT_NO_PRESERVE.func(data, first_to_move, last_to_move, 1, userdata);
+                            if (!ID_EQUALS.func(data, last_in_list, last, userdata)) {
+                                const first_after_delete = NEXT_ID.func(data, last, userdata);
+                                data = MOVE_RANGE_LEFT_OVERWRITE.func(data, first_after_delete, last_in_list, count, userdata);
                             }
                             data = SET_LEN.func(data, old_len - count, userdata);
                             return data;
                         }
                         fn infer_delete_one(data_: DATA_, first: ID_, last: ID_, userdata: USERDATA_) DATA_ {
-                            if (ID_GREATER_THAN.func(data_, first, last, userdata)) {
-                                @branchHint(.unlikely);
-                                return data_;
-                            }
+                            assert_valid_range(data_, first, last, userdata, @src());
                             var data = data_;
                             var count = RANGE_LEN.func(data, first, last, userdata);
-                            var next_last = last;
-                            var next_next_last = last;
-                            while (count > 0) : (count -= 1) {
-                                next_next_last = PREV_ID.func(data, next_last, userdata);
-                                data = DELETE_ONE.func(data, next_last, userdata);
-                                next_last = next_next_last;
+                            if (ID_EQUALS.func(data, FIRST_ID.func(data, userdata), first, userdata)) {
+                                while (count > 0) : (count -= 1) {
+                                    data = DELETE_ONE.func(data, FIRST_ID.func(data, userdata), userdata);
+                                }
+                            } else {
+                                const prev = PREV_ID.func(data, first, userdata);
+                                while (count > 0) : (count -= 1) {
+                                    const to_delete = NEXT_ID.func(data, prev, userdata);
+                                    data = DELETE_ONE.func(data, to_delete, userdata);
+                                }
                             }
                             return data;
                         }
@@ -2128,55 +2256,8 @@ pub const DataManipulationCore = struct {
                             assert_unreachable(@src(), "no `trim_free_space` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
                         }
                     };
-                    const MOVE_BLOCK_RIGHT_NO_PRESERVE = struct {
-                        const func: FN_MOVE_BLOCK_NO_PRESERVE = if (CUSTOM.MOVE_BLOCK_RIGHT_NO_PRESERVE) |cust| cust //
-                            else if (ALLOW_DEFAULT) default else unusable;
-                        fn default(data_: DATA_, first: ID_, last: ID_, count: COUNT_, userdata: USERDATA_) DATA_ {
-                            assert_valid_range(data_, first, last, userdata, @src());
-                            if (count == 0) {
-                                @branchHint(.unlikely);
-                                return data_;
-                            }
-                            var data = data_;
-                            var read = last;
-                            var write = NTH_NEXT_ID.func(data, read, count, userdata);
-                            while (true) {
-                                data = SET.func(data, write, GET.func(data, read, userdata), userdata);
-                                if (ID_EQUALS.func(data, read, first, userdata)) break;
-                                write = PREV_ID.func(data, write, userdata);
-                                read = PREV_ID.func(data, read, userdata);
-                            }
-                            return data;
-                        }
-                        fn unusable(_: DATA_, _: ID_, _: ID_, _: COUNT_, _: USERDATA_) DATA_ {
-                            assert_unreachable(@src(), "no `move_block_right_no_preserve` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
-                        }
-                    };
-                    const MOVE_BLOCK_LEFT_NO_PRESERVE = struct {
-                        const func: FN_MOVE_BLOCK_NO_PRESERVE = if (CUSTOM.MOVE_BLOCK_LEFT_NO_PRESERVE) |cust| cust //
-                            else if (ALLOW_DEFAULT) default else unusable;
-                        fn default(data_: DATA_, first: ID_, last: ID_, count: COUNT_, userdata: USERDATA_) DATA_ {
-                            assert_valid_range(data_, first, last, userdata, @src());
-                            if (count == 0) {
-                                @branchHint(.unlikely);
-                                return data_;
-                            }
-                            var data = data_;
-                            var read = first;
-                            var write = NTH_PREV_ID.func(data, read, count, userdata);
-                            while (true) {
-                                data = SET.func(data, write, GET.func(data, read, userdata), userdata);
-                                if (ID_EQUALS.func(data, read, last, userdata)) break;
-                                write = NEXT_ID.func(data, write, userdata);
-                                read = NEXT_ID.func(data, read, userdata);
-                            }
-                            return data;
-                        }
-                        fn unusable(_: DATA_, _: ID_, _: ID_, _: COUNT_, _: USERDATA_) DATA_ {
-                            assert_unreachable(@src(), "no `move_block_left_no_preserve` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
-                        }
-                    };
                 };
+
                 return SELECTOR;
             }
 
@@ -2189,6 +2270,8 @@ pub const DataManipulationCore = struct {
                     pub const COUNT = DEF.COUNT_INT;
                     pub const USERDATA = DEF.USERDATA;
 
+                    pub const range_slice: fn (DATA, first: ID, last: ID, USERDATA) []ELEM = FUNCS.GET_RANGE_SLICE;
+                    pub const range_const_slice: fn (DATA, first: ID, last: ID, USERDATA) []const ELEM = FUNCS.GET_RANGE_CONST_SLICE;
                     pub const get: fn (DATA, ID, USERDATA) ELEM = FUNCS.GET;
                     pub const get_ptr: fn (DATA, ID, USERDATA) *ELEM = FUNCS.GET_PTR;
                     pub const get_const_ptr: fn (DATA, ID, USERDATA) *const ELEM = FUNCS.GET_CONST_PTR;
@@ -2223,19 +2306,20 @@ pub const DataManipulationCore = struct {
                     pub const reverse_range: fn (DATA, first: ID, last: ID, USERDATA) DATA = FUNCS.REVERSE_RANGE;
                     pub const rotate_range_left: fn (DATA, first: ID, last: ID, n: COUNT, USERDATA) DATA = FUNCS.ROTATE_LEFT;
                     pub const rotate_range_right: fn (DATA, first: ID, last: ID, n: COUNT, USERDATA) DATA = FUNCS.ROTATE_RIGHT;
-                    pub const move_one_displace_others: fn (DATA, old_id: ID, new_id: ID, USERDATA) DATA = FUNCS.MOVE_ONE_PRESERVE;
-                    pub const move_range_displace_others: fn (DATA, old_first: ID, old_last: ID, new_first: ID, USERDATA) DATA = FUNCS.MOVE_BLOCK_PRESERVE;
+                    pub const move_one_overwrite: fn (DATA, old_id: ID, new_id: ID, USERDATA) DATA = FUNCS.MOVE_ONE_OVERWRITE;
+                    pub const move_one_right_displace: fn (DATA, old_id: ID, new_id: ID, USERDATA) DATA = FUNCS.MOVE_ONE_RIGHT_DISPLACE;
+                    pub const move_one_left_displace: fn (DATA, old_id: ID, new_id: ID, USERDATA) DATA = FUNCS.MOVE_ONE_LEFT_DISPLACE;
+                    pub const move_range_right_displace: fn (DATA, old_first: ID, old_last: ID, new_first: ID, USERDATA) DATA = FUNCS.MOVE_RANGE_RIGHT_DISPLACE;
+                    pub const move_range_left_displace: fn (DATA, old_first: ID, old_last: ID, new_first: ID, USERDATA) DATA = FUNCS.MOVE_RANGE_LEFT_DISPLACE;
+                    pub const move_range_right_overwrite: fn (DATA, first: ID, last: ID, n_positions: COUNT, USERDATA) DATA = FUNCS.MOVE_RANGE_RIGHT_OVERWRITE;
+                    pub const move_range_left_overwrite: fn (DATA, first: ID, last: ID, n_positions: COUNT, USERDATA) DATA = FUNCS.MOVE_RANGE_LEFT_OVERWRITE;
                     pub const scramble: fn (DATA, rand: Random, first: ID, last: ID, iterations: COUNT, USERDATA) DATA = FUNCS.SCRAMBLE;
                     pub const append_one_slot_assume_capacity: fn (DATA, USERDATA) struct { DATA, ID } = FUNCS.APPEND_ONE_SLOT_ASSUME_CAP;
                     pub const append_many_slots_assume_capacity: fn (DATA, count: COUNT, USERDATA) struct { DATA, ID, ID } = FUNCS.APPEND_MANY_SLOTS_ASSUME_CAP;
-                    pub const insert_one_slot_assume_capacity: fn (DATA, at_id: ID, USERDATA) struct { DATA, ID } = FUNCS.INSERT_ONE_SLOT_ASSUME_CAP;
-                    pub const insert_many_slots_assume_capacity: fn (DATA, at_id: ID, count: COUNT, USERDATA) struct { DATA, ID, ID } = FUNCS.INSERT_MANY_SLOTS_ASSUME_CAP;
-                    pub const move_block_right_no_preserve: fn (DATA, first: ID, last: ID, n_positions: COUNT, USERDATA) DATA = FUNCS.MOVE_BLOCK_RIGHT_NO_PRESERVE;
-                    pub const move_block_left_no_preserve: fn (DATA, first: ID, last: ID, n_positions: COUNT, USERDATA) DATA = FUNCS.MOVE_BLOCK_LEFT_NO_PRESERVE;
+                    pub const insert_one_slot_assume_capacity: fn (DATA, at_id: ID, USERDATA) struct { DATA, ID } = FUNCS.INSERT_ONE_SLOT_BEFORE_ASSUME_CAP;
+                    pub const insert_many_slots_assume_capacity: fn (DATA, at_id: ID, count: COUNT, USERDATA) struct { DATA, ID, ID } = FUNCS.INSERT_MANY_SLOTS_BEFORE_ASSUME_CAP;
                     pub const delete_one: fn (DATA, id: ID, USERDATA) DATA = FUNCS.DELETE_ONE;
                     pub const delete_range: fn (DATA, first: ID, last: ID, USERDATA) DATA = FUNCS.DELETE_RANGE;
-                    pub const range_slice: fn (DATA, first: ID, last: ID, USERDATA) []ELEM = FUNCS.GET_RANGE_SLICE;
-                    pub const range_const_slice: fn (DATA, first: ID, last: ID, USERDATA) []const ELEM = FUNCS.GET_RANGE_CONST_SLICE;
 
                     pub const tree = struct {
                         pub const first_child: fn (DATA, id: ID, exact_num_children_per_element: COUNT, USERDATA) ID = FUNCS.FIRST_CHILD_ID;

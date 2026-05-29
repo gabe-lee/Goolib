@@ -52,22 +52,9 @@ const Common = Root.CommonTypes;
 
 const DEBUG = std.debug.print;
 
-const GraphColor = enum(u2) {
-    WHITE = 0,
-    GREY = 1,
-    BLACK = 2,
-
-    pub fn set_in_int(self: GraphColor, comptime INT: type, position_index: math.Log2Int(INT)) INT {
-        const self_int: INT = @intCast(@intFromEnum(self));
-        const true_offset: math.Log2Int(INT) = position_index << 1;
-        return self_int << true_offset;
-    }
-    pub fn get_from_int(comptime INT: type, int: INT, position_index: math.Log2Int(INT)) GraphColor {
-        const true_offset = position_index << 1;
-        const self_int = int >> true_offset;
-        const self_int_masked = self_int & 0b11;
-        return @enumFromInt(@as(u2, @intCast(self_int_masked)));
-    }
+pub const WeightVsUserProvidedMode = enum(u8) {
+    ALLOW_LOW_WEIGHT_INFER_TO_OVERRIDE_USER_PROVIDED,
+    ALWAYS_USE_USER_PROVIDED,
 };
 
 pub const RecipeResolutionKind = enum(u8) {
@@ -95,7 +82,6 @@ pub fn WeightModeInfo(comptime RecipeTag: type) type {
     return struct {
         tags_equal: ?*const fn (a: RecipeTag, b: RecipeTag) bool = null,
         weight_type: type = f32,
-        target_N: ?*const anyopaque = null,
     };
 }
 
@@ -173,6 +159,9 @@ pub fn RecipeInferenceEngine(comptime TargetEnum: type, comptime SolutionTag: ty
             pub fn k_n(k: WeightType) Weight {
                 return Weight{ .k = k, .O = .n };
             }
+            pub fn n_plus_k_n(k: WeightType) Weight {
+                return Weight{ .k = k + 1, .O = .n };
+            }
             pub fn log_n() Weight {
                 return Weight{ .O = .log_n };
             }
@@ -234,7 +223,7 @@ pub fn RecipeInferenceEngine(comptime TargetEnum: type, comptime SolutionTag: ty
                     .dependancies = dependancies,
                 };
             }
-            pub fn recipe_with_special_factors(variant: SolutionTag, special_multiplier: WeightType, special_flat_add: WeightType, dependancies: []const Dependancy) Recipe {
+            pub fn recipe_with_special_factors(variant: SolutionTag, special_multiplier: Weight, special_flat_add: Weight, dependancies: []const Dependancy) Recipe {
                 return Recipe{
                     .variant_tag = variant,
                     .dependancies = dependancies,
@@ -339,21 +328,20 @@ pub fn RecipeInferenceEngine(comptime TargetEnum: type, comptime SolutionTag: ty
             }
         }
 
-        pub fn resolve_recipes_by_weight(target_n: WeightType, user_provided_entities: []const Target, recipes: []const RecipeList) AllSolutions {
-            return resolve_recipes_internal(user_provided_entities, recipes, target_n, true);
+        pub fn resolve_recipes_by_weight(target_n: WeightType, weight_vs_user_provided: WeightVsUserProvidedMode, user_provided_entities: []const Target, recipes: []const RecipeList) AllSolutions {
+            return resolve_recipes_internal(user_provided_entities, recipes, target_n, weight_vs_user_provided, true);
         }
         pub fn resolve_recipes_by_order(user_provided_entities: []const Target, recipes: []const RecipeList) AllSolutions {
             return resolve_recipes_internal(user_provided_entities, recipes, 0, false);
         }
 
-        fn resolve_recipes_internal(user_provided_entities: []const Target, provided_recipes: []const RecipeList, target_n: WeightType, comptime USE_WEIGHT_IF_AVAILABLE: bool) AllSolutions {
+        fn resolve_recipes_internal(user_provided_entities: []const Target, provided_recipes: []const RecipeList, target_n: WeightType, WEIGHT_USER_MODE: WeightVsUserProvidedMode, comptime USE_WEIGHT_IF_AVAILABLE: bool) AllSolutions {
             const USE_WEIGHT = comptime HAS_WEIGHT and USE_WEIGHT_IF_AVAILABLE;
             var available_bits: BitFlagInt = 0;
             var resolutions: AllSolutions = @splat(RecipeSolution.unavailable());
             var recipe_lists_found: BitFlagInt = 0;
             var best_recipe_weights: [NUM_BITS]WeightType = @splat(MAX_RECIPE_WEIGHT);
             var recipes: AllRecipes = UNINIT_RECIPES;
-
             for (user_provided_entities) |target| {
                 const target_bit_shift: Log2BitFlagInt = @intCast(@intFromEnum(target.target_enum));
                 const target_bit: BitFlagInt = @as(BitFlagInt, 1) << target_bit_shift;
@@ -362,7 +350,6 @@ pub fn RecipeInferenceEngine(comptime TargetEnum: type, comptime SolutionTag: ty
                 resolutions[target_bit_shift] = .user_provided();
                 available_bits |= target_bit;
             }
-
             for (provided_recipes) |recipe_list| {
                 assert_with_reason(recipe_lists_found & recipe_list.target_bit == 0, @src(), "recipe list for target `{s}` was provided more than once", .{@tagName(recipe_list.this_target)});
                 recipe_lists_found |= recipe_list.target_bit;
@@ -376,7 +363,6 @@ pub fn RecipeInferenceEngine(comptime TargetEnum: type, comptime SolutionTag: ty
                 const target_id = recipe_list.bit_shift_for_bit;
                 recipes[target_id] = recipe_list;
             }
-
             var change_in_resolutions = true;
             while (change_in_resolutions) {
                 change_in_resolutions = false;
@@ -386,6 +372,8 @@ pub fn RecipeInferenceEngine(comptime TargetEnum: type, comptime SolutionTag: ty
                     var currently_available = available_bits & target_bit != 0;
                     if (comptime !USE_WEIGHT) {
                         if (currently_available) continue :next_target;
+                    } else {
+                        if (WEIGHT_USER_MODE == .ALWAYS_USE_USER_PROVIDED and resolutions[target_shift] == .USER_PROVIDED) continue :next_target;
                     }
                     var current_weight = best_recipe_weights[target_shift];
                     var current_resolution = resolutions[target_shift];
@@ -479,7 +467,7 @@ pub fn RecipeInferenceEngine(comptime TargetEnum: type, comptime SolutionTag: ty
 
 test RecipeInferenceEngine {
     const PRINT_RESULTS = false;
-    const N = 32;
+    const TARGET_N = 32; // Num bits in int
     const CMP_WEIGHT = 1;
     const Op = enum {
         ADD,
@@ -499,100 +487,100 @@ test RecipeInferenceEngine {
             return std.mem.eql(u8, a, b);
         }
     };
-    const Engine = RecipeInferenceEngine(Op, Tag, .{
+    const WeightInfo = WeightModeInfo(Tag);
+    const Engine = RecipeInferenceEngine(Op, Tag, WeightInfo{
         .tags_equal = PROTO.tag_equal,
         .weight_type = f32,
     });
     const RecipeList = Engine.RecipeList;
     const Target = Engine.Target;
-    // CHECKPOINT fix test for new weight mode
     const recipes: []const RecipeList = &.{
         .recipe_list(.ADD, &.{
             .recipe("a - (-b)", &.{
-                .depends_on_with_weight(.SUB, 1),
-                .depends_on_with_weight(.NEG, 1),
+                .depends_on_with_weight(.SUB, .one()),
+                .depends_on_with_weight(.NEG, .one()),
             }),
             .recipe("a - (0 - b)", &.{
-                .depends_on_with_weight(.SUB, 2),
+                .depends_on_with_weight(.SUB, .flat(2)),
             }),
         }),
         .recipe_list(.SUB, &.{
             .recipe("a + ((~b) + 1)", &.{
-                .depends_on_with_weight(.ADD, 2),
-                .depends_on_with_weight(.INV, 1),
+                .depends_on_with_weight(.ADD, .flat(2)),
+                .depends_on_with_weight(.INV, .one()),
             }),
             .recipe("a + (-b)", &.{
-                .depends_on_with_weight(.ADD, 1),
-                .depends_on_with_weight(.NEG, 1),
+                .depends_on_with_weight(.ADD, .one()),
+                .depends_on_with_weight(.NEG, .one()),
             }),
         }),
         .recipe_list(.MUL, &.{
             .recipe("bit_shifts and add", &.{
-                .depends_on_with_weight(.ADD, N / 2),
-                .depends_on_with_weight(.SHR, N / 2),
-                .depends_on_with_weight(.SHL, N / 2),
+                .depends_on_with_weight(.ADD, .k_n(0.5)),
+                .depends_on_with_weight(.SHR, .k_n(0.5)),
+                .depends_on_with_weight(.SHL, .k_n(0.5)),
             }),
             .recipe("a + a + a + a...", &.{
-                .depends_on_with_weight(.ADD, N * N),
+                .depends_on_with_weight(.ADD, .k_n(1.5)),
             }),
         }),
         .recipe_list(.DIV, &.{
             .recipe("bit_shifts and sub", &.{
-                .depends_on_with_weight(.SUB, N),
-                .depends_on_with_weight(.SHR, N / 2),
-                .depends_on_with_weight(.SHL, N / 2),
+                .depends_on_with_weight(.SUB, .n()),
+                .depends_on_with_weight(.SHR, .k_n(0.5)),
+                .depends_on_with_weight(.SHL, .k_n(0.5)),
             }),
             .recipe("a - a - a - a...", &.{
-                .depends_on_with_weight(.SUB, N + (N * CMP_WEIGHT)),
+                .depends_on_with_weight(.SUB, .n_plus_k_n(CMP_WEIGHT)),
             }),
         }),
         .recipe_list(.NEG, &.{
             .recipe("0 - a", &.{
-                .depends_on_with_weight(.SUB, 1),
+                .depends_on_with_weight(.SUB, .one()),
             }),
         }),
         .recipe_list(.MOD, &.{
             .recipe("a - (a / b) * b", &.{
-                .depends_on_with_weight(.SUB, 1),
-                .depends_on_with_weight(.DIV, 1),
-                .depends_on_with_weight(.MUL, 1),
+                .depends_on_with_weight(.SUB, .one()),
+                .depends_on_with_weight(.DIV, .one()),
+                .depends_on_with_weight(.MUL, .one()),
             }),
             .recipe("(a - (a / b)) + (a - (a / b)) + ...", &.{
-                .depends_on_with_weight(.SUB, 1),
-                .depends_on_with_weight(.DIV, 1),
-                .depends_on_with_weight(.ADD, N),
+                .depends_on_with_weight(.SUB, .one()),
+                .depends_on_with_weight(.DIV, .one()),
+                .depends_on_with_weight(.ADD, .n()),
             }),
             .recipe("a - a - a - a...", &.{
-                .depends_on_with_weight(.SUB, N + (N * CMP_WEIGHT)),
+                .depends_on_with_weight(.SUB, .n_plus_k_n(CMP_WEIGHT)),
             }),
         }),
         .recipe_list(.SHL, &.{
             .recipe("a * pow(2, b)", &.{
-                .depends_on_with_weight(.MUL, 1),
-                .depends_on_with_weight(.POW, 1),
+                .depends_on_with_weight(.MUL, .one()),
+                .depends_on_with_weight(.POW, .one()),
             }),
             .recipe("a * (2 * 2 * 2 * 2 * ...)", &.{
-                .depends_on_with_weight(.MUL, 1 + (N)),
+                .depends_on_with_weight(.MUL, .n()),
             }),
         }),
         .recipe_list(.SHR, &.{
             .recipe("a / pow(2, b)", &.{
-                .depends_on_with_weight(.DIV, 1),
-                .depends_on_with_weight(.POW, 1),
+                .depends_on_with_weight(.DIV, .one()),
+                .depends_on_with_weight(.POW, .one()),
             }),
             .recipe("a / (2 / 2 / 2 / 2 / ...)", &.{
-                .depends_on_with_weight(.DIV, 1 + (N)),
+                .depends_on_with_weight(.DIV, .n()),
             }),
         }),
         .recipe_list(.POW, &.{
             .recipe("binary exponentiation by squaring", &.{
-                .depends_on_with_weight(.MUL, N + (N / 2)),
-                .depends_on_with_weight(.SHR, N),
+                .depends_on_with_weight(.MUL, .n_plus_k_n(0.5)),
+                .depends_on_with_weight(.SHR, .n()),
             }),
             .recipe("a * a * a * a...", &.{
-                .depends_on_with_weight(.MUL, N),
+                .depends_on_with_weight(.MUL, .n()),
             }),
-            .recipe_with_special_factors("magic ASIC power", 0, 0.5, &.{}),
+            .recipe_with_special_factors("magic ASIC power", .zero(), .flat(0.5), &.{}),
         }),
     };
     const UNDER_PROVIDED: []const Target = &.{
@@ -605,7 +593,7 @@ test RecipeInferenceEngine {
         .user_provided(.SUB),
         .user_provided_with_weight(.ADD, 100.0),
     };
-    var results = Engine.resolve_recipes_by_weight(UNDER_PROVIDED, recipes);
+    var results = Engine.resolve_recipes_by_weight(TARGET_N, UNDER_PROVIDED, recipes);
     if (PRINT_RESULTS) {
         std.debug.print("\n\ntest RecipeInferenceEngine results:\n=====================================\nunder-provided results (not enough funcs to infer all):\n", .{});
         for (results, 0..) |res, r| {
@@ -617,7 +605,7 @@ test RecipeInferenceEngine {
             }
         }
     }
-    results = Engine.resolve_recipes_by_weight(MIN_PROVIDED_ONE_HEAVY, recipes);
+    results = Engine.resolve_recipes_by_weight(TARGET_N, MIN_PROVIDED_ONE_HEAVY, recipes);
     if (PRINT_RESULTS) {
         std.debug.print("\nby-weight results (select the best function based on user-provided hueristics, possibly overriding user-provided functions):\n", .{});
         for (results, 0..) |res, r| {

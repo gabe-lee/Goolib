@@ -121,8 +121,8 @@ pub const PackageFlags = enum {
     APPEND_MANY_SLOTS_ASSUME_CAP,
     PREPEND_ONE_SLOT_ASSUME_CAP,
     PREPEND_MANY_SLOTS_ASSUME_CAP,
-    INSERT_ONE_SLOT_ASSUME_CAP,
-    INSERT_MANY_SLOTS_ASSUME_CAP,
+    INSERT_ONE_SLOT_BEFORE_ASSUME_CAP,
+    INSERT_MANY_SLOTS_BEFORE_ASSUME_CAP,
     DELETE_ONE,
     DELETE_RANGE,
     ENSURE_FREE_SPACE,
@@ -203,13 +203,18 @@ pub const InferFuncNames = enum {
     infer_get_set_move_block_left_overwrite,
     infer_get_set_move_block_right_overwrite,
     infer_nth_child,
+    infer_mv_one_overwrite,
+    infer_set_len,
+    infer_append_one,
+    infer_append_many,
+    infer_insert_one,
+    infer_insert_many,
+    infer_delete_one,
+    infer_delete_range,
 };
-const N_WEIGHT = 100;
-const N_SQUARED_WEIGHT = 10000;
-const LOG_N_WEIGHT = 10;
 const WeightModeInfo = Utils.RecipeInference.WeightModeInfo(InferFuncNames);
 pub const InferEngine = Utils.RecipeInference.RecipeInferenceEngine(PackageFlags, InferFuncNames, WeightModeInfo{
-    .weight_type = u32,
+    .weight_type = f32,
 });
 pub const FuncFlag = InferEngine.Target;
 pub const RecipeList = InferEngine.RecipeList;
@@ -606,9 +611,9 @@ pub const RECIPES: []const InferEngine.RecipeList = &.{
         }),
         .recipe(.infer_last_prev, &.{
             .depends_on(.LAST_ID),
-            .depends_on_with_weight(.PREV_ID, N_WEIGHT),
-            .depends_on_with_weight(.ID_EQUALS, N_WEIGHT),
-            .depends_on_with_weight(.ID_VALID, N_WEIGHT),
+            .depends_on_with_weight(.PREV_ID, .n()),
+            .depends_on_with_weight(.ID_EQUALS, .n()),
+            .depends_on_with_weight(.ID_VALID, .n()),
             .depends_on(.INVALID_ID_AFTER_LAST_ID),
         }),
     }),
@@ -619,13 +624,13 @@ pub const RECIPES: []const InferEngine.RecipeList = &.{
             .depends_on_zero_weight(.INCREASING_IDS_DIRECTLY_CORRESPOND_TO_INCREASING_ADDRESSES),
         }),
         .recipe(.infer_next, &.{
-            .depends_on_with_weight(.NEXT_ID, N_WEIGHT),
+            .depends_on_with_weight(.NEXT_ID, .n()),
         }),
         .recipe(.infer_last_prev, &.{
             .depends_on(.LAST_ID),
-            .depends_on_with_weight(.PREV_ID, N_WEIGHT),
-            .depends_on_with_weight(.ID_EQUALS, N_WEIGHT),
-            .depends_on_with_weight(.ID_VALID, N_WEIGHT),
+            .depends_on_with_weight(.PREV_ID, .n()),
+            .depends_on_with_weight(.ID_EQUALS, .n()),
+            .depends_on_with_weight(.ID_VALID, .n()),
             .depends_on(.INVALID_ID_AFTER_LAST_ID),
         }),
     }),
@@ -721,13 +726,13 @@ pub const RECIPES: []const InferEngine.RecipeList = &.{
             .depends_on(.LIMIT_LEN),
         }),
         .recipe(.infer_next, &.{
-            .depends_on(.NEXT_ID),
-            .depends_on(.ID_EQUALS),
+            .depends_on_with_weight(.NEXT_ID, .n()),
+            .depends_on_with_weight(.ID_EQUALS, .n()),
             .depends_on(.ID_LESS_OR_EQUAL),
         }),
         .recipe(.infer_prev, &.{
-            .depends_on(.PREV_ID),
-            .depends_on(.ID_EQUALS),
+            .depends_on_with_weight(.PREV_ID, .n()),
+            .depends_on_with_weight(.ID_EQUALS, .n()),
             .depends_on(.ID_LESS_OR_EQUAL),
         }),
     }),
@@ -779,12 +784,12 @@ pub const RECIPES: []const InferEngine.RecipeList = &.{
             .depends_on(.RANGE_LEN),
         }),
         .recipe(.infer_next, &.{
-            .depends_on(.NEXT_ID),
-            .depends_on(.ID_EQUALS),
+            .depends_on_with_weight(.NEXT_ID, .n()),
+            .depends_on_with_weight(.ID_EQUALS, .n()),
         }),
         .recipe(.infer_prev, &.{
-            .depends_on(.PREV_ID),
-            .depends_on(.ID_EQUALS),
+            .depends_on_with_weight(.PREV_ID, .n()),
+            .depends_on_with_weight(.ID_EQUALS, .n()),
         }),
     }),
     .recipe_list(.GET_LEN, &.{
@@ -876,41 +881,59 @@ pub const RECIPES: []const InferEngine.RecipeList = &.{
         }),
     }),
     .recipe_list(.REVERSE_RANGE, &.{
-        .recipe_with_special_factors(.infer_slice, 1, N_WEIGHT - 10, &.{
+        .recipe_with_special_factors(.infer_slice, .one(), .k_n(0.5), &.{
             .depends_on(.GET_RANGE_SLICE),
         }),
         .recipe(.infer_swap, &.{
-            .depends_on_with_weight(.SWAP, N_WEIGHT),
+            .depends_on_with_weight(.SWAP, .k_n(0.5)),
+            .depends_on_with_weight(.ID_EQUALS, .k_n(0.5)),
+            .depends_on_with_weight(.NEXT_ID, .k_n(0.5)),
+            .depends_on_with_weight(.PREV_ID, .k_n(0.5)),
+            .depends_on(.ID_LESS_THAN_OR_EQUAL),
         }),
     }),
     .recipe_list(.ROTATE_RANGE_LEFT, &.{
         .recipe(.infer_rot_right, &.{
+            .depends_on(.RANGE_LEN),
             .depends_on(.ROTATE_RANGE_RIGHT),
         }),
         .recipe(.infer_reverse_nth_next, &.{
-            .depends_on_with_weight(.REVERSE_RANGE, 2),
+            .depends_on_with_weight(.REVERSE_RANGE, .flat(2)),
             .depends_on(.NTH_NEXT_ID),
+            .depends_on(.PREV_ID),
+            .depends_on(.ID_LESS_THAN),
+            .depends_on(.RANGE_LEN),
         }),
         .recipe(.infer_reverse_nth_prev, &.{
-            .depends_on_with_weight(.REVERSE_RANGE, 2),
+            .depends_on_with_weight(.REVERSE_RANGE, .flat(2)),
             .depends_on(.NTH_PREV_ID),
+            .depends_on(.PREV_ID),
+            .depends_on(.ID_LESS_THAN),
+            .depends_on(.RANGE_LEN),
         }),
     }),
     .recipe_list(.ROTATE_RANGE_RIGHT, &.{
         .recipe(.infer_rot_left, &.{
+            .depends_on(.RANGE_LEN),
             .depends_on(.ROTATE_RANGE_LEFT),
         }),
         .recipe(.infer_reverse_nth_next, &.{
-            .depends_on_with_weight(.REVERSE_RANGE, 2),
+            .depends_on_with_weight(.REVERSE_RANGE, .flat(2)),
             .depends_on(.NTH_NEXT_ID),
+            .depends_on(.NEXT_ID),
+            .depends_on(.ID_LESS_THAN),
+            .depends_on(.RANGE_LEN),
         }),
         .recipe(.infer_reverse_nth_prev, &.{
-            .depends_on_with_weight(.REVERSE_RANGE, 2),
+            .depends_on_with_weight(.REVERSE_RANGE, .flat(2)),
             .depends_on(.NTH_PREV_ID),
+            .depends_on(.NEXT_ID),
+            .depends_on(.ID_LESS_THAN),
+            .depends_on(.RANGE_LEN),
         }),
     }),
     .recipe_list(.MOVE_ONE_RIGHT_DISPLACE, &.{
-        .recipe_with_special_factors(.infer_get_set_move_block_left_overwrite, 0.75, 0, &.{
+        .recipe_with_special_factors(.infer_get_set_move_block_left_overwrite, .flat(0.5), .zero(), &.{
             .depends_on(.GET),
             .depends_on(.SET),
             .depends_on(.MOVE_RANGE_LEFT_OVERWRITE),
@@ -922,13 +945,9 @@ pub const RECIPES: []const InferEngine.RecipeList = &.{
         .recipe(.infer_rot_left, &.{
             .depends_on(.ROTATE_RANGE_LEFT),
         }),
-        .recipe(.infer_rot_right, &.{
-            .depends_on(.ROTATE_RANGE_RIGHT),
-            .depends_on(.RANGE_LEN),
-        }),
     }),
     .recipe_list(.MOVE_ONE_LEFT_DISPLACE, &.{
-        .recipe(.infer_get_set_move_block_right_overwrite, &.{
+        .recipe_with_special_factors(.infer_get_set_move_block_right_overwrite, .flat(0.5), .zero(), &.{
             .depends_on(.GET),
             .depends_on(.SET),
             .depends_on(.MOVE_RANGE_RIGHT_OVERWRITE),
@@ -939,10 +958,6 @@ pub const RECIPES: []const InferEngine.RecipeList = &.{
         }),
         .recipe(.infer_rot_right, &.{
             .depends_on(.ROTATE_RANGE_RIGHT),
-        }),
-        .recipe(.infer_rot_left, &.{
-            .depends_on(.ROTATE_RANGE_LEFT),
-            .depends_on(.RANGE_LEN),
         }),
     }),
     .recipe_list(.MOVE_ONE_OVERWRITE, &.{
@@ -955,96 +970,128 @@ pub const RECIPES: []const InferEngine.RecipeList = &.{
         .recipe(.infer_rot_left, &.{
             .depends_on(.ROTATE_RANGE_LEFT),
             .depends_on(.RANGE_LEN),
-        }),
-        .recipe(.infer_rot_right, &.{
-            .depends_on(.ROTATE_RANGE_RIGHT),
-            .depends_on(.RANGE_LEN),
+            .depends_on(.NTH_NEXT_ID),
+            .depends_on(.ID_LESS_THAN),
+            .depends_on(.ID_EQUALS),
+            .depends_on(.VALID_ID),
         }),
     }),
     .recipe_list(.MOVE_RANGE_LEFT_DISPLACE, &.{
-        .recipe(.infer_rot_left, &.{
-            .depends_on(.ROTATE_RANGE_LEFT),
-            .depends_on(.RANGE_LEN),
-        }),
         .recipe(.infer_rot_right, &.{
             .depends_on(.ROTATE_RANGE_RIGHT),
             .depends_on(.RANGE_LEN),
+            .depends_on_with_weight(.ID_LESS_THAN, .flat(3)),
+            .depends_on(.ID_EQUALS),
+            .depends_on_with_weight(.VALID_ID, .flat(3)),
         }),
     }),
     .recipe_list(.MOVE_RANGE_RIGHT_OVERWRITE, &.{
-        .recipe(.infer_get_set, &.{
-            .depends_on(.GET),
-            .depends_on(.SET),
-            .depends_on(.PREV_ID),
-            .depends_on(.ID_EQUALS),
+        .recipe(.infer_mv_one_overwrite, &.{
+            .depends_on_with_weight(.MOVE_ONE_OVERWRITE, .n()),
+            .depends_on(.NTH_NEXT_ID),
+            .depends_on_with_weight(.VALID_ID, .flat(4)),
+            .depends_on_with_weight(.PREV_ID, .k_n(2)),
+            .depends_on_with_weight(.ID_EQUALS, .n()),
         }),
     }),
     .recipe_list(.MOVE_RANGE_LEFT_OVERWRITE, &.{
-        .recipe(.infer_get_set, &.{
-            .depends_on(.GET),
-            .depends_on(.SET),
-            .depends_on(.NEXT_ID),
-            .depends_on(.ID_EQUALS),
+        .recipe(.infer_mv_one_overwrite, &.{
+            .depends_on_with_weight(.MOVE_ONE_OVERWRITE, .n()),
+            .depends_on(.NTH_PREV_ID),
+            .depends_on_with_weight(.VALID_ID, .flat(4)),
+            .depends_on_with_weight(.NEXT_ID, .k_n(2)),
+            .depends_on_with_weight(.ID_EQUALS, .n()),
         }),
     }),
     .recipe_list(.SCRAMBLE, &.{
-        .recipe(.infer_get_set, &.{
-            .depends_on(.GET),
-            .depends_on(.SET),
+        .recipe(.infer_mv_one_overwrite, &.{
+            .depends_on_with_weight(.MOVE_ONE_OVERWRITE, .n()),
+            .depends_on_with_weight(.NTH_NEXT_ID, .n()),
+            .depends_on_with_weight(.ID_EQUALS, .n()),
+        }),
+    }),
+    .recipe_list(.APPEND_ONE_SLOT_ASSUME_CAP, &.{
+        .recipe(.infer_append_many, &.{
+            .depends_on(.APPEND_MANY_SLOTS_ASSUME_CAP),
+        }),
+        .recipe(.infer_set_len, &.{
+            .depends_on(.GET_LEN),
+            .depends_on(.SET_LEN),
+            .depends_on(.LAST_ID),
+        }),
+    }),
+    .recipe_list(.APPEND_MANY_SLOTS_ASSUME_CAP, &.{
+        .recipe(.infer_append_one, &.{
+            .depends_on_with_weight(.APPEND_ONE_SLOT_ASSUME_CAP, .n()),
+        }),
+        .recipe(.infer_set_len, &.{
+            .depends_on(.GET_LEN),
+            .depends_on(.SET_LEN),
+            .depends_on(.LAST_ID),
+        }),
+    }),
+    .recipe_list(.INSERT_ONE_SLOT_BEFORE_ASSUME_CAP, &.{
+        .recipe(.infer_append_one, &.{
+            .depends_on(.APPEND_ONE_SLOT_ASSUME_CAP),
+            .depends_on(.MOVE_RANGE_RIGHT_OVERWRITE),
+            .depends_on(.LAST_ID),
+        }),
+        .recipe(.infer_insert_many, &.{
+            .depends_on(.INSERT_MANY_SLOTS_BEFORE_ASSUME_CAP),
+        }),
+    }),
+    .recipe_list(.INSERT_MANY_SLOTS_BEFORE_ASSUME_CAP, &.{
+        .recipe(.infer_insert_one, &.{
+            .depends_on_with_weight(.INSERT_ONE_SLOT_BEFORE_ASSUME_CAP, .n()),
             .depends_on(.NTH_NEXT_ID),
+        }),
+        .recipe(.infer_append_many, &.{
+            .depends_on(.APPEND_MANY_SLOTS_ASSUME_CAP),
+            .depends_on(.LAST_ID),
+            .depends_on(.MOVE_RANGE_RIGHT_OVERWRITE),
+        }),
+    }),
+    .recipe_list(.DELETE_ONE, &.{
+        .recipe(.infer_delete_range, &.{
+            .depends_on(.DELETE_RANGE),
+        }),
+        .recipe(.infer_set_len, &.{
+            .depends_on(.GET_LEN),
+            .depends_on(.SET_LEN),
+            .depends_on(.LAST_ID),
+            .depends_on(.NEXT_ID),
+            .depends_on(.VALID_ID),
             .depends_on(.ID_EQUALS),
+            .depends_on(.MOVE_RANGE_LEFT_OVERWRITE),
+        }),
+    }),
+    .recipe_list(.DELETE_RANGE, &.{
+        .recipe(.infer_delete_one, &.{
+            .depends_on_with_weight(.DELETE_ONE, .n()),
+            .depends_on(.RANGE_LEN),
+            .depends_on(.ID_EQUALS),
+            .depends_on(.FIRST_ID),
+            .depends_on(.PREV_ID),
+            .depends_on_with_weight(.NEXT_ID, .n()),
+        }),
+        .recipe(.infer_set_len, &.{
+            .depends_on(.GET_LEN),
+            .depends_on(.SET_LEN),
+            .depends_on(.RANGE_LEN),
+            .depends_on(.LAST_ID),
+            .depends_on(.NEXT_ID),
+            .depends_on(.ID_EQUALS),
+            .depends_on(.MOVE_RANGE_LEFT_OVERWRITE),
         }),
     }),
 };
 
 // const INFER = struct {
-//     pub const APPEND_ONE = struct {
-//         const FROM_APPEND_MANY = F.APPEND_MANY_SLOTS_ASSUME_CAP;
-//     };
-//     pub const APPEND_MANY = struct {
-//         const FROM_APPEND_ONE = F.APPEND_ONE_SLOT_ASSUME_CAP;
-//     };
-//     pub const INSERT_ONE = struct {
-//         const FROM_INSERT_MANY = F.INSERT_MANY_SLOTS_ASSUME_CAP;
-//         const FROM_APPEND_ONE_MOVE_ONE_GET_SET = F.APPEND_ONE_SLOT_ASSUME_CAP | F.GET | F.SET | F.PREV_ID;
-//         const FROM_APPEND_ONE_MOVE_ONE_MOVE = F.APPEND_ONE_SLOT_ASSUME_CAP | F.MOVE_BLOCK_RIGHT_NO_PRESERVE;
-//     };
-//     pub const INSERT_MANY = struct {
-//         const FROM_INSERT_ONE = F.INSERT_ONE_SLOT_ASSUME_CAP;
-//         const FROM_APPEND_MANY_MOVE_BLOCK = F.APPEND_MANY_SLOTS_ASSUME_CAP;
-//         const FROM_APPEND_ONE_MOVE_ONE_GET_SET = F.APPEND_ONE_SLOT_ASSUME_CAP | F.GET | F.SET | F.PREV_ID;
-//     };
 //     pub const DELETE_ONE = struct {
 //         const FROM_DELETE_RANGE = F.DELETE_RANGE;
 //     };
 //     pub const DELETE_RANGE = struct {
 //         const FROM_DELETE_ONE = F.DELETE_ONE;
-//     };
-//     pub const MOVE_BLOCK_RIGHT_NO_PRESERVE = struct {
-//         const FROM_GET_SET_PREV = F.GET | F.SET | F.PREV_ID;
-//     };
-//     pub const MOVE_BLOCK_LEFT_NO_PRESERVE = struct {
-//         const FROM_GET_SET_NEXT = F.GET | F.SET | F.NEXT_ID;
-//     };
-//     pub const GET_BASE_PTR_CONST = struct {
-//         const FROM_BASE_PTR = F.GET_BASE_PTR;
-//     };
-//     pub const GET_RANGE_SLICE = struct {
-//         const FROM_BASE_PTR_CLASSIC_INDEX = F.GET_BASE_PTR | PROPERTY.CLASSIC_INDEXING_SCHEME;
-//         const FROM_PTR_OFFSET_CLASSIC_INDEX = F.GET_PTR | PROPERTY.OFFSET_CLASSIC_INDEXING_SCHEME;
-//     };
-//     pub const GET_RANGE_CONST_SLICE = struct {
-//         const FROM_BASE_PTR_CLASSIC_INDEX = F.GET_BASE_PTR | PROPERTY.CLASSIC_INDEXING_SCHEME;
-//         const FROM_BASE_CONST_PTR_CLASSIC_INDEX = F.GET_BASE_CONST_PTR | PROPERTY.CLASSIC_INDEXING_SCHEME;
-//         const FROM_PTR_OFFSET_CLASSIC_INDEX = F.GET_PTR | PROPERTY.OFFSET_CLASSIC_INDEXING_SCHEME;
-//         const FROM_CONST_PTR_OFFSET_CLASSIC_INDEX = F.GET_PTR | PROPERTY.OFFSET_CLASSIC_INDEXING_SCHEME;
-//         const FROM_RANGE_SLICE = F.GET_RANGE_SLICE;
-//     };
-//     pub const FIRST_CHILD_ID = struct {
-//         const FROM_NTH_CHILD_ID = F.NTH_CHILD_ID;
-//     };
-//     pub const LAST_CHILD_ID = struct {
-//         const FROM_NTH_CHILD_ID = F.NTH_CHILD_ID;
 //     };
 //     pub const ENSURE_FREE_SPACE = struct {
 //         const FROM_GET_LEN_GET_SET_CAP = F.GET_LEN | F.SET_CAP | F.GET_CAP;
