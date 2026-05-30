@@ -34,6 +34,7 @@ const Utils = Root.Utils;
 const math = std.math;
 const fmt = std.fmt;
 const Random = std.Random;
+const BHint = builtin.BranchHint;
 // const pq = std.PriorityQueue;
 
 const Root = @import("./_root.zig");
@@ -68,6 +69,156 @@ const KindInfo = Types.KindInfo;
 pub const SearchOrder = enum {
     SEARCH_PARAMS_IN_SAME_ORDER_AS_THEIR_ORDER_IN_DATA_BUFFER,
     SEARCH_PARAMS_UNORDERED,
+};
+
+pub const ReadWritePosOrder = enum {
+    READ_POS_IS_AFTER_WRITE_POS,
+    WRITE_POS_IS_EQUAL_TO_OR_AFTER_READ_POS,
+};
+
+pub const SeekCursorMode = enum {
+    READ_POS,
+    WRITE_POS,
+};
+
+pub const SeekOrigin = enum(u8) {
+    FORWARD_FROM_START_POS,
+    BACKWARD_FROM_END_POS,
+    FORWARD_FROM_READ_POS,
+    BACKWARD_FROM_READ_POS,
+    FORWARD_FROM_WRITE_POS,
+    BACKWARD_FROM_WRITE_POS,
+};
+
+pub const SeekLimitMode = enum {
+    CLAMP_TO_LIMITS,
+    ERROR_IF_EXCEED_LIMITS,
+};
+
+pub const ErrorMode = enum {
+    RETURN_ERRORS,
+    ERRORS_UNREACHABLE,
+
+    pub fn ReturnType(comptime self: ErrorMode, comptime ERR: type, comptime PAYLOAD: type) type {
+        if (self == .RETURN_ERRORS) {
+            return ERR!PAYLOAD;
+        } else {
+            return PAYLOAD;
+        }
+    }
+
+    pub fn HandleType(comptime self: ErrorMode, comptime ERR: type) type {
+        if (self == .RETURN_ERRORS) {
+            return ERR;
+        } else {
+            return noreturn;
+        }
+    }
+
+    pub fn handle_err(comptime self: ErrorMode, err: anyerror, comptime src: SourceLocation) self.HandleType(@TypeOf(err)) {
+        if (self == .RETURN_ERRORS) {
+            return err;
+        } else {
+            assert_unreachable_err(src, err);
+        }
+    }
+};
+
+pub const SeekError = error{
+    data_is_empty,
+    local_start_invalid,
+    local_end_invalid,
+    read_pos_invalid,
+    write_pos_invalid,
+    attempt_to_seek_before_absolute_data_start,
+    attempt_to_seek_after_absolute_data_end,
+    attempt_to_seek_before_local_start,
+    attempt_to_seek_after_local_end,
+    attempt_to_seek_read_pos_after_write_pos,
+    attempt_to_seek_write_pos_before_read_pos,
+};
+pub const SeekForwardError = error{
+    invalid_data_source,
+    attempt_to_seek_after_end,
+    cannot_seek,
+    cannot_seek_forward,
+};
+pub const CannotSeekForwardError = error{
+    invalid_data_source,
+    cannot_seek,
+    cannot_seek_forward,
+};
+pub const SeekBackwardError = error{
+    invalid_data_source,
+    attempt_to_seek_before_start,
+    cannot_seek,
+    cannot_seek_backward,
+};
+pub const CannotSeekBackwardError = error{
+    invalid_data_source,
+    cannot_seek,
+    cannot_seek_backward,
+};
+pub const CannotSeekError = error{
+    invalid_data_source,
+    cannot_seek,
+    cannot_seek_forward,
+    cannot_seek_backward,
+};
+pub const ReadError = error{
+    cannot_read,
+    invalid_data_source,
+    read_timeout,
+    read_canceled,
+    too_few_items_available_to_read,
+};
+
+pub const ReadConstrainedError = error{
+    cannot_read,
+    invalid_data_source,
+    read_timeout,
+    read_canceled,
+};
+pub const WriteError = error{
+    cannot_write,
+    invalid_data_destination,
+    write_canceled,
+    write_timeout,
+    not_enough_space_to_write,
+};
+pub const WriteConstrainedError = error{
+    cannot_write,
+    invalid_data_destination,
+    write_canceled,
+    write_timeout,
+};
+
+pub const ReadWriteError = error{
+    // read
+    cannot_read,
+    invalid_data_source,
+    read_timeout,
+    read_canceled,
+    too_few_items_available_to_read,
+    // write
+    cannot_write,
+    invalid_data_destination,
+    write_canceled,
+    write_timeout,
+    not_enough_space_to_write,
+};
+
+pub const ReadWriteErrorConstrained = error{
+    // read
+    cannot_read,
+    invalid_data_source,
+    read_timeout,
+    read_canceled,
+    // write
+    cannot_write,
+    invalid_data_destination,
+    write_canceled,
+    write_timeout,
 };
 
 const DEBUG = std.debug.print;
@@ -3255,6 +3406,256 @@ pub const DataManipulationCore = struct {
                     const PartitionResult = struct {
                         sub_partition_left_hi: ID,
                         sub_partition_right_lo: ID,
+                    };
+
+                    pub const Streamer = struct {
+                        data: *DATA,
+                        userdata: USERDATA,
+                        read_pos: ID,
+                        write_pos: ID,
+                        local_start: ?ID = null,
+                        local_end: ?ID = null,
+                        clamp_read_less_than_or_equal_write: bool = true,
+
+                        pub fn read_write_pos_order(self: *const Streamer) ReadWritePosOrder {
+                            if (id_less_than_or_equal(self.data, self.read_pos, self.write_pos, self.userdata)) {
+                                return ReadWritePosOrder.WRITE_POS_IS_EQUAL_TO_OR_AFTER_READ_POS;
+                            } else {
+                                return ReadWritePosOrder.READ_POS_IS_AFTER_WRITE_POS;
+                            }
+                        }
+
+                        const SeekOptions = struct {
+                            pos: SeekCursorMode,
+                            origin: SeekOrigin,
+                            delta: COUNT,
+                            limit_mode: SeekLimitMode,
+                        };
+                        const CT_SeekOptions = struct {
+                            POS: ?SeekCursorMode = null,
+                            ORIGIN: ?SeekOrigin = null,
+                            DELTA: ?COUNT = null,
+                            LIMIT_MODE: ?SeekLimitMode = null,
+                            ERR_MODE: ErrorMode,
+                            RETURN_CLAMP_DELTA: bool = true,
+                            EMPTY_HINT: BHint = .none,
+                            INVALID_HINT: BHint = .none,
+                            SEEK_BEYOND_ABS_HINT: BHint = .none,
+                            SEEK_BEYOND_LOCAL_HINT: BHint = .none,
+                        };
+
+                        // CHECKPOINT PEEK, READ, SET, WRITE funcs
+
+                        /// Seek either the `read_pos` or `write_pos`, forward or backward from the given `origin`, by `delta` positions, possibly clamping to
+                        /// the end of the local or absolute data.
+                        ///
+                        /// Returns the REAL `delta` moved from the stated `origin` in case the seek operation was clamped;
+                        pub fn seek(self: *Streamer, pos: SeekCursorMode, origin: SeekOrigin, delta: COUNT, limit_mode: SeekLimitMode) SeekError!COUNT {
+                            return self.seek_advanced(.{
+                                .pos = pos,
+                                .origin = origin,
+                                .delta = delta,
+                                .limit_mode = limit_mode,
+                            }, .{
+                                .ERR_MODE = .RETURN_ERRORS,
+                            });
+                        }
+
+                        /// Seek either the `read_pos` or `write_pos`, forward or backward from the given `origin`, by `delta` positions, possibly clamping to
+                        /// the end of the local or absolute data.
+                        ///
+                        /// Returns the REAL `delta` moved from the stated `origin` in case the seek operation was clamped;
+                        ///
+                        /// This advanced version allows specifying comptime settings that can change internal behavior:
+                        ///   - override runtime settings and allow the compiled code to omit impossible branches
+                        ///   - disable the possibility to return errors (error are unreachable instead)
+                        ///   - provide specific branch hints for certain conditions for better optimization
+                        ///   - disable returning the REAL delta (return the input delta even if it was clamped to prevent unnecessary math if not needed)
+                        pub fn seek_advanced(self: *Streamer, opts: SeekOptions, comptime ct_opts: CT_SeekOptions) ct_opts.ERR_MODE.ReturnType(SeekError, COUNT) {
+                            const pos = if (comptime ct_opts.POS) |POS| POS else opts.pos;
+                            const origin = if (comptime ct_opts.ORIGIN) |ORIGIN| ORIGIN else opts.origin;
+                            const delta = if (comptime ct_opts.DELTA) |DELTA| DELTA else opts.delta;
+                            const limit_mode = if (comptime ct_opts.LIMIT_MODE) |LIMIT_MODE| LIMIT_MODE else opts.limit_mode;
+                            const error_mode = ct_opts.ERR_MODE;
+                            if (get_len(self.data, self.userdata) <= 0) {
+                                @branchHint(ct_opts.EMPTY_HINT);
+                                return error_mode.handle_err(SeekError.data_is_empty, @src());
+                            }
+                            var real_delta = delta;
+                            const new_id = get_new_id: {
+                                switch (origin) {
+                                    .FORWARD_FROM_START_POS, .FORWARD_FROM_READ_POS, .FORWARD_FROM_WRITE_POS => {
+                                        const start = switch (origin) {
+                                            .FORWARD_FROM_START_POS => get_start: {
+                                                if (self.local_start) |s| {
+                                                    if (!id_valid(self.data, s, self.userdata)) {
+                                                        @branchHint(ct_opts.INVALID_HINT);
+                                                        return error_mode.handle_err(SeekError.local_start_invalid, @src());
+                                                    }
+                                                    break :get_start s;
+                                                } else {
+                                                    break :get_start first_id(self.data, self.userdata);
+                                                }
+                                            },
+                                            .FORWARD_FROM_READ_POS => get_start: {
+                                                if (!id_valid(self.data, self.read_pos, self.userdata)) {
+                                                    @branchHint(ct_opts.INVALID_HINT);
+                                                    return error_mode.handle_err(SeekError.read_pos_invalid, @src());
+                                                }
+                                                break :get_start self.read_pos;
+                                            },
+                                            .FORWARD_FROM_WRITE_POS => get_start: {
+                                                if (!id_valid(self.data, self.write_pos, self.userdata)) {
+                                                    @branchHint(ct_opts.INVALID_HINT);
+                                                    return error_mode.handle_err(SeekError.write_pos_invalid, @src());
+                                                }
+                                                break :get_start self.write_pos;
+                                            },
+                                            else => unreachable,
+                                        };
+                                        const nth = nth_next_id(self.data, start, delta, self.userdata);
+                                        if (!id_valid(self.data, nth, self.userdata)) {
+                                            @branchHint(ct_opts.SEEK_BEYOND_ABS_HINT);
+                                            const last = last_id(self.data, self.userdata);
+                                            switch (limit_mode) {
+                                                .CLAMP_TO_LIMITS => {
+                                                    if (comptime ct_opts.RETURN_CLAMP_DELTA) {
+                                                        real_delta = limit_len(self.data, start, last, self.userdata);
+                                                    }
+                                                    break :get_new_id last;
+                                                },
+                                                .ERROR_IF_EXCEED_LIMITS => {
+                                                    return error_mode.handle_err(SeekError.attempt_to_seek_after_absolute_data_end, @src());
+                                                },
+                                            }
+                                        }
+                                        if (self.local_end) |local_end| {
+                                            if (!id_valid(self.data, local_end, self.userdata)) {
+                                                @branchHint(ct_opts.INVALID_HINT);
+                                                return error_mode.handle_err(SeekError.local_end_invalid, @src());
+                                            }
+                                            if (id_greater_than(self.data, nth, local_end, self.userdata)) {
+                                                @branchHint(ct_opts.SEEK_BEYOND_LOCAL_HINT);
+                                                switch (limit_mode) {
+                                                    .CLAMP_TO_LIMITS => {
+                                                        if (comptime ct_opts.RETURN_CLAMP_DELTA) {
+                                                            real_delta = limit_len(self.data, start, local_end, self.userdata);
+                                                        }
+                                                        break :get_new_id local_end;
+                                                    },
+                                                    .ERROR_IF_EXCEED_LIMITS => {
+                                                        return error_mode.handle_err(SeekError.attempt_to_seek_after_local_end, @src());
+                                                    },
+                                                }
+                                            }
+                                        }
+                                        if (pos == .READ_POS and self.clamp_read_less_than_or_equal_write) {
+                                            if (id_greater_than(self.data, nth, self.write_pos, self.userdata)) {
+                                                @branchHint(ct_opts.SEEK_BEYOND_LOCAL_HINT);
+                                                switch (limit_mode) {
+                                                    .CLAMP_TO_LIMITS => {
+                                                        if (comptime ct_opts.RETURN_CLAMP_DELTA) {
+                                                            real_delta = limit_len(self.data, start, self.write_pos, self.userdata);
+                                                        }
+                                                        break :get_new_id self.write_pos;
+                                                    },
+                                                    .ERROR_IF_EXCEED_LIMITS => {
+                                                        return error_mode.handle_err(SeekError.attempt_to_seek_read_pos_after_write_pos, @src());
+                                                    },
+                                                }
+                                            }
+                                        }
+                                        break :get_new_id nth;
+                                    },
+                                    .BACKWARD_FROM_END_POS, .BACKWARD_FROM_READ_POS, .BACKWARD_FROM_WRITE_POS => {
+                                        const end = switch (origin) {
+                                            .BACKWARD_FROM_END_POS => get_end: {
+                                                if (self.local_end) |local_end| {
+                                                    if (!id_valid(self.data, local_end, self.userdata)) {
+                                                        @branchHint(ct_opts.INVALID_HINT);
+                                                        return error_mode.handle_err(SeekError.local_end_invalid, @src());
+                                                    }
+                                                    break :get_end local_end;
+                                                } else {
+                                                    break :get_end last_id(self.data, self.userdata);
+                                                }
+                                            },
+                                            .BACKWARD_FROM_READ_POS => get_start: {
+                                                if (!id_valid(self.data, self.read_pos, self.userdata)) {
+                                                    @branchHint(ct_opts.INVALID_HINT);
+                                                    return error_mode.handle_err(SeekError.read_pos_invalid, @src());
+                                                }
+                                                break :get_start self.read_pos;
+                                            },
+                                            .BACKWARD_FROM_WRITE_POS => get_start: {
+                                                if (!id_valid(self.data, self.write_pos, self.userdata)) {
+                                                    @branchHint(ct_opts.INVALID_HINT);
+                                                    return error_mode.handle_err(SeekError.write_pos_invalid, @src());
+                                                }
+                                                break :get_start self.write_pos;
+                                            },
+                                            else => unreachable,
+                                        };
+                                        const nth = nth_prev_id(self.data, end, delta, self.userdata);
+                                        if (!id_valid(self.data, nth, self.userdata)) {
+                                            @branchHint(ct_opts.SEEK_BEYOND_ABS_HINT);
+                                            const first = first_id(self.data, self.userdata);
+                                            switch (limit_mode) {
+                                                .CLAMP_TO_LIMITS => {
+                                                    if (comptime ct_opts.RETURN_CLAMP_DELTA) {
+                                                        real_delta = limit_len(self.data, first, end, self.userdata);
+                                                    }
+                                                    break :get_new_id first;
+                                                },
+                                                .ERROR_IF_EXCEED_LIMITS => return error_mode.handle_err(SeekError.attempt_to_seek_before_absolute_data_start, @src()),
+                                            }
+                                        }
+                                        if (self.local_start) |local_start| {
+                                            if (!id_valid(self.data, local_start, self.userdata)) {
+                                                @branchHint(ct_opts.INVALID_HINT);
+                                                return error_mode.handle_err(SeekError.local_start_invalid, @src());
+                                            }
+                                            if (id_less_than(self.data, nth, local_start, self.userdata)) {
+                                                @branchHint(ct_opts.SEEK_BEYOND_LOCAL_HINT);
+                                                switch (limit_mode) {
+                                                    .CLAMP_TO_LIMITS => {
+                                                        if (comptime ct_opts.RETURN_CLAMP_DELTA) {
+                                                            real_delta = limit_len(self.data, local_start, end, self.userdata);
+                                                        }
+                                                        break :get_new_id local_start;
+                                                    },
+                                                    .ERROR_IF_EXCEED_LIMITS => return error_mode.handle_err(SeekError.attempt_to_seek_before_local_start, @src()),
+                                                }
+                                            }
+                                        }
+                                        if (pos == .WRITE_POS and self.clamp_read_less_than_or_equal_write) {
+                                            if (id_less_than(self.data, nth, self.read_pos, self.userdata)) {
+                                                @branchHint(ct_opts.SEEK_BEYOND_LOCAL_HINT);
+                                                switch (limit_mode) {
+                                                    .CLAMP_TO_LIMITS => {
+                                                        if (comptime ct_opts.RETURN_CLAMP_DELTA) {
+                                                            real_delta = limit_len(self.data, self.read_pos, end, self.userdata);
+                                                        }
+                                                        break :get_new_id self.read_pos;
+                                                    },
+                                                    .ERROR_IF_EXCEED_LIMITS => return error_mode.handle_err(SeekError.attempt_to_seek_write_pos_before_read_pos, @src()),
+                                                }
+                                            }
+                                        }
+                                        break :get_new_id nth;
+                                    },
+                                }
+                            };
+                            switch (pos) {
+                                .READ_POS => {
+                                    self.read_pos = new_id;
+                                },
+                                .WRITE_POS => {
+                                    self.write_pos = new_id;
+                                },
+                            }
+                            return real_delta;
+                        }
                     };
                 };
             }
