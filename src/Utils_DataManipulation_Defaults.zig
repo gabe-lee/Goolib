@@ -97,6 +97,7 @@ pub fn core_for_slice_allocated(comptime ELEM: type) DataManipulationCore {
             alloc: Allocator = Root.DummyAllocator.allocator_panic_free_noop,
             alloc_settings: Utils.Alloc.SmartAllocSettings(ELEM) = .{},
             alloc_comptime_settings: Utils.Alloc.SmartAllocComptimeSettings(ELEM) = .{},
+            io: std.Io,
         },
     };
 }

@@ -46,42 +46,43 @@ const IList_CCASList_threadlocal_unzeroed_u8 = CCAS.CompactCoupledAllocationSyst
 const SlabBucketAllocator_multi_threaded = SBA.SimpleBucketAllocator(.new(.multi_threaded, 16)).Debug.make_two_list_test();
 
 // const ListSegmentAllocator_u8 = Goolib.ListSegmentAllocator.Internal.Fuzzer.make_list_segment_allocator_test(u8);
-pub fn main() anyerror!void {
-    var fuzzer = try Fuzz.DiffFuzzer.init_fuzz(
-        std.process.args(),
-        std.heap.smp_allocator,
-        &.{
-            // Fuzz.FAILURE_TEST,
-            // Fuzz.OVERHEAD_TEST,
-            Utils_quick_hex_dec_u64,
-            IList_SliceAdapter_u8,
-            IList_ArrayListAdapter_u8,
-            IList_RingList_u8,
-            IList_List_u8,
-            IList_MultiSortList_u8,
-            // ListSegmentAllocator_u8,
-            IList_CCASList_mutexed_zeroed_u8,
-            IList_CCASList_threadlocal_unzeroed_u8,
-            SlabBucketAllocator_multi_threaded,
-        },
-        &.{
-            .new_group("IList", &.{
-                IList_SliceAdapter_u8,
-                IList_ArrayListAdapter_u8,
-                IList_RingList_u8,
-                IList_List_u8,
-                IList_MultiSortList_u8,
-                IList_CCASList_mutexed_zeroed_u8,
-                IList_CCASList_threadlocal_unzeroed_u8,
-            }),
-            .new_group("Allocators", &.{
-                SlabBucketAllocator_multi_threaded,
-            }),
-            .new_group("Utils", &.{
-                Utils_quick_hex_dec_u64,
-            }),
-        },
-    );
-    defer fuzzer.deinit();
-    try fuzzer.fuzz_all();
+pub fn main(_: std.process.Init.Minimal) anyerror!void {
+    @panic("not updated to 16.0");
+    // var fuzzer = try Fuzz.DiffFuzzer.init_fuzz(
+    //     init.args.iterate(),
+    //     std.heap.smp_allocator,
+    //     &.{
+    //         // Fuzz.FAILURE_TEST,
+    //         // Fuzz.OVERHEAD_TEST,
+    //         Utils_quick_hex_dec_u64,
+    //         IList_SliceAdapter_u8,
+    //         IList_ArrayListAdapter_u8,
+    //         IList_RingList_u8,
+    //         IList_List_u8,
+    //         IList_MultiSortList_u8,
+    //         // ListSegmentAllocator_u8,
+    //         IList_CCASList_mutexed_zeroed_u8,
+    //         IList_CCASList_threadlocal_unzeroed_u8,
+    //         SlabBucketAllocator_multi_threaded,
+    //     },
+    //     &.{
+    //         .new_group("IList", &.{
+    //             IList_SliceAdapter_u8,
+    //             IList_ArrayListAdapter_u8,
+    //             IList_RingList_u8,
+    //             IList_List_u8,
+    //             IList_MultiSortList_u8,
+    //             IList_CCASList_mutexed_zeroed_u8,
+    //             IList_CCASList_threadlocal_unzeroed_u8,
+    //         }),
+    //         .new_group("Allocators", &.{
+    //             SlabBucketAllocator_multi_threaded,
+    //         }),
+    //         .new_group("Utils", &.{
+    //             Utils_quick_hex_dec_u64,
+    //         }),
+    //     },
+    // );
+    // defer fuzzer.deinit();
+    // try fuzzer.fuzz_all();
 }

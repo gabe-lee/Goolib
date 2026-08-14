@@ -34,7 +34,7 @@ const AllocInfal = Root.AllocatorInfallible;
 const DummyAllocator = Root.DummyAllocator;
 const Utils = Root.Utils;
 const _Flags = Root.Flags;
-const File = std.fs.File;
+const File = std.Io.File;
 const Writer = std.Io.Writer;
 const Prng = std.Random.DefaultPrng;
 const FixedAlloc = std.heap.FixedBufferAllocator;
@@ -282,7 +282,7 @@ pub const DiffFuzzer = struct {
     op_table: []const *const fn (rand: Random, state_opq: *anyopaque, alloc: Allocator, bench_time: *BenchTime) ?[]const u8 = noop_table[0..0],
     deinit_func: *const fn (state_opq: *anyopaque, alloc: Allocator) void = noop_deinit,
 
-    pub fn init_fuzz(args: std.process.ArgIterator, alloc: Allocator, test_list: []const FuzzTest, groups: []const FuzzTestGroup) anyerror!Self {
+    pub fn init_fuzz(args: std.process.Args.Iterator, alloc: Allocator, test_list: []const FuzzTest, groups: []const FuzzTestGroup) anyerror!Self {
         var secs: ?u64 = null;
         var seed: ?u64 = null;
         var name: ?[]const u8 = null;
@@ -353,7 +353,7 @@ pub const DiffFuzzer = struct {
         return s;
     }
 
-    pub fn init_bench(args: std.process.ArgIterator, alloc: Allocator, test_list: []const FuzzTest, groups: []const FuzzTestGroup) anyerror!Self {
+    pub fn init_bench(args: std.process.Args.Iterator, alloc: Allocator, test_list: []const FuzzTest, groups: []const FuzzTestGroup) anyerror!Self {
         var secs: ?u64 = null;
         var seed: ?u64 = null;
         var thrd: ?u64 = null;

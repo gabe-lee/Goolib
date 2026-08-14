@@ -336,14 +336,14 @@ pub inline fn ptr_cast(from: anytype, comptime TO: type) TO {
     switch (TI) {
         .pointer => |PTR_INFO| switch (PTR_INFO.size) {
             .slice => {
-                assert_with_reason(mem.isAligned(raw_addr, PTR_INFO.alignment), @src(), "address {d} was not aligned to required alignment for type {s} ({d})", .{ raw_addr, @typeName(TO), PTR_INFO.alignment });
+                assert_with_reason(mem.isAligned(raw_addr, PTR_INFO.alignment orelse @alignOf(PTR_INFO.child)), @src(), "address {d} was not aligned to required alignment for type {s} ({d})", .{ raw_addr, @typeName(TO), PTR_INFO.alignment orelse @alignOf(PTR_INFO.child) });
                 var to: TO = undefined;
                 to.ptr = @ptrFromInt(raw_addr);
                 to.len = 0;
                 return to;
             },
             else => {
-                assert_with_reason(mem.isAligned(raw_addr, PTR_INFO.alignment), @src(), "address {d} was not aligned to required alignment for type {s} ({d})", .{ raw_addr, @typeName(TO), PTR_INFO.alignment });
+                assert_with_reason(mem.isAligned(raw_addr, PTR_INFO.alignment orelse @alignOf(PTR_INFO.child)), @src(), "address {d} was not aligned to required alignment for type {s} ({d})", .{ raw_addr, @typeName(TO), PTR_INFO.alignment orelse @alignOf(PTR_INFO.child) });
                 return @ptrFromInt(raw_addr);
             },
         },
@@ -355,14 +355,14 @@ pub inline fn ptr_cast(from: anytype, comptime TO: type) TO {
                 switch (OPT_CHILD_INFO) {
                     .pointer => |CHILD_PTR_INFO| switch (CHILD_PTR_INFO.size) {
                         .slice => {
-                            assert_with_reason(mem.isAligned(raw_addr, CHILD_PTR_INFO.alignment), @src(), "address {d} was not aligned to required alignment for type {s} ({d})", .{ raw_addr, @typeName(TO), CHILD_PTR_INFO.alignment });
+                            assert_with_reason(mem.isAligned(raw_addr, CHILD_PTR_INFO.alignment orelse @alignOf(CHILD_PTR_INFO.child)), @src(), "address {d} was not aligned to required alignment for type {s} ({d})", .{ raw_addr, @typeName(TO), CHILD_PTR_INFO.alignment orelse @alignOf(CHILD_PTR_INFO.child) });
                             var to: TO = undefined;
                             to.ptr = @ptrFromInt(raw_addr);
                             to.len = 0;
                             return to;
                         },
                         else => {
-                            assert_with_reason(mem.isAligned(raw_addr, CHILD_PTR_INFO.alignment), @src(), "address {d} was not aligned to required alignment for type {s} ({d})", .{ raw_addr, @typeName(TO), CHILD_PTR_INFO.alignment });
+                            assert_with_reason(mem.isAligned(raw_addr, CHILD_PTR_INFO.alignment orelse @alignOf(CHILD_PTR_INFO.child)), @src(), "address {d} was not aligned to required alignment for type {s} ({d})", .{ raw_addr, @typeName(TO), CHILD_PTR_INFO.alignment orelse @alignOf(CHILD_PTR_INFO.child) });
                             return @ptrFromInt(raw_addr);
                         },
                     },
@@ -389,7 +389,7 @@ pub fn SameTypeSliceSameProps(comptime POINTER_OR_SLICE: type) type {
     const PTR = INFO.pointer;
     return @Pointer(.slice, .{
         .@"addrspace" = PTR.address_space,
-        .@"align" = PTR.alignment,
+        .@"align" = PTR.alignment orelse @alignOf(PTR.child),
         .@"allowzero" = PTR.is_allowzero,
         .@"const" = PTR.is_const,
         .@"volatile" = PTR.is_volatile,
@@ -402,7 +402,7 @@ pub fn TypeSliceSameProps(comptime POINTER_OR_SLICE: type, comptime NEW_TYPE: ty
     const PTR = INFO.pointer;
     return @Pointer(.slice, .{
         .@"addrspace" = PTR.address_space,
-        .@"align" = PTR.alignment,
+        .@"align" = PTR.alignment orelse @alignOf(PTR.child),
         .@"allowzero" = PTR.is_allowzero,
         .@"const" = PTR.is_const,
         .@"volatile" = PTR.is_volatile,
@@ -414,7 +414,7 @@ pub fn TypeSliceSamePropsAndType(comptime POINTER_OR_SLICE: type) type {
     const PTR = INFO.pointer;
     return @Pointer(.slice, .{
         .@"addrspace" = PTR.address_space,
-        .@"align" = PTR.alignment,
+        .@"align" = PTR.alignment orelse @alignOf(PTR.child),
         .@"allowzero" = PTR.is_allowzero,
         .@"const" = PTR.is_const,
         .@"volatile" = PTR.is_volatile,
@@ -441,7 +441,7 @@ pub fn ByteSliceSameProps(comptime POINTER_OR_SLICE: type) type {
     const PTR = INFO.pointer;
     return @Pointer(.slice, .{
         .@"addrspace" = PTR.address_space,
-        .@"align" = PTR.alignment,
+        .@"align" = PTR.alignment orelse @alignOf(PTR.child),
         .@"allowzero" = PTR.is_allowzero,
         .@"const" = PTR.is_const,
         .@"volatile" = PTR.is_volatile,

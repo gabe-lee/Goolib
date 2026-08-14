@@ -1969,19 +1969,19 @@ pub const Renderer = opaque {
         return vec;
     }
     pub fn set_draw_color(self: *Renderer, color: Color_RGBA_u8) Error!void {
-        return ok_or_fail_err(C.SDL_SetRenderDrawColor(self.to_c_ptr(), color.r, color.g, color.b, color.a));
+        return ok_or_fail_err(C.SDL_SetRenderDrawColor(self.to_c_ptr(), color.get_x(), color.get_y(), color.get_z(), color.get_w()));
     }
     pub fn set_draw_color_float(self: *Renderer, color: Color_RGBA_f32) Error!void {
-        return ok_or_fail_err(C.SDL_SetRenderDrawColorFloat(self.to_c_ptr(), color.r, color.g, color.b, color.a));
+        return ok_or_fail_err(C.SDL_SetRenderDrawColorFloat(self.to_c_ptr(), color.get_x(), color.get_y(), color.get_z(), color.get_w()));
     }
     pub fn get_draw_color(self: *Renderer) Error!Color_RGBA_u8 {
         var color = Color_RGBA_u8{};
-        try ok_or_null_err(C.SDL_GetRenderDrawColor(self.to_c_ptr(), &color.r, &color.g, &color.b, &color.a));
+        try ok_or_null_err(C.SDL_GetRenderDrawColor(self.to_c_ptr(), color.x_ptr(), color.y_ptr(), color.z_ptr(), color.w_ptr()));
         return color;
     }
     pub fn get_draw_color_float(self: *Renderer) Error!Color_RGBA_f32 {
         var color = Color_RGBA_f32{};
-        try ok_or_null_err(C.SDL_GetRenderDrawColorFloat(self.to_c_ptr(), &color.r, &color.g, &color.b, &color.a));
+        try ok_or_null_err(C.SDL_GetRenderDrawColorFloat(self.to_c_ptr(), color.x_ptr(), color.y_ptr(), color.z_ptr(), color.w_ptr()));
         return color;
     }
     pub fn set_draw_color_scale(self: *Renderer, scale: f32) Error!void {
@@ -2486,7 +2486,7 @@ pub const BlendOperation = enum(c_uint) {
 };
 pub const SimpleTexture = extern struct {
     format: PixelFormat = .UNKNOWN,
-    size: Vec_c_int = .ZERO_ZERO,
+    size: Vec_c_int = .ZERO,
     /// WARNING: changing this manually may be dangerous if not handled properly
     ref_count: AtomicInt = .{ .val = 0 },
     /// WARNING: changing this manually may be dangerous if not handled properly
@@ -6821,13 +6821,13 @@ pub const Meta = struct {
     pub const BUILD_MICRO_VERSION = C.SDL_MICRO_VERSION;
     pub const BUILD_VERSION = C.SDL_VERSION;
     pub const BUILD_REVISION = C.SDL_REVISION;
-    pub fn RUNTIME_MAJOR_VERSION(version: anytype) @TypeOf(@import("std").zig.c_translation.MacroArithmetic.div(version, @import("std").zig.c_translation.promoteIntLiteral(c_int, 1000000, .decimal))) {
+    pub fn RUNTIME_MAJOR_VERSION(version: anytype) @TypeOf(std.zig.c_translation.helpers.div(version, std.zig.c_translation.helpers.promoteIntLiteral(c_int, 1000000, .decimal))) {
         return C.SDL_VERSIONNUM_MAJOR(version);
     }
-    pub fn RUNTIME_MINOR_VERSION(version: anytype) @TypeOf(@import("std").zig.c_translation.MacroArithmetic.rem(@import("std").zig.c_translation.MacroArithmetic.div(version, @as(c_int, 1000)), @as(c_int, 1000))) {
+    pub fn RUNTIME_MINOR_VERSION(version: anytype) @TypeOf(std.zig.c_translation.helpers.rem(std.zig.c_translation.helpers.div(version, @as(c_int, 1000)), @as(c_int, 1000))) {
         return C.SDL_VERSIONNUM_MINOR(version);
     }
-    pub fn RUNTIME_MICRO_VERSION(version: anytype) @TypeOf(@import("std").zig.c_translation.MacroArithmetic.rem(version, @as(c_int, 1000))) {
+    pub fn RUNTIME_MICRO_VERSION(version: anytype) @TypeOf(std.zig.c_translation.helpers.rem(version, @as(c_int, 1000))) {
         return C.SDL_VERSIONNUM_MICRO(version);
     }
     pub fn RUNTIME_VERSION(major: anytype, minor: anytype, patch: anytype) c_int {

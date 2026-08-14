@@ -1,11 +1,11 @@
 .{
     .name = .Goolib,
-    .version = "0.3.0",
-    .minimum_zig_version = "0.15.1",
+    .version = "0.4.0",
+    .minimum_zig_version = "0.16.0",
     .dependencies = .{
         .sdl = .{
-            .url = "git+https://github.com/castholm/SDL.git#b1913e7c31ad72ecfd3ab04aeac387027754cfaf",
-            .hash = "sdl-0.3.0+3.2.22-7uIn9Pg3fwGG2IyIOPxxOSVe-75nUng9clt7tXGFLzMr",
+            .url = "git+https://github.com/castholm/SDL.git#fb2d799c4778832a34ccb3739e40dded700684bd",
+            .hash = "sdl-0.5.3+3.4.14-SDL--v4eqAGuIKFsspMVxBxZf1OIEmmH-yHDdEl9ZRdX",
         },
     },
     .fingerprint = 0x8df67e606c44b418,

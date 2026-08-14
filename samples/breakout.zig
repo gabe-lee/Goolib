@@ -529,7 +529,7 @@ fn reset_game() !void {
     }
 
     score = 0;
-    score_color = SDL.Color_RGBA_u8.new_opaque(0xff, 0xff, 0xff);
+    score_color = SDL.Color_RGBA_u8.new_rgba(0xff, 0xff, 0xff, 0xff);
 }
 
 fn app_update(appstate: ?*anyopaque) !SDL.AppResult {
@@ -674,7 +674,7 @@ fn app_update(appstate: ?*anyopaque) !SDL.AppResult {
                         .w = paddle.box.w,
                         .h = 0,
                     };
-                    if (Collision.sweep_test(ball.box, rem_vel, paddle_top, FVec.ZERO_ZERO)) |collision| {
+                    if (Collision.sweep_test(ball.box, rem_vel, paddle_top, FVec.ZERO)) |collision| {
                         if (t - collision.t >= 0.001) {
                             t = @min(0, collision.t);
                             sign_y = -1;
@@ -692,7 +692,7 @@ fn app_update(appstate: ?*anyopaque) !SDL.AppResult {
                 };
                 for (bricks.slice(), 0..) |brick, i| {
                     if (Collision.intersects(broad, brick.box)) {
-                        if (Collision.sweep_test(ball.box, rem_vel, brick.box, FVec.ZERO_ZERO)) |collision| {
+                        if (Collision.sweep_test(ball.box, rem_vel, brick.box, FVec.ZERO)) |collision| {
                             if (t - collision.t >= 0.001) {
                                 t = collision.t;
                                 sign_x = collision.sign_x;
@@ -771,9 +771,9 @@ fn app_update(appstate: ?*anyopaque) !SDL.AppResult {
                 }
             }
             if (score <= best_win and bricks.len == 0) {
-                score_color = SDL.Color_RGBA_u8.new_opaque(0x52, 0xcc, 0x73);
+                score_color = SDL.Color_RGBA_u8.new_rgba(0x52, 0xcc, 0x73, 0xff);
             } else if (ball.box.y >= window_size.y or score > best_win) {
-                score_color = SDL.Color_RGBA_u8.new_opaque(0xcc, 0x5c, 0x52);
+                score_color = SDL.Color_RGBA_u8.new_rgba(0xcc, 0x5c, 0x52, 0xff);
             }
         }
     }
@@ -834,7 +834,7 @@ fn app_update(appstate: ?*anyopaque) !SDL.AppResult {
             try renderer.draw_debug_text(FVec.new(8, 8), text.ptr);
             time = @min(@as(f32, @floatFromInt(best_win)) / Timekeeper.updates_per_s, 999.999);
             text = try std.fmt.bufPrintZ(&buf, "BEST {d: >7.3}", .{time});
-            try renderer.set_draw_color(SDL.Color_RGBA_u8.WHITE);
+            try renderer.set_draw_color(SDL.Color_RGBA_u8.ONE);
             try renderer.draw_debug_text(FVec.new(window_size.x / 2 - 8 * 12, 8), text.ptr);
         }
         try renderer.set_render_scale(FVec.new(1, 1));

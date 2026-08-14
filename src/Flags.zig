@@ -60,7 +60,7 @@ pub fn Flags(comptime FLAGS_ENUM: type, comptime GROUPS_ENUM: type) type {
     for (G_INFO.fields) |group_field| {
         assert_with_reason(group_field.value & ~A == 0, @src(), "group `{s}` has invalid bits for flags enum:\nbits to set = {b:0>64}\nvalid range = {b:0>64}\ninvalid pos = {b:0>64}", .{ group_field.name, group_field.value, A, group_field.value & ~A });
     }
-    return packed struct {
+    return extern struct {
         raw: RawInt = 0,
 
         const Self = @This();
