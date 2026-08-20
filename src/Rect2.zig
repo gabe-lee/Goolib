@@ -44,13 +44,14 @@ pub fn define_rect2_type(comptime T: type) type {
             else => false,
         };
 
-        x: T = 0,
-        y: T = 0,
-        w: T = 0,
-        h: T = 0,
+        pos: T_Vec2,
+        size: T_Vec2,
 
-        pub fn new(x: T, y: T, w: T, h: T) T_Rect2 {
-            return T_Rect2{ .x = x, .y = y, .w = w, .h = h };
+        pub fn new_xywh(x: T, y: T, w: T, h: T) T_Rect2 {
+            return T_Rect2{ .pos = .new(x, y), .size = .new(w, h) };
+        }
+        pub fn new(pos: T_Vec2, size: T_Vec2) T_Rect2 {
+            return T_Rect2{ .pos = pos, .size = size };
         }
 
         pub fn overlaps(self: T_Rect2, other: T_Rect2) bool {
@@ -84,56 +85,58 @@ pub fn define_rect2_type(comptime T: type) type {
         }
 
         pub fn equals(self: T_Rect2, other: T_Rect2) bool {
-            var result: u8 = @as(u8, @intCast(@intFromBool(self.x == other.x)));
-            result |= @as(u8, @intCast(@intFromBool(self.y == other.y))) << 1;
-            result |= @as(u8, @intCast(@intFromBool(self.w == other.w))) << 2;
-            result |= @as(u8, @intCast(@intFromBool(self.h == other.h))) << 3;
-            return result == 0b1111;
+            return self.pos.equals(other.pos) and self.size.equals(other.size);
+        }
+        pub fn approx_equal(self: T_Rect2, other: T_Rect2) bool {
+            return self.pos.approx_equal(other.pos) and self.size.approx_equal(other.size);
+        }
+        pub fn approx_equal_with_epsilon(self: T_Rect2, other: T_Rect2, epsilon: T) bool {
+            return self.pos.approx_equal_with_epsilon(other.pos, epsilon) and self.size.approx_equal(other.size, epsilon);
         }
 
         pub fn to_aabb2(self: T_Rect2) T_AABB2 {
             return T_AABB2{
-                .x_min = self.x,
-                .y_min = self.y,
-                .x_max = self.x + self.w,
-                .y_max = self.y + self.h,
+                .x_min = self.pos.x,
+                .y_min = self.pos.y,
+                .x_max = self.pos.x + self.size.x,
+                .y_max = self.pos.y + self.size.y,
             };
         }
 
-        pub fn to_new_type(self: T_Rect2, comptime NEW_T: type) define_rect2_type(NEW_T) {
-            const R = define_rect2_type(NEW_T);
-            const mode = @as(u8, @bitCast(IS_FLOAT)) | (@as(u8, @bitCast(R.IS_FLOAT)) << 1);
-            const FLOAT_TO_FLOAT: u8 = 0b11;
-            const FLOAT_TO_INT: u8 = 0b01;
-            const INT_TO_INT: u8 = 0b00;
-            const INT_TO_FLOAT: u8 = 0b10;
-            switch (mode) {
-                FLOAT_TO_FLOAT => return R{
-                    .x = @floatCast(self.x),
-                    .y = @floatCast(self.y),
-                    .w = @floatCast(self.w),
-                    .h = @floatCast(self.h),
-                },
-                FLOAT_TO_INT => return R{
-                    .x = @intFromFloat(self.x),
-                    .y = @intFromFloat(self.y),
-                    .w = @intFromFloat(self.w),
-                    .h = @intFromFloat(self.h),
-                },
-                INT_TO_INT => return R{
-                    .x = @intCast(self.x),
-                    .y = @intCast(self.y),
-                    .w = @intCast(self.w),
-                    .h = @intCast(self.h),
-                },
-                INT_TO_FLOAT => return R{
-                    .x = @floatFromInt(self.x),
-                    .y = @floatFromInt(self.y),
-                    .w = @floatFromInt(self.w),
-                    .h = @floatFromInt(self.h),
-                },
-                else => unreachable,
-            }
-        }
+        // pub fn to_new_type(self: T_Rect2, comptime NEW_T: type) define_rect2_type(NEW_T) {
+        //     const R = define_rect2_type(NEW_T);
+        //     const mode = @as(u8, @bitCast(IS_FLOAT)) | (@as(u8, @bitCast(R.IS_FLOAT)) << 1);
+        //     const FLOAT_TO_FLOAT: u8 = 0b11;
+        //     const FLOAT_TO_INT: u8 = 0b01;
+        //     const INT_TO_INT: u8 = 0b00;
+        //     const INT_TO_FLOAT: u8 = 0b10;
+        //     switch (mode) {
+        //         FLOAT_TO_FLOAT => return R{
+        //             .x = @floatCast(self.x),
+        //             .y = @floatCast(self.y),
+        //             .w = @floatCast(self.w),
+        //             .h = @floatCast(self.h),
+        //         },
+        //         FLOAT_TO_INT => return R{
+        //             .x = @intFromFloat(self.x),
+        //             .y = @intFromFloat(self.y),
+        //             .w = @intFromFloat(self.w),
+        //             .h = @intFromFloat(self.h),
+        //         },
+        //         INT_TO_INT => return R{
+        //             .x = @intCast(self.x),
+        //             .y = @intCast(self.y),
+        //             .w = @intCast(self.w),
+        //             .h = @intCast(self.h),
+        //         },
+        //         INT_TO_FLOAT => return R{
+        //             .x = @floatFromInt(self.x),
+        //             .y = @floatFromInt(self.y),
+        //             .w = @floatFromInt(self.w),
+        //             .h = @floatFromInt(self.h),
+        //         },
+        //         else => unreachable,
+        //     }
+        // }
     };
 }

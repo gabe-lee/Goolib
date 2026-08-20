@@ -2587,8 +2587,8 @@ pub const DataManipulationCore = struct {
 
                     pub const append_one_slot_assume_capacity: fn (DATA, USERDATA) struct { DATA, ID } = FUNCS.APPEND_ONE_SLOT_ASSUME_CAP;
                     pub const append_many_slots_assume_capacity: fn (DATA, count: COUNT, USERDATA) struct { DATA, ID, ID } = FUNCS.APPEND_MANY_SLOTS_ASSUME_CAP;
-                    pub const insert_one_slot_before_assume_capacity: fn (DATA, at_id: ID, USERDATA) struct { DATA, ID } = FUNCS.INSERT_ONE_SLOT_BEFORE_ASSUME_CAP;
-                    pub const insert_many_slots_before_assume_capacity: fn (DATA, at_id: ID, count: COUNT, USERDATA) struct { DATA, ID, ID } = FUNCS.INSERT_MANY_SLOTS_BEFORE_ASSUME_CAP;
+                    pub const insert_one_slot_assume_capacity: fn (DATA, at_id: ID, USERDATA) struct { DATA, ID } = FUNCS.INSERT_ONE_SLOT_BEFORE_ASSUME_CAP;
+                    pub const insert_many_slots_assume_capacity: fn (DATA, at_id: ID, count: COUNT, USERDATA) struct { DATA, ID, ID } = FUNCS.INSERT_MANY_SLOTS_BEFORE_ASSUME_CAP;
                     pub const prepend_one_slot_assume_capacity: fn (DATA, USERDATA) struct { DATA, ID } = FUNCS.PREPEND_ONE_SLOT_ASSUME_CAP;
                     pub const prepend_many_slots_assume_capacity: fn (DATA, count: COUNT, USERDATA) struct { DATA, ID, ID } = FUNCS.PREPEND_MANY_SLOTS_ASSUME_CAP;
                     pub const delete_one: fn (DATA, id: ID, USERDATA) DATA = FUNCS.DELETE_ONE;
@@ -2732,6 +2732,18 @@ pub const DataManipulationCore = struct {
                             return move_range_left_displace(data, old_first_id, old_last_id, new_first_id, userdata);
                         }
                     }
+                    pub fn append_one(data: DATA, val: ELEM, userdata: USERDATA) struct { DATA, ID } {
+                        var data_ = data;
+                        data_ = ensure_free_space(data, 1, userdata);
+                        data_, const id = append_one_slot_assume_capacity(data_, userdata);
+                        data_ = set(data_, id, val, userdata);
+                        return .{ data_, id };
+                    }
+                    pub fn append_one_assume_capacity(data: DATA, val: ELEM, userdata: USERDATA) struct { DATA, ID } {
+                        var data_, const id = append_one_slot_assume_capacity(data, userdata);
+                        data_ = set(data_, id, val, userdata);
+                        return .{ data_, id };
+                    }
                     pub fn append_one_slot(data: DATA, userdata: USERDATA) struct { DATA, ID } {
                         var data_ = data;
                         data_ = ensure_free_space(data, 1, userdata);
@@ -2742,15 +2754,41 @@ pub const DataManipulationCore = struct {
                         data_ = ensure_free_space(data, count, userdata);
                         return append_many_slots_assume_capacity(data_, count, userdata);
                     }
+                    pub fn insert_one(data: DATA, id: ID, val: ELEM, userdata: USERDATA) struct { DATA, ID } {
+                        var data_ = data;
+                        data_ = ensure_free_space(data, 1, userdata);
+                        data_, const id_ = insert_one_slot_assume_capacity(data_, id, userdata);
+                        data_ = set(data_, id_, val, userdata);
+                        return .{ data_, id_ };
+                    }
+                    pub fn insert_one_assume_capacity(data: DATA, id: ID, val: ELEM, userdata: USERDATA) struct { DATA, ID } {
+                        var data_ = data;
+                        data_ = ensure_free_space(data, 1, userdata);
+                        data_, const id_ = insert_one_slot_assume_capacity(data_, id, userdata);
+                        data_ = set(data_, id_, val, userdata);
+                        return .{ data_, id_ };
+                    }
                     pub fn insert_one_slot_before(data: DATA, before_id: ID, userdata: USERDATA) struct { DATA, ID } {
                         var data_ = data;
                         data_ = ensure_free_space(data, 1, userdata);
-                        return insert_one_slot_before_assume_capacity(data_, before_id, userdata);
+                        return insert_one_slot_assume_capacity(data_, before_id, userdata);
                     }
                     pub fn insert_many_slots_before(data: DATA, count: COUNT, userdata: USERDATA) struct { DATA, ID, ID } {
                         var data_ = data;
                         data_ = ensure_free_space(data, count, userdata);
-                        return insert_many_slots_before_assume_capacity(data_, count, userdata);
+                        return insert_many_slots_assume_capacity(data_, count, userdata);
+                    }
+                    pub fn prepend_one(data: DATA, val: ELEM, userdata: USERDATA) struct { DATA, ID } {
+                        var data_ = data;
+                        data_ = ensure_free_space(data, 1, userdata);
+                        data_, const id = prepend_one_slot_assume_capacity(data_, userdata);
+                        data_ = set(data_, id, val, userdata);
+                        return .{ data_, id };
+                    }
+                    pub fn prepend_one_assume_capacity(data: DATA, val: ELEM, userdata: USERDATA) struct { DATA, ID } {
+                        var data_, const id = prepend_one_slot_assume_capacity(data, userdata);
+                        data_ = set(data_, id, val, userdata);
+                        return .{ data_, id };
                     }
                     pub fn prepend_one_slot(data: DATA, userdata: USERDATA) struct { DATA, ID } {
                         var data_ = data;

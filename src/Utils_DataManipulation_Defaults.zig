@@ -366,12 +366,12 @@ pub fn default_functions_for_contiguous_mem_allocated(
         inline fn cast_offset_to_field_mutable(data: *DATA, comptime offset: usize, comptime field_type: type) *field_type {
             var opq: [*]u8 = @ptrCast(data);
             opq = opq + offset;
-            return @ptrCast(opq);
+            return @ptrCast(@alignCast(opq));
         }
         inline fn cast_offset_to_field_immutable(data: *const DATA, comptime offset: usize, comptime field_type: type) *const field_type {
             var opq: [*]u8 = @ptrCast(data);
             opq = opq + offset;
-            return @ptrCast(opq);
+            return @ptrCast(@alignCast(opq));
         }
         fn get_base_ptr(data: DATA, _: CORE.USERDATA) [*]ELEM {
             const ptr_offset: usize = comptime field_offset(PTR_FIELD_ACCESS, [*]ELEM);
@@ -467,12 +467,12 @@ pub fn default_functions_for_contiguous_mem_not_allocated(
         inline fn cast_offset_to_field_mutable(data: *DATA, comptime offset: usize, comptime field_type: type) *field_type {
             var opq: [*]u8 = @ptrCast(data);
             opq = opq + offset;
-            return @ptrCast(opq);
+            return @ptrCast(@alignCast(opq));
         }
         inline fn cast_offset_to_field_immutable(data: *const DATA, comptime offset: usize, comptime field_type: type) *const field_type {
             var opq: [*]u8 = @ptrCast(data);
             opq = opq + offset;
-            return @ptrCast(opq);
+            return @ptrCast(@alignCast(opq));
         }
         fn get_base_const_ptr(data: DATA, _: CORE.USERDATA) [*]const ELEM {
             const ptr_offset: usize = comptime field_offset(PTR_FIELD_ACCESS, [*]const ELEM);

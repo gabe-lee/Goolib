@@ -55,6 +55,9 @@ pub fn define_aabb2_type(comptime T: type) type {
         pub fn new(x_min: T, x_max: T, y_min: T, y_max: T) T_AABB2 {
             return T_AABB2{ .x_min = x_min, .x_max = x_max, .y_min = y_min, .y_max = y_max };
         }
+        pub fn new_from_pos_size(pos: T_Vec2, size: T_Vec2) T_AABB2 {
+            return T_Rect2.new(pos, size).to_aabb2();
+        }
 
         pub fn new_from_point(point: T_Vec2) T_AABB2 {
             return T_AABB2{
@@ -293,6 +296,34 @@ pub fn define_aabb2_type(comptime T: type) type {
                 .y_min = overlap_y_min,
                 .y_max = overlap_y_max,
             };
+        }
+        pub fn overlap_area_and_overlap_valid(self: T_AABB2, other: T_AABB2) struct { T_AABB2, bool } {
+            const overlap_x_min = @max(self.x_min, other.x_min);
+            const overlap_x_max = @min(self.x_max, other.x_max);
+            if (overlap_x_min >= overlap_x_max) return null;
+            const overlap_y_min = @max(self.y_min, other.y_min);
+            const overlap_y_max = @min(self.y_max, other.y_max);
+            if (overlap_y_min >= overlap_y_max) return null;
+            return .{ T_AABB2{
+                .x_min = overlap_x_min,
+                .x_max = overlap_x_max,
+                .y_min = overlap_y_min,
+                .y_max = overlap_y_max,
+            }, (overlap_x_min <= overlap_x_max and overlap_y_min <= overlap_y_max) };
+        }
+        pub fn overlap_area_and_overlap_greater_than_zero(self: T_AABB2, other: T_AABB2) struct { T_AABB2, bool } {
+            const overlap_x_min = @max(self.x_min, other.x_min);
+            const overlap_x_max = @min(self.x_max, other.x_max);
+            if (overlap_x_min >= overlap_x_max) return null;
+            const overlap_y_min = @max(self.y_min, other.y_min);
+            const overlap_y_max = @min(self.y_max, other.y_max);
+            if (overlap_y_min >= overlap_y_max) return null;
+            return .{ T_AABB2{
+                .x_min = overlap_x_min,
+                .x_max = overlap_x_max,
+                .y_min = overlap_y_min,
+                .y_max = overlap_y_max,
+            }, (overlap_x_min < overlap_x_max and overlap_y_min < overlap_y_max) };
         }
 
         pub fn overlap_area_approx(self: T_AABB2, other: T_AABB2) ?T_AABB2 {
