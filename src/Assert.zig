@@ -35,6 +35,7 @@ const Common = Root.CommonTypes;
 const MathX = Root.Math;
 
 pub const SHOULD_ASSERT = build.mode == .Debug or build.mode == .ReleaseSafe;
+pub const IS_DEBUG = build.mode == .Debug;
 
 pub fn should_assert() bool {
     return @inComptime() or SHOULD_ASSERT;

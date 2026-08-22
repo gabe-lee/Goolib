@@ -46,7 +46,7 @@ pub const PerpendicularZero = Common.PerpendicularZero;
 pub const NormalizeZero = Common.NormalizeZero;
 pub const ShouldTranslate = Common.ShouldTranslate;
 
-pub const Component = enum(u8) {
+pub const Axis = enum(u8) {
     X = 0,
     Y = 1,
 };
@@ -56,7 +56,6 @@ pub fn define_vec2_type(comptime T: type) type {
         const Vec2 = @This();
         const AABB = AABB2.define_aabb2_type(T);
         const Vec3 = Vec3Module.define_vec3_type(T, 2);
-        pub const Comp = Component;
         const IS_FLOAT = switch (T) {
             f16, f32, f64, f80, f128, c_longdouble => true,
             else => false,
@@ -97,12 +96,12 @@ pub fn define_vec2_type(comptime T: type) type {
             return Vec2{ .vec = num_cast(val, T) };
         }
 
-        pub inline fn get(self: Vec2, comptime COMP: Component) T {
-            return self.flat()[@intFromEnum(COMP)];
+        pub inline fn get(self: Vec2, comptime AXIS: Axis) T {
+            return self.flat()[@intFromEnum(AXIS)];
         }
-        pub inline fn set(self: *Vec2, comptime COMP: Component, val: T) void {
+        pub inline fn set(self: *Vec2, comptime AXIS: Axis, val: T) void {
             var f = self.flat();
-            f[@intFromEnum(COMP)] = val;
+            f[@intFromEnum(AXIS)] = val;
             self.* = @bitCast(f);
         }
 
@@ -122,7 +121,7 @@ pub fn define_vec2_type(comptime T: type) type {
             return Vec3{ .x = self.x, .y = self.y, .z = 0 };
         }
 
-        pub fn swizzle(self: Vec2, new_x: Component, new_y: Component) Vec2 {
+        pub fn swizzle(self: Vec2, new_x: Axis, new_y: Axis) Vec2 {
             const vec = self.flat();
             return Vec2{ .x = vec[@intFromEnum(new_x)], .y = vec[@intFromEnum(new_y)] };
         }
