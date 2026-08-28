@@ -51,6 +51,7 @@ pub const Compare = @import("./Utils_Compare.zig");
 pub const Search = @import("./Utils_Search.zig");
 pub const DataManipulation = @import("./Utils_DataManipulation.zig");
 pub const RecipeInference = @import("./Utils_RecipeInference.zig");
+pub const Traverser = @import("./Utils_Traverser.zig");
 
 comptime {
     if (build.is_test) {
@@ -63,6 +64,7 @@ comptime {
         _ = @import("./Utils_Search.zig");
         _ = @import("./Utils_DataManipulation.zig");
         _ = @import("./Utils_RecipeInference.zig");
+        _ = @import("./Utils_Traverser.zig");
     }
 }
 

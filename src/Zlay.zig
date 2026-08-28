@@ -126,7 +126,7 @@ pub const LayoutDirection = enum(u3) {
 pub const AxisRelative = enum(u1) {
     SAME_LAYOUT_DIRECTION_AS_CURRENT_AXIS = 0b0,
     OPPOSITE_LAYOUT_DIRECTION_OF_CURRENT_AXIS = 0b1,
-    
+
     pub inline fn with_driving(self: AxisRelative, comptime IS_DRIVING: bool)  AxisRelativeDriving {
         const raw: u2 = @as(u2, @intCast(@intFromEnum(self)));
         if (comptime !IS_DRIVING) {
@@ -141,7 +141,6 @@ pub const AxisRelativeDriving = enum(u2) {
     OPPOSITE_LAYOUT_DIRECTION_OF_CURRENT_AXIS_DRIVING_PHASE = 0b01,
     OPPOSITE_LAYOUT_DIRECTION_OF_CURRENT_AXIS_SECONDARY_PHASE = 0b11,
 };
-
 
 pub const Axis = Root.Vec2.Axis;
 pub const HorizontalDirection = enum(u1) {
@@ -272,7 +271,7 @@ const AxisLineBuilder = struct {
             self.write_current_axis_line_info();
             self.has_more_elements = false;
         }
-        
+
     }
 };
 
@@ -789,8 +788,8 @@ pub const PointerStateOverElementFinal = struct {
 const NULL_IDX: u32 = 0xFFFFFFFF;
 
 const MinLeftoverFinal = struct {
-    min_or_leftover: Size,
-    final: Size = .ZERO,
+    min_self_or_leftover: Size,
+    min_children_or_final: Size = .ZERO,
 };
 
 const MinLeftoverFinal_OR_FinalAABB = union {
@@ -799,7 +798,7 @@ const MinLeftoverFinal_OR_FinalAABB = union {
     final_rect: Rect,
 
     pub fn new(min_x: f32, min_y: f32) MinLeftoverFinal_OR_FinalAABB {
-        return MinLeftoverFinal_OR_FinalAABB{ .size = .{ .min_or_leftover = .new(min_x, min_y) } };
+        return MinLeftoverFinal_OR_FinalAABB{ .size = .{ .min_self_or_leftover = .new(min_x, min_y) } };
     }
 };
 
@@ -1025,7 +1024,13 @@ const SiblingSlice = struct {
     }
 };
 
-//CHECKPOINT build generic traversers
+const Traverse = Utils.Traverser.IndexBasedMultiFirstChildNextSiblingTraverser(LayoutElement, u32, NULL_IDX, &.{"first_inline_child", "first_floating_child"}, "next_sibling");
+const Nodes = Traverse.Nodes;
+const Stack = Traverse.Stack;
+const StackFrame = Traverse.StackFrame;
+const AllowedPaths = Traverse.AllowedPaths;
+const TraverseError = Utils.Traverser.Error;
+const StackRealloc = Utils.Traverser.StackRealloc;
 
 const LayoutElement = struct {
     requester: LayoutRequester,
@@ -1037,7 +1042,6 @@ const LayoutElement = struct {
     first_inline_child: u32 = NULL_IDX,
     last_inline_child: u32 = NULL_IDX,
     first_floating_child: u32 = NULL_IDX,
-    last_floating_child: u32 = NULL_IDX,
     num_inline_children: u32 = 0,
     next_sibling: u32 = NULL_IDX,
     parent_idx: u32,
@@ -1051,7 +1055,6 @@ const LayoutElement = struct {
     grow_mode_w: GrowMode,
     grow_mode_h: GrowMode,
     completely_clipped: bool = false,
-    use_flow_mode: bool,
     is_flow_virtual: bool = false,
 
     pub inline fn has_children(self: LayoutElement) bool {
@@ -1085,37 +1088,37 @@ const LayoutElement = struct {
         return self.leftover_space_on_sib_axis_line;
     }
     inline fn set_min_self_size(self: *LayoutElement, comptime AXIS: Axis, val: f32) void {
-        self._ms_fbb.size.min_or_leftover.set(AXIS, val);
+        self._ms_fbb.size.min_self_or_leftover.set(AXIS, val);
     }
     inline fn get_min_self_size(self: LayoutElement, comptime AXIS: Axis) f32 {
-        return self._ms_fbb.size.min_or_leftover.get(AXIS);
+        return self._ms_fbb.size.min_self_or_leftover.get(AXIS);
     }
     inline fn update_min_size_if_larger(self: *LayoutElement, comptime AXIS: Axis, val: f32) void {
-        self._ms_fbb.size.min_or_leftover.set(AXIS, @max(self._ms_fbb.size.min_or_leftover.get(AXIS), val));
+        self._ms_fbb.size.min_self_or_leftover.set(AXIS, @max(self._ms_fbb.size.min_self_or_leftover.get(AXIS), val));
     }
     inline fn set_space_leftover(self: *LayoutElement, comptime AXIS: Axis, val: f32) void {
-        self._ms_fbb.size.min_or_leftover.set(AXIS, val);
+        self._ms_fbb.size.min_self_or_leftover.set(AXIS, val);
     }
     inline fn get_space_leftover(self: LayoutElement, comptime AXIS: Axis) f32 {
-        return self._ms_fbb.size.min_or_leftover.get(AXIS);
+        return self._ms_fbb.size.min_self_or_leftover.get(AXIS);
     }
     inline fn set_min_children(self: *LayoutElement, comptime AXIS: Axis, val: f32) void {
-        self._ms_fbb.size.final.set(AXIS, val);
+        self._ms_fbb.size.min_children_or_final.set(AXIS, val);
     }
-    inline fn add_min_children_size(self: *LayoutElement, comptime AXIS: Axis, val: f32) void {
-        self._ms_fbb.size.final.set(AXIS, self._ms_fbb.size.final.get(AXIS) + val);
+    inline fn add_to_min_children_size(self: *LayoutElement, comptime AXIS: Axis, val: f32) void {
+        self._ms_fbb.size.min_children_or_final.set(AXIS, self._ms_fbb.size.min_children_or_final.get(AXIS) + val);
     }
-    inline fn max_min_children(self: *LayoutElement, comptime AXIS: Axis, val: f32) void {
-        self._ms_fbb.size.final.set(AXIS, @max(self._ms_fbb.size.final.get(AXIS), val));
+    inline fn max_of_min_children_size(self: *LayoutElement, comptime AXIS: Axis, val: f32) void {
+        self._ms_fbb.size.min_children_or_final.set(AXIS, @max(self._ms_fbb.size.min_children_or_final.get(AXIS), val));
     }
     inline fn get_min_children(self: LayoutElement, comptime AXIS: Axis) f32 {
-        return self._ms_fbb.size.final.get(AXIS);
+        return self._ms_fbb.size.min_children_or_final.get(AXIS);
     }
     inline fn set_final_size(self: *LayoutElement, comptime AXIS: Axis, val: f32) void {
-        self._ms_fbb.size.final.set(AXIS, val);
+        self._ms_fbb.size.min_children_or_final.set(AXIS, val);
     }
     inline fn get_final_size(self: LayoutElement, comptime AXIS: Axis) f32 {
-        return self._ms_fbb.size.final.get(AXIS);
+        return self._ms_fbb.size.min_children_or_final.get(AXIS);
     }
     inline fn set_max(self: *LayoutElement, comptime AXIS: Axis, val: f32) void {
         self._mg_fcbb.size_grow.max.set(AXIS, val);
@@ -1130,7 +1133,7 @@ const LayoutElement = struct {
         return self._mg_fcbb.size_grow.ratio.get(AXIS);
     }
     inline fn set_final_aabb(self: *LayoutElement, parent_abs: Pos) void {
-        const final_size = self._ms_fbb.size.final;
+        const final_size = self._ms_fbb.size.min_children_or_final;
         const abs_pos = parent_abs.add(self.relative_pos);
         self._ms_fbb.final_aabb = AABB.new_from_pos_size(abs_pos, final_size);
     }
@@ -1154,13 +1157,11 @@ const LayoutElement = struct {
     // inline fn get_next_child_axis_line(self: LayoutElement, manager_list: []LayoutElement)
 };
 
-const Error = error{
-    NONE,
-    PERCENT_NOT_IN_0_TO_1_RANGE,
-    ELEMENT_MEMORY_OUT_OF_SPACE,
-    DEPTH_MEMORY_OUT_OF_SPACE,
-    ID_MAP_OUT_OF_SPACE,
-    INTERNAL_ERROR,
+const Error = TraverseError || error{
+    percent_not_in_0_to_1_range,
+    element_mem_out_of_space,
+    element_mem_reallocation_error,
+    internal_error,
 };
 
 pub fn size_from_aspect_ratio(ratio_x_to_y: f32, axis: Axis, axis_dimension: f32) Size {
@@ -1187,43 +1188,150 @@ pub fn size_from_aspect_ratio_xy(ratio_x: f32, ratio_y: f32, axis: Axis, axis_di
 
 pub const Id = u32;
 
-// fn ArenaDef(comptime MAX_LEN: u32, comptime ELEM: type) type {
-//     return struct {
-//         const Self = @This();
+const OverlapCheck = struct {
+    aabb: AABB,
+    did_overlap: bool = false,
+};
 
-//         mem: [MAX_LEN]ELEM = undefined,
-//         len: u32 = 0,
+pub const VirtualElemMode = enum {
+    NORMAL,
+    VIRTUAL,
+};
 
-//         pub inline fn last(self: *Self) *ELEM {
-//             return &self.mem[self.len - 1];
-//         }
-//         pub inline fn get(self: *Self, idx: u32) *ELEM {
-//             return &self.mem[idx];
-//         }
-//         pub inline fn has_room_for_n_more(self: *const Self, n: u32) bool {
-//             return self.len + n <= MAX_LEN;
-//         }
-//         pub inline fn push(self: *Self, val: ELEM) void {
-//             self.mem[self.len] = val;
-//             self.len += 1;
-//         }
-//         pub inline fn pop(self: *Self) void {
-//             self.len -= 1;
-//         }
-//         pub inline fn restart(self: *Self, val: ELEM) void {
-//             self.len = 1;
-//             self.mem[0] = val;
-//         }
+const ChildIter = struct {
+    nodes: *Nodes,
+    curr_child_idx: u32,
 
-//         pub const Util = Utils.DataManipulation.Defaults.classically_indexed_mem_not_allocated_package(*Self, u32, LayoutElement, &.{"mem"}, &.{"len"});
-//     };
-// }
+    pub fn has_more_children(self: ChildIter) bool {
+        return self.curr_child_idx != NULL_IDX;
+    }
+    pub fn get_child(self: ChildIter)
+};
 
-const TraverseFrame = struct {
-    this_idx: u32,
-    children_remaining: u32,
-    next_relative_child_idx: u32 = 0,
-    last_child_added_idx: u32 = NULL_IDX,
+const Action = struct {
+    fn set_root_final_size_x(nodes: Nodes, root_idx: u32) void {
+        const root = get_elem_ptr(nodes, root_idx);
+        const final_size = @min(root.get_min_self_size(.X), root.get_max_size(.X));
+        root.set_final_size(.X, final_size);
+    }
+    fn set_root_final_size_y(nodes: Nodes, root_idx: u32) void {
+        const root = get_elem_ptr(nodes, root_idx);
+        const final_size = @min(root.get_min_self_size(.Y), root.get_max_size(.Y));
+        root.set_final_size(.Y, final_size);
+    }
+    fn propagate_min_size_to_parent_x(nodes: Nodes, idx: u32, _: void, comptime phase: LayoutPhase) Nodes {
+        const child = get_elem_ptr(nodes, idx);
+        child.add_to_min_children_size(.X, child.padding.h_padding());
+        child.set_min_self_size(.X, @max(child.get_min_self_size(.X), child.get_min_children(.X)));
+        if (child.parent_idx == NULL_IDX) return nodes;
+        const parent = get_parent_ptr(nodes, idx);
+        const gap = parent.child_gaps.horizontal;
+        if (parent.layout_dir.primary_dir() == .X and !parent.is_flow_virtual) {
+            var size = child.get_min_self_size(.X);
+            if (parent.first_inline_child != idx) {
+                size += gap;
+            }
+            parent.add_to_min_children_size(.X, size);
+        } else {
+            const size = child.get_min_self_size(.X);
+            parent.max_of_min_children_size(.X, size);
+        }
+        return nodes;
+    }
+    fn fit_and_expand_children_to_fill_parent_x(nodes_: Nodes, idx: u32, manager: *LayoutManager, comptime phase: LayoutPhase) Nodes {
+        var nodes = nodes_;
+        const parent = get_elem_ptr(nodes, idx);
+        const final_size_with_pad = parent.get_final_size(.X);
+        const final_size_for_children = final_size_with_pad - parent.padding.h_padding();
+        if (parent.num_inline_children > 0) {
+            var curr_child_idx = parent.first_inline_child;
+            if (phase == .PRIMARY_PHASE and parent.is_flow_virtual) {
+                const grand_parent = get_parent_ptr(nodes, idx);
+                var current_min_size: f32 = 0;
+                var num_this_line: u32 = 0;
+                while (curr_child_idx != NULL_IDX) {
+                    const child = get_elem_ptr(nodes, curr_child_idx);
+                    num_this_line += 1;
+                    current_min_size += child.get_min_self_size(.X);
+                    // CHECKPOINT finish this logic
+                    curr_child_idx = get_next_sibling(nodes, curr_child_idx);
+                }
+            } else {
+                while (curr_child_idx != NULL_IDX) {
+                    const child = get_elem_ptr(nodes, curr_child_idx);
+                    curr_child_idx = get_next_sibling(nodes, curr_child_idx);
+                }
+            }
+        }
+        return nodes;
+    }
+    fn propagate_min_size_to_parent_y(nodes_: Nodes, idx: u32, _: void, comptime phase: LayoutPhase) Nodes {
+        const child = get_elem_ptr(nodes, idx);
+        if (child.parent_idx == NULL_IDX) return nodes;
+        const parent = get_parent_ptr(nodes, idx);
+        const gap = parent.child_gaps.vertical;
+        if (parent.layout_dir.primary_dir() == .Y and !parent.is_flow_virtual) {
+            var size = child.get_min_self_size(.Y);
+            if (parent.first_inline_child != idx) {
+                size += gap;
+            }
+            parent.add_to_min_children_size(.Y, size);
+        } else {
+            const size = child.get_min_self_size(.Y);
+            parent.max_of_min_children_size(.Y, size);
+        }
+        return nodes;
+    }
+    fn fit_and_expand_children_to_fill_parent_y(nodes_: Nodes, idx: u32, manager: *LayoutManager, comptime phase: LayoutPhase) Nodes {
+        var nodes = nodes_;
+        const parent = get_elem_ptr(nodes, idx);
+        if (phase == .PRIMARY_PHASE and parent.is_flow_virtual) {
+
+        } else {
+
+        }
+        return nodes;
+    }
+    fn recheck_min_y_from_final_x(nodes_: Nodes, idx: u32, _: void) Nodes {
+        var nodes = nodes_;
+        return nodes;
+    }
+    fn recheck_min_x_from_final_y(nodes_: Nodes, idx: u32, _: void) Nodes {
+        var nodes = nodes_;
+        return nodes;
+    }
+    fn position_and_align_element(nodes_: Nodes, idx: u32, _: void) Nodes {
+        var nodes = nodes_;
+        return nodes;
+    }
+    fn check_aabb_overlap(nodes: Nodes, idx: u32, context: *OverlapCheck) Nodes {
+        const elem = get_elem_ptr(nodes, idx);
+        context.did_overlap = get_elem_ptr(nodes, idx).get_clip_aabb().overlaps(context.aabb);
+        return nodes;
+    }
+
+    //UTILS 
+    inline fn get_elem_ptr(nodes: Nodes, idx: u32) *LayoutElement {
+        return &nodes.ptr[idx];
+    }
+    inline fn get_elem(nodes: Nodes, idx: u32) LayoutElement {
+        return nodes.ptr[idx];
+    }
+    inline fn has_parent(nodes: Nodes, idx: u32) bool {
+        return nodes.ptr[idx].parent_idx != NULL_IDX;
+    }
+    inline fn get_parent_ptr(nodes: Nodes, idx: u32) *LayoutElement {
+        return &nodes.ptr[nodes.ptr[idx].parent_idx];
+    }
+    inline fn get_parent(nodes: Nodes, idx: u32) LayoutElement {
+        return nodes.ptr[nodes.ptr[idx].parent_idx];
+    }
+    inline fn get_next_sibling(nodes: Nodes, idx: u32) u32 {
+        return nodes.ptr[idx].next_sibling;
+    }
+    // inline fn set_next_sibling(nodes: Nodes, idx: u32, next: u32) void {
+    //     nodes.ptr[idx].next_sibling = void;
+    // }
 };
 
 pub const LayoutDrivingAxis = enum(u1) {
@@ -1242,27 +1350,18 @@ pub const LayoutDrivingAxis = enum(u1) {
     HEIGHT_DRIVES_WIDTH,
 };
 
-pub const DepthFrame = struct {
-    parent_idx: u32 = NULL_IDX,
-    last_inline_child_idx: u32 = NULL_IDX,
-    last_floating_child_idx: u32 = NULL_IDX,
+pub const LayoutPhase = enum {
+    PRIMARY_PHASE,
+    SECONDARY_PHASE,
 };
 
 pub const LayoutManager = struct {
-
-    alloc: Allocator = DummyAlloc.allocator_panic_free_noop,
-    elem_alloc_settings: Utils.Alloc.SmartAllocSettings(LayoutElement) = .{},
-    depth_alloc_settings: Utils.Alloc.SmartAllocSettings(DepthFrame) = .{},
-    elem_memory: [*]LayoutElement = Utils.invalid_ptr_many(LayoutElement),
-    depth_memory: [*]DepthFrame = Utils.invalid_ptr_many(DepthFrame),
-    elem_len: u32 = 0,
-    elem_cap: u32 = 0,
-    depth_len: u32 = 0,
-    depth_cap: u32 = 0,
+    elems: Nodes,
+    elem_ralloc: Utils.Traverser.StackRealloc.UNION(LayoutElement),
+    stack: Stack,
     real_max_elements: u32 = 1,
     real_max_depth: u32 = 1,
-    err: Error = Error.NONE,
-    can_realloc: bool = false,
+    err: ?Error = Error.NONE,
 
     inline fn handle_elem_mem_error(self: *LayoutManager, err: Utils.Alloc.AllocErr) void {
         if (err == Utils.Alloc.AllocErr.OutOfMemory) {
@@ -1303,9 +1402,9 @@ pub const LayoutManager = struct {
         var mgr = LayoutManager{
             .alloc = alloc,
             .elem_alloc_settings = elem_alloc_settings,
-            .depth_alloc_settings = depth_alloc_settings,
+            .stack_alloc_settings = depth_alloc_settings,
         };
-        
+
         if (initial_elem_cap > 0) {
             if (!mgr.realloc_elem_mem(initial_elem_cap)) {
                 return .{mgr, false};
@@ -1390,7 +1489,7 @@ pub const LayoutManager = struct {
         return &self.elements[self.elem_len - 1];
     }
 
-    pub fn collect_element_heirarchy_in_breadth_first_children_first_order_reversed(self: *LayoutManager, root_element: LayoutRequester) void {
+    pub fn collect_element_heirarchy(self: *LayoutManager, root_element: LayoutRequester) void {
         self.elem_len = 0;
         self.append_new_elem_from_requester_and_parent_prev_sibling(root_element, NULL_IDX);
         var next_layout_idx_with_unchecked_children: u32 = 0;
@@ -1406,18 +1505,37 @@ pub const LayoutManager = struct {
         self.real_max_elements = @max(self.real_max_elements, self.elem_len);
     }
 
-    pub fn recalculate_layout(self: *LayoutManager, comptime DRIVING_AXIS: Axis) Error {
-        const SECONDARY_AXIS = comptime switch (DRIVING_AXIS) {
-            .X => Axis.Y,
-            .Y => Axis.X,
-        };
-        if (self.elem_len == 0) return self.err;
-        self.propogate_minimums_to_parents(DRIVING_AXIS);
-        self.grow_and_shrink(DRIVING_AXIS);
-        self.recheck_element_sizes_with_with_known_primary_size(DRIVING_AXIS);
-        self.propogate_minimums_to_parents(SECONDARY_AXIS);
-        self.grow_and_shrink(SECONDARY_AXIS);
-        self.position_and_align_all_elements();
+    pub fn recalculate_layout(self: *LayoutManager, comptime DRIVING_AXIS: Axis, comptime STACK_REALLOC: StackRealloc, stack_realloc: STACK_REALLOC.T_PKG(StackFrame)) ?Error {
+        switch (comptime DRIVING_AXIS) {
+            .X => {
+                self.elems, self.stack, self.err = Traverse.do_action_on_all_nodes(self.elems, self.stack, .CHILDREN_FIRST, .exclude_child_paths(&.{""}), 0, STACK_REALLOC, stack_realloc, void{}, LayoutPhase.PRIMARY_PHASE, .COMPTIME_FN_BODY, Action.propagate_min_size_to_parent_x, void{});
+                if (self.err) |e| return e;
+                Action.set_root_final_size_x(self.elems, 0);
+                self.elems, self.stack, self.err = Traverse.do_action_on_all_nodes(self.elems, self.stack, .PARENTS_FIRST, 0, STACK_REALLOC, stack_realloc, self, LayoutPhase.PRIMARY_PHASE, .COMPTIME_FN_BODY, Action.fit_and_expand_children_to_fill_parent_x, void{});
+                if (self.err) |e| return e;
+                self.elems, self.stack, self.err = Traverse.do_action_on_all_nodes(self.elems, self.stack, .PARENTS_FIRST, 0, STACK_REALLOC, stack_realloc, void{}, void{}, .COMPTIME_FN_BODY, Action.recheck_min_y_from_final_x, void{});
+                if (self.err) |e| return e;
+                self.elems, self.stack, self.err = Traverse.do_action_on_all_nodes(self.elems, self.stack, .CHILDREN_FIRST, 0,  STACK_REALLOC, stack_realloc, void{}, LayoutPhase.SECONDARY_PHASE, .COMPTIME_FN_BODY, Action.propagate_min_size_to_parent_y, void{});
+                if (self.err) |e| return e;
+                Action.set_root_final_size_y(self.elems, 0);
+                self.elems, self.stack, self.err = Traverse.do_action_on_all_nodes(self.elems, self.stack, .PARENTS_FIRST, 0, STACK_REALLOC, stack_realloc, self, LayoutPhase.SECONDARY_PHASE, .COMPTIME_FN_BODY, Action.fit_and_expand_children_to_fill_parent_y, void{});
+            },
+            .Y => {
+                self.elems, self.stack, self.err = Traverse.do_action_on_all_nodes(self.elems, self.stack, .CHILDREN_FIRST, 0, STACK_REALLOC, stack_realloc, void{}, LayoutPhase.PRIMARY_PHASE, .COMPTIME_FN_BODY, Action.propagate_min_size_to_parent_y, void{});
+                if (self.err) |e| return e;
+                Action.set_root_final_size_y(self.elems, 0);
+                self.elems, self.stack, self.err = Traverse.do_action_on_all_nodes(self.elems, self.stack, .PARENTS_FIRST, 0, STACK_REALLOC, stack_realloc, self, LayoutPhase.PRIMARY_PHASE, .COMPTIME_FN_BODY, Action.fit_and_expand_children_to_fill_parent_y, void{});
+                if (self.err) |e| return e;
+                self.elems, self.stack, self.err = Traverse.do_action_on_all_nodes(self.elems, self.stack, .PARENTS_FIRST, 0, STACK_REALLOC, stack_realloc, void{}, void{}, .COMPTIME_FN_BODY, Action.recheck_min_x_from_final_y, void{});
+                if (self.err) |e| return e;
+                self.elems, self.stack, self.err = Traverse.do_action_on_all_nodes(self.elems, self.stack, .CHILDREN_FIRST, 0, STACK_REALLOC, stack_realloc, void{}, LayoutPhase.SECONDARY_PHASE, .COMPTIME_FN_BODY, Action.propagate_min_size_to_parent_x, void{});
+                if (self.err) |e| return e;
+                Action.set_root_final_size_x(self.elems, 0);
+                self.elems, self.stack, self.err = Traverse.do_action_on_all_nodes(self.elems, self.stack, .PARENTS_FIRST, 0, STACK_REALLOC, stack_realloc, self, LayoutPhase.SECONDARY_PHASE, .COMPTIME_FN_BODY, Action.fit_and_expand_children_to_fill_parent_x, void{});
+            },
+        }
+        if (self.err) |e| return e;
+        self.elems, self.stack, self.err = Traverse.do_action_on_all_nodes(self.elems, self.stack, .PARENTS_FIRST, 0, STACK_REALLOC, stack_realloc, void{}, void{}, .COMPTIME_FN_BODY, Action.position_and_align_element, void{});
         return self.err;
     }
 
