@@ -469,7 +469,7 @@ pub fn smart_alloc(alloc: Allocator, old_ptr: anytype, old_len: anytype, old_cap
 }
 
 pub fn smart_alloc_ptr_ptrs(alloc: Allocator, old_ptr_ptr: anytype, old_len: anytype, old_cap_ptr: anytype, new_cap: anytype, settings: SmartAllocSettings(Types.pointer_child_type(@TypeOf(old_ptr_ptr.*))), comptime comptime_settings: SmartAllocComptimeSettings(Types.pointer_child_type(@TypeOf(old_ptr_ptr.*)))) switch (comptime_settings.ERROR_MODE) {
-    .RETURN_ERRORS, .RETURN_ERRORS_AND_WARN => AllocErr!void,
+    .RETURN_ERRORS, .RETURN_ERRORS_AND_WARN => ?AllocErr,
     .ERRORS_PANIC, .ERRORS_ARE_UNREACHABLE => void,
 } {
     const new_mem = if (comptime comptime_settings.ERROR_MODE.does_error()) ( //
@@ -477,7 +477,11 @@ pub fn smart_alloc_ptr_ptrs(alloc: Allocator, old_ptr_ptr: anytype, old_len: any
         else smart_alloc(alloc, old_ptr_ptr.*, old_len, old_cap_ptr.*, new_cap, settings, comptime_settings);
     old_ptr_ptr.* = new_mem.ptr;
     old_cap_ptr.* = @intCast(new_mem.len);
-    return;
+    if (comptime comptime_settings.ERROR_MODE.does_error()) {
+        return null;
+    } else {
+        return;
+    }
 }
 
 pub fn smart_alloc_new(alloc: Allocator, comptime T: type, new_cap: usize, settings: SmartAllocSettings(T), comptime comptime_settings: SmartAllocComptimeSettings(T)) switch (comptime_settings.ERROR_MODE) {

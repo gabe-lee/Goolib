@@ -61,29 +61,29 @@ pub fn ReallocPackageDef(comptime T: type) type {
         settings: Utils.Alloc.SmartAllocSettings(T),
     };
 }
-pub const StackRealloc = enum {
-    STATIC_STACK,
-    ALLOW_STACK_REALLOC,
+pub const MemRealloc = enum {
+    STATIC_MEM,
+    ALLOW_MEM_REALLOC,
 
-    pub fn T_PKG(comptime self: StackRealloc, comptime ELEM: type) type {
+    pub fn T_PKG(comptime self: MemRealloc, comptime ELEM: type) type {
         switch (self) {
-            .STATIC_STACK => return void,
-            .ALLOW_STACK_REALLOC => return ReallocPackageDef(ELEM),
+            .STATIC_MEM => return void,
+            .ALLOW_MEM_REALLOC => return ReallocPackageDef(ELEM),
         }
     }
 
     pub fn UNION(comptime ELEM: type) type {
-        return union(StackRealloc) {
+        return union(MemRealloc) {
             const Self = @This();
 
-            STATIC_STACK: void,
-            ALLOW_STACK_REALLOC: T_PKG(.ALLOW_STACK_REALLOC, ELEM),
+            STATIC_MEM: void,
+            ALLOW_MEM_REALLOC: T_PKG(.ALLOW_MEM_REALLOC, ELEM),
 
-            pub fn static_stack() Self {
-                return Self{ .STATIC_STACK = void{} };
+            pub fn static_mem() Self {
+                return Self{ .STATIC_MEM = void{} };
             }
-            pub fn allow_stack_realloc(alloc: Allocator, settings: Utils.Alloc.SmartAllocSettings(ELEM)) Self {
-                return Self{ .ALLOW_STACK_REALLOC = T_PKG(.ALLOW_STACK_REALLOC, ELEM){
+            pub fn allow_mem_realloc(alloc: Allocator, settings: Utils.Alloc.SmartAllocSettings(ELEM)) Self {
+                return Self{ .ALLOW_MEM_REALLOC = T_PKG(.ALLOW_MEM_REALLOC, ELEM){
                     .alloc = alloc,
                     .settings = settings,
                 } };
@@ -109,7 +109,7 @@ pub fn IndexBasedFirstChildNextSiblingTraverser(comptime NODE: type, comptime ID
             cap: IDX,
         };
 
-        pub fn do_action_on_all_nodes_children_first_comptime_action_body(nodes_: Nodes, stack_: Stack, root: IDX, comptime STACK_REALLOC: StackRealloc, alloc_pkg: STACK_REALLOC.T_PKG(StackFrame), action_userdata: anytype, comptime action: fn (nodes: Nodes, idx: IDX, userdata: @TypeOf(action_userdata)) Nodes) struct { Nodes, Stack, ?Error } {
+        pub fn do_action_on_all_nodes_children_first_comptime_action_body(nodes_: Nodes, stack_: Stack, root: IDX, comptime STACK_REALLOC: MemRealloc, alloc_pkg: STACK_REALLOC.T_PKG(StackFrame), action_userdata: anytype, comptime action: fn (nodes: Nodes, idx: IDX, userdata: @TypeOf(action_userdata)) Nodes) struct { Nodes, Stack, ?Error } {
             var nodes: Nodes = nodes_;
             var stack: Stack = stack_;
             var err: ?Error = null;
@@ -134,7 +134,7 @@ pub fn IndexBasedFirstChildNextSiblingTraverser(comptime NODE: type, comptime ID
                         break;
                     }
                     if (stack.len >= stack.cap) {
-                        if (comptime STACK_REALLOC == .ALLOW_STACK_REALLOC) {
+                        if (comptime STACK_REALLOC == .ALLOW_MEM_REALLOC) {
                             const result = Utils.Alloc.smart_alloc(alloc_pkg.alloc, &stack.ptr, &stack.len, &stack.cap, stack.len + 1, alloc_pkg.settings, .{ .ERROR_MODE = .RETURN_ERRORS });
                             if (result) |_| {} else |_| {
                                 err = Error.stack_mem_reallocation_error;
@@ -165,7 +165,7 @@ pub fn IndexBasedFirstChildNextSiblingTraverser(comptime NODE: type, comptime ID
             return .{ nodes, stack, err };
         }
 
-        pub fn do_action_on_all_nodes_children_first(nodes_: Nodes, stack_: Stack, root: IDX, comptime STACK_REALLOC: StackRealloc, alloc_pkg: STACK_REALLOC.T_PKG(StackFrame), action_userdata: anytype, comptime action: *const fn (nodes: Nodes, idx: IDX, userdata: @TypeOf(action_userdata)) Nodes) struct { Nodes, Stack, ?Error } {
+        pub fn do_action_on_all_nodes_children_first(nodes_: Nodes, stack_: Stack, root: IDX, comptime STACK_REALLOC: MemRealloc, alloc_pkg: STACK_REALLOC.T_PKG(StackFrame), action_userdata: anytype, comptime action: *const fn (nodes: Nodes, idx: IDX, userdata: @TypeOf(action_userdata)) Nodes) struct { Nodes, Stack, ?Error } {
             var nodes: Nodes = nodes_;
             var stack: Stack = stack_;
             var err: ?Error = null;
@@ -190,7 +190,7 @@ pub fn IndexBasedFirstChildNextSiblingTraverser(comptime NODE: type, comptime ID
                         break;
                     }
                     if (stack.len >= stack.cap) {
-                        if (comptime STACK_REALLOC == .ALLOW_STACK_REALLOC) {
+                        if (comptime STACK_REALLOC == .ALLOW_MEM_REALLOC) {
                             const result = Utils.Alloc.smart_alloc(alloc_pkg.alloc, &stack.ptr, &stack.len, &stack.cap, stack.len + 1, alloc_pkg.settings, .{ .ERROR_MODE = .RETURN_ERRORS });
                             if (result) |_| {} else |_| {
                                 err = Error.stack_mem_reallocation_error;
@@ -221,7 +221,7 @@ pub fn IndexBasedFirstChildNextSiblingTraverser(comptime NODE: type, comptime ID
             return .{ nodes, stack, err };
         }
 
-        pub fn do_action_on_all_nodes_parents_first_comptime_action_body(nodes_: Nodes, stack_: Stack, root: IDX, comptime STACK_REALLOC: StackRealloc, alloc_pkg: STACK_REALLOC.T_PKG(StackFrame), action_userdata: anytype, comptime action: fn (nodes: Nodes, idx: IDX, userdata: @TypeOf(action_userdata)) Nodes) struct { Nodes, Stack, ?Error } {
+        pub fn do_action_on_all_nodes_parents_first_comptime_action_body(nodes_: Nodes, stack_: Stack, root: IDX, comptime STACK_REALLOC: MemRealloc, alloc_pkg: STACK_REALLOC.T_PKG(StackFrame), action_userdata: anytype, comptime action: fn (nodes: Nodes, idx: IDX, userdata: @TypeOf(action_userdata)) Nodes) struct { Nodes, Stack, ?Error } {
             var nodes: Nodes = nodes_;
             var stack: Stack = stack_;
             var err: ?Error = null;
@@ -247,7 +247,7 @@ pub fn IndexBasedFirstChildNextSiblingTraverser(comptime NODE: type, comptime ID
                         break;
                     }
                     if (stack.len >= stack.cap) {
-                        if (comptime STACK_REALLOC == .ALLOW_STACK_REALLOC) {
+                        if (comptime STACK_REALLOC == .ALLOW_MEM_REALLOC) {
                             const result = Utils.Alloc.smart_alloc(alloc_pkg.alloc, &stack.ptr, &stack.len, &stack.cap, stack.len + 1, alloc_pkg.settings, .{ .ERROR_MODE = .RETURN_ERRORS });
                             if (result) |_| {} else |_| {
                                 err = Error.stack_mem_reallocation_error;
@@ -278,7 +278,7 @@ pub fn IndexBasedFirstChildNextSiblingTraverser(comptime NODE: type, comptime ID
             return .{ nodes, stack, err };
         }
 
-        pub fn do_action_on_all_nodes_parents_first(nodes_: Nodes, stack_: Stack, root: IDX, comptime STACK_REALLOC: StackRealloc, alloc_pkg: STACK_REALLOC.T_PKG(StackFrame), action_userdata: anytype, comptime action: *const fn (nodes: Nodes, idx: IDX, userdata: @TypeOf(action_userdata)) Nodes) struct { Nodes, Stack, ?Error } {
+        pub fn do_action_on_all_nodes_parents_first(nodes_: Nodes, stack_: Stack, root: IDX, comptime STACK_REALLOC: MemRealloc, alloc_pkg: STACK_REALLOC.T_PKG(StackFrame), action_userdata: anytype, comptime action: *const fn (nodes: Nodes, idx: IDX, userdata: @TypeOf(action_userdata)) Nodes) struct { Nodes, Stack, ?Error } {
             var nodes: Nodes = nodes_;
             var stack: Stack = stack_;
             var err: ?Error = null;
@@ -304,7 +304,7 @@ pub fn IndexBasedFirstChildNextSiblingTraverser(comptime NODE: type, comptime ID
                         break;
                     }
                     if (stack.len >= stack.cap) {
-                        if (comptime STACK_REALLOC == .ALLOW_STACK_REALLOC) {
+                        if (comptime STACK_REALLOC == .ALLOW_MEM_REALLOC) {
                             const result = Utils.Alloc.smart_alloc(alloc_pkg.alloc, &stack.ptr, &stack.len, &stack.cap, stack.len + 1, alloc_pkg.settings, .{ .ERROR_MODE = .RETURN_ERRORS });
                             if (result) |_| {} else |_| {
                                 err = Error.stack_mem_reallocation_error;
@@ -358,13 +358,13 @@ pub fn IndexBasedMultiFirstChildNextSiblingTraverser(comptime NODE: type, compti
         pub fn CTFN(comptime self: FuncType, comptime USERDATA_RT: type, comptime USERDATA_CT: type) type {
             return switch (self) {
                 .RUNTIME_FN_PTR => void,
-                .COMPTIME_FN_PTR => *const fn (nodes: Nodes, idx: IDX, userdata: USERDATA_RT, comptime USERDATA: USERDATA_CT) Nodes,
-                .COMPTIME_FN_BODY => fn (nodes: Nodes, idx: IDX, userdata: USERDATA_RT, comptime USERDATA: USERDATA_CT) Nodes,
+                .COMPTIME_FN_PTR => *const fn (nodes: Elems, idx: IDX, userdata: USERDATA_RT, comptime USERDATA: USERDATA_CT) Elems,
+                .COMPTIME_FN_BODY => fn (nodes: Elems, idx: IDX, userdata: USERDATA_RT, comptime USERDATA: USERDATA_CT) Elems,
             };
         }
         pub fn RTFN(comptime self: FuncType, comptime USERDATA_RT: type, comptime USERDATA_CT: type) type {
             return switch (self) {
-                .RUNTIME_FN_PTR => *const fn (nodes: Nodes, idx: IDX, userdata: USERDATA_RT, USERDATA: USERDATA_CT) Nodes,
+                .RUNTIME_FN_PTR => *const fn (nodes: Elems, idx: IDX, userdata: USERDATA_RT, USERDATA: USERDATA_CT) Elems,
                 .COMPTIME_FN_PTR => void,
                 .COMPTIME_FN_BODY => void,
             };
@@ -375,7 +375,7 @@ pub fn IndexBasedMultiFirstChildNextSiblingTraverser(comptime NODE: type, compti
             next_child_for_each_path: [NUM_CHILD_PATHS]IDX,
             curr_path: IDX,
         };
-        pub const Nodes = struct {
+        pub const Elems = struct {
             ptr: [*]NODE,
             len: IDX = 0,
             cap: IDX,
@@ -437,7 +437,7 @@ pub fn IndexBasedMultiFirstChildNextSiblingTraverser(comptime NODE: type, compti
         inline fn get_next_child(stack: Stack, depth: IDX) IDX {
             return stack.ptr[depth].next_child_for_each_path[stack.ptr[depth].curr_path];
         }
-        inline fn push_stack_frame(nodes: Nodes, stack: Stack, root: IDX, comptime allowed_paths: AllowedPaths) struct { Stack, IDX } {
+        inline fn push_stack_frame(nodes: Elems, stack: Stack, root: IDX, comptime allowed_paths: AllowedPaths) struct { Stack, IDX } {
             var new_stack = stack;
             new_stack.ptr[new_stack.len] = StackFrame{
                 .this = root,
@@ -458,7 +458,7 @@ pub fn IndexBasedMultiFirstChildNextSiblingTraverser(comptime NODE: type, compti
             new_stack.len += 1;
             return .{ new_stack, new_depth };
         }
-        inline fn increment_next_child(nodes: Nodes, stack: Stack, depth: IDX, curr_child_idx: IDX) void {
+        inline fn increment_next_child(nodes: Elems, stack: Stack, depth: IDX, curr_child_idx: IDX) void {
             var next = @field(&nodes.ptr[curr_child_idx], NEXT_SIBLING_FIELD);
             stack.ptr[depth].next_child_for_each_path[stack.ptr[depth].curr_path] = next;
             while (next == NULL_IDX and stack.ptr[depth].curr_path < (NUM_CHILD_PATHS - 1)) {
@@ -466,9 +466,9 @@ pub fn IndexBasedMultiFirstChildNextSiblingTraverser(comptime NODE: type, compti
                 next = stack.ptr[depth].next_child_for_each_path[stack.ptr[depth].curr_path];
             }
         }
-        inline fn grow_stack_if_needed(stack: *Stack, err: *?Error, comptime STACK_REALLOC: StackRealloc, alloc_pkg: if (STACK_REALLOC == .ALLOW_STACK_REALLOC) ReallocPackage else void) bool {
+        inline fn grow_stack_if_needed(stack: *Stack, err: *?Error, comptime STACK_REALLOC: MemRealloc, alloc_pkg: if (STACK_REALLOC == .ALLOW_MEM_REALLOC) ReallocPackage else void) bool {
             if (stack.len >= stack.cap) {
-                if (comptime STACK_REALLOC == .ALLOW_STACK_REALLOC) {
+                if (comptime STACK_REALLOC == .ALLOW_MEM_REALLOC) {
                     const result = Utils.Alloc.smart_alloc(alloc_pkg.alloc, &stack.ptr, &stack.len, &stack.cap, stack.len + 1, alloc_pkg.settings, .{ .ERROR_MODE = .RETURN_ERRORS });
                     if (result) |_| {} else |_| {
                         err.* = Error.stack_mem_reallocation_error;
@@ -488,14 +488,14 @@ pub fn IndexBasedMultiFirstChildNextSiblingTraverser(comptime NODE: type, compti
             const new_depth = @max(1, depth) - 1;
             return .{ new_stack, new_depth, more_to_process };
         }
-        inline fn do_action(nodes: Nodes, idx: IDX, userdata: anytype, comptime USERDATA_CT: anytype, comptime FN_TYPE: FuncType, comptime FUNC: CTFN(FN_TYPE, @TypeOf(userdata), @TypeOf(USERDATA_CT)), func: RTFN(FN_TYPE, @TypeOf(userdata), @TypeOf(USERDATA_CT))) Nodes {
+        inline fn do_action(nodes: Elems, idx: IDX, userdata: anytype, comptime USERDATA_CT: anytype, comptime FN_TYPE: FuncType, comptime FUNC: CTFN(FN_TYPE, @TypeOf(userdata), @TypeOf(USERDATA_CT)), func: RTFN(FN_TYPE, @TypeOf(userdata), @TypeOf(USERDATA_CT))) Elems {
             return switch (comptime FN_TYPE) {
                 .RUNTIME_FN_PTR => func(nodes, idx, userdata, USERDATA_CT),
                 .COMPTIME_FN_BODY, .COMPTIME_FN_PTR => FUNC(nodes, idx, userdata, USERDATA_CT),
             };
         }
-        pub fn do_action_on_all_nodes(nodes_: Nodes, stack_: Stack, comptime ORDER: Order, comptime allowed_paths: AllowedPaths, root: IDX, comptime STACK_REALLOC: StackRealloc, alloc_pkg: if (STACK_REALLOC == .ALLOW_STACK_REALLOC) ReallocPackage else void, action_context_rt: anytype, comptime ACTION_CONTEXT_CT: anytype, comptime FN_TYPE: FuncType, comptime ACTION_CT: CTFN(FN_TYPE, @TypeOf(action_context_rt), @TypeOf(ACTION_CONTEXT_CT)), action_rt: RTFN(FN_TYPE, @TypeOf(action_context_rt), @TypeOf(ACTION_CONTEXT_CT))) struct { Nodes, Stack, ?Error } {
-            var nodes: Nodes = nodes_;
+        pub fn do_action_on_all_nodes(nodes_: Elems, stack_: Stack, comptime ORDER: Order, comptime allowed_paths: AllowedPaths, root: IDX, comptime STACK_REALLOC: MemRealloc, alloc_pkg: if (STACK_REALLOC == .ALLOW_MEM_REALLOC) ReallocPackage else void, action_context_rt: anytype, comptime ACTION_CONTEXT_CT: anytype, comptime FN_TYPE: FuncType, comptime ACTION_CT: CTFN(FN_TYPE, @TypeOf(action_context_rt), @TypeOf(ACTION_CONTEXT_CT)), action_rt: RTFN(FN_TYPE, @TypeOf(action_context_rt), @TypeOf(ACTION_CONTEXT_CT))) struct { Elems, Stack, ?Error } {
+            var nodes: Elems = nodes_;
             var stack: Stack = stack_;
             stack.len = 0;
             var err: ?Error = null;
@@ -718,12 +718,12 @@ test IndexBasedFirstChildNextSiblingTraverser {
             out.idx += 1;
             return m;
         }
-        fn act_dual(m: TravDual.Nodes, idx: u8, out: *Out, comptime _: void) TravDual.Nodes {
+        fn act_dual(m: TravDual.Elems, idx: u8, out: *Out, comptime _: void) TravDual.Elems {
             out.buf[out.idx] = m.ptr[idx].char;
             out.idx += 1;
             return m;
         }
-        fn act_dual_rt(m: TravDual.Nodes, idx: u8, out: *Out, _: void) TravDual.Nodes {
+        fn act_dual_rt(m: TravDual.Elems, idx: u8, out: *Out, _: void) TravDual.Elems {
             out.buf[out.idx] = m.ptr[idx].char;
             out.idx += 1;
             return m;
@@ -746,50 +746,50 @@ test IndexBasedFirstChildNextSiblingTraverser {
         .cap = 9,
         .len = 9,
     };
-    var nodes_dual = TravDual.Nodes{
+    var nodes_dual = TravDual.Elems{
         .ptr = @ptrCast(&mem_dual[0]),
         .cap = 15,
         .len = 15,
     };
     var err: ?Error = null;
     var out = Out{};
-    nodes, stack, err = Trav.do_action_on_all_nodes_children_first_comptime_action_body(nodes, stack, I, .STATIC_STACK, void{}, &out, PROTO.act);
+    nodes, stack, err = Trav.do_action_on_all_nodes_children_first_comptime_action_body(nodes, stack, I, .STATIC_MEM, void{}, &out, PROTO.act);
     try Test.expect_strings_equal(out.buf[0..out.idx], "result", "abcgdefhi", "expected", "", .{});
     out.idx = 0;
-    nodes, stack, err = Trav.do_action_on_all_nodes_children_first(nodes, stack, I, .STATIC_STACK, void{}, &out, PROTO.act);
+    nodes, stack, err = Trav.do_action_on_all_nodes_children_first(nodes, stack, I, .STATIC_MEM, void{}, &out, PROTO.act);
     try Test.expect_strings_equal(out.buf[0..out.idx], "result", "abcgdefhi", "expected", "", .{});
     out.idx = 0;
-    nodes, stack, err = Trav.do_action_on_all_nodes_parents_first_comptime_action_body(nodes, stack, I, .STATIC_STACK, void{}, &out, PROTO.act);
+    nodes, stack, err = Trav.do_action_on_all_nodes_parents_first_comptime_action_body(nodes, stack, I, .STATIC_MEM, void{}, &out, PROTO.act);
     try Test.expect_strings_equal(out.buf[0..out.idx], "result", "igabchdef", "expected", "", .{});
     out.idx = 0;
-    nodes, stack, err = Trav.do_action_on_all_nodes_parents_first(nodes, stack, I, .STATIC_STACK, void{}, &out, PROTO.act);
+    nodes, stack, err = Trav.do_action_on_all_nodes_parents_first(nodes, stack, I, .STATIC_MEM, void{}, &out, PROTO.act);
     try Test.expect_strings_equal(out.buf[0..out.idx], "result", "igabchdef", "expected", "", .{});
     out.idx = 0;
-    nodes_dual, stack_dual, err = TravDual.do_action_on_all_nodes(nodes_dual, stack_dual, .CHILDREN_FIRST, .all_child_paths(), I, .STATIC_STACK, void{}, &out, void{}, .COMPTIME_FN_BODY, PROTO.act_dual, void{});
+    nodes_dual, stack_dual, err = TravDual.do_action_on_all_nodes(nodes_dual, stack_dual, .CHILDREN_FIRST, .all_child_paths(), I, .STATIC_MEM, void{}, &out, void{}, .COMPTIME_FN_BODY, PROTO.act_dual, void{});
     try Test.expect_strings_equal(out.buf[0..out.idx], "result", "abcABCgdefDEFhi", "expected", "", .{});
     out.idx = 0;
-    nodes_dual, stack_dual, err = TravDual.do_action_on_all_nodes(nodes_dual, stack_dual, .CHILDREN_FIRST, .all_child_paths(), I, .STATIC_STACK, void{}, &out, void{}, .COMPTIME_FN_PTR, PROTO.act_dual, void{});
+    nodes_dual, stack_dual, err = TravDual.do_action_on_all_nodes(nodes_dual, stack_dual, .CHILDREN_FIRST, .all_child_paths(), I, .STATIC_MEM, void{}, &out, void{}, .COMPTIME_FN_PTR, PROTO.act_dual, void{});
     try Test.expect_strings_equal(out.buf[0..out.idx], "result", "abcABCgdefDEFhi", "expected", "", .{});
     out.idx = 0;
-    nodes_dual, stack_dual, err = TravDual.do_action_on_all_nodes(nodes_dual, stack_dual, .CHILDREN_FIRST, .all_child_paths(), I, .STATIC_STACK, void{}, &out, void{}, .RUNTIME_FN_PTR, void{}, PROTO.act_dual_rt);
+    nodes_dual, stack_dual, err = TravDual.do_action_on_all_nodes(nodes_dual, stack_dual, .CHILDREN_FIRST, .all_child_paths(), I, .STATIC_MEM, void{}, &out, void{}, .RUNTIME_FN_PTR, void{}, PROTO.act_dual_rt);
     try Test.expect_strings_equal(out.buf[0..out.idx], "result", "abcABCgdefDEFhi", "expected", "", .{});
     out.idx = 0;
-    nodes_dual, stack_dual, err = TravDual.do_action_on_all_nodes(nodes_dual, stack_dual, .PARENTS_FIRST, .all_child_paths(), I, .STATIC_STACK, void{}, &out, void{}, .COMPTIME_FN_BODY, PROTO.act_dual, void{});
+    nodes_dual, stack_dual, err = TravDual.do_action_on_all_nodes(nodes_dual, stack_dual, .PARENTS_FIRST, .all_child_paths(), I, .STATIC_MEM, void{}, &out, void{}, .COMPTIME_FN_BODY, PROTO.act_dual, void{});
     try Test.expect_strings_equal(out.buf[0..out.idx], "result", "igabcABChdefDEF", "expected", "", .{});
     out.idx = 0;
-    nodes_dual, stack_dual, err = TravDual.do_action_on_all_nodes(nodes_dual, stack_dual, .PARENTS_FIRST, .all_child_paths(), I, .STATIC_STACK, void{}, &out, void{}, .RUNTIME_FN_PTR, void{}, PROTO.act_dual_rt);
+    nodes_dual, stack_dual, err = TravDual.do_action_on_all_nodes(nodes_dual, stack_dual, .PARENTS_FIRST, .all_child_paths(), I, .STATIC_MEM, void{}, &out, void{}, .RUNTIME_FN_PTR, void{}, PROTO.act_dual_rt);
     try Test.expect_strings_equal(out.buf[0..out.idx], "result", "igabcABChdefDEF", "expected", "", .{});
     out.idx = 0;
-    nodes_dual, stack_dual, err = TravDual.do_action_on_all_nodes(nodes_dual, stack_dual, .CHILDREN_FIRST, .only_child_paths(&.{"first_child_lower"}), I, .STATIC_STACK, void{}, &out, void{}, .COMPTIME_FN_BODY, PROTO.act_dual, void{});
+    nodes_dual, stack_dual, err = TravDual.do_action_on_all_nodes(nodes_dual, stack_dual, .CHILDREN_FIRST, .only_child_paths(&.{"first_child_lower"}), I, .STATIC_MEM, void{}, &out, void{}, .COMPTIME_FN_BODY, PROTO.act_dual, void{});
     try Test.expect_strings_equal(out.buf[0..out.idx], "result", "abcgdefhi", "expected", "", .{});
     out.idx = 0;
-    nodes_dual, stack_dual, err = TravDual.do_action_on_all_nodes(nodes_dual, stack_dual, .PARENTS_FIRST, .exclude_child_paths(&.{"first_child_lower"}), I, .STATIC_STACK, void{}, &out, void{}, .COMPTIME_FN_BODY, PROTO.act_dual, void{});
+    nodes_dual, stack_dual, err = TravDual.do_action_on_all_nodes(nodes_dual, stack_dual, .PARENTS_FIRST, .exclude_child_paths(&.{"first_child_lower"}), I, .STATIC_MEM, void{}, &out, void{}, .COMPTIME_FN_BODY, PROTO.act_dual, void{});
     try Test.expect_strings_equal(out.buf[0..out.idx], "result", "i", "expected", "", .{});
     out.idx = 0;
-    nodes_dual, stack_dual, err = TravDual.do_action_on_all_nodes(nodes_dual, stack_dual, .PARENTS_FIRST, .only_child_paths(&.{"first_child_upper"}), I, .STATIC_STACK, void{}, &out, void{}, .COMPTIME_FN_BODY, PROTO.act_dual, void{});
+    nodes_dual, stack_dual, err = TravDual.do_action_on_all_nodes(nodes_dual, stack_dual, .PARENTS_FIRST, .only_child_paths(&.{"first_child_upper"}), I, .STATIC_MEM, void{}, &out, void{}, .COMPTIME_FN_BODY, PROTO.act_dual, void{});
     try Test.expect_strings_equal(out.buf[0..out.idx], "result", "i", "expected", "", .{});
     out.idx = 0;
-    nodes_dual, stack_dual, err = TravDual.do_action_on_all_nodes(nodes_dual, stack_dual, .CHILDREN_FIRST, .exclude_child_paths(&.{"first_child_upper"}), I, .STATIC_STACK, void{}, &out, void{}, .COMPTIME_FN_BODY, PROTO.act_dual, void{});
+    nodes_dual, stack_dual, err = TravDual.do_action_on_all_nodes(nodes_dual, stack_dual, .CHILDREN_FIRST, .exclude_child_paths(&.{"first_child_upper"}), I, .STATIC_MEM, void{}, &out, void{}, .COMPTIME_FN_BODY, PROTO.act_dual, void{});
     try Test.expect_strings_equal(out.buf[0..out.idx], "result", "abcgdefhi", "expected", "", .{});
     out.idx = 0;
 }
