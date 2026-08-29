@@ -3,7 +3,7 @@
 //! This module is inspired by the Clay layout library (https://github.com/nicbarker/clay)
 //! under the zlib/libpng license (https://github.com/nicbarker/clay/blob/main/LICENSE.md),
 //! but the code and process is entirely reinvented from scratch.
-//! 
+//!
 //! It has a more narrow focus on ONLY layout and is rendering/mouse agnostic,
 //! and is more flexible in how the hierarchy can be built by relying on a `LayoutRequester`,
 //! interface. This allows it to be more flexibly integrated into any user workflow, at the cost
@@ -50,7 +50,7 @@ const Utils = Root.Utils;
 const CommonTypes = Root.CommonTypes;
 const Test = Root.Testing;
 const DummyAlloc = Root.DummyAllocator;
-const dummy_alloc= DummyAlloc.allocator_panic_free_noop;
+const dummy_alloc = DummyAlloc.allocator_panic_free_noop;
 
 const assert_with_reason = Assert.assert_with_reason;
 const assert_unreachable = Assert.assert_unreachable;
@@ -106,7 +106,7 @@ pub const AxisRelative = enum(u1) {
     SAME_LAYOUT_DIRECTION_AS_CURRENT_AXIS = 0b0,
     OPPOSITE_LAYOUT_DIRECTION_OF_CURRENT_AXIS = 0b1,
 
-    pub inline fn with_driving(self: AxisRelative, comptime IS_DRIVING: bool)  AxisRelativeDriving {
+    pub inline fn with_driving(self: AxisRelative, comptime IS_DRIVING: bool) AxisRelativeDriving {
         const raw: u2 = @as(u2, @intCast(@intFromEnum(self)));
         if (comptime !IS_DRIVING) {
             raw &= 0b10;
@@ -483,35 +483,35 @@ pub const AttachPoint = enum(u5) {
     BOTTOM_RIGHT,
 };
 
-pub const Mouse = enum(u2) {
-    PASSTHROUGH,
-    CAPTURE,
-};
+// pub const Mouse = enum(u2) {
+//     PASSTHROUGH,
+//     CAPTURE,
+// };
 
-pub const MouseState = enum(u2) {
-    NOT_HOVERED,
-    HOVERED,
-    CLICKED,
-};
+// pub const MouseState = enum(u2) {
+//     NOT_HOVERED,
+//     HOVERED,
+//     CLICKED,
+// };
 
-pub const FloatMode = enum(u2) {
-    NO_FLOAT,
-    FLOAT_FROM_PARENT,
-    FLOAT_FROM_ELEMENT_ID,
-    FLOT_FROM_ROOT,
-};
+// pub const FloatMode = enum(u2) {
+//     NO_FLOAT,
+//     FLOAT_FROM_PARENT,
+//     FLOAT_FROM_ELEMENT_ID,
+//     FLOT_FROM_ROOT,
+// };
 
-pub const FloatClipping = enum(u1) {
-    NO_FLOAT_CLIPPING,
-    CLIP_TO_ATTACHED,
-};
+// pub const FloatClipping = enum(u1) {
+//     NO_FLOAT_CLIPPING,
+//     CLIP_TO_ATTACHED,
+// };
 
-pub const PointerClickState = enum(u2) {
-    NOT_PRESSED,
-    JUST_PRESSED,
-    HELD_PRESSED,
-    JUST_RELEASED,
-};
+// pub const PointerClickState = enum(u2) {
+//     NOT_PRESSED,
+//     JUST_PRESSED,
+//     HELD_PRESSED,
+//     JUST_RELEASED,
+// };
 
 pub const SiblingEdge = struct {
     pub const LEFT: u4 = 1 << 0;
@@ -612,40 +612,47 @@ const MaxSizeGrowRatio_OR_FinalClipAABB = union {
     }
 };
 
+const Dir = enum {
+    FORWARD,
+    REVERSE,
+};
 
-const Traverse = Utils.Traverser.IndexBasedMultiFirstChildNextSiblingTraverser(LayoutElement, u32, NULL_IDX, &.{"first_inline_child", "first_floating_child"}, "next_sibling");
+const Traverse = Utils.Traverser.IndexBasedMultiFirstChildNextSiblingTraverser(LayoutElement, u32, NULL_IDX, &.{ "first_inline_child", "first_floating_child" }, "next_sibling");
 const Elems = Traverse.Elems;
 const Stack = Traverse.Stack;
 const StackFrame = Traverse.StackFrame;
 const AllowedPaths = Traverse.AllowedPaths;
 const TraverseError = Utils.Traverser.Error;
 const MemRealloc = Utils.Traverser.MemRealloc;
+const StackReallocator = Traverse.StackReallocator;
 
 const LayoutElement = struct {
-    requester: LayoutRequester, // 16
-    _ms_fbb: MinLeftoverFinal_OR_FinalAABB, // 16
-    _mg_fcbb: MaxSizeGrowRatio_OR_FinalClipAABB, // 16
-    relative_pos: Pos = .ZERO, // 8
-    padding: Padding, // 8
-    child_gaps: Gap, // 4
-    first_inline_child: u32 = NULL_IDX, // 4
-    first_floating_child: u32 = NULL_IDX, // 4
-    first_axis_line: u32 = NULL_IDX, // 4
-    num_inline_children: u32 = 0, // 4
-    num_axis_lines: u32 = 0, // 4
-    next_sibling: u32 = NULL_IDX, // 4
-    parent_idx: u32, // 4
-    depth: u32, // 4
-    child_align: ChildAlignment, // 2
-    float_parent_attach: AttachPoint, // 1
-    float_child_attach: AttachPoint, // 1
-    layout_dir: LayoutDirection, // 1
-    is_floating: bool, // 1
-    clip_to_parent: bool, // 1
-    grow_mode_w: GrowMode, // 1
-    grow_mode_h: GrowMode, // 1
-    completely_clipped: bool = false, // 1
-    use_flow_mode: bool = false, // 1
+    requester: LayoutRequester,
+    _ms_fbb: MinLeftoverFinal_OR_FinalAABB,
+    _mg_fcbb: MaxSizeGrowRatio_OR_FinalClipAABB,
+    relative_pos: Pos = .ZERO,
+    padding: Padding,
+    child_gaps: Gap,
+    first_inline_child: u32 = NULL_IDX,
+    first_floating_child: u32 = NULL_IDX,
+    first_axis_line: u32 = NULL_IDX,
+    num_inline_children: u32 = 0,
+    num_axis_lines: u32 = 0,
+    next_sibling: u32 = NULL_IDX,
+    parent_idx: u32,
+    depth: u32,
+    child_align: ChildAlignment,
+    float_parent_attach: AttachPoint,
+    float_child_attach: AttachPoint,
+    primary_child_axis: Axis,
+    primary_child_dir: Dir,
+    secondary_child_dir: Dir,
+    is_floating: bool,
+    clip_to_parent: bool,
+    grow_mode_w: GrowMode,
+    grow_mode_h: GrowMode,
+    completely_clipped: bool = false,
+    use_flow_mode: bool = false,
 
     const SIZE = @sizeOf(LayoutElement);
 
@@ -700,7 +707,7 @@ const LayoutElement = struct {
     inline fn add_to_min_children_size(self: *LayoutElement, comptime AXIS: Axis, val: f32) void {
         self._ms_fbb.size.min_children_or_final.set(AXIS, self._ms_fbb.size.min_children_or_final.get(AXIS) + val);
     }
-    inline fn max_of_min_children_size(self: *LayoutElement, comptime AXIS: Axis, val: f32) void {
+    inline fn update_max_of_min_children_size(self: *LayoutElement, comptime AXIS: Axis, val: f32) void {
         self._ms_fbb.size.min_children_or_final.set(AXIS, @max(self._ms_fbb.size.min_children_or_final.get(AXIS), val));
     }
     inline fn get_min_children(self: LayoutElement, comptime AXIS: Axis) f32 {
@@ -783,15 +790,15 @@ const OverlapCheck = struct {
     did_overlap: bool = false,
 };
 
-const ChildIter = struct {
-    nodes: *Elems,
-    curr_child_idx: u32,
+// const ChildIter = struct {
+//     nodes: *Elems,
+//     curr_child_idx: u32,
 
-    pub fn has_more_children(self: ChildIter) bool {
-        return self.curr_child_idx != NULL_IDX;
-    }
-    pub fn get_child(self: ChildIter)
-};
+//     pub fn has_more_children(self: ChildIter) bool {
+//         return self.curr_child_idx != NULL_IDX;
+//     }
+//     pub fn get_child(self: ChildIter)
+// };
 
 const AxisStage = struct {
     AXIS: Axis,
@@ -818,64 +825,7 @@ const Action = struct {
         const final_size = @min(root.get_min_self_size(AXIS), root.get_max_size(AXIS));
         root.set_final_size(AXIS, final_size);
     }
-    fn propagate_min_size_to_parent(elems: Elems, idx: u32, _: void, comptime CT: AxisStage) Elems {
-        const child = get_elem_ptr(elems, idx);
-        child.add_to_min_children_size(CT.AXIS, child.padding.get(CT.AXIS));
-        child.set_min_self_size(CT.AXIS, @max(child.get_min_self_size(CT.AXIS), child.get_min_children(CT.AXIS)));
-        if (child.is_floating or child.parent_idx == NULL_IDX) return elems;
-        const parent = get_parent_ptr(elems, idx);
-        const gap = parent.child_gaps.get(CT.AXIS);
-        if (parent.layout_dir.primary_dir() == CT.AXIS and !parent.is_flow_virtual) {
-            var size = child.get_min_self_size(CT.AXIS);
-            if (parent.first_inline_child != idx) {
-                size += gap;
-            }
-            parent.add_to_min_children_size(CT.AXIS, size);
-        } else {
-            const size = child.get_min_self_size(CT.AXIS);
-            parent.max_of_min_children_size(CT.AXIS, size);
-        }
-        return elems;
-    }
-    fn fit_and_expand_children_to_fill_parent(nodes_: Elems, idx: u32, manager: *LayoutManager, comptime CT: AxisStage) Elems {
-        var nodes = nodes_;
-        const parent = get_elem_ptr(nodes, idx);
-        if (parent.is_floating or parent.parent_idx == NULL_IDX) {
-            const final_size = @min(parent.get_min_self_size(AXIS), parent.get_max_size(AXIS));
-            parent.set_final_size(AXIS, final_size);
-        }
-        const final_size_with_pad = parent.get_final_size(CT.AXIS);
-        const final_size_for_children = final_size_with_pad - parent.padding.get(CT.AXIS);
-        if (parent.first_inline_child != NULL_IDX) {
-            var curr_child_idx = parent.first_inline_child;
-            if (CT.STAGE == .PRIMARY_STAGE and parent.is_flow_virtual) {
-                const gap = parent.child_gaps.get(CT.AXIS);
-                const grand_parent = get_parent_ptr(nodes, idx);
-                var current_min_size: f32 = 0;
-                var added_min_size: f32 = 0;
-                var num_this_line: u32 = 0;
-                while (curr_child_idx != NULL_IDX) {
-                    const child = get_elem_ptr(nodes, curr_child_idx);
-                    num_this_line += 1;
-                    added_min_size += child.get_min_self_size(CT.AXIS);
-                    if (num_this_line > 1) {
-                        added_min_size += gap;
-                    }
-                    current_min_size += added_min_size;
-                    if (current_min_size > final_size_for_children) {
-                        // Make new sibling of paren
-                    }
-                    curr_child_idx = get_next_sibling(nodes, curr_child_idx);
-                }
-            } else {
-                while (curr_child_idx != NULL_IDX) {
-                    const child = get_elem_ptr(nodes, curr_child_idx);
-                    curr_child_idx = get_next_sibling(nodes, curr_child_idx);
-                }
-            }
-        }
-        return nodes;
-    }
+
     fn propagate_min_size_to_parent_y(nodes_: Elems, idx: u32, _: void, comptime phase: LayoutStage) Elems {
         const child = get_elem_ptr(nodes, idx);
         if (child.parent_idx == NULL_IDX) return nodes;
@@ -889,18 +839,14 @@ const Action = struct {
             parent.add_to_min_children_size(.Y, size);
         } else {
             const size = child.get_min_self_size(.Y);
-            parent.max_of_min_children_size(.Y, size);
+            parent.update_max_of_min_children_size(.Y, size);
         }
         return nodes;
     }
     fn fit_and_expand_children_to_fill_parent_y(nodes_: Elems, idx: u32, manager: *LayoutManager, comptime phase: LayoutStage) Elems {
         var nodes = nodes_;
         const parent = get_elem_ptr(nodes, idx);
-        if (phase == .PRIMARY_STAGE and parent.is_flow_virtual) {
-
-        } else {
-
-        }
+        if (phase == .PRIMARY_STAGE and parent.is_flow_virtual) {} else {}
         return nodes;
     }
     fn recheck_min_y_from_final_x(nodes_: Elems, idx: u32, _: void) Elems {
@@ -921,7 +867,7 @@ const Action = struct {
         return nodes;
     }
 
-    //UTILS 
+    //UTILS
     inline fn get_elem_ptr(nodes: Elems, idx: u32) *LayoutElement {
         return &nodes.ptr[idx];
     }
@@ -960,11 +906,11 @@ const Action = struct {
                     manager.err = Error.element_mem_out_of_space;
                 },
                 .ALLOW_MEM_REALLOC => |pkg| {
-                    const err: ?Utils.Alloc.AllocErr = Utils.Alloc.smart_alloc_ptr_ptrs(pkg.alloc, &elems.ptr, &elems.len, &elems.cap, elems.len + 1, pkg.settings, .{.ERROR_MODE = .RETURN_ERRORS});
+                    const err: ?Utils.Alloc.AllocErr = Utils.Alloc.smart_alloc_ptr_ptrs(pkg.alloc, &elems.ptr, &elems.len, &elems.cap, elems.len + 1, pkg.settings, .{ .ERROR_MODE = .RETURN_ERRORS });
                     if (err) |e| {
                         manager.err = Error.element_mem_reallocation_error;
                     }
-                }
+                },
             }
         }
         return elems;
@@ -993,7 +939,7 @@ pub const LayoutStage = enum {
 };
 
 const Lines = struct {
-    ptr: [*]AxisLine,
+    ptr: [*]AxisLine = Utils.invalid_ptr_many(AxisLine),
     len: u32 = 0,
     cap: u32 = 0,
 };
@@ -1009,101 +955,183 @@ const MemUnit = union {
     const ALIGN = @alignOf(MemUnit);
 };
 
-pub const LayoutManager = struct {
-    mem: [*]u8,
-    elems: [*]LayoutElement,
-    lines: [*]AxisLine,
-    stack: [*]StackFrame,
-    mem_cap: u32 = 0,
-    mem_len: u32 = 0,
-    elems_byte_len: u32 = 0,
-    elems_len: u32 = 0,
-    elems_byte_cap: u32 = 0,
-    elems_cap: u32 = 0,
-    lines_byte_len: u32 = 0,
-    lines_len: u32 = 0,
-    lines_byte_cap: u32 = 0,
-    lines_cap: u32 = 0,
-    stack_byte_len: u32 = 0,
-    stack_len: u32 = 0,
-    stack_byte_cap: u32 = 0,
-    stack_cap: u32 = 0,
-    mem_static: bool = true,
-    mem_alloc: Allocator = dummy_alloc,
-    max_bytes_used: u32 = 0,
+pub fn MemInit(comptime T: type) type {
+    return union(enum) {
+        const Self = @This();
 
-    const ALLOC_SETTINGS = Utils.Alloc.SmartAllocComptimeSettings(u8){
+        STATIC: []T,
+        INIT_ALLOW_RELLOC: struct {
+            init_mem: []T,
+            alloc: Allocator,
+        },
+        EMPTY_ALLOW_REALLOC: Allocator,
+
+        pub fn static_mem(mem: []T) Self {
+            return Self{
+                .STATIC = mem,
+            };
+        }
+        pub fn init_allow_realloc(mem: []T, alloc: Allocator) Self {
+            return Self{
+                .INIT_ALLOW_RELLOC = .{
+                    .alloc = alloc,
+                    .init_mem = mem,
+                },
+            };
+        }
+        pub fn empty_allow_realloc(alloc: Allocator) Self {
+            return Self{
+                .EMPTY_ALLOW_REALLOC = alloc,
+            };
+        }
+
+        pub fn get_mem(self: Self) []T {
+            switch (self) {
+                .STATIC, .EMPTY_ALLOW_REALLOC => return &.{},
+                .INIT_ALLOW_RELLOC => |v| return v.init_mem,
+            }
+        }
+        pub fn get_alloc(self: Self) Allocator {
+            switch (self) {
+                .STATIC => return dummy_alloc,
+                .EMPTY_ALLOW_REALLOC => |alloc| return alloc,
+                .INIT_ALLOW_RELLOC => |v| return v.alloc,
+            }
+        }
+    };
+}
+
+pub const LayoutManager = struct {
+    elems: Elems = .{},
+    stack: Stack = .{},
+    lines: Lines = .{},
+    elems_alloc: Allocator = dummy_alloc,
+    lines_alloc: Allocator = dummy_alloc,
+    stack_alloc: Allocator = dummy_alloc,
+    real_max_elems: u32 = 0,
+    real_max_lines: u32 = 0,
+    real_max_stack: u32 = 0,
+
+    const ELEM_ALLOC_SETTINGS = Utils.Alloc.SmartAllocComptimeSettings(LayoutElement){
         .CLEAR_OLD_MODE = .DONT_MEMSET_OLD,
-        .COPY_MODE = .DONT_COPY_EXISTING_DATA,
+        .COPY_MODE = .COPY_EXISTING_DATA,
         .ERROR_MODE = .RETURN_ERRORS,
-        .GROW_MODE = .GROW_EXACT_NEEDED,
+        .GROW_MODE = .GROW_BY_25_PERCENT,
         .INIT_NEW_MODE = .DONT_MEMSET_NEW,
-        .OLD_ALIGN = .align_to_type(MemUnit),
-        .NEW_ALIGN = .align_to_type(MemUnit),
+        .OLD_ALIGN = .align_to_type(),
+        .NEW_ALIGN = .align_to_type(),
+    };
+    const LINE_ALLOC_SETTINGS = Utils.Alloc.SmartAllocComptimeSettings(AxisLine){
+        .CLEAR_OLD_MODE = .DONT_MEMSET_OLD,
+        .COPY_MODE = .COPY_EXISTING_DATA,
+        .ERROR_MODE = .RETURN_ERRORS,
+        .GROW_MODE = .GROW_BY_25_PERCENT,
+        .INIT_NEW_MODE = .DONT_MEMSET_NEW,
+        .OLD_ALIGN = .align_to_type(),
+        .NEW_ALIGN = .align_to_type(),
+    };
+    const STACK_ALLOC_SETTINGS = Utils.Alloc.SmartAllocComptimeSettings(StackFrame){
+        .CLEAR_OLD_MODE = .DONT_MEMSET_OLD,
+        .COPY_MODE = .COPY_EXISTING_DATA,
+        .ERROR_MODE = .RETURN_ERRORS,
+        .GROW_MODE = .GROW_BY_25_PERCENT,
+        .INIT_NEW_MODE = .DONT_MEMSET_NEW,
+        .OLD_ALIGN = .align_to_type(),
+        .NEW_ALIGN = .align_to_type(),
     };
 
-    fn grow_elems_if_needed(self: *LayoutManager, add_elems: u32) Error!void {
-        const new_elem_len = self.elems_len + add_elems;
-        if (new_elem_len > self.elems_cap) {
-            const bytes_for_elems = new_elem_len * @sizeOf(LayoutElement);
-            try self.grow(bytes_for_elems, self.lines_byte_cap, self.stack_byte_cap);
-        }
-        return;
-    }
-
-    fn grow(self: *LayoutManager, bytes_for_elems: u32, bytes_for_lines: u32, bytes_for_stack: u32) Error!void {
-        const new_total_len = bytes_for_elems + bytes_for_lines + bytes_for_stack;
-            const new_mem = try Utils.Alloc.smart_alloc(self.mem_alloc, self.mem, self.mem_len, self.mem_cap, new_total_len, .{}, ALLOC_SETTINGS);
-            const new_mem_ptr = new_mem.ptr;
-            const new_mem_end = new_mem_ptr + new_mem.len;
-            const new_stack_ptr_opq = new_mem_end - bytes_for_stack;
-            const new_stack_ptr: [*]StackFrame = @ptrCast(@alignCast(new_stack_ptr_opq));
-            @memcpy(new_stack_ptr[0..self.stack_byte_len], self.stack[0..self.stack_byte_len]);
-            const new_lines_ptr: [*]AxisLine = @ptrCast(@alignCast(new_stack_ptr_opq - bytes_for_lines))
-            self.stack = new_stack_ptr;
-            //CHECKPOINT
-    }
-
-    fn append_elem_slot(self: *LayoutManager) struct {*LayoutElement, u32} {
-
-    }
-
-    inline fn handle_elem_mem_error(self: *LayoutManager, err: Utils.Alloc.AllocErr) void {
-        if (err == Utils.Alloc.AllocErr.OutOfMemory) {
-            self.err = Error.ELEMENT_MEMORY_OUT_OF_SPACE;
+    inline fn grow_elems_if_needed(self: *LayoutManager, add_elems: u32) Error!void {
+        const new_cap = self.elems.len + add_elems;
+        if (new_cap > self.elems.cap) {
+            try Utils.Alloc.smart_alloc(self.elems_alloc, &self.elems.ptr, &self.elems.len, &self.elems.cap, new_cap, .{}, ELEM_ALLOC_SETTINGS);
         }
     }
-    inline fn handle_depth_mem_error(self: *LayoutManager, err: Utils.Alloc.AllocErr) void {
-        if (err == Utils.Alloc.AllocErr.OutOfMemory) {
-            self.err = Error.DEPTH_MEMORY_OUT_OF_SPACE;
+    inline fn grow_lines_if_needed(self: *LayoutManager, add_lines: u32) Error!void {
+        const new_cap = self.lines.len + add_lines;
+        if (new_cap > self.lines.cap) {
+            try Utils.Alloc.smart_alloc(self.lines_alloc, &self.lines.ptr, &self.lines.len, &self.lines.cap, new_cap, .{}, ELEM_ALLOC_SETTINGS);
         }
     }
-    inline fn realloc_elem_mem(self: *LayoutManager, new_cap: u32) bool {
-        const err: Utils.Alloc.AllocErr = Utils.Alloc.smart_alloc_ptr_ptrs(mgr.alloc, &mgr.elem_memory, &mgr.elem_len, &mgr.elem_cap, new_cap, mgr.elem_alloc_settings, .{.ERROR_MODE = .RETURN_ERRORS});
-        if (err == Utils.Alloc.AllocErr.OutOfMemory) {
-            self.err = Error.ELEMENT_MEMORY_OUT_OF_SPACE;
-            return false;
+    inline fn grow_stack_if_needed(self: *LayoutManager, add_stack: u32) Error!void {
+        const new_cap = self.stack.len + add_stack;
+        if (new_cap > self.stack.cap) {
+            try Utils.Alloc.smart_alloc(self.stack_alloc, &self.stack.ptr, &self.stack.len, &self.stack.cap, new_cap, .{}, ELEM_ALLOC_SETTINGS);
         }
-        return true;
-    }
-    inline fn realloc_depth_mem(self: *LayoutManager, new_cap: u32) bool {
-        const err: Utils.Alloc.AllocErr = Utils.Alloc.smart_alloc_ptr_ptrs(mgr.alloc, &mgr.depth_memory, &mgr.depth_len, &mgr.depth_cap, new_cap, mgr.depth_alloc_settings, .{.ERROR_MODE = .RETURN_ERRORS});
-        if (err == Utils.Alloc.AllocErr.OutOfMemory) {
-            self.err = Error.DEPTH_MEMORY_OUT_OF_SPACE;
-            return false;
-        }
-        return true;
     }
 
-    pub fn new_static_mem(elem_memory: []LayoutElement, depth_memory: []DepthFrame) LayoutManager {
-        return LayoutManager{
-            .elem_memory = elem_memory.ptr,
-            .depth_memory = depth_memory.ptr,
-            .elem_cap = @intCast(elem_memory.len),
-            .depth_cap = @intCast(elem_memory.len),
+    inline fn get_elem_ptr(elems: Elems, idx: u32) *LayoutElement {
+        return &elems.ptr[idx];
+    }
+    inline fn get_line_ptr(self: *LayoutManager, idx: u32) *AxisLine {
+        return &self.lines.ptr[idx];
+    }
+    inline fn get_stack_ptr(self: *LayoutManager, idx: u32) *StackFrame {
+        return &self.stack.ptr[idx];
+    }
+    inline fn get_parent_ptr(elems: Elems, idx: u32) *LayoutElement {
+        return &elems.ptr[elems.ptr[idx].parent_idx];
+    }
+
+    fn append_elem_slot(self: *LayoutManager) Error!struct { *LayoutElement, u32 } {
+        try self.grow_elems_if_needed(1);
+        const idx = self.elems.len;
+        self.elems.len += 1;
+        self.real_max_elems = @max(self.real_max_elems, self.elems.len);
+        const ptr = self.get_elem_ptr(idx);
+        return .{ ptr, idx };
+    }
+    fn append_line_slot(self: *LayoutManager) Error!struct { *AxisLine, u32 } {
+        try self.grow_lines_if_needed(1);
+        const idx = self.lines.len;
+        self.lines.len += 1;
+        self.real_max_lines = @max(self.real_max_lines, self.lines.len);
+        const ptr = self.get_line_ptr(idx);
+        return .{ ptr, idx };
+    }
+    fn append_stack_slot(self: *LayoutManager) Error!struct { *StackFrame, u32 } {
+        try self.grow_stack_if_needed(1);
+        const idx = self.stack.len;
+        self.stack.len += 1;
+        self.real_max_stack = @max(self.real_max_stack, self.stack.len);
+        const ptr = self.get_stack_ptr(idx);
+        return .{ ptr, idx };
+    }
+
+    fn realloc_stack_impl(obj: *anyopaque, old_stack: Stack, needed_extra_frames: u32) Utils.Alloc.AllocErr!Stack {
+        const self: *LayoutManager = @ptrCast(@alignCast(obj));
+        assert_with_reason(old_stack.ptr == self.stack and old_stack.cap == self.stack_cap, @src(), "`old_stack` does not match the stack on the LayoutManager", .{});
+        self.stack.len = old_stack.len;
+        try self.grow_stack_if_needed(needed_extra_frames);
+        return Stack{
+            .ptr = self.stack,
+            .len = self.stack.len,
+            .cap = self.stack.cap,
         };
     }
-    pub fn new_allocated_mem(initial_elem_cap: u32, initial_depth_cap: u32, alloc: Allocator, elem_alloc_settings: Utils.Alloc.SmartAllocSettings(LayoutElement), depth_alloc_settings: Utils.Alloc.SmartAllocSettings(DepthFrame)) struct{LayoutManager, bool} {
+
+    fn stack_reallocator(self: *LayoutManager) StackReallocator {
+        return StackReallocator{
+            .object = @ptrCast(self),
+            .realloc_impl = realloc_stack_impl,
+        };
+    }
+
+    pub fn new(elem_mem: MemInit(LayoutElement), axis_line_mem: MemInit(AxisLine), stack_mem: MemInit(StackFrame)) LayoutManager {
+        var self: LayoutManager = .{};
+        const elem = elem_mem.get_mem();
+        const line = axis_line_mem.get_mem();
+        const stack = stack_mem.get_mem();
+        self.elems.ptr = elem.ptr;
+        self.elems.cap = elem.len;
+        self.lines.ptr = line.ptr;
+        self.lines.cap = line.len;
+        self.stack.ptr = stack.ptr;
+        self.stack.cap = stack.len;
+        self.elems_alloc = elem_mem.get_alloc();
+        self.lines_alloc = axis_line_mem.get_alloc();
+        self.stack_alloc = stack_mem.get_alloc();
+    }
+    pub fn new_allocated_mem(initial_elem_cap: u32, initial_depth_cap: u32, alloc: Allocator, elem_alloc_settings: Utils.Alloc.SmartAllocSettings(LayoutElement), depth_alloc_settings: Utils.Alloc.SmartAllocSettings(DepthFrame)) struct { LayoutManager, bool } {
         var mgr = LayoutManager{
             .alloc = alloc,
             .elem_alloc_settings = elem_alloc_settings,
@@ -1112,46 +1140,21 @@ pub const LayoutManager = struct {
 
         if (initial_elem_cap > 0) {
             if (!mgr.realloc_elem_mem(initial_elem_cap)) {
-                return .{mgr, false};
+                return .{ mgr, false };
             }
         }
         if (initial_depth_cap > 0) {
             if (!mgr.realloc_depth_mem(initial_depth_cap)) {
-                return .{mgr, false};
+                return .{ mgr, false };
             }
         }
-        return .{mgr, true};
-    }
-
-    inline fn get_elem_list_top_to_bottom(self: *LayoutManager) ElemList {
-        return ElemList{
-            .breadth_first_parents_first_siblings_reverse_order = @ptrCast(&self.all_elements_in_breadth_first_parents_first_siblings_reversed_order[0]),
-            .len = self.elem_len,
-            .head_idx = 0,
-            ._debug_dir_top_to_bottom = if (comptime Assert.IS_DEBUG) true else void{},
-        };
-    }
-    inline fn get_elem_list_bottom_to_top(self: *LayoutManager) ElemList {
-        return ElemList{
-            .breadth_first_parents_first_siblings_reverse_order = @ptrCast(&self.all_elements_in_breadth_first_parents_first_siblings_reversed_order[0]),
-            .len = self.elem_len,
-            .head_idx = 0,
-            ._debug_dir_top_to_bottom = if (comptime Assert.IS_DEBUG) false else void{},
-        };
-    }
-    inline fn get_child_slice(self: *LayoutManager, parent_idx: u32) SiblingSlice {
-        const parent = self.all_elements_in_breadth_first_parents_first_siblings_reversed_order[parent_idx];
-        return SiblingSlice{
-            .last_to_first = @ptrCast(&self.all_elements_in_breadth_first_parents_first_siblings_reversed_order[parent.last_child]),
-            .len = (parent.first_child - parent.last_child) + 1,
-            .first_sibling_abs_idx = parent.first_child,
-        };
+        return .{ mgr, true };
     }
 
     inline fn append_new_elem_from_requester_and_parent_prev_sibling(self: *LayoutManager, requester: LayoutRequester, parent: u32, prev_sibling: u32) ?*LayoutElement {
         if (self.elem_len >= self.elem_cap) {
             if (self.can_realloc) {
-                Utils.Alloc.smart_alloc_ptr_ptrs(self.alloc, &self.elem_memory, &self.elem_len, &self.elem_cap, self.elem_len + 1, self.elem_alloc_settings, .{.ERROR_MODE = .RETURN_ERRORS});
+                Utils.Alloc.smart_alloc_ptr_ptrs(self.alloc, &self.elem_memory, &self.elem_len, &self.elem_cap, self.elem_len + 1, self.elem_alloc_settings, .{ .ERROR_MODE = .RETURN_ERRORS });
             } else {
                 self.err = Error.ELEMENT_MEMORY_OUT_OF_SPACE;
             }
@@ -1210,220 +1213,90 @@ pub const LayoutManager = struct {
         self.real_max_elements = @max(self.real_max_elements, self.elem_len);
     }
 
-    pub fn recalculate_layout(self: *LayoutManager, comptime DRIVING_AXIS: Axis, comptime STACK_REALLOC: StackRealloc, stack_realloc: STACK_REALLOC.T_PKG(StackFrame)) ?Error {
+    pub fn recalculate_layout(self: *LayoutManager, comptime DRIVING_AXIS: Axis, comptime STACK_REALLOC: StackRealloc, stack_realloc: STACK_REALLOC.T_PKG(StackFrame)) Error!void {
         switch (comptime DRIVING_AXIS) {
             .X => {
-                self.elems, self.stack, self.err = Traverse.do_action_on_all_nodes(self.elems, self.stack, .CHILDREN_FIRST, .exclude_child_paths(&.{""}), 0, STACK_REALLOC, stack_realloc, void{}, LayoutStage.PRIMARY_STAGE, .COMPTIME_FN_BODY, Action.propagate_min_size_to_parent_x, void{});
-                if (self.err) |e| return e;
-                Action.set_root_final_size_x(self.elems, 0);
-                self.elems, self.stack, self.err = Traverse.do_action_on_all_nodes(self.elems, self.stack, .PARENTS_FIRST, 0, STACK_REALLOC, stack_realloc, self, LayoutStage.PRIMARY_STAGE, .COMPTIME_FN_BODY, Action.fit_and_expand_children_to_fill_parent_x, void{});
-                if (self.err) |e| return e;
-                self.elems, self.stack, self.err = Traverse.do_action_on_all_nodes(self.elems, self.stack, .PARENTS_FIRST, 0, STACK_REALLOC, stack_realloc, void{}, void{}, .COMPTIME_FN_BODY, Action.recheck_min_y_from_final_x, void{});
-                if (self.err) |e| return e;
-                self.elems, self.stack, self.err = Traverse.do_action_on_all_nodes(self.elems, self.stack, .CHILDREN_FIRST, 0,  STACK_REALLOC, stack_realloc, void{}, LayoutStage.SECONDARY_PHASE, .COMPTIME_FN_BODY, Action.propagate_min_size_to_parent_y, void{});
-                if (self.err) |e| return e;
-                Action.set_root_final_size_y(self.elems, 0);
-                self.elems, self.stack, self.err = Traverse.do_action_on_all_nodes(self.elems, self.stack, .PARENTS_FIRST, 0, STACK_REALLOC, stack_realloc, self, LayoutStage.SECONDARY_PHASE, .COMPTIME_FN_BODY, Action.fit_and_expand_children_to_fill_parent_y, void{});
+                self.elems, self.stack = try Traverse.do_action_on_all_nodes(self.elems, self.stack, self.stack_reallocator(), .CHILDREN_FIRST, 0, self, AxisStage.mode(.X, .PRIMARY_STAGE), .COMPTIME_FN_PTR, Action.propagate_min_size_to_parent, void{});
+                self.elems, self.stack = try Traverse.do_action_on_all_nodes(self.elems, self.stack, self.stack_reallocator(), .PARENTS_FIRST, 0, self, AxisStage.mode(.X, .PRIMARY_STAGE), .COMPTIME_FN_PTR, Action.fit_and_expand_children_to_fill_parent, void{});
+                self.elems, self.stack = try Traverse.do_action_on_all_nodes(self.elems, self.stack, self.stack_reallocator(), .PARENTS_FIRST, 0, self, AxisStage.mode(.Y, .SECONDARY_PHASE), .COMPTIME_FN_PTR, Action.recheck_min_y_from_final_x, void{});
+                self.elems, self.stack = try Traverse.do_action_on_all_nodes(self.elems, self.stack, self.stack_reallocator(), .CHILDREN_FIRST, 0, self, AxisStage.mode(.Y, .SECONDARY_PHASE), .COMPTIME_FN_PTR, Action.propagate_min_size_to_parent_y, void{});
+                self.elems, self.stack = try Traverse.do_action_on_all_nodes(self.elems, self.stack, self.stack_reallocator(), .PARENTS_FIRST, 0, self, AxisStage.mode(.Y, .SECONDARY_PHASE), .COMPTIME_FN_PTR, Action.fit_and_expand_children_to_fill_parent_y, void{});
             },
             .Y => {
-                self.elems, self.stack, self.err = Traverse.do_action_on_all_nodes(self.elems, self.stack, .CHILDREN_FIRST, 0, STACK_REALLOC, stack_realloc, void{}, LayoutStage.PRIMARY_STAGE, .COMPTIME_FN_BODY, Action.propagate_min_size_to_parent_y, void{});
-                if (self.err) |e| return e;
-                Action.set_root_final_size_y(self.elems, 0);
-                self.elems, self.stack, self.err = Traverse.do_action_on_all_nodes(self.elems, self.stack, .PARENTS_FIRST, 0, STACK_REALLOC, stack_realloc, self, LayoutStage.PRIMARY_STAGE, .COMPTIME_FN_BODY, Action.fit_and_expand_children_to_fill_parent_y, void{});
-                if (self.err) |e| return e;
-                self.elems, self.stack, self.err = Traverse.do_action_on_all_nodes(self.elems, self.stack, .PARENTS_FIRST, 0, STACK_REALLOC, stack_realloc, void{}, void{}, .COMPTIME_FN_BODY, Action.recheck_min_x_from_final_y, void{});
-                if (self.err) |e| return e;
-                self.elems, self.stack, self.err = Traverse.do_action_on_all_nodes(self.elems, self.stack, .CHILDREN_FIRST, 0, STACK_REALLOC, stack_realloc, void{}, LayoutStage.SECONDARY_PHASE, .COMPTIME_FN_BODY, Action.propagate_min_size_to_parent_x, void{});
-                if (self.err) |e| return e;
-                Action.set_root_final_size_x(self.elems, 0);
-                self.elems, self.stack, self.err = Traverse.do_action_on_all_nodes(self.elems, self.stack, .PARENTS_FIRST, 0, STACK_REALLOC, stack_realloc, self, LayoutStage.SECONDARY_PHASE, .COMPTIME_FN_BODY, Action.fit_and_expand_children_to_fill_parent_x, void{});
+                self.elems, self.stack = try Traverse.do_action_on_all_nodes(self.elems, self.stack, self.stack_reallocator(), .CHILDREN_FIRST, 0, self, AxisStage.mode(.Y, .PRIMARY_STAGE), .COMPTIME_FN_PTR, Action.propagate_min_size_to_parent, void{});
+                self.elems, self.stack = try Traverse.do_action_on_all_nodes(self.elems, self.stack, self.stack_reallocator(), .PARENTS_FIRST, 0, self, AxisStage.mode(.Y, .PRIMARY_STAGE), .COMPTIME_FN_PTR, Action.fit_and_expand_children_to_fill_parent, void{});
+                self.elems, self.stack = try Traverse.do_action_on_all_nodes(self.elems, self.stack, self.stack_reallocator(), .PARENTS_FIRST, 0, self, AxisStage.mode(.X, .SECONDARY_PHASE), .COMPTIME_FN_PTR, Action.recheck_min_x_from_final_y, void{});
+                self.elems, self.stack = try Traverse.do_action_on_all_nodes(self.elems, self.stack, self.stack_reallocator(), .CHILDREN_FIRST, 0, self, AxisStage.mode(.X, .SECONDARY_PHASE), .COMPTIME_FN_PTR, Action.propagate_min_size_to_parent_x, void{});
+                self.elems, self.stack = try Traverse.do_action_on_all_nodes(self.elems, self.stack, self.stack_reallocator(), .PARENTS_FIRST, 0, self, AxisStage.mode(.X, .SECONDARY_PHASE), .COMPTIME_FN_BODY, Action.fit_and_expand_children_to_fill_parent_x, void{});
             },
         }
-        if (self.err) |e| return e;
-        self.elems, self.stack, self.err = Traverse.do_action_on_all_nodes(self.elems, self.stack, .PARENTS_FIRST, 0, STACK_REALLOC, stack_realloc, void{}, void{}, .COMPTIME_FN_BODY, Action.position_and_align_element, void{});
-        return self.err;
+        self.elems, self.stack = try Traverse.do_action_on_all_nodes(self.elems, self.stack, self.stack_reallocator(), .PARENTS_FIRST, 0, self, void{}, .COMPTIME_FN_PTR, Action.position_and_align_element, void{});
     }
 
-    fn propogate_minimums_to_parents(self: *LayoutManager, comptime AXIS: Axis, comptime IS_DRIVING_AXIS: bool) void {
-        var remaining_elems = self.get_elem_list_bottom_to_top();
-        var curr_siblings: SiblingSlice = undefined;
-        while (remaining_elems.has_more_elements()) {
-            remaining_elems, curr_siblings = remaining_elems.split_off_deepest_sibling_slice();
-            if (curr_siblings.has_parent()) {
-                var curr_elem: *LayoutElement, var curr_idx: u32 = curr_siblings.get_first_ptr_and_idx();
-                var parent_elem = curr_siblings.get_parent_ptr(self.all_elements_in_breadth_first_parents_first_siblings_reversed_order[0..]);
-                const parent_grow = parent_elem.get_grow_mode(AXIS);
-                if (parent_grow != .EXACT) {
-                    switch (parent_elem.layout_dir.relative_to_axis(AXIS)) {
-                        .SAME_LAYOUT_DIRECTION_AS_CURRENT_AXIS => {
-                            if (parent_elem.use_flow_mode) {
-                                if (comptime IS_DRIVING_AXIS) {
-                                    var min_size_from_children: f32 = 0;
-                                    while (true) {
-                                        min_size_from_children = @max(min_size_from_children, curr_elem.get_min_self_size(AXIS));
-                                        if (!curr_siblings.has_next(curr_idx)) break;
-                                        curr_elem, curr_idx = curr_siblings.get_next_ptr_and_idx(curr_idx);
-                                    }
-                                    min_size_from_children += parent_elem.padding.get(AXIS);
-                                    parent_elem.update_min_size_if_larger(AXIS, min_size_from_children);
-                                } else {
-                                    while (curr_siblings.has_another_axis_line()) {
-                                        //FIXME
-                                    }
-                                }
-                            } else {
-                                const gap = parent_elem.child_gaps.get(AXIS);
-                                var min_size_from_children: f32 = 0;
-                                var not_first_child: bool = false;
-                                while (true) {
-                                    min_size_from_children += curr_elem.get_min_self_size(AXIS);
-                                    if (not_first_child) {
-                                        min_size_from_children += gap;
-                                    }
-                                    not_first_child = true;
-                                    if (!curr_siblings.has_next(curr_idx)) break;
-                                    curr_elem, curr_idx = curr_siblings.get_next_ptr_and_idx(curr_idx);
-                                }
-                                min_size_from_children += parent_elem.padding.get(AXIS);
-                                parent_elem.update_min_size_if_larger(AXIS, min_size_from_children);
-                            }
-                        },
-                        .OPPOSITE_LAYOUT_DIRECTION_OF_CURRENT_AXIS => {
-                            if ()
-                            var min_size_from_children: f32 = 0;
-                            while (true) {
-                                min_size_from_children = @max(min_size_from_children, curr_elem.get_min_self_size(AXIS));
-                                if (!curr_siblings.has_next(curr_idx)) break;
-                                curr_elem, curr_idx = curr_siblings.get_next_ptr_and_idx(curr_idx);
-                            }
-                            min_size_from_children += parent_elem.padding.get(AXIS);
-                            parent_elem.update_min_size_if_larger(AXIS, min_size_from_children);
-                        },
-                    }
-                }
+    fn propagate_min_size_to_parent(elems: Elems, idx: u32, _: *LayoutManager, comptime CT: AxisStage) Elems {
+        const child = get_elem_ptr(elems, idx);
+        child.add_to_min_children_size(CT.AXIS, child.padding.get(CT.AXIS));
+        child.set_min_self_size(CT.AXIS, @max(child.get_min_self_size(CT.AXIS), child.get_min_children(CT.AXIS)));
+        if (child.is_floating or child.parent_idx == NULL_IDX) return elems;
+        const parent = get_parent_ptr(elems, idx);
+        const gap = parent.child_gaps.get(CT.AXIS);
+        if (parent.primary_child_axis == CT.AXIS and !parent.use_flow_mode) {
+            var add_min_size = child.get_min_self_size(CT.AXIS);
+            if (parent.first_inline_child != idx) {
+                add_min_size += gap;
             }
+            parent.add_to_min_children_size(CT.AXIS, add_min_size);
+        } else {
+            const min_size = child.get_min_self_size(CT.AXIS);
+            parent.update_max_of_min_children_size(CT.AXIS, min_size);
         }
+        return elems;
     }
 
-    //breadth top_to_bottom
-    fn grow_and_shrink(self: *LayoutManager, comptime AXIS: Axis, comptime IS_DRIVING_AXIS: bool) void {
-        var remaining_elems = self.get_elem_list_top_to_bottom();
-        var curr_parent_siblings: SiblingSlice = undefined;
-        while (remaining_elems.has_more_elements()) {
-            remaining_elems, curr_parent_siblings = remaining_elems.split_off_shallowest_sibling_slice();
-            var curr_parent, var parent_local_idx = curr_parent_siblings.get_first_ptr_and_idx();
-            while (true) {
-                if (curr_parent.has_children()) {
-                    var remaining_children = self.get_child_slice(curr_parent_siblings.abs_idx(parent_local_idx));
-                    var curr_child, var child_local_idx = remaining_children.get_first_ptr_and_idx();
-                    while (true) {
-                        // GROW/SHRINK CHILD
-                        if (!remaining_children.has_next(child_local_idx)) break;
-                        curr_child, child_local_idx = remaining_children.get_next_ptr_and_idx(child_local_idx);
+    fn fit_and_expand_children_to_fill_parent(nodes_: Elems, idx: u32, manager: *LayoutManager, comptime CT: AxisStage) Elems {
+        var nodes = nodes_;
+        const parent = get_elem_ptr(nodes, idx);
+        if (parent.is_floating or parent.parent_idx == NULL_IDX) {
+            const final_size = @min(parent.get_min_self_size(CT.AXIS), parent.get_max_size(CT.AXIS));
+            parent.set_final_size(CT.AXIS, final_size);
+        }
+        const final_size_with_pad = parent.get_final_size(CT.AXIS);
+        const final_size_for_children = final_size_with_pad - parent.padding.get(CT.AXIS);
+        if (parent.first_inline_child != NULL_IDX) {
+            var curr_child_idx = parent.first_inline_child;
+            if (CT.STAGE == .PRIMARY_STAGE and parent.use_flow_mode) {
+                const gap = parent.child_gaps.get(CT.AXIS);
+                var current_min_size: f32 = 0;
+                var possible_next_min_size: f32 = 0;
+                var child_min_size: f32 = 0;
+                var added_min_size_with_gap: f32 = 0;
+                var gap_to_add = 0;
+                var curr_num_this_line: u32 = 0;
+                while (curr_child_idx != NULL_IDX) {
+                    const child = get_elem_ptr(nodes, curr_child_idx);
+                    child_min_size = child.get_min_self_size(CT.AXIS);
+                    added_min_size_with_gap = child_min_size + gap_to_add;
+                    possible_next_min_size += added_min_size_with_gap;
+                    if (curr_num_this_line >= 1 and possible_next_min_size > final_size_for_children) {
+                        // end current line and start new line
+                        current_min_size = child_min_size;
+                        possible_next_min_size = child_min_size;
+                        child_min_size = 0;
+                        //CHECKPOINT
+                    } else {
+                        current_min_size = possible_next_min_size;
+                        curr_num_this_line += 1;
+                        gap_to_add = gap;
                     }
                 }
-                if (!curr_parent_siblings.has_next(parent_local_idx)) break;
-                curr_parent, parent_local_idx = curr_parent_siblings.get_next_ptr_and_idx(parent_local_idx);
-            }
-        }
-        var parent_idx: u32 = 0;
-        //CHECKPOINT update to use AXIS
-        while (parent_idx < self.elem_len) : (parent_idx += 1) {
-            const first_child_idx = self.elements[parent_idx].first_child;
-            const last_child_idx = self.elements[parent_idx].last_child;
-            const parent_padding = self.elements[parent_idx].padding;
-            const parent_gaps = self.elements[parent_idx].child_gaps;
-            const num_gaps = @as(f32, @floatFromInt(first_child_idx - last_child_idx));
-            var child_idx: u32 = first_child_idx;
-            if (child_idx != NULL_IDX) {
-                switch (self.elements[parent_idx].layout_dir.relative_to_axis(AXIS)) {
-                    .SAME_DIRECTION_AS_CURRENT_AXIS => {
-                        var remaining_free_space = self.elements[parent_idx].get_min_children(AXIS) - parent_padding.get(AXIS) - parent_gaps.get_total(AXIS, num_gaps);
-                        var total_min: f32 = 0;
-                        var has_at_least_one_grow: bool = false;
-                        while (child_idx >= last_child_idx) : (child_idx -= 1) {
-                            const child_min = self.elements[child_idx].get_min_self(AXIS);
-                            self.elements[child_idx].set_final_size(AXIS, child_min);
-                            total_min += child_min;
-                            has_at_least_one_grow = has_at_least_one_grow or self.elements[child_idx].get_grow_mode(AXIS) == .GROW;
-                        }
-                        remaining_free_space = remaining_free_space - total_min;
-                        if (has_at_least_one_grow and total_min < remaining_free_space) {
-                            while (remaining_free_space >= 0.001) {
-                                var total_grow_weight_this_pass: f32 = 0;
-                                var num_elements_to_distrubute_across: f32 = 0;
-                                var total_space_claimed_this_pass: f32 = 0;
-                                child_idx = first_child_idx;
-                                while (child_idx >= last_child_idx) : (child_idx -= 1) {
-                                    if (self.elements[child_idx].get_grow_mode(AXIS) == .GROW and self.elements[child_idx].get_min_children(AXIS) < self.elements[child_idx].get_max(AXIS)) {
-                                        total_grow_weight_this_pass += self.elements[child_idx].get_grow_ratio(AXIS);
-                                        num_elements_to_distrubute_across += 1;
-                                    }
-                                }
-                                if (num_elements_to_distrubute_across == 0 or total_grow_weight_this_pass == 0) break;
-                                child_idx = first_child_idx;
-                                while (child_idx >= last_child_idx) : (child_idx -= 1) {
-                                    if (self.elements[child_idx].get_grow_mode(AXIS) == .GROW and self.elements[child_idx].get_min_children(AXIS) < self.elements[child_idx].get_max(AXIS)) {
-                                        var space_to_claim = remaining_free_space * (self.elements[child_idx].get_grow_ratio(AXIS) / total_grow_weight_this_pass);
-                                        var new_size = self.elements[child_idx].get_min_children(AXIS) + space_to_claim;
-                                        if (new_size >= self.elements[child_idx].get_max(AXIS)) {
-                                            new_size = self.elements[child_idx].get_max(AXIS);
-                                            space_to_claim = new_size - self.elements[child_idx].get_min_children(AXIS);
-                                        }
-                                        total_space_claimed_this_pass += space_to_claim;
-                                        self.elements[child_idx].get_min_children(AXIS) = new_size;
-                                    }
-                                }
-                                remaining_free_space -= total_space_claimed_this_pass;
-                                if (total_space_claimed_this_pass < 0.001) break;
-                            }
-                        }
-                        self.elements[parent_idx].get_min_self(AXIS) = remaining_free_space;
-                    },
-                    .OPPOSITE_DIRECTION_OF_CURRENT_AXIS => {
-                        const free_space = self.elements[parent_idx].get_min_children(AXIS) - parent_padding.get(AXIS)();
-                        var max_space_used: f32 = 0;
-                        while (child_idx >= last_child_idx) : (child_idx -= 1) {
-                            switch (self.elements[child_idx].get_grow_mode(AXIS)) {
-                                .EXACT, .SHRINK => {
-                                    self.elements[child_idx].get_min_children(AXIS) = self.elements[child_idx].get_min_self(AXIS);
-                                },
-                                .GROW => {
-                                    self.elements[child_idx].get_min_children(AXIS) = @max(@min(free_space, self.elements[child_idx].get_max(AXIS)), self.elements[child_idx].get_min_self(AXIS));
-                                },
-                            }
-                            max_space_used = @max(max_space_used, self.elements[child_idx].get_min_children(AXIS));
-                        }
-                        const leftover_space = max_space_used - free_space;
-                        self.elements[parent_idx].get_min_self(AXIS) = leftover_space;
-                    },
+            } else {
+                while (curr_child_idx != NULL_IDX) {
+                    const child = get_elem_ptr(nodes, curr_child_idx);
+                    curr_child_idx = get_next_sibling(nodes, curr_child_idx);
                 }
             }
-            var free_space: f32 = self.elements[parent_idx].get_max(AXIS) - self.elements[parent_idx].get_min_children(AXIS);
-            var total_grow_weight: f32 = 0;
-            child_idx = first_child_idx;
-            while (child_idx >= last_child_idx) : (child_idx -= 1) {
-                if (self.elements[child_idx].is_floating) continue;
-                switch (self.elements[parent_idx].get_grow_mode(AXIS)) {
-                    .EXACT, .SHRINK => {
-                        self.elements[parent_idx].get_min_children(AXIS) = self.elements[parent_idx].get_min_self(AXIS);
-                    },
-                    .GROW => {
-                        total_grow_weight += self.elements[child_idx].get_grow_ratio(AXIS);
-                    },
-                }
-            }
-            child_idx = first_child_idx;
-            while (child_idx >= last_child_idx) : (child_idx -= 1) {
-                if (self.elements[child_idx].is_floating or self.elements[child_idx].get_grow_mode(AXIS) != .GROW) continue;
-                var free_space_used = free_space * (self.elements[child_idx].get_grow_ratio(AXIS) / total_grow_weight);
-                var new_size = self.elements[child_idx].get_min_self(AXIS) + free_space_used;
-                new_size = @min(new_size, self.elements[child_idx].get_max(AXIS));
-                free_space_used = new_size - self.elements[child_idx].get_min_self(AXIS);
-                free_space -= free_space_used;
-                self.elements[child_idx].get_min_children(AXIS) = new_size;
-            }
         }
+        return nodes;
     }
 
     fn recheck_element_sizes_with_with_known_primary_size(self: *LayoutManager, comptime DRIVING_AXIS: Axis) void {
@@ -1454,136 +1327,6 @@ pub const LayoutManager = struct {
                     self.elements[i].min_size_width_or_leftover_horiz = new_secondary_size.min;
                     self.elements[i].max_size_width = new_secondary_size.max;
                 },
-            }
-        }
-    }
-
-    //breadth bottom-to-top
-    fn propogate_minimum_heights_to_parents(self: *LayoutManager) void {
-        var i: u32 = self.elem_len;
-        while (i > 1) : (i -= 1) {
-            var this_layout: *LayoutElement = &self.elements[i];
-            this_layout.min_height_from_children_or_final_height += this_layout.padding.top + this_layout.padding.bottom;
-            this_layout.min_size_height_or_leftover_vert = @min(@max(this_layout.min_size_height_or_leftover_vert, this_layout.min_height_from_children_or_final_height), this_layout.max_size_height);
-            if (this_layout.is_floating) continue;
-            var parent: *LayoutElement = &self.elements[this_layout.parent_idx];
-            if (parent.grow_mode_h != .EXACT) {
-                switch (parent.layout_dir.primary_dir()) {
-                    .HORIZONTAL => {
-                        parent.min_height_from_children_or_final_height = @max(parent.min_height_from_children_or_final_height, this_layout.min_size_height_or_leftover_vert);
-                    },
-                    .VERTICAL => {
-                        if (parent.first_child != i) {
-                            parent.min_height_from_children_or_final_height += parent.child_gaps.vertical + this_layout.min_size_height_or_leftover_vert;
-                        } else {
-                            parent.min_height_from_children_or_final_height += this_layout.min_size_height_or_leftover_vert;
-                        }
-                    },
-                }
-            }
-        }
-        var root_layout: *LayoutElement = &self.elements[0];
-        root_layout.min_height_from_children_or_final_height += root_layout.padding.top + root_layout.padding.bottom;
-        root_layout.min_size_height_or_leftover_vert = @min(@max(root_layout.min_size_height_or_leftover_vert, root_layout.min_height_from_children_or_final_height), root_layout.max_size_height);
-    }
-
-    //breadth top_to_bottom
-    fn grow_and_shrink_heights(self: *LayoutManager) void {
-        var parent_idx: u32 = 0;
-        while (parent_idx < self.elem_len) : (parent_idx += 1) {
-            const first_child_idx = self.elements[parent_idx].first_child;
-            const last_child_idx = self.elements[parent_idx].last_child;
-            const parent_padding = self.elements[parent_idx].padding;
-            const parent_gaps = self.elements[parent_idx].child_gaps;
-            const num_gaps = @as(f32, @floatFromInt(last_child_idx - first_child_idx));
-            var child_idx: u32 = first_child_idx;
-            if (child_idx != NULL_IDX) {
-                switch (self.elements[parent_idx].layout_dir.primary_dir()) {
-                    .VERTICAL => {
-                        var remaining_free_vert_space = self.elements[parent_idx].min_height_from_children_or_final_height - parent_padding.v_padding() - parent_gaps.total_v_gap(num_gaps);
-                        var total_min_height: f32 = 0;
-                        var has_at_least_one_grow: bool = false;
-                        while (child_idx <= last_child_idx) : (child_idx += 1) {
-                            const child_min = self.elements[child_idx].min_size_height_or_leftover_vert;
-                            self.elements[child_idx].min_height_from_children_or_final_height = child_min;
-                            total_min_height += child_min;
-                            has_at_least_one_grow = has_at_least_one_grow or self.elements[child_idx].grow_mode_h == .GROW;
-                        }
-                        remaining_free_vert_space = remaining_free_vert_space - total_min_height;
-                        if (has_at_least_one_grow and total_min_height < remaining_free_vert_space) {
-                            while (remaining_free_vert_space >= 0.001) {
-                                var total_grow_weight_this_pass: f32 = 0;
-                                var num_elements_to_distrubute_across: f32 = 0;
-                                var total_space_claimed_this_pass: f32 = 0;
-                                child_idx = first_child_idx;
-                                while (child_idx <= last_child_idx) : (child_idx += 1) {
-                                    if (self.elements[child_idx].grow_mode_h == .GROW and self.elements[child_idx].min_height_from_children_or_final_height < self.elements[child_idx].max_size_height) {
-                                        total_grow_weight_this_pass += self.elements[child_idx].grow_ratio_h;
-                                        num_elements_to_distrubute_across += 1;
-                                    }
-                                }
-                                if (num_elements_to_distrubute_across == 0 or total_grow_weight_this_pass == 0) break;
-                                child_idx = first_child_idx;
-                                while (child_idx <= last_child_idx) : (child_idx += 1) {
-                                    if (self.elements[child_idx].grow_mode_h == .GROW and self.elements[child_idx].min_height_from_children_or_final_height < self.elements[child_idx].max_size_height) {
-                                        var space_to_claim = remaining_free_vert_space * (self.elements[child_idx].grow_ratio_h / total_grow_weight_this_pass);
-                                        var new_height = self.elements[child_idx].min_height_from_children_or_final_height + space_to_claim;
-                                        if (new_height >= self.elements[child_idx].max_size_height) {
-                                            new_height = self.elements[child_idx].max_size_height;
-                                            space_to_claim = new_height - self.elements[child_idx].min_height_from_children_or_final_height;
-                                        }
-                                        total_space_claimed_this_pass += space_to_claim;
-                                        self.elements[child_idx].min_height_from_children_or_final_height = new_height;
-                                    }
-                                }
-                                remaining_free_vert_space -= total_space_claimed_this_pass;
-                                if (total_space_claimed_this_pass < 0.001) break;
-                            }
-                        }
-                        self.elements[parent_idx].min_size_height_or_leftover_vert = remaining_free_vert_space;
-                    },
-                    .HORIZONTAL => {
-                        const free_vert_space = self.elements[parent_idx].min_height_from_children_or_final_height - parent_padding.v_padding();
-                        var max_vert_space_used: f32 = 0;
-                        while (child_idx <= last_child_idx) : (child_idx += 1) {
-                            switch (self.elements[child_idx].grow_mode_h) {
-                                .EXACT, .SHRINK => {
-                                    self.elements[child_idx].min_height_from_children_or_final_height = self.elements[child_idx].min_size_height_or_leftover_vert;
-                                },
-                                .GROW => {
-                                    self.elements[child_idx].min_height_from_children_or_final_height = @max(@min(free_vert_space, self.elements[child_idx].max_size_height), self.elements[child_idx].min_size_height_or_leftover_vert);
-                                },
-                            }
-                            max_vert_space_used = @max(max_vert_space_used, self.elements[child_idx].min_height_from_children_or_final_height);
-                        }
-                        const leftover_vert = free_vert_space - max_vert_space_used;
-                        self.elements[parent_idx].min_size_height_or_leftover_vert = leftover_vert;
-                    },
-                }
-            }
-            var free_space: f32 = self.elements[parent_idx].max_size_height - self.elements[parent_idx].min_height_from_children_or_final_height;
-            var total_grow_weight: f32 = 0;
-
-            while (child_idx <= self.elements[parent_idx].last_child) : (child_idx += 1) {
-                if (self.elements[child_idx].is_floating) continue;
-                switch (self.elements[parent_idx].grow_mode_h) {
-                    .EXACT, .SHRINK => {
-                        self.elements[parent_idx].min_height_from_children_or_final_height = self.elements[parent_idx].min_size_height_or_leftover_vert;
-                    },
-                    .GROW => {
-                        total_grow_weight += self.elements[child_idx].grow_ratio_h;
-                    },
-                }
-            }
-            child_idx = self.elements[parent_idx].first_child;
-            while (child_idx <= self.elements[parent_idx].last_child) : (child_idx += 1) {
-                if (self.elements[child_idx].is_floating or self.elements[child_idx].grow_mode_h != .GROW) continue;
-                var free_space_used = free_space * (self.elements[child_idx].grow_ratio_h / total_grow_weight);
-                var new_height = self.elements[child_idx].min_size_height_or_leftover_vert + free_space_used;
-                new_height = @min(new_height, self.elements[child_idx].max_size_height);
-                free_space_used = new_height - self.elements[child_idx].min_size_height_or_leftover_vert;
-                free_space -= free_space_used;
-                self.elements[child_idx].min_height_from_children_or_final_height = new_height;
             }
         }
     }
