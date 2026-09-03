@@ -53,6 +53,7 @@ const DummyAlloc = Root.DummyAllocator;
 const dummy_alloc = DummyAlloc.allocator_panic_free_noop;
 
 const assert_with_reason = Assert.assert_with_reason;
+const assert_with_reason_debug_only = Assert.assert_with_reason_debug_only;
 const assert_unreachable = Assert.assert_unreachable;
 const assert_unreachable_err = Assert.assert_unreachable_err;
 const num_cast = Cast.num_cast;
@@ -188,7 +189,6 @@ pub const SizeLimits = struct {
 
 pub const GrowMode = enum(u2) {
     EXACT,
-    SHRINK,
     GROW,
 };
 
@@ -556,57 +556,34 @@ pub const LayoutRequest = struct {
     use_flow_mode: bool = false,
 };
 
-pub const PointerState = struct {
-    pos: Pos = .ZERO,
-    buttons: PointerButtons = .{},
-};
-
-pub const PointerButtons = struct {
-    left: PointerClickState = .NOT_PRESSED,
-    right: PointerClickState = .NOT_PRESSED,
-};
-
-pub const PointerStateOverElementInProcess = struct {
-    buttons: PointerButtons = .{},
-    is_over: bool = false,
-};
-
-pub const PointerStateOverElementFinal = struct {
-    buttons: PointerButtons = .{},
-    abs_pos: Pos,
-    rel_pos: Pos,
-    is_over: bool = false,
-};
-
 const NULL_IDX: u32 = 0xFFFFFFFF;
 
-const MinLeftoverFinal = struct {
-    min_self_or_leftover: Size,
-    min_children_or_final: Size = .ZERO,
+const MinSize = struct {
+    self: Size = .ZERO,
+    children: Size = .ZERO,
 };
 
-const MinLeftoverFinal_OR_FinalAABB = union {
-    size: MinLeftoverFinal,
+const MinSize_OR_FinalAABB = union {
+    min_size: MinSize,
     final_aabb: AABB,
-    final_rect: Rect,
 
-    pub fn new(min_x: f32, min_y: f32) MinLeftoverFinal_OR_FinalAABB {
-        return MinLeftoverFinal_OR_FinalAABB{ .size = .{ .min_self_or_leftover = .new(min_x, min_y) } };
+    pub fn new(min_x: f32, min_y: f32) MinSize_OR_FinalAABB {
+        return MinSize_OR_FinalAABB{ .min_size = .{ .self = .new(min_x, min_y) } };
     }
 };
 
-const MaxSizeGrowRatio = struct {
-    max: Size,
-    ratio: Size,
+const MaxSize = struct {
+    value: Size = .INF,
+    ratio: Size = .ZERO,
 };
 
-const MaxSizeGrowRatio_OR_FinalClipAABB = union {
-    size_grow: MaxSizeGrowRatio,
+const MaxSize_OR_FinalClipAABB = union {
+    max_size: MaxSize,
     final_clip_aabb: AABB,
 
-    pub fn new(max_x: f32, max_y: f32, grow_x: f32, grow_y: f32) MaxSizeGrowRatio_OR_FinalClipAABB {
-        return MaxSizeGrowRatio_OR_FinalClipAABB{ .size_grow = .{
-            .max = .new(max_x, max_y),
+    pub fn new(max_x: f32, max_y: f32, grow_x: f32, grow_y: f32) MaxSize_OR_FinalClipAABB {
+        return MaxSize_OR_FinalClipAABB{ .max_size = .{
+            .value = .new(max_x, max_y),
             .ratio = .new(grow_x, grow_y),
         } };
     }
@@ -628,14 +605,14 @@ const StackReallocator = Traverse.StackReallocator;
 
 const LayoutElement = struct {
     requester: LayoutRequester,
-    _ms_fbb: MinLeftoverFinal_OR_FinalAABB,
-    _mg_fcbb: MaxSizeGrowRatio_OR_FinalClipAABB,
+    _min_or_aabb: MinSize_OR_FinalAABB,
+    _max_or_clip_aabb: MaxSize_OR_FinalClipAABB,
     relative_pos: Pos = .ZERO,
     padding: Padding,
     child_gaps: Gap,
     first_inline_child: u32 = NULL_IDX,
     first_floating_child: u32 = NULL_IDX,
-    first_axis_line: u32 = NULL_IDX,
+    first_axis_line: AxisLine = .{},
     num_inline_children: u32 = 0,
     num_axis_lines: u32 = 0,
     next_sibling: u32 = NULL_IDX,
@@ -659,93 +636,60 @@ const LayoutElement = struct {
     pub inline fn has_children(self: LayoutElement) bool {
         return self.first_child != NULL_IDX;
     }
-    pub inline fn get_children(self: LayoutElement, manager_list: []LayoutElement) SiblingSlice {
-        assert_with_reason(self.has_children(), @src(), "no children on element", .{});
-        const num_children = (self.first_child - self.last_child) + 1;
-        return SiblingSlice{
-            .first_sibling_abs_idx = self.first_child,
-            .len = num_children,
-            .last_to_first = manager_list.ptr + self.last_child,
-        };
+    // pub inline fn get_children(self: LayoutElement, manager_list: []LayoutElement) SiblingSlice {
+    //     assert_with_reason(self.has_children(), @src(), "no children on element", .{});
+    //     const num_children = (self.first_child - self.last_child) + 1;
+    //     return SiblingSlice{
+    //         .first_sibling_abs_idx = self.first_child,
+    //         .len = num_children,
+    //         .last_to_first = manager_list.ptr + self.last_child,
+    //     };
+    // }
+    inline fn set_min_size_self(self: *LayoutElement, comptime AXIS: Axis, val: f32) void {
+        self._min_or_aabb.min_size.self.set(AXIS, val);
     }
-    inline fn set_axis_line_idx_on_parent(self: *LayoutElement, val: u32) void {
-        self.num_floating_siblings_on_axis_line = val;
-    }
-    inline fn get_axis_line_idx_on_parent(self: *LayoutElement) u32 {
-        return self.num_floating_siblings_on_axis_line;
-    }
-    inline fn set_axis_line_num_sibs_on_parent(self: *LayoutElement, val: u32) void {
-        self.num_total_siblings_on_sib_axis_line = val;
-    }
-    inline fn get_axis_line_num_sibs_on_parent(self: *LayoutElement) u32 {
-        return self.num_total_siblings_on_sib_axis_line;
-    }
-    inline fn set_axis_line_leftover_space_on_parent(self: *LayoutElement, val: f32) void {
-        self.leftover_space_on_sib_axis_line = val;
-    }
-    inline fn get_axis_line_leftover_space_on_parent(self: *LayoutElement) f32 {
-        return self.leftover_space_on_sib_axis_line;
-    }
-    inline fn set_min_self_size(self: *LayoutElement, comptime AXIS: Axis, val: f32) void {
-        self._ms_fbb.size.min_self_or_leftover.set(AXIS, val);
-    }
-    inline fn get_min_self_size(self: LayoutElement, comptime AXIS: Axis) f32 {
-        return self._ms_fbb.size.min_self_or_leftover.get(AXIS);
+    inline fn get_min_size_self(self: LayoutElement, comptime AXIS: Axis) f32 {
+        return self._min_or_aabb.min_size.self.get(AXIS);
     }
     inline fn update_min_size_if_larger(self: *LayoutElement, comptime AXIS: Axis, val: f32) void {
-        self._ms_fbb.size.min_self_or_leftover.set(AXIS, @max(self._ms_fbb.size.min_self_or_leftover.get(AXIS), val));
-    }
-    inline fn set_space_leftover(self: *LayoutElement, comptime AXIS: Axis, val: f32) void {
-        self._ms_fbb.size.min_self_or_leftover.set(AXIS, val);
-    }
-    inline fn get_space_leftover(self: LayoutElement, comptime AXIS: Axis) f32 {
-        return self._ms_fbb.size.min_self_or_leftover.get(AXIS);
-    }
-    inline fn set_min_children(self: *LayoutElement, comptime AXIS: Axis, val: f32) void {
-        self._ms_fbb.size.min_children_or_final.set(AXIS, val);
+        self._min_or_aabb.min_size.self.set(AXIS, @max(self._min_or_aabb.min_size.self.get(AXIS), val));
     }
     inline fn add_to_min_children_size(self: *LayoutElement, comptime AXIS: Axis, val: f32) void {
-        self._ms_fbb.size.min_children_or_final.set(AXIS, self._ms_fbb.size.min_children_or_final.get(AXIS) + val);
+        self._min_or_aabb.min_size.children.set(AXIS, self._min_or_aabb.min_size.children.get(AXIS) + val);
     }
     inline fn update_max_of_min_children_size(self: *LayoutElement, comptime AXIS: Axis, val: f32) void {
-        self._ms_fbb.size.min_children_or_final.set(AXIS, @max(self._ms_fbb.size.min_children_or_final.get(AXIS), val));
+        self._min_or_aabb.min_size.children.set(AXIS, @max(self._min_or_aabb.min_size.children.get(AXIS), val));
     }
-    inline fn get_min_children(self: LayoutElement, comptime AXIS: Axis) f32 {
-        return self._ms_fbb.size.min_children_or_final.get(AXIS);
+    inline fn get_min_size_from_children(self: LayoutElement, comptime AXIS: Axis) f32 {
+        return self._min_or_aabb.min_size.children.get(AXIS);
     }
-    inline fn set_final_size(self: *LayoutElement, comptime AXIS: Axis, val: f32) void {
-        self._ms_fbb.size.min_children_or_final.set(AXIS, val);
-    }
-    inline fn get_final_size(self: LayoutElement, comptime AXIS: Axis) f32 {
-        return self._ms_fbb.size.min_children_or_final.get(AXIS);
-    }
-    inline fn set_max(self: *LayoutElement, comptime AXIS: Axis, val: f32) void {
-        self._mg_fcbb.size_grow.max.set(AXIS, val);
+    inline fn set_max_size(self: *LayoutElement, comptime AXIS: Axis, val: f32) void {
+        self._max_or_clip_aabb.max_size.value.set(AXIS, val);
     }
     inline fn get_max_size(self: LayoutElement, comptime AXIS: Axis) f32 {
-        return self._mg_fcbb.size_grow.max.get(AXIS);
+        return self._max_or_clip_aabb.max_size.value.get(AXIS);
     }
     inline fn set_grow_ratio(self: *LayoutElement, comptime AXIS: Axis, val: f32) void {
-        self._mg_fcbb.size_grow.ratio.set(AXIS, val);
+        self._max_or_clip_aabb.max_size.ratio.set(AXIS, val);
     }
     inline fn get_grow_ratio(self: LayoutElement, comptime AXIS: Axis) f32 {
-        return self._mg_fcbb.size_grow.ratio.get(AXIS);
+        return self._max_or_clip_aabb.max_size.ratio.get(AXIS);
     }
     inline fn set_final_aabb(self: *LayoutElement, parent_abs: Pos) void {
-        const final_size = self._ms_fbb.size.min_children_or_final;
+        const final_size = self._min_or_aabb.min_size.self;
         const abs_pos = parent_abs.add(self.relative_pos);
-        self._ms_fbb.final_aabb = AABB.new_from_pos_size(abs_pos, final_size);
+        self._min_or_aabb.final_aabb = AABB.new_from_pos_size(abs_pos, final_size);
     }
     inline fn set_clip_aabb(self: *LayoutElement, parent_clip: AABB) void {
         const overlap_aabb, const not_completely_clipped = self.get_aabb().overlap_area_and_overlap_greater_than_zero(parent_clip);
-        self._mg_fcbb.final_clip_aabb = overlap_aabb;
+        self._max_or_clip_aabb.final_clip_aabb = overlap_aabb;
         self.completely_clipped = !not_completely_clipped;
     }
     pub inline fn get_aabb(self: LayoutElement) AABB {
-        return self._ms_fbb.final_aabb;
+        return self._min_or_aabb.final_aabb;
     }
     pub inline fn get_clip_aabb(self: LayoutElement) AABB {
-        return self._mg_fcbb.final_clip_aabb;
+        return self._max_or_clip_aabb.final_clip_aabb;
     }
     inline fn get_grow_mode(self: LayoutElement, comptime AXIS: Axis) GrowMode {
         switch (comptime AXIS) {
@@ -811,111 +755,165 @@ const AxisStage = struct {
         };
     }
 };
+const AxisStageFlow = struct {
+    AXIS: Axis,
+    STAGE: LayoutStage,
+    FLOW: bool,
+
+    pub inline fn new(comptime AXIS: Axis, comptime STAGE: LayoutStage, comptime FLOW: bool) AxisStageFlow {
+        return AxisStageFlow{
+            .AXIS = AXIS,
+            .STAGE = STAGE,
+            .FLOW = FLOW,
+        };
+    }
+};
+
+const CombineMode = enum {
+    ADD_MIN_SIZE_AND_GAP,
+    UPDATE_MAX_OF_MIN_SIZE,
+};
+const WrapMode = enum {
+    NO_WRAP,
+    ALLOW_WRAP,
+};
+
+const AxisLinePass = enum {
+    FIRST_PASS,
+    SECOND_PASS,
+};
+
+const HANDLE_COMBINE_STAGE = enum {
+    FINISH_LINE_AND_POSSIBLY_START_NEW,
+    FINISH_LINE_AND_END,
+    START_NEW_LINE,
+    ADD_CURRENT_CHILD_TO_CURRENT_LINE,
+};
 
 pub const AxisLine = struct {
     first_elem: u32 = NULL_IDX,
     num_elems: u32 = 0,
     next_line: u32 = NULL_IDX,
     min_size: Size = .ZERO,
+    max_secondary_grow: f32 = 0,
+
+    pub fn init_with_negative_gap(gap: f32, comptime PRIMARY_AXIS: Axis) AxisLine {
+        var size: Size = .ZERO;
+        size.set(PRIMARY_AXIS, -gap);
+        size.set(PRIMARY_AXIS.OPPOSITE(), 0);
+        return AxisLine{
+            .min_size = size,
+        };
+    }
+
+    pub fn new(first_elem: u32, num_elems: u32, min: f32, comptime AXIS: Axis) AxisLine {
+        var min_size = Size{};
+        min_size.set(AXIS, min);
+        return AxisLine{
+            .first_elem = first_elem,
+            .num_elems = num_elems,
+            .min_size = min_size,
+        };
+    }
 };
 
-const Action = struct {
-    fn set_root_final_size(elems: Elems, root_idx: u32, comptime AXIS: axis) void {
-        const root = get_elem_ptr(elems, root_idx);
-        const final_size = @min(root.get_min_self_size(AXIS), root.get_max_size(AXIS));
-        root.set_final_size(AXIS, final_size);
-    }
+// const Action = struct {
+//     fn set_root_final_size(elems: Elems, root_idx: u32, comptime AXIS: axis) void {
+//         const root = get_elem_ptr(elems, root_idx);
+//         const final_size = @min(root.get_min_size_self(AXIS), root.get_max_size(AXIS));
+//         root.set_final_size(AXIS, final_size);
+//     }
 
-    fn propagate_min_size_to_parent_y(nodes_: Elems, idx: u32, _: void, comptime phase: LayoutStage) Elems {
-        const child = get_elem_ptr(nodes, idx);
-        if (child.parent_idx == NULL_IDX) return nodes;
-        const parent = get_parent_ptr(nodes, idx);
-        const gap = parent.child_gaps.vertical;
-        if (parent.layout_dir.primary_dir() == .Y and !parent.is_flow_virtual) {
-            var size = child.get_min_self_size(.Y);
-            if (parent.first_inline_child != idx) {
-                size += gap;
-            }
-            parent.add_to_min_children_size(.Y, size);
-        } else {
-            const size = child.get_min_self_size(.Y);
-            parent.update_max_of_min_children_size(.Y, size);
-        }
-        return nodes;
-    }
-    fn fit_and_expand_children_to_fill_parent_y(nodes_: Elems, idx: u32, manager: *LayoutManager, comptime phase: LayoutStage) Elems {
-        var nodes = nodes_;
-        const parent = get_elem_ptr(nodes, idx);
-        if (phase == .PRIMARY_STAGE and parent.is_flow_virtual) {} else {}
-        return nodes;
-    }
-    fn recheck_min_y_from_final_x(nodes_: Elems, idx: u32, _: void) Elems {
-        var nodes = nodes_;
-        return nodes;
-    }
-    fn recheck_min_x_from_final_y(nodes_: Elems, idx: u32, _: void) Elems {
-        var nodes = nodes_;
-        return nodes;
-    }
-    fn position_and_align_element(nodes_: Elems, idx: u32, _: void) Elems {
-        var nodes = nodes_;
-        return nodes;
-    }
-    fn check_aabb_overlap(nodes: Elems, idx: u32, context: *OverlapCheck) Elems {
-        const elem = get_elem_ptr(nodes, idx);
-        context.did_overlap = get_elem_ptr(nodes, idx).get_clip_aabb().overlaps(context.aabb);
-        return nodes;
-    }
+//     fn propagate_min_size_to_parent_y(nodes: Elems, idx: u32, _: void, comptime phase: LayoutStage) Elems {
+//         const child = get_elem_ptr(nodes, idx);
+//         if (child.parent_idx == NULL_IDX) return nodes;
+//         const parent = get_parent_ptr(nodes, idx);
+//         const gap = parent.child_gaps.vertical;
+//         if (parent.layout_dir.primary_dir() == .Y and !parent.is_flow_virtual) {
+//             var size = child.get_min_size_self(.Y);
+//             if (parent.first_inline_child != idx) {
+//                 size += gap;
+//             }
+//             parent.add_to_min_children_size(.Y, size);
+//         } else {
+//             const size = child.get_min_size_self(.Y);
+//             parent.update_max_of_min_children_size(.Y, size);
+//         }
+//         return nodes;
+//     }
+//     fn fit_and_expand_children_to_fill_parent_y(nodes_: Elems, idx: u32, manager: *LayoutManager, comptime phase: LayoutStage) Elems {
+//         var nodes = nodes_;
+//         const parent = get_elem_ptr(nodes, idx);
+//         if (phase == .PRIMARY_STAGE and parent.is_flow_virtual) {} else {}
+//         return nodes;
+//     }
+//     fn recheck_min_y_from_final_x(nodes_: Elems, idx: u32, _: void) Elems {
+//         var nodes = nodes_;
+//         return nodes;
+//     }
+//     fn recheck_min_x_from_final_y(nodes_: Elems, idx: u32, _: void) Elems {
+//         var nodes = nodes_;
+//         return nodes;
+//     }
+//     fn position_and_align_element(nodes_: Elems, idx: u32, _: void) Elems {
+//         var nodes = nodes_;
+//         return nodes;
+//     }
+//     fn check_aabb_overlap(nodes: Elems, idx: u32, context: *OverlapCheck) Elems {
+//         const elem = get_elem_ptr(nodes, idx);
+//         context.did_overlap = get_elem_ptr(nodes, idx).get_clip_aabb().overlaps(context.aabb);
+//         return nodes;
+//     }
 
-    //UTILS
-    inline fn get_elem_ptr(nodes: Elems, idx: u32) *LayoutElement {
-        return &nodes.ptr[idx];
-    }
-    inline fn get_elem(nodes: Elems, idx: u32) LayoutElement {
-        return nodes.ptr[idx];
-    }
-    inline fn has_parent(nodes: Elems, idx: u32) bool {
-        return nodes.ptr[idx].parent_idx != NULL_IDX;
-    }
-    inline fn get_parent_ptr(nodes: Elems, idx: u32) *LayoutElement {
-        return &nodes.ptr[nodes.ptr[idx].parent_idx];
-    }
-    inline fn get_parent(nodes: Elems, idx: u32) LayoutElement {
-        return nodes.ptr[nodes.ptr[idx].parent_idx];
-    }
-    inline fn get_next_sibling(nodes: Elems, idx: u32) u32 {
-        return nodes.ptr[idx].next_sibling;
-    }
-    // inline fn set_next_sibling(nodes: Nodes, idx: u32, next: u32) void {
-    //     nodes.ptr[idx].next_sibling = void;
-    // }
-    inline fn split_virtual_sibling(elems_: Elems, elem_idx: u32, elem: *LayoutElement, parent: *LayoutElement, manager: *LayoutManager) Elems {
-        var elems = elems_realloc_if_needed_for_1_more(elems_, manager);
-        if (manager.err) return elems;
-        const next_idx = elems.len;
-        elems.len += 1;
-        elem.next_sibling = next_idx;
-        var cloned_elem = elem.*;
-        elems.ptr[next_idx] = sib_info;
-    }
-    inline fn elems_realloc_if_needed_for_1_more(elems_: Elems, manager: *LayoutManager) Elems {
-        var elems = elems_;
-        if (elems.len >= elems.cap) {
-            switch (manager.elem_ralloc) {
-                .STATIC_MEM => {
-                    manager.err = Error.element_mem_out_of_space;
-                },
-                .ALLOW_MEM_REALLOC => |pkg| {
-                    const err: ?Utils.Alloc.AllocErr = Utils.Alloc.smart_alloc_ptr_ptrs(pkg.alloc, &elems.ptr, &elems.len, &elems.cap, elems.len + 1, pkg.settings, .{ .ERROR_MODE = .RETURN_ERRORS });
-                    if (err) |e| {
-                        manager.err = Error.element_mem_reallocation_error;
-                    }
-                },
-            }
-        }
-        return elems;
-    }
-};
+//     //UTILS
+//     inline fn get_elem_ptr(nodes: Elems, idx: u32) *LayoutElement {
+//         return &nodes.ptr[idx];
+//     }
+//     inline fn get_elem(nodes: Elems, idx: u32) LayoutElement {
+//         return nodes.ptr[idx];
+//     }
+//     inline fn has_parent(nodes: Elems, idx: u32) bool {
+//         return nodes.ptr[idx].parent_idx != NULL_IDX;
+//     }
+//     inline fn get_parent_ptr(nodes: Elems, idx: u32) *LayoutElement {
+//         return &nodes.ptr[nodes.ptr[idx].parent_idx];
+//     }
+//     inline fn get_parent(nodes: Elems, idx: u32) LayoutElement {
+//         return nodes.ptr[nodes.ptr[idx].parent_idx];
+//     }
+//     inline fn get_next_sibling(nodes: Elems, idx: u32) u32 {
+//         return nodes.ptr[idx].next_sibling;
+//     }
+//     // inline fn set_next_sibling(nodes: Nodes, idx: u32, next: u32) void {
+//     //     nodes.ptr[idx].next_sibling = void;
+//     // }
+//     inline fn split_virtual_sibling(elems_: Elems, elem_idx: u32, elem: *LayoutElement, parent: *LayoutElement, manager: *LayoutManager) Elems {
+//         var elems = elems_realloc_if_needed_for_1_more(elems_, manager);
+//         if (manager.err) return elems;
+//         const next_idx = elems.len;
+//         elems.len += 1;
+//         elem.next_sibling = next_idx;
+//         var cloned_elem = elem.*;
+//         elems.ptr[next_idx] = sib_info;
+//     }
+//     inline fn elems_realloc_if_needed_for_1_more(elems_: Elems, manager: *LayoutManager) Elems {
+//         var elems = elems_;
+//         if (elems.len >= elems.cap) {
+//             switch (manager.elem_ralloc) {
+//                 .STATIC_MEM => {
+//                     manager.err = Error.element_mem_out_of_space;
+//                 },
+//                 .ALLOW_MEM_REALLOC => |pkg| {
+//                     const err: ?Utils.Alloc.AllocErr = Utils.Alloc.smart_alloc_ptr_ptrs(pkg.alloc, &elems.ptr, &elems.len, &elems.cap, elems.len + 1, pkg.settings, .{ .ERROR_MODE = .RETURN_ERRORS });
+//                     if (err) |e| {
+//                         manager.err = Error.element_mem_reallocation_error;
+//                     }
+//                 },
+//             }
+//         }
+//         return elems;
+//     }
+// };
 
 pub const LayoutDrivingAxis = enum(u1) {
     /// Width is calculated first, then elements may choose to recalculate
@@ -935,7 +933,7 @@ pub const LayoutDrivingAxis = enum(u1) {
 
 pub const LayoutStage = enum {
     PRIMARY_STAGE,
-    SECONDARY_PHASE,
+    SECONDARY_STAGE,
 };
 
 const Lines = struct {
@@ -1059,8 +1057,8 @@ pub const LayoutManager = struct {
         }
     }
 
-    inline fn get_elem_ptr(elems: Elems, idx: u32) *LayoutElement {
-        return &elems.ptr[idx];
+    inline fn get_elem_ptr(self: *LayoutManager, idx: u32) *LayoutElement {
+        return &self.elems.ptr[idx];
     }
     inline fn get_line_ptr(self: *LayoutManager, idx: u32) *AxisLine {
         return &self.lines.ptr[idx];
@@ -1080,12 +1078,34 @@ pub const LayoutManager = struct {
         const ptr = self.get_elem_ptr(idx);
         return .{ ptr, idx };
     }
-    fn append_line_slot(self: *LayoutManager) Error!struct { *AxisLine, u32 } {
+    fn append_line_comps(self: *LayoutManager, first_elem: u32, num_elems: u32, min_size: f32, comptime AXIS: Axis) Error!struct { *AxisLine, u32 } {
         try self.grow_lines_if_needed(1);
         const idx = self.lines.len;
         self.lines.len += 1;
         self.real_max_lines = @max(self.real_max_lines, self.lines.len);
         const ptr = self.get_line_ptr(idx);
+        ptr.first_elem = first_elem;
+        ptr.num_elems = num_elems;
+        ptr.min_size.set(AXIS, min_size);
+        ptr.next_line = NULL_IDX;
+        return .{ ptr, idx };
+    }
+    fn append_line(self: *LayoutManager, line: AxisLine) Error!u32 {
+        try self.grow_lines_if_needed(1);
+        const idx = self.lines.len;
+        self.lines.len += 1;
+        self.real_max_lines = @max(self.real_max_lines, self.lines.len);
+        const ptr = self.get_line_ptr(idx);
+        ptr.* = line;
+        return idx;
+    }
+    fn append_line_get_ptr(self: *LayoutManager, line: AxisLine) Error!struct { *AxisLine, u32 } {
+        try self.grow_lines_if_needed(1);
+        const idx = self.lines.len;
+        self.lines.len += 1;
+        self.real_max_lines = @max(self.real_max_lines, self.lines.len);
+        const ptr = self.get_line_ptr(idx);
+        ptr.* = line;
         return .{ ptr, idx };
     }
     fn append_stack_slot(self: *LayoutManager) Error!struct { *StackFrame, u32 } {
@@ -1159,15 +1179,14 @@ pub const LayoutManager = struct {
                 self.err = Error.ELEMENT_MEMORY_OUT_OF_SPACE;
             }
         }
-        assert_with_reason(self.elem_len < MAX_NUM_ELEMENTS, @src(), "out of space for layout elements: increase MAX_NUM_ELEMENTS comptime input to at least {d}", .{MAX_NUM_ELEMENTS + 1});
         const req: LayoutRequest = requester.get_layout_request();
         assert_with_reason(parent != NULL_IDX or (req.size.width.mode == .EXACT and req.size.height.mode == .EXACT), @src(), "the root element must have `size.width.mode == .EXACT` and `size.height.mode == .EXACT`", .{});
         const new_depth = if (parent == NULL_IDX) 0 else (self.elements[parent].depth + 1);
         self.real_max_depth = @max(new_depth, self.real_max_depth);
         const elem = LayoutElement{
             .requester = requester,
-            ._ms_fbb = .new(req.size.width.min, req.size.height.min),
-            ._mg_fcbb = .new(req.size.width.max, req.size.height.max, req.size.width.ratio, req.size.height.ratio),
+            ._min_or_aabb = .new(req.size.width.min, req.size.height.min),
+            ._max_or_clip_aabb = .new(req.size.width.max, req.size.height.max, req.size.width.ratio, req.size.height.ratio),
             .padding = req.padding,
             .child_gaps = req.child_gaps,
             .parent_idx = parent,
@@ -1218,85 +1237,213 @@ pub const LayoutManager = struct {
             .X => {
                 self.elems, self.stack = try Traverse.do_action_on_all_nodes(self.elems, self.stack, self.stack_reallocator(), .CHILDREN_FIRST, 0, self, AxisStage.mode(.X, .PRIMARY_STAGE), .COMPTIME_FN_PTR, Action.propagate_min_size_to_parent, void{});
                 self.elems, self.stack = try Traverse.do_action_on_all_nodes(self.elems, self.stack, self.stack_reallocator(), .PARENTS_FIRST, 0, self, AxisStage.mode(.X, .PRIMARY_STAGE), .COMPTIME_FN_PTR, Action.fit_and_expand_children_to_fill_parent, void{});
-                self.elems, self.stack = try Traverse.do_action_on_all_nodes(self.elems, self.stack, self.stack_reallocator(), .PARENTS_FIRST, 0, self, AxisStage.mode(.Y, .SECONDARY_PHASE), .COMPTIME_FN_PTR, Action.recheck_min_y_from_final_x, void{});
-                self.elems, self.stack = try Traverse.do_action_on_all_nodes(self.elems, self.stack, self.stack_reallocator(), .CHILDREN_FIRST, 0, self, AxisStage.mode(.Y, .SECONDARY_PHASE), .COMPTIME_FN_PTR, Action.propagate_min_size_to_parent_y, void{});
-                self.elems, self.stack = try Traverse.do_action_on_all_nodes(self.elems, self.stack, self.stack_reallocator(), .PARENTS_FIRST, 0, self, AxisStage.mode(.Y, .SECONDARY_PHASE), .COMPTIME_FN_PTR, Action.fit_and_expand_children_to_fill_parent_y, void{});
+                self.elems, self.stack = try Traverse.do_action_on_all_nodes(self.elems, self.stack, self.stack_reallocator(), .PARENTS_FIRST, 0, self, AxisStage.mode(.Y, .SECONDARY_STAGE), .COMPTIME_FN_PTR, Action.recheck_min_y_from_final_x, void{});
+                self.elems, self.stack = try Traverse.do_action_on_all_nodes(self.elems, self.stack, self.stack_reallocator(), .CHILDREN_FIRST, 0, self, AxisStage.mode(.Y, .SECONDARY_STAGE), .COMPTIME_FN_PTR, Action.propagate_min_size_to_parent_y, void{});
+                self.elems, self.stack = try Traverse.do_action_on_all_nodes(self.elems, self.stack, self.stack_reallocator(), .PARENTS_FIRST, 0, self, AxisStage.mode(.Y, .SECONDARY_STAGE), .COMPTIME_FN_PTR, Action.fit_and_expand_children_to_fill_parent_y, void{});
             },
             .Y => {
                 self.elems, self.stack = try Traverse.do_action_on_all_nodes(self.elems, self.stack, self.stack_reallocator(), .CHILDREN_FIRST, 0, self, AxisStage.mode(.Y, .PRIMARY_STAGE), .COMPTIME_FN_PTR, Action.propagate_min_size_to_parent, void{});
                 self.elems, self.stack = try Traverse.do_action_on_all_nodes(self.elems, self.stack, self.stack_reallocator(), .PARENTS_FIRST, 0, self, AxisStage.mode(.Y, .PRIMARY_STAGE), .COMPTIME_FN_PTR, Action.fit_and_expand_children_to_fill_parent, void{});
-                self.elems, self.stack = try Traverse.do_action_on_all_nodes(self.elems, self.stack, self.stack_reallocator(), .PARENTS_FIRST, 0, self, AxisStage.mode(.X, .SECONDARY_PHASE), .COMPTIME_FN_PTR, Action.recheck_min_x_from_final_y, void{});
-                self.elems, self.stack = try Traverse.do_action_on_all_nodes(self.elems, self.stack, self.stack_reallocator(), .CHILDREN_FIRST, 0, self, AxisStage.mode(.X, .SECONDARY_PHASE), .COMPTIME_FN_PTR, Action.propagate_min_size_to_parent_x, void{});
-                self.elems, self.stack = try Traverse.do_action_on_all_nodes(self.elems, self.stack, self.stack_reallocator(), .PARENTS_FIRST, 0, self, AxisStage.mode(.X, .SECONDARY_PHASE), .COMPTIME_FN_BODY, Action.fit_and_expand_children_to_fill_parent_x, void{});
+                self.elems, self.stack = try Traverse.do_action_on_all_nodes(self.elems, self.stack, self.stack_reallocator(), .PARENTS_FIRST, 0, self, AxisStage.mode(.X, .SECONDARY_STAGE), .COMPTIME_FN_PTR, Action.recheck_min_x_from_final_y, void{});
+                self.elems, self.stack = try Traverse.do_action_on_all_nodes(self.elems, self.stack, self.stack_reallocator(), .CHILDREN_FIRST, 0, self, AxisStage.mode(.X, .SECONDARY_STAGE), .COMPTIME_FN_PTR, Action.propagate_min_size_to_parent_x, void{});
+                self.elems, self.stack = try Traverse.do_action_on_all_nodes(self.elems, self.stack, self.stack_reallocator(), .PARENTS_FIRST, 0, self, AxisStage.mode(.X, .SECONDARY_STAGE), .COMPTIME_FN_BODY, Action.fit_and_expand_children_to_fill_parent_x, void{});
             },
         }
         self.elems, self.stack = try Traverse.do_action_on_all_nodes(self.elems, self.stack, self.stack_reallocator(), .PARENTS_FIRST, 0, self, void{}, .COMPTIME_FN_PTR, Action.position_and_align_element, void{});
     }
 
-    fn propagate_min_size_to_parent(elems: Elems, idx: u32, _: *LayoutManager, comptime CT: AxisStage) Elems {
+    fn propagate_min_size_to_parent(elems: Elems, idx: u32, _: *LayoutManager, comptime CT: AxisStage) anyerror!Elems {
         const child = get_elem_ptr(elems, idx);
         child.add_to_min_children_size(CT.AXIS, child.padding.get(CT.AXIS));
-        child.set_min_self_size(CT.AXIS, @max(child.get_min_self_size(CT.AXIS), child.get_min_children(CT.AXIS)));
+        child.set_min_size_self(CT.AXIS, @max(child.get_min_size_self(CT.AXIS), child.get_min_size_from_children(CT.AXIS)));
         if (child.is_floating or child.parent_idx == NULL_IDX) return elems;
         const parent = get_parent_ptr(elems, idx);
         const gap = parent.child_gaps.get(CT.AXIS);
         if (parent.primary_child_axis == CT.AXIS and !parent.use_flow_mode) {
-            var add_min_size = child.get_min_self_size(CT.AXIS);
+            var add_min_size = child.get_min_size_self(CT.AXIS);
             if (parent.first_inline_child != idx) {
                 add_min_size += gap;
             }
             parent.add_to_min_children_size(CT.AXIS, add_min_size);
         } else {
-            const min_size = child.get_min_self_size(CT.AXIS);
+            const min_size = child.get_min_size_self(CT.AXIS);
             parent.update_max_of_min_children_size(CT.AXIS, min_size);
         }
         return elems;
     }
 
-    fn fit_and_expand_children_to_fill_parent(nodes_: Elems, idx: u32, manager: *LayoutManager, comptime CT: AxisStage) Elems {
-        var nodes = nodes_;
-        const parent = get_elem_ptr(nodes, idx);
-        if (parent.is_floating or parent.parent_idx == NULL_IDX) {
-            const final_size = @min(parent.get_min_self_size(CT.AXIS), parent.get_max_size(CT.AXIS));
-            parent.set_final_size(CT.AXIS, final_size);
+    fn combine_all_children_with_axis_lines(self: *LayoutManager, parent: *LayoutElement, comptime CT: AxisStage, comptime COMBINE_MODE: CombineMode, comptime WRAP_MODE: WrapMode) anyerror!void {
+        const max_size_for_children = parent.get_min_size_self(CT.AXIS) - parent.padding.get(CT.AXIS);
+        var child: *LayoutElement = undefined;
+        var child_idx = parent.first_inline_child;
+        const gap = parent.child_gaps.get(Axis);
+        if (CT.STAGE == .PRIMARY_STAGE) {
+            parent.first_axis_line = AxisLine.init_with_negative_gap(gap, CT.AXIS);
         }
-        const final_size_with_pad = parent.get_final_size(CT.AXIS);
-        const final_size_for_children = final_size_with_pad - parent.padding.get(CT.AXIS);
+        var line = &parent.first_axis_line;
+        var children_left_on_parent = parent.num_inline_children;
+        var children_left_on_line = line.num_elems;
+        var more_children_on_parent = children_left_on_parent > 0;
+        var more_children_on_line = true;
+        while (more_children_on_parent) {
+            children_left_on_parent -= 1;
+            child = self.get_elem_ptr(child_idx);
+            more_children_on_parent = children_left_on_parent > 0;
+            if (CT.STAGE == .SECONDARY_STAGE) {
+                children_left_on_line -= 1;
+                more_children_on_line = children_left_on_line > 0;
+            }
+            line = try self.combine_child_with_axis_line(line, child, child_idx, more_children_on_parent, more_children_on_line, gap, max_size_for_children, CT.AXIS, COMBINE_MODE, WRAP_MODE, CT.STAGE);
+            child_idx = child.next_sibling;
+        }
+    }
+
+    fn combine_child_with_axis_line(self: *LayoutManager, line: *AxisLine, child: *LayoutElement, child_idx: u32, more_children_on_parent: bool, more_children_on_line: bool, gap: f32, max_size: f32, comptime AXIS: Axis, comptime COMBINE_MODE: CombineMode, comptime WRAP_MODE: WrapMode, comptime STAGE: LayoutStage) anyerror!*AxisLine {
+        var size_if_combine = line.min_size.get(AXIS);
+        var next_line = line;
+        const child_size = child.get_min_size_self(AXIS);
+        switch (comptime COMBINE_MODE) {
+            .ADD_MIN_SIZE_AND_GAP => {
+                size_if_combine += child_size + gap;
+                const handle_combine_stage: HANDLE_COMBINE_STAGE = switch (WRAP_MODE) {
+                    .NO_WRAP => .ADD_CURRENT_CHILD_TO_CURRENT_LINE,
+                    .ALLOW_WRAP => if (line.num_elems > 0 and size_if_combine > max_size) .FINISH_LINE_AND_POSSIBLY_START_NEW else .ADD_CURRENT_CHILD_TO_CURRENT_LINE,
+                };
+                to_stage: switch (handle_combine_stage) {
+                    .FINISH_LINE_AND_POSSIBLY_START_NEW => {
+                        if (WRAP_MODE == .NO_WRAP) {
+                            unreachable;
+                        }
+                        const total_gap = (line.num_elems - 1) * gap;
+                        self.distribute_extra_space_to_axis_line_members(line, max_size - total_gap, AXIS);
+                        if (more_children_on_parent) {
+                            switch (STAGE) {
+                                .SECONDARY_STAGE => {
+                                    assert_unreachable(@src(), "cannot start new axis line in secondary stage", .{});
+                                },
+                                .PRIMARY_STAGE => {
+                                    const new_line = AxisLine.new(child_idx, 1, child_size, AXIS);
+                                    next_line, const next_idx = try self.append_line_get_ptr(new_line);
+                                    line.next_line = next_idx;
+                                },
+                            }
+                        }
+                    },
+                    .FINISH_LINE_AND_END => {
+                        const total_gap = (line.num_elems - 1) * gap;
+                        self.distribute_extra_space_to_axis_line_members(line, max_size - total_gap, AXIS);
+                    },
+                    .ADD_CURRENT_CHILD_TO_CURRENT_LINE => {
+                        line.min_size.set(AXIS, size_if_combine);
+                        if (STAGE == .PRIMARY_STAGE) {
+                            line.num_elems += 1;
+                        }
+                        if (!more_children_on_parent) continue :to_stage .FINISH_LINE_AND_END;
+                    },
+                }
+            },
+            .UPDATE_MAX_OF_MIN_SIZE => {
+                size_if_combine = @max(size_if_combine, child_size);
+                line.min_size.set(AXIS, size_if_combine);
+                if (child.get_grow_mode(AXIS) == .GROW) {
+                    line.max_secondary_grow = @max(line.max_secondary_grow, child.get_grow_ratio(AXIS));
+                }
+                switch (STAGE) {
+                    .PRIMARY_STAGE => {
+                        line.num_elems += 1;
+                        assert_with_reason_debug_only(WRAP_MODE != .ALLOW_WRAP, @src(), "internal logic error: cannot use overflow mode when the primary layout direction does not match the driving axis", .{});
+                    },
+                    .SECONDARY_STAGE => {
+                        if (more_children_on_parent and !more_children_on_line) {
+                            assert_with_reason_debug_only(WRAP_MODE == .ALLOW_WRAP, @src(), "internal logic error: when `more_children_on_parent` and `!more_children_on_line`, the mode MUST be `ALLOW_WRAP`", .{});
+                            assert_with_reason_debug_only(line.next_line != NULL_IDX, @src(), "internal logic error: a null idx found on `line.next_line` when there should exist another line", .{});
+                            next_line = self.get_line_ptr(line.next_line);
+                        }
+                    },
+                }
+            },
+        }
+        return next_line;
+    }
+
+    fn distribute_extra_space_to_axis_line_members(self: *LayoutManager, axis_line: *AxisLine, space: f32, comptime AXIS: Axis) void {
+        var remaining_space = space;
+        var space_taken_this_pass: f32 = 0;
+        var total_weight_this_pass: f32 = 0;
+        var total_growable_this_pass: u32 = 0;
+        var idx: u32 = axis_line.first_elem;
+        var n: u32 = axis_line.num_elems;
+        var child: *LayoutElement = undefined;
+        while (remaining_space > 0) {
+            while (n > 0) {
+                n - 1;
+                child = get_elem_ptr(self.elems, idx);
+                if (child.get_grow_mode(AXIS) == .GROW and child.get_min_size_self(AXIS) < child.get_max_size(AXIS)) {
+                    total_growable_this_pass += 1;
+                    total_weight_this_pass += child.get_grow_ratio(AXIS);
+                }
+                idx = child.next_sibling;
+            }
+            if (total_growable_this_pass == 0) break;
+            idx = axis_line.first_elem;
+            n = axis_line.num_elems;
+            while (n > 0) {
+                n - 1;
+                child = get_elem_ptr(self.elems, idx);
+                if (child.get_grow_mode(AXIS) == .GROW and child.get_min_size_self(AXIS) < child.get_max_size(AXIS)) {
+                    const ratio_to_claim = child.get_grow_ratio(AXIS) / total_weight_this_pass;
+                    var space_to_claim = remaining_space * ratio_to_claim;
+                    var potential_new_size = child.get_min_size_self(AXIS) + space_to_claim;
+                    potential_new_size = @min(potential_new_size, child.get_max_size(AXIS));
+                    space_to_claim = potential_new_size - child.get_min_size_self(AXIS);
+                    space_taken_this_pass += space_to_claim;
+                    child.set_min_size_self(AXIS, potential_new_size);
+                }
+            }
+            if (space_taken_this_pass <= 0) break;
+            remaining_space -= space_taken_this_pass;
+            total_weight_this_pass = 0;
+            total_growable_this_pass = 0;
+        }
+        axis_line.min_size.set(AXIS, remaining_space);
+    }
+
+    // fn add_axis_line_to_parent_primary(self: *LayoutManager, parent: *LayoutElement, prev_axis_line: ?*AxisLine, axis_line: AxisLine) anyerror!*AxisLine {
+    //     var axis_line_ptr: *AxisLine = undefined;
+    //     if (parent.num_axis_lines == 0) {
+    //         parent.first_axis_line = axis_line;
+    //         axis_line_ptr = &parent.first_axis_line;
+    //     } else {
+    //         axis_line_ptr, const axis_line_idx = try self.append_line_get_ptr(axis_line);
+    //         prev_axis_line.?.next_line = axis_line_idx;
+    //     }
+    //     parent.num_axis_lines += 1;
+    //     return axis_line_ptr;
+    // }
+
+    fn fit_and_expand_children_to_fill_parent(_: Elems, idx: u32, self: *LayoutManager, comptime CT: AxisStage) anyerror!Elems {
+        const parent = self.get_elem_ptr(idx);
+        if (parent.is_floating or parent.parent_idx == NULL_IDX) {
+            const final_size = @min(parent.get_min_size_self(CT.AXIS), parent.get_max_size(CT.AXIS));
+            parent.set_min_size_self(CT.AXIS, final_size);
+        }
         if (parent.first_inline_child != NULL_IDX) {
-            var curr_child_idx = parent.first_inline_child;
-            if (CT.STAGE == .PRIMARY_STAGE and parent.use_flow_mode) {
-                const gap = parent.child_gaps.get(CT.AXIS);
-                var current_min_size: f32 = 0;
-                var possible_next_min_size: f32 = 0;
-                var child_min_size: f32 = 0;
-                var added_min_size_with_gap: f32 = 0;
-                var gap_to_add = 0;
-                var curr_num_this_line: u32 = 0;
-                while (curr_child_idx != NULL_IDX) {
-                    const child = get_elem_ptr(nodes, curr_child_idx);
-                    child_min_size = child.get_min_self_size(CT.AXIS);
-                    added_min_size_with_gap = child_min_size + gap_to_add;
-                    possible_next_min_size += added_min_size_with_gap;
-                    if (curr_num_this_line >= 1 and possible_next_min_size > final_size_for_children) {
-                        // end current line and start new line
-                        current_min_size = child_min_size;
-                        possible_next_min_size = child_min_size;
-                        child_min_size = 0;
-                        //CHECKPOINT
-                    } else {
-                        current_min_size = possible_next_min_size;
-                        curr_num_this_line += 1;
-                        gap_to_add = gap;
-                    }
+            assert_with_reason_debug_only(parent.num_inline_children > 0, @src(), "first child on parent wasnt NULL, but parent has no children count", .{});
+            if (parent.use_flow_mode) {
+                if (parent.primary_child_axis == CT.AXIS) {
+                    try self.combine_all_children_with_axis_lines(parent, CT, .ADD_MIN_SIZE_AND_GAP, .ALLOW_WRAP);
+                } else {
+                    try self.combine_all_children_with_axis_lines(parent, CT, .UPDATE_MAX_OF_MIN_SIZE, .ALLOW_WRAP);
                 }
             } else {
-                while (curr_child_idx != NULL_IDX) {
-                    const child = get_elem_ptr(nodes, curr_child_idx);
-                    curr_child_idx = get_next_sibling(nodes, curr_child_idx);
+                if (parent.primary_child_axis == CT.AXIS) {
+                    try self.combine_all_children_with_axis_lines(parent, CT, .ADD_MIN_SIZE_AND_GAP, .NO_WRAP);
+                } else {
+                    try self.combine_all_children_with_axis_lines(parent, CT, .UPDATE_MAX_OF_MIN_SIZE, .NO_WRAP);
                 }
             }
         }
-        return nodes;
+        return self.elems;
     }
 
     fn recheck_element_sizes_with_with_known_primary_size(self: *LayoutManager, comptime DRIVING_AXIS: Axis) void {

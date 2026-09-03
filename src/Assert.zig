@@ -102,6 +102,11 @@ pub inline fn assert_with_reason(condition: bool, comptime src_loc: ?SourceLocat
         }
     }
 }
+pub inline fn assert_with_reason_debug_only(condition: bool, comptime src_loc: ?SourceLocation, reason_fmt: []const u8, reason_args: anytype) void {
+    if (IS_DEBUG) {
+        assert_with_reason(condition, src_loc, reason_fmt, reason_args);
+    }
+}
 pub inline fn assert_in_comptime(comptime src_loc: ?SourceLocation) void {
     assert_with_reason(@inComptime(), src_loc, "this function can only be called in a comptime context. you may need to specifiy 'comptime' before the function call if the compiler cannot infer the context is comptime", .{});
 }

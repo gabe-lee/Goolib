@@ -49,6 +49,19 @@ pub const ShouldTranslate = Common.ShouldTranslate;
 pub const Axis = enum(u8) {
     X = 0,
     Y = 1,
+
+    fn opposite(self: Axis) Axis {
+        switch (self) {
+            .X => return .Y,
+            .y => return .X,
+        }
+    }
+    fn OPPOSITE(comptime self: Axis) Axis {
+        switch (self) {
+            .X => return .Y,
+            .y => return .X,
+        }
+    }
 };
 
 pub fn define_vec2_type(comptime T: type) type {
@@ -82,6 +95,7 @@ pub fn define_vec2_type(comptime T: type) type {
         pub const FILLED_WITH_2 = Vec2{ .x = 2, .y = 2 };
         pub const MIN_T = if (IS_FLOAT) -math.inf(T) else math.minInt(T);
         pub const MAX_T = if (IS_FLOAT) math.inf(T) else math.maxInt(T);
+        pub const INF = MAX;
 
         pub fn new(x: T, y: T) Vec2 {
             return Vec2{ .x = x, .y = y };
