@@ -748,26 +748,89 @@ const AxisStage = struct {
     AXIS: Axis,
     STAGE: LayoutStage,
 
-    pub inline fn mode(comptime AXIS: Axis, comptime STAGE: LayoutStage) AxisStage {
+    pub inline fn new(comptime AXIS: Axis, comptime STAGE: LayoutStage) AxisStage {
         return AxisStage{
             .AXIS = AXIS,
             .STAGE = STAGE,
         };
     }
 };
-const AxisStageFlow = struct {
-    AXIS: Axis,
-    STAGE: LayoutStage,
-    FLOW: bool,
 
-    pub inline fn new(comptime AXIS: Axis, comptime STAGE: LayoutStage, comptime FLOW: bool) AxisStageFlow {
-        return AxisStageFlow{
-            .AXIS = AXIS,
-            .STAGE = STAGE,
-            .FLOW = FLOW,
-        };
-    }
-};
+// const LayoutCTInfo = struct {
+//     AXIS_ORDER: [2]Axis = .{ Axis.X, Axis.Y },
+//     STAGE: LayoutStage = .PRIMARY_STAGE,
+
+//     inline fn new(comptime AXIS_1: Axis, comptime AXIS_2: Axis, comptime STAGE: LayoutStage) LayoutCTInfo {
+//         return LayoutCTInfo{
+//             .AXIS_ORDER = .{ AXIS_1, AXIS_2 },
+//             .STAGE = STAGE,
+//         };
+//     }
+//     inline fn AXIS(comptime self: LayoutCTInfo) Axis {
+//         return self.AXIS_ORDER[@intFromEnum(self.STAGE)];
+//     }
+//     inline fn OPPOSITE_AXIS(comptime self: LayoutCTInfo) Axis {
+//         return self.AXIS_ORDER[@intFromEnum(self.STAGE) ^ 1];
+//     }
+//     inline fn IN_PRIMARY_STAGE(comptime self: LayoutCTInfo) bool {
+//         return self.STAGE == .PRIMARY_STAGE;
+//     }
+//     inline fn IN_SECONDARY_STAGE(comptime self: LayoutCTInfo) bool {
+//         return self.STAGE == .SECONDARY_STAGE;
+//     }
+// };
+// const LayoutCTInfoPlus = struct {
+//     AXIS_ORDER: [2]Axis = .{ Axis.X, Axis.Y },
+//     STAGE: LayoutStage = .PRIMARY_STAGE,
+//     PARENT_FLOW: bool = false,
+//     PARENT_PRIMARY_LAYOUT: Axis = .X,
+
+//     inline fn new(comptime info: LayoutCTInfo, comptime PARENT_FLOW: bool, comptime PARENT_PRIMARY_LAYOUT: Axis) LayoutCTInfoPlus {
+//         return LayoutCTInfo{
+//             .AXIS_ORDER = info.AXIS_ORDER,
+//             .STAGE = info.STAGE,
+//             .PARENT_FLOW = PARENT_FLOW,
+//             .PARENT_PRIMARY_LAYOUT = PARENT_PRIMARY_LAYOUT,
+//         };
+//     }
+//     inline fn AXIS(comptime self: LayoutCTInfoPlus) Axis {
+//         return self.AXIS_ORDER[@intFromEnum(self.STAGE)];
+//     }
+//     inline fn OPPOSITE_AXIS(comptime self: LayoutCTInfoPlus) Axis {
+//         return self.AXIS_ORDER[@intFromEnum(self.STAGE) ^ 1];
+//     }
+//     inline fn IN_PRIMARY_STAGE(comptime self: LayoutCTInfoPlus) bool {
+//         return self.STAGE == .PRIMARY_STAGE;
+//     }
+//     inline fn IN_SECONDARY_STAGE(comptime self: LayoutCTInfoPlus) bool {
+//         return self.STAGE == .SECONDARY_STAGE;
+//     }
+//     inline fn PARENT_LAYOUT_SAME_DIRECTION_AS_CURRENT_STAGE(comptime self: LayoutCTInfoPlus) bool {
+//         return self.AXIS() == self.PARENT_PRIMARY_LAYOUT;
+//     }
+//     inline fn COMBINE_ADD_SIZE_AND_GAP(comptime self: LayoutCTInfoPlus) bool {
+//         return self.PARENT_LAYOUT_SAME_DIRECTION_AS_CURRENT_STAGE();
+//     }
+//     inline fn COMBINE_UPDATE_MAX_OF_MIN_SIZES(comptime self: LayoutCTInfoPlus) bool {
+//         return !self.PARENT_LAYOUT_SAME_DIRECTION_AS_CURRENT_STAGE();
+//     }
+//     inline fn MIGHT_HAVE_MULTIPLE_AXIS_LINES(comptime self: LayoutCTInfoPlus) bool {
+//         return !self.PARENT_LAYOUT_SAME_DIRECTION_AS_CURRENT_STAGE();
+//     }
+// };
+// const AxisStageFlow = struct {
+//     AXIS: Axis,
+//     STAGE: LayoutStage,
+//     FLOW: bool,
+
+//     pub inline fn new(comptime AXIS: Axis, comptime STAGE: LayoutStage, comptime FLOW: bool) AxisStageFlow {
+//         return AxisStageFlow{
+//             .AXIS = AXIS,
+//             .STAGE = STAGE,
+//             .FLOW = FLOW,
+//         };
+//     }
+// };
 
 const CombineMode = enum {
     ADD_MIN_SIZE_AND_GAP,
@@ -931,9 +994,9 @@ pub const LayoutDrivingAxis = enum(u1) {
     HEIGHT_DRIVES_WIDTH,
 };
 
-pub const LayoutStage = enum {
-    PRIMARY_STAGE,
-    SECONDARY_STAGE,
+pub const LayoutStage = enum(u8) {
+    PRIMARY_STAGE = 0,
+    SECONDARY_STAGE = 1,
 };
 
 const Lines = struct {
@@ -1232,21 +1295,21 @@ pub const LayoutManager = struct {
         self.real_max_elements = @max(self.real_max_elements, self.elem_len);
     }
 
-    pub fn recalculate_layout(self: *LayoutManager, comptime DRIVING_AXIS: Axis, comptime STACK_REALLOC: StackRealloc, stack_realloc: STACK_REALLOC.T_PKG(StackFrame)) Error!void {
+    pub fn recalculate_layout(self: *LayoutManager, comptime DRIVING_AXIS: Axis) Error!void {
         switch (comptime DRIVING_AXIS) {
             .X => {
-                self.elems, self.stack = try Traverse.do_action_on_all_nodes(self.elems, self.stack, self.stack_reallocator(), .CHILDREN_FIRST, 0, self, AxisStage.mode(.X, .PRIMARY_STAGE), .COMPTIME_FN_PTR, Action.propagate_min_size_to_parent, void{});
-                self.elems, self.stack = try Traverse.do_action_on_all_nodes(self.elems, self.stack, self.stack_reallocator(), .PARENTS_FIRST, 0, self, AxisStage.mode(.X, .PRIMARY_STAGE), .COMPTIME_FN_PTR, Action.fit_and_expand_children_to_fill_parent, void{});
-                self.elems, self.stack = try Traverse.do_action_on_all_nodes(self.elems, self.stack, self.stack_reallocator(), .PARENTS_FIRST, 0, self, AxisStage.mode(.Y, .SECONDARY_STAGE), .COMPTIME_FN_PTR, Action.recheck_min_y_from_final_x, void{});
-                self.elems, self.stack = try Traverse.do_action_on_all_nodes(self.elems, self.stack, self.stack_reallocator(), .CHILDREN_FIRST, 0, self, AxisStage.mode(.Y, .SECONDARY_STAGE), .COMPTIME_FN_PTR, Action.propagate_min_size_to_parent_y, void{});
-                self.elems, self.stack = try Traverse.do_action_on_all_nodes(self.elems, self.stack, self.stack_reallocator(), .PARENTS_FIRST, 0, self, AxisStage.mode(.Y, .SECONDARY_STAGE), .COMPTIME_FN_PTR, Action.fit_and_expand_children_to_fill_parent_y, void{});
+                self.elems, self.stack = try Traverse.do_action_on_all_nodes(self.elems, self.stack, self.stack_reallocator(), .CHILDREN_FIRST, 0, self, AxisStage.new(.X, .PRIMARY_STAGE), .COMPTIME_FN_PTR, propagate_min_size_to_parent, void{});
+                self.elems, self.stack = try Traverse.do_action_on_all_nodes(self.elems, self.stack, self.stack_reallocator(), .PARENTS_FIRST, 0, self, AxisStage.new(.X, .PRIMARY_STAGE), .COMPTIME_FN_PTR, fit_and_expand_children_to_fill_parent, void{});
+                self.elems, self.stack = try Traverse.do_action_on_all_nodes(self.elems, self.stack, self.stack_reallocator(), .PARENTS_FIRST, 0, self, AxisStage.new(.Y, .SECONDARY_STAGE), .COMPTIME_FN_PTR, Action.recheck_min_y_from_final_x, void{});
+                self.elems, self.stack = try Traverse.do_action_on_all_nodes(self.elems, self.stack, self.stack_reallocator(), .CHILDREN_FIRST, 0, self, AxisStage.new(.Y, .SECONDARY_STAGE), .COMPTIME_FN_PTR, Action.propagate_min_size_to_parent_y, void{});
+                self.elems, self.stack = try Traverse.do_action_on_all_nodes(self.elems, self.stack, self.stack_reallocator(), .PARENTS_FIRST, 0, self, AxisStage.new(.Y, .SECONDARY_STAGE), .COMPTIME_FN_PTR, Action.fit_and_expand_children_to_fill_parent_y, void{});
             },
             .Y => {
-                self.elems, self.stack = try Traverse.do_action_on_all_nodes(self.elems, self.stack, self.stack_reallocator(), .CHILDREN_FIRST, 0, self, AxisStage.mode(.Y, .PRIMARY_STAGE), .COMPTIME_FN_PTR, Action.propagate_min_size_to_parent, void{});
-                self.elems, self.stack = try Traverse.do_action_on_all_nodes(self.elems, self.stack, self.stack_reallocator(), .PARENTS_FIRST, 0, self, AxisStage.mode(.Y, .PRIMARY_STAGE), .COMPTIME_FN_PTR, Action.fit_and_expand_children_to_fill_parent, void{});
-                self.elems, self.stack = try Traverse.do_action_on_all_nodes(self.elems, self.stack, self.stack_reallocator(), .PARENTS_FIRST, 0, self, AxisStage.mode(.X, .SECONDARY_STAGE), .COMPTIME_FN_PTR, Action.recheck_min_x_from_final_y, void{});
-                self.elems, self.stack = try Traverse.do_action_on_all_nodes(self.elems, self.stack, self.stack_reallocator(), .CHILDREN_FIRST, 0, self, AxisStage.mode(.X, .SECONDARY_STAGE), .COMPTIME_FN_PTR, Action.propagate_min_size_to_parent_x, void{});
-                self.elems, self.stack = try Traverse.do_action_on_all_nodes(self.elems, self.stack, self.stack_reallocator(), .PARENTS_FIRST, 0, self, AxisStage.mode(.X, .SECONDARY_STAGE), .COMPTIME_FN_BODY, Action.fit_and_expand_children_to_fill_parent_x, void{});
+                self.elems, self.stack = try Traverse.do_action_on_all_nodes(self.elems, self.stack, self.stack_reallocator(), .CHILDREN_FIRST, 0, self, AxisStage.new(.Y, .PRIMARY_STAGE), .COMPTIME_FN_PTR, propagate_min_size_to_parent, void{});
+                self.elems, self.stack = try Traverse.do_action_on_all_nodes(self.elems, self.stack, self.stack_reallocator(), .PARENTS_FIRST, 0, self, AxisStage.new(.Y, .PRIMARY_STAGE), .COMPTIME_FN_PTR, fit_and_expand_children_to_fill_parent, void{});
+                self.elems, self.stack = try Traverse.do_action_on_all_nodes(self.elems, self.stack, self.stack_reallocator(), .PARENTS_FIRST, 0, self, AxisStage.new(.X, .SECONDARY_STAGE), .COMPTIME_FN_PTR, Action.recheck_min_x_from_final_y, void{});
+                self.elems, self.stack = try Traverse.do_action_on_all_nodes(self.elems, self.stack, self.stack_reallocator(), .CHILDREN_FIRST, 0, self, AxisStage.new(.X, .SECONDARY_STAGE), .COMPTIME_FN_PTR, Action.propagate_min_size_to_parent_x, void{});
+                self.elems, self.stack = try Traverse.do_action_on_all_nodes(self.elems, self.stack, self.stack_reallocator(), .PARENTS_FIRST, 0, self, AxisStage.new(.X, .SECONDARY_STAGE), .COMPTIME_FN_BODY, Action.fit_and_expand_children_to_fill_parent_x, void{});
             },
         }
         self.elems, self.stack = try Traverse.do_action_on_all_nodes(self.elems, self.stack, self.stack_reallocator(), .PARENTS_FIRST, 0, self, void{}, .COMPTIME_FN_PTR, Action.position_and_align_element, void{});
@@ -1296,6 +1359,9 @@ pub const LayoutManager = struct {
             line = try self.combine_child_with_axis_line(line, child, child_idx, more_children_on_parent, more_children_on_line, gap, max_size_for_children, CT.AXIS, COMBINE_MODE, WRAP_MODE, CT.STAGE);
             child_idx = child.next_sibling;
         }
+        if (COMBINE_MODE == .UPDATE_MAX_OF_MIN_SIZE) {
+            self.distribute_extra_space_to_axis_line_members_secondary(axis_line: *AxisLine, space: f32, comptime AXIS: Axis)
+        }
     }
 
     fn combine_child_with_axis_line(self: *LayoutManager, line: *AxisLine, child: *LayoutElement, child_idx: u32, more_children_on_parent: bool, more_children_on_line: bool, gap: f32, max_size: f32, comptime AXIS: Axis, comptime COMBINE_MODE: CombineMode, comptime WRAP_MODE: WrapMode, comptime STAGE: LayoutStage) anyerror!*AxisLine {
@@ -1315,7 +1381,7 @@ pub const LayoutManager = struct {
                             unreachable;
                         }
                         const total_gap = (line.num_elems - 1) * gap;
-                        self.distribute_extra_space_to_axis_line_members(line, max_size - total_gap, AXIS);
+                        self.distribute_primary_extra_space_to_axis_line_members(line, max_size - total_gap, AXIS);
                         if (more_children_on_parent) {
                             switch (STAGE) {
                                 .SECONDARY_STAGE => {
@@ -1331,7 +1397,7 @@ pub const LayoutManager = struct {
                     },
                     .FINISH_LINE_AND_END => {
                         const total_gap = (line.num_elems - 1) * gap;
-                        self.distribute_extra_space_to_axis_line_members(line, max_size - total_gap, AXIS);
+                        self.distribute_primary_extra_space_to_axis_line_members(line, max_size - total_gap, AXIS);
                     },
                     .ADD_CURRENT_CHILD_TO_CURRENT_LINE => {
                         line.min_size.set(AXIS, size_if_combine);
@@ -1366,7 +1432,7 @@ pub const LayoutManager = struct {
         return next_line;
     }
 
-    fn distribute_extra_space_to_axis_line_members(self: *LayoutManager, axis_line: *AxisLine, space: f32, comptime AXIS: Axis) void {
+    fn distribute_primary_extra_space_to_axis_line_members(self: *LayoutManager, axis_line: *AxisLine, space: f32, comptime AXIS: Axis) void {
         var remaining_space = space;
         var space_taken_this_pass: f32 = 0;
         var total_weight_this_pass: f32 = 0;
@@ -1406,6 +1472,87 @@ pub const LayoutManager = struct {
             total_growable_this_pass = 0;
         }
         axis_line.min_size.set(AXIS, remaining_space);
+    }
+
+    fn distribute_secondary_extra_space_to_all_axis_lines(self: *LayoutManager, parent: *LayoutElement, comptime AXIS: Axis) void {
+        var line = &parent.first_axis_line;
+        var lines_left: u32 = parent.num_axis_lines;
+        var total_axis_lines_size: f32 = -gap;
+        while (lines_left > 0) {
+            lines_left -= 1;
+            total_axis_lines_size += line.min_size.get(AXIS) + gap;
+            if (lines_left > 0) {
+                line = self.get_line_ptr(line.next_line);
+            }
+        }
+        const space_for_lines = parent.get_min_size_self(AXIS) - parent.padding.get(AXIS);
+        var remaining_space = space_for_lines - total_axis_lines_size;
+        while (remaining_space > 0) {
+            var space_claimed_this_pass: f32 = 0;
+            var num_growable_lines_this_pass: u32 = 0;
+            var total_line_weight_this_pass: f32 = 0;
+            line = &parent.first_axis_line;
+            lines_left = parent.num_axis_lines;
+            while (lines_left > 0) {
+                lines_left -= 1;
+                if (line.max_secondary_grow > 0) {
+                    line.max_secondary_grow = 0;
+                    var num_growable_elems_this_line: u32 = 0;
+                    var elems_left: u32 = line.num_elems;
+                    var elem_idx: u32 = line.first_elem;
+                    var elem: *LayoutElement = undefined;
+                    while (elems_left > 0) {
+                        elems_left -= 1;
+                        elem = self.get_elem_ptr(elem_idx);
+                        if (elem.get_min_size_self(AXIS) < elem.get_max_size(AXIS) and elem.get_grow_mode(AXIS) == .GROW) {
+                            num_growable_elems_this_line += 1;
+                            line.max_secondary_grow = @max(line.max_secondary_grow, elem.get_grow_ratio(AXIS));
+                        }
+                        elem_idx = elem.next_sibling;
+                    }
+                    if (num_growable_elems_this_line > 0) {
+                        num_growable_lines_this_pass += 1;
+                        total_line_weight_this_pass += line.max_secondary_grow;
+                    } else {
+                        line.max_secondary_grow = 0;
+                    }
+                }
+                if (lines_left > 0) {
+                    line = self.get_line_ptr(line.next_line);
+                }
+            }
+            if (num_growable_lines_this_pass == 0) break;
+            line = &parent.first_axis_line;
+            lines_left = parent.num_axis_lines;
+            while (lines_left > 0) {
+                lines_left -= 1;
+                if (line.max_secondary_grow > 0) {
+                    var elems_left: u32 = line.num_elems;
+                    var elem_idx: u32 = line.first_elem;
+                    var elem: *LayoutElement = undefined;
+                    var space_claimed_this_line: f32 = 0;
+                    while (elems_left > 0) {
+                        elems_left -= 1;
+                        elem = self.get_elem_ptr(elem_idx);
+                        if (elem.get_min_size_self(AXIS) < elem.get_max_size(AXIS) and elem.get_grow_mode(AXIS) == .GROW) {
+                            num_growable_elems_this_line += 1;
+                            max_grow_weight_this_line = @max(max_grow_weight_this_line, elem.get_grow_ratio(AXIS));
+                        }
+                        elem_idx = elem.next_sibling;
+                    }
+                    if (num_growable_elems_this_line > 0) {
+                        num_growable_lines_this_pass += 1;
+                        total_line_weight_this_pass += max_grow_weight_this_line;
+                    } else {
+                        line.max_secondary_grow = 0;
+                    }
+                }
+                
+                if (lines_left > 0) {
+                    line = self.get_line_ptr(line.next_line);
+                }
+            }
+        }
     }
 
     // fn add_axis_line_to_parent_primary(self: *LayoutManager, parent: *LayoutElement, prev_axis_line: ?*AxisLine, axis_line: AxisLine) anyerror!*AxisLine {
