@@ -585,14 +585,53 @@ const MaxMode = enum(u8) {
     PERCENT_X_PERCENT_Y,
 };
 
+const MaxFlags = Root.Flags.Flags(enum(u8){
+    // zig fmt:off
+    MAX_IS_PARENT_PERCENT_X = 0b0000_0001,
+    GROWABLE_X              = 0b0000_0010,
+    GROWABLE_THIS_PASS_X    = 0b0000_0100,
+    PROPAGATE_FLOATING_X    = 0b0000_1000,
+    MAX_IS_PARENT_PERCENT_Y = 0b0001_0000,
+    GROWABLE_Y              = 0b0010_0000,
+    GROWABLE_THIS_PASS_Y    = 0b0100_0000,
+    PROPAGATE_FLOATING_Y    = 0b1000_0000,
+    // zig fmt:on
+
+    inline fn max_is_parent_percent(comptime AXIS: Axis) @This() {
+        switch (AXIS) {
+            .X => return @This().MAX_IS_PARENT_PERCENT_X,
+            .Y => return @This().MAX_IS_PARENT_PERCENT_Y,
+        }
+    }
+    inline fn growable(comptime AXIS: Axis) @This() {
+        switch (AXIS) {
+            .X => return @This().GROWABLE_X,
+            .Y => return @This().GROWABLE_Y,
+        }
+    }
+    inline fn growable_this_pass(comptime AXIS: Axis) @This() {
+        switch (AXIS) {
+            .X => return @This().GROWABLE_THIS_PASS_X,
+            .Y => return @This().GROWABLE_THIS_PASS_Y,
+        }
+    }
+    inline fn propagate_floating(comptime AXIS: Axis) @This() {
+        switch (AXIS) {
+            .X => return @This().PROPAGATE_FLOATING_X,
+            .Y => return @This().PROPAGATE_FLOATING_Y,
+        }
+    }
+}, enum(u8){});
+
 const MaxSize = struct {
     value: Size = .INF,
-    max_is_percent_x: bool = false,
-    max_is_percent_y: bool = false,
-    growable_x: bool = false,
-    growable_x_this_pass: bool = false,
-    growable_y: bool = false,
-    growable_y_this_pass: bool = false,
+    next_this_pass: u32 = NULL_IDX,
+    flags: MaxFlags = .{},
+    // 3 free bytes
+
+    _ = comptime {
+        assert_with_reason_debug_only(@sizeOf(MaxSize) <= @sizeOf(AABB), @src(), "MaxSize must be smaller or equal size to AABB", .{});
+    }
 };
 
 const MaxSize_OR_FinalClipAABB = union {
@@ -646,15 +685,57 @@ const LayoutElement = struct {
     is_floating: bool,
     clip_to_parent: bool,
     completely_clipped: bool = false,
-    use_flow_mode: bool = false,
+    use_flow_mode: bool,
 
     const SIZE = @sizeOf(LayoutElement);
 
+    inline fn flags_ptr(self: *LayoutElement) *MaxFlags {
+        return &self._max_or_clip_aabb.max_size.flags;
+    }
+    inline fn flags(self: *LayoutElement) MaxFlags {
+        return self._max_or_clip_aabb.max_size.flags;
+    }
+    inline fn get_next_idx_this_pass(self: LayoutElement) u32 {
+        return self._max_or_clip_aabb.max_size.next_this_pass;
+    }
+    inline fn set_next_growable_idx_this_pass(self: *LayoutElement, next: u32) void {
+        self._max_or_clip_aabb.max_size.next_this_pass = next;
+    }
     pub inline fn has_children(self: LayoutElement) bool {
         return self.first_child != NULL_IDX;
     }
+    inline fn add_to_min_self_size(self: *LayoutElement, comptime AXIS: Axis, val: f32) void {
+        self._min_or_aabb.min_size.self.set(AXIS, self._min_or_aabb.min_size.self.get(AXIS) + val);
+    }
+    inline fn add_to_min_self_size_limit_to_max_update_growable(self: *LayoutElement, comptime AXIS: Axis, val: f32) void {
+        self._min_or_aabb.min_size.self.set(AXIS, self._min_or_aabb.min_size.self.get(AXIS) + val);
+        const max = self.get_max_size(AXIS);
+        if (self._min_or_aabb.min_size.self.get(AXIS) >= max) {
+            self._min_or_aabb.min_size.self.set(AXIS, max);
+            self.clear_growable(AXIS);
+        }
+    }
     inline fn set_min_size_self(self: *LayoutElement, comptime AXIS: Axis, val: f32) void {
         self._min_or_aabb.min_size.self.set(AXIS, val);
+    }
+    inline fn set_min_size_self_limit_to_max(self: *LayoutElement, comptime AXIS: Axis, val: f32) void {
+        self._min_or_aabb.min_size.self.set(AXIS, @min(self.get_max_size(AXIS), val));
+    }
+    inline fn set_min_size_self_limit_to_max_update_growable(self: *LayoutElement, comptime AXIS: Axis, val: f32) void {
+        const max = self.get_max_size(AXIS);
+        if (val >= max) {
+            self._min_or_aabb.min_size.self.set(AXIS, max);
+            self.clear_growable(AXIS);
+        } else {
+            self._min_or_aabb.min_size.self.set(AXIS, val);
+        }
+    }
+    inline fn reevaluate_growable_from_new_min_size(self: *LayoutElement, comptime AXIS: Axis) void {
+        const max = self.get_max_size(AXIS);
+        if (self.is_growable(AXIS) and self._min_or_aabb.min_size.self.get(AXIS) > max) {
+            self.clear_growable(AXIS);
+            self.set_min_size_self(AXIS, max);
+        }
     }
     inline fn get_min_size_self(self: LayoutElement, comptime AXIS: Axis) f32 {
         return self._min_or_aabb.min_size.self.get(AXIS);
@@ -662,13 +743,21 @@ const LayoutElement = struct {
     inline fn update_min_size_with_children_min_size(self: *LayoutElement, comptime AXIS: Axis) void {
         self._min_or_aabb.min_size.self.set(AXIS, @max(self._min_or_aabb.min_size.self.get(AXIS), self._min_or_aabb.min_size.children.get(AXIS)));
     }
+    inline fn update_min_size_with_children_min_size_limit_to_max_update_growable(self: *LayoutElement, comptime AXIS: Axis) void {
+        self._min_or_aabb.min_size.self.set(AXIS, @max(self._min_or_aabb.min_size.self.get(AXIS), self._min_or_aabb.min_size.children.get(AXIS)));
+        const max = self.get_max_size(AXIS);
+        if (self._min_or_aabb.min_size.self.get(AXIS) >= max) {
+            self._min_or_aabb.min_size.self.set(AXIS, max);
+            self.clear_growable(AXIS);
+        }
+    }
     inline fn add_to_min_children_size(self: *LayoutElement, comptime AXIS: Axis, val: f32) void {
         self._min_or_aabb.min_size.children.set(AXIS, self._min_or_aabb.min_size.children.get(AXIS) + val);
     }
     inline fn update_max_of_min_children_size(self: *LayoutElement, comptime AXIS: Axis, val: f32) void {
         self._min_or_aabb.min_size.children.set(AXIS, @max(self._min_or_aabb.min_size.children.get(AXIS), val));
     }
-    inline fn get_min_size_from_children(self: LayoutElement, comptime AXIS: Axis) f32 {
+    inline fn get_min_children_size(self: LayoutElement, comptime AXIS: Axis) f32 {
         return self._min_or_aabb.min_size.children.get(AXIS);
     }
     inline fn set_max_size(self: *LayoutElement, comptime AXIS: Axis, val: f32) void {
@@ -693,14 +782,35 @@ const LayoutElement = struct {
     pub inline fn get_clip_aabb(self: LayoutElement) AABB {
         return self._max_or_clip_aabb.final_clip_aabb;
     }
-    inline fn has_grow_mode(self: LayoutElement, comptime AXIS: Axis) bool {
-        switch (comptime AXIS) {
-            .X => return self._max_or_clip_aabb.max_size.grow_x,
-            .Y => return self._max_or_clip_aabb.max_size.grow_y,
-        }
+    inline fn can_grow_this_pass(self: LayoutElement, comptime AXIS: Axis) bool {
+        return self._max_or_clip_aabb.max_size.flags.has_flag(.growable_this_pass(AXIS));
     }
-    inline fn can_grow(self: LayoutElement, comptime AXIS: Axis) bool {
-        return self.has_grow_mode(AXIS) and self.get_min_size_self(AXIS) < self.get_max_size(AXIS);
+    inline fn set_can_grow_this_pass(self: *LayoutElement, comptime AXIS: Axis) void {
+        self._max_or_clip_aabb.max_size.flags.set(.growable_this_pass(AXIS));
+    }
+    inline fn clear_can_grow_this_pass(self: *LayoutElement, comptime AXIS: Axis) void {
+        self._max_or_clip_aabb.max_size.flags.clear(.growable_this_pass(AXIS));
+    }
+    inline fn is_growable(self: LayoutElement, comptime AXIS: Axis) bool {
+        return self._max_or_clip_aabb.max_size.flags.has_flag(.growable(AXIS));
+    }
+    inline fn set_growable(self: *LayoutElement, comptime AXIS: Axis) void {
+        self._max_or_clip_aabb.max_size.flags.set(.growable(AXIS));
+    }
+    inline fn clear_growable(self: *LayoutElement, comptime AXIS: Axis) void {
+        self._max_or_clip_aabb.max_size.flags.clear(.growable(AXIS));
+    }
+    inline fn should_propagate_floating(self: LayoutElement, comptime AXIS: Axis) bool {
+        return self._max_or_clip_aabb.max_size.flags.has_flag(.propagate_floating(AXIS));
+    }
+    inline fn set_propagate_floating(self: *LayoutElement, comptime AXIS: Axis) void {
+        self._max_or_clip_aabb.max_size.flags.set(.propagate_floating(AXIS));
+    }
+    inline fn max_size_is_percent_of_parent(self: LayoutElement, comptime AXIS: Axis) bool {
+        return self._max_or_clip_aabb.max_size.flags.has_flag(.max_is_parent_percent(AXIS));
+    }
+    inline fn set_max_size_is_percent_of_parent(self: *LayoutElement, comptime AXIS: Axis) void {
+        self._max_or_clip_aabb.max_size.flags.set(.max_is_parent_percent(AXIS));
     }
     // inline fn get_next_child_axis_line(self: LayoutElement, manager_list: []LayoutElement)
 };
@@ -863,7 +973,7 @@ pub const AxisLine = struct {
     num_elems: u32 = 0,
     next_line: u32 = NULL_IDX,
     min_size: Size = .ZERO,
-    max_secondary_grow: f32 = 0,
+    next_growable_line_this_pass: u32 = NULL_IDX,
 
     pub fn init_with_negative_gap(gap: f32, comptime PRIMARY_AXIS: Axis) AxisLine {
         var size: Size = .ZERO;
@@ -1362,7 +1472,7 @@ pub const LayoutManager = struct {
             child_idx = child.next_sibling;
         }
         if (COMBINE_MODE == .UPDATE_MAX_OF_MIN_SIZE) {
-            self.distribute_extra_space_to_axis_line_members_secondary(axis_line: *AxisLine, space: f32, comptime AXIS: Axis)
+            self.distribute_secondary_extra_space_to_all_axis_lines(parent, CT.AXIS);
         }
     }
 
@@ -1413,7 +1523,7 @@ pub const LayoutManager = struct {
             .UPDATE_MAX_OF_MIN_SIZE => {
                 size_if_combine = @max(size_if_combine, child_size);
                 line.min_size.set(AXIS, size_if_combine);
-                if (child.has_grow_mode(AXIS) == .GROW) {
+                if (child.is_growable(AXIS) == .GROW) {
                     line.max_secondary_grow = @max(line.max_secondary_grow, child.get_grow_ratio(AXIS));
                 }
                 switch (STAGE) {
@@ -1440,125 +1550,160 @@ pub const LayoutManager = struct {
             var idx: u32 = axis_line.first_elem;
             var n: u32 = axis_line.num_elems;
             var child: *LayoutElement = undefined;
-            var space_taken_this_pass: f32 = 0;
-            var total_growable_this_pass: u32 = 0;
-            var smallest_growable_this_pass: f32 = math.inf(f32);
-            var second_smallest_growable_this_pass: f32 = math.inf(f32);
-            //CHECKPOINT move to grow-to-equal-sizes mode
+            var total_growable_children_this_pass: u32 = 0;
+            var smallest_growable_child_this_pass: f32 = math.inf(f32);
+            var second_smallest_growable_child_this_pass: f32 = math.inf(f32);
+            var grow_limit_this_pass: f32 = math.inf(f32);
+            var first_growable_child_this_pass: u32 = NULL_IDX;
+            var prev_growable_child_this_pass: u32 = NULL_IDX;
             while (n > 0) {
                 n - 1;
                 child = get_elem_ptr(self.elems, idx);
-                if (child.can_grow(AXIS) and) {
-                    total_growable_this_pass += 1;
-                    if (child.get_min_size_self(AXIS) < smallest_growable_this_pass) {
-                        second_smallest_growable_this_pass = smallest_growable_this_pass;
-                        smallest_growable_this_pass = child.get_min_size_self(AXIS);
+                if (child.is_growable(AXIS)) {
+                     if (Math.approx_equal(f32, child.get_min_size_self(AXIS), smallest_growable_child_this_pass)) {
+                        const prev_child: *LayoutElement = self.get_elem_ptr(prev_growable_child_this_pass);
+                        prev_child.set_next_growable_idx_this_pass(idx);
+                        prev_growable_child_this_pass = idx;
+                        total_growable_children_this_pass += 1;
+                        grow_limit_this_pass = @min(grow_limit_this_pass, child.get_max_size(AXIS));
+                    } else if (Math.approx_less_than(f32, child.get_min_size_self(AXIS), smallest_growable_child_this_pass)) {
+                        second_smallest_growable_child_this_pass = smallest_growable_child_this_pass;
+                        smallest_growable_child_this_pass = child.get_min_size_self(AXIS);
+                        grow_limit_this_pass = @min(child.get_max_size(AXIS), second_smallest_growable_child_this_pass);
+                        first_growable_child_this_pass = idx;
+                        prev_growable_child_this_pass = idx;
+                        child.set_next_growable_idx_this_pass(NULL_IDX);
+                        total_growable_children_this_pass = 1;
                     }
                 }
                 idx = child.next_sibling;
             }
-            if (total_growable_this_pass == 0) break;
-            idx = axis_line.first_elem;
-            n = axis_line.num_elems;
+            if (total_growable_children_this_pass == 0) break;
+            idx = first_growable_child_this_pass;
+            n = total_growable_children_this_pass;
+            const nn: f32 = @floatFromInt(n);
+            const max_space_per_child_this_pass = grow_limit_this_pass - smallest_growable_child_this_pass;
+            var space_per_child_this_pass = remaining_space / nn;
+            space_per_child_this_pass = @min(space_per_child_this_pass, max_space_per_child_this_pass);
+            const space_taken_this_pass = nn * space_per_child_this_pass;
+            if (space_taken_this_pass <= math.floatEps(f32)) break;
             while (n > 0) {
                 n - 1;
                 child = get_elem_ptr(self.elems, idx);
-                if (child.can_grow(AXIS)) {
-                    const ratio_to_claim = child.get_grow_ratio(AXIS) / total_weight_this_pass;
-                    var space_to_claim = remaining_space * ratio_to_claim;
-                    var potential_new_size = child.get_min_size_self(AXIS) + space_to_claim;
-                    potential_new_size = @min(potential_new_size, child.get_max_size(AXIS));
-                    space_to_claim = potential_new_size - child.get_min_size_self(AXIS);
-                    space_taken_this_pass += space_to_claim;
-                    child.set_min_size_self(AXIS, potential_new_size);
-                }
+                child.add_to_min_self_size_limit_to_max_update_growable(AXIS, space_per_child_this_pass);
+                idx = child.get_next_idx_this_pass();
             }
-            if (space_taken_this_pass <= 0) break;
             remaining_space -= space_taken_this_pass;
-            total_weight_this_pass = 0;
-            total_growable_this_pass = 0;
+            axis_line.min_size.set(AXIS, axis_line.min_size.get(AXIS) + space_taken_this_pass)
         }
-        axis_line.min_size.set(AXIS, remaining_space);
     }
-    //CHECKPOINT REMOVE GROW WEIGHTS
+    
     fn distribute_secondary_extra_space_to_all_axis_lines(self: *LayoutManager, parent: *LayoutElement, comptime AXIS: Axis) void {
+        const gap = parent.child_gaps.get(AXIS);
         var line = &parent.first_axis_line;
-        var lines_left: u32 = parent.num_axis_lines;
+        var nc: u32 = parent.num_axis_lines;
         var total_axis_lines_size: f32 = -gap;
-        while (lines_left > 0) {
-            lines_left -= 1;
+        while (nc > 0) {
+            nc -= 1;
             total_axis_lines_size += line.min_size.get(AXIS) + gap;
-            if (lines_left > 0) {
+            var nn = line.num_elems;
+            var child_idx: u32 = line.first_elem;
+            while (nn > 0) {
+                nn - 1;
+                const child: *LayoutElement = self.get_elem_ptr(child_idx);
+                if (child.is_growable(AXIS)) {
+                    child.set_min_size_self_limit_to_max_update_growable(AXIS, line.min_size.get(AXIS));
+                }
+                child_idx = child.next_sibling;
+            }
+            if (nc > 0) {
                 line = self.get_line_ptr(line.next_line);
             }
         }
         const space_for_lines = parent.get_min_size_self(AXIS) - parent.padding.get(AXIS);
         var remaining_space = space_for_lines - total_axis_lines_size;
         while (remaining_space > 0) {
-            var space_claimed_this_pass: f32 = 0;
-            var num_growable_lines_this_pass: u32 = 0;
-            var total_line_weight_this_pass: f32 = 0;
             line = &parent.first_axis_line;
-            lines_left = parent.num_axis_lines;
-            while (lines_left > 0) {
-                lines_left -= 1;
-                if (line.max_secondary_grow > 0) {
-                    line.max_secondary_grow = 0;
-                    var num_growable_elems_this_line: u32 = 0;
-                    var elems_left: u32 = line.num_elems;
-                    var elem_idx: u32 = line.first_elem;
-                    var elem: *LayoutElement = undefined;
-                    while (elems_left > 0) {
-                        elems_left -= 1;
-                        elem = self.get_elem_ptr(elem_idx);
-                        if (elem.get_min_size_self(AXIS) < elem.get_max_size(AXIS) and elem.has_grow_mode(AXIS) == .GROW) {
-                            num_growable_elems_this_line += 1;
-                            line.max_secondary_grow = @max(line.max_secondary_grow, elem.get_grow_ratio(AXIS));
+            nc = parent.num_axis_lines;
+            var axis_line_idx: u32 = NULL_IDX;
+            var child: *LayoutElement = undefined;
+            var total_growable_lines_this_pass: u32 = 0;
+            var total_growable_children_this_pass: u32 = 0;
+            var child_grow_limit_this_pass: f32 = math.inf(f32);
+            var prev_growable_line_this_pass: u32 = NULL_IDX;
+            var first_growable_line_this_pass: u32 = NULL_IDX;
+            var smallest_growable_child_this_pass: f32 = math.inf(f32);
+            var second_smallest_growable_child_this_pass: f32 = math.inf(f32);
+            var first_growable_child_this_pass: u32 = NULL_IDX;
+            var prev_growable_child_this_pass: u32 = NULL_IDX;
+            var nc: u32 = undefined;
+            while (nc > 0) {
+                nc - 1;
+                nc = line.num_elems;
+                var child_idx: u32 = line.first_elem;
+                while (nc > 0) {
+                    nc - 1;
+                    child = get_elem_ptr(self.elems, idx);
+                    if (child.is_growable(AXIS)) {
+                        if (Math.approx_equal(f32, child.get_min_size_self(AXIS), smallest_growable_child_this_pass)) {
+                            const prev_child: *LayoutElement = self.get_elem_ptr(prev_growable_child_this_pass);
+                            const prev_line: *AxisLine = if (prev_growable_line_this_pass == NULL_IDX) &parent.first_axis_line else self.get_line_ptr(prev_growable_line_this_pass);
+                            prev_child.set_next_growable_idx_this_pass(idx);
+                            prev_line.next_growable_line_this_pass = axis_line_idx;
+                            prev_growable_child_this_pass = idx;
+                            prev_growable_child_this_pass = axis_line_idx;
+                            child_grow_limit_this_pass = @min(child_grow_limit_this_pass, child.get_max_size(AXIS));
+                            if (total_growable_lines_this_pass == 0) {
+                                total_growable_lines_this_pass += 1;
+                            } else if (axis_line_idx != prev_growable_line_this_pass) {
+                                total_growable_lines_this_pass += 1;
+                            }
+                            total_growable_children_this_pass += 1;
+                        } else if (Math.approx_less_than(f32, child.get_min_size_self(AXIS), smallest_growable_child_this_pass)) {
+                            total_growable_lines_this_pass = 1;
+                            total_growable_children_this_pass = 1;
+                            prev_growable_line_this_pass = axis_line_idx;
+                            first_growable_line_this_pass = axis_line_idx;
+                            second_smallest_growable_child_this_pass = smallest_growable_child_this_pass;
+                            smallest_growable_child_this_pass = child.get_min_size_self(AXIS);
+                            child_grow_limit_this_pass = @min(child.get_max_size(AXIS), second_smallest_growable_child_this_pass);
+                            first_growable_child_this_pass = idx;
+                            prev_growable_child_this_pass = idx;
+                            child.set_next_growable_idx_this_pass(NULL_IDX);
                         }
-                        elem_idx = elem.next_sibling;
                     }
-                    if (num_growable_elems_this_line > 0) {
-                        num_growable_lines_this_pass += 1;
-                        total_line_weight_this_pass += line.max_secondary_grow;
-                    } else {
-                        line.max_secondary_grow = 0;
-                    }
+                    idx = child.next_sibling;
                 }
-                if (lines_left > 0) {
-                    line = self.get_line_ptr(line.next_line);
+                axis_line_idx = line.next_line;
+                if (nc > 0) {
+                    line = self.get_line_ptr(axis_line_idx);
                 }
             }
-            if (num_growable_lines_this_pass == 0) break;
-            line = &parent.first_axis_line;
-            lines_left = parent.num_axis_lines;
-            while (lines_left > 0) {
-                lines_left -= 1;
-                if (line.max_secondary_grow > 0) {
-                    var elems_left: u32 = line.num_elems;
-                    var elem_idx: u32 = line.first_elem;
-                    var elem: *LayoutElement = undefined;
-                    var space_claimed_this_line: f32 = 0;
-                    while (elems_left > 0) {
-                        elems_left -= 1;
-                        elem = self.get_elem_ptr(elem_idx);
-                        if (elem.get_min_size_self(AXIS) < elem.get_max_size(AXIS) and elem.has_grow_mode(AXIS) == .GROW) {
-                            num_growable_elems_this_line += 1;
-                            max_grow_weight_this_line = @max(max_grow_weight_this_line, elem.get_grow_ratio(AXIS));
-                        }
-                        elem_idx = elem.next_sibling;
-                    }
-                    if (num_growable_elems_this_line > 0) {
-                        num_growable_lines_this_pass += 1;
-                        total_line_weight_this_pass += max_grow_weight_this_line;
-                    } else {
-                        line.max_secondary_grow = 0;
-                    }
-                }
-                
-                if (lines_left > 0) {
-                    line = self.get_line_ptr(line.next_line);
+            if (total_growable_lines_this_pass == 0) break;
+            idx = first_growable_child_this_pass;
+            nc = total_growable_children_this_pass;
+            nl = total_growable_lines_this_pass;
+            const total_growable_lines_this_pass_f32: f32 = @floatFromInt(total_growable_lines_this_pass);
+            const max_space_per_child_this_pass = child_grow_limit_this_pass - smallest_growable_child_this_pass;
+            var space_per_child_this_pass = remaining_space / total_growable_lines_this_pass_f32;
+            space_per_child_this_pass = @min(space_per_child_this_pass, max_space_per_child_this_pass);
+            const space_taken_this_pass = total_growable_lines_this_pass_f32 * space_per_child_this_pass;
+            if (space_taken_this_pass <= math.floatEps(f32)) break;
+            while (nc > 0) {
+                nc - 1;
+                child = get_elem_ptr(self.elems, idx);
+                child.add_to_min_self_size_limit_to_max_update_growable(AXIS, space_per_child_this_pass);
+                idx = child.get_next_idx_this_pass();
+            }
+            line = if (first_growable_line_this_pass == NULL_IDX) &parent.first_axis_line else self.get_line_ptr(first_growable_line_this_pass);
+            while (nl > 0) {
+                nl - 1;
+                line.min_size.set(AXIS, line.min_size.get(AXIS) + space_per_child_this_pass);
+                if (nl > 0) {
+                    line = self.get_line_ptr(line.next_growable_line_this_pass);
                 }
             }
+            remaining_space -= space_taken_this_pass;
         }
     }
 
@@ -1577,9 +1722,8 @@ pub const LayoutManager = struct {
 
     fn fit_and_expand_children_to_fill_parent(_: Elems, idx: u32, self: *LayoutManager, comptime CT: AxisStage) anyerror!Elems {
         const parent = self.get_elem_ptr(idx);
-        if (parent.is_floating or parent.parent_idx == NULL_IDX) {
-            const final_size = @min(parent.get_min_size_self(CT.AXIS), parent.get_max_size(CT.AXIS));
-            parent.set_min_size_self(CT.AXIS, final_size);
+        if ((parent.is_floating and !parent.should_propagate_floating(CT.AXIS)) or parent.parent_idx == NULL_IDX) {
+            parent.set_min_size_self_limit_to_max_update_growable(CT.AXIS, parent.get_min_size_self(CT.AXIS));
         }
         if (parent.first_inline_child != NULL_IDX) {
             assert_with_reason_debug_only(parent.num_inline_children > 0, @src(), "first child on parent wasnt NULL, but parent has no children count", .{});

@@ -194,24 +194,20 @@ pub fn approx_less_than_or_equal_to(comptime T: type, a: T, b: T) bool {
 }
 
 pub fn approx_less_than(comptime T: type, a: T, b: T) bool {
-    return a < (b + math.floatEpsAt(T, b));
+    return a < (b - math.floatEpsAt(T, b));
 }
 
 pub fn approx_greater_than_or_equal_to(comptime T: type, a: T, b: T) bool {
-    return (a + math.floatEpsAt(T, a)) >= b;
+    return a >= (b - math.floatEpsAt(T, b));
 }
 
 pub fn approx_greater_than(comptime T: type, a: T, b: T) bool {
-    return (a + math.floatEpsAt(T, a)) > b;
+    return a > (b + math.floatEpsAt(T, b));
 }
 
 pub fn approx_equal(comptime T: type, a: T, b: T) bool {
     if (Types.type_is_int(T)) return a == b;
-    const a_min: T = a - math.floatEpsAt(T, a);
-    const a_max: T = a + math.floatEpsAt(T, a);
-    const b_min: T = b - math.floatEpsAt(T, b);
-    const b_max: T = b + math.floatEpsAt(T, b);
-    return a_max >= b_min and b_max >= a_min;
+    return @abs(a - b) < math.floatEpsAt(T, @min(a, b));
 }
 pub fn approx_equal_vec(comptime T: type, a: T, b: T) @Vector(@typeInfo(T).vector.len, bool) {
     const I = @typeInfo(T).vector;
