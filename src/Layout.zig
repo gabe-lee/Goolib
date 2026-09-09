@@ -263,6 +263,8 @@ pub const SizeAxisInfo = struct {
 };
 
 pub const SizeInfo = struct {
+    min: Size,
+    max: Size,
     width: SizeAxisInfo,
     height: SizeAxisInfo,
 
@@ -532,36 +534,6 @@ pub const AttachPoint = enum(u4) {
     BOTTOM_RIGHT,
 };
 
-// pub const Mouse = enum(u2) {
-//     PASSTHROUGH,
-//     CAPTURE,
-// };
-
-// pub const MouseState = enum(u2) {
-//     NOT_HOVERED,
-//     HOVERED,
-//     CLICKED,
-// };
-
-// pub const FloatMode = enum(u2) {
-//     NO_FLOAT,
-//     FLOAT_FROM_PARENT,
-//     FLOAT_FROM_ELEMENT_ID,
-//     FLOT_FROM_ROOT,
-// };
-
-// pub const FloatClipping = enum(u1) {
-//     NO_FLOAT_CLIPPING,
-//     CLIP_TO_ATTACHED,
-// };
-
-// pub const PointerClickState = enum(u2) {
-//     NOT_PRESSED,
-//     JUST_PRESSED,
-//     HELD_PRESSED,
-//     JUST_RELEASED,
-// };
-
 pub const SiblingEdge = struct {
     pub const LEFT: u4 = 1 << 0;
     pub const RIGHT: u4 = 1 << 1;
@@ -575,35 +547,105 @@ pub const FloatingAttachment = struct {
 };
 
 pub const Floating = struct {
-    use_floating: bool = false,
+    /// Whether the element takes part in the layout heirarchy,
+    /// or merely uses the parent position and 'floats'
+    /// above (or below) the parent
+    is_floating: bool = false,
+    /// The attatchment points for the floating element.
+    /// If `final_position_offset` is 0, the parent and child
+    /// will visually touch at these points.
     attach: FloatingAttachment = .{},
-    offest: Pos = .ZERO,
 
-    pub inline fn in_line() Floating {
+    pub inline fn not_floating() Floating {
         return Floating{};
     }
-    pub inline fn floating(parent_attach: AttachPoint, child_attach: AttachPoint, offset_from_attach: Pos) Floating {
+    pub inline fn floating(parent_attach: AttachPoint, child_attach: AttachPoint) Floating {
         return Floating{
-            .use_floating = true,
+            .is_floating = true,
             .attach = .{
                 .parent = parent_attach,
                 .child = child_attach,
             },
-            .offset = offset_from_attach,
         };
     }
 };
 
 pub const LayoutRequest = struct {
-    //FIXME
-    size: SizeInfo,
-    float: Floating = .in_line(),
+    /// The minimum size of the element
+    min_size: Size,
+    /// The maximum size of the element. This always overrules min size.
+    max_size: Size = .INF,
+    /// After the layout position is calculated, this is added to that.
+    final_position_offset: Pos = .ZERO,
+    /// If the parent has free space on the x axis (within the same row),
+    /// allow the element to expand to fill the space
+    ///
+    /// Has NO effect when element is floating
+    grow_x_to_fill_parent_space: bool = false,
+    /// If the parent has free space on the y axis (within the same column),
+    /// allow the element to expand to fill the space
+    ///
+    /// Has NO effect when element is floating
+    grow_y_to_fill_parent_space: bool = false,
+    /// Whether the element takes part in the layout heirarchy,
+    /// or merely uses the parent position and 'floats'
+    /// above (or below) the parent
+    float: Floating = .not_floating(),
+    /// The padding around the inside edges of the element
+    /// before children are positioned
     padding: Padding = .uniform(0),
+    /// The gap bewteen children
     child_gaps: Gap = .uniform(0),
+    /// The edges that children are overall aligned to
     child_align: ChildAlignment = .x_y(.LEFT, .TOP),
-    layout_dir: LayoutDirection = .LEFT_TO_RIGHT__TOP_TO_BOTTOM,
+    /// The direction children are laid out in from first to last
+    child_layout_dir: LayoutDirection = .LEFT_TO_RIGHT__TOP_TO_BOTTOM,
+    /// If the child's final bounding box exceeds the parent's,
+    /// whether the child should clip its bounding box to be within
+    /// the parent's. The original bounding box and clipping bounding box are
+    /// always provided, this just changes how the clipping bounding box is
+    /// calculated. If `false` the clipping box is the same as the drawing box.
     clip_to_parent: bool = false,
-    use_flow_mode: bool = false,
+    /// If a child row/column overflows on the primary layout axis, whether
+    /// to start a new row/column for the remaining children. DUE TO
+    /// ALGORITHM CONSTRAINTS, THIS IS ONLY ALLOWED WHEN THE PRIMARY
+    /// LAYOUT DIRECTION MATCHES THE DRIVING AXIS OF THE LAYOUT MANAGER.
+    wrap_children_that_overflow_size: bool = false,
+    /// Within a child axis-line (row/column), how to align
+    /// children within the local axis line on the secondary axis.
+    ///
+    /// For example, If an axis line is a row (primary x axis),
+    /// and has 2 elements with a height (y size) of 50px and 100px,
+    /// the axis line will have a y size of 100px. This setting determines
+    /// how the 50px element is positioned in the y-axis using the remaining
+    /// 50px space within the axis-line.
+    ///
+    /// `INHERIT` means to match `child_align` setting
+    children_axis_line_local_align: AxisLineLocalAlign = .INHERIT,
+    /// Within the axis-line (row/column) this element occupies on its parent,
+    /// how to align itself within that local axis line on the secondary axis.
+    ///
+    /// This overrides the `children_axis_line_local_align` setting on the parent
+    /// when not set to `INHERIT`
+    ///
+    /// For example, If an axis line is a row (primary x axis),
+    /// and has 2 elements with a height (y size) of 50px and 100px,
+    /// the axis line will have a y size of 100px. This setting determines
+    /// how the 50px element is positioned in the y-axis using the remaining
+    /// 50px y space within the axis-line.
+    ///
+    /// `INHERIT` means to match `children_axis_line_local_align` setting
+    /// on the parent, or if the parent is also `INHERIT` it matches the
+    /// `child_align` setting instead
+    self_axis_line_local_align: AxisLineLocalAlign = .INHERIT,
+    /// How the `final_position_offset` is interpreted for the x value
+    offset_mode_x: OffsetMode = .ABSOLUTE,
+    /// How the `final_position_offset` is interpreted for the y value
+    offset_mode_y: OffsetMode = .ABSOLUTE,
+    /// How the element max x size is interpreted.
+    max_mode_x: MaxMode = .ABSOLUTE,
+    /// How the element max y size is interpreted.
+    max_mode_y: MaxMode = .ABSOLUTE,
 };
 
 const NULL_IDX: u32 = 0xFFFFFFFF;
@@ -622,63 +664,20 @@ const MinSize_OR_FinalAABB = union {
     }
 };
 
-const Growable = struct {
-    const NO = 0;
-    const POSSIBLE = 1;
-    const THIS_PASS = 2;
+const OffsetMode = enum(u2) {
+    ABSOLUTE,
+    PERCENT_OF_PARENT_SIZE,
+    PERCENT_OF_SELF_SIZE,
 };
-
-const MaxMode = enum(u3) {
-    EXACT_X_EXACT_Y,
-    PERCENT_X_EXACT_Y,
-    EXACT_X_PERCENT_Y,
-    PERCENT_X_PERCENT_Y,
+const MaxMode = enum(u1) {
+    ABSOLUTE,
+    PERCENT_OF_PARENT_SIZE,
 };
-
-const MaxFlags = Root.Flags.Flags(enum(u8) {
-    // zig fmt:off
-    MAX_IS_PARENT_PERCENT_X = 0b0000_0001,
-    GROWABLE_X = 0b0000_0010,
-    GROWABLE_THIS_PASS_X = 0b0000_0100,
-    PROPAGATE_FLOATING_X = 0b0000_1000,
-    MAX_IS_PARENT_PERCENT_Y = 0b0001_0000,
-    GROWABLE_Y = 0b0010_0000,
-    GROWABLE_THIS_PASS_Y = 0b0100_0000,
-    PROPAGATE_FLOATING_Y = 0b1000_0000,
-    // zig fmt:on
-
-    inline fn max_is_parent_percent(comptime AXIS: Axis) @This() {
-        switch (AXIS) {
-            .X => return @This().MAX_IS_PARENT_PERCENT_X,
-            .Y => return @This().MAX_IS_PARENT_PERCENT_Y,
-        }
-    }
-    inline fn growable(comptime AXIS: Axis) @This() {
-        switch (AXIS) {
-            .X => return @This().GROWABLE_X,
-            .Y => return @This().GROWABLE_Y,
-        }
-    }
-    inline fn growable_this_pass(comptime AXIS: Axis) @This() {
-        switch (AXIS) {
-            .X => return @This().GROWABLE_THIS_PASS_X,
-            .Y => return @This().GROWABLE_THIS_PASS_Y,
-        }
-    }
-    inline fn propagate_floating(comptime AXIS: Axis) @This() {
-        switch (AXIS) {
-            .X => return @This().PROPAGATE_FLOATING_X,
-            .Y => return @This().PROPAGATE_FLOATING_Y,
-        }
-    }
-}, enum(u8) {});
 
 const MaxSizeAndLayout = struct {
     value: Size = .INF,
     next_this_pass: u32 = NULL_IDX,
-    lay1: PackedLayoutInfo1 = .{},
-    lay2: PackedLayoutInfo2 = .{},
-    flags: MaxFlags = .{},
+    layout: PackedLayoutInfo = .{},
 
     comptime {
         assert_with_reason_debug_only(@sizeOf(MaxSizeAndLayout) <= @sizeOf(AABB), null, "MaxSize must be smaller or equal size to AABB", .{});
@@ -711,19 +710,22 @@ const YDir = enum(u1) {
     BOTTOM_TO_TOP,
 };
 
-const PackedLayoutInfo1 = packed struct(u16) {
-    float_parent_attach: AttachPoint = .TOP_LEFT, // 4
+const PackedLayoutInfo = packed struct(u32) {
+    float_parent_attach: AttachPoint = .TOP_LEFT, // 4 = 4
     float_self_attach: AttachPoint = .TOP_LEFT, // 4 = 8
     children_axis_line_local_align: AxisLineLocalAlign = .INHERIT, // 2 = 10
     self_axis_line_local_align: AxisLineLocalAlign = .INHERIT, // 2 = 12
     child_align_x: AlignX = .LEFT, // 2 = 14
     child_align_y: AlignY = .TOP, // 2 = 16
-};
-
-const PackedLayoutInfo2 = packed struct(u8) {
-    primary_child_axis: Axis = .X, // 1
-    child_layout_dir_x: XDir = .LEFT_TO_RIGHT, // 1 = 2
-    child_layout_dir_y: YDir = .TOP_TO_BOTTOM, // 1 = 3
+    offset_mode_x: OffsetMode = .ABSOLUTE, // 2 = 18
+    offset_mode_y: OffsetMode = .ABSOLUTE, // 2 = 20
+    growable_x: bool = false, // 1 = 21
+    growable_y: bool = false, // 1 = 22
+    primary_child_axis: Axis = .X, // 1 = 23
+    child_layout_dir_x: XDir = .LEFT_TO_RIGHT, // 1 = 24
+    child_layout_dir_y: YDir = .TOP_TO_BOTTOM, // 1 = 25
+    max_mode_x: MaxMode = .ABSOLUTE, // 1 = 26
+    max_mode_y: MaxMode = .ABSOLUTE, // 1 = 27
 };
 
 const Traverse = Utils.Traverser.IndexBasedMultiFirstChildNextSiblingTraverser(LayoutElement, u32, NULL_IDX, &.{ "first_inline_child", "first_floating_child" }, "next_sibling");
@@ -739,7 +741,7 @@ const LayoutElement = struct {
     requester: LayoutRequester,
     _min_or_aabb: MinSize_OR_FinalAABB,
     _max_or_clip_aabb: MaxSize_OR_FinalClipAABB,
-    relative_offset: Pos = .ZERO,
+    final_position_offset: Pos = .ZERO,
     padding: Padding,
     child_gaps: Gap,
     first_inline_child: u32 = NULL_IDX,
@@ -753,86 +755,80 @@ const LayoutElement = struct {
     is_floating: bool,
     clip_to_parent: bool,
     completely_clipped: bool = false,
-    use_flow_mode: bool,
+    use_wrap_mode: bool,
 
     const SIZE = @sizeOf(LayoutElement);
     inline fn set_children_local_align(self: *LayoutElement, alla: AxisLineLocalAlign) void {
-        self._max_or_clip_aabb.max_size.lay1.children_axis_line_local_align = alla;
+        self._max_or_clip_aabb.max_size.layout.children_axis_line_local_align = alla;
     }
     inline fn get_children_local_align(self: LayoutElement) AxisLineLocalAlign {
-        return self._max_or_clip_aabb.max_size.lay1.children_axis_line_local_align;
+        return self._max_or_clip_aabb.max_size.layout.children_axis_line_local_align;
     }
     inline fn set_self_local_align(self: *LayoutElement, alla: AxisLineLocalAlign) void {
-        self._max_or_clip_aabb.max_size.lay1.self_axis_line_local_align = alla;
+        self._max_or_clip_aabb.max_size.layout.self_axis_line_local_align = alla;
     }
     inline fn get_self_local_align(self: LayoutElement) AxisLineLocalAlign {
-        return self._max_or_clip_aabb.max_size.lay1.self_axis_line_local_align;
+        return self._max_or_clip_aabb.max_size.layout.self_axis_line_local_align;
     }
     inline fn set_parent_float_attach(self: *LayoutElement, attach: AttachPoint) void {
-        self._max_or_clip_aabb.max_size.lay1.float_parent_attach = attach;
+        self._max_or_clip_aabb.max_size.layout.float_parent_attach = attach;
     }
     inline fn get_parent_float_attach(self: LayoutElement) AttachPoint {
-        return self._max_or_clip_aabb.max_size.lay1.float_parent_attach;
+        return self._max_or_clip_aabb.max_size.layout.float_parent_attach;
     }
     inline fn set_self_float_attach(self: *LayoutElement, attach: AttachPoint) void {
-        self._max_or_clip_aabb.max_size.lay1.float_self_attach = attach;
+        self._max_or_clip_aabb.max_size.layout.float_self_attach = attach;
     }
     inline fn get_self_float_attach(self: LayoutElement) AttachPoint {
-        return self._max_or_clip_aabb.max_size.lay1.float_self_attach;
+        return self._max_or_clip_aabb.max_size.layout.float_self_attach;
     }
     inline fn set_child_align(self: *LayoutElement, comptime AXIS: Axis, alignment: if (AXIS == .X) AlignX else AlignY) void {
         switch (comptime AXIS) {
             .X => {
-                self._max_or_clip_aabb.max_size.lay1.child_align_x = alignment;
+                self._max_or_clip_aabb.max_size.layout.child_align_x = alignment;
             },
             .Y => {
-                self._max_or_clip_aabb.max_size.lay1.child_align_y = alignment;
+                self._max_or_clip_aabb.max_size.layout.child_align_y = alignment;
             },
         }
     }
     inline fn get_child_align(self: *LayoutElement, comptime AXIS: Axis) if (AXIS == .X) AlignX else AlignY {
         switch (comptime AXIS) {
             .X => {
-                return self._max_or_clip_aabb.max_size.lay1.child_align_x;
+                return self._max_or_clip_aabb.max_size.layout.child_align_x;
             },
             .Y => {
-                return self._max_or_clip_aabb.max_size.lay1.child_align_y;
+                return self._max_or_clip_aabb.max_size.layout.child_align_y;
             },
         }
     }
     inline fn set_primary_child_axis(self: *LayoutElement, axis: Axis) void {
-        self._max_or_clip_aabb.max_size.lay2.primary_child_axis = axis;
+        self._max_or_clip_aabb.max_size.layout.primary_child_axis = axis;
     }
     inline fn get_primary_child_axis(self: *LayoutElement) Axis {
-        return self._max_or_clip_aabb.max_size.lay2.primary_child_axis;
+        return self._max_or_clip_aabb.max_size.layout.primary_child_axis;
     }
     inline fn set_child_layout_dir(self: *LayoutElement, comptime AXIS: Axis, dir: if (AXIS == .X) XDir else YDir) void {
         switch (comptime AXIS) {
             .X => {
-                self._max_or_clip_aabb.max_size.lay2.child_layout_dir_x = dir;
+                self._max_or_clip_aabb.max_size.layout.child_layout_dir_x = dir;
             },
             .Y => {
-                self._max_or_clip_aabb.max_size.lay2.child_layout_dir_y = dir;
+                self._max_or_clip_aabb.max_size.layout.child_layout_dir_y = dir;
             },
         }
     }
     inline fn get_child_layout_dir(self: *LayoutElement, comptime AXIS: Axis) if (AXIS == .X) XDir else YDir {
         switch (comptime AXIS) {
             .X => {
-                return self._max_or_clip_aabb.max_size.lay2.child_layout_dir_x;
+                return self._max_or_clip_aabb.max_size.layout.child_layout_dir_x;
             },
             .Y => {
-                return self._max_or_clip_aabb.max_size.lay2.child_layout_dir_y;
+                return self._max_or_clip_aabb.max_size.layout.child_layout_dir_y;
             },
         }
     }
-    inline fn flags_ptr(self: *LayoutElement) *MaxFlags {
-        return &self._max_or_clip_aabb.max_size.flags;
-    }
-    inline fn flags(self: *LayoutElement) MaxFlags {
-        return self._max_or_clip_aabb.max_size.flags;
-    }
-    inline fn get_next_idx_this_pass(self: LayoutElement) u32 {
+    inline fn get_next_growable_idx_this_pass(self: LayoutElement) u32 {
         return self._max_or_clip_aabb.max_size.next_this_pass;
     }
     inline fn set_next_growable_idx_this_pass(self: *LayoutElement, next: u32) void {
@@ -849,20 +845,17 @@ const LayoutElement = struct {
         const max = self.get_max_size(AXIS);
         if (self._min_or_aabb.min_size.self.get(AXIS) >= max) {
             self._min_or_aabb.min_size.self.set(AXIS, max);
-            self.clear_growable(AXIS);
+            self.set_growable_false(AXIS);
         }
     }
     inline fn set_min_size_self(self: *LayoutElement, comptime AXIS: Axis, val: f32) void {
         self._min_or_aabb.min_size.self.set(AXIS, val);
     }
-    inline fn set_min_size_self_limit_to_max(self: *LayoutElement, comptime AXIS: Axis, val: f32) void {
-        self._min_or_aabb.min_size.self.set(AXIS, @min(self.get_max_size(AXIS), val));
-    }
     inline fn set_min_size_self_limit_to_max_update_growable(self: *LayoutElement, comptime AXIS: Axis, val: f32) void {
         const max = self.get_max_size(AXIS);
         if (val >= max) {
             self._min_or_aabb.min_size.self.set(AXIS, max);
-            self.clear_growable(AXIS);
+            self.set_growable_false(AXIS);
         } else {
             self._min_or_aabb.min_size.self.set(AXIS, val);
         }
@@ -870,7 +863,7 @@ const LayoutElement = struct {
     inline fn reevaluate_growable_from_new_min_size(self: *LayoutElement, comptime AXIS: Axis) void {
         const max = self.get_max_size(AXIS);
         if (self.is_growable(AXIS) and self._min_or_aabb.min_size.self.get(AXIS) > max) {
-            self.clear_growable(AXIS);
+            self.set_growable_false(AXIS);
             self.set_min_size_self(AXIS, max);
         }
     }
@@ -879,14 +872,6 @@ const LayoutElement = struct {
     }
     inline fn update_min_size_with_children_min_size(self: *LayoutElement, comptime AXIS: Axis) void {
         self._min_or_aabb.min_size.self.set(AXIS, @max(self._min_or_aabb.min_size.self.get(AXIS), self._min_or_aabb.min_size.children.get(AXIS)));
-    }
-    inline fn update_min_size_with_children_min_size_limit_to_max_update_growable(self: *LayoutElement, comptime AXIS: Axis) void {
-        self._min_or_aabb.min_size.self.set(AXIS, @max(self._min_or_aabb.min_size.self.get(AXIS), self._min_or_aabb.min_size.children.get(AXIS)));
-        const max = self.get_max_size(AXIS);
-        if (self._min_or_aabb.min_size.self.get(AXIS) >= max) {
-            self._min_or_aabb.min_size.self.set(AXIS, max);
-            self.clear_growable(AXIS);
-        }
     }
     inline fn add_to_min_children_size(self: *LayoutElement, comptime AXIS: Axis, val: f32) void {
         self._min_or_aabb.min_size.children.set(AXIS, self._min_or_aabb.min_size.children.get(AXIS) + val);
@@ -897,15 +882,62 @@ const LayoutElement = struct {
     inline fn get_min_children_size(self: LayoutElement, comptime AXIS: Axis) f32 {
         return self._min_or_aabb.min_size.children.get(AXIS);
     }
+    inline fn get_offset_mode(self: LayoutElement, comptime AXIS: Axis) OffsetMode {
+        switch (comptime AXIS) {
+            .X => return self._max_or_clip_aabb.max_size.layout.offset_mode_x,
+            .Y => return self._max_or_clip_aabb.max_size.layout.offset_mode_y,
+        }
+    }
+    inline fn get_max_mode(self: LayoutElement, comptime AXIS: Axis) MaxMode {
+        switch (comptime AXIS) {
+            .X => return self._max_or_clip_aabb.max_size.layout.max_mode_x,
+            .Y => return self._max_or_clip_aabb.max_size.layout.max_mode_y,
+        }
+    }
     inline fn set_max_size(self: *LayoutElement, comptime AXIS: Axis, val: f32) void {
         self._max_or_clip_aabb.max_size.value.set(AXIS, val);
+    }
+    inline fn finalize_max_size(self: *LayoutElement, comptime AXIS: Axis, parent_space_for_children_on_axis: f32) void {
+        switch (self.get_max_mode(AXIS)) {
+            .ABSOLUTE => {},
+            .PERCENT_OF_PARENT_SIZE => {
+                const percent = self._max_or_clip_aabb.max_size.value.get(AXIS);
+                self.set_max_size(AXIS, parent_space_for_children_on_axis * percent);
+            },
+        }
     }
     inline fn get_max_size(self: LayoutElement, comptime AXIS: Axis) f32 {
         return self._max_or_clip_aabb.max_size.value.get(AXIS);
     }
+    inline fn is_growable(self: LayoutElement, comptime AXIS: Axis) bool {
+        switch (comptime AXIS) {
+            .X => return self._max_or_clip_aabb.max_size.layout.growable_x,
+            .Y => return self._max_or_clip_aabb.max_size.layout.growable_y,
+        }
+    }
+    inline fn set_growable_true(self: *LayoutElement, comptime AXIS: Axis) void {
+        switch (comptime AXIS) {
+            .X => {
+                self._max_or_clip_aabb.max_size.layout.growable_x = true;
+            },
+            .Y => {
+                self._max_or_clip_aabb.max_size.layout.growable_y = true;
+            },
+        }
+    }
+    inline fn set_growable_false(self: *LayoutElement, comptime AXIS: Axis) void {
+        switch (comptime AXIS) {
+            .X => {
+                self._max_or_clip_aabb.max_size.layout.growable_x = false;
+            },
+            .Y => {
+                self._max_or_clip_aabb.max_size.layout.growable_y = false;
+            },
+        }
+    }
     inline fn set_final_aabb(self: *LayoutElement, parent_abs: Pos) void {
         const final_size = self._min_or_aabb.min_size.self;
-        const abs_pos = parent_abs.add(self.relative_offset);
+        const abs_pos = parent_abs.add(self.final_position_offset);
         self._min_or_aabb.final_aabb = AABB.new_from_pos_size(abs_pos, final_size);
     }
     inline fn set_clip_aabb(self: *LayoutElement, parent_clip: AABB) void {
@@ -919,36 +951,6 @@ const LayoutElement = struct {
     pub inline fn get_clip_aabb(self: LayoutElement) AABB {
         return self._max_or_clip_aabb.final_clip_aabb;
     }
-    inline fn can_grow_this_pass(self: LayoutElement, comptime AXIS: Axis) bool {
-        return self._max_or_clip_aabb.max_size.flags.has_flag(.growable_this_pass(AXIS));
-    }
-    inline fn set_can_grow_this_pass(self: *LayoutElement, comptime AXIS: Axis) void {
-        self._max_or_clip_aabb.max_size.flags.set(.growable_this_pass(AXIS));
-    }
-    inline fn clear_can_grow_this_pass(self: *LayoutElement, comptime AXIS: Axis) void {
-        self._max_or_clip_aabb.max_size.flags.clear(.growable_this_pass(AXIS));
-    }
-    inline fn is_growable(self: LayoutElement, comptime AXIS: Axis) bool {
-        return self._max_or_clip_aabb.max_size.flags.has_flag(.growable(AXIS));
-    }
-    inline fn set_growable(self: *LayoutElement, comptime AXIS: Axis) void {
-        self._max_or_clip_aabb.max_size.flags.set(.growable(AXIS));
-    }
-    inline fn clear_growable(self: *LayoutElement, comptime AXIS: Axis) void {
-        self._max_or_clip_aabb.max_size.flags.clear(.growable(AXIS));
-    }
-    inline fn should_propagate_floating(self: LayoutElement, comptime AXIS: Axis) bool {
-        return self._max_or_clip_aabb.max_size.flags.has_flag(.propagate_floating(AXIS));
-    }
-    inline fn set_propagate_floating(self: *LayoutElement, comptime AXIS: Axis) void {
-        self._max_or_clip_aabb.max_size.flags.set(.propagate_floating(AXIS));
-    }
-    inline fn max_size_is_percent_of_parent(self: LayoutElement, comptime AXIS: Axis) bool {
-        return self._max_or_clip_aabb.max_size.flags.has_flag(.max_is_parent_percent(AXIS));
-    }
-    inline fn set_max_size_is_percent_of_parent(self: *LayoutElement, comptime AXIS: Axis) void {
-        self._max_or_clip_aabb.max_size.flags.set(.max_is_parent_percent(AXIS));
-    }
     pub inline fn get_absolute_pos(self: *LayoutElement) Pos {
         return self._min_or_aabb.final_aabb.get_min_point();
     }
@@ -961,7 +963,6 @@ const LayoutElement = struct {
     pub inline fn get_final_size(self: *LayoutElement) Size {
         return self._min_or_aabb.final_aabb.get_max_point().subtract(self._min_or_aabb.final_aabb.get_min_point());
     }
-    // inline fn get_next_child_axis_line(self: LayoutElement, manager_list: []LayoutElement)
 };
 
 const Error = Utils.Alloc.AllocErr || TraverseError || error{
@@ -993,21 +994,6 @@ pub fn size_from_aspect_ratio_xy(ratio_x: f32, ratio_y: f32, axis: Axis, axis_di
 
 pub const Id = u32;
 
-const OverlapCheck = struct {
-    aabb: AABB,
-    did_overlap: bool = false,
-};
-
-// const ChildIter = struct {
-//     nodes: *Elems,
-//     curr_child_idx: u32,
-
-//     pub fn has_more_children(self: ChildIter) bool {
-//         return self.curr_child_idx != NULL_IDX;
-//     }
-//     pub fn get_child(self: ChildIter)
-// };
-
 const AxisStage = struct {
     AXIS: Axis,
     STAGE: LayoutStage,
@@ -1019,82 +1005,6 @@ const AxisStage = struct {
         };
     }
 };
-
-// const LayoutCTInfo = struct {
-//     AXIS_ORDER: [2]Axis = .{ Axis.X, Axis.Y },
-//     STAGE: LayoutStage = .PRIMARY_STAGE,
-
-//     inline fn new(comptime AXIS_1: Axis, comptime AXIS_2: Axis, comptime STAGE: LayoutStage) LayoutCTInfo {
-//         return LayoutCTInfo{
-//             .AXIS_ORDER = .{ AXIS_1, AXIS_2 },
-//             .STAGE = STAGE,
-//         };
-//     }
-//     inline fn AXIS(comptime self: LayoutCTInfo) Axis {
-//         return self.AXIS_ORDER[@intFromEnum(self.STAGE)];
-//     }
-//     inline fn OPPOSITE_AXIS(comptime self: LayoutCTInfo) Axis {
-//         return self.AXIS_ORDER[@intFromEnum(self.STAGE) ^ 1];
-//     }
-//     inline fn IN_PRIMARY_STAGE(comptime self: LayoutCTInfo) bool {
-//         return self.STAGE == .PRIMARY_STAGE;
-//     }
-//     inline fn IN_SECONDARY_STAGE(comptime self: LayoutCTInfo) bool {
-//         return self.STAGE == .SECONDARY_STAGE;
-//     }
-// };
-// const LayoutCTInfoPlus = struct {
-//     AXIS_ORDER: [2]Axis = .{ Axis.X, Axis.Y },
-//     STAGE: LayoutStage = .PRIMARY_STAGE,
-//     PARENT_FLOW: bool = false,
-//     PARENT_PRIMARY_LAYOUT: Axis = .X,
-
-//     inline fn new(comptime info: LayoutCTInfo, comptime PARENT_FLOW: bool, comptime PARENT_PRIMARY_LAYOUT: Axis) LayoutCTInfoPlus {
-//         return LayoutCTInfo{
-//             .AXIS_ORDER = info.AXIS_ORDER,
-//             .STAGE = info.STAGE,
-//             .PARENT_FLOW = PARENT_FLOW,
-//             .PARENT_PRIMARY_LAYOUT = PARENT_PRIMARY_LAYOUT,
-//         };
-//     }
-//     inline fn AXIS(comptime self: LayoutCTInfoPlus) Axis {
-//         return self.AXIS_ORDER[@intFromEnum(self.STAGE)];
-//     }
-//     inline fn OPPOSITE_AXIS(comptime self: LayoutCTInfoPlus) Axis {
-//         return self.AXIS_ORDER[@intFromEnum(self.STAGE) ^ 1];
-//     }
-//     inline fn IN_PRIMARY_STAGE(comptime self: LayoutCTInfoPlus) bool {
-//         return self.STAGE == .PRIMARY_STAGE;
-//     }
-//     inline fn IN_SECONDARY_STAGE(comptime self: LayoutCTInfoPlus) bool {
-//         return self.STAGE == .SECONDARY_STAGE;
-//     }
-//     inline fn PARENT_LAYOUT_SAME_DIRECTION_AS_CURRENT_STAGE(comptime self: LayoutCTInfoPlus) bool {
-//         return self.AXIS() == self.PARENT_PRIMARY_LAYOUT;
-//     }
-//     inline fn COMBINE_ADD_SIZE_AND_GAP(comptime self: LayoutCTInfoPlus) bool {
-//         return self.PARENT_LAYOUT_SAME_DIRECTION_AS_CURRENT_STAGE();
-//     }
-//     inline fn COMBINE_UPDATE_MAX_OF_MIN_SIZES(comptime self: LayoutCTInfoPlus) bool {
-//         return !self.PARENT_LAYOUT_SAME_DIRECTION_AS_CURRENT_STAGE();
-//     }
-//     inline fn MIGHT_HAVE_MULTIPLE_AXIS_LINES(comptime self: LayoutCTInfoPlus) bool {
-//         return !self.PARENT_LAYOUT_SAME_DIRECTION_AS_CURRENT_STAGE();
-//     }
-// };
-// const AxisStageFlow = struct {
-//     AXIS: Axis,
-//     STAGE: LayoutStage,
-//     FLOW: bool,
-
-//     pub inline fn new(comptime AXIS: Axis, comptime STAGE: LayoutStage, comptime FLOW: bool) AxisStageFlow {
-//         return AxisStageFlow{
-//             .AXIS = AXIS,
-//             .STAGE = STAGE,
-//             .FLOW = FLOW,
-//         };
-//     }
-// };
 
 const CombineMode = enum {
     ADD_MIN_SIZE_AND_GAP,
@@ -1144,110 +1054,12 @@ pub const AxisLine = struct {
     }
 };
 
-// const Action = struct {
-//     fn set_root_final_size(elems: Elems, root_idx: u32, comptime AXIS: axis) void {
-//         const root = get_elem_ptr(elems, root_idx);
-//         const final_size = @min(root.get_min_size_self(AXIS), root.get_max_size(AXIS));
-//         root.set_final_size(AXIS, final_size);
-//     }
-
-//     fn propagate_min_size_to_parent_y(nodes: Elems, idx: u32, _: void, comptime phase: LayoutStage) Elems {
-//         const child = get_elem_ptr(nodes, idx);
-//         if (child.parent_idx == NULL_IDX) return nodes;
-//         const parent = get_parent_ptr(nodes, idx);
-//         const gap = parent.child_gaps.vertical;
-//         if (parent.layout_dir.primary_dir() == .Y and !parent.is_flow_virtual) {
-//             var size = child.get_min_size_self(.Y);
-//             if (parent.first_inline_child != idx) {
-//                 size += gap;
-//             }
-//             parent.add_to_min_children_size(.Y, size);
-//         } else {
-//             const size = child.get_min_size_self(.Y);
-//             parent.update_max_of_min_children_size(.Y, size);
-//         }
-//         return nodes;
-//     }
-//     fn fit_and_expand_children_to_fill_parent_y(nodes_: Elems, idx: u32, manager: *LayoutManager, comptime phase: LayoutStage) Elems {
-//         var nodes = nodes_;
-//         const parent = get_elem_ptr(nodes, idx);
-//         if (phase == .PRIMARY_STAGE and parent.is_flow_virtual) {} else {}
-//         return nodes;
-//     }
-//     fn recheck_min_y_from_final_x(nodes_: Elems, idx: u32, _: void) Elems {
-//         var nodes = nodes_;
-//         return nodes;
-//     }
-//     fn recheck_min_x_from_final_y(nodes_: Elems, idx: u32, _: void) Elems {
-//         var nodes = nodes_;
-//         return nodes;
-//     }
-//     fn position_and_align_element(nodes_: Elems, idx: u32, _: void) Elems {
-//         var nodes = nodes_;
-//         return nodes;
-//     }
-//     fn check_aabb_overlap(nodes: Elems, idx: u32, context: *OverlapCheck) Elems {
-//         const elem = get_elem_ptr(nodes, idx);
-//         context.did_overlap = get_elem_ptr(nodes, idx).get_clip_aabb().overlaps(context.aabb);
-//         return nodes;
-//     }
-
-//     //UTILS
-//     inline fn get_elem_ptr(nodes: Elems, idx: u32) *LayoutElement {
-//         return &nodes.ptr[idx];
-//     }
-//     inline fn get_elem(nodes: Elems, idx: u32) LayoutElement {
-//         return nodes.ptr[idx];
-//     }
-//     inline fn has_parent(nodes: Elems, idx: u32) bool {
-//         return nodes.ptr[idx].parent_idx != NULL_IDX;
-//     }
-//     inline fn get_parent_ptr(nodes: Elems, idx: u32) *LayoutElement {
-//         return &nodes.ptr[nodes.ptr[idx].parent_idx];
-//     }
-//     inline fn get_parent(nodes: Elems, idx: u32) LayoutElement {
-//         return nodes.ptr[nodes.ptr[idx].parent_idx];
-//     }
-//     inline fn get_next_sibling(nodes: Elems, idx: u32) u32 {
-//         return nodes.ptr[idx].next_sibling;
-//     }
-//     // inline fn set_next_sibling(nodes: Nodes, idx: u32, next: u32) void {
-//     //     nodes.ptr[idx].next_sibling = void;
-//     // }
-//     inline fn split_virtual_sibling(elems_: Elems, elem_idx: u32, elem: *LayoutElement, parent: *LayoutElement, manager: *LayoutManager) Elems {
-//         var elems = elems_realloc_if_needed_for_1_more(elems_, manager);
-//         if (manager.err) return elems;
-//         const next_idx = elems.len;
-//         elems.len += 1;
-//         elem.next_sibling = next_idx;
-//         var cloned_elem = elem.*;
-//         elems.ptr[next_idx] = sib_info;
-//     }
-//     inline fn elems_realloc_if_needed_for_1_more(elems_: Elems, manager: *LayoutManager) Elems {
-//         var elems = elems_;
-//         if (elems.len >= elems.cap) {
-//             switch (manager.elem_ralloc) {
-//                 .STATIC_MEM => {
-//                     manager.err = Error.element_mem_out_of_space;
-//                 },
-//                 .ALLOW_MEM_REALLOC => |pkg| {
-//                     const err: ?Utils.Alloc.AllocErr = Utils.Alloc.smart_alloc_ptr_ptrs(pkg.alloc, &elems.ptr, &elems.len, &elems.cap, elems.len + 1, pkg.settings, .{ .ERROR_MODE = .RETURN_ERRORS });
-//                     if (err) |e| {
-//                         manager.err = Error.element_mem_reallocation_error;
-//                     }
-//                 },
-//             }
-//         }
-//         return elems;
-//     }
-// };
-
 pub const LayoutDrivingAxis = enum(u1) {
     /// Width is calculated first, then elements may choose to recalculate
     /// a new height based on the finalized width before height is finalized
     ///
     /// This is the most common case, especially if the layout elements contain text
-    /// primarily in left-to-right or right-to-left direction,
+    /// primarily in left-to-right or right-to-left direction
     WIDTH_DRIVES_HEIGHT,
     /// Height is calculated first, then elements may choose to recalculate
     /// a new width based on the finalized height before width is finalized
@@ -1527,8 +1339,8 @@ pub const LayoutManager = struct {
             .child_gaps = req.child_gaps,
             .parent_idx = parent,
             .child_align = req.child_align,
-            .layout_dir = req.layout_dir,
-            .is_floating = req.float.use_floating,
+            .layout_dir = req.child_layout_dir,
+            .is_floating = req.float.is_floating,
             .float_offset = req.float.offest,
             .float_child_attach = req.float.attach.child,
             .float_parent_attach = req.float.attach.parent,
@@ -1536,8 +1348,8 @@ pub const LayoutManager = struct {
             .clip_to_parent = req.clip_to_parent,
             .grow_mode_w = req.size.width.mode,
             .grow_mode_h = req.size.height.mode,
-            .relative_offset = if (req.float.use_floating) req.float.offest else .ZERO,
-            .use_flow_mode = req.use_flow_mode,
+            .final_position_offset = if (req.float.is_floating) req.float.offest else .ZERO,
+            .use_wrap_mode = req.use_flow_mode,
         };
         if (parent != NULL_IDX) {
             var par: *LayoutElement = &self.elements[parent];
@@ -1595,7 +1407,7 @@ pub const LayoutManager = struct {
         if (child.is_floating or child.parent_idx == NULL_IDX) return elems;
         const parent = get_parent_ptr(elems, idx);
         const gap = parent.child_gaps.get(CT.AXIS);
-        if (parent.primary_child_axis == CT.AXIS and !parent.use_flow_mode) {
+        if (parent.primary_child_axis == CT.AXIS and !parent.use_wrap_mode) {
             const add_min_size = child.get_min_size_self(CT.AXIS) + gap;
             parent.add_to_min_children_size(CT.AXIS, add_min_size);
         } else {
@@ -1749,7 +1561,7 @@ pub const LayoutManager = struct {
                 n - 1;
                 child = get_elem_ptr(self.elems, idx);
                 child.add_to_min_self_size_limit_to_max_update_growable(AXIS, space_per_child_this_pass);
-                idx = child.get_next_idx_this_pass();
+                idx = child.get_next_growable_idx_this_pass();
             }
             remaining_space -= space_taken_this_pass;
             axis_line.min_size.set(AXIS, axis_line.min_size.get(AXIS) + space_taken_this_pass);
@@ -1851,7 +1663,7 @@ pub const LayoutManager = struct {
                 children_left - 1;
                 child = get_elem_ptr(self.elems, child_idx);
                 child.add_to_min_self_size_limit_to_max_update_growable(AXIS, space_per_child_this_pass);
-                child_idx = child.get_next_idx_this_pass();
+                child_idx = child.get_next_growable_idx_this_pass();
             }
             line = if (first_growable_line_this_pass == NULL_IDX) &parent.first_axis_line else self.get_line_ptr(first_growable_line_this_pass);
             while (lines_left > 0) {
@@ -1872,7 +1684,7 @@ pub const LayoutManager = struct {
         }
         if (parent.first_inline_child != NULL_IDX) {
             assert_with_reason_debug_only(parent.num_inline_children > 0, @src(), "first child on parent wasnt NULL, but parent has no children count", .{});
-            if (parent.use_flow_mode) {
+            if (parent.use_wrap_mode) {
                 if (parent.primary_child_axis == CT.AXIS) {
                     try self.combine_all_children_with_axis_lines(parent, CT, .ADD_MIN_SIZE_AND_GAP, .ALLOW_WRAP);
                 } else {
@@ -2061,7 +1873,7 @@ pub const LayoutManager = struct {
                 }
             },
         }
-        const final_pos = Pos.new(if (comptime DATA.PRIME_AXIS == .X) data.cursor_pos_p else child_pos_s, if (comptime DATA.PRIME_AXIS == .Y) data.cursor_pos_p else child_pos_s).add(child.relative_offset);
+        const final_pos = Pos.new(if (comptime DATA.PRIME_AXIS == .X) data.cursor_pos_p else child_pos_s, if (comptime DATA.PRIME_AXIS == .Y) data.cursor_pos_p else child_pos_s).add(child.final_position_offset);
         const final_size = Size.new(if (comptime DATA.PRIME_AXIS == .X) child_size_p else child_size_s, if (comptime DATA.PRIME_AXIS == .Y) child_size_p else child_size_s);
         child._min_or_aabb.final_aabb = AABB.new_from_pos_size(final_pos, final_size);
         if (comptime DATA.NEGATIVE_DELTA_P) {
@@ -2107,8 +1919,8 @@ pub const LayoutManager = struct {
                 child_pos_y -= child_size.y;
             },
         }
-        child_pos_x += child.relative_offset.x;
-        child_pos_y += child.relative_offset.y;
+        child_pos_x += child.final_position_offset.x;
+        child_pos_y += child.final_position_offset.y;
         child._min_or_aabb.final_aabb == AABB.new_from_pos_size(Pos.new(child_pos_x, child_pos_y), child_size);
         if (child.clip_to_parent) {
             child._max_or_clip_aabb.final_clip_aabb, child.completely_clipped = child._min_or_aabb.final_aabb.overlap_area_and_overlap_area_zero_or_negative(parent._max_or_clip_aabb.final_clip_aabb);
@@ -2185,7 +1997,7 @@ pub const LayoutManager = struct {
         if (parent.parent_idx == NULL_IDX) {
             @branchHint(.unlikely);
             const final_size = parent._min_or_aabb.min_size.self;
-            parent._min_or_aabb.final_aabb = AABB.new(parent.relative_offset.x, parent.relative_offset.x + final_size.x, parent.relative_offset.y, parent.relative_offset.y + final_size.y);
+            parent._min_or_aabb.final_aabb = AABB.new(parent.final_position_offset.x, parent.final_position_offset.x + final_size.x, parent.final_position_offset.y, parent.final_position_offset.y + final_size.y);
         }
         if (parent.num_inline_children > 0) {
             switch (parent.primary_child_axis) {
