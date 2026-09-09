@@ -344,6 +344,8 @@ pub fn IndexBasedFirstChildNextSiblingTraverser(comptime NODE: type, comptime ID
 pub const Order = enum {
     CHILDREN_FIRST,
     PARENTS_FIRST,
+    ANY_ORDER_MIGHT_HAVE_IDX_GAPS,
+    ANY_ORDER_NO_IDX_GAPS_ROOT_IDX_TO_LAST_IDX,
 };
 
 pub const FuncType = enum {
@@ -358,13 +360,13 @@ pub fn IndexBasedMultiFirstChildNextSiblingTraverser(comptime NODE: type, compti
         pub fn CTFN(comptime self: FuncType, comptime USERDATA_RT: type, comptime USERDATA_CT: type) type {
             return switch (self) {
                 .RUNTIME_FN_PTR => void,
-                .COMPTIME_FN_PTR => *const fn (nodes: Elems, idx: IDX, userdata: USERDATA_RT, comptime USERDATA: USERDATA_CT) anyerror!Elems,
-                .COMPTIME_FN_BODY => fn (nodes: Elems, idx: IDX, userdata: USERDATA_RT, comptime USERDATA: USERDATA_CT) anyerror!Elems,
+                .COMPTIME_FN_PTR => *const fn (nodes: Nodes, idx: IDX, userdata: USERDATA_RT, comptime USERDATA: USERDATA_CT) anyerror!Nodes,
+                .COMPTIME_FN_BODY => fn (nodes: Nodes, idx: IDX, userdata: USERDATA_RT, comptime USERDATA: USERDATA_CT) anyerror!Nodes,
             };
         }
         pub fn RTFN(comptime self: FuncType, comptime USERDATA_RT: type, comptime USERDATA_CT: type) type {
             return switch (self) {
-                .RUNTIME_FN_PTR => *const fn (nodes: Elems, idx: IDX, userdata: USERDATA_RT, USERDATA: USERDATA_CT) anyerror!Elems,
+                .RUNTIME_FN_PTR => *const fn (nodes: Nodes, idx: IDX, userdata: USERDATA_RT, USERDATA: USERDATA_CT) anyerror!Nodes,
                 .COMPTIME_FN_PTR => void,
                 .COMPTIME_FN_BODY => void,
             };
@@ -394,7 +396,7 @@ pub fn IndexBasedMultiFirstChildNextSiblingTraverser(comptime NODE: type, compti
             next_child_for_each_path: [NUM_CHILD_PATHS]IDX,
             curr_path: IDX,
         };
-        pub const Elems = struct {
+        pub const Nodes = struct {
             ptr: [*]NODE = Utils.invalid_ptr_many(NODE),
             len: IDX = 0,
             cap: IDX = 0,
@@ -456,7 +458,7 @@ pub fn IndexBasedMultiFirstChildNextSiblingTraverser(comptime NODE: type, compti
         inline fn get_next_child(stack: Stack, depth: IDX) IDX {
             return stack.ptr[depth].next_child_for_each_path[stack.ptr[depth].curr_path];
         }
-        inline fn push_stack_frame(nodes: Elems, stack: Stack, realloc: StackReallocator, root: IDX, comptime allowed_paths: AllowedPaths) anyerror!struct { Stack, IDX } {
+        inline fn push_stack_frame(nodes: Nodes, stack: Stack, realloc: StackReallocator, root: IDX, comptime allowed_paths: AllowedPaths) anyerror!struct { Stack, IDX } {
             var new_stack = stack;
             try grow_stack_if_needed(&new_stack, realloc);
             new_stack.ptr[new_stack.len] = StackFrame{
@@ -478,7 +480,7 @@ pub fn IndexBasedMultiFirstChildNextSiblingTraverser(comptime NODE: type, compti
             new_stack.len += 1;
             return .{ new_stack, new_depth };
         }
-        inline fn increment_next_child(nodes: Elems, stack: Stack, depth: IDX, curr_child_idx: IDX) void {
+        inline fn increment_next_child(nodes: Nodes, stack: Stack, depth: IDX, curr_child_idx: IDX) void {
             var next = @field(&nodes.ptr[curr_child_idx], NEXT_SIBLING_FIELD);
             stack.ptr[depth].next_child_for_each_path[stack.ptr[depth].curr_path] = next;
             while (next == NULL_IDX and stack.ptr[depth].curr_path < (NUM_CHILD_PATHS - 1)) {
@@ -498,14 +500,25 @@ pub fn IndexBasedMultiFirstChildNextSiblingTraverser(comptime NODE: type, compti
             const new_depth = @max(1, depth) - 1;
             return .{ new_stack, new_depth, more_to_process };
         }
-        inline fn do_action(nodes: Elems, idx: IDX, userdata: anytype, comptime USERDATA_CT: anytype, comptime FN_TYPE: FuncType, comptime FUNC: CTFN(FN_TYPE, @TypeOf(userdata), @TypeOf(USERDATA_CT)), func: RTFN(FN_TYPE, @TypeOf(userdata), @TypeOf(USERDATA_CT))) anyerror!Elems {
+        inline fn do_action(nodes: Nodes, idx: IDX, userdata: anytype, comptime USERDATA_CT: anytype, comptime FN_TYPE: FuncType, comptime FUNC: CTFN(FN_TYPE, @TypeOf(userdata), @TypeOf(USERDATA_CT)), func: RTFN(FN_TYPE, @TypeOf(userdata), @TypeOf(USERDATA_CT))) anyerror!Nodes {
             return switch (comptime FN_TYPE) {
                 .RUNTIME_FN_PTR => try func(nodes, idx, userdata, USERDATA_CT),
                 .COMPTIME_FN_BODY, .COMPTIME_FN_PTR => try FUNC(nodes, idx, userdata, USERDATA_CT),
             };
         }
-        pub fn do_action_on_all_nodes(nodes_: Elems, stack_: Stack, stack_realloc: StackReallocator, comptime ORDER: Order, comptime allowed_paths: AllowedPaths, root: IDX, action_context_rt: anytype, comptime ACTION_CONTEXT_CT: anytype, comptime FN_TYPE: FuncType, comptime ACTION_CT: CTFN(FN_TYPE, @TypeOf(action_context_rt), @TypeOf(ACTION_CONTEXT_CT)), action_rt: RTFN(FN_TYPE, @TypeOf(action_context_rt), @TypeOf(ACTION_CONTEXT_CT))) anyerror!struct { Elems, Stack } {
-            var nodes: Elems = nodes_;
+        inline fn do_action_on_all_nodes_unordered_no_gaps(nodes_: Nodes, root: u32, action_context_rt: anytype, comptime ACTION_CONTEXT_CT: anytype, comptime FN_TYPE: FuncType, comptime ACTION_CT: CTFN(FN_TYPE, @TypeOf(action_context_rt), @TypeOf(ACTION_CONTEXT_CT)), action_rt: RTFN(FN_TYPE, @TypeOf(action_context_rt), @TypeOf(ACTION_CONTEXT_CT))) anyerror!Nodes {
+            var nodes: Nodes = nodes_;
+            var idx: u32 = root;
+            while (idx < nodes.len) : (idx += 1) {
+                nodes = try do_action(nodes, idx, action_context_rt, ACTION_CONTEXT_CT, FN_TYPE, ACTION_CT, action_rt);
+            }
+        }
+        pub fn do_action_on_all_nodes(nodes_: Nodes, stack_: Stack, stack_realloc: StackReallocator, comptime ORDER: Order, comptime allowed_paths: AllowedPaths, root: IDX, action_context_rt: anytype, comptime ACTION_CONTEXT_CT: anytype, comptime FN_TYPE: FuncType, comptime ACTION_CT: CTFN(FN_TYPE, @TypeOf(action_context_rt), @TypeOf(ACTION_CONTEXT_CT)), action_rt: RTFN(FN_TYPE, @TypeOf(action_context_rt), @TypeOf(ACTION_CONTEXT_CT))) anyerror!struct { Nodes, Stack } {
+            var nodes: Nodes = nodes_;
+            if (comptime ORDER == .ANY_ORDER_NO_IDX_GAPS_ROOT_IDX_TO_LAST_IDX) {
+                nodes = try do_action_on_all_nodes_unordered_no_gaps(nodes, root, action_context_rt, ACTION_CONTEXT_CT, FN_TYPE, ACTION_CT, action_rt);
+                return .{ nodes, stack_ };
+            }
             var stack: Stack = stack_;
             stack.len = 0;
             if (root == NULL_IDX) {
@@ -515,7 +528,7 @@ pub fn IndexBasedMultiFirstChildNextSiblingTraverser(comptime NODE: type, compti
                 return Error.index_out_of_bounds;
             }
             assert_with_reason(stack.cap >= 2, @src(), "stack capacity must be >= 2", .{});
-            if (comptime ORDER == .PARENTS_FIRST) {
+            if (comptime ORDER == .PARENTS_FIRST or ORDER == .ANY_ORDER_MIGHT_HAVE_IDX_GAPS) {
                 nodes = try do_action(nodes, root, action_context_rt, ACTION_CONTEXT_CT, FN_TYPE, ACTION_CT, action_rt);
             }
             stack, var depth = try push_stack_frame(nodes, stack, stack_realloc, root, allowed_paths);
@@ -528,7 +541,7 @@ pub fn IndexBasedMultiFirstChildNextSiblingTraverser(comptime NODE: type, compti
                     }
                     try grow_stack_if_needed(&stack, stack_realloc);
                     increment_next_child(nodes, stack, depth, curr_child_idx);
-                    if (comptime ORDER == .PARENTS_FIRST) {
+                    if (comptime ORDER == .PARENTS_FIRST or ORDER == .ANY_ORDER_MIGHT_HAVE_IDX_GAPS) {
                         nodes = try do_action(nodes, curr_child_idx, action_context_rt, ACTION_CONTEXT_CT, FN_TYPE, ACTION_CT, action_rt);
                     }
                     stack, depth = try push_stack_frame(nodes, stack, stack_realloc, curr_child_idx, allowed_paths);
@@ -726,12 +739,12 @@ test IndexBasedFirstChildNextSiblingTraverser {
             out.idx += 1;
             return m;
         }
-        fn act_dual(m: TravDual.Elems, idx: u8, out: *Out, comptime _: void) anyerror!TravDual.Elems {
+        fn act_dual(m: TravDual.Nodes, idx: u8, out: *Out, comptime _: void) anyerror!TravDual.Nodes {
             out.buf[out.idx] = m.ptr[idx].char;
             out.idx += 1;
             return m;
         }
-        fn act_dual_rt(m: TravDual.Elems, idx: u8, out: *Out, _: void) anyerror!TravDual.Elems {
+        fn act_dual_rt(m: TravDual.Nodes, idx: u8, out: *Out, _: void) anyerror!TravDual.Nodes {
             out.buf[out.idx] = m.ptr[idx].char;
             out.idx += 1;
             return m;
@@ -754,7 +767,7 @@ test IndexBasedFirstChildNextSiblingTraverser {
         .cap = 9,
         .len = 9,
     };
-    var nodes_dual = TravDual.Elems{
+    var nodes_dual = TravDual.Nodes{
         .ptr = @ptrCast(&mem_dual[0]),
         .cap = 15,
         .len = 15,

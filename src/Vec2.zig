@@ -46,7 +46,7 @@ pub const PerpendicularZero = Common.PerpendicularZero;
 pub const NormalizeZero = Common.NormalizeZero;
 pub const ShouldTranslate = Common.ShouldTranslate;
 
-pub const Axis = enum(u8) {
+pub const Axis = enum(u1) {
     X = 0,
     Y = 1,
 

@@ -132,18 +132,33 @@ const VerticalDirection = enum(u1) {
     BOTTOM_TO_TOP = 0b1,
 };
 
+const Align = enum(u2) {
+    START = 0,
+    MIDDLE = 1,
+    END = 2,
+    JUSTIFY = 3,
+};
+
 pub const AlignX = enum(u2) {
-    LEFT,
-    MIDDLE,
-    RIGHT,
-    JUSTIFY,
+    LEFT = 0,
+    MIDDLE = 1,
+    RIGHT = 2,
+    JUSTIFY = 3,
+
+    inline fn generic(self: AlignX) Align {
+        return @enumFromInt(@intFromEnum(self));
+    }
 };
 
 pub const AlignY = enum(u2) {
-    TOP,
-    CENTER,
-    BOTTOM,
-    JUSTIFY,
+    TOP = 0,
+    CENTER = 1,
+    BOTTOM = 2,
+    JUSTIFY = 3,
+
+    inline fn generic(self: AlignY) Align {
+        return @enumFromInt(@intFromEnum(self));
+    }
 };
 
 pub const SizeMode = enum(u2) {
@@ -162,6 +177,13 @@ pub const ChildAlignment = struct {
             .x = x,
             .y = y,
         };
+    }
+
+    pub inline fn get(self: ChildAlignment, comptime AXIS: Axis) Align {
+        switch (comptime AXIS) {
+            .X => return self.x.generic(),
+            .Y => return self.y.generic(),
+        }
     }
 };
 
@@ -303,6 +325,30 @@ pub const Padding = struct {
     }
     inline fn total_float(self: Padding) Size {
         return Size.new(self.x_padding(), self.y_padding());
+    }
+    inline fn start_padding(self: Padding, comptime AXIS: Axis, comptime DIR: Dir) f32 {
+        switch (comptime AXIS) {
+            .X => switch (comptime DIR) {
+                .FORWARD => return self.left,
+                .REVERSE => return self.right,
+            },
+            .Y => switch (comptime DIR) {
+                .FORWARD => return self.top,
+                .REVERSE => return self.bottom,
+            },
+        }
+    }
+    inline fn end_padding(self: Padding, comptime AXIS: Axis, comptime DIR: Dir) f32 {
+        switch (comptime AXIS) {
+            .X => switch (comptime DIR) {
+                .FORWARD => return self.right,
+                .REVERSE => return self.left,
+            },
+            .Y => switch (comptime DIR) {
+                .FORWARD => return self.bottom,
+                .REVERSE => return self.top,
+            },
+        }
     }
 };
 
@@ -474,7 +520,7 @@ pub const EventAtLocation = struct {
     }
 };
 
-pub const AttachPoint = enum(u5) {
+pub const AttachPoint = enum(u4) {
     TOP_LEFT,
     TOP_MIDDLE,
     TOP_RIGHT,
@@ -549,6 +595,7 @@ pub const Floating = struct {
 };
 
 pub const LayoutRequest = struct {
+    //FIXME
     size: SizeInfo,
     float: Floating = .in_line(),
     padding: Padding = .uniform(0),
@@ -581,23 +628,23 @@ const Growable = struct {
     const THIS_PASS = 2;
 };
 
-const MaxMode = enum(u8) {
+const MaxMode = enum(u3) {
     EXACT_X_EXACT_Y,
     PERCENT_X_EXACT_Y,
     EXACT_X_PERCENT_Y,
     PERCENT_X_PERCENT_Y,
 };
 
-const MaxFlags = Root.Flags.Flags(enum(u8){
+const MaxFlags = Root.Flags.Flags(enum(u8) {
     // zig fmt:off
     MAX_IS_PARENT_PERCENT_X = 0b0000_0001,
-    GROWABLE_X              = 0b0000_0010,
-    GROWABLE_THIS_PASS_X    = 0b0000_0100,
-    PROPAGATE_FLOATING_X    = 0b0000_1000,
+    GROWABLE_X = 0b0000_0010,
+    GROWABLE_THIS_PASS_X = 0b0000_0100,
+    PROPAGATE_FLOATING_X = 0b0000_1000,
     MAX_IS_PARENT_PERCENT_Y = 0b0001_0000,
-    GROWABLE_Y              = 0b0010_0000,
-    GROWABLE_THIS_PASS_Y    = 0b0100_0000,
-    PROPAGATE_FLOATING_Y    = 0b1000_0000,
+    GROWABLE_Y = 0b0010_0000,
+    GROWABLE_THIS_PASS_Y = 0b0100_0000,
+    PROPAGATE_FLOATING_Y = 0b1000_0000,
     // zig fmt:on
 
     inline fn max_is_parent_percent(comptime AXIS: Axis) @This() {
@@ -624,21 +671,22 @@ const MaxFlags = Root.Flags.Flags(enum(u8){
             .Y => return @This().PROPAGATE_FLOATING_Y,
         }
     }
-}, enum(u8){});
+}, enum(u8) {});
 
-const MaxSize = struct {
+const MaxSizeAndLayout = struct {
     value: Size = .INF,
     next_this_pass: u32 = NULL_IDX,
+    lay1: PackedLayoutInfo1 = .{},
+    lay2: PackedLayoutInfo2 = .{},
     flags: MaxFlags = .{},
-    // 3 free bytes
 
-    _ = comptime {
-        assert_with_reason_debug_only(@sizeOf(MaxSize) <= @sizeOf(AABB), @src(), "MaxSize must be smaller or equal size to AABB", .{});
+    comptime {
+        assert_with_reason_debug_only(@sizeOf(MaxSizeAndLayout) <= @sizeOf(AABB), null, "MaxSize must be smaller or equal size to AABB", .{});
     }
 };
 
 const MaxSize_OR_FinalClipAABB = union {
-    max_size: MaxSize,
+    max_size: MaxSizeAndLayout,
     final_clip_aabb: AABB,
 
     pub fn new(max_x: f32, max_y: f32, grow_x: bool, grow_y: bool) MaxSize_OR_FinalClipAABB {
@@ -650,21 +698,36 @@ const MaxSize_OR_FinalClipAABB = union {
     }
 };
 
-const Dir = enum {
+const Dir = enum(u1) {
     FORWARD,
     REVERSE,
 };
-const XDir = enum {
+const XDir = enum(u1) {
     LEFT_TO_RIGHT,
     RIGHT_TO_LEFT,
 };
-const YDir = enum {
+const YDir = enum(u1) {
     TOP_TO_BOTTOM,
     BOTTOM_TO_TOP,
 };
 
+const PackedLayoutInfo1 = packed struct(u16) {
+    float_parent_attach: AttachPoint = .TOP_LEFT, // 4
+    float_self_attach: AttachPoint = .TOP_LEFT, // 4 = 8
+    children_axis_line_local_align: AxisLineLocalAlign = .INHERIT, // 2 = 10
+    self_axis_line_local_align: AxisLineLocalAlign = .INHERIT, // 2 = 12
+    child_align_x: AlignX = .LEFT, // 2 = 14
+    child_align_y: AlignY = .TOP, // 2 = 16
+};
+
+const PackedLayoutInfo2 = packed struct(u8) {
+    primary_child_axis: Axis = .X, // 1
+    child_layout_dir_x: XDir = .LEFT_TO_RIGHT, // 1 = 2
+    child_layout_dir_y: YDir = .TOP_TO_BOTTOM, // 1 = 3
+};
+
 const Traverse = Utils.Traverser.IndexBasedMultiFirstChildNextSiblingTraverser(LayoutElement, u32, NULL_IDX, &.{ "first_inline_child", "first_floating_child" }, "next_sibling");
-const Elems = Traverse.Elems;
+const Nodes = Traverse.Nodes;
 const Stack = Traverse.Stack;
 const StackFrame = Traverse.StackFrame;
 const AllowedPaths = Traverse.AllowedPaths;
@@ -676,7 +739,7 @@ const LayoutElement = struct {
     requester: LayoutRequester,
     _min_or_aabb: MinSize_OR_FinalAABB,
     _max_or_clip_aabb: MaxSize_OR_FinalClipAABB,
-    relative_pos: Pos = .ZERO,
+    relative_offset: Pos = .ZERO,
     padding: Padding,
     child_gaps: Gap,
     first_inline_child: u32 = NULL_IDX,
@@ -687,19 +750,82 @@ const LayoutElement = struct {
     next_sibling: u32 = NULL_IDX,
     parent_idx: u32,
     depth: u32,
-    child_align: ChildAlignment,
-    float_parent_attach: AttachPoint,
-    float_child_attach: AttachPoint,
-    primary_child_axis: Axis,
-    child_layout_dir_x: XDir,
-    child_layout_dir_y: YDir,
     is_floating: bool,
     clip_to_parent: bool,
     completely_clipped: bool = false,
     use_flow_mode: bool,
 
     const SIZE = @sizeOf(LayoutElement);
-
+    inline fn set_children_local_align(self: *LayoutElement, alla: AxisLineLocalAlign) void {
+        self._max_or_clip_aabb.max_size.lay1.children_axis_line_local_align = alla;
+    }
+    inline fn get_children_local_align(self: LayoutElement) AxisLineLocalAlign {
+        return self._max_or_clip_aabb.max_size.lay1.children_axis_line_local_align;
+    }
+    inline fn set_self_local_align(self: *LayoutElement, alla: AxisLineLocalAlign) void {
+        self._max_or_clip_aabb.max_size.lay1.self_axis_line_local_align = alla;
+    }
+    inline fn get_self_local_align(self: LayoutElement) AxisLineLocalAlign {
+        return self._max_or_clip_aabb.max_size.lay1.self_axis_line_local_align;
+    }
+    inline fn set_parent_float_attach(self: *LayoutElement, attach: AttachPoint) void {
+        self._max_or_clip_aabb.max_size.lay1.float_parent_attach = attach;
+    }
+    inline fn get_parent_float_attach(self: LayoutElement) AttachPoint {
+        return self._max_or_clip_aabb.max_size.lay1.float_parent_attach;
+    }
+    inline fn set_self_float_attach(self: *LayoutElement, attach: AttachPoint) void {
+        self._max_or_clip_aabb.max_size.lay1.float_self_attach = attach;
+    }
+    inline fn get_self_float_attach(self: LayoutElement) AttachPoint {
+        return self._max_or_clip_aabb.max_size.lay1.float_self_attach;
+    }
+    inline fn set_child_align(self: *LayoutElement, comptime AXIS: Axis, alignment: if (AXIS == .X) AlignX else AlignY) void {
+        switch (comptime AXIS) {
+            .X => {
+                self._max_or_clip_aabb.max_size.lay1.child_align_x = alignment;
+            },
+            .Y => {
+                self._max_or_clip_aabb.max_size.lay1.child_align_y = alignment;
+            },
+        }
+    }
+    inline fn get_child_align(self: *LayoutElement, comptime AXIS: Axis) if (AXIS == .X) AlignX else AlignY {
+        switch (comptime AXIS) {
+            .X => {
+                return self._max_or_clip_aabb.max_size.lay1.child_align_x;
+            },
+            .Y => {
+                return self._max_or_clip_aabb.max_size.lay1.child_align_y;
+            },
+        }
+    }
+    inline fn set_primary_child_axis(self: *LayoutElement, axis: Axis) void {
+        self._max_or_clip_aabb.max_size.lay2.primary_child_axis = axis;
+    }
+    inline fn get_primary_child_axis(self: *LayoutElement) Axis {
+        return self._max_or_clip_aabb.max_size.lay2.primary_child_axis;
+    }
+    inline fn set_child_layout_dir(self: *LayoutElement, comptime AXIS: Axis, dir: if (AXIS == .X) XDir else YDir) void {
+        switch (comptime AXIS) {
+            .X => {
+                self._max_or_clip_aabb.max_size.lay2.child_layout_dir_x = dir;
+            },
+            .Y => {
+                self._max_or_clip_aabb.max_size.lay2.child_layout_dir_y = dir;
+            },
+        }
+    }
+    inline fn get_child_layout_dir(self: *LayoutElement, comptime AXIS: Axis) if (AXIS == .X) XDir else YDir {
+        switch (comptime AXIS) {
+            .X => {
+                return self._max_or_clip_aabb.max_size.lay2.child_layout_dir_x;
+            },
+            .Y => {
+                return self._max_or_clip_aabb.max_size.lay2.child_layout_dir_y;
+            },
+        }
+    }
     inline fn flags_ptr(self: *LayoutElement) *MaxFlags {
         return &self._max_or_clip_aabb.max_size.flags;
     }
@@ -779,11 +905,11 @@ const LayoutElement = struct {
     }
     inline fn set_final_aabb(self: *LayoutElement, parent_abs: Pos) void {
         const final_size = self._min_or_aabb.min_size.self;
-        const abs_pos = parent_abs.add(self.relative_pos);
+        const abs_pos = parent_abs.add(self.relative_offset);
         self._min_or_aabb.final_aabb = AABB.new_from_pos_size(abs_pos, final_size);
     }
     inline fn set_clip_aabb(self: *LayoutElement, parent_clip: AABB) void {
-        const overlap_aabb, const not_completely_clipped = self.get_aabb().overlap_area_and_overlap_greater_than_zero(parent_clip);
+        const overlap_aabb, const not_completely_clipped = self.get_aabb().overlap_area_and_overlap_area_positive(parent_clip);
         self._max_or_clip_aabb.final_clip_aabb = overlap_aabb;
         self.completely_clipped = !not_completely_clipped;
     }
@@ -825,6 +951,12 @@ const LayoutElement = struct {
     }
     pub inline fn get_absolute_pos(self: *LayoutElement) Pos {
         return self._min_or_aabb.final_aabb.get_min_point();
+    }
+    pub inline fn get_center_point_component(self: *LayoutElement, comptime AXIS: Axis) f32 {
+        return self._min_or_aabb.final_aabb.get_center_point_component(AXIS);
+    }
+    pub inline fn get_absolute_pos_end(self: *LayoutElement) Pos {
+        return self._min_or_aabb.final_aabb.get_max_point();
     }
     pub inline fn get_final_size(self: *LayoutElement) Size {
         return self._min_or_aabb.final_aabb.get_max_point().subtract(self._min_or_aabb.final_aabb.get_min_point());
@@ -1126,9 +1258,36 @@ pub const LayoutDrivingAxis = enum(u1) {
     HEIGHT_DRIVES_WIDTH,
 };
 
-pub const LayoutStage = enum(u8) {
+pub const LayoutStage = enum(u1) {
     PRIMARY_STAGE = 0,
     SECONDARY_STAGE = 1,
+};
+
+pub const AxisLineLocalAlign = enum(u2) {
+    INHERIT = 0,
+    TOP_OR_LEFT = 1,
+    CENTER = 2,
+    BOTTOM_OR_RIGHT = 3,
+};
+
+const LocalAlign = enum(u2) {
+    START = 1,
+    CENTER = 2,
+    END = 3,
+
+    fn eval(parent_secondary_align: Align, parent_child_ALLA: AxisLineLocalAlign, child_ALLA: AxisLineLocalAlign) LocalAlign {
+        switch (child_ALLA) {
+            .INHERIT => switch (parent_child_ALLA) {
+                .INHERIT => switch (parent_secondary_align) {
+                    .START, .JUSTIFY => return LocalAlign.START,
+                    .MIDDLE => return LocalAlign.CENTER,
+                    .END => return LocalAlign.END,
+                },
+                else => return @enumFromInt(@intFromEnum(parent_child_ALLA)),
+            },
+            else => return @enumFromInt(@intFromEnum(child_ALLA)),
+        }
+    }
 };
 
 const Lines = struct {
@@ -1195,7 +1354,7 @@ pub fn MemInit(comptime T: type) type {
 }
 
 pub const LayoutManager = struct {
-    elems: Elems = .{},
+    elems: Nodes = .{},
     stack: Stack = .{},
     lines: Lines = .{},
     elems_alloc: Allocator = dummy_alloc,
@@ -1261,7 +1420,7 @@ pub const LayoutManager = struct {
     inline fn get_stack_ptr(self: *LayoutManager, idx: u32) *StackFrame {
         return &self.stack.ptr[idx];
     }
-    inline fn get_parent_ptr(elems: Elems, idx: u32) *LayoutElement {
+    inline fn get_parent_ptr(elems: Nodes, idx: u32) *LayoutElement {
         return &elems.ptr[elems.ptr[idx].parent_idx];
     }
 
@@ -1346,27 +1505,9 @@ pub const LayoutManager = struct {
         self.lines_alloc = axis_line_mem.get_alloc();
         self.stack_alloc = stack_mem.get_alloc();
     }
-    pub fn new_allocated_mem(initial_elem_cap: u32, initial_depth_cap: u32, alloc: Allocator, elem_alloc_settings: Utils.Alloc.SmartAllocSettings(LayoutElement), depth_alloc_settings: Utils.Alloc.SmartAllocSettings(DepthFrame)) struct { LayoutManager, bool } {
-        var mgr = LayoutManager{
-            .alloc = alloc,
-            .elem_alloc_settings = elem_alloc_settings,
-            .stack_alloc_settings = depth_alloc_settings,
-        };
-
-        if (initial_elem_cap > 0) {
-            if (!mgr.realloc_elem_mem(initial_elem_cap)) {
-                return .{ mgr, false };
-            }
-        }
-        if (initial_depth_cap > 0) {
-            if (!mgr.realloc_depth_mem(initial_depth_cap)) {
-                return .{ mgr, false };
-            }
-        }
-        return .{ mgr, true };
-    }
 
     inline fn append_new_elem_from_requester_and_parent_prev_sibling(self: *LayoutManager, requester: LayoutRequester, parent: u32, prev_sibling: u32) ?*LayoutElement {
+        //FIXME
         if (self.elem_len >= self.elem_cap) {
             if (self.can_realloc) {
                 Utils.Alloc.smart_alloc_ptr_ptrs(self.alloc, &self.elem_memory, &self.elem_len, &self.elem_cap, self.elem_len + 1, self.elem_alloc_settings, .{ .ERROR_MODE = .RETURN_ERRORS });
@@ -1395,7 +1536,7 @@ pub const LayoutManager = struct {
             .clip_to_parent = req.clip_to_parent,
             .grow_mode_w = req.size.width.mode,
             .grow_mode_h = req.size.height.mode,
-            .relative_pos = if (req.float.use_floating) req.float.offest else .ZERO,
+            .relative_offset = if (req.float.use_floating) req.float.offest else .ZERO,
             .use_flow_mode = req.use_flow_mode,
         };
         if (parent != NULL_IDX) {
@@ -1404,7 +1545,6 @@ pub const LayoutManager = struct {
             if (par.last_child == NULL_IDX) {
                 par.last_child = self.elem_len;
             }
-            assert_with_reason(par.first_child >= par.last_child, @src(), "sanity check: first child always greater or equal last child", .{}); //DEBUG
         }
         self.elements[self.elem_len] = elem;
         self.elem_len += 1;
@@ -1412,6 +1552,7 @@ pub const LayoutManager = struct {
     }
 
     pub fn collect_element_heirarchy(self: *LayoutManager, root_element: LayoutRequester) void {
+        //FIXME
         self.elem_len = 0;
         self.append_new_elem_from_requester_and_parent_prev_sibling(root_element, NULL_IDX);
         var next_layout_idx_with_unchecked_children: u32 = 0;
@@ -1432,22 +1573,22 @@ pub const LayoutManager = struct {
             .X => {
                 self.elems, self.stack = try Traverse.do_action_on_all_nodes(self.elems, self.stack, self.stack_reallocator(), .CHILDREN_FIRST, 0, self, AxisStage.new(.X, .PRIMARY_STAGE), .COMPTIME_FN_PTR, propagate_min_size_to_parent, void{});
                 self.elems, self.stack = try Traverse.do_action_on_all_nodes(self.elems, self.stack, self.stack_reallocator(), .PARENTS_FIRST, 0, self, AxisStage.new(.X, .PRIMARY_STAGE), .COMPTIME_FN_PTR, fit_and_expand_children_to_fill_parent, void{});
-                self.elems, self.stack = try Traverse.do_action_on_all_nodes(self.elems, self.stack, self.stack_reallocator(), .PARENTS_FIRST, 0, self, AxisStage.new(.Y, .SECONDARY_STAGE), .COMPTIME_FN_PTR, Action.recheck_min_y_from_final_x, void{});
-                self.elems, self.stack = try Traverse.do_action_on_all_nodes(self.elems, self.stack, self.stack_reallocator(), .CHILDREN_FIRST, 0, self, AxisStage.new(.Y, .SECONDARY_STAGE), .COMPTIME_FN_PTR, Action.propagate_min_size_to_parent_y, void{});
-                self.elems, self.stack = try Traverse.do_action_on_all_nodes(self.elems, self.stack, self.stack_reallocator(), .PARENTS_FIRST, 0, self, AxisStage.new(.Y, .SECONDARY_STAGE), .COMPTIME_FN_PTR, Action.fit_and_expand_children_to_fill_parent_y, void{});
+                self.elems, self.stack = try Traverse.do_action_on_all_nodes(self.elems, self.stack, self.stack_reallocator(), .ANY_ORDER_NO_IDX_GAPS_ROOT_IDX_TO_LAST_IDX, 0, self, .X, .COMPTIME_FN_PTR, recheck_element_size_with_with_known_primary_size, void{});
+                self.elems, self.stack = try Traverse.do_action_on_all_nodes(self.elems, self.stack, self.stack_reallocator(), .CHILDREN_FIRST, 0, self, AxisStage.new(.Y, .SECONDARY_STAGE), .COMPTIME_FN_PTR, propagate_min_size_to_parent, void{});
+                self.elems, self.stack = try Traverse.do_action_on_all_nodes(self.elems, self.stack, self.stack_reallocator(), .PARENTS_FIRST, 0, self, AxisStage.new(.Y, .SECONDARY_STAGE), .COMPTIME_FN_PTR, fit_and_expand_children_to_fill_parent, void{});
             },
             .Y => {
                 self.elems, self.stack = try Traverse.do_action_on_all_nodes(self.elems, self.stack, self.stack_reallocator(), .CHILDREN_FIRST, 0, self, AxisStage.new(.Y, .PRIMARY_STAGE), .COMPTIME_FN_PTR, propagate_min_size_to_parent, void{});
                 self.elems, self.stack = try Traverse.do_action_on_all_nodes(self.elems, self.stack, self.stack_reallocator(), .PARENTS_FIRST, 0, self, AxisStage.new(.Y, .PRIMARY_STAGE), .COMPTIME_FN_PTR, fit_and_expand_children_to_fill_parent, void{});
-                self.elems, self.stack = try Traverse.do_action_on_all_nodes(self.elems, self.stack, self.stack_reallocator(), .PARENTS_FIRST, 0, self, AxisStage.new(.X, .SECONDARY_STAGE), .COMPTIME_FN_PTR, Action.recheck_min_x_from_final_y, void{});
-                self.elems, self.stack = try Traverse.do_action_on_all_nodes(self.elems, self.stack, self.stack_reallocator(), .CHILDREN_FIRST, 0, self, AxisStage.new(.X, .SECONDARY_STAGE), .COMPTIME_FN_PTR, Action.propagate_min_size_to_parent_x, void{});
-                self.elems, self.stack = try Traverse.do_action_on_all_nodes(self.elems, self.stack, self.stack_reallocator(), .PARENTS_FIRST, 0, self, AxisStage.new(.X, .SECONDARY_STAGE), .COMPTIME_FN_BODY, Action.fit_and_expand_children_to_fill_parent_x, void{});
+                self.elems, self.stack = try Traverse.do_action_on_all_nodes(self.elems, self.stack, self.stack_reallocator(), .ANY_ORDER_NO_IDX_GAPS_ROOT_IDX_TO_LAST_IDX, 0, self, .Y, .COMPTIME_FN_PTR, recheck_element_size_with_with_known_primary_size, void{});
+                self.elems, self.stack = try Traverse.do_action_on_all_nodes(self.elems, self.stack, self.stack_reallocator(), .CHILDREN_FIRST, 0, self, AxisStage.new(.X, .SECONDARY_STAGE), .COMPTIME_FN_PTR, propagate_min_size_to_parent, void{});
+                self.elems, self.stack = try Traverse.do_action_on_all_nodes(self.elems, self.stack, self.stack_reallocator(), .PARENTS_FIRST, 0, self, AxisStage.new(.X, .SECONDARY_STAGE), .COMPTIME_FN_BODY, fit_and_expand_children_to_fill_parent, void{});
             },
         }
-        self.elems, self.stack = try Traverse.do_action_on_all_nodes(self.elems, self.stack, self.stack_reallocator(), .PARENTS_FIRST, 0, self, void{}, .COMPTIME_FN_PTR, Action.position_and_align_element, void{});
+        self.elems, self.stack = try Traverse.do_action_on_all_nodes(self.elems, self.stack, self.stack_reallocator(), .PARENTS_FIRST, 0, self, void{}, .COMPTIME_FN_PTR, position_and_align_child_elements, void{});
     }
 
-    fn propagate_min_size_to_parent(elems: Elems, idx: u32, _: *LayoutManager, comptime CT: AxisStage) anyerror!Elems {
+    fn propagate_min_size_to_parent(elems: Nodes, idx: u32, _: *LayoutManager, comptime CT: AxisStage) anyerror!Nodes {
         const child = get_elem_ptr(elems, idx);
         child.add_to_min_children_size(CT.AXIS, child.padding.get(CT.AXIS));
         child.update_min_size_with_children_min_size(CT.AXIS);
@@ -1455,7 +1596,7 @@ pub const LayoutManager = struct {
         const parent = get_parent_ptr(elems, idx);
         const gap = parent.child_gaps.get(CT.AXIS);
         if (parent.primary_child_axis == CT.AXIS and !parent.use_flow_mode) {
-            var add_min_size = child.get_min_size_self(CT.AXIS) + gap;
+            const add_min_size = child.get_min_size_self(CT.AXIS) + gap;
             parent.add_to_min_children_size(CT.AXIS, add_min_size);
         } else {
             const min_size = child.get_min_size_self(CT.AXIS);
@@ -1577,7 +1718,7 @@ pub const LayoutManager = struct {
                 n - 1;
                 child = get_elem_ptr(self.elems, idx);
                 if (child.is_growable(AXIS)) {
-                     if (Math.approx_equal(f32, child.get_min_size_self(AXIS), smallest_growable_child_this_pass)) {
+                    if (Math.approx_equal(f32, child.get_min_size_self(AXIS), smallest_growable_child_this_pass)) {
                         const prev_child: *LayoutElement = self.get_elem_ptr(prev_growable_child_this_pass);
                         prev_child.set_next_growable_idx_this_pass(idx);
                         prev_growable_child_this_pass = idx;
@@ -1611,29 +1752,29 @@ pub const LayoutManager = struct {
                 idx = child.get_next_idx_this_pass();
             }
             remaining_space -= space_taken_this_pass;
-            axis_line.min_size.set(AXIS, axis_line.min_size.get(AXIS) + space_taken_this_pass)
+            axis_line.min_size.set(AXIS, axis_line.min_size.get(AXIS) + space_taken_this_pass);
         }
     }
-    
+
     fn distribute_secondary_extra_space_to_all_axis_lines(self: *LayoutManager, parent: *LayoutElement, comptime AXIS: Axis) void {
         const gap = parent.child_gaps.get(AXIS);
         var line = &parent.first_axis_line;
-        var nc: u32 = parent.num_axis_lines;
+        var lines_left: u32 = parent.num_axis_lines;
         var total_axis_lines_size: f32 = -gap;
-        while (nc > 0) {
-            nc -= 1;
+        while (lines_left > 0) {
+            lines_left -= 1;
             total_axis_lines_size += line.min_size.get(AXIS) + gap;
-            var nn = line.num_elems;
+            var children_left = line.num_elems;
             var child_idx: u32 = line.first_elem;
-            while (nn > 0) {
-                nn - 1;
+            while (children_left > 0) {
+                children_left -= 1;
                 const child: *LayoutElement = self.get_elem_ptr(child_idx);
                 if (child.is_growable(AXIS)) {
                     child.set_min_size_self_limit_to_max_update_growable(AXIS, line.min_size.get(AXIS));
                 }
                 child_idx = child.next_sibling;
             }
-            if (nc > 0) {
+            if (lines_left > 0) {
                 line = self.get_line_ptr(line.next_line);
             }
         }
@@ -1641,7 +1782,7 @@ pub const LayoutManager = struct {
         var remaining_space = space_for_lines - total_axis_lines_size;
         while (remaining_space > 0) {
             line = &parent.first_axis_line;
-            nc = parent.num_axis_lines;
+            lines_left = parent.num_axis_lines;
             var axis_line_idx: u32 = NULL_IDX;
             var child: *LayoutElement = undefined;
             var total_growable_lines_this_pass: u32 = 0;
@@ -1653,21 +1794,21 @@ pub const LayoutManager = struct {
             var second_smallest_growable_child_this_pass: f32 = math.inf(f32);
             var first_growable_child_this_pass: u32 = NULL_IDX;
             var prev_growable_child_this_pass: u32 = NULL_IDX;
-            var nc: u32 = undefined;
-            while (nc > 0) {
-                nc - 1;
-                nc = line.num_elems;
+            var children_left: u32 = undefined;
+            while (lines_left > 0) {
+                lines_left - 1;
+                children_left = line.num_elems;
                 var child_idx: u32 = line.first_elem;
-                while (nc > 0) {
-                    nc - 1;
-                    child = get_elem_ptr(self.elems, idx);
+                while (children_left > 0) {
+                    children_left - 1;
+                    child = get_elem_ptr(self.elems, child_idx);
                     if (child.is_growable(AXIS)) {
                         if (Math.approx_equal(f32, child.get_min_size_self(AXIS), smallest_growable_child_this_pass)) {
                             const prev_child: *LayoutElement = self.get_elem_ptr(prev_growable_child_this_pass);
                             const prev_line: *AxisLine = if (prev_growable_line_this_pass == NULL_IDX) &parent.first_axis_line else self.get_line_ptr(prev_growable_line_this_pass);
-                            prev_child.set_next_growable_idx_this_pass(idx);
+                            prev_child.set_next_growable_idx_this_pass(child_idx);
                             prev_line.next_growable_line_this_pass = axis_line_idx;
-                            prev_growable_child_this_pass = idx;
+                            prev_growable_child_this_pass = child_idx;
                             prev_growable_child_this_pass = axis_line_idx;
                             child_grow_limit_this_pass = @min(child_grow_limit_this_pass, child.get_max_size(AXIS));
                             if (total_growable_lines_this_pass == 0) {
@@ -1684,39 +1825,39 @@ pub const LayoutManager = struct {
                             second_smallest_growable_child_this_pass = smallest_growable_child_this_pass;
                             smallest_growable_child_this_pass = child.get_min_size_self(AXIS);
                             child_grow_limit_this_pass = @min(child.get_max_size(AXIS), second_smallest_growable_child_this_pass);
-                            first_growable_child_this_pass = idx;
-                            prev_growable_child_this_pass = idx;
+                            first_growable_child_this_pass = child_idx;
+                            prev_growable_child_this_pass = child_idx;
                             child.set_next_growable_idx_this_pass(NULL_IDX);
                         }
                     }
-                    idx = child.next_sibling;
+                    child_idx = child.next_sibling;
                 }
                 axis_line_idx = line.next_line;
-                if (nc > 0) {
+                if (lines_left > 0) {
                     line = self.get_line_ptr(axis_line_idx);
                 }
             }
             if (total_growable_lines_this_pass == 0) break;
-            idx = first_growable_child_this_pass;
-            nc = total_growable_children_this_pass;
-            nl = total_growable_lines_this_pass;
+            var child_idx = first_growable_child_this_pass;
+            children_left = total_growable_children_this_pass;
+            lines_left = total_growable_lines_this_pass;
             const total_growable_lines_this_pass_f32: f32 = @floatFromInt(total_growable_lines_this_pass);
             const max_space_per_child_this_pass = child_grow_limit_this_pass - smallest_growable_child_this_pass;
             var space_per_child_this_pass = remaining_space / total_growable_lines_this_pass_f32;
             space_per_child_this_pass = @min(space_per_child_this_pass, max_space_per_child_this_pass);
             const space_taken_this_pass = total_growable_lines_this_pass_f32 * space_per_child_this_pass;
             if (space_taken_this_pass <= math.floatEps(f32)) break;
-            while (nc > 0) {
-                nc - 1;
-                child = get_elem_ptr(self.elems, idx);
+            while (children_left > 0) {
+                children_left - 1;
+                child = get_elem_ptr(self.elems, child_idx);
                 child.add_to_min_self_size_limit_to_max_update_growable(AXIS, space_per_child_this_pass);
-                idx = child.get_next_idx_this_pass();
+                child_idx = child.get_next_idx_this_pass();
             }
             line = if (first_growable_line_this_pass == NULL_IDX) &parent.first_axis_line else self.get_line_ptr(first_growable_line_this_pass);
-            while (nl > 0) {
-                nl - 1;
+            while (lines_left > 0) {
+                lines_left - 1;
                 line.min_size.set(AXIS, line.min_size.get(AXIS) + space_per_child_this_pass);
-                if (nl > 0) {
+                if (lines_left > 0) {
                     line = self.get_line_ptr(line.next_growable_line_this_pass);
                 }
             }
@@ -1724,20 +1865,7 @@ pub const LayoutManager = struct {
         }
     }
 
-    // fn add_axis_line_to_parent_primary(self: *LayoutManager, parent: *LayoutElement, prev_axis_line: ?*AxisLine, axis_line: AxisLine) anyerror!*AxisLine {
-    //     var axis_line_ptr: *AxisLine = undefined;
-    //     if (parent.num_axis_lines == 0) {
-    //         parent.first_axis_line = axis_line;
-    //         axis_line_ptr = &parent.first_axis_line;
-    //     } else {
-    //         axis_line_ptr, const axis_line_idx = try self.append_line_get_ptr(axis_line);
-    //         prev_axis_line.?.next_line = axis_line_idx;
-    //     }
-    //     parent.num_axis_lines += 1;
-    //     return axis_line_ptr;
-    // }
-
-    fn fit_and_expand_children_to_fill_parent(_: Elems, idx: u32, self: *LayoutManager, comptime CT: AxisStage) anyerror!Elems {
+    fn fit_and_expand_children_to_fill_parent(_: Nodes, idx: u32, self: *LayoutManager, comptime CT: AxisStage) anyerror!Nodes {
         const parent = self.get_elem_ptr(idx);
         if ((parent.is_floating and !parent.should_propagate_floating(CT.AXIS)) or parent.parent_idx == NULL_IDX) {
             parent.set_min_size_self_limit_to_max_update_growable(CT.AXIS, parent.get_min_size_self(CT.AXIS));
@@ -1761,9 +1889,9 @@ pub const LayoutManager = struct {
         return self.elems;
     }
 
-    fn recheck_element_size_with_with_known_primary_size(_: Elems, idx: u32, self: *LayoutManager, comptime DRIVING_AXIS: Axis) anyerror!Elems {
-        comptime SECONDARY_AXIS = comptime DRIVING_AXIS.OPPOSITE();
-        const elem = self.get_elem_ptr(i);
+    fn recheck_element_size_with_with_known_primary_size(_: Nodes, idx: u32, self: *LayoutManager, comptime DRIVING_AXIS: Axis) anyerror!Nodes {
+        const SECONDARY_AXIS = comptime DRIVING_AXIS.OPPOSITE();
+        const elem = self.get_elem_ptr(idx);
         const check_info = SizeCheckInfo{
             .driving_axis = DRIVING_AXIS,
             .driving_size = elem.get_min_size_self(DRIVING_AXIS),
@@ -1776,185 +1904,332 @@ pub const LayoutManager = struct {
         return self.elems;
     }
 
-    fn position_and_align_child_elements(elems_: Elems, idx: u32, self: *LayoutManager, comptime _: void) anyerror!Elems {
+    inline fn for_each_axis_line(self: *LayoutManager, parent: *LayoutElement, context: anytype, comptime CONTEXT: anytype, comptime action: fn (*LayoutManager, *LayoutElement, *AxisLine, @TypeOf(context), comptime @TypeOf(CONTEXT)) void) void {
+        var line: *AxisLine = &parent.first_axis_line;
+        var n = parent.num_axis_lines;
+        if (n == 0) return;
+        action(self, parent, line, context);
+        n -= 1;
+        while (n > 0) {
+            line = self.get_line_ptr(line.next_line);
+            n -= 1;
+            action(self, parent, line, context);
+        }
+    }
+
+    inline fn for_each_child_on_axis_line(self: *LayoutManager, parent: *LayoutElement, line: *AxisLine, context: anytype, comptime CONTEXT: anytype, comptime action: fn (*LayoutManager, *LayoutElement, *AxisLine, u32, *LayoutElement, @TypeOf(context), comptime @TypeOf(CONTEXT)) void) void {
+        var child_idx: u32 = line.first_elem;
+        var child: *LayoutElement = undefined;
+        var n: u32 = line.num_elems;
+        while (n > 0) {
+            n -= 1;
+            child = self.get_elem_ptr(child_idx);
+            action(self, parent, line, child_idx, child, context);
+            child_idx = child.next_sibling;
+        }
+    }
+
+    inline fn for_each_floating_child(self: *LayoutManager, parent: *LayoutElement, context: anytype, comptime CONTEXT: anytype, comptime action: fn (*LayoutManager, *LayoutElement, u32, *LayoutElement, @TypeOf(context), comptime @TypeOf(CONTEXT)) void) void {
+        var child_idx: u32 = parent.first_floating_child;
+        var child: *LayoutElement = undefined;
+        while (child_idx != NULL_IDX) {
+            child = self.get_elem_ptr(child_idx);
+            action(self, parent, child_idx, child, context);
+            child_idx = child.next_sibling;
+        }
+    }
+
+    const PosAlignData_S = struct {
+        cursor_axis_line_start_p: f32,
+        cursor_pos_s: f32,
+        num_gaps_s: u32,
+        base_gap_p: f32,
+        gap_s: f32,
+        parent_size: Size,
+        parent_size_minus_padding: Size,
+        parent_abs_pos: Pos,
+        child_align_p: Align,
+        child_align_s: Align,
+    };
+    const PosAlignData_P = struct {
+        cursor_pos_p: f32,
+        cursor_pos_s: f32,
+        gap_p: f32,
+        gap_s: f32,
+    };
+    const PosAlignData_CT = struct {
+        PRIME_AXIS: Axis,
+        SEC_AXIS: Axis,
+        PRIME_DIR: Dir,
+        SEC_DIR: Dir,
+        NEGATIVE_DELTA_P: bool,
+        NEGATIVE_DELTA_S: bool,
+        SUBTRACT_CHILD_SIZE_FROM_CURSOR_P: bool,
+        SUBTRACT_CHILD_SIZE_FROM_CURSOR_S: bool,
+    };
+    const AxisSizeData = struct {
+        base_gap: f32,
+        total_size: f32,
+    };
+
+    fn position_and_align_childen_on_axis_line(self: *LayoutManager, parent: *LayoutElement, line: *AxisLine, data_s: *PosAlignData_S, comptime DATA: PosAlignData_CT) void {
+        var cursor_p = data_s.cursor_axis_line_start_p;
+        var gap_p = data_s.base_gap_p;
+        switch (data_s.child_align_p) {
+            .MIDDLE => {
+                var prime_size_data = AxisSizeData{
+                    .base_gap = gap_p,
+                    .total_size = -gap_p,
+                };
+                self.for_each_child_on_axis_line(parent, line, &prime_size_data, DATA.PRIME_AXIS, add_primary_size_to_total);
+                var leftover_primary_space = data_s.parent_size_minus_padding.get(DATA.PRIME_AXIS) - prime_size_data.total_size;
+                leftover_primary_space = leftover_primary_space / 2;
+                if (DATA.NEGATIVE_DELTA_P) {
+                    cursor_p -= leftover_primary_space;
+                } else {
+                    cursor_p += leftover_primary_space;
+                }
+            },
+            .JUSTIFY => {
+                if (line.num_elems > 1) {
+                    var prime_size_data = AxisSizeData{
+                        .base_gap = gap_p,
+                        .total_size = -gap_p,
+                    };
+                    self.for_each_child_on_axis_line(parent, line, &prime_size_data, DATA.PRIME_AXIS, add_primary_size_to_total);
+                    var leftover_primary_space = data_s.parent_size_minus_padding.get(DATA.PRIME_AXIS) - prime_size_data.total_size;
+                    leftover_primary_space = leftover_primary_space / (line.num_elems - 1);
+                    if (DATA.NEGATIVE_DELTA_P) {
+                        gap_p -= leftover_primary_space;
+                    } else {
+                        gap_p += leftover_primary_space;
+                    }
+                }
+            },
+            else => {},
+        }
+        var data_p = PosAlignData_P{
+            .cursor_pos_p = cursor_p,
+            .cursor_pos_s = data_s.cursor_pos_s,
+            .gap_p = gap_p,
+            .gap_s = data_s.gap_s,
+        };
+        self.for_each_child_on_axis_line(parent, line, &data_p, DATA, finalize_inline_child_aabb);
+        if (comptime DATA.NEGATIVE_DELTA_S) {
+            data_s.cursor_pos_s -= (line.min_size.get(DATA.SEC_AXIS) + data_s.gap_s);
+        } else {
+            data_s.cursor_pos_s += (line.min_size.get(DATA.SEC_AXIS) + data_s.gap_s);
+        }
+    }
+
+    fn add_secondary_size_to_total(_: *LayoutManager, _: *LayoutElement, line: *AxisLine, data: *AxisSizeData, comptime SEC_AXIS: Axis) void {
+        data.total_size += line.min_size.get(SEC_AXIS) + data.base_gap;
+    }
+    fn add_primary_size_to_total(_: *LayoutManager, _: *LayoutElement, _: *AxisLine, _: u32, child: *LayoutElement, data: *AxisSizeData, comptime PRIME_AXIS: Axis) void {
+        data.total_size += child.get_min_size_self(PRIME_AXIS) + data.base_gap;
+    }
+    fn finalize_inline_child_aabb(_: *LayoutManager, parent: *LayoutElement, line: *AxisLine, _: u32, child: *LayoutElement, data: *PosAlignData_P, comptime DATA: PosAlignData_CT) void {
+        const child_size_p = child.get_min_size_self(DATA.PRIME_AXIS);
+        const child_size_s = child.get_min_size_self(DATA.SEC_AXIS);
+
+        if (comptime DATA.NEGATIVE_DELTA_P) {
+            data.cursor_pos_p -= child_size_p;
+        }
+        var child_pos_s: f32 = data.cursor_pos_s;
+        const child_local_align = LocalAlign.eval(parent.get_child_align(DATA.SEC_AXIS).generic(), parent.get_children_local_align(), child.get_self_local_align());
+        switch (child_local_align) {
+            .START => {
+                if (comptime DATA.NEGATIVE_DELTA_P) {
+                    child_pos_s -= line.min_size.get(DATA.SEC_AXIS);
+                }
+            },
+            .CENTER => {
+                var local_sec_free_space = line.min_size.get(DATA.SEC_AXIS) - child_size_s;
+                local_sec_free_space /= 2;
+                if (comptime DATA.NEGATIVE_DELTA_P) {
+                    child_pos_s -= (local_sec_free_space + child_size_s);
+                } else {
+                    child_pos_s += local_sec_free_space;
+                }
+            },
+            .END => {
+                if (comptime DATA.NEGATIVE_DELTA_P) {
+                    child_pos_s -= child_size_s;
+                } else {
+                    const local_sec_free_space = line.min_size.get(DATA.SEC_AXIS) - child_size_s;
+                    child_pos_s += local_sec_free_space;
+                }
+            },
+        }
+        const final_pos = Pos.new(if (comptime DATA.PRIME_AXIS == .X) data.cursor_pos_p else child_pos_s, if (comptime DATA.PRIME_AXIS == .Y) data.cursor_pos_p else child_pos_s).add(child.relative_offset);
+        const final_size = Size.new(if (comptime DATA.PRIME_AXIS == .X) child_size_p else child_size_s, if (comptime DATA.PRIME_AXIS == .Y) child_size_p else child_size_s);
+        child._min_or_aabb.final_aabb = AABB.new_from_pos_size(final_pos, final_size);
+        if (comptime DATA.NEGATIVE_DELTA_P) {
+            data.cursor_pos_p -= data.gap_p;
+        } else {
+            data.cursor_pos_p += child_size_p + data.gap_p;
+        }
+        if (child.clip_to_parent) {
+            child._max_or_clip_aabb.final_clip_aabb, child.completely_clipped = child._min_or_aabb.final_aabb.overlap_area_and_overlap_area_zero_or_negative(parent._max_or_clip_aabb.final_clip_aabb);
+        } else {
+            child._max_or_clip_aabb.final_clip_aabb = child._min_or_aabb.final_aabb;
+        }
+    }
+    fn finalize_floating_child_aabb(_: *LayoutManager, parent: *LayoutElement, _: u32, child: *LayoutElement, _: void, _: void) void {
+        const child_size = child._min_or_aabb.min_size.self;
+        const parent_float_attach = child.get_parent_float_attach();
+        const self_float_attach = child.get_self_float_attach();
+        var child_pos_x = switch (parent_float_attach) {
+            .TOP_LEFT, .CENTER_LEFT, .BOTTOM_LEFT => parent.get_aabb().x_min,
+            .TOP_MIDDLE, .CENTER_MIDDLE, .BOTTOM_MIDDLE => parent.get_aabb().get_center_point_component(.X),
+            .TOP_RIGHT, .CENTER_RIGHT, .BOTTOM_RIGHT => parent.get_aabb().x_max,
+        };
+        switch (self_float_attach) {
+            .TOP_LEFT, .CENTER_LEFT, .BOTTOM_LEFT => {},
+            .TOP_MIDDLE, .CENTER_MIDDLE, .BOTTOM_MIDDLE => {
+                child_pos_x -= (child_size.x / 2.0);
+            },
+            .TOP_RIGHT, .CENTER_RIGHT, .BOTTOM_RIGHT => {
+                child_pos_x -= child_size.x;
+            },
+        }
+        var child_pos_y = switch (parent_float_attach) {
+            .TOP_LEFT, .TOP_MIDDLE, .TOP_RIGHT => parent.get_aabb().y_min,
+            .CENTER_LEFT, .CENTER_MIDDLE, .CENTER_RIGHT => parent.get_aabb().get_center_point_component(.Y),
+            .BOTTOM_LEFT, .BOTTOM_MIDDLE, .BOTTOM_RIGHT => parent.get_aabb().y_max,
+        };
+        switch (self_float_attach) {
+            .TOP_LEFT, .TOP_MIDDLE, .TOP_RIGHT => {},
+            .CENTER_LEFT, .CENTER_MIDDLE, .CENTER_RIGHT => {
+                child_pos_y -= (child_size.y / 2.0);
+            },
+            .BOTTOM_LEFT, .BOTTOM_MIDDLE, .BOTTOM_RIGHT => {
+                child_pos_y -= child_size.y;
+            },
+        }
+        child_pos_x += child.relative_offset.x;
+        child_pos_y += child.relative_offset.y;
+        child._min_or_aabb.final_aabb == AABB.new_from_pos_size(Pos.new(child_pos_x, child_pos_y), child_size);
+        if (child.clip_to_parent) {
+            child._max_or_clip_aabb.final_clip_aabb, child.completely_clipped = child._min_or_aabb.final_aabb.overlap_area_and_overlap_area_zero_or_negative(parent._max_or_clip_aabb.final_clip_aabb);
+        } else {
+            child._max_or_clip_aabb.final_clip_aabb = child._min_or_aabb.final_aabb;
+        }
+    }
+
+    fn position_and_align_inline_child_elements_core(self: *LayoutManager, parent: *LayoutElement, comptime PRIME_AXIS: Axis, comptime SEC_AXIS: Axis, comptime PRIME_DIR: Dir, comptime SEC_DIR: Dir) void {
+        const DATA = comptime PosAlignData_CT{
+            .PRIME_AXIS = PRIME_AXIS,
+            .SEC_AXIS = SEC_AXIS,
+            .PRIME_DIR = PRIME_DIR,
+            .SEC_DIR = SEC_DIR,
+            .NEGATIVE_DELTA_P = PRIME_DIR == .REVERSE,
+            .NEGATIVE_DELTA_S = SEC_DIR == .REVERSE,
+        };
+        const parent_abs_pos = parent.get_absolute_pos();
+        const parent_size = parent.get_final_size();
+        const parent_abs_pos_end = parent.get_absolute_pos_end();
+        const padding = parent.padding;
+        const parent_size_minus_padding = parent_size.subtract(padding.total_float());
+        const child_align_s = parent.child_align.get(SEC_AXIS);
+        var cursor_pos_s = if (DATA.NEGATIVE_DELTA_P) parent_abs_pos_end.get(SEC_AXIS) - padding.start_padding(SEC_AXIS, SEC_DIR) else parent_abs_pos.get(SEC_AXIS) + padding.start_padding(SEC_AXIS, SEC_DIR);
+        var gap_s = parent.child_gaps.get(SEC_AXIS);
+        const cursor_axis_line_start_p = if (DATA.NEGATIVE_DELTA_P) parent_abs_pos_end.get(PRIME_AXIS) - padding.start_padding(PRIME_AXIS, PRIME_DIR) else parent_abs_pos.get(PRIME_AXIS) + padding.start_padding(PRIME_AXIS, PRIME_DIR);
+        const num_gaps_s = parent.num_axis_lines - 1;
+        switch (child_align_s) {
+            .MIDDLE => {
+                var sec_size_data = AxisSizeData{
+                    .base_gap = gap_s,
+                    .total_size = -gap_s,
+                };
+                self.for_each_axis_line(parent, &sec_size_data, SEC_AXIS, add_secondary_size_to_total);
+                var leftover_secondary_space = parent_size_minus_padding.get(SEC_AXIS) - sec_size_data.total_size;
+                leftover_secondary_space = leftover_secondary_space / 2;
+                if (DATA.NEGATIVE_DELTA_P) {
+                    cursor_pos_s -= leftover_secondary_space;
+                } else {
+                    cursor_pos_s += leftover_secondary_space;
+                }
+            },
+            .JUSTIFY => {
+                if (num_gaps_s > 0) {
+                    var sec_size_data = AxisSizeData{
+                        .base_gap = gap_s,
+                        .total_size = -gap_s,
+                    };
+                    self.for_each_axis_line(parent, &sec_size_data, SEC_AXIS, add_secondary_size_to_total);
+                    var leftover_secondary_space = parent_size_minus_padding.get(SEC_AXIS) - sec_size_data.total_size;
+                    leftover_secondary_space = leftover_secondary_space / num_gaps_s;
+                    gap_s += leftover_secondary_space;
+                }
+            },
+            else => {},
+        }
+        var data = PosAlignData_S{
+            .cursor_axis_line_start_p = cursor_axis_line_start_p,
+            .cursor_pos_s = cursor_pos_s,
+            .num_gaps_s = num_gaps_s,
+            .base_gap_p = parent.child_gaps.get(PRIME_AXIS),
+            .gap_s = gap_s,
+            .parent_size_minus_padding = parent_size_minus_padding,
+            .parent_size = parent_size,
+            .parent_abs_pos = parent.get_absolute_pos(),
+            .child_align_p = parent.child_align.get(PRIME_AXIS),
+            .child_align_s = child_align_s,
+        };
+        self.for_each_axis_line(parent, &data, DATA, position_and_align_childen_on_axis_line);
+    }
+
+    fn position_and_align_child_elements(_: Nodes, idx: u32, self: *LayoutManager, comptime _: void) anyerror!Nodes {
         var parent: *LayoutElement = self.get_elem_ptr(idx);
         if (parent.parent_idx == NULL_IDX) {
             @branchHint(.unlikely);
             const final_size = parent._min_or_aabb.min_size.self;
-            parent._min_or_aabb.final_aabb = AABB.new(parent.relative_pos.x, parent.relative_pos.x + final_size.x, parent.relative_pos.y, parent.relative_pos.y + final_size.y)
+            parent._min_or_aabb.final_aabb = AABB.new(parent.relative_offset.x, parent.relative_offset.x + final_size.x, parent.relative_offset.y, parent.relative_offset.y + final_size.y);
         }
-        const parent_abs_pos = parent.get_absolute_pos();
-        const parent_size = parent.get_final_size();
-        const padding = parent.padding;
-        const parent_size_minus_padding = parent_size.subtract(padding.total_float());
-        const gaps = parent.child_gaps;
-        const num_secondary_gaps = parent.num_axis_lines - 1;
-        const primary_axis = parent.primary_child_axis;
-        const secondary_axis = primary_axis.opposite();
-        const x_dir = parent.child_layout_dir_x;
-        const y_dir = parent.child_layout_dir_y;
-        const child_align = parent.child_align;
-        switch (primary_axis) {
-            .X => {
-                var x_cursor_start f32 = undefined;
-                const num_x_gaps = undefined;
-                const num_y_gaps = num_secondary_gaps;
-                var child_idx: u32 = first_inline_child_idx;
-                var x_cursor_axis_line_start: f32 = undefined;
-                var x_cursor: f32 = undefined;
-                var y_cursor: f32 = undefined;
-                var x_add_width: f32 = undefined;
-                var y_add_height: f32 = undefined;
-                var x_dir_mult: f32 = undefined;
-                var y_dir_mult: f32 = undefined;
-                var x_gap_step_base: f32 = gaps.x_gap();
-                var y_gap_step: f32 = gaps.y_gap();
-                switch (x_dir) {
-                    .LEFT_TO_RIGHT => {
-                        x_cursor_axis_line_start = parent_abs_pos.x + num_cast(padding.left, f32);
-                        x_add_width = 0
-                        x_dir_mult = 1
+        if (parent.num_inline_children > 0) {
+            switch (parent.primary_child_axis) {
+                .X => switch (parent.child_layout_dir_x) {
+                    .LEFT_TO_RIGHT => switch (parent.child_layout_dir_y) {
+                        .TOP_TO_BOTTOM => {
+                            self.position_and_align_inline_child_elements_core(parent, .X, .Y, .FORWARD, .FORWARD);
+                        },
+                        .BOTTOM_TO_TOP => {
+                            self.position_and_align_inline_child_elements_core(parent, .X, .Y, .FORWARD, .REVERSE);
+                        },
                     },
-                    .RIGHT_TO_LEFT => {
-                        x_cursor_axis_line_start = parent_abs_pos.x + parent_size.x - num_cast(padding.right, f32);
-                        x_add_width = -1.0;
-                        x_dir_mult = -1.0;
+                    .RIGHT_TO_LEFT => switch (parent.child_layout_dir_y) {
+                        .TOP_TO_BOTTOM => {
+                            self.position_and_align_inline_child_elements_core(parent, .X, .Y, .REVERSE, .FORWARD);
+                        },
+                        .BOTTOM_TO_TOP => {
+                            self.position_and_align_inline_child_elements_core(parent, .X, .Y, .REVERSE, .REVERSE);
+                        },
                     },
-                }
-                switch (y_dir) {
-                    .TOP_TO_BOTTOM => {
-                        y_cursor = parent_abs_pos.y + num_cast(padding.top, f32);
-                        y_add_width = 0
-                        y_dir_mult = 1
+                },
+                .Y => switch (parent.child_layout_dir_x) {
+                    .LEFT_TO_RIGHT => switch (parent.child_layout_dir_y) {
+                        .TOP_TO_BOTTOM => {
+                            self.position_and_align_inline_child_elements_core(parent, .Y, .X, .FORWARD, .FORWARD);
+                        },
+                        .BOTTOM_TO_TOP => {
+                            self.position_and_align_inline_child_elements_core(parent, .Y, .X, .REVERSE, .FORWARD);
+                        },
                     },
-                    .BOTTOM_TO_TOP => {
-                        y_cursor = parent_abs_pos.y + parent_size.y - num_cast(padding.bottom, f32);
-                        y_add_width = -1.0;
-                        y_dir_mult = -1.0;
+                    .RIGHT_TO_LEFT => switch (parent.child_layout_dir_y) {
+                        .TOP_TO_BOTTOM => {
+                            self.position_and_align_inline_child_elements_core(parent, .Y, .X, .FORWARD, .REVERSE);
+                        },
+                        .BOTTOM_TO_TOP => {
+                            self.position_and_align_inline_child_elements_core(parent, .Y, .X, .REVERSE, .REVERSE);
+                        },
                     },
-                }
-                var line: AxisLine = parent.first_axis_line;
-                var next_axis_line_idx = line.next_line;
-                while (true) {
-                    var child_idx = line.first_elem;
-                    var child: *LayoutElement = undefined;
-                    var children_left = line.num_elems;
-                    num_x_gaps = line.num_elems - 1;
-                    const total_x_gap_base = num_x_gaps * x_gap_step_base;
-                    const size_for_children_x = parent_size_minus_padding.subtract(.new(total_x_gap_base, 0))
-                    // switch (child_align.x) { // RIGHT_TO_LEFT
-                    //         .LEFT => {},
-                    //         .JUSTIFY => {
-                    //             h_gap_step += (@max(0, self.elements[parent_idx].min_size_width_or_leftover_horiz) / num_y_gaps);
-                    //         },
-                    //         .MIDDLE => {
-                    //             x_cursor -= (self.elements[parent_idx].min_size_width_or_leftover_horiz / 2.0);
-                    //         },
-                    //         .RIGHT => {
-                    //             x_cursor -= self.elements[parent_idx].min_size_width_or_leftover_horiz;
-                    //         },
-                    //     }
-                    while (children_left > 0) {
-                        children_left - 1;
-                        child = self.get_elem_ptr(child_idx);
-
-                        child_idx = child.next_sibling;
-                    }
-                    if (next_axis_line_idx == NULL_IDX) break;
-                }
-            },
-            .Y => {},
-        }
-        
-        
-        switch (y_dir) {
-            .TOP_TO_BOTTOM => {
-                y_cursor = padding.top;
-                switch (child_align.y) {
-                    .TOP => {},
-                    .JUSTIFY => {
-                        v_gap_step += (@max(0, self.elements[parent_idx].min_size_height_or_leftover_vert) / num_y_gaps);
-                    },
-                    .CENTER => {
-                        y_cursor += (self.elements[parent_idx].min_size_height_or_leftover_vert / 2.0);
-                    },
-                    .BOTTOM => {
-                        y_cursor += self.elements[parent_idx].min_size_height_or_leftover_vert;
-                    },
-                }
-            },
-            .RIGHT_TO_LEFT => {
-                y_cursor = padding.bottom;
-                y_add_height = -1.0;
-                y_dir_mult = -1.0;
-                switch (child_align.y) {
-                    .TOP => {},
-                    .JUSTIFY => {
-                        v_gap_step += (@max(0, self.elements[parent_idx].min_size_height_or_leftover_vert) / num_y_gaps);
-                    },
-                    .CENTER => {
-                        y_cursor -= (self.elements[parent_idx].min_size_height_or_leftover_vert / 2.0);
-                    },
-                    .BOTTOM => {
-                        y_cursor -= self.elements[parent_idx].min_size_height_or_leftover_vert;
-                    },
-                }
-            },
-        }
-        if (child_idx != NULL_IDX) {
-            while (child_idx <= last_child_idx) : (child_idx += 1) {
-                const child_w = self.elements[child_idx].min_width_from_children_or_final_width;
-                const child_h = self.elements[child_idx].min_height_from_children_or_final_height;
-                const x_pos_rel = x_cursor + (x_add_width * child_w);
-                const y_pos_rel = y_cursor + (y_add_height * child_h);
-                const rel_pos = Pos.new(x_pos_rel, y_pos_rel);
-                const abs_pos = parent_abs_pos + rel_pos;
-                self.elements[child_idx].relative_pos = rel_pos;
-                self.elements[child_idx].absolute_pos = abs_pos;
-                switch (primary_axis) {
-                    .HORIZONTAL => {
-                        const abs_step = child_w + h_gap_step;
-                        x_cursor += (abs_step * x_dir_mult);
-                    },
-                    .VERTICAL => {
-                        const abs_step = child_h + v_gap_step;
-                        y_cursor += (abs_step * y_dir_mult);
-                    },
-                }
+                },
             }
         }
-        
-    }
-
-    pub fn handle_events_on_heirarchy_from_children_to_parents(self: *const LayoutManager, events: []EventAtLocation) void {
-        var i: u32 = self.elem_len;
-        while (i > 0) {
-            i -= 1;
-            const elem = self.elements[i];
-            for (events) |*e| {}
+        if (parent.first_floating_child != NULL_IDX) {
+            self.for_each_floating_child(parent, void{}, void{}, finalize_floating_child_aabb);
         }
-    }
-
-    pub fn execute_final_layout_handlers_for_all_elements_parents_first(self: *const LayoutManager) void {
-        var i: u32 = 0;
-        while (i < self.elem_len) : (i += 1) {
-            const inter_layout = self.elements[i];
-            const final_layout: LayoutResult = LayoutResult{
-                .pos = inter_layout.absolute_pos,
-                .size = Size(inter_layout.min_width_from_children_or_final_width, inter_layout.min_height_from_children_or_final_height),
-                .z_index = inter_layout.depth,
-                .has_clip = inter_layout.clip_to_parent,
-                .clip_aabb = if (inter_layout.clip_to_parent) get: {
-                    var out: AABB = AABB{};
-                    out.x_min = self.elements[inter_layout.parent_idx].absolute_pos.x;
-                    out.y_min = self.elements[inter_layout.parent_idx].absolute_pos.y;
-                    out.x_max = out.x_min + self.elements[inter_layout.parent_idx].min_width_from_children_or_final_width;
-                    out.y_max = out.y_min + self.elements[inter_layout.parent_idx].min_height_from_children_or_final_height;
-                    break :get out;
-                } else AABB{},
-                .sibling_edges = 0, //TODO implement sibling edge checks
-            };
-            self.elements[i].requester.handle_layout_result(final_layout);
-        }
+        return self.elems;
     }
 };

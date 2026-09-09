@@ -30,9 +30,15 @@ const Root = @import("./_root.zig");
 const Utils = Root.Utils;
 const MathX = Root.Math;
 
+const Edge = enum(u1) {
+    MIN,
+    MAX,
+};
+
 pub fn define_aabb2_type(comptime T: type) type {
     return extern struct {
         const T_AABB2 = @This();
+        const Axis = Root.Vec2.Axis;
         const T_Vec2 = Root.Vec2.define_vec2_type(T);
         const T_Rect2 = Root.Rect2.define_rect2_type(T);
         const INF = if (@typeInfo(T) == .int) math.maxInt(T) else math.inf(T);
@@ -51,6 +57,28 @@ pub fn define_aabb2_type(comptime T: type) type {
         x_max: T = NEG_INF,
         y_min: T = INF,
         y_max: T = NEG_INF,
+
+        pub inline fn INFINITE() T_AABB2 {
+            return T_AABB2{
+                .x_min = NEG_INF,
+                .x_max = INF,
+                .y_min = NEG_INF,
+                .y_max = INF,
+            };
+        }
+
+        pub inline fn get(self: T_AABB2, comptime EDGE: Edge, comptime AXIS: Axis) T {
+            switch (comptime EDGE) {
+                .MIN => switch (comptime AXIS) {
+                    .X => return self.x_min,
+                    .Y => return self.y_min,
+                },
+                .MAX => switch (comptime AXIS) {
+                    .X => return self.x_max,
+                    .Y => return self.y_max,
+                },
+            }
+        }
 
         pub fn new(x_min: T, x_max: T, y_min: T, y_max: T) T_AABB2 {
             return T_AABB2{ .x_min = x_min, .x_max = x_max, .y_min = y_min, .y_max = y_max };
@@ -89,6 +117,13 @@ pub fn define_aabb2_type(comptime T: type) type {
         }
         pub fn get_max_point(self: T_AABB2) T_Vec2 {
             return T_Vec2.new(self.x_max, self.y_max);
+        }
+        pub fn get_center_point(self: T_AABB2) T_Vec2 {
+            return self.get_min_point().add(self.get_size().scale(0.5));
+        }
+        pub fn get_center_point_component(self: T_AABB2, comptime AXIS: Axis) T {
+            const half_size_on_axis = (self.get(.MAX, AXIS) - self.get(.MIN, AXIS)) / 2;
+            return self.get(.MIN, AXIS) + half_size_on_axis;
         }
 
         pub fn scale(self: T_AABB2, factor: anytype) T_AABB2 {
@@ -311,7 +346,7 @@ pub fn define_aabb2_type(comptime T: type) type {
                 .y_max = overlap_y_max,
             }, (overlap_x_min <= overlap_x_max and overlap_y_min <= overlap_y_max) };
         }
-        pub fn overlap_area_and_overlap_greater_than_zero(self: T_AABB2, other: T_AABB2) struct { T_AABB2, bool } {
+        pub fn overlap_area_and_overlap_area_positive(self: T_AABB2, other: T_AABB2) struct { T_AABB2, bool } {
             const overlap_x_min = @max(self.x_min, other.x_min);
             const overlap_x_max = @min(self.x_max, other.x_max);
             if (overlap_x_min >= overlap_x_max) return null;
@@ -324,6 +359,20 @@ pub fn define_aabb2_type(comptime T: type) type {
                 .y_min = overlap_y_min,
                 .y_max = overlap_y_max,
             }, (overlap_x_min < overlap_x_max and overlap_y_min < overlap_y_max) };
+        }
+        pub fn overlap_area_and_overlap_area_zero_or_negative(self: T_AABB2, other: T_AABB2) struct { T_AABB2, bool } {
+            const overlap_x_min = @max(self.x_min, other.x_min);
+            const overlap_x_max = @min(self.x_max, other.x_max);
+            if (overlap_x_min >= overlap_x_max) return null;
+            const overlap_y_min = @max(self.y_min, other.y_min);
+            const overlap_y_max = @min(self.y_max, other.y_max);
+            if (overlap_y_min >= overlap_y_max) return null;
+            return .{ T_AABB2{
+                .x_min = overlap_x_min,
+                .x_max = overlap_x_max,
+                .y_min = overlap_y_min,
+                .y_max = overlap_y_max,
+            }, (overlap_x_min >= overlap_x_max and overlap_y_min >= overlap_y_max) };
         }
 
         pub fn overlap_area_approx(self: T_AABB2, other: T_AABB2) ?T_AABB2 {
