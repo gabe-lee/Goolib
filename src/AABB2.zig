@@ -349,10 +349,8 @@ pub fn define_aabb2_type(comptime T: type) type {
         pub fn overlap_area_and_overlap_area_positive(self: T_AABB2, other: T_AABB2) struct { T_AABB2, bool } {
             const overlap_x_min = @max(self.x_min, other.x_min);
             const overlap_x_max = @min(self.x_max, other.x_max);
-            if (overlap_x_min >= overlap_x_max) return null;
             const overlap_y_min = @max(self.y_min, other.y_min);
             const overlap_y_max = @min(self.y_max, other.y_max);
-            if (overlap_y_min >= overlap_y_max) return null;
             return .{ T_AABB2{
                 .x_min = overlap_x_min,
                 .x_max = overlap_x_max,
@@ -363,10 +361,8 @@ pub fn define_aabb2_type(comptime T: type) type {
         pub fn overlap_area_and_overlap_area_zero_or_negative(self: T_AABB2, other: T_AABB2) struct { T_AABB2, bool } {
             const overlap_x_min = @max(self.x_min, other.x_min);
             const overlap_x_max = @min(self.x_max, other.x_max);
-            if (overlap_x_min >= overlap_x_max) return null;
             const overlap_y_min = @max(self.y_min, other.y_min);
             const overlap_y_max = @min(self.y_max, other.y_max);
-            if (overlap_y_min >= overlap_y_max) return null;
             return .{ T_AABB2{
                 .x_min = overlap_x_min,
                 .x_max = overlap_x_max,
@@ -456,10 +452,8 @@ pub fn define_aabb2_type(comptime T: type) type {
 
         pub fn to_rect2(self: T_AABB2) T_Rect2 {
             return T_Rect2{
-                .x = self.x_min,
-                .y = self.y_min,
-                .w = self.x_max - self.x_min,
-                .h = self.y_max - self.y_min,
+                .pos = self.get_min_point(),
+                .size = self.get_size(),
             };
         }
 

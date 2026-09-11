@@ -68,6 +68,10 @@ comptime {
     }
 }
 
+pub fn meta_ptr_align(comptime ptr: builtin.Type.Pointer) usize {
+    return ptr.alignment orelse @alignOf(ptr.child);
+}
+
 pub inline fn inline_swap(comptime T: type, a: *T, b: *T, temp: *T) void {
     temp.* = a.*;
     a.* = b.*;

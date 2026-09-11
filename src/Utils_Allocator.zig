@@ -45,6 +45,7 @@ const assert_unreachable = Assert.assert_unreachable;
 const warn_unconditional = Assert.warn_unconditional;
 const assert_unreachable_always_panic = Assert.assert_unreachable_always_panic;
 const num_cast = Root.Cast.num_cast;
+const meta_ptr_align = Utils.meta_ptr_align;
 const KindInfo = Types.KindInfo;
 
 const CACHE_LINE = std.atomic.cache_line;
@@ -259,20 +260,20 @@ fn smart_alloc_internal(alloc: Allocator, comptime T: type, old_ptr: [*]T, old_l
     const PTR = @typeInfo(@TypeOf(old_ptr)).pointer;
     switch (comptime_settings.ERROR_MODE) {
         .RETURN_ERRORS, .RETURN_ERRORS_AND_WARN => {
-            break :t AllocErr![]align(PTR.alignment) PTR.child;
+            break :t AllocErr![]align(meta_ptr_align(PTR)) PTR.child;
         },
         .ERRORS_PANIC, .ERRORS_ARE_UNREACHABLE => {
-            break :t []align(PTR.alignment) PTR.child;
+            break :t []align(meta_ptr_align(PTR)) PTR.child;
         },
     }
 } {
     if (old_cap == new_cap) return old_ptr[0..old_cap];
     const INFO = @typeInfo(@TypeOf(old_ptr)).pointer;
     const SIZE = @sizeOf(T);
-    const SLICE = []align(INFO.alignment) T;
+    const SLICE = []align(meta_ptr_align(INFO)) T;
     const GROW = if (comptime_settings.GROW_MODE) |MODE| MODE else settings.grow_mode;
-    const OLD_ALIGN = if (comptime_settings.OLD_ALIGN) |A| A.get_align(INFO.alignment) else settings.old_align.get_align(INFO.alignment);
-    const NEW_ALIGN = if (comptime_settings.NEW_ALIGN) |A| A.get_align(INFO.alignment) else settings.new_align.get_align(INFO.alignment);
+    const OLD_ALIGN = if (comptime_settings.OLD_ALIGN) |A| A.get_align(meta_ptr_align(INFO)) else settings.old_align.get_align(meta_ptr_align(INFO));
+    const NEW_ALIGN = if (comptime_settings.NEW_ALIGN) |A| A.get_align(meta_ptr_align(INFO)) else settings.new_align.get_align(meta_ptr_align(INFO));
     const COPY = if (comptime_settings.COPY_MODE) |MODE| MODE else settings.copy_mode;
     const INIT_NEW = if (comptime_settings.INIT_NEW_MODE) |MODE| MODE else settings.init_new_mode;
     const CLEAR_OLD = if (comptime_settings.CLEAR_OLD_MODE) |MODE| MODE else settings.clear_old_mode;
@@ -299,24 +300,26 @@ fn smart_alloc_internal(alloc: Allocator, comptime T: type, old_ptr: [*]T, old_l
     next_stage: switch (SmartAllocStage.ALLOC_NEW) {
         .ALLOC_NEW => {
             if (new_byte_len == 0) continue :next_stage .MEMSET_OLD_AND_NEW;
-            if (alloc.rawRemap(old_byte_slice, .fromByteUnits(NEW_ALIGN), new_byte_len, @returnAddress())) |new_ptr| {
-                remap = true;
-                new_mem_byte_ptr = new_ptr;
-                const new_ptr_cast: [*]T = @ptrCast(@alignCast(new_ptr));
-                new_mem_total = new_ptr_cast[0..real_new_cap];
-                switch (COPY) {
-                    .COPY_EXISTING_DATA => {
-                        new_mem_used = new_ptr_cast[0..copy_len];
-                        new_mem_unused = new_ptr_cast[copy_len..real_new_cap];
-                        new_mem_unused_bytes = new_ptr[copy_byte_len..new_byte_len];
-                        continue :next_stage .MEMSET_OLD_AND_NEW;
-                    },
-                    .DONT_COPY_EXISTING_DATA => {
-                        new_mem_used = new_ptr_cast[0..0];
-                        new_mem_unused = new_ptr_cast[0..real_new_cap];
-                        new_mem_unused_bytes = new_ptr[0..new_byte_len];
-                        continue :next_stage .MEMSET_OLD_AND_NEW;
-                    },
+            if (old_byte_len > 0) {
+                if (alloc.rawRemap(old_byte_slice, .fromByteUnits(NEW_ALIGN), new_byte_len, @returnAddress())) |new_ptr| {
+                    remap = true;
+                    new_mem_byte_ptr = new_ptr;
+                    const new_ptr_cast: [*]T = @ptrCast(@alignCast(new_ptr));
+                    new_mem_total = new_ptr_cast[0..real_new_cap];
+                    switch (COPY) {
+                        .COPY_EXISTING_DATA => {
+                            new_mem_used = new_ptr_cast[0..copy_len];
+                            new_mem_unused = new_ptr_cast[copy_len..real_new_cap];
+                            new_mem_unused_bytes = new_ptr[copy_byte_len..new_byte_len];
+                            continue :next_stage .MEMSET_OLD_AND_NEW;
+                        },
+                        .DONT_COPY_EXISTING_DATA => {
+                            new_mem_used = new_ptr_cast[0..0];
+                            new_mem_unused = new_ptr_cast[0..real_new_cap];
+                            new_mem_unused_bytes = new_ptr[0..new_byte_len];
+                            continue :next_stage .MEMSET_OLD_AND_NEW;
+                        },
+                    }
                 }
             }
             new_mem_byte_ptr = alloc.rawAlloc(new_byte_len, .fromByteUnits(NEW_ALIGN), @returnAddress()) orelse {
@@ -457,10 +460,10 @@ pub fn smart_alloc(alloc: Allocator, old_ptr: anytype, old_len: anytype, old_cap
     const PTR = @typeInfo(@TypeOf(old_ptr)).pointer;
     switch (comptime_settings.ERROR_MODE) {
         .RETURN_ERRORS, .RETURN_ERRORS_AND_WARN => {
-            break :t AllocErr![]align(PTR.alignment) PTR.child;
+            break :t AllocErr![]align(meta_ptr_align(PTR)) PTR.child;
         },
         .ERRORS_PANIC, .ERRORS_ARE_UNREACHABLE => {
-            break :t []align(PTR.alignment) PTR.child;
+            break :t []align(meta_ptr_align(PTR)) PTR.child;
         },
     }
 } {
@@ -468,20 +471,17 @@ pub fn smart_alloc(alloc: Allocator, old_ptr: anytype, old_len: anytype, old_cap
     return smart_alloc_internal(alloc, T, old_ptr, @intCast(old_len), @intCast(old_cap), @intCast(new_cap), settings, comptime_settings);
 }
 
-pub fn smart_alloc_ptr_ptrs(alloc: Allocator, old_ptr_ptr: anytype, old_len: anytype, old_cap_ptr: anytype, new_cap: anytype, settings: SmartAllocSettings(Types.pointer_child_type(@TypeOf(old_ptr_ptr.*))), comptime comptime_settings: SmartAllocComptimeSettings(Types.pointer_child_type(@TypeOf(old_ptr_ptr.*)))) switch (comptime_settings.ERROR_MODE) {
-    .RETURN_ERRORS, .RETURN_ERRORS_AND_WARN => ?AllocErr,
+pub fn smart_alloc_ptr_ptrs(alloc: Allocator, ptr_ptr: anytype, len_ptr: anytype, cap_ptr: anytype, new_cap: anytype, settings: SmartAllocSettings(Types.pointer_child_type(@TypeOf(ptr_ptr.*))), comptime comptime_settings: SmartAllocComptimeSettings(Types.pointer_child_type(@TypeOf(ptr_ptr.*)))) switch (comptime_settings.ERROR_MODE) {
+    .RETURN_ERRORS, .RETURN_ERRORS_AND_WARN => AllocErr!void,
     .ERRORS_PANIC, .ERRORS_ARE_UNREACHABLE => void,
 } {
     const new_mem = if (comptime comptime_settings.ERROR_MODE.does_error()) ( //
-        try smart_alloc(alloc, old_ptr_ptr.*, old_len, old_cap_ptr.*, new_cap, settings, comptime_settings)) //
-        else smart_alloc(alloc, old_ptr_ptr.*, old_len, old_cap_ptr.*, new_cap, settings, comptime_settings);
-    old_ptr_ptr.* = new_mem.ptr;
-    old_cap_ptr.* = @intCast(new_mem.len);
-    if (comptime comptime_settings.ERROR_MODE.does_error()) {
-        return null;
-    } else {
-        return;
-    }
+        try smart_alloc(alloc, ptr_ptr.*, len_ptr.*, cap_ptr.*, new_cap, settings, comptime_settings)) //
+        else smart_alloc(alloc, ptr_ptr.*, len_ptr.*, cap_ptr.*, new_cap, settings, comptime_settings);
+    ptr_ptr.* = new_mem.ptr;
+    cap_ptr.* = @intCast(new_mem.len);
+    len_ptr.* = @min(len_ptr.*, cap_ptr.*);
+    return;
 }
 
 pub fn smart_alloc_new(alloc: Allocator, comptime T: type, new_cap: usize, settings: SmartAllocSettings(T), comptime comptime_settings: SmartAllocComptimeSettings(T)) switch (comptime_settings.ERROR_MODE) {

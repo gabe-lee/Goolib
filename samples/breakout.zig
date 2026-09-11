@@ -1,3 +1,31 @@
+//! A simple Breakout clone using Goolib, SDL3, and the Castholm SDL3 wrapper
+//! #### Note
+//! This code sample is heavily derived from the Breakout sample provided by the castholm SDL3 wrapper
+//! under the MIT License (https://github.com/castholm/zig-examples/blob/master/LICENSES/MIT.txt).
+//! Sprites and sounds are transitively licensed from [kenney.nl game assets](https://kenney.nl/assets)
+//! under the CC0-1.0 license (https://kenney.nl/assets/interface-sounds), (https://kenney.nl/assets/puzzle-pack-1)
+//! #### License: Zlib
+
+// zlib license
+//
+// Copyright (c) 2025-2026, Gabriel Lee Anderson <gla.ander@gmail.com>
+//
+// This software is provided 'as-is', without any express or implied
+// warranty. In no event will the authors be held liable for any damages
+// arising from the use of this software.
+//
+// Permission is granted to anyone to use this software for any purpose,
+// including commercial applications, and to alter it and redistribute it
+// freely, subject to the following restrictions:
+//
+// 1. The origin of this software must not be misrepresented; you must not
+//    claim that you wrote the original software. If you use this software
+//    in a product, an acknowledgment in the product documentation would be
+//    appreciated but is not required.
+// 2. Altered source versions must be plainly marked as such, and must not be
+//    misrepresented as being the original software.
+// 3. This notice may not be removed or altered from any source distribution.
+
 const std = @import("std");
 
 const sdl_log = std.log.scoped(.sdl);
@@ -171,21 +199,21 @@ const Sprites = struct {
     const bmp = @embedFile("sprites.bmp");
 
     // zig fmt: off
-    const brick_2x1_purple = SDL.Rect_f32{ .x =   1, .y =  1, .w = 64, .h = 32 };
-    const brick_1x1_purple = SDL.Rect_f32{ .x =  67, .y =  1, .w = 32, .h = 32 };
-    const brick_2x1_red    = SDL.Rect_f32{ .x = 101, .y =  1, .w = 64, .h = 32 };
-    const brick_1x1_red    = SDL.Rect_f32{ .x = 167, .y =  1, .w = 32, .h = 32 };
-    const brick_2x1_yellow = SDL.Rect_f32{ .x =   1, .y = 35, .w = 64, .h = 32 };
-    const brick_1x1_yellow = SDL.Rect_f32{ .x =  67, .y = 35, .w = 32, .h = 32 };
-    const brick_2x1_green  = SDL.Rect_f32{ .x = 101, .y = 35, .w = 64, .h = 32 };
-    const brick_1x1_green  = SDL.Rect_f32{ .x = 167, .y = 35, .w = 32, .h = 32 };
-    const brick_2x1_blue   = SDL.Rect_f32{ .x =   1, .y = 69, .w = 64, .h = 32 };
-    const brick_1x1_blue   = SDL.Rect_f32{ .x =  67, .y = 69, .w = 32, .h = 32 };
-    const brick_2x1_gray   = SDL.Rect_f32{ .x = 101, .y = 69, .w = 64, .h = 32 };
-    const brick_1x1_gray   = SDL.Rect_f32{ .x = 167, .y = 69, .w = 32, .h = 32 };
+    const brick_2x1_purple = SDL.Rect_f32{ .pos = .{.x =   1, .y =  1}, .size = .{.x = 64, .y = 32} };
+    const brick_1x1_purple = SDL.Rect_f32{ .pos = .{.x =  67, .y =  1}, .size = .{.x = 32, .y = 32} };
+    const brick_2x1_red    = SDL.Rect_f32{ .pos = .{.x = 101, .y =  1}, .size = .{.x = 64, .y = 32} };
+    const brick_1x1_red    = SDL.Rect_f32{ .pos = .{.x = 167, .y =  1}, .size = .{.x = 32, .y = 32} };
+    const brick_2x1_yellow = SDL.Rect_f32{ .pos = .{.x =   1, .y = 35}, .size = .{.x = 64, .y = 32} };
+    const brick_1x1_yellow = SDL.Rect_f32{ .pos = .{.x =  67, .y = 35}, .size = .{.x = 32, .y = 32} };
+    const brick_2x1_green  = SDL.Rect_f32{ .pos = .{.x = 101, .y = 35}, .size = .{.x = 64, .y = 32} };
+    const brick_1x1_green  = SDL.Rect_f32{ .pos = .{.x = 167, .y = 35}, .size = .{.x = 32, .y = 32} };
+    const brick_2x1_blue   = SDL.Rect_f32{ .pos = .{.x =   1, .y = 69}, .size = .{.x = 64, .y = 32} };
+    const brick_1x1_blue   = SDL.Rect_f32{ .pos = .{.x =  67, .y = 69}, .size = .{.x = 32, .y = 32} };
+    const brick_2x1_gray   = SDL.Rect_f32{ .pos = .{.x = 101, .y = 69}, .size = .{.x = 64, .y = 32} };
+    const brick_1x1_gray   = SDL.Rect_f32{ .pos = .{.x = 167, .y = 69}, .size = .{.x = 32, .y = 32} };
  
-    const ball             = SDL.Rect_f32{ .x =  2, .y = 104, .w =  22, .h = 22 };
-    const paddle           = SDL.Rect_f32{ .x = 27, .y = 103, .w = 104, .h = 24 };
+    const ball             = SDL.Rect_f32{ .pos = .{.x =  2, .y = 104}, .size = .{.x =  22, .y = 22} };
+    const paddle           = SDL.Rect_f32{ .pos = .{.x = 27, .y = 103}, .size = .{.x = 104, .y = 24} };
     // zig fmt: on
 };
 
@@ -329,12 +357,12 @@ const Collision = struct {
     sign_y: f32,
 
     fn intersects(a: Rect, b: Rect) bool {
-        const min_x = b.x - a.w;
-        const max_x = b.x + b.w;
-        if (a.x > min_x and a.x < max_x) {
-            const min_y = b.y - a.h;
-            const max_y = b.y + b.h;
-            if (a.y > min_y and a.y < max_y) {
+        const min_x = b.pos.x - a.size.x;
+        const max_x = b.pos.x + b.size.x;
+        if (a.pos.x > min_x and a.pos.x < max_x) {
+            const min_y = b.pos.y - a.size.y;
+            const max_y = b.pos.y + b.size.y;
+            if (a.pos.y > min_y and a.pos.y < max_y) {
                 return true;
             }
         }
@@ -344,14 +372,14 @@ const Collision = struct {
     fn sweep_test(a: Rect, a_vel: FVec, b: Rect, b_vel: FVec) ?Collision {
         const vel_x_inv = 1 / (a_vel.x - b_vel.x);
         const vel_y_inv = 1 / (a_vel.y - b_vel.y);
-        const min_x = b.x - a.w;
-        const min_y = b.y - a.h;
-        const max_x = b.x + b.w;
-        const max_y = b.y + b.h;
-        const t_min_x = (min_x - a.x) * vel_x_inv;
-        const t_min_y = (min_y - a.y) * vel_y_inv;
-        const t_max_x = (max_x - a.x) * vel_x_inv;
-        const t_max_y = (max_y - a.y) * vel_y_inv;
+        const min_x = b.pos.x - a.size.x;
+        const min_y = b.pos.y - a.size.y;
+        const max_x = b.pos.x + b.size.x;
+        const max_y = b.pos.y + b.size.y;
+        const t_min_x = (min_x - a.pos.x) * vel_x_inv;
+        const t_min_y = (min_y - a.pos.y) * vel_y_inv;
+        const t_max_x = (max_x - a.pos.x) * vel_x_inv;
+        const t_max_y = (max_y - a.pos.y) * vel_y_inv;
         const entry_x = @min(t_min_x, t_max_x);
         const entry_y = @min(t_min_y, t_max_y);
         const exit_x = @max(t_min_x, t_max_x);
@@ -379,11 +407,11 @@ const Ball = struct {
     src_rect: *const SDL.Rect_f32,
 
     fn get_paddle_bounce_angle(ball_: Ball, paddle_: Paddle) f32 {
-        const min_x = paddle_.box.x - ball_.box.w;
-        const max_x = paddle_.box.x + paddle_.box.w;
+        const min_x = paddle_.box.pos.x - ball_.box.size.x;
+        const max_x = paddle_.box.pos.x + paddle_.box.size.x;
         const min_angle = std.math.degreesToRadians(195);
         const max_angle = std.math.degreesToRadians(345);
-        const angle = ((ball_.box.x - min_x) / (max_x - min_x)) * (max_angle - min_angle) + min_angle;
+        const angle = ((ball_.box.pos.x - min_x) / (max_x - min_x)) * (max_angle - min_angle) + min_angle;
         return std.math.clamp(angle, min_angle, max_angle);
     }
 };
@@ -461,20 +489,28 @@ fn reset_game() !void {
     attempts += 1;
     paddle = .{
         .box = .{
-            .x = Cast.num_cast(window_size.x, f32) * 0.5 - Sprites.paddle.w * 0.5,
-            .y = Cast.num_cast(window_size.y, f32) - Sprites.paddle.h,
-            .w = Sprites.paddle.w,
-            .h = Sprites.paddle.h,
+            .pos = .{
+                .x = Cast.num_cast(window_size.x, f32) * 0.5 - Sprites.paddle.size.x * 0.5,
+                .y = Cast.num_cast(window_size.y, f32) - Sprites.paddle.size.y,
+            },
+            .size = .{
+                .x = Sprites.paddle.size.x,
+                .y = Sprites.paddle.size.y,
+            },
         },
         .src_rect = &Sprites.paddle,
     };
 
     ball = .{
         .box = .{
-            .x = paddle.box.x + paddle.box.w * 0.5,
-            .y = paddle.box.y - Sprites.ball.h,
-            .w = Sprites.ball.w,
-            .h = Sprites.ball.h,
+            .pos = .{
+                .x = paddle.box.pos.x + paddle.box.size.x * 0.5,
+                .y = paddle.box.pos.y - Sprites.ball.size.y,
+            },
+            .size = .{
+                .x = Sprites.ball.size.x,
+                .y = Sprites.ball.size.y,
+            },
         },
         .vel = FVec.new(0, 0),
         .launched = false,
@@ -484,7 +520,7 @@ fn reset_game() !void {
     bricks = .{};
     {
         const x = Cast.num_cast(window_size.x, f32) * 0.5;
-        const h = Sprites.brick_1x1_gray.h;
+        const h = Sprites.brick_1x1_gray.size.y;
         const gap = 5;
         for ([_][2]*const SDL.Rect_f32{
             .{ &Sprites.brick_1x1_purple, &Sprites.brick_2x1_purple },
@@ -498,28 +534,33 @@ fn reset_game() !void {
             var large = row % 2 == 0;
             var src_rect = src_rects[@intFromBool(large)];
             bricks.append(.{
-                .box = .{
-                    .x = x - src_rect.w * 0.5,
+                .box = .{ .pos = .{
+                    .x = x - src_rect.size.x * 0.5,
                     .y = y,
-                    .w = src_rect.w,
-                    .h = src_rect.h,
-                },
+                }, .size = .{
+                    .x = src_rect.size.x,
+                    .y = src_rect.size.y,
+                } },
                 .src_rect = src_rect,
             });
             var rel_x: f32 = 0;
             var count: usize = 0;
             while (count < 4) : (count += 1) {
-                rel_x += src_rect.w * 0.5 + gap;
+                rel_x += src_rect.size.x * 0.5 + gap;
                 large = !large;
                 src_rect = src_rects[@intFromBool(large)];
-                rel_x += src_rect.w * 0.5;
+                rel_x += src_rect.size.x * 0.5;
                 for ([_]f32{ -1, 1 }) |sign| {
                     bricks.append(.{
                         .box = .{
-                            .x = x - src_rect.w * 0.5 + rel_x * sign,
-                            .y = y,
-                            .w = src_rect.w,
-                            .h = src_rect.h,
+                            .pos = .{
+                                .x = x - src_rect.size.x * 0.5 + rel_x * sign,
+                                .y = y,
+                            },
+                            .size = .{
+                                .x = src_rect.size.x,
+                                .y = src_rect.size.y,
+                            },
                         },
                         .src_rect = src_rect,
                     });
@@ -607,14 +648,14 @@ fn app_update(appstate: ?*anyopaque) !SDL.AppResult {
             var mouse_vel_x = vcon.move_paddle_exact;
             if (vcon.slow_paddle_movement) mouse_vel_x *= 0.25;
             paddle_vel_x += mouse_vel_x;
-            paddle.box.x = std.math.clamp(paddle.box.x + paddle_vel_x, 0, window_size.x - paddle.box.w);
+            paddle.box.pos.x = std.math.clamp(paddle.box.pos.x + paddle_vel_x, 0, window_size.x - paddle.box.size.x);
         }
 
-        const previous_ball_y = ball.box.y;
+        const previous_ball_y = ball.box.pos.y;
 
         if (!ball.launched) {
             // Stick the ball to the paddle.
-            ball.box.x = paddle.box.x + paddle.box.w * 0.5;
+            ball.box.pos.x = paddle.box.pos.x + paddle.box.size.x * 0.5;
 
             if (vcon.launch_ball and !prev_vcon.launch_ball) {
                 // Launch the ball.
@@ -643,7 +684,7 @@ fn app_update(appstate: ?*anyopaque) !SDL.AppResult {
 
                 if (rem_vel.x < 0) {
                     // Left wall
-                    const wall_t = -ball.box.x * inv_rem_vel.x;
+                    const wall_t = -ball.box.pos.x * inv_rem_vel.x;
                     if (t - wall_t >= 0.001) {
                         t = wall_t;
                         sign_x = 1;
@@ -651,7 +692,7 @@ fn app_update(appstate: ?*anyopaque) !SDL.AppResult {
                     }
                 } else if (rem_vel.x > 0) {
                     // Right wall
-                    const wall_t = (window_size.x - ball.box.w - ball.box.x) * inv_rem_vel.x;
+                    const wall_t = (window_size.x - ball.box.size.x - ball.box.pos.x) * inv_rem_vel.x;
                     if (t - wall_t >= 0.001) {
                         t = wall_t;
                         sign_x = -1;
@@ -660,7 +701,7 @@ fn app_update(appstate: ?*anyopaque) !SDL.AppResult {
                 }
                 if (rem_vel.y < 0) {
                     // Top wall
-                    const wall_t = -ball.box.y * inv_rem_vel.y;
+                    const wall_t = -ball.box.pos.y * inv_rem_vel.y;
                     if (t - wall_t >= 0.001) {
                         t = wall_t;
                         sign_y = 1;
@@ -669,10 +710,14 @@ fn app_update(appstate: ?*anyopaque) !SDL.AppResult {
                 } else if (rem_vel.y > 0) {
                     // Paddle
                     const paddle_top: Rect = .{
-                        .x = paddle.box.x,
-                        .y = paddle.box.y,
-                        .w = paddle.box.w,
-                        .h = 0,
+                        .pos = .{
+                            .x = paddle.box.pos.x,
+                            .y = paddle.box.pos.y,
+                        },
+                        .size = .{
+                            .x = paddle.box.size.x,
+                            .y = 0,
+                        },
                     };
                     if (Collision.sweep_test(ball.box, rem_vel, paddle_top, FVec.ZERO)) |collision| {
                         if (t - collision.t >= 0.001) {
@@ -685,10 +730,14 @@ fn app_update(appstate: ?*anyopaque) !SDL.AppResult {
 
                 // Bricks
                 const broad: Rect = .{
-                    .x = @min(ball.box.x, ball.box.x + rem_vel.x),
-                    .y = @min(ball.box.y, ball.box.y + rem_vel.y),
-                    .w = @max(ball.box.w, ball.box.w + rem_vel.x),
-                    .h = @max(ball.box.h, ball.box.h + rem_vel.y),
+                    .pos = .{
+                        .x = @min(ball.box.pos.x, ball.box.pos.x + rem_vel.x),
+                        .y = @min(ball.box.pos.y, ball.box.pos.y + rem_vel.y),
+                    },
+                    .size = .{
+                        .x = @max(ball.box.size.x, ball.box.size.x + rem_vel.x),
+                        .y = @max(ball.box.size.y, ball.box.size.y + rem_vel.y),
+                    },
                 };
                 for (bricks.slice(), 0..) |brick, i| {
                     if (Collision.intersects(broad, brick.box)) {
@@ -707,8 +756,8 @@ fn app_update(appstate: ?*anyopaque) !SDL.AppResult {
                 if (collidee == .paddle) {
                     const angle = ball.get_paddle_bounce_angle(paddle);
                     const vel_factor = 1.05;
-                    ball.box.x += rem_vel.x * t;
-                    ball.box.y += rem_vel.y * t;
+                    ball.box.pos.x += rem_vel.x * t;
+                    ball.box.pos.y += rem_vel.y * t;
                     const vel = @sqrt(ball.vel.x * ball.vel.x + ball.vel.y * ball.vel.y) * vel_factor;
                     ball.vel.x = @cos(angle) * vel;
                     ball.vel.y = @sin(angle) * vel;
@@ -718,8 +767,8 @@ fn app_update(appstate: ?*anyopaque) !SDL.AppResult {
                     rem_vel.x = @cos(angle) * remaining_vel;
                     rem_vel.y = @sin(angle) * remaining_vel;
                 } else {
-                    ball.box.x += rem_vel.x * t;
-                    ball.box.y += rem_vel.y * t;
+                    ball.box.pos.x += rem_vel.x * t;
+                    ball.box.pos.y += rem_vel.y * t;
                     ball.vel.x = std.math.copysign(ball.vel.x, if (sign_x != 0) sign_x else rem_vel.x);
                     ball.vel.y = std.math.copysign(ball.vel.y, if (sign_y != 0) sign_y else rem_vel.y);
                     rem_vel.x = std.math.copysign(rem_vel.x * (1 - t), ball.vel.x);
@@ -732,7 +781,7 @@ fn app_update(appstate: ?*anyopaque) !SDL.AppResult {
                 // Enqueue an appropriate sound effect.
                 switch (collidee) {
                     .wall => {
-                        if (ball.box.y < window_size.y) {
+                        if (ball.box.pos.y < window_size.y) {
                             sounds_to_play.insert(.hit_wall);
                         }
                     },
@@ -753,7 +802,7 @@ fn app_update(appstate: ?*anyopaque) !SDL.AppResult {
             }
         }
 
-        if (previous_ball_y < window_size.y and ball.box.y >= window_size.y) {
+        if (previous_ball_y < window_size.y and ball.box.pos.y >= window_size.y) {
             // The ball fell below the paddle.
             if (bricks.len != 0) {
                 sounds_to_play.insert(.lose);
@@ -763,7 +812,7 @@ fn app_update(appstate: ?*anyopaque) !SDL.AppResult {
 
         // Update score.
         if (ball.launched) {
-            if (ball.box.y < window_size.y) {
+            if (ball.box.pos.y < window_size.y) {
                 if (bricks.len != 0) {
                     score +|= 1;
                 } else {
@@ -772,7 +821,7 @@ fn app_update(appstate: ?*anyopaque) !SDL.AppResult {
             }
             if (score <= best_win and bricks.len == 0) {
                 score_color = SDL.Color_RGBA_u8.new_rgba(0x52, 0xcc, 0x73, 0xff);
-            } else if (ball.box.y >= window_size.y or score > best_win) {
+            } else if (ball.box.pos.y >= window_size.y or score > best_win) {
                 score_color = SDL.Color_RGBA_u8.new_rgba(0xcc, 0x5c, 0x52, 0xff);
             }
         }

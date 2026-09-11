@@ -27,6 +27,7 @@ const Type = std.builtin.Type;
 const mem = std.mem;
 
 const Root = @import("./_root.zig");
+const num_cast = Root.Cast.num_cast;
 
 pub fn define_rect2_type(comptime T: type) type {
     return extern struct {
@@ -103,40 +104,12 @@ pub fn define_rect2_type(comptime T: type) type {
             };
         }
 
-        // pub fn to_new_type(self: T_Rect2, comptime NEW_T: type) define_rect2_type(NEW_T) {
-        //     const R = define_rect2_type(NEW_T);
-        //     const mode = @as(u8, @bitCast(IS_FLOAT)) | (@as(u8, @bitCast(R.IS_FLOAT)) << 1);
-        //     const FLOAT_TO_FLOAT: u8 = 0b11;
-        //     const FLOAT_TO_INT: u8 = 0b01;
-        //     const INT_TO_INT: u8 = 0b00;
-        //     const INT_TO_FLOAT: u8 = 0b10;
-        //     switch (mode) {
-        //         FLOAT_TO_FLOAT => return R{
-        //             .x = @floatCast(self.x),
-        //             .y = @floatCast(self.y),
-        //             .w = @floatCast(self.w),
-        //             .h = @floatCast(self.h),
-        //         },
-        //         FLOAT_TO_INT => return R{
-        //             .x = @intFromFloat(self.x),
-        //             .y = @intFromFloat(self.y),
-        //             .w = @intFromFloat(self.w),
-        //             .h = @intFromFloat(self.h),
-        //         },
-        //         INT_TO_INT => return R{
-        //             .x = @intCast(self.x),
-        //             .y = @intCast(self.y),
-        //             .w = @intCast(self.w),
-        //             .h = @intCast(self.h),
-        //         },
-        //         INT_TO_FLOAT => return R{
-        //             .x = @floatFromInt(self.x),
-        //             .y = @floatFromInt(self.y),
-        //             .w = @floatFromInt(self.w),
-        //             .h = @floatFromInt(self.h),
-        //         },
-        //         else => unreachable,
-        //     }
-        // }
+        pub fn to_new_type(self: T_Rect2, comptime NEW_T: type) define_rect2_type(NEW_T) {
+            const R = define_rect2_type(NEW_T);
+            return R{
+                .pos = .new(num_cast(self.pos.x, NEW_T), num_cast(self.pos.y, NEW_T)),
+                .size = .new(num_cast(self.size.x, NEW_T), num_cast(self.size.y, NEW_T)),
+            };
+        }
     };
 }

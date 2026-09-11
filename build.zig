@@ -141,6 +141,27 @@ pub fn build(b: *std.Build) void {
     const run_breakout_cmd = b.step("breakout", "Run the breakout sample app");
     run_breakout_cmd.dependOn(&run_breakout.step);
 
+    //LAYOUT SAMPLE APP
+    const layout_mod = b.addModule("layout", .{
+        .optimize = optimize,
+        .target = target,
+        .root_source_file = b.path("samples/layout.zig"),
+    });
+    const layout = b.addExecutable(.{
+        .name = "layout",
+        .root_module = layout_mod,
+    });
+    layout.lto = if (optimize != .Debug) std.zig.LtoMode.full else std.zig.LtoMode.none;
+    layout.root_module.addImport("Goolib", lib);
+    b.installArtifact(layout);
+
+    const run_layout = b.addRunArtifact(layout);
+    if (b.args) |args| run_layout.addArgs(args);
+    run_layout.step.dependOn(b.getInstallStep());
+
+    const run_layout_cmd = b.step("layout", "Run the ui layout sample app");
+    run_layout_cmd.dependOn(&run_layout.step);
+
     // FUZZ TESTS
     const fuzztest_mod = b.addModule("fuzztest", .{
         .optimize = optimize,

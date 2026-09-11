@@ -50,18 +50,20 @@ pub const Axis = enum(u1) {
     X = 0,
     Y = 1,
 
-    fn opposite(self: Axis) Axis {
-        switch (self) {
+    pub fn opposite(self: Axis) Axis {
+        return @enumFromInt(@intFromEnum(self) ^ @as(u1, 1));
+    }
+    pub fn OPPOSITE(comptime self: Axis) Axis {
+        switch (comptime self) {
             .X => return .Y,
-            .y => return .X,
+            .Y => return .X,
         }
     }
-    fn OPPOSITE(comptime self: Axis) Axis {
-        switch (self) {
-            .X => return .Y,
-            .y => return .X,
-        }
-    }
+};
+
+pub const AspectRatio = enum(u1) {
+    RATIO_X_TO_Y_IS,
+    RATIO_Y_TO_X_IS,
 };
 
 pub fn define_vec2_type(comptime T: type) type {
@@ -108,6 +110,22 @@ pub fn define_vec2_type(comptime T: type) type {
         }
         pub fn new_splat_any(val: anytype) Vec2 {
             return Vec2{ .vec = num_cast(val, T) };
+        }
+        pub fn new_from_aspect_ratio(comptime ASPECT_RATIO_MODE: AspectRatio, ratio: T, comptime KNOWN_AXIS: Axis, known_axis_size: T) Vec2 {
+            const other_axis: T = switch (comptime KNOWN_AXIS) {
+                .X => switch (comptime ASPECT_RATIO_MODE) {
+                    .RATIO_X_TO_Y_IS => known_axis_size / ratio,
+                    .RATIO_Y_TO_X_IS => known_axis_size * ratio,
+                },
+                .Y => switch (comptime ASPECT_RATIO_MODE) {
+                    .RATIO_Y_TO_X_IS => known_axis_size / ratio,
+                    .RATIO_X_TO_Y_IS => known_axis_size * ratio,
+                },
+            };
+            var out: Vec2 = undefined;
+            out.set(KNOWN_AXIS, known_axis_size);
+            out.set(KNOWN_AXIS.OPPOSITE(), other_axis);
+            return out;
         }
 
         pub inline fn get(self: Vec2, comptime AXIS: Axis) T {
