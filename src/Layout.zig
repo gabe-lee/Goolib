@@ -59,6 +59,8 @@ const assert_unreachable_err = Assert.assert_unreachable_err;
 const num_cast = Cast.num_cast;
 const kind_info = KindInfo.get_kind_info;
 
+const SUPER_DEBUG = true;
+
 pub const LayoutDirection = enum(u3) {
     LEFT_TO_RIGHT__TOP_TO_BOTTOM = 0b000,
     LEFT_TO_RIGHT__BOTTOM_TO_TOP = 0b001,
@@ -900,15 +902,6 @@ pub fn DefineLayoutManager(comptime T_DIMENSION: type, comptime T_DIMENSION_SMAL
             min_size: Size = .ZERO,
             next_growable_line_this_pass: IDX = NULL_IDX,
 
-            pub fn init_with_negative_gap(gap: T, comptime PRIMARY_AXIS: Axis) AxisLine {
-                var size: Size = .ZERO;
-                size.set(PRIMARY_AXIS, -gap);
-                size.set(PRIMARY_AXIS.OPPOSITE(), 0);
-                return AxisLine{
-                    .min_size = size,
-                };
-            }
-
             pub fn new(first_elem: IDX, num_elems: IDX, min: T, comptime AXIS: Axis) AxisLine {
                 var min_size = Size{};
                 min_size.set(AXIS, min);
@@ -971,6 +964,16 @@ pub fn DefineLayoutManager(comptime T_DIMENSION: type, comptime T_DIMENSION_SMAL
             };
         }
 
+        fn auto_debug(self: *LayoutManager, comptime src_loc: ?std.builtin.SourceLocation) void {
+            if (SUPER_DEBUG and Assert.IS_DEBUG) {
+                for (self.elems.ptr[0..self.elems.len], 0..) |elem, i| {
+                    assert_with_reason_debug_only(@intFromPtr(elem.requester.object) != 0, src_loc, "elem {d} requester pointer is 0", .{i});
+                    assert_with_reason_debug_only(elem.depth == 0 or elem.parent_idx < self.elems.len, src_loc, "elem {d} has invalid parent ptr", .{i});
+                    assert_with_reason_debug_only(elem.next_sibling == NULL_IDX or elem.next_sibling < self.elems.len, src_loc, "elem {d} has OOB next sibling", .{i});
+                }
+            }
+        }
+
         //*********
         // MANAGER
         //*********
@@ -1013,18 +1016,24 @@ pub fn DefineLayoutManager(comptime T_DIMENSION: type, comptime T_DIMENSION_SMAL
         };
 
         inline fn grow_elems_if_needed(self: *LayoutManager, add_elems: IDX) Error!void {
+            self.auto_debug(@src());
+            defer self.auto_debug(@src());
             const new_cap = self.elems.len + add_elems;
             if (new_cap > self.elems.cap) {
                 try Utils.Alloc.smart_alloc_ptr_ptrs(self.elems_alloc, &self.elems.ptr, &self.elems.len, &self.elems.cap, new_cap, .{}, ELEM_ALLOC_SETTINGS);
             }
         }
         inline fn grow_lines_if_needed(self: *LayoutManager, add_lines: IDX) Error!void {
+            self.auto_debug(@src());
+            defer self.auto_debug(@src());
             const new_cap = self.lines.len + add_lines;
             if (new_cap > self.lines.cap) {
                 try Utils.Alloc.smart_alloc_ptr_ptrs(self.lines_alloc, &self.lines.ptr, &self.lines.len, &self.lines.cap, new_cap, .{}, LINE_ALLOC_SETTINGS);
             }
         }
         inline fn grow_stack_if_needed(self: *LayoutManager, add_stack: IDX) Utils.Alloc.AllocErr!void {
+            self.auto_debug(@src());
+            defer self.auto_debug(@src());
             const new_cap = self.stack.len + add_stack;
             if (new_cap > self.stack.cap) {
                 try Utils.Alloc.smart_alloc_ptr_ptrs(self.stack_alloc, &self.stack.ptr, &self.stack.len, &self.stack.cap, new_cap, .{}, STACK_ALLOC_SETTINGS);
@@ -1045,6 +1054,8 @@ pub fn DefineLayoutManager(comptime T_DIMENSION: type, comptime T_DIMENSION_SMAL
         }
 
         fn append_elem_slot(self: *LayoutManager) Error!struct { *LayoutElement, IDX } {
+            self.auto_debug(@src());
+            defer self.auto_debug(@src());
             try self.grow_elems_if_needed(1);
             const idx = self.elems.len;
             self.elems.len += 1;
@@ -1053,6 +1064,8 @@ pub fn DefineLayoutManager(comptime T_DIMENSION: type, comptime T_DIMENSION_SMAL
             return .{ ptr, idx };
         }
         fn append_line_comps(self: *LayoutManager, first_elem: IDX, num_elems: IDX, min_size: T, comptime AXIS: Axis) Error!struct { *AxisLine, IDX } {
+            self.auto_debug(@src());
+            defer self.auto_debug(@src());
             try self.grow_lines_if_needed(1);
             const idx = self.lines.len;
             self.lines.len += 1;
@@ -1065,6 +1078,8 @@ pub fn DefineLayoutManager(comptime T_DIMENSION: type, comptime T_DIMENSION_SMAL
             return .{ ptr, idx };
         }
         fn append_line(self: *LayoutManager, line: AxisLine) Error!IDX {
+            self.auto_debug(@src());
+            defer self.auto_debug(@src());
             try self.grow_lines_if_needed(1);
             const idx = self.lines.len;
             self.lines.len += 1;
@@ -1074,6 +1089,8 @@ pub fn DefineLayoutManager(comptime T_DIMENSION: type, comptime T_DIMENSION_SMAL
             return idx;
         }
         fn append_line_get_ptr(self: *LayoutManager, line: AxisLine) Error!struct { *AxisLine, IDX } {
+            self.auto_debug(@src());
+            defer self.auto_debug(@src());
             try self.grow_lines_if_needed(1);
             const idx = self.lines.len;
             self.lines.len += 1;
@@ -1083,6 +1100,8 @@ pub fn DefineLayoutManager(comptime T_DIMENSION: type, comptime T_DIMENSION_SMAL
             return .{ ptr, idx };
         }
         fn append_stack_slot(self: *LayoutManager) Error!struct { *StackFrame, IDX } {
+            self.auto_debug(@src());
+            defer self.auto_debug(@src());
             try self.grow_stack_if_needed(1);
             const idx = self.stack.len;
             self.stack.len += 1;
@@ -1093,6 +1112,8 @@ pub fn DefineLayoutManager(comptime T_DIMENSION: type, comptime T_DIMENSION_SMAL
 
         fn realloc_stack_impl(obj: *anyopaque, old_stack: Stack, needed_extra_frames: IDX) Utils.Alloc.AllocErr!Stack {
             const self: *LayoutManager = @ptrCast(@alignCast(obj));
+            self.auto_debug(@src());
+            defer self.auto_debug(@src());
             assert_with_reason_debug_only(old_stack.ptr == self.stack.ptr and old_stack.cap == self.stack.cap, @src(), "`old_stack` does not match the stack on the LayoutManager", .{});
             self.stack.len = old_stack.len;
             try self.grow_stack_if_needed(needed_extra_frames);
@@ -1128,6 +1149,8 @@ pub fn DefineLayoutManager(comptime T_DIMENSION: type, comptime T_DIMENSION_SMAL
         }
 
         fn append_new_elem_from_requester_and_parent_and_prev_siblings(self: *LayoutManager, requester: LayoutRequester, parent_idx: IDX, prev_contained_sibling_idx: *IDX, prev_floating_sibling_idx: *IDX) Error!struct { *LayoutElement, IDX } {
+            self.auto_debug(@src());
+            defer self.auto_debug(@src());
             try self.grow_elems_if_needed(1);
             const req: LayoutRequest = requester.get_layout_request();
             const new_depth = if (parent_idx == NULL_IDX) 0 else (self.get_elem_ptr(parent_idx).depth + 1);
@@ -1148,6 +1171,7 @@ pub fn DefineLayoutManager(comptime T_DIMENSION: type, comptime T_DIMENSION_SMAL
                 .primary_child_axis = req.child_layout_dir.primary_axis(),
                 .self_axis_line_local_align = req.self_axis_line_local_align,
             };
+            DEBUG("Requester = {*}\n", .{requester.object});
             const elem = LayoutElement{
                 .requester = requester,
                 ._min_or_aabb = .new(req.min_size.x, req.min_size.y),
@@ -1161,6 +1185,7 @@ pub fn DefineLayoutManager(comptime T_DIMENSION: type, comptime T_DIMENSION_SMAL
                 .use_wrap_mode = req.wrap_children_that_overflow_size,
                 .final_position_offset = req.final_position_offset,
             };
+            DEBUG("elem.requester = {*}\n", .{elem.requester.object});
             const idx = self.elems.len;
             if (parent_idx != NULL_IDX) {
                 var parent: *LayoutElement = self.get_elem_ptr(parent_idx);
@@ -1187,10 +1212,13 @@ pub fn DefineLayoutManager(comptime T_DIMENSION: type, comptime T_DIMENSION_SMAL
 
             self.elems.ptr[idx] = elem;
             self.elems.len += 1;
+            DEBUG(" self.elems.ptr[{d}].requester = {*}\n", .{ idx, self.elems.ptr[idx].requester.object });
             return .{ &self.elems.ptr[idx], idx };
         }
 
         fn add_children_to_elems_list(_: Elems, parent_idx: IDX, self: *LayoutManager, comptime _: void) Error!Elems {
+            self.auto_debug(@src());
+            defer self.auto_debug(@src());
             var prev_contained_sibling_idx: IDX = NULL_IDX;
             var prev_floating_sibling_idx: IDX = NULL_IDX;
             var possible_child_requester: ?LayoutRequester = null;
@@ -1204,6 +1232,8 @@ pub fn DefineLayoutManager(comptime T_DIMENSION: type, comptime T_DIMENSION_SMAL
         }
 
         pub fn collect_element_heirarchy(self: *LayoutManager, root_element: LayoutRequester) anyerror!void {
+            self.auto_debug(@src());
+            defer self.auto_debug(@src());
             self.elems.len = 0;
             self.lines.len = 0;
             self.stack.len = 0;
@@ -1214,6 +1244,8 @@ pub fn DefineLayoutManager(comptime T_DIMENSION: type, comptime T_DIMENSION_SMAL
         }
 
         pub fn recalculate_layout(self: *LayoutManager, comptime DRIVING_AXIS: Axis) anyerror!void {
+            self.auto_debug(@src());
+            defer self.auto_debug(@src());
             switch (comptime DRIVING_AXIS) {
                 .X => {
                     self.elems, self.stack = try Traverse.do_action_on_all_nodes(self.elems, self.stack, self.stack_reallocator(), .CHILDREN_FIRST, .all_child_paths(), 0, self, AxisStage.new(.X, .PRIMARY_STAGE), .COMPTIME_FN_PTR, propagate_min_size_to_parent, void{}, .MAX_STACK_LEN_NOT_IMPORTANT, void{});
@@ -1234,6 +1266,8 @@ pub fn DefineLayoutManager(comptime T_DIMENSION: type, comptime T_DIMENSION_SMAL
         }
 
         fn propagate_min_size_to_parent(elems: Elems, idx: IDX, self: *LayoutManager, comptime CT: AxisStage) anyerror!Elems {
+            self.auto_debug(@src());
+            defer self.auto_debug(@src());
             const child = self.get_elem_ptr(idx);
             child.add_to_min_children_size(CT.AXIS, child.padding.get(CT.AXIS));
             child.update_min_size_with_children_min_size(CT.AXIS);
@@ -1251,14 +1285,16 @@ pub fn DefineLayoutManager(comptime T_DIMENSION: type, comptime T_DIMENSION_SMAL
         }
 
         fn combine_all_children_with_axis_lines(self: *LayoutManager, parent: *LayoutElement, comptime CT: AxisStage, comptime COMBINE_MODE: CombineMode, comptime WRAP_MODE: WrapMode) anyerror!void {
+            self.auto_debug(@src());
+            defer self.auto_debug(@src());
             const max_size_for_children = parent.get_min_size_self(CT.AXIS) - parent.padding.get(CT.AXIS);
             var child: *LayoutElement = undefined;
             var child_idx = parent.first_contained_child;
             const gap = parent.child_gaps.get(CT.AXIS);
-            if (CT.STAGE == .PRIMARY_STAGE) {
-                parent.first_axis_line = AxisLine.init_with_negative_gap(gap, CT.AXIS);
-            }
             var line = &parent.first_axis_line;
+            if (CT.STAGE == .PRIMARY_STAGE) {
+                line.min_size.set(CT.AXIS, -gap);
+            }
             var children_left_on_parent = parent.num_contained_children;
             var children_left_on_line = line.num_elems;
             var more_children_on_parent = children_left_on_parent > 0;
@@ -1280,6 +1316,8 @@ pub fn DefineLayoutManager(comptime T_DIMENSION: type, comptime T_DIMENSION_SMAL
         }
 
         fn combine_child_with_axis_line(self: *LayoutManager, line: *AxisLine, child: *LayoutElement, child_idx: IDX, more_children_on_parent: bool, more_children_on_line: bool, gap: T, max_size: T, comptime AXIS: Axis, comptime COMBINE_MODE: CombineMode, comptime WRAP_MODE: WrapMode, comptime STAGE: LayoutStage) anyerror!*AxisLine {
+            self.auto_debug(@src());
+            defer self.auto_debug(@src());
             var size_if_combine = line.min_size.get(AXIS);
             var next_line = line;
             const child_size = child.get_min_size_self(AXIS);
@@ -1349,6 +1387,8 @@ pub fn DefineLayoutManager(comptime T_DIMENSION: type, comptime T_DIMENSION_SMAL
         }
 
         fn distribute_primary_extra_space_to_axis_line_members(self: *LayoutManager, axis_line: *AxisLine, space: T, comptime AXIS: Axis) void {
+            self.auto_debug(@src());
+            defer self.auto_debug(@src());
             var remaining_space = space;
             while (remaining_space > 0) {
                 var idx: IDX = axis_line.first_elem;
@@ -1362,8 +1402,6 @@ pub fn DefineLayoutManager(comptime T_DIMENSION: type, comptime T_DIMENSION_SMAL
                 var prev_growable_child_this_pass: IDX = NULL_IDX;
                 while (n > 0) {
                     n -= 1;
-                    //FIXME //CHECKPOINT
-                    DEBUG("idx: {d}, elems_len: {d}, elems_cap: {d}\n", .{ idx, self.elems.len, self.elems.cap });
                     child = self.get_elem_ptr(idx);
                     if (child.is_growable(AXIS)) {
                         if (Math.approx_equal(T, child.get_min_size_self(AXIS), smallest_growable_child_this_pass)) {
@@ -1405,6 +1443,8 @@ pub fn DefineLayoutManager(comptime T_DIMENSION: type, comptime T_DIMENSION_SMAL
         }
 
         fn distribute_secondary_extra_space_to_all_axis_lines(self: *LayoutManager, parent: *LayoutElement, comptime AXIS: Axis) void {
+            self.auto_debug(@src());
+            defer self.auto_debug(@src());
             const gap = parent.child_gaps.get(AXIS);
             var line = &parent.first_axis_line;
             var lines_left: IDX = parent.num_axis_lines;
@@ -1514,6 +1554,8 @@ pub fn DefineLayoutManager(comptime T_DIMENSION: type, comptime T_DIMENSION_SMAL
         }
 
         fn fit_and_expand_children_to_fill_parent(_: Elems, idx: IDX, self: *LayoutManager, comptime CT: AxisStage) anyerror!Elems {
+            self.auto_debug(@src());
+            defer self.auto_debug(@src());
             const parent = self.get_elem_ptr(idx);
             if (parent.is_floating or parent.parent_idx == NULL_IDX) {
                 parent.set_min_size_self_limit_to_max_update_growable(CT.AXIS, parent.get_min_size_self(CT.AXIS));
@@ -1538,6 +1580,8 @@ pub fn DefineLayoutManager(comptime T_DIMENSION: type, comptime T_DIMENSION_SMAL
         }
 
         fn recheck_secondary_size_with_with_known_primary_size(_: Elems, idx: IDX, self: *LayoutManager, comptime DRIVING_AXIS: Axis) anyerror!Elems {
+            self.auto_debug(@src());
+            defer self.auto_debug(@src());
             const SECONDARY_AXIS = comptime DRIVING_AXIS.OPPOSITE();
             const elem = self.get_elem_ptr(idx);
             const check_info = SizeCheckInfo{
@@ -1553,6 +1597,8 @@ pub fn DefineLayoutManager(comptime T_DIMENSION: type, comptime T_DIMENSION_SMAL
         }
 
         inline fn for_each_axis_line(self: *LayoutManager, parent: *LayoutElement, context: anytype, comptime CONTEXT: anytype, comptime action: fn (*LayoutManager, *LayoutElement, *AxisLine, @TypeOf(context), comptime @TypeOf(CONTEXT)) void) void {
+            self.auto_debug(@src());
+            defer self.auto_debug(@src());
             var line: *AxisLine = &parent.first_axis_line;
             var n = parent.num_axis_lines;
             if (n == 0) return;
@@ -1566,6 +1612,8 @@ pub fn DefineLayoutManager(comptime T_DIMENSION: type, comptime T_DIMENSION_SMAL
         }
 
         inline fn for_each_child_on_axis_line(self: *LayoutManager, parent: *LayoutElement, line: *AxisLine, context: anytype, comptime CONTEXT: anytype, comptime action: fn (*LayoutManager, *LayoutElement, *AxisLine, IDX, *LayoutElement, @TypeOf(context), comptime @TypeOf(CONTEXT)) void) void {
+            self.auto_debug(@src());
+            defer self.auto_debug(@src());
             var child_idx: IDX = line.first_elem;
             var child: *LayoutElement = undefined;
             var n: IDX = line.num_elems;
@@ -1578,6 +1626,8 @@ pub fn DefineLayoutManager(comptime T_DIMENSION: type, comptime T_DIMENSION_SMAL
         }
 
         inline fn for_each_floating_child(self: *LayoutManager, parent: *LayoutElement, context: anytype, comptime CONTEXT: anytype, comptime action: fn (*LayoutManager, *LayoutElement, IDX, *LayoutElement, @TypeOf(context), comptime @TypeOf(CONTEXT)) void) void {
+            self.auto_debug(@src());
+            defer self.auto_debug(@src());
             var child_idx: IDX = parent.first_floating_child;
             var child: *LayoutElement = undefined;
             while (child_idx != NULL_IDX) {
@@ -1619,6 +1669,8 @@ pub fn DefineLayoutManager(comptime T_DIMENSION: type, comptime T_DIMENSION_SMAL
         };
 
         fn position_and_align_childen_on_axis_line(self: *LayoutManager, parent: *LayoutElement, line: *AxisLine, data_s: *PosAlignData_S, comptime DATA: PosAlignData_CT) void {
+            self.auto_debug(@src());
+            defer self.auto_debug(@src());
             var cursor_p = data_s.cursor_axis_line_start_p;
             var gap_p = data_s.base_gap_p;
             switch (data_s.child_align_p) {
@@ -1674,7 +1726,9 @@ pub fn DefineLayoutManager(comptime T_DIMENSION: type, comptime T_DIMENSION_SMAL
         fn add_primary_size_to_total(_: *LayoutManager, _: *LayoutElement, _: *AxisLine, _: IDX, child: *LayoutElement, data: *AxisSizeData, comptime PRIME_AXIS: Axis) void {
             data.total_size += child.get_min_size_self(PRIME_AXIS) + data.base_gap;
         }
-        fn finalize_inline_child_aabb(_: *LayoutManager, parent: *LayoutElement, line: *AxisLine, _: IDX, child: *LayoutElement, data: *PosAlignData_P, comptime DATA: PosAlignData_CT) void {
+        fn finalize_inline_child_aabb(self: *LayoutManager, parent: *LayoutElement, line: *AxisLine, _: IDX, child: *LayoutElement, data: *PosAlignData_P, comptime DATA: PosAlignData_CT) void {
+            self.auto_debug(@src());
+            defer self.auto_debug(@src());
             const child_size_p = child.get_min_size_self(DATA.PRIME_AXIS);
             const child_size_s = child.get_min_size_self(DATA.SEC_AXIS);
 
@@ -1721,7 +1775,9 @@ pub fn DefineLayoutManager(comptime T_DIMENSION: type, comptime T_DIMENSION_SMAL
                 child._max_or_clip_aabb.final_clip_aabb = child._min_or_aabb.final_aabb;
             }
         }
-        fn finalize_floating_child_aabb(_: *LayoutManager, parent: *LayoutElement, _: IDX, child: *LayoutElement, _: void, comptime _: void) void {
+        fn finalize_floating_child_aabb(self: *LayoutManager, parent: *LayoutElement, _: IDX, child: *LayoutElement, _: void, comptime _: void) void {
+            self.auto_debug(@src());
+            defer self.auto_debug(@src());
             const child_size = child._min_or_aabb.min_size.self;
             const parent_float_attach = child.get_parent_float_attach();
             const self_float_attach = child.get_self_float_attach();
@@ -1764,6 +1820,8 @@ pub fn DefineLayoutManager(comptime T_DIMENSION: type, comptime T_DIMENSION_SMAL
         }
 
         fn position_and_align_inline_child_elements_core(self: *LayoutManager, parent: *LayoutElement, comptime PRIME_AXIS: Axis, comptime SEC_AXIS: Axis, comptime PRIME_DIR: Dir, comptime SEC_DIR: Dir) void {
+            self.auto_debug(@src());
+            defer self.auto_debug(@src());
             const DATA = comptime PosAlignData_CT{
                 .PRIME_AXIS = PRIME_AXIS,
                 .SEC_AXIS = SEC_AXIS,
@@ -1827,6 +1885,8 @@ pub fn DefineLayoutManager(comptime T_DIMENSION: type, comptime T_DIMENSION_SMAL
         }
 
         fn position_and_align_child_elements(_: Elems, idx: IDX, self: *LayoutManager, comptime _: void) anyerror!Elems {
+            self.auto_debug(@src());
+            defer self.auto_debug(@src());
             var parent: *LayoutElement = self.get_elem_ptr(idx);
             if (parent.parent_idx == NULL_IDX) {
                 @branchHint(.unlikely);
@@ -1880,6 +1940,8 @@ pub fn DefineLayoutManager(comptime T_DIMENSION: type, comptime T_DIMENSION_SMAL
         }
 
         pub fn do_action_on_all_elements(self: *LayoutManager, comptime ORDER: Utils.Traverser.Order, context_rt: anytype, comptime CONTEXT_CT: anytype, comptime ACTION_TYPE: Utils.Traverser.FuncType, action_rt: Traverse.RTFN(ACTION_TYPE, @TypeOf(context_rt), @TypeOf(CONTEXT_CT)), comptime ACTION_CT: Traverse.CTFN(ACTION_TYPE, @TypeOf(context_rt), @TypeOf(CONTEXT_CT))) anyerror!void {
+            self.auto_debug(@src());
+            defer self.auto_debug(@src());
             self.elems, self.stack = try Traverse.do_action_on_all_nodes(self.elems, self.stack, self.stack_reallocator(), ORDER, .all_child_paths(), 0, context_rt, CONTEXT_CT, ACTION_TYPE, ACTION_CT, action_rt, .MAX_STACK_LEN_NOT_IMPORTANT, void{});
         }
 

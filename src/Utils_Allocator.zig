@@ -256,7 +256,7 @@ pub const AllocDebugTestResult = enum(u8) {
     UNREACHABLE,
 };
 
-fn smart_alloc_internal(alloc: Allocator, comptime T: type, old_ptr: [*]T, old_len: usize, old_cap: usize, new_cap: usize, settings: SmartAllocSettings(T), comptime comptime_settings: SmartAllocComptimeSettings(T)) t: {
+fn smart_alloc_internal(alloc: Allocator, comptime T: type, old_ptr: [*]T, old_len: usize, old_cap: usize, new_cap_before_adjust: usize, settings: SmartAllocSettings(T), comptime comptime_settings: SmartAllocComptimeSettings(T)) t: {
     const PTR = @typeInfo(@TypeOf(old_ptr)).pointer;
     switch (comptime_settings.ERROR_MODE) {
         .RETURN_ERRORS, .RETURN_ERRORS_AND_WARN => {
@@ -267,7 +267,7 @@ fn smart_alloc_internal(alloc: Allocator, comptime T: type, old_ptr: [*]T, old_l
         },
     }
 } {
-    if (old_cap == new_cap) return old_ptr[0..old_cap];
+    if (old_cap == new_cap_before_adjust) return old_ptr[0..old_cap];
     const INFO = @typeInfo(@TypeOf(old_ptr)).pointer;
     const SIZE = @sizeOf(T);
     const SLICE = []align(meta_ptr_align(INFO)) T;
@@ -278,19 +278,18 @@ fn smart_alloc_internal(alloc: Allocator, comptime T: type, old_ptr: [*]T, old_l
     const INIT_NEW = if (comptime_settings.INIT_NEW_MODE) |MODE| MODE else settings.init_new_mode;
     const CLEAR_OLD = if (comptime_settings.CLEAR_OLD_MODE) |MODE| MODE else settings.clear_old_mode;
     const old_byte_cap = @sizeOf(T) * old_cap;
-    const real_new_cap = if (old_cap < new_cap) switch (GROW) {
-        .GROW_EXACT_NEEDED => new_cap,
-        .GROW_BY_25_PERCENT => new_cap + (new_cap >> 2),
-        .GROW_BY_50_PERCENT => new_cap + (new_cap >> 1),
-        .GROW_BY_100_PERCENT => new_cap << 1,
-    } else new_cap;
-    const old_byte_len = @sizeOf(T) * old_cap;
-    const new_byte_len = @sizeOf(T) * real_new_cap;
-    const copy_len = @min(old_cap, real_new_cap);
+    const new_cap = if (old_cap < new_cap_before_adjust) switch (GROW) {
+        .GROW_EXACT_NEEDED => new_cap_before_adjust,
+        .GROW_BY_25_PERCENT => new_cap_before_adjust + (new_cap_before_adjust >> 2),
+        .GROW_BY_50_PERCENT => new_cap_before_adjust + (new_cap_before_adjust >> 1),
+        .GROW_BY_100_PERCENT => new_cap_before_adjust << 1,
+    } else new_cap_before_adjust;
+    const new_byte_cap = @sizeOf(T) * new_cap;
+    const copy_len = @min(old_cap, new_cap);
     const copy_byte_len = @sizeOf(T) * copy_len;
     const old_byte_ptr: [*]u8 = @ptrCast(@alignCast(old_ptr));
-    const old_byte_slice = old_byte_ptr[0..old_byte_len];
-    var new_mem_byte_ptr: [*]u8 = Utils.invalid_ptr_many(u8);
+    const old_byte_slice = old_byte_ptr[0..old_byte_cap];
+    var new_byte_ptr: [*]u8 = Utils.invalid_ptr_many(u8);
     var new_mem_used: SLICE = &.{};
     var new_mem_unused: SLICE = &.{};
     var new_mem_unused_bytes: []u8 = &.{};
@@ -299,46 +298,46 @@ fn smart_alloc_internal(alloc: Allocator, comptime T: type, old_ptr: [*]T, old_l
     var remap: bool = false;
     next_stage: switch (SmartAllocStage.ALLOC_NEW) {
         .ALLOC_NEW => {
-            if (new_byte_len == 0) continue :next_stage .MEMSET_OLD_AND_NEW;
-            if (old_byte_len > 0) {
-                if (alloc.rawRemap(old_byte_slice, .fromByteUnits(NEW_ALIGN), new_byte_len, @returnAddress())) |new_ptr| {
+            if (new_byte_cap == 0) continue :next_stage .MEMSET_OLD_AND_NEW;
+            if (old_byte_cap > 0 and OLD_ALIGN == NEW_ALIGN) {
+                if (alloc.rawRemap(old_byte_slice, .fromByteUnits(NEW_ALIGN), new_byte_cap, @returnAddress())) |new_ptr_| {
                     remap = true;
-                    new_mem_byte_ptr = new_ptr;
-                    const new_ptr_cast: [*]T = @ptrCast(@alignCast(new_ptr));
-                    new_mem_total = new_ptr_cast[0..real_new_cap];
+                    new_byte_ptr = new_ptr_;
+                    const new_ptr_cast: [*]T = @ptrCast(@alignCast(new_byte_ptr));
+                    new_mem_total = new_ptr_cast[0..new_cap];
                     switch (COPY) {
                         .COPY_EXISTING_DATA => {
                             new_mem_used = new_ptr_cast[0..copy_len];
-                            new_mem_unused = new_ptr_cast[copy_len..real_new_cap];
-                            new_mem_unused_bytes = new_ptr[copy_byte_len..new_byte_len];
+                            new_mem_unused = new_ptr_cast[copy_len..new_cap];
+                            new_mem_unused_bytes = new_ptr_[copy_byte_len..new_byte_cap];
                             continue :next_stage .MEMSET_OLD_AND_NEW;
                         },
                         .DONT_COPY_EXISTING_DATA => {
                             new_mem_used = new_ptr_cast[0..0];
-                            new_mem_unused = new_ptr_cast[0..real_new_cap];
-                            new_mem_unused_bytes = new_ptr[0..new_byte_len];
+                            new_mem_unused = new_ptr_cast[0..new_cap];
+                            new_mem_unused_bytes = new_ptr_[0..new_byte_cap];
                             continue :next_stage .MEMSET_OLD_AND_NEW;
                         },
                     }
                 }
             }
-            new_mem_byte_ptr = alloc.rawAlloc(new_byte_len, .fromByteUnits(NEW_ALIGN), @returnAddress()) orelse {
+            new_byte_ptr = alloc.rawAlloc(new_byte_cap, .fromByteUnits(NEW_ALIGN), @returnAddress()) orelse {
                 failure = true;
                 continue :next_stage .EVAL_DEBUG;
             };
-            const new_ptr_cast: [*]T = @ptrCast(@alignCast(new_mem_byte_ptr));
-            new_mem_total = new_ptr_cast[0..real_new_cap];
+            const new_ptr_cast: [*]T = @ptrCast(@alignCast(new_byte_ptr));
+            new_mem_total = new_ptr_cast[0..new_cap];
             switch (COPY) {
                 .COPY_EXISTING_DATA => {
                     new_mem_used = new_ptr_cast[0..copy_len];
-                    new_mem_unused = new_ptr_cast[copy_len..real_new_cap];
-                    new_mem_unused_bytes = new_mem_byte_ptr[copy_byte_len..new_byte_len];
+                    new_mem_unused = new_ptr_cast[copy_len..new_cap];
+                    new_mem_unused_bytes = new_byte_ptr[copy_byte_len..new_byte_cap];
                     continue :next_stage .COPY_OVER;
                 },
                 .DONT_COPY_EXISTING_DATA => {
                     new_mem_used = new_ptr_cast[0..0];
-                    new_mem_unused = new_ptr_cast[0..real_new_cap];
-                    new_mem_unused_bytes = new_mem_byte_ptr[0..new_byte_len];
+                    new_mem_unused = new_ptr_cast[0..new_cap];
+                    new_mem_unused_bytes = new_byte_ptr[0..new_byte_cap];
                     continue :next_stage .MEMSET_OLD_AND_NEW;
                 },
             }
@@ -366,7 +365,7 @@ fn smart_alloc_internal(alloc: Allocator, comptime T: type, old_ptr: [*]T, old_l
                 },
                 .DONT_MEMSET_OLD => {},
             }
-            if (new_byte_len > old_byte_cap) {
+            if (new_byte_cap > old_byte_cap) {
                 switch (INIT_NEW) {
                     .MEMSET_NEW_UNDEFINED => {
                         @memset(new_mem_unused_bytes, 0xAA);
@@ -392,7 +391,7 @@ fn smart_alloc_internal(alloc: Allocator, comptime T: type, old_ptr: [*]T, old_l
             continue :next_stage .FREE_OLD;
         },
         .FREE_OLD => {
-            if (old_byte_len > 0) {
+            if (old_byte_cap > 0) {
                 alloc.rawFree(old_byte_slice, .fromByteUnits(OLD_ALIGN), @returnAddress());
             }
             continue :next_stage .EVAL_DEBUG;
@@ -407,14 +406,14 @@ fn smart_alloc_internal(alloc: Allocator, comptime T: type, old_ptr: [*]T, old_l
                     .old_mem_byte_ptr = @intCast(old_byte_ptr),
                     .old_mem_byte_cap = @intCast(old_byte_cap),
                     .old_mem_type_cap = @intCast(old_cap),
-                    .old_mem_byte_len = @intCast(old_byte_len),
+                    .old_mem_byte_len = @intCast(old_byte_cap),
                     .old_mem_type_len = @intCast(old_len),
                     .copy_mode = COPY,
                     .clear_old_mode = CLEAR_OLD,
                     .growth_mode = GROW,
                     .init_new_mode = std.meta.activeTag(INIT_NEW),
                     .userdata = settings.trigger_debug_userdata,
-                    .new_mem_byte_ptr = new_mem_byte_ptr,
+                    .new_mem_byte_ptr = new_byte_ptr,
                     .new_mem_byte_cap = new_mem_total.len * SIZE,
                     .new_mem_type_cap = new_mem_total.len,
                     .new_mem_byte_len = @intCast(copy_byte_len),

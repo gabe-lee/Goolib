@@ -1,6 +1,8 @@
 const std = @import("std");
 const builtin = @import("builtin");
 
+const USE_LLVM: bool = true;
+
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
@@ -129,6 +131,7 @@ pub fn build(b: *std.Build) void {
     const breakout = b.addExecutable(.{
         .name = "breakout",
         .root_module = breakout_mod,
+        .use_llvm = USE_LLVM,
     });
     breakout.lto = if (optimize != .Debug) std.zig.LtoMode.full else std.zig.LtoMode.none;
     breakout.root_module.addImport("Goolib", lib);
@@ -150,6 +153,7 @@ pub fn build(b: *std.Build) void {
     const layout = b.addExecutable(.{
         .name = "layout",
         .root_module = layout_mod,
+        .use_llvm = USE_LLVM,
     });
     layout.lto = if (optimize != .Debug) std.zig.LtoMode.full else std.zig.LtoMode.none;
     layout.root_module.addImport("Goolib", lib);
@@ -171,6 +175,7 @@ pub fn build(b: *std.Build) void {
     const fuzztest = b.addExecutable(.{
         .name = "fuzztest",
         .root_module = fuzztest_mod,
+        .use_llvm = USE_LLVM,
     });
     fuzztest.root_module.addImport("Goolib", lib);
     b.installArtifact(fuzztest);
@@ -191,6 +196,7 @@ pub fn build(b: *std.Build) void {
     const benchtest = b.addExecutable(.{
         .name = "benchtest",
         .root_module = benchtest_mod,
+        .use_llvm = USE_LLVM,
     });
     benchtest.root_module.addImport("Goolib", lib);
     b.installArtifact(benchtest);
