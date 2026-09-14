@@ -68,6 +68,22 @@ comptime {
     }
 }
 
+pub fn DEBUG_VAR(value: anytype) if (Assert.IS_DEBUG) @TypeOf(value) else void {
+    if (comptime Assert.IS_DEBUG) {
+        return value;
+    } else {
+        return void{};
+    }
+}
+
+pub fn DEBUG_VAR_IF(comptime COND: bool, value: anytype) if (Assert.IS_DEBUG and COND) @TypeOf(value) else void {
+    if (comptime Assert.IS_DEBUG and COND) {
+        return value;
+    } else {
+        return void{};
+    }
+}
+
 pub fn meta_ptr_align(comptime ptr: builtin.Type.Pointer) usize {
     return ptr.alignment orelse @alignOf(ptr.child);
 }

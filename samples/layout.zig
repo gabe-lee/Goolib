@@ -113,7 +113,7 @@ const UIElement = struct {
     dx: f32,
     dy: f32,
 
-    pub fn init(self_idx: u32, parent: u32, level: u8) UIElement {
+    pub fn init(self_idx: u32, parent_idx: u32, level: u8) UIElement {
         const r = rand.intRangeAtMost(u8, MIN_COLOR_COMP, MAX_COLOR_COMP);
         const g = rand.intRangeAtMost(u8, MIN_COLOR_COMP, MAX_COLOR_COMP);
         const b = rand.intRangeAtMost(u8, MIN_COLOR_COMP, MAX_COLOR_COMP);
@@ -137,14 +137,15 @@ const UIElement = struct {
         const alla: AxisLineLocalAlign = if (level == 0 or alla_r < 0.7) .INHERIT else if (alla_r < 0.8) .TOP_OR_LEFT else if (alla_r < 0.9) .CENTER else .BOTTOM_OR_RIGHT;
         const aspect_r = rand.float(f32) > 0.8;
         const aspect: ?f32 = if (!aspect_r) null else (x / y);
-        if (parent != NULL_IDX) {
-            if (elem_list.ptr[parent].last_child != NULL_IDX) {
-                elem_list.ptr[elem_list.ptr[parent].last_child].next_sibling = self_idx;
+        if (parent_idx != NULL_IDX) {
+            const parent: *UIElement = &elem_list.ptr[parent_idx];
+            if (parent.last_child != NULL_IDX) {
+                elem_list.ptr[parent.last_child].next_sibling = self_idx;
             }
-            if (elem_list.ptr[parent].first_child == NULL_IDX) {
-                elem_list.ptr[parent].first_child = self_idx;
+            if (parent.first_child == NULL_IDX) {
+                parent.first_child = self_idx;
             }
-            elem_list.ptr[parent].last_child = self_idx;
+            parent.last_child = self_idx;
         }
         const tx = if (level == 0) x else ((rand.float(f32) * range) + min);
         const ty = if (level == 0) y else ((rand.float(f32) * range) + min);
@@ -377,12 +378,17 @@ pub fn app_init(appstate: ?*?*anyopaque, arg_count: c_int, arg_list: ?[*:null]?[
 
     const root_elem, const root_idx = elem_list.append_new();
     root_elem.* = .init(root_idx, NULL_IDX, 0); //BUG //FIXME // CHECKPOINT
+    // std.debug.print("root {d}\n", .{root_idx}); //DEBUG
     for (0..NUM_ELEMS_LEVEL_1) |_| {
         const lv_1_child, const lv_1_child_idx = elem_list.append_new();
         lv_1_child.* = .init(lv_1_child_idx, root_idx, 1);
+        root_elem.last_child = lv_1_child_idx;
+        // std.debug.print("  child {d} parent {d} l.child {d}\n", .{ lv_1_child_idx, root_idx, root_elem.last_child }); //DEBUG
         for (0..NUM_ELEMS_LEVEL_2) |_| {
             const lv_2_child, const lv_2_child_idx = elem_list.append_new();
             lv_2_child.* = .init(lv_2_child_idx, lv_1_child_idx, 2);
+            lv_1_child.last_child = lv_2_child_idx;
+            // std.debug.print("    child {d} parent {d} l.child {d}\n", .{ lv_2_child_idx, lv_1_child_idx, lv_1_child.last_child }); //DEBUG
         }
     }
 
@@ -421,7 +427,7 @@ fn app_update(appstate: ?*anyopaque) !SDL.AppResult {
     // Evaluate Layout
     {
         try manager.collect_element_heirarchy(elem_list.ptr[0].layout_requester());
-        try manager.recalculate_layout(.X);
+        try manager.recalculate_layout(.new_from_pos_size(.ZERO, .new(ROOT_SIZE, ROOT_SIZE)), .X);
     }
 
     // Draw.

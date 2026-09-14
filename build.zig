@@ -1,7 +1,7 @@
 const std = @import("std");
 const builtin = @import("builtin");
 
-const USE_LLVM: bool = true;
+const USE_LLVM: bool = false;
 
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});

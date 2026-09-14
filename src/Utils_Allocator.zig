@@ -137,6 +137,114 @@ pub fn InitNew(comptime T: type) type {
     };
 }
 
+const AllocStage = enum {
+    TRY_REMAP,
+    TRY_REALLOC,
+    COPY_DATA_FREE_OLD,
+    RETURN_DATA,
+    RETURN_ERROR,
+};
+
+pub fn realloc_list(ptr: anytype, len: anytype, cap: @TypeOf(len), need_len: @TypeOf(len), alloc_: Allocator, comptime GROW: GrowthMode, comptime ERROR: ErrorBehavior) ERROR.Payload(AllocErr, struct { @TypeOf(ptr), @TypeOf(len) }) {
+    if (need_len <= cap) {
+        return .{ ptr, cap };
+    }
+    const adjusted_need_len = switch (GROW) {
+        .GROW_EXACT_NEEDED => need_len,
+        .GROW_BY_100_PERCENT => need_len << 1,
+        .GROW_BY_50_PERCENT => need_len + (need_len >> 1),
+        .GROW_BY_25_PERCENT => need_len + (need_len >> 2),
+    };
+    const old_mem = ptr[0..num_cast(cap, usize)];
+    var new_mem = old_mem;
+    const PTR = @typeInfo(@TypeOf(ptr)).pointer;
+    to_stage: switch (AllocStage.TRY_REMAP) {
+        .TRY_REMAP => {
+            if (alloc_.remap(ptr[0..num_cast(cap, usize)], adjusted_need_len)) |new_mem_| {
+                new_mem = new_mem_;
+                continue :to_stage .RETURN_DATA;
+            }
+            continue :to_stage .TRY_REALLOC;
+        },
+        .TRY_REALLOC => {
+            if (alloc_.allocWithOptions(PTR.child, adjusted_need_len, if (PTR.alignment) |a| .fromByteUnits(a) else null, PTR.sentinel())) |new_mem_| {
+                new_mem = new_mem_;
+                continue :to_stage .COPY_DATA_FREE_OLD;
+            } else |_| {
+                continue :to_stage .RETURN_ERROR;
+            }
+        },
+        .RETURN_ERROR => {
+            switch (ERROR) {
+                .ERRORS_ARE_UNREACHABLE => {
+                    assert_unreachable(@src(), "allocator returned `OutOfMemory` error", .{});
+                },
+                .ERRORS_PANIC => {
+                    @panic("allocator returned `OutOfMemory` error");
+                },
+                .RETURN_ERRORS_AND_WARN => {
+                    Assert.warn_unconditional(@src(), "allocator returned `OutOfMemory` error", .{});
+                    return AllocErr.OutOfMemory;
+                },
+                .RETURN_ERRORS => {
+                    return AllocErr.OutOfMemory;
+                },
+            }
+        },
+        .COPY_DATA_FREE_OLD => {
+            @memcpy(new_mem[0..old_mem.len], old_mem);
+            alloc_.free(old_mem);
+            continue :to_stage .RETURN_DATA;
+        },
+        .RETURN_DATA => {
+            return .{ new_mem.ptr, num_cast(new_mem.len, @TypeOf(len)) };
+        },
+    }
+}
+
+pub inline fn realloc_list_refs(ptr_ptr: anytype, len: anytype, cap_ptr: *@TypeOf(len), need_len: @TypeOf(len), alloc_: Allocator, comptime GROW: GrowthMode, comptime ERROR: ErrorBehavior) ERROR.PayloadVoid(AllocErr) {
+    if (comptime ERROR.does_error()) {
+        ptr_ptr.*, cap_ptr.* = try realloc_list(ptr_ptr.*, len, cap_ptr.*, need_len, alloc_, GROW, ERROR);
+    } else {
+        ptr_ptr.*, cap_ptr.* = realloc_list(ptr_ptr.*, len, cap_ptr.*, need_len, alloc_, GROW, ERROR);
+    }
+    return;
+}
+
+pub fn alloc(comptime T: type, comptime ALIGN: Align, need_cap: anytype, alloc_: Allocator, comptime ERROR: ErrorBehavior) ERROR.Payload(AllocErr, ALIGN.ManyItemPointer(T)) {
+    if (alloc_.alignedAlloc(T, ALIGN.get_align_for_alloc(@alignOf(T)), num_cast(need_cap, usize))) |new_mem| {
+        return new_mem.ptr;
+    } else |_| {
+        switch (ERROR) {
+            .ERRORS_ARE_UNREACHABLE => {
+                assert_unreachable(@src(), "allocator returned `OutOfMemory` error", .{});
+            },
+            .ERRORS_PANIC => {
+                @panic("allocator returned `OutOfMemory` error");
+            },
+            .RETURN_ERRORS_AND_WARN => {
+                Assert.warn_unconditional(@src(), "allocator returned `OutOfMemory` error", .{});
+                return AllocErr.OutOfMemory;
+            },
+            .RETURN_ERRORS => {
+                return AllocErr.OutOfMemory;
+            },
+        }
+    }
+}
+pub inline fn alloc_refs(comptime T: type, comptime ALIGN: Align, need_cap: anytype, ptr_ptr: ALIGN.ManyItemPointer(T), cap_ptr: *@TypeOf(need_cap), alloc_: Allocator, comptime ERROR: ErrorBehavior) ERROR.PayloadVoid(AllocErr) {
+    if (comptime ERROR.does_error()) {
+        ptr_ptr.* = try alloc(T, ALIGN, need_cap, alloc_, ERROR);
+    } else {
+        ptr_ptr.* = alloc(T, ALIGN, need_cap, alloc_, ERROR);
+    }
+    cap_ptr.* = need_cap;
+    return;
+}
+pub inline fn free(ptr: anytype, cap: anytype, alloc_: Allocator) void {
+    alloc_.free(ptr[0..cap]);
+}
+
 pub const AlignMode = enum(u8) {
     ALIGN_TO_TYPE,
     ALIGN_TO_MAX_OF_TYPE_AND_CACHE_LINE,
@@ -163,6 +271,68 @@ pub const Align = union(AlignMode) {
             .ALIGN_TO_TYPE => type_align,
             .ALIGN_TO_MAX_OF_TYPE_AND_CACHE_LINE => @max(CACHE_LINE, type_align),
             .CUSTOM_ALIGN => |a| a,
+        };
+    }
+    pub fn non_native_align(self: Align, type_align: usize) bool {
+        return self.get_align(type_align) != type_align;
+    }
+    pub fn non_native_align_T(self: Align, comptime T: type) bool {
+        return self.get_align_T(T) != @alignOf(T);
+    }
+    pub fn ManyItemPointer(comptime self: Align, comptime T: type) type {
+        if (self.non_native_align_T(T)) {
+            return [*]align(self.get_align_T(T)) T;
+        } else {
+            return [*]T;
+        }
+    }
+    pub fn ManyItemPointerConst(comptime self: Align, comptime T: type) type {
+        if (self.non_native_align_T(T)) {
+            return [*]align(self.get_align_T(T)) const T;
+        } else {
+            return [*]const T;
+        }
+    }
+    pub fn Pointer(comptime self: Align, comptime T: type) type {
+        if (self.non_native_align_T(T)) {
+            return *align(self.get_align_T(T)) T;
+        } else {
+            return *T;
+        }
+    }
+    pub fn PointerConst(comptime self: Align, comptime T: type) type {
+        if (self.non_native_align_T(T)) {
+            return *align(self.get_align_T(T)) const T;
+        } else {
+            return *const T;
+        }
+    }
+    pub fn Slice(comptime self: Align, comptime T: type) type {
+        if (self.non_native_align_T(T)) {
+            return []align(self.get_align_T(T)) T;
+        } else {
+            return []T;
+        }
+    }
+    pub fn SliceConst(comptime self: Align, comptime T: type) type {
+        if (self.non_native_align_T(T)) {
+            return []align(self.get_align_T(T)) const T;
+        } else {
+            return []const T;
+        }
+    }
+    pub fn get_align_T(self: Align, comptime T: type) usize {
+        return switch (self) {
+            .ALIGN_TO_TYPE => @alignOf(T),
+            .ALIGN_TO_MAX_OF_TYPE_AND_CACHE_LINE => @max(CACHE_LINE, @alignOf(T)),
+            .CUSTOM_ALIGN => |a| a,
+        };
+    }
+    pub fn get_align_for_alloc(self: Align, type_align: usize) ?std.mem.Alignment {
+        return switch (self) {
+            .ALIGN_TO_TYPE => null,
+            .ALIGN_TO_MAX_OF_TYPE_AND_CACHE_LINE => std.mem.Alignment.fromByteUnits(@max(CACHE_LINE, type_align)),
+            .CUSTOM_ALIGN => |a| std.mem.Alignment.fromByteUnits(a),
         };
     }
 };
@@ -256,7 +426,7 @@ pub const AllocDebugTestResult = enum(u8) {
     UNREACHABLE,
 };
 
-fn smart_alloc_internal(alloc: Allocator, comptime T: type, old_ptr: [*]T, old_len: usize, old_cap: usize, new_cap_before_adjust: usize, settings: SmartAllocSettings(T), comptime comptime_settings: SmartAllocComptimeSettings(T)) t: {
+fn smart_alloc_internal(alloc_: Allocator, comptime T: type, old_ptr: [*]T, old_len: usize, old_cap: usize, new_cap_before_adjust: usize, settings: SmartAllocSettings(T), comptime comptime_settings: SmartAllocComptimeSettings(T)) t: {
     const PTR = @typeInfo(@TypeOf(old_ptr)).pointer;
     switch (comptime_settings.ERROR_MODE) {
         .RETURN_ERRORS, .RETURN_ERRORS_AND_WARN => {
@@ -300,7 +470,7 @@ fn smart_alloc_internal(alloc: Allocator, comptime T: type, old_ptr: [*]T, old_l
         .ALLOC_NEW => {
             if (new_byte_cap == 0) continue :next_stage .MEMSET_OLD_AND_NEW;
             if (old_byte_cap > 0 and OLD_ALIGN == NEW_ALIGN) {
-                if (alloc.rawRemap(old_byte_slice, .fromByteUnits(NEW_ALIGN), new_byte_cap, @returnAddress())) |new_ptr_| {
+                if (alloc_.rawRemap(old_byte_slice, .fromByteUnits(NEW_ALIGN), new_byte_cap, @returnAddress())) |new_ptr_| {
                     remap = true;
                     new_byte_ptr = new_ptr_;
                     const new_ptr_cast: [*]T = @ptrCast(@alignCast(new_byte_ptr));
@@ -321,7 +491,7 @@ fn smart_alloc_internal(alloc: Allocator, comptime T: type, old_ptr: [*]T, old_l
                     }
                 }
             }
-            new_byte_ptr = alloc.rawAlloc(new_byte_cap, .fromByteUnits(NEW_ALIGN), @returnAddress()) orelse {
+            new_byte_ptr = alloc_.rawAlloc(new_byte_cap, .fromByteUnits(NEW_ALIGN), @returnAddress()) orelse {
                 failure = true;
                 continue :next_stage .EVAL_DEBUG;
             };
@@ -392,7 +562,7 @@ fn smart_alloc_internal(alloc: Allocator, comptime T: type, old_ptr: [*]T, old_l
         },
         .FREE_OLD => {
             if (old_byte_cap > 0) {
-                alloc.rawFree(old_byte_slice, .fromByteUnits(OLD_ALIGN), @returnAddress());
+                alloc_.rawFree(old_byte_slice, .fromByteUnits(OLD_ALIGN), @returnAddress());
             }
             continue :next_stage .EVAL_DEBUG;
         },
@@ -455,7 +625,7 @@ fn smart_alloc_internal(alloc: Allocator, comptime T: type, old_ptr: [*]T, old_l
     return new_mem_total;
 }
 
-pub fn smart_alloc(alloc: Allocator, old_ptr: anytype, old_len: anytype, old_cap: anytype, new_cap: usize, settings: SmartAllocSettings(Types.pointer_child_type(@TypeOf(old_ptr))), comptime comptime_settings: SmartAllocComptimeSettings(Types.pointer_child_type(@TypeOf(old_ptr)))) t: {
+pub fn smart_alloc(alloc_: Allocator, old_ptr: anytype, old_len: anytype, old_cap: anytype, new_cap: usize, settings: SmartAllocSettings(Types.pointer_child_type(@TypeOf(old_ptr))), comptime comptime_settings: SmartAllocComptimeSettings(Types.pointer_child_type(@TypeOf(old_ptr)))) t: {
     const PTR = @typeInfo(@TypeOf(old_ptr)).pointer;
     switch (comptime_settings.ERROR_MODE) {
         .RETURN_ERRORS, .RETURN_ERRORS_AND_WARN => {
@@ -467,55 +637,55 @@ pub fn smart_alloc(alloc: Allocator, old_ptr: anytype, old_len: anytype, old_cap
     }
 } {
     const T = Types.pointer_child_type(@TypeOf(old_ptr));
-    return smart_alloc_internal(alloc, T, old_ptr, @intCast(old_len), @intCast(old_cap), @intCast(new_cap), settings, comptime_settings);
+    return smart_alloc_internal(alloc_, T, old_ptr, @intCast(old_len), @intCast(old_cap), @intCast(new_cap), settings, comptime_settings);
 }
 
-pub fn smart_alloc_ptr_ptrs(alloc: Allocator, ptr_ptr: anytype, len_ptr: anytype, cap_ptr: anytype, new_cap: anytype, settings: SmartAllocSettings(Types.pointer_child_type(@TypeOf(ptr_ptr.*))), comptime comptime_settings: SmartAllocComptimeSettings(Types.pointer_child_type(@TypeOf(ptr_ptr.*)))) switch (comptime_settings.ERROR_MODE) {
+pub fn smart_alloc_ptr_ptrs(alloc_: Allocator, ptr_ptr: anytype, len_ptr: anytype, cap_ptr: anytype, new_cap: anytype, settings: SmartAllocSettings(Types.pointer_child_type(@TypeOf(ptr_ptr.*))), comptime comptime_settings: SmartAllocComptimeSettings(Types.pointer_child_type(@TypeOf(ptr_ptr.*)))) switch (comptime_settings.ERROR_MODE) {
     .RETURN_ERRORS, .RETURN_ERRORS_AND_WARN => AllocErr!void,
     .ERRORS_PANIC, .ERRORS_ARE_UNREACHABLE => void,
 } {
     const new_mem = if (comptime comptime_settings.ERROR_MODE.does_error()) ( //
-        try smart_alloc(alloc, ptr_ptr.*, len_ptr.*, cap_ptr.*, new_cap, settings, comptime_settings)) //
-        else smart_alloc(alloc, ptr_ptr.*, len_ptr.*, cap_ptr.*, new_cap, settings, comptime_settings);
+        try smart_alloc(alloc_, ptr_ptr.*, len_ptr.*, cap_ptr.*, new_cap, settings, comptime_settings)) //
+        else smart_alloc(alloc_, ptr_ptr.*, len_ptr.*, cap_ptr.*, new_cap, settings, comptime_settings);
     ptr_ptr.* = new_mem.ptr;
     cap_ptr.* = @intCast(new_mem.len);
     len_ptr.* = @min(len_ptr.*, cap_ptr.*);
     return;
 }
 
-pub fn smart_alloc_new(alloc: Allocator, comptime T: type, new_cap: usize, settings: SmartAllocSettings(T), comptime comptime_settings: SmartAllocComptimeSettings(T)) switch (comptime_settings.ERROR_MODE) {
+pub fn smart_alloc_new(alloc_: Allocator, comptime T: type, new_cap: usize, settings: SmartAllocSettings(T), comptime comptime_settings: SmartAllocComptimeSettings(T)) switch (comptime_settings.ERROR_MODE) {
     .RETURN_ERRORS, .RETURN_ERRORS_AND_WARN => AllocErr![]T,
     .ERRORS_PANIC, .ERRORS_ARE_UNREACHABLE => []T,
 } {
     var ptr: [*]T = Utils.invalid_ptr_many(T);
     var len: usize = 0;
     if (comptime comptime_settings.ERROR_MODE.does_error()) ( //
-        try smart_alloc_ptr_ptrs(alloc, &ptr, &len, new_cap, settings, comptime_settings)) //
-    else smart_alloc_ptr_ptrs(alloc, &ptr, &len, new_cap, settings, comptime_settings);
+        try smart_alloc_ptr_ptrs(alloc_, &ptr, &len, new_cap, settings, comptime_settings)) //
+    else smart_alloc_ptr_ptrs(alloc_, &ptr, &len, new_cap, settings, comptime_settings);
     return ptr[0..len];
 }
 
-pub fn smart_push_to_list_many_ptr(ptr_to_data_pointer: anytype, ptr_to_len: anytype, ptr_to_cap: anytype, val: Types.pointer_child_child_type(@TypeOf(ptr_to_data_pointer)), alloc: Allocator, settings: SmartAllocSettings(Types.pointer_child_child_type(@TypeOf(ptr_to_data_pointer))), comptime comptime_settings: SmartAllocComptimeSettings(Types.pointer_child_child_type(@TypeOf(ptr_to_data_pointer)))) switch (comptime_settings.ERROR_MODE) {
+pub fn smart_push_to_list_many_ptr(ptr_to_data_pointer: anytype, ptr_to_len: anytype, ptr_to_cap: anytype, val: Types.pointer_child_child_type(@TypeOf(ptr_to_data_pointer)), alloc_: Allocator, settings: SmartAllocSettings(Types.pointer_child_child_type(@TypeOf(ptr_to_data_pointer))), comptime comptime_settings: SmartAllocComptimeSettings(Types.pointer_child_child_type(@TypeOf(ptr_to_data_pointer)))) switch (comptime_settings.ERROR_MODE) {
     .RETURN_ERRORS, .RETURN_ERRORS_AND_WARN => AllocErr!void,
     .ERRORS_PANIC, .ERRORS_ARE_UNREACHABLE => void,
 } {
     if (ptr_to_len.* >= ptr_to_cap.*) {
         if (comptime comptime_settings.ERROR_MODE.does_error()) ( //
-            try smart_alloc_ptr_ptrs(alloc, ptr_to_data_pointer, ptr_to_cap, @intCast(ptr_to_len.* + 1), settings, comptime_settings)) //
-        else smart_alloc_ptr_ptrs(alloc, ptr_to_data_pointer, ptr_to_cap, @intCast(ptr_to_len.* + 1), settings, comptime_settings);
+            try smart_alloc_ptr_ptrs(alloc_, ptr_to_data_pointer, ptr_to_cap, @intCast(ptr_to_len.* + 1), settings, comptime_settings)) //
+        else smart_alloc_ptr_ptrs(alloc_, ptr_to_data_pointer, ptr_to_cap, @intCast(ptr_to_len.* + 1), settings, comptime_settings);
     }
     ptr_to_data_pointer.*[ptr_to_len.*] = val;
     ptr_to_len.* += 1;
 }
 
-pub fn smart_push_to_list_slice(ptr_to_slice: anytype, ptr_to_cap: anytype, val: Types.pointer_child_child_type(@TypeOf(ptr_to_slice)), alloc: Allocator, settings: SmartAllocSettings(Types.pointer_child_child_type(@TypeOf(ptr_to_slice))), comptime comptime_settings: SmartAllocComptimeSettings(Types.pointer_child_child_type(@TypeOf(ptr_to_slice)))) switch (comptime_settings.ERROR_MODE) {
+pub fn smart_push_to_list_slice(ptr_to_slice: anytype, ptr_to_cap: anytype, val: Types.pointer_child_child_type(@TypeOf(ptr_to_slice)), alloc_: Allocator, settings: SmartAllocSettings(Types.pointer_child_child_type(@TypeOf(ptr_to_slice))), comptime comptime_settings: SmartAllocComptimeSettings(Types.pointer_child_child_type(@TypeOf(ptr_to_slice)))) switch (comptime_settings.ERROR_MODE) {
     .RETURN_ERRORS, .RETURN_ERRORS_AND_WARN => AllocErr!void,
     .ERRORS_PANIC, .ERRORS_ARE_UNREACHABLE => void,
 } {
     if (ptr_to_slice.*.len >= ptr_to_cap.*) {
         const new_mem = if (comptime comptime_settings.ERROR_MODE.does_error()) ( //
-            try smart_alloc(alloc, ptr_to_slice.*.ptr[0..ptr_to_cap.*], @intCast(ptr_to_slice.*.len + 1), settings, comptime_settings)) //
-            else smart_alloc(alloc, ptr_to_slice.*.ptr[0..ptr_to_cap.*], @intCast(ptr_to_slice.*.len + 1), settings, comptime_settings);
+            try smart_alloc(alloc_, ptr_to_slice.*.ptr[0..ptr_to_cap.*], @intCast(ptr_to_slice.*.len + 1), settings, comptime_settings)) //
+            else smart_alloc(alloc_, ptr_to_slice.*.ptr[0..ptr_to_cap.*], @intCast(ptr_to_slice.*.len + 1), settings, comptime_settings);
         ptr_to_cap.* = @intCast(new_mem.len);
         ptr_to_slice.* = new_mem[0..ptr_to_slice.*.len];
     }

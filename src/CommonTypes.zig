@@ -105,6 +105,18 @@ pub const ErrorBehavior = enum {
             .ERRORS_PANIC, .ERRORS_ARE_UNREACHABLE => false,
         };
     }
+    pub inline fn Payload(comptime self: ErrorBehavior, comptime ERROR: type, comptime PAYLOAD: type) type {
+        return switch (self) {
+            .RETURN_ERRORS, .RETURN_ERRORS_AND_WARN => ERROR!PAYLOAD,
+            .ERRORS_PANIC, .ERRORS_ARE_UNREACHABLE => PAYLOAD,
+        };
+    }
+    pub inline fn PayloadVoid(comptime self: ErrorBehavior, comptime ERROR: type) type {
+        return switch (self) {
+            .RETURN_ERRORS, .RETURN_ERRORS_AND_WARN => ERROR!void,
+            .ERRORS_PANIC, .ERRORS_ARE_UNREACHABLE => void,
+        };
+    }
 };
 
 pub fn PossibleErrorBuilder(comptime ERRORS: bool) type {

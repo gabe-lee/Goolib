@@ -59,7 +59,7 @@ const assert_unreachable_err = Assert.assert_unreachable_err;
 const num_cast = Cast.num_cast;
 const kind_info = KindInfo.get_kind_info;
 
-const SUPER_DEBUG = true;
+const EXTRA_DEBUG = true and Assert.IS_DEBUG;
 
 pub const LayoutDirection = enum(u3) {
     LEFT_TO_RIGHT__TOP_TO_BOTTOM = 0b000,
@@ -262,7 +262,14 @@ const YDir = enum(u1) {
     BOTTOM_TO_TOP,
 };
 
-const PackedLayoutInfo = packed struct(u32) {
+const PackedGrowMaxData = packed struct(u32) {
+    growable_x: bool = false, // 1 = 1
+    growable_y: bool = false, // 1 = 2
+    max_mode_x: MaxMode = .ABSOLUTE, // 1 = 3
+    max_mode_y: MaxMode = .ABSOLUTE, // 1 = 4
+    _unused: u28 = 0, // 28 = 32
+};
+const PackedLayoutData = packed struct(u32) {
     float_parent_attach: AttachPoint = .TOP_LEFT, // 4 = 4
     float_self_attach: AttachPoint = .TOP_LEFT, // 4 = 8
     children_axis_line_local_align: AxisLineLocalAlign = .INHERIT, // 2 = 10
@@ -271,14 +278,10 @@ const PackedLayoutInfo = packed struct(u32) {
     child_align_y: AlignY = .TOP, // 2 = 16
     offset_mode_x: OffsetMode = .ABSOLUTE, // 2 = 18
     offset_mode_y: OffsetMode = .ABSOLUTE, // 2 = 20
-    growable_x: bool = false, // 1 = 21
-    growable_y: bool = false, // 1 = 22
-    primary_child_axis: Axis = .X, // 1 = 23
-    child_layout_dir_x: XDir = .LEFT_TO_RIGHT, // 1 = 24
-    child_layout_dir_y: YDir = .TOP_TO_BOTTOM, // 1 = 25
-    max_mode_x: MaxMode = .ABSOLUTE, // 1 = 26
-    max_mode_y: MaxMode = .ABSOLUTE, // 1 = 27
-    _unused: u5 = 0, // 5 = 32
+    primary_child_axis: Axis = .X, // 1 = 21
+    child_layout_dir_x: XDir = .LEFT_TO_RIGHT, // 1 = 22
+    child_layout_dir_y: YDir = .TOP_TO_BOTTOM, // 1 = 23
+    _unused: u9 = 0, // 9 = 32
 };
 
 const AxisStage = struct {
@@ -289,6 +292,21 @@ const AxisStage = struct {
         return AxisStage{
             .AXIS = AXIS,
             .STAGE = STAGE,
+        };
+    }
+};
+const AxisStageCombineWrap = struct {
+    AXIS: Axis,
+    STAGE: LayoutStage,
+    COMBINE: CombineMode,
+    WRAP: WrapMode,
+
+    pub inline fn new(comptime AXIS: Axis, comptime STAGE: LayoutStage, comptime COMBINE: CombineMode, comptime WRAP: WrapMode) AxisStageCombineWrap {
+        return AxisStageCombineWrap{
+            .AXIS = AXIS,
+            .STAGE = STAGE,
+            .COMBINE = COMBINE,
+            .WRAP = WRAP,
         };
     }
 };
@@ -370,10 +388,10 @@ pub fn DefineLayoutManager(comptime T_DIMENSION: type, comptime T_DIMENSION_SMAL
             max_size: MaxSizeAndLayout,
             final_clip_aabb: AABB,
 
-            pub fn new(max_x: T, max_y: T, layout_info: PackedLayoutInfo) MaxSize_OR_FinalClipAABB {
+            pub fn new(max_x: T, max_y: T, grow_max_info: PackedGrowMaxData) MaxSize_OR_FinalClipAABB {
                 return MaxSize_OR_FinalClipAABB{ .max_size = .{
                     .value = .new(max_x, max_y),
-                    .layout = layout_info,
+                    .grow_max_info = grow_max_info,
                     .next_this_pass = NULL_IDX,
                 } };
             }
@@ -381,7 +399,7 @@ pub fn DefineLayoutManager(comptime T_DIMENSION: type, comptime T_DIMENSION_SMAL
         const MaxSizeAndLayout = struct {
             value: Size = .INF,
             next_this_pass: IDX = NULL_IDX,
-            layout: PackedLayoutInfo = .{},
+            grow_max_info: PackedGrowMaxData = .{},
 
             comptime {
                 assert_with_reason_debug_only(@sizeOf(MaxSizeAndLayout) <= @sizeOf(AABB), null, "MaxSize must be smaller or equal size to AABB", .{});
@@ -468,61 +486,40 @@ pub fn DefineLayoutManager(comptime T_DIMENSION: type, comptime T_DIMENSION_SMAL
             clip_to_parent: bool,
             completely_clipped: bool = false,
             use_wrap_mode: bool,
+            layout_info: PackedLayoutData,
 
-            inline fn set_children_local_align(self: *LayoutElement, alla: AxisLineLocalAlign) void {
-                self._max_or_clip_aabb.max_size.layout.children_axis_line_local_align = alla;
-            }
             inline fn get_children_local_align(self: LayoutElement) AxisLineLocalAlign {
-                return self._max_or_clip_aabb.max_size.layout.children_axis_line_local_align;
-            }
-            inline fn set_self_local_align(self: *LayoutElement, alla: AxisLineLocalAlign) void {
-                self._max_or_clip_aabb.max_size.layout.self_axis_line_local_align = alla;
+                return self.layout_info.children_axis_line_local_align;
             }
             inline fn get_self_local_align(self: LayoutElement) AxisLineLocalAlign {
-                return self._max_or_clip_aabb.max_size.layout.self_axis_line_local_align;
-            }
-            inline fn set_parent_float_attach(self: *LayoutElement, attach: AttachPoint) void {
-                self._max_or_clip_aabb.max_size.layout.float_parent_attach = attach;
+                return self.layout_info.self_axis_line_local_align;
             }
             inline fn get_parent_float_attach(self: LayoutElement) AttachPoint {
-                return self._max_or_clip_aabb.max_size.layout.float_parent_attach;
-            }
-            inline fn set_self_float_attach(self: *LayoutElement, attach: AttachPoint) void {
-                self._max_or_clip_aabb.max_size.layout.float_self_attach = attach;
+                return self.layout_info.float_parent_attach;
             }
             inline fn get_self_float_attach(self: LayoutElement) AttachPoint {
-                return self._max_or_clip_aabb.max_size.layout.float_self_attach;
-            }
-            inline fn set_child_align(self: *LayoutElement, comptime AXIS: Axis, alignment: if (AXIS == .X) AlignX else AlignY) void {
-                switch (comptime AXIS) {
-                    .X => {
-                        self._max_or_clip_aabb.max_size.layout.child_align_x = alignment;
-                    },
-                    .Y => {
-                        self._max_or_clip_aabb.max_size.layout.child_align_y = alignment;
-                    },
-                }
+                return self.layout_info.float_self_attach;
             }
             inline fn get_child_align(self: *LayoutElement, comptime AXIS: Axis) if (AXIS == .X) AlignX else AlignY {
                 switch (comptime AXIS) {
                     .X => {
-                        return self._max_or_clip_aabb.max_size.layout.child_align_x;
+                        return self.layout_info.child_align_x;
                     },
                     .Y => {
-                        return self._max_or_clip_aabb.max_size.layout.child_align_y;
+                        return self.layout_info.child_align_y;
                     },
                 }
             }
             inline fn get_primary_child_axis(self: *LayoutElement) Axis {
-                return self._max_or_clip_aabb.max_size.layout.primary_child_axis;
+                return self.layout_info.primary_child_axis;
             }
             inline fn get_child_layout_dir(self: *LayoutElement, comptime AXIS: Axis) if (AXIS == .X) XDir else YDir {
                 switch (comptime AXIS) {
                     .X => {
-                        return self._max_or_clip_aabb.max_size.layout.child_layout_dir_x;
+                        return self.layout_info.child_layout_dir_x;
                     },
                     .Y => {
-                        return self._max_or_clip_aabb.max_size.layout.child_layout_dir_y;
+                        return self.layout_info.child_layout_dir_y;
                     },
                 }
             }
@@ -582,14 +579,14 @@ pub fn DefineLayoutManager(comptime T_DIMENSION: type, comptime T_DIMENSION_SMAL
             }
             inline fn get_offset_mode(self: LayoutElement, comptime AXIS: Axis) OffsetMode {
                 switch (comptime AXIS) {
-                    .X => return self._max_or_clip_aabb.max_size.layout.offset_mode_x,
-                    .Y => return self._max_or_clip_aabb.max_size.layout.offset_mode_y,
+                    .X => return self._max_or_clip_aabb.max_size.grow_max_info.offset_mode_x,
+                    .Y => return self._max_or_clip_aabb.max_size.grow_max_info.offset_mode_y,
                 }
             }
             inline fn get_max_mode(self: LayoutElement, comptime AXIS: Axis) MaxMode {
                 switch (comptime AXIS) {
-                    .X => return self._max_or_clip_aabb.max_size.layout.max_mode_x,
-                    .Y => return self._max_or_clip_aabb.max_size.layout.max_mode_y,
+                    .X => return self._max_or_clip_aabb.max_size.grow_max_info.max_mode_x,
+                    .Y => return self._max_or_clip_aabb.max_size.grow_max_info.max_mode_y,
                 }
             }
             inline fn set_max_size(self: *LayoutElement, comptime AXIS: Axis, val: T) void {
@@ -609,39 +606,29 @@ pub fn DefineLayoutManager(comptime T_DIMENSION: type, comptime T_DIMENSION_SMAL
             }
             inline fn is_growable(self: LayoutElement, comptime AXIS: Axis) bool {
                 switch (comptime AXIS) {
-                    .X => return self._max_or_clip_aabb.max_size.layout.growable_x,
-                    .Y => return self._max_or_clip_aabb.max_size.layout.growable_y,
+                    .X => return self._max_or_clip_aabb.max_size.grow_max_info.growable_x,
+                    .Y => return self._max_or_clip_aabb.max_size.grow_max_info.growable_y,
                 }
             }
             inline fn set_growable_true(self: *LayoutElement, comptime AXIS: Axis) void {
                 switch (comptime AXIS) {
                     .X => {
-                        self._max_or_clip_aabb.max_size.layout.growable_x = true;
+                        self._max_or_clip_aabb.max_size.grow_max_info.growable_x = true;
                     },
                     .Y => {
-                        self._max_or_clip_aabb.max_size.layout.growable_y = true;
+                        self._max_or_clip_aabb.max_size.grow_max_info.growable_y = true;
                     },
                 }
             }
             inline fn set_growable_false(self: *LayoutElement, comptime AXIS: Axis) void {
                 switch (comptime AXIS) {
                     .X => {
-                        self._max_or_clip_aabb.max_size.layout.growable_x = false;
+                        self._max_or_clip_aabb.max_size.grow_max_info.growable_x = false;
                     },
                     .Y => {
-                        self._max_or_clip_aabb.max_size.layout.growable_y = false;
+                        self._max_or_clip_aabb.max_size.grow_max_info.growable_y = false;
                     },
                 }
-            }
-            inline fn set_final_aabb(self: *LayoutElement, parent_abs: Pos) void {
-                const final_size = self._min_or_aabb.min_size.self;
-                const abs_pos = parent_abs.add(self.final_position_offset);
-                self._min_or_aabb.final_aabb = AABB.new_from_pos_size(abs_pos, final_size);
-            }
-            inline fn set_clip_aabb(self: *LayoutElement, parent_clip: AABB) void {
-                const overlap_aabb, const not_completely_clipped = self.get_aabb().overlap_area_and_overlap_area_positive(parent_clip);
-                self._max_or_clip_aabb.final_clip_aabb = overlap_aabb;
-                self.completely_clipped = !not_completely_clipped;
             }
             pub inline fn get_aabb(self: LayoutElement) AABB {
                 return self._min_or_aabb.final_aabb;
@@ -660,22 +647,6 @@ pub fn DefineLayoutManager(comptime T_DIMENSION: type, comptime T_DIMENSION_SMAL
             }
             pub inline fn get_final_size(self: *LayoutElement) Size {
                 return self._min_or_aabb.final_aabb.get_max_point().subtract(self._min_or_aabb.final_aabb.get_min_point());
-            }
-            inline fn get_last_contained_child(self: LayoutElement) IDX {
-                return self.first_axis_line.next_line;
-            }
-            inline fn set_last_contained_child(self: *LayoutElement, idx: IDX) void {
-                self.first_axis_line.next_line = idx;
-            }
-            inline fn get_last_floating_child(self: LayoutElement) IDX {
-                return self.first_axis_line.next_growable_line_this_pass;
-            }
-            inline fn set_last_floating_child(self: *LayoutElement, idx: IDX) void {
-                self.first_axis_line.next_growable_line_this_pass = idx;
-            }
-            inline fn clear_last_contained_and_last_floating_child_cache(self: *LayoutElement) void {
-                self.first_axis_line.next_line = NULL_IDX;
-                self.first_axis_line.next_growable_line_this_pass = NULL_IDX;
             }
         };
         pub const SecondarySizeResult = struct {
@@ -965,12 +936,12 @@ pub fn DefineLayoutManager(comptime T_DIMENSION: type, comptime T_DIMENSION_SMAL
         }
 
         fn auto_debug(self: *LayoutManager, comptime src_loc: ?std.builtin.SourceLocation) void {
-            if (SUPER_DEBUG and Assert.IS_DEBUG) {
-                for (self.elems.ptr[0..self.elems.len], 0..) |elem, i| {
-                    assert_with_reason_debug_only(@intFromPtr(elem.requester.object) != 0, src_loc, "elem {d} requester pointer is 0", .{i});
-                    assert_with_reason_debug_only(elem.depth == 0 or elem.parent_idx < self.elems.len, src_loc, "elem {d} has invalid parent ptr", .{i});
-                    assert_with_reason_debug_only(elem.next_sibling == NULL_IDX or elem.next_sibling < self.elems.len, src_loc, "elem {d} has OOB next sibling", .{i});
-                }
+            if (EXTRA_DEBUG and Assert.IS_DEBUG) {
+                // for (self.elems.ptr[0..self.elems.len], 0..) |elem, i| {
+                //     assert_with_reason_debug_only(@intFromPtr(elem.requester.object) != 0, src_loc, "elem {d} requester pointer is 0", .{i});
+                //     assert_with_reason_debug_only(elem.depth == 0 or elem.parent_idx < self.elems.len, src_loc, "elem {d} has invalid parent ptr", .{i});
+                //     assert_with_reason_debug_only(elem.next_sibling == NULL_IDX or elem.next_sibling < self.elems.len, src_loc, "elem {d} has OOB next sibling", .{i});
+                // }
             }
         }
 
@@ -1020,7 +991,7 @@ pub fn DefineLayoutManager(comptime T_DIMENSION: type, comptime T_DIMENSION_SMAL
             defer self.auto_debug(@src());
             const new_cap = self.elems.len + add_elems;
             if (new_cap > self.elems.cap) {
-                try Utils.Alloc.smart_alloc_ptr_ptrs(self.elems_alloc, &self.elems.ptr, &self.elems.len, &self.elems.cap, new_cap, .{}, ELEM_ALLOC_SETTINGS);
+                try Utils.Alloc.realloc_list_refs(&self.elems.ptr, self.elems.len, &self.elems.cap, new_cap, self.elems_alloc, .GROW_BY_25_PERCENT, .RETURN_ERRORS);
             }
         }
         inline fn grow_lines_if_needed(self: *LayoutManager, add_lines: IDX) Error!void {
@@ -1028,7 +999,7 @@ pub fn DefineLayoutManager(comptime T_DIMENSION: type, comptime T_DIMENSION_SMAL
             defer self.auto_debug(@src());
             const new_cap = self.lines.len + add_lines;
             if (new_cap > self.lines.cap) {
-                try Utils.Alloc.smart_alloc_ptr_ptrs(self.lines_alloc, &self.lines.ptr, &self.lines.len, &self.lines.cap, new_cap, .{}, LINE_ALLOC_SETTINGS);
+                try Utils.Alloc.realloc_list_refs(&self.lines.ptr, self.lines.len, &self.lines.cap, new_cap, self.lines_alloc, .GROW_BY_25_PERCENT, .RETURN_ERRORS);
             }
         }
         inline fn grow_stack_if_needed(self: *LayoutManager, add_stack: IDX) Utils.Alloc.AllocErr!void {
@@ -1036,7 +1007,7 @@ pub fn DefineLayoutManager(comptime T_DIMENSION: type, comptime T_DIMENSION_SMAL
             defer self.auto_debug(@src());
             const new_cap = self.stack.len + add_stack;
             if (new_cap > self.stack.cap) {
-                try Utils.Alloc.smart_alloc_ptr_ptrs(self.stack_alloc, &self.stack.ptr, &self.stack.len, &self.stack.cap, new_cap, .{}, STACK_ALLOC_SETTINGS);
+                try Utils.Alloc.realloc_list_refs(&self.stack.ptr, self.stack.len, &self.stack.cap, new_cap, self.stack_alloc, .GROW_BY_25_PERCENT, .RETURN_ERRORS);
             }
         }
 
@@ -1154,7 +1125,13 @@ pub fn DefineLayoutManager(comptime T_DIMENSION: type, comptime T_DIMENSION_SMAL
             try self.grow_elems_if_needed(1);
             const req: LayoutRequest = requester.get_layout_request();
             const new_depth = if (parent_idx == NULL_IDX) 0 else (self.get_elem_ptr(parent_idx).depth + 1);
-            const layout_info = PackedLayoutInfo{
+            const grow_info = PackedGrowMaxData{
+                .growable_x = req.grow_x_to_fill_parent_space,
+                .growable_y = req.grow_y_to_fill_parent_space,
+                .max_mode_x = req.max_mode_x,
+                .max_mode_y = req.max_mode_y,
+            };
+            const layout_info = PackedLayoutData{
                 .child_align_x = req.child_align.x,
                 .child_align_y = req.child_align.y,
                 .child_layout_dir_x = req.child_layout_dir.x_dir(),
@@ -1162,20 +1139,15 @@ pub fn DefineLayoutManager(comptime T_DIMENSION: type, comptime T_DIMENSION_SMAL
                 .children_axis_line_local_align = req.children_axis_line_local_align,
                 .float_parent_attach = req.float.attach.parent,
                 .float_self_attach = req.float.attach.child,
-                .growable_x = req.grow_x_to_fill_parent_space,
-                .growable_y = req.grow_y_to_fill_parent_space,
-                .max_mode_x = req.max_mode_x,
-                .max_mode_y = req.max_mode_y,
                 .offset_mode_x = req.offset_mode_x,
                 .offset_mode_y = req.offset_mode_y,
                 .primary_child_axis = req.child_layout_dir.primary_axis(),
                 .self_axis_line_local_align = req.self_axis_line_local_align,
             };
-            DEBUG("Requester = {*}\n", .{requester.object});
             const elem = LayoutElement{
                 .requester = requester,
                 ._min_or_aabb = .new(req.min_size.x, req.min_size.y),
-                ._max_or_clip_aabb = .new(req.max_size.x, req.max_size.y, layout_info),
+                ._max_or_clip_aabb = .new(req.max_size.x, req.max_size.y, grow_info),
                 .child_gaps = req.child_gaps,
                 .depth = new_depth,
                 .clip_to_parent = req.clip_to_parent,
@@ -1184,8 +1156,8 @@ pub fn DefineLayoutManager(comptime T_DIMENSION: type, comptime T_DIMENSION_SMAL
                 .parent_idx = parent_idx,
                 .use_wrap_mode = req.wrap_children_that_overflow_size,
                 .final_position_offset = req.final_position_offset,
+                .layout_info = layout_info,
             };
-            DEBUG("elem.requester = {*}\n", .{elem.requester.object});
             const idx = self.elems.len;
             if (parent_idx != NULL_IDX) {
                 var parent: *LayoutElement = self.get_elem_ptr(parent_idx);
@@ -1212,7 +1184,6 @@ pub fn DefineLayoutManager(comptime T_DIMENSION: type, comptime T_DIMENSION_SMAL
 
             self.elems.ptr[idx] = elem;
             self.elems.len += 1;
-            DEBUG(" self.elems.ptr[{d}].requester = {*}\n", .{ idx, self.elems.ptr[idx].requester.object });
             return .{ &self.elems.ptr[idx], idx };
         }
 
@@ -1243,7 +1214,7 @@ pub fn DefineLayoutManager(comptime T_DIMENSION: type, comptime T_DIMENSION_SMAL
             self.real_max_elems = @max(self.real_max_elems, self.elems.len);
         }
 
-        pub fn recalculate_layout(self: *LayoutManager, comptime DRIVING_AXIS: Axis) anyerror!void {
+        pub fn recalculate_layout(self: *LayoutManager, root_clip_aabb: ?AABB, comptime DRIVING_AXIS: Axis) anyerror!void {
             self.auto_debug(@src());
             defer self.auto_debug(@src());
             switch (comptime DRIVING_AXIS) {
@@ -1262,6 +1233,7 @@ pub fn DefineLayoutManager(comptime T_DIMENSION: type, comptime T_DIMENSION_SMAL
                     self.elems, self.stack = try Traverse.do_action_on_all_nodes(self.elems, self.stack, self.stack_reallocator(), .PARENTS_FIRST, .all_child_paths(), 0, self, AxisStage.new(.X, .SECONDARY_STAGE), .COMPTIME_FN_PTR, fit_and_expand_children_to_fill_parent, void{}, .MAX_STACK_LEN_NOT_IMPORTANT, void{});
                 },
             }
+            self.finalize_root_aabbs(root_clip_aabb);
             self.elems, self.stack = try Traverse.do_action_on_all_nodes(self.elems, self.stack, self.stack_reallocator(), .PARENTS_FIRST, .all_child_paths(), 0, self, void{}, .COMPTIME_FN_PTR, position_and_align_child_elements, void{}, .MAX_STACK_LEN_NOT_IMPORTANT, void{});
         }
 
@@ -1284,107 +1256,177 @@ pub fn DefineLayoutManager(comptime T_DIMENSION: type, comptime T_DIMENSION_SMAL
             return self.elems;
         }
 
-        fn combine_all_children_with_axis_lines(self: *LayoutManager, parent: *LayoutElement, comptime CT: AxisStage, comptime COMBINE_MODE: CombineMode, comptime WRAP_MODE: WrapMode) anyerror!void {
+        const BuildAxisLineWrapData = struct {
+            line: *AxisLine,
+            prev_line: ?*AxisLine = null,
+            max_size_for_children: T,
+            gap_on_axis: T,
+            child_n: IDX = 0,
+
+            pub fn new(parent: *LayoutElement, gap: T, max_size_for_children: T) BuildAxisLineWrapData {
+                return BuildAxisLineWrapData{
+                    .line = &parent.first_axis_line,
+                    .gap_on_axis = gap,
+                    .max_size_for_children = max_size_for_children,
+                };
+            }
+        };
+
+        fn add_all_children_to_new_axis_lines_primary_wrapping(self: *LayoutManager, parent: *LayoutElement, comptime AXIS: Axis) anyerror!void {
             self.auto_debug(@src());
             defer self.auto_debug(@src());
+            const gap = parent.child_gaps.get(AXIS);
             const max_size_for_children = parent.get_min_size_self(CT.AXIS) - parent.padding.get(CT.AXIS);
-            var child: *LayoutElement = undefined;
-            var child_idx = parent.first_contained_child;
-            const gap = parent.child_gaps.get(CT.AXIS);
-            var line = &parent.first_axis_line;
-            if (CT.STAGE == .PRIMARY_STAGE) {
-                line.min_size.set(CT.AXIS, -gap);
-            }
-            var children_left_on_parent = parent.num_contained_children;
-            var children_left_on_line = line.num_elems;
-            var more_children_on_parent = children_left_on_parent > 0;
-            var more_children_on_line = true;
-            while (more_children_on_parent) {
-                children_left_on_parent -= 1;
-                child = self.get_elem_ptr(child_idx);
-                more_children_on_parent = children_left_on_parent > 0;
-                if (CT.STAGE == .SECONDARY_STAGE) {
-                    children_left_on_line -= 1;
-                    more_children_on_line = children_left_on_line > 0;
+            parent.first_axis_line.min_size.set(AXIS, -gap);
+            var data = BuildAxisLineWrapData.new(parent, gap, max_size_for_children);
+            try self.for_each_contained_child_err(parent, &data, AXIS, add_child_to_new_axis_line_primary_wrapping);
+        }
+        fn add_child_to_new_axis_line_primary_wrapping(self: *LayoutManager, parent: *LayoutElement, child_idx: IDX, child: *LayoutElement, data: *BuildAxisLineWrapData, comptime AXIS: Axis) anyerror!void {
+            self.auto_debug(@src());
+            defer self.auto_debug(@src());
+            const child_size = child.get_min_size_self(AXIS);
+            const size_if_combine = data.line.min_size.get(AXIS) + child_size + data.gap_on_axis;
+            data.child_n += 1;
+            if (data.line.num_elems > 0 and size_if_combine > data.max_size_for_children) {
+                const total_gap = num_cast(data.line.num_elems - 1, T) * data.gap_on_axis;
+                self.distribute_primary_extra_space_to_axis_line_members(data.line, data.max_size_for_children - total_gap, AXIS);
+                parent.num_axis_lines += 1;
+                if (data.child_n < parent.num_contained_children) {
+                    const new_line = AxisLine.new(child_idx, 1, child_size, AXIS);
+                    const new_line_ptr, const new_line_idx = try self.append_line_get_ptr(new_line);
+                    if (data.prev_line) |prev_line| {
+                        prev_line.next_line = new_line_idx;
+                    }
+                    data.prev_line = data.line;
+                    data.line = new_line_ptr;
                 }
-                line = try self.combine_child_with_axis_line(line, child, child_idx, more_children_on_parent, more_children_on_line, gap, max_size_for_children, CT.AXIS, COMBINE_MODE, WRAP_MODE, CT.STAGE);
-                child_idx = child.next_sibling;
+            } else {
+                data.line.min_size.set(AXIS, size_if_combine);
+                data.line.num_elems += 1;
+                if (data.child_n == parent.num_contained_children) {
+                    const total_gap = num_cast(data.line.num_elems - 1, T) * data.gap_on_axis;
+                    self.distribute_primary_extra_space_to_axis_line_members(data.line, data.max_size_for_children - total_gap, AXIS);
+                    parent.num_axis_lines += 1;
+                }
             }
-            if (COMBINE_MODE == .UPDATE_MAX_OF_MIN_SIZE) {
-                self.distribute_secondary_extra_space_to_all_axis_lines(parent, CT.AXIS);
+            if (comptime EXTRA_DEBUG) {
+                assert_with_reason_debug_only(data.child_n == parent.num_contained_children, @src(), "did not iterate over all children on parent, got {d}, needed {d}", .{ data.child_n, parent.num_contained_children });
             }
         }
 
-        fn combine_child_with_axis_line(self: *LayoutManager, line: *AxisLine, child: *LayoutElement, child_idx: IDX, more_children_on_parent: bool, more_children_on_line: bool, gap: T, max_size: T, comptime AXIS: Axis, comptime COMBINE_MODE: CombineMode, comptime WRAP_MODE: WrapMode, comptime STAGE: LayoutStage) anyerror!*AxisLine {
-            self.auto_debug(@src());
-            defer self.auto_debug(@src());
-            var size_if_combine = line.min_size.get(AXIS);
-            var next_line = line;
-            const child_size = child.get_min_size_self(AXIS);
-            switch (comptime COMBINE_MODE) {
-                .ADD_MIN_SIZE_AND_GAP => {
-                    size_if_combine += child_size + gap;
-                    const handle_combine_stage: HANDLE_COMBINE_STAGE = switch (WRAP_MODE) {
-                        .NO_WRAP => .ADD_CURRENT_CHILD_TO_CURRENT_LINE,
-                        .ALLOW_WRAP => if (line.num_elems > 0 and size_if_combine > max_size) .FINISH_LINE_AND_POSSIBLY_START_NEW else .ADD_CURRENT_CHILD_TO_CURRENT_LINE,
-                    };
-                    to_stage: switch (handle_combine_stage) {
-                        .FINISH_LINE_AND_POSSIBLY_START_NEW => {
-                            if (WRAP_MODE == .NO_WRAP) {
-                                unreachable;
-                            }
-                            const total_gap = num_cast(line.num_elems - 1, T) * gap;
-                            self.distribute_primary_extra_space_to_axis_line_members(line, max_size - total_gap, AXIS);
-                            if (more_children_on_parent) {
-                                switch (STAGE) {
-                                    .SECONDARY_STAGE => {
-                                        assert_unreachable(@src(), "cannot start new axis line in secondary stage", .{});
-                                    },
-                                    .PRIMARY_STAGE => {
-                                        const new_line = AxisLine.new(child_idx, 1, child_size, AXIS);
-                                        next_line, const next_idx = try self.append_line_get_ptr(new_line);
-                                        line.next_line = next_idx;
-                                    },
-                                }
-                            }
-                        },
-                        .FINISH_LINE_AND_END => {
-                            const total_gap = num_cast(line.num_elems - 1, T) * gap;
-                            self.distribute_primary_extra_space_to_axis_line_members(line, max_size - total_gap, AXIS);
-                        },
-                        .ADD_CURRENT_CHILD_TO_CURRENT_LINE => {
-                            line.min_size.set(AXIS, size_if_combine);
-                            if (STAGE == .PRIMARY_STAGE) {
-                                line.num_elems += 1;
-                            }
-                            if (!more_children_on_parent) continue :to_stage .FINISH_LINE_AND_END;
-                        },
-                    }
-                },
-                .UPDATE_MAX_OF_MIN_SIZE => {
-                    size_if_combine = @max(size_if_combine, child_size);
-                    line.min_size.set(AXIS, size_if_combine);
-                    // VERIFY does removing this code indicate some sort of logic error or old code residue elsewhere?
-                    // if (child.is_growable(AXIS)) {
-                    //     line.max_secondary_grow = @max(line.max_secondary_grow, child.get_grow_ratio(AXIS));
-                    // }
-                    switch (STAGE) {
-                        .PRIMARY_STAGE => {
-                            line.num_elems += 1;
-                            assert_with_reason_debug_only(WRAP_MODE != .ALLOW_WRAP, @src(), "internal logic error: cannot use overflow mode when the primary layout direction does not match the driving axis", .{});
-                        },
-                        .SECONDARY_STAGE => {
-                            if (more_children_on_parent and !more_children_on_line) {
-                                assert_with_reason_debug_only(WRAP_MODE == .ALLOW_WRAP, @src(), "internal logic error: when `more_children_on_parent` and `!more_children_on_line`, the mode MUST be `ALLOW_WRAP`", .{});
-                                assert_with_reason_debug_only(line.next_line != NULL_IDX, @src(), "internal logic error: a null idx found on `line.next_line` when there should exist another line", .{});
-                                next_line = self.get_line_ptr(line.next_line);
-                            }
-                        },
-                    }
-                },
-            }
-            return next_line;
-        }
+        // fn add_or_update_all_children_to_axis_lines(self: *LayoutManager, parent: *LayoutElement, comptime CT: AxisStageCombineWrap) anyerror!void {
+        //     self.auto_debug(@src());
+        //     defer self.auto_debug(@src());
+        //     const max_size_for_children = parent.get_min_size_self(CT.AXIS) - parent.padding.get(CT.AXIS);
+        //     var child: *LayoutElement = undefined;
+        //     var child_idx = parent.first_contained_child;
+        //     const gap = parent.child_gaps.get(CT.AXIS);
+        //     var line = &parent.first_axis_line;
+        //     var line_idx = NULL_IDX;
+        //     switch (comptime CT.STAGE) {
+        //         .PRIMARY_STAGE => switch (comptime CT.COMBINE_MODE) {
+        //             .ADD_MIN_SIZE_AND_GAP => {
+        //                 line.min_size.set(CT.AXIS, -gap);
+        //             },
+        //             .UPDATE_MAX_OF_MIN_SIZE => {},
+        //         },
+        //         .SECONDARY_STAGE => switch (comptime CT.COMBINE_MODE) {
+        //             .ADD_MIN_SIZE_AND_GAP => {
+        //                 line.min_size.set(CT.AXIS, -gap);
+        //             },
+        //             .UPDATE_MAX_OF_MIN_SIZE => {},
+        //         },
+        //     }
+        //     var children_left_on_parent = parent.num_contained_children;
+        //     var children_left_on_line = line.num_elems;
+        //     var more_children_on_parent = children_left_on_parent > 0;
+        //     while (more_children_on_parent) {
+        //         children_left_on_parent -= 1;
+        //         child = self.get_elem_ptr(child_idx);
+        //         more_children_on_parent = children_left_on_parent > 0;
+        //         line, children_left_on_line = try self.add_child_to_current_or_new_axis_line(parent, line, child, child_idx, more_children_on_parent, children_left_on_line, gap, max_size_for_children, CT.AXIS, COMBINE_MODE, WRAP_MODE, CT.STAGE);
+        //         child_idx = child.next_sibling;
+        //     }
+        //     switch (COMBINE_MODE) {
+        //         .ADD_MIN_SIZE_AND_GAP => {},
+        //         .UPDATE_MAX_OF_MIN_SIZE => {},
+        //     }
+        //     if (COMBINE_MODE == .UPDATE_MAX_OF_MIN_SIZE) {
+        //         self.distribute_secondary_extra_space_to_all_axis_lines(parent, CT.AXIS);
+        //     }
+        // }
+
+        // fn add_child_to_current_or_new_axis_line(self: *LayoutManager, parent: *LayoutElement, line: *AxisLine, child: *LayoutElement, child_idx: IDX, more_children_on_parent: bool, children_left_on_line: IDX, gap: T, max_size: T, comptime AXIS: Axis, comptime COMBINE_MODE: CombineMode, comptime WRAP_MODE: WrapMode, comptime STAGE: LayoutStage) anyerror!struct { *AxisLine, IDX } {
+        //     self.auto_debug(@src());
+        //     defer self.auto_debug(@src());
+        //     var size_if_combine = line.min_size.get(AXIS);
+        //     var next_line = line;
+        //     var next_children_remaining_on_line = children_left_on_line;
+        //     const child_size = child.get_min_size_self(AXIS);
+        //     DEBUG("comptime fmt: []const u8", args: anytype);
+        //     switch (comptime COMBINE_MODE) {
+        //         .ADD_MIN_SIZE_AND_GAP => {
+        //             size_if_combine += child_size + gap;
+        //             const handle_combine_stage: HANDLE_COMBINE_STAGE = switch (WRAP_MODE) {
+        //                 .NO_WRAP => .ADD_CURRENT_CHILD_TO_CURRENT_LINE,
+        //                 .ALLOW_WRAP => if (line.num_elems > 0 and size_if_combine > max_size) .FINISH_LINE_AND_POSSIBLY_START_NEW else .ADD_CURRENT_CHILD_TO_CURRENT_LINE,
+        //             };
+        //             to_stage: switch (handle_combine_stage) {
+        //                 .FINISH_LINE_AND_POSSIBLY_START_NEW => {
+        //                     if (WRAP_MODE == .NO_WRAP) {
+        //                         assert_unreachable(@src(), "the WRAP_MODE must be .ALLOW_WRAP in combine stage .FINISH_LINE_AND_POSSIBLY_START_NEW", .{});
+        //                     }
+        //                     const total_gap = num_cast(line.num_elems - 1, T) * gap;
+        //                     self.distribute_primary_extra_space_to_axis_line_members(line, max_size - total_gap, AXIS);
+        //                     parent.num_axis_lines += 1;
+        //                     if (more_children_on_parent) {
+        //                         switch (STAGE) {
+        //                             .SECONDARY_STAGE => {
+        //                                 assert_unreachable(@src(), "cannot start new axis line in secondary stage", .{});
+        //                             },
+        //                             .PRIMARY_STAGE => {
+        //                                 const new_line = AxisLine.new(child_idx, 1, child_size, AXIS);
+        //                                 next_line, const next_idx = try self.append_line_get_ptr(new_line);
+        //                                 line.next_line = next_idx;
+        //                             },
+        //                         }
+        //                     }
+        //                 },
+        //                 .FINISH_LINE_AND_END => {
+        //                     const total_gap = num_cast(line.num_elems - 1, T) * gap;
+        //                     self.distribute_primary_extra_space_to_axis_line_members(line, max_size - total_gap, AXIS);
+        //                     parent.num_axis_lines += 1;
+        //                 },
+        //                 .ADD_CURRENT_CHILD_TO_CURRENT_LINE => {
+        //                     line.min_size.set(AXIS, size_if_combine);
+        //                     if (STAGE == .PRIMARY_STAGE) {
+        //                         line.num_elems += 1;
+        //                     }
+        //                     if (!more_children_on_parent) continue :to_stage .FINISH_LINE_AND_END;
+        //                 },
+        //             }
+        //         },
+        //         .UPDATE_MAX_OF_MIN_SIZE => {
+        //             size_if_combine = @max(size_if_combine, child_size);
+        //             line.min_size.set(AXIS, size_if_combine);
+        //             switch (STAGE) {
+        //                 .PRIMARY_STAGE => {
+        //                     line.num_elems += 1;
+        //                     assert_with_reason_debug_only(WRAP_MODE != .ALLOW_WRAP, @src(), "internal logic error: cannot use overflow mode when the primary layout direction does not match the driving axis", .{});
+        //                 },
+        //                 .SECONDARY_STAGE => {
+        //                     if (more_children_on_parent and children_left_on_line == 0) {
+        //                         assert_with_reason_debug_only(WRAP_MODE == .ALLOW_WRAP, @src(), "internal logic error: when `more_children_on_parent` and `!more_children_on_line`, the mode MUST be `ALLOW_WRAP`", .{});
+        //                         assert_with_reason_debug_only(line.next_line != NULL_IDX, @src(), "internal logic error: a null idx found on `line.next_line` when there should exist another line", .{});
+        //                         next_line = self.get_line_ptr(line.next_line);
+        //                         next_children_remaining_on_line = next_line.num_elems;
+        //                     }
+        //                 },
+        //             }
+        //         },
+        //     }
+        //     return .{ next_line, next_children_remaining_on_line };
+        // }
 
         fn distribute_primary_extra_space_to_axis_line_members(self: *LayoutManager, axis_line: *AxisLine, space: T, comptime AXIS: Axis) void {
             self.auto_debug(@src());
@@ -1442,113 +1484,96 @@ pub fn DefineLayoutManager(comptime T_DIMENSION: type, comptime T_DIMENSION_SMAL
             }
         }
 
+        const AxisLineTotalSec = struct {
+            total_axis_lines_size: *T,
+            gap: T,
+        };
+
+        fn collect_total_minimum_axis_line_secondary_size_and_grow_children_to_secondary_size(self: *LayoutManager, parent: *LayoutElement, line_idx: IDX, line: *AxisLine, ctx: AxisLineTotalSec, comptime AXIS: Axis) void {
+            ctx.total_axis_lines_size.* += line.min_size.get(AXIS) + ctx.gap;
+            self.for_each_child_on_axis_line(parent, line_idx, line, void{}, AXIS, grow_growable_child_to_axis_line_secondary_min_size);
+        }
+
+        fn grow_growable_child_to_axis_line_secondary_min_size(_: *LayoutManager, _: *LayoutElement, _: IDX, line: *AxisLine, _: IDX, child: *LayoutElement, _: void, comptime AXIS: Axis) void {
+            if (child.is_growable(AXIS)) {
+                child.set_min_size_self_limit_to_max_update_growable(AXIS, line.min_size.get(AXIS));
+            }
+        }
+
+        fn find_all_smallest_growable_children_and_grow_limit_for_this_pass(self: *LayoutManager, parent: *LayoutElement, line_idx: IDX, line: *AxisLine, pass: *GrowPass, comptime AXIS: Axis) void {
+            self.for_each_child_on_axis_line(parent, line_idx, line, pass, AXIS, update_smallest_growable_and_max_grow_limit_this_pass);
+        }
+
+        fn update_smallest_growable_and_max_grow_limit_this_pass(self: *LayoutManager, parent: *LayoutElement, axis_line_idx: IDX, _: *AxisLine, child_idx: IDX, child: *LayoutElement, pass: *GrowPass, comptime AXIS: Axis) void {
+            if (child.is_growable(AXIS)) {
+                if (Math.approx_equal(T, child.get_min_size_self(AXIS), pass.smallest_growable_child_this_pass)) {
+                    const prev_child: *LayoutElement = self.get_elem_ptr(pass.prev_growable_child_this_pass);
+                    const prev_line: *AxisLine = if (pass.prev_growable_line_this_pass == NULL_IDX) &parent.first_axis_line else self.get_line_ptr(pass.prev_growable_line_this_pass);
+                    prev_child.set_next_growable_idx_this_pass(child_idx);
+                    prev_line.next_growable_line_this_pass = axis_line_idx;
+                    pass.prev_growable_child_this_pass = child_idx;
+                    pass.prev_growable_line_this_pass = axis_line_idx;
+                    pass.child_grow_limit_this_pass = @min(pass.child_grow_limit_this_pass, child.get_max_size(AXIS));
+                    if (pass.total_growable_lines_this_pass == 0) {
+                        pass.total_growable_lines_this_pass += 1;
+                    } else if (axis_line_idx != pass.prev_growable_line_this_pass) {
+                        pass.total_growable_lines_this_pass += 1;
+                    }
+                    pass.total_growable_children_this_pass += 1;
+                } else if (Math.approx_less_than(T, child.get_min_size_self(AXIS), pass.smallest_growable_child_this_pass)) {
+                    pass.total_growable_lines_this_pass = 1;
+                    pass.total_growable_children_this_pass = 1;
+                    pass.prev_growable_line_this_pass = axis_line_idx;
+                    pass.first_growable_line_this_pass = axis_line_idx;
+                    pass.second_smallest_growable_child_this_pass = pass.smallest_growable_child_this_pass;
+                    pass.smallest_growable_child_this_pass = child.get_min_size_self(AXIS);
+                    pass.child_grow_limit_this_pass = @min(child.get_max_size(AXIS), pass.second_smallest_growable_child_this_pass);
+                    pass.first_growable_child_this_pass = child_idx;
+                    pass.prev_growable_child_this_pass = child_idx;
+                    child.set_next_growable_idx_this_pass(NULL_IDX);
+                }
+            }
+        }
+
+        fn grow_child_by_space_per_child_this_pass(_: *LayoutManager, _: *LayoutElement, _: IDX, child: *LayoutElement, space_per_child_this_pass: T, comptime AXIS: Axis) void {
+            child.add_to_min_self_size_limit_to_max_update_growable(AXIS, space_per_child_this_pass);
+        }
+        fn grow_axis_line_by_space_per_child_this_pass(_: *LayoutManager, _: *LayoutElement, _: IDX, line: *AxisLine, space_per_child_this_pass: T, comptime AXIS: Axis) void {
+            line.min_size.set(AXIS, line.min_size.get(AXIS) + space_per_child_this_pass);
+        }
+
+        const GrowPass = struct {
+            total_growable_lines_this_pass: IDX = 0,
+            total_growable_children_this_pass: IDX = 0,
+            child_grow_limit_this_pass: T = math.inf(T),
+            prev_growable_line_this_pass: IDX = NULL_IDX,
+            first_growable_line_this_pass: IDX = NULL_IDX,
+            smallest_growable_child_this_pass: T = math.inf(T),
+            second_smallest_growable_child_this_pass: T = math.inf(T),
+            first_growable_child_this_pass: IDX = NULL_IDX,
+            prev_growable_child_this_pass: IDX = NULL_IDX,
+        };
+
         fn distribute_secondary_extra_space_to_all_axis_lines(self: *LayoutManager, parent: *LayoutElement, comptime AXIS: Axis) void {
             self.auto_debug(@src());
             defer self.auto_debug(@src());
             const gap = parent.child_gaps.get(AXIS);
-            var line = &parent.first_axis_line;
-            var lines_left: IDX = parent.num_axis_lines;
             var total_axis_lines_size: T = -gap;
-            while (lines_left > 0) {
-                lines_left -= 1;
-                total_axis_lines_size += line.min_size.get(AXIS) + gap;
-                var children_left = line.num_elems;
-                var child_idx: IDX = line.first_elem;
-                while (children_left > 0) {
-                    children_left -= 1;
-                    const child: *LayoutElement = self.get_elem_ptr(child_idx);
-                    if (child.is_growable(AXIS)) {
-                        child.set_min_size_self_limit_to_max_update_growable(AXIS, line.min_size.get(AXIS));
-                    }
-                    child_idx = child.next_sibling;
-                }
-                if (lines_left > 0) {
-                    line = self.get_line_ptr(line.next_line);
-                }
-            }
+            self.for_each_axis_line(parent, AxisLineTotalSec{ .total_axis_lines_size = &total_axis_lines_size, .gap = gap }, AXIS, collect_total_minimum_axis_line_secondary_size_and_grow_children_to_secondary_size);
             const space_for_lines = parent.get_min_size_self(AXIS) - parent.padding.get(AXIS);
             var remaining_space = space_for_lines - total_axis_lines_size;
             while (remaining_space > 0) {
-                line = &parent.first_axis_line;
-                lines_left = parent.num_axis_lines;
-                var axis_line_idx: IDX = NULL_IDX;
-                var child: *LayoutElement = undefined;
-                var total_growable_lines_this_pass: IDX = 0;
-                var total_growable_children_this_pass: IDX = 0;
-                var child_grow_limit_this_pass: T = math.inf(T);
-                var prev_growable_line_this_pass: IDX = NULL_IDX;
-                var first_growable_line_this_pass: IDX = NULL_IDX;
-                var smallest_growable_child_this_pass: T = math.inf(T);
-                var second_smallest_growable_child_this_pass: T = math.inf(T);
-                var first_growable_child_this_pass: IDX = NULL_IDX;
-                var prev_growable_child_this_pass: IDX = NULL_IDX;
-                var children_left: IDX = undefined;
-                while (lines_left > 0) {
-                    lines_left -= 1;
-                    children_left = line.num_elems;
-                    var child_idx: IDX = line.first_elem;
-                    while (children_left > 0) {
-                        children_left -= 1;
-                        child = self.get_elem_ptr(child_idx);
-                        if (child.is_growable(AXIS)) {
-                            if (Math.approx_equal(T, child.get_min_size_self(AXIS), smallest_growable_child_this_pass)) {
-                                const prev_child: *LayoutElement = self.get_elem_ptr(prev_growable_child_this_pass);
-                                const prev_line: *AxisLine = if (prev_growable_line_this_pass == NULL_IDX) &parent.first_axis_line else self.get_line_ptr(prev_growable_line_this_pass);
-                                prev_child.set_next_growable_idx_this_pass(child_idx);
-                                prev_line.next_growable_line_this_pass = axis_line_idx;
-                                prev_growable_child_this_pass = child_idx;
-                                prev_growable_child_this_pass = axis_line_idx;
-                                child_grow_limit_this_pass = @min(child_grow_limit_this_pass, child.get_max_size(AXIS));
-                                if (total_growable_lines_this_pass == 0) {
-                                    total_growable_lines_this_pass += 1;
-                                } else if (axis_line_idx != prev_growable_line_this_pass) {
-                                    total_growable_lines_this_pass += 1;
-                                }
-                                total_growable_children_this_pass += 1;
-                            } else if (Math.approx_less_than(T, child.get_min_size_self(AXIS), smallest_growable_child_this_pass)) {
-                                total_growable_lines_this_pass = 1;
-                                total_growable_children_this_pass = 1;
-                                prev_growable_line_this_pass = axis_line_idx;
-                                first_growable_line_this_pass = axis_line_idx;
-                                second_smallest_growable_child_this_pass = smallest_growable_child_this_pass;
-                                smallest_growable_child_this_pass = child.get_min_size_self(AXIS);
-                                child_grow_limit_this_pass = @min(child.get_max_size(AXIS), second_smallest_growable_child_this_pass);
-                                first_growable_child_this_pass = child_idx;
-                                prev_growable_child_this_pass = child_idx;
-                                child.set_next_growable_idx_this_pass(NULL_IDX);
-                            }
-                        }
-                        child_idx = child.next_sibling;
-                    }
-                    axis_line_idx = line.next_line;
-                    if (lines_left > 0) {
-                        line = self.get_line_ptr(axis_line_idx);
-                    }
-                }
-                if (total_growable_lines_this_pass == 0) break;
-                var child_idx = first_growable_child_this_pass;
-                children_left = total_growable_children_this_pass;
-                lines_left = total_growable_lines_this_pass;
-                const total_growable_lines_this_pass_T: T = @floatFromInt(total_growable_lines_this_pass);
-                const max_space_per_child_this_pass = child_grow_limit_this_pass - smallest_growable_child_this_pass;
-                var space_per_child_this_pass = remaining_space / total_growable_lines_this_pass_T;
+                var pass = GrowPass{};
+                self.for_each_axis_line(parent, &pass, AXIS, find_all_smallest_growable_children_and_grow_limit_for_this_pass);
+                if (pass.total_growable_lines_this_pass == 0) break;
+                const total_growable_lines_this_pass_T: T = num_cast(pass.total_growable_lines_this_pass, T);
+                const max_space_per_child_this_pass = pass.child_grow_limit_this_pass - pass.smallest_growable_child_this_pass;
+                var space_per_child_this_pass = remaining_space / num_cast(pass.total_growable_lines_this_pass, T);
                 space_per_child_this_pass = @min(space_per_child_this_pass, max_space_per_child_this_pass);
                 const space_taken_this_pass = total_growable_lines_this_pass_T * space_per_child_this_pass;
                 if (space_taken_this_pass <= math.floatEps(T)) break;
-                while (children_left > 0) {
-                    children_left -= 1;
-                    child = self.get_elem_ptr(child_idx);
-                    child.add_to_min_self_size_limit_to_max_update_growable(AXIS, space_per_child_this_pass);
-                    child_idx = child.get_next_growable_idx_this_pass();
-                }
-                line = if (first_growable_line_this_pass == NULL_IDX) &parent.first_axis_line else self.get_line_ptr(first_growable_line_this_pass);
-                while (lines_left > 0) {
-                    lines_left -= 1;
-                    line.min_size.set(AXIS, line.min_size.get(AXIS) + space_per_child_this_pass);
-                    if (lines_left > 0) {
-                        line = self.get_line_ptr(line.next_growable_line_this_pass);
-                    }
-                }
+                self.for_each_growable_child_this_pass(parent, pass, space_per_child_this_pass, AXIS, grow_child_by_space_per_child_this_pass);
+                self.for_each_growable_axis_line_this_pass(parent, pass, space_per_child_this_pass, AXIS, grow_axis_line_by_space_per_child_this_pass);
                 remaining_space -= space_taken_this_pass;
             }
         }
@@ -1562,17 +1587,24 @@ pub fn DefineLayoutManager(comptime T_DIMENSION: type, comptime T_DIMENSION_SMAL
             }
             if (parent.first_contained_child != NULL_IDX) {
                 assert_with_reason_debug_only(parent.num_contained_children > 0, @src(), "first child on parent wasnt NULL, but parent has no children count", .{});
-                if (parent.use_wrap_mode) {
+                if (comptime CT.STAGE == .PRIMARY_STAGE) {
                     if (parent.get_primary_child_axis() == CT.AXIS) {
-                        try self.combine_all_children_with_axis_lines(parent, CT, .ADD_MIN_SIZE_AND_GAP, .ALLOW_WRAP);
+                        if (parent.use_wrap_mode) {
+                            try self.add_all_children_to_new_axis_lines_primary_wrapping(parent, CT.AXIS);
+                        } else {
+                            // CHECKPOINT implement
+                            // add all children to first (and only) axis line by adding their min size and gap to current axis line min size
+                        }
                     } else {
-                        try self.combine_all_children_with_axis_lines(parent, CT, .UPDATE_MAX_OF_MIN_SIZE, .ALLOW_WRAP);
+                        // assert parent not using wrap mode, or warn if it is?
+                        // update parent first (and only) axis line minimum size with max of all childen min sizes
                     }
                 } else {
                     if (parent.get_primary_child_axis() == CT.AXIS) {
-                        try self.combine_all_children_with_axis_lines(parent, CT, .ADD_MIN_SIZE_AND_GAP, .NO_WRAP);
+                        // assert parent not using wrap mode, or warn if it is?
+                        // add all children to first (and only) axis line by adding their min size and gap to current axis line min size
                     } else {
-                        try self.combine_all_children_with_axis_lines(parent, CT, .UPDATE_MAX_OF_MIN_SIZE, .NO_WRAP);
+                        // update parent first (and only) axis line minimum size with max of all childen min sizes
                     }
                 }
             }
@@ -1596,22 +1628,27 @@ pub fn DefineLayoutManager(comptime T_DIMENSION: type, comptime T_DIMENSION_SMAL
             return self.elems;
         }
 
-        inline fn for_each_axis_line(self: *LayoutManager, parent: *LayoutElement, context: anytype, comptime CONTEXT: anytype, comptime action: fn (*LayoutManager, *LayoutElement, *AxisLine, @TypeOf(context), comptime @TypeOf(CONTEXT)) void) void {
+        inline fn for_each_axis_line(self: *LayoutManager, parent: *LayoutElement, context: anytype, comptime CONTEXT: anytype, comptime action: fn (*LayoutManager, *LayoutElement, IDX, *AxisLine, @TypeOf(context), comptime @TypeOf(CONTEXT)) void) void {
             self.auto_debug(@src());
             defer self.auto_debug(@src());
+            var line_idx = NULL_IDX;
             var line: *AxisLine = &parent.first_axis_line;
-            var n = parent.num_axis_lines;
-            if (n == 0) return;
-            action(self, parent, line, context, CONTEXT);
-            n -= 1;
-            while (n > 0) {
+            var debug_line_count = Utils.DEBUG_VAR_IF(EXTRA_DEBUG, @as(IDX, 0));
+            while (true) {
+                if (comptime EXTRA_DEBUG) {
+                    debug_line_count += 1;
+                }
+                action(self, parent, line_idx, line, context, CONTEXT);
+                line_idx = line.next_line;
+                if (line_idx == NULL_IDX) break;
                 line = self.get_line_ptr(line.next_line);
-                n -= 1;
-                action(self, parent, line, context, CONTEXT);
+            }
+            if (comptime EXTRA_DEBUG) {
+                assert_with_reason_debug_only(debug_line_count == parent.num_axis_lines, @src(), "the number of axis lines evaluated did not match the number recorded on parent ({d} != {d})", .{ debug_line_count, parent.num_axis_lines });
             }
         }
 
-        inline fn for_each_child_on_axis_line(self: *LayoutManager, parent: *LayoutElement, line: *AxisLine, context: anytype, comptime CONTEXT: anytype, comptime action: fn (*LayoutManager, *LayoutElement, *AxisLine, IDX, *LayoutElement, @TypeOf(context), comptime @TypeOf(CONTEXT)) void) void {
+        inline fn for_each_child_on_axis_line(self: *LayoutManager, parent: *LayoutElement, line_idx: IDX, line: *AxisLine, context: anytype, comptime CONTEXT: anytype, comptime action: fn (*LayoutManager, *LayoutElement, IDX, *AxisLine, IDX, *LayoutElement, @TypeOf(context), comptime @TypeOf(CONTEXT)) void) void {
             self.auto_debug(@src());
             defer self.auto_debug(@src());
             var child_idx: IDX = line.first_elem;
@@ -1620,7 +1657,7 @@ pub fn DefineLayoutManager(comptime T_DIMENSION: type, comptime T_DIMENSION_SMAL
             while (n > 0) {
                 n -= 1;
                 child = self.get_elem_ptr(child_idx);
-                action(self, parent, line, child_idx, child, context, CONTEXT);
+                action(self, parent, line_idx, line, child_idx, child, context, CONTEXT);
                 child_idx = child.next_sibling;
             }
         }
@@ -1634,6 +1671,80 @@ pub fn DefineLayoutManager(comptime T_DIMENSION: type, comptime T_DIMENSION_SMAL
                 child = self.get_elem_ptr(child_idx);
                 action(self, parent, child_idx, child, context, CONTEXT);
                 child_idx = child.next_sibling;
+            }
+        }
+        inline fn for_each_contained_child_err(self: *LayoutManager, parent: *LayoutElement, context: anytype, comptime CONTEXT: anytype, comptime action: fn (*LayoutManager, *LayoutElement, IDX, *LayoutElement, @TypeOf(context), comptime @TypeOf(CONTEXT)) anyerror!void) anyerror!void {
+            self.auto_debug(@src());
+            defer self.auto_debug(@src());
+            var child_idx: IDX = parent.first_contained_child;
+            var child: *LayoutElement = undefined;
+            var debug_num_children_process = Utils.DEBUG_VAR_IF(EXTRA_DEBUG, @as(IDX, 0));
+            while (child_idx != NULL_IDX) {
+                child = self.get_elem_ptr(child_idx);
+                if (comptime EXTRA_DEBUG) {
+                    debug_num_children_process += 1;
+                }
+                try action(self, parent, child_idx, child, context, CONTEXT);
+                child_idx = child.next_sibling;
+            }
+            if (comptime EXTRA_DEBUG) {
+                assert_with_reason_debug_only(debug_num_children_process == parent.num_contained_children, @src(), "the number of children processed does not match the number of contained children on parent ({d} != {d})", .{ debug_num_children_process, parent.num_contained_children });
+            }
+        }
+        inline fn for_each_contained_child(self: *LayoutManager, parent: *LayoutElement, context: anytype, comptime CONTEXT: anytype, comptime action: fn (*LayoutManager, *LayoutElement, IDX, *LayoutElement, @TypeOf(context), comptime @TypeOf(CONTEXT)) void) void {
+            self.auto_debug(@src());
+            defer self.auto_debug(@src());
+            var child_idx: IDX = parent.first_contained_child;
+            var child: *LayoutElement = undefined;
+            var debug_num_children_process = Utils.DEBUG_VAR_IF(EXTRA_DEBUG, @as(IDX, 0));
+            while (child_idx != NULL_IDX) {
+                child = self.get_elem_ptr(child_idx);
+                if (comptime EXTRA_DEBUG) {
+                    debug_num_children_process += 1;
+                }
+                action(self, parent, child_idx, child, context, CONTEXT);
+                child_idx = child.next_sibling;
+            }
+            if (comptime EXTRA_DEBUG) {
+                assert_with_reason_debug_only(debug_num_children_process == parent.num_contained_children, @src(), "the number of children processed does not match the number of contained children on parent ({d} != {d})", .{ debug_num_children_process, parent.num_contained_children });
+            }
+        }
+
+        inline fn for_each_growable_child_this_pass(self: *LayoutManager, parent: *LayoutElement, pass: GrowPass, context: anytype, comptime CONTEXT: anytype, comptime action: fn (*LayoutManager, *LayoutElement, IDX, *LayoutElement, @TypeOf(context), comptime @TypeOf(CONTEXT)) void) void {
+            self.auto_debug(@src());
+            defer self.auto_debug(@src());
+            var child_idx: IDX = pass.first_growable_child_this_pass;
+            var child: *LayoutElement = undefined;
+            var debug_num_growable_children_processed = Utils.DEBUG_VAR_IF(EXTRA_DEBUG, @as(IDX, 0));
+            while (child_idx != NULL_IDX) {
+                child = self.get_elem_ptr(child_idx);
+                if (comptime EXTRA_DEBUG) {
+                    debug_num_growable_children_processed += 1;
+                }
+                action(self, parent, child_idx, child, context, CONTEXT);
+                child_idx = child.get_next_growable_idx_this_pass();
+            }
+            if (comptime EXTRA_DEBUG) {
+                assert_with_reason_debug_only(debug_num_growable_children_processed == pass.total_growable_children_this_pass, @src(), "debug_num_growable_children_processed != pass.total_growable_children_this_pass ({d} != {d})", .{ debug_num_growable_children_processed, pass.total_growable_children_this_pass });
+            }
+        }
+        inline fn for_each_growable_axis_line_this_pass(self: *LayoutManager, parent: *LayoutElement, pass: GrowPass, context: anytype, comptime CONTEXT: anytype, comptime action: fn (*LayoutManager, *LayoutElement, IDX, *AxisLine, @TypeOf(context), comptime @TypeOf(CONTEXT)) void) void {
+            self.auto_debug(@src());
+            defer self.auto_debug(@src());
+            var line_idx = pass.first_growable_line_this_pass;
+            var line = if (pass.first_growable_line_this_pass == NULL_IDX) &parent.first_axis_line else self.get_line_ptr(pass.first_growable_line_this_pass);
+            var debug_num_growable_lines_processed = Utils.DEBUG_VAR_IF(EXTRA_DEBUG, @as(IDX, 0));
+            while (true) {
+                if (comptime EXTRA_DEBUG) {
+                    debug_num_growable_lines_processed += 1;
+                }
+                action(self, parent, line_idx, line, context, CONTEXT);
+                line_idx = line.next_growable_line_this_pass;
+                if (line_idx == NULL_IDX) break;
+                line = self.get_line_ptr(line.next_growable_line_this_pass);
+            }
+            if (comptime EXTRA_DEBUG) {
+                assert_with_reason_debug_only(debug_num_growable_lines_processed == pass.total_growable_lines_this_pass, @src(), "debug_num_growable_processed != pass.total_growable_lines_this_pass ({d} != {d})", .{ debug_num_growable_lines_processed, pass.total_growable_lines_this_pass });
             }
         }
 
@@ -1668,7 +1779,7 @@ pub fn DefineLayoutManager(comptime T_DIMENSION: type, comptime T_DIMENSION_SMAL
             total_size: T,
         };
 
-        fn position_and_align_childen_on_axis_line(self: *LayoutManager, parent: *LayoutElement, line: *AxisLine, data_s: *PosAlignData_S, comptime DATA: PosAlignData_CT) void {
+        fn position_and_align_childen_on_axis_line(self: *LayoutManager, parent: *LayoutElement, line_idx: IDX, line: *AxisLine, data_s: *PosAlignData_S, comptime DATA: PosAlignData_CT) void {
             self.auto_debug(@src());
             defer self.auto_debug(@src());
             var cursor_p = data_s.cursor_axis_line_start_p;
@@ -1679,7 +1790,7 @@ pub fn DefineLayoutManager(comptime T_DIMENSION: type, comptime T_DIMENSION_SMAL
                         .base_gap = gap_p,
                         .total_size = -gap_p,
                     };
-                    self.for_each_child_on_axis_line(parent, line, &prime_size_data, DATA.PRIME_AXIS, add_primary_size_to_total);
+                    self.for_each_child_on_axis_line(parent, line_idx, line, &prime_size_data, DATA.PRIME_AXIS, add_primary_size_to_total);
                     var leftover_primary_space = data_s.parent_size_minus_padding.get(DATA.PRIME_AXIS) - prime_size_data.total_size;
                     leftover_primary_space = leftover_primary_space / 2;
                     if (DATA.NEGATIVE_DELTA_P) {
@@ -1694,7 +1805,7 @@ pub fn DefineLayoutManager(comptime T_DIMENSION: type, comptime T_DIMENSION_SMAL
                             .base_gap = gap_p,
                             .total_size = -gap_p,
                         };
-                        self.for_each_child_on_axis_line(parent, line, &prime_size_data, DATA.PRIME_AXIS, add_primary_size_to_total);
+                        self.for_each_child_on_axis_line(parent, line_idx, line, &prime_size_data, DATA.PRIME_AXIS, add_primary_size_to_total);
                         var leftover_primary_space = data_s.parent_size_minus_padding.get(DATA.PRIME_AXIS) - prime_size_data.total_size;
                         leftover_primary_space = leftover_primary_space / num_cast(line.num_elems - 1, T);
                         if (DATA.NEGATIVE_DELTA_P) {
@@ -1712,7 +1823,9 @@ pub fn DefineLayoutManager(comptime T_DIMENSION: type, comptime T_DIMENSION_SMAL
                 .gap_p = gap_p,
                 .gap_s = data_s.gap_s,
             };
-            self.for_each_child_on_axis_line(parent, line, &data_p, DATA, finalize_inline_child_aabb);
+            //FIXME //CHECKPOINT
+
+            self.for_each_child_on_axis_line(parent, line_idx, line, &data_p, DATA, finalize_inline_child_aabb);
             if (comptime DATA.NEGATIVE_DELTA_S) {
                 data_s.cursor_pos_s -= (line.min_size.get(DATA.SEC_AXIS) + data_s.gap_s);
             } else {
@@ -1720,13 +1833,13 @@ pub fn DefineLayoutManager(comptime T_DIMENSION: type, comptime T_DIMENSION_SMAL
             }
         }
 
-        fn add_secondary_size_to_total(_: *LayoutManager, _: *LayoutElement, line: *AxisLine, data: *AxisSizeData, comptime SEC_AXIS: Axis) void {
+        fn add_secondary_size_to_total(_: *LayoutManager, _: *LayoutElement, _: IDX, line: *AxisLine, data: *AxisSizeData, comptime SEC_AXIS: Axis) void {
             data.total_size += line.min_size.get(SEC_AXIS) + data.base_gap;
         }
-        fn add_primary_size_to_total(_: *LayoutManager, _: *LayoutElement, _: *AxisLine, _: IDX, child: *LayoutElement, data: *AxisSizeData, comptime PRIME_AXIS: Axis) void {
+        fn add_primary_size_to_total(_: *LayoutManager, _: *LayoutElement, _: IDX, _: *AxisLine, _: IDX, child: *LayoutElement, data: *AxisSizeData, comptime PRIME_AXIS: Axis) void {
             data.total_size += child.get_min_size_self(PRIME_AXIS) + data.base_gap;
         }
-        fn finalize_inline_child_aabb(self: *LayoutManager, parent: *LayoutElement, line: *AxisLine, _: IDX, child: *LayoutElement, data: *PosAlignData_P, comptime DATA: PosAlignData_CT) void {
+        fn finalize_inline_child_aabb(self: *LayoutManager, parent: *LayoutElement, _: IDX, line: *AxisLine, _: IDX, child: *LayoutElement, data: *PosAlignData_P, comptime DATA: PosAlignData_CT) void {
             self.auto_debug(@src());
             defer self.auto_debug(@src());
             const child_size_p = child.get_min_size_self(DATA.PRIME_AXIS);
@@ -1763,16 +1876,17 @@ pub fn DefineLayoutManager(comptime T_DIMENSION: type, comptime T_DIMENSION_SMAL
             }
             const final_pos = Pos.new(if (comptime DATA.PRIME_AXIS == .X) data.cursor_pos_p else child_pos_s, if (comptime DATA.PRIME_AXIS == .Y) data.cursor_pos_p else child_pos_s).add(child.final_position_offset);
             const final_size = Size.new(if (comptime DATA.PRIME_AXIS == .X) child_size_p else child_size_s, if (comptime DATA.PRIME_AXIS == .Y) child_size_p else child_size_s);
-            child._min_or_aabb.final_aabb = AABB.new_from_pos_size(final_pos, final_size);
+            child._min_or_aabb = MinSize_OR_FinalAABB{ .final_aabb = AABB.new_from_pos_size(final_pos, final_size) };
             if (comptime DATA.NEGATIVE_DELTA_P) {
                 data.cursor_pos_p -= data.gap_p;
             } else {
                 data.cursor_pos_p += child_size_p + data.gap_p;
             }
             if (child.clip_to_parent) {
-                child._max_or_clip_aabb.final_clip_aabb, child.completely_clipped = child._min_or_aabb.final_aabb.overlap_area_and_overlap_area_zero_or_negative(parent._max_or_clip_aabb.final_clip_aabb);
+                const final_clip_aabb, child.completely_clipped = child._min_or_aabb.final_aabb.overlap_area_and_overlap_area_zero_or_negative(parent._max_or_clip_aabb.final_clip_aabb);
+                child._max_or_clip_aabb = MaxSize_OR_FinalClipAABB{ .final_clip_aabb = final_clip_aabb };
             } else {
-                child._max_or_clip_aabb.final_clip_aabb = child._min_or_aabb.final_aabb;
+                child._max_or_clip_aabb = MaxSize_OR_FinalClipAABB{ .final_clip_aabb = child._min_or_aabb.final_aabb };
             }
         }
         fn finalize_floating_child_aabb(self: *LayoutManager, parent: *LayoutElement, _: IDX, child: *LayoutElement, _: void, comptime _: void) void {
@@ -1811,11 +1925,12 @@ pub fn DefineLayoutManager(comptime T_DIMENSION: type, comptime T_DIMENSION_SMAL
             }
             child_pos_x += child.final_position_offset.x;
             child_pos_y += child.final_position_offset.y;
-            child._min_or_aabb.final_aabb = AABB.new_from_pos_size(Pos.new(child_pos_x, child_pos_y), child_size);
+            child._min_or_aabb = MinSize_OR_FinalAABB{ .final_aabb = AABB.new_from_pos_size(Pos.new(child_pos_x, child_pos_y), child_size) };
             if (child.clip_to_parent) {
-                child._max_or_clip_aabb.final_clip_aabb, child.completely_clipped = child._min_or_aabb.final_aabb.overlap_area_and_overlap_area_zero_or_negative(parent._max_or_clip_aabb.final_clip_aabb);
+                const final_clip_aabb, child.completely_clipped = child._min_or_aabb.final_aabb.overlap_area_and_overlap_area_zero_or_negative(parent._max_or_clip_aabb.final_clip_aabb);
+                child._max_or_clip_aabb = MaxSize_OR_FinalClipAABB{ .final_clip_aabb = final_clip_aabb };
             } else {
-                child._max_or_clip_aabb.final_clip_aabb = child._min_or_aabb.final_aabb;
+                child._max_or_clip_aabb = MaxSize_OR_FinalClipAABB{ .final_clip_aabb = child._min_or_aabb.final_aabb };
             }
         }
 
@@ -1884,15 +1999,22 @@ pub fn DefineLayoutManager(comptime T_DIMENSION: type, comptime T_DIMENSION_SMAL
             self.for_each_axis_line(parent, &data, DATA, position_and_align_childen_on_axis_line);
         }
 
+        fn finalize_root_aabbs(self: *LayoutManager, root_clip_aabb: ?AABB) void {
+            var root_elem = self.get_elem_ptr(0);
+            const final_root_size = root_elem._min_or_aabb.min_size.self;
+            root_elem._min_or_aabb = MinSize_OR_FinalAABB{ .final_aabb = AABB.new(root_elem.final_position_offset.x, root_elem.final_position_offset.x + final_root_size.x, root_elem.final_position_offset.y, root_elem.final_position_offset.y + final_root_size.y) };
+            if (root_clip_aabb) |clip_aabb| {
+                const clipped_aabb, root_elem.completely_clipped = root_elem._min_or_aabb.final_aabb.overlap_area_and_overlap_area_zero_or_negative(clip_aabb);
+                root_elem._max_or_clip_aabb = MaxSize_OR_FinalClipAABB{ .final_clip_aabb = clipped_aabb };
+            } else {
+                root_elem._max_or_clip_aabb = MaxSize_OR_FinalClipAABB{ .final_clip_aabb = root_elem._min_or_aabb.final_aabb };
+            }
+        }
+
         fn position_and_align_child_elements(_: Elems, idx: IDX, self: *LayoutManager, comptime _: void) anyerror!Elems {
             self.auto_debug(@src());
             defer self.auto_debug(@src());
             var parent: *LayoutElement = self.get_elem_ptr(idx);
-            if (parent.parent_idx == NULL_IDX) {
-                @branchHint(.unlikely);
-                const final_size = parent._min_or_aabb.min_size.self;
-                parent._min_or_aabb.final_aabb = AABB.new(parent.final_position_offset.x, parent.final_position_offset.x + final_size.x, parent.final_position_offset.y, parent.final_position_offset.y + final_size.y);
-            }
             if (parent.num_contained_children > 0) {
                 switch (parent.get_primary_child_axis()) {
                     .X => switch (parent.get_child_layout_dir(.X)) {
