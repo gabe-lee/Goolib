@@ -7,6 +7,9 @@
             .url = "git+https://github.com/castholm/SDL.git#fb2d799c4778832a34ccb3739e40dded700684bd",
             .hash = "sdl-0.5.3+3.4.14-SDL--v4eqAGuIKFsspMVxBxZf1OIEmmH-yHDdEl9ZRdX",
         },
+        .sdl_shadercross = .{
+            .path = "vendor/github.com/libsdl-org/SDL_shadercross",
+        },
     },
     .fingerprint = 0x8df67e606c44b418,
     .paths = .{
