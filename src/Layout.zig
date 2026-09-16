@@ -882,6 +882,32 @@ pub fn DefineLayoutManager(comptime T_DIMENSION: type, comptime T_DIMENSION_SMAL
                     .min_size = min_size,
                 };
             }
+
+            fn DEBUG_PRINT(self: AxisLine, idx: ?IDX, ptr: ?*AxisLine, comptime INDENT: comptime_int) void {
+                const IND = "  " ** INDENT;
+                const IND2 = IND ++ "  ";
+                var idx_buf: [16]u8 = undefined;
+                var ptr_buf: [32]u8 = undefined;
+                const idx_str = if (idx) |i| (if (i == NULL_IDX) "<first>" else (std.fmt.bufPrint(idx_buf[0..], "{d}", .{i}) catch unreachable)) else "?";
+                const ptr_str = if (ptr) |p| (std.fmt.bufPrint(ptr_buf[0..], "{x}", .{@intFromPtr(p)}) catch unreachable) else "?";
+                DEBUG("{s}AxisLine (idx {s}, ptr {s}) {{\n{s}.first_elem = {d}\n{s}.num_elems = {d}\n{s}.next_line = {d}\n{s}.min_size = ({d:.2}, {d:.2})\n{s}.next_growable = {d}\n{s}}}\n", .{
+                    IND,
+                    idx_str,
+                    ptr_str,
+                    IND2,
+                    self.first_elem,
+                    IND2,
+                    self.num_elems,
+                    IND2,
+                    self.next_line,
+                    IND2,
+                    self.min_size.x,
+                    self.min_size.y,
+                    IND2,
+                    self.next_growable_line_this_pass,
+                    IND,
+                });
+            }
         };
         const Lines = struct {
             ptr: [*]AxisLine = Utils.invalid_ptr_many(AxisLine),
@@ -935,7 +961,7 @@ pub fn DefineLayoutManager(comptime T_DIMENSION: type, comptime T_DIMENSION_SMAL
             };
         }
 
-        fn auto_debug(self: *LayoutManager, comptime src_loc: ?std.builtin.SourceLocation) void {
+        fn auto_debug(_: *LayoutManager, comptime _: ?std.builtin.SourceLocation) void {
             if (EXTRA_DEBUG and Assert.IS_DEBUG) {
                 // for (self.elems.ptr[0..self.elems.len], 0..) |elem, i| {
                 //     assert_with_reason_debug_only(@intFromPtr(elem.requester.object) != 0, src_loc, "elem {d} requester pointer is 0", .{i});
@@ -1002,6 +1028,26 @@ pub fn DefineLayoutManager(comptime T_DIMENSION: type, comptime T_DIMENSION_SMAL
                 try Utils.Alloc.realloc_list_refs(&self.lines.ptr, self.lines.len, &self.lines.cap, new_cap, self.lines_alloc, .GROW_BY_25_PERCENT, .RETURN_ERRORS);
             }
         }
+        inline fn grow_lines_if_needed_report_if_grow(self: *LayoutManager, add_lines: IDX) Error!bool {
+            self.auto_debug(@src());
+            defer self.auto_debug(@src());
+            const new_cap = self.lines.len + add_lines;
+            var grew = false;
+            if (new_cap > self.lines.cap) {
+                grew = true;
+                try Utils.Alloc.realloc_list_refs(&self.lines.ptr, self.lines.len, &self.lines.cap, new_cap, self.lines_alloc, .GROW_BY_25_PERCENT, .RETURN_ERRORS);
+            }
+            return grew;
+        }
+        inline fn grow_lines_if_needed_do_action_if_realloc(self: *LayoutManager, add_lines: IDX, ctx: anytype, action: fn (*LayoutManager, @TypeOf(ctx)) void) Error!void {
+            self.auto_debug(@src());
+            defer self.auto_debug(@src());
+            const new_cap = self.lines.len + add_lines;
+            if (new_cap > self.lines.cap) {
+                try Utils.Alloc.realloc_list_refs(&self.lines.ptr, self.lines.len, &self.lines.cap, new_cap, self.lines_alloc, .GROW_BY_25_PERCENT, .RETURN_ERRORS);
+                action(self, ctx);
+            }
+        }
         inline fn grow_stack_if_needed(self: *LayoutManager, add_stack: IDX) Utils.Alloc.AllocErr!void {
             self.auto_debug(@src());
             defer self.auto_debug(@src());
@@ -1016,6 +1062,13 @@ pub fn DefineLayoutManager(comptime T_DIMENSION: type, comptime T_DIMENSION_SMAL
         }
         inline fn get_line_ptr(self: *LayoutManager, idx: IDX) *AxisLine {
             return &self.lines.ptr[idx];
+        }
+        inline fn get_line_ptr_possbily_on_parent(self: *LayoutManager, idx: IDX, parent: *LayoutElement) *AxisLine {
+            if (idx == NULL_IDX) {
+                return &parent.first_axis_line;
+            } else {
+                return &self.lines.ptr[idx];
+            }
         }
         inline fn get_stack_ptr(self: *LayoutManager, idx: IDX) *StackFrame {
             return &self.stack.ptr[idx];
@@ -1063,6 +1116,17 @@ pub fn DefineLayoutManager(comptime T_DIMENSION: type, comptime T_DIMENSION_SMAL
             self.auto_debug(@src());
             defer self.auto_debug(@src());
             try self.grow_lines_if_needed(1);
+            const idx = self.lines.len;
+            self.lines.len += 1;
+            self.real_max_lines = @max(self.real_max_lines, self.lines.len);
+            const ptr = self.get_line_ptr(idx);
+            ptr.* = line;
+            return .{ ptr, idx };
+        }
+        fn append_line_get_ptr_do_action_if_realloc(self: *LayoutManager, line: AxisLine, ctx: anytype, action: fn (*LayoutManager, @TypeOf(ctx)) void) Error!struct { *AxisLine, IDX } {
+            self.auto_debug(@src());
+            defer self.auto_debug(@src());
+            try self.grow_lines_if_needed_do_action_if_realloc(1, ctx, action);
             const idx = self.lines.len;
             self.lines.len += 1;
             self.real_max_lines = @max(self.real_max_lines, self.lines.len);
@@ -1258,7 +1322,7 @@ pub fn DefineLayoutManager(comptime T_DIMENSION: type, comptime T_DIMENSION_SMAL
 
         const BuildAxisLineWrapData = struct {
             line: *AxisLine,
-            prev_line: ?*AxisLine = null,
+            line_idx: IDX = NULL_IDX,
             max_size_for_children: T,
             gap_on_axis: T,
             child_n: IDX = 0,
@@ -1272,161 +1336,117 @@ pub fn DefineLayoutManager(comptime T_DIMENSION: type, comptime T_DIMENSION_SMAL
             }
         };
 
-        fn add_all_children_to_new_axis_lines_primary_wrapping(self: *LayoutManager, parent: *LayoutElement, comptime AXIS: Axis) anyerror!void {
+        fn debug_print_final_axis_lines_on_parent(_: *LayoutManager, _: *LayoutElement, line_idx: IDX, line: *AxisLine, _: void, comptime INDENT: comptime_int) void {
+            line.DEBUG_PRINT(line_idx, line, INDENT);
+        }
+
+        fn add_all_children_to_new_axis_lines_add_size_wrapping(self: *LayoutManager, parent: *LayoutElement, comptime AXIS: Axis) anyerror!void {
             self.auto_debug(@src());
             defer self.auto_debug(@src());
             const gap = parent.child_gaps.get(AXIS);
-            const max_size_for_children = parent.get_min_size_self(CT.AXIS) - parent.padding.get(CT.AXIS);
+            const max_size_for_children = parent.get_min_size_self(AXIS) - parent.padding.get(AXIS);
             parent.first_axis_line.min_size.set(AXIS, -gap);
             var data = BuildAxisLineWrapData.new(parent, gap, max_size_for_children);
-            try self.for_each_contained_child_err(parent, &data, AXIS, add_child_to_new_axis_line_primary_wrapping);
-        }
-        fn add_child_to_new_axis_line_primary_wrapping(self: *LayoutManager, parent: *LayoutElement, child_idx: IDX, child: *LayoutElement, data: *BuildAxisLineWrapData, comptime AXIS: Axis) anyerror!void {
-            self.auto_debug(@src());
-            defer self.auto_debug(@src());
-            const child_size = child.get_min_size_self(AXIS);
-            const size_if_combine = data.line.min_size.get(AXIS) + child_size + data.gap_on_axis;
-            data.child_n += 1;
-            if (data.line.num_elems > 0 and size_if_combine > data.max_size_for_children) {
-                const total_gap = num_cast(data.line.num_elems - 1, T) * data.gap_on_axis;
-                self.distribute_primary_extra_space_to_axis_line_members(data.line, data.max_size_for_children - total_gap, AXIS);
-                parent.num_axis_lines += 1;
-                if (data.child_n < parent.num_contained_children) {
-                    const new_line = AxisLine.new(child_idx, 1, child_size, AXIS);
-                    const new_line_ptr, const new_line_idx = try self.append_line_get_ptr(new_line);
-                    if (data.prev_line) |prev_line| {
-                        prev_line.next_line = new_line_idx;
-                    }
-                    data.prev_line = data.line;
-                    data.line = new_line_ptr;
-                }
-            } else {
-                data.line.min_size.set(AXIS, size_if_combine);
-                data.line.num_elems += 1;
-                if (data.child_n == parent.num_contained_children) {
-                    const total_gap = num_cast(data.line.num_elems - 1, T) * data.gap_on_axis;
-                    self.distribute_primary_extra_space_to_axis_line_members(data.line, data.max_size_for_children - total_gap, AXIS);
-                    parent.num_axis_lines += 1;
-                }
-            }
+            try self.for_each_contained_child_err(parent, &data, AXIS, add_child_to_new_axis_line_primary_add_size_wrapping);
             if (comptime EXTRA_DEBUG) {
                 assert_with_reason_debug_only(data.child_n == parent.num_contained_children, @src(), "did not iterate over all children on parent, got {d}, needed {d}", .{ data.child_n, parent.num_contained_children });
             }
         }
 
-        // fn add_or_update_all_children_to_axis_lines(self: *LayoutManager, parent: *LayoutElement, comptime CT: AxisStageCombineWrap) anyerror!void {
-        //     self.auto_debug(@src());
-        //     defer self.auto_debug(@src());
-        //     const max_size_for_children = parent.get_min_size_self(CT.AXIS) - parent.padding.get(CT.AXIS);
-        //     var child: *LayoutElement = undefined;
-        //     var child_idx = parent.first_contained_child;
-        //     const gap = parent.child_gaps.get(CT.AXIS);
-        //     var line = &parent.first_axis_line;
-        //     var line_idx = NULL_IDX;
-        //     switch (comptime CT.STAGE) {
-        //         .PRIMARY_STAGE => switch (comptime CT.COMBINE_MODE) {
-        //             .ADD_MIN_SIZE_AND_GAP => {
-        //                 line.min_size.set(CT.AXIS, -gap);
-        //             },
-        //             .UPDATE_MAX_OF_MIN_SIZE => {},
-        //         },
-        //         .SECONDARY_STAGE => switch (comptime CT.COMBINE_MODE) {
-        //             .ADD_MIN_SIZE_AND_GAP => {
-        //                 line.min_size.set(CT.AXIS, -gap);
-        //             },
-        //             .UPDATE_MAX_OF_MIN_SIZE => {},
-        //         },
-        //     }
-        //     var children_left_on_parent = parent.num_contained_children;
-        //     var children_left_on_line = line.num_elems;
-        //     var more_children_on_parent = children_left_on_parent > 0;
-        //     while (more_children_on_parent) {
-        //         children_left_on_parent -= 1;
-        //         child = self.get_elem_ptr(child_idx);
-        //         more_children_on_parent = children_left_on_parent > 0;
-        //         line, children_left_on_line = try self.add_child_to_current_or_new_axis_line(parent, line, child, child_idx, more_children_on_parent, children_left_on_line, gap, max_size_for_children, CT.AXIS, COMBINE_MODE, WRAP_MODE, CT.STAGE);
-        //         child_idx = child.next_sibling;
-        //     }
-        //     switch (COMBINE_MODE) {
-        //         .ADD_MIN_SIZE_AND_GAP => {},
-        //         .UPDATE_MAX_OF_MIN_SIZE => {},
-        //     }
-        //     if (COMBINE_MODE == .UPDATE_MAX_OF_MIN_SIZE) {
-        //         self.distribute_secondary_extra_space_to_all_axis_lines(parent, CT.AXIS);
-        //     }
-        // }
+        const ReasignLinesCtx = struct {
+            ptrptr: **AxisLine,
+            idx: IDX,
+        };
 
-        // fn add_child_to_current_or_new_axis_line(self: *LayoutManager, parent: *LayoutElement, line: *AxisLine, child: *LayoutElement, child_idx: IDX, more_children_on_parent: bool, children_left_on_line: IDX, gap: T, max_size: T, comptime AXIS: Axis, comptime COMBINE_MODE: CombineMode, comptime WRAP_MODE: WrapMode, comptime STAGE: LayoutStage) anyerror!struct { *AxisLine, IDX } {
-        //     self.auto_debug(@src());
-        //     defer self.auto_debug(@src());
-        //     var size_if_combine = line.min_size.get(AXIS);
-        //     var next_line = line;
-        //     var next_children_remaining_on_line = children_left_on_line;
-        //     const child_size = child.get_min_size_self(AXIS);
-        //     DEBUG("comptime fmt: []const u8", args: anytype);
-        //     switch (comptime COMBINE_MODE) {
-        //         .ADD_MIN_SIZE_AND_GAP => {
-        //             size_if_combine += child_size + gap;
-        //             const handle_combine_stage: HANDLE_COMBINE_STAGE = switch (WRAP_MODE) {
-        //                 .NO_WRAP => .ADD_CURRENT_CHILD_TO_CURRENT_LINE,
-        //                 .ALLOW_WRAP => if (line.num_elems > 0 and size_if_combine > max_size) .FINISH_LINE_AND_POSSIBLY_START_NEW else .ADD_CURRENT_CHILD_TO_CURRENT_LINE,
-        //             };
-        //             to_stage: switch (handle_combine_stage) {
-        //                 .FINISH_LINE_AND_POSSIBLY_START_NEW => {
-        //                     if (WRAP_MODE == .NO_WRAP) {
-        //                         assert_unreachable(@src(), "the WRAP_MODE must be .ALLOW_WRAP in combine stage .FINISH_LINE_AND_POSSIBLY_START_NEW", .{});
-        //                     }
-        //                     const total_gap = num_cast(line.num_elems - 1, T) * gap;
-        //                     self.distribute_primary_extra_space_to_axis_line_members(line, max_size - total_gap, AXIS);
-        //                     parent.num_axis_lines += 1;
-        //                     if (more_children_on_parent) {
-        //                         switch (STAGE) {
-        //                             .SECONDARY_STAGE => {
-        //                                 assert_unreachable(@src(), "cannot start new axis line in secondary stage", .{});
-        //                             },
-        //                             .PRIMARY_STAGE => {
-        //                                 const new_line = AxisLine.new(child_idx, 1, child_size, AXIS);
-        //                                 next_line, const next_idx = try self.append_line_get_ptr(new_line);
-        //                                 line.next_line = next_idx;
-        //                             },
-        //                         }
-        //                     }
-        //                 },
-        //                 .FINISH_LINE_AND_END => {
-        //                     const total_gap = num_cast(line.num_elems - 1, T) * gap;
-        //                     self.distribute_primary_extra_space_to_axis_line_members(line, max_size - total_gap, AXIS);
-        //                     parent.num_axis_lines += 1;
-        //                 },
-        //                 .ADD_CURRENT_CHILD_TO_CURRENT_LINE => {
-        //                     line.min_size.set(AXIS, size_if_combine);
-        //                     if (STAGE == .PRIMARY_STAGE) {
-        //                         line.num_elems += 1;
-        //                     }
-        //                     if (!more_children_on_parent) continue :to_stage .FINISH_LINE_AND_END;
-        //                 },
-        //             }
-        //         },
-        //         .UPDATE_MAX_OF_MIN_SIZE => {
-        //             size_if_combine = @max(size_if_combine, child_size);
-        //             line.min_size.set(AXIS, size_if_combine);
-        //             switch (STAGE) {
-        //                 .PRIMARY_STAGE => {
-        //                     line.num_elems += 1;
-        //                     assert_with_reason_debug_only(WRAP_MODE != .ALLOW_WRAP, @src(), "internal logic error: cannot use overflow mode when the primary layout direction does not match the driving axis", .{});
-        //                 },
-        //                 .SECONDARY_STAGE => {
-        //                     if (more_children_on_parent and children_left_on_line == 0) {
-        //                         assert_with_reason_debug_only(WRAP_MODE == .ALLOW_WRAP, @src(), "internal logic error: when `more_children_on_parent` and `!more_children_on_line`, the mode MUST be `ALLOW_WRAP`", .{});
-        //                         assert_with_reason_debug_only(line.next_line != NULL_IDX, @src(), "internal logic error: a null idx found on `line.next_line` when there should exist another line", .{});
-        //                         next_line = self.get_line_ptr(line.next_line);
-        //                         next_children_remaining_on_line = next_line.num_elems;
-        //                     }
-        //                 },
-        //             }
-        //         },
-        //     }
-        //     return .{ next_line, next_children_remaining_on_line };
-        // }
+        fn update_line_ptr_for_new_mem_region(self: *LayoutManager, ctx: ReasignLinesCtx) void {
+            if (ctx.idx != NULL_IDX) {
+                ctx.ptrptr.* = self.get_line_ptr(ctx.idx);
+            }
+        }
+
+        fn add_child_to_new_axis_line_primary_add_size_wrapping(self: *LayoutManager, parent: *LayoutElement, child_idx: IDX, child: *LayoutElement, data: *BuildAxisLineWrapData, comptime AXIS: Axis) anyerror!void {
+            self.auto_debug(@src());
+            defer self.auto_debug(@src());
+            const child_size = child.get_min_size_self(AXIS);
+            const curr_line_size = data.line.min_size.get(AXIS);
+            const size_if_combine = curr_line_size + child_size + data.gap_on_axis;
+            data.child_n += 1;
+            if (data.line.num_elems > 0 and size_if_combine > data.max_size_for_children) {
+                const total_gap = num_cast(data.line.num_elems - 1, T) * data.gap_on_axis;
+                self.distribute_primary_extra_space_to_axis_line_members(data.line, data.max_size_for_children - total_gap, AXIS);
+                parent.num_axis_lines += 1;
+                const new_line = AxisLine.new(child_idx, 1, child_size, AXIS);
+                const ctx = ReasignLinesCtx{ .idx = data.line_idx, .ptrptr = &data.line };
+                const new_line_ptr, const new_line_idx = try self.append_line_get_ptr_do_action_if_realloc(new_line, ctx, update_line_ptr_for_new_mem_region);
+                data.line.next_line = new_line_idx;
+                data.line = new_line_ptr;
+                data.line_idx = new_line_idx;
+            } else {
+                data.line.min_size.set(AXIS, size_if_combine);
+                data.line.num_elems += 1;
+            }
+            if (data.child_n == parent.num_contained_children) {
+                const total_gap = num_cast(data.line.num_elems - 1, T) * data.gap_on_axis;
+                self.distribute_primary_extra_space_to_axis_line_members(data.line, data.max_size_for_children - total_gap, AXIS);
+                parent.num_axis_lines += 1;
+            }
+        }
+
+        fn add_all_children_to_first_axis_line_add_size_no_wrap(self: *LayoutManager, parent: *LayoutElement, comptime CT: AxisStage) void {
+            self.auto_debug(@src());
+            defer self.auto_debug(@src());
+            const gap = parent.child_gaps.get(CT.AXIS);
+            parent.first_axis_line.min_size.set(CT.AXIS, -gap);
+            parent.num_axis_lines = 1;
+            self.for_each_contained_child(parent, gap, CT, add_child_to_first_axis_line_add_size_no_wrap);
+            const max_size_for_children = parent.get_min_size_self(CT.AXIS) - parent.padding.get(CT.AXIS);
+            const total_gap = gap * num_cast(parent.first_axis_line.num_elems, T);
+            self.distribute_primary_extra_space_to_axis_line_members(&parent.first_axis_line, max_size_for_children - total_gap, CT.AXIS);
+        }
+
+        fn add_child_to_first_axis_line_add_size_no_wrap(self: *LayoutManager, parent: *LayoutElement, _: IDX, child: *LayoutElement, gap: T, comptime CT: AxisStage) void {
+            self.auto_debug(@src());
+            defer self.auto_debug(@src());
+            const child_size = child.get_min_size_self(CT.AXIS);
+            const curr_line_size = parent.first_axis_line.min_size.get(CT.AXIS);
+            parent.first_axis_line.min_size.set(CT.AXIS, curr_line_size + child_size + gap);
+            if (CT.STAGE == .PRIMARY_STAGE) {
+                parent.first_axis_line.num_elems += 1;
+            }
+        }
+
+        fn add_all_children_to_first_axis_line_max_of_min_size(self: *LayoutManager, parent: *LayoutElement, comptime CT: AxisStage) void {
+            self.auto_debug(@src());
+            defer self.auto_debug(@src());
+            parent.num_axis_lines = 1;
+            parent.first_axis_line.min_size.set(CT.AXIS, 0);
+            self.for_each_contained_child(parent, void{}, CT, add_child_to_first_axis_line_max_of_min_size);
+            // self.distribute_secondary_extra_space_to_all_axis_lines(parent, CT.AXIS);
+        }
+
+        fn add_child_to_first_axis_line_max_of_min_size(self: *LayoutManager, parent: *LayoutElement, _: IDX, child: *LayoutElement, _: void, comptime CT: AxisStage) void {
+            self.auto_debug(@src());
+            defer self.auto_debug(@src());
+            const child_size = child.get_min_size_self(CT.AXIS);
+            const curr_line_size = parent.first_axis_line.min_size.get(CT.AXIS);
+            parent.first_axis_line.min_size.set(CT.AXIS, @max(curr_line_size, child_size));
+            if (CT.STAGE == .PRIMARY_STAGE) {
+                parent.first_axis_line.num_elems += 1;
+            }
+        }
+
+        fn update_line_min_size_with_child_max_size(_: *LayoutManager, _: *LayoutElement, _: IDX, line: *AxisLine, _: IDX, child: *LayoutElement, _: void, comptime AXIS: Axis) void {
+            line.min_size.set(AXIS, @max(line.min_size.get(AXIS), child.get_min_size_self(AXIS)));
+        }
+
+        fn set_max_of_min_size_for_line(self: *LayoutManager, parent: *LayoutElement, line_idx: IDX, line: *AxisLine, _: void, comptime AXIS: Axis) void {
+            self.for_each_child_on_axis_line(parent, line_idx, line, void{}, AXIS, update_line_min_size_with_child_max_size);
+        }
+        fn add_all_children_to_first_axis_line_max_of_min_size_wrapped(self: *LayoutManager, parent: *LayoutElement, comptime CT: AxisStage) void {
+            self.auto_debug(@src());
+            defer self.auto_debug(@src());
+            self.for_each_axis_line(parent, void{}, CT.AXIS, set_max_of_min_size_for_line);
+        }
 
         fn distribute_primary_extra_space_to_axis_line_members(self: *LayoutManager, axis_line: *AxisLine, space: T, comptime AXIS: Axis) void {
             self.auto_debug(@src());
@@ -1587,25 +1607,19 @@ pub fn DefineLayoutManager(comptime T_DIMENSION: type, comptime T_DIMENSION_SMAL
             }
             if (parent.first_contained_child != NULL_IDX) {
                 assert_with_reason_debug_only(parent.num_contained_children > 0, @src(), "first child on parent wasnt NULL, but parent has no children count", .{});
-                if (comptime CT.STAGE == .PRIMARY_STAGE) {
-                    if (parent.get_primary_child_axis() == CT.AXIS) {
-                        if (parent.use_wrap_mode) {
-                            try self.add_all_children_to_new_axis_lines_primary_wrapping(parent, CT.AXIS);
-                        } else {
-                            // CHECKPOINT implement
-                            // add all children to first (and only) axis line by adding their min size and gap to current axis line min size
-                        }
+                if (parent.get_primary_child_axis() == CT.AXIS) {
+                    if (CT.STAGE == .PRIMARY_STAGE and parent.use_wrap_mode) {
+                        try self.add_all_children_to_new_axis_lines_add_size_wrapping(parent, CT.AXIS);
                     } else {
-                        // assert parent not using wrap mode, or warn if it is?
-                        // update parent first (and only) axis line minimum size with max of all childen min sizes
+                        self.add_all_children_to_first_axis_line_add_size_no_wrap(parent, CT);
                     }
                 } else {
-                    if (parent.get_primary_child_axis() == CT.AXIS) {
-                        // assert parent not using wrap mode, or warn if it is?
-                        // add all children to first (and only) axis line by adding their min size and gap to current axis line min size
+                    if (CT.STAGE == .SECONDARY_STAGE and parent.use_wrap_mode) {
+                        self.add_all_children_to_first_axis_line_max_of_min_size_wrapped(parent, CT);
                     } else {
-                        // update parent first (and only) axis line minimum size with max of all childen min sizes
+                        self.add_all_children_to_first_axis_line_max_of_min_size(parent, CT);
                     }
+                    self.distribute_secondary_extra_space_to_all_axis_lines(parent, CT.AXIS);
                 }
             }
             return self.elems;
@@ -1823,7 +1837,6 @@ pub fn DefineLayoutManager(comptime T_DIMENSION: type, comptime T_DIMENSION_SMAL
                 .gap_p = gap_p,
                 .gap_s = data_s.gap_s,
             };
-            //FIXME //CHECKPOINT
 
             self.for_each_child_on_axis_line(parent, line_idx, line, &data_p, DATA, finalize_inline_child_aabb);
             if (comptime DATA.NEGATIVE_DELTA_S) {

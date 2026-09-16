@@ -1871,7 +1871,7 @@ pub const Renderer = opaque {
         return ptr_cast_or_null_err(*Window, C.SDL_GetRenderWindow(self.to_c_ptr()));
     }
     pub fn get_name(self: *Renderer) Error![*:0]const u8 {
-        return ptr_cast_or_null_err([*:0]const u8, C.SDL_GetRenderWindow(self.to_c_ptr()));
+        return ptr_cast_or_null_err([*:0]const u8, C.SDL_GetRendererName(self.to_c_ptr()));
     }
     pub fn get_properties_id(self: *Renderer) Error!PropertiesID {
         return PropertiesID{ .id = try nonzero_or_null_err(C.SDL_GetRendererProperties(self.to_c_ptr())) };
@@ -2022,7 +2022,7 @@ pub const Renderer = opaque {
         return ok_or_fail_err(C.SDL_RenderLines(self.to_c_ptr(), @ptrCast(@alignCast(rects.ptr)), @intCast(rects.len)));
     }
     pub fn draw_rect_filled(self: *Renderer, rect: *const Rect_f32) Error!void {
-        return ok_or_fail_err(C.SDL_RenderRect(self.to_c_ptr(), @ptrCast(@alignCast(rect))));
+        return ok_or_fail_err(C.SDL_RenderFillRect(self.to_c_ptr(), @ptrCast(@alignCast(rect))));
     }
     pub fn draw_many_rects_filled(self: *Renderer, rects: []const Rect_f32) Error!void {
         return ok_or_fail_err(C.SDL_RenderLines(self.to_c_ptr(), @ptrCast(@alignCast(rects.ptr)), @intCast(rects.len)));

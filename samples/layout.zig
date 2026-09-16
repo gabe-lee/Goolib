@@ -51,19 +51,23 @@ const SecondarySizeResult = LayoutManager.SecondarySizeResult;
 const ChildAlign = Layout.ChildAlignment;
 
 var fully_initialized = false;
-const window_size: IVec = IVec.new(ROOT_SIZE_I, ROOT_SIZE_I);
+const window_size: IVec = IVec.new(WIN_SIZE_X, WIN_SIZE_Y);
 var window: *SDL.Window = undefined;
 var renderer: *SDL.Renderer = undefined;
 
 const NUM_ELEMS_LEVEL_1 = 9;
 const NUM_ELEMS_LEVEL_2 = 9;
-const ROOT_SIZE = 800.0;
-const ROOT_SIZE_I = 800;
-const MIN_SIZE_LV_1 = 100.0;
-const MAX_SIZE_LV_1 = 500.0;
+const WIN_SIZE_X = 1200;
+const WIN_SIZE_Y = 800;
+const ROOT_OFFSET_X = 200.0;
+const ROOT_OFFSET_Y = 50.0;
+const ROOT_SIZE = 700.0;
+const ROOT_SIZE_I = 700;
+const MIN_SIZE_LV_1 = (ROOT_SIZE - (PADDING * 2)) * 0.20;
+const MAX_SIZE_LV_1 = (ROOT_SIZE - (PADDING * 2)) * 0.40;
 const SIZE_RANGE_LV_1 = MAX_SIZE_LV_1 - MIN_SIZE_LV_1;
-const MIN_SIZE_LV_2 = 50.0;
-const MAX_SIZE_LV_2 = 300.0;
+const MIN_SIZE_LV_2 = (MIN_SIZE_LV_1 - (PADDING * 2)) * 0.10;
+const MAX_SIZE_LV_2 = (MAX_SIZE_LV_1 - (PADDING * 2)) * 0.30;
 const SIZE_RANGE_LV_2 = MAX_SIZE_LV_2 - MIN_SIZE_LV_2;
 const PADDING = 8.0;
 const GAP = 8.0;
@@ -125,18 +129,20 @@ const UIElement = struct {
         };
         const range: f32 = switch (level) {
             0 => 0,
-            1 => MAX_SIZE_LV_1 - MIN_SIZE_LV_1,
-            2 => MAX_SIZE_LV_2 - MIN_SIZE_LV_2,
+            1 => SIZE_RANGE_LV_1,
+            2 => SIZE_RANGE_LV_2,
             else => 0,
         };
         const x: f32 = (rand.float(f32) * range) + min;
         const y: f32 = (rand.float(f32) * range) + min;
-        const gx = if (level == 0 or rand.float(f32) > 0.8) false else true;
-        const gy = if (level == 0 or rand.float(f32) > 0.8) false else true;
+        const gx = if (level == 0 or rand.float(f32) > 0.3) false else true;
+        const gy = if (level == 0 or rand.float(f32) > 0.3) false else true;
         const alla_r = rand.float(f32);
         const alla: AxisLineLocalAlign = if (level == 0 or alla_r < 0.7) .INHERIT else if (alla_r < 0.8) .TOP_OR_LEFT else if (alla_r < 0.9) .CENTER else .BOTTOM_OR_RIGHT;
-        const aspect_r = rand.float(f32) > 0.8;
-        const aspect: ?f32 = if (!aspect_r) null else (x / y);
+        // const alla: AxisLineLocalAlign = .TOP_OR_LEFT;
+        // const aspect_r = rand.float(f32) > 0.8;
+        // const aspect: ?f32 = if (!aspect_r) null else (x / y);
+        const aspect: ?f32 = null;
         if (parent_idx != NULL_IDX) {
             const parent: *UIElement = &elem_list.ptr[parent_idx];
             if (parent.last_child != NULL_IDX) {
@@ -150,8 +156,8 @@ const UIElement = struct {
         const tx = if (level == 0) x else ((rand.float(f32) * range) + min);
         const ty = if (level == 0) y else ((rand.float(f32) * range) + min);
         const dt: f32 = (rand.float(f32) * DELTA_DURR_RANGE) + MIN_DELTA_DURR;
-        const dx = (tx - x) * dt;
-        const dy = (ty - y) * dt;
+        const dx = (tx - x) / dt;
+        const dy = (ty - y) / dt;
         return UIElement{
             .self_idx = self_idx,
             .color = .new_rgba(r, g, b, 0xff),
@@ -183,13 +189,14 @@ const UIElement = struct {
             .child_layout_dir = .LEFT_TO_RIGHT__TOP_TO_BOTTOM,
             .children_axis_line_local_align = .INHERIT,
             .self_axis_line_local_align = self.alla,
-            .clip_to_parent = true,
+            .clip_to_parent = self.level > 0,
             .float = .not_floating(),
             .grow_x_to_fill_parent_space = self.grow_x,
             .grow_y_to_fill_parent_space = self.grow_y,
             .padding = .uniform(8.0),
             .wrap_children_that_overflow_size = true,
             .min_size = self.size,
+            .final_position_offset = if (self.level == 0) .new(ROOT_OFFSET_X, ROOT_OFFSET_Y) else .ZERO,
         };
     }
     fn impl_get_first_child(obj: *anyopaque) ?LayoutRequester {
@@ -217,8 +224,8 @@ const UIElement = struct {
                     const tx = ((rand.float(f32) * SIZE_RANGE_LV_1) + MIN_SIZE_LV_1);
                     const ty = ((rand.float(f32) * SIZE_RANGE_LV_1) + MIN_SIZE_LV_1);
                     const dt: f32 = (rand.float(f32) * DELTA_DURR_RANGE) + MIN_DELTA_DURR;
-                    self.dx = (tx - self.size.x) * dt;
-                    self.dy = (ty - self.size.y) * dt;
+                    self.dx = (tx - self.size.x) / dt;
+                    self.dy = (ty - self.size.y) / dt;
                     self.next_mult_time = self.curr_time + dt;
                 }
             },
@@ -231,17 +238,14 @@ const UIElement = struct {
                     const tx = ((rand.float(f32) * SIZE_RANGE_LV_2) + MIN_SIZE_LV_2);
                     const ty = ((rand.float(f32) * SIZE_RANGE_LV_2) + MIN_SIZE_LV_2);
                     const dt: f32 = (rand.float(f32) * DELTA_DURR_RANGE) + MIN_DELTA_DURR;
-                    self.dx = (tx - self.size.x) * dt;
-                    self.dy = (ty - self.size.y) * dt;
+                    self.dx = (tx - self.size.x) / dt;
+                    self.dy = (ty - self.size.y) / dt;
                     self.next_mult_time = self.curr_time + dt;
                 }
             },
             else => {},
         }
     }
-    // pub fn draw(elems: *LayoutManager.Elems, idx: u32, manager: *LayoutManager, comptime _: void) anyerror!LayoutManager.Elems {
-    //     return elems;
-    // }
 
     const REQ_VTABLE = LayoutRequester.VTABLE{
         .check_secondary_size = impl_check_secondary_size,
@@ -266,7 +270,6 @@ fn fmt_sdl_drivers(write_buf: *BoundedArray(u8, 250), current_driver: [*:0]const
     var i: c_int = 0;
     while (i < num_drivers) : (i += 1) {
         const driver_name = try get_driver(i);
-        // _ = c_strings_equal(driver_name, current_driver);
         const is_current = c_strings_equal(driver_name, current_driver);
         if (is_current) _ = try writer.write(ANSI.FG_GREEN);
         try writer.print("\n\t({d}) {s}", .{ i, driver_name });
@@ -369,6 +372,7 @@ pub fn app_init(appstate: ?*?*anyopaque, arg_count: c_int, arg_list: ?[*:null]?[
     errdefer renderer.destroy();
 
     write_buf.clear();
+    // std.debug.print("SDL.Renderer.get_driver_name = {s}\n", .{SDL.Renderer.get_driver_name() catch "<unkown>"}); //DEBUG
     sdl_log.debug("SDL render drivers: {s}", .{try fmt_sdl_drivers(
         &write_buf,
         try renderer.get_name(),
@@ -377,18 +381,15 @@ pub fn app_init(appstate: ?*?*anyopaque, arg_count: c_int, arg_list: ?[*:null]?[
     )});
 
     const root_elem, const root_idx = elem_list.append_new();
-    root_elem.* = .init(root_idx, NULL_IDX, 0); //BUG //FIXME // CHECKPOINT
-    // std.debug.print("root {d}\n", .{root_idx}); //DEBUG
+    root_elem.* = .init(root_idx, NULL_IDX, 0);
     for (0..NUM_ELEMS_LEVEL_1) |_| {
         const lv_1_child, const lv_1_child_idx = elem_list.append_new();
         lv_1_child.* = .init(lv_1_child_idx, root_idx, 1);
         root_elem.last_child = lv_1_child_idx;
-        // std.debug.print("  child {d} parent {d} l.child {d}\n", .{ lv_1_child_idx, root_idx, root_elem.last_child }); //DEBUG
         for (0..NUM_ELEMS_LEVEL_2) |_| {
             const lv_2_child, const lv_2_child_idx = elem_list.append_new();
             lv_2_child.* = .init(lv_2_child_idx, lv_1_child_idx, 2);
             lv_1_child.last_child = lv_2_child_idx;
-            // std.debug.print("    child {d} parent {d} l.child {d}\n", .{ lv_2_child_idx, lv_1_child_idx, lv_1_child.last_child }); //DEBUG
         }
     }
 
@@ -401,11 +402,20 @@ pub fn app_init(appstate: ?*?*anyopaque, arg_count: c_int, arg_list: ?[*:null]?[
 fn draw_element(elems: LayoutManager.Elems, idx: u32, renderer_: *SDL.Renderer, comptime _: void) anyerror!LayoutManager.Elems {
     const elem_layout = elems.ptr[idx];
     const elem_data: *UIElement = @ptrCast(@alignCast(elem_layout.requester.object));
-    try renderer_.set_draw_color(elem_data.color);
-    const rect = elem_layout.get_aabb().to_rect2();
-    try renderer_.set_clip_rect(elem_layout.get_clip_aabb().to_rect2().to_new_type(c_int));
-    try renderer_.draw_rect_filled(&rect);
-    try renderer_.clear_clip_rect();
+    if (elem_layout.clip_to_parent) {
+        if (!elem_layout.completely_clipped) {
+            try renderer_.set_draw_color(elem_data.color);
+            const rect = elem_layout.get_aabb().to_rect2();
+            try renderer_.set_clip_rect(elem_layout.get_clip_aabb().expand_round_to_int().to_rect2().to_new_type(c_int));
+            try renderer_.draw_rect_filled(&rect);
+            try renderer_.clear_clip_rect();
+        }
+    } else {
+        try renderer_.set_draw_color(elem_data.color);
+        const rect = elem_layout.get_aabb().to_rect2();
+        try renderer_.draw_rect_filled(&rect);
+    }
+
     return elems;
 }
 
@@ -427,7 +437,7 @@ fn app_update(appstate: ?*anyopaque) !SDL.AppResult {
     // Evaluate Layout
     {
         try manager.collect_element_heirarchy(elem_list.ptr[0].layout_requester());
-        try manager.recalculate_layout(.new_from_pos_size(.ZERO, .new(ROOT_SIZE, ROOT_SIZE)), .X);
+        try manager.recalculate_layout(.new_from_pos_size(.new(ROOT_OFFSET_X, ROOT_OFFSET_Y), .new(ROOT_SIZE, ROOT_SIZE)), .X);
     }
 
     // Draw.

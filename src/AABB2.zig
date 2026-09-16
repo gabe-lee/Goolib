@@ -368,7 +368,24 @@ pub fn define_aabb2_type(comptime T: type) type {
                 .x_max = overlap_x_max,
                 .y_min = overlap_y_min,
                 .y_max = overlap_y_max,
-            }, (overlap_x_min >= overlap_x_max and overlap_y_min >= overlap_y_max) };
+            }, (overlap_x_min >= overlap_x_max or overlap_y_min >= overlap_y_max) };
+        }
+
+        pub fn expand_round_to_int(self: T_AABB2) T_AABB2 {
+            return T_AABB2{
+                .x_min = @floor(self.x_min),
+                .x_max = @ceil(self.x_max),
+                .y_min = @floor(self.y_min),
+                .y_max = @ceil(self.y_max),
+            };
+        }
+        pub fn shrink_round_to_int(self: T_AABB2) T_AABB2 {
+            return T_AABB2{
+                .x_min = @ceil(self.x_min),
+                .x_max = @floor(self.x_max),
+                .y_min = @ceil(self.y_min),
+                .y_max = @floor(self.y_max),
+            };
         }
 
         pub fn overlap_area_approx(self: T_AABB2, other: T_AABB2) ?T_AABB2 {

@@ -138,7 +138,7 @@ pub fn c_strings_equal(a: [*:0]const u8, b: [*:0]const u8) bool {
     var i: usize = 0;
     while (true) : (i += 1) {
         if (a[i] != b[i]) return false;
-        if (a[i] == '0') return true;
+        if (a[i] == 0) return true;
     }
 }
 
