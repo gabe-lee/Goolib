@@ -372,7 +372,6 @@ pub fn app_init(appstate: ?*?*anyopaque, arg_count: c_int, arg_list: ?[*:null]?[
     errdefer renderer.destroy();
 
     write_buf.clear();
-    // std.debug.print("SDL.Renderer.get_driver_name = {s}\n", .{SDL.Renderer.get_driver_name() catch "<unkown>"}); //DEBUG
     sdl_log.debug("SDL render drivers: {s}", .{try fmt_sdl_drivers(
         &write_buf,
         try renderer.get_name(),
