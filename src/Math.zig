@@ -992,74 +992,74 @@ pub fn solve_cubic_polynomial_for_zeros_advanced(a: anytype, b: @TypeOf(a), c: @
     }
 }
 
-/// For any value where `low <= value <= (high - 1)`, returns:
-///   - `-1` if the value is closest to `low`
-///   - `0` if the value is closest to the midpoint of `low` and `high`
-///   - `1` if the value is closest to `high`
-///
-/// It is guaranteed for integer values, that adding together the results of all values in the range `low <= value <= (high - 1)`
-/// will always equal 0. (It is symetrical, the number of `-1` results will always equal the number of `1` results)
-pub fn range_trichotomy(low: anytype, value: anytype, high: anytype, comptime OUT: type) OUT {
-    const hi = high - low;
-    const val = value - low;
-    const hi_minus_1 = upgrade_subtract(hi, @as(f32, 1.0));
-    const ratio = upgrade_divide(val, hi_minus_1);
-    const scaled_ratio = upgrade_multiply(@as(f32, 2.875), ratio);
-    const result_unadjusted = @floor(3 + scaled_ratio - 1.4375 + 0.5);
-    return num_cast(result_unadjusted, OUT) - 3;
-}
+// /// For any value where `low <= value <= (high - 1)`, returns:
+// ///   - `-1` if the value is closest to `low`
+// ///   - `0` if the value is closest to the midpoint of `low` and `high`
+// ///   - `1` if the value is closest to `high`
+// ///
+// /// It is guaranteed for integer values, that adding together the results of all values in the range `low <= value <= (high - 1)`
+// /// will always equal 0. (It is symetrical, the number of `-1` results will always equal the number of `1` results)
+// pub fn range_trichotomy(low: anytype, value: anytype, high: anytype, comptime OUT: type) OUT {
+//     const hi = high - low;
+//     const val = value - low;
+//     const hi_minus_1 = upgrade_subtract(hi, @as(f32, 1.0));
+//     const ratio = upgrade_divide(val, hi_minus_1);
+//     const scaled_ratio = upgrade_multiply(@as(f32, 2.875), ratio);
+//     const result_unadjusted = @floor(3 + scaled_ratio - 1.4375 + 0.5);
+//     return num_cast(result_unadjusted, OUT) - 3;
+// }
 
-test range_trichotomy {
-    const t = std.testing;
-    const EXTENDED_TEST = false;
-    try t.expectEqual(-1, range_trichotomy(0, 0, 10, i32));
-    try t.expectEqual(-1, range_trichotomy(0, 1, 10, i32));
-    try t.expectEqual(-1, range_trichotomy(0, 2, 10, i32));
-    try t.expectEqual(0, range_trichotomy(0, 3, 10, i32));
-    try t.expectEqual(0, range_trichotomy(0, 4, 10, i32));
-    try t.expectEqual(0, range_trichotomy(0, 5, 10, i32));
-    try t.expectEqual(0, range_trichotomy(0, 6, 10, i32));
-    try t.expectEqual(1, range_trichotomy(0, 7, 10, i32));
-    try t.expectEqual(1, range_trichotomy(0, 8, 10, i32));
-    try t.expectEqual(1, range_trichotomy(0, 9, 10, i32));
-    try t.expectEqual(-1, range_trichotomy(0, 0, 11, i32));
-    try t.expectEqual(-1, range_trichotomy(0, 1, 11, i32));
-    try t.expectEqual(-1, range_trichotomy(0, 2, 11, i32));
-    try t.expectEqual(-1, range_trichotomy(0, 3, 11, i32));
-    try t.expectEqual(0, range_trichotomy(0, 4, 11, i32));
-    try t.expectEqual(0, range_trichotomy(0, 5, 11, i32));
-    try t.expectEqual(0, range_trichotomy(0, 6, 11, i32));
-    try t.expectEqual(1, range_trichotomy(0, 7, 11, i32));
-    try t.expectEqual(1, range_trichotomy(0, 8, 11, i32));
-    try t.expectEqual(1, range_trichotomy(0, 9, 11, i32));
-    try t.expectEqual(1, range_trichotomy(0, 10, 11, i32));
-    try t.expectEqual(-1, range_trichotomy(0, 0, 1000000, i32));
-    try t.expectEqual(-1, range_trichotomy(0, 100000, 1000000, i32));
-    try t.expectEqual(-1, range_trichotomy(0, 200000, 1000000, i32));
-    try t.expectEqual(-1, range_trichotomy(0, 300000, 1000000, i32));
-    try t.expectEqual(0, range_trichotomy(0, 400000, 1000000, i32));
-    try t.expectEqual(0, range_trichotomy(0, 500000, 1000000, i32));
-    try t.expectEqual(0, range_trichotomy(0, 600000, 1000000, i32));
-    try t.expectEqual(1, range_trichotomy(0, 700000, 1000000, i32));
-    try t.expectEqual(1, range_trichotomy(0, 800000, 1000000, i32));
-    try t.expectEqual(1, range_trichotomy(0, 900000, 1000000, i32));
-    if (EXTENDED_TEST) {
-        var total: i32 = 0;
-        var v: u32 = 0;
-        while (v < 1000000) {
-            total += range_trichotomy(0, v, 1000000, i32);
-            v += 1;
-        }
-        try t.expectEqual(0, total); // symetric
-        total = 0;
-        v = 0;
-        while (v < 1000003) {
-            total += range_trichotomy(0, v, 1000003, i32);
-            v += 1;
-        }
-        try t.expectEqual(0, total); // symetric
-    }
-}
+// test range_trichotomy {
+//     const t = std.testing;
+//     const EXTENDED_TEST = false;
+//     try t.expectEqual(-1, range_trichotomy(0, 0, 10, i32));
+//     try t.expectEqual(-1, range_trichotomy(0, 1, 10, i32));
+//     try t.expectEqual(-1, range_trichotomy(0, 2, 10, i32));
+//     try t.expectEqual(0, range_trichotomy(0, 3, 10, i32));
+//     try t.expectEqual(0, range_trichotomy(0, 4, 10, i32));
+//     try t.expectEqual(0, range_trichotomy(0, 5, 10, i32));
+//     try t.expectEqual(0, range_trichotomy(0, 6, 10, i32));
+//     try t.expectEqual(1, range_trichotomy(0, 7, 10, i32));
+//     try t.expectEqual(1, range_trichotomy(0, 8, 10, i32));
+//     try t.expectEqual(1, range_trichotomy(0, 9, 10, i32));
+//     try t.expectEqual(-1, range_trichotomy(0, 0, 11, i32));
+//     try t.expectEqual(-1, range_trichotomy(0, 1, 11, i32));
+//     try t.expectEqual(-1, range_trichotomy(0, 2, 11, i32));
+//     try t.expectEqual(-1, range_trichotomy(0, 3, 11, i32));
+//     try t.expectEqual(0, range_trichotomy(0, 4, 11, i32));
+//     try t.expectEqual(0, range_trichotomy(0, 5, 11, i32));
+//     try t.expectEqual(0, range_trichotomy(0, 6, 11, i32));
+//     try t.expectEqual(1, range_trichotomy(0, 7, 11, i32));
+//     try t.expectEqual(1, range_trichotomy(0, 8, 11, i32));
+//     try t.expectEqual(1, range_trichotomy(0, 9, 11, i32));
+//     try t.expectEqual(1, range_trichotomy(0, 10, 11, i32));
+//     try t.expectEqual(-1, range_trichotomy(0, 0, 1000000, i32));
+//     try t.expectEqual(-1, range_trichotomy(0, 100000, 1000000, i32));
+//     try t.expectEqual(-1, range_trichotomy(0, 200000, 1000000, i32));
+//     try t.expectEqual(-1, range_trichotomy(0, 300000, 1000000, i32));
+//     try t.expectEqual(0, range_trichotomy(0, 400000, 1000000, i32));
+//     try t.expectEqual(0, range_trichotomy(0, 500000, 1000000, i32));
+//     try t.expectEqual(0, range_trichotomy(0, 600000, 1000000, i32));
+//     try t.expectEqual(1, range_trichotomy(0, 700000, 1000000, i32));
+//     try t.expectEqual(1, range_trichotomy(0, 800000, 1000000, i32));
+//     try t.expectEqual(1, range_trichotomy(0, 900000, 1000000, i32));
+//     if (EXTENDED_TEST) {
+//         var total: i32 = 0;
+//         var v: u32 = 0;
+//         while (v < 1000000) {
+//             total += range_trichotomy(0, v, 1000000, i32);
+//             v += 1;
+//         }
+//         try t.expectEqual(0, total); // symetric
+//         total = 0;
+//         v = 0;
+//         while (v < 1000003) {
+//             total += range_trichotomy(0, v, 1000003, i32);
+//             v += 1;
+//         }
+//         try t.expectEqual(0, total); // symetric
+//     }
+// }
 
 pub fn extract_partial_rand_from_rand(rand: anytype, val_less_than: anytype, comptime OUT: type) OUT {
     assert_with_reason(Types.type_is_pointer_with_child_unsigned_int_type(@TypeOf(rand)), @src(), "type of `rand` must be a pointer to an unsigned integer type, got type `{s}", .{@typeName(@TypeOf(rand))});
@@ -1893,7 +1893,7 @@ test "zig_zag_encoding" {
     const Test = Root.Testing;
     const I_CASES = [_]i32{ 0, -1, -2, 1, 2 };
     const U_CASES = [_]u32{ 0, 1, 3, 2, 4 };
-    var rand_core = std.Random.DefaultPrng.init(@bitCast(std.time.microTimestamp()));
+    var rand_core = Root.Rand.create_new_default_prng_seeded_from_time(std.testing.io);
     const rand = rand_core.random();
     const NUM_RAND = 100;
     for (I_CASES[0..], U_CASES[0..]) |i, u| {

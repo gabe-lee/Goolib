@@ -363,7 +363,7 @@ pub fn RecipeInferenceEngine(comptime EVAL_QUOTA: u32, comptime TargetEnum: type
             return resolve_recipes_internal(user_provided_entities, recipes, target_n, weight_vs_user_provided, true);
         }
         pub fn resolve_recipes_by_order(user_provided_entities: []const Target, recipes: []const RecipeList) AllSolutions {
-            return resolve_recipes_internal(user_provided_entities, recipes, 0, false);
+            return resolve_recipes_internal(user_provided_entities, recipes, 0, .ALWAYS_USE_USER_PROVIDED, false);
         }
 
         fn resolve_recipes_internal(user_provided_entities: []const Target, provided_recipes: []const RecipeList, target_n: WeightType, WEIGHT_USER_MODE: WeightVsUserProvidedMode, comptime USE_WEIGHT_IF_AVAILABLE: bool) AllSolutions {
@@ -519,7 +519,7 @@ test RecipeInferenceEngine {
         }
     };
     const WeightInfo = WeightModeInfo(Tag);
-    const Engine = RecipeInferenceEngine(Op, Tag, WeightInfo{
+    const Engine = RecipeInferenceEngine(2000, Op, Tag, WeightInfo{
         .tags_equal = PROTO.tag_equal,
         .weight_type = f32,
     });
@@ -624,7 +624,7 @@ test RecipeInferenceEngine {
         .user_provided(.SUB),
         .user_provided_with_weight(.ADD, 100.0),
     };
-    var results = Engine.resolve_recipes_by_weight(TARGET_N, UNDER_PROVIDED, recipes);
+    var results = Engine.resolve_recipes_by_weight(TARGET_N, .ALWAYS_USE_USER_PROVIDED, UNDER_PROVIDED, recipes);
     if (PRINT_RESULTS) {
         std.debug.print("\n\ntest RecipeInferenceEngine results:\n=====================================\nunder-provided results (not enough funcs to infer all):\n", .{});
         for (results, 0..) |res, r| {
@@ -636,7 +636,7 @@ test RecipeInferenceEngine {
             }
         }
     }
-    results = Engine.resolve_recipes_by_weight(TARGET_N, MIN_PROVIDED_ONE_HEAVY, recipes);
+    results = Engine.resolve_recipes_by_weight(TARGET_N, .ALWAYS_USE_USER_PROVIDED, MIN_PROVIDED_ONE_HEAVY, recipes);
     if (PRINT_RESULTS) {
         std.debug.print("\nby-weight results (select the best function based on user-provided hueristics, possibly overriding user-provided functions):\n", .{});
         for (results, 0..) |res, r| {

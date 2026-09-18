@@ -22,26 +22,33 @@
 // 3. This notice may not be removed or altered from any source distribution.
 
 const std = @import("std");
-const StdRandom = std.Random;
+const Random = std.Random;
 
-pub threadlocal var default_rand_core: StdRandom.DefaultPrng = StdRandom.DefaultPrng.init(0);
-pub threadlocal var default_rand: StdRandom = undefined;
+pub threadlocal var default_rand_core: Random.DefaultPrng = Random.DefaultPrng.init(0);
+pub threadlocal var default_rand: Random = undefined;
 
-pub fn seed_default_rand(seed: u64) void {
-    default_rand_core = StdRandom.DefaultPrng.init(seed);
+pub fn seed_default_global_rand(seed: u64) void {
+    default_rand_core = Random.DefaultPrng.init(seed);
     default_rand = default_rand_core.random();
 }
-pub fn seed_default_rand_and_get(seed: u64) StdRandom {
-    default_rand_core = StdRandom.DefaultPrng.init(seed);
+pub fn seed_default_global_rand_and_get(seed: u64) Random {
+    default_rand_core = Random.DefaultPrng.init(seed);
     default_rand = default_rand_core.random();
     return default_rand;
 }
-pub fn seed_default_rand_time_now(io: std.Io) void {
-    default_rand_core = StdRandom.DefaultPrng.init(@intCast(std.Io.Clock.boot.now(io).toMilliseconds()));
+pub fn seed_default_global_rand_time_now(io: std.Io) void {
+    default_rand_core = Random.DefaultPrng.init(@bitCast(std.Io.Clock.real.now(io).toMilliseconds()));
     default_rand = default_rand_core.random();
 }
-pub fn seed_default_rand_time_now_and_get(io: std.Io) StdRandom {
-    default_rand_core = StdRandom.DefaultPrng.init(@intCast(std.Io.Clock.boot.now(io).toMilliseconds()));
+pub fn seed_default_global_rand_time_now_and_get(io: std.Io) Random {
+    default_rand_core = Random.DefaultPrng.init(@bitCast(std.Io.Clock.real.now(io).toMilliseconds()));
     default_rand = default_rand_core.random();
     return default_rand;
+}
+
+pub fn create_new_default_prng_seeded_from_time(io: std.Io) Random.DefaultPrng {
+    return Random.DefaultPrng.init(@bitCast(std.Io.Clock.real.now(io).toMilliseconds()));
+}
+pub fn create_new_default_prng_seeded_from_num(seed: u64) Random.DefaultPrng {
+    return Random.DefaultPrng.init(seed);
 }

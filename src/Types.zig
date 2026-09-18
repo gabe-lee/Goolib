@@ -1810,7 +1810,7 @@ pub fn bare_union_with_same_fields_as_tagged_union(comptime UNION: type, comptim
         field_types[f] = field.type;
         field_attrs[f] = std.builtin.Type.UnionField.Attributes{ .@"align" = field.alignment };
     }
-    @Union(if (NEW_LAYOUT) |LAY| LAY else TAGGED_INFO.layout, null, &field_names, &field_types, &field_attrs);
+    return @Union(if (NEW_LAYOUT) |LAY| LAY else TAGGED_INFO.layout, null, &field_names, &field_types, &field_attrs);
 }
 
 pub const DefinedLayout = enum(u8) {

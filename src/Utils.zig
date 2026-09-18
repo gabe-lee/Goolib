@@ -780,7 +780,7 @@ pub const FilterResult = struct {
 
 /// This method deletes all of the indexes from the provided list where
 /// the value at that index results in `filter_func(val) == true`
-pub fn mem_remove_sparse_by_filter_func(comptime T: type, data_ptr: [*]T, len_ptr: anytype, start_index: usize, userdata: anytype, filter_func: *const fn (val: T, userdata: @TypeOf(userdata)) FilterResult) void {
+pub fn mem_remove_sparse_by_filter_func(comptime T: type, data_ptr: [*]T, len_ptr: anytype, start_index: usize, userdata: anytype, filter_func: *const fn (T, @TypeOf(userdata)) FilterResult) void {
     const LEN_PTR = @TypeOf(len_ptr);
     assert_with_reason(Types.type_is_single_item_pointer(LEN_PTR), @src(), "type of `len_ptr` must be a single-item-pointer to an integer type, got type {s}", .{@typeName(LEN_PTR)});
     const LEN = @typeInfo(LEN_PTR).pointer.child;
@@ -825,7 +825,7 @@ pub fn mem_remove_sparse_by_filter_func(comptime T: type, data_ptr: [*]T, len_pt
 
 test mem_remove_sparse_by_filter_func {
     const P = struct {
-        fn val_is_odd(v: u8, _: @TypeOf(null)) FilterResult {
+        fn val_is_odd(v: u8, _: void) FilterResult {
             return .cond_continue(v % 2 == 1);
         }
         fn val_is_even(v: u8, c: *usize) FilterResult {
@@ -867,7 +867,7 @@ test mem_remove_sparse_by_filter_func {
     };
     var ARR: [128]u8 = undefined;
     var buf: []u8 = ARR[0..];
-    var r = std.Random.DefaultPrng.init(@bitCast(std.time.microTimestamp()));
+    var r = Root.Rand.create_new_default_prng_seeded_from_time(std.testing.io);
     var rand = r.random();
     var c: usize = undefined;
     const CHECK_COUNT = 16;
@@ -875,7 +875,7 @@ test mem_remove_sparse_by_filter_func {
         buf = ARR[0..];
         rand.bytes(buf);
         c = P.count_evens(buf);
-        mem_remove_sparse_by_filter_func(u8, buf.ptr, &buf.len, 0, null, P.val_is_odd);
+        mem_remove_sparse_by_filter_func(u8, buf.ptr, &buf.len, 0, void{}, P.val_is_odd);
         try Test.expect_true(P.all_vals_even_and_match_count(buf, c), "P.all_vals_even_and_match_count(buf)", "mem_remove_sparse_by_filter_func(..., val_is_odd) did not remove all odd values or removed some even values", .{});
         buf = ARR[0..];
         rand.bytes(buf);

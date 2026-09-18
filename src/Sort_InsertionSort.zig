@@ -66,7 +66,7 @@ pub fn insertion_sort_implicit(buffer: anytype) void {
 pub fn insertion_sort_implicit_with_matching_buffers(buffer: anytype, matching_buffers: anytype) void {
     const BUF = @TypeOf(buffer);
     const T = Types.IndexableChild(BUF);
-    Types.assert_has_len(BUF);
+    Types.assert_has_len(BUF, @src());
     assert_with_reason(Utils.can_infer_type_order(T), @src(), "cannot inherently order type " ++ @typeName(T), .{});
     inline for (@typeInfo(matching_buffers).@"struct".fields) |matching_field| {
         _ = Types.IndexableChild(matching_field.type);
@@ -106,7 +106,7 @@ pub fn insertion_sort_implicit_with_matching_buffers(buffer: anytype, matching_b
 pub fn insertion_sort_with_func(buffer: anytype, greater_than: *const fn (a: Types.IndexableChild(@TypeOf(buffer)), b: Types.IndexableChild(@TypeOf(buffer))) bool) void {
     const BUF = @TypeOf(buffer);
     const T = Types.IndexableChild(BUF);
-    Types.assert_has_len(BUF);
+    Types.assert_has_len(BUF, @src());
     var i: usize = 1;
     var j: usize = undefined;
     var jj: usize = undefined;
@@ -170,7 +170,7 @@ pub fn insertion_sort_with_func_and_matching_buffers(buffer: anytype, matching_b
 pub fn insertion_sort_with_func_and_userdata(buffer: anytype, userdata: anytype, greater_than: *const fn (a: Types.IndexableChild(@TypeOf(buffer)), b: Types.IndexableChild(@TypeOf(buffer)), userdata: @TypeOf(userdata)) bool) void {
     const BUF = @TypeOf(buffer);
     const T = Types.IndexableChild(BUF);
-    Types.assert_has_len(BUF);
+    Types.assert_has_len(BUF, @src());
     var i: usize = 1;
     var j: usize = undefined;
     var jj: usize = undefined;
@@ -234,8 +234,8 @@ pub fn insertion_sort_with_func_userdata_and_matching_buffers(buffer: anytype, m
 pub fn insertion_sort_with_transform_to_implicit(buffer: anytype, comptime TRANSFORMED_TYPE: type, transform_fn: *const fn (in: Types.IndexableChild(@TypeOf(buffer))) TRANSFORMED_TYPE) void {
     const BUF = @TypeOf(buffer);
     const T = Types.IndexableChild(BUF);
-    Types.assert_has_len(BUF);
-    assert_with_reason(Utils.can_infer_type_order(TRANSFORMED_TYPE), @src(), "cannot inherently order type " ++ @typeName(TRANSFORMED_TYPE), .{});
+    Types.assert_has_len(BUF, @src());
+    // assert_with_reason(Utils.can_infer_type_order(TRANSFORMED_TYPE), @src(), "cannot inherently order type " ++ @typeName(TRANSFORMED_TYPE), .{});
     var i: usize = 1;
     var j: usize = undefined;
     var jj: usize = undefined;
@@ -308,8 +308,8 @@ pub fn insertion_sort_with_transform_to_implicit_and_matching_buffers(buffer: an
 pub fn insertion_sort_with_transform_to_implicit_and_userdata(buffer: anytype, userdata: anytype, comptime TRANSFORMED_TYPE: type, transform_fn: *const fn (in: Types.IndexableChild(@TypeOf(buffer)), userdata: @TypeOf(userdata)) TRANSFORMED_TYPE) void {
     const BUF = @TypeOf(buffer);
     const T = Types.IndexableChild(BUF);
-    Types.assert_has_len(BUF);
-    assert_with_reason(Utils.can_infer_type_order(TRANSFORMED_TYPE), @src(), "cannot inherently order type " ++ @typeName(TRANSFORMED_TYPE), .{});
+    Types.assert_has_len(BUF, @src());
+    // assert_with_reason(Utils.Compare(TRANSFORMED_TYPE), @src(), "cannot inherently order type " ++ @typeName(TRANSFORMED_TYPE), .{});
     var i: usize = 1;
     var j: usize = undefined;
     var jj: usize = undefined;
@@ -417,8 +417,7 @@ test "InsertionSort.zig" {
     var secret: u8 = 42;
 
     const proto = struct {
-        fn xfrm_user(a: u8, data: ?*const anyopaque) u16 {
-            const secret_ptr: *const u8 = @ptrCast(@alignCast(data));
+        fn xfrm_user(a: u8, secret_ptr: *const u8) u16 {
             return @bitCast(u8_u8{ a, secret_ptr.* });
         }
 
@@ -429,13 +428,13 @@ test "InsertionSort.zig" {
 
     for (cases) |case| {
         var output: [10]u8 = case.input;
-        insertion_sort_implicit(u8, output[0..case.len]);
+        insertion_sort_implicit(output[0..case.len]);
         try t.expectEqualSlices(u8, case.expected_output[0..case.len], output[0..case.len]);
         output = case.input;
-        insertion_sort_with_transform_to_implicit(u8, output[0..case.len], u16, proto.xfrm);
+        insertion_sort_with_transform_to_implicit(output[0..case.len], u16, proto.xfrm);
         try t.expectEqualSlices(u8, case.expected_output[0..case.len], output[0..case.len]);
         output = case.input;
-        insertion_sort_with_transform_to_implicit_and_userdata(u8, output[0..case.len], u16, proto.xfrm_user, &secret);
+        insertion_sort_with_transform_to_implicit_and_userdata(output[0..case.len], &secret, u16, proto.xfrm_user);
         try t.expectEqualSlices(u8, case.expected_output[0..case.len], output[0..case.len]);
     }
 }

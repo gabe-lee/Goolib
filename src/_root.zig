@@ -23,9 +23,10 @@
 
 const std = @import("std");
 const build = @import("builtin");
-const config = @import("config");
+const BUILD_CONIFG = @import("config");
+pub const CONFIG = BUILD_CONIFG.CONFIG;
 
-pub const VERSION = "0.4.0";
+pub const VERSION = "0.5.0";
 pub const NAME = "Goolib";
 
 pub const AABB2 = @import("./AABB2.zig");
@@ -88,7 +89,7 @@ pub const Reader = @import("./Reader.zig");
 pub const Rect2 = @import("./Rect2.zig");
 pub const RectPacker = @import("./RectPacker.zig");
 // pub const Result = @import("./Result.zig");
-pub const SDL3 = if (build.is_test or !config.NO_SDL) @import("./SDL3.zig") else struct {};
+pub const SDL3 = if (build.is_test or CONFIG.INCLUDE_SDL) @import("./SDL3.zig") else struct {};
 pub const Serializer = @import("./Serializer.zig");
 pub const Shape = @import("./Shape.zig");
 pub const SlabBucketAllocator = @import("./SlabBucketAllocator.zig");
@@ -166,9 +167,9 @@ comptime {
         _ = @import("./Rect2.zig");
         _ = @import("./RectPacker.zig");
         // _ = @import("./Result.zig");
-        _ = if (!config.NO_SDL) @import("./SDL3.zig") else struct {};
-        _ = if (!config.NO_SDL) @import("./SDL3_ShaderContract.zig") else struct {};
-        _ = if (!config.NO_SDL) @import("./SDL3_GraphicsController.zig") else struct {};
+        _ = if (CONFIG.INCLUDE_SDL) @import("./SDL3.zig") else struct {};
+        _ = if (CONFIG.INCLUDE_SDL) @import("./SDL3_ShaderContract.zig") else struct {};
+        _ = if (CONFIG.INCLUDE_SDL) @import("./SDL3_GraphicsController.zig") else struct {};
         _ = @import("./Serializer.zig");
         _ = @import("./Shape.zig");
         _ = @import("./SlabBucketAllocator.zig");

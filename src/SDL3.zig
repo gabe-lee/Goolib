@@ -27,7 +27,7 @@
 
 const std = @import("std");
 const build = @import("builtin");
-const config = @import("config");
+const CONFIG = Root.CONFIG;
 const init_zero = std.mem.zeroes;
 const assert = std.debug.assert;
 
@@ -68,8 +68,8 @@ pub const C = @cImport({
     @cDefine("SDL_DISABLE_OLD_NAMES", {});
     @cInclude("SDL3/SDL.h");
     @cInclude("SDL3/SDL_revision.h");
-    if (config.SDL_USER_MAIN) @cDefine("SDL_MAIN_HANDLED", {});
-    if (config.SDL_USER_CALLBACKS) @cDefine("SDL_MAIN_USE_CALLBACKS", {});
+    if (CONFIG.SDL_USER_HANDLES_MAIN) @cDefine("SDL_MAIN_HANDLED", {});
+    if (CONFIG.SDL_USER_PROVIDES_CALLBACKS) @cDefine("SDL_MAIN_USE_CALLBACKS", {});
     @cInclude("SDL3/SDL_main.h");
 });
 

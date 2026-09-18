@@ -1185,14 +1185,8 @@ pub const RECIPES: []const InferEngine.RecipeList = make: {
     };
 };
 
-// const INFER = struct {
-//     pub const ENSURE_FREE_SPACE = struct {
-//         const FROM_GET_LEN_GET_SET_CAP = F.GET_LEN | F.SET_CAP | F.GET_CAP;
-//     };
-// };
-
 test "data manipulation recipes" {
-    const PRINT_SOLUTIONS = true;
+    const PRINT_SOLUTIONS = false;
     const provide: []const InferEngine.Target = &.{
         // Inherent to native memory
         .user_provided(.GET_BASE_PTR),

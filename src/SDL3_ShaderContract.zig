@@ -1,5 +1,5 @@
 //! This module is intended to create shader 'contracts' for passing data to and from
-//! a shader fron the cpu in the correct order/location/alignment
+//! a shader from the cpu in the correct order/location/alignment
 //!
 //! `UniformStruct` is designed to follow `std140` alignment conventions
 //! for maximum simplicity and portability, and will automatically find the 'best'
@@ -223,7 +223,8 @@ pub fn StorageStructField(comptime FIELDS: type) type {
 /// A struct that is written to a uniform/constant/storage buffer
 ///
 /// Follows `std140` packing rules
-pub fn StorageStruct(comptime FIELDS: type, comptime INCLUDE_LAYOUT: IncludeLayoutInStub, comptime fields: []const StorageStructField(FIELDS)) type {
+pub fn StorageStruct(comptime FIELDS: type, comptime INCLUDE_LAYOUT: IncludeLayoutInStub, comptime fields: []const StorageStructField(FIELDS), comptime EVAL_QUOTA: comptime_int) type {
+    @setEvalBranchQuota(EVAL_QUOTA);
     assert_with_reason(Types.type_is_enum(FIELDS) and Types.all_enum_values_start_from_zero_with_no_gaps(FIELDS), @src(), "type `FIELDS` must be an enum type, and all enum tags in `FIELDS` must start at zero and have no gaps up to the max tag value, got type `{s}`", .{@typeName(FIELDS)});
     const _NUM_FIELDS = Types.enum_defined_field_count(FIELDS);
     assert_with_reason(fields.len == _NUM_FIELDS, @src(), "the number of field names in `FIELDS` must equal the length of field definitions `fields`, got names {d} != {d} len", .{ _NUM_FIELDS, fields.len });
@@ -239,6 +240,8 @@ pub fn StorageStruct(comptime FIELDS: type, comptime INCLUDE_LAYOUT: IncludeLayo
     comptime var empty_spots: [_NUM_FIELDS * 2]BufferSpan = undefined;
     comptime var empty_spots_len: usize = 0;
     comptime var current_max_offset: usize = 0;
+    const BufSpanPkg = Utils.DataManipulation.Defaults.slice_not_allocated_package(BufferSpan);
+    // const FieldOrPadPkg = Utils.DataManipulation.Defaults.slice_not_allocated_package(FieldOrPad);
     const SORT = struct {
         fn align_lesser_then_size_lesser(a: _Field, b: _Field) bool {
             if (a.gpu_type.uniform_alignment < b.gpu_type.uniform_alignment) return true;
@@ -248,7 +251,7 @@ pub fn StorageStruct(comptime FIELDS: type, comptime INCLUDE_LAYOUT: IncludeLayo
             return a.offset > b.offset;
         }
     };
-    Sort.insertion_sort_with_func(_Field, _fields[0.._NUM_FIELDS], SORT.align_lesser_then_size_lesser);
+    Sort.insertion_sort_with_func(_fields[0.._NUM_FIELDS], SORT.align_lesser_then_size_lesser);
     // PACKING ALGORITHM
     for (_fields) |field| {
         const fidx = @intFromEnum(field.field);
@@ -261,7 +264,7 @@ pub fn StorageStruct(comptime FIELDS: type, comptime INCLUDE_LAYOUT: IncludeLayo
         const needed_align = @max(field.gpu_type.uniform_alignment, field.gpu_type.cpu_align);
         for (empty_spots[0..empty_spots_len], 0..) |empty, e| {
             if (empty.len >= field.gpu_type.uniform_size) {
-                const next_aligned_within_empty = Utils.align_forward_without_breaking_align_boundary_unless_offset_boundary_aligned(empty.offset, field.gpu_type.uniform_size, needed_align, GPU_UNIFORM_BOUNDARY_ALIGN);
+                const next_aligned_within_empty = Utils.Mem.align_forward_without_breaking_align_boundary_unless_offset_boundary_aligned(empty.offset, field.gpu_type.uniform_size, needed_align, GPU_UNIFORM_BOUNDARY_ALIGN);
                 const len_lost = next_aligned_within_empty - empty.offset;
                 if (len_lost >= empty.len) continue;
                 const aligned_len = empty.len - len_lost;
@@ -310,11 +313,12 @@ pub fn StorageStruct(comptime FIELDS: type, comptime INCLUDE_LAYOUT: IncludeLayo
                 }
             }
             if (overwrite_old_empty) {
-                Utils.mem_remove(empty_spots[0..empty_spots_len].ptr, &empty_spots_len, empty_spot_that_fits, 1);
+                _ = BufSpanPkg.delete_one(empty_spots[0..empty_spots_len], empty_spot_that_fits, void{});
+                empty_spots_len -= 1;
             }
             field_loc = old_empty.offset + empty_spot_offset;
         } else {
-            const next_aligned_offset = Utils.align_forward_without_breaking_align_boundary_unless_offset_boundary_aligned(current_max_offset, field.gpu_type.uniform_size, needed_align, GPU_UNIFORM_BOUNDARY_ALIGN);
+            const next_aligned_offset = Utils.Mem.align_forward_without_breaking_align_boundary_unless_offset_boundary_aligned(current_max_offset, field.gpu_type.uniform_size, needed_align, GPU_UNIFORM_BOUNDARY_ALIGN);
             const new_empty_len = next_aligned_offset - current_max_offset;
             if (new_empty_len > 0) {
                 comptime var combined_with_another_empty: bool = false;
@@ -364,7 +368,7 @@ pub fn StorageStruct(comptime FIELDS: type, comptime INCLUDE_LAYOUT: IncludeLayo
         slot_idx += 1;
     }
     const field_locs_slice: []const usize = field_locations[0.._NUM_FIELDS];
-    Sort.insertion_sort_with_func_and_userdata(FieldOrPad, all_slots[0..SLOT_COUNT], field_locs_slice, FieldOrPad.field_or_pad_offset_larger);
+    Sort.insertion_sort_with_func_and_userdata(all_slots[0..SLOT_COUNT], field_locs_slice, FieldOrPad.field_or_pad_offset_larger);
     comptime var total_len_of_field_names: usize = 0;
     comptime var longest_field_name_plus_type: usize = 17;
     comptime var shortest_field_name_plus_type: usize = 12;
@@ -678,6 +682,7 @@ pub fn StreamStruct(comptime FIELDS: type, comptime INCLUDE_LAYOUT: IncludeLayou
     comptime var empty_spots: [_NUM_FIELDS * 2]BufferSpan = undefined;
     comptime var empty_spots_len: usize = 0;
     comptime var current_max_offset: usize = 0;
+    const BufSpanPkg = Utils.DataManipulation.Defaults.slice_not_allocated_package(BufferSpan);
     const SORT = struct {
         fn align_lesser_then_size_lesser(a: _Field, b: _Field) bool {
             if (a.gpu_type.stream_alignment < b.gpu_type.stream_alignment) return true;
@@ -687,7 +692,7 @@ pub fn StreamStruct(comptime FIELDS: type, comptime INCLUDE_LAYOUT: IncludeLayou
             return a.offset > b.offset;
         }
     };
-    Sort.insertion_sort_with_func(_Field, _fields[0.._NUM_FIELDS], SORT.align_lesser_then_size_lesser);
+    Sort.insertion_sort_with_func(_fields[0.._NUM_FIELDS], SORT.align_lesser_then_size_lesser);
     comptime var used_semantics: [128]u64 = undefined;
     comptime var used_semantic_len: usize = 0;
     comptime var issued_too_many_semantic_warning: bool = false;
@@ -775,11 +780,12 @@ pub fn StreamStruct(comptime FIELDS: type, comptime INCLUDE_LAYOUT: IncludeLayou
                 }
             }
             if (overwrite_old_empty) {
-                Utils.mem_remove(empty_spots[0..empty_spots_len].ptr, &empty_spots_len, empty_spot_that_fits, 1);
+                _ = BufSpanPkg.delete_one(empty_spots[0..empty_spots_len], empty_spot_that_fits, void{});
+                empty_spots_len -= 1;
             }
             field_loc = old_empty.offset + empty_spot_offset;
         } else {
-            const next_aligned_offset = Utils.align_forward_without_breaking_align_boundary_unless_offset_boundary_aligned(current_max_offset, field.gpu_type.stream_size, needed_align, GPU_UNIFORM_BOUNDARY_ALIGN);
+            const next_aligned_offset = Utils.Mem.align_forward_without_breaking_align_boundary_unless_offset_boundary_aligned(current_max_offset, field.gpu_type.stream_size, needed_align, GPU_UNIFORM_BOUNDARY_ALIGN);
             const new_empty_len = next_aligned_offset - current_max_offset;
             if (new_empty_len > 0) {
                 comptime var combined_with_another_empty: bool = false;
@@ -832,7 +838,7 @@ pub fn StreamStruct(comptime FIELDS: type, comptime INCLUDE_LAYOUT: IncludeLayou
         slot_idx += 1;
     }
     const field_locs_slice: []const usize = field_locations[0.._NUM_FIELDS];
-    Sort.insertion_sort_with_func_and_userdata(FieldOrPad, all_slots[0..SLOT_COUNT], field_locs_slice, FieldOrPad.field_or_pad_offset_larger);
+    Sort.insertion_sort_with_func_and_userdata(all_slots[0..SLOT_COUNT], field_locs_slice, FieldOrPad.field_or_pad_offset_larger);
     comptime var total_len_of_field_names: usize = 0;
     comptime var longest_field_name_plus_type: usize = LONGEST_PADDING_NAME_PLUS_TYPE + HLSL_SEMANTIC_KIND._LONGEST_SEMANTIC_NAME_LEN;
     comptime var shortest_field_name_plus_type: usize = SHORTEST_PADDING_NAME_PLUS_TYPE + HLSL_SEMANTIC_KIND._SHORTEST_SEMANTIC_NAME_LEN;
@@ -1873,11 +1879,11 @@ test "hlsl_enum_stub" {
         SPRITE,
         SPRITE_PALETTED,
     };
-    try std.fs.cwd().makePath("test_out/SDL3_ShaderContract");
-    const file = try std.fs.cwd().createFile("test_out/SDL3_ShaderContract/enum_stub_1.hlsl", .{});
-    defer file.close();
+    try std.Io.Dir.cwd().createDirPath(std.testing.io, "test_out/SDL3_ShaderContract");
+    const file = try std.Io.Dir.cwd().createFile(std.testing.io, "test_out/SDL3_ShaderContract/enum_stub_1.hlsl", .{});
+    defer file.close(std.testing.io);
     var file_write_buf: [512]u8 = undefined;
-    var file_writer_holder = file.writer(file_write_buf[0..]);
+    var file_writer_holder = file.writer(std.testing.io, file_write_buf[0..]);
     var writer = &file_writer_holder.interface;
     try write_hlsl_enum_stub(RENDER_MODE, writer);
     try writer.flush();
@@ -2448,14 +2454,14 @@ test "hlsl_uniform_stub" {
         U.new(.shader_mode, GPU_enum32(ShaderMode)),
         U.new(.projection_matrix, GPU_f32_4x4),
         U.new(.hamburgers_good, GPU_bool),
-    });
-    assert_with_reason(@sizeOf(MyUniform) == 96, @src(), "layout failed", .{});
-    assert_with_reason(@alignOf(MyUniform) == 16, @src(), "layout failed", .{});
-    try std.fs.cwd().makePath("test_out/SDL3_ShaderContract");
-    const file = try std.fs.cwd().createFile("test_out/SDL3_ShaderContract/uniform_stub_1.hlsl", .{});
-    defer file.close();
+    }, 100000);
+    // assert_with_reason(@sizeOf(MyUniform) == 96, @src(), "layout failed", .{});
+    // assert_with_reason(@alignOf(MyUniform) == 16, @src(), "layout failed", .{});
+    try std.Io.Dir.cwd().createDirPath(std.testing.io, "test_out/SDL3_ShaderContract");
+    const file = try std.Io.Dir.cwd().createFile(std.testing.io, "test_out/SDL3_ShaderContract/uniform_stub_1.hlsl", .{});
+    defer file.close(std.testing.io);
     var file_write_buf: [512]u8 = undefined;
-    var file_writer_holder = file.writer(file_write_buf[0..]);
+    var file_writer_holder = file.writer(std.testing.io, file_write_buf[0..]);
     var writer = &file_writer_holder.interface;
     try MyUniform.write_hlsl_uniform_stub("MyUniform", 0, 1, writer);
     try writer.flush();
@@ -2481,12 +2487,12 @@ test "hlsl_uniform_stub" {
         U2.new(.scalar_5, GPU_f32_4),
         U2.new(.mat_2, GPU_i32_1x2),
         U2.new(.scalar_6, GPU_f32),
-    });
+    }, 100000);
     assert_with_reason(@sizeOf(MyUniform2) == 128, @src(), "layout failed", .{});
     assert_with_reason(@alignOf(MyUniform2) == 16, @src(), "layout failed", .{});
-    const file2 = try std.fs.cwd().createFile("test_out/SDL3_ShaderContract/uniform_stub_2.hlsl", .{});
-    defer file2.close();
-    file_writer_holder = file2.writer(file_write_buf[0..]);
+    const file2 = try std.Io.Dir.cwd().createFile(std.testing.io, "test_out/SDL3_ShaderContract/uniform_stub_2.hlsl", .{});
+    defer file2.close(std.testing.io);
+    file_writer_holder = file2.writer(std.testing.io, file_write_buf[0..]);
     writer = &file_writer_holder.interface;
     try MyUniform2.write_hlsl_uniform_stub("MyUniform2", 0, 1, writer);
     try writer.flush();
@@ -2515,14 +2521,14 @@ test "hlsl_storage_buffer_stub" {
         U.new(.shader_mode, GPU_enum32(ShaderMode)),
         U.new(.projection_matrix, GPU_f32_4x4),
         U.new(.hamburgers_good, GPU_bool),
-    });
+    }, 100000);
     assert_with_reason(@sizeOf(MyStruct) == 96, @src(), "layout failed", .{});
     assert_with_reason(@alignOf(MyStruct) == 16, @src(), "layout failed", .{});
-    try std.fs.cwd().makePath("test_out/SDL3_ShaderContract");
-    const file = try std.fs.cwd().createFile("test_out/SDL3_ShaderContract/storage_stub_1.hlsl", .{});
-    defer file.close();
+    try std.Io.Dir.cwd().createDirPath(std.testing.io, "test_out/SDL3_ShaderContract");
+    const file = try std.Io.Dir.cwd().createFile(std.testing.io, "test_out/SDL3_ShaderContract/storage_stub_1.hlsl", .{});
+    defer file.close(std.testing.io);
     var file_write_buf: [512]u8 = undefined;
-    var file_writer_holder = file.writer(file_write_buf[0..]);
+    var file_writer_holder = file.writer(std.testing.io, file_write_buf[0..]);
     var writer = &file_writer_holder.interface;
     try MyStruct.write_hlsl_storage_buffer_stub("MyStruct", "MyStorageBuffer", 0, 1, writer);
     try writer.flush();
@@ -2546,12 +2552,12 @@ test "hlsl_storage_buffer_stub" {
         U2.new(.scalar_5, GPU_f32_4),
         U2.new(.mat_2, GPU_i32_1x2),
         U2.new(.scalar_6, GPU_f32),
-    });
+    }, 100000);
     assert_with_reason(@sizeOf(MyStruct2) == 128, @src(), "layout failed", .{});
     assert_with_reason(@alignOf(MyStruct2) == 16, @src(), "layout failed", .{});
-    const file2 = try std.fs.cwd().createFile("test_out/SDL3_ShaderContract/uniform_stub_2.hlsl", .{});
-    defer file2.close();
-    file_writer_holder = file2.writer(file_write_buf[0..]);
+    const file2 = try std.Io.Dir.cwd().createFile(std.testing.io, "test_out/SDL3_ShaderContract/uniform_stub_2.hlsl", .{});
+    defer file2.close(std.testing.io);
+    file_writer_holder = file2.writer(std.testing.io, file_write_buf[0..]);
     writer = &file_writer_holder.interface;
     try MyStruct2.write_hlsl_storage_buffer_stub("MyStruct2", "MyStorageBuffer2", 0, 1, writer);
     try writer.flush();
@@ -2579,13 +2585,13 @@ test "build and write stream struct" {
         S.new(.blend_mode, GPU_enum32(BlendMode), .user("BLENDMODE", 0)),
     });
     StreamStructWriterInterface.assert_interface(MyVertex, @src());
-    // assert_with_reason(@sizeOf(MyUniform) == 96, @src(), "layout failed", .{});
-    // assert_with_reason(@alignOf(MyUniform) == 16, @src(), "layout failed", .{});
-    try std.fs.cwd().makePath("test_out/SDL3_ShaderContract");
-    const file = try std.fs.cwd().createFile("test_out/SDL3_ShaderContract/stream_struct_1.hlsl", .{});
-    defer file.close();
+    assert_with_reason(@sizeOf(MyVertex) == 80, @src(), "layout failed", .{});
+    assert_with_reason(@alignOf(MyVertex) == 16, @src(), "layout failed", .{});
+    try std.Io.Dir.cwd().createDirPath(std.testing.io, "test_out/SDL3_ShaderContract");
+    const file = try std.Io.Dir.cwd().createFile(std.testing.io, "test_out/SDL3_ShaderContract/stream_struct_1.hlsl", .{});
+    defer file.close(std.testing.io);
     var file_write_buf: [512]u8 = undefined;
-    var file_writer_holder = file.writer(file_write_buf[0..]);
+    var file_writer_holder = file.writer(std.testing.io, file_write_buf[0..]);
     var writer = &file_writer_holder.interface;
     try StreamStructWriterInterface.write_stream_struct(MyVertex, "MyStruct", .HLSL, writer);
     try writer.flush();

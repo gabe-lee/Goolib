@@ -55,6 +55,12 @@ pub const Side = enum {
     RIGHT,
 };
 
+pub const FuncParamType = enum {
+    RUNTIME_FN_PTR,
+    COMPTIME_FN_PTR,
+    COMPTIME_FN_BODY,
+};
+
 /// A type describing a user-defined option for whether a function (or all/some
 /// of a type's methods) should return errors when they occur,
 /// or whether they should panic or be 'unreachable'

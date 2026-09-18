@@ -1,908 +1,908 @@
-//! //TODO Documentation
-//! #### License: Zlib
+// //! //TODO Documentation
+// //! #### License: Zlib
 
-// zlib license
-//
-// Copyright (c) 2025-2026, Gabriel Lee Anderson <gla.ander@gmail.com>
-//
-// This software is provided 'as-is', without any express or implied
-// warranty. In no event will the authors be held liable for any damages
-// arising from the use of this software.
-//
-// Permission is granted to anyone to use this software for any purpose,
-// including commercial applications, and to alter it and redistribute it
-// freely, subject to the following restrictions:
-//
-// 1. The origin of this software must not be misrepresented; you must not
-//    claim that you wrote the original software. If you use this software
-//    in a product, an acknowledgment in the product documentation would be
-//    appreciated but is not required.
-// 2. Altered source versions must be plainly marked as such, and must not be
-//    misrepresented as being the original software.
-// 3. This notice may not be removed or altered from any source distribution.
-const std = @import("std");
-const math = std.math;
-const Root = @import("./_root.zig");
-const Types = Root.Types;
-const Assert = Root.Assert;
-const Allocator = std.mem.Allocator;
-const AllocInfal = Root.AllocatorInfallible;
-const DummyAllocator = Root.DummyAllocator;
-const Utils = Root.Utils;
-const EnumeratedDefinitions = Utils.EnumeratedDefs.EnumeratedDefinitions;
+// // zlib license
+// //
+// // Copyright (c) 2025-2026, Gabriel Lee Anderson <gla.ander@gmail.com>
+// //
+// // This software is provided 'as-is', without any express or implied
+// // warranty. In no event will the authors be held liable for any damages
+// // arising from the use of this software.
+// //
+// // Permission is granted to anyone to use this software for any purpose,
+// // including commercial applications, and to alter it and redistribute it
+// // freely, subject to the following restrictions:
+// //
+// // 1. The origin of this software must not be misrepresented; you must not
+// //    claim that you wrote the original software. If you use this software
+// //    in a product, an acknowledgment in the product documentation would be
+// //    appreciated but is not required.
+// // 2. Altered source versions must be plainly marked as such, and must not be
+// //    misrepresented as being the original software.
+// // 3. This notice may not be removed or altered from any source distribution.
+// const std = @import("std");
+// const math = std.math;
+// const Root = @import("./_root.zig");
+// const Types = Root.Types;
+// const Assert = Root.Assert;
+// const Allocator = std.mem.Allocator;
+// const AllocInfal = Root.AllocatorInfallible;
+// const DummyAllocator = Root.DummyAllocator;
+// const Utils = Root.Utils;
+// const EnumeratedDefinitions = Utils.EnumeratedDefs.EnumeratedDefinitions;
 
-const num_cast = Root.Cast.num_cast;
+// const num_cast = Root.Cast.num_cast;
 
-const DEBUG = std.debug.print;
+// const DEBUG = std.debug.print;
 
-const List = Root.IList.List;
+// const List = Root.IList.List;
 
-const SetOneZeroMode = enum(u8) {
-    SET_1,
-    SET_0,
-};
+// const SetOneZeroMode = enum(u8) {
+//     SET_1,
+//     SET_0,
+// };
 
-const SetMode = enum(u8) {
-    CLEAR_AND_BIT_OR,
-    BIT_OR_ONLY,
-    CLEAR_ONLY,
-};
+// const SetMode = enum(u8) {
+//     CLEAR_AND_BIT_OR,
+//     BIT_OR_ONLY,
+//     CLEAR_ONLY,
+// };
 
-const TrueIndex = struct {
-    block_index: usize = 0,
-    bit_offset: math.Log2IntCeil(usize) = 0,
-};
+// const TrueIndex = struct {
+//     block_index: usize = 0,
+//     bit_offset: math.Log2IntCeil(usize) = 0,
+// };
 
-pub fn BitList(comptime BITS_PER_INDEX: comptime_int, comptime ELEM_TYPE: type) type {
-    Assert.assert_with_reason(BITS_PER_INDEX <= @bitSizeOf(usize), @src(), "`BITS_PER_INDEX` must be less than or equal to the number of bits in a `usize`, got {d} > {d}", .{ BITS_PER_INDEX, @bitSizeOf(usize) });
-    Assert.assert_with_reason(@bitSizeOf(ELEM_TYPE) == BITS_PER_INDEX, @src(), "the bit size of `ELEM_TYPE` ({d}) must equal the `BITS_PER_INDEX` ({d})", .{ @bitSizeOf(ELEM_TYPE), BITS_PER_INDEX });
-    return extern struct {
-        const Self = @This();
+// pub fn BitList(comptime BITS_PER_INDEX: comptime_int, comptime ELEM_TYPE: type) type {
+//     Assert.assert_with_reason(BITS_PER_INDEX <= @bitSizeOf(usize), @src(), "`BITS_PER_INDEX` must be less than or equal to the number of bits in a `usize`, got {d} > {d}", .{ BITS_PER_INDEX, @bitSizeOf(usize) });
+//     Assert.assert_with_reason(@bitSizeOf(ELEM_TYPE) == BITS_PER_INDEX, @src(), "the bit size of `ELEM_TYPE` ({d}) must equal the `BITS_PER_INDEX` ({d})", .{ @bitSizeOf(ELEM_TYPE), BITS_PER_INDEX });
+//     return extern struct {
+//         const Self = @This();
 
-        list: List(usize) = .{},
-        index_len: usize = 0,
+//         list: List(usize) = .{},
+//         index_len: usize = 0,
 
-        pub const BITS = std.meta.Int(.unsigned, BITS_PER_INDEX);
-        pub const TYPE = ELEM_TYPE;
-        const USIZEBITS = @bitSizeOf(usize);
-        const EVENLY_DIVISIBLE = USIZEBITS % BITS_PER_INDEX == 0;
-        const OFFSHIFT = if (USIZEBITS == 32) 5 else 6;
-        const OFFMASK = (1 << OFFSHIFT) - 1;
+//         pub const BITS = std.meta.Int(.unsigned, BITS_PER_INDEX);
+//         pub const TYPE = ELEM_TYPE;
+//         const USIZEBITS = @bitSizeOf(usize);
+//         const EVENLY_DIVISIBLE = USIZEBITS % BITS_PER_INDEX == 0;
+//         const OFFSHIFT = if (USIZEBITS == 32) 5 else 6;
+//         const OFFMASK = (1 << OFFSHIFT) - 1;
 
-        const BITMASK = (@as(usize, 1) << BITS_PER_INDEX) - 1;
+//         const BITMASK = (@as(usize, 1) << BITS_PER_INDEX) - 1;
 
-        pub fn init_capacity(cap: usize, alloc: Allocator) Self {
-            const bits_needed = BITS_PER_INDEX * cap;
-            const real_cap = std.mem.alignForward(usize, bits_needed, USIZEBITS) >> OFFSHIFT;
-            return Self{
-                .list = List(usize).init_capacity(real_cap, alloc),
-                .index_len = 0,
-            };
-        }
+//         pub fn init_capacity(cap: usize, alloc: Allocator) Self {
+//             const bits_needed = BITS_PER_INDEX * cap;
+//             const real_cap = std.mem.alignForward(usize, bits_needed, USIZEBITS) >> OFFSHIFT;
+//             return Self{
+//                 .list = List(usize).init_capacity(real_cap, alloc),
+//                 .index_len = 0,
+//             };
+//         }
 
-        pub fn free_memory(self: *Self, alloc: Allocator) void {
-            self.list.free(alloc);
-            self.index_len = 0;
-        }
+//         pub fn free_memory(self: *Self, alloc: Allocator) void {
+//             self.list.free(alloc);
+//             self.index_len = 0;
+//         }
 
-        fn block_offset(idx: usize) TrueIndex {
-            var out: TrueIndex = undefined;
-            const bit_idx = idx * BITS_PER_INDEX;
-            out.block_index = bit_idx >> OFFSHIFT;
-            out.bit_offset = @intCast(bit_idx & OFFMASK);
-            return out;
-        }
+//         fn block_offset(idx: usize) TrueIndex {
+//             var out: TrueIndex = undefined;
+//             const bit_idx = idx * BITS_PER_INDEX;
+//             out.block_index = bit_idx >> OFFSHIFT;
+//             out.bit_offset = @intCast(bit_idx & OFFMASK);
+//             return out;
+//         }
 
-        pub fn blocks_needed(cap: usize) usize {
-            const bits_needed = BITS_PER_INDEX * cap;
-            const real_cap = std.mem.alignForward(usize, bits_needed, USIZEBITS) >> OFFSHIFT;
-            return real_cap + if (EVENLY_DIVISIBLE) 0 else 1;
-        }
+//         pub fn blocks_needed(cap: usize) usize {
+//             const bits_needed = BITS_PER_INDEX * cap;
+//             const real_cap = std.mem.alignForward(usize, bits_needed, USIZEBITS) >> OFFSHIFT;
+//             return real_cap + if (EVENLY_DIVISIBLE) 0 else 1;
+//         }
 
-        pub fn get_raw(self: Self, idx: usize) BITS {
-            Assert.assert_idx_less_than_len(idx, self.index_len, @src());
-            const index = block_offset(idx);
-            if (EVENLY_DIVISIBLE) {
-                var value = self.list.ptr[index.block_index];
-                value >>= @intCast(index.bit_offset);
-                value &= BITMASK;
-                return @intCast(value);
-            } else {
-                var value = self.list.ptr[index.block_index];
-                value >>= @intCast(index.bit_offset);
-                var value_2 = self.list.ptr[index.block_index + 1];
-                const offset_2: math.Log2Int(usize) = num_cast((USIZEBITS - 1) - num_cast(index.bit_offset, usize), math.Log2Int(usize));
-                value_2 <<= offset_2;
-                value_2 <<= 1;
-                value |= value_2;
-                value &= BITMASK;
-                return @intCast(value);
-            }
-        }
+//         pub fn get_raw(self: Self, idx: usize) BITS {
+//             Assert.assert_idx_less_than_len(idx, self.index_len, @src());
+//             const index = block_offset(idx);
+//             if (EVENLY_DIVISIBLE) {
+//                 var value = self.list.ptr[index.block_index];
+//                 value >>= @intCast(index.bit_offset);
+//                 value &= BITMASK;
+//                 return @intCast(value);
+//             } else {
+//                 var value = self.list.ptr[index.block_index];
+//                 value >>= @intCast(index.bit_offset);
+//                 var value_2 = self.list.ptr[index.block_index + 1];
+//                 const offset_2: math.Log2Int(usize) = num_cast((USIZEBITS - 1) - num_cast(index.bit_offset, usize), math.Log2Int(usize));
+//                 value_2 <<= offset_2;
+//                 value_2 <<= 1;
+//                 value |= value_2;
+//                 value &= BITMASK;
+//                 return @intCast(value);
+//             }
+//         }
 
-        pub fn get(self: Self, idx: usize) TYPE {
-            return @bitCast(self.get_raw(idx));
-        }
+//         pub fn get(self: Self, idx: usize) TYPE {
+//             return @bitCast(self.get_raw(idx));
+//         }
 
-        fn set_internal(self: Self, idx: usize, val: BITS, comptime mode: SetMode) void {
-            Assert.assert_idx_less_than_len(idx, self.index_len, @src());
-            const index = block_offset(idx);
-            if (EVENLY_DIVISIBLE) {
-                var block = self.list.ptr[index.block_index];
-                var value: usize = @intCast(val);
-                const mask = BITMASK << @intCast(index.bit_offset);
-                value <<= @intCast(index.bit_offset);
-                if (mode != .BIT_OR_ONLY) {
-                    block &= ~mask;
-                }
-                if (mode != .CLEAR_ONLY) {
-                    block |= value;
-                }
-                self.list.ptr[index.block_index] = block;
-            } else {
-                var block = self.list.ptr[index.block_index];
-                var value: usize = @intCast(val);
-                var mask = BITMASK << @intCast(index.bit_offset);
-                value <<= @intCast(index.bit_offset);
-                if (mode != .BIT_OR_ONLY) {
-                    block &= ~mask;
-                }
-                if (mode != .CLEAR_ONLY) {
-                    block |= value;
-                }
-                self.list.ptr[index.block_index] = block;
-                const offset_2: math.Log2Int(usize) = num_cast((USIZEBITS - 1) - num_cast(index.bit_offset, usize), math.Log2Int(usize));
-                block = self.list.ptr[index.block_index + 1];
-                value = @intCast(val);
-                mask = BITMASK >> offset_2;
-                mask >>= 1;
-                value >>= offset_2;
-                value >>= 1;
-                if (mode != .BIT_OR_ONLY) {
-                    block &= ~mask;
-                }
-                if (mode != .CLEAR_ONLY) {
-                    block |= value;
-                }
-                self.list.ptr[index.block_index + 1] = block;
-            }
-        }
+//         fn set_internal(self: Self, idx: usize, val: BITS, comptime mode: SetMode) void {
+//             Assert.assert_idx_less_than_len(idx, self.index_len, @src());
+//             const index = block_offset(idx);
+//             if (EVENLY_DIVISIBLE) {
+//                 var block = self.list.ptr[index.block_index];
+//                 var value: usize = @intCast(val);
+//                 const mask = BITMASK << @intCast(index.bit_offset);
+//                 value <<= @intCast(index.bit_offset);
+//                 if (mode != .BIT_OR_ONLY) {
+//                     block &= ~mask;
+//                 }
+//                 if (mode != .CLEAR_ONLY) {
+//                     block |= value;
+//                 }
+//                 self.list.ptr[index.block_index] = block;
+//             } else {
+//                 var block = self.list.ptr[index.block_index];
+//                 var value: usize = @intCast(val);
+//                 var mask = BITMASK << @intCast(index.bit_offset);
+//                 value <<= @intCast(index.bit_offset);
+//                 if (mode != .BIT_OR_ONLY) {
+//                     block &= ~mask;
+//                 }
+//                 if (mode != .CLEAR_ONLY) {
+//                     block |= value;
+//                 }
+//                 self.list.ptr[index.block_index] = block;
+//                 const offset_2: math.Log2Int(usize) = num_cast((USIZEBITS - 1) - num_cast(index.bit_offset, usize), math.Log2Int(usize));
+//                 block = self.list.ptr[index.block_index + 1];
+//                 value = @intCast(val);
+//                 mask = BITMASK >> offset_2;
+//                 mask >>= 1;
+//                 value >>= offset_2;
+//                 value >>= 1;
+//                 if (mode != .BIT_OR_ONLY) {
+//                     block &= ~mask;
+//                 }
+//                 if (mode != .CLEAR_ONLY) {
+//                     block |= value;
+//                 }
+//                 self.list.ptr[index.block_index + 1] = block;
+//             }
+//         }
 
-        pub fn set(self: Self, idx: usize, val: TYPE) void {
-            const bits: BITS = @bitCast(val);
-            self.set_internal(idx, bits, .CLEAR_AND_BIT_OR);
-        }
-        pub fn set_no_clear(self: Self, idx: usize, val: TYPE) void {
-            const bits: BITS = @bitCast(val);
-            self.set_internal(idx, bits, .BIT_OR_ONLY);
-        }
-        pub fn set_raw(self: Self, idx: usize, bits: BITS) void {
-            self.set_internal(idx, bits, .CLEAR_AND_BIT_OR);
-        }
-        pub fn set_raw_no_clear(self: Self, idx: usize, bits: BITS) void {
-            self.set_internal(idx, bits, .BIT_OR_ONLY);
-        }
-        pub fn clear(self: Self, idx: usize) void {
-            self.set_internal(idx, 0, .CLEAR_ONLY);
-        }
+//         pub fn set(self: Self, idx: usize, val: TYPE) void {
+//             const bits: BITS = @bitCast(val);
+//             self.set_internal(idx, bits, .CLEAR_AND_BIT_OR);
+//         }
+//         pub fn set_no_clear(self: Self, idx: usize, val: TYPE) void {
+//             const bits: BITS = @bitCast(val);
+//             self.set_internal(idx, bits, .BIT_OR_ONLY);
+//         }
+//         pub fn set_raw(self: Self, idx: usize, bits: BITS) void {
+//             self.set_internal(idx, bits, .CLEAR_AND_BIT_OR);
+//         }
+//         pub fn set_raw_no_clear(self: Self, idx: usize, bits: BITS) void {
+//             self.set_internal(idx, bits, .BIT_OR_ONLY);
+//         }
+//         pub fn clear(self: Self, idx: usize) void {
+//             self.set_internal(idx, 0, .CLEAR_ONLY);
+//         }
 
-        pub fn ensure_capacity_and_zero_new(self: *Self, cap: usize, alloc: Allocator) void {
-            const old_cap = self.list.cap;
-            const need_cap = Self.blocks_needed(cap);
-            self.list.ensure_free_slots(need_cap, alloc);
-            const new_cap = self.list.cap;
-            self.list.len = self.list.cap;
-            @memset(self.list.ptr[old_cap..new_cap], 0);
-        }
-        pub fn ensure_capacity_and_fill_new_ones(self: *Self, cap: usize, alloc: Allocator) void {
-            const old_cap = self.list.cap;
-            const need_cap = Self.blocks_needed(cap);
-            self.list.ensure_free_slots(need_cap, alloc);
-            const new_cap = self.list.cap;
-            self.list.len = self.list.cap;
-            @memset(self.list.ptr[old_cap..new_cap], 1);
-        }
-        pub fn set_len(self: *Self, len: usize, alloc: Allocator) void {
-            self.ensure_capacity_and_zero_new(len, alloc);
-            self.index_len = len;
-        }
-        pub fn grow_len_if_needed(self: *Self, len: usize, alloc: Allocator) void {
-            if (self.index_len >= len) return;
-            self.ensure_capacity_and_zero_new(len, alloc);
-            self.index_len = len;
-        }
-        pub fn grow_len_if_needed_for_idx(self: *Self, idx: usize, alloc: Allocator) void {
-            if (idx < self.index_len) return;
-            const len = idx + 1;
-            self.ensure_capacity_and_zero_new(len, alloc);
-            self.index_len = len;
-        }
-        pub fn set_len_fill_new_ones(self: *Self, len: usize, alloc: Allocator) void {
-            self.ensure_capacity_and_fill_new_ones(len, alloc);
-            self.index_len = len;
-        }
-        pub fn grow_len_if_needed_fill_new_ones(self: *Self, len: usize, alloc: Allocator) void {
-            if (self.index_len >= len) return;
-            self.ensure_capacity_and_fill_new_ones(len, alloc);
-            self.index_len = len;
-        }
-        pub fn grow_len_if_needed_for_idx_fill_new_ones(self: *Self, idx: usize, alloc: Allocator) void {
-            if (idx < self.index_len) return;
-            const len = idx + 1;
-            self.ensure_capacity_and_fill_new_ones(len, alloc);
-            self.index_len = len;
-        }
+//         pub fn ensure_capacity_and_zero_new(self: *Self, cap: usize, alloc: Allocator) void {
+//             const old_cap = self.list.cap;
+//             const need_cap = Self.blocks_needed(cap);
+//             self.list.ensure_free_slots(need_cap, alloc);
+//             const new_cap = self.list.cap;
+//             self.list.len = self.list.cap;
+//             @memset(self.list.ptr[old_cap..new_cap], 0);
+//         }
+//         pub fn ensure_capacity_and_fill_new_ones(self: *Self, cap: usize, alloc: Allocator) void {
+//             const old_cap = self.list.cap;
+//             const need_cap = Self.blocks_needed(cap);
+//             self.list.ensure_free_slots(need_cap, alloc);
+//             const new_cap = self.list.cap;
+//             self.list.len = self.list.cap;
+//             @memset(self.list.ptr[old_cap..new_cap], 1);
+//         }
+//         pub fn set_len(self: *Self, len: usize, alloc: Allocator) void {
+//             self.ensure_capacity_and_zero_new(len, alloc);
+//             self.index_len = len;
+//         }
+//         pub fn grow_len_if_needed(self: *Self, len: usize, alloc: Allocator) void {
+//             if (self.index_len >= len) return;
+//             self.ensure_capacity_and_zero_new(len, alloc);
+//             self.index_len = len;
+//         }
+//         pub fn grow_len_if_needed_for_idx(self: *Self, idx: usize, alloc: Allocator) void {
+//             if (idx < self.index_len) return;
+//             const len = idx + 1;
+//             self.ensure_capacity_and_zero_new(len, alloc);
+//             self.index_len = len;
+//         }
+//         pub fn set_len_fill_new_ones(self: *Self, len: usize, alloc: Allocator) void {
+//             self.ensure_capacity_and_fill_new_ones(len, alloc);
+//             self.index_len = len;
+//         }
+//         pub fn grow_len_if_needed_fill_new_ones(self: *Self, len: usize, alloc: Allocator) void {
+//             if (self.index_len >= len) return;
+//             self.ensure_capacity_and_fill_new_ones(len, alloc);
+//             self.index_len = len;
+//         }
+//         pub fn grow_len_if_needed_for_idx_fill_new_ones(self: *Self, idx: usize, alloc: Allocator) void {
+//             if (idx < self.index_len) return;
+//             const len = idx + 1;
+//             self.ensure_capacity_and_fill_new_ones(len, alloc);
+//             self.index_len = len;
+//         }
 
-        fn find_first_n_consecutive_set_bits_starting_at_internal(self: Self, idx: usize, n: usize, comptime FROM_START: bool, comptime MUST_FIND_AT_INDEX: bool) ?usize {
-            Assert.assert_with_reason(BITS_PER_INDEX == 1, @src(), "this function can only be used when `BITS_PER_INDEX == 1,`", .{});
-            const start_block: TrueIndex = if (FROM_START) .{} else block_offset(idx);
-            var block_idx: usize = if (FROM_START) 0 else start_block.block_index;
-            var bits_idx: usize = if (FROM_START) 0 else idx;
-            var bits_left: usize = if (FROM_START) undefined else USIZEBITS - num_cast(start_block.bit_offset, usize);
-            var consecutive_ones: usize = 0;
-            var consecutive_ones_start: usize = if (FROM_START) 0 else idx;
-            if (!FROM_START) {
-                var block = self.list.ptr[block_idx] >> @intCast(start_block.bit_offset);
-                while (true) {
-                    const skip_zeroes: usize = @min(bits_left, num_cast(@ctz(block), usize));
-                    bits_idx += skip_zeroes;
-                    if (skip_zeroes == bits_left) break;
-                    bits_left -= skip_zeroes;
-                    block >>= @intCast(skip_zeroes);
-                    block = ~block;
-                    if (skip_zeroes > 0) {
-                        if (MUST_FIND_AT_INDEX) return null;
-                        consecutive_ones_start = bits_idx;
-                        consecutive_ones = 0;
-                    }
-                    const next_ones = @min(bits_left, @ctz(block));
-                    consecutive_ones += next_ones;
-                    bits_idx += next_ones;
-                    if (next_ones == bits_left or consecutive_ones >= n) break;
-                    bits_left -= next_ones;
-                    block >>= @intCast(next_ones);
-                    block = ~block;
-                }
-                if (consecutive_ones >= n) return consecutive_ones_start;
-            }
-            while (bits_idx < self.index_len) {
-                var block = self.list.ptr[block_idx];
-                bits_left = @min(USIZEBITS, self.index_len - bits_idx);
-                while (true) {
-                    const skip_zeroes: usize = @min(bits_left, num_cast(@ctz(block), usize));
-                    bits_idx += skip_zeroes;
-                    if (skip_zeroes == bits_left) break;
-                    bits_left -= skip_zeroes;
-                    block >>= @intCast(skip_zeroes);
-                    block = ~block;
-                    if (skip_zeroes > 0) {
-                        if (MUST_FIND_AT_INDEX) return null;
-                        consecutive_ones_start = bits_idx;
-                        consecutive_ones = 0;
-                    }
-                    const next_ones = @min(bits_left, @ctz(block));
-                    consecutive_ones += next_ones;
-                    bits_idx += next_ones;
-                    if (next_ones == bits_left or consecutive_ones >= n) break;
-                    bits_left -= next_ones;
-                    block >>= @intCast(next_ones);
-                    block = ~block;
-                }
-                if (consecutive_ones >= n) return consecutive_ones_start;
-                block_idx += 1;
-            }
-            return null;
-        }
-        pub fn find_first_n_consecutive_set_bits(self: Self, n: usize) ?usize {
-            return self.find_first_n_consecutive_set_bits_starting_at_internal(0, n, true, false);
-        }
-        pub fn find_first_n_consecutive_set_bits_starting_at(self: Self, idx: usize, n: usize) ?usize {
-            return self.find_first_n_consecutive_set_bits_starting_at_internal(idx, n, false, false);
-        }
-        pub fn idx_has_n_consecutive_set_bits(self: Self, idx: usize, n: usize) bool {
-            return self.find_first_n_consecutive_set_bits_starting_at_internal(idx, n, false, true) != null;
-        }
+//         fn find_first_n_consecutive_set_bits_starting_at_internal(self: Self, idx: usize, n: usize, comptime FROM_START: bool, comptime MUST_FIND_AT_INDEX: bool) ?usize {
+//             Assert.assert_with_reason(BITS_PER_INDEX == 1, @src(), "this function can only be used when `BITS_PER_INDEX == 1,`", .{});
+//             const start_block: TrueIndex = if (FROM_START) .{} else block_offset(idx);
+//             var block_idx: usize = if (FROM_START) 0 else start_block.block_index;
+//             var bits_idx: usize = if (FROM_START) 0 else idx;
+//             var bits_left: usize = if (FROM_START) undefined else USIZEBITS - num_cast(start_block.bit_offset, usize);
+//             var consecutive_ones: usize = 0;
+//             var consecutive_ones_start: usize = if (FROM_START) 0 else idx;
+//             if (!FROM_START) {
+//                 var block = self.list.ptr[block_idx] >> @intCast(start_block.bit_offset);
+//                 while (true) {
+//                     const skip_zeroes: usize = @min(bits_left, num_cast(@ctz(block), usize));
+//                     bits_idx += skip_zeroes;
+//                     if (skip_zeroes == bits_left) break;
+//                     bits_left -= skip_zeroes;
+//                     block >>= @intCast(skip_zeroes);
+//                     block = ~block;
+//                     if (skip_zeroes > 0) {
+//                         if (MUST_FIND_AT_INDEX) return null;
+//                         consecutive_ones_start = bits_idx;
+//                         consecutive_ones = 0;
+//                     }
+//                     const next_ones = @min(bits_left, @ctz(block));
+//                     consecutive_ones += next_ones;
+//                     bits_idx += next_ones;
+//                     if (next_ones == bits_left or consecutive_ones >= n) break;
+//                     bits_left -= next_ones;
+//                     block >>= @intCast(next_ones);
+//                     block = ~block;
+//                 }
+//                 if (consecutive_ones >= n) return consecutive_ones_start;
+//             }
+//             while (bits_idx < self.index_len) {
+//                 var block = self.list.ptr[block_idx];
+//                 bits_left = @min(USIZEBITS, self.index_len - bits_idx);
+//                 while (true) {
+//                     const skip_zeroes: usize = @min(bits_left, num_cast(@ctz(block), usize));
+//                     bits_idx += skip_zeroes;
+//                     if (skip_zeroes == bits_left) break;
+//                     bits_left -= skip_zeroes;
+//                     block >>= @intCast(skip_zeroes);
+//                     block = ~block;
+//                     if (skip_zeroes > 0) {
+//                         if (MUST_FIND_AT_INDEX) return null;
+//                         consecutive_ones_start = bits_idx;
+//                         consecutive_ones = 0;
+//                     }
+//                     const next_ones = @min(bits_left, @ctz(block));
+//                     consecutive_ones += next_ones;
+//                     bits_idx += next_ones;
+//                     if (next_ones == bits_left or consecutive_ones >= n) break;
+//                     bits_left -= next_ones;
+//                     block >>= @intCast(next_ones);
+//                     block = ~block;
+//                 }
+//                 if (consecutive_ones >= n) return consecutive_ones_start;
+//                 block_idx += 1;
+//             }
+//             return null;
+//         }
+//         pub fn find_first_n_consecutive_set_bits(self: Self, n: usize) ?usize {
+//             return self.find_first_n_consecutive_set_bits_starting_at_internal(0, n, true, false);
+//         }
+//         pub fn find_first_n_consecutive_set_bits_starting_at(self: Self, idx: usize, n: usize) ?usize {
+//             return self.find_first_n_consecutive_set_bits_starting_at_internal(idx, n, false, false);
+//         }
+//         pub fn idx_has_n_consecutive_set_bits(self: Self, idx: usize, n: usize) bool {
+//             return self.find_first_n_consecutive_set_bits_starting_at_internal(idx, n, false, true) != null;
+//         }
 
-        fn find_first_n_consecutive_unset_bits_starting_at_internal(self: Self, idx: usize, n: usize, comptime FROM_START: bool, comptime MUST_FIND_AT_INDEX: bool) ?usize {
-            Assert.assert_with_reason(BITS_PER_INDEX == 1, @src(), "this function can only be used when `BITS_PER_INDEX == 1,`", .{});
-            const start_block: TrueIndex = if (FROM_START) .{} else block_offset(idx);
-            var block_idx: usize = if (FROM_START) 0 else start_block.block_index;
-            var bits_idx: usize = if (FROM_START) 0 else idx;
-            var bits_left: usize = if (FROM_START) undefined else USIZEBITS - num_cast(start_block.bit_offset, usize);
-            var consecutive_zeroes: usize = 0;
-            var consecutive_zeroes_start: usize = if (FROM_START) 0 else idx;
-            if (!FROM_START) {
-                var block = (~self.list.ptr[block_idx]) >> @intCast(start_block.bit_offset);
-                while (true) {
-                    const skip_ones: usize = @min(bits_left, num_cast(@ctz(block), usize));
-                    bits_idx += skip_ones;
-                    if (skip_ones == bits_left) break;
-                    bits_left -= skip_ones;
-                    block >>= @intCast(skip_ones);
-                    block = ~block;
-                    if (skip_ones > 0) {
-                        if (MUST_FIND_AT_INDEX) return null;
-                        consecutive_zeroes_start = bits_idx;
-                        consecutive_zeroes = 0;
-                    }
-                    const next_zeroes = @min(bits_left, @ctz(block));
-                    consecutive_zeroes += next_zeroes;
-                    bits_idx += next_zeroes;
-                    if (next_zeroes == bits_left or consecutive_zeroes >= n) break;
-                    bits_left -= next_zeroes;
-                    block >>= @intCast(next_zeroes);
-                    block = ~block;
-                }
-                if (consecutive_zeroes >= n) return consecutive_zeroes_start;
-            }
-            while (bits_idx < self.index_len) {
-                var block = ~self.list.ptr[block_idx];
-                bits_left = @min(USIZEBITS, self.index_len - bits_idx);
-                while (true) {
-                    const skip_ones: usize = @min(bits_left, num_cast(@ctz(block), usize));
-                    bits_idx += skip_ones;
-                    if (skip_ones == bits_left) break;
-                    bits_left -= skip_ones;
-                    block >>= @intCast(skip_ones);
-                    block = ~block;
-                    if (skip_ones > 0) {
-                        if (MUST_FIND_AT_INDEX) return null;
-                        consecutive_zeroes_start = bits_idx;
-                        consecutive_zeroes = 0;
-                    }
-                    const next_zeroes = @min(bits_left, @ctz(block));
-                    consecutive_zeroes += next_zeroes;
-                    bits_idx += next_zeroes;
-                    if (next_zeroes == bits_left or consecutive_zeroes >= n) break;
-                    bits_left -= next_zeroes;
-                    block >>= @intCast(next_zeroes);
-                    block = ~block;
-                }
-                if (consecutive_zeroes >= n) return consecutive_zeroes_start;
-                block_idx += 1;
-            }
-            return null;
-        }
-        pub fn find_first_n_consecutive_unset_bits(self: Self, n: usize) ?usize {
-            return self.find_first_n_consecutive_unset_bits_starting_at_internal(0, n, true, false);
-        }
-        pub fn find_first_n_consecutive_unset_bits_starting_at(self: Self, idx: usize, n: usize) ?usize {
-            return self.find_first_n_consecutive_unset_bits_starting_at_internal(idx, n, false, false);
-        }
-        pub fn idx_has_n_consecutive_unset_bits(self: Self, idx: usize, n: usize) bool {
-            return self.find_first_n_consecutive_unset_bits_starting_at_internal(idx, n, false, true) != null;
-        }
+//         fn find_first_n_consecutive_unset_bits_starting_at_internal(self: Self, idx: usize, n: usize, comptime FROM_START: bool, comptime MUST_FIND_AT_INDEX: bool) ?usize {
+//             Assert.assert_with_reason(BITS_PER_INDEX == 1, @src(), "this function can only be used when `BITS_PER_INDEX == 1,`", .{});
+//             const start_block: TrueIndex = if (FROM_START) .{} else block_offset(idx);
+//             var block_idx: usize = if (FROM_START) 0 else start_block.block_index;
+//             var bits_idx: usize = if (FROM_START) 0 else idx;
+//             var bits_left: usize = if (FROM_START) undefined else USIZEBITS - num_cast(start_block.bit_offset, usize);
+//             var consecutive_zeroes: usize = 0;
+//             var consecutive_zeroes_start: usize = if (FROM_START) 0 else idx;
+//             if (!FROM_START) {
+//                 var block = (~self.list.ptr[block_idx]) >> @intCast(start_block.bit_offset);
+//                 while (true) {
+//                     const skip_ones: usize = @min(bits_left, num_cast(@ctz(block), usize));
+//                     bits_idx += skip_ones;
+//                     if (skip_ones == bits_left) break;
+//                     bits_left -= skip_ones;
+//                     block >>= @intCast(skip_ones);
+//                     block = ~block;
+//                     if (skip_ones > 0) {
+//                         if (MUST_FIND_AT_INDEX) return null;
+//                         consecutive_zeroes_start = bits_idx;
+//                         consecutive_zeroes = 0;
+//                     }
+//                     const next_zeroes = @min(bits_left, @ctz(block));
+//                     consecutive_zeroes += next_zeroes;
+//                     bits_idx += next_zeroes;
+//                     if (next_zeroes == bits_left or consecutive_zeroes >= n) break;
+//                     bits_left -= next_zeroes;
+//                     block >>= @intCast(next_zeroes);
+//                     block = ~block;
+//                 }
+//                 if (consecutive_zeroes >= n) return consecutive_zeroes_start;
+//             }
+//             while (bits_idx < self.index_len) {
+//                 var block = ~self.list.ptr[block_idx];
+//                 bits_left = @min(USIZEBITS, self.index_len - bits_idx);
+//                 while (true) {
+//                     const skip_ones: usize = @min(bits_left, num_cast(@ctz(block), usize));
+//                     bits_idx += skip_ones;
+//                     if (skip_ones == bits_left) break;
+//                     bits_left -= skip_ones;
+//                     block >>= @intCast(skip_ones);
+//                     block = ~block;
+//                     if (skip_ones > 0) {
+//                         if (MUST_FIND_AT_INDEX) return null;
+//                         consecutive_zeroes_start = bits_idx;
+//                         consecutive_zeroes = 0;
+//                     }
+//                     const next_zeroes = @min(bits_left, @ctz(block));
+//                     consecutive_zeroes += next_zeroes;
+//                     bits_idx += next_zeroes;
+//                     if (next_zeroes == bits_left or consecutive_zeroes >= n) break;
+//                     bits_left -= next_zeroes;
+//                     block >>= @intCast(next_zeroes);
+//                     block = ~block;
+//                 }
+//                 if (consecutive_zeroes >= n) return consecutive_zeroes_start;
+//                 block_idx += 1;
+//             }
+//             return null;
+//         }
+//         pub fn find_first_n_consecutive_unset_bits(self: Self, n: usize) ?usize {
+//             return self.find_first_n_consecutive_unset_bits_starting_at_internal(0, n, true, false);
+//         }
+//         pub fn find_first_n_consecutive_unset_bits_starting_at(self: Self, idx: usize, n: usize) ?usize {
+//             return self.find_first_n_consecutive_unset_bits_starting_at_internal(idx, n, false, false);
+//         }
+//         pub fn idx_has_n_consecutive_unset_bits(self: Self, idx: usize, n: usize) bool {
+//             return self.find_first_n_consecutive_unset_bits_starting_at_internal(idx, n, false, true) != null;
+//         }
 
-        pub fn find_first_bit_set(self: Self) ?usize {
-            Assert.assert_with_reason(BITS_PER_INDEX == 1, @src(), "this function can only be used when `BITS_PER_INDEX == 1,`", .{});
-            if (self.index_len == 0) return null;
-            for (self.list.slice(), 0..) |block, b| {
-                if (block > 0) {
-                    const offset = @ctz(block);
-                    const idx = offset + (b * USIZEBITS);
-                    if (idx < self.index_len) return idx;
-                    return null;
-                }
-            }
-            return null;
-        }
-        pub fn find_first_bit_set_starting_at(self: Self, idx: usize) ?usize {
-            Assert.assert_with_reason(BITS_PER_INDEX == 1, @src(), "this function can only be used when `BITS_PER_INDEX == 1,`", .{});
-            if (self.index_len == 0) return null;
-            const start_block = block_offset(idx);
-            var first_block = self.list.ptr[start_block.block_index];
-            first_block >>= start_block.bit_offset;
-            if (first_block > 0) {
-                const offset = @ctz(first_block);
-                const _idx = idx + offset;
-                if (_idx < self.index_len) return idx;
-                return null;
-            }
-            for (self.list.slice()[start_block.block_index..], start_block.block_index..) |block, b| {
-                if (block > 0) {
-                    const offset = @ctz(block);
-                    const _idx = offset + (b * USIZEBITS);
-                    if (_idx < self.index_len) return idx;
-                    return null;
-                }
-            }
-            return null;
-        }
-        pub fn find_first_bit_unset(self: Self) ?usize {
-            Assert.assert_with_reason(BITS_PER_INDEX == 1, @src(), "this function can only be used when `BITS_PER_INDEX == 1,`", .{});
-            if (self.index_len == 0) return null;
-            for (self.list.slice(), 0..) |block, b| {
-                if (block < math.maxInt(usize)) {
-                    const inverse_block = ~block;
-                    const offset = @ctz(inverse_block);
-                    const idx = offset + (b * USIZEBITS);
-                    if (idx < self.index_len) return idx;
-                    return null;
-                }
-            }
-            return null;
-        }
-        pub fn find_first_bit_unset_starting_at(self: Self, idx: usize) ?usize {
-            Assert.assert_with_reason(BITS_PER_INDEX == 1, @src(), "this function can only be used when `BITS_PER_INDEX == 1,`", .{});
-            if (self.index_len == 0) return null;
-            const start_block = block_offset(idx);
-            var first_block = self.list.ptr[start_block.block_index];
-            first_block >>= start_block.bit_offset;
-            const fill_ones = math.maxInt(usize) << (USIZEBITS - start_block.bit_offset);
-            first_block |= fill_ones;
-            if (first_block < math.maxInt(usize)) {
-                const inverse_block = ~first_block;
-                const offset = @ctz(inverse_block);
-                const _idx = idx + offset;
-                if (_idx < self.index_len) return _idx;
-                return null;
-            }
-            for (self.list.slice()[start_block.block_index..], start_block.block_index..) |block, b| {
-                if (block < math.maxInt(usize)) {
-                    const inverse_block = ~block;
-                    const offset = @ctz(inverse_block);
-                    const _idx = offset + (b * USIZEBITS);
-                    if (_idx < self.index_len) return _idx;
-                    return null;
-                }
-            }
-            return null;
-        }
+//         pub fn find_first_bit_set(self: Self) ?usize {
+//             Assert.assert_with_reason(BITS_PER_INDEX == 1, @src(), "this function can only be used when `BITS_PER_INDEX == 1,`", .{});
+//             if (self.index_len == 0) return null;
+//             for (self.list.slice(), 0..) |block, b| {
+//                 if (block > 0) {
+//                     const offset = @ctz(block);
+//                     const idx = offset + (b * USIZEBITS);
+//                     if (idx < self.index_len) return idx;
+//                     return null;
+//                 }
+//             }
+//             return null;
+//         }
+//         pub fn find_first_bit_set_starting_at(self: Self, idx: usize) ?usize {
+//             Assert.assert_with_reason(BITS_PER_INDEX == 1, @src(), "this function can only be used when `BITS_PER_INDEX == 1,`", .{});
+//             if (self.index_len == 0) return null;
+//             const start_block = block_offset(idx);
+//             var first_block = self.list.ptr[start_block.block_index];
+//             first_block >>= start_block.bit_offset;
+//             if (first_block > 0) {
+//                 const offset = @ctz(first_block);
+//                 const _idx = idx + offset;
+//                 if (_idx < self.index_len) return idx;
+//                 return null;
+//             }
+//             for (self.list.slice()[start_block.block_index..], start_block.block_index..) |block, b| {
+//                 if (block > 0) {
+//                     const offset = @ctz(block);
+//                     const _idx = offset + (b * USIZEBITS);
+//                     if (_idx < self.index_len) return idx;
+//                     return null;
+//                 }
+//             }
+//             return null;
+//         }
+//         pub fn find_first_bit_unset(self: Self) ?usize {
+//             Assert.assert_with_reason(BITS_PER_INDEX == 1, @src(), "this function can only be used when `BITS_PER_INDEX == 1,`", .{});
+//             if (self.index_len == 0) return null;
+//             for (self.list.slice(), 0..) |block, b| {
+//                 if (block < math.maxInt(usize)) {
+//                     const inverse_block = ~block;
+//                     const offset = @ctz(inverse_block);
+//                     const idx = offset + (b * USIZEBITS);
+//                     if (idx < self.index_len) return idx;
+//                     return null;
+//                 }
+//             }
+//             return null;
+//         }
+//         pub fn find_first_bit_unset_starting_at(self: Self, idx: usize) ?usize {
+//             Assert.assert_with_reason(BITS_PER_INDEX == 1, @src(), "this function can only be used when `BITS_PER_INDEX == 1,`", .{});
+//             if (self.index_len == 0) return null;
+//             const start_block = block_offset(idx);
+//             var first_block = self.list.ptr[start_block.block_index];
+//             first_block >>= start_block.bit_offset;
+//             const fill_ones = math.maxInt(usize) << (USIZEBITS - start_block.bit_offset);
+//             first_block |= fill_ones;
+//             if (first_block < math.maxInt(usize)) {
+//                 const inverse_block = ~first_block;
+//                 const offset = @ctz(inverse_block);
+//                 const _idx = idx + offset;
+//                 if (_idx < self.index_len) return _idx;
+//                 return null;
+//             }
+//             for (self.list.slice()[start_block.block_index..], start_block.block_index..) |block, b| {
+//                 if (block < math.maxInt(usize)) {
+//                     const inverse_block = ~block;
+//                     const offset = @ctz(inverse_block);
+//                     const _idx = offset + (b * USIZEBITS);
+//                     if (_idx < self.index_len) return _idx;
+//                     return null;
+//                 }
+//             }
+//             return null;
+//         }
 
-        pub fn set_range_bits(self: Self, start: usize, count: usize, comptime mode: SetOneZeroMode) void {
-            Assert.assert_with_reason(BITS_PER_INDEX == 1, @src(), "this function can only be used when `BITS_PER_INDEX == 1,`", .{});
-            const end = start + count;
-            Assert.assert_with_reason(end <= self.index_len, @src(), "start {d} + count {d} ({d}) is greater than the max index len {d}", .{ start, count, end, self.index_len });
-            const real_start = block_offset(start);
-            const val_in_first_block = Utils.first_n_bits_set(usize, @intCast(@min(USIZEBITS, count))) << @intCast(real_start.bit_offset);
-            switch (mode) {
-                .SET_1 => self.list.ptr[real_start.block_index] |= val_in_first_block,
-                .SET_0 => self.list.ptr[real_start.block_index] &= ~val_in_first_block,
-            }
-            const available_for_first_block = USIZEBITS - real_start.bit_offset;
-            if (available_for_first_block < count) {
-                var bits_left = count - available_for_first_block;
-                var next_block = real_start.block_index + 1;
-                while (bits_left >= USIZEBITS) {
-                    switch (mode) {
-                        .SET_1 => self.list.ptr[next_block] = math.maxInt(usize),
-                        .SET_0 => self.list.ptr[next_block] = 0,
-                    }
-                    next_block += 1;
-                    bits_left -= USIZEBITS;
-                }
-                if (bits_left > 0) {
-                    const val_in_last_block = Utils.first_n_bits_set(usize, @intCast(@min(USIZEBITS, bits_left)));
-                    switch (mode) {
-                        .SET_1 => self.list.ptr[next_block] |= val_in_last_block,
-                        .SET_0 => self.list.ptr[next_block] &= ~val_in_last_block,
-                    }
-                }
-            }
-        }
+//         pub fn set_range_bits(self: Self, start: usize, count: usize, comptime mode: SetOneZeroMode) void {
+//             Assert.assert_with_reason(BITS_PER_INDEX == 1, @src(), "this function can only be used when `BITS_PER_INDEX == 1,`", .{});
+//             const end = start + count;
+//             Assert.assert_with_reason(end <= self.index_len, @src(), "start {d} + count {d} ({d}) is greater than the max index len {d}", .{ start, count, end, self.index_len });
+//             const real_start = block_offset(start);
+//             const val_in_first_block = Utils.first_n_bits_set(usize, @intCast(@min(USIZEBITS, count))) << @intCast(real_start.bit_offset);
+//             switch (mode) {
+//                 .SET_1 => self.list.ptr[real_start.block_index] |= val_in_first_block,
+//                 .SET_0 => self.list.ptr[real_start.block_index] &= ~val_in_first_block,
+//             }
+//             const available_for_first_block = USIZEBITS - real_start.bit_offset;
+//             if (available_for_first_block < count) {
+//                 var bits_left = count - available_for_first_block;
+//                 var next_block = real_start.block_index + 1;
+//                 while (bits_left >= USIZEBITS) {
+//                     switch (mode) {
+//                         .SET_1 => self.list.ptr[next_block] = math.maxInt(usize),
+//                         .SET_0 => self.list.ptr[next_block] = 0,
+//                     }
+//                     next_block += 1;
+//                     bits_left -= USIZEBITS;
+//                 }
+//                 if (bits_left > 0) {
+//                     const val_in_last_block = Utils.first_n_bits_set(usize, @intCast(@min(USIZEBITS, bits_left)));
+//                     switch (mode) {
+//                         .SET_1 => self.list.ptr[next_block] |= val_in_last_block,
+//                         .SET_0 => self.list.ptr[next_block] &= ~val_in_last_block,
+//                     }
+//                 }
+//             }
+//         }
 
-        pub fn invert(self: Self, idx: usize) void {
-            var raw = self.get_raw(idx);
-            raw = ~raw;
-            self.set_raw(idx, raw);
-        }
+//         pub fn invert(self: Self, idx: usize) void {
+//             var raw = self.get_raw(idx);
+//             raw = ~raw;
+//             self.set_raw(idx, raw);
+//         }
 
-        pub fn count_bits_set_at_and_after_index(self: Self, idx: usize) usize {
-            Assert.assert_with_reason(BITS_PER_INDEX == 1, @src(), "you can only call this function when `BITS_PER_INDEX == 1`, got {d}", .{BITS_PER_INDEX});
-            const first = block_offset(idx);
-            const last = block_offset(self.index_len - 1);
-            var block_idx = last.block_index;
-            var block = self.list.ptr[block_idx];
-            const trim_last = (USIZEBITS - 1) - last.bit_offset;
-            block <<= @intCast(trim_last);
-            block >>= @intCast(trim_last);
-            var count: usize = 0;
-            if (last.block_index == first.block_index) {
-                block >>= @intCast(first.bit_offset);
-                count += @popCount(block);
-                return count;
-            }
-            count += @popCount(block);
-            block_idx -= 1;
-            while (block_idx > first.block_index) : (block_idx -= 1) {
-                block = self.list.ptr[block_idx];
-                count += @popCount(block);
-            }
-            block = self.list.ptr[block_idx];
-            block >>= @intCast(first.bit_offset);
-            count += @popCount(block);
-            return count;
-        }
-        pub fn count_bits_unset_at_and_after_index(self: Self, idx: usize) usize {
-            const bits_set = self.count_bits_set_at_and_after_index(idx);
-            const all_bits_at_and_after = self.index_len - idx;
-            return all_bits_at_and_after - bits_set;
-        }
-    };
-}
+//         pub fn count_bits_set_at_and_after_index(self: Self, idx: usize) usize {
+//             Assert.assert_with_reason(BITS_PER_INDEX == 1, @src(), "you can only call this function when `BITS_PER_INDEX == 1`, got {d}", .{BITS_PER_INDEX});
+//             const first = block_offset(idx);
+//             const last = block_offset(self.index_len - 1);
+//             var block_idx = last.block_index;
+//             var block = self.list.ptr[block_idx];
+//             const trim_last = (USIZEBITS - 1) - last.bit_offset;
+//             block <<= @intCast(trim_last);
+//             block >>= @intCast(trim_last);
+//             var count: usize = 0;
+//             if (last.block_index == first.block_index) {
+//                 block >>= @intCast(first.bit_offset);
+//                 count += @popCount(block);
+//                 return count;
+//             }
+//             count += @popCount(block);
+//             block_idx -= 1;
+//             while (block_idx > first.block_index) : (block_idx -= 1) {
+//                 block = self.list.ptr[block_idx];
+//                 count += @popCount(block);
+//             }
+//             block = self.list.ptr[block_idx];
+//             block >>= @intCast(first.bit_offset);
+//             count += @popCount(block);
+//             return count;
+//         }
+//         pub fn count_bits_unset_at_and_after_index(self: Self, idx: usize) usize {
+//             const bits_set = self.count_bits_set_at_and_after_index(idx);
+//             const all_bits_at_and_after = self.index_len - idx;
+//             return all_bits_at_and_after - bits_set;
+//         }
+//     };
+// }
 
-test "BitList" {
-    const Test = Root.Testing;
-    const BList = BitList(1, u1);
-    var data = [_]usize{
-        //        55        45  41       32      24       15     8      1
-        0b1111111110000011111111101111111101111111000111111001111100011110,
-        //           116
-        0b1111111111110000000000000000000000000000000000000000000000000011,
-        //                             162                               128
-        0b1111111111111111111111111111111111111111111111111111111111111111,
-    }; // 6+7+8+9+9+2+12+64
-    const list = BList{
-        .list = .{ .ptr = @ptrCast(&data), .cap = 3, .len = 3 },
-        .index_len = 192,
-    };
-    try Test.expect_equal(list.find_first_bit_set(), "list.find_first_bit_set()", 1, "1", "wrong result", .{});
-    try Test.expect_equal(list.find_first_bit_unset(), "list.find_first_bit_unset()", 0, "0", "wrong result", .{});
-    try Test.expect_equal(list.find_first_n_consecutive_set_bits(4), "list.find_first_n_consecutive_set_bits(4)", 1, "1", "wrong result", .{});
-    try Test.expect_equal(list.find_first_n_consecutive_set_bits(5), "list.find_first_n_consecutive_set_bits(5)", 8, "8", "wrong result", .{});
-    try Test.expect_equal(list.find_first_n_consecutive_set_bits(6), "list.find_first_n_consecutive_set_bits(6)", 15, "15", "wrong result", .{});
-    try Test.expect_equal(list.find_first_n_consecutive_set_bits(8), "list.find_first_n_consecutive_set_bits(8)", 32, "32", "wrong result", .{});
-    try Test.expect_equal(list.find_first_n_consecutive_set_bits(9), "list.find_first_n_consecutive_set_bits(9)", 41, "41", "wrong result", .{});
-    try Test.expect_equal(list.find_first_n_consecutive_set_bits(10), "list.find_first_n_consecutive_set_bits(10)", 55, "55", "wrong result", .{});
-    try Test.expect_equal(list.find_first_n_consecutive_set_bits(20), "list.find_first_n_consecutive_set_bits(20)", 116, "116", "wrong result", .{});
-    try Test.expect_equal(list.find_first_n_consecutive_set_bits(76), "list.find_first_n_consecutive_set_bits(76)", 116, "116", "wrong result", .{});
-    try Test.expect_equal(list.find_first_n_consecutive_set_bits(77), "list.find_first_n_consecutive_set_bits(77)", null, "null", "wrong result", .{});
-    try Test.expect_equal(list.find_first_n_consecutive_set_bits(78), "list.find_first_n_consecutive_set_bits(78)", null, "null", "wrong result", .{});
-    try Test.expect_equal(list.find_first_n_consecutive_set_bits_starting_at(45, 5), "list.find_first_n_consecutive_set_bits_starting_at(45, 5)", 45, "45", "wrong result", .{});
-    try Test.expect_equal(list.find_first_n_consecutive_set_bits_starting_at(45, 6), "list.find_first_n_consecutive_set_bits_starting_at(45, 6)", 55, "55", "wrong result", .{});
-    try Test.expect_equal(list.idx_has_n_consecutive_set_bits(45, 5), "list.idx_has_n_consecutive_set_bits(45, 5)", true, "true", "wrong result", .{});
-    try Test.expect_equal(list.idx_has_n_consecutive_set_bits(45, 6), "list.idx_has_n_consecutive_set_bits(45, 6)", false, "false", "wrong result", .{});
-    try Test.expect_equal(list.count_bits_set_at_and_after_index(15), "list.count_bits_set_at_and_after_index(15)", 117, "117", "wrong result", .{});
-    try Test.expect_equal(list.count_bits_set_at_and_after_index(24), "list.count_bits_set_at_and_after_index(24)", 111, "111", "wrong result", .{});
-    try Test.expect_equal(list.count_bits_set_at_and_after_index(162), "list.count_bits_set_at_and_after_index(162)", 30, "30", "wrong result", .{});
-    data[0] = ~data[0];
-    data[1] = ~data[1];
-    data[2] = ~data[2];
-    try Test.expect_equal(list.find_first_n_consecutive_unset_bits(4), "list.find_first_n_consecutive_unset_bits(4)", 1, "1", "wrong result", .{});
-    try Test.expect_equal(list.find_first_n_consecutive_unset_bits(5), "list.find_first_n_consecutive_unset_bits(5)", 8, "8", "wrong result", .{});
-    try Test.expect_equal(list.find_first_n_consecutive_unset_bits(6), "list.find_first_n_consecutive_unset_bits(6)", 15, "15", "wrong result", .{});
-    try Test.expect_equal(list.find_first_n_consecutive_unset_bits(8), "list.find_first_n_consecutive_unset_bits(8)", 32, "32", "wrong result", .{});
-    try Test.expect_equal(list.find_first_n_consecutive_unset_bits(9), "list.find_first_n_consecutive_unset_bits(9)", 41, "41", "wrong result", .{});
-    try Test.expect_equal(list.find_first_n_consecutive_unset_bits(10), "list.find_first_n_consecutive_unset_bits(10)", 55, "55", "wrong result", .{});
-    try Test.expect_equal(list.find_first_n_consecutive_unset_bits(20), "list.find_first_n_consecutive_unset_bits(20)", 116, "116", "wrong result", .{});
-    try Test.expect_equal(list.find_first_n_consecutive_unset_bits(76), "list.find_first_n_consecutive_unset_bits(76)", 116, "116", "wrong result", .{});
-    try Test.expect_equal(list.find_first_n_consecutive_unset_bits(77), "list.find_first_n_consecutive_unset_bits(77)", null, "null", "wrong result", .{});
-    try Test.expect_equal(list.find_first_n_consecutive_unset_bits(78), "list.find_first_n_consecutive_unset_bits(78)", null, "null", "wrong result", .{});
-    try Test.expect_equal(list.find_first_n_consecutive_unset_bits_starting_at(45, 5), "list.find_first_n_consecutive_unset_bits_starting_at(45, 5)", 45, "45", "wrong result", .{});
-    try Test.expect_equal(list.find_first_n_consecutive_unset_bits_starting_at(45, 6), "list.find_first_n_consecutive_unset_bits_starting_at(45, 6)", 55, "55", "wrong result", .{});
-    try Test.expect_equal(list.idx_has_n_consecutive_unset_bits(45, 5), "list.idx_has_n_consecutive_unset_bits(45, 5)", true, "true", "wrong result", .{});
-    try Test.expect_equal(list.idx_has_n_consecutive_unset_bits(45, 6), "list.idx_has_n_consecutive_unset_bits(45, 6)", false, "false", "wrong result", .{});
-}
+// test "BitList" {
+//     const Test = Root.Testing;
+//     const BList = BitList(1, u1);
+//     var data = [_]usize{
+//         //        55        45  41       32      24       15     8      1
+//         0b1111111110000011111111101111111101111111000111111001111100011110,
+//         //           116
+//         0b1111111111110000000000000000000000000000000000000000000000000011,
+//         //                             162                               128
+//         0b1111111111111111111111111111111111111111111111111111111111111111,
+//     }; // 6+7+8+9+9+2+12+64
+//     const list = BList{
+//         .list = .{ .ptr = @ptrCast(&data), .cap = 3, .len = 3 },
+//         .index_len = 192,
+//     };
+//     try Test.expect_equal(list.find_first_bit_set(), "list.find_first_bit_set()", 1, "1", "wrong result", .{});
+//     try Test.expect_equal(list.find_first_bit_unset(), "list.find_first_bit_unset()", 0, "0", "wrong result", .{});
+//     try Test.expect_equal(list.find_first_n_consecutive_set_bits(4), "list.find_first_n_consecutive_set_bits(4)", 1, "1", "wrong result", .{});
+//     try Test.expect_equal(list.find_first_n_consecutive_set_bits(5), "list.find_first_n_consecutive_set_bits(5)", 8, "8", "wrong result", .{});
+//     try Test.expect_equal(list.find_first_n_consecutive_set_bits(6), "list.find_first_n_consecutive_set_bits(6)", 15, "15", "wrong result", .{});
+//     try Test.expect_equal(list.find_first_n_consecutive_set_bits(8), "list.find_first_n_consecutive_set_bits(8)", 32, "32", "wrong result", .{});
+//     try Test.expect_equal(list.find_first_n_consecutive_set_bits(9), "list.find_first_n_consecutive_set_bits(9)", 41, "41", "wrong result", .{});
+//     try Test.expect_equal(list.find_first_n_consecutive_set_bits(10), "list.find_first_n_consecutive_set_bits(10)", 55, "55", "wrong result", .{});
+//     try Test.expect_equal(list.find_first_n_consecutive_set_bits(20), "list.find_first_n_consecutive_set_bits(20)", 116, "116", "wrong result", .{});
+//     try Test.expect_equal(list.find_first_n_consecutive_set_bits(76), "list.find_first_n_consecutive_set_bits(76)", 116, "116", "wrong result", .{});
+//     try Test.expect_equal(list.find_first_n_consecutive_set_bits(77), "list.find_first_n_consecutive_set_bits(77)", null, "null", "wrong result", .{});
+//     try Test.expect_equal(list.find_first_n_consecutive_set_bits(78), "list.find_first_n_consecutive_set_bits(78)", null, "null", "wrong result", .{});
+//     try Test.expect_equal(list.find_first_n_consecutive_set_bits_starting_at(45, 5), "list.find_first_n_consecutive_set_bits_starting_at(45, 5)", 45, "45", "wrong result", .{});
+//     try Test.expect_equal(list.find_first_n_consecutive_set_bits_starting_at(45, 6), "list.find_first_n_consecutive_set_bits_starting_at(45, 6)", 55, "55", "wrong result", .{});
+//     try Test.expect_equal(list.idx_has_n_consecutive_set_bits(45, 5), "list.idx_has_n_consecutive_set_bits(45, 5)", true, "true", "wrong result", .{});
+//     try Test.expect_equal(list.idx_has_n_consecutive_set_bits(45, 6), "list.idx_has_n_consecutive_set_bits(45, 6)", false, "false", "wrong result", .{});
+//     try Test.expect_equal(list.count_bits_set_at_and_after_index(15), "list.count_bits_set_at_and_after_index(15)", 117, "117", "wrong result", .{});
+//     try Test.expect_equal(list.count_bits_set_at_and_after_index(24), "list.count_bits_set_at_and_after_index(24)", 111, "111", "wrong result", .{});
+//     try Test.expect_equal(list.count_bits_set_at_and_after_index(162), "list.count_bits_set_at_and_after_index(162)", 30, "30", "wrong result", .{});
+//     data[0] = ~data[0];
+//     data[1] = ~data[1];
+//     data[2] = ~data[2];
+//     try Test.expect_equal(list.find_first_n_consecutive_unset_bits(4), "list.find_first_n_consecutive_unset_bits(4)", 1, "1", "wrong result", .{});
+//     try Test.expect_equal(list.find_first_n_consecutive_unset_bits(5), "list.find_first_n_consecutive_unset_bits(5)", 8, "8", "wrong result", .{});
+//     try Test.expect_equal(list.find_first_n_consecutive_unset_bits(6), "list.find_first_n_consecutive_unset_bits(6)", 15, "15", "wrong result", .{});
+//     try Test.expect_equal(list.find_first_n_consecutive_unset_bits(8), "list.find_first_n_consecutive_unset_bits(8)", 32, "32", "wrong result", .{});
+//     try Test.expect_equal(list.find_first_n_consecutive_unset_bits(9), "list.find_first_n_consecutive_unset_bits(9)", 41, "41", "wrong result", .{});
+//     try Test.expect_equal(list.find_first_n_consecutive_unset_bits(10), "list.find_first_n_consecutive_unset_bits(10)", 55, "55", "wrong result", .{});
+//     try Test.expect_equal(list.find_first_n_consecutive_unset_bits(20), "list.find_first_n_consecutive_unset_bits(20)", 116, "116", "wrong result", .{});
+//     try Test.expect_equal(list.find_first_n_consecutive_unset_bits(76), "list.find_first_n_consecutive_unset_bits(76)", 116, "116", "wrong result", .{});
+//     try Test.expect_equal(list.find_first_n_consecutive_unset_bits(77), "list.find_first_n_consecutive_unset_bits(77)", null, "null", "wrong result", .{});
+//     try Test.expect_equal(list.find_first_n_consecutive_unset_bits(78), "list.find_first_n_consecutive_unset_bits(78)", null, "null", "wrong result", .{});
+//     try Test.expect_equal(list.find_first_n_consecutive_unset_bits_starting_at(45, 5), "list.find_first_n_consecutive_unset_bits_starting_at(45, 5)", 45, "45", "wrong result", .{});
+//     try Test.expect_equal(list.find_first_n_consecutive_unset_bits_starting_at(45, 6), "list.find_first_n_consecutive_unset_bits_starting_at(45, 6)", 55, "55", "wrong result", .{});
+//     try Test.expect_equal(list.idx_has_n_consecutive_unset_bits(45, 5), "list.idx_has_n_consecutive_unset_bits(45, 5)", true, "true", "wrong result", .{});
+//     try Test.expect_equal(list.idx_has_n_consecutive_unset_bits(45, 6), "list.idx_has_n_consecutive_unset_bits(45, 6)", false, "false", "wrong result", .{});
+// }
 
-pub fn BitListDef(comptime ENUM: type) type {
-    return struct {
-        const Self = @This();
+// pub fn BitListDef(comptime ENUM: type) type {
+//     return struct {
+//         const Self = @This();
 
-        name: ENUM,
-        bits: comptime_int,
-        elem_type: type,
+//         name: ENUM,
+//         bits: comptime_int,
+//         elem_type: type,
 
-        pub fn valid(comptime self: Self, _: void) void {
-            Assert.assert_with_reason(self.bits <= @bitSizeOf(usize), @src(), "`bits` must be less than or equal to the number of bits in a `usize`, got {d} > {d}", .{ self.bits, @bitSizeOf(usize) });
-            Assert.assert_with_reason(@bitSizeOf(self.elem_type) == self.bits, @src(), "the bit size of `elem_type` ({d}) must equal the `bits` ({d})", .{ @bitSizeOf(self.elem_type), self.bits });
-        }
-    };
-}
-pub const BitListDefUnnamed = struct {
-    bits: comptime_int,
-    elem_type: type,
-};
-pub fn MultiBitList(comptime LIST_NAMES: type, comptime LIST_DEFS: EnumeratedDefinitions(LIST_NAMES, BitListDef(LIST_NAMES), "name", BitListDefUnnamed).ENUMERATED_LIST) type {
-    const bit_list_defs = EnumeratedDefinitions(LIST_NAMES, BitListDef(LIST_NAMES), "name", BitListDefUnnamed).build_ordered(LIST_DEFS, void{}, BitListDef(LIST_NAMES).valid);
-    return struct {
-        const MultiList = @This();
-        pub const DEFS = bit_list_defs;
-        pub const DEF_BUILDER = EnumeratedDefinitions(LIST_NAMES, BitListDef(LIST_NAMES), "name", BitListDefUnnamed);
+//         pub fn valid(comptime self: Self, _: void) void {
+//             Assert.assert_with_reason(self.bits <= @bitSizeOf(usize), @src(), "`bits` must be less than or equal to the number of bits in a `usize`, got {d} > {d}", .{ self.bits, @bitSizeOf(usize) });
+//             Assert.assert_with_reason(@bitSizeOf(self.elem_type) == self.bits, @src(), "the bit size of `elem_type` ({d}) must equal the `bits` ({d})", .{ @bitSizeOf(self.elem_type), self.bits });
+//         }
+//     };
+// }
+// pub const BitListDefUnnamed = struct {
+//     bits: comptime_int,
+//     elem_type: type,
+// };
+// pub fn MultiBitList(comptime LIST_NAMES: type, comptime LIST_DEFS: EnumeratedDefinitions(LIST_NAMES, BitListDef(LIST_NAMES), "name", BitListDefUnnamed).ENUMERATED_LIST) type {
+//     const bit_list_defs = EnumeratedDefinitions(LIST_NAMES, BitListDef(LIST_NAMES), "name", BitListDefUnnamed).build_ordered(LIST_DEFS, void{}, BitListDef(LIST_NAMES).valid);
+//     return struct {
+//         const MultiList = @This();
+//         pub const DEFS = bit_list_defs;
+//         pub const DEF_BUILDER = EnumeratedDefinitions(LIST_NAMES, BitListDef(LIST_NAMES), "name", BitListDefUnnamed);
 
-        lists: [DEF_BUILDER.NUM_DEFS]List(usize) = @splat(.{}),
-        len: usize = 0,
+//         lists: [DEF_BUILDER.NUM_DEFS]List(usize) = @splat(.{}),
+//         len: usize = 0,
 
-        pub fn list_type(comptime LIST: LIST_NAMES) type {
-            return DEFS[@intFromEnum(LIST)].elem_type;
-        }
-        pub fn list_raw(comptime LIST: LIST_NAMES) type {
-            return std.meta.Int(.unsigned, DEFS[@intFromEnum(LIST)].bits);
-        }
-        fn _list_type(comptime LIST_IDX: Types.enum_tag_type(LIST_NAMES)) type {
-            return DEFS[LIST_IDX].elem_type;
-        }
+//         pub fn list_type(comptime LIST: LIST_NAMES) type {
+//             return DEFS[@intFromEnum(LIST)].elem_type;
+//         }
+//         pub fn list_raw(comptime LIST: LIST_NAMES) type {
+//             return std.meta.Int(.unsigned, DEFS[@intFromEnum(LIST)].bits);
+//         }
+//         fn _list_type(comptime LIST_IDX: Types.enum_tag_type(LIST_NAMES)) type {
+//             return DEFS[LIST_IDX].elem_type;
+//         }
 
-        pub fn init_capacity(cap: usize, alloc: Allocator) MultiList {
-            var out = MultiList{};
-            inline for (0..DEF_BUILDER.NUM_DEFS) |def_idx| {
-                const BList = BitList(DEFS[def_idx].bits, DEFS[def_idx].elem_type);
-                const list = BList.init_capacity(cap, alloc);
-                out.lists[def_idx] = list.list;
-            }
-            return out;
-        }
+//         pub fn init_capacity(cap: usize, alloc: Allocator) MultiList {
+//             var out = MultiList{};
+//             inline for (0..DEF_BUILDER.NUM_DEFS) |def_idx| {
+//                 const BList = BitList(DEFS[def_idx].bits, DEFS[def_idx].elem_type);
+//                 const list = BList.init_capacity(cap, alloc);
+//                 out.lists[def_idx] = list.list;
+//             }
+//             return out;
+//         }
 
-        pub fn get(self: MultiList, comptime LIST: LIST_NAMES, idx: usize) list_type(LIST) {
-            const lidx = @intFromEnum(LIST);
-            const tlist = BitList(DEFS[lidx].bits, DEFS[lidx].elem_type){
-                .list = self.lists[lidx],
-                .index_len = self.len,
-            };
-            return tlist.get(idx);
-        }
-        pub fn get_raw(self: MultiList, comptime LIST: LIST_NAMES, idx: usize) list_raw(LIST) {
-            const lidx = @intFromEnum(LIST);
-            const tlist = BitList(DEFS[lidx].bits, DEFS[lidx].elem_type){
-                .list = self.lists[lidx],
-                .index_len = self.len,
-            };
-            return tlist.get_raw(idx);
-        }
+//         pub fn get(self: MultiList, comptime LIST: LIST_NAMES, idx: usize) list_type(LIST) {
+//             const lidx = @intFromEnum(LIST);
+//             const tlist = BitList(DEFS[lidx].bits, DEFS[lidx].elem_type){
+//                 .list = self.lists[lidx],
+//                 .index_len = self.len,
+//             };
+//             return tlist.get(idx);
+//         }
+//         pub fn get_raw(self: MultiList, comptime LIST: LIST_NAMES, idx: usize) list_raw(LIST) {
+//             const lidx = @intFromEnum(LIST);
+//             const tlist = BitList(DEFS[lidx].bits, DEFS[lidx].elem_type){
+//                 .list = self.lists[lidx],
+//                 .index_len = self.len,
+//             };
+//             return tlist.get_raw(idx);
+//         }
 
-        pub fn set(self: MultiList, comptime LIST: LIST_NAMES, idx: usize, val: list_type(LIST)) void {
-            const lidx = @intFromEnum(LIST);
-            const tlist = BitList(DEFS[lidx].bits, DEFS[lidx].elem_type){
-                .list = self.lists[lidx],
-                .index_len = self.len,
-            };
-            tlist.set(idx, val);
-        }
-        pub fn set_no_clear(self: MultiList, comptime LIST: LIST_NAMES, idx: usize, val: list_type(LIST)) void {
-            const lidx = @intFromEnum(LIST);
-            const tlist = BitList(DEFS[lidx].bits, DEFS[lidx].elem_type){
-                .list = self.lists[lidx],
-                .index_len = self.len,
-            };
-            tlist.set_no_clear(idx, val);
-        }
-        pub fn set_raw(self: MultiList, comptime LIST: LIST_NAMES, idx: usize, val: list_raw(LIST)) void {
-            const lidx = @intFromEnum(LIST);
-            const tlist = BitList(DEFS[lidx].bits, DEFS[lidx].elem_type){
-                .list = self.lists[lidx],
-                .index_len = self.len,
-            };
-            tlist.set(idx, val);
-        }
-        pub fn set_raw_no_clear(self: MultiList, comptime LIST: LIST_NAMES, idx: usize, val: list_raw(LIST)) void {
-            const lidx = @intFromEnum(LIST);
-            const tlist = BitList(DEFS[lidx].bits, DEFS[lidx].elem_type){
-                .list = self.lists[lidx],
-                .index_len = self.len,
-            };
-            tlist.set_no_clear(idx, val);
-        }
-        pub fn clear(self: MultiList, comptime LIST: LIST_NAMES, idx: usize) void {
-            const lidx = @intFromEnum(LIST);
-            const tlist = BitList(DEFS[lidx].bits, DEFS[lidx].elem_type){
-                .list = self.lists[lidx],
-                .index_len = self.len,
-            };
-            tlist.clear(idx);
-        }
+//         pub fn set(self: MultiList, comptime LIST: LIST_NAMES, idx: usize, val: list_type(LIST)) void {
+//             const lidx = @intFromEnum(LIST);
+//             const tlist = BitList(DEFS[lidx].bits, DEFS[lidx].elem_type){
+//                 .list = self.lists[lidx],
+//                 .index_len = self.len,
+//             };
+//             tlist.set(idx, val);
+//         }
+//         pub fn set_no_clear(self: MultiList, comptime LIST: LIST_NAMES, idx: usize, val: list_type(LIST)) void {
+//             const lidx = @intFromEnum(LIST);
+//             const tlist = BitList(DEFS[lidx].bits, DEFS[lidx].elem_type){
+//                 .list = self.lists[lidx],
+//                 .index_len = self.len,
+//             };
+//             tlist.set_no_clear(idx, val);
+//         }
+//         pub fn set_raw(self: MultiList, comptime LIST: LIST_NAMES, idx: usize, val: list_raw(LIST)) void {
+//             const lidx = @intFromEnum(LIST);
+//             const tlist = BitList(DEFS[lidx].bits, DEFS[lidx].elem_type){
+//                 .list = self.lists[lidx],
+//                 .index_len = self.len,
+//             };
+//             tlist.set(idx, val);
+//         }
+//         pub fn set_raw_no_clear(self: MultiList, comptime LIST: LIST_NAMES, idx: usize, val: list_raw(LIST)) void {
+//             const lidx = @intFromEnum(LIST);
+//             const tlist = BitList(DEFS[lidx].bits, DEFS[lidx].elem_type){
+//                 .list = self.lists[lidx],
+//                 .index_len = self.len,
+//             };
+//             tlist.set_no_clear(idx, val);
+//         }
+//         pub fn clear(self: MultiList, comptime LIST: LIST_NAMES, idx: usize) void {
+//             const lidx = @intFromEnum(LIST);
+//             const tlist = BitList(DEFS[lidx].bits, DEFS[lidx].elem_type){
+//                 .list = self.lists[lidx],
+//                 .index_len = self.len,
+//             };
+//             tlist.clear(idx);
+//         }
 
-        pub fn ensure_capacity_and_zero_new(self: *MultiList, cap: usize, alloc: Allocator) void {
-            inline for (0..DEF_BUILDER.NUM_DEFS) |def_idx| {
-                var tlist = BitList(DEFS[def_idx].bits, DEFS[def_idx].elem_type){
-                    .list = self.lists[def_idx],
-                    .index_len = self.len,
-                };
-                tlist.ensure_capacity_and_zero_new(cap, alloc);
-                self.lists[def_idx] = tlist.list;
-            }
-        }
-        pub fn set_len(self: *MultiList, len: usize, alloc: Allocator) void {
-            self.ensure_capacity_and_zero_new(len, alloc);
-            self.index_len = len;
-        }
+//         pub fn ensure_capacity_and_zero_new(self: *MultiList, cap: usize, alloc: Allocator) void {
+//             inline for (0..DEF_BUILDER.NUM_DEFS) |def_idx| {
+//                 var tlist = BitList(DEFS[def_idx].bits, DEFS[def_idx].elem_type){
+//                     .list = self.lists[def_idx],
+//                     .index_len = self.len,
+//                 };
+//                 tlist.ensure_capacity_and_zero_new(cap, alloc);
+//                 self.lists[def_idx] = tlist.list;
+//             }
+//         }
+//         pub fn set_len(self: *MultiList, len: usize, alloc: Allocator) void {
+//             self.ensure_capacity_and_zero_new(len, alloc);
+//             self.index_len = len;
+//         }
 
-        pub fn find_first_n_consecutive_set_bits(self: MultiList, comptime LIST: LIST_NAMES, n: usize) ?usize {
-            const lidx = @intFromEnum(LIST);
-            const tlist = BitList(DEFS[lidx].bits, DEFS[lidx].elem_type){
-                .list = self.lists[lidx],
-                .index_len = self.len,
-            };
-            return tlist.find_first_n_consecutive_set_bits(n);
-        }
-        pub fn find_first_n_consecutive_set_bits_starting_at(self: MultiList, comptime LIST: LIST_NAMES, idx: usize, n: usize) ?usize {
-            const lidx = @intFromEnum(LIST);
-            const tlist = BitList(DEFS[lidx].bits, DEFS[lidx].elem_type){
-                .list = self.lists[lidx],
-                .index_len = self.len,
-            };
-            return tlist.find_first_n_consecutive_set_bits_starting_at(idx, n);
-        }
-        pub fn idx_has_n_consecutive_set_bits(self: MultiList, comptime LIST: LIST_NAMES, idx: usize, n: usize) bool {
-            const lidx = @intFromEnum(LIST);
-            const tlist = BitList(DEFS[lidx].bits, DEFS[lidx].elem_type){
-                .list = self.lists[lidx],
-                .index_len = self.len,
-            };
-            return tlist.idx_has_n_consecutive_set_bits(idx, n);
-        }
+//         pub fn find_first_n_consecutive_set_bits(self: MultiList, comptime LIST: LIST_NAMES, n: usize) ?usize {
+//             const lidx = @intFromEnum(LIST);
+//             const tlist = BitList(DEFS[lidx].bits, DEFS[lidx].elem_type){
+//                 .list = self.lists[lidx],
+//                 .index_len = self.len,
+//             };
+//             return tlist.find_first_n_consecutive_set_bits(n);
+//         }
+//         pub fn find_first_n_consecutive_set_bits_starting_at(self: MultiList, comptime LIST: LIST_NAMES, idx: usize, n: usize) ?usize {
+//             const lidx = @intFromEnum(LIST);
+//             const tlist = BitList(DEFS[lidx].bits, DEFS[lidx].elem_type){
+//                 .list = self.lists[lidx],
+//                 .index_len = self.len,
+//             };
+//             return tlist.find_first_n_consecutive_set_bits_starting_at(idx, n);
+//         }
+//         pub fn idx_has_n_consecutive_set_bits(self: MultiList, comptime LIST: LIST_NAMES, idx: usize, n: usize) bool {
+//             const lidx = @intFromEnum(LIST);
+//             const tlist = BitList(DEFS[lidx].bits, DEFS[lidx].elem_type){
+//                 .list = self.lists[lidx],
+//                 .index_len = self.len,
+//             };
+//             return tlist.idx_has_n_consecutive_set_bits(idx, n);
+//         }
 
-        pub fn find_first_n_consecutive_unset_bits(self: MultiList, comptime LIST: LIST_NAMES, n: usize) ?usize {
-            const lidx = @intFromEnum(LIST);
-            const tlist = BitList(DEFS[lidx].bits, DEFS[lidx].elem_type){
-                .list = self.lists[lidx],
-                .index_len = self.len,
-            };
-            return tlist.find_first_n_consecutive_unset_bits(n);
-        }
-        pub fn find_first_n_consecutive_unset_bits_starting_at(self: MultiList, comptime LIST: LIST_NAMES, idx: usize, n: usize) ?usize {
-            const lidx = @intFromEnum(LIST);
-            const tlist = BitList(DEFS[lidx].bits, DEFS[lidx].elem_type){
-                .list = self.lists[lidx],
-                .index_len = self.len,
-            };
-            return tlist.find_first_n_consecutive_unset_bits_starting_at(idx, n);
-        }
-        pub fn idx_has_n_consecutive_unset_bits(self: MultiList, comptime LIST: LIST_NAMES, idx: usize, n: usize) bool {
-            const lidx = @intFromEnum(LIST);
-            const tlist = BitList(DEFS[lidx].bits, DEFS[lidx].elem_type){
-                .list = self.lists[lidx],
-                .index_len = self.len,
-            };
-            return tlist.idx_has_n_consecutive_unset_bits(idx, n);
-        }
+//         pub fn find_first_n_consecutive_unset_bits(self: MultiList, comptime LIST: LIST_NAMES, n: usize) ?usize {
+//             const lidx = @intFromEnum(LIST);
+//             const tlist = BitList(DEFS[lidx].bits, DEFS[lidx].elem_type){
+//                 .list = self.lists[lidx],
+//                 .index_len = self.len,
+//             };
+//             return tlist.find_first_n_consecutive_unset_bits(n);
+//         }
+//         pub fn find_first_n_consecutive_unset_bits_starting_at(self: MultiList, comptime LIST: LIST_NAMES, idx: usize, n: usize) ?usize {
+//             const lidx = @intFromEnum(LIST);
+//             const tlist = BitList(DEFS[lidx].bits, DEFS[lidx].elem_type){
+//                 .list = self.lists[lidx],
+//                 .index_len = self.len,
+//             };
+//             return tlist.find_first_n_consecutive_unset_bits_starting_at(idx, n);
+//         }
+//         pub fn idx_has_n_consecutive_unset_bits(self: MultiList, comptime LIST: LIST_NAMES, idx: usize, n: usize) bool {
+//             const lidx = @intFromEnum(LIST);
+//             const tlist = BitList(DEFS[lidx].bits, DEFS[lidx].elem_type){
+//                 .list = self.lists[lidx],
+//                 .index_len = self.len,
+//             };
+//             return tlist.idx_has_n_consecutive_unset_bits(idx, n);
+//         }
 
-        pub fn find_first_bit_set(self: MultiList, comptime LIST: LIST_NAMES) ?usize {
-            const lidx = @intFromEnum(LIST);
-            const tlist = BitList(DEFS[lidx].bits, DEFS[lidx].elem_type){
-                .list = self.lists[lidx],
-                .index_len = self.len,
-            };
-            return tlist.find_first_bit_set();
-        }
-        pub fn find_first_bit_set_starting_at(self: MultiList, comptime LIST: LIST_NAMES, idx: usize) ?usize {
-            const lidx = @intFromEnum(LIST);
-            const tlist = BitList(DEFS[lidx].bits, DEFS[lidx].elem_type){
-                .list = self.lists[lidx],
-                .index_len = self.len,
-            };
-            return tlist.find_first_bit_set_starting_at(idx);
-        }
-        pub fn find_first_bit_unset(self: MultiList, comptime LIST: LIST_NAMES) ?usize {
-            const lidx = @intFromEnum(LIST);
-            const tlist = BitList(DEFS[lidx].bits, DEFS[lidx].elem_type){
-                .list = self.lists[lidx],
-                .index_len = self.len,
-            };
-            return tlist.find_first_bit_unset();
-        }
-        pub fn find_first_bit_unset_starting_at(self: MultiList, comptime LIST: LIST_NAMES, idx: usize) ?usize {
-            const lidx = @intFromEnum(LIST);
-            const tlist = BitList(DEFS[lidx].bits, DEFS[lidx].elem_type){
-                .list = self.lists[lidx],
-                .index_len = self.len,
-            };
-            return tlist.find_first_bit_unset_starting_at(idx);
-        }
-        pub fn set_range_bits(self: MultiList, comptime LIST: LIST_NAMES, start: usize, count: usize, comptime mode: SetOneZeroMode) void {
-            const lidx = @intFromEnum(LIST);
-            const tlist = BitList(DEFS[lidx].bits, DEFS[lidx].elem_type){
-                .list = self.lists[lidx],
-                .index_len = self.len,
-            };
-            return tlist.set_range_bits(start, count, mode);
-        }
-        pub fn find_first_bit_set_and_unset_it(self: MultiList, comptime LIST: LIST_NAMES) ?usize {
-            const lidx = @intFromEnum(LIST);
-            const tlist = BitList(DEFS[lidx].bits, DEFS[lidx].elem_type){
-                .list = self.lists[lidx],
-                .index_len = self.len,
-            };
-            const idx = tlist.find_first_bit_set();
-            if (idx) |i| {
-                tlist.clear(i);
-            }
-            return idx;
-        }
-        pub fn find_first_bit_unset_and_set_it(self: MultiList, comptime LIST: LIST_NAMES) ?usize {
-            const lidx = @intFromEnum(LIST);
-            const tlist = BitList(DEFS[lidx].bits, DEFS[lidx].elem_type){
-                .list = self.lists[lidx],
-                .index_len = self.len,
-            };
-            const idx = tlist.find_first_bit_unset();
-            if (idx) |i| {
-                tlist.set_no_clear(i, @bitCast(0b1));
-            }
-            return idx;
-        }
+//         pub fn find_first_bit_set(self: MultiList, comptime LIST: LIST_NAMES) ?usize {
+//             const lidx = @intFromEnum(LIST);
+//             const tlist = BitList(DEFS[lidx].bits, DEFS[lidx].elem_type){
+//                 .list = self.lists[lidx],
+//                 .index_len = self.len,
+//             };
+//             return tlist.find_first_bit_set();
+//         }
+//         pub fn find_first_bit_set_starting_at(self: MultiList, comptime LIST: LIST_NAMES, idx: usize) ?usize {
+//             const lidx = @intFromEnum(LIST);
+//             const tlist = BitList(DEFS[lidx].bits, DEFS[lidx].elem_type){
+//                 .list = self.lists[lidx],
+//                 .index_len = self.len,
+//             };
+//             return tlist.find_first_bit_set_starting_at(idx);
+//         }
+//         pub fn find_first_bit_unset(self: MultiList, comptime LIST: LIST_NAMES) ?usize {
+//             const lidx = @intFromEnum(LIST);
+//             const tlist = BitList(DEFS[lidx].bits, DEFS[lidx].elem_type){
+//                 .list = self.lists[lidx],
+//                 .index_len = self.len,
+//             };
+//             return tlist.find_first_bit_unset();
+//         }
+//         pub fn find_first_bit_unset_starting_at(self: MultiList, comptime LIST: LIST_NAMES, idx: usize) ?usize {
+//             const lidx = @intFromEnum(LIST);
+//             const tlist = BitList(DEFS[lidx].bits, DEFS[lidx].elem_type){
+//                 .list = self.lists[lidx],
+//                 .index_len = self.len,
+//             };
+//             return tlist.find_first_bit_unset_starting_at(idx);
+//         }
+//         pub fn set_range_bits(self: MultiList, comptime LIST: LIST_NAMES, start: usize, count: usize, comptime mode: SetOneZeroMode) void {
+//             const lidx = @intFromEnum(LIST);
+//             const tlist = BitList(DEFS[lidx].bits, DEFS[lidx].elem_type){
+//                 .list = self.lists[lidx],
+//                 .index_len = self.len,
+//             };
+//             return tlist.set_range_bits(start, count, mode);
+//         }
+//         pub fn find_first_bit_set_and_unset_it(self: MultiList, comptime LIST: LIST_NAMES) ?usize {
+//             const lidx = @intFromEnum(LIST);
+//             const tlist = BitList(DEFS[lidx].bits, DEFS[lidx].elem_type){
+//                 .list = self.lists[lidx],
+//                 .index_len = self.len,
+//             };
+//             const idx = tlist.find_first_bit_set();
+//             if (idx) |i| {
+//                 tlist.clear(i);
+//             }
+//             return idx;
+//         }
+//         pub fn find_first_bit_unset_and_set_it(self: MultiList, comptime LIST: LIST_NAMES) ?usize {
+//             const lidx = @intFromEnum(LIST);
+//             const tlist = BitList(DEFS[lidx].bits, DEFS[lidx].elem_type){
+//                 .list = self.lists[lidx],
+//                 .index_len = self.len,
+//             };
+//             const idx = tlist.find_first_bit_unset();
+//             if (idx) |i| {
+//                 tlist.set_no_clear(i, @bitCast(0b1));
+//             }
+//             return idx;
+//         }
 
-        pub fn invert(self: MultiList, comptime LIST: LIST_NAMES, idx: usize) void {
-            const lidx = @intFromEnum(LIST);
-            const tlist = BitList(DEFS[lidx].bits, DEFS[lidx].elem_type){
-                .list = self.lists[lidx],
-                .index_len = self.len,
-            };
-            tlist.invert(idx);
-        }
-    };
-}
+//         pub fn invert(self: MultiList, comptime LIST: LIST_NAMES, idx: usize) void {
+//             const lidx = @intFromEnum(LIST);
+//             const tlist = BitList(DEFS[lidx].bits, DEFS[lidx].elem_type){
+//                 .list = self.lists[lidx],
+//                 .index_len = self.len,
+//             };
+//             tlist.invert(idx);
+//         }
+//     };
+// }
 
-pub const BoolList = BitList(1, bool);
+// pub const BoolList = BitList(1, bool);
 
-pub const FreeBitList = extern struct {
-    free_bits: BitList(1, bool) = .{},
-    free_count: usize = 0,
+// pub const FreeBitList = extern struct {
+//     free_bits: BitList(1, bool) = .{},
+//     free_count: usize = 0,
 
-    pub fn init_capacity(cap: usize, alloc: Allocator) FreeBitList {
-        return FreeBitList{
-            .free_bits = BitList(1, bool).init_capacity(cap, alloc),
-            .free_count = 0,
-        };
-    }
+//     pub fn init_capacity(cap: usize, alloc: Allocator) FreeBitList {
+//         return FreeBitList{
+//             .free_bits = BitList(1, bool).init_capacity(cap, alloc),
+//             .free_count = 0,
+//         };
+//     }
 
-    pub fn blocks_needed(cap: usize) usize {
-        return BitList(1, bool).blocks_needed(cap);
-    }
+//     pub fn blocks_needed(cap: usize) usize {
+//         return BitList(1, bool).blocks_needed(cap);
+//     }
 
-    pub fn free_memory(self: *FreeBitList, alloc: Allocator) void {
-        self.free_bits.list.free(alloc);
-    }
+//     pub fn free_memory(self: *FreeBitList, alloc: Allocator) void {
+//         self.free_bits.list.free(alloc);
+//     }
 
-    pub fn set_len(self: *FreeBitList, len: usize, alloc: Allocator) void {
-        if (len < self.free_bits.index_len) {
-            const free_lost = self.free_bits.count_bits_set_at_and_after_index(@intCast(len));
-            self.free_count -= free_lost;
-        } else {
-            self.free_count += len - self.free_bits.index_len;
-        }
-        self.free_bits.set_len_fill_new_ones(len, alloc);
-    }
-    pub fn grow_len_if_needed(self: *FreeBitList, len: usize, alloc: Allocator) void {
-        if (len > self.free_bits.index_len) {
-            self.set_len(len, alloc);
-        }
-    }
-    pub fn grow_len_if_needed_for_idx(self: *FreeBitList, idx: usize, alloc: Allocator) void {
-        const len = idx + 1;
-        if (len > self.free_bits.index_len) {
-            self.set_len(len, alloc);
-        }
-    }
-    pub fn find_1_free_and_set_used(self: *FreeBitList) ?usize {
-        if (self.free_count == 0) return null;
-        const idx = self.free_bits.find_first_bit_set();
-        Assert.assert_with_reason(idx != null, @src(), "free count was greater than 0, but no free bit was found, internal error", .{});
-        self.free_bits.clear(idx.?);
-        self.free_count -= 1;
-        return idx.?;
-    }
-    pub fn find_range_free_and_set_used(self: *FreeBitList, count: usize) ?usize {
-        if (self.free_count < count) return null;
-        const idx = self.free_bits.find_first_n_consecutive_set_bits(count);
-        if (idx) |i| {
-            self.free_bits.set_range_bits(i, count, .SET_0);
-            self.free_count -= count;
-        }
-        return idx;
-    }
-    pub fn has_n_consecutive_frees_at_idx(self: FreeBitList, idx: usize, n: usize) bool {
-        return self.free_bits.idx_has_n_consecutive_set_bits(idx, n);
-    }
-    pub fn set_free(self: *FreeBitList, idx: usize) void {
-        const val: u1 = 0b1;
-        self.free_bits.set_raw_no_clear(idx, val);
-        self.free_count += 1;
-    }
-    pub fn set_used(self: *FreeBitList, idx: usize) void {
-        self.free_bits.clear(idx);
-        self.free_count -= 1;
-    }
-    pub fn set_range_free(self: *FreeBitList, idx: usize, count: usize) void {
-        self.free_bits.set_range_bits(idx, count, .SET_1);
-        self.free_count += count;
-    }
-    pub fn set_range_used(self: *FreeBitList, idx: usize, count: usize) void {
-        self.free_bits.set_range_bits(idx, count, .SET_0);
-        self.free_count -= count;
-    }
-    pub fn idx_is_free(self: FreeBitList, idx: usize) bool {
-        return self.free_bits.get(idx);
-    }
-    pub fn idx_is_used(self: FreeBitList, idx: usize) bool {
-        return !self.free_bits.get(idx);
-    }
-};
+//     pub fn set_len(self: *FreeBitList, len: usize, alloc: Allocator) void {
+//         if (len < self.free_bits.index_len) {
+//             const free_lost = self.free_bits.count_bits_set_at_and_after_index(@intCast(len));
+//             self.free_count -= free_lost;
+//         } else {
+//             self.free_count += len - self.free_bits.index_len;
+//         }
+//         self.free_bits.set_len_fill_new_ones(len, alloc);
+//     }
+//     pub fn grow_len_if_needed(self: *FreeBitList, len: usize, alloc: Allocator) void {
+//         if (len > self.free_bits.index_len) {
+//             self.set_len(len, alloc);
+//         }
+//     }
+//     pub fn grow_len_if_needed_for_idx(self: *FreeBitList, idx: usize, alloc: Allocator) void {
+//         const len = idx + 1;
+//         if (len > self.free_bits.index_len) {
+//             self.set_len(len, alloc);
+//         }
+//     }
+//     pub fn find_1_free_and_set_used(self: *FreeBitList) ?usize {
+//         if (self.free_count == 0) return null;
+//         const idx = self.free_bits.find_first_bit_set();
+//         Assert.assert_with_reason(idx != null, @src(), "free count was greater than 0, but no free bit was found, internal error", .{});
+//         self.free_bits.clear(idx.?);
+//         self.free_count -= 1;
+//         return idx.?;
+//     }
+//     pub fn find_range_free_and_set_used(self: *FreeBitList, count: usize) ?usize {
+//         if (self.free_count < count) return null;
+//         const idx = self.free_bits.find_first_n_consecutive_set_bits(count);
+//         if (idx) |i| {
+//             self.free_bits.set_range_bits(i, count, .SET_0);
+//             self.free_count -= count;
+//         }
+//         return idx;
+//     }
+//     pub fn has_n_consecutive_frees_at_idx(self: FreeBitList, idx: usize, n: usize) bool {
+//         return self.free_bits.idx_has_n_consecutive_set_bits(idx, n);
+//     }
+//     pub fn set_free(self: *FreeBitList, idx: usize) void {
+//         const val: u1 = 0b1;
+//         self.free_bits.set_raw_no_clear(idx, val);
+//         self.free_count += 1;
+//     }
+//     pub fn set_used(self: *FreeBitList, idx: usize) void {
+//         self.free_bits.clear(idx);
+//         self.free_count -= 1;
+//     }
+//     pub fn set_range_free(self: *FreeBitList, idx: usize, count: usize) void {
+//         self.free_bits.set_range_bits(idx, count, .SET_1);
+//         self.free_count += count;
+//     }
+//     pub fn set_range_used(self: *FreeBitList, idx: usize, count: usize) void {
+//         self.free_bits.set_range_bits(idx, count, .SET_0);
+//         self.free_count -= count;
+//     }
+//     pub fn idx_is_free(self: FreeBitList, idx: usize) bool {
+//         return self.free_bits.get(idx);
+//     }
+//     pub fn idx_is_used(self: FreeBitList, idx: usize) bool {
+//         return !self.free_bits.get(idx);
+//     }
+// };

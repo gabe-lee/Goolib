@@ -248,7 +248,8 @@ test CompositeEnum {
     };
     const CE = CompositeEnum(U);
     var ce: CE = undefined;
-    const rand = Root.Rand.seed_default_rand_time_now_and_get();
+    var r = Root.Rand.create_new_default_prng_seeded_from_time(std.testing.io);
+    const rand = r.random();
     const NUM_TESTS = 100;
     for (0..NUM_TESTS) |_| {
         const e1_raw = rand.int(u1);

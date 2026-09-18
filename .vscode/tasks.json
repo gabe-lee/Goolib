@@ -1,0 +1,21 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Run Filtered Test Suite",
+      "type": "shell",
+      "command": "zig",
+      "args": [
+        "build",
+        "test",
+        "--",
+        "-Dtest-filter=${selectedText}"
+      ],
+      "problemMatcher": [],
+      "group": {
+        "kind": "test",
+        "isDefault": true
+      }
+    }
+  ]
+}

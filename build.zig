@@ -1,210 +1,96 @@
 const std = @import("std");
 const builtin = @import("builtin");
+const BreakoutApp = @import("./build/Breakout.zig");
+const LayoutApp = @import("./build/Layout.zig");
+const SDL3 = @import("./build/SDL3.zig");
+const FuzzTests = @import("./build/FuzzTests.zig");
+const BenchTests = @import("./build/BenchTests.zig");
+const Tests = @import("./build/Tests.zig");
+const FORCE_USE_LLVM: bool = false;
 
-const USE_LLVM: bool = false;
+pub const Options = struct {
+    TARGET: std.Build.ResolvedTarget,
+    OPTIMIZE: std.builtin.OptimizeMode,
+    USE_LLVM: bool,
+    INCLUDE_SDL: bool,
+    LINK_TIME_OPTIMIZE: std.zig.LtoMode,
+    PREFERRED_LINKAGE: std.builtin.LinkMode,
+    STRIP_DEBUG: bool,
+    POS_INDEPENDANT_CODE: bool,
+    SDL_EMSCRIPTEN_PTHREADS: bool,
+    SDL_INSTALL_BUILD_CONFIG_H: bool,
+    SDL_USER_HANDLES_MAIN: bool,
+    SDL_USER_PROVIDES_CALLBACKS: bool,
+    SDL_GFX_CONTROLLER_MAX_STORAGE_REGISTERS: u32,
+};
+
+pub const OptionsInLib = struct {
+    USE_LLVM: bool,
+    INCLUDE_SDL: bool,
+    SDL_EMSCRIPTEN_PTHREADS: bool,
+    SDL_INSTALL_BUILD_CONFIG_H: bool,
+    SDL_USER_HANDLES_MAIN: bool,
+    SDL_USER_PROVIDES_CALLBACKS: bool,
+    SDL_GFX_CONTROLLER_MAX_STORAGE_REGISTERS: u32,
+};
 
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
     // OPTIONS
-    const no_sdl = b.option(bool, "no-sdl", "do not include SDL3 when building") orelse false;
+    const opts = Options{
+        .TARGET = target,
+        .OPTIMIZE = optimize,
+        .USE_LLVM = FORCE_USE_LLVM or b.option(bool, "use-llvm", "use the LLVM compiler instead of the native x86-64 compiler (default: .Debug = false, .Release___ = true)") orelse if (optimize == .Debug) false else true,
+        .INCLUDE_SDL = b.option(bool, "include-sdl", "include SDL3 when building (default: true)") orelse true,
+        .PREFERRED_LINKAGE = b.option(std.builtin.LinkMode, "preferred-linkage", "Prefer building statically or dynamically linked libraries (default: static)") orelse .static,
+        .STRIP_DEBUG = b.option(bool, "strip-debug", "Strip debug symbols (default: varies)") orelse (optimize != .Debug),
+        .POS_INDEPENDANT_CODE = b.option(bool, "pos-independant-code", "Produce position-independent code (default: varies)") orelse true,
+        .LINK_TIME_OPTIMIZE = b.option(std.zig.LtoMode, "link-time-optimize", "Perform link time optimization (default: varies)") orelse if (optimize == .Debug) std.zig.LtoMode.none else std.zig.LtoMode.full,
+        .SDL_EMSCRIPTEN_PTHREADS = b.option(bool, "sdl-emscripten-pthreads", "Build with pthreads support when targeting Emscripten (default: false)") orelse false,
+        .SDL_INSTALL_BUILD_CONFIG_H = b.option(bool, "sdl-install-build-config-h", "Additionally install 'SDL_build_config.h' when installing SDL (default: false)") orelse false,
+        .SDL_USER_HANDLES_MAIN = b.option(bool, "sdl-user-handles-main", "define `SDL_MAIN_HANDLED` when importing SDL (default: true)") orelse true,
+        .SDL_USER_PROVIDES_CALLBACKS = b.option(bool, "sdl-user-provides-callbacks", "define `SDL_MAIN_USE_CALLBACKS` when importing SDL (default: false)") orelse false,
+        .SDL_GFX_CONTROLLER_MAX_STORAGE_REGISTERS = b.option(u32, "sdl-gfx-controller-max-storage-registers", "max number of storage registers that can exist in one shader (default: 64)\n\t(# sampled textures + # storage textures + # storage buffers)") orelse 64,
+    };
 
-    const preferred_linkage = b.option(
-        std.builtin.LinkMode,
-        "preferred_linkage",
-        "Prefer building statically or dynamically linked libraries (default: static)",
-    ) orelse .static;
-    const strip_debug = b.option(
-        bool,
-        "strip_debug",
-        "Strip debug symbols (default: varies)",
-    ) orelse (optimize != .Debug);
-    const pos_independant_code = b.option(
-        bool,
-        "pos_independant_code",
-        "Produce position-independent code (default: varies)",
-    ) orelse true;
-    const link_time_optimize = b.option(
-        std.zig.LtoMode,
-        "link_time_optimize",
-        "Perform link time optimization (default: varies)",
-    ) orelse if (optimize == .Debug) std.zig.LtoMode.none else std.zig.LtoMode.full;
-    const sdl_emscripten_pthreads = b.option(
-        bool,
-        "sdl_emscripten_pthreads",
-        "Build with pthreads support when targeting Emscripten (default: false)",
-    ) orelse false;
-    const sdl_install_build_config_h = b.option(
-        bool,
-        "sdl_install_build_config_h",
-        "Additionally install 'SDL_build_config.h' when installing SDL (default: false)",
-    ) orelse false;
-    const sdl_user_handles_main = b.option(
-        bool,
-        "sdl_user_handles_main",
-        "define `SDL_MAIN_HANDLED` when importing SDL (default: true)",
-    ) orelse true;
-    const sdl_user_provides_callbacks = b.option(
-        bool,
-        "sdl_user_provides_callbacks",
-        "define `SDL_MAIN_USE_CALLBACKS` when importing SDL (default: false)",
-    ) orelse false;
-    const sdl_gfx_controller_max_storage_registers = b.option(
-        u32,
-        "sdl_gfx_controller_max_storage_registers",
-        "max number of storage registers that can exist in one shader (default: 64)\n\t(# sampled textures + # storage textures + # storage buffers)",
-    ) orelse 64;
+    const opts_in_lib = OptionsInLib{
+        .INCLUDE_SDL = opts.INCLUDE_SDL,
+        .SDL_EMSCRIPTEN_PTHREADS = opts.SDL_EMSCRIPTEN_PTHREADS,
+        .SDL_GFX_CONTROLLER_MAX_STORAGE_REGISTERS = opts.SDL_GFX_CONTROLLER_MAX_STORAGE_REGISTERS,
+        .SDL_INSTALL_BUILD_CONFIG_H = opts.SDL_INSTALL_BUILD_CONFIG_H,
+        .SDL_USER_HANDLES_MAIN = opts.SDL_USER_HANDLES_MAIN,
+        .SDL_USER_PROVIDES_CALLBACKS = opts.SDL_USER_PROVIDES_CALLBACKS,
+        .USE_LLVM = opts.USE_LLVM,
+    };
 
-    const options = b.addOptions();
-    options.addOption(bool, "SDL_USER_MAIN", sdl_user_handles_main);
-    options.addOption(bool, "SDL_USER_CALLBACKS", sdl_user_provides_callbacks);
-    options.addOption(bool, "NO_SDL", no_sdl);
-    options.addOption(u32, "SDL_GFX_CONTROLLER_MAX_STORAGE_REGISTERS", sdl_gfx_controller_max_storage_registers);
+    const code_options = b.addOptions();
+    code_options.addOption(OptionsInLib, "OPTS", opts_in_lib);
 
-    //DEPENDENCIES
-
-    const sdl_dep: *std.Build.Dependency = if (!no_sdl) b.dependency("sdl", .{
-        .target = target,
-        .optimize = optimize,
-        .preferred_linkage = preferred_linkage,
-        .strip = strip_debug,
-        .pic = pos_independant_code,
-        .lto = link_time_optimize,
-        .emscripten_pthreads = sdl_emscripten_pthreads,
-        .install_build_config_h = sdl_install_build_config_h,
-    }) else undefined;
-    const sdl_lib: *std.Build.Step.Compile = if (!no_sdl) sdl_dep.artifact("SDL3") else undefined;
+    const LIBC = opts.INCLUDE_SDL;
 
     //MAIN LIBRARY
-
-    const lib = b.addModule("Goolib", .{
+    const goolib = b.addModule("Goolib", .{
         .root_source_file = b.path("src/_root.zig"),
         .target = target,
         .optimize = optimize,
-        .pic = pos_independant_code,
-        .strip = strip_debug,
-        .link_libc = true,
-    });
-    if (!no_sdl) {
-        lib.linkLibrary(sdl_lib);
-    }
-
-    lib.addOptions("config", options);
-
-    const lib_tests = b.addTest(.{
-        .root_module = lib,
-        .test_runner = .{ .path = b.path("testrunner_src/test_runner.zig"), .mode = .simple },
+        .pic = opts.POS_INDEPENDANT_CODE,
+        .strip = opts.STRIP_DEBUG,
+        .link_libc = LIBC,
     });
 
-    const run_lib_tests = b.addRunArtifact(lib_tests);
+    goolib.addOptions("config", code_options);
 
-    const test_step = b.step("test", "Run library tests");
-    test_step.dependOn(&run_lib_tests.step);
+    //OPTIONAL DEPENDANCIES
+    SDL3.sub_build(b, goolib, opts);
 
-    //FILEGEN
-    const filegen_mod = b.addModule("filegen", .{
-        .optimize = optimize,
-        .target = target,
-        .root_source_file = b.path("srcgen/main.zig"),
-    });
-    const filegen = b.addExecutable(.{
-        .name = "filegen",
-        .root_module = filegen_mod,
-    });
-    filegen.root_module.addImport("Goolib", lib);
-    b.installArtifact(filegen);
+    //SAMPLE APPS
+    BreakoutApp.sub_build(b, goolib, opts);
+    LayoutApp.sub_build(b, goolib, opts);
 
-    const run_filegen = b.addRunArtifact(filegen);
-    if (b.args) |args| run_filegen.addArgs(args);
-    run_filegen.step.dependOn(b.getInstallStep());
-
-    const run_filegen_cmd = b.step("filegen", "Automatically generate files for the library");
-    run_filegen_cmd.dependOn(&run_filegen.step);
-
-    //BREAKOUT SAMPLE APP
-    const breakout_mod = b.addModule("breakout", .{
-        .optimize = optimize,
-        .target = target,
-        .root_source_file = b.path("samples/breakout.zig"),
-    });
-    const breakout = b.addExecutable(.{
-        .name = "breakout",
-        .root_module = breakout_mod,
-        .use_llvm = USE_LLVM,
-    });
-    breakout.lto = if (optimize != .Debug) std.zig.LtoMode.full else std.zig.LtoMode.none;
-    breakout.root_module.addImport("Goolib", lib);
-    b.installArtifact(breakout);
-
-    const run_breakout = b.addRunArtifact(breakout);
-    if (b.args) |args| run_breakout.addArgs(args);
-    run_breakout.step.dependOn(b.getInstallStep());
-
-    const run_breakout_cmd = b.step("breakout", "Run the breakout sample app");
-    run_breakout_cmd.dependOn(&run_breakout.step);
-
-    //LAYOUT SAMPLE APP
-    const layout_mod = b.addModule("layout", .{
-        .optimize = optimize,
-        .target = target,
-        .root_source_file = b.path("samples/layout.zig"),
-    });
-    const layout = b.addExecutable(.{
-        .name = "layout",
-        .root_module = layout_mod,
-        .use_llvm = USE_LLVM,
-    });
-    layout.lto = if (optimize != .Debug) std.zig.LtoMode.full else std.zig.LtoMode.none;
-    layout.root_module.addImport("Goolib", lib);
-    b.installArtifact(layout);
-
-    const run_layout = b.addRunArtifact(layout);
-    if (b.args) |args| run_layout.addArgs(args);
-    run_layout.step.dependOn(b.getInstallStep());
-
-    const run_layout_cmd = b.step("layout", "Run the ui layout sample app");
-    run_layout_cmd.dependOn(&run_layout.step);
-
-    // FUZZ TESTS
-    const fuzztest_mod = b.addModule("fuzztest", .{
-        .optimize = optimize,
-        .target = target,
-        .root_source_file = b.path("src/_fuzz.zig"),
-    });
-    const fuzztest = b.addExecutable(.{
-        .name = "fuzztest",
-        .root_module = fuzztest_mod,
-        .use_llvm = USE_LLVM,
-    });
-    fuzztest.root_module.addImport("Goolib", lib);
-    b.installArtifact(fuzztest);
-
-    const run_fuzztest = b.addRunArtifact(fuzztest);
-    if (b.args) |args| run_fuzztest.addArgs(args);
-    run_fuzztest.step.dependOn(b.getInstallStep());
-
-    const run_fuzztest_cmd = b.step("fuzztest", "Run all (or one) library fuzz tests");
-    run_fuzztest_cmd.dependOn(&run_fuzztest.step);
-
-    // BENCH TESTS
-    const benchtest_mod = b.addModule("benchtest", .{
-        .optimize = optimize,
-        .target = target,
-        .root_source_file = b.path("src/_bench.zig"),
-    });
-    const benchtest = b.addExecutable(.{
-        .name = "benchtest",
-        .root_module = benchtest_mod,
-        .use_llvm = USE_LLVM,
-    });
-    benchtest.root_module.addImport("Goolib", lib);
-    b.installArtifact(benchtest);
-
-    const run_benchtest = b.addRunArtifact(benchtest);
-    if (b.args) |args| run_benchtest.addArgs(args);
-    run_benchtest.step.dependOn(b.getInstallStep());
-
-    const run_benchtest_cmd = b.step("benchtest", "Run all (or one) library bench tests");
-    run_benchtest_cmd.dependOn(&run_benchtest.step);
+    //TESTING PROGRAMS
+    Tests.sub_build(b, goolib, opts);
+    BenchTests.sub_build(b, goolib, opts);
+    FuzzTests.sub_build(b, goolib, opts);
 }
