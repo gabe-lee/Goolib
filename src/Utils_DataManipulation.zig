@@ -85,6 +85,11 @@ pub const SeekCursorMode = enum {
     WRITE_POS,
 };
 
+pub const IdMightError = enum {
+    ID_MIGHT_BE_INVALID,
+    ID_ALWAYS_VALID,
+};
+
 pub const SeekOrigin = enum(u8) {
     FORWARD_FROM_START_POS,
     BACKWARD_FROM_END_POS,
@@ -99,21 +104,49 @@ const IdOrCountKind = enum {
     COUNT,
 };
 
+const LimitMode = enum {
+    ID,
+    COUNT,
+    ID_OR_COUNT,
+};
+
+const GotNextIterStage = enum {
+    GET_ID,
+    CHECK_COND,
+    SAME_ID,
+};
+
+const AfterFilterMode = enum {
+    DO_ACTION,
+    DELETE,
+    REMOVE_TO_OUTPUT_DATA,
+    COPY_TO_OUTPUT_DATA,
+    TRANSFORM_TO_OUTPUT_DATA,
+    ACCUMULATE_VALUE,
+};
+
 pub const IterStateKind = enum(u8) {
     CONTINUE_IMPLICIT_NEXT_ID = 0,
     CONTINUE_SPECIFIC_NEXT_ID = 1,
-    STOP = 2,
+    CONTINUE_WITH_SAME_ID = 2,
+    CONTINUE_WITH_PREV_ID = 3,
+    CONTINUE_WITH_ID_AFTER_PREV = 4,
+    STOP_IMPLICIT_NEXT_ID = 5,
+    STOP_SPECIFIC_NEXT_ID = 6,
+    STOP_WITH_SAME_ID = 7,
+    STOP_WITH_PREV_ID = 8,
+    STOP_WITH_ID_AFTER_PREV = 9,
 
     pub fn is_continue(self: IterStateKind) bool {
-        return @intFromEnum(self) <= @intFromEnum(IterStateKind.CONTINUE_SPECIFIC_NEXT_ID);
+        return @intFromEnum(self) <= @intFromEnum(IterStateKind.CONTINUE_WITH_ID_AFTER_PREV);
     }
     pub fn is_stop(self: IterStateKind) bool {
         // return @intFromEnum(self) = @intFromEnum(IterStateKind.STOP);
-        return self == .STOP;
+        return @intFromEnum(self) >= @intFromEnum(IterStateKind.STOP_IMPLICIT_NEXT_ID);
     }
 };
 
-pub const LimitMode = enum {
+pub const OverLimitMode = enum {
     CLAMP_TO_LIMITS,
     ERROR_IF_EXCEED_LIMITS,
 };
@@ -259,59 +292,49 @@ pub const ReadWriteErrorConstrained = error{
     write_timeout,
 };
 
+pub const IdError = error{
+    id_invalid,
+};
+
 const DEBUG = std.debug.print;
 
-pub const aux_data_ALLOC_FIELD_NAME = "alloc";
-pub const aux_data_ALLOC_SETTINGS_FIELD_NAME = "alloc_settings";
-pub const aux_data_ALLOC_COMPTIME_SETTINGS_FIELD_NAME = "comptime_alloc_settings";
-pub const aux_data_IO_FIELD_NAME = "io";
+pub const AUX_DATA_ALLOC_FIELD_NAME = "alloc";
+pub const AUX_DATA_ALLOC_GROW_FIELD_NAME = "alloc_grow";
+pub const AUX_DATA_IO_FIELD_NAME = "io";
 
 fn get_alloc_from_aux_data(aux_data: anytype) Allocator {
-    const aux_data = @TypeOf(aux_data);
-    const INFO = KindInfo.get_kind_info(aux_data);
+    const AUX_DATA = @TypeOf(aux_data);
+    const INFO = KindInfo.get_kind_info(AUX_DATA);
     if (comptime INFO.is_struct()) {
-        if (comptime @hasField(aux_data, aux_data_ALLOC_FIELD_NAME)) {
-            if (comptime @FieldType(aux_data, aux_data_ALLOC_FIELD_NAME) == Allocator) {
-                return @field(aux_data, aux_data_ALLOC_FIELD_NAME);
+        if (comptime @hasField(aux_data, AUX_DATA_ALLOC_FIELD_NAME)) {
+            if (comptime @FieldType(aux_data, AUX_DATA_ALLOC_FIELD_NAME) == Allocator) {
+                return @field(aux_data, AUX_DATA_ALLOC_FIELD_NAME);
             }
         }
     }
     return Root.DummyAllocator.allocator_panic_free_noop;
 }
 
-fn get_alloc_settings_from_aux_data(aux_data: anytype, comptime ELEM: type) Utils.Alloc.SmartAllocSettings(ELEM) {
-    const aux_data = @TypeOf(aux_data);
-    const INFO = KindInfo.get_kind_info(aux_data);
+fn get_alloc_grow_from_aux_data(aux_data: anytype, comptime ELEM: type) Common.GrowthModel {
+    const AUX_DATA = @TypeOf(aux_data);
+    const INFO = KindInfo.get_kind_info(AUX_DATA);
     if (comptime INFO.is_struct()) {
-        if (comptime @hasField(aux_data, aux_data_ALLOC_SETTINGS_FIELD_NAME)) {
-            if (comptime @FieldType(aux_data, aux_data_ALLOC_SETTINGS_FIELD_NAME) == Utils.Alloc.SmartAllocSettings(ELEM)) {
-                return @field(aux_data, aux_data_ALLOC_SETTINGS_FIELD_NAME);
+        if (comptime @hasField(aux_data, AUX_DATA_ALLOC_GROW_FIELD_NAME)) {
+            if (comptime @FieldType(aux_data, AUX_DATA_ALLOC_GROW_FIELD_NAME) == Common.GrowthModel) {
+                return @field(aux_data, AUX_DATA_ALLOC_GROW_FIELD_NAME);
             }
         }
     }
     return Utils.Alloc.SmartAllocSettings(ELEM){};
 }
 
-fn get_alloc_comptime_settings_from_aux_data(aux_data: anytype, comptime ELEM: type) Utils.Alloc.SmartAllocComptimeSettings(ELEM) {
-    const aux_data = @TypeOf(aux_data);
-    const INFO = KindInfo.get_kind_info(aux_data);
-    if (comptime INFO.is_struct()) {
-        if (comptime @hasField(aux_data, aux_data_ALLOC_COMPTIME_SETTINGS_FIELD_NAME)) {
-            if (comptime @FieldType(aux_data, aux_data_ALLOC_COMPTIME_SETTINGS_FIELD_NAME) == Utils.Alloc.SmartAllocComptimeSettings(ELEM)) {
-                return @field(aux_data, aux_data_ALLOC_COMPTIME_SETTINGS_FIELD_NAME);
-            }
-        }
-    }
-    return Utils.Alloc.SmartAllocComptimeSettings(ELEM){};
-}
-
 fn get_io_from_aux_data(aux_data: anytype) Io {
-    const aux_data = @TypeOf(aux_data);
-    const INFO = KindInfo.get_kind_info(aux_data);
+    const AUX_DATA = @TypeOf(aux_data);
+    const INFO = KindInfo.get_kind_info(AUX_DATA);
     if (comptime INFO.is_struct()) {
-        if (comptime @hasField(aux_data, aux_data_IO_FIELD_NAME)) {
-            if (comptime @FieldType(aux_data, aux_data_IO_FIELD_NAME) == Io) {
-                return @field(aux_data, aux_data_IO_FIELD_NAME);
+        if (comptime @hasField(aux_data, AUX_DATA_IO_FIELD_NAME)) {
+            if (comptime @FieldType(aux_data, AUX_DATA_IO_FIELD_NAME) == Io) {
+                return @field(aux_data, AUX_DATA_IO_FIELD_NAME);
             }
         }
     }
@@ -2549,6 +2572,7 @@ pub const DataManipulationCore = struct {
                     pub const COUNT = DEF.COUNT_INT;
                     pub const AUX_DATA = DEF.aux_data;
                     pub const AUX_UNINIT = if (AUX_DATA == void) void{} else undefined;
+                    pub const MAX_COUNT = math.maxInt(COUNT);
 
                     pub const get_base_ptr: fn (DATA, AUX_DATA) [*]ELEM = FUNCS.GET_BASE_PTR;
                     pub const get_base_ptr_const: fn (DATA, AUX_DATA) [*]const ELEM = FUNCS.GET_BASE_CONST_PTR;
@@ -2828,8 +2852,14 @@ pub const DataManipulationCore = struct {
                     pub const IterState = union(IterStateKind) {
                         CONTINUE_IMPLICIT_NEXT_ID: void,
                         CONTINUE_SPECIFIC_NEXT_ID: ID,
+                        CONTINUE_WITH_SAME_ID: void,
+                        CONTINUE_WITH_PREV_ID: void,
+                        CONTINUE_WITH_ID_AFTER_PREV: void,
                         STOP_IMPLICIT_NEXT_ID: void,
                         STOP_SPECIFIC_NEXT_ID: ID,
+                        STOP_WITH_SAME_ID: void,
+                        STOP_WITH_PREV_ID: void,
+                        STOP_WITH_ID_AFTER_PREV: void,
 
                         pub fn continue_next_id() IterState {
                             return IterState{ .CONTINUE_IMPLICIT_NEXT_ID = void{} };
@@ -2837,18 +2867,36 @@ pub const DataManipulationCore = struct {
                         pub fn continue_to_specific_id(id: ID) IterState {
                             return IterState{ .CONTINUE_SPECIFIC_NEXT_ID = id };
                         }
+                        pub fn continue_with_same_id() IterState {
+                            return IterState{ .CONTINUE_WITH_SAME_ID = void{} };
+                        }
+                        pub fn continue_with_prev_id() IterState {
+                            return IterState{ .CONTINUE_WITH_PREV_ID = void{} };
+                        }
+                        pub fn continue_with_id_after_prev_id() IterState {
+                            return IterState{ .CONTINUE_WITH_ID_AFTER_PREV = void{} };
+                        }
                         pub fn stop_with_implicit_next() IterState {
                             return IterState{ .STOP_IMPLICIT_NEXT_ID = void{} };
                         }
                         pub fn stop_with_specific_next(id: ID) IterState {
                             return IterState{ .STOP_SPECIFIC_NEXT_ID = id };
                         }
+                        pub fn stop_with_same_id() IterState {
+                            return IterState{ .STOP_WITH_SAME_ID = void{} };
+                        }
+                        pub fn stop_with_prev_id() IterState {
+                            return IterState{ .STOP_WITH_PREV_ID = void{} };
+                        }
+                        pub fn stop_with_id_after_prev_id() IterState {
+                            return IterState{ .STOP_WITH_ID_AFTER_PREV = void{} };
+                        }
                     };
 
                     fn ForEachActionRT(comptime MODE: FuncParamType, comptime RT_CTX: type, comptime CT_CTX: type, comptime ERROR: ?type) type {
                         if (comptime ERROR) |E| {
                             switch (comptime MODE) {
-                                .RUNTIME_FN_PTR => *const fn (DATA, AUX_DATA, ID, RT_CTX, CT_CTX) E!struct { DATA, IterState },
+                                .RUNTIME_FN_PTR => *const fn (DATA, AUX_DATA, ID, RT_CTX, CT_CTX) struct { DATA, IterState, ?E },
                                 .COMPTIME_FN_PTR, .COMPTIME_FN_BODY => void,
                             }
                         } else {
@@ -2862,8 +2910,8 @@ pub const DataManipulationCore = struct {
                         if (comptime ERROR) |E| {
                             switch (comptime MODE) {
                                 .RUNTIME_FN_PTR => void,
-                                .COMPTIME_FN_PTR => *const fn (DATA, AUX_DATA, ID, RT_CTX, comptime CT_CTX) E!struct { DATA, IterState },
-                                .COMPTIME_FN_BODY => fn (DATA, AUX_DATA, ID, RT_CTX, comptime CT_CTX) E!struct { DATA, IterState },
+                                .COMPTIME_FN_PTR => *const fn (DATA, AUX_DATA, ID, RT_CTX, comptime CT_CTX) struct { DATA, IterState, ?E },
+                                .COMPTIME_FN_BODY => fn (DATA, AUX_DATA, ID, RT_CTX, comptime CT_CTX) struct { DATA, IterState, ?E },
                             }
                         } else {
                             switch (comptime MODE) {
@@ -2873,160 +2921,300 @@ pub const DataManipulationCore = struct {
                             }
                         }
                     }
-
-                    fn IdOrCount(comptime KIND: IdOrCountKind) type {
-                        const I = if (KIND == .ID) ID else COUNT;
-                        return struct {
-                            const SelfIdOrCount = @This();
-                            val: I,
-
-                            pub inline fn new(count: COUNT, id: ID) SelfIdOrCount {
-                                switch (comptime KIND) {
-                                    .COUNT => return SelfIdOrCount{ .val = count },
-                                    .ID => return SelfIdOrCount{ .val = id },
-                                }
+                    fn FilterActionRT(comptime USE_FILTER: bool, comptime MODE: FuncParamType, comptime RT_CTX: type, comptime CT_CTX: type, comptime ERROR: ?type) type {
+                        if (comptime !USE_FILTER) return void;
+                        if (comptime ERROR) |E| {
+                            switch (comptime MODE) {
+                                .RUNTIME_FN_PTR => *const fn (DATA, AUX_DATA, ID, RT_CTX, CT_CTX) struct { bool, DATA, IterState, ?E },
+                                .COMPTIME_FN_PTR, .COMPTIME_FN_BODY => void,
                             }
-
-                            pub inline fn initialy_under_limit(self: SelfIdOrCount, data: DATA, aux: AUX_DATA, limit: SelfIdOrCount) bool {
-                                switch (comptime KIND) {
-                                    .COUNT => return self.val < limit.val,
-                                    .ID => return id_less_than_or_equal(data, self.val, limit.val, aux),
-                                }
+                        } else {
+                            switch (comptime MODE) {
+                                .RUNTIME_FN_PTR => *const fn (DATA, AUX_DATA, ID, RT_CTX, CT_CTX) struct { bool, DATA, IterState },
+                                .COMPTIME_FN_PTR, .COMPTIME_FN_BODY => void,
                             }
-
-                            pub inline fn incr_with_id_implicit_next(self: SelfIdOrCount, curr_id: ID, data: DATA, aux: AUX_DATA, limit: SelfIdOrCount) struct { SelfIdOrCount, ID, bool } {
-                                switch (comptime KIND) {
-                                    .COUNT => {
-                                        const new_count = self.val + 1;
-                                        const next_id_ = next_id(data, curr_id, aux);
-                                        return .{ SelfIdOrCount{ .val = new_count }, next_id_, new_count < limit.val };
-                                    },
-                                    .ID => {
-                                        assert_with_reason(self.val == curr_id, @src(), "curr_id mismatched limit.lim in .ID mode, {any} != {any}", .{ curr_id, self.val });
-                                        const next_id_ = next_id(data, curr_id, aux);
-                                        return .{ SelfIdOrCount{ .val = next_id_ }, next_id_, !id_equals(data, self.val, limit.val, aux) };
-                                    },
-                                }
+                        }
+                    }
+                    fn FilterActionCT(comptime USE_FILTER: bool, comptime MODE: FuncParamType, comptime RT_CTX: type, comptime CT_CTX: type, comptime ERROR: ?type) type {
+                        if (comptime !USE_FILTER) return void;
+                        if (comptime ERROR) |E| {
+                            switch (comptime MODE) {
+                                .RUNTIME_FN_PTR => void,
+                                .COMPTIME_FN_PTR => *const fn (DATA, AUX_DATA, ID, RT_CTX, comptime CT_CTX) struct { bool, DATA, IterState, ?E },
+                                .COMPTIME_FN_BODY => fn (DATA, AUX_DATA, ID, RT_CTX, comptime CT_CTX) struct { bool, DATA, IterState, ?E },
                             }
-                            pub inline fn incr_with_id_specific_next(self: SelfIdOrCount, curr_id: ID, data: DATA, aux: AUX_DATA, limit: SelfIdOrCount, next_id_: ID) struct { SelfIdOrCount, ID, bool } {
-                                switch (comptime KIND) {
-                                    .COUNT => {
-                                        const new_count = self.val + 1;
-                                        return .{ SelfIdOrCount{ .val = new_count }, next_id_, new_count < limit.val };
-                                    },
-                                    .ID => {
-                                        assert_with_reason(self.val == curr_id, @src(), "curr_id mismatched limit.lim in .ID mode, {any} != {any}", .{ curr_id, self.val });
-                                        return .{ SelfIdOrCount{ .val = next_id_ }, next_id_, !id_equals(data, self.val, limit.val, aux) };
-                                    },
-                                }
+                        } else {
+                            switch (comptime MODE) {
+                                .RUNTIME_FN_PTR => void,
+                                .COMPTIME_FN_PTR => *const fn (DATA, AUX_DATA, ID, RT_CTX, comptime CT_CTX) struct { bool, DATA, IterState },
+                                .COMPTIME_FN_BODY => fn (DATA, AUX_DATA, ID, RT_CTX, comptime CT_CTX) struct { bool, DATA, IterState },
                             }
-                        };
+                        }
                     }
 
-                    fn for_each_internal(data_: DATA, aux: AUX_DATA, first: ID, comptime LIMIT: IdOrCountKind, limit: IdOrCount(LIMIT), ctx: anytype, comptime CTX: anytype, comptime FN_TYPE: FuncParamType, comptime ERROR: ?type, action_rt: ForEachActionRT(FN_TYPE, @TypeOf(ctx), @TypeOf(CTX), ERROR), comptime ACTION_CT: ForEachActionCT(FN_TYPE, @TypeOf(ctx), @TypeOf(CTX), ERROR)) if (ERROR) |E| struct { DATA, E } else DATA {
+                    const IdAndN = struct {
+                        id: ID,
+                        n: COUNT,
+
+                        pub fn new(id: ID, n: COUNT) IdAndN {
+                            return IdAndN{
+                                .id = id,
+                                .n = n,
+                            };
+                        }
+
+                        pub inline fn initialy_under_limit(self: IdAndN, comptime MODE: LimitMode, data: DATA, aux: AUX_DATA, limit: IdAndN) bool {
+                            switch (comptime MODE) {
+                                .COUNT => return self.n < limit.n,
+                                .ID => return id_less_than_or_equal(data, self.id, limit.id, aux),
+                                .ID_OR_COUNT => return (self.n < limit.n) and id_less_than_or_equal(data, self.id, limit.id, aux),
+                            }
+                        }
+
+                        pub inline fn incr_n_and_id(self: IdAndN, data: DATA, aux: AUX_DATA) IdAndN {
+                            var new_self: IdAndN = undefined;
+                            new_self.n = self.n + 1;
+                            new_self.id = next_id(data, self.id, aux);
+                            return new_self;
+                        }
+                        pub inline fn incr_n_set_id(self: IdAndN, new_id: ID) IdAndN {
+                            var new_self: IdAndN = undefined;
+                            new_self.n = self.n + 1;
+                            new_self.id = new_id;
+                            return new_self;
+                        }
+                        pub inline fn incr_n_same_id(self: IdAndN) IdAndN {
+                            var new_self: IdAndN = undefined;
+                            new_self.n = self.n + 1;
+                            new_self.id = self.id;
+                            return new_self;
+                        }
+
+                        pub inline fn goto_next_iter(self: IdAndN, comptime MODE: LimitMode, iter_state: IterState, data: DATA, aux: AUX_DATA, limit: IdAndN, prev: ?IdAndN) struct { IdAndN, bool } {
+                            var new_self: IdAndN = undefined;
+                            switch (iter_state) {
+                                .CONTINUE_IMPLICIT_NEXT_ID, .STOP_IMPLICIT_NEXT_ID => {
+                                    new_self = self.incr_n_and_id(data, aux);
+                                },
+                                .CONTINUE_SPECIFIC_NEXT_ID, .STOP_SPECIFIC_NEXT_ID => |id| {
+                                    new_self = self.incr_n_set_id(id);
+                                },
+                                .CONTINUE_WITH_SAME_ID, .STOP_WITH_SAME_ID => {
+                                    new_self = self.incr_n_same_id();
+                                },
+                                .CONTINUE_WITH_PREV_ID, .STOP_WITH_PREV_ID => {
+                                    const prev_ = if (prev) |p| p.id else prev_id(data, self.id, aux);
+                                    new_self = self.incr_n_set_id(prev_);
+                                },
+                                .CONTINUE_WITH_ID_AFTER_PREV, .STOP_WITH_ID_AFTER_PREV => {
+                                    const prev_ = if (prev) |p| p.id else prev_id(data, self.id, aux);
+                                    new_self = self.incr_n_set_id(prev_);
+                                },
+                            }
+                            const iter_state_kind = @as(IterStateKind, iter_state);
+                            var continue_: bool = iter_state_kind.is_continue();
+                            switch (MODE) {
+                                .ID => {
+                                    continue_ = continue_ and !id_equals(data, self.id, limit.id, aux);
+                                },
+                                .COUNT => {
+                                    continue_ = continue_ and new_self.n < limit.n;
+                                },
+                                .ID_OR_COUNT => {
+                                    continue_ = continue_ and !(id_equals(data, self.id, limit.id, aux) or new_self.n >= limit.n);
+                                },
+                            }
+                            return .{ new_self, continue_ };
+                        }
+                    };
+
+                    fn DataResultErrorFilterError(comptime ERROR: ?type, comptime FILTER_ERROR: ?type) type {
+                        return if (ERROR) |E| (if (FILTER_ERROR) |F| struct { DATA, ?(E || F) } else struct { DATA, ?E }) else (if (FILTER_ERROR) |F| struct { DATA, ?F } else DATA);
+                    }
+                    fn DataResultError(comptime ERROR: ?type) type {
+                        return if (ERROR) |E| struct { DATA, ?E } else DATA;
+                    }
+
+                    fn for_each_internal(
+                        data_: DATA,
+                        aux: AUX_DATA,
+                        first: ID,
+                        comptime LIMIT: LimitMode,
+                        limit: IdAndN,
+                        ctx: anytype,
+                        comptime CTX: anytype,
+                        comptime FN_TYPE: FuncParamType,
+                        comptime ERROR: ?type,
+                        action_rt: ForEachActionRT(FN_TYPE, @TypeOf(ctx), @TypeOf(CTX), ERROR),
+                        comptime ACTION_CT: ForEachActionCT(FN_TYPE, @TypeOf(ctx), @TypeOf(CTX), ERROR),
+                        comptime FILTER: bool,
+                        comptime FILTER_ERROR: ?type,
+                        comptime FILTER_FN_TYPE: FuncParamType,
+                        filter_max_count: COUNT,
+                        filter_rt: FilterActionRT(FILTER, FILTER_FN_TYPE, @TypeOf(ctx), @TypeOf(CTX), ERROR),
+                        comptime FILTER_CT: FilterActionCT(FILTER, FILTER_FN_TYPE, @TypeOf(ctx), @TypeOf(CTX), ERROR),
+                    ) DataResultErrorFilterError(ERROR, FILTER_ERROR) {
                         var state: IterState = IterState.continue_next_id();
+                        var filter_state: if (FILTER) IterState else void = if (FILTER) IterState.continue_next_id() else void{};
                         var data = data_;
-                        var id = first;
+                        var use_this_value: bool = true;
                         assert_id_valid(data, first, aux, @src());
-                        var curr = IdOrCount(LIMIT).new(first);
-                        var should_continue: bool = curr.initialy_under_limit(data, aux, limit);
+                        var curr = IdAndN.new(first, 0);
+                        var prev: ?IdAndN = null;
+                        var filter_count: if (FILTER) COUNT else void = if (FILTER) 0 else void{};
+                        var filter_continue: if (FILTER) bool else void = if (FILTER) true else void{};
+                        var should_continue: bool = curr.initialy_under_limit(LIMIT, data, aux, limit);
+                        var err: if (ERROR) |E| ?E else void = if (ERROR) null else void{};
                         if (comptime ERROR != null) {
                             if (comptime FN_TYPE == .RUNTIME_FN_PTR) {
                                 while (should_continue) {
-                                    data, state = try action_rt(data, aux, id, ctx, CTX);
-                                    switch (state) {
-                                        .CONTINUE_IMPLICIT_NEXT_ID => {
-                                            curr, id, should_continue = curr.incr_with_id_implicit_next(id, data, aux, limit);
-                                        },
-                                        .CONTINUE_SPECIFIC_NEXT_ID => |next_id_| {
-                                            curr, id, should_continue = curr.incr_with_id_specific_next(id, data, aux, limit, next_id_);
-                                        },
-                                        .STOP_IMPLICIT_NEXT_ID => {
-                                            curr, id, _ = curr.incr_with_id_implicit_next(id, data, aux, limit);
-                                            should_continue = false;
-                                        },
-                                        .STOP_SPECIFIC_NEXT_ID => |next_id_| {
-                                            curr, id, _ = curr.incr_with_id_specific_next(id, data, aux, limit, next_id_);
-                                            should_continue = false;
-                                        },
+                                    if (comptime FILTER) {
+                                        use_this_value, data, filter_state, err = filter_rt(data, aux, curr.id, ctx, CTX);
+                                        if (err != null) {
+                                            return .{ data, err };
+                                        }
+                                        if (use_this_value) {
+                                            filter_count += 1;
+                                            filter_continue = filter_count < filter_max_count;
+                                            data, state, err = action_rt(data, aux, curr.id, ctx, CTX);
+                                            if (err != null) {
+                                                return .{ data, err };
+                                            }
+                                        } else {
+                                            state = filter_state;
+                                        }
+                                    } else {
+                                        data, state, err = action_rt(data, aux, curr.id, ctx, CTX);
+                                        if (err != null) {
+                                            return .{ data, err };
+                                        }
+                                    }
+                                    prev = curr;
+                                    curr, should_continue = curr.goto_next_iter(LIMIT, state, data, aux, limit, prev);
+                                    if (comptime FILTER) {
+                                        should_continue = should_continue and filter_continue;
                                     }
                                 }
                             } else {
                                 while (should_continue) {
-                                    data, state = try ACTION_CT(data, aux, id, ctx, CTX);
-                                    switch (state) {
-                                        .CONTINUE_IMPLICIT_NEXT_ID => {
-                                            curr, id, should_continue = curr.incr_with_id_implicit_next(id, data, aux, limit);
-                                        },
-                                        .CONTINUE_SPECIFIC_NEXT_ID => |next_id_| {
-                                            curr, id, should_continue = curr.incr_with_id_specific_next(id, data, aux, limit, next_id_);
-                                        },
-                                        .STOP_IMPLICIT_NEXT_ID => {
-                                            curr, id, _ = curr.incr_with_id_implicit_next(id, data, aux, limit);
-                                            should_continue = false;
-                                        },
-                                        .STOP_SPECIFIC_NEXT_ID => |next_id_| {
-                                            curr, id, _ = curr.incr_with_id_specific_next(id, data, aux, limit, next_id_);
-                                            should_continue = false;
-                                        },
+                                    if (comptime FILTER) {
+                                        use_this_value, data, filter_state, err = FILTER_CT(data, aux, curr.id, ctx, CTX);
+                                        if (err != null) {
+                                            return .{ data, err };
+                                        }
+                                        if (use_this_value) {
+                                            filter_count += 1;
+                                            filter_continue = filter_count < filter_max_count;
+                                            data, state, err = ACTION_CT(data, aux, curr.id, ctx, CTX);
+                                            if (err != null) {
+                                                return .{ data, err };
+                                            }
+                                        } else {
+                                            state = filter_state;
+                                        }
+                                    } else {
+                                        data, state, err = ACTION_CT(data, aux, curr.id, ctx, CTX);
+                                        if (err != null) {
+                                            return .{ data, err };
+                                        }
+                                    }
+                                    prev = curr;
+                                    curr, should_continue = curr.goto_next_iter(LIMIT, state, data, aux, limit, prev);
+                                    if (comptime FILTER) {
+                                        should_continue = should_continue and filter_continue;
                                     }
                                 }
                             }
                         } else {
                             if (comptime FN_TYPE == .RUNTIME_FN_PTR) {
                                 while (should_continue) {
-                                    data, state = action_rt(data, aux, id, ctx, CTX);
-                                    switch (state) {
-                                        .CONTINUE_IMPLICIT_NEXT_ID => {
-                                            curr, id, should_continue = curr.incr_with_id_implicit_next(id, data, aux, limit);
-                                        },
-                                        .CONTINUE_SPECIFIC_NEXT_ID => |next_id_| {
-                                            curr, id, should_continue = curr.incr_with_id_specific_next(id, data, aux, limit, next_id_);
-                                        },
-                                        .STOP_IMPLICIT_NEXT_ID => {
-                                            curr, id, _ = curr.incr_with_id_implicit_next(id, data, aux, limit);
-                                            should_continue = false;
-                                        },
-                                        .STOP_SPECIFIC_NEXT_ID => |next_id_| {
-                                            curr, id, _ = curr.incr_with_id_specific_next(id, data, aux, limit, next_id_);
-                                            should_continue = false;
-                                        },
+                                    if (comptime FILTER) {
+                                        use_this_value, data, filter_state = filter_rt(data, aux, curr.id, ctx, CTX);
+                                        if (use_this_value) {
+                                            filter_count += 1;
+                                            filter_continue = filter_count < filter_max_count;
+                                            data, state = action_rt(data, aux, curr.id, ctx, CTX);
+                                        } else {
+                                            state = filter_state;
+                                        }
+                                    } else {
+                                        data, state = action_rt(data, aux, curr.id, ctx, CTX);
+                                    }
+                                    prev = curr;
+                                    curr, should_continue = curr.goto_next_iter(LIMIT, state, data, aux, limit, prev);
+                                    if (comptime FILTER) {
+                                        should_continue = should_continue and filter_continue;
                                     }
                                 }
                             } else {
                                 while (should_continue) {
-                                    data, state = ACTION_CT(data, aux, id, ctx, CTX);
-                                    switch (state) {
-                                        .CONTINUE_IMPLICIT_NEXT_ID => {
-                                            curr, id, should_continue = curr.incr_with_id_implicit_next(id, data, aux, limit);
-                                        },
-                                        .CONTINUE_SPECIFIC_NEXT_ID => |next_id_| {
-                                            curr, id, should_continue = curr.incr_with_id_specific_next(id, data, aux, limit, next_id_);
-                                        },
-                                        .STOP_IMPLICIT_NEXT_ID => {
-                                            curr, id, _ = curr.incr_with_id_implicit_next(id, data, aux, limit);
-                                            should_continue = false;
-                                        },
-                                        .STOP_SPECIFIC_NEXT_ID => |next_id_| {
-                                            curr, id, _ = curr.incr_with_id_specific_next(id, data, aux, limit, next_id_);
-                                            should_continue = false;
-                                        },
+                                    if (comptime FILTER) {
+                                        use_this_value, data, filter_state = FILTER_CT(data, aux, curr.id, ctx, CTX);
+                                        if (use_this_value) {
+                                            filter_count += 1;
+                                            filter_continue = filter_count < filter_max_count;
+                                            data, state = ACTION_CT(data, aux, curr.id, ctx, CTX);
+                                        } else {
+                                            state = filter_state;
+                                        }
+                                    } else {
+                                        data, state = ACTION_CT(data, aux, curr.id, ctx, CTX);
+                                    }
+                                    prev = curr;
+                                    curr, should_continue = curr.goto_next_iter(LIMIT, state, data, aux, limit, prev);
+                                    if (comptime FILTER) {
+                                        should_continue = should_continue and filter_continue;
                                     }
                                 }
                             }
                         }
+                        if (comptime ERROR) {
+                            return .{ data, err };
+                        } else {
+                            return data;
+                        }
                     }
 
-                    pub inline fn for_each_in_range(data: DATA, aux: AUX_DATA, first: ID, last: ID, ctx: anytype, comptime CTX: anytype, comptime FN_TYPE: FuncParamType, comptime ERROR: ?type, action_rt: ForEachActionRT(FN_TYPE, @TypeOf(ctx), @TypeOf(CTX), ERROR), comptime ACTION_CT: ForEachActionCT(FN_TYPE, @TypeOf(ctx), @TypeOf(CTX), ERROR)) if (ERROR) |E| struct { DATA, E } else DATA {
-                        return for_each_internal(data, aux, first, .ID, .new(0, last), ctx, CTX, FN_TYPE, ERROR, action_rt, ACTION_CT);
+                    pub inline fn for_each_in_range(data: DATA, aux: AUX_DATA, first: ID, last: ID, ctx: anytype, comptime CTX: anytype, comptime FN_TYPE: FuncParamType, comptime ERROR: ?type, action_rt: ForEachActionRT(FN_TYPE, @TypeOf(ctx), @TypeOf(CTX), ERROR), comptime ACTION_CT: ForEachActionCT(FN_TYPE, @TypeOf(ctx), @TypeOf(CTX), ERROR)) DataResultError(ERROR) {
+                        return for_each_internal(data, aux, first, .ID, .new(last, MAX_COUNT), ctx, CTX, FN_TYPE, ERROR, action_rt, ACTION_CT, false, void, .COMPTIME_FN_BODY, 0, void{}, void{});
                     }
-                    pub inline fn for_each_count(data: DATA, aux: AUX_DATA, first: ID, count: COUNT, ctx: anytype, comptime CTX: anytype, comptime FN_TYPE: FuncParamType, comptime ERROR: ?type, action_rt: ForEachActionRT(FN_TYPE, @TypeOf(ctx), @TypeOf(CTX), ERROR), comptime ACTION_CT: ForEachActionCT(FN_TYPE, @TypeOf(ctx), @TypeOf(CTX), ERROR)) if (ERROR) |E| struct { DATA, E } else DATA {
-                        return for_each_internal(data, aux, first, .COUNT, .new(count, first), ctx, CTX, FN_TYPE, ERROR, action_rt, ACTION_CT);
+                    pub inline fn for_each_count(data: DATA, aux: AUX_DATA, first: ID, count: COUNT, ctx: anytype, comptime CTX: anytype, comptime FN_TYPE: FuncParamType, comptime ERROR: ?type, action_rt: ForEachActionRT(FN_TYPE, @TypeOf(ctx), @TypeOf(CTX), ERROR), comptime ACTION_CT: ForEachActionCT(FN_TYPE, @TypeOf(ctx), @TypeOf(CTX), ERROR)) DataResultError(ERROR) {
+                        return for_each_internal(data, aux, first, .COUNT, .new(first, count), ctx, CTX, FN_TYPE, ERROR, action_rt, ACTION_CT, false, void, .COMPTIME_FN_BODY, 0, void{}, void{});
                     }
+                    pub inline fn for_each_in_range_max_count(data: DATA, aux: AUX_DATA, first: ID, last: ID, max_count: COUNT, ctx: anytype, comptime CTX: anytype, comptime FN_TYPE: FuncParamType, comptime ERROR: ?type, action_rt: ForEachActionRT(FN_TYPE, @TypeOf(ctx), @TypeOf(CTX), ERROR), comptime ACTION_CT: ForEachActionCT(FN_TYPE, @TypeOf(ctx), @TypeOf(CTX), ERROR)) DataResultError(ERROR) {
+                        return for_each_internal(data, aux, first, .ID_OR_COUNT, .new(last, max_count), ctx, CTX, FN_TYPE, ERROR, action_rt, ACTION_CT, false, void, .COMPTIME_FN_BODY, 0, void{}, void{});
+                    }
+                    pub inline fn for_each_in_range_filtered(data: DATA, aux: AUX_DATA, first: ID, last: ID, ctx: anytype, comptime CTX: anytype, comptime FN_TYPE: FuncParamType, comptime ERROR: ?type, action_rt: ForEachActionRT(FN_TYPE, @TypeOf(ctx), @TypeOf(CTX), ERROR), comptime ACTION_CT: ForEachActionCT(FN_TYPE, @TypeOf(ctx), @TypeOf(CTX), ERROR), comptime FILTER_FN_TYPE: FuncParamType, comptime FILTER_ERROR: ?type, filter_max_count: COUNT, filter_fn: FilterActionRT(true, FILTER_FN_TYPE, @TypeOf(ctx), @TypeOf(CTX), FILTER_ERROR), comptime FILTER_FN: FilterActionCT(true, FILTER_FN_TYPE, @TypeOf(ctx), @TypeOf(CTX), FILTER_ERROR)) DataResultErrorFilterError(ERROR, FILTER_ERROR) {
+                        return for_each_internal(data, aux, first, .ID, .new(last, MAX_COUNT), ctx, CTX, FN_TYPE, ERROR, action_rt, ACTION_CT, true, FILTER_ERROR, FILTER_FN_TYPE, filter_max_count, filter_fn, FILTER_FN);
+                    }
+                    pub inline fn for_each_count_filtered(data: DATA, aux: AUX_DATA, first: ID, count: COUNT, ctx: anytype, comptime CTX: anytype, comptime FN_TYPE: FuncParamType, comptime ERROR: ?type, action_rt: ForEachActionRT(FN_TYPE, @TypeOf(ctx), @TypeOf(CTX), ERROR), comptime ACTION_CT: ForEachActionCT(FN_TYPE, @TypeOf(ctx), @TypeOf(CTX), ERROR), comptime FILTER_FN_TYPE: FuncParamType, comptime FILTER_ERROR: ?type, filter_max_count: COUNT, filter_fn: FilterActionRT(true, FILTER_FN_TYPE, @TypeOf(ctx), @TypeOf(CTX), FILTER_ERROR), comptime FILTER_FN: FilterActionCT(true, FILTER_FN_TYPE, @TypeOf(ctx), @TypeOf(CTX), FILTER_ERROR)) DataResultErrorFilterError(ERROR, FILTER_ERROR) {
+                        return for_each_internal(data, aux, first, .COUNT, .new(first, count), ctx, CTX, FN_TYPE, ERROR, action_rt, ACTION_CT, true, FILTER_ERROR, FILTER_FN_TYPE, filter_max_count, filter_fn, FILTER_FN);
+                    }
+                    pub inline fn for_each_in_range_max_count_filtered(data: DATA, aux: AUX_DATA, first: ID, last: ID, max_count: COUNT, ctx: anytype, comptime CTX: anytype, comptime FN_TYPE: FuncParamType, comptime ERROR: ?type, action_rt: ForEachActionRT(FN_TYPE, @TypeOf(ctx), @TypeOf(CTX), ERROR), comptime ACTION_CT: ForEachActionCT(FN_TYPE, @TypeOf(ctx), @TypeOf(CTX), ERROR), comptime FILTER_FN_TYPE: FuncParamType, comptime FILTER_ERROR: ?type,  filter_max_count: COUNT, filter_fn: FilterActionRT(true, FILTER_FN_TYPE, @TypeOf(ctx), @TypeOf(CTX), FILTER_ERROR), comptime FILTER_FN: FilterActionCT(true, FILTER_FN_TYPE, @TypeOf(ctx), @TypeOf(CTX), FILTER_ERROR)) DataResultErrorFilterError(ERROR, FILTER_ERROR) {
+                        return for_each_internal(data, aux, first, .ID_OR_COUNT, .new(last, max_count), ctx, CTX, FN_TYPE, ERROR, action_rt, ACTION_CT, true, FILTER_ERROR, FILTER_FN_TYPE, filter_max_count, filter_fn, FILTER_FN);
+                    }
+
+                    fn remove_action(data: DATA, aux: AUX_DATA, id: ID, _: void, comptime _: void) struct { DATA, IterState, ?IdError } {
+                        if (!id_valid(data, id, aux)) {
+                            return .{ data, IterState.stop_with_same_id(), IdError.id_invalid };
+                        }
+                        const new_data = delete_one(data, id, aux);
+                        return .{ new_data, IterState.continue_next_id(), null };
+                    }
+                    fn remove_action_no_err(data: DATA, aux: AUX_DATA, id: ID, _: void, comptime _: void) struct { DATA, IterState } {
+                        const new_data = delete_one(data, id, aux);
+                        return .{ new_data, IterState.continue_next_id() };
+                    }
+
+                    pub fn filtered_remove_in_range(data: DATA, aux: AUX_DATA, first: ID, last: ID, comptime ID_ERROR_MODE: IdMightError) if (ID_ERROR_MODE == IdMightError.ID_MIGHT_BE_INVALID) struct { DATA, IdError } else DATA {
+                        for_each_in_range_filtered(data, aux, first, last, void{}, void{}, .RUNTIME_FN_PTR, comptime ERROR: ?type, action_rt: (unknown type), comptime ACTION_CT: (unknown type), comptime FILTER_FN_TYPE: FuncParamType, filter_max_count: (unknown type), filter_fn: (unknown type), comptime FILTER_FN: (unknown type))
+                    }
+
                     //TODO FILTER_REMOVE
                     //TODO FILTER_SELECT
                     //TODO FILTER_TRANSFORM
                     //TODO ACCUMULATE
+                    //TODO FILTER_ACCUMULATE
                     //TODO TRANSFORM
 
                     pub const SortInputs = struct {
@@ -4723,12 +4911,12 @@ const TEST_UTILS = struct {
                 };
             }
         };
-        const aux_data_CONCRETE = struct {
+        const AUX_DATA_CONCRETE = struct {
             ptr: [*]ELEM,
             len: COUNT = 0,
             cap: COUNT = 0,
         };
-        const aux_data = *aux_data_CONCRETE;
+        const AUX_DATA = *AUX_DATA_CONCRETE;
         const COUNT = u32;
         const ID = struct {
             raw: [4]u8 = @splat(0),
@@ -4758,101 +4946,101 @@ const TEST_UTILS = struct {
             }
         };
         const FUNC = struct {
-            fn get_len(_: DATA, aux_data: aux_data) COUNT {
+            fn get_len(_: DATA, aux_data: AUX_DATA) COUNT {
                 return aux_data.len;
             }
-            fn set_len(data: DATA, new_len: COUNT, aux_data: aux_data) DATA {
+            fn set_len(data: DATA, new_len: COUNT, aux_data: AUX_DATA) DATA {
                 aux_data.len = new_len;
                 return data.incr();
             }
-            fn get_cap(_: DATA, aux_data: aux_data) COUNT {
+            fn get_cap(_: DATA, aux_data: AUX_DATA) COUNT {
                 return aux_data.len;
             }
-            fn set_cap(data: DATA, new_cap: COUNT, aux_data: aux_data) DATA {
+            fn set_cap(data: DATA, new_cap: COUNT, aux_data: AUX_DATA) DATA {
                 aux_data.cap = new_cap;
                 return data.incr();
             }
-            fn get_base_ptr(_: DATA, aux_data: aux_data) [*]ELEM {
+            fn get_base_ptr(_: DATA, aux_data: AUX_DATA) [*]ELEM {
                 return aux_data.ptr;
             }
-            fn get_base_ptr_const(_: DATA, aux_data: aux_data) [*]const ELEM {
+            fn get_base_ptr_const(_: DATA, aux_data: AUX_DATA) [*]const ELEM {
                 return aux_data.ptr;
             }
-            fn set_base_ptr(data: DATA, ptr: [*]ELEM, aux_data: aux_data) DATA {
+            fn set_base_ptr(data: DATA, ptr: [*]ELEM, aux_data: AUX_DATA) DATA {
                 aux_data.ptr = ptr;
                 return data.incr();
             }
-            fn get(_: DATA, id: ID, aux_data: aux_data) ELEM {
+            fn get(_: DATA, id: ID, aux_data: AUX_DATA) ELEM {
                 return aux_data.ptr[id.real()];
             }
-            fn get_ptr(_: DATA, id: ID, aux_data: aux_data) *ELEM {
+            fn get_ptr(_: DATA, id: ID, aux_data: AUX_DATA) *ELEM {
                 return &aux_data.ptr[id.real()];
             }
-            fn set(data: DATA, id: ID, val: ELEM, aux_data: aux_data) DATA {
+            fn set(data: DATA, id: ID, val: ELEM, aux_data: AUX_DATA) DATA {
                 aux_data.ptr[id.real()] = val;
                 return data.incr();
             }
-            fn id_less(_: DATA, a: ID, b: ID, _: aux_data) bool {
+            fn id_less(_: DATA, a: ID, b: ID, _: AUX_DATA) bool {
                 return a.real() < b.real();
             }
-            fn id_less_or_equal(_: DATA, a: ID, b: ID, _: aux_data) bool {
+            fn id_less_or_equal(_: DATA, a: ID, b: ID, _: AUX_DATA) bool {
                 return a.real() <= b.real();
             }
-            fn id_greater(_: DATA, a: ID, b: ID, _: aux_data) bool {
+            fn id_greater(_: DATA, a: ID, b: ID, _: AUX_DATA) bool {
                 return a.real() > b.real();
             }
-            fn id_greater_or_equal(_: DATA, a: ID, b: ID, _: aux_data) bool {
+            fn id_greater_or_equal(_: DATA, a: ID, b: ID, _: AUX_DATA) bool {
                 return a.real() >= b.real();
             }
-            fn id_equal(_: DATA, a: ID, b: ID, _: aux_data) bool {
+            fn id_equal(_: DATA, a: ID, b: ID, _: AUX_DATA) bool {
                 return a.real() == b.real();
             }
-            fn first(_: DATA, _: aux_data) ID {
+            fn first(_: DATA, _: AUX_DATA) ID {
                 return ID{};
             }
-            fn nth_from_start(_: DATA, n: COUNT, _: aux_data) ID {
+            fn nth_from_start(_: DATA, n: COUNT, _: AUX_DATA) ID {
                 return .new(@intCast(n));
             }
-            fn next(_: DATA, id: ID, _: aux_data) ID {
+            fn next(_: DATA, id: ID, _: AUX_DATA) ID {
                 return ID.new(id.real() + 1);
             }
-            fn nth_next(_: DATA, id: ID, n: COUNT, _: aux_data) ID {
+            fn nth_next(_: DATA, id: ID, n: COUNT, _: AUX_DATA) ID {
                 return ID.new(id.real() + @as(u32, @intCast(n)));
             }
-            fn prev(_: DATA, id: ID, _: aux_data) ID {
+            fn prev(_: DATA, id: ID, _: AUX_DATA) ID {
                 return ID.new(id.real() - 1);
             }
-            fn nth_prev(_: DATA, id: ID, n: COUNT, _: aux_data) ID {
+            fn nth_prev(_: DATA, id: ID, n: COUNT, _: AUX_DATA) ID {
                 return ID.new(id.real() - @as(u32, @intCast(n)));
             }
-            fn last(data: DATA, aux_data: aux_data) ID {
+            fn last(data: DATA, aux_data: AUX_DATA) ID {
                 return .new(@intCast(get_len(data, aux_data) -% 1));
             }
-            fn nth_from_end(data: DATA, n: COUNT, aux_data: aux_data) ID {
+            fn nth_from_end(data: DATA, n: COUNT, aux_data: AUX_DATA) ID {
                 return .new(@intCast(get_len(data, aux_data) -% 1 -% n));
             }
-            fn elem_less(a: ELEM, b: ELEM, _: aux_data) bool {
+            fn elem_less(a: ELEM, b: ELEM, _: AUX_DATA) bool {
                 return a.real() < b.real();
             }
-            fn elem_less_or_equal(a: ELEM, b: ELEM, _: aux_data) bool {
+            fn elem_less_or_equal(a: ELEM, b: ELEM, _: AUX_DATA) bool {
                 return a.real() <= b.real();
             }
-            fn elem_greater(a: ELEM, b: ELEM, _: aux_data) bool {
+            fn elem_greater(a: ELEM, b: ELEM, _: AUX_DATA) bool {
                 return a.real() > b.real();
             }
-            fn elem_greater_or_equal(a: ELEM, b: ELEM, _: aux_data) bool {
+            fn elem_greater_or_equal(a: ELEM, b: ELEM, _: AUX_DATA) bool {
                 return a.real() >= b.real();
             }
-            fn elem_equal(a: ELEM, b: ELEM, _: aux_data) bool {
+            fn elem_equal(a: ELEM, b: ELEM, _: AUX_DATA) bool {
                 return a.real() == b.real();
             }
-            fn valid_id(_: DATA, id: ID, aux_data: aux_data) bool {
+            fn valid_id(_: DATA, id: ID, aux_data: AUX_DATA) bool {
                 return 0 <= id.real() and id.real() < aux_data.len;
             }
-            fn invalid_after(_: DATA, aux_data: aux_data) ID {
+            fn invalid_after(_: DATA, aux_data: AUX_DATA) ID {
                 return ID.new(@intCast(aux_data.len));
             }
-            fn invalid_before(_: DATA, _: aux_data) ID {
+            fn invalid_before(_: DATA, _: AUX_DATA) ID {
                 return ID.new(math.maxInt(u32));
             }
         };
@@ -4861,7 +5049,7 @@ const TEST_UTILS = struct {
             .DATA = DATA,
             .ELEM = ELEM,
             .ID = ID,
-            .aux_data = aux_data,
+            .aux_data = AUX_DATA,
         };
         const PKG_FULL_CUSTOM_FUNCS = CORE.select_functions(7000, .ALLOW_INFERED_IMPLEMENTATIONS, CORE.Builder().CustomFunctions_{
             .GET = FUNC.get,
@@ -4994,7 +5182,7 @@ test "Utils_DataManipulation => sorting algorithms" {
         var buf: [BUF_MAX_LEN]Blind = undefined;
         var buf_len: u32 = 0;
         var is_sorted: bool = false;
-        var udata_concrete = TEST_UTILS.BLIND.aux_data_CONCRETE{
+        var udata_concrete = TEST_UTILS.BLIND.AUX_DATA_CONCRETE{
             .ptr = @ptrCast(&buf),
             .len = 0,
             .cap = 0,
