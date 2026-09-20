@@ -51,6 +51,8 @@ const Endian = Root.CommonTypes.Endian;
 const Math = Root.Math;
 const Common = Root.CommonTypes;
 
+const Iterator = Root.Iterator.Iterator;
+
 pub const Defaults = @import("./Utils_DataManipulation_Defaults.zig");
 pub const Recipes = @import("./Utils_DataManipulation_Recipes.zig");
 pub const Standard = @import("./Utils_DataManipulation_Standard.zig");
@@ -2849,6 +2851,17 @@ pub const DataManipulationCore = struct {
                         return prepend_many_slots_assume_capacity(data_, count, aux_data);
                     }
 
+                    /// Remove sparse indexes in O(N) time. Id's in the id list MUST be in the same order they will be encountered in THIS data list.
+                    /// 
+                    /// `IDS_TO_REMOVE_PKG` must be a 'DataManipulationPackage' with an element (`ELEM`) type that matches the
+                    /// `ID` type of this package. 
+                    pub fn remove_sparse_from_ordered_id_list(data: DATA, aux_data: AUX_DATA, comptime IDS_TO_REMOVE_PKG: type, ids_to_remove_in_order_data: anytype, ids_to_remove_in_order_aux_data: anytype) struct {DATA, COUNT} {
+                        var write_id = IDS_TO_REMOVE_PKG.first_id(ids_to_remove_in_order_data, ids_to_remove_in_order_aux_data);
+                        var read_id = write_id;
+                        const last_id = IDS_TO_REMOVE_PKG.last_id(ids_to_remove_in_order_data, ids_to_remove_in_order_aux_data);
+                        
+                    }
+
                     pub const IterState = union(IterStateKind) {
                         CONTINUE_IMPLICIT_NEXT_ID: void,
                         CONTINUE_SPECIFIC_NEXT_ID: ID,
@@ -3207,7 +3220,7 @@ pub const DataManipulationCore = struct {
                     }
 
                     pub fn filtered_remove_in_range(data: DATA, aux: AUX_DATA, first: ID, last: ID, comptime ID_ERROR_MODE: IdMightError) if (ID_ERROR_MODE == IdMightError.ID_MIGHT_BE_INVALID) struct { DATA, IdError } else DATA {
-                        for_each_in_range_filtered(data, aux, first, last, void{}, void{}, .RUNTIME_FN_PTR, comptime ERROR: ?type, action_rt: (unknown type), comptime ACTION_CT: (unknown type), comptime FILTER_FN_TYPE: FuncParamType, filter_max_count: (unknown type), filter_fn: (unknown type), comptime FILTER_FN: (unknown type))
+                        for_each_in_range_filtered(data, aux, first, last, void{}, void{}, .RUNTIME_FN_PTR, IdError, action_rt: (unknown type), comptime ACTION_CT: (unknown type), comptime FILTER_FN_TYPE: FuncParamType, filter_max_count: (unknown type), filter_fn: (unknown type), comptime FILTER_FN: (unknown type))
                     }
 
                     //TODO FILTER_REMOVE
