@@ -37,7 +37,9 @@ const Assert = Root.Assert;
 const Utils = Root.Utils;
 const CommonTypes = Root.CommonTypes;
 const Test = Root.Testing;
-const DummyAlloc = Root.DummyAllocator.allocator_panic_free_noop;
+const dummy_alloc = Root.DummyAllocator.allocator_panic_free_noop;
+const Random = std.Random;
+const Io = std.Io;
 
 const assert_with_reason = Assert.assert_with_reason;
 const assert_unreachable = Assert.assert_unreachable;
@@ -45,12 +47,17 @@ const assert_unreachable_err = Assert.assert_unreachable_err;
 const num_cast = Cast.num_cast;
 const kind_info = KindInfo.get_kind_info;
 
-pub const Mode = enum {
+pub const FieldMode = enum {
     WHOLE_STRUCTS,
     SPLIT_FIELDS,
 };
 
-pub fn List(comptime T: type, comptime MODE: Mode) type {
+pub const LayoutMode = enum {
+    SERIAL_INDEXES,
+    SERIAL_INDEXES_WITH_OFFSET,
+};
+
+pub fn List(comptime T: type, comptime FIELD_LAYOUT: FieldMode, comptime INDEX_LAYOUT: LayoutMode) type {
     const _NUM_FIELDS: usize = switch (@typeInfo(T)) {
         .@"struct" => |s| s.fields.len,
         else => 1,
@@ -97,13 +104,23 @@ pub fn List(comptime T: type, comptime MODE: Mode) type {
         const ORDERED_FIELD_NAMES = _ORDERED_FIELD_NAMES;
         const ORDERED_FIELD_TYPES = _ORDERED_FIELD_TYPES;
         const ORDERED_FIELD_OFFETS = _ORDERED_FIELD_OFFETS;
-        const SPLIT = MODE == .SPLIT_FIELDS;
+        const SPLIT = FIELD_LAYOUT == .SPLIT_FIELDS;
+        const MAX_ALIGN = @alignOf(T);
+        const SERIAL_IDXS = switch (INDEX_LAYOUT) {
+            .SERIAL_INDEXES, .SERIAL_INDEXES_WITH_OFFSET => true,
+            else => false,
+        };
+        const IDX_OFFSET = switch (INDEX_LAYOUT) {
+            .SERIAL_INDEXES => false,
+            .SERIAL_INDEXES_WITH_OFFSET => true,
+        };
         pub const Field = _FIELD_ENUM;
-        const Ptr = if (SPLIT) [*]u8 else [*]T;
+        const Ptr = if (SPLIT) [*]align(MAX_ALIGN) u8 else [*]T;
 
         ptr: Ptr = undefined,
         len: u32 = 0,
         cap: u32 = 0,
+        start_offset: if (IDX_OFFSET) u32 else void = if (IDX_OFFSET) 0 else void{},
 
         fn assert_valid_idx(self: Self, idx: u32, src: ?std.builtin.SourceLocation) void {
             assert_with_reason(idx < self.len, src, "index `{d}` is out of bounds", .{idx});
@@ -117,6 +134,12 @@ pub fn List(comptime T: type, comptime MODE: Mode) type {
         fn assert_start_less_end_exclusive(start: u32, end_excl: u32, src: ?std.builtin.SourceLocation) void {
             assert_with_reason(start < end_excl, src, "start must be <= end_exclusive, got {d} > {d}", .{ start, end_excl });
         }
+        fn assert_start_less_or_equal_end_exclusive(start: u32, end_excl: u32, src: ?std.builtin.SourceLocation) void {
+            assert_with_reason(start <= end_excl, src, "start must be <= end_exclusive, got {d} > {d}", .{ start, end_excl });
+        }
+        fn assert_serial_indexes(src: ?std.builtin.SourceLocation) void {
+            assert_with_reason(SERIAL_IDXS, src, "indexes must be serially in order at this point", .{});
+        }
 
         fn field_offset(comptime field: Field) u32 {
             return ORDERED_FIELD_OFFETS[@intFromEnum(field)];
@@ -125,9 +148,14 @@ pub fn List(comptime T: type, comptime MODE: Mode) type {
             return ORDERED_FIELD_TYPES[@intFromEnum(field)];
         }
 
-        pub fn set(self: Self, idx: u32, val: T) void {
-            self.assert_valid_idx(idx, @src());
-            switch (MODE) {
+        fn true_idx(self: Self, idx: u32) u32 {
+            switch (comptime INDEX_LAYOUT) {
+                .SERIAL_INDEXES => return idx,
+                .SERIAL_INDEXES_WITH_OFFSET => return idx + self.start_offset,
+            }
+        }
+        fn set_true_idx(self: Self, idx: u32, val: T) void {
+            switch (FIELD_LAYOUT) {
                 .WHOLE_STRUCTS => {
                     self.ptr[idx] = val;
                 },
@@ -141,9 +169,12 @@ pub fn List(comptime T: type, comptime MODE: Mode) type {
                 },
             }
         }
-        pub fn set_field(self: Self, comptime field: Field, idx: u32, val: FieldType(field)) void {
+        pub fn set(self: Self, idx: u32, val: T) void {
             self.assert_valid_idx(idx, @src());
-            switch (MODE) {
+            self.set_true_idx(self.true_idx(idx), val);
+        }
+        fn set_field_internal(self: Self, comptime field: Field, idx: u32, val: FieldType(field)) void {
+            switch (FIELD_LAYOUT) {
                 .WHOLE_STRUCTS => {
                     @field(&self.ptr[idx], @tagName(field)) = val;
                 },
@@ -158,9 +189,13 @@ pub fn List(comptime T: type, comptime MODE: Mode) type {
                 },
             }
         }
-        pub fn get(self: Self, idx: u32) T {
+        pub fn set_field(self: Self, comptime field: Field, idx: u32, val: FieldType(field)) void {
             self.assert_valid_idx(idx, @src());
-            switch (MODE) {
+            self.set_field_internal(field, self.true_idx(idx), val);
+        }
+        fn get_true_idx(self: Self, idx: u32) T {
+            self.assert_valid_idx(idx, @src());
+            switch (FIELD_LAYOUT) {
                 .WHOLE_STRUCTS => {
                     return self.ptr[idx];
                 },
@@ -175,19 +210,28 @@ pub fn List(comptime T: type, comptime MODE: Mode) type {
                 },
             }
         }
+        pub fn get(self: Self, idx: u32) T {
+            self.assert_valid_idx(idx, @src());
+            return self.get_true_idx(self.true_idx(idx));
+        }
+        fn get_ptr_internal(self: Self, idx: u32) *T {
+            return &self.ptr[idx];
+        }
         pub fn get_ptr(self: Self, idx: u32) *T {
             self.assert_valid_idx(idx, @src());
             assert_whole_struct_for_ptr(@src());
+            return self.get_ptr_internal(self.true_idx(idx));
+        }
+        fn get_ptr_const_internal(self: Self, idx: u32) *const T {
             return &self.ptr[idx];
         }
         pub fn get_ptr_const(self: Self, idx: u32) *const T {
             self.assert_valid_idx(idx, @src());
             assert_whole_struct_for_ptr(@src());
-            return &self.ptr[idx];
+            return self.get_ptr_const_internal(self.true_idx(idx));
         }
-        pub fn get_field(self: Self, comptime field: Field, idx: u32) FieldType(field) {
-            self.assert_valid_idx(idx, @src());
-            switch (MODE) {
+        fn get_field_true_idx(self: Self, comptime field: Field, idx: u32) FieldType(field) {
+            switch (FIELD_LAYOUT) {
                 .WHOLE_STRUCTS => {
                     return @field(&self.ptr[idx], @tagName(field));
                 },
@@ -201,9 +245,12 @@ pub fn List(comptime T: type, comptime MODE: Mode) type {
                 },
             }
         }
-        pub fn get_field_ptr(self: Self, comptime field: Field, idx: u32) *FieldType(field) {
+        pub fn get_field(self: Self, comptime field: Field, idx: u32) FieldType(field) {
             self.assert_valid_idx(idx, @src());
-            switch (MODE) {
+            return self.get_field(field, self.true_idx(idx));
+        }
+        fn get_field_ptr_internal(self: Self, comptime field: Field, idx: u32) *FieldType(field) {
+            switch (FIELD_LAYOUT) {
                 .WHOLE_STRUCTS => {
                     return @field(&self.ptr[idx], @tagName(field));
                 },
@@ -217,9 +264,12 @@ pub fn List(comptime T: type, comptime MODE: Mode) type {
                 },
             }
         }
-        pub fn get_field_ptr_const(self: Self, comptime field: Field, idx: u32) *const FieldType(field) {
+        pub fn get_field_ptr(self: Self, comptime field: Field, idx: u32) *FieldType(field) {
             self.assert_valid_idx(idx, @src());
-            switch (MODE) {
+            return self.get_field_ptr_internal(field, self.true_idx(idx));
+        }
+        fn get_field_ptr_const_internal(self: Self, comptime field: Field, idx: u32) *const FieldType(field) {
+            switch (FIELD_LAYOUT) {
                 .WHOLE_STRUCTS => {
                     return @field(&self.ptr[idx], @tagName(field));
                 },
@@ -232,6 +282,10 @@ pub fn List(comptime T: type, comptime MODE: Mode) type {
                     return ptr;
                 },
             }
+        }
+        pub fn get_field_ptr_const(self: Self, comptime field: Field, idx: u32) *const FieldType(field) {
+            self.assert_valid_idx(idx, @src());
+            return self.get_field_ptr_const_internal(field, self.true_idx(idx));
         }
         pub fn get_len(self: Self) u32 {
             return self.len;
@@ -257,149 +311,154 @@ pub fn List(comptime T: type, comptime MODE: Mode) type {
         pub fn decr_cap(self: *Self, count: u32) void {
             self.cap -= count;
         }
-        pub fn slice(self: Self, start: u32, end_exclusive: u32) Self {
-            assert_whole_struct_for_slice(@src());
-            return Self{
-                .ptr = self.ptr + start,
-                .len = end_exclusive - start,
-                .cap = end_exclusive - start,
-            };
-        }
-        pub fn reverse_range(self: Self, start: u32, end_exclusive: u32) void {
-            if (start >= end_exclusive) return;
-            switch (MODE) {
+        // pub fn slice(self: Self, start: u32, end_exclusive: u32) Self {
+        //     assert_whole_struct_for_slice(@src());
+        //     return Self{
+        //         .ptr = self.ptr + start,
+        //         .len = end_exclusive - start,
+        //         .cap = end_exclusive - start,
+        //     };
+        // }
+        fn reverse_range_internal(self: Self, start: u32, end_exclusive: u32) void {
+            switch (FIELD_LAYOUT) {
                 .WHOLE_STRUCTS => {
-                    var left: u32 = start;
-                    var right: u32 = end_exclusive - 1;
-                    var count: u32 = (end_exclusive - start) >> 1;
-                    while (count > 0) {
-                        const temp = self.ptr[left];
-                        self.ptr[left] = self.ptr[right];
-                        self.ptr[right] = temp;
-                        count -= 1;
-                        left += 1;
-                        right -= 1;
+                    switch (comptime INDEX_LAYOUT) {
+                        .SERIAL_INDEXES => {
+                            std.mem.reverse(T, self.ptr[start..end_exclusive]);
+                        },
+                        .SERIAL_INDEXES_WITH_OFFSET => {
+                            std.mem.reverse(T, (self.ptr + self.start_offset)[start..end_exclusive]);
+                        },
+                        else => unreachable,
                     }
                 },
                 .SPLIT_FIELDS => {
-                    const full_count: u32 = (end_exclusive - start) >> 1;
                     inline for (ORDERED_FIELD_OFFETS[0.._NUM_FIELDS], ORDERED_FIELD_TYPES[0..]) |offset, t| {
-                        var count: u32 = full_count;
-                        const base_off = (self.cap * offset);
-                        const left_off = base_off + (@sizeOf(t) * start);
-                        const right_off = base_off + (@sizeOf(t) * (end_exclusive - 1));
-                        const left_opq = self.ptr + left_off;
-                        const right_opq = self.ptr + right_off;
-                        const ptr_left: [*]t = @ptrCast(@alignCast(left_opq));
-                        const ptr_right: [*]t = @ptrCast(@alignCast(right_opq));
-                        while (count > 0) {
-                            const temp = ptr_left[0];
-                            ptr_left[0] = ptr_right[0];
-                            ptr_right[0] = temp;
-                            count -= 1;
-                            ptr_left += 1;
-                            ptr_right -= 1;
+                        const field_ptr: [*]t = @ptrCast(self.ptr + (self.cap * offset));
+                        switch (comptime INDEX_LAYOUT) {
+                            .SERIAL_INDEXES => {
+                                std.mem.reverse(T, field_ptr[start..end_exclusive]);
+                            },
+                            .SERIAL_INDEXES_WITH_OFFSET => {
+                                std.mem.reverse(T, (field_ptr + self.start_offset)[start..end_exclusive]);
+                            },
+                            else => unreachable,
                         }
                     }
                 },
             }
         }
-        fn reverse_range_field_idx(self: Self, comptime fidx: u32, full_count: u32, start: u32, end_exclusive: u32) void {
-            var count: u32 = full_count;
+        pub fn reverse_range(self: Self, start: u32, end_exclusive: u32) void {
+            self.assert_valid_idx(start, @src());
+            self.assert_valid_idx(end_exclusive, @src());
+            if (start == end_exclusive) return;
+            assert_start_less_end_exclusive(start, end_exclusive, @src());
+            self.reverse_range_internal(start, end_exclusive);
+        }
+        fn reverse_range_field_idx(self: Self, comptime fidx: usize, start: u32, end_exclusive: u32) void {
             const offset = ORDERED_FIELD_OFFETS[fidx];
             const t = ORDERED_FIELD_TYPES[fidx];
-            const base_off = (self.cap * offset);
-            const left_off = base_off + (@sizeOf(t) * start);
-            const right_off = base_off + (@sizeOf(t) * (end_exclusive - 1));
-            const left_opq = self.ptr + left_off;
-            const right_opq = self.ptr + right_off;
-            const ptr_left: [*]t = @ptrCast(@alignCast(left_opq));
-            const ptr_right: [*]t = @ptrCast(@alignCast(right_opq));
-            while (count > 0) {
-                const temp = ptr_left[0];
-                ptr_left[0] = ptr_right[0];
-                ptr_right[0] = temp;
-                count -= 1;
-                ptr_left += 1;
-                ptr_right -= 1;
+            const field_ptr: [*]t = @ptrCast(self.ptr + (self.cap * offset));
+            switch (comptime INDEX_LAYOUT) {
+                .SERIAL_INDEXES => {
+                    std.mem.reverse(T, field_ptr[start..end_exclusive]);
+                },
+                .SERIAL_INDEXES_WITH_OFFSET => {
+                    std.mem.reverse(T, (field_ptr + self.start_offset)[start..end_exclusive]);
+                },
+                else => unreachable,
             }
         }
         pub fn reverse(self: Self) void {
             self.reverse_range(0, self.len);
         }
-        pub fn rotate_range(self: Self, start: u32, end_exclusive: u32, delta: i64) void {
-            if (start >= end_exclusive) return;
+        fn rotate_range_internal(self: Self, start: u32, end_exclusive: u32, delta: i64) void {
             const len: i64 = end_exclusive - start;
             const shift: u32 = @intCast(@mod(delta, len));
-            self.rotate_range_right(start, end_exclusive, shift);
+            self.rotate_range_right_internal(start, end_exclusive, shift);
+        }
+        pub fn rotate_range(self: Self, start: u32, end_exclusive: u32, delta: i64) void {
+            self.assert_valid_idx(start, @src());
+            self.assert_valid_idx(end_exclusive, @src());
+            if (start == end_exclusive) return;
+            assert_start_less_end_exclusive(start, end_exclusive, @src());
+            self.rotate_range_internal(start, end_exclusive, delta);
         }
         pub fn rotate(self: Self, delta: i64) void {
             return self.rotate_range(0, self.len, delta);
         }
-        pub fn rotate_range_right(self: Self, start: u32, end_exclusive: u32, count: u32) void {
-            if (start >= end_exclusive) return;
+        fn rotate_range_right_internal(self: Self, start: u32, end_exclusive: u32, count: u32) void {
             const len = end_exclusive - start;
             const shift = count % len;
             if (shift == 0) return;
             if (shift == 1) {
-                self.move_one_left(end_exclusive - 1, start);
+                self.move_one_left_displace_internal(end_exclusive - 1, start);
                 return;
             }
             if (shift == len - 1) {
-                self.move_one_right(start, end_exclusive - 1);
+                self.move_one_right_displace_internal(start, end_exclusive - 1);
                 return;
             }
             const boundary = end_exclusive - shift;
-            switch (MODE) {
+            switch (FIELD_LAYOUT) {
                 .WHOLE_STRUCTS => {
-                    self.reverse_range(start, boundary);
-                    self.reverse_range(boundary, end_exclusive);
-                    self.reverse_range(start, end_exclusive);
+                    self.reverse_range_internal(start, boundary);
+                    self.reverse_range_internal(boundary, end_exclusive);
+                    self.reverse_range_internal(start, end_exclusive);
                 },
                 .SPLIT_FIELDS => {
-                    const start_len = (boundary - start);
-                    const end_len = (end_exclusive - boundary);
-                    inline for (0..NUM_FIELDS) |i| {
-                        self.reverse_range_field_idx(@intCast(i), start_len, start, boundary);
-                        self.reverse_range_field_idx(@intCast(i), end_len, boundary, end_exclusive);
-                        self.reverse_range_field_idx(@intCast(i), len, start, end_exclusive);
+                    inline for (0..NUM_FIELDS) |FIDX| {
+                        self.reverse_range_field_idx(FIDX, start, boundary);
+                        self.reverse_range_field_idx(FIDX, boundary, end_exclusive);
+                        self.reverse_range_field_idx(FIDX, start, end_exclusive);
                     }
                 },
             }
+        }
+        pub fn rotate_range_right(self: Self, start: u32, end_exclusive: u32, count: u32) void {
+            self.assert_valid_idx(start, @src());
+            self.assert_valid_idx(end_exclusive, @src());
+            if (start == end_exclusive or count == 0) return;
+            assert_start_less_end_exclusive(start, end_exclusive, @src());
+            return self.rotate_range_right_internal(start, end_exclusive, count);
         }
         pub fn rotate_right(self: Self, count: u32) void {
             self.rotate_range_right(0, self.len, count);
         }
-        pub fn rotate_range_left(self: Self, start: u32, end_exclusive: u32, count: u32) void {
-            if (start >= end_exclusive) return;
+        fn rotate_range_left_internal(self: Self, start: u32, end_exclusive: u32, count: u32) void {
             const len = end_exclusive - start;
             const shift = count % len;
             if (shift == 0) return;
             if (shift == 1) {
-                self.move_one_right(start, end_exclusive - 1);
+                self.move_one_right_displace(start, end_exclusive - 1);
                 return;
             }
             if (shift == len - 1) {
-                self.move_one_left(end_exclusive - 1, start);
+                self.move_one_left_displace(end_exclusive - 1, start);
                 return;
             }
             const boundary = start + shift;
-            switch (MODE) {
+            switch (FIELD_LAYOUT) {
                 .WHOLE_STRUCTS => {
-                    self.reverse_range(start, boundary);
-                    self.reverse_range(boundary, end_exclusive);
-                    self.reverse_range(start, end_exclusive);
+                    self.reverse_range_internal(start, boundary);
+                    self.reverse_range_internal(boundary, end_exclusive);
+                    self.reverse_range_internal(start, end_exclusive);
                 },
                 .SPLIT_FIELDS => {
-                    const start_len = (boundary - start);
-                    const end_len = (end_exclusive - boundary);
-                    inline for (0..NUM_FIELDS) |i| {
-                        self.reverse_range_field_idx(@intCast(i), start_len, start, boundary);
-                        self.reverse_range_field_idx(@intCast(i), end_len, boundary, end_exclusive);
-                        self.reverse_range_field_idx(@intCast(i), len, start, end_exclusive);
+                    inline for (0..NUM_FIELDS) |FIDX| {
+                        self.reverse_range_field_idx(FIDX, start, boundary);
+                        self.reverse_range_field_idx(FIDX, boundary, end_exclusive);
+                        self.reverse_range_field_idx(FIDX, start, end_exclusive);
                     }
                 },
             }
+        }
+        pub fn rotate_range_left(self: Self, start: u32, end_exclusive: u32, count: u32) void {
+            self.assert_valid_idx(start, @src());
+            self.assert_valid_idx(end_exclusive, @src());
+            if (start == end_exclusive or count == 0) return;
+            assert_start_less_end_exclusive(start, end_exclusive, @src());
+            return self.rotate_range_left_internal(start, end_exclusive, count);
         }
         pub fn rotate_left(self: Self, count: u32) void {
             self.rotate_range_left(0, self.len, count);
@@ -421,7 +480,7 @@ pub fn List(comptime T: type, comptime MODE: Mode) type {
             const block_len = old_end_exclusive - old_start;
             const new_end_exclusive = new_start + block_len;
             assert_with_reason(new_end_exclusive <= self.len, @src(), "end of block will exceed list length, len = {d}, new_end_exclusive = {d}", .{ self.len, new_end_exclusive });
-            self.rotate_range_left(old_start, new_end_exclusive, block_len);
+            self.rotate_range_left_internal(old_start, new_end_exclusive, block_len);
         }
         pub fn move_block_left_displace(self: Self, old_start: u32, old_end_exclusive: u32, new_start: u32) void {
             self.assert_valid_idx(old_start, @src());
@@ -431,31 +490,39 @@ pub fn List(comptime T: type, comptime MODE: Mode) type {
             assert_start_less_end_exclusive(old_start, old_end_exclusive, @src());
             assert_with_reason(old_start > new_start, @src(), "old start must be >= new_start to move block left, got {d} < {d}", .{ old_start, new_start });
             const block_len = old_end_exclusive - old_start;
-            self.rotate_range_right(new_start, old_end_exclusive, block_len);
+            self.rotate_range_right_internal(new_start, old_end_exclusive, block_len);
         }
 
-        pub fn move_one(self: Self, old_idx: u32, new_idx: u32) void {
+        pub fn move_one_displace(self: Self, old_idx: u32, new_idx: u32) void {
             if (old_idx < new_idx) {
-                self.move_one_right(old_idx, new_idx);
+                self.move_one_right_displace(old_idx, new_idx);
             } else {
-                self.move_one_left(old_idx, new_idx);
+                self.move_one_left_displace(old_idx, new_idx);
             }
         }
-        pub fn move_one_right(self: Self, old_idx: u32, new_idx: u32) void {
-            self.assert_valid_idx(old_idx, @src());
-            self.assert_valid_idx(new_idx, @src());
-            if (old_idx == new_idx) return;
-            assert_with_reason(old_idx < new_idx, @src(), "old_idx must be <= new_idx, got {d} > {d}", .{ old_idx, new_idx });
-            switch (MODE) {
+        fn move_one_right_displace_internal(self: Self, old_idx: u32, new_idx: u32) void {
+            switch (comptime FIELD_LAYOUT) {
                 .WHOLE_STRUCTS => {
-                    const temp = self.ptr[old_idx];
-                    @memmove(self.ptr[old_idx..new_idx], self.ptr[(old_idx + 1)..(new_idx + 1)]);
-                    self.ptr[new_idx] = temp;
+                    const offset_ptr = switch (comptime INDEX_LAYOUT) {
+                        .SERIAL_INDEXES => self.ptr,
+                        .SERIAL_INDEXES_WITH_OFFSET => self.ptr + self.start_offset,
+                    };
+                    switch (comptime INDEX_LAYOUT) {
+                        .SERIAL_INDEXES, .SERIAL_INDEXES_WITH_OFFSET => {
+                            const temp = self.ptr[old_idx];
+                            @memmove(offset_ptr[old_idx..new_idx], offset_ptr[(old_idx + 1)..(new_idx + 1)]);
+                            offset_ptr[new_idx] = temp;
+                        },
+                        else => unreachable,
+                    }
                 },
                 .SPLIT_FIELDS => {
                     inline for (ORDERED_FIELD_OFFETS[0..], ORDERED_FIELD_TYPES[0..]) |offset, t| {
                         const raw_offset = (self.cap * offset);
-                        const field_ptr: [*]t = @ptrCast(self.ptr + raw_offset);
+                        const field_ptr: [*]t = switch (comptime INDEX_LAYOUT) {
+                            .SERIAL_INDEXES => @ptrCast(@alignCast(self.ptr + raw_offset)),
+                            .SERIAL_INDEXES_WITH_OFFSET => @as([*]t, @ptrCast(@alignCast(self.ptr + raw_offset))) + self.start_offset,
+                        };
                         const temp = field_ptr[old_idx];
                         @memmove(field_ptr[old_idx..new_idx], field_ptr[(old_idx + 1)..(new_idx + 1)]);
                         field_ptr[new_idx] = temp;
@@ -463,28 +530,116 @@ pub fn List(comptime T: type, comptime MODE: Mode) type {
                 },
             }
         }
-        pub fn move_one_left(self: Self, old_idx: u32, new_idx: u32) void {
+        pub fn move_one_right_displace(self: Self, old_idx: u32, new_idx: u32) void {
             self.assert_valid_idx(old_idx, @src());
             self.assert_valid_idx(new_idx, @src());
             if (old_idx == new_idx) return;
-            assert_with_reason(old_idx > new_idx, @src(), "old_idx must be >= new_idx, got {d} < {d}", .{ old_idx, new_idx });
-            switch (MODE) {
+            assert_with_reason(old_idx < new_idx, @src(), "old_idx must be <= new_idx, got {d} > {d}", .{ old_idx, new_idx });
+            self.move_one_right_displace_internal(old_idx, new_idx);
+        }
+        fn move_one_left_displace_internal(self: Self, old_idx: u32, new_idx: u32) void {
+            switch (comptime FIELD_LAYOUT) {
                 .WHOLE_STRUCTS => {
-                    const temp = self.ptr[old_idx];
-                    @memmove(self.ptr[(new_idx + 1)..(old_idx + 1)], self.ptr[new_idx..old_idx]);
-                    self.ptr[new_idx] = temp;
+                    const offset_ptr = switch (comptime INDEX_LAYOUT) {
+                        .SERIAL_INDEXES => self.ptr,
+                        .SERIAL_INDEXES_WITH_OFFSET => self.ptr + self.start_offset,
+                    };
+                    switch (comptime INDEX_LAYOUT) {
+                        .SERIAL_INDEXES, .SERIAL_INDEXES_WITH_OFFSET => {
+                            const temp = self.ptr[old_idx];
+                            @memmove(offset_ptr[(old_idx + 1)..(new_idx + 1)], offset_ptr[old_idx..new_idx]);
+                            offset_ptr[new_idx] = temp;
+                        },
+                        else => unreachable,
+                    }
                 },
                 .SPLIT_FIELDS => {
                     inline for (ORDERED_FIELD_OFFETS[0..], ORDERED_FIELD_TYPES[0..]) |offset, t| {
                         const raw_offset = (self.cap * offset);
-                        const field_ptr: [*]t = @ptrCast(self.ptr + raw_offset);
+                        const field_ptr: [*]t = switch (comptime INDEX_LAYOUT) {
+                            .SERIAL_INDEXES => @ptrCast(@alignCast(self.ptr + raw_offset)),
+                            .SERIAL_INDEXES_WITH_OFFSET => @as([*]t, @ptrCast(@alignCast(self.ptr + raw_offset))) + self.start_offset,
+                        };
                         const temp = field_ptr[old_idx];
-                        @memmove(field_ptr[(new_idx + 1)..(old_idx + 1)], field_ptr[new_idx..old_idx]);
+                        @memmove(field_ptr[(old_idx + 1)..(new_idx + 1)], field_ptr[old_idx..new_idx]);
                         field_ptr[new_idx] = temp;
                     }
                 },
             }
         }
-        // TODO: SCRAMBLE
+        pub fn move_one_left_displace(self: Self, old_idx: u32, new_idx: u32) void {
+            self.assert_valid_idx(old_idx, @src());
+            self.assert_valid_idx(new_idx, @src());
+            if (old_idx == new_idx) return;
+            assert_with_reason(old_idx > new_idx, @src(), "old_idx must be >= new_idx, got {d} < {d}", .{ old_idx, new_idx });
+            self.move_one_left_displace_internal(old_idx, new_idx);
+        }
+        fn move_one_overwrite_true_idx(self: Self, old_idx: u32, new_idx: u32) void {
+            switch (comptime FIELD_LAYOUT) {
+                .WHOLE_STRUCTS => {
+                    self.ptr[new_idx] = self.ptr[old_idx];
+                },
+                .SPLIT_FIELDS => {
+                    inline for (ORDERED_FIELD_OFFETS[0..NUM_FIELDS], ORDERED_FIELD_TYPES[0..]) |offset, t| {
+                        const field_ptr: [*]t = @ptrCast(self.ptr + (self.cap * offset));
+                        field_ptr[new_idx] = field_ptr[old_idx];
+                    }
+                },
+            }
+        }
+        fn move_one_overwrite(self: Self, old_idx: u32, new_idx: u32) void {
+            self.assert_valid_idx(old_idx, @src());
+            self.assert_valid_idx(new_idx, @src());
+            self.move_one_overwrite_true_idx(self.true_idx(old_idx), self.true_idx(new_idx));
+        }
+        fn swap_true_idx(self: Self, idx_a: u32, idx_b: u32) void {
+            const tmp = self.ptr[idx_a];
+            self.ptr[idx_a] = self.ptr[idx_b];
+            self.ptr[idx_b] = tmp;
+        }
+        fn swap(self: Self, idx_a: u32, idx_b: u32) void {
+            self.assert_valid_idx(idx_a, @src());
+            self.assert_valid_idx(idx_b, @src());
+            self.swap_true_idx(self.true_idx(idx_a), self.true_idx(idx_b));
+        }
+        fn scramble_range_internal(self: Self, start: u32, end_exclusive: u32, iterations: u32, rand: Random) void {
+            const len = end_exclusive - start;
+            if (len <= 1) return;
+            if (len == 2) {
+                if (rand.boolean()) {
+                    self.swap_true_idx(self.true_idx(start), self.true_idx(end_exclusive));
+                }
+                return;
+            }
+            var n: u32 = 0;
+            const first_idx = rand.intRangeLessThan(u32, start, end_exclusive);
+            var empty_idx: u32 = first_idx;
+            var empty_true_idx: u32 = self.true_idx(first_idx);
+            const first_val = self.get_true_idx(empty_true_idx);
+            while (n < iterations) : (n += 1) {
+                const move_idx = find_different_idx: {
+                    while (true) {
+                        const possible_different_idx = rand.intRangeLessThan(u32, start, end_exclusive);
+                        if (possible_different_idx != empty_idx) break :find_different_idx possible_different_idx;
+                    }
+                };
+                const move_true_idx = self.true_idx(move_idx);
+                self.move_one_overwrite_true_idx(move_true_idx, empty_true_idx);
+                empty_idx = move_idx;
+                empty_true_idx = move_true_idx;
+            }
+            self.set_true_idx(empty_true_idx, first_val);
+        }
+        pub fn scramble_range(self: Self, start: u32, end_exclusive: u32, iterations: u32, rand: Random) void {
+            self.assert_valid_idx(start, @src());
+            self.assert_valid_idx(end_exclusive, @src());
+            if (iterations == 0 or start == end_exclusive) return;
+            assert_start_less_end_exclusive(start, end_exclusive, @src());
+            self.scramble_range_internal(start, end_exclusive, iterations, rand);
+        }
+        pub fn scramble(self: Self, iterations: u32, rand: Random) void {
+            self.scramble_range(0, self.len, iterations, rand);
+        }
+        //CHECKPOINT Realloc etc...
     };
 }
