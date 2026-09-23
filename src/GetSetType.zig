@@ -35,7 +35,7 @@ const Utils = Root.Utils;
 const InterfaceSignature = Types.InterfaceSignature;
 const ConstDeclDefinition = Types.ConstDeclDefinition;
 const StructFieldDefinition = Types.StructFieldDefinition;
-const NamedFuncDefinition = Types.NamedFuncDefinition;
+const MethodDefinition = Types.MethodDefinition;
 const Growth = Common.GrowthModel;
 const ErrorBehavior = Common.ErrorBehavior;
 const AssertBehavior = Common.AssertBehavior;
@@ -87,69 +87,69 @@ fn sig__self__len(comptime SELF: type) type {
     return fn (SELF) @field(SELF, "INDEX");
 }
 
-const GetSetIndexedIndirectFunctions = [_]NamedFuncDefinition{
-    NamedFuncDefinition{
+const GetSetIndexedIndirectFunctions = [_]MethodDefinition{
+    MethodDefinition{
         .name = "get",
         .signature_builder = sig__self_idx__val,
     },
-    NamedFuncDefinition{
+    MethodDefinition{
         .name = "set",
         .signature_builder = sig__self_idx_val__void,
     },
-    NamedFuncDefinition{
+    MethodDefinition{
         .name = "len",
         .signature_builder = sig__self__len,
     },
 };
-const GetSetIndexedDirectFunctions = [_]NamedFuncDefinition{
-    NamedFuncDefinition{
+const GetSetIndexedDirectFunctions = [_]MethodDefinition{
+    MethodDefinition{
         .name = "get",
         .signature_builder = sig__self_idx__val,
     },
-    NamedFuncDefinition{
+    MethodDefinition{
         .name = "set",
         .signature_builder = sig__selfptr_idx_val__void,
     },
-    NamedFuncDefinition{
+    MethodDefinition{
         .name = "len",
         .signature_builder = sig__self__len,
     },
 };
 
-const GetSetDirectFunctions = [_]NamedFuncDefinition{
-    NamedFuncDefinition{
+const GetSetDirectFunctions = [_]MethodDefinition{
+    MethodDefinition{
         .name = "get",
         .signature_builder = sig__self__val,
     },
-    NamedFuncDefinition{
+    MethodDefinition{
         .name = "set",
         .signature_builder = sig__selfptr_val__void,
     },
 };
-const GetSetIndirectFunctions = [_]NamedFuncDefinition{
-    NamedFuncDefinition{
+const GetSetIndirectFunctions = [_]MethodDefinition{
+    MethodDefinition{
         .name = "get",
         .signature_builder = sig__self__val,
     },
-    NamedFuncDefinition{
+    MethodDefinition{
         .name = "set",
         .signature_builder = sig__self_val__void,
     },
 };
 
-const GetIndexedFunctions = [_]NamedFuncDefinition{
-    NamedFuncDefinition{
+const GetIndexedFunctions = [_]MethodDefinition{
+    MethodDefinition{
         .name = "get",
         .signature_builder = sig__self_idx__val,
     },
-    NamedFuncDefinition{
+    MethodDefinition{
         .name = "len",
         .signature_builder = sig__self__len,
     },
 };
 
-const GetFunctions = [_]NamedFuncDefinition{
-    NamedFuncDefinition{
+const GetFunctions = [_]MethodDefinition{
+    MethodDefinition{
         .name = "get",
         .signature_builder = sig__self__val,
     },

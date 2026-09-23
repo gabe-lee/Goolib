@@ -1487,11 +1487,12 @@ pub const InterfaceSignatureError = error{
     const_declaration_wrong_val,
 };
 
+//DEPRECATE
 pub const InterfaceSignature = struct {
     interface_name: []const u8,
     const_decls: []const ConstDeclDefinition = &.{},
     struct_fields: []const StructFieldDefinition = &.{},
-    functions: []const NamedFuncDefinition = &.{},
+    functions: []const MethodDefinition = &.{},
 
     pub fn type_fulfills(comptime self: InterfaceSignature, comptime T: type) bool {
         inline for (self.functions) |func| {
@@ -1528,6 +1529,115 @@ pub const InterfaceSignature = struct {
                 InterfaceSignatureError.field_has_wrong_type => assert_unreachable(src_loc, "(assert interface `{s}`) type `{s}` field `{s}` is not the correct type `{s}`, got type `{s}`", .{ self.interface_name, @typeName(T), field.name, @typeName(field.T), @typeName(@FieldType(T, field.name)) }),
                 else => unreachable,
             };
+        }
+    }
+};
+
+pub const InterfaceSignature2 = struct {
+    interface_name: []const u8,
+    const_decls: []const ConstDeclDefinition = &.{},
+    struct_fields: []const StructFieldDefinition = &.{},
+    methods: []const MethodDefinition2 = &.{},
+    static_functions: []const StaticFunctionDefinition = &.{},
+
+    pub fn type_fulfills(comptime self: InterfaceSignature2, comptime T: type) bool {
+        inline for (self.methods) |method| {
+            if (method.has_func_error(T) != null) return false;
+        }
+        inline for (self.static_functions) |func| {
+            if (func.has_func_error(T) != null) return false;
+        }
+        inline for (self.const_decls) |const_decl| {
+            if (const_decl.has_decl_error(T) != null) return false;
+        }
+        inline for (self.struct_fields) |field| {
+            if (field.has_field_error(T) != null) return false;
+        }
+        return true;
+    }
+
+    pub fn assert_type_fulfills_return_base_type(comptime self: InterfaceSignature2, comptime T: type, comptime src_loc: ?SourceLocation) type {
+        const BASE_TYPE = switch (@typeInfo(T)) {
+            .pointer => |p| p.child,
+            else => T,
+        };
+        inline for (self.methods) |method| {
+            if (method.has_func_error(BASE_TYPE)) |err| switch (err) {
+                InterfaceSignatureError.missing_function => assert_unreachable(src_loc, "(assert interface `{s}`) type `{s}` is missing function `{s}`", .{ self.interface_name, @typeName(BASE_TYPE), method.name }),
+                InterfaceSignatureError.field_has_wrong_type => assert_unreachable(src_loc, "(assert interface `{s}`) type `{s}` field `{s}` is not a function type, got type `{s}`", .{ self.interface_name, @typeName(BASE_TYPE), method.name, @typeName(@TypeOf(@field(BASE_TYPE, method.name))) }),
+                InterfaceSignatureError.function_has_wrong_signature => assert_unreachable(src_loc, "(assert interface `{s}`) type `{s}` function `{s}` does not match the needed signature `{s}`, got `{s}`", .{ self.interface_name, @typeName(BASE_TYPE), method.name, @typeName(method.signature), @typeName(@TypeOf(@field(BASE_TYPE, method.name))) }),
+                else => unreachable,
+            };
+        }
+        inline for (self.static_functions) |func| {
+            if (func.has_func_error(BASE_TYPE)) |err| switch (err) {
+                InterfaceSignatureError.missing_function => assert_unreachable(src_loc, "(assert interface `{s}`) type `{s}` is missing function `{s}`", .{ self.interface_name, @typeName(BASE_TYPE), func.name }),
+                InterfaceSignatureError.field_has_wrong_type => assert_unreachable(src_loc, "(assert interface `{s}`) type `{s}` field `{s}` is not a function type, got type `{s}`", .{ self.interface_name, @typeName(BASE_TYPE), func.name, @typeName(@TypeOf(@field(BASE_TYPE, func.name))) }),
+                InterfaceSignatureError.function_has_wrong_signature => assert_unreachable(src_loc, "(assert interface `{s}`) type `{s}` function `{s}` does not match the needed signature `{s}`, got `{s}`", .{ self.interface_name, @typeName(BASE_TYPE), func.name, @typeName(func.signature), @typeName(@TypeOf(@field(BASE_TYPE, func.name))) }),
+                else => unreachable,
+            };
+        }
+        inline for (self.const_decls) |const_decl| {
+            if (const_decl.has_decl_error(BASE_TYPE)) |err| switch (err) {
+                InterfaceSignatureError.missing_const_declaration => assert_unreachable(src_loc, "(assert interface `{s}`) type `{s}` is missing constant declaration `{s}`", .{ self.interface_name, @typeName(BASE_TYPE), const_decl.name }),
+                InterfaceSignatureError.const_declaration_wrong_type => assert_unreachable(src_loc, "(assert interface `{s}`) type `{s}` constant declaration `{s}` is not the needed type `{s}`, got `{s}`", .{ self.interface_name, @typeName(BASE_TYPE), const_decl.name, @typeName(const_decl.T), @typeName(@TypeOf(@field(BASE_TYPE, const_decl.name))) }),
+                InterfaceSignatureError.const_declaration_wrong_val => assert_unreachable(src_loc, "(assert interface `{s}`) type `{s}` constant declaration `{s}` does not have the required value `{any}`, got `{any}`", .{ self.interface_name, @typeName(BASE_TYPE), const_decl.name, @as(*const const_decl.T, @ptrCast(@alignCast(const_decl.needed_val.?))).*, @field(BASE_TYPE, const_decl.name) }),
+                else => unreachable,
+            };
+        }
+        inline for (self.struct_fields) |field| {
+            if (field.has_field_error(BASE_TYPE)) |err| switch (err) {
+                InterfaceSignatureError.missing_field => assert_unreachable(src_loc, "(assert interface `{s}`) type `{s}` is missing field `{s}`", .{ self.interface_name, @typeName(BASE_TYPE), field.name }),
+                InterfaceSignatureError.field_has_wrong_type => assert_unreachable(src_loc, "(assert interface `{s}`) type `{s}` field `{s}` is not the correct type `{s}`, got type `{s}`", .{ self.interface_name, @typeName(BASE_TYPE), field.name, @typeName(field.T), @typeName(@FieldType(BASE_TYPE, field.name)) }),
+                else => unreachable,
+            };
+        }
+        return BASE_TYPE;
+    }
+};
+
+pub const RecieverKind = enum {
+    VALUE,
+    PTR_MUTABLE,
+    PTR_CONST,
+
+    pub fn CastType(comptime self: RecieverKind, comptime BaseType: type) type {
+        switch (comptime self) {
+            .VALUE => return BaseType,
+            .PTR_MUTABLE => return *BaseType,
+            .PTR_CONST => return *const BaseType,
+        }
+    }
+    pub fn Cast(comptime self: RecieverKind, comptime BaseType: type, val: anytype, comptime target: RecieverKind) self.CastType(BaseType) {
+        if (self == target) return val;
+        switch (self) {
+            .VALUE => assert_unreachable(@src(), "cannot cast a value reciever to a pointer reciever", .{}),
+            .PTR_CONST => switch (target) {
+                .VALUE => return val.*,
+                .PTR_MUTABLE => assert_unreachable(@src(), "cannot cast a constant pointer reciever to a mutable pointer reciever", .{}),
+                else => unreachable,
+            },
+            .PTR_MUTABLE => switch (target) {
+                .VALUE => return val.*,
+                .PTR_CONST => return @ptrCast(val),
+                else => unreachable,
+            },
+        }
+    }
+    pub fn assert_can_cast(comptime self: RecieverKind, comptime target: RecieverKind) void {
+        switch (self) {
+            .VALUE => {
+                assert_unreachable(@src(), "cannot cast a value reciever to a pointer reciever", .{});
+            },
+            .PTR_CONST => {
+                switch (target) {
+                    .PTR_MUTABLE => {
+                        assert_unreachable(@src(), "cannot cast a constant pointer reciever to a mutable pointer reciever", .{});
+                    },
+                    else => {},
+                }
+            },
+            .PTR_MUTABLE => {},
         }
     }
 };
@@ -1581,52 +1691,96 @@ pub const StructFieldDefinition = struct {
     }
 };
 
-pub const NamedFuncDefinition = struct {
+pub const MethodDefinition = struct {
     name: [:0]const u8,
-    signature_builder: fn (comptime CONCRETE_TYPE: type) type,
+    signature_builder: fn (comptime BASE_TYPE: type) type,
 
-    pub fn has_func_error(comptime self: NamedFuncDefinition, comptime T: type) ?InterfaceSignatureError {
+    pub fn has_func_error(comptime self: MethodDefinition, comptime T: type) ?InterfaceSignatureError {
         if (!@hasDecl(T, self.name)) return InterfaceSignatureError.missing_function;
         const needed_signature = self.signature_builder(T);
         if (@TypeOf(@field(T, self.name)) != needed_signature) return InterfaceSignatureError.function_has_wrong_signature;
         return null;
     }
 
-    pub fn define_func_with_builder(comptime name: [:0]const u8, comptime signature_builder: fn (comptime SELF_T: type) type) NamedFuncDefinition {
-        return NamedFuncDefinition{
+    pub fn define_func_with_builder(comptime name: [:0]const u8, comptime signature_builder: fn (comptime SELF_T: type) type) MethodDefinition {
+        return MethodDefinition{
             .name = name,
             .signature_builder = signature_builder,
         };
     }
 };
 
-// pub const ParamDefinition = struct {
-//     is_generic:  bool = false,
-//     is_noalias: bool = false,
-//     type: ?type = null,
+pub const MethodDefinition2 = struct {
+    name: [:0]const u8,
+    signature: type,
 
-//     pub fn from_type_info(comptime info: std.builtin.Type.Fn.Param) ParamDefinition {
-//         return ParamDefinition{
-//             .is_generic = info.is_generic,
-//             .is_noalias = info.is_noalias,
-//             .type = info.type,
-//         }
-//     }
+    pub fn has_func_error(comptime self: MethodDefinition2, comptime BASE_TYPE: type) ?InterfaceSignatureError {
+        if (!@hasDecl(BASE_TYPE, self.name)) return InterfaceSignatureError.missing_function;
+        const NEED_FUNC = @typeInfo(self.signature).@"fn";
+        const NEED_PARAMS = NEED_FUNC.params;
+        const NEED_RETURN = NEED_FUNC.return_type;
+        const GOT_FIELD = @TypeOf(@field(BASE_TYPE, self.name));
+        const GOT_INFO = @typeInfo(GOT_FIELD);
+        switch (GOT_INFO) {
+            .@"fn" => |GOT_FUNC| {
+                const GOT_PARAMS = GOT_FUNC.params;
+                const GOT_RETURN = GOT_FUNC.return_type;
+                if (GOT_PARAMS.len != NEED_PARAMS.len) return InterfaceSignatureError.function_has_wrong_signature;
+                if (GOT_RETURN != NEED_RETURN) return InterfaceSignatureError.function_has_wrong_signature;
+                if (GOT_PARAMS.len > 1) {
+                    inline for (NEED_PARAMS[1..], GOT_PARAMS[1..]) |got_param, need_param| {
+                        if (got_param.type != need_param.type) return InterfaceSignatureError.function_has_wrong_signature;
+                    }
+                }
+            },
+            else => return InterfaceSignatureError.field_has_wrong_type,
+        }
+        return null;
+    }
 
-//     pub fn equals(self: ParamDefinition, other: ParamDefinition) bool {
-//         return self.is_generic == other.is_generic and self.is_noalias == other.is_noalias and self.type == other.type;
-//     }
+    pub fn define_method(comptime name: [:0]const u8, comptime opaque_signature: type) MethodDefinition2 {
+        return MethodDefinition2{
+            .name = name,
+            .signature = opaque_signature,
+        };
+    }
+};
 
-//     pub fn first_param_is_self() ParamDefinition {
-//         return ParamDefinition{ .p = .{ .type = null, .is_generic = true, .is_noalias = false } };
-//     }
-//     pub fn define_param(comptime t: type) ParamDefinition {
-//         return ParamDefinition{ .p = .{ .type = t, .is_generic = false, .is_noalias = false } };
-//     }
-//     pub fn define_param_adv(comptime t: type, comptime generic: Generic, comptime no_alias: NoAlias) ParamDefinition {
-//         return ParamDefinition{ .p = .{ .type = t, .is_generic = @bitCast(generic), .is_noalias = @bitCast(no_alias) } };
-//     }
-// };
+pub const StaticFunctionDefinition = struct {
+    name: [:0]const u8,
+    signature: type,
+
+    pub fn has_func_error(comptime self: StaticFunctionDefinition, comptime BASE_TYPE: type) ?InterfaceSignatureError {
+        if (!@hasDecl(BASE_TYPE, self.name)) return InterfaceSignatureError.missing_function;
+        const NEED_FUNC = @typeInfo(self.signature).@"fn";
+        const NEED_PARAMS = NEED_FUNC.params;
+        const NEED_RETURN = NEED_FUNC.return_type;
+        const GOT_FIELD = @TypeOf(@field(BASE_TYPE, self.name));
+        const GOT_INFO = @typeInfo(GOT_FIELD);
+        switch (GOT_INFO) {
+            .@"fn" => |GOT_FUNC| {
+                const GOT_PARAMS = GOT_FUNC.params;
+                const GOT_RETURN = GOT_FUNC.return_type;
+                if (GOT_PARAMS.len != NEED_PARAMS.len) return InterfaceSignatureError.function_has_wrong_signature;
+                if (GOT_RETURN != NEED_RETURN) return InterfaceSignatureError.function_has_wrong_signature;
+                if (GOT_PARAMS.len > 0) {
+                    inline for (NEED_PARAMS, GOT_PARAMS) |got_param, need_param| {
+                        if (got_param.type != need_param.type) return InterfaceSignatureError.function_has_wrong_signature;
+                    }
+                }
+            },
+            else => return InterfaceSignatureError.field_has_wrong_type,
+        }
+        return null;
+    }
+
+    pub fn define_static_func(comptime name: [:0]const u8, comptime signature: type) StaticFunctionDefinition {
+        return StaticFunctionDefinition{
+            .name = name,
+            .signature = signature,
+        };
+    }
+};
 
 pub fn all_enum_names_match_all_object_field_names(comptime ENUM: type, comptime STRUCT_OR_UNION_OR_ENUM: type) bool {
     const E_INFO = @typeInfo(ENUM).@"enum";

@@ -62,7 +62,7 @@ const IncludeOffests = Common.IncludeOffests;
 const SDL3 = Root.SDL3;
 const GPU_VertexElementFormat = SDL3.GPU_VertexElementFormat;
 const InterfaceSignature = Types.InterfaceSignature;
-const NamedFuncDefinition = Types.NamedFuncDefinition;
+const MethodDefinition = Types.MethodDefinition;
 const ParamDefinition = Types.ParamDefinition;
 
 const assert_with_reason = Assert.assert_with_reason;
@@ -613,11 +613,11 @@ pub const StorageStructWriterInterface = struct {
     const Signature = InterfaceSignature{
         .interface_name = "StorageStructWriter",
         .functions = &.{
-            NamedFuncDefinition.define_func_with_builder(
+            MethodDefinition.define_func_with_builder(
                 "write_uniform_struct",
                 UniformFuncBuilder,
             ),
-            NamedFuncDefinition.define_func_with_builder(
+            MethodDefinition.define_func_with_builder(
                 "write_storage_buffer_and_struct",
                 BufferFuncBuilder,
             ),
@@ -1060,7 +1060,7 @@ pub const StreamStructWriterInterface = struct {
     const Signature = InterfaceSignature{
         .interface_name = "StreamStructWriter",
         .functions = &.{
-            NamedFuncDefinition.define_func_with_builder(
+            MethodDefinition.define_func_with_builder(
                 "write_stream_struct",
                 FuncSignatureBuilder,
             ),
@@ -1092,11 +1092,11 @@ pub const StreamStructGPUDefinitionInterface = struct {
     const Signature = InterfaceSignature{
         .interface_name = "StreamStructGPUDefinition",
         .functions = &.{
-            NamedFuncDefinition.define_func_with_builder(
+            MethodDefinition.define_func_with_builder(
                 "get_field_gpu_location",
                 LocationBuilder,
             ),
-            NamedFuncDefinition.define_func_with_builder(
+            MethodDefinition.define_func_with_builder(
                 "get_field_gpu_format",
                 FormatBuilder,
             ),
@@ -1131,11 +1131,11 @@ pub const StreamStructCPUDefinitionInterface = struct {
     const Signature = InterfaceSignature{
         .interface_name = "StreamStructCPUDefinition",
         .functions = &.{
-            NamedFuncDefinition.define_func_with_builder(
+            MethodDefinition.define_func_with_builder(
                 "get_field_cpu_offset",
                 OffsetBuilder,
             ),
-            NamedFuncDefinition.define_func_with_builder(
+            MethodDefinition.define_func_with_builder(
                 "get_field_cpu_type",
                 TypeBuilder,
             ),

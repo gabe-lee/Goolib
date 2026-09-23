@@ -29,7 +29,7 @@ const Endian = std.builtin.Endian;
 const Root = @import("./_root.zig");
 const Assert = Root.Assert;
 const assert_with_reason = Assert.assert_with_reason;
-const Iterator = Root.Iterator.Iterator;
+const Iterator2 = Root.Iterator.Iterator2;
 const IterCaps = Root.Iterator.IteratorCapabilities;
 
 pub const NATIVE_ENDIAN = build.cpu.arch.endian();
@@ -260,7 +260,7 @@ pub fn CompactSparseBytes(comptime OFFSET: type) type {
 
         const Self = @This();
 
-        const VTABLE = Iterator(u8).VTable{
+        const VTABLE = Iterator2(u8).VTable{
             .reset = iter_noop,
             .advance_next = iter_adv_next,
             .peek_next_or_null = iter_adv_next,
@@ -302,8 +302,8 @@ pub fn CompactSparseBytes(comptime OFFSET: type) type {
             return false;
         }
 
-        pub fn iterator(self: *Self) Iterator(u8) {
-            return Iterator(u8){
+        pub fn iterator(self: *Self) Iterator2(u8) {
+            return Iterator2(u8){
                 .implementor = @ptrCast(self),
                 .vtable = &VTABLE,
             };

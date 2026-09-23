@@ -51,6 +51,7 @@ const Endian = Root.CommonTypes.Endian;
 const Math = Root.Math;
 const Common = Root.CommonTypes;
 
+// const Iterator2 = Root.Iterator.Iterator2;
 const Iterator = Root.Iterator.Iterator;
 
 pub const Defaults = @import("./Utils_DataManipulation_Defaults.zig");
@@ -471,17 +472,17 @@ pub const DataManipulationCore = struct {
     ///
     /// MUST be an integer.
     COUNT_INT: type = undefined,
-    /// An optional aux_data type that is passed to every function call.
+    /// An optional AUX_DATA type that is passed to every function call.
     ///
-    /// If needed, this should be some external cache or data source
+    /// If needed, this could be some external cache or data source
     /// that holds all common information needed to execute data manipulation
     /// functions on the data structure.
     ///
-    /// For most use cases this can be left as `void`. An example use case is
-    /// if the actual concrete data structure holds elements that are references
-    /// to some other data structure that holds the actual elements themselves,
-    /// and you need to use the reference type to get the real type out of the external aux_data
-    aux_data: type = void,
+    /// An example use case is if the actual concrete data structure holds
+    /// elements that are references to some other data structure that holds
+    /// the actual elements themselves, and you need to use the reference
+    /// type to get the real type out of the external AUX_DATA
+    AUX_DATA: type = void,
 
     pub fn define(comptime CORE: DataManipulationCore, comptime DEFAULT_MODE: InferedFuncMode, comptime CUSTOM: CORE.CustomFunctions()) type {
         return CORE.select_functions(DEFAULT_MODE, CUSTOM).finalize();
@@ -2851,16 +2852,267 @@ pub const DataManipulationCore = struct {
                         return prepend_many_slots_assume_capacity(data_, count, aux_data);
                     }
 
-                    /// Remove sparse indexes in O(N) time. Id's in the id list MUST be in the same order they will be encountered in THIS data list.
-                    /// 
-                    /// `IDS_TO_REMOVE_PKG` must be a 'DataManipulationPackage' with an element (`ELEM`) type that matches the
-                    /// `ID` type of this package. 
-                    pub fn remove_sparse_from_ordered_id_list(data: DATA, aux_data: AUX_DATA, comptime IDS_TO_REMOVE_PKG: type, ids_to_remove_in_order_data: anytype, ids_to_remove_in_order_aux_data: anytype) struct {DATA, COUNT} {
-                        var write_id = IDS_TO_REMOVE_PKG.first_id(ids_to_remove_in_order_data, ids_to_remove_in_order_aux_data);
-                        var read_id = write_id;
-                        const last_id = IDS_TO_REMOVE_PKG.last_id(ids_to_remove_in_order_data, ids_to_remove_in_order_aux_data);
-                        
+                    pub fn increment_len(data: DATA, count: COUNT, aux_data: AUX_DATA) DATA {
+                        return set_len(data, get_len(data, aux_data) + count, aux_data);
                     }
+                    pub fn decrement_len(data: DATA, count: COUNT, aux_data: AUX_DATA) DATA {
+                        return set_len(data, get_len(data, aux_data) - count, aux_data);
+                    }
+
+                    pub const IdIterator = Iterator(ID);
+                    pub const ElemIterator = Iterator(ELEM);
+
+                    pub const SimpleIdIterator = struct {
+                        data: DATA,
+                        aux: AUX_DATA,
+                        cursor_right_before: ID,
+
+                        pub fn new(data: DATA, aux: AUX_DATA, first: ID) SimpleIdIterator {
+                            return SimpleIdIterator{
+                                .data = data,
+                                .aux = aux,
+                                .cursor_right_before = first,
+                            };
+                        }
+
+                        pub fn has_next(self: *const SimpleIdIterator) bool {
+                            return id_valid(self.data, self.cursor_right_before, self.aux);
+                        }
+
+                        pub fn next(self: *SimpleIdIterator) ID {
+                            const id = self.cursor_right_before;
+                            self.cursor_right_before = next_id(self.data, id, self.aux);
+                            return id;
+                        }
+
+                        pub fn next_ptr(_: *SimpleIdIterator) ID {
+                            assert_unreachable(@src(), "cannot get an id pointer", .{});
+                        }
+
+                        pub fn has_prev(self: *const SimpleIdIterator) bool {
+                            const prev_ = prev_id(self.data, self.cursor_right_before, self.aux);
+                            return id_valid(self.data, prev_, self.aux);
+                        }
+
+                        pub fn prev(self: *SimpleIdIterator) ID {
+                            const prev_ = prev_id(self.data, self.cursor_right_before, self.aux);
+                            self.cursor_right_before = prev_;
+                            return prev_;
+                        }
+
+                        pub fn prev_ptr(_: *SimpleIdIterator) ID {
+                            assert_unreachable(@src(), "cannot get an id pointer", .{});
+                        }
+
+                        pub const Adapter = IdIterator.Adapter(*SimpleIdIterator);
+
+                        pub fn adapter(self: *SimpleIdIterator) Adapter {
+                            return Adapter{ ._obj = self };
+                        }
+                    };
+
+                    pub const ReadWriteIterator = struct {
+                        data: DATA,
+                        aux: AUX_DATA,
+                        read_cursor: ID,
+                        write_cursor: ID,
+
+                        pub fn new(data: DATA, aux: AUX_DATA, init_read: ID, init_write: ID) ReadWriteIterator {
+                            return ReadWriteIterator{
+                                .data = data,
+                                .aux = aux,
+                                .read_cursor = init_read,
+                                .write_cursor = init_write,
+                            };
+                        }
+
+                        pub fn has_next_read(self: *const ReadWriteIterator) bool {
+                            return id_valid(self.data, self.read_cursor, self.aux);
+                        }
+
+                        pub fn next_read_id(self: *ReadWriteIterator) ID {
+                            const id = self.read_cursor;
+                            self.read_cursor = next_id(self.data, id, self.aux);
+                            return get(self.data, id, self.aux);
+                        }
+
+                        pub fn next_read_elem(self: *ReadWriteIterator) ELEM {
+                            const id = self.read_cursor;
+                            self.read_cursor = next_id(self.data, id, self.aux);
+                            return get(self.data, id, self.aux);
+                        }
+
+                        pub fn next_read_elem_ptr(self: *ReadWriteIterator) *ELEM {
+                            const id = self.read_cursor;
+                            self.read_cursor = next_id(self.data, id, self.aux);
+                            return get_ptr(self.data, id, self.aux);
+                        }
+
+                        pub fn next_read(self: *ReadWriteIterator) struct { *ELEM, ID } {
+                            const id = self.read_cursor;
+                            self.read_cursor = next_id(self.data, id, self.aux);
+                            return .{ get_ptr(self.data, id, self.aux), id };
+                        }
+
+                        pub fn has_prev_read(self: *const ReadWriteIterator) bool {
+                            const prev_ = prev_id(self.data, self.read_cursor, self.aux);
+                            return id_valid(self.data, prev_, self.aux);
+                        }
+
+                        pub fn prev_read_id(self: *ReadWriteIterator) ID {
+                            self.read_cursor = prev_id(self.data, self.read_cursor, self.aux);
+                            return get(self.data, self.read_cursor, self.aux);
+                        }
+
+                        pub fn prev_read_elem(self: *ReadWriteIterator) ELEM {
+                            self.read_cursor = prev_id(self.data, self.read_cursor, self.aux);
+                            return get(self.data, self.read_cursor, self.aux);
+                        }
+
+                        pub fn prev_read_elem_ptr(self: *ReadWriteIterator) *ELEM {
+                            self.read_cursor = prev_id(self.data, self.read_cursor, self.aux);
+                            return get_ptr(self.data, self.read_cursor, self.aux);
+                        }
+
+                        pub fn prev_read(self: *ReadWriteIterator) struct { *ELEM, ID } {
+                            self.read_cursor = prev_id(self.data, self.read_cursor, self.aux);
+                            return .{ get_ptr(self.data, self.read_cursor, self.aux), self.read_cursor };
+                        }
+
+                        pub fn has_next_write(self: *const ReadWriteIterator) bool {
+                            return id_valid(self.data, self.write_cursor, self.aux);
+                        }
+
+                        pub fn next_write_id(self: *ReadWriteIterator) ID {
+                            const id = self.write_cursor;
+                            self.write_cursor = next_id(self.data, id, self.aux);
+                            return get(self.data, id, self.aux);
+                        }
+
+                        pub fn next_write_elem(self: *ReadWriteIterator) ELEM {
+                            const id = self.write_cursor;
+                            self.write_cursor = next_id(self.data, id, self.aux);
+                            return get(self.data, id, self.aux);
+                        }
+
+                        pub fn next_write_elem_ptr(self: *ReadWriteIterator) *ELEM {
+                            const id = self.write_cursor;
+                            self.write_cursor = next_id(self.data, id, self.aux);
+                            return get_ptr(self.data, id, self.aux);
+                        }
+
+                        pub fn next_write(self: *ReadWriteIterator) struct { *ELEM, ID } {
+                            const id = self.write_cursor;
+                            self.write_cursor = next_id(self.data, id, self.aux);
+                            return .{ get_ptr(self.data, id, self.aux), id };
+                        }
+
+                        pub fn has_prev_write(self: *const ReadWriteIterator) bool {
+                            const prev_ = prev_id(self.data, self.write_cursor, self.aux);
+                            return id_valid(self.data, prev_, self.aux);
+                        }
+
+                        pub fn prev_write_id(self: *ReadWriteIterator) ID {
+                            self.write_cursor = prev_id(self.data, self.write_cursor, self.aux);
+                            return get(self.data, self.write_cursor, self.aux);
+                        }
+
+                        pub fn prev_write_elem(self: *ReadWriteIterator) ELEM {
+                            self.write_cursor = prev_id(self.data, self.write_cursor, self.aux);
+                            return get(self.data, self.write_cursor, self.aux);
+                        }
+
+                        pub fn prev_write_elem_ptr(self: *ReadWriteIterator) *ELEM {
+                            self.write_cursor = prev_id(self.data, self.write_cursor, self.aux);
+                            return get_ptr(self.data, self.write_cursor, self.aux);
+                        }
+
+                        pub fn prev_write(self: *ReadWriteIterator) struct { *ELEM, ID } {
+                            self.write_cursor = prev_id(self.data, self.write_cursor, self.aux);
+                            return .{ get_ptr(self.data, self.write_cursor, self.aux), self.write_cursor };
+                        }
+                    };
+
+                    pub const SimpleElemIterator = struct {
+                        data: DATA,
+                        aux: AUX_DATA,
+                        cursor_right_before: ID,
+
+                        pub fn new(data: DATA, aux: AUX_DATA, first: ID) SimpleElemIterator {
+                            return SimpleElemIterator{
+                                .data = data,
+                                .aux = aux,
+                                .cursor_right_before = first,
+                            };
+                        }
+
+                        pub fn has_next(self: *const ElemIterator) bool {
+                            return id_valid(self.data, self.cursor_right_before, self.aux);
+                        }
+
+                        pub fn next(self: *ElemIterator) ELEM {
+                            const id = self.cursor_right_before;
+                            self.cursor_right_before = next_id(self.data, id, self.aux);
+                            return get(self.data, id, self.aux);
+                        }
+
+                        pub fn next_ptr(self: *ElemIterator) *ELEM {
+                            const id = self.cursor_right_before;
+                            self.cursor_right_before = next_id(self.data, id, self.aux);
+                            return get_ptr(self.data, id, self.aux);
+                        }
+
+                        pub fn has_prev(self: *const ElemIterator) bool {
+                            const prev_ = prev_id(self.data, self.cursor_right_before, self.aux);
+                            return id_valid(self.data, prev_, self.aux);
+                        }
+
+                        pub fn prev(self: *ElemIterator) ELEM {
+                            const prev_ = prev_id(self.data, self.cursor_right_before, self.aux);
+                            self.cursor_right_before = prev_;
+                            return get(self.data, prev_, self.aux);
+                        }
+
+                        pub fn prev_ptr(self: *ElemIterator) *ELEM {
+                            const prev_ = prev_id(self.data, self.cursor_right_before, self.aux);
+                            self.cursor_right_before = prev_;
+                            return get_ptr(self.data, prev_, self.aux);
+                        }
+
+                        pub const Adapter = ElemIterator.Adapter(*SimpleElemIterator);
+
+                        pub fn adapter(self: *SimpleElemIterator) Adapter {
+                            return Adapter{ ._obj = self };
+                        }
+                    };
+
+                    // /// Remove sparse indexes in O(N) time. Id's in the id list MUST be in the same order they will be encountered in THIS data list.
+                    // ///
+                    // /// `IDS_TO_REMOVE_PKG` must be a 'DataManipulationPackage' with an element (`ELEM`) type that matches the
+                    // /// `ID` type of this package.
+                    // pub fn delete_sparse_from_ordered_id_list(data_: DATA, aux_data: AUX_DATA, comptime DELETE_ID_ITERATOR: type, delete_id_iter: IdIterator.Adapter(DELETE_ID_ITERATOR)) struct { DATA, COUNT } {
+                    //     var data = data_;
+                    //     if (delete_id_iter.has_next()) {
+                    //         var num_to_delete = 0;
+                    //         const first_id_ = delete_id_iter.peek_next();
+                    //         assert_id_valid(data, first_id_, aux_data, @src());
+                    //         var iter = ReadWriteIterator.new(data, aux_data, first_id_, first_id_);
+                    //         var write_ptr = iter.next_write_elem_ptr();
+                    //         while (delete_id_iter.has_next() and iter.has_next_read()) {
+                    //             const id_to_delete = delete_id_iter.next();
+                    //             const read_ptr, const read_id = iter.next_read();
+                    //             if (!id_equals(data, id_to_delete, read_id, aux_data)) {
+                    //                 write_ptr.* = read_ptr.*;
+                    //                 write_ptr = iter.next_write_elem_ptr();
+                    //             } else {
+                    //                 num_to_delete += 1;
+                    //             }
+                    //         }
+                    //         while (true) {}
+                    //         while (delete_id_iter.has_next()) {}
+                    //     }
+                    //     return data;
+                    // }
 
                     pub const IterState = union(IterStateKind) {
                         CONTINUE_IMPLICIT_NEXT_ID: void,
@@ -3203,7 +3455,7 @@ pub const DataManipulationCore = struct {
                     pub inline fn for_each_count_filtered(data: DATA, aux: AUX_DATA, first: ID, count: COUNT, ctx: anytype, comptime CTX: anytype, comptime FN_TYPE: FuncParamType, comptime ERROR: ?type, action_rt: ForEachActionRT(FN_TYPE, @TypeOf(ctx), @TypeOf(CTX), ERROR), comptime ACTION_CT: ForEachActionCT(FN_TYPE, @TypeOf(ctx), @TypeOf(CTX), ERROR), comptime FILTER_FN_TYPE: FuncParamType, comptime FILTER_ERROR: ?type, filter_max_count: COUNT, filter_fn: FilterActionRT(true, FILTER_FN_TYPE, @TypeOf(ctx), @TypeOf(CTX), FILTER_ERROR), comptime FILTER_FN: FilterActionCT(true, FILTER_FN_TYPE, @TypeOf(ctx), @TypeOf(CTX), FILTER_ERROR)) DataResultErrorFilterError(ERROR, FILTER_ERROR) {
                         return for_each_internal(data, aux, first, .COUNT, .new(first, count), ctx, CTX, FN_TYPE, ERROR, action_rt, ACTION_CT, true, FILTER_ERROR, FILTER_FN_TYPE, filter_max_count, filter_fn, FILTER_FN);
                     }
-                    pub inline fn for_each_in_range_max_count_filtered(data: DATA, aux: AUX_DATA, first: ID, last: ID, max_count: COUNT, ctx: anytype, comptime CTX: anytype, comptime FN_TYPE: FuncParamType, comptime ERROR: ?type, action_rt: ForEachActionRT(FN_TYPE, @TypeOf(ctx), @TypeOf(CTX), ERROR), comptime ACTION_CT: ForEachActionCT(FN_TYPE, @TypeOf(ctx), @TypeOf(CTX), ERROR), comptime FILTER_FN_TYPE: FuncParamType, comptime FILTER_ERROR: ?type,  filter_max_count: COUNT, filter_fn: FilterActionRT(true, FILTER_FN_TYPE, @TypeOf(ctx), @TypeOf(CTX), FILTER_ERROR), comptime FILTER_FN: FilterActionCT(true, FILTER_FN_TYPE, @TypeOf(ctx), @TypeOf(CTX), FILTER_ERROR)) DataResultErrorFilterError(ERROR, FILTER_ERROR) {
+                    pub inline fn for_each_in_range_max_count_filtered(data: DATA, aux: AUX_DATA, first: ID, last: ID, max_count: COUNT, ctx: anytype, comptime CTX: anytype, comptime FN_TYPE: FuncParamType, comptime ERROR: ?type, action_rt: ForEachActionRT(FN_TYPE, @TypeOf(ctx), @TypeOf(CTX), ERROR), comptime ACTION_CT: ForEachActionCT(FN_TYPE, @TypeOf(ctx), @TypeOf(CTX), ERROR), comptime FILTER_FN_TYPE: FuncParamType, comptime FILTER_ERROR: ?type, filter_max_count: COUNT, filter_fn: FilterActionRT(true, FILTER_FN_TYPE, @TypeOf(ctx), @TypeOf(CTX), FILTER_ERROR), comptime FILTER_FN: FilterActionCT(true, FILTER_FN_TYPE, @TypeOf(ctx), @TypeOf(CTX), FILTER_ERROR)) DataResultErrorFilterError(ERROR, FILTER_ERROR) {
                         return for_each_internal(data, aux, first, .ID_OR_COUNT, .new(last, max_count), ctx, CTX, FN_TYPE, ERROR, action_rt, ACTION_CT, true, FILTER_ERROR, FILTER_FN_TYPE, filter_max_count, filter_fn, FILTER_FN);
                     }
 
@@ -3219,9 +3471,9 @@ pub const DataManipulationCore = struct {
                         return .{ new_data, IterState.continue_next_id() };
                     }
 
-                    pub fn filtered_remove_in_range(data: DATA, aux: AUX_DATA, first: ID, last: ID, comptime ID_ERROR_MODE: IdMightError) if (ID_ERROR_MODE == IdMightError.ID_MIGHT_BE_INVALID) struct { DATA, IdError } else DATA {
-                        for_each_in_range_filtered(data, aux, first, last, void{}, void{}, .RUNTIME_FN_PTR, IdError, action_rt: (unknown type), comptime ACTION_CT: (unknown type), comptime FILTER_FN_TYPE: FuncParamType, filter_max_count: (unknown type), filter_fn: (unknown type), comptime FILTER_FN: (unknown type))
-                    }
+                    // pub fn filtered_remove_in_range(data: DATA, aux: AUX_DATA, first: ID, last: ID, comptime ID_ERROR_MODE: IdMightError) if (ID_ERROR_MODE == IdMightError.ID_MIGHT_BE_INVALID) struct { DATA, IdError } else DATA {
+                    //     for_each_in_range_filtered(data, aux, first, last, void{}, void{}, .RUNTIME_FN_PTR, IdError, action_rt: (unknown type), comptime ACTION_CT: (unknown type), comptime FILTER_FN_TYPE: FuncParamType, filter_max_count: (unknown type), filter_fn: (unknown type), comptime FILTER_FN: (unknown type))
+                    // }
 
                     //TODO FILTER_REMOVE
                     //TODO FILTER_SELECT
