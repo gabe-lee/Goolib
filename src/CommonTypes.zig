@@ -233,6 +233,27 @@ pub const GrowthModel = enum {
     GROW_BY_50_PERCENT,
     /// TODO documentation
     GROW_BY_25_PERCENT,
+
+    pub fn calc(self: GrowthModel, input: anytype) @TypeOf(input) {
+        const T = @TypeOf(input);
+        if (Root.Types.type_is_int(T)) {
+            switch (self) {
+                .GROW_EXACT_NEEDED => return input,
+                .GROW_BY_25_PERCENT => return input + (input >> 2),
+                .GROW_BY_50_PERCENT => return input + (input >> 1),
+                .GROW_BY_100_PERCENT => return input << 1,
+            }
+        } else if (Root.Types.type_is_float(T)) {
+            switch (self) {
+                .GROW_EXACT_NEEDED => return input,
+                .GROW_BY_25_PERCENT => return input + (input * 0.25),
+                .GROW_BY_50_PERCENT => return input + (input * 0.5),
+                .GROW_BY_100_PERCENT => return input * 2.0,
+            }
+        } else {
+            assert_unreachable(@src(), "type `{s}` is not a numeric type", .{@typeName(T)});
+        }
+    }
 };
 
 /// TODO documentation
