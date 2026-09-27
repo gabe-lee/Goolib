@@ -49,7 +49,7 @@ const assert_unreachable_err_always_panic = Assert.assert_unreachable_err_always
 const num_cast = Cast.num_cast;
 const kind_info = KindInfo.get_kind_info;
 
-pub const FieldMode = enum {
+pub const FieldLayout = enum {
     WHOLE_STRUCTS,
     SPLIT_FIELDS,
 };
@@ -126,20 +126,32 @@ const ReturnMode = enum {
     }
 };
 
-pub fn ListNotAllocated(comptime T: type, comptime FIELD_LAYOUT: FieldMode, comptime INDEX_LAYOUT: IndexLayout) type {
+pub const ListDef = struct {
+    ELEM: type,
+    IDX: type,
+    FIELD_LAYOUT: FieldLayout,
+    INDEX_LAYOUT: IndexLayout,
+    OWNERSHIP: Ownership,
+
+    pub inline fn List(comptime self: ListDef) type {
+        return ListFullDefinition(self.ELEM, self.IDX, self.FIELD_LAYOUT, self.INDEX_LAYOUT, self.OWNERSHIP);
+    }
+};
+
+pub fn ListNotAllocated(comptime T: type, comptime FIELD_LAYOUT: FieldLayout, comptime INDEX_LAYOUT: IndexLayout) type {
     return ListFullDefinition(T, u32, FIELD_LAYOUT, INDEX_LAYOUT, .OWNED_NOT_ALLOCATED);
 }
-pub fn ListAllocated(comptime T: type, comptime FIELD_LAYOUT: FieldMode, comptime INDEX_LAYOUT: IndexLayout) type {
+pub fn ListAllocated(comptime T: type, comptime FIELD_LAYOUT: FieldLayout, comptime INDEX_LAYOUT: IndexLayout) type {
     return ListFullDefinition(T, u32, FIELD_LAYOUT, INDEX_LAYOUT, .OWNED_ALLOCATED);
 }
-pub fn SliceMutable(comptime T: type, comptime FIELD_LAYOUT: FieldMode, comptime INDEX_LAYOUT: IndexLayout) type {
+pub fn SliceMutable(comptime T: type, comptime FIELD_LAYOUT: FieldLayout, comptime INDEX_LAYOUT: IndexLayout) type {
     return ListFullDefinition(T, u32, FIELD_LAYOUT, INDEX_LAYOUT, .REFERENCED_MUTABLE);
 }
-pub fn SliceImmutable(comptime T: type, comptime FIELD_LAYOUT: FieldMode, comptime INDEX_LAYOUT: IndexLayout) type {
+pub fn SliceImmutable(comptime T: type, comptime FIELD_LAYOUT: FieldLayout, comptime INDEX_LAYOUT: IndexLayout) type {
     return ListFullDefinition(T, u32, FIELD_LAYOUT, INDEX_LAYOUT, .REFERENCED_IMMUTABLE);
 }
 
-pub fn ListFullDefinition(comptime T: type, comptime IDX: type, comptime FIELD_LAYOUT: FieldMode, comptime INDEX_LAYOUT: IndexLayout, comptime OWNERSHIP: Ownership) type {
+pub fn ListFullDefinition(comptime T: type, comptime IDX: type, comptime FIELD_LAYOUT: FieldLayout, comptime INDEX_LAYOUT: IndexLayout, comptime OWNERSHIP: Ownership) type {
     assert_with_reason(Type.type_is_unsigned_int(IDX), @src(), "IDX type must be an unsigned integer, got type `{s}`", .{@typeName(IDX)});
     const _NUM_FIELDS: usize = switch (@typeInfo(T)) {
         .@"struct" => |s| s.fields.len,
@@ -179,6 +191,13 @@ pub fn ListFullDefinition(comptime T: type, comptime IDX: type, comptime FIELD_L
     // const _Y = _FIELD_INFO.
     return struct {
         const Self = @This();
+        pub const GOOLIB_LIST_DEF = ListDef{
+            .ELEM = T,
+            .IDX = IDX,
+            .FIELD_LAYOUT = FIELD_LAYOUT,
+            .INDEX_LAYOUT = INDEX_LAYOUT,
+            .OWNERSHIP = OWNERSHIP,
+        };
         const NUM_FIELDS = _NUM_FIELDS;
         const ORDERED_FIELD_NAMES = _ORDERED_FIELD_NAMES;
         const ORDERED_FIELD_TYPES = _ORDERED_FIELD_TYPES;
@@ -196,21 +215,7 @@ pub fn ListFullDefinition(comptime T: type, comptime IDX: type, comptime FIELD_L
         const IS_REFERENCE = !IS_OWNED;
         const IS_CONST = OWNERSHIP == .REFERENCED_IMMUTABLE;
         const IS_MUTABLE = !IS_CONST;
-        const HAS_START_OFFSET = check: {
-            var needs_start_offset: bool = false;
-            switch (INDEX_LAYOUT) {
-                .SERIAL_INDEXES => {},
-            }
-            switch (FIELD_LAYOUT) {
-                .WHOLE_STRUCTS => {},
-                .SPLIT_FIELDS => {
-                    if (IS_REFERENCE) {
-                        needs_start_offset = true;
-                    }
-                },
-            }
-            break :check needs_start_offset;
-        };
+        const HAS_START_OFFSET = IS_REFERENCE;
         const ENUM_INT = _E_INT;
         pub const Field = _FIELD_ENUM;
         const MemPtr = if (SPLIT) (if (IS_CONST) [*]align(MAX_ALIGN) const u8 else [*]align(MAX_ALIGN) u8) else (if (IS_CONST) [*]const T else [*]T);
@@ -288,6 +293,15 @@ pub fn ListFullDefinition(comptime T: type, comptime IDX: type, comptime FIELD_L
         fn assert_valid_idx_or_len(self: Self, idx: IDX, src: ?std.builtin.SourceLocation) void {
             assert_with_reason(idx <= self.data_len, src, "index `{d}` is out of bounds (len = {d})", .{ idx, self.data_len });
         }
+        fn assert_count_less_equal_data_offset(self: Self, count: IDX, src: ?std.builtin.SourceLocation) void {
+            assert_with_reason(count <= self.data_offset, src, "count `{d}` greater than data offset (offset = {d})", .{ count, self.data_offset });
+        }
+        fn assert_count_less_equal_len(self: Self, count: IDX, src: ?std.builtin.SourceLocation) void {
+            assert_with_reason(count <= self.data_len, src, "count `{d}` is greater than len (len = {d})", .{ count, self.data_len });
+        }
+        fn assert_count_less_equal_data_unused_space(self: Self, count: IDX, src: ?std.builtin.SourceLocation) void {
+            assert_with_reason(count <= (self.data_cap - self.data_len), src, "count `{d}` greater than data cap minus data len (free space = {d})", .{ count, self.data_cap - self.data_len });
+        }
         fn assert_whole_struct_for_ptr(src: ?std.builtin.SourceLocation) void {
             assert_with_reason(!SPLIT, src, "cannot get whole struct pointer in .SPLIT_FIELDS mode", .{});
         }
@@ -304,7 +318,16 @@ pub fn ListFullDefinition(comptime T: type, comptime IDX: type, comptime FIELD_L
             assert_with_reason(SERIAL_IDXS, src, "indexes must be serially in order at this point", .{});
         }
         fn assert_owned(src: ?std.builtin.SourceLocation) void {
-            assert_with_reason(IS_OWNED, src, "cannot alter capacity/memory pointer on non-owned memory", .{});
+            assert_with_reason(IS_OWNED, src, "slice is not owned (reference to memory only)", .{});
+        }
+        fn assert_reference(src: ?std.builtin.SourceLocation) void {
+            assert_with_reason(IS_REFERENCE, src, "list is not a reference to owned memory", .{});
+        }
+        fn assert_reference_and_data_offset(src: ?std.builtin.SourceLocation) void {
+            assert_with_reason(IS_REFERENCE and HAS_START_OFFSET, src, "list is not a reference to owned memory or does not have a data offset", .{});
+        }
+        fn assert_reference_mutable(src: ?std.builtin.SourceLocation) void {
+            assert_with_reason(IS_REFERENCE and IS_MUTABLE, src, "list/slice is not a mutable reference to owned memory", .{});
         }
         fn assert_owned_allocated(src: ?std.builtin.SourceLocation) void {
             assert_with_reason(IS_OWNED_ALLOCATED, src, "cannot alter capacity/memory pointer on non-owned or non-allocated memory", .{});
@@ -314,6 +337,30 @@ pub fn ListFullDefinition(comptime T: type, comptime IDX: type, comptime FIELD_L
         }
         fn assert_mutable(src: ?std.builtin.SourceLocation) void {
             assert_with_reason(IS_MUTABLE, src, "pointer is not mutable", .{});
+        }
+        fn assert_goolib_list(comptime TT: type, src: ?std.builtin.SourceLocation) void {
+            assert_with_reason(@hasDecl(TT, "GOOLIB_LIST_DEF"), src, "type is not a Goolib List, got type `{s}`", .{@typeName(TT)});
+            assert_with_reason(@TypeOf(@field(TT, "GOOLIB_LIST_DEF")) == ListDef, src, "type is not a Goolib List (`GOOLIB_LIST_DEF` decl is type `{s}`), got type `{s}`", .{ @typeName(@TypeOf(@field(TT, "GOOLIB_LIST_DEF"))), @typeName(TT) });
+            assert_with_reason(T == TT.GOOLIB_LIST_DEF.List(), src, "type is not a Goolib List (`TT` != `TT.GOOLIB_LIST_DEF.List()`, got type `{s}`", .{@typeName(TT)});
+        }
+        fn assert_goolib_list_ptr(comptime TT: type, src: ?std.builtin.SourceLocation) void {
+            assert_with_reason(Type.type_is_pointer_or_slice(TT), src, "type is not a pointer to Goolib List, got type `{s}`", .{@typeName(TT)});
+            const TTT = @typeInfo(@TypeOf(TT)).pointer.child;
+            assert_goolib_list(TTT, src);
+        }
+        fn assert_goolib_list_ptr_get_type(comptime TT: type, src: ?std.builtin.SourceLocation) type {
+            assert_with_reason(Type.type_is_pointer_or_slice(TT), src, "type is not a pointer to Goolib List, got type `{s}`", .{@typeName(TT)});
+            const TTT = @typeInfo(@TypeOf(TT)).pointer.child;
+            assert_goolib_list(TTT, src);
+            return TTT;
+        }
+        fn assert_goolib_list_with_elem(comptime TT: type, comptime TT_ELEM: type, src: ?std.builtin.SourceLocation) void {
+            assert_goolib_list(TT, src);
+            assert_with_reason(TT.GOOLIB_LIST_DEF.ELEM == TT_ELEM, src, "Goolib list does not have matching element type (got `{s}`, need `{s}`)", .{ @typeName(TT.GOOLIB_LIST_DEF.ELEM), @typeName(TT_ELEM) });
+        }
+        fn assert_goolib_list_ptr_with_elem(comptime TT: type, comptime TT_ELEM: type, src: ?std.builtin.SourceLocation) void {
+            const TTT = assert_goolib_list_ptr_get_type(TT, src);
+            assert_with_reason(TTT.GOOLIB_LIST_DEF.ELEM == TT_ELEM, src, "Goolib list does not have matching element type (got `{s}`, need `{s}`)", .{ @typeName(TT.GOOLIB_LIST_DEF.ELEM), @typeName(TT_ELEM) });
         }
 
         inline fn end_stride() IDX {
@@ -359,6 +406,46 @@ pub fn ListFullDefinition(comptime T: type, comptime IDX: type, comptime FIELD_L
         }
         inline fn root_field_ptr(self: Self, comptime FIELD: Field) if (IS_CONST) [*]const FieldType(FIELD) else [*]FieldType(FIELD) {
             return self.field_slice_from_field_idx(@intFromEnum(FIELD));
+        }
+        inline fn contiguous_indexes_after_index(self: Self, start: IDX) IDX {
+            switch (comptime INDEX_LAYOUT) {
+                .SERIAL_INDEXES => return self.data_len - start,
+            }
+        }
+        inline fn contiguous_indexes_after_index_max(self: Self, start: IDX, max: IDX) IDX {
+            return @max(max, self.contiguous_indexes_after_index(start));
+        }
+        inline fn get_list_def(comptime TT: type) ListDef {
+            assert_goolib_list(TT, @src());
+            return TT.GOOLIB_LIST_DEF;
+        }
+        inline fn coerce_anytype_with_def(val_: anytype, comptime LIST_DEF: ListDef) LIST_DEF.List() {
+            const VAL_ = @TypeOf(val_);
+            assert_goolib_list(VAL_, @src());
+            const VAL_DEF: ListDef = VAL_.GOOLIB_LIST_DEF;
+            const VAL = VAL_DEF.List();
+            return @as(VAL, val_);
+        }
+        inline fn coerce_anytype(val_: anytype) get_list_def(@TypeOf(val_)).List() {
+            const VAL_ = @TypeOf(val_);
+            assert_goolib_list(VAL_, @src());
+            const VAL_DEF: ListDef = VAL_.GOOLIB_LIST_DEF;
+            const VAL = VAL_DEF.List();
+            return @as(VAL, val_);
+        }
+        inline fn coerce_anytype_with_def_to_ptr(val_: anytype, comptime LIST_DEF: ListDef) LIST_DEF.List() {
+            const VAL_ = @TypeOf(val_);
+            const VAL__ = assert_goolib_list_ptr_get_type(VAL_, @src());
+            const VAL_DEF: ListDef = VAL__.GOOLIB_LIST_DEF;
+            const VAL = VAL_DEF.List();
+            return @as(*VAL, val_);
+        }
+        inline fn coerce_anytype_to_ptr(val_: anytype) get_list_def(@TypeOf(val_)).List() {
+            const VAL_ = @TypeOf(val_);
+            const VAL__ = assert_goolib_list_ptr_get_type(VAL_, @src());
+            const VAL_DEF: ListDef = VAL__.GOOLIB_LIST_DEF;
+            const VAL = VAL_DEF.List();
+            return @as(*VAL, val_);
         }
         //****************
         // SET
@@ -604,6 +691,24 @@ pub fn ListFullDefinition(comptime T: type, comptime IDX: type, comptime FIELD_L
                 };
             }
         }
+        pub fn slice_from_start(self: Self, end_exclusive: IDX) Slice {
+            return self.slice(0, end_exclusive);
+        }
+        pub fn slice_from_start_const(self: Self, end_exclusive: IDX) SliceConst {
+            return self.slice_const(0, end_exclusive);
+        }
+        pub fn slice_to_end(self: Self, start: IDX) Slice {
+            return self.slice(start, self.data_len);
+        }
+        pub fn slice_to_end_const(self: Self, start: IDX) SliceConst {
+            return self.slice_const(start, self.data_len);
+        }
+        pub fn slice_entire(self: Self) Slice {
+            return self.slice(0, self.data_len);
+        }
+        pub fn slice_entire_const(self: Self) SliceConst {
+            return self.slice_const(0, self.data_len);
+        }
         pub fn zig_slice(self: Self, start: IDX, end_exclusive: IDX) []T {
             self.assert_valid_idx_or_zero_if_len_is_zero(start, @src());
             self.assert_valid_idx_or_len(end_exclusive, @src());
@@ -626,6 +731,157 @@ pub fn ListFullDefinition(comptime T: type, comptime IDX: type, comptime FIELD_L
                     return @as([*]const T, @ptrCast(self.get_ptr_true_idx(self.true_idx(0))))[start..end_exclusive];
                 },
             }
+        }
+        pub fn zig_slice_from_start(self: Self, end_exclusive: IDX) []T {
+            return self.zig_slice(0, end_exclusive);
+        }
+        pub fn zig_slice_from_start_const(self: Self, end_exclusive: IDX) []const T {
+            return self.zig_slice_const(0, end_exclusive);
+        }
+        pub fn zig_slice_to_end(self: Self, start: IDX) []T {
+            return self.zig_slice(start, self.data_len);
+        }
+        pub fn zig_slice_to_end_const(self: Self, start: IDX) []const T {
+            return self.zig_slice_const(start, self.data_len);
+        }
+        pub fn zig_slice_entire(self: Self) []T {
+            return self.zig_slice(0, self.data_len);
+        }
+        pub fn zig_slice_entire_const(self: Self) []const T {
+            return self.zig_slice_const(0, self.data_len);
+        }
+        //****************
+        // SLICE MOVEMENT
+        //****************
+        pub fn incr_slice_start(self: *Self, count: IDX) void {
+            assert_reference_and_data_offset(@src());
+            self.assert_count_less_equal_len(count, @src());
+            self.data_offset += count;
+            self.data_len -= count;
+            self.data_cap -= count;
+        }
+        pub fn decr_slice_start(self: *Self, count: IDX) void {
+            assert_reference_and_data_offset(@src());
+            self.assert_count_less_equal_data_offset(count, @src());
+            self.data_offset -= count;
+            self.data_len += count;
+            self.data_cap += count;
+        }
+        pub fn incr_slice_end(self: *Self, count: IDX) void {
+            assert_reference_and_data_offset(@src());
+            self.assert_count_less_equal_data_unused_space(count, @src());
+            self.data_len += count;
+            self.data_cap -= count;
+        }
+        pub fn decr_slice_end(self: *Self, count: IDX) void {
+            assert_reference_and_data_offset(@src());
+            self.assert_count_less_equal_len(count, @src());
+            self.data_len -= count;
+            self.data_cap += count;
+        }
+        pub fn slide_slice_lower(self: *Self, count: IDX) void {
+            assert_reference_and_data_offset(@src());
+            self.assert_count_less_equal_data_offset(count, @src());
+            self.data_offset -= count;
+            self.data_cap += count;
+        }
+        pub fn slide_slice_higher(self: *Self, count: IDX) void {
+            assert_reference_and_data_offset(@src());
+            self.assert_count_less_equal_data_unused_space(count, @src());
+            self.data_offset += count;
+            self.data_cap -= count;
+        }
+        pub fn split_off_slice_from_start(self: *Self, count: IDX) Slice {
+            assert_reference_and_data_offset(@src());
+            self.assert_count_less_equal_len(count, @src());
+            const new_slice = Slice{
+                .root_ptr = self.root_ptr,
+                .root_cap = self.root_cap,
+                .data_offset = self.data_offset,
+                .data_len = count,
+                .data_cap = self.data_cap,
+            };
+            self.data_offset += count;
+            self.data_len -= count;
+            self.data_cap -= count;
+            return new_slice;
+        }
+        pub fn split_off_slice_from_start_const(self: *Self, count: IDX) SliceConst {
+            assert_reference_and_data_offset(@src());
+            self.assert_count_less_equal_len(count, @src());
+            const new_slice = SliceConst{
+                .root_ptr = self.root_ptr,
+                .root_cap = self.root_cap,
+                .data_offset = self.data_offset,
+                .data_len = count,
+                .data_cap = self.data_cap,
+            };
+            self.data_offset += count;
+            self.data_len -= count;
+            self.data_cap -= count;
+            return new_slice;
+        }
+        pub fn split_off_slice_from_end(self: *Self, count: IDX) Slice {
+            assert_reference_and_data_offset(@src());
+            self.assert_count_less_equal_len(count, @src());
+            const new_slice = Slice{
+                .root_ptr = self.root_ptr,
+                .root_cap = self.root_cap,
+                .data_offset = self.data_len - count,
+                .data_len = count,
+                .data_cap = count + (self.data_cap - self.data_len),
+            };
+            self.data_len -= count;
+            self.data_cap += count;
+            return new_slice;
+        }
+        pub fn split_off_slice_from_end_const(self: *Self, count: IDX) SliceConst {
+            assert_reference_and_data_offset(@src());
+            self.assert_count_less_equal_len(count, @src());
+            const new_slice = SliceConst{
+                .root_ptr = self.root_ptr,
+                .root_cap = self.root_cap,
+                .data_offset = self.data_len - count,
+                .data_len = count,
+                .data_cap = count + (self.data_cap - self.data_len),
+            };
+            self.data_len -= count;
+            self.data_cap += count;
+            return new_slice;
+        }
+        pub fn split_off_zig_slice_from_start(self: *Self, count: IDX) []T {
+            assert_reference_and_data_offset(@src());
+            self.assert_count_less_equal_len(count, @src());
+            const new_slice = self.zig_slice(0, count);
+            self.data_offset += count;
+            self.data_len -= count;
+            self.data_cap -= count;
+            return new_slice;
+        }
+        pub fn split_off_zig_slice_from_start_const(self: *Self, count: IDX) []const T {
+            assert_reference_and_data_offset(@src());
+            self.assert_count_less_equal_len(count, @src());
+            const new_slice = self.zig_slice_const(0, count);
+            self.data_offset += count;
+            self.data_len -= count;
+            self.data_cap -= count;
+            return new_slice;
+        }
+        pub fn split_off_zig_slice_from_end(self: *Self, count: IDX) []T {
+            assert_reference_and_data_offset(@src());
+            self.assert_count_less_equal_len(count, @src());
+            const new_slice = self.zig_slice(self.data_len - count, self.data_len);
+            self.data_len -= count;
+            self.data_cap += count;
+            return new_slice;
+        }
+        pub fn split_off_zig_slice_from_end_const(self: *Self, count: IDX) []const T {
+            assert_reference_and_data_offset(@src());
+            self.assert_count_less_equal_len(count, @src());
+            const new_slice = self.zig_slice_const(self.data_len - count, self.data_len);
+            self.data_len -= count;
+            self.data_cap += count;
+            return new_slice;
         }
         //****************
         // REVERSE/ROTATE
@@ -839,7 +1095,6 @@ pub fn ListFullDefinition(comptime T: type, comptime IDX: type, comptime FIELD_L
             assert_with_reason(old_start > new_start, @src(), "old start must be >= new_start to move block left, got {d} < {d}", .{ old_start, new_start });
             self.move_block_overwrite_internal(old_start, old_end_exclusive, new_start);
         }
-
         pub fn move_one_displace(self: Self, old_idx: IDX, new_idx: IDX) void {
             if (old_idx < new_idx) {
                 self.move_one_right_displace(old_idx, new_idx);
@@ -1080,6 +1335,7 @@ pub fn ListFullDefinition(comptime T: type, comptime IDX: type, comptime FIELD_L
                     self.data_len = 0;
                     self.root_cap = 0;
                     self.data_offset = if (HAS_START_OFFSET) 0 else void{};
+                    self.data_cap = if (HAS_START_OFFSET) 0 else void{};
                 },
                 .SPLIT_FIELDS => {
                     const byte_cap = end_stride() * self.root_cap;
@@ -1088,6 +1344,7 @@ pub fn ListFullDefinition(comptime T: type, comptime IDX: type, comptime FIELD_L
                     self.data_len = 0;
                     self.root_cap = 0;
                     self.data_offset = if (HAS_START_OFFSET) 0 else void{};
+                    self.data_cap = if (HAS_START_OFFSET) 0 else void{};
                 },
             }
         }
@@ -1100,7 +1357,164 @@ pub fn ListFullDefinition(comptime T: type, comptime IDX: type, comptime FIELD_L
                 self.free_internal(alloc);
             }
         }
-
+        //*********
+        // COPY TO
+        //*********
+        pub fn copy_self_range_to_dest_range(self: Self, self_start: IDX, self_end_exclusive: IDX, dest_: anytype, dest_start: anytype) void {
+            self.assert_valid_idx(self_start, @src());
+            self.assert_valid_idx_or_len(self_end_exclusive, @src());
+            assert_start_less_or_equal_end_exclusive(self_start, self_end_exclusive, @src());
+            const DEST_ = @TypeOf(dest_);
+            assert_goolib_list_with_elem(DEST_, T, @src());
+            const DEST_DEF: ListDef = DEST_.GOOLIB_LIST_DEF;
+            const DEST = DEST_DEF.List();
+            DEST.assert_mutable(@src());
+            const dest: DEST = @as(DEST, dest_);
+            dest.assert_valid_idx(@intCast(dest_start), @src());
+            var remaining_count = self_end_exclusive - self_start;
+            if (remaining_count == 0) return;
+            const dest_end_exclusive: @TypeOf(dest_start) = dest_start + num_cast(remaining_count, @TypeOf(dest_start));
+            dest.assert_valid_idx_or_len(dest_end_exclusive, @src());
+            if (comptime (FIELD_LAYOUT == .WHOLE_STRUCTS and DEST.GOOLIB_LIST_DEF.FIELD_LAYOUT == .WHOLE_STRUCTS) or (FIELD_LAYOUT == .SPLIT_FIELDS and DEST.GOOLIB_LIST_DEF.FIELD_LAYOUT == .SPLIT_FIELDS)) {
+                var remaining_self = self.slice_const(self_start, self_end_exclusive);
+                var remaining_dest = dest.slice(dest_start, dest_end_exclusive);
+                while (remaining_count > 0) {
+                    const contiguous_self = remaining_self.contiguous_indexes_after_index_max(0, remaining_count);
+                    const contiguous_dest: IDX = @intCast(remaining_dest.contiguous_indexes_after_index_max(0, remaining_count));
+                    const copy_len = @min(contiguous_self, contiguous_dest);
+                    switch (comptime FIELD_LAYOUT) {
+                        .WHOLE_STRUCTS => {
+                            const copy_src = remaining_self.split_off_zig_slice_from_start_const(copy_len);
+                            const copy_dst = remaining_dest.split_off_zig_slice_from_start(copy_len);
+                            @memcpy(copy_dst, copy_src);
+                        },
+                        .SPLIT_FIELDS => {
+                            inline for (0..NUM_FIELDS) |FIDX| {
+                                const copy_src: [*]FieldTypeFidx(FIDX) = @ptrCast(remaining_self.get_field_ptr_const(@enumFromInt(FIDX), 0));
+                                const copy_dst: [*]FieldTypeFidx(FIDX) = @ptrCast(remaining_dest.get_field_ptr(@enumFromInt(FIDX), 0));
+                                @memcpy(copy_dst, copy_src);
+                            }
+                            remaining_self.incr_slice_start(copy_len);
+                            remaining_dest.incr_slice_start(copy_len);
+                        },
+                    }
+                    remaining_count -= copy_len;
+                }
+            } else {
+                var read_idx = self_start;
+                var write_idx = dest_start;
+                while (remaining_count > 0) {
+                    dest.set(write_idx, self.get(read_idx));
+                    read_idx += 1;
+                    write_idx += 1;
+                    remaining_count -= 1;
+                }
+            }
+        }
+        pub fn copy_self_range_to_dest_start(self: Self, self_start: IDX, self_end_exclusive: IDX, dest_: anytype) void {
+            const dest = coerce_anytype(dest_);
+            self.copy_self_range_to_dest_range(self_start, self_end_exclusive, dest, 0);
+        }
+        pub fn copy_self_range_to_dest_end(self: Self, self_start: IDX, self_end_exclusive: IDX, dest_: anytype) void {
+            const dest = coerce_anytype(dest_);
+            self.copy_self_range_to_dest_range(self_start, self_end_exclusive, dest, dest.data_len - @as(@TypeOf(dest.data_len), self_end_exclusive - self_start));
+        }
+        pub fn copy_self_range_to_dest_appended_end(self: Self, self_start: IDX, self_end_exclusive: IDX, dest_: anytype, dest_alloc: Allocator) void {
+            var dest = coerce_anytype_to_ptr(dest_);
+            const dest_start = dest.append_many_slots_get_idx(dest_alloc);
+            self.copy_self_range_to_dest_range(self_start, self_end_exclusive, dest.*, dest_start);
+            dest_.* = dest.*;
+        }
+        pub fn copy_self_range_to_dest_appended_end_assume_cap(self: Self, self_start: IDX, self_end_exclusive: IDX, dest_: anytype) void {
+            var dest = coerce_anytype_to_ptr(dest_);
+            const dest_start = dest.append_many_slots_assume_cap_get_idx();
+            self.copy_self_range_to_dest_range(self_start, self_end_exclusive, dest.*, dest_start);
+            dest_.* = dest.*;
+        }
+        pub fn copy_self_range_to_dest_prepended_start(self: Self, self_start: IDX, self_end_exclusive: IDX, dest_: anytype, dest_alloc: Allocator) void {
+            var dest = coerce_anytype_to_ptr(dest_);
+            const dest_start = dest.prepend_many_slots_get_idx(dest_alloc);
+            self.copy_self_range_to_dest_range(self_start, self_end_exclusive, dest.*, dest_start);
+            dest_.* = dest.*;
+        }
+        pub fn copy_self_range_to_dest_prepended_start_assume_cap(self: Self, self_start: IDX, self_end_exclusive: IDX, dest_: anytype) void {
+            var dest = coerce_anytype_to_ptr(dest_);
+            const dest_start = dest.prepend_many_slots_assume_cap_get_idx();
+            self.copy_self_range_to_dest_range(self_start, self_end_exclusive, dest.*, dest_start);
+            dest_.* = dest.*;
+        }
+        pub fn copy_self_start_to_dest_range(self: Self, count: IDX, dest_: anytype, dest_start: anytype) void {
+            const dest = coerce_anytype(dest_);
+            self.copy_self_range_to_dest_range(0, count, dest, dest_start);
+        }
+        pub fn copy_self_start_to_dest_start(self: Self, count: IDX, dest_: anytype) void {
+            const dest = coerce_anytype(dest_);
+            self.copy_self_range_to_dest_range(0, count, dest, 0);
+        }
+        pub fn copy_self_start_to_dest_end(self: Self, count: IDX, dest_: anytype) void {
+            const dest = coerce_anytype(dest_);
+            self.copy_self_range_to_dest_range(0, count, dest, dest.data_len - @as(@TypeOf(dest.data_len), count));
+        }
+        pub fn copy_self_start_to_dest_appended_end(self: Self, count: IDX, dest_: anytype, dest_alloc: Allocator) void {
+            var dest = coerce_anytype_to_ptr(dest_);
+            const dest_start = dest.append_many_slots_get_idx(dest_alloc);
+            self.copy_self_range_to_dest_range(0, count, dest.*, dest_start);
+            dest_.* = dest.*;
+        }
+        pub fn copy_self_start_to_dest_appended_end_assume_cap(self: Self, count: IDX, dest_: anytype) void {
+            var dest = coerce_anytype_to_ptr(dest_);
+            const dest_start = dest.append_many_slots_assume_cap_get_idx();
+            self.copy_self_range_to_dest_range(0, count, dest.*, dest_start);
+            dest_.* = dest.*;
+        }
+        pub fn copy_self_start_to_dest_prepended_start(self: Self, count: IDX, dest_: anytype, dest_alloc: Allocator) void {
+            var dest = coerce_anytype_to_ptr(dest_);
+            const dest_start = dest.prepend_many_slots_get_idx(dest_alloc);
+            self.copy_self_range_to_dest_range(0, count, dest.*, dest_start);
+            dest_.* = dest.*;
+        }
+        pub fn copy_self_start_to_dest_prepended_start_assume_cap(self: Self, count: IDX, dest_: anytype) void {
+            var dest = coerce_anytype_to_ptr(dest_);
+            const dest_start = dest.prepend_many_slots_assume_cap_get_idx();
+            self.copy_self_range_to_dest_range(0, count, dest.*, dest_start);
+            dest_.* = dest.*;
+        }
+        pub fn copy_self_end_to_dest_range(self: Self, count: IDX, dest_: anytype, dest_start: anytype) void {
+            const dest = coerce_anytype(dest_);
+            self.copy_self_range_to_dest_range(self.data_len - count, self.data_len, dest, dest_start);
+        }
+        pub fn copy_self_end_to_dest_start(self: Self, count: IDX, dest_: anytype) void {
+            const dest = coerce_anytype(dest_);
+            self.copy_self_range_to_dest_range(self.data_len - count, self.data_len, dest, 0);
+        }
+        pub fn copy_self_end_to_dest_end(self: Self, count: IDX, dest_: anytype) void {
+            const dest = coerce_anytype(dest_);
+            self.copy_self_range_to_dest_range(self.data_len - count, self.data_len, dest, dest.data_len - @as(@TypeOf(dest.data_len), count));
+        }
+        pub fn copy_self_end_to_dest_appended_end(self: Self, count: IDX, dest_: anytype, dest_alloc: Allocator) void {
+            var dest = coerce_anytype_to_ptr(dest_);
+            const dest_start = dest.append_many_slots_get_idx(dest_alloc);
+            self.copy_self_range_to_dest_range(self.data_len - count, self.data_len, dest.*, dest_start);
+            dest_.* = dest.*;
+        }
+        pub fn copy_self_end_to_dest_appended_end_assume_cap(self: Self, count: IDX, dest_: anytype) void {
+            var dest = coerce_anytype_to_ptr(dest_);
+            const dest_start = dest.append_many_slots_assume_cap_get_idx();
+            self.copy_self_range_to_dest_range(self.data_len - count, self.data_len, dest.*, dest_start);
+            dest_.* = dest.*;
+        }
+        pub fn copy_self_end_to_dest_prepended_start(self: Self, count: IDX, dest_: anytype, dest_alloc: Allocator) void {
+            var dest = coerce_anytype_to_ptr(dest_);
+            const dest_start = dest.prepend_many_slots_get_idx(dest_alloc);
+            self.copy_self_range_to_dest_range(self.data_len - count, self.data_len, dest.*, dest_start);
+            dest_.* = dest.*;
+        }
+        pub fn copy_self_end_to_dest_prepended_start_assume_cap(self: Self, count: IDX, dest_: anytype) void {
+            var dest = coerce_anytype_to_ptr(dest_);
+            const dest_start = dest.prepend_many_slots_assume_cap_get_idx();
+            self.copy_self_range_to_dest_range(self.data_len - count, self.data_len, dest.*, dest_start);
+            dest_.* = dest.*;
+        }
         //************
         // APPEND ONE
         //************
@@ -1118,11 +1532,17 @@ pub fn ListFullDefinition(comptime T: type, comptime IDX: type, comptime FIELD_L
             return first_idx;
         }
         fn append_one_slot_internal(self: *Self, comptime ALLOC: AllocMode, alloc: Allocator, comptime GROWTH_MODE: GrowthMode, growth: Growth, comptime RETURN: ReturnMode) RETURN.RetType(ElemPtr, IDX) {
-            const last_idx = self.append_idxs_internal(1, ALLOC, alloc, GROWTH_MODE, growth);
-            switch (comptime INDEX_LAYOUT) {
-                .SERIAL_INDEXES => {},
+            var first_new_idx: IDX = undefined;
+            if (comptime IS_REFERENCE and HAS_START_OFFSET) {
+                first_new_idx = self.data_len;
+                self.incr_slice_end(1);
+            } else {
+                first_new_idx = self.append_idxs_internal(1, ALLOC, alloc, GROWTH_MODE, growth);
+                switch (comptime INDEX_LAYOUT) {
+                    .SERIAL_INDEXES => {},
+                }
             }
-            return RETURN.ret_val(ElemPtr, IDX, if (comptime RETURN.returns_ptr()) self.get_ptr(last_idx) else undefined, last_idx);
+            return RETURN.ret_val(ElemPtr, IDX, if (comptime RETURN.returns_ptr()) self.get_ptr(first_new_idx) else undefined, first_new_idx);
         }
         pub inline fn append_one_slot_assume_cap_get_ptr(self: *Self) ElemPtr {
             return self.append_one_slot_internal(.ASSUME_CAP, dummy_alloc, .DEFAULT_GROWTH, .GROW_EXACT_NEEDED, .RETURN_PTR);
@@ -1220,16 +1640,130 @@ pub fn ListFullDefinition(comptime T: type, comptime IDX: type, comptime FIELD_L
         //*************
         // APPEND MANY
         //*************
-        // TODO: Append many
+        fn append_many_slots_internal(self: *Self, count: IDX, comptime ALLOC: AllocMode, alloc: Allocator, comptime GROWTH_MODE: GrowthMode, growth: Growth, comptime RETURN: ReturnMode) RETURN.RetType(Slice, IDX) {
+            var first_new_idx: IDX = undefined;
+            if (comptime IS_REFERENCE and HAS_START_OFFSET) {
+                first_new_idx = self.data_len;
+                self.incr_slice_end(count);
+            } else {
+                first_new_idx = self.append_idxs_internal(count, ALLOC, alloc, GROWTH_MODE, growth);
+                switch (comptime INDEX_LAYOUT) {
+                    .SERIAL_INDEXES => {},
+                }
+            }
+            return RETURN.ret_val(Slice, IDX, if (comptime RETURN.returns_ptr()) self.slice(first_new_idx, self.data_len) else undefined, first_new_idx);
+        }
+        pub inline fn append_many_slots_assume_cap_get_slice(self: *Self) Slice {
+            return self.append_many_slots_internal(.ASSUME_CAP, dummy_alloc, .DEFAULT_GROWTH, .GROW_EXACT_NEEDED, .RETURN_PTR);
+        }
+        pub inline fn append_many_slots_with_growth_get_slice(self: *Self, growth: Growth, alloc: Allocator) Slice {
+            return self.append_many_slots_internal(.REALLOC, alloc, .CUSTOM_GROWTH, growth, .RETURN_PTR);
+        }
+        pub inline fn append_many_slots_get_slice(self: *Self, alloc: Allocator) Slice {
+            return self.append_many_slots_internal(.REALLOC, alloc, .DEFAULT_GROWTH, .GROW_BY_25_PERCENT, .RETURN_PTR);
+        }
+        pub inline fn append_many_slots_assume_cap_get_slice_idx(self: *Self) struct { Slice, IDX } {
+            return self.append_many_slots_internal(.ASSUME_CAP, dummy_alloc, .DEFAULT_GROWTH, .GROW_EXACT_NEEDED, .RETURN_PTR_IDX);
+        }
+        pub inline fn append_many_slots_with_growth_get_slice_idx(self: *Self, growth: Growth, alloc: Allocator) struct { Slice, IDX } {
+            return self.append_many_slots_internal(.REALLOC, alloc, .CUSTOM_GROWTH, growth, .RETURN_PTR_IDX);
+        }
+        pub inline fn append_many_slots_get_slice_idx(self: *Self, alloc: Allocator) struct { Slice, IDX } {
+            return self.append_many_slots_internal(.REALLOC, alloc, .DEFAULT_GROWTH, .GROW_BY_25_PERCENT, .RETURN_PTR_IDX);
+        }
+        pub inline fn append_many_slots_assume_cap_get_idx(self: *Self) IDX {
+            return self.append_many_slots_internal(.ASSUME_CAP, dummy_alloc, .DEFAULT_GROWTH, .GROW_EXACT_NEEDED, .RETURN_IDX);
+        }
+        pub inline fn append_many_slots_with_growth_get_idx(self: *Self, growth: Growth, alloc: Allocator) IDX {
+            return self.append_many_slots_internal(.REALLOC, alloc, .CUSTOM_GROWTH, growth, .RETURN_IDX);
+        }
+        pub inline fn append_many_slots_get_idx(self: *Self, alloc: Allocator) IDX {
+            return self.append_many_slots_internal(.REALLOC, alloc, .DEFAULT_GROWTH, .GROW_BY_25_PERCENT, .RETURN_IDX);
+        }
+        pub inline fn append_many_slots_assume_cap(self: *Self) void {
+            return self.append_many_slots_internal(.ASSUME_CAP, dummy_alloc, .DEFAULT_GROWTH, .GROW_EXACT_NEEDED, .RETURN_VOID);
+        }
+        pub inline fn append_many_slots_with_growth(self: *Self, growth: Growth, alloc: Allocator) void {
+            return self.append_many_slots_internal(.REALLOC, alloc, .CUSTOM_GROWTH, growth, .RETURN_VOID);
+        }
+        pub inline fn append_many_slots(self: *Self, alloc: Allocator) void {
+            return self.append_many_slots_internal(.REALLOC, alloc, .DEFAULT_GROWTH, .GROW_BY_25_PERCENT, .RETURN_VOID);
+        }
+        pub inline fn append_many_assume_cap_get_ptr(self: *Self, vals_: anytype) Slice {
+            assert_goolib_list_with_elem(@TypeOf(vals_), T, @src());
+            const vals = coerce_anytype(vals_);
+            const self_start = self.get_len();
+            vals.copy_self_range_to_dest_appended_end_assume_cap(0, vals.get_len(), self);
+            return self.slice(self_start, self.get_len());
+        }
+        pub inline fn append_many_with_growth_get_ptr(self: *Self, vals_: anytype, growth: Growth, alloc: Allocator) Slice {
+            assert_goolib_list_with_elem(@TypeOf(vals_), T, @src());
+            const vals = coerce_anytype(vals_);
+            const self_start = self.get_len();
+            //CHECKPOINT incorporate GROWTH
+            vals.copy_self_range_to_dest_appended_end_assume_cap(0, vals.get_len(), self);
+            return self.slice(self_start, self.get_len());
+        }
+        pub inline fn append_many_get_ptr(self: *Self, vals: anytype, alloc: Allocator) Slice {
+            const elem_slice = self.append_one_slot_internal(.REALLOC, alloc, .DEFAULT_GROWTH, .GROW_BY_25_PERCENT, .RETURN_PTR);
+            assign_val_to_elem_ptr(elem_ptr, val);
+            return elem_slice;
+        }
+        pub inline fn append_many_assume_cap_get_ptr_idx(self: *Self, vals: anytype) struct { Slice, IDX } {
+            const elem_slice, const slot_idx = self.append_one_slot_internal(.ASSUME_CAP, dummy_alloc, .DEFAULT_GROWTH, .GROW_EXACT_NEEDED, .RETURN_PTR_IDX);
+            assign_val_to_elem_ptr(elem_ptr, val);
+            return .{ elem_slice, slot_idx };
+        }
+        pub inline fn append_many_with_growth_get_ptr_idx(self: *Self, vals: anytype, growth: Growth, alloc: Allocator) struct { Slice, IDX } {
+            const elem_slice, const slot_idx = self.append_one_slot_internal(.REALLOC, alloc, .CUSTOM_GROWTH, growth, .RETURN_PTR_IDX);
+            assign_val_to_elem_ptr(elem_ptr, val);
+            return .{ elem_slice, slot_idx };
+        }
+        pub inline fn append_many_get_ptr_idx(self: *Self, vals: anytype, alloc: Allocator) struct { Slice, IDX } {
+            const elem_slice, const slot_idx = self.append_one_slot_internal(.REALLOC, alloc, .DEFAULT_GROWTH, .GROW_BY_25_PERCENT, .RETURN_PTR_IDX);
+            assign_val_to_elem_ptr(elem_ptr, val);
+            return .{ elem_slice, slot_idx };
+        }
+        pub inline fn append_many_assume_cap_get_idx(self: *Self, vals: anytype) IDX {
+            const slot_idx = self.append_one_slot_internal(.ASSUME_CAP, dummy_alloc, .DEFAULT_GROWTH, .GROW_EXACT_NEEDED, .RETURN_IDX);
+            self.set_true_idx(self.true_idx(slot_idx), val);
+            return slot_idx;
+        }
+        pub inline fn append_many_with_growth_get_idx(self: *Self, vals: anytype, growth: Growth, alloc: Allocator) IDX {
+            const slot_idx = self.append_one_slot_internal(.REALLOC, alloc, .CUSTOM_GROWTH, growth, .RETURN_IDX);
+            self.set_true_idx(self.true_idx(slot_idx), val);
+            return slot_idx;
+        }
+        pub inline fn append_many_get_idx(self: *Self, vals: anytype, alloc: Allocator) IDX {
+            const slot_idx = self.append_one_slot_internal(.REALLOC, alloc, .DEFAULT_GROWTH, .GROW_BY_25_PERCENT, .RETURN_IDX);
+            self.set_true_idx(self.true_idx(slot_idx), val);
+            return slot_idx;
+        }
+        pub inline fn append_many_assume_cap(self: *Self, vals: anytype) void {
+            const slot_idx = self.append_one_slot_internal(.ASSUME_CAP, dummy_alloc, .DEFAULT_GROWTH, .GROW_EXACT_NEEDED, .RETURN_IDX);
+            self.set_true_idx(self.true_idx(slot_idx), val);
+        }
+        pub inline fn append_many_with_growth(self: *Self, vals: anytype, growth: Growth, alloc: Allocator) void {
+            const slot_idx = self.append_one_slot_internal(.REALLOC, alloc, .CUSTOM_GROWTH, growth, .RETURN_IDX);
+            self.set_true_idx(self.true_idx(slot_idx), val);
+        }
+        pub inline fn append_many(self: *Self, vals: anytype, alloc: Allocator) void {
+            const slot_idx = self.append_one_slot_internal(.REALLOC, alloc, .DEFAULT_GROWTH, .GROW_BY_25_PERCENT, .RETURN_IDX);
+            self.set_true_idx(self.true_idx(slot_idx), val);
+        }
         //*************
         // PREPEND ONE
         //*************
         fn prepend_one_slot_internal(self: *Self, comptime ALLOC: AllocMode, alloc: Allocator, comptime GROWTH_MODE: GrowthMode, growth: Growth, comptime RETURN: ReturnMode) RETURN.RetType(ElemPtr, IDX) {
-            const last_idx = self.append_idxs_internal(1, ALLOC, alloc, GROWTH_MODE, growth);
-            switch (comptime INDEX_LAYOUT) {
-                .SERIAL_INDEXES => {
-                    self.move_one_left_displace_internal(last_idx, 0);
-                },
+            if (comptime IS_REFERENCE and HAS_START_OFFSET) {
+                self.decr_slice_start(1);
+            } else {
+                const last_idx = self.append_idxs_internal(1, ALLOC, alloc, GROWTH_MODE, growth);
+                switch (comptime INDEX_LAYOUT) {
+                    .SERIAL_INDEXES => {
+                        self.move_one_left_displace_internal(last_idx, 0);
+                    },
+                }
             }
             return RETURN.ret_val(ElemPtr, IDX, if (comptime RETURN.returns_ptr()) self.get_ptr(0) else undefined, 0);
         }
@@ -1281,7 +1815,55 @@ pub fn ListFullDefinition(comptime T: type, comptime IDX: type, comptime FIELD_L
         //**************
         // PREPEND MANY
         //**************
-        // TODO: Prepend many
+        fn prepend_many_slots_internal(self: *Self, count: IDX, comptime ALLOC: AllocMode, alloc: Allocator, comptime GROWTH_MODE: GrowthMode, growth: Growth, comptime RETURN: ReturnMode) RETURN.RetType(Slice, IDX) {
+            if (comptime IS_REFERENCE and HAS_START_OFFSET) {
+                self.decr_slice_start(count);
+            } else {
+                const last_idx = self.append_idxs_internal(count, ALLOC, alloc, GROWTH_MODE, growth);
+                switch (comptime INDEX_LAYOUT) {
+                    .SERIAL_INDEXES => {
+                        self.move_one_left_displace_internal(last_idx, 0);
+                    },
+                }
+            }
+            return RETURN.ret_val(Slice, IDX, if (comptime RETURN.returns_ptr()) self.slice(0, count) else undefined, 0);
+        }
+        pub inline fn prepend_many_slots_assume_cap_get_slice(self: *Self) Slice {
+            return self.prepend_many_slots_internal(.ASSUME_CAP, dummy_alloc, .DEFAULT_GROWTH, .GROW_EXACT_NEEDED, .RETURN_PTR);
+        }
+        pub inline fn prepend_many_slots_with_growth_get_slice(self: *Self, growth: Growth, alloc: Allocator) Slice {
+            return self.prepend_many_slots_internal(.REALLOC, alloc, .CUSTOM_GROWTH, growth, .RETURN_PTR);
+        }
+        pub inline fn prepend_many_slots_get_slice(self: *Self, alloc: Allocator) Slice {
+            return self.prepend_many_slots_internal(.REALLOC, alloc, .DEFAULT_GROWTH, .GROW_BY_25_PERCENT, .RETURN_PTR);
+        }
+        pub inline fn prepend_many_slots_assume_cap_get_slice_idx(self: *Self) struct { Slice, IDX } {
+            return self.prepend_many_slots_internal(.ASSUME_CAP, dummy_alloc, .DEFAULT_GROWTH, .GROW_EXACT_NEEDED, .RETURN_PTR_IDX);
+        }
+        pub inline fn prepend_many_slots_with_growth_get_slice_idx(self: *Self, growth: Growth, alloc: Allocator) struct { Slice, IDX } {
+            return self.prepend_many_slots_internal(.REALLOC, alloc, .CUSTOM_GROWTH, growth, .RETURN_PTR_IDX);
+        }
+        pub inline fn prepend_many_slots_get_slice_idx(self: *Self, alloc: Allocator) struct { Slice, IDX } {
+            return self.prepend_many_slots_internal(.REALLOC, alloc, .DEFAULT_GROWTH, .GROW_BY_25_PERCENT, .RETURN_PTR_IDX);
+        }
+        pub inline fn prepend_many_slots_assume_cap_get_idx(self: *Self) IDX {
+            return self.prepend_many_slots_internal(.ASSUME_CAP, dummy_alloc, .DEFAULT_GROWTH, .GROW_EXACT_NEEDED, .RETURN_IDX);
+        }
+        pub inline fn prepend_many_slots_with_growth_get_idx(self: *Self, growth: Growth, alloc: Allocator) IDX {
+            return self.prepend_many_slots_internal(.REALLOC, alloc, .CUSTOM_GROWTH, growth, .RETURN_IDX);
+        }
+        pub inline fn prepend_many_slots_get_idx(self: *Self, alloc: Allocator) IDX {
+            return self.prepend_many_slots_internal(.REALLOC, alloc, .DEFAULT_GROWTH, .GROW_BY_25_PERCENT, .RETURN_IDX);
+        }
+        pub inline fn prepend_many_slots_assume_cap(self: *Self) void {
+            return self.prepend_many_slots_internal(.ASSUME_CAP, dummy_alloc, .DEFAULT_GROWTH, .GROW_EXACT_NEEDED, .RETURN_VOID);
+        }
+        pub inline fn prepend_many_slots_with_growth(self: *Self, growth: Growth, alloc: Allocator) void {
+            return self.prepend_many_slots_internal(.REALLOC, alloc, .CUSTOM_GROWTH, growth, .RETURN_VOID);
+        }
+        pub inline fn prepend_many_slots(self: *Self, alloc: Allocator) void {
+            return self.prepend_many_slots_internal(.REALLOC, alloc, .DEFAULT_GROWTH, .GROW_BY_25_PERCENT, .RETURN_VOID);
+        }
         //**************
         // INSERT ONE
         //**************
@@ -1293,11 +1875,17 @@ pub fn ListFullDefinition(comptime T: type, comptime IDX: type, comptime FIELD_L
                 return self.prepend_one_slot_internal(ALLOC, alloc, GROWTH_MODE, growth, RETURN);
             } else {
                 self.assert_valid_idx(idx, @src());
-                const last_idx = self.append_idxs_internal(1, ALLOC, alloc, GROWTH_MODE, growth);
-                switch (comptime INDEX_LAYOUT) {
-                    .SERIAL_INDEXES => {
-                        self.move_one_left_displace_internal(last_idx, idx);
-                    },
+                var first_new_idx: IDX = undefined;
+                if (comptime IS_REFERENCE and HAS_START_OFFSET) {
+                    first_new_idx = self.data_len;
+                    self.incr_slice_end(1);
+                } else {
+                    first_new_idx = self.append_idxs_internal(1, ALLOC, alloc, GROWTH_MODE, growth);
+                    switch (comptime INDEX_LAYOUT) {
+                        .SERIAL_INDEXES => {
+                            self.move_one_left_displace_internal(first_new_idx, idx);
+                        },
+                    }
                 }
                 return RETURN.ret_val(ElemPtr, IDX, if (comptime RETURN.returns_ptr()) self.get_ptr(idx) else undefined, idx);
             }
