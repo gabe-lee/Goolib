@@ -26,6 +26,7 @@ const build = @import("builtin");
 /// std imports
 const Allocator = std.mem.Allocator;
 const DEBUG = std.debug.print;
+const math = std.math;
 
 /// Goolib imports
 const Root = @import("./_root.zig");
@@ -94,6 +95,16 @@ pub const Ownership = enum {
     OWNED_ALLOCATED,
     REFERENCED_MUTABLE,
     REFERENCED_IMMUTABLE,
+};
+
+pub const SortOrder = enum(u8) {
+    NORMAL,
+    REVERSE,
+};
+
+pub const HeapKind = enum(u8) {
+    MIN_HEAP,
+    MAX_HEAP,
 };
 
 const ReturnMode = enum {
@@ -276,13 +287,23 @@ pub fn ListFullDefinition(comptime ELEM: type, comptime IDX: type, comptime FIEL
                 return TrueIdx{ .idx = idx };
             }
         };
+        pub const IdxElemPair = struct { IDX, ELEM };
 
         // Root memory region
+        /// The root memory pointer of the memory region
         root_ptr: MemPtr = undefined,
+        /// The root capacity of the memory region
         root_cap: IDX = 0,
+        /// The offset from the root pointer that represents
+        /// the 'first' element in the data. For example, this would be used
+        /// in a Ring Buffer configuration, to denote the current starting position
+        /// where index `0` sits
         root_offset: if (HAS_ROOT_OFFSET) IDX else void = if (HAS_ROOT_OFFSET) 0 else void{},
         // Usable data slice
+        /// The length of the data, either its entirety or as a slice
         data_len: IDX = 0,
+        /// If the list is a slice, this is the offset from index
+        /// `0` where the slice starts
         slice_offset: if (IS_REFERENCE) IDX else void = if (IS_REFERENCE) 0 else void{},
 
         //****************
@@ -299,9 +320,12 @@ pub fn ListFullDefinition(comptime ELEM: type, comptime IDX: type, comptime FIEL
         }
         fn assert_valid_range(self: Self, start: IDX, end_exclusive: IDX, comptime src: ?std.builtin.SourceLocation) void {
             assert_with_reason(start <= end_exclusive, src, "start index is after end index exclusive ({d} > {d})", .{ start, end_exclusive });
-            assert_with_reason(start <= self.get_len(), src, "start index is after data len ({d} > {d})", .{ start, self.get_len() });
             assert_with_reason(end_exclusive <= self.get_len(), src, "end_exclusive index is after data len ({d} > {d})", .{ end_exclusive, self.get_len() });
-            assert_with_reason((start == end_exclusive) or (start < self.get_len()), src, "start index is out of bounds for len ({d} >= {d})", .{ start, self.get_len() });
+        }
+        fn assert_valid_range_3(self: Self, start: IDX, middle: IDX, end_exclusive: IDX, comptime src: ?std.builtin.SourceLocation) void {
+            assert_with_reason(start <= middle, src, "start index is after middle index ({d} > {d})", .{ start, middle });
+            assert_with_reason(middle <= end_exclusive, src, "middle index is after end_exclusive index ({d} > {d})", .{ middle, end_exclusive });
+            assert_with_reason(end_exclusive <= self.get_len(), src, "end_exclusive index is after data len ({d} > {d})", .{ end_exclusive, self.get_len() });
         }
         fn assert_valid_idx_or_len(self: Self, idx: IDX, comptime src: ?std.builtin.SourceLocation) void {
             assert_with_reason(idx <= self.data_len, src, "index `{d}` is out of bounds (len = {d})", .{ idx, self.data_len });
@@ -544,6 +568,52 @@ pub fn ListFullDefinition(comptime ELEM: type, comptime IDX: type, comptime FIEL
                 },
                 .COMPTIME_FN_BODY, .COMPTIME_FN_PTR => {
                     return FILTER(self, idx, filter_ctx, FILTER_CTX);
+                },
+            }
+        }
+        inline fn CompareIdxIdxFnRt(comptime KIND: FuncParamType, comptime RT_CTX: type, comptime CT_CTX: type) type {
+            return switch (comptime KIND) {
+                .RUNTIME_FN_PTR => *const fn (Self, IDX, IDX, RT_CTX, CT_CTX) bool,
+                .COMPTIME_FN_BODY, .COMPTIME_FN_PTR => void,
+            };
+        }
+        inline fn CompareIdxIdxFnCt(comptime KIND: FuncParamType, comptime RT_CTX: type, comptime CT_CTX: type) type {
+            return switch (comptime KIND) {
+                .RUNTIME_FN_PTR => void,
+                .COMPTIME_FN_BODY => fn (Self, IDX, IDX, RT_CTX, comptime CT_CTX) bool,
+                .COMPTIME_FN_PTR => *const fn (Self, IDX, IDX, RT_CTX, comptime CT_CTX) bool,
+            };
+        }
+        inline fn eval_compare_idx_idx(self: Self, idx_a: IDX, idx_b: IDX, comptime KIND: FuncParamType, compare_ctx: anytype, comptime COMPARE_CTX: anytype, compare: CompareIdxIdxFnRt(KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)), comptime COMPARE: CompareIdxIdxFnCt(KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX))) bool {
+            switch (comptime KIND) {
+                .RUNTIME_FN_PTR => {
+                    return compare(self, idx_a, idx_b, compare_ctx, COMPARE_CTX);
+                },
+                .COMPTIME_FN_BODY, .COMPTIME_FN_PTR => {
+                    return COMPARE(self, idx_a, idx_b, compare_ctx, COMPARE_CTX);
+                },
+            }
+        }
+        inline fn CompareIdxValFnRt(comptime KIND: FuncParamType, comptime RT_CTX: type, comptime CT_CTX: type) type {
+            return switch (comptime KIND) {
+                .RUNTIME_FN_PTR => *const fn (Self, IDX, ELEM, RT_CTX, CT_CTX) bool,
+                .COMPTIME_FN_BODY, .COMPTIME_FN_PTR => void,
+            };
+        }
+        inline fn CompareIdxValFnCt(comptime KIND: FuncParamType, comptime RT_CTX: type, comptime CT_CTX: type) type {
+            return switch (comptime KIND) {
+                .RUNTIME_FN_PTR => void,
+                .COMPTIME_FN_BODY => fn (Self, IDX, ELEM, RT_CTX, comptime CT_CTX) bool,
+                .COMPTIME_FN_PTR => *const fn (Self, IDX, ELEM, RT_CTX, comptime CT_CTX) bool,
+            };
+        }
+        inline fn eval_compare_idx_val(self: Self, idx_a: IDX, val_b: ELEM, comptime KIND: FuncParamType, compare_ctx: anytype, comptime COMPARE_CTX: anytype, compare: CompareIdxValFnRt(KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)), comptime COMPARE: CompareIdxValFnCt(KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX))) bool {
+            switch (comptime KIND) {
+                .RUNTIME_FN_PTR => {
+                    return compare(self, idx_a, val_b, compare_ctx, COMPARE_CTX);
+                },
+                .COMPTIME_FN_BODY, .COMPTIME_FN_PTR => {
+                    return COMPARE(self, idx_a, val_b, compare_ctx, COMPARE_CTX);
                 },
             }
         }
@@ -2577,15 +2647,22 @@ pub fn ListFullDefinition(comptime ELEM: type, comptime IDX: type, comptime FIEL
         ) IDX {
             return self.delete_filtered_internal(0, self.get_len(), .SWAP, .RETURN_VAL, .REALLOC, dest, dest_alloc, dest_growth, filter_ctx, FILTER_CTX, FILTER_FUNC_KIND, filter, FILTER);
         }
-        /// Elements MUST be laid out in a 'n-ary flat array tree'
-        pub fn tree__parent_idx_unchecked(self: Self, idx: IDX, max_num_children_per_element: IDX) IDX {
+        //*****************
+        // ROOT FLAT TREE
+        //*****************
+        /// Elements MUST be laid out in a 'n-ary flat array tree',
+        /// starting at the root of the data
+        /// and it is expected that if the data is a slice, it spans
+        /// the entire data length
+        pub fn root_tree__parent_idx_unchecked(self: Self, idx: IDX, max_num_children_per_element: IDX) IDX {
             const new_idx_ = self.slice_idx_to_root_idx(idx);
             return self.root_idx_to_slice_idx(@divFloor(new_idx_ - 1, max_num_children_per_element));
         }
         /// Elements MUST be laid out in a 'n-ary flat array tree'
-        /// 
-        /// the `if_exists` condition does not consider slices that do not start at
-        pub fn tree__parent_idx_if_exists(self: Self, idx: IDX, max_num_children_per_element: IDX) ?IDX {
+        /// starting at the root of the data
+        /// and it is expected that if the data is a slice, it spans
+        /// the entire data length
+        pub fn root_tree__parent_idx_if_exists(self: Self, idx: IDX, max_num_children_per_element: IDX) ?IDX {
             self.assert_valid_idx(idx, @src());
             var new_idx = self.slice_idx_to_root_idx(idx);
             if (new_idx == 0) return null;
@@ -2593,18 +2670,159 @@ pub fn ListFullDefinition(comptime ELEM: type, comptime IDX: type, comptime FIEL
             return self.root_idx_to_slice_idx(new_idx);
         }
         /// Elements MUST be laid out in a 'n-ary flat array tree'
-        pub fn tree__nth_child_idx_unchecked(self: Self, idx: IDX, max_num_children_per_element: IDX, nth_child: IDX) IDX {
+        /// starting at the root of the data
+        /// and it is expected that if the data is a slice, it spans
+        /// the entire data length
+        pub fn root_tree__nth_child_idx_unchecked(self: Self, idx: IDX, max_num_children_per_element: IDX, nth_child: IDX) IDX {
             const new_idx_ = self.slice_idx_to_root_idx(idx);
             return self.root_idx_to_slice_idx((new_idx_ * max_num_children_per_element) + nth_child + 1);
         }
         /// Elements MUST be laid out in a 'n-ary flat array tree'
-        pub fn tree__nth_child_idx_if_exists(self: Self, idx: IDX, max_num_children_per_element: IDX, nth_child: IDX) ?IDX {
+        /// starting at the root of the data
+        /// and it is expected that if the data is a slice, it spans
+        /// the entire data length
+        pub fn root_tree__nth_child_idx_if_exists(self: Self, idx: IDX, max_num_children_per_element: IDX, nth_child: IDX) ?IDX {
             self.assert_valid_idx(idx, @src());
             assert_with_reason(nth_child < max_num_children_per_element, @src(), "nth_child ({d}) exceeds maximum children per element ({d})", .{ nth_child, max_num_children_per_element });
             var new_idx_ = self.slice_idx_to_root_idx(idx);
             new_idx_ = self.root_idx_to_slice_idx((new_idx_ * max_num_children_per_element) + nth_child + 1);
             if (new_idx_ >= self.get_len()) return null;
             return new_idx_;
+        }
+        /// Elements MUST be laid out in a 'n-ary flat array tree'
+        /// starting at the root of the data
+        /// and it is expected that if the data is a slice, it spans
+        /// the entire data length
+        pub fn root_tree__first_child_idx_unchecked(self: Self, idx: IDX, max_num_children_per_element: IDX) IDX {
+            return self.root_tree__nth_child_idx_unchecked(idx, max_num_children_per_element, 0);
+        }
+        /// Elements MUST be laid out in a 'n-ary flat array tree'
+        /// starting at the root of the data
+        /// and it is expected that if the data is a slice, it spans
+        /// the entire data length
+        pub fn root_tree__first_child_idx_if_exists(self: Self, idx: IDX, max_num_children_per_element: IDX) ?IDX {
+            return self.root_tree__nth_child_idx_if_exists(idx, max_num_children_per_element, 0);
+        }
+        /// Elements MUST be laid out in a 'n-ary flat array tree'
+        /// starting at the root of the data
+        /// and it is expected that if the data is a slice, it spans
+        /// the entire data length
+        pub fn root_tree__last_child_idx_unchecked(self: Self, idx: IDX, max_num_children_per_element: IDX) IDX {
+            return self.root_tree__nth_child_idx_unchecked(idx, max_num_children_per_element, max_num_children_per_element - 1);
+        }
+        /// Elements MUST be laid out in a 'n-ary flat array tree'
+        /// starting at the root of the data
+        /// and it is expected that if the data is a slice, it spans
+        /// the entire data length
+        pub fn root_tree__last_child_idx_if_exists(self: Self, idx: IDX, max_num_children_per_element: IDX) ?IDX {
+            return self.root_tree__nth_child_idx_if_exists(idx, max_num_children_per_element, max_num_children_per_element - 1);
+        }
+        //*****************
+        // LOCAL FLAT TREE
+        //*****************
+        /// Elements MUST be laid out in a 'n-ary flat array tree',
+        /// starting at the start of the slice
+        pub fn local_tree__parent_idx_unchecked(self: Self, idx: IDX, max_num_children_per_element: IDX) IDX {
+            return self.root_idx_to_slice_idx(@divFloor(idx - 1, max_num_children_per_element));
+        }
+        /// Elements MUST be laid out in a 'n-ary flat array tree'
+        /// starting at the start of the slice
+        pub fn local_tree__parent_idx_if_exists(self: Self, idx: IDX, max_num_children_per_element: IDX) ?IDX {
+            self.assert_valid_idx(idx, @src());
+            if (idx == 0) return null;
+            return @divFloor(idx - 1, max_num_children_per_element);
+        }
+        /// Elements MUST be laid out in a 'n-ary flat array tree'
+        /// starting at the start of the slice
+        pub fn local_tree__nth_child_idx_unchecked(self: Self, idx: IDX, max_num_children_per_element: IDX, nth_child: IDX) IDX {
+            return self.root_idx_to_slice_idx((idx * max_num_children_per_element) + nth_child + 1);
+        }
+        /// Elements MUST be laid out in a 'n-ary flat array tree'
+        /// starting at the start of the slice
+        pub fn local_tree__nth_child_idx_if_exists(self: Self, idx: IDX, max_num_children_per_element: IDX, nth_child: IDX) ?IDX {
+            self.assert_valid_idx(idx, @src());
+            assert_with_reason(nth_child < max_num_children_per_element, @src(), "nth_child ({d}) exceeds maximum children per element ({d})", .{ nth_child, max_num_children_per_element });
+            const new_idx = self.root_idx_to_slice_idx((idx * max_num_children_per_element) + nth_child + 1);
+            if (new_idx >= self.get_len()) return null;
+            return new_idx;
+        }
+        /// Elements MUST be laid out in a 'n-ary flat array tree'
+        /// starting at the start of the slice
+        pub fn local_tree__first_child_idx_unchecked(self: Self, idx: IDX, max_num_children_per_element: IDX) IDX {
+            return self.local_tree__nth_child_idx_unchecked(idx, max_num_children_per_element, 0);
+        }
+        /// Elements MUST be laid out in a 'n-ary flat array tree'
+        /// starting at the start of the slice
+        pub fn local_tree__first_child_idx_if_exists(self: Self, idx: IDX, max_num_children_per_element: IDX) ?IDX {
+            return self.local_tree__nth_child_idx_if_exists(idx, max_num_children_per_element, 0);
+        }
+        /// Elements MUST be laid out in a 'n-ary flat array tree'
+        /// starting at the start of the slice
+        pub fn local_tree__last_child_idx_unchecked(self: Self, idx: IDX, max_num_children_per_element: IDX) IDX {
+            return self.local_tree__nth_child_idx_unchecked(idx, max_num_children_per_element, max_num_children_per_element - 1);
+        }
+        /// Elements MUST be laid out in a 'n-ary flat array tree'
+        /// starting at the start of the slice
+        pub fn local_tree__last_child_idx_if_exists(self: Self, idx: IDX, max_num_children_per_element: IDX) ?IDX {
+            return self.local_tree__nth_child_idx_if_exists(idx, max_num_children_per_element, max_num_children_per_element - 1);
+        }
+        pub fn median_index_and_elem_of_3_indexes(self: Self, idxs_: [3]IDX) IdxElemPair {
+            var idxs = idxs_;
+            var tmp: IDX = undefined;
+            if (idxs[1] < idxs[0]) {
+                tmp = idxs[0];
+                idxs[0] = idxs[1];
+                idxs[1] = tmp;
+            }
+            if (idxs[2] < idxs[0]) {
+                tmp = idxs[0];
+                idxs[0] = idxs[2];
+                idxs[2] = tmp;
+            }
+            if (idxs[2] < idxs[1]) {
+                return .{ idxs[2], self.get(2) };
+            }
+            return .{ idxs[1], self.get(1) };
+        }
+
+        fn heap_sift_down_with_range_internal(
+            self: Self,
+            heap_first_idx: IDX,
+            heap_len: IDX,
+            idx: IDX,
+            compare_ctx: anytype,
+            comptime COMPARE_CTX: anytype,
+            comptime COMPARE_IDX_IDX_FN_KIND: FuncParamType,
+            higher_in_heap_idx: CompareIdxIdxFnRt(COMPARE_IDX_IDX_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
+            comptime HIGHER_IN_HEAP_IDX: CompareIdxIdxFnCt(COMPARE_IDX_IDX_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
+            comptime COMPARE_IDX_VAL_FN_KIND: FuncParamType,
+            higher_in_heap_val: CompareIdxValFnRt(COMPARE_IDX_VAL_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
+            comptime HIGHER_IN_HEAP_VAL: CompareIdxValFnCt(COMPARE_IDX_VAL_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
+        ) void {
+            self.assert_valid_range_3(heap_first_idx, idx, heap_first_idx + heap_len, @src());
+            var hole_idx: IDX = idx;
+            var hole_n: IDX = idx - heap_first_idx;
+            const target_val = self.get(idx);
+            const half_len = heap_len >> 1;
+            while (hole_n < half_len) {
+                var highest_child_n = (hole_n << 1) | 1; // Left child relative index
+                var highest_child_idx = heap_first_idx + highest_child_n; // Left child absolute index
+                const right_child_n = highest_child_n + 1;
+                if (right_child_n < heap_len) {
+                    const right_child_idx = highest_child_idx + 1;
+                    if (self.eval_compare_idx_idx(right_child_idx, highest_child_idx, COMPARE_IDX_IDX_FN_KIND, compare_ctx, COMPARE_CTX, higher_in_heap_idx, HIGHER_IN_HEAP_IDX)) {
+                        highest_child_n = right_child_n;
+                        highest_child_idx = right_child_idx;
+                    }
+                }
+                if (!self.eval_compare_idx_val(highest_child_idx, target_val, COMPARE_IDX_VAL_FN_KIND, compare_ctx, COMPARE_CTX, higher_in_heap_val, HIGHER_IN_HEAP_VAL)) {
+                    break;
+                }
+                self.move_one_overwrite(highest_child_idx, hole_idx);
+                hole_idx = highest_child_idx;
+                hole_n = highest_child_n;
+            }
+            self.set(hole_idx, target_val);
         }
     };
 }
