@@ -41,6 +41,7 @@ const dummy_alloc = Root.DummyAllocator.allocator_panic_free_noop;
 const Random = std.Random;
 const Io = std.Io;
 const Growth = Common.GrowthModel;
+const FuncParamType = Common.FuncParamType;
 
 const assert_with_reason = Assert.assert_with_reason;
 const assert_unreachable = Assert.assert_unreachable;
@@ -190,7 +191,6 @@ pub fn ListFullDefinition(comptime ELEM: type, comptime IDX: type, comptime FIEL
             else => break :get .{ [1][]const u8{"$SELF"}, [1]type{ELEM}, [2]IDX{ 0, @sizeOf(ELEM) }, @Enum(u1, .exhaustive, &.{"$SELF"}, &.{0}) },
         }
     };
-    // const _Y = _FIELD_INFO.
     return struct {
         const Self = @This();
         pub const GOOLIB_LIST_DEF = ListDef{
@@ -216,6 +216,9 @@ pub fn ListFullDefinition(comptime ELEM: type, comptime IDX: type, comptime FIEL
         const IS_OWNED_ALLOCATED = OWNERSHIP == .OWNED_ALLOCATED;
         const IS_REFERENCE = !IS_OWNED;
         const IS_CONST = OWNERSHIP == .REFERENCED_IMMUTABLE;
+        const HAS_ROOT_OFFSET = switch (INDEX_LAYOUT) {
+            .SERIAL_INDEXES => false,
+        };
         const IS_MUTABLE = !IS_CONST;
         const ENUM_INT = _E_INT;
         pub const Field = _FIELD_ENUM;
@@ -277,9 +280,10 @@ pub fn ListFullDefinition(comptime ELEM: type, comptime IDX: type, comptime FIEL
         // Root memory region
         root_ptr: MemPtr = undefined,
         root_cap: IDX = 0,
+        root_offset: if (HAS_ROOT_OFFSET) IDX else void = if (HAS_ROOT_OFFSET) 0 else void{},
         // Usable data slice
         data_len: IDX = 0,
-        data_offset: if (IS_REFERENCE) IDX else void = if (IS_REFERENCE) 0 else void{},
+        slice_offset: if (IS_REFERENCE) IDX else void = if (IS_REFERENCE) 0 else void{},
 
         //****************
         // ASSERT/UTILS
@@ -302,8 +306,8 @@ pub fn ListFullDefinition(comptime ELEM: type, comptime IDX: type, comptime FIEL
         fn assert_valid_idx_or_len(self: Self, idx: IDX, comptime src: ?std.builtin.SourceLocation) void {
             assert_with_reason(idx <= self.data_len, src, "index `{d}` is out of bounds (len = {d})", .{ idx, self.data_len });
         }
-        fn assert_count_less_equal_data_offset(self: Self, count: IDX, comptime src: ?std.builtin.SourceLocation) void {
-            assert_with_reason(count <= self.data_offset, src, "count `{d}` greater than data offset (offset = {d})", .{ count, self.data_offset });
+        fn assert_count_less_equal_slice_offset(self: Self, count: IDX, comptime src: ?std.builtin.SourceLocation) void {
+            assert_with_reason(count <= self.get_slice_offset(), src, "count `{d}` greater than slice offset (offset = {d})", .{ count, self.get_slice_offset() });
         }
         fn assert_count_less_equal_len(self: Self, count: IDX, comptime src: ?std.builtin.SourceLocation) void {
             assert_with_reason(count <= self.data_len, src, "count `{d}` is greater than len (len = {d})", .{ count, self.data_len });
@@ -424,15 +428,24 @@ pub fn ListFullDefinition(comptime ELEM: type, comptime IDX: type, comptime FIEL
         inline fn FieldTypeFidx(comptime fidx: usize) type {
             return ORDERED_FIELD_TYPES[fidx];
         }
-        inline fn get_start_offset(self: Self) IDX {
-            if (comptime IS_REFERENCE) return self.data_offset;
+        inline fn get_root_offset(self: Self) IDX {
+            if (comptime HAS_ROOT_OFFSET) return self.root_offset;
             return 0;
         }
-
+        inline fn get_slice_offset(self: Self) IDX {
+            if (comptime IS_REFERENCE) return self.slice_offset;
+            return 0;
+        }
         inline fn true_idx(self: Self, idx: IDX) TrueIdx {
             return switch (comptime INDEX_LAYOUT) {
-                .SERIAL_INDEXES => TrueIdx.new(idx + self.get_start_offset()),
+                .SERIAL_INDEXES => TrueIdx.new(idx + self.get_root_offset() + self.get_slice_offset()),
             };
+        }
+        inline fn slice_idx_to_root_idx(self: Self, idx: IDX) IDX {
+            return idx + self.get_slice_offset();
+        }
+        inline fn root_idx_to_slice_idx(self: Self, idx: IDX) IDX {
+            return idx - self.get_slice_offset();
         }
         inline fn assign_val_to_elem_ptr(elem_ptr: ElemPtr, val: ELEM) void {
             switch (comptime FIELD_LAYOUT) {
@@ -509,6 +522,30 @@ pub fn ListFullDefinition(comptime ELEM: type, comptime IDX: type, comptime FIEL
                 .@"struct" => .{coerce_anytype_to_list_with_same_elem_type(val_).V},
                 else => assert_unreachable(@src(), "type `{s}` cannot be coerced to a Goolib List with elem type `{s}`", .{ @typeName(@TypeOf(val_)), @typeName(ELEM) }),
             };
+        }
+
+        inline fn FilterFnRt(comptime KIND: FuncParamType, comptime RT_CTX: type, comptime CT_CTX: type) type {
+            return switch (comptime KIND) {
+                .RUNTIME_FN_PTR => *const fn (Self, IDX, RT_CTX, CT_CTX) bool,
+                .COMPTIME_FN_BODY, .COMPTIME_FN_PTR => void,
+            };
+        }
+        inline fn FilterFnCt(comptime KIND: FuncParamType, comptime RT_CTX: type, comptime CT_CTX: type) type {
+            return switch (comptime KIND) {
+                .RUNTIME_FN_PTR => void,
+                .COMPTIME_FN_BODY => fn (Self, IDX, RT_CTX, comptime CT_CTX) bool,
+                .COMPTIME_FN_PTR => *const fn (Self, IDX, RT_CTX, comptime CT_CTX) bool,
+            };
+        }
+        inline fn eval_filter(self: Self, idx: IDX, comptime KIND: FuncParamType, filter_ctx: anytype, comptime FILTER_CTX: anytype, filter: FilterFnRt(KIND, @TypeOf(filter_ctx), @TypeOf(FILTER_CTX)), comptime FILTER: FilterFnCt(KIND, @TypeOf(filter_ctx), @TypeOf(FILTER_CTX))) bool {
+            switch (comptime KIND) {
+                .RUNTIME_FN_PTR => {
+                    return filter(self, idx, filter_ctx, FILTER_CTX);
+                },
+                .COMPTIME_FN_BODY, .COMPTIME_FN_PTR => {
+                    return FILTER(self, idx, filter_ctx, FILTER_CTX);
+                },
+            }
         }
 
         //****************
@@ -707,7 +744,7 @@ pub fn ListFullDefinition(comptime ELEM: type, comptime IDX: type, comptime FIEL
             self.data_len -|= count;
         }
         pub inline fn get_cap(self: Self) IDX {
-            if (comptime IS_REFERENCE) return self.root_cap - self.data_offset;
+            if (comptime IS_REFERENCE) return self.root_cap - self.get_slice_offset();
             return self.root_cap;
         }
         pub inline fn set_root_cap(self: *Self, new_cap: IDX) void {
@@ -733,14 +770,14 @@ pub fn ListFullDefinition(comptime ELEM: type, comptime IDX: type, comptime FIEL
             self.root_cap -|= count;
             self.data_len = @min(self.data_len, self.root_cap);
         }
-        inline fn incr_data_offset(self: *Self, count: IDX) void {
-            self.data_offset += count;
+        inline fn incr_root_offset(self: *Self, count: IDX) void {
+            self.root_offset += count;
         }
-        inline fn decr_data_offset(self: *Self, count: IDX) void {
-            self.data_offset -= count;
+        inline fn decr_root_offset(self: *Self, count: IDX) void {
+            self.root_offset -= count;
         }
-        inline fn set_data_offset(self: *Self, offset: IDX) void {
-            self.data_offset = offset;
+        inline fn set_root_offset(self: *Self, offset: IDX) void {
+            self.root_offset = offset;
         }
         pub inline fn get_unused_space(self: Self) IDX {
             return self.get_cap() - self.get_len();
@@ -756,8 +793,9 @@ pub fn ListFullDefinition(comptime ELEM: type, comptime IDX: type, comptime FIEL
             return Slice{
                 .root_ptr = self.root_ptr,
                 .root_cap = self.root_cap,
+                .root_offset = self.root_offset,
                 .data_len = end_exclusive - start,
-                .data_offset = self.get_start_offset() + start,
+                .slice_offset = self.get_slice_offset() + start,
             };
         }
         pub fn slice_const(self: Self, start: IDX, end_exclusive: IDX) SliceConst {
@@ -765,8 +803,9 @@ pub fn ListFullDefinition(comptime ELEM: type, comptime IDX: type, comptime FIEL
             return SliceConst{
                 .root_ptr = self.root_ptr,
                 .root_cap = self.root_cap,
+                .root_offset = self.root_offset,
                 .data_len = end_exclusive - start,
-                .data_offset = self.get_start_offset() + start,
+                .slice_offset = self.get_slice_offset() + start,
             };
         }
         pub fn slice_from_start(self: Self, end_exclusive: IDX) Slice {
@@ -832,13 +871,13 @@ pub fn ListFullDefinition(comptime ELEM: type, comptime IDX: type, comptime FIEL
         pub fn incr_slice_start(self: *Self, count: IDX) void {
             assert_reference(@src());
             self.assert_count_less_equal_len(count, @src());
-            self.data_offset += count;
+            self.slice_offset += count;
             self.decr_len(count);
         }
         pub fn decr_slice_start(self: *Self, count: IDX) void {
             assert_reference(@src());
-            self.assert_count_less_equal_data_offset(count, @src());
-            self.data_offset -= count;
+            self.assert_count_less_equal_slice_offset(count, @src());
+            self.slice_offset -= count;
             self.incr_len(count);
         }
         pub fn incr_slice_end(self: *Self, count: IDX) void {
@@ -853,13 +892,13 @@ pub fn ListFullDefinition(comptime ELEM: type, comptime IDX: type, comptime FIEL
         }
         pub fn slide_slice_lower(self: *Self, count: IDX) void {
             assert_reference(@src());
-            self.assert_count_less_equal_data_offset(count, @src());
-            self.decr_data_offset(count);
+            self.assert_count_less_equal_slice_offset(count, @src());
+            self.decr_root_offset(count);
         }
         pub fn slide_slice_higher(self: *Self, count: IDX) void {
             assert_reference(@src());
             self.assert_count_less_equal_data_unused_space(count, @src());
-            self.incr_data_offset(count);
+            self.incr_root_offset(count);
         }
         pub fn split_off_slice_from_start(self: *Self, count: IDX) Slice {
             assert_reference(@src());
@@ -868,10 +907,11 @@ pub fn ListFullDefinition(comptime ELEM: type, comptime IDX: type, comptime FIEL
             const new_slice = Slice{
                 .root_ptr = self.root_ptr,
                 .root_cap = self.root_cap,
-                .data_offset = self.data_offset,
+                .root_offset = self.root_offset,
                 .data_len = count,
+                .slice_offset = self.get_slice_offset(),
             };
-            self.incr_data_offset(count);
+            self.incr_root_offset(count);
             self.decr_len_unchecked(count);
             return new_slice;
         }
@@ -881,10 +921,11 @@ pub fn ListFullDefinition(comptime ELEM: type, comptime IDX: type, comptime FIEL
             const new_slice = SliceConst{
                 .root_ptr = self.root_ptr,
                 .root_cap = self.root_cap,
-                .data_offset = self.data_offset,
+                .root_offset = self.root_offset,
                 .data_len = count,
+                .slice_offset = self.get_slice_offset(),
             };
-            self.incr_data_offset(count);
+            self.incr_root_offset(count);
             self.decr_len_unchecked(count);
             return new_slice;
         }
@@ -894,8 +935,9 @@ pub fn ListFullDefinition(comptime ELEM: type, comptime IDX: type, comptime FIEL
             const new_slice = Slice{
                 .root_ptr = self.root_ptr,
                 .root_cap = self.root_cap,
-                .data_offset = self.get_start_offset() + (self.get_len() - count),
+                .root_offset = self.root_offset,
                 .data_len = count,
+                .slice_offset = self.get_slice_offset() + (self.get_len() - count),
             };
             self.decr_len_unchecked(count);
             return new_slice;
@@ -905,8 +947,9 @@ pub fn ListFullDefinition(comptime ELEM: type, comptime IDX: type, comptime FIEL
             const new_slice = SliceConst{
                 .root_ptr = self.root_ptr,
                 .root_cap = self.root_cap,
-                .data_offset = self.get_start_offset() + (self.get_len() - count),
+                .root_offset = self.root_offset,
                 .data_len = count,
+                .slice_offset = self.get_slice_offset() + (self.get_len() - count),
             };
             self.decr_len_unchecked(count);
             return new_slice;
@@ -915,7 +958,7 @@ pub fn ListFullDefinition(comptime ELEM: type, comptime IDX: type, comptime FIEL
             assert_reference(@src());
             self.assert_count_less_equal_len(count, @src());
             const new_slice = self.zig_slice(0, count);
-            self.incr_data_offset(count);
+            self.incr_root_offset(count);
             self.decr_len_unchecked(count);
             return new_slice;
         }
@@ -923,7 +966,7 @@ pub fn ListFullDefinition(comptime ELEM: type, comptime IDX: type, comptime FIEL
             assert_reference(@src());
             self.assert_count_less_equal_len(count, @src());
             const new_slice = self.zig_slice_const(0, count);
-            self.incr_data_offset(count);
+            self.incr_root_offset(count);
             self.decr_len_unchecked(count);
             return new_slice;
         }
@@ -2129,10 +2172,20 @@ pub fn ListFullDefinition(comptime ELEM: type, comptime IDX: type, comptime FIEL
         //**************
         // DELETE MANY
         //**************
-        fn delete_many_internal(self: *Self, start_idx: IDX, end_idx_exclusive: IDX, comptime STRATEGY: DeleteMode, comptime RETURN: DeleteReturnMode, dest_: anytype) void {
+        fn delete_many_internal(self: *Self, start_idx: IDX, end_idx_exclusive: IDX, comptime STRATEGY: DeleteMode, comptime RETURN: DeleteReturnMode, dest_: anytype, comptime ALLOC: AllocMode, dest_alloc: Allocator, dest_growth: Growth) void {
             const count = end_idx_exclusive - start_idx;
             if (comptime RETURN == .RETURN_VAL) {
-                self.copy_self_range_to_dest_start(start_idx, end_idx_exclusive, dest_);
+                const slice_to_copy = self.slice_const(start_idx, end_idx_exclusive);
+                switch (comptime ALLOC) {
+                    .ASSUME_CAP => {
+                        const dest = coerce_anytype_to_list_or_list_ptr_with_same_elem_type(dest_);
+                        dest.append_many_assume_cap(slice_to_copy);
+                    },
+                    .REALLOC => {
+                        const dest = coerce_anytype_to_list_ptr_with_same_elem_type(dest_);
+                        dest.append_many_with_growth(slice_to_copy, dest_growth, dest_alloc);
+                    },
+                }
             }
             if (start_idx == self.data_len - count) {
                 switch (comptime INDEX_LAYOUT) {
@@ -2230,6 +2283,328 @@ pub fn ListFullDefinition(comptime ELEM: type, comptime IDX: type, comptime FIEL
             self.assert_valid_range(start_idx, end_idx_exclusive, @src());
             if (count == 0) return;
             self.delete_many_internal(start_idx, end_idx_exclusive, .SWAP, .RETURN_VAL, dest);
+        }
+        //*****************
+        // DELETE FILTERED
+        //*****************
+        fn delete_filtered_internal(
+            self: *Self,
+            start_idx: IDX,
+            end_idx_exclusive: IDX,
+            comptime STRATEGY: DeleteMode,
+            comptime RETURN: DeleteReturnMode,
+            comptime ALLOC: AllocMode,
+            dest_: anytype,
+            dest_alloc: Allocator,
+            dest_growth: Growth,
+            filter_ctx: anytype,
+            comptime FILTER_CTX: anytype,
+            comptime FILTER_FUNC_KIND: FuncParamType,
+            filter: FilterFnRt(FILTER_FUNC_KIND, @TypeOf(filter_ctx), @TypeOf(FILTER_CTX)),
+            comptime FILTER: FilterFnCt(FILTER_FUNC_KIND, @TypeOf(filter_ctx), @TypeOf(FILTER_CTX)),
+        ) IDX {
+            const dest = coerce_anytype_to_list_ptr_with_same_elem_type(dest_);
+            if (start_idx == end_idx_exclusive) return 0;
+            switch (comptime STRATEGY) {
+                .ORDERED => {
+                    var idx_to_check = start_idx;
+                    var idx_to_place_kept_elem = start_idx;
+                    var num_deleted: IDX = 0;
+                    while (idx_to_check < end_idx_exclusive) {
+                        const should_delete = self.eval_filter(idx_to_check, FILTER_FUNC_KIND, filter_ctx, FILTER_CTX, filter, FILTER);
+                        if (should_delete) {
+                            switch (comptime RETURN) {
+                                .RETURN_VAL => {
+                                    switch (comptime ALLOC) {
+                                        .REALLOC => {
+                                            dest.append_one_with_growth(self.get(idx_to_check), dest_growth, dest_alloc);
+                                        },
+                                        .ASSUME_CAP => {
+                                            dest.append_one_assume_cap(self.get(idx_to_check));
+                                        },
+                                    }
+                                },
+                                .IGNORE_VAL => {},
+                            }
+                            num_deleted += 1;
+                            idx_to_check += 1;
+                            break;
+                        } else {
+                            idx_to_check += 1;
+                            idx_to_place_kept_elem += 1;
+                        }
+                    }
+                    while (idx_to_check < end_idx_exclusive) {
+                        const should_delete = self.eval_filter(idx_to_check, FILTER_FUNC_KIND, filter_ctx, FILTER_CTX, filter, FILTER);
+                        if (should_delete) {
+                            switch (comptime RETURN) {
+                                .RETURN_VAL => {
+                                    switch (comptime ALLOC) {
+                                        .REALLOC => {
+                                            dest.append_one_with_growth(self.get(idx_to_check), dest_growth, dest_alloc);
+                                        },
+                                        .ASSUME_CAP => {
+                                            dest.append_one_assume_cap(self.get(idx_to_check));
+                                        },
+                                    }
+                                },
+                                .IGNORE_VAL => {},
+                            }
+                            num_deleted += 1;
+                            idx_to_check += 1;
+                        } else {
+                            self.move_one_overwrite(idx_to_check, idx_to_place_kept_elem);
+                            idx_to_check += 1;
+                            idx_to_place_kept_elem += 1;
+                        }
+                    }
+                    if (num_deleted > 0) {
+                        self.move_block_left_overwrite(idx_to_check, self.get_len(), idx_to_place_kept_elem);
+                    }
+                    self.decr_len_unchecked(num_deleted);
+                    return num_deleted;
+                },
+                .SWAP => {
+                    var last_idx_in_list = self.get_len() - 1;
+                    var idx_to_check = start_idx;
+                    var num_deleted: IDX = 0;
+                    while (idx_to_check < end_idx_exclusive and last_idx_in_list >= end_idx_exclusive) {
+                        const should_delete = self.eval_filter(idx_to_check, FILTER_FUNC_KIND, filter_ctx, FILTER_CTX, filter, FILTER);
+                        if (should_delete) {
+                            switch (comptime RETURN) {
+                                .RETURN_VAL => {
+                                    switch (comptime ALLOC) {
+                                        .REALLOC => {
+                                            dest.append_one_with_growth(self.get(idx_to_check), dest_growth, dest_alloc);
+                                        },
+                                        .ASSUME_CAP => {
+                                            dest.append_one_assume_cap(self.get(idx_to_check));
+                                        },
+                                    }
+                                },
+                                .IGNORE_VAL => {},
+                            }
+                            self.move_one_overwrite(last_idx_in_list, idx_to_check);
+                            num_deleted += 1;
+                            idx_to_check += 1;
+                            last_idx_in_list -= 1;
+                        } else {
+                            idx_to_check += 1;
+                        }
+                    }
+                    if (idx_to_check < end_idx_exclusive) {
+                        while (idx_to_check <= last_idx_in_list) {
+                            const should_delete = self.eval_filter(idx_to_check, FILTER_FUNC_KIND, filter_ctx, FILTER_CTX, filter, FILTER);
+                            if (should_delete) {
+                                switch (comptime RETURN) {
+                                    .RETURN_VAL => {
+                                        switch (comptime ALLOC) {
+                                            .REALLOC => {
+                                                dest.append_one_with_growth(self.get(idx_to_check), dest_growth, dest_alloc);
+                                            },
+                                            .ASSUME_CAP => {
+                                                dest.append_one_assume_cap(self.get(idx_to_check));
+                                            },
+                                        }
+                                    },
+                                    .IGNORE_VAL => {},
+                                }
+                                self.move_one_overwrite(last_idx_in_list, idx_to_check);
+                                num_deleted += 1;
+                                if (idx_to_check == last_idx_in_list) break;
+                                last_idx_in_list -= 1;
+                            } else {
+                                idx_to_check += 1;
+                            }
+                        }
+                    }
+                    self.decr_len_unchecked(num_deleted);
+                    return num_deleted;
+                },
+            }
+        }
+        pub inline fn delete_range_filtered(
+            self: *Self,
+            start_idx: IDX,
+            end_idx_exclusive: IDX,
+            filter_ctx: anytype,
+            comptime FILTER_CTX: anytype,
+            comptime FILTER_FUNC_KIND: FuncParamType,
+            filter: FilterFnRt(FILTER_FUNC_KIND, @TypeOf(filter_ctx), @TypeOf(FILTER_CTX)),
+            comptime FILTER: FilterFnCt(FILTER_FUNC_KIND, @TypeOf(filter_ctx), @TypeOf(FILTER_CTX)),
+        ) IDX {
+            self.assert_valid_range(start_idx, end_idx_exclusive, @src());
+            return self.delete_filtered_internal(start_idx, end_idx_exclusive, .ORDERED, .IGNORE_VAL, .ASSUME_CAP, void{}, dummy_alloc, .GROW_EXACT_NEEDED, filter_ctx, FILTER_CTX, FILTER_FUNC_KIND, filter, FILTER);
+        }
+        pub inline fn swap_delete_range_filtered(
+            self: *Self,
+            start_idx: IDX,
+            end_idx_exclusive: IDX,
+            filter_ctx: anytype,
+            comptime FILTER_CTX: anytype,
+            comptime FILTER_FUNC_KIND: FuncParamType,
+            filter: FilterFnRt(FILTER_FUNC_KIND, @TypeOf(filter_ctx), @TypeOf(FILTER_CTX)),
+            comptime FILTER: FilterFnCt(FILTER_FUNC_KIND, @TypeOf(filter_ctx), @TypeOf(FILTER_CTX)),
+        ) IDX {
+            self.assert_valid_range(start_idx, end_idx_exclusive, @src());
+            return self.delete_filtered_internal(start_idx, end_idx_exclusive, .SWAP, .IGNORE_VAL, .ASSUME_CAP, void{}, dummy_alloc, .GROW_EXACT_NEEDED, filter_ctx, FILTER_CTX, FILTER_FUNC_KIND, filter, FILTER);
+        }
+        pub inline fn remove_range_filtered_assume_dest_cap(
+            self: *Self,
+            start_idx: IDX,
+            end_idx_exclusive: IDX,
+            dest: anytype,
+            filter_ctx: anytype,
+            comptime FILTER_CTX: anytype,
+            comptime FILTER_FUNC_KIND: FuncParamType,
+            filter: FilterFnRt(FILTER_FUNC_KIND, @TypeOf(filter_ctx), @TypeOf(FILTER_CTX)),
+            comptime FILTER: FilterFnCt(FILTER_FUNC_KIND, @TypeOf(filter_ctx), @TypeOf(FILTER_CTX)),
+        ) IDX {
+            self.assert_valid_range(start_idx, end_idx_exclusive, @src());
+            return self.delete_filtered_internal(start_idx, end_idx_exclusive, .ORDERED, .RETURN_VAL, .ASSUME_CAP, dest, dummy_alloc, .GROW_EXACT_NEEDED, filter_ctx, FILTER_CTX, FILTER_FUNC_KIND, filter, FILTER);
+        }
+        pub inline fn swap_remove_range_filtered_assume_dest_cap(
+            self: *Self,
+            start_idx: IDX,
+            end_idx_exclusive: IDX,
+            dest: anytype,
+            filter_ctx: anytype,
+            comptime FILTER_CTX: anytype,
+            comptime FILTER_FUNC_KIND: FuncParamType,
+            filter: FilterFnRt(FILTER_FUNC_KIND, @TypeOf(filter_ctx), @TypeOf(FILTER_CTX)),
+            comptime FILTER: FilterFnCt(FILTER_FUNC_KIND, @TypeOf(filter_ctx), @TypeOf(FILTER_CTX)),
+        ) IDX {
+            self.assert_valid_range(start_idx, end_idx_exclusive, @src());
+            return self.delete_filtered_internal(start_idx, end_idx_exclusive, .SWAP, .RETURN_VAL, .ASSUME_CAP, dest, dummy_alloc, .GROW_EXACT_NEEDED, filter_ctx, FILTER_CTX, FILTER_FUNC_KIND, filter, FILTER);
+        }
+        pub inline fn remove_range_filtered(
+            self: *Self,
+            start_idx: IDX,
+            end_idx_exclusive: IDX,
+            dest: anytype,
+            dest_alloc: Allocator,
+            dest_growth: Growth,
+            filter_ctx: anytype,
+            comptime FILTER_CTX: anytype,
+            comptime FILTER_FUNC_KIND: FuncParamType,
+            filter: FilterFnRt(FILTER_FUNC_KIND, @TypeOf(filter_ctx), @TypeOf(FILTER_CTX)),
+            comptime FILTER: FilterFnCt(FILTER_FUNC_KIND, @TypeOf(filter_ctx), @TypeOf(FILTER_CTX)),
+        ) IDX {
+            self.assert_valid_range(start_idx, end_idx_exclusive, @src());
+            return self.delete_filtered_internal(start_idx, end_idx_exclusive, .ORDERED, .RETURN_VAL, .REALLOC, dest, dest_alloc, dest_growth, filter_ctx, FILTER_CTX, FILTER_FUNC_KIND, filter, FILTER);
+        }
+        pub inline fn swap_remove_range_filtered(
+            self: *Self,
+            start_idx: IDX,
+            end_idx_exclusive: IDX,
+            dest: anytype,
+            dest_alloc: Allocator,
+            dest_growth: Growth,
+            filter_ctx: anytype,
+            comptime FILTER_CTX: anytype,
+            comptime FILTER_FUNC_KIND: FuncParamType,
+            filter: FilterFnRt(FILTER_FUNC_KIND, @TypeOf(filter_ctx), @TypeOf(FILTER_CTX)),
+            comptime FILTER: FilterFnCt(FILTER_FUNC_KIND, @TypeOf(filter_ctx), @TypeOf(FILTER_CTX)),
+        ) IDX {
+            self.assert_valid_range(start_idx, end_idx_exclusive, @src());
+            return self.delete_filtered_internal(start_idx, end_idx_exclusive, .SWAP, .RETURN_VAL, .REALLOC, dest, dest_alloc, dest_growth, filter_ctx, FILTER_CTX, FILTER_FUNC_KIND, filter, FILTER);
+        }
+        pub inline fn delete_filtered(
+            self: *Self,
+            filter_ctx: anytype,
+            comptime FILTER_CTX: anytype,
+            comptime FILTER_FUNC_KIND: FuncParamType,
+            filter: FilterFnRt(FILTER_FUNC_KIND, @TypeOf(filter_ctx), @TypeOf(FILTER_CTX)),
+            comptime FILTER: FilterFnCt(FILTER_FUNC_KIND, @TypeOf(filter_ctx), @TypeOf(FILTER_CTX)),
+        ) IDX {
+            return self.delete_filtered_internal(0, self.get_len(), .ORDERED, .IGNORE_VAL, .ASSUME_CAP, void{}, dummy_alloc, .GROW_EXACT_NEEDED, filter_ctx, FILTER_CTX, FILTER_FUNC_KIND, filter, FILTER);
+        }
+        pub inline fn swap_delete_filtered(
+            self: *Self,
+            filter_ctx: anytype,
+            comptime FILTER_CTX: anytype,
+            comptime FILTER_FUNC_KIND: FuncParamType,
+            filter: FilterFnRt(FILTER_FUNC_KIND, @TypeOf(filter_ctx), @TypeOf(FILTER_CTX)),
+            comptime FILTER: FilterFnCt(FILTER_FUNC_KIND, @TypeOf(filter_ctx), @TypeOf(FILTER_CTX)),
+        ) IDX {
+            return self.delete_filtered_internal(0, self.get_len(), .SWAP, .IGNORE_VAL, .ASSUME_CAP, void{}, dummy_alloc, .GROW_EXACT_NEEDED, filter_ctx, FILTER_CTX, FILTER_FUNC_KIND, filter, FILTER);
+        }
+        pub inline fn remove_filtered_assume_dest_cap(
+            self: *Self,
+            dest: anytype,
+            filter_ctx: anytype,
+            comptime FILTER_CTX: anytype,
+            comptime FILTER_FUNC_KIND: FuncParamType,
+            filter: FilterFnRt(FILTER_FUNC_KIND, @TypeOf(filter_ctx), @TypeOf(FILTER_CTX)),
+            comptime FILTER: FilterFnCt(FILTER_FUNC_KIND, @TypeOf(filter_ctx), @TypeOf(FILTER_CTX)),
+        ) IDX {
+            return self.delete_filtered_internal(0, self.get_len(), .ORDERED, .RETURN_VAL, .ASSUME_CAP, dest, dummy_alloc, .GROW_EXACT_NEEDED, filter_ctx, FILTER_CTX, FILTER_FUNC_KIND, filter, FILTER);
+        }
+        pub inline fn swap_remove_filtered_assume_dest_cap(
+            self: *Self,
+            dest: anytype,
+            filter_ctx: anytype,
+            comptime FILTER_CTX: anytype,
+            comptime FILTER_FUNC_KIND: FuncParamType,
+            filter: FilterFnRt(FILTER_FUNC_KIND, @TypeOf(filter_ctx), @TypeOf(FILTER_CTX)),
+            comptime FILTER: FilterFnCt(FILTER_FUNC_KIND, @TypeOf(filter_ctx), @TypeOf(FILTER_CTX)),
+        ) IDX {
+            return self.delete_filtered_internal(0, self.get_len(), .SWAP, .RETURN_VAL, .ASSUME_CAP, dest, dummy_alloc, .GROW_EXACT_NEEDED, filter_ctx, FILTER_CTX, FILTER_FUNC_KIND, filter, FILTER);
+        }
+        pub inline fn remove_filtered(
+            self: *Self,
+            dest: anytype,
+            dest_alloc: Allocator,
+            dest_growth: Growth,
+            filter_ctx: anytype,
+            comptime FILTER_CTX: anytype,
+            comptime FILTER_FUNC_KIND: FuncParamType,
+            filter: FilterFnRt(FILTER_FUNC_KIND, @TypeOf(filter_ctx), @TypeOf(FILTER_CTX)),
+            comptime FILTER: FilterFnCt(FILTER_FUNC_KIND, @TypeOf(filter_ctx), @TypeOf(FILTER_CTX)),
+        ) IDX {
+            return self.delete_filtered_internal(0, self.get_len(), .ORDERED, .RETURN_VAL, .REALLOC, dest, dest_alloc, dest_growth, filter_ctx, FILTER_CTX, FILTER_FUNC_KIND, filter, FILTER);
+        }
+        pub inline fn swap_remove_filtered(
+            self: *Self,
+            dest: anytype,
+            dest_alloc: Allocator,
+            dest_growth: Growth,
+            filter_ctx: anytype,
+            comptime FILTER_CTX: anytype,
+            comptime FILTER_FUNC_KIND: FuncParamType,
+            filter: FilterFnRt(FILTER_FUNC_KIND, @TypeOf(filter_ctx), @TypeOf(FILTER_CTX)),
+            comptime FILTER: FilterFnCt(FILTER_FUNC_KIND, @TypeOf(filter_ctx), @TypeOf(FILTER_CTX)),
+        ) IDX {
+            return self.delete_filtered_internal(0, self.get_len(), .SWAP, .RETURN_VAL, .REALLOC, dest, dest_alloc, dest_growth, filter_ctx, FILTER_CTX, FILTER_FUNC_KIND, filter, FILTER);
+        }
+        /// Elements MUST be laid out in a 'n-ary flat array tree'
+        pub fn tree__parent_idx_unchecked(self: Self, idx: IDX, max_num_children_per_element: IDX) IDX {
+            const new_idx_ = self.slice_idx_to_root_idx(idx);
+            return self.root_idx_to_slice_idx(@divFloor(new_idx_ - 1, max_num_children_per_element));
+        }
+        /// Elements MUST be laid out in a 'n-ary flat array tree'
+        /// 
+        /// the `if_exists` condition does not consider slices that do not start at
+        pub fn tree__parent_idx_if_exists(self: Self, idx: IDX, max_num_children_per_element: IDX) ?IDX {
+            self.assert_valid_idx(idx, @src());
+            var new_idx = self.slice_idx_to_root_idx(idx);
+            if (new_idx == 0) return null;
+            new_idx = @divFloor(new_idx - 1, max_num_children_per_element);
+            return self.root_idx_to_slice_idx(new_idx);
+        }
+        /// Elements MUST be laid out in a 'n-ary flat array tree'
+        pub fn tree__nth_child_idx_unchecked(self: Self, idx: IDX, max_num_children_per_element: IDX, nth_child: IDX) IDX {
+            const new_idx_ = self.slice_idx_to_root_idx(idx);
+            return self.root_idx_to_slice_idx((new_idx_ * max_num_children_per_element) + nth_child + 1);
+        }
+        /// Elements MUST be laid out in a 'n-ary flat array tree'
+        pub fn tree__nth_child_idx_if_exists(self: Self, idx: IDX, max_num_children_per_element: IDX, nth_child: IDX) ?IDX {
+            self.assert_valid_idx(idx, @src());
+            assert_with_reason(nth_child < max_num_children_per_element, @src(), "nth_child ({d}) exceeds maximum children per element ({d})", .{ nth_child, max_num_children_per_element });
+            var new_idx_ = self.slice_idx_to_root_idx(idx);
+            new_idx_ = self.root_idx_to_slice_idx((new_idx_ * max_num_children_per_element) + nth_child + 1);
+            if (new_idx_ >= self.get_len()) return null;
+            return new_idx_;
         }
     };
 }
